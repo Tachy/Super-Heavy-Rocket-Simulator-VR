@@ -79,6 +79,13 @@ public:
 
     bool clamped() const { return clamped_; }
     void release_clamps() { clamped_ = false; }
+    // Contact wrench for the next step() only: force through the CG (GCRF) and torque (body axes).
+    void apply_external_wrench(const math::Vec3& force_gcrf_n, const math::Vec3& torque_body_nm);
+    // Fixes the body to the Earth where it is (caught by the tower): from now on it co-rotates with the Earth
+    // like a clamped vehicle and is no longer integrated.
+    void hold_fixed_to_earth(const frames::BodyOrientation& earth, time::Epoch epoch);
+    bool caught() const { return caught_; }
+    void mark_impacted() { impacted_ = true; }  // struck the tower or overloaded a catch pin
     bool impacted() const { return impacted_; }
     bool resting() const { return resting_; }  // carried by the ground after a gentle touchdown
     const AirData& air_data() const { return air_data_; }
@@ -118,6 +125,9 @@ private:
     math::Vec3 pad_itrf_m_;
     math::Quat attitude_itrf_;  // body -> ITRF while clamped
     double ground_height_m_ = 0.0;
+    math::Vec3 external_force_gcrf_n_;
+    math::Vec3 external_torque_body_nm_;
+    bool caught_ = false;
 };
 
 // Earth rotation vector in GCRF from the orientation's rotation rate (omega_x = dR/dt * R^T).
