@@ -1,6 +1,9 @@
 add_library(starsim_core STATIC
     src/time/utc_date_time.cpp
     src/frames/geodetic.cpp
+    src/environment/point_mass_gravity.cpp
+    src/orbit/kepler.cpp
+    src/orbit/ballistic_propagator.cpp
     src/spice/spice_session.cpp
     src/spice/spice_time_converter.cpp
     src/spice/spice_ephemeris.cpp

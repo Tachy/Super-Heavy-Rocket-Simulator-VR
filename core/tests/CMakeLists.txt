@@ -14,6 +14,10 @@ add_executable(starsim_core_tests
     test_spice_time.cpp
     test_ephemeris_validation.cpp
     test_orientation_validation.cpp
+    test_integrators.cpp
+    test_kepler.cpp
+    test_orbit_propagation.cpp
+    test_artemis_validation.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE

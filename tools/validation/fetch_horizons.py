@@ -32,6 +32,12 @@ EPOCHS_JD_TDB = [
 # Topocentric checks need EOP history: only past epochs (2000-2026).
 TOPO_EPOCHS_JD_TDB = [2451545.0, 2455562.125, 2458849.5, 2460409.25, 2460676.5, 2461041.5]
 
+ARTEMIS_ARCS = [
+    # name, center, start (TDB), stop (TDB)
+    ("outbound_geocentric", "500@399", "2022-11-16 16:00", "2022-11-21 06:00"),
+    ("dro_selenocentric", "500@301", "2022-11-26 00:00", "2022-12-01 18:00"),
+]
+
 SITES = {
     # name: (east longitude deg, geodetic latitude deg, height above WGS84 km)
     "starbase_olp1": (-97.15394, 25.99686, 0.010),
@@ -39,7 +45,7 @@ SITES = {
 }
 
 
-def horizons_vectors(command: str, center: str, epochs: list[float], extra: dict | None = None) -> list[list[str]]:
+def horizons_vectors(command: str, center: str, epochs: list[float] | None, extra: dict | None = None) -> list[list[str]]:
     params = {
         "format": "json",
         "COMMAND": f"'{command}'",
@@ -52,10 +58,11 @@ def horizons_vectors(command: str, center: str, epochs: list[float], extra: dict
         "OUT_UNITS": "KM-S",
         "CSV_FORMAT": "YES",
         "TIME_TYPE": "TDB",
-        "TLIST_TYPE": "JD",
-        "TLIST": " ".join(f"'{jd:.6f}'" for jd in epochs),
         "OBJ_DATA": "NO",
     }
+    if epochs is not None:
+        params["TLIST_TYPE"] = "JD"
+        params["TLIST"] = " ".join(f"'{jd:.6f}'" for jd in epochs)
     params.update(extra or {})
     url = API_URL + "?" + urllib.parse.urlencode(params)
     with urllib.request.urlopen(url) as response:
@@ -94,6 +101,13 @@ def main() -> int:
         write_csv(f"horizons_moon_topocentric_{site}.csv",
                   header + ["site_lon_deg", "site_lat_deg", "site_h_km"],
                   [r + [str(lon), str(lat), str(h)] for r in rows])
+
+    # Artemis I (Orion, -1023) reconstructed trajectory: real free-flight arcs to validate the
+    # gravity model. Earth-centred during the outbound coast, Moon-centred in the DRO.
+    for name, center, start, stop in ARTEMIS_ARCS:
+        rows = horizons_vectors("-1023", center, None,
+                                {"START_TIME": f"'{start}'", "STOP_TIME": f"'{stop}'", "STEP_SIZE": "'1 h'"})
+        write_csv(f"horizons_artemis1_{name}.csv", header, rows)
     return 0
 
 

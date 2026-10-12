@@ -1,17 +1,13 @@
 #pragma once
 
-#include "starsim/math/vec3.hpp"
+#include "starsim/math/state_vector.hpp"
 #include "starsim/time/epoch.hpp"
 
 namespace starsim::ephemeris {
 
 enum class Body { Sun, Earth, Moon, EarthMoonBarycenter };
 
-// Position and velocity of a body in GCRF (Earth-centred, ICRF-aligned axes).
-struct StateVector {
-    math::Vec3 position_m;
-    math::Vec3 velocity_mps;
-};
+using StateVector = math::StateVector;
 
 // Positions of natural bodies from a planetary ephemeris (DE440 by default).
 class Ephemeris {
