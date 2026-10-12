@@ -24,6 +24,7 @@ add_library(starsim_core STATIC
     src/mission/lunar_transfer.cpp
     src/optim/sparse_matrix.cpp
     src/optim/minimum_degree.cpp
+    src/optim/ldl.cpp
     src/time/utc_date_time.cpp
     src/frames/geodetic.cpp
     src/environment/point_mass_gravity.cpp
