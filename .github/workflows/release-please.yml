@@ -1,0 +1,20 @@
+# release-please: keeps a release PR (version + CHANGELOG.md) up to date from the Conventional Commits on
+# main. Nothing is published until that PR is merged; merging it creates the tag and the GitHub release.
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

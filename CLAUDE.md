@@ -7,6 +7,8 @@ Not an arcade game: physical correctness has top priority.
 ## Communication & language
 - Answer the user **in German**.
 - Code, identifiers, comments, commit messages and docs inside the repo: **English**.
+- Commit messages follow Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, ...): release-please
+  builds the release PR and CHANGELOG.md from them. Releases are made by the user (merging that PR).
 
 ## Architecture (non-negotiable)
 ```
