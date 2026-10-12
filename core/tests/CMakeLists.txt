@@ -35,6 +35,7 @@ add_executable(starsim_core_tests
     test_optim_equilibration.cpp
     test_optim_kkt.cpp
     test_optim_solver.cpp
+    test_optim_validation.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE
@@ -43,6 +44,7 @@ target_compile_definitions(starsim_core_tests PRIVATE
     STARSIM_OUTPUT_DIR="${CMAKE_BINARY_DIR}"
     STARSIM_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
     STARSIM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/fixtures"
+    STARSIM_SOCP_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/socp"
 )
 
 include(Catch)
