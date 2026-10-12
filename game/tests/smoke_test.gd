@@ -32,6 +32,13 @@ func _initialize() -> void:
 	print("Starbase GCRF at 2026-10-12T12:00:00 UTC: ", pad)
 	print("Moon distance now: %.3f km" % (core.body_position_gcrf_m("moon", tdb).length() / 1000.0))
 
+	# Catch tower geometry comes from the core's config (one source of truth for physics and drawing).
+	var tower_sim := FlightSim.new()
+	tower_sim.setup(ProjectSettings.globalize_path("res://").path_join("../config").simplify_path())
+	var tower: Dictionary = tower_sim.site_tower("starbase_olp1")
+	_check(tower.get("present", false), "Starbase has a catch tower")
+	_check(absf(float(tower.get("mount_height_m", 0.0)) - 20.0) < 1e-9, "tower geometry from the core config")
+
 	print("SMOKE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 

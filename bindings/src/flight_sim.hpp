@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <memory>
 
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -24,6 +25,14 @@ public:
     void setup(const godot::String& config_dir);
     bool launch_from_pad(const godot::String& vehicle_id, double latitude_deg, double longitude_deg, double height_m,
                          double heading_deg, double tdb_s);
+    // Launch from a site of config/launch_sites.toml (with its catch tower, if it has one).
+    bool launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg, double tdb_s);
+    // Catch tower geometry of a site (no flight needed): {present, origin_itrf_m, east, north, up (ITRF units),
+    // tower_direction, across, tower_center_m, tower_size_m, hinge_plus_m, hinge_minus_m (site frame), mount_*,
+    // arm_* sizes, arm_open_rad}.
+    godot::Dictionary site_tower(const godot::String& site_id) const;
+    // Tower of the current flight: {present, opening_rad, carriage_offset_m, phase (German)}.
+    godot::Dictionary tower_state() const;
     bool is_active() const { return session_ && session_->active(); }
     double advance_to(double tdb_s);
     double mission_time_s() const;
@@ -69,6 +78,7 @@ private:
     spice::SpiceEphemeris ephemeris_;
     spice::SpiceOrientation earth_ = spice::SpiceOrientation::earth();
     std::unique_ptr<sim::FlightSession> session_;
+    std::filesystem::path config_dir_;
 };
 
 }  // namespace starsim::bindings

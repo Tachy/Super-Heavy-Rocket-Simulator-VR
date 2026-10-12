@@ -3,6 +3,8 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "starsim/config/launch_site_config.hpp"
+#include "starsim/contact/tower_geometry.hpp"
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
@@ -17,8 +19,68 @@ time::Epoch epoch(double tdb_s) { return time::Epoch::from_tdb_seconds_past_j200
 }  // namespace
 
 void FlightSim::setup(const godot::String& config_dir) {
-    session_ = std::make_unique<sim::FlightSession>(ephemeris_, earth_,
-                                                    std::filesystem::path(config_dir.utf8().get_data()));
+    config_dir_ = std::filesystem::path(config_dir.utf8().get_data());
+    session_ = std::make_unique<sim::FlightSession>(ephemeris_, earth_, config_dir_);
+}
+
+bool FlightSim::launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg,
+                                 double tdb_s) {
+    if (!session_) {
+        godot::UtilityFunctions::push_error("FlightSim: call setup() first");
+        return false;
+    }
+    try {
+        const auto site = config::load_launch_site(config_dir_, site_id.utf8().get_data());
+        session_->launch_from_pad(vehicle_id.utf8().get_data(), sim::launch_site_from_config(site),
+                                  heading_deg * constants::deg_to_rad, epoch(tdb_s));
+        return true;
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("FlightSim.launch_from_site: ") + e.what());
+        return false;
+    }
+}
+
+godot::Dictionary FlightSim::site_tower(const godot::String& site_id) const {
+    godot::Dictionary d;
+    d["present"] = false;
+    try {
+        const auto site = config::load_launch_site(config_dir_, site_id.utf8().get_data());
+        if (!site.tower) return d;
+        const contact::TowerGeometry g(*site.tower, site.latitude_rad, site.longitude_rad, site.height_m);
+        const auto& c = *site.tower;
+        d["present"] = true;
+        d["origin_itrf_m"] = to_godot(g.origin_itrf_m());
+        d["east"] = to_godot(contact::column(g.site_to_itrf(), 0));
+        d["north"] = to_godot(contact::column(g.site_to_itrf(), 1));
+        d["up"] = to_godot(contact::column(g.site_to_itrf(), 2));
+        d["tower_direction"] = to_godot(g.tower_direction());
+        d["across"] = to_godot(g.across());
+        d["tower_center_m"] = to_godot(g.tower_box().center);
+        d["tower_size_m"] = godot::Vector3(c.width_m, c.width_m, c.height_m);
+        d["mount_height_m"] = c.mount_height_m;
+        d["mount_inner_radius_m"] = c.mount_inner_radius_m;
+        d["mount_outer_radius_m"] = c.mount_outer_radius_m;
+        d["arm_length_m"] = c.arm_length_m;
+        d["arm_width_m"] = c.arm_width_m;
+        d["arm_thickness_m"] = c.arm_thickness_m;
+        d["arm_open_rad"] = c.arm_open_rad;
+        d["hinge_plus_m"] = to_godot(g.hinge(1));
+        d["hinge_minus_m"] = to_godot(g.hinge(-1));
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("FlightSim.site_tower: ") + e.what());
+    }
+    return d;
+}
+
+godot::Dictionary FlightSim::tower_state() const {
+    godot::Dictionary d;
+    const auto* tower = session_ ? session_->tower() : nullptr;
+    d["present"] = tower != nullptr;
+    if (!tower) return d;
+    d["opening_rad"] = tower->arms().opening_rad();
+    d["carriage_offset_m"] = tower->arms().carriage_offset_m();
+    d["phase"] = godot::String::utf8(sim::to_string(tower->phase()));
+    return d;
 }
 
 bool FlightSim::launch_from_pad(const godot::String& vehicle_id, double latitude_deg, double longitude_deg,
@@ -237,6 +299,10 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("launch_from_pad", "vehicle_id", "latitude_deg", "longitude_deg", "height_m",
                                   "heading_deg", "tdb_s"),
                          &FlightSim::launch_from_pad);
+    ClassDB::bind_method(D_METHOD("launch_from_site", "vehicle_id", "site_id", "heading_deg", "tdb_s"),
+                         &FlightSim::launch_from_site);
+    ClassDB::bind_method(D_METHOD("site_tower", "site_id"), &FlightSim::site_tower);
+    ClassDB::bind_method(D_METHOD("tower_state"), &FlightSim::tower_state);
     ClassDB::bind_method(D_METHOD("is_active"), &FlightSim::is_active);
     ClassDB::bind_method(D_METHOD("advance_to", "tdb_s"), &FlightSim::advance_to);
     ClassDB::bind_method(D_METHOD("mission_time_s"), &FlightSim::mission_time_s);
