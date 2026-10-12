@@ -25,6 +25,7 @@ add_library(starsim_core STATIC
     src/optim/sparse_matrix.cpp
     src/optim/minimum_degree.cpp
     src/optim/ldl.cpp
+    src/optim/cones.cpp
     src/time/utc_date_time.cpp
     src/frames/geodetic.cpp
     src/environment/point_mass_gravity.cpp
