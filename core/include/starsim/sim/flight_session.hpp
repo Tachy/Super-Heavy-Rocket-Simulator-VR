@@ -1,6 +1,8 @@
 #pragma once
 
 #include <filesystem>
+#include "starsim/config/launch_site_config.hpp"
+#include "starsim/sim/catch_tower_sim.hpp"
 #include <map>
 #include <memory>
 #include <optional>
@@ -45,7 +47,10 @@ struct LaunchSite {
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
     double height_m = 0.0;
+    std::optional<config::TowerConfig> tower;  // catch tower (stacks then stand on its launch mount)
 };
+
+LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site);
 
 // All flying bodies of one mission (the stack, and after staging booster and ship) on a common
 // fixed tick. The pilot controls one body; separated bodies coast with their engines off.
@@ -68,6 +73,15 @@ public:
     // Places a vehicle (stages from `first_stage` upwards) on a given orbit, nose along the velocity.
     void place_in_orbit(const std::string& vehicle_id, const math::StateVector& state_gcrf, time::Epoch epoch,
                         size_t first_stage = 0);
+    // Fidelity flag: catch towers of launch sites (default on). Takes effect at the next set_launch_site().
+    void set_towers(bool enabled) { towers_enabled_ = enabled; }
+    // Site of the mission (tower, landing target). launch_from_pad() sets it too.
+    void set_launch_site(const LaunchSite& site);
+    const LaunchSite& launch_site() const { return launch_site_; }
+    // Places a vehicle with a free state (scenarios, tests); the body becomes the controlled one.
+    void place_body(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch);
+    const CatchTowerSim* tower() const { return tower_.get(); }
+    CatchTowerSim* tower() { return tower_.get(); }
     bool active() const { return !bodies_.empty(); }
     time::Epoch epoch() const { return epoch_; }
 
@@ -147,6 +161,7 @@ private:
     void run_autopilot();
     void run_return_guidance(Flying& flying);
     double coast_allowance_s() const;  // 0 if fixed ticks are needed now
+    std::vector<vehicle::FlightBody*> body_pointers() const;
 
     std::filesystem::path config_dir_;
     const frames::BodyOrientation& earth_;
@@ -163,6 +178,8 @@ private:
     time::Epoch epoch_;
     time::Epoch launch_epoch_;
     LaunchSite launch_site_;
+    bool towers_enabled_ = true;
+    std::unique_ptr<CatchTowerSim> tower_;
     std::optional<gnc::BoosterReturnParameters> booster_return_;
     double gm_earth_;
     AutopilotStatus autopilot_;

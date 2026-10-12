@@ -54,6 +54,9 @@ func _process(_delta: float) -> void:
 		lines.append("--- am Startplatz gehalten ---")
 	if t["impacted"]:
 		lines.append("*** Bodenkontakt ***")
+	var tower: Dictionary = sim.tower_state()
+	if tower.get("present", false) and sim.body_count() > 1:
+		lines.append("Turm            %s" % tower["phase"])
 	var ap: Dictionary = sim.autopilot_status()
 	if ap.get("state", "aus") != "aus":
 		lines.append("Autopilot       %s" % ap["state"])

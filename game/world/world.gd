@@ -25,6 +25,7 @@ var clock := SimClock.new()
 var camera := OrbitCamera.new()
 var earth := CelestialBody.new()
 var ground_patch := GroundPatch.new()
+var towers: Array[TowerView] = []  ## catch towers of the launch sites
 var moon := CelestialBody.new()
 var sun_disk := MeshInstance3D.new()
 var sun_light := DirectionalLight3D.new()
@@ -85,6 +86,9 @@ func update_world() -> void:
 		var reached := flight.advance(clock.tdb_s, _delta)
 		if clock.tdb_s - reached > 0.05:  # sim at its per-frame tick limit: hold the clock back
 			clock.tdb_s = reached
+	for view in towers:
+		var at_site: bool = flight.sim.is_active() and view.site_id == flight.launch_site_id
+		view.update_state(flight.sim.tower_state() if at_site else {})
 	var t := clock.tdb_s
 	earth.fixed_to_gcrf = core.earth_fixed_to_gcrf(t)
 	moon.fixed_to_gcrf = core.moon_fixed_to_gcrf(t)
@@ -202,6 +206,14 @@ func _setup_bodies(data_dir: String) -> void:
 	earth.add_child(ground_patch)
 	for site: Dictionary in sites:
 		earth.add_child(_make_pad(site))
+	for site: Dictionary in sites:
+		var geometry: Dictionary = flight.sim.site_tower(site["id"])
+		if geometry.get("present", false):
+			var view := TowerView.new()
+			view.site_id = site["id"]
+			earth.add_child(view)
+			view.build(geometry)
+			towers.append(view)
 
 	_moon_material.shader = load("res://shaders/moon.gdshader")
 	_moon_material.set_shader_parameter("albedo_texture", _load_texture(data_dir.path_join("textures/moon_color.png")))

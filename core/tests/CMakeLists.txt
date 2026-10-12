@@ -36,6 +36,13 @@ add_executable(starsim_core_tests
     test_optim_kkt.cpp
     test_optim_solver.cpp
     test_optim_validation.cpp
+    test_launch_site_config.cpp
+    test_contact_primitives.cpp
+    test_tower_geometry.cpp
+    test_catch_arms.cpp
+    test_pin_contact.cpp
+    test_catch_trigger.cpp
+    test_catch_tower.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE

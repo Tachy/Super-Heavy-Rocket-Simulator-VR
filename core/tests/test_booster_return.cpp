@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include "starsim/config/launch_site_config.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
@@ -126,4 +127,58 @@ TEST_CASE("Booster returns to the launch pad after staging", "[gnc][booster][val
     CHECK(distance_m < 20.0);
     CHECK(last_sink_rate < vehicle::FlightBody::max_touchdown_sink_rate_mps);
     CHECK(last_side_speed < 3.0);
+}
+
+TEST_CASE("Catch roll reference turns the pins towards the arms", "[gnc][booster]") {
+    const math::Vec3 up{0.0, 0.0, 1.0};
+    const math::Vec3 across{1.0, 0.0, 0.0};
+    for (const double azimuth_deg : {90.0, 45.0}) {
+        const double a = azimuth_deg * deg;
+        const auto y = gnc::catch_roll_reference(across, up, a, {0.0, 1.0, 0.0});
+        const auto z = cross(up, y);
+        const math::Vec3 pin = y * std::cos(a) + z * std::sin(a);  // first pin direction in the site frame
+        CHECK(std::abs(std::abs(dot(pin, across)) - 1.0) < 1e-12);
+        // The opposite current roll gives the opposite reference (shortest roll, pins symmetric).
+        const auto y2 = gnc::catch_roll_reference(across, up, a, -y);
+        CHECK(norm(y2 + y) < 1e-12);
+    }
+}
+
+TEST_CASE("Booster return to the catch tower ends caught or missed", "[gnc][booster][catch][validation]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
+    const std::string vehicle_id = GENERATE(as<std::string>{}, "starship_block1", "starship_block2", "starship_block3");
+    CAPTURE(vehicle_id);
+    session.launch_from_pad(vehicle_id, site, 90.0 * deg, t0);
+    session.set_booster_return(true);
+    gnc::AscentTarget target;
+    target.periapsis_altitude_m = 200e3;
+    target.apoapsis_altitude_m = 200e3;
+    target.inclination_rad = 26.6 * deg;
+    session.engage_ascent_autopilot(target);
+
+    bool landing = false;
+    for (double t = 0.0; t < 1200.0;) {
+        t += landing ? sim::FlightSession::tick_s : 0.5;
+        session.advance_to(t0 + t, 1000);
+        CHECK_FALSE(session.body(session.controlled_index()).impacted());  // clears the tower on the way up
+        if (session.body_count() < 2) continue;
+        const auto& booster = session.body(0);
+        const auto* status = session.return_status(0);
+        landing = status && status->phase >= gnc::ReturnPhase::LandingBurn;
+        if (booster.caught() || booster.impacted() || booster.resting()) break;
+    }
+    const auto* tower = session.tower();
+    REQUIRE(tower != nullptr);
+    const auto phase = tower->phase();
+    CHECK((phase == sim::CatchPhase::Caught || phase == sim::CatchPhase::Missed));
+    const auto t_end = earth.fixed_to_gcrf(session.epoch());
+    const auto p = tower->geometry().to_site(transpose(t_end.rotation) * session.body(0).state().position_gcrf_m);
+    std::printf("%s: tower %s, booster %.1f m from the catch axis, max pin load %.2f MN\n", vehicle_id.c_str(),
+                sim::to_string(phase), std::hypot(p.x, p.y), tower->max_pin_load_n() / 1e6);
 }

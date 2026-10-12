@@ -263,14 +263,47 @@ void FlightSession::run_autopilot() {
 }
 
 
+LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site) {
+    return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower};
+}
+
+void FlightSession::set_launch_site(const LaunchSite& site) {
+    launch_site_ = site;
+    tower_.reset();
+    if (towers_enabled_ && site.tower) {
+        tower_ = std::make_unique<CatchTowerSim>(*site.tower, site.latitude_rad, site.longitude_rad, site.height_m);
+    }
+}
+
+std::vector<vehicle::FlightBody*> FlightSession::body_pointers() const {
+    std::vector<vehicle::FlightBody*> list;
+    for (const auto& flying : bodies_) list.push_back(flying.body.get());
+    return list;
+}
+
+void FlightSession::place_body(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
+                               time::Epoch epoch) {
+    auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(config, config_dir_), state);
+    body->set_ground_height(launch_site_.height_m);
+    bodies_.clear();
+    bodies_.push_back({std::move(body), {}, nullptr, {}});
+    controlled_ = 0;
+    epoch_ = epoch;
+    launch_epoch_ = epoch;
+}
+
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
                                     time::Epoch epoch) {
     auto vehicle = std::make_unique<vehicle::Vehicle>(config::load_vehicle(config_dir_, vehicle_id), config_dir_);
+    set_launch_site(site);
+    const double stand_height = site.height_m + (tower_ ? site.tower->mount_height_m : 0.0);
     bodies_.clear();
     bodies_.push_back({vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad, site.longitude_rad,
-                                                   site.height_m, heading_rad, earth_, epoch),
+                                                   stand_height, heading_rad, earth_, epoch),
                        {}, nullptr, {}});
-    launch_site_ = site;
+    // The stack stands on the launch mount: its top is the ground until staging (a stack released without
+    // thrust settles back onto it instead of dropping through the mount's open centre).
+    bodies_.back().body->set_ground_height(stand_height);
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
@@ -286,7 +319,7 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         if (flying.return_guidance && !flying.body->impacted()) {
             const auto& r = flying.return_command;
             for (auto& group : command.groups) group.throttle = r.throttle;
-            return_controller_.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf).apply_to(command);
+            return_controller_.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf, r.roll_reference_gcrf).apply_to(command);
             command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(r.rcs_force_gcrf);
         }
         return command;
@@ -337,13 +370,14 @@ double FlightSession::coast_allowance_s() const {
     if (autopilot_.state == AutopilotState::Burn) {
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s);
     }
+    if (tower_) allowance = std::min(allowance, tower_->coast_limit_s(body_pointers(), earth_, epoch_));
     for (const auto& flying : bodies_) {
         const auto& body = *flying.body;
         if (flying.return_guidance && flying.return_guidance->phase() != gnc::ReturnPhase::Landed &&
             !body.impacted()) {
             return 0.0;
         }
-        if (body.impacted() || body.resting()) continue;  // no longer moving on its own
+        if (body.impacted() || body.resting() || body.caught()) continue;  // no longer moving on its own
         if (!body.can_coast()) return 0.0;
         for (const auto& [group, run] : flying.running_groups) {
             if (run) return 0.0;
@@ -372,8 +406,13 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             }
         }
         for (size_t i = 0; i < bodies_.size(); ++i) {
-            if (i != controlled_ && bodies_[i].return_guidance) run_return_guidance(bodies_[i]);
+            if (i != controlled_ && bodies_[i].return_guidance) {
+                if (tower_) bodies_[i].return_guidance->set_catch_contact(tower_->in_contact(*bodies_[i].body));
+                run_return_guidance(bodies_[i]);
+            }
         }
+        const auto pointers = body_pointers();
+        if (tower_) tower_->before_tick(pointers, earth_, epoch_);
         for (size_t i = 0; i < bodies_.size(); ++i) {
             auto& body = *bodies_[i].body;
             const auto t = earth_.fixed_to_gcrf(epoch_);
@@ -387,6 +426,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             }
             body.step(env_, epoch_, tick_s, command);
         }
+        if (tower_) tower_->after_tick(pointers, earth_, epoch_ + tick_s, tick_s);
         epoch_ += tick_s;
     }
     if (bodies_.empty()) {
@@ -421,10 +461,18 @@ void FlightSession::stage() {
     auto& lower = bodies_[controlled_];
     auto upper = lower.body->separate(1);
     for (auto& [group, run] : lower.running_groups) run = false;  // booster engines off after separation
+    lower.body->set_ground_height(launch_site_.height_m);  // separated stages: the real ground, not the mount
+    upper->set_ground_height(launch_site_.height_m);
     if (booster_return_) {
-        lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(
-            gnc::LandingSite{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m},
-            *booster_return_);
+        gnc::LandingSite landing{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m, {}};
+        const auto& booster_stage = lower.body->vehicle().stages().front();
+        if (tower_ && !booster_stage.config.catch_pins.azimuths_rad.empty()) {
+            const auto& g = tower_->geometry();
+            landing.catch_target = gnc::CatchTarget{g.to_itrf({0.0, 0.0, g.arm_top_height_m(0.0)}), g.site_to_itrf() * g.across(),
+                                                    booster_stage.base_station_m + booster_stage.config.catch_pins.station_m,
+                                                    booster_stage.config.catch_pins.azimuths_rad.front()};
+        }
+        lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(landing, *booster_return_);
     }
     Flying flying{std::move(upper), {}, nullptr, {}};
     bodies_.push_back(std::move(flying));

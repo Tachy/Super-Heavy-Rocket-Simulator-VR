@@ -10,9 +10,51 @@ latitude_deg = 25.99686     # [E] from public satellite imagery
 longitude_deg = -97.15394
 height_m = 10.0
 
+[site.tower]                  # catch tower ("chopsticks"); all values [E] from public imagery and reporting
+azimuth_deg = 315.0           # [E] pad centre -> tower centre, clockwise from north (verify against imagery)
+distance_m = 30.0             # [E]
+width_m = 12.0                # [E] square lattice tower
+height_m = 146.0              # [E]
+mount_height_m = 20.0         # [E] top of the orbital launch mount: a stack stands here
+mount_outer_radius_m = 13.0   # [E]
+mount_inner_radius_m = 5.5    # [E] open centre for the engine exhaust
+arm_length_m = 36.0           # [E] hinge -> tip
+arm_width_m = 2.0             # [E] top surface the pins land on
+arm_thickness_m = 2.5         # [E]
+arm_open_deg = 40.0           # [E] each arm swung outward
+arm_closed_gap_m = 9.6        # [E] hull 9 m + 0.3 m each side; pins (4.5-5.5 m) overlap the arm tops by 0.7 m
+arm_rate_deg_s = 10.0         # [E]
+arm_force_limit_n = 2.0e6     # [E] closing stalls when the hull pushes back harder
+catch_height_m = 95.0         # [E] arm tops above the pad ground; caught booster bottom clears the mount
+carriage_mass_kg = 1.5e5      # [E] carriage + arms
+carriage_stiffness_n_m = 2.0e6    # [E] shock absorbers: ~1.4 m static travel under a 275 t booster
+carriage_damping_n_s_m = 1.2e6    # [E]
+carriage_stroke_m = 4.0       # [E] travel to the hard stop
+
 [[site]]
 id = "ksc_lc39a"
 name = "KSC LC-39A"
 latitude_deg = 28.60822     # [E] from public satellite imagery
 longitude_deg = -80.60410
 height_m = 15.0
+
+[site.tower]                  # catch tower ("chopsticks"); all values [E] from public imagery and reporting
+azimuth_deg = 0.0             # [E] pad centre -> tower centre, clockwise from north (tower north of the mount, verify against imagery)
+distance_m = 30.0             # [E]
+width_m = 12.0                # [E] square lattice tower
+height_m = 146.0              # [E]
+mount_height_m = 20.0         # [E] top of the orbital launch mount: a stack stands here
+mount_outer_radius_m = 13.0   # [E]
+mount_inner_radius_m = 5.5    # [E] open centre for the engine exhaust
+arm_length_m = 36.0           # [E] hinge -> tip
+arm_width_m = 2.0             # [E] top surface the pins land on
+arm_thickness_m = 2.5         # [E]
+arm_open_deg = 40.0           # [E] each arm swung outward
+arm_closed_gap_m = 9.6        # [E] hull 9 m + 0.3 m each side; pins (4.5-5.5 m) overlap the arm tops by 0.7 m
+arm_rate_deg_s = 10.0         # [E]
+arm_force_limit_n = 2.0e6     # [E] closing stalls when the hull pushes back harder
+catch_height_m = 95.0         # [E] arm tops above the pad ground; caught booster bottom clears the mount
+carriage_mass_kg = 1.5e5      # [E] carriage + arms
+carriage_stiffness_n_m = 2.0e6    # [E] shock absorbers: ~1.4 m static travel under a 275 t booster
+carriage_damping_n_s_m = 1.2e6    # [E]
+carriage_stroke_m = 4.0       # [E] travel to the hard stop

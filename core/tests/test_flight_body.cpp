@@ -250,3 +250,35 @@ TEST_CASE("A hard touchdown is an impact", "[vehicle]") {
     for (int i = 0; i < 4000 && !body->impacted(); ++i, t += 0.005) body->step(world.env, t0 + t, 0.005, {});
     CHECK(body->impacted());
 }
+
+TEST_CASE("An external wrench acts for one step", "[vehicle]") {
+    DeepSpace space;
+    auto body = ship_in_deep_space(far_away());
+    const double m = body->vehicle().mass_properties().mass_kg;
+    const double iyy = body->vehicle().mass_properties().inertia_kg_m2.y;
+    body->apply_external_wrench({1.0e6, 0.0, 0.0}, {0.0, 1.0e6, 0.0});
+    body->step(space.env, t0, 0.1, {});
+    CHECK(body->state().velocity_gcrf_mps.x == Catch::Approx(1.0e6 / m * 0.1).epsilon(1e-6));
+    CHECK(body->state().angular_velocity_body_radps.y == Catch::Approx(1.0e6 / iyy * 0.1).epsilon(1e-6));
+    const Vec3 v = body->state().velocity_gcrf_mps;
+    body->step(space.env, t0 + 0.1, 0.1, {});
+    CHECK(body->state().velocity_gcrf_mps.x == Catch::Approx(v.x).epsilon(1e-12));  // cleared after use
+}
+
+TEST_CASE("A caught body co-rotates with the Earth", "[vehicle]") {
+    ZeroGravity gravity;
+    environment::Us76Atmosphere atmosphere;
+    RotatingEarth earth;
+    vehicle::FlightEnvironment env{gravity, atmosphere, earth, nullptr, false};
+    RigidBodyState s;
+    s.position_gcrf_m = {6.45e6, 0.0, 0.0};
+    s.velocity_gcrf_mps = {0.0, 3.0, -2.0};
+    auto body = ship_in_deep_space(s);
+    body->hold_fixed_to_earth(earth, t0);
+    CHECK(body->caught());
+    for (int i = 0; i < 100; ++i) body->step(env, t0 + i, 1.0, {});
+    const auto r = earth.fixed_to_gcrf(t0 + 100.0).rotation * Vec3{6.45e6, 0.0, 0.0};
+    CHECK(norm(body->state().position_gcrf_m - r) < 1e-6);
+    body->mark_impacted();
+    CHECK(body->impacted());
+}

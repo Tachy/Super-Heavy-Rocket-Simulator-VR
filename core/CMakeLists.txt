@@ -9,6 +9,7 @@ FetchContent_MakeAvailable(tomlplusplus)
 
 add_library(starsim_core STATIC
     src/config/vehicle_config.cpp
+    src/config/launch_site_config.cpp
     src/environment/us76_atmosphere.cpp
     src/propulsion/engine_performance.cpp
     src/aero/slender_body_aero.cpp
@@ -20,8 +21,15 @@ add_library(starsim_core STATIC
     src/gnc/burn_node.cpp
     src/gnc/booster_return.cpp
     src/sim/telemetry_recorder.cpp
+    src/sim/catch_tower_sim.cpp
     src/sim/flight_session.cpp
     src/mission/lunar_transfer.cpp
+    src/contact/primitives.cpp
+    src/contact/tower_geometry.cpp
+    src/contact/catch_arms.cpp
+    src/contact/pin_contact.cpp
+    src/contact/catch_trigger.cpp
+    src/contact/tower_collision.cpp
     src/optim/sparse_matrix.cpp
     src/optim/minimum_degree.cpp
     src/optim/ldl.cpp

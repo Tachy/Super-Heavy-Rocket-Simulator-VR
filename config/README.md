@@ -38,6 +38,19 @@ flow separation (vacuum engines).
   (frontal lattice area per fin), `station_m` (hinge), `radius_m` (fin centre of pressure),
   `max_deflection_deg`, `rate_deg_s`, `table` (normal-force slope and limit over Mach, e.g.
   `aero/grid_fin.csv`). Fin mass belongs in the stage's `dry_mass_kg`.
+- `[stage.catch_pins]`: hardpoints the tower arms catch, one per entry of `azimuths_deg` (from body +y
+  towards +z, like the grid fins), `station_m` (from the bottom of the stage), `protrusion_m` (beyond the
+  hull), `max_load_n` (structural limit per pin; above it the catch is an impact).
+
+## Launch sites (`launch_sites.toml`)
+- `[[site]]`: `id`, `name`, `latitude_deg`, `longitude_deg`, `height_m` (ground above WGS84).
+- `[site.tower]` (optional catch tower; site frame: origin at the pad centre on the ground, east/north/up):
+  `azimuth_deg`/`distance_m` (pad centre -> tower centre), `width_m`, `height_m`, launch mount
+  (`mount_height_m`, `mount_inner_radius_m`, `mount_outer_radius_m`), arms (`arm_length_m`, `arm_width_m`,
+  `arm_thickness_m`, `arm_open_deg`, `arm_closed_gap_m`, `arm_rate_deg_s`, `arm_force_limit_n`),
+  `catch_height_m` (arm tops above the ground) and the carriage shock absorbers (`carriage_mass_kg`,
+  `carriage_stiffness_n_m`, `carriage_damping_n_s_m`, `carriage_stroke_m`). The hinges sit on the tower face,
+  `arm_closed_gap_m / 2 + arm_width_m / 2` from the catch axis.
 
 ## Adding another rocket
 1. Add missing engines under `engines/`.

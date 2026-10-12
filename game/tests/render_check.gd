@@ -2,6 +2,7 @@
 # godot --path game --script res://tests/render_check.gd -- --utc=2024-04-08T18:42:00 --focus=earth
 # Vehicle: --vehicle=starship_block3 --site=starbase_olp1 [--fly=40] (ignite, liftoff at 3 s, fly N s)
 #          [--autopilot] (ascent autopilot instead of manual) [--circularize] (plan node afterwards)
+# Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed).
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -42,6 +43,10 @@ func _process(_delta: float) -> bool:
 			_view_from(world, _args["view_from"])
 		if _args.has("vehicle"):
 			_fly_vehicle(world)
+		if _args.has("tower_arms_deg"):
+			for view in world.towers:
+				view.preview_opening_rad = deg_to_rad(float(_args["tower_arms_deg"]))
+				view.update_state({})
 	_frames += 1
 	if _frames == FRAMES_TO_SETTLE:
 		var out: String = _args.get("out", "user://render_check.png")

@@ -75,6 +75,12 @@ max_deflection_deg = 30.0               # [E]
 rate_deg_s = 30.0                       # [E] electric actuators
 table = "aero/grid_fin.csv"
 
+[stage.catch_pins]
+azimuths_deg = [90.0, 270.0]           # [E] two hardpoints between the grid fins, caught by the tower arms
+station_m = 65.5                       # [E] above the grid fins, below the hot-staging ring
+protrusion_m = 1.0                     # [E] beyond the hull
+max_load_n = 5.0e6                     # [E] structural limit per pin (~1.9 g of a 275 t booster on two pins)
+
 [stage.recovery]
 method = "tower_catch"
 reserve_propellant_kg = 330000.0         # boostback + landing (RTLS) [E]

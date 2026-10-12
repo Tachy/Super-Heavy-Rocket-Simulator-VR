@@ -51,6 +51,8 @@ struct TickContext {
     Vec3 srp_acceleration_gcrf;  // evaluated at the start of the tick
     Vec3 rcs_torque_nm;          // commanded reaction-control couple, body axes
     Vec3 rcs_force_n;            // commanded reaction-control translation force, body axes
+    Vec3 external_force_gcrf_n;   // contact (tower arms), through the CG
+    Vec3 external_torque_body_nm;
 };
 
 struct Forces {
@@ -103,8 +105,10 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
     }
     f.moment_body_nm += ctx.rcs_torque_nm;
     f.nongravitational_body_n += ctx.rcs_force_n;
+    f.moment_body_nm += ctx.external_torque_body_nm;
     f.acceleration_gcrf = ctx.env.gravity.acceleration_mps2(s.position_gcrf_m, ctx.epoch + tau_s) +
-                          s.attitude.rotate(f.nongravitational_body_n) / f.mass.mass_kg + ctx.srp_acceleration_gcrf;
+                          s.attitude.rotate(f.nongravitational_body_n) / f.mass.mass_kg + ctx.srp_acceleration_gcrf +
+                          ctx.external_force_gcrf_n / f.mass.mass_kg;
     return f;
 }
 
@@ -195,6 +199,22 @@ void FlightBody::follow_pad(const frames::BodyOrientation& earth, time::Epoch ep
     state_.angular_velocity_body_radps = state_.attitude.inverse_rotate(earth_rotation_vector(transform));
 }
 
+void FlightBody::apply_external_wrench(const Vec3& force_gcrf_n, const Vec3& torque_body_nm) {
+    external_force_gcrf_n_ += force_gcrf_n;
+    external_torque_body_nm_ += torque_body_nm;
+}
+
+void FlightBody::hold_fixed_to_earth(const frames::BodyOrientation& earth, time::Epoch epoch) {
+    const auto transform = earth.fixed_to_gcrf(epoch);
+    const math::Mat3 to_fixed = transpose(transform.rotation);
+    const double cg = vehicle_->mass_properties().cg_station_m;
+    pad_itrf_m_ = to_fixed * (state_.position_gcrf_m - state_.attitude.rotate(Vec3{cg, 0.0, 0.0}));
+    attitude_itrf_ = (Quat::from_matrix(to_fixed) * state_.attitude).normalized();
+    caught_ = true;
+    resting_ = false;
+    follow_pad(earth, epoch);
+}
+
 Vec3 FlightBody::rcs_torque(const VehicleCommand& command) const {
     const Vec3 max = vehicle_->max_rcs_torque_nm();
     const Vec3& f = command.rcs_torque_fraction;
@@ -218,9 +238,11 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     vehicle_->update_grid_fins(dt_s, command);
     update_air_data(env, epoch);
 
-    if (clamped_) {
+    if (clamped_ || caught_) {
         vehicle_->consume_propellant(dt_s);
         follow_pad(env.earth_orientation, epoch + dt_s);
+        external_force_gcrf_n_ = {};
+        external_torque_body_nm_ = {};
         return;
     }
     resting_ = false;  // re-established by the ground contact below
@@ -233,9 +255,13 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
                           vehicle_->tank_mass_flows_kgps(),
                           solar_radiation_acceleration(env, *vehicle_, state_, vehicle_->mass_properties().mass_kg, epoch),
                           rcs_torque(command),
-                          rcs_force(command)};
+                          rcs_force(command),
+                          external_force_gcrf_n_,
+                          external_torque_body_nm_};
     const integrators::OdeFunction<13> f = [&ctx](double tau, const State13& y) { return derivative(ctx, tau, y); };
     state_ = unpack(integrators::rk4_step<13>(f, 0.0, pack(state_), dt_s));
+    external_force_gcrf_n_ = {};
+    external_torque_body_nm_ = {};
     vehicle_->consume_propellant(dt_s);
 
     resolve_ground_contact(env.earth_orientation, epoch + dt_s);
@@ -290,7 +316,7 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
     if (impacted_ || duration_s <= 0.0) {
         return;
     }
-    if (resting_) {  // stays on the ground, co-rotating with the Earth
+    if (resting_ || caught_) {  // stays on the ground / on the tower, co-rotating with the Earth
         follow_pad(env.earth_orientation, epoch + duration_s);
         return;
     }
@@ -302,6 +328,8 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
                           earth_rotation_vector(transform),
                           vehicle_->tank_mass_flows_kgps(),
                           solar_radiation_acceleration(env, *vehicle_, state_, vehicle_->mass_properties().mass_kg, epoch),
+                          {},
+                          {},
                           {},
                           {}};
     const integrators::OdeFunction<13> f = [&ctx](double tau, const State13& y) { return derivative(ctx, tau, y); };
