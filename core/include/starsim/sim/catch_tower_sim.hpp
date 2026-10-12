@@ -12,7 +12,7 @@
 
 namespace starsim::sim {
 
-enum class CatchPhase { Open, Closing, Caught, Missed };
+enum class CatchPhase { Open, Closing, Caught, Missed, Aborted };
 
 const char* to_string(CatchPhase phase);  // German UI text
 
@@ -26,6 +26,10 @@ public:
     const contact::CatchArms& arms() const { return arms_; }
     CatchPhase phase() const { return phase_; }
     void close_arms(bool instantly);
+    // The landing guidance gave up the catch: the arms stay (or swing back) open for the rest of the flight.
+    void abort_catch();
+    // A body struck the tower, the mount or an arm (tower damage).
+    bool tower_struck() const { return tower_struck_; }
 
     // Contact wrenches for the coming tick (from the current states) and the automatic tower.
     void before_tick(const std::vector<vehicle::FlightBody*>& bodies, const frames::BodyOrientation& earth, time::Epoch epoch);
@@ -58,7 +62,8 @@ private:
     double hull_push_n_ = 0.0;
     double vertical_load_n_ = 0.0;
     double max_pin_load_n_ = 0.0;
-    double caught_load_n_ = 0.0;  // weight of the bodies hanging on the arms
+    double caught_load_n_ = 0.0;
+    bool tower_struck_ = false;  // weight of the bodies hanging on the arms
 };
 
 }  // namespace starsim::sim

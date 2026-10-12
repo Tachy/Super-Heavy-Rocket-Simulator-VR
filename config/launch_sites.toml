@@ -31,6 +31,10 @@ carriage_stiffness_n_m = 2.0e6    # [E] shock absorbers: ~1.4 m static travel un
 carriage_damping_n_s_m = 1.2e6    # [E]
 carriage_stroke_m = 4.0       # [E] travel to the hard stop
 
+[site.sea]                    # coastline for aborted landings: ground beyond this line is water (flat until M8)
+direction_deg = 90.0          # [E] towards the sea (Gulf of Mexico), clockwise from north (verify against imagery)
+shoreline_distance_m = 500.0  # [E] pad centre -> shoreline along that direction (verify against imagery)
+
 [[site]]
 id = "ksc_lc39a"
 name = "KSC LC-39A"
@@ -58,3 +62,7 @@ carriage_mass_kg = 1.5e5      # [E] carriage + arms
 carriage_stiffness_n_m = 2.0e6    # [E] shock absorbers: ~1.4 m static travel under a 275 t booster
 carriage_damping_n_s_m = 1.2e6    # [E]
 carriage_stroke_m = 4.0       # [E] travel to the hard stop
+
+[site.sea]                    # coastline for aborted landings: ground beyond this line is water (flat until M8)
+direction_deg = 90.0          # [E] towards the Atlantic, clockwise from north (verify against imagery)
+shoreline_distance_m = 1300.0 # [E] pad centre -> shoreline along that direction (verify against imagery)

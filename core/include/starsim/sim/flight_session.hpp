@@ -48,9 +48,12 @@ struct LaunchSite {
     double longitude_rad = 0.0;
     double height_m = 0.0;
     std::optional<config::TowerConfig> tower;  // catch tower (stacks then stand on its launch mount)
+    std::optional<config::SeaConfig> sea;      // coastline (aborted landings)
 };
 
 LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site);
+
+enum class LandingOutcome;
 
 // All flying bodies of one mission (the stack, and after staging booster and ship) on a common
 // fixed tick. The pilot controls one body; separated bodies coast with their engines off.
@@ -146,6 +149,8 @@ public:
     size_t controlled_index() const { return controlled_; }
     const vehicle::FlightBody& body(size_t index) const { return *bodies_.at(index).body; }
     vehicle::FlightTelemetry telemetry(size_t index) const;
+    // How the flight of body `index` ended so far (Flying while it is in the air).
+    LandingOutcome landing_outcome(size_t index) const;
     // Seconds since liftoff (clamp release); before liftoff: since the vehicle was placed on the pad.
     double mission_time_s() const { return epoch_ - launch_epoch_; }
 

@@ -6,6 +6,7 @@
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/sim/landing_outcome.hpp"
 
 namespace starsim::sim {
 
@@ -264,7 +265,7 @@ void FlightSession::run_autopilot() {
 
 
 LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site) {
-    return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower};
+    return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower, site.sea};
 }
 
 void FlightSession::set_launch_site(const LaunchSite& site) {
@@ -478,6 +479,12 @@ void FlightSession::stage() {
     bodies_.push_back(std::move(flying));
     controlled_ = bodies_.size() - 1;
     ignite();  // hot staging: the upper stage lights immediately
+}
+
+LandingOutcome FlightSession::landing_outcome(size_t index) const {
+    const auto t = earth_.fixed_to_gcrf(epoch_);
+    const auto& body = *bodies_.at(index).body;
+    return sim::landing_outcome(body, launch_site_, transpose(t.rotation) * body.state().position_gcrf_m);
 }
 
 vehicle::FlightTelemetry FlightSession::telemetry(size_t index) const {

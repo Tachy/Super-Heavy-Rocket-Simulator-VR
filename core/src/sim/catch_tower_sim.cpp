@@ -30,6 +30,7 @@ const char* to_string(CatchPhase phase) {
         case CatchPhase::Closing: return "schließt";
         case CatchPhase::Caught: return "gefangen";
         case CatchPhase::Missed: return "verfehlt";
+        case CatchPhase::Aborted: return "Abbruch";
     }
     return "";
 }
@@ -41,6 +42,12 @@ void CatchTowerSim::close_arms(bool instantly) {
     if (instantly) arms_.set_closed();
     arms_.command_close(true);
     if (phase_ == CatchPhase::Open) phase_ = CatchPhase::Closing;
+}
+
+void CatchTowerSim::abort_catch() {
+    if (phase_ == CatchPhase::Caught) return;
+    arms_.command_close(false);
+    phase_ = CatchPhase::Aborted;
 }
 
 bool CatchTowerSim::catchable(const vehicle::FlightBody& body) {
@@ -130,18 +137,24 @@ void CatchTowerSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, 
             const auto pose = site_pose(*body, t);
             const Vec3 bottom = pose.cg_m + pose.body_to_site * Vec3{-pose.cg_station_m, 0.0, 0.0};
             const Vec3 top = pose.cg_m + pose.body_to_site * Vec3{body->vehicle().length_m() - pose.cg_station_m, 0.0, 0.0};
-            if (contact::hits_tower(geometry_, bottom, top, 0.5 * body->vehicle().diameter_m())) body->mark_impacted();
+            if (contact::hits_tower(geometry_, bottom, top, 0.5 * body->vehicle().diameter_m())) {
+                body->mark_impacted();
+                tower_struck_ = true;
+            }
             if (was_tracked) {
                 auto& tr = tracks_.at(body);
                 if (tr.contact.max_pin_load_n > tr.geometry.max_pin_load_n || arms_.hit_hard_stop()) body->mark_impacted();
                 const double radius = 0.5 * body->vehicle().diameter_m();
                 for (const int side : {1, -1}) {
                     const auto arm = geometry_.arm_box(side, arms_.opening_rad(), arms_.carriage_offset_m());
-                    if (contact::hull_penetration_m(arm, bottom, top, radius) > hull_crush_depth_m) body->mark_impacted();
+                    if (contact::hull_penetration_m(arm, bottom, top, radius) > hull_crush_depth_m) {
+                        body->mark_impacted();
+                        tower_struck_ = true;
+                    }
                 }
                 const Vec3 pin_axis = pose.cg_m + pose.body_to_site * Vec3{tr.geometry.pin_station_m - pose.cg_station_m, 0.0, 0.0};
                 if (pin_axis.z < geometry_.arm_top_height_m(arms_.carriage_offset_m()) - missed_drop_m &&
-                    phase_ != CatchPhase::Caught) {
+                    phase_ != CatchPhase::Caught && phase_ != CatchPhase::Aborted) {
                     phase_ = CatchPhase::Missed;
                 }
                 const bool at_rest = tr.contact.all_pins_in_contact() && !body->vehicle().any_engine_producing_thrust() &&
@@ -156,7 +169,10 @@ void CatchTowerSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, 
                 }
             }
         }
-        if (was_tracked && (body->impacted() || body->resting()) && phase_ != CatchPhase::Caught) phase_ = CatchPhase::Missed;
+        if (was_tracked && (body->impacted() || body->resting()) && phase_ != CatchPhase::Caught &&
+            phase_ != CatchPhase::Aborted) {
+            phase_ = CatchPhase::Missed;
+        }
     }
 }
 

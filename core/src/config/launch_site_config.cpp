@@ -37,6 +37,13 @@ TowerConfig load_tower(const Document& doc, const toml::table& t) {
     return c;
 }
 
+SeaConfig load_sea(const Document& doc, const toml::table& t) {
+    SeaConfig c;
+    c.direction_rad = doc.number(t, "direction_deg") * constants::deg_to_rad;
+    c.shoreline_distance_m = doc.positive(t, "shoreline_distance_m");
+    return c;
+}
+
 }  // namespace
 
 LaunchSiteConfig load_launch_site(const std::filesystem::path& config_dir, std::string_view site_id) {
@@ -52,6 +59,7 @@ LaunchSiteConfig load_launch_site(const std::filesystem::path& config_dir, std::
             s.longitude_rad = doc.number(t, "longitude_deg") * constants::deg_to_rad;
             s.height_m = doc.number(t, "height_m");
             if (auto tower = t["tower"].as_table()) s.tower = load_tower(doc, *tower);
+            if (auto sea = t["sea"].as_table()) s.sea = load_sea(doc, *sea);
             return s;
         }
     }

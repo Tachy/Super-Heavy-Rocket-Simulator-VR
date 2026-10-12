@@ -48,6 +48,7 @@ add_executable(starsim_core_tests
     test_descent_discretization.cpp
     test_descent_problem.cpp
     test_descent_planner.cpp
+    test_landing_outcome.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE

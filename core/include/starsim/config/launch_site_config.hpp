@@ -33,6 +33,13 @@ struct TowerConfig {
     double carriage_stroke_m = 0.0;
 };
 
+// Coastline of a launch site ([site.sea]): a straight shoreline perpendicular to `direction_rad`; the ground beyond
+// it is water (aborted landings end there as a splashdown).
+struct SeaConfig {
+    double direction_rad = 0.0;          // pad centre -> sea, clockwise from north
+    double shoreline_distance_m = 0.0;   // pad centre -> shoreline along that direction
+};
+
 struct LaunchSiteConfig {
     std::string id;
     std::string name;
@@ -40,6 +47,7 @@ struct LaunchSiteConfig {
     double longitude_rad = 0.0;
     double height_m = 0.0;  // ground (pad) height above WGS84
     std::optional<TowerConfig> tower;
+    std::optional<SeaConfig> sea;
 };
 
 // Reads site `site_id` from config/launch_sites.toml.

@@ -206,3 +206,28 @@ TEST_CASE("A stack released without thrust stays on the launch mount", "[contact
     CHECK_FALSE(session.body(0).impacted());
     CHECK(session.body(0).resting());
 }
+
+TEST_CASE("An aborted catch keeps the arms open", "[contact][catch]") {
+    const auto t0 = start();
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    use_starbase(session);
+    session.tower()->abort_catch();
+    place_booster(session, t0, {0.0, 0.0, 3.0}, {0.0, 0.0, -1.0});  // would be caught (see the centred arrival)
+    const auto& booster = session.body(0);
+    // 3 s: the pins pass the arm tops (an engines-off fall onto the mount below would strike the tower).
+    run(session, t0, 3.0, [&] { return booster.caught() || booster.impacted() || booster.resting(); });
+    CHECK_FALSE(booster.caught());
+    CHECK(session.tower()->phase() == sim::CatchPhase::Aborted);
+    CHECK(session.tower()->arms().opening_rad() > 0.0);
+}
+
+TEST_CASE("Striking the tower is recorded", "[contact][catch]") {
+    const auto t0 = start();
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    use_starbase(session);
+    const auto& tower = session.tower()->geometry();
+    place_booster(session, t0, tower.tower_direction() * 12.0 + Vec3{0.0, 0.0, 20.0}, tower.tower_direction() * 5.0);
+    const auto& booster = session.body(0);
+    run(session, t0, 10.0, [&] { return booster.impacted(); });
+    CHECK(session.tower()->tower_struck());
+}

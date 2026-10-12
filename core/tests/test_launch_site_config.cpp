@@ -21,6 +21,9 @@ TEST_CASE("Launch sites load with their catch tower", "[config]") {
     CHECK(t.arm_closed_gap_m > 9.0);  // wider than the 9 m booster hull
     CHECK(t.mount_inner_radius_m < t.mount_outer_radius_m);
     CHECK_THAT(t.arm_open_rad, WithinAbs(40.0 * constants::deg_to_rad, 1e-12));
+    REQUIRE(site.sea.has_value());
+    CHECK_THAT(site.sea->direction_rad, WithinAbs(90.0 * constants::deg_to_rad, 1e-12));
+    CHECK(site.sea->shoreline_distance_m > 0.0);
     CHECK(config::load_launch_site(STARSIM_CONFIG_DIR, "ksc_lc39a").tower.has_value());
     CHECK_THROWS_AS(config::load_launch_site(STARSIM_CONFIG_DIR, "nowhere"), config::ConfigError);
 }
