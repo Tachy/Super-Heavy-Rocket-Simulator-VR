@@ -4,6 +4,7 @@
 
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/orbit/lambert.hpp"
 
 using namespace starsim;
 using orbit::KeplerianElements;
@@ -55,4 +56,32 @@ TEST_CASE("Two-body propagation handles hyperbolas backwards", "[orbit]") {
     CHECK(norm(back.position_m - start.position_m) < 1e-4);
     CHECK(orbit::specific_energy(later, gm_earth) ==
           Catch::Approx(orbit::specific_energy(start, gm_earth)).epsilon(1e-12));
+}
+
+TEST_CASE("Lambert: Curtis example 5.2", "[orbit]") {
+    // r1 = (5000, 10000, 2100) km, r2 = (-14600, 2500, 7000) km, 1 h, mu = 398600 km^3/s^2.
+    const double mu = 398600e9;
+    const math::Vec3 r1{5000e3, 10000e3, 2100e3}, r2{-14600e3, 2500e3, 7000e3};
+    const auto sol = orbit::solve_lambert(r1, r2, 3600.0, mu);
+    REQUIRE(sol);
+    CHECK(sol->departure_velocity_mps.x == Catch::Approx(-5992.5).margin(1.0));
+    CHECK(sol->departure_velocity_mps.y == Catch::Approx(1925.4).margin(1.0));
+    CHECK(sol->departure_velocity_mps.z == Catch::Approx(3245.6).margin(1.0));
+    CHECK(sol->arrival_velocity_mps.x == Catch::Approx(-3312.5).margin(1.0));
+    CHECK(sol->arrival_velocity_mps.y == Catch::Approx(-4196.6).margin(1.0));
+    CHECK(sol->arrival_velocity_mps.z == Catch::Approx(-385.29).margin(1.0));
+}
+
+TEST_CASE("Lambert solutions reproduce the arc (elliptic, long way, hyperbolic)", "[orbit]") {
+    const double mu = gm_earth;
+    struct Case { math::Vec3 r1, r2; double tof; math::Vec3 normal; };
+    const auto c = GENERATE(Case{{7.0e6, 0, 0}, {0, 8.0e6, 1.0e6}, 2000.0, {0, 0, 1}},
+                            Case{{7.0e6, 0, 0}, {0, 8.0e6, 1.0e6}, 6000.0, {0, 0, -1}},   // long way
+                            Case{{6.8e6, 0, 0}, {-3.0e8, 2.0e8, 5.0e7}, 3.0 * 86400.0, {0, 0, 1}},  // translunar
+                            Case{{7.0e6, 0, 0}, {1.0e7, 2.0e7, 0}, 1500.0, {0, 0, 1}});     // hyperbolic
+    const auto sol = orbit::solve_lambert(c.r1, c.r2, c.tof, mu, c.normal);
+    REQUIRE(sol);
+    const auto end = orbit::propagate_two_body({c.r1, sol->departure_velocity_mps}, mu, c.tof);
+    CHECK(norm(end.position_m - c.r2) < 1.0);
+    CHECK(norm(end.velocity_mps - sol->arrival_velocity_mps) < 1e-3);
 }
