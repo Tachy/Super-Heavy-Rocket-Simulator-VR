@@ -4,29 +4,10 @@
 #include <string>
 #include <vector>
 
+#include "starsim/gnc/landing_site.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
 namespace starsim::gnc {
-
-// Catch on the tower arms instead of a touchdown on the pad.
-struct CatchTarget {
-    math::Vec3 pin_point_itrf_m;   // pins' midpoint on a centred catch: on the catch axis at the arm tops
-    math::Vec3 across_itrf;        // horizontal unit; the pins must point along +-this direction
-    double pin_station_m = 0.0;    // vehicle frame
-    double pin_azimuth_rad = 0.0;  // first pin, from body +y towards +z
-};
-
-struct LandingSite {
-    double latitude_rad = 0.0;
-    double longitude_rad = 0.0;
-    double height_m = 0.0;  // ground (pad) height above WGS84
-    std::optional<CatchTarget> catch_target;
-};
-
-// Body +y direction (same frame as the inputs) that turns the first pin along +-across, upright body (x = up);
-// of the two solutions the one nearer `current_body_y` (the pins are symmetric).
-math::Vec3 catch_roll_reference(const math::Vec3& across, const math::Vec3& up, double pin_azimuth_rad,
-                                const math::Vec3& current_body_y);
 
 struct BoosterReturnParameters {
     double flight_time_s = 230.0;  // planned time from boostback start to touchdown (Lambert arc shape)

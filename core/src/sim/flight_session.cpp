@@ -1,6 +1,7 @@
 #include "starsim/sim/flight_session.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
@@ -9,6 +10,12 @@
 #include "starsim/sim/landing_outcome.hpp"
 
 namespace starsim::sim {
+
+namespace {
+
+constexpr double tower_keep_out_margin_m = 5.0;  // [E] aborted landings stay this far from the tower lattice
+
+}  // namespace
 
 FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames::BodyOrientation& earth,
                              std::filesystem::path config_dir, environment::PointMassGravityConfig gravity_config)
@@ -268,6 +275,26 @@ LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site) {
     return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower, site.sea};
 }
 
+gnc::LandingSite FlightSession::return_site(const vehicle::Vehicle& booster) const {
+    gnc::LandingSite landing{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m, {}, {}};
+    const auto& stage = booster.stages().front();
+    if (tower_ && !stage.config.catch_pins.azimuths_rad.empty()) {
+        const auto& g = tower_->geometry();
+        const auto& c = g.config();
+        landing.catch_target = gnc::CatchTarget{g.to_itrf({0.0, 0.0, g.arm_top_height_m(0.0)}),
+                                                g.site_to_itrf() * g.across(),
+                                                stage.base_station_m + stage.config.catch_pins.station_m,
+                                                stage.config.catch_pins.azimuths_rad.front(),
+                                                g.to_itrf(g.tower_direction() * c.distance_m),
+                                                0.5 * c.width_m * std::sqrt(2.0) + 0.5 * booster.diameter_m() +
+                                                    tower_keep_out_margin_m};
+    }
+    if (launch_site_.sea) {
+        landing.sea = gnc::SeaSide{launch_site_.sea->direction_rad, launch_site_.sea->shoreline_distance_m};
+    }
+    return landing;
+}
+
 void FlightSession::set_launch_site(const LaunchSite& site) {
     launch_site_ = site;
     tower_.reset();
@@ -465,14 +492,7 @@ void FlightSession::stage() {
     lower.body->set_ground_height(launch_site_.height_m);  // separated stages: the real ground, not the mount
     upper->set_ground_height(launch_site_.height_m);
     if (booster_return_) {
-        gnc::LandingSite landing{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m, {}};
-        const auto& booster_stage = lower.body->vehicle().stages().front();
-        if (tower_ && !booster_stage.config.catch_pins.azimuths_rad.empty()) {
-            const auto& g = tower_->geometry();
-            landing.catch_target = gnc::CatchTarget{g.to_itrf({0.0, 0.0, g.arm_top_height_m(0.0)}), g.site_to_itrf() * g.across(),
-                                                    booster_stage.base_station_m + booster_stage.config.catch_pins.station_m,
-                                                    booster_stage.config.catch_pins.azimuths_rad.front()};
-        }
+        const auto landing = return_site(lower.body->vehicle());
         lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(landing, *booster_return_);
     }
     Flying flying{std::move(upper), {}, nullptr, {}};

@@ -83,6 +83,10 @@ public:
     const LaunchSite& launch_site() const { return launch_site_; }
     // Places a vehicle with a free state (scenarios, tests); the body becomes the controlled one.
     void place_body(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch);
+    // Landing site of a returning `booster`: catch target when the site has a tower and the booster has pins,
+    // coastline when configured.
+    gnc::LandingSite return_site(const vehicle::Vehicle& booster) const;
+    const vehicle::FlightEnvironment& environment() const { return env_; }
     const CatchTowerSim* tower() const { return tower_.get(); }
     CatchTowerSim* tower() { return tower_.get(); }
     bool active() const { return !bodies_.empty(); }
