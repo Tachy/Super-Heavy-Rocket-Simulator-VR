@@ -1,0 +1,88 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include <cmath>
+#include <memory>
+
+#include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/attitude_controller.hpp"
+#include "starsim/gnc/descent_tracking.hpp"
+
+using namespace starsim;
+using namespace starsim::gnc;
+using math::Quat;
+using math::Vec3;
+
+namespace {
+
+// Two phases of 2 s, two nodes each (3 nodes): straight down, the rate about body z rising 0 -> 0.2 rad/s.
+DescentPlan synthetic_plan() {
+    DescentPlan p;
+    p.nodes_per_phase = 2;
+    p.converged = true;
+    p.reference.duration_s = {2.0, 2.0};
+    p.reference.x = {make_state(1.0e5, {100.0, 0.0, 0.0}, {-20.0, 0.0, 0.0}, Quat{}, {0.0, 0.0, 0.0}),
+                     make_state(0.99e5, {70.0, 0.0, 0.0}, {-10.0, 0.0, 0.0}, Quat{}, {0.0, 0.0, 0.2}),
+                     make_state(0.98e5, {60.0, 0.0, 0.0}, {-1.0, 0.0, 0.0}, Quat{}, {0.0, 0.0, 0.2})};
+    p.reference.u = {{2.0e6, 0.0, 0.0}, {1.5e6, 0.0, 0.0}, {1.0e6, 0.0, 0.0}};
+    return p;
+}
+
+DescentModel flat_model() {
+    DescentModel m;
+    m.gravity_mps2 = {-9.8, 0.0, 0.0};
+    return m;
+}
+
+}  // namespace
+
+TEST_CASE("Plan samples interpolate between nodes", "[gnc][tracking]") {
+    const auto ref = sample_plan(synthetic_plan(), flat_model(), 1.0, 1.0);
+    CHECK(ref.phase == 0);
+    CHECK_FALSE(ref.finished);
+    CHECK(std::abs(ref.position_m.x - 85.0) < 1e-9);
+    CHECK(std::abs(ref.velocity_mps.x + 15.0) < 1e-9);
+    CHECK(std::abs(ref.thrust_acceleration_mps2.x - 1.75e6 / 0.995e5) < 1e-6);
+    CHECK(std::abs(ref.axis.x - 1.0) < 1e-12);
+    CHECK(std::abs(ref.rate_body_radps.z - 0.1) < 1e-9);
+    CHECK(std::abs(ref.angular_acceleration_body_radps2.z - 0.1) < 1e-6);
+    CHECK(sample_plan(synthetic_plan(), flat_model(), 3.0, 1.0).phase == 1);
+}
+
+TEST_CASE("After the plan's end the reference keeps sinking slowly against gravity", "[gnc][tracking]") {
+    const auto ref = sample_plan(synthetic_plan(), flat_model(), 6.0, 1.0);
+    CHECK(ref.finished);
+    CHECK(ref.phase == 1);
+    CHECK(std::abs(ref.velocity_mps.x + 1.0) < 1e-12);
+    CHECK(std::abs(ref.position_m.x - 58.0) < 1e-9);  // 60 m - 1 m/s x 2 s
+    CHECK(std::abs(ref.thrust_acceleration_mps2.x - 9.8) < 1e-12);
+    CHECK(norm(ref.rate_body_radps) == 0.0);
+}
+
+TEST_CASE("Tracking corrects position and velocity errors within limits", "[gnc][tracking]") {
+    const auto ref = sample_plan(synthetic_plan(), flat_model(), 1.0, 1.0);
+    const TrackingGains gains;
+    const Vec3 exact = commanded_acceleration(ref, ref.position_m, ref.velocity_mps, gains);
+    CHECK(norm(exact - ref.thrust_acceleration_mps2) < 1e-12);
+    const Vec3 off = commanded_acceleration(ref, ref.position_m + Vec3{0.0, 50.0, 0.0}, ref.velocity_mps, gains);
+    CHECK(norm(off - ref.thrust_acceleration_mps2) <= gains.max_correction_mps2 + 1e-12);
+    CHECK(off.y < 0.0);  // pushes back towards the plan
+    const double tilt = std::atan2(std::hypot(off.y, off.z), off.x);
+    CHECK(tilt <= gains.max_tilt_rad + 1e-12);
+}
+
+TEST_CASE("Rate feed-forward removes the damping torque for a planned rotation", "[gnc][tracking]") {
+    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    cfg.stages.resize(1);
+    vehicle::RigidBodyState s;
+    s.position_gcrf_m = {6.4e6, 0.0, 0.0};
+    s.angular_velocity_body_radps = {0.0, 0.02, 0.0};  // engines off: RCS
+    const vehicle::FlightBody body(std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR), s);
+    const AttitudeController controller;
+    const Vec3 axis = s.attitude.rotate({1.0, 0.0, 0.0});
+    const auto plain = controller.steer(body, 0.0, axis);
+    AttitudeController::Feedforward ff;
+    ff.rate_body_radps = {0.0, 0.02, 0.0};
+    const auto fed = controller.steer(body, 0.0, axis, {}, &ff);
+    CHECK(plain.rcs_torque_fraction.y < -1e-3);          // damps the rate
+    CHECK(std::abs(fed.rcs_torque_fraction.y) < 1e-9);   // the rate is planned: nothing to damp
+}

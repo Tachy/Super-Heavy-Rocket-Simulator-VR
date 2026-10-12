@@ -41,10 +41,17 @@ public:
     AttitudeController() = default;
     explicit AttitudeController(Gains gains) : gains_(gains) {}
 
+    // Planned motion the controller should not fight: body rate (relative to inertial space) and angular
+    // acceleration, body axes. The roll components are ignored (roll follows the roll reference).
+    struct Feedforward {
+        math::Vec3 rate_body_radps;
+        math::Vec3 acceleration_body_radps2;
+    };
+
     // `axis_gcrf`: desired direction of the body x-axis (unit). `roll_reference_gcrf` (optional, non-zero):
     // direction the body +y axis should point to, projected perpendicular to the axis.
     ControlOutput steer(const vehicle::FlightBody& body, double ambient_pressure_pa, const math::Vec3& axis_gcrf,
-                        const math::Vec3& roll_reference_gcrf = {}) const;
+                        const math::Vec3& roll_reference_gcrf = {}, const Feedforward* feedforward = nullptr) const;
 
     // Rate command (stability augmentation for manual flight): tracks body angular rates.
     ControlOutput steer_rates(const vehicle::FlightBody& body, double ambient_pressure_pa,

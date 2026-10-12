@@ -154,7 +154,8 @@ ControlOutput AttitudeController::steer_rates(const vehicle::FlightBody& body, d
 }
 
 ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double ambient_pressure_pa,
-                                        const Vec3& axis_gcrf, const Vec3& roll_reference_gcrf) const {
+                                        const Vec3& axis_gcrf, const Vec3& roll_reference_gcrf,
+                                        const Feedforward* feedforward) const {
     const auto& state = body.state();
     const auto mass = body.vehicle().mass_properties();
 
@@ -185,10 +186,14 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
         return moment_of_inertia > 0.0 ? torque / moment_of_inertia : 0.0;
     };
     const double gain = wn * wn / kd;
+    const Vec3 ff_rate = feedforward ? Vec3{0.0, feedforward->rate_body_radps.y, feedforward->rate_body_radps.z} : Vec3{};
+    const Vec3 ff_acceleration =
+        feedforward ? Vec3{0.0, feedforward->acceleration_body_radps2.y, feedforward->acceleration_body_radps2.z} : Vec3{};
     const Vec3 rate{rate_command(roll_error, gain, max_acceleration(a.roll_moment, rcs_max.x, fin_max.x, inertia.x)),
-                    rate_command(rotation.y, gain, max_acceleration(a.lever_moment, rcs_max.y, fin_max.y, inertia.y)),
-                    rate_command(rotation.z, gain, max_acceleration(a.lever_moment, rcs_max.z, fin_max.z, inertia.z))};
-    const Vec3 torque{inertia.x * kd * (rate.x - w.x), inertia.y * kd * (rate.y - w.y), inertia.z * kd * (rate.z - w.z)};
+                    rate_command(rotation.y, gain, max_acceleration(a.lever_moment, rcs_max.y, fin_max.y, inertia.y)) + ff_rate.y,
+                    rate_command(rotation.z, gain, max_acceleration(a.lever_moment, rcs_max.z, fin_max.z, inertia.z)) + ff_rate.z};
+    const Vec3 torque{inertia.x * kd * (rate.x - w.x), inertia.y * (kd * (rate.y - w.y) + ff_acceleration.y),
+                      inertia.z * (kd * (rate.z - w.z) + ff_acceleration.z)};
     return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins);
 }
 
