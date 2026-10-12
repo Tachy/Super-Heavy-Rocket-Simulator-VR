@@ -28,6 +28,7 @@ add_executable(starsim_core_tests
     test_booster_return.cpp
     test_grid_fins.cpp
     test_optim_sparse.cpp
+    test_optim_ordering.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE
