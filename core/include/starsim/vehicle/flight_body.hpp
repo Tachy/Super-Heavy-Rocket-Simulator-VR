@@ -29,6 +29,12 @@ struct FlightEnvironment {
     bool solar_radiation_pressure = true;
 };
 
+// Air data at the start of the last tick (what an air-data system would report to the controllers).
+struct AirData {
+    math::Vec3 air_velocity_body_mps;  // vehicle CG relative to the air
+    aero::FinAirData air;
+};
+
 struct FlightTelemetry {
     double altitude_m = 0.0;              // above WGS84
     double latitude_rad = 0.0;
@@ -75,6 +81,7 @@ public:
     void release_clamps() { clamped_ = false; }
     bool impacted() const { return impacted_; }
     bool resting() const { return resting_; }  // carried by the ground after a gentle touchdown
+    const AirData& air_data() const { return air_data_; }
 
     // Flat ground at this height above WGS84 (the pad elevation; terrain comes later).
     double ground_height_m() const { return ground_height_m_; }
@@ -100,12 +107,14 @@ private:
     math::Vec3 rcs_torque(const VehicleCommand& command) const;
     math::Vec3 rcs_force(const VehicleCommand& command) const;
     void resolve_ground_contact(const frames::BodyOrientation& earth, time::Epoch epoch);
+    void update_air_data(const FlightEnvironment& env, time::Epoch epoch);
 
     std::unique_ptr<Vehicle> vehicle_;
     RigidBodyState state_;
     bool clamped_ = false;
     bool impacted_ = false;
     bool resting_ = false;
+    AirData air_data_;
     math::Vec3 pad_itrf_m_;
     math::Quat attitude_itrf_;  // body -> ITRF while clamped
     double ground_height_m_ = 0.0;

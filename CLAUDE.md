@@ -101,14 +101,18 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
-- Booster return lands on the pad (no impact, sink < 2 m/s) but 2-20 m off and with 2-7 m/s lateral speed:
-  too much for a tower catch. Cause: on the 3 centre engines the attitude follows commands with several
-  seconds of lag (alpha_max ~0.15 rad/s^2; min throttle 0.4 gives T/W ~1.1, no hover), and the explicit
-  guidance laws in `gnc/booster_return` do not plan for it. Parameter tuning was exhausted (2026-10-12).
-  Planned: grid fins as aerodynamic actuators, then powered-descent guidance by convex optimisation with
-  tilt/throttle/attitude-rate constraints, re-solved in flight (see plan file, M6 "Landeführung").
-- Booster return reserve (block 3: 300 t) and the tail-first drag table (`aero/super_heavy_descent.csv`)
-  are estimates [E]; the boostback alone needs ~200 t from our (lofted, T+137 s) staging state.
+- Booster return lands on the pad for blocks 1-3 (no impact, sink < 2 m/s, 7-12 m off, 0.7-2 m/s lateral):
+  not yet good enough for a tower catch. Cause: on the 3 centre engines the attitude follows commands with
+  seconds of lag (alpha_max ~0.15 rad/s^2; grid fins add little at < 50 m/s; min throttle 0.4 gives
+  T/W ~1.1, no hover), and the explicit guidance laws in `gnc/booster_return` do not plan for it; the
+  centre-engine segment is therefore deliberately gentle (hold tau 4 s, tilt <= 10 deg).
+  Planned: powered-descent guidance by convex optimisation with tilt/throttle/attitude-rate constraints,
+  re-solved in flight (see plan file, M6 "Landeführung").
+- Booster return reserves (block 1/2: 330 t, block 3: 300 t; block 1 lands with only ~0.6 t left), the
+  tail-first drag table (`aero/super_heavy_descent.csv`) and the grid fin data (`aero/grid_fin.csv`,
+  sizes/stations) are estimates [E]; the boostback alone needs ~200 t from our lofted staging state.
+- Wikipedia's booster load 2,700 t LOX / 700 t CH4 (O/F 3.86) does not match Raptor's 3.6: blocks 1/2 now
+  split the 3,400 t total at 3.6 [D] (`vehicle_report.py` prints the loaded O/F).
 
 ## Game (Godot) structure
 - `game/world/`: `world.gd` (per-frame orchestration), `celestial_body.gd` (floating origin + scaled space:
@@ -137,11 +141,19 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   O circularize at apoapsis, X autopilot off. HUD: NavBall (`ui/nav_ball.gd`), flight director
   (`ui/flight_overlay.gd`), trajectories (`vehicle/trajectory_view.gd`: green planned, orange predicted).
 - Booster return (M6, `gnc/booster_return`): `FlightSession::set_booster_return(true)` gives the separated
-  booster its own guidance (flip, Lambert boostback with drag-aware aim-point shooting, coast with RCS
-  impact trim, landing burn 13 -> 3 engines: 1-D burn simulation for ignition, ZEM/ZEV vertical, braking
-  profile divert). It uses its own faster attitude controller. The attitude controller limits the rate
-  command to what the available angular acceleration can still stop (no overshoot when saturated).
-  Diagnostics: `STARSIM_VERBOSE=1`, `STARSIM_DEBUG_LANDING=1`, `STARSIM_DEBUG_HOLD=1` with test "[booster]".
+  booster its own guidance (flip, Lambert boostback with drag-aware aim-point shooting, coast: RCS impact
+  trim above ~2 kPa dynamic pressure, below it grid-fin steering - angle of attack found by bisection on
+  the aero model (for the blunt tail-first booster the tilted axial drag dominates: the force points to the
+  side the top leans to) -, landing burn 13 -> 3 engines: 1-D burn simulation for ignition, ZEM/ZEV
+  vertical, braking-profile divert). It uses its own faster attitude controller with grid fins enabled.
+  The attitude controller limits the rate command to what the available angular acceleration (gimbal or
+  RCS, plus fins) can still stop. Diagnostics: `STARSIM_VERBOSE=1`, `STARSIM_DEBUG_LANDING=1`,
+  `STARSIM_DEBUG_HOLD=1` with test "[booster]".
+- Grid fins (`aero/grid_fin`, `[stage.grid_fins]`): flat-plate style normal force from the local flow at
+  each fin (incl. omega x r: aerodynamic damping), slope/limit over Mach from a table (transonic choking).
+  Actuators: deflection and rate limits (`Vehicle::update_grid_fins`). The controller allocates torque to
+  the fins first (minimum-norm least squares), the remainder to gimbals/RCS, using the air data of the
+  last tick (`FlightBody::air_data()`); fins are used only when `AttitudeController::Gains::grid_fins`.
 - `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically
   (follow the Earth), impacted/resting bodies do not block coast segments.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`

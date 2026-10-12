@@ -155,7 +155,7 @@ private:
     vehicle::FlightEnvironment env_;
     gnc::AttitudeController controller_;
     // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).
-    gnc::AttitudeController return_controller_{gnc::AttitudeController::Gains{1.5, 0.9}};
+    gnc::AttitudeController return_controller_{gnc::AttitudeController::Gains{1.5, 0.9, true}};
     std::vector<Flying> bodies_;
     size_t controlled_ = 0;
     PilotInput input_;

@@ -28,13 +28,14 @@ jettison_after_separation_kg = 9000.0    # hot-staging ring, dropped after boost
 [[stage.tank]]
 id = "lox_main"
 contents = "oxidizer"
-mass_kg = 2700000.0                      # [S:wiki_sh]
+mass_kg = 2660900.0                      # [D] 3,400 t total [S:wiki_sh] split at the engines' O/F 3.6
+                                         # (wiki quotes 2,700 t / 700 t = O/F 3.86: 180 t LOX would stay unusable)
 base_station_m = 4.5                     # [E] above thrust section
 
 [[stage.tank]]
 id = "ch4_main"
 contents = "fuel"
-mass_kg = 700000.0                       # [S:wiki_sh] (total 3,400 t; other tables: 3,250 t)
+mass_kg = 739100.0                       # [D] (other tables: 3,250 t total)
 base_station_m = 40.4                    # [E] above common dome
 
 [[stage.engine_group]]
@@ -65,11 +66,19 @@ relight = false                          # started by ground equipment [S:wiki_s
 reference_diameter_m = 9.0
 ascent_drag_table = "aero/starship_stack_ascent.csv"
 descent_drag_table = "aero/super_heavy_descent.csv"  # tail first (booster return)
-grid_fins = 4                            # ~3 t each, included in dry mass [S:wiki_sh]
+
+[stage.grid_fins]
+azimuths_deg = [45.0, 135.0, 225.0, 315.0]          # [E] layout 4 fins; ~3 t each, included in dry mass [S:wiki_sh]
+area_m2 = 9.0                        # [E] frontal lattice area per fin
+station_m = 63.0                       # [E] hinge station from the bottom of the stage (below the hot-staging ring)
+radius_m = 6.0                          # [E] centre of pressure: 4.5 m tank radius + half the fin span
+max_deflection_deg = 30.0               # [E]
+rate_deg_s = 30.0                       # [E] electric actuators
+table = "aero/grid_fin.csv"
 
 [stage.recovery]
 method = "tower_catch"
-reserve_propellant_kg = 230000.0         # boostback + landing [E]
+reserve_propellant_kg = 330000.0         # boostback + landing (RTLS) [E]
 nominal_meco_s = 159.0                   # [S:wiki_sh]
 nominal_meco_altitude_m = 64000.0        # [S:wiki_sh]
 

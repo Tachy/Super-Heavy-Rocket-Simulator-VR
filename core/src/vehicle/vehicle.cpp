@@ -73,6 +73,14 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
                 stage.engines.push_back(engine);
             }
         }
+        const auto& fins = stage_config.grid_fins;
+        if (!fins.azimuths_rad.empty()) {
+            stage.grid_fin_table = std::make_shared<aero::GridFinTable>(config::load_csv_table(config_dir / fins.table));
+            for (double azimuth : fins.azimuths_rad) {
+                stage.grid_fins.push_back({{station + fins.station_m, azimuth, fins.radius_m, fins.area_m2},
+                                           fins.max_deflection_rad, fins.rate_rad_s, 0.0});
+            }
+        }
         station += stage_config.length_m;
         stages_.push_back(std::move(stage));
     }
@@ -217,6 +225,25 @@ void Vehicle::update_engines(double dt_s, const VehicleCommand& command, double 
     }
 }
 
+void Vehicle::update_grid_fins(double dt_s, const VehicleCommand& command) {
+    size_t index = 0;
+    for (auto& stage : stages_) {
+        for (auto& fin : stage.grid_fins) {
+            const double target = index < command.grid_fin_rad.size() ? command.grid_fin_rad[index] : 0.0;
+            fin.deflection_rad = approach(fin.deflection_rad,
+                                          std::clamp(target, -fin.max_deflection_rad, fin.max_deflection_rad),
+                                          fin.rate_rad_s * dt_s);
+            ++index;
+        }
+    }
+}
+
+size_t Vehicle::grid_fin_count() const {
+    size_t n = 0;
+    for (const auto& stage : stages_) n += stage.grid_fins.size();
+    return n;
+}
+
 std::vector<std::vector<double>> Vehicle::tank_mass_flows_kgps() const {
     std::vector<std::vector<double>> flows;
     for (const auto& stage : stages_) {
@@ -306,6 +333,7 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
         Stage stage = std::move(stages_[i]);
         stage.base_station_m -= shift;
         for (auto& e : stage.engines) e.gimbal_point_m.x -= shift;
+        for (auto& fin : stage.grid_fins) fin.geometry.station_m -= shift;
         upper->stages_.push_back(std::move(stage));
     }
     stages_.erase(stages_.begin() + static_cast<long>(index), stages_.end());

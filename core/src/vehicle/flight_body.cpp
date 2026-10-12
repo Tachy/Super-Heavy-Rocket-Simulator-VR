@@ -87,6 +87,20 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
             f.moment_body_nm += cross(e.gimbal_point_m - Vec3{f.mass.cg_station_m, 0.0, 0.0}, force);
         }
     }
+    // Grid fins: local flow at each fin including the rotation (gives aerodynamic damping).
+    const Vec3 air_velocity_body = s.attitude.inverse_rotate(air_velocity);
+    const aero::FinAirData fin_air{air.density_kg_m3, air.speed_of_sound_mps, f.aero.rarefaction};
+    for (const auto& stage : ctx.vehicle.stages()) {
+        for (const auto& fin : stage.grid_fins) {
+            const Vec3 arm = Vec3{fin.geometry.station_m - f.mass.cg_station_m, 0.0, 0.0} +
+                             aero::grid_fin_radial(fin.geometry) * fin.geometry.radius_m;
+            const Vec3 fin_velocity = air_velocity_body + cross(s.angular_velocity_body_radps, arm);
+            const auto force = aero::grid_fin_force(fin.geometry, fin.deflection_rad, fin_velocity, fin_air,
+                                                    *stage.grid_fin_table);
+            f.nongravitational_body_n += force.force_body_n;
+            f.moment_body_nm += cross(arm, force.force_body_n);
+        }
+    }
     f.moment_body_nm += ctx.rcs_torque_nm;
     f.nongravitational_body_n += ctx.rcs_force_n;
     f.acceleration_gcrf = ctx.env.gravity.acceleration_mps2(s.position_gcrf_m, ctx.epoch + tau_s) +
@@ -201,6 +215,8 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
     const auto geodetic = frames::fixed_to_geodetic(transpose(transform.rotation) * state_.position_gcrf_m);
     vehicle_->update_engines(dt_s, command, env.atmosphere.at(geodetic.height_m).pressure_pa);
+    vehicle_->update_grid_fins(dt_s, command);
+    update_air_data(env, epoch);
 
     if (clamped_) {
         vehicle_->consume_propellant(dt_s);
@@ -255,6 +271,17 @@ void FlightBody::resolve_ground_contact(const frames::BodyOrientation& earth, ti
     resting_ = true;
 }
 
+void FlightBody::update_air_data(const FlightEnvironment& env, time::Epoch epoch) {
+    const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
+    const auto geodetic = frames::fixed_to_geodetic(transpose(transform.rotation) * state_.position_gcrf_m);
+    const auto air = env.atmosphere.at(geodetic.height_m);
+    const Vec3 air_velocity =
+        state_.velocity_gcrf_mps - cross(earth_rotation_vector(transform), state_.position_gcrf_m);
+    air_data_.air_velocity_body_mps = state_.attitude.inverse_rotate(air_velocity);
+    air_data_.air = {air.density_kg_m3, air.speed_of_sound_mps,
+                     aero::rarefaction_weight(air.mean_free_path_m / vehicle_->length_m())};
+}
+
 bool FlightBody::can_coast() const {
     return !clamped_ && !impacted_ && !vehicle_->any_engine_producing_thrust();
 }
@@ -285,6 +312,7 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
     const auto result = integrators::integrate<13>(f, 0.0, pack(state_), duration_s, options);
     state_ = unpack(result.y);
     resolve_ground_contact(env.earth_orientation, epoch + duration_s);
+    update_air_data(env, epoch + duration_s);
 }
 
 std::unique_ptr<FlightBody> FlightBody::separate(size_t index, double separation_dv_mps) {

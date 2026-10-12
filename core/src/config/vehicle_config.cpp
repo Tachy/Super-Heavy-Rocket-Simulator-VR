@@ -145,6 +145,23 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     } else {
         s.aero.reference_diameter_m = s.diameter_m;
     }
+    if (auto fins = t["grid_fins"].as_table()) {
+        const auto* azimuths = (*fins)["azimuths_deg"].as_array();
+        if (!azimuths || azimuths->empty()) {
+            doc.fail("grid_fins.azimuths_deg must list one azimuth per fin");
+        }
+        for (const auto& a : *azimuths) {
+            const auto value = a.value<double>();
+            if (!value) doc.fail("grid_fins.azimuths_deg must be numbers");
+            s.grid_fins.azimuths_rad.push_back(*value * constants::deg_to_rad);
+        }
+        s.grid_fins.area_m2 = doc.number(*fins, "area_m2");
+        s.grid_fins.station_m = doc.number(*fins, "station_m");
+        s.grid_fins.radius_m = doc.number(*fins, "radius_m");
+        s.grid_fins.max_deflection_rad = doc.number(*fins, "max_deflection_deg") * constants::deg_to_rad;
+        s.grid_fins.rate_rad_s = doc.number(*fins, "rate_deg_s") * constants::deg_to_rad;
+        s.grid_fins.table = doc.text(*fins, "table");
+    }
     if (auto rcs = t["rcs"].as_table()) {
         s.rcs_thruster_count = static_cast<int>(doc.number_or(*rcs, "thruster_count", 0.0));
         s.rcs_thrust_n = doc.number_or(*rcs, "thrust_per_thruster_n", 0.0);

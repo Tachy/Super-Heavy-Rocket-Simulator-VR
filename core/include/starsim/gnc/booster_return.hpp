@@ -23,7 +23,7 @@ struct BoosterReturnParameters {
     double landing_throttle = 0.8;  // design throttle of the inner-engine segment: the rest is control margin
     double final_throttle = 0.8;    // design throttle of the centre-engine segment (slower, time to settle)
     double gate_speed_mps = 50.0;   // sink rate at the hand-over to the centre engines
-    double max_tilt_rad = 20.0 * 3.14159265358979 / 180.0;         // thrust from the vertical, centre engines
+    double max_tilt_rad = 10.0 * 3.14159265358979 / 180.0;         // thrust from the vertical, centre engines
     double max_tilt_ignition_rad = 25.0 * 3.14159265358979 / 180.0; // with the inner engines (more gimbal authority)
     double flip_tolerance_rad = 15.0 * 3.14159265358979 / 180.0;
 };
@@ -46,8 +46,9 @@ struct ReturnCommand {
 //  Flip      - turn towards the boostback direction with the centre engines at minimum throttle
 //  Boostback - burn along v_go of a Lambert arc whose aim point is shifted until the drag-aware
 //              prediction of that arc hits the site (shooting on the aim point); cutoff at v_go ~ 0
-//  Coast     - engines first (stable for a low CG), RCS holds the attitude and trims the predicted
-//              impact point by translation [substitute for grid-fin steering, not modelled yet]
+//  Coast     - engines first (stable for a low CG). In the atmosphere the grid fins hold an angle of
+//              attack whose cross-flow force moves the predicted impact point onto the site; above it
+//              RCS translation trims the impact point
 //  Landing   - ZEM/ZEV (zero-effort miss / zero-effort velocity) guidance in the Earth-fixed frame to a
 //              slow touchdown on the site, time-to-go from a constant-deceleration profile. Ignition
 //              from a one-dimensional simulation of the burn along the flight path (drag, gravity, mass
@@ -92,6 +93,7 @@ private:
     int tick_counter_ = 0;
     double impact_miss_m_ = 0.0;
     math::Vec3 trim_itrf_;  // RCS trim force fraction from the latest impact prediction
+    math::Vec3 steer_itrf_;  // aerodynamic steering: lateral offset of the axis (tan alpha)
 };
 
 }  // namespace starsim::gnc

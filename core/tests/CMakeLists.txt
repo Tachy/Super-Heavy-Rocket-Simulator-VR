@@ -26,6 +26,7 @@ add_executable(starsim_core_tests
     test_ascent_guidance.cpp
     test_lunar_transfer.cpp
     test_booster_return.cpp
+    test_grid_fins.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE

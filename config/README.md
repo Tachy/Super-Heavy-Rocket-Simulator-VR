@@ -31,6 +31,14 @@ Isp(p_amb)  = F(p_amb) / (mdot * g0)
 mutually consistent. `max_ambient_pressure_pa` limits where the nozzle may run without
 flow separation (vacuum engines).
 
+## Aerodynamics and control surfaces (per stage)
+- `[stage.aero]`: `ascent_drag_table` (nose first, whole stack), `descent_drag_table` (tail first,
+  e.g. a returning booster; defaults to the ascent table), `entry_table`, `nose_length_m`.
+- `[stage.grid_fins]`: one fin per entry of `azimuths_deg` (from body +y towards +z), `area_m2`
+  (frontal lattice area per fin), `station_m` (hinge), `radius_m` (fin centre of pressure),
+  `max_deflection_deg`, `rate_deg_s`, `table` (normal-force slope and limit over Mach, e.g.
+  `aero/grid_fin.csv`). Fin mass belongs in the stage's `dry_mass_kg`.
+
 ## Adding another rocket
 1. Add missing engines under `engines/`.
 2. Copy a vehicle file, adjust stages/tanks/engine groups.

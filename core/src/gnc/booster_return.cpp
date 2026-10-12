@@ -17,9 +17,13 @@ namespace {
 constexpr double gm_earth = 3.986004418e14;
 constexpr double touchdown_speed_mps = 1.0;
 constexpr double trim_deadband_m = 2.0;
+constexpr double aero_steering_min_q_pa = 2000.0;  // below: RCS translation trim
+constexpr double aero_steering_time_fraction = 0.5;
+constexpr double aero_steering_max_alpha_rad = 8.0 * constants::deg_to_rad;  // [E] fin trim authority, heating
 constexpr double minimum_time_to_go_s = 0.3;
 constexpr double touchdown_cutoff_height_m = 0.05; // engine cutoff when the legs / catch arms take the load
-constexpr double divert_time_constant_s = 2.0;      // cross-track damping and final position hold
+constexpr double divert_time_constant_s = 2.0;      // cross-track damping during the divert
+constexpr double hold_time_constant_s = 4.0;        // position hold on the centre engines
 constexpr double divert_hold_radius_m = 3.0;        // inside: position hold instead of braking profile
 constexpr double tilt_taper_height_m = 60.0;                           // below: tilt limit tapers off
 constexpr double touchdown_tilt_rad = 4.0 * constants::deg_to_rad;     // tilt limit at touchdown
@@ -55,6 +59,31 @@ EngineSet engine_set(const vehicle::Vehicle& v, const std::vector<std::string>& 
         }
     }
     return set;
+}
+
+// Hinge station of the grid fins (vehicle frame), or a negative value without fins.
+double grid_fin_station(const vehicle::Vehicle& v) {
+    for (const auto& stage : v.stages()) {
+        if (!stage.grid_fins.empty()) return stage.grid_fins.front().geometry.station_m;
+    }
+    return -1.0;
+}
+
+// Lateral acceleration (perpendicular to the flight path) of a booster falling engines first at the angle
+// of attack alpha, with the grid fins holding that attitude (they cancel the aerodynamic moment about the
+// CG). Positive: the force points away from the side the top leans to.
+double lateral_acceleration(const vehicle::FlightBody& body, double speed, const environment::AtmosphereState& air,
+                            double alpha, double fin_station) {
+    const auto mass = body.vehicle().mass_properties();
+    const Vec3 v_body{-speed * std::cos(alpha), speed * std::sin(alpha), 0.0};  // top leans towards +y
+    const auto aero = body.vehicle().aero().compute(v_body, air.density_kg_m3, air.speed_of_sound_mps, false,
+                                                     air.mean_free_path_m);
+    const Vec3 moment = cross(Vec3{aero.normal_force_station_m - mass.cg_station_m, 0.0, 0.0}, aero.force_body_n);
+    const double fin_force_y = -moment.z / (fin_station - mass.cg_station_m);
+    const Vec3 total = aero.force_body_n + Vec3{0.0, fin_force_y, 0.0};
+    const Vec3 u = v_body / speed;
+    const Vec3 perpendicular = total - u * dot(total, u);
+    return -perpendicular.y / mass.mass_kg;
 }
 
 }  // namespace
@@ -275,18 +304,52 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
     }
 
     if (phase_ == ReturnPhase::Coast) {
-        cmd.axis_gcrf = -math::normalized(v_rel_gcrf);  // engines first
-        if (tick_counter_ % 200 == 0) {
+        // Steering: in the atmosphere with the grid fins (they hold an angle of attack, the body's cross-flow
+        // force moves the impact point), above it by RCS translation.
+        const auto air_now = env.atmosphere.at(geo.height_m);
+        const double speed = norm(v_fixed);
+        const double dynamic_pressure = 0.5 * air_now.density_kg_m3 * speed * speed;
+        const double fin_station = grid_fin_station(body.vehicle());
+        const bool aero_steering = fin_station > 0.0 && dynamic_pressure > aero_steering_min_q_pa;
+        if (tick_counter_ % (aero_steering ? 40 : 200) == 0) {
             const auto impact = predict_impact(body, env, epoch, site_.height_m);
             if (impact.valid) {
                 const Vec3 miss = horizontal_miss(impact);
                 impact_miss_m_ = norm(miss);
-                // Proportional trim: full RCS force from 100 m miss, off below the trim deadband.
-                trim_itrf_ = impact_miss_m_ > trim_deadband_m
-                                 ? miss * (std::min(impact_miss_m_ / 100.0, 1.0) / impact_miss_m_)
-                                 : Vec3{};
+                trim_itrf_ = {};
+                steer_itrf_ = {};
+                if (aero_steering) {
+                    // Constant lateral acceleration that removes the miss within a fraction of the time to
+                    // impact (margin for the prediction model, which ignores the steering force itself); the
+                    // angle of attack comes from the aerodynamic model by bisection. Its sign too: for the blunt tail-first
+                    // booster the tilted axial drag outweighs the cross-flow force, so the force points to
+                    // the side the top leans to.
+                    const double t_correct = aero_steering_time_fraction * impact.time_s;
+                    const Vec3 required = miss * (2.0 / std::max(t_correct * t_correct, 1.0));
+                    auto lateral = [&](double alpha) {
+                        return lateral_acceleration(body, speed, air_now, alpha, fin_station);
+                    };
+                    const double at_max = lateral(aero_steering_max_alpha_rad);
+                    if (at_max != 0.0 && impact_miss_m_ > trim_deadband_m) {
+                        double low = 0.0, high = aero_steering_max_alpha_rad;
+                        if (std::abs(at_max) > norm(required)) {
+                            for (int i = 0; i < 20; ++i) {
+                                const double mid = 0.5 * (low + high);
+                                (std::abs(lateral(mid)) < norm(required) ? low : high) = mid;
+                            }
+                        }
+                        // Lean towards -d if the force points away from the lean, towards d otherwise.
+                        const double lean = at_max > 0.0 ? -1.0 : 1.0;
+                        steer_itrf_ = math::normalized(required) * (-lean * std::tan(high));
+                    }
+                } else if (impact_miss_m_ > trim_deadband_m) {
+                    // Proportional trim: full RCS force from 100 m miss.
+                    trim_itrf_ = miss * (std::min(impact_miss_m_ / 100.0, 1.0) / impact_miss_m_);
+                }
             }
         }
+        // Engines first; for a lateral push towards d the top leans towards -d.
+        cmd.axis_gcrf = transform.rotation * math::normalized(-math::normalized(v_fixed) - steer_itrf_);
         cmd.impact_miss_m = impact_miss_m_;
         cmd.rcs_force_gcrf = transform.rotation * trim_itrf_;
         const double height = geo.height_m - mass.cg_station_m - site_.height_m;
@@ -329,13 +392,14 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         const Vec3 offset_side = (r_fixed - r_pad) - site_up * height;
         const Vec3 v_side = v_fixed + site_up * sink;
         const Vec3 g_side = g_fixed - site_up * g_up;
-        // Divert while closing in on the pad, with the constant deceleration that stops exactly over it
-        // (front-loaded; energy-optimal ZEM/ZEV would leave the braking to the end, where the tilt is
-        // limited); cross-track motion and the final hold are critically damped.
-        constexpr double w = 1.0 / divert_time_constant_s;
+        // Inner engines: divert while closing in on the pad, with the constant deceleration that stops
+        // exactly over it (front-loaded; energy-optimal ZEM/ZEV would leave the braking to the end, where
+        // the tilt is limited); cross-track motion is critically damped. Centre engines: slow, gentle hold
+        // only - they turn the booster with seconds of lag, an upright touchdown comes first.
+        const double w = 1.0 / (final_engines_ ? hold_time_constant_s : divert_time_constant_s);
         Vec3 a_side = -(offset_side * (w * w) + v_side * (2.0 * w));
         const double distance = norm(offset_side);
-        if (distance > divert_hold_radius_m) {
+        if (!final_engines_ && distance > divert_hold_radius_m) {
             const Vec3 towards = -offset_side / distance;
             const double closing = dot(v_side, towards);
             if (closing > 0.0) {

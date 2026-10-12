@@ -68,6 +68,17 @@ struct AeroConfig {
     double nose_length_m = 0.0;     // ogive nose (0 = flat top, e.g. a booster)
 };
 
+// Grid fins of a stage (aerodynamic control surfaces, e.g. for the booster's return).
+struct GridFinConfig {
+    std::vector<double> azimuths_rad;  // one fin per entry, from body +y towards +z
+    double area_m2 = 0.0;              // frontal lattice area per fin
+    double station_m = 0.0;            // hinge station from the bottom of the stage
+    double radius_m = 0.0;             // radius of the fin's centre of pressure
+    double max_deflection_rad = 0.0;
+    double rate_rad_s = 0.0;
+    std::string table;                 // normal-force table, path relative to config/
+};
+
 struct StageConfig {
     std::string id;
     std::string name;
@@ -86,6 +97,7 @@ struct StageConfig {
     std::vector<TankConfig> tanks;
     std::vector<EngineGroupConfig> engine_groups;
     AeroConfig aero;
+    GridFinConfig grid_fins;  // empty azimuths: none
 };
 
 struct VehicleConfig {

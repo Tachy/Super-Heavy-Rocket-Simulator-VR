@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "starsim/aero/grid_fin.hpp"
 #include "starsim/aero/slender_body_aero.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/vec3.hpp"
@@ -37,6 +38,13 @@ struct Engine {
     bool producing_thrust() const { return mode != EngineMode::Off && spool > 0.0; }
 };
 
+struct GridFin {
+    aero::GridFinGeometry geometry;  // station in the vehicle body frame
+    double max_deflection_rad = 0.0;
+    double rate_rad_s = 0.0;
+    double deflection_rad = 0.0;     // actual (rate limited)
+};
+
 struct Tank {
     config::TankConfig config;
     double density_kg_m3 = 0.0;
@@ -49,6 +57,8 @@ struct Stage {
     double base_station_m = 0.0;  // bottom of this stage in the vehicle body frame
     std::vector<Tank> tanks;
     std::vector<Engine> engines;
+    std::vector<GridFin> grid_fins;
+    std::shared_ptr<const aero::GridFinTable> grid_fin_table;
     double extra_mass_kg = 0.0;   // payload + fairing
 
     double propellant_kg(config::TankContents contents) const;
@@ -79,6 +89,8 @@ struct VehicleCommand {
     // Reaction control translation: requested force direction and magnitude as a fraction (|f| <= 1) of
     // the maximum RCS force, body axes.
     math::Vec3 rcs_force_fraction;
+    // Grid fin deflections (rad), one per fin in stage order; missing entries mean neutral.
+    std::vector<double> grid_fin_rad;
 };
 
 // Stack of stages with engines, tanks and aerodynamics. Owns no kinematic state (see FlightBody).
@@ -99,6 +111,9 @@ public:
     // Discrete engine update for one tick: start/stop transients, throttle and gimbal rate limits,
     // relight rules, flow-separation limits. Must be called once per tick before integration.
     void update_engines(double dt_s, const VehicleCommand& command, double ambient_pressure_pa);
+    // Grid fin actuators for one tick (deflection and rate limits).
+    void update_grid_fins(double dt_s, const VehicleCommand& command);
+    size_t grid_fin_count() const;
 
     // Total propellant mass flow per tank (index: stage, tank) for the current engine state.
     std::vector<std::vector<double>> tank_mass_flows_kgps() const;
