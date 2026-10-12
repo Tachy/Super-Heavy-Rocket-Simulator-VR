@@ -6,11 +6,13 @@ namespace starsim::contact {
 
 // Automatic tower: the arms wait half open (standby) while the booster comes down between them and close only
 // just before the pins arrive - from standby within a fraction of a second - if the booster axis is near the
-// catch axis; climbing or below the arms: open.
+// catch axis and it sinks slowly (a booster still braking hard would make "time to contact at this speed" far too
+// short); climbing or below the arms: open.
 struct CatchTrigger {
     double standby_lead_s = 10.0;    // [E] arms to standby this long before the pins arrive
     double max_axis_offset_m = 2.0;  // [E] final closing only this close to the catch axis (standby: ~3 m clear)
     double margin_s = 0.5;           // [E] arms closed this long before the pins arrive
+    double max_closing_sink_mps = 8.0;  // [E] the final approach is slow; faster means still braking hard
     double hover_height_m = 2.0;     // [E]
 };
 

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <utility>
 
@@ -156,6 +158,7 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
     DescentLimits limits = settings.limits;
     if (warm_start) limits.min_phase_s = {0.0, 0.0};
     std::vector<double> virtual_controls;
+    DescentWeights weights = settings.weights;
     const auto scale = descent_state_scales();
     bool candidate = false;  // the last solution met the convergence tests that need no propagation
     for (int it = 0;; ++it) {
@@ -187,12 +190,32 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
                              defect < settings.flyable_defect_tolerance;
             break;
         }
-        const auto sub = build_descent_subproblem(model, plan.reference, lin, initial, start_phase, target, limits,
-                                                  settings.weights, n);
-        const auto result = solve(start_phase, target.goal, sub.problem);
+        // Adaptive trust region: a subproblem the solver cannot finish (numerics, usually a far step from a poor
+        // iterate) is solved again with a tighter trust region; after a success it relaxes towards the setting.
+        auto sub = build_descent_subproblem(model, plan.reference, lin, initial, start_phase, target, limits, weights, n);
+        // A subproblem solution need not be optimal, only feasible: SCvx judges the iterate by its nonlinear defects.
+        const auto usable = [&](const optim::SocpResult& r) {
+            return r.status == optim::SocpStatus::Optimal ||
+                   ((r.status == optim::SocpStatus::NumericalError || r.status == optim::SocpStatus::MaxIterations) &&
+                    !r.x.empty() && r.primal_residual <= settings.usable_primal_residual);
+        };
+        auto result = solve(start_phase, target.goal, sub.problem);
+        for (int retry = 0; !usable(result) && retry < settings.trust_region_retries; ++retry) {
+            weights.trust_region *= settings.trust_region_growth;
+            sub = build_descent_subproblem(model, plan.reference, lin, initial, start_phase, target, limits, weights, n);
+            result = solve(start_phase, target.goal, sub.problem);
+        }
+        if (usable(result)) {
+            weights.trust_region = std::max(settings.weights.trust_region, weights.trust_region / settings.trust_region_growth);
+        }
         plan.status = result.status;
         plan.iterations = it + 1;
-        if (result.status != optim::SocpStatus::Optimal) {
+        if (std::getenv("STARSIM_DEBUG_SCVX_SOLVER")) {  // diagnostics: SOCP solver per SCvx iteration
+            std::printf("  [socp] it %d status %d iters %d pivots %d reduced %d pres %.2e dres %.2e gap %.2e\n", it,
+                        static_cast<int>(result.status), result.iterations, result.regularized_pivots,
+                        result.reduced_accuracy, result.primal_residual, result.dual_residual, result.gap);
+        }
+        if (!usable(result)) {
             // The subproblem failed (numerics): the current iterate still counts if it is flyable, otherwise the
             // caller falls back / aborts.
             plan.converged = it > 0 && plan.virtual_control < settings.virtual_control_tolerance &&
@@ -202,7 +225,7 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
         const double previous_final_mass = plan.reference.x.back()[descent_index::mass];
         plan.virtual_control = sub.virtual_control(result.x);
         virtual_controls.push_back(plan.virtual_control);
-        if (it >= settings.stall_iterations && plan.virtual_control > 10.0 * settings.virtual_control_tolerance &&
+        if (it >= settings.stall_iterations && plan.virtual_control > settings.stall_virtual_control &&
             plan.virtual_control > settings.stall_ratio * virtual_controls[static_cast<size_t>(it - settings.stall_iterations)]) {
             plan.last_step = sub.max_step(result.x);
             plan.reference = sub.unpack(result.x);

@@ -33,6 +33,13 @@ struct DescentLimits {
     std::array<double, 2> tilt_max_rad{25.0 * constants::deg_to_rad, 10.0 * constants::deg_to_rad};  // per phase
     double terminal_tilt_rad = 4.0 * constants::deg_to_rad;   // [E] at the catch / touchdown (structural)
     int tilt_taper_nodes = 4;                                 // phase 1's last nodes taper linearly to it
+    // At the end of the plan the thrust is at most minimum + this fraction of the maximum: the final engines exceed
+    // the weight even at minimum throttle and throttle at a limited rate, so the plan ends gently, not braking hard.
+    double terminal_thrust_margin = 0.05;  // [E]
+    // Calm engine switch (a plan starting on the ignition set): at the shared node the booster is nearly upright and
+    // hardly turning - the final engines turn it slowly.
+    double switch_tilt_rad = 3.0 * constants::deg_to_rad;  // [E]
+    double switch_rate_radps = 0.03;                        // [E]
     double throttle_margin = 0.1;  // [E] planned thrust stays this fraction below the maximum (tracking margin)
     // [E] pitch/yaw per phase: the 13 ignition engines turn the booster fast (alpha_max ~1.4 rad/s^2), the 3 final
     // engines slowly (~0.1-0.3 rad/s^2).
@@ -54,6 +61,9 @@ struct DescentWeights {
     double trust_region = 1.0e-1;    // squared scaled step
     double sea_distance = 1.0e-2;    // per metre (abort)
     double final_lateral = 0.01;     // [E] catch: per metre from the catch axis, per final-set node
+    double attitude_violation = 10.0;  // [E] per unit above the tilt (quaternion y,z norm) or rate (rad/s) limit;
+                                       // higher values degrade the SOCP conditioning
+    double corridor_violation = 10.0;  // [E] per metre outside the catch corridor, per node (~100 t of propellant)
     double final_lateral_time_s = 2.0;  // [E] lateral speed counts as the offset it builds up in this time
 };
 

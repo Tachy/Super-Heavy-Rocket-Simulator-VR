@@ -97,6 +97,10 @@ DescentModel make_descent_model(const DescentModelInputs& in) {
             vacuum_thrust += e.performance->thrust_n(1.0, 0.0);
             set.thrust_min_n += e.performance->thrust_n(c.throttle_min, pressure);
             flow += e.performance->mass_flow_kgps(1.0);
+            if (c.throttle_rate_per_s > 0.0) {
+                set.throttle_rate_per_s = set.throttle_rate_per_s > 0.0 ? std::min(set.throttle_rate_per_s, c.throttle_rate_per_s)
+                                                                        : c.throttle_rate_per_s;
+            }
             if (e.gimbaled) {
                 set.gimbal_max_rad = set.gimbal_max_rad > 0.0 ? std::min(set.gimbal_max_rad, c.gimbal_max_rad) : c.gimbal_max_rad;
                 gimbal_station += e.gimbal_point_m.x;

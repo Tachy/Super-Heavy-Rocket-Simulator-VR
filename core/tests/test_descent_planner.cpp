@@ -384,3 +384,92 @@ TEST_CASE("A feasible plan at the iteration limit is flyable", "[gnc][descent][s
     CHECK(plan.nonlinear_defect < s.defect_tolerance);
     CHECK(plan.converged);
 }
+
+TEST_CASE("A re-plan from outside the corridor stays feasible and closes in", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    auto target = catch_target(*b, Quat{});
+    target.corridor_top_m = target.position_m.x + 70.0;
+    target.corridor_radius_m = 1.5;
+    target.final_set_radius_m = 3.0;
+    // On the final engines, 8 m off the catch axis 100 m above the catch point: no plan can reach the corridor at once.
+    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg - 30000.0, {target.position_m.x + 100.0, 8.0, 0.0},
+                               {-15.0, 0.0, 0.0}, Quat{}, {});
+    const auto plan = plan_descent(b->model, x0, 1, target, s, nullptr, 0.0);
+    REQUIRE(plan.converged);
+    const auto& end = plan.reference.x.back();
+    CHECK(std::hypot(end[descent_index::position + 1], end[descent_index::position + 2]) < 1e-3);  // still the catch point
+}
+
+TEST_CASE("A re-plan right after the engine switch tolerates the turn rate of the ignition set", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    auto s = settings(*b);
+    const auto target = catch_target(*b, Quat{});
+    // On the final engines, tilted 8 deg and still turning at 0.135 rad/s (measured at the switch in the catch
+    // scenario; above the final set's 0.1 rad/s): the three engines need longer than one node interval to stop that.
+    const Quat tilted = Quat::from_axis_angle({0.0, 0.0, 1.0}, 8.0 * deg);
+    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg - 30000.0, {target.position_m.x + 110.0, 3.0, 0.0},
+                               {-38.0, -2.0, 0.0}, tilted, {0.0, 0.0, 0.135});
+    const auto plan = plan_descent(b->model, x0, 1, target, s, nullptr, 0.0);
+    CHECK(plan.converged);
+}
+
+TEST_CASE("A centred ignition with engines still starting plans with corridor and soft limits", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    auto s = settings(*b);
+    s.limits.phase0_initial_spool = 0.0;
+    s.limits.phase0_startup_s = 3.0;
+    auto target = catch_target(*b, Quat{});
+    target.corridor_top_m = target.position_m.x + 70.0;
+    target.corridor_radius_m = 1.5;
+    target.final_set_radius_m = 3.0;
+    for (const double height : {850.0, 900.0, 950.0}) {
+        CAPTURE(height);
+        const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {height, 0.0, 0.0}, {-260.0, 0.0, 0.0}, Quat{}, {});
+        const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
+        CHECK(plan.converged);
+    }
+}
+
+TEST_CASE("Planned thrust changes no faster than the engines can throttle", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    const auto x0 = ignition_state(*b);
+    const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
+    REQUIRE(plan.converged);
+    const int boundary = s.nodes_per_phase - 1;
+    for (int k = 0; k + 1 < static_cast<int>(plan.reference.u.size()); ++k) {
+        if (k == boundary - 1) continue;  // the engine switch: the ignition set runs down
+        const int phase = k < boundary ? 0 : 1;
+        const auto& set = b->model.engine_sets[static_cast<size_t>(phase)];
+        const double dt = plan.node_time_s(k + 1) - plan.node_time_s(k);
+        const double change = std::abs(norm(plan.reference.u[static_cast<size_t>(k + 1)]) - norm(plan.reference.u[static_cast<size_t>(k)]));
+        CAPTURE(k);
+        CHECK(change <= set.throttle_rate_per_s * set.thrust_max_n * dt * 1.05 + 1.0e3);
+    }
+}
+
+TEST_CASE("Plans end gently: thrust near the minimum at the catch", "[gnc][descent][scvx]") {
+    // The three final engines exceed the weight even at minimum throttle and throttle at a limited rate: a plan
+    // ending in hard braking would turn the booster upwards right after its end, before the pins reach the arms.
+    const auto b = block3();
+    const auto s = settings(*b);
+    const auto x0 = ignition_state(*b);
+    const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
+    REQUIRE(plan.converged);
+    const auto& set = b->model.engine_sets[1];
+    CHECK(norm(plan.reference.u.back()) <= set.thrust_min_n + s.limits.terminal_thrust_margin * set.thrust_max_n + 1.0e3);
+}
+
+TEST_CASE("The engine switch happens with the booster upright and calm", "[gnc][descent][scvx]") {
+    // Three engines turn the booster slowly: it must not still be tilting when the ignition set shuts down.
+    const auto b = block3();
+    const auto s = settings(*b);
+    const auto x0 = ignition_state(*b);  // 30 m east, 15 m south: a divert on the ignition set
+    const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
+    REQUIRE(plan.converged);
+    const auto& x = plan.reference.x[static_cast<size_t>(s.nodes_per_phase - 1)];
+    CHECK(tilt_of(x) <= s.limits.switch_tilt_rad + 1e-3);
+    const Vec3 w = state_rate(x);
+    CHECK(std::hypot(w.y, w.z) <= s.limits.switch_rate_radps + 1e-3);
+}

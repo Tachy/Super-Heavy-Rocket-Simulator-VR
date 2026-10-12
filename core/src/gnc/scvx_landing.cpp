@@ -78,10 +78,12 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
         const auto& p = *outcome.plan;
         const auto& x0 = p.reference.x.front();
         std::printf("[scvx] snap %.2f phase %d goal %d conv %d it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f "
-                    "h %.1f v %.1f,%.1f,%.1f m %.0f\n",
+                    "h %.1f v %.1f,%.1f,%.1f m %.0f tilt %.1f deg rate %.3f lat %.1f,%.1f\n",
                     outcome.snapshot_epoch - plan_epoch_, p.start_phase, static_cast<int>(p.goal), p.converged, p.iterations,
                     p.virtual_control, p.last_step, p.nonlinear_defect, static_cast<int>(p.status), p.reference.duration_s[0],
-                    p.reference.duration_s[1], x0[1], x0[4], x0[5], x0[6], x0[0]);
+                    p.reference.duration_s[1], x0[1], x0[4], x0[5], x0[6], x0[0],
+                    2.0 * std::asin(std::min(1.0, std::hypot(x0[9], x0[10]))) * 57.29577951308232, std::hypot(x0[12], x0[13]),
+                    x0[2], x0[3]);
     }
     ++stats_.plans;
     stats_.last_solve_ms = outcome.solve_ms;
@@ -95,6 +97,9 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     }
     if (outcome.plan->converged) return;
     ++stats_.failures;
+    // Only an unreachable catch counts towards the abort: a re-plan that ran out of iterations while the dynamics
+    // nearly hold leaves the previous plan in charge.
+    if (outcome.plan->virtual_control < parameters_.settings.stall_virtual_control) return;
     if (++consecutive_failures_ >= parameters_.failures_before_abort) aborting_ = true;
 }
 

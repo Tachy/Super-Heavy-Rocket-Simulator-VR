@@ -27,10 +27,17 @@ struct ScvxSettings {
     // At the iteration limit a plan within this defect (5 cm per interval) still counts as flyable: the next re-plan
     // starts from the measured state a second later.
     double flyable_defect_tolerance = 5e-3;
+    // Adaptive trust region: a failed subproblem is solved again with the trust-region weight times growth.
+    int trust_region_retries = 3;
+    // A subproblem the solver could not finish to full accuracy is still used if it is feasible to this residual.
+    double usable_primal_residual = 1e-6;
+    double trust_region_growth = 10.0;
     // Not converging: stop once the virtual control has not shrunk below stall_ratio of its value stall_iterations
-    // iterations earlier while still above 10x its tolerance (an unreachable target; keeps failing re-plans short).
+    // iterations earlier while still above stall_virtual_control (scaled: metre-size defects, an unreachable target;
+    // keeps failing re-plans short without cutting slow but healthy convergence).
     int stall_iterations = 3;
     double stall_ratio = 0.5;
+    double stall_virtual_control = 1.0;
     DescentLimits limits;
     DescentWeights weights;
 };

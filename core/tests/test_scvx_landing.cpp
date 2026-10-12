@@ -85,7 +85,10 @@ TEST_CASE("Repeated failed re-plans switch to an abort", "[gnc][scvx_landing]") 
     int calls = 0;
     gnc::PlanFunction failing = [&calls](gnc::DescentPlanner& planner, const gnc::PlanRequest& r) {
         auto plan = gnc::default_plan_function()(planner, r);
-        if (calls++ > 0 && r.target.goal == gnc::DescentGoal::Catch) plan.converged = false;  // re-plans fail
+        if (calls++ > 0 && r.target.goal == gnc::DescentGoal::Catch) {  // re-plans fail: the catch is unreachable
+            plan.converged = false;
+            plan.virtual_control = 5.0;
+        }
         return plan;
     };
     gnc::ScvxLandingGuidance guidance(f.session->return_site(f.body->vehicle()), f.parameters(), failing);
@@ -117,4 +120,23 @@ TEST_CASE("Landing throttle counts the thrust of engines still running down", "[
     REQUIRE(residual > 0.0);
     const double thrust = residual + 0.6 * centre_full;
     CHECK(std::abs(gnc::landing_throttle(body.vehicle(), groups, thrust, pressure) - 0.6) < 1e-9);
+}
+
+TEST_CASE("Slowly converging re-plans keep the catch and the previous plan", "[gnc][scvx_landing]") {
+    Fixture f;
+    int calls = 0;
+    gnc::PlanFunction slow = [&calls](gnc::DescentPlanner& planner, const gnc::PlanRequest& r) {
+        auto plan = gnc::default_plan_function()(planner, r);
+        if (calls++ > 0) {  // out of iterations, but the dynamics nearly hold: not an unreachable catch
+            plan.converged = false;
+            plan.virtual_control = 0.05;
+        }
+        return plan;
+    };
+    gnc::ScvxLandingGuidance guidance(f.session->return_site(f.body->vehicle()), f.parameters(), slow);
+    REQUIRE(guidance.start(*f.body, f.session->environment(), f.t0));
+    const auto& env = f.session->environment();
+    for (double t = 1.0; t <= 4.0; t += 0.5) guidance.update(*f.body, env, f.t0 + t);
+    CHECK_FALSE(guidance.aborting());
+    CHECK(guidance.statistics().failures >= 2);
 }

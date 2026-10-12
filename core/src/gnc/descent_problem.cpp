@@ -76,8 +76,15 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     }
     const auto eta = b.add_variables(K, "eta");
     const auto eta_s = b.add_variables(1, "eta_s");
-    const auto distance = b.add_variables(1, "sea_distance");
-    const auto lateral = b.add_variables(K, "lateral");  // catch: distance from the catch axis on the final set
+    // Penalised auxiliary variables (soft constraints, epigraphs), created only where their constraint exists: a
+    // free zero-cost variable would leave the interior-point solve ill-conditioned.
+    std::vector<std::pair<int, double>> penalties;  // (variable, objective weight)
+    auto penalised = [&](double weight, const char* name) {
+        const int v = b.add_variables(1, name)[0];
+        b.add_nonnegative(AffineExpr{}.add(v, 1.0));
+        penalties.emplace_back(v, weight);
+        return v;
+    };
 
     // Physical values as affine expressions of the deviations.
     auto X = [&](int k, int i) { return AffineExpr{ref.x[at(k)][i]}.add(sub.dx[at(k)][i], S[static_cast<size_t>(i)]); };
@@ -128,7 +135,8 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         b.add_equality(X(last, descent_index::position).add_constant(-target.ground_cg_height_m));
         for (int i = descent_index::velocity; i < descent_index::velocity + 3; ++i) b.add_equality(X(last, i));
         for (int i = descent_index::rate + 1; i < 14; ++i) b.add_equality(X(last, i));  // pitch/yaw; roll is free
-        b.add_second_order_cone({AffineExpr{}.add(distance[0], 1.0), X(last, 2).add_constant(-target.sea_target_m.y),
+        const int distance = penalised(weights.sea_distance, "sea_distance");
+        b.add_second_order_cone({AffineExpr{}.add(distance, 1.0), X(last, 2).add_constant(-target.sea_target_m.y),
                                  X(last, 3).add_constant(-target.sea_target_m.z)});
     }
     // Path constraints.
@@ -150,6 +158,14 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         const double t_min = set.thrust_min_n * spool;
         const double gimbal = set.gimbal_max_rad;
         double tilt = limits.tilt_max_rad[static_cast<size_t>(p)];
+        const double rate_max = limits.rate_max_radps[static_cast<size_t>(p)];
+        if (k == boundary && start_phase == 0) {
+            // Calm engine switch, hard (the ignition set can always settle the booster before it shuts down).
+            b.add_second_order_cone({AffineExpr{std::sqrt(0.5 * (1.0 - std::cos(limits.switch_tilt_rad)))},
+                                     X(k, descent_index::attitude + 2), X(k, descent_index::attitude + 3)});
+            b.add_second_order_cone({AffineExpr{limits.switch_rate_radps}, X(k, descent_index::rate + 1),
+                                     X(k, descent_index::rate + 2)});
+        }
         if (const int from_end = last - k; p == 1 && from_end < limits.tilt_taper_nodes) {
             tilt = limits.terminal_tilt_rad + (tilt - limits.terminal_tilt_rad) * from_end / limits.tilt_taper_nodes;
         }
@@ -169,10 +185,16 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         // The measured start state (and, starting in phase 1, its zero-duration copies up to the shared node) is
         // fixed: state limits there could only make a re-plan from a slightly violating snapshot infeasible.
         if (!(k == 0 || (start_phase == 1 && k <= boundary))) {
-        b.add_second_order_cone({AffineExpr{std::sqrt(0.5 * (1.0 - std::cos(tilt)))}, X(k, descent_index::attitude + 2),
+        // Tilt and rate limits are soft (exact L1 penalty): right after the engine switch the booster may still turn
+        // faster than the final set allows, and a re-plan must stay feasible while that dies out.
+        const int tilt_slack = penalised(weights.attitude_violation, "tilt_slack");  // quaternion (y, z) norm over
+        const int rate_slack = penalised(weights.attitude_violation, "rate_slack");  // rad/s over
+        b.add_second_order_cone({AffineExpr{std::sqrt(0.5 * (1.0 - std::cos(tilt)))}.add(tilt_slack, 1.0),
+                                 X(k, descent_index::attitude + 2),
                                  X(k, descent_index::attitude + 3)});
         // Pitch/yaw rate only: the model has no roll authority, a measured roll rate just persists.
-        b.add_second_order_cone({AffineExpr{limits.rate_max_radps[static_cast<size_t>(p)]}, X(k, descent_index::rate + 1),
+        b.add_second_order_cone({AffineExpr{rate_max}.add(rate_slack, 1.0),
+                                 X(k, descent_index::rate + 1),
                                  X(k, descent_index::rate + 2)});
         b.add_nonnegative(X(k, descent_index::mass).add_constant(-limits.min_mass_kg));
         if (target.goal == DescentGoal::Catch) {
@@ -185,7 +207,9 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
             const double radius = in_corridor                                  ? target.corridor_radius_m
                                   : p == 1 && target.final_set_radius_m > 0.0 ? target.final_set_radius_m
                                                                               : corridor_inactive_radius_m;
-            b.add_second_order_cone({AffineExpr{radius},
+            // Soft: a re-plan from outside the corridor stays feasible (exact L1 penalty, zero slack when reachable).
+            const int corridor_slack = penalised(weights.corridor_violation, "corridor_slack");
+            b.add_second_order_cone({AffineExpr{radius}.add(corridor_slack, 1.0),
                                      X(k, 2).add_constant(-target.position_m.y), X(k, 3).add_constant(-target.position_m.z)});
         } else {
             // Keep-out: n . (r - c) >= R with n the horizontal direction from the centre to the reference.
@@ -221,6 +245,47 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         b.add_nonnegative(AffineExpr{s}.add_constant(-limits.min_phase_s[static_cast<size_t>(p)]));
         b.add_nonnegative(AffineExpr{limits.max_phase_s - ref.duration_s[static_cast<size_t>(p)]}.add(sub.ds[p], -duration_scale_s));
     }
+    // Gentle end (see DescentLimits::terminal_thrust_margin): a cone on the last node's thrust.
+    {
+        const auto& set = model.engine_sets[1];
+        b.add_second_order_cone({AffineExpr{set.thrust_min_n + limits.terminal_thrust_margin * set.thrust_max_n},
+                                 U(last, 0), U(last, 1), U(last, 2)});
+    }
+    // Throttle rate: the thrust magnitude (linearised along the reference direction) changes at most the engines'
+    // throttle rate over each interval (reference interval lengths). Not over the engine switch, where the ignition
+    // set runs down, nor over the zero-length intervals of a plan starting on the final set.
+    auto magnitude = [&](int k) {
+        const Vec3& ub = ref.u[at(k)];
+        const Vec3 dir = norm(ub) >= min_reference_thrust_n ? ub / norm(ub) : Vec3{1.0, 0.0, 0.0};
+        const double d[3] = {dir.x, dir.y, dir.z};
+        AffineExpr m;
+        for (int j = 0; j < 3; ++j) {
+            const AffineExpr uj = U(k, j);
+            m.add_constant(d[j] * uj.constant);
+            for (const auto& [index, c] : uj.terms) m.add(index, d[j] * c);
+        }
+        return m;
+    };
+    for (int k = 0; k + 1 < K; ++k) {
+        if (k == boundary - 1 || (start_phase == 1 && k < boundary)) continue;
+        const auto& set = model.engine_sets[k < boundary ? 0 : 1];
+        if (set.throttle_rate_per_s <= 0.0) continue;
+        const double dt = reference_node_time(ref.duration_s, k + 1, n) - reference_node_time(ref.duration_s, k, n);
+        const double max_change = set.throttle_rate_per_s * set.thrust_max_n * dt;
+        AffineExpr change = magnitude(k + 1);
+        const AffineExpr previous = magnitude(k);
+        change.add_constant(-previous.constant);
+        for (const auto& [index, c] : previous.terms) change.add(index, -c);
+        AffineExpr up{max_change}, down{max_change};
+        up.add_constant(-change.constant);
+        down.add_constant(change.constant);
+        for (const auto& [index, c] : change.terms) {
+            up.add(index, -c);
+            down.add(index, c);
+        }
+        b.add_nonnegative(up);
+        b.add_nonnegative(down);
+    }
     // Objective: maximum final mass, small virtual control, small steps (and close to the sea on an abort).
     AffineExpr objective;
     objective.add(sub.dx[at(last)][descent_index::mass], -weights.fuel * S[0] / mass_scale_kg);
@@ -229,25 +294,20 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     }
     for (int k = 0; k < K; ++k) objective.add(eta[k], weights.trust_region);
     objective.add(eta_s[0], weights.trust_region);
-    if (target.goal == DescentGoal::Abort) {
-        objective.add(distance[0], weights.sea_distance);
-    } else {
-        b.add_nonnegative(AffineExpr{}.add(distance[0], 1.0));  // unused: keep the variable bounded (zero cost)
-    }
     // Catch: the final (3-engine) set turns the booster slowly - it should descend straight above the catch point
     // (the hull slides down between the arms), so the lateral divert happens on the ignition set. A soft penalty on
     // the final set's distance from the catch axis keeps every re-plan feasible.
     for (int k = 0; k < K; ++k) {
         if (target.goal == DescentGoal::Catch && k >= boundary && k > 0) {
             const double tau = weights.final_lateral_time_s;  // lateral speed counts as the offset it makes in tau
-            b.add_second_order_cone({AffineExpr{}.add(lateral[k], 1.0), X(k, 2).add_constant(-target.position_m.y),
+            const int lateral = b.add_variables(1, "lateral")[0];
+            b.add_second_order_cone({AffineExpr{}.add(lateral, 1.0), X(k, 2).add_constant(-target.position_m.y),
                                      X(k, 3).add_constant(-target.position_m.z), scaled(X(k, 5), tau),
                                      scaled(X(k, 6), tau)});
-            objective.add(lateral[k], weights.final_lateral);
-        } else {
-            b.add_nonnegative(AffineExpr{}.add(lateral[k], 1.0));  // unused: zero cost
+            penalties.emplace_back(lateral, weights.final_lateral);
         }
     }
+    for (const auto& [variable, weight] : penalties) objective.add(variable, weight);
     b.set_objective(objective);
     sub.problem = b.build();
     return sub;

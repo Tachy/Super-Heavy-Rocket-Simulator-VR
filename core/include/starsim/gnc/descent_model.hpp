@@ -47,6 +47,7 @@ struct EngineSetModel {
     // Thrust lost to the ambient pressure (all engines, sea level): mass flow = k (|u| + this), since the flow
     // scales with throttle while the pressure loss does not.
     double pressure_thrust_loss_n = 0.0;
+    double throttle_rate_per_s = 0.0;        // throttle change per second (fraction of full thrust; 0: unlimited)
 };
 
 // Planning model of the landing burn (documented simplifications): rigid body with constant inertia and CG,

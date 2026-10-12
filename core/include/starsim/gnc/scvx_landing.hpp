@@ -15,7 +15,8 @@ struct ScvxLandingParameters {
     double replan_interval_s = 1.0;        // spec
     double plan_latency_s = 0.5;           // spec: a plan takes effect at snapshot + this
     double min_replan_time_to_go_s = 3.0;  // [E] no catch re-plans closer to the end (phase durations degenerate)
-    int failures_before_abort = 2;         // [E] consecutive failed re-plans before the catch is given up
+    int failures_before_abort = 2;         // [E] consecutive re-plans that find the catch unreachable (virtual
+                                           // control >= settings.stall_virtual_control) before it is given up
     bool realtime = false;                 // never wait for a re-plan (interactive play)
     SnapshotSettings snapshot;
     ScvxSettings settings;

@@ -16,9 +16,11 @@ TEST_CASE("The tower waits half open and closes the arms just before the pins ar
     // Arguments: pin height above the arms, axis offset, sink rate, final closing time.
     CHECK(arm_command(t, 150.0, 5.0, 10.0, final_close) == ArmCommand::Open);      // 15 s to contact
     CHECK(arm_command(t, 50.0, 5.0, 10.0, final_close) == ArmCommand::Standby);    // 5 s: wait half open
-    CHECK(arm_command(t, 10.0, 0.5, 10.0, final_close) == ArmCommand::Closed);     // 1 s <= 0.65 + 0.5 s
-    CHECK(arm_command(t, 10.0, 2.5, 10.0, final_close) == ArmCommand::Standby);    // too far off: no catch
-    CHECK(arm_command(t, 20.0, 0.5, 10.0, final_close) == ArmCommand::Standby);    // 2 s: not yet
+    CHECK(arm_command(t, 5.0, 0.5, 5.0, final_close) == ArmCommand::Closed);       // 1 s <= 0.65 + 0.5 s
+    CHECK(arm_command(t, 5.0, 2.5, 5.0, final_close) == ArmCommand::Standby);      // too far off: no catch
+    CHECK(arm_command(t, 10.0, 0.5, 5.0, final_close) == ArmCommand::Standby);     // 2 s: not yet
+    // Still braking hard (sink above the slow final approach): "1 s at this speed" would close far too early.
+    CHECK(arm_command(t, 140.0, 0.5, 140.0, final_close) == ArmCommand::Standby);
     CHECK(arm_command(t, 1.0, 0.5, 0.0, final_close) == ArmCommand::Closed);       // hovering just above the arms
     CHECK(arm_command(t, 20.0, 0.5, -1.0, final_close) == ArmCommand::Open);       // climbing
     CHECK(arm_command(t, -1.0, 0.5, 1.0, final_close) == ArmCommand::Open);        // pins already below the arms
