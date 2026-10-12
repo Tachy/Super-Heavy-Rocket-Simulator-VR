@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -19,6 +20,10 @@ struct AffineExpr {
         terms.emplace_back(variable, coefficient);
         return *this;
     }
+    AffineExpr& add_constant(double value) {
+        constant += value;
+        return *this;
+    }
 };
 
 // Contiguous block of variables; block[i] is the global index of its i-th variable.
@@ -27,7 +32,10 @@ struct VariableBlock {
     int size = 0;
     std::string name;
 
-    int operator[](int i) const { return offset + i; }
+    int operator[](int i) const {
+        if (i < 0 || i >= size) throw std::out_of_range("VariableBlock: index outside the block");
+        return offset + i;
+    }
 };
 
 // Assembles a SocpProblem from named variable blocks and affine constraints, so callers never compute row

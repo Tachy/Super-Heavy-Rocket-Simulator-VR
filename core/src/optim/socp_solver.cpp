@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <limits>
 #include <span>
+#include <stdexcept>
 
 #include "starsim/optim/equilibration.hpp"
 #include "starsim/optim/kkt_system.hpp"
@@ -33,16 +34,16 @@ struct Direction {
 //   dkappa = (d_kappa - kappa dtau) / tau.
 class InteriorPointSolver {
 public:
-    InteriorPointSolver(const SocpProblem& problem, const SocpSettings& settings)
-        : original_(problem),
-          settings_(settings),
-          scaled_(problem),
-          equilibration_(equilibrate(scaled_, settings.equilibration_passes)),
-          n_(scaled_.variables),
-          p_(scaled_.A.rows()),
-          m_(scaled_.G.rows()),
-          kkt_(scaled_.A, scaled_.G, scaled_.cones, settings.static_regularization, settings.refinement_steps),
-          scaling_(scaled_.cones) {
+    // Built once per problem structure: ordering, symbolic factorisation and work arrays.
+    InteriorPointSolver(const SocpProblem& structure, const SocpSettings& settings)
+        : settings_(settings),
+          scaled_(structure),
+          n_(structure.variables),
+          p_(structure.A.rows()),
+          m_(structure.G.rows()),
+          kkt_(structure.A, structure.G, structure.cones, settings.static_regularization, settings.refinement_steps),
+          scaling_(structure.cones) {
+        structure.validate();
         const auto n = static_cast<std::size_t>(n_);
         const auto p = static_cast<std::size_t>(p_);
         const auto m = static_cast<std::size_t>(m_);
@@ -79,6 +80,27 @@ public:
         aty_.assign(n, 0.0);
     }
 
+    // Solves a problem of the structure given to the constructor (values may differ).
+    SocpResult solve(const SocpProblem& problem) {
+        problem.validate();
+        const auto same_pattern = [](const CscMatrix& a, const CscMatrix& b) {
+            return a.rows() == b.rows() && a.cols() == b.cols() && a.col_start() == b.col_start() &&
+                   a.row_index() == b.row_index();
+        };
+        if (problem.variables != n_ || problem.cones.nonnegative != scaled_.cones.nonnegative ||
+            problem.cones.second_order != scaled_.cones.second_order || !same_pattern(problem.A, scaled_.A) ||
+            !same_pattern(problem.G, scaled_.G)) {
+            throw std::invalid_argument("SocpSolver: different problem structure");
+        }
+        original_ = &problem;
+        scaled_ = problem;
+        equilibration_ = equilibrate(scaled_, settings_.equilibration_passes);
+        kkt_.set_values(scaled_.A, scaled_.G);
+        max_regularized_ = 0;
+        return run();
+    }
+
+private:
     SocpResult run() {
         SocpResult result;
         if (!initialize()) return finish(result, SocpStatus::NumericalError);
@@ -89,6 +111,7 @@ public:
             if (check_termination(result, settings_.tolerance)) return result;
             if (iteration >= settings_.max_iterations) return give_up(result, SocpStatus::MaxIterations);
             if (!scaling_.update(s_, z_) || !kkt_.factor(scaling_)) return give_up(result, SocpStatus::NumericalError);
+            max_regularized_ = std::max(max_regularized_, kkt_.regularized_pivots());
 
             // Column of tau: K [x1; y1; z1] = [-c; b; h].
             fill_rhs([&](int j) { return -scaled_.c[j]; }, [&](int i) { return scaled_.b[i]; },
@@ -100,6 +123,7 @@ public:
             cone_product(scaled_.cones, scaling_.lambda(), scaling_.lambda(), lambda_square_);
             for (int i = 0; i < m_; ++i) d_s_[i] = -lambda_square_[i];
             solve_direction(1.0, -tau_ * kappa_, affine_);
+            if (!std::isfinite(affine_.tau)) return give_up(result, SocpStatus::NumericalError);
             const double alpha_affine = std::min(1.0, max_step_length(affine_));
             const double sigma = std::pow(1.0 - alpha_affine, 3);
 
@@ -110,6 +134,7 @@ public:
             for (int i = 0; i < m_; ++i) d_s_[i] = -lambda_square_[i] - d_s_[i] + sigma * mu * identity_[i];
             solve_direction(1.0 - sigma, -tau_ * kappa_ - affine_.tau * affine_.kappa + sigma * mu, combined_);
             const double alpha = std::min(1.0, step_fraction * max_step_length(combined_));
+            if (!std::isfinite(alpha) || !std::isfinite(combined_.tau)) return give_up(result, SocpStatus::NumericalError);
             if (settings_.verbose) {
                 std::fprintf(stderr, "%3d  pres %9.2e  dres %9.2e  gap %9.2e  sigma %5.3f  alpha %5.3f\n", iteration,
                              result.primal_residual, result.dual_residual, result.gap, sigma, alpha);
@@ -140,6 +165,7 @@ private:
     // Least-squares starting point (as ECOS/CVXOPT) with W = I.
     bool initialize() {
         if (!scaling_.update(identity_, identity_) || !kkt_.factor(scaling_)) return false;
+        max_regularized_ = std::max(max_regularized_, kkt_.regularized_pivots());
         fill_rhs([](int) { return 0.0; }, [&](int i) { return scaled_.b[i]; }, [&](int i) { return scaled_.h[i]; });
         kkt_.solve(rhs_, solution_);
         for (int j = 0; j < n_; ++j) x_[j] = solution_[j];
@@ -227,7 +253,7 @@ private:
 
     bool check_termination(SocpResult& result, double tol) {
         unscaled_iterate();
-        const auto& o = original_;
+        const auto& o = *original_;
         std::fill(ax_.begin(), ax_.end(), 0.0);
         o.A.multiply_add(xo_, ax_);
         std::copy(so_.begin(), so_.end(), gx_.begin());
@@ -273,6 +299,7 @@ private:
     }
 
     void store(SocpResult& result, double factor) const {
+        result.regularized_pivots = max_regularized_;
         result.x.resize(xo_.size());
         result.y.resize(yo_.size());
         result.z.resize(zo_.size());
@@ -288,12 +315,13 @@ private:
     SocpResult& finish(SocpResult& result, SocpStatus status) {
         unscaled_iterate();
         store(result, 1.0 / tau_);
-        result.objective = dot(original_.c, result.x);
+        result.objective = dot(original_->c, result.x);
         result.status = status;
         return result;
     }
 
-    const SocpProblem& original_;
+    const SocpProblem* original_ = nullptr;
+    int max_regularized_ = 0;
     SocpSettings settings_;
     SocpProblem scaled_;
     Equilibration equilibration_;
@@ -314,10 +342,22 @@ private:
 
 }  // namespace
 
+class SocpSolver::Impl : public InteriorPointSolver {
+public:
+    using InteriorPointSolver::InteriorPointSolver;
+};
+
+SocpSolver::SocpSolver(const SocpProblem& structure, SocpSettings settings)
+    : impl_(std::make_unique<Impl>(structure, settings)) {}
+SocpSolver::~SocpSolver() = default;
+SocpSolver::SocpSolver(SocpSolver&&) noexcept = default;
+SocpSolver& SocpSolver::operator=(SocpSolver&&) noexcept = default;
+
+SocpResult SocpSolver::solve(const SocpProblem& problem) { return impl_->solve(problem); }
+
 SocpResult solve_socp(const SocpProblem& problem, const SocpSettings& settings) {
-    problem.validate();
-    InteriorPointSolver solver(problem, settings);
-    return solver.run();
+    SocpSolver solver(problem, settings);
+    return solver.solve(problem);
 }
 
 }  // namespace starsim::optim

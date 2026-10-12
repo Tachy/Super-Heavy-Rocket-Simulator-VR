@@ -124,3 +124,30 @@ Integration: full returns of blocks 1-3 at Starbase -> caught.
 
 Optimising the ignition time and the descent phase; grid fins in the planning model; wind (M8); early abort
 before the boostback; the ship landing (same machinery later, own phases and cones); real coastlines (M8).
+
+## Refinements during Plan 3a
+
+- The node shared by both phases takes the final (3-engine) set's limits: 13 engines at minimum throttle give more
+  thrust than 3 at full, so the intersection is empty; the thrust steps down over phase 0's last interval.
+- Convergence: virtual control below tolerance AND (step below tolerance OR final mass changing < 100 kg) AND the
+  new iterate's nonlinear interval defects < 5 cm. The mass criterion stops the slow creep towards the exact fuel
+  optimum; the defect check keeps the plan flyable.
+- Iterative refinement in the KKT solves stops when a step no longer shrinks the residual (ratio 1, not
+  Clarabel's 5: with 5 the SOCP landing fixture needed 50 instead of 17 iterations).
+- Review fixes: the catch ends upright with any roll (the thrust has no roll authority; the tracking controller
+  rolls the pins towards the arms with gimbal roll / RCS); no state limits on the measured start node; minimum
+  phase durations only for a fresh plan; mass flow affine in thrust (pressure thrust loss); interval defect
+  tolerance 1 cm.
+
+## Follow-ups (from the Plan 3a review, for Plan 3b)
+
+- Timing: failure cases run all 10 iterations (430-600 ms); add an iteration budget / early stop on a stalled
+  virtual control and keep one `SocpSolver` per (start phase, goal) across re-plans.
+- Refinement keeps a residual-increasing correction step (test before accepting).
+- Abort plans need a ground constraint at the intermediate nodes.
+- `plan_descent` leaves `status == Optimal` and stale diagnostics when not converged: callers check `converged`.
+- Tilt limit not tapered towards the catch; the trust region is a fixed penalty (not adaptive); thrust bounds at
+  site pressure (~2 % off at 1.2 km); hard-coded pi in `DescentLimits`.
+- Tests to add: NumericalError in the middle of a reused solve; warm start from a perturbed state;
+  `shifted()` should use the snapshot for node 0.
+- Engine start-up (Raptor `startup_s` 3 s) vs a 1.6 s phase 0: the tracking layer must handle the transient.
