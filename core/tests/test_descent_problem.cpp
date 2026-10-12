@@ -57,7 +57,6 @@ DescentTarget catch_target() {
     t.goal = DescentGoal::Catch;
     t.position_m = {30.0, 0.0, 0.0};
     t.velocity_mps = {-1.0, 0.0, 0.0};
-    t.attitude = Quat{1.0, 0.0, 0.0, 0.0};
     return t;
 }
 

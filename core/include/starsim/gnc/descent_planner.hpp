@@ -16,7 +16,9 @@ struct ScvxSettings {
     // Also converged once the dynamics hold (virtual control) and the final mass changes less than this: near the
     // fuel optimum the trust region only lets SCvx creep (~70 kg per iteration), feasibility is what guidance needs.
     double final_mass_tolerance_kg = 100.0;
-    double defect_tolerance = 5e-3;  // largest nonlinear defect of an interval, scaled (5 cm in position)
+    // Largest nonlinear defect of an interval, scaled (1 cm in position): defects add up over the 2N-2 intervals,
+    // so this keeps the flown plan within ~0.3 m of the target (5 cm per interval allowed > 1 m).
+    double defect_tolerance = 1e-3;
     DescentLimits limits;
     DescentWeights weights;
 };

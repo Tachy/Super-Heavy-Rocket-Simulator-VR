@@ -24,6 +24,12 @@ Quat nlerp(const Quat& a, const Quat& b, double f) {
     return Quat{a.w + (bb.w - a.w) * f, a.x + (bb.x - a.x) * f, a.y + (bb.y - a.y) * f, a.z + (bb.z - a.z) * f}.normalized();
 }
 
+// Upright attitude that keeps the roll of q (the planning model has no roll authority).
+Quat upright_with_roll(const Quat& q) {
+    const double n = std::hypot(q.w, q.x);
+    return n > 1e-9 ? Quat{q.w / n, q.x / n, 0.0, 0.0} : Quat{1.0, 0.0, 0.0, 0.0};
+}
+
 double guess_node_time(const std::array<double, 2>& duration, int k, int n) {
     return k <= n - 1 ? duration[0] * k / (n - 1) : duration[0] + duration[1] * (k - n + 1) / (n - 1);
 }
@@ -97,7 +103,7 @@ DescentReference initial_guess(const DescentModel& model, const DescentState& in
                            ? target.position_m
                            : Vec3{target.ground_cg_height_m, target.sea_target_m.y, target.sea_target_m.z};
     const Vec3 v_end = target.goal == DescentGoal::Catch ? target.velocity_mps : Vec3{};
-    const Quat q_end = target.goal == DescentGoal::Catch ? target.attitude : Quat{1.0, 0.0, 0.0, 0.0};
+    const Quat q_end = upright_with_roll(state_attitude(initial));
     const double total = ref.duration_s[0] + ref.duration_s[1];
     double mass = m0;
     for (int k = 0; k < 2 * n - 1; ++k) {
@@ -110,7 +116,7 @@ DescentReference initial_guess(const DescentModel& model, const DescentState& in
         ref.u.push_back({thrust, 0.0, 0.0});
         if (k < 2 * n - 2) {
             const double dt = (k < n - 1 ? ref.duration_s[0] : ref.duration_s[1]) / (n - 1);
-            mass = std::max(mass - set.mass_flow_per_thrust_s_m * thrust * dt, limits.min_mass_kg);
+            mass = std::max(mass - set.mass_flow_per_thrust_s_m * (thrust + set.pressure_thrust_loss_n) * dt, limits.min_mass_kg);
         }
     }
     return ref;
@@ -125,6 +131,10 @@ DescentPlan plan_descent(const DescentModel& model, const DescentState& initial,
     plan.goal = target.goal;
     plan.reference = warm_start ? shifted(*warm_start, elapsed, start_phase, n)
                                 : initial_guess(model, initial, start_phase, target, settings.limits, n);
+    // Minimum phase durations only shape a fresh plan: on a re-plan they would stretch a nearly finished phase
+    // again and again (every replan cycle).
+    DescentLimits limits = settings.limits;
+    if (warm_start) limits.min_phase_s = {0.0, 0.0};
     std::optional<optim::SocpSolver> solver;
     const auto scale = descent_state_scales();
     bool candidate = false;  // the last solution met the convergence tests that need no propagation
@@ -150,7 +160,7 @@ DescentPlan plan_descent(const DescentModel& model, const DescentState& initial,
             break;
         }
         if (it == settings.max_iterations) break;
-        const auto sub = build_descent_subproblem(model, plan.reference, lin, initial, start_phase, target, settings.limits,
+        const auto sub = build_descent_subproblem(model, plan.reference, lin, initial, start_phase, target, limits,
                                                   settings.weights, n);
         if (!solver) solver.emplace(sub.problem);
         const auto result = solver->solve(sub.problem);

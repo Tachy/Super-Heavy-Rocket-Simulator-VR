@@ -42,8 +42,11 @@ math::Vec3 state_rate(const DescentState& x);
 struct EngineSetModel {
     double thrust_max_n = 0.0;               // all engines at full throttle
     double thrust_min_n = 0.0;               // all engines at minimum throttle
-    double mass_flow_per_thrust_s_m = 0.0;   // kg/s per N = 1 / (Isp g0)
+    double mass_flow_per_thrust_s_m = 0.0;   // kg/s per N of vacuum-equivalent thrust (max flow / vacuum thrust)
     double gimbal_max_rad = 0.0;
+    // Thrust lost to the ambient pressure (all engines, sea level): mass flow = k (|u| + this), since the flow
+    // scales with throttle while the pressure loss does not.
+    double pressure_thrust_loss_n = 0.0;
 };
 
 // Planning model of the landing burn (documented simplifications): rigid body with constant inertia and CG,

@@ -14,8 +14,9 @@ enum class DescentGoal { Catch, Abort };
 struct DescentTarget {
     DescentGoal goal = DescentGoal::Catch;
     math::Vec3 position_m;            // Catch: CG position at the catch
-    math::Vec3 velocity_mps;          // Catch: velocity at the catch (sink 1 m/s)
-    math::Quat attitude;              // Catch: upright, pins across the arms (sign nearest the initial attitude)
+    math::Vec3 velocity_mps;          // Catch: velocity at the catch (sink 1 m/s); the catch ends upright with any
+                                      // roll: the thrust has no roll authority, the tracking controller rolls the
+                                      // pins towards the arms (gimbal roll, RCS)
     double ground_cg_height_m = 0.0;  // Abort: CG height at touchdown
     math::Vec3 sea_target_m;          // Abort: point at sea (y, z used)
     math::Vec3 keep_out_center_m;     // Abort: tower + mount, horizontal centre

@@ -110,12 +110,13 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     // Terminal state.
     const int last = K - 1;
     if (target.goal == DescentGoal::Catch) {
-        const double t[13] = {target.position_m.x,   target.position_m.y,   target.position_m.z,
-                              target.velocity_mps.x, target.velocity_mps.y, target.velocity_mps.z,
-                              target.attitude.w,     target.attitude.x,     target.attitude.y,
-                              target.attitude.z,     0.0,                   0.0,
-                              0.0};
-        for (int i = 1; i < 14; ++i) b.add_equality(X(last, i).add_constant(-t[i - 1]));
+        // Position, velocity, upright (quaternion y = z = 0, any roll), no rotation.
+        const double t[6] = {target.position_m.x,   target.position_m.y,   target.position_m.z,
+                             target.velocity_mps.x, target.velocity_mps.y, target.velocity_mps.z};
+        for (int i = 0; i < 6; ++i) b.add_equality(X(last, descent_index::position + i).add_constant(-t[i]));
+        b.add_equality(X(last, descent_index::attitude + 2));
+        b.add_equality(X(last, descent_index::attitude + 3));
+        for (int i = descent_index::rate; i < 14; ++i) b.add_equality(X(last, i));
     } else {
         b.add_equality(X(last, descent_index::position).add_constant(-target.ground_cg_height_m));
         for (int i = descent_index::velocity; i < descent_index::velocity + 3; ++i) b.add_equality(X(last, i));
@@ -148,6 +149,9 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         }
         b.add_nonnegative(lower);
         b.add_second_order_cone({scaled(U(k, 0), std::tan(gimbal)), U(k, 1), U(k, 2)});
+        // The measured start state (and, starting in phase 1, its zero-duration copies up to the shared node) is
+        // fixed: state limits there could only make a re-plan from a slightly violating snapshot infeasible.
+        if (!(k == 0 || (start_phase == 1 && k <= boundary))) {
         b.add_second_order_cone({AffineExpr{std::sqrt(0.5 * (1.0 - std::cos(tilt)))}, X(k, descent_index::attitude + 2),
                                  X(k, descent_index::attitude + 3)});
         b.add_second_order_cone({AffineExpr{limits.rate_max_radps}, X(k, descent_index::rate),
@@ -170,6 +174,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
             for (const auto& [index, c] : rz.terms) keep.add(index, nz * c);
             keep.add_constant(ny * ry.constant + nz * rz.constant);
             b.add_nonnegative(keep);
+        }
         }
         // Trust region: eta_k >= ||(dx_k, du_k)||^2 as a rotated cone ||(2 v, eta - 1)|| <= eta + 1.
         std::vector<AffineExpr> cone{AffineExpr{1.0}.add(eta[k], 1.0)};

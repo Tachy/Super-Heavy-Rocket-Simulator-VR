@@ -55,8 +55,7 @@ DescentTarget catch_target(const Booster& b, const Quat& initial_attitude) {
     const double cg = b.vehicle->mass_properties().cg_station_m;
     t.position_m = {96.0 - (pin_station - cg), 0.0, 0.0};  // pins 1 m above the 95 m arm tops
     t.velocity_mps = {-1.0, 0.0, 0.0};
-    // Upright, roll 0 (the pin direction itself is checked in Plan 3b with the real tower geometry).
-    t.attitude = nearest_sign(Quat{1.0, 0.0, 0.0, 0.0}, initial_attitude);
+    (void)initial_attitude;  // the catch ends upright with any roll (the tracking controller rolls the pins)
     return t;
 }
 
@@ -160,4 +159,59 @@ TEST_CASE("SCvx plans an abort to the sea clear of the tower", "[gnc][descent][s
         const Vec3 r = state_position(x) - target.keep_out_center_m;
         CHECK(std::hypot(r.y, r.z) >= target.keep_out_radius_m - 0.5);
     }
+}
+
+TEST_CASE("SCvx plans a catch whatever the initial roll", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    for (const double roll_deg : {90.0, -90.0, 20.0}) {
+        CAPTURE(roll_deg);
+        auto x0 = ignition_state(*b);
+        const Quat q = Quat::from_axis_angle({1.0, 0.0, 0.0}, roll_deg * deg) * state_attitude(x0);
+        x0 = make_state(x0[descent_index::mass], state_position(x0), state_velocity(x0), q, {});
+        const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, q), s, nullptr, 0.0);
+        CHECK(plan.converged);
+    }
+}
+
+TEST_CASE("SCvx re-plans from states slightly outside the path cones", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    auto x0 = ignition_state(*b);
+    x0[descent_index::rate + 1] = 0.12;  // above the 0.1 rad/s rate bound
+    CHECK(plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0).converged);
+
+    const auto first = plan_descent(b->model, ignition_state(*b), 0, catch_target(*b, state_attitude(ignition_state(*b))), s,
+                                    nullptr, 0.0);
+    REQUIRE(first.converged);
+    const double t = first.reference.duration_s[0] + 1.0;
+    auto x1 = first.state_at(t);
+    const Quat tilted = Quat::from_axis_angle({0.0, 0.0, 1.0}, 11.0 * deg);  // beyond phase 1's 10 deg tilt
+    x1 = make_state(x1[descent_index::mass], state_position(x1), state_velocity(x1), tilted, state_rate(x1));
+    CHECK(plan_descent(b->model, x1, 1, catch_target(*b, tilted), s, &first, t).converged);
+}
+
+TEST_CASE("A re-plan does not stretch a nearly finished phase to the minimum duration", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    const auto x0 = ignition_state(*b);
+    const auto target = catch_target(*b, state_attitude(x0));
+    const auto first = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
+    REQUIRE(first.converged);
+    const double t = first.reference.duration_s[0] - 0.5;  // half a second of the 13-engine phase left
+    const auto again = plan_descent(b->model, first.state_at(t), 0, target, s, &first, t);
+    REQUIRE(again.converged);
+    CHECK(again.reference.duration_s[0] < 0.9);
+}
+
+TEST_CASE("Planning model mass flow matches the engines at minimum throttle", "[gnc][descent]") {
+    const auto b = block3();
+    const auto& set = b->model.engine_sets[1];  // 3 centre engines
+    const auto x = make_state(3.0e5, {500.0, 0.0, 0.0}, {-50.0, 0.0, 0.0}, Quat{1.0, 0.0, 0.0, 0.0}, {});
+    const double model_flow = -b->model.derivative(x, {set.thrust_min_n, 0.0, 0.0}, 1)[descent_index::mass];
+    double true_flow = 0.0;
+    for (const auto& e : b->vehicle->stages()[0].engines) {
+        if (e.group_id == "booster/center") true_flow += e.performance->mass_flow_kgps(e.performance->config().throttle_min);
+    }
+    CHECK(std::abs(model_flow - true_flow) < 1e-6 * true_flow);
 }

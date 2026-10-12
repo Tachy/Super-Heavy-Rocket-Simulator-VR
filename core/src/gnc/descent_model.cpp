@@ -56,7 +56,8 @@ DescentState DescentModel::derivative(const DescentState& x, const Vec3& u, int 
     const Vec3 lever{-gimbal_lever_m, 0.0, 0.0};  // gimbal point relative to the CG, body axes
     const Vec3 h{inertia_kg_m2.x * w.x, inertia_kg_m2.y * w.y, inertia_kg_m2.z * w.z};
     const Vec3 torque = cross(lever, u) - cross(w, h);
-    return make_state(-engine_sets[static_cast<size_t>(phase)].mass_flow_per_thrust_s_m * norm(u), v, acceleration, q_dot,
+    const auto& set = engine_sets[static_cast<size_t>(phase)];
+    return make_state(-set.mass_flow_per_thrust_s_m * (norm(u) + set.pressure_thrust_loss_n), v, acceleration, q_dot,
                       {torque.x / inertia_kg_m2.x, torque.y / inertia_kg_m2.y, torque.z / inertia_kg_m2.z});
 }
 
@@ -88,10 +89,12 @@ DescentModel make_descent_model(const DescentModelInputs& in) {
     for (int p = 0; p < 2; ++p) {
         EngineSetModel set;
         double flow = 0.0;
+        double vacuum_thrust = 0.0;
         for (const auto& e : stage.engines) {
             if (e.starved || std::find(groups[p]->begin(), groups[p]->end(), e.group_id) == groups[p]->end()) continue;
             const auto& c = e.performance->config();
             set.thrust_max_n += e.performance->thrust_n(1.0, pressure);
+            vacuum_thrust += e.performance->thrust_n(1.0, 0.0);
             set.thrust_min_n += e.performance->thrust_n(c.throttle_min, pressure);
             flow += e.performance->mass_flow_kgps(1.0);
             if (e.gimbaled) {
@@ -100,7 +103,8 @@ DescentModel make_descent_model(const DescentModelInputs& in) {
                 ++gimbal_count;
             }
         }
-        set.mass_flow_per_thrust_s_m = set.thrust_max_n > 0.0 ? flow / set.thrust_max_n : 0.0;
+        set.mass_flow_per_thrust_s_m = vacuum_thrust > 0.0 ? flow / vacuum_thrust : 0.0;
+        set.pressure_thrust_loss_n = vacuum_thrust - set.thrust_max_n;
         m.engine_sets[static_cast<size_t>(p)] = set;
     }
     const auto mass = vehicle.mass_properties();
