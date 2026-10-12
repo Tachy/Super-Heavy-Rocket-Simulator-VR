@@ -43,6 +43,7 @@ add_executable(starsim_core_tests
     test_pin_contact.cpp
     test_catch_trigger.cpp
     test_catch_tower.cpp
+    test_socp_reuse.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE

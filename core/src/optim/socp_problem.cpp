@@ -1,5 +1,6 @@
 #include "starsim/optim/socp_problem.hpp"
 
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -14,6 +15,11 @@ void SocpProblem::validate() const {
     if (cones.nonnegative < 0 || cones.size() != G.rows()) fail("cone layout does not match G");
     for (const int q : cones.second_order) {
         if (q < 1) fail("second-order cone of dimension < 1");
+    }
+    for (const auto* values : {&c, &b, &h, &A.values(), &G.values()}) {
+        for (const double v : *values) {
+            if (!std::isfinite(v)) fail("non-finite data");
+        }
     }
 }
 

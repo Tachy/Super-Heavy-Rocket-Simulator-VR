@@ -45,6 +45,7 @@ struct SocpResult {
     double objective = 0.0;  // c^T x (+inf primal infeasible, -inf dual infeasible)
     int iterations = 0;
     bool reduced_accuracy = false;  // status accepted at SocpSettings::reduced_accuracy_tolerance
+    int regularized_pivots = 0;     // most dynamically regularised KKT pivots in one factorisation
     double primal_residual = 0.0;
     double dual_residual = 0.0;
     double gap = 0.0;

@@ -23,6 +23,8 @@ public:
 
     // Writes -W^T W into the matrix and factorises. False on a numerical failure.
     bool factor(const NtScaling& scaling);
+    // New values of A and G with the patterns given to the constructor.
+    void set_values(const CscMatrix& a, const CscMatrix& g);
     // Solves K u = rhs (both of size n + p + m) after a successful factor().
     void solve(std::span<const double> rhs, std::span<double> solution);
 
@@ -37,6 +39,7 @@ private:
     CscMatrix matrix_;
     std::vector<int> scaling_positions_;  // value index per W^T W entry: orthant diagonal, then cone blocks row-major
     std::vector<int> sign_;
+    std::vector<int> a_positions_, g_positions_;  // value index of each A / G entry, then of its transpose
     SparseLdl ldl_;
     std::vector<double> residual_;
 };

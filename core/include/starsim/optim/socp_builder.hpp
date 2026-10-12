@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -27,7 +28,10 @@ struct VariableBlock {
     int size = 0;
     std::string name;
 
-    int operator[](int i) const { return offset + i; }
+    int operator[](int i) const {
+        if (i < 0 || i >= size) throw std::out_of_range("VariableBlock: index outside the block");
+        return offset + i;
+    }
 };
 
 // Assembles a SocpProblem from named variable blocks and affine constraints, so callers never compute row
