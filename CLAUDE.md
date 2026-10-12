@@ -25,7 +25,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`.
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation),
-  eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver).
+  eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
+  contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
   CSPICE lives only in `core/src/spice/` and implements `time::TimeScaleConverter`,
@@ -108,8 +109,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
-- Booster return lands on the pad for blocks 1-3 (no impact, sink < 2 m/s, 7-12 m off, 0.7-2 m/s lateral):
-  not yet good enough for a tower catch. Cause: on the 3 centre engines the attitude follows commands with
+- Booster return: on a site without a tower blocks 1-3 land on the pad (no impact, sink < 2 m/s, 7-12 m off,
+  0.7-2 m/s lateral); at Starbase with the catch tower all three miss the arms (8.7 / 12.2 / 8.9 m off the
+  catch axis; the arms leave 0.3 m of clearance per side). Cause: on the 3 centre engines the attitude follows commands with
   seconds of lag (alpha_max ~0.15 rad/s^2; grid fins add little at < 50 m/s; min throttle 0.4 gives
   T/W ~1.1, no hover), and the explicit guidance laws in `gnc/booster_return` do not plan for it; the
   centre-engine segment is therefore deliberately gentle (hold tau 4 s, tilt <= 10 deg).
@@ -118,6 +120,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Booster return reserves (block 1/2: 330 t, block 3: 300 t; block 1 lands with only ~0.6 t left), the
   tail-first drag table (`aero/super_heavy_descent.csv`) and the grid fin data (`aero/grid_fin.csv`,
   sizes/stations) are estimates [E]; the boostback alone needs ~200 t from our lofted staging state.
+- Catch tower dimensions and azimuths (`[site.tower]`, Starbase 315 deg, LC-39A 0 deg) and the catch pins
+  (`[stage.catch_pins]`, 5 MN per pin) are estimates [E]; verify the tower azimuths against imagery.
 - Wikipedia's booster load 2,700 t LOX / 700 t CH4 (O/F 3.86) does not match Raptor's 3.6: blocks 1/2 now
   split the 3,400 t total at 3.6 [D] (`vehicle_report.py` prints the loaded O/F).
 
@@ -147,6 +151,17 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   translation comes with docking, M9). Game keys: P ascent autopilot (config/missions/leo_ascent.toml),
   O circularize at apoapsis, X autopilot off. HUD: NavBall (`ui/nav_ball.gd`), flight director
   (`ui/flight_overlay.gd`), trajectories (`vehicle/trajectory_view.gd`: green planned, orange predicted).
+- Catch tower (M6, `contact/*`, `sim/catch_tower_sim`): a site loaded with `config::load_launch_site` /
+  `sim::launch_site_from_config` carries its tower; stacks then stand on the launch mount (20 m). The tower
+  closes its arms automatically (time to pin contact <= closing time + 1 s, axis offset <= 3 m), applies
+  penalty contact forces (pins and a hull ring vs the arm boxes, friction 0.3) through
+  `FlightBody::apply_external_wrench`, and judges: caught (both pins, engines off, at rest 2 s ->
+  `FlightBody::hold_fixed_to_earth`), impact (tower/mount hit, pin load > `max_load_n`, carriage hard stop
+  > 1 m/s, an arm > 0.2 m deep in the hull) or missed. With a tower the booster's landing burn aims at the
+  catch point, rolls its pins towards the arms and cuts off on pin contact. Fidelity flag
+  `FlightSession::set_towers`; `FlightSession::place_body` places a vehicle freely (scenarios).
+  Game: `game/world/tower_view.gd` draws the tower from `FlightSim.site_tower`, arms from `tower_state`
+  (render_check `--tower_arms_deg=`); a new `class_name` needs one `godot --headless --import`.
 - Booster return (M6, `gnc/booster_return`): `FlightSession::set_booster_return(true)` gives the separated
   booster its own guidance (flip, Lambert boostback with drag-aware aim-point shooting, coast: RCS impact
   trim above ~2 kPa dynamic pressure, below it grid-fin steering - angle of attack found by bisection on

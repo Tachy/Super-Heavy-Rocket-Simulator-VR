@@ -140,3 +140,16 @@ Rendering: `render_check` view of the tower at Starbase with open and closed arm
 
 Ship catch; tower flexibility; arm-tower collisions of the ship; wind loads (M8); detailed tower model (M8);
 manual arm control.
+
+## Refinements during planning and implementation
+
+- Hinge position derived: `arm_closed_gap_m / 2 + arm_width_m / 2` from the catch axis on the tower face;
+  `arm_hinge_spacing_m` dropped.
+- Catch pins listed by `azimuths_deg` (count implied) with `max_load_n` per pin (5 MN [E]); above it the catch
+  is an impact - this is how an 8 m/s arrival fails (the carriage stroke alone would absorb it).
+- Automatic trigger: close when the predicted time to pin contact is within the closing time + 1 s (or the pins
+  hover within 2 m above the arms), axis offset <= 3 m; a fixed height window closed too late at catch speeds.
+- Hull vs arms: besides the hull ring next to the pins, an arm reaching more than 0.2 m [E] into the hull
+  capsule is an impact (otherwise an off-centre booster could hang on one arm by its hull).
+- `CatchTowerSim::close_arms(instantly)` for scenario tests; `FlightSession::place_body` places a vehicle freely.
+- Measured baseline with the explicit guidance (Starbase): blocks 1/2/3 miss the arms by 8.7 / 12.2 / 8.9 m.
