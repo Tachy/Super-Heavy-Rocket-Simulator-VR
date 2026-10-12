@@ -45,6 +45,9 @@ struct DescentReference {
     std::array<double, 2> duration_s{};
 };
 
+// Scales of the state deviation variables (one unit = this much physical change).
+std::array<double, 14> descent_state_scales();
+
 // Convex subproblem of one SCvx iteration in scaled deviations from the reference.
 class DescentSubproblem {
 public:

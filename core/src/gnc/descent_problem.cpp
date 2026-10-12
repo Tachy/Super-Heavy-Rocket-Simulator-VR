@@ -20,7 +20,9 @@ constexpr double thrust_scale_fraction = 0.1;  // of phase 0's maximum thrust
 constexpr double duration_scale_s = 1.0;
 constexpr double min_reference_thrust_n = 1.0;  // below: no direction for the lower-bound linearisation
 
-std::array<double, 14> state_scales() {
+}  // namespace
+
+std::array<double, 14> descent_state_scales() {
     std::array<double, 14> s{};
     s[0] = mass_scale_kg;
     for (size_t i = 1; i < 4; ++i) s[i] = position_scale_m;
@@ -29,6 +31,8 @@ std::array<double, 14> state_scales() {
     for (size_t i = 11; i < 14; ++i) s[i] = rate_scale_radps;
     return s;
 }
+
+namespace {
 
 AffineExpr scaled(AffineExpr e, double factor) {
     for (auto& term : e.terms) term.second *= factor;
@@ -46,7 +50,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     sub.reference = ref;
     sub.start_phase = start_phase;
     sub.nodes = 2 * n - 1;
-    sub.state_scale = state_scales();
+    sub.state_scale = descent_state_scales();
     sub.thrust_scale = thrust_scale_fraction * model.engine_sets[0].thrust_max_n;
     const auto& S = sub.state_scale;
     const double su = sub.thrust_scale;
