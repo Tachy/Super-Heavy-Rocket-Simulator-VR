@@ -275,8 +275,39 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     return command;
 }
 
+// How long all bodies may coast from now: nothing firing or commanded, no ascent guidance, no pilot
+// input, rotation settled, and far enough from a planned ignition.
+double FlightSession::coast_allowance_s() const {
+    if (bodies_.empty()) return 0.0;
+    const bool guided = autopilot_.state == AutopilotState::PreLaunch || autopilot_.state == AutopilotState::Booster ||
+                        autopilot_.state == AutopilotState::UpperStage;
+    if (guided) return 0.0;
+    if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0) return 0.0;
+    double allowance = max_coast_s;
+    if (autopilot_.state == AutopilotState::Burn) {
+        allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s);
+    }
+    for (const auto& flying : bodies_) {
+        const auto& body = *flying.body;
+        if (!body.can_coast()) return 0.0;
+        for (const auto& [group, run] : flying.running_groups) {
+            if (run) return 0.0;
+        }
+        if (norm(body.state().angular_velocity_body_radps) > 1e-3 && &flying == &bodies_[controlled_]) return 0.0;
+    }
+    return allowance > 1.0 ? allowance : 0.0;
+}
+
 time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
     for (int tick = 0; tick < max_ticks && target - epoch_ >= tick_s; ++tick) {
+        if (const double coast = std::min(coast_allowance_s(), target - epoch_); coast > 1.0) {
+            for (auto& flying : bodies_) flying.body->coast(env_, epoch_, coast);
+            epoch_ += coast;
+            if (autopilot_.state == AutopilotState::Burn) {
+                autopilot_.burn.time_to_ignition_s -= coast;  // refreshed on the next tick
+            }
+            continue;
+        }
         if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit &&
             !bodies_.empty()) {
             run_autopilot();

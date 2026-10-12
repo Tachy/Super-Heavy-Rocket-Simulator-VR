@@ -40,3 +40,25 @@ TEST_CASE("Flight session: pad, ignition, liftoff, staging", "[sim]") {
     CHECK(session.telemetry(0).engines_running == 0);  // booster shut down
     CHECK(session.telemetry(1).engines_running == 3);  // ship: sea-level Raptors only (RVacs blocked at low altitude)
 }
+
+TEST_CASE("Coast segments agree with fixed ticks", "[sim]") {
+    test::spice_session();
+    const spice::SpiceEphemeris ephemeris;
+    const auto earth = spice::SpiceOrientation::earth();
+    const auto t0 = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
+    const math::StateVector leo{{6778137.0, 0.0, 0.0}, {0.0, 7668.6 * 0.9, 7668.6 * 0.436}};
+
+    // Reference: fixed 200 Hz RK4 ticks (pilot input keeps the session out of coast mode).
+    sim::FlightSession ticked(ephemeris, earth, STARSIM_CONFIG_DIR);
+    ticked.place_in_orbit("starship_block3", leo, t0, 1);
+    ticked.set_input({0.0, 0.0, 1e-9, 1.0});  // tiny roll input: forces ticks, negligible torque
+    ticked.advance_to(t0 + 3600.0, 1000000);
+
+    sim::FlightSession coasting(ephemeris, earth, STARSIM_CONFIG_DIR);
+    coasting.place_in_orbit("starship_block3", leo, t0, 1);
+    coasting.advance_to(t0 + 3600.0, 1000000);
+
+    const double dr = norm(ticked.body(0).state().position_gcrf_m - coasting.body(0).state().position_gcrf_m);
+    std::printf("[validation] 1 h LEO coast vs 200 Hz ticks: |dr| = %.3f m\n", dr);
+    CHECK(dr < 1.0);
+}

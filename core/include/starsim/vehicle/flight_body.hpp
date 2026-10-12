@@ -65,6 +65,12 @@ public:
 
     void step(const FlightEnvironment& env, time::Epoch epoch, double dt_s, const VehicleCommand& command);
 
+    // Unpowered flight over a longer interval with adaptive DOP853 on the same 13-element state and the
+    // same forces (gravity, aerodynamics, solar radiation pressure; no thrust, no RCS). Used instead of
+    // fixed ticks when nothing is commanded, e.g. for a multi-day lunar transfer.
+    void coast(const FlightEnvironment& env, time::Epoch epoch, double duration_s);
+    bool can_coast() const;  // engines off, not clamped, not on the ground
+
     bool clamped() const { return clamped_; }
     void release_clamps() { clamped_ = false; }
     bool impacted() const { return impacted_; }

@@ -52,6 +52,8 @@ struct LaunchSite {
 class FlightSession {
 public:
     static constexpr double tick_s = 0.005;  // 200 Hz
+    static constexpr double max_coast_s = 600.0;
+    static constexpr double burn_preparation_s = 120.0;  // ticks resume this long before an ignition
     static constexpr double max_pitch_yaw_rate_radps = 5.0 * 3.14159265358979 / 180.0;
     static constexpr double max_roll_rate_radps = 10.0 * 3.14159265358979 / 180.0;
 
@@ -68,7 +70,8 @@ public:
     bool active() const { return !bodies_.empty(); }
     time::Epoch epoch() const { return epoch_; }
 
-    // Integrates whole ticks up to `target` (at most `max_ticks`); returns the epoch reached.
+    // Integrates up to `target` (at most `max_ticks` steps); returns the epoch reached. Fixed 200 Hz ticks
+    // while anything is commanded, adaptive coast segments (<= max_coast_s) otherwise.
     time::Epoch advance_to(time::Epoch target, int max_ticks = 4000);
 
     void set_input(const PilotInput& input) { input_ = input; }
@@ -133,6 +136,7 @@ private:
 
     vehicle::VehicleCommand command_for(size_t index, double ambient_pressure_pa) const;
     void run_autopilot();
+    double coast_allowance_s() const;  // 0 if fixed ticks are needed now
 
     std::filesystem::path config_dir_;
     const frames::BodyOrientation& earth_;

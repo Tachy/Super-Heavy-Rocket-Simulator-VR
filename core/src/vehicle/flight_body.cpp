@@ -5,6 +5,7 @@
 
 #include "starsim/environment/eclipse.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/integrators/integrate.hpp"
 #include "starsim/integrators/rk4.hpp"
 #include "starsim/math/constants.hpp"
 
@@ -240,6 +241,33 @@ void FlightBody::resolve_ground_contact(const frames::BodyOrientation& earth, ti
     pad_itrf_m_ = frames::geodetic_to_fixed({bottom.latitude_rad, bottom.longitude_rad, ground_height_m_});
     attitude_itrf_ = (Quat::from_matrix(to_fixed) * state_.attitude).normalized();
     follow_pad(earth, epoch);
+}
+
+bool FlightBody::can_coast() const {
+    return !clamped_ && !impacted_ && !vehicle_->any_engine_producing_thrust();
+}
+
+void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double duration_s) {
+    if (impacted_ || duration_s <= 0.0) {
+        return;
+    }
+    const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
+    const TickContext ctx{env,
+                          *vehicle_,
+                          epoch,
+                          transform.rotation,
+                          earth_rotation_vector(transform),
+                          vehicle_->tank_mass_flows_kgps(),
+                          solar_radiation_acceleration(env, *vehicle_, state_, vehicle_->mass_properties().mass_kg, epoch),
+                          {}};
+    const integrators::OdeFunction<13> f = [&ctx](double tau, const State13& y) { return derivative(ctx, tau, y); };
+    integrators::Dop853Options<13> options;
+    options.relative_tolerance = 1e-12;
+    options.absolute_tolerance =
+        State13{{1e-3, 1e-3, 1e-3, 1e-6, 1e-6, 1e-6, 1e-12, 1e-12, 1e-12, 1e-12, 1e-12, 1e-12, 1e-12}};
+    const auto result = integrators::integrate<13>(f, 0.0, pack(state_), duration_s, options);
+    state_ = unpack(result.y);
+    resolve_ground_contact(env.earth_orientation, epoch + duration_s);
 }
 
 std::unique_ptr<FlightBody> FlightBody::separate(size_t index, double separation_dv_mps) {
