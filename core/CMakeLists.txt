@@ -21,6 +21,7 @@ add_library(starsim_core STATIC
     src/gnc/burn_node.cpp
     src/gnc/booster_return.cpp
     src/gnc/descent_model.cpp
+    src/gnc/descent_discretization.cpp
     src/sim/telemetry_recorder.cpp
     src/sim/catch_tower_sim.cpp
     src/sim/flight_session.cpp
