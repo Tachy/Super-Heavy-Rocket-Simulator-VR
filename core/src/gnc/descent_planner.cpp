@@ -2,7 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <optional>
+#include <stdexcept>
 #include <utility>
 
 #include "starsim/gnc/descent_discretization.hpp"
@@ -124,6 +124,26 @@ DescentReference initial_guess(const DescentModel& model, const DescentState& in
 
 DescentPlan plan_descent(const DescentModel& model, const DescentState& initial, int start_phase, const DescentTarget& target,
                          const ScvxSettings& settings, const DescentPlan* warm_start, double elapsed) {
+    DescentPlanner planner;
+    return planner.plan(model, initial, start_phase, target, settings, warm_start, elapsed);
+}
+
+optim::SocpResult DescentPlanner::solve(int start_phase, DescentGoal goal, const optim::SocpProblem& problem) {
+    auto& solver = solvers_[{start_phase, goal}];
+    if (solver) {
+        try {
+            return solver->solve(problem);
+        } catch (const std::invalid_argument&) {
+            // Another structure (e.g. another node count): rebuild below. Invalid data throws again there.
+        }
+    }
+    solver = std::make_unique<optim::SocpSolver>(problem);
+    return solver->solve(problem);
+}
+
+DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& initial, int start_phase,
+                                 const DescentTarget& target, const ScvxSettings& settings, const DescentPlan* warm_start,
+                                 double elapsed) {
     const int n = settings.nodes_per_phase;
     DescentPlan plan;
     plan.nodes_per_phase = n;
@@ -135,7 +155,7 @@ DescentPlan plan_descent(const DescentModel& model, const DescentState& initial,
     // again and again (every replan cycle).
     DescentLimits limits = settings.limits;
     if (warm_start) limits.min_phase_s = {0.0, 0.0};
-    std::optional<optim::SocpSolver> solver;
+    std::vector<double> virtual_controls;
     const auto scale = descent_state_scales();
     bool candidate = false;  // the last solution met the convergence tests that need no propagation
     for (int it = 0;; ++it) {
@@ -162,13 +182,19 @@ DescentPlan plan_descent(const DescentModel& model, const DescentState& initial,
         if (it == settings.max_iterations) break;
         const auto sub = build_descent_subproblem(model, plan.reference, lin, initial, start_phase, target, limits,
                                                   settings.weights, n);
-        if (!solver) solver.emplace(sub.problem);
-        const auto result = solver->solve(sub.problem);
+        const auto result = solve(start_phase, target.goal, sub.problem);
         plan.status = result.status;
         plan.iterations = it + 1;
         if (result.status != optim::SocpStatus::Optimal) return plan;  // not converged: the caller falls back / aborts
         const double previous_final_mass = plan.reference.x.back()[descent_index::mass];
         plan.virtual_control = sub.virtual_control(result.x);
+        virtual_controls.push_back(plan.virtual_control);
+        if (it >= settings.stall_iterations && plan.virtual_control > 10.0 * settings.virtual_control_tolerance &&
+            plan.virtual_control > settings.stall_ratio * virtual_controls[static_cast<size_t>(it - settings.stall_iterations)]) {
+            plan.last_step = sub.max_step(result.x);
+            plan.reference = sub.unpack(result.x);
+            return plan;  // stalled: not converged
+        }
         plan.last_step = sub.max_step(result.x);
         plan.reference = sub.unpack(result.x);
         const bool dynamics_hold = plan.virtual_control < settings.virtual_control_tolerance;

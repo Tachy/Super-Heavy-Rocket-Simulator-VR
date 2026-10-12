@@ -215,3 +215,30 @@ TEST_CASE("Planning model mass flow matches the engines at minimum throttle", "[
     }
     CHECK(std::abs(model_flow - true_flow) < 1e-6 * true_flow);
 }
+
+TEST_CASE("A planner reuses one solver per start phase and goal with unchanged results", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    const auto x0 = ignition_state(*b);
+    const auto target = catch_target(*b, state_attitude(x0));
+    DescentPlanner planner;
+    const auto first = planner.plan(b->model, x0, 0, target, s, nullptr, 0.0);
+    REQUIRE(first.converged);
+    const double t = first.reference.duration_s[0] + 1.0;
+    const auto again = planner.plan(b->model, first.state_at(t), 1, target, s, &first, t);
+    const auto twice = planner.plan(b->model, first.state_at(t), 1, target, s, &first, t);
+    CHECK(planner.solver_count() == 2);  // (phase 0, catch) and (phase 1, catch)
+    const auto fresh = plan_descent(b->model, first.state_at(t), 1, target, s, &first, t);
+    CHECK(twice.reference.x == fresh.reference.x);
+    CHECK(again.reference.x == fresh.reference.x);
+}
+
+TEST_CASE("SCvx stops early when the virtual control stalls", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    // 200 m up at 250 m/s: no thrust can stop this before the catch point.
+    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {200.0, 0.0, 0.0}, {-250.0, 0.0, 0.0}, Quat{}, {});
+    const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, Quat{}), s, nullptr, 0.0);
+    CHECK_FALSE(plan.converged);
+    CHECK(plan.iterations <= s.stall_iterations + 2);
+}
