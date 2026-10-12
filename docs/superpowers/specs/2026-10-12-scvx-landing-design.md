@@ -124,3 +124,13 @@ Integration: full returns of blocks 1-3 at Starbase -> caught.
 
 Optimising the ignition time and the descent phase; grid fins in the planning model; wind (M8); early abort
 before the boostback; the ship landing (same machinery later, own phases and cones); real coastlines (M8).
+
+## Refinements during Plan 3a
+
+- The node shared by both phases takes the final (3-engine) set's limits: 13 engines at minimum throttle give more
+  thrust than 3 at full, so the intersection is empty; the thrust steps down over phase 0's last interval.
+- Convergence: virtual control below tolerance AND (step below tolerance OR final mass changing < 100 kg) AND the
+  new iterate's nonlinear interval defects < 5 cm. The mass criterion stops the slow creep towards the exact fuel
+  optimum; the defect check keeps the plan flyable.
+- Iterative refinement in the KKT solves stops when a step no longer shrinks the residual (ratio 1, not
+  Clarabel's 5: with 5 the SOCP landing fixture needed 50 instead of 17 iterations).

@@ -171,6 +171,15 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   The attitude controller limits the rate command to what the available angular acceleration (gimbal or
   RCS, plus fins) can still stop. Diagnostics: `STARSIM_VERBOSE=1`, `STARSIM_DEBUG_LANDING=1`,
   `STARSIM_DEBUG_HOLD=1` with test "[booster]".
+- SCvx landing planner (M6, Plan 3a, not yet flown): `gnc/descent_*` plans the landing burn (13 -> 3 engines)
+  in the plan frame (origin pad centre on the ground, x up, y east, z north; upright = identity attitude):
+  `descent_model` (14-state rigid body, tabulated air/drag, Coriolis + centrifugal, numeric Jacobians;
+  `make_descent_model` builds it from the booster on the simulation thread), `descent_discretization` (FOH +
+  RK4 sensitivities), `descent_problem` (convex subproblem in scaled deviations: thrust/gimbal/tilt/rate/glide
+  cones, catch or sea-abort goal with tower keep-out; the shared phase node has the 3-engine bounds),
+  `descent_planner` (`plan_descent`: penalised trust region, warm start, converged when the virtual control is
+  small, the step or final mass has settled and the nonlinear interval defects are < 5 cm). Uses the reusable
+  `optim::SocpSolver`. Nominal block 3 case: 4 iterations, ~0.2 s. In-flight use: Plan 3b.
 - Grid fins (`aero/grid_fin`, `[stage.grid_fins]`): flat-plate style normal force from the local flow at
   each fin (incl. omega x r: aerodynamic damping), slope/limit over Mach from a table (transonic choking).
   Actuators: deflection and rate limits (`Vehicle::update_grid_fins`). The controller allocates torque to
