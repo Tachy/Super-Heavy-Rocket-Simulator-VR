@@ -1,5 +1,6 @@
 #include "starsim/gnc/attitude_controller.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace starsim::gnc {
@@ -11,6 +12,7 @@ namespace {
 struct Authority {
     double lever_moment = 0.0;  // sum of thrust * lever arm of the gimbaled engines (pitch/yaw)
     double roll_moment = 0.0;   // sum of thrust * ring radius
+    double gimbal_max_rad = 0.0;  // smallest deflection limit of the running gimbaled engines
 };
 
 Authority gimbal_authority(const vehicle::FlightBody& body, double cg_station_m, double ambient_pressure_pa) {
@@ -21,12 +23,28 @@ Authority gimbal_authority(const vehicle::FlightBody& body, double cg_station_m,
             const double thrust = e.spool * e.performance->thrust_n(e.throttle, ambient_pressure_pa);
             a.lever_moment += thrust * (cg_station_m - e.gimbal_point_m.x);
             a.roll_moment += thrust * std::hypot(e.gimbal_point_m.y, e.gimbal_point_m.z);
+            const double limit = e.performance->config().gimbal_max_rad;
+            a.gimbal_max_rad = a.gimbal_max_rad > 0.0 ? std::min(a.gimbal_max_rad, limit) : limit;
         }
     }
     return a;
 }
 
 double fraction(double torque, double max) { return max > 0.0 ? torque / max : 0.0; }
+
+// Fraction of the maximum angular deceleration planned for stopping a rotation (margin for lag and
+// thrust changes).
+constexpr double braking_margin = 0.5;
+
+// Rate command for an attitude error: linear (natural frequency / damping) for small errors, limited for
+// large ones to the rate that can still be stopped with the available angular acceleration, so a
+// saturated actuator does not overshoot.
+double rate_command(double error_rad, double linear_gain, double max_angular_acceleration) {
+    const double linear = linear_gain * error_rad;
+    if (max_angular_acceleration <= 0.0) return linear;
+    const double braking = std::sqrt(2.0 * braking_margin * max_angular_acceleration * std::abs(error_rad));
+    return std::copysign(std::min(std::abs(linear), braking), error_rad);
+}
 
 }  // namespace
 
@@ -81,12 +99,22 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
         roll_error = std::atan2(ref_body.z, ref_body.y);  // rotate +y towards the reference about +x
     }
 
+    // Torque = I * kd * (rate_command - rate); for small errors this is I * (wn^2 e - kd w).
     const double wn = gains_.natural_frequency_rad_s;
     const double kd = 2.0 * gains_.damping_ratio * wn;
     const Vec3& w = state.angular_velocity_body_radps;
     const Vec3& inertia = mass.inertia_kg_m2;
-    const Vec3 torque{inertia.x * (wn * wn * roll_error - kd * w.x), inertia.y * (wn * wn * rotation.y - kd * w.y),
-                      inertia.z * (wn * wn * rotation.z - kd * w.z)};
+    const Authority a = gimbal_authority(body, mass.cg_station_m, ambient_pressure_pa);
+    const Vec3 rcs_max = body.vehicle().max_rcs_torque_nm();
+    auto max_acceleration = [&](double gimbal_moment, double rcs_torque, double moment_of_inertia) {
+        const double torque = gimbal_moment > 0.0 ? gimbal_moment * std::sin(a.gimbal_max_rad) : rcs_torque;
+        return moment_of_inertia > 0.0 ? torque / moment_of_inertia : 0.0;
+    };
+    const double gain = wn * wn / kd;
+    const Vec3 rate{rate_command(roll_error, gain, max_acceleration(a.roll_moment, rcs_max.x, inertia.x)),
+                    rate_command(rotation.y, gain, max_acceleration(a.lever_moment, rcs_max.y, inertia.y)),
+                    rate_command(rotation.z, gain, max_acceleration(a.lever_moment, rcs_max.z, inertia.z))};
+    const Vec3 torque{inertia.x * kd * (rate.x - w.x), inertia.y * kd * (rate.y - w.y), inertia.z * kd * (rate.z - w.z)};
     return allocate(body, ambient_pressure_pa, torque);
 }
 

@@ -139,6 +139,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     if (auto aero = t["aero"].as_table()) {
         s.aero.reference_diameter_m = doc.number_or(*aero, "reference_diameter_m", s.diameter_m);
         s.aero.ascent_drag_table = doc.text_or(*aero, "ascent_drag_table");
+        s.aero.descent_drag_table = doc.text_or(*aero, "descent_drag_table");
         s.aero.entry_table = doc.text_or(*aero, "entry_table");
         s.aero.nose_length_m = doc.number_or(*aero, "nose_length_m", 0.0);
     } else {

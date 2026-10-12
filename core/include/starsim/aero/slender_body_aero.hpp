@@ -42,7 +42,8 @@ struct AeroResult {
 double rarefaction_weight(double knudsen);
 
 // Axisymmetric slender body:
-//   axial force  C_A = C_A0(M) cos^2(alpha)                      (table, power on / off)
+//   axial force  C_A = C_A0(M) cos^2(alpha)                      (table, power on / off; a separate
+//                                                                 table for tail-first flight if given)
 //   normal force C_N = sin(2a) cos(a/2) + eta * C_dc * (L D / A_ref) sin^2(a)   (Jorgensen, NASA TR R-474)
 // The potential term acts at 0.466 of the nose length from the tip (ogive, Barrowman), the cross-flow
 // term at mid-length. [E] eta = 0.68, C_dc = 1.2 - generic, to be calibrated (no public Starship data).
@@ -51,7 +52,7 @@ double rarefaction_weight(double knudsen);
 // No damping derivatives yet.
 class SlenderBodyAero {
 public:
-    SlenderBodyAero(SlenderBodyGeometry geometry, AxialDragCurve drag);
+    SlenderBodyAero(SlenderBodyGeometry geometry, AxialDragCurve drag, AxialDragCurve tail_first_drag = {});
 
     // air_velocity_body_mps: velocity of the vehicle relative to the air, body axes.
     AeroResult compute(const math::Vec3& air_velocity_body_mps, double density_kg_m3, double speed_of_sound_mps,
@@ -59,10 +60,15 @@ public:
 
     const SlenderBodyGeometry& geometry() const { return geometry_; }
     const AxialDragCurve& drag_curve() const { return drag_; }
+    // Table for the given flight direction (tail first falls back to the nose-first table).
+    const AxialDragCurve& drag_curve(bool tail_first) const {
+        return tail_first && !tail_first_drag_.empty() ? tail_first_drag_ : drag_;
+    }
 
 private:
     SlenderBodyGeometry geometry_;
     AxialDragCurve drag_;
+    AxialDragCurve tail_first_drag_;
     double reference_area_m2_;
 };
 

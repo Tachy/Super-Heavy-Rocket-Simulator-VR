@@ -39,6 +39,31 @@ void FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target, con
     }
 }
 
+void FlightSession::set_booster_return(bool enabled, gnc::BoosterReturnParameters parameters) {
+    if (enabled) {
+        booster_return_ = std::move(parameters);
+    } else {
+        booster_return_.reset();
+    }
+}
+
+const gnc::ReturnCommand* FlightSession::return_status(size_t index) const {
+    const auto& flying = bodies_.at(index);
+    return flying.return_guidance ? &flying.return_command : nullptr;
+}
+
+// Autonomous return of a separated booster: engine groups, throttle and steering axis for this tick.
+void FlightSession::run_return_guidance(Flying& flying) {
+    if (flying.body->impacted()) return;
+    flying.return_command = flying.return_guidance->update(*flying.body, env_, epoch_);
+    for (const auto& stage : flying.body->vehicle().stages()) {
+        for (const auto& e : stage.engines) {
+            const auto& groups = flying.return_command.run_groups;
+            flying.running_groups[e.group_id] = std::find(groups.begin(), groups.end(), e.group_id) != groups.end();
+        }
+    }
+}
+
 void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::StateVector& state, time::Epoch epoch,
                                    size_t first_stage) {
     auto config = config::load_vehicle(config_dir_, vehicle_id);
@@ -57,7 +82,7 @@ void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::St
     }
     const vehicle::RigidBodyState rigid{state.position_m, state.velocity_mps, math::Quat::from_matrix(m), {}};
     bodies_.clear();
-    bodies_.push_back({std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid), {}});
+    bodies_.push_back({std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid), {}, nullptr, {}});
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
@@ -244,7 +269,8 @@ void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchS
     bodies_.clear();
     bodies_.push_back({vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad, site.longitude_rad,
                                                    site.height_m, heading_rad, earth_, epoch),
-                       {}});
+                       {}, nullptr, {}});
+    launch_site_ = site;
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
@@ -257,6 +283,12 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         command.groups.push_back({group, run, index == controlled_ ? input_.throttle : 1.0});
     }
     if (index != controlled_) {
+        if (flying.return_guidance && !flying.body->impacted()) {
+            const auto& r = flying.return_command;
+            for (auto& group : command.groups) group.throttle = r.throttle;
+            return_controller_.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf).apply_to(command);
+            command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(r.rcs_force_gcrf);
+        }
         return command;
     }
     const bool guided = autopilot_.state == AutopilotState::Booster || autopilot_.state == AutopilotState::UpperStage;
@@ -307,6 +339,11 @@ double FlightSession::coast_allowance_s() const {
     }
     for (const auto& flying : bodies_) {
         const auto& body = *flying.body;
+        if (flying.return_guidance && flying.return_guidance->phase() != gnc::ReturnPhase::Landed &&
+            !body.impacted()) {
+            return 0.0;
+        }
+        if (body.impacted() || body.resting()) continue;  // no longer moving on its own
         if (!body.can_coast()) return 0.0;
         for (const auto& [group, run] : flying.running_groups) {
             if (run) return 0.0;
@@ -333,6 +370,9 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             if (autopilot_.state == AutopilotState::Booster || closed_loop) {
                 autopilot_.guidance = guidance_->update(*bodies_[controlled_].body, env_, epoch_, closed_loop);
             }
+        }
+        for (size_t i = 0; i < bodies_.size(); ++i) {
+            if (i != controlled_ && bodies_[i].return_guidance) run_return_guidance(bodies_[i]);
         }
         for (size_t i = 0; i < bodies_.size(); ++i) {
             auto& body = *bodies_[i].body;
@@ -381,7 +421,12 @@ void FlightSession::stage() {
     auto& lower = bodies_[controlled_];
     auto upper = lower.body->separate(1);
     for (auto& [group, run] : lower.running_groups) run = false;  // booster engines off after separation
-    Flying flying{std::move(upper), {}};
+    if (booster_return_) {
+        lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(
+            gnc::LandingSite{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m},
+            *booster_return_);
+    }
+    Flying flying{std::move(upper), {}, nullptr, {}};
     bodies_.push_back(std::move(flying));
     controlled_ = bodies_.size() - 1;
     ignite();  // hot staging: the upper stage lights immediately

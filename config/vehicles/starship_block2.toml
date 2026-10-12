@@ -63,6 +63,7 @@ relight = false                          # started by ground equipment [S:wiki_s
 [stage.aero]
 reference_diameter_m = 9.0
 ascent_drag_table = "aero/starship_stack_ascent.csv"
+descent_drag_table = "aero/super_heavy_descent.csv"  # tail first (booster return)
 grid_fins = 4                            # ~3 t each, included in dry mass [S:wiki_sh]
 
 [stage.recovery]
@@ -70,6 +71,11 @@ method = "tower_catch"
 reserve_propellant_kg = 230000.0         # boostback + landing [E]
 nominal_meco_s = 159.0                   # [S:wiki_sh]
 nominal_meco_altitude_m = 64000.0        # [S:wiki_sh]
+
+[stage.rcs]
+type = "cold_gas"                        # Super Heavy uses cold-gas thrusters for attitude control
+thruster_count = 8                       # [E]
+thrust_per_thruster_n = 3000.0           # [E]
 
 # ---------------------------------------------------------------- ship
 [[stage]]

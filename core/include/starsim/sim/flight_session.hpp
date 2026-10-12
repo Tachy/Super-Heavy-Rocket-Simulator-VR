@@ -11,6 +11,7 @@
 #include "starsim/environment/gravity.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/gnc/attitude_controller.hpp"
+#include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -83,6 +84,11 @@ public:
     // while engaged.
     void engage_ascent_autopilot(const gnc::AscentTarget& target, const gnc::PitchProgram& program = {});
     void disengage_autopilot() { autopilot_.state = AutopilotState::Off; }
+    // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
+    // at the next staging; the booster is then guided independently of the controlled body.
+    void set_booster_return(bool enabled, gnc::BoosterReturnParameters parameters = {});
+    // Return guidance of a body (nullptr if it has none) and its latest command.
+    const gnc::ReturnCommand* return_status(size_t index) const;
     const AutopilotStatus& autopilot() const { return autopilot_; }
     const gnc::AscentGuidance* ascent_guidance() const { return guidance_.get(); }
     double gm_earth_m3ps2() const { return gm_earth_; }
@@ -133,10 +139,13 @@ private:
     struct Flying {
         std::unique_ptr<vehicle::FlightBody> body;
         std::map<std::string, bool> running_groups;  // "<stage>/<group>" -> run
+        std::unique_ptr<gnc::BoosterReturnGuidance> return_guidance;  // autonomous return (separated booster)
+        gnc::ReturnCommand return_command;
     };
 
     vehicle::VehicleCommand command_for(size_t index, double ambient_pressure_pa) const;
     void run_autopilot();
+    void run_return_guidance(Flying& flying);
     double coast_allowance_s() const;  // 0 if fixed ticks are needed now
 
     std::filesystem::path config_dir_;
@@ -145,12 +154,16 @@ private:
     environment::Us76Atmosphere atmosphere_;
     vehicle::FlightEnvironment env_;
     gnc::AttitudeController controller_;
+    // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).
+    gnc::AttitudeController return_controller_{gnc::AttitudeController::Gains{1.5, 0.9}};
     std::vector<Flying> bodies_;
     size_t controlled_ = 0;
     PilotInput input_;
     ControlMode mode_ = ControlMode::RateCommand;
     time::Epoch epoch_;
     time::Epoch launch_epoch_;
+    LaunchSite launch_site_;
+    std::optional<gnc::BoosterReturnParameters> booster_return_;
     double gm_earth_;
     AutopilotStatus autopilot_;
     std::unique_ptr<gnc::AscentGuidance> guidance_;

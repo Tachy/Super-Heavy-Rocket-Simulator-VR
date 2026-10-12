@@ -104,8 +104,14 @@ void Vehicle::rebuild_aero() {
         // [E] Upper stage without its own table keeps the stack table after separation.
         drag = aero_->drag_curve();
     }
+    // Tail-first flight: the base shape is that of the lowest stage.
+    aero::AxialDragCurve tail_first;
+    if (const auto& table = stages_.front().config.aero.descent_drag_table; !table.empty()) {
+        tail_first = aero::AxialDragCurve(config::load_csv_table(config_dir_ / table));
+    }
     aero_ = std::make_unique<aero::SlenderBodyAero>(
-        aero::SlenderBodyGeometry{length_m(), diameter_m(), stages_.back().config.aero.nose_length_m}, drag);
+        aero::SlenderBodyGeometry{length_m(), diameter_m(), stages_.back().config.aero.nose_length_m}, drag,
+        tail_first);
 }
 
 MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* flows, double tau_s) const {

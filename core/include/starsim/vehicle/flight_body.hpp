@@ -74,6 +74,7 @@ public:
     bool clamped() const { return clamped_; }
     void release_clamps() { clamped_ = false; }
     bool impacted() const { return impacted_; }
+    bool resting() const { return resting_; }  // carried by the ground after a gentle touchdown
 
     // Flat ground at this height above WGS84 (the pad elevation; terrain comes later).
     double ground_height_m() const { return ground_height_m_; }
@@ -104,6 +105,7 @@ private:
     RigidBodyState state_;
     bool clamped_ = false;
     bool impacted_ = false;
+    bool resting_ = false;
     math::Vec3 pad_itrf_m_;
     math::Quat attitude_itrf_;  // body -> ITRF while clamped
     double ground_height_m_ = 0.0;

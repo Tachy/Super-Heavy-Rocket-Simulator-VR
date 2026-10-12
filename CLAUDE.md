@@ -101,6 +101,14 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
+- Booster return lands on the pad (no impact, sink < 2 m/s) but 2-20 m off and with 2-7 m/s lateral speed:
+  too much for a tower catch. Cause: on the 3 centre engines the attitude follows commands with several
+  seconds of lag (alpha_max ~0.15 rad/s^2; min throttle 0.4 gives T/W ~1.1, no hover), and the explicit
+  guidance laws in `gnc/booster_return` do not plan for it. Parameter tuning was exhausted (2026-10-12).
+  Planned: grid fins as aerodynamic actuators, then powered-descent guidance by convex optimisation with
+  tilt/throttle/attitude-rate constraints, re-solved in flight (see plan file, M6 "Landeführung").
+- Booster return reserve (block 3: 300 t) and the tail-first drag table (`aero/super_heavy_descent.csv`)
+  are estimates [E]; the boostback alone needs ~200 t from our (lofted, T+137 s) staging state.
 
 ## Game (Godot) structure
 - `game/world/`: `world.gd` (per-frame orchestration), `celestial_body.gd` (floating origin + scaled space:
@@ -128,6 +136,14 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   translation comes with docking, M9). Game keys: P ascent autopilot (config/missions/leo_ascent.toml),
   O circularize at apoapsis, X autopilot off. HUD: NavBall (`ui/nav_ball.gd`), flight director
   (`ui/flight_overlay.gd`), trajectories (`vehicle/trajectory_view.gd`: green planned, orange predicted).
+- Booster return (M6, `gnc/booster_return`): `FlightSession::set_booster_return(true)` gives the separated
+  booster its own guidance (flip, Lambert boostback with drag-aware aim-point shooting, coast with RCS
+  impact trim, landing burn 13 -> 3 engines: 1-D burn simulation for ignition, ZEM/ZEV vertical, braking
+  profile divert). It uses its own faster attitude controller. The attitude controller limits the rate
+  command to what the available angular acceleration can still stop (no overshoot when saturated).
+  Diagnostics: `STARSIM_VERBOSE=1`, `STARSIM_DEBUG_LANDING=1`, `STARSIM_DEBUG_HOLD=1` with test "[booster]".
+- `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically
+  (follow the Earth), impacted/resting bodies do not block coast segments.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 

@@ -46,9 +46,10 @@ double AxialDragCurve::cd(double mach, bool powered) const {
     return interpolate(mach_, powered ? cd_power_on_ : cd_power_off_, mach);
 }
 
-SlenderBodyAero::SlenderBodyAero(SlenderBodyGeometry geometry, AxialDragCurve drag)
+SlenderBodyAero::SlenderBodyAero(SlenderBodyGeometry geometry, AxialDragCurve drag, AxialDragCurve tail_first_drag)
     : geometry_(geometry),
       drag_(std::move(drag)),
+      tail_first_drag_(std::move(tail_first_drag)),
       reference_area_m2_(constants::pi * 0.25 * geometry.diameter_m * geometry.diameter_m) {}
 
 AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, double density_kg_m3,
@@ -75,7 +76,8 @@ AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, dou
 
     // Axial force opposes the axial component of motion.
     const double cos_a = std::cos(alpha);
-    const double c_axial = ((1.0 - w) * drag_.cd(result.mach, powered) + w * free_molecular_drag_coefficient) * cos_a * cos_a;
+    const double cd = drag_curve(axial_speed < 0.0).cd(result.mach, powered);
+    const double c_axial = ((1.0 - w) * cd + w * free_molecular_drag_coefficient) * cos_a * cos_a;
     const double axial_force = -std::copysign(c_axial * q_area, axial_speed);
 
     // Normal force opposes the cross-flow velocity.

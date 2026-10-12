@@ -207,6 +207,7 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
         follow_pad(env.earth_orientation, epoch + dt_s);
         return;
     }
+    resting_ = false;  // re-established by the ground contact below
 
     const TickContext ctx{env,
                           *vehicle_,
@@ -251,6 +252,7 @@ void FlightBody::resolve_ground_contact(const frames::BodyOrientation& earth, ti
     pad_itrf_m_ = frames::geodetic_to_fixed({bottom.latitude_rad, bottom.longitude_rad, ground_height_m_});
     attitude_itrf_ = (Quat::from_matrix(to_fixed) * state_.attitude).normalized();
     follow_pad(earth, epoch);
+    resting_ = true;
 }
 
 bool FlightBody::can_coast() const {
@@ -259,6 +261,10 @@ bool FlightBody::can_coast() const {
 
 void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double duration_s) {
     if (impacted_ || duration_s <= 0.0) {
+        return;
+    }
+    if (resting_) {  // stays on the ground, co-rotating with the Earth
+        follow_pad(env.earth_orientation, epoch + duration_s);
         return;
     }
     const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);

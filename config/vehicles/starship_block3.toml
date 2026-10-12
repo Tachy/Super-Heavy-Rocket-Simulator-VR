@@ -65,13 +65,19 @@ relight = true                           # Raptor 3 outer engines can relight [S
 [stage.aero]
 reference_diameter_m = 9.0
 ascent_drag_table = "aero/starship_stack_ascent.csv"
+descent_drag_table = "aero/super_heavy_descent.csv"  # tail first (booster return)
 grid_fins = 3                            # ~1.5x Block 2 size, 90/90/180 deg layout [S:wiki_sh]
 
 [stage.recovery]
 method = "tower_catch"
-reserve_propellant_kg = 240000.0         # [E]; separate LOX landing tank feeds inner engines [S:nsf_b3]
+reserve_propellant_kg = 300000.0         # [E] boostback + landing (RTLS); separate LOX landing tank feeds inner engines [S:nsf_b3]
 nominal_meco_s = 160.0                   # [E]
 nominal_meco_altitude_m = 65000.0        # [E]
+
+[stage.rcs]
+type = "cold_gas"                        # Super Heavy uses cold-gas thrusters for attitude control
+thruster_count = 8                       # [E]
+thrust_per_thruster_n = 3000.0           # [E]
 
 # ---------------------------------------------------------------- ship
 [[stage]]
