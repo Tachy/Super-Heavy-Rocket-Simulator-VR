@@ -8,6 +8,7 @@ extends Node
 const THROTTLE_KEY_RATE := 0.5  # per second
 
 var sim := FlightSim.new()
+var launch_site_id := ""  ## site of the current flight (its tower shows the flight's arm state)
 var throttle := 1.0
 var rate_mode := true
 var views: Array[VehicleView] = []
@@ -38,8 +39,8 @@ func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 9
 		view.queue_free()
 	views.clear()
 	throttle = 1.0
-	var ok := sim.launch_from_pad(vehicle_id, site["latitude_deg"], site["longitude_deg"], site["height_m"],
-			heading_deg, tdb_s)
+	var ok := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s)
+	launch_site_id = site["id"] if ok else ""
 	last_event = "%s auf %s" % [vehicle_id, site["name"]] if ok else "Start fehlgeschlagen"
 	return ok
 
