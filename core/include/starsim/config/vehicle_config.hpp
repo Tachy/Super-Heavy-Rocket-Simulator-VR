@@ -79,6 +79,14 @@ struct GridFinConfig {
     std::string table;                 // normal-force table, path relative to config/
 };
 
+// Catch pins of a stage: hardpoints the tower arms catch (the returning booster).
+struct CatchPinConfig {
+    std::vector<double> azimuths_rad;  // one pin per entry, from body +y towards +z (like the grid fins)
+    double station_m = 0.0;            // from the bottom of the stage
+    double protrusion_m = 0.0;         // beyond the hull radius
+    double max_load_n = 0.0;           // structural limit per pin
+};
+
 struct StageConfig {
     std::string id;
     std::string name;
@@ -98,6 +106,7 @@ struct StageConfig {
     std::vector<EngineGroupConfig> engine_groups;
     AeroConfig aero;
     GridFinConfig grid_fins;  // empty azimuths: none
+    CatchPinConfig catch_pins;  // empty azimuths: none
 };
 
 struct VehicleConfig {

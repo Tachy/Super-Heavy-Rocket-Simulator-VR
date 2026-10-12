@@ -6,54 +6,13 @@
 #include <toml++/toml.hpp>
 
 #include "starsim/math/constants.hpp"
+#include "toml_document.hpp"
 
 namespace starsim::config {
 
 namespace {
 
-// Reads a TOML file and remembers its path for error messages.
-struct Document {
-    std::filesystem::path path;
-    toml::table root;
-
-    explicit Document(std::filesystem::path p) : path(std::move(p)) {
-        if (!std::filesystem::exists(path)) {
-            throw ConfigError("config file not found: " + path.string());
-        }
-        try {
-            root = toml::parse_file(path.string());
-        } catch (const toml::parse_error& e) {
-            std::ostringstream message;
-            message << path.string() << ": " << e.description() << " (line " << e.source().begin.line << ")";
-            throw ConfigError(message.str());
-        }
-    }
-
-    [[noreturn]] void fail(const std::string& what) const { throw ConfigError(path.string() + ": " + what); }
-
-    double number(const toml::table& t, std::string_view key) const {
-        if (auto v = t[key].value<double>()) return *v;
-        fail("missing number '" + std::string(key) + "'");
-    }
-    double number_or(const toml::table& t, std::string_view key, double fallback) const {
-        return t[key].value<double>().value_or(fallback);
-    }
-    std::string text(const toml::table& t, std::string_view key) const {
-        if (auto v = t[key].value<std::string>()) return *v;
-        fail("missing string '" + std::string(key) + "'");
-    }
-    std::string text_or(const toml::table& t, std::string_view key, std::string fallback = {}) const {
-        return t[key].value<std::string>().value_or(std::move(fallback));
-    }
-    bool boolean(const toml::table& t, std::string_view key) const {
-        if (auto v = t[key].value<bool>()) return *v;
-        fail("missing boolean '" + std::string(key) + "'");
-    }
-    const toml::table& table(const toml::table& t, std::string_view key) const {
-        if (auto v = t[key].as_table()) return *v;
-        fail("missing table [" + std::string(key) + "]");
-    }
-};
+using detail::Document;
 
 PropellantConfig load_propellant(const std::filesystem::path& config_dir, const std::string& id) {
     const Document doc(config_dir / "propellants.toml");
@@ -161,6 +120,20 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.grid_fins.max_deflection_rad = doc.number(*fins, "max_deflection_deg") * constants::deg_to_rad;
         s.grid_fins.rate_rad_s = doc.number(*fins, "rate_deg_s") * constants::deg_to_rad;
         s.grid_fins.table = doc.text(*fins, "table");
+    }
+    if (auto pins = t["catch_pins"].as_table()) {
+        const auto* azimuths = (*pins)["azimuths_deg"].as_array();
+        if (!azimuths || azimuths->empty()) {
+            doc.fail("catch_pins.azimuths_deg must list one azimuth per pin");
+        }
+        for (const auto& a : *azimuths) {
+            const auto value = a.value<double>();
+            if (!value) doc.fail("catch_pins.azimuths_deg must be numbers");
+            s.catch_pins.azimuths_rad.push_back(*value * constants::deg_to_rad);
+        }
+        s.catch_pins.station_m = doc.number(*pins, "station_m");
+        s.catch_pins.protrusion_m = doc.positive(*pins, "protrusion_m");
+        s.catch_pins.max_load_n = doc.positive(*pins, "max_load_n");
     }
     if (auto rcs = t["rcs"].as_table()) {
         s.rcs_thruster_count = static_cast<int>(doc.number_or(*rcs, "thruster_count", 0.0));
