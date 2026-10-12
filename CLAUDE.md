@@ -117,9 +117,11 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   centre-engine segment is therefore deliberately gentle (hold tau 4 s, tilt <= 10 deg).
   Planned: powered-descent guidance by convex optimisation with tilt/throttle/attitude-rate constraints,
   re-solved in flight (see plan file, M6 "Landeführung").
-- Booster return reserves (block 1/2: 330 t, block 3: 300 t; block 1 lands with only ~0.6 t left), the
+- Booster return reserves (block 1/2: 330 t, block 3: 280 t; block 1 lands with only ~0.6 t left), the
   tail-first drag table (`aero/super_heavy_descent.csv`) and the grid fin data (`aero/grid_fin.csv`,
   sizes/stations) are estimates [E]; the boostback alone needs ~200 t from our lofted staging state.
+  Block 3 is checked against the FAA EA's ~74 t residual propellant at landing-burn ignition (Raptor 3 at 280 tf:
+  70.4 t at ignition).
 - Catch tower dimensions and azimuths (`[site.tower]`, Starbase 315 deg, LC-39A 0 deg) and the catch pins
   (`[stage.catch_pins]`, 5 MN per pin) are estimates [E]; verify the tower azimuths against imagery.
 - Wikipedia's booster load 2,700 t LOX / 700 t CH4 (O/F 3.86) does not match Raptor's 3.6: blocks 1/2 now

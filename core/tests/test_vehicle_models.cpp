@@ -71,7 +71,7 @@ TEST_CASE("US76 atmosphere is continuous at 86 km and vanishes in space", "[envi
 TEST_CASE("Engine performance reproduces sea-level and vacuum data", "[propulsion]") {
     const auto v = config::load_vehicle(config_dir, "starship_block3");
     const propulsion::EnginePerformance raptor(v.engine("raptor3"));
-    CHECK(raptor.thrust_n(1.0, constants::standard_pressure_pa) == Catch::Approx(2.4517e6));
+    CHECK(raptor.thrust_n(1.0, constants::standard_pressure_pa) == Catch::Approx(2.7459e6));  // 280 tf [S:block3_summary]
     CHECK(raptor.specific_impulse_s(1.0, constants::standard_pressure_pa) == Catch::Approx(330.0));
     CHECK(raptor.specific_impulse_s(1.0, 0.0) == Catch::Approx(350.0).epsilon(1e-3));
     CHECK(raptor.thrust_n(0.4, 0.0) == Catch::Approx(0.4 * raptor.thrust_n(1.0, 0.0)));

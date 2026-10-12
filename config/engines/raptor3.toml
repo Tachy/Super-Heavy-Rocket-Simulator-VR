@@ -3,6 +3,7 @@
 wiki_raptor = "https://en.wikipedia.org/wiki/SpaceX_Raptor (retrieved 2026-10-12)"
 wiki_sh = "https://en.wikipedia.org/wiki/SpaceX_Super_Heavy (retrieved 2026-10-12): Block 3 Isp SL 330 s / vac 350 s"
 satnews = "https://satnews.com/2026/05/14/spacex-debuts-starship-v3-redefining-heavy-lift-launch-capability/"
+block3_summary = "Project decision 2026-10-12 (Block 3 summary: 33 Raptor 3, ~280 tf per engine at sea level)"
 
 [engine]
 id = "raptor3"
@@ -14,9 +15,9 @@ chamber_pressure_pa = 330e5          # operational; 350 bar reached on test stan
 
 [performance]
 reference_pressure_pa = 101325.0
-thrust_ref_n = 2.4517e6              # 250 tf [S:wiki_raptor]; some sources quote 280 tf (test)
+thrust_ref_n = 2.7459e6              # 280 tf [S:block3_summary]; Wikipedia's 250 tf is the earlier figure [S:wiki_raptor]
 isp_ref_s = 330.0                    # sea level [S:wiki_sh]
-nozzle_exit_diameter_m = 1.366       # [D] from Isp_vac = 350 s [S:wiki_sh]: A_e = F_sl*(350/330-1)/p0
+nozzle_exit_diameter_m = 1.446       # [D] from Isp_vac = 350 s [S:wiki_sh]: A_e = F_sl*(350/330-1)/p0 = 1.6424 m^2
 max_ambient_pressure_pa = 110000.0   # [E]
 
 [throttle]

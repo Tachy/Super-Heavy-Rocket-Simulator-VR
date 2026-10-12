@@ -20,6 +20,10 @@ using namespace starsim;
 namespace {
 
 constexpr double deg = constants::deg_to_rad;
+// FAA Revised Draft EA, Nov 2024 (https://www.faa.gov/media/87636, p. 7): "Up to approximately 74 MT of residual
+// propellant ... on the Super Heavy vehicle for downrange landing, including expenditures" [S]. An EA projection,
+// used here as the cap on the Block 3 booster's propellant at landing-burn ignition.
+constexpr double faa_landing_propellant_kg = 74.0e3;
 
 }  // namespace
 
@@ -163,6 +167,7 @@ TEST_CASE("Booster return to the catch tower ends caught or missed", "[gnc][boos
     session.engage_ascent_autopilot(target);
 
     bool landing = false;
+    double ignition_propellant_kg = -1.0;
     for (double t = 0.0; t < 1200.0;) {
         t += landing ? sim::FlightSession::tick_s : 0.5;
         session.advance_to(t0 + t, 1000);
@@ -170,7 +175,9 @@ TEST_CASE("Booster return to the catch tower ends caught or missed", "[gnc][boos
         if (session.body_count() < 2) continue;
         const auto& booster = session.body(0);
         const auto* status = session.return_status(0);
-        landing = status && status->phase >= gnc::ReturnPhase::LandingBurn;
+        const bool burning = status && status->phase >= gnc::ReturnPhase::LandingBurn;
+        if (burning && !landing) ignition_propellant_kg = booster.vehicle().propellant_kg();
+        landing = burning;
         if (booster.caught() || booster.impacted() || booster.resting()) break;
     }
     const auto* tower = session.tower();
@@ -181,4 +188,7 @@ TEST_CASE("Booster return to the catch tower ends caught or missed", "[gnc][boos
     const auto p = tower->geometry().to_site(transpose(t_end.rotation) * session.body(0).state().position_gcrf_m);
     std::printf("%s: tower %s, booster %.1f m from the catch axis, max pin load %.2f MN\n", vehicle_id.c_str(),
                 sim::to_string(phase), std::hypot(p.x, p.y), tower->max_pin_load_n() / 1e6);
+    std::printf("%s: propellant at landing-burn ignition %.1f t\n", vehicle_id.c_str(), ignition_propellant_kg / 1e3);
+    REQUIRE(ignition_propellant_kg >= 0.0);
+    if (vehicle_id == "starship_block3") CHECK(ignition_propellant_kg <= faa_landing_propellant_kg);
 }
