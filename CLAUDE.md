@@ -101,6 +101,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Rendering uses APPARENT positions (light time + aberration) for Sun and Moon; geometric positions
   would misplace the Moon's shadow on Earth by ~40 km.
 - UI text is German, code English.
+- VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
+  (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 
 ## Vehicle configuration
 `config/` holds propellants, engines, vehicles and aero tables as TOML/CSV with provenance tags
