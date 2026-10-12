@@ -25,6 +25,7 @@ add_library(starsim_core STATIC
     src/mission/lunar_transfer.cpp
     src/contact/primitives.cpp
     src/contact/tower_geometry.cpp
+    src/contact/catch_arms.cpp
     src/optim/sparse_matrix.cpp
     src/optim/minimum_degree.cpp
     src/optim/ldl.cpp
