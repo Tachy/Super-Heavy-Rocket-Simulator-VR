@@ -51,6 +51,7 @@ public:
                        bool powered) const;
 
     const SlenderBodyGeometry& geometry() const { return geometry_; }
+    const AxialDragCurve& drag_curve() const { return drag_; }
 
 private:
     SlenderBodyGeometry geometry_;

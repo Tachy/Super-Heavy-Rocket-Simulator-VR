@@ -12,6 +12,8 @@ add_library(starsim_core STATIC
     src/environment/us76_atmosphere.cpp
     src/propulsion/engine_performance.cpp
     src/aero/slender_body_aero.cpp
+    src/vehicle/vehicle.cpp
+    src/vehicle/flight_body.cpp
     src/time/utc_date_time.cpp
     src/frames/geodetic.cpp
     src/environment/point_mass_gravity.cpp

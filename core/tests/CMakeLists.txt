@@ -20,6 +20,7 @@ add_executable(starsim_core_tests
     test_artemis_validation.cpp
     test_eclipse.cpp
     test_vehicle_models.cpp
+    test_flight_body.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE
