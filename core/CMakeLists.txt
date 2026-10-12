@@ -21,6 +21,7 @@ add_library(starsim_core STATIC
     src/gnc/burn_node.cpp
     src/gnc/booster_return.cpp
     src/sim/telemetry_recorder.cpp
+    src/sim/catch_tower_sim.cpp
     src/sim/flight_session.cpp
     src/mission/lunar_transfer.cpp
     src/contact/primitives.cpp

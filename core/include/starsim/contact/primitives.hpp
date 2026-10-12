@@ -45,6 +45,8 @@ double distance_to_annulus(const Annulus& ring, const math::Vec3& point);  // 0 
 
 // Capsule = segment a-b swept by a sphere of `radius_m`; tested by sampling the segment (see the .cpp).
 bool capsule_overlaps_box(const math::Vec3& a, const math::Vec3& b, double radius_m, const OrientedBox& box);
+// How deep the box reaches into the capsule: radius minus the smallest sampled axis distance (> 0: overlap).
+double capsule_penetration_m(const math::Vec3& a, const math::Vec3& b, double radius_m, const OrientedBox& box);
 bool capsule_overlaps_annulus(const math::Vec3& a, const math::Vec3& b, double radius_m, const Annulus& ring);
 
 }  // namespace starsim::contact

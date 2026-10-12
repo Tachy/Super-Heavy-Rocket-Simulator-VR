@@ -8,4 +8,8 @@ namespace starsim::contact {
 // launch mount. The arms are not part of this test: they act through the contact model.
 bool hits_tower(const TowerGeometry& tower, const math::Vec3& bottom_m, const math::Vec3& top_m, double hull_radius_m);
 
+// How deep an arm box reaches into the hull capsule (> 0: overlap). Pins rest on the arms and the hull may touch
+// their inner faces; an arm deep inside the hull means the hull itself struck or lies on the arm.
+double hull_penetration_m(const OrientedBox& arm, const math::Vec3& bottom_m, const math::Vec3& top_m, double hull_radius_m);
+
 }  // namespace starsim::contact

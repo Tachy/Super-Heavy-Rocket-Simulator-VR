@@ -263,14 +263,45 @@ void FlightSession::run_autopilot() {
 }
 
 
+LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site) {
+    return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower};
+}
+
+void FlightSession::set_launch_site(const LaunchSite& site) {
+    launch_site_ = site;
+    tower_.reset();
+    if (towers_enabled_ && site.tower) {
+        tower_ = std::make_unique<CatchTowerSim>(*site.tower, site.latitude_rad, site.longitude_rad, site.height_m);
+    }
+}
+
+std::vector<vehicle::FlightBody*> FlightSession::body_pointers() const {
+    std::vector<vehicle::FlightBody*> list;
+    for (const auto& flying : bodies_) list.push_back(flying.body.get());
+    return list;
+}
+
+void FlightSession::place_body(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
+                               time::Epoch epoch) {
+    auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(config, config_dir_), state);
+    body->set_ground_height(launch_site_.height_m);
+    bodies_.clear();
+    bodies_.push_back({std::move(body), {}, nullptr, {}});
+    controlled_ = 0;
+    epoch_ = epoch;
+    launch_epoch_ = epoch;
+}
+
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
                                     time::Epoch epoch) {
     auto vehicle = std::make_unique<vehicle::Vehicle>(config::load_vehicle(config_dir_, vehicle_id), config_dir_);
+    set_launch_site(site);
+    const double stand_height = site.height_m + (tower_ ? site.tower->mount_height_m : 0.0);
     bodies_.clear();
     bodies_.push_back({vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad, site.longitude_rad,
-                                                   site.height_m, heading_rad, earth_, epoch),
+                                                   stand_height, heading_rad, earth_, epoch),
                        {}, nullptr, {}});
-    launch_site_ = site;
+    bodies_.back().body->set_ground_height(site.height_m);
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
@@ -332,6 +363,7 @@ double FlightSession::coast_allowance_s() const {
     const bool guided = autopilot_.state == AutopilotState::PreLaunch || autopilot_.state == AutopilotState::Booster ||
                         autopilot_.state == AutopilotState::UpperStage;
     if (guided) return 0.0;
+    if (tower_ && tower_->needs_ticks(body_pointers(), earth_, epoch_)) return 0.0;
     if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0) return 0.0;
     double allowance = max_coast_s;
     if (autopilot_.state == AutopilotState::Burn) {
@@ -343,7 +375,7 @@ double FlightSession::coast_allowance_s() const {
             !body.impacted()) {
             return 0.0;
         }
-        if (body.impacted() || body.resting()) continue;  // no longer moving on its own
+        if (body.impacted() || body.resting() || body.caught()) continue;  // no longer moving on its own
         if (!body.can_coast()) return 0.0;
         for (const auto& [group, run] : flying.running_groups) {
             if (run) return 0.0;
@@ -374,6 +406,8 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         for (size_t i = 0; i < bodies_.size(); ++i) {
             if (i != controlled_ && bodies_[i].return_guidance) run_return_guidance(bodies_[i]);
         }
+        const auto pointers = body_pointers();
+        if (tower_) tower_->before_tick(pointers, earth_, epoch_);
         for (size_t i = 0; i < bodies_.size(); ++i) {
             auto& body = *bodies_[i].body;
             const auto t = earth_.fixed_to_gcrf(epoch_);
@@ -387,6 +421,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             }
             body.step(env_, epoch_, tick_s, command);
         }
+        if (tower_) tower_->after_tick(pointers, earth_, epoch_ + tick_s, tick_s);
         epoch_ += tick_s;
     }
     if (bodies_.empty()) {

@@ -14,15 +14,16 @@ namespace {
 // r * (1 - sqrt(1 - 1/16)) = 3 % of the radius.
 constexpr double sample_spacing_per_radius = 0.5;
 
+// Smallest distance of the sampled capsule axis.
 template <class Distance>
-bool capsule_overlaps(const Vec3& a, const Vec3& b, double radius_m, Distance distance) {
+double min_axis_distance(const Vec3& a, const Vec3& b, double radius_m, Distance distance) {
     const double length = norm(b - a);
     const int samples = std::max(2, static_cast<int>(std::ceil(length / (sample_spacing_per_radius * radius_m))) + 1);
+    double smallest = std::numeric_limits<double>::infinity();
     for (int i = 0; i < samples; ++i) {
-        const Vec3 p = a + (b - a) * (static_cast<double>(i) / (samples - 1));
-        if (distance(p) < radius_m) return true;
+        smallest = std::min(smallest, distance(a + (b - a) * (static_cast<double>(i) / (samples - 1))));
     }
-    return false;
+    return smallest;
 }
 
 }  // namespace
@@ -60,11 +61,15 @@ double distance_to_annulus(const Annulus& ring, const Vec3& point) {
 }
 
 bool capsule_overlaps_box(const Vec3& a, const Vec3& b, double radius_m, const OrientedBox& box) {
-    return capsule_overlaps(a, b, radius_m, [&](const Vec3& p) { return distance_to_box(box, p); });
+    return capsule_penetration_m(a, b, radius_m, box) > 0.0;
+}
+
+double capsule_penetration_m(const Vec3& a, const Vec3& b, double radius_m, const OrientedBox& box) {
+    return radius_m - min_axis_distance(a, b, radius_m, [&](const Vec3& p) { return distance_to_box(box, p); });
 }
 
 bool capsule_overlaps_annulus(const Vec3& a, const Vec3& b, double radius_m, const Annulus& ring) {
-    return capsule_overlaps(a, b, radius_m, [&](const Vec3& p) { return distance_to_annulus(ring, p); });
+    return min_axis_distance(a, b, radius_m, [&](const Vec3& p) { return distance_to_annulus(ring, p); }) < radius_m;
 }
 
 }  // namespace starsim::contact

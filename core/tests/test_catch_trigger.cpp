@@ -4,6 +4,8 @@
 #include "starsim/contact/catch_trigger.hpp"
 #include "starsim/contact/tower_collision.hpp"
 
+#include <cmath>
+
 using namespace starsim;
 using namespace starsim::contact;
 using math::Vec3;
@@ -28,4 +30,11 @@ TEST_CASE("Hull collisions with the tower and the launch mount", "[contact]") {
     const Vec3 near_tower = tower.tower_direction() * 20.0;                       // hull reaches 24.5 m: face at 24 m
     CHECK(hits_tower(tower, near_tower + up * 50.0, near_tower + up * 121.0, 4.5));
     CHECK(hits_tower(tower, Vec3{3.0, 0.0, 10.0}, Vec3{3.0, 0.0, 81.0}, 4.5));     // fell into the mount
+}
+
+TEST_CASE("Hull penetration by an arm box", "[contact]") {
+    const OrientedBox arm{{6.0, 0.0, 0.0}, math::Mat3::identity(), {1.0, 18.0, 1.25}};  // inner face at x = 5
+    const Vec3 bottom{0.0, 0.0, -30.0}, top{0.0, 0.0, 40.0};
+    CHECK(hull_penetration_m(arm, bottom, top, 4.5) <= 0.0);                                   // 0.5 m clear
+    CHECK(std::abs(hull_penetration_m(arm, bottom + Vec3{1.0, 0, 0}, top + Vec3{1.0, 0, 0}, 4.5) - 0.5) < 1e-9);
 }
