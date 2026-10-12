@@ -18,6 +18,7 @@ const SUN_RENDER_DISTANCE_M := 2.0e7
 const FOCUS_EARTH := "earth"
 const FOCUS_MOON := "moon"
 const FOCUS_EARTH_MOON := "earth_moon"
+const FOCUS_VEHICLE := "vehicle"
 
 var core := StarsimCore.new()
 var clock := SimClock.new()
@@ -28,6 +29,7 @@ var sun_disk := MeshInstance3D.new()
 var sun_light := DirectionalLight3D.new()
 var stars := StarField.new()
 var moon_orbit := OrbitLine.new()
+var flight := FlightController.new()
 var earth_label := Label3D.new()
 var moon_label := Label3D.new()
 var sites: Array = []  ## launch sites from config/launch_sites.toml
@@ -49,6 +51,8 @@ func _ready() -> void:
 		push_error("World: SPICE kernels missing - run tools/data_pipeline/fetch.py")
 		return
 	sites = TomlLite.load_file(Paths.config_dir().path_join("launch_sites.toml")).get("site", [])
+	flight.setup(Paths.config_dir())
+	add_child(flight)
 
 	add_child(clock)
 	add_child(camera)
@@ -63,14 +67,21 @@ func _ready() -> void:
 	clock.set_time(core.utc_to_tdb_s(Time.get_datetime_string_from_system(true)))
 
 
-func _process(_delta: float) -> void:
+var _delta := 0.0
+
+
+func _process(delta: float) -> void:
 	if not core.is_open():
 		return
+	_delta = delta
 	update_world()
 
 
 ## Recomputes the whole scene for clock.tdb_s. Public so tests can render a fixed instant.
 func update_world() -> void:
+	# The flight simulation may lag behind the clock at high time warp; the clock then waits for it.
+	if flight.sim.is_active():
+		clock.tdb_s = flight.advance(clock.tdb_s, _delta)
 	var t := clock.tdb_s
 	earth.fixed_to_gcrf = core.earth_fixed_to_gcrf(t)
 	moon.fixed_to_gcrf = core.moon_fixed_to_gcrf(t)
@@ -95,9 +106,19 @@ func update_world() -> void:
 	_moon_material.set_shader_parameter("camera_position_local", moon.to_local_frame(cam - moon_gcrf_m))
 
 	_place_sun(sun_from_camera)
+	flight.place_views(self, cam)
 	moon_orbit.update_line(core, t, cam)
 	earth_label.position = earth.position
 	moon_label.position = moon.position
+
+
+## Puts a vehicle on a launch site at the current instant and focuses the camera on it.
+func launch_vehicle(vehicle_id: String, site: Dictionary) -> bool:
+	if not flight.launch(vehicle_id, site, clock.tdb_s):
+		return false
+	clock.warp = 1.0
+	set_focus(FOCUS_VEHICLE)
+	return true
 
 
 ## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml).
@@ -125,6 +146,10 @@ func set_focus(new_focus: String) -> void:
 		FOCUS_EARTH_MOON:
 			camera.distance_m = 1.1e9
 			camera.pitch = -1.2
+		FOCUS_VEHICLE:
+			camera.distance_m = 260.0
+			camera.pitch = -0.15
+			camera.yaw = 0.8
 		_:
 			for site in sites:
 				if site["id"] == focus:
@@ -142,8 +167,12 @@ func _update_camera(t: float) -> void:
 		camera.site_up_gcrf = rotation * Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
 		camera.site_east_gcrf = rotation * Vector3(-sin(lon), cos(lon), 0.0)
 		camera.site_north_gcrf = rotation * Vector3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat))
+	elif focus == FOCUS_VEHICLE and flight.sim.is_active():
+		camera.focus_center_gcrf_m = flight.controlled_position_gcrf()
+		camera.orbit_local_up_gcrf = camera.focus_center_gcrf_m.normalized()
 	else:
 		camera.focus_center_gcrf_m = moon_gcrf_m if focus == FOCUS_MOON else Vector3.ZERO
+		camera.orbit_local_up_gcrf = Vector3.ZERO
 	camera.update_pose()
 
 
@@ -203,7 +232,10 @@ func _setup_environment() -> void:
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_COLOR
 	environment.background_color = Color.BLACK
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	# [E] Faint ambient light (sky / earthshine stand-in) until the atmosphere model exists (M8).
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color(0.55, 0.65, 0.8)
+	environment.ambient_light_energy = 0.25
 	environment.tonemap_mode = Environment.TONE_MAPPER_AGX
 	environment.glow_enabled = true
 	environment.glow_hdr_threshold = 4.0

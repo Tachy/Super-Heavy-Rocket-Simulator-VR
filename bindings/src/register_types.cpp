@@ -4,6 +4,7 @@
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
 
+#include "flight_sim.hpp"
 #include "starsim_core.hpp"
 
 namespace {
@@ -13,6 +14,7 @@ void initialize_starsim(godot::ModuleInitializationLevel level) {
         return;
     }
     GDREGISTER_CLASS(starsim::bindings::StarsimCore);
+    GDREGISTER_CLASS(starsim::bindings::FlightSim);
 }
 
 void uninitialize_starsim(godot::ModuleInitializationLevel) {}

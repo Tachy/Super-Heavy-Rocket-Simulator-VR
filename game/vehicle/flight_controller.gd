@@ -1,0 +1,135 @@
+class_name FlightController
+extends Node
+## Owns the C++ flight session: pilot input (HOTAS + keyboard), pilot actions, vehicle views.
+## Keyboard: W/S pitch, A/D yaw, Q/E roll, Shift/Ctrl throttle, I ignition, L release clamps,
+## K cutoff, G stage separation, M control mode. HOTAS (stick + throttle found by name): config/input_hotas.toml.
+
+const THROTTLE_KEY_RATE := 0.5  # per second
+
+var sim := FlightSim.new()
+var throttle := 1.0
+var rate_mode := true
+var views: Array[VehicleView] = []
+var last_event := ""
+
+var _stick := {}     ## [stick] table of config/input_hotas.toml
+var _throttle := {}  ## [throttle] table
+var _joydump := OS.get_cmdline_user_args().has("--joydump")
+
+
+func setup(config_dir: String) -> void:
+	sim.setup(config_dir)
+	var mapping := TomlLite.load_file(config_dir.path_join("input_hotas.toml"))
+	_stick = mapping.get("stick", {})
+	_throttle = mapping.get("throttle", {})
+
+
+func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 90.0) -> bool:
+	for view in views:
+		view.queue_free()
+	views.clear()
+	throttle = 1.0
+	var ok := sim.launch_from_pad(vehicle_id, site["latitude_deg"], site["longitude_deg"], site["height_m"],
+			heading_deg, tdb_s)
+	last_event = "%s auf %s" % [vehicle_id, site["name"]] if ok else "Start fehlgeschlagen"
+	return ok
+
+
+## Advances the simulation to `tdb_s`; returns the time actually reached (the sim may lag at high warp).
+func advance(tdb_s: float, delta: float) -> float:
+	if not sim.is_active():
+		return tdb_s
+	_read_input(delta)
+	return sim.advance_to(tdb_s)
+
+
+func place_views(parent: Node3D, camera_gcrf_m: Vector3) -> void:
+	if not sim.is_active():
+		return
+	while views.size() < sim.body_count():
+		var view := VehicleView.new()
+		view.body_index = views.size()
+		parent.add_child(view)
+		views.append(view)
+	for view in views:
+		view.update_view(sim, camera_gcrf_m)
+
+
+func controlled_position_gcrf() -> Vector3:
+	return sim.body_position_gcrf_m(sim.controlled_index()) if sim.is_active() else Vector3.ZERO
+
+
+func _unhandled_key_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo or not sim.is_active():
+		return
+	match key.keycode:
+		KEY_I:
+			sim.ignite()
+			last_event = "Zündung"
+		KEY_L:
+			sim.release_clamps()
+			last_event = "Klammern gelöst"
+		KEY_K:
+			sim.cutoff()
+			last_event = "Triebwerke aus"
+		KEY_G:
+			sim.stage()
+			last_event = "Stufentrennung"
+		KEY_M:
+			rate_mode = not rate_mode
+			sim.set_rate_mode(rate_mode)
+			last_event = "Steuerung: %s" % ("Ratensteuerung (SAS)" if rate_mode else "Direkt (Gimbal)")
+
+
+func _read_input(delta: float) -> void:
+	var pitch := _key_axis(KEY_S, KEY_W)
+	var yaw := _key_axis(KEY_A, KEY_D)
+	var roll := _key_axis(KEY_Q, KEY_E)
+	if Input.is_key_pressed(KEY_SHIFT):
+		throttle = minf(throttle + THROTTLE_KEY_RATE * delta, 1.0)
+	if Input.is_key_pressed(KEY_CTRL):
+		throttle = maxf(throttle - THROTTLE_KEY_RATE * delta, 0.0)
+
+	var stick := _find_device(_stick.get("device_name", ""))
+	if stick >= 0:
+		pitch += _axis(stick, _stick, "pitch")
+		yaw += _axis(stick, _stick, "yaw")
+		roll += _axis(stick, _stick, "roll")
+	var lever := _find_device(_throttle.get("device_name", ""))
+	if lever >= 0:
+		throttle = (_axis(lever, _throttle, "throttle", false) + 1.0) * 0.5
+	if _joydump:
+		for device in Input.get_connected_joypads():
+			var values := PackedStringArray()
+			for axis in 6:
+				values.append("%d:%+.2f" % [axis, Input.get_joy_axis(device, axis)])
+			print("[joydump] %d %s  %s" % [device, Input.get_joy_name(device), " ".join(values)])
+	sim.set_input(clampf(pitch, -1.0, 1.0), clampf(yaw, -1.0, 1.0), clampf(roll, -1.0, 1.0), throttle)
+
+
+## Index of the first connected joypad whose name contains `name_part`, or -1.
+static func _find_device(name_part: String) -> int:
+	if name_part.is_empty():
+		return -1
+	for device in Input.get_connected_joypads():
+		var raw_name := str(Input.get_joy_info(device).get("raw_name", ""))
+		if Input.get_joy_name(device).contains(name_part) or raw_name.contains(name_part):
+			return device
+	return -1
+
+
+static func _axis(device: int, mapping: Dictionary, role: String, apply_deadzone := true) -> float:
+	var axis := int(mapping.get(role + "_axis", -1))
+	if axis < 0:
+		return 0.0
+	var value := Input.get_joy_axis(device, axis)
+	if mapping.get(role + "_invert", false):
+		value = -value
+	if apply_deadzone and absf(value) < float(mapping.get("deadzone", 0.04)):
+		return 0.0
+	return value
+
+
+static func _key_axis(negative: Key, positive: Key) -> float:
+	return (1.0 if Input.is_key_pressed(positive) else 0.0) - (1.0 if Input.is_key_pressed(negative) else 0.0)

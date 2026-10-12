@@ -7,6 +7,7 @@ const FOCUS_OPTIONS := [
 	["Erde", World.FOCUS_EARTH],
 	["Mond", World.FOCUS_MOON],
 	["Erde-Mond-System", World.FOCUS_EARTH_MOON],
+	["Fahrzeug", World.FOCUS_VEHICLE],
 ]
 const PRESETS := [
 	["Jetzt", ""],
@@ -22,6 +23,9 @@ var _info_label := Label.new()
 var _utc_input := LineEdit.new()
 var _focus := OptionButton.new()
 var _presets := OptionButton.new()
+var _vehicles := OptionButton.new()
+var _launch_site := OptionButton.new()
+var _vehicle_ids: PackedStringArray = []
 var _warp_before_pause := 1.0
 
 
@@ -60,6 +64,20 @@ func _ready() -> void:
 		_presets.add_item(preset[0])
 	_presets.item_selected.connect(_on_preset_selected)
 	box.add_child(_presets)
+
+	box.add_child(HSeparator.new())
+	var launch_label := Label.new()
+	launch_label.text = "Start vorbereiten"
+	box.add_child(launch_label)
+	for file in DirAccess.get_files_at(Paths.config_dir().path_join("vehicles")):
+		if file.ends_with(".toml"):
+			_vehicle_ids.append(file.get_basename())
+			_vehicles.add_item(file.get_basename())
+	box.add_child(_vehicles)
+	for site in world.sites:
+		_launch_site.add_item(site["name"])
+	box.add_child(_launch_site)
+	box.add_child(_button("Auf die Rampe stellen", _on_launch_pressed))
 
 
 func _process(_delta: float) -> void:
@@ -118,6 +136,13 @@ func _on_preset_selected(index: int) -> void:
 	if utc.is_empty():
 		utc = Time.get_datetime_string_from_system(true)
 	world.clock.set_time(world.core.utc_to_tdb_s(utc))
+
+
+func _on_launch_pressed() -> void:
+	if _vehicle_ids.is_empty() or world.sites.is_empty():
+		return
+	if world.launch_vehicle(_vehicle_ids[_vehicles.selected], world.sites[_launch_site.selected]):
+		_focus.select(FOCUS_OPTIONS.size() - 1)
 
 
 func _button(text: String, action: Callable) -> Button:

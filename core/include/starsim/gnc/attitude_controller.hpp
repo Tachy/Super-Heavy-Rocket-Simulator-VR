@@ -28,6 +28,10 @@ public:
     GimbalSteering steer(const vehicle::FlightBody& body, double ambient_pressure_pa, const math::Vec3& axis_gcrf,
                          const math::Vec3& roll_reference_gcrf = {}) const;
 
+    // Rate command (stability augmentation for manual flight): tracks body angular rates.
+    GimbalSteering steer_rates(const vehicle::FlightBody& body, double ambient_pressure_pa,
+                               const math::Vec3& rates_body_radps) const;
+
 private:
     Gains gains_;
 };

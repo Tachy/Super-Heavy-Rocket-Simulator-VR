@@ -1,5 +1,6 @@
 # Renders the main scene at a fixed instant and camera, saves a PNG and quits (needs a GPU, no --headless).
 # godot --path game --script res://tests/render_check.gd -- --utc=2024-04-08T18:42:00 --focus=earth
+# Vehicle: --vehicle=starship_block3 --site=starbase_olp1 [--fly=40] (ignite, liftoff at 3 s, fly N s)
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -38,6 +39,8 @@ func _process(_delta: float) -> bool:
 			_aim_at_moon(world)
 		if _args.has("view_from"):
 			_view_from(world, _args["view_from"])
+		if _args.has("vehicle"):
+			_fly_vehicle(world)
 	_frames += 1
 	if _frames == FRAMES_TO_SETTLE:
 		var out: String = _args.get("out", "user://render_check.png")
@@ -54,6 +57,30 @@ func _view_from(world: World, body: String) -> void:
 	var u := Frames.to_render(direction).normalized()
 	world.camera.pitch = -asin(u.y)
 	world.camera.yaw = atan2(u.x, u.z)
+
+
+# Launch a vehicle at the given instant, fly it with neutral controls (rate command holds attitude).
+func _fly_vehicle(world: World) -> void:
+	var site: Dictionary = world.sites[0]
+	for candidate: Dictionary in world.sites:
+		if candidate["id"] == _args.get("site", ""):
+			site = candidate
+	var t0 := world.clock.tdb_s
+	world.launch_vehicle(_args["vehicle"], site)
+	world.clock.warp = 0.0
+	var sim := world.flight.sim
+	var fly := float(_args.get("fly", "0"))
+	if fly > 0.0:
+		sim.ignite()
+		sim.advance_to(t0 + 3.0)
+		sim.release_clamps()
+		sim.advance_to(t0 + 3.0 + fly)
+		world.clock.set_time(t0 + 3.0 + fly)
+	var cam := world.camera
+	if _args.has("yaw"): cam.yaw = float(_args["yaw"])
+	if _args.has("pitch"): cam.pitch = float(_args["pitch"])
+	if _args.has("distance"): cam.distance_m = float(_args["distance"])
+	print("render_check: telemetry ", sim.telemetry(sim.controlled_index()))
 
 
 # Ground camera: point at the Moon.

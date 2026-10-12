@@ -87,8 +87,12 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 ## Known issues
 - The very first `--import` of a fresh `game/.godot` segfaults on editor shutdown when the
   extension is present (import itself completes; later runs are fine). Not yet investigated.
-- Solar radiation pressure is not modelled yet (belongs to the vehicle model, M4). Artemis I free-flight
-  arcs show it as a t^2 residual (~1.9e-8 m/s^2: 39 m after 18 h).
+- Solar radiation pressure is modelled for vehicles (FlightBody); the Artemis I coast test still uses the
+  pure gravity propagator and shows SRP as a t^2 residual (~1.9e-8 m/s^2: 39 m after 18 h).
+- Starship throttle schedules are not public: the IFT-3 test reconstructs the throttle from measured
+  acceleration (mean 0.75 of nameplate) and checks consistency (speed 4.3 %, altitude 7.9 %, max-Q).
+- Earth is a 256x128 ellipsoid mesh: near the ground facets sit up to ~0.5 km below the true surface and
+  the sky is black (no atmosphere rendering) - terrain and atmosphere come in M8.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
 
 ## Game (Godot) structure
@@ -101,6 +105,14 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Rendering uses APPARENT positions (light time + aberration) for Sun and Moon; geometric positions
   would misplace the Moon's shadow on Earth by ~40 km.
 - UI text is German, code English.
+- Flight: `game/vehicle/flight_controller.gd` (input, pilot actions) drives the C++ `FlightSim`
+  (`sim::FlightSession`, 200 Hz); `vehicle_view.gd` draws stages and plumes; `ui/flight_hud.gd` shows telemetry.
+  The world clock waits for the flight sim at high time warp.
+- HOTAS: Thrustmaster T.16000M + TWCS, found by device name (`config/input_hotas.toml`). Raw axes (twist,
+  throttle lever) only exist when `config/sdl_gamecontrollerdb.txt` is loaded BEFORE engine start via
+  `SDL_GAMECONTROLLERCONFIG_FILE` (done by `Start-Desktop.cmd`); Godot's built-in mappings drop them and
+  `Input.add_joy_mapping` at runtime has no effect. Probe axes: `res://tests/joy_probe.gd`.
+- Start the game with `Start-Desktop.cmd` (repo root).
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 

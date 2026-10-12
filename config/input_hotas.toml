@@ -1,0 +1,24 @@
+# HOTAS mapping. Devices are found by a substring of their name (indices change when re-plugging).
+# Raw axes need config/sdl_gamecontrollerdb.txt, loaded at engine start by Start-Desktop.cmd.
+# Find axes with: godot --path game --script res://tests/joy_probe.gd -- --seconds=30
+# Measured 2026-10-12 on Thrustmaster T.16000M FCS + TWCS throttle.
+
+[stick]
+device_name = "T16000M"
+deadzone = 0.04
+pitch_axis = 1          # stick forward = -1 -> inverted: forward tips the nose towards the heading
+pitch_invert = true
+yaw_axis = 0            # stick left/right
+yaw_invert = false
+roll_axis = 2           # twist
+roll_invert = false
+# axis 3 = slider (unused)
+
+[throttle]
+device_name = "TWCS"
+throttle_axis = 2       # main lever, forward = -1
+throttle_invert = true
+# axes 0/1 = mini-stick, axis 5 = rocker (unused)
+
+# Keyboard (always active): W/S pitch, A/D yaw, Q/E roll, Shift/Ctrl throttle up/down,
+# I ignition, L release clamps (liftoff), K engine cutoff, G stage separation, M control mode.

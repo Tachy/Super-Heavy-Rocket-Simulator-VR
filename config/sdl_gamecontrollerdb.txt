@@ -1,0 +1,7 @@
+# SDL controller mappings loaded at engine start (set by Start-Desktop.cmd via SDL_GAMECONTROLLERCONFIG_FILE).
+# Flight-sim devices are mapped 1:1 to their raw axes a0..a5 so that twist, sliders and throttle levers
+# reach Godot (the built-in gamepad mappings drop them). Axis roles: config/input_hotas.toml.
+# Thrustmaster T.16000M FCS stick
+030065a94f0400000ab1000000000000,T16000M raw,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,platform:Windows,
+# Thrustmaster TWCS throttle
+0300f6394f04000087b6000000000000,TWCS raw,leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,platform:Windows,

@@ -12,3 +12,6 @@ func _ready() -> void:
 	var panel := TimePanel.new()
 	panel.world = world
 	ui.add_child(panel)
+	var hud := FlightHud.new()
+	hud.world = world
+	ui.add_child(hud)
