@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "starsim/gnc/descent_discretization.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/optim/socp_builder.hpp"
 
 namespace starsim::gnc {
@@ -24,12 +25,19 @@ struct DescentTarget {
 };
 
 struct DescentLimits {
-    std::array<double, 2> tilt_max_rad{25.0 * 3.14159265358979 / 180.0, 10.0 * 3.14159265358979 / 180.0};  // per phase
-    double rate_max_radps = 0.1;                                // [E] structural / controllability
-    double glide_slope_rad = 30.0 * 3.14159265358979 / 180.0;  // above the horizontal, towards the catch point
-    double min_mass_kg = 0.0;                                   // dry mass + reserve
+    std::array<double, 2> tilt_max_rad{25.0 * constants::deg_to_rad, 10.0 * constants::deg_to_rad};  // per phase
+    double terminal_tilt_rad = 4.0 * constants::deg_to_rad;   // [E] at the catch / touchdown (structural)
+    int tilt_taper_nodes = 4;                                 // phase 1's last nodes taper linearly to it
+    double rate_max_radps = 0.1;                              // [E] structural / controllability
+    double glide_slope_rad = 30.0 * constants::deg_to_rad;    // above the horizontal, towards the catch point
+    double min_mass_kg = 0.0;                                 // dry mass + reserve
     std::array<double, 2> min_phase_s{1.0, 1.0};
     double max_phase_s = 120.0;
+    // Start-up of the ignition engines (thrust = spool x throttled thrust, spool rising linearly over startup_s):
+    // phase 0's thrust bounds scale with the spool at each node's reference time. The planning model's mass flow
+    // keeps the full pressure-loss term meanwhile (a few kg too much; documented simplification).
+    double phase0_initial_spool = 1.0;
+    double phase0_startup_s = 0.0;
 };
 
 struct DescentWeights {
@@ -48,6 +56,9 @@ struct DescentReference {
 
 // Scales of the state deviation variables (one unit = this much physical change).
 std::array<double, 14> descent_state_scales();
+
+// Time of node k from the plan start for the given phase durations (nodes equally spaced within a phase).
+double reference_node_time(const std::array<double, 2>& duration_s, int k, int nodes_per_phase);
 
 // Convex subproblem of one SCvx iteration in scaled deviations from the reference.
 class DescentSubproblem {

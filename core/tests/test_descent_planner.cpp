@@ -242,3 +242,76 @@ TEST_CASE("SCvx stops early when the virtual control stalls", "[gnc][descent][sc
     CHECK_FALSE(plan.converged);
     CHECK(plan.iterations <= s.stall_iterations + 2);
 }
+
+namespace {
+
+double tilt_of(const DescentState& x) {
+    return 2.0 * std::asin(std::min(1.0, std::hypot(x[descent_index::attitude + 2], x[descent_index::attitude + 3])));
+}
+
+}  // namespace
+
+TEST_CASE("The tilt limit tapers towards the catch", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    auto s = settings(*b);
+    const auto x0 = ignition_state(*b);
+    const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
+    REQUIRE(plan.converged);
+    const int last = static_cast<int>(plan.reference.x.size()) - 1;
+    for (int from_end = 0; from_end < s.limits.tilt_taper_nodes; ++from_end) {
+        const double limit = s.limits.terminal_tilt_rad +
+                             (s.limits.tilt_max_rad[1] - s.limits.terminal_tilt_rad) * from_end / s.limits.tilt_taper_nodes;
+        CHECK(tilt_of(plan.reference.x[static_cast<size_t>(last - from_end)]) <= limit + 1e-6);
+    }
+}
+
+TEST_CASE("Thrust follows the engines' start-up at ignition", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    auto s = settings(*b);
+    s.limits.phase0_initial_spool = 0.0;
+    s.limits.phase0_startup_s = 3.0;
+    const auto x0 = ignition_state(*b);
+    const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
+    REQUIRE(plan.converged);
+    const double t_max = b->model.engine_sets[0].thrust_max_n;
+    for (int k = 0; k < s.nodes_per_phase - 1; ++k) {
+        const double t = plan.node_time_s(k);
+        // The bound uses the previous iterate's node times: a converged plan's durations differ by its last step.
+        CHECK(norm(plan.reference.u[static_cast<size_t>(k)]) <= t_max * (std::min(1.0, t / 3.0) + 1e-3));
+    }
+}
+
+TEST_CASE("An abort plan stays above the ground at every node", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    auto s = settings(*b);
+    s.limits.glide_slope_rad = 0.0;
+    DescentTarget target;
+    target.goal = DescentGoal::Abort;
+    target.ground_cg_height_m = b->vehicle->mass_properties().cg_station_m;
+    target.sea_target_m = {0.0, 2000.0, 0.0};
+    target.keep_out_center_m = {0.0, 0.0, -30.0};
+    target.keep_out_radius_m = 25.0;
+    // Low and slow: the cheapest path to the sea would skim the ground.
+    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {120.0, 0.0, 0.0}, {-20.0, 15.0, 0.0}, Quat{}, {});
+    const auto plan = plan_descent(b->model, x0, 1, target, s, nullptr, 0.0);
+    REQUIRE(plan.converged);
+    for (const auto& x : plan.reference.x) CHECK(x[descent_index::position] >= target.ground_cg_height_m - 1e-3);
+}
+
+TEST_CASE("A warm start begins at the measured snapshot", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    const auto x0 = ignition_state(*b);
+    const auto target = catch_target(*b, state_attitude(x0));
+    const auto first = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
+    REQUIRE(first.converged);
+    const double t = 2.0;
+    auto snapshot = first.state_at(t);
+    snapshot[descent_index::position + 1] += 20.0;  // 20 m east of the old plan
+    snapshot[descent_index::velocity + 2] -= 3.0;
+    const int phase = first.phase_at(t);
+    const auto ref = warm_start_reference(first, t, phase, s.nodes_per_phase, snapshot);
+    CHECK(ref.x[0] == snapshot);
+    const auto again = plan_descent(b->model, snapshot, phase, target, s, &first, t);
+    CHECK(again.converged);
+}

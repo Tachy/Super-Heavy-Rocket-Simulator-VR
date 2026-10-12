@@ -30,9 +30,7 @@ Quat upright_with_roll(const Quat& q) {
     return n > 1e-9 ? Quat{q.w / n, q.x / n, 0.0, 0.0} : Quat{1.0, 0.0, 0.0, 0.0};
 }
 
-double guess_node_time(const std::array<double, 2>& duration, int k, int n) {
-    return k <= n - 1 ? duration[0] * k / (n - 1) : duration[0] + duration[1] * (k - n + 1) / (n - 1);
-}
+double guess_node_time(const std::array<double, 2>& duration, int k, int n) { return reference_node_time(duration, k, n); }
 
 // Node interval containing t (zero-length intervals skipped) and the fraction within it.
 std::pair<int, double> locate(const DescentPlan& plan, double t) {
@@ -46,19 +44,20 @@ std::pair<int, double> locate(const DescentPlan& plan, double t) {
     return {last - 1, 1.0};
 }
 
-DescentReference shifted(const DescentPlan& previous, double elapsed, int start_phase, int n) {
+}  // namespace
+
+DescentReference warm_start_reference(const DescentPlan& previous, double elapsed, int start_phase, int n,
+                                      const DescentState& initial) {
     DescentReference ref;
     ref.duration_s[0] = start_phase == 1 ? 0.0 : std::max(previous.reference.duration_s[0] - elapsed, 0.0);
     ref.duration_s[1] = start_phase == 1 ? std::max(previous.duration_s() - elapsed, 0.0) : previous.reference.duration_s[1];
     for (int k = 0; k < 2 * n - 1; ++k) {
         const double t = guess_node_time(ref.duration_s, k, n);
-        ref.x.push_back(previous.state_at(elapsed + t));
+        ref.x.push_back(t <= 0.0 ? initial : previous.state_at(elapsed + t));
         ref.u.push_back(previous.thrust_at(elapsed + t));
     }
     return ref;
 }
-
-}  // namespace
 
 Quat nearest_sign(const Quat& target, const Quat& reference) {
     const double d = target.w * reference.w + target.x * reference.x + target.y * reference.y + target.z * reference.z;
@@ -149,7 +148,7 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
     plan.nodes_per_phase = n;
     plan.start_phase = start_phase;
     plan.goal = target.goal;
-    plan.reference = warm_start ? shifted(*warm_start, elapsed, start_phase, n)
+    plan.reference = warm_start ? warm_start_reference(*warm_start, elapsed, start_phase, n, initial)
                                 : initial_guess(model, initial, start_phase, target, settings.limits, n);
     // Minimum phase durations only shape a fresh plan: on a re-plan they would stretch a nearly finished phase
     // again and again (every replan cycle).

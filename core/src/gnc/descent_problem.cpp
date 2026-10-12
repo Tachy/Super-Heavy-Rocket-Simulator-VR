@@ -42,6 +42,10 @@ AffineExpr scaled(AffineExpr e, double factor) {
 
 }  // namespace
 
+double reference_node_time(const std::array<double, 2>& duration, int k, int n) {
+    return k <= n - 1 ? duration[0] * k / (n - 1) : duration[0] + duration[1] * (k - n + 1) / (n - 1);
+}
+
 DescentSubproblem build_descent_subproblem(const DescentModel& model, const DescentReference& ref,
                                            const std::vector<IntervalLinearization>& lin, const DescentState& initial,
                                            int start_phase, const DescentTarget& target, const DescentLimits& limits,
@@ -132,10 +136,18 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         // so the thrust steps down over phase 0's last interval (engines running down at the switch).
         const int p = k < boundary ? 0 : 1;
         const auto& set = p == 0 ? e0 : e1;
-        const double t_max = set.thrust_max_n;
-        const double t_min = set.thrust_min_n;
+        double spool = 1.0;
+        if (p == 0 && limits.phase0_startup_s > 0.0) {
+            spool = std::min(1.0, limits.phase0_initial_spool +
+                                      reference_node_time(ref.duration_s, k, n) / limits.phase0_startup_s);
+        }
+        const double t_max = set.thrust_max_n * spool;
+        const double t_min = set.thrust_min_n * spool;
         const double gimbal = set.gimbal_max_rad;
-        const double tilt = limits.tilt_max_rad[static_cast<size_t>(p)];
+        double tilt = limits.tilt_max_rad[static_cast<size_t>(p)];
+        if (const int from_end = last - k; p == 1 && from_end < limits.tilt_taper_nodes) {
+            tilt = limits.terminal_tilt_rad + (tilt - limits.terminal_tilt_rad) * from_end / limits.tilt_taper_nodes;
+        }
         b.add_second_order_cone({AffineExpr{t_max}, U(k, 0), U(k, 1), U(k, 2)});
         // Lower thrust bound, linearised: (ubar / |ubar|) . u >= t_min.
         const Vec3& ub = ref.u[at(k)];
@@ -174,6 +186,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
             for (const auto& [index, c] : rz.terms) keep.add(index, nz * c);
             keep.add_constant(ny * ry.constant + nz * rz.constant);
             b.add_nonnegative(keep);
+            b.add_nonnegative(X(k, descent_index::position).add_constant(-target.ground_cg_height_m));  // above ground
         }
         }
         // Trust region: eta_k >= ||(dx_k, du_k)||^2 as a rotated cone ||(2 v, eta - 1)|| <= eta + 1.

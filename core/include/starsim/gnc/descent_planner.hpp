@@ -56,6 +56,11 @@ math::Quat nearest_sign(const math::Quat& target, const math::Quat& reference);
 DescentReference initial_guess(const DescentModel& model, const DescentState& initial, int start_phase,
                                const DescentTarget& target, const DescentLimits& limits, int nodes_per_phase);
 
+// Previous plan shifted by `elapsed_s` onto the node grid of a re-plan; nodes at time 0 are the measured `initial`
+// state (the old plan's prediction there differs by the tracking error).
+DescentReference warm_start_reference(const DescentPlan& previous, double elapsed_s, int start_phase, int nodes_per_phase,
+                                      const DescentState& initial);
+
 // SCvx (penalised trust region): linearise about the iterate, solve the convex subproblem, take its solution as
 // the next iterate; converged when the step and the virtual control are below tolerance. `warm_start` (may be
 // null) is the previous plan, `warm_start_elapsed_s` the time since its start.
