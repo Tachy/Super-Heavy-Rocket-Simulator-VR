@@ -20,6 +20,10 @@ struct AffineExpr {
         terms.emplace_back(variable, coefficient);
         return *this;
     }
+    AffineExpr& add_constant(double value) {
+        constant += value;
+        return *this;
+    }
 };
 
 // Contiguous block of variables; block[i] is the global index of its i-th variable.

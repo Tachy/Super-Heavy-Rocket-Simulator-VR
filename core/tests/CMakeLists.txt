@@ -46,6 +46,7 @@ add_executable(starsim_core_tests
     test_socp_reuse.cpp
     test_descent_model.cpp
     test_descent_discretization.cpp
+    test_descent_problem.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE
