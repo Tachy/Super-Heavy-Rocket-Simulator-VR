@@ -19,6 +19,7 @@ add_library(starsim_core STATIC
     src/gnc/burn_node.cpp
     src/sim/telemetry_recorder.cpp
     src/sim/flight_session.cpp
+    src/mission/lunar_transfer.cpp
     src/time/utc_date_time.cpp
     src/frames/geodetic.cpp
     src/environment/point_mass_gravity.cpp
