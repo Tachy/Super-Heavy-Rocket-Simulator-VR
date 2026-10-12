@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -10,6 +11,7 @@
 #include "starsim/environment/gravity.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/gnc/attitude_controller.hpp"
+#include "starsim/gnc/burn_node.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
 namespace starsim::sim {
@@ -28,13 +30,14 @@ enum class ControlMode {
     DirectGimbal  // stick commands gimbal angles directly
 };
 
-enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, Orbit };
+enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, Orbit, Burn };
 
 const char* to_string(AutopilotState state);
 
 struct AutopilotStatus {
     AutopilotState state = AutopilotState::Off;
     gnc::GuidanceCommand guidance;
+    gnc::BurnExecutor::Status burn;  // valid in state Burn
 };
 
 struct LaunchSite {
@@ -52,12 +55,16 @@ public:
     static constexpr double max_pitch_yaw_rate_radps = 5.0 * 3.14159265358979 / 180.0;
     static constexpr double max_roll_rate_radps = 10.0 * 3.14159265358979 / 180.0;
 
+    // `gravity_config`: fidelity flags of the gravity model (default: Earth + J2, Moon, Sun).
     FlightSession(const ephemeris::Ephemeris& ephemeris, const frames::BodyOrientation& earth,
-                  std::filesystem::path config_dir);
+                  std::filesystem::path config_dir, environment::PointMassGravityConfig gravity_config = {});
 
     // Places a vehicle on a pad (engines off, clamped). `heading_rad`: direction of body +y.
     void launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
                          time::Epoch epoch);
+    // Places a vehicle (stages from `first_stage` upwards) on a given orbit, nose along the velocity.
+    void place_in_orbit(const std::string& vehicle_id, const math::StateVector& state_gcrf, time::Epoch epoch,
+                        size_t first_stage = 0);
     bool active() const { return !bodies_.empty(); }
     time::Epoch epoch() const { return epoch_; }
 
@@ -76,6 +83,14 @@ public:
     const AutopilotStatus& autopilot() const { return autopilot_; }
     const gnc::AscentGuidance* ascent_guidance() const { return guidance_.get(); }
     double gm_earth_m3ps2() const { return gm_earth_; }
+
+    // Manoeuvre execution on the controlled body (RCS orientation, timed ignition, closed-loop cutoff).
+    void execute_burn(const gnc::BurnNode& node);
+    bool plan_circularization_at_apoapsis();  // plans and executes; false if not on an elliptic orbit
+    const gnc::BurnExecutor* burn() const { return burn_ ? &*burn_ : nullptr; }
+
+    // Coasting prediction of a body (no thrust): GCRF positions every `step_s`, until impact or `duration_s`.
+    std::vector<math::Vec3> predict_trajectory(size_t index, double duration_s, double step_s) const;
 
     // Failure injection for tests and training.
     void fail_engine(size_t body_index, size_t stage_index, size_t engine_index);
@@ -117,6 +132,7 @@ private:
     double gm_earth_;
     AutopilotStatus autopilot_;
     std::unique_ptr<gnc::AscentGuidance> guidance_;
+    std::optional<gnc::BurnExecutor> burn_;
 };
 
 }  // namespace starsim::sim

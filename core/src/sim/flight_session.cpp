@@ -4,15 +4,16 @@
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
+#include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/frames/geodetic.hpp"
 
 namespace starsim::sim {
 
 FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames::BodyOrientation& earth,
-                             std::filesystem::path config_dir)
+                             std::filesystem::path config_dir, environment::PointMassGravityConfig gravity_config)
     : config_dir_(std::move(config_dir)),
       earth_(earth),
-      gravity_(ephemeris, earth),
+      gravity_(ephemeris, earth, gravity_config),
       env_{gravity_, atmosphere_, earth, &ephemeris, true},
       gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)) {}
 
@@ -23,6 +24,7 @@ const char* to_string(AutopilotState state) {
         case AutopilotState::Booster: return "Booster";
         case AutopilotState::UpperStage: return "Oberstufe";
         case AutopilotState::Orbit: return "Orbit erreicht";
+        case AutopilotState::Burn: return "Manöver";
     }
     return "";
 }
@@ -35,6 +37,71 @@ void FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target, con
         autopilot_.state = bodies_[controlled_].body->vehicle().stages().size() > 1 ? AutopilotState::Booster
                                                                                     : AutopilotState::UpperStage;
     }
+}
+
+void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::StateVector& state, time::Epoch epoch,
+                                   size_t first_stage) {
+    auto config = config::load_vehicle(config_dir_, vehicle_id);
+    config.stages.erase(config.stages.begin(), config.stages.begin() + static_cast<long>(first_stage));
+    auto vehicle = std::make_unique<vehicle::Vehicle>(config, config_dir_);
+    // Body x along the velocity, body z along the orbit normal.
+    const math::Vec3 x = math::normalized(state.velocity_mps);
+    const math::Vec3 z = math::normalized(cross(state.position_m, state.velocity_mps));
+    const math::Vec3 y = cross(z, x);
+    math::Mat3 m;
+    const math::Vec3 columns[3] = {x, y, z};
+    for (int c = 0; c < 3; ++c) {
+        m(0, c) = columns[c].x;
+        m(1, c) = columns[c].y;
+        m(2, c) = columns[c].z;
+    }
+    const vehicle::RigidBodyState rigid{state.position_m, state.velocity_mps, math::Quat::from_matrix(m), {}};
+    bodies_.clear();
+    bodies_.push_back({std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid), {}});
+    controlled_ = 0;
+    epoch_ = epoch;
+    launch_epoch_ = epoch;
+    autopilot_ = {};
+    burn_.reset();
+}
+
+void FlightSession::execute_burn(const gnc::BurnNode& node) {
+    burn_.emplace(node);
+    autopilot_.state = AutopilotState::Burn;
+}
+
+bool FlightSession::plan_circularization_at_apoapsis() {
+    if (bodies_.empty()) return false;
+    const auto& s = bodies_[controlled_].body->state();
+    const auto node = gnc::circularize_at_apoapsis({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gm_earth_);
+    if (!node) return false;
+    execute_burn(*node);
+    return true;
+}
+
+std::vector<math::Vec3> FlightSession::predict_trajectory(size_t index, double duration_s, double step_s) const {
+    std::vector<math::Vec3> points;
+    const auto& s = bodies_.at(index).body->state();
+    // Impact on a sphere of the polar radius (display only; the flight itself uses the ellipsoid).
+    const std::vector<integrators::Event<6>> impact{
+        {"impact", [](double, const integrators::State<6>& y) { return std::hypot(y[0], y[1], y[2]) - 6356752.0; },
+         integrators::Crossing::Falling}};
+    double next = 0.0;
+    const integrators::StepObserver<6> observer = [&](const integrators::Dop853<6>& solver) {
+        while (next <= solver.t()) {
+            const auto y = solver.dense_output(next);
+            points.push_back({y[0], y[1], y[2]});
+            next += step_s;
+        }
+    };
+    auto options = orbit::default_coast_options();
+    options.relative_tolerance = 1e-9;  // display accuracy is plenty
+    options.absolute_tolerance = integrators::State<6>{{1.0, 1.0, 1.0, 1e-3, 1e-3, 1e-3}};
+    const auto result = integrators::integrate<6>(orbit::ballistic_dynamics(gravity_, epoch_), 0.0,
+                                                  math::pack({s.position_gcrf_m, s.velocity_gcrf_mps}), duration_s,
+                                                  options, impact, observer);
+    points.push_back({result.y[0], result.y[1], result.y[2]});
+    return points;
 }
 
 void FlightSession::fail_engine(size_t body_index, size_t stage_index, size_t engine_index) {
@@ -75,10 +142,34 @@ void FlightSession::run_autopilot() {
                 autopilot_.state = AutopilotState::Orbit;
             }
             break;
+        case AutopilotState::Burn: {
+            // Full-thrust vacuum performance of the lowest stage that has engines.
+            double thrust = 0.0, mdot = 0.0, shutdown = 0.0;
+            for (const auto& stage : body.vehicle().stages()) {
+                if (stage.engines.empty()) continue;
+                for (const auto& e : stage.engines) {
+                    if (e.starved) continue;
+                    thrust += e.performance->thrust_n(1.0, 0.0);
+                    mdot += e.performance->mass_flow_kgps(1.0);
+                    shutdown = std::max(shutdown, e.performance->config().shutdown_s);
+                }
+                break;
+            }
+            autopilot_.burn = burn_->update(body, epoch_, tick_s, thrust, mdot, shutdown);
+            const bool running = std::any_of(flying.running_groups.begin(), flying.running_groups.end(),
+                                             [](const auto& g) { return g.second; });
+            if (autopilot_.burn.ignite && !running) ignite();
+            if (autopilot_.burn.complete) {
+                cutoff();
+                autopilot_.state = AutopilotState::Off;
+            }
+            break;
+        }
         default:
             break;
     }
 }
+
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
                                     time::Epoch epoch) {
@@ -102,10 +193,10 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         return command;
     }
     const bool guided = autopilot_.state == AutopilotState::Booster || autopilot_.state == AutopilotState::UpperStage;
-    if (guided) {
+    if (guided || autopilot_.state == AutopilotState::Burn) {
         for (auto& group : command.groups) group.throttle = 1.0;
-        controller_.steer(*flying.body, ambient_pressure_pa, autopilot_.guidance.thrust_direction_gcrf)
-            .apply_to(command);
+        const auto& direction = guided ? autopilot_.guidance.thrust_direction_gcrf : autopilot_.burn.direction_gcrf;
+        controller_.steer(*flying.body, ambient_pressure_pa, direction).apply_to(command);
         return command;
     }
     // Axis convention: body +y points downrange (launch heading), z = x cross y. Pitch input > 0 tips
@@ -132,7 +223,8 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
 
 time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
     for (int tick = 0; tick < max_ticks && target - epoch_ >= tick_s; ++tick) {
-        if (autopilot_.state != AutopilotState::Off && !bodies_.empty()) {
+        if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit &&
+            !bodies_.empty()) {
             run_autopilot();
             const bool closed_loop = autopilot_.state == AutopilotState::UpperStage;
             if (autopilot_.state == AutopilotState::Booster || closed_loop) {

@@ -95,6 +95,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites.
   Physics ground = flat at the pad height (FlightBody::ground_height_m): gentle contact (<= 3 m/s, <= 10 deg)
   rests, harder contact is an impact. Sky is black (no atmosphere rendering). Terrain/atmosphere: M8.
+- Orbit targets are judged on osculating elements at cutoff. Burn planning helpers are two-body; in the J2
+  field a Kepler-circular orbit oscillates ~10 km in radius (J2 raises gravity ~0.14 %). J2-aware targeting: open.
+- C++ sources are UTF-8 (/utf-8); UI strings in the core are German.
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.

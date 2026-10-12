@@ -16,6 +16,7 @@ add_library(starsim_core STATIC
     src/vehicle/flight_body.cpp
     src/gnc/attitude_controller.cpp
     src/gnc/ascent_guidance.cpp
+    src/gnc/burn_node.cpp
     src/sim/telemetry_recorder.cpp
     src/sim/flight_session.cpp
     src/time/utc_date_time.cpp
@@ -36,7 +37,7 @@ target_include_directories(starsim_core PUBLIC include)
 target_link_libraries(starsim_core PRIVATE cspice tomlplusplus::tomlplusplus)
 
 if(MSVC)
-    target_compile_options(starsim_core PRIVATE /W4 /permissive- /fp:precise)
+    target_compile_options(starsim_core PRIVATE /W4 /permissive- /fp:precise /utf-8)
 else()
     target_compile_options(starsim_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
