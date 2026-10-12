@@ -12,6 +12,7 @@ namespace {
 constexpr double crossflow_efficiency = 0.68;      // eta [E]
 constexpr double crossflow_drag_coefficient = 1.2;  // C_dc of a circular cylinder [E]
 constexpr double ogive_cp_fraction = 0.466;          // potential CP behind the tip, fraction of nose length
+constexpr double free_molecular_drag_coefficient = 2.2;  // [E] diffuse reflection, per projected area
 
 double interpolate(const std::vector<double>& x, const std::vector<double>& y, double at) {
     if (at <= x.front()) return y.front();
@@ -23,6 +24,13 @@ double interpolate(const std::vector<double>& x, const std::vector<double>& y, d
 }
 
 }  // namespace
+
+double rarefaction_weight(double knudsen) {
+    if (knudsen <= 0.01) return 0.0;
+    if (knudsen >= 10.0) return 1.0;
+    const double s = std::sin(constants::pi / 8.0 * (3.0 + std::log10(knudsen)));
+    return s * s;
+}
 
 AxialDragCurve::AxialDragCurve(const config::CsvTable& table)
     : mach_(table.column("mach")),
@@ -44,7 +52,7 @@ SlenderBodyAero::SlenderBodyAero(SlenderBodyGeometry geometry, AxialDragCurve dr
       reference_area_m2_(constants::pi * 0.25 * geometry.diameter_m * geometry.diameter_m) {}
 
 AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, double density_kg_m3,
-                                    double speed_of_sound_mps, bool powered) const {
+                                    double speed_of_sound_mps, bool powered, double mean_free_path_m) const {
     AeroResult result;
     const double speed = norm(air_velocity_body_mps);
     result.normal_force_station_m = 0.5 * geometry_.length_m;
@@ -54,6 +62,9 @@ AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, dou
     result.mach = speed_of_sound_mps > 0.0 ? speed / speed_of_sound_mps : 0.0;
     result.dynamic_pressure_pa = 0.5 * density_kg_m3 * speed * speed;
     const double q_area = result.dynamic_pressure_pa * reference_area_m2_;
+    result.knudsen = mean_free_path_m / geometry_.length_m;
+    result.rarefaction = rarefaction_weight(result.knudsen);
+    const double w = result.rarefaction;
 
     // Oncoming flow relative to the body is -air_velocity. Angle of attack between +x and the motion.
     const double axial_speed = air_velocity_body_mps.x;
@@ -64,14 +75,16 @@ AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, dou
 
     // Axial force opposes the axial component of motion.
     const double cos_a = std::cos(alpha);
-    const double c_axial = drag_.cd(result.mach, powered) * cos_a * cos_a;
+    const double c_axial = ((1.0 - w) * drag_.cd(result.mach, powered) + w * free_molecular_drag_coefficient) * cos_a * cos_a;
     const double axial_force = -std::copysign(c_axial * q_area, axial_speed);
 
     // Normal force opposes the cross-flow velocity.
     const double sin_a = std::sin(alpha);
-    const double potential = geometry_.nose_length_m > 0.0 ? std::abs(std::sin(2.0 * alpha) * std::cos(0.5 * alpha)) : 0.0;
+    const double potential =
+        (1.0 - w) * (geometry_.nose_length_m > 0.0 ? std::abs(std::sin(2.0 * alpha) * std::cos(0.5 * alpha)) : 0.0);
     const double planform_ratio = geometry_.length_m * geometry_.diameter_m / reference_area_m2_;
-    const double viscous = crossflow_efficiency * crossflow_drag_coefficient * planform_ratio * sin_a * sin_a;
+    const double crossflow = (1.0 - w) * crossflow_efficiency * crossflow_drag_coefficient + w * free_molecular_drag_coefficient;
+    const double viscous = crossflow * planform_ratio * sin_a * sin_a;
     const double normal_force = (potential + viscous) * q_area;
 
     result.force_body_n = {axial_force, 0.0, 0.0};

@@ -37,7 +37,8 @@ struct FlightTelemetry {
     double speed_relative_mps = 0.0;      // relative to the rotating Earth (what webcasts show)
     double vertical_speed_mps = 0.0;      // relative, along the local vertical
     double flight_path_angle_rad = 0.0;   // relative velocity above the local horizontal
-    double mach = 0.0;
+    double mach = 0.0;                    // meaningful only in continuum flow (knudsen < 0.01)
+    double knudsen = 0.0;                 // mean free path / vehicle length
     double dynamic_pressure_pa = 0.0;
     double angle_of_attack_rad = 0.0;
     double mass_kg = 0.0;
@@ -89,6 +90,7 @@ public:
 
 private:
     void follow_pad(const frames::BodyOrientation& earth, time::Epoch epoch);
+    math::Vec3 rcs_torque(const VehicleCommand& command) const;
     void resolve_ground_contact(const frames::BodyOrientation& earth, time::Epoch epoch);
 
     std::unique_ptr<Vehicle> vehicle_;

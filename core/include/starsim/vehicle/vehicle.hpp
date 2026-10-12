@@ -74,6 +74,8 @@ struct VehicleCommand {
     double gimbal_pitch_rad = 0.0;
     double gimbal_yaw_rad = 0.0;
     double gimbal_roll_rad = 0.0;
+    // Reaction control: requested torque as a fraction (-1..1) of the maximum per body axis.
+    math::Vec3 rcs_torque_fraction;
 };
 
 // Stack of stages with engines, tanks and aerodynamics. Owns no kinematic state (see FlightBody).
@@ -101,6 +103,13 @@ public:
     void consume_propellant(double dt_s);
 
     bool any_engine_producing_thrust() const;
+
+    // Failure injection: engine `index` (in stage order) shuts down for good.
+    void fail_engine(size_t stage_index, size_t engine_index);
+
+    // Maximum RCS torque per body axis. [E] Thrusters modelled as pure couples: half of them act per
+    // axis, pitch/yaw lever = half the vehicle length, roll lever = the radius.
+    math::Vec3 max_rcs_torque_nm() const;
     const aero::SlenderBodyAero& aero() const { return *aero_; }
 
     // Splits the stack below stage `index`: this vehicle keeps stages [0, index), the returned one

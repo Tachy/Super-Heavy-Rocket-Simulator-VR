@@ -79,6 +79,8 @@ struct StageConfig {
     double jettison_after_separation_kg = 0.0;
     double reserve_propellant_kg = 0.0;
     double radiation_pressure_coefficient = 1.3;  // Cr for solar radiation pressure
+    int rcs_thruster_count = 0;                    // reaction control (cold gas)
+    double rcs_thrust_n = 0.0;                     // per thruster
     std::string separation;
     std::vector<TankConfig> tanks;
     std::vector<EngineGroupConfig> engine_groups;

@@ -144,6 +144,10 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     } else {
         s.aero.reference_diameter_m = s.diameter_m;
     }
+    if (auto rcs = t["rcs"].as_table()) {
+        s.rcs_thruster_count = static_cast<int>(doc.number_or(*rcs, "thruster_count", 0.0));
+        s.rcs_thrust_n = doc.number_or(*rcs, "thrust_per_thruster_n", 0.0);
+    }
     if (auto recovery = t["recovery"].as_table()) {
         s.reserve_propellant_kg = doc.number_or(*recovery, "reserve_propellant_kg", 0.0);
     }

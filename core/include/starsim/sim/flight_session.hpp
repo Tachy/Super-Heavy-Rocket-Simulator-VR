@@ -8,6 +8,7 @@
 
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/environment/gravity.hpp"
+#include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/gnc/attitude_controller.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -25,6 +26,15 @@ struct PilotInput {
 enum class ControlMode {
     RateCommand,  // stick commands body rates; the controller drives the gimbals (stability augmentation)
     DirectGimbal  // stick commands gimbal angles directly
+};
+
+enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, Orbit };
+
+const char* to_string(AutopilotState state);
+
+struct AutopilotStatus {
+    AutopilotState state = AutopilotState::Off;
+    gnc::GuidanceCommand guidance;
 };
 
 struct LaunchSite {
@@ -58,6 +68,18 @@ public:
     void set_control_mode(ControlMode mode) { mode_ = mode; }
     ControlMode control_mode() const { return mode_; }
 
+    // Ascent autopilot: ignition, liftoff at full thrust, booster profile, MECO at the landing reserve,
+    // hot staging, closed-loop upper-stage guidance to the target orbit, cutoff. Pilot input is ignored
+    // while engaged.
+    void engage_ascent_autopilot(const gnc::AscentTarget& target, const gnc::PitchProgram& program = {});
+    void disengage_autopilot() { autopilot_.state = AutopilotState::Off; }
+    const AutopilotStatus& autopilot() const { return autopilot_; }
+    const gnc::AscentGuidance* ascent_guidance() const { return guidance_.get(); }
+    double gm_earth_m3ps2() const { return gm_earth_; }
+
+    // Failure injection for tests and training.
+    void fail_engine(size_t body_index, size_t stage_index, size_t engine_index);
+
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
     void cutoff();             // stop all engines
@@ -78,6 +100,7 @@ private:
     };
 
     vehicle::VehicleCommand command_for(size_t index, double ambient_pressure_pa) const;
+    void run_autopilot();
 
     std::filesystem::path config_dir_;
     const frames::BodyOrientation& earth_;
@@ -91,6 +114,9 @@ private:
     ControlMode mode_ = ControlMode::RateCommand;
     time::Epoch epoch_;
     time::Epoch launch_epoch_;
+    double gm_earth_;
+    AutopilotStatus autopilot_;
+    std::unique_ptr<gnc::AscentGuidance> guidance_;
 };
 
 }  // namespace starsim::sim

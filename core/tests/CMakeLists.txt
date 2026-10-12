@@ -23,6 +23,7 @@ add_executable(starsim_core_tests
     test_flight_body.cpp
     test_ift3_validation.cpp
     test_flight_session.cpp
+    test_ascent_guidance.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE

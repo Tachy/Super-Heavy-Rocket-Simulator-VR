@@ -136,6 +136,7 @@ godot::Dictionary FlightSim::telemetry(int index) const {
     d["vertical_speed_mps"] = t.vertical_speed_mps;
     d["flight_path_angle_deg"] = t.flight_path_angle_rad * constants::rad_to_deg;
     d["mach"] = t.mach;
+    d["knudsen"] = t.knudsen;
     d["dynamic_pressure_pa"] = t.dynamic_pressure_pa;
     d["angle_of_attack_deg"] = t.angle_of_attack_rad * constants::rad_to_deg;
     d["mass_kg"] = t.mass_kg;

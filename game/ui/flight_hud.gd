@@ -31,7 +31,13 @@ func _process(_delta: float) -> void:
 	lines.append("  inertial      %9.0f m/s" % t["speed_inertial_mps"])
 	lines.append("  vertikal      %9.0f m/s" % t["vertical_speed_mps"])
 	lines.append("Bahnwinkel      %9.1f °" % t["flight_path_angle_deg"])
-	lines.append("Mach            %9.2f" % t["mach"])
+	# Mach only means something in continuum flow; above ~90 km the gas is rarefied.
+	if t["knudsen"] < 0.01:
+		lines.append("Mach            %9.2f" % t["mach"])
+	elif t["knudsen"] < 10.0:
+		lines.append("Mach            %9.2f  (Übergangsströmung)" % t["mach"])
+	else:
+		lines.append("Mach                 –   (freie Molekularströmung)")
 	lines.append("Staudruck       %9.1f kPa" % (t["dynamic_pressure_pa"] / 1000.0))
 	lines.append("Anstellwinkel   %9.1f °" % t["angle_of_attack_deg"])
 	lines.append("Beschleunigung  %9.2f g" % t["sensed_acceleration_g"])

@@ -103,3 +103,23 @@ TEST_CASE("Slender body aerodynamics", "[aero]") {
     CHECK(slip.force_body_n.y < 0.0);
     CHECK(slip.normal_force_station_m > 0.5 * 124.4);
 }
+
+TEST_CASE("Mean free path and rarefied-flow drag", "[environment][aero]") {
+    const environment::Us76Atmosphere atmosphere;
+    // US76 tabulated mean free path: 6.6332e-8 m at sea level, 1.42e-1 m at 100 km.
+    CHECK(atmosphere.at(0.0).mean_free_path_m == Catch::Approx(6.6332e-8).epsilon(0.01));
+    CHECK(atmosphere.at(100e3).mean_free_path_m == Catch::Approx(0.142).epsilon(0.1));
+
+    CHECK(aero::rarefaction_weight(1e-4) == 0.0);
+    CHECK(aero::rarefaction_weight(100.0) == 1.0);
+    CHECK(aero::rarefaction_weight(0.1) == Catch::Approx(0.5));  // midpoint of the bridge
+
+    const auto table = config::load_csv_table(config_dir / "aero/starship_stack_ascent.csv");
+    const aero::SlenderBodyAero body({52.1, 9.0, 17.0}, aero::AxialDragCurve(table));
+    const double area = constants::pi * 0.25 * 81.0;
+    const auto orbit = atmosphere.at(400e3);
+    const auto r = body.compute({7700.0, 0.0, 0.0}, orbit.density_kg_m3, orbit.speed_of_sound_mps, false,
+                                orbit.mean_free_path_m);
+    CHECK(r.knudsen > 10.0);
+    CHECK(-r.force_body_n.x / (r.dynamic_pressure_pa * area) == Catch::Approx(2.2));  // free-molecular C_A
+}

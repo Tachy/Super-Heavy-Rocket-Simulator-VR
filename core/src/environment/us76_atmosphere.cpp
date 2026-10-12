@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/math/constants.hpp"
@@ -14,6 +15,8 @@ constexpr double gas_constant = 8314.32;            // R*, J / (kmol K)
 constexpr double sea_level_molar_mass = 28.9644;    // M0, kg / kmol
 constexpr double effective_earth_radius_m = 6356766.0;  // r0 for geopotential altitude
 constexpr double heat_capacity_ratio = 1.4;
+constexpr double boltzmann = 1.380649e-23;               // J/K
+constexpr double collision_diameter_m = 3.65e-10;         // sigma, US76 mean collision diameter
 
 struct Layer {
     double base_geopotential_m;
@@ -52,6 +55,13 @@ constexpr std::array<UpperPoint, 22> upper{{
     {1000e3, 1000.0, 3.561e-15},
 }};
 
+// lambda = 1 / (sqrt(2) pi sigma^2 n), n = p / (k T)  (US76 eq. 21)
+double mean_free_path(double pressure_pa, double temperature_k) {
+    if (pressure_pa <= 0.0) return std::numeric_limits<double>::infinity();
+    const double n = pressure_pa / (boltzmann * temperature_k);
+    return 1.0 / (std::sqrt(2.0) * constants::pi * collision_diameter_m * collision_diameter_m * n);
+}
+
 double speed_of_sound(double temperature_k) {
     return std::sqrt(heat_capacity_ratio * gas_constant * temperature_k / sea_level_molar_mass);
 }
@@ -75,12 +85,13 @@ AtmosphereState lower_atmosphere(double altitude_m) {
                             g0 * sea_level_molar_mass / (gas_constant * layer->lapse_rate_k_per_m));
     }
     const double density = pressure * sea_level_molar_mass / (gas_constant * temperature);
-    return {density, pressure, temperature, speed_of_sound(temperature)};
+    return {density, pressure, temperature, speed_of_sound(temperature), mean_free_path(pressure, temperature)};
 }
 
 AtmosphereState upper_atmosphere(double altitude_m) {
     if (altitude_m >= upper.back().altitude_m) {
-        return {0.0, 0.0, upper.back().temperature_k, speed_of_sound(upper.back().temperature_k)};
+        return {0.0, 0.0, upper.back().temperature_k, speed_of_sound(upper.back().temperature_k),
+                std::numeric_limits<double>::infinity()};
     }
     const auto next = std::upper_bound(upper.begin(), upper.end(), altitude_m,
                                        [](double z, const UpperPoint& p) { return z < p.altitude_m; });
@@ -90,7 +101,7 @@ AtmosphereState upper_atmosphere(double altitude_m) {
     const double density = std::exp(std::log(lo.density_kg_m3) + f * std::log(hi.density_kg_m3 / lo.density_kg_m3));
     const double temperature = lo.temperature_k + f * (hi.temperature_k - lo.temperature_k);
     const double pressure = density * gas_constant * temperature / sea_level_molar_mass;
-    return {density, pressure, temperature, speed_of_sound(temperature)};
+    return {density, pressure, temperature, speed_of_sound(temperature), mean_free_path(pressure, temperature)};
 }
 
 }  // namespace

@@ -48,6 +48,7 @@ struct TickContext {
     Vec3 earth_rotation_gcrf;
     std::vector<std::vector<double>> tank_flows;
     Vec3 srp_acceleration_gcrf;  // evaluated at the start of the tick
+    Vec3 rcs_torque_nm;          // commanded reaction-control couple, body axes
 };
 
 struct Forces {
@@ -70,7 +71,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
     const Vec3 air_velocity = s.velocity_gcrf_mps - cross(ctx.earth_rotation_gcrf, s.position_gcrf_m);
     const bool powered = ctx.vehicle.any_engine_producing_thrust();
     f.aero = ctx.vehicle.aero().compute(s.attitude.inverse_rotate(air_velocity), air.density_kg_m3,
-                                        air.speed_of_sound_mps, powered);
+                                        air.speed_of_sound_mps, powered, air.mean_free_path_m);
     f.nongravitational_body_n = f.aero.force_body_n;
     f.moment_body_nm = cross(Vec3{f.aero.normal_force_station_m - f.mass.cg_station_m, 0.0, 0.0}, f.aero.force_body_n);
 
@@ -84,6 +85,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
             f.moment_body_nm += cross(e.gimbal_point_m - Vec3{f.mass.cg_station_m, 0.0, 0.0}, force);
         }
     }
+    f.moment_body_nm += ctx.rcs_torque_nm;
     f.acceleration_gcrf = ctx.env.gravity.acceleration_mps2(s.position_gcrf_m, ctx.epoch + tau_s) +
                           s.attitude.rotate(f.nongravitational_body_n) / f.mass.mass_kg + ctx.srp_acceleration_gcrf;
     return f;
@@ -176,6 +178,12 @@ void FlightBody::follow_pad(const frames::BodyOrientation& earth, time::Epoch ep
     state_.angular_velocity_body_radps = state_.attitude.inverse_rotate(earth_rotation_vector(transform));
 }
 
+Vec3 FlightBody::rcs_torque(const VehicleCommand& command) const {
+    const Vec3 max = vehicle_->max_rcs_torque_nm();
+    const Vec3& f = command.rcs_torque_fraction;
+    return {std::clamp(f.x, -1.0, 1.0) * max.x, std::clamp(f.y, -1.0, 1.0) * max.y, std::clamp(f.z, -1.0, 1.0) * max.z};
+}
+
 void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt_s, const VehicleCommand& command) {
     if (impacted_) {
         return;
@@ -196,7 +204,8 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
                           transform.rotation,
                           earth_rotation_vector(transform),
                           vehicle_->tank_mass_flows_kgps(),
-                          solar_radiation_acceleration(env, *vehicle_, state_, vehicle_->mass_properties().mass_kg, epoch)};
+                          solar_radiation_acceleration(env, *vehicle_, state_, vehicle_->mass_properties().mass_kg, epoch),
+                          rcs_torque(command)};
     const integrators::OdeFunction<13> f = [&ctx](double tau, const State13& y) { return derivative(ctx, tau, y); };
     state_ = unpack(integrators::rk4_step<13>(f, 0.0, pack(state_), dt_s));
     vehicle_->consume_propellant(dt_s);
@@ -272,9 +281,10 @@ FlightTelemetry FlightBody::telemetry(const FlightEnvironment& env, time::Epoch 
     t.flight_path_angle_rad = std::atan2(t.vertical_speed_mps, norm(relative - t.vertical_speed_mps * up));
 
     const TickContext ctx{env, *vehicle_, epoch, transform.rotation, earth_rotation_vector(transform),
-                          vehicle_->tank_mass_flows_kgps(), {}};
+                          vehicle_->tank_mass_flows_kgps(), {}, {}};
     const Forces f = evaluate(ctx, 0.0, state_);
     t.mach = f.aero.mach;
+    t.knudsen = f.aero.knudsen;
     t.dynamic_pressure_pa = f.aero.dynamic_pressure_pa;
     t.angle_of_attack_rad = f.aero.angle_of_attack_rad;
     t.mass_kg = f.mass.mass_kg;

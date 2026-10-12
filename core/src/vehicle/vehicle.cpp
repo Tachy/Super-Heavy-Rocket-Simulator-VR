@@ -268,6 +268,20 @@ bool Vehicle::any_engine_producing_thrust() const {
     return false;
 }
 
+void Vehicle::fail_engine(size_t stage_index, size_t engine_index) {
+    auto& e = stages_.at(stage_index).engines.at(engine_index);
+    e.mode = EngineMode::Off;
+    e.spool = 0.0;
+    e.starved = true;  // never restarts
+}
+
+Vec3 Vehicle::max_rcs_torque_nm() const {
+    double force = 0.0;
+    for (const auto& s : stages_) force += 0.5 * s.config.rcs_thruster_count * s.config.rcs_thrust_n;
+    const double lever = 0.5 * length_m();
+    return {force * 0.5 * diameter_m(), force * lever, force * lever};
+}
+
 std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     if (index == 0 || index >= stages_.size()) {
         throw std::out_of_range("Vehicle::separate: index must split the stack into two non-empty parts");

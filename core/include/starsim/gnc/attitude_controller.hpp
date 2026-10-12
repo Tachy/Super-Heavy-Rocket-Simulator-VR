@@ -10,9 +10,22 @@ struct GimbalSteering {
     double roll_rad = 0.0;
 };
 
-// Thrust-vector attitude controller: points the body x-axis along a commanded direction.
-// Second-order error dynamics per axis (natural frequency, damping), converted into gimbal angles
-// from the current inertia, thrust and lever arm. Roll is only damped unless a roll reference is set.
+// Actuator commands that realise a desired body torque: engine gimbals where running gimbaled engines
+// give authority on an axis, reaction control otherwise.
+struct ControlOutput {
+    GimbalSteering gimbal;
+    math::Vec3 rcs_torque_fraction;
+
+    void apply_to(vehicle::VehicleCommand& command) const {
+        command.gimbal_pitch_rad = gimbal.pitch_rad;
+        command.gimbal_yaw_rad = gimbal.yaw_rad;
+        command.gimbal_roll_rad = gimbal.roll_rad;
+        command.rcs_torque_fraction = rcs_torque_fraction;
+    }
+};
+
+// Attitude controller: second-order error dynamics per axis (natural frequency, damping) turned into a
+// torque from the current inertia, then allocated to gimbals or RCS.
 class AttitudeController {
 public:
     struct Gains {
@@ -25,12 +38,16 @@ public:
 
     // `axis_gcrf`: desired direction of the body x-axis (unit). `roll_reference_gcrf` (optional, non-zero):
     // direction the body +y axis should point to, projected perpendicular to the axis.
-    GimbalSteering steer(const vehicle::FlightBody& body, double ambient_pressure_pa, const math::Vec3& axis_gcrf,
-                         const math::Vec3& roll_reference_gcrf = {}) const;
+    ControlOutput steer(const vehicle::FlightBody& body, double ambient_pressure_pa, const math::Vec3& axis_gcrf,
+                        const math::Vec3& roll_reference_gcrf = {}) const;
 
     // Rate command (stability augmentation for manual flight): tracks body angular rates.
-    GimbalSteering steer_rates(const vehicle::FlightBody& body, double ambient_pressure_pa,
-                               const math::Vec3& rates_body_radps) const;
+    ControlOutput steer_rates(const vehicle::FlightBody& body, double ambient_pressure_pa,
+                              const math::Vec3& rates_body_radps) const;
+
+    // Allocates a desired body torque to gimbals / RCS.
+    static ControlOutput allocate(const vehicle::FlightBody& body, double ambient_pressure_pa,
+                                  const math::Vec3& torque_body_nm);
 
 private:
     Gains gains_;

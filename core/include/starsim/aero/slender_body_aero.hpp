@@ -34,13 +34,20 @@ struct AeroResult {
     double mach = 0.0;
     double dynamic_pressure_pa = 0.0;
     double angle_of_attack_rad = 0.0;  // total angle between body axis and the oncoming flow
+    double knudsen = 0.0;              // mean free path / body length
+    double rarefaction = 0.0;          // 0 = continuum, 1 = free-molecular flow
 };
+
+// Bridging weight continuum -> free-molecular flow over 0.01 < Kn < 10 (sine-squared in log Kn).
+double rarefaction_weight(double knudsen);
 
 // Axisymmetric slender body:
 //   axial force  C_A = C_A0(M) cos^2(alpha)                      (table, power on / off)
 //   normal force C_N = sin(2a) cos(a/2) + eta * C_dc * (L D / A_ref) sin^2(a)   (Jorgensen, NASA TR R-474)
 // The potential term acts at 0.466 of the nose length from the tip (ogive, Barrowman), the cross-flow
 // term at mid-length. [E] eta = 0.68, C_dc = 1.2 - generic, to be calibrated (no public Starship data).
+// Rarefied flow (above ~90 km): bridged by Knudsen number to free-molecular coefficients
+// (C_A = 2.2 cos^2 a, cross-flow C_dc = 2.2 with eta = 1 [E], typical diffuse-reflection values).
 // No damping derivatives yet.
 class SlenderBodyAero {
 public:
@@ -48,7 +55,7 @@ public:
 
     // air_velocity_body_mps: velocity of the vehicle relative to the air, body axes.
     AeroResult compute(const math::Vec3& air_velocity_body_mps, double density_kg_m3, double speed_of_sound_mps,
-                       bool powered) const;
+                       bool powered, double mean_free_path_m = 0.0) const;
 
     const SlenderBodyGeometry& geometry() const { return geometry_; }
     const AxialDragCurve& drag_curve() const { return drag_; }

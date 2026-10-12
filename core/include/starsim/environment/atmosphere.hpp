@@ -7,6 +7,7 @@ struct AtmosphereState {
     double pressure_pa = 0.0;
     double temperature_k = 0.0;
     double speed_of_sound_mps = 0.0;
+    double mean_free_path_m = 0.0;  // infinity in vacuum
 };
 
 class Atmosphere {

@@ -140,10 +140,7 @@ TEST_CASE("IFT-3 booster ascent matches webcast telemetry", "[vehicle][validatio
             throttle_sum += throttle;
             ++throttle_samples;
         }
-        const auto steering = controller.steer(*body, ambient, axis, downrange);
-        command.gimbal_pitch_rad = steering.pitch_rad;
-        command.gimbal_yaw_rad = steering.yaw_rad;
-        command.gimbal_roll_rad = steering.roll_rad;
+        controller.steer(*body, ambient, axis, downrange).apply_to(command);
 
         if (t >= 0.0 && std::abs(t - std::round(t)) < 0.5 * dt) {
             recorder.record(t, telemetry);
