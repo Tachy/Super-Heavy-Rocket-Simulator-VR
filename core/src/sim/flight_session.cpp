@@ -317,7 +317,7 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         if (flying.return_guidance && !flying.body->impacted()) {
             const auto& r = flying.return_command;
             for (auto& group : command.groups) group.throttle = r.throttle;
-            return_controller_.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf).apply_to(command);
+            return_controller_.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf, r.roll_reference_gcrf).apply_to(command);
             command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(r.rcs_force_gcrf);
         }
         return command;
@@ -404,7 +404,10 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             }
         }
         for (size_t i = 0; i < bodies_.size(); ++i) {
-            if (i != controlled_ && bodies_[i].return_guidance) run_return_guidance(bodies_[i]);
+            if (i != controlled_ && bodies_[i].return_guidance) {
+                if (tower_) bodies_[i].return_guidance->set_catch_contact(tower_->in_contact(*bodies_[i].body));
+                run_return_guidance(bodies_[i]);
+            }
         }
         const auto pointers = body_pointers();
         if (tower_) tower_->before_tick(pointers, earth_, epoch_);
@@ -457,9 +460,15 @@ void FlightSession::stage() {
     auto upper = lower.body->separate(1);
     for (auto& [group, run] : lower.running_groups) run = false;  // booster engines off after separation
     if (booster_return_) {
-        lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(
-            gnc::LandingSite{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m},
-            *booster_return_);
+        gnc::LandingSite landing{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m, {}};
+        const auto& booster_stage = lower.body->vehicle().stages().front();
+        if (tower_ && !booster_stage.config.catch_pins.azimuths_rad.empty()) {
+            const auto& g = tower_->geometry();
+            landing.catch_target = gnc::CatchTarget{g.to_itrf({0.0, 0.0, g.arm_top_height_m(0.0)}), g.site_to_itrf() * g.across(),
+                                                    booster_stage.base_station_m + booster_stage.config.catch_pins.station_m,
+                                                    booster_stage.config.catch_pins.azimuths_rad.front()};
+        }
+        lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(landing, *booster_return_);
     }
     Flying flying{std::move(upper), {}, nullptr, {}};
     bodies_.push_back(std::move(flying));
