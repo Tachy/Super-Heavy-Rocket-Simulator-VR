@@ -112,6 +112,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Rendering uses APPARENT positions (light time + aberration) for Sun and Moon; geometric positions
   would misplace the Moon's shadow on Earth by ~40 km.
 - UI text is German, code English.
+- Views and controls of the finished game are specified in `docs/ansichten.md` (German, living document):
+  keep it in sync when building M6 (planner), M7 (cockpit/VR) and M8.
 - Flight: `game/vehicle/flight_controller.gd` (input, pilot actions) drives the C++ `FlightSim`
   (`sim::FlightSession`, 200 Hz); `vehicle_view.gd` draws stages and plumes; `ui/flight_hud.gd` shows telemetry.
   The world clock waits for the flight sim at high time warp.
