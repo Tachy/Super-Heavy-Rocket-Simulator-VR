@@ -1,0 +1,32 @@
+# Third-party sources and engine builds (fetched / built locally, see CLAUDE.md)
+/external/
+
+# Downloaded runtime data (SPICE kernels, tiles, ...) - fetched by tools/data_pipeline/fetch.py
+/data/*
+!/data/README.md
+
+# Build output
+/build/
+/out/
+*.obj
+*.lib
+*.exp
+*.pdb
+*.ilk
+
+# Godot
+/game/.godot/
+/game/bin/
+*.import
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# IDEs / OS
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

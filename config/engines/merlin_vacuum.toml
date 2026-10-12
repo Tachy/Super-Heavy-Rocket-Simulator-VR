@@ -1,0 +1,35 @@
+# SpaceX Merlin Vacuum (1D) - Falcon 9 second stage
+[sources]
+wiki_merlin = "https://en.wikipedia.org/wiki/SpaceX_Merlin (commonly cited values)"
+
+[engine]
+id = "merlin_vacuum"
+name = "Merlin Vacuum"
+cycle = "gas generator"
+propellant = "kerolox"
+mixture_ratio = 2.36                 # [E]
+chamber_pressure_pa = 97e5           # [E]
+
+[performance]
+reference_pressure_pa = 0.0
+thrust_ref_n = 981e3                 # [S:wiki_merlin]
+isp_ref_s = 348.0                    # [S:wiki_merlin]
+nozzle_exit_diameter_m = 3.3         # [E]
+max_ambient_pressure_pa = 2000.0     # [E]
+
+[throttle]
+min = 0.39                           # [S:wiki_merlin]
+max = 1.00
+rate_per_s = 0.5                     # [E]
+
+[gimbal]
+max_angle_deg = 5.0                  # [E]
+rate_deg_s = 10.0                    # [E]
+
+[mass]
+dry_kg = 630.0                       # [E]
+vehicle_side_hardware_kg = 0.0
+
+[timing]
+startup_s = 2.0                      # [E]
+shutdown_s = 0.3                     # [E]

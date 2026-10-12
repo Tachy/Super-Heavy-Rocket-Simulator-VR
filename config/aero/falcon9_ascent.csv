@@ -1,0 +1,13 @@
+# Axial drag coefficient of Falcon 9 at zero angle of attack, reference area pi*(d/2)^2.
+# [E] Generic slender launch-vehicle trend. Calibrate against telemetry.
+mach,cd_axial_power_on,cd_axial_power_off
+0.0,0.28,0.35
+0.8,0.31,0.38
+0.95,0.42,0.50
+1.1,0.55,0.63
+1.3,0.53,0.60
+2.0,0.45,0.52
+3.0,0.37,0.43
+5.0,0.30,0.35
+10.0,0.26,0.30
+25.0,0.25,0.29

@@ -1,0 +1,36 @@
+# SpaceX Raptor 2 - sea-level variant (Super Heavy Block 1/2, Starship Block 1/2)
+[sources]
+wiki_raptor = "https://en.wikipedia.org/wiki/SpaceX_Raptor (retrieved 2026-10-12)"
+wiki_sh = "https://en.wikipedia.org/wiki/SpaceX_Super_Heavy (retrieved 2026-10-12)"
+
+[engine]
+id = "raptor2"
+name = "Raptor 2"
+cycle = "full-flow staged combustion"
+propellant = "methalox"
+mixture_ratio = 3.6                  # [S:wiki_raptor]
+chamber_pressure_pa = 300e5          # [S:wiki_raptor]
+
+[performance]
+reference_pressure_pa = 101325.0     # sea-level reference
+thrust_ref_n = 2.2555e6              # 230 tf [S:wiki_raptor]
+isp_ref_s = 327.0                    # sea level [S:wiki_sh]
+nozzle_exit_diameter_m = 1.317       # [D] from Isp_vac = 347 s [S:wiki_sh]: A_e = F_sl*(347/327-1)/p0
+max_ambient_pressure_pa = 110000.0   # sea-level nozzle, no separation limit in practice [E]
+
+[throttle]
+min = 0.40                           # [S:wiki_raptor]
+max = 1.00
+rate_per_s = 0.5                     # throttle change per second [E]
+
+[gimbal]
+max_angle_deg = 15.0                 # [E] commonly cited
+rate_deg_s = 20.0                    # [E]
+
+[mass]
+dry_kg = 1630.0                      # [S:wiki_raptor]
+vehicle_side_hardware_kg = 1245.0    # 2875 kg engine+vehicle-side minus engine [S:wiki_raptor, SpaceX Aug 2024]
+
+[timing]
+startup_s = 3.0                      # ignition to full thrust [E]
+shutdown_s = 0.5                     # [E]

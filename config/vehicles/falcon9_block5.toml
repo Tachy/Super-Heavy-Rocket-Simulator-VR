@@ -1,0 +1,86 @@
+# Falcon 9 Block 5 - reference vehicle with well-documented public data (validates the generic schema)
+# dry_mass_kg always INCLUDES the installed engines.
+
+[sources]
+wiki_f9 = "https://en.wikipedia.org/wiki/Falcon_9 (commonly cited values)"
+
+[vehicle]
+id = "falcon9_block5"
+name = "Falcon 9 Block 5"
+display_name = "Medium Launcher"
+propellant = "kerolox"
+stages_bottom_to_top = ["first_stage", "second_stage"]
+
+[[stage]]
+id = "first_stage"
+name = "Falcon 9 Block 5 first stage"
+length_m = 41.2                          # [S:wiki_f9]
+diameter_m = 3.66                        # [S:wiki_f9]
+dry_mass_kg = 25600.0                    # [S:wiki_f9]
+dry_cg_station_m = 12.0                  # [E]
+separation = "cold_pneumatic"
+jettison_after_separation_kg = 0.0
+
+[[stage.tank]]
+id = "lox_main"
+contents = "oxidizer"
+mass_kg = 278000.0                       # [D] 395.7 t total [S:wiki_f9] split at O/F 2.36
+base_station_m = 4.0                     # [E]
+
+[[stage.tank]]
+id = "rp1_main"
+contents = "fuel"
+mass_kg = 117700.0                       # [D]
+base_station_m = 27.0                    # [E]
+
+[[stage.engine_group]]
+id = "octaweb"
+engine = "merlin1d"
+count = 9                                # 8 ring + 1 center; modelled as one group (simplification)
+ring_radius_m = 1.2                      # [E]
+gimbal = true
+relight = true                           # 3 engines relight for boostback / entry / landing
+
+[stage.aero]
+reference_diameter_m = 3.66
+ascent_drag_table = "aero/falcon9_ascent.csv"
+grid_fins = 4
+
+[stage.recovery]
+method = "drone_ship_landing"
+reserve_propellant_kg = 30000.0          # [E]
+nominal_meco_s = 162.0                   # [E]
+nominal_meco_altitude_m = 68000.0        # [E]
+
+[[stage]]
+id = "second_stage"
+name = "Falcon 9 Block 5 second stage"
+length_m = 13.8                          # [S:wiki_f9]
+diameter_m = 3.66
+dry_mass_kg = 3900.0                     # [S:wiki_f9]
+dry_cg_station_m = 4.0                   # [E]
+payload_mass_kg = 0.0
+fairing_mass_kg = 1900.0                 # [S:wiki_f9]
+
+[[stage.tank]]
+id = "lox_main"
+contents = "oxidizer"
+mass_kg = 65150.0                        # [D] 92.67 t total [S:wiki_f9] split at O/F 2.36
+base_station_m = 3.0                     # [E]
+
+[[stage.tank]]
+id = "rp1_main"
+contents = "fuel"
+mass_kg = 27520.0                        # [D]
+base_station_m = 8.4                     # [E]
+
+[[stage.engine_group]]
+id = "mvac"
+engine = "merlin_vacuum"
+count = 1
+ring_radius_m = 0.0
+gimbal = true
+relight = true
+
+[stage.aero]
+reference_diameter_m = 3.66

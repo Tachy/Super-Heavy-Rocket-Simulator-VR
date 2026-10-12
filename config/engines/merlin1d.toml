@@ -1,0 +1,35 @@
+# SpaceX Merlin 1D (Full Thrust) - Falcon 9 first stage
+[sources]
+wiki_merlin = "https://en.wikipedia.org/wiki/SpaceX_Merlin (commonly cited values)"
+
+[engine]
+id = "merlin1d"
+name = "Merlin 1D"
+cycle = "gas generator"
+propellant = "kerolox"
+mixture_ratio = 2.36                 # [E]
+chamber_pressure_pa = 97e5           # [S:wiki_merlin]
+
+[performance]
+reference_pressure_pa = 101325.0
+thrust_ref_n = 845e3                 # [S:wiki_merlin]
+isp_ref_s = 282.0                    # [S:wiki_merlin]
+nozzle_exit_diameter_m = 1.045       # [D] from Isp_vac = 311 s [S:wiki_merlin]
+max_ambient_pressure_pa = 110000.0
+
+[throttle]
+min = 0.40                           # [S:wiki_merlin] ~39-40 %
+max = 1.00
+rate_per_s = 0.5                     # [E]
+
+[gimbal]
+max_angle_deg = 5.0                  # [E]
+rate_deg_s = 15.0                    # [E]
+
+[mass]
+dry_kg = 470.0                       # [S:wiki_merlin]
+vehicle_side_hardware_kg = 0.0       # included in stage dry mass
+
+[timing]
+startup_s = 2.0                      # [E]
+shutdown_s = 0.3                     # [E]

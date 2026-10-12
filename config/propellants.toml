@@ -1,0 +1,17 @@
+# Propellant combinations. Densities at loading conditions.
+
+[[propellant]]
+id = "methalox"
+oxidizer = "LOX"
+fuel = "CH4"
+mixture_ratio = 3.6               # O/F by mass [S: Wikipedia "SpaceX Raptor"; design text also mentions ~3.8]
+oxidizer_density_kg_m3 = 1200.0   # subcooled LOX (~70 K); 1141 at normal boiling point [E]
+fuel_density_kg_m3 = 440.0        # subcooled liquid methane (~95 K); 422 at normal boiling point [E]
+
+[[propellant]]
+id = "kerolox"
+oxidizer = "LOX"
+fuel = "RP-1"
+mixture_ratio = 2.36              # Merlin 1D [E: commonly cited]
+oxidizer_density_kg_m3 = 1200.0   # densified LOX on Falcon 9 (~66 K) [E]
+fuel_density_kg_m3 = 830.0        # chilled RP-1 [E]

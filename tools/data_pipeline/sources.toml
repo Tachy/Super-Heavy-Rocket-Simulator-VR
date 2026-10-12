@@ -1,0 +1,77 @@
+# Every external data source or library used by the simulator.
+# `target` is relative to the repository root. `extract = true` unpacks zip archives into `target`.
+# CREDITS.md is generated from this file (tools/data_pipeline/credits.py).
+
+[[source]]
+id = "cspice"
+name = "NAIF SPICE Toolkit (CSPICE N0067, Windows/MSVC 64-bit package; sources compiled by us)"
+url = "https://naif.jpl.nasa.gov/pub/naif/toolkit/C/PC_Windows_VisualC_64bit/packages/cspice.zip"
+target = "external/cspice.zip"
+extract = true
+extract_to = "external"
+license = "NAIF rules: free of charge, may be redistributed; no warranty (https://naif.jpl.nasa.gov/naif/rules.html)"
+credit = "SPICE Toolkit, NASA/JPL Navigation and Ancillary Information Facility (NAIF)"
+
+[[source]]
+id = "lsk"
+name = "Leap seconds kernel"
+url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls"
+target = "data/spice/naif0012.tls"
+license = "NAIF generic kernels: public, free to use"
+credit = "NASA/JPL NAIF generic kernels"
+
+[[source]]
+id = "de440s"
+name = "JPL planetary and lunar ephemeris DE440 (short, 1849-2150)"
+url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp"
+target = "data/spice/de440s.bsp"
+license = "NAIF generic kernels: public, free to use"
+credit = "Park et al. (2021), The JPL Planetary and Lunar Ephemerides DE440 and DE441, AJ 161:105"
+
+[[source]]
+id = "gm_de440"
+name = "GM values consistent with DE440"
+url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc"
+target = "data/spice/gm_de440.tpc"
+license = "NAIF generic kernels: public, free to use"
+credit = "NASA/JPL NAIF generic kernels"
+
+[[source]]
+id = "pck00011"
+name = "Planetary constants (radii, orientation models)"
+url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc"
+target = "data/spice/pck00011.tpc"
+license = "NAIF generic kernels: public, free to use"
+credit = "NASA/JPL NAIF generic kernels"
+
+[[source]]
+id = "earth_combined"
+name = "Earth orientation ITRF93, 1962 - 2126 (IERS history + long-term prediction)"
+url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/earth_1962_260806_2126_combined.bpc"
+target = "data/spice/earth_1962_260806_2126_combined.bpc"
+license = "NAIF generic kernels: public, free to use (based on IERS EOP data)"
+credit = "NASA/JPL NAIF, Earth orientation data from IERS"
+
+[[source]]
+id = "earth_latest"
+name = "Earth orientation ITRF93, latest high precision (overrides combined where available)"
+url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/earth_latest_high_prec.bpc"
+target = "data/spice/earth_latest_high_prec.bpc"
+license = "NAIF generic kernels: public, free to use (based on IERS EOP data)"
+credit = "NASA/JPL NAIF, Earth orientation data from IERS"
+
+[[source]]
+id = "moon_pa"
+name = "Moon principal-axes orientation from DE440"
+url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/moon_pa_de440_200625.bpc"
+target = "data/spice/moon_pa_de440_200625.bpc"
+license = "NAIF generic kernels: public, free to use"
+credit = "NASA/JPL NAIF generic kernels"
+
+[[source]]
+id = "moon_fk"
+name = "Moon frames kernel (MOON_PA / MOON_ME for DE440)"
+url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/fk/satellites/moon_de440_250416.tf"
+target = "data/spice/moon_de440_250416.tf"
+license = "NAIF generic kernels: public, free to use"
+credit = "NASA/JPL NAIF generic kernels"

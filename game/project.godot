@@ -1,0 +1,10 @@
+config_version=5
+
+[application]
+
+config/name="Starship Simulator"
+config/features=PackedStringArray("4.7", "Forward Plus")
+
+[rendering]
+
+renderer/rendering_method="forward_plus"

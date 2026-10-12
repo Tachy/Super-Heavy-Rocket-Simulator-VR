@@ -1,0 +1,92 @@
+# Super Heavy / Starship Simulator
+
+Physically accurate simulator for Super Heavy + Starship: a playable PC-VR flight simulator
+(OpenXR, HOTAS, seated cockpit) and a mission/engineering simulation (planning, telemetry, validation).
+Not an arcade game: physical correctness has top priority.
+
+## Communication & language
+- Answer the user **in German**.
+- Code, identifiers, comments, commit messages and docs inside the repo: **English**.
+
+## Architecture (non-negotiable)
+```
+core/        C++20 simulation core. NO Godot dependency. Pure float64.
+bindings/    GDExtension adapter (godot-cpp, precision=double). Thin: no physics/business logic.
+game/        Godot 4 project (double-precision build). Rendering, UI, VR, input. Text formats only (.tscn/.tres/.gd).
+config/      Data-driven definitions: vehicles, launch sites, missions (TOML).
+tools/       Data pipeline (Python): downloads, license log, tile generation, CREDITS.
+data/        Downloaded runtime data (git-ignored), fetched via tools/data_pipeline/fetch.py.
+external/    Third-party sources & engine build (git-ignored).
+tests/       Validation fixtures (reference values from JPL Horizons etc.).
+```
+- `core` is split into small modules with clear interfaces: `math`, `time`, `frames`, `ephemeris`,
+  `environment`, `vehicle`, `propulsion`, `aero`, `contact`, `integrators`, `gnc`, `mission`, `sim`.
+  Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
+- External libraries are wrapped behind interfaces inside one module; nothing else includes them.
+  CSPICE lives only in `core/src/spice/` and implements `time::TimeScaleConverter`,
+  `ephemeris::Ephemeris` and `frames::BodyOrientation`.
+- The game only reads simulation state and sends commands. Physics never runs in GDScript.
+- The simulation runs on its own thread with a fixed tick; rendering interpolates.
+- Vehicles, launch sites and missions are configuration, not code.
+
+## Physics & numerics conventions
+- SI units internally, always. Angles in radians.
+- Frame and unit go into the name: `position_gcrf_m`, `velocity_itrf_mps`, `epoch_tdb_s`, `latitude_rad`.
+- Inertial frame: GCRF (Earth-centred, ICRF-aligned; SPICE calls it `J2000`). Earth-fixed: ITRF93 via NAIF binary PCK.
+- Time: `Epoch` stores TDB seconds past J2000. UTC only at the user interface boundary (leap seconds via SPICE LSK).
+- Earth shape: WGS84 ellipsoid. Moon: sphere R = 1737.4 km (+ LOLA terrain later).
+- Default gravity: point masses Earth + Moon + Sun plus Earth J2 (switchable). Earth/Moon/Sun positions
+  come from DE440, only spacecraft are integrated.
+- Simplifications are allowed only when deliberate, documented and switchable (fidelity flags).
+- Rendering: floating origin at the player's head; positions are differenced in double and only then
+  converted to float32.
+
+## Quality rules
+- Every physical model gets unit tests and at least one reference/validation case with a documented tolerance.
+- Small files with one responsibility; prefer composition over inheritance.
+- No magic numbers: physical constants live in `core/include/starsim/math/constants.hpp` with their source.
+- CSPICE is not thread-safe: only the simulation thread calls `ephemeris`.
+
+## Build & test (Windows, MSVC 2022 Build Tools, CMake, Ninja, SCons)
+One-time setup:
+```powershell
+# Runtime data (SPICE kernels) and CSPICE sources -> data/spice, external/cspice
+python tools/data_pipeline/fetch.py
+
+# Engine sources (git-ignored, pinned)
+git clone --depth 1 --branch 4.7.2-stable https://github.com/godotengine/godot.git external/godot   # ed1daf0
+git clone https://github.com/godotengine/godot-cpp.git external/godot-cpp                           # b051e69
+
+# Godot double-precision editor (~15 min on 24 cores; needs misc/scripts/install_accesskit.py
+# and install_d3d12_sdk_windows.py run once)
+cd external/godot; scons platform=windows target=editor precision=double production=yes
+
+# Extension API of OUR engine build, used by godot-cpp
+cd external/godot-cpp; ../godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --dump-extension-api
+```
+Every build:
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/build.ps1          # core + GDExtension + ctest
+powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings
+# Godot smoke test (extension loads, float64 end to end)
+external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --path game --script res://tests/smoke_test.gd
+```
+- `STARSIM_VERBOSE=1` makes validation tests print per-epoch errors.
+- Validation fixtures are regenerated with `python tools/validation/fetch_horizons.py` (committed).
+- The GDExtension DLL is written to `game/bin/` (git-ignored).
+
+## Known issues
+- The very first `--import` of a fresh `game/.godot` segfaults on editor shutdown when the
+  extension is present (import itself completes; later runs are fine). Not yet investigated.
+- Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
+
+## Vehicle configuration
+`config/` holds propellants, engines, vehicles and aero tables as TOML/CSV with provenance tags
+([S] sourced, [E] estimate, [D] derived) - see `config/README.md`.
+`python tools/vehicle_report.py <vehicle-id> [--payload-kg N]` prints masses, thrust, burn time
+and the Tsiolkovsky delta-v budget; use it after every config change.
+
+## Data licensing
+Only free data. Every source is recorded with its licence in `tools/data_pipeline/sources.toml`;
+`CREDITS.md` is generated from it. Check the licence when adding a source. Trademarks
+("Starship", "SpaceX") are used internally only; display names come from config.
