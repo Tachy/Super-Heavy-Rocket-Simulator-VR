@@ -105,6 +105,7 @@ public:
         double mass_flow_kgps = 0.0;
         double shutdown_s = 0.0;
         double minimum_dv_mps = 0.0;  // impulse of the start + shutdown transients
+        bool rcs = false;             // RCS translation (no main engines)
     };
     const BurnConfiguration& burn_configuration() const { return burn_config_; }
     const gnc::BurnExecutor* burn() const { return burn_ ? &*burn_ : nullptr; }
@@ -155,6 +156,7 @@ private:
     std::unique_ptr<gnc::AscentGuidance> guidance_;
     std::optional<gnc::BurnExecutor> burn_;
     BurnConfiguration burn_config_;
+    math::Vec3 last_rcs_acceleration_;  // RCS translation of the controlled body in the last tick (GCRF)
 
     std::vector<BurnConfiguration> burn_configurations() const;
 };

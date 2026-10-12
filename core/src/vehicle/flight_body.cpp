@@ -50,6 +50,7 @@ struct TickContext {
     std::vector<std::vector<double>> tank_flows;
     Vec3 srp_acceleration_gcrf;  // evaluated at the start of the tick
     Vec3 rcs_torque_nm;          // commanded reaction-control couple, body axes
+    Vec3 rcs_force_n;            // commanded reaction-control translation force, body axes
 };
 
 struct Forces {
@@ -87,6 +88,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
         }
     }
     f.moment_body_nm += ctx.rcs_torque_nm;
+    f.nongravitational_body_n += ctx.rcs_force_n;
     f.acceleration_gcrf = ctx.env.gravity.acceleration_mps2(s.position_gcrf_m, ctx.epoch + tau_s) +
                           s.attitude.rotate(f.nongravitational_body_n) / f.mass.mass_kg + ctx.srp_acceleration_gcrf;
     return f;
@@ -185,6 +187,13 @@ Vec3 FlightBody::rcs_torque(const VehicleCommand& command) const {
     return {std::clamp(f.x, -1.0, 1.0) * max.x, std::clamp(f.y, -1.0, 1.0) * max.y, std::clamp(f.z, -1.0, 1.0) * max.z};
 }
 
+Vec3 FlightBody::rcs_force(const VehicleCommand& command) const {
+    const Vec3& f = command.rcs_force_fraction;
+    const double magnitude = norm(f);
+    const Vec3 fraction = magnitude > 1.0 ? f / magnitude : f;
+    return fraction * vehicle_->max_rcs_force_n();
+}
+
 void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt_s, const VehicleCommand& command) {
     if (impacted_) {
         return;
@@ -206,7 +215,8 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
                           earth_rotation_vector(transform),
                           vehicle_->tank_mass_flows_kgps(),
                           solar_radiation_acceleration(env, *vehicle_, state_, vehicle_->mass_properties().mass_kg, epoch),
-                          rcs_torque(command)};
+                          rcs_torque(command),
+                          rcs_force(command)};
     const integrators::OdeFunction<13> f = [&ctx](double tau, const State13& y) { return derivative(ctx, tau, y); };
     state_ = unpack(integrators::rk4_step<13>(f, 0.0, pack(state_), dt_s));
     vehicle_->consume_propellant(dt_s);
@@ -259,6 +269,7 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
                           earth_rotation_vector(transform),
                           vehicle_->tank_mass_flows_kgps(),
                           solar_radiation_acceleration(env, *vehicle_, state_, vehicle_->mass_properties().mass_kg, epoch),
+                          {},
                           {}};
     const integrators::OdeFunction<13> f = [&ctx](double tau, const State13& y) { return derivative(ctx, tau, y); };
     integrators::Dop853Options<13> options;
@@ -309,7 +320,7 @@ FlightTelemetry FlightBody::telemetry(const FlightEnvironment& env, time::Epoch 
     t.flight_path_angle_rad = std::atan2(t.vertical_speed_mps, norm(relative - t.vertical_speed_mps * up));
 
     const TickContext ctx{env, *vehicle_, epoch, transform.rotation, earth_rotation_vector(transform),
-                          vehicle_->tank_mass_flows_kgps(), {}, {}};
+                          vehicle_->tank_mass_flows_kgps(), {}, {}, {}};
     const Forces f = evaluate(ctx, 0.0, state_);
     t.mach = f.aero.mach;
     t.knudsen = f.aero.knudsen;

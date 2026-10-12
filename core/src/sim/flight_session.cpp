@@ -122,11 +122,20 @@ bool FlightSession::execute_burn(const gnc::BurnNode& node) {
             break;
         }
     }
-    if (chosen == nullptr && !configurations.empty() && configurations.back().minimum_dv_mps <= 0.8 * dv) {
-        chosen = &configurations.back();
+    BurnConfiguration rcs;
+    if (chosen == nullptr && !bodies_.empty()) {
+        // Below the main-engine minimum impulse: RCS translation (no transients), if the vehicle has RCS
+        // and the burn takes less than an hour.
+        const auto& vehicle = bodies_[controlled_].body->vehicle();
+        rcs.rcs = true;
+        rcs.thrust_n = vehicle.max_rcs_force_n();
+        rcs.mass_flow_kgps = 1e-9;  // cold gas (ullage) mass neglected [E]
+        if (rcs.thrust_n > 0.0 && dv / (rcs.thrust_n / vehicle.mass_properties().mass_kg) < 3600.0) {
+            chosen = &rcs;
+        }
     }
     if (chosen == nullptr) {
-        return false;  // fine corrections need RCS translation (M9)
+        return false;
     }
     burn_config_ = *chosen;
     burn_.emplace(node);
@@ -206,7 +215,12 @@ void FlightSession::run_autopilot() {
             break;
         case AutopilotState::Burn: {
             const auto& c = burn_config_;
-            autopilot_.burn = burn_->update(body, epoch_, tick_s, c.thrust_n, c.mass_flow_kgps, c.shutdown_s);
+            autopilot_.burn = burn_->update(body, epoch_, tick_s, c.thrust_n, c.mass_flow_kgps, c.shutdown_s,
+                                            last_rcs_acceleration_);
+            if (c.rcs) {
+                if (autopilot_.burn.complete) autopilot_.state = AutopilotState::Off;
+                break;
+            }
             const bool running = std::any_of(flying.running_groups.begin(), flying.running_groups.end(),
                                              [](const auto& g) { return g.second; });
             if (autopilot_.burn.ignite && !running) {
@@ -251,6 +265,10 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         for (auto& group : command.groups) group.throttle = throttle;
         const auto& direction = guided ? autopilot_.guidance.thrust_direction_gcrf : autopilot_.burn.direction_gcrf;
         controller_.steer(*flying.body, ambient_pressure_pa, direction).apply_to(command);
+        if (!guided && burn_config_.rcs && autopilot_.burn.ignite && !autopilot_.burn.complete) {
+            // Translation along the remaining delta-v, independent of the attitude.
+            command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(autopilot_.burn.direction_gcrf);
+        }
         return command;
     }
     // Axis convention: body +y points downrange (launch heading), z = x cross y. Pitch input > 0 tips
@@ -321,7 +339,13 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             const auto t = earth_.fixed_to_gcrf(epoch_);
             const double altitude =
                 frames::fixed_to_geodetic(transpose(t.rotation) * body.state().position_gcrf_m).height_m;
-            body.step(env_, epoch_, tick_s, command_for(i, atmosphere_.at(altitude).pressure_pa));
+            const auto command = command_for(i, atmosphere_.at(altitude).pressure_pa);
+            if (i == controlled_) {
+                const double force = norm(command.rcs_force_fraction) > 0.0 ? body.vehicle().max_rcs_force_n() : 0.0;
+                last_rcs_acceleration_ = body.state().attitude.rotate(math::normalized_or_zero(command.rcs_force_fraction)) *
+                                         (force / body.vehicle().mass_properties().mass_kg);
+            }
+            body.step(env_, epoch_, tick_s, command);
         }
         epoch_ += tick_s;
     }

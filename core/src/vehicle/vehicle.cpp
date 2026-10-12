@@ -282,6 +282,12 @@ Vec3 Vehicle::max_rcs_torque_nm() const {
     return {force * 0.5 * diameter_m(), force * lever, force * lever};
 }
 
+double Vehicle::max_rcs_force_n() const {
+    double force = 0.0;
+    for (const auto& s : stages_) force += 0.5 * s.config.rcs_thruster_count * s.config.rcs_thrust_n;
+    return force;
+}
+
 std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     if (index == 0 || index >= stages_.size()) {
         throw std::out_of_range("Vehicle::separate: index must split the stack into two non-empty parts");

@@ -76,6 +76,9 @@ struct VehicleCommand {
     double gimbal_roll_rad = 0.0;
     // Reaction control: requested torque as a fraction (-1..1) of the maximum per body axis.
     math::Vec3 rcs_torque_fraction;
+    // Reaction control translation: requested force direction and magnitude as a fraction (|f| <= 1) of
+    // the maximum RCS force, body axes.
+    math::Vec3 rcs_force_fraction;
 };
 
 // Stack of stages with engines, tanks and aerodynamics. Owns no kinematic state (see FlightBody).
@@ -110,6 +113,8 @@ public:
     // Maximum RCS torque per body axis. [E] Thrusters modelled as pure couples: half of them act per
     // axis, pitch/yaw lever = half the vehicle length, roll lever = the radius.
     math::Vec3 max_rcs_torque_nm() const;
+    // Maximum RCS translation force in any direction [E]: half of the thrusters act together.
+    double max_rcs_force_n() const;
     const aero::SlenderBodyAero& aero() const { return *aero_; }
 
     // Splits the stack below stage `index`: this vehicle keeps stages [0, index), the returned one

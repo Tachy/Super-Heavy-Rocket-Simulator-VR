@@ -34,4 +34,9 @@ inline double norm(const Vec3& v) { return std::sqrt(dot(v, v)); }
 
 inline Vec3 normalized(const Vec3& v) { return v / norm(v); }
 
+inline Vec3 normalized_or_zero(const Vec3& v) {
+    const double n = norm(v);
+    return n > 0.0 ? v / n : Vec3{};
+}
+
 }  // namespace starsim::math

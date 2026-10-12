@@ -97,6 +97,7 @@ public:
 private:
     void follow_pad(const frames::BodyOrientation& earth, time::Epoch epoch);
     math::Vec3 rcs_torque(const VehicleCommand& command) const;
+    math::Vec3 rcs_force(const VehicleCommand& command) const;
     void resolve_ground_contact(const frames::BodyOrientation& earth, time::Epoch epoch);
 
     std::unique_ptr<Vehicle> vehicle_;

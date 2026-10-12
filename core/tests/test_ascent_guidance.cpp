@@ -218,20 +218,36 @@ TEST_CASE("Pitch kick tuning against the IFT-3 flight-path angle", "[.tuning]") 
     }
 }
 
-TEST_CASE("Burns below the main-engine minimum impulse are rejected", "[gnc][burn]") {
+TEST_CASE("Burns below the main-engine minimum impulse use RCS translation", "[gnc][validation][burn]") {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();
-    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    environment::PointMassGravityConfig two_body;
+    two_body.moon = two_body.sun = two_body.earth_j2 = false;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR, two_body);
     const double gm = session.gm_earth_m3ps2();
     const auto t0 = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
     const orbit::KeplerianElements circular{equatorial_radius_m + 300e3, 0.0, 26.5 * deg, 0.0, 0.0, 0.0};
     session.place_in_orbit("starship_block3", orbit::state_from_elements(circular, gm), t0, 1);
     const double minimum = session.minimum_burn_dv_mps();
     CHECK(minimum > 1.0);  // one engine group at minimum throttle, ~1.75 s of transients
+
+    const double dv = 0.5;  // m/s, far below the Raptor minimum
     const auto s = session.body(0).state();
-    CHECK_FALSE(session.execute_burn({t0 + 100.0, math::normalized(s.velocity_gcrf_mps) * (0.5 * minimum)}));
-    CHECK(session.execute_burn({t0 + 100.0, math::normalized(s.velocity_gcrf_mps) * (2.0 * minimum)}));
+    const auto at_node = orbit::propagate_two_body({s.position_gcrf_m, s.velocity_gcrf_mps}, gm, 600.0);
+    REQUIRE(session.execute_burn({t0 + 600.0, math::normalized(at_node.velocity_mps) * dv}));
+    CHECK(session.burn_configuration().rcs);
+    for (double t = 0.0; t < 3000.0 && session.autopilot().state == sim::AutopilotState::Burn; t += 1.0) {
+        session.advance_to(t0 + t, 100000);
+    }
+    REQUIRE(session.autopilot().state == sim::AutopilotState::Off);
+    const auto& after = session.body(0).state();
+    const auto el = orbit::elements_from_state({after.position_gcrf_m, after.velocity_gcrf_mps}, gm);
+    const double expected_a = 1.0 / (2.0 / circular.semi_major_axis_m -
+                                     std::pow(std::sqrt(gm / circular.semi_major_axis_m) + dv, 2) / gm);
+    std::printf("[validation] 0.5 m/s RCS translation burn: semi-major axis change %.1f m, expected %.1f m\n",
+                el.semi_major_axis_m - circular.semi_major_axis_m, expected_a - circular.semi_major_axis_m);
+    CHECK(std::abs(el.semi_major_axis_m - expected_a) < 30.0);  // ~0.01 m/s
 }
 
 TEST_CASE("Small burn uses a reduced engine configuration and stays accurate", "[gnc][validation][burn]") {
