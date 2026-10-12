@@ -84,3 +84,4 @@ relight = true
 
 [stage.aero]
 reference_diameter_m = 3.66
+nose_length_m = 6.0                      # fairing ogive [E]

@@ -19,10 +19,12 @@ add_executable(starsim_core_tests
     test_orbit_propagation.cpp
     test_artemis_validation.cpp
     test_eclipse.cpp
+    test_vehicle_models.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE
     STARSIM_KERNEL_DIR="${STARSIM_DATA_DIR}/spice"
+    STARSIM_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
     STARSIM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/fixtures"
 )
 

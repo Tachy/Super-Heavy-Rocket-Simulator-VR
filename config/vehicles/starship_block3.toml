@@ -114,6 +114,7 @@ relight = true
 [stage.aero]
 reference_diameter_m = 9.0
 entry_table = "aero/ship_entry.csv"
+nose_length_m = 17.0                     # ogive nose cone [E]
 flaps = 4
 
 [stage.recovery]
