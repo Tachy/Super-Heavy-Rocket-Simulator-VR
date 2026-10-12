@@ -21,10 +21,13 @@ add_executable(starsim_core_tests
     test_eclipse.cpp
     test_vehicle_models.cpp
     test_flight_body.cpp
+    test_ift3_validation.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE
     STARSIM_KERNEL_DIR="${STARSIM_DATA_DIR}/spice"
+    STARSIM_DATA_DIR="${STARSIM_DATA_DIR}"
+    STARSIM_OUTPUT_DIR="${CMAKE_BINARY_DIR}"
     STARSIM_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
     STARSIM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/fixtures"
 )

@@ -109,3 +109,13 @@ url = "https://codeberg.org/astronexus/hyg/media/branch/main/data/hyg/CURRENT/hy
 target = "data/raw/hyg_v44.csv.gz"
 license = "CC BY-SA 4.0 (attribution, share-alike for the derived star list)"
 credit = "HYG Database by David Nash (astronexus), CC BY-SA 4.0"
+
+# ------------------------------------------------------------------ validation data (not redistributed)
+
+[[source]]
+id = "ift3_booster_telemetry"
+name = "Starship IFT-3 booster telemetry scraped from the SpaceX webcast (smoothed, derived quantities)"
+url = "https://raw.githubusercontent.com/meithan/Starship_IFT3/master/data/IFT3_full_data_booster.csv"
+target = "data/validation/IFT3_full_data_booster.csv"
+license = "GPL-3.0 (used only as local test reference; not committed or redistributed)"
+credit = "Juan Carlos Toledo-Roy (meithan), github.com/meithan/Starship_IFT3"

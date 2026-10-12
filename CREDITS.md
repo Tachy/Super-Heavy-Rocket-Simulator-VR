@@ -17,6 +17,7 @@ Generated from `tools/data_pipeline/sources.toml` by `tools/data_pipeline/credit
 | [Black Marble 2016, 3 km (13500x6750)](https://eoimages.gsfc.nasa.gov/images/imagerecords/144000/144898/BlackMarble_2016_3km.jpg) | NASA Earth Observatory, Joshua Stevens, Suomi NPP VIIRS data (Miguel Roman, NASA GSFC): Black Marble 2016 | NASA Earth Observatory imagery: public domain (credit requested) |
 | [CGI Moon Kit: LROC WAC colour mosaic with polar fill, 4k](https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lroc_color_poles_4k.tif) | NASA's Scientific Visualization Studio, Ernie Wright; LRO LROC WAC data (NASA/GSFC/Arizona State University) | NASA Scientific Visualization Studio: public domain (credit requested) |
 | [HYG star database v4.4](https://codeberg.org/astronexus/hyg/media/branch/main/data/hyg/CURRENT/hyg_v44.csv.gz) | HYG Database by David Nash (astronexus), CC BY-SA 4.0 | CC BY-SA 4.0 (attribution, share-alike for the derived star list) |
+| [Starship IFT-3 booster telemetry scraped from the SpaceX webcast (smoothed, derived quantities)](https://raw.githubusercontent.com/meithan/Starship_IFT3/master/data/IFT3_full_data_booster.csv) | Juan Carlos Toledo-Roy (meithan), github.com/meithan/Starship_IFT3 | GPL-3.0 (used only as local test reference; not committed or redistributed) |
 
 Code dependencies: Godot Engine (MIT), godot-cpp (MIT), Catch2 (BSL-1.0),
 DOP853 coefficients from SciPy (BSD-3-Clause).
