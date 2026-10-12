@@ -31,6 +31,7 @@ add_executable(starsim_core_tests
     test_optim_ordering.cpp
     test_optim_ldl.cpp
     test_optim_cones.cpp
+    test_optim_builder.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE
