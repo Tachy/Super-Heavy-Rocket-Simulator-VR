@@ -76,6 +76,10 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
         snap.catch_target.goal = DescentGoal::Catch;
         snap.catch_target.position_m = pins - Vec3{c.pin_station_m - mass.cg_station_m, 0.0, 0.0};
         snap.catch_target.velocity_mps = {-settings.catch_sink_mps, 0.0, 0.0};
+        const double arm_top = frame.to_plan(c.pin_point_itrf_m).x;
+        snap.catch_target.corridor_top_m = arm_top + mass.cg_station_m + settings.corridor_margin_m;
+        snap.catch_target.corridor_radius_m = settings.corridor_radius_m;
+        snap.catch_target.final_set_radius_m = settings.final_set_radius_m;
         const Vec3 tower = frame.to_plan(c.tower_center_itrf_m);
         snap.abort_target.keep_out_center_m = {0.0, tower.y, tower.z};
         snap.abort_target.keep_out_radius_m = c.tower_keep_out_radius_m;

@@ -43,8 +43,8 @@ TEST_CASE("Plan samples interpolate between nodes", "[gnc][tracking]") {
     CHECK(std::abs(ref.velocity_mps.x + 15.0) < 1e-9);
     CHECK(std::abs(ref.thrust_acceleration_mps2.x - 1.75e6 / 0.995e5) < 1e-6);
     CHECK(std::abs(ref.axis.x - 1.0) < 1e-12);
-    CHECK(std::abs(ref.rate_body_radps.z - 0.1) < 1e-9);
-    CHECK(std::abs(ref.angular_acceleration_body_radps2.z - 0.1) < 1e-6);
+    CHECK(std::abs(ref.rate_plan_radps.z - 0.1) < 1e-9);
+    CHECK(std::abs(ref.angular_acceleration_plan_radps2.z - 0.1) < 1e-6);
     CHECK(sample_plan(synthetic_plan(), flat_model(), 3.0, 1.0).phase == 1);
 }
 
@@ -55,7 +55,17 @@ TEST_CASE("After the plan's end the reference keeps sinking slowly against gravi
     CHECK(std::abs(ref.velocity_mps.x + 1.0) < 1e-12);
     CHECK(std::abs(ref.position_m.x - 58.0) < 1e-9);  // 60 m - 1 m/s x 2 s
     CHECK(std::abs(ref.thrust_acceleration_mps2.x - 9.8) < 1e-12);
-    CHECK(norm(ref.rate_body_radps) == 0.0);
+    CHECK(norm(ref.rate_plan_radps) == 0.0);
+}
+
+TEST_CASE("Planned rates are given in the plan frame, whatever the planned roll", "[gnc][tracking]") {
+    auto plan = synthetic_plan();
+    const Quat rolled = Quat::from_axis_angle({1.0, 0.0, 0.0}, 0.5 * 3.14159265358979);  // body z -> plan -y
+    for (auto& x : plan.reference.x) x = make_state(x[0], state_position(x), state_velocity(x), rolled, state_rate(x));
+    const auto ref = sample_plan(plan, flat_model(), 1.0, 1.0);
+    CHECK(std::abs(ref.rate_plan_radps.y + 0.1) < 1e-9);
+    CHECK(std::abs(ref.rate_plan_radps.z) < 1e-9);
+    CHECK(std::abs(ref.angular_acceleration_plan_radps2.y + 0.1) < 1e-6);
 }
 
 TEST_CASE("Tracking corrects position and velocity errors within limits", "[gnc][tracking]") {

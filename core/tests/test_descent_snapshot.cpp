@@ -61,6 +61,10 @@ TEST_CASE("The descent snapshot puts the booster into the plan frame", "[gnc][de
     CHECK(std::abs(snap.catch_target.position_m.y) < 1e-6);
     CHECK(std::abs(snap.catch_target.position_m.z) < 1e-6);
     CHECK(snap.catch_target.velocity_mps.x == -1.0);
+    // Vertical corridor from where the hull bottom is 5 m above the arm tops, half the 3 m standby clearance.
+    CHECK(std::abs(snap.catch_target.corridor_top_m - (tower.catch_height_m + cg + 5.0)) < 1e-6);
+    CHECK(snap.catch_target.corridor_radius_m == 1.5);
+    CHECK(snap.catch_target.final_set_radius_m == 3.0);
     CHECK(snap.abort_target.goal == gnc::DescentGoal::Abort);
     CHECK(std::abs(snap.abort_target.sea_target_m.y - (site.sea->shoreline_distance_m + 150.0)) < 1e-6);  // due east
     CHECK(snap.abort_target.keep_out_radius_m > 0.5 * tower.width_m);

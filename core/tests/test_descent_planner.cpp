@@ -92,7 +92,8 @@ TEST_CASE("SCvx plans a catch from an ignition-like state", "[gnc][descent][scvx
         const int phase = k < static_cast<size_t>(s.nodes_per_phase - 1) ? 0 : 1;
         CHECK(norm(u) <= b->model.engine_sets[static_cast<size_t>(phase)].thrust_max_n * (1.0 + 1e-6) + 1.0);
         CHECK(std::hypot(u.y, u.z) <= std::tan(b->model.engine_sets[0].gimbal_max_rad) * u.x * (1.0 + 1e-6) + 1.0);
-        CHECK(norm(state_rate(plan.reference.x[k])) <= s.limits.rate_max_radps + 1e-6);
+        const Vec3 w = state_rate(plan.reference.x[k]);
+        CHECK(std::hypot(w.y, w.z) <= s.limits.rate_max_radps[static_cast<size_t>(phase)] + 1e-6);  // pitch/yaw
     }
     // Open loop: the plan's thrust flown through the nonlinear model ends at the catch point.
     DescentState x = x0;
@@ -314,4 +315,72 @@ TEST_CASE("A warm start begins at the measured snapshot", "[gnc][descent][scvx]"
     CHECK(ref.x[0] == snapshot);
     const auto again = plan_descent(b->model, snapshot, phase, target, s, &first, t);
     CHECK(again.converged);
+}
+
+TEST_CASE("SCvx re-plans while the booster rolls (no roll authority in the model)", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    auto x0 = ignition_state(*b);
+    for (const double roll_rate : {0.01, 0.15}) {  // 0.15 rad/s: above the pitch/yaw rate bound
+        CAPTURE(roll_rate);
+        x0[descent_index::rate] = roll_rate;  // the tracking controller rolls the pins towards the arms
+        const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
+        CHECK(plan.converged);
+    }
+}
+
+TEST_CASE("Catch plans fly the final engine set straight above the catch point", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    const auto x0 = ignition_state(*b);  // 30 m east, 15 m south: the divert happens on the ignition set
+    const auto target = catch_target(*b, state_attitude(x0));
+    const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
+    REQUIRE(plan.converged);
+    const double arms_m = 60.0;  // the hull slides down between the arms for the last ~60 m
+    int inside = 0;
+    for (size_t k = static_cast<size_t>(s.nodes_per_phase - 1); k < plan.reference.x.size(); ++k) {
+        const auto& x = plan.reference.x[k];
+        if (x[descent_index::position] > target.position_m.x + arms_m) continue;
+        ++inside;
+        CHECK(std::hypot(x[descent_index::position + 1], x[descent_index::position + 2]) <= 0.3);
+    }
+    CHECK(inside >= 2);
+}
+
+
+TEST_CASE("Catch plans stay in a vertical corridor while the hull passes the arms", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    const auto s = settings(*b);
+    const auto x0 = ignition_state(*b);  // 30 m east, 15 m south
+    auto target = catch_target(*b, state_attitude(x0));
+    target.corridor_top_m = target.position_m.x + 70.0;
+    target.corridor_radius_m = 1.5;
+    target.final_set_radius_m = 3.0;  // the final engine set flies above the catch point (divert on 13 engines)
+    const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
+    REQUIRE(plan.converged);
+    for (size_t k = static_cast<size_t>(s.nodes_per_phase - 1); k < plan.reference.x.size(); ++k) {
+        const auto& x = plan.reference.x[k];
+        CHECK(std::hypot(x[descent_index::position + 1], x[descent_index::position + 2]) <= target.final_set_radius_m + 1e-3);
+    }
+    int inside = 0;
+    for (const auto& x : plan.reference.x) {
+        if (x[descent_index::position] >= target.corridor_top_m - 2.0) continue;  // linearised about the last iterate
+        ++inside;
+        CHECK(std::hypot(x[descent_index::position + 1], x[descent_index::position + 2]) <= target.corridor_radius_m + 1e-3);
+    }
+    CHECK(inside >= 3);
+}
+
+TEST_CASE("A feasible plan at the iteration limit is flyable", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    auto s = settings(*b);
+    s.fresh_max_iterations = 4;          // stopped before the fuel optimum
+    s.final_mass_tolerance_kg = 1.0e-6;  // and before the final mass settles
+    s.step_tolerance = 1.0e-9;
+    const auto x0 = ignition_state(*b);
+    const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
+    CHECK(plan.iterations == 4);
+    CHECK(plan.virtual_control < s.virtual_control_tolerance);
+    CHECK(plan.nonlinear_defect < s.defect_tolerance);
+    CHECK(plan.converged);
 }

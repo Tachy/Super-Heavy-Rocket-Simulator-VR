@@ -5,7 +5,8 @@
 
 namespace starsim::gnc {
 
-// What the active plan asks for at one moment (plan frame; rates body axes, relative to the plan frame).
+// What the active plan asks for at one moment (plan frame; rates relative to the plan frame, in its axes - the plan's
+// roll is free, so its body axes are not the vehicle's).
 struct TrackingReference {
     int phase = 0;
     bool finished = false;                     // past the plan's end: slow sink against gravity until the catch
@@ -13,8 +14,8 @@ struct TrackingReference {
     math::Vec3 velocity_mps;
     math::Vec3 thrust_acceleration_mps2;       // planned thrust / planned mass
     math::Vec3 axis;                           // planned body x-axis
-    math::Vec3 rate_body_radps;
-    math::Vec3 angular_acceleration_body_radps2;
+    math::Vec3 rate_plan_radps;
+    math::Vec3 angular_acceleration_plan_radps2;
 };
 
 TrackingReference sample_plan(const DescentPlan& plan, const DescentModel& model, double t_s, double terminal_sink_mps);

@@ -13,7 +13,8 @@ namespace starsim::gnc {
 
 struct ScvxSettings {
     int nodes_per_phase = 15;
-    int max_iterations = 10;
+    int max_iterations = 10;         // re-plan from a warm start (time budget)
+    int fresh_max_iterations = 30;   // fresh plan from the straight-line guess (the simulation waits for it)
     int substeps = 4;                         // RK4 steps per interval in the discretisation
     double step_tolerance = 1e-2;             // largest scaled node step for convergence
     double virtual_control_tolerance = 1e-4;  // L1, scaled
@@ -23,6 +24,9 @@ struct ScvxSettings {
     // Largest nonlinear defect of an interval, scaled (1 cm in position): defects add up over the 2N-2 intervals,
     // so this keeps the flown plan within ~0.3 m of the target (5 cm per interval allowed > 1 m).
     double defect_tolerance = 1e-3;
+    // At the iteration limit a plan within this defect (5 cm per interval) still counts as flyable: the next re-plan
+    // starts from the measured state a second later.
+    double flyable_defect_tolerance = 5e-3;
     // Not converging: stop once the virtual control has not shrunk below stall_ratio of its value stall_iterations
     // iterations earlier while still above 10x its tolerance (an unreachable target; keeps failing re-plans short).
     int stall_iterations = 3;

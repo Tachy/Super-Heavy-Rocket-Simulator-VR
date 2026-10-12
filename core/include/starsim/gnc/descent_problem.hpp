@@ -18,6 +18,11 @@ struct DescentTarget {
     math::Vec3 velocity_mps;          // Catch: velocity at the catch (sink 1 m/s); the catch ends upright with any
                                       // roll: the thrust has no roll authority, the tracking controller rolls the
                                       // pins towards the arms (gimbal roll, RCS)
+    // Catch: vertical corridor while the hull passes the arms. Nodes whose reference CG height is below
+    // corridor_top_m stay within corridor_radius_m of the catch axis (radius 0: no corridor).
+    double corridor_top_m = 0.0;
+    double corridor_radius_m = 0.0;
+    double final_set_radius_m = 0.0;  // every final-set node this close to the catch axis (0: no limit)
     double ground_cg_height_m = 0.0;  // Abort: CG height at touchdown
     math::Vec3 sea_target_m;          // Abort: point at sea (y, z used)
     math::Vec3 keep_out_center_m;     // Abort: tower + mount, horizontal centre
@@ -28,7 +33,10 @@ struct DescentLimits {
     std::array<double, 2> tilt_max_rad{25.0 * constants::deg_to_rad, 10.0 * constants::deg_to_rad};  // per phase
     double terminal_tilt_rad = 4.0 * constants::deg_to_rad;   // [E] at the catch / touchdown (structural)
     int tilt_taper_nodes = 4;                                 // phase 1's last nodes taper linearly to it
-    double rate_max_radps = 0.1;                              // [E] structural / controllability
+    double throttle_margin = 0.1;  // [E] planned thrust stays this fraction below the maximum (tracking margin)
+    // [E] pitch/yaw per phase: the 13 ignition engines turn the booster fast (alpha_max ~1.4 rad/s^2), the 3 final
+    // engines slowly (~0.1-0.3 rad/s^2).
+    std::array<double, 2> rate_max_radps{0.2, 0.1};
     double glide_slope_rad = 30.0 * constants::deg_to_rad;    // above the horizontal, towards the catch point
     double min_mass_kg = 0.0;                                 // dry mass + reserve
     std::array<double, 2> min_phase_s{1.0, 1.0};
@@ -45,6 +53,8 @@ struct DescentWeights {
     double virtual_control = 1.0e3;  // L1, scaled units
     double trust_region = 1.0e-1;    // squared scaled step
     double sea_distance = 1.0e-2;    // per metre (abort)
+    double final_lateral = 0.01;     // [E] catch: per metre from the catch axis, per final-set node
+    double final_lateral_time_s = 2.0;  // [E] lateral speed counts as the offset it builds up in this time
 };
 
 // Iterate of SCvx: states and thrust at 2N-1 nodes, phase durations.

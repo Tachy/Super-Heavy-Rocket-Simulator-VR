@@ -108,6 +108,13 @@ public:
     // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
     // at the next staging; the booster is then guided independently of the controlled body.
     void set_booster_return(bool enabled, gnc::BoosterReturnParameters parameters = {});
+    // Scenarios: a returning booster placed with a free state, guided by its return guidance from `start_phase`
+    // (it becomes the controlled body; pilot input is ignored while it has return guidance).
+    void place_returning_booster(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
+                                 time::Epoch epoch, gnc::BoosterReturnParameters parameters, gnc::ReturnPhase start_phase);
+    // Interactive real-time play: landing re-plans never hold up the simulation (default: off = deterministic).
+    void set_realtime_planning(bool realtime);
+    const gnc::BoosterReturnGuidance* return_guidance(size_t index) const { return bodies_.at(index).return_guidance.get(); }
     // Return guidance of a body (nullptr if it has none) and its latest command.
     const gnc::ReturnCommand* return_status(size_t index) const;
     const AutopilotStatus& autopilot() const { return autopilot_; }
@@ -188,6 +195,7 @@ private:
     time::Epoch launch_epoch_;
     LaunchSite launch_site_;
     bool towers_enabled_ = true;
+    bool realtime_planning_ = false;
     std::unique_ptr<CatchTowerSim> tower_;
     std::optional<gnc::BoosterReturnParameters> booster_return_;
     double gm_earth_;

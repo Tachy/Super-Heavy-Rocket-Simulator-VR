@@ -33,6 +33,11 @@ struct ScvxLandingCommand {
     double offset_m = 0.0;  // horizontal distance of the CG from the plan's end point
 };
 
+// Throttle of `run_groups` that gives `thrust_n` together with the engines still starting or running down (engines
+// just starting count as slightly spooled so the throttle stays finite).
+double landing_throttle(const vehicle::Vehicle& vehicle, const std::vector<std::string>& run_groups, double thrust_n,
+                        double pressure_pa);
+
 // Landing burn on SCvx plans: the first plan synchronously at ignition, re-plans every replan_interval_s from a
 // snapshot (worker thread, effective at snapshot + latency), tracking of the active plan (thrust acceleration with a
 // position/velocity correction, attitude with feed-forward, pins rolled across the arms), engine switch at the

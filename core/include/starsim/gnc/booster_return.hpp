@@ -1,13 +1,20 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "starsim/gnc/attitude_controller.hpp"
 #include "starsim/gnc/landing_site.hpp"
+#include "starsim/gnc/scvx_landing.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
 namespace starsim::gnc {
+
+enum class ReturnPhase { Flip, Boostback, Coast, LandingBurn, Landed };
+
+const char* to_string(ReturnPhase phase);
 
 struct BoosterReturnParameters {
     double flight_time_s = 230.0;  // planned time from boostback start to touchdown (Lambert arc shape)
@@ -22,11 +29,11 @@ struct BoosterReturnParameters {
     double max_tilt_rad = 10.0 * 3.14159265358979 / 180.0;         // thrust from the vertical, centre engines
     double max_tilt_ignition_rad = 25.0 * 3.14159265358979 / 180.0; // with the inner engines (more gimbal authority)
     double flip_tolerance_rad = 15.0 * 3.14159265358979 / 180.0;
+    // Landing burn on SCvx plans (catch sites only); the explicit laws above remain the fallback when the first
+    // plan fails, and the guidance of sites without a tower.
+    bool scvx_landing = true;
+    ScvxLandingParameters scvx;
 };
-
-enum class ReturnPhase { Flip, Boostback, Coast, LandingBurn, Landed };
-
-const char* to_string(ReturnPhase phase);
 
 struct ReturnCommand {
     ReturnPhase phase = ReturnPhase::Flip;
@@ -37,6 +44,9 @@ struct ReturnCommand {
     double impact_miss_m = 0.0;           // predicted horizontal miss of the landing site (ballistic)
     double time_to_go_s = 0.0;            // landing burn
     math::Vec3 roll_reference_gcrf;       // desired body +y (zero: free roll)
+    bool scvx = false;                                          // landing burn flown on SCvx plans
+    bool abort = false;                                         // catch given up: arms stay open, landing at sea
+    std::optional<AttitudeController::Feedforward> feedforward; // planned rotation (SCvx)
 };
 
 // Return of a first stage to its launch site:
@@ -60,6 +70,13 @@ public:
     ReturnPhase phase() const { return phase_; }
     // Pins on the tower arms (reported by the tower each tick): the landing burn ends.
     void set_catch_contact(bool contact) { catch_contact_ = contact; }
+    // Scenarios: start in a later phase (e.g. LandingBurn for a booster placed at ignition).
+    void skip_to(ReturnPhase phase) {
+        phase_ = phase;
+        started_ = true;
+    }
+    void set_realtime(bool realtime);
+    const ScvxLandingGuidance* scvx() const { return scvx_.get(); }
 
     // Drag-aware ballistic impact prediction (point mass, tail-first axial drag from the vehicle's table,
     // power off). `velocity_gcrf_mps` overrides the body's velocity (e.g. a planned arc).
@@ -95,6 +112,12 @@ private:
     math::Vec3 steer_itrf_;  // aerodynamic steering: lateral offset of the axis (tan alpha)
     bool catch_contact_ = false;
     double target_bottom_height_m_ = 0.0;  // vehicle bottom above the site ground at touchdown / catch
+    std::unique_ptr<ScvxLandingGuidance> scvx_;  // landing burn on SCvx plans (null: explicit laws)
+    bool landing_started_ = false;
+
+    void start_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
+    void explicit_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
+                          ReturnCommand& cmd);
 };
 
 }  // namespace starsim::gnc

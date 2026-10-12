@@ -144,6 +144,7 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
                                  const DescentTarget& target, const ScvxSettings& settings, const DescentPlan* warm_start,
                                  double elapsed) {
     const int n = settings.nodes_per_phase;
+    const int max_iterations = warm_start ? settings.max_iterations : settings.fresh_max_iterations;
     DescentPlan plan;
     plan.nodes_per_phase = n;
     plan.start_phase = start_phase;
@@ -167,8 +168,9 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
                                              plan.reference.u[static_cast<size_t>(k)], plan.reference.u[static_cast<size_t>(k + 1)],
                                              plan.reference.duration_s[static_cast<size_t>(p)], 1.0 / (n - 1), settings.substeps));
             for (int i = 0; i < 14; ++i) {
-                defect = std::max(defect, std::abs(plan.reference.x[static_cast<size_t>(k + 1)][i] - lin.back().propagated[i]) /
-                                              scale[static_cast<size_t>(i)]);
+                const double d = std::abs(plan.reference.x[static_cast<size_t>(k + 1)][i] - lin.back().propagated[i]) /
+                                 scale[static_cast<size_t>(i)];
+                defect = std::max(defect, d);
             }
         }
         plan.nonlinear_defect = defect;
@@ -178,13 +180,25 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
             plan.converged = true;
             break;
         }
-        if (it == settings.max_iterations) break;
+        if (it == max_iterations) {
+            // Out of iterations: a dynamically consistent plan (virtual control and nonlinear defects within
+            // tolerance) is flyable even though it has not settled at the fuel optimum.
+            plan.converged = it > 0 && plan.virtual_control < settings.virtual_control_tolerance &&
+                             defect < settings.flyable_defect_tolerance;
+            break;
+        }
         const auto sub = build_descent_subproblem(model, plan.reference, lin, initial, start_phase, target, limits,
                                                   settings.weights, n);
         const auto result = solve(start_phase, target.goal, sub.problem);
         plan.status = result.status;
         plan.iterations = it + 1;
-        if (result.status != optim::SocpStatus::Optimal) return plan;  // not converged: the caller falls back / aborts
+        if (result.status != optim::SocpStatus::Optimal) {
+            // The subproblem failed (numerics): the current iterate still counts if it is flyable, otherwise the
+            // caller falls back / aborts.
+            plan.converged = it > 0 && plan.virtual_control < settings.virtual_control_tolerance &&
+                             defect < settings.flyable_defect_tolerance;
+            return plan;
+        }
         const double previous_final_mass = plan.reference.x.back()[descent_index::mass];
         plan.virtual_control = sub.virtual_control(result.x);
         virtual_controls.push_back(plan.virtual_control);

@@ -2,13 +2,19 @@
 
 // Helpers for return/landing scenarios: a booster with a chosen propellant load, placed over the launch site.
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
 #include <string>
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/contact/primitives.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/booster_return.hpp"
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/landing_outcome.hpp"
 
 namespace starsim::test {
 
@@ -41,6 +47,78 @@ inline vehicle::RigidBodyState state_over_site(const sim::LaunchSite& site, cons
     s.attitude = math::Quat::from_matrix(t.rotation * enu_to_itrf * body_to_enu);
     s.angular_velocity_body_radps = s.attitude.inverse_rotate(vehicle::earth_rotation_vector(t));
     return s;
+}
+
+// CG height above the pad at which the return guidance's own burn prediction ignites for a booster falling straight
+// down at `sink_mps` (stop height 0), by bisection.
+inline double ignition_height_m(const sim::FlightSession& session, const config::VehicleConfig& cfg,
+                                const frames::BodyOrientation& earth, time::Epoch epoch, double sink_mps,
+                                const gnc::BoosterReturnParameters& parameters = {}) {
+    double low = 200.0, high = 8000.0;  // [m] bracket
+    for (int i = 0; i < 40; ++i) {
+        const double h = 0.5 * (low + high);
+        const vehicle::FlightBody body(std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR),
+                                       state_over_site(session.launch_site(), earth, epoch, {0.0, 0.0, h}, {0.0, 0.0, -sink_mps}));
+        const gnc::BoosterReturnGuidance guidance(session.return_site(body.vehicle()), parameters);
+        (guidance.predict_landing_burn(body, session.environment(), epoch).stop_height_m > 0.0 ? high : low) = h;
+    }
+    return 0.5 * (low + high);
+}
+
+// End of a landing: first pin contact (offset of the CG from the catch axis, horizontal and vertical speed, site
+// frame) and how it ended.
+struct CatchRun {
+    bool contact = false;
+    double offset_m = 0.0;
+    double lateral_mps = 0.0;
+    double sink_mps = 0.0;
+    sim::CatchPhase tower_phase = sim::CatchPhase::Open;
+    bool tower_struck = false;
+    sim::LandingOutcome outcome = sim::LandingOutcome::Flying;
+    bool caught_within_tolerance() const {
+        return tower_phase == sim::CatchPhase::Caught && contact && offset_m < 1.0 && lateral_mps < 0.5;
+    }
+};
+
+// Advances body 0 tick by tick until it is caught, rests, impacts or `max_s` pass.
+inline CatchRun fly_landing(sim::FlightSession& session, const frames::BodyOrientation& earth, time::Epoch t0, double max_s) {
+    CatchRun run;
+    const auto& booster = session.body(0);
+    const auto* tower = session.tower();
+    for (double t = sim::FlightSession::tick_s; t <= max_s; t += sim::FlightSession::tick_s) {
+        session.advance_to(t0 + t, 10);
+        if (std::getenv("STARSIM_DEBUG_CATCH") && tower && static_cast<int>(std::lround(t / sim::FlightSession::tick_s)) % 20 == 0) {  // diagnostics
+            const auto tr = earth.fixed_to_gcrf(session.epoch());
+            const auto& s = booster.state();
+            const auto& g = tower->geometry();
+            const math::Vec3 p = g.to_site(transpose(tr.rotation) * s.position_gcrf_m);
+            const math::Vec3 v = transpose(g.site_to_itrf()) * transpose(tr.rotation) *
+                                 (s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), s.position_gcrf_m));
+            const auto* r = session.return_status(0);
+            std::printf("  [catch] t %.1f cg %.2f,%.2f,%.1f v %.2f,%.2f,%.1f tower %s open %.3f contact %d thr %.2f groups %zu abort %d\n", t,
+                        p.x, p.y, p.z, v.x, v.y, v.z, sim::to_string(tower->phase()), tower->arms().opening_rad(),
+                        tower->in_contact(booster), r ? r->throttle : -1.0, r ? r->run_groups.size() : 0, r ? r->abort : 0);
+        }
+        if (!run.contact && tower && tower->in_contact(booster)) {
+            const auto tr = earth.fixed_to_gcrf(session.epoch());
+            const auto& s = booster.state();
+            const auto& g = tower->geometry();
+            const math::Vec3 p = g.to_site(transpose(tr.rotation) * s.position_gcrf_m);
+            const math::Vec3 v = transpose(g.site_to_itrf()) * transpose(tr.rotation) *
+                                 (s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), s.position_gcrf_m));
+            run.contact = true;
+            run.offset_m = std::hypot(p.x, p.y);
+            run.lateral_mps = std::hypot(v.x, v.y);
+            run.sink_mps = -v.z;
+        }
+        if (booster.caught() || booster.impacted() || booster.resting()) break;
+    }
+    if (tower) {
+        run.tower_phase = tower->phase();
+        run.tower_struck = tower->tower_struck();
+    }
+    run.outcome = session.landing_outcome(0);
+    return run;
 }
 
 }  // namespace starsim::test

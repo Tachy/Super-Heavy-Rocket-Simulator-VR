@@ -369,84 +369,25 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
     }
 
     if (phase_ == ReturnPhase::LandingBurn) {
-        // Gravity + centrifugal acceleration in the Earth-fixed frame (Coriolis left to the feedback).
-        const Vec3 omega_fixed = to_fixed * omega;
-        const Vec3 g_fixed = to_fixed * env.gravity.acceleration_mps2(s.position_gcrf_m, epoch) -
-                             cross(omega_fixed, cross(omega_fixed, r_fixed));
-        const Vec3 r_pad = site_.catch_target  // CG position at touchdown / catch
-                               ? site_.catch_target->pin_point_itrf_m -
-                                     site_up * (site_.catch_target->pin_station_m - mass.cg_station_m)
-                               : site_fixed + site_up * mass.cg_station_m;
-        const double height = dot(r_fixed - r_pad, site_up);
-        const double sink = -dot(v_fixed, site_up);
-        const auto final_set = engine_set(body.vehicle(), parameters_.landing_groups, pressure);
-        const double g = norm(g_fixed);
-        // Gate where the centre engines take over: sink rate gate_speed, height such that they finish at
-        // the design throttle with a constant deceleration.
-        const double final_deceleration =
-            std::max(parameters_.final_throttle * final_set.thrust_n / mass.mass_kg - g, 1.0);
-        const double gate_height = parameters_.gate_speed_mps * parameters_.gate_speed_mps / (2.0 * final_deceleration);
-        if (!final_engines_ && (height <= gate_height || sink <= parameters_.gate_speed_mps)) final_engines_ = true;
-
-        // Vertical channel: the current segment (gate, then touchdown), constant-deceleration time-to-go.
-        const double target_height = final_engines_ ? 0.0 : gate_height;
-        const double target_sink = final_engines_ ? touchdown_speed_mps : parameters_.gate_speed_mps;
-        const double t = std::max(2.0 * std::max(height - target_height, 0.0) / (std::max(sink, 0.0) + target_sink),
-                                  minimum_time_to_go_s);
-        const double g_up = dot(g_fixed, site_up);
-        const double zem_up = target_height - (height - sink * t + 0.5 * g_up * t * t);
-        const double zev_up = -target_sink - (-sink + g_up * t);
-        const double a_vertical = 6.0 * zem_up / (t * t) - 2.0 * zev_up / t;
-        // Horizontal channel.
-        const Vec3 offset_side = (r_fixed - r_pad) - site_up * height;
-        const Vec3 v_side = v_fixed + site_up * sink;
-        const Vec3 g_side = g_fixed - site_up * g_up;
-        // Inner engines: divert while closing in on the pad, with the constant deceleration that stops
-        // exactly over it (front-loaded; energy-optimal ZEM/ZEV would leave the braking to the end, where
-        // the tilt is limited); cross-track motion is critically damped. Centre engines: slow, gentle hold
-        // only - they turn the booster with seconds of lag, an upright touchdown comes first.
-        const double w = 1.0 / (final_engines_ ? hold_time_constant_s : divert_time_constant_s);
-        Vec3 a_side = -(offset_side * (w * w) + v_side * (2.0 * w));
-        const double distance = norm(offset_side);
-        if (!final_engines_ && distance > divert_hold_radius_m) {
-            const Vec3 towards = -offset_side / distance;
-            const double closing = dot(v_side, towards);
-            if (closing > 0.0) {
-                const Vec3 v_cross = v_side - towards * closing;
-                a_side = -towards * (closing * closing / (2.0 * distance)) - v_cross * (2.0 * w);
-            }
-        }
-        a_side -= g_side;
-
-        const auto& groups = final_engines_ ? parameters_.landing_groups : parameters_.landing_ignition_groups;
-        const auto engines = final_engines_ ? final_set : engine_set(body.vehicle(), groups, pressure);
-        const double a_max = engines.thrust_n / mass.mass_kg;
-        // Tilt limit: the thrust stays within max_tilt of the vertical, tapering to a few degrees for the
-        // touchdown (structural limit of the landing).
-        const double a_up = std::max(a_vertical, 0.1 * g);
-        const double tilt_max = final_engines_ ? parameters_.max_tilt_rad : parameters_.max_tilt_ignition_rad;
-        const double tilt_limit =
-            std::clamp(height / tilt_taper_height_m, 0.0, 1.0) * std::max(tilt_max - touchdown_tilt_rad, 0.0) +
-            touchdown_tilt_rad;
-        const double side_limit = a_up * std::tan(tilt_limit);
-        if (norm(a_side) > side_limit) a_side = a_side * (side_limit / norm(a_side));
-        const Vec3 a_cmd = site_up * a_up + a_side;
-        const Vec3 axis_fixed = math::normalized(a_cmd);
-        cmd.axis_gcrf = transform.rotation * axis_fixed;
-        if (site_.catch_target) {
-            const Vec3 body_y = to_fixed * s.attitude.rotate(Vec3{0.0, 1.0, 0.0});
-            cmd.roll_reference_gcrf = transform.rotation * catch_roll_reference(site_.catch_target->across_itrf, site_up,
-                                                                                site_.catch_target->pin_azimuth_rad, body_y);
-        }
-        cmd.throttle = a_max > 0.0 ? std::clamp(norm(a_cmd) / a_max, 0.0, 1.0) : 1.0;
-        cmd.run_groups = groups;
-        cmd.time_to_go_s = t;
-        cmd.impact_miss_m = norm(offset_side);
-        // Touchdown sensed (or ground contact): engines off.
-        const bool catch_over = site_.catch_target && (catch_contact_ || height < -catch_missed_height_m);
-        if (body.resting() || body.impacted() || catch_over ||
-            (!site_.catch_target && final_engines_ && height < touchdown_cutoff_height_m)) {
-            phase_ = ReturnPhase::Landed;
+        if (!landing_started_) start_landing(body, env, epoch);
+        if (scvx_) {
+            const auto c = scvx_->update(body, env, epoch);
+            cmd.run_groups = c.run_groups;
+            cmd.throttle = c.throttle;
+            cmd.axis_gcrf = c.axis_gcrf;
+            cmd.roll_reference_gcrf = c.roll_reference_gcrf;
+            cmd.feedforward = c.feedforward;
+            cmd.scvx = true;
+            cmd.abort = c.abort;
+            cmd.time_to_go_s = c.time_to_go_s;
+            cmd.impact_miss_m = c.offset_m;
+            const Vec3 r_catch = site_.catch_target->pin_point_itrf_m -
+                                 site_up * (site_.catch_target->pin_station_m - mass.cg_station_m);
+            const double height = dot(r_fixed - r_catch, site_up);
+            const bool catch_over = !c.abort && (catch_contact_ || height < -catch_missed_height_m);
+            if (body.resting() || body.impacted() || catch_over) phase_ = ReturnPhase::Landed;
+        } else {
+            explicit_landing(body, env, epoch, cmd);
         }
     }
     if (phase_ == ReturnPhase::Landed) {
@@ -455,6 +396,116 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
     }
     cmd.phase = phase_;
     return cmd;
+}
+
+void BoosterReturnGuidance::set_realtime(bool realtime) {
+    parameters_.scvx.realtime = realtime;
+    if (scvx_) scvx_->set_realtime(realtime);
+}
+
+void BoosterReturnGuidance::start_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                          time::Epoch epoch) {
+    landing_started_ = true;
+    if (!parameters_.scvx_landing || !site_.catch_target) return;
+    auto p = parameters_.scvx;
+    p.snapshot.ignition_groups = parameters_.landing_ignition_groups;
+    p.snapshot.final_groups = parameters_.landing_groups;
+    scvx_ = std::make_unique<ScvxLandingGuidance>(site_, p);
+    if (!scvx_->start(body, env, epoch)) scvx_.reset();  // fallback: the explicit laws
+}
+
+// ZEM/ZEV landing burn (the fallback of the SCvx guidance and the guidance of sites without a tower).
+void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                             time::Epoch epoch, ReturnCommand& cmd) {
+    const auto& s = body.state();
+    const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
+    const Mat3 to_fixed = transpose(transform.rotation);
+    const Vec3 omega = vehicle::earth_rotation_vector(transform);
+    const Vec3 r_fixed = to_fixed * s.position_gcrf_m;
+    const Vec3 v_fixed = to_fixed * (s.velocity_gcrf_mps - cross(omega, s.position_gcrf_m));
+    const auto mass = body.vehicle().mass_properties();
+    const Vec3 site_up = up_at(site_.latitude_rad, site_.longitude_rad);
+    const Vec3 site_fixed = frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m});
+    const double pressure = env.atmosphere.at(frames::fixed_to_geodetic(r_fixed).height_m).pressure_pa;
+    // Gravity + centrifugal acceleration in the Earth-fixed frame (Coriolis left to the feedback).
+    const Vec3 omega_fixed = to_fixed * omega;
+    const Vec3 g_fixed = to_fixed * env.gravity.acceleration_mps2(s.position_gcrf_m, epoch) -
+                         cross(omega_fixed, cross(omega_fixed, r_fixed));
+    const Vec3 r_pad = site_.catch_target  // CG position at touchdown / catch
+                           ? site_.catch_target->pin_point_itrf_m -
+                                 site_up * (site_.catch_target->pin_station_m - mass.cg_station_m)
+                           : site_fixed + site_up * mass.cg_station_m;
+    const double height = dot(r_fixed - r_pad, site_up);
+    const double sink = -dot(v_fixed, site_up);
+    const auto final_set = engine_set(body.vehicle(), parameters_.landing_groups, pressure);
+    const double g = norm(g_fixed);
+    // Gate where the centre engines take over: sink rate gate_speed, height such that they finish at
+    // the design throttle with a constant deceleration.
+    const double final_deceleration =
+        std::max(parameters_.final_throttle * final_set.thrust_n / mass.mass_kg - g, 1.0);
+    const double gate_height = parameters_.gate_speed_mps * parameters_.gate_speed_mps / (2.0 * final_deceleration);
+    if (!final_engines_ && (height <= gate_height || sink <= parameters_.gate_speed_mps)) final_engines_ = true;
+
+    // Vertical channel: the current segment (gate, then touchdown), constant-deceleration time-to-go.
+    const double target_height = final_engines_ ? 0.0 : gate_height;
+    const double target_sink = final_engines_ ? touchdown_speed_mps : parameters_.gate_speed_mps;
+    const double t = std::max(2.0 * std::max(height - target_height, 0.0) / (std::max(sink, 0.0) + target_sink),
+                              minimum_time_to_go_s);
+    const double g_up = dot(g_fixed, site_up);
+    const double zem_up = target_height - (height - sink * t + 0.5 * g_up * t * t);
+    const double zev_up = -target_sink - (-sink + g_up * t);
+    const double a_vertical = 6.0 * zem_up / (t * t) - 2.0 * zev_up / t;
+    // Horizontal channel.
+    const Vec3 offset_side = (r_fixed - r_pad) - site_up * height;
+    const Vec3 v_side = v_fixed + site_up * sink;
+    const Vec3 g_side = g_fixed - site_up * g_up;
+    // Inner engines: divert while closing in on the pad, with the constant deceleration that stops
+    // exactly over it (front-loaded; energy-optimal ZEM/ZEV would leave the braking to the end, where
+    // the tilt is limited); cross-track motion is critically damped. Centre engines: slow, gentle hold
+    // only - they turn the booster with seconds of lag, an upright touchdown comes first.
+    const double w = 1.0 / (final_engines_ ? hold_time_constant_s : divert_time_constant_s);
+    Vec3 a_side = -(offset_side * (w * w) + v_side * (2.0 * w));
+    const double distance = norm(offset_side);
+    if (!final_engines_ && distance > divert_hold_radius_m) {
+        const Vec3 towards = -offset_side / distance;
+        const double closing = dot(v_side, towards);
+        if (closing > 0.0) {
+            const Vec3 v_cross = v_side - towards * closing;
+            a_side = -towards * (closing * closing / (2.0 * distance)) - v_cross * (2.0 * w);
+        }
+    }
+    a_side -= g_side;
+
+    const auto& groups = final_engines_ ? parameters_.landing_groups : parameters_.landing_ignition_groups;
+    const auto engines = final_engines_ ? final_set : engine_set(body.vehicle(), groups, pressure);
+    const double a_max = engines.thrust_n / mass.mass_kg;
+    // Tilt limit: the thrust stays within max_tilt of the vertical, tapering to a few degrees for the
+    // touchdown (structural limit of the landing).
+    const double a_up = std::max(a_vertical, 0.1 * g);
+    const double tilt_max = final_engines_ ? parameters_.max_tilt_rad : parameters_.max_tilt_ignition_rad;
+    const double tilt_limit =
+        std::clamp(height / tilt_taper_height_m, 0.0, 1.0) * std::max(tilt_max - touchdown_tilt_rad, 0.0) +
+        touchdown_tilt_rad;
+    const double side_limit = a_up * std::tan(tilt_limit);
+    if (norm(a_side) > side_limit) a_side = a_side * (side_limit / norm(a_side));
+    const Vec3 a_cmd = site_up * a_up + a_side;
+    const Vec3 axis_fixed = math::normalized(a_cmd);
+    cmd.axis_gcrf = transform.rotation * axis_fixed;
+    if (site_.catch_target) {
+        const Vec3 body_y = to_fixed * s.attitude.rotate(Vec3{0.0, 1.0, 0.0});
+        cmd.roll_reference_gcrf = transform.rotation * catch_roll_reference(site_.catch_target->across_itrf, site_up,
+                                                                            site_.catch_target->pin_azimuth_rad, body_y);
+    }
+    cmd.throttle = a_max > 0.0 ? std::clamp(norm(a_cmd) / a_max, 0.0, 1.0) : 1.0;
+    cmd.run_groups = groups;
+    cmd.time_to_go_s = t;
+    cmd.impact_miss_m = norm(offset_side);
+    // Touchdown sensed (or ground contact): engines off.
+    const bool catch_over = site_.catch_target && (catch_contact_ || height < -catch_missed_height_m);
+    if (body.resting() || body.impacted() || catch_over ||
+        (!site_.catch_target && final_engines_ && height < touchdown_cutoff_height_m)) {
+        phase_ = ReturnPhase::Landed;
+    }
 }
 
 }  // namespace starsim::gnc

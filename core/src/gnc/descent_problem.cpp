@@ -19,6 +19,7 @@ constexpr double rate_scale_radps = 0.05;
 constexpr double thrust_scale_fraction = 0.1;  // of phase 0's maximum thrust
 constexpr double duration_scale_s = 1.0;
 constexpr double min_reference_thrust_n = 1.0;  // below: no direction for the lower-bound linearisation
+constexpr double corridor_inactive_radius_m = 1.0e3;  // nodes above the corridor: idle (a landing burn diverts < 1 km)
 
 }  // namespace
 
@@ -76,6 +77,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     const auto eta = b.add_variables(K, "eta");
     const auto eta_s = b.add_variables(1, "eta_s");
     const auto distance = b.add_variables(1, "sea_distance");
+    const auto lateral = b.add_variables(K, "lateral");  // catch: distance from the catch axis on the final set
 
     // Physical values as affine expressions of the deviations.
     auto X = [&](int k, int i) { return AffineExpr{ref.x[at(k)][i]}.add(sub.dx[at(k)][i], S[static_cast<size_t>(i)]); };
@@ -114,17 +116,18 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     // Terminal state.
     const int last = K - 1;
     if (target.goal == DescentGoal::Catch) {
-        // Position, velocity, upright (quaternion y = z = 0, any roll), no rotation.
+        // Position, velocity, upright (quaternion y = z = 0, any roll), no pitch/yaw rotation (the thrust has no roll
+        // authority: a measured roll rate stays in the model, the tracking controller handles roll).
         const double t[6] = {target.position_m.x,   target.position_m.y,   target.position_m.z,
                              target.velocity_mps.x, target.velocity_mps.y, target.velocity_mps.z};
         for (int i = 0; i < 6; ++i) b.add_equality(X(last, descent_index::position + i).add_constant(-t[i]));
         b.add_equality(X(last, descent_index::attitude + 2));
         b.add_equality(X(last, descent_index::attitude + 3));
-        for (int i = descent_index::rate; i < 14; ++i) b.add_equality(X(last, i));
+        for (int i = descent_index::rate + 1; i < 14; ++i) b.add_equality(X(last, i));  // pitch/yaw; roll is free
     } else {
         b.add_equality(X(last, descent_index::position).add_constant(-target.ground_cg_height_m));
         for (int i = descent_index::velocity; i < descent_index::velocity + 3; ++i) b.add_equality(X(last, i));
-        for (int i = descent_index::rate; i < 14; ++i) b.add_equality(X(last, i));
+        for (int i = descent_index::rate + 1; i < 14; ++i) b.add_equality(X(last, i));  // pitch/yaw; roll is free
         b.add_second_order_cone({AffineExpr{}.add(distance[0], 1.0), X(last, 2).add_constant(-target.sea_target_m.y),
                                  X(last, 3).add_constant(-target.sea_target_m.z)});
     }
@@ -141,7 +144,9 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
             spool = std::min(1.0, limits.phase0_initial_spool +
                                       reference_node_time(ref.duration_s, k, n) / limits.phase0_startup_s);
         }
-        const double t_max = set.thrust_max_n * spool;
+        // Tracking margin below the maximum (none above the minimum: the final set at minimum throttle barely exceeds
+        // the weight, a margin there would forbid descending).
+        const double t_max = (1.0 - limits.throttle_margin) * set.thrust_max_n * spool;
         const double t_min = set.thrust_min_n * spool;
         const double gimbal = set.gimbal_max_rad;
         double tilt = limits.tilt_max_rad[static_cast<size_t>(p)];
@@ -166,14 +171,22 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         if (!(k == 0 || (start_phase == 1 && k <= boundary))) {
         b.add_second_order_cone({AffineExpr{std::sqrt(0.5 * (1.0 - std::cos(tilt)))}, X(k, descent_index::attitude + 2),
                                  X(k, descent_index::attitude + 3)});
-        b.add_second_order_cone({AffineExpr{limits.rate_max_radps}, X(k, descent_index::rate),
-                                 X(k, descent_index::rate + 1), X(k, descent_index::rate + 2)});
+        // Pitch/yaw rate only: the model has no roll authority, a measured roll rate just persists.
+        b.add_second_order_cone({AffineExpr{limits.rate_max_radps[static_cast<size_t>(p)]}, X(k, descent_index::rate + 1),
+                                 X(k, descent_index::rate + 2)});
         b.add_nonnegative(X(k, descent_index::mass).add_constant(-limits.min_mass_kg));
         if (target.goal == DescentGoal::Catch) {
             const double tg = std::tan(limits.glide_slope_rad);
             b.add_second_order_cone({X(k, 1).add_constant(-target.position_m.x),
                                      scaled(X(k, 2).add_constant(-target.position_m.y), tg),
                                      scaled(X(k, 3).add_constant(-target.position_m.z), tg)});
+            // Corridor: same structure at every node (the reference height only selects the radius).
+            const bool in_corridor = target.corridor_radius_m > 0.0 && ref.x[at(k)][descent_index::position] < target.corridor_top_m;
+            const double radius = in_corridor                                  ? target.corridor_radius_m
+                                  : p == 1 && target.final_set_radius_m > 0.0 ? target.final_set_radius_m
+                                                                              : corridor_inactive_radius_m;
+            b.add_second_order_cone({AffineExpr{radius},
+                                     X(k, 2).add_constant(-target.position_m.y), X(k, 3).add_constant(-target.position_m.z)});
         } else {
             // Keep-out: n . (r - c) >= R with n the horizontal direction from the centre to the reference.
             const Vec3 rb = state_position(ref.x[at(k)]) - target.keep_out_center_m;
@@ -220,6 +233,20 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         objective.add(distance[0], weights.sea_distance);
     } else {
         b.add_nonnegative(AffineExpr{}.add(distance[0], 1.0));  // unused: keep the variable bounded (zero cost)
+    }
+    // Catch: the final (3-engine) set turns the booster slowly - it should descend straight above the catch point
+    // (the hull slides down between the arms), so the lateral divert happens on the ignition set. A soft penalty on
+    // the final set's distance from the catch axis keeps every re-plan feasible.
+    for (int k = 0; k < K; ++k) {
+        if (target.goal == DescentGoal::Catch && k >= boundary && k > 0) {
+            const double tau = weights.final_lateral_time_s;  // lateral speed counts as the offset it makes in tau
+            b.add_second_order_cone({AffineExpr{}.add(lateral[k], 1.0), X(k, 2).add_constant(-target.position_m.y),
+                                     X(k, 3).add_constant(-target.position_m.z), scaled(X(k, 5), tau),
+                                     scaled(X(k, 6), tau)});
+            objective.add(lateral[k], weights.final_lateral);
+        } else {
+            b.add_nonnegative(AffineExpr{}.add(lateral[k], 1.0));  // unused: zero cost
+        }
     }
     b.set_objective(objective);
     sub.problem = b.build();

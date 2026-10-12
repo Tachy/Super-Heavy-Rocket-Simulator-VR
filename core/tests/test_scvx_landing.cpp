@@ -96,3 +96,25 @@ TEST_CASE("Repeated failed re-plans switch to an abort", "[gnc][scvx_landing]") 
     CHECK(guidance.statistics().failures == 2);
     CHECK(guidance.update(*f.body, env, f.t0 + 4.0).abort);
 }
+
+TEST_CASE("Landing throttle counts the thrust of engines still running down", "[gnc][scvx_landing]") {
+    Fixture f;
+    auto& body = *f.body;
+    const auto& env = f.session->environment();
+    vehicle::VehicleCommand all;
+    all.groups = {{"booster/center", true, 1.0}, {"booster/middle", true, 1.0}};
+    for (int i = 0; i < 800; ++i) body.step(env, f.t0 + i * 0.005, 0.005, all);  // 4 s: all 13 engines spooled up
+    vehicle::VehicleCommand centre;
+    centre.groups = {{"booster/center", true, 1.0}, {"booster/middle", false, 1.0}};
+    for (int i = 0; i < 50; ++i) body.step(env, f.t0 + 4.0 + i * 0.005, 0.005, centre);  // middle engines half run down
+    const std::vector<std::string> groups{"booster/center"};
+    const double pressure = 1.0e5;
+    double centre_full = 0.0, residual = 0.0;
+    for (const auto& e : body.vehicle().stages().front().engines) {
+        if (e.group_id == "booster/center") centre_full += e.spool * e.performance->thrust_n(1.0, pressure);
+        else if (e.group_id == "booster/middle") residual += e.spool * e.performance->thrust_n(e.throttle, pressure);
+    }
+    REQUIRE(residual > 0.0);
+    const double thrust = residual + 0.6 * centre_full;
+    CHECK(std::abs(gnc::landing_throttle(body.vehicle(), groups, thrust, pressure) - 0.6) < 1e-9);
+}

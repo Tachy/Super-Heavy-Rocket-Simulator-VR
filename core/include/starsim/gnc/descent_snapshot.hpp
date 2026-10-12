@@ -34,6 +34,11 @@ struct SnapshotSettings {
     double catch_clearance_m = 1.0;    // pins above the arm tops at the end of the plan (spec)
     double catch_sink_mps = 1.0;       // sink rate at the end of the plan (spec)
     double sea_margin_m = 150.0;       // [E] abort target beyond the shoreline
+    // Vertical corridor from where the hull bottom is corridor_margin_m above the arm tops: within corridor_radius_m of
+    // the catch axis (the arms wait half open with ~3 m clearance per side and close only at the end).
+    double corridor_margin_m = 5.0;    // [E]
+    double corridor_radius_m = 1.5;    // [E] half the standby clearance
+    double final_set_radius_m = 3.0;   // [E] the final set (slow to turn) flies above the catch point
 };
 
 // Everything the planner needs, taken on the simulation thread (the worker must not touch SPICE, the environment

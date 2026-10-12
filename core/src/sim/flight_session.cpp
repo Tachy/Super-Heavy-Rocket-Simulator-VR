@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
@@ -70,6 +71,7 @@ void FlightSession::run_return_guidance(Flying& flying) {
             flying.running_groups[e.group_id] = std::find(groups.begin(), groups.end(), e.group_id) != groups.end();
         }
     }
+    if (tower_ && flying.return_command.abort) tower_->abort_catch();
 }
 
 void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::StateVector& state, time::Epoch epoch,
@@ -295,6 +297,24 @@ gnc::LandingSite FlightSession::return_site(const vehicle::Vehicle& booster) con
     return landing;
 }
 
+void FlightSession::place_returning_booster(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
+                                            time::Epoch epoch, gnc::BoosterReturnParameters parameters,
+                                            gnc::ReturnPhase start_phase) {
+    place_body(config, state, epoch);
+    auto& flying = bodies_.front();
+    flying.return_guidance =
+        std::make_unique<gnc::BoosterReturnGuidance>(return_site(flying.body->vehicle()), std::move(parameters));
+    flying.return_guidance->skip_to(start_phase);
+    flying.return_guidance->set_realtime(realtime_planning_);
+}
+
+void FlightSession::set_realtime_planning(bool realtime) {
+    realtime_planning_ = realtime;
+    for (auto& flying : bodies_) {
+        if (flying.return_guidance) flying.return_guidance->set_realtime(realtime);
+    }
+}
+
 void FlightSession::set_launch_site(const LaunchSite& site) {
     launch_site_ = site;
     tower_.reset();
@@ -343,11 +363,12 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     for (const auto& [group, run] : flying.running_groups) {
         command.groups.push_back({group, run, index == controlled_ ? input_.throttle : 1.0});
     }
-    if (index != controlled_) {
+    if (index != controlled_ || flying.return_guidance) {
         if (flying.return_guidance && !flying.body->impacted()) {
             const auto& r = flying.return_command;
             for (auto& group : command.groups) group.throttle = r.throttle;
-            return_controller_.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf, r.roll_reference_gcrf).apply_to(command);
+            return_controller_.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf, r.roll_reference_gcrf,
+                                     r.feedforward ? &*r.feedforward : nullptr).apply_to(command);
             command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(r.rcs_force_gcrf);
         }
         return command;
@@ -434,7 +455,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             }
         }
         for (size_t i = 0; i < bodies_.size(); ++i) {
-            if (i != controlled_ && bodies_[i].return_guidance) {
+            if (bodies_[i].return_guidance) {
                 if (tower_) bodies_[i].return_guidance->set_catch_contact(tower_->in_contact(*bodies_[i].body));
                 run_return_guidance(bodies_[i]);
             }
@@ -494,6 +515,7 @@ void FlightSession::stage() {
     if (booster_return_) {
         const auto landing = return_site(lower.body->vehicle());
         lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(landing, *booster_return_);
+        lower.return_guidance->set_realtime(realtime_planning_);
     }
     Flying flying{std::move(upper), {}, nullptr, {}};
     bodies_.push_back(std::move(flying));

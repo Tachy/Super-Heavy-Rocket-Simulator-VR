@@ -35,10 +35,11 @@ TrackingReference sample_plan(const DescentPlan& plan, const DescentModel& model
     r.velocity_mps = state_velocity(x);
     r.thrust_acceleration_mps2 = q.rotate(plan.thrust_at(t)) / x[descent_index::mass];
     r.axis = q.rotate({1.0, 0.0, 0.0});
-    r.rate_body_radps = state_rate(x);
+    r.rate_plan_radps = q.rotate(state_rate(x));
     const double a = std::max(t - rate_difference_step_s, 0.0);
     const double b = std::min(t + rate_difference_step_s, end);
-    if (b > a) r.angular_acceleration_body_radps2 = (state_rate(plan.state_at(b)) - state_rate(plan.state_at(a))) / (b - a);
+    // d/dt (R w_body) = R (dw_body/dt + w x w) = R dw_body/dt.
+    if (b > a) r.angular_acceleration_plan_radps2 = q.rotate((state_rate(plan.state_at(b)) - state_rate(plan.state_at(a))) / (b - a));
     return r;
 }
 
