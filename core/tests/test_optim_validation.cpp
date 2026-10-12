@@ -26,6 +26,7 @@ struct SocpFixture {
     double objective = 0.0;
     std::vector<double> x;
     bool unique = false;
+    std::string status;  // "optimal" or "primal_infeasible"
 };
 
 SocpFixture read_socp_fixture(const std::string& name) {
@@ -72,6 +73,8 @@ SocpFixture read_socp_fixture(const std::string& name) {
             in >> f.objective;
         } else if (key == "x") {
             read_vector(f.x);
+        } else if (key == "status") {
+            in >> f.status;
         } else if (key == "unique") {
             int u = 0;
             in >> u;
@@ -106,6 +109,18 @@ TEST_CASE("SOCP solver matches Clarabel on reference problems", "[optim][validat
         for (std::size_t i = 0; i < r.x.size(); ++i) diff += std::pow(r.x[i] - f.x[i], 2);
         CHECK(std::sqrt(diff) / std::max(1.0, norm2(f.x)) <= 1e-5);
     }
+}
+
+TEST_CASE("SOCP solver certifies infeasibility of reference problems", "[optim][validation]") {
+    // Both lost their certificate to a failed factorisation once: tau -> 0 drives W^T W over 20 orders of
+    // magnitude, a wrong-sign pivot gets regularised and the later pivots overflow.
+    const std::string name = GENERATE(as<std::string>{}, "infeasible_small", "infeasible_medium");
+    INFO(name);
+    const auto f = read_socp_fixture(name);
+    REQUIRE(f.status == "primal_infeasible");
+    const auto r = solve_socp(f.problem);
+    INFO("status " << to_string(r.status) << ", iterations " << r.iterations);
+    CHECK(r.status == SocpStatus::PrimalInfeasible);
 }
 
 TEST_CASE("SOCP solver is deterministic on the landing problem", "[optim][validation]") {

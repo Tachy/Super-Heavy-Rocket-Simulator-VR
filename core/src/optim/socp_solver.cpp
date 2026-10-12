@@ -86,9 +86,9 @@ public:
         for (int iteration = 0;; ++iteration) {
             result.iterations = iteration;
             compute_residuals();
-            if (check_termination(result)) return result;
-            if (iteration >= settings_.max_iterations) return finish(result, SocpStatus::MaxIterations);
-            if (!scaling_.update(s_, z_) || !kkt_.factor(scaling_)) return finish(result, SocpStatus::NumericalError);
+            if (check_termination(result, settings_.tolerance)) return result;
+            if (iteration >= settings_.max_iterations) return give_up(result, SocpStatus::MaxIterations);
+            if (!scaling_.update(s_, z_) || !kkt_.factor(scaling_)) return give_up(result, SocpStatus::NumericalError);
 
             // Column of tau: K [x1; y1; z1] = [-c; b; h].
             fill_rhs([&](int j) { return -scaled_.c[j]; }, [&](int i) { return scaled_.b[i]; },
@@ -114,7 +114,7 @@ public:
                 std::fprintf(stderr, "%3d  pres %9.2e  dres %9.2e  gap %9.2e  sigma %5.3f  alpha %5.3f\n", iteration,
                              result.primal_residual, result.dual_residual, result.gap, sigma, alpha);
             }
-            if (alpha < minimum_step) return finish(result, SocpStatus::NumericalError);
+            if (alpha < minimum_step) return give_up(result, SocpStatus::NumericalError);
             take_step(alpha, combined_);
         }
     }
@@ -215,7 +215,17 @@ private:
         unscale(equilibration_, xo_, yo_, zo_, so_);
     }
 
-    bool check_termination(SocpResult& result) {
+    // Status from the last iterate at the looser tolerance (e.g. an infeasibility certificate whose tau has
+    // become so small that W^T W can no longer be factorised), otherwise `status`.
+    SocpResult& give_up(SocpResult& result, SocpStatus status) {
+        if (check_termination(result, settings_.reduced_accuracy_tolerance)) {
+            result.reduced_accuracy = true;
+            return result;
+        }
+        return finish(result, status);
+    }
+
+    bool check_termination(SocpResult& result, double tol) {
         unscaled_iterate();
         const auto& o = original_;
         std::fill(ax_.begin(), ax_.end(), 0.0);
@@ -236,7 +246,6 @@ private:
         result.gap = dot(so_, zo_) / (tau_ * tau_);
         const double cx = dot(o.c, xo_);
         const double primal_cost = cx / tau_;
-        const double tol = settings_.tolerance;
 
         if (result.primal_residual <= tol && result.dual_residual <= tol &&
             result.gap <= tol * std::max(1.0, std::abs(primal_cost))) {

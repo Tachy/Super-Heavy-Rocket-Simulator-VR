@@ -149,3 +149,16 @@ Reference fixtures (tag `[optim][validation]`):
 
 Quadratic objective as a native form; exponential, power and semidefinite cones; warm start; parallelism;
 an expanded sparse representation of large cones (not needed for cones of dimension <= ~20).
+
+## Follow-ups from the branch review (for sub-project 3)
+
+- **Reusable solver object:** `solve_socp` rebuilds the KKT pattern, the minimum-degree ordering and the
+  symbolic LDL^T on every call (3.3 ms of 14 ms on the landing problem; one factorisation 0.17 ms). In-flight
+  SCvx needs a persistent `SocpSolver` built once from the structure (patterns of A and G, cones) with an
+  `update(c, A values, b, G values, h)` path (`KktSystem::set_values`) and, for the 200 Hz simulation, an
+  iteration budget per call or an asynchronous worker with deterministic hand-over.
+- **Refinement stop ratio:** iterative refinement often uses all 8 steps while the residual stalls near 1e-7;
+  stop when a step no longer reduces it by a factor (Clarabel: `iterative_refinement_stop_ratio = 5`).
+- **Diagnostics:** report regularised pivots and refinement failures in `SocpResult` for in-flight health
+  monitoring; check `std::isfinite` on the step (a NaN direction is caught one iteration late); reject
+  NaN/Inf data in `SocpProblem::validate`; bounds-check `VariableBlock::operator[]`.

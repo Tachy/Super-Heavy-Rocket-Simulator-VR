@@ -52,6 +52,13 @@ def random_problem(seed, n, p, l, socs):
     return Problem(-(A.T @ y0 + G.T @ z0), A, A @ x0, G, G @ x0 + s0, l, socs)
 
 
+def primal_infeasible(prob):
+    """Adds the contradiction of the first orthant row (g x <= h0 and g x >= h0 + 5)."""
+    G = sp.vstack([prob.G[:prob.l], prob.G[:1] * -1.0, prob.G[prob.l:]]).tocsc()
+    h = np.concatenate([prob.h[:prob.l], [-prob.h[0] - 5.0], prob.h[prob.l:]])
+    return Problem(prob.c, prob.A, prob.b, G, h, prob.l + 1, prob.socs)
+
+
 def from_cvxpy(problem):
     data, _, _ = problem.get_problem_data(cp.CLARABEL)
     dims = data["dims"]
@@ -109,7 +116,7 @@ def landing_problem():
     return from_cvxpy(cp.Problem(cp.Maximize(z[-1]), cons))
 
 
-def solve_clarabel(prob):
+def clarabel_solution(prob):
     n, p = len(prob.c), prob.A.shape[0]
     cones = []
     if p:
@@ -122,14 +129,24 @@ def solve_clarabel(prob):
     settings.tol_gap_abs = settings.tol_gap_rel = settings.tol_feas = 1e-10
     solver = clarabel.DefaultSolver(sp.csc_matrix((n, n)), prob.c, sp.vstack([prob.A, prob.G]).tocsc(),
                                     np.concatenate([prob.b, prob.h]), cones, settings)
-    solution = solver.solve()
+    return solver.solve()
+
+
+def solve_clarabel(prob):
+    solution = clarabel_solution(prob)
     if solution.status != clarabel.SolverStatus.Solved:
         raise RuntimeError(f"Clarabel: {solution.status}")
     return np.array(solution.x), float(prob.c @ np.array(solution.x))
 
 
-def write(name, prob, unique):
-    x, objective = solve_clarabel(prob)
+def write(name, prob, unique, status="optimal"):
+    if status == "optimal":
+        x, objective = solve_clarabel(prob)
+    else:
+        solution = clarabel_solution(prob)
+        if solution.status != clarabel.SolverStatus.PrimalInfeasible:
+            raise RuntimeError(f"Clarabel: {solution.status}, expected primal infeasible")
+        x, objective = [], float("nan")
     OUT.mkdir(parents=True, exist_ok=True)
 
     def vec(key, values):
@@ -147,10 +164,12 @@ def write(name, prob, unique):
         f.write(f"nonnegative {prob.l}\n")
         f.write(f"second_order {len(prob.socs)}" + "".join(f" {q}" for q in prob.socs) + "\n")
         f.write(vec("c", prob.c) + mat("A", prob.A) + vec("b", prob.b) + mat("G", prob.G) + vec("h", prob.h))
-        f.write(f"objective {objective!r}\n")
-        f.write(vec("x", x))
-        f.write(f"unique {int(unique)}\n")
-    print(f"{name}: n={len(prob.c)} p={prob.A.shape[0]} m={prob.G.shape[0]} objective={objective:.10g}")
+        f.write(f"status {status}\n")
+        if status == "optimal":
+            f.write(f"objective {objective!r}\n")
+            f.write(vec("x", x))
+            f.write(f"unique {int(unique)}\n")
+    print(f"{name}: n={len(prob.c)} p={prob.A.shape[0]} m={prob.G.shape[0]} {status} objective={objective:.10g}")
 
 
 def main():
@@ -160,6 +179,11 @@ def main():
     write("socp_large", random_problem(4, n=200, p=30, l=150, socs=[4] * 40), unique=True)
     write("portfolio", portfolio_problem(), unique=False)
     write("landing_gfold", landing_problem(), unique=False)
+    # Infeasible cases whose certificate the solver once lost to a failed factorisation (tau -> 0, W^2 spanning
+    # 1e-11..1e9): found by the branch review's stress run.
+    write("infeasible_small", primal_infeasible(random_problem(103, n=44, p=9, l=41, socs=[1])), False, "primal_infeasible")
+    write("infeasible_medium", primal_infeasible(random_problem(133, n=62, p=12, l=116, socs=[6, 3])), False,
+          "primal_infeasible")
 
 
 if __name__ == "__main__":

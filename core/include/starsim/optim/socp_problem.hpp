@@ -22,6 +22,10 @@ struct SocpProblem {
 
 struct SocpSettings {
     double tolerance = 1e-8;              // relative residuals and duality gap
+    // When the iteration cannot continue (failed factorisation, collapsed step, iteration limit), the last
+    // iterate is accepted as optimal or as an infeasibility certificate at this looser tolerance (ECOS:
+    // feastol_inacc) and flagged as reduced accuracy.
+    double reduced_accuracy_tolerance = 1e-4;
     int max_iterations = 50;
     double static_regularization = 7e-8;  // KKT diagonal (ECOS default)
     int refinement_steps = 8;             // iterative refinement per KKT solve
@@ -40,6 +44,7 @@ struct SocpResult {
     std::vector<double> x, y, z, s;
     double objective = 0.0;  // c^T x (+inf primal infeasible, -inf dual infeasible)
     int iterations = 0;
+    bool reduced_accuracy = false;  // status accepted at SocpSettings::reduced_accuracy_tolerance
     double primal_residual = 0.0;
     double dual_residual = 0.0;
     double gap = 0.0;
