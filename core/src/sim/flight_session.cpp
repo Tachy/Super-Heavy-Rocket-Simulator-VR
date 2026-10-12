@@ -65,18 +65,80 @@ void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::St
     burn_.reset();
 }
 
-void FlightSession::execute_burn(const gnc::BurnNode& node) {
+// Candidate engine configurations of the lowest stage with engines, strongest first: all groups at full
+// throttle, each group alone at full throttle, each group alone at minimum throttle.
+std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations() const {
+    std::vector<BurnConfiguration> configurations;
+    if (bodies_.empty()) return configurations;
+    const auto& vehicle = bodies_[controlled_].body->vehicle();
+    const double mass = vehicle.mass_properties().mass_kg;
+    for (const auto& stage : vehicle.stages()) {
+        if (stage.engines.empty()) continue;
+        std::vector<std::string> groups;
+        for (const auto& e : stage.engines) {
+            if (std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) groups.push_back(e.group_id);
+        }
+        auto make = [&](const std::vector<std::string>& selected, bool minimum_throttle) {
+            BurnConfiguration c;
+            c.groups = selected;
+            double transient = 0.0;
+            for (const auto& e : stage.engines) {
+                if (e.starved || std::find(selected.begin(), selected.end(), e.group_id) == selected.end()) continue;
+                const auto& cfg = e.performance->config();
+                c.throttle = minimum_throttle ? cfg.throttle_min : 1.0;
+                c.thrust_n += e.performance->thrust_n(c.throttle, 0.0);
+                c.mass_flow_kgps += e.performance->mass_flow_kgps(c.throttle);
+                c.shutdown_s = std::max(c.shutdown_s, cfg.shutdown_s);
+                transient = std::max(transient, 0.5 * (cfg.startup_s + cfg.shutdown_s));
+            }
+            c.minimum_dv_mps = c.thrust_n / mass * transient;
+            return c;
+        };
+        configurations.push_back(make(groups, false));
+        for (const auto& g : groups) configurations.push_back(make({g}, false));
+        for (const auto& g : groups) configurations.push_back(make({g}, true));
+        break;
+    }
+    std::erase_if(configurations, [](const BurnConfiguration& c) { return c.thrust_n <= 0.0; });
+    std::stable_sort(configurations.begin(), configurations.end(),
+                     [](const BurnConfiguration& a, const BurnConfiguration& b) { return a.thrust_n > b.thrust_n; });
+    return configurations;
+}
+
+double FlightSession::minimum_burn_dv_mps() const {
+    const auto configurations = burn_configurations();
+    return configurations.empty() ? 0.0 : configurations.back().minimum_dv_mps;
+}
+
+bool FlightSession::execute_burn(const gnc::BurnNode& node) {
+    // Strongest configuration whose start/shutdown impulse is at most a quarter of the burn, so that
+    // the transients stay small against the closed-loop part; otherwise the weakest that still fits.
+    const double dv = norm(node.delta_v_gcrf_mps);
+    const auto configurations = burn_configurations();
+    const BurnConfiguration* chosen = nullptr;
+    for (const auto& c : configurations) {
+        if (c.minimum_dv_mps <= 0.25 * dv) {
+            chosen = &c;
+            break;
+        }
+    }
+    if (chosen == nullptr && !configurations.empty() && configurations.back().minimum_dv_mps <= 0.8 * dv) {
+        chosen = &configurations.back();
+    }
+    if (chosen == nullptr) {
+        return false;  // fine corrections need RCS translation (M9)
+    }
+    burn_config_ = *chosen;
     burn_.emplace(node);
     autopilot_.state = AutopilotState::Burn;
+    return true;
 }
 
 bool FlightSession::plan_circularization_at_apoapsis() {
     if (bodies_.empty()) return false;
     const auto& s = bodies_[controlled_].body->state();
     const auto node = gnc::circularize_at_apoapsis({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gm_earth_);
-    if (!node) return false;
-    execute_burn(*node);
-    return true;
+    return node && execute_burn(*node);
 }
 
 std::vector<math::Vec3> FlightSession::predict_trajectory(size_t index, double duration_s, double step_s) const {
@@ -143,22 +205,13 @@ void FlightSession::run_autopilot() {
             }
             break;
         case AutopilotState::Burn: {
-            // Full-thrust vacuum performance of the lowest stage that has engines.
-            double thrust = 0.0, mdot = 0.0, shutdown = 0.0;
-            for (const auto& stage : body.vehicle().stages()) {
-                if (stage.engines.empty()) continue;
-                for (const auto& e : stage.engines) {
-                    if (e.starved) continue;
-                    thrust += e.performance->thrust_n(1.0, 0.0);
-                    mdot += e.performance->mass_flow_kgps(1.0);
-                    shutdown = std::max(shutdown, e.performance->config().shutdown_s);
-                }
-                break;
-            }
-            autopilot_.burn = burn_->update(body, epoch_, tick_s, thrust, mdot, shutdown);
+            const auto& c = burn_config_;
+            autopilot_.burn = burn_->update(body, epoch_, tick_s, c.thrust_n, c.mass_flow_kgps, c.shutdown_s);
             const bool running = std::any_of(flying.running_groups.begin(), flying.running_groups.end(),
                                              [](const auto& g) { return g.second; });
-            if (autopilot_.burn.ignite && !running) ignite();
+            if (autopilot_.burn.ignite && !running) {
+                for (const auto& g : c.groups) flying.running_groups[g] = true;
+            }
             if (autopilot_.burn.complete) {
                 cutoff();
                 autopilot_.state = AutopilotState::Off;
@@ -194,7 +247,8 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     }
     const bool guided = autopilot_.state == AutopilotState::Booster || autopilot_.state == AutopilotState::UpperStage;
     if (guided || autopilot_.state == AutopilotState::Burn) {
-        for (auto& group : command.groups) group.throttle = 1.0;
+        const double throttle = guided ? 1.0 : burn_config_.throttle;
+        for (auto& group : command.groups) group.throttle = throttle;
         const auto& direction = guided ? autopilot_.guidance.thrust_direction_gcrf : autopilot_.burn.direction_gcrf;
         controller_.steer(*flying.body, ambient_pressure_pa, direction).apply_to(command);
         return command;

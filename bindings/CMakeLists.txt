@@ -18,6 +18,9 @@ add_library(starsim_gdext SHARED
     src/flight_sim.cpp
 )
 target_link_libraries(starsim_gdext PRIVATE starsim::core godot::cpp)
+if(MSVC)
+    target_compile_options(starsim_gdext PRIVATE /utf-8)
+endif()
 
 set(STARSIM_GAME_BIN_DIR "${CMAKE_SOURCE_DIR}/game/bin")
 set_target_properties(starsim_gdext PROPERTIES

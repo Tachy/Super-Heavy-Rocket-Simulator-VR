@@ -3,7 +3,9 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/orbit/kepler.hpp"
 
 namespace starsim::bindings {
 
@@ -149,6 +151,85 @@ godot::Dictionary FlightSim::telemetry(int index) const {
     return d;
 }
 
+void FlightSim::engage_ascent_autopilot(double periapsis_km, double apoapsis_km, double inclination_deg,
+                                        bool northerly) {
+    if (!is_active()) return;
+    session_->engage_ascent_autopilot(
+        {periapsis_km * 1000.0, apoapsis_km * 1000.0, inclination_deg * constants::deg_to_rad, northerly});
+}
+
+void FlightSim::disengage_autopilot() {
+    if (is_active()) session_->disengage_autopilot();
+}
+
+bool FlightSim::plan_circularization() { return is_active() && session_->plan_circularization_at_apoapsis(); }
+
+bool FlightSim::plan_burn(double seconds_from_now, double prograde_mps, double normal_mps, double radial_mps) {
+    if (!is_active()) return false;
+    const auto& s = session_->body(session_->controlled_index()).state();
+    const auto at_node = orbit::propagate_two_body({s.position_gcrf_m, s.velocity_gcrf_mps},
+                                                   session_->gm_earth_m3ps2(), seconds_from_now);
+    return session_->execute_burn(
+        {session_->epoch() + seconds_from_now,
+         gnc::delta_v_from_components(at_node, prograde_mps, normal_mps, radial_mps)});
+}
+
+godot::Dictionary FlightSim::autopilot_status() const {
+    godot::Dictionary d;
+    if (!is_active()) return d;
+    const auto& ap = session_->autopilot();
+    d["state"] = godot::String::utf8(sim::to_string(ap.state));
+    d["engaged"] = ap.state != sim::AutopilotState::Off && ap.state != sim::AutopilotState::Orbit;
+    d["phase"] = godot::String::utf8(gnc::to_string(ap.guidance.phase));
+    d["time_to_go_s"] = ap.guidance.time_to_go_s;
+    const bool burning = ap.state == sim::AutopilotState::Burn;
+    d["direction"] = to_godot(burning ? ap.burn.direction_gcrf : ap.guidance.thrust_direction_gcrf);
+    d["has_direction"] = ap.state == sim::AutopilotState::Booster || ap.state == sim::AutopilotState::UpperStage ||
+                         burning;
+    if (burning) {
+        godot::Dictionary b;
+        b["time_to_ignition_s"] = ap.burn.time_to_ignition_s;
+        b["remaining_dv_mps"] = ap.burn.remaining_dv_mps;
+        b["burn_duration_s"] = ap.burn.burn_duration_s;
+        b["total_dv_mps"] = session_->burn() ? norm(session_->burn()->node().delta_v_gcrf_mps) : 0.0;
+        d["burn"] = b;
+    }
+    return d;
+}
+
+godot::PackedVector3Array FlightSim::predict_trajectory(int index, double duration_s, double step_s) const {
+    godot::PackedVector3Array points;
+    if (!check_index(index)) return points;
+    try {
+        for (const auto& p : session_->predict_trajectory(static_cast<size_t>(index), duration_s, step_s)) {
+            points.push_back(to_godot(p));
+        }
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("FlightSim.predict_trajectory: ") + e.what());
+    }
+    return points;
+}
+
+godot::PackedVector3Array FlightSim::target_orbit_points(int count) const {
+    godot::PackedVector3Array points;
+    const auto* guidance = is_active() ? session_->ascent_guidance() : nullptr;
+    if (guidance == nullptr || count < 3) return points;
+    const math::Vec3 n = guidance->target_plane_normal_gcrf();
+    const math::Vec3 u = math::normalized(cross(math::Vec3{0.0, 0.0, 1.0}, n));  // ascending node
+    const math::Vec3 w = cross(n, u);
+    const double r = guidance->target_radius_m();
+    for (int i = 0; i <= count; ++i) {
+        const double t = constants::two_pi * i / count;
+        points.push_back(to_godot(r * (std::cos(t) * u + std::sin(t) * w)));
+    }
+    return points;
+}
+
+godot::Vector3 FlightSim::body_velocity_gcrf_mps(int index) const {
+    if (!check_index(index)) return {};
+    return to_godot(session_->body(index).state().velocity_gcrf_mps);
+}
+
 void FlightSim::_bind_methods() {
     using godot::ClassDB;
     using godot::D_METHOD;
@@ -173,6 +254,18 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("body_stages", "index"), &FlightSim::body_stages);
     ClassDB::bind_method(D_METHOD("body_engines", "index"), &FlightSim::body_engines);
     ClassDB::bind_method(D_METHOD("telemetry", "index"), &FlightSim::telemetry);
+    ClassDB::bind_method(D_METHOD("engage_ascent_autopilot", "periapsis_km", "apoapsis_km", "inclination_deg",
+                                  "northerly"),
+                         &FlightSim::engage_ascent_autopilot);
+    ClassDB::bind_method(D_METHOD("disengage_autopilot"), &FlightSim::disengage_autopilot);
+    ClassDB::bind_method(D_METHOD("plan_circularization"), &FlightSim::plan_circularization);
+    ClassDB::bind_method(D_METHOD("plan_burn", "seconds_from_now", "prograde_mps", "normal_mps", "radial_mps"),
+                         &FlightSim::plan_burn);
+    ClassDB::bind_method(D_METHOD("autopilot_status"), &FlightSim::autopilot_status);
+    ClassDB::bind_method(D_METHOD("predict_trajectory", "index", "duration_s", "step_s"),
+                         &FlightSim::predict_trajectory);
+    ClassDB::bind_method(D_METHOD("target_orbit_points", "count"), &FlightSim::target_orbit_points);
+    ClassDB::bind_method(D_METHOD("body_velocity_gcrf_mps", "index"), &FlightSim::body_velocity_gcrf_mps);
 }
 
 }  // namespace starsim::bindings

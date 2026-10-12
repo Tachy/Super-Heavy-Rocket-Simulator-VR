@@ -85,8 +85,25 @@ public:
     double gm_earth_m3ps2() const { return gm_earth_; }
 
     // Manoeuvre execution on the controlled body (RCS orientation, timed ignition, closed-loop cutoff).
-    void execute_burn(const gnc::BurnNode& node);
-    bool plan_circularization_at_apoapsis();  // plans and executes; false if not on an elliptic orbit
+    // Rejects burns smaller than the main engines' start + shutdown impulse (they would overshoot);
+    // fine corrections need RCS translation (M9).
+    bool execute_burn(const gnc::BurnNode& node);
+    // Plans and executes; false if not on an elliptic orbit or the burn is too small.
+    bool plan_circularization_at_apoapsis();
+    // Smallest delta-v the main engines of the controlled body can deliver (start + shutdown transients
+    // of the weakest configuration: one engine group at minimum throttle).
+    double minimum_burn_dv_mps() const;
+
+    // Engine configuration used for a burn.
+    struct BurnConfiguration {
+        std::vector<std::string> groups;
+        double throttle = 1.0;
+        double thrust_n = 0.0;        // vacuum
+        double mass_flow_kgps = 0.0;
+        double shutdown_s = 0.0;
+        double minimum_dv_mps = 0.0;  // impulse of the start + shutdown transients
+    };
+    const BurnConfiguration& burn_configuration() const { return burn_config_; }
     const gnc::BurnExecutor* burn() const { return burn_ ? &*burn_ : nullptr; }
 
     // Coasting prediction of a body (no thrust): GCRF positions every `step_s`, until impact or `duration_s`.
@@ -133,6 +150,9 @@ private:
     AutopilotStatus autopilot_;
     std::unique_ptr<gnc::AscentGuidance> guidance_;
     std::optional<gnc::BurnExecutor> burn_;
+    BurnConfiguration burn_config_;
+
+    std::vector<BurnConfiguration> burn_configurations() const;
 };
 
 }  // namespace starsim::sim

@@ -189,3 +189,82 @@ TEST_CASE("Circularization burn at apoapsis (burn execution, two-body field)", "
     CHECK(std::abs(peri - 400.0) < 5.0);
     CHECK(std::abs(apo - 400.0) < 5.0);
 }
+
+// Tuning aid (hidden, run with "[.tuning]"): flight-path angle profile of the booster for several kicks.
+TEST_CASE("Pitch kick tuning against the IFT-3 flight-path angle", "[.tuning]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter time;
+    std::printf("IFT-3 reference gamma: 60 s 72.2, 90 s 58.8, 120 s 43.7, 150 s 32.5 deg\n");
+    for (double kick_deg : {3.4, 5.0, 6.0, 7.0, 8.0, 10.0}) {
+        sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+        const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+        session.launch_from_pad("starship_block3", {25.99686 * deg, -97.15394 * deg, 10.0}, 90.0 * deg, t0);
+        gnc::PitchProgram program;
+        program.kick_angle_rad = kick_deg * deg;
+        session.engage_ascent_autopilot({200e3, 200e3, 26.5 * deg, true}, program);
+        std::printf("kick %4.1f deg:", kick_deg);
+        double next = 60.0;
+        for (double t = 0.0; t < 400.0 && next <= 150.0; t += 1.0) {
+            session.advance_to(t0 + t, 1000);
+            if (session.autopilot().state == sim::AutopilotState::Booster && session.mission_time_s() >= next) {
+                const auto tm = session.telemetry(session.controlled_index());
+                std::printf("  %3.0f s %5.1f deg (%4.1f km)", next, tm.flight_path_angle_rad / deg, tm.altitude_m / 1000.0);
+                next += 30.0;
+            }
+        }
+        std::printf("\n");
+    }
+}
+
+TEST_CASE("Burns below the main-engine minimum impulse are rejected", "[gnc][burn]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const double gm = session.gm_earth_m3ps2();
+    const auto t0 = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
+    const orbit::KeplerianElements circular{equatorial_radius_m + 300e3, 0.0, 26.5 * deg, 0.0, 0.0, 0.0};
+    session.place_in_orbit("starship_block3", orbit::state_from_elements(circular, gm), t0, 1);
+    const double minimum = session.minimum_burn_dv_mps();
+    CHECK(minimum > 1.0);  // one engine group at minimum throttle, ~1.75 s of transients
+    const auto s = session.body(0).state();
+    CHECK_FALSE(session.execute_burn({t0 + 100.0, math::normalized(s.velocity_gcrf_mps) * (0.5 * minimum)}));
+    CHECK(session.execute_burn({t0 + 100.0, math::normalized(s.velocity_gcrf_mps) * (2.0 * minimum)}));
+}
+
+TEST_CASE("Small burn uses a reduced engine configuration and stays accurate", "[gnc][validation][burn]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    environment::PointMassGravityConfig two_body;
+    two_body.moon = two_body.sun = two_body.earth_j2 = false;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR, two_body);
+    const double gm = session.gm_earth_m3ps2();
+    const auto t0 = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
+    const orbit::KeplerianElements circular{equatorial_radius_m + 300e3, 0.0, 26.5 * deg, 0.0, 0.0, 0.0};
+    session.place_in_orbit("starship_block3", orbit::state_from_elements(circular, gm), t0, 1);
+
+    const double dv = 20.0;
+    const auto s = session.body(0).state();
+    REQUIRE(session.execute_burn({t0 + 60.0, math::normalized(s.velocity_gcrf_mps) * dv}));
+    const auto& config = session.burn_configuration();
+    CHECK(config.groups.size() == 1);  // not all six engines for 20 m/s
+
+    for (double t = 0.0; t < 300.0 && session.autopilot().state == sim::AutopilotState::Burn; t += 1.0) {
+        session.advance_to(t0 + t, 1000);
+    }
+    session.advance_to(session.epoch() + 3.0);
+    const auto& after = session.body(0).state();
+    const double v_after = norm(after.velocity_gcrf_mps);
+    // Prograde burn on a circular orbit: speed after = v_circ + dv (gravity does no work in-plane at r const).
+    const auto el = orbit::elements_from_state({after.position_gcrf_m, after.velocity_gcrf_mps}, gm);
+    const double expected_a = 1.0 / (2.0 / circular.semi_major_axis_m -
+                                     std::pow(std::sqrt(gm / circular.semi_major_axis_m) + dv, 2) / gm);
+    std::printf("[validation] 20 m/s burn with %s at %.0f %%: semi-major axis %.2f km, expected %.2f km\n",
+                config.groups.front().c_str(), config.throttle * 100.0, el.semi_major_axis_m / 1000.0,
+                expected_a / 1000.0);
+    CHECK(std::abs(el.semi_major_axis_m - expected_a) < 1500.0);  // ~0.4 m/s
+    (void)v_after;
+}

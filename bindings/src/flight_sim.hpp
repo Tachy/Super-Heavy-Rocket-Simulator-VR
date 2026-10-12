@@ -5,6 +5,7 @@
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/quaternion.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
@@ -33,6 +34,20 @@ public:
     void cutoff();
     void release_clamps();
     void stage();
+
+    // Guidance and manoeuvres.
+    void engage_ascent_autopilot(double periapsis_km, double apoapsis_km, double inclination_deg, bool northerly);
+    void disengage_autopilot();
+    bool plan_circularization();
+    // Node `seconds_from_now` ahead with orbit-relative components (prograde, normal, radial-out), m/s.
+    bool plan_burn(double seconds_from_now, double prograde_mps, double normal_mps, double radial_mps);
+    // {state, phase, time_to_go_s, direction (GCRF), burn: {time_to_ignition_s, remaining_dv_mps,
+    //  burn_duration_s, direction}}
+    godot::Dictionary autopilot_status() const;
+    godot::PackedVector3Array predict_trajectory(int index, double duration_s, double step_s) const;
+    // Target orbit of the ascent guidance as a closed curve (GCRF), empty without guidance.
+    godot::PackedVector3Array target_orbit_points(int count) const;
+    godot::Vector3 body_velocity_gcrf_mps(int index) const;
 
     int body_count() const;
     int controlled_index() const;

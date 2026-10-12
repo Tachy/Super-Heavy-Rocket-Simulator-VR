@@ -120,6 +120,12 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   `SDL_GAMECONTROLLERCONFIG_FILE` (done by `Start-Desktop.cmd`); Godot's built-in mappings drop them and
   `Input.add_joy_mapping` at runtime has no effect. Probe axes: `res://tests/joy_probe.gd`.
 - Start the game with `Start-Desktop.cmd` (repo root).
+- GNC (M5): `gnc/ascent_guidance` (pitch program + PEG + terminal v_go steering), `gnc/burn_node`
+  (closed-loop burns), autopilot state machine in `sim::FlightSession`. Burns pick the strongest engine
+  configuration whose start/shutdown impulse is <= 1/4 of the delta-v; smaller burns are rejected (RCS
+  translation comes with docking, M9). Game keys: P ascent autopilot (config/missions/leo_ascent.toml),
+  O circularize at apoapsis, X autopilot off. HUD: NavBall (`ui/nav_ball.gd`), flight director
+  (`ui/flight_overlay.gd`), trajectories (`vehicle/trajectory_view.gd`: green planned, orange predicted).
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 

@@ -1,6 +1,7 @@
 # Renders the main scene at a fixed instant and camera, saves a PNG and quits (needs a GPU, no --headless).
 # godot --path game --script res://tests/render_check.gd -- --utc=2024-04-08T18:42:00 --focus=earth
 # Vehicle: --vehicle=starship_block3 --site=starbase_olp1 [--fly=40] (ignite, liftoff at 3 s, fly N s)
+#          [--autopilot] (ascent autopilot instead of manual) [--circularize] (plan node afterwards)
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -71,16 +72,34 @@ func _fly_vehicle(world: World) -> void:
 	var sim := world.flight.sim
 	var fly := float(_args.get("fly", "0"))
 	if fly > 0.0:
-		sim.ignite()
-		sim.advance_to(t0 + 3.0)
-		sim.release_clamps()
-		sim.advance_to(t0 + 3.0 + fly)
+		if _args.has("autopilot"):
+			sim.engage_ascent_autopilot(200.0, 200.0, 26.5, true)
+		else:
+			sim.ignite()
+			_advance(sim, t0 + 3.0)
+			sim.release_clamps()
+		_advance(sim, t0 + 3.0 + fly)
 		world.clock.set_time(t0 + 3.0 + fly)
+		if _args.has("circularize"):
+			sim.plan_circularization()
+		if _args.has("burn"):  # --burn=<prograde m/s>,<node in s>,<capture after s>
+			var b := (_args["burn"] as String).split(",")
+			sim.plan_burn(float(b[1]), float(b[0]), 0.0, 0.0)
+			var t_capture := t0 + 3.0 + fly + float(b[2])
+			_advance(sim, t_capture)
+			world.clock.set_time(t_capture)
 	var cam := world.camera
 	if _args.has("yaw"): cam.yaw = float(_args["yaw"])
 	if _args.has("pitch"): cam.pitch = float(_args["pitch"])
 	if _args.has("distance"): cam.distance_m = float(_args["distance"])
 	print("render_check: telemetry ", sim.telemetry(sim.controlled_index()))
+
+
+# FlightSim.advance_to integrates at most 20 s per call.
+func _advance(sim: FlightSim, target: float) -> void:
+	for i in 1000:
+		if sim.advance_to(target) >= target - 0.01:
+			return
 
 
 # Ground camera: point at the Moon.

@@ -2,7 +2,8 @@ class_name FlightController
 extends Node
 ## Owns the C++ flight session: pilot input (HOTAS + keyboard), pilot actions, vehicle views.
 ## Keyboard: W/S pitch, A/D yaw, Q/E roll, Shift/Ctrl throttle, I ignition, L release clamps,
-## K cutoff, G stage separation, M control mode. HOTAS (stick + throttle found by name): config/input_hotas.toml.
+## K cutoff, G stage separation, M control mode, P ascent autopilot (config/missions/leo_ascent.toml),
+## O circularize at apoapsis, X autopilot off. HOTAS (stick + throttle found by name): config/input_hotas.toml.
 
 const THROTTLE_KEY_RATE := 0.5  # per second
 
@@ -10,6 +11,10 @@ var sim := FlightSim.new()
 var throttle := 1.0
 var rate_mode := true
 var views: Array[VehicleView] = []
+var trajectory := TrajectoryView.new()
+var navball: NavBall
+var overlay: FlightOverlay
+var ascent_target := {}
 var last_event := ""
 
 var _stick := {}     ## [stick] table of config/input_hotas.toml
@@ -22,6 +27,7 @@ var _lever_initial := NAN
 
 func setup(config_dir: String) -> void:
 	sim.setup(config_dir)
+	ascent_target = TomlLite.load_file(config_dir.path_join("missions/leo_ascent.toml")).get("target", {})
 	var mapping := TomlLite.load_file(config_dir.path_join("input_hotas.toml"))
 	_stick = mapping.get("stick", {})
 	_throttle = mapping.get("throttle", {})
@@ -47,6 +53,10 @@ func advance(tdb_s: float, delta: float) -> float:
 
 
 func place_views(parent: Node3D, camera_gcrf_m: Vector3) -> void:
+	if trajectory.get_parent() == null:
+		parent.add_child(trajectory)
+	trajectory.update_view(sim, camera_gcrf_m, get_process_delta_time())
+	_update_instruments()
 	if not sim.is_active():
 		return
 	while views.size() < sim.body_count():
@@ -79,10 +89,48 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_G:
 			sim.stage()
 			last_event = "Stufentrennung"
+		KEY_P:
+			sim.engage_ascent_autopilot(ascent_target.get("periapsis_km", 200.0), ascent_target.get("apoapsis_km", 200.0),
+					ascent_target.get("inclination_deg", 26.5), ascent_target.get("northerly", true))
+			last_event = "Aufstiegs-Autopilot aktiv"
+		KEY_O:
+			last_event = "Zirkularisierung geplant" if sim.plan_circularization() \
+					else "Kein Manöver: keine Ellipsenbahn oder Δv zu klein für die Haupttriebwerke"
+		KEY_X:
+			sim.disengage_autopilot()
+			last_event = "Autopilot aus"
 		KEY_M:
 			rate_mode = not rate_mode
 			sim.set_rate_mode(rate_mode)
 			last_event = "Steuerung: %s" % ("Ratensteuerung (SAS)" if rate_mode else "Direkt (Gimbal)")
+
+
+## Feeds NavBall and flight director: local horizon, velocity vector, commanded direction.
+func _update_instruments() -> void:
+	if navball == null or overlay == null:
+		return
+	navball.visible = sim.is_active()
+	if not sim.is_active():
+		overlay.target_gcrf = Vector3.ZERO
+		overlay.prograde_gcrf = Vector3.ZERO
+		return
+	var index := sim.controlled_index()
+	var position := sim.body_position_gcrf_m(index)
+	var velocity := sim.body_velocity_gcrf_mps(index)
+	var up := position.normalized()
+	var north := (Vector3(0, 0, 1) - up * up.z).normalized()
+	# Below ~70 km the surface-relative velocity matters (aerodynamics), above it the inertial one (orbit).
+	var relative := velocity - Vector3(0, 0, 7.2921150e-5).cross(position)
+	var prograde := (relative if position.length() - 6378137.0 < 70000.0 else velocity).normalized()
+	var status: Dictionary = sim.autopilot_status()
+	var target: Vector3 = status.get("direction", Vector3.ZERO) if status.get("has_direction", false) else Vector3.ZERO
+	navball.attitude = sim.body_attitude_gcrf(index)
+	navball.up_gcrf = up
+	navball.north_gcrf = north
+	navball.prograde_gcrf = prograde if velocity.length() > 1.0 else Vector3.ZERO
+	navball.target_gcrf = target
+	overlay.prograde_gcrf = navball.prograde_gcrf
+	overlay.target_gcrf = target
 
 
 func _read_input(delta: float) -> void:

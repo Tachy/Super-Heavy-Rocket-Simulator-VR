@@ -3,7 +3,8 @@ extends PanelContainer
 ## Telemetry of the controlled vehicle (top right) plus the pilot's key reference.
 
 const KEY_HELP := "I Zünden · L Klammern lösen · K Aus · G Stufentrennung · M Steuermodus\n" \
-		+ "W/S Nicken · A/D Gieren · Q/E Rollen · Shift/Strg Schub (oder HOTAS)"
+		+ "W/S Nicken · A/D Gieren · Q/E Rollen · Shift/Strg Schub (oder HOTAS)\n" \
+		+ "P Aufstiegs-Autopilot · O Zirkularisieren an Apoapsis · X Autopilot aus"
 
 var world: World
 var _label := Label.new()
@@ -32,10 +33,11 @@ func _process(_delta: float) -> void:
 	lines.append("  vertikal      %9.0f m/s" % t["vertical_speed_mps"])
 	lines.append("Bahnwinkel      %9.1f °" % t["flight_path_angle_deg"])
 	# Mach only means something in continuum flow; above ~90 km the gas is rarefied.
-	if t["knudsen"] < 0.01:
+	# Above Kn ~ 0.1 the continuum assumption (and with it the Mach number) no longer holds.
+	if t["knudsen"] < 0.1:
 		lines.append("Mach            %9.2f" % t["mach"])
 	elif t["knudsen"] < 10.0:
-		lines.append("Mach            %9.2f  (Übergangsströmung)" % t["mach"])
+		lines.append("Mach                 –   (Übergangsströmung, Kn %.2f)" % t["knudsen"])
 	else:
 		lines.append("Mach                 –   (freie Molekularströmung)")
 	lines.append("Staudruck       %9.1f kPa" % (t["dynamic_pressure_pa"] / 1000.0))
@@ -52,9 +54,31 @@ func _process(_delta: float) -> void:
 		lines.append("--- am Startplatz gehalten ---")
 	if t["impacted"]:
 		lines.append("*** Bodenkontakt ***")
+	var ap: Dictionary = sim.autopilot_status()
+	if ap.get("state", "aus") != "aus":
+		lines.append("Autopilot       %s" % ap["state"])
+		if ap["state"] in ["Booster", "Oberstufe"]:
+			lines.append("  Phase         %s" % ap["phase"])
+		if ap["state"] == "Oberstufe":
+			lines.append("  Restbrennzeit %9.1f s" % ap["time_to_go_s"])
+	if ap.has("burn"):
+		var b: Dictionary = ap["burn"]
+		var ignition: float = b["time_to_ignition_s"]
+		lines.append("Manöver         Δv %.1f / %.1f m/s" % [b["remaining_dv_mps"], b["total_dv_mps"]])
+		lines.append("  %s" % _dv_bar(b["remaining_dv_mps"], b["total_dv_mps"]))
+		if ignition > 0.0:
+			lines.append("  Zündung in    %02d:%02d  (Brenndauer %.1f s)" % [int(ignition) / 60, int(ignition) % 60, b["burn_duration_s"]])
+		else:
+			lines.append("  BRENNT        Rest %.1f s" % b["burn_duration_s"])
 	if world.flight.last_event != "":
 		lines.append("Ereignis: %s" % world.flight.last_event)
 	lines.append("")
 	lines.append(KEY_HELP)
 	_label.text = "\n".join(lines)
 	position = Vector2(get_viewport_rect().size.x - size.x - 12.0, 12.0)
+
+
+static func _dv_bar(remaining: float, total: float) -> String:
+	var cells := 24
+	var filled := int(round(cells * clampf(remaining / maxf(total, 1e-6), 0.0, 1.0)))
+	return "[" + "█".repeat(filled) + "·".repeat(cells - filled) + "]"

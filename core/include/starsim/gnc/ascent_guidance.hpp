@@ -18,7 +18,9 @@ struct AscentTarget {
 // Open-loop first-stage profile.
 struct PitchProgram {
     double vertical_rise_speed_mps = 60.0;  // clear the tower before turning
-    double kick_angle_rad = 0.06;           // initial tilt from vertical towards the launch azimuth
+    // Initial tilt from vertical towards the launch azimuth. 10 deg reproduces the IFT-3 flight-path angle
+    // over the first 90 s (tuning test "[.tuning]"); later the faster V3 turns over more slowly.
+    double kick_angle_rad = 10.0 * 3.14159265358979 / 180.0;
     double kick_duration_s = 12.0;
 };
 

@@ -1,0 +1,7 @@
+# Ascent autopilot target (key P). Insertion at periapsis; orbit as osculating elements at cutoff.
+
+[target]
+periapsis_km = 200.0
+apoapsis_km = 200.0
+inclination_deg = 26.5     # Starbase is at 26.0 deg N: due east gives ~26 deg
+northerly = true
