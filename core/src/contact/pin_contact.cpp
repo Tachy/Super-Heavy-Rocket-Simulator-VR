@@ -14,7 +14,7 @@ namespace {
 // Contact parameters, tuned for the 200 Hz RK4 tick (contact period ~0.4 s for a 275 t booster on two pins).
 constexpr double pin_stiffness_n_m = 4.0e7;    // [E] per pin: ~3.4 cm compression under a 275 t booster
 constexpr double pin_damping_n_s_m = 1.0e6;    // [E] per pin: damping ratio ~0.2
-constexpr double hull_stiffness_n_m = 4.0e7;   // [E] whole hull ring
+constexpr double hull_stiffness_n_m = 4.0e7;   // [E] hull against an arm face (per ring point in contact)
 constexpr double hull_damping_n_s_m = 1.0e6;   // [E]
 constexpr double friction_coefficient = 0.3;   // [E] dry steel on steel
 // Below this slip friction grows linearly. The explicit (start-of-tick) friction is stable only while
@@ -97,7 +97,8 @@ CatchContact catch_contact(const CatchBodyGeometry& body, const SitePose& pose, 
     for (const auto& b : body.hull) {
         const Vec3 p = site_point(b);
         for (size_t i = 0; i < arms.size(); ++i) {
-            const Vec3 f = force_at(p, hull_stiffness_n_m / hull_samples, hull_damping_n_s_m / hull_samples, arms[i]);
+            // Per ring point: an arm face touches about one point of the ring at a time.
+            const Vec3 f = force_at(p, hull_stiffness_n_m, hull_damping_n_s_m, arms[i]);
             if (norm(f) > 0.0) apply(p, f, i);
         }
     }

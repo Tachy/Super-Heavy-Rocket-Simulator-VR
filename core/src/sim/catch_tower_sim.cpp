@@ -1,5 +1,8 @@
 #include "starsim/sim/catch_tower_sim.hpp"
 
+#include <cstdio>
+#include <cstdlib>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -20,13 +23,16 @@ constexpr double missed_drop_m = 5.0;       // pins this far below the arm tops:
 constexpr double tower_zone_m = 1000.0;     // bodies closer than this need fixed ticks
 // Bound on a coasting body's acceleration towards the tower (gravity; drag only slows the fall).
 constexpr double coast_acceleration_bound_mps2 = 10.0;
-constexpr double hull_crush_depth_m = 0.2;  // [E] an arm this deep in the hull: struck it (centred catch: 0.3 m clear)
+// The arms are force limited (they stall against the hull): damage comes from the hull being driven into an arm.
+constexpr double hull_damage_force_n = 6.0e6;  // [E] hull against one arm, ~3x the arm actuator force
+constexpr double hull_overlap_m = 1.0;         // [E] gross overlap of hull and arm the contact points cannot see
 
 }  // namespace
 
 const char* to_string(CatchPhase phase) {
     switch (phase) {
         case CatchPhase::Open: return "offen";
+        case CatchPhase::Standby: return "bereit";
         case CatchPhase::Closing: return "schließt";
         case CatchPhase::Caught: return "gefangen";
         case CatchPhase::Missed: return "verfehlt";
@@ -41,7 +47,13 @@ CatchTowerSim::CatchTowerSim(const config::TowerConfig& config, double latitude_
 void CatchTowerSim::close_arms(bool instantly) {
     if (instantly) arms_.set_closed();
     arms_.command_close(true);
-    if (phase_ == CatchPhase::Open) phase_ = CatchPhase::Closing;
+    if (phase_ == CatchPhase::Open || phase_ == CatchPhase::Standby) phase_ = CatchPhase::Closing;
+}
+
+void CatchTowerSim::standby_arms(bool instantly) {
+    if (instantly) arms_.set_standby();
+    arms_.command(contact::ArmCommand::Standby);
+    if (phase_ == CatchPhase::Open) phase_ = CatchPhase::Standby;
 }
 
 void CatchTowerSim::abort_catch() {
@@ -115,12 +127,16 @@ void CatchTowerSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
         hull_push_n_ = std::max({hull_push_n_, tr.contact.hull_push_n[0], tr.contact.hull_push_n[1]});
         vertical_load_n_ += tr.contact.vertical_load_n;
         max_pin_load_n_ = std::max(max_pin_load_n_, tr.contact.max_pin_load_n);
-        if (phase_ == CatchPhase::Open) {
+        if (phase_ == CatchPhase::Open || phase_ == CatchPhase::Standby) {
             const Vec3 pin_axis = pose.cg_m + pose.body_to_site * Vec3{tr.geometry.pin_station_m - pose.cg_station_m, 0.0, 0.0};
             const double pin_height = pin_axis.z - geometry_.arm_top_height_m(arms_.carriage_offset_m());
-            if (contact::should_close_arms(trigger_, pin_height, std::hypot(pose.cg_m.x, pose.cg_m.y),
-                                           -pose.velocity_mps.z, arms_.closing_time_s())) {
+            const auto command = contact::arm_command(trigger_, pin_height, std::hypot(pose.cg_m.x, pose.cg_m.y),
+                                                      -pose.velocity_mps.z, arms_.final_closing_time_s());
+            if (command == contact::ArmCommand::Closed) {
                 close_arms(false);
+            } else {
+                arms_.command(command);
+                phase_ = command == contact::ArmCommand::Standby ? CatchPhase::Standby : CatchPhase::Open;
             }
         }
     }
@@ -140,6 +156,7 @@ void CatchTowerSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, 
             if (contact::hits_tower(geometry_, bottom, top, 0.5 * body->vehicle().diameter_m())) {
                 body->mark_impacted();
                 tower_struck_ = true;
+                if (std::getenv("STARSIM_DEBUG_CATCH")) std::printf("[tower] hull hits tower/mount: cg %.2f,%.2f,%.2f bottom %.2f top %.2f opening %.3f\n", pose.cg_m.x, pose.cg_m.y, pose.cg_m.z, bottom.z, top.z, arms_.opening_rad());  // diagnostics
             }
             if (was_tracked) {
                 auto& tr = tracks_.at(body);
@@ -147,9 +164,11 @@ void CatchTowerSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, 
                 const double radius = 0.5 * body->vehicle().diameter_m();
                 for (const int side : {1, -1}) {
                     const auto arm = geometry_.arm_box(side, arms_.opening_rad(), arms_.carriage_offset_m());
-                    if (contact::hull_penetration_m(arm, bottom, top, radius) > hull_crush_depth_m) {
+                    if (contact::hull_penetration_m(arm, bottom, top, radius) > hull_overlap_m ||
+                        std::max(tr.contact.hull_push_n[0], tr.contact.hull_push_n[1]) > hull_damage_force_n) {
                         body->mark_impacted();
                         tower_struck_ = true;
+                        if (std::getenv("STARSIM_DEBUG_CATCH")) std::printf("[tower] arm %d in hull: cg %.2f,%.2f,%.2f bottom %.2f opening %.3f\n", side, pose.cg_m.x, pose.cg_m.y, pose.cg_m.z, bottom.z, arms_.opening_rad());  // diagnostics
                     }
                 }
                 const Vec3 pin_axis = pose.cg_m + pose.body_to_site * Vec3{tr.geometry.pin_station_m - pose.cg_station_m, 0.0, 0.0};

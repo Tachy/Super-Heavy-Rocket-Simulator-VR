@@ -23,6 +23,7 @@ TowerConfig load_tower(const Document& doc, const toml::table& t) {
     c.arm_width_m = doc.positive(t, "arm_width_m");
     c.arm_thickness_m = doc.positive(t, "arm_thickness_m");
     c.arm_open_rad = doc.positive(t, "arm_open_deg") * deg;
+    c.arm_standby_rad = doc.positive(t, "arm_standby_deg") * deg;
     c.arm_closed_gap_m = doc.positive(t, "arm_closed_gap_m");
     c.arm_rate_rad_s = doc.positive(t, "arm_rate_deg_s") * deg;
     c.arm_force_limit_n = doc.positive(t, "arm_force_limit_n");
@@ -32,6 +33,7 @@ TowerConfig load_tower(const Document& doc, const toml::table& t) {
     c.carriage_damping_n_s_m = doc.positive(t, "carriage_damping_n_s_m");
     c.carriage_stroke_m = doc.positive(t, "carriage_stroke_m");
     if (c.mount_inner_radius_m >= c.mount_outer_radius_m) doc.fail("tower: mount_inner_radius_m >= mount_outer_radius_m");
+    if (c.arm_standby_rad >= c.arm_open_rad) doc.fail("tower: arm_standby_deg must be below arm_open_deg");
     if (c.catch_height_m <= c.mount_height_m) doc.fail("tower: catch_height_m must be above mount_height_m");
     if (c.distance_m <= 0.5 * c.width_m) doc.fail("tower: the pad centre lies inside the tower");
     return c;

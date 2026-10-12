@@ -60,3 +60,21 @@ TEST_CASE("Arms can be set closed instantly", "[contact]") {
     CHECK(arms.closed());
     CHECK(arms.close_commanded());
 }
+
+TEST_CASE("Arms wait half open and close from there in a fraction of a second", "[contact]") {
+    const auto config = tower();
+    REQUIRE(config.arm_standby_rad > 0.0);
+    REQUIRE(config.arm_standby_rad < config.arm_open_rad);
+    contact::CatchArms arms(config);
+    arms.command(contact::ArmCommand::Standby);
+    run(arms, 4.0, 0.0, 0.0);
+    CHECK_THAT(arms.opening_rad(), WithinAbs(config.arm_standby_rad, 1e-12));
+    CHECK_THAT(arms.final_closing_time_s(), WithinAbs(config.arm_standby_rad / config.arm_rate_rad_s, 1e-12));
+    CHECK(arms.final_closing_time_s() < 1.0);
+    arms.command(contact::ArmCommand::Closed);
+    run(arms, arms.final_closing_time_s() + 0.01, 0.0, 0.0);
+    CHECK(arms.closed());
+    arms.command(contact::ArmCommand::Open);
+    run(arms, 5.0, 0.0, 0.0);
+    CHECK_THAT(arms.opening_rad(), WithinAbs(config.arm_open_rad, 1e-12));
+}

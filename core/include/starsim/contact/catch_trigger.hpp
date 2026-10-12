@@ -1,16 +1,20 @@
 #pragma once
 
+#include "starsim/contact/catch_arms.hpp"
+
 namespace starsim::contact {
 
-// Automatic tower: close the arms when the pins will reach the arm tops within the closing time (plus a
-// margin) and the booster axis is near the catch axis, or when the pins hover just above the arms.
+// Automatic tower: the arms wait half open (standby) while the booster comes down between them and close only
+// just before the pins arrive - from standby within a fraction of a second - if the booster axis is near the
+// catch axis; climbing or below the arms: open.
 struct CatchTrigger {
-    double max_axis_offset_m = 3.0;  // [E] farther off the arms cannot catch the pins
-    double margin_s = 1.0;           // [E] arms closed this long before the pins arrive
+    double standby_lead_s = 10.0;    // [E] arms to standby this long before the pins arrive
+    double max_axis_offset_m = 2.0;  // [E] final closing only this close to the catch axis (standby: ~3 m clear)
+    double margin_s = 0.5;           // [E] arms closed this long before the pins arrive
     double hover_height_m = 2.0;     // [E]
 };
 
-bool should_close_arms(const CatchTrigger& trigger, double pin_height_above_arms_m, double axis_offset_m,
-                       double sink_rate_mps, double closing_time_s);
+ArmCommand arm_command(const CatchTrigger& trigger, double pin_height_above_arms_m, double axis_offset_m,
+                       double sink_rate_mps, double final_closing_time_s);
 
 }  // namespace starsim::contact

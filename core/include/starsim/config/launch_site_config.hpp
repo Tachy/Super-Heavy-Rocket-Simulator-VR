@@ -23,6 +23,7 @@ struct TowerConfig {
     double arm_width_m = 0.0;
     double arm_thickness_m = 0.0;
     double arm_open_rad = 0.0;          // each arm swung outward from closed (parallel arms)
+    double arm_standby_rad = 0.0;       // waiting opening before the catch (arms close from here at the end)
     double arm_closed_gap_m = 0.0;      // clear gap between the closed arms
     double arm_rate_rad_s = 0.0;
     double arm_force_limit_n = 0.0;     // closing stalls above this push of the hull

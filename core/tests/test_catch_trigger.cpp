@@ -10,14 +10,18 @@ using namespace starsim;
 using namespace starsim::contact;
 using math::Vec3;
 
-TEST_CASE("The tower closes the arms just in time", "[contact]") {
+TEST_CASE("The tower waits half open and closes the arms just before the pins arrive", "[contact]") {
     const CatchTrigger t;
-    CHECK(should_close_arms(t, 30.0, 0.5, 10.0, 4.0));         // 3 s to contact <= 4 + 1 s
-    CHECK_FALSE(should_close_arms(t, 60.0, 0.5, 10.0, 4.0));   // 6 s
-    CHECK_FALSE(should_close_arms(t, 30.0, 4.0, 10.0, 4.0));   // too far off the catch axis
-    CHECK(should_close_arms(t, 1.0, 0.5, 0.0, 4.0));           // hovering just above the arms
-    CHECK_FALSE(should_close_arms(t, 20.0, 0.5, -1.0, 4.0));   // climbing
-    CHECK_FALSE(should_close_arms(t, -1.0, 0.5, 1.0, 4.0));    // pins already below the arms
+    const double final_close = 0.65;  // standby -> closed
+    // Arguments: pin height above the arms, axis offset, sink rate, final closing time.
+    CHECK(arm_command(t, 150.0, 5.0, 10.0, final_close) == ArmCommand::Open);      // 15 s to contact
+    CHECK(arm_command(t, 50.0, 5.0, 10.0, final_close) == ArmCommand::Standby);    // 5 s: wait half open
+    CHECK(arm_command(t, 10.0, 0.5, 10.0, final_close) == ArmCommand::Closed);     // 1 s <= 0.65 + 0.5 s
+    CHECK(arm_command(t, 10.0, 2.5, 10.0, final_close) == ArmCommand::Standby);    // too far off: no catch
+    CHECK(arm_command(t, 20.0, 0.5, 10.0, final_close) == ArmCommand::Standby);    // 2 s: not yet
+    CHECK(arm_command(t, 1.0, 0.5, 0.0, final_close) == ArmCommand::Closed);       // hovering just above the arms
+    CHECK(arm_command(t, 20.0, 0.5, -1.0, final_close) == ArmCommand::Open);       // climbing
+    CHECK(arm_command(t, -1.0, 0.5, 1.0, final_close) == ArmCommand::Open);        // pins already below the arms
 }
 
 TEST_CASE("Hull collisions with the tower and the launch mount", "[contact]") {

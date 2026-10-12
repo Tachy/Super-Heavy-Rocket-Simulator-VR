@@ -11,15 +11,23 @@ constexpr double hard_stop_speed_mps = 1.0;  // [E] faster at the end of the str
 CatchArms::CatchArms(const config::TowerConfig& config) : config_(config), opening_rad_(config.arm_open_rad) {}
 
 void CatchArms::set_closed() {
-    close_ = true;
+    command_ = ArmCommand::Closed;
     opening_rad_ = 0.0;
+    opening_rate_rad_s_ = 0.0;
+}
+
+void CatchArms::set_standby() {
+    command_ = ArmCommand::Standby;
+    opening_rad_ = config_.arm_standby_rad;
     opening_rate_rad_s_ = 0.0;
 }
 
 void CatchArms::step(double dt_s, double hull_push_n, double vertical_load_n) {
     const double previous = opening_rad_;
-    const double target = close_ ? 0.0 : config_.arm_open_rad;
-    stalled_ = close_ && hull_push_n > config_.arm_force_limit_n;
+    const double target = command_ == ArmCommand::Closed    ? 0.0
+                          : command_ == ArmCommand::Standby ? config_.arm_standby_rad
+                                                            : config_.arm_open_rad;
+    stalled_ = target < opening_rad_ && hull_push_n > config_.arm_force_limit_n;
     if (!stalled_) {
         const double max_change = config_.arm_rate_rad_s * dt_s;
         opening_rad_ += std::clamp(target - opening_rad_, -max_change, max_change);

@@ -12,7 +12,7 @@
 
 namespace starsim::sim {
 
-enum class CatchPhase { Open, Closing, Caught, Missed, Aborted };
+enum class CatchPhase { Open, Standby, Closing, Caught, Missed, Aborted };
 
 const char* to_string(CatchPhase phase);  // German UI text
 
@@ -26,6 +26,7 @@ public:
     const contact::CatchArms& arms() const { return arms_; }
     CatchPhase phase() const { return phase_; }
     void close_arms(bool instantly);
+    void standby_arms(bool instantly);  // half open, waiting for the booster
     // The landing guidance gave up the catch: the arms stay (or swing back) open for the rest of the flight.
     void abort_catch();
     // A body struck the tower, the mount or an arm (tower damage).
