@@ -43,7 +43,7 @@ Q^q = { s in R^q : ||(s_1, ..., s_{q-1})||_2 <= s_0 }      (Lorentz cone)
 Helper that assembles a `SocpProblem` readably, so sub-project 3 never computes indices by hand:
 
 - `add_variables(count, name)` -> a `VariableBlock` (offset, size, name for diagnostics).
-- `add_equality(terms, rhs)`: sum of (coefficient, variable index) == rhs.
+- `add_equality(expr)`: affine expression == 0.
 - `add_nonnegative(terms, constant)`: affine expression >= 0.
 - `add_second_order_cone(rows)`: each row an affine expression; rows[0] >= ||rows[1..]||.
 - `set_objective(terms)`.
@@ -82,14 +82,15 @@ Primal-dual interior point method on the homogeneous self-dual embedding (HSDE),
   [ G   0   -W^T W  ] [dz]   [r_z]
   ```
   quasi-definite after static regularisation (`+delta` on the (1,1) block, `-delta` on the (2,2) block,
-  delta ~ 1e-8 relative), solved by LDL^T without pivoting, followed by iterative refinement against the
-  unregularised matrix (up to 3 steps). The same factorisation serves the affine and the combined
+  delta = 7e-8 after equilibration; dynamic regularisation of wrong-sign pivots: epsilon 1e-13, delta 2e-7,
+  as in ECOS), solved by LDL^T without pivoting, followed by iterative refinement against the
+  unregularised matrix (up to 8 steps). The same factorisation serves the affine and the combined
   direction, and the two solves for the HSDE `tau` direction.
 - **Sparse LDL^T (own):** symbolic phase once per problem structure (elimination tree, column counts,
   pattern of L); numeric phase each iteration (up-looking, as in Davis' LDL). The pattern of the `W^T W`
   blocks is the dense cone block, fixed across iterations.
-- **Ordering:** approximate minimum degree (AMD, own implementation after Amestoy/Davis/Duff), computed
-  once in the symbolic phase.
+- **Ordering:** minimum degree on the explicit elimination graph (ties: lowest index), computed once in the
+  symbolic phase; full AMD (Amestoy/Davis/Duff) is not needed for banded trajectory problems.
 - No heap allocation inside the iteration loop: all work arrays are sized in the setup.
 
 ## Determinism and performance
@@ -105,12 +106,12 @@ Primal-dual interior point method on the homogeneous self-dual embedding (HSDE),
 | File | Responsibility |
 |------|----------------|
 | `optim/sparse_matrix.hpp/.cpp` | triplet -> CSC, transpose, matrix-vector products |
-| `optim/amd.hpp/.cpp` | approximate minimum degree ordering |
+| `optim/minimum_degree.hpp/.cpp` | minimum-degree ordering |
 | `optim/ldl.hpp/.cpp` | sparse LDL^T: symbolic + numeric factorisation, solve |
 | `optim/cones.hpp/.cpp` | cone layout, NT scaling, cone products, max step to the boundary |
 | `optim/kkt_system.hpp/.cpp` | assembles the KKT matrix, regularisation, iterative refinement |
 | `optim/equilibration.hpp/.cpp` | Ruiz scaling / unscaling |
-| `optim/socp_problem.hpp` | `SocpProblem`, `SocpSettings`, `SocpResult`, `SocpStatus` |
+| `optim/socp_problem.hpp/.cpp` | `SocpProblem`, `SocpSettings`, `SocpResult`, `SocpStatus` |
 | `optim/socp_solver.hpp/.cpp` | HSDE predictor-corrector loop |
 | `optim/socp_builder.hpp/.cpp` | `AffineExpr`, `VariableBlock`, `SocpBuilder` |
 
@@ -121,7 +122,7 @@ Each file stays small; the solver loop only orchestrates the pieces.
 Unit tests (Catch2, tag `[optim]`):
 - Sparse matrix: triplet assembly with duplicates, transpose, products against dense computation.
 - LDL^T: random sparse quasi-definite matrices (fixed seed) against a dense solve; residual <= 1e-12 relative.
-- AMD: result is a permutation; fill of L with AMD <= fill without ordering on a banded trajectory-like
+- Ordering: result is a permutation; fill of L with minimum degree < fill without ordering on a banded trajectory-like
   pattern and on a 2-D grid Laplacian.
 - Cones: NT scaling satisfies `W z = W^{-T} s` (= lambda); max step keeps the point in the cone.
 - Builder: rows end up in cone order; expressions with constants land in `h`.
@@ -134,12 +135,13 @@ Analytic cases:
 
 Reference fixtures (tag `[optim][validation]`):
 - `tools/validation/gen_socp_fixtures.py` generates problems, solves them with CVXPY + Clarabel and writes
-  `tests/validation/socp/*.json` (problem data + reference x and objective). Committed; regenerated only
+  `tests/validation/socp/*.txt` (key/value text format, see the generator; problem data + reference x and
+  objective). Committed; regenerated only
   when the generator changes. CVXPY and Clarabel are Apache-2.0, recorded as tools (not runtime data).
 - Cases: random feasible LPs and SOCPs (fixed seeds, sizes 10-200), a portfolio-style SOCP, and a
   G-FOLD-style 3-DOF landing problem (lossless convexification, ~40 nodes) of the size of sub-project 3.
 - Tolerance: objective relative error <= 1e-6; solution `||x - x_ref|| / max(1, ||x_ref||) <= 1e-5`
-  (for problems with a unique optimum).
+  (for problems with a unique optimum), compared at the references' own tolerance 1e-10.
 - Determinism: solving the same problem twice gives identical results.
 - Benchmark: the landing problem converges in < 30 iterations; time printed with `STARSIM_VERBOSE=1`.
 
