@@ -15,6 +15,9 @@ var last_event := ""
 var _stick := {}     ## [stick] table of config/input_hotas.toml
 var _throttle := {}  ## [throttle] table
 var _joydump := OS.get_cmdline_user_args().has("--joydump")
+## The throttle lever reports 0 (= 50 %) until it is first moved; only then does it take over.
+var lever_armed := false
+var _lever_initial := NAN
 
 
 func setup(config_dir: String) -> void:
@@ -98,7 +101,14 @@ func _read_input(delta: float) -> void:
 		roll += _axis(stick, _stick, "roll")
 	var lever := _find_device(_throttle.get("device_name", ""))
 	if lever >= 0:
-		throttle = (_axis(lever, _throttle, "throttle", false) + 1.0) * 0.5
+		var lever_value := _axis(lever, _throttle, "throttle", false)
+		if is_nan(_lever_initial):
+			_lever_initial = lever_value
+		elif not lever_armed and absf(lever_value - _lever_initial) > 0.02:
+			lever_armed = true
+			last_event = "Schubhebel aktiv"
+		if lever_armed:
+			throttle = (lever_value + 1.0) * 0.5
 	if _joydump:
 		for device in Input.get_connected_joypads():
 			var values := PackedStringArray()

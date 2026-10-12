@@ -1,4 +1,7 @@
 # Launch and landing sites. Geodetic coordinates on WGS84, height above the ellipsoid.
+# Until terrain exists (M8) the ground near a site is flat at this height (physics and rendering).
+# Note: the geoid lies ~25-28 m below the ellipsoid on the US Gulf/Atlantic coasts, so pads a few metres
+# above sea level have negative ellipsoidal heights. [E] values below are not yet geoid-corrected.
 
 [[site]]
 id = "starbase_olp1"

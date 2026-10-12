@@ -68,6 +68,13 @@ public:
     void release_clamps() { clamped_ = false; }
     bool impacted() const { return impacted_; }
 
+    // Flat ground at this height above WGS84 (the pad elevation; terrain comes later).
+    double ground_height_m() const { return ground_height_m_; }
+    void set_ground_height(double height_m) { ground_height_m_ = height_m; }
+
+    static constexpr double max_touchdown_sink_rate_mps = 3.0;  // [E] structural limit
+    static constexpr double max_touchdown_tilt_rad = 10.0 * 3.14159265358979 / 180.0;
+
     // Splits the stack below stage `index`. Returns the upper part; both keep position, velocity and
     // rotation consistent with the rigid body before the split. `separation_dv_mps` pushes them apart
     // along the axis (split by mass).
@@ -82,6 +89,7 @@ public:
 
 private:
     void follow_pad(const frames::BodyOrientation& earth, time::Epoch epoch);
+    void resolve_ground_contact(const frames::BodyOrientation& earth, time::Epoch epoch);
 
     std::unique_ptr<Vehicle> vehicle_;
     RigidBodyState state_;
@@ -89,7 +97,7 @@ private:
     bool impacted_ = false;
     math::Vec3 pad_itrf_m_;
     math::Quat attitude_itrf_;  // body -> ITRF while clamped
-    double cg_height_on_pad_m_ = 0.0;
+    double ground_height_m_ = 0.0;
 };
 
 // Earth rotation vector in GCRF from the orientation's rotation rate (omega_x = dR/dt * R^T).

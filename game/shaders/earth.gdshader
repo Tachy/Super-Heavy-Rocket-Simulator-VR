@@ -14,12 +14,14 @@ uniform float sun_radius_m = 695700000.0;
 uniform float moon_radius_m = 1737400.0;
 uniform float night_lights_intensity = 1.2;
 uniform float day_exposure = 1.5;
+// Ground patches store vertices relative to their centre; this restores body-local metres.
+instance uniform vec3 vertex_offset = vec3(0.0);
 
 varying vec3 local_position;
 varying vec3 local_normal;
 
 void vertex() {
-	local_position = VERTEX;
+	local_position = VERTEX + vertex_offset;
 	local_normal = NORMAL;
 }
 

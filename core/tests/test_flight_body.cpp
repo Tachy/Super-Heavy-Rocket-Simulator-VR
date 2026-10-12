@@ -182,3 +182,71 @@ TEST_CASE("Engines obey relight rules and flame out when dry", "[vehicle]") {
     }
     CHECK(booster.telemetry(space.env, t0).engines_running == 0);  // flame-out when LOX is gone
 }
+
+namespace {
+
+class CentralGravity final : public environment::GravityModel {
+public:
+    ephemeris::Body central_body() const override { return ephemeris::Body::Earth; }
+    Vec3 acceleration_mps2(const Vec3& r, time::Epoch) const override {
+        const double d = norm(r);
+        return r * (-3.986004418e14 / (d * d * d));
+    }
+};
+
+struct PadWorld {
+    CentralGravity gravity;
+    environment::Us76Atmosphere atmosphere;
+    RotatingEarth earth;
+    vehicle::FlightEnvironment env{gravity, atmosphere, earth, nullptr, false};
+};
+
+std::unique_ptr<FlightBody> stack_on_pad(const PadWorld& world) {
+    auto cfg = config::load_vehicle(config_dir, "starship_block3");
+    return FlightBody::on_pad(std::make_unique<Vehicle>(cfg, config_dir), 25.99686 * constants::deg_to_rad,
+                              -97.15394 * constants::deg_to_rad, 10.0, 0.0, world.earth, t0);
+}
+
+VehicleCommand booster_throttle(double throttle) {
+    VehicleCommand c;
+    c.groups = {{"booster/center", true, throttle}, {"booster/middle", true, throttle},
+                {"booster/outer", true, throttle}};
+    return c;
+}
+
+}  // namespace
+
+TEST_CASE("Released with too little thrust, the vehicle stays on the pad; with enough it lifts off", "[vehicle]") {
+    PadWorld world;
+    auto body = stack_on_pad(world);
+    double t = 0.0;
+    auto run = [&](double seconds, const VehicleCommand& c) {
+        for (int i = 0; i < static_cast<int>(seconds / 0.005); ++i, t += 0.005) body->step(world.env, t0 + t, 0.005, c);
+    };
+    run(4.0, booster_throttle(0.4));  // spool up while clamped
+    body->release_clamps();
+    run(5.0, booster_throttle(0.4));  // T/W ~ 0.6
+    const auto resting = body->telemetry(world.env, t0 + t);
+    CHECK_FALSE(body->impacted());
+    CHECK(std::abs(resting.vertical_speed_mps) < 0.01);
+    CHECK(resting.altitude_m > 10.0);  // CG above the 10 m pad
+
+    run(10.0, booster_throttle(1.0));
+    const auto climbing = body->telemetry(world.env, t0 + t);
+    CHECK_FALSE(body->impacted());
+    CHECK(climbing.altitude_m > resting.altitude_m + 30.0);
+    CHECK(climbing.vertical_speed_mps > 5.0);
+}
+
+TEST_CASE("A hard touchdown is an impact", "[vehicle]") {
+    PadWorld world;
+    auto body = stack_on_pad(world);
+    body->release_clamps();
+    // Lift the vehicle 200 m and let it fall with engines off.
+    auto state = body->state();
+    state.position_gcrf_m += normalized(state.position_gcrf_m) * 200.0;
+    body->set_state(state);
+    double t = 0.0;
+    for (int i = 0; i < 4000 && !body->impacted(); ++i, t += 0.005) body->step(world.env, t0 + t, 0.005, {});
+    CHECK(body->impacted());
+}

@@ -91,8 +91,12 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   pure gravity propagator and shows SRP as a t^2 residual (~1.9e-8 m/s^2: 39 m after 18 h).
 - Starship throttle schedules are not public: the IFT-3 test reconstructs the throttle from measured
   acceleration (mean 0.75 of nameplate) and checks consistency (speed 4.3 %, altitude 7.9 %, max-Q).
-- Earth is a 256x128 ellipsoid mesh: near the ground facets sit up to ~0.5 km below the true surface and
-  the sky is black (no atmosphere rendering) - terrain and atmosphere come in M8.
+- Earth is a 256x128 ellipsoid mesh whose facets sit up to ~0.6 km below the true surface; below 500 km a
+  2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites.
+  Physics ground = flat at the pad height (FlightBody::ground_height_m): gentle contact (<= 3 m/s, <= 10 deg)
+  rests, harder contact is an impact. Sky is black (no atmosphere rendering). Terrain/atmosphere: M8.
+- The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
+- Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
 
 ## Game (Godot) structure

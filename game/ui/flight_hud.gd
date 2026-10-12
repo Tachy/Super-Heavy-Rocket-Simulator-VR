@@ -39,7 +39,8 @@ func _process(_delta: float) -> void:
 	lines.append("Masse           %9.0f t" % (t["mass_kg"] / 1000.0))
 	lines.append("Treibstoff      %9.0f t" % (t["propellant_kg"] / 1000.0))
 	lines.append("Triebwerke      %9d" % t["engines_running"])
-	lines.append("Schubregler     %9.0f %%" % (world.flight.throttle * 100.0))
+	lines.append("Schubregler     %9.0f %%%s" % [world.flight.throttle * 100.0,
+			"" if world.flight.lever_armed else "  (Hebel einmal bewegen)"])
 	lines.append("Steuerung       %s" % ("Ratensteuerung (SAS)" if world.flight.rate_mode else "Direkt (Gimbal)"))
 	if t["clamped"]:
 		lines.append("--- am Startplatz gehalten ---")

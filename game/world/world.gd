@@ -24,6 +24,7 @@ var core := StarsimCore.new()
 var clock := SimClock.new()
 var camera := OrbitCamera.new()
 var earth := CelestialBody.new()
+var ground_patch := GroundPatch.new()
 var moon := CelestialBody.new()
 var sun_disk := MeshInstance3D.new()
 var sun_light := DirectionalLight3D.new()
@@ -81,7 +82,9 @@ func _process(delta: float) -> void:
 func update_world() -> void:
 	# The flight simulation may lag behind the clock at high time warp; the clock then waits for it.
 	if flight.sim.is_active():
-		clock.tdb_s = flight.advance(clock.tdb_s, _delta)
+		var reached := flight.advance(clock.tdb_s, _delta)
+		if clock.tdb_s - reached > 0.05:  # sim at its per-frame tick limit: hold the clock back
+			clock.tdb_s = reached
 	var t := clock.tdb_s
 	earth.fixed_to_gcrf = core.earth_fixed_to_gcrf(t)
 	moon.fixed_to_gcrf = core.moon_fixed_to_gcrf(t)
@@ -98,6 +101,7 @@ func update_world() -> void:
 	var sun_from_camera := core.apparent_body_position_gcrf_m("sun", t, cam, Vector3.ZERO)
 
 	earth.place(cam)
+	ground_patch.update_for_camera(earth.fixed_to_gcrf.transposed() * cam)
 	moon.place(cam)
 	_earth_material.set_shader_parameter("sun_position_local", earth.to_local_frame(sun_apparent_from_earth_m))
 	_earth_material.set_shader_parameter("moon_position_local", earth.to_local_frame(moon_apparent_from_earth_m))
@@ -193,6 +197,11 @@ func _setup_bodies(data_dir: String) -> void:
 	earth.name = "Earth"
 	earth.setup(EARTH_SEMI_MAJOR_AXIS_M, EARTH_FLATTENING, _earth_material)
 	add_child(earth)
+	ground_patch.setup(_earth_material)
+	ground_patch.sites = sites
+	earth.add_child(ground_patch)
+	for site: Dictionary in sites:
+		earth.add_child(_make_pad(site))
 
 	_moon_material.shader = load("res://shaders/moon.gdshader")
 	_moon_material.set_shader_parameter("albedo_texture", _load_texture(data_dir.path_join("textures/moon_color.png")))
@@ -213,6 +222,28 @@ func _setup_bodies(data_dir: String) -> void:
 	add_child(sun_disk)
 	sun_light.light_energy = 1.0
 	add_child(sun_light)
+
+
+## Concrete pad disc at a launch site (Earth-fixed, top surface at the site height).
+func _make_pad(site: Dictionary) -> MeshInstance3D:
+	var disc := CylinderMesh.new()
+	disc.top_radius = 35.0
+	disc.bottom_radius = 37.0
+	disc.height = 2.0
+	var concrete := StandardMaterial3D.new()
+	concrete.albedo_color = Color(0.62, 0.61, 0.58)
+	concrete.roughness = 0.9
+	var pad := MeshInstance3D.new()
+	pad.name = "Pad_" + str(site["id"])
+	pad.mesh = disc
+	pad.material_override = concrete
+	var lat := deg_to_rad(site["latitude_deg"])
+	var lon := deg_to_rad(site["longitude_deg"])
+	var up := Frames.to_render(Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat)))
+	var east := Frames.to_render(Vector3(-sin(lon), cos(lon), 0.0))
+	var center := GroundPatch.geodetic_to_fixed(site["latitude_deg"], site["longitude_deg"], site["height_m"] - 1.0)
+	pad.transform = Transform3D(Basis(east, up, east.cross(up)), Frames.to_render(center))
+	return pad
 
 
 ## Screen-space label for the map view, where bodies are only a few pixels large.

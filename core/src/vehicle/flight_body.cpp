@@ -159,6 +159,7 @@ std::unique_ptr<FlightBody> FlightBody::on_pad(std::unique_ptr<Vehicle> vehicle,
     }
     auto body = std::make_unique<FlightBody>(std::move(vehicle), RigidBodyState{});
     body->clamped_ = true;
+    body->ground_height_m_ = height_m;
     body->pad_itrf_m_ = frames::geodetic_to_fixed(pad);
     body->attitude_itrf_ = Quat::from_matrix(columns);
     body->follow_pad(earth, epoch);
@@ -200,18 +201,36 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     state_ = unpack(integrators::rk4_step<13>(f, 0.0, pack(state_), dt_s));
     vehicle_->consume_propellant(dt_s);
 
-    // Ground contact: the lowest point of the body below the ellipsoid surface.
-    const auto end = env.earth_orientation.fixed_to_gcrf(epoch + dt_s);
+    resolve_ground_contact(env.earth_orientation, epoch + dt_s);
+}
+
+// Ground = flat at ground_height_m_ (the pad elevation) until terrain exists (M8).
+// Gentle contact: the ground carries the vehicle (it rests, co-rotating with the Earth, and lifts off as
+// soon as thrust exceeds weight). Hard contact (sink rate or tilt too large): impact.
+void FlightBody::resolve_ground_contact(const frames::BodyOrientation& earth, time::Epoch epoch) {
+    const auto transform = earth.fixed_to_gcrf(epoch);
+    const math::Mat3 to_fixed = transpose(transform.rotation);
     const double cg = vehicle_->mass_properties().cg_station_m;
-    const Vec3 bottom = state_.position_gcrf_m + state_.attitude.rotate(Vec3{-cg, 0.0, 0.0});
-    const Vec3 top = state_.position_gcrf_m + state_.attitude.rotate(Vec3{vehicle_->length_m() - cg, 0.0, 0.0});
-    const double lowest = std::min(frames::fixed_to_geodetic(transpose(end.rotation) * bottom).height_m,
-                                   frames::fixed_to_geodetic(transpose(end.rotation) * top).height_m);
-    const Vec3 up = normalized(state_.position_gcrf_m);
-    const double sink_rate = -dot(state_.velocity_gcrf_mps - cross(earth_rotation_vector(end), state_.position_gcrf_m), up);
-    if (lowest < 0.0 && sink_rate > 0.0) {
-        impacted_ = true;  // ground = ellipsoid surface until terrain exists (M8)
+    const Vec3 bottom_fixed = to_fixed * (state_.position_gcrf_m + state_.attitude.rotate(Vec3{-cg, 0.0, 0.0}));
+    const Vec3 top_fixed =
+        to_fixed * (state_.position_gcrf_m + state_.attitude.rotate(Vec3{vehicle_->length_m() - cg, 0.0, 0.0}));
+    const auto bottom = frames::fixed_to_geodetic(bottom_fixed);
+    const double lowest = std::min(bottom.height_m, frames::fixed_to_geodetic(top_fixed).height_m);
+    if (lowest >= ground_height_m_) {
+        return;
     }
+    const Vec3 up = transform.rotation * local_up_fixed(bottom);
+    const Vec3 relative = state_.velocity_gcrf_mps - cross(earth_rotation_vector(transform), state_.position_gcrf_m);
+    const double sink_rate = -dot(relative, up);
+    const double tilt = std::acos(std::clamp(dot(state_.attitude.rotate(Vec3{1.0, 0.0, 0.0}), up), -1.0, 1.0));
+    if (sink_rate > max_touchdown_sink_rate_mps || tilt > max_touchdown_tilt_rad) {
+        impacted_ = true;
+        return;
+    }
+    // Rest on the ground below the current bottom point, keeping the current attitude relative to the Earth.
+    pad_itrf_m_ = frames::geodetic_to_fixed({bottom.latitude_rad, bottom.longitude_rad, ground_height_m_});
+    attitude_itrf_ = (Quat::from_matrix(to_fixed) * state_.attitude).normalized();
+    follow_pad(earth, epoch);
 }
 
 std::unique_ptr<FlightBody> FlightBody::separate(size_t index, double separation_dv_mps) {
@@ -233,7 +252,9 @@ std::unique_ptr<FlightBody> FlightBody::separate(size_t index, double separation
     const RigidBodyState lower_state = rigid_part(lower.cg_station_m, -separation_dv_mps * upper.mass_kg / total);
     const RigidBodyState upper_state = rigid_part(shift + upper.cg_station_m, separation_dv_mps * lower.mass_kg / total);
     state_ = lower_state;
-    return std::make_unique<FlightBody>(std::move(upper_vehicle), upper_state);
+    auto upper_body = std::make_unique<FlightBody>(std::move(upper_vehicle), upper_state);
+    upper_body->ground_height_m_ = ground_height_m_;
+    return upper_body;
 }
 
 FlightTelemetry FlightBody::telemetry(const FlightEnvironment& env, time::Epoch epoch) const {
