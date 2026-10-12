@@ -1,0 +1,15 @@
+# Launch and landing sites. Geodetic coordinates on WGS84, height above the ellipsoid.
+
+[[site]]
+id = "starbase_olp1"
+name = "Starbase OLP-1"
+latitude_deg = 25.99686     # [E] from public satellite imagery
+longitude_deg = -97.15394
+height_m = 10.0
+
+[[site]]
+id = "ksc_lc39a"
+name = "KSC LC-39A"
+latitude_deg = 28.60822     # [E] from public satellite imagery
+longitude_deg = -80.60410
+height_m = 15.0

@@ -19,6 +19,13 @@ public:
 
     // Gravitational parameter GM of the body, consistent with the ephemeris.
     virtual double gm_m3ps2(Body body) const = 0;
+
+    // Apparent position of `target` relative to an observer (observer state relative to the Earth's
+    // centre, GCRF axes), corrected for light time and stellar aberration. Use for everything that is
+    // *seen*: rendering, eclipses, shadows. Geometric positions misplace e.g. the Moon's shadow on the
+    // Earth by ~40 km (20.5" annual aberration).
+    virtual math::Vec3 apparent_position_gcrf(Body target, time::Epoch epoch,
+                                              const math::StateVector& observer_gcrf) const = 0;
 };
 
 }  // namespace starsim::ephemeris

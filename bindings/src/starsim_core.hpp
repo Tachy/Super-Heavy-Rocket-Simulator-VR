@@ -29,11 +29,22 @@ public:
     // Geocentric GCRF position of "sun" / "moon" in metres.
     godot::Vector3 body_position_gcrf_m(const godot::String& body, double tdb_s) const;
 
-    // Rotation ITRF -> GCRF (rows of the rotation matrix in Basis rows).
+    // Apparent (light-time + aberration corrected) position of a body as seen by an observer whose
+    // state is given relative to the Earth's centre in GCRF. Returns the vector observer -> body.
+    godot::Vector3 apparent_body_position_gcrf_m(const godot::String& body, double tdb_s,
+                                                 const godot::Vector3& observer_position_m,
+                                                 const godot::Vector3& observer_velocity_mps) const;
+
+    // Rotations body-fixed -> GCRF (rows of the rotation matrix in Basis rows).
+    // Earth: ITRF93. Moon: MOON_ME, the frame lunar textures are registered in.
     godot::Basis earth_fixed_to_gcrf(double tdb_s) const;
+    godot::Basis moon_fixed_to_gcrf(double tdb_s) const;
 
     // WGS84 geodetic position (degrees, metres) -> GCRF metres.
     godot::Vector3 geodetic_to_gcrf_m(double latitude_deg, double longitude_deg, double height_m, double tdb_s) const;
+
+    // Fraction of the solar disk hidden by the Moon for a ground observer (0 = none, 1 = total).
+    double solar_eclipse_fraction(double latitude_deg, double longitude_deg, double height_m, double tdb_s) const;
 
 protected:
     static void _bind_methods();
@@ -43,6 +54,7 @@ private:
     spice::SpiceTimeConverter time_;
     spice::SpiceEphemeris ephemeris_;
     spice::SpiceOrientation earth_ = spice::SpiceOrientation::earth();
+    spice::SpiceOrientation moon_ = spice::SpiceOrientation::moon_mean_earth();  // map frame
 };
 
 }  // namespace starsim::bindings

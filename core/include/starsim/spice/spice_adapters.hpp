@@ -21,6 +21,8 @@ class SpiceEphemeris final : public ephemeris::Ephemeris {
 public:
     ephemeris::StateVector state_gcrf(ephemeris::Body target, time::Epoch epoch) const override;
     double gm_m3ps2(ephemeris::Body body) const override;
+    math::Vec3 apparent_position_gcrf(ephemeris::Body target, time::Epoch epoch,
+                                      const math::StateVector& observer_gcrf) const override;
 };
 
 // Orientation of a SPICE body-fixed frame relative to J2000 (= ICRF / GCRF axes in DE4xx kernels).
@@ -32,6 +34,9 @@ public:
     static SpiceOrientation earth() { return SpiceOrientation("ITRF93"); }
     // Moon: principal-axes frame from the DE440 lunar libration solution.
     static SpiceOrientation moon() { return SpiceOrientation("MOON_PA"); }
+    // Moon: mean-Earth/polar-axis frame, the reference frame of lunar maps and textures (differs from
+    // MOON_PA by ~0.8 km on the surface).
+    static SpiceOrientation moon_mean_earth() { return SpiceOrientation("MOON_ME"); }
 
     frames::FixedToInertial fixed_to_gcrf(time::Epoch epoch) const override;
 

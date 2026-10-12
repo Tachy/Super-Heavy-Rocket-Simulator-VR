@@ -31,4 +31,10 @@ inline constexpr double earth_j2 = 1.0826267e-3;
 // IAU 2015 nominal lunar mean radius used for the Moon sphere.
 inline constexpr double moon_mean_radius_m = 1737400.0;
 
+// IAU 2015 Resolution B3 nominal solar radius.
+inline constexpr double sun_radius_m = 695700000.0;
+
+// Mean obliquity of the ecliptic at J2000.0 (IAU 2006): 84381.406 arcsec.
+inline constexpr double obliquity_j2000_rad = 84381.406 / 3600.0 * deg_to_rad;
+
 }  // namespace starsim::constants
