@@ -37,6 +37,7 @@ add_executable(starsim_core_tests
     test_optim_solver.cpp
     test_optim_validation.cpp
     test_launch_site_config.cpp
+    test_contact_primitives.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE

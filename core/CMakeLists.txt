@@ -23,6 +23,7 @@ add_library(starsim_core STATIC
     src/sim/telemetry_recorder.cpp
     src/sim/flight_session.cpp
     src/mission/lunar_transfer.cpp
+    src/contact/primitives.cpp
     src/optim/sparse_matrix.cpp
     src/optim/minimum_degree.cpp
     src/optim/ldl.cpp
