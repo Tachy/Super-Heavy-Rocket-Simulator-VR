@@ -3,10 +3,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/contact/primitives.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/sim/catch_tower_sim.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
@@ -131,4 +133,76 @@ TEST_CASE("Drifting into the tower is an impact", "[contact][catch]") {
     run(session, t0, 10.0, [&] { return booster.impacted(); });
     CHECK(booster.impacted());
     CHECK_FALSE(booster.caught());
+}
+
+namespace {
+
+// Booster velocity relative to the ground in the site frame.
+Vec3 site_velocity(const sim::FlightSession& session, const vehicle::FlightBody& body) {
+    const auto t = spice_earth().fixed_to_gcrf(session.epoch());
+    const Vec3 omega = vehicle::earth_rotation_vector(t);
+    const auto& s = body.state();
+    return transpose(session.tower()->geometry().site_to_itrf()) * transpose(t.rotation) *
+           (s.velocity_gcrf_mps - cross(omega, s.position_gcrf_m));
+}
+
+}  // namespace
+
+TEST_CASE("The carriage keeps carrying a caught booster", "[contact][catch]") {
+    const auto t0 = start();
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    use_starbase(session);
+    session.tower()->close_arms(true);
+    place_booster(session, t0, {0.0, 0.0, 0.02}, {0.0, 0.0, -1.0});
+    const auto& booster = session.body(0);
+    run(session, t0, 30.0, [&] { return booster.caught(); });
+    REQUIRE(booster.caught());
+    const double sag = booster.vehicle().mass_properties().mass_kg * constants::standard_gravity_mps2 /
+                       session.tower()->geometry().config().carriage_stiffness_n_m;
+    const auto caught_at = session.epoch();
+    for (double t = 0.5; t <= 30.0; t += 0.5) session.advance_to(caught_at + t, 1000);  // ticks, no coast
+    CHECK(std::abs(session.tower()->arms().carriage_offset_m() + sag) < 0.05 * sag);
+}
+
+TEST_CASE("Pin friction does not chatter from tick to tick", "[contact][catch]") {
+    const auto t0 = start();
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    use_starbase(session);
+    session.tower()->close_arms(true);
+    place_booster(session, t0, {0.0, 0.0, 0.02}, {0.0, 0.0, -1.0});
+    const auto& booster = session.body(0);
+    session.advance_to(t0 + 0.5, 1000);  // pins on the arms
+    Vec3 previous = site_velocity(session, booster);
+    double largest_change = 0.0;
+    for (int k = 1; k <= 200 && !booster.caught(); ++k) {
+        session.advance_to(t0 + 0.5 + k * sim::FlightSession::tick_s, 10);
+        const Vec3 v = site_velocity(session, booster);
+        largest_change = std::max(largest_change, std::hypot(v.x - previous.x, v.y - previous.y));
+        previous = v;
+    }
+    INFO("largest tick-to-tick change of the horizontal velocity " << largest_change << " m/s");
+    CHECK(largest_change < 1e-3);
+}
+
+TEST_CASE("A booster coasting down from above the tower zone is judged by the tower", "[contact][catch]") {
+    const auto t0 = start();
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    use_starbase(session);
+    place_booster(session, t0, {0.0, 0.0, 1200.0}, {0.0, 0.0, 0.0});
+    const auto& booster = session.body(0);
+    session.advance_to(t0 + 90.0, 100000);  // one call: coast segments allowed (each > 1 s)
+    CHECK((booster.impacted() || booster.resting()));
+    CHECK(session.tower()->phase() == sim::CatchPhase::Missed);
+}
+
+TEST_CASE("A stack released without thrust stays on the launch mount", "[contact][catch]") {
+    const auto t0 = start();
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    session.launch_from_pad("starship_block3",
+                            sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")),
+                            90.0 * constants::deg_to_rad, t0);
+    session.release_clamps();
+    for (double t = 0.5; t <= 10.0; t += 0.5) session.advance_to(t0 + t, 1000);
+    CHECK_FALSE(session.body(0).impacted());
+    CHECK(session.body(0).resting());
 }

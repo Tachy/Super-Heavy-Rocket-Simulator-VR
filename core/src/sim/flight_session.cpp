@@ -301,7 +301,9 @@ void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchS
     bodies_.push_back({vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad, site.longitude_rad,
                                                    stand_height, heading_rad, earth_, epoch),
                        {}, nullptr, {}});
-    bodies_.back().body->set_ground_height(site.height_m);
+    // The stack stands on the launch mount: its top is the ground until staging (a stack released without
+    // thrust settles back onto it instead of dropping through the mount's open centre).
+    bodies_.back().body->set_ground_height(stand_height);
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
@@ -363,12 +365,12 @@ double FlightSession::coast_allowance_s() const {
     const bool guided = autopilot_.state == AutopilotState::PreLaunch || autopilot_.state == AutopilotState::Booster ||
                         autopilot_.state == AutopilotState::UpperStage;
     if (guided) return 0.0;
-    if (tower_ && tower_->needs_ticks(body_pointers(), earth_, epoch_)) return 0.0;
     if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0) return 0.0;
     double allowance = max_coast_s;
     if (autopilot_.state == AutopilotState::Burn) {
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s);
     }
+    if (tower_) allowance = std::min(allowance, tower_->coast_limit_s(body_pointers(), earth_, epoch_));
     for (const auto& flying : bodies_) {
         const auto& body = *flying.body;
         if (flying.return_guidance && flying.return_guidance->phase() != gnc::ReturnPhase::Landed &&
@@ -459,6 +461,8 @@ void FlightSession::stage() {
     auto& lower = bodies_[controlled_];
     auto upper = lower.body->separate(1);
     for (auto& [group, run] : lower.running_groups) run = false;  // booster engines off after separation
+    lower.body->set_ground_height(launch_site_.height_m);  // separated stages: the real ground, not the mount
+    upper->set_ground_height(launch_site_.height_m);
     if (booster_return_) {
         gnc::LandingSite landing{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m, {}};
         const auto& booster_stage = lower.body->vehicle().stages().front();

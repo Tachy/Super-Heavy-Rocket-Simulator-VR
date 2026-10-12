@@ -17,7 +17,10 @@ constexpr double pin_damping_n_s_m = 1.0e6;    // [E] per pin: damping ratio ~0.
 constexpr double hull_stiffness_n_m = 4.0e7;   // [E] whole hull ring
 constexpr double hull_damping_n_s_m = 1.0e6;   // [E]
 constexpr double friction_coefficient = 0.3;   // [E] dry steel on steel
-constexpr double friction_regularization_mps = 0.01;  // below: friction linear in the slip (no stick-slip chatter)
+// Below this slip friction grows linearly. The explicit (start-of-tick) friction is stable only while
+// mu N / v_reg * dt / m_eff < 2; at a pin m_eff ~ 7e4 kg and mu N ~ 4e5 N, so 0.1 m/s gives ~0.3
+// (0.01 m/s gave ~3: the slip reversed every tick).
+constexpr double friction_regularization_mps = 0.1;
 constexpr int pin_samples = 3;
 constexpr int hull_samples = 16;
 

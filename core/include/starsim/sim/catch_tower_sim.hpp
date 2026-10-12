@@ -33,9 +33,9 @@ public:
     void after_tick(const std::vector<vehicle::FlightBody*>& bodies, const frames::BodyOrientation& earth,
                     time::Epoch epoch_end, double dt_s);
     bool in_contact(const vehicle::FlightBody& body) const;  // pins on the arms in the last tick
-    // A body near the tower still moves on its own: fixed ticks are needed (no coast segments).
-    bool needs_ticks(const std::vector<vehicle::FlightBody*>& bodies, const frames::BodyOrientation& earth,
-                     time::Epoch epoch) const;
+    // Longest coast segment before a freely moving body could enter the tower zone (0: tick now).
+    double coast_limit_s(const std::vector<vehicle::FlightBody*>& bodies, const frames::BodyOrientation& earth,
+                         time::Epoch epoch) const;
     double max_pin_load_n() const { return max_pin_load_n_; }  // largest so far (diagnostics)
 
 private:
@@ -58,6 +58,7 @@ private:
     double hull_push_n_ = 0.0;
     double vertical_load_n_ = 0.0;
     double max_pin_load_n_ = 0.0;
+    double caught_load_n_ = 0.0;  // weight of the bodies hanging on the arms
 };
 
 }  // namespace starsim::sim

@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "starsim/contact/tower_collision.hpp"
+#include "starsim/math/constants.hpp"
 
 namespace starsim::sim {
 
@@ -16,6 +18,8 @@ constexpr double rest_rate_radps = 0.01;
 constexpr double rest_time_s = 2.0;         // ... for this long, engines off, both pins on the arms
 constexpr double missed_drop_m = 5.0;       // pins this far below the arm tops: the catch is lost
 constexpr double tower_zone_m = 1000.0;     // bodies closer than this need fixed ticks
+// Bound on a coasting body's acceleration towards the tower (gravity; drag only slows the fall).
+constexpr double coast_acceleration_bound_mps2 = 10.0;
 constexpr double hull_crush_depth_m = 0.2;  // [E] an arm this deep in the hull: struck it (centred catch: 0.3 m clear)
 
 }  // namespace
@@ -91,7 +95,7 @@ void CatchTowerSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
     const auto arms = arm_states();
     const math::Mat3 site_to_gcrf = t.rotation * geometry_.site_to_itrf();
     hull_push_n_ = 0.0;
-    vertical_load_n_ = 0.0;
+    vertical_load_n_ = caught_load_n_;
     for (auto* body : bodies) {
         if (!catchable(*body)) continue;
         auto& tr = track(*body);
@@ -146,6 +150,7 @@ void CatchTowerSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, 
                                      std::abs(arms_.carriage_velocity_mps()) < rest_speed_mps;
                 tr.at_rest_s = at_rest ? tr.at_rest_s + dt_s : 0.0;
                 if (tr.at_rest_s >= rest_time_s && !body->impacted()) {
+                    caught_load_n_ += body->vehicle().mass_properties().mass_kg * constants::standard_gravity_mps2;
                     body->hold_fixed_to_earth(earth, epoch_end);
                     phase_ = CatchPhase::Caught;
                 }
@@ -160,14 +165,22 @@ bool CatchTowerSim::in_contact(const vehicle::FlightBody& body) const {
     return it != tracks_.end() && it->second.contact.any_contact();
 }
 
-bool CatchTowerSim::needs_ticks(const std::vector<vehicle::FlightBody*>& bodies, const frames::BodyOrientation& earth,
-                                time::Epoch epoch) const {
+double CatchTowerSim::coast_limit_s(const std::vector<vehicle::FlightBody*>& bodies, const frames::BodyOrientation& earth,
+                                    time::Epoch epoch) const {
     const auto t = earth.fixed_to_gcrf(epoch);
+    const Vec3 omega = vehicle::earth_rotation_vector(t);
+    double limit = std::numeric_limits<double>::infinity();
     for (const auto* body : bodies) {
         if (body->clamped() || body->impacted() || body->caught() || body->resting()) continue;
-        if (norm(geometry_.to_site(transpose(t.rotation) * body->state().position_gcrf_m)) < tower_zone_m) return true;
+        const auto& s = body->state();
+        const double gap = norm(geometry_.to_site(transpose(t.rotation) * s.position_gcrf_m)) - tower_zone_m;
+        if (gap <= 0.0) return 0.0;
+        // Earliest entry: gap = v t + a t^2 / 2 with the speed over the ground and the acceleration bound.
+        const double v = norm(s.velocity_gcrf_mps - cross(omega, s.position_gcrf_m));
+        const double a = coast_acceleration_bound_mps2;
+        limit = std::min(limit, (std::sqrt(v * v + 2.0 * a * gap) - v) / a);
     }
-    return false;
+    return limit;
 }
 
 }  // namespace starsim::sim
