@@ -22,6 +22,15 @@ add_library(starsim_core STATIC
     src/sim/telemetry_recorder.cpp
     src/sim/flight_session.cpp
     src/mission/lunar_transfer.cpp
+    src/optim/sparse_matrix.cpp
+    src/optim/minimum_degree.cpp
+    src/optim/ldl.cpp
+    src/optim/cones.cpp
+    src/optim/socp_problem.cpp
+    src/optim/socp_builder.cpp
+    src/optim/equilibration.cpp
+    src/optim/kkt_system.cpp
+    src/optim/socp_solver.cpp
     src/time/utc_date_time.cpp
     src/frames/geodetic.cpp
     src/environment/point_mass_gravity.cpp
