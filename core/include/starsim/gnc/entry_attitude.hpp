@@ -19,6 +19,11 @@ struct EntryAttitude {
 EntryAttitude entry_attitude(const math::Vec3& air_velocity_gcrf, const math::Vec3& up_gcrf, double alpha_rad,
                              double bank_rad, double belly_azimuth_rad);
 
+// The same setpoint for a given lift direction (unit, made perpendicular to the air velocity) instead of a bank:
+// the belly flop, where the fall is near vertical and a bank from the vertical plane is not defined.
+EntryAttitude entry_attitude_with_lift(const math::Vec3& air_velocity_gcrf, const math::Vec3& lift_direction_gcrf,
+                                       double alpha_rad, double belly_azimuth_rad);
+
 // The same setpoint as a body -> GCRF rotation (initial states, tests).
 math::Quat entry_attitude_quaternion(const math::Vec3& air_velocity_gcrf, const math::Vec3& up_gcrf, double alpha_rad,
                                      double bank_rad, double belly_azimuth_rad);

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+
 #include "starsim/gnc/entry_aero_table.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/vec3.hpp"
@@ -19,7 +21,25 @@ struct EntryPredictorModel {
     double nose_radius_m = 0.0;   // Sutton-Graves (heat rate prediction); 0: no heating predicted
     double drag_scale = 1.0;      // online corrections (measured / modelled aerodynamic acceleration)
     double lift_scale = 1.0;
+    // Bank rate limit over Mach: `bank_rate_radps` above `fast_bank_mach_high`, `fast_bank_rate_radps` below
+    // `fast_bank_mach_low`, linear in between (see EntryGuidanceParameters).
     double bank_rate_radps = 1.0 * constants::deg_to_rad;
+    double fast_bank_rate_radps = 1.0 * constants::deg_to_rad;
+    double fast_bank_mach_low = 5.0;
+    double fast_bank_mach_high = 10.0;
+    double bank_rate_at(double mach) const {
+        const double f = std::clamp((fast_bank_mach_high - mach) / (fast_bank_mach_high - fast_bank_mach_low), 0.0, 1.0);
+        return bank_rate_radps + f * (fast_bank_rate_radps - bank_rate_radps);
+    }
+    // Terminal steering (EntryPredictorState::steered): angle of attack for a steering fraction f in [0, 1],
+    // 90 deg - f (90 deg - min alpha): from no lift to the most lift of the trimmed range.
+    double terminal_min_alpha_rad = 55.0 * constants::deg_to_rad;  // [E] trimmed range (b1)
+    double steering_alpha(double fraction) const {
+        return 0.5 * constants::pi - std::clamp(fraction, 0.0, 1.0) * (0.5 * constants::pi - terminal_min_alpha_rad);
+    }
+    double steering_fraction(double alpha_rad) const {
+        return std::clamp((0.5 * constants::pi - alpha_rad) / (0.5 * constants::pi - terminal_min_alpha_rad), 0.0, 1.0);
+    }
     double gm_m3ps2 = constants::earth_gm_m3ps2;
     double j2 = constants::earth_j2;
     double earth_radius_m = constants::wgs84_semi_major_axis_m;
@@ -30,14 +50,22 @@ struct EntryPredictorState {
     math::Vec3 position_itrf_m;
     math::Vec3 velocity_itrf_mps;  // relative to the rotating Earth
     double bank_rad = 0.0;         // current bank (signed, entry_attitude convention)
+    // Terminal steering instead of the bank: lift direction (made perpendicular to the air velocity) times the
+    // steering fraction (|.| <= 1, zero: alpha 90 deg, no lift), held to the gate; coefficients at that alpha.
+    bool steered = false;
+    math::Vec3 steering_itrf;
+    double reversal_time_s = -1.0; // the bank command changes sign at this time from the start (< 0: never)
 };
 
 struct EntryPrediction {
     math::Vec3 end_position_itrf_m;
     math::Vec3 end_velocity_itrf_mps;
     double time_s = 0.0;
-    double downrange_error_m = 0.0;  // range start -> end minus range start -> target; > 0: overshoot
-    double crossrange_m = 0.0;       // target's distance from the great circle start -> end; > 0: target to the right
+    // Miss: > 0 overshoot / target to the right. Start farther than 50 km from the target: range start -> end minus
+    // range start -> target, and the target's distance from the great circle start -> end; closer: the horizontal
+    // miss at the end along / across the track there.
+    double downrange_error_m = 0.0;
+    double crossrange_m = 0.0;
     double peak_heat_rate_w_m2 = 0.0;
     double heat_load_j_m2 = 0.0;     // including the load so far
     double peak_load_g = 0.0;        // aerodynamic acceleration / g0

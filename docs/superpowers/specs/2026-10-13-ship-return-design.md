@@ -162,34 +162,50 @@ limit; a nominal flight-13 replay stays inside both (peak heat rate reported for
 ### Units
 
 - **`gnc/entry_aero_table`** (built on the simulation thread from the vehicle): C_D A and C_L A [m^2] over Mach at
-  the nominal angle of attack of the alpha schedule, hull plus the four flaps in pitch trim (forward and aft pairs
-  moved differentially about mid-range until the pitch moment about the current CG is zero). Continuum
-  coefficients (above ~90 km forces are tiny; the online scale factors absorb the difference). The alpha schedule
-  moves into the vehicle config: `[stage.aero] entry_alpha_table = "aero/ship_entry_alpha.csv"`.
+  the nominal angle of attack of the alpha schedule, and over Mach and angle of attack 40-140 deg (terminal
+  steering), hull plus the four flaps in pitch trim (forward and aft pairs moved differentially about mid-range
+  until the pitch moment about the current CG is zero). Continuum coefficients (above ~90 km forces are tiny; the
+  online scale factors absorb the difference). The alpha schedule moves into the vehicle config:
+  `[stage.aero] entry_alpha_table = "aero/ship_entry_alpha.csv"`.
 - **`gnc/entry_predictor`** (pure, no SPICE - can run on a worker): 3-DOF in the Earth-fixed frame (central
   gravity + J2, Coriolis and centrifugal terms, US76 air, constant mass), RK4 with 1 s steps. Lift is rotated
   about the air velocity by the bank angle, the bank moving from its current value to the commanded one at the
-  bank rate limit (1 deg/s, b1). Drag and lift are multiplied by online scale factors. Ends at the gate height
-  above the target (or ground impact, skip-out above 130 km, 3000 s). Reports the end state, the signed
-  downrange error to the target (great-circle range end - target, both from the start), the crossrange, and
-  peaks of heat rate (Sutton-Graves, b1), heat load, aerodynamic load and dynamic pressure.
+  bank rate limit (over Mach, as the guidance); optionally one planned reversal (the command changes sign at a
+  given time) or, for the terminal phase, a fixed steering vector (lift direction x fraction, alpha from it).
+  Drag and lift are multiplied by online scale factors. Ends at the gate height above the target (or skip-out
+  above 130 km, 3000 s). Miss: farther than 50 km from the target the range difference from the start and the
+  target's distance from the great circle start -> end (monotone in the bank); closer, the horizontal miss at
+  the end along / across the track there (a range difference cannot tell a target behind the end from one ahead).
+  Peaks of heat rate (Sutton-Graves, b1), heat load, aerodynamic load and dynamic pressure.
 - **`gnc/entry_guidance`** (`EntryGuidance`, like `BoosterReturnGuidance`):
   - *Entry* phase, every 2 s: (a) scale factors drag/lift = measured / modelled aerodynamic acceleration
     (accelerometer: `FlightBody::aero_acceleration_body_mps2()`, filtered, clamped 0.5-2, only above 1 m/s^2);
     (b) corrector: bracketed secant (Illinois) on |sigma| in [0, 150 deg] for zero downrange error, warm-started;
     full lift up if even that is short, 150 deg if even that is long; (c) corridor constraints: if the
-    prediction exceeds 90 % of a limit (heat rate, heat load, load, dynamic pressure [E] 25 kPa), |sigma| is
-    reduced by bisection to the largest value inside them (range is given up, not the vehicle); (d) bank sign:
-    reversal when the heading error to the target exceeds a corridor linear in speed [E] (tuned in tests);
-    (e) output: alpha from the schedule at the current Mach, bank rate-limited to 1 deg/s.
-  - *Belly flop* below Mach 0.7 [E] (subsonic): the ship falls belly down; horizontal steering by tilting the belly
-    away from the wanted acceleration (horizontal force ~ m g tan(tilt), tilt <= 15 deg [E]); zero-effort-miss law
-    to the gate point (a = -k ZEM / t_go^2, t_go from height and sink rate). Nose azimuth: the track at the
-    hand-over (b3 may set the heading the flip needs). Attitude by `gnc/belly_flop_attitude` (no velocity
-    reference - the fall is near vertical).
+    prediction exceeds 90 % of a limit (heat rate, load, dynamic pressure [E] 25 kPa), |sigma| is reduced by
+    bisection to the largest value inside them (range is given up, not the vehicle); (d) bank reversals timed by
+    the predictor: with the sign held the end lies on one side of the target, reversing now on the other - the
+    reversal is flown in the cycle in which a reversal one cycle later would already end on the "hold" side; the
+    bank magnitude accounts for the reversal still to come (its time interpolated). A heading-error corridor does
+    not work here: the long glide on one sign curves the track by 15-20 deg on a trajectory that ends on target.
+    No reversals below 600 m/s, at least 20 s apart [E]; (e) output: alpha from the schedule at the current Mach,
+    bank rate-limited: 1 deg/s above Mach 10 (faster departs in alpha, b1 - seen again with 8 % weaker flaps),
+    3 deg/s below Mach 5 (late reversals must be quick; 1 deg/s left 5-15 km at the hand-over) [E].
+  - *Terminal* below Mach 2 [E] (supersonic to the subsonic belly flop): like a skydiver - the belly faces the air
+    flow (no sideslip), the lift is pointed: its direction about the air velocity and its size by the angle of
+    attack (90 deg none, 55 deg most [E], the trimmed range). One Newton step per 0.5 s on the predicted
+    horizontal miss at the gate (three predictions with the steering vector held). Starts from the lift vector
+    flown at the hand-over (no jump); commanded attitude slew-limited to 3 deg/s. Rejected on the way (6-DOF
+    evidence): tilting a level hull (a rolled cylinder makes no side force; nose-up beyond ~100 deg alpha tumbles),
+    yawing the axis onto the gate while gliding (large sideslip: the ship spun up), a constant-velocity ZEM (the
+    belly's drag brakes the hand-over speed within seconds).
   - *Gate*: reached at `gate_height_m` [E] 1500 m above the target's ground (b3 starts the flip there).
   - Command: phase, alpha / bank setpoint, body axis + roll reference for `AttitudeController` (flaps, 0.5 rad/s),
     predicted downrange / crossrange miss, constraint flag.
+- **Ship axial drag** (found in b2): the ship alone had no axial drag table (a separated ship inherited the stack's
+  in the session, a ship built alone in tests had none - the level hull drifted along its axis unbraked). The
+  ship now carries the stack's ascent table [E] (same nose and diameter); the b1 replay stays inside its
+  tolerances (flight 13 1.8 %, 12 2.5 %, 14 4.3 % above Mach 3).
 - **Session**: `FlightSession::place_entering_ship(config, state, epoch, target)` (scenarios; b4 adds the deorbit
   burn), the ship then flies its entry guidance; telemetry carries the setpoint (alpha, bank, phase, predicted
   miss) for the HUD's flight director lines. Manual entry flight (the player banks, the computer re-plans) comes
@@ -199,13 +215,14 @@ limit; a nominal flight-13 replay stays inside both (peak heat rate reported for
 
 - Predictor vs the 6-DOF ship (b1 physics) at constant bank: end point of an entry within 2 % of the range flown.
 - Corrector unit tests on the predictor alone (long / short targets, saturation).
-- Belly flop: from 12 km, falling at terminal speed with 2 km horizontal offset, the ship reaches the gate within
-  50 m.
+- Terminal / belly flop: from 12 km, falling at terminal speed with the gate 2 km ahead and 0.5 km to the side, the
+  ship reaches the gate within 50 m; a guided 6-DOF entry from the interface reaches it within 100 m.
 - Campaign `[ship][guidance][validation]`: from entry interface states uprange of Starbase with dispersions (entry
   flight-path angle +-0.2 deg, speed +-40 m/s, target range +-300 km, crossrange +-60 km, entry mass +-5 %, hull
   cross-flow +-10 % and flap table +-10 % in the truth model only) every case reaches the gate within 100 m
   horizontally, belly down within 15 deg, sink rate below 200 m/s, without breakup.
-- Constraint test: with the load limit lowered to just above the nominal peak, the guidance holds it.
+- Constraint test: a steep entry (-2.5 deg) flown again with the load limit at 85 % of its guided peak: the
+  guidance holds the limit and the ship does not break up.
 
 Out of b2: the guided skip (optional mode, last priority - deferred), wind, manual entry flight (M7).
 

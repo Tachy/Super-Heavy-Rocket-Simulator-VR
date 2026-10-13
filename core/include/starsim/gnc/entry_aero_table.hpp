@@ -34,11 +34,20 @@ public:
     double alpha_rad(double mach) const { return schedule_.at(mach); }
     bool empty() const { return mach_.empty(); }
 
+    // Drag and lift area at any angle of attack (40..140 deg, flaps in trim; bilinear over Mach and alpha): the
+    // terminal phase steers by the lift's direction about the air velocity and by alpha.
+    double cd_area_m2(double mach, double alpha_rad) const;
+    double cl_area_m2(double mach, double alpha_rad) const;
+
 private:
     AlphaSchedule schedule_;
     std::vector<double> mach_;
     std::vector<double> cd_area_m2_;
     std::vector<double> cl_area_m2_;
+    std::vector<double> alpha_grid_rad_;
+    std::vector<std::vector<double>> cd_grid_m2_;  // [mach][alpha]
+    std::vector<std::vector<double>> cl_grid_m2_;
+    double bilinear(const std::vector<std::vector<double>>& grid, double mach, double alpha_rad) const;
 };
 
 }  // namespace starsim::gnc

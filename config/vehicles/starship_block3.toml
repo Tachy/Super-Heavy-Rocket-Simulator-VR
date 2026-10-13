@@ -152,6 +152,7 @@ relight = true
 [stage.aero]
 reference_diameter_m = 9.0
 crossflow_table = "aero/ship_crossflow.csv"  # belly-first entry [D]
+ascent_drag_table = "aero/starship_stack_ascent.csv"  # [E] axial drag of the ship alone: same nose and diameter as the stack
 flap_table = "aero/flap.csv"
 entry_alpha_table = "aero/ship_entry_alpha.csv"  # nominal entry angle of attack over Mach [D]
 belly_azimuth_deg = 270.0                # heat shield towards body -z

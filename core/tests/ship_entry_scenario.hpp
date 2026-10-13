@@ -52,6 +52,7 @@ struct EntryStart {
     double flight_path_angle_rad = -1.0 * constants::deg_to_rad;
     double heading_rad = 90.0 * constants::deg_to_rad;  // clockwise from north
     double latitude_rad = 10.0 * constants::deg_to_rad;
+    double longitude_rad = 0.0;  // of the test Earth (ITRF = GCRF at entry_t0)
     double mass_propellant_kg = -1.0;  // < 0: the stage's landing_propellant_kg
     double bank_rad = 0.0;             // initial attitude (alpha 60 deg)
 };
@@ -90,10 +91,11 @@ public:
         belly_azimuth_rad_ = ship.aero.belly_azimuth_rad;
         initial_bank_rad_ = start.bank_rad;
 
-        const frames::GeodeticPosition g{start.latitude_rad, 0.0, start.height_m};
+        const frames::GeodeticPosition g{start.latitude_rad, start.longitude_rad, start.height_m};
         const math::Vec3 r = frames::geodetic_to_fixed(g);
         const double sl = std::sin(g.latitude_rad), cl = std::cos(g.latitude_rad);
-        const math::Vec3 east{0.0, 1.0, 0.0}, north{-sl, 0.0, cl}, up{cl, 0.0, sl};
+        const double so = std::sin(g.longitude_rad), co = std::cos(g.longitude_rad);
+        const math::Vec3 east{-so, co, 0.0}, north{-sl * co, -sl * so, cl}, up{cl * co, cl * so, sl};
         const double cg = std::cos(start.flight_path_angle_rad), sg = std::sin(start.flight_path_angle_rad);
         const math::Vec3 horizontal = north * std::cos(start.heading_rad) + east * std::sin(start.heading_rad);
         const math::Vec3 v_rel = (horizontal * cg + up * sg) * start.speed_relative_mps;
@@ -115,6 +117,11 @@ public:
     time::Epoch epoch() const { return entry_t0 + time_s_; }
     math::Vec3 position_itrf_m() const {
         return transpose(earth_.fixed_to_gcrf(epoch()).rotation) * body_->state().position_gcrf_m;
+    }
+    math::Vec3 velocity_itrf_mps() const {  // relative to the rotating Earth
+        const auto t = earth_.fixed_to_gcrf(epoch());
+        const auto& s = body_->state();
+        return transpose(t.rotation) * (s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), s.position_gcrf_m));
     }
     const vehicle::FlightEnvironment& environment() const { return env_; }
 

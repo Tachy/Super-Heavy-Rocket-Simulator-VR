@@ -14,6 +14,16 @@ struct Axes {
     Vec3 x, y, z;  // body axes in GCRF
 };
 
+Axes axes_from_lift(const Vec3& u, const Vec3& l, double alpha_rad, double belly_azimuth_rad) {
+    Axes a;
+    a.x = u * std::cos(alpha_rad) + l * std::sin(alpha_rad);
+    const Vec3 b = u * std::sin(alpha_rad) - l * std::cos(alpha_rad);
+    const Vec3 c = cross(a.x, b);  // body direction at belly azimuth + 90 deg
+    a.y = b * std::cos(belly_azimuth_rad) - c * std::sin(belly_azimuth_rad);
+    a.z = cross(a.x, a.y);
+    return a;
+}
+
 Axes entry_axes(const Vec3& air_velocity_gcrf, const Vec3& up_gcrf, double alpha_rad, double bank_rad,
                 double belly_azimuth_rad) {
     const Vec3 u = math::normalized(air_velocity_gcrf);
@@ -24,13 +34,7 @@ Axes entry_axes(const Vec3& air_velocity_gcrf, const Vec3& up_gcrf, double alpha
     l0 = math::normalized(l0);
     const Vec3 side = cross(u, l0);
     const Vec3 l = l0 * std::cos(bank_rad) - side * std::sin(bank_rad);  // right-handed about u
-    Axes a;
-    a.x = u * std::cos(alpha_rad) + l * std::sin(alpha_rad);
-    const Vec3 b = u * std::sin(alpha_rad) - l * std::cos(alpha_rad);
-    const Vec3 c = cross(a.x, b);  // body direction at belly azimuth + 90 deg
-    a.y = b * std::cos(belly_azimuth_rad) - c * std::sin(belly_azimuth_rad);
-    a.z = cross(a.x, a.y);
-    return a;
+    return axes_from_lift(u, l, alpha_rad, belly_azimuth_rad);
 }
 
 }  // namespace
@@ -38,6 +42,15 @@ Axes entry_axes(const Vec3& air_velocity_gcrf, const Vec3& up_gcrf, double alpha
 EntryAttitude entry_attitude(const Vec3& air_velocity_gcrf, const Vec3& up_gcrf, double alpha_rad, double bank_rad,
                              double belly_azimuth_rad) {
     const Axes a = entry_axes(air_velocity_gcrf, up_gcrf, alpha_rad, bank_rad, belly_azimuth_rad);
+    return {a.x, a.y};
+}
+
+EntryAttitude entry_attitude_with_lift(const Vec3& air_velocity_gcrf, const Vec3& lift_direction_gcrf, double alpha_rad,
+                                       double belly_azimuth_rad) {
+    const Vec3 u = math::normalized(air_velocity_gcrf);
+    Vec3 l = lift_direction_gcrf - u * dot(lift_direction_gcrf, u);
+    if (norm(l) < 1e-9) l = cross(u, std::abs(u.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 1.0, 0.0});
+    const Axes a = axes_from_lift(u, math::normalized(l), alpha_rad, belly_azimuth_rad);
     return {a.x, a.y};
 }
 

@@ -15,6 +15,8 @@ namespace {
 
 constexpr double entry_height_m = 80000.0;   // skip-out: below this, then above
 constexpr double skip_out_height_m = 130000.0;
+constexpr double min_track_speed_mps = 1.0;
+constexpr double near_target_range_m = 50000.0;  // [E] miss metric switch (see predict_entry)
 
 struct Derivative {
     Vec3 dr, dv;
@@ -25,11 +27,13 @@ struct AeroSample {
     double heat_rate_w_m2 = 0.0;
     double dynamic_pressure_pa = 0.0;
     double height_m = 0.0;
+    double mach = 0.0;
 };
 
 class Model {
 public:
-    Model(const EntryPredictorModel& m) : m_(m) {}
+    Model(const EntryPredictorModel& m, bool steered, const Vec3& steering)
+        : m_(m), steered_(steered), steering_(steering) {}
 
     AeroSample aero(const Vec3& r, const Vec3& v, double bank_rad) const {
         AeroSample s;
@@ -38,6 +42,7 @@ public:
         const double speed = norm(v);
         if (air.density_kg_m3 <= 0.0 || speed < 1e-3) return s;
         const double mach = speed / air.speed_of_sound_mps;
+        s.mach = mach;
         s.dynamic_pressure_pa = 0.5 * air.density_kg_m3 * speed * speed;
         const Vec3 u = v / speed;
         const Vec3 up = math::normalized(r);
@@ -47,8 +52,18 @@ public:
         const Vec3 side = cross(u, l0);
         const Vec3 l = l0 * std::cos(bank_rad) - side * std::sin(bank_rad);
         const double q_over_m = s.dynamic_pressure_pa / m_.mass_kg;
-        s.acceleration = u * (-q_over_m * m_.drag_scale * m_.aero.cd_area_m2(mach)) +
-                         l * (q_over_m * m_.lift_scale * m_.aero.cl_area_m2(mach));
+        if (steered_) {
+            const double fraction = std::min(norm(steering_), 1.0);
+            const double alpha = m_.steering_alpha(fraction);
+            s.acceleration = u * (-q_over_m * m_.drag_scale * m_.aero.cd_area_m2(mach, alpha));
+            const Vec3 lb = steering_ - u * dot(steering_, u);
+            if (fraction > 0.0 && norm(lb) > 1e-9) {
+                s.acceleration += lb / norm(lb) * (q_over_m * m_.lift_scale * m_.aero.cl_area_m2(mach, alpha));
+            }
+        } else {
+            s.acceleration = u * (-q_over_m * m_.drag_scale * m_.aero.cd_area_m2(mach)) +
+                             l * (q_over_m * m_.lift_scale * m_.aero.cl_area_m2(mach));
+        }
         if (m_.nose_radius_m > 0.0) {
             s.heat_rate_w_m2 = aero::stagnation_heat_rate_w_m2(air.density_kg_m3, speed, m_.nose_radius_m);
         }
@@ -69,6 +84,8 @@ public:
 
 private:
     const EntryPredictorModel& m_;
+    bool steered_ = false;
+    Vec3 steering_;
     environment::Us76Atmosphere atmosphere_;
 };
 
@@ -82,7 +99,7 @@ double ground_range_m(const Vec3& a_itrf_m, const Vec3& b_itrf_m) {
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
                               double bank_command_rad, const EntryTarget& target, double gate_height_m,
                               double heat_load_so_far_j_m2, double step_s, double max_time_s) {
-    const Model m(model);
+    Model m(model, start.steered, start.steering_itrf);
     EntryPrediction p;
     p.heat_load_j_m2 = heat_load_so_far_j_m2;
     Vec3 r = start.position_itrf_m, v = start.velocity_itrf_mps;
@@ -92,8 +109,10 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     double t = 0.0;
     AeroSample now = m.aero(r, v, bank);
     while (t < max_time_s) {
-        const double max_change = model.bank_rate_radps * step_s;
-        const double next_bank = bank + std::clamp(bank_command_rad - bank, -max_change, max_change);
+        const double max_change = model.bank_rate_at(now.mach) * step_s;
+        const bool reversed = start.reversal_time_s >= 0.0 && t >= start.reversal_time_s;
+        const double command = reversed ? -bank_command_rad : bank_command_rad;
+        const double next_bank = bank + std::clamp(command - bank, -max_change, max_change);
         const double mid_bank = 0.5 * (bank + next_bank);
         const Derivative k1 = m.derivative(r, v, bank);
         const Derivative k2 = m.derivative(r + k1.dr * (0.5 * step_s), v + k1.dv * (0.5 * step_s), mid_bank);
@@ -125,11 +144,30 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     p.end_position_itrf_m = r;
     p.end_velocity_itrf_mps = v;
     p.time_s = t;
-    p.downrange_error_m = ground_range_m(start.position_itrf_m, r) - ground_range_m(start.position_itrf_m, target.position_itrf_m);
-    const Vec3 n = cross(start.position_itrf_m, r);
-    if (norm(n) > 1e-6 * norm(r) * norm(r)) {
-        p.crossrange_m = -std::asin(std::clamp(dot(math::normalized(target.position_itrf_m), math::normalized(n)), -1.0, 1.0)) *
-                         constants::wgs84_semi_major_axis_m;
+    // Far from the target: difference of ranges from the start (monotone in the bank) and the target's distance
+    // from the great circle start -> end. Close to it a range difference cannot tell a target behind the end from
+    // one ahead: there the miss in the end's horizontal plane, along / across the track at the end (its velocity's
+    // horizontal direction; the direction from the start when the fall is vertical).
+    if (ground_range_m(start.position_itrf_m, target.position_itrf_m) > near_target_range_m) {
+        p.downrange_error_m =
+            ground_range_m(start.position_itrf_m, r) - ground_range_m(start.position_itrf_m, target.position_itrf_m);
+        const Vec3 n = cross(start.position_itrf_m, r);
+        if (norm(n) > 1e-6 * norm(r) * norm(r)) {
+            p.crossrange_m = -std::asin(std::clamp(dot(math::normalized(target.position_itrf_m), math::normalized(n)),
+                                                   -1.0, 1.0)) *
+                             constants::wgs84_semi_major_axis_m;
+        }
+        return p;
+    }
+    const Vec3 up = math::normalized(r);
+    const auto horizontal = [&](const Vec3& x) { return x - up * dot(x, up); };
+    Vec3 track = horizontal(v);
+    if (norm(track) < min_track_speed_mps) track = horizontal(r - start.position_itrf_m);
+    if (norm(track) > 0.0) {
+        track = math::normalized(track);
+        const Vec3 miss = horizontal(r - target.position_itrf_m);
+        p.downrange_error_m = dot(miss, track);
+        p.crossrange_m = -dot(miss, cross(track, up));
     }
     return p;
 }

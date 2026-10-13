@@ -9,7 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "ship_entry_scenario.hpp"
-#include "starsim/gnc/belly_flop.hpp"
+#include "starsim/gnc/attitude_slew.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
@@ -199,50 +199,44 @@ TEST_CASE("Entry corrector hits the target on its own model", "[ship][guidance]"
     CHECK(short_target.bank_rad < test_parameters().max_bank_rad);
 }
 
-TEST_CASE("Guided 6-DOF entry reaches the belly-flop hand-over on course", "[ship][guidance]") {
+TEST_CASE("Guided 6-DOF entry flies to the gate", "[ship][guidance]") {
     const auto schedule = ship_alpha_schedule();
     test::ShipEntryScenario scenario(test::EntryStart{});
     gnc::EntryGuidance guidance(scenario.body(), schedule, predicted_target(scenario, schedule, 50.0, 200000.0),
                                 test_parameters());
-    const auto samples = scenario.run_guided(guidance, gnc::EntryPhase::BellyFlop);
+    const auto samples = scenario.run_guided(guidance, gnc::EntryPhase::Gate);
     REQUIRE_FALSE(samples.empty());
     if (verbose()) {
         for (size_t i = 0; i < samples.size(); i += 30) {
             const auto& g = samples[i];
             std::cout << "t " << g.t_s << " h " << g.telemetry.altitude_m / 1e3 << " v " << g.telemetry.speed_relative_mps
-                      << " bank " << g.command.bank_rad / deg << " downrange " << g.command.downrange_error_m / 1e3
-                      << " cross " << g.command.crossrange_m / 1e3 << " heading err " << g.command.heading_error_rad / deg
-                      << " scales " << g.command.drag_scale << "/" << g.command.lift_scale << "\n";
+                      << " " << gnc::to_string(g.command.phase) << " bank " << g.command.bank_rad / deg << " alpha "
+                      << g.command.alpha_rad / deg << " downrange " << g.command.downrange_error_m / 1e3 << " cross "
+                      << g.command.crossrange_m / 1e3 << " scales " << g.command.drag_scale << "/"
+                      << g.command.lift_scale << "\n";
         }
     }
-    const auto& last = samples.back();
-    const double miss_to_target = gnc::ground_range_m(scenario.position_itrf_m(), guidance.target().position_itrf_m);
+    const double miss = gnc::ground_range_m(scenario.position_itrf_m(), guidance.target().position_itrf_m);
     if (verbose()) {
-        std::cout << "hand-over at " << last.t_s << " s, h " << last.telemetry.altitude_m / 1e3 << " km, Mach "
-                  << last.telemetry.mach << ", predicted downrange " << last.command.downrange_error_m / 1e3
-                  << " km, cross " << last.command.crossrange_m / 1e3 << " km, distance to target " << miss_to_target / 1e3
-                  << " km, peak heat " << scenario.body().peak_heat_rate_w_m2() / 1e3 << " kW/m2\n";
+        std::cout << "gate at " << samples.back().t_s << " s, miss " << miss << " m, peak heat "
+                  << scenario.body().peak_heat_rate_w_m2() / 1e3 << " kW/m2\n";
     }
-    CHECK(guidance.phase() == gnc::EntryPhase::BellyFlop);
+    CHECK(guidance.phase() == gnc::EntryPhase::Gate);
     CHECK_FALSE(scenario.body().impacted());
-    CHECK(std::abs(last.command.downrange_error_m) < 3000.0);
-    CHECK(std::abs(last.command.crossrange_m) < 3000.0);
+    CHECK(miss < 100.0);
 }
 
-
-TEST_CASE("Belly flop attitude points the belly down, tilted away", "[ship][guidance]") {
-    const math::Vec3 up{0.0, 0.0, 1.0}, nose{1.0, 0.0, 0.0}, h{0.0, 1.0, 0.0};
-    const double belly_azimuth = 270.0 * deg, tilt = 10.0 * deg;
-    const auto a = gnc::belly_flop_attitude(up, nose, h, tilt, belly_azimuth);
+TEST_CASE("Belly flop attitude faces the flow and points the nose along the lift", "[ship][guidance]") {
+    const math::Vec3 up{0.0, 0.0, 1.0}, north{1.0, 0.0, 0.0};
+    const math::Vec3 falling = -up * 100.0;  // vertical fall: a bank from the vertical plane is undefined
+    const double belly_azimuth = 270.0 * deg, alpha = 75.0 * deg;
+    const auto a = gnc::entry_attitude_with_lift(falling, north, alpha, belly_azimuth);
     const math::Vec3 z = cross(a.axis_gcrf, a.roll_reference_gcrf);
     const math::Vec3 belly = a.roll_reference_gcrf * std::cos(belly_azimuth) + z * std::sin(belly_azimuth);
-    CHECK(std::abs(dot(belly, -up) - std::cos(tilt)) < 1e-12);
-    CHECK(std::abs(dot(belly, h) + std::sin(tilt)) < 1e-12);  // tilted away: the force pushes towards h
-    CHECK(std::abs(dot(a.axis_gcrf, nose) - 1.0) < 1e-12);    // sideways tilt keeps the nose level
-
-    // a tilt towards the nose pitches it down (angle of attack 90 deg - tilt)
-    const auto pitched = gnc::belly_flop_attitude(up, nose, nose, tilt, belly_azimuth);
-    CHECK(std::abs(dot(pitched.axis_gcrf, -up) - std::sin(tilt)) < 1e-12);
+    CHECK(std::abs(dot(belly, -up) - std::sin(alpha)) < 1e-12);           // belly towards the flow (from below)
+    CHECK(std::abs(dot(a.axis_gcrf, north) - std::sin(alpha)) < 1e-12);  // nose towards the lift ...
+    CHECK(std::abs(dot(a.axis_gcrf, -up) - std::cos(alpha)) < 1e-12);    // ... tipped down by 90 deg - alpha
+    CHECK(std::abs(dot(a.axis_gcrf, {0.0, 1.0, 0.0})) < 1e-12);          // no sideslip
 
     // slew limiter: at most the given angle per call, exact when within it
     const math::Quat from{}, to = math::Quat::from_axis_angle({0.0, 0.0, 1.0}, 30.0 * deg);
@@ -264,7 +258,7 @@ TEST_CASE("Belly flop steers to the gate", "[ship][guidance]") {
         across_m / (constants::wgs84_semi_major_axis_m * std::cos(start.latitude_rad)), 0.0};
     const gnc::EntryTarget target{frames::geodetic_to_fixed(target_geodetic), 0.0};
     gnc::EntryGuidance guidance(scenario.body(), ship_alpha_schedule(), target, test_parameters());
-    guidance.skip_to(gnc::EntryPhase::BellyFlop);
+    guidance.skip_to(gnc::EntryPhase::Terminal);
     const auto samples = scenario.run_guided(guidance, gnc::EntryPhase::Gate, 600.0);
     REQUIRE_FALSE(samples.empty());
 
@@ -292,4 +286,5 @@ TEST_CASE("Belly flop steers to the gate", "[ship][guidance]") {
     CHECK(belly_off_down < 15.0 * deg);
     CHECK(-t.vertical_speed_mps < 200.0);
 }
+
 

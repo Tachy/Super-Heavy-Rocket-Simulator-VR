@@ -8,7 +8,7 @@
 
 namespace starsim::gnc {
 
-enum class EntryPhase { Entry, BellyFlop, Gate };
+enum class EntryPhase { Entry, Terminal, Gate };
 
 const char* to_string(EntryPhase phase);
 
@@ -16,21 +16,26 @@ struct EntryGuidanceParameters {
     double gate_height_m = 1500.0;   // [E] above the target ground: the flip starts here (b3)
     double cycle_s = 2.0;            // re-prediction interval
     double max_bank_rad = 150.0 * constants::deg_to_rad;
-    double bank_rate_radps = 1.0 * constants::deg_to_rad;  // faster bank changes depart in alpha (b1)
+    // Bank rate limits [E]: 1 deg/s hypersonic (faster departs in alpha, b1; seen again with weak flaps), 3 deg/s
+    // below Mach 5 (dense air, more flap authority: reversals late in the entry must be quick), linear in between.
+    double bank_rate_radps = 1.0 * constants::deg_to_rad;
+    double fast_bank_rate_radps = 3.0 * constants::deg_to_rad;
+    double fast_bank_mach_low = 5.0;
+    double fast_bank_mach_high = 10.0;
     double constraint_fraction = 0.9;                      // of the heat-rate and load limits
     double max_dynamic_pressure_pa = 25000.0;              // [E]
-    double belly_flop_mach = 0.7;                          // [E] subsonic hand-over
-    double max_tilt_rad = 15.0 * constants::deg_to_rad;    // [E] belly-flop steering
-    double zem_gain = 3.0;
-    // [E] the commanded attitude turns at most this fast in the belly flop (from the entry attitude at hand-over)
-    double belly_flop_slew_rate_radps = 5.0 * constants::deg_to_rad;
-    // [E] the nose turns onto the wanted acceleration only when it exceeds this (no heading jitter near the gate)
-    double belly_flop_turn_min_acceleration_mps2 = 0.3;
-    // Bank reversal when the predicted crossrange (the current bank sign held to the gate) overshoots to the side the
-    // bank pushes by more than base + fraction * range to go [E]; none below min_reversal_speed (belly flop's job).
+    double terminal_mach = 2.0;                            // [E] hand-over to the terminal steering
+    double terminal_min_alpha_rad = 55.0 * constants::deg_to_rad;  // [E] most lift (trimmed range, b1)
+    double terminal_cycle_s = 0.5;               // steering update (three predictions)
+    double terminal_prediction_step_s = 0.5;
+    double terminal_newton_step = 0.1;           // finite difference of the steering fraction
+    // [E] the commanded attitude turns at most this fast in the terminal phase (as the bank rate below Mach 5)
+    double terminal_slew_rate_radps = 3.0 * constants::deg_to_rad;
+    // Reversals: planned by the corrector (time of the next reversal for zero crossrange); without a bracket the
+    // sign closer across wins if it gains more than this [E]. None below min_reversal_speed (belly flop's job).
     double reversal_crossrange_base_m = 2000.0;
-    double reversal_crossrange_fraction = 0.01;
     double min_reversal_speed_mps = 600.0;
+    double min_reversal_interval_s = 20.0;    // [E] dwell between reversals
     double scale_filter_gain = 0.3;   // per cycle, measured / modelled aerodynamic acceleration
     double scale_min_acceleration_mps2 = 1.0;
     bool predictor_j2 = true;         // false: central gravity (test scenarios without J2)
@@ -57,7 +62,10 @@ struct EntryCommand {
 //              deadband that narrows with the range to go; online drag / lift scale factors from the accelerometer.
 //              (A heading-error corridor does not work here: the long glide on one bank sign curves the track, the
 //              great-circle heading to the target differs by 15-20 deg on a trajectory that ends on it.)
-//  BellyFlop - below the hand-over Mach number: belly down, tilt steering to the gate point.
+//  Terminal  - below the hand-over Mach number (supersonic to the subsonic belly flop): like a skydiver, the belly
+//              faces the flow (no sideslip) and the lift is pointed - its direction about the air velocity and its
+//              size by the angle of attack (90 deg: none, the minimum alpha: most) - by a Newton step per cycle on
+//              the predicted horizontal miss at the gate (two directions, three predictions).
 //  Gate      - the gate height above the target is reached (b3 flips and lands).
 class EntryGuidance {
 public:
@@ -79,15 +87,19 @@ public:
         int predictions = 0;
     };
     // Corrector: bank magnitude in [0, max_bank] for zero downrange error with the bank sign `sign` (+-1), the
-    // search starting at `warm_start_rad`; then the corridor constraints.
+    // search starting at `warm_start_rad`; then the corridor constraints. A reversal planned in `state`
+    // (reversal_time_s) is flown by the prediction.
     Solution solve(const EntryPredictorModel& model, const EntryPredictorState& state, double heat_load_j_m2,
                    double sign, double warm_start_rad) const;
     const EntryPredictorModel& model() const { return model_; }
 
 private:
     void entry_cycle(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf);
-    void belly_flop(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const math::Vec3& r_itrf,
-                    const math::Vec3& v_itrf, double height_m, double dt_s);
+    void terminal(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const math::Vec3& r_itrf,
+                  const math::Vec3& v_itrf, double dt_s);
+    // Horizontal miss at the gate predicted with a terminal steering vector (and the time to go).
+    math::Vec3 terminal_miss(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf,
+                               const math::Vec3& steering, double* time_to_go_s) const;
     bool violates(const EntryPrediction& p) const;
 
     EntryTarget target_;
@@ -103,10 +115,15 @@ private:
     double bank_target_rad_ = 0.0;   // corrector output with sign
     double bank_magnitude_rad_ = 0.0;
     double sign_ = 0.0;              // 0: not chosen yet
+    double time_since_reversal_s_ = 1.0e9;
     EntryCommand command_;
-    bool flop_started_ = false;
-    math::Quat flop_attitude_gcrf_;  // commanded attitude in the belly flop (slew limited)
-    math::Vec3 nose_itrf_;           // nose direction chosen at hand-over (horizontal)
+    bool terminal_started_ = false;
+    bool terminal_predicted_ = false;
+    math::Quat terminal_attitude_gcrf_;  // commanded attitude in the terminal phase (slew limited)
+    math::Vec3 terminal_steering_itrf_;        // lift direction x fraction (|.| <= 1)
+    math::Vec3 terminal_lift_direction_itrf_;  // last lift direction (kept when the steering is ~0)
+    math::Vec3 terminal_zem_itrf_;             // predicted horizontal miss at the gate
+    double terminal_prediction_age_s_ = 0.0;
 };
 
 }  // namespace starsim::gnc
