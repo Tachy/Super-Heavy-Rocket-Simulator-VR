@@ -16,6 +16,7 @@ const char* to_string(LandingOutcome outcome) {
         case LandingOutcome::Splashdown: return "Wasserung";
         case LandingOutcome::Impact: return "Aufprall";
         case LandingOutcome::BrokenUp: return "zerbrochen";
+        case LandingOutcome::TippedOver: return "umgekippt";
     }
     return "";
 }

@@ -54,6 +54,7 @@ struct LaunchSite {
     double height_m = 0.0;
     std::optional<config::TowerConfig> tower;  // catch tower (stacks then stand on its launch mount)
     std::optional<config::SeaConfig> sea;      // coastline (aborted landings)
+    double pad_radius_m = 0.0;                 // landing zone: concrete pad radius
 };
 
 LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site);
@@ -92,13 +93,17 @@ public:
     // Site of the mission (tower, landing target). launch_from_pad() sets it too.
     void set_launch_site(const LaunchSite& site);
     const LaunchSite& launch_site() const { return launch_site_; }
+    // Landing zone of the mission: first stages that land on legs ("leg_landing") return to it, and the legs land on
+    // its ground plane (with its shoreline). Set after the launch site (set_launch_site resets the leg landing).
+    void set_landing_zone(const LaunchSite& zone);
+    const std::optional<LaunchSite>& landing_zone() const { return landing_zone_; }
     // Places a vehicle with a free state (scenarios, tests); the body becomes the controlled one.
     void place_body(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch);
-    // Landing site of a returning `booster`: catch target when the site has a tower and the booster has pins,
-    // coastline when configured.
+    // Landing site of a returning `booster`: catch target when the site has a tower and the booster has pins; a stage
+    // with legs ("leg_landing") lands on the landing zone's pad; coastline when configured.
     gnc::LandingSite return_site(const vehicle::Vehicle& booster) const;
-    // The lowest stage of `vehicle` gets return guidance after separation (booster return on, caught by a tower at
-    // this site).
+    // The lowest stage of `vehicle` gets return guidance after separation (booster return on, and either caught by a
+    // tower at this site or landing on its legs on the landing zone).
     bool returns_after_staging(const vehicle::Vehicle& vehicle) const;
     const vehicle::FlightEnvironment& environment() const { return env_; }
     const CatchTowerSim* tower() const { return tower_.get(); }
@@ -199,6 +204,9 @@ public:
     // Dispersion injection (tests, training): an instantaneous velocity change of a body, e.g. the residual of a burn
     // (tail-off, misalignment) beyond what the closed-loop cutoff removes.
     void apply_velocity_error(size_t body_index, const math::Vec3& delta_v_gcrf_mps);
+    // Truth-model error injection (tests, training): the hull's aerodynamic force of a body scaled by `factor`; the
+    // onboard models (impact prediction, landing planner) keep the nominal tables.
+    void set_aero_dispersion(size_t body_index, double factor);
 
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
@@ -260,6 +268,7 @@ private:
     time::Epoch epoch_;
     time::Epoch launch_epoch_;
     LaunchSite launch_site_;
+    std::optional<LaunchSite> landing_zone_;
     bool towers_enabled_ = true;
     bool realtime_planning_ = false;
     std::unique_ptr<CatchTowerSim> tower_;

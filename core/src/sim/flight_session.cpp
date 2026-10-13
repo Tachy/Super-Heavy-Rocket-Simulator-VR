@@ -383,7 +383,8 @@ void FlightSession::run_autopilot() {
                 const auto& s = body.state();
                 reserve_kg = gnc::BoosterReturnGuidance::meco_propellant_kg(
                     body.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, earth_, epoch_,
-                    return_site(body.vehicle()), *booster_return_, booster.config.landing_propellant_kg);
+                    return_site(body.vehicle()), gnc::booster_return_parameters(booster.config, *booster_return_),
+                    booster.config.landing_propellant_kg);
             }
             if (propellant <= reserve_kg) {
                 stage();  // MECO + hot staging; the upper stage becomes the controlled body
@@ -432,19 +433,29 @@ void FlightSession::run_autopilot() {
 
 
 bool FlightSession::returns_after_staging(const vehicle::Vehicle& vehicle) const {
-    // Return guidance only for a booster that is caught by a tower at this site: Super Heavy has no legs (project
-    // decision 2026-10-13: it is always caught); Falcon 9 pad / drone-ship landings are not modelled yet.
-    return booster_return_ && vehicle.stages().front().config.recovery_method == "tower_catch" &&
-           launch_site_.tower.has_value();
+    // Return guidance for a booster that is caught by a tower at this site (Super Heavy has no legs, project decision
+    // 2026-10-13: it is always caught) or lands on its legs on the mission's landing zone (Falcon 9).
+    if (!booster_return_) return false;
+    const auto& stage = vehicle.stages().front().config;
+    if (stage.recovery_method == "tower_catch") return launch_site_.tower.has_value();
+    return stage.recovery_method == "leg_landing" && landing_zone_ && !stage.landing_legs.azimuths_rad.empty();
 }
 
 LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site) {
-    return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower, site.sea};
+    return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower, site.sea, site.pad_radius_m};
 }
 
 gnc::LandingSite FlightSession::return_site(const vehicle::Vehicle& booster) const {
-    gnc::LandingSite landing{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m, {}, {}};
     const auto& stage = booster.stages().front();
+    if (landing_zone_ && stage.config.recovery_method == "leg_landing" && !stage.config.landing_legs.azimuths_rad.empty()) {
+        const auto& z = *landing_zone_;
+        gnc::LandingSite landing{z.latitude_rad, z.longitude_rad, z.height_m, {}, {}, {}};
+        if (z.sea) landing.sea = gnc::SeaSide{z.sea->direction_rad, z.sea->shoreline_distance_m};
+        // The feet sit -foot_station_m below the stage bottom when deployed.
+        landing.pad = gnc::PadTarget{-stage.config.landing_legs.foot_station_m, z.pad_radius_m};
+        return landing;
+    }
+    gnc::LandingSite landing{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m, {}, {}, {}};
     if (tower_ && !stage.config.catch_pins.azimuths_rad.empty()) {
         const auto& g = tower_->geometry();
         const auto& c = g.config();
@@ -475,6 +486,17 @@ void FlightSession::place_returning_booster(const config::VehicleConfig& config,
     flying.return_guidance->set_realtime(realtime_planning_);
 }
 
+void FlightSession::set_landing_zone(const LaunchSite& zone) {
+    landing_zone_ = zone;
+    contact::LandingSurface ground;
+    ground.sea = zone.sea;
+    legs_ = std::make_unique<LegLandingSim>(zone.latitude_rad, zone.longitude_rad, zone.height_m, std::move(ground), tick_s);
+}
+
+void FlightSession::set_aero_dispersion(size_t body_index, double factor) {
+    bodies_.at(body_index).body->vehicle().set_hull_aero_scale(factor);
+}
+
 void FlightSession::set_realtime_planning(bool realtime) {
     realtime_planning_ = realtime;
     for (auto& flying : bodies_) {
@@ -485,6 +507,7 @@ void FlightSession::set_realtime_planning(bool realtime) {
 
 void FlightSession::set_launch_site(const LaunchSite& site) {
     launch_site_ = site;
+    landing_zone_.reset();
     contact::LandingSurface ground;
     ground.sea = site.sea;
     legs_ = std::make_unique<LegLandingSim>(site.latitude_rad, site.longitude_rad, site.height_m, std::move(ground), tick_s);
@@ -725,7 +748,10 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         for (size_t i = 0; i < bodies_.size(); ++i) {
             if (bodies_[i].return_guidance) {
                 if (tower_) bodies_[i].return_guidance->set_catch_contact(tower_->in_contact(*bodies_[i].body));
+                bodies_[i].return_guidance->set_leg_contact(legs_->in_contact(*bodies_[i].body));
                 run_return_guidance(bodies_[i]);
+                auto& v = bodies_[i].body->vehicle();
+                if (bodies_[i].return_command.deploy_legs && v.leg_deployment() == 0.0) v.deploy_legs();
             }
             auto& flying = bodies_[i];
             if (flying.entry_guidance && !flying.ship_landing && !flying.body->impacted()) {
@@ -793,7 +819,9 @@ void FlightSession::stage() {
     upper->set_ground_height(launch_site_.height_m);
     if (returns_after_staging(lower.body->vehicle())) {
         const auto landing = return_site(lower.body->vehicle());
-        lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(landing, *booster_return_);
+        lower.body->set_ground_height(landing.height_m);
+        lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(
+            landing, gnc::booster_return_parameters(lower.body->vehicle().stages().front().config, *booster_return_));
         lower.return_guidance->set_realtime(realtime_planning_);
     }
     Flying flying{std::move(upper), {}, nullptr, {}};
@@ -805,7 +833,15 @@ void FlightSession::stage() {
 LandingOutcome FlightSession::landing_outcome(size_t index) const {
     const auto t = earth_.fixed_to_gcrf(epoch_);
     const auto& body = *bodies_.at(index).body;
-    return sim::landing_outcome(body, launch_site_, transpose(t.rotation) * body.state().position_gcrf_m);
+    switch (legs_->touchdown(body)) {  // a landing on legs is judged by the legs
+        case LegTouchdown::Landed: return LandingOutcome::Landed;
+        case LegTouchdown::TippedOver: return LandingOutcome::TippedOver;
+        case LegTouchdown::Impact: return LandingOutcome::Impact;
+        case LegTouchdown::Splashdown: return LandingOutcome::Splashdown;
+        case LegTouchdown::None: break;
+    }
+    const auto& site = landing_zone_ && bodies_.at(index).return_guidance ? *landing_zone_ : launch_site_;
+    return sim::landing_outcome(body, site, transpose(t.rotation) * body.state().position_gcrf_m);
 }
 
 vehicle::FlightTelemetry FlightSession::telemetry(size_t index) const {

@@ -133,6 +133,10 @@ public:
     bool legs_deploying() const { return legs_deploying_; }
     double leg_deployment() const { return leg_deployment_; }
     void set_leg_deployment(double fraction);  // scenarios: legs placed in a given state
+    // Truth-model error injection: the hull's aerodynamic force (FlightBody) is scaled by this; aero() itself - what
+    // the onboard models use - is unchanged.
+    void set_hull_aero_scale(double factor) { hull_aero_scale_ = factor; }
+    double hull_aero_scale() const { return hull_aero_scale_; }
     void update_landing_legs(double dt_s);
     // Flap actuators for one tick (range [0, max] and rate limits).
     void update_flaps(double dt_s, const VehicleCommand& command);
@@ -169,6 +173,7 @@ private:
     std::unique_ptr<aero::SlenderBodyAero> aero_;
     bool legs_deploying_ = false;
     double leg_deployment_ = 0.0;
+    double hull_aero_scale_ = 1.0;
 };
 
 }  // namespace starsim::vehicle

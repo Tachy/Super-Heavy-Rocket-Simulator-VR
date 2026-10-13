@@ -5,7 +5,8 @@
 namespace starsim::sim {
 
 // How a body's flight ended (German UI text via to_string).
-enum class LandingOutcome { Flying, Caught, Landed, Splashdown, Impact, BrokenUp };
+// TippedOver: a stage on its legs fell over after touching down (judged by the leg landing).
+enum class LandingOutcome { Flying, Caught, Landed, Splashdown, Impact, BrokenUp, TippedOver };
 
 const char* to_string(LandingOutcome outcome);
 

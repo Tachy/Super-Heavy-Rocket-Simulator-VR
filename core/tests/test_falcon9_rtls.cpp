@@ -110,3 +110,86 @@ TEST_CASE("A falling Falcon 9 stage flies its entry burn on the centre engine", 
     CHECK(guidance->entry_delta_v_mps() < 130.0);
     CHECK(guidance->phase() == gnc::ReturnPhase::Coast);
 }
+
+namespace {
+
+// End of a landing on legs: first foot contact (CG offset from the zone centre, sink, lateral speed, site frame), the
+// leg judgement and the session's outcome.
+struct LegRun {
+    bool contact = false;
+    double contact_offset_m = 0.0;
+    double contact_sink_mps = 0.0;
+    double contact_lateral_mps = 0.0;
+    double legs_at_contact = 0.0;  // deployment fraction
+    double offset_m = 0.0;         // where it ended
+    double propellant_kg = 0.0;    // left at the end
+    sim::LegTouchdown touchdown = sim::LegTouchdown::None;
+    sim::LandingOutcome outcome = sim::LandingOutcome::Flying;
+};
+
+LegRun fly_to_touchdown(sim::FlightSession& session, time::Epoch t0, double max_s) {
+    LegRun run;
+    const auto& stage = session.body(0);
+    const auto zone = session.launch_site();
+    auto enu = [&](math::Vec3* velocity) {
+        const auto tr = earth().fixed_to_gcrf(session.epoch());
+        const auto& s = stage.state();
+        if (velocity) {
+            const Vec3 v_fixed = transpose(tr.rotation) * (s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), s.position_gcrf_m));
+            const Vec3 origin = frames::geodetic_to_fixed({zone.latitude_rad, zone.longitude_rad, zone.height_m});
+            *velocity = sim::site_enu_m(zone, origin + v_fixed);
+        }
+        return sim::site_enu_m(zone, transpose(tr.rotation) * s.position_gcrf_m);
+    };
+    for (double t = sim::FlightSession::tick_s; t <= max_s; t += sim::FlightSession::tick_s) {
+        session.advance_to(t0 + t, 10);
+        if (!run.contact && session.leg_landing().in_contact(stage)) {
+            Vec3 v;
+            const Vec3 p = enu(&v);
+            run.contact = true;
+            run.contact_offset_m = std::hypot(p.x, p.y);
+            run.contact_sink_mps = -v.z;
+            run.contact_lateral_mps = std::hypot(v.x, v.y);
+            run.legs_at_contact = stage.vehicle().leg_deployment();
+        }
+        if (session.leg_touchdown(0) != sim::LegTouchdown::None || stage.impacted()) break;
+    }
+    const Vec3 p = enu(nullptr);
+    run.offset_m = std::hypot(p.x, p.y);
+    run.propellant_kg = stage.vehicle().propellant_kg();
+    run.touchdown = session.leg_touchdown(0);
+    run.outcome = session.landing_outcome(0);
+    return run;
+}
+
+constexpr double ignition_sink_mps = 300.0;      // [D] CRS-35: ~300 m/s at landing-burn ignition (~3.2 km)
+constexpr double ignition_propellant_kg = 11300.0;  // [D] gauge 2.8-2.9 % at ignition
+
+}  // namespace
+
+TEST_CASE("Falcon 9 lands on LZ-40 from the landing-burn ignition state", "[gnc][falcon9][rtls]") {
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    session.set_launch_site(lz40());
+    session.set_landing_zone(lz40());
+    const auto parameters = falcon9_parameters();
+    const auto cfg = test::booster_config("falcon9_block5", ignition_propellant_kg);
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, ignition_sink_mps, parameters);
+    session.place_returning_booster(cfg,
+                                    test::state_over_site(session.launch_site(), earth(), t0, {15.0, -10.0, h},
+                                                          {2.0, -1.0, -ignition_sink_mps}),
+                                    t0, parameters, gnc::ReturnPhase::LandingBurn);
+    const auto run = fly_to_touchdown(session, t0, 60.0);
+    std::printf("[falcon9] ignition at %.0f m: %s / %s, contact offset %.2f m, sink %.2f m/s, lateral %.2f m/s, legs %.2f, "
+                "ended %.2f m off, %.0f kg left\n", h, sim::to_string(run.touchdown), sim::to_string(run.outcome),
+                run.contact_offset_m, run.contact_sink_mps, run.contact_lateral_mps, run.legs_at_contact, run.offset_m,
+                run.propellant_kg);
+    CHECK(h > 2500.0);
+    CHECK(h < 4000.0);
+    REQUIRE(run.contact);
+    CHECK(run.legs_at_contact == 1.0);
+    CHECK(run.contact_offset_m < 1.0);
+    CHECK(run.contact_sink_mps < 2.0);
+    CHECK(run.touchdown == sim::LegTouchdown::Landed);
+    CHECK(run.outcome == sim::LandingOutcome::Landed);
+}

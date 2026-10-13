@@ -78,6 +78,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
     const bool powered = ctx.vehicle.any_engine_producing_thrust();
     f.aero = ctx.vehicle.aero().compute(s.attitude.inverse_rotate(air_velocity), air.density_kg_m3,
                                         air.speed_of_sound_mps, powered, air.mean_free_path_m);
+    f.aero.force_body_n = f.aero.force_body_n * ctx.vehicle.hull_aero_scale();
     f.nongravitational_body_n = f.aero.force_body_n;
     f.aero_body_n = f.aero.force_body_n;
     f.moment_body_nm = cross(Vec3{f.aero.normal_force_station_m - f.mass.cg_station_m, 0.0, 0.0}, f.aero.force_body_n);

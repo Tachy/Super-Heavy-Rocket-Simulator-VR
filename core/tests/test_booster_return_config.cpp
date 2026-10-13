@@ -24,7 +24,7 @@ TEST_CASE("Falcon 9 return parameters come from its recovery config", "[gnc][fal
     CHECK(p.entry_altitude_m == 56600.0);
     CHECK(p.entry_delta_v_mps == 125.0);
     CHECK(p.entry_throttle == 0.4);
-    CHECK(p.scvx.ignition_throttle == 0.9);
+    CHECK(p.scvx.ignition_throttle == 0.7);
     CHECK(p.scvx.settings.limits.switches[0].min_sink_mps == 230.0);
     CHECK(p.scvx.settings.limits.switches[1].max_sink_mps == 190.0);
     CHECK(p.scvx.divert_speed_mps == 250.0);
