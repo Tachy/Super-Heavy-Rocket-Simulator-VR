@@ -95,7 +95,21 @@ public:
             r, v, gnc::entry_attitude_quaternion(v_rel, up, 60.0 * constants::deg_to_rad, start.bank_rad, belly_azimuth_rad_),
             {}};
         body_ = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR), state);
+        start_position_itrf_m_ = r;  // ITRF = GCRF at entry_t0
+        start_velocity_itrf_mps_ = v_rel;
     }
+
+    // The start as the guidance's predictor sees it (ITRF = GCRF at entry_t0).
+    math::Vec3 start_position_itrf_m() const { return start_position_itrf_m_; }
+    math::Vec3 start_velocity_itrf_mps() const { return start_velocity_itrf_mps_; }
+    double initial_bank_rad() const { return initial_bank_rad_; }
+    // Seconds flown so far and the body's Earth-fixed position now.
+    double time_s() const { return time_s_; }
+    time::Epoch epoch() const { return entry_t0 + time_s_; }
+    math::Vec3 position_itrf_m() const {
+        return transpose(earth_.fixed_to_gcrf(epoch()).rotation) * body_->state().position_gcrf_m;
+    }
+    const vehicle::FlightEnvironment& environment() const { return env_; }
 
     // Flies until the Mach number (in continuum flow, below 40 km) drops below `until_mach`, the altitude below
     // `stop_altitude_m`, the body breaks up or lands, the ship skips out and climbs above 130 km, or `max_time_s`
@@ -138,6 +152,7 @@ public:
                 if (body_->skipped_out() && t.altitude_m > 130000.0) break;
             }
             if (body_->impacted() || body_->resting()) break;
+            time_s_ = (k + 1) * dt;
             const math::Vec3 up = math::normalized(s.position_gcrf_m);
             const auto setpoint = gnc::entry_attitude(v_rel, up, alpha, bank, belly_azimuth_rad_);
             vehicle::VehicleCommand command;
@@ -159,6 +174,9 @@ private:
     std::unique_ptr<vehicle::FlightBody> body_;
     double belly_azimuth_rad_ = 0.0;
     double initial_bank_rad_ = 0.0;
+    double time_s_ = 0.0;
+    math::Vec3 start_position_itrf_m_;
+    math::Vec3 start_velocity_itrf_mps_;
 };
 
 }  // namespace starsim::test
