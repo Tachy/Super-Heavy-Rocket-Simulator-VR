@@ -9,7 +9,9 @@
 
 namespace starsim::gnc {
 
-enum class DescentGoal { Catch, Abort };
+// Catch: on the tower arms. Abort: at sea. Pad: touchdown on legs on a landing pad - the terminal state of a catch
+// (position, velocity, upright, no pitch/yaw rate) without the tower's corridor.
+enum class DescentGoal { Catch, Abort, Pad };
 
 // End of the landing burn, plan frame.
 struct DescentTarget {

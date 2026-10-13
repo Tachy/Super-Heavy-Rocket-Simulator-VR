@@ -9,6 +9,7 @@
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/gnc/descent_discretization.hpp"
+#include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/descent_planner.hpp"
 #include "starsim/math/constants.hpp"
 
@@ -535,4 +536,60 @@ TEST_CASE("Each engine set hands over within its switch sink rates", "[gnc][desc
             CHECK(v >= -sw.max_sink_mps - 1e-3);  // ... and not much faster: the next set takes over from there
         }
     }
+}
+
+namespace {
+
+// Falcon 9 first stage at landing-burn ignition (CRS-35: 11.3 t of propellant [D]); landing burn 1 -> 3 -> 1 engines.
+std::unique_ptr<Booster> falcon9() {
+    auto b = std::make_unique<Booster>();
+    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    cfg.stages.resize(1);
+    double total = 0.0;
+    for (const auto& tank : cfg.stages[0].tanks) total += tank.mass_kg;
+    for (auto& tank : cfg.stages[0].tanks) tank.mass_kg *= 11300.0 / total;
+    b->vehicle = std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR);
+    DescentModelInputs in;
+    in.vehicle = b->vehicle.get();
+    in.phase_groups = {std::vector<std::string>{"first_stage/center"},
+                       std::vector<std::string>{"first_stage/center", "first_stage/pair"},
+                       std::vector<std::string>{"first_stage/center"}};
+    in.atmosphere = &b->atmosphere;
+    in.site_height_m = -20.0;
+    const double lat = 28.56 * deg;
+    in.gravity_mps2 = {-9.79, 0.0, 0.0};
+    in.earth_rate_radps = Vec3{std::sin(lat), 0.0, std::cos(lat)} * 7.2921150e-5;
+    in.earth_center_m = {-6.373e6, 0.0, 0.0};
+    b->model = make_descent_model(in);
+    return b;
+}
+
+}  // namespace
+
+TEST_CASE("SCvx plans a Falcon 9 touchdown on the landing pad", "[gnc][descent][scvx][falcon9]") {
+    const auto b = falcon9();
+    const auto cfg = gnc::booster_return_parameters(b->vehicle->stages()[0].config);
+    auto s = cfg.scvx.settings;
+    s.limits.min_mass_kg = b->vehicle->mass_properties().mass_kg - b->vehicle->propellant_kg() + 3000.0;
+    s.limits.approach_time_constant_s = 0.0;  // the single engine cannot hover (see the pad goal)
+    const double contact_cg_m = b->vehicle->mass_properties().cg_station_m - b->vehicle->stages()[0].config.landing_legs.foot_station_m;
+    DescentTarget target;
+    target.goal = DescentGoal::Pad;
+    target.position_m = {contact_cg_m, 0.0, 0.0};
+    target.velocity_mps = {-1.0, 0.0, 0.0};
+    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {3200.0, 20.0, -10.0}, {-300.0, 3.0, -2.0},
+                               Quat::from_axis_angle({0.0, 0.0, 1.0}, 2.0 * deg), {});
+    const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("falcon9 pad: %d iterations, vc %.2e, durations %.1f + %.1f + %.1f s, final mass %.0f kg\n",
+                    plan.iterations, plan.virtual_control, plan.reference.duration_s[0], plan.reference.duration_s[1],
+                    plan.reference.duration_s[2], plan.reference.x.back()[descent_index::mass]);
+    }
+    REQUIRE(plan.converged);
+    CHECK(plan.goal == DescentGoal::Pad);
+    const auto& end = plan.reference.x.back();
+    CHECK(std::abs(end[descent_index::position] - contact_cg_m) < 0.1);
+    CHECK(std::hypot(end[descent_index::position + 1], end[descent_index::position + 2]) < 0.1);
+    CHECK(std::abs(end[descent_index::velocity] + 1.0) < 0.05);
+    CHECK(end[descent_index::mass] >= s.limits.min_mass_kg - 1.0);
 }

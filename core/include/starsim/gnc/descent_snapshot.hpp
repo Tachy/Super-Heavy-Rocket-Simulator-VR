@@ -58,7 +58,7 @@ struct SnapshotSettings {
 struct DescentSnapshot {
     DescentModel model;
     DescentState initial;
-    DescentTarget catch_target;   // goal Catch (meaningless without a catch target at the site)
+    DescentTarget catch_target;   // goal Catch, or Pad at a site with a pad target (meaningless without either)
     DescentTarget abort_target;   // goal Abort
     double min_mass_kg = 0.0;
     double phase0_spool = 1.0;    // mean spool of the ignition (phase 0) engines now

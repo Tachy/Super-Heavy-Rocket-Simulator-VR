@@ -126,7 +126,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     }
     // Terminal state.
     const int last = K - 1;
-    if (target.goal == DescentGoal::Catch) {
+    if (target.goal != DescentGoal::Abort) {
         // Position, velocity, upright (quaternion y = z = 0, any roll), no pitch/yaw rotation (the thrust has no roll
         // authority: a measured roll rate stays in the model, the tracking controller handles roll).
         const double t[6] = {target.position_m.x,   target.position_m.y,   target.position_m.z,
@@ -210,7 +210,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
                                  X(k, descent_index::rate + 1),
                                  X(k, descent_index::rate + 2)});
         b.add_nonnegative(X(k, descent_index::mass).add_constant(-limits.min_mass_kg));
-        if (target.goal == DescentGoal::Catch) {
+        if (target.goal != DescentGoal::Abort) {
             const double tg = std::tan(limits.glide_slope_rad);
             b.add_second_order_cone({X(k, 1).add_constant(-target.position_m.x),
                                      scaled(X(k, 2).add_constant(-target.position_m.y), tg),
@@ -354,7 +354,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     // (the hull slides down between the arms), so the lateral divert happens on the earlier sets. A soft penalty on
     // the final set's distance from the catch axis keeps every re-plan feasible.
     for (int k = 0; k < K; ++k) {
-        if (target.goal == DescentGoal::Catch && k >= final_phase * (n - 1) && k > 0) {
+        if (target.goal != DescentGoal::Abort && k >= final_phase * (n - 1) && k > 0) {
             const double tau = weights.final_lateral_time_s;  // lateral speed counts as the offset it makes in tau
             const int lateral = b.add_variables(1, "lateral")[0];
             b.add_second_order_cone({AffineExpr{}.add(lateral, 1.0), X(k, 2).add_constant(-target.position_m.y),

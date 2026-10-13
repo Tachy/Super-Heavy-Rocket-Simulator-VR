@@ -24,12 +24,19 @@ struct CatchTarget {
     double mount_height_m = 0.0;          // launch mount top above the pad ground
 };
 
+// Touchdown on landing legs on a pad (landing zone) at the site's centre.
+struct PadTarget {
+    double contact_bottom_height_m = 0.0;  // stage bottom (station 0) above the pad when the feet touch it
+    double radius_m = 0.0;                 // landing pad (concrete) radius
+};
+
 struct LandingSite {
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
     double height_m = 0.0;  // ground (pad) height above WGS84
     std::optional<CatchTarget> catch_target;
     std::optional<SeaSide> sea;
+    std::optional<PadTarget> pad;  // landing on legs (no catch target)
 };
 
 // Body +y direction (same frame as the inputs) that turns the first pin along +-across, upright body (x = up);

@@ -113,7 +113,7 @@ DescentReference initial_guess(const DescentModel& model, const DescentState& in
     const double m0 = initial[descent_index::mass];
     const double g = norm(model.gravity_mps2);
     const double speed0 = norm(state_velocity(initial));
-    const double final_speed = target.goal == DescentGoal::Catch ? norm(target.velocity_mps) : 0.0;
+    const double final_speed = target.goal != DescentGoal::Abort ? norm(target.velocity_mps) : 0.0;
     auto decel = [&](int p, double m) {
         return std::max(guess_throttle * model.engine_sets[static_cast<size_t>(p)].thrust_max_n / m - g, min_deceleration_mps2);
     };
@@ -125,10 +125,10 @@ DescentReference initial_guess(const DescentModel& model, const DescentState& in
         ref.duration_s[static_cast<size_t>(p)] = std::max((speed - end_speed) / decel(p, m0), limits.min_phase_s[static_cast<size_t>(p)]);
         speed = end_speed;
     }
-    const Vec3 r_end = target.goal == DescentGoal::Catch
+    const Vec3 r_end = target.goal != DescentGoal::Abort
                            ? target.position_m
                            : Vec3{target.ground_cg_height_m, target.sea_target_m.y, target.sea_target_m.z};
-    const Vec3 v_end = target.goal == DescentGoal::Catch ? target.velocity_mps : Vec3{};
+    const Vec3 v_end = target.goal != DescentGoal::Abort ? target.velocity_mps : Vec3{};
     const Quat q_end = upright_with_roll(state_attitude(initial));
     double total = 0.0;
     for (const double d : ref.duration_s) total += d;

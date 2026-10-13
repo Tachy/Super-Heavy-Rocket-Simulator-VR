@@ -128,8 +128,15 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
         snap.abort_target.mount_keep_out_radius_m = c.mount_keep_out_radius_m;
         snap.abort_target.mount_top_cg_height_m = c.mount_height_m + mass.cg_station_m + settings.mount_margin_m;
     }
+    if (site.pad) {
+        // Touchdown: the CG where the feet meet the pad, sinking at the end speed.
+        snap.catch_target.goal = DescentGoal::Pad;
+        snap.catch_target.position_m = {mass.cg_station_m + site.pad->contact_bottom_height_m, 0.0, 0.0};
+        snap.catch_target.velocity_mps = {-settings.catch_sink_mps, 0.0, 0.0};
+    }
     snap.abort_target.goal = DescentGoal::Abort;
-    snap.abort_target.ground_cg_height_m = mass.cg_station_m;  // bottom on the ground (flat at the pad height)
+    // Bottom on the ground (flat at the pad height), on the legs at a pad site.
+    snap.abort_target.ground_cg_height_m = mass.cg_station_m + (site.pad ? site.pad->contact_bottom_height_m : 0.0);
     if (site.sea) {
         const Vec3 seaward{0.0, std::sin(site.sea->direction_rad), std::cos(site.sea->direction_rad)};
         snap.abort_target.sea_target_m = seaward * (site.sea->shoreline_distance_m + settings.sea_margin_m);

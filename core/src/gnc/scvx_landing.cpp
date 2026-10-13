@@ -132,7 +132,7 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     ++stats_.plans;
     stats_.last_solve_ms = outcome.solve_ms;
     stats_.max_solve_ms = std::max(stats_.max_solve_ms, outcome.solve_ms);
-    const bool stale = aborting_ && outcome.plan->goal == DescentGoal::Catch;  // requested before the abort
+    const bool stale = aborting_ && outcome.plan->goal != DescentGoal::Abort;  // requested before the abort
     if (outcome.plan->converged && !stale) {
         plan_ = outcome.plan;
         plan_epoch_ = outcome.snapshot_epoch + outcome.start_offset_s;
@@ -182,7 +182,7 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
 
     const double t = epoch - plan_epoch_;
     const double time_to_go = plan_->duration_s() - t;
-    const bool abort_pending = aborting_ && plan_->goal == DescentGoal::Catch;  // no abort plan yet
+    const bool abort_pending = aborting_ && plan_->goal != DescentGoal::Abort;  // no abort plan yet
     if (epoch - next_request_ >= -epoch_tolerance_s && !replanner_.busy() &&
         (time_to_go > parameters_.min_replan_time_to_go_s || abort_pending)) {
         const auto snapshot = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
