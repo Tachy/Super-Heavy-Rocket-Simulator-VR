@@ -112,7 +112,7 @@ TEST_CASE("Session flies an entering ship to the gate over Starbase", "[ship][gu
     CHECK_FALSE(session.body(0).impacted());
     CHECK(norm(lead - up * dot(lead, up)) > 100.0);
     CHECK(miss < 150.0);
-    CHECK(nose_off_deg < 15.0);  // the nose sector is +-10 deg
+    CHECK(nose_off_deg < 18.0);  // the nose sector is +-10 deg at the gate, plus the hull's attitude lag and sideslip
 }
 
 // The whole return below Mach 3 in one session: entry guidance to the gate (nose turned to the tower in the steep

@@ -6,6 +6,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <random>
+#include <vector>
 
 #include "return_scenario.hpp"
 #include "starsim/config/launch_site_config.hpp"
@@ -84,9 +86,16 @@ struct ReturnRun {
     double propellant_kg = 0.0;
 };
 
+// Execution error of the deorbit burn, applied when it ends: magnitude (fraction of the burn) and pointing.
+struct BurnError {
+    double scale = 0.0;
+    double pointing_rad = 0.0;
+    double pointing_azimuth_rad = 0.0;  // about the burn direction, from the orbit normal
+};
+
 // Plans the return, flies to the gate (coarse steps through the coast, 1 s in the entry, 0.05 s near the gate) and
 // on to the catch.
-ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& parameters) {
+ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& parameters, const BurnError& error = {}) {
     ReturnRun run;
     run.planned = session.plan_ship_return(parameters);
     const auto* plan = session.ship_return_plan();
@@ -97,6 +106,14 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
                 plan->crossrange_m / 1000.0);
     if (!run.planned) return run;
     const time::Epoch interface = plan->entry_interface_epoch;
+    while (session.autopilot().state == sim::AutopilotState::Burn) session.advance_to(session.epoch() + 60.0, 400000);
+    if (error.scale != 0.0 || error.pointing_rad != 0.0) {
+        const Vec3 u = math::normalized(plan->node.delta_v_gcrf_mps);
+        const Vec3 a = math::normalized(cross(session.body(0).state().position_gcrf_m, session.body(0).state().velocity_gcrf_mps));
+        const Vec3 b = cross(u, a);
+        const Vec3 w = a * std::cos(error.pointing_azimuth_rad) + b * std::sin(error.pointing_azimuth_rad);
+        session.apply_velocity_error(0, (u * error.scale + w * std::tan(error.pointing_rad)) * plan->delta_v_mps);
+    }
     while (session.epoch() < interface - 400.0) session.advance_to(std::min(session.epoch() + 600.0, interface - 400.0), 400000);
     const bool verbose = std::getenv("STARSIM_VERBOSE") != nullptr;
     while (!session.body(0).impacted() && session.epoch() < interface + 3600.0) {
@@ -104,13 +121,16 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
         if (entry && entry->phase() == gnc::EntryPhase::Gate) break;
         const double height = session.telemetry(0).altitude_m - session.launch_site().height_m;
         session.advance_to(session.epoch() + (height < 3000.0 ? 0.05 : 1.0), 400000);
-        if (verbose && entry && static_cast<long>(session.epoch() - interface) % 20 == 0 && height >= 3000.0) {
+        const long elapsed = static_cast<long>(session.epoch() - interface);
+        if (verbose && entry && height >= 3000.0 && (elapsed % 20 == 0 || (height < 14000.0 && elapsed % 2 == 0))) {
             const auto* s = session.entry_status(0);
             const auto tel = session.telemetry(0);
-            std::printf("t %+.0f %s h %.1f km v %.0f Mach %.2f alpha %.1f bank %.1f downrange %.1f km cross %.1f km\n",
+            const auto& w = session.body(0).state().angular_velocity_body_radps;
+            std::printf("t %+.0f %s h %.1f km v %.0f Mach %.2f alpha %.1f (aoa %.1f) bank %.1f downrange %.1f km cross %.1f km "
+                        "gamma %.1f w %.3f %.3f %.3f\n",
                         session.epoch() - interface, gnc::to_string(s->phase), tel.altitude_m / 1000.0,
-                        tel.speed_relative_mps, tel.mach, s->alpha_rad / deg, s->bank_rad / deg,
-                        s->downrange_error_m / 1000.0, s->crossrange_m / 1000.0);
+                        tel.speed_relative_mps, tel.mach, s->alpha_rad / deg, tel.angle_of_attack_rad / deg, s->bank_rad / deg,
+                        s->downrange_error_m / 1000.0, s->crossrange_m / 1000.0, tel.flight_path_angle_rad / deg, w.x, w.y, w.z);
         }
     }
     const auto* entry = session.entry_guidance(0);
@@ -122,6 +142,18 @@ ReturnRun fly_return(sim::FlightSession& session, const gnc::DeorbitParameters& 
         const Vec3 up = math::normalized(r);
         const Vec3 d = r - entry->target().position_itrf_m;
         run.gate_miss_m = norm(d - up * dot(d, up));
+        {
+            const Vec3 nose_dir = entry->target().nose_direction_itrf;  // to the tower
+            const Vec3 side = cross(up, nose_dir);
+            const auto& st = session.body(0).state();
+            const Vec3 v = transpose(tr.rotation) * (st.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), st.position_gcrf_m));
+            const Vec3 nose = transpose(tr.rotation) * st.attitude.rotate(Vec3{1.0, 0.0, 0.0});
+            const auto tel = session.telemetry(0);
+            std::printf("gate: along %.0f m across %.0f m (tower line), velocity along %.1f across %.1f down %.1f m/s, nose "
+                        "along %.2f across %.2f up %.2f, alpha %.1f deg\n",
+                        dot(d, nose_dir), dot(d, side), dot(v, nose_dir), dot(v, side), -dot(v, up), dot(nose, nose_dir),
+                        dot(nose, side), dot(nose, up), tel.angle_of_attack_rad / deg);
+        }
         run.landing = test::fly_landing(session, earth(), session.epoch(), 120.0);
     }
     run.propellant_kg = session.body(0).vehicle().propellant_kg();
@@ -150,7 +182,89 @@ TEST_CASE("Ship returns from orbit into the tower's arms", "[ship][catch][sessio
     const auto run = fly_return(session, deorbit_parameters(m));
     REQUIRE(run.planned);
     CHECK(run.gate);
-    CHECK(run.gate_miss_m < 300.0);  // the catch is the criterion: gate cross-track errors up to ~200 m are flown out (b3)
+    CHECK(run.gate_miss_m < 100.0);
     CHECK_FALSE(run.landing.tower_struck);
     CHECK(run.landing.caught_within_tolerance());
+}
+
+namespace {
+
+struct Case {
+    double phase_deg = 0.0;
+    double periapsis_km = 200.0;
+    double apoapsis_km = 200.0;
+    double propellant_t = 45.0;
+    BurnError error;
+};
+
+void fly_campaign(const std::vector<Case>& cases, const char* name) {
+    const auto base = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    int index = 0;
+    for (const auto& c : cases) {
+        auto m = base;
+        m.argument_of_latitude_rad = c.phase_deg * deg;
+        m.periapsis_height_m = c.periapsis_km * 1000.0;
+        m.apoapsis_height_m = c.apoapsis_km * 1000.0;
+        m.propellant_kg = c.propellant_t * 1000.0;
+        sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+        const auto t0 = place_mission(session, m);
+        std::printf("%s case %d: phase %.0f deg, orbit %.1f x %.1f km, %.1f t, burn error %.2f %% / %.2f deg\n", name,
+                    index, c.phase_deg, c.periapsis_km, c.apoapsis_km, c.propellant_t, c.error.scale * 100.0,
+                    c.error.pointing_rad / deg);
+        const auto run = fly_return(session, deorbit_parameters(m), c.error);
+        const auto* plan = session.ship_return_plan();
+        std::printf("%s case %d: waited %.1f h\n", name, index, plan ? (plan->node.epoch - t0) / 3600.0 : -1.0);
+        INFO(name << " case " << index);
+        CHECK(run.planned);
+        CHECK(run.gate);
+        CHECK(run.gate_miss_m < 100.0);
+        CHECK_FALSE(run.landing.tower_struck);
+        CHECK(run.landing.caught_within_tolerance());
+        ++index;
+    }
+}
+
+std::vector<Case> phase_cases(int first, int count) {
+    std::vector<Case> cases;
+    for (int i = first; i < first + count; ++i) {
+        Case c;
+        c.phase_deg = 45.0 * i;
+        cases.push_back(c);
+    }
+    return cases;
+}
+
+std::vector<Case> dispersed_cases(int first, int count) {
+    std::mt19937 rng(20261013);
+    std::uniform_real_distribution<double> u(-1.0, 1.0);
+    std::vector<Case> cases;
+    for (int i = 0; i < first + count; ++i) {
+        Case c;
+        c.phase_deg = 180.0 + 180.0 * u(rng);
+        c.periapsis_km = 200.0 + 10.0 * u(rng);
+        c.apoapsis_km = c.periapsis_km + 10.0 + 10.0 * u(rng);
+        c.propellant_t = 45.0 + 3.0 * u(rng);
+        c.error.scale = 0.01 * u(rng);
+        c.error.pointing_rad = 0.5 * deg * std::abs(u(rng));
+        c.error.pointing_azimuth_rad = constants::pi * u(rng);
+        if (i >= first) cases.push_back(c);
+    }
+    return cases;
+}
+
+}  // namespace
+
+// Campaign: the orbit phase sets which pass is taken (wait, crossrange, arrival heading); dispersed orbits, propellant
+// and deorbit-burn execution errors (+-1 % magnitude, 0.5 deg pointing) are flown out by the entry guidance.
+TEST_CASE("Ship return campaign: orbit phase 0-135 deg", "[ship][mission][validation]") { fly_campaign(phase_cases(0, 4), "phase"); }
+TEST_CASE("Ship return campaign: orbit phase 180-315 deg", "[ship][mission][validation]") { fly_campaign(phase_cases(4, 4), "phase"); }
+TEST_CASE("Ship return campaign: dispersions 1-3", "[ship][mission][validation]") { fly_campaign(dispersed_cases(0, 3), "dispersed"); }
+TEST_CASE("Ship return campaign: dispersions 4-6", "[ship][mission][validation]") { fly_campaign(dispersed_cases(3, 3), "dispersed"); }
+
+// Diagnostics: one return from the orbit phase in STARSIM_RETURN_PHASE (deg).
+TEST_CASE("Ship return single case", "[.][ship][mission]") {
+    Case c;
+    if (const char* p = std::getenv("STARSIM_RETURN_PHASE")) c.phase_deg = std::atof(p);
+    if (const char* d = std::getenv("STARSIM_RETURN_DISPERSED")) c = dispersed_cases(std::atoi(d), 1).front();
+    fly_campaign({c}, "single");
 }

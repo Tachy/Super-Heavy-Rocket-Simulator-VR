@@ -183,6 +183,9 @@ public:
 
     // Failure injection for tests and training.
     void fail_engine(size_t body_index, size_t stage_index, size_t engine_index);
+    // Dispersion injection (tests, training): an instantaneous velocity change of a body, e.g. the residual of a burn
+    // (tail-off, misalignment) beyond what the closed-loop cutoff removes.
+    void apply_velocity_error(size_t body_index, const math::Vec3& delta_v_gcrf_mps);
 
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
@@ -230,8 +233,10 @@ private:
     gnc::AttitudeController controller_;
     // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).
     gnc::AttitudeController return_controller_{gnc::AttitudeController::Gains{1.5, 0.9, true}};
-    // Entering ship: flaps + RCS, slow (the flaps move at ~20 deg/s: 0.8 rad/s limit-cycles in roll, b1).
-    gnc::AttitudeController entry_controller_{gnc::AttitudeController::Gains{0.5, 0.9, false, true}};
+    // Entering ship: flaps + RCS, slow (the flaps move at ~20 deg/s: 0.8 rad/s limit-cycles in roll, b1). [E] actuator
+    // delay 0.5 s (the flaps' slew): without it the belly flop's nose turn (5 deg/s) set off a roll limit cycle and the
+    // ship departed (b4 campaign).
+    gnc::AttitudeController entry_controller_{gnc::AttitudeController::Gains{0.5, 0.9, false, true, 0.5}};
     // Ship flip and landing burn: gimbals with flaps and RCS, faster than in the entry [E].
     // [E] actuator delay: the gimbals slew 30 deg (stop to stop) at 20 deg/s, half of that on average
     gnc::AttitudeController ship_landing_controller_{gnc::AttitudeController::Gains{1.5, 0.9, false, true, 0.75}};

@@ -41,13 +41,26 @@ struct EntryPredictorModel {
     double terminal_min_alpha_rad = 50.0 * constants::deg_to_rad;          // [E] trimmed range (b1)
     double terminal_alpha_authority_rad = 20.0 * constants::deg_to_rad;    // [E]
     double steering_freeze_gamma_rad = -70.0 * constants::deg_to_rad;      // [E]
-    // With a nose direction in the target: when the basis freezes the steering becomes the nose direction times
-    // nose_fraction (alpha ~86 deg: little lift, the nose turns about the air velocity; room to steer either way);
-    // after that it stays within +-nose_sector_rad about it and between nose_min_fraction and nose_max_fraction
-    // (at most the belly flop's alpha: more lift pointed back to the tower in a -70 deg fall points down and pulls the
-    // ship out of trim) - nose_sector_steering [E].
+    // With a nose direction in the target: when the basis freezes the steering turns into the nose sector (the nearest
+    // edge) at nose_fraction (alpha ~86 deg: little lift, the nose turns about the air velocity; room to steer either
+    // way); after that it stays within the sector about the nose direction and between nose_min_fraction and
+    // nose_max_fraction (at most the belly flop's alpha: more lift pointed back to the tower in a -70 deg fall points
+    // down and pulls the ship out of trim) - nose_sector_steering [E]. The sector narrows from nose_sector_wide_rad
+    // (nose_sector_wide_height_m and more above the gate: crossrange authority) to nose_sector_rad at the gate (the flip
+    // must push along the tower line) [E].
     double nose_fraction = 0.2;
     double nose_sector_rad = 10.0 * constants::deg_to_rad;
+    double nose_sector_wide_rad = 30.0 * constants::deg_to_rad;
+    double nose_sector_wide_height_m = 4000.0;
+    // The lift direction turns into the sector about the air velocity at this rate, the fraction held at nose_fraction
+    // until it is within nose_turned_rad (as the guidance flies it: an instant turn left the prediction blind to the
+    // lift swept during the up to ~25 s turn - gate overshoots of 0.4-0.8 km, b4 campaign).
+    double nose_turn_rate_radps = 3.0 * constants::deg_to_rad;
+    double nose_turned_rad = 5.0 * constants::deg_to_rad;
+    double nose_sector_at(double height_above_gate_m) const {
+        const double f = std::clamp(height_above_gate_m / nose_sector_wide_height_m, 0.0, 1.0);
+        return nose_sector_rad + f * (nose_sector_wide_rad - nose_sector_rad);
+    }
     double nose_min_fraction = 0.02;
     double nose_max_fraction = 0.5;
     double steering_alpha(double fraction, double mach) const {
@@ -87,6 +100,8 @@ struct EntryPredictorState {
     // perpendicular to the velocity"). A start already past that carries its frozen basis.
     bool basis_frozen = false;
     math::Vec3 basis_e1, basis_e2;
+    // Frozen basis with a nose direction: the lift direction flown now (unit, along e1 / e2; zero: the steering's).
+    math::Vec3 lift_direction;
     double reversal_time_s = -1.0; // the bank command changes sign at this time from the start (< 0: never)
 };
 
@@ -121,6 +136,11 @@ void steering_basis(const math::Vec3& up, const math::Vec3& u, math::Vec3& e1, m
 
 // The steering vector (components along e1, e2) of the horizontal direction `nose`, `fraction` long.
 math::Vec3 nose_steering(const math::Vec3& nose, const math::Vec3& e1, const math::Vec3& e2, double fraction);
+
+// Where the nose turn ends when the basis freezes: the direction of p turned into the sector (its nearest edge), at
+// `fraction` (the nose direction itself when p is zero).
+math::Vec3 nose_turn_steering(const math::Vec3& p, const math::Vec3& nose, const math::Vec3& e1, const math::Vec3& e2,
+                              double sector_rad, double fraction);
 
 // The steering vector p (components along e1, e2) turned into the sector of +-sector_rad about the horizontal
 // direction `nose`, its length clamped to [min_fraction, max_fraction].

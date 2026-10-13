@@ -32,13 +32,22 @@ struct AeroSample {
 
 class Model {
 public:
-    Model(const EntryPredictorModel& m, const EntryPredictorState& start, const Vec3& nose)
+    Model(const EntryPredictorModel& m, const EntryPredictorState& start, const Vec3& nose, double gate_m)
         : m_(m), steered_(start.steered), steering_(start.steering), frozen_(start.basis_frozen),
-          e1_(start.basis_e1), e2_(start.basis_e2), nose_(nose) {
-        if (steered_ && frozen_ && norm(nose_) > 0.0) {
-            steering_ = nose_sector_steering(steering_, nose_, e1_, e2_, m_.nose_sector_rad, m_.nose_min_fraction,
-                                             m_.nose_max_fraction);
-        }
+          e1_(start.basis_e1), e2_(start.basis_e2), nose_(nose), gate_m_(gate_m) {
+        const Vec3& d = norm(start.lift_direction) > 0.0 ? start.lift_direction : start.steering;
+        lift_angle_ = std::atan2(d.y, d.x);
+    }
+
+    bool nose_mode() const { return steered_ && frozen_ && norm(nose_) > 0.0; }
+
+    // Once per step: the lift direction turns towards the sector steering at the turn rate.
+    void advance(const Vec3& r, double step_s) {
+        if (!nose_mode()) return;
+        const Vec3 target = sector_steering(frames::fixed_to_geodetic(r).height_m);
+        const double turn = std::remainder(std::atan2(target.y, target.x) - lift_angle_, 2.0 * constants::pi);
+        const double max_turn = m_.nose_turn_rate_radps * step_s;
+        lift_angle_ += std::clamp(turn, -max_turn, max_turn);
     }
 
     // Steering basis: velocity frame until the path is steeper than the freeze angle, then fixed (decided per step).
@@ -48,7 +57,12 @@ public:
         if (std::asin(std::clamp(dot(u, up), -1.0, 1.0)) < m_.steering_freeze_gamma_rad) {
             steering_basis(up, u, e1_, e2_);
             frozen_ = true;
-            if (norm(nose_) > 0.0) steering_ = nose_steering(nose_, e1_, e2_, m_.nose_fraction);  // as the guidance
+            if (norm(nose_) > 0.0) {  // as the guidance
+                lift_angle_ = std::atan2(steering_.y, steering_.x);  // the turn starts from the lift flown
+                steering_ = nose_turn_steering(steering_, nose_, e1_, e2_,
+                                               m_.nose_sector_at(frames::fixed_to_geodetic(r).height_m - gate_m_),
+                                               m_.nose_fraction);
+            }
         }
     }
 
@@ -70,12 +84,20 @@ public:
         const Vec3 l = l0 * std::cos(bank_rad) - side * std::sin(bank_rad);
         const double q_over_m = s.dynamic_pressure_pa / m_.mass_kg;
         if (steered_) {
-            const double fraction = std::min(norm(steering_), 1.0);
+            Vec3 steering = steering_;
+            if (nose_mode()) {  // the sector narrows towards the gate; the lift direction flown turns into it
+                const Vec3 target = sector_steering(s.height_m);
+                double size = norm(target);
+                const double left = std::remainder(std::atan2(target.y, target.x) - lift_angle_, 2.0 * constants::pi);
+                if (std::abs(left) > m_.nose_turned_rad) size = std::min(size, m_.nose_fraction);
+                steering = Vec3{size * std::cos(lift_angle_), size * std::sin(lift_angle_), 0.0};
+            }
+            const double fraction = std::min(norm(steering), 1.0);
             const double alpha = m_.steering_alpha(fraction, mach);
             s.acceleration = u * (-q_over_m * m_.drag_scale * m_.aero.cd_area_m2(mach, alpha));
             Vec3 e1 = e1_, e2 = e2_;
             if (!frozen_) steering_basis(up, u, e1, e2);
-            Vec3 lb = e1 * steering_.x + e2 * steering_.y;
+            Vec3 lb = e1 * steering.x + e2 * steering.y;
             lb = lb - u * dot(lb, u);
             if (fraction > 0.0 && norm(lb) > 1e-9) {
                 s.acceleration += lb / norm(lb) * (q_over_m * m_.lift_scale * m_.aero.cl_area_m2(mach, alpha));
@@ -108,7 +130,14 @@ private:
     Vec3 steering_;
     bool frozen_ = false;
     Vec3 e1_, e2_;
+    Vec3 sector_steering(double height_m) const {
+        return nose_sector_steering(steering_, nose_, e1_, e2_, m_.nose_sector_at(height_m - gate_m_), m_.nose_min_fraction,
+                                    m_.nose_max_fraction);
+    }
+
     Vec3 nose_;
+    double gate_m_ = 0.0;
+    double lift_angle_ = 0.0;  // nose mode: lift direction flown, from e1 towards e2
     environment::Us76Atmosphere atmosphere_;
 };
 
@@ -130,6 +159,12 @@ Vec3 nose_steering(const Vec3& nose, const Vec3& e1, const Vec3& e2, double frac
     return {fraction * std::cos(heading), fraction * std::sin(heading), 0.0};
 }
 
+Vec3 nose_turn_steering(const Vec3& p, const Vec3& nose, const Vec3& e1, const Vec3& e2, double sector_rad,
+                        double fraction) {
+    if (norm(p) < 1e-9) return nose_steering(nose, e1, e2, fraction);
+    return nose_sector_steering(p / norm(p) * fraction, nose, e1, e2, sector_rad, fraction, fraction);
+}
+
 Vec3 nose_sector_steering(const Vec3& p, const Vec3& nose, const Vec3& e1, const Vec3& e2, double sector_rad,
                           double min_fraction, double max_fraction) {
     const double heading = std::atan2(dot(nose, e2), dot(nose, e1));
@@ -147,17 +182,18 @@ double ground_range_m(const Vec3& a_itrf_m, const Vec3& b_itrf_m) {
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
                               double bank_command_rad, const EntryTarget& target, double gate_height_m,
                               double heat_load_so_far_j_m2, double step_s, double max_time_s) {
-    Model m(model, start, target.nose_direction_itrf);
+    const double gate_m = target.ground_height_m + gate_height_m;
+    Model m(model, start, target.nose_direction_itrf, gate_m);
     EntryPrediction p;
     p.heat_load_j_m2 = heat_load_so_far_j_m2;
     Vec3 r = start.position_itrf_m, v = start.velocity_itrf_mps;
     double bank = start.bank_rad;
-    const double gate_m = target.ground_height_m + gate_height_m;
     bool entered = false;
     double t = 0.0;
     AeroSample now = m.aero(r, v, bank);
     while (t < max_time_s) {
         m.update_basis(r, v);
+        m.advance(r, step_s);
         const double max_change = model.bank_rate_at(now.mach) * step_s;
         const bool reversed = start.reversal_time_s >= 0.0 && t >= start.reversal_time_s;
         const double command = reversed ? -bank_command_rad : bank_command_rad;

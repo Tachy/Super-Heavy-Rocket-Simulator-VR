@@ -341,6 +341,13 @@ void FlightSession::fail_engine(size_t body_index, size_t stage_index, size_t en
     bodies_.at(body_index).body->vehicle().fail_engine(stage_index, engine_index);
 }
 
+void FlightSession::apply_velocity_error(size_t body_index, const math::Vec3& delta_v_gcrf_mps) {
+    auto& body = *bodies_.at(body_index).body;
+    auto state = body.state();
+    state.velocity_gcrf_mps += delta_v_gcrf_mps;
+    body.set_state(state);
+}
+
 // Discrete autopilot decisions, once per tick before integration.
 void FlightSession::run_autopilot() {
     auto& flying = bodies_[controlled_];
@@ -564,7 +571,10 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     if (flying.entry_guidance) {
         if (!flying.body->impacted()) {
             const auto& e = flying.entry_command;
-            entry_controller_.steer(*flying.body, ambient_pressure_pa, e.axis_gcrf, e.roll_reference_gcrf).apply_to(command);
+            const gnc::AttitudeController::Feedforward feedforward{
+                flying.body->state().attitude.inverse_rotate(e.rate_gcrf_radps), {}};
+            entry_controller_.steer(*flying.body, ambient_pressure_pa, e.axis_gcrf, e.roll_reference_gcrf, &feedforward)
+                .apply_to(command);
         }
         return command;
     }

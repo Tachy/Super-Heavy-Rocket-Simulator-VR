@@ -41,10 +41,17 @@ struct EntryGuidanceParameters {
     // about the air velocity at this rate; while it turns the steering is held at the nose fraction (no lift to speak of)
     // the nose sector (EntryPredictorModel::nose_*) [E]
     double terminal_nose_fraction = 0.2;
-    double terminal_nose_sector_rad = 10.0 * constants::deg_to_rad;  // 20 deg: the flip pushed past the arms
+    double terminal_nose_sector_rad = 10.0 * constants::deg_to_rad;  // at the gate (20 deg: the flip pushed past the arms)
+    double terminal_nose_sector_wide_rad = 30.0 * constants::deg_to_rad;  // this high above the gate and more:
+    double terminal_nose_sector_wide_height_m = 4000.0;                   // crossrange authority after the turn
     double terminal_nose_min_fraction = 0.02;
     double terminal_nose_max_fraction = 0.5;
-    double terminal_nose_turn_rate_radps = 5.0 * constants::deg_to_rad;
+    // 3 deg/s (b4 campaign: 13 of 13 caught; at 5 deg/s the flaps' roll limit cycle departed or drifted 3 of 13, b3's 5
+    // deg/s was set before the prediction modelled the turn)
+    double terminal_nose_turn_rate_radps = 3.0 * constants::deg_to_rad;
+    // [E] the commanded attitude follows the turn at this multiple of its rate: at 2x the pitch-up to the turn's alpha
+    // together with the turn saturated the flaps and set off a roll limit cycle (departures, b4 campaign)
+    double terminal_nose_slew_factor = 1.5;
     double terminal_nose_turned_rad = 5.0 * constants::deg_to_rad;  // the turn is over within this
     double terminal_nose_max_turn_step_rad = 5.0 * constants::deg_to_rad;  // [E] steering angle change per cycle in the sector
     // Reversals: planned by the corrector (time of the next reversal for zero crossrange); without a bracket the
@@ -63,6 +70,9 @@ struct EntryCommand {
     double bank_rad = 0.0;               // setpoint now (rate limited)
     math::Vec3 axis_gcrf;                // for AttitudeController::steer
     math::Vec3 roll_reference_gcrf;
+    // Terminal phase: angular velocity of the commanded attitude (feedforward: a PD controller tracking the nose turn's
+    // 5 deg/s ramp alone lags ~2 zeta w / wn = ~18 deg, which the belly flop loses as angle of attack)
+    math::Vec3 rate_gcrf_radps;
     double downrange_error_m = 0.0;      // latest prediction (> 0: overshoot)
     double crossrange_m = 0.0;           // > 0: target right of the predicted track
     double heading_error_rad = 0.0;      // target azimuth - track azimuth (> 0: target to the right)
