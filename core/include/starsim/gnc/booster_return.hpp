@@ -167,6 +167,7 @@ private:
     bool leg_contact_ = false;
     bool legs_deployed_ = false;          // deployment commanded
     bool entry_done_ = false;
+    bool entry_predicted_ = false;         // the entry burn's own impact prediction has run
     double entry_delta_v_mps_ = 0.0;
     time::Epoch last_update_;              // previous update (entry burn integration)
     std::optional<time::Epoch> plan_end_;  // SCvx pad landing: end of the active plan

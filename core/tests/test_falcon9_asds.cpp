@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "return_scenario.hpp"
@@ -170,7 +172,7 @@ TEST_CASE("A falling Falcon 9 stage flies its drone-ship entry burn on three eng
                                                   std::acos(std::clamp(axis.z, -1.0, 1.0)));
     session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, {0.0, -40e3, 75e3}, velocity, tilt),
                                     t0, asds_parameters(), gnc::ReturnPhase::Coast);
-    bool burned = false, ended = false;
+    bool burned = false, ended = false, finite = true;
     double ignition_altitude_m = 0.0, propellant_before_kg = 0.0;
     std::vector<std::string> groups;
     for (double t = 0.0; t < 60.0 && !ended;) {
@@ -178,6 +180,8 @@ TEST_CASE("A falling Falcon 9 stage flies its drone-ship entry burn on three eng
         session.advance_to(t0 + t, 10);
         const auto* status = session.return_status(0);
         REQUIRE(status != nullptr);
+        finite = finite && std::isfinite(status->axis_gcrf.x) && std::isfinite(status->axis_gcrf.y) &&
+                 std::isfinite(status->axis_gcrf.z);
         if (status->phase == gnc::ReturnPhase::EntryBurn && !burned) {
             burned = true;
             groups = status->run_groups;
@@ -195,6 +199,7 @@ TEST_CASE("A falling Falcon 9 stage flies its drone-ship entry burn on three eng
     REQUIRE(burned);
     REQUIRE(ended);
     CHECK(groups == std::vector<std::string>{"first_stage/center", "first_stage/pair"});
+    CHECK(finite);  // the commanded axis, also on the burn's first ticks
     CHECK(ignition_altitude_m < 66.0e3);
     CHECK(ignition_altitude_m > 64.0e3);
     CHECK(guidance->entry_delta_v_mps() >= 880.0);
@@ -285,4 +290,90 @@ TEST_CASE("Falcon 9 drone-ship mission: nominal impact point of the first stage"
     std::printf("[falcon9] MECO T+%.1f s at %.1f km with %.1f t; impact after %.0f s at latitude %.4f deg, longitude %.4f "
                 "deg\n", session.mission_time_s(), meco.height_m / 1e3, stage.vehicle().propellant_kg() / 1e3, impact.time_s,
                 geo.latitude_rad / deg, geo.longitude_rad / deg);
+}
+
+TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage landed on the deck", "[gnc][falcon9][asds][validation]") {
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
+    const auto ship_site = *session.landing_zone();
+    auto height_speed = [&](const vehicle::FlightBody& b) {
+        const auto tr = earth().fixed_to_gcrf(session.epoch());
+        const auto& s = b.state();
+        const double h = frames::fixed_to_geodetic(transpose(tr.rotation) * s.position_gcrf_m).height_m - ship_site.height_m;
+        return std::pair{h, norm(s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), s.position_gcrf_m))};
+    };
+    double meco_s = -1.0, meco_h = 0.0, meco_v = 0.0, meco_kg = 0.0, entry_s = -1.0, entry_h = 0.0, entry_v = 0.0,
+           entry_kg = 0.0, entry_pointing_deg = 0.0, entry_end_s = -1.0, entry_end_v = 0.0, landing_s = -1.0,
+           landing_h = 0.0, landing_v = 0.0, landing_kg = 0.0;
+    gnc::ReturnPhase last_phase = gnc::ReturnPhase::Coast;
+    for (double t = 0.0; t < 900.0; t += 0.05) {
+        session.advance_to(t0 + t, 100);
+        if (session.body_count() < 2) continue;
+        const auto& stage = session.body(0);
+        if (meco_s < 0.0) {
+            meco_s = session.mission_time_s();
+            std::tie(meco_h, meco_v) = height_speed(stage);
+            meco_kg = stage.vehicle().propellant_kg();
+        }
+        const auto* status = session.return_status(0);
+        if (!status) break;
+        if (std::getenv("STARSIM_VERBOSE") && std::fmod(session.mission_time_s(), 5.0) < 0.05) {
+            const auto [h, v] = height_speed(stage);
+            std::printf("    T+%.0f s %s %.1f km %.0f m/s miss %.0f m\n", session.mission_time_s(), gnc::to_string(status->phase),
+                        h / 1e3, v, status->impact_miss_m);
+        }
+        if (status->phase != last_phase) {
+            const auto [h, v] = height_speed(stage);
+            if (std::getenv("STARSIM_VERBOSE")) {
+                std::printf("  T+%.1f s %s: %.1f km, %.0f m/s, %.1f t, miss %.0f m\n", session.mission_time_s(),
+                            gnc::to_string(status->phase), h / 1e3, v, stage.vehicle().propellant_kg() / 1e3, status->impact_miss_m);
+            }
+            if (status->phase == gnc::ReturnPhase::EntryBurn && entry_s < 0.0) {
+                entry_s = session.mission_time_s();
+                entry_h = h;
+                entry_v = v;
+                entry_kg = stage.vehicle().propellant_kg();
+                const Vec3 axis = stage.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+                entry_pointing_deg = std::acos(std::clamp(dot(axis, status->axis_gcrf), -1.0, 1.0)) / deg;
+            }
+            if (last_phase == gnc::ReturnPhase::EntryBurn && entry_end_s < 0.0) {
+                entry_end_s = session.mission_time_s();
+                entry_end_v = v;
+            }
+            if (status->phase == gnc::ReturnPhase::LandingBurn && landing_s < 0.0) {
+                landing_s = session.mission_time_s();
+                std::tie(landing_h, landing_v) = std::pair{h, v};
+                landing_kg = stage.vehicle().propellant_kg();
+            }
+            last_phase = status->phase;
+        }
+        if (session.leg_touchdown(0) != sim::LegTouchdown::None || stage.impacted()) break;
+    }
+    const auto& stage = session.body(0);
+    const Vec3 p = sim::site_enu_m(ship_site, transpose(earth().fixed_to_gcrf(session.epoch()).rotation) * stage.state().position_gcrf_m);
+    std::printf("[validation] Falcon 9 ASDS: MECO T+%.0f s at %.1f km, %.0f km/h, %.1f t (Starlink 15-25: T+149 s, 60 km, "
+                "~8000 km/h, gauge ~43 t); entry burn T+%.0f s at %.1f km, %.0f km/h, %.1f t, %.1f deg off the burn axis "
+                "(T+364 s, 67.4 km, ~7900 km/h, 24.1 t) to T+%.0f s, %.0f km/h (T+386 s, ~5250 km/h); landing burn T+%.0f "
+                "s at %.2f km, %.0f m/s, %.1f t (T+476 s, ~3.0 km, ~270 m/s, 11.1 t); %s at T+%.0f s (T+499 s), %.2f m from "
+                "the deck centre, %.1f t left\n",
+                meco_s, meco_h / 1e3, meco_v * 3.6, meco_kg / 1e3, entry_s, entry_h / 1e3, entry_v * 3.6, entry_kg / 1e3,
+                entry_pointing_deg, entry_end_s, entry_end_v * 3.6, landing_s, landing_h / 1e3, landing_v,
+                landing_kg / 1e3, sim::to_string(session.landing_outcome(0)), session.mission_time_s(), std::hypot(p.x, p.y),
+                stage.vehicle().propellant_kg() / 1e3);
+    CHECK(meco_s > 0.0);
+    CHECK(entry_s > 0.0);
+    CHECK(entry_pointing_deg < 15.0);  // turned engines first on the RCS before the burn
+    CHECK(landing_s > 0.0);
+    CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);
+    CHECK(std::hypot(p.x, p.y) < 5.0);
+    // The landing-burn ignition state lies within the telemetry's spread (spec): ~3.0 km, ~270 m/s, 11.1 t.
+    CHECK(std::abs(landing_kg - 11300.0) < 1000.0);
+    CHECK(landing_h > 2500.0);
+    CHECK(landing_h < 4000.0);
+    CHECK(std::abs(landing_v - 270.0) < 40.0);
+    // Timeline [D] of Starlink 15-25: entry burn T+364 s, landing burn T+476 s.
+    CHECK(std::abs(entry_s - 364.0) < 25.0);
+    CHECK(std::abs(landing_s - 476.0) < 25.0);
 }

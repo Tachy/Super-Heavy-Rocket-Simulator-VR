@@ -476,6 +476,10 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
             geo.height_m - site_.height_m < parameters_.entry_altitude_m) {
             phase_ = ReturnPhase::EntryBurn;
             entry_delta_v_mps_ = 0.0;
+            // The coast's steering (fin lean) does not carry over: the burn predicts its own miss at once.
+            steer_itrf_ = {};
+            impact_miss_m_ = 0.0;
+            entry_predicted_ = false;
         }
         if (phase_ == ReturnPhase::Coast && descending && (height < 30e3 || tick_counter_ % 20 == 0)) {
             const auto burn = predict_landing_burn(body, env, epoch);
@@ -557,7 +561,8 @@ void BoosterReturnGuidance::entry_burn(const vehicle::FlightBody& body, const ve
     const Vec3 v_fixed = to_fixed * (s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(transform), s.position_gcrf_m));
     const Vec3 site_up = up_at(site_.latitude_rad, site_.longitude_rad);
     const Vec3 site_fixed = frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m});
-    if (tick_counter_ % 40 == 0) {
+    if (tick_counter_ % 40 == 0 || !entry_predicted_) {
+        entry_predicted_ = true;
         const auto impact = predict(body, env, epoch);
         if (impact.valid) {
             const Vec3 miss = site_fixed - impact.position_itrf_m;
