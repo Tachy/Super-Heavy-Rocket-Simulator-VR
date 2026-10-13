@@ -102,6 +102,12 @@ public:
     void set_realtime(bool realtime);
     const ScvxLandingGuidance* scvx() const { return scvx_.get(); }
 
+    // Retrograde burn still to come on the way down (the entry burn), modelled as an impulse where the fall first
+    // crosses `altitude_m` above the ground height.
+    struct PendingBurn {
+        double altitude_m = 0.0;
+        double delta_v_mps = 0.0;
+    };
     // Drag-aware ballistic impact prediction (point mass, tail-first axial drag from the vehicle's table,
     // power off). `velocity_gcrf_mps` overrides the body's velocity (e.g. a planned arc).
     struct Impact {
@@ -111,7 +117,8 @@ public:
         bool valid = false;
     };
     static Impact predict_impact(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
-                                 time::Epoch epoch, double ground_height_m, const math::Vec3* velocity_gcrf_mps = nullptr);
+                                 time::Epoch epoch, double ground_height_m, const math::Vec3* velocity_gcrf_mps = nullptr,
+                                 const PendingBurn* burn = nullptr);
 
     // One-dimensional landing-burn simulation along the current flight path: height above the ground
     // where the speed reaches zero (negative: below ground) and the burn duration.
@@ -159,6 +166,10 @@ private:
 
     void entry_burn(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
                     ReturnCommand& cmd);
+    // The rest of the entry burn while it is still ahead or running (nullopt without one / once flown).
+    std::optional<PendingBurn> pending_entry_burn() const;
+    Impact predict(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
+                   const math::Vec3* velocity_gcrf_mps = nullptr) const;
 
     void start_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     void explicit_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,

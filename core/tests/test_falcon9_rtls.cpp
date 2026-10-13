@@ -7,10 +7,13 @@
 #include <cstdio>
 #include <random>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "return_scenario.hpp"
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/mission_config.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
@@ -260,4 +263,98 @@ TEST_CASE("Falcon 9 RTLS landing campaign: dispersions at ignition", "[gnc][falc
     }
     std::printf("[validation] Falcon 9 RTLS: landed %d of %zu, contact offset <= %.2f m, sink <= %.2f m/s, >= %.0f kg left\n",
                 landed, cases.size(), worst_offset, worst_sink, least_propellant);
+}
+
+TEST_CASE("The Falcon 9 RTLS mission loads", "[config][falcon9]") {
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");
+    CHECK(m.vehicle_id == "falcon9_block5");
+    CHECK(m.site_id == "ccsfs_slc40");
+    CHECK(m.landing_zone_id == "ccsfs_lz40");
+    CHECK(m.payload_kg == 12500.0);
+    CHECK_FALSE(m.fairing);
+    CHECK(m.booster_throttle.size() == 4);
+    CHECK(std::abs(m.kick_angle_rad / constants::deg_to_rad - 14.0) < 1e-12);
+}
+
+TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on LZ-40", "[gnc][falcon9][rtls][validation]") {
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, m.vehicle_id);
+    cfg.stages.back().payload_mass_kg = m.payload_kg;
+    if (!m.fairing) cfg.stages.back().fairing_mass_kg = 0.0;
+    session.launch_from_pad(cfg, sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)),
+                            m.heading_rad, t0);
+    session.set_landing_zone(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.landing_zone_id)));
+    session.set_booster_return(true);
+    gnc::PitchProgram program;
+    program.kick_angle_rad = m.kick_angle_rad;
+    program.booster_throttle = m.booster_throttle;
+    session.engage_ascent_autopilot({m.periapsis_height_m, m.apoapsis_height_m, m.inclination_rad, m.northerly}, program);
+
+    const auto zone = *session.landing_zone();
+    auto height_speed = [&](const vehicle::FlightBody& b) {
+        const auto tr = earth().fixed_to_gcrf(session.epoch());
+        const auto& s = b.state();
+        const double h = frames::fixed_to_geodetic(transpose(tr.rotation) * s.position_gcrf_m).height_m - zone.height_m;
+        return std::pair{h, norm(s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), s.position_gcrf_m))};
+    };
+    double meco_s = -1.0, meco_propellant_kg = 0.0, entry_s = -1.0, entry_h = 0.0, landing_s = -1.0, landing_h = 0.0,
+           landing_v = 0.0, landing_propellant_kg = 0.0;
+    gnc::ReturnPhase last_phase = gnc::ReturnPhase::Flip;
+    for (double t = 0.0; t < 900.0; t += 0.05) {
+        session.advance_to(t0 + t, 100);
+        if (session.body_count() < 2) continue;
+        const auto& stage = session.body(0);
+        if (meco_s < 0.0) {
+            meco_s = session.mission_time_s();
+            meco_propellant_kg = stage.vehicle().propellant_kg();
+        }
+        const auto* status = session.return_status(0);
+        if (!status) break;
+        if (std::getenv("STARSIM_VERBOSE") && std::fmod(session.mission_time_s(), 5.0) < 0.05) {
+            const auto [h, v] = height_speed(stage);
+            std::printf("    T+%.0f s %s %.1f km %.0f m/s miss %.0f m\n", session.mission_time_s(), gnc::to_string(status->phase),
+                        h / 1e3, v, status->impact_miss_m);
+        }
+        if (status->phase != last_phase) {
+            if (std::getenv("STARSIM_VERBOSE")) {
+                const auto [h, v] = height_speed(stage);
+                std::printf("  T+%.1f s %s: %.1f km, %.0f m/s, %.1f t, miss %.0f m\n", session.mission_time_s(),
+                            gnc::to_string(status->phase), h / 1e3, v, stage.vehicle().propellant_kg() / 1e3, status->impact_miss_m);
+            }
+            last_phase = status->phase;
+            if (status->phase == gnc::ReturnPhase::EntryBurn && entry_s < 0.0) {
+                entry_s = session.mission_time_s();
+                entry_h = height_speed(stage).first;
+            }
+            if (status->phase == gnc::ReturnPhase::LandingBurn && landing_s < 0.0) {
+                landing_s = session.mission_time_s();
+                std::tie(landing_h, landing_v) = height_speed(stage);
+                landing_propellant_kg = stage.vehicle().propellant_kg();
+            }
+        }
+        if (session.leg_touchdown(0) != sim::LegTouchdown::None || stage.impacted()) break;
+    }
+    const auto& stage = session.body(0);
+    const Vec3 p = sim::site_enu_m(zone, transpose(earth().fixed_to_gcrf(session.epoch()).rotation) * stage.state().position_gcrf_m);
+    std::printf("[validation] Falcon 9 RTLS: MECO T+%.0f s with %.1f t (CRS-35: T+137 s, ~61 t); entry burn T+%.0f s at "
+                "%.1f km (T+355 s, 56.6 km); landing burn T+%.0f s at %.2f km, %.0f m/s, %.1f t (T+420 s, ~3.2 km, ~300 "
+                "m/s, 11.3 t); %s at T+%.0f s (T+442 s), %.2f m from the centre, %.1f t left\n",
+                meco_s, meco_propellant_kg / 1e3, entry_s, entry_h / 1e3, landing_s, landing_h / 1e3, landing_v,
+                landing_propellant_kg / 1e3, sim::to_string(session.landing_outcome(0)), session.mission_time_s(),
+                std::hypot(p.x, p.y), stage.vehicle().propellant_kg() / 1e3);
+    CHECK(meco_s > 0.0);
+    CHECK(entry_s > 0.0);
+    CHECK(landing_s > 0.0);
+    CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);
+    CHECK(std::hypot(p.x, p.y) < 5.0);
+    // The landing-burn ignition state lies within the telemetry's spread (spec): ~3.2 km, ~300 m/s, 11.3 t.
+    CHECK(std::abs(landing_propellant_kg - 11300.0) < 1000.0);
+    CHECK(landing_h > 2500.0);
+    CHECK(landing_h < 4000.0);
+    CHECK(std::abs(landing_v - 300.0) < 30.0);
+    // Timeline [D]: entry burn T+355 s, landing burn T+420 s on CRS-35.
+    CHECK(std::abs(entry_s - 355.0) < 20.0);
+    CHECK(std::abs(landing_s - 420.0) < 20.0);
 }

@@ -247,6 +247,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             if (s.landing_switch_sink_mps.size() != 2) doc.fail("landing_switch_sink_mps must list 2 switch windows");
         }
         s.return_flight_time_s = doc.number_or(*recovery, "return_flight_time_s", 0.0);
+        s.boostback_loss_fraction = doc.number_or(*recovery, "boostback_loss_fraction", -1.0);
         s.entry_burn_altitude_m = doc.number_or(*recovery, "entry_burn_altitude_m", 0.0);
         s.entry_burn_delta_v_mps = doc.number_or(*recovery, "entry_burn_delta_v_mps", 0.0);
         s.entry_burn_throttle = doc.number_or(*recovery, "entry_burn_throttle", 0.0);

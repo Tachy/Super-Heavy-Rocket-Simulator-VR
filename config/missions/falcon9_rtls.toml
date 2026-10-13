@@ -1,0 +1,24 @@
+# Falcon 9 launch from SLC-40 with a return of the first stage to landing zone LZ-40 (RTLS, milestone c3): the ascent
+# autopilot plans MECO for the return ([stage.recovery] landing_propellant_kg), the first stage flips, boosts back, flies
+# its entry burn and lands on its legs; the second stage flies on to orbit. Modelled on CRS-35 (2026-10-13).
+
+[mission]
+name = "Falcon 9 mit Landung auf LZ-40"
+vehicle = "falcon9_block5"
+site = "ccsfs_slc40"
+landing_zone = "ccsfs_lz40"
+heading_deg = 45.0              # body +y on the pad (launch azimuth towards the ISS plane, north-east)
+payload_t = 12.5                # [E] cargo Dragon with its trunk load (the RTLS payload range)
+fairing = false                 # Dragon flies without a fairing
+
+[target]
+periapsis_km = 200.0
+apoapsis_km = 200.0
+inclination_deg = 51.6          # ISS plane
+northerly = true
+
+[pitch_program]
+kick_deg = 14.0                 # [E] c1 sweep: CRS-35 MECO T+130 s / 55.9 km (recorded 137 s / 56.6 km)
+# [D] first-stage throttle over mission time {t_s, fraction} from the CRS-35 webcast (G-force and gauge): full thrust to
+# max-Q, a bucket to ~70 % from T+50 to T+60 s, then ~92 %.
+booster_throttle = [[48.0, 1.0], [51.0, 0.7], [60.0, 0.7], [63.0, 0.92]]

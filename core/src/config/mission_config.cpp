@@ -37,4 +37,41 @@ ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_d
     return m;
 }
 
+AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
+    const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    const double deg = constants::deg_to_rad;
+    const auto* mission = doc.root["mission"].as_table();
+    const auto* target = doc.root["target"].as_table();
+    const auto* program = doc.root["pitch_program"].as_table();
+    if (!mission || !target || !program) doc.fail("missing [mission], [target] or [pitch_program]");
+    AscentMission m;
+    m.id = std::string(mission_id);
+    m.name = doc.text(*mission, "name");
+    m.vehicle_id = doc.text(*mission, "vehicle");
+    m.site_id = doc.text(*mission, "site");
+    m.landing_zone_id = doc.text_or(*mission, "landing_zone");
+    m.heading_rad = doc.number(*mission, "heading_deg") * deg;
+    m.payload_kg = doc.number_or(*mission, "payload_t", 0.0) * 1000.0;
+    m.fairing = (*mission)["fairing"].value_or(true);
+    m.periapsis_height_m = doc.positive(*target, "periapsis_km") * 1000.0;
+    m.apoapsis_height_m = doc.positive(*target, "apoapsis_km") * 1000.0;
+    if (m.apoapsis_height_m < m.periapsis_height_m) doc.fail("target: apoapsis below periapsis");
+    m.inclination_rad = doc.number(*target, "inclination_deg") * deg;
+    m.northerly = (*target)["northerly"].value_or(true);
+    m.kick_angle_rad = doc.positive(*program, "kick_deg") * deg;
+    if (const auto* points = (*program)["booster_throttle"].as_array()) {
+        for (const auto& node : *points) {
+            const auto* pair = node.as_array();
+            const auto t = pair && pair->size() == 2 ? (*pair)[0].value<double>() : std::nullopt;
+            const auto f = pair && pair->size() == 2 ? (*pair)[1].value<double>() : std::nullopt;
+            if (!t || !f || *f <= 0.0 || *f > 1.0) doc.fail("booster_throttle entries must be [t_s, fraction in (0, 1]]");
+            if (!m.booster_throttle.empty() && *t <= m.booster_throttle.back().first) {
+                doc.fail("booster_throttle times must increase");
+            }
+            m.booster_throttle.emplace_back(*t, *f);
+        }
+    }
+    return m;
+}
+
 }  // namespace starsim::config

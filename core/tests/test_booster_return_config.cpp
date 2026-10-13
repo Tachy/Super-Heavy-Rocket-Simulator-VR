@@ -20,7 +20,8 @@ TEST_CASE("Falcon 9 return parameters come from its recovery config", "[gnc][fal
     CHECK(p.landing_ignition_groups == Groups{"first_stage/center"});
     CHECK(p.landing_divert_groups == Groups{"first_stage/center", "first_stage/pair"});
     CHECK(p.landing_groups == Groups{"first_stage/center"});
-    CHECK(p.flight_time_s == 290.0);
+    CHECK(p.flight_time_s == 260.0);
+    CHECK(p.boostback_loss_fraction == 0.12);
     CHECK(p.entry_altitude_m == 56600.0);
     CHECK(p.entry_delta_v_mps == 125.0);
     CHECK(p.entry_throttle == 0.4);

@@ -143,6 +143,7 @@ BoosterReturnParameters booster_return_parameters(const config::StageConfig& sta
         p.scvx.switch_speed_mps = 0.5 * (switches[1].min_sink_mps + switches[1].max_sink_mps);
     }
     if (stage.return_flight_time_s > 0.0) p.flight_time_s = stage.return_flight_time_s;
+    if (stage.boostback_loss_fraction >= 0.0) p.boostback_loss_fraction = stage.boostback_loss_fraction;
     if (stage.entry_burn_altitude_m > 0.0) {
         p.entry_altitude_m = stage.entry_burn_altitude_m;
         p.entry_delta_v_mps = stage.entry_burn_delta_v_mps;
@@ -176,7 +177,7 @@ BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnPara
 BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicle::FlightBody& body,
                                                                     const vehicle::FlightEnvironment& env,
                                                                     time::Epoch epoch, double ground_height_m,
-                                                                    const Vec3* velocity_gcrf_mps) {
+                                                                    const Vec3* velocity_gcrf_mps, const PendingBurn* burn) {
     const auto t0 = env.earth_orientation.fixed_to_gcrf(epoch);
     const Vec3 omega = vehicle::earth_rotation_vector(t0);
     const double w = norm(omega);
@@ -205,6 +206,7 @@ BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicl
     double previous_height = frames::fixed_to_geodetic(fixed_at(0.0, r)).height_m - mass.cg_station_m;
     Vec3 previous_r = r;
     Vec3 v_prev = v;
+    bool burn_pending = burn && burn->delta_v_mps > 0.0;
     for (double t = 0.0; t < 900.0; t += dt) {
         // RK4 on (r, v)
         const Vec3 a1 = acceleration(t, r, v);
@@ -218,6 +220,11 @@ BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicl
         r = r_next;
         v = v_next;
         const double height = frames::fixed_to_geodetic(fixed_at(t + dt, r)).height_m - mass.cg_station_m;
+        if (burn_pending && height < previous_height && height + mass.cg_station_m - ground_height_m < burn->altitude_m) {
+            const Vec3 v_air = v - cross(omega, r);
+            v -= math::normalized(v_air) * std::min(burn->delta_v_mps, norm(v_air));
+            burn_pending = false;
+        }
         if (height <= ground_height_m) {
             const double f = (previous_height - ground_height_m) / (previous_height - height);
             const Vec3 r_hit = previous_r + (r - previous_r) * f;
@@ -368,7 +375,7 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         const auto arc = orbit::solve_lambert(s.position_gcrf_m, aim_gcrf, time_left, gm_earth, normal);
         if (arc && tick_counter_ % 20 == 1) {
             // Shooting on the aim point: where would the Lambert arc really come down (drag, rotation)?
-            const auto impact = predict_impact(body, env, epoch, site_.height_m, &arc->departure_velocity_mps);
+            const auto impact = predict(body, env, epoch, &arc->departure_velocity_mps);
             if (impact.valid) {
                 const Vec3 miss = horizontal_miss(impact);
                 aim_offset_itrf_ += miss;
@@ -407,7 +414,7 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         const double fin_station = grid_fin_station(body.vehicle());
         const bool aero_steering = fin_station > 0.0 && dynamic_pressure > aero_steering_min_q_pa;
         if (tick_counter_ % (aero_steering ? 40 : 200) == 0) {
-            const auto impact = predict_impact(body, env, epoch, site_.height_m);
+            const auto impact = predict(body, env, epoch);
             if (impact.valid) {
                 const Vec3 miss = horizontal_miss(impact);
                 impact_miss_m_ = norm(miss);
@@ -542,7 +549,7 @@ void BoosterReturnGuidance::entry_burn(const vehicle::FlightBody& body, const ve
     const Vec3 site_up = up_at(site_.latitude_rad, site_.longitude_rad);
     const Vec3 site_fixed = frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m});
     if (tick_counter_ % 40 == 0) {
-        const auto impact = predict_impact(body, env, epoch, site_.height_m);
+        const auto impact = predict(body, env, epoch);
         if (impact.valid) {
             const Vec3 miss = site_fixed - impact.position_itrf_m;
             steer_itrf_ = miss - site_up * dot(miss, site_up);
@@ -558,6 +565,20 @@ void BoosterReturnGuidance::entry_burn(const vehicle::FlightBody& body, const ve
     cmd.run_groups = parameters_.entry_groups;
     cmd.throttle = parameters_.entry_throttle;
     cmd.impact_miss_m = impact_miss_m_;
+}
+
+std::optional<BoosterReturnGuidance::PendingBurn> BoosterReturnGuidance::pending_entry_burn() const {
+    if (parameters_.entry_altitude_m <= 0.0 || entry_done_) return std::nullopt;
+    // While burning: the rest from here (the altitude is already crossed: the impulse applies at once).
+    const double altitude = phase_ == ReturnPhase::EntryBurn ? 1e9 : parameters_.entry_altitude_m;
+    return PendingBurn{altitude, std::max(parameters_.entry_delta_v_mps - entry_delta_v_mps_, 0.0)};
+}
+
+BoosterReturnGuidance::Impact BoosterReturnGuidance::predict(const vehicle::FlightBody& body,
+                                                             const vehicle::FlightEnvironment& env, time::Epoch epoch,
+                                                             const Vec3* velocity_gcrf_mps) const {
+    const auto burn = pending_entry_burn();
+    return predict_impact(body, env, epoch, site_.height_m, velocity_gcrf_mps, burn ? &*burn : nullptr);
 }
 
 void BoosterReturnGuidance::set_realtime(bool realtime) {

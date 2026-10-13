@@ -96,7 +96,9 @@ nominal_meco_s = 137.0                       # [D] CRS-35 (RTLS); Starlink 15-25
 nominal_meco_altitude_m = 56600.0            # [D] CRS-35; Starlink 15-25: 60 km
 # Return (gnc::booster_return_parameters). Evidence: our CRS-35 webcast telemetry (RTLS to LZ-40).
 boostback_engine_groups = ["center", "pair"]  # [E] the 3-engine set (thrust on the axis)
-return_flight_time_s = 290.0                 # [D] CRS-35: boostback from ~T+150 s, touchdown T+442 s
+boostback_loss_fraction = 0.12               # [D] MECO planning: identified on our full RTLS (11.3 t at ignition)
+return_flight_time_s = 260.0                 # [D] Lambert arc; with drag and the entry burn the touchdown follows ~300 s after
+                                             # the boostback start as on CRS-35 (T+~150 s -> T+442 s; 290 s landed 38 s late)
 entry_engine_groups = ["center"]             # [D] CRS-35: the engine icon shows the centre engine alone
 entry_burn_altitude_m = 56600.0              # [D] CRS-35: lit at T+355 s, 56.6 km (out at 35.9 km)
 entry_burn_delta_v_mps = 125.0               # [D] gauge 3.5 -> 3.1 %: 1.6 t on 39.5 t at Isp_vac 311 s

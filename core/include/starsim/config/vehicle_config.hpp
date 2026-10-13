@@ -152,6 +152,7 @@ struct StageConfig {
     std::vector<double> landing_phase_throttles;                  // design throttle per set (ignition timing)
     std::vector<std::pair<double, double>> landing_switch_sink_mps;  // per engine switch: sink window {min, max}
     double return_flight_time_s = 0.0;   // boostback start -> touchdown (Lambert arc)
+    double boostback_loss_fraction = -1.0;  // MECO planning: boostback delta-v beyond the Lambert arc (< 0: default)
     double entry_burn_altitude_m = 0.0;  // entry burn ignition while descending (0: none)
     double entry_burn_delta_v_mps = 0.0;
     double entry_burn_throttle = 0.0;
