@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -192,4 +193,71 @@ TEST_CASE("Falcon 9 lands on LZ-40 from the landing-burn ignition state", "[gnc]
     CHECK(run.contact_sink_mps < 2.0);
     CHECK(run.touchdown == sim::LegTouchdown::Landed);
     CHECK(run.outcome == sim::LandingOutcome::Landed);
+}
+
+namespace {
+
+struct RtlsDispersion {
+    Vec3 offset_m;               // lateral, site frame
+    Vec3 velocity_mps;           // added to the nominal fall
+    double mass_factor = 1.0;    // propellant at ignition
+    math::Quat tilt;             // attitude error
+    double aero_factor = 1.0;    // truth hull aerodynamics vs the onboard models
+};
+
+// Fixed seeds; spec c3: +-10 m, +-3 m/s per axis, +-5 % propellant, +-3 deg about a random horizontal axis, truth
+// aerodynamics +-10 %.
+RtlsDispersion rtls_dispersion(unsigned seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<double> unit(-1.0, 1.0);
+    RtlsDispersion d;
+    d.offset_m = {10.0 * unit(rng), 10.0 * unit(rng), 0.0};
+    d.velocity_mps = {3.0 * unit(rng), 3.0 * unit(rng), 3.0 * unit(rng)};
+    d.mass_factor = 1.0 + 0.05 * unit(rng);
+    const double azimuth = constants::pi * unit(rng);
+    d.tilt = math::Quat::from_axis_angle({std::cos(azimuth), std::sin(azimuth), 0.0}, 3.0 * constants::deg_to_rad * unit(rng));
+    d.aero_factor = 1.0 + 0.1 * unit(rng);
+    return d;
+}
+
+LegRun fly_rtls_dispersed(const RtlsDispersion& d) {
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    session.set_launch_site(lz40());
+    session.set_landing_zone(lz40());
+    const auto parameters = falcon9_parameters();
+    const auto nominal = test::booster_config("falcon9_block5", ignition_propellant_kg);
+    const double h = test::ignition_height_m(session, nominal, earth(), t0, ignition_sink_mps, parameters);
+    const auto cfg = test::booster_config("falcon9_block5", ignition_propellant_kg * d.mass_factor);
+    session.place_returning_booster(cfg,
+                                    test::state_over_site(session.launch_site(), earth(), t0, d.offset_m + Vec3{0.0, 0.0, h},
+                                                          d.velocity_mps + Vec3{0.0, 0.0, -ignition_sink_mps}, d.tilt),
+                                    t0, parameters, gnc::ReturnPhase::LandingBurn);
+    session.set_aero_dispersion(0, d.aero_factor);
+    return fly_to_touchdown(session, t0, 60.0);
+}
+
+}  // namespace
+
+TEST_CASE("Falcon 9 RTLS landing campaign: dispersions at ignition", "[gnc][falcon9][rtls][validation]") {
+    std::vector<RtlsDispersion> cases{RtlsDispersion{}};
+    for (unsigned seed = 1; seed <= 20; ++seed) cases.push_back(rtls_dispersion(seed));
+    int landed = 0;
+    double worst_offset = 0.0, worst_sink = 0.0, least_propellant = 1e9;
+    for (size_t i = 0; i < cases.size(); ++i) {
+        const auto run = fly_rtls_dispersed(cases[i]);
+        CAPTURE(i);
+        std::printf("case %2zu: %s, contact %.2f m, sink %.2f m/s, lateral %.2f m/s, ended %.2f m off, %.0f kg left "
+                    "(aero x%.2f)\n", i, sim::to_string(run.outcome), run.contact_offset_m, run.contact_sink_mps,
+                    run.contact_lateral_mps, run.offset_m, run.propellant_kg, cases[i].aero_factor);
+        std::fflush(stdout);
+        CHECK(run.outcome == sim::LandingOutcome::Landed);
+        CHECK(run.offset_m < 5.0);  // spec success: < 5 m from the centre
+        if (run.outcome == sim::LandingOutcome::Landed) ++landed;
+        worst_offset = std::max(worst_offset, run.contact_offset_m);
+        worst_sink = std::max(worst_sink, run.contact_sink_mps);
+        least_propellant = std::min(least_propellant, run.propellant_kg);
+    }
+    std::printf("[validation] Falcon 9 RTLS: landed %d of %zu, contact offset <= %.2f m, sink <= %.2f m/s, >= %.0f kg left\n",
+                landed, cases.size(), worst_offset, worst_sink, least_propellant);
 }
