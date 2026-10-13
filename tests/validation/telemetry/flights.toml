@@ -66,6 +66,8 @@ engines = "Raptor 2"
 outcome_booster = "soft splashdown (gulf)"
 outcome_ship = "soft splashdown (ocean)"
 notes = "full booster return to a water landing: ascent, descent and landing burn usable"
+table = "flight4_2024-06-06.csv"
+webcast = "https://x.com/i/broadcasts/1OwxWYzDXjWGQ"
 sources = ["wiki_tests", "wiki_sh"]
 
 [[flight]]
@@ -149,7 +151,9 @@ config = "starship_block2"
 engines = "Raptor 2"
 outcome_booster = "soft splashdown (gulf)"
 outcome_ship = "soft splashdown (ocean)"
-notes = "whole flight usable"
+notes = "whole flight usable; descent ballistic coefficient 20-40 % below flights 7/8 (same booster block): unexplained, not in the drag test"
+table = "flight10_2025-08-26.csv"
+webcast = "https://x.com/i/broadcasts/1lPKqvNwLREGb"
 sources = ["wiki_tests", "wiki_sh"]
 
 [[flight]]
@@ -175,7 +179,9 @@ config = "starship_block3"
 engines = "Raptor 3"
 outcome_booster = "lost in the landing burn (gulf)"
 outcome_ship = "splashdown on target (ocean)"
-notes = "first Block 3, from Pad 2; one booster engine out ~2/3 through ascent; ship lost one RVac at T+3:03 (longer burn)"
+notes = "first Block 3, from Pad 2; one booster engine out ~2/3 through ascent; ship lost one RVac at T+3:03 (longer burn); booster telemetry freezes in the descent (vehicle lost)"
+table = "flight12_2026-05-22.csv"
+webcast = "https://x.com/i/broadcasts/1pKkOykQRgNKj"
 sources = ["wiki_tests", "wiki_sh", "nsf_f12", "space_f12"]
 
 [[flight]]
@@ -189,6 +195,8 @@ engines = "Raptor 3"
 outcome_booster = "hard impact (gulf): only 10 of 13 engines relit for the landing burn"
 outcome_ship = "splashdown on target (ocean)"
 notes = "ascent and descent usable; landing burn not nominal"
+table = "flight13_2026-07-24.csv"
+webcast = "https://x.com/i/broadcasts/1AJEmmYdMDnJL"
 sources = ["wiki_tests", "nsf_f13"]
 
 [[flight]]
@@ -202,4 +210,6 @@ engines = "Raptor 3"
 outcome_booster = "splashdown on target (gulf), 11 of 13 engines in the landing burn"
 outcome_ship = "orbit 262 x 275 km, 30.5 deg; early deorbit, splashdown (Pacific)"
 notes = "one centre booster engine out during ascent; ship RVac (engine 6) out at T+7:18; first orbit"
+table = "flight14_2026-09-28.csv"
+webcast = "https://x.com/i/broadcasts/1qxvvenMPMQxB"
 sources = ["wiki_tests", "nsf_f14", "space_f14"]

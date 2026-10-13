@@ -1,5 +1,5 @@
 // Tail-first descent of the booster against our webcast telemetry tables (tests/validation/telemetry): the booster
-// of the configuration that flew (block 1 on flight 5, block 2 on flights 7 and 8) is placed unguided in each flight's state at its peak descent speed (~26 km) and must follow the
+// of the configuration that flew (block 1: flights 4, 5; block 2: flights 7, 8) is placed unguided in each flight's state at its peak descent speed (~26 km) and must follow the
 // recorded speed until the landing burn.
 
 #include <catch2/catch_test_macros.hpp>
@@ -73,13 +73,18 @@ std::pair<double, double> altitude_fit(const std::vector<Sample>& d, double t, d
 
 }  // namespace
 
-TEST_CASE("Booster descent drag reproduces the flight 5/7/8 telemetry", "[gnc][booster][validation]") {
+TEST_CASE("Booster descent drag reproduces the webcast telemetry of flights 4-8", "[gnc][booster][validation]") {
     // Table and the vehicle configuration that flew (tests/validation/telemetry/flights.toml).
-    const auto [file, vehicle_id] = GENERATE(table<std::string, std::string>({
-        {"flight5_2024-10-13.csv", "starship_block1"},
-        {"flight7_2025-01-16.csv", "starship_block2"},
-        {"flight8_2025-03-06.csv", "starship_block2"},
+    // Propellant in the descent: as our block 1/2 returns at ignition (72 t).
+    const auto [file, vehicle_id, propellant_kg] = GENERATE(table<std::string, std::string, double>({
+        {"flight4_2024-06-06.csv", "starship_block1", 72.0e3},
+        {"flight5_2024-10-13.csv", "starship_block1", 72.0e3},
+        {"flight7_2025-01-16.csv", "starship_block2", 72.0e3},
+        {"flight8_2025-03-06.csv", "starship_block2", 72.0e3},
     }));
+    // Not (yet) here: flight 10 (block 2: ballistic coefficient 20-40 % below flights 7/8 with the same booster -
+    // unexplained, possibly a differently flown descent), flight 12 (booster lost, data freeze), flights 13/14
+    // (block 3: our booster is ~7 % too fast - the mass analysis points to ~215 t dry instead of our 255 t; pending).
     CAPTURE(file, vehicle_id);
     const auto data = load_booster(file);
     REQUIRE(data.size() > 500);
@@ -99,6 +104,11 @@ TEST_CASE("Booster descent drag reproduces the flight 5/7/8 telemetry", "[gnc][b
         }
         last = &s;
     }
+    if (t_ignition <= peak->t_s && last) {
+        // Round-dial layout (flight 10 on): before the landing burn the booster's speed dial gives way to its engine
+        // icon - compare up to the last speed reading.
+        t_ignition = last->t_s + 2.0;
+    }
     REQUIRE(t_ignition > peak->t_s);
     const auto [h0, vz0] = altitude_fit(data, peak->t_s, 6.0);
     const double vh0 = std::sqrt(std::max(peak->speed_mps * peak->speed_mps - vz0 * vz0, 0.0));
@@ -109,8 +119,7 @@ TEST_CASE("Booster descent drag reproduces the flight 5/7/8 telemetry", "[gnc][b
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
     session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
-    const double landing_propellant_kg = 72.0e3;  // as our block 1/2 returns at ignition
-    session.place_body(test::booster_config(vehicle_id, landing_propellant_kg),
+    session.place_body(test::booster_config(vehicle_id, propellant_kg),
                        test::state_over_site(session.launch_site(), earth, t0, {20.0e3, 0.0, h0}, {-vh0, 0.0, vz0}), t0);
 
     double max_error = 0.0, sum_sq = 0.0;
@@ -122,6 +131,11 @@ TEST_CASE("Booster descent drag reproduces the flight 5/7/8 telemetry", "[gnc][b
         const auto& st = session.body(0).state();
         const double speed = norm(st.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), st.position_gcrf_m));
         const double error = speed / s.speed_mps - 1.0;
+        if (std::getenv("STARSIM_VERBOSE") && n % 8 == 0) {
+            const double height = frames::fixed_to_geodetic(transpose(tr.rotation) * st.position_gcrf_m).height_m;
+            std::printf("  T+%.1f s  recorded %.0f m/s at %.1f km  simulated %.0f m/s at %.1f km\n", s.t_s, s.speed_mps,
+                        s.altitude_m / 1e3, speed, height / 1e3);
+        }
         max_error = std::max(max_error, std::abs(error));
         sum_sq += error * error;
         ++n;
