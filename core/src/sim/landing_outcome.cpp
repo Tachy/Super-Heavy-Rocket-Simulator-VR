@@ -37,7 +37,13 @@ LandingOutcome landing_outcome(const vehicle::FlightBody& body, const LaunchSite
     if (!body.breakup_reason().empty()) return LandingOutcome::BrokenUp;
     if (!body.impacted() && !body.resting()) return LandingOutcome::Flying;
     const Vec3 enu = site_enu_m(site, position_itrf_m);
-    if (site.sea && over_water(*site.sea, enu.x, enu.y)) return LandingOutcome::Splashdown;
+    if (site.deck) {
+        contact::LandingSurface ship;
+        ship.deck = site.deck;
+        if (ship.below(enu.x, enu.y).water) return LandingOutcome::Splashdown;
+    } else if (site.sea && over_water(*site.sea, enu.x, enu.y)) {
+        return LandingOutcome::Splashdown;
+    }
     return body.resting() ? LandingOutcome::Landed : LandingOutcome::Impact;
 }
 

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <filesystem>
+#include "starsim/config/drone_ship_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/contact/landing_surface.hpp"
 #include "starsim/sim/catch_tower_sim.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
 #include <map>
@@ -55,9 +57,15 @@ struct LaunchSite {
     std::optional<config::TowerConfig> tower;  // catch tower (stacks then stand on its launch mount)
     std::optional<config::SeaConfig> sea;      // coastline (aborted landings)
     double pad_radius_m = 0.0;                 // landing zone: concrete pad radius
+    std::optional<contact::LandingSurface::Deck> deck;  // a drone ship: its deck (height_m: the deck), the sea around it
 };
 
 LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site);
+// A drone ship holding station at (latitude, longitude) as a landing zone: its deck at sea height + freeboard, the long
+// axis along `heading_rad` (clockwise from north). `sea` marks the water beside the deck's side edge: the landing
+// guidance's abort aims there.
+LaunchSite drone_ship_site(const config::DroneShipConfig& ship, double latitude_rad, double longitude_rad,
+                           double sea_height_m, double heading_rad);
 
 enum class LandingOutcome;
 

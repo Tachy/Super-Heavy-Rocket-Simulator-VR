@@ -10,6 +10,7 @@
 #include "starsim/gnc/descent_snapshot.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 
 namespace starsim::sim {
@@ -442,7 +443,20 @@ bool FlightSession::returns_after_staging(const vehicle::Vehicle& vehicle) const
 }
 
 LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site) {
-    return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower, site.sea, site.pad_radius_m};
+    return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower, site.sea, site.pad_radius_m, {}};
+}
+
+LaunchSite drone_ship_site(const config::DroneShipConfig& ship, double latitude_rad, double longitude_rad,
+                           double sea_height_m, double heading_rad) {
+    LaunchSite site;
+    site.latitude_rad = latitude_rad;
+    site.longitude_rad = longitude_rad;
+    site.height_m = sea_height_m + ship.freeboard_m;
+    site.pad_radius_m = 0.5 * ship.deck_width_m;
+    site.deck = contact::LandingSurface::Deck{0.5 * ship.deck_length_m, 0.5 * ship.deck_width_m, heading_rad,
+                                              ship.freeboard_m};
+    site.sea = config::SeaConfig{heading_rad + 0.5 * constants::pi, 0.5 * ship.deck_width_m};
+    return site;
 }
 
 gnc::LandingSite FlightSession::return_site(const vehicle::Vehicle& booster) const {
@@ -489,7 +503,11 @@ void FlightSession::place_returning_booster(const config::VehicleConfig& config,
 void FlightSession::set_landing_zone(const LaunchSite& zone) {
     landing_zone_ = zone;
     contact::LandingSurface ground;
-    ground.sea = zone.sea;
+    if (zone.deck) {
+        ground.deck = zone.deck;
+    } else {
+        ground.sea = zone.sea;
+    }
     legs_ = std::make_unique<LegLandingSim>(zone.latitude_rad, zone.longitude_rad, zone.height_m, std::move(ground), tick_s);
 }
 

@@ -43,6 +43,7 @@ add_executable(starsim_core_tests
     test_leg_landing.cpp
     test_falcon9_descent_telemetry.cpp
     test_booster_return_config.cpp
+    test_falcon9_asds.cpp
     test_falcon9_rtls.cpp
     test_ship_catch.cpp
     test_ship_entry_telemetry.cpp

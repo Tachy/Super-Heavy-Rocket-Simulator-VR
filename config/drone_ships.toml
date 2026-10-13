@@ -1,0 +1,13 @@
+# Drone ships (autonomous landing barges) for first-stage landings at sea (milestone c4). The ship holds its position
+# (station keeping) and its deck stays level: no sea state yet. Where it waits is set per mission (the nominal impact
+# point of that mission's first stage). Display names are generic.
+#
+# [sources]
+#   wiki_asds  https://en.wikipedia.org/wiki/Autonomous_spaceport_drone_ship  (deck ~300 x ~170 ft)
+
+[[drone_ship]]
+id = "asds_atlantic"
+name = "Drohnenschiff"
+deck_length_m = 91.0        # [S:wiki_asds] ~300 ft
+deck_width_m = 52.0         # [S:wiki_asds] ~170 ft (with the wing extensions)
+freeboard_m = 3.0           # [E] deck above the waterline
