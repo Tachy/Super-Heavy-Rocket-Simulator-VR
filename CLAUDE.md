@@ -97,8 +97,10 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   extension is present (import itself completes; later runs are fine). Not yet investigated.
 - Solar radiation pressure is modelled for vehicles (FlightBody); the Artemis I coast test still uses the
   pure gravity propagator and shows SRP as a t^2 residual (~1.9e-8 m/s^2: 39 m after 18 h).
-- Starship throttle schedules are not public: the IFT-3 test reconstructs the throttle from measured
-  acceleration (mean 0.75 of nameplate) and checks consistency (speed 4.3 %, altitude 7.9 %, max-Q).
+- Only the current configuration (Block 3 / V3, Raptor 3) is modelled (decision 2026-10-13); its data come from
+  the flights that flew it (12-14, `tests/validation/telemetry/flights.toml`). Earlier blocks were removed.
+- Starship throttle schedules are not public; they are a guidance choice, not vehicle data. Flights 12-14 fly the
+  booster at ~85-90 % after max-Q with an acceleration cap of ~2.2 g; our ascent autopilot still flies full thrust.
 - Earth is a 256x128 ellipsoid mesh whose facets sit up to ~0.6 km below the true surface; below 500 km a
   2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites.
   Physics ground = flat at the pad height (FlightBody::ground_height_m): gentle contact (<= 3 m/s, <= 10 deg)
@@ -109,38 +111,35 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
-- Booster return: on a site without a tower blocks 1-3 land on the pad with the explicit laws (no impact, sink
-  < 2 m/s, 4-11 m off, < 1.2 m/s lateral). At a catch site the landing burn flies SCvx plans (`gnc/scvx_landing`)
-  re-planned every 1 s on a worker thread (effective at snapshot + 0.5 s; tests and time warp wait, real-time play
-  never waits - `FlightSession::set_realtime_planning`). From an ignition state (scenario: 355 m/s at ~1.85 km,
-  Flight 5 webcast) the dispersion campaign `[gnc][catch][validation]` (+-10 m, +-3 m/s, +-5 % mass, +-3 deg,
-  engine failure) catches 21 of 21 (< 1 m, < 0.5 m/s). Profile close to recorded catches: 13 engines ~4.5 s,
-  switch at 70-95 m/s (~750 m), 3 engines ~16 s. Lateral tracking is an LQR on the gimbaled-rocket dynamics
-  (`gnc/tvc_lateral`; the gimbal's wrong-way side force makes cascaded position/attitude loops swing up on 3
-  engines); plans use <= 30 % of the gimbal limit, the LQR effort is 0.2 x the gimbal authority at the current
-  thrust. The coast phase already rolls the pins towards the arms (grid fins / RCS). Planning model: constant
-  CG/inertia, no grid fins, no wind; no re-plans in the last 3 s. The explicit laws remain the fallback.
-  Full returns: block 3 is caught; blocks 1/2 still abort (`[!mayfail]`): our ascent stages too high and fast
-  (block 1: T+134 s, 83 km, 2.0 km/s; IFT-3: ~T+165 s, ~70 km, ~1.57 km/s - the autopilot flies the booster at
-  full throttle, IFT-3's reconstructed throttle averages 0.75), so the booster reaches 131 km (IFT-3: 106 km)
-  and arrives too fast. Next: an ascent throttle schedule from the IFT-3 reconstruction.
-  Abort to the sea is weak: a late abort (< ~250 m) on 3 engines near minimum throttle (T/W > 1, cannot hover or
-  descend slowly) can end hovering over land until the propellant runs out.
+- Booster return: on a site without a tower the booster lands on the pad with the explicit laws (no impact, sink
+  < 2 m/s, ~4 m off). At a catch site the landing burn flies SCvx plans (`gnc/scvx_landing`) re-planned every 1 s
+  on a worker thread (effective at snapshot + 0.5 s; tests and time warp wait, real-time play never waits -
+  `FlightSession::set_realtime_planning`). From an ignition state (scenario: 355 m/s at ~1.6 km) the dispersion
+  campaign `[gnc][catch][validation]` (+-10 m, +-3 m/s, +-5 % mass, +-3 deg, engine failure) catches 21 of 21
+  (< 1 m, < 0.5 m/s), but with 1.5-2.7 m/s sink at pin contact: the vertical tracking lags the plan by ~0.4 m/s in
+  the last 3 s without re-plans (nominal test tolerance interim 3 m/s). Lateral tracking is an LQR on the
+  gimbaled-rocket dynamics (`gnc/tvc_lateral`); plans use <= 30 % of the gimbal limit, the LQR effort is 0.2 x the
+  gimbal authority. The coast phase already rolls the pins towards the arms. Planning model: constant CG/inertia,
+  no grid fins, no wind; no re-plans in the last 3 s. The explicit laws remain the fallback.
+  OPEN: the V3 landing sequence is 13 -> 5 (divert) -> 3 engines ending in a hover (satnews 2025-10-05; 5 engines
+  seen on flights 13/14); ours is 13 -> 3. Planned next (user decision 2026-10-13).
+  Full return: caught, 54.6 t at landing-burn ignition (flight 14 gauge: ~51 t). Abort to the sea is weak: a late
+  abort can end hovering over land until the propellant runs out.
 - Descent drag (tail first): body table `aero/super_heavy_descent.csv` [D] plus the grid fins' axial drag
-  (`aero/grid_fin.csv` column `ca_axial` [E], per fin count/area). Identified from our own webcast telemetry tables
-  of flights 5, 7 and 8 (`tests/validation/telemetry`, built by `tools/telemetry/webcast_telemetry.py`; drag from
-  `tools/telemetry/drag_estimate.py`; which vehicles flew: `tests/validation/telemetry/flights.toml`): the unguided
-  booster of the flown block (1 on flight 5, 2 on flights 7/8) follows each descent from ~26 km to
-  the landing burn within ~1 % rms (test "Booster descent drag reproduces the flight 5/7/8 telemetry"; IFT-3 as a
-  cross-check). The measured quantity is the ballistic coefficient; C_D assumes our mass (~347 t at that point).
-  Subsonic drag is not measured (the landing burn starts at ~Mach 1).
-- Booster return reserves (block 1/2: 330 t, block 3: 280 t) and the grid fin normal-force data (`aero/grid_fin.csv`,
-  sizes/stations) are estimates [E]. Block 3 is checked against the FAA EA's ~74 t residual propellant at
-  landing-burn ignition (Raptor 3 at 280 tf: 70.3 t at ignition).
+  (`aero/grid_fin.csv` column `ca_axial` [E], 3 x 13.5 m^2). Identified from our webcast telemetry of flights 13 and
+  14 (`tests/validation/telemetry`, `tools/telemetry/webcast_telemetry.py` + `drag_estimate.py`; below ~9 km the
+  speed dial gives way to the engine icon, speed then from the 0.1 km altitude of the nearly vertical fall): the
+  unguided booster (210 t dry + 51 t) follows both descents from ~27 km within 0.6 / 2.6 % rms and loses altitude to
+  the landing burn within 415 / 158 m (test "Booster descent drag reproduces the webcast telemetry of flights 13
+  and 14"). The webcast's speed and altitude graphics are offset by ~1.5-2 s. Subsonic drag is not measured.
+- Block 3 masses [D] from flights 12-14 (`tools/telemetry/mass_estimate.py`, `ship_dv.py`): ship dry 255 t
+  (rocket equation staging -> cutoff with the propellant gauge, 248-260 t), booster dry 210 t +-40 t (stack mass
+  balance and descent ballistic coefficient), liftoff ~5,550 t; tank capacities 3,650 / 1,600 t [S]; Raptor 3
+  280 tf consistent (peaks ~270 tf sea-level equivalent; 250 tf is contradicted), minimum throttle 30 % [D] (V3
+  hovers on 3 engines). Booster reserve at MECO 225 t [D] (gives ~51 t at landing-burn ignition as flight 14) -
+  a guidance choice; real boosters stage with ~530 t (~15 %) and burn ~470 t in the boostback.
 - Catch tower dimensions and azimuths (`[site.tower]`, Starbase 315 deg, LC-39A 0 deg) and the catch pins
   (`[stage.catch_pins]`, 5 MN per pin) are estimates [E]; verify the tower azimuths against imagery.
-- Wikipedia's booster load 2,700 t LOX / 700 t CH4 (O/F 3.86) does not match Raptor's 3.6: blocks 1/2 now
-  split the 3,400 t total at 3.6 [D] (`vehicle_report.py` prints the loaded O/F).
 
 ## Game (Godot) structure
 - `game/world/`: `world.gd` (per-frame orchestration), `celestial_body.gd` (floating origin + scaled space:

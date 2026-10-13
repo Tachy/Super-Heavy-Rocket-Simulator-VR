@@ -162,8 +162,11 @@ TEST_CASE("Stage separation conserves momentum", "[vehicle]") {
 
 TEST_CASE("Engines obey relight rules and flame out when dry", "[vehicle]") {
     DeepSpace space;
-    auto cfg = config::load_vehicle(config_dir, "starship_block2");  // Raptor 2 outer ring: no relight
+    auto cfg = config::load_vehicle(config_dir, "starship_block3");
     for (auto& [id, engine] : cfg.engines) engine.startup_s = engine.shutdown_s = 0.0;
+    for (auto& group : cfg.stages[0].engine_groups) {
+        if (group.id == "outer") group.relight = false;  // test the rule (Raptor 3 itself relights)
+    }
     cfg.stages.pop_back();
     cfg.stages[0].tanks[0].mass_kg = 20000.0;  // little LOX
     FlightBody booster(std::make_unique<Vehicle>(cfg, config_dir), far_away());

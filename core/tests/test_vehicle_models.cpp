@@ -29,7 +29,7 @@ TEST_CASE("Vehicle configuration loads with all referenced engines", "[config]")
 }
 
 TEST_CASE("All shipped vehicle configurations load", "[config]") {
-    const auto id = GENERATE("starship_block1", "starship_block2", "starship_block3", "falcon9_block5");
+    const auto id = GENERATE("starship_block3", "falcon9_block5");
     const auto v = config::load_vehicle(config_dir, id);
     CHECK_FALSE(v.stages.empty());
     for (const auto& stage : v.stages) {

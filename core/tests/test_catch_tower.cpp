@@ -40,11 +40,11 @@ void use_starbase(sim::FlightSession& session) {
     session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
 }
 
-// Block 2 booster with 4 t of propellant left, upright over the catch axis, pins facing the arms. `pin_offset_m`
+// Block 3 booster with 4 t of propellant left, upright over the catch axis, pins facing the arms. `pin_offset_m`
 // (site frame) moves the pins' midpoint from the catch point (arm tops on the catch axis); velocity in the site
 // frame, relative to the ground.
 void place_booster(sim::FlightSession& session, time::Epoch epoch, const Vec3& pin_offset_m, const Vec3& velocity_mps) {
-    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block2");
+    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     cfg.stages.resize(1);
     for (auto& tank : cfg.stages[0].tanks) tank.mass_kg = 2000.0;
     const vehicle::Vehicle probe(cfg, STARSIM_CONFIG_DIR);

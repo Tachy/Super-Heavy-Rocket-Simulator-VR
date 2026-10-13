@@ -190,8 +190,9 @@ TEST_CASE("Circularization burn at apoapsis (burn execution, two-body field)", "
     CHECK(std::abs(apo - 400.0) < 5.0);
 }
 
-// Tuning aid (hidden, run with "[.tuning]"): flight-path angle profile of the booster for several kicks.
-TEST_CASE("Pitch kick tuning against the IFT-3 flight-path angle", "[.tuning]") {
+// Tuning aid (hidden, run with "[.tuning]"): flight-path angle profile of the booster for several kicks
+// (reference: IFT-3 webcast 2024, an earlier vehicle; to be replaced by flights 12-14).
+TEST_CASE("Pitch kick tuning against a flight-path angle profile", "[.tuning]") {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();

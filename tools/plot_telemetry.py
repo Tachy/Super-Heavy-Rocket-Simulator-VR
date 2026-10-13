@@ -1,8 +1,7 @@
 """Plot simulated telemetry (core TelemetryRecorder CSV), optionally against a webcast reference.
 
 Usage:
-  python tools/plot_telemetry.py build/ift3_sim.csv --reference data/validation/IFT3_full_data_booster.csv \
-      --out build/ift3_comparison.png
+  python tools/plot_telemetry.py <simulated.csv> [--reference <webcast table.csv>] --out <plot.png>
 """
 
 from __future__ import annotations

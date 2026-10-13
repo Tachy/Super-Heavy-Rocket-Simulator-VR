@@ -22,7 +22,9 @@ id = "booster"
 name = "Super Heavy Block 3"
 length_m = 72.3                          # [S:wiki_sh]
 diameter_m = 9.0                         # [S:wiki_sh]
-dry_mass_kg = 255000.0                   # [E] Block 2 275 t - Raptor 3 integration savings (~38 t) + longer tanks / integrated hot-stage truss
+dry_mass_kg = 210000.0                   # [D] +-40 t: flights 12-14 telemetry - stack mass balance (gauge + acceleration, minus
+                                         # the ship: 165-215 t) and the descent ballistic coefficient (~20 % below Block 1/2,
+                                         # if the drag shape is unchanged). Previously 255 t [E].
 dry_cg_station_m = 24.0                  # [E]
 separation = "hot_staging"
 jettison_after_separation_kg = 0.0       # hot-stage truss integrated, not jettisoned [S:wiki_sh, nsf_b3]
@@ -85,7 +87,7 @@ max_load_n = 5.0e6                     # [E] structural limit per pin (~1.9 g of
 
 [stage.recovery]
 method = "tower_catch"
-reserve_propellant_kg = 280000.0         # [E] tuned so that <= 74 t remain at landing-burn ignition [S:faa_ea_2024]; boostback + landing (RTLS); separate LOX landing tank feeds inner engines [S:nsf_b3]
+reserve_propellant_kg = 225000.0         # [D] tuned so that ~51 t remain at landing-burn ignition (flight 14 gauge: 1.4 % of 3,650 t after the boostback; FAA EA cap 74 t [S:faa_ea_2024]); a guidance decision, to be planned by the autopilot
 nominal_meco_s = 160.0                   # [E]
 nominal_meco_altitude_m = 65000.0        # [E]
 
@@ -100,7 +102,8 @@ id = "ship"
 name = "Starship Block 3"
 length_m = 52.1                          # [D] stack 124.4 m [S:wiki_starship] - booster 72.3 m
 diameter_m = 9.0
-dry_mass_kg = 100000.0                   # [E]
+dry_mass_kg = 255000.0                   # [D] flights 12-14 webcast telemetry (propellant gauge, rocket equation staging ->
+                                         # cutoff, 20-26 Starlink V3 ~2 t each): 248 / 260 / 254 t
 dry_cg_station_m = 20.0                  # [E]
 payload_mass_kg = 0.0
 

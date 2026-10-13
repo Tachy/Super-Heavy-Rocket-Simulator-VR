@@ -110,41 +110,31 @@ target = "data/raw/hyg_v44.csv.gz"
 license = "CC BY-SA 4.0 (attribution, share-alike for the derived star list)"
 credit = "HYG Database by David Nash (astronexus), CC BY-SA 4.0"
 
-# ------------------------------------------------------------------ validation data (not redistributed)
-
-[[source]]
-id = "ift3_booster_telemetry"
-name = "Starship IFT-3 booster telemetry scraped from the SpaceX webcast (smoothed, derived quantities)"
-url = "https://raw.githubusercontent.com/meithan/Starship_IFT3/master/data/IFT3_full_data_booster.csv"
-target = "data/validation/IFT3_full_data_booster.csv"
-license = "GPL-3.0 (used only as local test reference; not committed or redistributed)"
-credit = "Juan Carlos Toledo-Roy (meithan), github.com/meithan/Starship_IFT3"
-
 # ------------------------------------------------------------------ own telemetry tables (committed)
-# Numbers shown in SpaceX's public webcasts (speed, altitude, mission clock), read by our own OCR tool
-# (tools/telemetry/webcast_telemetry.py). Only the transcribed values are kept; the video is neither stored nor
-# redistributed. Present in the repository, so fetch.py reports them as "already present".
+# Numbers shown in SpaceX's public webcasts (speed, altitude, propellant gauge, engine icons, mission clock), read by
+# our own OCR tool (tools/telemetry/webcast_telemetry.py). Only the transcribed values are kept; the videos are
+# neither committed nor redistributed. Present in the repository, so fetch.py reports them as "already present".
 
 [[source]]
-id = "telemetry_flight5"
-name = "Starship Flight 5 (2024-10-13) webcast telemetry, booster and ship speed/altitude (own OCR transcription)"
-url = "https://x.com/i/broadcasts/1RDGlyognOgJL"
-target = "tests/validation/telemetry/flight5_2024-10-13.csv"
+id = "telemetry_flight12"
+name = "Starship Flight 12 (2026-05-22) webcast telemetry: booster and ship speed, altitude, propellant gauge, engines (own OCR transcription)"
+url = "https://x.com/i/broadcasts/1pKkOykQRgNKj"
+target = "tests/validation/telemetry/flight12_2026-05-22.csv"
 license = "Factual values displayed in the public SpaceX webcast, transcribed by this project (video not redistributed)"
 credit = "Telemetry: SpaceX webcast; transcription: this project"
 
 [[source]]
-id = "telemetry_flight7"
-name = "Starship Flight 7 (2025-01-16) webcast telemetry, booster and ship speed/altitude (own OCR transcription)"
-url = "https://x.com/i/broadcasts/1OwGWNYrzZVKQ"
-target = "tests/validation/telemetry/flight7_2025-01-16.csv"
+id = "telemetry_flight13"
+name = "Starship Flight 13 (2026-07-24) webcast telemetry: booster and ship speed, altitude, propellant gauge, engines (own OCR transcription)"
+url = "https://x.com/i/broadcasts/1AJEmmYdMDnJL"
+target = "tests/validation/telemetry/flight13_2026-07-24.csv"
 license = "Factual values displayed in the public SpaceX webcast, transcribed by this project (video not redistributed)"
 credit = "Telemetry: SpaceX webcast; transcription: this project"
 
 [[source]]
-id = "telemetry_flight8"
-name = "Starship Flight 8 (2025-03-06) webcast telemetry, booster and ship speed/altitude (own OCR transcription)"
-url = "https://x.com/i/broadcasts/1lPKqMQbAWLKb"
-target = "tests/validation/telemetry/flight8_2025-03-06.csv"
+id = "telemetry_flight14"
+name = "Starship Flight 14 (2026-09-28) webcast telemetry: booster and ship speed, altitude, propellant gauge, engines (own OCR transcription)"
+url = "https://x.com/i/broadcasts/1qxvvenMPMQxB"
+target = "tests/validation/telemetry/flight14_2026-09-28.csv"
 license = "Factual values displayed in the public SpaceX webcast, transcribed by this project (video not redistributed)"
 credit = "Telemetry: SpaceX webcast; transcription: this project"

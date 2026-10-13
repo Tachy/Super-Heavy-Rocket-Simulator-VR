@@ -29,7 +29,7 @@ TEST_CASE("Launch sites load with their catch tower", "[config]") {
 }
 
 TEST_CASE("Boosters define two opposite catch pins", "[config]") {
-    for (const char* id : {"starship_block1", "starship_block2", "starship_block3"}) {
+    for (const char* id : {"starship_block3"}) {
         CAPTURE(id);
         const auto v = config::load_vehicle(STARSIM_CONFIG_DIR, id);
         const auto& booster = v.stages.front();

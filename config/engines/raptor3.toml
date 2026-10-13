@@ -21,7 +21,7 @@ nozzle_exit_diameter_m = 1.446       # [D] from Isp_vac = 350 s [S:wiki_sh]: A_e
 max_ambient_pressure_pa = 110000.0   # [E]
 
 [throttle]
-min = 0.40                           # [S:wiki_raptor]
+min = 0.30                           # [D] V3 lands hovering on 3 engines (baseline 13 -> 5 -> 3, satnews 2025-10-05): ~250 t on 3 x 280 tf needs <= ~30 %; Wikipedia gives 40 % for Raptor in general
 max = 1.00
 rate_per_s = 0.5                     # [E]
 

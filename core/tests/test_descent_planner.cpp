@@ -394,9 +394,11 @@ TEST_CASE("A re-plan from outside the corridor stays feasible and closes in", "[
     target.corridor_top_m = target.position_m.x + 70.0;
     target.corridor_radius_m = 1.5;
     target.final_set_radius_m = 3.0;
-    // On the final engines, 8 m off the catch axis 100 m above the catch point: no plan can reach the corridor at once.
-    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg - 30000.0, {target.position_m.x + 100.0, 8.0, 0.0},
-                               {-15.0, 0.0, 0.0}, Quat{}, {});
+    // On the final engines, 8 m off the catch axis 200 m above the catch point: no plan can reach the corridor at once.
+    // (Three engines at minimum throttle exceed the weight of the light booster: it cannot hover to take time, so a
+    // divert this size needs the height.)
+    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {target.position_m.x + 200.0, 8.0, 0.0},
+                               {-25.0, 0.0, 0.0}, Quat{}, {});
     const auto plan = plan_descent(b->model, x0, 1, target, s, nullptr, 0.0);
     REQUIRE(plan.converged);
     const auto& end = plan.reference.x.back();

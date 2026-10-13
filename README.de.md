@@ -29,8 +29,8 @@ benennen, denen die Konfigurationen nachempfunden sind.
   über die Knudsen-Zahl, Strahlungsdruck der Sonne mit Erd- und Mondschatten.
 - Gravitation: Punktmassen Erde, Mond und Sonne plus J2 der Erde (jeder Term schaltbar); DOP853 mit
   Dense Output und Ereignissuche für Freiflug, 200-Hz-RK4 im angetriebenen Flug.
-- Aufstieg validiert gegen die Telemetrie des Webcasts von Starship IFT-3: Geschwindigkeit auf 4,3 %, Höhe
-  auf 7,9 %, Max-Q und Mach ohne Kalibrierung.
+- Fahrzeugdaten des aktuellen Starship (V3) aus eigener Auswertung der Webcasts der Flüge 12–14 bestimmt
+  (Geschwindigkeit, Höhe, Treibstoffanzeigen, Triebwerkssymbole): Massen, Schub, Booster-Abstiegswiderstand (auf ~1–3 %).
 
 **Lenkung, Navigation und Regelung**
 - Aufstiegs-Autopilot: Startazimut mit Korrektur der Erddrehung, Pitch Kick, Gravity Turn, Powered Explicit
@@ -50,7 +50,7 @@ benennen, denen die Konfigurationen nachempfunden sind.
   vorhergesagter (orange) Bahn, Δv-Balken für Manöver.
 
 **Datengetrieben und kostenlos**
-- Fahrzeuge (Starship Block 1–3, Falcon 9 zum Vergleich), Triebwerke, Aerotabellen, Startplätze (Starbase,
+- Fahrzeuge (aktuelles Starship V3, Falcon 9 zum Vergleich), Triebwerke, Aerotabellen, Startplätze (Starbase,
   LC-39A) und Missionen sind TOML/CSV-Konfiguration mit Herkunftskennung ([S] belegt, [E] geschätzt,
   [D] abgeleitet); `tools/vehicle_report.py` gibt Massen- und Δv-Bilanz aus.
 - Nur freie Daten und Werkzeuge; jede Quelle ist mit Lizenz erfasst, `CREDITS.md` wird daraus erzeugt.

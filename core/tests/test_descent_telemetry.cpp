@@ -1,5 +1,5 @@
 // Tail-first descent of the booster against our webcast telemetry tables (tests/validation/telemetry): the booster
-// of the configuration that flew (block 1: flights 4, 5; block 2: flights 7, 8) is placed unguided in each flight's state at its peak descent speed (~26 km) and must follow the
+// of the configuration that flew (block 3) is placed unguided in each flight's state at its peak descent speed (~26 km) and must follow the
 // recorded speed until the landing burn.
 
 #include <catch2/catch_test_macros.hpp>
@@ -29,6 +29,7 @@ struct Sample {
     double t_s = 0.0;
     double speed_mps = -1.0;    // < 0: no reading
     double altitude_m = -1.0;
+    int engines_lit = -1;       // booster engine icons lit (round-dial layout), < 0: no reading
 };
 
 std::vector<Sample> load_booster(const std::string& file) {
@@ -46,11 +47,12 @@ std::vector<Sample> load_booster(const std::string& file) {
         std::stringstream ss(line);
         std::string cell;
         while (std::getline(ss, cell, ',')) f.push_back(cell);
-        f.resize(5);
+        f.resize(9);
         Sample s;
         s.t_s = std::stod(f[0]);
         if (!f[1].empty()) s.speed_mps = std::stod(f[1]) / 3.6;
         if (!f[2].empty()) s.altitude_m = std::stod(f[2]) * 1e3;
+        if (!f[6].empty()) s.engines_lit = std::stoi(f[6]);
         out.push_back(s);
     }
     return out;
@@ -73,18 +75,14 @@ std::pair<double, double> altitude_fit(const std::vector<Sample>& d, double t, d
 
 }  // namespace
 
-TEST_CASE("Booster descent drag reproduces the webcast telemetry of flights 4-8", "[gnc][booster][validation]") {
+TEST_CASE("Booster descent drag reproduces the webcast telemetry of flights 13 and 14", "[gnc][booster][validation]") {
     // Table and the vehicle configuration that flew (tests/validation/telemetry/flights.toml).
-    // Propellant in the descent: as our block 1/2 returns at ignition (72 t).
+    // Propellant in the descent: from the gauge after the boostback (flight 14: 1.4 % of 3,650 t = 51 t).
     const auto [file, vehicle_id, propellant_kg] = GENERATE(table<std::string, std::string, double>({
-        {"flight4_2024-06-06.csv", "starship_block1", 72.0e3},
-        {"flight5_2024-10-13.csv", "starship_block1", 72.0e3},
-        {"flight7_2025-01-16.csv", "starship_block2", 72.0e3},
-        {"flight8_2025-03-06.csv", "starship_block2", 72.0e3},
+        {"flight13_2026-07-24.csv", "starship_block3", 51.0e3},
+        {"flight14_2026-09-28.csv", "starship_block3", 51.0e3},
     }));
-    // Not (yet) here: flight 10 (block 2: ballistic coefficient 20-40 % below flights 7/8 with the same booster -
-    // unexplained, possibly a differently flown descent), flight 12 (booster lost, data freeze), flights 13/14
-    // (block 3: our booster is ~7 % too fast - the mass analysis points to ~215 t dry instead of our 255 t; pending).
+    // Not here: flight 12 (booster lost in the descent, data freeze).
     CAPTURE(file, vehicle_id);
     const auto data = load_booster(file);
     REQUIRE(data.size() > 500);
@@ -140,13 +138,45 @@ TEST_CASE("Booster descent drag reproduces the webcast telemetry of flights 4-8"
         sum_sq += error * error;
         ++n;
     }
+    // Below the speed readings (round dials: the booster's speed gives way to its engine icon at ~9 km) the 0.1 km
+    // altitude continues the comparison down to the landing burn (first lit engine icon after the descent peak).
+    double t_burn = 0.0;
+    for (const auto& s : data) {
+        if (s.t_s > t_ignition && s.engines_lit > 0) {
+            t_burn = s.t_s;
+            break;
+        }
+    }
+    // The webcast's speed and altitude graphics are offset against each other by ~1.5-2 s (the recorded altitude
+    // falls faster than the displayed speed allows), so the altitude part compares the altitude LOST since its
+    // first sample - that tests the transonic drag, not the offset.
+    double max_altitude_error_m = 0.0, offset_m = 0.0;
+    int n_altitude = 0;
+    for (const auto& s : data) {
+        if (s.t_s <= t_ignition - 2.0 || t_burn <= 0.0 || s.t_s > t_burn - 1.0 || s.altitude_m < 0.0) continue;
+        session.advance_to(t0 + (s.t_s - peak->t_s), 1000);
+        const auto tr = earth.fixed_to_gcrf(session.epoch());
+        const double height =
+            frames::fixed_to_geodetic(transpose(tr.rotation) * session.body(0).state().position_gcrf_m).height_m;
+        if (n_altitude == 0) offset_m = height - s.altitude_m;
+        max_altitude_error_m = std::max(max_altitude_error_m, std::abs(height - s.altitude_m - offset_m));
+        ++n_altitude;
+        if (std::getenv("STARSIM_VERBOSE") && n_altitude % 4 == 0) {
+            std::printf("  T+%.1f s  recorded %.1f km  simulated %.1f km\n", s.t_s, s.altitude_m / 1e3, height / 1e3);
+        }
+    }
+    if (std::getenv("STARSIM_VERBOSE") && n_altitude > 0) {
+        std::printf("%s: altitude lost to the landing burn (T+%.1f s): %d samples, max error %.0f m\n", file.c_str(), t_burn,
+                    n_altitude, max_altitude_error_m);
+    }
+    if (n_altitude > 0) CHECK(max_altitude_error_m < 500.0);  // 0.1 km readings, ~10-25 s of fall from ~9 km
     const double rms = std::sqrt(sum_sq / n);
     if (std::getenv("STARSIM_VERBOSE")) {
         std::printf("%s: start T+%.1f s at %.1f km, %.0f m/s (vertical %.0f); %d samples to T+%.1f s: rms %.1f %%, "
                     "max %.1f %%\n", file.c_str(), peak->t_s, h0 / 1e3, peak->speed_mps, vz0, n, t_ignition - 2.0,
                     100.0 * rms, 100.0 * max_error);
     }
-    CHECK(n > 40);
+    CHECK(n > 30);  // round dials: the speed dial gives way to the engine icon before the landing burn
     CHECK(rms < 0.03);
     CHECK(max_error < 0.06);
 }

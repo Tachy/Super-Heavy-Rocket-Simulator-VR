@@ -21,7 +21,6 @@ add_executable(starsim_core_tests
     test_eclipse.cpp
     test_vehicle_models.cpp
     test_flight_body.cpp
-    test_ift3_validation.cpp
     test_flight_session.cpp
     test_ascent_guidance.cpp
     test_lunar_transfer.cpp

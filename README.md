@@ -30,8 +30,8 @@ used only to identify the real-world systems the configurations approximate.
   Knudsen number, solar radiation pressure with Earth/Moon shadow.
 - Gravity: Earth, Moon and Sun point masses plus Earth J2 (every term switchable); DOP853 integrator with
   dense output and event location for coast arcs, 200 Hz RK4 ticks in powered flight.
-- Ascent validated against the Starship IFT-3 webcast telemetry: speed within 4.3 %, altitude within 7.9 %,
-  max-Q and Mach without calibration.
+- Vehicle data of the current Starship (V3) identified from our own transcription of the flight 12-14 webcasts
+  (speed, altitude, propellant gauges, engine icons): masses, thrust, booster descent drag (within ~1-3 %).
 
 **Guidance, navigation and control**
 - Ascent autopilot: launch azimuth with Earth-rotation correction, pitch kick, gravity turn, Powered Explicit
@@ -51,7 +51,7 @@ used only to identify the real-world systems the configurations approximate.
   predicted (orange) trajectories, delta-v bars for burns.
 
 **Data-driven and free**
-- Vehicles (Starship blocks 1-3, Falcon 9 for comparison), engines, aero tables, launch sites (Starbase,
+- Vehicles (current Starship V3, Falcon 9 for comparison), engines, aero tables, launch sites (Starbase,
   LC-39A) and missions are TOML/CSV configuration with provenance tags ([S] sourced, [E] estimate,
   [D] derived); `tools/vehicle_report.py` prints mass and delta-v budgets.
 - Only free data and tools; every source and its licence is recorded and `CREDITS.md` is generated.

@@ -18,7 +18,7 @@ nozzle_exit_diameter_m = 2.4         # [E] as RVac 2
 max_ambient_pressure_pa = 5000.0     # [E]
 
 [throttle]
-min = 0.40                           # [E]
+min = 0.30                           # [E] same powerhead as Raptor 3 (see raptor3.toml)
 max = 1.00
 rate_per_s = 0.5                     # [E]
 
