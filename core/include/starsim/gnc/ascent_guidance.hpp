@@ -1,5 +1,8 @@
 #pragma once
 
+#include <utility>
+#include <vector>
+
 #include <string>
 
 #include "starsim/math/vec3.hpp"
@@ -22,6 +25,9 @@ struct PitchProgram {
     // over the first 90 s (tuning test "[.tuning]"); later the faster V3 turns over more slowly.
     double kick_angle_rad = 10.0 * 3.14159265358979 / 180.0;
     double kick_duration_s = 12.0;
+    // First-stage throttle over mission time {t_s, fraction}, linearly interpolated, held beyond the ends (empty: full
+    // thrust). A guidance choice, not vehicle data - e.g. a max-Q bucket; the upper stage always flies full (PEG).
+    std::vector<std::pair<double, double>> booster_throttle;
 };
 
 enum class AscentPhase { Vertical, PitchKick, GravityTurn, ClosedLoop, Cutoff };
@@ -33,6 +39,7 @@ struct GuidanceCommand {
     AscentPhase phase = AscentPhase::Vertical;
     double time_to_go_s = 0.0;         // closed loop only
     bool cutoff = false;
+    double throttle = 1.0;             // open loop: PitchProgram::booster_throttle; closed loop: full
 };
 
 // Inertial launch azimuth (clockwise from north) for a target inclination from a given latitude,

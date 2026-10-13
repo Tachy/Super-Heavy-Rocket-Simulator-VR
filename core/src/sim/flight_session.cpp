@@ -601,7 +601,7 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     }
     const bool guided = autopilot_.state == AutopilotState::Booster || autopilot_.state == AutopilotState::UpperStage;
     if (guided || autopilot_.state == AutopilotState::Burn) {
-        const double throttle = guided ? 1.0 : burn_config_.throttle;
+        const double throttle = guided ? autopilot_.guidance.throttle : burn_config_.throttle;
         for (auto& group : command.groups) group.throttle = throttle;
         const auto& direction = guided ? autopilot_.guidance.thrust_direction_gcrf : autopilot_.burn.direction_gcrf;
         const auto& vehicle = flying.body->vehicle();

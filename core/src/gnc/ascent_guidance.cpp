@@ -102,7 +102,26 @@ void AscentGuidance::start(const vehicle::FlightBody& body, const frames::BodyOr
 
 GuidanceCommand AscentGuidance::update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                        time::Epoch epoch, bool closed_loop) {
-    return closed_loop ? peg(body, env, epoch) : open_loop(body, env, epoch);
+    if (closed_loop) return peg(body, env, epoch);
+    GuidanceCommand cmd = open_loop(body, env, epoch);
+    const auto& schedule = program_.booster_throttle;
+    const double t = epoch - liftoff_;
+    if (!schedule.empty()) {
+        if (t <= schedule.front().first) {
+            cmd.throttle = schedule.front().second;
+        } else if (t >= schedule.back().first) {
+            cmd.throttle = schedule.back().second;
+        } else {
+            for (size_t i = 1; i < schedule.size(); ++i) {
+                if (t > schedule[i].first) continue;
+                const auto& [t0, f0] = schedule[i - 1];
+                const auto& [t1, f1] = schedule[i];
+                cmd.throttle = f0 + (f1 - f0) * (t - t0) / (t1 - t0);
+                break;
+            }
+        }
+    }
+    return cmd;
 }
 
 GuidanceCommand AscentGuidance::open_loop(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,

@@ -1,16 +1,26 @@
-# Axial drag coefficient of the Falcon 9 Block 5 first stage falling engines first (tail first), reference area
-# pi*(d/2)^2 with d = 3.66 m, WITHOUT the grid fins (the vehicle model adds their drag from aero/grid_fin.csv).
-# [E] Tail-first cylinder estimate: the shape of the Super Heavy descent table (aero/super_heavy_descent.csv, also a
-# blunt base first). To be replaced by a table identified from Falcon 9 webcast telemetry (c1 Task 5).
+# Axial drag coefficient of the Falcon 9 Block 5 first stage falling engines first (tail first, legs stowed),
+# reference area pi*(d/2)^2 with d = 3.66 m, WITHOUT the grid fins (the vehicle model adds their axial drag from
+# aero/grid_fin.csv ca_axial, 4 x 1.8 m^2: 0.51-0.68 on this reference).
+# [D] Mach 0.9-4.8: identified from our webcast telemetry of CRS-35 (RTLS, 2026-10-13) and Starlink 15-25 (drone ship,
+# 2026-10-12) (tests/validation/telemetry, tools/telemetry/drag_estimate.py: D/m = -dv/dt - g sin(gamma) between the
+# entry and the landing burn), descent masses 37.5 / 41 t = dry 25.6 t + the stage's propellant gauge (3.0 / 3.9 % of
+# 395.7 t), minus the fins' share; the two flights agree within ~10 % except near Mach 2 (2.3 vs 2.7 total).
+# The high-altitude points (q < 2 kPa) scatter and are not used. [E] subsonic below Mach 0.9 and above Mach 4.8: held.
+# Power-on column: kept equal [E] (the burns are short and flown on 1-3 engines).
 mach,cd_axial_power_on,cd_axial_power_off
-0.0,0.900,0.900
-0.6,0.950,0.950
-0.8,1.000,1.000
-0.95,1.150,1.150
-1.1,1.450,1.450
-1.5,1.380,1.380
-2.0,1.420,1.420
-3.0,1.750,1.750
-5.0,1.880,1.880
-10.0,1.880,1.880
-25.0,1.880,1.880
+0.0,0.600,0.600
+0.6,0.620,0.620
+0.9,0.670,0.670
+1.0,0.770,0.770
+1.1,0.940,0.940
+1.2,1.120,1.120
+1.4,1.360,1.360
+1.65,1.550,1.550
+2.0,1.850,1.850
+2.4,2.100,2.100
+3.0,2.500,2.500
+3.6,2.620,2.620
+4.0,2.300,2.300
+4.8,2.100,2.100
+10.0,2.100,2.100
+25.0,2.100,2.100

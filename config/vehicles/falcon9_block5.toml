@@ -64,7 +64,7 @@ relight = false
 [stage.aero]
 reference_diameter_m = 3.66
 ascent_drag_table = "aero/falcon9_ascent.csv"
-descent_drag_table = "aero/falcon9_descent.csv"   # tail first
+descent_drag_table = "aero/falcon9_descent.csv"   # tail first [D] from webcast telemetry
 
 [stage.grid_fins]
 azimuths_deg = [45.0, 135.0, 225.0, 315.0]   # [E] four fins between the legs' azimuths
@@ -88,10 +88,12 @@ friction = 0.6
 
 [stage.recovery]
 method = "leg_landing"                       # pad (RTLS) or drone ship, chosen by the mission (user 2026-10-13)
-reserve_propellant_kg = 30000.0              # [E] MECO without return guidance
-landing_propellant_kg = 6000.0               # [E] at landing-burn ignition (c1 Task 5 derives it)
-nominal_meco_s = 150.0                       # [E]
-nominal_meco_altitude_m = 68000.0            # [E]
+# Propellant from the stage's gauge in our webcast telemetry (tests/validation/telemetry, % of 395.7 t):
+reserve_propellant_kg = 43000.0              # [D] MECO of a drone-ship return (Starlink 15-25: ~11 % at T+149 s);
+                                             # an RTLS keeps more (CRS-35: ~15.5 % = 61 t at T+137 s)
+landing_propellant_kg = 11300.0              # [D] at landing-burn ignition: 2.8-2.9 % on both flights
+nominal_meco_s = 137.0                       # [D] CRS-35 (RTLS); Starlink 15-25 (drone ship): 149 s
+nominal_meco_altitude_m = 56600.0            # [D] CRS-35; Starlink 15-25: 60 km
 
 [stage.rcs]
 type = "cold_gas"                            # nitrogen, two pods at the top
@@ -111,14 +113,17 @@ fairing_mass_kg = 1900.0                 # [S:wiki_f9]
 [[stage.tank]]
 id = "lox_main"
 contents = "oxidizer"
-mass_kg = 65150.0                        # [D] 92.67 t total [S:wiki_f9] split at O/F 2.36
+mass_kg = 75000.0                        # [D] 106.7 t total split at O/F 2.36: our CRS-35 webcast telemetry (G-force
+                                         # and stage-1 gauge at T+112-132 s) puts ~125 t above the first stage
+                                         # (12.5 t Dragon [E]); 92.67 t [S:wiki_f9] left the stack ~15 t light and
+                                         # the liftoff mass 520 t instead of 549 t [S:wiki_f9]
 base_station_m = 3.0                     # [E]
 
 [[stage.tank]]
 id = "rp1_main"
 contents = "fuel"
-mass_kg = 27520.0                        # [D]
-base_station_m = 8.4                     # [E]
+mass_kg = 31700.0                        # [D]
+base_station_m = 9.4                     # [E] above the longer LOX tank
 
 [[stage.engine_group]]
 id = "mvac"
