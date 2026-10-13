@@ -111,6 +111,8 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.aero.descent_drag_table = doc.text_or(*aero, "descent_drag_table");
         s.aero.crossflow_table = doc.text_or(*aero, "crossflow_table");
         s.aero.nose_length_m = doc.number_or(*aero, "nose_length_m", 0.0);
+        s.aero.flap_table = doc.text_or(*aero, "flap_table");
+        s.aero.belly_azimuth_rad = doc.number_or(*aero, "belly_azimuth_deg", 270.0) * constants::deg_to_rad;
     } else {
         s.aero.reference_diameter_m = s.diameter_m;
     }
@@ -130,6 +132,24 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.grid_fins.max_deflection_rad = doc.number(*fins, "max_deflection_deg") * constants::deg_to_rad;
         s.grid_fins.rate_rad_s = doc.number(*fins, "rate_deg_s") * constants::deg_to_rad;
         s.grid_fins.table = doc.text(*fins, "table");
+    }
+    if (auto flaps = t["flap"].as_array()) {
+        for (auto& node : *flaps) {
+            const auto* ft = node.as_table();
+            if (!ft) doc.fail("stage.flap entries must be tables");
+            config::FlapConfig f;
+            f.id = doc.text(*ft, "id");
+            f.hinge_azimuth_rad = doc.number(*ft, "hinge_azimuth_deg") * constants::deg_to_rad;
+            f.station_fwd_m = doc.number(*ft, "station_fwd_m");
+            f.station_aft_m = doc.number(*ft, "station_aft_m");
+            f.span_m = doc.number(*ft, "span_m");
+            f.area_m2 = doc.number(*ft, "area_m2");
+            f.max_deflection_rad = doc.number(*ft, "max_deflection_deg") * constants::deg_to_rad;
+            f.rate_rad_s = doc.number(*ft, "rate_deg_s") * constants::deg_to_rad;
+            f.initial_deflection_rad = doc.number_or(*ft, "initial_deflection_deg", 0.0) * constants::deg_to_rad;
+            s.flaps.push_back(f);
+        }
+        if (!s.flaps.empty() && s.aero.flap_table.empty()) doc.fail("stage.flap needs [stage.aero] flap_table");
     }
     if (auto pins = t["catch_pins"].as_table()) {
         const auto* azimuths = (*pins)["azimuths_deg"].as_array();

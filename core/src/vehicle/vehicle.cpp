@@ -82,6 +82,17 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
                                            fins.max_deflection_rad, fins.rate_rad_s, 0.0});
             }
         }
+        if (!stage_config.flaps.empty()) {
+            stage.flap_table =
+                std::make_shared<aero::FlapTable>(config::load_csv_table(config_dir / stage_config.aero.flap_table));
+            for (const auto& f : stage_config.flaps) {
+                stage.flaps.push_back({{station + f.station_fwd_m, station + f.station_aft_m, f.hinge_azimuth_rad,
+                                        0.5 * stage_config.diameter_m, f.span_m, f.area_m2,
+                                        stage_config.aero.belly_azimuth_rad},
+                                       f.max_deflection_rad, f.rate_rad_s,
+                                       std::clamp(f.initial_deflection_rad, 0.0, f.max_deflection_rad)});
+            }
+        }
         station += stage_config.length_m;
         stages_.push_back(std::move(stage));
     }
@@ -255,6 +266,24 @@ void Vehicle::update_grid_fins(double dt_s, const VehicleCommand& command) {
     }
 }
 
+void Vehicle::update_flaps(double dt_s, const VehicleCommand& command) {
+    size_t index = 0;
+    for (auto& stage : stages_) {
+        for (auto& flap : stage.flaps) {
+            const double target = index < command.flap_rad.size() ? command.flap_rad[index] : flap.deflection_rad;
+            flap.deflection_rad = approach(flap.deflection_rad, std::clamp(target, 0.0, flap.max_deflection_rad),
+                                           flap.rate_rad_s * dt_s);
+            ++index;
+        }
+    }
+}
+
+size_t Vehicle::flap_count() const {
+    size_t n = 0;
+    for (const auto& stage : stages_) n += stage.flaps.size();
+    return n;
+}
+
 size_t Vehicle::grid_fin_count() const {
     size_t n = 0;
     for (const auto& stage : stages_) n += stage.grid_fins.size();
@@ -351,6 +380,10 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
         stage.base_station_m -= shift;
         for (auto& e : stage.engines) e.gimbal_point_m.x -= shift;
         for (auto& fin : stage.grid_fins) fin.geometry.station_m -= shift;
+        for (auto& flap : stage.flaps) {
+            flap.geometry.station_fwd_m -= shift;
+            flap.geometry.station_aft_m -= shift;
+        }
         upper->stages_.push_back(std::move(stage));
     }
     stages_.erase(stages_.begin() + static_cast<long>(index), stages_.end());

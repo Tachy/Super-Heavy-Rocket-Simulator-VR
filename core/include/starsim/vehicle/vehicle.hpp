@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "starsim/aero/flap.hpp"
 #include "starsim/aero/grid_fin.hpp"
 #include "starsim/aero/slender_body_aero.hpp"
 #include "starsim/config/vehicle_config.hpp"
@@ -45,6 +46,13 @@ struct GridFin {
     double deflection_rad = 0.0;     // actual (rate limited)
 };
 
+struct Flap {
+    aero::FlapGeometry geometry;     // stations in the vehicle body frame
+    double max_deflection_rad = 0.0;
+    double rate_rad_s = 0.0;
+    double deflection_rad = 0.0;     // actual (rate limited), 0 = folded leeward
+};
+
 struct Tank {
     config::TankConfig config;
     double density_kg_m3 = 0.0;
@@ -59,6 +67,8 @@ struct Stage {
     std::vector<Engine> engines;
     std::vector<GridFin> grid_fins;
     std::shared_ptr<const aero::GridFinTable> grid_fin_table;
+    std::vector<Flap> flaps;
+    std::shared_ptr<const aero::FlapTable> flap_table;
     double extra_mass_kg = 0.0;   // payload + fairing
 
     double propellant_kg(config::TankContents contents) const;
@@ -91,6 +101,8 @@ struct VehicleCommand {
     math::Vec3 rcs_force_fraction;
     // Grid fin deflections (rad), one per fin in stage order; missing entries mean neutral.
     std::vector<double> grid_fin_rad;
+    // Flap deflections (rad), one per flap in stage order; missing entries hold the current deflection.
+    std::vector<double> flap_rad;
 };
 
 // Stack of stages with engines, tanks and aerodynamics. Owns no kinematic state (see FlightBody).
@@ -114,6 +126,9 @@ public:
     // Grid fin actuators for one tick (deflection and rate limits).
     void update_grid_fins(double dt_s, const VehicleCommand& command);
     size_t grid_fin_count() const;
+    // Flap actuators for one tick (range [0, max] and rate limits).
+    void update_flaps(double dt_s, const VehicleCommand& command);
+    size_t flap_count() const;
 
     // Total propellant mass flow per tank (index: stage, tank) for the current engine state.
     std::vector<std::vector<double>> tank_mass_flows_kgps() const;

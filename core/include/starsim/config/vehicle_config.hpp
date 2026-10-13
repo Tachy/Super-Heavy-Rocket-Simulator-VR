@@ -67,6 +67,21 @@ struct AeroConfig {
     std::string descent_drag_table; // tail-first flight (booster return); empty = mirror the ascent table
     std::string crossflow_table;    // hull cross-flow eta * C_dc over Mach; used when the stage flies alone
     double nose_length_m = 0.0;     // ogive nose (0 = flat top, e.g. a booster)
+    std::string flap_table;         // flap normal-force table (mach, cn_max), path relative to config/
+    double belly_azimuth_rad = 1.5 * 3.14159265358979323846;  // body direction of the heat shield (default -z)
+};
+
+// One flap of a stage (Starship): flat plate hinged along the hull side, see aero/flap.hpp.
+struct FlapConfig {
+    std::string id;
+    double hinge_azimuth_rad = 0.0;  // from body +y towards +z
+    double station_fwd_m = 0.0;      // from the bottom of the stage
+    double station_aft_m = 0.0;
+    double span_m = 0.0;
+    double area_m2 = 0.0;
+    double max_deflection_rad = 0.0;
+    double rate_rad_s = 0.0;
+    double initial_deflection_rad = 0.0;
 };
 
 // Grid fins of a stage (aerodynamic control surfaces, e.g. for the booster's return).
@@ -114,6 +129,7 @@ struct StageConfig {
     AeroConfig aero;
     GridFinConfig grid_fins;  // empty azimuths: none
     CatchPinConfig catch_pins;  // empty azimuths: none
+    std::vector<FlapConfig> flaps;
 };
 
 struct VehicleConfig {

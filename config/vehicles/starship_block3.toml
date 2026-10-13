@@ -150,12 +150,58 @@ relight = true
 [stage.aero]
 reference_diameter_m = 9.0
 crossflow_table = "aero/ship_crossflow.csv"  # belly-first entry [D]
+flap_table = "aero/flap.csv"
+belly_azimuth_deg = 270.0                # heat shield towards body -z
 nose_length_m = 17.0                     # ogive nose cone [E]
 flaps = 4
+
+# Flaps [E]: Block 3 aft flaps ~12 m x 4 m, forward flaps smaller and moved leeward (Block 2 on); hinges on the
+# hull sides (belly at body -z). 0 deg = folded leeward (edge-on to a belly-first flow), 90 deg = in the belly
+# plane (broadside). Rates [E]: electric actuators, ~20 deg/s.
+[[stage.flap]]
+id = "aft_right"
+hinge_azimuth_deg = 0.0
+station_fwd_m = 14.0
+station_aft_m = 2.0
+span_m = 4.0
+area_m2 = 48.0
+max_deflection_deg = 90.0
+rate_deg_s = 20.0
+
+[[stage.flap]]
+id = "aft_left"
+hinge_azimuth_deg = 180.0
+station_fwd_m = 14.0
+station_aft_m = 2.0
+span_m = 4.0
+area_m2 = 48.0
+max_deflection_deg = 90.0
+rate_deg_s = 20.0
+
+[[stage.flap]]
+id = "forward_right"
+hinge_azimuth_deg = 20.0                 # moved leeward (Block 2 on)
+station_fwd_m = 46.0
+station_aft_m = 38.0
+span_m = 3.0
+area_m2 = 24.0
+max_deflection_deg = 90.0
+rate_deg_s = 20.0
+
+[[stage.flap]]
+id = "forward_left"
+hinge_azimuth_deg = 160.0
+station_fwd_m = 46.0
+station_aft_m = 38.0
+span_m = 3.0
+area_m2 = 24.0
+max_deflection_deg = 90.0
+rate_deg_s = 20.0
 
 [stage.recovery]
 method = "tower_catch"
 reserve_propellant_kg = 30000.0          # [E]
+landing_propellant_kg = 25000.0          # [E] header tanks: flip and landing burn
 heat_shield_mass_kg = 10500.0            # [E] Block 1 figure
 
 [stage.rcs]

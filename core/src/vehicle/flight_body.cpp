@@ -103,6 +103,19 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
             f.moment_body_nm += cross(arm, force.force_body_n);
         }
     }
+    // Flaps: local flow at each flap centroid including the rotation.
+    for (const auto& stage : ctx.vehicle.stages()) {
+        if (!stage.flap_table) continue;
+        for (const auto& flap : stage.flaps) {
+            const Vec3 arm =
+                aero::flap_centroid(flap.geometry, flap.deflection_rad) - Vec3{f.mass.cg_station_m, 0.0, 0.0};
+            const Vec3 flap_velocity = air_velocity_body + cross(s.angular_velocity_body_radps, arm);
+            const auto force =
+                aero::flap_force(flap.geometry, flap.deflection_rad, flap_velocity, fin_air, *stage.flap_table);
+            f.nongravitational_body_n += force.force_body_n;
+            f.moment_body_nm += cross(arm, force.force_body_n);
+        }
+    }
     f.moment_body_nm += ctx.rcs_torque_nm;
     f.nongravitational_body_n += ctx.rcs_force_n;
     f.moment_body_nm += ctx.external_torque_body_nm;
@@ -236,6 +249,7 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     const auto geodetic = frames::fixed_to_geodetic(transpose(transform.rotation) * state_.position_gcrf_m);
     vehicle_->update_engines(dt_s, command, env.atmosphere.at(geodetic.height_m).pressure_pa);
     vehicle_->update_grid_fins(dt_s, command);
+    vehicle_->update_flaps(dt_s, command);
     update_air_data(env, epoch);
 
     if (clamped_ || caught_) {
