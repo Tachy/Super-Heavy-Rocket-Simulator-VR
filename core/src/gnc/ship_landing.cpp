@@ -14,6 +14,7 @@ using math::Vec3;
 namespace {
 
 constexpr double deg = constants::deg_to_rad;
+constexpr double no_sink_limit_mps = 1.0e3;  // an engine-set switch without a sink window
 constexpr double catch_missed_height_m = 5.0;  // CG this far below the catch point: the catch is over (as the booster)
 
 Vec3 up_at(double latitude_rad, double longitude_rad) {
@@ -28,24 +29,18 @@ ShipLandingParameters ship_landing_parameters() {
     auto& s = p.scvx;
     s.snapshot.phase_groups = {std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2", "ship/sea_level_3"},
                                std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"},
-                               std::vector<std::string>{"ship/sea_level_1"}};
+                               std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"}};
     s.snapshot.reserve_kg = 1000.0;  // [E] the ship's landing propellant is small (header tanks)
     // [E] lateral LQR effort: the booster's 0.2 swung the ship's gimbals stop to stop after the flip (20 deg/s slew)
     s.lateral_effort_fraction = 0.1;
-    // [E] the last engine alone: its thrust axis is ~3 deg off the hull; a firmer final-set LQR and leaning the hull over
-    // during the 1.5 s before the 2 -> 1 switch (thrust centroid moves 0.87 x ring radius) keep the arrival within ~0.5 m
-    s.final_lateral_effort_fraction = 0.3;
-    s.switch_prerotation_s = 1.5;
     auto& l = s.settings.limits;
-    l.tilt_max_rad = {20.0 * deg, 15.0 * deg, 8.0 * deg};  // [E] the more engines, the more gimbal authority
-    l.rate_max_radps = {0.3, 0.2, 0.1};                    // [E] the ship is shorter and lighter than the booster
-    // [E] 3 -> 2 while still sinking fast; 2 -> 1 only when nearly hovering just above the arms (user 2026-10-13: one
-    // engine only for the last moments - at ~268 t one Raptor 3 gives thrust/weight ~1.01, it can hold, not brake).
+    l.tilt_max_rad = {20.0 * deg, 15.0 * deg, 15.0 * deg};  // [E] the more engines, the more gimbal authority
+    l.rate_max_radps = {0.3, 0.2, 0.2};                     // [E] the ship is shorter and lighter than the booster
     // 3 -> 2 at 20-40 m/s sink [D]: flight 14 video shows two engines from ~200 m (user 2026-10-13), where flights
-    // 13/14 sank at 31 / 35 m/s (webcast telemetry).
-    l.switches = {{{0.0, 0.0, 20.0, 40.0}, {3.0 * deg, 0.03, 0.3, 2.0}}};
-    l.throttle_margin = 0.03;          // [E] the last engine needs ~96 % to hover
-    l.terminal_thrust_margin = 1.0;    // no "gentle end" cap: one engine at minimum is far below the weight
+    // 13/14 sank at 31 / 35 m/s (webcast telemetry). The planner's third phase flies the same pair (no switch).
+    l.switches = {{{0.0, 0.0, 20.0, 40.0}, {0.0, 0.0, 0.0, no_sink_limit_mps}}};
+    l.throttle_margin = 0.05;          // [E]
+    l.terminal_thrust_margin = 1.0;    // no "gentle end" cap: two engines at minimum are below the weight
     return p;
 }
 

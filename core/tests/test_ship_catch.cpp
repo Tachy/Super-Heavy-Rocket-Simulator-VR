@@ -5,6 +5,10 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
+#include <random>
+#include <string>
+#include <vector>
 
 #include "return_scenario.hpp"
 #include "starsim/config/launch_site_config.hpp"
@@ -50,7 +54,12 @@ struct Gate {
     double height_m = 950.0;           // CG above the pad (flight 13 relit at ~0.95 km)
     Vec3 velocity_enu_mps{3.0, 0.0, -100.0};
     double alpha_deg = 80.0;           // belly first into the flow
-    double propellant_kg = 30000.0;
+    double bank_deg = 0.0;
+    // Air velocity the attitude is built from (alpha, bank; the nose heads along its horizontal part): the entry
+    // guidance turns the nose to the tower, a dispersed gate velocity must not turn it ("": the gate velocity).
+    std::optional<Vec3> attitude_velocity_enu_mps;
+    std::string failed_group;          // this engine fails 1 s into the flip ("": none)
+    double propellant_kg = 35000.0;    // the ship's landing_propellant_kg [E]
     gnc::ShipLandingParameters parameters = gnc::ship_landing_parameters();
 };
 
@@ -63,11 +72,21 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
     auto state = test::state_over_site(session.launch_site(), earth(), t0, gate.offset_enu_m + Vec3{0.0, 0.0, gate.height_m},
                                        gate.velocity_enu_mps);
     const auto t = earth().fixed_to_gcrf(t0);
-    const Vec3 v_rel = state.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), state.position_gcrf_m);
+    const auto attitude_state = test::state_over_site(session.launch_site(), earth(), t0,
+                                                      gate.offset_enu_m + Vec3{0.0, 0.0, gate.height_m},
+                                                      gate.attitude_velocity_enu_mps.value_or(gate.velocity_enu_mps));
+    const Vec3 v_rel = attitude_state.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), state.position_gcrf_m);
     state.attitude = gnc::entry_attitude_quaternion(v_rel, math::normalized(state.position_gcrf_m), gate.alpha_deg * deg,
-                                                    0.0, cfg.stages[0].aero.belly_azimuth_rad);
+                                                    gate.bank_deg * deg, cfg.stages[0].aero.belly_azimuth_rad);
     state.angular_velocity_body_radps = state.attitude.inverse_rotate(vehicle::earth_rotation_vector(t));
     session.place_landing_ship(cfg, state, t0, gate.parameters);
+    if (!gate.failed_group.empty()) {
+        session.advance_to(t0 + 1.0, 1000);
+        const auto& engines = session.body(0).vehicle().stages().front().engines;
+        for (size_t i = 0; i < engines.size(); ++i) {
+            if (engines[i].group_id == gate.failed_group) session.fail_engine(0, 0, i);
+        }
+    }
     const auto run = test::fly_landing(session, earth(), t0, 120.0);
     const auto* g = session.ship_landing(0);
     if (g) std::printf("flip %.1f s, ends at %.0f m; ", g->flip_duration_s(), g->flip_end_height_m());
@@ -82,15 +101,58 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
 
 }  // namespace
 
-TEST_CASE("Ship flips at the gate and is caught", "[ship][landing][catch]") {
-    // gate back along the line pad -> tower (azimuth 315 deg), nose to the tower: the flip pushes towards it and the
-    // side pins lie across the arms without a roll
+// Gate back along the line pad -> tower (azimuth 315 deg), nose to the tower: the flip pushes towards it and the side
+// pins lie across the arms without a roll.
+static Gate nominal_gate() {
     Gate g;
     const Vec3 to_tower{std::sin(315.0 * deg), std::cos(315.0 * deg), 0.0};
     g.offset_enu_m = to_tower * -220.0;
     g.velocity_enu_mps = to_tower * 3.0 + Vec3{0.0, 0.0, -100.0};
-    const auto run = fly_from_gate(g);
+    return g;
+}
+
+TEST_CASE("Ship flips at the gate and is caught", "[ship][landing][catch]") {
+    const auto run = fly_from_gate(nominal_gate());
     CHECK(run.caught_within_tolerance());
     CHECK_FALSE(run.tower_struck);
     CHECK(run.outcome == sim::LandingOutcome::Caught);
+}
+
+// Dispersed gate states (fixed seeds): the entry guidance's gate accuracy is metres (b2 campaign), the belly flop adds
+// wind-free scatter; +-10 m per axis, +-10 m/s per axis, landing propellant +-5 %, alpha and bank +-5 deg. One case
+// loses the first engine to be dropped (sea_level_3) in the flip: the switch to two engines comes early.
+TEST_CASE("Ship catch campaign: gate dispersions and an engine failure", "[ship][catch][validation]") {
+    std::vector<Gate> cases;
+    for (unsigned seed = 1; seed <= 20; ++seed) {
+        std::mt19937 rng(seed);
+        std::uniform_real_distribution<double> unit(-1.0, 1.0);
+        Gate g = nominal_gate();
+        g.attitude_velocity_enu_mps = g.velocity_enu_mps;  // nose to the tower
+        g.offset_enu_m += Vec3{10.0 * unit(rng), 10.0 * unit(rng), 0.0};
+        g.height_m += 10.0 * unit(rng);
+        g.velocity_enu_mps += Vec3{10.0 * unit(rng), 10.0 * unit(rng), 10.0 * unit(rng)};
+        g.propellant_kg *= 1.0 + 0.05 * unit(rng);
+        g.alpha_deg += 5.0 * unit(rng);
+        g.bank_deg = 5.0 * unit(rng);
+        cases.push_back(g);
+    }
+    Gate failure = nominal_gate();
+    failure.failed_group = "ship/sea_level_3";
+    cases.push_back(failure);
+
+    int caught = 0;
+    for (size_t i = 0; i < cases.size(); ++i) {
+        CAPTURE(i);
+        std::printf("case %2zu: ", i);
+        const auto run = fly_from_gate(cases[i]);
+        std::fflush(stdout);
+        CHECK_FALSE(run.tower_struck);  // never, in any case
+        if (run.caught_within_tolerance()) {
+            ++caught;
+        } else {
+            CHECK((run.outcome == sim::LandingOutcome::Splashdown || run.outcome == sim::LandingOutcome::Landed));
+        }
+    }
+    std::printf("caught %d of %zu\n", caught, cases.size());
+    CHECK(caught >= 19);  // >= 90 % of 21, as the booster
 }

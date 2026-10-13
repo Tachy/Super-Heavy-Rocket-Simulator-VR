@@ -23,8 +23,8 @@ struct ShipLandingParameters {
     ScvxLandingParameters scvx;                                  // ship preset: ship_landing_parameters()
 };
 
-// The ship's preset: engine phases 3 -> 2 -> 1 (user 2026-10-13) and planning limits for a ship whose last engine
-// barely holds it (one Raptor 3 2.75 MN at sea level vs ~265 t: thrust/weight ~1.04).
+// The ship's preset: engine phases 3 -> 2 (user 2026-10-13, flight 13/14 videos: the belly engine shuts down, the
+// leeward pair lands; its thrust centroid lies in the symmetry plane) and planning limits for the ship.
 ShipLandingParameters ship_landing_parameters();
 
 // From the gate (belly down, ~100 m/s sink):
