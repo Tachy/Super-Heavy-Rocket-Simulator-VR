@@ -30,6 +30,7 @@ add_executable(starsim_core_tests
     test_flaps.cpp
     test_entry_heating.cpp
     test_entry_attitude.cpp
+    test_entry_guidance.cpp
     test_ship_entry.cpp
     test_ship_entry_telemetry.cpp
     test_optim_sparse.cpp

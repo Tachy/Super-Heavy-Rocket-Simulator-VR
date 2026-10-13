@@ -288,7 +288,8 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
         heat_load_j_m2_ += heat_rate_w_m2_ * dt_s;
         peak_heat_rate_w_m2_ = std::max(peak_heat_rate_w_m2_, heat_rate_w_m2_);
         const Forces end = evaluate(ctx, dt_s, state_);
-        const double load_g = norm(end.aero_body_n) / end.mass.mass_kg / constants::standard_gravity_mps2;
+        aero_acceleration_body_mps2_ = end.aero_body_n / end.mass.mass_kg;
+        const double load_g = norm(aero_acceleration_body_mps2_) / constants::standard_gravity_mps2;
         if (heat_rate_w_m2_ > shield.max_heat_rate_w_m2 || heat_load_j_m2_ > shield.max_heat_load_j_m2) {
             breakup_reason_ = "Hitzeschild versagt";
         } else if (shield.max_load_g > 0.0 && load_g > shield.max_load_g) {

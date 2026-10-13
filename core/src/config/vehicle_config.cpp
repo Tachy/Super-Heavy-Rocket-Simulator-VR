@@ -112,6 +112,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.aero.crossflow_table = doc.text_or(*aero, "crossflow_table");
         s.aero.nose_length_m = doc.number_or(*aero, "nose_length_m", 0.0);
         s.aero.flap_table = doc.text_or(*aero, "flap_table");
+        s.aero.entry_alpha_table = doc.text_or(*aero, "entry_alpha_table");
         s.aero.belly_azimuth_rad = doc.number_or(*aero, "belly_azimuth_deg", 270.0) * constants::deg_to_rad;
     } else {
         s.aero.reference_diameter_m = s.diameter_m;

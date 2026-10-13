@@ -153,6 +153,7 @@ relight = true
 reference_diameter_m = 9.0
 crossflow_table = "aero/ship_crossflow.csv"  # belly-first entry [D]
 flap_table = "aero/flap.csv"
+entry_alpha_table = "aero/ship_entry_alpha.csv"  # nominal entry angle of attack over Mach [D]
 belly_azimuth_deg = 270.0                # heat shield towards body -z
 nose_length_m = 17.0                     # ogive nose cone [E]
 flaps = 4

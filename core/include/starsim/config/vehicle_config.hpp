@@ -69,6 +69,7 @@ struct AeroConfig {
     double nose_length_m = 0.0;     // ogive nose (0 = flat top, e.g. a booster)
     std::string flap_table;         // flap normal-force table (mach, cn_max), path relative to config/
     double belly_azimuth_rad = 1.5 * 3.14159265358979323846;  // body direction of the heat shield (default -z)
+    std::string entry_alpha_table;  // nominal entry angle of attack over Mach (mach, alpha_deg); entry guidance
 };
 
 // One flap of a stage (Starship): flat plate hinged along the hull side, see aero/flap.hpp.

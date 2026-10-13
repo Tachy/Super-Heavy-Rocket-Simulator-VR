@@ -60,6 +60,9 @@ struct EntrySample {
     vehicle::FlightTelemetry telemetry;
     double drag_mps2 = 0.0;  // along the relative velocity
     double lift_vertical_mps2 = 0.0;
+    // Accelerometer (aerodynamic acceleration) split along / across the air velocity.
+    double aero_drag_mps2 = 0.0;
+    double aero_lift_mps2 = 0.0;
 };
 
 // Commanded angle of attack and bank from the current telemetry.
@@ -124,6 +127,10 @@ public:
                     sample.drag_mps2 = -dot(a - g, u);
                     (void)up;
                 }
+                const math::Vec3 a_aero = s.attitude.rotate(body_->aero_acceleration_body_mps2());
+                const math::Vec3 u_air = math::normalized(v_rel);
+                sample.aero_drag_mps2 = -dot(a_aero, u_air);
+                sample.aero_lift_mps2 = norm(a_aero + u_air * sample.aero_drag_mps2);
                 previous_v_rel = v_rel;
                 samples.push_back(sample);
                 if (t.altitude_m < 40000.0 && t.mach < until_mach) break;

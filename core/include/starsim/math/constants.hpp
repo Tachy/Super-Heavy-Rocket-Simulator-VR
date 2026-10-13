@@ -29,6 +29,11 @@ inline constexpr double j2000_julian_date = 2451545.0;
 inline constexpr double wgs84_semi_major_axis_m = 6378137.0;
 inline constexpr double wgs84_flattening = 1.0 / 298.257223563;
 
+// Earth gravitational parameter (IERS Conventions 2010, TT-compatible) and nominal rotation rate (WGS84,
+// NIMA TR8350.2). For onboard models that must not call SPICE (entry guidance prediction).
+inline constexpr double earth_gm_m3ps2 = 3.986004418e14;
+inline constexpr double earth_rotation_rate_radps = 7.292115e-5;
+
 // Earth second zonal harmonic J2 (unnormalised), EGM2008: C20 = -4.84165143790815e-4 normalised.
 inline constexpr double earth_j2 = 1.0826267e-3;
 

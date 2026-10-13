@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "ship_entry_scenario.hpp"
+#include "starsim/gnc/entry_aero_table.hpp"
 
 using namespace starsim;
 
@@ -100,18 +101,7 @@ double interpolate(const std::vector<double>& x, const std::vector<double>& y, d
     return y[i - 1] + f * (y[i] - y[i - 1]);
 }
 
-struct AlphaSchedule {
-    std::vector<double> mach, alpha_rad;
-    double at(double m) const { return interpolate(mach, alpha_rad, m); }
-};
-
-AlphaSchedule alpha_schedule() {
-    const auto table = config::load_csv_table(std::filesystem::path(STARSIM_CONFIG_DIR) / "aero/ship_entry_alpha.csv");
-    AlphaSchedule s;
-    s.mach = table.column("mach");
-    for (double a : table.column("alpha_deg")) s.alpha_rad.push_back(a * deg);
-    return s;
-}
+gnc::AlphaSchedule alpha_schedule() { return gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, "aero/ship_entry_alpha.csv"); }
 
 struct ReplayResult {
     double speed_rms = 0.0;      // relative, speed over time above Mach 3 (the bank holds the recorded altitude)
