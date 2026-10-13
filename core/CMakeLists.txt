@@ -31,6 +31,7 @@ add_library(starsim_core STATIC
     src/gnc/descent_replanner.cpp
     src/gnc/descent_tracking.cpp
     src/gnc/scvx_landing.cpp
+    src/gnc/ship_landing.cpp
     src/gnc/tvc_lateral.cpp
     src/gnc/attitude_slew.cpp
     src/gnc/entry_aero_table.cpp

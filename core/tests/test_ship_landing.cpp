@@ -3,10 +3,16 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <memory>
 #include <set>
 #include <string>
 
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/environment/atmosphere.hpp"
+#include "starsim/gnc/descent_planner.hpp"
+#include "starsim/gnc/ship_landing.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
@@ -48,3 +54,68 @@ TEST_CASE("Ship has three single sea-level engine groups and catch pins", "[ship
     CHECK(ship.catch_pins.station_m > 30.0);
     CHECK(ship.catch_pins.station_m < 38.0);  // below the forward flaps (38-46 m)
 }
+
+namespace {
+
+// The ship after the flip: landing propellant (30 t) minus the flip (~3 t), model built like the flight will build it.
+struct Ship {
+    std::unique_ptr<vehicle::Vehicle> vehicle;
+    environment::Us76Atmosphere atmosphere;
+    gnc::DescentModel model;
+};
+
+std::unique_ptr<Ship> ship_after_flip(double propellant_kg = 27000.0) {
+    auto s = std::make_unique<Ship>();
+    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    cfg.stages.erase(cfg.stages.begin());
+    double full = 0.0;
+    for (const auto& tank : cfg.stages[0].tanks) full += tank.mass_kg;
+    for (auto& tank : cfg.stages[0].tanks) tank.mass_kg *= propellant_kg / full;
+    s->vehicle = std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR);
+    gnc::DescentModelInputs in;
+    in.vehicle = s->vehicle.get();
+    in.phase_groups = gnc::ship_landing_parameters().scvx.snapshot.phase_groups;
+    in.atmosphere = &s->atmosphere;
+    in.site_height_m = 10.0;
+    const double lat = 26.0 * deg;
+    in.gravity_mps2 = {-9.79, 0.0, 0.0};
+    in.earth_rate_radps = math::Vec3{std::sin(lat), 0.0, std::cos(lat)} * 7.2921150e-5;
+    in.earth_center_m = {-6.374e6, 0.0, 0.0};
+    s->model = gnc::make_descent_model(in);
+    return s;
+}
+
+}  // namespace
+
+// After the flip (relight at the 800 m gate [D: flights 13/14 relit between 1 and 0.5 km at ~100 m/s]).
+TEST_CASE("SCvx plans a ship catch from after the flip", "[ship][landing]") {
+    const auto ship = ship_after_flip();
+    gnc::DescentTarget target;
+    target.goal = gnc::DescentGoal::Catch;
+    const double pin_station = ship->vehicle->stages()[0].config.catch_pins.station_m;
+    const double cg = ship->vehicle->mass_properties().cg_station_m;
+    target.position_m = {96.0 - (pin_station - cg), 0.0, 0.0};  // pins 1 m above the 95 m arm tops
+    target.velocity_mps = {-1.0, 0.0, 0.0};
+    auto settings = gnc::ship_landing_parameters().scvx.settings;
+    settings.limits.min_mass_kg = ship->vehicle->mass_properties().mass_kg - ship->vehicle->propellant_kg() + 1000.0;
+    const auto x0 = gnc::make_state(ship->vehicle->mass_properties().mass_kg, {650.0, 20.0, -10.0}, {-85.0, 3.0, 0.0},
+                                    math::Quat::from_axis_angle({0.0, 0.0, 1.0}, 5.0 * deg), {});
+    const auto plan = gnc::plan_descent(ship->model, x0, 0, target, settings, nullptr, 0.0);
+    const auto& d = plan.reference.duration_s;
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("ship scvx: converged %d, %d iterations, vc %.2e, durations %.1f + %.1f + %.1f s, final mass %.1f t\n",
+                    plan.converged, plan.iterations, plan.virtual_control, d[0], d[1], d[2],
+                    gnc::state_position(plan.reference.x.back()).x * 0.0 + plan.reference.x.back()[0] / 1000.0);
+        const auto& sets = ship->model.engine_sets;
+        for (int p = 0; p < gnc::descent_phases; ++p) {
+            std::printf("  set %d: thrust %.2f .. %.2f MN\n", p, sets[static_cast<size_t>(p)].thrust_min_n / 1e6,
+                        sets[static_cast<size_t>(p)].thrust_max_n / 1e6);
+        }
+    }
+    REQUIRE(plan.converged);
+    CHECK(d[0] > 0.0);
+    CHECK(d[1] > 0.0);
+    CHECK(d[2] > 0.0);
+    CHECK(norm(gnc::state_position(plan.reference.x.back()) - target.position_m) < 0.5);
+}
+
