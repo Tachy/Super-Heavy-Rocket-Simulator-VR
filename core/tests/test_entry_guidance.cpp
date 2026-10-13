@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "ship_entry_scenario.hpp"
+#include "starsim/gnc/belly_flop.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
@@ -226,5 +227,69 @@ TEST_CASE("Guided 6-DOF entry reaches the belly-flop hand-over on course", "[shi
     CHECK_FALSE(scenario.body().impacted());
     CHECK(std::abs(last.command.downrange_error_m) < 3000.0);
     CHECK(std::abs(last.command.crossrange_m) < 3000.0);
+}
+
+
+TEST_CASE("Belly flop attitude points the belly down, tilted away", "[ship][guidance]") {
+    const math::Vec3 up{0.0, 0.0, 1.0}, nose{1.0, 0.0, 0.0}, h{0.0, 1.0, 0.0};
+    const double belly_azimuth = 270.0 * deg, tilt = 10.0 * deg;
+    const auto a = gnc::belly_flop_attitude(up, nose, h, tilt, belly_azimuth);
+    const math::Vec3 z = cross(a.axis_gcrf, a.roll_reference_gcrf);
+    const math::Vec3 belly = a.roll_reference_gcrf * std::cos(belly_azimuth) + z * std::sin(belly_azimuth);
+    CHECK(std::abs(dot(belly, -up) - std::cos(tilt)) < 1e-12);
+    CHECK(std::abs(dot(belly, h) + std::sin(tilt)) < 1e-12);  // tilted away: the force pushes towards h
+    CHECK(std::abs(dot(a.axis_gcrf, nose) - 1.0) < 1e-12);    // sideways tilt keeps the nose level
+
+    // a tilt towards the nose pitches it down (angle of attack 90 deg - tilt)
+    const auto pitched = gnc::belly_flop_attitude(up, nose, nose, tilt, belly_azimuth);
+    CHECK(std::abs(dot(pitched.axis_gcrf, -up) - std::sin(tilt)) < 1e-12);
+
+    // slew limiter: at most the given angle per call, exact when within it
+    const math::Quat from{}, to = math::Quat::from_axis_angle({0.0, 0.0, 1.0}, 30.0 * deg);
+    const math::Quat step = gnc::slew_toward(from, to, 5.0 * deg);
+    CHECK(std::abs(2.0 * std::acos(step.w) - 5.0 * deg) < 1e-9);
+    CHECK(gnc::slew_toward(from, to, 40.0 * deg).w == to.w);
+}
+
+TEST_CASE("Belly flop steers to the gate", "[ship][guidance]") {
+    test::EntryStart start;
+    start.height_m = 12000.0;
+    start.speed_relative_mps = 120.0;
+    start.flight_path_angle_rad = -85.0 * deg;
+    start.heading_rad = 0.0;  // moving north (as after the entry: the gate ahead, slightly off the track)
+    test::ShipEntryScenario scenario(start);
+    const double along_m = 2000.0, across_m = 500.0;  // gate point north and east of the start's ground point
+    const frames::GeodeticPosition target_geodetic{
+        start.latitude_rad + along_m / constants::wgs84_semi_major_axis_m,
+        across_m / (constants::wgs84_semi_major_axis_m * std::cos(start.latitude_rad)), 0.0};
+    const gnc::EntryTarget target{frames::geodetic_to_fixed(target_geodetic), 0.0};
+    gnc::EntryGuidance guidance(scenario.body(), ship_alpha_schedule(), target, test_parameters());
+    guidance.skip_to(gnc::EntryPhase::BellyFlop);
+    const auto samples = scenario.run_guided(guidance, gnc::EntryPhase::Gate, 600.0);
+    REQUIRE_FALSE(samples.empty());
+
+    const auto& body = scenario.body();
+    const math::Vec3 up_gcrf = math::normalized(body.state().position_gcrf_m);
+    const double az = body.vehicle().stages().front().config.aero.belly_azimuth_rad;
+    const math::Vec3 belly = body.state().attitude.rotate({0.0, std::cos(az), std::sin(az)});
+    const double belly_off_down = std::acos(std::clamp(dot(belly, -up_gcrf), -1.0, 1.0));
+    const double miss = gnc::ground_range_m(scenario.position_itrf_m(), target.position_itrf_m);
+    const auto& t = samples.back().telemetry;
+    if (verbose()) {
+        for (size_t i = 0; i < samples.size(); i += 10) {
+            const auto& g = samples[i];
+            std::cout << "t " << g.t_s << " h " << g.telemetry.altitude_m << " v " << g.telemetry.speed_relative_mps
+                      << " gamma " << g.telemetry.flight_path_angle_rad / deg << " aoa "
+                      << g.telemetry.angle_of_attack_rad / deg << " zem " << g.command.downrange_error_m << " / "
+                      << g.command.crossrange_m << " alpha cmd " << g.command.alpha_rad / deg << "\n";
+        }
+        std::cout << "gate: " << samples.back().t_s << " s, h " << t.altitude_m << " m, miss " << miss << " m, sink "
+                  << -t.vertical_speed_mps << " m/s, belly " << belly_off_down / deg << " deg off down\n";
+    }
+    CHECK(guidance.phase() == gnc::EntryPhase::Gate);
+    CHECK_FALSE(body.impacted());
+    CHECK(miss < 50.0);
+    CHECK(belly_off_down < 15.0 * deg);
+    CHECK(-t.vertical_speed_mps < 200.0);
 }
 

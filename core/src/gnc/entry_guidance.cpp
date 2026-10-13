@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "starsim/environment/atmosphere.hpp"
+#include "starsim/gnc/belly_flop.hpp"
 #include "starsim/frames/geodetic.hpp"
 
 namespace starsim::gnc {
@@ -182,6 +183,58 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     command_.constrained = s.constrained;
 }
 
+void EntryGuidance::belly_flop(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const Vec3& r_itrf,
+                               const Vec3& v_itrf, double height_m, double dt_s) {
+    const Vec3 up = math::normalized(r_itrf);
+    const Vec3 offset = r_itrf - target_.position_itrf_m;
+    const Vec3 offset_h = offset - up * dot(offset, up);
+    const Vec3 v_h = v_itrf - up * dot(v_itrf, up);
+    if (!flop_started_) {  // from the attitude flown now: heading of the nose (along the track after the entry)
+        flop_started_ = true;
+        flop_attitude_gcrf_ = body.state().attitude;
+        const Vec3 x = transpose(itrf_to_gcrf) * body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+        const Vec3 x_h = x - up * dot(x, up);
+        nose_itrf_ = norm(x_h) > 1e-3 ? x_h / norm(x_h) : math::normalized(cross(Vec3{0.0, 0.0, 1.0}, up));
+    }
+    const double height_above_gate = height_m - target_.ground_height_m - parameters_.gate_height_m;
+    const double sink = -dot(v_itrf, up);
+    const Vec3 a = belly_flop_acceleration(offset_h, v_h, height_above_gate, sink, parameters_.zem_gain);
+    const double a_norm = norm(a);
+    // The hull is a cylinder: its cross-flow force lies in the plane of the axis and the (near vertical) air flow,
+    // i.e. horizontally along the axis - rolling gives no side force. So the axis is yawed onto the wanted
+    // acceleration (the nose keeps its hemisphere) and pitched: nose down pushes forward, nose up backward. The
+    // heading turns at most at the bank rate limit (yaw about the belly axis is slow; faster turns spin up, b1).
+    Vec3 nose = math::normalized(nose_itrf_ - up * dot(nose_itrf_, up));
+    if (a_norm > parameters_.belly_flop_turn_min_acceleration_mps2 && phase_ != EntryPhase::Gate) {
+        const Vec3 along = a / a_norm;
+        const Vec3 wanted_nose = dot(along, nose) >= 0.0 ? along : -along;
+        const double turn = std::atan2(dot(cross(nose, wanted_nose), up), dot(nose, wanted_nose));
+        const double max_turn = parameters_.bank_rate_radps * dt_s;
+        const double step = std::clamp(turn, -max_turn, max_turn);
+        nose = math::normalized(nose * std::cos(step) + cross(up, nose) * std::sin(step));
+    }
+    nose_itrf_ = nose;
+    // At the gate the flip takes over (b3): until then the belly stays level.
+    const double tilt_magnitude =
+        phase_ == EntryPhase::Gate
+            ? 0.0
+            : std::min(std::atan(std::abs(dot(a, nose)) / constants::standard_gravity_mps2), parameters_.max_tilt_rad);
+    const double tilt = dot(a, nose) >= 0.0 ? tilt_magnitude : -tilt_magnitude;  // > 0: nose down
+    const Vec3 direction = nose;
+    const auto wanted = belly_flop_attitude(up, nose, direction, tilt, belly_azimuth_rad_);
+    const math::Quat wanted_gcrf = attitude_from_axes(itrf_to_gcrf * wanted.axis_gcrf, itrf_to_gcrf * wanted.roll_reference_gcrf);
+    flop_attitude_gcrf_ = slew_toward(flop_attitude_gcrf_, wanted_gcrf, parameters_.belly_flop_slew_rate_radps * dt_s);
+    command_.axis_gcrf = flop_attitude_gcrf_.rotate(Vec3{1.0, 0.0, 0.0});
+    command_.roll_reference_gcrf = flop_attitude_gcrf_.rotate(Vec3{0.0, 1.0, 0.0});
+    command_.alpha_rad = 0.5 * constants::pi - tilt;
+    command_.bank_rad = 0.0;
+    // zero-effort miss at the gate: along the nose (> 0: beyond the gate) and to its right
+    const double t_go = std::max(height_above_gate, 1.0) / std::max(sink, 20.0);
+    const Vec3 zem = offset_h + v_h * t_go;
+    command_.downrange_error_m = dot(zem, nose);
+    command_.crossrange_m = -dot(zem, cross(nose, up));
+}
+
 EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                    time::Epoch epoch) {
     const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
@@ -240,6 +293,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         command_.axis_gcrf = attitude.axis_gcrf;
         command_.roll_reference_gcrf = attitude.roll_reference_gcrf;
     }
+    if (phase_ != EntryPhase::Entry) belly_flop(body, transform.rotation, r_itrf, v_itrf, height, dt);
     command_.phase = phase_;
     command_.drag_scale = model_.drag_scale;
     command_.lift_scale = model_.lift_scale;

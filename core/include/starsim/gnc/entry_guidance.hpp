@@ -2,6 +2,7 @@
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
+#include "starsim/math/quat.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -21,6 +22,10 @@ struct EntryGuidanceParameters {
     double belly_flop_mach = 0.7;                          // [E] subsonic hand-over
     double max_tilt_rad = 15.0 * constants::deg_to_rad;    // [E] belly-flop steering
     double zem_gain = 3.0;
+    // [E] the commanded attitude turns at most this fast in the belly flop (from the entry attitude at hand-over)
+    double belly_flop_slew_rate_radps = 5.0 * constants::deg_to_rad;
+    // [E] the nose turns onto the wanted acceleration only when it exceeds this (no heading jitter near the gate)
+    double belly_flop_turn_min_acceleration_mps2 = 0.3;
     // Bank reversal when the predicted crossrange (the current bank sign held to the gate) overshoots to the side the
     // bank pushes by more than base + fraction * range to go [E]; none below min_reversal_speed (belly flop's job).
     double reversal_crossrange_base_m = 2000.0;
@@ -81,6 +86,8 @@ public:
 
 private:
     void entry_cycle(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf);
+    void belly_flop(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const math::Vec3& r_itrf,
+                    const math::Vec3& v_itrf, double height_m, double dt_s);
     bool violates(const EntryPrediction& p) const;
 
     EntryTarget target_;
@@ -97,6 +104,9 @@ private:
     double bank_magnitude_rad_ = 0.0;
     double sign_ = 0.0;              // 0: not chosen yet
     EntryCommand command_;
+    bool flop_started_ = false;
+    math::Quat flop_attitude_gcrf_;  // commanded attitude in the belly flop (slew limited)
+    math::Vec3 nose_itrf_;           // nose direction chosen at hand-over (horizontal)
 };
 
 }  // namespace starsim::gnc
