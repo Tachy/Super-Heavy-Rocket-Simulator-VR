@@ -211,10 +211,13 @@ GuidanceCommand AscentGuidance::peg(const vehicle::FlightBody& body, const vehic
 
     const double c = (gm_ / (r * r) - vt * vt / r) / a;
     const double fr = std::clamp(peg_a_ + c, -0.9, 0.9);
-    // Out-of-plane: null the velocity and position offset from the target plane over the remaining burn.
+    // Out-of-plane: null the velocity and position offset from the target plane together at the end of the burn
+    // (zero-effort miss / velocity law: acceleration linear in time). A steep target plane from a low-latitude site
+    // (Falcon 9 to 51.6 deg) starts the upper stage ~200 m/s and ~50 km off the plane; a law that only nulls the offset
+    // under constant acceleration overshot it (+110 m/s, ~0.9 deg of inclination).
     const double t_go = std::max(peg_t_, 5.0);
     const double plane_offset = dot(s.position_gcrf_m, n_hat);
-    const double fh = std::clamp((-vh / t_go - 2.0 * plane_offset / (t_go * t_go)) / a, -0.3, 0.3);
+    const double fh = std::clamp((-4.0 * vh / t_go - 6.0 * plane_offset / (t_go * t_go)) / a, -0.5, 0.5);
     const double ft = std::sqrt(std::max(0.0, 1.0 - fr * fr - fh * fh));
 
     cmd.thrust_direction_gcrf = math::normalized(fr * r_hat + ft * theta_hat + fh * n_hat);
@@ -230,7 +233,9 @@ GuidanceCommand AscentGuidance::peg(const vehicle::FlightBody& body, const vehic
     // |v_go| from converging (it would overshoot the in-plane speed).
     const Vec3 h_now = cross(s.position_gcrf_m, s.velocity_gcrf_mps);
     const Vec3 horizontal_now = math::normalized(cross(h_now, r_hat));
-    const Vec3 v_go = required_speed * horizontal_now - s.velocity_gcrf_mps;
+    // ... turned into the target plane by the out-of-plane speed left (the plane steering above ends ~10 m/s short
+    // of it on a steep plane: 0.1 deg of inclination), within what the tail-off cannot fix anyway.
+    const Vec3 v_go = required_speed * horizontal_now - s.velocity_gcrf_mps - vh * n_hat;
     const double tail_off_dv = 0.5 * a * shutdown_time_s(body.vehicle());
     if (peg_t_ < terminal_time_s) {
         cmd.thrust_direction_gcrf = math::normalized(v_go);

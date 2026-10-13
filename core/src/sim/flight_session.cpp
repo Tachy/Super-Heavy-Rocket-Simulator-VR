@@ -507,7 +507,12 @@ void FlightSession::place_body(const config::VehicleConfig& config, const vehicl
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
                                     time::Epoch epoch) {
-    auto vehicle = std::make_unique<vehicle::Vehicle>(config::load_vehicle(config_dir_, vehicle_id), config_dir_);
+    launch_from_pad(config::load_vehicle(config_dir_, vehicle_id), site, heading_rad, epoch);
+}
+
+void FlightSession::launch_from_pad(const config::VehicleConfig& config, const LaunchSite& site, double heading_rad,
+                                    time::Epoch epoch) {
+    auto vehicle = std::make_unique<vehicle::Vehicle>(config, config_dir_);
     set_launch_site(site);
     const double stand_height = site.height_m + (tower_ ? site.tower->mount_height_m : 0.0);
     bodies_.clear();

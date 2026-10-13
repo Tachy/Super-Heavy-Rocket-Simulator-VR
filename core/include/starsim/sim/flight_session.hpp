@@ -80,6 +80,9 @@ public:
     // Places a vehicle on a pad (engines off, clamped). `heading_rad`: direction of body +y.
     void launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
                          time::Epoch epoch);
+    // The same with a loaded (possibly modified, e.g. the mission's payload) vehicle configuration.
+    void launch_from_pad(const config::VehicleConfig& config, const LaunchSite& site, double heading_rad,
+                         time::Epoch epoch);
     // Places a vehicle (stages from `first_stage` upwards) on a given orbit, nose along the velocity.
     void place_in_orbit(const std::string& vehicle_id, const math::StateVector& state_gcrf, time::Epoch epoch,
                         size_t first_stage = 0);
