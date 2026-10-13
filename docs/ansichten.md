@@ -107,9 +107,11 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
   matrix (33/6 Raptors), Tanks, Autopilot, Stufentrennung, Abbruch.
 - Rechts: Außenansicht Ship. Im Wiedereintritt zeigt das HUD Wärmestrom (kW/m²) und Wärmelast (MJ/m²),
   „!!! Hitze / Last nahe der Grenze !!!“ ab 80 % einer Grenze, „Abprall: zurück über 100 km“ und am Ende
-  „Hitzeschild versagt“ / „Strukturüberlast“ (heute schon im Desktop-HUD). [Vorschlag] Anstellwinkel und
-  Rollwinkel als Soll/Ist-Anzeige im Flugdirektor (Steuerungsstufen: der Spieler kann rollen, der
-  Bordcomputer rechnet das Soll nach).
+  „Hitzeschild versagt“ / „Strukturüberlast“ (heute schon im Desktop-HUD). Die Eintrittslenkung zeigt Phase
+  („Eintritt“, „Endanflug“, „Tor“), Soll-/Ist-Anstellwinkel, Soll-Rollwinkel, die vorhergesagte Ablage längs/quer
+  zum Ziel und „Korridorgrenze“, wenn eine Grenze den Rollwinkel beschränkt (heute schon im Desktop-HUD).
+  [Vorschlag] Dieselben Werte als Soll/Ist-Anzeige im Flugdirektor (Steuerungsstufen: der Spieler kann rollen,
+  der Bordcomputer rechnet das Soll nach).
 - [Vorschlag] Jeder Außenbildschirm hat 3–4 umschaltbare Kameras (Berührung oder HOTAS-Taste).
 - Bedienung: HOTAS fliegt; die Bildschirme werden in VR mit dem Finger des Controllers berührt, am Desktop
   per Maus.

@@ -15,6 +15,7 @@
 #include "starsim/gnc/attitude_controller.hpp"
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/burn_node.hpp"
+#include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
 namespace starsim::sim {
@@ -115,6 +116,14 @@ public:
     // (it becomes the controlled body; pilot input is ignored while it has return guidance).
     void place_returning_booster(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
                                  time::Epoch epoch, gnc::BoosterReturnParameters parameters, gnc::ReturnPhase start_phase);
+    // Scenarios: a ship (single stage with flaps and a heat shield) placed with a free state flies its entry guidance
+    // to the gate above the launch site's pad (b3 adds the flip and the catch). It becomes the controlled body; pilot
+    // input is ignored while it has entry guidance.
+    void place_entering_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch,
+                             gnc::EntryGuidanceParameters parameters = {});
+    const gnc::EntryGuidance* entry_guidance(size_t index) const { return bodies_.at(index).entry_guidance.get(); }
+    // Entry guidance of a body (nullptr if it has none): its latest command (setpoint for the flight director).
+    const gnc::EntryCommand* entry_status(size_t index) const;
     // Interactive real-time play: landing re-plans never hold up the simulation (default: off = deterministic).
     void set_realtime_planning(bool realtime);
     const gnc::BoosterReturnGuidance* return_guidance(size_t index) const { return bodies_.at(index).return_guidance.get(); }
@@ -174,6 +183,8 @@ private:
         std::map<std::string, bool> running_groups;  // "<stage>/<group>" -> run
         std::unique_ptr<gnc::BoosterReturnGuidance> return_guidance;  // autonomous return (separated booster)
         gnc::ReturnCommand return_command;
+        std::unique_ptr<gnc::EntryGuidance> entry_guidance;  // entering ship (scenario)
+        gnc::EntryCommand entry_command;
     };
 
     vehicle::VehicleCommand command_for(size_t index, double ambient_pressure_pa) const;
@@ -190,6 +201,8 @@ private:
     gnc::AttitudeController controller_;
     // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).
     gnc::AttitudeController return_controller_{gnc::AttitudeController::Gains{1.5, 0.9, true}};
+    // Entering ship: flaps + RCS, slow (the flaps move at ~20 deg/s: 0.8 rad/s limit-cycles in roll, b1).
+    gnc::AttitudeController entry_controller_{gnc::AttitudeController::Gains{0.5, 0.9, false, true}};
     std::vector<Flying> bodies_;
     size_t controlled_ = 0;
     PilotInput input_;

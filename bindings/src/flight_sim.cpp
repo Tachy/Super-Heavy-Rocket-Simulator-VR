@@ -243,7 +243,32 @@ godot::Dictionary FlightSim::telemetry(int index) const {
     d["heat_warning"] = session_->body(index).heat_warning();
     d["breakup_reason"] = godot::String::utf8(session_->body(index).breakup_reason().c_str());
     d["skipped_out"] = session_->body(index).skipped_out();
+    if (const auto* e = session_->entry_status(index)) {  // entry guidance setpoint (flight director)
+        d["entry_phase"] = godot::String::utf8(starsim::gnc::to_string(e->phase));
+        d["entry_alpha_deg"] = e->alpha_rad * starsim::constants::rad_to_deg;
+        d["entry_bank_deg"] = e->bank_rad * starsim::constants::rad_to_deg;
+        d["entry_downrange_km"] = e->downrange_error_m / 1000.0;
+        d["entry_crossrange_km"] = e->crossrange_m / 1000.0;
+        d["entry_constrained"] = e->constrained;
+    }
     return d;
+}
+
+godot::Array FlightSim::body_flaps(int index) const {
+    godot::Array flaps;
+    if (!check_index(index)) return flaps;
+    for (const auto& stage : session_->body(index).vehicle().stages()) {
+        for (const auto& f : stage.flaps) {
+            godot::Dictionary d;
+            d["hinge_azimuth_deg"] = f.geometry.hinge_azimuth_rad * starsim::constants::rad_to_deg;
+            d["station_fwd_m"] = f.geometry.station_fwd_m;
+            d["station_aft_m"] = f.geometry.station_aft_m;
+            d["span_m"] = f.geometry.span_m;
+            d["deflection_deg"] = f.deflection_rad * starsim::constants::rad_to_deg;  // 0 folded leeward, 90 broadside
+            flaps.push_back(d);
+        }
+    }
+    return flaps;
 }
 
 void FlightSim::engage_ascent_autopilot(double periapsis_km, double apoapsis_km, double inclination_deg,
@@ -339,6 +364,7 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("set_booster_return", "enabled"), &FlightSim::set_booster_return);
     ClassDB::bind_method(D_METHOD("set_realtime_planning", "enabled"), &FlightSim::set_realtime_planning);
     ClassDB::bind_method(D_METHOD("return_state", "index"), &FlightSim::return_state);
+    ClassDB::bind_method(D_METHOD("body_flaps", "index"), &FlightSim::body_flaps);
     ClassDB::bind_method(D_METHOD("is_active"), &FlightSim::is_active);
     ClassDB::bind_method(D_METHOD("advance_to", "tdb_s"), &FlightSim::advance_to);
     ClassDB::bind_method(D_METHOD("mission_time_s"), &FlightSim::mission_time_s);

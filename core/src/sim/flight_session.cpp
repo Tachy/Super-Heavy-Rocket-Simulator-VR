@@ -61,6 +61,24 @@ const gnc::ReturnCommand* FlightSession::return_status(size_t index) const {
     return flying.return_guidance ? &flying.return_command : nullptr;
 }
 
+const gnc::EntryCommand* FlightSession::entry_status(size_t index) const {
+    const auto& flying = bodies_.at(index);
+    return flying.entry_guidance ? &flying.entry_command : nullptr;
+}
+
+void FlightSession::place_entering_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
+                                        time::Epoch epoch, gnc::EntryGuidanceParameters parameters) {
+    place_body(config, state, epoch);
+    auto& flying = bodies_.front();
+    const auto& stage = flying.body->vehicle().stages().front().config;
+    const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
+    // [E] gate over the pad centre until b3 places it for the catch
+    const gnc::EntryTarget target{frames::geodetic_to_fixed({launch_site_.latitude_rad, launch_site_.longitude_rad,
+                                                             launch_site_.height_m}),
+                                  launch_site_.height_m};
+    flying.entry_guidance = std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters);
+}
+
 // Autonomous return of a separated booster: engine groups, throttle and steering axis for this tick.
 void FlightSession::run_return_guidance(Flying& flying) {
     if (flying.body->impacted()) return;
@@ -381,6 +399,13 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     for (const auto& [group, run] : flying.running_groups) {
         command.groups.push_back({group, run, index == controlled_ ? input_.throttle : 1.0});
     }
+    if (flying.entry_guidance) {
+        if (!flying.body->impacted()) {
+            const auto& e = flying.entry_command;
+            entry_controller_.steer(*flying.body, ambient_pressure_pa, e.axis_gcrf, e.roll_reference_gcrf).apply_to(command);
+        }
+        return command;
+    }
     if (index != controlled_ || flying.return_guidance) {
         if (flying.return_guidance && !flying.body->impacted()) {
             const auto& r = flying.return_command;
@@ -450,6 +475,7 @@ double FlightSession::coast_allowance_s() const {
             !body.impacted()) {
             return 0.0;
         }
+        if (flying.entry_guidance && !body.impacted() && !body.resting()) return 0.0;  // steered every tick
         if (body.impacted() || body.resting() || body.caught()) continue;  // no longer moving on its own
         if (!body.can_coast()) return 0.0;
         for (const auto& [group, run] : flying.running_groups) {
@@ -482,6 +508,9 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             if (bodies_[i].return_guidance) {
                 if (tower_) bodies_[i].return_guidance->set_catch_contact(tower_->in_contact(*bodies_[i].body));
                 run_return_guidance(bodies_[i]);
+            }
+            if (bodies_[i].entry_guidance && !bodies_[i].body->impacted()) {
+                bodies_[i].entry_command = bodies_[i].entry_guidance->update(*bodies_[i].body, env_, epoch_);
             }
         }
         const auto pointers = body_pointers();

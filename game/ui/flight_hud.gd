@@ -50,6 +50,11 @@ func _process(_delta: float) -> void:
 		lines.append("--- Abprall: zurück über 100 km ---")
 	if t.get("heat_warning", false):
 		lines.append("!!! Hitze / Last nahe der Grenze !!!")
+	if t.has("entry_phase"):  # entry guidance setpoint (flight director)
+		lines.append("Eintritt        %s%s" % [t["entry_phase"], "  (Korridorgrenze)" if t["entry_constrained"] else ""])
+		lines.append("  Soll Anstellw. %8.1f °  Ist %.1f °" % [t["entry_alpha_deg"], t["angle_of_attack_deg"]])
+		lines.append("  Soll Rollwinkel %7.1f °" % t["entry_bank_deg"])
+		lines.append("  Ablage längs %9.1f km  quer %.1f km" % [t["entry_downrange_km"], t["entry_crossrange_km"]])
 	lines.append("Schub           %9.1f MN" % (t["thrust_n"] / 1.0e6))
 	lines.append("Masse           %9.0f t" % (t["mass_kg"] / 1000.0))
 	lines.append("Treibstoff      %9.0f t" % (t["propellant_kg"] / 1000.0))

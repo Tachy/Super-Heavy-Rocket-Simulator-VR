@@ -46,7 +46,9 @@ flow separation (vacuum engines).
   `belly_azimuth_deg` (body direction of the heat shield, default 270 = -z).
 - `[stage.heat_shield]` (ship): `nose_radius_m` (Sutton-Graves), `max_heat_rate_w_m2`, `max_heat_load_j_m2`,
   `max_load_g` (aerodynamic acceleration); judged while the stage flies alone.
-- `aero/ship_entry_alpha.csv`: nominal angle of attack over Mach of the belly-first entry (entry autopilot profile).
+- `aero/ship_entry_alpha.csv`: nominal angle of attack over Mach of the belly-first entry (entry guidance profile),
+  referenced by `[stage.aero] entry_alpha_table`. The ship's `ascent_drag_table` (the stack's [E]) gives its axial
+  drag when it flies alone.
 - `[stage.catch_pins]`: hardpoints the tower arms catch, one per entry of `azimuths_deg` (from body +y
   towards +z, like the grid fins), `station_m` (from the bottom of the stage), `protrusion_m` (beyond the
   hull), `max_load_n` (structural limit per pin; above it the catch is an impact).

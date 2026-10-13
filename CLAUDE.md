@@ -246,6 +246,19 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   ship breaks up ("Hitzeschild versagt" / "Strukturüberlast", outcome "zerbrochen"), warning from 80 %; skip-out
   event ("Abprall": below 80 km, then above 100 km). Heating is integrated in `step()` only. Entry mass in tests:
   dry + `landing_propellant_kg` (25 t [E]) in the main tanks (no header tanks modelled).
+  The ship alone carries the stack's axial drag table [E] (`ascent_drag_table`; before b2 a ship built alone had none).
+- Ship entry guidance (b2, `gnc/entry_guidance`, `gnc/entry_predictor`, `gnc/entry_aero_table`): the onboard computer
+  predicts the rest of the entry as a 3-DOF point mass (Earth-fixed, J2, US76, the ship's trimmed C_D A / C_L A over
+  Mach and alpha with flaps in pitch trim, online drag / lift scale factors from the accelerometer
+  `FlightBody::aero_acceleration_body_mps2()`; pure, no SPICE) every 2 s and solves the bank magnitude for zero range
+  error (Illinois); heat-rate, load and dynamic-pressure peaks over 90 % of a limit cut the bank back. Bank reversals are
+  timed by the predictor (hold vs reverse-now end on opposite sides). Bank rate 1 deg/s above Mach 10, 3 deg/s below
+  Mach 5 [E]. Below Mach 2 the terminal phase ("Endanflug") points the lift like a skydiver (belly to the flow, lift
+  direction about it, alpha 90..55 deg) by Newton steps on the predicted gate miss; the gate is 1.5 km [E] above the
+  pad (b3 flips there). `FlightSession::place_entering_ship` (scenarios), `entry_status` (setpoint; bindings
+  telemetry `entry_*`, HUD lines). Campaign `[ship][guidance][validation]` (12 dispersed entries to Starbase,
+  truth aero +-10 %): gate within 0.6-7.7 m, belly <= 8 deg off down; load limit held; session test 49 m.
+  Tests use `predictor_j2 = false` (the scenario Earth has central gravity; J2 alone shifts a long glide ~2 %).
 - `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically
   (follow the Earth), impacted/resting bodies do not block coast segments.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`

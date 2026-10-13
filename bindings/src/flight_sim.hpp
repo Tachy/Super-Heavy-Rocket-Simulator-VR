@@ -70,6 +70,8 @@ public:
     godot::Array body_stages(int index) const;
     // [{position_m (body, relative to the bottom), firing, throttle, spool}]
     godot::Array body_engines(int index) const;
+    // Flaps of a body (stations in its body frame, deflection 0 folded leeward .. 90 broadside) for rendering.
+    godot::Array body_flaps(int index) const;
     godot::Dictionary telemetry(int index) const;
 
 protected:
