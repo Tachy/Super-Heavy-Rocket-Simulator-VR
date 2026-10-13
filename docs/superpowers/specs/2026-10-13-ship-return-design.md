@@ -156,7 +156,8 @@ limit; a nominal flight-13 replay stays inside both (peak heat rate reported for
   high-energy returns. Ends with the transition to the subsonic
   belly flop (alpha ~ 70-90 deg) and a belly-flop glide steered by the flaps to the flip gate above the tower.
   Manual flight: the flight director shows the alpha/bank setpoint.
-- **b3 flip and catch**: relight the three sea-level Raptors at the flip gate (flights 13/14: engines lit at
+- **b3 flip and catch** (user 2026-10-13: engine sequence 3 -> 2 -> 1, as seen in the videos; SCvx phases like the
+  booster's 13 -> 5 -> 3): relight the three sea-level Raptors at the flip gate (flights 13/14: engines lit at
   ~0.5-1.5 km, ~100 m/s), rotate to vertical (gimbal + flaps + RCS), then the SCvx landing planner with a model
   built from the ship (`make_descent_model` generalised; one engine phase), the tower's catch point for the ship
   (`[stage.catch_pins]` on the ship), the existing tower contact and judgement. Ditching fallback as for the
