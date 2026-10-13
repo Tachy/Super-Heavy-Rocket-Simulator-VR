@@ -46,7 +46,7 @@ TEST_CASE("Ship has three single sea-level engine groups and catch pins", "[ship
         angles.insert(std::lround(std::atan2(e.gimbal_point_m.z, e.gimbal_point_m.y) / deg));
     }
     CHECK(sea_level_engines == 3);
-    CHECK(angles == std::set<long>{0, 120, -120});
+    CHECK(angles == std::set<long>{90, -150, -30});  // the last engine (90) in the symmetry plane
 
     REQUIRE(ship.catch_pins.azimuths_rad.size() == 2);
     CHECK(std::abs(ship.catch_pins.azimuths_rad[0] - 0.0 * deg) < 1e-9);  // the sides: nose to the tower before the flip

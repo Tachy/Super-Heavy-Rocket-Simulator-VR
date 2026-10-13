@@ -32,6 +32,10 @@ ShipLandingParameters ship_landing_parameters() {
     s.snapshot.reserve_kg = 1000.0;  // [E] the ship's landing propellant is small (header tanks)
     // [E] lateral LQR effort: the booster's 0.2 swung the ship's gimbals stop to stop after the flip (20 deg/s slew)
     s.lateral_effort_fraction = 0.1;
+    // [E] the last engine alone: its thrust axis is ~3 deg off the hull; a firmer final-set LQR and leaning the hull over
+    // during the 1.5 s before the 2 -> 1 switch (thrust centroid moves 0.87 x ring radius) keep the arrival within ~0.5 m
+    s.final_lateral_effort_fraction = 0.3;
+    s.switch_prerotation_s = 1.5;
     auto& l = s.settings.limits;
     l.tilt_max_rad = {20.0 * deg, 15.0 * deg, 8.0 * deg};  // [E] the more engines, the more gimbal authority
     l.rate_max_radps = {0.3, 0.2, 0.1};                    // [E] the ship is shorter and lighter than the booster

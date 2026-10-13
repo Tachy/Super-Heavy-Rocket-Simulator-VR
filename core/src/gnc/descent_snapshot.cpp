@@ -34,16 +34,59 @@ PlanFrame plan_frame(double latitude_rad, double longitude_rad, double height_m)
             frames::geodetic_to_fixed({latitude_rad, longitude_rad, height_m})};
 }
 
+namespace {
+
+// From the thrust centroid through the CG (see thrust_axis_body).
+Vec3 axis_through_cg(Vec3 centroid, double thrust, double cg_station_m) {
+    if (thrust <= 0.0) return {1.0, 0.0, 0.0};
+    centroid = centroid / thrust;
+    const double lever = cg_station_m - centroid.x;
+    if (lever <= 0.0) return {1.0, 0.0, 0.0};
+    return math::normalized(Vec3{lever, -centroid.y, -centroid.z});
+}
+
+}  // namespace
+
+Vec3 thrust_axis_body(const vehicle::Vehicle& vehicle, double cg_station_m) {
+    Vec3 centroid;
+    double thrust = 0.0;
+    for (const auto& e : vehicle.stages().front().engines) {
+        if (!e.producing_thrust()) continue;
+        const double f = e.spool * e.performance->thrust_n(e.throttle, 0.0);
+        centroid += e.gimbal_point_m * f;
+        thrust += f;
+    }
+    return axis_through_cg(centroid, thrust, cg_station_m);
+}
+
+Vec3 thrust_axis_body(const vehicle::Vehicle& vehicle, double cg_station_m, const std::vector<std::string>& groups) {
+    Vec3 centroid;
+    double thrust = 0.0;
+    for (const auto& e : vehicle.stages().front().engines) {
+        if (e.starved || !contains(groups, e.group_id)) continue;
+        const double f = e.performance->thrust_n(1.0, 0.0);
+        centroid += e.gimbal_point_m * f;
+        thrust += f;
+    }
+    return axis_through_cg(centroid, thrust, cg_station_m);
+}
+
 DescentState plan_state(const vehicle::FlightBody& body, const frames::FixedToInertial& earth, const PlanFrame& frame) {
     const auto& s = body.state();
+    // Hull -> thrust axis: the shortest rotation from body x to the thrust direction.
+    const Vec3 thrust_axis = thrust_axis_body(body.vehicle(), body.vehicle().mass_properties().cg_station_m);
+    const Vec3 turn = cross(Vec3{1.0, 0.0, 0.0}, thrust_axis);
+    const double turn_angle = std::atan2(norm(turn), thrust_axis.x);
+    const Quat hull_to_thrust = turn_angle > 0.0 ? Quat::from_axis_angle(turn / norm(turn), turn_angle) : Quat{};
+    const Quat attitude = s.attitude * hull_to_thrust;
     const Mat3 to_fixed = transpose(earth.rotation);
     const Vec3 omega = vehicle::earth_rotation_vector(earth);  // GCRF
     const Vec3 r_fixed = to_fixed * s.position_gcrf_m;
     const Vec3 v_fixed = to_fixed * (s.velocity_gcrf_mps - cross(omega, s.position_gcrf_m));
     const Quat gcrf_to_plan = Quat::from_matrix(transpose(frame.plan_to_itrf) * to_fixed);
     return make_state(body.vehicle().mass_properties().mass_kg, frame.to_plan(r_fixed), frame.direction_to_plan(v_fixed),
-                      (gcrf_to_plan * s.attitude).normalized(),
-                      s.angular_velocity_body_radps - s.attitude.inverse_rotate(omega));
+                      (gcrf_to_plan * attitude).normalized(),
+                      hull_to_thrust.inverse_rotate(s.angular_velocity_body_radps - s.attitude.inverse_rotate(omega)));
 }
 
 DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,

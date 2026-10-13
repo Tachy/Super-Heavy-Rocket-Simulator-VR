@@ -245,11 +245,22 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
         // Lateral LQR per plan axis (position, velocity, tilt, tilt rate against the plan; input: tilt acceleration),
         // plus the plan's tilt acceleration as feed-forward. Tilt of the body axis towards y/z: axis'' = alpha x axis.
         const auto q = state_attitude(x);
-        const Vec3 axis = q.rotate({1.0, 0.0, 0.0});
+        const auto mass = body.vehicle().mass_properties();
+        Vec3 axis = q.rotate({1.0, 0.0, 0.0});  // the thrust axis (plan_state)
+        if (parameters_.switch_prerotation_s > 0.0 && engine_set_ + 1 < descent_phases) {
+            double t_switch = 0.0;  // planned switch from this set, plan time
+            for (int p = 0; p <= engine_set_; ++p) t_switch += plan_->reference.duration_s[static_cast<size_t>(p)];
+            const double blend = std::clamp(1.0 - (t_switch - t) / parameters_.switch_prerotation_s, 0.0, 1.0);
+            if (blend > 0.0) {
+                const auto& next = parameters_.snapshot.phase_groups[static_cast<size_t>(engine_set_ + 1)];
+                const Vec3 shift = thrust_axis_body(body.vehicle(), mass.cg_station_m, next) -
+                                   thrust_axis_body(body.vehicle(), mass.cg_station_m);
+                axis = axis + q.rotate(shift) * blend;  // small angles: hull and thrust axes differ by degrees
+            }
+        }
         const Vec3 axis_rate = cross(q.rotate(state_rate(x)), axis);
         const Vec3 ref_axis_rate = cross(ref.rate_plan_radps, ref.axis);
         const Vec3 ref_axis_accel = cross(ref.angular_acceleration_plan_radps2, ref.axis);
-        const auto mass = body.vehicle().mass_properties();
         const double a = std::max(track.thrust_acceleration_mps2, min_lqr_thrust_acceleration_mps2);
         const double c = mass.inertia_kg_m2.y / (mass.mass_kg * model_.gimbal_lever_m);
         // Tilt acceleration the gimbals can give at this thrust: a sin(gimbal_max) / c. The LQR's control effort
@@ -260,7 +271,10 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
             std::abs(c - lqr_c_) > lqr_retune_fraction * c) {
             TvcLateralWeights weights = parameters_.lateral;
             if (parameters_.lateral_effort_fraction > 0.0) {
-                weights.angular_accel_radps2 = parameters_.lateral_effort_fraction * alpha_max;
+                const double f = set == descent_phases - 1 && parameters_.final_lateral_effort_fraction > 0.0
+                                     ? parameters_.final_lateral_effort_fraction
+                                     : parameters_.lateral_effort_fraction;
+                weights.angular_accel_radps2 = f * alpha_max;
             }
             lqr_gains_ = tvc_lateral_gains(a, c, weights);
             lqr_a_ = a;

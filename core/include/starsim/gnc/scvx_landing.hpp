@@ -40,7 +40,12 @@ struct ScvxLandingParameters {
     // [E] Campaign with the calibrated descent drag: 0.3 left a limit cycle on 3 engines near minimum throttle (each
     // re-plan's small reference step saturated the gimbals) in 1 of 21 cases; 0.2 and 0.15 catch all 21.
     double lateral_effort_fraction = 0.2;
+    double final_lateral_effort_fraction = 0.0;  // the same for the final engine set (0: lateral_effort_fraction)
     double roll_frequency_rad_s = 1.0;  // [E] pins towards the arms
+    // An engine switch that moves the thrust centroid (the ship's 2 -> 1) turns the thrust axis against the hull; over
+    // this time before the planned switch the lateral control blends the steered axis towards the next set's, so the
+    // hull leans over in advance instead of the thrust pushing sideways after the switch (0: no blending). [E]
+    double switch_prerotation_s = 0.0;
 };
 
 struct ScvxLandingCommand {

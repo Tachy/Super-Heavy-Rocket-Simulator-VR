@@ -24,8 +24,19 @@ struct PlanFrame {
 
 PlanFrame plan_frame(double latitude_rad, double longitude_rad, double height_m);
 
+// Direction of the net thrust in body axes when it exerts no pitch/yaw moment: from the thrust centroid of the
+// running engines through the CG. An asymmetric set (two of the ship's three centre Raptors, or the last one) has its
+// centroid off the axis, so the thrust is tilted against the body axis (~1.5 / 3 deg on the ship). Body x without
+// thrust.
+math::Vec3 thrust_axis_body(const vehicle::Vehicle& vehicle, double cg_station_m);
+// The same for the engines of `groups` at full thrust (an engine set before it runs).
+math::Vec3 thrust_axis_body(const vehicle::Vehicle& vehicle, double cg_station_m, const std::vector<std::string>& groups);
+
 // Current state of the body in the plan frame: velocity relative to the ground, attitude body -> plan, body rate
 // relative to the (rotating) plan frame. `earth`: the Earth-fixed -> GCRF transform at the current epoch.
+// The planning model's thrust acts along its body x through the CG, so the attitude is that of the thrust axis
+// (thrust_axis_body), not of the hull: plans and the lateral control then steer the thrust, and an asymmetric engine
+// set does not push sideways against them.
 DescentState plan_state(const vehicle::FlightBody& body, const frames::FixedToInertial& earth, const PlanFrame& frame);
 
 struct SnapshotSettings {

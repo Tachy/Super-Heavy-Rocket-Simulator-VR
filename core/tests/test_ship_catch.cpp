@@ -82,8 +82,7 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
 
 }  // namespace
 
-// Hidden ([.]) until the catch from the gate works (b3 Task 3 in progress, see the b3 ledger).
-TEST_CASE("Ship flips at the gate and is caught", "[.][ship][landing][catch]") {
+TEST_CASE("Ship flips at the gate and is caught", "[ship][landing][catch]") {
     // gate back along the line pad -> tower (azimuth 315 deg), nose to the tower: the flip pushes towards it and the
     // side pins lie across the arms without a roll
     Gate g;
