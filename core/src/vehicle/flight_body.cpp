@@ -233,6 +233,12 @@ void FlightBody::hold_fixed_to_earth(const frames::BodyOrientation& earth, time:
     follow_pad(earth, epoch);
 }
 
+void FlightBody::hold_landed(const frames::BodyOrientation& earth, time::Epoch epoch) {
+    hold_fixed_to_earth(earth, epoch);
+    caught_ = false;
+    landed_ = true;
+}
+
 Vec3 FlightBody::rcs_torque(const VehicleCommand& command) const {
     const Vec3 max = vehicle_->max_rcs_torque_nm();
     const Vec3& f = command.rcs_torque_fraction;
@@ -254,10 +260,11 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     const auto geodetic = frames::fixed_to_geodetic(transpose(transform.rotation) * state_.position_gcrf_m);
     vehicle_->update_engines(dt_s, command, env.atmosphere.at(geodetic.height_m).pressure_pa);
     vehicle_->update_grid_fins(dt_s, command);
+    vehicle_->update_landing_legs(dt_s);
     vehicle_->update_flaps(dt_s, command);
     update_air_data(env, epoch);
 
-    if (clamped_ || caught_) {
+    if (clamped_ || caught_ || landed_) {
         vehicle_->consume_propellant(dt_s);
         follow_pad(env.earth_orientation, epoch + dt_s);
         external_force_gcrf_n_ = {};
@@ -315,6 +322,7 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
 // Gentle contact: the ground carries the vehicle (it rests, co-rotating with the Earth, and lifts off as
 // soon as thrust exceeds weight). Hard contact (sink rate or tilt too large): impact.
 void FlightBody::resolve_ground_contact(const frames::BodyOrientation& earth, time::Epoch epoch) {
+    if (vehicle_->leg_deployment() > 0.0) return;  // legs moving or out: the leg landing simulation owns the contact
     const auto transform = earth.fixed_to_gcrf(epoch);
     const math::Mat3 to_fixed = transpose(transform.rotation);
     const double cg = vehicle_->mass_properties().cg_station_m;
@@ -361,7 +369,7 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
     if (impacted_ || duration_s <= 0.0) {
         return;
     }
-    if (resting_ || caught_) {  // stays on the ground / on the tower, co-rotating with the Earth
+    if (resting_ || caught_ || landed_) {  // stays on the ground / on the tower, co-rotating with the Earth
         follow_pad(env.earth_orientation, epoch + duration_s);
         return;
     }

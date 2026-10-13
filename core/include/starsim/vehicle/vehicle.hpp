@@ -126,6 +126,14 @@ public:
     // Grid fin actuators for one tick (deflection and rate limits).
     void update_grid_fins(double dt_s, const VehicleCommand& command);
     size_t grid_fin_count() const;
+    // Landing legs of the lowest stage ([stage.landing_legs]): deploy() starts the deployment, which cannot be
+    // reversed and takes deploy_time_s; leg_deployment() runs 0 (stowed) .. 1 (deployed, locked).
+    bool has_landing_legs() const;
+    void deploy_legs() { legs_deploying_ = has_landing_legs(); }
+    bool legs_deploying() const { return legs_deploying_; }
+    double leg_deployment() const { return leg_deployment_; }
+    void set_leg_deployment(double fraction);  // scenarios: legs placed in a given state
+    void update_landing_legs(double dt_s);
     // Flap actuators for one tick (range [0, max] and rate limits).
     void update_flaps(double dt_s, const VehicleCommand& command);
     size_t flap_count() const;
@@ -159,6 +167,8 @@ private:
     std::filesystem::path config_dir_;
     std::vector<Stage> stages_;
     std::unique_ptr<aero::SlenderBodyAero> aero_;
+    bool legs_deploying_ = false;
+    double leg_deployment_ = 0.0;
 };
 
 }  // namespace starsim::vehicle

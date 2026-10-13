@@ -17,6 +17,9 @@ namespace starsim::sim {
 namespace {
 
 constexpr double tower_keep_out_margin_m = 5.0;  // [E] aborted landings stay this far from the tower lattice
+// A freely falling body this close to its ground is ticked: a coast segment ends with one ground-contact check, so
+// a long one would fall through the ground and judge the touchdown at the speed it has reached far below it.
+constexpr double ground_tick_height_m = 5000.0;
 
 }  // namespace
 
@@ -677,6 +680,15 @@ double FlightSession::coast_allowance_s() const {
         }
         if (body.impacted() || body.resting() || body.caught()) continue;  // no longer moving on its own
         if (!body.can_coast()) return 0.0;
+        {
+            const auto t = earth_.fixed_to_gcrf(epoch_);
+            const double height = frames::fixed_to_geodetic(transpose(t.rotation) * body.state().position_gcrf_m).height_m -
+                                  body.ground_height_m();
+            if (height < ground_tick_height_m) return 0.0;
+            const math::Vec3 up = math::normalized(body.state().position_gcrf_m);
+            const double sink = -dot(body.state().velocity_gcrf_mps, up);
+            if (sink > 0.0) allowance = std::min(allowance, (height - ground_tick_height_m) / sink);
+        }
         for (const auto& [group, run] : flying.running_groups) {
             if (run) return 0.0;
         }
@@ -789,6 +801,12 @@ LandingOutcome FlightSession::landing_outcome(size_t index) const {
 
 vehicle::FlightTelemetry FlightSession::telemetry(size_t index) const {
     return bodies_.at(index).body->telemetry(env_, epoch_);
+}
+
+void FlightSession::deploy_legs(size_t body_index) { bodies_.at(body_index).body->vehicle().deploy_legs(); }
+
+void FlightSession::set_leg_deployment(size_t body_index, double fraction) {
+    bodies_.at(body_index).body->vehicle().set_leg_deployment(fraction);
 }
 
 }  // namespace starsim::sim

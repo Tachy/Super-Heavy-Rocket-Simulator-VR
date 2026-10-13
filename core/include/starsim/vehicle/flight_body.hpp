@@ -86,9 +86,11 @@ public:
     // like a clamped vehicle and is no longer integrated.
     void hold_fixed_to_earth(const frames::BodyOrientation& earth, time::Epoch epoch);
     bool caught() const { return caught_; }
+    // Fixes a stage standing on its legs to the Earth where it is (landed): resting() from now on.
+    void hold_landed(const frames::BodyOrientation& earth, time::Epoch epoch);
     void mark_impacted() { impacted_ = true; }  // struck the tower or overloaded a catch pin
     bool impacted() const { return impacted_; }
-    bool resting() const { return resting_; }  // carried by the ground after a gentle touchdown
+    bool resting() const { return resting_ || landed_; }  // carried by the ground after a gentle touchdown / landed
     // Entry (a single stage with a heat shield): stagnation heat rate of the last tick, its integral and peak.
     // Exceeding a limit breaks the vehicle up (impacted() then true, breakup_reason() names the cause in German);
     // heat_warning() from 80 % of a limit. Heating is integrated in step() only (coast() is for vacuum arcs).
@@ -142,6 +144,7 @@ private:
     math::Vec3 external_force_gcrf_n_;
     math::Vec3 external_torque_body_nm_;
     bool caught_ = false;
+    bool landed_ = false;  // standing on its legs, held to the Earth (hold_landed)
     double heat_rate_w_m2_ = 0.0;
     double heat_load_j_m2_ = 0.0;
     double peak_heat_rate_w_m2_ = 0.0;

@@ -253,6 +253,20 @@ void Vehicle::update_engines(double dt_s, const VehicleCommand& command, double 
     }
 }
 
+bool Vehicle::has_landing_legs() const {
+    return !stages_.empty() && !stages_.front().config.landing_legs.azimuths_rad.empty();
+}
+
+void Vehicle::set_leg_deployment(double fraction) {
+    leg_deployment_ = has_landing_legs() ? std::clamp(fraction, 0.0, 1.0) : 0.0;
+    legs_deploying_ = leg_deployment_ > 0.0;
+}
+
+void Vehicle::update_landing_legs(double dt_s) {
+    if (!legs_deploying_) return;
+    leg_deployment_ = std::min(1.0, leg_deployment_ + dt_s / stages_.front().config.landing_legs.deploy_time_s);
+}
+
 void Vehicle::update_grid_fins(double dt_s, const VehicleCommand& command) {
     size_t index = 0;
     for (auto& stage : stages_) {

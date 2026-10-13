@@ -186,6 +186,9 @@ public:
 
     // Failure injection for tests and training.
     void fail_engine(size_t body_index, size_t stage_index, size_t engine_index);
+    // Landing legs of a body: start the deployment (guidance, pilot), or place them in a state (scenarios).
+    void deploy_legs(size_t body_index);
+    void set_leg_deployment(size_t body_index, double fraction);
     // Dispersion injection (tests, training): an instantaneous velocity change of a body, e.g. the residual of a burn
     // (tail-off, misalignment) beyond what the closed-loop cutoff removes.
     void apply_velocity_error(size_t body_index, const math::Vec3& delta_v_gcrf_mps);
