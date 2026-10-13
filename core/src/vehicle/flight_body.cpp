@@ -299,6 +299,9 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
                         heat_load_j_m2_ >= warning_fraction * shield.max_heat_load_j_m2 ||
                         (shield.max_load_g > 0.0 && load_g >= warning_fraction * shield.max_load_g);
         if (!breakup_reason_.empty()) impacted_ = true;
+        constexpr double entry_height_m = 80000.0, skip_height_m = 100000.0;  // [E] event thresholds
+        if (geodetic.height_m < entry_height_m) entered_atmosphere_ = true;
+        if (entered_atmosphere_ && geodetic.height_m > skip_height_m) skipped_out_ = true;
     }
     external_force_gcrf_n_ = {};
     external_torque_body_nm_ = {};

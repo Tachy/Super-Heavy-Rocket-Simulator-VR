@@ -242,6 +242,7 @@ godot::Dictionary FlightSim::telemetry(int index) const {
     d["heat_load_j_m2"] = session_->body(index).heat_load_j_m2();
     d["heat_warning"] = session_->body(index).heat_warning();
     d["breakup_reason"] = godot::String::utf8(session_->body(index).breakup_reason().c_str());
+    d["skipped_out"] = session_->body(index).skipped_out();
     return d;
 }
 

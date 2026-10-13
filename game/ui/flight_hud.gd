@@ -46,6 +46,8 @@ func _process(_delta: float) -> void:
 	if t.get("heat_load_j_m2", 0.0) > 0.0:
 		lines.append("Wärmestrom      %9.0f kW/m²" % (t["heat_rate_w_m2"] / 1000.0))
 		lines.append("Wärmelast       %9.0f MJ/m²" % (t["heat_load_j_m2"] / 1.0e6))
+	if t.get("skipped_out", false):
+		lines.append("--- Abprall: zurück über 100 km ---")
 	if t.get("heat_warning", false):
 		lines.append("!!! Hitze / Last nahe der Grenze !!!")
 	lines.append("Schub           %9.1f MN" % (t["thrust_n"] / 1.0e6))

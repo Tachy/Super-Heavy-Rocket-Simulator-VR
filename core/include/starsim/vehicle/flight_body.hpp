@@ -97,6 +97,8 @@ public:
     double peak_heat_rate_w_m2() const { return peak_heat_rate_w_m2_; }
     bool heat_warning() const { return heat_warning_; }
     const std::string& breakup_reason() const { return breakup_reason_; }
+    // Skip-out ("Abprall"): after dipping below 80 km the vehicle climbed back above 100 km (set once, stays set).
+    bool skipped_out() const { return skipped_out_; }
     const AirData& air_data() const { return air_data_; }
 
     // Flat ground at this height above WGS84 (the pad elevation; terrain comes later).
@@ -142,6 +144,8 @@ private:
     double peak_heat_rate_w_m2_ = 0.0;
     bool heat_warning_ = false;
     std::string breakup_reason_;
+    bool entered_atmosphere_ = false;
+    bool skipped_out_ = false;
 };
 
 // Earth rotation vector in GCRF from the orientation's rotation rate (omega_x = dR/dt * R^T).
