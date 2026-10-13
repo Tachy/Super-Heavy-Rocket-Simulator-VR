@@ -31,7 +31,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
-  contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions),
+  contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
   aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
@@ -119,7 +119,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
 - Booster recovery (decision 2026-10-13): Super Heavy is always caught (no legs; `[stage.recovery] method =
   "tower_catch"`): return guidance only at sites with a tower. Falcon 9 boosters land on the pad or the drone ship
-  ("drone_ship_landing") - not modelled yet. If the first SCvx catch plan fails, an SCvx sea abort is planned at once;
+  ("leg_landing", milestone c: `docs/superpowers/specs/2026-10-13-falcon9-landing-design.md`;
+  vehicle and legs done, return guidance from c3). If the first SCvx catch plan fails, an SCvx sea abort is planned at once;
   the explicit laws are the last fallback (over the arms, ~1-3 m: not accurate enough to be caught); with
   `scvx_landing = false` the whole return aims beyond the shoreline and ditches (test: 1.05 m/s, 650 m off).
 - Booster return: at a catch site the landing burn flies SCvx plans (`gnc/scvx_landing`), V3 sequence 13 -> 5 (divert pair) -> 3 engines,
@@ -306,7 +307,24 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   Diagnostics: `STARSIM_DEBUG_DEORBIT=1`; test "Ship return single case" (hidden, `STARSIM_RETURN_PHASE=<deg>` or
   `STARSIM_RETURN_DISPERSED=<i>`, with `STARSIM_VERBOSE=1`).
 - `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically
-  (follow the Earth), impacted/resting bodies do not block coast segments.
+  (follow the Earth), impacted/resting bodies do not block coast segments. A freely falling body below 5 km above its
+  ground is ticked (a coast segment would fall through the ground before its single contact check).
+- Falcon 9 (milestone c, `config/vehicles/falcon9_block5.toml`, Block 5 only): octaweb groups `center` / `pair` /
+  `ring`, 4 grid fins, cold-gas RCS, `[stage.landing_legs]`; sites `ccsfs_slc40` (launch, no tower) and `ccsfs_lz40`
+  (`kind = "landing_zone"`, ~340 m east of the pad [E], 85 m pad [S]). It reaches a 200 km / 51.6 deg orbit on the
+  ascent autopilot with a pitch kick of 18 deg [E] (test `[falcon9]`; the upper stage's plane steering nulls
+  out-of-plane speed and offset together - ZEM/ZEV - and the terminal v_go removes the rest). Inclinations of steep
+  planes are judged against the true equator of date (GCRF elements carry ~0.15 deg of precession by 2026).
+  `FlightSession::launch_from_pad` also takes a loaded `VehicleConfig` (mission payload).
+- Landing legs (c2, `contact/landing_legs`, `contact/landing_surface`, `sim/leg_landing_sim`): `Vehicle::deploy_legs`
+  (sticky, `deploy_time_s`; `FlightSession::deploy_legs` / `set_leg_deployment`); once the legs move,
+  `LegLandingSim` owns the body's ground contact: four feet as spring-dampers in series with plastic crush cores
+  (`stroke_m`, `crush_force_n`), friction capped at what stops a foot's slip within a tick (the small roll inertia made
+  plain regularised friction limit-cycle). Surface: the site's ground plane with its shoreline, or a deck over the sea
+  (`FlightSession::set_landing_surface`). Judgement (`FlightSession::leg_touchdown`): "gelandet" (>= 3 feet, engines
+  off, at rest 2 s -> `FlightBody::hold_landed`), "umgekippt" (> 30 deg on a foot), "Aufprall" (core used up, base on
+  the surface, legs not fully out), "Wasserung". Drop tests `[legs]`: 1/3/6 m/s land (6 m/s crushes 0.36 m), 10 m/s and
+  25 deg at 2 m/s are lost. Diagnostics: `STARSIM_DEBUG_LEGS=1`.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 

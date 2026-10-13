@@ -57,9 +57,20 @@ flow separation (vacuum engines).
 - `[stage.catch_pins]`: hardpoints the tower arms catch, one per entry of `azimuths_deg` (from body +y
   towards +z, like the grid fins), `station_m` (from the bottom of the stage), `protrusion_m` (beyond the
   hull), `max_load_n` (structural limit per pin; above it the catch is an impact).
+- `[stage.recovery] method`: `"tower_catch"` (Super Heavy: always caught), `"leg_landing"` (Falcon 9: on its legs on a
+  landing zone or a drone ship, chosen by the mission); empty: expendable.
+- `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry
+  (`footprint_radius_m` from the axis, `foot_station_m` below the stage bottom: negative), `deploy_time_s`, and the
+  per-leg crush core (`stiffness_n_m` and `damping_n_s_m` until the force reaches `crush_force_n`, then it crushes
+  plastically over at most `stroke_m`; more is an impact) and the foot's Coulomb `friction`.
+- Falcon 9 octaweb: `center` (1, the landing engine), `pair` (2 opposite ring engines: with the centre the 3-engine set
+  of boostback and entry burn, thrust on the axis), `ring` (the other 6).
 
 ## Launch sites (`launch_sites.toml`)
-- `[[site]]`: `id`, `name`, `latitude_deg`, `longitude_deg`, `height_m` (ground above WGS84).
+- `[[site]]`: `id`, `name`, `latitude_deg`, `longitude_deg`, `height_m` (ground above WGS84), `kind`
+  (`"launch_pad"` default, `"landing_zone"`: a pad first stages land on, with `pad_radius_m`).
+- `[site.sea]` (optional): straight shoreline perpendicular to `direction_deg`, `shoreline_distance_m` from the pad
+  centre; beyond it the ground is water (aborted landings, leg landings: "Wasserung").
 - `[site.tower]` (optional catch tower; site frame: origin at the pad centre on the ground, east/north/up):
   `azimuth_deg`/`distance_m` (pad centre -> tower centre), `width_m`, `height_m`, launch mount
   (`mount_height_m`, `mount_inner_radius_m`, `mount_outer_radius_m`), arms (`arm_length_m`, `arm_width_m`,
