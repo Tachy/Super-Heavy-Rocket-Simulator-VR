@@ -36,6 +36,7 @@ add_executable(starsim_core_tests
     test_ship_entry.cpp
     test_ship_landing.cpp
     test_ship_deorbit.cpp
+    test_deorbit_planner.cpp
     test_ship_catch.cpp
     test_ship_entry_telemetry.cpp
     test_optim_sparse.cpp
