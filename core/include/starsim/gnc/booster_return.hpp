@@ -18,6 +18,9 @@ enum class ReturnPhase { Flip, Boostback, Coast, EntryBurn, LandingBurn, Landed 
 const char* to_string(ReturnPhase phase);
 
 struct BoosterReturnParameters {
+    // false (drone ship): no flip and no boostback - the stage coasts on its ascent arc from separation, turning engines
+    // first on its RCS, and the entry burn steers the impact point.
+    bool boostback = true;
     double flight_time_s = 230.0;  // planned time from boostback start to touchdown (Lambert arc shape)
     double flip_duration_s = 10.0; // [E] separation to boostback ignition (MECO planning; our flip takes ~10 s)
     // [D] MECO planning: boostback delta-v beyond the two-body Lambert arc - the drag-aware aim point lies ~60 m/s
@@ -49,8 +52,11 @@ struct BoosterReturnParameters {
     ScvxLandingParameters scvx;
 };
 
-// Return parameters of a first stage: `base` with every return key of its [stage.recovery] that is set (engine sets,
-// return flight time, entry burn, landing-burn profile; engine group ids get the stage prefix).
+// Return parameters of a first stage: `base` with every key of a return profile that is set (engine sets, return flight
+// time, entry burn, landing-burn profile; engine group ids get the stage prefix `stage_id`).
+BoosterReturnParameters booster_return_parameters(const std::string& stage_id, const config::ReturnProfile& profile,
+                                                  BoosterReturnParameters base = {});
+// The same with the stage's [stage.recovery] profile (launch / landing site, catch tower).
 BoosterReturnParameters booster_return_parameters(const config::StageConfig& stage, BoosterReturnParameters base = {});
 
 struct ReturnCommand {
@@ -130,7 +136,8 @@ public:
                                         time::Epoch epoch) const;
 
     // Propellant the booster needs at main-engine cutoff to return with `landing_propellant_kg` left at landing-burn
-    // ignition; the ascent autopilot cuts off when the booster is down to it. `stack` is the vehicle before
+    // ignition; the ascent autopilot cuts off when the booster is down to it. Without a boostback: the run-down and the
+    // entry burn only (the site does not matter). `stack` is the vehicle before
     // separation (its lowest stage is the booster) at `state_gcrf`. Sums the run-down of the engines running now,
     // the flip (flip_duration_s on the landing engines at minimum throttle, two-body coast) and the boostback: the
     // rocket equation (vacuum exhaust velocity) on the delta-v of the Lambert arc from the state after the flip to

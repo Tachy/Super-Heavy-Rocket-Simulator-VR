@@ -384,7 +384,7 @@ void FlightSession::run_autopilot() {
                 const auto& s = body.state();
                 reserve_kg = gnc::BoosterReturnGuidance::meco_propellant_kg(
                     body.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, earth_, epoch_,
-                    return_site(body.vehicle()), gnc::booster_return_parameters(booster.config, *booster_return_),
+                    return_site(body.vehicle()), return_parameters(booster.config),
                     booster.config.landing_propellant_kg);
             }
             if (propellant <= reserve_kg) {
@@ -498,6 +498,12 @@ void FlightSession::place_returning_booster(const config::VehicleConfig& config,
         std::make_unique<gnc::BoosterReturnGuidance>(return_site(flying.body->vehicle()), std::move(parameters));
     flying.return_guidance->skip_to(start_phase);
     flying.return_guidance->set_realtime(realtime_planning_);
+}
+
+gnc::BoosterReturnParameters FlightSession::return_parameters(const config::StageConfig& stage) const {
+    const bool drone_ship = landing_zone_ && landing_zone_->deck;
+    return gnc::booster_return_parameters(stage.id, stage.return_profile_for(drone_ship),
+                                          booster_return_.value_or(gnc::BoosterReturnParameters{}));
 }
 
 void FlightSession::set_landing_zone(const LaunchSite& zone) {
@@ -839,7 +845,7 @@ void FlightSession::stage() {
         const auto landing = return_site(lower.body->vehicle());
         lower.body->set_ground_height(landing.height_m);
         lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(
-            landing, gnc::booster_return_parameters(lower.body->vehicle().stages().front().config, *booster_return_));
+            landing, return_parameters(lower.body->vehicle().stages().front().config));
         lower.return_guidance->set_realtime(realtime_planning_);
     }
     Flying flying{std::move(upper), {}, nullptr, {}};

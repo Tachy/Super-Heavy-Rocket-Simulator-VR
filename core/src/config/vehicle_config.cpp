@@ -212,45 +212,57 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         if (const auto* groups = (*recovery)["deorbit_engine_groups"].as_array()) {
             s.deorbit_engine_groups = group_list(*groups, "deorbit engine");
         }
-        if (const auto* groups = (*recovery)["boostback_engine_groups"].as_array()) {
-            s.boostback_engine_groups = group_list(*groups, "boostback engine");
-        }
-        if (const auto* groups = (*recovery)["entry_engine_groups"].as_array()) {
-            s.entry_engine_groups = group_list(*groups, "entry engine");
-        }
-        if (const auto* phases = (*recovery)["landing_engine_phases"].as_array()) {
-            for (const auto& node : *phases) {
-                const auto* list = node.as_array();
-                if (!list) doc.fail("landing_engine_phases must be a list of engine group lists");
-                s.landing_engine_phases.push_back(group_list(*list, "landing engine"));
+        // Return profile: `base` with the keys of `table` that are set.
+        auto read_profile = [&](const toml::table& table, config::ReturnProfile p) {
+            p.boostback = table["boostback"].value_or(p.boostback);
+            if (const auto* groups = table["boostback_engine_groups"].as_array()) {
+                p.boostback_engine_groups = group_list(*groups, "boostback engine");
             }
-            if (s.landing_engine_phases.size() != 3) doc.fail("landing_engine_phases must list 3 engine sets");
-        }
-        if (const auto* throttles = (*recovery)["landing_phase_throttles"].as_array()) {
-            for (const auto& node : *throttles) {
-                const auto value = node.value<double>();
-                if (!value || *value <= 0.0 || *value > 1.0) doc.fail("landing_phase_throttles must be in (0, 1]");
-                s.landing_phase_throttles.push_back(*value);
+            if (const auto* groups = table["entry_engine_groups"].as_array()) {
+                p.entry_engine_groups = group_list(*groups, "entry engine");
             }
-            if (s.landing_phase_throttles.size() != 3) doc.fail("landing_phase_throttles must list 3 throttles");
-        }
-        if (const auto* windows = (*recovery)["landing_switch_sink_mps"].as_array()) {
-            for (const auto& node : *windows) {
-                const auto* pair = node.as_array();
-                const auto low = pair && pair->size() == 2 ? (*pair)[0].value<double>() : std::nullopt;
-                const auto high = pair && pair->size() == 2 ? (*pair)[1].value<double>() : std::nullopt;
-                if (!low || !high || *low < 0.0 || *high < *low) {
-                    doc.fail("landing_switch_sink_mps entries must be [min, max] sink rates");
+            if (const auto* phases = table["landing_engine_phases"].as_array()) {
+                p.landing_engine_phases.clear();
+                for (const auto& node : *phases) {
+                    const auto* list = node.as_array();
+                    if (!list) doc.fail("landing_engine_phases must be a list of engine group lists");
+                    p.landing_engine_phases.push_back(group_list(*list, "landing engine"));
                 }
-                s.landing_switch_sink_mps.emplace_back(*low, *high);
+                if (p.landing_engine_phases.size() != 3) doc.fail("landing_engine_phases must list 3 engine sets");
             }
-            if (s.landing_switch_sink_mps.size() != 2) doc.fail("landing_switch_sink_mps must list 2 switch windows");
+            if (const auto* throttles = table["landing_phase_throttles"].as_array()) {
+                p.landing_phase_throttles.clear();
+                for (const auto& node : *throttles) {
+                    const auto value = node.value<double>();
+                    if (!value || *value <= 0.0 || *value > 1.0) doc.fail("landing_phase_throttles must be in (0, 1]");
+                    p.landing_phase_throttles.push_back(*value);
+                }
+                if (p.landing_phase_throttles.size() != 3) doc.fail("landing_phase_throttles must list 3 throttles");
+            }
+            if (const auto* windows = table["landing_switch_sink_mps"].as_array()) {
+                p.landing_switch_sink_mps.clear();
+                for (const auto& node : *windows) {
+                    const auto* pair = node.as_array();
+                    const auto low = pair && pair->size() == 2 ? (*pair)[0].value<double>() : std::nullopt;
+                    const auto high = pair && pair->size() == 2 ? (*pair)[1].value<double>() : std::nullopt;
+                    if (!low || !high || *low < 0.0 || *high < *low) {
+                        doc.fail("landing_switch_sink_mps entries must be [min, max] sink rates");
+                    }
+                    p.landing_switch_sink_mps.emplace_back(*low, *high);
+                }
+                if (p.landing_switch_sink_mps.size() != 2) doc.fail("landing_switch_sink_mps must list 2 switch windows");
+            }
+            p.return_flight_time_s = doc.number_or(table, "return_flight_time_s", p.return_flight_time_s);
+            p.boostback_loss_fraction = doc.number_or(table, "boostback_loss_fraction", p.boostback_loss_fraction);
+            p.entry_burn_altitude_m = doc.number_or(table, "entry_burn_altitude_m", p.entry_burn_altitude_m);
+            p.entry_burn_delta_v_mps = doc.number_or(table, "entry_burn_delta_v_mps", p.entry_burn_delta_v_mps);
+            p.entry_burn_throttle = doc.number_or(table, "entry_burn_throttle", p.entry_burn_throttle);
+            return p;
+        };
+        s.return_profile = read_profile(*recovery, {});
+        if (const auto* drone_ship = (*recovery)["drone_ship"].as_table()) {
+            s.drone_ship_return = read_profile(*drone_ship, s.return_profile);
         }
-        s.return_flight_time_s = doc.number_or(*recovery, "return_flight_time_s", 0.0);
-        s.boostback_loss_fraction = doc.number_or(*recovery, "boostback_loss_fraction", -1.0);
-        s.entry_burn_altitude_m = doc.number_or(*recovery, "entry_burn_altitude_m", 0.0);
-        s.entry_burn_delta_v_mps = doc.number_or(*recovery, "entry_burn_delta_v_mps", 0.0);
-        s.entry_burn_throttle = doc.number_or(*recovery, "entry_burn_throttle", 0.0);
     }
     return s;
 }

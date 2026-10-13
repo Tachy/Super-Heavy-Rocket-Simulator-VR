@@ -121,4 +121,54 @@ inline CatchRun fly_landing(sim::FlightSession& session, const frames::BodyOrien
     return run;
 }
 
+// End of a landing on legs: first foot contact (CG offset from the zone centre, sink, lateral speed, site frame), the
+// leg judgement and the session's outcome.
+struct LegRun {
+    bool contact = false;
+    double contact_offset_m = 0.0;
+    double contact_sink_mps = 0.0;
+    double contact_lateral_mps = 0.0;
+    double legs_at_contact = 0.0;  // deployment fraction
+    double offset_m = 0.0;         // where it ended
+    double propellant_kg = 0.0;    // left at the end
+    sim::LegTouchdown touchdown = sim::LegTouchdown::None;
+    sim::LandingOutcome outcome = sim::LandingOutcome::Flying;
+};
+
+inline LegRun fly_to_touchdown(sim::FlightSession& session, const frames::BodyOrientation& earth, time::Epoch t0,
+                               double max_s) {
+    LegRun run;
+    const auto& stage = session.body(0);
+    const auto zone = session.launch_site();
+    auto enu = [&](math::Vec3* velocity) {
+        const auto tr = earth.fixed_to_gcrf(session.epoch());
+        const auto& s = stage.state();
+        if (velocity) {
+            const math::Vec3 v_fixed = transpose(tr.rotation) * (s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), s.position_gcrf_m));
+            const math::Vec3 origin = frames::geodetic_to_fixed({zone.latitude_rad, zone.longitude_rad, zone.height_m});
+            *velocity = sim::site_enu_m(zone, origin + v_fixed);
+        }
+        return sim::site_enu_m(zone, transpose(tr.rotation) * s.position_gcrf_m);
+    };
+    for (double t = sim::FlightSession::tick_s; t <= max_s; t += sim::FlightSession::tick_s) {
+        session.advance_to(t0 + t, 10);
+        if (!run.contact && session.leg_landing().in_contact(stage)) {
+            math::Vec3 v;
+            const math::Vec3 p = enu(&v);
+            run.contact = true;
+            run.contact_offset_m = std::hypot(p.x, p.y);
+            run.contact_sink_mps = -v.z;
+            run.contact_lateral_mps = std::hypot(v.x, v.y);
+            run.legs_at_contact = stage.vehicle().leg_deployment();
+        }
+        if (session.leg_touchdown(0) != sim::LegTouchdown::None || stage.impacted()) break;
+    }
+    const math::Vec3 p = enu(nullptr);
+    run.offset_m = std::hypot(p.x, p.y);
+    run.propellant_kg = stage.vehicle().propellant_kg();
+    run.touchdown = session.leg_touchdown(0);
+    run.outcome = session.landing_outcome(0);
+    return run;
+}
+
 }  // namespace starsim::test

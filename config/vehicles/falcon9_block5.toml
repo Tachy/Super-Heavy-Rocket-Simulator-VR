@@ -109,6 +109,20 @@ landing_engine_phases = [["center"], ["center", "pair"], ["center"]]
 landing_phase_throttles = [0.7, 0.45, 0.65]  # [E] design throttles that time the ignition: ~3.2 km at 300 m/s as CRS-35
 landing_switch_sink_mps = [[230.0, 270.0], [140.0, 190.0]]  # [D] around ~250 / ~165 m/s
 
+# Return to a drone ship (milestone c4; keys left out come from the RTLS profile above). Evidence: our Starlink 15-25
+# webcast telemetry (drone ship, no boostback).
+[stage.recovery.drone_ship]
+boostback = false                            # [D] no boostback: the stage coasts on its ascent arc, turns on its RCS
+entry_engine_groups = ["center", "pair"]     # [D] three engine icons T+367.5-385 s (the centre engine lit 3.5 s earlier)
+entry_burn_altitude_m = 66000.0              # [D] centre engine lit at 67.4 km, three engines from 64.2 km
+entry_burn_delta_v_mps = 880.0               # [D] 7,926 -> 5,245 km/h over T+361-392 s (745 m/s) plus ~125 m/s of
+                                             # gravity along the path; the rocket equation on the gauge (24.1 -> 11.3 t at
+                                             # Isp_vac 311 s) gives 908 m/s
+entry_burn_throttle = 0.72                   # [D] 880 m/s in ~19 s on three engines (12.8 t at 3 x 0.72 x 306 kg/s)
+landing_engine_phases = [["center"], ["center"], ["center"]]  # [D] one engine icon from ignition to touchdown
+landing_phase_throttles = [0.7, 0.7, 0.65]   # [E] design throttles that time the ignition (~3.0 km at ~270 m/s)
+landing_switch_sink_mps = [[120.0, 280.0], [40.0, 120.0]]  # [E] no engine change: wide windows that only split the plan
+
 [stage.rcs]
 type = "cold_gas"                            # nitrogen, two pods at the top
 thruster_count = 8                           # [E]

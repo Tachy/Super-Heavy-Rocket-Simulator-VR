@@ -45,3 +45,34 @@ TEST_CASE("Super Heavy keeps the default return parameters", "[gnc][booster]") {
     CHECK(p.scvx.divert_speed_mps == defaults.scvx.divert_speed_mps);
     CHECK(p.scvx.settings.limits.switches[1].max_tilt_rad == defaults.scvx.settings.limits.switches[1].max_tilt_rad);
 }
+
+TEST_CASE("Falcon 9 drone-ship returns fly their own profile", "[gnc][falcon9][asds]") {
+    const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    const auto& stage = cfg.stages.front();
+    REQUIRE(stage.drone_ship_return);
+    const auto& profile = stage.return_profile_for(true);
+    CHECK(&profile == &*stage.drone_ship_return);
+    CHECK(&stage.return_profile_for(false) == &stage.return_profile);
+    const auto p = gnc::booster_return_parameters(stage.id, profile);
+    CHECK_FALSE(p.boostback);
+    CHECK(p.entry_groups == Groups{"first_stage/center", "first_stage/pair"});
+    CHECK(p.entry_altitude_m == 66000.0);
+    CHECK(p.entry_delta_v_mps == 880.0);
+    CHECK(p.landing_ignition_groups == Groups{"first_stage/center"});
+    CHECK(p.landing_divert_groups == Groups{"first_stage/center"});
+    CHECK(p.landing_groups == Groups{"first_stage/center"});
+    // Keys the drone-ship table leaves out come from the RTLS profile.
+    CHECK(p.boostback_groups == Groups{"first_stage/center", "first_stage/pair"});
+    // The RTLS profile is untouched.
+    const auto rtls = gnc::booster_return_parameters(stage);
+    CHECK(rtls.boostback);
+    CHECK(rtls.entry_groups == Groups{"first_stage/center"});
+    CHECK(rtls.entry_delta_v_mps == 125.0);
+}
+
+TEST_CASE("Super Heavy has no drone-ship profile", "[gnc][booster]") {
+    const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    CHECK_FALSE(cfg.stages.front().drone_ship_return);
+    CHECK(&cfg.stages.front().return_profile_for(true) == &cfg.stages.front().return_profile);
+    CHECK(gnc::booster_return_parameters(cfg.stages.front()).boostback);
+}

@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <map>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -127,6 +128,22 @@ struct HeatShieldConfig {
     double max_load_g = 0.0;           // aerodynamic acceleration (aero force / mass); 0 = not judged
 };
 
+// Return of a first stage (gnc::booster_return_parameters; empty / 0: the guidance's defaults, which are Super Heavy's).
+// Engine groups are ids of the stage.
+struct ReturnProfile {
+    bool boostback = true;  // false: no flip and no boostback, the stage coasts on its ascent arc (drone ship)
+    std::vector<std::string> boostback_engine_groups;
+    std::vector<std::string> entry_engine_groups;
+    std::vector<std::vector<std::string>> landing_engine_phases;  // 3 sets: ignition, divert, final
+    std::vector<double> landing_phase_throttles;                  // design throttle per set (ignition timing)
+    std::vector<std::pair<double, double>> landing_switch_sink_mps;  // per engine switch: sink window {min, max}
+    double return_flight_time_s = 0.0;   // boostback start -> touchdown (Lambert arc)
+    double boostback_loss_fraction = -1.0;  // MECO planning: boostback delta-v beyond the Lambert arc (< 0: default)
+    double entry_burn_altitude_m = 0.0;  // entry burn ignition while descending (0: none)
+    double entry_burn_delta_v_mps = 0.0;
+    double entry_burn_throttle = 0.0;
+};
+
 struct StageConfig {
     std::string id;
     std::string name;
@@ -144,18 +161,13 @@ struct StageConfig {
     // [stage.recovery] method: "tower_catch" (Super Heavy: always caught, no legs), "leg_landing" (Falcon 9: on a
     // landing zone or a drone ship, chosen by the mission); empty: expendable.
     std::string recovery_method;
-    // [stage.recovery] return of a first stage (gnc::booster_return_parameters; empty / 0: the guidance's defaults,
-    // which are Super Heavy's). Engine groups are ids of this stage.
-    std::vector<std::string> boostback_engine_groups;
-    std::vector<std::string> entry_engine_groups;
-    std::vector<std::vector<std::string>> landing_engine_phases;  // 3 sets: ignition, divert, final
-    std::vector<double> landing_phase_throttles;                  // design throttle per set (ignition timing)
-    std::vector<std::pair<double, double>> landing_switch_sink_mps;  // per engine switch: sink window {min, max}
-    double return_flight_time_s = 0.0;   // boostback start -> touchdown (Lambert arc)
-    double boostback_loss_fraction = -1.0;  // MECO planning: boostback delta-v beyond the Lambert arc (< 0: default)
-    double entry_burn_altitude_m = 0.0;  // entry burn ignition while descending (0: none)
-    double entry_burn_delta_v_mps = 0.0;
-    double entry_burn_throttle = 0.0;
+    // [stage.recovery] return of a first stage to the launch or landing site / a catch tower, and
+    // [stage.recovery.drone_ship] the return to a drone ship (keys left out there come from the first profile).
+    ReturnProfile return_profile;
+    std::optional<ReturnProfile> drone_ship_return;
+    const ReturnProfile& return_profile_for(bool drone_ship) const {
+        return drone_ship && drone_ship_return ? *drone_ship_return : return_profile;
+    }
     // [stage.recovery] deorbit_engine_groups: the engine set deorbit burns run on (empty: the burn picks one). The ship:
     // the belly sea-level Raptor alone, its thrust steered through the CG (user 2026-10-13).
     std::vector<std::string> deorbit_engine_groups;

@@ -3,8 +3,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 #include "return_scenario.hpp"
 #include "starsim/config/drone_ship_config.hpp"
@@ -113,4 +116,111 @@ TEST_CASE("A stage set down on the deck lands, one beside it splashes down", "[l
         CHECK(run_drop(session) == sim::LegTouchdown::Splashdown);
         CHECK(session.landing_outcome(0) == sim::LandingOutcome::Splashdown);
     }
+}
+
+namespace {
+
+gnc::BoosterReturnParameters asds_parameters() {
+    const auto stage = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5").stages.front();
+    return gnc::booster_return_parameters(stage.id, stage.return_profile_for(true));
+}
+
+constexpr double asds_ignition_sink_mps = 270.0;       // [D] Starlink 15-25: ~270 m/s at ~3.0 km (T+476 s)
+constexpr double asds_ignition_propellant_kg = 11300.0;  // [D] gauge 2.8 % at ignition
+
+}  // namespace
+
+TEST_CASE("A Falcon 9 drone-ship MECO plan has no boostback", "[gnc][falcon9][asds]") {
+    // The stack at ~60 km, ~2.2 km/s, climbing north-east of the Cape: the plan is the run-down, the entry burn and
+    // the landing propellant, wherever the ship waits.
+    const auto t0 = start();
+    const vehicle::Vehicle stack(config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5"), STARSIM_CONFIG_DIR);
+    const auto tr = earth().fixed_to_gcrf(t0);
+    const Vec3 r_fixed = frames::geodetic_to_fixed({29.5 * deg, -79.5 * deg, 60e3});
+    const Vec3 up = math::normalized(r_fixed);
+    const Vec3 east = math::normalized(cross(Vec3{0.0, 0.0, 1.0}, up));
+    const math::StateVector state{tr.position(r_fixed), tr.velocity(r_fixed, east * 1800.0 + up * 900.0)};
+    const auto p = asds_parameters();
+    const auto near = ship();
+    const gnc::LandingSite a{near.latitude_rad, near.longitude_rad, near.height_m, {}, {}, {}};
+    const gnc::LandingSite b{near.latitude_rad + 2.0 * deg, near.longitude_rad + 3.0 * deg, near.height_m, {}, {}, {}};
+    const double at_a = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, a, p, 11300.0);
+    const double at_b = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, b, p, 11300.0);
+    // Entry burn by the rocket equation: (25.6 + 11.3) t x exp(880 / (311 x 9.807)) - 25.6 t = 23.6 t; nine engines'
+    // run-down (0.15 s each at full flow) ~0.4 t.
+    std::printf("[falcon9] drone-ship MECO propellant %.1f t\n", at_a / 1e3);
+    CHECK(at_a == at_b);
+    CHECK(at_a > 23.0e3);
+    CHECK(at_a < 25.0e3);
+}
+
+TEST_CASE("A falling Falcon 9 stage flies its drone-ship entry burn on three engines", "[gnc][falcon9][asds]") {
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    session.set_launch_site(ship());
+    session.set_landing_zone(ship());
+    const auto cfg = test::booster_config("falcon9_block5", 24100.0);  // [D] gauge 6.1 % at the entry burn
+    // 75 km up, 40 km short of the ship, flying towards it at 1.9 km/s horizontally, falling at 1.0 km/s, engines first.
+    const Vec3 velocity{0.0, 1900.0, -1000.0};
+    const Vec3 axis = math::normalized(-velocity);
+    const auto tilt = math::Quat::from_axis_angle(math::normalized(cross(Vec3{0.0, 0.0, 1.0}, axis)),
+                                                  std::acos(std::clamp(axis.z, -1.0, 1.0)));
+    session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, {0.0, -40e3, 75e3}, velocity, tilt),
+                                    t0, asds_parameters(), gnc::ReturnPhase::Coast);
+    bool burned = false, ended = false;
+    double ignition_altitude_m = 0.0, propellant_before_kg = 0.0;
+    std::vector<std::string> groups;
+    for (double t = 0.0; t < 60.0 && !ended;) {
+        t += sim::FlightSession::tick_s;
+        session.advance_to(t0 + t, 10);
+        const auto* status = session.return_status(0);
+        REQUIRE(status != nullptr);
+        if (status->phase == gnc::ReturnPhase::EntryBurn && !burned) {
+            burned = true;
+            groups = status->run_groups;
+            propellant_before_kg = session.body(0).vehicle().propellant_kg();
+            const auto tr = earth().fixed_to_gcrf(session.epoch());
+            ignition_altitude_m = frames::fixed_to_geodetic(transpose(tr.rotation) * session.body(0).state().position_gcrf_m).height_m -
+                                  session.launch_site().height_m;
+        }
+        if (burned && status->phase != gnc::ReturnPhase::EntryBurn) ended = true;
+    }
+    const auto* guidance = session.return_guidance(0);
+    const double used_kg = propellant_before_kg - session.body(0).vehicle().propellant_kg();
+    std::printf("[falcon9] drone-ship entry burn from %.1f km, %.0f m/s burned, %.1f t used\n", ignition_altitude_m / 1e3,
+                guidance->entry_delta_v_mps(), used_kg / 1e3);
+    REQUIRE(burned);
+    REQUIRE(ended);
+    CHECK(groups == std::vector<std::string>{"first_stage/center", "first_stage/pair"});
+    CHECK(ignition_altitude_m < 66.0e3);
+    CHECK(ignition_altitude_m > 64.0e3);
+    CHECK(guidance->entry_delta_v_mps() >= 880.0);
+    CHECK(guidance->entry_delta_v_mps() < 900.0);
+    CHECK(std::abs(used_kg - 12800.0) < 1000.0);  // [D] 24.1 -> 11.3 t
+}
+
+TEST_CASE("Falcon 9 lands on the drone ship from the landing-burn ignition state", "[gnc][falcon9][asds]") {
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    session.set_launch_site(ship());
+    session.set_landing_zone(ship());
+    const auto parameters = asds_parameters();
+    const auto cfg = test::booster_config("falcon9_block5", asds_ignition_propellant_kg);
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, asds_ignition_sink_mps, parameters);
+    session.place_returning_booster(cfg,
+                                    test::state_over_site(session.launch_site(), earth(), t0, {15.0, -10.0, h},
+                                                          {2.0, -1.0, -asds_ignition_sink_mps}),
+                                    t0, parameters, gnc::ReturnPhase::LandingBurn);
+    const auto run = test::fly_to_touchdown(session, earth(), t0, 60.0);
+    std::printf("[falcon9] drone ship: ignition at %.0f m: %s / %s, contact offset %.2f m, sink %.2f m/s, lateral %.2f "
+                "m/s, legs %.2f, ended %.2f m off, %.0f kg left\n", h, sim::to_string(run.touchdown),
+                sim::to_string(run.outcome), run.contact_offset_m, run.contact_sink_mps, run.contact_lateral_mps,
+                run.legs_at_contact, run.offset_m, run.propellant_kg);
+    CHECK(h > 2500.0);  // [D] Starlink 15-25: ~3.0 km
+    CHECK(h < 3500.0);
+    REQUIRE(run.contact);
+    CHECK(run.legs_at_contact == 1.0);
+    CHECK(run.contact_offset_m < 1.0);
+    CHECK(run.contact_sink_mps < 2.0);
+    CHECK(run.outcome == sim::LandingOutcome::Landed);
 }

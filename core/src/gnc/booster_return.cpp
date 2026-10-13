@@ -114,42 +114,48 @@ const char* to_string(ReturnPhase phase) {
     return "";
 }
 
-BoosterReturnParameters booster_return_parameters(const config::StageConfig& stage, BoosterReturnParameters p) {
+BoosterReturnParameters booster_return_parameters(const std::string& stage_id, const config::ReturnProfile& profile,
+                                                  BoosterReturnParameters p) {
+    p.boostback = profile.boostback;
     const auto ids = [&](const std::vector<std::string>& local) {
         std::vector<std::string> out;
-        for (const auto& id : local) out.push_back(stage.id + "/" + id);
+        for (const auto& id : local) out.push_back(stage_id + "/" + id);
         return out;
     };
-    if (!stage.boostback_engine_groups.empty()) p.boostback_groups = ids(stage.boostback_engine_groups);
-    if (!stage.entry_engine_groups.empty()) p.entry_groups = ids(stage.entry_engine_groups);
-    if (stage.landing_engine_phases.size() == 3) {
-        p.landing_ignition_groups = ids(stage.landing_engine_phases[0]);
-        p.landing_divert_groups = ids(stage.landing_engine_phases[1]);
-        p.landing_groups = ids(stage.landing_engine_phases[2]);
+    if (!profile.boostback_engine_groups.empty()) p.boostback_groups = ids(profile.boostback_engine_groups);
+    if (!profile.entry_engine_groups.empty()) p.entry_groups = ids(profile.entry_engine_groups);
+    if (profile.landing_engine_phases.size() == 3) {
+        p.landing_ignition_groups = ids(profile.landing_engine_phases[0]);
+        p.landing_divert_groups = ids(profile.landing_engine_phases[1]);
+        p.landing_groups = ids(profile.landing_engine_phases[2]);
     }
-    if (stage.landing_phase_throttles.size() == 3) {
-        p.scvx.ignition_throttle = stage.landing_phase_throttles[0];
-        p.scvx.divert_throttle = stage.landing_phase_throttles[1];
-        p.scvx.final_throttle = stage.landing_phase_throttles[2];
+    if (profile.landing_phase_throttles.size() == 3) {
+        p.scvx.ignition_throttle = profile.landing_phase_throttles[0];
+        p.scvx.divert_throttle = profile.landing_phase_throttles[1];
+        p.scvx.final_throttle = profile.landing_phase_throttles[2];
     }
-    if (stage.landing_switch_sink_mps.size() == 2) {
+    if (profile.landing_switch_sink_mps.size() == 2) {
         auto& switches = p.scvx.settings.limits.switches;
         for (size_t i = 0; i < 2; ++i) {
-            const auto [low, high] = stage.landing_switch_sink_mps[i];
+            const auto [low, high] = profile.landing_switch_sink_mps[i];
             switches[i] = {0.0, 0.0, low, high};
         }
         // The burn prediction switches in the middle of each window.
         p.scvx.divert_speed_mps = 0.5 * (switches[0].min_sink_mps + switches[0].max_sink_mps);
         p.scvx.switch_speed_mps = 0.5 * (switches[1].min_sink_mps + switches[1].max_sink_mps);
     }
-    if (stage.return_flight_time_s > 0.0) p.flight_time_s = stage.return_flight_time_s;
-    if (stage.boostback_loss_fraction >= 0.0) p.boostback_loss_fraction = stage.boostback_loss_fraction;
-    if (stage.entry_burn_altitude_m > 0.0) {
-        p.entry_altitude_m = stage.entry_burn_altitude_m;
-        p.entry_delta_v_mps = stage.entry_burn_delta_v_mps;
-        if (stage.entry_burn_throttle > 0.0) p.entry_throttle = stage.entry_burn_throttle;
+    if (profile.return_flight_time_s > 0.0) p.flight_time_s = profile.return_flight_time_s;
+    if (profile.boostback_loss_fraction >= 0.0) p.boostback_loss_fraction = profile.boostback_loss_fraction;
+    if (profile.entry_burn_altitude_m > 0.0) {
+        p.entry_altitude_m = profile.entry_burn_altitude_m;
+        p.entry_delta_v_mps = profile.entry_burn_delta_v_mps;
+        if (profile.entry_burn_throttle > 0.0) p.entry_throttle = profile.entry_burn_throttle;
     }
     return p;
+}
+
+BoosterReturnParameters booster_return_parameters(const config::StageConfig& stage, BoosterReturnParameters base) {
+    return booster_return_parameters(stage.id, stage.return_profile, std::move(base));
 }
 
 BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnParameters parameters)
@@ -172,6 +178,7 @@ BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnPara
     } else if (site_.pad) {
         target_bottom_height_m_ = site_.pad->contact_bottom_height_m;  // on the legs
     }
+    if (!parameters_.boostback) phase_ = ReturnPhase::Coast;  // drone ship: coast from separation
 }
 
 BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicle::FlightBody& body,
@@ -302,6 +309,16 @@ double BoosterReturnGuidance::meco_propellant_kg(const vehicle::Vehicle& stack, 
             run_down_kg += 0.5 * e.performance->config().shutdown_s * e.performance->mass_flow_kgps(e.throttle);
         }
     }
+    const double dry_kg = booster.config.dry_mass_kg + booster.extra_mass_kg;
+    // Entry burn (rocket equation on its delta-v): the propellant to have left after the boostback.
+    double after_boostback_kg = landing_propellant_kg;
+    if (parameters.entry_altitude_m > 0.0 && parameters.entry_delta_v_mps > 0.0) {
+        const auto entry = engine_set(stack, parameters.entry_groups, 0.0);
+        const double entry_exhaust_mps = entry.mass_flow_kgps > 0.0 ? entry.vacuum_thrust_n / entry.mass_flow_kgps : 1.0;
+        after_boostback_kg = (landing_propellant_kg + dry_kg) * std::exp(parameters.entry_delta_v_mps / entry_exhaust_mps) - dry_kg;
+    }
+    if (!parameters.boostback) return run_down_kg + after_boostback_kg;
+
     double flip_kg = 0.0;
     for (const auto& e : booster.engines) {
         const auto& groups = parameters.landing_groups;
@@ -325,14 +342,6 @@ double BoosterReturnGuidance::meco_propellant_kg(const vehicle::Vehicle& stack, 
     const auto engines = engine_set(stack, parameters.boostback_groups, 0.0);
     const double exhaust_mps = engines.mass_flow_kgps > 0.0 ? engines.vacuum_thrust_n / engines.mass_flow_kgps : 1.0;
     const double e = std::exp(-delta_v / exhaust_mps);
-    const double dry_kg = booster.config.dry_mass_kg + booster.extra_mass_kg;
-    // Entry burn (rocket equation on its delta-v): the propellant to have left after the boostback.
-    double after_boostback_kg = landing_propellant_kg;
-    if (parameters.entry_altitude_m > 0.0 && parameters.entry_delta_v_mps > 0.0) {
-        const auto entry = engine_set(stack, parameters.entry_groups, 0.0);
-        const double entry_exhaust_mps = entry.mass_flow_kgps > 0.0 ? entry.vacuum_thrust_n / entry.mass_flow_kgps : 1.0;
-        after_boostback_kg = (landing_propellant_kg + dry_kg) * std::exp(parameters.entry_delta_v_mps / entry_exhaust_mps) - dry_kg;
-    }
     return run_down_kg + flip_kg + (after_boostback_kg + dry_kg * (1.0 - e)) / e;
 }
 

@@ -113,6 +113,9 @@ public:
     // The lowest stage of `vehicle` gets return guidance after separation (booster return on, and either caught by a
     // tower at this site or landing on its legs on the landing zone).
     bool returns_after_staging(const vehicle::Vehicle& vehicle) const;
+    // Return parameters of a first stage: the guidance's (set_booster_return) with the stage's return profile for this
+    // mission's landing target (drone ship or not).
+    gnc::BoosterReturnParameters return_parameters(const config::StageConfig& stage) const;
     const vehicle::FlightEnvironment& environment() const { return env_; }
     const CatchTowerSim* tower() const { return tower_.get(); }
     CatchTowerSim* tower() { return tower_.get(); }
