@@ -105,7 +105,11 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 - Mitte: alles zu Steuerung und Status im heutigen Crew-Dragon-Design (dunkler Hintergrund, klare
   Typografie, Berührflächen): Flugdirektor, NavBall, Bahnwerte, Δv-Balken, Manöverknoten, Triebwerks-
   matrix (33/6 Raptors), Tanks, Autopilot, Stufentrennung, Abbruch.
-- Rechts: Außenansicht Ship.
+- Rechts: Außenansicht Ship. Im Wiedereintritt zeigt das HUD Wärmestrom (kW/m²) und Wärmelast (MJ/m²),
+  „!!! Hitze / Last nahe der Grenze !!!“ ab 80 % einer Grenze, „Abprall: zurück über 100 km“ und am Ende
+  „Hitzeschild versagt“ / „Strukturüberlast“ (heute schon im Desktop-HUD). [Vorschlag] Anstellwinkel und
+  Rollwinkel als Soll/Ist-Anzeige im Flugdirektor (Steuerungsstufen: der Spieler kann rollen, der
+  Bordcomputer rechnet das Soll nach).
 - [Vorschlag] Jeder Außenbildschirm hat 3–4 umschaltbare Kameras (Berührung oder HOTAS-Taste).
 - Bedienung: HOTAS fliegt; die Bildschirme werden in VR mit dem Finger des Controllers berührt, am Desktop
   per Maus.

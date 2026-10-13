@@ -31,7 +31,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
-  contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions).
+  contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions),
+  aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
   CSPICE lives only in `core/src/spice/` and implements `time::TimeScaleConverter`,
@@ -226,6 +227,25 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   Actuators: deflection and rate limits (`Vehicle::update_grid_fins`). The controller allocates torque to
   the fins first (minimum-norm least squares), the remainder to gimbals/RCS, using the air data of the
   last tick (`FlightBody::air_data()`); fins are used only when `AttitudeController::Gains::grid_fins`.
+- Ship entry (b1 of `docs/superpowers/specs/2026-10-13-ship-return-design.md`): belly first. Hull =
+  `SlenderBodyAero` with the ship's cross-flow table `aero/ship_crossflow.csv` [D] (used when the ship flies alone;
+  shaped like a cylinder in cross-flow: transonic rise to 1.9, 1.5-1.6 hypersonic). Four flaps (`aero/flap`,
+  `[[stage.flap]]` [E] aft 2 x 48 m^2, forward 2 x 24 m^2 moved 20 deg leeward; Newtonian flat plates,
+  `aero/flap.csv`; 0 deg folded leeward, 90 deg broadside; 20 deg/s). `AttitudeController::Gains::flaps`: the flaps
+  cancel the modelled aero moment (hull + flaps) and steer by a Newton step on their linearised moments
+  (minimum-norm, per-flap clamp, null space drawn to mid-range), the rest goes to RCS. `gnc/entry_attitude`
+  builds the setpoint from angle of attack and bank (belly at `[stage.aero] belly_azimuth_deg`). Nominal alpha
+  over Mach `aero/ship_entry_alpha.csv` [D] (55 deg hypersonic, 50 near Mach 8, 60-80 towards the belly flop).
+  Ship dry CG 28 m [D] (the trim requirement: at 20 m it sat ~9 m behind the hull's centre of pressure).
+  Entry control: 0.5 rad/s and bank changes <= 1 deg/s (0.8 rad/s limit-cycles in roll with 20 deg/s flaps;
+  faster bank changes depart in alpha). Validation: replay of flights 12-14 (bank follows the recorded altitude)
+  - speed over time above Mach 3 within 1.6 / 2.3 / 4.9 % rms, below Mach 3 over altitude 6.0 / 5.2 %,
+  belly-flop speed within 2-3 % (test "Ship entry reproduces the webcast telemetry of flights 12-14").
+  Corridor (`[stage.heat_shield]`, judged while the ship flies alone): Sutton-Graves stagnation heat rate
+  (`aero/entry_heating`, nose radius 6 m [E]), heat load, aerodynamic load (thrust not counted); beyond a limit the
+  ship breaks up ("Hitzeschild versagt" / "Strukturüberlast", outcome "zerbrochen"), warning from 80 %; skip-out
+  event ("Abprall": below 80 km, then above 100 km). Heating is integrated in `step()` only. Entry mass in tests:
+  dry + `landing_propellant_kg` (25 t [E]) in the main tanks (no header tanks modelled).
 - `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically
   (follow the Earth), impacted/resting bodies do not block coast segments.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`

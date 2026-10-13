@@ -39,6 +39,14 @@ flow separation (vacuum engines).
   (frontal lattice area per fin), `station_m` (hinge), `radius_m` (fin centre of pressure),
   `max_deflection_deg`, `rate_deg_s`, `table` (normal-force slope and limit over Mach, e.g.
   `aero/grid_fin.csv`). Fin mass belongs in the stage's `dry_mass_kg`.
+- `[[stage.flap]]` (ship): flat plates hinged along the hull side - `id`, `hinge_azimuth_deg` (from body +y
+  towards +z), `station_fwd_m`/`station_aft_m` (from the bottom of the stage), `span_m`, `area_m2`,
+  `max_deflection_deg` (0 = folded leeward, 90 = broadside to a belly-first flow), `rate_deg_s`, optional
+  `initial_deflection_deg`; needs `[stage.aero] flap_table` (`aero/flap.csv`: mach, cn_max) and
+  `belly_azimuth_deg` (body direction of the heat shield, default 270 = -z).
+- `[stage.heat_shield]` (ship): `nose_radius_m` (Sutton-Graves), `max_heat_rate_w_m2`, `max_heat_load_j_m2`,
+  `max_load_g` (aerodynamic acceleration); judged while the stage flies alone.
+- `aero/ship_entry_alpha.csv`: nominal angle of attack over Mach of the belly-first entry (entry autopilot profile).
 - `[stage.catch_pins]`: hardpoints the tower arms catch, one per entry of `azimuths_deg` (from body +y
   towards +z, like the grid fins), `station_m` (from the bottom of the stage), `protrusion_m` (beyond the
   hull), `max_load_n` (structural limit per pin; above it the catch is an impact).
