@@ -1,5 +1,5 @@
-// Tail-first descent of the booster against our webcast telemetry tables (tests/validation/telemetry): the block 1
-// booster is placed unguided in each flight's state at its peak descent speed (~26 km) and must follow the
+// Tail-first descent of the booster against our webcast telemetry tables (tests/validation/telemetry): the booster
+// of the configuration that flew (block 1 on flight 5, block 2 on flights 7 and 8) is placed unguided in each flight's state at its peak descent speed (~26 km) and must follow the
 // recorded speed until the landing burn.
 
 #include <catch2/catch_test_macros.hpp>
@@ -74,9 +74,13 @@ std::pair<double, double> altitude_fit(const std::vector<Sample>& d, double t, d
 }  // namespace
 
 TEST_CASE("Booster descent drag reproduces the flight 5/7/8 telemetry", "[gnc][booster][validation]") {
-    const std::string file = GENERATE(as<std::string>{}, "flight5_2024-10-13.csv", "flight7_2025-01-16.csv",
-                                      "flight8_2025-03-06.csv");
-    CAPTURE(file);
+    // Table and the vehicle configuration that flew (tests/validation/telemetry/flights.toml).
+    const auto [file, vehicle_id] = GENERATE(table<std::string, std::string>({
+        {"flight5_2024-10-13.csv", "starship_block1"},
+        {"flight7_2025-01-16.csv", "starship_block2"},
+        {"flight8_2025-03-06.csv", "starship_block2"},
+    }));
+    CAPTURE(file, vehicle_id);
     const auto data = load_booster(file);
     REQUIRE(data.size() > 500);
     // Peak descent speed (after the boostback) and the landing-burn ignition (speed falling > 120 km/h per s).
@@ -105,8 +109,8 @@ TEST_CASE("Booster descent drag reproduces the flight 5/7/8 telemetry", "[gnc][b
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
     const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
     session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
-    const double landing_propellant_kg = 72.0e3;  // as our block 1 return at ignition
-    session.place_body(test::booster_config("starship_block1", landing_propellant_kg),
+    const double landing_propellant_kg = 72.0e3;  // as our block 1/2 returns at ignition
+    session.place_body(test::booster_config(vehicle_id, landing_propellant_kg),
                        test::state_over_site(session.launch_site(), earth, t0, {20.0e3, 0.0, h0}, {-vh0, 0.0, vz0}), t0);
 
     double max_error = 0.0, sum_sq = 0.0;

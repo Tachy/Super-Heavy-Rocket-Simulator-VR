@@ -1,0 +1,205 @@
+# Starship integrated flight tests: which vehicles flew, and which of our vehicle configurations they validate.
+# Only flights whose configuration is documented are evaluated (telemetry tables in this directory).
+#
+# Sources (retrieved 2026-10-13):
+#   wiki_tests  https://en.wikipedia.org/wiki/SpaceX_Starship_flight_tests   (serials, block per vehicle, outcomes)
+#   wiki_sh     https://en.wikipedia.org/wiki/SpaceX_Super_Heavy              (Raptor 2 on Block 1/2, Raptor 3 on Block 3
+#                                                                              "for their first Starship flight of 2026")
+#   nsf_f12     https://www.nasaspaceflight.com/2026/05/starship-flight-12-block-3-pad-2/
+#   space_f12   https://www.space.com/news/live/spacex-starship-flight-12-launch-updates-may-22-2026
+#   nsf_f13     https://www.nasaspaceflight.com/2026/07/starship-flight-13-flight/
+#   nsf_f14     https://www.nasaspaceflight.com/2026/09/starship-flight-14-orbit/
+#   space_f14   https://www.space.com/news/live/spacex-starship-flight-14-live-updates-sept-28-2026-starship-first-orbital-launch-attempt
+#
+# Notes marked "from memory" are not backed by the sources above; verify before relying on them.
+# Fields: config = our vehicle id (config/vehicles); engines = Raptor generation (booster and ship);
+# notes = what matters for evaluating the telemetry (engine-outs change thrust and mass flow: the engine icons in the
+# webcast show them, read them before using a segment). table = our telemetry table, if made.
+
+[[flight]]
+flight = 1
+date_utc = "2023-04-20T13:33:09Z"
+booster = "B7"
+ship = "S24"
+block = 1
+config = "starship_block1"
+engines = "Raptor 2"
+outcome_booster = "lost (no staging)"
+outcome_ship = "lost (no staging)"
+notes = "no staging, no hot-staging ring yet; engine-outs during ascent (from memory, unverified: check the engine icons) - not useful for parameters"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 2
+date_utc = "2023-11-18T13:02:50Z"
+booster = "B9"
+ship = "S25"
+block = 1
+config = "starship_block1"
+engines = "Raptor 2"
+outcome_booster = "lost (gulf); during boostback (from memory)"
+outcome_ship = "lost before engine cutoff"
+notes = "first hot staging; booster ascent usable, no return data"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 3
+date_utc = "2024-03-14T13:25:00Z"
+booster = "B10"
+ship = "S28"
+block = 1
+config = "starship_block1"
+engines = "Raptor 2"
+outcome_booster = "lost (gulf); before/at the landing burn (from memory)"
+outcome_ship = "lost (ocean); on reentry (from memory)"
+notes = "IFT-3 ascent validation exists (test_ift3_validation.cpp, meithan data); descent usable to ~3 km"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 4
+date_utc = "2024-06-06T12:50:00Z"
+booster = "B11"
+ship = "S29"
+block = 1
+config = "starship_block1"
+engines = "Raptor 2"
+outcome_booster = "soft splashdown (gulf)"
+outcome_ship = "soft splashdown (ocean)"
+notes = "full booster return to a water landing: ascent, descent and landing burn usable"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 5
+date_utc = "2024-10-13T12:25:00Z"
+booster = "B12"
+ship = "S30"
+block = 1
+config = "starship_block1"
+engines = "Raptor 2"
+outcome_booster = "caught (OLP-1)"
+outcome_ship = "soft splashdown (ocean)"
+notes = "first catch; whole flight usable (ship to splashdown)"
+table = "flight5_2024-10-13.csv"
+webcast = "https://x.com/i/broadcasts/1RDGlyognOgJL"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 6
+date_utc = "2024-11-19T22:00:00Z"
+booster = "B13"
+ship = "S31"
+block = 1
+config = "starship_block1"
+engines = "Raptor 2"
+outcome_booster = "catch aborted, diverted to the gulf"
+outcome_ship = "soft splashdown (ocean)"
+notes = "last Block 1 ship; booster ascent and descent usable, abort trajectory differs"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 7
+date_utc = "2025-01-16T22:37:00Z"
+booster = "B14-1"
+ship = "S33"
+block = 2
+config = "starship_block2"
+engines = "Raptor 2"
+outcome_booster = "caught (OLP-1)"
+outcome_ship = "lost during ascent (~T+8:30)"
+notes = "first Block 2 stack; booster flight complete, ship data until loss"
+table = "flight7_2025-01-16.csv"
+webcast = "https://x.com/i/broadcasts/1OwGWNYrzZVKQ"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 8
+date_utc = "2025-03-06T23:31:02Z"
+booster = "B15-1"
+ship = "S34"
+block = 2
+config = "starship_block2"
+engines = "Raptor 2"
+outcome_booster = "caught (OLP-1)"
+outcome_ship = "lost during ascent (~T+9:30)"
+notes = "booster flight complete, ship data until loss"
+table = "flight8_2025-03-06.csv"
+webcast = "https://x.com/i/broadcasts/1lPKqMQbAWLKb"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 9
+date_utc = "2025-05-27T23:36:28Z"
+booster = "B14-2"
+ship = "S35"
+block = 2
+config = "starship_block2"
+engines = "Raptor 2"
+outcome_booster = "lost (gulf)"
+outcome_ship = "lost on reentry (ocean)"
+notes = "first reflown booster; descent reportedly flown as an experiment at a high angle of attack (from memory, unverified): check before using the descent"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 10
+date_utc = "2025-08-26T23:30:00Z"
+booster = "B16"
+ship = "S37"
+block = 2
+config = "starship_block2"
+engines = "Raptor 2"
+outcome_booster = "soft splashdown (gulf)"
+outcome_ship = "soft splashdown (ocean)"
+notes = "whole flight usable"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 11
+date_utc = "2025-10-13T23:23:00Z"
+booster = "B15-2"
+ship = "S38"
+block = 2
+config = "starship_block2"
+engines = "Raptor 2"
+outcome_booster = "soft splashdown (gulf)"
+outcome_ship = "soft splashdown (ocean)"
+notes = "last Block 2 flight; whole flight usable"
+sources = ["wiki_tests", "wiki_sh"]
+
+[[flight]]
+flight = 12
+date_utc = "2026-05-22T22:30:00Z"
+booster = "B19"
+ship = "S39"
+block = 3
+config = "starship_block3"
+engines = "Raptor 3"
+outcome_booster = "lost in the landing burn (gulf)"
+outcome_ship = "splashdown on target (ocean)"
+notes = "first Block 3, from Pad 2; one booster engine out ~2/3 through ascent; ship lost one RVac at T+3:03 (longer burn)"
+sources = ["wiki_tests", "wiki_sh", "nsf_f12", "space_f12"]
+
+[[flight]]
+flight = 13
+date_utc = "2026-07-24T22:51:00Z"
+booster = "B20"
+ship = "S40"
+block = 3
+config = "starship_block3"
+engines = "Raptor 3"
+outcome_booster = "hard impact (gulf): only 10 of 13 engines relit for the landing burn"
+outcome_ship = "splashdown on target (ocean)"
+notes = "ascent and descent usable; landing burn not nominal"
+sources = ["wiki_tests", "nsf_f13"]
+
+[[flight]]
+flight = 14
+date_utc = "2026-09-28T12:48:59Z"
+booster = "B21"
+ship = "S41"
+block = 3
+config = "starship_block3"
+engines = "Raptor 3"
+outcome_booster = "splashdown on target (gulf), 11 of 13 engines in the landing burn"
+outcome_ship = "orbit 262 x 275 km, 30.5 deg; early deorbit, splashdown (Pacific)"
+notes = "one centre booster engine out during ascent; ship RVac (engine 6) out at T+7:18; first orbit"
+sources = ["wiki_tests", "nsf_f14", "space_f14"]

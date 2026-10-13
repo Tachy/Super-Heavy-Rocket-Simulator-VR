@@ -129,7 +129,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Descent drag (tail first): body table `aero/super_heavy_descent.csv` [D] plus the grid fins' axial drag
   (`aero/grid_fin.csv` column `ca_axial` [E], per fin count/area). Identified from our own webcast telemetry tables
   of flights 5, 7 and 8 (`tests/validation/telemetry`, built by `tools/telemetry/webcast_telemetry.py`; drag from
-  `tools/telemetry/drag_estimate.py`): the unguided block 1 booster follows each flight's descent from ~26 km to
+  `tools/telemetry/drag_estimate.py`; which vehicles flew: `tests/validation/telemetry/flights.toml`): the unguided
+  booster of the flown block (1 on flight 5, 2 on flights 7/8) follows each descent from ~26 km to
   the landing burn within ~1 % rms (test "Booster descent drag reproduces the flight 5/7/8 telemetry"; IFT-3 as a
   cross-check). The measured quantity is the ballistic coefficient; C_D assumes our mass (~347 t at that point).
   Subsonic drag is not measured (the landing burn starts at ~Mach 1).

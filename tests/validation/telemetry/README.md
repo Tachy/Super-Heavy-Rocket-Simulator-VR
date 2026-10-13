@@ -6,9 +6,12 @@ T+8:40 at 1 sample/s). Sources and licence notes: `tools/data_pipeline/sources.t
 
 | File | Flight | Vehicles | Coverage |
 |---|---|---|---|
-| `flight5_2024-10-13.csv` | Flight 5 | B12 (caught) / S30 | T-10 s to ship splashdown (~T+65 min) |
-| `flight7_2025-01-16.csv` | Flight 7 | B14 (caught) / S33 | T-10 s to T+10 min (ship lost ~T+8:30) |
-| `flight8_2025-03-06.csv` | Flight 8 | B15 (caught) / S34 | T-10 s to T+10 min (ship lost ~T+9:30) |
+| `flight5_2024-10-13.csv` | Flight 5 | Block 1: B12 (caught) / S30 | T-10 s to ship splashdown (~T+65 min) |
+| `flight7_2025-01-16.csv` | Flight 7 | Block 2: B14-1 (caught) / S33 | T-10 s to T+10 min (ship lost ~T+8:30) |
+| `flight8_2025-03-06.csv` | Flight 8 | Block 2: B15-1 (caught) / S34 | T-10 s to T+10 min (ship lost ~T+9:30) |
+
+`flights.toml`: which vehicles (serials, block, Raptor generation) flew on each flight test, outcomes and what
+to watch for when evaluating a flight, with sources. Only flights with a documented configuration are evaluated.
 
 Columns: `t_s` (time after liftoff from the mission clock, +-0.25 s), `booster_speed_kmh`,
 `booster_altitude_km`, `ship_speed_kmh`, `ship_altitude_km`. Empty cells: nothing valid was read (field hidden,
