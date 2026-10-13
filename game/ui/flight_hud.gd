@@ -43,6 +43,11 @@ func _process(_delta: float) -> void:
 	lines.append("Staudruck       %9.1f kPa" % (t["dynamic_pressure_pa"] / 1000.0))
 	lines.append("Anstellwinkel   %9.1f °" % t["angle_of_attack_deg"])
 	lines.append("Beschleunigung  %9.2f g" % t["sensed_acceleration_g"])
+	if t.get("heat_load_j_m2", 0.0) > 0.0:
+		lines.append("Wärmestrom      %9.0f kW/m²" % (t["heat_rate_w_m2"] / 1000.0))
+		lines.append("Wärmelast       %9.0f MJ/m²" % (t["heat_load_j_m2"] / 1.0e6))
+	if t.get("heat_warning", false):
+		lines.append("!!! Hitze / Last nahe der Grenze !!!")
 	lines.append("Schub           %9.1f MN" % (t["thrust_n"] / 1.0e6))
 	lines.append("Masse           %9.0f t" % (t["mass_kg"] / 1000.0))
 	lines.append("Treibstoff      %9.0f t" % (t["propellant_kg"] / 1000.0))
@@ -52,7 +57,9 @@ func _process(_delta: float) -> void:
 	lines.append("Steuerung       %s" % ("Ratensteuerung (SAS)" if world.flight.rate_mode else "Direkt (Gimbal)"))
 	if t["clamped"]:
 		lines.append("--- am Startplatz gehalten ---")
-	if t["impacted"]:
+	if t.get("breakup_reason", "") != "":
+		lines.append("*** %s ***" % t["breakup_reason"])
+	elif t["impacted"]:
 		lines.append("*** Bodenkontakt ***")
 	var tower: Dictionary = sim.tower_state()
 	if tower.get("present", false) and sim.body_count() > 1:

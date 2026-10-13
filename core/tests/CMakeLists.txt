@@ -28,6 +28,7 @@ add_executable(starsim_core_tests
     test_descent_telemetry.cpp
     test_grid_fins.cpp
     test_flaps.cpp
+    test_entry_heating.cpp
     test_optim_sparse.cpp
     test_optim_ordering.cpp
     test_optim_ldl.cpp

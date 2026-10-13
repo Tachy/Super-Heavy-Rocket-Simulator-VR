@@ -238,6 +238,10 @@ godot::Dictionary FlightSim::telemetry(int index) const {
     d["engines_running"] = t.engines_running;
     d["clamped"] = session_->body(index).clamped();
     d["impacted"] = session_->body(index).impacted();
+    d["heat_rate_w_m2"] = session_->body(index).heat_rate_w_m2();
+    d["heat_load_j_m2"] = session_->body(index).heat_load_j_m2();
+    d["heat_warning"] = session_->body(index).heat_warning();
+    d["breakup_reason"] = godot::String::utf8(session_->body(index).breakup_reason().c_str());
     return d;
 }
 

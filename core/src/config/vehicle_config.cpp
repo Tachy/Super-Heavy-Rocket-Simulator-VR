@@ -151,6 +151,12 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         }
         if (!s.flaps.empty() && s.aero.flap_table.empty()) doc.fail("stage.flap needs [stage.aero] flap_table");
     }
+    if (auto shield = t["heat_shield"].as_table()) {
+        s.heat_shield.nose_radius_m = doc.number(*shield, "nose_radius_m");
+        s.heat_shield.max_heat_rate_w_m2 = doc.number(*shield, "max_heat_rate_w_m2");
+        s.heat_shield.max_heat_load_j_m2 = doc.number(*shield, "max_heat_load_j_m2");
+        s.heat_shield.max_load_g = doc.number_or(*shield, "max_load_g", 0.0);
+    }
     if (auto pins = t["catch_pins"].as_table()) {
         const auto* azimuths = (*pins)["azimuths_deg"].as_array();
         if (!azimuths || azimuths->empty()) {

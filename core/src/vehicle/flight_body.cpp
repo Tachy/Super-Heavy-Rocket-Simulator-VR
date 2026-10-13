@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "starsim/aero/entry_heating.hpp"
 #include "starsim/environment/eclipse.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/integrators/integrate.hpp"
@@ -58,6 +59,7 @@ struct TickContext {
 struct Forces {
     Vec3 acceleration_gcrf;        // total
     Vec3 nongravitational_body_n;  // thrust + aero, body axes
+    Vec3 aero_body_n;              // aerodynamic part (hull, grid fins, flaps), body axes
     Vec3 moment_body_nm;
     double thrust_n = 0.0;
     aero::AeroResult aero;
@@ -77,6 +79,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
     f.aero = ctx.vehicle.aero().compute(s.attitude.inverse_rotate(air_velocity), air.density_kg_m3,
                                         air.speed_of_sound_mps, powered, air.mean_free_path_m);
     f.nongravitational_body_n = f.aero.force_body_n;
+    f.aero_body_n = f.aero.force_body_n;
     f.moment_body_nm = cross(Vec3{f.aero.normal_force_station_m - f.mass.cg_station_m, 0.0, 0.0}, f.aero.force_body_n);
 
     for (const auto& stage : ctx.vehicle.stages()) {
@@ -100,6 +103,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
             const auto force = aero::grid_fin_force(fin.geometry, fin.deflection_rad, fin_velocity, fin_air,
                                                     *stage.grid_fin_table);
             f.nongravitational_body_n += force.force_body_n;
+            f.aero_body_n += force.force_body_n;
             f.moment_body_nm += cross(arm, force.force_body_n);
         }
     }
@@ -113,6 +117,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
             const auto force =
                 aero::flap_force(flap.geometry, flap.deflection_rad, flap_velocity, fin_air, *stage.flap_table);
             f.nongravitational_body_n += force.force_body_n;
+            f.aero_body_n += force.force_body_n;
             f.moment_body_nm += cross(arm, force.force_body_n);
         }
     }
@@ -274,6 +279,27 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
                           external_torque_body_nm_};
     const integrators::OdeFunction<13> f = [&ctx](double tau, const State13& y) { return derivative(ctx, tau, y); };
     state_ = unpack(integrators::rk4_step<13>(f, 0.0, pack(state_), dt_s));
+    // Entry limits of a single stage with a heat shield (the ship): heating from the tick's air data, load from
+    // the aerodynamic forces at the end of the tick (thrust loads are the engines' business).
+    if (vehicle_->stages().size() == 1 && vehicle_->stages().front().config.heat_shield.nose_radius_m > 0.0) {
+        const auto& shield = vehicle_->stages().front().config.heat_shield;
+        heat_rate_w_m2_ = aero::stagnation_heat_rate_w_m2(air_data_.air.density_kg_m3,
+                                                          norm(air_data_.air_velocity_body_mps), shield.nose_radius_m);
+        heat_load_j_m2_ += heat_rate_w_m2_ * dt_s;
+        peak_heat_rate_w_m2_ = std::max(peak_heat_rate_w_m2_, heat_rate_w_m2_);
+        const Forces end = evaluate(ctx, dt_s, state_);
+        const double load_g = norm(end.aero_body_n) / end.mass.mass_kg / constants::standard_gravity_mps2;
+        if (heat_rate_w_m2_ > shield.max_heat_rate_w_m2 || heat_load_j_m2_ > shield.max_heat_load_j_m2) {
+            breakup_reason_ = "Hitzeschild versagt";
+        } else if (shield.max_load_g > 0.0 && load_g > shield.max_load_g) {
+            breakup_reason_ = "Strukturüberlast";
+        }
+        constexpr double warning_fraction = 0.8;
+        heat_warning_ = heat_rate_w_m2_ >= warning_fraction * shield.max_heat_rate_w_m2 ||
+                        heat_load_j_m2_ >= warning_fraction * shield.max_heat_load_j_m2 ||
+                        (shield.max_load_g > 0.0 && load_g >= warning_fraction * shield.max_load_g);
+        if (!breakup_reason_.empty()) impacted_ = true;
+    }
     external_force_gcrf_n_ = {};
     external_torque_body_nm_ = {};
     vehicle_->consume_propellant(dt_s);

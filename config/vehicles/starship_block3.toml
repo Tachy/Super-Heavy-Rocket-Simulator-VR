@@ -202,6 +202,12 @@ rate_deg_s = 20.0
 method = "tower_catch"
 reserve_propellant_kg = 30000.0          # [E]
 landing_propellant_kg = 25000.0          # [E] header tanks: flip and landing burn
+
+[stage.heat_shield]
+nose_radius_m = 6.0                      # [E] effective radius of the belly-first windward side
+max_heat_rate_w_m2 = 1.2e6               # [E] ceramic tiles; LEO entries peak ~0.5-0.7 MW/m^2
+max_heat_load_j_m2 = 6.0e8               # [E]
+max_load_g = 6.0                         # [E] structure
 heat_shield_mass_kg = 10500.0            # [E] Block 1 figure
 
 [stage.rcs]

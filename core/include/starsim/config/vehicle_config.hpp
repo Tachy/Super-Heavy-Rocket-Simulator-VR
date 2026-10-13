@@ -103,6 +103,14 @@ struct CatchPinConfig {
     double max_load_n = 0.0;           // structural limit per pin
 };
 
+// Heat shield and structure of a vehicle that enters the atmosphere (the ship). Judged while the stage flies alone.
+struct HeatShieldConfig {
+    double nose_radius_m = 0.0;        // effective radius of the windward side for Sutton-Graves; 0 = none
+    double max_heat_rate_w_m2 = 0.0;
+    double max_heat_load_j_m2 = 0.0;
+    double max_load_g = 0.0;           // aerodynamic acceleration (aero force / mass); 0 = not judged
+};
+
 struct StageConfig {
     std::string id;
     std::string name;
@@ -130,6 +138,7 @@ struct StageConfig {
     GridFinConfig grid_fins;  // empty azimuths: none
     CatchPinConfig catch_pins;  // empty azimuths: none
     std::vector<FlapConfig> flaps;
+    HeatShieldConfig heat_shield;
 };
 
 struct VehicleConfig {

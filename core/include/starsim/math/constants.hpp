@@ -14,6 +14,10 @@ inline constexpr double rad_to_deg = 180.0 / pi;
 // Standard gravity, exact by definition (3rd CGPM, 1901).
 inline constexpr double standard_gravity_mps2 = 9.80665;
 
+// Sutton-Graves stagnation-point heating constant for Earth air, SI units (kg^0.5 m^-1; q in W/m^2 with rho in
+// kg/m^3, nose radius in m, speed in m/s). Sutton & Graves, NASA TR R-376 (1971): 1.7415e-4.
+inline constexpr double sutton_graves_earth_si = 1.7415e-4;
+
 // Standard atmosphere sea-level pressure, exact by definition.
 inline constexpr double standard_pressure_pa = 101325.0;
 

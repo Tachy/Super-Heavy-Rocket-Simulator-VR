@@ -15,6 +15,7 @@ const char* to_string(LandingOutcome outcome) {
         case LandingOutcome::Landed: return "gelandet";
         case LandingOutcome::Splashdown: return "Wasserung";
         case LandingOutcome::Impact: return "Aufprall";
+        case LandingOutcome::BrokenUp: return "zerbrochen";
     }
     return "";
 }
@@ -32,6 +33,7 @@ Vec3 site_enu_m(const LaunchSite& site, const Vec3& itrf_m) {
 
 LandingOutcome landing_outcome(const vehicle::FlightBody& body, const LaunchSite& site, const Vec3& position_itrf_m) {
     if (body.caught()) return LandingOutcome::Caught;
+    if (!body.breakup_reason().empty()) return LandingOutcome::BrokenUp;
     if (!body.impacted() && !body.resting()) return LandingOutcome::Flying;
     const Vec3 enu = site_enu_m(site, position_itrf_m);
     if (site.sea && over_water(*site.sea, enu.x, enu.y)) return LandingOutcome::Splashdown;

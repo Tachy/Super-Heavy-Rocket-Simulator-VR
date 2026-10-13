@@ -88,6 +88,14 @@ public:
     void mark_impacted() { impacted_ = true; }  // struck the tower or overloaded a catch pin
     bool impacted() const { return impacted_; }
     bool resting() const { return resting_; }  // carried by the ground after a gentle touchdown
+    // Entry (a single stage with a heat shield): stagnation heat rate of the last tick, its integral and peak.
+    // Exceeding a limit breaks the vehicle up (impacted() then true, breakup_reason() names the cause in German);
+    // heat_warning() from 80 % of a limit. Heating is integrated in step() only (coast() is for vacuum arcs).
+    double heat_rate_w_m2() const { return heat_rate_w_m2_; }
+    double heat_load_j_m2() const { return heat_load_j_m2_; }
+    double peak_heat_rate_w_m2() const { return peak_heat_rate_w_m2_; }
+    bool heat_warning() const { return heat_warning_; }
+    const std::string& breakup_reason() const { return breakup_reason_; }
     const AirData& air_data() const { return air_data_; }
 
     // Flat ground at this height above WGS84 (the pad elevation; terrain comes later).
@@ -128,6 +136,11 @@ private:
     math::Vec3 external_force_gcrf_n_;
     math::Vec3 external_torque_body_nm_;
     bool caught_ = false;
+    double heat_rate_w_m2_ = 0.0;
+    double heat_load_j_m2_ = 0.0;
+    double peak_heat_rate_w_m2_ = 0.0;
+    bool heat_warning_ = false;
+    std::string breakup_reason_;
 };
 
 // Earth rotation vector in GCRF from the orientation's rotation rate (omega_x = dR/dt * R^T).
