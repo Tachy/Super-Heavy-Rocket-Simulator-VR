@@ -195,3 +195,42 @@ def assign(row: dict) -> dict:
         out["booster_propellant_pct"] = gauge("L1")
         out["booster_engines_lit"] = _dots(row, "L1")[0]
     return out
+
+
+def assign_falcon9(row: dict) -> dict:
+    """Falcon 9 webcasts (same round-dial layout): before stage separation the left dials show the stack's speed and
+    altitude, the right ones the acceleration ("G-FORCE", one decimal) and the first stage's engine icon (9 dots,
+    lit = running) inside its propellant gauge. After separation the labels read "STAGE 1" (left) and "STAGE 2"
+    (right) and each side shows its stage's speed and altitude; for the first stage's burns (entry, landing) the
+    speed dial gives way to its engine icon and gauge. After the first stage's flight the second stage's numbers move
+    to the left without a label. Columns: booster_* = first stage, ship_* = second stage, g_force."""
+    l1, l2, r1, r2 = (_number(row[k]) for k in ("L1", "L2", "R1", "R2"))
+
+    def gauge(slot):
+        return float(row[f"{slot}_gauge"]) if row[f"{slot}_gauge"] else None
+
+    staged = "STAGE" in row["label_left"].upper() or "STAGE" in row["label_right"].upper() or (r1 is not None and r1 > 100)
+    out = {}
+    if staged:
+        if l1 is not None:
+            out["booster_speed_kmh"] = l1
+        elif _dots(row, "L1")[1] >= 1:  # engine icon: dark engines are not counted, lit ones are
+            out["booster_engines_lit"] = _dots(row, "L1")[0]
+            out["booster_propellant_pct"] = gauge("L1")
+        out["booster_altitude_km"] = l2
+        out["ship_speed_kmh"] = r1
+        out["ship_altitude_km"] = r2
+    elif l1 is not None and l1 > 10000.0 and r1 is None:  # second stage alone (the stack never flies this fast)
+        out["ship_speed_kmh"] = l1
+        out["ship_altitude_km"] = l2
+    else:
+        for col in ("booster_speed_kmh", "ship_speed_kmh"):
+            out[col] = l1
+        for col in ("booster_altitude_km", "ship_altitude_km"):
+            out[col] = l2
+        if r1 is not None and r1 < 15.0:
+            out["g_force"] = r1
+        if r2 is None and _dots(row, "R2")[1] >= 1:
+            out["booster_engines_lit"] = _dots(row, "R2")[0]
+            out["booster_propellant_pct"] = gauge("R2")
+    return out

@@ -138,3 +138,19 @@ url = "https://x.com/i/broadcasts/1qxvvenMPMQxB"
 target = "tests/validation/telemetry/flight14_2026-09-28.csv"
 license = "Factual values displayed in the public SpaceX webcast, transcribed by this project (video not redistributed)"
 credit = "Telemetry: SpaceX webcast; transcription: this project"
+
+[[source]]
+id = "telemetry_f9_crs35"
+name = "Falcon 9 CRS-35 (2026-10-13) webcast telemetry: stage 1/2 speed, altitude, G-force, stage 1 engines and propellant gauge (own OCR transcription)"
+url = "https://x.com/i/broadcasts/1aJbdEzoAvYKX"
+target = "tests/validation/telemetry/f9_crs35_2026-10-13.csv"
+license = "Factual values displayed in the public SpaceX webcast, transcribed by this project (video not redistributed)"
+credit = "Telemetry: SpaceX webcast; transcription: this project"
+
+[[source]]
+id = "telemetry_f9_starlink15_25"
+name = "Falcon 9 Starlink 15-25 (2026-10-12) webcast telemetry: stage 1/2 speed, altitude, G-force, stage 1 engines and propellant gauge (own OCR transcription)"
+url = "https://x.com/i/broadcasts/1yKAPwdemygxb"
+target = "tests/validation/telemetry/f9_starlink15-25_2026-10-12.csv"
+license = "Factual values displayed in the public SpaceX webcast, transcribed by this project (video not redistributed)"
+credit = "Telemetry: SpaceX webcast; transcription: this project"

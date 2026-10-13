@@ -9,6 +9,8 @@ T+8:40 at 1 sample/s). Sources and licence notes: `tools/data_pipeline/sources.t
 | `flight12_2026-05-22.csv` | Flight 12 | Block 3: B19 / S39 | T-15 s to T+66 min: ship entry to 57 km, last 1.5 km to splashdown |
 | `flight13_2026-07-24.csv` | Flight 13 | Block 3: B20 / S40 | T-15 s to T+65 min: ship coast, entry and splashdown |
 | `flight14_2026-09-28.csv` | Flight 14 | Block 3: B21 / S41 | T-15 s to T+3 h 9 min: ship orbit (gaps), entry and splashdown |
+| `f9_crs35_2026-10-13.csv` | Falcon 9 CRS-35 | Block 5 | T-6 s to T+10.5 min: ascent (G-force, stage 1 gauge), RTLS to LZ-40 |
+| `f9_starlink15-25_2026-10-12.csv` | Falcon 9 Starlink 15-25 | Block 5 (B1088) | T-6 s to T+9.5 min: ascent, drone-ship return (OCISLY) |
 
 Sampling: 2 frames/s to T+10 min; the ship's coast and entry after that at 1 frame/s (flight 14's entry at
 0.5 frame/s). Raw scans of several runs are merged by video time (sorted, duplicates dropped) before `clean`.
@@ -47,3 +49,9 @@ Masses and thrust from the propellant gauge (dials layout; absolute scale from a
 `python tools/telemetry/mass_estimate.py <table.csv> --capacity-t 3650 --isp-sl 330 --isp-vac 350 --from 20 --to 130`
 (stack/booster) or `--vehicle ship --capacity-t 1600 --isp-sl 365 --isp-vac 365 --cd 0 --from 200 --to 500`.
 New layout scans: `scan ... --layout dials` (1920x1080).
+
+Falcon 9 tables (`clean ... --vehicle falcon9`): `booster_*` = first stage, `ship_*` = second stage (the stack's values
+in both until separation), extra column `g_force` (the G-FORCE dial before separation). `booster_engines_lit` /
+`booster_propellant_pct`: the first stage's engine icon and gauge (right side before separation, left side in the
+entry and landing burns, where they replace the speed dial). Lit engine dots are counted; dark ones are not drawn
+brightly enough to count.

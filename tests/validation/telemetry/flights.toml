@@ -60,3 +60,36 @@ notes = "one centre booster engine out during ascent; ship RVac (engine 6) out a
 table = "flight14_2026-09-28.csv"
 webcast = "https://x.com/i/broadcasts/1qxvvenMPMQxB"
 sources = ["wiki_tests", "nsf_f14", "space_f14"]
+
+# ------------------------------------------------------------------ Falcon 9 Block 5 (milestone c)
+# Sources (retrieved 2026-10-13):
+#   sfn_sl1525  https://spaceflightnow.com/2026/10/12/spacex-falcon-9-rocket-to-launch-27-starlink-satellites-into-orbit-from-california/
+#   wiki_slc40  https://en.wikipedia.org/wiki/Cape_Canaveral_Space_Launch_Complex_40  (LZ-40, CRS-35 landing 2026-10-13)
+# Same round-dial layout as the Starship webcasts: "STAGE 1" left, "STAGE 2" right after separation; before it the
+# right dials show G-FORCE and the first stage's engine icon in its propellant gauge (read with --vehicle falcon9).
+
+[[flight]]
+flight = "CRS-35"
+date_utc = "2026-10-13T10:33:00Z"
+booster = ""                 # serial not found in the sources
+block = 5
+config = "falcon9_block5"
+engines = "Merlin 1D"
+outcome_booster = "landed at LZ-40 (RTLS)"
+notes = "cargo Dragon to the ISS (51.6 deg), payload ~12-13 t incl. trunk [E]; MECO ~T+2:20 (6,518 km/h, ~60 km), boostback T+2:30-3:15, apogee 116 km, entry burn T+5:56-6:13 on the centre engine only (55 -> 36 km), landing burn T+7:00-7:22 1 -> 3 -> 1 engines (3 engines ~T+7:04-7:08), gauge ~2.9 % at landing-burn ignition"
+table = "f9_crs35_2026-10-13.csv"
+webcast = "https://x.com/i/broadcasts/1aJbdEzoAvYKX"
+sources = ["wiki_slc40"]
+
+[[flight]]
+flight = "Starlink 15-25"
+date_utc = "2026-10-13T00:28:00Z"
+booster = "B1088"            # 20th flight
+block = 5
+config = "falcon9_block5"
+engines = "Merlin 1D"
+outcome_booster = "landed on the drone ship OCISLY (Pacific)"
+notes = "SLC-4E Vandenberg, 27 Starlink V2 Mini Optimized, 70 deg southerly; MECO ~T+2:30 (~7,970 km/h, ~60 km), no boostback, apogee 114 km, entry burn ~T+6:00-6:30 on 3 engines (67 -> ~45 km, 7,840 -> 5,270 km/h), landing burn from ~3.5 km on 1 engine, touchdown ~T+8:25"
+table = "f9_starlink15-25_2026-10-12.csv"
+webcast = "https://x.com/i/broadcasts/1yKAPwdemygxb"
+sources = ["sfn_sl1525"]

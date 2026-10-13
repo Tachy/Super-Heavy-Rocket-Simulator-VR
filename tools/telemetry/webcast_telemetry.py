@@ -52,7 +52,7 @@ BOXES = {
 CLOCK_TOP = (0.012, 0.028, 0.122, 0.070)
 FIELDS = ["booster_speed", "booster_altitude", "ship_speed", "ship_altitude"]
 # Outlier test: deviation from the neighbourhood median above max(relative * value, absolute) is rejected.
-OUTLIER = {"speed": (0.04, 40.0), "altitude": (0.06, 2.0), "percent": (0.04, 1.0)}  # km/h, km, %
+OUTLIER = {"speed": (0.04, 40.0), "altitude": (0.06, 2.0), "percent": (0.04, 1.0), "g": (0.1, 0.3)}  # km/h, km, %, g
 # Output columns (first five as in the earliest tables) and their outlier test.
 OUTPUT = [("booster_speed_kmh", "speed"), ("booster_altitude_km", "altitude"), ("ship_speed_kmh", "speed"),
           ("ship_altitude_km", "altitude"), ("booster_propellant_pct", "percent"), ("booster_engines_lit", "count"),
@@ -367,16 +367,20 @@ def clean(args) -> None:
     rows = [rows[i] for i in keep]
     t = [t[i] for i in keep]
     # Values per output column (raw readings of the layout -> vehicle values), then the outlier test.
-    if "label_left" in rows[0]:
+    output = OUTPUT + [("g_force", "g")] if args.vehicle == "falcon9" else OUTPUT
+    if args.vehicle == "falcon9":
+        assigned = [dials.assign_falcon9(r) for r in rows]
+        values = {col: [a.get(col) for a in assigned] for col, _ in output}
+    elif "label_left" in rows[0]:
         assigned = [dials.assign(r) for r in rows]
-        values = {col: [a.get(col) for a in assigned] for col, _ in OUTPUT}
+        values = {col: [a.get(col) for a in assigned] for col, _ in output}
     else:
-        values = {col: [None] * len(rows) for col, _ in OUTPUT}
+        values = {col: [None] * len(rows) for col, _ in output}
         for name in FIELDS:
             col = f"{name}_kmh" if name.endswith("speed") else f"{name}_km"
             values[col] = [int(r[name]) if re.fullmatch(r"\d+", r[name]) else None for r in rows]
     series = {}
-    for col, kind in OUTPUT:
+    for col, kind in output:
         series[col] = majority_series(t, values[col]) if kind == "count" else clean_series(t, values[col], kind)
     with open(args.out, "w", newline="") as f:
         f.write(f"# {args.flight} - SpaceX webcast telemetry, read by tools/telemetry/webcast_telemetry.py (OCR)\n")
@@ -384,15 +388,15 @@ def clean(args) -> None:
         f.write("# t_s: time after liftoff (mission clock); speeds km/h, altitudes km as displayed (rounded); propellant:\n"
                 "# the webcast's gauge in % (round-dial layout only); engines_lit: engine icons lit\n")
         w = csv.writer(f)
-        w.writerow(["t_s"] + [col for col, _ in OUTPUT])
+        w.writerow(["t_s"] + [col for col, _ in output])
         kept = 0
         for k in range(len(rows)):
-            vals = [series[col][k] for col, _ in OUTPUT]
+            vals = [series[col][k] for col, _ in output]
             if all(v is None for v in vals):
                 continue
             kept += 1
             w.writerow([f"{t[k]:.2f}"] + ["" if v is None else (f"{v:g}" if isinstance(v, float) else v) for v in vals])
-    valid = {col: sum(v is not None for v in series[col]) for col, _ in OUTPUT}
+    valid = {col: sum(v is not None for v in series[col]) for col, _ in output}
     print(f"liftoff at video ~{t0:.2f} s (median offset); {kept} rows; valid readings {valid}")
 
 
@@ -436,6 +440,8 @@ def main() -> None:
     c.add_argument("out")
     c.add_argument("--flight", required=True)
     c.add_argument("--url", required=True)
+    c.add_argument("--vehicle", choices=["starship", "falcon9"], default="starship",
+                   help="falcon9: STAGE 1 / STAGE 2 sides, G-FORCE dial before separation (dials.assign_falcon9)")
     args = p.parse_args()
     {"scan": scan, "templates": templates, "locate": locate, "clean": clean}[args.cmd](args)
 
