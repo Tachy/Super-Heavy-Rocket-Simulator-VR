@@ -21,7 +21,8 @@ TEST_CASE("Vehicle configuration loads with all referenced engines", "[config]")
     REQUIRE(v.stages.size() == 2);
     CHECK(v.stages[0].id == "booster");
     CHECK(v.stages[1].id == "ship");
-    CHECK(v.stages[0].engine_groups.size() == 3);
+    CHECK(v.stages[0].engine_groups.size() == 4);  // centre, divert pair, middle, outer
+    CHECK(v.stages[0].engine_groups[1].angles_rad.size() == 2);
     CHECK(v.engines.size() == 2);
     CHECK(v.engine("raptor3").gimbal_max_rad == Catch::Approx(15.0 * constants::deg_to_rad));
     CHECK(v.propellant.mixture_ratio == 3.6);

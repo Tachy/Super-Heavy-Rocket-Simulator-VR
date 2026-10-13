@@ -7,6 +7,7 @@ wiki_sh = "https://en.wikipedia.org/wiki/SpaceX_Super_Heavy (retrieved 2026-10-1
 wiki_starship = "https://en.wikipedia.org/wiki/SpaceX_Starship (retrieved 2026-10-12)"
 nsf_b3 = "https://www.nasaspaceflight.com/2026/05/super-heavy-block-3-booster-future/"
 satnews = "https://satnews.com/2026/05/14/spacex-debuts-starship-v3-redefining-heavy-lift-launch-capability/"
+satnews_2025_10 = "https://news.satnews.com/2025/10/05/spacex-prepares-starship-for-11th-flight-test-on-the-13th-using-a-new-engine-configuration/ (V3 landing burn baseline: 13 -> 5 divert -> 3 centre engines, ending in a hover)"
 faa_ea_2024 = "https://www.faa.gov/media/87636 (FAA Revised Draft EA, Nov 2024, p. 7): up to ~74 t residual propellant on Super Heavy for landing, incl. expenditures"
 
 [vehicle]
@@ -50,10 +51,20 @@ gimbal = true
 relight = true
 
 [[stage.engine_group]]
-id = "middle"
+id = "divert"                            # with the centre engines: the 5-engine divert phase of the landing burn
+engine = "raptor3"                       # (V3 baseline 13 -> 5 -> 3 [S:satnews_2025_10]); which pair: [E]
+count = 2
+ring_radius_m = 2.6                      # [E] middle ring
+angles_deg = [0.0, 180.0]                # [E] a symmetric pair
+gimbal = true
+relight = true
+
+[[stage.engine_group]]
+id = "middle"                            # the other 8 engines of the 10-engine middle ring
 engine = "raptor3"
-count = 10
+count = 8
 ring_radius_m = 2.6                      # [E]
+angles_deg = [36.0, 72.0, 108.0, 144.0, 216.0, 252.0, 288.0, 324.0]
 gimbal = true
 relight = true
 

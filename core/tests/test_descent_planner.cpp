@@ -36,7 +36,7 @@ std::unique_ptr<Booster> block3() {
     b->vehicle = std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR);
     DescentModelInputs in;
     in.vehicle = b->vehicle.get();
-    in.ignition_groups = {"booster/center", "booster/middle"};
+    in.ignition_groups = {"booster/center", "booster/divert", "booster/middle"};
     in.final_groups = {"booster/center"};
     in.atmosphere = &b->atmosphere;
     in.site_height_m = 10.0;

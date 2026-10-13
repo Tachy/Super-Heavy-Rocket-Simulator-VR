@@ -18,10 +18,10 @@ const char* to_string(ReturnPhase phase);
 
 struct BoosterReturnParameters {
     double flight_time_s = 230.0;  // planned time from boostback start to touchdown (Lambert arc shape)
-    std::vector<std::string> boostback_groups{"booster/center", "booster/middle"};
+    std::vector<std::string> boostback_groups{"booster/center", "booster/divert", "booster/middle"};
     // Landing burn: starts with the inner engines (high deceleration close to the ground, small gravity
     // losses) and continues on the centre engines once these can finish it at the design throttle.
-    std::vector<std::string> landing_ignition_groups{"booster/center", "booster/middle"};
+    std::vector<std::string> landing_ignition_groups{"booster/center", "booster/divert", "booster/middle"};
     std::vector<std::string> landing_groups{"booster/center"};
     double landing_throttle = 0.8;  // design throttle of the inner-engine segment: the rest is control margin
     double final_throttle = 0.8;    // design throttle of the centre-engine segment (slower, time to settle)

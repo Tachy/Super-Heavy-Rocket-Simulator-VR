@@ -29,7 +29,7 @@ TEST_CASE("The descent snapshot puts the booster into the plan frame", "[gnc][de
     REQUIRE(landing.sea.has_value());
     const auto frame = gnc::plan_frame(landing.latitude_rad, landing.longitude_rad, landing.height_m);
     gnc::SnapshotSettings settings;
-    settings.ignition_groups = {"booster/center", "booster/middle"};
+    settings.ignition_groups = {"booster/center", "booster/divert", "booster/middle"};
     settings.final_groups = {"booster/center"};
     const auto snap = gnc::take_descent_snapshot(body, session.environment(), t0, landing, frame, settings);
 

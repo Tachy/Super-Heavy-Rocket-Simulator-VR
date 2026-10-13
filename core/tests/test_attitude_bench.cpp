@@ -31,7 +31,7 @@ TEST_CASE("Attitude bench: 13 engines following a turning axis", "[.bench]") {
     const gnc::AttitudeController controller{gnc::AttitudeController::Gains{wn, 0.9, fins}};
     const double rate = 0.1;  // rad/s about site north (tilts the axis towards east)
     vehicle::VehicleCommand cmd;
-    cmd.groups = {{"booster/center", true, 0.7}, {"booster/middle", true, 0.7}};
+    cmd.groups = {{"booster/center", true, 0.7}, {"booster/divert", true, 0.7}, {"booster/middle", true, 0.7}};
     double max_err = 0.0;
     for (int i = 0; i < 1400; ++i) {  // 7 s: 3 s spool-up, then the turn
         const double t = i * 0.005;

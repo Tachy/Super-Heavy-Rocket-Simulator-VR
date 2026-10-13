@@ -58,6 +58,7 @@ struct EngineGroupConfig {
     double ring_radius_m = 0.0;
     bool gimbal = false;
     bool relight = false;
+    std::vector<double> angles_rad;  // explicit ring angles (one per engine); empty: evenly spaced from 0
 };
 
 struct AeroConfig {

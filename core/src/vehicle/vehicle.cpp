@@ -61,7 +61,8 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
         }
         for (const auto& group : stage_config.engine_groups) {
             for (int k = 0; k < group.count; ++k) {
-                const double angle = constants::two_pi * k / group.count;
+                const double angle = group.angles_rad.empty() ? constants::two_pi * k / group.count
+                                                              : group.angles_rad[static_cast<size_t>(k)];
                 Engine engine;
                 engine.performance = performances.at(group.engine_id);
                 engine.group_id = stage_config.id + "/" + group.id;

@@ -46,7 +46,7 @@ struct Fixture {
 
     gnc::ScvxLandingParameters parameters() const {
         gnc::ScvxLandingParameters p;
-        p.snapshot.ignition_groups = {"booster/center", "booster/middle"};
+        p.snapshot.ignition_groups = {"booster/center", "booster/divert", "booster/middle"};
         p.snapshot.final_groups = {"booster/center"};
         return p;
     }
@@ -59,7 +59,7 @@ TEST_CASE("SCvx landing guidance starts with a plan and commands the ignition en
     gnc::ScvxLandingGuidance guidance(f.session->return_site(f.body->vehicle()), f.parameters());
     REQUIRE(guidance.start(*f.body, f.session->environment(), f.t0));
     const auto cmd = guidance.update(*f.body, f.session->environment(), f.t0);
-    CHECK(cmd.run_groups == std::vector<std::string>{"booster/center", "booster/middle"});
+    CHECK(cmd.run_groups == std::vector<std::string>{"booster/center", "booster/divert", "booster/middle"});
     CHECK(cmd.throttle > 0.0);
     CHECK(cmd.throttle <= 1.0);
     CHECK_FALSE(cmd.abort);
@@ -110,17 +110,17 @@ TEST_CASE("Landing throttle counts the thrust of engines still running down", "[
     auto& body = *f.body;
     const auto& env = f.session->environment();
     vehicle::VehicleCommand all;
-    all.groups = {{"booster/center", true, 1.0}, {"booster/middle", true, 1.0}};
+    all.groups = {{"booster/center", true, 1.0}, {"booster/divert", true, 1.0}, {"booster/middle", true, 1.0}};
     for (int i = 0; i < 800; ++i) body.step(env, f.t0 + i * 0.005, 0.005, all);  // 4 s: all 13 engines spooled up
     vehicle::VehicleCommand centre;
-    centre.groups = {{"booster/center", true, 1.0}, {"booster/middle", false, 1.0}};
+    centre.groups = {{"booster/center", true, 1.0}, {"booster/divert", false, 1.0}, {"booster/middle", false, 1.0}};
     for (int i = 0; i < 50; ++i) body.step(env, f.t0 + 4.0 + i * 0.005, 0.005, centre);  // middle engines half run down
     const std::vector<std::string> groups{"booster/center"};
     const double pressure = 1.0e5;
     double centre_full = 0.0, residual = 0.0;
     for (const auto& e : body.vehicle().stages().front().engines) {
         if (e.group_id == "booster/center") centre_full += e.spool * e.performance->thrust_n(1.0, pressure);
-        else if (e.group_id == "booster/middle") residual += e.spool * e.performance->thrust_n(e.throttle, pressure);
+        else if (e.group_id == "booster/middle" || e.group_id == "booster/divert") residual += e.spool * e.performance->thrust_n(e.throttle, pressure);
     }
     REQUIRE(residual > 0.0);
     const double thrust = residual + 0.6 * centre_full;

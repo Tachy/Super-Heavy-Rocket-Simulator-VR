@@ -212,7 +212,7 @@ std::unique_ptr<FlightBody> stack_on_pad(const PadWorld& world) {
 
 VehicleCommand booster_throttle(double throttle) {
     VehicleCommand c;
-    c.groups = {{"booster/center", true, throttle}, {"booster/middle", true, throttle},
+    c.groups = {{"booster/center", true, throttle}, {"booster/divert", true, throttle}, {"booster/middle", true, throttle},
                 {"booster/outer", true, throttle}};
     return c;
 }
@@ -284,4 +284,33 @@ TEST_CASE("A caught body co-rotates with the Earth", "[vehicle]") {
     CHECK(norm(body->state().position_gcrf_m - r) < 1e-6);
     body->mark_impacted();
     CHECK(body->impacted());
+}
+
+TEST_CASE("The Block 3 booster has a divert pair on the middle ring", "[vehicle]") {
+    // Landing sequence 13 -> 5 -> 3 (V3 baseline): the five divert engines are the three centre engines and a pair
+    // of the middle ring. Engine groups may place their engines at explicit ring angles.
+    const Vehicle v(config::load_vehicle(config_dir, "starship_block3"), config_dir);
+    const auto& engines = v.stages().front().engines;
+    REQUIRE(engines.size() == 33);
+    int center = 0, divert = 0, middle = 0, outer = 0;
+    for (const auto& e : engines) {
+        center += e.group_id == "booster/center";
+        divert += e.group_id == "booster/divert";
+        middle += e.group_id == "booster/middle";
+        outer += e.group_id == "booster/outer";
+    }
+    CHECK(center == 3);
+    CHECK(divert == 2);
+    CHECK(middle == 8);
+    CHECK(outer == 20);
+    for (size_t i = 0; i < engines.size(); ++i) {
+        for (size_t j = i + 1; j < engines.size(); ++j) {
+            CHECK(norm(engines[i].gimbal_point_m - engines[j].gimbal_point_m) > 0.5);  // no two engines in one place
+        }
+    }
+    for (const auto& e : engines) {
+        if (e.group_id != "booster/divert") continue;
+        CHECK(std::hypot(e.gimbal_point_m.y, e.gimbal_point_m.z) == Catch::Approx(2.6));
+        CHECK(std::abs(std::sin(e.ring_angle_rad)) < 1e-12);  // at 0 and 180 deg: a symmetric pair
+    }
 }

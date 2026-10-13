@@ -92,7 +92,17 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             const auto& g = *node.as_table();
             s.engine_groups.push_back({doc.text(g, "id"), doc.text(g, "engine"),
                                        static_cast<int>(doc.number(g, "count")), doc.number(g, "ring_radius_m"),
-                                       doc.boolean(g, "gimbal"), doc.boolean(g, "relight")});
+                                       doc.boolean(g, "gimbal"), doc.boolean(g, "relight"), {}});
+            if (const auto* angles = g["angles_deg"].as_array()) {
+                for (const auto& a : *angles) {
+                    const auto value = a.value<double>();
+                    if (!value) doc.fail("engine_group.angles_deg must be numbers");
+                    s.engine_groups.back().angles_rad.push_back(*value * constants::deg_to_rad);
+                }
+                if (static_cast<int>(s.engine_groups.back().angles_rad.size()) != s.engine_groups.back().count) {
+                    doc.fail("engine_group.angles_deg must list one angle per engine");
+                }
+            }
         }
     }
     if (auto aero = t["aero"].as_table()) {
