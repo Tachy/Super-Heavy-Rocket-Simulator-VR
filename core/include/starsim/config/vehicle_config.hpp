@@ -99,6 +99,9 @@ struct StageConfig {
     double fairing_mass_kg = 0.0;
     double jettison_after_separation_kg = 0.0;
     double reserve_propellant_kg = 0.0;
+    // [stage.recovery] method: "tower_catch" (Super Heavy: always caught, no legs), "drone_ship_landing" / pad
+    // landing (Falcon 9, not modelled yet); empty: expendable.
+    std::string recovery_method;
     double radiation_pressure_coefficient = 1.3;  // Cr for solar radiation pressure
     int rcs_thruster_count = 0;                    // reaction control (cold gas)
     double rcs_thrust_n = 0.0;                     // per thruster

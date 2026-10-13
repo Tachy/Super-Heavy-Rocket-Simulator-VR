@@ -150,7 +150,14 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
 bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch) {
     const auto snapshot = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
     model_ = snapshot.model;
-    const auto outcome = replanner_.plan_now(request(snapshot, 0));
+    auto outcome = replanner_.plan_now(request(snapshot, 0));
+    if (!outcome.plan->converged && site_.sea && !aborting_) {
+        // The catch is out of reach from the start: plan the abort to the sea right away.
+        ++stats_.plans;
+        ++stats_.failures;
+        aborting_ = true;
+        outcome = replanner_.plan_now(request(snapshot, 0));
+    }
     if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: plans and tracking
         const auto& p = *outcome.plan;
         std::printf("[scvx] first: conv %d it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f/%.2f spool %.2f\n",

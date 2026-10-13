@@ -1,5 +1,5 @@
-// Return to launch site: after hot staging the booster flips, boosts back, coasts engines first and
-// lands on the pad with a landing burn (tower catch modelled as a touchdown on the pad).
+// Return to launch site: after hot staging the booster flips, boosts back, coasts engines first and is caught by
+// the tower after its landing burn (Super Heavy has no legs: always caught, project decision 2026-10-13).
 
 #include <cmath>
 #include <cstdio>
@@ -13,6 +13,7 @@
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/landing_outcome.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "return_scenario.hpp"
 #include "test_support.hpp"
@@ -29,18 +30,22 @@ constexpr double faa_landing_propellant_kg = 74.0e3;
 
 }  // namespace
 
-TEST_CASE("Booster returns to the launch pad after staging", "[gnc][booster][validation]") {
+// The explicit laws (fallback when the first SCvx plan fails) are not accurate enough for the arms (~1-3 m, the arms
+// leave 0.3 m per side): the booster ditches beyond the shoreline with the arms open, gently, clear of the tower.
+TEST_CASE("The explicit fallback guidance ditches the booster at sea next to the tower", "[gnc][booster][validation]") {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
-    const sim::LaunchSite pad{25.99686 * deg, -97.15394 * deg, 10.0};
+    const auto pad = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
     const std::string vehicle_id = GENERATE(as<std::string>{}, "starship_block3");
     CAPTURE(vehicle_id);
     session.launch_from_pad(vehicle_id, pad, 90.0 * deg, t0);
-    session.set_booster_return(true);
+    gnc::BoosterReturnParameters explicit_only;
+    explicit_only.scvx_landing = false;
+    session.set_booster_return(true, explicit_only);
     gnc::AscentTarget target;
     target.periapsis_altitude_m = 200e3;
     target.apoapsis_altitude_m = 200e3;
@@ -59,7 +64,7 @@ TEST_CASE("Booster returns to the launch pad after staging", "[gnc][booster][val
         session.advance_to(t0 + t, 1000);
         if (session.body_count() < 2) continue;
         const auto& booster = session.body(0);
-        if (booster.resting() || booster.impacted()) break;
+        if (booster.caught() || booster.resting() || booster.impacted()) break;
         const auto tm = session.telemetry(0);
         last_sink_rate = -tm.vertical_speed_mps;
         last_side_speed = std::sqrt(std::max(tm.speed_relative_mps * tm.speed_relative_mps -
@@ -116,23 +121,39 @@ TEST_CASE("Booster returns to the launch pad after staging", "[gnc][booster][val
 
     REQUIRE(session.body_count() >= 2);
     const auto& booster = session.body(0);
-    const auto transform = earth.fixed_to_gcrf(session.epoch());
-    const auto cg_fixed = transpose(transform.rotation) * booster.state().position_gcrf_m;
-    const auto pad_fixed = frames::geodetic_to_fixed({pad.latitude_rad, pad.longitude_rad, pad.height_m});
-    const auto geo = frames::fixed_to_geodetic(cg_fixed);
-    const auto foot = frames::geodetic_to_fixed({geo.latitude_rad, geo.longitude_rad, pad.height_m});
-    const double distance_m = norm(foot - pad_fixed);
-    std::printf("[validation] %s booster return: apogee %.1f km, touchdown %.1f m from the pad, sink rate %.2f m/s, "
-                "lateral %.2f m/s, %.1f t propellant left, %s\n",
-                vehicle_id.c_str(), max_altitude_km, distance_m, last_sink_rate, last_side_speed, booster.vehicle().propellant_kg() / 1000.0,
-                booster.impacted() ? "IMPACT" : booster.resting() ? "landed" : "still flying");
-    CHECK_FALSE(booster.impacted());
-    CHECK(booster.resting());
-    // Pad landing. A tower catch needs < ~1 m and < ~0.5 m/s lateral: not reached yet (attitude lag of the
-    // centre engines; see CLAUDE.md "Known issues" - powered-descent guidance by convex optimisation).
-    CHECK(distance_m < 20.0);
+    const auto* tower = session.tower();
+    REQUIRE(tower != nullptr);
+    const auto t_end = earth.fixed_to_gcrf(session.epoch());
+    const auto p = tower->geometry().to_site(transpose(t_end.rotation) * booster.state().position_gcrf_m);
+    std::printf("[validation] %s explicit return: apogee %.1f km, tower %s, %.1f m from the catch axis, sink %.2f m/s, "
+                "lateral %.2f m/s, %.1f t propellant left\n",
+                vehicle_id.c_str(), max_altitude_km, sim::to_string(tower->phase()), std::hypot(p.x, p.y), last_sink_rate,
+                last_side_speed, booster.vehicle().propellant_kg() / 1000.0);
+    CHECK_FALSE(tower->tower_struck());
+    CHECK(tower->phase() == sim::CatchPhase::Aborted);
+    CHECK(session.landing_outcome(0) == sim::LandingOutcome::Splashdown);
     CHECK(last_sink_rate < vehicle::FlightBody::max_touchdown_sink_rate_mps);
-    CHECK(last_side_speed < 3.0);
+}
+
+TEST_CASE("A booster recovered by tower catch gets no return guidance at a site without a tower", "[gnc][booster]") {
+    // Super Heavy has no legs: without a tower there is nothing to land on (project decision 2026-10-13).
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    const sim::LaunchSite pad{25.99686 * deg, -97.15394 * deg, 10.0};  // no tower
+    session.launch_from_pad("starship_block3", pad, 90.0 * deg, t0);
+    session.set_booster_return(true);
+    gnc::AscentTarget target;
+    target.periapsis_altitude_m = 200e3;
+    target.apoapsis_altitude_m = 200e3;
+    target.inclination_rad = 26.6 * deg;
+    session.engage_ascent_autopilot(target);
+    for (double t = 0.0; t < 400.0 && session.body_count() < 2; t += 0.5) session.advance_to(t0 + t, 1000);
+    REQUIRE(session.body_count() >= 2);
+    CHECK(session.return_status(0) == nullptr);
 }
 
 TEST_CASE("Catch roll reference turns the pins towards the arms", "[gnc][booster]") {
@@ -150,9 +171,7 @@ TEST_CASE("Catch roll reference turns the pins towards the arms", "[gnc][booster
     }
 }
 
-// Known open (Plan 3b, 2026-10-12): with SCvx the full return does not yet end on the arms reliably (attitude
-// overshoot at the 13 -> 3 engine switch); [!mayfail] reports without failing the suite until Task 11 closes it.
-TEST_CASE("Booster return to the catch tower ends caught or missed", "[gnc][booster][catch][validation][!mayfail]") {
+TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][catch][validation]") {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();
@@ -187,8 +206,7 @@ TEST_CASE("Booster return to the catch tower ends caught or missed", "[gnc][boos
     const auto* tower = session.tower();
     REQUIRE(tower != nullptr);
     const auto phase = tower->phase();
-    // Until the SCvx catch is robust (Plan 3b, Task 11 tightens this to "caught"): any end, but never the tower.
-    CHECK((phase == sim::CatchPhase::Caught || phase == sim::CatchPhase::Missed || phase == sim::CatchPhase::Aborted));
+    CHECK(phase == sim::CatchPhase::Caught);
     CHECK_FALSE(tower->tower_struck());
     const auto t_end = earth.fixed_to_gcrf(session.epoch());
     const auto p = tower->geometry().to_site(transpose(t_end.rotation) * session.body(0).state().position_gcrf_m);

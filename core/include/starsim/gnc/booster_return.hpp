@@ -102,7 +102,8 @@ public:
                                         time::Epoch epoch) const;
 
 private:
-    LandingSite site_;
+    LandingSite site_;  // target of the return (moved to the sea point when ditching)
+    bool ditch_ = false;  // explicit laws only at a catch site: the whole return aims beyond the shoreline
     BoosterReturnParameters parameters_;
     ReturnPhase phase_ = ReturnPhase::Flip;
     time::Epoch boostback_start_;

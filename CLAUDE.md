@@ -116,9 +116,12 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
-- Booster return: on a site without a tower the booster lands on the pad with the explicit laws (no impact, sink
-  ~1 m/s, ~3 m off) - a simulator fallback: the real Super Heavy has no legs (caught or splashdown). At a catch
-  site the landing burn flies SCvx plans (`gnc/scvx_landing`), V3 sequence 13 -> 5 (divert pair) -> 3 engines,
+- Booster recovery (decision 2026-10-13): Super Heavy is always caught (no legs; `[stage.recovery] method =
+  "tower_catch"`): return guidance only at sites with a tower. Falcon 9 boosters land on the pad or the drone ship
+  ("drone_ship_landing") - not modelled yet. If the first SCvx catch plan fails, an SCvx sea abort is planned at once;
+  the explicit laws are the last fallback (over the arms, ~1-3 m: not accurate enough to be caught); with
+  `scvx_landing = false` the whole return aims beyond the shoreline and ditches (test: 1.05 m/s, 650 m off).
+- Booster return: at a catch site the landing burn flies SCvx plans (`gnc/scvx_landing`), V3 sequence 13 -> 5 (divert pair) -> 3 engines,
   re-planned every 1 s on a worker thread (effective at snapshot + 0.5 s: a re-plan starts from the snapshot
   predicted over that latency with the active plan's thrust, its start thrust within the throttle-rate reach of the
   measured thrust; tests and time warp wait, real-time play never waits - `FlightSession::set_realtime_planning`).

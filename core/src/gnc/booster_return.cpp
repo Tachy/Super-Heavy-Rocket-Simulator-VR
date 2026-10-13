@@ -108,7 +108,19 @@ const char* to_string(ReturnPhase phase) {
 
 BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnParameters parameters)
     : site_(std::move(site)), parameters_(std::move(parameters)) {
-    if (site_.catch_target) {
+    if (site_.catch_target && site_.sea && !parameters_.scvx_landing) {
+        // The explicit laws cannot hit the arms (Super Heavy has no legs): the return aims at the sea.
+        ditch_ = true;
+        const Vec3 up = up_at(site_.latitude_rad, site_.longitude_rad);
+        const Vec3 east = math::normalized(cross(Vec3{0.0, 0.0, 1.0}, up));
+        const Vec3 north = cross(up, east);
+        const Vec3 seaward = north * std::cos(site_.sea->direction_rad) + east * std::sin(site_.sea->direction_rad);
+        const auto sea = frames::fixed_to_geodetic(
+            frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m}) +
+            seaward * (site_.sea->shoreline_distance_m + parameters_.scvx.snapshot.sea_margin_m));
+        site_.latitude_rad = sea.latitude_rad;
+        site_.longitude_rad = sea.longitude_rad;
+    } else if (site_.catch_target) {
         const auto pins = frames::fixed_to_geodetic(site_.catch_target->pin_point_itrf_m);
         target_bottom_height_m_ = pins.height_m - site_.height_m - site_.catch_target->pin_station_m;
     }
@@ -443,7 +455,8 @@ void BoosterReturnGuidance::start_landing(const vehicle::FlightBody& body, const
     if (!scvx_->start(body, env, epoch)) scvx_.reset();  // fallback: the explicit laws
 }
 
-// ZEM/ZEV landing burn (the fallback of the SCvx guidance and the guidance of sites without a tower).
+// ZEM/ZEV landing burn: the last fallback (SCvx catch and sea-abort plans both failed: over the arms, ~1-3 m), or with
+// scvx_landing off a ditching beyond the shoreline (Super Heavy has no legs).
 void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                              time::Epoch epoch, ReturnCommand& cmd) {
     const auto& s = body.state();
@@ -460,10 +473,11 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
     const Vec3 omega_fixed = to_fixed * omega;
     const Vec3 g_fixed = to_fixed * env.gravity.acceleration_mps2(s.position_gcrf_m, epoch) -
                          cross(omega_fixed, cross(omega_fixed, r_fixed));
-    const Vec3 r_pad = site_.catch_target  // CG position at touchdown / catch
-                           ? site_.catch_target->pin_point_itrf_m -
-                                 site_up * (site_.catch_target->pin_station_m - mass.cg_station_m)
-                           : site_fixed + site_up * mass.cg_station_m;
+    const bool catching = site_.catch_target && !ditch_;
+    Vec3 r_pad = site_fixed + site_up * mass.cg_station_m;  // CG position at touchdown (ditching: at sea) / catch
+    if (catching) {
+        r_pad = site_.catch_target->pin_point_itrf_m - site_up * (site_.catch_target->pin_station_m - mass.cg_station_m);
+    }
     const double height = dot(r_fixed - r_pad, site_up);
     const double sink = -dot(v_fixed, site_up);
     const auto final_set = engine_set(body.vehicle(), parameters_.landing_groups, pressure);
@@ -523,20 +537,21 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
     const Vec3 a_cmd = site_up * a_up + a_side;
     const Vec3 axis_fixed = math::normalized(a_cmd);
     cmd.axis_gcrf = transform.rotation * axis_fixed;
-    if (site_.catch_target) {
+    if (catching) {
         const Vec3 body_y = to_fixed * s.attitude.rotate(Vec3{0.0, 1.0, 0.0});
         cmd.roll_reference_gcrf = transform.rotation * catch_roll_reference(site_.catch_target->across_itrf, site_up,
                                                                             site_.catch_target->pin_azimuth_rad, body_y);
     }
+    cmd.abort = ditch_;  // the tower keeps its arms open
     // Throttle for that thrust (nozzle pressure loss, engines still starting or running down).
     cmd.throttle = landing_throttle(body.vehicle(), groups, mass.mass_kg * norm(a_cmd), pressure);
     cmd.run_groups = groups;
     cmd.time_to_go_s = t;
     cmd.impact_miss_m = norm(offset_side);
     // Touchdown sensed (or ground contact): engines off.
-    const bool catch_over = site_.catch_target && (catch_contact_ || height < -catch_missed_height_m);
+    const bool catch_over = catching && (catch_contact_ || height < -catch_missed_height_m);
     if (body.resting() || body.impacted() || catch_over ||
-        (!site_.catch_target && final_engines_ && height < touchdown_cutoff_height_m)) {
+        (!catching && final_engines_ && height < touchdown_cutoff_height_m)) {
         phase_ = ReturnPhase::Landed;
     }
 }

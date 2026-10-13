@@ -106,6 +106,22 @@ TEST_CASE("Repeated failed re-plans switch to an abort", "[gnc][scvx_landing]") 
     CHECK(abort_min_phase_s == 0.0);
 }
 
+TEST_CASE("An unreachable catch at ignition starts with an abort plan to the sea", "[gnc][scvx_landing]") {
+    // Super Heavy has no legs: if the catch cannot be planned, the booster ditches at sea instead (arms open).
+    Fixture f;
+    gnc::PlanFunction no_catch = [](gnc::DescentPlanner& planner, const gnc::PlanRequest& r) {
+        auto plan = gnc::default_plan_function()(planner, r);
+        if (r.target.goal == gnc::DescentGoal::Catch) plan.converged = false;
+        return plan;
+    };
+    gnc::ScvxLandingGuidance guidance(f.session->return_site(f.body->vehicle()), f.parameters(), no_catch);
+    REQUIRE(guidance.start(*f.body, f.session->environment(), f.t0));
+    CHECK(guidance.aborting());
+    CHECK(guidance.update(*f.body, f.session->environment(), f.t0).abort);
+    CHECK(guidance.statistics().plans == 2);
+    CHECK(guidance.statistics().failures == 1);
+}
+
 TEST_CASE("Landing throttle delivers the thrust, counting engines still running down", "[gnc][scvx_landing]") {
     Fixture f;
     auto& body = *f.body;

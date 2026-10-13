@@ -520,7 +520,11 @@ void FlightSession::stage() {
     for (auto& [group, run] : lower.running_groups) run = false;  // booster engines off after separation
     lower.body->set_ground_height(launch_site_.height_m);  // separated stages: the real ground, not the mount
     upper->set_ground_height(launch_site_.height_m);
-    if (booster_return_) {
+    // Return guidance only for a booster that is caught by a tower at this site: Super Heavy has no legs (project
+    // decision 2026-10-13: it is always caught); Falcon 9 pad / drone-ship landings are not modelled yet.
+    const bool catchable = lower.body->vehicle().stages().front().config.recovery_method == "tower_catch" &&
+                           launch_site_.tower.has_value();
+    if (booster_return_ && catchable) {
         const auto landing = return_site(lower.body->vehicle());
         lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(landing, *booster_return_);
         lower.return_guidance->set_realtime(realtime_planning_);
