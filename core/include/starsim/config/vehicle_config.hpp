@@ -129,6 +129,9 @@ struct StageConfig {
     // [stage.recovery] method: "tower_catch" (Super Heavy: always caught, no legs), "drone_ship_landing" / pad
     // landing (Falcon 9, not modelled yet); empty: expendable.
     std::string recovery_method;
+    // [stage.recovery] deorbit_engine_groups: the engine set deorbit burns run on (empty: the burn picks one). The ship:
+    // the belly sea-level Raptor alone, its thrust steered through the CG (user 2026-10-13).
+    std::vector<std::string> deorbit_engine_groups;
     double radiation_pressure_coefficient = 1.3;  // Cr for solar radiation pressure
     int rcs_thruster_count = 0;                    // reaction control (cold gas)
     double rcs_thrust_n = 0.0;                     // per thruster

@@ -63,7 +63,7 @@ double burn_duration_s(double delta_v, double mass_kg, double thrust_n, double m
 
 BurnExecutor::Status BurnExecutor::update(const vehicle::FlightBody& body, time::Epoch now, double dt_s,
                                           double thrust_n, double mass_flow_kgps, double shutdown_time_s,
-                                          const Vec3& rcs_acceleration_gcrf) {
+                                          const Vec3& rcs_acceleration_gcrf, const Vec3& thrust_axis_body) {
     Status st;
     const double mass = body.vehicle().mass_properties().mass_kg;
 
@@ -76,7 +76,7 @@ BurnExecutor::Status BurnExecutor::update(const vehicle::FlightBody& body, time:
     }
     if (delivered > 0.0) {
         started_ = true;
-        remaining_ -= body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0}) * (delivered / mass * dt_s);
+        remaining_ -= body.state().attitude.rotate(thrust_axis_body) * (delivered / mass * dt_s);
     }
     if (norm(rcs_acceleration_gcrf) > 0.0) {
         started_ = true;

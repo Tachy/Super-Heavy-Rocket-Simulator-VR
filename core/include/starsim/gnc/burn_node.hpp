@@ -46,8 +46,11 @@ public:
     // Once per tick, before integration. `thrust_n` / `mass_flow_kgps`: full-thrust performance of the
     // engines used for the burn (vacuum).
     // `rcs_acceleration_gcrf`: RCS translation acceleration applied during the last tick (RCS burns).
+    // `thrust_axis_body`: direction of the engines' thrust in body axes (an asymmetric set gimballed through the CG
+    // pushes along an axis tilted against the hull, gnc::thrust_axis_body).
     Status update(const vehicle::FlightBody& body, time::Epoch now, double dt_s, double thrust_n,
-                  double mass_flow_kgps, double shutdown_time_s, const math::Vec3& rcs_acceleration_gcrf = {});
+                  double mass_flow_kgps, double shutdown_time_s, const math::Vec3& rcs_acceleration_gcrf = {},
+                  const math::Vec3& thrust_axis_body = {1.0, 0.0, 0.0});
 
 private:
     BurnNode node_;

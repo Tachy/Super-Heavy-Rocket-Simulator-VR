@@ -7,6 +7,7 @@
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
+#include "starsim/gnc/descent_snapshot.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/sim/landing_outcome.hpp"
@@ -141,7 +142,7 @@ void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::St
 
 // Candidate engine configurations of the lowest stage with engines, strongest first: all groups at full
 // throttle, each group alone at full throttle, each group alone at minimum throttle.
-std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations() const {
+std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations(const std::vector<std::string>* forced) const {
     std::vector<BurnConfiguration> configurations;
     if (bodies_.empty()) return configurations;
     const auto& vehicle = bodies_[controlled_].body->vehicle();
@@ -183,8 +184,16 @@ std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations
                 transient = std::max(transient, 0.5 * (cfg.startup_s + cfg.shutdown_s));
             }
             c.minimum_dv_mps = c.thrust_n / mass * transient;
+            c.thrust_axis_body = gnc::thrust_axis_body(vehicle, vehicle.mass_properties().cg_station_m, selected);
             return c;
         };
+        if (forced) {
+            std::vector<std::string> selected;
+            for (const auto& g : *forced) selected.push_back(stage.config.id + "/" + g);
+            configurations.push_back(make(selected, false));
+            configurations.push_back(make(selected, true));
+            break;
+        }
         configurations.push_back(make(groups, false));
         for (const auto& set : sets) configurations.push_back(make(set, false));
         for (const auto& set : sets) configurations.push_back(make(set, true));
@@ -201,11 +210,16 @@ double FlightSession::minimum_burn_dv_mps() const {
     return configurations.empty() ? 0.0 : configurations.back().minimum_dv_mps;
 }
 
-bool FlightSession::execute_burn(const gnc::BurnNode& node) {
+bool FlightSession::execute_burn(const gnc::BurnNode& node) { return start_burn(node, burn_configurations()); }
+
+bool FlightSession::execute_burn(const gnc::BurnNode& node, const std::vector<std::string>& groups) {
+    return start_burn(node, burn_configurations(&groups));
+}
+
+bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<BurnConfiguration>& configurations) {
     // Strongest configuration whose start/shutdown impulse is at most a quarter of the burn, so that
     // the transients stay small against the closed-loop part; otherwise the weakest that still fits.
     const double dv = norm(node.delta_v_gcrf_mps);
-    const auto configurations = burn_configurations();
     const BurnConfiguration* chosen = nullptr;
     for (const auto& c : configurations) {
         if (c.minimum_dv_mps <= 0.25 * dv) {
@@ -315,8 +329,11 @@ void FlightSession::run_autopilot() {
             break;
         case AutopilotState::Burn: {
             const auto& c = burn_config_;
+            const auto& vehicle = body.vehicle();
+            const math::Vec3 thrust_axis =
+                c.rcs ? math::Vec3{1.0, 0.0, 0.0} : gnc::thrust_axis_body(vehicle, vehicle.mass_properties().cg_station_m, c.groups);
             autopilot_.burn = burn_->update(body, epoch_, tick_s, c.thrust_n, c.mass_flow_kgps, c.shutdown_s,
-                                            last_rcs_acceleration_);
+                                            last_rcs_acceleration_, thrust_axis);
             if (c.rcs) {
                 if (autopilot_.burn.complete) autopilot_.state = AutopilotState::Off;
                 break;
@@ -496,7 +513,34 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         const double throttle = guided ? 1.0 : burn_config_.throttle;
         for (auto& group : command.groups) group.throttle = throttle;
         const auto& direction = guided ? autopilot_.guidance.thrust_direction_gcrf : autopilot_.burn.direction_gcrf;
-        controller_.steer(*flying.body, ambient_pressure_pa, direction).apply_to(command);
+        const auto& vehicle = flying.body->vehicle();
+        const math::Vec3 thrust_axis = guided || burn_config_.rcs
+                                           ? math::Vec3{1.0, 0.0, 0.0}
+                                           : gnc::thrust_axis_body(vehicle, vehicle.mass_properties().cg_station_m,
+                                                                   burn_config_.groups);
+        if (thrust_axis.x < 1.0 - 1e-9) {
+            // Asymmetric set (the ship's deorbit Raptor): its thrust goes through the CG along an axis tilted against the
+            // hull; the hull turns so that this axis points along the burn, its roll kept where it is.
+            const auto& attitude = flying.body->state().attitude;
+            const math::Vec3 x0 = math::normalized(direction);
+            const math::Vec3 y_now = attitude.rotate(math::Vec3{0.0, 1.0, 0.0});
+            const math::Vec3 y0 = math::normalized(y_now - x0 * dot(y_now, x0));
+            const math::Vec3 z0 = cross(x0, y0);
+            math::Mat3 m;
+            const math::Vec3 columns[3] = {x0, y0, z0};
+            for (int c = 0; c < 3; ++c) {
+                m(0, c) = columns[c].x;
+                m(1, c) = columns[c].y;
+                m(2, c) = columns[c].z;
+            }
+            const math::Vec3 x{1.0, 0.0, 0.0};
+            const math::Quat to_x = math::Quat::from_axis_angle(cross(thrust_axis, x), std::acos(std::clamp(thrust_axis.x, -1.0, 1.0)));
+            const math::Quat hull = math::Quat::from_matrix(m) * to_x;  // hull.rotate(thrust_axis) = x0
+            controller_.steer(*flying.body, ambient_pressure_pa, hull.rotate(x), hull.rotate(math::Vec3{0.0, 1.0, 0.0}))
+                .apply_to(command);
+        } else {
+            controller_.steer(*flying.body, ambient_pressure_pa, direction).apply_to(command);
+        }
         if (!guided && burn_config_.rcs && autopilot_.burn.ignite && !autopilot_.burn.complete) {
             // Translation along the remaining delta-v, independent of the attitude.
             command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(autopilot_.burn.direction_gcrf);

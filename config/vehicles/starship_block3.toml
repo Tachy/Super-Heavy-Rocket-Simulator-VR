@@ -239,6 +239,8 @@ reserve_propellant_kg = 30000.0          # [E]
 landing_propellant_kg = 35000.0          # [E] header tanks (the webcast gauge shows the main tanks only): flip (~8 t) and
                                          # landing burn; a tower catch ends slower than the splashdowns of flights 13/14.
                                          # b3 catch campaign: 30 t ran dry in a third of the dispersed cases, 35 t holds
+deorbit_engine_groups = ["sea_level_3"]  # user 2026-10-13: the belly Raptor alone (in the symmetry plane), thrust
+                                         # gimballed through the CG
 
 [stage.heat_shield]
 nose_radius_m = 6.0                      # [E] effective radius of the belly-first windward side

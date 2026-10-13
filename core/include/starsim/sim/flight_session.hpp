@@ -143,6 +143,10 @@ public:
     // Rejects burns smaller than the main engines' start + shutdown impulse (they would overshoot);
     // fine corrections need RCS translation (M9).
     bool execute_burn(const gnc::BurnNode& node);
+    // On a given engine set (config group ids of the lowest stage with engines, e.g. the deorbit set): full throttle if
+    // its start/shutdown impulse is at most a quarter of the burn, else minimum throttle; false if neither fits. The hull
+    // is steered so that the set's thrust axis through the CG (gnc::thrust_axis_body) points along the burn.
+    bool execute_burn(const gnc::BurnNode& node, const std::vector<std::string>& groups);
     // Plans and executes; false if not on an elliptic orbit or the burn is too small.
     bool plan_circularization_at_apoapsis();
     // Smallest delta-v the main engines of the controlled body can deliver (start + shutdown transients
@@ -158,6 +162,7 @@ public:
         double shutdown_s = 0.0;
         double minimum_dv_mps = 0.0;  // impulse of the start + shutdown transients
         bool rcs = false;             // RCS translation (no main engines)
+        math::Vec3 thrust_axis_body{1.0, 0.0, 0.0};  // through the CG at the start (asymmetric sets: tilted)
     };
     const BurnConfiguration& burn_configuration() const { return burn_config_; }
     const gnc::BurnExecutor* burn() const { return burn_ ? &*burn_ : nullptr; }
@@ -235,7 +240,9 @@ private:
     BurnConfiguration burn_config_;
     math::Vec3 last_rcs_acceleration_;  // RCS translation of the controlled body in the last tick (GCRF)
 
-    std::vector<BurnConfiguration> burn_configurations() const;
+    // `forced`: only this set (config group ids), at full and at minimum throttle.
+    std::vector<BurnConfiguration> burn_configurations(const std::vector<std::string>* forced = nullptr) const;
+    bool start_burn(const gnc::BurnNode& node, const std::vector<BurnConfiguration>& configurations);
 };
 
 }  // namespace starsim::sim

@@ -1,5 +1,6 @@
 #include "starsim/config/vehicle_config.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -180,6 +181,15 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.reserve_propellant_kg = doc.number_or(*recovery, "reserve_propellant_kg", 0.0);
         s.landing_propellant_kg = doc.number_or(*recovery, "landing_propellant_kg", 0.0);
         s.recovery_method = doc.text_or(*recovery, "method");
+        if (const auto* groups = (*recovery)["deorbit_engine_groups"].as_array()) {
+            for (const auto& node : *groups) {
+                const auto id = node.value<std::string>().value_or("");
+                const bool known = std::any_of(s.engine_groups.begin(), s.engine_groups.end(),
+                                               [&](const auto& g) { return g.id == id; });
+                if (!known) doc.fail("deorbit engine group '" + id + "' is not an engine group of stage '" + s.id + "'");
+                s.deorbit_engine_groups.push_back(id);
+            }
+        }
     }
     return s;
 }
