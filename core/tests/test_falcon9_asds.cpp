@@ -11,7 +11,10 @@
 
 #include "return_scenario.hpp"
 #include "starsim/config/drone_ship_config.hpp"
+#include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/mission_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/sim/ascent_mission.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -223,4 +226,63 @@ TEST_CASE("Falcon 9 lands on the drone ship from the landing-burn ignition state
     CHECK(run.contact_offset_m < 1.0);
     CHECK(run.contact_sink_mps < 2.0);
     CHECK(run.outcome == sim::LandingOutcome::Landed);
+}
+
+TEST_CASE("The Falcon 9 drone-ship mission loads", "[config][falcon9][asds]") {
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
+    CHECK(m.vehicle_id == "falcon9_block5");
+    CHECK(m.site_id == "ccsfs_slc40");
+    CHECK(m.landing_zone_id.empty());
+    REQUIRE(m.drone_ship);
+    CHECK(m.drone_ship->id == "asds_atlantic");
+    CHECK(m.payload_kg > 16000.0);
+    CHECK(m.payload_kg < 17500.0);
+    CHECK(m.fairing);
+    CHECK(std::abs(m.inclination_rad / deg - 53.0) < 1e-9);
+    // The ship waits ~600 km down the ground track (spec), north-east of the Cape.
+    const auto pad = config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id);
+    const double distance_m = constants::wgs84_semi_major_axis_m * std::acos(std::sin(pad.latitude_rad) * std::sin(m.drone_ship->latitude_rad) +
+                                                               std::cos(pad.latitude_rad) * std::cos(m.drone_ship->latitude_rad) *
+                                                                   std::cos(m.drone_ship->longitude_rad - pad.longitude_rad));
+    std::printf("[falcon9] drone ship %.0f km from the pad\n", distance_m / 1e3);
+    CHECK(distance_m > 450e3);
+    CHECK(distance_m < 750e3);
+}
+
+TEST_CASE("Starting the drone-ship mission puts the ship out as the landing zone", "[sim][falcon9][asds]") {
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, start());
+    REQUIRE(session.landing_zone());
+    REQUIRE(session.landing_zone()->deck);
+    CHECK(session.landing_zone()->latitude_rad == m.drone_ship->latitude_rad);
+    CHECK(session.landing_zone()->height_m == m.drone_ship->sea_height_m + 3.0);
+    CHECK(session.autopilot().state != sim::AutopilotState::Off);
+    CHECK(session.returns_after_staging(session.body(0).vehicle()));
+    CHECK(session.return_parameters(session.body(0).vehicle().stages().front().config).boostback == false);
+    CHECK(session.body(0).vehicle().stages().back().config.payload_mass_kg == m.payload_kg);
+}
+
+TEST_CASE("Falcon 9 drone-ship mission: nominal impact point of the first stage", "[.][falcon9][asds]") {
+    // Diagnostic: where the stage would come down from MECO (drag, the entry burn as an impulse, no steering) - the
+    // drone ship's position in config/missions/falcon9_asds.toml [D].
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
+    for (double t = 0.0; t < 300.0 && session.body_count() < 2; t += 0.05) session.advance_to(t0 + t, 100);
+    REQUIRE(session.body_count() == 2);
+    const auto& stage = session.body(0);
+    const auto p = session.return_parameters(stage.vehicle().stages().front().config);
+    const gnc::BoosterReturnGuidance::PendingBurn burn{p.entry_altitude_m, p.entry_delta_v_mps};
+    const double ground = session.landing_zone()->height_m;
+    const auto impact = gnc::BoosterReturnGuidance::predict_impact(stage, session.environment(), session.epoch(), ground,
+                                                                   nullptr, &burn);
+    REQUIRE(impact.valid);
+    const auto geo = frames::fixed_to_geodetic(impact.position_itrf_m);
+    const auto tr = earth().fixed_to_gcrf(session.epoch());
+    const auto meco = frames::fixed_to_geodetic(transpose(tr.rotation) * stage.state().position_gcrf_m);
+    std::printf("[falcon9] MECO T+%.1f s at %.1f km with %.1f t; impact after %.0f s at latitude %.4f deg, longitude %.4f "
+                "deg\n", session.mission_time_s(), meco.height_m / 1e3, stage.vehicle().propellant_kg() / 1e3, impact.time_s,
+                geo.latitude_rad / deg, geo.longitude_rad / deg);
 }

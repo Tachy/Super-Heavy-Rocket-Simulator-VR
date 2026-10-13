@@ -50,6 +50,16 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
     m.vehicle_id = doc.text(*mission, "vehicle");
     m.site_id = doc.text(*mission, "site");
     m.landing_zone_id = doc.text_or(*mission, "landing_zone");
+    if (const auto* ship = doc.root["drone_ship"].as_table()) {
+        if (!m.landing_zone_id.empty()) doc.fail("a mission has either a landing_zone or a [drone_ship]");
+        MissionDroneShip d;
+        d.id = doc.text(*ship, "id");
+        d.latitude_rad = doc.number(*ship, "latitude_deg") * deg;
+        d.longitude_rad = doc.number(*ship, "longitude_deg") * deg;
+        d.heading_rad = doc.number(*ship, "heading_deg") * deg;
+        d.sea_height_m = doc.number(*ship, "sea_height_m");
+        m.drone_ship = d;
+    }
     m.heading_rad = doc.number(*mission, "heading_deg") * deg;
     m.payload_kg = doc.number_or(*mission, "payload_t", 0.0) * 1000.0;
     m.fairing = (*mission)["fairing"].value_or(true);

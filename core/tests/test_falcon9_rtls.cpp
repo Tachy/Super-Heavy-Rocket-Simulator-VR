@@ -17,6 +17,7 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/ascent_mission.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -231,17 +232,7 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
-    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, m.vehicle_id);
-    cfg.stages.back().payload_mass_kg = m.payload_kg;
-    if (!m.fairing) cfg.stages.back().fairing_mass_kg = 0.0;
-    session.launch_from_pad(cfg, sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)),
-                            m.heading_rad, t0);
-    session.set_landing_zone(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.landing_zone_id)));
-    session.set_booster_return(true);
-    gnc::PitchProgram program;
-    program.kick_angle_rad = m.kick_angle_rad;
-    program.booster_throttle = m.booster_throttle;
-    session.engage_ascent_autopilot({m.periapsis_height_m, m.apoapsis_height_m, m.inclination_rad, m.northerly}, program);
+    sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
 
     const auto zone = *session.landing_zone();
     auto height_speed = [&](const vehicle::FlightBody& b) {

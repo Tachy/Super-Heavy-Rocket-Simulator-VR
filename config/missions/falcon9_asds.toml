@@ -1,0 +1,32 @@
+# Falcon 9 launch from SLC-40 with a Starlink-class payload and the first stage landing on a drone ship (ASDS, milestone
+# c4): the ascent autopilot plans MECO for the drone-ship return (run-down, entry burn, landing propellant); the first
+# stage coasts without a boostback, turns engines first on its RCS, flies its three-engine entry burn (steering onto the
+# deck) and lands on one engine; the second stage flies on to orbit. Modelled on Starlink 15-25 (2026-10-12; that flight
+# launched from Vandenberg - this mission flies the Florida 53 deg shell).
+
+[mission]
+name = "Falcon 9 mit Landung auf dem Drohnenschiff"
+vehicle = "falcon9_block5"
+site = "ccsfs_slc40"
+heading_deg = 45.0              # body +y on the pad (launch azimuth ~43 deg for 53 deg)
+payload_t = 16.5                # [E] Starlink class (24-29 satellites)
+fairing = true
+
+[drone_ship]
+id = "asds_atlantic"
+latitude_deg = 32.7128          # [D] nominal impact point of this mission's first stage: MECO T+144 s, 67.9 km, 24.0 t,
+                                # drag + entry burn, no steering (test "... nominal impact point ...", 2026-10-14)
+longitude_deg = -76.3275
+heading_deg = 45.0              # [E] long axis along the ground track
+sea_height_m = -35.0            # [E] geoid off the Carolinas (EGM2008 ~-35 m)
+
+[target]
+periapsis_km = 200.0            # [E] Starlink insertion (the satellites raise their own orbit)
+apoapsis_km = 280.0
+inclination_deg = 53.0          # Starlink shell (Florida launches north-east)
+northerly = true
+
+[pitch_program]
+kick_deg = 14.0                 # [E] as CRS-35
+# [D] Starlink 15-25 webcast: the G-force dips from 1.8 to 1.4 g at T+55 s (max-Q bucket) as on CRS-35: the same schedule.
+booster_throttle = [[48.0, 1.0], [51.0, 0.7], [60.0, 0.7], [63.0, 0.92]]

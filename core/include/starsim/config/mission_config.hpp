@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -33,14 +34,24 @@ struct ShipReturnMission {
 
 ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
 
+// Where a mission's drone ship waits ([drone_ship] of an ascent mission): the nominal impact point of its first stage.
+struct MissionDroneShip {
+    std::string id;  // config/drone_ships.toml
+    double latitude_rad = 0.0;
+    double longitude_rad = 0.0;
+    double heading_rad = 0.0;   // deck long axis, clockwise from north
+    double sea_height_m = 0.0;  // sea surface above WGS84 (geoid)
+};
+
 // Launch to orbit on the ascent autopilot (config/missions/<id>.toml), optionally with a first-stage return to a landing
-// zone (Falcon 9 RTLS).
+// zone (Falcon 9 RTLS) or a drone ship (ASDS).
 struct AscentMission {
     std::string id;
     std::string name;
     std::string vehicle_id;
     std::string site_id;
     std::string landing_zone_id;  // empty: no landing zone
+    std::optional<MissionDroneShip> drone_ship;  // exclusive with landing_zone_id
     double heading_rad = 0.0;     // body +y on the pad
     double payload_kg = 0.0;
     bool fairing = true;          // false: the payload flies without the upper stage's fairing (Dragon)
