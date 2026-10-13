@@ -10,6 +10,7 @@
 
 #include "ship_entry_scenario.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
+#include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
 
 using namespace starsim;
@@ -140,3 +141,90 @@ TEST_CASE("Entry predictor range falls with bank and starts from the current ban
     CHECK(r60 > r120);
     CHECK(r0_from_120 < r0);
 }
+
+namespace {
+
+// `end` moved by `distance_m` further along the great circle start -> end.
+math::Vec3 shift_along(const math::Vec3& start, const math::Vec3& end, double distance_m) {
+    const math::Vec3 n = math::normalized(cross(start, end));
+    const double a = distance_m / constants::wgs84_semi_major_axis_m;
+    return end * std::cos(a) + cross(n, end) * std::sin(a);
+}
+
+gnc::EntryGuidanceParameters test_parameters() {
+    gnc::EntryGuidanceParameters p;
+    p.predictor_j2 = false;  // the scenario's Earth has central gravity only
+    return p;
+}
+
+// Ground point under the predicted gate for a constant bank from the scenario's start, moved downrange.
+gnc::EntryTarget predicted_target(test::ShipEntryScenario& scenario, const gnc::AlphaSchedule& schedule,
+                                  double bank_deg, double shift_m) {
+    const auto model = predictor_model(scenario, schedule);
+    const auto p = gnc::predict_entry(model, predictor_start(scenario), bank_deg * deg, gnc::EntryTarget{}, 1500.0);
+    const math::Vec3 ground = p.end_position_itrf_m * ((norm(p.end_position_itrf_m) - 1500.0) / norm(p.end_position_itrf_m));
+    return {shift_along(scenario.start_position_itrf_m(), ground, shift_m), 0.0};
+}
+
+}  // namespace
+
+TEST_CASE("Entry corrector hits the target on its own model", "[ship][guidance]") {
+    const auto schedule = ship_alpha_schedule();
+    test::ShipEntryScenario scenario(test::EntryStart{});
+    const auto start = predictor_start(scenario);
+
+    const gnc::EntryGuidance nominal(scenario.body(), schedule, predicted_target(scenario, schedule, 55.0, 0.0),
+                                     test_parameters());
+    const auto s = nominal.solve(nominal.model(), start, 0.0, 1.0, 0.0);
+    if (verbose()) {
+        std::cout << "corrector: bank " << s.bank_rad / deg << " deg, error " << s.prediction.downrange_error_m
+                  << " m, " << s.predictions << " predictions\n";
+    }
+    CHECK(std::abs(s.bank_rad / deg - 55.0) < 3.0);
+    CHECK(std::abs(s.prediction.downrange_error_m) < 1000.0);
+    CHECK_FALSE(s.constrained);
+
+    const gnc::EntryGuidance far(scenario.body(), schedule, predicted_target(scenario, schedule, 0.0, 3.0e6),
+                                 test_parameters());
+    CHECK(far.solve(far.model(), start, 0.0, 1.0, 60.0 * deg).bank_rad == 0.0);
+    const gnc::EntryGuidance near(scenario.body(), schedule, predicted_target(scenario, schedule, 150.0, -1.0e6),
+                                  test_parameters());
+    // Short of even the steepest entry: the bank would go to its limit, but beyond ~77 deg the predicted load
+    // exceeds 90 % of the 6 g limit - the corridor cuts it back (range given up, not the vehicle).
+    const auto short_target = near.solve(near.model(), start, 0.0, 1.0, 60.0 * deg);
+    CHECK(short_target.constrained);
+    CHECK(short_target.prediction.peak_load_g <= 0.9 * 6.0);
+    CHECK(short_target.bank_rad > 60.0 * deg);
+    CHECK(short_target.bank_rad < test_parameters().max_bank_rad);
+}
+
+TEST_CASE("Guided 6-DOF entry reaches the belly-flop hand-over on course", "[ship][guidance]") {
+    const auto schedule = ship_alpha_schedule();
+    test::ShipEntryScenario scenario(test::EntryStart{});
+    gnc::EntryGuidance guidance(scenario.body(), schedule, predicted_target(scenario, schedule, 50.0, 200000.0),
+                                test_parameters());
+    const auto samples = scenario.run_guided(guidance, gnc::EntryPhase::BellyFlop);
+    REQUIRE_FALSE(samples.empty());
+    if (verbose()) {
+        for (size_t i = 0; i < samples.size(); i += 30) {
+            const auto& g = samples[i];
+            std::cout << "t " << g.t_s << " h " << g.telemetry.altitude_m / 1e3 << " v " << g.telemetry.speed_relative_mps
+                      << " bank " << g.command.bank_rad / deg << " downrange " << g.command.downrange_error_m / 1e3
+                      << " cross " << g.command.crossrange_m / 1e3 << " heading err " << g.command.heading_error_rad / deg
+                      << " scales " << g.command.drag_scale << "/" << g.command.lift_scale << "\n";
+        }
+    }
+    const auto& last = samples.back();
+    const double miss_to_target = gnc::ground_range_m(scenario.position_itrf_m(), guidance.target().position_itrf_m);
+    if (verbose()) {
+        std::cout << "hand-over at " << last.t_s << " s, h " << last.telemetry.altitude_m / 1e3 << " km, Mach "
+                  << last.telemetry.mach << ", predicted downrange " << last.command.downrange_error_m / 1e3
+                  << " km, cross " << last.command.crossrange_m / 1e3 << " km, distance to target " << miss_to_target / 1e3
+                  << " km, peak heat " << scenario.body().peak_heat_rate_w_m2() / 1e3 << " kW/m2\n";
+    }
+    CHECK(guidance.phase() == gnc::EntryPhase::BellyFlop);
+    CHECK_FALSE(scenario.body().impacted());
+    CHECK(std::abs(last.command.downrange_error_m) < 3000.0);
+    CHECK(std::abs(last.command.crossrange_m) < 3000.0);
+}
+

@@ -15,6 +15,7 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/attitude_controller.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
+#include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -63,6 +64,12 @@ struct EntrySample {
     // Accelerometer (aerodynamic acceleration) split along / across the air velocity.
     double aero_drag_mps2 = 0.0;
     double aero_lift_mps2 = 0.0;
+};
+
+struct GuidedSample {
+    double t_s = 0.0;
+    vehicle::FlightTelemetry telemetry;
+    gnc::EntryCommand command;
 };
 
 // Commanded angle of attack and bank from the current telemetry.
@@ -160,6 +167,36 @@ public:
             const double pressure = atmosphere_.at(height).pressure_pa;
             controller.steer(*body_, pressure, setpoint.axis_gcrf, setpoint.roll_reference_gcrf).apply_to(command);
             body_->step(env_, now, dt, command);
+        }
+        return samples;
+    }
+
+    // Flies on the entry guidance's attitude commands until its phase reaches `stop_phase`, the body breaks up or
+    // lands, the ship skips out above 130 km, or `max_time_s` passes. One sample per second.
+    std::vector<GuidedSample> run_guided(gnc::EntryGuidance& guidance, gnc::EntryPhase stop_phase,
+                                         double max_time_s = 3000.0) {
+        std::vector<GuidedSample> samples;
+        gnc::AttitudeController::Gains gains;
+        gains.flaps = true;
+        gains.natural_frequency_rad_s = 0.5;
+        const gnc::AttitudeController controller(gains);
+        const double dt = 0.01;
+        const int k0 = static_cast<int>(std::lround(time_s_ / dt));
+        for (int k = k0; k * dt < max_time_s; ++k) {
+            const time::Epoch now = entry_t0 + k * dt;
+            const auto command = guidance.update(*body_, env_, now);
+            if ((k - k0) % 100 == 0) samples.push_back({k * dt, body_->telemetry(env_, now), command});
+            if (static_cast<int>(guidance.phase()) >= static_cast<int>(stop_phase)) break;
+            if (body_->impacted() || body_->resting()) break;
+            if (body_->skipped_out() && samples.back().telemetry.altitude_m > 130000.0) break;
+            const auto transform = env_.earth_orientation.fixed_to_gcrf(now);
+            const auto& s = body_->state();
+            const double height = frames::fixed_to_geodetic(transpose(transform.rotation) * s.position_gcrf_m).height_m;
+            vehicle::VehicleCommand vc;
+            controller.steer(*body_, atmosphere_.at(height).pressure_pa, command.axis_gcrf, command.roll_reference_gcrf)
+                .apply_to(vc);
+            body_->step(env_, now, dt, vc);
+            time_s_ = (k + 1) * dt;
         }
         return samples;
     }

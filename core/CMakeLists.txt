@@ -34,6 +34,7 @@ add_library(starsim_core STATIC
     src/gnc/tvc_lateral.cpp
     src/gnc/entry_aero_table.cpp
     src/gnc/entry_attitude.cpp
+    src/gnc/entry_guidance.cpp
     src/gnc/entry_predictor.cpp
     src/sim/telemetry_recorder.cpp
     src/sim/catch_tower_sim.cpp
