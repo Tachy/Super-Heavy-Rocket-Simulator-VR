@@ -7,23 +7,30 @@
 
 namespace starsim::aero {
 
-// Normal-force characteristic of a grid (lattice) fin versus Mach number: slope of the normal-force
+// Normal-force (and axial-force) characteristic of a grid (lattice) fin versus Mach number: slope of the normal-force
 // coefficient (per rad, on the fin's frontal lattice area) and the effective angle beyond which the
 // force no longer grows (cell flow separation). Transonic "choking" of the cells shows as a dip of the
 // slope. Linear interpolation, clamped at the table ends.
 class GridFinTable {
 public:
     GridFinTable() = default;
-    explicit GridFinTable(const config::CsvTable& table);  // columns: mach, cn_alpha_per_rad, limit_deg
+    // columns: mach, cn_alpha_per_rad, limit_deg, optional ca_axial
+    explicit GridFinTable(const config::CsvTable& table);
 
     double normal_force_slope_per_rad(double mach) const;
     double limit_rad(double mach) const;
+    // Axial force coefficient on the frontal lattice area (0 without the column); it is added to the vehicle's
+    // tail-first drag curve (Vehicle), not to the fin force.
+    double axial_coefficient(double mach) const;
+    const std::vector<double>& mach() const { return mach_; }
+    const std::vector<double>& axial_coefficients() const { return axial_; }
     bool empty() const { return mach_.empty(); }
 
 private:
     std::vector<double> mach_;
     std::vector<double> slope_;
     std::vector<double> limit_rad_;
+    std::vector<double> axial_;  // empty: no axial data
 };
 
 // One fin in body axes (x along the vehicle axis towards the nose, see vehicle.hpp). At zero deflection

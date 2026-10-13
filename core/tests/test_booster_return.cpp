@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -13,6 +14,7 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+#include "return_scenario.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -223,4 +225,53 @@ TEST_CASE("Block 3 reaches landing-burn ignition within the FAA residual propell
     std::printf("starship_block3: propellant at landing-burn ignition %.1f t (FAA EA: <= 74 t)\n", ignition_propellant_kg / 1e3);
     REQUIRE(ignition_propellant_kg >= 0.0);
     CHECK(ignition_propellant_kg <= faa_landing_propellant_kg);
+}
+
+// IFT-3 (2024-03-14, B10 ~ block 1) booster descent, SpaceX webcast telemetry as smoothed by meithan/Starship_IFT3
+// [S] (data/validation/IFT3_full_data_booster.csv, local only): T+330 s at 79.0 km, vertical -711.3 m/s,
+// horizontal 123.8 m/s; then speed at altitude: 31.5 km 1185.0, 19.8 km 1173.5, 10.1 km 814.5, 4.8 km 501.0,
+// 2.8 km 402.7, 1.4 km 360.5 m/s (below ~3 km the landing burn had begun: not used). Flight 5 (2024-10-13, B12)
+// webcast: 2 km at 1301 km/h, engines not yet lit. The booster is placed in the T+330 s state (block 1, landing
+// propellant) and falls unguided; tolerance 5 % (the booster's real mass is not public: 72 t propellant assumed).
+TEST_CASE("Booster descent drag reproduces the IFT-3 telemetry", "[gnc][booster][validation]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    const double landing_propellant_kg = 72.0e3;  // block 1 at ignition in our full return
+    // No guidance: the booster falls engines first on its own (aerodynamically stable), no landing burn.
+    session.place_body(test::booster_config("starship_block1", landing_propellant_kg),
+                       test::state_over_site(session.launch_site(), earth, t0, {25.0e3, 0.0, 79.0e3}, {-123.8, 0.0, -711.3}),
+                       t0);
+    struct Point {
+        double altitude_m, speed_mps;
+        double simulated_mps = -1.0;
+    };
+    std::vector<Point> points{{31.5e3, 1185.0}, {19.8e3, 1173.5}, {10.1e3, 814.5}, {4.8e3, 501.0}, {2.0e3, 1301.0 / 3.6}};
+    double previous_height_m = 79.0e3;
+    for (double t = 0.0; t < 300.0;) {
+        t += 0.05;
+        session.advance_to(t0 + t, 1000);
+        const auto& booster = session.body(0);
+        const auto tr = earth.fixed_to_gcrf(session.epoch());
+        const auto& s = booster.state();
+        const double height = frames::fixed_to_geodetic(transpose(tr.rotation) * s.position_gcrf_m).height_m;
+        const double speed = norm(s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), s.position_gcrf_m));
+        for (auto& p : points) {
+            if (p.simulated_mps < 0.0 && previous_height_m > p.altitude_m && height <= p.altitude_m) p.simulated_mps = speed;
+        }
+        previous_height_m = height;
+        if (booster.impacted()) break;
+    }
+    for (const auto& p : points) {
+        if (std::getenv("STARSIM_VERBOSE")) {
+            std::printf("IFT-3 descent: %5.0f m  recorded %6.1f m/s  simulated %6.1f m/s  (%+.1f %%)\n", p.altitude_m,
+                        p.speed_mps, p.simulated_mps, 100.0 * (p.simulated_mps / p.speed_mps - 1.0));
+        }
+        CAPTURE(p.altitude_m, p.simulated_mps);
+        CHECK(std::abs(p.simulated_mps / p.speed_mps - 1.0) < 0.05);
+    }
 }

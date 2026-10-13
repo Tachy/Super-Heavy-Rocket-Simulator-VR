@@ -116,6 +116,17 @@ void Vehicle::rebuild_aero() {
     aero::AxialDragCurve tail_first;
     if (const auto& table = stages_.front().config.aero.descent_drag_table; !table.empty()) {
         tail_first = aero::AxialDragCurve(config::load_csv_table(config_dir_ / table));
+        // The lowest stage's grid fins (fixed, deployed) add their axial drag in tail-first flight; the ascent table
+        // already describes the whole stack.
+        const auto& low = stages_.front();
+        if (low.grid_fin_table && !low.grid_fins.empty()) {
+            const double reference_area_m2 = constants::pi * 0.25 * diameter_m() * diameter_m();
+            double fin_area_m2 = 0.0;
+            for (const auto& fin : low.grid_fins) fin_area_m2 += fin.geometry.area_m2;
+            std::vector<double> delta;
+            for (const double ca : low.grid_fin_table->axial_coefficients()) delta.push_back(ca * fin_area_m2 / reference_area_m2);
+            if (!delta.empty()) tail_first = tail_first.plus(low.grid_fin_table->mach(), delta);
+        }
     }
     aero_ = std::make_unique<aero::SlenderBodyAero>(
         aero::SlenderBodyGeometry{length_m(), diameter_m(), stages_.back().config.aero.nose_length_m}, drag,

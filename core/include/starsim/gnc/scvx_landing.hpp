@@ -35,7 +35,9 @@ struct ScvxLandingParameters {
     TvcLateralWeights lateral;
     // LQR control effort scale as a fraction of the gimbals' tilt acceleration at the current thrust (0: the fixed
     // scale in `lateral`).
-    double lateral_effort_fraction = 0.3;  // [E] (campaign: 0.2 and 0.3 catch all cases, 0.5 swings up on 3 engines)
+    // [E] Campaign with the calibrated descent drag: 0.3 left a limit cycle on 3 engines near minimum throttle (each
+    // re-plan's small reference step saturated the gimbals) in 1 of 21 cases; 0.2 and 0.15 catch all 21.
+    double lateral_effort_fraction = 0.2;
     double roll_frequency_rad_s = 1.0;  // [E] pins towards the arms
 };
 

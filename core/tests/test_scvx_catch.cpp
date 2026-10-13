@@ -2,6 +2,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <vector>
 #include <random>
@@ -18,7 +20,7 @@ using math::Vec3;
 namespace {
 
 constexpr double nominal_propellant_kg = 70.0e3;  // below the FAA EA's ~74 t at ignition (Task 1: 70.4 t)
-constexpr double nominal_sink_mps = 260.0;        // [E] tail-first fall speed at ignition (recorded returns: 250-280)
+constexpr double nominal_sink_mps = 355.0;        // [S] Flight 5 webcast: 1301 km/h at 2 km, 1264 km/h at 1 km (13 engines lit)
 
 const spice::SpiceEphemeris& ephemeris() {
     test::spice_session();
@@ -153,4 +155,39 @@ TEST_CASE("SCvx catch campaign: dispersions and an engine failure", "[gnc][catch
     }
     std::printf("caught %d of %zu\n", caught, cases.size());
     CHECK(caught >= 19);  // >= 90 % of 21
+}
+
+namespace {
+
+// Places a block 3 booster in the coast 60 deg off in roll, 12 km above the site, and returns the angle between its
+// body +y and the catch roll reference when the landing burn starts (-1: it never started).
+double roll_error_at_ignition_deg() {
+    const auto t0 = start();
+    sim::FlightSession session(ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
+    const auto rolled = math::Quat::from_axis_angle({0.0, 0.0, 1.0}, 60.0 * constants::deg_to_rad);
+    session.place_returning_booster(cfg,
+                                    test::state_over_site(session.launch_site(), earth(), t0, {0.0, 0.0, 12000.0},
+                                                          {0.0, 0.0, -450.0}, rolled),
+                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::Coast);
+    for (double t = 0.0; t < 120.0;) {
+        t += sim::FlightSession::tick_s;
+        session.advance_to(t0 + t, 10);
+        const auto* status = session.return_status(0);
+        if (!status || status->phase != gnc::ReturnPhase::LandingBurn) continue;
+        const Vec3 body_y = session.body(0).state().attitude.rotate({0.0, 1.0, 0.0});
+        return std::acos(std::clamp(dot(body_y, status->roll_reference_gcrf), -1.0, 1.0)) / constants::deg_to_rad;
+    }
+    return -1.0;
+}
+
+}  // namespace
+
+// Recorded catches light the landing burn already rolled for the catch: the grid fins roll the booster on the way down.
+TEST_CASE("A returning booster rolls its pins towards the arms before the landing burn", "[gnc][catch]") {
+    const double roll_error_deg = roll_error_at_ignition_deg();
+    CAPTURE(roll_error_deg);
+    CHECK(roll_error_deg >= 0.0);  // the landing burn started
+    CHECK(roll_error_deg < 5.0);
 }

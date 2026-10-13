@@ -134,3 +134,37 @@ TEST_CASE("Attitude controller allocates torque to the grid fins", "[gnc][gridfi
     // Without permission the fins stay neutral.
     CHECK(gnc::AttitudeController::allocate(*body, 0.0, Vec3{0.0, 5e6, 0.0}).grid_fin_rad.empty());
 }
+
+TEST_CASE("Grid fins add their axial drag to the tail-first drag curve", "[aero][grid_fins]") {
+    // Lattice fins are blunt in the axial direction: their drag on the frontal lattice area is of the order of the
+    // body's own and must slow the falling booster (recorded boosters are transonic ~30 s before the landing burn).
+    const auto cfg = config::load_vehicle(config_dir, "starship_block3");
+    const vehicle::Vehicle v(cfg, config_dir);
+    const auto& stage = cfg.stages.front();
+    const aero::AxialDragCurve body(config::load_csv_table(config_dir / stage.aero.descent_drag_table));
+    const aero::AxialDragCurve ascent(config::load_csv_table(config_dir / stage.aero.ascent_drag_table));
+    const double reference_area_m2 = constants::pi * 0.25 * v.diameter_m() * v.diameter_m();
+    const double fins_area_m2 = static_cast<double>(stage.grid_fins.azimuths_rad.size()) * stage.grid_fins.area_m2;
+    for (const double mach : {0.5, 1.0, 2.0, 4.0}) {
+        CAPTURE(mach);
+        const double ca = table().axial_coefficient(mach);
+        CHECK(ca > 0.5);
+        const double expected = body.cd(mach, false) + fins_area_m2 * ca / reference_area_m2;
+        CHECK(v.aero().drag_curve(true).cd(mach, false) == Catch::Approx(expected).epsilon(1e-9));
+        CHECK(v.aero().drag_curve(true).cd(mach, true) ==
+              Catch::Approx(body.cd(mach, true) + fins_area_m2 * ca / reference_area_m2).epsilon(1e-9));
+        CHECK(v.aero().drag_curve(false).cd(mach, false) == Catch::Approx(ascent.cd(mach, false)));  // ascent table as is
+    }
+}
+
+TEST_CASE("A drag curve plus an increment interpolates both tables", "[aero]") {
+    config::CsvTable t;
+    t.columns = {"mach", "cd_axial_power_on", "cd_axial_power_off"};
+    t.rows = {{0.0, 1.0, 1.1}, {2.0, 1.2, 1.3}};
+    const aero::AxialDragCurve base(t);
+    const auto sum = base.plus({0.0, 1.0, 3.0}, {0.5, 1.0, 0.0});
+    CHECK(sum.cd(1.0, false) == Catch::Approx(1.2 + 1.0));
+    CHECK(sum.cd(0.5, true) == Catch::Approx(1.05 + 0.75));
+    CHECK(sum.cd(2.0, false) == Catch::Approx(1.3 + 0.5));
+    CHECK(sum.cd(3.0, false) == Catch::Approx(1.3 + 0.0));
+}

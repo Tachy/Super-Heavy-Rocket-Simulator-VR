@@ -45,6 +45,13 @@ GridFinTable::GridFinTable(const config::CsvTable& table)
     if (!std::is_sorted(mach_.begin(), mach_.end()) || mach_.size() < 2) {
         throw config::ConfigError("grid fin table: mach column must be ascending with >= 2 rows");
     }
+    if (std::find(table.columns.begin(), table.columns.end(), "ca_axial") != table.columns.end()) {
+        axial_ = table.column("ca_axial");
+    }
+}
+
+double GridFinTable::axial_coefficient(double mach) const {
+    return axial_.empty() ? 0.0 : interpolate(mach_, axial_, mach);
 }
 
 double GridFinTable::normal_force_slope_per_rad(double mach) const {

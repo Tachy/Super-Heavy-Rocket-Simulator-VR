@@ -15,6 +15,8 @@ public:
 
     double cd(double mach, bool powered) const;
     bool empty() const { return mach_.empty(); }
+    // This curve plus an increment table (both interpolated, on the union of the Mach points; power on and off).
+    AxialDragCurve plus(const std::vector<double>& mach, const std::vector<double>& delta_cd) const;
 
 private:
     std::vector<double> mach_;

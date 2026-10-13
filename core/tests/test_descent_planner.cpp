@@ -352,7 +352,7 @@ TEST_CASE("Catch plans stay in a vertical corridor while the hull passes the arm
     const auto b = block3();
     const auto s = settings(*b);
     // Within the campaign's ignition dispersion (+-10 m): larger offsets are partly left to the final set (soft).
-    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {1200.0, 8.0, -6.0}, {-250.0, 4.0, -2.0},
+    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {1800.0, 8.0, -6.0}, {-355.0, 4.0, -2.0},
                                Quat::from_axis_angle({0.0, 0.0, 1.0}, 2.0 * deg), {});
     auto target = catch_target(*b, state_attitude(x0));
     target.corridor_top_m = target.position_m.x + 70.0;

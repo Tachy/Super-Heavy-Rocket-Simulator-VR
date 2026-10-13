@@ -76,7 +76,7 @@ struct GridFinConfig {
     double radius_m = 0.0;             // radius of the fin's centre of pressure
     double max_deflection_rad = 0.0;
     double rate_rad_s = 0.0;
-    std::string table;                 // normal-force table, path relative to config/
+    std::string table;                 // normal- and axial-force table, path relative to config/
 };
 
 // Catch pins of a stage: hardpoints the tower arms catch (the returning booster).

@@ -361,6 +361,13 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         cmd.axis_gcrf = transform.rotation * math::normalized(-math::normalized(v_fixed) - steer_itrf_);
         cmd.impact_miss_m = impact_miss_m_;
         cmd.rcs_force_gcrf = transform.rotation * trim_itrf_;
+        if (site_.catch_target) {
+            // Roll the pins towards the arms already on the way down (grid fins, above the air RCS): recorded
+            // boosters light the landing burn already rolled for the catch.
+            const Vec3 body_y = to_fixed * s.attitude.rotate(Vec3{0.0, 1.0, 0.0});
+            cmd.roll_reference_gcrf = transform.rotation * catch_roll_reference(site_.catch_target->across_itrf, site_up,
+                                                                                site_.catch_target->pin_azimuth_rad, body_y);
+        }
         const double height = geo.height_m - mass.cg_station_m - site_.height_m;
         const bool descending = dot(v_fixed, site_up) < 0.0;
         if (descending && (height < 30e3 || tick_counter_ % 20 == 0)) {

@@ -41,6 +41,22 @@ AxialDragCurve::AxialDragCurve(const config::CsvTable& table)
     }
 }
 
+AxialDragCurve AxialDragCurve::plus(const std::vector<double>& mach, const std::vector<double>& delta_cd) const {
+    if (mach.empty()) return *this;
+    std::vector<double> points = mach_;
+    points.insert(points.end(), mach.begin(), mach.end());
+    std::sort(points.begin(), points.end());
+    points.erase(std::unique(points.begin(), points.end()), points.end());
+    AxialDragCurve sum;
+    sum.mach_ = points;
+    for (const double m : points) {
+        const double delta = interpolate(mach, delta_cd, m);
+        sum.cd_power_on_.push_back(interpolate(mach_, cd_power_on_, m) + delta);
+        sum.cd_power_off_.push_back(interpolate(mach_, cd_power_off_, m) + delta);
+    }
+    return sum;
+}
+
 double AxialDragCurve::cd(double mach, bool powered) const {
     if (empty()) return 0.0;
     return interpolate(mach_, powered ? cd_power_on_ : cd_power_off_, mach);

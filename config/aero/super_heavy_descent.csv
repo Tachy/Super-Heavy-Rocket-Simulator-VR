@@ -1,17 +1,21 @@
 # Axial drag coefficient of the Super Heavy booster falling engines first (tail first), reference
 # area pi*(d/2)^2. Blunt engine skirt with 33 nozzles, open hot-staging ring on top, grid fins.
-# [E] Blunt-cylinder trend (flat-faced cylinder ~0.9 subsonic, stagnation-dominated ~1.2 supersonic)
-# plus grid-fin drag; NOT Starship-specific data. Calibrate against booster descent telemetry.
+# [E] Blunt-cylinder trend (flat-faced cylinder ~0.9 subsonic, stagnation-dominated ~1.2 supersonic), then
+# [D] calibrated together with the grid fins' ca_axial: x1.0 up to Mach 1.2, rising linearly to x1.3 from
+# Mach 2.5, so that the unguided block 1 booster (72 t propellant) placed in the IFT-3 B10 state at T+330 s
+# (79 km) passes 31.5 / 19.8 / 10.1 / 4.8 km within 2 % of the webcast speeds and 2 km within 3 % of
+# Flight 5's (test "Booster descent drag reproduces the IFT-3 telemetry"). The grid fins' drag is added by
+# the vehicle model from aero/grid_fin.csv (ca_axial) and the fin count and area of each vehicle.
 # Power-on column: during the landing burn the plume shields the base; kept equal for now [E].
 mach,cd_axial_power_on,cd_axial_power_off
-0.0,0.90,0.90
-0.6,0.95,0.95
-0.8,1.00,1.00
-0.95,1.15,1.15
-1.1,1.30,1.30
-1.5,1.35,1.35
-2.0,1.33,1.33
-3.0,1.28,1.28
-5.0,1.24,1.24
-10.0,1.22,1.22
-25.0,1.22,1.22
+0.0,0.900,0.900
+0.6,0.950,0.950
+0.8,1.000,1.000
+0.95,1.150,1.150
+1.1,1.300,1.300
+1.5,1.443,1.443
+2.0,1.576,1.576
+3.0,1.664,1.664
+5.0,1.612,1.612
+10.0,1.586,1.586
+25.0,1.586,1.586

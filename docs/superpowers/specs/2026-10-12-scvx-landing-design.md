@@ -183,4 +183,8 @@ tower impact). Large diverts (+-50 m; grid fins in the planning model, attitude 
   13 engines ~4.6 s, switch ~650 m, 3 engines ~15 s.
 - Re-plan times (Release, 24 cores): first plan 0.2-1.1 s, re-plans typically 0.1-0.5 s, worst seen ~2 s on the
   longer catch profile (the 0.5 s latency is then exceeded; tests wait, real-time play keeps the old plan).
-- Open: full returns arrive far too fast (see CLAUDE.md known issues); descent drag needs calibration.
+- Descent drag calibrated against IFT-3 / Flight 5 telemetry (grid-fin axial drag added explicitly; see CLAUDE.md).
+  The ignition scenario now starts at Flight 5's 355 m/s; the LQR effort fraction dropped to 0.2 (0.3 left a limit
+  cycle on 3 engines near minimum throttle in 1 of 21 cases).
+- The coast phase rolls the pins towards the arms before ignition (recorded catches light the burn already rolled).
+- Open: full returns of blocks 1/2 (ascent stages too energetic), weak late aborts (see CLAUDE.md known issues).

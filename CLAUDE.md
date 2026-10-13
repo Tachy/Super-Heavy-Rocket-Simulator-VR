@@ -110,24 +110,30 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
 - Booster return: on a site without a tower blocks 1-3 land on the pad with the explicit laws (no impact, sink
-  < 2 m/s, 7-12 m off, 0.7-2 m/s lateral). At a catch site the landing burn flies SCvx plans (`gnc/scvx_landing`)
+  < 2 m/s, 4-11 m off, < 1.2 m/s lateral). At a catch site the landing burn flies SCvx plans (`gnc/scvx_landing`)
   re-planned every 1 s on a worker thread (effective at snapshot + 0.5 s; tests and time warp wait, real-time play
-  never waits - `FlightSession::set_realtime_planning`). From an ignition state (scenario, 260 m/s at ~1.5 km)
-  the dispersion campaign `[gnc][catch][validation]` (+-10 m, +-3 m/s, +-5 % mass, +-3 deg, engine failure)
-  catches 21 of 21 (< 1 m, < 0.5 m/s). Profile after recorded catches: 13 engines ~5 s, switch at 70-95 m/s,
-  3 engines ~15 s. Lateral tracking is an LQR on the gimbaled-rocket dynamics (`gnc/tvc_lateral`; the gimbal's
-  wrong-way side force makes cascaded position/attitude loops swing up on 3 engines); plans use <= 30 % of the
-  gimbal limit, the rest is the tracker's margin. Planning model: constant CG/inertia, no grid fins, no wind; no
-  re-plans in the last 3 s. The explicit laws remain the fallback if the first plan fails.
-  OPEN: full returns are not yet caught (`[!mayfail]`): the booster arrives far too fast (block 3: ~1270 m/s at
-  15 km, ~730 m/s at 4 km; recorded flights are transonic ~30 s before the landing burn and at ~333 m/s at 2 km),
-  so the burn starts high with a large divert and blocks 1/2 lack the propellant. Descent drag (incl. grid fins,
-  angle of attack) needs calibration against booster telemetry.
-- Booster return reserves (block 1/2: 330 t, block 3: 280 t; block 1 lands with only ~0.6 t left), the
-  tail-first drag table (`aero/super_heavy_descent.csv`) and the grid fin data (`aero/grid_fin.csv`,
-  sizes/stations) are estimates [E]; the boostback alone needs ~200 t from our lofted staging state.
-  Block 3 is checked against the FAA EA's ~74 t residual propellant at landing-burn ignition (Raptor 3 at 280 tf:
-  70.4 t at ignition).
+  never waits - `FlightSession::set_realtime_planning`). From an ignition state (scenario: 355 m/s at ~1.85 km,
+  Flight 5 webcast) the dispersion campaign `[gnc][catch][validation]` (+-10 m, +-3 m/s, +-5 % mass, +-3 deg,
+  engine failure) catches 21 of 21 (< 1 m, < 0.5 m/s). Profile close to recorded catches: 13 engines ~4.5 s,
+  switch at 70-95 m/s (~750 m), 3 engines ~16 s. Lateral tracking is an LQR on the gimbaled-rocket dynamics
+  (`gnc/tvc_lateral`; the gimbal's wrong-way side force makes cascaded position/attitude loops swing up on 3
+  engines); plans use <= 30 % of the gimbal limit, the LQR effort is 0.2 x the gimbal authority at the current
+  thrust. The coast phase already rolls the pins towards the arms (grid fins / RCS). Planning model: constant
+  CG/inertia, no grid fins, no wind; no re-plans in the last 3 s. The explicit laws remain the fallback.
+  Full returns: block 3 is caught; blocks 1/2 still abort (`[!mayfail]`): our ascent stages too high and fast
+  (block 1: T+134 s, 83 km, 2.0 km/s; IFT-3: ~T+165 s, ~70 km, ~1.57 km/s - the autopilot flies the booster at
+  full throttle, IFT-3's reconstructed throttle averages 0.75), so the booster reaches 131 km (IFT-3: 106 km)
+  and arrives too fast. Next: an ascent throttle schedule from the IFT-3 reconstruction.
+  Abort to the sea is weak: a late abort (< ~250 m) on 3 engines near minimum throttle (T/W > 1, cannot hover or
+  descend slowly) can end hovering over land until the propellant runs out.
+- Descent drag (tail first): body table `aero/super_heavy_descent.csv` plus the grid fins' axial drag
+  (`aero/grid_fin.csv` column `ca_axial`, per fin count/area) [E], calibrated [D] (x1.0 to Mach 1.2, x1.3 from
+  Mach 2.5) so that the unguided block 1 booster placed in IFT-3's T+330 s state matches the webcast speeds at
+  31.5/19.8/10.1/4.8 km and Flight 5's at 2 km within 3 % (test "Booster descent drag reproduces the IFT-3
+  telemetry"; 72 t propellant assumed, the real mass is not public).
+- Booster return reserves (block 1/2: 330 t, block 3: 280 t) and the grid fin normal-force data (`aero/grid_fin.csv`,
+  sizes/stations) are estimates [E]. Block 3 is checked against the FAA EA's ~74 t residual propellant at
+  landing-burn ignition (Raptor 3 at 280 tf: 70.3 t at ignition).
 - Catch tower dimensions and azimuths (`[site.tower]`, Starbase 315 deg, LC-39A 0 deg) and the catch pins
   (`[stage.catch_pins]`, 5 MN per pin) are estimates [E]; verify the tower azimuths against imagery.
 - Wikipedia's booster load 2,700 t LOX / 700 t CH4 (O/F 3.86) does not match Raptor's 3.6: blocks 1/2 now
