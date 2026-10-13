@@ -146,6 +146,69 @@ limit; a nominal flight-13 replay stays inside both (peak heat rate reported for
   5 % rms from 85 km to Mach 1, and the subsonic terminal speed within 10 %. The alpha schedule and the
   cross-flow table are identified on flight 13 and checked on 12 and 14.
 
+## b2 design (entry guidance, refined 2026-10-13; decisions taken autonomously, ledgered)
+
+### Approaches considered
+
+1. **Numeric predictor-corrector on the bank magnitude (chosen, as outlined).** The onboard computer integrates a
+   3-DOF point mass from the measured state to the gate with the vehicle's own aero coefficients, and solves for
+   the bank magnitude that zeroes the range error; bank reversals by a heading-error corridor. Closed loop from the
+   actual state (control levels: a human-made state is just another initial state).
+2. Reference drag profile tracking (Shuttle / Apollo style). Needs an offline reference per entry and gains;
+   brittle for arbitrary states the player produces - rejected.
+3. SCvx entry trajectory optimisation. Heavy, and the bank-only control with slow reversals gains little from
+   optimality - rejected.
+
+### Units
+
+- **`gnc/entry_aero_table`** (built on the simulation thread from the vehicle): C_D A and C_L A [m^2] over Mach at
+  the nominal angle of attack of the alpha schedule, hull plus the four flaps in pitch trim (forward and aft pairs
+  moved differentially about mid-range until the pitch moment about the current CG is zero). Continuum
+  coefficients (above ~90 km forces are tiny; the online scale factors absorb the difference). The alpha schedule
+  moves into the vehicle config: `[stage.aero] entry_alpha_table = "aero/ship_entry_alpha.csv"`.
+- **`gnc/entry_predictor`** (pure, no SPICE - can run on a worker): 3-DOF in the Earth-fixed frame (central
+  gravity + J2, Coriolis and centrifugal terms, US76 air, constant mass), RK4 with 1 s steps. Lift is rotated
+  about the air velocity by the bank angle, the bank moving from its current value to the commanded one at the
+  bank rate limit (1 deg/s, b1). Drag and lift are multiplied by online scale factors. Ends at the gate height
+  above the target (or ground impact, skip-out above 130 km, 3000 s). Reports the end state, the signed
+  downrange error to the target (great-circle range end - target, both from the start), the crossrange, and
+  peaks of heat rate (Sutton-Graves, b1), heat load, aerodynamic load and dynamic pressure.
+- **`gnc/entry_guidance`** (`EntryGuidance`, like `BoosterReturnGuidance`):
+  - *Entry* phase, every 2 s: (a) scale factors drag/lift = measured / modelled aerodynamic acceleration
+    (accelerometer: `FlightBody::aero_acceleration_body_mps2()`, filtered, clamped 0.5-2, only above 1 m/s^2);
+    (b) corrector: bracketed secant (Illinois) on |sigma| in [0, 150 deg] for zero downrange error, warm-started;
+    full lift up if even that is short, 150 deg if even that is long; (c) corridor constraints: if the
+    prediction exceeds 90 % of a limit (heat rate, heat load, load, dynamic pressure [E] 25 kPa), |sigma| is
+    reduced by bisection to the largest value inside them (range is given up, not the vehicle); (d) bank sign:
+    reversal when the heading error to the target exceeds a corridor linear in speed [E] (tuned in tests);
+    (e) output: alpha from the schedule at the current Mach, bank rate-limited to 1 deg/s.
+  - *Belly flop* below Mach 0.7 [E] (subsonic): the ship falls belly down; horizontal steering by tilting the belly
+    away from the wanted acceleration (horizontal force ~ m g tan(tilt), tilt <= 15 deg [E]); zero-effort-miss law
+    to the gate point (a = -k ZEM / t_go^2, t_go from height and sink rate). Nose azimuth: the track at the
+    hand-over (b3 may set the heading the flip needs). Attitude by `gnc/belly_flop_attitude` (no velocity
+    reference - the fall is near vertical).
+  - *Gate*: reached at `gate_height_m` [E] 1500 m above the target's ground (b3 starts the flip there).
+  - Command: phase, alpha / bank setpoint, body axis + roll reference for `AttitudeController` (flaps, 0.5 rad/s),
+    predicted downrange / crossrange miss, constraint flag.
+- **Session**: `FlightSession::place_entering_ship(config, state, epoch, target)` (scenarios; b4 adds the deorbit
+  burn), the ship then flies its entry guidance; telemetry carries the setpoint (alpha, bank, phase, predicted
+  miss) for the HUD's flight director lines. Manual entry flight (the player banks, the computer re-plans) comes
+  with the cockpit (M7); the setpoint shown now is what it will fly against.
+
+### Validation (b2 deliverable)
+
+- Predictor vs the 6-DOF ship (b1 physics) at constant bank: end point of an entry within 2 % of the range flown.
+- Corrector unit tests on the predictor alone (long / short targets, saturation).
+- Belly flop: from 12 km, falling at terminal speed with 2 km horizontal offset, the ship reaches the gate within
+  50 m.
+- Campaign `[ship][guidance][validation]`: from entry interface states uprange of Starbase with dispersions (entry
+  flight-path angle +-0.2 deg, speed +-40 m/s, target range +-300 km, crossrange +-60 km, entry mass +-5 %, hull
+  cross-flow +-10 % and flap table +-10 % in the truth model only) every case reaches the gate within 100 m
+  horizontally, belly down within 15 deg, sink rate below 200 m/s, without breakup.
+- Constraint test: with the load limit lowered to just above the nominal peak, the guidance holds it.
+
+Out of b2: the guided skip (optional mode, last priority - deferred), wind, manual entry flight (M7).
+
 ## b2-b4 outline (refined in their plans)
 
 - **b2 entry guidance**: numeric predictor-corrector (the onboard computer integrates the remaining entry with the
