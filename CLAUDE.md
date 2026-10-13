@@ -106,7 +106,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Only the current configuration (Block 3 / V3, Raptor 3) is modelled (decision 2026-10-13); its data come from
   the flights that flew it (12-14, `tests/validation/telemetry/flights.toml`). Earlier blocks were removed.
 - Starship throttle schedules are not public; they are a guidance choice, not vehicle data. Flights 12-14 fly the
-  booster at ~85-90 % after max-Q with an acceleration cap of ~2.2 g; our ascent autopilot still flies full thrust.
+  booster at ~85-90 % after max-Q with an acceleration cap of ~2.2 g; our Starship ascent still flies full thrust
+  (`PitchProgram::booster_throttle` exists since c1 - Falcon 9 uses it - but Starship has no schedule yet).
 - Earth is a 256x128 ellipsoid mesh whose facets sit up to ~0.6 km below the true surface; below 500 km a
   2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites.
   Physics ground = flat at the pad height (FlightBody::ground_height_m): gentle contact (<= 3 m/s, <= 10 deg)
@@ -311,11 +312,22 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   ground is ticked (a coast segment would fall through the ground before its single contact check).
 - Falcon 9 (milestone c, `config/vehicles/falcon9_block5.toml`, Block 5 only): octaweb groups `center` / `pair` /
   `ring`, 4 grid fins, cold-gas RCS, `[stage.landing_legs]`; sites `ccsfs_slc40` (launch, no tower) and `ccsfs_lz40`
-  (`kind = "landing_zone"`, ~340 m east of the pad [E], 85 m pad [S]). It reaches a 200 km / 51.6 deg orbit on the
-  ascent autopilot with a pitch kick of 18 deg [E] (test `[falcon9]`; the upper stage's plane steering nulls
-  out-of-plane speed and offset together - ZEM/ZEV - and the terminal v_go removes the rest). Inclinations of steep
-  planes are judged against the true equator of date (GCRF elements carry ~0.15 deg of precession by 2026).
-  `FlightSession::launch_from_pad` also takes a loaded `VehicleConfig` (mission payload).
+  (`kind = "landing_zone"`, ~340 m east of the pad [E], 85 m pad [S]). Evidence: our webcast telemetry of CRS-35 (RTLS,
+  LZ-40) and Starlink 15-25 (drone ship) - same round-dial layout as Starship (`webcast_telemetry.py clean --vehicle
+  falcon9`: stage 1 left / stage 2 right after separation, G-FORCE and the stage-1 engine icon + propellant gauge
+  before; the icon replaces the speed dial in the entry and landing burns). Derived [D]: second-stage propellant
+  106.7 t (G-force and gauge put ~125 t above the first stage; liftoff 546 t), landing propellant 11.3 t (gauge 2.8-2.9 %
+  at landing-burn ignition on both flights), MECO propellant 61 t RTLS / 43 t drone ship, descent drag table
+  `aero/falcon9_descent.csv` (unguided replay from after the entry burn: 0.9 / 1.6 % rms, test "Falcon 9 descent drag
+  reproduces ..."). Burns seen: CRS-35 entry burn on the centre engine only, landing burn 1 -> 3 -> 1; Starlink 15-25
+  entry burn on 3, landing burn on 1 (~40 % throttle by the gauge). The drone-ship descent stays ~2 km higher than a
+  zero-lift fall (grid-fin lift). Ascent: `PitchProgram::booster_throttle` (first-stage throttle over mission time,
+  empty = full) carries the Falcon 9 max-Q bucket (~70 %, T+50-60 s) and ~92 % after it [D]; pitch kick 14 deg [E];
+  CRS-35 MECO T+130 s / 55.9 km / 6215 km/h vs recorded 137 / 56.6 / 6441 (the real stack starts slower in its first
+  ~7 s, so mid-ascent we run ahead). The upper stage's plane steering nulls out-of-plane speed and offset together
+  (ZEM/ZEV) and the terminal v_go removes the rest; inclinations of steep planes are judged against the true equator of
+  date (GCRF elements carry ~0.15 deg of precession by 2026). `FlightSession::launch_from_pad` also takes a loaded
+  `VehicleConfig` (mission payload; Dragon flies without a fairing).
 - Landing legs (c2, `contact/landing_legs`, `contact/landing_surface`, `sim/leg_landing_sim`): `Vehicle::deploy_legs`
   (sticky, `deploy_time_s`; `FlightSession::deploy_legs` / `set_leg_deployment`); once the legs move,
   `LegLandingSim` owns the body's ground contact: four feet as spring-dampers in series with plastic crush cores
