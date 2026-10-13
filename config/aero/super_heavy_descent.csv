@@ -1,21 +1,21 @@
 # Axial drag coefficient of the Super Heavy booster falling engines first (tail first), reference
-# area pi*(d/2)^2. Blunt engine skirt with 33 nozzles, open hot-staging ring on top, grid fins.
-# [E] Blunt-cylinder trend (flat-faced cylinder ~0.9 subsonic, stagnation-dominated ~1.2 supersonic), then
-# [D] calibrated together with the grid fins' ca_axial: x1.0 up to Mach 1.2, rising linearly to x1.3 from
-# Mach 2.5, so that the unguided block 1 booster (72 t propellant) placed in the IFT-3 B10 state at T+330 s
-# (79 km) passes 31.5 / 19.8 / 10.1 / 4.8 km within 2 % of the webcast speeds and 2 km within 3 % of
-# Flight 5's (test "Booster descent drag reproduces the IFT-3 telemetry"). The grid fins' drag is added by
-# the vehicle model from aero/grid_fin.csv (ca_axial) and the fin count and area of each vehicle.
+# area pi*(d/2)^2, WITHOUT the grid fins (the vehicle model adds their drag from aero/grid_fin.csv ca_axial and
+# each vehicle's fin count and area).
+# [D] Mach >= 1.1: total drag of the block 1 booster identified from webcast telemetry of flights 5, 7 and 8
+# (tests/validation/telemetry, tools/telemetry/drag_estimate.py: D/m = -dv/dt - g sin(gamma) in the unpowered
+# descent; the three flights agree within ~8 %), converted to C_D with the simulated mass (~347 t: 275 t dry +
+# ~72 t propellant) and reduced by the fins' share (4 x 9 m^2). Above Mach 3.5 held constant (noisy estimate).
+# [E] Subsonic: blunt-cylinder trend (not measured: the landing burn starts at ~Mach 1).
 # Power-on column: during the landing burn the plume shields the base; kept equal for now [E].
 mach,cd_axial_power_on,cd_axial_power_off
 0.0,0.900,0.900
 0.6,0.950,0.950
 0.8,1.000,1.000
-0.95,1.150,1.150
-1.1,1.300,1.300
-1.5,1.443,1.443
-2.0,1.576,1.576
-3.0,1.664,1.664
-5.0,1.612,1.612
-10.0,1.586,1.586
-25.0,1.586,1.586
+0.95,1.120,1.120
+1.1,1.204,1.204
+1.5,1.474,1.474
+2.0,1.641,1.641
+3.0,1.867,1.867
+5.0,1.896,1.896
+10.0,1.896,1.896
+25.0,1.896,1.896

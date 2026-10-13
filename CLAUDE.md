@@ -126,11 +126,13 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   and arrives too fast. Next: an ascent throttle schedule from the IFT-3 reconstruction.
   Abort to the sea is weak: a late abort (< ~250 m) on 3 engines near minimum throttle (T/W > 1, cannot hover or
   descend slowly) can end hovering over land until the propellant runs out.
-- Descent drag (tail first): body table `aero/super_heavy_descent.csv` plus the grid fins' axial drag
-  (`aero/grid_fin.csv` column `ca_axial`, per fin count/area) [E], calibrated [D] (x1.0 to Mach 1.2, x1.3 from
-  Mach 2.5) so that the unguided block 1 booster placed in IFT-3's T+330 s state matches the webcast speeds at
-  31.5/19.8/10.1/4.8 km and Flight 5's at 2 km within 3 % (test "Booster descent drag reproduces the IFT-3
-  telemetry"; 72 t propellant assumed, the real mass is not public).
+- Descent drag (tail first): body table `aero/super_heavy_descent.csv` [D] plus the grid fins' axial drag
+  (`aero/grid_fin.csv` column `ca_axial` [E], per fin count/area). Identified from our own webcast telemetry tables
+  of flights 5, 7 and 8 (`tests/validation/telemetry`, built by `tools/telemetry/webcast_telemetry.py`; drag from
+  `tools/telemetry/drag_estimate.py`): the unguided block 1 booster follows each flight's descent from ~26 km to
+  the landing burn within ~1 % rms (test "Booster descent drag reproduces the flight 5/7/8 telemetry"; IFT-3 as a
+  cross-check). The measured quantity is the ballistic coefficient; C_D assumes our mass (~347 t at that point).
+  Subsonic drag is not measured (the landing burn starts at ~Mach 1).
 - Booster return reserves (block 1/2: 330 t, block 3: 280 t) and the grid fin normal-force data (`aero/grid_fin.csv`,
   sizes/stations) are estimates [E]. Block 3 is checked against the FAA EA's ~74 t residual propellant at
   landing-burn ignition (Raptor 3 at 280 tf: 70.3 t at ignition).

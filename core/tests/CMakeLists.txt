@@ -26,6 +26,7 @@ add_executable(starsim_core_tests
     test_ascent_guidance.cpp
     test_lunar_transfer.cpp
     test_booster_return.cpp
+    test_descent_telemetry.cpp
     test_grid_fins.cpp
     test_optim_sparse.cpp
     test_optim_ordering.cpp
@@ -65,6 +66,7 @@ target_compile_definitions(starsim_core_tests PRIVATE
     STARSIM_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
     STARSIM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/fixtures"
     STARSIM_SOCP_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/socp"
+    STARSIM_TELEMETRY_DIR="${CMAKE_SOURCE_DIR}/tests/validation/telemetry"
 )
 
 include(Catch)

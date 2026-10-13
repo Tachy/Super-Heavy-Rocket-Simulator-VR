@@ -6,17 +6,16 @@
 # (M ~0.85-1.2), recovery once the cells swallow the shocks, then a supersonic decrease. NOT
 # Super-Heavy-specific data. Calibrate against booster descent telemetry.
 # ca_axial: axial force coefficient on the frontal lattice area (fin drag in tail-first flight; the fins are
-# fixed, so they drag the whole descent). [E] Lattice-fin trend: ~0.8 subsonic, peak ~1.6 when the cells
-# choke transonically, ~1 low supersonic, falling slowly beyond; [D] scaled with the body's tail-first drag
-# against IFT-3 / Flight 5 descent telemetry (see aero/super_heavy_descent.csv).
+# fixed, so they drag the whole descent). [E] ~0.8 subsonic, ~1.0 transonic, slowly falling beyond: descent
+# telemetry of flights 5/7/8 shows no transonic drag peak from cell choking (see aero/super_heavy_descent.csv).
 mach,cn_alpha_per_rad,limit_deg,ca_axial
-0.0,2.9,25,0.800
-0.7,3.1,24,0.900
-0.9,2.2,20,1.400
-1.1,1.6,20,1.600
-1.4,2.1,24,1.360
-2.0,1.9,26,1.303
-3.0,1.4,28,1.170
-5.0,0.9,30,1.040
-10.0,0.6,30,0.975
-25.0,0.5,30,0.975
+0.0,2.9,25,0.80
+0.7,3.1,24,0.85
+0.9,2.2,20,0.95
+1.1,1.6,20,1.00
+1.4,2.1,24,1.00
+2.0,1.9,26,0.90
+3.0,1.4,28,0.80
+5.0,0.9,30,0.75
+10.0,0.6,30,0.75
+25.0,0.5,30,0.75

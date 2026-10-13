@@ -31,3 +31,6 @@ __pycache__/
 Thumbs.db
 .DS_Store
 /start.cfg
+
+# Telemetry OCR scratch files
+/tools/telemetry/_*.png

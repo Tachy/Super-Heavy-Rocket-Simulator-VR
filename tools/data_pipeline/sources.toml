@@ -119,3 +119,32 @@ url = "https://raw.githubusercontent.com/meithan/Starship_IFT3/master/data/IFT3_
 target = "data/validation/IFT3_full_data_booster.csv"
 license = "GPL-3.0 (used only as local test reference; not committed or redistributed)"
 credit = "Juan Carlos Toledo-Roy (meithan), github.com/meithan/Starship_IFT3"
+
+# ------------------------------------------------------------------ own telemetry tables (committed)
+# Numbers shown in SpaceX's public webcasts (speed, altitude, mission clock), read by our own OCR tool
+# (tools/telemetry/webcast_telemetry.py). Only the transcribed values are kept; the video is neither stored nor
+# redistributed. Present in the repository, so fetch.py reports them as "already present".
+
+[[source]]
+id = "telemetry_flight5"
+name = "Starship Flight 5 (2024-10-13) webcast telemetry, booster and ship speed/altitude (own OCR transcription)"
+url = "https://x.com/i/broadcasts/1RDGlyognOgJL"
+target = "tests/validation/telemetry/flight5_2024-10-13.csv"
+license = "Factual values displayed in the public SpaceX webcast, transcribed by this project (video not redistributed)"
+credit = "Telemetry: SpaceX webcast; transcription: this project"
+
+[[source]]
+id = "telemetry_flight7"
+name = "Starship Flight 7 (2025-01-16) webcast telemetry, booster and ship speed/altitude (own OCR transcription)"
+url = "https://x.com/i/broadcasts/1OwGWNYrzZVKQ"
+target = "tests/validation/telemetry/flight7_2025-01-16.csv"
+license = "Factual values displayed in the public SpaceX webcast, transcribed by this project (video not redistributed)"
+credit = "Telemetry: SpaceX webcast; transcription: this project"
+
+[[source]]
+id = "telemetry_flight8"
+name = "Starship Flight 8 (2025-03-06) webcast telemetry, booster and ship speed/altitude (own OCR transcription)"
+url = "https://x.com/i/broadcasts/1lPKqMQbAWLKb"
+target = "tests/validation/telemetry/flight8_2025-03-06.csv"
+license = "Factual values displayed in the public SpaceX webcast, transcribed by this project (video not redistributed)"
+credit = "Telemetry: SpaceX webcast; transcription: this project"

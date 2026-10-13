@@ -230,9 +230,9 @@ TEST_CASE("Block 3 reaches landing-burn ignition within the FAA residual propell
 // IFT-3 (2024-03-14, B10 ~ block 1) booster descent, SpaceX webcast telemetry as smoothed by meithan/Starship_IFT3
 // [S] (data/validation/IFT3_full_data_booster.csv, local only): T+330 s at 79.0 km, vertical -711.3 m/s,
 // horizontal 123.8 m/s; then speed at altitude: 31.5 km 1185.0, 19.8 km 1173.5, 10.1 km 814.5, 4.8 km 501.0,
-// 2.8 km 402.7, 1.4 km 360.5 m/s (below ~3 km the landing burn had begun: not used). Flight 5 (2024-10-13, B12)
-// webcast: 2 km at 1301 km/h, engines not yet lit. The booster is placed in the T+330 s state (block 1, landing
-// propellant) and falls unguided; tolerance 5 % (the booster's real mass is not public: 72 t propellant assumed).
+// 2.8 km 402.7, 1.4 km 360.5 m/s (below ~3 km the landing burn had begun: not used). The booster is placed in
+// the T+330 s state (block 1, landing propellant) and falls unguided; tolerance 5 % (the real mass is not public:
+// 72 t propellant assumed). Flights 5, 7 and 8 (own tables): test_descent_telemetry.cpp.
 TEST_CASE("Booster descent drag reproduces the IFT-3 telemetry", "[gnc][booster][validation]") {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
@@ -250,7 +250,7 @@ TEST_CASE("Booster descent drag reproduces the IFT-3 telemetry", "[gnc][booster]
         double altitude_m, speed_mps;
         double simulated_mps = -1.0;
     };
-    std::vector<Point> points{{31.5e3, 1185.0}, {19.8e3, 1173.5}, {10.1e3, 814.5}, {4.8e3, 501.0}, {2.0e3, 1301.0 / 3.6}};
+    std::vector<Point> points{{31.5e3, 1185.0}, {19.8e3, 1173.5}, {10.1e3, 814.5}, {4.8e3, 501.0}};
     double previous_height_m = 79.0e3;
     for (double t = 0.0; t < 300.0;) {
         t += 0.05;
