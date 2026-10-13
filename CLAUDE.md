@@ -121,7 +121,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Booster recovery (decision 2026-10-13): Super Heavy is always caught (no legs; `[stage.recovery] method =
   "tower_catch"`): return guidance only at sites with a tower. Falcon 9 boosters land on the pad or the drone ship
   ("leg_landing", milestone c: `docs/superpowers/specs/2026-10-13-falcon9-landing-design.md`;
-  vehicle and legs done, return guidance from c3). If the first SCvx catch plan fails, an SCvx sea abort is planned at once;
+  vehicle, legs and the RTLS to LZ-40 done (c3), drone ship next (c4)). If the first SCvx catch plan fails, an SCvx sea abort is planned at once;
   the explicit laws are the last fallback (over the arms, ~1-3 m: not accurate enough to be caught); with
   `scvx_landing = false` the whole return aims beyond the shoreline and ditches (test: 1.05 m/s, 650 m off).
 - Booster return: at a catch site the landing burn flies SCvx plans (`gnc/scvx_landing`), V3 sequence 13 -> 5 (divert pair) -> 3 engines,
@@ -337,6 +337,24 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   off, at rest 2 s -> `FlightBody::hold_landed`), "umgekippt" (> 30 deg on a foot), "Aufprall" (core used up, base on
   the surface, legs not fully out), "Wasserung". Drop tests `[legs]`: 1/3/6 m/s land (6 m/s crushes 0.36 m), 10 m/s and
   25 deg at 2 m/s are lost. Diagnostics: `STARSIM_DEBUG_LEGS=1`.
+- Falcon 9 RTLS (c3, `config/missions/falcon9_rtls.toml`, `config::load_ascent_mission`): `FlightSession::set_landing_zone`
+  (after `launch_from_pad`; the legs land on the zone's ground) makes a `"leg_landing"` stage return to the zone
+  (`returns_after_staging`, `return_site` with a `gnc::PadTarget`). The return guidance is generic over the vehicle:
+  `gnc::booster_return_parameters(stage)` takes engine sets, return flight time, boostback loss fraction, entry burn
+  and the landing-burn profile from `[stage.recovery]` (Super Heavy has none of these keys: defaults unchanged).
+  Phases Flip -> Boostback -> Coast -> EntryBurn ("Wiedereintritt", Falcon 9 only: retrograde on the centre engine from
+  56.6 km for 125 m/s [D], leaning <= 5 deg towards the impact miss) -> Coast -> LandingBurn. The impact prediction
+  carries the entry burn still ahead as an impulse. The landing burn flies SCvx plans with the goal `DescentGoal::Pad`
+  (terminal state of a catch at leg-contact height, sink 1 m/s, no corridor, no exponential approach: one Merlin at
+  minimum throttle exceeds the weight), 1 -> 3 -> 1 engines with switch windows 230-270 / 140-190 m/s [D]; the legs
+  deploy 5 s [E] + deploy time before the planned touchdown, the engines stop on leg contact or 0.5 s after the plan's
+  end; an unreachable zone aborts to the sea ("Wasserung"). `LandingOutcome::TippedOver` ("umgekippt") comes from the
+  leg judgement. Validation: from ignition (3.2 km, 300 m/s, 11.3 t) lands 0.01 m off at 0.86 m/s; campaign
+  `[falcon9][rtls][validation]` (+-10 m, +-3 m/s, +-5 % propellant, +-3 deg, truth hull aero +-10 % via
+  `FlightSession::set_aero_dispersion`) 21 of 21 within 0.01 m, <= 1.01 m/s, >= 5 t left; full mission: entry burn
+  T+349 s, landing burn T+416 s at 3.0 km / 291 m/s / 11.3 t, touchdown T+446 s, 0.02 m off (CRS-35: 355 / 420 at
+  ~3.2 km, ~300 m/s / 442 s). `return_flight_time_s` 260 s and `boostback_loss_fraction` 0.12 [D] are identified on
+  that mission. Known gap: our MECO leaves 50.6 t, CRS-35's gauge ~61 t (the real return spends ~10 t more).
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 

@@ -85,6 +85,13 @@ flow separation (vacuum engines).
   `carriage_stiffness_n_m`, `carriage_damping_n_s_m`, `carriage_stroke_m`). The hinges sit on the tower face,
   `arm_closed_gap_m / 2 + arm_width_m / 2` from the catch axis.
 
+## Missions (`missions/`)
+- `leo_ascent.toml`: target orbit of the game's ascent autopilot (key P).
+- `ship_return_starbase.toml`: ship return from orbit (`config::load_ship_return_mission`).
+- `falcon9_rtls.toml` (`config::load_ascent_mission`): `[mission]` vehicle, launch `site`, optional `landing_zone` (a
+  site of kind `landing_zone`: the first stage returns to it), `heading_deg`, `payload_t`, `fairing`; `[target]` orbit;
+  `[pitch_program]` `kick_deg` and `booster_throttle` (`[t_s, fraction]` pairs, increasing times).
+
 ## Adding another rocket
 1. Add missing engines under `engines/`.
 2. Copy a vehicle file, adjust stages/tanks/engine groups.
