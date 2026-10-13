@@ -47,6 +47,8 @@ struct LaunchSiteConfig {
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
     double height_m = 0.0;  // ground (pad) height above WGS84
+    std::string kind = "launch_pad";  // "launch_pad" or "landing_zone" (a pad where first stages land on legs)
+    double pad_radius_m = 0.0;        // landing zone: radius of the concrete landing pad (0 otherwise)
     std::optional<TowerConfig> tower;
     std::optional<SeaConfig> sea;
 };

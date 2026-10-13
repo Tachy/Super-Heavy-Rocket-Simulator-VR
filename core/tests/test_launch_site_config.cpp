@@ -5,6 +5,7 @@
 
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
 
 using namespace starsim;
@@ -42,4 +43,20 @@ TEST_CASE("Boosters define two opposite catch pins", "[config]") {
         CHECK(pins.max_load_n > 0.0);
         CHECK(v.stages.back().catch_pins.azimuths_rad.size() == 2);  // the ship is caught too (b3)
     }
+}
+
+TEST_CASE("SLC-40 and its landing zone LZ-40 load", "[config][falcon9]") {
+    const auto pad = config::load_launch_site(STARSIM_CONFIG_DIR, "ccsfs_slc40");
+    CHECK(pad.kind == "launch_pad");
+    CHECK_FALSE(pad.tower.has_value());
+    CHECK(pad.pad_radius_m == 0.0);
+    const auto lz = config::load_launch_site(STARSIM_CONFIG_DIR, "ccsfs_lz40");
+    CHECK(lz.kind == "landing_zone");
+    CHECK(lz.pad_radius_m > 20.0);
+    REQUIRE(lz.sea.has_value());
+    // LZ-40 lies inside the SLC-40 complex: less than 1.5 km from the pad.
+    const auto a = frames::geodetic_to_fixed({pad.latitude_rad, pad.longitude_rad, pad.height_m});
+    const auto b = frames::geodetic_to_fixed({lz.latitude_rad, lz.longitude_rad, lz.height_m});
+    CHECK(norm(a - b) < 1500.0);
+    CHECK(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1").kind == "launch_pad");
 }

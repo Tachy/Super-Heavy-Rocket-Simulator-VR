@@ -68,3 +68,27 @@ carriage_stroke_m = 4.0       # [E] travel to the hard stop
 [site.sea]                    # coastline for aborted landings: ground beyond this line is water (flat until M8)
 direction_deg = 90.0          # [E] towards the Atlantic, clockwise from north (verify against imagery)
 shoreline_distance_m = 1300.0 # [E] pad centre -> shoreline along that direction (verify against imagery)
+
+[[site]]
+id = "ccsfs_slc40"
+name = "CCSFS SLC-40"
+latitude_deg = 28.56194     # [S] Wikipedia "Cape Canaveral Space Launch Complex 40": 28°33'43"N 80°34'38"W
+longitude_deg = -80.57722
+height_m = -20.0            # [E] ~5 m above sea level, geoid ~-25 m (no tower: a stack stands on the ground)
+
+[site.sea]
+direction_deg = 90.0        # [E] towards the Atlantic (verify against imagery)
+shoreline_distance_m = 1000.0  # [E] pad -> shoreline (verify against imagery)
+
+[[site]]
+id = "ccsfs_lz40"
+name = "Landezone LZ-40"
+kind = "landing_zone"       # Falcon first stages land here (first landing Crew-12, 2026-02-13)
+latitude_deg = 28.56194     # [E] east of the SLC-40 pad inside the complex (FAA EA 2025: "a single LZ east of SLC-40");
+longitude_deg = -80.57370   # [E] ~340 m east of the pad (verify against imagery)
+height_m = -20.0            # [E]
+pad_radius_m = 42.7         # [S] FAA EA 2025: 280 ft concrete pad (400 ft with the gravel apron)
+
+[site.sea]
+direction_deg = 90.0        # [E]
+shoreline_distance_m = 650.0  # [E] (verify against imagery)
