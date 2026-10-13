@@ -51,6 +51,8 @@ add_library(starsim_core STATIC
     src/contact/pin_contact.cpp
     src/contact/catch_trigger.cpp
     src/contact/tower_collision.cpp
+    src/contact/landing_surface.cpp
+    src/contact/landing_legs.cpp
     src/optim/sparse_matrix.cpp
     src/optim/minimum_degree.cpp
     src/optim/ldl.cpp

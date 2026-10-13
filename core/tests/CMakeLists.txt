@@ -39,6 +39,7 @@ add_executable(starsim_core_tests
     test_deorbit_planner.cpp
     test_ship_return_mission.cpp
     test_falcon9_ascent.cpp
+    test_landing_legs.cpp
     test_ship_catch.cpp
     test_ship_entry_telemetry.cpp
     test_optim_sparse.cpp
