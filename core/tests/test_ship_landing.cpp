@@ -119,3 +119,4 @@ TEST_CASE("SCvx plans a ship catch from after the flip", "[ship][landing]") {
     CHECK(norm(gnc::state_position(plan.reference.x.back()) - target.position_m) < 0.5);
 }
 
+

@@ -214,6 +214,18 @@ ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, doub
             torque = needed - achieved;  // remainder for gimbals / RCS
         }
     }
+    // Off-axis thrust (an asymmetric engine set, e.g. two of the ship's three centre Raptors): the moment of the
+    // running engines at neutral gimbal is cancelled first, so the gimbals deliver the wanted net torque.
+    if (a.lever_moment > 0.0) {
+        for (const auto& stage : body.vehicle().stages()) {
+            for (const auto& e : stage.engines) {
+                if (!e.producing_thrust()) continue;
+                const double thrust = e.spool * e.performance->thrust_n(e.throttle, ambient_pressure_pa);
+                const Vec3 arm = e.gimbal_point_m - Vec3{mass.cg_station_m, 0.0, 0.0};
+                torque -= cross(arm, Vec3{thrust, 0.0, 0.0});
+            }
+        }
+    }
     // Moments of a deflection (see Vehicle::update_engines): pitch -> +tau_y, yaw -> -tau_z, roll -> +tau_x.
     if (a.lever_moment > 0.0) {
         out.gimbal.pitch_rad = torque.y / a.lever_moment;

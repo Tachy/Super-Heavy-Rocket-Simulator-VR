@@ -16,6 +16,7 @@
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
+#include "starsim/gnc/ship_landing.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
 namespace starsim::sim {
@@ -122,6 +123,11 @@ public:
     void place_entering_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch,
                              gnc::EntryGuidanceParameters parameters = {});
     const gnc::EntryGuidance* entry_guidance(size_t index) const { return bodies_.at(index).entry_guidance.get(); }
+    // Scenarios: a ship placed at the gate (belly down) flips and lands on its landing guidance (catch at this site's
+    // tower). An entering ship gets the same guidance when its entry guidance reaches the gate.
+    void place_landing_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch,
+                            gnc::ShipLandingParameters parameters = gnc::ship_landing_parameters());
+    const gnc::ShipLandingGuidance* ship_landing(size_t index) const { return bodies_.at(index).ship_landing.get(); }
     // Entry guidance of a body (nullptr if it has none): its latest command (setpoint for the flight director).
     const gnc::EntryCommand* entry_status(size_t index) const;
     // Interactive real-time play: landing re-plans never hold up the simulation (default: off = deterministic).
@@ -185,11 +191,16 @@ private:
         gnc::ReturnCommand return_command;
         std::unique_ptr<gnc::EntryGuidance> entry_guidance;  // entering ship (scenario)
         gnc::EntryCommand entry_command;
+        std::unique_ptr<gnc::ShipLandingGuidance> ship_landing;  // ship from the gate: flip and catch (its command:
+                                                                 // return_command)
     };
 
     vehicle::VehicleCommand command_for(size_t index, double ambient_pressure_pa) const;
     void run_autopilot();
     void run_return_guidance(Flying& flying);
+    void run_ship_landing(Flying& flying);
+    void apply_return_command(const Flying& flying, const gnc::AttitudeController& controller,
+                              double ambient_pressure_pa, vehicle::VehicleCommand& command) const;
     double coast_allowance_s() const;  // 0 if fixed ticks are needed now
     std::vector<vehicle::FlightBody*> body_pointers() const;
 
@@ -203,6 +214,8 @@ private:
     gnc::AttitudeController return_controller_{gnc::AttitudeController::Gains{1.5, 0.9, true}};
     // Entering ship: flaps + RCS, slow (the flaps move at ~20 deg/s: 0.8 rad/s limit-cycles in roll, b1).
     gnc::AttitudeController entry_controller_{gnc::AttitudeController::Gains{0.5, 0.9, false, true}};
+    // Ship flip and landing burn: gimbals with flaps and RCS, faster than in the entry [E].
+    gnc::AttitudeController ship_landing_controller_{gnc::AttitudeController::Gains{1.5, 0.9, false, true}};
     std::vector<Flying> bodies_;
     size_t controlled_ = 0;
     PilotInput input_;

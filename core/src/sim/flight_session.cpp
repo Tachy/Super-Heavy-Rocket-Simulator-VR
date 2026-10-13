@@ -79,6 +79,28 @@ void FlightSession::place_entering_ship(const config::VehicleConfig& config, con
     flying.entry_guidance = std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters);
 }
 
+void FlightSession::place_landing_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
+                                       time::Epoch epoch, gnc::ShipLandingParameters parameters) {
+    place_body(config, state, epoch);
+    auto& flying = bodies_.front();
+    flying.ship_landing = std::make_unique<gnc::ShipLandingGuidance>(return_site(flying.body->vehicle()), std::move(parameters));
+    flying.ship_landing->set_realtime(realtime_planning_);
+}
+
+// Flip and landing burn of a ship: engine groups and throttle for this tick (attitude in command_for).
+void FlightSession::run_ship_landing(Flying& flying) {
+    if (flying.body->impacted()) return;
+    if (tower_) flying.ship_landing->set_catch_contact(tower_->in_contact(*flying.body));
+    flying.return_command = flying.ship_landing->update(*flying.body, env_, epoch_);
+    for (const auto& stage : flying.body->vehicle().stages()) {
+        for (const auto& e : stage.engines) {
+            const auto& groups = flying.return_command.run_groups;
+            flying.running_groups[e.group_id] = std::find(groups.begin(), groups.end(), e.group_id) != groups.end();
+        }
+    }
+    if (tower_ && flying.return_command.abort) tower_->abort_catch();
+}
+
 // Autonomous return of a separated booster: engine groups, throttle and steering axis for this tick.
 void FlightSession::run_return_guidance(Flying& flying) {
     if (flying.body->impacted()) return;
@@ -365,6 +387,7 @@ void FlightSession::set_realtime_planning(bool realtime) {
     realtime_planning_ = realtime;
     for (auto& flying : bodies_) {
         if (flying.return_guidance) flying.return_guidance->set_realtime(realtime);
+        if (flying.ship_landing) flying.ship_landing->set_realtime(realtime);
     }
 }
 
@@ -410,11 +433,30 @@ void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchS
     launch_epoch_ = epoch;
 }
 
+void FlightSession::apply_return_command(const Flying& flying, const gnc::AttitudeController& controller,
+                                         double ambient_pressure_pa, vehicle::VehicleCommand& command) const {
+    const auto& r = flying.return_command;
+    for (auto& group : command.groups) group.throttle = r.throttle;
+    if (r.torque_body_nm) {
+        // SCvx lateral LQR: the guidance's torque straight to gimbals / RCS (grid fins neutral: the planning model has
+        // none, and at low speed their allocation fights the gimbals).
+        gnc::AttitudeController::allocate(*flying.body, ambient_pressure_pa, *r.torque_body_nm, false).apply_to(command);
+    } else {
+        controller.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf, r.roll_reference_gcrf,
+                         r.feedforward ? &*r.feedforward : nullptr).apply_to(command);
+    }
+    command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(r.rcs_force_gcrf);
+}
+
 vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_pressure_pa) const {
     vehicle::VehicleCommand command;
     const auto& flying = bodies_[index];
     for (const auto& [group, run] : flying.running_groups) {
         command.groups.push_back({group, run, index == controlled_ ? input_.throttle : 1.0});
+    }
+    if (flying.ship_landing) {
+        if (!flying.body->impacted()) apply_return_command(flying, ship_landing_controller_, ambient_pressure_pa, command);
+        return command;
     }
     if (flying.entry_guidance) {
         if (!flying.body->impacted()) {
@@ -425,17 +467,7 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     }
     if (index != controlled_ || flying.return_guidance) {
         if (flying.return_guidance && !flying.body->impacted()) {
-            const auto& r = flying.return_command;
-            for (auto& group : command.groups) group.throttle = r.throttle;
-            if (r.torque_body_nm) {
-                // SCvx lateral LQR: the guidance's torque straight to gimbals / RCS (grid fins neutral: the planning
-                // model has none, and at low speed their allocation fights the gimbals).
-                gnc::AttitudeController::allocate(*flying.body, ambient_pressure_pa, *r.torque_body_nm, false).apply_to(command);
-            } else {
-                return_controller_.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf, r.roll_reference_gcrf,
-                                         r.feedforward ? &*r.feedforward : nullptr).apply_to(command);
-            }
-            command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(r.rcs_force_gcrf);
+            apply_return_command(flying, return_controller_, ambient_pressure_pa, command);
         }
         return command;
     }
@@ -492,7 +524,9 @@ double FlightSession::coast_allowance_s() const {
             !body.impacted()) {
             return 0.0;
         }
-        if (flying.entry_guidance && !body.impacted() && !body.resting()) return 0.0;  // steered every tick
+        if ((flying.entry_guidance || flying.ship_landing) && !body.impacted() && !body.resting() && !body.caught()) {
+            return 0.0;  // steered every tick
+        }
         if (body.impacted() || body.resting() || body.caught()) continue;  // no longer moving on its own
         if (!body.can_coast()) return 0.0;
         for (const auto& [group, run] : flying.running_groups) {
@@ -526,9 +560,15 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                 if (tower_) bodies_[i].return_guidance->set_catch_contact(tower_->in_contact(*bodies_[i].body));
                 run_return_guidance(bodies_[i]);
             }
-            if (bodies_[i].entry_guidance && !bodies_[i].body->impacted()) {
-                bodies_[i].entry_command = bodies_[i].entry_guidance->update(*bodies_[i].body, env_, epoch_);
+            auto& flying = bodies_[i];
+            if (flying.entry_guidance && !flying.ship_landing && !flying.body->impacted()) {
+                flying.entry_command = flying.entry_guidance->update(*flying.body, env_, epoch_);
+                if (flying.entry_command.phase == gnc::EntryPhase::Gate) {  // the flip and the catch take over
+                    flying.ship_landing = std::make_unique<gnc::ShipLandingGuidance>(return_site(flying.body->vehicle()));
+                    flying.ship_landing->set_realtime(realtime_planning_);
+                }
             }
+            if (flying.ship_landing) run_ship_landing(flying);
         }
         const auto pointers = body_pointers();
         if (tower_) tower_->before_tick(pointers, earth_, epoch_);
