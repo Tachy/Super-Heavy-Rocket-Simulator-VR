@@ -33,6 +33,9 @@ public:
     godot::Dictionary site_tower(const godot::String& site_id) const;
     // Tower of the current flight: {present, opening_rad, carriage_offset_m, phase (German)}.
     godot::Dictionary tower_state() const;
+    void set_booster_return(bool enabled);
+    void set_realtime_planning(bool enabled);
+    godot::Dictionary return_state(int64_t index) const;
     bool is_active() const { return session_ && session_->active(); }
     double advance_to(double tdb_s);
     double mission_time_s() const;

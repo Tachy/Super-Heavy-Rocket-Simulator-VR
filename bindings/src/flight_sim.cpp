@@ -8,6 +8,7 @@
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/landing_outcome.hpp"
 
 namespace starsim::bindings {
 
@@ -80,6 +81,33 @@ godot::Dictionary FlightSim::tower_state() const {
     d["opening_rad"] = tower->arms().opening_rad();
     d["carriage_offset_m"] = tower->arms().carriage_offset_m();
     d["phase"] = godot::String::utf8(sim::to_string(tower->phase()));
+    return d;
+}
+
+void FlightSim::set_booster_return(bool enabled) {
+    if (session_) session_->set_booster_return(enabled);
+}
+
+void FlightSim::set_realtime_planning(bool enabled) {
+    if (session_) session_->set_realtime_planning(enabled);
+}
+
+godot::Dictionary FlightSim::return_state(int64_t index) const {
+    godot::Dictionary d;
+    d["present"] = false;
+    if (!session_ || index < 0 || static_cast<size_t>(index) >= session_->body_count()) return d;
+    const auto i = static_cast<size_t>(index);
+    d["outcome"] = godot::String::utf8(sim::to_string(session_->landing_outcome(i)));
+    const auto* status = session_->return_status(i);
+    if (!status) return d;
+    d["present"] = true;
+    d["phase"] = godot::String::utf8(gnc::to_string(status->phase));
+    d["guidance"] = godot::String::utf8(status->scvx ? "SCvx" : "explizit");
+    d["abort"] = status->abort;
+    const auto* guidance = session_->return_guidance(i);
+    const auto* scvx = guidance ? guidance->scvx() : nullptr;
+    d["plans"] = scvx ? scvx->statistics().plans : 0;
+    d["max_plan_ms"] = scvx ? scvx->statistics().max_solve_ms : 0.0;
     return d;
 }
 
@@ -303,6 +331,9 @@ void FlightSim::_bind_methods() {
                          &FlightSim::launch_from_site);
     ClassDB::bind_method(D_METHOD("site_tower", "site_id"), &FlightSim::site_tower);
     ClassDB::bind_method(D_METHOD("tower_state"), &FlightSim::tower_state);
+    ClassDB::bind_method(D_METHOD("set_booster_return", "enabled"), &FlightSim::set_booster_return);
+    ClassDB::bind_method(D_METHOD("set_realtime_planning", "enabled"), &FlightSim::set_realtime_planning);
+    ClassDB::bind_method(D_METHOD("return_state", "index"), &FlightSim::return_state);
     ClassDB::bind_method(D_METHOD("is_active"), &FlightSim::is_active);
     ClassDB::bind_method(D_METHOD("advance_to", "tdb_s"), &FlightSim::advance_to);
     ClassDB::bind_method(D_METHOD("mission_time_s"), &FlightSim::mission_time_s);

@@ -91,6 +91,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			sim.stage()
 			last_event = "Stufentrennung"
 		KEY_P:
+			sim.set_booster_return(true)  # the booster flies back and is caught after staging
 			sim.engage_ascent_autopilot(ascent_target.get("periapsis_km", 200.0), ascent_target.get("apoapsis_km", 200.0),
 					ascent_target.get("inclination_deg", 26.5), ascent_target.get("northerly", true))
 			last_event = "Aufstiegs-Autopilot aktiv"

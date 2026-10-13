@@ -83,6 +83,7 @@ func _process(delta: float) -> void:
 func update_world() -> void:
 	# The flight simulation may lag behind the clock at high time warp; the clock then waits for it.
 	if flight.sim.is_active():
+		flight.sim.set_realtime_planning(clock.warp <= 1.0)  # landing re-plans never stall real-time play
 		var reached := flight.advance(clock.tdb_s, _delta)
 		if clock.tdb_s - reached > 0.05:  # sim at its per-frame tick limit: hold the clock back
 			clock.tdb_s = reached

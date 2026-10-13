@@ -57,6 +57,14 @@ func _process(_delta: float) -> void:
 	var tower: Dictionary = sim.tower_state()
 	if tower.get("present", false) and sim.body_count() > 1:
 		lines.append("Turm            %s" % tower["phase"])
+	if sim.body_count() > 1:
+		var ret: Dictionary = sim.return_state(0)
+		if ret.get("present", false):
+			lines.append("Booster         %s (%s)" % [ret["phase"], ret["guidance"]])
+			if ret["abort"] and not tower.get("present", false):
+				lines.append("Turm            Abbruch")
+			if ret["outcome"] != "fliegt":
+				lines.append("Ergebnis        %s" % ret["outcome"])
 	var ap: Dictionary = sim.autopilot_status()
 	if ap.get("state", "aus") != "aus":
 		lines.append("Autopilot       %s" % ap["state"])
