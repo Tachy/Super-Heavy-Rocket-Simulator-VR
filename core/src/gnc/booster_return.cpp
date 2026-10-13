@@ -5,6 +5,7 @@
 
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/orbit/kepler.hpp"
 #include "starsim/orbit/lambert.hpp"
 
 namespace starsim::gnc {
@@ -237,6 +238,44 @@ BoosterReturnGuidance::BurnPrediction BoosterReturnGuidance::predict_landing_bur
     return {h, t};
 }
 
+double BoosterReturnGuidance::meco_propellant_kg(const vehicle::Vehicle& stack, const math::StateVector& state_gcrf,
+                                                const frames::BodyOrientation& earth, time::Epoch epoch,
+                                                const LandingSite& site, const BoosterReturnParameters& parameters,
+                                                double landing_propellant_kg) {
+    const auto& booster = stack.stages().front();
+    double run_down_kg = 0.0;
+    for (const auto& e : booster.engines) {
+        if (e.producing_thrust()) {
+            run_down_kg += 0.5 * e.performance->config().shutdown_s * e.performance->mass_flow_kgps(e.throttle);
+        }
+    }
+    double flip_kg = 0.0;
+    for (const auto& e : booster.engines) {
+        const auto& groups = parameters.landing_groups;
+        if (e.starved || std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) continue;
+        flip_kg += parameters.flip_duration_s * e.performance->mass_flow_kgps(e.performance->config().throttle_min);
+    }
+
+    const auto after_flip = orbit::propagate_two_body(state_gcrf, gm_earth, parameters.flip_duration_s);
+    const double time_left = std::max(parameters.flight_time_s - parameters.flip_duration_s, 30.0);
+    const Vec3 site_fixed = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    const Vec3 aim_gcrf =
+        earth.fixed_to_gcrf(epoch + parameters.flip_duration_s + time_left).position(site_fixed);
+    const Vec3 normal = math::normalized(cross(after_flip.position_m, aim_gcrf));
+    const auto arc = orbit::solve_lambert(after_flip.position_m, aim_gcrf, time_left, gm_earth, normal);
+    const double delta_v =
+        arc ? (1.0 + parameters.boostback_loss_fraction) * norm(arc->departure_velocity_mps - after_flip.velocity_mps)
+            : 0.0;
+
+    // Rocket equation on the booster alone after the flip: with dry mass m_d and propellant Q, the boostback leaves
+    // Q - (m_d + Q)(1 - e) >= landing  <=>  Q >= (landing + m_d (1 - e)) / e,   e = exp(-delta_v / c).
+    const auto engines = engine_set(stack, parameters.boostback_groups, 0.0);
+    const double exhaust_mps = engines.mass_flow_kgps > 0.0 ? engines.vacuum_thrust_n / engines.mass_flow_kgps : 1.0;
+    const double e = std::exp(-delta_v / exhaust_mps);
+    const double dry_kg = booster.config.dry_mass_kg + booster.extra_mass_kg;
+    return run_down_kg + flip_kg + (landing_propellant_kg + dry_kg * (1.0 - e)) / e;
+}
+
 ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                             time::Epoch epoch) {
     const auto& s = body.state();
@@ -263,45 +302,6 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
     }
     ++tick_counter_;
     ReturnCommand cmd;
-
-    if (phase_ == ReturnPhase::Flip || phase_ == ReturnPhase::Boostback) {
-        const double time_left = std::max(boostback_start_ + parameters_.flight_time_s - epoch, 30.0);
-        const auto at_landing = env.earth_orientation.fixed_to_gcrf(epoch + time_left);
-        const Vec3 aim_fixed = site_fixed + aim_offset_itrf_ + site_up * mass.cg_station_m;
-        const Vec3 aim_gcrf = at_landing.position(aim_fixed);
-        const Vec3 normal = math::normalized(cross(s.position_gcrf_m, aim_gcrf));
-        const auto arc = orbit::solve_lambert(s.position_gcrf_m, aim_gcrf, time_left, gm_earth, normal);
-        if (arc && tick_counter_ % 20 == 1) {
-            // Shooting on the aim point: where would the Lambert arc really come down (drag, rotation)?
-            const auto impact = predict_impact(body, env, epoch, site_.height_m, &arc->departure_velocity_mps);
-            if (impact.valid) {
-                const Vec3 miss = horizontal_miss(impact);
-                aim_offset_itrf_ += miss;
-                impact_miss_m_ = norm(miss);
-            }
-        }
-        const Vec3 v_go = arc ? arc->departure_velocity_mps - s.velocity_gcrf_mps : -v_rel_gcrf;
-        cmd.axis_gcrf = math::normalized(v_go);
-        cmd.impact_miss_m = impact_miss_m_;
-
-        const double pointing = std::acos(std::clamp(dot(body_axis, cmd.axis_gcrf), -1.0, 1.0));
-        if (phase_ == ReturnPhase::Flip) {
-            // Turn with the centre engines idling (gimbal authority), then go to full boostback thrust.
-            cmd.run_groups = parameters_.landing_groups;
-            cmd.throttle = 0.0;  // limited to the minimum throttle by the engines
-            if (pointing < parameters_.flip_tolerance_rad) phase_ = ReturnPhase::Boostback;
-        } else {
-            cmd.run_groups = parameters_.boostback_groups;
-            cmd.throttle = 1.0;
-            // Cutoff when the remaining delta-v equals the shutdown tail-off impulse.
-            const auto engines = engine_set(body.vehicle(), parameters_.boostback_groups, pressure);
-            const double tail_off_mps = 0.5 * engines.thrust_n / mass.mass_kg * engines.shutdown_s;
-            if (norm(v_go) < std::max(tail_off_mps, 0.5)) phase_ = ReturnPhase::Coast;
-        }
-        cmd.phase = phase_;
-        if (phase_ == ReturnPhase::Coast) cmd.run_groups.clear();
-        return cmd;
-    }
 
     if (phase_ == ReturnPhase::Flip || phase_ == ReturnPhase::Boostback) {
         const double time_left = std::max(boostback_start_ + parameters_.flight_time_s - epoch, 30.0);

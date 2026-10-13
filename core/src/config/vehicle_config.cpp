@@ -151,6 +151,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     }
     if (auto recovery = t["recovery"].as_table()) {
         s.reserve_propellant_kg = doc.number_or(*recovery, "reserve_propellant_kg", 0.0);
+        s.landing_propellant_kg = doc.number_or(*recovery, "landing_propellant_kg", 0.0);
         s.recovery_method = doc.text_or(*recovery, "method");
     }
     return s;

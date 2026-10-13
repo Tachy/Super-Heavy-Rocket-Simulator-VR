@@ -110,6 +110,18 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 - Bedienung: HOTAS fliegt; die Bildschirme werden in VR mit dem Finger des Controllers berührt, am Desktop
   per Maus.
 
+**Steuerungsstufen** [Entschieden 2026-10-13]
+- Grundsatz: Die Autopiloten von Booster und Ship können jeden geplanten Missionsschritt allein fliegen
+  (Aufstieg, Stufentrennung, Rückflug und Fang, Bahnmanöver, Wiedereintritt, Landung bzw. Fang des Ships).
+- Optional übernimmt der Spieler:
+  - **Lenkung von Hand**: Lage/Steuerung beim Aufstieg und mit dem Starship per HOTAS, der Schub bleibt
+    beim Autopiloten.
+  - **Experte**: Schub und Lenkung von Hand.
+- In jeder Stufe rechnet der Bordcomputer das Soll aus dem tatsächlichen Zustand laufend nach (Flugdirektor,
+  Brennschluss, Manöver, Rückflugbedarf des Boosters) und zeigt es an; der Autopilot kann jederzeit wieder
+  übernehmen.
+- [Vorschlag] Umschalten über eine HOTAS-Taste und den mittleren Bildschirm; die aktive Stufe steht im HUD.
+
 **Crew** [Entschieden]
 - Der Spieler fliegt allein (Kommandant, mittlerer Sitz).
 - Zwei weitere Crewmitglieder sitzen sichtbar daneben (Raumanzug, Kopf- und Handbewegungen) und machen

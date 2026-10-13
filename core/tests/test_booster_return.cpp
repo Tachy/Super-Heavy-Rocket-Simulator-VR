@@ -11,6 +11,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/landing_outcome.hpp"
@@ -215,7 +216,10 @@ TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][
     std::printf("%s: propellant at landing-burn ignition %.1f t\n", vehicle_id.c_str(), ignition_propellant_kg / 1e3);
 }
 
-TEST_CASE("Block 3 reaches landing-burn ignition within the FAA residual propellant", "[gnc][booster][validation]") {
+// The ascent autopilot plans MECO from what the return needs (flip, boostback, the propellant kept for the landing
+// burn), not from a fixed reserve: the booster lights its landing burn with the planned propellant.
+TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned propellant, within the FAA residual",
+          "[gnc][booster][validation]") {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();
@@ -240,7 +244,12 @@ TEST_CASE("Block 3 reaches landing-burn ignition within the FAA residual propell
             ignition_propellant_kg = session.body(0).vehicle().propellant_kg();
         }
     }
-    std::printf("starship_block3: propellant at landing-burn ignition %.1f t (FAA EA: <= 74 t)\n", ignition_propellant_kg / 1e3);
+    const double planned_kg =
+        config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3").stages.front().landing_propellant_kg;
+    std::printf("starship_block3: propellant at landing-burn ignition %.1f t, planned %.1f t (FAA EA: <= 74 t)\n",
+                ignition_propellant_kg / 1e3, planned_kg / 1e3);
     REQUIRE(ignition_propellant_kg >= 0.0);
     CHECK(ignition_propellant_kg <= faa_landing_propellant_kg);
+    REQUIRE(planned_kg > 0.0);
+    CHECK(std::abs(ignition_propellant_kg - planned_kg) < 3.0e3);  // model: two-body flip coast, no drag/gravity loss
 }

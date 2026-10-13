@@ -98,7 +98,10 @@ struct StageConfig {
     double payload_mass_kg = 0.0;
     double fairing_mass_kg = 0.0;
     double jettison_after_separation_kg = 0.0;
-    double reserve_propellant_kg = 0.0;
+    double reserve_propellant_kg = 0.0;  // MECO without return guidance
+    // Returning booster: propellant to have left at landing-burn ignition; the ascent autopilot plans MECO from it
+    // and the return's needs (0: MECO at reserve_propellant_kg).
+    double landing_propellant_kg = 0.0;
     // [stage.recovery] method: "tower_catch" (Super Heavy: always caught, no legs), "drone_ship_landing" / pad
     // landing (Falcon 9, not modelled yet); empty: expendable.
     std::string recovery_method;

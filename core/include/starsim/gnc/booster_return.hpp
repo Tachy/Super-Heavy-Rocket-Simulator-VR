@@ -18,6 +18,10 @@ const char* to_string(ReturnPhase phase);
 
 struct BoosterReturnParameters {
     double flight_time_s = 230.0;  // planned time from boostback start to touchdown (Lambert arc shape)
+    double flip_duration_s = 10.0; // [E] separation to boostback ignition (MECO planning; our flip takes ~10 s)
+    // [D] MECO planning: boostback delta-v beyond the two-body Lambert arc - the drag-aware aim point lies ~60 m/s
+    // further, finite burn and tail-off ~70 m/s more (identified on our full block 3 return: 1616 vs 1488 m/s).
+    double boostback_loss_fraction = 0.086;
     std::vector<std::string> boostback_groups{"booster/center", "booster/divert", "booster/middle"};
     // Landing burn: starts with the inner engines (high deceleration close to the ground, small gravity
     // losses) and continues on the centre engines once these can finish it at the design throttle.
@@ -100,6 +104,17 @@ public:
     };
     BurnPrediction predict_landing_burn(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                         time::Epoch epoch) const;
+
+    // Propellant the booster needs at main-engine cutoff to return with `landing_propellant_kg` left at landing-burn
+    // ignition; the ascent autopilot cuts off when the booster is down to it. `stack` is the vehicle before
+    // separation (its lowest stage is the booster) at `state_gcrf`. Sums the run-down of the engines running now,
+    // the flip (flip_duration_s on the landing engines at minimum throttle, two-body coast) and the boostback: the
+    // rocket equation (vacuum exhaust velocity) on the delta-v of the Lambert arc from the state after the flip to
+    // the site at the end of flight_time_s, as the guidance flies it, plus boostback_loss_fraction (drag shift of the
+    // aim point, finite burn). Without a Lambert arc only the landing propellant and the flip are counted.
+    static double meco_propellant_kg(const vehicle::Vehicle& stack, const math::StateVector& state_gcrf,
+                                     const frames::BodyOrientation& earth, time::Epoch epoch, const LandingSite& site,
+                                     const BoosterReturnParameters& parameters, double landing_propellant_kg);
 
 private:
     LandingSite site_;  // target of the return (moved to the sea point when ditching)

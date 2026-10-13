@@ -135,7 +135,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   no grid fins, no wind; no re-plans in the last 3 s. The explicit laws remain the fallback.
   Switch windows [E]: 13 -> 5 at 180-220 m/s sink (5 engines seen at ~200 m/s on flights 13/14), 5 -> 3 calm at
   15-30 m/s (satnews 2025-10-05: V3 ends in a hover on 3 engines).
-  Full return: caught, 54.8 t at landing-burn ignition (flight 14 gauge: ~51 t); it arrives slower than flights
+  Full return: caught, 50.9 t at landing-burn ignition (planned 51 t, flight 14 gauge); it arrives slower than flights
   13/14 (~300 m/s at ignition, ~2.3 km). Abort to the sea is weak: a late
   abort can end hovering over land until the propellant runs out.
 - Descent drag (tail first): body table `aero/super_heavy_descent.csv` [D] plus the grid fins' axial drag
@@ -149,8 +149,12 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   (rocket equation staging -> cutoff with the propellant gauge, 248-260 t), booster dry 210 t +-40 t (stack mass
   balance and descent ballistic coefficient), liftoff ~5,550 t; tank capacities 3,650 / 1,600 t [S]; Raptor 3
   280 tf consistent (peaks ~270 tf sea-level equivalent; 250 tf is contradicted), minimum throttle 30 % [D] (V3
-  hovers on 3 engines). Booster reserve at MECO 225 t [D] (gives ~51 t at landing-burn ignition as flight 14) -
-  a guidance choice; real boosters stage with ~530 t (~15 %) and burn ~470 t in the boostback.
+  hovers on 3 engines). MECO of a returning booster is planned by the ascent autopilot from the state
+  (`BoosterReturnGuidance::meco_propellant_kg`: run-down + flip + boostback by the rocket equation on the Lambert
+  delta-v after the flip, +8.6 % [D] for the drag-shifted aim point and finite burn) so that `landing_propellant_kg`
+  = 51 t [D] (flight 14 gauge) remain at landing-burn ignition (test: 50.9 t; 30 / 70 t targets within 0.4 t);
+  it stages with ~207 t. `reserve_propellant_kg` (225 t) is the MECO without return guidance. Real boosters stage
+  with ~530 t (~15 %) and burn ~470 t in the boostback.
 - Catch tower dimensions and azimuths (`[site.tower]`, Starbase 315 deg, LC-39A 0 deg) and the catch pins
   (`[stage.catch_pins]`, 5 MN per pin) are estimates [E]; verify the tower azimuths against imagery.
 

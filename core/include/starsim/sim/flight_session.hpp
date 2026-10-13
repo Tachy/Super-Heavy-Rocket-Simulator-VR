@@ -86,6 +86,9 @@ public:
     // Landing site of a returning `booster`: catch target when the site has a tower and the booster has pins,
     // coastline when configured.
     gnc::LandingSite return_site(const vehicle::Vehicle& booster) const;
+    // The lowest stage of `vehicle` gets return guidance after separation (booster return on, caught by a tower at
+    // this site).
+    bool returns_after_staging(const vehicle::Vehicle& vehicle) const;
     const vehicle::FlightEnvironment& environment() const { return env_; }
     const CatchTowerSim* tower() const { return tower_.get(); }
     CatchTowerSim* tower() { return tower_.get(); }
