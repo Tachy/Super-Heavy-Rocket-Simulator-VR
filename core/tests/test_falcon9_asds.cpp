@@ -298,6 +298,30 @@ TEST_CASE("Falcon 9 lands on the drone ship from the landing-burn ignition state
     CHECK(run.outcome == sim::LandingOutcome::Landed);
 }
 
+TEST_CASE("A Falcon 9 stage that cannot reach the drone ship ditches beside it", "[gnc][falcon9][asds]") {
+    // Lit 900 m off the deck towards the abort side (across the deck), falling straight: one engine diverts a few hundred
+    // metres, the deck is out of reach; the abort plans for the water beside the ship (spec c4).
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    session.set_launch_site(ship());
+    session.set_landing_zone(ship());
+    const auto parameters = asds_parameters();
+    const auto cfg = test::booster_config("falcon9_block5", asds_ignition_propellant_kg);
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, asds_ignition_sink_mps, parameters);
+    session.place_returning_booster(cfg,
+                                    test::state_over_site(session.launch_site(), earth(), t0, {900.0, 0.0, h},
+                                                          {0.0, 0.0, -asds_ignition_sink_mps}),
+                                    t0, parameters, gnc::ReturnPhase::LandingBurn);
+    const auto run = test::fly_to_touchdown(session, earth(), t0, 60.0);
+    const auto* guidance = session.return_guidance(0);
+    std::printf("[falcon9] drone ship abort: %s / %s, ended %.0f m from the deck centre, abort %d\n",
+                sim::to_string(run.touchdown), sim::to_string(run.outcome), run.offset_m,
+                guidance && guidance->scvx() ? guidance->scvx()->aborting() : -1);
+    REQUIRE(guidance->scvx() != nullptr);
+    CHECK(guidance->scvx()->aborting());
+    CHECK(run.outcome == sim::LandingOutcome::Splashdown);
+}
+
 TEST_CASE("The Falcon 9 drone-ship mission loads", "[config][falcon9][asds]") {
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
     CHECK(m.vehicle_id == "falcon9_block5");

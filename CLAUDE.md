@@ -121,7 +121,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Booster recovery (decision 2026-10-13): Super Heavy is always caught (no legs; `[stage.recovery] method =
   "tower_catch"`): return guidance only at sites with a tower. Falcon 9 boosters land on the pad or the drone ship
   ("leg_landing", milestone c: `docs/superpowers/specs/2026-10-13-falcon9-landing-design.md`;
-  vehicle, legs and the RTLS to LZ-40 done (c3), drone ship next (c4)). If the first SCvx catch plan fails, an SCvx sea abort is planned at once;
+  vehicle, legs, the RTLS to LZ-40 (c3) and the drone ship (c4) done; the game (c5) next). If the first SCvx catch plan fails, an SCvx sea abort is planned at once;
   the explicit laws are the last fallback (over the arms, ~1-3 m: not accurate enough to be caught); with
   `scvx_landing = false` the whole return aims beyond the shoreline and ditches (test: 1.05 m/s, 650 m off).
 - Booster return: at a catch site the landing burn flies SCvx plans (`gnc/scvx_landing`), V3 sequence 13 -> 5 (divert pair) -> 3 engines,
@@ -344,7 +344,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   and the landing-burn profile from `[stage.recovery]` (Super Heavy has none of these keys: defaults unchanged).
   Phases Flip -> Boostback -> Coast -> EntryBurn ("Wiedereintritt", Falcon 9 only: retrograde on the centre engine from
   56.6 km for 125 m/s [D], leaning <= 5 deg towards the impact miss) -> Coast -> LandingBurn. The impact prediction
-  carries the entry burn still ahead as an impulse. The landing burn flies SCvx plans with the goal `DescentGoal::Pad`
+  carries the entry burn still ahead (a finite burn since c4). The landing burn flies SCvx plans with the goal `DescentGoal::Pad`
   (terminal state of a catch at leg-contact height, sink 1 m/s, no corridor, no exponential approach: one Merlin at
   minimum throttle exceeds the weight), 1 -> 3 -> 1 engines with switch windows 230-270 / 140-190 m/s [D]; the legs
   deploy 5 s [E] + deploy time before the planned touchdown, the engines stop on leg contact or 0.5 s after the plan's
@@ -355,6 +355,30 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   T+349 s, landing burn T+416 s at 3.0 km / 291 m/s / 11.3 t, touchdown T+446 s, 0.02 m off (CRS-35: 355 / 420 at
   ~3.2 km, ~300 m/s / 442 s). `return_flight_time_s` 260 s and `boostback_loss_fraction` 0.12 [D] are identified on
   that mission. Known gap: our MECO leaves 50.6 t, CRS-35's gauge ~61 t (the real return spends ~10 t more).
+- Falcon 9 drone ship (c4, `config/drone_ships.toml`, `config/missions/falcon9_asds.toml`): a drone ship is a landing zone
+  with a deck (`sim::drone_ship_site`: deck 91 x 52 m [S], 3 m freeboard [E], stationary and level; `sea` marks the water
+  beside the long edge for the abort); the mission's `[drone_ship]` places it at the nominal impact point of our ascent
+  [D] (hidden test "... nominal impact point ...": drag + finite entry burn, 10 s after MECO). `sim::start_ascent_mission`
+  sets a session up from an `AscentMission` (payload, pad, landing zone or drone ship, booster return, autopilot).
+  `[stage.recovery.drone_ship]` overrides the RTLS profile when the landing zone has a deck (`StageConfig::return_profile_for`,
+  `FlightSession::return_parameters`): `boostback = false` (the guidance starts coasting, turns engines first on its RCS;
+  MECO plans run-down + entry burn + landing propellant only: 23.6 t), entry burn on centre + pair from 66 km for
+  880 m/s [D] at 0.72, landing burn on the centre engine in all three phases [D] (`landing_phase_max_tilt_deg` 20).
+  What the slanted approach (~90 m/s across at ignition) needed, all generic: the impact prediction flies the pending
+  entry burn as a finite burn with its lean (`PendingBurn`; the impulse model was 3.5 km off); the entry burn solves its
+  lean by shooting on that prediction (`entry_max_lean_rad` 5 deg); leg landings aim the ballistic impact beyond the pad by
+  the landing burn's lead (`landing_burn_lead_itrf`: the retrograde burn bends the fall to the vertical and stops short);
+  SCvx landing burns feather the grid fins into their local flow (`AttitudeController::feathered_grid_fins`: neutral fins
+  acted as a tail the planning model does not know - Super Heavy too, catch campaign still 21/21); the return guidance
+  estimates the drag online from the accelerometer (`FlightBody::set_accelerometer`, `drag_scale()`). Validation: full
+  mission (kick 16 deg: MECO T+144 s, 62.9 km, 8112 km/h vs Starlink 15-25 T+149 s, 60 km, ~8000 km/h; 15.5 t to
+  200 x 281 km): entry burn T+366-385 s (T+364-386), landing burn T+465 s at 2.9 km / 271 m/s / 11.2 t (T+476 s, ~3.0 km,
+  ~270 m/s), landed T+499 s (T+499 s) 0.02 m off; campaigns `[falcon9][asds][validation]` from ignition (as RTLS) and
+  from MECO states (+-200 m, +-5 m/s, +-5 %, aero +-10 %; two halves) 21 of 21 each, <= 0.04 m, <= 1.01 m/s; a deck out
+  of reach ditches beside the ship. Known gaps: our MECO leaves 24 t (gauge ~43 t: ~19 t vanish between MECO and the entry
+  burn without a burn shown); our vehicle carries ~16 t to that orbit (real Starlink stacks ~17 t); landing burns end at
+  the SCvx reserve (5 t [E], Super Heavy's value) after 34 s (real 23 s: our final approach is gentler than the
+  hoverslam). Diagnostics: hidden test "Falcon 9 ASDS single MECO case" with `STARSIM_ASDS_SEED=<101-120>`.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 

@@ -65,6 +65,9 @@ flow separation (vacuum engines).
   descending below that altitude, retrograde, for that delta-v), `landing_engine_phases` (3 group lists: ignition,
   divert, final set), `landing_phase_throttles` (3 design throttles that time the ignition) and
   `landing_switch_sink_mps` (2 `[min, max]` sink windows of the engine switches).
+- `[stage.recovery.drone_ship]`: the return to a drone ship; its keys override the profile above (left out: taken from
+  it). `boostback = false`: no flip or boostback (the stage coasts on its ascent arc). `landing_phase_max_tilt_deg`
+  (3 values, either table): planned thrust tilt limit per landing engine set (default: Super Heavy's 25 / 20 / 10).
 - `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry
   (`footprint_radius_m` from the axis, `foot_station_m` below the stage bottom: negative), `deploy_time_s`, and the
   per-leg crush core (`stiffness_n_m` and `damping_n_s_m` until the force reaches `crush_force_n`, then it crushes
@@ -85,12 +88,18 @@ flow separation (vacuum engines).
   `carriage_stiffness_n_m`, `carriage_damping_n_s_m`, `carriage_stroke_m`). The hinges sit on the tower face,
   `arm_closed_gap_m / 2 + arm_width_m / 2` from the catch axis.
 
+## Drone ships (`drone_ships.toml`)
+- `[[drone_ship]]`: `id`, `name` (generic display name), `deck_length_m`, `deck_width_m`, `freeboard_m` (deck above the
+  sea). Where it waits is set by the mission.
+
 ## Missions (`missions/`)
 - `leo_ascent.toml`: target orbit of the game's ascent autopilot (key P).
 - `ship_return_starbase.toml`: ship return from orbit (`config::load_ship_return_mission`).
 - `falcon9_rtls.toml` (`config::load_ascent_mission`): `[mission]` vehicle, launch `site`, optional `landing_zone` (a
   site of kind `landing_zone`: the first stage returns to it), `heading_deg`, `payload_t`, `fairing`; `[target]` orbit;
   `[pitch_program]` `kick_deg` and `booster_throttle` (`[t_s, fraction]` pairs, increasing times).
+- `falcon9_asds.toml`: the same keys; instead of a `landing_zone` a `[drone_ship]` table (`id`, `latitude_deg`,
+  `longitude_deg`, `heading_deg` of the deck's long axis, `sea_height_m` above WGS84): the first stage lands on its deck.
 
 ## Adding another rocket
 1. Add missing engines under `engines/`.
