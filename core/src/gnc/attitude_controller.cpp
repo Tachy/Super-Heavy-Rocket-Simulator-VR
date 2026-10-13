@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+
+#include "starsim/math/constants.hpp"
 
 namespace starsim::gnc {
 
@@ -97,6 +100,66 @@ std::vector<double> allocate_fins(const FinAuthority& a, const Vec3& torque) {
     return d;
 }
 
+// Minimum-norm solution d = A^T (A A^T + eps I)^-1 b of A d = b (A: 3 x n, given by its columns).
+std::vector<double> minimum_norm(const std::vector<Vec3>& columns, const Vec3& b) {
+    FinAuthority a;
+    a.torque_per_rad = columns;
+    a.max_deflection_rad.assign(columns.size(), std::numeric_limits<double>::infinity());
+    return allocate_fins(a, b);
+}
+
+// Flaps: modelled aerodynamic moment about the CG (hull + flaps at their current deflections) and the flap
+// moments' derivative per radian of deflection (numeric), from the latest air data.
+struct FlapAuthority {
+    bool active = false;
+    std::vector<Vec3> torque_per_rad;
+    std::vector<double> deflection_rad;
+    std::vector<double> max_deflection_rad;
+    Vec3 aero_moment_nm;
+    Vec3 max_torque_nm;  // per axis, half of each flap's range with the favourable sign
+};
+
+Vec3 flap_moment(const vehicle::Flap& flap, double deflection_rad, const aero::FlapTable& table,
+                 const vehicle::AirData& air, const Vec3& rate_body, double cg_station_m) {
+    const Vec3 arm = aero::flap_centroid(flap.geometry, deflection_rad) - Vec3{cg_station_m, 0.0, 0.0};
+    const auto force =
+        aero::flap_force(flap.geometry, deflection_rad, air.air_velocity_body_mps + cross(rate_body, arm), air.air, table);
+    return cross(arm, force.force_body_n);
+}
+
+FlapAuthority flap_authority(const vehicle::FlightBody& body, double cg_station_m) {
+    FlapAuthority a;
+    const auto& air = body.air_data();
+    if (air.air.density_kg_m3 <= 0.0 || body.vehicle().flap_count() == 0) return a;
+    const Vec3& w = body.state().angular_velocity_body_radps;
+    const auto hull = body.vehicle().aero().compute(air.air_velocity_body_mps, air.air.density_kg_m3,
+                                                    air.air.speed_of_sound_mps,
+                                                    body.vehicle().any_engine_producing_thrust(), air.mean_free_path_m);
+    a.aero_moment_nm = cross(Vec3{hull.normal_force_station_m - cg_station_m, 0.0, 0.0}, hull.force_body_n);
+    constexpr double step_rad = 1.0 * constants::deg_to_rad;
+    for (const auto& stage : body.vehicle().stages()) {
+        if (!stage.flap_table) continue;
+        for (const auto& flap : stage.flaps) {
+            const double d = flap.deflection_rad;
+            a.aero_moment_nm += flap_moment(flap, d, *stage.flap_table, air, w, cg_station_m);
+            const double lo = std::max(0.0, d - step_rad), hi = std::min(flap.max_deflection_rad, d + step_rad);
+            const Vec3 per_rad = (flap_moment(flap, hi, *stage.flap_table, air, w, cg_station_m) -
+                                  flap_moment(flap, lo, *stage.flap_table, air, w, cg_station_m)) /
+                                 (hi - lo);
+            a.torque_per_rad.push_back(per_rad);
+            a.deflection_rad.push_back(d);
+            a.max_deflection_rad.push_back(flap.max_deflection_rad);
+            a.max_torque_nm += Vec3{std::abs(per_rad.x), std::abs(per_rad.y), std::abs(per_rad.z)} *
+                               (0.5 * flap.max_deflection_rad);
+        }
+    }
+    a.active = !a.torque_per_rad.empty();
+    return a;
+}
+
+// Fraction of the null-space distance to mid-range removed per call (redundant flap setting, slow drift).
+constexpr double flap_centring_gain = 0.2;
+
 // Fraction of the maximum angular deceleration planned for stopping a rotation (margin for lag and
 // thrust changes).
 constexpr double braking_margin = 0.5;
@@ -114,7 +177,7 @@ double rate_command(double error_rad, double linear_gain, double max_angular_acc
 }  // namespace
 
 ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, double ambient_pressure_pa,
-                                           const Vec3& desired_torque, bool grid_fins) {
+                                           const Vec3& desired_torque, bool grid_fins, bool flaps) {
     const auto mass = body.vehicle().mass_properties();
     const Authority a = gimbal_authority(body, mass.cg_station_m, ambient_pressure_pa);
     const Vec3 rcs_max = body.vehicle().max_rcs_torque_nm();
@@ -125,6 +188,31 @@ ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, doub
         const FinAuthority fins = fin_authority(body, mass.cg_station_m);
         out.grid_fin_rad = allocate_fins(fins, torque);
         for (size_t i = 0; i < out.grid_fin_rad.size(); ++i) torque -= fins.torque_per_rad[i] * out.grid_fin_rad[i];
+    }
+    if (flaps) {
+        const FlapAuthority fa = flap_authority(body, mass.cg_station_m);
+        if (fa.active) {
+            // Newton step: the flaps add what the modelled aero moment lacks of the wanted net torque.
+            const Vec3 needed = torque - fa.aero_moment_nm;
+            std::vector<double> delta = minimum_norm(fa.torque_per_rad, needed);
+            // Redundant direction(s): drift towards mid-range without changing the moment (to first order).
+            const size_t n = delta.size();
+            std::vector<double> to_mid(n);
+            Vec3 mid_moment;
+            for (size_t i = 0; i < n; ++i) {
+                to_mid[i] = 0.5 * fa.max_deflection_rad[i] - fa.deflection_rad[i];
+                mid_moment += fa.torque_per_rad[i] * to_mid[i];
+            }
+            const std::vector<double> range_part = minimum_norm(fa.torque_per_rad, mid_moment);
+            out.flap_rad.resize(n);
+            Vec3 achieved;
+            for (size_t i = 0; i < n; ++i) {
+                delta[i] += flap_centring_gain * (to_mid[i] - range_part[i]);
+                out.flap_rad[i] = std::clamp(fa.deflection_rad[i] + delta[i], 0.0, fa.max_deflection_rad[i]);
+                achieved += fa.torque_per_rad[i] * (out.flap_rad[i] - fa.deflection_rad[i]);
+            }
+            torque = needed - achieved;  // remainder for gimbals / RCS
+        }
     }
     // Moments of a deflection (see Vehicle::update_engines): pitch -> +tau_y, yaw -> -tau_z, roll -> +tau_x.
     if (a.lever_moment > 0.0) {
@@ -150,7 +238,7 @@ ControlOutput AttitudeController::steer_rates(const vehicle::FlightBody& body, d
     const double k = 2.0 * gains_.damping_ratio * gains_.natural_frequency_rad_s;
     const Vec3 torque{inertia.x * k * (rates_body_radps.x - w.x), inertia.y * k * (rates_body_radps.y - w.y),
                       inertia.z * k * (rates_body_radps.z - w.z)};
-    return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins);
+    return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins, gains_.flaps);
 }
 
 ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double ambient_pressure_pa,
@@ -179,8 +267,9 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
     const Vec3& inertia = mass.inertia_kg_m2;
     const Authority a = gimbal_authority(body, mass.cg_station_m, ambient_pressure_pa);
     const Vec3 rcs_max = body.vehicle().max_rcs_torque_nm();
-    const Vec3 fin_max =
+    Vec3 fin_max =
         gains_.grid_fins && body.vehicle().grid_fin_count() > 0 ? fin_authority(body, mass.cg_station_m).max_torque_nm : Vec3{};
+    if (gains_.flaps) fin_max += flap_authority(body, mass.cg_station_m).max_torque_nm;
     auto max_acceleration = [&](double gimbal_moment, double rcs_torque, double fin_torque, double moment_of_inertia) {
         const double torque = (gimbal_moment > 0.0 ? gimbal_moment * std::sin(a.gimbal_max_rad) : rcs_torque) + fin_torque;
         return moment_of_inertia > 0.0 ? torque / moment_of_inertia : 0.0;
@@ -194,7 +283,7 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
                     rate_command(rotation.z, gain, max_acceleration(a.lever_moment, rcs_max.z, fin_max.z, inertia.z)) + ff_rate.z};
     const Vec3 torque{inertia.x * kd * (rate.x - w.x), inertia.y * (kd * (rate.y - w.y) + ff_acceleration.y),
                       inertia.z * (kd * (rate.z - w.z) + ff_acceleration.z)};
-    return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins);
+    return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins, gains_.flaps);
 }
 
 }  // namespace starsim::gnc

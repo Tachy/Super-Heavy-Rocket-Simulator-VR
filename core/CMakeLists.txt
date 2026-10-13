@@ -32,6 +32,7 @@ add_library(starsim_core STATIC
     src/gnc/descent_tracking.cpp
     src/gnc/scvx_landing.cpp
     src/gnc/tvc_lateral.cpp
+    src/gnc/entry_attitude.cpp
     src/sim/telemetry_recorder.cpp
     src/sim/catch_tower_sim.cpp
     src/sim/landing_outcome.cpp

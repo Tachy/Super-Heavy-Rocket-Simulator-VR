@@ -18,6 +18,7 @@ struct ControlOutput {
     GimbalSteering gimbal;
     math::Vec3 rcs_torque_fraction;
     std::vector<double> grid_fin_rad;  // empty: fins neutral
+    std::vector<double> flap_rad;      // empty: flaps hold their deflection
 
     void apply_to(vehicle::VehicleCommand& command) const {
         command.gimbal_pitch_rad = gimbal.pitch_rad;
@@ -25,6 +26,7 @@ struct ControlOutput {
         command.gimbal_roll_rad = gimbal.roll_rad;
         command.rcs_torque_fraction = rcs_torque_fraction;
         command.grid_fin_rad = grid_fin_rad;
+        command.flap_rad = flap_rad;
     }
 };
 
@@ -36,6 +38,8 @@ public:
         double natural_frequency_rad_s = 0.8;
         double damping_ratio = 0.9;
         bool grid_fins = false;  // use the grid fins (descent); otherwise they stay neutral
+        // Use the flaps (ship entry): they trim the modelled aerodynamic moment and steer; otherwise they hold.
+        bool flaps = false;
     };
 
     AttitudeController() = default;
@@ -57,9 +61,12 @@ public:
     ControlOutput steer_rates(const vehicle::FlightBody& body, double ambient_pressure_pa,
                               const math::Vec3& rates_body_radps) const;
 
-    // Allocates a desired body torque to grid fins (optional) and gimbals / RCS.
+    // Allocates a desired body torque to grid fins (optional) and gimbals / RCS. With `flaps` the torque is the net
+    // torque wanted: the flaps cancel the modelled aerodynamic moment (hull + flaps, the trim) and add the rest by a
+    // Newton step on their numerically linearised moments (minimum-norm, each flap clamped to its range, the null
+    // space drawn towards mid-range); what they cannot give goes to gimbals / RCS.
     static ControlOutput allocate(const vehicle::FlightBody& body, double ambient_pressure_pa,
-                                  const math::Vec3& torque_body_nm, bool grid_fins = false);
+                                  const math::Vec3& torque_body_nm, bool grid_fins = false, bool flaps = false);
 
 private:
     Gains gains_;

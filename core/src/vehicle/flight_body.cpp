@@ -346,6 +346,7 @@ void FlightBody::update_air_data(const FlightEnvironment& env, time::Epoch epoch
     air_data_.air_velocity_body_mps = state_.attitude.inverse_rotate(air_velocity);
     air_data_.air = {air.density_kg_m3, air.speed_of_sound_mps,
                      aero::rarefaction_weight(air.mean_free_path_m / vehicle_->length_m())};
+    air_data_.mean_free_path_m = air.mean_free_path_m;
 }
 
 bool FlightBody::can_coast() const {

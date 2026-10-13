@@ -116,7 +116,9 @@ length_m = 52.1                          # [D] stack 124.4 m [S:wiki_starship] -
 diameter_m = 9.0
 dry_mass_kg = 255000.0                   # [D] flights 12-14 webcast telemetry (propellant gauge, rocket equation staging ->
                                          # cutoff, 20-26 Starlink V3 ~2 t each): 248 / 260 / 254 t
-dry_cg_station_m = 20.0                  # [E]
+dry_cg_station_m = 28.0                  # [D] belly-first trim: with the landing propellant the ship must trim on its
+                                         # flaps near mid-range at alpha 55-75 deg (aero model, b1 plan Task 6);
+                                         # was 20 m [E], ~9 m behind the hull's centre of pressure (untrimmable)
 payload_mass_kg = 0.0
 
 [[stage.tank]]

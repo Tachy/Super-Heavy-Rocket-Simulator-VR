@@ -33,6 +33,7 @@ struct FlightEnvironment {
 struct AirData {
     math::Vec3 air_velocity_body_mps;  // vehicle CG relative to the air
     aero::FinAirData air;
+    double mean_free_path_m = 0.0;
 };
 
 struct FlightTelemetry {
