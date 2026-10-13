@@ -54,6 +54,15 @@ std::vector<IntervalLinearization> linearize(const DescentModel& m, const Descen
     return lin;
 }
 
+// Limits for the synthetic reference (100 m/s at the start, ~67 m/s at the first switch): the flight switch windows
+// (13 -> 5 at ~200 m/s) lie beyond its speeds.
+DescentLimits limits() {
+    DescentLimits l;
+    l.switches[0].min_sink_mps = 50.0;
+    l.switches[0].max_sink_mps = 90.0;
+    return l;
+}
+
 DescentTarget catch_target() {
     DescentTarget t;
     t.goal = DescentGoal::Catch;
@@ -66,7 +75,7 @@ DescentTarget catch_target() {
 
 TEST_CASE("The descent subproblem keeps its structure across references", "[gnc][descent]") {
     const auto m = model();
-    const DescentLimits limits;
+    const auto limits = ::limits();
     const DescentWeights weights;
     const auto ref_a = straight_reference(1.0);
     const auto ref_b = straight_reference(0.9);
@@ -83,7 +92,7 @@ TEST_CASE("The descent subproblem keeps its structure across references", "[gnc]
 TEST_CASE("One SCvx subproblem is solvable and its solution unpacks", "[gnc][descent]") {
     const auto m = model();
     const auto ref = straight_reference(1.0);
-    const auto sub = build_descent_subproblem(m, ref, linearize(m, ref), ref.x[0], 0, catch_target(), DescentLimits{},
+    const auto sub = build_descent_subproblem(m, ref, linearize(m, ref), ref.x[0], 0, catch_target(), limits(),
                                               DescentWeights{}, N);
     const auto result = optim::solve_socp(sub.problem);
     REQUIRE(result.status == optim::SocpStatus::Optimal);
@@ -102,7 +111,7 @@ TEST_CASE("Starting in a later phase fixes the earlier phases to zero length", "
         for (int p = 0; p < start_phase; ++p) ref.duration_s[static_cast<size_t>(p)] = 0.0;
         for (int k = 1; k <= start_phase * (N - 1); ++k) ref.x[static_cast<size_t>(k)] = ref.x[0];
         const auto sub = build_descent_subproblem(m, ref, linearize(m, ref), ref.x[0], start_phase, catch_target(),
-                                                  DescentLimits{}, DescentWeights{}, N);
+                                                  limits(), DescentWeights{}, N);
         const auto result = optim::solve_socp(sub.problem);
         REQUIRE(result.status == optim::SocpStatus::Optimal);
         const auto next = sub.unpack(result.x);

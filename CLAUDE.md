@@ -126,16 +126,17 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   predicted over that latency with the active plan's thrust, its start thrust within the throttle-rate reach of the
   measured thrust; tests and time warp wait, real-time play never waits - `FlightSession::set_realtime_planning`).
   The approach into the arms is slow (sink <= 1 m/s + height / 3 s, soft). From an ignition state (scenario:
-  355 m/s at ~2 km) the dispersion campaign `[gnc][catch][validation]` (+-10 m, +-3 m/s, +-5 % mass, +-3 deg,
-  engine failure) catches 21 of 21 (< 0.1 m, < 0.05 m/s lateral, 0.95-0.97 m/s sink at pin contact). The landing
+  355 m/s at 2.88 km as on flights 13/14 [D]; the ignition profile flies 13 engines at 35 %) the dispersion campaign
+  `[gnc][catch][validation]` (+-10 m, +-3 m/s, +-5 % mass, +-3 deg, engine failure) catches 21 of 21 (< 0.1 m, < 0.05 m/s lateral, 0.95-0.97 m/s sink at pin contact). The landing
   throttle accounts for the nozzle pressure loss (thrust = throttle x F_vac - p A_e; a throttle proportional to sea
   level thrust gave ~10 % too little thrust at low throttle). Lateral tracking is an LQR on the
   gimbaled-rocket dynamics (`gnc/tvc_lateral`); plans use <= 30 % of the gimbal limit, the LQR effort is 0.2 x the
   gimbal authority. The coast phase already rolls the pins towards the arms. Planning model: constant CG/inertia,
   no grid fins, no wind; no re-plans in the last 3 s. The explicit laws remain the fallback.
-  Switch windows [E]: 13 -> 5 at 150-250 m/s sink (5 engines seen at ~200 m/s on flights 13/14), 5 -> 3 calm at
+  Switch windows [E]: 13 -> 5 at 180-220 m/s sink (5 engines seen at ~200 m/s on flights 13/14), 5 -> 3 calm at
   15-30 m/s (satnews 2025-10-05: V3 ends in a hover on 3 engines).
-  Full return: caught, 54.6 t at landing-burn ignition (flight 14 gauge: ~51 t). Abort to the sea is weak: a late
+  Full return: caught, 54.8 t at landing-burn ignition (flight 14 gauge: ~51 t); it arrives slower than flights
+  13/14 (~300 m/s at ignition, ~2.3 km). Abort to the sea is weak: a late
   abort can end hovering over land until the propellant runs out.
 - Descent drag (tail first): body table `aero/super_heavy_descent.csv` [D] plus the grid fins' axial drag
   (`aero/grid_fin.csv` column `ca_axial` [E], 3 x 13.5 m^2). Identified from our webcast telemetry of flights 13 and

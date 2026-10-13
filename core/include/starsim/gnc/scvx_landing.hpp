@@ -21,10 +21,11 @@ struct ScvxLandingParameters {
                                            // control >= settings.stall_virtual_control) before it is given up
     bool realtime = false;                 // never wait for a re-plan (interactive play)
     // Burn profile that times the ignition (BoosterReturnGuidance::predict_landing_burn), V3 baseline: 13 engines,
-    // 5 from ~200 m/s (flights 13/14), 3 for the last slow metres.
-    double ignition_throttle = 0.5;        // [E] 13 engines
+    // 5 from ~200 m/s, 3 for the last slow metres. Flights 13/14 light the burn at ~2.8-2.9 km falling ~0.35-0.4 km/s
+    // [D]: 13 engines near minimum throttle reproduce that (scenario: 2.88 km at 355 m/s).
+    double ignition_throttle = 0.35;       // [E] 13 engines
     double divert_speed_mps = 200.0;       // [E] switch to the 5 divert engines
-    double divert_throttle = 0.5;          // [E]
+    double divert_throttle = 0.4;          // [E]
     double switch_speed_mps = 22.0;        // [E] switch to the 3 centre engines
     double final_throttle = 0.4;           // [E] near hover
     SnapshotSettings snapshot;

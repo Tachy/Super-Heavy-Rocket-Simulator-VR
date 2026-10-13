@@ -54,7 +54,7 @@ struct DescentLimits {
     // show five engines at ~200 m/s, ~1.4 km [E]. 5 -> 3: calm (the three centre engines turn the booster slowly),
     // at a low sink rate; the final set then descends gently into the arms [E].
     std::array<EngineSwitchLimits, descent_phases - 1> switches{{
-        {0.0, 0.0, 150.0, 250.0},
+        {0.0, 0.0, 180.0, 220.0},  // [D] flights 13/14: ~200 m/s
         {3.0 * constants::deg_to_rad, 0.03, 15.0, 30.0},
     }};
     double final_min_thrust_fraction = 0.0;  // [E] final-set thrust floor (fraction of its maximum) but at the end
