@@ -117,6 +117,10 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
   - **Lenkung von Hand**: Lage/Steuerung beim Aufstieg und mit dem Starship per HOTAS, der Schub bleibt
     beim Autopiloten.
   - **Experte**: Schub und Lenkung von Hand.
+  - **Im All genauso**: Entweder zündet der Autopilot die Steuerdüsen nach der Vorgabe des Bordcomputers und
+    der Spieler schaut zu, oder der Spieler steuert die Steuerdüsen selbst und hält das Schiff mit dem
+    Steuerkreuz auf der aktuellen Soll-Trajektorie des Bordcomputers ausgerichtet („in der Mitte halten“,
+    wie beim Flugdirektor).
 - In jeder Stufe rechnet der Bordcomputer das Soll aus dem tatsächlichen Zustand laufend nach (Flugdirektor,
   Brennschluss, Manöver, Rückflugbedarf des Boosters) und zeigt es an; der Autopilot kann jederzeit wieder
   übernehmen.
