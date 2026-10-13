@@ -173,6 +173,23 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.catch_pins.protrusion_m = doc.positive(*pins, "protrusion_m");
         s.catch_pins.max_load_n = doc.positive(*pins, "max_load_n");
     }
+    if (auto legs = t["landing_legs"].as_table()) {
+        const auto* azimuths = (*legs)["azimuths_deg"].as_array();
+        if (!azimuths || azimuths->size() < 3) doc.fail("landing_legs.azimuths_deg must list at least three legs");
+        for (const auto& a : *azimuths) {
+            const auto value = a.value<double>();
+            if (!value) doc.fail("landing_legs.azimuths_deg must be numbers");
+            s.landing_legs.azimuths_rad.push_back(*value * constants::deg_to_rad);
+        }
+        s.landing_legs.footprint_radius_m = doc.positive(*legs, "footprint_radius_m");
+        s.landing_legs.foot_station_m = doc.number(*legs, "foot_station_m");
+        s.landing_legs.deploy_time_s = doc.positive(*legs, "deploy_time_s");
+        s.landing_legs.stroke_m = doc.positive(*legs, "stroke_m");
+        s.landing_legs.crush_force_n = doc.positive(*legs, "crush_force_n");
+        s.landing_legs.stiffness_n_m = doc.positive(*legs, "stiffness_n_m");
+        s.landing_legs.damping_n_s_m = doc.positive(*legs, "damping_n_s_m");
+        s.landing_legs.friction = doc.positive(*legs, "friction");
+    }
     if (auto rcs = t["rcs"].as_table()) {
         s.rcs_thruster_count = static_cast<int>(doc.number_or(*rcs, "thruster_count", 0.0));
         s.rcs_thrust_n = doc.number_or(*rcs, "thrust_per_thruster_n", 0.0);

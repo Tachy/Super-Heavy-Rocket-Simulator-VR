@@ -33,24 +33,70 @@ contents = "fuel"
 mass_kg = 117700.0                       # [D]
 base_station_m = 27.0                    # [E]
 
+# Octaweb [S:wiki_f9]: 8 engines on a ring around a centre engine. Grouped for the burns of a return: the centre
+# engine lands, centre + the opposite pair form the 3-engine set of boostback and entry burn (thrust on the axis).
 [[stage.engine_group]]
-id = "octaweb"
+id = "center"                            # landing engine
 engine = "merlin1d"
-count = 9                                # 8 ring + 1 center; modelled as one group (simplification)
-ring_radius_m = 1.2                      # [E]
+count = 1
+ring_radius_m = 0.0
 gimbal = true
-relight = true                           # 3 engines relight for boostback / entry / landing
+relight = true
+
+[[stage.engine_group]]
+id = "pair"                              # with the centre: the 3-engine set (boostback, entry burn)
+engine = "merlin1d"
+count = 2
+ring_radius_m = 1.25                     # [E] octaweb ring from imagery (3.66 m core)
+angles_deg = [0.0, 180.0]
+gimbal = true
+relight = true
+
+[[stage.engine_group]]
+id = "ring"
+engine = "merlin1d"
+count = 6
+ring_radius_m = 1.25                     # [E]
+angles_deg = [45.0, 90.0, 135.0, 225.0, 270.0, 315.0]
+gimbal = true
+relight = false
 
 [stage.aero]
 reference_diameter_m = 3.66
 ascent_drag_table = "aero/falcon9_ascent.csv"
-grid_fins = 4
+descent_drag_table = "aero/falcon9_descent.csv"   # tail first
+
+[stage.grid_fins]
+azimuths_deg = [45.0, 135.0, 225.0, 315.0]   # [E] four fins between the legs' azimuths
+area_m2 = 1.8                                # [E] titanium fin ~1.2 x 1.5 m frontal lattice
+station_m = 39.0                             # [E] hinge near the interstage top (stage 41.2 m)
+radius_m = 2.6                               # [E] 1.83 m core radius + half the fin span
+max_deflection_deg = 20.0                    # [E]
+rate_deg_s = 30.0                            # [E] hydraulic (open loop) actuators
+table = "aero/grid_fin.csv"
+
+[stage.landing_legs]                         # all [E] from imagery and public figures; contact physics in c2
+azimuths_deg = [0.0, 90.0, 180.0, 270.0]
+footprint_radius_m = 9.0                     # span ~18 m
+foot_station_m = -1.5                        # feet below the engine bell exit when deployed
+deploy_time_s = 2.0
+stroke_m = 0.5                               # crush core
+crush_force_n = 4.0e5                        # per leg: 4 legs ~6 g on a 27 t stage
+stiffness_n_m = 2.0e7
+damping_n_s_m = 2.0e5
+friction = 0.6
 
 [stage.recovery]
-method = "drone_ship_landing"
-reserve_propellant_kg = 30000.0          # [E]
-nominal_meco_s = 162.0                   # [E]
-nominal_meco_altitude_m = 68000.0        # [E]
+method = "leg_landing"                       # pad (RTLS) or drone ship, chosen by the mission (user 2026-10-13)
+reserve_propellant_kg = 30000.0              # [E] MECO without return guidance
+landing_propellant_kg = 6000.0               # [E] at landing-burn ignition (c1 Task 5 derives it)
+nominal_meco_s = 150.0                       # [E]
+nominal_meco_altitude_m = 68000.0            # [E]
+
+[stage.rcs]
+type = "cold_gas"                            # nitrogen, two pods at the top
+thruster_count = 8                           # [E]
+thrust_per_thruster_n = 450.0                # [E]
 
 [[stage]]
 id = "second_stage"

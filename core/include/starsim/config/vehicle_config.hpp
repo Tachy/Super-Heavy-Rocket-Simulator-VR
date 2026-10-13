@@ -104,6 +104,20 @@ struct CatchPinConfig {
     double max_load_n = 0.0;           // structural limit per pin
 };
 
+// Landing legs of a stage that lands on the ground or a deck (Falcon 9). Deployed geometry and the crush-core contact
+// parameters per leg ([stage.landing_legs]); no legs when azimuths_rad is empty.
+struct LandingLegConfig {
+    std::vector<double> azimuths_rad;  // one leg per entry, from body +y towards +z
+    double footprint_radius_m = 0.0;   // foot from the axis, deployed
+    double foot_station_m = 0.0;       // foot station from the bottom of the stage (negative: below it), deployed
+    double deploy_time_s = 0.0;
+    double stroke_m = 0.0;             // crush-core stroke
+    double crush_force_n = 0.0;        // the core crushes above this force
+    double stiffness_n_m = 0.0;        // before the core crushes
+    double damping_n_s_m = 0.0;
+    double friction = 0.0;             // Coulomb, foot on the surface
+};
+
 // Heat shield and structure of a vehicle that enters the atmosphere (the ship). Judged while the stage flies alone.
 struct HeatShieldConfig {
     double nose_radius_m = 0.0;        // effective radius of the windward side for Sutton-Graves; 0 = none
@@ -132,6 +146,7 @@ struct StageConfig {
     // [stage.recovery] deorbit_engine_groups: the engine set deorbit burns run on (empty: the burn picks one). The ship:
     // the belly sea-level Raptor alone, its thrust steered through the CG (user 2026-10-13).
     std::vector<std::string> deorbit_engine_groups;
+    LandingLegConfig landing_legs;
     double radiation_pressure_coefficient = 1.3;  // Cr for solar radiation pressure
     int rcs_thruster_count = 0;                    // reaction control (cold gas)
     double rcs_thrust_n = 0.0;                     // per thruster

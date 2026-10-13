@@ -7,8 +7,10 @@
 #include "starsim/aero/slender_body_aero.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
+#include "starsim/gnc/descent_snapshot.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/propulsion/engine_performance.hpp"
+#include "starsim/vehicle/vehicle.hpp"
 
 using namespace starsim;
 
@@ -38,6 +40,38 @@ TEST_CASE("All shipped vehicle configurations load", "[config]") {
             CHECK_NOTHROW(aero::AxialDragCurve(config::load_csv_table(config_dir / stage.aero.ascent_drag_table)));
         }
     }
+}
+
+TEST_CASE("Falcon 9 engine groups: 1 centre + 2 pair + 6 ring, 3-engine set on the axis", "[config][falcon9]") {
+    const auto cfg = config::load_vehicle(config_dir, "falcon9_block5");
+    const auto& s = cfg.stages.front();
+    int total = 0;
+    for (const auto& g : s.engine_groups) total += g.count;
+    CHECK(total == 9);
+    const vehicle::Vehicle v(cfg, config_dir);
+    const double cg = v.mass_properties().cg_station_m;
+    auto engines_in = [&](const std::string& group) {
+        int n = 0;
+        for (const auto& e : v.stages().front().engines) n += e.group_id == group ? 1 : 0;
+        return n;
+    };
+    CHECK(engines_in("first_stage/center") == 1);
+    CHECK(engines_in("first_stage/pair") == 2);
+    CHECK(engines_in("first_stage/ring") == 6);
+    // Thrust of the centre + pair and of the centre alone along the hull axis: no moment from an offset centroid.
+    for (const auto& groups : {std::vector<std::string>{"first_stage/center", "first_stage/pair"},
+                               std::vector<std::string>{"first_stage/center"}}) {
+        const auto axis = gnc::thrust_axis_body(v, cg, groups);
+        CHECK(std::hypot(axis.y, axis.z) < 1e-9);
+    }
+    CHECK(s.recovery_method == "leg_landing");
+    CHECK(s.grid_fins.azimuths_rad.size() == 4);
+    CHECK(s.rcs_thruster_count > 0);
+    REQUIRE(s.landing_legs.azimuths_rad.size() == 4);
+    CHECK(s.landing_legs.footprint_radius_m > 8.0);
+    CHECK(s.landing_legs.footprint_radius_m < 10.0);
+    CHECK(s.landing_legs.foot_station_m < 0.0);
+    CHECK_FALSE(s.aero.descent_drag_table.empty());
 }
 
 TEST_CASE("Configuration errors name the file", "[config]") {

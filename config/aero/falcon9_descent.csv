@@ -1,0 +1,16 @@
+# Axial drag coefficient of the Falcon 9 Block 5 first stage falling engines first (tail first), reference area
+# pi*(d/2)^2 with d = 3.66 m, WITHOUT the grid fins (the vehicle model adds their drag from aero/grid_fin.csv).
+# [E] Tail-first cylinder estimate: the shape of the Super Heavy descent table (aero/super_heavy_descent.csv, also a
+# blunt base first). To be replaced by a table identified from Falcon 9 webcast telemetry (c1 Task 5).
+mach,cd_axial_power_on,cd_axial_power_off
+0.0,0.900,0.900
+0.6,0.950,0.950
+0.8,1.000,1.000
+0.95,1.150,1.150
+1.1,1.450,1.450
+1.5,1.380,1.380
+2.0,1.420,1.420
+3.0,1.750,1.750
+5.0,1.880,1.880
+10.0,1.880,1.880
+25.0,1.880,1.880
