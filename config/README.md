@@ -49,6 +49,11 @@ flow separation (vacuum engines).
 - `aero/ship_entry_alpha.csv`: nominal angle of attack over Mach of the belly-first entry (entry guidance profile),
   referenced by `[stage.aero] entry_alpha_table`. The ship's `ascent_drag_table` (the stack's [E]) gives its axial
   drag when it flies alone.
+- Ship sea-level Raptors: three single-engine groups (`sea_level_1/2` the leeward pair at 30/150 deg, `sea_level_3`
+  towards the belly at 270 deg) so the landing burn can drop the belly engine (3 -> 2); burns elsewhere run the three
+  together (groups of the same engine on the same ring form one symmetric burn set).
+- `[stage.recovery] landing_propellant_kg`: booster - at landing-burn ignition (MECO is planned for it); ship - entry
+  mass in scenarios, the header-tank propellant for flip and landing burn (35 t [E]).
 - `[stage.catch_pins]`: hardpoints the tower arms catch, one per entry of `azimuths_deg` (from body +y
   towards +z, like the grid fins), `station_m` (from the bottom of the stage), `protrusion_m` (beyond the
   hull), `max_load_n` (structural limit per pin; above it the catch is an impact).

@@ -228,6 +228,12 @@ Out of b2: the guided skip (optional mode, last priority - deferred), wind, manu
 
 ## b3 design (flip and catch, refined 2026-10-13; decisions autonomous, ledgered)
 
+- **Superseded 2026-10-13 (user, flight 13 splashdown video): engines 3 -> 2.** Two sea-level Raptors sit on the
+  leeward side (30/150 deg), one towards the belly (270 deg); the belly engine shuts down and the leeward pair lands,
+  its thrust centroid in the symmetry plane (one engine alone tilts the thrust ~3 deg off the hull and is not meant
+  for the landing). Phase sets {1,2,3} -> {1,2} -> {1,2} (the planner's third phase flies the same pair). Thrust of an
+  asymmetric set goes through the CG along a tilted axis: plan states carry the thrust-axis attitude. Landing
+  propellant 35 t [E]. The original text follows for the record.
 - **Engines 3 -> 2 -> 1** (user 2026-10-13): the ship's sea-level group is split into three single-engine groups
   `sea_level_1/2/3` (explicit ring angles 0/120/240 deg [E]); phase sets {1,2,3} -> {1,2} -> {1}, so the SCvx
   planner's three engine phases (built for the booster's 13 -> 5 -> 3) carry over unchanged.

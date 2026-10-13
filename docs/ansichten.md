@@ -110,6 +110,8 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
   „Hitzeschild versagt“ / „Strukturüberlast“ (heute schon im Desktop-HUD). Die Eintrittslenkung zeigt Phase
   („Eintritt“, „Endanflug“, „Tor“), Soll-/Ist-Anstellwinkel, Soll-Rollwinkel, die vorhergesagte Ablage längs/quer
   zum Ziel und „Korridorgrenze“, wenn eine Grenze den Rollwinkel beschränkt (heute schon im Desktop-HUD).
+  Ab dem Tor zeigt es Flip und Landebrennen des Ships (Phase, Lenkung SCvx) und das Ergebnis wie beim Booster
+  (heute schon im Desktop-HUD).
   [Vorschlag] Dieselben Werte als Soll/Ist-Anzeige im Flugdirektor (Steuerungsstufen: der Spieler kann rollen,
   der Bordcomputer rechnet das Soll nach).
 - [Vorschlag] Jeder Außenbildschirm hat 3–4 umschaltbare Kameras (Berührung oder HOTAS-Taste).

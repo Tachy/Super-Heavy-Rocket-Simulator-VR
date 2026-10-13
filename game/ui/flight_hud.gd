@@ -71,10 +71,11 @@ func _process(_delta: float) -> void:
 	var tower: Dictionary = sim.tower_state()
 	if tower.get("present", false) and sim.body_count() > 1:
 		lines.append("Turm            %s" % tower["phase"])
-	if sim.body_count() > 1:
-		var ret: Dictionary = sim.return_state(0)
+	for i in sim.body_count():  # returning vehicles: the booster (body 0 after staging) and the ship's flip and catch
+		var ret: Dictionary = sim.return_state(i)
 		if ret.get("present", false):
-			lines.append("Booster         %s (%s)" % [ret["phase"], ret["guidance"]])
+			var label := "Booster" if i == 0 and sim.body_count() > 1 else "Ship"
+			lines.append("%-15s %s (%s)" % [label, ret["phase"], ret["guidance"]])
 			if ret["abort"] and not tower.get("present", false):
 				lines.append("Turm            Abbruch")
 			if ret["outcome"] != "fliegt":

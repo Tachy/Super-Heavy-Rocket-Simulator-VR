@@ -245,7 +245,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   (`aero/entry_heating`, nose radius 6 m [E]), heat load, aerodynamic load (thrust not counted); beyond a limit the
   ship breaks up ("Hitzeschild versagt" / "Strukturüberlast", outcome "zerbrochen"), warning from 80 %; skip-out
   event ("Abprall": below 80 km, then above 100 km). Heating is integrated in `step()` only. Entry mass in tests:
-  dry + `landing_propellant_kg` (30 t [E]) in the main tanks (no header tanks modelled).
+  dry + `landing_propellant_kg` (35 t [E]) in the main tanks (no header tanks modelled).
   The ship alone carries the stack's axial drag table [E] (`ascent_drag_table`; before b2 a ship built alone had none).
 - Ship entry guidance (b2, `gnc/entry_guidance`, `gnc/entry_predictor`, `gnc/entry_aero_table`): the onboard computer
   predicts the rest of the entry as a 3-DOF point mass (Earth-fixed, J2, US76, the ship's trimmed C_D A / C_L A over
@@ -253,12 +253,30 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   `FlightBody::aero_acceleration_body_mps2()`; pure, no SPICE) every 2 s and solves the bank magnitude for zero range
   error (Illinois); heat-rate, load and dynamic-pressure peaks over 90 % of a limit cut the bank back. Bank reversals are
   timed by the predictor (hold vs reverse-now end on opposite sides). Bank rate 1 deg/s above Mach 10, 3 deg/s below
-  Mach 5 [E]. Below Mach 2 the terminal phase ("Endanflug") points the lift like a skydiver (belly to the flow, lift
-  direction about it, alpha 90..55 deg) by Newton steps on the predicted gate miss; the gate is 1.5 km [E] above the
-  pad (b3 flips there). `FlightSession::place_entering_ship` (scenarios), `entry_status` (setpoint; bindings
-  telemetry `entry_*`, HUD lines). Campaign `[ship][guidance][validation]` (12 dispersed entries to Starbase,
-  truth aero +-10 %): gate within 0.6-7.7 m, belly <= 8 deg off down; load limit held; session test 49 m.
+  Mach 5 [E]. From Mach 5 (latest Mach 3, once a reversal has settled) the terminal phase ("Endanflug") steers the
+  lift in the velocity frame relative to the alpha schedule (Levenberg-Marquardt steps on the predicted gate miss,
+  starting from the entry's bank); the gate ("Tor") is 800 m [E] above the pad, where b3 flips (flight 13 relit at
+  ~0.95 km [D]; at 950 m campaign case 4 misses by 212 m). `FlightSession::place_entering_ship` (scenarios),
+  `entry_status` (setpoint; bindings telemetry `entry_*`, HUD lines). Campaign `[ship][guidance][validation]`
+  (12 dispersed entries to Starbase, truth aero +-10 %): 11 within 0.11 m, case 4 marginal (roundoff moves it between
+  ~0.1 and ~1.2 km: open), belly <= 30 deg off down at the gate; load limit held.
   Tests use `predictor_j2 = false` (the scenario Earth has central gravity; J2 alone shifts a long glide ~2 %).
+- Ship flip and catch (b3, `gnc/ship_landing`): at the gate the three sea-level Raptors relight at 80 % [E], the aft
+  flaps fold and the forward flaps go broadside until the tilt is < 30 deg (the tail drops while the engines spool);
+  the flip takes ~4 s (flights: 2-3 s; Raptor start-up 3 s [E]) and ~8 t, and pushes the ship ~100 m along its nose -
+  the gate lies back along the pad -> tower line with the nose to the tower, so the side pins (0/180 deg) lie across the
+  arms without a roll. Once upright (< 15 deg, < 0.2 rad/s) SCvx plans (`ship_landing_parameters()`) fly 3 -> 2 engines:
+  the belly engine shuts down at 20-40 m/s sink [D: flight 14 video, two engines from ~200 m], the leeward pair lands
+  (layout [D] from the flight 13 splashdown video; its thrust centroid lies in the symmetry plane). Thrust of an
+  asymmetric set goes through the CG along an axis tilted against the hull (~1.5 deg for the pair): plan states carry
+  that thrust-axis attitude (`gnc::thrust_axis_body`), else the LQR (no integrator) holds a ~2 m offset. Ship LQR
+  effort 0.1 of the gimbal authority [E] (more limit-cycles after the flip), attitude controller with
+  `Gains::actuator_delay_s` 0.75 s (gimbal slew in the braking; no overshoot). Flaps folded in the burn.
+  `FlightSession::place_landing_ship` (scenarios); the entry hands over at the gate. Test from the gate: caught 0.01 m,
+  0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10 m, +-10 m/s, +-5 % propellant, +-5 deg alpha /
+  bank, belly engine failed in the flip): 20 of 21 caught (<= 0.02 m), the failure aborts to the sea. Open: the gate
+  lead in the entry guidance (it still aims at the pad), the tower judges a 4.5 m/s arrival (out of propellant)
+  "gefangen". Diagnostics: `STARSIM_DEBUG_FLIP=1`, `STARSIM_DEBUG_BURN=1` with the SCvx / catch flags.
 - `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically
   (follow the Earth), impacted/resting bodies do not block coast segments.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
