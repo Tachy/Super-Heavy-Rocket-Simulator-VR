@@ -15,6 +15,7 @@
 #include "starsim/gnc/attitude_controller.hpp"
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/burn_node.hpp"
+#include "starsim/gnc/deorbit_planner.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/vehicle/flight_body.hpp"
@@ -35,7 +36,8 @@ enum class ControlMode {
     DirectGimbal  // stick commands gimbal angles directly
 };
 
-enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, Orbit, Burn };
+// Return: a ship after its deorbit burn (coast to the entry interface, entry, flip, catch).
+enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, Orbit, Burn, Return };
 
 const char* to_string(AutopilotState state);
 
@@ -65,6 +67,9 @@ public:
     static constexpr double tick_s = 0.005;  // 200 Hz
     static constexpr double max_coast_s = 600.0;
     static constexpr double burn_preparation_s = 120.0;  // ticks resume this long before an ignition
+    // [E] a returning ship gets its entry guidance this long before the entry interface (turn to the entry attitude
+    // on RCS: ~1.5 min for the 125 deg from the burn attitude)
+    static constexpr double entry_lead_s = 300.0;
     static constexpr double max_pitch_yaw_rate_radps = 5.0 * 3.14159265358979 / 180.0;
     static constexpr double max_roll_rate_radps = 10.0 * 3.14159265358979 / 180.0;
 
@@ -128,6 +133,12 @@ public:
     void place_landing_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch,
                             gnc::ShipLandingParameters parameters = gnc::ship_landing_parameters());
     const gnc::ShipLandingGuidance* ship_landing(size_t index) const { return bodies_.at(index).ship_landing.get(); }
+    // Return of the controlled ship from orbit to this site's tower (b4): the onboard computer plans the deorbit burn
+    // (gnc::plan_deorbit) and flies it on the vehicle's deorbit engine set; the ship then coasts, gets its entry guidance
+    // `entry_lead_s` before the entry interface and is caught by the flip and landing guidance. False if the plan is
+    // refused (reason in ship_return_plan()) or the burn cannot be flown.
+    bool plan_ship_return(const gnc::DeorbitParameters& parameters = {});
+    const gnc::DeorbitPlan* ship_return_plan() const { return deorbit_plan_ ? &*deorbit_plan_ : nullptr; }
     // Entry guidance of a body (nullptr if it has none): its latest command (setpoint for the flight director).
     const gnc::EntryCommand* entry_status(size_t index) const;
     // Interactive real-time play: landing re-plans never hold up the simulation (default: off = deterministic).
@@ -207,6 +218,8 @@ private:
     void apply_return_command(const Flying& flying, const gnc::AttitudeController& controller,
                               double ambient_pressure_pa, vehicle::VehicleCommand& command) const;
     double coast_allowance_s() const;  // 0 if fixed ticks are needed now
+    void start_entry_guidance(Flying& flying, const gnc::EntryGuidanceParameters& parameters);
+    time::Epoch entry_start_epoch() const;  // returning ship: entry interface (coasting from now) - entry_lead_s
     std::vector<vehicle::FlightBody*> body_pointers() const;
 
     std::filesystem::path config_dir_;
@@ -239,6 +252,10 @@ private:
     std::optional<gnc::BurnExecutor> burn_;
     BurnConfiguration burn_config_;
     math::Vec3 last_rcs_acceleration_;  // RCS translation of the controlled body in the last tick (GCRF)
+    std::optional<gnc::DeorbitPlan> deorbit_plan_;  // last ship return plan (also when refused)
+    bool ship_return_ = false;                      // the burn is the deorbit burn of a ship return
+    gnc::DeorbitParameters deorbit_parameters_;
+    time::Epoch entry_start_;                       // state Return: entry guidance from here
 
     // `forced`: only this set (config group ids), at full and at minimum throttle.
     std::vector<BurnConfiguration> burn_configurations(const std::vector<std::string>* forced = nullptr) const;

@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(tomlplusplus)
 add_library(starsim_core STATIC
     src/config/vehicle_config.cpp
     src/config/launch_site_config.cpp
+    src/config/mission_config.cpp
     src/environment/us76_atmosphere.cpp
     src/propulsion/engine_performance.cpp
     src/aero/slender_body_aero.cpp

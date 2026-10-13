@@ -36,6 +36,7 @@ const char* to_string(AutopilotState state) {
         case AutopilotState::UpperStage: return "Oberstufe";
         case AutopilotState::Orbit: return "Orbit erreicht";
         case AutopilotState::Burn: return "Manöver";
+        case AutopilotState::Return: return "Rückkehr";
     }
     return "";
 }
@@ -71,12 +72,68 @@ const gnc::EntryCommand* FlightSession::entry_status(size_t index) const {
 void FlightSession::place_entering_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
                                         time::Epoch epoch, gnc::EntryGuidanceParameters parameters) {
     place_body(config, state, epoch);
-    auto& flying = bodies_.front();
+    start_entry_guidance(bodies_.front(), parameters);
+}
+
+void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanceParameters& parameters) {
     const auto& stage = flying.body->vehicle().stages().front().config;
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
     // gate ahead of the tower's catch axis (b3), else over the pad centre
     const auto target = gnc::ship_entry_target(return_site(flying.body->vehicle()), gnc::ship_landing_parameters());
     flying.entry_guidance = std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters);
+}
+
+bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
+    ship_return_ = false;
+    deorbit_plan_.reset();
+    deorbit_parameters_ = parameters;
+    if (bodies_.empty()) return false;
+    auto& flying = bodies_[controlled_];
+    const auto& vehicle = flying.body->vehicle();
+    const auto& stage = vehicle.stages().front().config;
+    gnc::DeorbitPlan refused;
+    if (stage.aero.entry_alpha_table.empty() || stage.deorbit_engine_groups.empty() || flying.entry_guidance ||
+        flying.ship_landing) {
+        refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
+        deorbit_plan_ = refused;
+        return false;
+    }
+    const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
+    if (configurations.empty()) {
+        refused.reason = "Deorbit-Triebwerk nicht verfügbar";
+        deorbit_plan_ = refused;
+        return false;
+    }
+    const double exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
+    const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
+    const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters());
+    const gnc::EntryGuidance onboard(*flying.body, schedule, target);
+    const auto& s = flying.body->state();
+    deorbit_plan_ = gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_, onboard.model(),
+                                      target, vehicle.mass_properties().mass_kg, exhaust_velocity_mps,
+                                      vehicle.propellant_kg(), stage.landing_propellant_kg, parameters);
+    if (!deorbit_plan_->feasible) return false;
+    if (!execute_burn(deorbit_plan_->node, stage.deorbit_engine_groups)) {
+        deorbit_plan_->feasible = false;
+        deorbit_plan_->reason = "Deorbit-Brennvorgang zu klein für das Triebwerk";
+        return false;
+    }
+    ship_return_ = true;
+    return true;
+}
+
+time::Epoch FlightSession::entry_start_epoch() const {
+    const auto& s = bodies_[controlled_].body->state();
+    const integrators::Event<6> interface{
+        "entry interface",
+        [&](double t_s, const integrators::State<6>& y) {
+            const math::Vec3 r = transpose(earth_.fixed_to_gcrf(epoch_ + t_s).rotation) * math::Vec3{y[0], y[1], y[2]};
+            return frames::fixed_to_geodetic(r).height_m - deorbit_parameters_.entry_interface_height_m;
+        },
+        integrators::Crossing::Falling};
+    const auto coast = orbit::propagate_coast(gravity_, {s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, epoch_ + 6000.0,
+                                              std::span(&interface, 1));
+    return coast.event_index == 0 ? coast.epoch - entry_lead_s : epoch_;  // no entry ahead: guidance at once
 }
 
 void FlightSession::place_landing_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
@@ -345,10 +402,16 @@ void FlightSession::run_autopilot() {
             }
             if (autopilot_.burn.complete) {
                 cutoff();
-                autopilot_.state = AutopilotState::Off;
+                autopilot_.state = ship_return_ ? AutopilotState::Return : AutopilotState::Off;
+                if (ship_return_) entry_start_ = entry_start_epoch();  // from the state the burn actually left
             }
             break;
         }
+        case AutopilotState::Return:
+            if (!flying.entry_guidance && !flying.ship_landing && epoch_ >= entry_start_) {
+                start_entry_guidance(flying, {});
+            }
+            break;
         default:
             break;
     }
@@ -430,6 +493,9 @@ void FlightSession::place_body(const config::VehicleConfig& config, const vehicl
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
+    autopilot_ = {};
+    burn_.reset();
+    ship_return_ = false;
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -580,6 +646,9 @@ double FlightSession::coast_allowance_s() const {
     double allowance = max_coast_s;
     if (autopilot_.state == AutopilotState::Burn) {
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s);
+    }
+    if (autopilot_.state == AutopilotState::Return && !bodies_[controlled_].entry_guidance) {
+        allowance = std::min(allowance, entry_start_ - epoch_);
     }
     if (tower_) allowance = std::min(allowance, tower_->coast_limit_s(body_pointers(), earth_, epoch_));
     for (const auto& flying : bodies_) {

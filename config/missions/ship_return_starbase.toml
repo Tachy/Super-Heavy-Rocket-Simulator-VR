@@ -1,0 +1,26 @@
+# Return of the ship from low Earth orbit to the Starbase tower (b4). The onboard computer plans the deorbit burn
+# (belly sea-level Raptor alone, [stage.recovery] deorbit_engine_groups) for the first pass over Starbase within the
+# entry's crossrange reach, then the entry guidance (b2) flies to the gate and the flip and landing guidance (b3)
+# into the tower's arms. In the game the ship starts from the orbit it is in (key R); [orbit] is the scenario start.
+
+[mission]
+name = "Rückkehr nach Starbase"
+vehicle = "starship_block3"
+stage = "ship"
+site = "starbase_olp1"
+
+[orbit]
+epoch_utc = "2026-10-13T12:00:00"
+periapsis_km = 200.0
+apoapsis_km = 200.0
+inclination_deg = 26.5          # the ascent from Starbase (leo_ascent.toml)
+raan_deg = 0.0
+argument_of_latitude_deg = 0.0
+propellant_t = 45.0             # [E] landing 35 t + deorbit ~6 t + margin
+
+[deorbit]
+entry_interface_km = 120.0
+entry_flight_path_deg = -1.0    # [E] b2's nominal entry
+nominal_bank_deg = 50.0         # [E] the plan flies this bank: range to spare both ways
+max_crossrange_km = 60.0        # [E] reach of the entry guidance's reversals (b2 campaign)
+search_window_h = 48.0
