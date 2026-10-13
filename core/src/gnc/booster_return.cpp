@@ -21,6 +21,10 @@ constexpr double aero_steering_min_q_pa = 2000.0;  // below: RCS translation tri
 constexpr double aero_steering_time_fraction = 0.5;
 constexpr double aero_steering_max_alpha_rad = 8.0 * constants::deg_to_rad;  // [E] fin trim authority, heating
 constexpr double minimum_time_to_go_s = 0.3;
+// Centre-engine approach: sink rate follows touchdown speed + height / tau (an exponential approach, the V3 profile
+// ending in a near hover; the same shape as the SCvx plans' approach limit), with a proportional sink-rate loop.
+constexpr double approach_time_constant_s = 3.0;  // [E]
+constexpr double approach_gain_per_s = 1.0;       // [E]
 constexpr double touchdown_cutoff_height_m = 0.05; // engine cutoff when the legs / catch arms take the load
 constexpr double divert_time_constant_s = 2.0;      // cross-track damping during the divert
 constexpr double hold_time_constant_s = 4.0;        // position hold on the centre engines
@@ -43,6 +47,7 @@ Mat3 rotation_z(double a) {
 
 struct EngineSet {
     double thrust_n = 0.0;        // full throttle at the given ambient pressure
+    double vacuum_thrust_n = 0.0; // full throttle in vacuum (the pressure loss does not scale with the throttle)
     double mass_flow_kgps = 0.0;  // full throttle
     double startup_s = 0.0;
     double shutdown_s = 0.0;
@@ -54,6 +59,7 @@ EngineSet engine_set(const vehicle::Vehicle& v, const std::vector<std::string>& 
         for (const auto& e : stage.engines) {
             if (e.starved || std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) continue;
             set.thrust_n += e.performance->thrust_n(1.0, pressure_pa);
+            set.vacuum_thrust_n += e.performance->thrust_n(1.0, 0.0);
             set.mass_flow_kgps += e.performance->mass_flow_kgps(1.0);
             set.startup_s = std::max(set.startup_s, e.performance->config().startup_s);
             set.shutdown_s = std::max(set.shutdown_s, e.performance->config().shutdown_s);
@@ -178,9 +184,21 @@ BoosterReturnGuidance::BurnPrediction BoosterReturnGuidance::predict_landing_bur
     const double area = constants::pi * 0.25 * body.vehicle().diameter_m() * body.vehicle().diameter_m();
     const auto& drag = body.vehicle().aero().drag_curve(true);
     const bool scvx = parameters_.scvx_landing && site_.catch_target;
-    const double f = scvx ? parameters_.scvx.ignition_throttle : parameters_.landing_throttle;
-    const double f_final = scvx ? parameters_.scvx.final_throttle : parameters_.final_throttle;
-    const double gate_speed = scvx ? parameters_.scvx.switch_speed_mps : parameters_.gate_speed_mps;
+    // Segments: ignition set, (SCvx only) divert set, final set; each until its switch speed.
+    struct Segment {
+        const std::vector<std::string>* groups;
+        double throttle;
+        double end_speed_mps;
+    };
+    std::vector<Segment> segments;
+    if (scvx) {
+        segments = {{&parameters_.landing_ignition_groups, parameters_.scvx.ignition_throttle, parameters_.scvx.divert_speed_mps},
+                    {&parameters_.landing_divert_groups, parameters_.scvx.divert_throttle, parameters_.scvx.switch_speed_mps},
+                    {&parameters_.landing_groups, parameters_.scvx.final_throttle, 0.0}};
+    } else {
+        segments = {{&parameters_.landing_ignition_groups, parameters_.landing_throttle, parameters_.gate_speed_mps},
+                    {&parameters_.landing_groups, parameters_.final_throttle, 0.0}};
+    }
     const double g = norm(env.gravity.acceleration_mps2(st.position_gcrf_m, epoch));
 
     double speed = norm(v_rel);
@@ -189,20 +207,20 @@ BoosterReturnGuidance::BurnPrediction BoosterReturnGuidance::predict_landing_bur
     double m = mass.mass_kg;
     const double dt = 0.05;
     double t = 0.0;
-    bool final_engines = false;
+    size_t segment = 0;
     for (; t < 200.0 && speed > 0.0; t += dt) {
         const auto air = env.atmosphere.at(site_.height_m + mass.cg_station_m + h);
-        const auto final_set = engine_set(body.vehicle(), parameters_.landing_groups, air.pressure_pa);
-        if (!final_engines && speed <= gate_speed) final_engines = true;  // same switch as the guidance
-        const auto engines = final_engines
-                                 ? final_set
-                                 : engine_set(body.vehicle(), parameters_.landing_ignition_groups, air.pressure_pa);
-        const double spool = engines.startup_s > 0.0 ? std::clamp(t / engines.startup_s, 0.0, 1.0) : 1.0;
+        while (segment + 1 < segments.size() && speed <= segments[segment].end_speed_mps) ++segment;  // as the guidance
+        const auto engines = engine_set(body.vehicle(), *segments[segment].groups, air.pressure_pa);
+        const double throttle = segments[segment].throttle;
+        // Only the ignition engines start up (the later sets are already running).
+        const double spool = segment == 0 && engines.startup_s > 0.0 ? std::clamp(t / engines.startup_s, 0.0, 1.0) : 1.0;
         const double mach = air.speed_of_sound_mps > 0.0 ? speed / air.speed_of_sound_mps : 0.0;
         const double drag_n = 0.5 * air.density_kg_m3 * speed * speed * area * drag.cd(mach, spool > 0.0);
-        speed -= ((spool * (final_engines ? f_final : f) * engines.thrust_n + drag_n) / m - g * sin_gamma) * dt;
+        const double thrust_n = std::max(throttle * engines.vacuum_thrust_n - (engines.vacuum_thrust_n - engines.thrust_n), 0.0);
+        speed -= ((spool * thrust_n + drag_n) / m - g * sin_gamma) * dt;
         h -= speed * sin_gamma * dt;
-        m -= spool * (final_engines ? f_final : f) * engines.mass_flow_kgps * dt;
+        m -= spool * throttle * engines.mass_flow_kgps * dt;
     }
     return {h, t};
 }
@@ -419,8 +437,8 @@ void BoosterReturnGuidance::start_landing(const vehicle::FlightBody& body, const
     landing_started_ = true;
     if (!parameters_.scvx_landing || !site_.catch_target) return;
     auto p = parameters_.scvx;
-    p.snapshot.ignition_groups = parameters_.landing_ignition_groups;
-    p.snapshot.final_groups = parameters_.landing_groups;
+    p.snapshot.phase_groups = {parameters_.landing_ignition_groups, parameters_.landing_divert_groups,
+                               parameters_.landing_groups};
     scvx_ = std::make_unique<ScvxLandingGuidance>(site_, p);
     if (!scvx_->start(body, env, epoch)) scvx_.reset();  // fallback: the explicit laws
 }
@@ -465,7 +483,12 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
     const double g_up = dot(g_fixed, site_up);
     const double zem_up = target_height - (height - sink * t + 0.5 * g_up * t * t);
     const double zev_up = -target_sink - (-sink + g_up * t);
-    const double a_vertical = 6.0 * zem_up / (t * t) - 2.0 * zev_up / t;
+    double a_vertical = 6.0 * zem_up / (t * t) - 2.0 * zev_up / t;
+    if (final_engines_) {
+        // Along v_ref(h) the reference deceleration is (dv_ref/dh) sink = sink / tau.
+        const double v_ref = touchdown_speed_mps + std::max(height, 0.0) / approach_time_constant_s;
+        a_vertical = -g_up + std::max(sink, 0.0) / approach_time_constant_s + approach_gain_per_s * (sink - v_ref);
+    }
     // Horizontal channel.
     const Vec3 offset_side = (r_fixed - r_pad) - site_up * height;
     const Vec3 v_side = v_fixed + site_up * sink;
@@ -488,8 +511,6 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
     a_side -= g_side;
 
     const auto& groups = final_engines_ ? parameters_.landing_groups : parameters_.landing_ignition_groups;
-    const auto engines = final_engines_ ? final_set : engine_set(body.vehicle(), groups, pressure);
-    const double a_max = engines.thrust_n / mass.mass_kg;
     // Tilt limit: the thrust stays within max_tilt of the vertical, tapering to a few degrees for the
     // touchdown (structural limit of the landing).
     const double a_up = std::max(a_vertical, 0.1 * g);
@@ -507,7 +528,8 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
         cmd.roll_reference_gcrf = transform.rotation * catch_roll_reference(site_.catch_target->across_itrf, site_up,
                                                                             site_.catch_target->pin_azimuth_rad, body_y);
     }
-    cmd.throttle = a_max > 0.0 ? std::clamp(norm(a_cmd) / a_max, 0.0, 1.0) : 1.0;
+    // Throttle for that thrust (nozzle pressure loss, engines still starting or running down).
+    cmd.throttle = landing_throttle(body.vehicle(), groups, mass.mass_kg * norm(a_cmd), pressure);
     cmd.run_groups = groups;
     cmd.time_to_go_s = t;
     cmd.impact_miss_m = norm(offset_side);

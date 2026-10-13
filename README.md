@@ -43,7 +43,8 @@ used only to identify the real-world systems the configurations approximate.
   orbit insertion: a planned Earth-Moon mission arrives in a 100 km polar lunar orbit.
 - Booster return to the launch site: flip, Lambert boostback with drag-aware aim-point shooting,
   atmospheric descent steered by grid fins (angle-of-attack control, transonic choking modelled), landing
-  burn 13 -> 3 engines - all three booster generations land on the pad.
+  burn 13 -> 5 -> 3 engines on convex-optimisation (SCvx) plans re-solved in flight: caught by the tower arms
+  (dispersion campaign 21 of 21, ~1 m/s sink at the catch).
 
 **Flying it yourself**
 - Thrustmaster T.16000M stick + TWCS throttle (raw axes via an SDL mapping), keyboard fallback.

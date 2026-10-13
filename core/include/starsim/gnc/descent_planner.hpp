@@ -12,7 +12,7 @@
 namespace starsim::gnc {
 
 struct ScvxSettings {
-    int nodes_per_phase = 15;
+    int nodes_per_phase = 10;  // 28 nodes over the three phases (re-plans within the 1 s cycle)
     int max_iterations = 10;         // re-plan from a warm start (time budget)
     int fresh_max_iterations = 30;   // fresh plan from the straight-line guess (the simulation waits for it)
     int substeps = 4;                         // RK4 steps per interval in the discretisation
@@ -21,7 +21,7 @@ struct ScvxSettings {
     // Also converged once the dynamics hold (virtual control) and the final mass changes less than this: near the
     // fuel optimum the trust region only lets SCvx creep (~70 kg per iteration), feasibility is what guidance needs.
     double final_mass_tolerance_kg = 100.0;
-    // Largest nonlinear defect of an interval, scaled (1 cm in position): defects add up over the 2N-2 intervals,
+    // Largest nonlinear defect of an interval, scaled (1 cm in position): defects add up over the P(N-1) intervals,
     // so this keeps the flown plan within ~0.3 m of the target (5 cm per interval allowed > 1 m).
     double defect_tolerance = 1e-3;
     // At the iteration limit a plan within this defect (5 cm per interval) still counts as flyable: the next re-plan
@@ -54,7 +54,7 @@ struct DescentPlan {
     double nonlinear_defect = 0.0;  // largest scaled defect of the plan propagated through the model
     optim::SocpStatus status = optim::SocpStatus::NumericalError;
 
-    double duration_s() const { return reference.duration_s[0] + reference.duration_s[1]; }
+    double duration_s() const;
     double node_time_s(int k) const;
     int phase_at(double t_s) const;
     DescentState state_at(double t_s) const;   // linear between nodes, quaternion normalised

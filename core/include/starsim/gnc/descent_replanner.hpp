@@ -19,12 +19,14 @@ struct PlanRequest {
     ScvxSettings settings;
     std::shared_ptr<const DescentPlan> warm_start;  // null: fresh plan
     double warm_start_elapsed_s = 0.0;
-    time::Epoch snapshot_epoch;                     // the plan starts here (node 0 = initial)
+    time::Epoch snapshot_epoch;                     // when the snapshot was taken
+    double start_offset_s = 0.0;                    // the plan starts this long after the snapshot (node 0 = initial)
 };
 
 struct PlanOutcome {
     std::shared_ptr<const DescentPlan> plan;
     time::Epoch snapshot_epoch;
+    double start_offset_s = 0.0;  // of the request: the plan starts at snapshot_epoch + this
     double solve_ms = 0.0;  // wall-clock time of the planner
 };
 

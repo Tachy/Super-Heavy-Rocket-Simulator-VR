@@ -23,6 +23,8 @@ struct BoosterReturnParameters {
     // losses) and continues on the centre engines once these can finish it at the design throttle.
     std::vector<std::string> landing_ignition_groups{"booster/center", "booster/divert", "booster/middle"};
     std::vector<std::string> landing_groups{"booster/center"};
+    // SCvx landing (V3 baseline 13 -> 5 -> 3): the divert set between the ignition and the centre engines.
+    std::vector<std::string> landing_divert_groups{"booster/center", "booster/divert"};
     double landing_throttle = 0.8;  // design throttle of the inner-engine segment: the rest is control margin
     double final_throttle = 0.8;    // design throttle of the centre-engine segment (slower, time to settle)
     double gate_speed_mps = 50.0;   // sink rate at the hand-over to the centre engines

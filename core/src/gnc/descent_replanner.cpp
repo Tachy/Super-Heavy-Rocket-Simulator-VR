@@ -15,6 +15,7 @@ PlanOutcome run(DescentPlanner& planner, const PlanFunction& plan, const PlanReq
     PlanOutcome outcome;
     outcome.plan = std::make_shared<const DescentPlan>(plan(planner, request));
     outcome.snapshot_epoch = request.snapshot_epoch;
+    outcome.start_offset_s = request.start_offset_s;
     outcome.solve_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     return outcome;
 }

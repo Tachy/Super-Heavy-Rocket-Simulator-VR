@@ -36,8 +36,9 @@ std::unique_ptr<Booster> block3() {
     b->vehicle = std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR);
     DescentModelInputs in;
     in.vehicle = b->vehicle.get();
-    in.ignition_groups = {"booster/center", "booster/divert", "booster/middle"};
-    in.final_groups = {"booster/center"};
+    in.phase_groups = {std::vector<std::string>{"booster/center", "booster/divert", "booster/middle"},
+                       std::vector<std::string>{"booster/center", "booster/divert"},
+                       std::vector<std::string>{"booster/center"}};
     in.atmosphere = &b->atmosphere;
     in.site_height_m = 10.0;
     const double lat = 26.0 * deg;
@@ -65,6 +66,11 @@ ScvxSettings settings(const Booster& b) {
     return s;
 }
 
+constexpr int final_phase = descent_phases - 1;
+
+// Time from the plan start to the start of the final (3-engine) phase.
+double final_phase_start(const DescentPlan& plan) { return plan.reference.duration_s[0] + plan.reference.duration_s[1]; }
+
 // Ignition-like state: 1.2 km up, falling at 250 m/s, 30 m off to the east drifting 4 m/s, slightly tilted.
 DescentState ignition_state(const Booster& b) {
     return make_state(b.vehicle->mass_properties().mass_kg, {1200.0, 30.0, -15.0}, {-250.0, 4.0, -2.0},
@@ -82,14 +88,15 @@ TEST_CASE("SCvx plans a catch from an ignition-like state", "[gnc][descent][scvx
     const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     if (std::getenv("STARSIM_VERBOSE")) {
-        std::printf("scvx: %d iterations, vc %.2e, step %.2e, durations %.1f + %.1f s, %.0f ms\n", plan.iterations,
-                    plan.virtual_control, plan.last_step, plan.reference.duration_s[0], plan.reference.duration_s[1], ms);
+        std::printf("scvx: %d iterations, vc %.2e, step %.2e, durations %.1f + %.1f + %.1f s, %.0f ms\n", plan.iterations,
+                    plan.virtual_control, plan.last_step, plan.reference.duration_s[0], plan.reference.duration_s[1],
+                    plan.reference.duration_s[2], ms);
     }
     REQUIRE(plan.converged);
     // Constraints at the nodes.
     for (size_t k = 0; k < plan.reference.u.size(); ++k) {
         const Vec3 u = plan.reference.u[k];
-        const int phase = k < static_cast<size_t>(s.nodes_per_phase - 1) ? 0 : 1;
+        const int phase = descent_node_phase(static_cast<int>(k), s.nodes_per_phase);
         CHECK(norm(u) <= b->model.engine_sets[static_cast<size_t>(phase)].thrust_max_n * (1.0 + 1e-6) + 1.0);
         CHECK(std::hypot(u.y, u.z) <= std::tan(b->model.engine_sets[0].gimbal_max_rad) * u.x * (1.0 + 1e-6) + 1.0);
         const Vec3 w = state_rate(plan.reference.x[k]);
@@ -98,8 +105,8 @@ TEST_CASE("SCvx plans a catch from an ignition-like state", "[gnc][descent][scvx
     // Open loop: the plan's thrust flown through the nonlinear model ends at the catch point.
     DescentState x = x0;
     const int n = s.nodes_per_phase;
-    for (int k = 0; k < 2 * n - 2; ++k) {
-        const int phase = k < n - 1 ? 0 : 1;
+    for (int k = 0; k < descent_node_count(n) - 1; ++k) {
+        const int phase = k / (n - 1);
         x = linearize_interval(b->model, phase, x, plan.reference.u[static_cast<size_t>(k)],
                                plan.reference.u[static_cast<size_t>(k + 1)],
                                plan.reference.duration_s[static_cast<size_t>(phase)], 1.0 / (n - 1), 20)
@@ -126,10 +133,11 @@ TEST_CASE("SCvx re-plans from the final phase with a warm start", "[gnc][descent
     const auto s = settings(*b);
     const auto first = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
     REQUIRE(first.converged);
-    const double t = first.reference.duration_s[0] + 1.0;  // one second into phase 1
-    const auto again = plan_descent(b->model, first.state_at(t), 1, target, s, &first, t);
+    const double t = final_phase_start(first) + 1.0;  // one second into the final phase
+    const auto again = plan_descent(b->model, first.state_at(t), final_phase, target, s, &first, t);
     CHECK(again.converged);
     CHECK(again.reference.duration_s[0] == 0.0);
+    CHECK(again.reference.duration_s[1] == 0.0);
     CHECK(again.iterations <= first.iterations);
 }
 
@@ -185,11 +193,17 @@ TEST_CASE("SCvx re-plans from states slightly outside the path cones", "[gnc][de
     const auto first = plan_descent(b->model, ignition_state(*b), 0, catch_target(*b, state_attitude(ignition_state(*b))), s,
                                     nullptr, 0.0);
     REQUIRE(first.converged);
-    const double t = first.reference.duration_s[0] + 1.0;
+    const double t = final_phase_start(first) + 1.0;
     auto x1 = first.state_at(t);
-    const Quat tilted = Quat::from_axis_angle({0.0, 0.0, 1.0}, 11.0 * deg);  // beyond phase 1's 10 deg tilt
+    const Quat tilted = Quat::from_axis_angle({0.0, 0.0, 1.0}, 11.0 * deg);  // beyond the final phase's 10 deg tilt
     x1 = make_state(x1[descent_index::mass], state_position(x1), state_velocity(x1), tilted, state_rate(x1));
-    CHECK(plan_descent(b->model, x1, 1, catch_target(*b, tilted), s, &first, t).converged);
+    const auto again = plan_descent(b->model, x1, final_phase, catch_target(*b, tilted), s, &first, t);
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("tilted re-plan: h %.1f v %.1f, %d iterations, vc %.2e, step %.2e, defect %.2e, final mass %.0f\n",
+                    x1[descent_index::position], x1[descent_index::velocity], again.iterations, again.virtual_control,
+                    again.last_step, again.nonlinear_defect, again.reference.x.back()[0]);
+    }
+    CHECK(again.converged);
 }
 
 TEST_CASE("A re-plan does not stretch a nearly finished phase to the minimum duration", "[gnc][descent][scvx]") {
@@ -207,9 +221,9 @@ TEST_CASE("A re-plan does not stretch a nearly finished phase to the minimum dur
 
 TEST_CASE("Planning model mass flow matches the engines at minimum throttle", "[gnc][descent]") {
     const auto b = block3();
-    const auto& set = b->model.engine_sets[1];  // 3 centre engines
+    const auto& set = b->model.engine_sets[final_phase];  // 3 centre engines
     const auto x = make_state(3.0e5, {500.0, 0.0, 0.0}, {-50.0, 0.0, 0.0}, Quat{1.0, 0.0, 0.0, 0.0}, {});
-    const double model_flow = -b->model.derivative(x, {set.thrust_min_n, 0.0, 0.0}, 1)[descent_index::mass];
+    const double model_flow = -b->model.derivative(x, {set.thrust_min_n, 0.0, 0.0}, final_phase)[descent_index::mass];
     double true_flow = 0.0;
     for (const auto& e : b->vehicle->stages()[0].engines) {
         if (e.group_id == "booster/center") true_flow += e.performance->mass_flow_kgps(e.performance->config().throttle_min);
@@ -225,11 +239,11 @@ TEST_CASE("A planner reuses one solver per start phase and goal with unchanged r
     DescentPlanner planner;
     const auto first = planner.plan(b->model, x0, 0, target, s, nullptr, 0.0);
     REQUIRE(first.converged);
-    const double t = first.reference.duration_s[0] + 1.0;
-    const auto again = planner.plan(b->model, first.state_at(t), 1, target, s, &first, t);
-    const auto twice = planner.plan(b->model, first.state_at(t), 1, target, s, &first, t);
-    CHECK(planner.solver_count() == 2);  // (phase 0, catch) and (phase 1, catch)
-    const auto fresh = plan_descent(b->model, first.state_at(t), 1, target, s, &first, t);
+    const double t = final_phase_start(first) + 1.0;
+    const auto again = planner.plan(b->model, first.state_at(t), final_phase, target, s, &first, t);
+    const auto twice = planner.plan(b->model, first.state_at(t), final_phase, target, s, &first, t);
+    CHECK(planner.solver_count() == 2);  // (phase 0, catch) and (final phase, catch)
+    const auto fresh = plan_descent(b->model, first.state_at(t), final_phase, target, s, &first, t);
     CHECK(twice.reference.x == fresh.reference.x);
     CHECK(again.reference.x == fresh.reference.x);
 }
@@ -261,7 +275,7 @@ TEST_CASE("The tilt limit tapers towards the catch", "[gnc][descent][scvx]") {
     const int last = static_cast<int>(plan.reference.x.size()) - 1;
     for (int from_end = 0; from_end < s.limits.tilt_taper_nodes; ++from_end) {
         const double limit = s.limits.terminal_tilt_rad +
-                             (s.limits.tilt_max_rad[1] - s.limits.terminal_tilt_rad) * from_end / s.limits.tilt_taper_nodes;
+                             (s.limits.tilt_max_rad[final_phase] - s.limits.terminal_tilt_rad) * from_end / s.limits.tilt_taper_nodes;
         CHECK(tilt_of(plan.reference.x[static_cast<size_t>(last - from_end)]) <= limit + 1e-6);
     }
 }
@@ -294,7 +308,7 @@ TEST_CASE("An abort plan stays above the ground at every node", "[gnc][descent][
     target.keep_out_radius_m = 25.0;
     // Low and slow: the cheapest path to the sea would skim the ground.
     const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {120.0, 0.0, 0.0}, {-20.0, 15.0, 0.0}, Quat{}, {});
-    const auto plan = plan_descent(b->model, x0, 1, target, s, nullptr, 0.0);
+    const auto plan = plan_descent(b->model, x0, final_phase, target, s, nullptr, 0.0);
     REQUIRE(plan.converged);
     for (const auto& x : plan.reference.x) CHECK(x[descent_index::position] >= target.ground_cg_height_m - 1e-3);
 }
@@ -332,17 +346,18 @@ TEST_CASE("SCvx re-plans while the booster rolls (no roll authority in the model
 TEST_CASE("Catch plans fly the final engine set straight above the catch point", "[gnc][descent][scvx]") {
     const auto b = block3();
     const auto s = settings(*b);
-    const auto x0 = ignition_state(*b);  // 30 m east, 15 m south: the divert happens on the ignition set
+    const auto x0 = ignition_state(*b);  // 30 m east, 15 m south: the divert happens on the earlier sets
     const auto target = catch_target(*b, state_attitude(x0));
     const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
     REQUIRE(plan.converged);
     const double arms_m = 60.0;  // the hull slides down between the arms for the last ~60 m
     int inside = 0;
-    for (size_t k = static_cast<size_t>(s.nodes_per_phase - 1); k < plan.reference.x.size(); ++k) {
+    for (size_t k = static_cast<size_t>(final_phase * (s.nodes_per_phase - 1)); k < plan.reference.x.size(); ++k) {
         const auto& x = plan.reference.x[k];
         if (x[descent_index::position] > target.position_m.x + arms_m) continue;
         ++inside;
-        CHECK(std::hypot(x[descent_index::position + 1], x[descent_index::position + 2]) <= 0.3);
+        // Soft penalty only (the flight adds the 1.5 m corridor): the longer 3-engine approach keeps ~0.4 m.
+        CHECK(std::hypot(x[descent_index::position + 1], x[descent_index::position + 2]) <= 0.5);
     }
     CHECK(inside >= 2);
 }
@@ -357,10 +372,10 @@ TEST_CASE("Catch plans stay in a vertical corridor while the hull passes the arm
     auto target = catch_target(*b, state_attitude(x0));
     target.corridor_top_m = target.position_m.x + 70.0;
     target.corridor_radius_m = 1.5;
-    target.final_set_radius_m = 3.0;  // the final engine set flies above the catch point (divert on 13 engines)
+    target.final_set_radius_m = 3.0;  // the final engine set flies above the catch point (divert on 13 and 5 engines)
     const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
     REQUIRE(plan.converged);
-    for (size_t k = static_cast<size_t>(s.nodes_per_phase - 1); k < plan.reference.x.size(); ++k) {
+    for (size_t k = static_cast<size_t>(final_phase * (s.nodes_per_phase - 1)); k < plan.reference.x.size(); ++k) {
         const auto& x = plan.reference.x[k];
         CHECK(std::hypot(x[descent_index::position + 1], x[descent_index::position + 2]) <= target.final_set_radius_m + 1e-3);
     }
@@ -383,7 +398,7 @@ TEST_CASE("A feasible plan at the iteration limit is flyable", "[gnc][descent][s
     const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
     CHECK(plan.iterations == 5);
     CHECK(plan.virtual_control < s.virtual_control_tolerance);
-    CHECK(plan.nonlinear_defect < s.defect_tolerance);
+    CHECK(plan.nonlinear_defect < s.flyable_defect_tolerance);
     CHECK(plan.converged);
 }
 
@@ -399,22 +414,22 @@ TEST_CASE("A re-plan from outside the corridor stays feasible and closes in", "[
     // divert this size needs the height.)
     const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {target.position_m.x + 200.0, 8.0, 0.0},
                                {-25.0, 0.0, 0.0}, Quat{}, {});
-    const auto plan = plan_descent(b->model, x0, 1, target, s, nullptr, 0.0);
+    const auto plan = plan_descent(b->model, x0, final_phase, target, s, nullptr, 0.0);
     REQUIRE(plan.converged);
     const auto& end = plan.reference.x.back();
     CHECK(std::hypot(end[descent_index::position + 1], end[descent_index::position + 2]) < 1e-3);  // still the catch point
 }
 
-TEST_CASE("A re-plan right after the engine switch tolerates the turn rate of the ignition set", "[gnc][descent][scvx]") {
+TEST_CASE("A re-plan on the final engines tolerates a turn rate above their limit", "[gnc][descent][scvx]") {
     const auto b = block3();
     auto s = settings(*b);
     const auto target = catch_target(*b, Quat{});
-    // On the final engines at the switch of the catch profile (~600 m, ~72 m/s), tilted 8 deg and still turning at
-    // 0.135 rad/s (above the final set's 0.1 rad/s): the three engines need longer than one node interval to stop that.
+    // On the final engines (~600 m, ~72 m/s), tilted 8 deg and still turning at 0.135 rad/s (above the final set's
+    // 0.1 rad/s): the three engines need longer than one node interval to stop that.
     const Quat tilted = Quat::from_axis_angle({0.0, 0.0, 1.0}, 8.0 * deg);
     const auto x0 = make_state(b->vehicle->mass_properties().mass_kg - 30000.0, {target.position_m.x + 600.0, 3.0, 0.0},
                                {-72.0, -2.0, 0.0}, tilted, {0.0, 0.0, 0.135});
-    const auto plan = plan_descent(b->model, x0, 1, target, s, nullptr, 0.0);
+    const auto plan = plan_descent(b->model, x0, final_phase, target, s, nullptr, 0.0);
     CHECK(plan.converged);
 }
 
@@ -441,10 +456,11 @@ TEST_CASE("Planned thrust changes no faster than the engines can throttle", "[gn
     const auto x0 = ignition_state(*b);
     const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
     REQUIRE(plan.converged);
-    const int boundary = s.nodes_per_phase - 1;
-    for (int k = 0; k + 1 < static_cast<int>(plan.reference.u.size()); ++k) {
-        if (k == boundary - 1) continue;  // the engine switch: the ignition set runs down
-        const int phase = k < boundary ? 0 : 1;
+    const int n = s.nodes_per_phase;
+    const int last = static_cast<int>(plan.reference.u.size()) - 1;
+    for (int k = 0; k + 1 <= last; ++k) {
+        if ((k + 1) % (n - 1) == 0 && k + 1 < last) continue;  // an engine switch: the outgoing set runs down
+        const int phase = k / (n - 1);
         const auto& set = b->model.engine_sets[static_cast<size_t>(phase)];
         const double dt = plan.node_time_s(k + 1) - plan.node_time_s(k);
         const double change = std::abs(norm(plan.reference.u[static_cast<size_t>(k + 1)]) - norm(plan.reference.u[static_cast<size_t>(k)]));
@@ -461,21 +477,22 @@ TEST_CASE("Plans end gently: thrust near the minimum at the catch", "[gnc][desce
     const auto x0 = ignition_state(*b);
     const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
     REQUIRE(plan.converged);
-    const auto& set = b->model.engine_sets[1];
+    const auto& set = b->model.engine_sets[final_phase];
     CHECK(norm(plan.reference.u.back()) <= set.thrust_min_n + s.limits.terminal_thrust_margin * set.thrust_max_n + 1.0e3);
 }
 
-TEST_CASE("The engine switch happens with the booster upright and calm", "[gnc][descent][scvx]") {
-    // Three engines turn the booster slowly: it must not still be tilting when the ignition set shuts down.
+TEST_CASE("The switch to the final engines happens with the booster upright and calm", "[gnc][descent][scvx]") {
+    // Three engines turn the booster slowly: it must not still be tilting when the divert pair shuts down.
     const auto b = block3();
     const auto s = settings(*b);
-    const auto x0 = ignition_state(*b);  // 30 m east, 15 m south: a divert on the ignition set
+    const auto x0 = ignition_state(*b);  // 30 m east, 15 m south: a divert on the earlier sets
     const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
     REQUIRE(plan.converged);
-    const auto& x = plan.reference.x[static_cast<size_t>(s.nodes_per_phase - 1)];
-    CHECK(tilt_of(x) <= s.limits.switch_tilt_rad + 1e-3);
+    const auto& x = plan.reference.x[static_cast<size_t>(final_phase * (s.nodes_per_phase - 1))];
+    const auto& sw = s.limits.switches[final_phase - 1];
+    CHECK(tilt_of(x) <= sw.max_tilt_rad + 1e-3);
     const Vec3 w = state_rate(x);
-    CHECK(std::hypot(w.y, w.z) <= s.limits.switch_rate_radps + 1e-3);
+    CHECK(std::hypot(w.y, w.z) <= sw.max_rate_radps + 1e-3);
 }
 
 TEST_CASE("An abort plan keeps clear of the launch mount near the ground", "[gnc][descent][scvx]") {
@@ -492,7 +509,7 @@ TEST_CASE("An abort plan keeps clear of the launch mount near the ground", "[gnc
     target.mount_top_cg_height_m = 20.0 + target.ground_cg_height_m + 5.0;
     // Low over the pad, slowly sinking: the cheapest path would leave from the mount sideways at its height.
     const auto x0 = make_state(b->vehicle->mass_properties().mass_kg - 30000.0, {120.0, 2.0, 0.0}, {-15.0, 0.0, 0.0}, Quat{}, {});
-    const auto plan = plan_descent(b->model, x0, 1, target, s, nullptr, 0.0);
+    const auto plan = plan_descent(b->model, x0, final_phase, target, s, nullptr, 0.0);
     REQUIRE(plan.converged);
     for (const auto& x : plan.reference.x) {
         if (x[descent_index::position] >= target.mount_top_cg_height_m - 1.0) continue;
@@ -500,9 +517,9 @@ TEST_CASE("An abort plan keeps clear of the launch mount near the ground", "[gnc
     }
 }
 
-TEST_CASE("The ignition set hands over within the hand-over sink rates", "[gnc][descent][scvx]") {
-    // Thirteen engines at minimum throttle far exceed the weight: running them down to a slow descent would make
-    // any timing error a climb. The switch happens at a sink rate the final engines can take over.
+TEST_CASE("Each engine set hands over within its switch sink rates", "[gnc][descent][scvx]") {
+    // Thirteen (five) engines at minimum throttle far exceed the weight: running them down to a slow descent would
+    // make any timing error a climb. Each switch happens at a sink rate the next set can take over.
     const auto b = block3();
     const auto s = settings(*b);
     for (const double height : {1000.0, 1300.0}) {
@@ -510,10 +527,12 @@ TEST_CASE("The ignition set hands over within the hand-over sink rates", "[gnc][
         const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {height, 5.0, 0.0}, {-250.0, 0.0, 0.0}, Quat{}, {});
         const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, Quat{}), s, nullptr, 0.0);
         REQUIRE(plan.converged);
-        CHECK(plan.reference.x[static_cast<size_t>(s.nodes_per_phase - 1)][descent_index::velocity] <=
-              -s.limits.switch_min_sink_mps + 1e-3);
-        // ... and not much faster: the final engines are slow to steer, their segment stays short.
-        CHECK(plan.reference.x[static_cast<size_t>(s.nodes_per_phase - 1)][descent_index::velocity] >=
-              -s.limits.switch_max_sink_mps - 1e-3);
+        for (int p = 1; p < descent_phases; ++p) {
+            CAPTURE(p);
+            const double v = plan.reference.x[static_cast<size_t>(p * (s.nodes_per_phase - 1))][descent_index::velocity];
+            const auto& sw = s.limits.switches[static_cast<size_t>(p - 1)];
+            CHECK(v <= -sw.min_sink_mps + 1e-3);
+            CHECK(v >= -sw.max_sink_mps - 1e-3);  // ... and not much faster: the next set takes over from there
+        }
     }
 }

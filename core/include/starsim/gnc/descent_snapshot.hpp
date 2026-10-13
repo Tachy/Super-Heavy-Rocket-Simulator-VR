@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -28,8 +29,7 @@ PlanFrame plan_frame(double latitude_rad, double longitude_rad, double height_m)
 DescentState plan_state(const vehicle::FlightBody& body, const frames::FixedToInertial& earth, const PlanFrame& frame);
 
 struct SnapshotSettings {
-    std::vector<std::string> ignition_groups;  // phase 0 engine set
-    std::vector<std::string> final_groups;     // phase 1 engine set
+    std::array<std::vector<std::string>, descent_phases> phase_groups;  // engine groups per phase
     double reserve_kg = 5000.0;        // [E] propellant the plan must leave (residuals, unusable)
     double catch_clearance_m = 1.0;    // pins above the arm tops at the end of the plan (spec)
     double catch_sink_mps = 1.0;       // sink rate at the end of the plan (spec)
@@ -50,8 +50,9 @@ struct DescentSnapshot {
     DescentTarget catch_target;   // goal Catch (meaningless without a catch target at the site)
     DescentTarget abort_target;   // goal Abort
     double min_mass_kg = 0.0;
-    double phase0_spool = 1.0;    // mean spool of the ignition engines now
+    double phase0_spool = 1.0;    // mean spool of the ignition (phase 0) engines now
     double startup_s = 0.0;       // their start-up time
+    double thrust_n = 0.0;        // thrust of all engines now (starting, running, running down)
     time::Epoch epoch;
 };
 

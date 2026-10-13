@@ -33,20 +33,30 @@ struct DescentTarget {
     double mount_top_cg_height_m = 0.0;
 };
 
+// Engine switch from phase p to p + 1, at their shared node.
+struct EngineSwitchLimits {
+    double max_tilt_rad = 0.0;    // calm switch: nearly upright (0: no limit)
+    double max_rate_radps = 0.0;  // ... and hardly turning, pitch/yaw (0: no limit)
+    double min_sink_mps = 0.0;    // still sinking at least this fast: the outgoing set at minimum throttle would climb
+    double max_sink_mps = 0.0;
+};
+
 struct DescentLimits {
-    std::array<double, 2> tilt_max_rad{25.0 * constants::deg_to_rad, 10.0 * constants::deg_to_rad};  // per phase
+    // [E] per phase (13, 5, 3 engines): the more engines, the more gimbal authority.
+    std::array<double, descent_phases> tilt_max_rad{25.0 * constants::deg_to_rad, 20.0 * constants::deg_to_rad,
+                                                    10.0 * constants::deg_to_rad};
     double terminal_tilt_rad = 4.0 * constants::deg_to_rad;   // [E] at the catch / touchdown (structural)
-    int tilt_taper_nodes = 4;                                 // phase 1's last nodes taper linearly to it
+    int tilt_taper_nodes = 4;                                 // the final phase's last nodes taper linearly to it
     // At the end of the plan the thrust is at most minimum + this fraction of the maximum: the final engines exceed
     // the weight even at minimum throttle and throttle at a limited rate, so the plan ends gently, not braking hard.
     double terminal_thrust_margin = 0.05;  // [E]
-    // Calm engine switch (a plan starting on the ignition set): at the shared node the booster is nearly upright and
-    // hardly turning - the final engines turn it slowly.
-    double switch_tilt_rad = 3.0 * constants::deg_to_rad;  // [E]
-    double switch_rate_radps = 0.03;                        // [E]
-    // ... and still sinking at least this fast: thirteen engines at minimum throttle far exceed the weight.
-    double switch_min_sink_mps = 70.0;                      // [E] recorded catches switch at ~80 m/s, ~500 m
-    double switch_max_sink_mps = 95.0;                      // [E]
+    // Engine switches (applied while still ahead of the plan's start phase). 13 -> 5: the webcasts of flights 13/14
+    // show five engines at ~200 m/s, ~1.4 km [E]. 5 -> 3: calm (the three centre engines turn the booster slowly),
+    // at a low sink rate; the final set then descends gently into the arms [E].
+    std::array<EngineSwitchLimits, descent_phases - 1> switches{{
+        {0.0, 0.0, 150.0, 250.0},
+        {3.0 * constants::deg_to_rad, 0.03, 15.0, 30.0},
+    }};
     double final_min_thrust_fraction = 0.0;  // [E] final-set thrust floor (fraction of its maximum) but at the end
     int final_ease_nodes = 3;                // last nodes free to ease down to the gentle end
     double throttle_margin = 0.1;  // [E] planned thrust stays this fraction below the maximum (tracking margin)
@@ -54,17 +64,25 @@ struct DescentLimits {
     // (campaign: 0.4 lost one of 21 cases to saturation, 0.3 none).
     double gimbal_fraction = 0.3;
     // [E] pitch/yaw per phase: the 13 ignition engines turn the booster fast (alpha_max ~1.4 rad/s^2), the 3 final
-    // engines slowly (~0.1-0.3 rad/s^2).
-    std::array<double, 2> rate_max_radps{0.2, 0.1};
+    // engines slowly (~0.1-0.3 rad/s^2), the 5 divert engines in between.
+    std::array<double, descent_phases> rate_max_radps{0.2, 0.15, 0.1};
     double glide_slope_rad = 30.0 * constants::deg_to_rad;    // above the horizontal, towards the catch point
+    // Catch approach: sink <= catch sink + height above the catch point / this time constant (soft), so the booster
+    // slows down into the arms as the V3 profile ends in a hover (0: no limit). [E]
+    double approach_time_constant_s = 3.0;
     double min_mass_kg = 0.0;                                 // dry mass + reserve
-    std::array<double, 2> min_phase_s{1.0, 1.0};
+    PhaseDurations min_phase_s{1.0, 1.0, 1.0};
     double max_phase_s = 120.0;
     // Start-up of the ignition engines (thrust = spool x throttled thrust, spool rising linearly over startup_s):
     // phase 0's thrust bounds scale with the spool at each node's reference time. The planning model's mass flow
     // keeps the full pressure-loss term meanwhile (a few kg too much; documented simplification).
     double phase0_initial_spool = 1.0;
     double phase0_startup_s = 0.0;
+    // Re-plans: the thrust at the start (the measured thrust, > 0) can only change at the engines' throttle rate over
+    // this window - the time until the plan takes effect. Without it a re-plan from a state slightly off its cones
+    // brakes at once, within the latency the engines cannot follow, and the next plan finds the booster further off.
+    double initial_thrust_n = 0.0;      // 0: free
+    double initial_thrust_window_s = 0.5;
 };
 
 struct DescentWeights {
@@ -79,18 +97,26 @@ struct DescentWeights {
     double final_lateral_time_s = 2.0;  // [E] lateral speed counts as the offset it builds up in this time
 };
 
-// Iterate of SCvx: states and thrust at 2N-1 nodes, phase durations.
+// Iterate of SCvx: states and thrust at P (N-1) + 1 nodes (P phases of N nodes, neighbours sharing one), phase
+// durations.
 struct DescentReference {
     std::vector<DescentState> x;
     std::vector<math::Vec3> u;  // body frame
-    std::array<double, 2> duration_s{};
+    PhaseDurations duration_s{};
 };
+
+// Nodes of a plan with `nodes_per_phase` nodes per phase.
+constexpr int descent_node_count(int nodes_per_phase) { return descent_phases * (nodes_per_phase - 1) + 1; }
+// Phase whose bounds node k has (a shared node starts the next phase; the last node belongs to the last phase).
+constexpr int descent_node_phase(int k, int nodes_per_phase) {
+    return k / (nodes_per_phase - 1) < descent_phases ? k / (nodes_per_phase - 1) : descent_phases - 1;
+}
 
 // Scales of the state deviation variables (one unit = this much physical change).
 std::array<double, 14> descent_state_scales();
 
 // Time of node k from the plan start for the given phase durations (nodes equally spaced within a phase).
-double reference_node_time(const std::array<double, 2>& duration_s, int k, int nodes_per_phase);
+double reference_node_time(const PhaseDurations& duration_s, int k, int nodes_per_phase);
 
 // Convex subproblem of one SCvx iteration in scaled deviations from the reference.
 class DescentSubproblem {
@@ -111,8 +137,8 @@ public:
     double thrust_scale = 1.0;
 };
 
-// Nodes 0 .. 2N-2; intervals 0 .. N-2 belong to phase 0, N-1 .. 2N-3 to phase 1; node N-1 is shared and has
-// the final set's bounds. `start_phase` 1 fixes phase 0's duration to 0.
+// Nodes 0 .. P(N-1); interval k belongs to phase k / (N-1); the shared node p (N-1) has phase p's bounds.
+// `start_phase` s fixes the durations of phases 0 .. s-1 to 0 (their nodes are copies of the initial state).
 DescentSubproblem build_descent_subproblem(const DescentModel& model, const DescentReference& reference,
                                            const std::vector<IntervalLinearization>& linearization,
                                            const DescentState& initial, int start_phase, const DescentTarget& target,

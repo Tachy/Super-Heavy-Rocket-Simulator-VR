@@ -17,8 +17,7 @@ using math::Vec3;
 
 namespace {
 
-constexpr double gate_speed_mps = 50.0;   // guess: phase 0 brings the speed down to this (as the explicit guidance)
-constexpr double guess_throttle = 0.8;    // guess: design throttle
+constexpr double guess_throttle = 0.8;    // guess: design throttle (each phase ends mid-way in its switch window)
 constexpr double min_deceleration_mps2 = 1.0;
 
 Quat nlerp(const Quat& a, const Quat& b, double f) {
@@ -32,7 +31,6 @@ Quat upright_with_roll(const Quat& q) {
     return n > 1e-9 ? Quat{q.w / n, q.x / n, 0.0, 0.0} : Quat{1.0, 0.0, 0.0, 0.0};
 }
 
-double guess_node_time(const std::array<double, 2>& duration, int k, int n) { return reference_node_time(duration, k, n); }
 
 // Node interval containing t (zero-length intervals skipped) and the fraction within it.
 std::pair<int, double> locate(const DescentPlan& plan, double t) {
@@ -50,11 +48,20 @@ std::pair<int, double> locate(const DescentPlan& plan, double t) {
 
 DescentReference warm_start_reference(const DescentPlan& previous, double elapsed, int start_phase, int n,
                                       const DescentState& initial) {
+    // Phases before start_phase are over; the start phase ends where it ended in the previous plan (later phases keep
+    // their durations): what is left of it, or of all phases up to it if the engines switched before the plan said.
     DescentReference ref;
-    ref.duration_s[0] = start_phase == 1 ? 0.0 : std::max(previous.reference.duration_s[0] - elapsed, 0.0);
-    ref.duration_s[1] = start_phase == 1 ? std::max(previous.duration_s() - elapsed, 0.0) : previous.reference.duration_s[1];
-    for (int k = 0; k < 2 * n - 1; ++k) {
-        const double t = guess_node_time(ref.duration_s, k, n);
+    double end = 0.0;    // previous plan: end of phase p
+    double begin = 0.0;  // new plan: start of phase p, previous plan's time
+    for (int p = 0; p < descent_phases; ++p) {
+        end += previous.reference.duration_s[static_cast<size_t>(p)];
+        if (p < start_phase) continue;
+        if (p == start_phase) begin = elapsed;
+        ref.duration_s[static_cast<size_t>(p)] = std::max(end - begin, 0.0);
+        begin = std::max(end, begin);
+    }
+    for (int k = 0; k < descent_node_count(n); ++k) {
+        const double t = reference_node_time(ref.duration_s, k, n);
         ref.x.push_back(t <= 0.0 ? initial : previous.state_at(elapsed + t));
         ref.u.push_back(previous.thrust_at(elapsed + t));
     }
@@ -66,9 +73,22 @@ Quat nearest_sign(const Quat& target, const Quat& reference) {
     return d >= 0.0 ? target : Quat{-target.w, -target.x, -target.y, -target.z};
 }
 
-double DescentPlan::node_time_s(int k) const { return guess_node_time(reference.duration_s, k, nodes_per_phase); }
+double DescentPlan::node_time_s(int k) const { return reference_node_time(reference.duration_s, k, nodes_per_phase); }
 
-int DescentPlan::phase_at(double t) const { return t < reference.duration_s[0] ? 0 : 1; }
+double DescentPlan::duration_s() const {
+    double total = 0.0;
+    for (const double d : reference.duration_s) total += d;
+    return total;
+}
+
+int DescentPlan::phase_at(double t) const {
+    double end = 0.0;
+    for (int p = 0; p + 1 < descent_phases; ++p) {
+        end += reference.duration_s[static_cast<size_t>(p)];
+        if (t < end) return p;
+    }
+    return descent_phases - 1;
+}
 
 DescentState DescentPlan::state_at(double t) const {
     const auto [k, f] = locate(*this, t);
@@ -98,25 +118,32 @@ DescentReference initial_guess(const DescentModel& model, const DescentState& in
         return std::max(guess_throttle * model.engine_sets[static_cast<size_t>(p)].thrust_max_n / m - g, min_deceleration_mps2);
     };
     DescentReference ref;
-    ref.duration_s[0] = start_phase == 1 ? 0.0 : std::max((speed0 - gate_speed_mps) / decel(0, m0), limits.min_phase_s[0]);
-    ref.duration_s[1] = std::max((std::min(speed0, gate_speed_mps) - final_speed) / decel(1, m0), limits.min_phase_s[1]);
+    double speed = speed0;  // at the start of phase p
+    for (int p = start_phase; p < descent_phases; ++p) {
+        const auto& sw = limits.switches[static_cast<size_t>(std::min(p, descent_phases - 2))];
+        const double end_speed = p + 1 < descent_phases ? std::min(speed, 0.5 * (sw.min_sink_mps + sw.max_sink_mps)) : final_speed;
+        ref.duration_s[static_cast<size_t>(p)] = std::max((speed - end_speed) / decel(p, m0), limits.min_phase_s[static_cast<size_t>(p)]);
+        speed = end_speed;
+    }
     const Vec3 r_end = target.goal == DescentGoal::Catch
                            ? target.position_m
                            : Vec3{target.ground_cg_height_m, target.sea_target_m.y, target.sea_target_m.z};
     const Vec3 v_end = target.goal == DescentGoal::Catch ? target.velocity_mps : Vec3{};
     const Quat q_end = upright_with_roll(state_attitude(initial));
-    const double total = ref.duration_s[0] + ref.duration_s[1];
+    double total = 0.0;
+    for (const double d : ref.duration_s) total += d;
     double mass = m0;
-    for (int k = 0; k < 2 * n - 1; ++k) {
-        const double f = total > 0.0 ? guess_node_time(ref.duration_s, k, n) / total : 0.0;
-        const int p = k < n - 1 ? 0 : 1;
+    const int nodes = descent_node_count(n);
+    for (int k = 0; k < nodes; ++k) {
+        const double f = total > 0.0 ? reference_node_time(ref.duration_s, k, n) / total : 0.0;
+        const int p = descent_node_phase(k, n);
         const auto& set = model.engine_sets[static_cast<size_t>(p)];
         const double thrust = std::clamp(mass * (g + decel(p, mass)), set.thrust_min_n, set.thrust_max_n);
         ref.x.push_back(make_state(mass, state_position(initial) * (1.0 - f) + r_end * f,
                                    state_velocity(initial) * (1.0 - f) + v_end * f, nlerp(state_attitude(initial), q_end, f), {}));
         ref.u.push_back({thrust, 0.0, 0.0});
-        if (k < 2 * n - 2) {
-            const double dt = (k < n - 1 ? ref.duration_s[0] : ref.duration_s[1]) / (n - 1);
+        if (k < nodes - 1) {
+            const double dt = ref.duration_s[static_cast<size_t>(k / (n - 1))] / (n - 1);
             mass = std::max(mass - set.mass_flow_per_thrust_s_m * (thrust + set.pressure_thrust_loss_n) * dt, limits.min_mass_kg);
         }
     }
@@ -156,17 +183,18 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
     // Minimum phase durations only shape a fresh plan: on a re-plan they would stretch a nearly finished phase
     // again and again (every replan cycle).
     DescentLimits limits = settings.limits;
-    if (warm_start) limits.min_phase_s = {0.0, 0.0};
+    if (warm_start) limits.min_phase_s = {};
     std::vector<double> virtual_controls;
     DescentWeights weights = settings.weights;
     const auto scale = descent_state_scales();
     bool candidate = false;  // the last solution met the convergence tests that need no propagation
     for (int it = 0;; ++it) {
         std::vector<IntervalLinearization> lin;
-        lin.reserve(static_cast<size_t>(2 * n - 2));
+        const int intervals = descent_node_count(n) - 1;
+        lin.reserve(static_cast<size_t>(intervals));
         double defect = 0.0;
-        for (int k = 0; k < 2 * n - 2; ++k) {
-            const int p = k < n - 1 ? 0 : 1;
+        for (int k = 0; k < intervals; ++k) {
+            const int p = k / (n - 1);
             lin.push_back(linearize_interval(model, p, plan.reference.x[static_cast<size_t>(k)],
                                              plan.reference.u[static_cast<size_t>(k)], plan.reference.u[static_cast<size_t>(k + 1)],
                                              plan.reference.duration_s[static_cast<size_t>(p)], 1.0 / (n - 1), settings.substeps));

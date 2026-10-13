@@ -56,8 +56,7 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
 
     DescentModelInputs in;
     in.vehicle = &vehicle;
-    in.ignition_groups = settings.ignition_groups;
-    in.final_groups = settings.final_groups;
+    in.phase_groups = settings.phase_groups;
     in.atmosphere = &env.atmosphere;
     in.site_height_m = site.height_m;
     in.gravity_mps2 = gcrf_to_plan * env.gravity.acceleration_mps2(t.rotation * frame.origin_itrf_m, epoch);
@@ -96,12 +95,16 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
     double spool = 0.0;
     int engines = 0;
     for (const auto& e : vehicle.stages().front().engines) {
-        if (e.starved || !contains(settings.ignition_groups, e.group_id)) continue;
+        if (e.starved || !contains(settings.phase_groups[0], e.group_id)) continue;
         spool += e.spool;
         snap.startup_s = std::max(snap.startup_s, e.performance->config().startup_s);
         ++engines;
     }
     snap.phase0_spool = engines > 0 ? spool / engines : 1.0;
+    const double pressure = env.atmosphere.at(site.height_m + snap.initial[descent_index::position]).pressure_pa;
+    for (const auto& e : vehicle.stages().front().engines) {
+        if (!e.starved) snap.thrust_n += e.spool * e.performance->thrust_n(e.throttle, pressure);
+    }
     return snap;
 }
 

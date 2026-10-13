@@ -14,16 +14,18 @@ using math::Vec3;
 
 namespace {
 
-// Two phases of 2 s, two nodes each (3 nodes): straight down, the rate about body z rising 0 -> 0.2 rad/s.
+// Phases of 2 s, 2 s and 0 s, two nodes each (4 nodes, the last phase empty): straight down, the rate about body z
+// rising 0 -> 0.2 rad/s.
 DescentPlan synthetic_plan() {
     DescentPlan p;
     p.nodes_per_phase = 2;
     p.converged = true;
-    p.reference.duration_s = {2.0, 2.0};
+    p.reference.duration_s = {2.0, 2.0, 0.0};
     p.reference.x = {make_state(1.0e5, {100.0, 0.0, 0.0}, {-20.0, 0.0, 0.0}, Quat{}, {0.0, 0.0, 0.0}),
                      make_state(0.99e5, {70.0, 0.0, 0.0}, {-10.0, 0.0, 0.0}, Quat{}, {0.0, 0.0, 0.2}),
+                     make_state(0.98e5, {60.0, 0.0, 0.0}, {-1.0, 0.0, 0.0}, Quat{}, {0.0, 0.0, 0.2}),
                      make_state(0.98e5, {60.0, 0.0, 0.0}, {-1.0, 0.0, 0.0}, Quat{}, {0.0, 0.0, 0.2})};
-    p.reference.u = {{2.0e6, 0.0, 0.0}, {1.5e6, 0.0, 0.0}, {1.0e6, 0.0, 0.0}};
+    p.reference.u = {{2.0e6, 0.0, 0.0}, {1.5e6, 0.0, 0.0}, {1.0e6, 0.0, 0.0}, {1.0e6, 0.0, 0.0}};
     return p;
 }
 
@@ -51,7 +53,7 @@ TEST_CASE("Plan samples interpolate between nodes", "[gnc][tracking]") {
 TEST_CASE("After the plan's end the reference keeps sinking slowly against gravity", "[gnc][tracking]") {
     const auto ref = sample_plan(synthetic_plan(), flat_model(), 6.0, 1.0);
     CHECK(ref.finished);
-    CHECK(ref.phase == 1);
+    CHECK(ref.phase == descent_phases - 1);
     CHECK(std::abs(ref.velocity_mps.x + 1.0) < 1e-12);
     CHECK(std::abs(ref.position_m.x - 58.0) < 1e-9);  // 60 m - 1 m/s x 2 s
     CHECK(std::abs(ref.thrust_acceleration_mps2.x - 9.8) < 1e-12);

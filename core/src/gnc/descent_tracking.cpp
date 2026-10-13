@@ -20,7 +20,7 @@ TrackingReference sample_plan(const DescentPlan& plan, const DescentModel& model
     const double end = plan.duration_s();
     if (t >= end) {
         const auto& x = plan.reference.x.back();
-        r.phase = 1;
+        r.phase = descent_phases - 1;
         r.finished = true;
         r.velocity_mps = {-terminal_sink_mps, 0.0, 0.0};
         r.position_m = state_position(x) + r.velocity_mps * (t - end);

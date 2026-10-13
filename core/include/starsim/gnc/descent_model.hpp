@@ -20,6 +20,11 @@ inline math::Vec3 plan_to_site(const math::Vec3& p) { return {p.y, p.z, p.x}; }
 // mass, position (3), velocity (3, relative to the ground), attitude quaternion (w, x, y, z; body -> plan),
 // body angular rate (3, relative to the plan frame).
 using DescentState = math::VecN<14>;
+
+// Engine phases of the landing burn (V3 baseline): ignition set (13 engines), divert set (5), final set (3 centre
+// engines, ending in a hover).
+constexpr int descent_phases = 3;
+using PhaseDurations = std::array<double, descent_phases>;
 using Mat14x14 = std::array<double, 196>;  // row-major
 using Mat14x3 = std::array<double, 42>;    // row-major
 
@@ -56,7 +61,7 @@ struct EngineSetModel {
 // plan frame; no grid fins, no wind. Air data and drag are tabulated so the model owns all its data (the
 // planner can run on a worker thread).
 struct DescentModel {
-    std::array<EngineSetModel, 2> engine_sets;  // phase 0: ignition set, phase 1: final set
+    std::array<EngineSetModel, descent_phases> engine_sets;  // per phase: ignition, divert, final set
     double gimbal_lever_m = 0.0;                // CG above the gimbal point
     math::Vec3 inertia_kg_m2;                   // principal, body axes
     double reference_area_m2 = 0.0;
@@ -77,8 +82,7 @@ struct DescentModel {
 // Snapshot inputs for the model (all evaluated on the simulation thread).
 struct DescentModelInputs {
     const vehicle::Vehicle* vehicle = nullptr;    // the booster (single stage)
-    std::vector<std::string> ignition_groups;     // phase 0 engine set
-    std::vector<std::string> final_groups;        // phase 1 engine set
+    std::array<std::vector<std::string>, descent_phases> phase_groups;  // engine groups per phase
     const environment::Atmosphere* atmosphere = nullptr;
     double site_height_m = 0.0;                   // pad ground above WGS84
     math::Vec3 gravity_mps2;                      // plan frame

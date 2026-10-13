@@ -42,7 +42,8 @@ benennen, denen die Konfigurationen nachempfunden sind.
   den Mondorbit: Eine geplante Erde-Mond-Mission erreicht einen polaren Mondorbit in 100 km Höhe.
 - Rückkehr des Boosters zum Startplatz: Wende, Lambert-Boostback mit Schießverfahren inklusive Luftwiderstand,
   Abstieg mit Gitterflossen-Steuerung (Anstellwinkel, transsonisches Blockieren modelliert), Landebrennen
-  13 → 3 Triebwerke – alle drei Booster-Generationen landen auf der Rampe.
+  13 → 5 → 3 Triebwerke nach im Flug neu gelösten Plänen aus konvexer Optimierung (SCvx): Fang mit den
+  Turmarmen (Streuungskampagne 21 von 21, ~1 m/s Sinkrate beim Fang).
 
 **Selbst fliegen**
 - Thrustmaster T.16000M + TWCS-Schubhebel (Rohachsen über ein SDL-Mapping), Tastatur als Ersatz.

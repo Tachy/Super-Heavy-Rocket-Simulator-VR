@@ -20,12 +20,13 @@ struct ScvxLandingParameters {
     int failures_before_abort = 2;         // [E] consecutive re-plans that find the catch unreachable (virtual
                                            // control >= settings.stall_virtual_control) before it is given up
     bool realtime = false;                 // never wait for a re-plan (interactive play)
-    // Burn profile that times the ignition (BoosterReturnGuidance::predict_landing_burn), after recorded catches:
-    // 13 engines from ~2 km for ~5 s, 3 engines from ~500 m at ~80 m/s for ~20 s - a long final segment that
-    // leaves the slow-turning 3-engine booster time to settle laterally.
-    double ignition_throttle = 0.5;        // [E] 13 engines near minimum throttle
-    double switch_speed_mps = 83.0;        // [E] ~300 km/h on recorded catches
-    double final_throttle = 0.6;           // [E]
+    // Burn profile that times the ignition (BoosterReturnGuidance::predict_landing_burn), V3 baseline: 13 engines,
+    // 5 from ~200 m/s (flights 13/14), 3 for the last slow metres.
+    double ignition_throttle = 0.5;        // [E] 13 engines
+    double divert_speed_mps = 200.0;       // [E] switch to the 5 divert engines
+    double divert_throttle = 0.5;          // [E]
+    double switch_speed_mps = 22.0;        // [E] switch to the 3 centre engines
+    double final_throttle = 0.4;           // [E] near hover
     SnapshotSettings snapshot;
     ScvxSettings settings;
     TrackingGains tracking;
@@ -83,6 +84,8 @@ public:
     const Statistics& statistics() const { return stats_; }
 
 private:
+    // A re-plan (a plan exists) starts where it takes effect: the snapshot state predicted over the plan latency with
+    // the active plan's thrust (the engines fly that plan meanwhile).
     PlanRequest request(const DescentSnapshot& snapshot, int start_phase) const;
     void accept(const PlanOutcome& outcome);
 
@@ -94,7 +97,7 @@ private:
     time::Epoch plan_epoch_;
     DescentModel model_;  // of the latest snapshot (gravity after the plan's end)
     time::Epoch next_request_;
-    bool final_engines_ = false;
+    int engine_set_ = 0;  // phase whose engine set runs (only ever increases)
     bool aborting_ = false;
     int consecutive_failures_ = 0;
     Statistics stats_;

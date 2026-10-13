@@ -83,15 +83,15 @@ DescentModel make_descent_model(const DescentModelInputs& in) {
     const auto& stage = vehicle.stages().front();
     const double pressure = in.atmosphere->at(in.site_height_m).pressure_pa;
     DescentModel m;
-    const std::vector<std::string>* groups[2] = {&in.ignition_groups, &in.final_groups};
     double gimbal_station = 0.0;
     int gimbal_count = 0;
-    for (int p = 0; p < 2; ++p) {
+    for (int p = 0; p < descent_phases; ++p) {
+        const auto& groups = in.phase_groups[static_cast<size_t>(p)];
         EngineSetModel set;
         double flow = 0.0;
         double vacuum_thrust = 0.0;
         for (const auto& e : stage.engines) {
-            if (e.starved || std::find(groups[p]->begin(), groups[p]->end(), e.group_id) == groups[p]->end()) continue;
+            if (e.starved || std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) continue;
             const auto& c = e.performance->config();
             set.thrust_max_n += e.performance->thrust_n(1.0, pressure);
             vacuum_thrust += e.performance->thrust_n(1.0, 0.0);

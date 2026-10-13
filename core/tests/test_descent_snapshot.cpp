@@ -29,8 +29,9 @@ TEST_CASE("The descent snapshot puts the booster into the plan frame", "[gnc][de
     REQUIRE(landing.sea.has_value());
     const auto frame = gnc::plan_frame(landing.latitude_rad, landing.longitude_rad, landing.height_m);
     gnc::SnapshotSettings settings;
-    settings.ignition_groups = {"booster/center", "booster/divert", "booster/middle"};
-    settings.final_groups = {"booster/center"};
+    settings.phase_groups = {std::vector<std::string>{"booster/center", "booster/divert", "booster/middle"},
+                         std::vector<std::string>{"booster/center", "booster/divert"},
+                         std::vector<std::string>{"booster/center"}};
     const auto snap = gnc::take_descent_snapshot(body, session.environment(), t0, landing, frame, settings);
 
     const Vec3 r = gnc::state_position(snap.initial);

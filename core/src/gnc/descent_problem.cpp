@@ -43,8 +43,11 @@ AffineExpr scaled(AffineExpr e, double factor) {
 
 }  // namespace
 
-double reference_node_time(const std::array<double, 2>& duration, int k, int n) {
-    return k <= n - 1 ? duration[0] * k / (n - 1) : duration[0] + duration[1] * (k - n + 1) / (n - 1);
+double reference_node_time(const PhaseDurations& duration, int k, int n) {
+    const int p = descent_node_phase(k, n);
+    double t = 0.0;
+    for (int q = 0; q < p; ++q) t += duration[static_cast<size_t>(q)];
+    return t + duration[static_cast<size_t>(p)] * (k - p * (n - 1)) / (n - 1);
 }
 
 DescentSubproblem build_descent_subproblem(const DescentModel& model, const DescentReference& ref,
@@ -54,13 +57,14 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     DescentSubproblem sub;
     sub.reference = ref;
     sub.start_phase = start_phase;
-    sub.nodes = 2 * n - 1;
+    sub.nodes = descent_node_count(n);
     sub.state_scale = descent_state_scales();
     sub.thrust_scale = thrust_scale_fraction * model.engine_sets[0].thrust_max_n;
     const auto& S = sub.state_scale;
     const double su = sub.thrust_scale;
     const int K = sub.nodes;
-    const int boundary = n - 1;
+    const int final_phase = descent_phases - 1;
+    const int fixed_nodes_end = start_phase * (n - 1);  // nodes 0 .. this: the measured start state
     const auto at = [](int k) { return static_cast<size_t>(k); };
 
     optim::SocpBuilder b;
@@ -68,7 +72,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         sub.dx.push_back(b.add_variables(14, "dx"));
         sub.du.push_back(b.add_variables(3, "du"));
     }
-    sub.ds = b.add_variables(2, "ds");
+    sub.ds = b.add_variables(descent_phases, "ds");
     std::vector<optim::VariableBlock> abs_nu;
     for (int k = 0; k < K - 1; ++k) {
         sub.nu.push_back(b.add_variables(14, "nu"));
@@ -97,7 +101,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     // Dynamics, each row divided by its state scale.
     for (int k = 0; k < K - 1; ++k) {
         const auto& L = lin[at(k)];
-        const int p = k < boundary ? 0 : 1;
+        const int p = k / (n - 1);
         for (int i = 0; i < 14; ++i) {
             const double inv = 1.0 / S[static_cast<size_t>(i)];
             AffineExpr row{(ref.x[at(k + 1)][i] - L.propagated[i]) * inv};
@@ -140,13 +144,11 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
                                  X(last, 3).add_constant(-target.sea_target_m.z)});
     }
     // Path constraints.
-    const auto& e0 = model.engine_sets[0];
-    const auto& e1 = model.engine_sets[1];
     for (int k = 0; k < K; ++k) {
-        // The shared node starts the final set: 13 engines at minimum throttle give more thrust than 3 at full,
-        // so the thrust steps down over phase 0's last interval (engines running down at the switch).
-        const int p = k < boundary ? 0 : 1;
-        const auto& set = p == 0 ? e0 : e1;
+        // A shared node starts the next set: 13 engines at minimum throttle give more thrust than 5 at full, so the
+        // thrust steps down over a phase's last interval (engines running down at the switch).
+        const int p = descent_node_phase(k, n);
+        const auto& set = model.engine_sets[at(p)];
         double spool = 1.0;
         if (p == 0 && limits.phase0_startup_s > 0.0) {
             spool = std::min(1.0, limits.phase0_initial_spool +
@@ -157,22 +159,27 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         const double t_max = (1.0 - limits.throttle_margin) * set.thrust_max_n * spool;
         // Final set: a short, firm segment (control authority grows with thrust; a slow float at minimum throttle lets
         // gimbal saturation push the booster sideways); only the last nodes may ease down for the gentle end.
-        const bool firm = p == 1 && last - k >= limits.final_ease_nodes;
+        const bool firm = p == final_phase && last - k >= limits.final_ease_nodes;
         const double t_min = (firm ? std::max(set.thrust_min_n, limits.final_min_thrust_fraction * set.thrust_max_n)
                                    : set.thrust_min_n) * spool;
         const double gimbal = limits.gimbal_fraction * set.gimbal_max_rad;
         double tilt = limits.tilt_max_rad[static_cast<size_t>(p)];
         const double rate_max = limits.rate_max_radps[static_cast<size_t>(p)];
-        if (k == boundary && start_phase == 0) {
-            // Calm engine switch, hard (the ignition set can always settle the booster before it shuts down).
-            b.add_second_order_cone({AffineExpr{std::sqrt(0.5 * (1.0 - std::cos(limits.switch_tilt_rad)))},
-                                     X(k, descent_index::attitude + 2), X(k, descent_index::attitude + 3)});
-            b.add_second_order_cone({AffineExpr{limits.switch_rate_radps}, X(k, descent_index::rate + 1),
-                                     X(k, descent_index::rate + 2)});
-            b.add_nonnegative(scaled(X(k, descent_index::velocity), -1.0).add_constant(-limits.switch_min_sink_mps));
-            b.add_nonnegative(X(k, descent_index::velocity).add_constant(limits.switch_max_sink_mps));
+        if (p > start_phase && k == p * (n - 1)) {
+            // Engine switch ahead, hard (the outgoing set can always settle the booster before it shuts down).
+            const auto& sw = limits.switches[at(p - 1)];
+            if (sw.max_tilt_rad > 0.0) {
+                b.add_second_order_cone({AffineExpr{std::sqrt(0.5 * (1.0 - std::cos(sw.max_tilt_rad)))},
+                                         X(k, descent_index::attitude + 2), X(k, descent_index::attitude + 3)});
+            }
+            if (sw.max_rate_radps > 0.0) {
+                b.add_second_order_cone({AffineExpr{sw.max_rate_radps}, X(k, descent_index::rate + 1),
+                                         X(k, descent_index::rate + 2)});
+            }
+            b.add_nonnegative(scaled(X(k, descent_index::velocity), -1.0).add_constant(-sw.min_sink_mps));
+            b.add_nonnegative(X(k, descent_index::velocity).add_constant(sw.max_sink_mps));
         }
-        if (const int from_end = last - k; p == 1 && from_end < limits.tilt_taper_nodes) {
+        if (const int from_end = last - k; p == final_phase && from_end < limits.tilt_taper_nodes) {
             tilt = limits.terminal_tilt_rad + (tilt - limits.terminal_tilt_rad) * from_end / limits.tilt_taper_nodes;
         }
         b.add_second_order_cone({AffineExpr{t_max}, U(k, 0), U(k, 1), U(k, 2)});
@@ -188,9 +195,9 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         }
         b.add_nonnegative(lower);
         b.add_second_order_cone({scaled(U(k, 0), std::tan(gimbal)), U(k, 1), U(k, 2)});
-        // The measured start state (and, starting in phase 1, its zero-duration copies up to the shared node) is
-        // fixed: state limits there could only make a re-plan from a slightly violating snapshot infeasible.
-        if (!(k == 0 || (start_phase == 1 && k <= boundary))) {
+        // The measured start state (and, starting in a later phase, its zero-duration copies up to that phase's first
+        // node) is fixed: state limits there could only make a re-plan from a slightly violating snapshot infeasible.
+        if (k > fixed_nodes_end) {
         // Tilt and rate limits are soft (exact L1 penalty): right after the engine switch the booster may still turn
         // faster than the final set allows, and a re-plan must stay feasible while that dies out.
         const int tilt_slack = penalised(weights.attitude_violation, "tilt_slack");  // quaternion (y, z) norm over
@@ -208,10 +215,20 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
             b.add_second_order_cone({X(k, 1).add_constant(-target.position_m.x),
                                      scaled(X(k, 2).add_constant(-target.position_m.y), tg),
                                      scaled(X(k, 3).add_constant(-target.position_m.z), tg)});
+            if (limits.approach_time_constant_s > 0.0) {
+                // v_x + sink_end + (x - x_catch) / tau >= -slack (soft: a re-plan from a fast state stays feasible).
+                const int approach_slack = penalised(weights.corridor_violation, "approach_slack");
+                AffineExpr approach = X(k, descent_index::velocity).add_constant(-target.velocity_mps.x).add(approach_slack, 1.0);
+                const AffineExpr height =
+                    scaled(X(k, descent_index::position).add_constant(-target.position_m.x), 1.0 / limits.approach_time_constant_s);
+                approach.add_constant(height.constant);
+                for (const auto& [index, c] : height.terms) approach.add(index, c);
+                b.add_nonnegative(approach);
+            }
             // Corridor: same structure at every node (the reference height only selects the radius).
             const bool in_corridor = target.corridor_radius_m > 0.0 && ref.x[at(k)][descent_index::position] < target.corridor_top_m;
             const double radius = in_corridor                                  ? target.corridor_radius_m
-                                  : p == 1 && target.final_set_radius_m > 0.0 ? target.final_set_radius_m
+                                  : p == final_phase && target.final_set_radius_m > 0.0 ? target.final_set_radius_m
                                                                               : corridor_inactive_radius_m;
             // Soft: a re-plan from outside the corridor stays feasible (exact L1 penalty, zero slack when reachable).
             const int corridor_slack = penalised(weights.corridor_violation, "corridor_slack");
@@ -254,12 +271,16 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         cone.push_back(AffineExpr{-1.0}.add(eta[k], 1.0));
         b.add_second_order_cone(cone);
     }
-    b.add_second_order_cone({AffineExpr{1.0}.add(eta_s[0], 1.0), AffineExpr{}.add(sub.ds[0], 2.0),
-                             AffineExpr{}.add(sub.ds[1], 2.0), AffineExpr{-1.0}.add(eta_s[0], 1.0)});
+    {
+        std::vector<AffineExpr> cone{AffineExpr{1.0}.add(eta_s[0], 1.0)};
+        for (int p = 0; p < descent_phases; ++p) cone.push_back(AffineExpr{}.add(sub.ds[p], 2.0));
+        cone.push_back(AffineExpr{-1.0}.add(eta_s[0], 1.0));
+        b.add_second_order_cone(cone);
+    }
     // Phase durations.
-    for (int p = 0; p < 2; ++p) {
+    for (int p = 0; p < descent_phases; ++p) {
         const AffineExpr s = AffineExpr{ref.duration_s[static_cast<size_t>(p)]}.add(sub.ds[p], duration_scale_s);
-        if (p == 0 && start_phase == 1) {
+        if (p < start_phase) {
             b.add_equality(s);
             continue;
         }
@@ -268,13 +289,13 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     }
     // Gentle end (see DescentLimits::terminal_thrust_margin): a cone on the last node's thrust.
     {
-        const auto& set = model.engine_sets[1];
+        const auto& set = model.engine_sets[at(final_phase)];
         b.add_second_order_cone({AffineExpr{set.thrust_min_n + limits.terminal_thrust_margin * set.thrust_max_n},
                                  U(last, 0), U(last, 1), U(last, 2)});
     }
     // Throttle rate: the thrust magnitude (linearised along the reference direction) changes at most the engines'
-    // throttle rate over each interval (reference interval lengths). Not over the engine switch, where the ignition
-    // set runs down, nor over the zero-length intervals of a plan starting on the final set.
+    // throttle rate over each interval (reference interval lengths). Not over an engine switch, where the outgoing
+    // set runs down, nor over the zero-length intervals before the start phase.
     auto magnitude = [&](int k) {
         const Vec3& ub = ref.u[at(k)];
         const Vec3 dir = norm(ub) >= min_reference_thrust_n ? ub / norm(ub) : Vec3{1.0, 0.0, 0.0};
@@ -287,9 +308,23 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         }
         return m;
     };
+    if (const auto& set = model.engine_sets[at(start_phase)]; limits.initial_thrust_n > 0.0 && set.throttle_rate_per_s > 0.0) {
+        // |u| at the start phase's first node within the throttle-rate reach of the measured thrust.
+        // Engines of an earlier set still running down count in the measurement: clamp it to this set's range.
+        const double measured = std::clamp(limits.initial_thrust_n, set.thrust_min_n, (1.0 - limits.throttle_margin) * set.thrust_max_n);
+        const double reach = set.throttle_rate_per_s * set.thrust_max_n * limits.initial_thrust_window_s;
+        const AffineExpr m = magnitude(fixed_nodes_end);
+        AffineExpr up{measured + reach - m.constant}, down{m.constant - measured + reach};
+        for (const auto& [index, c] : m.terms) {
+            up.add(index, -c);
+            down.add(index, c);
+        }
+        b.add_nonnegative(up);
+        b.add_nonnegative(down);
+    }
     for (int k = 0; k + 1 < K; ++k) {
-        if (k == boundary - 1 || (start_phase == 1 && k < boundary)) continue;
-        const auto& set = model.engine_sets[k < boundary ? 0 : 1];
+        if (((k + 1) % (n - 1) == 0 && k + 1 < last) || k < fixed_nodes_end) continue;
+        const auto& set = model.engine_sets[at(k / (n - 1))];
         if (set.throttle_rate_per_s <= 0.0) continue;
         const double dt = reference_node_time(ref.duration_s, k + 1, n) - reference_node_time(ref.duration_s, k, n);
         const double max_change = set.throttle_rate_per_s * set.thrust_max_n * dt;
@@ -316,10 +351,10 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
     for (int k = 0; k < K; ++k) objective.add(eta[k], weights.trust_region);
     objective.add(eta_s[0], weights.trust_region);
     // Catch: the final (3-engine) set turns the booster slowly - it should descend straight above the catch point
-    // (the hull slides down between the arms), so the lateral divert happens on the ignition set. A soft penalty on
+    // (the hull slides down between the arms), so the lateral divert happens on the earlier sets. A soft penalty on
     // the final set's distance from the catch axis keeps every re-plan feasible.
     for (int k = 0; k < K; ++k) {
-        if (target.goal == DescentGoal::Catch && k >= boundary && k > 0) {
+        if (target.goal == DescentGoal::Catch && k >= final_phase * (n - 1) && k > 0) {
             const double tau = weights.final_lateral_time_s;  // lateral speed counts as the offset it makes in tau
             const int lateral = b.add_variables(1, "lateral")[0];
             b.add_second_order_cone({AffineExpr{}.add(lateral, 1.0), X(k, 2).add_constant(-target.position_m.y),
@@ -341,8 +376,9 @@ DescentReference DescentSubproblem::unpack(const std::vector<double>& s) const {
         for (int i = 0; i < 14; ++i) out.x[at(k)][i] += state_scale[at(i)] * s[at(dx[at(k)][i])];
         out.u[at(k)] += Vec3{s[at(du[at(k)][0])], s[at(du[at(k)][1])], s[at(du[at(k)][2])]} * thrust_scale;
     }
-    for (int p = 0; p < 2; ++p) out.duration_s[at(p)] += duration_scale_s * s[at(ds[p])];
-    if (start_phase == 1) out.duration_s[0] = 0.0;
+    for (int p = 0; p < descent_phases; ++p) {
+        out.duration_s[at(p)] = p < start_phase ? 0.0 : out.duration_s[at(p)] + duration_scale_s * s[at(ds[p])];
+    }
     return out;
 }
 

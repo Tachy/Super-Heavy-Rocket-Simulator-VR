@@ -24,32 +24,64 @@ bool contains(const std::vector<std::string>& groups, const std::string& group) 
     return std::find(groups.begin(), groups.end(), group) != groups.end();
 }
 
-// The engines dropped at the switch run down over their shutdown time: a linear run-down has the impulse of a step at
-// half that time, so the switch is commanded this much before the planned one.
-double switch_lead_s(const vehicle::Vehicle& v, const SnapshotSettings& s) {
+// The engines dropped at the switch to phase `next` run down over their shutdown time: a linear run-down has the
+// impulse of a step at half that time, so the switch is commanded this much before the planned one.
+double switch_lead_s(const vehicle::Vehicle& v, const SnapshotSettings& s, int next) {
     double lead = 0.0;
+    const auto& before = s.phase_groups[static_cast<size_t>(next - 1)];
+    const auto& after = s.phase_groups[static_cast<size_t>(next)];
     for (const auto& e : v.stages().front().engines) {
-        if (contains(s.ignition_groups, e.group_id) && !contains(s.final_groups, e.group_id)) {
+        if (contains(before, e.group_id) && !contains(after, e.group_id)) {
             lead = std::max(lead, 0.5 * e.performance->config().shutdown_s);
         }
     }
     return lead;
 }
 
+constexpr double prediction_step_s = 0.05;  // RK4 step of the latency prediction
+
+// x after `duration_s` of flying `plan` from its time t0_s (planning model, the plan's body-frame thrust).
+DescentState predict_on_plan(const DescentModel& model, const DescentPlan& plan, double t0_s, double duration_s,
+                             DescentState x) {
+    const int steps = std::max(1, static_cast<int>(std::ceil(duration_s / prediction_step_s)));
+    const double h = duration_s / steps;
+    for (int i = 0; i < steps; ++i) {
+        const double t = t0_s + i * h;
+        const int phase = plan.phase_at(t + 0.5 * h);
+        const auto f = [&](const DescentState& y, double tt) { return model.derivative(y, plan.thrust_at(tt), phase); };
+        const auto k1 = f(x, t);
+        const auto k2 = f(x + k1 * (0.5 * h), t + 0.5 * h);
+        const auto k3 = f(x + k2 * (0.5 * h), t + 0.5 * h);
+        const auto k4 = f(x + k3 * h, t + h);
+        x = x + (k1 + k2 * 2.0 + k3 * 2.0 + k4) * (h / 6.0);
+    }
+    const auto q = state_attitude(x).normalized();
+    x[descent_index::attitude] = q.w;
+    x[descent_index::attitude + 1] = q.x;
+    x[descent_index::attitude + 2] = q.y;
+    x[descent_index::attitude + 3] = q.z;
+    return x;
+}
+
 }  // namespace
 
 double landing_throttle(const vehicle::Vehicle& v, const std::vector<std::string>& run_groups, double thrust_n,
                         double pressure_pa) {
-    double available = 0.0, residual = 0.0;
+    // Thrust of an engine: throttle x vacuum thrust - ambient pressure x exit area; the pressure loss does not scale
+    // with the throttle, so the throttle solves sum spool (throttle F_vac - loss) = thrust - residual.
+    double vacuum = 0.0, loss = 0.0, residual = 0.0;
     for (const auto& e : v.stages().front().engines) {
         if (e.starved) continue;
         if (contains(run_groups, e.group_id)) {
-            available += std::max(e.spool, min_spool_for_throttle) * e.performance->thrust_n(1.0, pressure_pa);
+            const double spool = std::max(e.spool, min_spool_for_throttle);
+            const double f_vac = e.performance->thrust_n(1.0, 0.0);
+            vacuum += spool * f_vac;
+            loss += spool * (f_vac - e.performance->thrust_n(1.0, pressure_pa));
         } else {
             residual += e.spool * e.performance->thrust_n(e.throttle, pressure_pa);  // still starting or running down
         }
     }
-    return available > 0.0 ? std::clamp((thrust_n - residual) / available, 0.0, 1.0) : 1.0;
+    return vacuum > 0.0 ? std::clamp((thrust_n - residual + loss) / vacuum, 0.0, 1.0) : 1.0;
 }
 
 ScvxLandingGuidance::ScvxLandingGuidance(LandingSite site, ScvxLandingParameters parameters, PlanFunction plan)
@@ -68,11 +100,19 @@ PlanRequest ScvxLandingGuidance::request(const DescentSnapshot& snapshot, int st
     r.settings.limits.min_mass_kg = snapshot.min_mass_kg;
     r.settings.limits.phase0_initial_spool = snapshot.phase0_spool;
     r.settings.limits.phase0_startup_s = snapshot.startup_s;
+    if (plan_) {
+        r.start_offset_s = parameters_.plan_latency_s;
+        r.initial = predict_on_plan(snapshot.model, *plan_, snapshot.epoch - plan_epoch_, r.start_offset_s, snapshot.initial);
+    }
     if (plan_ && plan_->goal == r.target.goal) {
         r.warm_start = plan_;
-        r.warm_start_elapsed_s = snapshot.epoch - plan_epoch_;
+        r.warm_start_elapsed_s = snapshot.epoch + r.start_offset_s - plan_epoch_;
     }
-    if (aborting_) r.settings.limits.min_phase_s = {0.0, 0.0};  // mid-flight: no forced phase durations
+    if (plan_) {  // a re-plan: the engines are running, their thrust changes at the throttle rate
+        r.settings.limits.initial_thrust_n = snapshot.thrust_n;
+        r.settings.limits.initial_thrust_window_s = parameters_.plan_latency_s;
+    }
+    if (aborting_) r.settings.limits.min_phase_s = {};  // mid-flight: no forced phase durations
     r.snapshot_epoch = snapshot.epoch;
     return r;
 }
@@ -81,11 +121,11 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: plans and tracking
         const auto& p = *outcome.plan;
         const auto& x0 = p.reference.x.front();
-        std::printf("[scvx] snap %.2f phase %d goal %d conv %d it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f "
+        std::printf("[scvx] snap %.2f phase %d goal %d conv %d it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f/%.2f "
                     "h %.1f v %.1f,%.1f,%.1f m %.0f tilt %.1f deg rate %.3f lat %.1f,%.1f\n",
                     outcome.snapshot_epoch - plan_epoch_, p.start_phase, static_cast<int>(p.goal), p.converged, p.iterations,
                     p.virtual_control, p.last_step, p.nonlinear_defect, static_cast<int>(p.status), p.reference.duration_s[0],
-                    p.reference.duration_s[1], x0[1], x0[4], x0[5], x0[6], x0[0],
+                    p.reference.duration_s[1], p.reference.duration_s[2], x0[1], x0[4], x0[5], x0[6], x0[0],
                     2.0 * std::asin(std::min(1.0, std::hypot(x0[9], x0[10]))) * 57.29577951308232, std::hypot(x0[12], x0[13]),
                     x0[2], x0[3]);
     }
@@ -95,7 +135,7 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     const bool stale = aborting_ && outcome.plan->goal == DescentGoal::Catch;  // requested before the abort
     if (outcome.plan->converged && !stale) {
         plan_ = outcome.plan;
-        plan_epoch_ = outcome.snapshot_epoch;
+        plan_epoch_ = outcome.snapshot_epoch + outcome.start_offset_s;
         consecutive_failures_ = 0;
         return;
     }
@@ -113,9 +153,9 @@ bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::
     const auto outcome = replanner_.plan_now(request(snapshot, 0));
     if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: plans and tracking
         const auto& p = *outcome.plan;
-        std::printf("[scvx] first: conv %d it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f spool %.2f\n",
+        std::printf("[scvx] first: conv %d it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f/%.2f spool %.2f\n",
                     p.converged, p.iterations, p.virtual_control, p.last_step, p.nonlinear_defect, static_cast<int>(p.status),
-                    p.reference.duration_s[0], p.reference.duration_s[1], snapshot.phase0_spool);
+                    p.reference.duration_s[0], p.reference.duration_s[1], p.reference.duration_s[2], snapshot.phase0_spool);
     }
     ++stats_.plans;
     stats_.last_solve_ms = stats_.max_solve_ms = outcome.solve_ms;
@@ -140,18 +180,23 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
         (time_to_go > parameters_.min_replan_time_to_go_s || abort_pending)) {
         const auto snapshot = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
         model_ = snapshot.model;
-        const int phase = final_engines_ ? 1 : plan_->phase_at(t);
+        const int phase = std::max(engine_set_, plan_->phase_at(t + parameters_.plan_latency_s));
         replanner_.submit(request(snapshot, phase));
         next_request_ = epoch + parameters_.replan_interval_s;
     }
 
     const auto earth = env.earth_orientation.fixed_to_gcrf(epoch);
     const auto x = plan_state(body, earth, frame_);
-    // Slower than the hand-over sink rate on the ignition set: switch now (thirteen engines would climb).
-    if (!final_engines_ && -x[descent_index::velocity] < parameters_.settings.limits.switch_min_sink_mps) final_engines_ = true;
     const auto ref = sample_plan(*plan_, model_, epoch - plan_epoch_, parameters_.snapshot.catch_sink_mps);
-    if (ref.phase == 1 || plan_->phase_at(epoch - plan_epoch_ + switch_lead_s(body.vehicle(), parameters_.snapshot)) == 1) {
-        final_engines_ = true;
+    while (engine_set_ + 1 < descent_phases) {
+        // Slower than the switch window on this set: switch now (its engines at minimum throttle would climb); else
+        // at the planned switch, the run-down of the dropped engines ahead.
+        const int next = engine_set_ + 1;
+        const bool too_slow = -x[descent_index::velocity] < parameters_.settings.limits.switches[static_cast<size_t>(engine_set_)].min_sink_mps;
+        const bool planned = ref.phase >= next ||
+                             plan_->phase_at(epoch - plan_epoch_ + switch_lead_s(body.vehicle(), parameters_.snapshot, next)) >= next;
+        if (!too_slow && !planned) break;
+        engine_set_ = next;
     }
     const auto track = tracking_command(ref, state_position(x), state_velocity(x), parameters_.tracking);
     const Vec3& axis_plan = track.axis;
@@ -170,7 +215,7 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
     }
 
     ScvxLandingCommand cmd;
-    cmd.run_groups = final_engines_ ? parameters_.snapshot.final_groups : parameters_.snapshot.ignition_groups;
+    cmd.run_groups = parameters_.snapshot.phase_groups[static_cast<size_t>(engine_set_)];
     const Vec3 r_fixed = transpose(earth.rotation) * body.state().position_gcrf_m;
     const double pressure = env.atmosphere.at(frames::fixed_to_geodetic(r_fixed).height_m).pressure_pa;
     cmd.throttle = landing_throttle(body.vehicle(), cmd.run_groups, x[descent_index::mass] * track.thrust_acceleration_mps2, pressure);
@@ -202,7 +247,7 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
         const double c = mass.inertia_kg_m2.y / (mass.mass_kg * model_.gimbal_lever_m);
         // Tilt acceleration the gimbals can give at this thrust: a sin(gimbal_max) / c. The LQR's control effort
         // scale follows it (a design for more than the engines can give saturates and swings up).
-        const int set = final_engines_ ? 1 : 0;
+        const int set = engine_set_;
         const double alpha_max = a * std::sin(model_.engine_sets[static_cast<size_t>(set)].gimbal_max_rad) / c;
         if (set != lqr_set_ || std::abs(a - lqr_a_) > lqr_retune_fraction * a ||
             std::abs(c - lqr_c_) > lqr_retune_fraction * c) {

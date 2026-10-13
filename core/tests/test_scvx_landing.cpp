@@ -46,8 +46,9 @@ struct Fixture {
 
     gnc::ScvxLandingParameters parameters() const {
         gnc::ScvxLandingParameters p;
-        p.snapshot.ignition_groups = {"booster/center", "booster/divert", "booster/middle"};
-        p.snapshot.final_groups = {"booster/center"};
+        p.snapshot.phase_groups = {std::vector<std::string>{"booster/center", "booster/divert", "booster/middle"},
+                             std::vector<std::string>{"booster/center", "booster/divert"},
+                             std::vector<std::string>{"booster/center"}};
         return p;
     }
 };
@@ -105,7 +106,7 @@ TEST_CASE("Repeated failed re-plans switch to an abort", "[gnc][scvx_landing]") 
     CHECK(abort_min_phase_s == 0.0);
 }
 
-TEST_CASE("Landing throttle counts the thrust of engines still running down", "[gnc][scvx_landing]") {
+TEST_CASE("Landing throttle delivers the thrust, counting engines still running down", "[gnc][scvx_landing]") {
     Fixture f;
     auto& body = *f.body;
     const auto& env = f.session->environment();
@@ -123,8 +124,17 @@ TEST_CASE("Landing throttle counts the thrust of engines still running down", "[
         else if (e.group_id == "booster/middle" || e.group_id == "booster/divert") residual += e.spool * e.performance->thrust_n(e.throttle, pressure);
     }
     REQUIRE(residual > 0.0);
-    const double thrust = residual + 0.6 * centre_full;
-    CHECK(std::abs(gnc::landing_throttle(body.vehicle(), groups, thrust, pressure) - 0.6) < 1e-9);
+    // Low throttle, where the nozzle's pressure loss (not proportional to the throttle) matters most.
+    for (const double fraction : {0.6, 0.35}) {
+        CAPTURE(fraction);
+        const double thrust = residual + fraction * centre_full;
+        const double throttle = gnc::landing_throttle(body.vehicle(), groups, thrust, pressure);
+        double delivered = residual;
+        for (const auto& e : body.vehicle().stages().front().engines) {
+            if (e.group_id == "booster/center") delivered += e.spool * e.performance->thrust_n(throttle, pressure);
+        }
+        CHECK(std::abs(delivered - thrust) < 1e-9 * thrust);
+    }
 }
 
 TEST_CASE("Slowly converging re-plans keep the catch and the previous plan", "[gnc][scvx_landing]") {
