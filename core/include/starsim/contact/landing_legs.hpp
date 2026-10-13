@@ -28,11 +28,20 @@ struct LegContact {
     double max_foot_force_n = 0.0;
 };
 
+// The body's inertia for friction that stays stable with explicit (start-of-tick) forces: a foot's friction is capped
+// at what stops its slip within the tick (effective mass at the foot incl. rotation, shared by the feet in contact).
+// Without it, a stage with a small roll inertia (Falcon 9: ~45 t m^2, feet 9 m out) reversed its spin every tick.
+struct FrictionLimit {
+    double mass_kg = 0.0;
+    math::Vec3 inertia_body_kg_m2;  // principal moments (roll, pitch, yaw)
+    double dt_s = 0.0;
+};
+
 // Penalty contact of the feet with the surface. Each foot is a spring-damper (stiffness, damping) in series with a
 // crush core: once the force reaches the crush force the core crushes plastically (constant force, the stroke used so
 // far in `crushed_m`, one per foot, grows; no rebound). Regularised Coulomb friction against the slip. A foot over
 // water gets no support (it sinks: `water` once below the sea). The base ring only reports contact (no force).
 LegContact leg_contact(const LegGeometry& legs, std::vector<double>& crushed_m, const SitePose& pose,
-                       const LandingSurface& surface);
+                       const LandingSurface& surface, const FrictionLimit* friction_limit = nullptr);
 
 }  // namespace starsim::contact

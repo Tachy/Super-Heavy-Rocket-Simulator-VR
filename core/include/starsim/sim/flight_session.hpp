@@ -3,6 +3,7 @@
 #include <filesystem>
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/sim/catch_tower_sim.hpp"
+#include "starsim/sim/leg_landing_sim.hpp"
 #include <map>
 #include <memory>
 #include <optional>
@@ -189,6 +190,12 @@ public:
     // Landing legs of a body: start the deployment (guidance, pilot), or place them in a state (scenarios).
     void deploy_legs(size_t body_index);
     void set_leg_deployment(size_t body_index, double fraction);
+    // Landing on legs: the surface the legs land on (default: the site's ground plane with its shoreline; a drone
+    // ship's deck replaces it), and how a body's touchdown ended.
+    void set_landing_surface(double latitude_rad, double longitude_rad, double height_m, contact::LandingSurface surface);
+    const LegLandingSim& leg_landing() const { return *legs_; }
+    LegTouchdown leg_touchdown(size_t body_index) const { return legs_->touchdown(*bodies_.at(body_index).body); }
+    std::vector<double> leg_crushed_m(size_t body_index) const { return legs_->crushed_m(*bodies_.at(body_index).body); }
     // Dispersion injection (tests, training): an instantaneous velocity change of a body, e.g. the residual of a burn
     // (tail-off, misalignment) beyond what the closed-loop cutoff removes.
     void apply_velocity_error(size_t body_index, const math::Vec3& delta_v_gcrf_mps);
@@ -256,6 +263,8 @@ private:
     bool towers_enabled_ = true;
     bool realtime_planning_ = false;
     std::unique_ptr<CatchTowerSim> tower_;
+    std::unique_ptr<LegLandingSim> legs_;  // always present (site ground plane by default)
+    void reset_leg_landing();              // new bodies: no stale tracks
     std::optional<gnc::BoosterReturnParameters> booster_return_;
     double gm_earth_;
     AutopilotStatus autopilot_;

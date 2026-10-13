@@ -42,6 +42,7 @@ add_library(starsim_core STATIC
     src/gnc/entry_predictor.cpp
     src/sim/telemetry_recorder.cpp
     src/sim/catch_tower_sim.cpp
+    src/sim/leg_landing_sim.cpp
     src/sim/landing_outcome.cpp
     src/sim/flight_session.cpp
     src/mission/lunar_transfer.cpp

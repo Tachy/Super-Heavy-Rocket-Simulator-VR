@@ -35,11 +35,25 @@ LegGeometry make_leg_geometry(const config::LandingLegConfig& legs, double stage
 }
 
 LegContact leg_contact(const LegGeometry& legs, std::vector<double>& crushed_m, const SitePose& pose,
-                       const LandingSurface& surface) {
+                       const LandingSurface& surface, const FrictionLimit* friction_limit) {
     LegContact result;
     crushed_m.resize(legs.feet.size(), 0.0);
     const auto& c = legs.config;
     auto site_point = [&](const Vec3& b) { return pose.cg_m + pose.body_to_site * (b - Vec3{pose.cg_station_m, 0.0, 0.0}); };
+    // Feet that touch supported ground (they share the friction limit).
+    int touching = 0;
+    for (const auto& foot : legs.feet) {
+        const Vec3 p = site_point(foot);
+        const auto support = surface.below(p.x, p.y);
+        if (!support.water && p.z < support.height_m) ++touching;
+    }
+    // Effective mass of the body at a point for a push along `t` (site frame): 1 / (1/m + (r x t) . I^-1 (r x t)).
+    auto effective_mass = [&](const Vec3& r, const Vec3& t) {
+        const Vec3 a = transpose(pose.body_to_site) * cross(r, t);  // body axes
+        const auto& inertia = friction_limit->inertia_body_kg_m2;
+        const double rotational = a.x * a.x / inertia.x + a.y * a.y / inertia.y + a.z * a.z / inertia.z;
+        return 1.0 / (1.0 / friction_limit->mass_kg + rotational);
+    };
     for (size_t i = 0; i < legs.feet.size(); ++i) {
         const Vec3 p = site_point(legs.feet[i]);
         const auto support = surface.below(p.x, p.y);
@@ -58,7 +72,13 @@ LegContact leg_contact(const LegGeometry& legs, std::vector<double>& crushed_m, 
         }
         if (crushed_m[i] > c.stroke_m) result.stroke_exhausted = true;
         const Vec3 slip{v.x, v.y, 0.0};
-        const Vec3 f = Vec3{0.0, 0.0, f_n} - slip * (c.friction * f_n / std::max(norm(slip), friction_regularization_mps));
+        Vec3 friction = slip * (-c.friction * f_n / std::max(norm(slip), friction_regularization_mps));
+        if (friction_limit && norm(slip) > 0.0) {
+            const double stop = effective_mass(p - pose.cg_m, slip / norm(slip)) * norm(slip) /
+                                (friction_limit->dt_s * std::max(touching, 1));
+            if (norm(friction) > stop) friction = friction * (stop / norm(friction));
+        }
+        const Vec3 f = Vec3{0.0, 0.0, f_n} + friction;
         result.force_n += f;
         result.torque_nm += cross(p - pose.cg_m, f);
         result.max_foot_force_n = std::max(result.max_foot_force_n, f_n);

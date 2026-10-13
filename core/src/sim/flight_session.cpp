@@ -29,7 +29,9 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
       earth_(earth),
       gravity_(ephemeris, earth, gravity_config),
       env_{gravity_, atmosphere_, earth, &ephemeris, true},
-      gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)) {}
+      gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)) {
+    legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
+}
 
 const char* to_string(AutopilotState state) {
     switch (state) {
@@ -192,6 +194,7 @@ void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::St
     }
     const vehicle::RigidBodyState rigid{state.position_m, state.velocity_mps, math::Quat::from_matrix(m), {}};
     bodies_.clear();
+    reset_leg_landing();
     bodies_.push_back({std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid), {}, nullptr, {}});
     controlled_ = 0;
     epoch_ = epoch;
@@ -482,6 +485,9 @@ void FlightSession::set_realtime_planning(bool realtime) {
 
 void FlightSession::set_launch_site(const LaunchSite& site) {
     launch_site_ = site;
+    contact::LandingSurface ground;
+    ground.sea = site.sea;
+    legs_ = std::make_unique<LegLandingSim>(site.latitude_rad, site.longitude_rad, site.height_m, std::move(ground), tick_s);
     tower_.reset();
     if (towers_enabled_ && site.tower) {
         tower_ = std::make_unique<CatchTowerSim>(*site.tower, site.latitude_rad, site.longitude_rad, site.height_m);
@@ -499,6 +505,7 @@ void FlightSession::place_body(const config::VehicleConfig& config, const vehicl
     auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(config, config_dir_), state);
     body->set_ground_height(launch_site_.height_m);
     bodies_.clear();
+    reset_leg_landing();
     bodies_.push_back({std::move(body), {}, nullptr, {}});
     controlled_ = 0;
     epoch_ = epoch;
@@ -732,6 +739,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         }
         const auto pointers = body_pointers();
         if (tower_) tower_->before_tick(pointers, earth_, epoch_);
+        legs_->before_tick(pointers, earth_, epoch_);
         for (size_t i = 0; i < bodies_.size(); ++i) {
             auto& body = *bodies_[i].body;
             const auto t = earth_.fixed_to_gcrf(epoch_);
@@ -746,6 +754,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             body.step(env_, epoch_, tick_s, command);
         }
         if (tower_) tower_->after_tick(pointers, earth_, epoch_ + tick_s, tick_s);
+        legs_->after_tick(pointers, earth_, epoch_ + tick_s, tick_s);
         epoch_ += tick_s;
     }
     if (bodies_.empty()) {
@@ -801,6 +810,15 @@ LandingOutcome FlightSession::landing_outcome(size_t index) const {
 
 vehicle::FlightTelemetry FlightSession::telemetry(size_t index) const {
     return bodies_.at(index).body->telemetry(env_, epoch_);
+}
+
+void FlightSession::set_landing_surface(double latitude_rad, double longitude_rad, double height_m,
+                                        contact::LandingSurface surface) {
+    legs_ = std::make_unique<LegLandingSim>(latitude_rad, longitude_rad, height_m, std::move(surface), tick_s);
+}
+
+void FlightSession::reset_leg_landing() {
+    legs_->clear();
 }
 
 void FlightSession::deploy_legs(size_t body_index) { bodies_.at(body_index).body->vehicle().deploy_legs(); }
