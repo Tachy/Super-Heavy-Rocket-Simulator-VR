@@ -14,6 +14,7 @@ add_library(starsim_core STATIC
     src/propulsion/engine_performance.cpp
     src/aero/slender_body_aero.cpp
     src/aero/grid_fin.cpp
+    src/aero/flap.cpp
     src/vehicle/vehicle.cpp
     src/vehicle/flight_body.cpp
     src/gnc/attitude_controller.cpp
