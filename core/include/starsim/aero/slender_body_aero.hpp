@@ -24,6 +24,21 @@ private:
     std::vector<double> cd_power_off_;
 };
 
+// Cross-flow drag coefficient eta * C_dc versus Mach (the Jorgensen viscous term), linear interpolation, clamped
+// at the table ends. Replaces the generic constants for a vehicle whose cross-flow is identified (the ship's entry).
+class CrossflowCurve {
+public:
+    CrossflowCurve() = default;
+    explicit CrossflowCurve(const config::CsvTable& table);  // columns: mach, crossflow_cd
+
+    double cd(double mach) const;
+    bool empty() const { return mach_.empty(); }
+
+private:
+    std::vector<double> mach_;
+    std::vector<double> cd_;
+};
+
 struct SlenderBodyGeometry {
     double length_m = 0.0;
     double diameter_m = 0.0;
@@ -48,13 +63,14 @@ double rarefaction_weight(double knudsen);
 //                                                                 table for tail-first flight if given)
 //   normal force C_N = sin(2a) cos(a/2) + eta * C_dc * (L D / A_ref) sin^2(a)   (Jorgensen, NASA TR R-474)
 // The potential term acts at 0.466 of the nose length from the tip (ogive, Barrowman), the cross-flow
-// term at mid-length. [E] eta = 0.68, C_dc = 1.2 - generic, to be calibrated (no public Starship data).
+// term at mid-length. [E] eta = 0.68, C_dc = 1.2 - generic; a CrossflowCurve replaces eta * C_dc where identified.
 // Rarefied flow (above ~90 km): bridged by Knudsen number to free-molecular coefficients
 // (C_A = 2.2 cos^2 a, cross-flow C_dc = 2.2 with eta = 1 [E], typical diffuse-reflection values).
 // No damping derivatives yet.
 class SlenderBodyAero {
 public:
-    SlenderBodyAero(SlenderBodyGeometry geometry, AxialDragCurve drag, AxialDragCurve tail_first_drag = {});
+    SlenderBodyAero(SlenderBodyGeometry geometry, AxialDragCurve drag, AxialDragCurve tail_first_drag = {},
+                    CrossflowCurve crossflow = {});
 
     // air_velocity_body_mps: velocity of the vehicle relative to the air, body axes.
     AeroResult compute(const math::Vec3& air_velocity_body_mps, double density_kg_m3, double speed_of_sound_mps,
@@ -71,6 +87,7 @@ private:
     SlenderBodyGeometry geometry_;
     AxialDragCurve drag_;
     AxialDragCurve tail_first_drag_;
+    CrossflowCurve crossflow_;
     double reference_area_m2_;
 };
 

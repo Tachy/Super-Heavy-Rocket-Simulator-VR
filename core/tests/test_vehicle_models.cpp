@@ -124,3 +124,19 @@ TEST_CASE("Mean free path and rarefied-flow drag", "[environment][aero]") {
     CHECK(r.knudsen > 10.0);
     CHECK(-r.force_body_n.x / (r.dynamic_pressure_pa * area) == Catch::Approx(2.2));  // free-molecular C_A
 }
+
+TEST_CASE("A cross-flow table replaces the generic cross-flow coefficient", "[aero]") {
+    config::CsvTable t;
+    t.columns = {"mach", "crossflow_cd"};
+    t.rows = {{0.0, 1.0}, {10.0, 1.5}};
+    const aero::SlenderBodyGeometry g{50.0, 9.0, 0.0};  // flat top: no potential term
+    const aero::SlenderBodyAero generic(g, {});
+    const aero::SlenderBodyAero tabled(g, {}, {}, aero::CrossflowCurve(t));
+    const double rho = 1e-3, sound = 300.0;
+    const math::Vec3 broadside{0.0, 0.0, -3000.0};  // Mach 10, alpha 90 deg
+    const auto a = generic.compute(broadside, rho, sound, false);
+    const auto b = tabled.compute(broadside, rho, sound, false);
+    const double q = 0.5 * rho * 3000.0 * 3000.0;
+    CHECK(b.force_body_n.z == Catch::Approx(1.5 * 50.0 * 9.0 * q).epsilon(1e-9));
+    CHECK(a.force_body_n.z == Catch::Approx(0.68 * 1.2 * 50.0 * 9.0 * q).epsilon(1e-9));
+}

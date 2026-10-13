@@ -57,15 +57,26 @@ AxialDragCurve AxialDragCurve::plus(const std::vector<double>& mach, const std::
     return sum;
 }
 
+CrossflowCurve::CrossflowCurve(const config::CsvTable& table)
+    : mach_(table.column("mach")), cd_(table.column("crossflow_cd")) {
+    if (!std::is_sorted(mach_.begin(), mach_.end()) || mach_.size() < 2) {
+        throw config::ConfigError("cross-flow table: mach column must be ascending with >= 2 rows");
+    }
+}
+
+double CrossflowCurve::cd(double mach) const { return empty() ? 0.0 : interpolate(mach_, cd_, mach); }
+
 double AxialDragCurve::cd(double mach, bool powered) const {
     if (empty()) return 0.0;
     return interpolate(mach_, powered ? cd_power_on_ : cd_power_off_, mach);
 }
 
-SlenderBodyAero::SlenderBodyAero(SlenderBodyGeometry geometry, AxialDragCurve drag, AxialDragCurve tail_first_drag)
+SlenderBodyAero::SlenderBodyAero(SlenderBodyGeometry geometry, AxialDragCurve drag, AxialDragCurve tail_first_drag,
+                                 CrossflowCurve crossflow)
     : geometry_(geometry),
       drag_(std::move(drag)),
       tail_first_drag_(std::move(tail_first_drag)),
+      crossflow_(std::move(crossflow)),
       reference_area_m2_(constants::pi * 0.25 * geometry.diameter_m * geometry.diameter_m) {}
 
 AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, double density_kg_m3,
@@ -101,7 +112,9 @@ AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, dou
     const double potential =
         (1.0 - w) * (geometry_.nose_length_m > 0.0 ? std::abs(std::sin(2.0 * alpha) * std::cos(0.5 * alpha)) : 0.0);
     const double planform_ratio = geometry_.length_m * geometry_.diameter_m / reference_area_m2_;
-    const double crossflow = (1.0 - w) * crossflow_efficiency * crossflow_drag_coefficient + w * free_molecular_drag_coefficient;
+    const double continuum_crossflow =
+        crossflow_.empty() ? crossflow_efficiency * crossflow_drag_coefficient : crossflow_.cd(result.mach);
+    const double crossflow = (1.0 - w) * continuum_crossflow + w * free_molecular_drag_coefficient;
     const double viscous = crossflow * planform_ratio * sin_a * sin_a;
     const double normal_force = (potential + viscous) * q_area;
 

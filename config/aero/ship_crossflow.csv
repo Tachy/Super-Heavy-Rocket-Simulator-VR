@@ -1,0 +1,10 @@
+# Ship hull cross-flow coefficient eta * C_dc (Jorgensen viscous term, reference planform = length x diameter).
+# [E] initial: modified Newtonian cylinder 1.23 hypersonic, ~1.0-1.1 subsonic; calibrated [D] against the
+# entries of flights 12-14 (tests/validation/telemetry; ship entry plan b1, Task 8).
+mach,crossflow_cd
+0.0,1.0
+0.8,1.1
+1.2,1.4
+3.0,1.3
+10.0,1.25
+30.0,1.23

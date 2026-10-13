@@ -129,9 +129,14 @@ void Vehicle::rebuild_aero() {
             if (!delta.empty()) tail_first = tail_first.plus(low.grid_fin_table->mach(), delta);
         }
     }
+    // Identified hull cross-flow of a stage flying alone (the ship's entry); stacks keep the generic value.
+    aero::CrossflowCurve crossflow;
+    if (stages_.size() == 1 && !stages_.front().config.aero.crossflow_table.empty()) {
+        crossflow = aero::CrossflowCurve(config::load_csv_table(config_dir_ / stages_.front().config.aero.crossflow_table));
+    }
     aero_ = std::make_unique<aero::SlenderBodyAero>(
         aero::SlenderBodyGeometry{length_m(), diameter_m(), stages_.back().config.aero.nose_length_m}, drag,
-        tail_first);
+        tail_first, crossflow);
 }
 
 MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* flows, double tau_s) const {

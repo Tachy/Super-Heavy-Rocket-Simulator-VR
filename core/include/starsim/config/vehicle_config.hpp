@@ -65,7 +65,7 @@ struct AeroConfig {
     double reference_diameter_m = 0.0;
     std::string ascent_drag_table;  // path relative to config/, empty if none
     std::string descent_drag_table; // tail-first flight (booster return); empty = mirror the ascent table
-    std::string entry_table;
+    std::string crossflow_table;    // hull cross-flow eta * C_dc over Mach; used when the stage flies alone
     double nose_length_m = 0.0;     // ogive nose (0 = flat top, e.g. a booster)
 };
 
