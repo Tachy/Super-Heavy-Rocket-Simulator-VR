@@ -131,6 +131,23 @@ std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations
         for (const auto& e : stage.engines) {
             if (std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) groups.push_back(e.group_id);
         }
+        // Burn sets: groups of the same engine on the same ring burn together (symmetric thrust; e.g. the ship's three
+        // single-engine sea-level groups of the landing sequence - one off-axis Raptor would push the burn askew).
+        std::vector<std::vector<std::string>> sets;
+        std::vector<std::pair<std::string, double>> set_keys;
+        for (const auto& g : groups) {
+            const auto first = std::find_if(stage.engines.begin(), stage.engines.end(),
+                                            [&](const vehicle::Engine& e) { return e.group_id == g; });
+            const std::pair<std::string, double> key{first->performance->config().id,
+                                                     std::round(std::hypot(first->gimbal_point_m.y, first->gimbal_point_m.z) * 100.0)};
+            const auto it = std::find(set_keys.begin(), set_keys.end(), key);
+            if (it == set_keys.end()) {
+                set_keys.push_back(key);
+                sets.push_back({g});
+            } else {
+                sets[static_cast<size_t>(it - set_keys.begin())].push_back(g);
+            }
+        }
         auto make = [&](const std::vector<std::string>& selected, bool minimum_throttle) {
             BurnConfiguration c;
             c.groups = selected;
@@ -148,8 +165,8 @@ std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations
             return c;
         };
         configurations.push_back(make(groups, false));
-        for (const auto& g : groups) configurations.push_back(make({g}, false));
-        for (const auto& g : groups) configurations.push_back(make({g}, true));
+        for (const auto& set : sets) configurations.push_back(make(set, false));
+        for (const auto& set : sets) configurations.push_back(make(set, true));
         break;
     }
     std::erase_if(configurations, [](const BurnConfiguration& c) { return c.thrust_n <= 0.0; });

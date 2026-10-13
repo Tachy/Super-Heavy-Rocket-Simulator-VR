@@ -66,7 +66,7 @@ RigidBodyState far_away() { return {{1e10, 0.0, 0.0}, {}, {}, {}}; }
 
 VehicleCommand ship_full_thrust() {
     VehicleCommand c;
-    c.groups = {{"ship/sea_level", true, 1.0}, {"ship/vacuum", true, 1.0}};
+    c.groups = {{"ship/sea_level_1", true, 1.0}, {"ship/sea_level_2", true, 1.0}, {"ship/sea_level_3", true, 1.0}, {"ship/vacuum", true, 1.0}};
     return c;
 }
 

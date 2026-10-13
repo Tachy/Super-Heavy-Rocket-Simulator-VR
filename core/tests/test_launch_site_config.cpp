@@ -40,6 +40,6 @@ TEST_CASE("Boosters define two opposite catch pins", "[config]") {
         CHECK(pins.station_m < booster.length_m);
         CHECK(pins.protrusion_m > 0.0);
         CHECK(pins.max_load_n > 0.0);
-        CHECK(v.stages.back().catch_pins.azimuths_rad.empty());  // ship: none yet
+        CHECK(v.stages.back().catch_pins.azimuths_rad.size() == 2);  // the ship is caught too (b3)
     }
 }

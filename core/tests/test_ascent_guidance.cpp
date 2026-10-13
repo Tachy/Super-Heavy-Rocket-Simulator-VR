@@ -231,7 +231,7 @@ TEST_CASE("Burns below the main-engine minimum impulse use RCS translation", "[g
     const orbit::KeplerianElements circular{equatorial_radius_m + 300e3, 0.0, 26.5 * deg, 0.0, 0.0, 0.0};
     session.place_in_orbit("starship_block3", orbit::state_from_elements(circular, gm), t0, 1);
     const double minimum = session.minimum_burn_dv_mps();
-    CHECK(minimum > 1.0);  // one engine group at minimum throttle, ~1.75 s of transients
+    CHECK(minimum > 0.6);  // one engine (a single-engine group since b3) at minimum throttle, ~1.75 s of transients
 
     const double dv = 0.5;  // m/s, far below the Raptor minimum
     const auto s = session.body(0).state();

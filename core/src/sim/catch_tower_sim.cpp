@@ -21,6 +21,10 @@ constexpr double rest_rate_radps = 0.01;
 constexpr double rest_time_s = 2.0;         // ... for this long, engines off, both pins on the arms
 constexpr double missed_drop_m = 5.0;       // pins this far below the arm tops: the catch is lost
 constexpr double tower_zone_m = 1000.0;     // bodies closer than this need fixed ticks
+// [E] The tower serves a catchable body only inside this zone (CG horizontally from the catch axis, height above the
+// arm tops): a stage with pins elsewhere (e.g. the ship after staging) is neither tracked nor judged.
+constexpr double catch_zone_radius_m = 2000.0;
+constexpr double catch_zone_height_m = 5000.0;
 // Bound on a coasting body's acceleration towards the tower (gravity; drag only slows the fall).
 constexpr double coast_acceleration_bound_mps2 = 10.0;
 // The arms are force limited (they stall against the hull): damage comes from the hull being driven into an arm.
@@ -117,8 +121,13 @@ void CatchTowerSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
     vertical_load_n_ = caught_load_n_;
     for (auto* body : bodies) {
         if (!catchable(*body)) continue;
-        auto& tr = track(*body);
         const auto pose = site_pose(*body, t);
+        if (tracks_.count(body) == 0 &&
+            (std::hypot(pose.cg_m.x, pose.cg_m.y) > catch_zone_radius_m ||
+             pose.cg_m.z - geometry_.arm_top_height_m(arms_.carriage_offset_m()) > catch_zone_height_m)) {
+            continue;  // not (yet) approaching this tower
+        }
+        auto& tr = track(*body);
         tr.contact = contact::catch_contact(tr.geometry, pose, arms);
         if (tr.contact.any_contact()) {
             body->apply_external_wrench(site_to_gcrf * tr.contact.force_n,
