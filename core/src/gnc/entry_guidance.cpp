@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/gnc/attitude_slew.hpp"
@@ -20,6 +22,8 @@ constexpr int max_illinois_iterations = 8;
 constexpr int constraint_bisections = 6;
 constexpr double terminal_max_height_m = 40000.0;  // the hand-over Mach number is only trusted in dense air
 constexpr double max_terminal_prediction_s = 900.0;
+constexpr double settled_bank_rad = 5.0 * constants::deg_to_rad;  // no reversal in progress
+constexpr double levenberg_marquardt_damping = 1.0e-3;            // relative to the trace of J^T J
 constexpr double min_steering_fraction = 1.0e-3;  // below: the lift direction of the last cycle is kept  // the hand-over Mach number is only trusted in dense air
 
 double sign_of(double x) { return x < 0.0 ? -1.0 : 1.0; }
@@ -60,6 +64,7 @@ EntryGuidance::EntryGuidance(const vehicle::FlightBody& ship, const AlphaSchedul
     model_.fast_bank_mach_low = parameters_.fast_bank_mach_low;
     model_.fast_bank_mach_high = parameters_.fast_bank_mach_high;
     model_.terminal_min_alpha_rad = parameters_.terminal_min_alpha_rad;
+    model_.terminal_alpha_authority_rad = parameters_.terminal_alpha_authority_rad;
     if (!parameters_.predictor_j2) model_.j2 = 0.0;
     limits_ = stage.config.heat_shield;
     belly_azimuth_rad_ = stage.config.aero.belly_azimuth_rad;
@@ -223,7 +228,10 @@ Vec3 EntryGuidance::terminal_miss(const vehicle::FlightBody& body, const Vec3& r
     m.mass_kg = body.vehicle().mass_properties().mass_kg;
     EntryPredictorState state{r_itrf, v_itrf, 0.0};
     state.steered = true;
-    state.steering_itrf = steering;
+    state.steering = steering;
+    state.basis_frozen = terminal_basis_frozen_;
+    state.basis_e1 = terminal_e1_;
+    state.basis_e2 = terminal_e2_;
     const EntryPrediction p = predict_entry(m, state, 0.0, target_, parameters_.gate_height_m, 0.0,
                                             parameters_.terminal_prediction_step_s, max_terminal_prediction_s);
     if (time_to_go_s) *time_to_go_s = p.time_s;
@@ -233,66 +241,91 @@ Vec3 EntryGuidance::terminal_miss(const vehicle::FlightBody& body, const Vec3& r
 }
 
 void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const Vec3& r_itrf,
-                             const Vec3& v_itrf, double dt_s) {
+                             const Vec3& v_itrf, double mach, double dt_s) {
     const Vec3 up = math::normalized(r_itrf);
     const Vec3 east = math::normalized(cross(Vec3{0.0, 0.0, 1.0}, up));
     const Vec3 north = cross(up, east);
     const Vec3 u = math::normalized(v_itrf);
-    if (!terminal_started_) {  // the lift vector flown now: alpha and lift direction of the body axis
+    // steering basis: velocity frame, frozen once the path is steeper than the freeze angle (as the prediction)
+    if (!terminal_basis_frozen_) {
+        steering_basis(up, u, terminal_e1_, terminal_e2_);
+        if (std::asin(std::clamp(dot(u, up), -1.0, 1.0)) < model_.steering_freeze_gamma_rad) terminal_basis_frozen_ = true;
+    }
+    Vec3 e1 = terminal_e1_ - u * dot(terminal_e1_, u), e2 = terminal_e2_ - u * dot(terminal_e2_, u);
+    if (!terminal_started_) {
         terminal_started_ = true;
         terminal_attitude_gcrf_ = body.state().attitude;
-        const Vec3 x = transpose(itrf_to_gcrf) * body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
-        const double alpha = std::acos(std::clamp(dot(x, u), -1.0, 1.0));
-        const Vec3 l = x - u * dot(x, u);
-        terminal_lift_direction_itrf_ = norm(l) > 1e-6 ? l / norm(l) : north;
-        terminal_steering_itrf_ = terminal_lift_direction_itrf_ * model_.steering_fraction(alpha);
+        if (handed_over_) {
+            // from the entry: its own plan (schedule alpha = fraction 0.5, the commanded bank), so the terminal phase
+            // starts from the entry's prediction
+            terminal_lift_direction_ = Vec3{std::cos(bank_rad_), -std::sin(bank_rad_), 0.0};
+            terminal_steering_ = terminal_lift_direction_ * 0.5;
+        } else {  // placed in the terminal phase (scenario): the lift vector flown now
+            const Vec3 x = transpose(itrf_to_gcrf) * body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+            const double alpha = std::acos(std::clamp(dot(x, u), -1.0, 1.0));
+            const Vec3 l = x - u * dot(x, u);
+            terminal_lift_direction_ =
+                norm(l) > 1e-6 ? math::normalized(Vec3{dot(l, e1), dot(l, e2), 0.0}) : Vec3{1.0, 0.0, 0.0};
+            terminal_steering_ = terminal_lift_direction_ * model_.steering_fraction(alpha, mach);
+        }
     }
     terminal_prediction_age_s_ += dt_s;
     if (phase_ == EntryPhase::Terminal &&
         (terminal_prediction_age_s_ >= parameters_.terminal_cycle_s || !terminal_predicted_)) {
         terminal_prediction_age_s_ = 0.0;
         terminal_predicted_ = true;
-        // steering basis perpendicular to the air velocity: "up" and "side" (north when the fall is vertical)
-        Vec3 e1 = up - u * dot(up, u);
-        if (norm(e1) < 0.1) e1 = north - u * dot(north, u);
-        e1 = math::normalized(e1);
-        const Vec3 e2 = cross(u, e1);
-        Vec3 p = terminal_steering_itrf_ - u * dot(terminal_steering_itrf_, u);
+        Vec3 p = terminal_steering_;
         const Vec3 z0 = terminal_miss(body, r_itrf, v_itrf, p, nullptr);
         const double d = parameters_.terminal_newton_step;
-        const Vec3 z1 = terminal_miss(body, r_itrf, v_itrf, p + e1 * d, nullptr);
-        const Vec3 z2 = terminal_miss(body, r_itrf, v_itrf, p + e2 * d, nullptr);
+        // finite differences pointing into the unit disk (beyond it the fraction is clamped: no slope)
+        const double d1s = norm(p + Vec3{d, 0.0, 0.0}) <= 1.0 ? d : -d;
+        const double d2s = norm(p + Vec3{0.0, d, 0.0}) <= 1.0 ? d : -d;
+        const Vec3 z1 = terminal_miss(body, r_itrf, v_itrf, p + Vec3{d1s, 0.0, 0.0}, nullptr);
+        const Vec3 z2 = terminal_miss(body, r_itrf, v_itrf, p + Vec3{0.0, d2s, 0.0}, nullptr);
         // 2x2 Jacobian of the miss (east, north) over the steering (e1, e2)
-        const double j11 = dot(z1 - z0, east) / d, j12 = dot(z2 - z0, east) / d;
-        const double j21 = dot(z1 - z0, north) / d, j22 = dot(z2 - z0, north) / d;
-        const double det = j11 * j22 - j12 * j21;
-        if (std::abs(det) > 1e-9) {
-            const double me = dot(z0, east), mn = dot(z0, north);
-            const double d1 = -(j22 * me - j12 * mn) / det, d2 = -(-j21 * me + j11 * mn) / det;
-            p = p + e1 * d1 + e2 * d2;
+        const double j11 = dot(z1 - z0, east) / d1s, j12 = dot(z2 - z0, east) / d2s;
+        const double j21 = dot(z1 - z0, north) / d1s, j22 = dot(z2 - z0, north) / d2s;
+        // Levenberg-Marquardt step on the miss (least squares when the gate is out of reach at the steering limit),
+        // limited in size: (J^T J + lambda I) dp = -J^T z.
+        const double me = dot(z0, east), mn = dot(z0, north);
+        const double a11 = j11 * j11 + j21 * j21, a12 = j11 * j12 + j21 * j22, a22 = j12 * j12 + j22 * j22;
+        const double lambda = levenberg_marquardt_damping * (a11 + a22);
+        const double b1 = -(j11 * me + j21 * mn), b2 = -(j12 * me + j22 * mn);
+        const double det = (a11 + lambda) * (a22 + lambda) - a12 * a12;
+        if (det > 0.0) {
+            Vec3 step{((a22 + lambda) * b1 - a12 * b2) / det, ((a11 + lambda) * b2 - a12 * b1) / det, 0.0};
+            if (norm(step) > parameters_.terminal_max_step) step = step * (parameters_.terminal_max_step / norm(step));
+            p = p + step;
             if (norm(p) > 1.0) p = p / norm(p);
         }
-        terminal_steering_itrf_ = p;
+        terminal_steering_ = p;
+        if (std::getenv("STARSIM_DEBUG_ENTRY")) {  // diagnostics
+            const Vec3 xb = transpose(itrf_to_gcrf) * body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+            std::printf("[terminal] Mach %.2f gamma %.1f |p| %.3f p %.3f/%.3f miss E/N %.0f/%.0f alpha cmd %.1f actual "
+                        "%.1f scales %.2f/%.2f\n",
+                        mach, std::asin(std::clamp(dot(u, up), -1.0, 1.0)) * constants::rad_to_deg, norm(p), p.x, p.y,
+                        dot(z0, east), dot(z0, north), command_.alpha_rad * constants::rad_to_deg,
+                        std::acos(std::clamp(dot(xb, u), -1.0, 1.0)) * constants::rad_to_deg, model_.drag_scale,
+                        model_.lift_scale);
+        }
         terminal_zem_itrf_ = z0;
     }
     // At the gate the flip takes over (b3): until then the steering of the last cycle is held.
-    const double fraction = std::min(norm(terminal_steering_itrf_), 1.0);
-    if (fraction > min_steering_fraction) {
-        terminal_lift_direction_itrf_ = terminal_steering_itrf_ / norm(terminal_steering_itrf_);
-    }
-    const double alpha = model_.steering_alpha(fraction);
-    const auto wanted = entry_attitude_with_lift(itrf_to_gcrf * v_itrf, itrf_to_gcrf * terminal_lift_direction_itrf_, alpha,
-                                                 belly_azimuth_rad_);
+    const double fraction = std::min(norm(terminal_steering_), 1.0);
+    if (fraction > min_steering_fraction) terminal_lift_direction_ = terminal_steering_ / norm(terminal_steering_);
+    const double alpha = model_.steering_alpha(fraction, mach);
+    const Vec3 lift_itrf = e1 * terminal_lift_direction_.x + e2 * terminal_lift_direction_.y;
+    const auto wanted = entry_attitude_with_lift(itrf_to_gcrf * v_itrf, itrf_to_gcrf * lift_itrf, alpha, belly_azimuth_rad_);
     const math::Quat wanted_gcrf = attitude_from_axes(wanted.axis_gcrf, wanted.roll_reference_gcrf);
     terminal_attitude_gcrf_ =
         slew_toward(terminal_attitude_gcrf_, wanted_gcrf, parameters_.terminal_slew_rate_radps * dt_s);
     command_.axis_gcrf = terminal_attitude_gcrf_.rotate(Vec3{1.0, 0.0, 0.0});
     command_.roll_reference_gcrf = terminal_attitude_gcrf_.rotate(Vec3{0.0, 1.0, 0.0});
     command_.alpha_rad = alpha;
-    command_.bank_rad = 0.0;
+    command_.bank_rad = std::atan2(-terminal_lift_direction_.y, terminal_lift_direction_.x);  // as a bank
     // predicted miss at the gate along the horizontal track (> 0: beyond) and to its right
     Vec3 track = v_itrf - up * dot(v_itrf, up);
-    track = norm(track) > 1e-3 ? track / norm(track) : terminal_lift_direction_itrf_;
+    track = norm(track) > 1e-3 ? track / norm(track) : north;
     command_.downrange_error_m = dot(terminal_zem_itrf_, track);
     command_.crossrange_m = -dot(terminal_zem_itrf_, cross(track, up));
 }
@@ -317,19 +350,28 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         bank_rad_ = measured_bank_rad(axis_gcrf, v_rel_gcrf, up_gcrf);
         last_update_ = epoch;
         last_cycle_ = epoch - parameters_.cycle_s;
+        last_scale_update_ = epoch - parameters_.cycle_s;
     }
     const double dt = epoch - last_update_;
     last_update_ = epoch;
 
     // Online scale factors: the accelerometer's drag and lift against the model at this Mach number.
     const Vec3 a_aero = s.attitude.rotate(body.aero_acceleration_body_mps2());
-    if (phase_ == EntryPhase::Entry && epoch - last_cycle_ >= parameters_.cycle_s &&
+    if (phase_ != EntryPhase::Gate && epoch - last_scale_update_ >= parameters_.cycle_s &&
         norm(a_aero) > parameters_.scale_min_acceleration_mps2 && air.density_kg_m3 > 0.0) {
+        last_scale_update_ = epoch;
         const Vec3 u = math::normalized(v_rel_gcrf);
         const double q_over_m = 0.5 * air.density_kg_m3 * speed * speed / model_.mass_kg;
         const double drag = -dot(a_aero, u), lift = norm(a_aero + u * drag);
-        const double drag_model = q_over_m * model_.aero.cd_area_m2(mach);
-        const double lift_model = q_over_m * model_.aero.cl_area_m2(mach);
+        // at the angle of attack flown (not the commanded one: near 80 deg a few degrees of attitude lag change the lift
+        // by tens of percent, which is no model error)
+        // (terminal phase; the entry phase flies the schedule: the exact-alpha table)
+        const bool terminal_phase = phase_ == EntryPhase::Terminal;
+        const double alpha_flown = std::acos(std::clamp(dot(axis_gcrf, u), -1.0, 1.0));
+        const double drag_model = q_over_m * (terminal_phase ? model_.aero.cd_area_m2(mach, alpha_flown)
+                                                             : model_.aero.cd_area_m2(mach));
+        const double lift_model = q_over_m * (terminal_phase ? model_.aero.cl_area_m2(mach, alpha_flown)
+                                                             : model_.aero.cl_area_m2(mach));
         const auto filter = [&](double& k, double measured) {
             k += parameters_.scale_filter_gain * (std::clamp(measured, 0.5, 2.0) - k);
         };
@@ -338,8 +380,13 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
     }
 
     if (height - target_.ground_height_m <= parameters_.gate_height_m) phase_ = EntryPhase::Gate;
-    if (phase_ == EntryPhase::Entry && mach < parameters_.terminal_mach && height < terminal_max_height_m) {
+    // Hand-over below the terminal Mach number once no bank reversal is in progress (the terminal phase starts from
+    // the bank flown), at the latest at the late hand-over Mach number.
+    const bool bank_settled = std::abs(bank_target_rad_ - bank_rad_) < settled_bank_rad;
+    if (phase_ == EntryPhase::Entry && height < terminal_max_height_m &&
+        ((mach < parameters_.terminal_mach && bank_settled) || mach < parameters_.terminal_mach_latest)) {
         phase_ = EntryPhase::Terminal;
+        handed_over_ = true;
     }
 
     if (phase_ == EntryPhase::Entry) {
@@ -355,7 +402,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         command_.axis_gcrf = attitude.axis_gcrf;
         command_.roll_reference_gcrf = attitude.roll_reference_gcrf;
     }
-    if (phase_ != EntryPhase::Entry) terminal(body, transform.rotation, r_itrf, v_itrf, dt);
+    if (phase_ != EntryPhase::Entry) terminal(body, transform.rotation, r_itrf, v_itrf, mach, dt);
     command_.phase = phase_;
     command_.drag_scale = model_.drag_scale;
     command_.lift_scale = model_.lift_scale;

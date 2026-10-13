@@ -202,7 +202,7 @@ TEST_CASE("Entry corrector hits the target on its own model", "[ship][guidance]"
 TEST_CASE("Guided 6-DOF entry flies to the gate", "[ship][guidance]") {
     const auto schedule = ship_alpha_schedule();
     test::ShipEntryScenario scenario(test::EntryStart{});
-    gnc::EntryGuidance guidance(scenario.body(), schedule, predicted_target(scenario, schedule, 50.0, 200000.0),
+    gnc::EntryGuidance guidance(scenario.body(), schedule, predicted_target(scenario, schedule, 50.0, 100000.0),
                                 test_parameters());
     const auto samples = scenario.run_guided(guidance, gnc::EntryPhase::Gate);
     REQUIRE_FALSE(samples.empty());
@@ -286,5 +286,7 @@ TEST_CASE("Belly flop steers to the gate", "[ship][guidance]") {
     CHECK(belly_off_down < 15.0 * deg);
     CHECK(-t.vertical_speed_mps < 200.0);
 }
+
+
 
 

@@ -232,7 +232,8 @@ max_load_n = 5.0e6                       # [E] per pin (~1.9 g of a 265 t ship o
 [stage.recovery]
 method = "tower_catch"
 reserve_propellant_kg = 30000.0          # [E]
-landing_propellant_kg = 25000.0          # [E] header tanks: flip and landing burn
+landing_propellant_kg = 30000.0          # [E] header tanks: flip and landing burn; a tower catch ends slower than the
+                                         # splashdowns of flights 13/14 (b3: 25 t left no margin for the catch)
 
 [stage.heat_shield]
 nose_radius_m = 6.0                      # [E] effective radius of the belly-first windward side

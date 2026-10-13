@@ -13,7 +13,8 @@ enum class EntryPhase { Entry, Terminal, Gate };
 const char* to_string(EntryPhase phase);
 
 struct EntryGuidanceParameters {
-    double gate_height_m = 1500.0;   // [E] above the target ground: the flip starts here (b3)
+    double gate_height_m = 800.0;    // [D] above the target ground: the flip starts here (b3); flights 13/14 relit
+                                     // between 1 and 0.5 km at ~100 m/s
     double cycle_s = 2.0;            // re-prediction interval
     double max_bank_rad = 150.0 * constants::deg_to_rad;
     // Bank rate limits [E]: 1 deg/s hypersonic (faster departs in alpha, b1; seen again with weak flaps), 3 deg/s
@@ -24,11 +25,14 @@ struct EntryGuidanceParameters {
     double fast_bank_mach_high = 10.0;
     double constraint_fraction = 0.9;                      // of the heat-rate and load limits
     double max_dynamic_pressure_pa = 25000.0;              // [E]
-    double terminal_mach = 2.0;                            // [E] hand-over to the terminal steering
-    double terminal_min_alpha_rad = 55.0 * constants::deg_to_rad;  // [E] most lift (trimmed range, b1)
+    double terminal_mach = 5.0;                            // [E] hand-over to the terminal steering ...
+    double terminal_mach_latest = 3.0;                     // [E] ... or here if a bank reversal was still running
+    double terminal_min_alpha_rad = 50.0 * constants::deg_to_rad;        // [E] most lift (trimmed range, b1)
+    double terminal_alpha_authority_rad = 20.0 * constants::deg_to_rad;  // [E] steering around the alpha schedule
     double terminal_cycle_s = 0.5;               // steering update (three predictions)
     double terminal_prediction_step_s = 0.5;
     double terminal_newton_step = 0.1;           // finite difference of the steering fraction
+    double terminal_max_step = 0.3;              // [E] steering change per cycle (Levenberg-Marquardt step limit)
     // [E] the commanded attitude turns at most this fast in the terminal phase (as the bank rate below Mach 5)
     double terminal_slew_rate_radps = 3.0 * constants::deg_to_rad;
     // Reversals: planned by the corrector (time of the next reversal for zero crossrange); without a bracket the
@@ -96,7 +100,7 @@ public:
 private:
     void entry_cycle(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf);
     void terminal(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const math::Vec3& r_itrf,
-                  const math::Vec3& v_itrf, double dt_s);
+                  const math::Vec3& v_itrf, double mach, double dt_s);
     // Horizontal miss at the gate predicted with a terminal steering vector (and the time to go).
     math::Vec3 terminal_miss(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf,
                                const math::Vec3& steering, double* time_to_go_s) const;
@@ -111,6 +115,7 @@ private:
     bool started_ = false;
     time::Epoch last_update_;
     time::Epoch last_cycle_;
+    time::Epoch last_scale_update_;
     double bank_rad_ = 0.0;          // setpoint now (rate limited)
     double bank_target_rad_ = 0.0;   // corrector output with sign
     double bank_magnitude_rad_ = 0.0;
@@ -120,8 +125,11 @@ private:
     bool terminal_started_ = false;
     bool terminal_predicted_ = false;
     math::Quat terminal_attitude_gcrf_;  // commanded attitude in the terminal phase (slew limited)
-    math::Vec3 terminal_steering_itrf_;        // lift direction x fraction (|.| <= 1)
-    math::Vec3 terminal_lift_direction_itrf_;  // last lift direction (kept when the steering is ~0)
+    math::Vec3 terminal_steering_;        // velocity frame (steering_basis): lift direction x fraction (|.| <= 1)
+    math::Vec3 terminal_lift_direction_;  // last lift direction (kept when the steering is ~0)
+    bool terminal_basis_frozen_ = false;
+    bool handed_over_ = false;  // the terminal phase follows the entry phase (not placed by skip_to)
+    math::Vec3 terminal_e1_, terminal_e2_;  // steering basis (see EntryPredictorState::basis_frozen)
     math::Vec3 terminal_zem_itrf_;             // predicted horizontal miss at the gate
     double terminal_prediction_age_s_ = 0.0;
 };

@@ -32,8 +32,19 @@ struct AeroSample {
 
 class Model {
 public:
-    Model(const EntryPredictorModel& m, bool steered, const Vec3& steering)
-        : m_(m), steered_(steered), steering_(steering) {}
+    explicit Model(const EntryPredictorModel& m, const EntryPredictorState& start)
+        : m_(m), steered_(start.steered), steering_(start.steering), frozen_(start.basis_frozen),
+          e1_(start.basis_e1), e2_(start.basis_e2) {}
+
+    // Steering basis: velocity frame until the path is steeper than the freeze angle, then fixed (decided per step).
+    void update_basis(const Vec3& r, const Vec3& v) {
+        if (!steered_ || frozen_) return;
+        const Vec3 up = math::normalized(r), u = math::normalized(v);
+        if (std::asin(std::clamp(dot(u, up), -1.0, 1.0)) < m_.steering_freeze_gamma_rad) {
+            steering_basis(up, u, e1_, e2_);
+            frozen_ = true;
+        }
+    }
 
     AeroSample aero(const Vec3& r, const Vec3& v, double bank_rad) const {
         AeroSample s;
@@ -54,9 +65,12 @@ public:
         const double q_over_m = s.dynamic_pressure_pa / m_.mass_kg;
         if (steered_) {
             const double fraction = std::min(norm(steering_), 1.0);
-            const double alpha = m_.steering_alpha(fraction);
+            const double alpha = m_.steering_alpha(fraction, mach);
             s.acceleration = u * (-q_over_m * m_.drag_scale * m_.aero.cd_area_m2(mach, alpha));
-            const Vec3 lb = steering_ - u * dot(steering_, u);
+            Vec3 e1 = e1_, e2 = e2_;
+            if (!frozen_) steering_basis(up, u, e1, e2);
+            Vec3 lb = e1 * steering_.x + e2 * steering_.y;
+            lb = lb - u * dot(lb, u);
             if (fraction > 0.0 && norm(lb) > 1e-9) {
                 s.acceleration += lb / norm(lb) * (q_over_m * m_.lift_scale * m_.aero.cl_area_m2(mach, alpha));
             }
@@ -86,10 +100,23 @@ private:
     const EntryPredictorModel& m_;
     bool steered_ = false;
     Vec3 steering_;
+    bool frozen_ = false;
+    Vec3 e1_, e2_;
     environment::Us76Atmosphere atmosphere_;
 };
 
 }  // namespace
+
+void steering_basis(const Vec3& up, const Vec3& u, Vec3& e1, Vec3& e2) {
+    e1 = up - u * dot(up, u);
+    if (norm(e1) < 1.0e-2) {  // vertical fall (within ~0.6 deg): north instead
+        const Vec3 east = math::normalized(cross(Vec3{0.0, 0.0, 1.0}, up));
+        const Vec3 north = cross(up, east);
+        e1 = north - u * dot(north, u);
+    }
+    e1 = math::normalized(e1);
+    e2 = cross(u, e1);
+}
 
 double ground_range_m(const Vec3& a_itrf_m, const Vec3& b_itrf_m) {
     const Vec3 a = math::normalized(a_itrf_m), b = math::normalized(b_itrf_m);
@@ -99,7 +126,7 @@ double ground_range_m(const Vec3& a_itrf_m, const Vec3& b_itrf_m) {
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
                               double bank_command_rad, const EntryTarget& target, double gate_height_m,
                               double heat_load_so_far_j_m2, double step_s, double max_time_s) {
-    Model m(model, start.steered, start.steering_itrf);
+    Model m(model, start);
     EntryPrediction p;
     p.heat_load_j_m2 = heat_load_so_far_j_m2;
     Vec3 r = start.position_itrf_m, v = start.velocity_itrf_mps;
@@ -109,6 +136,7 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     double t = 0.0;
     AeroSample now = m.aero(r, v, bank);
     while (t < max_time_s) {
+        m.update_basis(r, v);
         const double max_change = model.bank_rate_at(now.mach) * step_s;
         const bool reversed = start.reversal_time_s >= 0.0 && t >= start.reversal_time_s;
         const double command = reversed ? -bank_command_rad : bank_command_rad;
