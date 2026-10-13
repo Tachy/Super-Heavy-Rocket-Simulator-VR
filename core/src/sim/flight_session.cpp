@@ -496,6 +496,7 @@ void FlightSession::place_returning_booster(const config::VehicleConfig& config,
     auto& flying = bodies_.front();
     flying.return_guidance =
         std::make_unique<gnc::BoosterReturnGuidance>(return_site(flying.body->vehicle()), std::move(parameters));
+    flying.body->set_accelerometer(true);  // the return guidance estimates the drag online
     flying.return_guidance->skip_to(start_phase);
     flying.return_guidance->set_realtime(realtime_planning_);
 }
@@ -589,9 +590,12 @@ void FlightSession::apply_return_command(const Flying& flying, const gnc::Attitu
     const auto& r = flying.return_command;
     for (auto& group : command.groups) group.throttle = r.throttle;
     if (r.torque_body_nm) {
-        // SCvx lateral LQR: the guidance's torque straight to gimbals / RCS (grid fins neutral: the planning model has
-        // none, and at low speed their allocation fights the gimbals).
-        gnc::AttitudeController::allocate(*flying.body, ambient_pressure_pa, *r.torque_body_nm, false).apply_to(command);
+        // SCvx lateral LQR: the guidance's torque straight to gimbals / RCS. The grid fins feather into their local flow:
+        // the planning model has none (neutral fins act as a tail and turn an engines-first stage into the air flow;
+        // allocating torque to them fights the gimbals at low speed).
+        auto output = gnc::AttitudeController::allocate(*flying.body, ambient_pressure_pa, *r.torque_body_nm, false);
+        output.grid_fin_rad = gnc::AttitudeController::feathered_grid_fins(*flying.body);
+        output.apply_to(command);
         if (std::getenv("STARSIM_DEBUG_BURN") && flying.ship_landing) {  // diagnostics
             static int n = 0;
             if (++n % 40 == 0) {
@@ -844,6 +848,7 @@ void FlightSession::stage() {
     if (returns_after_staging(lower.body->vehicle())) {
         const auto landing = return_site(lower.body->vehicle());
         lower.body->set_ground_height(landing.height_m);
+        lower.body->set_accelerometer(true);  // the return guidance estimates the drag online
         lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(
             landing, return_parameters(lower.body->vehicle().stages().front().config));
         lower.return_guidance->set_realtime(realtime_planning_);

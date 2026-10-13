@@ -9,14 +9,15 @@ name = "Falcon 9 mit Landung auf dem Drohnenschiff"
 vehicle = "falcon9_block5"
 site = "ccsfs_slc40"
 heading_deg = 45.0              # body +y on the pad (launch azimuth ~43 deg for 53 deg)
-payload_t = 16.5                # [E] Starlink class (24-29 satellites)
+payload_t = 15.5                # [E] Starlink class: our vehicle model carries ~16 t to this orbit (16.5 t ran
+                                # stage 2 dry; real stacks ~17 t - see the MECO gap in CLAUDE.md)
 fairing = true
 
 [drone_ship]
 id = "asds_atlantic"
-latitude_deg = 32.7128          # [D] nominal impact point of this mission's first stage: MECO T+144 s, 67.9 km, 24.0 t,
-                                # drag + entry burn, no steering (test "... nominal impact point ...", 2026-10-14)
-longitude_deg = -76.3275
+latitude_deg = 32.6958          # [D] nominal impact point of this mission's first stage, predicted 10 s after MECO (T+144 s)
+                                # with drag and the finite entry burn, no steering (test "... nominal impact point ...")
+longitude_deg = -76.3175
 heading_deg = 45.0              # [E] long axis along the ground track
 sea_height_m = -35.0            # [E] geoid off the Carolinas (EGM2008 ~-35 m)
 
@@ -27,6 +28,7 @@ inclination_deg = 53.0          # Starlink shell (Florida launches north-east)
 northerly = true
 
 [pitch_program]
-kick_deg = 14.0                 # [E] as CRS-35
+kick_deg = 16.0                 # [D] MECO T+144 s at 62.9 km, 8112 km/h, 25.3 deg (Starlink 15-25: T+149 s, 60 km,
+                                # ~8000 km/h, ~25 deg from the altitude rate)
 # [D] Starlink 15-25 webcast: the G-force dips from 1.8 to 1.4 g at T+55 s (max-Q bucket) as on CRS-35: the same schedule.
 booster_throttle = [[48.0, 1.0], [51.0, 0.7], [60.0, 0.7], [63.0, 0.92]]

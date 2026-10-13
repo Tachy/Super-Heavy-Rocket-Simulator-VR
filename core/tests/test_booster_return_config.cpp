@@ -61,6 +61,7 @@ TEST_CASE("Falcon 9 drone-ship returns fly their own profile", "[gnc][falcon9][a
     CHECK(p.landing_ignition_groups == Groups{"first_stage/center"});
     CHECK(p.landing_divert_groups == Groups{"first_stage/center"});
     CHECK(p.landing_groups == Groups{"first_stage/center"});
+    CHECK(std::abs(p.scvx.settings.limits.tilt_max_rad[2] - 20.0 * 3.14159265358979 / 180.0) < 1e-12);
     // Keys the drone-ship table leaves out come from the RTLS profile.
     CHECK(p.boostback_groups == Groups{"first_stage/center", "first_stage/pair"});
     // The RTLS profile is untouched.

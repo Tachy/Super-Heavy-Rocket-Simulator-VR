@@ -239,6 +239,15 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 }
                 if (p.landing_phase_throttles.size() != 3) doc.fail("landing_phase_throttles must list 3 throttles");
             }
+            if (const auto* tilts = table["landing_phase_max_tilt_deg"].as_array()) {
+                p.landing_phase_max_tilt_rad.clear();
+                for (const auto& node : *tilts) {
+                    const auto value = node.value<double>();
+                    if (!value || *value <= 0.0 || *value >= 90.0) doc.fail("landing_phase_max_tilt_deg must be in (0, 90)");
+                    p.landing_phase_max_tilt_rad.push_back(*value * constants::deg_to_rad);
+                }
+                if (p.landing_phase_max_tilt_rad.size() != 3) doc.fail("landing_phase_max_tilt_deg must list 3 limits");
+            }
             if (const auto* windows = table["landing_switch_sink_mps"].as_array()) {
                 p.landing_switch_sink_mps.clear();
                 for (const auto& node : *windows) {

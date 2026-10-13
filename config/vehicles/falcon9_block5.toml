@@ -120,6 +120,8 @@ entry_burn_delta_v_mps = 880.0               # [D] 7,926 -> 5,245 km/h over T+36
                                              # Isp_vac 311 s) gives 908 m/s
 entry_burn_throttle = 0.72                   # [D] 880 m/s in ~19 s on three engines (12.8 t at 3 x 0.72 x 306 kg/s)
 landing_engine_phases = [["center"], ["center"], ["center"]]  # [D] one engine icon from ignition to touchdown
+landing_phase_max_tilt_deg = [20.0, 20.0, 20.0]  # [E] the same engine throughout: the same gimbal authority (the slanted
+                                                 # drone-ship approach needs its divert in the last phase too)
 landing_phase_throttles = [0.7, 0.7, 0.65]   # [E] design throttles that time the ignition (~3.0 km at ~270 m/s)
 landing_switch_sink_mps = [[120.0, 280.0], [40.0, 120.0]]  # [E] no engine change: wide windows that only split the plan
 

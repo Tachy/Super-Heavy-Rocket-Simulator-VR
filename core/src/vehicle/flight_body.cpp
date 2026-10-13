@@ -311,6 +311,9 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
         constexpr double entry_height_m = 80000.0, skip_height_m = 100000.0;  // [E] event thresholds
         if (geodetic.height_m < entry_height_m) entered_atmosphere_ = true;
         if (entered_atmosphere_ && geodetic.height_m > skip_height_m) skipped_out_ = true;
+    } else if (accelerometer_) {
+        const Forces end = evaluate(ctx, dt_s, state_);
+        aero_acceleration_body_mps2_ = end.aero_body_n / end.mass.mass_kg;
     }
     external_force_gcrf_n_ = {};
     external_torque_body_nm_ = {};

@@ -34,11 +34,10 @@ constexpr double catch_missed_height_m = 5.0;  // CG this far below the catch he
 constexpr double tilt_taper_height_m = 60.0;                           // below: tilt limit tapers off
 constexpr double leg_deploy_margin_s = 5.0;      // [E] legs locked this long before the planned touchdown
 constexpr double pad_cutoff_after_plan_s = 0.5;  // pad landing: engines off this long after the plan's end (spec)
-// Entry burn steering: the axis leans from retrograde towards the drag-aware impact miss, fully at
-// entry_steering_miss_m, by at most entry_steering_max_rad [E] (a small correction; the grid fins do the rest).
-constexpr double entry_steering_miss_m = 2000.0;
-constexpr double entry_steering_max_rad = 5.0 * constants::deg_to_rad;
 constexpr double touchdown_tilt_rad = 4.0 * constants::deg_to_rad;     // tilt limit at touchdown
+// Online drag estimate (as the ship's entry guidance): filter gain per 0.2 s update, only with a clear signal.
+constexpr double drag_scale_filter_gain = 0.1;          // [E]
+constexpr double drag_scale_min_acceleration_mps2 = 1.0; // [E]
 
 Vec3 up_at(double lat, double lon) { return {std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)}; }
 
@@ -134,6 +133,9 @@ BoosterReturnParameters booster_return_parameters(const std::string& stage_id, c
         p.scvx.divert_throttle = profile.landing_phase_throttles[1];
         p.scvx.final_throttle = profile.landing_phase_throttles[2];
     }
+    if (profile.landing_phase_max_tilt_rad.size() == 3) {
+        for (size_t i = 0; i < 3; ++i) p.scvx.settings.limits.tilt_max_rad[i] = profile.landing_phase_max_tilt_rad[i];
+    }
     if (profile.landing_switch_sink_mps.size() == 2) {
         auto& switches = p.scvx.settings.limits.switches;
         for (size_t i = 0; i < 2; ++i) {
@@ -184,7 +186,8 @@ BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnPara
 BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicle::FlightBody& body,
                                                                     const vehicle::FlightEnvironment& env,
                                                                     time::Epoch epoch, double ground_height_m,
-                                                                    const Vec3* velocity_gcrf_mps, const PendingBurn* burn) {
+                                                                    const Vec3* velocity_gcrf_mps, const PendingBurn* burn,
+                                                                    double drag_scale) {
     const auto t0 = env.earth_orientation.fixed_to_gcrf(epoch);
     const Vec3 omega = vehicle::earth_rotation_vector(t0);
     const double w = norm(omega);
@@ -192,6 +195,8 @@ BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicl
     const double area = constants::pi * 0.25 * body.vehicle().diameter_m() * body.vehicle().diameter_m();
     const auto& drag = body.vehicle().aero().drag_curve(true);  // the returning booster falls engines first
 
+    double m = mass.mass_kg;
+    double burn_thrust_n = 0.0;  // during the pending burn (finite model)
     auto fixed_at = [&](double t, const Vec3& r_gcrf) { return transpose(rotation_z(w * t) * t0.rotation) * r_gcrf; };
     auto acceleration = [&](double t, const Vec3& r, const Vec3& v) {
         const auto geo = frames::fixed_to_geodetic(fixed_at(t, r));
@@ -201,8 +206,15 @@ BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicl
         Vec3 a = env.gravity.acceleration_mps2(r, epoch + t);
         if (speed > 1e-3 && air.density_kg_m3 > 0.0) {
             const double mach = air.speed_of_sound_mps > 0.0 ? speed / air.speed_of_sound_mps : 0.0;
-            const double force = 0.5 * air.density_kg_m3 * speed * speed * area * drag.cd(mach, false);
-            a -= v_air * (force / (speed * mass.mass_kg));
+            const double force = drag_scale * 0.5 * air.density_kg_m3 * speed * speed * area * drag.cd(mach, false);
+            a -= v_air * (force / (speed * m));
+        }
+        if (burn_thrust_n > 0.0 && speed > 1e-3) {
+            Vec3 axis = -v_air / speed;
+            if (burn->lean_rad != 0.0) {
+                axis = math::normalized(axis + rotation_z(w * t) * t0.rotation * burn->lean_itrf * std::tan(burn->lean_rad));
+            }
+            a += axis * (burn_thrust_n / m);
         }
         return a;
     };
@@ -214,7 +226,20 @@ BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicl
     Vec3 previous_r = r;
     Vec3 v_prev = v;
     bool burn_pending = burn && burn->delta_v_mps > 0.0;
+    bool burning = false;
+    double burned_mps = 0.0;
     for (double t = 0.0; t < 900.0; t += dt) {
+        if (burning) {
+            // Constant thrust over the step; the last step only for the rest of the delta-v.
+            const double step_mps = burn->thrust_n / m * dt;
+            const double fraction = std::min(1.0, (burn->delta_v_mps - burned_mps) / step_mps);
+            burn_thrust_n = burn->thrust_n * fraction;
+            burned_mps += step_mps * fraction;
+            m -= burn->mass_flow_kgps * fraction * dt;
+            if (burned_mps >= burn->delta_v_mps - 1e-9) burning = false;
+        } else {
+            burn_thrust_n = 0.0;
+        }
         // RK4 on (r, v)
         const Vec3 a1 = acceleration(t, r, v);
         const Vec3 a2 = acceleration(t + dt / 2, r + v * (dt / 2), v + a1 * (dt / 2));
@@ -228,9 +253,13 @@ BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicl
         v = v_next;
         const double height = frames::fixed_to_geodetic(fixed_at(t + dt, r)).height_m - mass.cg_station_m;
         if (burn_pending && height < previous_height && height + mass.cg_station_m - ground_height_m < burn->altitude_m) {
-            const Vec3 v_air = v - cross(omega, r);
-            v -= math::normalized(v_air) * std::min(burn->delta_v_mps, norm(v_air));
             burn_pending = false;
+            if (burn->thrust_n > 0.0) {
+                burning = true;  // from the next step
+            } else {
+                const Vec3 v_air = v - cross(omega, r);
+                v -= math::normalized(v_air) * std::min(burn->delta_v_mps, norm(v_air));
+            }
         }
         if (height <= ground_height_m) {
             const double f = (previous_height - ground_height_m) / (previous_height - height);
@@ -289,13 +318,77 @@ BoosterReturnGuidance::BurnPrediction BoosterReturnGuidance::predict_landing_bur
         // Only the ignition engines start up (the later sets are already running).
         const double spool = segment == 0 && engines.startup_s > 0.0 ? std::clamp(t / engines.startup_s, 0.0, 1.0) : 1.0;
         const double mach = air.speed_of_sound_mps > 0.0 ? speed / air.speed_of_sound_mps : 0.0;
-        const double drag_n = 0.5 * air.density_kg_m3 * speed * speed * area * drag.cd(mach, spool > 0.0);
+        const double drag_n = drag_scale_ * 0.5 * air.density_kg_m3 * speed * speed * area * drag.cd(mach, spool > 0.0);
         const double thrust_n = std::max(throttle * engines.vacuum_thrust_n - (engines.vacuum_thrust_n - engines.thrust_n), 0.0);
         speed -= ((spool * thrust_n + drag_n) / m - g * sin_gamma) * dt;
         h -= speed * sin_gamma * dt;
         m -= spool * throttle * engines.mass_flow_kgps * dt;
     }
     return {h, t};
+}
+
+Vec3 BoosterReturnGuidance::landing_burn_lead_itrf(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                                   const Impact& impact) const {
+    if (!site_.pad || !impact.valid) return {};
+    const Vec3 up = up_at(site_.latitude_rad, site_.longitude_rad);
+    const Vec3 v = impact.velocity_itrf_mps;
+    const Vec3 horizontal = v - up * dot(v, up);
+    const double v_h = norm(horizontal);
+    const double v_z = -dot(v, up);
+    if (v_h < 1.0 || v_z <= 0.0) return {};
+
+    const auto& vehicle = body.vehicle();
+    const auto mass = vehicle.mass_properties();
+    // Mass at the landing burn: the entry burn still ahead burns its propellant first.
+    double m0 = mass.mass_kg;
+    if (const auto burn = pending_entry_burn(vehicle); burn && burn->mass_flow_kgps > 0.0) {
+        m0 *= std::exp(-burn->delta_v_mps / (burn->thrust_n / burn->mass_flow_kgps));
+    }
+    const double area = constants::pi * 0.25 * vehicle.diameter_m() * vehicle.diameter_m();
+    const auto& drag = vehicle.aero().drag_curve(true);
+    const double g = constants::standard_gravity_mps2;
+    const double throttle = parameters_.scvx_landing ? parameters_.scvx.ignition_throttle : parameters_.landing_throttle;
+    // Fall from height h0 (CG above the touchdown CG height) at the impact's velocity: horizontal travel and the
+    // height where the motion stops (burn) or the ground is reached (ballistic).
+    struct End {
+        double x_m = 0.0;
+        double z_m = 0.0;
+    };
+    auto fall = [&](double h0, bool burn) {
+        double x = 0.0, z = h0, vx = v_h, vz = -v_z, m = m0;
+        const double dt = 0.05;
+        for (double t = 0.0; t < 200.0; t += dt) {
+            const double speed = std::hypot(vx, vz);
+            if (burn && (speed < 1.0 || vz >= 0.0)) break;
+            if (!burn && z <= 0.0) break;
+            const double height = site_.height_m + mass.cg_station_m + target_bottom_height_m_ + z;
+            const auto air = env.atmosphere.at(height);
+            const double mach = air.speed_of_sound_mps > 0.0 ? speed / air.speed_of_sound_mps : 0.0;
+            double decel = drag_scale_ * 0.5 * air.density_kg_m3 * speed * speed * area * drag.cd(mach, burn) / m;
+            if (burn) {
+                const auto engines = engine_set(vehicle, parameters_.landing_ignition_groups, air.pressure_pa);
+                const double spool = engines.startup_s > 0.0 ? std::clamp(t / engines.startup_s, 0.0, 1.0) : 1.0;
+                const double thrust_n =
+                    std::max(throttle * engines.vacuum_thrust_n - (engines.vacuum_thrust_n - engines.thrust_n), 0.0);
+                decel += spool * thrust_n / m;
+                m -= spool * throttle * engines.mass_flow_kgps * dt;
+            }
+            vx -= decel * vx / speed * dt;
+            vz -= (decel * vz / speed + g) * dt;
+            x += vx * dt;
+            z += vz * dt;
+        }
+        return End{x, z};
+    };
+    // Ignition height: the burn stops on the ground (bisection on the start height).
+    double low = 0.0, high = 20000.0;
+    for (int i = 0; i < 30; ++i) {
+        const double mid = 0.5 * (low + high);
+        (fall(mid, true).z_m > 0.0 ? high : low) = mid;
+    }
+    const double ignition_m = 0.5 * (low + high);
+    const double lead_m = fall(ignition_m, false).x_m - fall(ignition_m, true).x_m;
+    return horizontal * (std::max(lead_m, 0.0) / v_h);
 }
 
 double BoosterReturnGuidance::meco_propellant_kg(const vehicle::Vehicle& stack, const math::StateVector& state_gcrf,
@@ -360,8 +453,9 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
     const auto geo = frames::fixed_to_geodetic(r_fixed);
     const double pressure = env.atmosphere.at(geo.height_m).pressure_pa;
     const Vec3 body_axis = s.attitude.rotate(Vec3{1.0, 0.0, 0.0});
+    // Leg landing: the ballistic impact lies beyond the pad by the landing burn's lead (it stops short of it).
     auto horizontal_miss = [&](const Impact& impact) {
-        const Vec3 miss = site_fixed - impact.position_itrf_m;
+        const Vec3 miss = site_fixed + landing_burn_lead_itrf(body, env, impact) - impact.position_itrf_m;
         return miss - site_up * dot(miss, site_up);
     };
 
@@ -415,6 +509,7 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
     }
 
     if (phase_ == ReturnPhase::Coast) {
+        if (tick_counter_ % 40 == 0) estimate_drag_scale(body, env, epoch);
         // Steering: in the atmosphere with the grid fins (they hold an angle of attack, the body's cross-flow
         // force moves the impact point), above it by RCS translation.
         const auto air_now = env.atmosphere.at(geo.height_m);
@@ -499,6 +594,7 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         }
         if (entry_delta_v_mps_ >= parameters_.entry_delta_v_mps) {
             entry_done_ = true;
+            steer_itrf_ = {};  // the burn's lean direction is not a fin lean
             phase_ = ReturnPhase::Coast;
             cmd.phase = phase_;
             cmd.axis_gcrf = transform.rotation * (-math::normalized(v_fixed));
@@ -563,36 +659,81 @@ void BoosterReturnGuidance::entry_burn(const vehicle::FlightBody& body, const ve
     const Vec3 site_fixed = frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m});
     if (tick_counter_ % 40 == 0 || !entry_predicted_) {
         entry_predicted_ = true;
-        const auto impact = predict(body, env, epoch);
-        if (impact.valid) {
-            const Vec3 miss = site_fixed - impact.position_itrf_m;
-            steer_itrf_ = miss - site_up * dot(miss, site_up);
-            impact_miss_m_ = norm(steer_itrf_);
+        // Shooting on the lean: the miss of the rest of the burn flown straight retrograde, and leaning fully towards
+        // that miss; the lean in between that cancels the miss's component along it (the prediction carries the drag
+        // that bleeds off the sideways speed in the descent).
+        auto burn = pending_entry_burn(body.vehicle());
+        const auto straight = burn ? predict_impact(body, env, epoch, site_.height_m, nullptr, &*burn, drag_scale_) : Impact{};
+        if (straight.valid) {
+            const Vec3 miss = site_fixed + landing_burn_lead_itrf(body, env, straight) - straight.position_itrf_m;
+            const Vec3 horizontal = miss - site_up * dot(miss, site_up);
+            impact_miss_m_ = norm(horizontal);
+            entry_lean_rad_ = 0.0;
+            if (impact_miss_m_ > trim_deadband_m && parameters_.entry_max_lean_rad > 0.0) {
+                steer_itrf_ = horizontal / impact_miss_m_;
+                burn->lean_itrf = steer_itrf_;
+                burn->lean_rad = parameters_.entry_max_lean_rad;
+                const auto leaning = predict_impact(body, env, epoch, site_.height_m, nullptr, &*burn, drag_scale_);
+                if (leaning.valid) {
+                    const double moved_m = dot(leaning.position_itrf_m - straight.position_itrf_m, steer_itrf_);
+                    if (moved_m > 0.0) {
+                        entry_lean_rad_ = parameters_.entry_max_lean_rad * std::min(impact_miss_m_ / moved_m, 1.0);
+                    }
+                }
+            }
         }
     }
     Vec3 axis = -math::normalized(v_fixed);
-    if (impact_miss_m_ > trim_deadband_m) {
-        const double lean = entry_steering_max_rad * std::min(impact_miss_m_ / entry_steering_miss_m, 1.0);
-        axis = math::normalized(axis + math::normalized(steer_itrf_) * std::tan(lean));
-    }
+    if (entry_lean_rad_ > 0.0) axis = math::normalized(axis + steer_itrf_ * std::tan(entry_lean_rad_));
     cmd.axis_gcrf = transform.rotation * axis;
     cmd.run_groups = parameters_.entry_groups;
     cmd.throttle = parameters_.entry_throttle;
     cmd.impact_miss_m = impact_miss_m_;
 }
 
-std::optional<BoosterReturnGuidance::PendingBurn> BoosterReturnGuidance::pending_entry_burn() const {
+BoosterReturnGuidance::PendingBurn BoosterReturnGuidance::entry_burn_ahead(const vehicle::Vehicle& vehicle,
+                                                                           const BoosterReturnParameters& parameters) {
+    const auto engines = engine_set(vehicle, parameters.entry_groups, 0.0);
+    return {parameters.entry_altitude_m, parameters.entry_delta_v_mps, parameters.entry_throttle * engines.vacuum_thrust_n,
+            parameters.entry_throttle * engines.mass_flow_kgps};
+}
+
+std::optional<BoosterReturnGuidance::PendingBurn> BoosterReturnGuidance::pending_entry_burn(
+    const vehicle::Vehicle& vehicle) const {
     if (parameters_.entry_altitude_m <= 0.0 || entry_done_) return std::nullopt;
-    // While burning: the rest from here (the altitude is already crossed: the impulse applies at once).
-    const double altitude = phase_ == ReturnPhase::EntryBurn ? 1e9 : parameters_.entry_altitude_m;
-    return PendingBurn{altitude, std::max(parameters_.entry_delta_v_mps - entry_delta_v_mps_, 0.0)};
+    auto burn = entry_burn_ahead(vehicle, parameters_);
+    // While burning: the rest from here (the altitude is already crossed: it continues at once).
+    if (phase_ == ReturnPhase::EntryBurn) burn.altitude_m = 1e9;
+    burn.delta_v_mps = std::max(parameters_.entry_delta_v_mps - entry_delta_v_mps_, 0.0);
+    return burn;
 }
 
 BoosterReturnGuidance::Impact BoosterReturnGuidance::predict(const vehicle::FlightBody& body,
                                                              const vehicle::FlightEnvironment& env, time::Epoch epoch,
                                                              const Vec3* velocity_gcrf_mps) const {
-    const auto burn = pending_entry_burn();
-    return predict_impact(body, env, epoch, site_.height_m, velocity_gcrf_mps, burn ? &*burn : nullptr);
+    const auto burn = pending_entry_burn(body.vehicle());
+    return predict_impact(body, env, epoch, site_.height_m, velocity_gcrf_mps, burn ? &*burn : nullptr, drag_scale_);
+}
+
+void BoosterReturnGuidance::estimate_drag_scale(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                                time::Epoch epoch) {
+    if (body.vehicle().any_engine_producing_thrust()) return;
+    const auto& s = body.state();
+    const auto t = env.earth_orientation.fixed_to_gcrf(epoch);
+    const Vec3 v_air = s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), s.position_gcrf_m);
+    const double speed = norm(v_air);
+    const Vec3 a_aero = s.attitude.rotate(body.aero_acceleration_body_mps2());
+    const double drag_mps2 = -dot(a_aero, v_air) / std::max(speed, 1e-3);
+    if (speed < 1.0 || drag_mps2 < drag_scale_min_acceleration_mps2) return;
+    const auto geo = frames::fixed_to_geodetic(transpose(t.rotation) * s.position_gcrf_m);
+    const auto air = env.atmosphere.at(geo.height_m);
+    const auto& vehicle = body.vehicle();
+    const double area = constants::pi * 0.25 * vehicle.diameter_m() * vehicle.diameter_m();
+    const double mach = air.speed_of_sound_mps > 0.0 ? speed / air.speed_of_sound_mps : 0.0;
+    const double model_mps2 = 0.5 * air.density_kg_m3 * speed * speed * area * vehicle.aero().drag_curve(true).cd(mach, false) /
+                              vehicle.mass_properties().mass_kg;
+    if (model_mps2 <= 0.0) return;
+    drag_scale_ += drag_scale_filter_gain * (std::clamp(drag_mps2 / model_mps2, 0.5, 2.0) - drag_scale_);
 }
 
 void BoosterReturnGuidance::set_realtime(bool realtime) {

@@ -185,6 +185,25 @@ double rate_command(double error_rad, double linear_gain, double max_angular_acc
 
 }  // namespace
 
+std::vector<double> AttitudeController::feathered_grid_fins(const vehicle::FlightBody& body) {
+    std::vector<double> deflections;
+    const auto& air = body.air_data();
+    const Vec3& w = body.state().angular_velocity_body_radps;
+    const double cg = body.vehicle().mass_properties().cg_station_m;
+    for (const auto& stage : body.vehicle().stages()) {
+        for (const auto& fin : stage.grid_fins) {
+            // Fin normal n(d) = t cos d + e_x sin d; no normal flow when v_t cos d + v_x sin d = 0.
+            const Vec3 arm = Vec3{fin.geometry.station_m - cg, 0.0, 0.0} +
+                             aero::grid_fin_radial(fin.geometry) * fin.geometry.radius_m;
+            const Vec3 v = air.air_velocity_body_mps + cross(w, arm);
+            const double v_t = dot(v, aero::grid_fin_tangential(fin.geometry));
+            const double d = std::abs(v.x) > 1e-6 ? std::atan(-v_t / v.x) : 0.0;
+            deflections.push_back(std::clamp(d, -fin.max_deflection_rad, fin.max_deflection_rad));
+        }
+    }
+    return deflections;
+}
+
 ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, double ambient_pressure_pa,
                                            const Vec3& desired_torque, bool grid_fins, bool flaps) {
     const auto mass = body.vehicle().mass_properties();

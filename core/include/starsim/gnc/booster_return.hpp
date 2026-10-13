@@ -40,6 +40,9 @@ struct BoosterReturnParameters {
     double entry_altitude_m = 0.0;
     double entry_delta_v_mps = 0.0;
     double entry_throttle = 1.0;
+    // [E] the entry burn's axis leans from retrograde towards the predicted miss by at most this (a small correction; the
+    // grid fins do the rest)
+    double entry_max_lean_rad = 5.0 * 3.14159265358979 / 180.0;
     double landing_throttle = 0.8;  // design throttle of the inner-engine segment: the rest is control margin
     double final_throttle = 0.8;    // design throttle of the centre-engine segment (slower, time to settle)
     double gate_speed_mps = 50.0;   // sink rate at the hand-over to the centre engines
@@ -100,6 +103,8 @@ public:
     // A foot on the ground (reported by the leg landing each tick): the landing burn ends.
     void set_leg_contact(bool contact) { leg_contact_ = contact; }
     double entry_delta_v_mps() const { return entry_delta_v_mps_; }  // burned in the entry burn so far
+    // Online estimate (unpowered descent): the accelerometer's drag over the tabulated drag; the predictions use it.
+    double drag_scale() const { return drag_scale_; }
     // Scenarios: start in a later phase (e.g. LandingBurn for a booster placed at ignition).
     void skip_to(ReturnPhase phase) {
         phase_ = phase;
@@ -108,12 +113,19 @@ public:
     void set_realtime(bool realtime);
     const ScvxLandingGuidance* scvx() const { return scvx_.get(); }
 
-    // Retrograde burn still to come on the way down (the entry burn), modelled as an impulse where the fall first
-    // crosses `altitude_m` above the ground height.
+    // Retrograde burn still to come on the way down (the entry burn): lit where the fall first crosses `altitude_m`
+    // above the ground height, against the air velocity at `thrust_n` (vacuum) until `delta_v_mps` are burned, its axis
+    // leaning by `lean_rad` towards the horizontal Earth-fixed direction `lean_itrf`; thrust_n = 0: an impulse there.
     struct PendingBurn {
         double altitude_m = 0.0;
         double delta_v_mps = 0.0;
+        double thrust_n = 0.0;
+        double mass_flow_kgps = 0.0;
+        math::Vec3 lean_itrf;
+        double lean_rad = 0.0;
     };
+    // The entry burn of `parameters` on `vehicle` (its entry engine set at the entry throttle), all of it still ahead.
+    static PendingBurn entry_burn_ahead(const vehicle::Vehicle& vehicle, const BoosterReturnParameters& parameters);
     // Drag-aware ballistic impact prediction (point mass, tail-first axial drag from the vehicle's table,
     // power off). `velocity_gcrf_mps` overrides the body's velocity (e.g. a planned arc).
     struct Impact {
@@ -122,9 +134,10 @@ public:
         double time_s = 0.0;
         bool valid = false;
     };
+    // `drag_scale` multiplies the tabulated drag (the online estimate, drag_scale()).
     static Impact predict_impact(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                  time::Epoch epoch, double ground_height_m, const math::Vec3* velocity_gcrf_mps = nullptr,
-                                 const PendingBurn* burn = nullptr);
+                                 const PendingBurn* burn = nullptr, double drag_scale = 1.0);
 
     // One-dimensional landing-burn simulation along the current flight path: height above the ground
     // where the speed reaches zero (negative: below ground) and the burn duration.
@@ -134,6 +147,14 @@ public:
     };
     BurnPrediction predict_landing_burn(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                         time::Epoch epoch) const;
+
+    // Landing on legs: how far short of the ballistic impact a retrograde landing burn stops (Earth-fixed, horizontal,
+    // along the impact's horizontal velocity). The burn against the velocity bends the fall towards the vertical (a
+    // gravity turn), so a stage whose ballistic impact is the pad stops short of it by this. From the impact's velocity
+    // in the vertical plane: ballistic fall and burn (ignition set at its design throttle, the burn prediction's thrust
+    // and drag model) from the height where the burn stops on the ground. Zero at a catch site.
+    math::Vec3 landing_burn_lead_itrf(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                      const Impact& impact) const;
 
     // Propellant the booster needs at main-engine cutoff to return with `landing_propellant_kg` left at landing-burn
     // ignition; the ascent autopilot cuts off when the booster is down to it. Without a boostback: the run-down and the
@@ -167,7 +188,10 @@ private:
     bool leg_contact_ = false;
     bool legs_deployed_ = false;          // deployment commanded
     bool entry_done_ = false;
-    bool entry_predicted_ = false;         // the entry burn's own impact prediction has run
+    bool entry_predicted_ = false;         // the entry burn's own lean has been solved
+    double entry_lean_rad_ = 0.0;          // entry burn: lean of the axis towards steer_itrf_
+    double drag_scale_ = 1.0;              // measured / tabulated drag (engines off, in the air)
+    void estimate_drag_scale(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     double entry_delta_v_mps_ = 0.0;
     time::Epoch last_update_;              // previous update (entry burn integration)
     std::optional<time::Epoch> plan_end_;  // SCvx pad landing: end of the active plan
@@ -175,7 +199,7 @@ private:
     void entry_burn(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
                     ReturnCommand& cmd);
     // The rest of the entry burn while it is still ahead or running (nullopt without one / once flown).
-    std::optional<PendingBurn> pending_entry_burn() const;
+    std::optional<PendingBurn> pending_entry_burn(const vehicle::Vehicle& vehicle) const;
     Impact predict(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
                    const math::Vec3* velocity_gcrf_mps = nullptr) const;
 

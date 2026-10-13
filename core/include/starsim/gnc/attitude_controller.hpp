@@ -71,6 +71,10 @@ public:
     static ControlOutput allocate(const vehicle::FlightBody& body, double ambient_pressure_pa,
                                   const math::Vec3& torque_body_nm, bool grid_fins = false, bool flaps = false);
 
+    // Grid fin deflections that turn each fin's plane into its local flow (no normal force, within its deflection
+    // limit), from the latest air data: fins that carry no load (a planning model without fins stays true).
+    static std::vector<double> feathered_grid_fins(const vehicle::FlightBody& body);
+
 private:
     Gains gains_;
 };
