@@ -183,7 +183,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   (closed-loop burns), autopilot state machine in `sim::FlightSession`. Burns pick the strongest engine
   configuration whose start/shutdown impulse is <= 1/4 of the delta-v; smaller burns are rejected (RCS
   translation comes with docking, M9). Game keys: P ascent autopilot (config/missions/leo_ascent.toml),
-  O circularize at apoapsis, X autopilot off. HUD: NavBall (`ui/nav_ball.gd`), flight director
+  O circularize at apoapsis, R ship return to the site's tower (b4), X autopilot off. HUD: NavBall (`ui/nav_ball.gd`), flight director
   (`ui/flight_overlay.gd`), trajectories (`vehicle/trajectory_view.gd`: green planned, orange predicted).
 - Catch tower (M6, `contact/*`, `sim/catch_tower_sim`): a site loaded with `config::load_launch_site` /
   `sim::launch_site_from_config` carries its tower; stacks then stand on the launch mount (20 m). The tower
@@ -279,14 +279,32 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   with `EntryTarget::nose_direction_itrf` to the tower. Only that approach is robust: the arms stand across the line,
   a burn arriving from the side (azimuth 45/225 deg) runs into an arm at arm height; flip-push 20 deg off the line
   already ends there. The terminal phase turns the nose once the fall is steep (basis frozen, -70 deg): the steering
-  becomes nose x 0.2 (alpha ~86 deg), the lift direction turns about the air velocity at 5 deg/s [E] (a shortest-path
-  attitude slew passes through low alpha: ~1 km miss) with the steering held, then Levenberg-Marquardt steps in sector
-  coordinates (fraction 0.02-0.5, +-10 deg about the nose; the predictor models the same). Session test from Mach 2.6,
-  28 km west: gate 123 m off, nose 7 deg off, caught 0.07 m, 0.96 m/s, 4.2 t left (also from 22-25 km). Open: an
-  energy-short terminal phase (33-39 km: most lift to reach the gate) stays shallow and misses the gate (0.1-0.8 km),
-  the gate cross-track error (the sector leaves little crossrange authority), the tower judges a 4.5 m/s arrival (out
-  of propellant) "gefangen". Diagnostics: `STARSIM_DEBUG_FLIP=1`, `STARSIM_DEBUG_BURN=1`, `STARSIM_DEBUG_ENTRY=1` with
-  the SCvx / catch flags.
+  turns to the nearest edge of the nose sector at fraction 0.2 (alpha ~86 deg), the lift direction turns about the air
+  velocity at 3 deg/s [E] (a shortest-path attitude slew passes through low alpha: ~1 km miss) with the steering held,
+  then Levenberg-Marquardt steps in sector coordinates (fraction 0.02-0.5; the sector narrows from +-30 deg 4 km above
+  the gate to +-10 deg at it [E]). The predictor flies the same turn at its rate (an instant turn hid the lift swept in
+  it: 0.4-0.8 km overshoots). The commanded attitude slews at 1.5x the turn rate and its rate is fed forward to the
+  entry controller (`EntryCommand::rate_gcrf_radps`; without it the PD loop lagged the turn by ~18 deg of alpha), which
+  has an actuator delay of 0.5 s [E] (2x slew or 5 deg/s set off a roll limit cycle on the flaps: departures). Session
+  test from Mach 2.6, 28 km west: gate < 1 m off, caught 0.02 m, 0.95 m/s, 2.1 t left. Open: an energy-short terminal
+  phase (33-39 km from Mach 2.6) stays shallow and misses the gate (not seen from orbit), the tower judges a 4.5 m/s
+  arrival (out of propellant) "gefangen". Diagnostics: `STARSIM_DEBUG_FLIP=1`, `STARSIM_DEBUG_BURN=1`,
+  `STARSIM_DEBUG_ENTRY=1` with the SCvx / catch flags.
+- Ship return from orbit (b4, `config/missions/ship_return_starbase.toml`, `config::load_ship_return_mission`):
+  `FlightSession::plan_ship_return` (game key R) plans the deorbit burn on the onboard computer (`gnc/deorbit_planner`:
+  coast samples over 48 h, passes = closest approaches of the ground track; per pass the burn epoch is bracketed on the
+  entry predictor's downrange error and burn epoch + retrograde delta-v are shot (Newton) to the 120 km entry interface
+  at -1 deg with the prediction at a nominal 50 deg bank (both signs averaged) ending at the gate; the first pass within
+  60 km crossrange [E] is taken; refused without the landing reserve or without a pass). The burn flies on
+  `[stage.recovery] deorbit_engine_groups` - the ship: the belly sea-level Raptor alone (user 2026-10-13), the hull turned
+  so that its thrust axis through the CG (`gnc::thrust_axis_body`, ~3 deg off the hull) points along the burn; the burn
+  executor senses along that axis (`FlightSession::execute_burn(node, groups)`). `AutopilotState::Return` ("Rückkehr")
+  coasts to 300 s before the entry interface, then the entry guidance (b2) and the flip and catch (b3) take over.
+  From 200 km / 26.5 deg: burn after ~21-22 h (one pass a day passes Starbase within reach), 65-78 m/s, 5.6-6.8 t.
+  Campaign `[ship][mission][validation]` (orbit phase 0-315 deg, orbit 190-230 km, 42-48 t, deorbit execution
+  +-1 % / 0.5 deg via `FlightSession::apply_velocity_error`): 14 of 14 caught, gate ~1 m, 8.9-13.9 t left (~40 s each).
+  Diagnostics: `STARSIM_DEBUG_DEORBIT=1`; test "Ship return single case" (hidden, `STARSIM_RETURN_PHASE=<deg>` or
+  `STARSIM_RETURN_DISPERSED=<i>`, with `STARSIM_VERBOSE=1`).
 - `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically
   (follow the Earth), impacted/resting bodies do not block coast segments.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`

@@ -284,6 +284,16 @@ void FlightSim::disengage_autopilot() {
 
 bool FlightSim::plan_circularization() { return is_active() && session_->plan_circularization_at_apoapsis(); }
 
+bool FlightSim::plan_ship_return() {
+    if (!is_active()) return false;
+    try {
+        return session_->plan_ship_return();
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("FlightSim.plan_ship_return: ") + e.what());
+        return false;
+    }
+}
+
 bool FlightSim::plan_burn(double seconds_from_now, double prograde_mps, double normal_mps, double radial_mps) {
     if (!is_active()) return false;
     const auto& s = session_->body(session_->controlled_index()).state();
@@ -313,6 +323,17 @@ godot::Dictionary FlightSim::autopilot_status() const {
         b["burn_duration_s"] = ap.burn.burn_duration_s;
         b["total_dv_mps"] = session_->burn() ? norm(session_->burn()->node().delta_v_gcrf_mps) : 0.0;
         d["burn"] = b;
+    }
+    if (const auto* plan = session_->ship_return_plan()) {
+        godot::Dictionary r;
+        r["feasible"] = plan->feasible;
+        r["reason"] = godot::String::utf8(plan->reason.c_str());
+        r["delta_v_mps"] = plan->delta_v_mps;
+        r["propellant_t"] = plan->propellant_kg / 1000.0;
+        r["burn_in_s"] = plan->node.epoch - session_->epoch();
+        r["entry_in_s"] = plan->entry_interface_epoch - session_->epoch();
+        r["crossrange_km"] = plan->crossrange_m / 1000.0;
+        d["return"] = r;
     }
     return d;
 }
@@ -387,6 +408,7 @@ void FlightSim::_bind_methods() {
                          &FlightSim::engage_ascent_autopilot);
     ClassDB::bind_method(D_METHOD("disengage_autopilot"), &FlightSim::disengage_autopilot);
     ClassDB::bind_method(D_METHOD("plan_circularization"), &FlightSim::plan_circularization);
+    ClassDB::bind_method(D_METHOD("plan_ship_return"), &FlightSim::plan_ship_return);
     ClassDB::bind_method(D_METHOD("plan_burn", "seconds_from_now", "prograde_mps", "normal_mps", "radial_mps"),
                          &FlightSim::plan_burn);
     ClassDB::bind_method(D_METHOD("autopilot_status"), &FlightSim::autopilot_status);

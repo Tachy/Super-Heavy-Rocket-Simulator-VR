@@ -93,9 +93,14 @@ func _process(_delta: float) -> void:
 		lines.append("Manöver         Δv %.1f / %.1f m/s" % [b["remaining_dv_mps"], b["total_dv_mps"]])
 		lines.append("  %s" % _dv_bar(b["remaining_dv_mps"], b["total_dv_mps"]))
 		if ignition > 0.0:
-			lines.append("  Zündung in    %02d:%02d  (Brenndauer %.1f s)" % [int(ignition) / 60, int(ignition) % 60, b["burn_duration_s"]])
+			lines.append("  Zündung in    %s  (Brenndauer %.1f s)" % [_clock(ignition), b["burn_duration_s"]])
 		else:
 			lines.append("  BRENNT        Rest %.1f s" % b["burn_duration_s"])
+	if ap.has("return") and ap["return"]["feasible"]:
+		var r: Dictionary = ap["return"]
+		if r["entry_in_s"] > 0.0:
+			lines.append("Rückkehr        Δv %.1f m/s (%.1f t), Quer %.0f km" % [r["delta_v_mps"], r["propellant_t"], r["crossrange_km"]])
+			lines.append("  Eintritt in   %s" % _clock(r["entry_in_s"]))
 	if world.flight.last_event != "":
 		lines.append("Ereignis: %s" % world.flight.last_event)
 	lines.append("")
@@ -108,3 +113,11 @@ static func _dv_bar(remaining: float, total: float) -> String:
 	var cells := 24
 	var filled := int(round(cells * clampf(remaining / maxf(total, 1e-6), 0.0, 1.0)))
 	return "[" + "█".repeat(filled) + "·".repeat(cells - filled) + "]"
+
+
+## "mm:ss", or "h:mm:ss" from an hour on (a deorbit burn can be a day ahead).
+static func _clock(seconds: float) -> String:
+	var t := int(seconds)
+	if t >= 3600:
+		return "%d:%02d:%02d" % [t / 3600, (t / 60) % 60, t % 60]
+	return "%02d:%02d" % [t / 60, t % 60]

@@ -3,7 +3,8 @@ extends Node
 ## Owns the C++ flight session: pilot input (HOTAS + keyboard), pilot actions, vehicle views.
 ## Keyboard: W/S pitch, A/D yaw, Q/E roll, Shift/Ctrl throttle, I ignition, L release clamps,
 ## K cutoff, G stage separation, M control mode, P ascent autopilot (config/missions/leo_ascent.toml),
-## O circularize at apoapsis, X autopilot off. HOTAS (stick + throttle found by name): config/input_hotas.toml.
+## O circularize at apoapsis, R return the ship to the site's tower (config/missions/ship_return_starbase.toml),
+## X autopilot off. HOTAS (stick + throttle found by name): config/input_hotas.toml.
 
 const THROTTLE_KEY_RATE := 0.5  # per second
 
@@ -98,6 +99,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		KEY_O:
 			last_event = "Zirkularisierung geplant" if sim.plan_circularization() \
 					else "Kein Manöver: keine Ellipsenbahn oder Δv zu klein für die Haupttriebwerke"
+		KEY_R:
+			if sim.plan_ship_return():
+				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Fang am Turm"
+			else:
+				last_event = "Keine Rückkehr: %s" % sim.autopilot_status().get("return", {}).get("reason", "kein Schiff im Orbit")
 		KEY_X:
 			sim.disengage_autopilot()
 			last_event = "Autopilot aus"

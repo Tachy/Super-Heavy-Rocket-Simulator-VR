@@ -112,6 +112,9 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
   zum Ziel und „Korridorgrenze“, wenn eine Grenze den Rollwinkel beschränkt (heute schon im Desktop-HUD).
   Ab dem Tor zeigt es Flip und Landebrennen des Ships (Phase, Lenkung SCvx) und das Ergebnis wie beim Booster
   (heute schon im Desktop-HUD).
+  Rückkehr aus dem Orbit (Taste R am Desktop): der Bordcomputer plant den Deorbit-Brennvorgang für den nächsten
+  Überflug des Startplatzes in Reichweite; das HUD zeigt „Rückkehr Δv … m/s (… t), Quer … km“, „Eintritt in h:mm:ss“
+  und den Manöverknoten mit „Zündung in h:mm:ss“; ohne Plan den Grund („Zu wenig Treibstoff …“, „Kein Überflug …“).
   [Vorschlag] Dieselben Werte als Soll/Ist-Anzeige im Flugdirektor (Steuerungsstufen: der Spieler kann rollen,
   der Bordcomputer rechnet das Soll nach).
 - [Vorschlag] Jeder Außenbildschirm hat 3–4 umschaltbare Kameras (Berührung oder HOTAS-Taste).

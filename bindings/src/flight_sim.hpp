@@ -51,10 +51,14 @@ public:
     void engage_ascent_autopilot(double periapsis_km, double apoapsis_km, double inclination_deg, bool northerly);
     void disengage_autopilot();
     bool plan_circularization();
+    // Return of the ship from orbit to the site's tower (onboard deorbit plan, burn, entry, catch); the plan or the
+    // reason it was refused appears in autopilot_status()["return"].
+    bool plan_ship_return();
     // Node `seconds_from_now` ahead with orbit-relative components (prograde, normal, radial-out), m/s.
     bool plan_burn(double seconds_from_now, double prograde_mps, double normal_mps, double radial_mps);
     // {state, phase, time_to_go_s, direction (GCRF), burn: {time_to_ignition_s, remaining_dv_mps,
-    //  burn_duration_s, direction}}
+    //  burn_duration_s, direction}, return: {feasible, reason, delta_v_mps, propellant_t, burn_in_s, entry_in_s,
+    //  crossrange_km}}
     godot::Dictionary autopilot_status() const;
     godot::PackedVector3Array predict_trajectory(int index, double duration_s, double step_s) const;
     // Target orbit of the ascent guidance as a closed curve (GCRF), empty without guidance.
