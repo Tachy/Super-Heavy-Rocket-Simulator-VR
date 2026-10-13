@@ -42,6 +42,7 @@ python tools/telemetry/webcast_telemetry.py clean raw.csv <table.csv> --flight "
 
 Drag of the falling booster (ballistic coefficient, C_D for an assumed mass):
 `python tools/telemetry/drag_estimate.py <table.csv> --from 340 --to 392`.
+Ship entry (beta and vertical L/D): `python tools/telemetry/entry_estimate.py <table.csv> --from 2800 --to 3760`.
 Masses and thrust from the propellant gauge (dials layout; absolute scale from a sourced tank capacity):
 `python tools/telemetry/mass_estimate.py <table.csv> --capacity-t 3650 --isp-sl 330 --isp-vac 350 --from 20 --to 130`
 (stack/booster) or `--vehicle ship --capacity-t 1600 --isp-sl 365 --isp-vac 365 --cd 0 --from 200 --to 500`.
