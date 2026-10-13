@@ -5,6 +5,7 @@
 // telemetry replay tests.
 
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <vector>
@@ -51,6 +52,7 @@ struct EntryStart {
     double heading_rad = 90.0 * constants::deg_to_rad;  // clockwise from north
     double latitude_rad = 10.0 * constants::deg_to_rad;
     double mass_propellant_kg = -1.0;  // < 0: the stage's landing_propellant_kg
+    double bank_rad = 0.0;             // initial attitude (alpha 60 deg)
 };
 
 struct EntrySample {
@@ -76,6 +78,7 @@ public:
         for (auto& f : ship.flaps) f.initial_deflection_rad = 0.5 * f.max_deflection_rad;
         if (tweak) tweak(cfg);
         belly_azimuth_rad_ = ship.aero.belly_azimuth_rad;
+        initial_bank_rad_ = start.bank_rad;
 
         const frames::GeodeticPosition g{start.latitude_rad, 0.0, start.height_m};
         const math::Vec3 r = frames::geodetic_to_fixed(g);
@@ -86,20 +89,23 @@ public:
         const math::Vec3 v_rel = (horizontal * cg + up * sg) * start.speed_relative_mps;
         const math::Vec3 v = v_rel + cross(math::Vec3{0.0, 0.0, earth_rate_radps}, r);
         const vehicle::RigidBodyState state{
-            r, v, gnc::entry_attitude_quaternion(v_rel, up, 60.0 * constants::deg_to_rad, 0.0, belly_azimuth_rad_),
+            r, v, gnc::entry_attitude_quaternion(v_rel, up, 60.0 * constants::deg_to_rad, start.bank_rad, belly_azimuth_rad_),
             {}};
         body_ = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR), state);
     }
 
-    // Flies until the Mach number (in continuum flow, below 40 km) drops below `until_mach`, the body breaks up or
-    // lands, the ship skips out and climbs above 130 km, or `max_time_s` passes. One sample per second.
-    std::vector<EntrySample> run(const EntryLaw& law, double until_mach, double max_time_s = 3000.0) {
+    // Flies until the Mach number (in continuum flow, below 40 km) drops below `until_mach`, the altitude below
+    // `stop_altitude_m`, the body breaks up or lands, the ship skips out and climbs above 130 km, or `max_time_s`
+    // passes. One sample per second.
+    std::vector<EntrySample> run(const EntryLaw& law, double until_mach, double max_time_s = 3000.0,
+                                 double stop_altitude_m = -1.0) {
         std::vector<EntrySample> samples;
         gnc::AttitudeController::Gains gains;
         gains.flaps = true;
+        gains.natural_frequency_rad_s = 0.5;  // the flaps move at ~20 deg/s: 0.8 rad/s limit-cycles in roll
         const gnc::AttitudeController controller(gains);
         const double dt = 0.01;
-        double alpha = 60.0 * constants::deg_to_rad, bank = 0.0;
+        double alpha = 60.0 * constants::deg_to_rad, bank = initial_bank_rad_;
         math::Vec3 previous_v_rel;
         for (int k = 0; k * dt < max_time_s; ++k) {
             const time::Epoch now = entry_t0 + k * dt;
@@ -121,6 +127,7 @@ public:
                 previous_v_rel = v_rel;
                 samples.push_back(sample);
                 if (t.altitude_m < 40000.0 && t.mach < until_mach) break;
+                if (t.altitude_m < stop_altitude_m) break;
                 if (body_->skipped_out() && t.altitude_m > 130000.0) break;
             }
             if (body_->impacted() || body_->resting()) break;
@@ -144,6 +151,7 @@ private:
     vehicle::FlightEnvironment env_{gravity_, atmosphere_, earth_, nullptr, false};
     std::unique_ptr<vehicle::FlightBody> body_;
     double belly_azimuth_rad_ = 0.0;
+    double initial_bank_rad_ = 0.0;
 };
 
 }  // namespace starsim::test

@@ -31,6 +31,7 @@ add_executable(starsim_core_tests
     test_entry_heating.cpp
     test_entry_attitude.cpp
     test_ship_entry.cpp
+    test_ship_entry_telemetry.cpp
     test_optim_sparse.cpp
     test_optim_ordering.cpp
     test_optim_ldl.cpp

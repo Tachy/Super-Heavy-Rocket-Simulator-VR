@@ -1,0 +1,10 @@
+# Ship entry: nominal angle of attack over Mach (belly first), the entry autopilot profile.
+# [D] identified on flight 13 with the cross-flow table (core/tests/test_ship_entry_telemetry.cpp).
+mach,alpha_deg
+0.0,80.0
+0.8,80.0
+1.5,70.0
+3.0,60.0
+8.0,50.0
+15.0,52.0
+30.0,55.0
