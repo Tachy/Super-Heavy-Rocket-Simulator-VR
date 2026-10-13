@@ -226,6 +226,35 @@ limit; a nominal flight-13 replay stays inside both (peak heat rate reported for
 
 Out of b2: the guided skip (optional mode, last priority - deferred), wind, manual entry flight (M7).
 
+## b3 design (flip and catch, refined 2026-10-13; decisions autonomous, ledgered)
+
+- **Engines 3 -> 2 -> 1** (user 2026-10-13): the ship's sea-level group is split into three single-engine groups
+  `sea_level_1/2/3` (explicit ring angles 0/120/240 deg [E]); phase sets {1,2,3} -> {1,2} -> {1}, so the SCvx
+  planner's three engine phases (built for the booster's 13 -> 5 -> 3) carry over unchanged.
+  Physics note: at the catch the ship weighs ~265 t (dry 255 t [D] + remaining propellant); one Raptor 3 gives
+  2.75 MN at sea level: thrust/weight ~1.04. The single engine can barely hold the ship - the last phase starts
+  nearly hovering and flies near full throttle. The ship's planning limits differ from the booster's accordingly
+  (smaller throttle margin, no "gentle end" thrust cap, which assumes the final set exceeds the weight at minimum).
+- **Catch pins on the ship** `[stage.catch_pins]` [E]: two pins at azimuths 90/270 deg (belly and back, clear of
+  the flaps at 0/180 and 20/160), at the station just below the forward flaps. The tower, its arms and the catch
+  judgement are reused unchanged (`LandingSite::catch_target` from the vehicle's pins).
+- **`gnc/ship_landing`** (`ShipLandingGuidance`, output `ReturnCommand` like the booster's guidance):
+  - *Flip* at the gate: the three sea-level engines relight (their start-up from the engine model) at a flip
+    throttle [E]; the commanded axis is the local vertical (engines down), roll held; the attitude controller uses
+    gimbals, flaps and RCS. Done when the axis is within 15 deg [E] of the vertical.
+  - *Landing burn* on SCvx plans (`ScvxLandingGuidance`) with the ship's phase groups and limits [E] (switch
+    windows, tilt and rate limits per phase); the catch target from the ship's pins; abort to the sea after repeated
+    unreachable re-plans (as the booster). If the very first plan fails, it is retried each second; the explicit
+    fallback laws of the booster are not ported (documented gap).
+  - Ends on pin contact (engines off) or touchdown.
+- **Session**: when the entry guidance reaches the gate, the ship's landing guidance takes over (catch site: the
+  launch site's tower); the gate point is the catch axis on the ground.
+
+Validation (b3 deliverable): from the gate state (belly down, ~95 m/s sink, 1.5 km) the ship flips (vertical in a
+few seconds) and is caught; campaign over gate dispersions (+-10 m, +-10 m/s, +-5 % mass, +-5 deg attitude, one
+engine failed) caught within the booster's tolerances; relight height and speed compared with flights 13/14
+(engines lit at ~0.5-1.5 km, ~100 m/s [D]).
+
 ## b2-b4 outline (refined in their plans)
 
 - **b2 entry guidance**: numeric predictor-corrector (the onboard computer integrates the remaining entry with the
