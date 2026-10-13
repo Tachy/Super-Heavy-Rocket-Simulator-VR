@@ -13,7 +13,7 @@
 
 namespace starsim::gnc {
 
-enum class ReturnPhase { Flip, Boostback, Coast, LandingBurn, Landed };
+enum class ReturnPhase { Flip, Boostback, Coast, EntryBurn, LandingBurn, Landed };
 
 const char* to_string(ReturnPhase phase);
 
@@ -67,6 +67,7 @@ struct ReturnCommand {
     std::optional<AttitudeController::Feedforward> feedforward; // planned rotation (SCvx)
     std::optional<math::Vec3> torque_body_nm;                   // SCvx lateral LQR: body torque (gimbals / RCS)
     std::vector<double> flap_rad;  // flaps commanded directly (ship flip; empty: the attitude controller sets them)
+    bool deploy_legs = false;      // landing on legs: deploy them now (sticky)
 };
 
 // Return of a first stage to its launch site:
@@ -90,6 +91,9 @@ public:
     ReturnPhase phase() const { return phase_; }
     // Pins on the tower arms (reported by the tower each tick): the landing burn ends.
     void set_catch_contact(bool contact) { catch_contact_ = contact; }
+    // A foot on the ground (reported by the leg landing each tick): the landing burn ends.
+    void set_leg_contact(bool contact) { leg_contact_ = contact; }
+    double entry_delta_v_mps() const { return entry_delta_v_mps_; }  // burned in the entry burn so far
     // Scenarios: start in a later phase (e.g. LandingBurn for a booster placed at ignition).
     void skip_to(ReturnPhase phase) {
         phase_ = phase;
@@ -146,6 +150,15 @@ private:
     double target_bottom_height_m_ = 0.0;  // vehicle bottom above the site ground at touchdown / catch
     std::unique_ptr<ScvxLandingGuidance> scvx_;  // landing burn on SCvx plans (null: explicit laws)
     bool landing_started_ = false;
+    bool leg_contact_ = false;
+    bool legs_deployed_ = false;          // deployment commanded
+    bool entry_done_ = false;
+    double entry_delta_v_mps_ = 0.0;
+    time::Epoch last_update_;              // previous update (entry burn integration)
+    std::optional<time::Epoch> plan_end_;  // SCvx pad landing: end of the active plan
+
+    void entry_burn(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
+                    ReturnCommand& cmd);
 
     void start_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     void explicit_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,

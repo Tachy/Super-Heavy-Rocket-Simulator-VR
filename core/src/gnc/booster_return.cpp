@@ -32,6 +32,12 @@ constexpr double hold_time_constant_s = 4.0;        // position hold on the cent
 constexpr double divert_hold_radius_m = 3.0;        // inside: position hold instead of braking profile
 constexpr double catch_missed_height_m = 5.0;  // CG this far below the catch height: the arms were missed
 constexpr double tilt_taper_height_m = 60.0;                           // below: tilt limit tapers off
+constexpr double leg_deploy_margin_s = 5.0;      // [E] legs locked this long before the planned touchdown
+constexpr double pad_cutoff_after_plan_s = 0.5;  // pad landing: engines off this long after the plan's end (spec)
+// Entry burn steering: the axis leans from retrograde towards the drag-aware impact miss, fully at
+// entry_steering_miss_m, by at most entry_steering_max_rad [E] (a small correction; the grid fins do the rest).
+constexpr double entry_steering_miss_m = 2000.0;
+constexpr double entry_steering_max_rad = 5.0 * constants::deg_to_rad;
 constexpr double touchdown_tilt_rad = 4.0 * constants::deg_to_rad;     // tilt limit at touchdown
 
 Vec3 up_at(double lat, double lon) { return {std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)}; }
@@ -101,6 +107,7 @@ const char* to_string(ReturnPhase phase) {
         case ReturnPhase::Flip: return "Wende";
         case ReturnPhase::Boostback: return "Boostback";
         case ReturnPhase::Coast: return "Abstieg";
+        case ReturnPhase::EntryBurn: return "Wiedereintritt";
         case ReturnPhase::LandingBurn: return "Landebrennen";
         case ReturnPhase::Landed: return "Gelandet";
     }
@@ -161,6 +168,8 @@ BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnPara
     } else if (site_.catch_target) {
         const auto pins = frames::fixed_to_geodetic(site_.catch_target->pin_point_itrf_m);
         target_bottom_height_m_ = pins.height_m - site_.height_m - site_.catch_target->pin_station_m;
+    } else if (site_.pad) {
+        target_bottom_height_m_ = site_.pad->contact_bottom_height_m;  // on the legs
     }
 }
 
@@ -233,7 +242,7 @@ BoosterReturnGuidance::BurnPrediction BoosterReturnGuidance::predict_landing_bur
     const auto mass = body.vehicle().mass_properties();
     const double area = constants::pi * 0.25 * body.vehicle().diameter_m() * body.vehicle().diameter_m();
     const auto& drag = body.vehicle().aero().drag_curve(true);
-    const bool scvx = parameters_.scvx_landing && site_.catch_target;
+    const bool scvx = parameters_.scvx_landing && (site_.catch_target || site_.pad);
     // Segments: ignition set, (SCvx only) divert set, final set; each until its switch speed.
     struct Segment {
         const std::vector<std::string>* groups;
@@ -310,7 +319,14 @@ double BoosterReturnGuidance::meco_propellant_kg(const vehicle::Vehicle& stack, 
     const double exhaust_mps = engines.mass_flow_kgps > 0.0 ? engines.vacuum_thrust_n / engines.mass_flow_kgps : 1.0;
     const double e = std::exp(-delta_v / exhaust_mps);
     const double dry_kg = booster.config.dry_mass_kg + booster.extra_mass_kg;
-    return run_down_kg + flip_kg + (landing_propellant_kg + dry_kg * (1.0 - e)) / e;
+    // Entry burn (rocket equation on its delta-v): the propellant to have left after the boostback.
+    double after_boostback_kg = landing_propellant_kg;
+    if (parameters.entry_altitude_m > 0.0 && parameters.entry_delta_v_mps > 0.0) {
+        const auto entry = engine_set(stack, parameters.entry_groups, 0.0);
+        const double entry_exhaust_mps = entry.mass_flow_kgps > 0.0 ? entry.vacuum_thrust_n / entry.mass_flow_kgps : 1.0;
+        after_boostback_kg = (landing_propellant_kg + dry_kg) * std::exp(parameters.entry_delta_v_mps / entry_exhaust_mps) - dry_kg;
+    }
+    return run_down_kg + flip_kg + (after_boostback_kg + dry_kg * (1.0 - e)) / e;
 }
 
 ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
@@ -336,7 +352,10 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
     if (!started_) {
         started_ = true;
         boostback_start_ = epoch;
+        last_update_ = epoch;
     }
+    const double dt = epoch - last_update_;
+    last_update_ = epoch;
     ++tick_counter_;
     ReturnCommand cmd;
 
@@ -437,12 +456,37 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         }
         const double height = geo.height_m - mass.cg_station_m - site_.height_m;
         const bool descending = dot(v_fixed, site_up) < 0.0;
-        if (descending && (height < 30e3 || tick_counter_ % 20 == 0)) {
+        if (descending && !entry_done_ && parameters_.entry_altitude_m > 0.0 &&
+            geo.height_m - site_.height_m < parameters_.entry_altitude_m) {
+            phase_ = ReturnPhase::EntryBurn;
+            entry_delta_v_mps_ = 0.0;
+        }
+        if (phase_ == ReturnPhase::Coast && descending && (height < 30e3 || tick_counter_ % 20 == 0)) {
             const auto burn = predict_landing_burn(body, env, epoch);
             if (burn.stop_height_m <= 0.0) phase_ = ReturnPhase::LandingBurn;
         }
         cmd.phase = phase_;
         if (phase_ == ReturnPhase::Coast) return cmd;
+    }
+
+    if (phase_ == ReturnPhase::EntryBurn) {
+        if (body.vehicle().any_engine_producing_thrust()) {
+            double thrust_n = 0.0;
+            for (const auto& e : body.vehicle().stages().front().engines) {
+                if (e.producing_thrust()) thrust_n += e.spool * e.performance->thrust_n(e.throttle, pressure);
+            }
+            entry_delta_v_mps_ += thrust_n / mass.mass_kg * dt;
+        }
+        if (entry_delta_v_mps_ >= parameters_.entry_delta_v_mps) {
+            entry_done_ = true;
+            phase_ = ReturnPhase::Coast;
+            cmd.phase = phase_;
+            cmd.axis_gcrf = transform.rotation * (-math::normalized(v_fixed));
+            return cmd;
+        }
+        entry_burn(body, env, epoch, cmd);
+        cmd.phase = phase_;
+        return cmd;
     }
 
     if (phase_ == ReturnPhase::LandingBurn) {
@@ -459,11 +503,21 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
             cmd.abort = c.abort;
             cmd.time_to_go_s = c.time_to_go_s;
             cmd.impact_miss_m = c.offset_m;
-            const Vec3 r_catch = site_.catch_target->pin_point_itrf_m -
-                                 site_up * (site_.catch_target->pin_station_m - mass.cg_station_m);
-            const double height = dot(r_fixed - r_catch, site_up);
-            const bool catch_over = !c.abort && (catch_contact_ || height < -catch_missed_height_m);
-            if (body.resting() || body.impacted() || catch_over) phase_ = ReturnPhase::Landed;
+            bool over = false;
+            if (site_.catch_target) {
+                const Vec3 r_catch = site_.catch_target->pin_point_itrf_m -
+                                     site_up * (site_.catch_target->pin_station_m - mass.cg_station_m);
+                const double height = dot(r_fixed - r_catch, site_up);
+                over = !c.abort && (catch_contact_ || height < -catch_missed_height_m);
+            } else {
+                // Pad: the legs go out before the touchdown; the engines stop on leg contact, or shortly after the plan's
+                // end (a plan ending a little high: the stage drops onto its legs).
+                const double deploy_s = body.vehicle().stages().front().config.landing_legs.deploy_time_s;
+                if (c.time_to_go_s <= deploy_s + leg_deploy_margin_s) legs_deployed_ = true;
+                if (c.time_to_go_s > 0.0 || !plan_end_) plan_end_ = epoch + c.time_to_go_s;
+                over = leg_contact_ || epoch - *plan_end_ > pad_cutoff_after_plan_s;
+            }
+            if (body.resting() || body.impacted() || over) phase_ = ReturnPhase::Landed;
         } else {
             explicit_landing(body, env, epoch, cmd);
         }
@@ -472,8 +526,38 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         cmd.run_groups.clear();
         cmd.axis_gcrf = transform.rotation * site_up;
     }
+    cmd.deploy_legs = legs_deployed_;
     cmd.phase = phase_;
     return cmd;
+}
+
+// Entry burn: retrograde (relative to the ground) on the entry engines, the axis leaning towards the drag-aware impact
+// miss of the landing site (small correction).
+void BoosterReturnGuidance::entry_burn(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                       time::Epoch epoch, ReturnCommand& cmd) {
+    const auto& s = body.state();
+    const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
+    const Mat3 to_fixed = transpose(transform.rotation);
+    const Vec3 v_fixed = to_fixed * (s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(transform), s.position_gcrf_m));
+    const Vec3 site_up = up_at(site_.latitude_rad, site_.longitude_rad);
+    const Vec3 site_fixed = frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m});
+    if (tick_counter_ % 40 == 0) {
+        const auto impact = predict_impact(body, env, epoch, site_.height_m);
+        if (impact.valid) {
+            const Vec3 miss = site_fixed - impact.position_itrf_m;
+            steer_itrf_ = miss - site_up * dot(miss, site_up);
+            impact_miss_m_ = norm(steer_itrf_);
+        }
+    }
+    Vec3 axis = -math::normalized(v_fixed);
+    if (impact_miss_m_ > trim_deadband_m) {
+        const double lean = entry_steering_max_rad * std::min(impact_miss_m_ / entry_steering_miss_m, 1.0);
+        axis = math::normalized(axis + math::normalized(steer_itrf_) * std::tan(lean));
+    }
+    cmd.axis_gcrf = transform.rotation * axis;
+    cmd.run_groups = parameters_.entry_groups;
+    cmd.throttle = parameters_.entry_throttle;
+    cmd.impact_miss_m = impact_miss_m_;
 }
 
 void BoosterReturnGuidance::set_realtime(bool realtime) {
@@ -484,10 +568,13 @@ void BoosterReturnGuidance::set_realtime(bool realtime) {
 void BoosterReturnGuidance::start_landing(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                           time::Epoch epoch) {
     landing_started_ = true;
-    if (!parameters_.scvx_landing || !site_.catch_target) return;
+    if (!parameters_.scvx_landing || !(site_.catch_target || site_.pad)) return;
     auto p = parameters_.scvx;
     p.snapshot.phase_groups = {parameters_.landing_ignition_groups, parameters_.landing_divert_groups,
                                parameters_.landing_groups};
+    // A pad landing ends on one engine whose minimum thrust exceeds the weight: no exponential approach (infeasible at
+    // the end, see DescentLimits::approach_time_constant_s).
+    if (site_.pad) p.settings.limits.approach_time_constant_s = 0.0;
     scvx_ = std::make_unique<ScvxLandingGuidance>(site_, p);
     if (!scvx_->start(body, env, epoch)) scvx_.reset();  // fallback: the explicit laws
 }
@@ -511,7 +598,8 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
     const Vec3 g_fixed = to_fixed * env.gravity.acceleration_mps2(s.position_gcrf_m, epoch) -
                          cross(omega_fixed, cross(omega_fixed, r_fixed));
     const bool catching = site_.catch_target && !ditch_;
-    Vec3 r_pad = site_fixed + site_up * mass.cg_station_m;  // CG position at touchdown (ditching: at sea) / catch
+    // CG position at touchdown (ditching: at sea; on legs: the feet on the ground) / catch
+    Vec3 r_pad = site_fixed + site_up * (mass.cg_station_m + target_bottom_height_m_);
     if (catching) {
         r_pad = site_.catch_target->pin_point_itrf_m - site_up * (site_.catch_target->pin_station_m - mass.cg_station_m);
     }
@@ -585,9 +673,12 @@ void BoosterReturnGuidance::explicit_landing(const vehicle::FlightBody& body, co
     cmd.run_groups = groups;
     cmd.time_to_go_s = t;
     cmd.impact_miss_m = norm(offset_side);
+    if (site_.pad && t <= body.vehicle().stages().front().config.landing_legs.deploy_time_s + leg_deploy_margin_s) {
+        legs_deployed_ = true;
+    }
     // Touchdown sensed (or ground contact): engines off.
     const bool catch_over = catching && (catch_contact_ || height < -catch_missed_height_m);
-    if (body.resting() || body.impacted() || catch_over ||
+    if (body.resting() || body.impacted() || catch_over || leg_contact_ ||
         (!catching && final_engines_ && height < touchdown_cutoff_height_m)) {
         phase_ = ReturnPhase::Landed;
     }
