@@ -49,8 +49,8 @@ TEST_CASE("Ship has three single sea-level engine groups and catch pins", "[ship
     CHECK(angles == std::set<long>{0, 120, -120});
 
     REQUIRE(ship.catch_pins.azimuths_rad.size() == 2);
-    CHECK(std::abs(ship.catch_pins.azimuths_rad[0] - 90.0 * deg) < 1e-9);
-    CHECK(std::abs(ship.catch_pins.azimuths_rad[1] - 270.0 * deg) < 1e-9);
+    CHECK(std::abs(ship.catch_pins.azimuths_rad[0] - 0.0 * deg) < 1e-9);  // the sides: nose to the tower before the flip
+    CHECK(std::abs(ship.catch_pins.azimuths_rad[1] - 180.0 * deg) < 1e-9);
     CHECK(ship.catch_pins.station_m > 30.0);
     CHECK(ship.catch_pins.station_m < 38.0);  // below the forward flaps (38-46 m)
 }

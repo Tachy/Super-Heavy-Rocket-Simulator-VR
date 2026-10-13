@@ -1,6 +1,8 @@
 #include "starsim/gnc/ship_landing.hpp"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/mat3.hpp"
@@ -28,6 +30,8 @@ ShipLandingParameters ship_landing_parameters() {
                                std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"},
                                std::vector<std::string>{"ship/sea_level_1"}};
     s.snapshot.reserve_kg = 1000.0;  // [E] the ship's landing propellant is small (header tanks)
+    // [E] lateral LQR effort: the booster's 0.2 swung the ship's gimbals stop to stop after the flip (20 deg/s slew)
+    s.lateral_effort_fraction = 0.1;
     auto& l = s.settings.limits;
     l.tilt_max_rad = {20.0 * deg, 15.0 * deg, 8.0 * deg};  // [E] the more engines, the more gimbal authority
     l.rate_max_radps = {0.3, 0.2, 0.1};                    // [E] the ship is shorter and lighter than the booster
@@ -64,10 +68,38 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
         cmd.run_groups = parameters_.flip_groups;
         cmd.throttle = parameters_.flip_throttle;
         cmd.axis_gcrf = up_gcrf;  // engines down
+        if (site_.catch_target) {
+            // pins across the arms already in the flip, while three engines and the flaps can roll the ship (two
+            // off-axis engines in the burn have little roll authority)
+            const Vec3 body_y = transpose(transform.rotation) * body.state().attitude.rotate(Vec3{0.0, 1.0, 0.0});
+            cmd.roll_reference_gcrf = transform.rotation * catch_roll_reference(site_.catch_target->across_itrf, site_up,
+                                                                                site_.catch_target->pin_azimuth_rad, body_y);
+        }
         const Vec3 axis = body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
         const double tilt = std::acos(std::clamp(dot(axis, up_gcrf), -1.0, 1.0));
         const Vec3 w = body.state().angular_velocity_body_radps;
         const bool settled = std::hypot(w.y, w.z) < parameters_.flip_settled_rate_radps;  // the plans' rate cone
+        if (std::getenv("STARSIM_DEBUG_FLIP")) {  // diagnostics
+            double spool = 0.0, thrust = 0.0;
+            for (const auto& e : body.vehicle().stages().front().engines) {
+                if (e.producing_thrust()) thrust += e.spool * e.performance->thrust_n(e.throttle, 0.0);
+                spool = std::max(spool, e.spool);
+            }
+            std::printf("[flip] t %.2f tilt %.1f rate %.3f spool %.2f thrust %.2f MN flaps", epoch - flip_start_,
+                        tilt * constants::rad_to_deg, std::hypot(w.y, w.z), spool, thrust / 1e6);
+            for (const auto& f : body.vehicle().stages().front().flaps) {
+                std::printf(" %.0f", f.deflection_rad * constants::rad_to_deg);
+            }
+            std::printf(" w %.3f/%.3f\n", w.y, w.z);
+        }
+        if (tilt > parameters_.flip_flaps_until_tilt_rad) {
+            const auto& stage = body.vehicle().stages().front();
+            const double cg = body.vehicle().mass_properties().cg_station_m;
+            for (const auto& f : stage.flaps) {
+                const bool forward = 0.5 * (f.geometry.station_fwd_m + f.geometry.station_aft_m) > cg;
+                cmd.flap_rad.push_back(forward ? f.max_deflection_rad : 0.0);
+            }
+        }
         if (tilt < parameters_.flip_tolerance_rad && flip_duration_s_ == 0.0) {
             flip_duration_s_ = epoch - flip_start_;
             const Vec3 r_fixed = transpose(transform.rotation) * body.state().position_gcrf_m;
@@ -96,6 +128,8 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
         cmd.abort = c.abort;
         cmd.time_to_go_s = c.time_to_go_s;
         cmd.impact_miss_m = c.offset_m;
+        // [E] flaps folded against the hull in the burn: the plans' model has no flaps
+        cmd.flap_rad.assign(body.vehicle().stages().front().flaps.size(), 0.0);
         const auto mass = body.vehicle().mass_properties();
         const Vec3 r_fixed = transpose(transform.rotation) * body.state().position_gcrf_m;
         const Vec3 r_catch = site_.catch_target->pin_point_itrf_m -

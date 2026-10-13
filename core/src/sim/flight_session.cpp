@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 #include "starsim/config/vehicle_config.hpp"
@@ -441,11 +442,32 @@ void FlightSession::apply_return_command(const Flying& flying, const gnc::Attitu
         // SCvx lateral LQR: the guidance's torque straight to gimbals / RCS (grid fins neutral: the planning model has
         // none, and at low speed their allocation fights the gimbals).
         gnc::AttitudeController::allocate(*flying.body, ambient_pressure_pa, *r.torque_body_nm, false).apply_to(command);
+        if (std::getenv("STARSIM_DEBUG_BURN") && flying.ship_landing) {  // diagnostics
+            static int n = 0;
+            if (++n % 40 == 0) {
+                double gp = 0.0, gy = 0.0;
+                for (const auto& e : flying.body->vehicle().stages().front().engines) {
+                    if (e.producing_thrust()) { gp = e.gimbal_pitch_rad; gy = e.gimbal_yaw_rad; }
+                }
+                const auto& t = *r.torque_body_nm;
+                const auto& w = flying.body->state().angular_velocity_body_radps;
+                const auto inertia = flying.body->vehicle().mass_properties().inertia_kg_m2;
+                int running = 0;
+                for (const auto& e : flying.body->vehicle().stages().front().engines) running += e.producing_thrust() ? 1 : 0;
+                std::printf("[burn] torque %.2f/%.2f/%.2f MNm gimbal cmd %.2f/%.2f deg actual %.2f/%.2f deg w %.3f/%.3f/%.3f "
+                            "I*w %.1f/%.1f engines %d flaps",
+                            t.x / 1e6, t.y / 1e6, t.z / 1e6, command.gimbal_pitch_rad * 57.3, command.gimbal_yaw_rad * 57.3,
+                            gp * 57.3, gy * 57.3, w.x, w.y, w.z, inertia.y * w.y / 1e6, inertia.z * w.z / 1e6, running);
+                for (const auto& f : flying.body->vehicle().stages().front().flaps) std::printf(" %.0f", f.deflection_rad * 57.3);
+                std::printf("\n");
+            }
+        }
     } else {
         controller.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf, r.roll_reference_gcrf,
                          r.feedforward ? &*r.feedforward : nullptr).apply_to(command);
     }
     command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(r.rcs_force_gcrf);
+    if (!r.flap_rad.empty()) command.flap_rad = r.flap_rad;
 }
 
 vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_pressure_pa) const {

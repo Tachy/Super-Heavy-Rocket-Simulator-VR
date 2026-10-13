@@ -224,7 +224,8 @@ max_deflection_deg = 90.0
 rate_deg_s = 20.0
 
 [stage.catch_pins]
-azimuths_deg = [90.0, 270.0]             # [E] back and belly: clear of the flaps (hinges at 0/180 and 20/160 deg)
+azimuths_deg = [0.0, 180.0]              # [E] the sides, below the forward flaps: with the nose towards the tower before
+                                         # the flip they lie across the arms after it (no roll needed; user 2026-10-13)
 station_m = 36.5                         # [E] just below the forward flaps (38-46 m)
 protrusion_m = 1.0                       # [E] beyond the hull (as the booster's)
 max_load_n = 5.0e6                       # [E] per pin (~1.9 g of a 265 t ship on two pins)

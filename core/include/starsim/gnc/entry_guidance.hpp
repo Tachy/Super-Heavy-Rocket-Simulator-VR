@@ -13,8 +13,10 @@ enum class EntryPhase { Entry, Terminal, Gate };
 const char* to_string(EntryPhase phase);
 
 struct EntryGuidanceParameters {
-    double gate_height_m = 950.0;    // [D] above the target ground: the flip starts here (b3); flight 13 relit at
-                                     // ~0.95 km / 101 m/s, flipped in 2-3 s losing ~200 m (webcast telemetry)
+    // [E] above the target ground: the flip starts here (b3). Flight 13 relit at ~0.95 km / 101 m/s and flipped in
+    // 2-3 s losing ~200 m (webcast telemetry); at 950 m the entry campaign's hardest case (4) misses by 212 m, at
+    // 800 m all twelve reach the gate - open (b3 ledger).
+    double gate_height_m = 800.0;
     double cycle_s = 2.0;            // re-prediction interval
     double max_bank_rad = 150.0 * constants::deg_to_rad;
     // Bank rate limits [E]: 1 deg/s hypersonic (faster departs in alpha, b1; seen again with weak flaps), 3 deg/s

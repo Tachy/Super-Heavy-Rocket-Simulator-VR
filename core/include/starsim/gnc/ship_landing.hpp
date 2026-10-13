@@ -16,6 +16,9 @@ struct ShipLandingParameters {
     double flip_throttle = 0.8;                                  // [E]
     double flip_tolerance_rad = 15.0 * constants::deg_to_rad;    // [E] axis from the vertical: the burn plans start
     double flip_settled_rate_radps = 0.2;                        // [E] ... once the flip's pitch/yaw rate is this low
+    // The flip starts aerodynamically: aft flaps folded, forward flaps out - the tail loses its drag and falls (engines
+    // down) while the engines spool up; below this tilt the attitude controller takes the flaps back [E].
+    double flip_flaps_until_tilt_rad = 30.0 * constants::deg_to_rad;
     double first_plan_retry_s = 1.0;                             // a failed first plan is tried again this often
     ScvxLandingParameters scvx;                                  // ship preset: ship_landing_parameters()
 };

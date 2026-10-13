@@ -215,7 +215,8 @@ private:
     // Entering ship: flaps + RCS, slow (the flaps move at ~20 deg/s: 0.8 rad/s limit-cycles in roll, b1).
     gnc::AttitudeController entry_controller_{gnc::AttitudeController::Gains{0.5, 0.9, false, true}};
     // Ship flip and landing burn: gimbals with flaps and RCS, faster than in the entry [E].
-    gnc::AttitudeController ship_landing_controller_{gnc::AttitudeController::Gains{1.5, 0.9, false, true}};
+    // [E] actuator delay: the gimbals slew 30 deg (stop to stop) at 20 deg/s, half of that on average
+    gnc::AttitudeController ship_landing_controller_{gnc::AttitudeController::Gains{1.5, 0.9, false, true, 0.75}};
     std::vector<Flying> bodies_;
     size_t controlled_ = 0;
     PilotInput input_;

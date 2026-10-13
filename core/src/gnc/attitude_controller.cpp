@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 
 #include "starsim/math/constants.hpp"
@@ -160,6 +161,9 @@ FlapAuthority flap_authority(const vehicle::FlightBody& body, double cg_station_
 // Fraction of the null-space distance to mid-range removed per call (redundant flap setting, slow drift).
 constexpr double flap_centring_gain = 0.2;
 
+// Thrust centroid this far off the axis: the engine set is asymmetric (roll by RCS, see allocate).
+constexpr double asymmetric_thrust_offset_m = 0.05;
+
 // Fraction of the maximum angular deceleration planned for stopping a rotation (margin for lag and
 // thrust changes).
 constexpr double braking_margin = 0.5;
@@ -167,10 +171,15 @@ constexpr double braking_margin = 0.5;
 // Rate command for an attitude error: linear (natural frequency / damping) for small errors, limited for
 // large ones to the rate that can still be stopped with the available angular acceleration, so a
 // saturated actuator does not overshoot.
-double rate_command(double error_rad, double linear_gain, double max_angular_acceleration) {
+// With an actuator delay d (e.g. the gimbals' slew to the opposite stop) the rate w still turns w d before braking
+// starts: w d + w^2 / (2 b) <= |error|.
+double rate_command(double error_rad, double linear_gain, double max_angular_acceleration, double actuator_delay_s = 0.0) {
     const double linear = linear_gain * error_rad;
     if (max_angular_acceleration <= 0.0) return linear;
-    const double braking = std::sqrt(2.0 * braking_margin * max_angular_acceleration * std::abs(error_rad));
+    const double b = braking_margin * max_angular_acceleration;
+    const double d = actuator_delay_s;
+    const double braking = d > 0.0 ? b * (std::sqrt(d * d + 2.0 * std::abs(error_rad) / b) - d)
+                                   : std::sqrt(2.0 * braking_margin * max_angular_acceleration * std::abs(error_rad));
     return std::copysign(std::min(std::abs(linear), braking), error_rad);
 }
 
@@ -188,6 +197,12 @@ ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, doub
         const FinAuthority fins = fin_authority(body, mass.cg_station_m);
         out.grid_fin_rad = allocate_fins(fins, torque);
         for (size_t i = 0; i < out.grid_fin_rad.size(); ++i) torque -= fins.torque_per_rad[i] * out.grid_fin_rad[i];
+    }
+    if (!flaps && body.vehicle().flap_count() > 0) {
+        // Flaps not steering (e.g. the ship's landing burn): the modelled aerodynamic moment (hull + flaps as they
+        // are) is cancelled by the gimbals / RCS instead.
+        const FlapAuthority fa = flap_authority(body, mass.cg_station_m);
+        if (fa.active) torque -= fa.aero_moment_nm;
     }
     if (flaps) {
         const FlapAuthority fa = flap_authority(body, mass.cg_station_m);
@@ -216,15 +231,23 @@ ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, doub
     }
     // Off-axis thrust (an asymmetric engine set, e.g. two of the ship's three centre Raptors): the moment of the
     // running engines at neutral gimbal is cancelled first, so the gimbals deliver the wanted net torque.
+    // The same set's thrust centroid off the axis also makes differential (roll) gimbaling push sideways: then roll
+    // goes to the RCS.
+    bool asymmetric = false;
     if (a.lever_moment > 0.0) {
+        Vec3 moment_sum;
+        double thrust_sum = 0.0;
         for (const auto& stage : body.vehicle().stages()) {
             for (const auto& e : stage.engines) {
                 if (!e.producing_thrust()) continue;
                 const double thrust = e.spool * e.performance->thrust_n(e.throttle, ambient_pressure_pa);
                 const Vec3 arm = e.gimbal_point_m - Vec3{mass.cg_station_m, 0.0, 0.0};
                 torque -= cross(arm, Vec3{thrust, 0.0, 0.0});
+                moment_sum += e.gimbal_point_m * thrust;
+                thrust_sum += thrust;
             }
         }
+        asymmetric = thrust_sum > 0.0 && std::hypot(moment_sum.y, moment_sum.z) / thrust_sum > asymmetric_thrust_offset_m;
     }
     // Moments of a deflection (see Vehicle::update_engines): pitch -> +tau_y, yaw -> -tau_z, roll -> +tau_x.
     if (a.lever_moment > 0.0) {
@@ -234,7 +257,7 @@ ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, doub
         out.rcs_torque_fraction.y = fraction(torque.y, rcs_max.y);
         out.rcs_torque_fraction.z = fraction(torque.z, rcs_max.z);
     }
-    if (a.roll_moment > 0.0) {
+    if (a.roll_moment > 0.0 && !asymmetric) {
         out.gimbal.roll_rad = torque.x / a.roll_moment;
     } else {
         out.rcs_torque_fraction.x = fraction(torque.x, rcs_max.x);
@@ -291,8 +314,10 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
     const Vec3 ff_acceleration =
         feedforward ? Vec3{0.0, feedforward->acceleration_body_radps2.y, feedforward->acceleration_body_radps2.z} : Vec3{};
     const Vec3 rate{rate_command(roll_error, gain, max_acceleration(a.roll_moment, rcs_max.x, fin_max.x, inertia.x)),
-                    rate_command(rotation.y, gain, max_acceleration(a.lever_moment, rcs_max.y, fin_max.y, inertia.y)) + ff_rate.y,
-                    rate_command(rotation.z, gain, max_acceleration(a.lever_moment, rcs_max.z, fin_max.z, inertia.z)) + ff_rate.z};
+                    rate_command(rotation.y, gain, max_acceleration(a.lever_moment, rcs_max.y, fin_max.y, inertia.y),
+                                 gains_.actuator_delay_s) + ff_rate.y,
+                    rate_command(rotation.z, gain, max_acceleration(a.lever_moment, rcs_max.z, fin_max.z, inertia.z),
+                                 gains_.actuator_delay_s) + ff_rate.z};
     const Vec3 torque{inertia.x * kd * (rate.x - w.x), inertia.y * (kd * (rate.y - w.y) + ff_acceleration.y),
                       inertia.z * (kd * (rate.z - w.z) + ff_acceleration.z)};
     return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins, gains_.flaps);

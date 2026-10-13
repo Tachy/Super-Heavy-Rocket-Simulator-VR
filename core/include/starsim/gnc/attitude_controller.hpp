@@ -40,6 +40,9 @@ public:
         bool grid_fins = false;  // use the grid fins (descent); otherwise they stay neutral
         // Use the flaps (ship entry): they trim the modelled aerodynamic moment and steer; otherwise they hold.
         bool flaps = false;
+        // Pitch/yaw braking starts this much later than commanded (gimbals slewing to the opposite stop): large turns
+        // are slowed earlier so they end without overshoot (0: instantaneous actuators).
+        double actuator_delay_s = 0.0;
     };
 
     AttitudeController() = default;

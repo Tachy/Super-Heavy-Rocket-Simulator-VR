@@ -9,6 +9,7 @@
 #include "return_scenario.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
+#include "starsim/gnc/ship_landing.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
@@ -50,6 +51,7 @@ struct Gate {
     Vec3 velocity_enu_mps{3.0, 0.0, -100.0};
     double alpha_deg = 80.0;           // belly first into the flow
     double propellant_kg = 30000.0;
+    gnc::ShipLandingParameters parameters = gnc::ship_landing_parameters();
 };
 
 test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
@@ -65,7 +67,7 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
     state.attitude = gnc::entry_attitude_quaternion(v_rel, math::normalized(state.position_gcrf_m), gate.alpha_deg * deg,
                                                     0.0, cfg.stages[0].aero.belly_azimuth_rad);
     state.angular_velocity_body_radps = state.attitude.inverse_rotate(vehicle::earth_rotation_vector(t));
-    session.place_landing_ship(cfg, state, t0);
+    session.place_landing_ship(cfg, state, t0, gate.parameters);
     const auto run = test::fly_landing(session, earth(), t0, 120.0);
     const auto* g = session.ship_landing(0);
     if (g) std::printf("flip %.1f s, ends at %.0f m; ", g->flip_duration_s(), g->flip_end_height_m());
@@ -82,7 +84,13 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
 
 // Hidden ([.]) until the catch from the gate works (b3 Task 3 in progress, see the b3 ledger).
 TEST_CASE("Ship flips at the gate and is caught", "[.][ship][landing][catch]") {
-    const auto run = fly_from_gate(Gate{});
+    // gate back along the line pad -> tower (azimuth 315 deg), nose to the tower: the flip pushes towards it and the
+    // side pins lie across the arms without a roll
+    Gate g;
+    const Vec3 to_tower{std::sin(315.0 * deg), std::cos(315.0 * deg), 0.0};
+    g.offset_enu_m = to_tower * -220.0;
+    g.velocity_enu_mps = to_tower * 3.0 + Vec3{0.0, 0.0, -100.0};
+    const auto run = fly_from_gate(g);
     CHECK(run.caught_within_tolerance());
     CHECK_FALSE(run.tower_struck);
     CHECK(run.outcome == sim::LandingOutcome::Caught);
