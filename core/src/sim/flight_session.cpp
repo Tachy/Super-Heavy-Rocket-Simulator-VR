@@ -73,10 +73,8 @@ void FlightSession::place_entering_ship(const config::VehicleConfig& config, con
     auto& flying = bodies_.front();
     const auto& stage = flying.body->vehicle().stages().front().config;
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
-    // [E] gate over the pad centre until b3 places it for the catch
-    const gnc::EntryTarget target{frames::geodetic_to_fixed({launch_site_.latitude_rad, launch_site_.longitude_rad,
-                                                             launch_site_.height_m}),
-                                  launch_site_.height_m};
+    // gate ahead of the tower's catch axis (b3), else over the pad centre
+    const auto target = gnc::ship_entry_target(return_site(flying.body->vehicle()), gnc::ship_landing_parameters());
     flying.entry_guidance = std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters);
 }
 

@@ -274,9 +274,19 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   `Gains::actuator_delay_s` 0.75 s (gimbal slew in the braking; no overshoot). Flaps folded in the burn.
   `FlightSession::place_landing_ship` (scenarios); the entry hands over at the gate. Test from the gate: caught 0.01 m,
   0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10 m, +-10 m/s, +-5 % propellant, +-5 deg alpha /
-  bank, belly engine failed in the flip): 20 of 21 caught (<= 0.02 m), the failure aborts to the sea. Open: the gate
-  lead in the entry guidance (it still aims at the pad), the tower judges a 4.5 m/s arrival (out of propellant)
-  "gefangen". Diagnostics: `STARSIM_DEBUG_FLIP=1`, `STARSIM_DEBUG_BURN=1` with the SCvx / catch flags.
+  bank, belly engine failed in the flip): 20 of 21 caught (<= 0.02 m), the failure aborts to the sea.
+  Gate lead: `gnc::ship_entry_target` puts the entry's target 220 m [E] back from the catch axis on the line tower -> pad
+  with `EntryTarget::nose_direction_itrf` to the tower. Only that approach is robust: the arms stand across the line,
+  a burn arriving from the side (azimuth 45/225 deg) runs into an arm at arm height; flip-push 20 deg off the line
+  already ends there. The terminal phase turns the nose once the fall is steep (basis frozen, -70 deg): the steering
+  becomes nose x 0.2 (alpha ~86 deg), the lift direction turns about the air velocity at 5 deg/s [E] (a shortest-path
+  attitude slew passes through low alpha: ~1 km miss) with the steering held, then Levenberg-Marquardt steps in sector
+  coordinates (fraction 0.02-0.5, +-10 deg about the nose; the predictor models the same). Session test from Mach 2.6,
+  28 km west: gate 123 m off, nose 7 deg off, caught 0.07 m, 0.96 m/s, 4.2 t left (also from 22-25 km). Open: an
+  energy-short terminal phase (33-39 km: most lift to reach the gate) stays shallow and misses the gate (0.1-0.8 km),
+  the gate cross-track error (the sector leaves little crossrange authority), the tower judges a 4.5 m/s arrival (out
+  of propellant) "gefangen". Diagnostics: `STARSIM_DEBUG_FLIP=1`, `STARSIM_DEBUG_BURN=1`, `STARSIM_DEBUG_ENTRY=1` with
+  the SCvx / catch flags.
 - `FlightBody::resting()`: carried by the ground after a gentle touchdown; resting bodies coast analytically
   (follow the Earth), impacted/resting bodies do not block coast segments.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`

@@ -44,6 +44,20 @@ ShipLandingParameters ship_landing_parameters() {
     return p;
 }
 
+EntryTarget ship_entry_target(const LandingSite& site, const ShipLandingParameters& parameters) {
+    const Vec3 pad = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    EntryTarget target{pad, site.height_m, {}};
+    if (!site.catch_target) return target;
+    const auto& c = *site.catch_target;
+    const Vec3 up = up_at(site.latitude_rad, site.longitude_rad);
+    Vec3 to_tower = c.tower_center_itrf_m - c.pin_point_itrf_m;
+    to_tower = math::normalized(to_tower - up * dot(to_tower, up));
+    const Vec3 axis = c.pin_point_itrf_m - up * dot(c.pin_point_itrf_m - pad, up);  // catch axis at the pad height
+    target.position_itrf_m = axis - to_tower * parameters.gate_lead_m;
+    target.nose_direction_itrf = to_tower;
+    return target;
+}
+
 ShipLandingGuidance::ShipLandingGuidance(LandingSite site, ShipLandingParameters parameters)
     : site_(std::move(site)), parameters_(std::move(parameters)) {}
 

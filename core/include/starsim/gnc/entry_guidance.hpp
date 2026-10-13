@@ -37,6 +37,16 @@ struct EntryGuidanceParameters {
     double terminal_max_step = 0.3;              // [E] steering change per cycle (Levenberg-Marquardt step limit)
     // [E] the commanded attitude turns at most this fast in the terminal phase (as the bank rate below Mach 5)
     double terminal_slew_rate_radps = 3.0 * constants::deg_to_rad;
+    // [E] with a nose direction in the target (EntryPredictorModel::nose_*): the lift direction - and the nose - turns
+    // about the air velocity at this rate; while it turns the steering is held at the nose fraction (no lift to speak of)
+    // the nose sector (EntryPredictorModel::nose_*) [E]
+    double terminal_nose_fraction = 0.2;
+    double terminal_nose_sector_rad = 10.0 * constants::deg_to_rad;  // 20 deg: the flip pushed past the arms
+    double terminal_nose_min_fraction = 0.02;
+    double terminal_nose_max_fraction = 0.5;
+    double terminal_nose_turn_rate_radps = 5.0 * constants::deg_to_rad;
+    double terminal_nose_turned_rad = 5.0 * constants::deg_to_rad;  // the turn is over within this
+    double terminal_nose_max_turn_step_rad = 5.0 * constants::deg_to_rad;  // [E] steering angle change per cycle in the sector
     // Reversals: planned by the corrector (time of the next reversal for zero crossrange); without a bracket the
     // sign closer across wins if it gains more than this [E]. None below min_reversal_speed (belly flop's job).
     double reversal_crossrange_base_m = 2000.0;
@@ -130,6 +140,7 @@ private:
     math::Vec3 terminal_steering_;        // velocity frame (steering_basis): lift direction x fraction (|.| <= 1)
     math::Vec3 terminal_lift_direction_;  // last lift direction (kept when the steering is ~0)
     bool terminal_basis_frozen_ = false;
+    bool nose_turning_ = false;  // the lift direction still turns to the nose sector
     bool handed_over_ = false;  // the terminal phase follows the entry phase (not placed by skip_to)
     math::Vec3 terminal_e1_, terminal_e2_;  // steering basis (see EntryPredictorState::basis_frozen)
     math::Vec3 terminal_zem_itrf_;             // predicted horizontal miss at the gate

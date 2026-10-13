@@ -32,9 +32,14 @@ struct AeroSample {
 
 class Model {
 public:
-    explicit Model(const EntryPredictorModel& m, const EntryPredictorState& start)
+    Model(const EntryPredictorModel& m, const EntryPredictorState& start, const Vec3& nose)
         : m_(m), steered_(start.steered), steering_(start.steering), frozen_(start.basis_frozen),
-          e1_(start.basis_e1), e2_(start.basis_e2) {}
+          e1_(start.basis_e1), e2_(start.basis_e2), nose_(nose) {
+        if (steered_ && frozen_ && norm(nose_) > 0.0) {
+            steering_ = nose_sector_steering(steering_, nose_, e1_, e2_, m_.nose_sector_rad, m_.nose_min_fraction,
+                                             m_.nose_max_fraction);
+        }
+    }
 
     // Steering basis: velocity frame until the path is steeper than the freeze angle, then fixed (decided per step).
     void update_basis(const Vec3& r, const Vec3& v) {
@@ -43,6 +48,7 @@ public:
         if (std::asin(std::clamp(dot(u, up), -1.0, 1.0)) < m_.steering_freeze_gamma_rad) {
             steering_basis(up, u, e1_, e2_);
             frozen_ = true;
+            if (norm(nose_) > 0.0) steering_ = nose_steering(nose_, e1_, e2_, m_.nose_fraction);  // as the guidance
         }
     }
 
@@ -102,6 +108,7 @@ private:
     Vec3 steering_;
     bool frozen_ = false;
     Vec3 e1_, e2_;
+    Vec3 nose_;
     environment::Us76Atmosphere atmosphere_;
 };
 
@@ -118,6 +125,20 @@ void steering_basis(const Vec3& up, const Vec3& u, Vec3& e1, Vec3& e2) {
     e2 = cross(u, e1);
 }
 
+Vec3 nose_steering(const Vec3& nose, const Vec3& e1, const Vec3& e2, double fraction) {
+    const double heading = std::atan2(dot(nose, e2), dot(nose, e1));
+    return {fraction * std::cos(heading), fraction * std::sin(heading), 0.0};
+}
+
+Vec3 nose_sector_steering(const Vec3& p, const Vec3& nose, const Vec3& e1, const Vec3& e2, double sector_rad,
+                          double min_fraction, double max_fraction) {
+    const double heading = std::atan2(dot(nose, e2), dot(nose, e1));
+    const double size = std::clamp(norm(p), min_fraction, max_fraction);
+    const double offset = norm(p) > 1e-9 ? std::remainder(std::atan2(p.y, p.x) - heading, 2.0 * constants::pi) : 0.0;
+    const double angle = heading + std::clamp(offset, -sector_rad, sector_rad);
+    return {size * std::cos(angle), size * std::sin(angle), 0.0};
+}
+
 double ground_range_m(const Vec3& a_itrf_m, const Vec3& b_itrf_m) {
     const Vec3 a = math::normalized(a_itrf_m), b = math::normalized(b_itrf_m);
     return std::atan2(norm(cross(a, b)), dot(a, b)) * constants::wgs84_semi_major_axis_m;
@@ -126,7 +147,7 @@ double ground_range_m(const Vec3& a_itrf_m, const Vec3& b_itrf_m) {
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
                               double bank_command_rad, const EntryTarget& target, double gate_height_m,
                               double heat_load_so_far_j_m2, double step_s, double max_time_s) {
-    Model m(model, start);
+    Model m(model, start, target.nose_direction_itrf);
     EntryPrediction p;
     p.heat_load_j_m2 = heat_load_so_far_j_m2;
     Vec3 r = start.position_itrf_m, v = start.velocity_itrf_mps;

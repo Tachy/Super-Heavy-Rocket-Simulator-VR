@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "starsim/gnc/booster_return.hpp"
+#include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/gnc/scvx_landing.hpp"
 #include "starsim/math/constants.hpp"
 
@@ -20,12 +21,20 @@ struct ShipLandingParameters {
     // down) while the engines spool up; below this tilt the attitude controller takes the flaps back [E].
     double flip_flaps_until_tilt_rad = 30.0 * constants::deg_to_rad;
     double first_plan_retry_s = 1.0;                             // a failed first plan is tried again this often
+    // [E] the flip pushes the ship ~100-200 m along its nose (thrust across the path while it turns): the entry's gate
+    // lies this far back from the catch axis on the line tower -> pad, the nose pointing to the tower
+    double gate_lead_m = 220.0;
     ScvxLandingParameters scvx;                                  // ship preset: ship_landing_parameters()
 };
 
 // The ship's preset: engine phases 3 -> 2 (user 2026-10-13, flight 13/14 videos: the belly engine shuts down, the
 // leeward pair lands; its thrust centroid lies in the symmetry plane) and planning limits for the ship.
 ShipLandingParameters ship_landing_parameters();
+
+// Where the ship's entry guidance aims: with a catch tower `gate_lead_m` back from the catch axis on the line
+// tower -> pad, the nose to the tower: the flip pushes the ship towards the arms, the final approach comes from the open
+// side between them and the side pins lie across them; else the pad centre.
+EntryTarget ship_entry_target(const LandingSite& site, const ShipLandingParameters& parameters);
 
 // From the gate (belly down, ~100 m/s sink):
 //  Flip        - the sea-level engines relight at the flip throttle and the attitude controller turns the axis to the

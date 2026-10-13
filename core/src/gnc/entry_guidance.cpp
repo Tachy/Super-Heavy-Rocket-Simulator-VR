@@ -65,6 +65,10 @@ EntryGuidance::EntryGuidance(const vehicle::FlightBody& ship, const AlphaSchedul
     model_.fast_bank_mach_high = parameters_.fast_bank_mach_high;
     model_.terminal_min_alpha_rad = parameters_.terminal_min_alpha_rad;
     model_.terminal_alpha_authority_rad = parameters_.terminal_alpha_authority_rad;
+    model_.nose_fraction = parameters_.terminal_nose_fraction;
+    model_.nose_sector_rad = parameters_.terminal_nose_sector_rad;
+    model_.nose_min_fraction = parameters_.terminal_nose_min_fraction;
+    model_.nose_max_fraction = parameters_.terminal_nose_max_fraction;
     if (!parameters_.predictor_j2) model_.j2 = 0.0;
     limits_ = stage.config.heat_shield;
     belly_azimuth_rad_ = stage.config.aero.belly_azimuth_rad;
@@ -249,7 +253,12 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& 
     // steering basis: velocity frame, frozen once the path is steeper than the freeze angle (as the prediction)
     if (!terminal_basis_frozen_) {
         steering_basis(up, u, terminal_e1_, terminal_e2_);
-        if (std::asin(std::clamp(dot(u, up), -1.0, 1.0)) < model_.steering_freeze_gamma_rad) terminal_basis_frozen_ = true;
+        if (std::asin(std::clamp(dot(u, up), -1.0, 1.0)) < model_.steering_freeze_gamma_rad) {
+            terminal_basis_frozen_ = true;
+            if (norm(target_.nose_direction_itrf) > 0.0 && terminal_started_) {  // as the prediction (nose_fraction)
+                terminal_steering_ = nose_steering(target_.nose_direction_itrf, terminal_e1_, terminal_e2_, model_.nose_fraction);
+            }
+        }
     }
     Vec3 e1 = terminal_e1_ - u * dot(terminal_e1_, u), e2 = terminal_e2_ - u * dot(terminal_e2_, u);
     if (!terminal_started_) {
@@ -292,7 +301,33 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& 
         const double lambda = levenberg_marquardt_damping * (a11 + a22);
         const double b1 = -(j11 * me + j21 * mn), b2 = -(j12 * me + j22 * mn);
         const double det = (a11 + lambda) * (a22 + lambda) - a12 * a12;
-        if (det > 0.0) {
+        const bool nose_sector = terminal_basis_frozen_ && norm(target_.nose_direction_itrf) > 0.0;
+        if (nose_sector && !nose_turning_) {
+            // In the nose sector the step is taken in its own coordinates (fraction r, angle t off the nose heading h),
+            // bounded by the sector: a free step projected onto it would mostly be lost.
+            p = nose_sector_steering(p, target_.nose_direction_itrf, terminal_e1_, terminal_e2_, model_.nose_sector_rad,
+                                     model_.nose_min_fraction, model_.nose_max_fraction);
+            const double h = std::atan2(dot(target_.nose_direction_itrf, terminal_e2_), dot(target_.nose_direction_itrf, terminal_e1_));
+            double r = norm(p);
+            double t = std::remainder(std::atan2(p.y, p.x) - h, 2.0 * constants::pi);
+            const double c = std::cos(h + t), s = std::sin(h + t);
+            // chain rule: dp/dr = (c, s), dp/dt = r (-s, c)
+            const double k11 = j11 * c + j12 * s, k21 = j21 * c + j22 * s;
+            const double k12 = r * (-j11 * s + j12 * c), k22 = r * (-j21 * s + j22 * c);
+            const double q11 = k11 * k11 + k21 * k21, q12 = k11 * k12 + k21 * k22, q22 = k12 * k12 + k22 * k22;
+            const double mu = levenberg_marquardt_damping * (q11 + q22);
+            const double c1 = -(k11 * me + k21 * mn), c2 = -(k12 * me + k22 * mn);
+            const double qdet = (q11 + mu) * (q22 + mu) - q12 * q12;
+            if (qdet > 0.0) {
+                const double dr = ((q22 + mu) * c1 - q12 * c2) / qdet, dt = ((q11 + mu) * c2 - q12 * c1) / qdet;
+                r = std::clamp(r + std::clamp(dr, -parameters_.terminal_max_step, parameters_.terminal_max_step),
+                               model_.nose_min_fraction, model_.nose_max_fraction);
+                t = std::clamp(t + std::clamp(dt, -parameters_.terminal_nose_max_turn_step_rad,
+                                              parameters_.terminal_nose_max_turn_step_rad),
+                               -model_.nose_sector_rad, model_.nose_sector_rad);
+                p = Vec3{r * std::cos(h + t), r * std::sin(h + t), 0.0};
+            }
+        } else if (det > 0.0 && !nose_turning_) {
             Vec3 step{((a22 + lambda) * b1 - a12 * b2) / det, ((a11 + lambda) * b2 - a12 * b1) / det, 0.0};
             if (norm(step) > parameters_.terminal_max_step) step = step * (parameters_.terminal_max_step / norm(step));
             p = p + step;
@@ -311,14 +346,28 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& 
         terminal_zem_itrf_ = z0;
     }
     // At the gate the flip takes over (b3): until then the steering of the last cycle is held.
-    const double fraction = std::min(norm(terminal_steering_), 1.0);
-    if (fraction > min_steering_fraction) terminal_lift_direction_ = terminal_steering_ / norm(terminal_steering_);
+    double fraction = std::min(norm(terminal_steering_), 1.0);
+    double slew_rate = parameters_.terminal_slew_rate_radps;
+    if (terminal_basis_frozen_ && norm(target_.nose_direction_itrf) > 0.0) {
+        // The nose turns about the air velocity (a shortest-path attitude slew would pass through lower angles of
+        // attack: lift in odd directions); the predictions hold the nose fraction until it is done.
+        const double flown = std::atan2(terminal_lift_direction_.y, terminal_lift_direction_.x);
+        const double turn = std::remainder(std::atan2(terminal_steering_.y, terminal_steering_.x) - flown, 2.0 * constants::pi);
+        const double max_turn = parameters_.terminal_nose_turn_rate_radps * dt_s;
+        const double angle = flown + std::clamp(turn, -max_turn, max_turn);
+        terminal_lift_direction_ = Vec3{std::cos(angle), std::sin(angle), 0.0};
+        nose_turning_ = std::abs(turn) > parameters_.terminal_nose_turned_rad;
+        if (nose_turning_) fraction = std::min(fraction, model_.nose_fraction);
+        slew_rate = std::max(slew_rate, 2.0 * parameters_.terminal_nose_turn_rate_radps);  // follows the turn
+    } else if (fraction > min_steering_fraction) {
+        terminal_lift_direction_ = terminal_steering_ / norm(terminal_steering_);
+    }
     const double alpha = model_.steering_alpha(fraction, mach);
     const Vec3 lift_itrf = e1 * terminal_lift_direction_.x + e2 * terminal_lift_direction_.y;
     const auto wanted = entry_attitude_with_lift(itrf_to_gcrf * v_itrf, itrf_to_gcrf * lift_itrf, alpha, belly_azimuth_rad_);
     const math::Quat wanted_gcrf = attitude_from_axes(wanted.axis_gcrf, wanted.roll_reference_gcrf);
     terminal_attitude_gcrf_ =
-        slew_toward(terminal_attitude_gcrf_, wanted_gcrf, parameters_.terminal_slew_rate_radps * dt_s);
+        slew_toward(terminal_attitude_gcrf_, wanted_gcrf, slew_rate * dt_s);
     command_.axis_gcrf = terminal_attitude_gcrf_.rotate(Vec3{1.0, 0.0, 0.0});
     command_.roll_reference_gcrf = terminal_attitude_gcrf_.rotate(Vec3{0.0, 1.0, 0.0});
     command_.alpha_rad = alpha;
