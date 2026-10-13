@@ -83,6 +83,8 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
         const Vec3 tower = frame.to_plan(c.tower_center_itrf_m);
         snap.abort_target.keep_out_center_m = {0.0, tower.y, tower.z};
         snap.abort_target.keep_out_radius_m = c.tower_keep_out_radius_m;
+        snap.abort_target.mount_keep_out_radius_m = c.mount_keep_out_radius_m;
+        snap.abort_target.mount_top_cg_height_m = c.mount_height_m + mass.cg_station_m + settings.mount_margin_m;
     }
     snap.abort_target.goal = DescentGoal::Abort;
     snap.abort_target.ground_cg_height_m = mass.cg_station_m;  // bottom on the ground (flat at the pad height)

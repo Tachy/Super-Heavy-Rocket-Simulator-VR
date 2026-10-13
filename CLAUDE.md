@@ -109,14 +109,20 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
-- Booster return: on a site without a tower blocks 1-3 land on the pad (no impact, sink < 2 m/s, 7-12 m off,
-  0.7-2 m/s lateral); at Starbase with the catch tower all three miss the arms (8.7 / 12.2 / 8.9 m off the
-  catch axis; the arms leave 0.3 m of clearance per side). Cause: on the 3 centre engines the attitude follows commands with
-  seconds of lag (alpha_max ~0.15 rad/s^2; grid fins add little at < 50 m/s; min throttle 0.4 gives
-  T/W ~1.1, no hover), and the explicit guidance laws in `gnc/booster_return` do not plan for it; the
-  centre-engine segment is therefore deliberately gentle (hold tau 4 s, tilt <= 10 deg).
-  Planned: powered-descent guidance by convex optimisation with tilt/throttle/attitude-rate constraints,
-  re-solved in flight (see plan file, M6 "Landeführung").
+- Booster return: on a site without a tower blocks 1-3 land on the pad with the explicit laws (no impact, sink
+  < 2 m/s, 7-12 m off, 0.7-2 m/s lateral). At a catch site the landing burn flies SCvx plans (`gnc/scvx_landing`)
+  re-planned every 1 s on a worker thread (effective at snapshot + 0.5 s; tests and time warp wait, real-time play
+  never waits - `FlightSession::set_realtime_planning`). From an ignition state (scenario, 260 m/s at ~1.5 km)
+  the dispersion campaign `[gnc][catch][validation]` (+-10 m, +-3 m/s, +-5 % mass, +-3 deg, engine failure)
+  catches 21 of 21 (< 1 m, < 0.5 m/s). Profile after recorded catches: 13 engines ~5 s, switch at 70-95 m/s,
+  3 engines ~15 s. Lateral tracking is an LQR on the gimbaled-rocket dynamics (`gnc/tvc_lateral`; the gimbal's
+  wrong-way side force makes cascaded position/attitude loops swing up on 3 engines); plans use <= 30 % of the
+  gimbal limit, the rest is the tracker's margin. Planning model: constant CG/inertia, no grid fins, no wind; no
+  re-plans in the last 3 s. The explicit laws remain the fallback if the first plan fails.
+  OPEN: full returns are not yet caught (`[!mayfail]`): the booster arrives far too fast (block 3: ~1270 m/s at
+  15 km, ~730 m/s at 4 km; recorded flights are transonic ~30 s before the landing burn and at ~333 m/s at 2 km),
+  so the burn starts high with a large divert and blocks 1/2 lack the propellant. Descent drag (incl. grid fins,
+  angle of attack) needs calibration against booster telemetry.
 - Booster return reserves (block 1/2: 330 t, block 3: 280 t; block 1 lands with only ~0.6 t left), the
   tail-first drag table (`aero/super_heavy_descent.csv`) and the grid fin data (`aero/grid_fin.csv`,
   sizes/stations) are estimates [E]; the boostback alone needs ~200 t from our lofted staging state.
@@ -173,7 +179,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   The attitude controller limits the rate command to what the available angular acceleration (gimbal or
   RCS, plus fins) can still stop. Diagnostics: `STARSIM_VERBOSE=1`, `STARSIM_DEBUG_LANDING=1`,
   `STARSIM_DEBUG_HOLD=1` with test "[booster]".
-- SCvx landing planner (M6, Plan 3a, not yet flown): `gnc/descent_*` plans the landing burn (13 -> 3 engines)
+- SCvx landing planner (M6, Plan 3a; flown since Plan 3b): `gnc/descent_*` plans the landing burn (13 -> 3 engines)
   in the plan frame (origin pad centre on the ground, x up, y east, z north; upright = identity attitude):
   `descent_model` (14-state rigid body, tabulated air/drag, Coriolis + centrifugal, numeric Jacobians;
   `make_descent_model` builds it from the booster on the simulation thread), `descent_discretization` (FOH +
@@ -181,7 +187,12 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   cones, catch or sea-abort goal with tower keep-out; the shared phase node has the 3-engine bounds),
   `descent_planner` (`plan_descent`: penalised trust region, warm start, converged when the virtual control is
   small, the step or final mass has settled and the nonlinear interval defects are < 5 cm). Uses the reusable
-  `optim::SocpSolver`. Nominal block 3 case: 4 iterations, ~0.2 s. In-flight use: Plan 3b.
+  `optim::SocpSolver`. Nominal block 3 case: 4 iterations, ~0.2 s. In flight (Plan 3b): `gnc/descent_snapshot`
+  (sim-thread snapshot; the worker never calls SPICE), `gnc/descent_replanner` (worker thread, fixed sim-time
+  latency), `gnc/descent_tracking` (plan reference sampling), `gnc/tvc_lateral` (LQR gains), `gnc/scvx_landing`
+  (first plan, re-plans, abort to the sea after repeated unreachable catches, commands incl. a body torque);
+  `sim/landing_outcome` (shoreline `[site.sea]`, "Wasserung"); tower `CatchPhase::Aborted` (arms stay open).
+  Diagnostics: `STARSIM_DEBUG_SCVX=1`, `STARSIM_DEBUG_SCVX_SOLVER=1`, `STARSIM_DEBUG_CATCH=1`.
 - Grid fins (`aero/grid_fin`, `[stage.grid_fins]`): flat-plate style normal force from the local flow at
   each fin (incl. omega x r: aerodynamic damping), slope/limit over Mach from a table (transonic choking).
   Actuators: deflection and rate limits (`Vehicle::update_grid_fins`). The controller allocates torque to

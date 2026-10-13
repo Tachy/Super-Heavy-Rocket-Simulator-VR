@@ -34,6 +34,7 @@ struct SnapshotSettings {
     double catch_clearance_m = 1.0;    // pins above the arm tops at the end of the plan (spec)
     double catch_sink_mps = 1.0;       // sink rate at the end of the plan (spec)
     double sea_margin_m = 150.0;       // [E] abort target beyond the shoreline
+    double mount_margin_m = 5.0;       // [E] abort: the hull bottom stays this far above the mount top near it
     // Vertical corridor from where the hull bottom is corridor_margin_m above the arm tops: within corridor_radius_m of
     // the catch axis (the arms wait half open with ~3 m clearance per side and close only at the end).
     double corridor_margin_m = 5.0;    // [E]

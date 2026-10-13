@@ -151,3 +151,36 @@ before the boostback; the ship landing (same machinery later, own phases and con
 - Tests to add: NumericalError in the middle of a reused solve; warm start from a perturbed state;
   `shifted()` should use the snapshot for node 0.
 - Engine start-up (Raptor `startup_s` 3 s) vs a 1.6 s phase 0: the tracking layer must handle the transient.
+
+## Decision 2026-10-13: robustness target for Plan 3b
+
+Measured during Plan 3b: the catch is precise for small offsets at ignition (centred: 0.05 m, 0.19 m/s) but large
+diverts during the landing burn (22 m and more) fail: the planning model has no grid fins (their side force while
+they deliver control torque is ~0.7 MN, ~2 m/s^2) and the attitude loop lags ~0.3 s, both growing steeply with the
+divert. In a full return the grid-fin descent delivers the booster with ~4 m miss to ignition. User decision: the
+Plan 3b campaign uses realistic dispersions at ignition - lateral +-10 m, velocity +-3 m/s, residual mass +-5 %,
+attitude +-3 deg, plus one engine failure - with the same pass criteria (>= 90 % caught within < 1 m / < 0.5 m/s, no
+tower impact). Large diverts (+-50 m; grid fins in the planning model, attitude control) are a follow-up.
+
+## Refinements during Plan 3b
+
+- Catch arms: standby at 6.5 deg from 10 s before pin contact, late force-limited closing, damage by hull force
+  (> 6 MN) or overlap (> 1 m) instead of geometric contact (user decision "Realistischer machen").
+- Tilt, rate and corridor limits are soft (exact L1 penalty) so re-plans from a slightly violating state stay
+  feasible; the engine switch is hard-calm (tilt <= 3 deg, rate <= 0.03 rad/s) and happens at 70-95 m/s sink.
+- Gentle end: terminal thrust at most minimum + 5 % of the maximum; throttle-rate limit from the engine config.
+- Only a catch found unreachable (virtual control >= stall threshold) twice in a row aborts; plans stopped at the
+  iteration limit with small virtual control are flown.
+- Abort plans keep clear of the tower and of the launch mount.
+- Lateral tracking: LQR per plan axis on (position, velocity, tilt, tilt rate) with the gimbal's wrong-way side
+  force (c = I / (m L)); control effort scale 0.3 x the gimbal tilt acceleration at the current thrust, output
+  clamped to it; torque straight to gimbals/RCS, grid fins neutral during the SCvx burn. Cascaded position ->
+  attitude tracking swung up on 3 engines (campaign 0/21); with the LQR 11/21; with the plan limited to 30 % of
+  the gimbal 20/21; with the effort scaled to the available authority 21/21.
+- Burn profile after the user's catch-video data (13 engines from ~2 km at ~333 m/s for ~5 s; switch at
+  ~83 m/s, ~500 m; 3 engines ~20 s): ignition timed for 13 engines at 0.5 throttle, switch at 83 m/s, final
+  throttle 0.6 (separate from the explicit pad-landing profile). Scenario result: ignition ~1.5 km at 260 m/s,
+  13 engines ~4.6 s, switch ~650 m, 3 engines ~15 s.
+- Re-plan times (Release, 24 cores): first plan 0.2-1.1 s, re-plans typically 0.1-0.5 s, worst seen ~2 s on the
+  longer catch profile (the 0.5 s latency is then exceeded; tests wait, real-time play keeps the old plan).
+- Open: full returns arrive far too fast (see CLAUDE.md known issues); descent drag needs calibration.

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -8,6 +9,7 @@
 #include "starsim/gnc/descent_replanner.hpp"
 #include "starsim/gnc/descent_snapshot.hpp"
 #include "starsim/gnc/descent_tracking.hpp"
+#include "starsim/gnc/tvc_lateral.hpp"
 
 namespace starsim::gnc {
 
@@ -18,9 +20,23 @@ struct ScvxLandingParameters {
     int failures_before_abort = 2;         // [E] consecutive re-plans that find the catch unreachable (virtual
                                            // control >= settings.stall_virtual_control) before it is given up
     bool realtime = false;                 // never wait for a re-plan (interactive play)
+    // Burn profile that times the ignition (BoosterReturnGuidance::predict_landing_burn), after recorded catches:
+    // 13 engines from ~2 km for ~5 s, 3 engines from ~500 m at ~80 m/s for ~20 s - a long final segment that
+    // leaves the slow-turning 3-engine booster time to settle laterally.
+    double ignition_throttle = 0.5;        // [E] 13 engines near minimum throttle
+    double switch_speed_mps = 83.0;        // [E] ~300 km/h on recorded catches
+    double final_throttle = 0.6;           // [E]
     SnapshotSettings snapshot;
     ScvxSettings settings;
     TrackingGains tracking;
+    // Lateral control by LQR on the gimbaled-rocket dynamics (body torque command); false: attitude-controller
+    // tracking of the commanded axis.
+    bool lqr_lateral = true;
+    TvcLateralWeights lateral;
+    // LQR control effort scale as a fraction of the gimbals' tilt acceleration at the current thrust (0: the fixed
+    // scale in `lateral`).
+    double lateral_effort_fraction = 0.3;  // [E] (campaign: 0.2 and 0.3 catch all cases, 0.5 swings up on 3 engines)
+    double roll_frequency_rad_s = 1.0;  // [E] pins towards the arms
 };
 
 struct ScvxLandingCommand {
@@ -32,6 +48,7 @@ struct ScvxLandingCommand {
     bool abort = false;
     double time_to_go_s = 0.0;
     double offset_m = 0.0;  // horizontal distance of the CG from the plan's end point
+    std::optional<math::Vec3> torque_body_nm;  // LQR lateral control: body torque for the gimbals / RCS
 };
 
 // Throttle of `run_groups` that gives `thrust_n` together with the engines still starting or running down (engines
@@ -79,6 +96,10 @@ private:
     bool aborting_ = false;
     int consecutive_failures_ = 0;
     Statistics stats_;
+    TvcLateralGains lqr_gains_;  // cached for (lqr_a_, lqr_c_)
+    double lqr_a_ = -1.0;
+    double lqr_c_ = -1.0;
+    int lqr_set_ = -1;
 };
 
 }  // namespace starsim::gnc

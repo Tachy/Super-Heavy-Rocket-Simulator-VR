@@ -83,7 +83,9 @@ TEST_CASE("A re-plan from a snapshot takes effect half a second later", "[gnc][s
 TEST_CASE("Repeated failed re-plans switch to an abort", "[gnc][scvx_landing]") {
     Fixture f;
     int calls = 0;
-    gnc::PlanFunction failing = [&calls](gnc::DescentPlanner& planner, const gnc::PlanRequest& r) {
+    double abort_min_phase_s = -1.0;
+    gnc::PlanFunction failing = [&calls, &abort_min_phase_s](gnc::DescentPlanner& planner, const gnc::PlanRequest& r) {
+        if (r.target.goal == gnc::DescentGoal::Abort) abort_min_phase_s = r.settings.limits.min_phase_s[0];
         auto plan = gnc::default_plan_function()(planner, r);
         if (calls++ > 0 && r.target.goal == gnc::DescentGoal::Catch) {  // re-plans fail: the catch is unreachable
             plan.converged = false;
@@ -98,6 +100,9 @@ TEST_CASE("Repeated failed re-plans switch to an abort", "[gnc][scvx_landing]") 
     CHECK(guidance.aborting());
     CHECK(guidance.statistics().failures == 2);
     CHECK(guidance.update(*f.body, env, f.t0 + 4.0).abort);
+    for (double t = 4.5; t <= 6.0; t += 0.5) guidance.update(*f.body, env, f.t0 + t);
+    // An abort re-plans mid-flight: no minimum phase durations (a forced second on 13 engines low down would climb).
+    CHECK(abort_min_phase_s == 0.0);
 }
 
 TEST_CASE("Landing throttle counts the thrust of engines still running down", "[gnc][scvx_landing]") {

@@ -177,7 +177,10 @@ BoosterReturnGuidance::BurnPrediction BoosterReturnGuidance::predict_landing_bur
     const auto mass = body.vehicle().mass_properties();
     const double area = constants::pi * 0.25 * body.vehicle().diameter_m() * body.vehicle().diameter_m();
     const auto& drag = body.vehicle().aero().drag_curve(true);
-    const double f = parameters_.landing_throttle;
+    const bool scvx = parameters_.scvx_landing && site_.catch_target;
+    const double f = scvx ? parameters_.scvx.ignition_throttle : parameters_.landing_throttle;
+    const double f_final = scvx ? parameters_.scvx.final_throttle : parameters_.final_throttle;
+    const double gate_speed = scvx ? parameters_.scvx.switch_speed_mps : parameters_.gate_speed_mps;
     const double g = norm(env.gravity.acceleration_mps2(st.position_gcrf_m, epoch));
 
     double speed = norm(v_rel);
@@ -190,16 +193,16 @@ BoosterReturnGuidance::BurnPrediction BoosterReturnGuidance::predict_landing_bur
     for (; t < 200.0 && speed > 0.0; t += dt) {
         const auto air = env.atmosphere.at(site_.height_m + mass.cg_station_m + h);
         const auto final_set = engine_set(body.vehicle(), parameters_.landing_groups, air.pressure_pa);
-        if (!final_engines && speed <= parameters_.gate_speed_mps) final_engines = true;  // same switch as the guidance
+        if (!final_engines && speed <= gate_speed) final_engines = true;  // same switch as the guidance
         const auto engines = final_engines
                                  ? final_set
                                  : engine_set(body.vehicle(), parameters_.landing_ignition_groups, air.pressure_pa);
         const double spool = engines.startup_s > 0.0 ? std::clamp(t / engines.startup_s, 0.0, 1.0) : 1.0;
         const double mach = air.speed_of_sound_mps > 0.0 ? speed / air.speed_of_sound_mps : 0.0;
         const double drag_n = 0.5 * air.density_kg_m3 * speed * speed * area * drag.cd(mach, spool > 0.0);
-        speed -= ((spool * (final_engines ? parameters_.final_throttle : f) * engines.thrust_n + drag_n) / m - g * sin_gamma) * dt;
+        speed -= ((spool * (final_engines ? f_final : f) * engines.thrust_n + drag_n) / m - g * sin_gamma) * dt;
         h -= speed * sin_gamma * dt;
-        m -= spool * (final_engines ? parameters_.final_throttle : f) * engines.mass_flow_kgps * dt;
+        m -= spool * (final_engines ? f_final : f) * engines.mass_flow_kgps * dt;
     }
     return {h, t};
 }
@@ -377,6 +380,7 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
             cmd.axis_gcrf = c.axis_gcrf;
             cmd.roll_reference_gcrf = c.roll_reference_gcrf;
             cmd.feedforward = c.feedforward;
+            cmd.torque_body_nm = c.torque_body_nm;
             cmd.scvx = true;
             cmd.abort = c.abort;
             cmd.time_to_go_s = c.time_to_go_s;

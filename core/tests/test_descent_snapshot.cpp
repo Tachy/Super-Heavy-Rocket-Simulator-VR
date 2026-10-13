@@ -68,6 +68,9 @@ TEST_CASE("The descent snapshot puts the booster into the plan frame", "[gnc][de
     CHECK(snap.abort_target.goal == gnc::DescentGoal::Abort);
     CHECK(std::abs(snap.abort_target.sea_target_m.y - (site.sea->shoreline_distance_m + 150.0)) < 1e-6);  // due east
     CHECK(snap.abort_target.keep_out_radius_m > 0.5 * tower.width_m);
+    // Launch mount: outer radius + hull radius + margin, active below the mount top plus the CG station and margin.
+    CHECK(std::abs(snap.abort_target.mount_keep_out_radius_m - (tower.mount_outer_radius_m + 4.5 + 5.0)) < 1e-6);
+    CHECK(std::abs(snap.abort_target.mount_top_cg_height_m - (tower.mount_height_m + cg + 5.0)) < 1e-6);
     CHECK(snap.min_mass_kg == body.vehicle().mass_properties().mass_kg - body.vehicle().propellant_kg() + 5000.0);
     CHECK(snap.phase0_spool == 0.0);  // engines off
     CHECK(snap.startup_s == 3.0);     // Raptor 3 start-up [E]

@@ -351,7 +351,9 @@ TEST_CASE("Catch plans fly the final engine set straight above the catch point",
 TEST_CASE("Catch plans stay in a vertical corridor while the hull passes the arms", "[gnc][descent][scvx]") {
     const auto b = block3();
     const auto s = settings(*b);
-    const auto x0 = ignition_state(*b);  // 30 m east, 15 m south
+    // Within the campaign's ignition dispersion (+-10 m): larger offsets are partly left to the final set (soft).
+    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {1200.0, 8.0, -6.0}, {-250.0, 4.0, -2.0},
+                               Quat::from_axis_angle({0.0, 0.0, 1.0}, 2.0 * deg), {});
     auto target = catch_target(*b, state_attitude(x0));
     target.corridor_top_m = target.position_m.x + 70.0;
     target.corridor_radius_m = 1.5;
@@ -374,12 +376,12 @@ TEST_CASE("Catch plans stay in a vertical corridor while the hull passes the arm
 TEST_CASE("A feasible plan at the iteration limit is flyable", "[gnc][descent][scvx]") {
     const auto b = block3();
     auto s = settings(*b);
-    s.fresh_max_iterations = 4;          // stopped before the fuel optimum
+    s.fresh_max_iterations = 5;          // stopped before the fuel optimum
     s.final_mass_tolerance_kg = 1.0e-6;  // and before the final mass settles
     s.step_tolerance = 1.0e-9;
     const auto x0 = ignition_state(*b);
     const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, state_attitude(x0)), s, nullptr, 0.0);
-    CHECK(plan.iterations == 4);
+    CHECK(plan.iterations == 5);
     CHECK(plan.virtual_control < s.virtual_control_tolerance);
     CHECK(plan.nonlinear_defect < s.defect_tolerance);
     CHECK(plan.converged);
@@ -405,11 +407,11 @@ TEST_CASE("A re-plan right after the engine switch tolerates the turn rate of th
     const auto b = block3();
     auto s = settings(*b);
     const auto target = catch_target(*b, Quat{});
-    // On the final engines, tilted 8 deg and still turning at 0.135 rad/s (measured at the switch in the catch
-    // scenario; above the final set's 0.1 rad/s): the three engines need longer than one node interval to stop that.
+    // On the final engines at the switch of the catch profile (~600 m, ~72 m/s), tilted 8 deg and still turning at
+    // 0.135 rad/s (above the final set's 0.1 rad/s): the three engines need longer than one node interval to stop that.
     const Quat tilted = Quat::from_axis_angle({0.0, 0.0, 1.0}, 8.0 * deg);
-    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg - 30000.0, {target.position_m.x + 110.0, 3.0, 0.0},
-                               {-38.0, -2.0, 0.0}, tilted, {0.0, 0.0, 0.135});
+    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg - 30000.0, {target.position_m.x + 600.0, 3.0, 0.0},
+                               {-72.0, -2.0, 0.0}, tilted, {0.0, 0.0, 0.135});
     const auto plan = plan_descent(b->model, x0, 1, target, s, nullptr, 0.0);
     CHECK(plan.converged);
 }
@@ -423,7 +425,7 @@ TEST_CASE("A centred ignition with engines still starting plans with corridor an
     target.corridor_top_m = target.position_m.x + 70.0;
     target.corridor_radius_m = 1.5;
     target.final_set_radius_m = 3.0;
-    for (const double height : {850.0, 900.0, 950.0}) {
+    for (const double height : {1450.0, 1500.0, 1550.0}) {  // ignition of the catch profile at 260 m/s
         CAPTURE(height);
         const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {height, 0.0, 0.0}, {-260.0, 0.0, 0.0}, Quat{}, {});
         const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
@@ -472,4 +474,44 @@ TEST_CASE("The engine switch happens with the booster upright and calm", "[gnc][
     CHECK(tilt_of(x) <= s.limits.switch_tilt_rad + 1e-3);
     const Vec3 w = state_rate(x);
     CHECK(std::hypot(w.y, w.z) <= s.limits.switch_rate_radps + 1e-3);
+}
+
+TEST_CASE("An abort plan keeps clear of the launch mount near the ground", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    auto s = settings(*b);
+    s.limits.glide_slope_rad = 0.0;
+    DescentTarget target;
+    target.goal = DescentGoal::Abort;
+    target.ground_cg_height_m = b->vehicle->mass_properties().cg_station_m;
+    target.sea_target_m = {0.0, 650.0, 0.0};  // the sea 650 m east
+    target.keep_out_center_m = {0.0, -21.0, 21.0};  // tower north-west of the pad
+    target.keep_out_radius_m = 18.0;
+    target.mount_keep_out_radius_m = 20.0;  // launch mount on the pad centre (13 m + hull 4.5 m + margin)
+    target.mount_top_cg_height_m = 20.0 + target.ground_cg_height_m + 5.0;
+    // Low over the pad, slowly sinking: the cheapest path would leave from the mount sideways at its height.
+    const auto x0 = make_state(b->vehicle->mass_properties().mass_kg - 30000.0, {120.0, 2.0, 0.0}, {-15.0, 0.0, 0.0}, Quat{}, {});
+    const auto plan = plan_descent(b->model, x0, 1, target, s, nullptr, 0.0);
+    REQUIRE(plan.converged);
+    for (const auto& x : plan.reference.x) {
+        if (x[descent_index::position] >= target.mount_top_cg_height_m - 1.0) continue;
+        CHECK(std::hypot(x[descent_index::position + 1], x[descent_index::position + 2]) >= target.mount_keep_out_radius_m - 0.5);
+    }
+}
+
+TEST_CASE("The ignition set hands over within the hand-over sink rates", "[gnc][descent][scvx]") {
+    // Thirteen engines at minimum throttle far exceed the weight: running them down to a slow descent would make
+    // any timing error a climb. The switch happens at a sink rate the final engines can take over.
+    const auto b = block3();
+    const auto s = settings(*b);
+    for (const double height : {1000.0, 1300.0}) {
+        CAPTURE(height);
+        const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {height, 5.0, 0.0}, {-250.0, 0.0, 0.0}, Quat{}, {});
+        const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, Quat{}), s, nullptr, 0.0);
+        REQUIRE(plan.converged);
+        CHECK(plan.reference.x[static_cast<size_t>(s.nodes_per_phase - 1)][descent_index::velocity] <=
+              -s.limits.switch_min_sink_mps + 1e-3);
+        // ... and not much faster: the final engines are slow to steer, their segment stays short.
+        CHECK(plan.reference.x[static_cast<size_t>(s.nodes_per_phase - 1)][descent_index::velocity] >=
+              -s.limits.switch_max_sink_mps - 1e-3);
+    }
 }

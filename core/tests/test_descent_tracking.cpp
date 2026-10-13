@@ -68,18 +68,6 @@ TEST_CASE("Planned rates are given in the plan frame, whatever the planned roll"
     CHECK(std::abs(ref.angular_acceleration_plan_radps2.y + 0.1) < 1e-6);
 }
 
-TEST_CASE("Tracking corrects position and velocity errors within limits", "[gnc][tracking]") {
-    const auto ref = sample_plan(synthetic_plan(), flat_model(), 1.0, 1.0);
-    const TrackingGains gains;
-    const Vec3 exact = commanded_acceleration(ref, ref.position_m, ref.velocity_mps, gains);
-    CHECK(norm(exact - ref.thrust_acceleration_mps2) < 1e-12);
-    const Vec3 off = commanded_acceleration(ref, ref.position_m + Vec3{0.0, 50.0, 0.0}, ref.velocity_mps, gains);
-    CHECK(norm(off - ref.thrust_acceleration_mps2) <= gains.max_correction_mps2 + 1e-12);
-    CHECK(off.y < 0.0);  // pushes back towards the plan
-    const double tilt = std::atan2(std::hypot(off.y, off.z), off.x);
-    CHECK(tilt <= gains.max_tilt_rad + 1e-12);
-}
-
 TEST_CASE("Rate feed-forward removes the damping torque for a planned rotation", "[gnc][tracking]") {
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     cfg.stages.resize(1);
@@ -95,4 +83,23 @@ TEST_CASE("Rate feed-forward removes the damping torque for a planned rotation",
     const auto fed = controller.steer(body, 0.0, axis, {}, &ff);
     CHECK(plain.rcs_torque_fraction.y < -1e-3);          // damps the rate
     CHECK(std::abs(fed.rcs_torque_fraction.y) < 1e-9);   // the rate is planned: nothing to damp
+}
+
+TEST_CASE("Tracking turns lateral errors into small, bounded tilts even at low thrust", "[gnc][tracking]") {
+    // Final engines near minimum thrust: thrust acceleration ~8 m/s^2. A 50 m lateral error must not command a
+    // large tilt (the slow final set would saturate its gimbals and push the booster sideways).
+    auto plan = synthetic_plan();
+    for (auto& u : plan.reference.u) u = {8.0e5, 0.0, 0.0};  // 8 m/s^2 at 1e5 kg
+    const auto ref = sample_plan(plan, flat_model(), 1.0, 1.0);
+    const TrackingGains gains;
+    const auto cmd = tracking_command(ref, ref.position_m + Vec3{0.0, 50.0, 0.0}, ref.velocity_mps, gains);
+    const double tilt = std::acos(std::min(1.0, dot(cmd.axis, ref.axis)));
+    CHECK(tilt <= gains.max_tilt_correction_rad + 1e-9);
+    CHECK(cmd.axis.y < 0.0);  // towards the plan
+    // A vertical error changes the thrust, not the axis.
+    const auto low = tracking_command(ref, ref.position_m - Vec3{5.0, 0.0, 0.0}, ref.velocity_mps, gains);
+    CHECK(std::acos(std::min(1.0, dot(low.axis, ref.axis))) < 1e-9);
+    CHECK(low.thrust_acceleration_mps2 > norm(ref.thrust_acceleration_mps2));
+    const auto exact = tracking_command(ref, ref.position_m, ref.velocity_mps, gains);
+    CHECK(std::abs(exact.thrust_acceleration_mps2 - norm(ref.thrust_acceleration_mps2)) < 1e-9);
 }

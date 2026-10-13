@@ -47,6 +47,7 @@ struct ReturnCommand {
     bool scvx = false;                                          // landing burn flown on SCvx plans
     bool abort = false;                                         // catch given up: arms stay open, landing at sea
     std::optional<AttitudeController::Feedforward> feedforward; // planned rotation (SCvx)
+    std::optional<math::Vec3> torque_body_nm;                   // SCvx lateral LQR: body torque (gimbals / RCS)
 };
 
 // Return of a first stage to its launch site:

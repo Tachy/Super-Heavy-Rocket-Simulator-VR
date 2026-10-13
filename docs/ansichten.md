@@ -100,7 +100,8 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 
 - Links: Außenansicht Booster; nach der Stufentrennung begleitet sie den Booster beim Rückflug und
   Abfangen am Turm. Im HUD steht dazu der Zustand des Turms: „Turm: offen / schließt / gefangen /
-  verfehlt“ (heute schon im Desktop-HUD).
+  verfehlt / Abbruch“, die Phase der Booster-Führung „Booster <Phase> (SCvx/explizit)“ und am Ende
+  „Ergebnis gefangen / gelandet / Wasserung / Aufprall“ (heute schon im Desktop-HUD).
 - Mitte: alles zu Steuerung und Status im heutigen Crew-Dragon-Design (dunkler Hintergrund, klare
   Typografie, Berührflächen): Flugdirektor, NavBall, Bahnwerte, Δv-Balken, Manöverknoten, Triebwerks-
   matrix (33/6 Raptors), Tanks, Autopilot, Stufentrennung, Abbruch.

@@ -24,12 +24,20 @@ struct TrackingGains {
     double frequency_rad_s = 0.6;     // [E] position loop (re-plans every second remove the rest)
     double damping = 1.0;
     double max_correction_mps2 = 2.0; // [E] keeps the correction a correction (the plan does the flying)
-    double max_tilt_rad = 25.0 * constants::deg_to_rad;  // thrust from the vertical (phase 0 limit)
+    // [E] largest tilt added to the planned axis: a slow-turning vehicle with gimbaled engines first pushes the
+    // wrong way when it tilts (the gimbal side force), a large tilt command would saturate the gimbals.
+    double max_tilt_correction_rad = 3.0 * constants::deg_to_rad;
 };
 
-// Thrust acceleration to fly now: planned plus a PD correction of the position/velocity error (bounded), the
-// direction limited to max_tilt from the vertical.
-math::Vec3 commanded_acceleration(const TrackingReference& reference, const math::Vec3& position_m,
-                                  const math::Vec3& velocity_mps, const TrackingGains& gains);
+// What to fly now: the planned body axis tilted by the lateral part of a position/velocity correction (relative to
+// the planned thrust acceleration, at least gravity; bounded), and the planned thrust acceleration plus the
+// correction's part along the planned thrust.
+struct TrackingCommand {
+    math::Vec3 axis;
+    double thrust_acceleration_mps2 = 0.0;
+};
+
+TrackingCommand tracking_command(const TrackingReference& reference, const math::Vec3& position_m,
+                                 const math::Vec3& velocity_mps, const TrackingGains& gains);
 
 }  // namespace starsim::gnc

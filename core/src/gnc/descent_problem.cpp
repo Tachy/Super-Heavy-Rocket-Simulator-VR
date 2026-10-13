@@ -155,8 +155,12 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         // Tracking margin below the maximum (none above the minimum: the final set at minimum throttle barely exceeds
         // the weight, a margin there would forbid descending).
         const double t_max = (1.0 - limits.throttle_margin) * set.thrust_max_n * spool;
-        const double t_min = set.thrust_min_n * spool;
-        const double gimbal = set.gimbal_max_rad;
+        // Final set: a short, firm segment (control authority grows with thrust; a slow float at minimum throttle lets
+        // gimbal saturation push the booster sideways); only the last nodes may ease down for the gentle end.
+        const bool firm = p == 1 && last - k >= limits.final_ease_nodes;
+        const double t_min = (firm ? std::max(set.thrust_min_n, limits.final_min_thrust_fraction * set.thrust_max_n)
+                                   : set.thrust_min_n) * spool;
+        const double gimbal = limits.gimbal_fraction * set.gimbal_max_rad;
         double tilt = limits.tilt_max_rad[static_cast<size_t>(p)];
         const double rate_max = limits.rate_max_radps[static_cast<size_t>(p)];
         if (k == boundary && start_phase == 0) {
@@ -165,6 +169,8 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
                                      X(k, descent_index::attitude + 2), X(k, descent_index::attitude + 3)});
             b.add_second_order_cone({AffineExpr{limits.switch_rate_radps}, X(k, descent_index::rate + 1),
                                      X(k, descent_index::rate + 2)});
+            b.add_nonnegative(scaled(X(k, descent_index::velocity), -1.0).add_constant(-limits.switch_min_sink_mps));
+            b.add_nonnegative(X(k, descent_index::velocity).add_constant(limits.switch_max_sink_mps));
         }
         if (const int from_end = last - k; p == 1 && from_end < limits.tilt_taper_nodes) {
             tilt = limits.terminal_tilt_rad + (tilt - limits.terminal_tilt_rad) * from_end / limits.tilt_taper_nodes;
@@ -224,6 +230,21 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
             keep.add_constant(ny * ry.constant + nz * rz.constant);
             b.add_nonnegative(keep);
             b.add_nonnegative(X(k, descent_index::position).add_constant(-target.ground_cg_height_m));  // above ground
+            if (target.mount_keep_out_radius_m > 0.0) {
+                // Launch mount: n . r >= R near the ground (n from the pad centre to the reference); far above it the
+                // row stays with a radius that never binds, so the structure is the same at every node.
+                const Vec3 rr = state_position(ref.x[at(k)]);
+                const double hr = std::hypot(rr.y, rr.z);
+                const double my = hr > 1e-6 ? rr.y / hr : 1.0;
+                const double mz = hr > 1e-6 ? rr.z / hr : 0.0;
+                const bool near_ground = rr.x < target.mount_top_cg_height_m;
+                AffineExpr mount{near_ground ? -target.mount_keep_out_radius_m : corridor_inactive_radius_m};
+                const AffineExpr my_x = X(k, 2), mz_x = X(k, 3);
+                for (const auto& [index, c] : my_x.terms) mount.add(index, my * c);
+                for (const auto& [index, c] : mz_x.terms) mount.add(index, mz * c);
+                mount.add_constant(my * my_x.constant + mz * mz_x.constant);
+                b.add_nonnegative(mount);
+            }
         }
         }
         // Trust region: eta_k >= ||(dx_k, du_k)||^2 as a rotated cone ||(2 v, eta - 1)|| <= eta + 1.

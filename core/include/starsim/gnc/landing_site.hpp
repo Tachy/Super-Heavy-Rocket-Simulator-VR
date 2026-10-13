@@ -20,6 +20,8 @@ struct CatchTarget {
     double pin_azimuth_rad = 0.0;         // first pin, from body +y towards +z
     math::Vec3 tower_center_itrf_m;       // tower axis on the ground (abort keep-out)
     double tower_keep_out_radius_m = 0.0; // around the tower axis, incl. the hull radius and a margin
+    double mount_keep_out_radius_m = 0.0; // around the pad centre (launch mount), incl. hull radius and margin
+    double mount_height_m = 0.0;          // launch mount top above the pad ground
 };
 
 struct LandingSite {

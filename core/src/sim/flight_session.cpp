@@ -289,7 +289,9 @@ gnc::LandingSite FlightSession::return_site(const vehicle::Vehicle& booster) con
                                                 stage.config.catch_pins.azimuths_rad.front(),
                                                 g.to_itrf(g.tower_direction() * c.distance_m),
                                                 0.5 * c.width_m * std::sqrt(2.0) + 0.5 * booster.diameter_m() +
-                                                    tower_keep_out_margin_m};
+                                                    tower_keep_out_margin_m,
+                                                c.mount_outer_radius_m + 0.5 * booster.diameter_m() + tower_keep_out_margin_m,
+                                                c.mount_height_m};
     }
     if (launch_site_.sea) {
         landing.sea = gnc::SeaSide{launch_site_.sea->direction_rad, launch_site_.sea->shoreline_distance_m};
@@ -367,8 +369,14 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         if (flying.return_guidance && !flying.body->impacted()) {
             const auto& r = flying.return_command;
             for (auto& group : command.groups) group.throttle = r.throttle;
-            return_controller_.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf, r.roll_reference_gcrf,
-                                     r.feedforward ? &*r.feedforward : nullptr).apply_to(command);
+            if (r.torque_body_nm) {
+                // SCvx lateral LQR: the guidance's torque straight to gimbals / RCS (grid fins neutral: the planning
+                // model has none, and at low speed their allocation fights the gimbals).
+                gnc::AttitudeController::allocate(*flying.body, ambient_pressure_pa, *r.torque_body_nm, false).apply_to(command);
+            } else {
+                return_controller_.steer(*flying.body, ambient_pressure_pa, r.axis_gcrf, r.roll_reference_gcrf,
+                                         r.feedforward ? &*r.feedforward : nullptr).apply_to(command);
+            }
             command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(r.rcs_force_gcrf);
         }
         return command;

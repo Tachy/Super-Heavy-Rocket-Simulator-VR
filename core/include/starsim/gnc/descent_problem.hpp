@@ -27,6 +27,10 @@ struct DescentTarget {
     math::Vec3 sea_target_m;          // Abort: point at sea (y, z used)
     math::Vec3 keep_out_center_m;     // Abort: tower + mount, horizontal centre
     double keep_out_radius_m = 0.0;
+    // Abort: the launch mount on the pad centre, kept clear by nodes whose reference CG height is below
+    // mount_top_cg_height_m (radius 0: none).
+    double mount_keep_out_radius_m = 0.0;
+    double mount_top_cg_height_m = 0.0;
 };
 
 struct DescentLimits {
@@ -40,7 +44,15 @@ struct DescentLimits {
     // hardly turning - the final engines turn it slowly.
     double switch_tilt_rad = 3.0 * constants::deg_to_rad;  // [E]
     double switch_rate_radps = 0.03;                        // [E]
+    // ... and still sinking at least this fast: thirteen engines at minimum throttle far exceed the weight.
+    double switch_min_sink_mps = 70.0;                      // [E] recorded catches switch at ~80 m/s, ~500 m
+    double switch_max_sink_mps = 95.0;                      // [E]
+    double final_min_thrust_fraction = 0.0;  // [E] final-set thrust floor (fraction of its maximum) but at the end
+    int final_ease_nodes = 3;                // last nodes free to ease down to the gentle end
     double throttle_margin = 0.1;  // [E] planned thrust stays this fraction below the maximum (tracking margin)
+    // [E] planned gimbal deflection at most this fraction of the limit: the rest is the lateral controller's margin
+    // (campaign: 0.4 lost one of 21 cases to saturation, 0.3 none).
+    double gimbal_fraction = 0.3;
     // [E] pitch/yaw per phase: the 13 ignition engines turn the booster fast (alpha_max ~1.4 rad/s^2), the 3 final
     // engines slowly (~0.1-0.3 rad/s^2).
     std::array<double, 2> rate_max_radps{0.2, 0.1};
