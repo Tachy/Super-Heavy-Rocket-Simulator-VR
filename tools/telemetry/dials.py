@@ -145,8 +145,10 @@ def _phase(row: dict) -> tuple:
         left = "booster_icon_alt"  # landing approach: engine icon (+ propellant arc) instead of the speed dial
     elif "HEAVY" in left_label:
         left = "booster"
-    elif "STARSHIP" in left_label or (left_numbers and right_ship_icon and _number(row["R1"]) is None):
-        left = "ship"  # labelled, or the ship alone after the booster's flight (its icon on the right)
+    elif "STARSHIP" in left_label or (left_numbers and _number(row["R1"]) is None and _number(row["R2"]) is None):
+        # labelled, or the ship alone after the booster's flight: unlabelled numbers on the left and none on the
+        # right (its engine icon there is not always read - flight 14's entry shows it dimmed)
+        left = "ship"
     elif _number(row["L1"]) is None and _dots(row, "L1")[1] >= 1 and right in ("stack", "ship"):
         left = "booster_icon"  # dark (shut-down) engines are not drawn: during the boostback only a few dots
     else:

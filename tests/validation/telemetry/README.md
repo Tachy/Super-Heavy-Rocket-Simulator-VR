@@ -6,9 +6,12 @@ T+8:40 at 1 sample/s). Sources and licence notes: `tools/data_pipeline/sources.t
 
 | File | Flight | Vehicles | Coverage |
 |---|---|---|---|
-| `flight12_2026-05-22.csv` | Flight 12 | Block 3: B19 / S39 | T-15 s to T+10 min (+ ship entry, see below) |
-| `flight13_2026-07-24.csv` | Flight 13 | Block 3: B20 / S40 | T-15 s to T+10 min (+ ship entry) |
-| `flight14_2026-09-28.csv` | Flight 14 | Block 3: B21 / S41 | T-15 s to T+10 min (+ orbit and ship entry) |
+| `flight12_2026-05-22.csv` | Flight 12 | Block 3: B19 / S39 | T-15 s to T+66 min: ship entry to 57 km, last 1.5 km to splashdown |
+| `flight13_2026-07-24.csv` | Flight 13 | Block 3: B20 / S40 | T-15 s to T+65 min: ship coast, entry and splashdown |
+| `flight14_2026-09-28.csv` | Flight 14 | Block 3: B21 / S41 | T-15 s to T+3 h 9 min: ship orbit (gaps), entry and splashdown |
+
+Sampling: 2 frames/s to T+10 min; the ship's coast and entry after that at 1 frame/s (flight 14's entry at
+0.5 frame/s). Raw scans of several runs are merged by video time (sorted, duplicates dropped) before `clean`.
 
 Only the current configuration (Block 3) is kept (project decision 2026-10-13); earlier flights were evaluated
 once and removed with their vehicle configurations.
