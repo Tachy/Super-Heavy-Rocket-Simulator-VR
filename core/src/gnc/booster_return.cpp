@@ -107,6 +107,43 @@ const char* to_string(ReturnPhase phase) {
     return "";
 }
 
+BoosterReturnParameters booster_return_parameters(const config::StageConfig& stage, BoosterReturnParameters p) {
+    const auto ids = [&](const std::vector<std::string>& local) {
+        std::vector<std::string> out;
+        for (const auto& id : local) out.push_back(stage.id + "/" + id);
+        return out;
+    };
+    if (!stage.boostback_engine_groups.empty()) p.boostback_groups = ids(stage.boostback_engine_groups);
+    if (!stage.entry_engine_groups.empty()) p.entry_groups = ids(stage.entry_engine_groups);
+    if (stage.landing_engine_phases.size() == 3) {
+        p.landing_ignition_groups = ids(stage.landing_engine_phases[0]);
+        p.landing_divert_groups = ids(stage.landing_engine_phases[1]);
+        p.landing_groups = ids(stage.landing_engine_phases[2]);
+    }
+    if (stage.landing_phase_throttles.size() == 3) {
+        p.scvx.ignition_throttle = stage.landing_phase_throttles[0];
+        p.scvx.divert_throttle = stage.landing_phase_throttles[1];
+        p.scvx.final_throttle = stage.landing_phase_throttles[2];
+    }
+    if (stage.landing_switch_sink_mps.size() == 2) {
+        auto& switches = p.scvx.settings.limits.switches;
+        for (size_t i = 0; i < 2; ++i) {
+            const auto [low, high] = stage.landing_switch_sink_mps[i];
+            switches[i] = {0.0, 0.0, low, high};
+        }
+        // The burn prediction switches in the middle of each window.
+        p.scvx.divert_speed_mps = 0.5 * (switches[0].min_sink_mps + switches[0].max_sink_mps);
+        p.scvx.switch_speed_mps = 0.5 * (switches[1].min_sink_mps + switches[1].max_sink_mps);
+    }
+    if (stage.return_flight_time_s > 0.0) p.flight_time_s = stage.return_flight_time_s;
+    if (stage.entry_burn_altitude_m > 0.0) {
+        p.entry_altitude_m = stage.entry_burn_altitude_m;
+        p.entry_delta_v_mps = stage.entry_burn_delta_v_mps;
+        if (stage.entry_burn_throttle > 0.0) p.entry_throttle = stage.entry_burn_throttle;
+    }
+    return p;
+}
+
 BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnParameters parameters)
     : site_(std::move(site)), parameters_(std::move(parameters)) {
     if (site_.catch_target && site_.sea && !parameters_.scvx_landing) {

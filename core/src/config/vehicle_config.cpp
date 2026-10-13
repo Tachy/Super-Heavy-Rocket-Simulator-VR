@@ -198,15 +198,58 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.reserve_propellant_kg = doc.number_or(*recovery, "reserve_propellant_kg", 0.0);
         s.landing_propellant_kg = doc.number_or(*recovery, "landing_propellant_kg", 0.0);
         s.recovery_method = doc.text_or(*recovery, "method");
-        if (const auto* groups = (*recovery)["deorbit_engine_groups"].as_array()) {
-            for (const auto& node : *groups) {
+        auto group_list = [&](const toml::array& list, const std::string& key) {
+            std::vector<std::string> ids;
+            for (const auto& node : list) {
                 const auto id = node.value<std::string>().value_or("");
                 const bool known = std::any_of(s.engine_groups.begin(), s.engine_groups.end(),
                                                [&](const auto& g) { return g.id == id; });
-                if (!known) doc.fail("deorbit engine group '" + id + "' is not an engine group of stage '" + s.id + "'");
-                s.deorbit_engine_groups.push_back(id);
+                if (!known) doc.fail(key + " group '" + id + "' is not an engine group of stage '" + s.id + "'");
+                ids.push_back(id);
             }
+            return ids;
+        };
+        if (const auto* groups = (*recovery)["deorbit_engine_groups"].as_array()) {
+            s.deorbit_engine_groups = group_list(*groups, "deorbit engine");
         }
+        if (const auto* groups = (*recovery)["boostback_engine_groups"].as_array()) {
+            s.boostback_engine_groups = group_list(*groups, "boostback engine");
+        }
+        if (const auto* groups = (*recovery)["entry_engine_groups"].as_array()) {
+            s.entry_engine_groups = group_list(*groups, "entry engine");
+        }
+        if (const auto* phases = (*recovery)["landing_engine_phases"].as_array()) {
+            for (const auto& node : *phases) {
+                const auto* list = node.as_array();
+                if (!list) doc.fail("landing_engine_phases must be a list of engine group lists");
+                s.landing_engine_phases.push_back(group_list(*list, "landing engine"));
+            }
+            if (s.landing_engine_phases.size() != 3) doc.fail("landing_engine_phases must list 3 engine sets");
+        }
+        if (const auto* throttles = (*recovery)["landing_phase_throttles"].as_array()) {
+            for (const auto& node : *throttles) {
+                const auto value = node.value<double>();
+                if (!value || *value <= 0.0 || *value > 1.0) doc.fail("landing_phase_throttles must be in (0, 1]");
+                s.landing_phase_throttles.push_back(*value);
+            }
+            if (s.landing_phase_throttles.size() != 3) doc.fail("landing_phase_throttles must list 3 throttles");
+        }
+        if (const auto* windows = (*recovery)["landing_switch_sink_mps"].as_array()) {
+            for (const auto& node : *windows) {
+                const auto* pair = node.as_array();
+                const auto low = pair && pair->size() == 2 ? (*pair)[0].value<double>() : std::nullopt;
+                const auto high = pair && pair->size() == 2 ? (*pair)[1].value<double>() : std::nullopt;
+                if (!low || !high || *low < 0.0 || *high < *low) {
+                    doc.fail("landing_switch_sink_mps entries must be [min, max] sink rates");
+                }
+                s.landing_switch_sink_mps.emplace_back(*low, *high);
+            }
+            if (s.landing_switch_sink_mps.size() != 2) doc.fail("landing_switch_sink_mps must list 2 switch windows");
+        }
+        s.return_flight_time_s = doc.number_or(*recovery, "return_flight_time_s", 0.0);
+        s.entry_burn_altitude_m = doc.number_or(*recovery, "entry_burn_altitude_m", 0.0);
+        s.entry_burn_delta_v_mps = doc.number_or(*recovery, "entry_burn_delta_v_mps", 0.0);
+        s.entry_burn_throttle = doc.number_or(*recovery, "entry_burn_throttle", 0.0);
     }
     return s;
 }

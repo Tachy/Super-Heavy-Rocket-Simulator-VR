@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // Vehicle definitions loaded from config/ (see config/README.md). Plain data, SI units, radians.
@@ -140,9 +141,20 @@ struct StageConfig {
     // Returning booster: propellant to have left at landing-burn ignition; the ascent autopilot plans MECO from it
     // and the return's needs (0: MECO at reserve_propellant_kg).
     double landing_propellant_kg = 0.0;
-    // [stage.recovery] method: "tower_catch" (Super Heavy: always caught, no legs), "drone_ship_landing" / pad
-    // landing (Falcon 9, not modelled yet); empty: expendable.
+    // [stage.recovery] method: "tower_catch" (Super Heavy: always caught, no legs), "leg_landing" (Falcon 9: on a
+    // landing zone or a drone ship, chosen by the mission); empty: expendable.
     std::string recovery_method;
+    // [stage.recovery] return of a first stage (gnc::booster_return_parameters; empty / 0: the guidance's defaults,
+    // which are Super Heavy's). Engine groups are ids of this stage.
+    std::vector<std::string> boostback_engine_groups;
+    std::vector<std::string> entry_engine_groups;
+    std::vector<std::vector<std::string>> landing_engine_phases;  // 3 sets: ignition, divert, final
+    std::vector<double> landing_phase_throttles;                  // design throttle per set (ignition timing)
+    std::vector<std::pair<double, double>> landing_switch_sink_mps;  // per engine switch: sink window {min, max}
+    double return_flight_time_s = 0.0;   // boostback start -> touchdown (Lambert arc)
+    double entry_burn_altitude_m = 0.0;  // entry burn ignition while descending (0: none)
+    double entry_burn_delta_v_mps = 0.0;
+    double entry_burn_throttle = 0.0;
     // [stage.recovery] deorbit_engine_groups: the engine set deorbit burns run on (empty: the burn picks one). The ship:
     // the belly sea-level Raptor alone, its thrust steered through the CG (user 2026-10-13).
     std::vector<std::string> deorbit_engine_groups;

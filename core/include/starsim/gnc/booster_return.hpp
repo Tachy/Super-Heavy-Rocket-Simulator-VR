@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/attitude_controller.hpp"
 #include "starsim/gnc/landing_site.hpp"
 #include "starsim/gnc/scvx_landing.hpp"
@@ -29,6 +30,13 @@ struct BoosterReturnParameters {
     std::vector<std::string> landing_groups{"booster/center"};
     // SCvx landing (V3 baseline 13 -> 5 -> 3): the divert set between the ignition and the centre engines.
     std::vector<std::string> landing_divert_groups{"booster/center", "booster/divert"};
+    // Entry burn (Falcon 9; Super Heavy has none): lit while descending below entry_altitude_m, retrograde (relative
+    // to the ground), until the burned delta-v reaches entry_delta_v_mps. It limits the descent's dynamic pressure and
+    // heating. entry_altitude_m = 0: no entry burn.
+    std::vector<std::string> entry_groups;
+    double entry_altitude_m = 0.0;
+    double entry_delta_v_mps = 0.0;
+    double entry_throttle = 1.0;
     double landing_throttle = 0.8;  // design throttle of the inner-engine segment: the rest is control margin
     double final_throttle = 0.8;    // design throttle of the centre-engine segment (slower, time to settle)
     double gate_speed_mps = 50.0;   // sink rate at the hand-over to the centre engines
@@ -40,6 +48,10 @@ struct BoosterReturnParameters {
     bool scvx_landing = true;
     ScvxLandingParameters scvx;
 };
+
+// Return parameters of a first stage: `base` with every return key of its [stage.recovery] that is set (engine sets,
+// return flight time, entry burn, landing-burn profile; engine group ids get the stage prefix).
+BoosterReturnParameters booster_return_parameters(const config::StageConfig& stage, BoosterReturnParameters base = {});
 
 struct ReturnCommand {
     ReturnPhase phase = ReturnPhase::Flip;

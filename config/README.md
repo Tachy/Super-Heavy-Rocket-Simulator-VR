@@ -59,6 +59,12 @@ flow separation (vacuum engines).
   hull), `max_load_n` (structural limit per pin; above it the catch is an impact).
 - `[stage.recovery] method`: `"tower_catch"` (Super Heavy: always caught), `"leg_landing"` (Falcon 9: on its legs on a
   landing zone or a drone ship, chosen by the mission); empty: expendable.
+- `[stage.recovery]` return keys (`gnc::booster_return_parameters`; left out: the guidance's defaults, Super Heavy's):
+  `boostback_engine_groups`, `entry_engine_groups` (group ids of this stage), `return_flight_time_s` (boostback start
+  to touchdown), `entry_burn_altitude_m` / `entry_burn_delta_v_mps` / `entry_burn_throttle` (entry burn lit while
+  descending below that altitude, retrograde, for that delta-v), `landing_engine_phases` (3 group lists: ignition,
+  divert, final set), `landing_phase_throttles` (3 design throttles that time the ignition) and
+  `landing_switch_sink_mps` (2 `[min, max]` sink windows of the engine switches).
 - `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry
   (`footprint_radius_m` from the axis, `foot_station_m` below the stage bottom: negative), `deploy_time_s`, and the
   per-leg crush core (`stiffness_n_m` and `damping_n_s_m` until the force reaches `crush_force_n`, then it crushes
