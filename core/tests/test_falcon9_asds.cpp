@@ -101,7 +101,7 @@ TEST_CASE("A Falcon 9 stage returning to a drone ship aims at its deck", "[gnc][
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
     session.set_launch_site(ship());
     session.set_landing_zone(ship());
-    const vehicle::Vehicle stage(test::booster_config("falcon9_block5", 11300.0), STARSIM_CONFIG_DIR);
+    const vehicle::Vehicle stage(test::booster_config("falcon9_block5", 12100.0), STARSIM_CONFIG_DIR);
     const auto target = session.return_site(stage);
     CHECK(target.height_m == -32.0);
     REQUIRE(target.pad);
@@ -135,7 +135,7 @@ gnc::BoosterReturnParameters asds_parameters() {
 }
 
 constexpr double asds_ignition_sink_mps = 270.0;       // [D] Starlink 15-25: ~270 m/s at ~3.0 km (T+476 s)
-constexpr double asds_ignition_propellant_kg = 11300.0;  // [D] gauge 2.8 % at ignition
+constexpr double asds_ignition_propellant_kg = 12100.0;  // [D] gauge 2.8-2.9 % of 425 t at ignition
 
 }  // namespace
 
@@ -153,14 +153,14 @@ TEST_CASE("A Falcon 9 drone-ship MECO plan has no boostback", "[gnc][falcon9][as
     const auto near = ship();
     const gnc::LandingSite a{near.latitude_rad, near.longitude_rad, near.height_m, {}, {}, {}};
     const gnc::LandingSite b{near.latitude_rad + 2.0 * deg, near.longitude_rad + 3.0 * deg, near.height_m, {}, {}, {}};
-    const double at_a = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, a, p, 11300.0);
-    const double at_b = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, b, p, 11300.0);
-    // Entry burn by the rocket equation: (25.6 + 11.3) t x exp(880 / (311 x 9.807)) - 25.6 t = 23.6 t; nine engines'
+    const double at_a = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, a, p, 12100.0);
+    const double at_b = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, b, p, 12100.0);
+    // Entry burn by the rocket equation: (25.6 + 12.1) t x exp(880 / (311 x 9.807)) - 25.6 t = 24.7 t; nine engines'
     // run-down (0.15 s each at full flow) ~0.4 t.
     std::printf("[falcon9] drone-ship MECO propellant %.1f t\n", at_a / 1e3);
     CHECK(at_a == at_b);
-    CHECK(at_a > 23.0e3);
-    CHECK(at_a < 25.0e3);
+    CHECK(at_a > 24.0e3);
+    CHECK(at_a < 26.0e3);
 }
 
 namespace {
@@ -257,7 +257,8 @@ TEST_CASE("A falling Falcon 9 stage flies its drone-ship entry burn on three eng
     CHECK(run.ignition_altitude_m > 64.0e3);
     CHECK(run.delta_v_mps >= 880.0);
     CHECK(run.delta_v_mps < 900.0);
-    CHECK(std::abs(run.used_kg - 12800.0) < 1000.0);  // [D] 24.1 -> 11.3 t
+    // [D] gauge 6.1 -> 2.85 % of 425 t = 13.8 t; the rocket equation on 880 m/s gives 12.6 t from 24.7 t.
+    CHECK(std::abs(run.used_kg - 13200.0) < 1000.0);
     CHECK(horizontal_m(error) < 300.0);
 }
 
@@ -474,9 +475,9 @@ TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage lan
     CHECK(std::abs(periapsis_km - 200.0) < 5.0);
     CHECK(std::abs(apoapsis_km - 280.0) < 5.0);
     std::printf("[validation] Falcon 9 ASDS: MECO T+%.0f s at %.1f km, %.0f km/h, %.1f t (Starlink 15-25: T+149 s, 60 km, "
-                "~8000 km/h, gauge ~43 t); entry burn T+%.0f s at %.1f km, %.0f km/h, %.1f t, %.1f deg off the burn axis "
-                "(T+364 s, 67.4 km, ~7900 km/h, 24.1 t) to T+%.0f s, %.0f km/h (T+386 s, ~5250 km/h); landing burn T+%.0f "
-                "s at %.2f km, %.0f m/s, %.1f t (T+476 s, ~3.0 km, ~270 m/s, 11.1 t); %s at T+%.0f s (T+499 s), %.2f m from "
+                "~8000 km/h, gauge ~47 t); entry burn T+%.0f s at %.1f km, %.0f km/h, %.1f t, %.1f deg off the burn axis "
+                "(T+364 s, 67.4 km, ~7900 km/h, 25.9 t) to T+%.0f s, %.0f km/h (T+386 s, ~5250 km/h); landing burn T+%.0f "
+                "s at %.2f km, %.0f m/s, %.1f t (T+476 s, ~3.0 km, ~270 m/s, 11.9 t); %s at T+%.0f s (T+499 s), %.2f m from "
                 "the deck centre, %.1f t left\n",
                 meco_s, meco_h / 1e3, meco_v * 3.6, meco_kg / 1e3, entry_s, entry_h / 1e3, entry_v * 3.6, entry_kg / 1e3,
                 entry_pointing_deg, entry_end_s, entry_end_v * 3.6, landing_s, landing_h / 1e3, landing_v,
@@ -487,8 +488,8 @@ TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage lan
     CHECK(landing_s > 0.0);
     CHECK(outcome == sim::LandingOutcome::Landed);
     CHECK(std::hypot(p.x, p.y) < 5.0);
-    // The landing-burn ignition state lies within the telemetry's spread (spec): ~3.0 km, ~270 m/s, 11.1 t.
-    CHECK(std::abs(landing_kg - 11300.0) < 1000.0);
+    // The landing-burn ignition state lies within the telemetry's spread (spec): ~3.0 km, ~270 m/s, 11.9 t.
+    CHECK(std::abs(landing_kg - 12100.0) < 1000.0);
     CHECK(landing_h > 2500.0);
     CHECK(landing_h < 4000.0);
     CHECK(std::abs(landing_v - 270.0) < 40.0);

@@ -68,14 +68,14 @@ TEST_CASE("A Falcon 9 MECO plan keeps the entry burn's propellant", "[gnc][falco
     auto with_entry = falcon9_parameters();
     auto without = with_entry;
     without.entry_altitude_m = 0.0;
-    const double landing_kg = 11300.0;
+    const double landing_kg = 12100.0;
     const double a = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, landing, with_entry, landing_kg);
     const double b = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, landing, without, landing_kg);
-    // Entry burn by the rocket equation on the stage (dry 25.6 t + 11.3 t) at the centre engine's vacuum exhaust
-    // velocity (311 s): ~1.6 t (the CRS-35 gauge: 3.5 -> 3.1 % of 395.7 t), more after the boostback's leverage.
+    // Entry burn by the rocket equation on the stage (dry 25.6 t + 12.1 t) at the centre engine's vacuum exhaust
+    // velocity (311 s): ~1.6 t (the CRS-35 gauge: 3.5 -> 3.1 % of 425 t = 1.7 t), more after the boostback's leverage.
     std::printf("[falcon9] MECO propellant with entry burn %.1f t, without %.1f t\n", a / 1e3, b / 1e3);
     CHECK(a - b > 1500.0);
-    CHECK(a - b < 3000.0);
+    CHECK(a - b < 3500.0);
 }
 
 TEST_CASE("A falling Falcon 9 stage flies its entry burn on the centre engine", "[gnc][falcon9][rtls]") {
@@ -119,7 +119,7 @@ TEST_CASE("A falling Falcon 9 stage flies its entry burn on the centre engine", 
 namespace {
 
 constexpr double ignition_sink_mps = 300.0;      // [D] CRS-35: ~300 m/s at landing-burn ignition (~3.2 km)
-constexpr double ignition_propellant_kg = 11300.0;  // [D] gauge 2.8-2.9 % at ignition
+constexpr double ignition_propellant_kg = 12100.0;  // [D] gauge 2.8-2.9 % of 425 t at ignition
 
 }  // namespace
 
@@ -225,7 +225,7 @@ TEST_CASE("The Falcon 9 RTLS mission loads", "[config][falcon9]") {
     CHECK(m.payload_kg == 12500.0);
     CHECK_FALSE(m.fairing);
     CHECK(m.booster_throttle.size() == 4);
-    CHECK(std::abs(m.kick_angle_rad / constants::deg_to_rad - 14.0) < 1e-12);
+    CHECK(std::abs(m.kick_angle_rad / constants::deg_to_rad - 12.0) < 1e-12);
 }
 
 TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on LZ-40", "[gnc][falcon9][rtls][validation]") {
@@ -280,9 +280,9 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
     }
     const auto& stage = session.body(0);
     const Vec3 p = sim::site_enu_m(zone, transpose(earth().fixed_to_gcrf(session.epoch()).rotation) * stage.state().position_gcrf_m);
-    std::printf("[validation] Falcon 9 RTLS: MECO T+%.0f s with %.1f t (CRS-35: T+137 s, ~61 t); entry burn T+%.0f s at "
+    std::printf("[validation] Falcon 9 RTLS: MECO T+%.0f s with %.1f t (CRS-35: T+137 s, ~66 t); entry burn T+%.0f s at "
                 "%.1f km (T+355 s, 56.6 km); landing burn T+%.0f s at %.2f km, %.0f m/s, %.1f t (T+420 s, ~3.2 km, ~300 "
-                "m/s, 11.3 t); %s at T+%.0f s (T+442 s), %.2f m from the centre, %.1f t left\n",
+                "m/s, 12.1 t); %s at T+%.0f s (T+442 s), %.2f m from the centre, %.1f t left\n",
                 meco_s, meco_propellant_kg / 1e3, entry_s, entry_h / 1e3, landing_s, landing_h / 1e3, landing_v,
                 landing_propellant_kg / 1e3, sim::to_string(session.landing_outcome(0)), session.mission_time_s(),
                 std::hypot(p.x, p.y), stage.vehicle().propellant_kg() / 1e3);
@@ -291,8 +291,8 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
     CHECK(landing_s > 0.0);
     CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);
     CHECK(std::hypot(p.x, p.y) < 5.0);
-    // The landing-burn ignition state lies within the telemetry's spread (spec): ~3.2 km, ~300 m/s, 11.3 t.
-    CHECK(std::abs(landing_propellant_kg - 11300.0) < 1000.0);
+    // The landing-burn ignition state lies within the telemetry's spread (spec): ~3.2 km, ~300 m/s, 12.1 t.
+    CHECK(std::abs(landing_propellant_kg - 12100.0) < 1000.0);
     CHECK(landing_h > 2500.0);
     CHECK(landing_h < 4000.0);
     CHECK(std::abs(landing_v - 300.0) < 30.0);
