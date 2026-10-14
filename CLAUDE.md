@@ -548,7 +548,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Lunar missions (spec `docs/superpowers/specs/2026-10-14-lunar-missions-design.md`), l1 reference bodies: vehicle states
   stay Earth-centred GCRF everywhere; `environment::ReferenceBody` (Earth: ITRF93 + WGS84 + US76; Moon: MOON_ME, sphere
   1737.4 km, vacuum) gives what is relative to a body. A `FlightBody` takes the Moon within 60,000 km of it and the Earth
-  again beyond 100,000 km [E] (the NRHO's apolune stays inside); bodies on the ground keep theirs. Air, ground contact,
+  again beyond 100,000 km [E] (the NRHO's apolune stays inside; a body just placed counts as coming from the Moon);
+  bodies on the ground keep theirs, and a ground impact keeps the wreck where it struck on its body. Air, ground contact,
   resting (it follows the Moon), telemetry (`reference_body`, altitude, osculating periapsis / apoapsis and inclination to
   the body's equator) and the session's tick-near-ground decision and LVLH holds use it. `FlightSession` takes a Moon
   orientation (5th constructor argument, `spice::SpiceOrientation::moon_mean_earth()`); without it (bindings until l6)
