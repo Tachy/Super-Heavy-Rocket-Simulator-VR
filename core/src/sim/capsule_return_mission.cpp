@@ -8,7 +8,12 @@ namespace starsim::sim {
 
 void place_capsule_return_mission(FlightSession& session, const config::CapsuleReturnMission& m,
                                   const std::filesystem::path& config_dir, time::Epoch epoch) {
-    auto cfg = config::load_vehicle(config_dir, m.vehicle_id);
+    place_capsule_return_mission(session, m, config::load_vehicle(config_dir, m.vehicle_id), config_dir, epoch);
+}
+
+void place_capsule_return_mission(FlightSession& session, const config::CapsuleReturnMission& m,
+                                  config::VehicleConfig cfg, const std::filesystem::path& config_dir,
+                                  time::Epoch epoch) {
     for (auto& stage : cfg.stages) {
         for (auto& tank : stage.tanks) {
             if (tank.contents == config::TankContents::Rcs) tank.mass_kg = m.rcs_propellant_kg;

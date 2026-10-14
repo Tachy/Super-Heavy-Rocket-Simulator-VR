@@ -129,6 +129,7 @@ const char* to_string(CapsuleReturnStep step) {
         case CapsuleReturnStep::Drogues: return "Bremsschirme";
         case CapsuleReturnStep::Mains: return "Hauptschirme";
         case CapsuleReturnStep::SplashedDown: return "gewassert";
+        case CapsuleReturnStep::Lost: return "verloren";
     }
     return "?";
 }
@@ -204,6 +205,11 @@ bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
 }
 
 void FlightSession::run_capsule_return(Flying& flying) {
+    if (flying.body->impacted() && capsule_return_step_ != CapsuleReturnStep::SplashedDown) {
+        capsule_return_step_ = CapsuleReturnStep::Lost;  // d4 minor: the step stayed "Bremsschirme" after an impact
+        autopilot_.state = AutopilotState::Off;
+        return;
+    }
     switch (capsule_return_step_) {
         case CapsuleReturnStep::TrunkJettison:
             if (epoch_ >= capsule_step_epoch_) {
@@ -250,7 +256,6 @@ void FlightSession::run_capsule_return(Flying& flying) {
                     default: break;
                 }
             }
-            if (flying.body->impacted()) autopilot_.state = AutopilotState::Off;
             break;
         default:
             break;

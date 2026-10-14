@@ -49,8 +49,9 @@ enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparati
 const char* to_string(AutopilotState state);
 
 // Steps of a capsule's return from orbit (FlightSession::plan_capsule_return).
+// Lost: the capsule impacted or broke up before resting on the water (autopilot off).
 enum class CapsuleReturnStep {
-    None, DeorbitBurn, TrunkJettison, NoseConeClose, Coast, Entry, Gate, Drogues, Mains, SplashedDown
+    None, DeorbitBurn, TrunkJettison, NoseConeClose, Coast, Entry, Gate, Drogues, Mains, SplashedDown, Lost
 };
 const char* to_string(CapsuleReturnStep step);
 

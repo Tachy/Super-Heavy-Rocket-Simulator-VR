@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <random>
+#include <vector>
 
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/splashdown_zone_config.hpp"
@@ -254,6 +255,8 @@ struct MissionRun {
     Descent descent;  // times relative to the gate (fly_down)
     double splashdown_after_ignition_s = -1.0;
     double rcs_left_kg = 0.0;
+    sim::CapsuleReturnStep final_step = sim::CapsuleReturnStep::None;  // 1 s after the descent ended
+    sim::AutopilotState final_autopilot = sim::AutopilotState::Off;
 };
 
 // Dispersion of a return: orbit phase offset, MMH/NTO load, deorbit burn execution (applied at cutoff).
@@ -263,6 +266,7 @@ struct MissionDispersion {
     double burn_scale = 0.0;            // relative magnitude error
     double pointing_rad = 0.0;          // pointing error
     double pointing_azimuth_rad = 0.0;  // about the burn direction, from the orbit normal
+    bool without_mains = false;         // the capsule flies without its main parachutes
 };
 
 // Places the mission (dispersed), plans and flies it to the water.
@@ -273,7 +277,11 @@ MissionRun fly_mission(const MissionDispersion& dispersion = {}) {
     test::spice_session();  // leap seconds for the UTC epoch
     const auto t0 = spice::SpiceTimeConverter{}.from_utc(m.epoch_utc);
     sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
-    sim::place_capsule_return_mission(session, m, STARSIM_CONFIG_DIR, t0);
+    auto vehicle = config::load_vehicle(STARSIM_CONFIG_DIR, m.vehicle_id);
+    if (dispersion.without_mains) {
+        std::erase_if(vehicle.stages.back().parachutes, [](const auto& p) { return p.role == "main"; });
+    }
+    sim::place_capsule_return_mission(session, m, std::move(vehicle), STARSIM_CONFIG_DIR, t0);
     MissionRun run;
     run.planned = session.plan_capsule_return(sim::capsule_return_parameters(m));
     if (!run.planned) return run;
@@ -308,6 +316,9 @@ MissionRun fly_mission(const MissionDispersion& dispersion = {}) {
     run.descent = fly_down(session);
     run.splashdown_after_ignition_s = gate_s + run.descent.splashdown_s - run.ignition_s;
     run.rcs_left_kg = session.body(session.controlled_index()).vehicle().rcs_propellant_kg();
+    session.advance_to(session.epoch() + 1.0, 1000000);  // the step machine sees the outcome
+    run.final_step = session.capsule_return_step();
+    run.final_autopilot = session.autopilot().state;
     return run;
 }
 
@@ -334,6 +345,7 @@ TEST_CASE("Crew Dragon return mission splashes down in the zone on the published
     CHECK(d.sink_mps == Catch::Approx(7.0).epsilon(0.30));              // [S] 15-16 mph
     CHECK(r.splashdown_after_ignition_s / 60.0 == Catch::Approx(54.0).epsilon(0.15));  // [S] Crew-10 10:39 -> 11:33 EDT
     CHECK(d.peak_g < 3.6);
+    CHECK(r.final_step == sim::CapsuleReturnStep::SplashedDown);
 }
 
 namespace {
@@ -395,4 +407,15 @@ TEST_CASE("A capsule placed above the drogue height does not coast past it", "[d
     REQUIRE(seq != nullptr);
     REQUIRE(seq->drogue_height_m());
     CHECK(*seq->drogue_height_m() == Catch::Approx(5500.0).margin(50.0));
+}
+
+TEST_CASE("A capsule return without mains ends lost, not under its drogues", "[dragon][mission][splashdown]") {
+    MissionDispersion d;
+    d.without_mains = true;
+    const auto r = fly_mission(d);
+    REQUIRE(r.planned);
+    CHECK(r.descent.outcome == sim::LandingOutcome::Impact);  // ~50 m/s under the drogues alone
+    CHECK(r.final_step == sim::CapsuleReturnStep::Lost);
+    CHECK(std::string(sim::to_string(r.final_step)) == "verloren");
+    CHECK(r.final_autopilot == sim::AutopilotState::Off);
 }
