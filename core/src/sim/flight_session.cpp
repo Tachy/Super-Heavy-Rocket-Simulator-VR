@@ -1128,6 +1128,14 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             if (nose_cone_body_ < bodies_.size()) set_nose_cone(nose_cone_body_, true);
             nose_cone_epoch_.reset();
         }
+        // Parachute sequencers before the coast check: a body that has not ticked yet (placed, staged, released)
+        // must already limit its coast to the watch height (review d4: a placed capsule coasted past 5.5 km).
+        for (auto& flying : bodies_) {
+            if (!flying.parachutes && !flying.body->vehicle().stages().front().config.parachutes.empty()) {
+                flying.parachutes = std::make_unique<gnc::ParachuteSequencer>(
+                    flying.body->vehicle().stages().front().config.parachutes);
+            }
+        }
         if (const double coast = std::min(coast_allowance_s(), target - epoch_); coast > 1.0) {
             for (auto& flying : bodies_) flying.body->coast(env_, epoch_, coast);
             epoch_ += coast;
@@ -1162,10 +1170,6 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                 }
             }
             if (flying.ship_landing) run_ship_landing(flying);
-            if (!flying.parachutes && !flying.body->vehicle().stages().front().config.parachutes.empty()) {
-                flying.parachutes = std::make_unique<gnc::ParachuteSequencer>(
-                    flying.body->vehicle().stages().front().config.parachutes);
-            }
             if (flying.parachutes && !flying.body->impacted()) run_parachutes(flying);
         }
         const auto pointers = body_pointers();

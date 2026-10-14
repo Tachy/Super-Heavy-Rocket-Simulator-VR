@@ -385,3 +385,14 @@ TEST_CASE("Crew Dragon return single case", "[.][dragon]") {
     std::printf("single case: %s, %.2f km from the centre, gate at %.2f km\n", sim::to_string(r.descent.outcome),
                 r.descent.miss_m / 1000.0, r.descent.drogue_height_m / 1000.0);
 }
+
+// Review d4 (Important): the sequencer was created in the first tick, so a placed capsule's first coast segment used the
+// 5 km tick height and carried it past the drogue height.
+TEST_CASE("A capsule placed above the drogue height does not coast past it", "[dragon][splashdown][session]") {
+    Scenario s(8000.0, 200.0, 80.0 * deg);
+    fly_down(s.session, 900.0, 30.0);
+    const auto* seq = s.session.parachute_sequencer(0);
+    REQUIRE(seq != nullptr);
+    REQUIRE(seq->drogue_height_m());
+    CHECK(*seq->drogue_height_m() == Catch::Approx(5500.0).margin(50.0));
+}
