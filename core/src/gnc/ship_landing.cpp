@@ -121,6 +121,7 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
         if (tilt < parameters_.flip_tolerance_rad && settled && epoch >= next_attempt_ && site_.catch_target) {
             ++first_plan_attempts_;
             auto guidance = std::make_unique<ScvxLandingGuidance>(site_, parameters_.scvx);
+            if (abort_requested_) guidance->request_abort();
             if (guidance->start(body, env, epoch)) {
                 scvx_ = std::move(guidance);
                 phase_ = ReturnPhase::LandingBurn;
@@ -157,6 +158,11 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
     }
     cmd.phase = phase_;
     return cmd;
+}
+
+void ShipLandingGuidance::request_abort() {
+    abort_requested_ = true;
+    if (scvx_) scvx_->request_abort();
 }
 
 }  // namespace starsim::gnc

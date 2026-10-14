@@ -140,6 +140,7 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
     if (site.sea) {
         const Vec3 seaward{0.0, std::sin(site.sea->direction_rad), std::cos(site.sea->direction_rad)};
         snap.abort_target.sea_target_m = seaward * (site.sea->shoreline_distance_m + settings.sea_margin_m);
+        snap.abort_target.sea_min_distance_m = site.sea->shoreline_distance_m + settings.sea_clearance_m;
     }
 
     double spool = 0.0;

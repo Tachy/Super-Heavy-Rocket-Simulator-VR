@@ -27,6 +27,9 @@ struct DescentTarget {
     double final_set_radius_m = 0.0;  // every final-set node this close to the catch axis (0: no limit)
     double ground_cg_height_m = 0.0;  // Abort: CG height at touchdown
     math::Vec3 sea_target_m;          // Abort: point at sea (y, z used)
+    // Abort: the end lies at least this far along the direction of sea_target_m (beyond the shoreline: a hard
+    // constraint; 0: none - only the soft pull towards sea_target_m).
+    double sea_min_distance_m = 0.0;
     math::Vec3 keep_out_center_m;     // Abort: tower + mount, horizontal centre
     double keep_out_radius_m = 0.0;
     // Abort: the launch mount on the pad centre, kept clear by nodes whose reference CG height is below

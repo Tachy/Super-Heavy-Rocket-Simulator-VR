@@ -134,6 +134,10 @@ void FlightSim::set_booster_return(bool enabled) {
     if (session_) session_->set_booster_return(enabled);
 }
 
+void FlightSim::abort_landing(int index) {
+    if (check_index(index)) session_->abort_landing(static_cast<size_t>(index));
+}
+
 void FlightSim::set_realtime_planning(bool enabled) {
     if (session_) session_->set_realtime_planning(enabled);
 }
@@ -473,6 +477,7 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("tower_state"), &FlightSim::tower_state);
     ClassDB::bind_method(D_METHOD("set_booster_return", "enabled"), &FlightSim::set_booster_return);
     ClassDB::bind_method(D_METHOD("set_realtime_planning", "enabled"), &FlightSim::set_realtime_planning);
+    ClassDB::bind_method(D_METHOD("abort_landing", "index"), &FlightSim::abort_landing);
     ClassDB::bind_method(D_METHOD("return_state", "index"), &FlightSim::return_state);
     ClassDB::bind_method(D_METHOD("body_flaps", "index"), &FlightSim::body_flaps);
     ClassDB::bind_method(D_METHOD("is_active"), &FlightSim::is_active);

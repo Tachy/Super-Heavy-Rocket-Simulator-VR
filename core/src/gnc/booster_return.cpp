@@ -752,7 +752,13 @@ void BoosterReturnGuidance::start_landing(const vehicle::FlightBody& body, const
     // the end, see DescentLimits::approach_time_constant_s).
     if (site_.pad) p.settings.limits.approach_time_constant_s = 0.0;
     scvx_ = std::make_unique<ScvxLandingGuidance>(site_, p);
+    if (abort_requested_) scvx_->request_abort();
     if (!scvx_->start(body, env, epoch)) scvx_.reset();  // fallback: the explicit laws
+}
+
+void BoosterReturnGuidance::request_abort() {
+    abort_requested_ = true;
+    if (scvx_) scvx_->request_abort();
 }
 
 // ZEM/ZEV landing burn: the last fallback (SCvx catch and sea-abort plans both failed: over the arms, ~1-3 m), or with

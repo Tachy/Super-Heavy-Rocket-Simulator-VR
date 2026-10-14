@@ -1,6 +1,7 @@
 // The booster placed at landing-burn ignition over Starbase flies the burn on SCvx plans and is caught.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -33,6 +34,8 @@ const frames::BodyOrientation& earth() {
     static const auto e = spice::SpiceOrientation::earth();
     return e;
 }
+
+const spice::SpiceEphemeris& de440() { return ephemeris(); }
 
 time::Epoch start() {
     test::spice_session();
@@ -69,6 +72,42 @@ TEST_CASE("SCvx flies a nominal landing burn onto the arms", "[gnc][catch]") {
     CHECK(run.sink_mps < 2.0);
     CHECK_FALSE(run.tower_struck);
     CHECK(run.outcome == sim::LandingOutcome::Caught);
+}
+
+TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea", "[gnc][catch][abort]") {
+    // The pilot (or the tower) gives the catch up at a given CG height above the pad: the booster must reach the sea
+    // beyond the shoreline, not hover over land until its propellant runs out.
+    const double abort_height_m = GENERATE(1500.0, 800.0, 400.0);
+    CAPTURE(abort_height_m);
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")));
+    const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
+    session.place_returning_booster(cfg,
+                                    test::state_over_site(session.launch_site(), earth(), t0, {20.0, -10.0, h},
+                                                          {0.0, 0.0, -nominal_sink_mps}),
+                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+    const auto& booster = session.body(0);
+    const auto& site = session.launch_site();
+    bool aborted = false;
+    double t = 0.0;
+    for (; t < 150.0 && !booster.impacted() && !booster.resting() && !booster.caught(); t += 0.05) {
+        session.advance_to(t0 + t, 100);
+        const auto tr = earth().fixed_to_gcrf(session.epoch());
+        const Vec3 p = sim::site_enu_m(site, transpose(tr.rotation) * booster.state().position_gcrf_m);
+        if (!aborted && p.z < abort_height_m) {
+            session.abort_landing(0);
+            aborted = true;
+        }
+    }
+    const auto tr = earth().fixed_to_gcrf(session.epoch());
+    const Vec3 p = sim::site_enu_m(site, transpose(tr.rotation) * booster.state().position_gcrf_m);
+    std::printf("[abort] at %.0f m: %s after %.1f s at %.0f m east / %.0f m north, %.1f t left\n", abort_height_m,
+                sim::to_string(session.landing_outcome(0)), t, p.x, p.y, booster.vehicle().propellant_kg() / 1e3);
+    CHECK(aborted);
+    CHECK(session.landing_outcome(0) == sim::LandingOutcome::Splashdown);
+    CHECK_FALSE(session.tower()->tower_struck());
 }
 
 TEST_CASE("SCvx landings are deterministic", "[gnc][catch]") {

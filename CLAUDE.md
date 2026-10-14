@@ -145,8 +145,12 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   Switch windows [E]: 13 -> 5 at 180-220 m/s sink (5 engines seen at ~200 m/s on flights 13/14), 5 -> 3 calm at
   15-30 m/s (satnews 2025-10-05: V3 ends in a hover on 3 engines).
   Full return: caught, 50.9 t at landing-burn ignition (planned 51 t, flight 14 gauge); it arrives slower than flights
-  13/14 (~300 m/s at ignition, ~2.3 km). Abort to the sea is weak: a late
-  abort can end hovering over land until the propellant runs out.
+  13/14 (~300 m/s at ignition, ~2.3 km). Abort plans must end beyond the shoreline (`DescentTarget::sea_min_distance_m`
+  = shoreline + `sea_clearance_m` 30 m [E], a hard constraint) and pull towards the sea target (soft); only when the
+  water is out of reach do the plans fall back to the soft pull (before: the soft pull alone, 100 kg per metre, set the
+  booster down beside the tower). `FlightSession::abort_landing` / `FlightSim.abort_landing` is the pilot's abort; test
+  "A commanded abort late in the landing burn ditches the booster at sea" (1500 / 800 / 400 m: water, 25.7 / 14.6 /
+  5.7 t left).
 - Descent drag (tail first): body table `aero/super_heavy_descent.csv` [D] plus the grid fins' axial drag
   (`aero/grid_fin.csv` column `ca_axial` [E], 3 x 13.5 m^2). Identified from our webcast telemetry of flights 13 and
   14 (`tests/validation/telemetry`, `tools/telemetry/webcast_telemetry.py` + `drag_estimate.py`; below ~9 km the
@@ -369,7 +373,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   355 / 420 at ~3.2 km, ~300 m/s / 442 s). `return_flight_time_s` 260 s and `boostback_loss_fraction` 0.12 [D] were
   identified on that mission with the 395.7 t stage (kept). Known gap: our MECO leaves 55 t, CRS-35's gauge ~66 t (the
   real return spends ~11 t more).
-- SCvx landing aborts (all vehicles): a first plan that finds the target unreachable aborts at once; `failures_before_abort`
+- SCvx landing aborts (all vehicles; the pilot's `abort_landing` too): a first plan that finds the target unreachable aborts at once; `failures_before_abort`
   (2) re-plans with a virtual control above the stall threshold, or `unconverged_before_abort` (4) unconverged re-plans of
   any kind (a marginal first plan the vehicle could not follow), give the target up and plan for the sea.
 - Falcon 9 drone ship (c4, `config/drone_ships.toml`, `config/missions/falcon9_asds.toml`): a drone ship is a landing zone

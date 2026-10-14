@@ -84,3 +84,6 @@ func _check_falcon9(config_dir: String, tdb: float) -> void:
 	_check(ship.body_grid_fins(0).size() == 3, "Super Heavy: three grid fins")
 	_check(ship.start_mission("starship_leo", tdb) and ship.mission_site_id() == "starbase_olp1",
 			"Starship LEO mission starts at Starbase")
+	ship.abort_landing(0)  # no returning body yet: no effect, no error
+	_check(ship.is_active() and ship.tower_state().get("phase", "") != "Abbruch",
+			"abort before staging changes nothing (tower not aborted)")

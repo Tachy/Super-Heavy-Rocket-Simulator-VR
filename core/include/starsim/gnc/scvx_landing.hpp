@@ -81,6 +81,8 @@ public:
     ScvxLandingCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 
     bool aborting() const { return aborting_; }
+    // Gives the target up now (pilot or tower command): the next plan goes to the sea. No effect without a sea.
+    void request_abort();
     void set_realtime(bool realtime) { parameters_.realtime = realtime; }
 
     struct Statistics {
@@ -109,6 +111,7 @@ private:
     bool aborting_ = false;
     int consecutive_failures_ = 0;
     int consecutive_unconverged_ = 0;
+    bool sea_required_ = true;  // abort plans must end beyond the shoreline; false once that proved unreachable
     Statistics stats_;
     TvcLateralGains lqr_gains_;  // cached for (lqr_a_, lqr_c_)
     double lqr_a_ = -1.0;

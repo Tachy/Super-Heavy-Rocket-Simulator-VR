@@ -54,6 +54,8 @@ public:
     void set_catch_contact(bool contact) { catch_contact_ = contact; }
     void set_realtime(bool realtime);
     const ScvxLandingGuidance* scvx() const { return scvx_.get(); }
+    // Gives the catch up (pilot or tower command): the landing burn plans for the sea.
+    void request_abort();
     int first_plan_attempts() const { return first_plan_attempts_; }
     // The flip: from the gate until the axis is within the flip tolerance; height of the CG above the site then.
     double flip_duration_s() const { return flip_duration_s_; }
@@ -71,6 +73,7 @@ private:
     double flip_end_height_m_ = 0.0;
     int first_plan_attempts_ = 0;
     bool catch_contact_ = false;
+    bool abort_requested_ = false;
 };
 
 }  // namespace starsim::gnc

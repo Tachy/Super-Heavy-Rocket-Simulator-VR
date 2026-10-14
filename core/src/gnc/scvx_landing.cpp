@@ -96,6 +96,7 @@ PlanRequest ScvxLandingGuidance::request(const DescentSnapshot& snapshot, int st
     r.initial = snapshot.initial;
     r.start_phase = start_phase;
     r.target = aborting_ ? snapshot.abort_target : snapshot.catch_target;
+    if (!sea_required_) r.target.sea_min_distance_m = 0.0;
     r.settings = parameters_.settings;
     r.settings.limits.min_mass_kg = snapshot.min_mass_kg;
     r.settings.limits.phase0_initial_spool = snapshot.phase0_spool;
@@ -142,6 +143,12 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     }
     if (outcome.plan->converged) return;
     ++stats_.failures;
+    if (outcome.plan->goal == DescentGoal::Abort && sea_required_) {
+        // The water beyond the shoreline is out of reach from here: the next abort plans only pull towards it.
+        sea_required_ = false;
+        next_request_ = plan_epoch_;
+        return;
+    }
     // Re-plans that keep failing leave the vehicle on an ever older plan: give the target up (the abort plans for the
     // sea), even when each failure alone looked recoverable.
     if (!aborting_ && ++consecutive_unconverged_ >= parameters_.unconverged_before_abort && site_.sea) {
@@ -154,6 +161,12 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     if (++consecutive_failures_ >= parameters_.failures_before_abort) aborting_ = true;
 }
 
+void ScvxLandingGuidance::request_abort() {
+    if (aborting_ || !site_.sea) return;
+    aborting_ = true;
+    next_request_ = plan_epoch_;  // re-plan on the next update
+}
+
 bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch) {
     const auto snapshot = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
     model_ = snapshot.model;
@@ -163,6 +176,13 @@ bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::
         ++stats_.plans;
         ++stats_.failures;
         aborting_ = true;
+        outcome = replanner_.plan_now(request(snapshot, 0));
+    }
+    if (!outcome.plan->converged && aborting_ && sea_required_) {
+        // Not even the water beyond the shoreline is in reach: an abort that only pulls towards the sea.
+        ++stats_.plans;
+        ++stats_.failures;
+        sea_required_ = false;
         outcome = replanner_.plan_now(request(snapshot, 0));
     }
     if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: plans and tracking

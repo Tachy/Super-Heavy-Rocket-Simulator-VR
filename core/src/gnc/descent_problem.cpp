@@ -142,6 +142,14 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         const int distance = penalised(weights.sea_distance, "sea_distance");
         b.add_second_order_cone({AffineExpr{}.add(distance, 1.0), X(last, 2).add_constant(-target.sea_target_m.y),
                                  X(last, 3).add_constant(-target.sea_target_m.z)});
+        const double sea_norm = std::hypot(target.sea_target_m.y, target.sea_target_m.z);
+        if (target.sea_min_distance_m > 0.0 && sea_norm > 0.0) {
+            const double ny = target.sea_target_m.y / sea_norm, nz = target.sea_target_m.z / sea_norm;
+            const auto& xl = ref.x[at(last)];
+            b.add_nonnegative(AffineExpr{ny * xl[2] + nz * xl[3] - target.sea_min_distance_m}
+                                  .add(sub.dx[at(last)][2], ny * S[2])
+                                  .add(sub.dx[at(last)][3], nz * S[3]));
+        }
     }
     // Path constraints.
     for (int k = 0; k < K; ++k) {

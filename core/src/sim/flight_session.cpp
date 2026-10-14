@@ -348,6 +348,14 @@ void FlightSession::fail_engine(size_t body_index, size_t stage_index, size_t en
     bodies_.at(body_index).body->vehicle().fail_engine(stage_index, engine_index);
 }
 
+void FlightSession::abort_landing(size_t body_index) {
+    auto& flying = bodies_.at(body_index);
+    if (!flying.return_guidance && !flying.ship_landing) return;  // not returning: nothing to give up
+    if (flying.return_guidance) flying.return_guidance->request_abort();
+    if (flying.ship_landing) flying.ship_landing->request_abort();
+    if (tower_) tower_->abort_catch();
+}
+
 void FlightSession::apply_velocity_error(size_t body_index, const math::Vec3& delta_v_gcrf_mps) {
     auto& body = *bodies_.at(body_index).body;
     auto state = body.state();
