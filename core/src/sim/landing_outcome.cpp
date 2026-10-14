@@ -17,6 +17,7 @@ const char* to_string(LandingOutcome outcome) {
         case LandingOutcome::Impact: return "Aufprall";
         case LandingOutcome::BrokenUp: return "zerbrochen";
         case LandingOutcome::TippedOver: return "umgekippt";
+        case LandingOutcome::SplashedDown: return "gewassert";
     }
     return "";
 }
@@ -36,6 +37,9 @@ LandingOutcome landing_outcome(const vehicle::FlightBody& body, const LaunchSite
     if (body.caught()) return LandingOutcome::Caught;
     if (!body.breakup_reason().empty()) return LandingOutcome::BrokenUp;
     if (!body.impacted() && !body.resting()) return LandingOutcome::Flying;
+    if (body.vehicle().splashdown_recovery()) {  // capsule: judged by its sink at the water (FlightBody), not the site
+        return body.resting() ? LandingOutcome::SplashedDown : LandingOutcome::Impact;
+    }
     const Vec3 enu = site_enu_m(site, position_itrf_m);
     if (site.deck) {
         contact::LandingSurface ship;

@@ -17,6 +17,7 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/parachute_sequencer.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/sim/landing_outcome.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
@@ -343,4 +344,43 @@ TEST_CASE("Sequencer: resting on the surface before any deployment ends the sequ
     const auto a = seq.update({0.0, 0.0, 0.0, true});
     CHECK_FALSE(a.deploy_mains);
     CHECK(seq.phase() == gnc::ParachutePhase::Down);
+}
+
+TEST_CASE("A capsule under its mains rests on the water: gewassert", "[parachute][splashdown]") {
+    World w;
+    time::Epoch t;
+    auto body = falling_capsule(30.0, 7.0);
+    body->vehicle().deploy_parachutes("main");
+    body->vehicle().update_parachutes(60.0);  // fully open
+    fall(*body, w.env, t, 30.0);
+    REQUIRE(body->touchdown_sink_mps());
+    CHECK(*body->touchdown_sink_mps() == Catch::Approx(7.0).epsilon(0.05));
+    CHECK(body->resting());
+    CHECK_FALSE(body->impacted());
+    sim::LaunchSite site;  // any site: a splashdown vehicle is judged by its sink rate, not by the shoreline
+    CHECK(sim::landing_outcome(*body, site, {}) == sim::LandingOutcome::SplashedDown);
+    CHECK(std::string(sim::to_string(sim::LandingOutcome::SplashedDown)) == "gewassert");
+}
+
+TEST_CASE("A capsule hitting the water faster than its limit is an impact", "[parachute][splashdown]") {
+    World w;
+    time::Epoch t;
+    auto body = falling_capsule(200.0, 50.0);  // drogue speed, no mains
+    fall(*body, w.env, t, 30.0);
+    REQUIRE(body->touchdown_sink_mps());
+    CHECK(*body->touchdown_sink_mps() > 9.0);
+    CHECK(body->impacted());
+    sim::LaunchSite site;
+    CHECK(sim::landing_outcome(*body, site, {}) == sim::LandingOutcome::Impact);
+}
+
+TEST_CASE("A tilted capsule still splashes down", "[parachute][splashdown]") {
+    World w;
+    time::Epoch t;
+    auto body = falling_capsule(1.0, 6.0);
+    auto s = body->state();
+    s.attitude = (math::Quat::from_axis_angle({0.0, 0.0, 1.0}, 30.0 * constants::deg_to_rad) * s.attitude).normalized();
+    body->set_state(s);
+    fall(*body, w.env, t, 5.0);
+    CHECK(body->resting());  // the ground rule (<= 10 deg tilt) does not apply on water
 }

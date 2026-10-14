@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/environment/gravity.hpp"
@@ -113,6 +114,8 @@ public:
     // Flat ground at this height above WGS84 (the pad elevation; terrain comes later).
     double ground_height_m() const { return ground_height_m_; }
     void set_ground_height(double height_m) { ground_height_m_ = height_m; }
+    // Sink rate (m/s, relative to the rotating Earth) at the first ground / water contact.
+    std::optional<double> touchdown_sink_mps() const { return touchdown_sink_mps_; }
 
     static constexpr double max_touchdown_sink_rate_mps = 3.0;  // [E] structural limit
     static constexpr double max_touchdown_tilt_rad = 10.0 * 3.14159265358979 / 180.0;
@@ -142,6 +145,7 @@ private:
     bool clamped_ = false;
     bool impacted_ = false;
     bool resting_ = false;
+    std::optional<double> touchdown_sink_mps_;
     AirData air_data_;
     math::Vec3 pad_itrf_m_;
     math::Quat attitude_itrf_;  // body -> ITRF while clamped

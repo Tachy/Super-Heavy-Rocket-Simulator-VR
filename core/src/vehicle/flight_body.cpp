@@ -354,7 +354,14 @@ void FlightBody::resolve_ground_contact(const frames::BodyOrientation& earth, ti
     const Vec3 relative = state_.velocity_gcrf_mps - cross(earth_rotation_vector(transform), state_.position_gcrf_m);
     const double sink_rate = -dot(relative, up);
     const double tilt = std::acos(std::clamp(dot(state_.attitude.rotate(Vec3{1.0, 0.0, 0.0}), up), -1.0, 1.0));
-    if (sink_rate > max_touchdown_sink_rate_mps || tilt > max_touchdown_tilt_rad) {
+    if (!touchdown_sink_mps_) touchdown_sink_mps_ = sink_rate;
+    if (vehicle_->splashdown_recovery()) {
+        // On the water (d4): any tilt, sink up to the vehicle's limit; no buoyancy (it rests at the surface).
+        if (sink_rate > vehicle_->max_splashdown_speed_mps()) {
+            impacted_ = true;
+            return;
+        }
+    } else if (sink_rate > max_touchdown_sink_rate_mps || tilt > max_touchdown_tilt_rad) {
         impacted_ = true;
         return;
     }

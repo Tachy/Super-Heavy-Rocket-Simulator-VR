@@ -59,3 +59,7 @@ TEST_CASE("A booster coming down beyond the shoreline splashes down, on land it 
                                                                     : sim::LandingOutcome::Impact));
     }
 }
+
+TEST_CASE("A capsule resting on the water is gewassert", "[sim][landing]") {
+    CHECK(std::string(sim::to_string(sim::LandingOutcome::SplashedDown)) == "gewassert");
+}
