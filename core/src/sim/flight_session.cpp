@@ -348,12 +348,13 @@ void FlightSession::fail_engine(size_t body_index, size_t stage_index, size_t en
     bodies_.at(body_index).body->vehicle().fail_engine(stage_index, engine_index);
 }
 
-void FlightSession::abort_landing(size_t body_index) {
+bool FlightSession::abort_landing(size_t body_index) {
     auto& flying = bodies_.at(body_index);
-    if (!flying.return_guidance && !flying.ship_landing) return;  // not returning: nothing to give up
-    if (flying.return_guidance) flying.return_guidance->request_abort();
-    if (flying.ship_landing) flying.ship_landing->request_abort();
-    if (tower_) tower_->abort_catch();
+    bool accepted = false;
+    if (flying.return_guidance) accepted = flying.return_guidance->request_abort();
+    if (flying.ship_landing) accepted = flying.ship_landing->request_abort();
+    if (accepted && tower_) tower_->abort_catch();  // never open the arms under a body still aiming at them
+    return accepted;
 }
 
 void FlightSession::apply_velocity_error(size_t body_index, const math::Vec3& delta_v_gcrf_mps) {
@@ -566,9 +567,15 @@ void FlightSession::place_body(const config::VehicleConfig& config, const vehicl
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
+    reset_mission_state();
+}
+
+void FlightSession::reset_mission_state() {
     autopilot_ = {};
+    guidance_.reset();
     burn_.reset();
     ship_return_ = false;
+    deorbit_plan_.reset();
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -591,6 +598,7 @@ void FlightSession::launch_from_pad(const config::VehicleConfig& config, const L
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
+    reset_mission_state();  // a new flight never inherits the previous one's autopilot, burn or return plan
 }
 
 void FlightSession::apply_return_command(const Flying& flying, const gnc::AttitudeController& controller,

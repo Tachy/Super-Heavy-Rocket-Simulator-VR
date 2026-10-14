@@ -113,8 +113,9 @@ public:
     void set_realtime(bool realtime);
     const ScvxLandingGuidance* scvx() const { return scvx_.get(); }
     // Gives the landing target up (pilot or tower command): the landing burn plans for the sea (also when it has not
-    // started yet).
-    void request_abort();
+    // started yet; on the explicit laws the whole descent re-aims beyond the shoreline). False (refused, no effect)
+    // without a sea, once down or with the pins on the arms.
+    bool request_abort();
 
     // Retrograde burn still to come on the way down (the entry burn): lit where the fall first crosses `altitude_m`
     // above the ground height, against the air velocity at `thrust_n` (vacuum) until `delta_v_mps` are burned, its axis
@@ -188,6 +189,8 @@ private:
     double target_bottom_height_m_ = 0.0;  // vehicle bottom above the site ground at touchdown / catch
     std::unique_ptr<ScvxLandingGuidance> scvx_;  // landing burn on SCvx plans (null: explicit laws)
     bool abort_requested_ = false;
+    time::Epoch entry_thrust_epoch_;  // entry burn: its start, then the last tick with thrust
+    void retarget_to_sea();  // explicit laws: aim the touchdown beyond the shoreline (ditch_)
     bool landing_started_ = false;
     bool leg_contact_ = false;
     bool legs_deployed_ = false;          // deployment commanded

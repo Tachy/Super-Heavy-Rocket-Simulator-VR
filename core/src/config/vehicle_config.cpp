@@ -266,6 +266,9 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             p.entry_burn_altitude_m = doc.number_or(table, "entry_burn_altitude_m", p.entry_burn_altitude_m);
             p.entry_burn_delta_v_mps = doc.number_or(table, "entry_burn_delta_v_mps", p.entry_burn_delta_v_mps);
             p.entry_burn_throttle = doc.number_or(table, "entry_burn_throttle", p.entry_burn_throttle);
+            if (p.entry_burn_altitude_m > 0.0 && p.entry_engine_groups.empty()) {
+                doc.fail("an entry burn (entry_burn_altitude_m) needs entry_engine_groups");
+            }
             return p;
         };
         s.return_profile = read_profile(*recovery, {});

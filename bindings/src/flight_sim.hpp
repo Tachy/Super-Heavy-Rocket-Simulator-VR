@@ -43,8 +43,9 @@ public:
     // Tower of the current flight: {present, opening_rad, carriage_offset_m, phase (German)}.
     godot::Dictionary tower_state() const;
     void set_booster_return(bool enabled);
-    // Pilot's abort of a returning body's landing or catch: it ditches at sea (return_state "abort").
-    void abort_landing(int index);
+    // Pilot's abort of a returning body's landing or catch: it ditches at sea (return_state "abort"). False when the
+    // guidance cannot abort (not returning, no sea, already down or on the arms).
+    bool abort_landing(int index);
     void set_realtime_planning(bool enabled);
     godot::Dictionary return_state(int64_t index) const;
     bool is_active() const { return session_ && session_->active(); }

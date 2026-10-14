@@ -35,6 +35,7 @@ constexpr double tilt_taper_height_m = 60.0;                           // below:
 constexpr double leg_deploy_margin_s = 5.0;      // [E] legs locked this long before the planned touchdown
 constexpr double pad_cutoff_after_plan_s = 0.5;  // pad landing: engines off this long after the plan's end (spec)
 constexpr double touchdown_tilt_rad = 4.0 * constants::deg_to_rad;     // tilt limit at touchdown
+constexpr double entry_no_thrust_s = 5.0;  // [E] entry burn without thrust this long (engines out): it is over
 // Online drag estimate (as the ship's entry guidance): filter gain per 0.2 s update, only with a clear signal.
 constexpr double drag_scale_filter_gain = 0.1;          // [E]
 constexpr double drag_scale_min_acceleration_mps2 = 1.0; // [E]
@@ -164,16 +165,7 @@ BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnPara
     : site_(std::move(site)), parameters_(std::move(parameters)) {
     if (site_.catch_target && site_.sea && !parameters_.scvx_landing) {
         // The explicit laws cannot hit the arms (Super Heavy has no legs): the return aims at the sea.
-        ditch_ = true;
-        const Vec3 up = up_at(site_.latitude_rad, site_.longitude_rad);
-        const Vec3 east = math::normalized(cross(Vec3{0.0, 0.0, 1.0}, up));
-        const Vec3 north = cross(up, east);
-        const Vec3 seaward = north * std::cos(site_.sea->direction_rad) + east * std::sin(site_.sea->direction_rad);
-        const auto sea = frames::fixed_to_geodetic(
-            frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m}) +
-            seaward * (site_.sea->shoreline_distance_m + parameters_.scvx.snapshot.sea_margin_m));
-        site_.latitude_rad = sea.latitude_rad;
-        site_.longitude_rad = sea.longitude_rad;
+        retarget_to_sea();
     } else if (site_.catch_target) {
         const auto pins = frames::fixed_to_geodetic(site_.catch_target->pin_point_itrf_m);
         target_bottom_height_m_ = pins.height_m - site_.height_m - site_.catch_target->pin_station_m;
@@ -181,6 +173,20 @@ BoosterReturnGuidance::BoosterReturnGuidance(LandingSite site, BoosterReturnPara
         target_bottom_height_m_ = site_.pad->contact_bottom_height_m;  // on the legs
     }
     if (!parameters_.boostback) phase_ = ReturnPhase::Coast;  // drone ship: coast from separation
+}
+
+void BoosterReturnGuidance::retarget_to_sea() {
+    ditch_ = true;
+    target_bottom_height_m_ = 0.0;  // the hull's bottom at sea level (flat at the site height)
+    const Vec3 up = up_at(site_.latitude_rad, site_.longitude_rad);
+    const Vec3 east = math::normalized(cross(Vec3{0.0, 0.0, 1.0}, up));
+    const Vec3 north = cross(up, east);
+    const Vec3 seaward = north * std::cos(site_.sea->direction_rad) + east * std::sin(site_.sea->direction_rad);
+    const auto sea = frames::fixed_to_geodetic(
+        frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m}) +
+        seaward * (site_.sea->shoreline_distance_m + parameters_.scvx.snapshot.sea_margin_m));
+    site_.latitude_rad = sea.latitude_rad;
+    site_.longitude_rad = sea.longitude_rad;
 }
 
 BoosterReturnGuidance::Impact BoosterReturnGuidance::predict_impact(const vehicle::FlightBody& body,
@@ -571,6 +577,7 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
             geo.height_m - site_.height_m < parameters_.entry_altitude_m) {
             phase_ = ReturnPhase::EntryBurn;
             entry_delta_v_mps_ = 0.0;
+            entry_thrust_epoch_ = epoch;
             // The coast's steering (fin lean) does not carry over: the burn predicts its own miss at once.
             steer_itrf_ = {};
             impact_miss_m_ = 0.0;
@@ -591,8 +598,12 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
                 if (e.producing_thrust()) thrust_n += e.spool * e.performance->thrust_n(e.throttle, pressure);
             }
             entry_delta_v_mps_ += thrust_n / mass.mass_kg * dt;
+            entry_thrust_epoch_ = epoch;
         }
-        if (entry_delta_v_mps_ >= parameters_.entry_delta_v_mps) {
+        // Nothing burning for longer than an engine start (failed or starved engines): the burn is over, the coast and
+        // its landing-burn check take over.
+        const bool dead = epoch - entry_thrust_epoch_ > entry_no_thrust_s;
+        if (entry_delta_v_mps_ >= parameters_.entry_delta_v_mps || dead) {
             entry_done_ = true;
             steer_itrf_ = {};  // the burn's lean direction is not a fin lean
             phase_ = ReturnPhase::Coast;
@@ -753,12 +764,18 @@ void BoosterReturnGuidance::start_landing(const vehicle::FlightBody& body, const
     if (site_.pad) p.settings.limits.approach_time_constant_s = 0.0;
     scvx_ = std::make_unique<ScvxLandingGuidance>(site_, p);
     if (abort_requested_) scvx_->request_abort();
-    if (!scvx_->start(body, env, epoch)) scvx_.reset();  // fallback: the explicit laws
+    if (!scvx_->start(body, env, epoch)) {
+        scvx_.reset();  // fallback: the explicit laws
+        if (abort_requested_ && !ditch_) retarget_to_sea();
+    }
 }
 
-void BoosterReturnGuidance::request_abort() {
+bool BoosterReturnGuidance::request_abort() {
+    if (!site_.sea || phase_ == ReturnPhase::Landed || catch_contact_) return false;
+    if (scvx_) return abort_requested_ = scvx_->request_abort();
     abort_requested_ = true;
-    if (scvx_) scvx_->request_abort();
+    if (landing_started_ && !ditch_) retarget_to_sea();  // explicit laws in charge: they must not aim at the arms
+    return true;
 }
 
 // ZEM/ZEV landing burn: the last fallback (SCvx catch and sea-abort plans both failed: over the arms, ~1-3 m), or with

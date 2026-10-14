@@ -155,7 +155,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   13/14 (~300 m/s at ignition, ~2.3 km). Abort plans must end beyond the shoreline (`DescentTarget::sea_min_distance_m`
   = shoreline + `sea_clearance_m` 30 m [E], a hard constraint) and pull towards the sea target (soft); only when the
   water is out of reach do the plans fall back to the soft pull (before: the soft pull alone, 100 kg per metre, set the
-  booster down beside the tower). `FlightSession::abort_landing` / `FlightSim.abort_landing` is the pilot's abort; test
+  booster down beside the tower). `FlightSession::abort_landing` / `FlightSim.abort_landing` is the pilot's abort
+  (refused - false, arms untouched - without a sea, once down or with the pins on the arms; on the explicit laws the
+  descent re-aims beyond the shoreline; before the landing burn it is remembered for it); test
   "A commanded abort late in the landing burn ditches the booster at sea" (1500 / 800 / 400 m: water, 25.7 / 14.6 /
   5.7 t left).
 - Descent drag (tail first): body table `aero/super_heavy_descent.csv` [D] plus the grid fins' axial drag
@@ -353,7 +355,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   56.4 km / 6372 km/h vs recorded 137 / 56.6 / 6441. The upper stage's plane steering nulls out-of-plane speed and offset together
   (ZEM/ZEV) and the terminal v_go removes the rest; inclinations of steep planes are judged against the true equator of
   date (GCRF elements carry ~0.15 deg of precession by 2026). `FlightSession::launch_from_pad` also takes a loaded
-  `VehicleConfig` (mission payload; Dragon flies without a fairing).
+  `VehicleConfig` (mission payload; Dragon flies without a fairing); every launch starts with the autopilot off (no ascent
+  guidance, burn or ship return of a previous flight; `set_booster_return` is a session setting and stays).
 - Landing legs (c2, `contact/landing_legs`, `contact/landing_surface`, `sim/leg_landing_sim`): `Vehicle::deploy_legs`
   (sticky, `deploy_time_s`; `FlightSession::deploy_legs` / `set_leg_deployment`); once the legs move,
   `LegLandingSim` owns the body's ground contact: four feet as spring-dampers in series with plastic crush cores
@@ -369,7 +372,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   `gnc::booster_return_parameters(stage)` takes engine sets, return flight time, boostback loss fraction, entry burn
   and the landing-burn profile from `[stage.recovery]` (Super Heavy has none of these keys: defaults unchanged).
   Phases Flip -> Boostback -> Coast -> EntryBurn ("Wiedereintritt", Falcon 9 only: retrograde on the centre engine from
-  56.6 km for 125 m/s [D], leaning <= 5 deg towards the impact miss) -> Coast -> LandingBurn. The impact prediction
+  56.6 km for 125 m/s [D], leaning <= 5 deg towards the impact miss; it ends after 5 s [E] without thrust - engines out -
+  and the landing burn still comes) -> Coast -> LandingBurn. The impact prediction
   carries the entry burn still ahead (a finite burn since c4). The landing burn flies SCvx plans with the goal `DescentGoal::Pad`
   (terminal state of a catch at leg-contact height, sink 1 m/s, no corridor, no exponential approach: one Merlin at
   minimum throttle exceeds the weight), 1 -> 3 -> 1 engines with switch windows 230-270 / 140-190 m/s [D]; the legs

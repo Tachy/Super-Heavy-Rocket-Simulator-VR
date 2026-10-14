@@ -161,10 +161,12 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     if (++consecutive_failures_ >= parameters_.failures_before_abort) aborting_ = true;
 }
 
-void ScvxLandingGuidance::request_abort() {
-    if (aborting_ || !site_.sea) return;
+bool ScvxLandingGuidance::request_abort() {
+    if (!site_.sea) return false;
+    if (aborting_) return true;
     aborting_ = true;
     next_request_ = plan_epoch_;  // re-plan on the next update
+    return true;
 }
 
 bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch) {

@@ -358,6 +358,23 @@ TEST_CASE("Starting the drone-ship mission puts the ship out as the landing zone
     CHECK(session.body(0).vehicle().stages().back().config.payload_mass_kg == m.payload_kg);
 }
 
+TEST_CASE("A plain launch after a mission does not inherit its autopilot", "[sim][falcon9][asds]") {
+    // Review finding: start_mission engages the autopilot; a later free launch on the same session must start idle.
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    const auto t0 = start();
+    sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
+    session.launch_from_pad("starship_block3",
+                            sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")),
+                            0.0, t0 + 10.0);
+    CHECK(session.autopilot().state == sim::AutopilotState::Off);
+    CHECK(session.ascent_guidance() == nullptr);
+    session.advance_to(t0 + 20.0);
+    CHECK(session.autopilot().state == sim::AutopilotState::Off);
+    CHECK(session.body(0).clamped());
+    CHECK(session.telemetry(0).engines_running == 0);
+}
+
 TEST_CASE("Falcon 9 drone-ship mission: nominal impact point of the first stage", "[.][falcon9][asds]") {
     // Diagnostic: where the stage would come down from MECO (drag, the entry burn as an impulse, no steering) - the
     // drone ship's position in config/missions/falcon9_asds.toml [D].

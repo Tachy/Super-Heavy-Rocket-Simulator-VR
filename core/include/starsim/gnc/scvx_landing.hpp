@@ -81,8 +81,8 @@ public:
     ScvxLandingCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 
     bool aborting() const { return aborting_; }
-    // Gives the target up now (pilot or tower command): the next plan goes to the sea. No effect without a sea.
-    void request_abort();
+    // Gives the target up now (pilot or tower command): the next plan goes to the sea. False (no effect) without a sea.
+    bool request_abort();
     void set_realtime(bool realtime) { parameters_.realtime = realtime; }
 
     struct Statistics {

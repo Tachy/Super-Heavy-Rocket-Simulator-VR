@@ -134,8 +134,8 @@ void FlightSim::set_booster_return(bool enabled) {
     if (session_) session_->set_booster_return(enabled);
 }
 
-void FlightSim::abort_landing(int index) {
-    if (check_index(index)) session_->abort_landing(static_cast<size_t>(index));
+bool FlightSim::abort_landing(int index) {
+    return check_index(index) && session_->abort_landing(static_cast<size_t>(index));
 }
 
 void FlightSim::set_realtime_planning(bool enabled) {

@@ -110,6 +110,28 @@ TEST_CASE("A commanded abort late in the landing burn ditches the booster at sea
     CHECK_FALSE(session.tower()->tower_struck());
 }
 
+TEST_CASE("An abort the guidance cannot fly leaves the tower's arms alone", "[gnc][catch][abort]") {
+    // Review finding: without water to ditch in, or once the booster is down, the abort is refused - the arms must not
+    // open under a booster that keeps aiming at them.
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
+    site.sea.reset();  // a tower site without a coastline
+    session.set_launch_site(site);
+    const auto cfg = test::booster_config("starship_block3", nominal_propellant_kg);
+    const double h = test::ignition_height_m(session, cfg, earth(), t0, nominal_sink_mps, gnc::BoosterReturnParameters{});
+    session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, {20.0, -10.0, h},
+                                                               {0.0, 0.0, -nominal_sink_mps}),
+                                    t0, gnc::BoosterReturnParameters{}, gnc::ReturnPhase::LandingBurn);
+    session.advance_to(t0 + 1.0, 100);
+    CHECK_FALSE(session.abort_landing(0));
+    CHECK(session.tower()->phase() != sim::CatchPhase::Aborted);
+
+    gnc::BoosterReturnGuidance landed(session.return_site(session.body(0).vehicle()), gnc::BoosterReturnParameters{});
+    landed.skip_to(gnc::ReturnPhase::Landed);
+    CHECK_FALSE(landed.request_abort());
+}
+
 TEST_CASE("SCvx landings are deterministic", "[gnc][catch]") {
     const auto a = fly({20.0, -10.0, 0.0}, {3.0, 0.0, 0.0});
     const auto b = fly({20.0, -10.0, 0.0}, {3.0, 0.0, 0.0});

@@ -73,6 +73,8 @@ func _check_falcon9(config_dir: String, tdb: float) -> void:
 	_check((f9.return_state(0) as Dictionary).has("legs"), "return state carries the legs")
 	_check(not f9.start_mission("no_such_mission", tdb), "unknown mission is refused")
 	_check(f9.launch_from_site("falcon9_block5", "ccsfs_slc40", 0.0, tdb), "Falcon 9 launches without a mission")
+	f9.advance_to(tdb + 5.0)
+	_check(f9.autopilot_status().get("state", "") == "aus", "a plain launch after a mission starts with the autopilot off")
 	_check(not f9.landing_zone().get("present", true), "a plain launch has no landing zone")
 	_check(f9.mission_site_id() == "ccsfs_slc40", "plain launch: its site")
 	_check(f9.body_legs(7).is_empty() and f9.body_grid_fins(7).is_empty(), "invalid body index: empty results")
@@ -84,6 +86,6 @@ func _check_falcon9(config_dir: String, tdb: float) -> void:
 	_check(ship.body_grid_fins(0).size() == 3, "Super Heavy: three grid fins")
 	_check(ship.start_mission("starship_leo", tdb) and ship.mission_site_id() == "starbase_olp1",
 			"Starship LEO mission starts at Starbase")
-	ship.abort_landing(0)  # no returning body yet: no effect, no error
+	_check(not ship.abort_landing(0), "abort refused for a body that is not returning")
 	_check(ship.is_active() and ship.tower_state().get("phase", "") != "Abbruch",
 			"abort before staging changes nothing (tower not aborted)")

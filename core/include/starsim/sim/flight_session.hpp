@@ -203,8 +203,10 @@ public:
 
     // Failure injection for tests and training.
     void fail_engine(size_t body_index, size_t stage_index, size_t engine_index);
-    // Gives a returning body's landing or catch up (pilot's abort): it ditches at sea; the tower keeps its arms open.
-    void abort_landing(size_t body_index);
+    // Gives a returning body's landing or catch up (pilot's abort): it ditches at sea and the tower keeps its arms open.
+    // Before the landing burn the abort is remembered and the burn plans for the sea. False when the guidance cannot
+    // abort (not returning, no sea at the site, already down or on the arms): then nothing changes.
+    bool abort_landing(size_t body_index);
     // Landing legs of a body: start the deployment (guidance, pilot), or place them in a state (scenarios).
     void deploy_legs(size_t body_index);
     void set_leg_deployment(size_t body_index, double fraction);
@@ -287,6 +289,7 @@ private:
     std::unique_ptr<CatchTowerSim> tower_;
     std::unique_ptr<LegLandingSim> legs_;  // always present (site ground plane by default)
     void reset_leg_landing();              // new bodies: no stale tracks
+    void reset_mission_state();            // new flight: autopilot off, no ascent guidance, burn or ship return
     std::optional<gnc::BoosterReturnParameters> booster_return_;
     double gm_earth_;
     AutopilotStatus autopilot_;

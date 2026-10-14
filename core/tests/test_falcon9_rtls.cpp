@@ -116,6 +116,39 @@ TEST_CASE("A falling Falcon 9 stage flies its entry burn on the centre engine", 
     CHECK(guidance->phase() == gnc::ReturnPhase::Coast);
 }
 
+TEST_CASE("An entry burn whose engine fails gives way to the landing burn", "[gnc][falcon9][rtls]") {
+    // Review finding: with the centre engine dead the entry burn never reached its delta-v and the stage fell without a
+    // landing burn. Now the burn ends when nothing burns, and the landing burn still comes.
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    session.set_launch_site(lz40());
+    const auto cfg = test::booster_config("falcon9_block5", 14000.0);
+    session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, {20e3, 0.0, 70e3},
+                                                               {-300.0, 0.0, -1100.0}),
+                                    t0, falcon9_parameters(), gnc::ReturnPhase::Coast);
+    bool failed = false, landing_burn = false;
+    double burn_start_s = -1.0, burn_end_s = -1.0;
+    for (double t = 0.0; t < 120.0 && !landing_burn && !session.body(0).impacted(); t += sim::FlightSession::tick_s) {
+        session.advance_to(t0 + t, 10);
+        const auto phase = session.return_status(0)->phase;
+        if (phase == gnc::ReturnPhase::EntryBurn && !failed) {
+            const auto& engines = session.body(0).vehicle().stages().front().engines;
+            for (size_t i = 0; i < engines.size(); ++i) {
+                if (engines[i].group_id == "first_stage/center") session.fail_engine(0, 0, i);
+            }
+            failed = true;
+            burn_start_s = t;
+        }
+        if (failed && burn_end_s < 0.0 && phase != gnc::ReturnPhase::EntryBurn) burn_end_s = t;
+        landing_burn = phase == gnc::ReturnPhase::LandingBurn;
+    }
+    std::printf("[falcon9] failed entry burn: %.1f s to %.1f s, landing burn %d\n", burn_start_s, burn_end_s, landing_burn);
+    REQUIRE(failed);
+    CHECK(burn_end_s > burn_start_s);
+    CHECK(burn_end_s - burn_start_s < 10.0);
+    CHECK(landing_burn);
+}
+
 namespace {
 
 constexpr double ignition_sink_mps = 300.0;      // [D] CRS-35: ~300 m/s at landing-burn ignition (~3.2 km)

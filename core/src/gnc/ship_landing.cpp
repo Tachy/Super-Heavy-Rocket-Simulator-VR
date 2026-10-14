@@ -160,9 +160,11 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
     return cmd;
 }
 
-void ShipLandingGuidance::request_abort() {
-    abort_requested_ = true;
-    if (scvx_) scvx_->request_abort();
+bool ShipLandingGuidance::request_abort() {
+    if (!site_.sea || phase_ == ReturnPhase::Landed || catch_contact_) return false;
+    if (scvx_) return abort_requested_ = scvx_->request_abort();
+    abort_requested_ = true;  // still flipping: the first plan goes to the sea
+    return true;
 }
 
 }  // namespace starsim::gnc
