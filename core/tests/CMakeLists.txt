@@ -34,6 +34,7 @@ add_executable(starsim_core_tests
     test_reference_body.cpp
     test_lunar_flight_body.cpp
     test_lunar_session.cpp
+    test_lunar_propagation.cpp
     test_booster_return.cpp
     test_descent_telemetry.cpp
     test_grid_fins.cpp
