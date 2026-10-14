@@ -111,8 +111,12 @@ TEST_CASE("A falling Falcon 9 stage flies its entry burn on the centre engine", 
     CHECK(groups == std::vector<std::string>{"first_stage/center"});
     CHECK(ignition_altitude_m < 56.6e3);
     CHECK(ignition_altitude_m > 55.0e3);
-    CHECK(guidance->entry_delta_v_mps() >= 125.0);
-    CHECK(guidance->entry_delta_v_mps() < 130.0);
+    // The burn reaches its delta-v as planned: 125 m/s, changed by at most 25 % for the miss along the track.
+    const double target = guidance->entry_delta_v_target_mps();
+    CHECK(target >= 0.75 * 125.0);
+    CHECK(target <= 1.25 * 125.0);
+    CHECK(guidance->entry_delta_v_mps() >= target);
+    CHECK(guidance->entry_delta_v_mps() < target + 5.0);
     CHECK(guidance->phase() == gnc::ReturnPhase::Coast);
 }
 

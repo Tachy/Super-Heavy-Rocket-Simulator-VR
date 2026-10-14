@@ -18,6 +18,8 @@ namespace {
 constexpr double gm_earth = 3.986004418e14;
 constexpr double touchdown_speed_mps = 1.0;
 constexpr double trim_deadband_m = 2.0;
+// Entry burn shooting along the ground track: the probe burn is this much longer (secant on the impact prediction).
+constexpr double entry_delta_v_probe_mps = 20.0;
 constexpr double aero_steering_min_q_pa = 2000.0;  // below: RCS translation trim
 constexpr double aero_steering_time_fraction = 0.5;
 constexpr double aero_steering_max_alpha_rad = 8.0 * constants::deg_to_rad;  // [E] fin trim authority, heating
@@ -577,6 +579,7 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
             geo.height_m - site_.height_m < parameters_.entry_altitude_m) {
             phase_ = ReturnPhase::EntryBurn;
             entry_delta_v_mps_ = 0.0;
+            entry_delta_v_change_mps_ = 0.0;
             entry_thrust_epoch_ = epoch;
             // The coast's steering (fin lean) does not carry over: the burn predicts its own miss at once.
             steer_itrf_ = {};
@@ -603,7 +606,7 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         // Nothing burning for longer than an engine start (failed or starved engines): the burn is over, the coast and
         // its landing-burn check take over.
         const bool dead = epoch - entry_thrust_epoch_ > entry_no_thrust_s;
-        if (entry_delta_v_mps_ >= parameters_.entry_delta_v_mps || dead) {
+        if (entry_delta_v_mps_ >= parameters_.entry_delta_v_mps + entry_delta_v_change_mps_ || dead) {
             entry_done_ = true;
             steer_itrf_ = {};  // the burn's lean direction is not a fin lean
             phase_ = ReturnPhase::Coast;
@@ -670,25 +673,43 @@ void BoosterReturnGuidance::entry_burn(const vehicle::FlightBody& body, const ve
     const Vec3 site_fixed = frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m});
     if (tick_counter_ % 40 == 0 || !entry_predicted_) {
         entry_predicted_ = true;
-        // Shooting on the lean: the miss of the rest of the burn flown straight retrograde, and leaning fully towards
-        // that miss; the lean in between that cancels the miss's component along it (the prediction carries the drag
-        // that bleeds off the sideways speed in the descent).
+        // Shooting on the impact prediction of the rest of the burn (it carries the drag that bleeds off the sideways
+        // speed in the descent). Along the ground track: the burn's delta-v (a secant step per update on a probe burn
+        // that is longer by a fixed amount). Across: the lean - flown straight retrograde and leaning fully across, the
+        // lean in between that cancels the cross-track miss.
         auto burn = pending_entry_burn(body.vehicle());
         const auto straight = burn ? predict_impact(body, env, epoch, site_.height_m, nullptr, &*burn, drag_scale_) : Impact{};
         if (straight.valid) {
             const Vec3 miss = site_fixed + landing_burn_lead_itrf(body, env, straight) - straight.position_itrf_m;
             const Vec3 horizontal = miss - site_up * dot(miss, site_up);
             impact_miss_m_ = norm(horizontal);
+            const Vec3 track = math::normalized_or_zero(v_fixed - site_up * dot(v_fixed, site_up));
+            const double along_m = dot(horizontal, track);
+            const Vec3 across = horizontal - track * along_m;
+            const double change_limit = parameters_.entry_max_delta_v_change * parameters_.entry_delta_v_mps;
+            if (std::abs(along_m) > trim_deadband_m && change_limit > 0.0 && burn->delta_v_mps > 0.0) {
+                auto longer = *burn;
+                longer.delta_v_mps += entry_delta_v_probe_mps;
+                const auto probe = predict_impact(body, env, epoch, site_.height_m, nullptr, &longer, drag_scale_);
+                if (probe.valid) {
+                    const double moved_m = dot(probe.position_itrf_m - straight.position_itrf_m, track);  // < 0: shorter
+                    if (moved_m < -1.0) {
+                        entry_delta_v_change_mps_ = std::clamp(
+                            entry_delta_v_change_mps_ + along_m * entry_delta_v_probe_mps / moved_m, -change_limit,
+                            change_limit);
+                    }
+                }
+            }
             entry_lean_rad_ = 0.0;
-            if (impact_miss_m_ > trim_deadband_m && parameters_.entry_max_lean_rad > 0.0) {
-                steer_itrf_ = horizontal / impact_miss_m_;
+            if (norm(across) > trim_deadband_m && parameters_.entry_max_lean_rad > 0.0) {
+                steer_itrf_ = across / norm(across);
                 burn->lean_itrf = steer_itrf_;
                 burn->lean_rad = parameters_.entry_max_lean_rad;
                 const auto leaning = predict_impact(body, env, epoch, site_.height_m, nullptr, &*burn, drag_scale_);
                 if (leaning.valid) {
                     const double moved_m = dot(leaning.position_itrf_m - straight.position_itrf_m, steer_itrf_);
                     if (moved_m > 0.0) {
-                        entry_lean_rad_ = parameters_.entry_max_lean_rad * std::min(impact_miss_m_ / moved_m, 1.0);
+                        entry_lean_rad_ = parameters_.entry_max_lean_rad * std::min(norm(across) / moved_m, 1.0);
                     }
                 }
             }
@@ -715,7 +736,7 @@ std::optional<BoosterReturnGuidance::PendingBurn> BoosterReturnGuidance::pending
     auto burn = entry_burn_ahead(vehicle, parameters_);
     // While burning: the rest from here (the altitude is already crossed: it continues at once).
     if (phase_ == ReturnPhase::EntryBurn) burn.altitude_m = 1e9;
-    burn.delta_v_mps = std::max(parameters_.entry_delta_v_mps - entry_delta_v_mps_, 0.0);
+    burn.delta_v_mps = std::max(parameters_.entry_delta_v_mps + entry_delta_v_change_mps_ - entry_delta_v_mps_, 0.0);
     return burn;
 }
 

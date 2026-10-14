@@ -40,9 +40,11 @@ struct BoosterReturnParameters {
     double entry_altitude_m = 0.0;
     double entry_delta_v_mps = 0.0;
     double entry_throttle = 1.0;
-    // [E] the entry burn's axis leans from retrograde towards the predicted miss by at most this (a small correction; the
-    // grid fins do the rest)
-    double entry_max_lean_rad = 5.0 * 3.14159265358979 / 180.0;
+    // The entry burn removes the predicted impact miss (d1: a stage with its RCS at one station cannot translate in the
+    // coast): its axis leans from retrograde across the ground track by at most this [E], and its delta-v changes by at
+    // most this fraction [E] of entry_delta_v_mps for the miss along the track (shooting on the impact prediction).
+    double entry_max_lean_rad = 10.0 * 3.14159265358979 / 180.0;
+    double entry_max_delta_v_change = 0.25;
     double landing_throttle = 0.8;  // design throttle of the inner-engine segment: the rest is control margin
     double final_throttle = 0.8;    // design throttle of the centre-engine segment (slower, time to settle)
     double gate_speed_mps = 50.0;   // sink rate at the hand-over to the centre engines
@@ -103,6 +105,8 @@ public:
     // A foot on the ground (reported by the leg landing each tick): the landing burn ends.
     void set_leg_contact(bool contact) { leg_contact_ = contact; }
     double entry_delta_v_mps() const { return entry_delta_v_mps_; }  // burned in the entry burn so far
+    // The entry burn's delta-v as now planned: entry_delta_v_mps of the parameters, changed for the miss along the track.
+    double entry_delta_v_target_mps() const { return parameters_.entry_delta_v_mps + entry_delta_v_change_mps_; }
     // Online estimate (unpowered descent): the accelerometer's drag over the tabulated drag; the predictions use it.
     double drag_scale() const { return drag_scale_; }
     // Scenarios: start in a later phase (e.g. LandingBurn for a booster placed at ignition).
@@ -200,6 +204,7 @@ private:
     double drag_scale_ = 1.0;              // measured / tabulated drag (engines off, in the air)
     void estimate_drag_scale(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     double entry_delta_v_mps_ = 0.0;
+    double entry_delta_v_change_mps_ = 0.0;  // the entry burn's delta-v beyond (or short of) entry_delta_v_mps
     time::Epoch last_update_;              // previous update (entry burn integration)
     std::optional<time::Epoch> plan_end_;  // SCvx pad landing: end of the active plan
 

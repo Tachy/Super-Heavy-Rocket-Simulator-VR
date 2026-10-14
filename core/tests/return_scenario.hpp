@@ -18,13 +18,15 @@
 
 namespace starsim::test {
 
-// Single-stage booster of `vehicle_id` with its tanks scaled to `propellant_kg` in total.
+// Single-stage booster of `vehicle_id` with its main tanks scaled to `propellant_kg` in total (RCS supplies stay full).
 inline config::VehicleConfig booster_config(const std::string& vehicle_id, double propellant_kg) {
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, vehicle_id);
     cfg.stages.resize(1);
     double total = 0.0;
-    for (const auto& tank : cfg.stages[0].tanks) total += tank.mass_kg;
-    for (auto& tank : cfg.stages[0].tanks) tank.mass_kg *= propellant_kg / total;
+    for (const auto& tank : cfg.stages[0].tanks) total += tank.contents == config::TankContents::Rcs ? 0.0 : tank.mass_kg;
+    for (auto& tank : cfg.stages[0].tanks) {
+        if (tank.contents != config::TankContents::Rcs) tank.mass_kg *= propellant_kg / total;
+    }
     return cfg;
 }
 
