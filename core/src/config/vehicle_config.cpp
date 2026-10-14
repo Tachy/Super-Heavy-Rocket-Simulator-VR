@@ -212,6 +212,9 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         if (s.aero.entry_profile != "ship" && s.aero.entry_profile != "capsule") {
             doc.fail("stage.aero.entry_profile must be \"ship\" or \"capsule\"");
         }
+        if (s.aero.entry_profile == "capsule" && s.aero.capsule_table.empty()) {  // review d3 M3
+            doc.fail("stage.aero: entry_profile = \"capsule\" needs capsule_table");
+        }
     } else {
         s.aero.reference_diameter_m = s.diameter_m;
     }

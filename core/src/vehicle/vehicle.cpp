@@ -648,6 +648,7 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     upper->stop_rcs();
     rcs_allocator_.reset();  // each part keeps only its own thrusters
     upper->rcs_allocator_.reset();
+    upper->hull_aero_scale_ = hull_aero_scale_;  // review d3 M5: the truth aero dispersion stays on both parts
     upper->nose_cone_open_ = nose_cone_open_ && upper->has_nose_cone();
     nose_cone_open_ = nose_cone_open_ && has_nose_cone();
     refresh_rcs_availability();  // a payload split off flies alone: its thrusters are free now

@@ -893,3 +893,24 @@ TEST_CASE("A new flight or a pilot burn ends a capsule return", "[dragon][missio
     d.session.place_body(capsule_config(), d.session.body(0).state(), d.session.epoch());
     CHECK(d.session.capsule_return_step() == sim::CapsuleReturnStep::None);
 }
+
+TEST_CASE("A capsule still on the second stage refuses the capsule return", "[dragon][mission]") {
+    DragonDeorbit d(dragon_raan_rad());
+    auto stack = config::stack_payload(config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5"),
+                                       config::load_vehicle(STARSIM_CONFIG_DIR, "crew_dragon"));
+    stack.stages.erase(stack.stages.begin());  // the second stage with Dragon on top, in orbit
+    const auto s = d.session.body(0).state();
+    d.session.place_body(stack, s, d.session.epoch());
+    d.session.set_splashdown_zone(d.zone);
+    CHECK_FALSE(d.session.plan_capsule_return());
+    REQUIRE(d.session.ship_return_plan() != nullptr);
+    CHECK(d.session.ship_return_plan()->reason == "Keine Rückkehr möglich: Kapsel noch auf der Oberstufe");
+}
+
+TEST_CASE("Splitting a body keeps its truth aero dispersion on both parts", "[vehicle][dragon]") {
+    vehicle::Vehicle stack(config::load_vehicle(STARSIM_CONFIG_DIR, "crew_dragon"), STARSIM_CONFIG_DIR);
+    stack.set_hull_aero_scale(1.1);
+    auto capsule = stack.separate(1);
+    CHECK(capsule->hull_aero_scale() == 1.1);
+    CHECK(stack.hull_aero_scale() == 1.1);
+}

@@ -384,3 +384,8 @@ TEST_CASE("A tilted capsule still splashes down", "[parachute][splashdown]") {
     fall(*body, w.env, t, 5.0);
     CHECK(body->resting());  // the ground rule (<= 10 deg tilt) does not apply on water
 }
+
+TEST_CASE("A capsule entry profile needs a capsule table", "[dragon][config]") {
+    CHECK_THROWS_AS(config::load_vehicle(patched_config("capsule_table = \"aero/crew_dragon_aero.csv\"", ""), "crew_dragon"),
+                    config::ConfigError);
+}

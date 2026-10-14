@@ -160,6 +160,11 @@ bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
         deorbit_plan_ = refused;
         return false;
     }
+    if (stages.back().config.payload) {  // review d3 M2: the capsule must fly alone (released from the second stage)
+        refused.reason = "Keine Rückkehr möglich: Kapsel noch auf der Oberstufe";
+        deorbit_plan_ = refused;
+        return false;
+    }
     if (!splashdown_zone_) {
         refused.reason = "Keine Rückkehr möglich: keine Wasserungszone";
         deorbit_plan_ = refused;
