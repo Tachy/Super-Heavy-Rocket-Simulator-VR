@@ -411,8 +411,7 @@ const propulsion::RcsAllocator& Vehicle::rcs_allocator() const {
     return *rcs_allocator_;
 }
 
-void Vehicle::reset_rcs() {
-    rcs_allocator_.reset();
+void Vehicle::stop_rcs() {
     rcs_modulator_ = {};
     rcs_duty_.clear();
     rcs_torque_ = {};
@@ -518,8 +517,10 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     upper->rebuild_aero();
     id_ += "/" + stages_.back().config.id;
     rebuild_aero();
-    reset_rcs();
-    upper->reset_rcs();
+    stop_rcs();
+    upper->stop_rcs();
+    rcs_allocator_.reset();  // each part keeps only its own thrusters
+    upper->rcs_allocator_.reset();
     return upper;
 }
 

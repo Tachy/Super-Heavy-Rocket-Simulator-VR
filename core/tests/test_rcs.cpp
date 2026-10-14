@@ -338,3 +338,19 @@ TEST_CASE("RCS capability of every stage (report)", "[rcs][vehicle]") {
         CHECK(now.z > 0.0);
     }
 }
+
+TEST_CASE("A coast segment starts with the thrusters off", "[rcs][vehicle]") {
+    // Review finding: a coast after a tick that ended mid-pulse integrated the pulse's mass flow over the whole segment.
+    DeepSpace space;
+    auto body = stage_alone("falcon9_block5", 1);
+    vehicle::VehicleCommand roll;
+    roll.rcs_torque_fraction = {1.0, 0.0, 0.0};
+    body->step(space.env, t0, tick_s, roll);
+    double firing = 0.0;
+    for (const auto& t : body->vehicle().stages()[0].rcs) firing += t.output;
+    REQUIRE(firing > 0.0);
+    body->coast(space.env, t0 + tick_s, 100.0);
+    for (const auto& t : body->vehicle().stages()[0].rcs) CHECK(t.output == 0.0);
+    CHECK(norm(body->vehicle().rcs_force_n()) == 0.0);
+    CHECK(norm(body->vehicle().rcs_torque_nm()) == 0.0);
+}

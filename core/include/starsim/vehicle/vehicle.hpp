@@ -186,6 +186,8 @@ public:
     void update_rcs(double dt_s, const VehicleCommand& command);
     math::Vec3 rcs_torque_nm() const { return rcs_torque_; }
     math::Vec3 rcs_force_n() const { return rcs_force_; }
+    // All thrusters off and nothing owed (coast segments, impact; also after a separation).
+    void stop_rcs();
     const aero::SlenderBodyAero& aero() const { return *aero_; }
 
     // Splits the stack below stage `index`: this vehicle keeps stages [0, index), the returned one
@@ -197,7 +199,6 @@ private:
     void rebuild_aero();
     const propulsion::RcsAllocator& rcs_allocator() const;  // for the current CG and the thrusters not starved
     void refresh_rcs_supply();                               // starves thrusters whose supply ran dry
-    void reset_rcs();
 
     std::string id_;
     std::filesystem::path config_dir_;

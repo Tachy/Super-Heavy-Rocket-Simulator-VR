@@ -242,6 +242,8 @@ void FlightBody::hold_landed(const frames::BodyOrientation& earth, time::Epoch e
 
 void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt_s, const VehicleCommand& command) {
     if (impacted_) {
+        vehicle_->stop_rcs();
+        rcs_force_body_n_ = {};
         return;
     }
     const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
@@ -363,6 +365,7 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
     if (impacted_ || duration_s <= 0.0) {
         return;
     }
+    vehicle_->stop_rcs();  // a pulse in progress ends: its mass flow must not run through the whole segment
     if (resting_ || caught_ || landed_) {  // stays on the ground / on the tower, co-rotating with the Earth
         follow_pad(env.earth_orientation, epoch + duration_s);
         return;
