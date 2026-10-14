@@ -121,7 +121,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Booster recovery (decision 2026-10-13): Super Heavy is always caught (no legs; `[stage.recovery] method =
   "tower_catch"`): return guidance only at sites with a tower. Falcon 9 boosters land on the pad or the drone ship
   ("leg_landing", milestone c: `docs/superpowers/specs/2026-10-13-falcon9-landing-design.md`;
-  vehicle, legs, the RTLS to LZ-40 (c3) and the drone ship (c4) done; the game (c5) next). If the first SCvx catch plan fails, an SCvx sea abort is planned at once;
+  vehicle, legs, the RTLS to LZ-40 (c3), the drone ship (c4) and the game interface (c5) done; the drawing and UI wait
+  for the user's UI specification). If the first SCvx catch plan fails, an SCvx sea abort is planned at once;
   the explicit laws are the last fallback (over the arms, ~1-3 m: not accurate enough to be caught); with
   `scvx_landing = false` the whole return aims beyond the shoreline and ditches (test: 1.05 m/s, 650 m off).
 - Booster return: at a catch site the landing burn flies SCvx plans (`gnc/scvx_landing`), V3 sequence 13 -> 5 (divert pair) -> 3 engines,
@@ -379,6 +380,11 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   burn without a burn shown); our vehicle carries ~16 t to that orbit (real Starlink stacks ~17 t); landing burns end at
   the SCvx reserve (5 t [E], Super Heavy's value) after 34 s (real 23 s: our final approach is gentler than the
   hoverslam). Diagnostics: hidden test "Falcon 9 ASDS single MECO case" with `STARSIM_ASDS_SEED=<101-120>`.
+- Game interface for Falcon 9 (c5; the drawing and UI are specified by the user first): `FlightSim.start_mission(id, tdb)`
+  (ascent missions of `config/missions`), `mission_site_id`, `landing_zone()` (pad radius or drone-ship deck, sea height,
+  site frame in ITRF), `body_legs(i)` (geometry, deployment, touchdown), `body_grid_fins(i)` (geometry, deflection);
+  `return_state(i)["legs"]`. Covered by the smoke test. The bindings build with C++ exceptions on
+  (`GODOTCPP_DISABLE_EXCEPTIONS OFF`): godot-cpp's default turned every core config error into an engine crash.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 
