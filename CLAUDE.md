@@ -112,7 +112,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   recorded MECO of ~500 t: speed within 3-6 %, altitude within ~1 km at T+60-120 s, MECO T+135 s / 48 km / 5840 km/h vs
   ~T+140 s / ~53 km / ~5950 km/h). The game's key P and the older ascent tests still fly full thrust with the default
   pitch program. Known gap: our return guidance plans MECO with ~207 t; the flights stage with ~500 t (as for Falcon 9,
-  the real return spends far more than our Lambert boostback + 8.6 %).
+  the real return spends far more than our Lambert boostback + 8.6 %): flight 14's gauge falls 11.8 -> 3.5 % (~300 t)
+  in ~25 s on 13 engines (their full mass flow) - ~2.2 km/s by the rocket equation (dry 210 t), our boostback ~1.5 km/s;
+  the real booster also arrives faster at landing-burn ignition (355 vs ~300 m/s). Next return-guidance topic.
 - Earth is a 256x128 ellipsoid mesh whose facets sit up to ~0.6 km below the true surface; below 500 km a
   2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites.
   Physics ground = flat at the pad height (FlightBody::ground_height_m): gentle contact (<= 3 m/s, <= 10 deg)
