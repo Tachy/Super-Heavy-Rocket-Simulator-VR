@@ -72,6 +72,18 @@ struct Flap {
     double deflection_rad = 0.0;     // actual (rate limited), 0 = folded leeward
 };
 
+enum class ParachuteState { Stowed, Open, Released, Torn };  // Open: inflating, reefed or full
+
+// A parachute set on a stage (d4): `drag_area_m2` covers all its canopies.
+struct Parachute {
+    config::ParachuteConfig config;
+    double attach_station_m = 0.0;   // vehicle body frame
+    ParachuteState state = ParachuteState::Stowed;
+    double deployed_s = 0.0;         // since line stretch
+    double drag_area_m2 = 0.0;       // now, all canopies
+    double peak_load_n = 0.0;        // per canopy, since deployment
+};
+
 struct Tank {
     config::TankConfig config;
     double density_kg_m3 = 0.0;
@@ -88,6 +100,7 @@ struct Stage {
     std::shared_ptr<const aero::GridFinTable> grid_fin_table;
     std::vector<Flap> flaps;
     std::shared_ptr<const aero::FlapTable> flap_table;
+    std::vector<Parachute> parachutes;
     std::vector<RcsThruster> rcs;
     double extra_mass_kg = 0.0;   // payload + fairing
 
@@ -166,6 +179,18 @@ public:
     void set_hull_aero_scale(double factor) { hull_aero_scale_ = factor; }
     double hull_aero_scale() const { return hull_aero_scale_; }
     void update_landing_legs(double dt_s);
+    // Parachute sets ([[stage.parachute]], d4). deploy opens the stowed sets of `role` ("drogue" / "main"); a released
+    // or torn set stays so. update grows the open sets' drag areas (aero::parachute_drag_area_m2).
+    bool deploy_parachutes(const std::string& role);
+    void release_parachutes(const std::string& role);
+    void update_parachutes(double dt_s);
+    bool parachutes_out() const;
+    bool parachute_torn() const;
+    // Opening-load judgement (FlightBody): the peak per canopy; above the set's max_load_n the set tears.
+    void record_parachute_load(size_t stage, size_t set, double load_per_canopy_n);
+    // The lowest stage recovers by splashdown ([stage.recovery] method = "splashdown").
+    bool splashdown_recovery() const;
+    double max_splashdown_speed_mps() const;
     // Flap actuators for one tick (range [0, max] and rate limits).
     void update_flaps(double dt_s, const VehicleCommand& command);
     size_t flap_count() const;

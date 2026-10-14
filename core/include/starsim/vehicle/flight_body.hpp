@@ -135,6 +135,7 @@ private:
     void follow_pad(const frames::BodyOrientation& earth, time::Epoch epoch);
     void resolve_ground_contact(const frames::BodyOrientation& earth, time::Epoch epoch);
     void update_air_data(const FlightEnvironment& env, time::Epoch epoch);
+    void judge_parachute_loads();
 
     std::unique_ptr<Vehicle> vehicle_;
     RigidBodyState state_;

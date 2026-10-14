@@ -4,6 +4,7 @@
 #include <cmath>
 #include <map>
 
+#include "starsim/aero/parachute.hpp"
 #include "starsim/math/constants.hpp"
 
 namespace starsim::vehicle {
@@ -95,6 +96,12 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
                                        f.max_deflection_rad, f.rate_rad_s,
                                        std::clamp(f.initial_deflection_rad, 0.0, f.max_deflection_rad)});
             }
+        }
+        for (const auto& p : stage_config.parachutes) {
+            Parachute chute;
+            chute.config = p;
+            chute.attach_station_m = station + p.attach_station_m;
+            stage.parachutes.push_back(chute);
         }
         for (const auto& t : stage_config.rcs.thrusters) {
             int tank = -1;
@@ -529,6 +536,75 @@ void Vehicle::fail_engine(size_t stage_index, size_t engine_index) {
 
 Vec3 Vehicle::max_rcs_torque_nm() const { return rcs_allocator().max_torque_nm(); }
 
+bool Vehicle::deploy_parachutes(const std::string& role) {
+    bool any = false;
+    for (auto& stage : stages_) {
+        for (auto& chute : stage.parachutes) {
+            if (chute.config.role != role || chute.state != ParachuteState::Stowed) continue;
+            chute.state = ParachuteState::Open;
+            chute.deployed_s = 0.0;
+            any = true;
+        }
+    }
+    return any;
+}
+
+void Vehicle::release_parachutes(const std::string& role) {
+    for (auto& stage : stages_) {
+        for (auto& chute : stage.parachutes) {
+            if (chute.config.role != role || chute.state != ParachuteState::Open) continue;
+            chute.state = ParachuteState::Released;
+            chute.drag_area_m2 = 0.0;
+        }
+    }
+}
+
+void Vehicle::update_parachutes(double dt_s) {
+    for (auto& stage : stages_) {
+        for (auto& chute : stage.parachutes) {
+            if (chute.state != ParachuteState::Open) continue;
+            chute.deployed_s += dt_s;
+            chute.drag_area_m2 = chute.config.count * aero::parachute_drag_area_m2(chute.config, chute.deployed_s);
+        }
+    }
+}
+
+bool Vehicle::parachutes_out() const {
+    for (const auto& stage : stages_) {
+        for (const auto& chute : stage.parachutes) {
+            if (chute.state == ParachuteState::Open) return true;
+        }
+    }
+    return false;
+}
+
+bool Vehicle::parachute_torn() const {
+    for (const auto& stage : stages_) {
+        for (const auto& chute : stage.parachutes) {
+            if (chute.state == ParachuteState::Torn) return true;
+        }
+    }
+    return false;
+}
+
+void Vehicle::record_parachute_load(size_t stage, size_t set, double load_per_canopy_n) {
+    auto& chute = stages_.at(stage).parachutes.at(set);
+    if (chute.state != ParachuteState::Open) return;
+    chute.peak_load_n = std::max(chute.peak_load_n, load_per_canopy_n);
+    if (load_per_canopy_n > chute.config.max_load_n) {  // all canopies of a set carry the same load: they tear together
+        chute.state = ParachuteState::Torn;
+        chute.drag_area_m2 = 0.0;
+    }
+}
+
+bool Vehicle::splashdown_recovery() const {
+    return !stages_.empty() && stages_.front().config.recovery_method == "splashdown";
+}
+
+double Vehicle::max_splashdown_speed_mps() const {
+    return stages_.empty() ? 0.0 : stages_.front().config.max_splashdown_speed_mps;
+}
+
 std::unique_ptr<Vehicle> Vehicle::copy_upper(size_t index) const {
     auto copy = std::unique_ptr<Vehicle>(new Vehicle());
     copy->id_ = id_;
@@ -556,6 +632,7 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
         for (auto& e : stage.engines) e.gimbal_point_m.x -= shift;
         for (auto& fin : stage.grid_fins) fin.geometry.station_m -= shift;
         for (auto& t : stage.rcs) t.position_m.x -= shift;
+        for (auto& chute : stage.parachutes) chute.attach_station_m -= shift;
         for (auto& flap : stage.flaps) {
             flap.geometry.station_fwd_m -= shift;
             flap.geometry.station_aft_m -= shift;

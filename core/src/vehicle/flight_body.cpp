@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "starsim/aero/entry_heating.hpp"
+#include "starsim/aero/parachute.hpp"
 #include "starsim/environment/eclipse.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/integrators/integrate.hpp"
@@ -124,6 +125,18 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
             f.nongravitational_body_n += force.force_body_n;
             f.aero_body_n += force.force_body_n;
             f.moment_body_nm += cross(arm, force.force_body_n);
+        }
+    }
+    // Parachutes: drag of the riser point's local flow (incl. omega x r: the hanging capsule's damping), massless canopies.
+    for (const auto& stage : ctx.vehicle.stages()) {
+        for (const auto& chute : stage.parachutes) {
+            if (chute.state != ParachuteState::Open || chute.drag_area_m2 <= 0.0) continue;
+            const Vec3 arm{chute.attach_station_m - f.mass.cg_station_m, -f.mass.cg_offset_m.y, -f.mass.cg_offset_m.z};
+            const Vec3 point_velocity = air_velocity_body + cross(s.angular_velocity_body_radps, arm);
+            const Vec3 force = aero::parachute_force_body_n(chute.drag_area_m2, point_velocity, air.density_kg_m3);
+            f.nongravitational_body_n += force;
+            f.aero_body_n += force;
+            f.moment_body_nm += cross(arm, force);
         }
     }
     f.moment_body_nm += ctx.rcs_torque_nm;
@@ -256,10 +269,12 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     vehicle_->update_grid_fins(dt_s, command);
     vehicle_->update_landing_legs(dt_s);
     vehicle_->update_flaps(dt_s, command);
+    vehicle_->update_parachutes(dt_s);
     // Held, caught or landed: the thrusters stay off.
     vehicle_->update_rcs(dt_s, clamped_ || caught_ || landed_ ? VehicleCommand{} : command);
     rcs_force_body_n_ = vehicle_->rcs_force_n();
     update_air_data(env, epoch);
+    judge_parachute_loads();
 
     if (clamped_ || caught_ || landed_) {
         vehicle_->consume_propellant(dt_s);
@@ -348,6 +363,23 @@ void FlightBody::resolve_ground_contact(const frames::BodyOrientation& earth, ti
     attitude_itrf_ = (Quat::from_matrix(to_fixed) * state_.attitude).normalized();
     follow_pad(earth, epoch);
     resting_ = true;
+}
+
+// Opening loads: q at each open set's riser point (air data of this tick) times one canopy's drag area. The drag area
+// already grew this tick, so the load is that of the area the tick will fly with.
+void FlightBody::judge_parachute_loads() {
+    const auto mass = vehicle_->mass_properties();
+    const auto& stages = vehicle_->stages();
+    for (size_t i = 0; i < stages.size(); ++i) {
+        for (size_t k = 0; k < stages[i].parachutes.size(); ++k) {
+            const auto& chute = stages[i].parachutes[k];
+            if (chute.state != ParachuteState::Open) continue;
+            const Vec3 arm{chute.attach_station_m - mass.cg_station_m, -mass.cg_offset_m.y, -mass.cg_offset_m.z};
+            const Vec3 v = air_data_.air_velocity_body_mps + cross(state_.angular_velocity_body_radps, arm);
+            const double q = 0.5 * air_data_.air.density_kg_m3 * dot(v, v);
+            vehicle_->record_parachute_load(i, k, q * chute.drag_area_m2 / chute.config.count);
+        }
+    }
 }
 
 void FlightBody::update_air_data(const FlightEnvironment& env, time::Epoch epoch) {
