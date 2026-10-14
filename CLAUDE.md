@@ -319,16 +319,20 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   (`kind = "landing_zone"`, ~340 m east of the pad [E], 85 m pad [S]). Evidence: our webcast telemetry of CRS-35 (RTLS,
   LZ-40) and Starlink 15-25 (drone ship) - same round-dial layout as Starship (`webcast_telemetry.py clean --vehicle
   falcon9`: stage 1 left / stage 2 right after separation, G-FORCE and the stage-1 engine icon + propellant gauge
-  before; the icon replaces the speed dial in the entry and landing burns). Derived [D]: second-stage propellant
-  106.7 t (G-force and gauge put ~125 t above the first stage; liftoff 546 t), landing propellant 11.3 t (gauge 2.8-2.9 %
-  at landing-burn ignition on both flights), MECO propellant 61 t RTLS / 43 t drone ship, descent drag table
-  `aero/falcon9_descent.csv` (unguided replay from after the entry burn: 0.9 / 1.6 % rms, test "Falcon 9 descent drag
-  reproduces ..."). Burns seen: CRS-35 entry burn on the centre engine only, landing burn 1 -> 3 -> 1; Starlink 15-25
+  before; the icon replaces the speed dial in the entry and landing burns). Derived [D]: first-stage propellant 425 t
+  (decision 2026-10-14: the gauge falls 0.63 %/s at full thrust - nine Merlins at their 845 kN rating burn 2.75 t/s; the
+  telemetry fixes only capacity x mass flow: the alternative, the commonly cited 395.7 t with the engines at ~93 % all
+  ascent, keeps no official figure; `tools/telemetry/mass_estimate.py --area-m2 10.52`; with 425 t the simulated G
+  matches the dial before max-Q), second-stage propellant 106.7 t, landing propellant 12.1 t (gauge 2.8-2.9 % at
+  landing-burn ignition on both flights; touchdown 1.7 % = 7.2 t), MECO gauge 66 t RTLS / 47 t drone ship, descent drag
+  table `aero/falcon9_descent.csv` (unguided replay from after the entry burn: 0.9 / 1.5 % rms, test "Falcon 9 descent
+  drag reproduces ..."). Burns seen: CRS-35 entry burn on the centre engine only, landing burn 1 -> 3 -> 1; Starlink 15-25
   entry burn on 3, landing burn on 1 (~40 % throttle by the gauge). The drone-ship descent stays ~2 km higher than a
   zero-lift fall (grid-fin lift). Ascent: `PitchProgram::booster_throttle` (first-stage throttle over mission time,
-  empty = full) carries the Falcon 9 max-Q bucket (~70 %, T+50-60 s) and ~92 % after it [D]; pitch kick 14 deg [E];
-  CRS-35 MECO T+130 s / 55.9 km / 6215 km/h vs recorded 137 / 56.6 / 6441 (the real stack starts slower in its first
-  ~7 s, so mid-ascent we run ahead). The upper stage's plane steering nulls out-of-plane speed and offset together
+  empty = full) carries the Falcon 9 schedule [D] from the CRS-35 G-force dial against the simulated stack: full thrust,
+  a ~72 % max-Q bucket T+50-61 s, then ~95 % (`STARSIM_DEBUG_ASCENT_G=1` prints the simulated G); pitch kick 12 deg [E];
+  CRS-35 T+60 / 120 s 1219 / 4807 km/h (recorded 1188 / 4672: the real stack starts ~2.5 s slower), MECO T+137 s /
+  56.4 km / 6372 km/h vs recorded 137 / 56.6 / 6441. The upper stage's plane steering nulls out-of-plane speed and offset together
   (ZEM/ZEV) and the terminal v_go removes the rest; inclinations of steep planes are judged against the true equator of
   date (GCRF elements carry ~0.15 deg of precession by 2026). `FlightSession::launch_from_pad` also takes a loaded
   `VehicleConfig` (mission payload; Dragon flies without a fairing).
@@ -353,12 +357,16 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   minimum throttle exceeds the weight), 1 -> 3 -> 1 engines with switch windows 230-270 / 140-190 m/s [D]; the legs
   deploy 5 s [E] + deploy time before the planned touchdown, the engines stop on leg contact or 0.5 s after the plan's
   end; an unreachable zone aborts to the sea ("Wasserung"). `LandingOutcome::TippedOver` ("umgekippt") comes from the
-  leg judgement. Validation: from ignition (3.2 km, 300 m/s, 11.3 t) lands 0.01 m off at 0.86 m/s; campaign
+  leg judgement. Validation: from ignition (3.3 km, 300 m/s, 12.1 t) lands 0.01 m off at 0.88 m/s; campaign
   `[falcon9][rtls][validation]` (+-10 m, +-3 m/s, +-5 % propellant, +-3 deg, truth hull aero +-10 % via
-  `FlightSession::set_aero_dispersion`) 21 of 21 within 0.01 m, <= 1.01 m/s, >= 5 t left; full mission: entry burn
-  T+349 s, landing burn T+416 s at 3.0 km / 291 m/s / 11.3 t, touchdown T+446 s, 0.02 m off (CRS-35: 355 / 420 at
-  ~3.2 km, ~300 m/s / 442 s). `return_flight_time_s` 260 s and `boostback_loss_fraction` 0.12 [D] are identified on
-  that mission. Known gap: our MECO leaves 50.6 t, CRS-35's gauge ~61 t (the real return spends ~10 t more).
+  `FlightSession::set_aero_dispersion`) 21 of 21 within 0.01 m, <= 0.99 m/s, >= 5.7 t left; full mission: MECO T+141 s,
+  entry burn T+356 s, landing burn T+423 s at 3.0 km / 287 m/s / 11.7 t, touchdown T+459 s, 0.00 m off (CRS-35: 137 /
+  355 / 420 at ~3.2 km, ~300 m/s / 442 s). `return_flight_time_s` 260 s and `boostback_loss_fraction` 0.12 [D] were
+  identified on that mission with the 395.7 t stage (kept). Known gap: our MECO leaves 55 t, CRS-35's gauge ~66 t (the
+  real return spends ~11 t more).
+- SCvx landing aborts (all vehicles): a first plan that finds the target unreachable aborts at once; `failures_before_abort`
+  (2) re-plans with a virtual control above the stall threshold, or `unconverged_before_abort` (4) unconverged re-plans of
+  any kind (a marginal first plan the vehicle could not follow), give the target up and plan for the sea.
 - Falcon 9 drone ship (c4, `config/drone_ships.toml`, `config/missions/falcon9_asds.toml`): a drone ship is a landing zone
   with a deck (`sim::drone_ship_site`: deck 91 x 52 m [S], 3 m freeboard [E], stationary and level; `sea` marks the water
   beside the long edge for the abort); the mission's `[drone_ship]` places it at the nominal impact point of our ascent
@@ -366,7 +374,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   sets a session up from an `AscentMission` (payload, pad, landing zone or drone ship, booster return, autopilot).
   `[stage.recovery.drone_ship]` overrides the RTLS profile when the landing zone has a deck (`StageConfig::return_profile_for`,
   `FlightSession::return_parameters`): `boostback = false` (the guidance starts coasting, turns engines first on its RCS;
-  MECO plans run-down + entry burn + landing propellant only: 23.6 t), entry burn on centre + pair from 66 km for
+  MECO plans run-down + entry burn + landing propellant only: 24.7 t), entry burn on centre + pair from 66 km for
   880 m/s [D] at 0.72, landing burn on the centre engine in all three phases [D] (`landing_phase_max_tilt_deg` 20).
   What the slanted approach (~90 m/s across at ignition) needed, all generic: the impact prediction flies the pending
   entry burn as a finite burn with its lean (`PendingBurn`; the impulse model was 3.5 km off); the entry burn solves its
@@ -375,14 +383,16 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   SCvx landing burns feather the grid fins into their local flow (`AttitudeController::feathered_grid_fins`: neutral fins
   acted as a tail the planning model does not know - Super Heavy too, catch campaign still 21/21); the return guidance
   estimates the drag online from the accelerometer (`FlightBody::set_accelerometer`, `drag_scale()`). Validation: full
-  mission (kick 16 deg: MECO T+144 s, 62.9 km, 8112 km/h vs Starlink 15-25 T+149 s, 60 km, ~8000 km/h; 15.5 t to
-  200 x 281 km): entry burn T+366-385 s (T+364-386), landing burn T+465 s at 2.9 km / 271 m/s / 11.2 t (T+476 s, ~3.0 km,
-  ~270 m/s), landed T+499 s (T+499 s) 0.02 m off; campaigns `[falcon9][asds][validation]` from ignition (as RTLS) and
-  from MECO states (+-200 m, +-5 m/s, +-5 %, aero +-10 %; two halves) 21 of 21 each, <= 0.04 m, <= 1.01 m/s; a deck out
-  of reach ditches beside the ship. Known gaps: our MECO leaves 24 t (gauge ~43 t: ~19 t vanish between MECO and the entry
-  burn without a burn shown); our vehicle carries ~16 t to that orbit (real Starlink stacks ~17 t); landing burns end at
-  the SCvx reserve (5 t [E], Super Heavy's value) after 34 s (real 23 s: our final approach is gentler than the
-  hoverslam). Diagnostics: hidden test "Falcon 9 ASDS single MECO case" with `STARSIM_ASDS_SEED=<101-120>`.
+  mission (kick 13 deg: MECO T+152 s, 64.8 km, 8373 km/h, flight path 24.7 deg vs Starlink 15-25 T+149 s, 60 km,
+  ~8000 km/h, ~25 deg; 16.5 t to 200 x 281 km - 17 t arrives with 0.3 t left): entry burn T+379-399 s (T+364-386), landing
+  burn T+476 s at 3.0 km / 271 m/s / 12.0 t (T+476 s, ~3.0 km, ~270 m/s, 11.9 t), landed T+515 s (T+499 s) 0.01 m off;
+  campaigns `[falcon9][asds][validation]` from ignition (as RTLS) and from MECO states (+-200 m, +-5 m/s, +-5 %, aero
+  +-10 %; two halves) 21 of 21 each; a deck out of reach ditches beside the ship. Known gaps: our MECO leaves 25 t, the
+  gauge ~47 t - and the gauge itself falls from 47 t at MECO to 25.9 t at the entry burn while the speed stays ~8000 km/h
+  (no burn between; unexplained); landing burns end at the SCvx reserve (5 t [E], Super Heavy's value) after ~36 s: the
+  gauge shows 7.2 t at touchdown after a ~23 s burn of ~4.9 t, and a 7.2 t planner reserve is infeasible from the recorded
+  ignition state in our model (our burn decelerates harder early - unmeasured subsonic and power-on drag [E]).
+  Diagnostics: hidden test "Falcon 9 ASDS single MECO case" with `STARSIM_ASDS_SEED=<101-120>`.
 - Game interface for Falcon 9 (c5; the drawing and UI are specified by the user first): `FlightSim.start_mission(id, tdb)`
   (ascent missions of `config/missions`), `mission_site_id`, `landing_zone()` (pad radius or drone-ship deck, sea height,
   site frame in ITRF), `body_legs(i)` (geometry, deployment, touchdown), `body_grid_fins(i)` (geometry, deflection);
