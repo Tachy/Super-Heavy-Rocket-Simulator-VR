@@ -98,7 +98,9 @@ public:
 
     // Unpowered flight over a longer interval with adaptive DOP853 on the same 13-element state and the
     // same forces (gravity, aerodynamics, solar radiation pressure; no thrust, no RCS). Used instead of
-    // fixed ticks when nothing is commanded, e.g. for a multi-day lunar transfer.
+    // fixed ticks when nothing is commanded, e.g. for a multi-day lunar transfer. The reference body (air, drag) is the
+    // one chosen at the segment's start, its frame frozen at that epoch: keep segments short where it can change (the
+    // session coasts <= 600 s; a body that starts Moon-referenced must not coast into the Earth's air in one segment).
     void coast(const FlightEnvironment& env, time::Epoch epoch, double duration_s);
     bool can_coast() const;  // engines off, not clamped, not on the ground
 
@@ -178,7 +180,10 @@ private:
     AirData air_data_;
     math::Vec3 pad_fixed_m_;    // bottom point in the body-fixed frame of held_on_ while clamped/caught/landed/resting
     math::Quat attitude_fixed_;  // body -> body-fixed axes of held_on_
-    ephemeris::Body reference_ = ephemeris::Body::Earth;  // chosen at the last step / coast
+    // Chosen at the last step / coast; undecided (a body just built or placed): the Moon within the release distance.
+    std::optional<ephemeris::Body> reference_;
+    bool wreck_on_ground_ = false;  // struck the ground: the wreck stays where it struck (pad_fixed_m_ on held_on_)
+    void hold_wreck(const environment::BodyFrame& frame, ephemeris::Body body);
     ephemeris::Body held_on_ = ephemeris::Body::Earth;    // the body pad_fixed_m_ / attitude_fixed_ refer to
     double ground_height_m_ = 0.0;
     math::Vec3 external_force_gcrf_n_;

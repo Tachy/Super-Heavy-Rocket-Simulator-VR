@@ -205,10 +205,12 @@ environment::ReferenceBody reference_body_of(const FlightEnvironment& env, ephem
 }
 
 ephemeris::Body FlightBody::reference_body(const FlightEnvironment& env, time::Epoch epoch) const {
-    if (clamped_ || caught_ || landed_ || resting_) return held_on_;
+    if (clamped_ || caught_ || landed_ || resting_ || wreck_on_ground_) return held_on_;
     if (env.moon == nullptr) return ephemeris::Body::Earth;
     const double distance = norm(state_.position_gcrf_m - env.moon->centre_gcrf(epoch).position_m);
-    const double limit = reference_ == ephemeris::Body::Moon ? moon_release_distance_m : moon_capture_distance_m;
+    // Undecided (just built or placed, e.g. an NRHO near its apolune): as if it came from the Moon.
+    const bool from_moon = !reference_ || *reference_ == ephemeris::Body::Moon;
+    const double limit = from_moon ? moon_release_distance_m : moon_capture_distance_m;
     return distance < limit ? ephemeris::Body::Moon : ephemeris::Body::Earth;
 }
 
@@ -268,6 +270,18 @@ void FlightBody::hold_fixed_to_earth(const frames::BodyOrientation& earth, time:
     hold_fixed(environment::BodyFrame::centred_at_origin(earth.fixed_to_gcrf(epoch)), ephemeris::Body::Earth);
 }
 
+// A ground impact: the wreck stays where it struck, on its body (lunar l1 review: a frozen GCRF state left a wreck on
+// the Moon behind at ~1 km/s).
+void FlightBody::hold_wreck(const environment::BodyFrame& frame, ephemeris::Body body) {
+    const double cg = vehicle_->mass_properties().cg_station_m;
+    pad_fixed_m_ = frame.to_fixed(state_.position_gcrf_m - state_.attitude.rotate(Vec3{cg, 0.0, 0.0}));
+    attitude_fixed_ = (Quat::from_matrix(transpose(frame.transform.rotation)) * state_.attitude).normalized();
+    held_on_ = body;
+    reference_ = body;
+    impacted_ = true;
+    wreck_on_ground_ = true;
+}
+
 void FlightBody::hold_fixed(const environment::BodyFrame& frame, ephemeris::Body body) {
     const double cg = vehicle_->mass_properties().cg_station_m;
     pad_fixed_m_ = frame.to_fixed(state_.position_gcrf_m - state_.attitude.rotate(Vec3{cg, 0.0, 0.0}));
@@ -289,10 +303,11 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     if (impacted_) {
         vehicle_->stop_rcs();
         rcs_force_body_n_ = {};
+        if (wreck_on_ground_) follow_pad(reference_body_of(env, held_on_).frame(epoch + dt_s));
         return;
     }
     reference_ = reference_body(env, epoch);
-    const auto body = reference_body_of(env, reference_);
+    const auto body = reference_body_of(env, *reference_);
     const auto frame = body.frame(epoch);
     const auto geodetic = frames::fixed_to_geodetic(frame.to_fixed(state_.position_gcrf_m), body.shape());
     vehicle_->update_engines(dt_s, command, body.air(geodetic.height_m).pressure_pa);
@@ -389,11 +404,11 @@ void FlightBody::resolve_ground_contact(const environment::ReferenceBody& body, 
     if (vehicle_->splashdown_recovery()) {
         // On the water (d4): any tilt, sink up to the vehicle's limit; no buoyancy (it rests at the surface).
         if (sink_rate > vehicle_->max_splashdown_speed_mps()) {
-            impacted_ = true;
+            hold_wreck(frame, body.id());
             return;
         }
     } else if (sink_rate > max_touchdown_sink_rate_mps || tilt > max_touchdown_tilt_rad) {
-        impacted_ = true;
+        hold_wreck(frame, body.id());
         return;
     }
     // Rest on the ground below the current bottom point, keeping the current attitude relative to the Earth.
@@ -441,6 +456,9 @@ bool FlightBody::can_coast() const {
 
 void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double duration_s) {
     if (impacted_ || duration_s <= 0.0) {
+        if (impacted_ && wreck_on_ground_ && duration_s > 0.0) {
+            follow_pad(reference_body_of(env, held_on_).frame(epoch + duration_s));
+        }
         return;
     }
     vehicle_->stop_rcs();  // a pulse in progress ends: its mass flow must not run through the whole segment
@@ -449,7 +467,7 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
         return;
     }
     reference_ = reference_body(env, epoch);
-    const auto body = reference_body_of(env, reference_);
+    const auto body = reference_body_of(env, *reference_);
     const TickContext ctx{env,
                           *vehicle_,
                           epoch,
@@ -469,7 +487,7 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
     const auto result = integrators::integrate<13>(f, 0.0, pack(state_), duration_s, options);
     state_ = unpack(result.y);
     reference_ = reference_body(env, epoch + duration_s);
-    const auto end_body = reference_body_of(env, reference_);
+    const auto end_body = reference_body_of(env, *reference_);
     const auto end_frame = end_body.frame(epoch + duration_s);
     resolve_ground_contact(end_body, end_frame);
     update_air_data(end_body, end_frame);

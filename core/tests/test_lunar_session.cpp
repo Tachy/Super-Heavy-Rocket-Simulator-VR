@@ -50,7 +50,8 @@ TEST_CASE("A session ticks a body falling towards the lunar ground instead of co
     CHECK(fx.session.reference_body(0) == ephemeris::Body::Moon);
     fx.session.advance_to(fx.t0 + 120.0, 100000);
     CHECK(fx.session.body(0).impacted());
-    CHECK(fx.session.telemetry(0).altitude_m > -2.0);  // stopped at the ground, not 100 km under it
+    // The wreck stays where it struck, on the moving Moon (not 100 km under the ground, not left behind in space).
+    CHECK(std::abs(fx.session.telemetry(0).altitude_m) < 50.0);
 }
 
 TEST_CASE("LVLH hold in lunar orbit is about the Moon", "[sim][lunar]") {

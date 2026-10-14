@@ -146,8 +146,10 @@ TEST_CASE("The reference body switches with hysteresis at 60,000 / 100,000 km fr
     auto at = [&](double distance_m) {
         return RigidBodyState{centre.position_m + distance_m * out, centre.velocity_mps, {}, {}};
     };
-    auto body = ship(at(80.0e6));
-    CHECK(body->reference_body(fx.env, fx.t0) == ephemeris::Body::Earth);  // never was at the Moon
+    auto body = ship(at(101.0e6));
+    body->coast(fx.env, fx.t0, 1.5);  // records the Earth
+    body->set_state(at(80.0e6));
+    CHECK(body->reference_body(fx.env, fx.t0 + 1.5) == ephemeris::Body::Earth);  // came from the Earth: band keeps it
     body->set_state(at(59.0e6));
     body->coast(fx.env, fx.t0, 1.5);  // a coast (or step) records the choice
     CHECK(body->reference_body(fx.env, fx.t0 + 1.5) == ephemeris::Body::Moon);
@@ -166,10 +168,22 @@ TEST_CASE("Separated parts keep the reference body", "[vehicle][lunar]") {
     auto cfg = config::load_vehicle(config_dir, "starship_block3");
     auto stack = std::make_unique<FlightBody>(std::make_unique<vehicle::Vehicle>(cfg, config_dir),
                                               lunar_orbit(fx.moon, fx.t0));
-    stack->coast(fx.env, fx.t0, 2.0);
+    stack->coast(fx.env, fx.t0, 2.0);  // records the Moon
+    // Inside the hysteresis band (80,000 km): only the recorded choice keeps the Moon.
+    const auto centre = fx.moon.centre_gcrf(fx.t0 + 2.0);
+    stack->set_state({centre.position_m + Vec3{80.0e6, 0.0, 0.0}, centre.velocity_mps, {}, {}});
     auto upper = stack->separate(1, 0.5);
     CHECK(stack->reference_body(fx.env, fx.t0 + 2.0) == ephemeris::Body::Moon);
     CHECK(upper->reference_body(fx.env, fx.t0 + 2.0) == ephemeris::Body::Moon);
+}
+
+TEST_CASE("A body placed inside the hysteresis band reports the Moon before its first step", "[vehicle][lunar]") {
+    LunarFixture fx;
+    // An NRHO near its apolune (~70,000 km): undecided bodies take the Moon within the release distance.
+    const auto centre = fx.moon.centre_gcrf(fx.t0);
+    auto body = ship({centre.position_m + Vec3{0.0, 0.0, -70.0e6}, centre.velocity_mps, {}, {}});
+    CHECK(body->reference_body(fx.env, fx.t0) == ephemeris::Body::Moon);
+    CHECK(body->telemetry(fx.env, fx.t0).reference_body == ephemeris::Body::Moon);
 }
 
 TEST_CASE("No skip-out is judged at the Moon", "[vehicle][lunar]") {
