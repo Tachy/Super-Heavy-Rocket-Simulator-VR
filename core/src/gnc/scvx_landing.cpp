@@ -137,10 +137,17 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
         plan_ = outcome.plan;
         plan_epoch_ = outcome.snapshot_epoch + outcome.start_offset_s;
         consecutive_failures_ = 0;
+        consecutive_unconverged_ = 0;
         return;
     }
     if (outcome.plan->converged) return;
     ++stats_.failures;
+    // Re-plans that keep failing leave the vehicle on an ever older plan: give the target up (the abort plans for the
+    // sea), even when each failure alone looked recoverable.
+    if (!aborting_ && ++consecutive_unconverged_ >= parameters_.unconverged_before_abort && site_.sea) {
+        aborting_ = true;
+        return;
+    }
     // Only an unreachable catch counts towards the abort: a re-plan that ran out of iterations while the dynamics
     // nearly hold leaves the previous plan in charge.
     if (outcome.plan->virtual_control < parameters_.settings.stall_virtual_control) return;

@@ -19,6 +19,8 @@ struct ScvxLandingParameters {
     double min_replan_time_to_go_s = 3.0;  // [E] no catch re-plans closer to the end (phase durations degenerate)
     int failures_before_abort = 2;         // [E] consecutive re-plans that find the catch unreachable (virtual
                                            // control >= settings.stall_virtual_control) before it is given up
+    int unconverged_before_abort = 4;      // [E] consecutive re-plans that do not converge at all (a marginal first
+                                           // plan the vehicle could not follow) before the target is given up
     bool realtime = false;                 // never wait for a re-plan (interactive play)
     // Burn profile that times the ignition (BoosterReturnGuidance::predict_landing_burn), V3 baseline: 13 engines,
     // 5 from ~200 m/s, 3 for the last slow metres. Flights 13/14 light the burn at ~2.8-2.9 km falling ~0.35-0.4 km/s
@@ -106,6 +108,7 @@ private:
     int engine_set_ = 0;  // phase whose engine set runs (only ever increases)
     bool aborting_ = false;
     int consecutive_failures_ = 0;
+    int consecutive_unconverged_ = 0;
     Statistics stats_;
     TvcLateralGains lqr_gains_;  // cached for (lqr_a_, lqr_c_)
     double lqr_a_ = -1.0;
