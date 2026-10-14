@@ -53,8 +53,15 @@ void FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target, con
     autopilot_ = {AutopilotState::PreLaunch, {}};
     if (!bodies_.empty() && !bodies_[controlled_].body->clamped()) {
         guidance_->start(*bodies_[controlled_].body, earth_, epoch_);
-        autopilot_.state = bodies_[controlled_].body->vehicle().stages().size() > 1 ? AutopilotState::Booster
-                                                                                    : AutopilotState::UpperStage;
+        // Booster while more than one launcher stage with engines is left (a stacked payload's stages and its abort
+        // engines do not count: [second stage, trunk, capsule] resumes as the upper stage).
+        int powered = 0;
+        for (const auto& stage : bodies_[controlled_].body->vehicle().stages()) {
+            const bool engines = std::any_of(stage.engines.begin(), stage.engines.end(),
+                                             [](const vehicle::Engine& e) { return !e.abort_only; });
+            powered += !stage.config.payload && engines ? 1 : 0;
+        }
+        autopilot_.state = powered > 1 ? AutopilotState::Booster : AutopilotState::UpperStage;
     }
 }
 

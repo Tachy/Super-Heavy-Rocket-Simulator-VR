@@ -305,6 +305,7 @@ struct BurnResult {
     Vec3 error_mps;
     double propellant_kg = 0.0;
     Vec3 axis_body;
+    double misalignment_at_ignition_rad = -1.0;  // thrust axis vs burn direction when the translation starts
 };
 
 BurnResult fly_prograde_burn(DragonInOrbit& o, double dv, bool drop_forward_thrusters = false) {
@@ -344,6 +345,10 @@ BurnResult fly_prograde_burn(DragonInOrbit& o, double dv, bool drop_forward_thru
     REQUIRE(s.burn_configuration().rcs);
     for (double t = 1.0; t < 1200.0 && s.autopilot().state == sim::AutopilotState::Burn; t += 1.0) {
         s.advance_to(o.t0 + t, 1000);
+        if (r.misalignment_at_ignition_rad < 0.0 && s.autopilot().burn.ignite) {
+            r.misalignment_at_ignition_rad =
+                angle_between(s.body(0).state().attitude.rotate(r.axis_body), s.autopilot().burn.direction_gcrf);
+        }
         if (std::getenv("STARSIM_VERBOSE") && static_cast<int>(t) % 10 == 0) {
             const auto& w = s.body(0).state().angular_velocity_body_radps;
             std::printf("t %4.0f kg %.2f ignite %d remaining %.3f w %.5f %.5f %.5f\n", t,
@@ -495,4 +500,44 @@ TEST_CASE("Falcon 9 lifts Crew Dragon into its insertion orbit and the capsule s
     CHECK(used < 5.0);
     // The first stage landed on LZ-40 meanwhile (RTLS as in falcon9_rtls).
     CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);
+}
+
+TEST_CASE("A retrograde Draco burn waits for its half turn", "[dragon][burn]") {
+    // Review (d2): the orbit controller slews at 1 deg/s, so a burn whose axis points away from the hold needs more than
+    // the 120 s burn preparation: the turn must be done when the translation starts.
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    DragonInOrbit o(ephemeris, earth);  // nose along the velocity
+    const auto r = fly_prograde_burn(o, -2.0);  // retrograde: +x (the side pods) turns half round
+    const double ideal_kg = 12500.0 * (1.0 - std::exp(-2.0 / (300.0 * constants::standard_gravity_mps2)));
+    std::printf("[validation] Dragon retrograde 2 m/s burn: misaligned %.1f deg at ignition, error %.4f m/s, %.2f kg\n",
+                r.misalignment_at_ignition_rad / constants::deg_to_rad, norm(r.error_mps), r.propellant_kg);
+    CHECK(r.axis_body.x == Catch::Approx(1.0));
+    CHECK(r.misalignment_at_ignition_rad >= 0.0);
+    CHECK(r.misalignment_at_ignition_rad < 5.0 * constants::deg_to_rad);
+    CHECK(norm(r.error_mps) < 0.03);
+    CHECK(r.propellant_kg < 1.3 * ideal_kg + 2.5);  // the half turn at 1 deg/s costs ~1.5 kg
+}
+
+TEST_CASE("Re-engaging the ascent autopilot after staging keeps a stacked payload on the upper stage",
+          "[dragon][sim]") {
+    // Review (d2): [second stage, trunk, capsule] has three stages but one launcher stage with engines: the autopilot must
+    // resume as the upper stage (cutoff, payload release), not as a booster burning the stage dry.
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const auto t0 = time.from_utc({2026, 10, 13, 10, 33, 0.0});
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_crew_dragon");
+    sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
+    for (double t = 1.0; t < 400.0 && session.autopilot().state != sim::AutopilotState::UpperStage; t += 1.0) {
+        session.advance_to(t0 + t, 1000);
+    }
+    REQUIRE(session.autopilot().state == sim::AutopilotState::UpperStage);
+    session.advance_to(session.epoch() + 10.0, 10000);
+    session.disengage_autopilot();
+    session.engage_ascent_autopilot({m.periapsis_height_m, m.apoapsis_height_m, m.inclination_rad, m.northerly});
+    CHECK(session.autopilot().state == sim::AutopilotState::UpperStage);
 }
