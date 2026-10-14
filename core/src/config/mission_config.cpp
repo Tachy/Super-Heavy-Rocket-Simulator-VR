@@ -5,8 +5,31 @@
 
 namespace starsim::config {
 
+namespace {
+
+MissionKind kind_of(const detail::Document& doc) {
+    const auto* mission = doc.root["mission"].as_table();
+    if (!mission) doc.fail("missing [mission]");
+    const auto kind = doc.text_or(*mission, "kind", "ascent");
+    if (kind == "ascent") return MissionKind::Ascent;
+    if (kind == "ship_return") return MissionKind::ShipReturn;
+    if (kind == "capsule_return") return MissionKind::CapsuleReturn;
+    doc.fail("mission: unknown kind '" + kind + "' (ascent, ship_return, capsule_return)");
+}
+
+void require_kind(const detail::Document& doc, MissionKind kind, const char* name) {
+    if (kind_of(doc) != kind) doc.fail(std::string("not a ") + name + " mission ([mission] kind)");
+}
+
+}  // namespace
+
+MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_view mission_id) {
+    return kind_of(detail::Document(config_dir / "missions" / (std::string(mission_id) + ".toml")));
+}
+
 ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
     const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    require_kind(doc, MissionKind::ShipReturn, "ship return");
     const double deg = constants::deg_to_rad;
     const auto* mission = doc.root["mission"].as_table();
     const auto* orbit = doc.root["orbit"].as_table();
@@ -39,6 +62,7 @@ ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_d
 
 CapsuleReturnMission load_capsule_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
     const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    require_kind(doc, MissionKind::CapsuleReturn, "capsule return");
     const double deg = constants::deg_to_rad;
     const auto* mission = doc.root["mission"].as_table();
     const auto* orbit = doc.root["orbit"].as_table();
@@ -70,6 +94,7 @@ CapsuleReturnMission load_capsule_return_mission(const std::filesystem::path& co
 
 AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
     const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    require_kind(doc, MissionKind::Ascent, "ascent");
     const double deg = constants::deg_to_rad;
     const auto* mission = doc.root["mission"].as_table();
     const auto* target = doc.root["target"].as_table();

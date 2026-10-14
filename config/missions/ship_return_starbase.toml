@@ -5,6 +5,7 @@
 
 [mission]
 name = "Rückkehr nach Starbase"
+kind = "ship_return"            # FlightSim.start_mission dispatches on it (absent: "ascent")
 vehicle = "starship_block3"
 stage = "ship"
 site = "starbase_olp1"
