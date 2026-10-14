@@ -56,6 +56,7 @@ add_library(starsim_core STATIC
     src/sim/landing_outcome.cpp
     src/sim/flight_session.cpp
     src/sim/ascent_mission.cpp
+    src/sim/capsule_return_mission.cpp
     src/mission/lunar_transfer.cpp
     src/contact/primitives.cpp
     src/contact/tower_geometry.cpp

@@ -112,6 +112,8 @@ public:
     void launch_from_pad(const config::VehicleConfig& config, const LaunchSite& site, double heading_rad,
                          time::Epoch epoch);
     // Places a vehicle (stages from `first_stage` upwards) on a given orbit, nose along the velocity.
+    // ... or from a loaded configuration (all its stages; a mission's propellant loads).
+    void place_in_orbit(const config::VehicleConfig& config, const math::StateVector& state_gcrf, time::Epoch epoch);
     void place_in_orbit(const std::string& vehicle_id, const math::StateVector& state_gcrf, time::Epoch epoch,
                         size_t first_stage = 0);
     // Fidelity flag: catch towers of launch sites (default on). Takes effect at the next set_launch_site().

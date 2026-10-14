@@ -1,0 +1,26 @@
+# Return of Crew Dragon from an ISS-like orbit to the Pacific off San Diego (d4). The onboard computer plans the Draco
+# deorbit burn (FlightSession::plan_capsule_return) for the first pass over the zone within the capsule's crossrange,
+# jettisons the trunk after the burn and closes the nose cone [S: West Coast order since 2025], flies the bank-guided
+# entry (d3) to the drogue gate, and comes down under drogues and mains (d4). [orbit] is the scenario start.
+
+[mission]
+name = "Crew-Dragon-Rückkehr"
+vehicle = "crew_dragon"
+zone = "pacific_san_diego"
+
+[orbit]
+epoch_utc = "2026-10-14T06:00:00"
+periapsis_km = 420.0            # [E] ISS altitude after undocking
+apoapsis_km = 420.0
+inclination_deg = 51.6          # [S] ISS
+raan_deg = 60.0                 # [D] the first plane (10 deg steps) with a pass over the zone within reach in 48 h:
+                                # burn after 37 h (hidden test "Crew Dragon return: the first feasible orbit plane")
+argument_of_latitude_deg = 0.0
+rcs_propellant_kg = 2000.0      # [E] after the ISS mission; the return spends ~650 kg (d3: 598 kg deorbit, ~30 kg entry)
+
+[deorbit]
+entry_interface_km = 120.0
+entry_flight_path_deg = -2.0    # [E] d3: inside the crew's 4 g at L/D 0.2
+nominal_bank_deg = 30.0         # [E] d3
+max_crossrange_km = 40.0        # [E] d3
+search_window_h = 48.0

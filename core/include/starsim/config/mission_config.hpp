@@ -34,6 +34,29 @@ struct ShipReturnMission {
 
 ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
 
+// Capsule return from orbit (config/missions/<id>.toml, d4): the start orbit, the splashdown zone and the deorbit
+// planning settings (FlightSession::plan_capsule_return).
+struct CapsuleReturnMission {
+    std::string id;
+    std::string name;
+    std::string vehicle_id;
+    std::string zone_id;  // config/splashdown_zones.toml
+    time::UtcDateTime epoch_utc;
+    double periapsis_height_m = 0.0;  // above the equatorial radius
+    double apoapsis_height_m = 0.0;
+    double inclination_rad = 0.0;
+    double raan_rad = 0.0;
+    double argument_of_latitude_rad = 0.0;
+    double rcs_propellant_kg = 0.0;  // in the capsule's RCS tank at the start
+    double entry_interface_height_m = 0.0;
+    double entry_flight_path_rad = 0.0;
+    double nominal_bank_rad = 0.0;
+    double max_crossrange_m = 0.0;
+    double search_window_s = 0.0;
+};
+
+CapsuleReturnMission load_capsule_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
+
 // Where a mission's drone ship waits ([drone_ship] of an ascent mission): the nominal impact point of its first stage.
 struct MissionDroneShip {
     std::string id;  // config/drone_ships.toml

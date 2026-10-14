@@ -371,6 +371,11 @@ void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::St
                                    size_t first_stage) {
     auto config = config::load_vehicle(config_dir_, vehicle_id);
     config.stages.erase(config.stages.begin(), config.stages.begin() + static_cast<long>(first_stage));
+    place_in_orbit(config, state, epoch);
+}
+
+void FlightSession::place_in_orbit(const config::VehicleConfig& config, const math::StateVector& state,
+                                   time::Epoch epoch) {
     auto vehicle = std::make_unique<vehicle::Vehicle>(config, config_dir_);
     // Body x along the velocity, body z along the orbit normal.
     const math::Vec3 x = math::normalized(state.velocity_mps);

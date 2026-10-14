@@ -7,13 +7,16 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <random>
 
+#include "starsim/config/mission_config.hpp"
 #include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/parachute_sequencer.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/mat3.hpp"
+#include "starsim/sim/capsule_return_mission.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/spice/spice_adapters.hpp"
@@ -208,4 +211,177 @@ TEST_CASE("A capsule on its trunk has no parachute sequencer", "[dragon][splashd
     session.advance_to(t0 + 1.0);
     CHECK(session.parachute_sequencer(0) == nullptr);
     CHECK_FALSE(session.body(0).vehicle().parachutes_out());
+}
+
+TEST_CASE("Crew Dragon return mission loads", "[dragon][mission][config]") {
+    const auto m = config::load_capsule_return_mission(STARSIM_CONFIG_DIR, "crew_dragon_return");
+    CHECK(m.vehicle_id == "crew_dragon");
+    CHECK(m.zone_id == "pacific_san_diego");
+    CHECK(m.periapsis_height_m == 420000.0);
+    CHECK(m.inclination_rad == Catch::Approx(51.6 * deg));
+    CHECK(m.entry_flight_path_rad == Catch::Approx(-2.0 * deg));
+    CHECK(m.nominal_bank_rad == Catch::Approx(30.0 * deg));
+    CHECK(m.max_crossrange_m == 40000.0);
+    CHECK(m.rcs_propellant_kg == 2000.0);
+    const auto p = sim::capsule_return_parameters(m);
+    CHECK(p.entry_flight_path_rad == m.entry_flight_path_rad);
+    CHECK(p.gate_height_m == Catch::Approx(5500.0));
+}
+
+TEST_CASE("Crew Dragon return: the first feasible orbit plane", "[.][dragon][mission]") {
+    auto m = config::load_capsule_return_mission(STARSIM_CONFIG_DIR, "crew_dragon_return");
+    test::spice_session();  // leap seconds for the UTC epoch
+    const auto t0 = spice::SpiceTimeConverter{}.from_utc(m.epoch_utc);
+    for (double r = 0.0; r < 360.0; r += 10.0) {
+        m.raan_rad = r * deg;
+        sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+        sim::place_capsule_return_mission(session, m, STARSIM_CONFIG_DIR, t0);
+        if (session.plan_capsule_return(sim::capsule_return_parameters(m))) {
+            std::printf("first feasible RAAN %.0f deg (burn after %.1f h)\n", r,
+                        (session.ship_return_plan()->node.epoch - t0) / 3600.0);
+            return;
+        }
+    }
+    FAIL("no plane");
+}
+
+namespace {
+
+struct MissionRun {
+    bool planned = false;
+    double wait_h = 0.0;
+    double ignition_s = -1.0, cutoff_s = -1.0, trunk_s = -1.0, interface_s = -1.0;
+    Descent descent;  // times relative to the gate (fly_down)
+    double splashdown_after_ignition_s = -1.0;
+    double rcs_left_kg = 0.0;
+};
+
+// Dispersion of a return: orbit phase offset, MMH/NTO load, deorbit burn execution (applied at cutoff).
+struct MissionDispersion {
+    double phase_offset_deg = 0.0;
+    double rcs_scale = 1.0;
+    double burn_scale = 0.0;            // relative magnitude error
+    double pointing_rad = 0.0;          // pointing error
+    double pointing_azimuth_rad = 0.0;  // about the burn direction, from the orbit normal
+};
+
+// Places the mission (dispersed), plans and flies it to the water.
+MissionRun fly_mission(const MissionDispersion& dispersion = {}) {
+    auto m = config::load_capsule_return_mission(STARSIM_CONFIG_DIR, "crew_dragon_return");
+    m.argument_of_latitude_rad += dispersion.phase_offset_deg * deg;
+    m.rcs_propellant_kg *= dispersion.rcs_scale;
+    test::spice_session();  // leap seconds for the UTC epoch
+    const auto t0 = spice::SpiceTimeConverter{}.from_utc(m.epoch_utc);
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    sim::place_capsule_return_mission(session, m, STARSIM_CONFIG_DIR, t0);
+    MissionRun run;
+    run.planned = session.plan_capsule_return(sim::capsule_return_parameters(m));
+    if (!run.planned) return run;
+    run.wait_h = (session.ship_return_plan()->node.epoch - t0) / 3600.0;
+    // to the gate as in d3: big steps to the burn, 1 s after
+    while (static_cast<int>(session.capsule_return_step()) < static_cast<int>(sim::CapsuleReturnStep::Gate) &&
+           session.epoch() - t0 < 3.0 * 86400.0 && !session.body(session.controlled_index()).impacted()) {
+        double step = 1.0;
+        if (session.autopilot().state == sim::AutopilotState::Burn) {
+            const double to_ignition = session.autopilot().burn.time_to_ignition_s;
+            if (to_ignition > 900.0) step = to_ignition - 600.0;
+            if (run.ignition_s < 0.0 && session.autopilot().burn.ignite) run.ignition_s = session.epoch() - t0;
+        } else if (run.cutoff_s < 0.0 && run.ignition_s >= 0.0) {
+            run.cutoff_s = session.epoch() - t0;
+            const auto* plan = session.ship_return_plan();
+            const auto& s = session.body(session.controlled_index()).state();
+            const Vec3 u = math::normalized(plan->node.delta_v_gcrf_mps);
+            const Vec3 a = math::normalized(cross(s.position_gcrf_m, s.velocity_gcrf_mps));
+            const Vec3 b = cross(u, a);
+            const Vec3 w = a * std::cos(dispersion.pointing_azimuth_rad) + b * std::sin(dispersion.pointing_azimuth_rad);
+            session.apply_velocity_error(session.controlled_index(),
+                                         (u * dispersion.burn_scale + w * std::tan(dispersion.pointing_rad)) * plan->delta_v_mps);
+        }
+        session.advance_to(session.epoch() + step, 1000000);
+        if (run.trunk_s < 0.0 && session.body_count() == 2) run.trunk_s = session.epoch() - t0;
+        if (run.interface_s < 0.0 && run.cutoff_s >= 0.0 &&
+            session.telemetry(session.controlled_index()).altitude_m < m.entry_interface_height_m) {
+            run.interface_s = session.epoch() - t0;
+        }
+    }
+    const double gate_s = session.epoch() - t0;
+    run.descent = fly_down(session);
+    run.splashdown_after_ignition_s = gate_s + run.descent.splashdown_s - run.ignition_s;
+    run.rcs_left_kg = session.body(session.controlled_index()).vehicle().rcs_propellant_kg();
+    return run;
+}
+
+}  // namespace
+
+TEST_CASE("Crew Dragon return mission splashes down in the zone on the published timeline", "[dragon][mission][splashdown]") {
+    const auto r = fly_mission();
+    REQUIRE(r.planned);
+    const auto& d = r.descent;
+    std::printf("[validation] Crew Dragon return: waited %.1f h; burn %.0f s, trunk %.0f s after cutoff, interface %.0f s "
+                "after cutoff; drogues %.2f km / %.0f m/s, mains %.2f km / %.0f m/s %.0f s later, splashdown %.0f s after "
+                "the mains at %.1f m/s, %.2f km from the zone centre; ignition -> splashdown %.1f min (Crew-10: 54); "
+                "peak under canopies %.2f g; %.0f kg MMH/NTO left\n",
+                r.wait_h, r.cutoff_s - r.ignition_s, r.trunk_s - r.cutoff_s, r.interface_s - r.cutoff_s,
+                d.drogue_height_m / 1000.0, d.drogue_speed_mps, d.main_height_m / 1000.0, d.main_speed_mps,
+                d.main_s - d.drogue_s, d.splashdown_s - d.main_s, d.sink_mps, d.miss_m / 1000.0,
+                r.splashdown_after_ignition_s / 60.0, d.peak_g, r.rcs_left_kg);
+    CHECK(d.outcome == sim::LandingOutcome::SplashedDown);
+    CHECK(d.miss_m < 2000.0);                                          // user 2026-10-14: zone radius 2 km
+    CHECK(d.drogue_height_m == Catch::Approx(5500.0).epsilon(0.15));    // [S] ~18,000 ft
+    CHECK(d.drogue_speed_mps == Catch::Approx(156.0).epsilon(0.15));    // [S] ~350 mph
+    CHECK(d.main_height_m == Catch::Approx(1830.0).epsilon(0.15));      // [S] ~6,000 ft
+    CHECK(d.main_speed_mps == Catch::Approx(53.0).epsilon(0.15));       // [S] ~119 mph
+    CHECK(d.sink_mps == Catch::Approx(7.0).epsilon(0.30));              // [S] 15-16 mph
+    CHECK(r.splashdown_after_ignition_s / 60.0 == Catch::Approx(54.0).epsilon(0.15));  // [S] Crew-10 10:39 -> 11:33 EDT
+    CHECK(d.peak_g < 3.6);
+}
+
+namespace {
+
+// Dispersed returns on the mission's pass: an ISS-like orbit (51.6 deg) passes a given point within the capsule's 40 km
+// crossrange only every few days (from the 8 orbit phases 0-315 deg of the mission orbit only phase 0 has a pass within
+// 48 h, 2 within 96 h: a 45 deg phase shifts the ground track ~270 km at 32.6 N), so the phase is dispersed about the
+// mission's (+-3 deg, ~18 km), with the MMH/NTO load (+-10 %) and the deorbit burn execution (+-1 %, 0.5 deg).
+MissionDispersion dispersion_case(int index) {
+    std::mt19937 rng(20261014);
+    std::uniform_real_distribution<double> u(-1.0, 1.0);
+    MissionDispersion d;
+    for (int i = 0; i <= index; ++i) {
+        d.phase_offset_deg = 3.0 * u(rng);
+        d.rcs_scale = 1.0 + 0.1 * u(rng);
+        d.burn_scale = 0.01 * u(rng);
+        d.pointing_rad = 0.5 * deg * std::abs(u(rng));
+        d.pointing_azimuth_rad = constants::pi * u(rng);
+    }
+    return d;
+}
+
+void fly_dispersed_campaign(int first, int count) {
+    for (int i = first; i < first + count; ++i) {
+        const auto c = dispersion_case(i);
+        const auto r = fly_mission(c);
+        std::printf("[validation] dragon return case %d (phase %+.2f deg, MMH/NTO %+.1f %%, burn %+.2f %% / %.2f deg): "
+                    "planned %d, waited %.1f h, %s, %.2f km from the centre, %.1f m/s, peak %.2f g, %.1f min ignition -> "
+                    "splashdown\n",
+                    i, c.phase_offset_deg, (c.rcs_scale - 1.0) * 100.0, c.burn_scale * 100.0, c.pointing_rad / deg,
+                    r.planned, r.wait_h, sim::to_string(r.descent.outcome), r.descent.miss_m / 1000.0,
+                    r.descent.sink_mps, r.descent.peak_g, r.splashdown_after_ignition_s / 60.0);
+        INFO("case " << i);
+        CHECK(r.planned);
+        CHECK(r.descent.outcome == sim::LandingOutcome::SplashedDown);
+        CHECK(r.descent.miss_m < 2000.0);
+    }
+}
+
+}  // namespace
+
+TEST_CASE("Crew Dragon return campaign: cases 0-3", "[dragon][mission][validation]") { fly_dispersed_campaign(0, 4); }
+TEST_CASE("Crew Dragon return campaign: cases 4-7", "[dragon][mission][validation]") { fly_dispersed_campaign(4, 4); }
+
+// STARSIM_DRAGON_CASE=<0-7> (with STARSIM_DEBUG_ENTRY=1 / STARSIM_DEBUG_DEORBIT=1 for the guidance).
+TEST_CASE("Crew Dragon return single case", "[.][dragon]") {
+    const char* index = std::getenv("STARSIM_DRAGON_CASE");
+    const auto r = fly_mission(dispersion_case(index ? std::atoi(index) : 0));
+    std::printf("single case: %s, %.2f km from the centre, gate at %.2f km\n", sim::to_string(r.descent.outcome),
+                r.descent.miss_m / 1000.0, r.descent.drogue_height_m / 1000.0);
 }
