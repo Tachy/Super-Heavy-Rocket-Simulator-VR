@@ -12,6 +12,7 @@
 #include "ship_entry_scenario.hpp"
 #include "starsim/aero/capsule_aero.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/capsule_entry_control.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/mat3.hpp"
 #include "starsim/vehicle/flight_body.hpp"
@@ -90,6 +91,25 @@ public:
         const Vec3 u = air_velocity_body();
         return std::acos(std::clamp(-u.x / norm(u), -1.0, 1.0));
     }
+    Vec3 air_velocity_gcrf() const { return body_->state().attitude.rotate(air_velocity_body()); }
+    Vec3 up_gcrf() const { return math::normalized(body_->state().position_gcrf_m); }
+    double dynamic_pressure_pa() const {
+        const double v = norm(air_velocity_body());
+        return 0.5 * atmosphere_.at(altitude_m()).density_kg_m3 * v * v;
+    }
+    double bank_rad() const { return gnc::capsule_bank_rad(*body_, env_, epoch()); }
+    // One tick with the Dracos flying `bank_command_rad`.
+    void fly(double bank_command_rad) {
+        vehicle::VehicleCommand c;
+        c.rcs_torque_fraction = gnc::capsule_entry_torque_fraction(*body_, env_, epoch(), bank_command_rad);
+        step(c);
+    }
+    void set_bank(double bank_rad) {
+        auto st = body_->state();
+        st.attitude = gnc::capsule_trim_attitude(body_->vehicle(), air_velocity_gcrf(), up_gcrf(), bank_rad);
+        st.angular_velocity_body_radps = {};
+        body_->set_state(st);
+    }
     double altitude_m() const {
         const auto t = env_.earth_orientation.fixed_to_gcrf(epoch());
         return frames::fixed_to_geodetic(transpose(t.rotation) * body_->state().position_gcrf_m).height_m;
@@ -165,4 +185,66 @@ TEST_CASE("Vehicles without a lateral CG offset keep their moments", "[vehicle][
     CHECK(ship.capsule_aero() == nullptr);
     vehicle::Vehicle f9(config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5"), STARSIM_CONFIG_DIR);
     CHECK(f9.mass_properties().cg_point_m().y == 0.0);
+}
+
+TEST_CASE("Capsule trim attitude has the commanded bank", "[dragon][entry]") {
+    CapsuleEntryScenario s(60000.0, 7000.0, -1.0 * deg);
+    for (const double bank_deg : {-120.0, -30.0, 0.0, 45.0, 150.0}) {
+        s.set_bank(bank_deg * deg);
+        CHECK(s.bank_rad() / deg == Catch::Approx(bank_deg).margin(0.5));
+        CHECK(s.theta_rad() == Catch::Approx(s.trim().theta_rad).margin(0.2 * deg));
+    }
+}
+
+TEST_CASE("The Dracos roll the capsule to a commanded bank and hold the trim", "[dragon][entry]") {
+    CapsuleEntryScenario s(60000.0, 7000.0, -1.0 * deg);
+    s.set_bank(0.0);
+    const double propellant0 = s.body().vehicle().rcs_propellant_kg();
+    while (s.time_s() < 15.0) s.fly(60.0 * deg);
+    const auto w = s.body().state().angular_velocity_body_radps;
+    const Vec3 u = math::normalized(s.air_velocity_body());
+    const Vec3 w_perp = w - u * dot(w, u);
+    std::printf("[validation] capsule bank 0 -> 60 deg: %.1f deg after 15 s, theta %.1f deg (trim %.1f), pitch/yaw rate "
+                "%.2f deg/s\n",
+                s.bank_rad() / deg, s.theta_rad() / deg, s.trim().theta_rad / deg, norm(w_perp) / deg);
+    CHECK(std::abs(s.bank_rad() - 60.0 * deg) < 5.0 * deg);
+    CHECK(std::abs(s.theta_rad() - s.trim().theta_rad) < 3.0 * deg);
+    CHECK(norm(w_perp) < 2.0 * deg);
+    // reversal: through lift up (|bank| < 90 deg on the way), never through lift down
+    double worst = 0.0;
+    while (s.time_s() < 35.0) {
+        s.fly(-60.0 * deg);
+        worst = std::max(worst, std::abs(s.bank_rad()));
+    }
+    std::printf("[validation] capsule reversal 60 -> -60 deg: %.1f deg after 20 s, largest |bank| %.1f deg\n",
+                s.bank_rad() / deg, worst / deg);
+    CHECK(worst < 90.0 * deg);
+    CHECK(std::abs(s.bank_rad() + 60.0 * deg) < 5.0 * deg);
+    // holding and switching the bank through the entry costs tens of kilograms (Apollo: ~30-40 kg per entry [E])
+    double command = -60.0 * deg;
+    while (s.time_s() < 335.0) {
+        if (std::fmod(s.time_s(), 60.0) < CapsuleEntryScenario::dt_s) command = -command;
+        s.fly(command);
+    }
+    const double used = propellant0 - s.body().vehicle().rcs_propellant_kg();
+    std::printf("[validation] capsule entry control: %.1f kg of Draco propellant in 335 s\n", used);
+    CHECK(used < 60.0);
+    CHECK_FALSE(s.body().impacted());
+}
+
+TEST_CASE("A capsule tumbling off trim in thin air turns to its trim before the air bites", "[dragon][entry]") {
+    CapsuleEntryScenario s(110000.0, 7400.0, -1.5 * deg, 0.0);
+    {  // 90 deg off the trim, tumbling at 2 deg/s
+        CapsuleEntryScenario probe(110000.0, 7400.0, -1.5 * deg, 90.0 * deg - s.trim().theta_rad);
+        auto st = probe.body().state();
+        st.angular_velocity_body_radps = {0.0, 0.0, 2.0 * deg};
+        s.body().set_state(st);
+    }
+    while (s.dynamic_pressure_pa() < 1000.0 && s.time_s() < 900.0) s.fly(0.0);
+    std::printf("[validation] capsule from 90 deg / 2 deg/s at 110 km: at q = 1 kPa (%.0f s, %.1f km) theta %.1f deg "
+                "(trim %.1f), bank %.1f deg\n",
+                s.time_s(), s.altitude_m() / 1000.0, s.theta_rad() / deg, s.trim().theta_rad / deg, s.bank_rad() / deg);
+    REQUIRE(s.dynamic_pressure_pa() >= 1000.0);
+    CHECK(std::abs(s.theta_rad() - s.trim().theta_rad) < 5.0 * deg);
+    CHECK(std::abs(s.bank_rad()) < 10.0 * deg);
 }
