@@ -47,6 +47,14 @@ public:
         // free: a roll moves little mass far from the axis). A full-authority slew spends ~10x
         // the propellant of a slow one (start and stop impulse ~ rate), and the RCS supply is finite.
         double rcs_max_rate_radps = 0.0;
+        // Attitude hold on pulsed RCS (orbit): per axis no torque while the error is within hold_deadband_rad and the
+        // rate error within hold_rate_deadband_radps - the pulses then form a slow limit cycle instead of chattering
+        // (0: off).
+        double hold_deadband_rad = 0.0;
+        double hold_rate_deadband_radps = 0.0;
+        // Roll-rate limit when the RCS rolls (no gimbal roll authority), rad/s; 0: none. A blunt capsule's roll inertia
+        // is close to its pitch inertia: an unlimited roll there costs as much as an unlimited pitch slew.
+        double rcs_max_roll_rate_radps = 0.0;
     };
 
     AttitudeController() = default;

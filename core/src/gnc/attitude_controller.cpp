@@ -347,8 +347,22 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
             }
         }
     }
-    const Vec3 torque{inertia.x * kd * (rate.x - w.x), inertia.y * (kd * (rate.y - w.y) + ff_acceleration.y),
-                      inertia.z * (kd * (rate.z - w.z) + ff_acceleration.z)};
+    if (const double limit = gains_.rcs_max_roll_rate_radps; limit > 0.0 && !(a.roll_moment > 0.0)) {
+        rate.x = std::clamp(rate.x, -limit, limit);
+    }
+    Vec3 torque{inertia.x * kd * (rate.x - w.x), inertia.y * (kd * (rate.y - w.y) + ff_acceleration.y),
+                inertia.z * (kd * (rate.z - w.z) + ff_acceleration.z)};
+    if (gains_.hold_deadband_rad > 0.0) {
+        const double errors[3] = {roll_error, rotation.y, rotation.z};
+        const double rate_errors[3] = {w.x, w.y - ff_rate.y, w.z - ff_rate.z};
+        double* components[3] = {&torque.x, &torque.y, &torque.z};
+        for (int i = 0; i < 3; ++i) {
+            if (std::abs(errors[i]) < gains_.hold_deadband_rad &&
+                std::abs(rate_errors[i]) < gains_.hold_rate_deadband_radps) {
+                *components[i] = 0.0;
+            }
+        }
+    }
     return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins, gains_.flaps);
 }
 

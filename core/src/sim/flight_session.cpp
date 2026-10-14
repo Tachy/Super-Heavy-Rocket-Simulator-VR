@@ -202,6 +202,7 @@ void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::St
     launch_epoch_ = epoch;
     autopilot_ = {};
     burn_.reset();
+    attitude_mode_ = {};
 }
 
 // Candidate engine configurations of the lowest stage with engines, strongest first: all groups at full
@@ -359,6 +360,18 @@ bool FlightSession::abort_landing(size_t body_index) {
     if (flying.ship_landing) accepted = flying.ship_landing->request_abort();
     if (accepted && tower_) tower_->abort_catch();  // never open the arms under a body still aiming at them
     return accepted;
+}
+
+void FlightSession::apply_angular_rate(size_t body_index, const math::Vec3& rate_body_radps) {
+    auto& body = *bodies_.at(body_index).body;
+    auto state = body.state();
+    state.angular_velocity_body_radps = rate_body_radps;
+    body.set_state(state);
+}
+
+bool FlightSession::attitude_mode_active() const {
+    return attitude_mode_.kind != gnc::AttitudeModeKind::Free &&
+           (autopilot_.state == AutopilotState::Off || autopilot_.state == AutopilotState::Orbit);
 }
 
 void FlightSession::apply_velocity_error(size_t body_index, const math::Vec3& delta_v_gcrf_mps) {
@@ -580,6 +593,7 @@ void FlightSession::reset_mission_state() {
     burn_.reset();
     ship_return_ = false;
     deorbit_plan_.reset();
+    attitude_mode_ = {};
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -713,6 +727,20 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         }
         return command;
     }
+    if (attitude_mode_active()) {
+        const auto& s = flying.body->state();
+        gnc::AttitudeMode mode = attitude_mode_;
+        if (mode.kind == gnc::AttitudeModeKind::Sun && env_.ephemeris) {
+            mode.direction_gcrf = env_.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch_).position_m - s.position_gcrf_m;
+        }
+        const auto target = gnc::attitude_target(mode, {s.position_gcrf_m, s.velocity_gcrf_mps});
+        const gnc::AttitudeController::Feedforward feedforward{s.attitude.inverse_rotate(target.rate_gcrf_radps), {}};
+        orbit_controller_.steer(*flying.body, ambient_pressure_pa, target.axis_gcrf, target.roll_reference_gcrf,
+                                &feedforward)
+            .apply_to(command);
+        command.rcs_keep_force = true;  // an orbit: turns must not push the vehicle
+        return command;
+    }
     // Axis convention: body +y points downrange (launch heading), z = x cross y. Pitch input > 0 tips
     // the nose towards +y (rotation about +z); yaw input > 0 turns it to the right of the heading, i.e.
     // towards -z (rotation about +y; z = up x heading points to the left).
@@ -742,6 +770,7 @@ double FlightSession::coast_allowance_s() const {
     const bool guided = autopilot_.state == AutopilotState::PreLaunch || autopilot_.state == AutopilotState::Booster ||
                         autopilot_.state == AutopilotState::UpperStage;
     if (guided) return 0.0;
+    if (attitude_mode_active()) return 0.0;  // pulsed RCS hold: ticked
     if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0) return 0.0;
     double allowance = max_coast_s;
     if (autopilot_.state == AutopilotState::Burn) {

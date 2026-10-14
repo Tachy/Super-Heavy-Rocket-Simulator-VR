@@ -20,6 +20,7 @@
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/gnc/deorbit_planner.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
+#include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -207,6 +208,12 @@ public:
     // Before the landing burn the abort is remembered and the burn plans for the sea. False when the guidance cannot
     // abort (not returning, no sea at the site, already down or on the arms): then nothing changes.
     bool abort_landing(size_t body_index);
+    // Attitude mode of the controlled body while no autopilot phase steers it (state Off / Orbit; d2). Any mode but Free
+    // keeps the session ticking (pulsed RCS hold); Free lets it coast. Pilot input is ignored while a mode is held.
+    void set_attitude_mode(const gnc::AttitudeMode& mode) { attitude_mode_ = mode; }
+    const gnc::AttitudeMode& attitude_mode() const { return attitude_mode_; }
+    // Scenarios and tests: sets a body's angular rate (body axes).
+    void apply_angular_rate(size_t body_index, const math::Vec3& rate_body_radps);
     // Crew Dragon's nose cone (thrusters behind it fire only while it is open); no effect without one.
     void set_nose_cone(size_t body_index, bool open);
     // Landing legs of a body: start the deployment (guidance, pilot), or place them in a state (scenarios).
@@ -282,6 +289,14 @@ private:
     // Ship flip and landing burn: gimbals with flaps and RCS, faster than in the entry [E].
     // [E] actuator delay: the gimbals slew 30 deg (stop to stop) at 20 deg/s, half of that on average
     gnc::AttitudeController ship_landing_controller_{gnc::AttitudeController::Gains{1.5, 0.9, false, true, 0.75}};
+    // Orbit attitude modes on pulsed RCS: slow (1 deg/s slews on every axis [E]: the RCS supply is finite; an unlimited
+    // roll of the capsule spent 3.5 kg on a 180 deg turn), with a hold deadband [E] 0.5 deg / 0.05 deg/s so the hold
+    // settles into a slow limit cycle instead of chattering (d2).
+    gnc::AttitudeController orbit_controller_{gnc::AttitudeController::Gains{
+        0.3, 0.9, false, false, 0.0, 1.0 * constants::deg_to_rad, 0.5 * constants::deg_to_rad,
+        0.05 * constants::deg_to_rad, 1.0 * constants::deg_to_rad}};
+    gnc::AttitudeMode attitude_mode_;
+    bool attitude_mode_active() const;  // a mode is held now (not Free, no autopilot phase steering)
     std::vector<Flying> bodies_;
     size_t controlled_ = 0;
     PilotInput input_;

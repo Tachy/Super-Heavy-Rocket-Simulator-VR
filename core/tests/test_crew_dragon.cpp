@@ -6,9 +6,11 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
+#include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -171,4 +173,123 @@ TEST_CASE("Abort-only engines are never lit by the session", "[dragon][sim]") {
     session.advance_to(t_deep + 1.0);
     CHECK_FALSE(session.body(0).vehicle().any_engine_producing_thrust());
     CHECK(session.minimum_burn_dv_mps() == 0.0);  // no burn configuration on main engines
+}
+
+TEST_CASE("The LVLH frame: x along the velocity, z to nadir, rotating at the orbit rate", "[dragon][attitude]") {
+    const double gm = 3.986004418e14;
+    const orbit::KeplerianElements circular{6578137.0, 0.0, 0.9, 0.3, 0.0, 1.0};
+    const auto s = orbit::state_from_elements(circular, gm);
+    const auto q = gnc::lvlh_attitude_gcrf(s);
+    CHECK(norm(q.rotate({1.0, 0.0, 0.0}) - math::normalized(s.velocity_mps)) < 1e-9);  // circular: v is horizontal
+    CHECK(norm(q.rotate({0.0, 0.0, 1.0}) + math::normalized(s.position_m)) < 1e-12);
+    const auto target = gnc::attitude_target(gnc::lvlh_hold(), s);
+    const double n = std::sqrt(gm / std::pow(circular.semi_major_axis_m, 3));
+    CHECK(norm(target.rate_gcrf_radps) == Catch::Approx(n).epsilon(1e-9));
+    CHECK(dot(target.rate_gcrf_radps, cross(s.position_m, s.velocity_mps)) > 0.0);
+    // "Trunk forward": the body turned 180 deg about z in LVLH points its nose against the velocity.
+    const auto back =
+        gnc::attitude_target(gnc::lvlh_hold(math::Quat::from_axis_angle({0.0, 0.0, 1.0}, constants::pi)), s);
+    CHECK(dot(back.axis_gcrf, math::normalized(s.velocity_mps)) == Catch::Approx(-1.0));
+}
+
+namespace {
+
+// Crew Dragon (trunk + capsule) alone on a 200 km circular orbit at 51.6 deg, nose cone open.
+struct DragonInOrbit {
+    const spice::SpiceEphemeris* ephemeris;
+    const frames::BodyOrientation* earth;
+    sim::FlightSession session;
+    time::Epoch t0;
+    double gm;
+    explicit DragonInOrbit(const spice::SpiceEphemeris& eph, const frames::BodyOrientation& orientation)
+        : ephemeris(&eph), earth(&orientation), session(eph, orientation, STARSIM_CONFIG_DIR), t0(t_deep),
+          gm(session.gm_earth_m3ps2()) {
+        const orbit::KeplerianElements circular{6378137.0 + 200e3, 0.0, 51.6 * constants::deg_to_rad, 0.0, 0.0, 0.0};
+        session.place_in_orbit("crew_dragon", orbit::state_from_elements(circular, gm), t0);
+        session.set_nose_cone(0, true);
+    }
+};
+
+double angle_between(const Vec3& a, const Vec3& b) {
+    return std::acos(std::clamp(dot(math::normalized(a), math::normalized(b)), -1.0, 1.0));
+}
+
+}  // namespace
+
+TEST_CASE("Dragon captures an inertial attitude from a tumble and holds it on pulses", "[dragon][attitude]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    DragonInOrbit o(ephemeris, earth);
+    auto& s = o.session;
+    const auto hold = s.body(0).state().attitude;
+    s.set_attitude_mode(gnc::inertial_hold(hold));
+    s.apply_angular_rate(0, {0.5 * constants::deg_to_rad, -1.0 * constants::deg_to_rad, 0.7 * constants::deg_to_rad});
+    const double kg0 = s.body(0).vehicle().rcs_propellant_kg();
+    double worst = 0.0, kg_after_capture = 0.0;
+    for (double t = 1.0; t <= 1800.0; t += 1.0) {
+        s.advance_to(o.t0 + t, 1000);
+        if (t == 120.0) kg_after_capture = s.body(0).vehicle().rcs_propellant_kg();
+        if (t > 120.0) {
+            worst = std::max(worst, angle_between(s.body(0).state().attitude.rotate({1.0, 0.0, 0.0}),
+                                                  hold.rotate({1.0, 0.0, 0.0})));
+        }
+    }
+    const double used = kg0 - s.body(0).vehicle().rcs_propellant_kg();
+    const double hold_kg_per_h = (kg_after_capture - s.body(0).vehicle().rcs_propellant_kg()) / (1680.0 / 3600.0);
+    std::printf("[validation] Dragon inertial hold 30 min after a 1.3 deg/s tumble: worst %.2f deg after 2 min, %.2f kg "
+                "(capture %.2f kg, hold %.2f kg/h)\n",
+                worst / constants::deg_to_rad, used, kg0 - kg_after_capture, hold_kg_per_h);
+    CHECK(worst < 1.0 * constants::deg_to_rad);
+    CHECK(used > 0.0);
+    CHECK(used < 5.0);  // [E] ruling 4: ~1 kg/h hold + the capture
+}
+
+TEST_CASE("Dragon holds LVLH with its trunk forward for a quarter orbit", "[dragon][attitude]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    DragonInOrbit o(ephemeris, earth);
+    auto& s = o.session;
+    const auto mode = gnc::lvlh_hold(math::Quat::from_axis_angle({0.0, 0.0, 1.0}, constants::pi));
+    s.set_attitude_mode(mode);
+    const double kg0 = s.body(0).vehicle().rcs_propellant_kg();
+    double worst = 0.0, kg_after_turn = 0.0;
+    for (double t = 1.0; t <= 1330.0; t += 1.0) {
+        s.advance_to(o.t0 + t, 1000);
+        const auto& b = s.body(0).state();
+        if (t == 300.0) kg_after_turn = s.body(0).vehicle().rcs_propellant_kg();
+        if (std::getenv("STARSIM_VERBOSE") && static_cast<int>(t) % 20 == 0) {
+            const auto target = gnc::attitude_target(mode, {b.position_gcrf_m, b.velocity_gcrf_mps});
+            const Vec3 w = b.angular_velocity_body_radps;
+            const Vec3 wt = b.attitude.inverse_rotate(target.rate_gcrf_radps);
+            std::printf("t %4.0f err %.3f deg w %.5f %.5f %.5f target %.5f %.5f %.5f kg %.3f\n", t,
+                        angle_between(b.attitude.rotate({1.0, 0.0, 0.0}), target.axis_gcrf) / constants::deg_to_rad, w.x,
+                        w.y, w.z, wt.x, wt.y, wt.z, kg0 - s.body(0).vehicle().rcs_propellant_kg());
+        }
+        if (t > 300.0) {  // after the 180 deg turn
+            const auto target = gnc::attitude_target(mode, {b.position_gcrf_m, b.velocity_gcrf_mps});
+            worst = std::max(worst, angle_between(b.attitude.rotate({1.0, 0.0, 0.0}), target.axis_gcrf));
+        }
+    }
+    std::printf("[validation] Dragon LVLH trunk-forward hold: worst %.2f deg, turn %.2f kg, hold %.2f kg/h\n",
+                worst / constants::deg_to_rad, kg0 - kg_after_turn,
+                (kg_after_turn - s.body(0).vehicle().rcs_propellant_kg()) / (1030.0 / 3600.0));
+    CHECK(worst < 1.5 * constants::deg_to_rad);
+    CHECK(kg0 - s.body(0).vehicle().rcs_propellant_kg() < 4.0);  // [E] 180 deg turn at 1 deg/s + ~3 kg/h hold
+}
+
+TEST_CASE("Dragon points its nose at the Sun", "[dragon][attitude]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    DragonInOrbit o(ephemeris, earth);
+    auto& s = o.session;
+    gnc::AttitudeMode sun;
+    sun.kind = gnc::AttitudeModeKind::Sun;
+    s.set_attitude_mode(sun);
+    s.advance_to(o.t0 + 600.0, 200000);
+    const auto& b = s.body(0).state();
+    const Vec3 to_sun = ephemeris.state_gcrf(ephemeris::Body::Sun, s.epoch()).position_m - b.position_gcrf_m;
+    CHECK(angle_between(b.attitude.rotate({1.0, 0.0, 0.0}), to_sun) < 1.0 * constants::deg_to_rad);
 }
