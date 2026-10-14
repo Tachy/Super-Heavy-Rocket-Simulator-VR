@@ -79,6 +79,15 @@ private:
     double target_speed_mps_ = 0.0;
     double kick_start_s_ = -1.0;
     time::Epoch liftoff_;
+    // J2-aware insertion into a circular target (gnc/j2_insertion): radius, radial and horizontal speed at the predicted
+    // cutoff point, re-solved when that point moves by more than j2_resolve_angle; inactive: the Kepler target.
+    bool insertion_active_ = false;
+    double insertion_u_rad_ = 0.0;
+    double insertion_radius_m_ = 0.0;
+    double insertion_radial_mps_ = 0.0;
+    double insertion_horizontal_mps_ = 0.0;
+    void update_insertion(const math::Vec3& r_hat, double r, double vt, double t_go, const vehicle::FlightEnvironment& env,
+                          time::Epoch epoch);
     // PEG state
     double peg_a_ = 0.0;
     double peg_b_ = 0.0;

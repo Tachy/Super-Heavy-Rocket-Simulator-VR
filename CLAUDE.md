@@ -117,8 +117,13 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites.
   Physics ground = flat at the pad height (FlightBody::ground_height_m): gentle contact (<= 3 m/s, <= 10 deg)
   rests, harder contact is an impact. Sky is black (no atmosphere rendering). Terrain/atmosphere: M8.
-- Orbit targets are judged on osculating elements at cutoff. Burn planning helpers are two-body; in the J2
-  field a Kepler-circular orbit oscillates ~10 km in radius (J2 raises gravity ~0.14 %). J2-aware targeting: open.
+- Circular ascent targets are J2-aware (`gnc/j2_insertion`): when the gravity model has J2
+  (`GravityModel::central_j2`), PEG aims at the radius, radial and horizontal speed at the predicted cutoff point whose
+  next revolution stays closest to the target radius (Gauss-Newton on a point-mass + J2 revolution, re-solved when the
+  cutoff point moves > 2 deg). A Kepler-circular insertion swung 5-20 km in radius (Starship 26.5 deg: 190.8-200.0 km);
+  now the flown revolution keeps 199.7-201.6 km - the J2 short-period swing left is 0.7 / 2.1 / 3.3 km at 26.5 / 51.6 /
+  97 deg. Circular-orbit tests judge the flown revolution; elliptical targets (Starlink 200 x 280 km) are still judged
+  on osculating elements at cutoff (Kepler). Burn planning helpers are two-body.
 - C++ sources are UTF-8 (/utf-8); UI strings in the core are German.
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.

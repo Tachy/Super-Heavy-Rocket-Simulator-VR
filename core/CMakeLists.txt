@@ -22,6 +22,7 @@ add_library(starsim_core STATIC
     src/vehicle/flight_body.cpp
     src/gnc/attitude_controller.cpp
     src/gnc/ascent_guidance.cpp
+    src/gnc/j2_insertion.cpp
     src/gnc/burn_node.cpp
     src/gnc/booster_return.cpp
     src/gnc/descent_model.cpp

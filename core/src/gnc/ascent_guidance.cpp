@@ -4,6 +4,8 @@
 #include <cmath>
 
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/environment/gravity.hpp"
+#include "starsim/gnc/j2_insertion.hpp"
 #include "starsim/math/constants.hpp"
 
 namespace starsim::gnc {
@@ -11,6 +13,9 @@ namespace starsim::gnc {
 using math::Vec3;
 
 namespace {
+
+// [E] re-solve the J2-aware insertion when the predicted cutoff point moves by more than this.
+constexpr double j2_resolve_angle_rad = 2.0 * constants::deg_to_rad;
 
 constexpr double earth_rotation_rate_radps = 7.2921150e-5;
 constexpr double equatorial_radius_m = 6378137.0;
@@ -98,6 +103,7 @@ void AscentGuidance::start(const vehicle::FlightBody& body, const frames::BodyOr
     liftoff_ = epoch;
     kick_start_s_ = -1.0;
     peg_converged_ = false;
+    insertion_active_ = false;
 }
 
 GuidanceCommand AscentGuidance::update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
@@ -155,6 +161,29 @@ GuidanceCommand AscentGuidance::open_loop(const vehicle::FlightBody& body, const
     return cmd;
 }
 
+void AscentGuidance::update_insertion(const Vec3& r_hat, double r, double vt, double t_go,
+                                      const vehicle::FlightEnvironment& env, time::Epoch epoch) {
+    const double j2 = env.gravity.central_j2();
+    const bool circular = std::abs(target_.apoapsis_altitude_m - target_.periapsis_altitude_m) < 1.0;
+    if (j2 == 0.0 || !circular) return;
+    const Vec3 pole = env.earth_orientation.fixed_to_gcrf(epoch).rotation * Vec3{0.0, 0.0, 1.0};
+    const Vec3 node = math::normalized(cross(pole, plane_normal_));
+    const Vec3 in_plane = cross(plane_normal_, node);
+    // Cutoff point: the current position advanced along the target plane by the angle flown in the time to go.
+    const double angle = 0.5 * (vt + target_speed_mps_) * t_go / r;
+    const Vec3 forward = math::normalized(cross(plane_normal_, r_hat));
+    const Vec3 at_cutoff = r_hat * std::cos(angle) + forward * std::sin(angle);
+    const double u = std::atan2(dot(at_cutoff, in_plane), dot(at_cutoff, node));
+    if (insertion_active_ && std::abs(std::remainder(u - insertion_u_rad_, 2.0 * constants::pi)) < j2_resolve_angle_rad) return;
+    const double inclination = std::acos(std::clamp(dot(plane_normal_, pole), -1.0, 1.0));
+    const auto s = j2_circular_insertion(gm_, target_radius_m_, inclination, u, j2, environment::earth_j2_reference_radius_m);
+    insertion_active_ = true;
+    insertion_u_rad_ = u;
+    insertion_radius_m_ = s.radius_m;
+    insertion_radial_mps_ = s.radial_speed_mps;
+    insertion_horizontal_mps_ = s.horizontal_speed_mps;
+}
+
 GuidanceCommand AscentGuidance::peg(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                     time::Epoch epoch) {
     const auto& s = body.state();
@@ -177,8 +206,10 @@ GuidanceCommand AscentGuidance::peg(const vehicle::FlightBody& body, const vehic
     const double a = perf.thrust_n / mass;
     const double ve = perf.thrust_n / perf.mass_flow_kgps;
     const double tau = ve / a;
-    const double r_t = target_radius_m_;
-    const double vt_t = target_speed_mps_;
+    if (peg_converged_) update_insertion(r_hat, r, vt, peg_t_, env, epoch);
+    const double r_t = insertion_active_ ? insertion_radius_m_ : target_radius_m_;
+    const double vt_t = insertion_active_ ? insertion_horizontal_mps_ : target_speed_mps_;
+    const double vr_t = insertion_active_ ? insertion_radial_mps_ : 0.0;
 
     auto solve_ab = [&](double t_go) {
         const double b0 = -ve * std::log(1.0 - t_go / tau);
@@ -186,7 +217,7 @@ GuidanceCommand AscentGuidance::peg(const vehicle::FlightBody& body, const vehic
         const double c0 = b0 * t_go - b1;
         const double c1 = c0 * tau - ve * t_go * t_go / 2.0;
         const double det = b0 * c1 - b1 * c0;
-        const double rhs_v = 0.0 - vr;                // target radial speed: 0 (insertion at periapsis)
+        const double rhs_v = vr_t - vr;               // target radial speed: 0 (insertion at periapsis; J2: solved)
         const double rhs_r = r_t - r - vr * t_go;
         peg_a_ = (rhs_v * c1 - b1 * rhs_r) / det;
         peg_b_ = (b0 * rhs_r - c0 * rhs_v) / det;
@@ -254,7 +285,10 @@ GuidanceCommand AscentGuidance::peg(const vehicle::FlightBody& body, const vehic
     const Vec3 horizontal_now = math::normalized(cross(h_now, r_hat));
     // ... turned into the target plane by the out-of-plane speed left (the plane steering above ends ~10 m/s short
     // of it on a steep plane: 0.1 deg of inclination), within what the tail-off cannot fix anyway.
-    const Vec3 v_go = required_speed * horizontal_now - s.velocity_gcrf_mps - vh * n_hat;
+    // J2-aware circular insertion: the solved horizontal and radial speed instead of the Kepler speed.
+    const Vec3 v_target = insertion_active_ ? insertion_horizontal_mps_ * horizontal_now + insertion_radial_mps_ * r_hat
+                                            : required_speed * horizontal_now;
+    const Vec3 v_go = v_target - s.velocity_gcrf_mps - vh * n_hat;
     const double tail_off_dv = 0.5 * a * shutdown_time_s(body.vehicle());
     if (peg_t_ < terminal_time_s) {
         cmd.thrust_direction_gcrf = math::normalized(v_go);

@@ -2,6 +2,7 @@
 
 #include "starsim/ephemeris/ephemeris.hpp"
 #include "starsim/frames/body_orientation.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/math/vec3.hpp"
 #include "starsim/time/epoch.hpp"
 
@@ -16,6 +17,8 @@ public:
 
     virtual ephemeris::Body central_body() const = 0;
     virtual math::Vec3 acceleration_mps2(const math::Vec3& position_m, time::Epoch epoch) const = 0;
+    // The central body's J2 as modelled (0: not modelled), for guidance that plans in the same field.
+    virtual double central_j2() const { return 0.0; }
 };
 
 // Fidelity flags of the default gravity model (all switchable, see CLAUDE.md).
@@ -38,6 +41,9 @@ public:
     math::Vec3 acceleration_mps2(const math::Vec3& position_m, time::Epoch epoch) const override;
 
     const PointMassGravityConfig& config() const { return config_; }
+    double central_j2() const override {
+        return config_.central_body == ephemeris::Body::Earth && config_.earth_j2 ? constants::earth_j2 : 0.0;
+    }
 
 private:
     math::Vec3 third_body(ephemeris::Body body, double gm, const math::Vec3& position_m, time::Epoch epoch) const;

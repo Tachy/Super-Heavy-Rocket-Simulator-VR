@@ -42,6 +42,7 @@ struct OrbitResult {
     double inclination_deg = 0.0;
     double propellant_t = 0.0;
     double flight_time_s = 0.0;
+    double flown_low_km = 0.0, flown_high_km = 0.0;  // radius over the next revolution, as altitude
     sim::AutopilotState state = sim::AutopilotState::Off;
 };
 
@@ -109,6 +110,8 @@ OrbitResult fly_to_orbit(const gnc::AscentTarget& target, bool booster_engine_ou
     const auto flown = flown_orbit(session, session.controlled_index());
     std::printf("[validation]   flown radius range over one revolution (J2 field): %.1f .. %.1f km\n", flown.low_km,
                 flown.high_km);
+    r.flown_low_km = flown.low_km;
+    r.flown_high_km = flown.high_km;
     r.inclination_deg = elements.inclination_rad / deg;
     r.propellant_t = ship.vehicle().propellant_kg() / 1000.0;
     r.flight_time_s = session.mission_time_s();
@@ -137,8 +140,11 @@ TEST_CASE("Autopilot flies Starship V3 from Starbase into a 200 km orbit", "[gnc
     gnc::AscentTarget target{200e3, 200e3, 26.5 * deg, true};
     const auto r = fly_to_orbit(target, false);
     REQUIRE(r.state == sim::AutopilotState::Orbit);
-    CHECK(std::abs(r.periapsis_km - 200.0) < 5.0);
-    CHECK(std::abs(r.apoapsis_km - 200.0) < 5.0);
+    // J2-aware insertion: the flown revolution stays at 200 km within the J2 short-period swing (~0.7 km at 26.5 deg
+    // in the J2-only field; the Moon and Sun add a little); the osculating elements at cutoff differ by design.
+    CHECK(r.flown_low_km > 198.0);
+    CHECK(r.flown_high_km < 203.0);
+    CHECK(r.flown_high_km - r.flown_low_km < 3.0);
     CHECK(std::abs(r.inclination_deg - 26.5) < 0.1);
     CHECK(r.propellant_t > 0.0);
 }
@@ -147,8 +153,8 @@ TEST_CASE("Closed-loop guidance recovers from a booster engine-out", "[gnc][vali
     gnc::AscentTarget target{200e3, 200e3, 26.5 * deg, true};
     const auto r = fly_to_orbit(target, true);
     REQUIRE(r.state == sim::AutopilotState::Orbit);
-    CHECK(std::abs(r.periapsis_km - 200.0) < 5.0);
-    CHECK(std::abs(r.apoapsis_km - 200.0) < 5.0);
+    CHECK(r.flown_low_km > 198.0);  // the flown revolution (J2-aware insertion), as the nominal ascent
+    CHECK(r.flown_high_km < 203.0);
     CHECK(std::abs(r.inclination_deg - 26.5) < 0.1);
 }
 
