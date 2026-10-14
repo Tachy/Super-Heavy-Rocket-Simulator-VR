@@ -332,11 +332,21 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
     const Vec3 ff_rate = feedforward ? Vec3{0.0, feedforward->rate_body_radps.y, feedforward->rate_body_radps.z} : Vec3{};
     const Vec3 ff_acceleration =
         feedforward ? Vec3{0.0, feedforward->acceleration_body_radps2.y, feedforward->acceleration_body_radps2.z} : Vec3{};
-    const Vec3 rate{rate_command(roll_error, gain, max_acceleration(a.roll_moment, rcs_max.x, fin_max.x, inertia.x)),
-                    rate_command(rotation.y, gain, max_acceleration(a.lever_moment, rcs_max.y, fin_max.y, inertia.y),
-                                 gains_.actuator_delay_s) + ff_rate.y,
-                    rate_command(rotation.z, gain, max_acceleration(a.lever_moment, rcs_max.z, fin_max.z, inertia.z),
-                                 gains_.actuator_delay_s) + ff_rate.z};
+    Vec3 rate{rate_command(roll_error, gain, max_acceleration(a.roll_moment, rcs_max.x, fin_max.x, inertia.x)),
+              rate_command(rotation.y, gain, max_acceleration(a.lever_moment, rcs_max.y, fin_max.y, inertia.y),
+                           gains_.actuator_delay_s) + ff_rate.y,
+              rate_command(rotation.z, gain, max_acceleration(a.lever_moment, rcs_max.z, fin_max.z, inertia.z),
+                           gains_.actuator_delay_s) + ff_rate.z};
+    if (const double limit = gains_.rcs_max_rate_radps; limit > 0.0) {
+        if (!(a.lever_moment > 0.0)) {
+            // Pitch and yaw together: the slew about the combined axis stays within the limit.
+            const double r = std::hypot(rate.y, rate.z);
+            if (r > limit) {
+                rate.y *= limit / r;
+                rate.z *= limit / r;
+            }
+        }
+    }
     const Vec3 torque{inertia.x * kd * (rate.x - w.x), inertia.y * (kd * (rate.y - w.y) + ff_acceleration.y),
                       inertia.z * (kd * (rate.z - w.z) + ff_acceleration.z)};
     return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins, gains_.flaps);

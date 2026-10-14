@@ -43,6 +43,10 @@ public:
         // Pitch/yaw braking starts this much later than commanded (gimbals slewing to the opposite stop): large turns
         // are slowed earlier so they end without overshoot (0: instantaneous actuators).
         double actuator_delay_s = 0.0;
+        // Slew-rate limit of pitch and yaw when the RCS turns them (no gimbal authority), rad/s; 0: none (roll is
+        // free: a roll moves little mass far from the axis). A full-authority slew spends ~10x
+        // the propellant of a slow one (start and stop impulse ~ rate), and the RCS supply is finite.
+        double rcs_max_rate_radps = 0.0;
     };
 
     AttitudeController() = default;

@@ -269,6 +269,10 @@ private:
     gnc::AttitudeController controller_;
     // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).
     gnc::AttitudeController return_controller_{gnc::AttitudeController::Gains{1.5, 0.9, true}};
+    // Its coast phase (turning engines first on the RCS, d1): slews limited to 2 deg/s [E] - the RCS supply is finite
+    // (Falcon 9 nitrogen); a full-authority turn spent it (and the momentum the air adds at 70 km) before the entry burn.
+    gnc::AttitudeController return_coast_controller_{
+        gnc::AttitudeController::Gains{1.5, 0.9, true, false, 0.0, 2.0 * constants::deg_to_rad}};
     // Entering ship: flaps + RCS, slow (the flaps move at ~20 deg/s: 0.8 rad/s limit-cycles in roll, b1). [E] actuator
     // delay 0.5 s (the flaps' slew): without it the belly flop's nose turn (5 deg/s) set off a roll limit cycle and the
     // ship departed (b4 campaign).

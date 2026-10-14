@@ -663,7 +663,9 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     }
     if (index != controlled_ || flying.return_guidance) {
         if (flying.return_guidance && !flying.body->impacted()) {
-            apply_return_command(flying, return_controller_, ambient_pressure_pa, command);
+            const bool coasting = flying.return_guidance->phase() == gnc::ReturnPhase::Coast;
+            apply_return_command(flying, coasting ? return_coast_controller_ : return_controller_, ambient_pressure_pa,
+                                 command);
         }
         return command;
     }

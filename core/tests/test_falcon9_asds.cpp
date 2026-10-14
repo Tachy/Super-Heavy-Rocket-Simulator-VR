@@ -441,14 +441,18 @@ TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage lan
         if (!status) break;
         if (std::getenv("STARSIM_VERBOSE") && std::fmod(session.mission_time_s(), 5.0) < 0.05) {
             const auto [h, v] = height_speed(stage);
-            std::printf("    T+%.0f s %s %.1f km %.0f m/s miss %.0f m\n", session.mission_time_s(), gnc::to_string(status->phase),
-                        h / 1e3, v, status->impact_miss_m);
-        }
+            const Vec3 axis_now = stage.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+            std::printf("    T+%.0f s %s %.1f km %.0f m/s RCS %.0f kg miss %.0f m, axis error %.1f deg, rate %.3f rad/s\n",
+                        session.mission_time_s(), gnc::to_string(status->phase), h / 1e3, v,
+                        stage.vehicle().rcs_propellant_kg(), status->impact_miss_m,
+                        std::acos(std::clamp(dot(axis_now, status->axis_gcrf), -1.0, 1.0)) / deg,
+                        norm(stage.state().angular_velocity_body_radps));        }
         if (status->phase != last_phase) {
             const auto [h, v] = height_speed(stage);
             if (std::getenv("STARSIM_VERBOSE")) {
-                std::printf("  T+%.1f s %s: %.1f km, %.0f m/s, %.1f t, miss %.0f m\n", session.mission_time_s(),
-                            gnc::to_string(status->phase), h / 1e3, v, stage.vehicle().propellant_kg() / 1e3, status->impact_miss_m);
+                std::printf("  T+%.1f s %s: %.1f km, %.0f m/s, %.1f t, RCS %.0f kg, miss %.0f m\n", session.mission_time_s(),
+                            gnc::to_string(status->phase), h / 1e3, v, stage.vehicle().propellant_kg() / 1e3,
+                            stage.vehicle().rcs_propellant_kg(), status->impact_miss_m);
             }
             if (status->phase == gnc::ReturnPhase::EntryBurn && entry_s < 0.0) {
                 entry_s = session.mission_time_s();
@@ -697,8 +701,11 @@ TEST_CASE("Falcon 9 ASDS single MECO case", "[.][asds-single]") {
         const Vec3 origin = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
         const Vec3 v = sim::site_enu_m(site, origin + v_fixed);
         if (status->phase != last || std::fmod(t, 10.0) < 0.05) {
-            std::printf("  t %.1f %s: enu %.0f,%.0f,%.0f v %.1f,%.1f,%.1f miss %.0f m, %.1f t\n", t, gnc::to_string(status->phase),
-                        p.x, p.y, p.z, v.x, v.y, v.z, status->impact_miss_m, b.vehicle().propellant_kg() / 1e3);
+            const Vec3 axis = b.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+            std::printf("  t %.1f %s: enu %.0f,%.0f,%.0f v %.1f,%.1f,%.1f miss %.0f m, %.1f t, RCS %.0f kg, axis error %.1f deg\n",
+                        t, gnc::to_string(status->phase), p.x, p.y, p.z, v.x, v.y, v.z, status->impact_miss_m,
+                        b.vehicle().propellant_kg() / 1e3, b.vehicle().rcs_propellant_kg(),
+                        std::acos(std::clamp(dot(axis, status->axis_gcrf), -1.0, 1.0)) / deg);
             last = status->phase;
         }
         if (session.leg_touchdown(0) != sim::LegTouchdown::None || b.impacted()) break;

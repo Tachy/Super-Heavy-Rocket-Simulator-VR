@@ -32,7 +32,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
-  aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating).
+  aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating),
+  propulsion (engine performance, RCS allocator + pulse modulator).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
   CSPICE lives only in `core/src/spice/` and implements `time::TimeScaleConverter`,
@@ -202,8 +203,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Start the game with `Start-Desktop.cmd` (repo root).
 - GNC (M5): `gnc/ascent_guidance` (pitch program + PEG + terminal v_go steering), `gnc/burn_node`
   (closed-loop burns), autopilot state machine in `sim::FlightSession`. Burns pick the strongest engine
-  configuration whose start/shutdown impulse is <= 1/4 of the delta-v; smaller burns are rejected (RCS
-  translation comes with docking, M9). Game keys: P ascent autopilot (config/missions/leo_ascent.toml),
+  configuration whose start/shutdown impulse is <= 1/4 of the delta-v; smaller burns fly on RCS translation along +x
+  (the thrusters' force and mass flow) when the vehicle has thrusters along +x (the ship's aft ullage thrusters,
+  Falcon 9 second stage), else they are rejected. Game keys: P ascent autopilot (config/missions/leo_ascent.toml),
   O circularize at apoapsis, R ship return to the site's tower (b4), X autopilot off. HUD: NavBall (`ui/nav_ball.gd`), flight director
   (`ui/flight_overlay.gd`), trajectories (`vehicle/trajectory_view.gd`: green planned, orange predicted).
 - Catch tower (M6, `contact/*`, `sim/catch_tower_sim`): a site loaded with `config::load_launch_site` /
@@ -420,6 +422,20 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   site frame in ITRF), `body_legs(i)` (geometry, deployment, touchdown), `body_grid_fins(i)` (geometry, deflection);
   `return_state(i)["legs"]`. Covered by the smoke test. The bindings build with C++ exceptions on
   (`GODOTCPP_DISABLE_EXCEPTIONS OFF`): godot-cpp's default turned every core config error into an engine crash.
+- RCS (d1 of `docs/superpowers/specs/2026-10-14-rcs-crew-dragon-design.md`): individual thrusters from `[stage.rcs]` pods
+  (Super Heavy 12 x 3 kN at the forward dome, ship 14 x 1.5 kN fore and aft incl. two aft ullage thrusters along +x,
+  Falcon 9 8 x 450 N at the interstage and 8 x 200 N on the second stage; layouts [E]), on/off with a fixed thrust
+  (constant pressure; user 2026-10-14: no continuous mode, the autopilots fly on the pulses). Per tick
+  `Vehicle::update_rcs` allocates the commanded torque / force fractions (`propulsion/rcs_allocator`: box QP solved by
+  an exact active set on the 6 x n effectiveness about the current CG, rebuilt when the CG moves > 1 cm or a supply runs
+  dry) and `propulsion/rcs_modulator` turns the duties into pulses of >= 20 ms (4 ticks). Balanced layouts (pure couples
+  on every axis: the ship) keep the net force what was asked for, so turns do not translate it (the ship's saturated
+  burn turn borrowed its ullage thrusters: +55 m on a 0.5 m/s burn); one-station layouts (Super Heavy, Falcon 9) turn
+  with a push, torque first. Capability per axis (`max_rcs_torque_nm`, the fraction scale of the controllers) and per
+  direction (`rcs_force_capability`) come from the geometry. Propellant: Falcon 9 N2 tanks (200 / 80 kg carved out of
+  the dry masses; not in the gauge `propellant_kg()`), Starship / Super Heavy ullage gas from the main tanks (Isp 70 s
+  [E]). The burn executor counts the realised RCS force while a translation is commanded. Not modelled: thrust rise /
+  tail-off, short-pulse Isp loss, pressure blowdown.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 

@@ -54,6 +54,15 @@ flow separation (vacuum engines).
   together (groups of the same engine on the same ring form one symmetric burn set).
 - `[stage.recovery] landing_propellant_kg`: booster - at landing-burn ignition (MECO is planned for it); ship - entry
   mass in scenarios, the header-tank propellant for flip and landing burn (35 t [E]).
+- `[stage.rcs]`: reaction control as individual thrusters, on/off with a fixed thrust (constant feed pressure), controlled
+  by time: `isp_s`, `propellant` (`"main"`: ullage gas from the stage's oxidizer and fuel tanks, drawn in proportion to
+  what is left; or the id of a `[[stage.tank]]` with `contents = "rcs"`, which needs `density_kg_m3` and is not part of
+  the propellant gauge), `minimum_on_time_s` (shortest pulse; the minimum impulse bit is thrust x this), `type`
+  (documentation). Thrusters come from `[[stage.rcs.pod]]` - `id`, `station_m`, `radius_m`, `azimuths_deg` (from body
+  +y towards +z), `thrust_n`, `directions` (at each azimuth one thruster per entry: `tangential_plus`,
+  `tangential_minus`, `inward` (force towards the axis, plume outwards), `forward` (+x, plume aft), `aft`) - and/or
+  single `[[stage.rcs.thruster]]` - `id`, `position_m` [station, y, z], `direction` (force on the vehicle), `thrust_n`.
+  An RCS tank's mass is part of the stage's real dry mass: carve it out of `dry_mass_kg`.
 - `[stage.catch_pins]`: hardpoints the tower arms catch, one per entry of `azimuths_deg` (from body +y
   towards +z, like the grid fins), `station_m` (from the bottom of the stage), `protrusion_m` (beyond the
   hull), `max_load_n` (structural limit per pin; above it the catch is an impact).
