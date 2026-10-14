@@ -354,3 +354,23 @@ TEST_CASE("A coast segment starts with the thrusters off", "[rcs][vehicle]") {
     CHECK(norm(body->vehicle().rcs_force_n()) == 0.0);
     CHECK(norm(body->vehicle().rcs_torque_nm()) == 0.0);
 }
+
+TEST_CASE("The RCS duty is reported per thruster and empty when stopped", "[rcs][vehicle]") {
+    DeepSpace space;
+    auto body = stage_alone("falcon9_block5", 1);
+    auto& v = body->vehicle();
+    CHECK(v.rcs_duty().empty());  // nothing allocated yet
+    vehicle::VehicleCommand roll;
+    roll.rcs_torque_fraction = {0.3, 0.0, 0.0};
+    body->step(space.env, t0, tick_s, roll);
+    REQUIRE(v.rcs_duty().size() == v.stages()[0].rcs.size());
+    double sum = 0.0;
+    for (const double d : v.rcs_duty()) {
+        CHECK(d >= 0.0);
+        CHECK(d <= 1.0);
+        sum += d;
+    }
+    CHECK(sum > 0.0);
+    v.stop_rcs();
+    CHECK(v.rcs_duty().empty());
+}

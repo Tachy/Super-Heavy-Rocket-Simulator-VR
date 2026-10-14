@@ -374,15 +374,19 @@ void FlightBody::resolve_ground_contact(const frames::BodyOrientation& earth, ti
 
 // Opening loads: q at each open set's riser point (air data of this tick) times one canopy's drag area. The drag area
 // already grew this tick, so the load is that of the area the tick will fly with.
-void FlightBody::judge_parachute_loads() {
+Vec3 FlightBody::point_air_velocity_body_mps(double station_m) const {
     const auto mass = vehicle_->mass_properties();
+    const Vec3 arm{station_m - mass.cg_station_m, -mass.cg_offset_m.y, -mass.cg_offset_m.z};
+    return air_data_.air_velocity_body_mps + cross(state_.angular_velocity_body_radps, arm);
+}
+
+void FlightBody::judge_parachute_loads() {
     const auto& stages = vehicle_->stages();
     for (size_t i = 0; i < stages.size(); ++i) {
         for (size_t k = 0; k < stages[i].parachutes.size(); ++k) {
             const auto& chute = stages[i].parachutes[k];
             if (chute.state != ParachuteState::Open) continue;
-            const Vec3 arm{chute.attach_station_m - mass.cg_station_m, -mass.cg_offset_m.y, -mass.cg_offset_m.z};
-            const Vec3 v = air_data_.air_velocity_body_mps + cross(state_.angular_velocity_body_radps, arm);
+            const Vec3 v = point_air_velocity_body_mps(chute.attach_station_m);
             const double q = 0.5 * air_data_.air.density_kg_m3 * dot(v, v);
             vehicle_->record_parachute_load(i, k, q * chute.drag_area_m2 / chute.config.count);
         }

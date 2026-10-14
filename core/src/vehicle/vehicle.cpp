@@ -578,6 +578,16 @@ bool Vehicle::parachutes_out() const {
     return false;
 }
 
+const char* to_string(ParachuteState state) {
+    switch (state) {
+        case ParachuteState::Stowed: return "verstaut";
+        case ParachuteState::Open: return "offen";
+        case ParachuteState::Released: return "abgeworfen";
+        case ParachuteState::Torn: return "Fallschirm gerissen";
+    }
+    return "?";
+}
+
 bool Vehicle::parachute_torn() const {
     for (const auto& stage : stages_) {
         for (const auto& chute : stage.parachutes) {

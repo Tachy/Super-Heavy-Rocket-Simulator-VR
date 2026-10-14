@@ -73,6 +73,7 @@ struct Flap {
 };
 
 enum class ParachuteState { Stowed, Open, Released, Torn };  // Open: inflating, reefed or full
+const char* to_string(ParachuteState state);  // German (UI): "Fallschirm gerissen" for a torn set
 
 // A parachute set on a stage (d4): `drag_area_m2` covers all its canopies.
 struct Parachute {
@@ -218,6 +219,9 @@ public:
     void update_rcs(double dt_s, const VehicleCommand& command);
     math::Vec3 rcs_torque_nm() const { return rcs_torque_; }
     math::Vec3 rcs_force_n() const { return rcs_force_; }
+    // Duty (0..1) the allocator gave each thruster this tick, stage by stage in thruster order; empty before the first
+    // update_rcs and after stop_rcs (all off).
+    const std::vector<double>& rcs_duty() const { return rcs_duty_; }
     // All thrusters off and nothing owed (coast segments, impact; also after a separation).
     void stop_rcs();
     // Hinged nose cone of a stage (Crew Dragon): closed at construction; thrusters behind it are blocked while closed.

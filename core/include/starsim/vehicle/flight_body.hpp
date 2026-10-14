@@ -110,6 +110,8 @@ public:
     // Guidance that reads the accelerometer turns it on (one more force evaluation per tick).
     void set_accelerometer(bool on) { accelerometer_ = on; }
     const AirData& air_data() const { return air_data_; }
+    // Air velocity (body frame) of a point on the axis at `station_m`: the CG's plus omega x r (last tick's air data).
+    math::Vec3 point_air_velocity_body_mps(double station_m) const;
 
     // Flat ground at this height above WGS84 (the pad elevation; terrain comes later).
     double ground_height_m() const { return ground_height_m_; }

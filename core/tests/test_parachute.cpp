@@ -389,3 +389,25 @@ TEST_CASE("A capsule entry profile needs a capsule table", "[dragon][config]") {
     CHECK_THROWS_AS(config::load_vehicle(patched_config("capsule_table = \"aero/crew_dragon_aero.csv\"", ""), "crew_dragon"),
                     config::ConfigError);
 }
+
+TEST_CASE("Parachute states read in German; a torn set says so", "[parachute][vehicle]") {
+    CHECK(std::string(vehicle::to_string(vehicle::ParachuteState::Stowed)) == "verstaut");
+    CHECK(std::string(vehicle::to_string(vehicle::ParachuteState::Open)) == "offen");
+    CHECK(std::string(vehicle::to_string(vehicle::ParachuteState::Released)) == "abgeworfen");
+    CHECK(std::string(vehicle::to_string(vehicle::ParachuteState::Torn)) == "Fallschirm gerissen");
+}
+
+TEST_CASE("The air velocity at a riser point is the body's when it does not rotate", "[parachute][body]") {
+    World w;
+    time::Epoch t;
+    auto body = falling_capsule(3000.0, 50.0);
+    fall(*body, w.env, t, 0.1);
+    const double station = body->vehicle().stages().front().parachutes.front().attach_station_m;
+    const Vec3 v = body->point_air_velocity_body_mps(station);
+    const Vec3 w_body = body->state().angular_velocity_body_radps;
+    const auto mass = body->vehicle().mass_properties();
+    const Vec3 arm{station - mass.cg_station_m, -mass.cg_offset_m.y, -mass.cg_offset_m.z};
+    const Vec3 expected = body->air_data().air_velocity_body_mps + cross(w_body, arm);
+    CHECK(norm(v - expected) < 1e-12);
+    CHECK(norm(v) == Catch::Approx(50.0).epsilon(0.05));
+}
