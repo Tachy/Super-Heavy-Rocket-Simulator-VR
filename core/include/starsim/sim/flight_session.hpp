@@ -22,6 +22,7 @@
 #include "starsim/gnc/deorbit_planner.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/orbital_attitude.hpp"
+#include "starsim/gnc/parachute_sequencer.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -48,7 +49,9 @@ enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparati
 const char* to_string(AutopilotState state);
 
 // Steps of a capsule's return from orbit (FlightSession::plan_capsule_return).
-enum class CapsuleReturnStep { None, DeorbitBurn, TrunkJettison, NoseConeClose, Coast, Entry, Gate };
+enum class CapsuleReturnStep {
+    None, DeorbitBurn, TrunkJettison, NoseConeClose, Coast, Entry, Gate, Drogues, Mains, SplashedDown
+};
 const char* to_string(CapsuleReturnStep step);
 
 struct AutopilotStatus {
@@ -173,6 +176,11 @@ public:
     void place_entering_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch,
                              gnc::EntryGuidanceParameters parameters = {});
     const gnc::EntryGuidance* entry_guidance(size_t index) const { return bodies_.at(index).entry_guidance.get(); }
+    // Parachute sequence of body `index` (its lowest stage has [[stage.parachute]] sets: a capsule alone), nullptr if
+    // none. The Dracos stay off once a set is out (user 2026-10-14: no steering under the parachutes).
+    const gnc::ParachuteSequencer* parachute_sequencer(size_t index) const { return bodies_.at(index).parachutes.get(); }
+    // Horizontal distance (m) of body `index` from the splashdown zone's centre; throws std::logic_error without a zone.
+    double splashdown_miss_m(size_t index) const;
     // Scenarios: a capsule (a stage with [stage.aero] entry_profile = "capsule") placed with a free state flies its entry
     // guidance on its RCS (gnc::capsule_entry_torque_fraction) to the drogue gate over the splashdown zone, then holds
     // the lift up (d4 adds the parachutes). It becomes the controlled body.
@@ -310,12 +318,14 @@ private:
         gnc::EntryCommand entry_command;
         std::unique_ptr<gnc::ShipLandingGuidance> ship_landing;  // ship from the gate: flip and catch (its command:
                                                                  // return_command)
+        std::unique_ptr<gnc::ParachuteSequencer> parachutes;     // lowest stage with parachute sets (capsule)
     };
 
     vehicle::VehicleCommand command_for(size_t index, double ambient_pressure_pa) const;
     void run_autopilot();
     void run_return_guidance(Flying& flying);
     void run_ship_landing(Flying& flying);
+    void run_parachutes(Flying& flying);
     void apply_return_command(const Flying& flying, const gnc::AttitudeController& controller,
                               double ambient_pressure_pa, vehicle::VehicleCommand& command) const;
     double coast_allowance_s() const;  // 0 if fixed ticks are needed now

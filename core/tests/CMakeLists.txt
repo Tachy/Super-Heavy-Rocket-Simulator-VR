@@ -25,6 +25,7 @@ add_executable(starsim_core_tests
     test_capsule_aero.cpp
     test_capsule_entry.cpp
     test_parachute.cpp
+    test_capsule_splashdown.cpp
     test_flight_body.cpp
     test_flight_session.cpp
     test_ascent_guidance.cpp

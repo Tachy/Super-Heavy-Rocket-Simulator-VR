@@ -202,7 +202,7 @@ TEST_CASE("Vehicle opens, releases and tears parachute sets", "[parachute][vehic
     v.record_parachute_load(0, 1, 100000.0);
     CHECK(sets[1].peak_load_n == 100000.0);
     CHECK_FALSE(v.parachute_torn());
-    v.record_parachute_load(0, 1, 160000.0);  // > 150 kN per canopy
+    v.record_parachute_load(0, 1, 160000.0);  // > 120 kN per canopy
     CHECK(sets[1].state == vehicle::ParachuteState::Torn);
     CHECK(v.parachute_torn());
     CHECK_FALSE(v.parachutes_out());

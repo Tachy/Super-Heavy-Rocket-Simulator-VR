@@ -20,6 +20,7 @@
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/landing_outcome.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 #include "starsim/gnc/capsule_entry_control.hpp"
@@ -653,7 +654,9 @@ struct ReturnResult {
 ReturnResult fly_capsule_return(sim::FlightSession& session, time::Epoch t0) {
     ReturnResult r;
     double ignition = -1.0, cutoff = -1.0, rcs_at_interface = 0.0;
-    while (session.capsule_return_step() != sim::CapsuleReturnStep::Gate && session.epoch() - t0 < 2.0 * 86400.0) {
+    // the drogues follow the gate within one step (d4)
+    while (static_cast<int>(session.capsule_return_step()) < static_cast<int>(sim::CapsuleReturnStep::Gate) &&
+           session.epoch() - t0 < 2.0 * 86400.0) {
         const auto& body = session.body(session.controlled_index());
         if (body.impacted()) break;
         double step = 1.0;
@@ -681,7 +684,7 @@ ReturnResult fly_capsule_return(sim::FlightSession& session, time::Epoch t0) {
     }
     r.burn_s = cutoff - ignition;
     const size_t i = session.controlled_index();
-    r.reached_gate = session.capsule_return_step() == sim::CapsuleReturnStep::Gate;
+    r.reached_gate = static_cast<int>(session.capsule_return_step()) >= static_cast<int>(sim::CapsuleReturnStep::Gate);
     if (session.entry_guidance(i)) {
         const auto tr = spice_earth().fixed_to_gcrf(session.epoch());
         const Vec3 pos = transpose(tr.rotation) * session.body(i).state().position_gcrf_m;
@@ -720,9 +723,9 @@ TEST_CASE("Crew Dragon returns from orbit to the drogue gate", "[dragon][mission
     CHECK_FALSE(capsule.crew_load_warning());
     CHECK(capsule.vehicle().stages().size() == 1);
     CHECK(capsule.vehicle().stages().front().config.id == "capsule");
-    // Review (d3) M1: after the gate the capsule falls into the sea; then the session coasts again (time warp)
-    s.advance_to(s.epoch() + 120.0, 1000000);
-    CHECK(s.body(s.controlled_index()).impacted());
+    // After the gate the capsule comes down under its parachutes (d4) and is gewassert; then the session coasts again
+    s.advance_to(s.epoch() + 600.0, 1000000);
+    CHECK(s.landing_outcome(s.controlled_index()) == sim::LandingOutcome::SplashedDown);
     const auto before = s.epoch();
     const auto reached = s.advance_to(before + 3600.0, 2000);
     CHECK(reached - before > 3000.0);

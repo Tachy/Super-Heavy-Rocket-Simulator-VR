@@ -126,6 +126,9 @@ const char* to_string(CapsuleReturnStep step) {
         case CapsuleReturnStep::Coast: return "Freiflug";
         case CapsuleReturnStep::Entry: return "Wiedereintritt";
         case CapsuleReturnStep::Gate: return "Tor";
+        case CapsuleReturnStep::Drogues: return "Bremsschirme";
+        case CapsuleReturnStep::Mains: return "Hauptschirme";
+        case CapsuleReturnStep::SplashedDown: return "gewassert";
     }
     return "?";
 }
@@ -228,9 +231,52 @@ void FlightSession::run_capsule_return(Flying& flying) {
                 capsule_return_step_ = CapsuleReturnStep::Gate;
             }
             break;
+        case CapsuleReturnStep::Gate:
+        case CapsuleReturnStep::Drogues:
+        case CapsuleReturnStep::Mains:
+            if (flying.parachutes) {
+                switch (flying.parachutes->phase()) {
+                    case gnc::ParachutePhase::Drogues: capsule_return_step_ = CapsuleReturnStep::Drogues; break;
+                    case gnc::ParachutePhase::Mains: capsule_return_step_ = CapsuleReturnStep::Mains; break;
+                    case gnc::ParachutePhase::Down:
+                        capsule_return_step_ = CapsuleReturnStep::SplashedDown;
+                        autopilot_.state = AutopilotState::Off;
+                        break;
+                    default: break;
+                }
+            }
+            if (flying.body->impacted()) autopilot_.state = AutopilotState::Off;
+            break;
         default:
             break;
     }
+}
+
+void FlightSession::run_parachutes(Flying& flying) {
+    auto& body = *flying.body;
+    const auto t = earth_.fixed_to_gcrf(epoch_);
+    const auto& s = body.state();
+    const double altitude = frames::fixed_to_geodetic(transpose(t.rotation) * s.position_gcrf_m).height_m;
+    const math::Vec3 air = s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), s.position_gcrf_m);
+    const double q = 0.5 * atmosphere_.at(altitude).density_kg_m3 * dot(air, air);
+    const double sink = -dot(air, math::normalized(s.position_gcrf_m));
+    const auto a = flying.parachutes->update({altitude - body.ground_height_m(), q, sink, body.resting()});
+    auto& v = body.vehicle();
+    if (a.release_drogues) v.release_parachutes("drogue");
+    if (a.deploy_drogues) v.deploy_parachutes("drogue");
+    if (a.deploy_mains) v.deploy_parachutes("main");
+    if (a.release_mains) v.release_parachutes("main");
+}
+
+double FlightSession::splashdown_miss_m(size_t index) const {
+    if (!splashdown_zone_) throw std::logic_error("FlightSession: no splashdown zone set");
+    const auto t = earth_.fixed_to_gcrf(epoch_);
+    const math::Vec3 r = transpose(t.rotation) * bodies_.at(index).body->state().position_gcrf_m;
+    const math::Vec3 z =
+        frames::geodetic_to_fixed({splashdown_zone_->latitude_rad, splashdown_zone_->longitude_rad, 0.0});
+    const math::Vec3 up = math::normalized(r);
+    const math::Vec3 d = r - z;
+    return norm(d - up * dot(d, up));
 }
 
 bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
@@ -782,7 +828,7 @@ std::vector<vehicle::FlightBody*> FlightSession::body_pointers() const {
 void FlightSession::place_body(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
                                time::Epoch epoch) {
     auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(config, config_dir_), state);
-    body->set_ground_height(launch_site_.height_m);
+    body->set_ground_height(body->vehicle().splashdown_recovery() ? 0.0 : launch_site_.height_m);  // a capsule: the sea
     bodies_.clear();
     reset_leg_landing();
     bodies_.push_back({std::move(body), {}, nullptr, {}});
@@ -871,6 +917,9 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     const auto& flying = bodies_[index];
     for (const auto& [group, run] : flying.running_groups) {
         command.groups.push_back({group, run, index == controlled_ ? input_.throttle : 1.0});
+    }
+    if (flying.parachutes && flying.parachutes->phase() != gnc::ParachutePhase::Armed) {
+        return command;  // no steering under the parachutes (user 2026-10-14): the Dracos stay off
     }
     if (flying.ship_landing) {
         if (!flying.body->impacted()) apply_return_command(flying, ship_landing_controller_, ambient_pressure_pa, command);
@@ -1045,10 +1094,15 @@ double FlightSession::coast_allowance_s() const {
             const auto t = earth_.fixed_to_gcrf(epoch_);
             const double height = frames::fixed_to_geodetic(transpose(t.rotation) * body.state().position_gcrf_m).height_m -
                                   body.ground_height_m();
-            if (height < ground_tick_height_m) return 0.0;
+            // a capsule ticks from above its parachute deployment heights (no coast past them)
+            const double tick_height =
+                flying.parachutes && flying.parachutes->phase() != gnc::ParachutePhase::Down
+                    ? std::max(ground_tick_height_m, flying.parachutes->watch_height_m())
+                    : ground_tick_height_m;
+            if (height < tick_height) return 0.0;
             const math::Vec3 up = math::normalized(body.state().position_gcrf_m);
             const double sink = -dot(body.state().velocity_gcrf_mps, up);
-            if (sink > 0.0) allowance = std::min(allowance, (height - ground_tick_height_m) / sink);
+            if (sink > 0.0) allowance = std::min(allowance, (height - tick_height) / sink);
         }
         for (const auto& [group, run] : flying.running_groups) {
             if (run) return 0.0;
@@ -1098,6 +1152,11 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                 }
             }
             if (flying.ship_landing) run_ship_landing(flying);
+            if (!flying.parachutes && !flying.body->vehicle().stages().front().config.parachutes.empty()) {
+                flying.parachutes = std::make_unique<gnc::ParachuteSequencer>(
+                    flying.body->vehicle().stages().front().config.parachutes);
+            }
+            if (flying.parachutes && !flying.body->impacted()) run_parachutes(flying);
         }
         const auto pointers = body_pointers();
         if (tower_) tower_->before_tick(pointers, earth_, epoch_);
