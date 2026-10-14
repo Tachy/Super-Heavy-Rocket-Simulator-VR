@@ -73,6 +73,7 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
                 engine.ring_angle_rad = angle;
                 engine.gimbaled = group.gimbal;
                 engine.relight = group.relight;
+                engine.abort_only = group.abort_only;
                 stage.engines.push_back(engine);
             }
         }
@@ -102,11 +103,13 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
             }
             stage.rcs.push_back({t.id, t.position_m + Vec3{station, 0.0, 0.0}, t.direction, t.thrust_n,
                                  stage_config.rcs.isp_s, tank, 0.0, false});
+            stage.rcs.back().behind_nose_cone = t.behind_nose_cone;
         }
         station += stage_config.length_m;
         stages_.push_back(std::move(stage));
     }
     rebuild_aero();
+    refresh_rcs_availability();
 }
 
 double Vehicle::length_m() const {
@@ -380,18 +383,22 @@ void Vehicle::consume_propellant(double dt_s) {
             }
         }
     }
-    refresh_rcs_supply();
+    refresh_rcs_availability();
 }
 
-void Vehicle::refresh_rcs_supply() {
+void Vehicle::refresh_rcs_availability() {
     bool changed = false;
+    // A payload's stages (config::stack_payload) wait until the payload flies alone: its lowest stage is the vehicle's.
+    const bool stacked = !stages_.empty() && !stages_.front().config.payload;
     for (auto& stage : stages_) {
         const bool main_dry = stage.propellant_kg(config::TankContents::Oxidizer) <= 0.0 ||
                               stage.propellant_kg(config::TankContents::Fuel) <= 0.0;
         for (auto& t : stage.rcs) {
             const bool starved = t.tank >= 0 ? stage.tanks[static_cast<size_t>(t.tank)].mass_kg <= 0.0 : main_dry;
-            if (starved != t.starved) {
+            const bool blocked = (stacked && stage.config.payload) || (t.behind_nose_cone && !nose_cone_open_);
+            if (starved != t.starved || blocked != t.blocked) {
                 t.starved = starved;
+                t.blocked = blocked;
                 changed = true;
             }
         }
@@ -399,12 +406,24 @@ void Vehicle::refresh_rcs_supply() {
     if (changed) rcs_allocator_.reset();
 }
 
+bool Vehicle::has_nose_cone() const {
+    return std::any_of(stages_.begin(), stages_.end(), [](const Stage& s) { return s.config.nose_cone; });
+}
+
+void Vehicle::set_nose_cone_open(bool open) {
+    if (!has_nose_cone()) return;
+    nose_cone_open_ = open;
+    refresh_rcs_availability();
+}
+
 const propulsion::RcsAllocator& Vehicle::rcs_allocator() const {
     const double cg = mass_properties().cg_station_m;
     if (!rcs_allocator_ || std::abs(rcs_allocator_->cg_station_m() - cg) > rcs_cg_tolerance_m) {
         std::vector<propulsion::RcsThrusterGeometry> geometry;
         for (const auto& s : stages_) {
-            for (const auto& t : s.rcs) geometry.push_back({t.position_m, t.direction, t.starved ? 0.0 : t.thrust_n});
+            for (const auto& t : s.rcs) {
+                geometry.push_back({t.position_m, t.direction, t.starved || t.blocked ? 0.0 : t.thrust_n});
+            }
         }
         rcs_allocator_.emplace(std::move(geometry), cg);
     }
@@ -422,7 +441,7 @@ void Vehicle::stop_rcs() {
 }
 
 void Vehicle::update_rcs(double dt_s, const VehicleCommand& command) {
-    refresh_rcs_supply();
+    refresh_rcs_availability();
     const auto& a = rcs_allocator();
     rcs_torque_ = {};
     rcs_force_ = {};
@@ -452,7 +471,7 @@ void Vehicle::update_rcs(double dt_s, const VehicleCommand& command) {
     size_t i = 0;
     for (auto& s : stages_) {
         for (auto& t : s.rcs) {
-            t.output = firing[i] && !t.starved ? 1.0 : 0.0;  // fixed thrust, on/off
+            t.output = firing[i] && !t.starved && !t.blocked ? 1.0 : 0.0;  // fixed thrust, on/off
             output[i++] = t.output;
         }
     }
@@ -521,6 +540,10 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     upper->stop_rcs();
     rcs_allocator_.reset();  // each part keeps only its own thrusters
     upper->rcs_allocator_.reset();
+    upper->nose_cone_open_ = nose_cone_open_ && upper->has_nose_cone();
+    nose_cone_open_ = nose_cone_open_ && has_nose_cone();
+    refresh_rcs_availability();  // a payload split off flies alone: its thrusters are free now
+    upper->refresh_rcs_availability();
     return upper;
 }
 

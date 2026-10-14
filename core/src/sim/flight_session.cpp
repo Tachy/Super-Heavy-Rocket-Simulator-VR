@@ -212,11 +212,12 @@ std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations
     const auto& vehicle = bodies_[controlled_].body->vehicle();
     const double mass = vehicle.mass_properties().mass_kg;
     for (const auto& stage : vehicle.stages()) {
-        if (stage.engines.empty()) continue;
         std::vector<std::string> groups;
         for (const auto& e : stage.engines) {
+            if (e.abort_only) continue;  // launch escape: never a burn engine
             if (std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) groups.push_back(e.group_id);
         }
+        if (groups.empty()) continue;
         // Burn sets: groups of the same engine on the same ring burn together (symmetric thrust; e.g. the ship's three
         // single-engine sea-level groups of the landing sequence - one off-axis Raptor would push the burn askew).
         std::vector<std::vector<std::string>> sets;
@@ -239,7 +240,9 @@ std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations
             c.groups = selected;
             double transient = 0.0;
             for (const auto& e : stage.engines) {
-                if (e.starved || std::find(selected.begin(), selected.end(), e.group_id) == selected.end()) continue;
+                if (e.starved || e.abort_only || std::find(selected.begin(), selected.end(), e.group_id) == selected.end()) {
+                    continue;
+                }
                 const auto& cfg = e.performance->config();
                 c.throttle = minimum_throttle ? cfg.throttle_min : 1.0;
                 c.thrust_n += e.performance->thrust_n(c.throttle, 0.0);
@@ -374,7 +377,7 @@ void FlightSession::run_autopilot() {
             ignite();
             bool all_running = true;
             for (const auto& e : body.vehicle().stages().front().engines) {
-                all_running = all_running && (e.mode == vehicle::EngineMode::Running || e.starved);
+                all_running = all_running && (e.mode == vehicle::EngineMode::Running || e.starved || e.abort_only);
             }
             if (all_running) {
                 release_clamps();
@@ -845,9 +848,13 @@ void FlightSession::ignite() {
     if (bodies_.empty()) return;
     auto& flying = bodies_[controlled_];
     for (const auto& stage : flying.body->vehicle().stages()) {
-        if (stage.engines.empty()) continue;
-        for (const auto& e : stage.engines) flying.running_groups[e.group_id] = true;
-        break;  // lowest stage with engines only
+        bool lit = false;
+        for (const auto& e : stage.engines) {
+            if (e.abort_only) continue;  // launch escape: never lit here
+            flying.running_groups[e.group_id] = true;
+            lit = true;
+        }
+        if (lit) break;  // lowest stage with engines only
     }
 }
 
@@ -908,6 +915,10 @@ void FlightSession::set_landing_surface(double latitude_rad, double longitude_ra
 
 void FlightSession::reset_leg_landing() {
     legs_->clear();
+}
+
+void FlightSession::set_nose_cone(size_t body_index, bool open) {
+    bodies_.at(body_index).body->vehicle().set_nose_cone_open(open);
 }
 
 void FlightSession::deploy_legs(size_t body_index) { bodies_.at(body_index).body->vehicle().deploy_legs(); }

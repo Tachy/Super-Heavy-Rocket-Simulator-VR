@@ -207,6 +207,8 @@ public:
     // Before the landing burn the abort is remembered and the burn plans for the sea. False when the guidance cannot
     // abort (not returning, no sea at the site, already down or on the arms): then nothing changes.
     bool abort_landing(size_t body_index);
+    // Crew Dragon's nose cone (thrusters behind it fire only while it is open); no effect without one.
+    void set_nose_cone(size_t body_index, bool open);
     // Landing legs of a body: start the deployment (guidance, pilot), or place them in a state (scenarios).
     void deploy_legs(size_t body_index);
     void set_leg_deployment(size_t body_index, double fraction);

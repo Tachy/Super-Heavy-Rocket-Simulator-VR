@@ -35,6 +35,7 @@ struct Engine {
     double gimbal_yaw_rad = 0.0;    // deflection towards +y
     bool has_run = false;
     bool starved = false;    // shut down by propellant depletion
+    bool abort_only = false; // launch escape (data only): never lit by the session
 
     // Unit thrust direction (body frame) for the current gimbal angles.
     math::Vec3 thrust_direction() const;
@@ -58,6 +59,8 @@ struct RcsThruster {
     int tank = -1;           // index of the stage's Rcs tank; -1: ullage gas from the main tanks
     double output = 0.0;     // this tick: 1 firing, 0 off
     bool starved = false;    // its supply is empty
+    bool behind_nose_cone = false;
+    bool blocked = false;    // cannot fire now: behind a closed nose cone, or a payload stage still stacked
 };
 
 struct Flap {
@@ -188,6 +191,10 @@ public:
     math::Vec3 rcs_force_n() const { return rcs_force_; }
     // All thrusters off and nothing owed (coast segments, impact; also after a separation).
     void stop_rcs();
+    // Hinged nose cone of a stage (Crew Dragon): closed at construction; thrusters behind it are blocked while closed.
+    bool has_nose_cone() const;
+    bool nose_cone_open() const { return nose_cone_open_; }
+    void set_nose_cone_open(bool open);
     const aero::SlenderBodyAero& aero() const { return *aero_; }
 
     // Splits the stack below stage `index`: this vehicle keeps stages [0, index), the returned one
@@ -198,7 +205,7 @@ private:
     Vehicle() = default;
     void rebuild_aero();
     const propulsion::RcsAllocator& rcs_allocator() const;  // for the current CG and the thrusters not starved
-    void refresh_rcs_supply();                               // starves thrusters whose supply ran dry
+    void refresh_rcs_availability();  // starves thrusters whose supply ran dry, blocks those that cannot fire now
 
     std::string id_;
     std::filesystem::path config_dir_;
@@ -207,6 +214,7 @@ private:
     bool legs_deploying_ = false;
     double leg_deployment_ = 0.0;
     double hull_aero_scale_ = 1.0;
+    bool nose_cone_open_ = false;
     mutable std::optional<propulsion::RcsAllocator> rcs_allocator_;
     propulsion::RcsModulator rcs_modulator_;
     std::vector<double> rcs_duty_;

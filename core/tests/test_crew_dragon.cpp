@@ -8,8 +8,14 @@
 #include <cstdio>
 
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/environment/atmosphere.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/flight_session.hpp"
+#include "starsim/spice/spice_adapters.hpp"
+#include "starsim/vehicle/flight_body.hpp"
 #include "starsim/vehicle/vehicle.hpp"
+#include "test_support.hpp"
 
 using namespace starsim;
 using math::Vec3;
@@ -65,3 +71,104 @@ TEST_CASE("A payload vehicle stacks on top of its launcher", "[dragon][config]")
     CHECK_THROWS_AS(config::stack_payload(f9, f9), config::ConfigError);
 }
 
+namespace {
+
+constexpr double tick_s = 0.005;
+const time::Epoch t_deep = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
+
+class ZeroGravity final : public environment::GravityModel {
+public:
+    ephemeris::Body central_body() const override { return ephemeris::Body::Earth; }
+    Vec3 acceleration_mps2(const Vec3&, time::Epoch) const override { return {}; }
+};
+
+class FixedEarth final : public frames::BodyOrientation {
+public:
+    frames::FixedToInertial fixed_to_gcrf(time::Epoch) const override { return {math::Mat3::identity(), {}}; }
+};
+
+struct DeepSpace {
+    ZeroGravity gravity;
+    environment::Us76Atmosphere atmosphere;  // zero above 1000 km
+    FixedEarth earth;
+    vehicle::FlightEnvironment env{gravity, atmosphere, earth, nullptr, false};
+};
+
+std::unique_ptr<vehicle::FlightBody> deep_space_body(const config::VehicleConfig& cfg) {
+    return std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(cfg, config_dir),
+                                                 vehicle::RigidBodyState{{1e10, 0.0, 0.0}, {}, {}, {}});
+}
+
+double rcs_kg(const vehicle::Vehicle& v, const std::string& stage_id) {
+    for (const auto& s : v.stages()) {
+        if (s.config.id != stage_id) continue;
+        double kg = 0.0;
+        for (const auto& t : s.tanks) kg += t.config.contents == config::TankContents::Rcs ? t.mass_kg : 0.0;
+        return kg;
+    }
+    return 0.0;
+}
+
+}  // namespace
+
+TEST_CASE("A stacked payload's thrusters stay inhibited until it flies alone", "[dragon][rcs]") {
+    DeepSpace space;
+    const auto stack = config::stack_payload(config::load_vehicle(config_dir, "falcon9_block5"),
+                                             config::load_vehicle(config_dir, "crew_dragon"));
+    auto body = deep_space_body(stack);
+    auto upper = body->separate(1);  // second stage + trunk + capsule, as after staging
+    vehicle::VehicleCommand roll;
+    roll.rcs_torque_fraction = {1.0, 0.0, 0.0};
+    const double dragon_before = rcs_kg(upper->vehicle(), "capsule");
+    for (int k = 0; k < 200; ++k) upper->step(space.env, t_deep + k * tick_s, tick_s, roll);
+    CHECK(upper->state().angular_velocity_body_radps.x > 0.0);   // the second stage's nitrogen pods roll it
+    CHECK(rcs_kg(upper->vehicle(), "capsule") == dragon_before);  // no Draco fired
+    for (const auto& t : upper->vehicle().stages().back().rcs) CHECK(t.blocked);
+    // Alone (trunk + capsule) its Dracos fire.
+    auto dragon = upper->separate(1);
+    for (const auto& t : dragon->vehicle().stages().back().rcs) CHECK(t.blocked == t.behind_nose_cone);
+    for (int k = 0; k < 200; ++k) dragon->step(space.env, t_deep + k * tick_s, tick_s, roll);
+    CHECK(rcs_kg(dragon->vehicle(), "capsule") < dragon_before);
+}
+
+TEST_CASE("The Dracos behind the nose cone fire only with the cone open", "[dragon][rcs]") {
+    const auto cfg = config::load_vehicle(config_dir, "crew_dragon");
+    vehicle::Vehicle v(cfg, config_dir);
+    REQUIRE(v.has_nose_cone());
+    CHECK_FALSE(v.nose_cone_open());
+    CHECK(v.rcs_force_capability({-1.0, 0.0, 0.0}).force_n == Catch::Approx(0.0).margin(1e-6));
+    CHECK(v.rcs_force_capability({1.0, 0.0, 0.0}).force_n == Catch::Approx(1600.0).epsilon(0.01));
+    v.set_nose_cone_open(true);
+    CHECK(v.rcs_force_capability({-1.0, 0.0, 0.0}).force_n == Catch::Approx(1600.0).epsilon(0.01));
+}
+
+TEST_CASE("Dragon turns on pure couples: a full torque on any axis does not push it", "[dragon][rcs]") {
+    // Balanced layout (pure couples on every axis): with rcs_keep_force a saturated turn leaves the capsule where it is.
+    DeepSpace space;
+    for (const Vec3 axis : {Vec3{1.0, 0.0, 0.0}, Vec3{0.0, 1.0, 0.0}, Vec3{0.0, 0.0, -1.0}}) {
+        CAPTURE(axis.x, axis.y, axis.z);
+        auto body = deep_space_body(config::load_vehicle(config_dir, "crew_dragon"));
+        body->vehicle().set_nose_cone_open(true);
+        vehicle::VehicleCommand turn;
+        turn.rcs_torque_fraction = axis;
+        turn.rcs_keep_force = true;
+        for (int k = 0; k < 400; ++k) body->step(space.env, t_deep + k * tick_s, tick_s, turn);
+        const Vec3 w = body->state().angular_velocity_body_radps;
+        CHECK(dot(w, axis) > 0.005);                           // it turns (> 0.3 deg/s after 2 s)
+        CHECK(norm(body->state().velocity_gcrf_mps) < 2e-3);  // < 2 mm/s from leaks
+    }
+}
+
+TEST_CASE("Abort-only engines are never lit by the session", "[dragon][sim]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const double gm = session.gm_earth_m3ps2();
+    const orbit::KeplerianElements circular{6378137.0 + 200e3, 0.0, 51.6 * constants::deg_to_rad, 0.0, 0.0, 0.0};
+    session.place_in_orbit("crew_dragon", orbit::state_from_elements(circular, gm), t_deep);
+    session.ignite();
+    session.advance_to(t_deep + 1.0);
+    CHECK_FALSE(session.body(0).vehicle().any_engine_producing_thrust());
+    CHECK(session.minimum_burn_dv_mps() == 0.0);  // no burn configuration on main engines
+}
