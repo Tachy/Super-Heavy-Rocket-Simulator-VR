@@ -14,6 +14,9 @@
 #include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
+#include "starsim/gnc/deorbit_planner.hpp"
+#include "starsim/orbit/ballistic_propagator.hpp"
+#include "starsim/orbit/kepler.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
@@ -445,3 +448,161 @@ TEST_CASE("Capsule entry guidance reaches the drogue gate", "[dragon][entry][ses
     CHECK(g.peak_g < 4.5);
 }
 
+
+namespace {
+
+// The Crew Dragon (capsule + trunk) on a 420 km circular orbit at 51.6 deg (ISS-like), nose cone open, splashdown zone set.
+struct DragonDeorbit {
+    sim::FlightSession session;
+    time::Epoch t0;
+    config::SplashdownZoneConfig zone;
+    // `raan_rad`: the orbit plane; dragon_raan_rad() gives one with a pass over the zone in reach.
+    explicit DragonDeorbit(double raan_rad, double inclination_rad = 51.6 * deg)
+        : session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR),
+          t0(spice::SpiceTimeConverter{}.from_utc({2026, 10, 14, 6, 0, 0.0})),
+          zone(config::load_splashdown_zone(STARSIM_CONFIG_DIR, "pacific_san_diego")) {
+        const orbit::KeplerianElements circular{constants::wgs84_semi_major_axis_m + 420e3, 0.0, inclination_rad, raan_rad,
+                                                0.0, 0.0};
+        session.place_in_orbit("crew_dragon", orbit::state_from_elements(circular, session.gm_earth_m3ps2()), t0);
+        session.set_nose_cone(0, true);
+        session.set_splashdown_zone(zone);
+    }
+    // Entry model of the capsule alone after the trunk jettison, with its mass then.
+    gnc::EntryPredictorModel capsule_model(double mass_kg) const {
+        auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "crew_dragon");
+        cfg.stages.erase(cfg.stages.begin());
+        const vehicle::Vehicle capsule(cfg, STARSIM_CONFIG_DIR);
+        gnc::EntryPredictorModel m;
+        m.aero = gnc::EntryAeroTable::capsule(capsule);
+        m.mass_kg = mass_kg;
+        return m;
+    }
+    gnc::DeorbitParameters parameters(double thrust_n) const {
+        gnc::DeorbitParameters p;
+        p.entry_flight_path_rad = -2.0 * deg;
+        p.nominal_bank_rad = 30.0 * deg;
+        p.max_crossrange_m = 40000.0;
+        p.gate_height_m = 5500.0;
+        p.burn_thrust_n = thrust_n;
+        return p;
+    }
+    gnc::DeorbitPlan plan(const gnc::DeorbitParameters& p, double entry_mass_kg) {
+        const auto& body = session.body(0);
+        const auto& s = body.state();
+        const auto rcs = body.vehicle().rcs_force_capability({1.0, 0.0, 0.0});
+        return gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, session.epoch(), session.environment().gravity,
+                                 spice_earth(), capsule_model(entry_mass_kg), session.capsule_entry_target(),
+                                 body.vehicle().mass_properties().mass_kg, rcs.force_n / rcs.mass_flow_kgps,
+                                 body.vehicle().rcs_propellant_kg(), 50.0, p);
+    }
+    // Flies the node on the Dracos (+x), then coasts to the entry interface; returns the relative flight-path angle there.
+    double fly_to_interface(const gnc::DeorbitPlan& plan, double& epoch_error_s, double& burn_s) {
+        REQUIRE(session.execute_burn(plan.node));
+        double ignition = -1.0, cutoff = -1.0;
+        while (session.autopilot().state == sim::AutopilotState::Burn) {
+            // long coast to the burn in big steps (a 1 s step is never coasted analytically: ticks)
+            const double to_ignition = session.autopilot().burn.time_to_ignition_s;
+            session.advance_to(session.epoch() + (to_ignition > 900.0 ? to_ignition - 600.0 : 1.0), 1000000);
+            if (ignition < 0.0 && session.autopilot().burn.ignite) ignition = session.epoch() - t0;
+        }
+        cutoff = session.epoch() - t0;
+        burn_s = cutoff - ignition;
+        while (session.telemetry(0).altitude_m > 120000.0 && session.epoch() - t0 < 3.0 * 86400.0) {
+            const double h = session.telemetry(0).altitude_m;
+            session.advance_to(session.epoch() + (h > 130000.0 ? 10.0 : 0.05), 100000);
+        }
+        epoch_error_s = session.epoch() - plan.entry_interface_epoch;
+        return session.telemetry(0).flight_path_angle_rad;
+    }
+};
+
+// The first orbit plane (RAAN in 10 deg steps) whose impulsive capsule deorbit plan is feasible: a pass over the zone
+// within the capsule's crossrange inside the 48 h window (an ISS-like orbit overflies a given point within ~40 km only
+// on some days).
+double dragon_raan_rad() {
+    static const double raan = [] {
+        for (double r = 0.0; r < 360.0; r += 10.0) {
+            DragonDeorbit d(r * deg);
+            const double mass = d.session.body(0).vehicle().mass_properties().mass_kg;
+            if (d.plan(d.parameters(0.0), mass - 2000.0).feasible) return r * deg;
+        }
+        return -1.0;
+    }();
+    return raan;
+}
+
+}  // namespace
+
+TEST_CASE("A finite deorbit burn ends where the planner predicts", "[dragon][deorbit]") {
+    REQUIRE(dragon_raan_rad() >= 0.0);
+    std::printf("[validation] Dragon orbit plane with a pass in reach: RAAN %.0f deg\n", dragon_raan_rad() / deg);
+    DragonDeorbit d(dragon_raan_rad());
+    const double thrust = d.session.body(0).vehicle().rcs_force_capability({1.0, 0.0, 0.0}).force_n;
+    const double entry_mass = d.session.body(0).vehicle().mass_properties().mass_kg - 1500.0 - 500.0;
+    const auto finite = d.plan(d.parameters(thrust), entry_mass);
+    INFO(finite.reason);
+    REQUIRE(finite.feasible);
+    DragonDeorbit d_impulse(dragon_raan_rad());
+    const auto impulsive = d_impulse.plan(d_impulse.parameters(0.0), entry_mass);
+    REQUIRE(impulsive.feasible);
+    double finite_dt = 0.0, impulse_dt = 0.0, finite_burn = 0.0, impulse_burn = 0.0;
+    const double gamma_finite = d.fly_to_interface(finite, finite_dt, finite_burn);
+    const double gamma_impulse = d_impulse.fly_to_interface(impulsive, impulse_dt, impulse_burn);
+    std::printf("[validation] Draco deorbit %.1f m/s (%.0f kg planned), burn %.0f s: finite plan -> gamma %.3f deg "
+                "(planned %.3f), interface %+.1f s; impulsive plan -> gamma %.3f deg, %+.1f s\n",
+                finite.delta_v_mps, finite.propellant_kg, finite_burn, gamma_finite / deg,
+                finite.entry_flight_path_rad / deg, finite_dt, gamma_impulse / deg, impulse_dt);
+    CHECK(std::abs(gamma_finite - finite.entry_flight_path_rad) < 0.03 * deg);
+    CHECK(std::abs(finite_dt) < 5.0);
+    CHECK(std::abs(gamma_impulse - impulsive.entry_flight_path_rad) > std::abs(gamma_finite - finite.entry_flight_path_rad));
+}
+
+TEST_CASE("Deorbit plan predicts the entry with the entry mass", "[dragon][deorbit]") {
+    REQUIRE(dragon_raan_rad() >= 0.0);
+    DragonDeorbit d(dragon_raan_rad());
+    const double stack = d.session.body(0).vehicle().mass_properties().mass_kg;
+    auto p = d.parameters(0.0);
+    const auto with_stack = d.plan(p, 0.0);  // default: the stack's mass after the burn
+    p.entry_mass_kg = stack - 1500.0 - 500.0;
+    const auto with_capsule = d.plan(p, 0.0);
+    REQUIRE(with_stack.feasible);
+    REQUIRE(with_capsule.feasible);
+    // the capsule's plan, checked independently: coast from the impulse to the interface, predict with the entry mass
+    const auto& s = d.session.body(0).state();
+    auto at_node = orbit::propagate_coast(d.session.environment().gravity, {s.position_gcrf_m, s.velocity_gcrf_mps},
+                                          d.session.epoch(), with_capsule.node.epoch);
+    at_node.state.velocity_mps += with_capsule.node.delta_v_gcrf_mps;
+    const integrators::Event<6> interface{
+        "entry interface",
+        [&](double t_s, const integrators::State<6>& y) {
+            const Vec3 r = transpose(spice_earth().fixed_to_gcrf(with_capsule.node.epoch + t_s).rotation) * Vec3{y[0], y[1], y[2]};
+            return frames::fixed_to_geodetic(r).height_m - 120000.0;
+        },
+        integrators::Crossing::Falling};
+    const auto ei = orbit::propagate_coast(d.session.environment().gravity, at_node.state, with_capsule.node.epoch,
+                                           with_capsule.node.epoch + 6000.0, std::span(&interface, 1));
+    REQUIRE(ei.event_index == 0);
+    const auto tr = spice_earth().fixed_to_gcrf(ei.epoch);
+    double downrange[2];
+    const double masses[2] = {p.entry_mass_kg, stack};
+    for (int k = 0; k < 2; ++k) {
+        double sum = 0.0;
+        for (const double sign : {1.0, -1.0}) {
+            gnc::EntryPredictorState start;
+            start.position_itrf_m = transpose(tr.rotation) * ei.state.position_m;
+            start.velocity_itrf_mps =
+                transpose(tr.rotation) * (ei.state.velocity_mps - cross(vehicle::earth_rotation_vector(tr), ei.state.position_m));
+            start.bank_rad = sign * p.nominal_bank_rad;
+            sum += 0.5 * gnc::predict_entry(d.capsule_model(masses[k]), start, start.bank_rad, d.session.capsule_entry_target(),
+                                            p.gate_height_m, 0.0, 2.0)
+                             .downrange_error_m;
+        }
+        downrange[k] = sum;
+    }
+    std::printf("[validation] deorbit plans: stack mass -> burn %+.0f s / %.2f m/s, capsule mass -> %+.0f s / %.2f m/s; "
+                "independent prediction of the capsule plan %.2f km (stack mass %.2f km)\n",
+                with_stack.node.epoch - d.t0, with_stack.delta_v_mps, with_capsule.node.epoch - d.t0,
+                with_capsule.delta_v_mps, downrange[0] / 1000.0, downrange[1] / 1000.0);
+    CHECK(std::abs(downrange[0]) < 1000.0);
+    CHECK(std::abs(downrange[1]) > std::abs(downrange[0]));
+}

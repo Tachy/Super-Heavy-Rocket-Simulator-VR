@@ -23,6 +23,11 @@ struct DeorbitParameters {
     double lead_s = 600.0;                 // earliest burn after planning (turn to the burn attitude)
     double gate_height_m = 800.0;          // as EntryGuidanceParameters
     double sample_s = 60.0;                // coast sampling of the pass search
+    // > 0: the burn is flown as a finite burn of this thrust centred on the node, along the node's fixed inertial
+    // direction (the executor ignites half the duration early); 0: impulsive. A Draco deorbit lasts ~13 min (d3).
+    double burn_thrust_n = 0.0;
+    // > 0: the entry predictor's mass (a capsule drops its trunk after the burn); 0: the mass after the burn.
+    double entry_mass_kg = 0.0;
 };
 
 struct DeorbitPlan {

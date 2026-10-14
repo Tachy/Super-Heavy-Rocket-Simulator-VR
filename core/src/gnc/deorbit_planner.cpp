@@ -49,10 +49,11 @@ class Shooter {
 public:
     Shooter(const std::vector<Sample>& samples, const environment::GravityModel& gravity,
             const frames::BodyOrientation& earth, const EntryPredictorModel& model, const EntryTarget& target,
-            const DeorbitParameters& parameters)
+            const DeorbitParameters& parameters, double mass_kg, double exhaust_velocity_mps)
         : samples_(samples), gravity_(gravity), earth_(earth), model_(model), target_(target), parameters_(parameters),
-          options_(planning_options()) {}
+          options_(planning_options()), mass_kg_(mass_kg), exhaust_velocity_mps_(exhaust_velocity_mps) {}
 
+    // The entry predictor's mass (after the burn, or the capsule's after the trunk jettison).
     void set_mass(double mass_kg) { model_.mass_kg = mass_kg; }
 
     math::StateVector state_at(time::Epoch epoch) const {
@@ -63,18 +64,46 @@ public:
         return orbit::propagate_coast(gravity_, samples_[i].state, samples_[i].epoch, epoch, {}, options_).state;
     }
 
+    // State at the end of the burn centred on `burn` (impulsive: at `burn`) and that epoch.
+    math::StateVector after_burn(time::Epoch burn, double delta_v_mps, time::Epoch& end) const {
+        auto s = state_at(burn);
+        const Vec3 direction = -math::normalized(s.velocity_mps);
+        if (parameters_.burn_thrust_n <= 0.0) {
+            s.velocity_mps += direction * delta_v_mps;
+            end = burn;
+            return s;
+        }
+        const double thrust = parameters_.burn_thrust_n;
+        const double mass_flow = thrust / exhaust_velocity_mps_;
+        const double duration = burn_duration_s(delta_v_mps, mass_kg_, thrust, mass_flow);
+        const time::Epoch start = burn - 0.5 * duration;
+        const auto coast = orbit::ballistic_dynamics(gravity_, start);
+        const double m0 = mass_kg_;
+        const integrators::OdeFunction<6> powered = [&](double t, const integrators::State<6>& y) {
+            auto dy = coast(t, y);
+            const double a = thrust / (m0 - mass_flow * t);
+            dy[3] += a * direction.x;
+            dy[4] += a * direction.y;
+            dy[5] += a * direction.z;
+            return dy;
+        };
+        const auto r = integrators::integrate<6>(powered, 0.0, math::pack(state_at(start)), duration, options_);
+        end = start + duration;
+        return math::unpack(r.y);
+    }
+
     Shot shoot(time::Epoch burn, double delta_v_mps) const {
         Shot shot;
-        auto s = state_at(burn);
-        s.velocity_mps -= math::normalized(s.velocity_mps) * delta_v_mps;
+        time::Epoch end;
+        const auto s = after_burn(burn, delta_v_mps, end);
         const integrators::Event<6> interface{
             "entry interface",
             [&](double t_s, const integrators::State<6>& y) {
-                const Vec3 r = transpose(earth_.fixed_to_gcrf(burn + t_s).rotation) * Vec3{y[0], y[1], y[2]};
+                const Vec3 r = transpose(earth_.fixed_to_gcrf(end + t_s).rotation) * Vec3{y[0], y[1], y[2]};
                 return frames::fixed_to_geodetic(r).height_m - parameters_.entry_interface_height_m;
             },
             integrators::Crossing::Falling};
-        const auto coast = orbit::propagate_coast(gravity_, s, burn, burn + 6000.0, std::span(&interface, 1), options_);
+        const auto coast = orbit::propagate_coast(gravity_, s, end, end + 6000.0, std::span(&interface, 1), options_);
         if (coast.event_index != 0) return shot;
         Vec3 r, v;
         to_fixed(earth_, coast.epoch, coast.state, r, v);
@@ -106,6 +135,8 @@ private:
     const EntryTarget& target_;
     const DeorbitParameters& parameters_;
     integrators::Dop853Options<6> options_;
+    double mass_kg_;
+    double exhaust_velocity_mps_;
 };
 
 // Two-body retrograde delta-v from a circular-ish orbit at radius r (speed v, flight path gamma) that crosses the
@@ -159,6 +190,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     // Passes: closest approaches of the ground track to the target, prefiltered on the track's cross distance.
     const Vec3 target_direction = math::normalized(target.position_itrf_m);
     const double radius_m = norm(target.position_itrf_m);
+    if (debug) std::printf("[deorbit] %zu coast samples over %.0f s\n", samples.size(), samples.back().epoch - samples.front().epoch);
     std::vector<double> angle(samples.size());
     std::vector<double> cross_track(samples.size());
     for (size_t i = 0; i < samples.size(); ++i) {
@@ -171,7 +203,10 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     const double period_s = 2.0 * constants::pi * std::sqrt(r0 * r0 * r0 / gm);
     const double entry_radius_m = radius_m + parameters.entry_interface_height_m;
 
-    Shooter shooter(samples, gravity, earth, model, target, parameters);
+    Shooter shooter(samples, gravity, earth, model, target, parameters, mass_kg, exhaust_velocity_mps);
+    const auto entry_mass = [&](double dv) {
+        return parameters.entry_mass_kg > 0.0 ? parameters.entry_mass_kg : mass_kg - burn_propellant(dv);
+    };
     for (size_t i = 1; i + 1 < samples.size(); ++i) {
         if (!(angle[i] < angle[i - 1] && angle[i] <= angle[i + 1])) continue;
         if (std::abs(cross_track[i]) > 5.0 * parameters.max_crossrange_m) continue;
@@ -182,7 +217,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         const double v0 = norm(s.velocity_mps);
         const double gamma0 = std::asin(dot(s.velocity_mps, s.position_m) / (v0 * norm(s.position_m)));
         double dv = initial_delta_v(norm(s.position_m), v0, gamma0, entry_radius_m, parameters.entry_flight_path_rad, gm);
-        shooter.set_mass(mass_kg - burn_propellant(dv));
+        shooter.set_mass(entry_mass(dv));
 
         // Bracket the burn epoch on the downrange error (later burn: later entry, overshoot).
         const time::Epoch earliest = epoch + parameters.lead_s;
@@ -253,7 +288,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
             step_v = std::clamp(step_v, -20.0, 20.0);
             t = std::max(t + step_t, earliest);
             dv = std::max(dv + step_v, 1.0);
-            shooter.set_mass(mass_kg - burn_propellant(dv));
+            shooter.set_mass(entry_mass(dv));
         }
         if (!converged || std::abs(shot.crossrange_m) > parameters.max_crossrange_m) continue;
 
