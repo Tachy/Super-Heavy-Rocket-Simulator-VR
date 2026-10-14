@@ -48,6 +48,7 @@ struct SlenderBodyGeometry {
 struct AeroResult {
     math::Vec3 force_body_n;       // total aerodynamic force, body axes (x = towards the nose)
     double normal_force_station_m = 0.0;  // where the normal force acts (from the bottom of the body)
+    math::Vec3 moment_body_nm;            // pure moment besides the force at that station (capsule; else zero)
     double mach = 0.0;
     double dynamic_pressure_pa = 0.0;
     double angle_of_attack_rad = 0.0;  // total angle between body axis and the oncoming flow
