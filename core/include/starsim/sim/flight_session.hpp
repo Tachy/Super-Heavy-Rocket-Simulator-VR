@@ -41,7 +41,8 @@ enum class ControlMode {
 };
 
 // Return: a ship after its deorbit burn (coast to the entry interface, entry, flip, catch).
-enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, Orbit, Burn, Return };
+// PayloadSeparation: after the upper stage's cutoff, waiting to release a payload vehicle (d2).
+enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return };
 
 const char* to_string(AutopilotState state);
 
@@ -69,6 +70,14 @@ LaunchSite drone_ship_site(const config::DroneShipConfig& ship, double latitude_
                            double sea_height_m, double heading_rad);
 
 enum class LandingOutcome;
+
+// Release of a mission's payload vehicle (config::stack_payload) from the upper stage.
+struct PayloadSeparation {
+    std::string first_stage_id;  // the payload's lowest stage (e.g. "trunk")
+    double delay_s = 30.0;       // after the upper stage's cutoff
+    double dv_mps = 0.3;         // spring push (relative speed)
+    double nose_cone_open_s = 600.0;  // after the separation; < 0: stays closed
+};
 
 // All flying bodies of one mission (the stack, and after staging booster and ship) on a common
 // fixed tick. The pilot controls one body; separated bodies coast with their engines off.
@@ -216,6 +225,13 @@ public:
     const gnc::AttitudeMode& attitude_mode() const { return attitude_mode_; }
     // Scenarios and tests: sets a body's angular rate (body axes).
     void apply_angular_rate(size_t body_index, const math::Vec3& rate_body_radps);
+    // Payload vehicle of the mission: released `delay_s` after the upper stage's cutoff with a spring push; it becomes
+    // the controlled body, holds its attitude inertially and opens its nose cone after `nose_cone_open_s` (< 0: closed).
+    // Takes effect at the next cutoff of the ascent autopilot; a new launch resets it.
+    void set_payload_separation(std::optional<PayloadSeparation> separation) { payload_separation_ = std::move(separation); }
+    // Releases the payload now (pilot action, or the autopilot): false without a payload separation set or when the
+    // controlled body carries no such stage above its lowest.
+    bool separate_payload();
     // Crew Dragon's nose cone (thrusters behind it fire only while it is open); no effect without one.
     void set_nose_cone(size_t body_index, bool open);
     // Landing legs of a body: start the deployment (guidance, pilot), or place them in a state (scenarios).
@@ -298,6 +314,10 @@ private:
         0.3, 0.9, false, false, 0.0, 1.0 * constants::deg_to_rad, 0.5 * constants::deg_to_rad,
         0.05 * constants::deg_to_rad, 1.0 * constants::deg_to_rad}};
     gnc::AttitudeMode attitude_mode_;
+    std::optional<PayloadSeparation> payload_separation_;
+    time::Epoch separation_epoch_;            // state PayloadSeparation: release at
+    std::optional<time::Epoch> nose_cone_epoch_;  // the released payload opens its nose cone at
+    size_t nose_cone_body_ = 0;
     bool attitude_mode_active() const;  // a mode is held now (not Free, no autopilot phase steering)
     std::vector<Flying> bodies_;
     size_t controlled_ = 0;

@@ -40,6 +40,7 @@ const char* to_string(AutopilotState state) {
         case AutopilotState::PreLaunch: return "Startvorbereitung";
         case AutopilotState::Booster: return "Booster";
         case AutopilotState::UpperStage: return "Oberstufe";
+        case AutopilotState::PayloadSeparation: return "Nutzlasttrennung";
         case AutopilotState::Orbit: return "Orbit erreicht";
         case AutopilotState::Burn: return "Manöver";
         case AutopilotState::Return: return "Rückkehr";
@@ -378,7 +379,30 @@ void FlightSession::apply_angular_rate(size_t body_index, const math::Vec3& rate
 
 bool FlightSession::attitude_mode_active() const {
     return attitude_mode_.kind != gnc::AttitudeModeKind::Free &&
-           (autopilot_.state == AutopilotState::Off || autopilot_.state == AutopilotState::Orbit);
+           (autopilot_.state == AutopilotState::Off || autopilot_.state == AutopilotState::Orbit ||
+            autopilot_.state == AutopilotState::PayloadSeparation);
+}
+
+bool FlightSession::separate_payload() {
+    if (bodies_.empty() || !payload_separation_) return false;
+    auto& lower = bodies_[controlled_];
+    const auto& stages = lower.body->vehicle().stages();
+    size_t index = 0;
+    for (size_t i = 1; i < stages.size(); ++i) {
+        if (stages[i].config.id == payload_separation_->first_stage_id) index = i;
+    }
+    if (index == 0) return false;
+    auto upper = lower.body->separate(index, payload_separation_->dv_mps);
+    for (auto& [group, run] : lower.running_groups) run = false;
+    upper->set_ground_height(launch_site_.height_m);
+    bodies_.push_back({std::move(upper), {}, nullptr, {}});
+    controlled_ = bodies_.size() - 1;
+    attitude_mode_ = gnc::inertial_hold(bodies_[controlled_].body->state().attitude);
+    if (payload_separation_->nose_cone_open_s >= 0.0) {
+        nose_cone_epoch_ = epoch_ + payload_separation_->nose_cone_open_s;
+        nose_cone_body_ = controlled_;
+    }
+    return true;
 }
 
 void FlightSession::apply_velocity_error(size_t body_index, const math::Vec3& delta_v_gcrf_mps) {
@@ -429,6 +453,18 @@ void FlightSession::run_autopilot() {
         case AutopilotState::UpperStage:
             if (autopilot_.guidance.cutoff) {
                 cutoff();
+                autopilot_.state = AutopilotState::Orbit;
+                if (payload_separation_) {
+                    autopilot_.state = AutopilotState::PayloadSeparation;
+                    separation_epoch_ = epoch_ + payload_separation_->delay_s;
+                    // the stack holds its attitude on the upper stage's thrusters until the release
+                    attitude_mode_ = gnc::inertial_hold(body.state().attitude);
+                }
+            }
+            break;
+        case AutopilotState::PayloadSeparation:
+            if (epoch_ >= separation_epoch_) {
+                separate_payload();
                 autopilot_.state = AutopilotState::Orbit;
             }
             break;
@@ -601,6 +637,8 @@ void FlightSession::reset_mission_state() {
     ship_return_ = false;
     deorbit_plan_.reset();
     attitude_mode_ = {};
+    payload_separation_.reset();
+    nose_cone_epoch_.reset();
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -784,11 +822,13 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
 double FlightSession::coast_allowance_s() const {
     if (bodies_.empty()) return 0.0;
     const bool guided = autopilot_.state == AutopilotState::PreLaunch || autopilot_.state == AutopilotState::Booster ||
-                        autopilot_.state == AutopilotState::UpperStage;
+                        autopilot_.state == AutopilotState::UpperStage ||
+                        autopilot_.state == AutopilotState::PayloadSeparation;
     if (guided) return 0.0;
     if (attitude_mode_active()) return 0.0;  // pulsed RCS hold: ticked
     if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0) return 0.0;
     double allowance = max_coast_s;
+    if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
     if (autopilot_.state == AutopilotState::Burn) {
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s);
     }
@@ -826,6 +866,10 @@ double FlightSession::coast_allowance_s() const {
 
 time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
     for (int tick = 0; tick < max_ticks && target - epoch_ >= tick_s; ++tick) {
+        if (nose_cone_epoch_ && epoch_ >= *nose_cone_epoch_) {
+            if (nose_cone_body_ < bodies_.size()) set_nose_cone(nose_cone_body_, true);
+            nose_cone_epoch_.reset();
+        }
         if (const double coast = std::min(coast_allowance_s(), target - epoch_); coast > 1.0) {
             for (auto& flying : bodies_) flying.body->coast(env_, epoch_, coast);
             epoch_ += coast;

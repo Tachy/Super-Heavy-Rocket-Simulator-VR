@@ -63,6 +63,16 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
     m.heading_rad = doc.number(*mission, "heading_deg") * deg;
     m.payload_kg = doc.number_or(*mission, "payload_t", 0.0) * 1000.0;
     m.fairing = (*mission)["fairing"].value_or(true);
+    if (const auto* payload = doc.root["payload"].as_table()) {
+        if (m.payload_kg > 0.0) doc.fail("a mission has either payload_t or a [payload] vehicle");
+        MissionPayload p;
+        p.vehicle_id = doc.text(*payload, "vehicle");
+        p.separation_delay_s = doc.number_or(*payload, "separation_delay_s", p.separation_delay_s);
+        p.separation_dv_mps = doc.number_or(*payload, "separation_dv_mps", p.separation_dv_mps);
+        p.nose_cone_open_s = doc.number_or(*payload, "nose_cone_open_s", p.nose_cone_open_s);
+        if (p.separation_delay_s < 0.0 || p.separation_dv_mps < 0.0) doc.fail("[payload] times and speeds must be >= 0");
+        m.payload = p;
+    }
     m.periapsis_height_m = doc.positive(*target, "periapsis_km") * 1000.0;
     m.apoapsis_height_m = doc.positive(*target, "apoapsis_km") * 1000.0;
     if (m.apoapsis_height_m < m.periapsis_height_m) doc.fail("target: apoapsis below periapsis");

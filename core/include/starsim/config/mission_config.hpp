@@ -43,6 +43,15 @@ struct MissionDroneShip {
     double sea_height_m = 0.0;  // sea surface above WGS84 (geoid)
 };
 
+// A payload vehicle on top of an ascent mission's stack ([payload]; config::stack_payload), released after the upper
+// stage's cutoff.
+struct MissionPayload {
+    std::string vehicle_id;
+    double separation_delay_s = 30.0;  // after the upper stage's cutoff
+    double separation_dv_mps = 0.3;    // spring push (relative speed)
+    double nose_cone_open_s = 600.0;   // after the separation; < 0: stays closed
+};
+
 // Launch to orbit on the ascent autopilot (config/missions/<id>.toml), optionally with a first-stage return to a landing
 // zone (Falcon 9 RTLS) or a drone ship (ASDS).
 struct AscentMission {
@@ -55,6 +64,7 @@ struct AscentMission {
     double heading_rad = 0.0;     // body +y on the pad
     double payload_kg = 0.0;
     bool fairing = true;          // false: the payload flies without the upper stage's fairing (Dragon)
+    std::optional<MissionPayload> payload;  // a payload vehicle on top of the stack (exclusive with payload_kg)
     double periapsis_height_m = 0.0;
     double apoapsis_height_m = 0.0;
     double inclination_rad = 0.0;

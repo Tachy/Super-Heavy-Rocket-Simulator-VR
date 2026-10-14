@@ -111,6 +111,9 @@ flow separation (vacuum engines).
 - `falcon9_rtls.toml` (`config::load_ascent_mission`): `[mission]` vehicle, launch `site`, optional `landing_zone` (a
   site of kind `landing_zone`: the first stage returns to it), `heading_deg`, `payload_t`, `fairing`; `[target]` orbit;
   `[pitch_program]` `kick_deg` and `booster_throttle` (`[t_s, fraction]` pairs, increasing times).
+- `falcon9_crew_dragon.toml`: the same keys with a `[payload]` table instead of `payload_t` (exclusive): `vehicle` (a
+  vehicle of `vehicles/`, stacked on the launcher by `config::stack_payload`), `separation_delay_s` (after the upper
+  stage's cutoff), `separation_dv_mps` (spring push), `nose_cone_open_s` (after the separation; < 0: stays closed).
 - `falcon9_asds.toml`: the same keys; instead of a `landing_zone` a `[drone_ship]` table (`id`, `latitude_deg`,
   `longitude_deg`, `heading_deg` of the deck's long axis, `sea_height_m` above WGS84): the first stage lands on its deck.
 

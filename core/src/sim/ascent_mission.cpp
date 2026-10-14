@@ -11,6 +11,13 @@ void start_ascent_mission(FlightSession& session, const config::AscentMission& m
     auto vehicle = config::load_vehicle(config_dir, mission.vehicle_id);
     vehicle.stages.back().payload_mass_kg = mission.payload_kg;
     if (!mission.fairing) vehicle.stages.back().fairing_mass_kg = 0.0;
+    std::optional<PayloadSeparation> separation;
+    if (const auto& p = mission.payload) {
+        const auto payload = config::load_vehicle(config_dir, p->vehicle_id);
+        separation = PayloadSeparation{payload.stages.front().id, p->separation_delay_s, p->separation_dv_mps,
+                                       p->nose_cone_open_s};
+        vehicle = config::stack_payload(std::move(vehicle), payload);
+    }
     session.launch_from_pad(vehicle, launch_site_from_config(config::load_launch_site(config_dir, mission.site_id)),
                             mission.heading_rad, epoch);
     if (!mission.landing_zone_id.empty()) {
@@ -25,6 +32,7 @@ void start_ascent_mission(FlightSession& session, const config::AscentMission& m
     gnc::PitchProgram program;
     program.kick_angle_rad = mission.kick_angle_rad;
     program.booster_throttle = mission.booster_throttle;
+    session.set_payload_separation(separation);  // after launch_from_pad (a new launch resets it)
     session.engage_ascent_autopilot(
         {mission.periapsis_height_m, mission.apoapsis_height_m, mission.inclination_rad, mission.northerly}, program);
 }

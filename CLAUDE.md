@@ -446,6 +446,25 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   the dry masses; not in the gauge `propellant_kg()`), Starship / Super Heavy ullage gas from the main tanks (Isp 70 s
   [E]). The burn executor counts the realised RCS force while a translation is commanded. Not modelled: thrust rise /
   tail-off, short-pulse Isp loss, pressure blowdown.
+- Crew Dragon (d2 of the same spec, `config/vehicles/crew_dragon.toml`, test file `core/tests/test_crew_dragon.cpp`):
+  capsule + trunk, 12.5 t [S] (capsule dry 8.4 t [D], 2,562 kg MMH/NTO [S] in an RCS tank, trunk 1.5 t [E]). 16 Dracos
+  (400 N, Isp 300 s, 10 ms pulses) [E layout]: 4 under the nose cone push aft (usable only with the cone open,
+  `Vehicle::set_nose_cone_open`, `FlightSession::set_nose_cone`), 4 side pods (tangential +/-, forward) give pure couples
+  on all axes; no lateral translation (docking, M9). 8 SuperDracos are an `abort_only` group: data only, never lit by
+  the session (`ignite`, burn configurations). Payload vehicles: a mission's `[payload]` stacks a vehicle on the launcher
+  (`config::stack_payload`); its stages are `payload` stages whose thrusters are blocked until it flies alone.
+  `FlightSession::set_payload_separation` / `separate_payload`: released at cutoff + 30 s with a 0.3 m/s push [E]
+  (`AutopilotState::PayloadSeparation` "Nutzlasttrennung", the stack holds its attitude meanwhile); the capsule becomes
+  the controlled body in an inertial hold and opens its nose cone 600 s later [E]. Orbit attitude modes
+  (`gnc/orbital_attitude`: Inertial, Lvlh, Direction, Sun; `FlightSession::set_attitude_mode`) are flown by
+  `orbit_controller_`: slews <= 1 deg/s on every axis (roll too: `Gains::rcs_max_roll_rate_radps`; an unlimited roll of
+  the capsule spent 3.5 kg on a 180 deg turn), hold deadband 0.5 deg / 0.05 deg/s [E]; any mode but Free keeps the
+  session ticking (Free coasts). RCS burns fly along +x when the vehicle has thrust along it, else along -x (the hull
+  turns half about body y), steered by the orbit controller. Mission `falcon9_crew_dragon` (SLC-40, 51.6 deg,
+  200 x 210 km, RTLS to LZ-40): SECO T+503 s, release T+533 s, 200.0 x 210.8 km, 51.74 deg (GCRF elements), +18 m in the
+  first 60 s, 0.42 kg in the first 10 min, first stage landed. Inertial hold after a 1.3 deg/s tumble: <= 0.71 deg,
+  2.4 kg/h (pulse quantum: not grams per hour); LVLH trunk forward: <= 0.71 deg, 3.1 kg/h; Draco burns 1 / 10 m/s within
+  0.002 / 0.014 m/s (5.0 / 43.4 kg, ideal 4.3 / 42.4), -x 2 m/s within 0.007 m/s.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 

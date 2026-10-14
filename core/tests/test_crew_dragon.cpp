@@ -8,12 +8,15 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "starsim/config/mission_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/landing_outcome.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 #include "starsim/vehicle/vehicle.hpp"
@@ -389,4 +392,107 @@ TEST_CASE("An RCS burn along -x turns the hull round and keeps the delta-v", "[d
     CHECK(norm(r.error_mps) < 0.05);
     const double ideal_kg = 12500.0 * (1.0 - std::exp(-2.0 / (300.0 * constants::standard_gravity_mps2)));
     CHECK(r.propellant_kg < 1.5 * ideal_kg + 1.0);  // no half turn flown
+}
+
+TEST_CASE("The crew mission loads its payload vehicle", "[dragon][config]") {
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_crew_dragon");
+    REQUIRE(m.payload);
+    CHECK(m.payload->vehicle_id == "crew_dragon");
+    CHECK(m.payload->separation_delay_s == Catch::Approx(30.0));
+    CHECK(m.payload->separation_dv_mps == Catch::Approx(0.3));
+    CHECK(m.payload->nose_cone_open_s == Catch::Approx(600.0));
+    CHECK(m.payload_kg == 0.0);
+    CHECK_FALSE(config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls").payload);
+}
+
+TEST_CASE("A mission without a payload vehicle ends in orbit as before", "[dragon][sim]") {
+    // Review focus 5: no payload separation without a payload. The second stage flies the upper-stage phase from a placed
+    // state to cutoff and must end in state Orbit, not PayloadSeparation.
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const double gm = session.gm_earth_m3ps2();
+    const orbit::KeplerianElements start{6378137.0 + 195e3, 0.0005, 51.6 * constants::deg_to_rad, 0.0, 0.0, 0.5};
+    session.place_in_orbit("falcon9_block5", orbit::state_from_elements(start, gm), t_deep, 1);
+    session.engage_ascent_autopilot({200e3, 200e3, 51.6 * constants::deg_to_rad, true});
+    session.ignite();
+    bool separation_state = false;
+    for (double t = 1.0; t < 600.0 && session.autopilot().state != sim::AutopilotState::Orbit; t += 1.0) {
+        session.advance_to(t_deep + t, 1000);
+        separation_state = separation_state || session.autopilot().state == sim::AutopilotState::PayloadSeparation;
+    }
+    CHECK_FALSE(separation_state);
+    CHECK(session.autopilot().state == sim::AutopilotState::Orbit);
+    CHECK(session.body_count() == 1);
+}
+
+TEST_CASE("Falcon 9 lifts Crew Dragon into its insertion orbit and the capsule separates",
+          "[dragon][mission][validation]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const auto t0 = time.from_utc({2026, 10, 13, 10, 33, 0.0});
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_crew_dragon");
+    sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
+    double seco_s = -1.0, separation_s = -1.0;
+    size_t stage2 = 0, capsule = 0;
+    for (double t = 1.0; t < 1200.0; t += 1.0) {
+        session.advance_to(t0 + t, 1000);
+        const auto state = session.autopilot().state;
+        if (seco_s < 0.0 && state == sim::AutopilotState::PayloadSeparation) seco_s = session.mission_time_s();
+        if (separation_s < 0.0 && seco_s > 0.0 && state != sim::AutopilotState::PayloadSeparation) {
+            separation_s = session.mission_time_s();
+            capsule = session.controlled_index();
+            stage2 = capsule - 1;
+            break;
+        }
+    }
+    REQUIRE(seco_s > 0.0);
+    REQUIRE(separation_s > 0.0);
+    CHECK(separation_s - seco_s == Catch::Approx(30.0).margin(1.0));
+    CHECK(session.body(capsule).vehicle().stages().back().config.id == "capsule");
+    CHECK(session.body(stage2).vehicle().stages().back().config.id == "second_stage");
+    CHECK(session.attitude_mode().kind == gnc::AttitudeModeKind::Inertial);
+    // Insertion orbit of the capsule.
+    const auto& s = session.body(capsule).state();
+    const auto el = orbit::elements_from_state({s.position_gcrf_m, s.velocity_gcrf_mps}, session.gm_earth_m3ps2());
+    const double peri_km = (el.semi_major_axis_m * (1.0 - el.eccentricity) - 6378137.0) / 1000.0;
+    const double apo_km = (el.semi_major_axis_m * (1.0 + el.eccentricity) - 6378137.0) / 1000.0;
+    std::printf("[validation] crew mission: SECO T+%.0f s, separation T+%.0f s, orbit %.1f x %.1f km, i %.2f deg\n",
+                seco_s, separation_s, peri_km, apo_km, el.inclination_rad / constants::deg_to_rad);
+    CHECK(peri_km == Catch::Approx(200.0).margin(5.0));  // [E] osculating elements carry the J2 swing
+    CHECK(apo_km == Catch::Approx(210.0).margin(5.0));
+    CHECK(el.inclination_rad / constants::deg_to_rad == Catch::Approx(51.6).margin(0.2));
+    // Clearance: the distance (between the CGs, ~12 m apart at the release) grows for 60 s - attitude pulses must not push
+    // the capsule back - by about the spring push x 60 s (0.3 m/s: 18 m).
+    const double d0 = norm(session.body(capsule).state().position_gcrf_m - session.body(stage2).state().position_gcrf_m);
+    double last = d0;
+    const double kg0 = session.body(capsule).vehicle().rcs_propellant_kg();
+    const auto t_sep = session.epoch();
+    bool growing = true;
+    for (double t = 1.0; t <= 60.0; t += 1.0) {
+        session.advance_to(t_sep + t, 1000);
+        const double d =
+            norm(session.body(capsule).state().position_gcrf_m - session.body(stage2).state().position_gcrf_m);
+        growing = growing && d > last;
+        last = d;
+    }
+    std::printf("[validation] capsule 60 s after the separation: %.1f m from the second stage (+%.1f m)\n", last,
+                last - d0);
+    CHECK(growing);
+    CHECK(last - d0 > 15.0);
+    CHECK(last - d0 < 25.0);  // no extra push from the hold
+    CHECK_FALSE(session.body(stage2).vehicle().any_engine_producing_thrust());
+    // The nose cone opens 600 s after the separation; the capsule holds its attitude on the Dracos meanwhile.
+    CHECK_FALSE(session.body(capsule).vehicle().nose_cone_open());
+    session.advance_to(t_sep + 601.0, 200000);
+    CHECK(session.body(capsule).vehicle().nose_cone_open());
+    const double used = kg0 - session.body(capsule).vehicle().rcs_propellant_kg();
+    std::printf("[validation] capsule: %.2f kg of MMH/NTO in the first 10 min\n", used);
+    CHECK(used < 5.0);
+    // The first stage landed on LZ-40 meanwhile (RTLS as in falcon9_rtls).
+    CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);
 }

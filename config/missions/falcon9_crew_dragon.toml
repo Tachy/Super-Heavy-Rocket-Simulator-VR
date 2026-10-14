@@ -1,0 +1,27 @@
+# Falcon 9 from SLC-40 with a Crew Dragon (a real vehicle on top of the stack, milestone d2) and the first stage landing
+# on LZ-40 (as Crew-9: B1085 landed at LZ-1 [S]). The second stage inserts the stack, the capsule separates on its
+# springs, opens its nose cone and holds its attitude on the Dracos; the second stage coasts unguided.
+
+[mission]
+name = "Falcon 9 mit Crew Dragon"
+vehicle = "falcon9_block5"
+site = "ccsfs_slc40"                    # Crew-9 launched from SLC-40 [S]
+landing_zone = "ccsfs_lz40"
+heading_deg = 45.0                      # body +y on the pad (towards the ISS plane, north-east)
+fairing = false
+
+[payload]
+vehicle = "crew_dragon"
+separation_delay_s = 30.0               # [E] after second-stage cutoff
+separation_dv_mps = 0.3                 # [E] spring push
+nose_cone_open_s = 600.0                # [E] after the separation
+
+[target]
+periapsis_km = 200.0                    # [S] Crew Dragon insertion ~200 x 210 km (spec)
+apoapsis_km = 210.0
+inclination_deg = 51.6                  # ISS plane
+northerly = true
+
+[pitch_program]
+kick_deg = 12.0                         # [E] as falcon9_rtls (the same 12.5 t on top)
+booster_throttle = [[49.0, 1.0], [51.0, 0.72], [60.0, 0.72], [62.0, 0.95]]  # [D] CRS-35 bucket (see falcon9_rtls)
