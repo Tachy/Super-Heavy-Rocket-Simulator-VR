@@ -10,6 +10,9 @@ endif()
 set(GODOTCPP_PRECISION "double" CACHE STRING "" FORCE)
 set(GODOTCPP_CUSTOM_API_FILE "${GODOT_API_FILE}" CACHE FILEPATH "" FORCE)
 set(GODOTCPP_TARGET "template_debug" CACHE STRING "" FORCE)
+# The core reports bad input (unknown site, mission, vehicle) with exceptions that the bindings catch and push as
+# Godot errors; godot-cpp disables exceptions by default (_HAS_EXCEPTIONS=0), which made those a crash.
+set(GODOTCPP_DISABLE_EXCEPTIONS OFF CACHE BOOL "" FORCE)
 add_subdirectory("${GODOT_CPP_DIR}" "${CMAKE_BINARY_DIR}/godot-cpp" SYSTEM)
 
 add_library(starsim_gdext SHARED
