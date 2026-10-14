@@ -152,6 +152,26 @@ struct HeatShieldConfig {
     double crew_load_limit_g = 0.0;    // crew: warning above it and the entry guidance's load limit; 0 = none
 };
 
+// One reefing stage of a parachute: the canopy fills to `area_fraction` of its full drag area and holds there.
+struct ReefingStageConfig {
+    double area_fraction = 0.0;
+    double hold_s = 0.0;
+};
+
+// A set of identical parachutes ([[stage.parachute]]; d4): massless drag areas on a riser point on the axis.
+struct ParachuteConfig {
+    std::string id;
+    std::string role;                  // "drogue" or "main" (gnc::ParachuteSequencer)
+    int count = 0;                     // canopies in the set
+    double drag_area_m2 = 0.0;         // C_D S0 of one canopy, fully open
+    double attach_station_m = 0.0;     // riser attachment on the axis, from the bottom of the stage
+    double fill_time_s = 0.0;          // inflation of each reefing stage and of the final opening
+    std::vector<ReefingStageConfig> reefing;  // ascending area fractions in (0, 1); empty: opens to full at once
+    double max_load_n = 0.0;           // per canopy: beyond it the set tears ("Fallschirm gerissen")
+    double deploy_height_m = 0.0;      // above the ground / sea
+    double max_deploy_dynamic_pressure_pa = 0.0;  // the deployment waits above it; 0 = no check
+};
+
 // Return of a first stage (gnc::booster_return_parameters; empty / 0: the guidance's defaults, which are Super Heavy's).
 // Engine groups are ids of the stage.
 struct ReturnProfile {
@@ -211,6 +231,10 @@ struct StageConfig {
     CatchPinConfig catch_pins;  // empty azimuths: none
     std::vector<FlapConfig> flaps;
     HeatShieldConfig heat_shield;
+    std::vector<ParachuteConfig> parachutes;  // [[stage.parachute]] (d4: Crew Dragon drogues and mains)
+    // [stage.recovery] max_splashdown_speed_mps (method "splashdown", required there): sink rate at the water up to
+    // which the capsule is "gewassert"; faster is an impact.
+    double max_splashdown_speed_mps = 0.0;
 };
 
 struct VehicleConfig {

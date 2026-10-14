@@ -5,6 +5,9 @@
 [sources]
 wiki_dragon2 = "https://en.wikipedia.org/wiki/SpaceX_Dragon_2 (commonly cited values)"
 nasa_crew2 = "NASA Commercial Crew blog / SpaceX, Crew-2 return (2021-11-08): drogues ~18,000 ft at ~350 mph, mains ~6,000 ft, deorbit burn ~12 min"
+nasa_demo2 = "NASA, Demo-2 return timeline (2020-08-02): drogues ~18,000 ft at ~350 mph, mains ~6,000 ft at ~119 mph, splashdown ~3 min later"
+spacex_crew1 = "SpaceX, Crew-1 return (2021-05-02): two drogues, four mains at ~6,500 ft"
+splashdown_speed = "Crew-7 coverage (Spectrum News 2024-03-11): ~16 mph at splashdown; TechCrunch Demo-2 preview: ~15 mph"
 
 [vehicle]
 id = "crew_dragon"
@@ -79,7 +82,8 @@ relight = true
 abort_only = true
 
 [stage.recovery]
-method = "splashdown"                    # d3: guided entry to the drogue gate; d4: parachutes
+method = "splashdown"                    # d3: guided entry to the drogue gate; d4: parachutes and splashdown
+max_splashdown_speed_mps = 9.0           # [E: spec] faster sink at the water is an impact
 
 [stage.aero]
 reference_diameter_m = 4.0
@@ -93,3 +97,31 @@ max_heat_rate_w_m2 = 2.0e6               # [E]
 max_heat_load_j_m2 = 4.0e8               # [E]
 max_load_g = 15.0                        # [E] structure
 crew_load_limit_g = 4.0                  # [E: spec] crew, sustained: warning and the guidance's load limit
+
+# Parachutes [S:nasa_demo2, spacex_crew1]: two drogues at the gate, released when the four mains open. Canopy drag areas
+# [D] from the published speeds with a 10.0 t capsule [E] and its own subsonic C_A S 12.2 m^2: drogues 53 m/s (119 mph) at
+# 1.8 km -> 68 m^2 in all; mains 7.0 m/s (15-16 mph [S:splashdown_speed]) at sea level -> 3270 m^2 in all (a 35 m Mark 3
+# canopy at C_D ~0.85). Reefing, fill times and load limits [E] (no public data): sized so that the crew's sustained load
+# stays under 3.6 g (0.9 x crew_load_limit_g).
+[[stage.parachute]]
+id = "drogue"
+role = "drogue"
+count = 2
+drag_area_m2 = 28.0                      # [D] per canopy
+attach_station_m = 3.6                   # [E] riser bridle under the nose cone, on the axis
+fill_time_s = 1.0                        # [E]
+reefing = [[0.35, 4.0]]                  # [E] one reefed stage
+max_load_n = 200000.0                    # [E] per canopy
+deploy_height_m = 5500.0                 # [S:nasa_demo2] ~18,000 ft
+max_deploy_dynamic_pressure_pa = 15000.0 # [E] gate dispersion (d3: 160-178 m/s at 5.5 km) gives <= 11 kPa
+
+[[stage.parachute]]
+id = "main"
+role = "main"
+count = 4
+drag_area_m2 = 815.0                     # [D] per canopy
+attach_station_m = 3.6                   # [E]
+fill_time_s = 2.0                        # [E]
+reefing = [[0.06, 4.0], [0.20, 4.0], [0.45, 4.0]]  # [E] three reefed stages
+max_load_n = 150000.0                    # [E] per canopy
+deploy_height_m = 1800.0                 # [S:nasa_demo2] ~6,000 ft (Crew-1: ~6,500 ft)

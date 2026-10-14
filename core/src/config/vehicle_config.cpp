@@ -257,6 +257,48 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.heat_shield.max_load_g = doc.number_or(*shield, "max_load_g", 0.0);
         s.heat_shield.crew_load_limit_g = doc.number_or(*shield, "crew_load_limit_g", 0.0);
     }
+    if (auto chutes = t["parachute"].as_array()) {
+        for (auto& node : *chutes) {
+            const auto* pt = node.as_table();
+            if (!pt) doc.fail("stage.parachute entries must be tables");
+            config::ParachuteConfig p;
+            p.id = doc.text(*pt, "id");
+            p.role = doc.text(*pt, "role");
+            if (p.role != "drogue" && p.role != "main") doc.fail("stage.parachute.role must be \"drogue\" or \"main\"");
+            p.count = static_cast<int>(doc.positive(*pt, "count"));
+            p.drag_area_m2 = doc.positive(*pt, "drag_area_m2");
+            p.attach_station_m = doc.number(*pt, "attach_station_m");
+            p.fill_time_s = doc.positive(*pt, "fill_time_s");
+            p.max_load_n = doc.positive(*pt, "max_load_n");
+            p.deploy_height_m = doc.positive(*pt, "deploy_height_m");
+            p.max_deploy_dynamic_pressure_pa = doc.number_or(*pt, "max_deploy_dynamic_pressure_pa", 0.0);
+            if (const auto* reefing = (*pt)["reefing"].as_array()) {
+                double previous = 0.0;
+                for (const auto& r : *reefing) {
+                    const auto* pair = r.as_array();
+                    if (!pair || pair->size() != 2) doc.fail("stage.parachute.reefing entries are [area_fraction, hold_s]");
+                    const auto fraction = (*pair)[0].value<double>();
+                    const auto hold = (*pair)[1].value<double>();
+                    if (!fraction || !hold || *fraction <= previous || *fraction >= 1.0 || *hold < 0.0) {
+                        doc.fail("stage.parachute.reefing: area fractions must ascend in (0, 1), holds >= 0");
+                    }
+                    p.reefing.push_back({*fraction, *hold});
+                    previous = *fraction;
+                }
+            }
+            s.parachutes.push_back(p);
+        }
+        int drogues = 0, mains = 0;
+        for (const auto& p : s.parachutes) (p.role == "drogue" ? drogues : mains)++;
+        if (drogues > 1 || mains > 1) doc.fail("stage.parachute: at most one drogue set and one main set");
+        for (const auto& d : s.parachutes) {
+            for (const auto& m : s.parachutes) {
+                if (d.role == "drogue" && m.role == "main" && !(m.deploy_height_m < d.deploy_height_m)) {
+                    doc.fail("stage.parachute: the mains must deploy below the drogues");
+                }
+            }
+        }
+    }
     if (auto pins = t["catch_pins"].as_table()) {
         const auto* azimuths = (*pins)["azimuths_deg"].as_array();
         if (!azimuths || azimuths->empty()) {
@@ -296,6 +338,9 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.reserve_propellant_kg = doc.number_or(*recovery, "reserve_propellant_kg", 0.0);
         s.landing_propellant_kg = doc.number_or(*recovery, "landing_propellant_kg", 0.0);
         s.recovery_method = doc.text_or(*recovery, "method");
+        if (s.recovery_method == "splashdown") {
+            s.max_splashdown_speed_mps = doc.positive(*recovery, "max_splashdown_speed_mps");
+        }
         auto group_list = [&](const toml::array& list, const std::string& key) {
             std::vector<std::string> ids;
             for (const auto& node : list) {

@@ -22,6 +22,7 @@ add_library(starsim_core STATIC
     src/aero/flap.cpp
     src/aero/entry_heating.cpp
     src/aero/capsule_aero.cpp
+    src/aero/parachute.cpp
     src/vehicle/vehicle.cpp
     src/vehicle/flight_body.cpp
     src/gnc/attitude_controller.cpp
