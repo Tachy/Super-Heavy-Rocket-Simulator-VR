@@ -702,6 +702,8 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         } else {
             controller_.steer(*flying.body, ambient_pressure_pa, direction).apply_to(command);
         }
+        // Orbit manoeuvre: turning towards the burn must not push the vehicle (an unrequested push moves the orbit).
+        command.rcs_keep_force = !guided;
         if (!guided && burn_config_.rcs && autopilot_.burn.ignite && !autopilot_.burn.complete) {
             // Translation along the remaining delta-v, independent of the attitude.
             command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(autopilot_.burn.direction_gcrf);

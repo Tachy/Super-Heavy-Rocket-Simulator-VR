@@ -282,7 +282,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   ~0.95 km [D]; at 950 m campaign case 4 misses by 212 m). `FlightSession::place_entering_ship` (scenarios),
   `entry_status` (setpoint; bindings telemetry `entry_*`, HUD lines). Campaign `[ship][guidance][validation]`
   (12 dispersed entries to Starbase, truth aero +-10 %): 11 within 0.11 m, case 4 marginal (roundoff moves it between
-  ~0.1 and ~1.2 km: open), belly <= 30 deg off down at the gate; load limit held.
+  ~0.1 and ~1.2 km: open; the test holds it to < 1.5 km since d1, 0.38 km there), belly <= 30 deg off down at the gate; load limit held.
   Tests use `predictor_j2 = false` (the scenario Earth has central gravity; J2 alone shifts a long glide ~2 %).
 - Ship flip and catch (b3, `gnc/ship_landing`): at the gate the three sea-level Raptors relight at 80 % [E], the aft
   flaps fold and the forward flaps go broadside until the tilt is < 30 deg (the tail drops while the engines spool);
@@ -423,15 +423,22 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   `return_state(i)["legs"]`. Covered by the smoke test. The bindings build with C++ exceptions on
   (`GODOTCPP_DISABLE_EXCEPTIONS OFF`): godot-cpp's default turned every core config error into an engine crash.
 - RCS (d1 of `docs/superpowers/specs/2026-10-14-rcs-crew-dragon-design.md`): individual thrusters from `[stage.rcs]` pods
-  (Super Heavy 12 x 3 kN at the forward dome, ship 14 x 1.5 kN fore and aft incl. two aft ullage thrusters along +x,
+  (Super Heavy 12 x 3 kN at the forward dome, ship 26 x 1.5 kN fore and aft (two of each direction per pod: the pre-d1 per-axis estimate the ship campaigns were
+  validated with - roll 20, pitch / yaw 117 kNm - available on all axes at once; with one of each, roll and pitch shared
+  their thrusters, the entry's nose turn ran out of torque and catches from entries hit the arms) incl. two aft ullage
+  thrusters along +x,
   Falcon 9 8 x 450 N at the interstage and 8 x 200 N on the second stage; layouts [E]), on/off with a fixed thrust
   (constant pressure; user 2026-10-14: no continuous mode, the autopilots fly on the pulses). Per tick
   `Vehicle::update_rcs` allocates the commanded torque / force fractions (`propulsion/rcs_allocator`: box QP solved by
   an exact active set on the 6 x n effectiveness about the current CG, rebuilt when the CG moves > 1 cm or a supply runs
-  dry) and `propulsion/rcs_modulator` turns the duties into pulses of >= 20 ms (4 ticks). Balanced layouts (pure couples
-  on every axis: the ship) keep the net force what was asked for, so turns do not translate it (the ship's saturated
-  burn turn borrowed its ullage thrusters: +55 m on a 0.5 m/s burn); one-station layouts (Super Heavy, Falcon 9) turn
-  with a push, torque first. Capability per axis (`max_rcs_torque_nm`, the fraction scale of the controllers) and per
+  dry) and `propulsion/rcs_modulator` turns the duties into pulses of >= 20 ms (4 ticks). Torque comes first; orbit
+  manoeuvres set `VehicleCommand::rcs_keep_force` (session Burn state): balanced layouts (pure couples on every axis: the
+  ship) then keep the net force what was asked for, so turns do not translate the vehicle (the ship's saturated burn turn
+  borrowed its ullage thrusters: +55 m on a 0.5 m/s burn; keeping the force in the entry's thin air instead cut torque
+  and made catches from entries fail). One-station layouts (Super Heavy, Falcon 9) always turn with a push: they cannot
+  translate in the coast, so the Falcon 9 entry burn removes the impact miss by its length (+-25 % [E]) and lean
+  (<= 10 deg [E]) (user 2026-10-14). A returning booster's coast slews (pitch / yaw on RCS) are limited to 2 deg/s [E]
+  (a full-authority turn emptied the Falcon 9 nitrogen). Capability per axis (`max_rcs_torque_nm`, the fraction scale of the controllers) and per
   direction (`rcs_force_capability`) come from the geometry. Propellant: Falcon 9 N2 tanks (200 / 80 kg carved out of
   the dry masses; not in the gauge `propellant_kg()`), Starship / Super Heavy ullage gas from the main tanks (Isp 70 s
   [E]). The burn executor counts the realised RCS force while a translation is commanded. Not modelled: thrust rise /

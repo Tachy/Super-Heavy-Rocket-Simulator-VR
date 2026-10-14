@@ -52,6 +52,9 @@ struct DescentLimits {
                                                     10.0 * constants::deg_to_rad};
     double terminal_tilt_rad = 4.0 * constants::deg_to_rad;   // [E] at the catch / touchdown (structural)
     int tilt_taper_nodes = 4;                                 // the final phase's last nodes taper linearly to it
+    // [E] catch: nodes in the corridor (the hull passing the arms) tilt at most this - the corridor holds the CG, a tilted
+    // hull swings its bottom ~cg_station x tilt aside (10 deg: ~4.5 m on the ship, into a standby arm; d1 campaigns).
+    double corridor_tilt_rad = 6.0 * constants::deg_to_rad;
     // At the end of the plan the thrust is at most minimum + this fraction of the maximum: the final engines exceed
     // the weight even at minimum throttle and throttle at a limited rate, so the plan ends gently, not braking hard.
     double terminal_thrust_margin = 0.05;  // [E]

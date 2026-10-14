@@ -192,6 +192,8 @@ EntryRun fly_entry_burn(const Vec3& start_enu_m, double max_lean_rad) {
                                                   std::acos(std::clamp(axis.z, -1.0, 1.0)));
     auto parameters = asds_parameters();
     parameters.entry_max_lean_rad = max_lean_rad;
+    // Without a lean the nominal burn flies unchanged (the prediction's own test): no delta-v correction either.
+    if (max_lean_rad == 0.0) parameters.entry_max_delta_v_change = 0.0;
     session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, start_enu_m, velocity, tilt),
                                     t0, parameters, gnc::ReturnPhase::Coast);
     const double ground = session.landing_zone()->height_m;

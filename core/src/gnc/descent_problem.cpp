@@ -190,6 +190,10 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         if (const int from_end = last - k; p == final_phase && from_end < limits.tilt_taper_nodes) {
             tilt = limits.terminal_tilt_rad + (tilt - limits.terminal_tilt_rad) * from_end / limits.tilt_taper_nodes;
         }
+        if (target.goal == DescentGoal::Catch && target.corridor_radius_m > 0.0 && limits.corridor_tilt_rad > 0.0 &&
+            ref.x[at(k)][descent_index::position] < target.corridor_top_m) {
+            tilt = std::min(tilt, limits.corridor_tilt_rad);  // the hull passes the arms nearly upright
+        }
         b.add_second_order_cone({AffineExpr{t_max}, U(k, 0), U(k, 1), U(k, 2)});
         // Lower thrust bound, linearised: (ubar / |ubar|) . u >= t_min.
         const Vec3& ub = ref.u[at(k)];

@@ -438,7 +438,7 @@ void Vehicle::update_rcs(double dt_s, const VehicleCommand& command) {
         const Vec3 u = command.rcs_force_fraction / magnitude;
         force = u * (std::min(magnitude, 1.0) * a.force_capability_n(u));
     }
-    rcs_duty_ = a.allocate(torque, force, &rcs_duty_);
+    rcs_duty_ = a.allocate(torque, force, &rcs_duty_, command.rcs_keep_force);
     if (rcs_modulator_.firing().size() != rcs_duty_.size()) {
         double minimum_on_time_s = 0.0;
         for (const auto& s : stages_) {

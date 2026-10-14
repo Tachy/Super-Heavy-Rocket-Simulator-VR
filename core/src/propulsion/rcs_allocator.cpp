@@ -120,9 +120,8 @@ RcsAllocator::RcsAllocator(std::vector<RcsThrusterGeometry> thrusters, double cg
 }
 
 std::vector<double> RcsAllocator::allocate(const Vec3& torque_nm, const Vec3& force_n,
-                                           const std::vector<double>* warm_start) const {
-    // Balanced layouts keep the force what was asked for (no translation from turning); others turn with a push.
-    return balanced_ ? solve(torque_nm, force_n, torque_scale_ / torque_priority, couple_force_priority, warm_start)
+                                           const std::vector<double>* warm_start, bool keep_force) const {
+    return keep_force && balanced_ ? solve(torque_nm, force_n, torque_scale_ / torque_priority, couple_force_priority, warm_start)
                      : solve(torque_nm, force_n, torque_scale_, 1.0, warm_start);
 }
 

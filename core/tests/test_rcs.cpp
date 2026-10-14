@@ -136,12 +136,12 @@ TEST_CASE("RCS allocator: a balanced layout turns at full capability without a n
     const Vec3 cap = a.max_torque_nm();
     for (const Vec3 want : {Vec3{cap.x, 0.0, 0.0}, Vec3{0.0, -cap.y, 0.0}, Vec3{0.0, 0.0, cap.z}}) {
         CAPTURE(want.x, want.y, want.z);
-        const auto d = a.allocate(want, {});
+        const auto d = a.allocate(want, {}, nullptr, true);  // in vacuum
         CHECK(norm(a.force_n(d)) < 1.0);
         CHECK(norm(a.torque_nm(d) - want) < 0.01 * norm(want));
     }
     // Beyond the capability (all axes at once) the demand is cut and the force stays small.
-    CHECK(norm(a.force_n(a.allocate(cap * 2.0, {}))) < 0.01 * 1500.0);  // finite force weight: a small leak
+    CHECK(norm(a.force_n(a.allocate(cap * 2.0, {}, nullptr, true))) < 0.01 * 1500.0);  // finite force weight: a small leak
     // A single ring has no pure pitch couple: it turns with a push (torque first).
     CHECK_FALSE(RcsAllocator(ring(68.0, 4.5, 3000.0, {45, 135, 225, 315}), 30.0).balanced());
 }
@@ -181,7 +181,7 @@ TEST_CASE("RCS thrusters are loaded for every stage", "[rcs][config]") {
     const auto ss = config::load_vehicle(config_dir, "starship_block3");
     const auto f9 = config::load_vehicle(config_dir, "falcon9_block5");
     CHECK(ss.stages[0].rcs.thrusters.size() == 12);
-    CHECK(ss.stages[1].rcs.thrusters.size() == 14);
+    CHECK(ss.stages[1].rcs.thrusters.size() == 26);
     CHECK(f9.stages[0].rcs.thrusters.size() == 8);
     CHECK(f9.stages[1].rcs.thrusters.size() == 8);
     // Pod expansion: Super Heavy pod 1 at 45 deg, radius 4.5, station 68 m; first thruster tangential +.

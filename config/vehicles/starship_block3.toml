@@ -270,7 +270,9 @@ station_m = 46.0                         # [E] forward of the forward flaps; sid
 radius_m = 4.5
 azimuths_deg = [0.0, 180.0]
 thrust_n = 1500.0                        # [E] (the pre-d1 estimate)
-directions = ["tangential_plus", "tangential_minus", "inward"]
+directions = ["tangential_plus", "tangential_plus", "tangential_minus", "tangential_minus", "inward", "inward"]
+# [E] two of each: the pre-d1 per-axis estimate (roll 20, pitch / yaw 117 kNm) available on all axes at once - with one
+# of each, roll and pitch shared their thrusters and the entry's nose turn ran out of torque (d1 campaigns)
 
 [[stage.rcs.pod]]
 id = "aft"
@@ -278,4 +280,4 @@ station_m = 6.0                          # [E] above the aft flaps
 radius_m = 4.5
 azimuths_deg = [0.0, 180.0]
 thrust_n = 1500.0                        # [E]
-directions = ["tangential_plus", "tangential_minus", "inward", "forward"]  # forward: ullage settling, translation
+directions = ["tangential_plus", "tangential_plus", "tangential_minus", "tangential_minus", "inward", "inward", "forward"]  # forward: ullage settling, translation

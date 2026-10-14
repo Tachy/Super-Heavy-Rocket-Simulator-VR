@@ -114,6 +114,10 @@ struct VehicleCommand {
     // Reaction control translation: requested force direction and magnitude as a fraction (|f| <= 1) of the
     // capability along that direction (rcs_force_capability), body axes.
     math::Vec3 rcs_force_fraction;
+    // Keep the RCS net force what was asked for where the layout allows (pure couples): turns do not translate the
+    // vehicle, a saturated torque is cut instead. Orbit manoeuvres set it (an unrequested push moves the orbit);
+    // otherwise torque comes first.
+    bool rcs_keep_force = false;
     // Grid fin deflections (rad), one per fin in stage order; missing entries mean neutral.
     std::vector<double> grid_fin_rad;
     // Flap deflections (rad), one per flap in stage order; missing entries hold the current deflection.
