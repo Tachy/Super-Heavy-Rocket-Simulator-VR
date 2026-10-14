@@ -151,6 +151,12 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     s.diameter_m = doc.number(t, "diameter_m");
     s.dry_mass_kg = doc.number(t, "dry_mass_kg");
     s.dry_cg_station_m = doc.number(t, "dry_cg_station_m");
+    if (const auto* offset = t["dry_cg_offset_m"].as_array()) {
+        if (offset->size() != 2) doc.fail("dry_cg_offset_m must be [y, z]");
+        const auto y = (*offset)[0].value<double>(), z = (*offset)[1].value<double>();
+        if (!y || !z) doc.fail("dry_cg_offset_m must be numbers");
+        s.dry_cg_offset_m = {0.0, *y, *z};
+    }
     s.payload_mass_kg = doc.number_or(t, "payload_mass_kg", 0.0);
     s.fairing_mass_kg = doc.number_or(t, "fairing_mass_kg", 0.0);
     s.jettison_after_separation_kg = doc.number_or(t, "jettison_after_separation_kg", 0.0);
@@ -200,6 +206,12 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.aero.flap_table = doc.text_or(*aero, "flap_table");
         s.aero.entry_alpha_table = doc.text_or(*aero, "entry_alpha_table");
         s.aero.belly_azimuth_rad = doc.number_or(*aero, "belly_azimuth_deg", 270.0) * constants::deg_to_rad;
+        s.aero.capsule_table = doc.text_or(*aero, "capsule_table");
+        s.aero.entry_profile = doc.text_or(*aero, "entry_profile");
+        if (s.aero.entry_profile.empty()) s.aero.entry_profile = "ship";
+        if (s.aero.entry_profile != "ship" && s.aero.entry_profile != "capsule") {
+            doc.fail("stage.aero.entry_profile must be \"ship\" or \"capsule\"");
+        }
     } else {
         s.aero.reference_diameter_m = s.diameter_m;
     }
@@ -243,6 +255,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.heat_shield.max_heat_rate_w_m2 = doc.number(*shield, "max_heat_rate_w_m2");
         s.heat_shield.max_heat_load_j_m2 = doc.number(*shield, "max_heat_load_j_m2");
         s.heat_shield.max_load_g = doc.number_or(*shield, "max_load_g", 0.0);
+        s.heat_shield.crew_load_limit_g = doc.number_or(*shield, "crew_load_limit_g", 0.0);
     }
     if (auto pins = t["catch_pins"].as_table()) {
         const auto* azimuths = (*pins)["azimuths_deg"].as_array();

@@ -23,10 +23,14 @@ struct RcsThrusterGeometry {
 class RcsAllocator {
 public:
     RcsAllocator() = default;
-    RcsAllocator(std::vector<RcsThrusterGeometry> thrusters, double cg_station_m);
+    // Lever arms about the CG point (station, y, z); the station form puts the CG on the axis.
+    RcsAllocator(std::vector<RcsThrusterGeometry> thrusters, const math::Vec3& cg_m);
+    RcsAllocator(std::vector<RcsThrusterGeometry> thrusters, double cg_station_m)
+        : RcsAllocator(std::move(thrusters), math::Vec3{cg_station_m, 0.0, 0.0}) {}
 
     size_t size() const { return thrusters_.size(); }
-    double cg_station_m() const { return cg_station_m_; }
+    double cg_station_m() const { return cg_m_.x; }
+    const math::Vec3& cg_m() const { return cg_m_; }
     bool balanced() const { return balanced_; }
 
     // Duties in [0, 1] for a torque about the CG and a force (see the class comment for the priorities); least
@@ -52,7 +56,7 @@ private:
         math::Vec3 force;
     };
     std::vector<RcsThrusterGeometry> thrusters_;
-    double cg_station_m_ = 0.0;
+    math::Vec3 cg_m_;
     double torque_scale_ = 0.0;       // weight of the torque rows (priority / reference lever)
     double saturating_demand_ = 0.0;  // a demand beyond any capability (capability queries)
     std::vector<Row> rows_;

@@ -98,6 +98,8 @@ public:
     double heat_load_j_m2() const { return heat_load_j_m2_; }
     double peak_heat_rate_w_m2() const { return peak_heat_rate_w_m2_; }
     bool heat_warning() const { return heat_warning_; }
+    // The aerodynamic load exceeded the crew limit ([stage.heat_shield] crew_load_limit_g) at some point (stays set).
+    bool crew_load_warning() const { return crew_load_warning_; }
     const std::string& breakup_reason() const { return breakup_reason_; }
     // Skip-out ("Abprall"): after dipping below 80 km the vehicle climbed back above 100 km (set once, stays set).
     bool skipped_out() const { return skipped_out_; }
@@ -151,6 +153,7 @@ private:
     double heat_load_j_m2_ = 0.0;
     double peak_heat_rate_w_m2_ = 0.0;
     bool heat_warning_ = false;
+    bool crew_load_warning_ = false;
     std::string breakup_reason_;
     bool entered_atmosphere_ = false;
     bool skipped_out_ = false;

@@ -76,12 +76,16 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
     // Aerodynamics relative to the co-rotating atmosphere (no wind model yet).
     const Vec3 air_velocity = s.velocity_gcrf_mps - cross(ctx.earth_rotation_gcrf, s.position_gcrf_m);
     const bool powered = ctx.vehicle.any_engine_producing_thrust();
-    f.aero = ctx.vehicle.aero().compute(s.attitude.inverse_rotate(air_velocity), air.density_kg_m3,
-                                        air.speed_of_sound_mps, powered, air.mean_free_path_m);
+    f.aero = ctx.vehicle.hull_aero(s.attitude.inverse_rotate(air_velocity), air, powered);
     f.aero.force_body_n = f.aero.force_body_n * ctx.vehicle.hull_aero_scale();
+    f.aero.moment_body_nm = f.aero.moment_body_nm * ctx.vehicle.hull_aero_scale();
     f.nongravitational_body_n = f.aero.force_body_n;
     f.aero_body_n = f.aero.force_body_n;
-    f.moment_body_nm = cross(Vec3{f.aero.normal_force_station_m - f.mass.cg_station_m, 0.0, 0.0}, f.aero.force_body_n);
+    // About the CG, which sits off the axis by cg_offset_m on a capsule (zero otherwise: the same moment as before).
+    f.moment_body_nm = cross(Vec3{f.aero.normal_force_station_m - f.mass.cg_station_m, -f.mass.cg_offset_m.y,
+                                  -f.mass.cg_offset_m.z},
+                             f.aero.force_body_n) +
+                       f.aero.moment_body_nm;
 
     for (const auto& stage : ctx.vehicle.stages()) {
         for (const auto& e : stage.engines) {
@@ -295,6 +299,7 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
         } else if (shield.max_load_g > 0.0 && load_g > shield.max_load_g) {
             breakup_reason_ = "Strukturüberlast";
         }
+        if (shield.crew_load_limit_g > 0.0 && load_g > shield.crew_load_limit_g) crew_load_warning_ = true;
         constexpr double warning_fraction = 0.8;
         heat_warning_ = heat_rate_w_m2_ >= warning_fraction * shield.max_heat_rate_w_m2 ||
                         heat_load_j_m2_ >= warning_fraction * shield.max_heat_load_j_m2 ||

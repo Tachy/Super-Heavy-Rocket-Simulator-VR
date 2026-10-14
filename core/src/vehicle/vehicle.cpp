@@ -161,10 +161,22 @@ void Vehicle::rebuild_aero() {
     aero_ = std::make_unique<aero::SlenderBodyAero>(
         aero::SlenderBodyGeometry{length_m(), diameter_m(), stages_.back().config.aero.nose_length_m}, drag,
         tail_first, crossflow);
+    // A capsule flying alone (its heat shield at the bottom of the stack): blunt-body aerodynamics, apex at station 0.
+    capsule_aero_.reset();
+    if (const auto& low = stages_.front().config.aero; !low.capsule_table.empty()) {
+        capsule_aero_ = std::make_unique<aero::CapsuleAero>(
+            aero::load_capsule_aero_table(config_dir_ / low.capsule_table), low.reference_diameter_m, 0.0);
+    }
+}
+
+aero::AeroResult Vehicle::hull_aero(const Vec3& air_velocity_body_mps, const environment::AtmosphereState& air,
+                                    bool powered) const {
+    if (capsule_aero_) return capsule_aero_->compute(air_velocity_body_mps, air.density_kg_m3, air.speed_of_sound_mps);
+    return aero_->compute(air_velocity_body_mps, air.density_kg_m3, air.speed_of_sound_mps, powered, air.mean_free_path_m);
 }
 
 MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* flows, double tau_s) const {
-    struct Part { double mass, station, ixx, iyy; };
+    struct Part { double mass, station, ixx, iyy; double y = 0.0, z = 0.0; };
     std::vector<Part> parts;
     for (size_t si = 0; si < stages_.size(); ++si) {
         const auto& s = stages_[si];
@@ -172,7 +184,8 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
         const double l = s.config.length_m;
         // Dry structure as a thin-walled cylinder about its own CG [E].
         parts.push_back({s.config.dry_mass_kg, s.base_station_m + s.config.dry_cg_station_m,
-                         s.config.dry_mass_kg * r * r, s.config.dry_mass_kg * (0.5 * r * r + l * l / 12.0)});
+                         s.config.dry_mass_kg * r * r, s.config.dry_mass_kg * (0.5 * r * r + l * l / 12.0),
+                         s.config.dry_cg_offset_m.y, s.config.dry_cg_offset_m.z});
         if (s.extra_mass_kg > 0.0) {
             parts.push_back({s.extra_mass_kg, s.base_station_m + extra_mass_station_fraction * l, 0.0, 0.0});
         }
@@ -190,8 +203,13 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
     for (const auto& p : parts) {
         mp.mass_kg += p.mass;
         mp.cg_station_m += p.mass * p.station;
+        mp.cg_offset_m.y += p.mass * p.y;
+        mp.cg_offset_m.z += p.mass * p.z;
     }
     mp.cg_station_m /= mp.mass_kg;
+    // Lateral offset (capsule trim): enters the aerodynamic and RCS moments only; the inertia stays on the axis (its
+    // parallel-axis term is < 0.1 %, d3 plan ruling 2).
+    mp.cg_offset_m = mp.cg_offset_m / mp.mass_kg;
     double ixx = 0.0, iyy = 0.0;
     for (const auto& p : parts) {
         const double d = p.station - mp.cg_station_m;
@@ -417,8 +435,8 @@ void Vehicle::set_nose_cone_open(bool open) {
 }
 
 const propulsion::RcsAllocator& Vehicle::rcs_allocator() const {
-    const double cg = mass_properties().cg_station_m;
-    if (!rcs_allocator_ || std::abs(rcs_allocator_->cg_station_m() - cg) > rcs_cg_tolerance_m) {
+    const Vec3 cg = mass_properties().cg_point_m();
+    if (!rcs_allocator_ || norm(rcs_allocator_->cg_m() - cg) > rcs_cg_tolerance_m) {
         std::vector<propulsion::RcsThrusterGeometry> geometry;
         for (const auto& s : stages_) {
             for (const auto& t : s.rcs) {

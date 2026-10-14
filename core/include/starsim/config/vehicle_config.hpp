@@ -93,6 +93,8 @@ struct AeroConfig {
     std::string flap_table;         // flap normal-force table (mach, cn_max), path relative to config/
     double belly_azimuth_rad = 1.5 * 3.14159265358979323846;  // body direction of the heat shield (default -z)
     std::string entry_alpha_table;  // nominal entry angle of attack over Mach (mach, alpha_deg); entry guidance
+    std::string capsule_table;      // blunt capsule (mach, alpha_deg, ca, cn, cm), used once the stage is the lowest
+    std::string entry_profile = "ship";  // entry guidance phases: "ship" (terminal nose turn) or "capsule"
 };
 
 // One flap of a stage (Starship): flat plate hinged along the hull side, see aero/flap.hpp.
@@ -147,6 +149,7 @@ struct HeatShieldConfig {
     double max_heat_rate_w_m2 = 0.0;
     double max_heat_load_j_m2 = 0.0;
     double max_load_g = 0.0;           // aerodynamic acceleration (aero force / mass); 0 = not judged
+    double crew_load_limit_g = 0.0;    // crew: warning above it and the entry guidance's load limit; 0 = none
 };
 
 // Return of a first stage (gnc::booster_return_parameters; empty / 0: the guidance's defaults, which are Super Heavy's).
@@ -174,6 +177,7 @@ struct StageConfig {
     double diameter_m = 0.0;
     double dry_mass_kg = 0.0;  // includes engines
     double dry_cg_station_m = 0.0;
+    math::Vec3 dry_cg_offset_m;  // lateral dry CG offset (y, z) from the axis (capsule trim); x unused (0)
     double payload_mass_kg = 0.0;
     double fairing_mass_kg = 0.0;
     double jettison_after_separation_kg = 0.0;

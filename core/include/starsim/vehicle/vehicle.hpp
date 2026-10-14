@@ -5,7 +5,9 @@
 #include <string>
 #include <vector>
 
+#include "starsim/aero/capsule_aero.hpp"
 #include "starsim/aero/flap.hpp"
+#include "starsim/environment/atmosphere.hpp"
 #include "starsim/aero/grid_fin.hpp"
 #include "starsim/aero/slender_body_aero.hpp"
 #include "starsim/config/vehicle_config.hpp"
@@ -95,7 +97,9 @@ struct Stage {
 struct MassProperties {
     double mass_kg = 0.0;
     double cg_station_m = 0.0;
+    math::Vec3 cg_offset_m;    // lateral CG offset from the axis (0, y, z): a capsule's trim offset, else zero
     math::Vec3 inertia_kg_m2;  // principal moments about the CG: (roll, pitch, yaw) = (Ixx, Iyy, Izz)
+    math::Vec3 cg_point_m() const { return {cg_station_m, cg_offset_m.y, cg_offset_m.z}; }
 };
 
 // Command for one simulation tick. Engine groups are addressed as "<stage>/<group>".
@@ -196,6 +200,11 @@ public:
     bool nose_cone_open() const { return nose_cone_open_; }
     void set_nose_cone_open(bool open);
     const aero::SlenderBodyAero& aero() const { return *aero_; }
+    // Blunt-capsule aerodynamics when the lowest stage has a capsule table (the capsule alone), else nullptr.
+    const aero::CapsuleAero* capsule_aero() const { return capsule_aero_.get(); }
+    // Hull aerodynamics for the flight state: the capsule's when present, else the slender body's.
+    aero::AeroResult hull_aero(const math::Vec3& air_velocity_body_mps, const environment::AtmosphereState& air,
+                               bool powered) const;
 
     // Splits the stack below stage `index`: this vehicle keeps stages [0, index), the returned one
     // stages [index, n). Stations of the upper part are re-based to its own bottom.
@@ -211,6 +220,7 @@ private:
     std::filesystem::path config_dir_;
     std::vector<Stage> stages_;
     std::unique_ptr<aero::SlenderBodyAero> aero_;
+    std::unique_ptr<aero::CapsuleAero> capsule_aero_;
     bool legs_deploying_ = false;
     double leg_deployment_ = 0.0;
     double hull_aero_scale_ = 1.0;

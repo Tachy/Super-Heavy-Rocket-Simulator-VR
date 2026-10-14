@@ -73,10 +73,10 @@ double& axis(Vec3& v, int i) { return i == 0 ? v.x : (i == 1 ? v.y : v.z); }
 
 }  // namespace
 
-RcsAllocator::RcsAllocator(std::vector<RcsThrusterGeometry> thrusters, double cg_station_m)
-    : thrusters_(std::move(thrusters)), cg_station_m_(cg_station_m) {
+RcsAllocator::RcsAllocator(std::vector<RcsThrusterGeometry> thrusters, const Vec3& cg_m)
+    : thrusters_(std::move(thrusters)), cg_m_(cg_m) {
     const size_t n = thrusters_.size();
-    const Vec3 cg{cg_station_m_, 0.0, 0.0};
+    const Vec3 cg = cg_m_;
     double lever = 1.0;
     for (const auto& t : thrusters_) lever = std::max(lever, norm(t.position_m - cg));
     torque_scale_ = torque_priority / lever;
