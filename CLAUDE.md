@@ -290,9 +290,12 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   entry controller (`EntryCommand::rate_gcrf_radps`; without it the PD loop lagged the turn by ~18 deg of alpha), which
   has an actuator delay of 0.5 s [E] (2x slew or 5 deg/s set off a roll limit cycle on the flaps: departures). Session
   test from Mach 2.6, 28 km west: gate < 1 m off, caught 0.02 m, 0.95 m/s, 2.1 t left. Open: an energy-short terminal
-  phase (33-39 km from Mach 2.6) stays shallow and misses the gate (not seen from orbit), the tower judges a 4.5 m/s
-  arrival (out of propellant) "gefangen". Diagnostics: `STARSIM_DEBUG_FLIP=1`, `STARSIM_DEBUG_BURN=1`,
-  `STARSIM_DEBUG_ENTRY=1` with the SCvx / catch flags.
+  phase (33-39 km from Mach 2.6) stays shallow and misses the gate (not seen from orbit). Ship catch propellant margin:
+  5 of 21 dispersed gates arrive with <= 0.7 t (gate +-10 m/s: up to ~39 m/s across after the flip, braked high inside
+  the glide cone); campaign case 12 (seed 13) reaches the catch point before the arms have closed, runs dry and drops
+  ~1 m onto the arms at 4.5 m/s - judged "gefangen" correctly (carriage absorbs it, pin loads below the limit).
+  Diagnostics: `STARSIM_DEBUG_FLIP=1`, `STARSIM_DEBUG_BURN=1`, `STARSIM_DEBUG_ENTRY=1` with the SCvx / catch flags;
+  hidden test "Ship catch single case" with `STARSIM_SHIP_SEED=<1-20>`.
 - Ship return from orbit (b4, `config/missions/ship_return_starbase.toml`, `config::load_ship_return_mission`):
   `FlightSession::plan_ship_return` (game key R) plans the deorbit burn on the onboard computer (`gnc/deorbit_planner`:
   coast samples over 48 h, passes = closest approaches of the ground track; per pass the burn epoch is bracketed on the

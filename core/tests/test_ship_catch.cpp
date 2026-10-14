@@ -111,6 +111,32 @@ static Gate nominal_gate() {
     return g;
 }
 
+// Dispersed gate of the campaign (fixed seed): +-10 m per axis, +-10 m/s per axis, landing propellant +-5 %, alpha and
+// bank +-5 deg; the nose to the tower.
+static Gate dispersed_gate(unsigned seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<double> unit(-1.0, 1.0);
+    Gate g = nominal_gate();
+    g.attitude_velocity_enu_mps = g.velocity_enu_mps;  // nose to the tower
+    g.offset_enu_m += Vec3{10.0 * unit(rng), 10.0 * unit(rng), 0.0};
+    g.height_m += 10.0 * unit(rng);
+    g.velocity_enu_mps += Vec3{10.0 * unit(rng), 10.0 * unit(rng), 10.0 * unit(rng)};
+    g.propellant_kg *= 1.0 + 0.05 * unit(rng);
+    g.alpha_deg += 5.0 * unit(rng);
+    g.bank_deg = 5.0 * unit(rng);
+    return g;
+}
+
+TEST_CASE("Ship catch single case", "[.][ship-single]") {
+    // Diagnostics: STARSIM_SHIP_SEED=<seed of the campaign, 1-20> (0: nominal gate).
+    const char* seed_text = std::getenv("STARSIM_SHIP_SEED");
+    const unsigned seed = seed_text ? static_cast<unsigned>(std::atoi(seed_text)) : 0u;
+    const Gate g = seed ? dispersed_gate(seed) : nominal_gate();
+    std::printf("seed %u: propellant %.0f kg, gate v %.1f,%.1f,%.1f m/s, height %.0f m\n", seed, g.propellant_kg,
+                g.velocity_enu_mps.x, g.velocity_enu_mps.y, g.velocity_enu_mps.z, g.height_m);
+    fly_from_gate(g);
+}
+
 TEST_CASE("Ship flips at the gate and is caught", "[ship][landing][catch]") {
     const auto run = fly_from_gate(nominal_gate());
     CHECK(run.caught_within_tolerance());
@@ -123,19 +149,7 @@ TEST_CASE("Ship flips at the gate and is caught", "[ship][landing][catch]") {
 // loses the first engine to be dropped (sea_level_3) in the flip: the switch to two engines comes early.
 TEST_CASE("Ship catch campaign: gate dispersions and an engine failure", "[ship][catch][validation]") {
     std::vector<Gate> cases;
-    for (unsigned seed = 1; seed <= 20; ++seed) {
-        std::mt19937 rng(seed);
-        std::uniform_real_distribution<double> unit(-1.0, 1.0);
-        Gate g = nominal_gate();
-        g.attitude_velocity_enu_mps = g.velocity_enu_mps;  // nose to the tower
-        g.offset_enu_m += Vec3{10.0 * unit(rng), 10.0 * unit(rng), 0.0};
-        g.height_m += 10.0 * unit(rng);
-        g.velocity_enu_mps += Vec3{10.0 * unit(rng), 10.0 * unit(rng), 10.0 * unit(rng)};
-        g.propellant_kg *= 1.0 + 0.05 * unit(rng);
-        g.alpha_deg += 5.0 * unit(rng);
-        g.bank_deg = 5.0 * unit(rng);
-        cases.push_back(g);
-    }
+    for (unsigned seed = 1; seed <= 20; ++seed) cases.push_back(dispersed_gate(seed));
     Gate failure = nominal_gate();
     failure.failed_group = "ship/sea_level_3";
     cases.push_back(failure);
