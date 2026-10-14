@@ -226,6 +226,9 @@ public:
     void stop_rcs();
     // Hinged nose cone of a stage (Crew Dragon): closed at construction; thrusters behind it are blocked while closed.
     bool has_nose_cone() const;
+    // A payload vehicle (config::stack_payload) still on its launcher: a launcher stage below payload stages. A released
+    // payload keeps its stages' payload flag, so this - not the flag - tells whether it flies alone.
+    bool payload_stacked() const;
     bool nose_cone_open() const { return nose_cone_open_; }
     void set_nose_cone_open(bool open);
     const aero::SlenderBodyAero& aero() const { return *aero_; }

@@ -541,3 +541,17 @@ TEST_CASE("Re-engaging the ascent autopilot after staging keeps a stacked payloa
     session.engage_ascent_autopilot({m.periapsis_height_m, m.apoapsis_height_m, m.inclination_rad, m.northerly});
     CHECK(session.autopilot().state == sim::AutopilotState::UpperStage);
 }
+
+TEST_CASE("A payload is stacked only while a launcher stage is below it", "[dragon][config]") {
+    const auto stack = config::stack_payload(config::load_vehicle(config_dir, "falcon9_block5"),
+                                             config::load_vehicle(config_dir, "crew_dragon"));
+    vehicle::Vehicle v(stack, config_dir);
+    CHECK(v.payload_stacked());
+    auto upper = v.separate(1);  // second stage + Dragon
+    CHECK(upper->payload_stacked());
+    CHECK_FALSE(v.payload_stacked());  // the first stage alone
+    auto dragon = upper->separate(1);
+    CHECK_FALSE(dragon->payload_stacked());
+    CHECK_FALSE(upper->payload_stacked());
+    CHECK_FALSE(vehicle::Vehicle(config::load_vehicle(config_dir, "crew_dragon"), config_dir).payload_stacked());
+}

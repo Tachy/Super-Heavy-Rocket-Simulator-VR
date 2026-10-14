@@ -411,10 +411,14 @@ void Vehicle::consume_propellant(double dt_s) {
     refresh_rcs_availability();
 }
 
+bool Vehicle::payload_stacked() const {
+    return !stages_.empty() && !stages_.front().config.payload && stages_.back().config.payload;
+}
+
 void Vehicle::refresh_rcs_availability() {
     bool changed = false;
     // A payload's stages (config::stack_payload) wait until the payload flies alone: its lowest stage is the vehicle's.
-    const bool stacked = !stages_.empty() && !stages_.front().config.payload;
+    const bool stacked = payload_stacked();
     for (auto& stage : stages_) {
         const bool main_dry = stage.propellant_kg(config::TankContents::Oxidizer) <= 0.0 ||
                               stage.propellant_kg(config::TankContents::Fuel) <= 0.0;

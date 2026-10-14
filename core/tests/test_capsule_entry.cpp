@@ -907,6 +907,21 @@ TEST_CASE("A capsule still on the second stage refuses the capsule return", "[dr
     CHECK(d.session.ship_return_plan()->reason == "Keine Rückkehr möglich: Kapsel noch auf der Oberstufe");
 }
 
+TEST_CASE("A capsule released from the second stage plans its return", "[dragon][mission]") {
+    // Review d5 I1: the stages of a released payload kept their payload flag, so a capsule flown up on Falcon 9 was
+    // refused as "noch auf der Oberstufe" and never reported as a capsule body.
+    DragonDeorbit d(dragon_raan_rad());
+    auto stack = config::stack_payload(config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5"),
+                                       config::load_vehicle(STARSIM_CONFIG_DIR, "crew_dragon"));
+    stack.stages.erase(stack.stages.begin(), stack.stages.begin() + 2);  // trunk + capsule, released
+    REQUIRE(stack.stages.front().payload);
+    const auto s = d.session.body(0).state();
+    d.session.place_body(stack, s, d.session.epoch());
+    d.session.set_splashdown_zone(d.zone);
+    CHECK_FALSE(d.session.body(0).vehicle().payload_stacked());
+    CHECK(d.session.plan_capsule_return());
+}
+
 TEST_CASE("Splitting a body keeps its truth aero dispersion on both parts", "[vehicle][dragon]") {
     vehicle::Vehicle stack(config::load_vehicle(STARSIM_CONFIG_DIR, "crew_dragon"), STARSIM_CONFIG_DIR);
     stack.set_hull_aero_scale(1.1);

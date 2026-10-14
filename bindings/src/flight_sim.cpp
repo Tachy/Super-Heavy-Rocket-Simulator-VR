@@ -422,7 +422,7 @@ godot::Dictionary FlightSim::capsule_state(int index) const {
     const auto i = static_cast<size_t>(index);
     const auto& vehicle = session_->body(i).vehicle();
     const auto& top = vehicle.stages().back().config;
-    const bool present = top.aero.entry_profile == "capsule" && !top.payload;  // not stacked on a launcher
+    const bool present = top.aero.entry_profile == "capsule" && !vehicle.payload_stacked();  // not on a launcher
     d["present"] = present;
     if (!present) return d;
     d["nose_cone"] = vehicle.has_nose_cone();

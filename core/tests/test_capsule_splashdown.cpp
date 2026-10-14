@@ -84,13 +84,14 @@ struct Descent {
 };
 
 // Flies the controlled body (the capsule) of `session` until it is down or `max_s` passed, in `step_s` steps; records
-// the events (deployment heights as the sequencer saw them).
-Descent fly_down(sim::FlightSession& session, double max_s = 900.0, double step_s = 0.05) {
+// the events (deployment heights as the sequencer saw them). `final_step_s` is used in the last 100 m.
+Descent fly_down(sim::FlightSession& session, double max_s = 900.0, double step_s = 0.05, double final_step_s = 0.05) {
     Descent d;
     const auto t0 = session.epoch();
     const size_t i = session.controlled_index();
     while (session.epoch() - t0 < max_s) {
-        session.advance_to(session.epoch() + step_s, 1000000);
+        const bool low = session.telemetry(i).altitude_m < 100.0;
+        session.advance_to(session.epoch() + (low ? final_step_s : step_s), 1000000);
         const auto& body = session.body(i);
         const auto tel = session.telemetry(i);
         d.peak_g = std::max(d.peak_g, norm(body.aero_acceleration_body_mps2()) / constants::standard_gravity_mps2);
@@ -267,6 +268,7 @@ struct MissionDispersion {
     double pointing_rad = 0.0;          // pointing error
     double pointing_azimuth_rad = 0.0;  // about the burn direction, from the orbit normal
     bool without_mains = false;         // the capsule flies without its main parachutes
+    double final_step_s = 0.05;         // advance_to steps in the last 100 m (one tick: a call ends on the contact tick)
 };
 
 // Places the mission (dispersed), plans and flies it to the water.
@@ -313,10 +315,10 @@ MissionRun fly_mission(const MissionDispersion& dispersion = {}) {
         }
     }
     const double gate_s = session.epoch() - t0;
-    run.descent = fly_down(session);
+    run.descent = fly_down(session, 900.0, 0.05, dispersion.final_step_s);
     run.splashdown_after_ignition_s = gate_s + run.descent.splashdown_s - run.ignition_s;
     run.rcs_left_kg = session.body(session.controlled_index()).vehicle().rcs_propellant_kg();
-    session.advance_to(session.epoch() + 1.0, 1000000);  // the step machine sees the outcome
+    session.advance_to(session.epoch() + 60.0, 1000000);  // one time-warp frame: the step machine still sees the outcome
     run.final_step = session.capsule_return_step();
     run.final_autopilot = session.autopilot().state;
     return run;
@@ -412,6 +414,7 @@ TEST_CASE("A capsule placed above the drogue height does not coast past it", "[d
 TEST_CASE("A capsule return without mains ends lost, not under its drogues", "[dragon][mission][splashdown]") {
     MissionDispersion d;
     d.without_mains = true;
+    d.final_step_s = 1.5 * sim::FlightSession::tick_s;  // one tick per call (review d5 I2: the next call coasts)
     const auto r = fly_mission(d);
     REQUIRE(r.planned);
     CHECK(r.descent.outcome == sim::LandingOutcome::Impact);  // ~50 m/s under the drogues alone

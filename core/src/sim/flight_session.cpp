@@ -161,7 +161,7 @@ bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
         deorbit_plan_ = refused;
         return false;
     }
-    if (stages.back().config.payload) {  // review d3 M2: the capsule must fly alone (released from the second stage)
+    if (vehicle.payload_stacked()) {  // review d3 M2: the capsule must fly alone (released from the second stage)
         refused.reason = "Keine Rückkehr möglich: Kapsel noch auf der Oberstufe";
         deorbit_plan_ = refused;
         return false;
@@ -1083,6 +1083,13 @@ double FlightSession::coast_allowance_s() const {
         (capsule_return_step_ == CapsuleReturnStep::TrunkJettison ||
          capsule_return_step_ == CapsuleReturnStep::NoseConeClose || capsule_return_step_ == CapsuleReturnStep::Coast)) {
         return 0.0;  // capsule return: timed steps and the turn to the trim attitude, ticked (the entry: per body below)
+    }
+    // Under the parachutes the capsule is ticked by its watch height; once it is down (resting or impacted) one more tick
+    // ends the return (gewassert / verloren) - review d5 I2: a time-warp call ending on the contact tick coasted past it.
+    if (autopilot_.state == AutopilotState::Return &&
+        (capsule_return_step_ == CapsuleReturnStep::Gate || capsule_return_step_ == CapsuleReturnStep::Drogues ||
+         capsule_return_step_ == CapsuleReturnStep::Mains)) {
+        return 0.0;
     }
     if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0) return 0.0;
     double allowance = max_coast_s;
