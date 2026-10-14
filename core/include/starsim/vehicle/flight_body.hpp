@@ -5,6 +5,7 @@
 
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/environment/gravity.hpp"
+#include "starsim/environment/reference_body.hpp"
 #include "starsim/ephemeris/ephemeris.hpp"
 #include "starsim/frames/body_orientation.hpp"
 #include "starsim/math/quat.hpp"
@@ -21,13 +22,15 @@ struct RigidBodyState {
     math::Vec3 angular_velocity_body_radps;
 };
 
-// Everything outside the vehicle that acts on it. Gravity must be Earth-centred.
+// Everything outside the vehicle that acts on it. Gravity must be Earth-centred; the Earth is the reference body unless
+// `moon` is given and the vehicle is near it.
 struct FlightEnvironment {
     const environment::GravityModel& gravity;
     const environment::Atmosphere& atmosphere;
     const frames::BodyOrientation& earth_orientation;
     const ephemeris::Ephemeris* ephemeris = nullptr;  // needed for solar radiation pressure
     bool solar_radiation_pressure = true;
+    const environment::ReferenceBody* moon = nullptr;  // lunar l1: the Moon as a reference body (nullptr: Earth only)
 };
 
 // Air data at the start of the last tick (what an air-data system would report to the controllers).
@@ -38,11 +41,13 @@ struct AirData {
 };
 
 struct FlightTelemetry {
-    double altitude_m = 0.0;              // above WGS84
+    // Position and relative velocity refer to the reference body (Earth: WGS84 / ITRF; Moon: sphere / MOON_ME).
+    ephemeris::Body reference_body = ephemeris::Body::Earth;
+    double altitude_m = 0.0;              // above the reference body's shape
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
-    double speed_inertial_mps = 0.0;
-    double speed_relative_mps = 0.0;      // relative to the rotating Earth (what webcasts show)
+    double speed_inertial_mps = 0.0;      // GCRF
+    double speed_relative_mps = 0.0;      // relative to the rotating reference body (what webcasts show)
     double vertical_speed_mps = 0.0;      // relative, along the local vertical
     double flight_path_angle_rad = 0.0;   // relative velocity above the local horizontal
     double mach = 0.0;                    // meaningful only in continuum flow (knudsen < 0.01)
@@ -54,6 +59,17 @@ struct FlightTelemetry {
     double thrust_n = 0.0;
     double sensed_acceleration_g = 0.0;   // non-gravitational acceleration / g0
     int engines_running = 0;
+    double periapsis_altitude_m = 0.0;  // osculating orbit about the reference body, above its equatorial radius
+    double apoapsis_altitude_m = 0.0;   // infinity on an open orbit
+    double inclination_rad = 0.0;       // to the reference body's equator of date (body-fixed z)
+};
+
+// The reference body `id` of an environment (the Earth from its orientation and atmosphere; the Moon if given).
+environment::ReferenceBody reference_body_of(const FlightEnvironment& env, ephemeris::Body id);
+
+struct GroundClearance {
+    double height_m = 0.0;  // CG above the ground of the reference body
+    double sink_mps = 0.0;  // inertial velocity relative to the body's centre, towards it
 };
 
 // A vehicle moving under gravity, thrust, aerodynamics and solar radiation pressure.
@@ -73,6 +89,13 @@ public:
 
     void step(const FlightEnvironment& env, time::Epoch epoch, double dt_s, const VehicleCommand& command);
 
+    // Reference body (lunar l1): the Moon within moon_capture_distance_m of it, the Earth again beyond
+    // moon_release_distance_m (hysteresis on the choice of the last step / coast); bodies on the ground keep theirs.
+    static constexpr double moon_capture_distance_m = 60.0e6;   // [E]
+    static constexpr double moon_release_distance_m = 100.0e6;  // [E] the NRHO's apolune (~70,000 km) stays inside
+    ephemeris::Body reference_body(const FlightEnvironment& env, time::Epoch epoch) const;
+    GroundClearance ground_clearance(const FlightEnvironment& env, time::Epoch epoch) const;
+
     // Unpowered flight over a longer interval with adaptive DOP853 on the same 13-element state and the
     // same forces (gravity, aerodynamics, solar radiation pressure; no thrust, no RCS). Used instead of
     // fixed ticks when nothing is commanded, e.g. for a multi-day lunar transfer.
@@ -86,6 +109,8 @@ public:
     // Fixes the body to the Earth where it is (caught by the tower): from now on it co-rotates with the Earth
     // like a clamped vehicle and is no longer integrated.
     void hold_fixed_to_earth(const frames::BodyOrientation& earth, time::Epoch epoch);
+    // Fixes the body where it is to the body-fixed frame `frame` of `body` (generic form of hold_fixed_to_earth).
+    void hold_fixed(const environment::BodyFrame& frame, ephemeris::Body body);
     bool caught() const { return caught_; }
     // Fixes a stage standing on its legs to the Earth where it is (landed): resting() from now on.
     void hold_landed(const frames::BodyOrientation& earth, time::Epoch epoch);
@@ -113,7 +138,8 @@ public:
     // Air velocity (body frame) of a point on the axis at `station_m`: the CG's plus omega x r (last tick's air data).
     math::Vec3 point_air_velocity_body_mps(double station_m) const;
 
-    // Flat ground at this height above WGS84 (the pad elevation; terrain comes later).
+    // Flat ground at this height above WGS84 when the reference body is the Earth (the pad elevation); at the Moon the
+    // ground is the sphere (terrain: lunar l2).
     double ground_height_m() const { return ground_height_m_; }
     void set_ground_height(double height_m) { ground_height_m_ = height_m; }
     // Sink rate (m/s, relative to the rotating Earth) at the first ground / water contact.
@@ -137,9 +163,10 @@ public:
     math::Vec3 rcs_force_body_n() const { return rcs_force_body_n_; }
 
 private:
-    void follow_pad(const frames::BodyOrientation& earth, time::Epoch epoch);
-    void resolve_ground_contact(const frames::BodyOrientation& earth, time::Epoch epoch);
-    void update_air_data(const FlightEnvironment& env, time::Epoch epoch);
+    void follow_pad(const environment::BodyFrame& frame);
+    void resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame);
+    void update_air_data(const environment::ReferenceBody& body, const environment::BodyFrame& frame);
+    double ground_height_on(ephemeris::Body body) const { return body == ephemeris::Body::Earth ? ground_height_m_ : 0.0; }
     void judge_parachute_loads();
 
     std::unique_ptr<Vehicle> vehicle_;
@@ -149,8 +176,10 @@ private:
     bool resting_ = false;
     std::optional<double> touchdown_sink_mps_;
     AirData air_data_;
-    math::Vec3 pad_itrf_m_;
-    math::Quat attitude_itrf_;  // body -> ITRF while clamped
+    math::Vec3 pad_fixed_m_;    // bottom point in the body-fixed frame of held_on_ while clamped/caught/landed/resting
+    math::Quat attitude_fixed_;  // body -> body-fixed axes of held_on_
+    ephemeris::Body reference_ = ephemeris::Body::Earth;  // chosen at the last step / coast
+    ephemeris::Body held_on_ = ephemeris::Body::Earth;    // the body pad_fixed_m_ / attitude_fixed_ refer to
     double ground_height_m_ = 0.0;
     math::Vec3 external_force_gcrf_n_;
     math::Vec3 external_torque_body_nm_;

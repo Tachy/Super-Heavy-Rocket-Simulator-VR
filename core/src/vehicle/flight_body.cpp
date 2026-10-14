@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "starsim/aero/entry_heating.hpp"
 #include "starsim/aero/parachute.hpp"
@@ -10,6 +11,7 @@
 #include "starsim/integrators/integrate.hpp"
 #include "starsim/integrators/rk4.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/orbit/kepler.hpp"
 
 namespace starsim::vehicle {
 
@@ -47,8 +49,8 @@ struct TickContext {
     const FlightEnvironment& env;
     const Vehicle& vehicle;
     time::Epoch epoch;
-    math::Mat3 earth_fixed_to_gcrf;
-    Vec3 earth_rotation_gcrf;
+    const environment::ReferenceBody& body;  // reference body of the tick
+    environment::BodyFrame frame;            // its frame at the start of the tick (air only: the Moon is airless)
     std::vector<std::vector<double>> tank_flows;
     Vec3 srp_acceleration_gcrf;  // evaluated at the start of the tick
     Vec3 rcs_torque_nm;          // commanded reaction-control couple, body axes
@@ -70,12 +72,12 @@ struct Forces {
 Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
     Forces f;
     f.mass = ctx.vehicle.mass_properties(&ctx.tank_flows, tau_s);
-    const Vec3 r_fixed = transpose(ctx.earth_fixed_to_gcrf) * s.position_gcrf_m;
-    const auto geodetic = frames::fixed_to_geodetic(r_fixed);
-    const auto air = ctx.env.atmosphere.at(geodetic.height_m);
+    const Vec3 r_fixed = ctx.frame.to_fixed(s.position_gcrf_m);
+    const auto geodetic = frames::fixed_to_geodetic(r_fixed, ctx.body.shape());
+    const auto air = ctx.body.air(geodetic.height_m);
 
     // Aerodynamics relative to the co-rotating atmosphere (no wind model yet).
-    const Vec3 air_velocity = s.velocity_gcrf_mps - cross(ctx.earth_rotation_gcrf, s.position_gcrf_m);
+    const Vec3 air_velocity = ctx.frame.relative_velocity(s.position_gcrf_m, s.velocity_gcrf_mps);
     const bool powered = ctx.vehicle.any_engine_producing_thrust();
     f.aero = ctx.vehicle.hull_aero(s.attitude.inverse_rotate(air_velocity), air, powered);
     f.aero.force_body_n = f.aero.force_body_n * ctx.vehicle.hull_aero_scale();
@@ -195,6 +197,31 @@ Vec3 solar_radiation_acceleration(const FlightEnvironment& env, const Vehicle& v
 
 Vec3 earth_rotation_vector(const frames::FixedToInertial& transform) { return frames::rotation_vector(transform); }
 
+environment::ReferenceBody reference_body_of(const FlightEnvironment& env, ephemeris::Body id) {
+    if (id == ephemeris::Body::Moon && env.moon) return *env.moon;
+    return environment::ReferenceBody::earth(
+        env.earth_orientation, env.atmosphere,
+        env.ephemeris ? env.ephemeris->gm_m3ps2(ephemeris::Body::Earth) : constants::earth_gm_m3ps2);
+}
+
+ephemeris::Body FlightBody::reference_body(const FlightEnvironment& env, time::Epoch epoch) const {
+    if (clamped_ || caught_ || landed_ || resting_) return held_on_;
+    if (env.moon == nullptr) return ephemeris::Body::Earth;
+    const double distance = norm(state_.position_gcrf_m - env.moon->centre_gcrf(epoch).position_m);
+    const double limit = reference_ == ephemeris::Body::Moon ? moon_release_distance_m : moon_capture_distance_m;
+    return distance < limit ? ephemeris::Body::Moon : ephemeris::Body::Earth;
+}
+
+GroundClearance FlightBody::ground_clearance(const FlightEnvironment& env, time::Epoch epoch) const {
+    const auto id = reference_body(env, epoch);
+    const auto body = reference_body_of(env, id);
+    const auto frame = body.frame(epoch);
+    const auto centred = frame.centred({state_.position_gcrf_m, state_.velocity_gcrf_mps});
+    const double height =
+        frames::fixed_to_geodetic(frame.to_fixed(state_.position_gcrf_m), body.shape()).height_m - ground_height_on(id);
+    return {height, -dot(centred.velocity_mps, math::normalized(centred.position_m))};
+}
+
 FlightBody::FlightBody(std::unique_ptr<Vehicle> vehicle, const RigidBodyState& state)
     : vehicle_(std::move(vehicle)), state_(state) {}
 
@@ -216,20 +243,20 @@ std::unique_ptr<FlightBody> FlightBody::on_pad(std::unique_ptr<Vehicle> vehicle,
     auto body = std::make_unique<FlightBody>(std::move(vehicle), RigidBodyState{});
     body->clamped_ = true;
     body->ground_height_m_ = height_m;
-    body->pad_itrf_m_ = frames::geodetic_to_fixed(pad);
-    body->attitude_itrf_ = Quat::from_matrix(columns);
-    body->follow_pad(earth, epoch);
+    body->pad_fixed_m_ = frames::geodetic_to_fixed(pad);
+    body->attitude_fixed_ = Quat::from_matrix(columns);
+    body->held_on_ = ephemeris::Body::Earth;
+    body->follow_pad(environment::BodyFrame::centred_at_origin(earth.fixed_to_gcrf(epoch)));
     return body;
 }
 
-void FlightBody::follow_pad(const frames::BodyOrientation& earth, time::Epoch epoch) {
-    const auto transform = earth.fixed_to_gcrf(epoch);
+void FlightBody::follow_pad(const environment::BodyFrame& frame) {
     const double cg = vehicle_->mass_properties().cg_station_m;
-    const Vec3 cg_fixed = pad_itrf_m_ + attitude_itrf_.rotate(Vec3{cg, 0.0, 0.0});
-    state_.position_gcrf_m = transform.position(cg_fixed);
-    state_.velocity_gcrf_mps = transform.velocity(cg_fixed, {});
-    state_.attitude = (Quat::from_matrix(transform.rotation) * attitude_itrf_).normalized();
-    state_.angular_velocity_body_radps = state_.attitude.inverse_rotate(earth_rotation_vector(transform));
+    const Vec3 cg_fixed = pad_fixed_m_ + attitude_fixed_.rotate(Vec3{cg, 0.0, 0.0});
+    state_.position_gcrf_m = frame.position_gcrf(cg_fixed);
+    state_.velocity_gcrf_mps = frame.velocity_gcrf(cg_fixed, {});
+    state_.attitude = (Quat::from_matrix(frame.transform.rotation) * attitude_fixed_).normalized();
+    state_.angular_velocity_body_radps = state_.attitude.inverse_rotate(frame.rotation_gcrf_radps);
 }
 
 void FlightBody::apply_external_wrench(const Vec3& force_gcrf_n, const Vec3& torque_body_nm) {
@@ -238,14 +265,18 @@ void FlightBody::apply_external_wrench(const Vec3& force_gcrf_n, const Vec3& tor
 }
 
 void FlightBody::hold_fixed_to_earth(const frames::BodyOrientation& earth, time::Epoch epoch) {
-    const auto transform = earth.fixed_to_gcrf(epoch);
-    const math::Mat3 to_fixed = transpose(transform.rotation);
+    hold_fixed(environment::BodyFrame::centred_at_origin(earth.fixed_to_gcrf(epoch)), ephemeris::Body::Earth);
+}
+
+void FlightBody::hold_fixed(const environment::BodyFrame& frame, ephemeris::Body body) {
     const double cg = vehicle_->mass_properties().cg_station_m;
-    pad_itrf_m_ = to_fixed * (state_.position_gcrf_m - state_.attitude.rotate(Vec3{cg, 0.0, 0.0}));
-    attitude_itrf_ = (Quat::from_matrix(to_fixed) * state_.attitude).normalized();
+    pad_fixed_m_ = frame.to_fixed(state_.position_gcrf_m - state_.attitude.rotate(Vec3{cg, 0.0, 0.0}));
+    attitude_fixed_ = (Quat::from_matrix(transpose(frame.transform.rotation)) * state_.attitude).normalized();
+    held_on_ = body;
+    reference_ = body;
     caught_ = true;
     resting_ = false;
-    follow_pad(earth, epoch);
+    follow_pad(frame);
 }
 
 void FlightBody::hold_landed(const frames::BodyOrientation& earth, time::Epoch epoch) {
@@ -260,9 +291,11 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
         rcs_force_body_n_ = {};
         return;
     }
-    const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
-    const auto geodetic = frames::fixed_to_geodetic(transpose(transform.rotation) * state_.position_gcrf_m);
-    vehicle_->update_engines(dt_s, command, env.atmosphere.at(geodetic.height_m).pressure_pa);
+    reference_ = reference_body(env, epoch);
+    const auto body = reference_body_of(env, reference_);
+    const auto frame = body.frame(epoch);
+    const auto geodetic = frames::fixed_to_geodetic(frame.to_fixed(state_.position_gcrf_m), body.shape());
+    vehicle_->update_engines(dt_s, command, body.air(geodetic.height_m).pressure_pa);
     vehicle_->update_grid_fins(dt_s, command);
     vehicle_->update_landing_legs(dt_s);
     vehicle_->update_flaps(dt_s, command);
@@ -270,12 +303,12 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     // Held, caught or landed: the thrusters stay off.
     vehicle_->update_rcs(dt_s, clamped_ || caught_ || landed_ ? VehicleCommand{} : command);
     rcs_force_body_n_ = vehicle_->rcs_force_n();
-    update_air_data(env, epoch);
+    update_air_data(body, frame);
     judge_parachute_loads();
 
     if (clamped_ || caught_ || landed_) {
         vehicle_->consume_propellant(dt_s);
-        follow_pad(env.earth_orientation, epoch + dt_s);
+        follow_pad(reference_body_of(env, held_on_).frame(epoch + dt_s));
         external_force_gcrf_n_ = {};
         external_torque_body_nm_ = {};
         return;
@@ -285,8 +318,8 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     const TickContext ctx{env,
                           *vehicle_,
                           epoch,
-                          transform.rotation,
-                          earth_rotation_vector(transform),
+                          body,
+                          frame,
                           vehicle_->tank_mass_flows_kgps(),
                           solar_radiation_acceleration(env, *vehicle_, state_, vehicle_->mass_properties().mass_kg, epoch),
                           vehicle_->rcs_torque_nm(),
@@ -318,8 +351,10 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
                         (shield.max_load_g > 0.0 && load_g >= warning_fraction * shield.max_load_g);
         if (!breakup_reason_.empty()) impacted_ = true;
         constexpr double entry_height_m = 80000.0, skip_height_m = 100000.0;  // [E] event thresholds
-        if (geodetic.height_m < entry_height_m) entered_atmosphere_ = true;
-        if (entered_atmosphere_ && geodetic.height_m > skip_height_m) skipped_out_ = true;
+        if (body.has_atmosphere()) {
+            if (geodetic.height_m < entry_height_m) entered_atmosphere_ = true;
+            if (entered_atmosphere_ && geodetic.height_m > skip_height_m) skipped_out_ = true;
+        }
     } else if (accelerometer_) {
         const Forces end = evaluate(ctx, dt_s, state_);
         aero_acceleration_body_mps2_ = end.aero_body_n / end.mass.mass_kg;
@@ -328,27 +363,26 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     external_torque_body_nm_ = {};
     vehicle_->consume_propellant(dt_s);
 
-    resolve_ground_contact(env.earth_orientation, epoch + dt_s);
+    resolve_ground_contact(body, body.frame(epoch + dt_s));
 }
 
 // Ground = flat at ground_height_m_ (the pad elevation) until terrain exists (M8).
 // Gentle contact: the ground carries the vehicle (it rests, co-rotating with the Earth, and lifts off as
 // soon as thrust exceeds weight). Hard contact (sink rate or tilt too large): impact.
-void FlightBody::resolve_ground_contact(const frames::BodyOrientation& earth, time::Epoch epoch) {
+void FlightBody::resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame) {
     if (vehicle_->leg_deployment() > 0.0) return;  // legs moving or out: the leg landing simulation owns the contact
-    const auto transform = earth.fixed_to_gcrf(epoch);
-    const math::Mat3 to_fixed = transpose(transform.rotation);
     const double cg = vehicle_->mass_properties().cg_station_m;
-    const Vec3 bottom_fixed = to_fixed * (state_.position_gcrf_m + state_.attitude.rotate(Vec3{-cg, 0.0, 0.0}));
+    const double ground_height = ground_height_on(body.id());
+    const Vec3 bottom_fixed = frame.to_fixed(state_.position_gcrf_m + state_.attitude.rotate(Vec3{-cg, 0.0, 0.0}));
     const Vec3 top_fixed =
-        to_fixed * (state_.position_gcrf_m + state_.attitude.rotate(Vec3{vehicle_->length_m() - cg, 0.0, 0.0}));
-    const auto bottom = frames::fixed_to_geodetic(bottom_fixed);
-    const double lowest = std::min(bottom.height_m, frames::fixed_to_geodetic(top_fixed).height_m);
-    if (lowest >= ground_height_m_) {
+        frame.to_fixed(state_.position_gcrf_m + state_.attitude.rotate(Vec3{vehicle_->length_m() - cg, 0.0, 0.0}));
+    const auto bottom = frames::fixed_to_geodetic(bottom_fixed, body.shape());
+    const double lowest = std::min(bottom.height_m, frames::fixed_to_geodetic(top_fixed, body.shape()).height_m);
+    if (lowest >= ground_height) {
         return;
     }
-    const Vec3 up = transform.rotation * local_up_fixed(bottom);
-    const Vec3 relative = state_.velocity_gcrf_mps - cross(earth_rotation_vector(transform), state_.position_gcrf_m);
+    const Vec3 up = frame.transform.rotation * local_up_fixed(bottom);
+    const Vec3 relative = frame.relative_velocity(state_.position_gcrf_m, state_.velocity_gcrf_mps);
     const double sink_rate = -dot(relative, up);
     const double tilt = std::acos(std::clamp(dot(state_.attitude.rotate(Vec3{1.0, 0.0, 0.0}), up), -1.0, 1.0));
     if (!touchdown_sink_mps_) touchdown_sink_mps_ = sink_rate;
@@ -363,9 +397,10 @@ void FlightBody::resolve_ground_contact(const frames::BodyOrientation& earth, ti
         return;
     }
     // Rest on the ground below the current bottom point, keeping the current attitude relative to the Earth.
-    pad_itrf_m_ = frames::geodetic_to_fixed({bottom.latitude_rad, bottom.longitude_rad, ground_height_m_});
-    attitude_itrf_ = (Quat::from_matrix(to_fixed) * state_.attitude).normalized();
-    follow_pad(earth, epoch);
+    pad_fixed_m_ = frames::geodetic_to_fixed({bottom.latitude_rad, bottom.longitude_rad, ground_height}, body.shape());
+    attitude_fixed_ = (Quat::from_matrix(transpose(frame.transform.rotation)) * state_.attitude).normalized();
+    held_on_ = body.id();
+    follow_pad(frame);
     resting_ = true;
 }
 
@@ -390,12 +425,10 @@ void FlightBody::judge_parachute_loads() {
     }
 }
 
-void FlightBody::update_air_data(const FlightEnvironment& env, time::Epoch epoch) {
-    const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
-    const auto geodetic = frames::fixed_to_geodetic(transpose(transform.rotation) * state_.position_gcrf_m);
-    const auto air = env.atmosphere.at(geodetic.height_m);
-    const Vec3 air_velocity =
-        state_.velocity_gcrf_mps - cross(earth_rotation_vector(transform), state_.position_gcrf_m);
+void FlightBody::update_air_data(const environment::ReferenceBody& body, const environment::BodyFrame& frame) {
+    const auto geodetic = frames::fixed_to_geodetic(frame.to_fixed(state_.position_gcrf_m), body.shape());
+    const auto air = body.air(geodetic.height_m);
+    const Vec3 air_velocity = frame.relative_velocity(state_.position_gcrf_m, state_.velocity_gcrf_mps);
     air_data_.air_velocity_body_mps = state_.attitude.inverse_rotate(air_velocity);
     air_data_.air = {air.density_kg_m3, air.speed_of_sound_mps,
                      aero::rarefaction_weight(air.mean_free_path_m / vehicle_->length_m())};
@@ -411,16 +444,17 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
         return;
     }
     vehicle_->stop_rcs();  // a pulse in progress ends: its mass flow must not run through the whole segment
-    if (resting_ || caught_ || landed_) {  // stays on the ground / on the tower, co-rotating with the Earth
-        follow_pad(env.earth_orientation, epoch + duration_s);
+    if (resting_ || caught_ || landed_) {  // stays on the ground / on the tower, co-rotating with its body
+        follow_pad(reference_body_of(env, held_on_).frame(epoch + duration_s));
         return;
     }
-    const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
+    reference_ = reference_body(env, epoch);
+    const auto body = reference_body_of(env, reference_);
     const TickContext ctx{env,
                           *vehicle_,
                           epoch,
-                          transform.rotation,
-                          earth_rotation_vector(transform),
+                          body,
+                          body.frame(epoch),
                           vehicle_->tank_mass_flows_kgps(),
                           solar_radiation_acceleration(env, *vehicle_, state_, vehicle_->mass_properties().mass_kg, epoch),
                           {},
@@ -434,8 +468,11 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
         State13{{1e-3, 1e-3, 1e-3, 1e-6, 1e-6, 1e-6, 1e-12, 1e-12, 1e-12, 1e-12, 1e-12, 1e-12, 1e-12}};
     const auto result = integrators::integrate<13>(f, 0.0, pack(state_), duration_s, options);
     state_ = unpack(result.y);
-    resolve_ground_contact(env.earth_orientation, epoch + duration_s);
-    update_air_data(env, epoch + duration_s);
+    reference_ = reference_body(env, epoch + duration_s);
+    const auto end_body = reference_body_of(env, reference_);
+    const auto end_frame = end_body.frame(epoch + duration_s);
+    resolve_ground_contact(end_body, end_frame);
+    update_air_data(end_body, end_frame);
 }
 
 std::unique_ptr<FlightBody> FlightBody::separate(size_t index, double separation_dv_mps) {
@@ -459,25 +496,38 @@ std::unique_ptr<FlightBody> FlightBody::separate(size_t index, double separation
     state_ = lower_state;
     auto upper_body = std::make_unique<FlightBody>(std::move(upper_vehicle), upper_state);
     upper_body->ground_height_m_ = ground_height_m_;
+    upper_body->reference_ = reference_;
     return upper_body;
 }
 
 FlightTelemetry FlightBody::telemetry(const FlightEnvironment& env, time::Epoch epoch) const {
     FlightTelemetry t;
-    const auto transform = env.earth_orientation.fixed_to_gcrf(epoch);
-    const auto geodetic = frames::fixed_to_geodetic(transpose(transform.rotation) * state_.position_gcrf_m);
+    const auto id = reference_body(env, epoch);
+    const auto body = reference_body_of(env, id);
+    const auto frame = body.frame(epoch);
+    const auto geodetic = frames::fixed_to_geodetic(frame.to_fixed(state_.position_gcrf_m), body.shape());
+    t.reference_body = id;
     t.altitude_m = geodetic.height_m;
     t.latitude_rad = geodetic.latitude_rad;
     t.longitude_rad = geodetic.longitude_rad;
-    const Vec3 up = transform.rotation * local_up_fixed(geodetic);
-    const Vec3 relative = state_.velocity_gcrf_mps - cross(earth_rotation_vector(transform), state_.position_gcrf_m);
+    const Vec3 up = frame.transform.rotation * local_up_fixed(geodetic);
+    const Vec3 relative = frame.relative_velocity(state_.position_gcrf_m, state_.velocity_gcrf_mps);
     t.speed_inertial_mps = norm(state_.velocity_gcrf_mps);
     t.speed_relative_mps = norm(relative);
     t.vertical_speed_mps = dot(relative, up);
     t.flight_path_angle_rad = std::atan2(t.vertical_speed_mps, norm(relative - t.vertical_speed_mps * up));
 
-    const TickContext ctx{env, *vehicle_, epoch, transform.rotation, earth_rotation_vector(transform),
-                          vehicle_->tank_mass_flows_kgps(), {}, {}, {}};
+    const auto centred = frame.centred({state_.position_gcrf_m, state_.velocity_gcrf_mps});
+    const auto el = orbit::elements_from_state(centred, body.gm_m3ps2());
+    const double radius = body.shape().semi_major_axis_m;
+    t.periapsis_altitude_m = el.semi_major_axis_m * (1.0 - el.eccentricity) - radius;
+    t.apoapsis_altitude_m = el.eccentricity < 1.0 ? el.semi_major_axis_m * (1.0 + el.eccentricity) - radius
+                                                  : std::numeric_limits<double>::infinity();
+    const Vec3 h = cross(centred.position_m, centred.velocity_mps);
+    const Vec3 pole = frame.transform.rotation * Vec3{0.0, 0.0, 1.0};
+    t.inclination_rad = std::acos(std::clamp(dot(h, pole) / norm(h), -1.0, 1.0));
+
+    const TickContext ctx{env, *vehicle_, epoch, body, frame, vehicle_->tank_mass_flows_kgps(), {}, {}, {}};
     const Forces f = evaluate(ctx, 0.0, state_);
     t.mach = f.aero.mach;
     t.knudsen = f.aero.knudsen;
