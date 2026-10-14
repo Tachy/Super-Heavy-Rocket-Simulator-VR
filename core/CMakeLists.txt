@@ -10,6 +10,7 @@ FetchContent_MakeAvailable(tomlplusplus)
 add_library(starsim_core STATIC
     src/config/vehicle_config.cpp
     src/config/drone_ship_config.cpp
+    src/config/splashdown_zone_config.cpp
     src/config/launch_site_config.cpp
     src/config/mission_config.cpp
     src/environment/us76_atmosphere.cpp

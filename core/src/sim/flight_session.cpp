@@ -1,5 +1,7 @@
 #include "starsim/sim/flight_session.hpp"
 
+#include "starsim/gnc/capsule_entry_control.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -89,8 +91,26 @@ void FlightSession::place_entering_ship(const config::VehicleConfig& config, con
     start_entry_guidance(bodies_.front(), parameters);
 }
 
+gnc::EntryTarget FlightSession::capsule_entry_target() const {
+    if (!splashdown_zone_) throw std::logic_error("FlightSession: no splashdown zone set");
+    gnc::EntryTarget target;
+    target.position_itrf_m = frames::geodetic_to_fixed({splashdown_zone_->latitude_rad, splashdown_zone_->longitude_rad, 0.0});
+    target.ground_height_m = 0.0;
+    return target;
+}
+
+void FlightSession::place_entering_capsule(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
+                                           time::Epoch epoch, gnc::EntryGuidanceParameters parameters) {
+    place_body(config, state, epoch);
+    start_entry_guidance(bodies_.front(), parameters);
+}
+
 void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanceParameters& parameters) {
     const auto& stage = flying.body->vehicle().stages().front().config;
+    if (stage.aero.entry_profile == "capsule") {
+        flying.entry_guidance = std::make_unique<gnc::EntryGuidance>(*flying.body, capsule_entry_target(), parameters);
+        return;
+    }
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
     // gate ahead of the tower's catch axis (b3), else over the pad centre
     const auto target = gnc::ship_entry_target(return_site(flying.body->vehicle()), gnc::ship_landing_parameters());
@@ -720,6 +740,15 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         if (!flying.body->impacted()) apply_return_command(flying, ship_landing_controller_, ambient_pressure_pa, command);
         return command;
     }
+    if (flying.entry_guidance && flying.entry_guidance->capsule()) {
+        // The Dracos fly the bank; the aerodynamic trim holds the angle of attack. After the gate: lift up, damped.
+        if (!flying.body->impacted() && !flying.body->resting()) {
+            const auto& e = flying.entry_command;
+            const double bank = e.phase == gnc::EntryPhase::Gate ? 0.0 : e.bank_rad;
+            command.rcs_torque_fraction = gnc::capsule_entry_torque_fraction(*flying.body, env_, epoch_, bank);
+        }
+        return command;
+    }
     if (flying.entry_guidance) {
         if (!flying.body->impacted()) {
             const auto& e = flying.entry_command;
@@ -904,7 +933,8 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             auto& flying = bodies_[i];
             if (flying.entry_guidance && !flying.ship_landing && !flying.body->impacted()) {
                 flying.entry_command = flying.entry_guidance->update(*flying.body, env_, epoch_);
-                if (flying.entry_command.phase == gnc::EntryPhase::Gate) {  // the flip and the catch take over
+                if (flying.entry_command.phase == gnc::EntryPhase::Gate && !flying.entry_guidance->capsule()) {
+                    // the flip and the catch take over
                     flying.ship_landing = std::make_unique<gnc::ShipLandingGuidance>(return_site(flying.body->vehicle()));
                     flying.ship_landing->set_realtime(realtime_planning_);
                 }

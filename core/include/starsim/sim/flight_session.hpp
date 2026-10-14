@@ -3,6 +3,7 @@
 #include <filesystem>
 #include "starsim/config/drone_ship_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/contact/landing_surface.hpp"
 #include "starsim/sim/catch_tower_sim.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
@@ -115,6 +116,11 @@ public:
     // its ground plane (with its shoreline). Set after the launch site (set_launch_site resets the leg landing).
     void set_landing_zone(const LaunchSite& zone);
     const std::optional<LaunchSite>& landing_zone() const { return landing_zone_; }
+    // Recovery area of a capsule at sea: its entry guidance aims the drogue gate over the zone's centre.
+    void set_splashdown_zone(const config::SplashdownZoneConfig& zone) { splashdown_zone_ = zone; }
+    const std::optional<config::SplashdownZoneConfig>& splashdown_zone() const { return splashdown_zone_; }
+    // Entry target of a capsule: the zone's centre at sea level (WGS84 height 0); throws std::logic_error without a zone.
+    gnc::EntryTarget capsule_entry_target() const;
     // Places a vehicle with a free state (scenarios, tests); the body becomes the controlled one.
     void place_body(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch);
     // Landing site of a returning `booster`: catch target when the site has a tower and the booster has pins; a stage
@@ -158,6 +164,12 @@ public:
     void place_entering_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch,
                              gnc::EntryGuidanceParameters parameters = {});
     const gnc::EntryGuidance* entry_guidance(size_t index) const { return bodies_.at(index).entry_guidance.get(); }
+    // Scenarios: a capsule (a stage with [stage.aero] entry_profile = "capsule") placed with a free state flies its entry
+    // guidance on its RCS (gnc::capsule_entry_torque_fraction) to the drogue gate over the splashdown zone, then holds
+    // the lift up (d4 adds the parachutes). It becomes the controlled body.
+    void place_entering_capsule(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
+                                time::Epoch epoch,
+                                gnc::EntryGuidanceParameters parameters = gnc::EntryGuidanceParameters::capsule());
     // Scenarios: a ship placed at the gate (belly down) flips and lands on its landing guidance (catch at this site's
     // tower). An entering ship gets the same guidance when its entry guidance reaches the gate.
     void place_landing_ship(const config::VehicleConfig& config, const vehicle::RigidBodyState& state, time::Epoch epoch,
@@ -327,6 +339,7 @@ private:
     time::Epoch launch_epoch_;
     LaunchSite launch_site_;
     std::optional<LaunchSite> landing_zone_;
+    std::optional<config::SplashdownZoneConfig> splashdown_zone_;
     bool towers_enabled_ = true;
     bool realtime_planning_ = false;
     std::unique_ptr<CatchTowerSim> tower_;

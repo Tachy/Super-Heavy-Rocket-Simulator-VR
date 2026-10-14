@@ -7,6 +7,7 @@
 
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/gnc/attitude_slew.hpp"
+#include "starsim/gnc/capsule_entry_control.hpp"
 #include "starsim/frames/geodetic.hpp"
 
 namespace starsim::gnc {
@@ -55,9 +56,23 @@ const char* to_string(EntryPhase phase) {
 EntryGuidance::EntryGuidance(const vehicle::FlightBody& ship, const AlphaSchedule& schedule, EntryTarget target,
                              EntryGuidanceParameters parameters)
     : target_(target), parameters_(parameters) {
-    const auto& stage = ship.vehicle().stages().front();
     model_.aero = EntryAeroTable(ship.vehicle(), schedule);
-    model_.mass_kg = ship.vehicle().mass_properties().mass_kg;
+    configure_model(ship);
+}
+
+EntryGuidance::EntryGuidance(const vehicle::FlightBody& capsule, EntryTarget target, EntryGuidanceParameters parameters)
+    : target_(target), parameters_(parameters), capsule_(true) {
+    model_.aero = EntryAeroTable::capsule(capsule.vehicle());
+    configure_model(capsule);
+    const auto& shield = capsule.vehicle().stages().front().config.heat_shield;
+    if (shield.crew_load_limit_g > 0.0 && (limits_.max_load_g <= 0.0 || shield.crew_load_limit_g < limits_.max_load_g)) {
+        limits_.max_load_g = shield.crew_load_limit_g;
+    }
+}
+
+void EntryGuidance::configure_model(const vehicle::FlightBody& body) {
+    const auto& stage = body.vehicle().stages().front();
+    model_.mass_kg = body.vehicle().mass_properties().mass_kg;
     model_.nose_radius_m = stage.config.heat_shield.nose_radius_m;
     model_.bank_rate_radps = parameters_.bank_rate_radps;
     model_.fast_bank_rate_radps = parameters_.fast_bank_rate_radps;
@@ -224,6 +239,12 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     }
     bank_magnitude_rad_ = s.bank_rad;
     bank_target_rad_ = sign_ * s.bank_rad;
+    if (std::getenv("STARSIM_DEBUG_ENTRY")) {
+        std::printf("[entry] v %.0f bank %+.1f%s downrange %.1f km cross %.1f km peak %.2f g q %.1f kPa (%d predictions)\n",
+                    norm(v_itrf), bank_target_rad_ / constants::deg_to_rad, s.constrained ? " constrained" : "",
+                    s.prediction.downrange_error_m / 1000.0, s.prediction.crossrange_m / 1000.0, s.prediction.peak_load_g,
+                    s.prediction.peak_dynamic_pressure_pa / 1000.0, s.predictions);
+    }
     command_.downrange_error_m = s.prediction.downrange_error_m;
     command_.crossrange_m = s.prediction.crossrange_m;
     command_.heading_error_rad = heading_error;
@@ -413,7 +434,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
 
     if (!started_) {  // take over the bank the vehicle flies now (whoever flew it so far)
         started_ = true;
-        bank_rad_ = measured_bank_rad(axis_gcrf, v_rel_gcrf, up_gcrf);
+        bank_rad_ = capsule_ ? capsule_bank_rad(body, env, epoch) : measured_bank_rad(axis_gcrf, v_rel_gcrf, up_gcrf);
         last_update_ = epoch;
         last_cycle_ = epoch - parameters_.cycle_s;
         last_scale_update_ = epoch - parameters_.cycle_s;
@@ -449,7 +470,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
     // Hand-over below the terminal Mach number once no bank reversal is in progress (the terminal phase starts from
     // the bank flown), at the latest at the late hand-over Mach number.
     const bool bank_settled = std::abs(bank_target_rad_ - bank_rad_) < settled_bank_rad;
-    if (phase_ == EntryPhase::Entry && height < terminal_max_height_m &&
+    if (phase_ == EntryPhase::Entry && parameters_.terminal_phase && height < terminal_max_height_m &&
         ((mach < parameters_.terminal_mach && bank_settled) || mach < parameters_.terminal_mach_latest)) {
         phase_ = EntryPhase::Terminal;
         handed_over_ = true;
@@ -464,11 +485,17 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         bank_rad_ += std::clamp(bank_target_rad_ - bank_rad_, -max_change, max_change);
         command_.alpha_rad = model_.aero.alpha_rad(mach);
         command_.bank_rad = bank_rad_;
-        const auto attitude = entry_attitude(v_rel_gcrf, up_gcrf, command_.alpha_rad, bank_rad_, belly_azimuth_rad_);
-        command_.axis_gcrf = attitude.axis_gcrf;
-        command_.roll_reference_gcrf = attitude.roll_reference_gcrf;
+        if (capsule_) {  // flight director only: the capsule's RCS flies the bank (capsule_entry_control)
+            const auto q = capsule_trim_attitude(body.vehicle(), v_rel_gcrf, up_gcrf, bank_rad_);
+            command_.axis_gcrf = q.rotate(Vec3{1.0, 0.0, 0.0});
+            command_.roll_reference_gcrf = q.rotate(Vec3{0.0, 1.0, 0.0});
+        } else {
+            const auto attitude = entry_attitude(v_rel_gcrf, up_gcrf, command_.alpha_rad, bank_rad_, belly_azimuth_rad_);
+            command_.axis_gcrf = attitude.axis_gcrf;
+            command_.roll_reference_gcrf = attitude.roll_reference_gcrf;
+        }
     }
-    if (phase_ != EntryPhase::Entry) terminal(body, transform.rotation, r_itrf, v_itrf, mach, dt);
+    if (phase_ != EntryPhase::Entry && !capsule_) terminal(body, transform.rotation, r_itrf, v_itrf, mach, dt);
     command_.phase = phase_;
     command_.drag_scale = model_.drag_scale;
     command_.lift_scale = model_.lift_scale;

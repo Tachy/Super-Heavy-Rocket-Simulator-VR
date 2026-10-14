@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 #include "starsim/aero/flap.hpp"
 #include "starsim/math/constants.hpp"
@@ -122,6 +123,32 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
         cd_grid_m2_.push_back(cd);
         cl_grid_m2_.push_back(cl);
     }
+}
+
+EntryAeroTable EntryAeroTable::capsule(const vehicle::Vehicle& capsule) {
+    const auto* aero = capsule.capsule_aero();
+    if (!aero) throw std::logic_error("EntryAeroTable::capsule: vehicle has no capsule aerodynamics");
+    const Vec3 cg = capsule.mass_properties().cg_point_m();
+    EntryAeroTable t;
+    std::vector<double> cd, cl;
+    for (const double mach : aero->table().mach) {
+        const auto trim = aero->trim(mach, cg);
+        if (!trim.found) continue;  // a Mach row without a trim: the neighbours' values interpolate across it
+        t.mach_.push_back(mach);
+        t.schedule_.mach.push_back(mach);
+        t.schedule_.alpha_rad.push_back(constants::pi - trim.theta_rad);
+        cd.push_back(trim.cd * aero->reference_area_m2());
+        cl.push_back(trim.cl * aero->reference_area_m2());
+    }
+    if (t.mach_.empty()) throw std::logic_error("EntryAeroTable::capsule: the capsule trims at no Mach number");
+    t.cd_area_m2_ = cd;
+    t.cl_area_m2_ = cl;
+    t.alpha_grid_rad_ = {0.0, constants::pi};
+    for (size_t i = 0; i < cd.size(); ++i) {
+        t.cd_grid_m2_.push_back({cd[i], cd[i]});
+        t.cl_grid_m2_.push_back({cl[i], cl[i]});
+    }
+    return t;
 }
 
 double EntryAeroTable::bilinear(const std::vector<std::vector<double>>& grid, double mach, double alpha_rad) const {

@@ -11,7 +11,13 @@
 
 #include "ship_entry_scenario.hpp"
 #include "starsim/aero/capsule_aero.hpp"
+#include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/entry_aero_table.hpp"
+#include "starsim/gnc/entry_predictor.hpp"
+#include "starsim/sim/flight_session.hpp"
+#include "starsim/spice/spice_adapters.hpp"
+#include "test_support.hpp"
 #include "starsim/gnc/capsule_entry_control.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/mat3.hpp"
@@ -109,6 +115,14 @@ public:
         st.attitude = gnc::capsule_trim_attitude(body_->vehicle(), air_velocity_gcrf(), up_gcrf(), bank_rad);
         st.angular_velocity_body_radps = {};
         body_->set_state(st);
+    }
+    Vec3 position_itrf_m() const {
+        return transpose(env_.earth_orientation.fixed_to_gcrf(epoch()).rotation) * body_->state().position_gcrf_m;
+    }
+    Vec3 velocity_itrf_mps() const {
+        const auto t = env_.earth_orientation.fixed_to_gcrf(epoch());
+        const auto& st = body_->state();
+        return transpose(t.rotation) * (st.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), st.position_gcrf_m));
     }
     double altitude_m() const {
         const auto t = env_.earth_orientation.fixed_to_gcrf(epoch());
@@ -248,3 +262,186 @@ TEST_CASE("A capsule tumbling off trim in thin air turns to its trim before the 
     CHECK(std::abs(s.theta_rad() - s.trim().theta_rad) < 5.0 * deg);
     CHECK(std::abs(s.bank_rad()) < 10.0 * deg);
 }
+
+namespace {
+
+const spice::SpiceEphemeris& spice_ephemeris() {
+    test::spice_session();
+    static const spice::SpiceEphemeris e;
+    return e;
+}
+
+const frames::BodyOrientation& spice_earth() {
+    test::spice_session();
+    static const auto e = spice::SpiceOrientation::earth();
+    return e;
+}
+
+// Entry interface state `range_m` uprange of the zone on a great circle that crosses the zone heading `azimuth_rad`
+// (clockwise from north), 120 km up, `speed_mps` relative to the Earth at `gamma_rad`; the capsule at its trim with
+// `bank_rad`.
+vehicle::RigidBodyState entry_interface_state(const config::SplashdownZoneConfig& zone, double range_m, double azimuth_rad,
+                                              double speed_mps, double gamma_rad, double bank_rad, time::Epoch epoch,
+                                              const vehicle::Vehicle& capsule) {
+    const Vec3 z = frames::geodetic_to_fixed({zone.latitude_rad, zone.longitude_rad, 0.0});
+    const Vec3 up_z = math::normalized(z);
+    const Vec3 east{-std::sin(zone.longitude_rad), std::cos(zone.longitude_rad), 0.0};
+    const Vec3 north = cross(up_z, east);
+    const Vec3 track = north * std::cos(azimuth_rad) + east * std::sin(azimuth_rad);  // direction of flight at the zone
+    const double a = range_m / constants::wgs84_semi_major_axis_m;
+    const Vec3 dir = up_z * std::cos(a) - track * std::sin(a);                        // start direction (uprange)
+    const Vec3 heading = math::normalized(up_z * std::sin(a) + track * std::cos(a));  // towards the zone
+    const auto g = frames::fixed_to_geodetic(dir * constants::wgs84_semi_major_axis_m);
+    const Vec3 r = frames::geodetic_to_fixed({g.latitude_rad, g.longitude_rad, 120000.0});
+    const Vec3 up = math::normalized(r);
+    const Vec3 h = math::normalized(heading - up * dot(heading, up));
+    const Vec3 v_rel = (h * std::cos(gamma_rad) + up * std::sin(gamma_rad)) * speed_mps;
+    const auto t = spice_earth().fixed_to_gcrf(epoch);
+    const Vec3 r_gcrf = t.rotation * r;
+    const Vec3 v_rel_gcrf = t.rotation * v_rel;
+    vehicle::RigidBodyState s;
+    s.position_gcrf_m = r_gcrf;
+    s.velocity_gcrf_mps = v_rel_gcrf + cross(vehicle::earth_rotation_vector(t), r_gcrf);
+    s.attitude = gnc::capsule_trim_attitude(capsule, v_rel_gcrf, math::normalized(r_gcrf), bank_rad);
+    return s;
+}
+
+double horizontal_miss_m(const Vec3& r_itrf, const Vec3& target_itrf) {
+    const Vec3 up = math::normalized(r_itrf);
+    const Vec3 d = r_itrf - target_itrf;
+    return norm(d - up * dot(d, up));
+}
+
+// Range of the nominal entry (predictor at `bank_rad`) so that a start that far uprange ends at the zone.
+double nominal_entry_range_m(const config::SplashdownZoneConfig& zone, double azimuth_rad, double speed_mps,
+                             double gamma_rad, double bank_rad, time::Epoch t0, const vehicle::Vehicle& capsule) {
+    double range = 2000000.0;
+    for (int i = 0; i < 4; ++i) {
+        const auto s0 = entry_interface_state(zone, range, azimuth_rad, speed_mps, gamma_rad, bank_rad, t0, capsule);
+        gnc::EntryPredictorModel model;
+        model.aero = gnc::EntryAeroTable::capsule(capsule);
+        model.mass_kg = capsule.mass_properties().mass_kg;
+        const auto t = spice_earth().fixed_to_gcrf(t0);
+        gnc::EntryPredictorState start;
+        start.position_itrf_m = transpose(t.rotation) * s0.position_gcrf_m;
+        start.velocity_itrf_mps =
+            transpose(t.rotation) * (s0.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), s0.position_gcrf_m));
+        start.bank_rad = bank_rad;
+        gnc::EntryTarget target;
+        target.position_itrf_m = frames::geodetic_to_fixed({zone.latitude_rad, zone.longitude_rad, 0.0});
+        const auto p = gnc::predict_entry(model, start, bank_rad, target, 5500.0);
+        range += p.downrange_error_m;  // overshoot: start farther uprange
+    }
+    return range;
+}
+
+struct GateResult {
+    double time_s = 0.0;
+    double miss_m = 0.0;
+    double speed_mps = 0.0;
+    double altitude_m = 0.0;
+    double peak_g = 0.0;
+    bool reached = false;
+};
+
+// Flies the session's capsule (body 0) to its gate, or impact, or `max_s`.
+GateResult fly_capsule_to_gate(sim::FlightSession& session, time::Epoch t0, double max_s = 3000.0) {
+    GateResult g;
+    double time_s = 0.0;
+    while (session.entry_guidance(0)->phase() != gnc::EntryPhase::Gate && !session.body(0).impacted() && time_s < max_s) {
+        time_s += session.telemetry(0).altitude_m < 8000.0 ? 0.05 : 1.0;
+        session.advance_to(t0 + time_s);
+        g.peak_g = std::max(g.peak_g, norm(session.body(0).aero_acceleration_body_mps2()) / constants::standard_gravity_mps2);
+        if (std::getenv("STARSIM_VERBOSE") && static_cast<int>(time_s) % 20 == 0 && time_s == std::floor(time_s)) {
+            const auto* st = session.entry_status(0);
+            const auto tel = session.telemetry(0);
+            std::printf("t %.0f h %.0f v %.0f Mach %.2f bank %.1f (flown %.1f) downrange %.0f cross %.0f scales %.3f %.3f\n",
+                        time_s, tel.altitude_m, tel.speed_relative_mps, tel.mach, st->bank_rad / deg,
+                        gnc::capsule_bank_rad(session.body(0), session.environment(), session.epoch()) / deg,
+                        st->downrange_error_m, st->crossrange_m, st->drag_scale, st->lift_scale);
+        }
+    }
+    const auto tr = spice_earth().fixed_to_gcrf(session.epoch());
+    const Vec3 r = transpose(tr.rotation) * session.body(0).state().position_gcrf_m;
+    const auto tel = session.telemetry(0);
+    g.time_s = time_s;
+    g.miss_m = horizontal_miss_m(r, session.entry_guidance(0)->target().position_itrf_m);
+    g.speed_mps = tel.speed_relative_mps;
+    g.altitude_m = tel.altitude_m;
+    g.reached = session.entry_guidance(0)->phase() == gnc::EntryPhase::Gate;
+    return g;
+}
+
+}  // namespace
+
+TEST_CASE("Splashdown zone loads", "[dragon][config]") {
+    const auto z = config::load_splashdown_zone(STARSIM_CONFIG_DIR, "pacific_san_diego");
+    CHECK(z.latitude_rad / deg == Catch::Approx(32.60).margin(1e-9));
+    CHECK(z.longitude_rad / deg == Catch::Approx(-117.80).margin(1e-9));
+    CHECK(z.radius_m == 10000.0);
+    CHECK_THROWS(config::load_splashdown_zone(STARSIM_CONFIG_DIR, "atlantis"));
+}
+
+TEST_CASE("Capsule entry table follows the trim", "[dragon][entry]") {
+    vehicle::Vehicle capsule(capsule_config(), STARSIM_CONFIG_DIR);
+    const auto table = gnc::EntryAeroTable::capsule(capsule);
+    const auto trim = capsule.capsule_aero()->trim(20.0, capsule.mass_properties().cg_point_m());
+    CHECK(table.cl_area_m2(20.0) / table.cd_area_m2(20.0) == Catch::Approx(trim.lift_to_drag).epsilon(1e-9));
+    CHECK(table.cd_area_m2(20.0) == Catch::Approx(trim.cd * capsule.capsule_aero()->reference_area_m2()).epsilon(1e-9));
+    CHECK(table.alpha_rad(20.0) == Catch::Approx(constants::pi - trim.theta_rad).epsilon(1e-9));
+    CHECK(table.cd_area_m2(20.0, 1.0) == Catch::Approx(table.cd_area_m2(20.0)).epsilon(1e-9));
+}
+
+TEST_CASE("The capsule predictor matches the flown entry at constant bank", "[dragon][entry]") {
+    CapsuleEntryScenario s(120000.0, 7400.0, -1.2 * deg);
+    s.set_bank(60.0 * deg);
+    gnc::EntryPredictorModel model;
+    model.aero = gnc::EntryAeroTable::capsule(s.body().vehicle());
+    model.mass_kg = s.body().vehicle().mass_properties().mass_kg;
+    model.j2 = 0.0;
+    model.gm_m3ps2 = 3.986004418e14;  // test::EntryGravity
+    model.omega_radps = test::earth_rate_radps;
+    gnc::EntryPredictorState start;
+    start.position_itrf_m = s.position_itrf_m();
+    start.velocity_itrf_mps = s.velocity_itrf_mps();
+    start.bank_rad = 60.0 * deg;
+    gnc::EntryTarget target;
+    target.position_itrf_m = math::normalized(s.position_itrf_m()) * constants::wgs84_semi_major_axis_m;
+    const auto p = gnc::predict_entry(model, start, 60.0 * deg, target, 5500.0, 0.0, 0.5);
+    REQUIRE(p.reached_gate);
+    while (s.altitude_m() > 5500.0 && s.time_s() < 3000.0) s.fly(60.0 * deg);
+    const double miss = gnc::ground_range_m(p.end_position_itrf_m, s.position_itrf_m());
+    std::printf("[validation] capsule predictor vs flown at 60 deg bank: %.1f km apart, %.0f vs %.0f s, end speed %.0f vs "
+                "%.0f m/s\n",
+                miss / 1000.0, p.time_s, s.time_s(), norm(p.end_velocity_itrf_mps), norm(s.velocity_itrf_mps()));
+    CHECK(miss < 15000.0);
+    CHECK(std::abs(p.time_s - s.time_s()) < 20.0);
+}
+
+TEST_CASE("Capsule entry guidance reaches the drogue gate", "[dragon][entry][session]") {
+    test::spice_session();
+    const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 14, 18, 0, 0.0});
+    const auto zone = config::load_splashdown_zone(STARSIM_CONFIG_DIR, "pacific_san_diego");
+    const auto cfg = capsule_config();
+    const vehicle::Vehicle capsule(cfg, STARSIM_CONFIG_DIR);
+    // the nominal entry of the deorbit plan: -2.0 deg at the interface, 30 deg of bank (d3 ledger: under the crew's 4 g
+    // an L/D 0.2 capsule has range authority only between ~0 and ~45 deg of bank)
+    const double azimuth = 120.0 * deg, speed = 7500.0, gamma = -2.0 * deg;  // arriving from the west-north-west
+    const double range = nominal_entry_range_m(zone, azimuth, speed, gamma, 30.0 * deg, t0, capsule);
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    session.set_splashdown_zone(zone);
+    session.place_entering_capsule(cfg, entry_interface_state(zone, range, azimuth, speed, gamma, 30.0 * deg, t0, capsule),
+                                   t0);
+    const auto g = fly_capsule_to_gate(session, t0);
+    std::printf("[validation] capsule entry from %.0f km uprange: gate after %.0f s at %.0f m, miss %.2f km, %.0f m/s "
+                "(%.0f km/h), peak %.2f g, heat %.0f kW/m2 / %.0f MJ/m2, crew warning %d\n",
+                range / 1000.0, g.time_s, g.altitude_m, g.miss_m / 1000.0, g.speed_mps, g.speed_mps * 3.6, g.peak_g,
+                session.body(0).peak_heat_rate_w_m2() / 1000.0, session.body(0).heat_load_j_m2() / 1e6,
+                session.body(0).crew_load_warning());
+    CHECK(g.reached);
+    CHECK_FALSE(session.body(0).impacted());
+    CHECK(g.miss_m < 2000.0);
+    CHECK(g.speed_mps == Catch::Approx(156.0).epsilon(0.15));  // ~350 mph at ~18,000 ft [S: NASA Crew-2]
+    CHECK(g.peak_g < 4.5);
+}
+

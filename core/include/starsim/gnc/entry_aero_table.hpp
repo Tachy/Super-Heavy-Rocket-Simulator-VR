@@ -28,6 +28,10 @@ public:
     EntryAeroTable() = default;
     // `ship`: a single-stage vehicle with flaps (its first stage carries them).
     EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule& schedule);
+    // A capsule (Vehicle::capsule_aero): drag and lift area at its trim over Mach about the current CG; the alpha
+    // schedule is pi - theta_trim (the angle between the nose and the air velocity). It has one angle of attack, so the
+    // alpha-grid accessors return the trim's values at any alpha (the capsule flies no terminal phase).
+    static EntryAeroTable capsule(const vehicle::Vehicle& capsule);
 
     double cd_area_m2(double mach) const;
     double cl_area_m2(double mach) const;

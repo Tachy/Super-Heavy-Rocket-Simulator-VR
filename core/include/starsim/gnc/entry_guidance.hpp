@@ -62,6 +62,22 @@ struct EntryGuidanceParameters {
     double scale_filter_gain = 0.3;   // per cycle, measured / modelled aerodynamic acceleration
     double scale_min_acceleration_mps2 = 1.0;
     bool predictor_j2 = true;         // false: central gravity (test scenarios without J2)
+    bool terminal_phase = true;       // false: no terminal steering (a capsule: bank to the gate)
+
+    // A capsule (Crew Dragon, d3): gate at the drogue deployment height (~18,000 ft [S: NASA Crew-2]), bank rate
+    // 10 deg/s [E] throughout (Dracos; Apollo rolled at up to ~20 deg/s), no terminal phase, reversals to lower speed.
+    static EntryGuidanceParameters capsule() {
+        EntryGuidanceParameters p;
+        p.gate_height_m = 5500.0;
+        p.bank_rate_radps = 10.0 * constants::deg_to_rad;
+        p.fast_bank_rate_radps = 10.0 * constants::deg_to_rad;
+        p.max_bank_rad = 165.0 * constants::deg_to_rad;
+        p.terminal_phase = false;
+        // no terminal phase removes the last crossrange: reversals keep going to lower speed with a narrower deadband [E]
+        p.reversal_crossrange_base_m = 500.0;
+        p.min_reversal_speed_mps = 300.0;
+        return p;
+    }
 };
 
 struct EntryCommand {
@@ -98,6 +114,11 @@ public:
     // `ship`: the entering single-stage vehicle (flaps, heat shield); its current mass properties set the trim.
     EntryGuidance(const vehicle::FlightBody& ship, const AlphaSchedule& schedule, EntryTarget target,
                   EntryGuidanceParameters parameters = {});
+    // A capsule (Vehicle::capsule_aero): fixed trim angle of attack, bank only (EntryAeroTable::capsule); the load limit
+    // is the crew's ([stage.heat_shield] crew_load_limit_g) when lower than the structure's.
+    EntryGuidance(const vehicle::FlightBody& capsule, EntryTarget target,
+                  EntryGuidanceParameters parameters = EntryGuidanceParameters::capsule());
+    bool capsule() const { return capsule_; }
 
     EntryCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 
@@ -133,6 +154,8 @@ private:
     EntryPredictorModel model_;
     config::HeatShieldConfig limits_;
     double belly_azimuth_rad_ = 0.0;
+    bool capsule_ = false;
+    void configure_model(const vehicle::FlightBody& body);
     EntryPhase phase_ = EntryPhase::Entry;
     bool started_ = false;
     time::Epoch last_update_;
