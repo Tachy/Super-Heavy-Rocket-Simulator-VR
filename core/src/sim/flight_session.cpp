@@ -297,11 +297,18 @@ bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<Burn
     }
     BurnConfiguration rcs;
     if (chosen == nullptr && !bodies_.empty()) {
-        // Below the main-engine minimum impulse: RCS translation (no transients), if the vehicle has RCS
-        // and the burn takes less than an hour.
+        // Below the main-engine minimum impulse (or no main engines): RCS translation (no transients) along +x when the
+        // vehicle has thrusters along it (ullage thrusters), else along -x (Crew Dragon with only the Dracos under its
+        // nose cone) - if the burn takes less than an hour. Lateral axes are not used: one-station layouts (Super Heavy)
+        // push only with a torque, and lateral translation belongs to docking (M9).
         const auto& vehicle = bodies_[controlled_].body->vehicle();
         rcs.rcs = true;
-        const auto capability = vehicle.rcs_force_capability({1.0, 0.0, 0.0});  // the burn points +x along it
+        auto capability = vehicle.rcs_force_capability({1.0, 0.0, 0.0});
+        rcs.thrust_axis_body = {1.0, 0.0, 0.0};
+        if (!(capability.force_n > 0.0)) {
+            capability = vehicle.rcs_force_capability({-1.0, 0.0, 0.0});
+            rcs.thrust_axis_body = {-1.0, 0.0, 0.0};
+        }
         rcs.thrust_n = capability.force_n;
         rcs.mass_flow_kgps = capability.mass_flow_kgps;
         if (rcs.thrust_n > 0.0 && dv / (rcs.thrust_n / vehicle.mass_properties().mass_kg) < 3600.0) {
@@ -429,7 +436,7 @@ void FlightSession::run_autopilot() {
             const auto& c = burn_config_;
             const auto& vehicle = body.vehicle();
             const math::Vec3 thrust_axis =
-                c.rcs ? math::Vec3{1.0, 0.0, 0.0} : gnc::thrust_axis_body(vehicle, vehicle.mass_properties().cg_station_m, c.groups);
+                c.rcs ? c.thrust_axis_body : gnc::thrust_axis_body(vehicle, vehicle.mass_properties().cg_station_m, c.groups);
             autopilot_.burn = burn_->update(body, epoch_, tick_s, c.thrust_n, c.mass_flow_kgps, c.shutdown_s,
                                             last_rcs_acceleration_, thrust_axis);
             if (c.rcs) {
@@ -692,10 +699,13 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         for (auto& group : command.groups) group.throttle = throttle;
         const auto& direction = guided ? autopilot_.guidance.thrust_direction_gcrf : autopilot_.burn.direction_gcrf;
         const auto& vehicle = flying.body->vehicle();
-        const math::Vec3 thrust_axis = guided || burn_config_.rcs
-                                           ? math::Vec3{1.0, 0.0, 0.0}
-                                           : gnc::thrust_axis_body(vehicle, vehicle.mass_properties().cg_station_m,
-                                                                   burn_config_.groups);
+        const math::Vec3 thrust_axis = guided            ? math::Vec3{1.0, 0.0, 0.0}
+                                       : burn_config_.rcs ? burn_config_.thrust_axis_body
+                                                          : gnc::thrust_axis_body(vehicle, vehicle.mass_properties().cg_station_m,
+                                                                                  burn_config_.groups);
+        // RCS burns turn and hold on pulses: the orbit controller (rate-limited slews, hold deadband); the ascent
+        // controller chattered on the Dracos' pulses (~3 kg of a 1 m/s burn's 7 kg).
+        const auto& steering = !guided && burn_config_.rcs ? orbit_controller_ : controller_;
         if (thrust_axis.x < 1.0 - 1e-9) {
             // Asymmetric set (the ship's deorbit Raptor): its thrust goes through the CG along an axis tilted against the
             // hull; the hull turns so that this axis points along the burn, its roll kept where it is.
@@ -712,12 +722,18 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
                 m(2, c) = columns[c].z;
             }
             const math::Vec3 x{1.0, 0.0, 0.0};
-            const math::Quat to_x = math::Quat::from_axis_angle(cross(thrust_axis, x), std::acos(std::clamp(thrust_axis.x, -1.0, 1.0)));
+            const math::Vec3 turn_axis = cross(thrust_axis, x);
+            // Anti-parallel (an RCS burn along -x): half a turn about body y - it keeps +y, so the roll reference below
+            // keeps the roll where it is (a half turn about z flipped +y: a 180 deg roll error chased every tick).
+            const math::Quat to_x =
+                norm(turn_axis) > 1e-9
+                    ? math::Quat::from_axis_angle(turn_axis, std::acos(std::clamp(thrust_axis.x, -1.0, 1.0)))
+                    : math::Quat::from_axis_angle({0.0, 1.0, 0.0}, constants::pi);
             const math::Quat hull = math::Quat::from_matrix(m) * to_x;  // hull.rotate(thrust_axis) = x0
-            controller_.steer(*flying.body, ambient_pressure_pa, hull.rotate(x), hull.rotate(math::Vec3{0.0, 1.0, 0.0}))
+            steering.steer(*flying.body, ambient_pressure_pa, hull.rotate(x), hull.rotate(math::Vec3{0.0, 1.0, 0.0}))
                 .apply_to(command);
         } else {
-            controller_.steer(*flying.body, ambient_pressure_pa, direction).apply_to(command);
+            steering.steer(*flying.body, ambient_pressure_pa, direction).apply_to(command);
         }
         // Orbit manoeuvre: turning towards the burn must not push the vehicle (an unrequested push moves the orbit).
         command.rcs_keep_force = !guided;

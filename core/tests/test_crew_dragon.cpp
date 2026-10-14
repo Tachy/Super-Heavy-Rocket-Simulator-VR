@@ -293,3 +293,100 @@ TEST_CASE("Dragon points its nose at the Sun", "[dragon][attitude]") {
     const Vec3 to_sun = ephemeris.state_gcrf(ephemeris::Body::Sun, s.epoch()).position_m - b.position_gcrf_m;
     CHECK(angle_between(b.attitude.rotate({1.0, 0.0, 0.0}), to_sun) < 1.0 * constants::deg_to_rad);
 }
+
+namespace {
+
+// Flies an RCS burn of `dv` m/s prograde from the 200 km orbit (node 300 s ahead) and compares the final velocity with
+// the same orbit coasted without the burn in an identical session: the difference is the burn.
+struct BurnResult {
+    Vec3 error_mps;
+    double propellant_kg = 0.0;
+    Vec3 axis_body;
+};
+
+BurnResult fly_prograde_burn(DragonInOrbit& o, double dv, bool drop_forward_thrusters = false) {
+    auto& s = o.session;
+    const auto& b0 = s.body(0).state();
+    const math::StateVector start{b0.position_gcrf_m, b0.velocity_gcrf_mps};
+    const double node_s = 300.0;
+    const auto at_node = orbit::propagate_two_body(start, o.gm, node_s);
+    const Vec3 planned = math::normalized(at_node.velocity_mps) * dv;
+    if (drop_forward_thrusters) {
+        // The side pods' forward thrusters lost: the strongest axis is -x (the four Dracos under the nose cone). Such a
+        // layout turns only with a push and a short lever, so the capsule starts with its nose against the burn: the hull
+        // attitude for a -x burn (half a turn about body z of the burn frame) is then already held - a wrong anti-parallel
+        // attitude would turn it, spend propellant and push it off the planned delta-v.
+        auto cfg = config::load_vehicle(config_dir, "crew_dragon");
+        std::erase_if(cfg.stages[1].rcs.thrusters, [](const config::RcsThrusterConfig& t) { return t.direction.x > 0.5; });
+        auto state = s.body(0).state();
+        const Vec3 x = -math::normalized(planned);
+        const Vec3 y_now = state.attitude.rotate({0.0, 1.0, 0.0});
+        const Vec3 y = math::normalized(y_now - x * dot(y_now, x));
+        const Vec3 z = cross(x, y);
+        math::Mat3 m;
+        const Vec3 columns[3] = {x, y, z};
+        for (int c = 0; c < 3; ++c) {
+            m(0, c) = columns[c].x;
+            m(1, c) = columns[c].y;
+            m(2, c) = columns[c].z;
+        }
+        state.attitude = math::Quat::from_matrix(m);
+        s.place_body(cfg, state, o.t0);
+        s.set_nose_cone(0, true);
+    }
+    const double kg0 = s.body(0).vehicle().rcs_propellant_kg();
+    REQUIRE(s.execute_burn({o.t0 + node_s, planned}));
+    BurnResult r;
+    r.axis_body = s.burn_configuration().thrust_axis_body;
+    REQUIRE(s.burn_configuration().rcs);
+    for (double t = 1.0; t < 1200.0 && s.autopilot().state == sim::AutopilotState::Burn; t += 1.0) {
+        s.advance_to(o.t0 + t, 1000);
+        if (std::getenv("STARSIM_VERBOSE") && static_cast<int>(t) % 10 == 0) {
+            const auto& w = s.body(0).state().angular_velocity_body_radps;
+            std::printf("t %4.0f kg %.2f ignite %d remaining %.3f w %.5f %.5f %.5f\n", t,
+                        kg0 - s.body(0).vehicle().rcs_propellant_kg(), s.autopilot().burn.ignite ? 1 : 0,
+                        s.autopilot().burn.remaining_dv_mps, w.x, w.y, w.z);
+        }
+    }
+    REQUIRE(s.autopilot().state == sim::AutopilotState::Off);
+    r.propellant_kg = kg0 - s.body(0).vehicle().rcs_propellant_kg();
+    sim::FlightSession reference(*o.ephemeris, *o.earth, STARSIM_CONFIG_DIR);
+    reference.place_in_orbit("crew_dragon", start, o.t0);
+    reference.advance_to(s.epoch(), 1000000);
+    r.error_mps = (s.body(0).state().velocity_gcrf_mps - reference.body(0).state().velocity_gcrf_mps) - planned;
+    return r;
+}
+
+}  // namespace
+
+TEST_CASE("Dragon flies 1 m/s and 10 m/s burns on its Dracos", "[dragon][burn][validation]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    for (const double dv : {1.0, 10.0}) {
+        CAPTURE(dv);
+        DragonInOrbit o(ephemeris, earth);
+        const auto r = fly_prograde_burn(o, dv);
+        std::printf("[validation] Dragon %.0f m/s Draco burn: error %.4f m/s, %.2f kg, axis %.0f/%.0f/%.0f\n", dv,
+                    norm(r.error_mps), r.propellant_kg, r.axis_body.x, r.axis_body.y, r.axis_body.z);
+        CHECK(r.axis_body.x == Catch::Approx(1.0));  // the side pods' forward thrusters (+x)
+        CHECK(norm(r.error_mps) < 0.01 + 0.01 * dv);  // [E] 1 % + the pulse quantum
+        const double ideal_kg = 12500.0 * (1.0 - std::exp(-dv / (300.0 * constants::standard_gravity_mps2)));
+        CHECK(r.propellant_kg > ideal_kg);
+        CHECK(r.propellant_kg < 1.3 * ideal_kg + 0.5);  // turning and holding during the burn
+    }
+}
+
+TEST_CASE("An RCS burn along -x turns the hull round and keeps the delta-v", "[dragon][burn]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    DragonInOrbit o(ephemeris, earth);
+    const auto r = fly_prograde_burn(o, 2.0, true);
+    std::printf("[validation] Dragon 2 m/s burn on the nose Dracos (-x): error %.4f m/s, %.2f kg\n", norm(r.error_mps),
+                r.propellant_kg);
+    CHECK(r.axis_body.x == Catch::Approx(-1.0));
+    CHECK(norm(r.error_mps) < 0.05);
+    const double ideal_kg = 12500.0 * (1.0 - std::exp(-2.0 / (300.0 * constants::standard_gravity_mps2)));
+    CHECK(r.propellant_kg < 1.5 * ideal_kg + 1.0);  // no half turn flown
+}
