@@ -40,7 +40,9 @@ func _initialize() -> void:
 	_check(tower.get("present", false), "Starbase has a catch tower")
 	_check(absf(float(tower.get("mount_height_m", 0.0)) - 20.0) < 1e-9, "tower geometry from the core config")
 
-	_check_falcon9(config_dir, tdb)
+	# A script error aborts a check function (it then returns null) without failing a check: count it as a failure.
+	_check(_check_falcon9(config_dir, tdb) == true, "Falcon 9 checks ran to the end")
+	_check(_check_dragon(config_dir, tdb) == true, "Crew Dragon checks ran to the end")
 
 	print("SMOKE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
@@ -53,7 +55,7 @@ func _check(condition: bool, label: String) -> void:
 
 
 # Falcon 9 missions (c5 game interface): mission start, landing zone with and without a deck, legs and grid fins.
-func _check_falcon9(config_dir: String, tdb: float) -> void:
+func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	var f9 := FlightSim.new()
 	f9.setup(config_dir)
 	_check(f9.start_mission("falcon9_rtls", tdb), "Falcon 9 RTLS mission starts")
@@ -89,3 +91,51 @@ func _check_falcon9(config_dir: String, tdb: float) -> void:
 	_check(not ship.abort_landing(0), "abort refused for a body that is not returning")
 	_check(ship.is_active() and ship.tower_state().get("phase", "") != "Abbruch",
 			"abort before staging changes nothing (tower not aborted)")
+	return true
+
+
+# Crew Dragon (d5 game interface): both missions via start_mission, thrusters, parachutes and the capsule state.
+func _check_dragon(config_dir: String, tdb: float) -> bool:
+	var sim := FlightSim.new()
+	sim.setup(config_dir)
+	_check(sim.body_rcs(0).is_empty() and sim.body_parachutes(0).is_empty() and sim.capsule_state(0).is_empty()
+			and not sim.splashdown_zone().get("present", true), "before a flight: empty thruster/parachute/capsule state")
+	_check(sim.start_mission("falcon9_crew_dragon", tdb), "Falcon 9 with Crew Dragon starts")
+	_check(absf(sim.mission_start_tdb_s() - tdb) < 1e-9, "an ascent starts at the requested time")
+	var rcs: Array = sim.body_rcs(0)
+	_check(rcs.size() == 8 + 8 + 16, "stack: 8 + 8 Falcon 9 thrusters and 16 Dracos")
+	var dracos_blocked := true
+	for t in rcs:
+		if t.get("stage", 0) == 3 and not t.get("blocked", false):
+			dracos_blocked = false
+	_check(dracos_blocked, "stacked Dracos are blocked")
+	_check((rcs[0] as Dictionary).has_all(["id", "position_m", "direction", "firing", "duty", "thrust_n", "starved"]),
+			"thruster fields")
+	_check(not sim.capsule_state(0).get("present", true), "a capsule stacked on its launcher is not a capsule body")
+	_check(sim.body_parachutes(0).size() == 2, "the stacked capsule carries its two parachute sets")
+	_check(not sim.start_mission("ship_return_starbase", tdb), "a ship return is not started by start_mission")
+
+	var ret := FlightSim.new()
+	ret.setup(config_dir)
+	_check(ret.start_mission("crew_dragon_return", tdb), "Crew Dragon return mission starts")
+	_check(absf(ret.mission_start_tdb_s() - tdb) > 1.0, "the return starts at its own epoch, not the requested one")
+	var capsule: Dictionary = ret.capsule_state(ret.controlled_index())
+	_check(capsule.get("present", false) and capsule.get("trunk_attached", false) and capsule.get("nose_cone_open", false),
+			"capsule on its trunk with the nose cone open")
+	_check(capsule.get("return_step", "") == "Deorbit-Brennvorgang", "the deorbit burn is planned")
+	_check(capsule.get("parachute_phase", "x") == "", "no parachute sequencer while the trunk is attached")
+	_check(ret.autopilot_status().get("return", {}).get("feasible", false), "the return plan is feasible")
+	_check(ret.autopilot_status().get("capsule_step", "") == "Deorbit-Brennvorgang", "autopilot status: capsule step")
+	var zone: Dictionary = ret.splashdown_zone()
+	_check(zone.get("present", false) and absf(float(zone.get("radius_m", 0.0)) - 2000.0) < 1e-9, "splashdown zone radius 2 km")
+	var chutes: Array = ret.body_parachutes(ret.controlled_index())
+	_check(chutes.size() == 2 and chutes[0].get("state", "") == "verstaut" and float(chutes[0].get("inflation", 1.0)) == 0.0,
+			"parachutes stowed")
+	_check(ret.body_rcs(ret.controlled_index()).size() == 16, "Crew Dragon alone: 16 Dracos")
+	ret.advance_to(ret.mission_start_tdb_s() + 10.0)
+	_check(ret.is_active(), "the return mission advances")
+	_check(ret.body_rcs(9).is_empty() and ret.body_parachutes(9).is_empty() and ret.capsule_state(9).is_empty(),
+			"invalid body index: empty results")
+	_check(not ret.plan_capsule_return(), "a second return plan is refused while one runs")
+	_check(not ret.set_splashdown_zone("no_such_zone"), "unknown splashdown zone is refused")
+	return true

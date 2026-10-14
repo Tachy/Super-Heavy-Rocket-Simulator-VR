@@ -5,14 +5,16 @@
 
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
+#include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/contact/tower_geometry.hpp"
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
-#include "starsim/sim/ascent_mission.hpp"
+#include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
+#include "starsim/vehicle/vehicle.hpp"
 
 namespace starsim::bindings {
 
@@ -39,6 +41,7 @@ bool FlightSim::launch_from_site(const godot::String& vehicle_id, const godot::S
         session_->launch_from_pad(vehicle_id.utf8().get_data(), sim::launch_site_from_config(site),
                                   heading_deg * constants::deg_to_rad, epoch(tdb_s));
         site_id_ = site_id;
+        mission_start_tdb_s_ = tdb_s;
         return true;
     } catch (const std::exception& e) {
         godot::UtilityFunctions::push_error(godot::String("FlightSim.launch_from_site: ") + e.what());
@@ -52,9 +55,9 @@ bool FlightSim::start_mission(const godot::String& mission_id, double tdb_s) {
         return false;
     }
     try {
-        const auto mission = config::load_ascent_mission(config_dir_, mission_id.utf8().get_data());
-        sim::start_ascent_mission(*session_, mission, config_dir_, epoch(tdb_s));
-        site_id_ = godot::String::utf8(mission.site_id.c_str());
+        const auto s = sim::start_mission(*session_, config_dir_, mission_id.utf8().get_data(), epoch(tdb_s), time_);
+        site_id_ = godot::String::utf8(s.site_id.c_str());
+        mission_start_tdb_s_ = s.epoch.tdb_seconds_past_j2000();
         return true;
     } catch (const std::exception& e) {
         godot::UtilityFunctions::push_error(godot::String("FlightSim.start_mission: ") + e.what());
@@ -172,6 +175,7 @@ bool FlightSim::launch_from_pad(const godot::String& vehicle_id, double latitude
         const double deg = constants::deg_to_rad;
         session_->launch_from_pad(vehicle_id.utf8().get_data(), {latitude_deg * deg, longitude_deg * deg, height_m},
                                   heading_deg * deg, epoch(tdb_s));
+        mission_start_tdb_s_ = tdb_s;
         return true;
     } catch (const std::exception& e) {
         godot::UtilityFunctions::push_error(godot::String("FlightSim.launch_from_pad: ") + e.what());
@@ -359,6 +363,120 @@ godot::Array FlightSim::body_grid_fins(int index) const {
     return fins;
 }
 
+godot::Array FlightSim::body_rcs(int index) const {
+    godot::Array thrusters;
+    if (!check_index(index)) return thrusters;
+    const auto& vehicle = session_->body(index).vehicle();
+    const auto& duty = vehicle.rcs_duty();
+    const auto& stages = vehicle.stages();
+    size_t k = 0;
+    for (size_t s = 0; s < stages.size(); ++s) {
+        for (const auto& t : stages[s].rcs) {
+            godot::Dictionary d;
+            d["id"] = godot::String::utf8(t.id.c_str());
+            d["stage"] = static_cast<int64_t>(s);
+            d["position_m"] = to_godot(t.position_m);
+            d["direction"] = to_godot(t.direction);
+            d["thrust_n"] = t.thrust_n;
+            d["firing"] = t.output > 0.0;
+            d["duty"] = k < duty.size() ? duty[k] : 0.0;  // empty after stop_rcs: all off
+            d["starved"] = t.starved;
+            d["blocked"] = t.blocked;
+            thrusters.push_back(d);
+            ++k;
+        }
+    }
+    return thrusters;
+}
+
+godot::Array FlightSim::body_parachutes(int index) const {
+    godot::Array sets;
+    if (!check_index(index)) return sets;
+    const auto& body = session_->body(index);
+    for (const auto& stage : body.vehicle().stages()) {
+        for (const auto& p : stage.parachutes) {
+            const double full = p.config.count * p.config.drag_area_m2;
+            const math::Vec3 v = body.point_air_velocity_body_mps(p.attach_station_m);
+            const double speed = norm(v);
+            godot::Dictionary d;
+            d["id"] = godot::String::utf8(p.config.id.c_str());
+            d["role"] = godot::String::utf8(p.config.role.c_str());
+            d["state"] = godot::String::utf8(vehicle::to_string(p.state));
+            d["count"] = p.config.count;
+            d["attach_station_m"] = p.attach_station_m;
+            d["drag_area_m2"] = p.drag_area_m2;
+            d["full_drag_area_m2"] = full;
+            d["inflation"] = full > 0.0 ? p.drag_area_m2 / full : 0.0;
+            d["direction"] = speed > 0.1 ? to_godot(v * (-1.0 / speed)) : godot::Vector3(1.0, 0.0, 0.0);
+            d["peak_load_n"] = p.peak_load_n;
+            d["max_load_n"] = p.config.max_load_n;
+            sets.push_back(d);
+        }
+    }
+    return sets;
+}
+
+godot::Dictionary FlightSim::capsule_state(int index) const {
+    godot::Dictionary d;
+    if (!check_index(index)) return d;
+    const auto i = static_cast<size_t>(index);
+    const auto& vehicle = session_->body(i).vehicle();
+    const auto& top = vehicle.stages().back().config;
+    const bool present = top.aero.entry_profile == "capsule" && !top.payload;  // not stacked on a launcher
+    d["present"] = present;
+    if (!present) return d;
+    d["nose_cone"] = vehicle.has_nose_cone();
+    d["nose_cone_open"] = vehicle.nose_cone_open();
+    d["trunk_attached"] = vehicle.stages().size() > 1;
+    d["return_step"] = godot::String::utf8(sim::to_string(session_->capsule_return_step()));
+    const auto* sequencer = session_->parachute_sequencer(i);
+    d["parachute_phase"] = sequencer ? godot::String::utf8(gnc::to_string(sequencer->phase())) : godot::String();
+    d["parachute_torn"] = vehicle.parachute_torn();
+    if (session_->splashdown_zone()) d["splashdown_miss_m"] = session_->splashdown_miss_m(i);
+    d["outcome"] = godot::String::utf8(sim::to_string(session_->landing_outcome(i)));
+    return d;
+}
+
+godot::Dictionary FlightSim::splashdown_zone() const {
+    godot::Dictionary d;
+    d["present"] = false;
+    if (!session_ || !session_->splashdown_zone()) return d;
+    const auto& z = *session_->splashdown_zone();
+    const double lat = z.latitude_rad, lon = z.longitude_rad;
+    d["present"] = true;
+    d["id"] = godot::String::utf8(z.id.c_str());
+    d["name"] = godot::String::utf8(z.name.c_str());
+    d["latitude_deg"] = lat * constants::rad_to_deg;
+    d["longitude_deg"] = lon * constants::rad_to_deg;
+    d["radius_m"] = z.radius_m;
+    d["origin_itrf_m"] = to_godot(frames::geodetic_to_fixed({lat, lon, 0.0}));  // sea level (WGS84 height 0)
+    d["east"] = godot::Vector3(-std::sin(lon), std::cos(lon), 0.0);
+    d["north"] = godot::Vector3(-std::sin(lat) * std::cos(lon), -std::sin(lat) * std::sin(lon), std::cos(lat));
+    d["up"] = godot::Vector3(std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat));
+    return d;
+}
+
+bool FlightSim::set_splashdown_zone(const godot::String& zone_id) {
+    if (!session_) return false;
+    try {
+        session_->set_splashdown_zone(config::load_splashdown_zone(config_dir_, zone_id.utf8().get_data()));
+        return true;
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("FlightSim.set_splashdown_zone: ") + e.what());
+        return false;
+    }
+}
+
+bool FlightSim::plan_capsule_return() {
+    if (!is_active()) return false;
+    try {
+        return session_->plan_capsule_return();
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("FlightSim.plan_capsule_return: ") + e.what());
+        return false;
+    }
+}
+
 void FlightSim::engage_ascent_autopilot(double periapsis_km, double apoapsis_km, double inclination_deg,
                                         bool northerly) {
     if (!is_active()) return;
@@ -423,6 +541,9 @@ godot::Dictionary FlightSim::autopilot_status() const {
         r["crossrange_km"] = plan->crossrange_m / 1000.0;
         d["return"] = r;
     }
+    if (session_->capsule_return_step() != sim::CapsuleReturnStep::None) {
+        d["capsule_step"] = godot::String::utf8(sim::to_string(session_->capsule_return_step()));
+    }
     return d;
 }
 
@@ -470,6 +591,13 @@ void FlightSim::_bind_methods() {
                          &FlightSim::launch_from_site);
     ClassDB::bind_method(D_METHOD("start_mission", "mission_id", "tdb_s"), &FlightSim::start_mission);
     ClassDB::bind_method(D_METHOD("mission_site_id"), &FlightSim::mission_site_id);
+    ClassDB::bind_method(D_METHOD("mission_start_tdb_s"), &FlightSim::mission_start_tdb_s);
+    ClassDB::bind_method(D_METHOD("body_rcs", "index"), &FlightSim::body_rcs);
+    ClassDB::bind_method(D_METHOD("body_parachutes", "index"), &FlightSim::body_parachutes);
+    ClassDB::bind_method(D_METHOD("capsule_state", "index"), &FlightSim::capsule_state);
+    ClassDB::bind_method(D_METHOD("splashdown_zone"), &FlightSim::splashdown_zone);
+    ClassDB::bind_method(D_METHOD("set_splashdown_zone", "zone_id"), &FlightSim::set_splashdown_zone);
+    ClassDB::bind_method(D_METHOD("plan_capsule_return"), &FlightSim::plan_capsule_return);
     ClassDB::bind_method(D_METHOD("landing_zone"), &FlightSim::landing_zone);
     ClassDB::bind_method(D_METHOD("body_legs", "index"), &FlightSim::body_legs);
     ClassDB::bind_method(D_METHOD("body_grid_fins", "index"), &FlightSim::body_grid_fins);

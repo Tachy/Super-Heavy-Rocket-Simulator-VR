@@ -27,9 +27,12 @@ public:
                          double heading_deg, double tdb_s);
     // Launch from a site of config/launch_sites.toml (with its catch tower, if it has one).
     bool launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg, double tdb_s);
-    // Ascent mission of config/missions (payload, pad, landing zone or drone ship, booster return, ascent autopilot
-    // engaged); false (error pushed) for an unknown or invalid mission.
+    // Mission of config/missions by its [mission] kind: an ascent starts at `tdb_s` (payload, pad, landing zone or drone
+    // ship, booster return, ascent autopilot); a capsule return at its own epoch (mission_start_tdb_s()) with the deorbit
+    // planned; false (error pushed) for an unknown, invalid or ship-return mission.
     bool start_mission(const godot::String& mission_id, double tdb_s);
+    // Epoch (TDB s) the current flight began at: the launch, or a return mission's own epoch (the world clock jumps there).
+    double mission_start_tdb_s() const { return mission_start_tdb_s_; }
     // Launch site id of the current flight (launch_from_site or the mission), "" before the first.
     godot::String mission_site_id() const { return site_id_; }
     // Landing zone of a returning first stage: {present}; present: {origin_itrf_m (its surface: the deck top for a drone
@@ -95,6 +98,27 @@ public:
     godot::Dictionary body_legs(int index) const;
     // Grid fins: [{station_m (body frame), azimuth_deg, radius_m (centre of pressure), area_m2, deflection_deg}].
     godot::Array body_grid_fins(int index) const;
+    // RCS thrusters, one per thruster: [{id, stage, position_m (body), direction (force on the vehicle; the plume points
+    // the other way), thrust_n, firing, duty (0..1 allocated this tick), starved (supply empty), blocked (behind a closed
+    // nose cone, or a payload still stacked)}].
+    godot::Array body_rcs(int index) const;
+    // Parachute sets: [{id, role, state (German: verstaut / offen / abgeworfen / Fallschirm gerissen), count,
+    // attach_station_m (body), drag_area_m2 (now, all canopies), full_drag_area_m2, inflation (0..1), direction (body unit
+    // vector from the riser point towards the canopies: against the point's air velocity; +x below 0.1 m/s),
+    // peak_load_n, max_load_n (per canopy)}].
+    godot::Array body_parachutes(int index) const;
+    // Capsule flying on its own (top stage with a capsule entry profile, not stacked on a launcher): {present}; present:
+    // {nose_cone, nose_cone_open, trunk_attached, return_step (German), parachute_phase (German, "" without a sequencer),
+    // parachute_torn, splashdown_miss_m (with a zone), outcome (German)}. Empty for an invalid index.
+    godot::Dictionary capsule_state(int index) const;
+    // Splashdown zone of the flight: {present}; present: {id, name, latitude_deg, longitude_deg, radius_m, origin_itrf_m
+    // (sea level), east, north, up (ITRF unit vectors)}.
+    godot::Dictionary splashdown_zone() const;
+    // Zone of config/splashdown_zones.toml for plan_capsule_return; false (error pushed) for an unknown zone.
+    bool set_splashdown_zone(const godot::String& zone_id);
+    // Return of the controlled capsule to the splashdown zone (deorbit, trunk, entry, parachutes); the plan or the reason
+    // it was refused appears in autopilot_status()["return"], the step in ["capsule_step"].
+    bool plan_capsule_return();
     godot::Dictionary telemetry(int index) const;
 
 protected:
@@ -108,6 +132,8 @@ private:
     std::unique_ptr<sim::FlightSession> session_;
     std::filesystem::path config_dir_;
     godot::String site_id_;
+    spice::SpiceTimeConverter time_;
+    double mission_start_tdb_s_ = 0.0;
 };
 
 }  // namespace starsim::bindings
