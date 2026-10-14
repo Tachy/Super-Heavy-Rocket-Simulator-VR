@@ -220,7 +220,16 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         shooter.set_mass(entry_mass(dv));
 
         // Bracket the burn epoch on the downrange error (later burn: later entry, overshoot).
-        const time::Epoch earliest = epoch + parameters.lead_s;
+        // The lead applies to the ignition: a finite burn ignites half its duration before the node (review d3).
+        const auto earliest_for = [&](double delta_v) {
+            double half = 0.0;
+            if (parameters.burn_thrust_n > 0.0) {
+                const double thrust = parameters.burn_thrust_n;
+                half = 0.5 * burn_duration_s(delta_v, mass_kg, thrust, thrust / exhaust_velocity_mps);
+            }
+            return epoch + parameters.lead_s + half;
+        };
+        const time::Epoch earliest = earliest_for(dv);
         bool bracketed = false;
         time::Epoch t_lo, t_hi;
         Shot s_lo;
@@ -286,7 +295,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
             double step_v = -(-a21 * f1 + a11 * f2) / det;
             step_t = std::clamp(step_t, -120.0, 120.0);
             step_v = std::clamp(step_v, -20.0, 20.0);
-            t = std::max(t + step_t, earliest);
+            t = std::max(t + step_t, earliest_for(dv + step_v));
             dv = std::max(dv + step_v, 1.0);
             shooter.set_mass(entry_mass(dv));
         }

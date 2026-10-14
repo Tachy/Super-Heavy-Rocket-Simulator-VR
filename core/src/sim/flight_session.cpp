@@ -142,6 +142,8 @@ gnc::DeorbitParameters FlightSession::capsule_deorbit_parameters() {
 }
 
 bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
+    // A return in progress keeps its plan (review d3: a second call reset it mid-way).
+    if (capsule_return_step_ != CapsuleReturnStep::None || autopilot_.state == AutopilotState::Return) return false;
     ship_return_ = false;
     capsule_return_step_ = CapsuleReturnStep::None;
     deorbit_plan_.reset();
@@ -467,6 +469,7 @@ bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<Burn
     burn_.emplace(node);
     autopilot_.state = AutopilotState::Burn;
     attitude_mode_ = {};  // d2 minor: a mode set before the burn no longer turns the vehicle back after it
+    capsule_return_step_ = CapsuleReturnStep::None;  // a pilot burn ends a capsule return (its plan sets it after this)
     return true;
 }
 
@@ -651,7 +654,8 @@ void FlightSession::run_autopilot() {
                 break;
             }
             if (!flying.entry_guidance && !flying.ship_landing && epoch_ >= entry_start_) {
-                start_entry_guidance(flying, {});
+                const bool capsule = flying.body->vehicle().stages().front().config.aero.entry_profile == "capsule";
+                start_entry_guidance(flying, capsule ? gnc::EntryGuidanceParameters::capsule() : gnc::EntryGuidanceParameters{});
             }
             break;
         default:
@@ -797,6 +801,7 @@ void FlightSession::reset_mission_state() {
     attitude_mode_ = {};
     payload_separation_.reset();
     nose_cone_epoch_.reset();
+    capsule_return_step_ = CapsuleReturnStep::None;  // review d3: a return does not carry into a new flight
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -1010,8 +1015,10 @@ double FlightSession::coast_allowance_s() const {
                         autopilot_.state == AutopilotState::PayloadSeparation;
     if (guided) return 0.0;
     if (attitude_mode_active()) return 0.0;  // pulsed RCS hold: ticked
-    if (autopilot_.state == AutopilotState::Return && capsule_return_step_ != CapsuleReturnStep::None) {
-        return 0.0;  // capsule return: timed steps and the turn to the trim attitude, ticked
+    if (autopilot_.state == AutopilotState::Return &&
+        (capsule_return_step_ == CapsuleReturnStep::TrunkJettison ||
+         capsule_return_step_ == CapsuleReturnStep::NoseConeClose || capsule_return_step_ == CapsuleReturnStep::Coast)) {
+        return 0.0;  // capsule return: timed steps and the turn to the trim attitude, ticked (the entry: per body below)
     }
     if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0) return 0.0;
     double allowance = max_coast_s;

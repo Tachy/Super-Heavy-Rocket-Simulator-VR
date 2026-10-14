@@ -720,6 +720,12 @@ TEST_CASE("Crew Dragon returns from orbit to the drogue gate", "[dragon][mission
     CHECK_FALSE(capsule.crew_load_warning());
     CHECK(capsule.vehicle().stages().size() == 1);
     CHECK(capsule.vehicle().stages().front().config.id == "capsule");
+    // Review (d3) M1: after the gate the capsule falls into the sea; then the session coasts again (time warp)
+    s.advance_to(s.epoch() + 120.0, 1000000);
+    CHECK(s.body(s.controlled_index()).impacted());
+    const auto before = s.epoch();
+    const auto reached = s.advance_to(before + 3600.0, 2000);
+    CHECK(reached - before > 3000.0);
 }
 
 TEST_CASE("No pass within reach refuses the capsule return", "[dragon][mission]") {
@@ -832,4 +838,55 @@ TEST_CASE("Capsule entry single case", "[.][dragon]") {
     bool warning = false;
     const auto g = fly_campaign_case(seed ? std::atoi(seed) : 1, peak_g, warning);
     CHECK(g.miss_m < 2000.0);
+}
+
+TEST_CASE("A finite deorbit burn ignites after the planning lead", "[dragon][deorbit]") {
+    // Review (d3) I1: the lead limited the burn's centre; a ~17 min Draco burn ignites half its length earlier.
+    REQUIRE(dragon_raan_rad() >= 0.0);
+    DragonDeorbit d(dragon_raan_rad());
+    const auto& v = d.session.body(0).vehicle();
+    const auto rcs = v.rcs_force_capability({1.0, 0.0, 0.0});
+    const double mass = v.mass_properties().mass_kg;
+    auto p = d.parameters(rcs.force_n);
+    p.entry_mass_kg = mass - 2100.0;
+    const auto first = d.plan(p, 0.0);
+    REQUIRE(first.feasible);
+    // the earliest burn just before the first plan's: the solution sits at the lead
+    p.lead_s = (first.node.epoch - d.session.epoch()) - 100.0;
+    const auto tight = d.plan(p, 0.0);
+    if (!tight.feasible) {  // that pass is out of reach now (no later one in the window): refused, not ignited early
+        CHECK_FALSE(tight.reason.empty());
+        return;
+    }
+    const double duration = gnc::burn_duration_s(tight.delta_v_mps, mass, rcs.force_n, rcs.mass_flow_kgps);
+    const double ignition_after_planning = (tight.node.epoch - 0.5 * duration) - d.session.epoch();
+    std::printf("[validation] deorbit with the lead at the solution: ignition %.0f s after planning (lead %.0f s)\n",
+                ignition_after_planning, p.lead_s);
+    CHECK(ignition_after_planning >= p.lead_s - 1.0);
+}
+
+TEST_CASE("A capsule return in progress refuses a second plan", "[dragon][mission]") {
+    // Review (d3) I2: a second call reset the return mid-way (the ship fallback then started the wrong entry guidance).
+    REQUIRE(dragon_raan_rad() >= 0.0);
+    DragonDeorbit d(dragon_raan_rad());
+    REQUIRE(d.session.plan_capsule_return());
+    const auto node_epoch = d.session.ship_return_plan()->node.epoch;
+    CHECK_FALSE(d.session.plan_capsule_return());
+    CHECK(d.session.capsule_return_step() == sim::CapsuleReturnStep::DeorbitBurn);
+    CHECK(d.session.autopilot().state == sim::AutopilotState::Burn);
+    REQUIRE(d.session.ship_return_plan() != nullptr);
+    CHECK(d.session.ship_return_plan()->node.epoch == node_epoch);  // the plan in progress is kept
+}
+
+TEST_CASE("A new flight or a pilot burn ends a capsule return", "[dragon][mission]") {
+    // Review (d3) I3: the return step survived a new flight; an RCS burn there then jettisoned the new vehicle's stage.
+    REQUIRE(dragon_raan_rad() >= 0.0);
+    DragonDeorbit d(dragon_raan_rad());
+    REQUIRE(d.session.plan_capsule_return());
+    const auto& st = d.session.body(0).state();
+    REQUIRE(d.session.execute_burn({d.session.epoch() + 300.0, math::normalized(st.velocity_gcrf_mps) * 0.5}));
+    CHECK(d.session.capsule_return_step() == sim::CapsuleReturnStep::None);
+    REQUIRE(d.session.plan_capsule_return());
+    d.session.place_body(capsule_config(), d.session.body(0).state(), d.session.epoch());
+    CHECK(d.session.capsule_return_step() == sim::CapsuleReturnStep::None);
 }
