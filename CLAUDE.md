@@ -113,10 +113,14 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   towards MECO) and kick 14 deg: test "Starship ascent follows the webcast telemetry of flights 13 and 14" (flown with the
   recorded MECO of ~500 t: speed within 3-6 %, altitude within ~1 km at T+60-120 s, MECO T+135 s / 48 km / 5840 km/h vs
   ~T+140 s / ~53 km / ~5950 km/h). The game's key P and the older ascent tests still fly full thrust with the default
-  pitch program. Known gap: our return guidance plans MECO with ~207 t; the flights stage with ~500 t (as for Falcon 9,
-  the real return spends far more than our Lambert boostback + 8.6 %): flight 14's gauge falls 11.8 -> 3.5 % (~300 t)
-  in ~25 s on 13 engines (their full mass flow) - ~2.2 km/s by the rocket equation (dry 210 t), our boostback ~1.5 km/s;
-  the real booster also arrives faster at landing-burn ignition (355 vs ~300 m/s). Next return-guidance topic.
+  pitch program. Staging mass vs the gauge (decision 2026-10-14: physics first, the gauge after staging is not
+  followed): on this ascent our return plans MECO with ~310 t (301 t at the boostback start, ~2.2 km/s on 13 engines),
+  flight 14's gauge shows 11.8 % (431 t) there. The gauge is not consistent with the engines after staging: it falls
+  ~15 t/s on 13 engines (full mass flow ~10.5 t/s) and 3.5 -> 1.4 % (77 t) in the last ~12 s on 3 engines (~30 t);
+  Falcon 9's falls 21 t in a coast without a burn. The timeline matches (test "Block 3 plans MECO ..."): boostback
+  T+152-176 s (flight 14 ~152-187 s), apogee 91.8 km at T+236 s (98.9 km, T+240 s), landing-burn ignition T+390 s
+  (~T+398 s) at 287 m/s / 2.2 km (flights 13/14: ~355 m/s at ~2.9 km; subsonic drag is not measured). The earlier
+  "~207 t, boostback ~1.5 km/s" came from the default full-thrust ascent (MECO at ~97 km climbing at 1.7 km/s).
 - Earth is a 256x128 ellipsoid mesh whose facets sit up to ~0.6 km below the true surface; below 500 km a
   2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites.
   Physics ground = flat at the pad height (FlightBody::ground_height_m): gentle contact (<= 3 m/s, <= 10 deg)
@@ -154,8 +158,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   Switch windows [E]: 13 -> 5 at 180-220 m/s sink (5 engines seen at ~200 m/s on flights 13/14), 5 -> 3 calm at
   15-30 m/s (satnews 2025-10-05: V3 ends in a hover on 3 engines).
   Full return: caught, 51.0 t at landing-burn ignition (planned 51 t, flight 14 gauge; the MECO plan budgets 1.7 t [D] of
-  main-tank RCS gas, `[stage.recovery] rcs_propellant_kg`, since d1); it arrives slower than flights
-  13/14 (~300 m/s at ignition, ~2.3 km). Abort plans must end beyond the shoreline (`DescentTarget::sea_min_distance_m`
+  main-tank RCS gas, `[stage.recovery] rcs_propellant_kg`, since d1; the catch and MECO tests fly the flight-like
+  ascent `starship_leo`: 52.6 t); it arrives slower than flights 13/14 (287 m/s at ignition, ~2.2 km). Abort plans must end beyond the shoreline (`DescentTarget::sea_min_distance_m`
   = shoreline + `sea_clearance_m` 30 m [E], a hard constraint) and pull towards the sea target (soft); only when the
   water is out of reach do the plans fall back to the soft pull (before: the soft pull alone, 100 kg per metre, set the
   booster down beside the tower). `FlightSession::abort_landing` / `FlightSim.abort_landing` is the pilot's abort
@@ -178,8 +182,10 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   (`BoosterReturnGuidance::meco_propellant_kg`: run-down + flip + boostback by the rocket equation on the Lambert
   delta-v after the flip, +8.6 % [D] for the drag-shifted aim point and finite burn) so that `landing_propellant_kg`
   = 51 t [D] (flight 14 gauge) remain at landing-burn ignition (test: 51.0 t with the RCS gas budget; 30 / 70 t targets within 0.4 t);
-  it stages with ~207 t. `reserve_propellant_kg` (225 t) is the MECO without return guidance. Real boosters stage
-  with ~530 t (~15 %) and burn ~470 t in the boostback.
+  on the flight-like ascent it stages with ~310 t. `reserve_propellant_kg` (225 t) is the MECO without return guidance.
+  The flights' gauge shows ~500 t (~13.5 %) at MECO and 1.4 % (51 t) after the boostback (video T+188-195 s; the
+  cleaned table drops these readings) - more than the engines can burn in between: the gauge is not followed after
+  staging (see the Starship throttle note).
 - Catch tower dimensions and azimuths (`[site.tower]`, Starbase 315 deg, LC-39A 0 deg) and the catch pins
   (`[stage.catch_pins]`, 5 MN per pin) are estimates [E]; verify the tower azimuths against imagery.
 
@@ -388,8 +394,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   `FlightSession::set_aero_dispersion`) 21 of 21 within 0.01 m, <= 0.99 m/s, >= 5.7 t left; full mission: MECO T+141 s,
   entry burn T+356 s, landing burn T+423 s at 3.0 km / 287 m/s / 11.7 t, touchdown T+459 s, 0.00 m off (CRS-35: 137 /
   355 / 420 at ~3.2 km, ~300 m/s / 442 s). `return_flight_time_s` 260 s and `boostback_loss_fraction` 0.12 [D] were
-  identified on that mission with the 395.7 t stage (kept). Known gap: our MECO leaves 55 t, CRS-35's gauge ~66 t (the
-  real return spends ~11 t more).
+  identified on that mission with the 395.7 t stage (kept). CRS-35's gauge shows ~66 t at MECO against our 55 t (not
+  followed: the Falcon 9 gauge drops without burns, see the drone ship).
 - SCvx landing aborts (all vehicles; the pilot's `abort_landing` too): a first plan that finds the target unreachable aborts at once; `failures_before_abort`
   (2) re-plans with a virtual control above the stall threshold, or `unconverged_before_abort` (4) unconverged re-plans of
   any kind (a marginal first plan the vehicle could not follow), give the target up and plan for the sea.
@@ -413,9 +419,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   ~8000 km/h, ~25 deg; 16.5 t to 200 x 281 km - 17 t arrives with 0.3 t left): entry burn T+379-399 s (T+364-386), landing
   burn T+476 s at 3.0 km / 271 m/s / 12.0 t (T+476 s, ~3.0 km, ~270 m/s, 11.9 t), landed T+515 s (T+499 s) 0.01 m off;
   campaigns `[falcon9][asds][validation]` from ignition (as RTLS) and from MECO states (+-200 m, +-5 m/s, +-5 %, aero
-  +-10 %; two halves) 21 of 21 each; a deck out of reach ditches beside the ship. Known gaps: our MECO leaves 25 t, the
-  gauge ~47 t - and the gauge itself falls from 47 t at MECO to 25.9 t at the entry burn while the speed stays ~8000 km/h
-  (no burn between; unexplained); landing burns end at the SCvx reserve (5 t [E], Super Heavy's value) after ~36 s: the
+  +-10 %; two halves) 21 of 21 each; a deck out of reach ditches beside the ship. Our MECO leaves 25 t; the gauge shows
+  ~47 t, but it falls from 47 t at MECO to 25.9 t at the entry burn while the speed stays ~8000 km/h (no burn between) -
+  our MECO matches the gauge after that drop (physics first, decision 2026-10-14). Known gap: landing burns end at the SCvx reserve (5 t [E], Super Heavy's value) after ~36 s: the
   gauge shows 7.2 t at touchdown after a ~23 s burn of ~4.9 t, and a 7.2 t planner reserve is infeasible from the recorded
   ignition state in our model (our burn decelerates harder early - unmeasured subsonic and power-on drag [E]).
   Diagnostics: hidden test "Falcon 9 ASDS single MECO case" with `STARSIM_ASDS_SEED=<101-120>`.

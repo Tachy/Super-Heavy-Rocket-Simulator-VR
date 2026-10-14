@@ -89,7 +89,8 @@ TEST_CASE("Starship ascent follows the webcast telemetry of flights 13 and 14", 
     // Recorded (tests/validation/telemetry, flights 13 / 14, displayed altitude above the pad and speed relative to the
     // ground): T+30 s 1.6 km 518 / 513 km/h, T+60 s 8.5 / 8.3 km 1404 / 1408 km/h, T+90 s 20.8 / 20.1 km 2787 / 2758 km/h,
     // T+120 s 39.0 / 37.4 km 4878 / 4817 km/h; MECO ~T+140 s at ~53 km, ~5900-6000 km/h with ~13.5 % = ~500 t left in
-    // the booster (gauge): flown with that MECO, not the return guidance's plan (our return needs less: known gap).
+    // the booster (gauge): flown with that MECO, not the return guidance's plan (~310 t: the gauge is not consistent
+    // with the engines after staging and is not followed - test "Block 3 plans MECO ...").
     struct Recorded {
         double t_s, altitude_km, speed_kmh;
     };

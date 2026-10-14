@@ -11,8 +11,10 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/mission_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/spice/spice_adapters.hpp"
@@ -28,6 +30,14 @@ constexpr double deg = constants::deg_to_rad;
 // propellant ... on the Super Heavy vehicle for downrange landing, including expenditures" [S]. An EA projection,
 // used here as the cap on the Block 3 booster's propellant at landing-burn ignition.
 constexpr double faa_landing_propellant_kg = 74.0e3;
+
+// The flight-like ascent: mission starship_leo (booster throttle of flights 13 / 14, kick 14 deg, MECO planned for the
+// return to the Starbase tower). The default pitch program at full thrust cuts off at ~97 km climbing at 1.7 km/s,
+// which leaves the boostback little to turn around (~1.5 km/s instead of ~2.2).
+void start_flight_like_ascent(sim::FlightSession& session, time::Epoch t0) {
+    sim::start_ascent_mission(session, config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo"), STARSIM_CONFIG_DIR,
+                              t0);
+}
 
 }  // namespace
 
@@ -179,16 +189,8 @@ TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
-    const auto site = sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1"));
-    const std::string vehicle_id = GENERATE(as<std::string>{}, "starship_block3");
-    CAPTURE(vehicle_id);
-    session.launch_from_pad(vehicle_id, site, 90.0 * deg, t0);
-    session.set_booster_return(true);
-    gnc::AscentTarget target;
-    target.periapsis_altitude_m = 200e3;
-    target.apoapsis_altitude_m = 200e3;
-    target.inclination_rad = 26.6 * deg;
-    session.engage_ascent_autopilot(target);
+    const std::string vehicle_id = "starship_block3";
+    start_flight_like_ascent(session, t0);
 
     bool landing = false;
     double ignition_propellant_kg = -1.0;
@@ -217,7 +219,12 @@ TEST_CASE("Booster return to the catch tower ends on the arms", "[gnc][booster][
 }
 
 // The ascent autopilot plans MECO from what the return needs (flip, boostback, the propellant kept for the landing
-// burn), not from a fixed reserve: the booster lights its landing burn with the planned propellant.
+// burn), not from a fixed reserve: the booster lights its landing burn with the planned propellant. On the flight-like
+// ascent the return keeps flight 14's timeline (our webcast table and video readings, tests/validation/telemetry):
+// boostback ~T+152-187 s (31 -> 11 -> 3 engines), apogee 98.9 km at T+240 s, landing-burn ignition ~T+398 s. The
+// booster's gauge is not followed after staging (user 2026-10-14: physics first): it shows 11.8 % (431 t) at the
+// boostback's start, falls faster than the engines can burn (13 engines: ~15 t/s against ~10.5 t/s at full thrust) and
+// 77 t in the last 12 s on 3 engines (~30 t burnt); our return needs ~300 t there.
 TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned propellant, within the FAA residual",
           "[gnc][booster][validation]") {
     test::spice_session();
@@ -226,28 +233,43 @@ TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned pr
     const spice::SpiceTimeConverter time;
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
-    session.launch_from_pad("starship_block3",
-                            sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1")),
-                            90.0 * deg, t0);
-    session.set_booster_return(true);
-    gnc::AscentTarget target;
-    target.periapsis_altitude_m = 200e3;
-    target.apoapsis_altitude_m = 200e3;
-    target.inclination_rad = 26.6 * deg;
-    session.engage_ascent_autopilot(target);
-    double ignition_propellant_kg = -1.0;
-    for (double t = 0.5; t < 1200.0 && ignition_propellant_kg < 0.0; t += 0.5) {
+    start_flight_like_ascent(session, t0);
+    double ignition_propellant_kg = -1.0, ignition_s = -1.0, boostback_start_kg = -1.0;
+    double boostback_start_s = -1.0, boostback_end_s = -1.0, apogee_km = 0.0, apogee_s = -1.0;
+    for (double t = 0.25; t < 1200.0 && ignition_propellant_kg < 0.0; t += 0.25) {
         session.advance_to(t0 + t, 1000);
         if (session.body_count() < 2) continue;
         const auto* status = session.return_status(0);
-        if (status && status->phase >= gnc::ReturnPhase::LandingBurn) {
-            ignition_propellant_kg = session.body(0).vehicle().propellant_kg();
+        if (!status) continue;
+        const auto tm = session.telemetry(0);
+        const double t_mission = session.mission_time_s();
+        if (status->phase == gnc::ReturnPhase::Boostback && boostback_start_s < 0.0) {
+            boostback_start_s = t_mission;
+            boostback_start_kg = tm.propellant_kg;
+        }
+        if (status->phase > gnc::ReturnPhase::Boostback && boostback_start_s > 0.0 && boostback_end_s < 0.0) {
+            boostback_end_s = t_mission;
+        }
+        if (tm.altitude_m / 1e3 > apogee_km) {
+            apogee_km = tm.altitude_m / 1e3;
+            apogee_s = t_mission;
+        }
+        if (status->phase >= gnc::ReturnPhase::LandingBurn) {
+            ignition_propellant_kg = tm.propellant_kg;
+            ignition_s = t_mission;
         }
     }
     const double planned_kg =
         config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3").stages.front().landing_propellant_kg;
-    std::printf("starship_block3: propellant at landing-burn ignition %.1f t, planned %.1f t (FAA EA: <= 74 t)\n",
+    std::printf("[validation] starship_block3 return: boostback T+%.0f-%.0f s from %.0f t (flight 14: ~T+152-187 s, gauge "
+                "431 t), apogee %.1f km at T+%.0f s (98.9 km at T+240 s), landing-burn ignition T+%.0f s (~T+398 s) with "
+                "%.1f t, planned %.1f t (FAA EA: <= 74 t)\n",
+                boostback_start_s, boostback_end_s, boostback_start_kg / 1e3, apogee_km, apogee_s, ignition_s,
                 ignition_propellant_kg / 1e3, planned_kg / 1e3);
+    CHECK(std::abs(boostback_start_s - 152.0) < 5.0);
+    CHECK(std::abs(apogee_s - 240.0) < 15.0);
+    CHECK(std::abs(apogee_km - 98.9) < 10.0);
+    CHECK(std::abs(ignition_s - 398.0) < 15.0);
     REQUIRE(ignition_propellant_kg >= 0.0);
     CHECK(ignition_propellant_kg <= faa_landing_propellant_kg);
     REQUIRE(planned_kg > 0.0);

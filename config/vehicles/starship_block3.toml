@@ -99,7 +99,7 @@ max_load_n = 5.0e6                     # [E] structural limit per pin (~1.9 g of
 [stage.recovery]
 method = "tower_catch"
 reserve_propellant_kg = 225000.0         # [D] MECO without return guidance (with it, the autopilot plans MECO from landing_propellant_kg)
-landing_propellant_kg = 51000.0          # [D] at landing-burn ignition: flight 14 gauge 1.4 % of 3,650 t after the boostback (FAA EA cap 74 t [S:faa_ea_2024])
+landing_propellant_kg = 51000.0          # [D] at landing-burn ignition: flight 14 gauge 1.4 % of 3,650 t after the boostback, video T+188-195 s (FAA EA cap 74 t [S:faa_ea_2024])
 rcs_propellant_kg = 1700.0               # [D] main-tank RCS gas MECO -> landing-burn ignition: our full return arrived with
                                          # 49.2 t instead of 50.9 t once the RCS drew it (d1)
 nominal_meco_s = 160.0                   # [E]
