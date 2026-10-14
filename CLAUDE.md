@@ -526,7 +526,18 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   is flown only if reversing now ends closer across than holding (a capsule overshot +5.9 km vs -2.1 km held at 536 m/s
   and came down 5.8 km off). Webcast telemetry of a Dragon return is not used (published figures cover the tolerances;
   no free licence). Diagnostics: hidden tests "Crew Dragon return single case" (`STARSIM_DRAGON_CASE=<0-7>`) and
-  "Crew Dragon return: the first feasible orbit plane".
+  "Crew Dragon return: the first feasible orbit plane". A capsule that impacts or breaks up ends its return as "verloren"
+  (`CapsuleReturnStep::Lost`, autopilot off; test "A capsule return without mains ends lost, ...").
+- Game interface for Crew Dragon (d5 of the same spec, plan `docs/superpowers/plans/2026-10-14-crew-dragon-d5.md`; the
+  drawing and UI are specified by the user first): `FlightSim.start_mission` dispatches on `[mission] kind`
+  (`sim::start_mission`: "ascent" default; "capsule_return" starts at the mission's own epoch - `mission_start_tdb_s()`,
+  the world clock jumps there - with the deorbit planned; "ship_return" is refused: key R from orbit). `body_rcs(i)` (per
+  thruster: stage, position, direction, thrust, firing, duty `Vehicle::rcs_duty()`, starved, blocked),
+  `body_parachutes(i)` (state German incl. "Fallschirm gerissen", drag area, inflation, riser station, canopy direction
+  against the riser point's air velocity `FlightBody::point_air_velocity_body_mps`, loads), `capsule_state(i)` (a capsule
+  flying alone, not stacked: nose cone, trunk, return step, parachute phase, splashdown miss, outcome),
+  `splashdown_zone()`, `set_splashdown_zone(id)`, `plan_capsule_return()`, `autopilot_status()["capsule_step"]`. Covered
+  by the smoke test, whose check functions must run to their end (a GDScript error used to abort one silently).
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 

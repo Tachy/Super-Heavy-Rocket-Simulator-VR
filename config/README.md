@@ -124,6 +124,10 @@ flow separation (vacuum engines).
   sea). Where it waits is set by the mission.
 
 ## Missions (`missions/`)
+- `[mission] kind = "ascent" | "ship_return" | "capsule_return"` (default "ascent"): `config::mission_kind`;
+  `sim::start_mission` / `FlightSim.start_mission` dispatch on it (an ascent starts at the requested time, a capsule return
+  at its `[orbit]` epoch with the deorbit planned, a ship return is refused: it is flown from orbit, key R). Each loader
+  refuses a file of another kind.
 - `leo_ascent.toml`: target orbit of the game's ascent autopilot (key P).
 - `ship_return_starbase.toml`: ship return from orbit (`config::load_ship_return_mission`).
 - `crew_dragon_return.toml`: capsule return from orbit (`config::load_capsule_return_mission`,
