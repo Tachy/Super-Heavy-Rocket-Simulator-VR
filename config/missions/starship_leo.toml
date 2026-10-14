@@ -1,0 +1,26 @@
+# Starship (Block 3 / V3) from Starbase into a low Earth orbit with the booster returning to the tower (catch). The
+# ascent autopilot plans MECO for the booster's return ([stage.recovery] landing_propellant_kg). Booster throttle from
+# our webcast telemetry of flights 13 and 14 (tests/validation/telemetry).
+
+[mission]
+name = "Starship in einen niedrigen Erdorbit"
+vehicle = "starship_block3"
+site = "starbase_olp1"
+heading_deg = 90.0              # body +y on the pad
+payload_t = 0.0
+fairing = false
+
+[target]
+periapsis_km = 200.0
+apoapsis_km = 200.0
+inclination_deg = 26.5          # Starbase is at 26.0 deg N: due east gives ~26 deg
+northerly = true
+
+[pitch_program]
+kick_deg = 14.0                 # [D] sweep "Starship pitch kick sweep" ([.tuning]): altitude at T+60/90/120 s within
+                                # ~1 km of flights 13/14 (9.1 / 21.3 / 38.4 km vs 8.4 / 20.5 / 38.2), MECO T+135 s 48 km
+# [D] booster throttle over mission time {t_s, fraction}. Shape from the gauge's mass flow on flights 13 and 14
+# (tools/telemetry/mass_estimate.py, 3,650 t, Raptor 3 at 280 tf): flat to T+60 s, a max-Q bucket (T+64-76 s), up again
+# to T+112 s, then down towards MECO (an acceleration limit as the stack gets lighter); level fitted to the recorded speed
+# (T+30-120 s within 3-6 %): 0.944 x the gauge's shares (0.9 / 0.8 / 0.87 / 0.8) - the gauge capacity is not exact.
+booster_throttle = [[60.0, 0.85], [64.0, 0.76], [76.0, 0.76], [82.0, 0.83], [112.0, 0.83], [126.0, 0.76]]

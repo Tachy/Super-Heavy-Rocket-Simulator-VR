@@ -82,3 +82,5 @@ func _check_falcon9(config_dir: String, tdb: float) -> void:
 	_check(not ship.landing_zone().get("present", true), "Starship: no landing zone")
 	_check(not ship.body_legs(0).get("present", true), "Starship: no legs")
 	_check(ship.body_grid_fins(0).size() == 3, "Super Heavy: three grid fins")
+	_check(ship.start_mission("starship_leo", tdb) and ship.mission_site_id() == "starbase_olp1",
+			"Starship LEO mission starts at Starbase")

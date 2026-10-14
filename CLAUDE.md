@@ -105,9 +105,14 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   pure gravity propagator and shows SRP as a t^2 residual (~1.9e-8 m/s^2: 39 m after 18 h).
 - Only the current configuration (Block 3 / V3, Raptor 3) is modelled (decision 2026-10-13); its data come from
   the flights that flew it (12-14, `tests/validation/telemetry/flights.toml`). Earlier blocks were removed.
-- Starship throttle schedules are not public; they are a guidance choice, not vehicle data. Flights 12-14 fly the
-  booster at ~85-90 % after max-Q with an acceleration cap of ~2.2 g; our Starship ascent still flies full thrust
-  (`PitchProgram::booster_throttle` exists since c1 - Falcon 9 uses it - but Starship has no schedule yet).
+- Starship throttle schedules are not public; they are a guidance choice, not vehicle data. The ascent mission
+  `config/missions/starship_leo.toml` (`sim::start_ascent_mission`, `FlightSim.start_mission`) carries the booster
+  schedule [D] of flights 13/14 (gauge shape, level fitted to the recorded speed: ~0.85, max-Q bucket ~0.76, ~0.83, ~0.76
+  towards MECO) and kick 14 deg: test "Starship ascent follows the webcast telemetry of flights 13 and 14" (flown with the
+  recorded MECO of ~500 t: speed within 3-6 %, altitude within ~1 km at T+60-120 s, MECO T+135 s / 48 km / 5840 km/h vs
+  ~T+140 s / ~53 km / ~5950 km/h). The game's key P and the older ascent tests still fly full thrust with the default
+  pitch program. Known gap: our return guidance plans MECO with ~207 t; the flights stage with ~500 t (as for Falcon 9,
+  the real return spends far more than our Lambert boostback + 8.6 %).
 - Earth is a 256x128 ellipsoid mesh whose facets sit up to ~0.6 km below the true surface; below 500 km a
   2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites.
   Physics ground = flat at the pad height (FlightBody::ground_height_m): gentle contact (<= 3 m/s, <= 10 deg)
