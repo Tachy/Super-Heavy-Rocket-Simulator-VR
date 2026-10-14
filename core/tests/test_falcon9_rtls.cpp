@@ -85,8 +85,10 @@ TEST_CASE("A falling Falcon 9 stage flies its entry burn on the centre engine", 
     const auto cfg = test::booster_config("falcon9_block5", 14000.0);
     // 70 km above the zone, coming back from the east at 300 m/s, falling at 1100 m/s, engines first.
     const Vec3 velocity{-300.0, 0.0, -1100.0};
+    auto parameters = falcon9_parameters();
+    parameters.entry_max_altitude_change_m = 0.0;  // the burn's nominal ignition altitude is under test
     session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, {20e3, 0.0, 70e3}, velocity),
-                                    t0, falcon9_parameters(), gnc::ReturnPhase::Coast);
+                                    t0, parameters, gnc::ReturnPhase::Coast);
     bool burned = false, ended = false;
     double ignition_altitude_m = 0.0;
     std::vector<std::string> groups;

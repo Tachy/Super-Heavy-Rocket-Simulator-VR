@@ -192,8 +192,11 @@ EntryRun fly_entry_burn(const Vec3& start_enu_m, double max_lean_rad) {
                                                   std::acos(std::clamp(axis.z, -1.0, 1.0)));
     auto parameters = asds_parameters();
     parameters.entry_max_lean_rad = max_lean_rad;
-    // Without a lean the nominal burn flies unchanged (the prediction's own test): no delta-v correction either.
-    if (max_lean_rad == 0.0) parameters.entry_max_delta_v_change = 0.0;
+    // Without a lean the nominal burn flies unchanged (the prediction's own test): no delta-v or ignition correction.
+    if (max_lean_rad == 0.0) {
+        parameters.entry_max_delta_v_change = 0.0;
+        parameters.entry_max_altitude_change_m = 0.0;
+    }
     session.place_returning_booster(cfg, test::state_over_site(session.launch_site(), earth(), t0, start_enu_m, velocity, tilt),
                                     t0, parameters, gnc::ReturnPhase::Coast);
     const double ground = session.landing_zone()->height_m;
@@ -613,11 +616,9 @@ test::LegRun fly_asds_dispersed(const vehicle::RigidBodyState& nominal, time::Ep
     return test::fly_to_touchdown(session, earth(), epoch, max_s);
 }
 
-// `allowed_misses`: cases that may miss the spec's success (landed < 5 m from the deck centre) if they still end safely:
-// landed elsewhere on the deck, or aborted to the sea. Any other outcome fails.
 void report_campaign(const char* name, const std::vector<AsdsDispersion>& cases,
-                     const std::function<test::LegRun(const AsdsDispersion&)>& fly, int allowed_misses = 0) {
-    int landed = 0, missed = 0;
+                     const std::function<test::LegRun(const AsdsDispersion&)>& fly) {
+    int landed = 0;
     double worst_offset = 0.0, worst_sink = 0.0, least_propellant = 1e9;
     for (size_t i = 0; i < cases.size(); ++i) {
         const auto run = fly(cases[i]);
@@ -626,14 +627,8 @@ void report_campaign(const char* name, const std::vector<AsdsDispersion>& cases,
                     "(aero x%.2f)\n", name, i, sim::to_string(run.outcome), run.contact_offset_m, run.contact_sink_mps,
                     run.contact_lateral_mps, run.offset_m, run.propellant_kg, cases[i].aero_factor);
         std::fflush(stdout);
-        const bool success = run.outcome == sim::LandingOutcome::Landed && run.offset_m < 5.0;
-        const bool safe = run.outcome == sim::LandingOutcome::Landed || run.outcome == sim::LandingOutcome::Splashdown;
-        if (!success && safe && missed < allowed_misses) {
-            ++missed;
-        } else {
-            CHECK(run.outcome == sim::LandingOutcome::Landed);
-            CHECK(run.offset_m < 5.0);  // spec success: < 5 m from the deck centre
-        }
+        CHECK(run.outcome == sim::LandingOutcome::Landed);
+        CHECK(run.offset_m < 5.0);  // spec success: < 5 m from the deck centre
         if (run.outcome == sim::LandingOutcome::Landed) ++landed;
         worst_offset = std::max(worst_offset, run.contact_offset_m);
         worst_sink = std::max(worst_sink, run.contact_sink_mps);
@@ -661,22 +656,18 @@ namespace {
 
 // Spec c4: the stage 10 s after MECO with +-200 m, +-5 m/s per axis (~2.5 km of impact spread), +-5 % propellant,
 // truth aero +-10 %: the coast, the entry burn and the fins bring it onto the deck. Since d1 (individual thrusters) the
-// RCS cannot translate the stage in the coast (its pods sit at one station): the entry burn removes the miss by its
-// length and lean, which leaves the stage faster or lighter at the landing burn - two cases per half may miss the 5 m
-// if it ends safely (on the deck or aborted to the sea; user 2026-10-14: correct over the burn). Two halves (ctest runs them in
+// RCS cannot translate the stage in the coast (its pods sit at one station): the entry burn removes the miss (user
+// 2026-10-14) - its ignition altitude along the track, its length and lean for the rest. Two halves (ctest runs them in
 // parallel; each case flies ~340 s).
 void meco_campaign(const char* name, unsigned first_seed, unsigned last_seed, bool with_nominal) {
     const auto& n = nominal_return();
     std::vector<AsdsDispersion> cases;
     if (with_nominal) cases.push_back(AsdsDispersion{});
     for (unsigned seed = first_seed; seed <= last_seed; ++seed) cases.push_back(asds_dispersion(seed, 200.0, 5.0, 0.0));
-    report_campaign(
-        name, cases,
-        [&](const AsdsDispersion& d) {
-            return fly_asds_dispersed(n.after_meco, n.after_meco_epoch, n.after_meco_propellant_kg, gnc::ReturnPhase::Coast,
-                                      d, 600.0);
-        },
-        2);
+    report_campaign(name, cases, [&](const AsdsDispersion& d) {
+        return fly_asds_dispersed(n.after_meco, n.after_meco_epoch, n.after_meco_propellant_kg, gnc::ReturnPhase::Coast, d,
+                                  600.0);
+    });
 }
 
 }  // namespace

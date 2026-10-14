@@ -48,6 +48,10 @@ struct BoosterReturnParameters {
     // most this fraction [E] of entry_delta_v_mps for the miss along the track (shooting on the impact prediction).
     double entry_max_lean_rad = 10.0 * 3.14159265358979 / 180.0;
     double entry_max_delta_v_change = 0.25;
+    // [E] Before it, in the coast above the air, the burn's ignition altitude moves by at most this to put the impact
+    // on the target along the track (earlier ignition: the rest of the fall is slower and shorter) - free of propellant
+    // and of speed at the landing burn; the burn's length then trims what is left.
+    double entry_max_altitude_change_m = 8000.0;
     double landing_throttle = 0.8;  // design throttle of the inner-engine segment: the rest is control margin
     double final_throttle = 0.8;    // design throttle of the centre-engine segment (slower, time to settle)
     double gate_speed_mps = 50.0;   // sink rate at the hand-over to the centre engines
@@ -208,6 +212,7 @@ private:
     void estimate_drag_scale(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     double entry_delta_v_mps_ = 0.0;
     double entry_delta_v_change_mps_ = 0.0;  // the entry burn's delta-v beyond (or short of) entry_delta_v_mps
+    double entry_altitude_change_m_ = 0.0;   // the entry burn's ignition altitude above (or below) entry_altitude_m
     time::Epoch last_update_;              // previous update (entry burn integration)
     std::optional<time::Epoch> plan_end_;  // SCvx pad landing: end of the active plan
 

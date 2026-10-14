@@ -20,6 +20,8 @@ constexpr double touchdown_speed_mps = 1.0;
 constexpr double trim_deadband_m = 2.0;
 // Entry burn shooting along the ground track: the probe burn is this much longer (secant on the impact prediction).
 constexpr double entry_delta_v_probe_mps = 20.0;
+// Entry burn ignition shooting in the coast: the probe ignites this much higher.
+constexpr double entry_altitude_probe_m = 1000.0;
 constexpr double aero_steering_min_q_pa = 2000.0;  // below: RCS translation trim
 constexpr double aero_steering_time_fraction = 0.5;
 constexpr double aero_steering_max_alpha_rad = 8.0 * constants::deg_to_rad;  // [E] fin trim authority, heating
@@ -560,6 +562,23 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
                         steer_itrf_ = math::normalized(required) * (-lean * std::tan(high));
                     }
                 } else if (impact_miss_m_ > trim_deadband_m) {
+                    if (auto burn = pending_entry_burn(body.vehicle());
+                        burn && parameters_.entry_max_altitude_change_m > 0.0) {
+                        // Entry burn ahead: shoot its ignition altitude on the miss along the track (secant on a probe
+                        // that ignites higher by a fixed amount).
+                        const Vec3 track = math::normalized_or_zero(v_fixed - site_up * dot(v_fixed, site_up));
+                        const double along_m = dot(miss, track);
+                        burn->altitude_m += entry_altitude_probe_m;
+                        const auto probe = predict_impact(body, env, epoch, site_.height_m, nullptr, &*burn, drag_scale_);
+                        if (probe.valid) {
+                            const double moved_m = dot(probe.position_itrf_m - impact.position_itrf_m, track);
+                            if (std::abs(moved_m) > 1.0) {
+                                const double limit = parameters_.entry_max_altitude_change_m;
+                                entry_altitude_change_m_ = std::clamp(
+                                    entry_altitude_change_m_ + along_m * entry_altitude_probe_m / moved_m, -limit, limit);
+                            }
+                        }
+                    }
                     // Proportional trim: full RCS force from 100 m miss.
                     trim_itrf_ = miss * (std::min(impact_miss_m_ / 100.0, 1.0) / impact_miss_m_);
                 }
@@ -579,7 +598,7 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         const double height = geo.height_m - mass.cg_station_m - site_.height_m;
         const bool descending = dot(v_fixed, site_up) < 0.0;
         if (descending && !entry_done_ && parameters_.entry_altitude_m > 0.0 &&
-            geo.height_m - site_.height_m < parameters_.entry_altitude_m) {
+            geo.height_m - site_.height_m < parameters_.entry_altitude_m + entry_altitude_change_m_) {
             phase_ = ReturnPhase::EntryBurn;
             entry_delta_v_mps_ = 0.0;
             entry_delta_v_change_mps_ = 0.0;
@@ -737,6 +756,7 @@ std::optional<BoosterReturnGuidance::PendingBurn> BoosterReturnGuidance::pending
     const vehicle::Vehicle& vehicle) const {
     if (parameters_.entry_altitude_m <= 0.0 || entry_done_) return std::nullopt;
     auto burn = entry_burn_ahead(vehicle, parameters_);
+    burn.altitude_m += entry_altitude_change_m_;
     // While burning: the rest from here (the altitude is already crossed: it continues at once).
     if (phase_ == ReturnPhase::EntryBurn) burn.altitude_m = 1e9;
     burn.delta_v_mps = std::max(parameters_.entry_delta_v_mps + entry_delta_v_change_mps_ - entry_delta_v_mps_, 0.0);

@@ -437,8 +437,10 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   ship) then keep the net force what was asked for, so turns do not translate the vehicle (the ship's saturated burn turn
   borrowed its ullage thrusters: +55 m on a 0.5 m/s burn; keeping the force in the entry's thin air instead cut torque
   and made catches from entries fail). One-station layouts (Super Heavy, Falcon 9) always turn with a push: they cannot
-  translate in the coast, so the Falcon 9 entry burn removes the impact miss by its length (+-25 % [E]) and lean
-  (<= 10 deg [E]) (user 2026-10-14). A returning booster's coast slews (pitch / yaw on RCS) are limited to 2 deg/s [E]
+  translate in the coast, so the Falcon 9 entry burn removes the impact miss (user 2026-10-14): in the coast its ignition
+  altitude is shot on the miss along the track (+-8 km [E]: an earlier burn shortens the rest of the fall, free of
+  propellant and of speed at the landing burn), in the burn its length (+-25 % [E]) and lean across (<= 10 deg [E])
+  trim the rest; MECO campaigns 21 / 21 within 0.04 m. A returning booster's coast slews (pitch / yaw on RCS) are limited to 2 deg/s [E]
   (a full-authority turn emptied the Falcon 9 nitrogen). Capability per axis (`max_rcs_torque_nm`, the fraction scale of the controllers) and per
   direction (`rcs_force_capability`) come from the geometry. Propellant: Falcon 9 N2 tanks (200 / 80 kg carved out of
   the dry masses; not in the gauge `propellant_kg()`), Starship / Super Heavy ullage gas from the main tanks (Isp 70 s
