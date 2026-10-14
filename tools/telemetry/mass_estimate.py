@@ -73,7 +73,8 @@ def main():
     ap.add_argument("--isp-vac", type=float, required=True)
     ap.add_argument("--from", dest="t_from", type=float, default=20.0)
     ap.add_argument("--to", dest="t_to", type=float, default=140.0)
-    ap.add_argument("--cd", type=float, default=0.5, help="stack drag coefficient on the 9 m disc (ascent)")
+    ap.add_argument("--cd", type=float, default=0.5, help="stack drag coefficient on the reference disc (ascent)")
+    ap.add_argument("--area-m2", type=float, default=AREA_M2, help="drag reference area (default: the 9 m disc)")
     ap.add_argument("--engine-rating-tf", type=float, default=0.0, help="sea-level rating per engine, to compare")
     ap.add_argument("--step", type=float, default=2.0)
     a = ap.parse_args()
@@ -123,7 +124,7 @@ def main():
     # least squares for M (one unknown).
     # Robust: M from every sample, median (single misreadings would dominate a least-squares fit).
     samples = [x for x in samples if 0.0 < x[3] <= 1.0 and 0.5 < x[4] < 50.0 and 0.0 < x[5] < 0.02]
-    per_sample = sorted((C * (isp * G0 * f - p * aT) - q * a.cd * AREA_M2) / aT
+    per_sample = sorted((C * (isp * G0 * f - p * aT) - q * a.cd * a.area_m2) / aT
                         for _, _, _, p, aT, f, isp, q, _ in samples)
     M = statistics.median(per_sample)
     quart = (per_sample[len(per_sample) // 4], per_sample[(3 * len(per_sample)) // 4])
@@ -133,7 +134,7 @@ def main():
     print(" t[s]  h[km]  v[m/s]  gauge%   mass[t]  thrust[MN]  engines  per engine [tf]  rating share  resid%")
     for t, h, v, p, aT, f, isp, q, lit in samples:
         m = M + C * p
-        thrust_motion = m * aT + q * a.cd * AREA_M2
+        thrust_motion = m * aT + q * a.cd * a.area_m2
         thrust_flow = isp * G0 * C * f
         per = thrust_flow / lit / 9806.65 if lit else float("nan")
         # sea-level-equivalent rating share: per-engine thrust scaled by Isp_sl/Isp(h)
