@@ -477,7 +477,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
     }
 
     if (phase_ == EntryPhase::Entry) {
-        if (epoch - last_cycle_ >= parameters_.cycle_s) {
+        if (epoch - last_cycle_ >= parameters_.cycle_s && speed >= parameters_.hold_bank_below_speed_mps) {
             last_cycle_ = epoch;
             entry_cycle(body, r_itrf, v_itrf);
         }

@@ -63,6 +63,10 @@ struct EntryGuidanceParameters {
     double scale_min_acceleration_mps2 = 1.0;
     bool predictor_j2 = true;         // false: central gravity (test scenarios without J2)
     bool terminal_phase = true;       // false: no terminal steering (a capsule: bank to the gate)
+    // > 0: below this speed the bank is held (no more corrector cycles). A capsule falling steeply at subsonic speed has
+    // little lift authority left, and its bank from the vertical plane degenerates: the corrector swung to lift down
+    // and back (d3 campaign: 0.4 km predicted at 690 m/s, 3.8 km flown). 0: never (the ship's terminal phase takes over).
+    double hold_bank_below_speed_mps = 0.0;
 
     // A capsule (Crew Dragon, d3): gate at the drogue deployment height (~18,000 ft [S: NASA Crew-2]), bank rate
     // 10 deg/s [E] throughout (Dracos; Apollo rolled at up to ~20 deg/s), no terminal phase, reversals to lower speed.
@@ -75,7 +79,8 @@ struct EntryGuidanceParameters {
         p.terminal_phase = false;
         // no terminal phase removes the last crossrange: reversals keep going to lower speed with a narrower deadband [E]
         p.reversal_crossrange_base_m = 500.0;
-        p.min_reversal_speed_mps = 300.0;
+        p.min_reversal_speed_mps = 500.0;
+        p.hold_bank_below_speed_mps = 500.0;  // [E]
         return p;
     }
 };

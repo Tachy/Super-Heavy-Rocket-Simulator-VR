@@ -32,7 +32,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
-  aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating),
+  aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating, blunt capsule from a
+  modified-Newtonian table with offset-CG trim),
   propulsion (engine performance, RCS allocator + pulse modulator).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
@@ -465,6 +466,37 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   first 60 s, 0.42 kg in the first 10 min, first stage landed. Inertial hold after a 1.3 deg/s tumble: <= 0.71 deg,
   2.4 kg/h (pulse quantum: not grams per hour); LVLH trunk forward: <= 0.71 deg, 3.1 kg/h; Draco burns 1 / 10 m/s within
   0.002 / 0.014 m/s (5.0 / 43.4 kg, ideal 4.3 / 42.4), -x 2 m/s within 0.007 m/s.
+- Crew Dragon entry (d3 of the same spec, plan `docs/superpowers/plans/2026-10-14-crew-dragon-d3.md`, tests
+  `core/tests/test_capsule_aero.cpp`, `test_capsule_entry.cpp`): capsule aerodynamics `aero/capsule_aero` from
+  `aero/crew_dragon_aero.csv` (modified Newtonian [D] by `tools/aero/gen_capsule_aero.py`: spherical-section shield
+  R_n = 1.2 D [E], 15 deg sidewall, C_p,max from the Rayleigh pitot formula; [E] below Mach 2, subsonic C_A ~0.97;
+  hypersonic C_A 1.68 at 0 deg, ~10 % above Apollo/Orion's measured values - Newtonian over-predicts flat shields; no
+  rarefied bridging, no damping derivatives). Used once the capsule is the lowest stage (`Vehicle::capsule_aero`,
+  `hull_aero`); `AeroResult::moment_body_nm` carries its pure moment. Lateral CG: `[[stage]] dry_cg_offset_m` [D] 9.6 cm
+  (`MassProperties::cg_offset_m`, used by the aerodynamic and RCS moments only; inertia on the axis) trims the 10.5 t
+  entry capsule at 12.5 deg, L/D 0.20 [E: spec], C_D 1.57. Entry control `gnc/capsule_entry_control`: the Dracos roll the
+  lift about the air velocity (bank rate <= 10 deg/s [E], reversals through lift up) and damp pitch / yaw (deadband
+  1 deg/s); the aero trim holds alpha; below 200 Pa the full trim attitude is held (a 90 deg / 2 deg/s tumble at 110 km
+  is on trim by 1 kPa); ~31 kg of MMH/NTO per entry (Apollo ~30-40 kg). Entry guidance: `EntryGuidance(capsule, target)`
+  with `EntryGuidanceParameters::capsule()` (`EntryAeroTable::capsule`: trim over Mach; no terminal phase; gate 5.5 km
+  [S: NASA Crew-2, drogues ~18,000 ft]; reversals down to 500 m/s with a 0.5 km deadband; the bank is held below
+  500 m/s - the bank from the vertical plane degenerates in the steep subsonic fall; load limit = crew 4 g [E]
+  (`[stage.heat_shield] crew_load_limit_g`, `FlightBody::crew_load_warning`) x 0.9). An L/D 0.2 capsule peaks at 3.3 g
+  lift up and 4.7 g at 60 deg of bank whatever the entry angle: under 3.6 g only ~0-45 deg of bank remain, so the nominal
+  entry is -2.0 deg at 120 km with 30 deg of bank [E] (at -1.2 deg the range moves ~2400 km per degree of entry angle,
+  at -2.0 deg ~1000 km). Splashdown zone `config/splashdown_zones.toml` (`pacific_san_diego` 32.6 N 117.8 W [E], off San
+  Diego where Crew-10 / Ax-4 splashed down in 2025 [S], radius 2 km - user 2026-10-14). Deorbit: `gnc::plan_deorbit` with
+  `DeorbitParameters::burn_thrust_n` (finite burn centred on the node along its fixed direction) and `entry_mass_kg` (the
+  capsule after the trunk jettison: 45 km of downrange otherwise). `FlightSession::plan_capsule_return` (steps
+  `CapsuleReturnStep`): Draco burn along +x (4 side Dracos, 1.6 kN), trunk jettison 120 s after it, nose cone closed
+  120 s later [E; order [S]: SpaceX deorbits before the trunk jettison since the West Coast return], turn to the trim
+  attitude, entry guidance `entry_lead_s` before the interface, gate; `place_entering_capsule` (scenarios). From 420 km /
+  51.6 deg: 139 m/s / 598 kg after 37 h, burn 1058 s (published 7.5-12 min: the Draco layout is an estimate), interface
+  1135 s after it, gate 0.58 km off at 166 m/s (597 km/h; published ~560), 3.5 g, 33 kg of Dracos in the entry. Campaign
+  `[dragon][entry][validation]` (entry angle +-0.1 deg, mass +-3 %, truth aero +-10 % from the planned interface state):
+  12 of 12 at the gate within 1.2 km, 160-178 m/s, <= 3.6 g. The gate is where d4 opens the drogues; until then the
+  capsule falls on (bank 0, damped). Diagnostics: `STARSIM_DEBUG_ENTRY=1` (one line per guidance cycle),
+  hidden test "Capsule entry single case" with `STARSIM_CAPSULE_SEED=<1-12>`.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 
