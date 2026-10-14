@@ -27,11 +27,15 @@ constexpr double ground_tick_height_m = 5000.0;
 }  // namespace
 
 FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames::BodyOrientation& earth,
-                             std::filesystem::path config_dir, environment::PointMassGravityConfig gravity_config)
+                             std::filesystem::path config_dir, environment::PointMassGravityConfig gravity_config,
+                             const frames::BodyOrientation* moon_orientation)
     : config_dir_(std::move(config_dir)),
       earth_(earth),
       gravity_(ephemeris, earth, gravity_config),
-      env_{gravity_, atmosphere_, earth, &ephemeris, true},
+      moon_(moon_orientation ? std::optional<environment::ReferenceBody>(
+                                   environment::ReferenceBody::moon(ephemeris, *moon_orientation))
+                             : std::nullopt),
+      env_{gravity_, atmosphere_, earth, &ephemeris, true, moon_ ? &*moon_ : nullptr},
       gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)) {
     legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
 }
@@ -1040,7 +1044,9 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         if (mode.kind == gnc::AttitudeModeKind::Sun && env_.ephemeris) {
             mode.direction_gcrf = env_.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch_).position_m - s.position_gcrf_m;
         }
-        const auto target = gnc::attitude_target(mode, {s.position_gcrf_m, s.velocity_gcrf_mps});
+        // LVLH about the reference body (lunar l1); Inertial / Direction do not depend on the centre.
+        const auto ref = vehicle::reference_body_of(env_, flying.body->reference_body(env_, epoch_));
+        const auto target = gnc::attitude_target(mode, ref.frame(epoch_).centred({s.position_gcrf_m, s.velocity_gcrf_mps}));
         const gnc::AttitudeController::Feedforward feedforward{s.attitude.inverse_rotate(target.rate_gcrf_radps), {}};
         orbit_controller_.steer(*flying.body, ambient_pressure_pa, target.axis_gcrf, target.roll_reference_gcrf,
                                 &feedforward)
@@ -1113,18 +1119,16 @@ double FlightSession::coast_allowance_s() const {
         if (body.impacted() || body.resting() || body.caught()) continue;  // no longer moving on its own
         if (!body.can_coast()) return 0.0;
         {
-            const auto t = earth_.fixed_to_gcrf(epoch_);
-            const double height = frames::fixed_to_geodetic(transpose(t.rotation) * body.state().position_gcrf_m).height_m -
-                                  body.ground_height_m();
+            const auto clearance = body.ground_clearance(env_, epoch_);  // over the body's reference body (lunar l1)
             // a capsule ticks from above its parachute deployment heights (no coast past them)
             const double tick_height =
                 flying.parachutes && flying.parachutes->phase() != gnc::ParachutePhase::Down
                     ? std::max(ground_tick_height_m, flying.parachutes->watch_height_m())
                     : ground_tick_height_m;
-            if (height < tick_height) return 0.0;
-            const math::Vec3 up = math::normalized(body.state().position_gcrf_m);
-            const double sink = -dot(body.state().velocity_gcrf_mps, up);
-            if (sink > 0.0) allowance = std::min(allowance, (height - tick_height) / sink);
+            if (clearance.height_m < tick_height) return 0.0;
+            if (clearance.sink_mps > 0.0) {
+                allowance = std::min(allowance, (clearance.height_m - tick_height) / clearance.sink_mps);
+            }
         }
         for (const auto& [group, run] : flying.running_groups) {
             if (run) return 0.0;
@@ -1271,6 +1275,10 @@ LandingOutcome FlightSession::landing_outcome(size_t index) const {
     }
     const auto& site = landing_zone_ && bodies_.at(index).return_guidance ? *landing_zone_ : launch_site_;
     return sim::landing_outcome(body, site, transpose(t.rotation) * body.state().position_gcrf_m);
+}
+
+ephemeris::Body FlightSession::reference_body(size_t index) const {
+    return bodies_.at(index).body->reference_body(env_, epoch_);
 }
 
 vehicle::FlightTelemetry FlightSession::telemetry(size_t index) const {

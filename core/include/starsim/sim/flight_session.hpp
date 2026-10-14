@@ -15,6 +15,7 @@
 
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/environment/gravity.hpp"
+#include "starsim/environment/reference_body.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/gnc/attitude_controller.hpp"
 #include "starsim/gnc/booster_return.hpp"
@@ -103,8 +104,11 @@ public:
     static constexpr double max_roll_rate_radps = 10.0 * 3.14159265358979 / 180.0;
 
     // `gravity_config`: fidelity flags of the gravity model (default: Earth + J2, Moon, Sun).
+    // `moon_orientation` (MOON_ME): the Moon becomes a reference body (lunar l1: ground, air, telemetry and LVLH relative
+    // to the nearest body); without it everything is relative to the Earth.
     FlightSession(const ephemeris::Ephemeris& ephemeris, const frames::BodyOrientation& earth,
-                  std::filesystem::path config_dir, environment::PointMassGravityConfig gravity_config = {});
+                  std::filesystem::path config_dir, environment::PointMassGravityConfig gravity_config = {},
+                  const frames::BodyOrientation* moon_orientation = nullptr);
 
     // Places a vehicle on a pad (engines off, clamped). `heading_rad`: direction of body +y.
     void launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -143,6 +147,8 @@ public:
     // mission's landing target (drone ship or not).
     gnc::BoosterReturnParameters return_parameters(const config::StageConfig& stage) const;
     const vehicle::FlightEnvironment& environment() const { return env_; }
+    // Reference body of body `index` now (lunar l1).
+    ephemeris::Body reference_body(size_t index) const;
     const CatchTowerSim* tower() const { return tower_.get(); }
     CatchTowerSim* tower() { return tower_.get(); }
     bool active() const { return !bodies_.empty(); }
@@ -340,6 +346,7 @@ private:
     const frames::BodyOrientation& earth_;
     environment::PointMassGravity gravity_;
     environment::Us76Atmosphere atmosphere_;
+    std::optional<environment::ReferenceBody> moon_;  // lunar l1: with a Moon orientation
     vehicle::FlightEnvironment env_;
     gnc::AttitudeController controller_;
     // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).
