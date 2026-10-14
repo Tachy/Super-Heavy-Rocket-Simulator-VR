@@ -28,7 +28,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
 ```
 - `core` is split into small modules with clear interfaces: `math`, `time`, `frames`, `ephemeris`,
   `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`.
-  Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity),
+  Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
+  Moon: body-fixed frame, shape, atmosphere or vacuum),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
@@ -470,7 +471,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   turns half about body y), steered by the orbit controller. Mission `falcon9_crew_dragon` (SLC-40, 51.6 deg,
   200 x 210 km, RTLS to LZ-40): SECO T+503 s, release T+533 s, 200.0 x 210.8 km, 51.74 deg (GCRF elements), +18 m in the
   first 60 s, 0.42 kg in the first 10 min, first stage landed. Inertial hold after a 1.3 deg/s tumble: <= 0.71 deg,
-  2.4 kg/h (pulse quantum: not grams per hour); LVLH trunk forward: <= 0.71 deg, 3.1 kg/h; Draco burns 1 / 10 m/s within
+  1.9 kg/h (pulse quantum: not grams per hour); LVLH trunk forward: <= 0.71 deg, 2.4 kg/h; Draco burns 1 / 10 m/s within
   0.002 / 0.014 m/s (5.0 / 43.4 kg, ideal 4.3 / 42.4), -x 2 m/s within 0.007 m/s.
 - Crew Dragon entry (d3 of the same spec, plan `docs/superpowers/plans/2026-10-14-crew-dragon-d3.md`, tests
   `core/tests/test_capsule_aero.cpp`, `test_capsule_entry.cpp`): capsule aerodynamics `aero/capsule_aero` from
@@ -544,6 +545,18 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   flying alone, not stacked: nose cone, trunk, return step, parachute phase, splashdown miss, outcome),
   `splashdown_zone()`, `set_splashdown_zone(id)`, `plan_capsule_return()`, `autopilot_status()["capsule_step"]`. Covered
   by the smoke test, whose check functions must run to their end (a GDScript error used to abort one silently).
+- Lunar missions (spec `docs/superpowers/specs/2026-10-14-lunar-missions-design.md`), l1 reference bodies: vehicle states
+  stay Earth-centred GCRF everywhere; `environment::ReferenceBody` (Earth: ITRF93 + WGS84 + US76; Moon: MOON_ME, sphere
+  1737.4 km, vacuum) gives what is relative to a body. A `FlightBody` takes the Moon within 60,000 km of it and the Earth
+  again beyond 100,000 km [E] (the NRHO's apolune stays inside); bodies on the ground keep theirs. Air, ground contact,
+  resting (it follows the Moon), telemetry (`reference_body`, altitude, osculating periapsis / apoapsis and inclination to
+  the body's equator) and the session's tick-near-ground decision and LVLH holds use it. `FlightSession` takes a Moon
+  orientation (5th constructor argument, `spice::SpiceOrientation::moon_mean_earth()`); without it (bindings until l6)
+  everything is relative to the Earth as before. Ground at the Moon: the sphere (LOLA tile: l2). Validation
+  (`test_lunar_propagation.cpp`): 100 km LLO and a 3,000 x 70,000 km orbit one day Earth-centred vs a Moon-centred
+  integration of the same forces (the DE440 Moon's acceleration as the frame's) 0.020 / 0.025 m; 200 Hz ticks 20 min
+  5e-5 m. A Moon-centred `PointMassGravity` is a different model (its frame accelerates as point-mass Earth and Sun pull
+  the Moon; DE440's Moon also feels the planets, Earth J2 and tides): 0.33 / 4.4 m in a day.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 
