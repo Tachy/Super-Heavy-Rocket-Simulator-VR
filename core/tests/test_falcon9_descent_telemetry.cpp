@@ -77,11 +77,11 @@ std::pair<double, double> altitude_fit(const std::vector<Sample>& d, double t, d
 
 TEST_CASE("Falcon 9 descent drag reproduces the webcast telemetry of CRS-35 and Starlink 15-25",
           "[gnc][falcon9][validation]") {
-    // Propellant in the descent from the stage's gauge after the entry burn (% of 395.7 t); horizontal direction of
+    // Propellant in the descent from the stage's gauge after the entry burn (% of 425 t); horizontal direction of
     // flight (east, north): CRS-35 flies back west to LZ-40, Starlink 15-25 south along the Californian coast.
     const auto [file, propellant_kg, heading_east, heading_north] = GENERATE(table<std::string, double, double, double>({
-        {"f9_crs35_2026-10-13.csv", 0.030 * 395.7e3, -1.0, 0.0},
-        {"f9_starlink15-25_2026-10-12.csv", 0.039 * 395.7e3, 0.0, -1.0},
+        {"f9_crs35_2026-10-13.csv", 0.030 * 425.0e3, -1.0, 0.0},
+        {"f9_starlink15-25_2026-10-12.csv", 0.039 * 425.0e3, 0.0, -1.0},
     }));
     CAPTURE(file);
     const auto data = load_stage1(file);
