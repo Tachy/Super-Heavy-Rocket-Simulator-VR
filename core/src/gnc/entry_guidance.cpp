@@ -216,8 +216,11 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
             next.reversal_time_s = parameters_.cycle_s;
             const Solution reverse_next = solve(model_, next, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
             const double c_next = reverse_next.prediction.crossrange_m;
-            reverse = (c_next > 0.0) == (c_hold > 0.0);
-            if (!reverse) {
+            // ... and only if reversing now ends closer across than holding: late in a capsule's entry the crossrange
+            // moves fast with the reversal time, and a reversal one cycle early overshot (d4 campaign: -2.1 km held,
+            // +5.9 km reversed at 536 m/s, then held from 500 m/s: 5.8 km off the zone).
+            reverse = (c_next > 0.0) == (c_hold > 0.0) && std::abs(c_now) < std::abs(c_hold);
+            if (!reverse && (c_next > 0.0) != (c_hold > 0.0)) {
                 // the bank magnitude for the reversal still to come: its time interpolated between the next cycle
                 // and the end of the prediction (the crossrange over the reversal time is nearly linear)
                 EntryPredictorState planned = state;
