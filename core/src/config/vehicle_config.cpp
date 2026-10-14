@@ -1,6 +1,7 @@
 #include "starsim/config/vehicle_config.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 
@@ -14,6 +15,85 @@ namespace starsim::config {
 namespace {
 
 using detail::Document;
+
+std::vector<double> number_list(const Document& doc, const toml::table& t, std::string_view key) {
+    const auto* list = t[key].as_array();
+    if (!list || list->empty()) doc.fail("missing list '" + std::string(key) + "'");
+    std::vector<double> out;
+    for (const auto& node : *list) {
+        const auto value = node.value<double>();
+        if (!value) doc.fail("'" + std::string(key) + "' must hold numbers");
+        out.push_back(*value);
+    }
+    return out;
+}
+
+std::vector<std::string> text_list(const Document& doc, const toml::table& t, std::string_view key) {
+    const auto* list = t[key].as_array();
+    if (!list || list->empty()) doc.fail("missing list '" + std::string(key) + "'");
+    std::vector<std::string> out;
+    for (const auto& node : *list) {
+        const auto value = node.value<std::string>();
+        if (!value) doc.fail("'" + std::string(key) + "' must hold strings");
+        out.push_back(*value);
+    }
+    return out;
+}
+
+// [stage.rcs]: thrusters from pods (a set of directions at each azimuth of a ring) and single [[stage.rcs.thruster]]s.
+RcsConfig load_rcs(const Document& doc, const toml::table& rcs, const std::vector<TankConfig>& tanks) {
+    RcsConfig out;
+    out.isp_s = doc.positive(rcs, "isp_s");
+    out.propellant = doc.text(rcs, "propellant");
+    out.minimum_on_time_s = doc.positive(rcs, "minimum_on_time_s");
+    if (out.propellant != "main" && std::none_of(tanks.begin(), tanks.end(), [&](const TankConfig& k) {
+            return k.id == out.propellant && k.contents == TankContents::Rcs;
+        })) {
+        doc.fail("stage.rcs.propellant must be \"main\" or the id of a tank with contents = \"rcs\"");
+    }
+    if (auto pods = rcs["pod"].as_array()) {
+        for (const auto& node : *pods) {
+            const auto& p = *node.as_table();
+            const std::string id = doc.text(p, "id");
+            const double station = doc.number(p, "station_m");
+            const double radius = doc.positive(p, "radius_m");
+            const double thrust = doc.positive(p, "thrust_n");
+            const auto azimuths = number_list(doc, p, "azimuths_deg");
+            const auto directions = text_list(doc, p, "directions");
+            for (size_t k = 0; k < azimuths.size(); ++k) {
+                const double a = azimuths[k] * constants::deg_to_rad;
+                const math::Vec3 radial{0.0, std::cos(a), std::sin(a)}, tangential{0.0, -std::sin(a), std::cos(a)};
+                for (const auto& d : directions) {
+                    math::Vec3 direction;
+                    if (d == "tangential_plus") direction = tangential;
+                    else if (d == "tangential_minus") direction = -tangential;
+                    else if (d == "inward") direction = -radial;
+                    else if (d == "forward") direction = {1.0, 0.0, 0.0};
+                    else if (d == "aft") direction = {-1.0, 0.0, 0.0};
+                    else doc.fail("stage.rcs.pod.directions: unknown '" + d + "'");
+                    out.thrusters.push_back({id + "_" + std::to_string(k + 1) + "_" + d,
+                                             math::Vec3{station, 0.0, 0.0} + radial * radius, direction, thrust});
+                }
+            }
+        }
+    }
+    if (auto list = rcs["thruster"].as_array()) {
+        for (const auto& node : *list) {
+            const auto& q = *node.as_table();
+            const auto position = number_list(doc, q, "position_m");
+            const auto direction = number_list(doc, q, "direction");
+            if (position.size() != 3 || direction.size() != 3) {
+                doc.fail("stage.rcs.thruster position_m and direction need 3 numbers");
+            }
+            const math::Vec3 d{direction[0], direction[1], direction[2]};
+            if (!(math::norm(d) > 0.0)) doc.fail("stage.rcs.thruster direction must not be zero");
+            out.thrusters.push_back({doc.text(q, "id"), {position[0], position[1], position[2]}, math::normalized(d),
+                                     doc.positive(q, "thrust_n")});
+        }
+    }
+    if (out.thrusters.empty()) doc.fail("stage.rcs needs [[stage.rcs.pod]] or [[stage.rcs.thruster]] entries");
+    return out;
+}
 
 PropellantConfig load_propellant(const std::filesystem::path& config_dir, const std::string& id) {
     const Document doc(config_dir / "propellants.toml");
@@ -80,12 +160,14 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         for (const auto& node : *tanks) {
             const auto& tank = *node.as_table();
             const auto contents = doc.text(tank, "contents");
-            if (contents != "oxidizer" && contents != "fuel") {
-                doc.fail("tank contents must be 'oxidizer' or 'fuel'");
+            if (contents != "oxidizer" && contents != "fuel" && contents != "rcs") {
+                doc.fail("tank contents must be 'oxidizer', 'fuel' or 'rcs'");
             }
-            s.tanks.push_back({doc.text(tank, "id"),
-                               contents == "oxidizer" ? TankContents::Oxidizer : TankContents::Fuel,
-                               doc.number(tank, "mass_kg"), doc.number(tank, "base_station_m")});
+            const TankContents kind = contents == "oxidizer" ? TankContents::Oxidizer
+                                      : contents == "fuel"   ? TankContents::Fuel
+                                                             : TankContents::Rcs;
+            s.tanks.push_back({doc.text(tank, "id"), kind, doc.number(tank, "mass_kg"), doc.number(tank, "base_station_m"),
+                               kind == TankContents::Rcs ? doc.positive(tank, "density_kg_m3") : 0.0});
         }
     }
     if (auto groups = t["engine_group"].as_array()) {
@@ -190,10 +272,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.landing_legs.damping_n_s_m = doc.positive(*legs, "damping_n_s_m");
         s.landing_legs.friction = doc.positive(*legs, "friction");
     }
-    if (auto rcs = t["rcs"].as_table()) {
-        s.rcs_thruster_count = static_cast<int>(doc.number_or(*rcs, "thruster_count", 0.0));
-        s.rcs_thrust_n = doc.number_or(*rcs, "thrust_per_thruster_n", 0.0);
-    }
+    if (auto rcs = t["rcs"].as_table()) s.rcs = load_rcs(doc, *rcs, s.tanks);
     if (auto recovery = t["recovery"].as_table()) {
         s.reserve_propellant_kg = doc.number_or(*recovery, "reserve_propellant_kg", 0.0);
         s.landing_propellant_kg = doc.number_or(*recovery, "landing_propellant_kg", 0.0);

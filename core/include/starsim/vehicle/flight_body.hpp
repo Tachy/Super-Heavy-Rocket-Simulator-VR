@@ -126,11 +126,11 @@ public:
     Vehicle& vehicle() { return *vehicle_; }
     const RigidBodyState& state() const { return state_; }
     void set_state(const RigidBodyState& state) { state_ = state; }
+    // Force of the reaction-control thrusters that fired in the last tick, body axes.
+    math::Vec3 rcs_force_body_n() const { return rcs_force_body_n_; }
 
 private:
     void follow_pad(const frames::BodyOrientation& earth, time::Epoch epoch);
-    math::Vec3 rcs_torque(const VehicleCommand& command) const;
-    math::Vec3 rcs_force(const VehicleCommand& command) const;
     void resolve_ground_contact(const frames::BodyOrientation& earth, time::Epoch epoch);
     void update_air_data(const FlightEnvironment& env, time::Epoch epoch);
 
@@ -156,6 +156,7 @@ private:
     bool skipped_out_ = false;
     math::Vec3 aero_acceleration_body_mps2_;
     bool accelerometer_ = false;
+    math::Vec3 rcs_force_body_n_;
 };
 
 // Earth rotation vector in GCRF from the orientation's rotation rate (omega_x = dR/dt * R^T).

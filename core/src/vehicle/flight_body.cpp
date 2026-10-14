@@ -240,19 +240,6 @@ void FlightBody::hold_landed(const frames::BodyOrientation& earth, time::Epoch e
     landed_ = true;
 }
 
-Vec3 FlightBody::rcs_torque(const VehicleCommand& command) const {
-    const Vec3 max = vehicle_->max_rcs_torque_nm();
-    const Vec3& f = command.rcs_torque_fraction;
-    return {std::clamp(f.x, -1.0, 1.0) * max.x, std::clamp(f.y, -1.0, 1.0) * max.y, std::clamp(f.z, -1.0, 1.0) * max.z};
-}
-
-Vec3 FlightBody::rcs_force(const VehicleCommand& command) const {
-    const Vec3& f = command.rcs_force_fraction;
-    const double magnitude = norm(f);
-    const Vec3 fraction = magnitude > 1.0 ? f / magnitude : f;
-    return fraction * vehicle_->max_rcs_force_n();
-}
-
 void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt_s, const VehicleCommand& command) {
     if (impacted_) {
         return;
@@ -263,6 +250,9 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     vehicle_->update_grid_fins(dt_s, command);
     vehicle_->update_landing_legs(dt_s);
     vehicle_->update_flaps(dt_s, command);
+    // Held, caught or landed: the thrusters stay off.
+    vehicle_->update_rcs(dt_s, clamped_ || caught_ || landed_ ? VehicleCommand{} : command);
+    rcs_force_body_n_ = vehicle_->rcs_force_n();
     update_air_data(env, epoch);
 
     if (clamped_ || caught_ || landed_) {
@@ -281,8 +271,8 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
                           earth_rotation_vector(transform),
                           vehicle_->tank_mass_flows_kgps(),
                           solar_radiation_acceleration(env, *vehicle_, state_, vehicle_->mass_properties().mass_kg, epoch),
-                          rcs_torque(command),
-                          rcs_force(command),
+                          vehicle_->rcs_torque_nm(),
+                          vehicle_->rcs_force_n(),
                           external_force_gcrf_n_,
                           external_torque_body_nm_};
     const integrators::OdeFunction<13> f = [&ctx](double tau, const State13& y) { return derivative(ctx, tau, y); };

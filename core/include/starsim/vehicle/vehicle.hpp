@@ -11,6 +11,8 @@
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/vec3.hpp"
 #include "starsim/propulsion/engine_performance.hpp"
+#include "starsim/propulsion/rcs_allocator.hpp"
+#include "starsim/propulsion/rcs_modulator.hpp"
 
 namespace starsim::vehicle {
 
@@ -46,6 +48,18 @@ struct GridFin {
     double deflection_rad = 0.0;     // actual (rate limited)
 };
 
+// Reaction-control thruster: fixed thrust, on/off (constant feed pressure; user 2026-10-14).
+struct RcsThruster {
+    std::string id;
+    math::Vec3 position_m;   // vehicle body frame
+    math::Vec3 direction;    // unit; force on the vehicle
+    double thrust_n = 0.0;
+    double isp_s = 0.0;
+    int tank = -1;           // index of the stage's Rcs tank; -1: ullage gas from the main tanks
+    double output = 0.0;     // this tick: 1 firing, 0 off
+    bool starved = false;    // its supply is empty
+};
+
 struct Flap {
     aero::FlapGeometry geometry;     // stations in the vehicle body frame
     double max_deflection_rad = 0.0;
@@ -69,6 +83,7 @@ struct Stage {
     std::shared_ptr<const aero::GridFinTable> grid_fin_table;
     std::vector<Flap> flaps;
     std::shared_ptr<const aero::FlapTable> flap_table;
+    std::vector<RcsThruster> rcs;
     double extra_mass_kg = 0.0;   // payload + fairing
 
     double propellant_kg(config::TankContents contents) const;
@@ -94,10 +109,10 @@ struct VehicleCommand {
     double gimbal_pitch_rad = 0.0;
     double gimbal_yaw_rad = 0.0;
     double gimbal_roll_rad = 0.0;
-    // Reaction control: requested torque as a fraction (-1..1) of the maximum per body axis.
+    // Reaction control: requested torque as a fraction (-1..1) of the capability per body axis (max_rcs_torque_nm).
     math::Vec3 rcs_torque_fraction;
-    // Reaction control translation: requested force direction and magnitude as a fraction (|f| <= 1) of
-    // the maximum RCS force, body axes.
+    // Reaction control translation: requested force direction and magnitude as a fraction (|f| <= 1) of the
+    // capability along that direction (rcs_force_capability), body axes.
     math::Vec3 rcs_force_fraction;
     // Grid fin deflections (rad), one per fin in stage order; missing entries mean neutral.
     std::vector<double> grid_fin_rad;
@@ -118,7 +133,9 @@ public:
 
     // Mass properties now, or `tau_s` into a tick with constant tank mass flows (RK4 sub-steps).
     MassProperties mass_properties(const std::vector<std::vector<double>>* flows = nullptr, double tau_s = 0.0) const;
+    // Main propellant (oxidizer + fuel: the gauge); reaction-control supplies are rcs_propellant_kg().
     double propellant_kg() const;
+    double rcs_propellant_kg() const;
 
     // Discrete engine update for one tick: start/stop transients, throttle and gimbal rate limits,
     // relight rules, flow-separation limits. Must be called once per tick before integration.
@@ -152,11 +169,19 @@ public:
     // Failure injection: engine `index` (in stage order) shuts down for good.
     void fail_engine(size_t stage_index, size_t engine_index);
 
-    // Maximum RCS torque per body axis. [E] Thrusters modelled as pure couples: half of them act per
-    // axis, pitch/yaw lever = half the vehicle length, roll lever = the radius.
+    // Reaction control from the individual thrusters ([stage.rcs]) about the current CG: torque capability per body
+    // axis (the smaller of + and -), and the force (with no torque) along a body direction with its mass flow.
     math::Vec3 max_rcs_torque_nm() const;
-    // Maximum RCS translation force in any direction [E]: half of the thrusters act together.
-    double max_rcs_force_n() const;
+    struct RcsCapability {
+        double force_n = 0.0;
+        double mass_flow_kgps = 0.0;
+    };
+    RcsCapability rcs_force_capability(const math::Vec3& direction_body) const;
+    // Allocation (torque first) and on/off pulses with a minimum on-time for one tick; must be called once per tick
+    // before integration. The resulting torque (about the CG) and force of the firing thrusters, body axes:
+    void update_rcs(double dt_s, const VehicleCommand& command);
+    math::Vec3 rcs_torque_nm() const { return rcs_torque_; }
+    math::Vec3 rcs_force_n() const { return rcs_force_; }
     const aero::SlenderBodyAero& aero() const { return *aero_; }
 
     // Splits the stack below stage `index`: this vehicle keeps stages [0, index), the returned one
@@ -166,6 +191,9 @@ public:
 private:
     Vehicle() = default;
     void rebuild_aero();
+    const propulsion::RcsAllocator& rcs_allocator() const;  // for the current CG and the thrusters not starved
+    void refresh_rcs_supply();                               // starves thrusters whose supply ran dry
+    void reset_rcs();
 
     std::string id_;
     std::filesystem::path config_dir_;
@@ -174,6 +202,11 @@ private:
     bool legs_deploying_ = false;
     double leg_deployment_ = 0.0;
     double hull_aero_scale_ = 1.0;
+    mutable std::optional<propulsion::RcsAllocator> rcs_allocator_;
+    propulsion::RcsModulator rcs_modulator_;
+    std::vector<double> rcs_duty_;
+    math::Vec3 rcs_torque_;
+    math::Vec3 rcs_force_;
 };
 
 }  // namespace starsim::vehicle

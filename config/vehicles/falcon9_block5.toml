@@ -16,7 +16,7 @@ id = "first_stage"
 name = "Falcon 9 Block 5 first stage"
 length_m = 41.2                          # [S:wiki_f9]
 diameter_m = 3.66                        # [S:wiki_f9]
-dry_mass_kg = 25600.0                    # [S:wiki_f9]
+dry_mass_kg = 25400.0                    # [S:wiki_f9] 25.6 t incl. the 0.2 t of RCS nitrogen below [E]
 dry_cg_station_m = 12.0                  # [E]
 separation = "cold_pneumatic"
 jettison_after_separation_kg = 0.0
@@ -132,17 +132,33 @@ landing_phase_max_tilt_deg = [20.0, 20.0, 20.0]  # [E] the same engine throughou
 landing_phase_throttles = [0.7, 0.7, 0.65]   # [E] design throttles that time the ignition (~3.0 km at ~270 m/s)
 landing_switch_sink_mps = [[120.0, 280.0], [40.0, 120.0]]  # [E] no engine change: wide windows that only split the plan
 
+[[stage.tank]]
+id = "rcs_n2"
+contents = "rcs"
+mass_kg = 200.0                              # [E] nitrogen, carved out of the 25.6 t dry mass
+density_kg_m3 = 250.0                        # [E] COPV gas at ~300 bar
+base_station_m = 38.0                        # [E] interstage
+
 [stage.rcs]
 type = "cold_gas"                            # nitrogen, two pods at the top
-thruster_count = 8                           # [E]
-thrust_per_thruster_n = 450.0                # [E]
+isp_s = 70.0                                 # [E] typical N2 cold gas
+propellant = "rcs_n2"
+minimum_on_time_s = 0.02                     # [E] valve; on/off only, fixed thrust (constant pressure)
+
+[[stage.rcs.pod]]
+id = "pod"
+station_m = 40.0                             # [E] interstage, below the grid fins
+radius_m = 1.83
+azimuths_deg = [0.0, 180.0]                  # [E] between the fins (45 / 135 / 225 / 315 deg)
+thrust_n = 450.0                             # [E] (the pre-d1 estimate)
+directions = ["tangential_plus", "tangential_minus", "inward", "inward"]
 
 [[stage]]
 id = "second_stage"
 name = "Falcon 9 Block 5 second stage"
 length_m = 13.8                          # [S:wiki_f9]
 diameter_m = 3.66
-dry_mass_kg = 3900.0                     # [S:wiki_f9]
+dry_mass_kg = 3820.0                     # [S:wiki_f9] 3.9 t incl. the 80 kg of RCS nitrogen below [E]
 dry_cg_station_m = 4.0                   # [E]
 payload_mass_kg = 0.0
 fairing_mass_kg = 1900.0                 # [S:wiki_f9]
@@ -161,6 +177,27 @@ id = "rp1_main"
 contents = "fuel"
 mass_kg = 31700.0                        # [D]
 base_station_m = 9.4                     # [E] above the longer LOX tank
+
+[[stage.tank]]
+id = "rcs_n2"
+contents = "rcs"
+mass_kg = 80.0                           # [E] nitrogen, carved out of the 3.9 t dry mass
+density_kg_m3 = 250.0                    # [E] COPV gas at ~300 bar
+base_station_m = 1.0                     # [E]
+
+[stage.rcs]
+type = "cold_gas"
+isp_s = 70.0                             # [E] typical N2 cold gas
+propellant = "rcs_n2"
+minimum_on_time_s = 0.02                 # [E] valve; on/off only, fixed thrust (constant pressure)
+
+[[stage.rcs.pod]]
+id = "pod"
+station_m = 1.5                          # [E] aft skirt
+radius_m = 1.83
+azimuths_deg = [90.0, 270.0]
+thrust_n = 200.0                         # [E]
+directions = ["tangential_plus", "tangential_minus", "inward", "forward"]
 
 [[stage.engine_group]]
 id = "mvac"

@@ -4,10 +4,14 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <cstdio>
 
+#include "starsim/config/vehicle_config.hpp"
+#include "starsim/environment/atmosphere.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/propulsion/rcs_allocator.hpp"
 #include "starsim/propulsion/rcs_modulator.hpp"
+#include "starsim/vehicle/flight_body.hpp"
 
 using namespace starsim;
 using math::Vec3;
@@ -17,6 +21,44 @@ using propulsion::RcsThrusterGeometry;
 namespace {
 
 constexpr double pi = constants::pi;
+const std::filesystem::path config_dir = STARSIM_CONFIG_DIR;
+const time::Epoch t0 = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
+constexpr double tick_s = 0.005;
+
+class ZeroGravity final : public environment::GravityModel {
+public:
+    ephemeris::Body central_body() const override { return ephemeris::Body::Earth; }
+    Vec3 acceleration_mps2(const Vec3&, time::Epoch) const override { return {}; }
+};
+
+class FixedEarth final : public frames::BodyOrientation {
+public:
+    frames::FixedToInertial fixed_to_gcrf(time::Epoch) const override { return {math::Mat3::identity(), {}}; }
+};
+
+struct DeepSpace {
+    ZeroGravity gravity;
+    environment::Us76Atmosphere atmosphere;  // zero above 1000 km
+    FixedEarth earth;
+    vehicle::FlightEnvironment env{gravity, atmosphere, earth, nullptr, false};
+};
+
+// One stage of a vehicle alone (the others removed from the configuration), far from everything.
+std::unique_ptr<vehicle::FlightBody> stage_alone(const std::string& vehicle_id, size_t stage) {
+    auto cfg = config::load_vehicle(config_dir, vehicle_id);
+    const auto keep = cfg.stages[stage];
+    cfg.stages = {keep};
+    return std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(cfg, config_dir),
+                                                 vehicle::RigidBodyState{{1e10, 0.0, 0.0}, {}, {}, {}});
+}
+
+size_t rcs_tank_index(const vehicle::Stage& stage) {
+    for (size_t i = 0; i < stage.tanks.size(); ++i) {
+        if (stage.tanks[i].config.contents == config::TankContents::Rcs) return i;
+    }
+    FAIL("no RCS tank");
+    return 0;
+}
 
 // A pod ring: at each azimuth one thruster each tangential +, tangential - and inward.
 std::vector<RcsThrusterGeometry> ring(double station, double radius, double thrust, std::initializer_list<double> az_deg) {
@@ -110,4 +152,166 @@ TEST_CASE("RCS modulator: a duty that drops to zero leaves nothing owed", "[rcs]
     for (int k = 0; k < 3; ++k) m.update({0.5}, 0.005);  // owes 7.5 ms, not yet a pulse
     m.update({0.0}, 0.005);
     for (int k = 0; k < 2; ++k) CHECK_FALSE(m.update({0.3}, 0.005)[0]);  // starts from zero again
+}
+
+TEST_CASE("RCS thrusters are loaded for every stage", "[rcs][config]") {
+    const auto ss = config::load_vehicle(config_dir, "starship_block3");
+    const auto f9 = config::load_vehicle(config_dir, "falcon9_block5");
+    CHECK(ss.stages[0].rcs.thrusters.size() == 12);
+    CHECK(ss.stages[1].rcs.thrusters.size() == 14);
+    CHECK(f9.stages[0].rcs.thrusters.size() == 8);
+    CHECK(f9.stages[1].rcs.thrusters.size() == 8);
+    // Pod expansion: Super Heavy pod 1 at 45 deg, radius 4.5, station 68 m; first thruster tangential +.
+    const auto& t = ss.stages[0].rcs.thrusters[0];
+    CHECK(t.position_m.x == Catch::Approx(68.0));
+    CHECK(t.position_m.y == Catch::Approx(4.5 * std::cos(pi / 4)));
+    CHECK(t.direction.y == Catch::Approx(-std::sin(pi / 4)));
+    CHECK(f9.stages[0].rcs.propellant == "rcs_n2");
+    CHECK(ss.stages[0].rcs.propellant == "main");
+}
+
+TEST_CASE("RCS tanks do not change the liftoff mass and stay out of the propellant gauge", "[rcs][config]") {
+    const auto cfg = config::load_vehicle(config_dir, "falcon9_block5");
+    const vehicle::Vehicle v(cfg, config_dir);
+    CHECK(v.rcs_propellant_kg() == Catch::Approx(200.0 + 80.0));
+    double main = 0.0;
+    for (const auto& s : cfg.stages) {
+        for (const auto& t : s.tanks) {
+            if (t.contents != config::TankContents::Rcs) main += t.mass_kg;
+        }
+    }
+    CHECK(v.propellant_kg() == Catch::Approx(main));
+    // 25.6 t + 3.9 t dry before d1: the N2 was carved out of them.
+    CHECK(cfg.stages[0].dry_mass_kg + 200.0 == Catch::Approx(25600.0));
+    CHECK(cfg.stages[1].dry_mass_kg + 80.0 == Catch::Approx(3900.0));
+}
+
+TEST_CASE("A roll command spins the Falcon 9 second stage and draws its nitrogen", "[rcs][vehicle]") {
+    // At a full roll command the tangential thrusters fire every tick: roll acceleration = capability / Ixx, N2 drawn
+    // at sum(firing * F) / (Isp g0).
+    DeepSpace space;
+    auto body = stage_alone("falcon9_block5", 1);
+    const auto& v = body->vehicle();
+    const double capability = v.max_rcs_torque_nm().x;
+    const double ixx = v.mass_properties().inertia_kg_m2.x;
+    const size_t tank = rcs_tank_index(v.stages()[0]);
+    const double n2_before = v.stages()[0].tanks[tank].mass_kg;
+    const double isp_g0 = v.stages()[0].config.rcs.isp_s * constants::standard_gravity_mps2;
+    vehicle::VehicleCommand roll;
+    roll.rcs_torque_fraction = {1.0, 0.0, 0.0};
+    double expected_n2 = 0.0;
+    const int ticks = 400;  // 2 s
+    for (int k = 0; k < ticks; ++k) {
+        body->step(space.env, t0 + k * tick_s, tick_s, roll);
+        for (const auto& t : v.stages()[0].rcs) expected_n2 += t.output * t.thrust_n / isp_g0 * tick_s;
+    }
+    const Vec3 w = body->state().angular_velocity_body_radps;
+    CHECK(capability > 0.0);
+    CHECK(w.x == Catch::Approx(ticks * tick_s * capability / ixx).epsilon(0.03));
+    CHECK(std::abs(w.y) < 0.01 * w.x);
+    CHECK(std::abs(w.z) < 0.01 * w.x);
+    CHECK(norm(body->state().velocity_gcrf_mps) < 0.01);
+    CHECK(expected_n2 > 0.0);
+    CHECK(n2_before - v.stages()[0].tanks[tank].mass_kg == Catch::Approx(expected_n2).epsilon(0.02));
+}
+
+TEST_CASE("A small roll command gives its mean torque in pulses", "[rcs][vehicle]") {
+    DeepSpace space;
+    auto body = stage_alone("falcon9_block5", 1);
+    const auto& v = body->vehicle();
+    const double capability = v.max_rcs_torque_nm().x;
+    const double ixx = v.mass_properties().inertia_kg_m2.x;
+    vehicle::VehicleCommand roll;
+    roll.rcs_torque_fraction = {0.13, 0.0, 0.0};
+    const size_t n = v.stages()[0].rcs.size();
+    std::vector<int> run(n, 0);
+    int shortest = 1 << 30;
+    bool on_off_only = true;
+    const int ticks = 800;  // 4 s
+    for (int k = 0; k < ticks; ++k) {
+        body->step(space.env, t0 + k * tick_s, tick_s, roll);
+        for (size_t i = 0; i < n; ++i) {
+            const double out = v.stages()[0].rcs[i].output;
+            on_off_only = on_off_only && (out == 0.0 || out == 1.0);
+            if (out > 0.0) {
+                ++run[i];
+            } else if (run[i] > 0) {
+                shortest = std::min(shortest, run[i]);
+                run[i] = 0;
+            }
+        }
+    }
+    CHECK(on_off_only);
+    CHECK(body->state().angular_velocity_body_radps.x ==
+          Catch::Approx(ticks * tick_s * 0.13 * capability / ixx).epsilon(0.05));
+    CHECK(shortest >= 4);  // 20 ms at 200 Hz
+}
+
+TEST_CASE("An empty RCS tank starves its thrusters", "[rcs][vehicle]") {
+    DeepSpace space;
+    auto body = stage_alone("falcon9_block5", 1);
+    auto& stage = body->vehicle().stages()[0];
+    stage.tanks[rcs_tank_index(stage)].mass_kg = 0.0;
+    vehicle::VehicleCommand roll;
+    roll.rcs_torque_fraction = {1.0, 0.0, 0.0};
+    for (int k = 0; k < 200; ++k) body->step(space.env, t0 + k * tick_s, tick_s, roll);
+    CHECK(norm(body->vehicle().max_rcs_torque_nm()) == 0.0);
+    CHECK(norm(body->state().angular_velocity_body_radps) == 0.0);
+    CHECK(std::isfinite(body->state().position_gcrf_m.x));
+}
+
+TEST_CASE("Separation re-bases the thrusters and gives each part its own", "[rcs][vehicle]") {
+    const auto cfg = config::load_vehicle(config_dir, "falcon9_block5");
+    vehicle::Vehicle stack(cfg, config_dir);
+    const double local = cfg.stages[1].rcs.thrusters[0].position_m.x;
+    CHECK(stack.stages()[1].rcs[0].position_m.x == Catch::Approx(cfg.stages[0].length_m + local));
+    const Vec3 stack_torque = stack.max_rcs_torque_nm();
+    auto upper = stack.separate(1);
+    CHECK(upper->stages()[0].rcs[0].position_m.x == Catch::Approx(local));
+    CHECK(stack.stages()[0].rcs.size() == 8);
+    CHECK(upper->stages()[0].rcs.size() == 8);
+    CHECK(stack.max_rcs_torque_nm().x > 0.0);
+    CHECK(upper->max_rcs_torque_nm().x > 0.0);
+    CHECK(stack.max_rcs_torque_nm().y != Catch::Approx(stack_torque.y));  // rebuilt for the new CG and set
+}
+
+TEST_CASE("The RCS allocation follows the CG", "[rcs][vehicle]") {
+    DeepSpace space;
+    auto body = stage_alone("starship_block3", 0);
+    auto& v = body->vehicle();
+    const double full = v.max_rcs_torque_nm().y;
+    for (auto& t : v.stages()[0].tanks) t.mass_kg *= 0.05;
+    const double drained = v.max_rcs_torque_nm().y;
+    CHECK(drained != Catch::Approx(full).epsilon(0.01));
+    vehicle::VehicleCommand roll;
+    roll.rcs_torque_fraction = {1.0, 0.0, 0.0};
+    body->step(space.env, t0, tick_s, roll);
+    const Vec3 tau = v.rcs_torque_nm();
+    CHECK(tau.x > 0.0);
+    CHECK(std::hypot(tau.y, tau.z) < 0.01 * tau.x);
+}
+
+TEST_CASE("RCS capability of every stage (report)", "[rcs][vehicle]") {
+    struct Case {
+        const char* vehicle;
+        size_t stage;
+        int old_count;
+        double old_thrust_n;
+    };
+    for (const Case c : {Case{"starship_block3", 0, 8, 3000.0}, Case{"starship_block3", 1, 6, 1500.0},
+                         Case{"falcon9_block5", 0, 8, 450.0}, Case{"falcon9_block5", 1, 0, 0.0}}) {
+        auto body = stage_alone(c.vehicle, c.stage);
+        const auto& v = body->vehicle();
+        const double force = 0.5 * c.old_count * c.old_thrust_n;
+        const Vec3 old{force * 0.5 * v.diameter_m(), force * 0.5 * v.length_m(), force * 0.5 * v.length_m()};
+        const Vec3 now = v.max_rcs_torque_nm();
+        const auto forward = v.rcs_force_capability({1.0, 0.0, 0.0});
+        std::printf("[rcs] %s/%s: torque roll/pitch/yaw %.0f / %.0f / %.0f kNm (pre-d1 %.0f / %.0f / %.0f), "
+                    "+x force %.0f N (%.2f kg/s; pre-d1 %.0f N)\n",
+                    c.vehicle, v.stages()[0].config.id.c_str(), now.x / 1e3, now.y / 1e3, now.z / 1e3, old.x / 1e3,
+                    old.y / 1e3, old.z / 1e3, forward.force_n, forward.mass_flow_kgps, force);
+        CHECK(now.x > 0.0);
+        CHECK(now.y > 0.0);
+        CHECK(now.z > 0.0);
+    }
 }

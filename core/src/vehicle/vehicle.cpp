@@ -14,6 +14,8 @@ namespace {
 
 // Payload and fairing sit in the upper part of their stage [E].
 constexpr double extra_mass_station_fraction = 0.75;
+// The RCS allocation is rebuilt when the CG has moved this far (lever change negligible below).
+constexpr double rcs_cg_tolerance_m = 0.01;
 
 double approach(double value, double target, double max_step) {
     return value + std::clamp(target - value, -max_step, max_step);
@@ -54,9 +56,9 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
         stage.extra_mass_kg = stage_config.payload_mass_kg + stage_config.fairing_mass_kg;
         const double area = constants::pi * 0.25 * stage_config.diameter_m * stage_config.diameter_m;
         for (const auto& tank_config : stage_config.tanks) {
-            const double density = tank_config.contents == config::TankContents::Oxidizer
-                                       ? config.propellant.oxidizer_density_kg_m3
-                                       : config.propellant.fuel_density_kg_m3;
+            const double density = tank_config.contents == config::TankContents::Oxidizer ? config.propellant.oxidizer_density_kg_m3
+                                   : tank_config.contents == config::TankContents::Fuel   ? config.propellant.fuel_density_kg_m3
+                                                                                          : tank_config.density_kg_m3;
             stage.tanks.push_back({tank_config, density, area, tank_config.mass_kg});
         }
         for (const auto& group : stage_config.engine_groups) {
@@ -92,6 +94,14 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
                                        f.max_deflection_rad, f.rate_rad_s,
                                        std::clamp(f.initial_deflection_rad, 0.0, f.max_deflection_rad)});
             }
+        }
+        for (const auto& t : stage_config.rcs.thrusters) {
+            int tank = -1;
+            for (size_t i = 0; i < stage.tanks.size(); ++i) {
+                if (stage.tanks[i].config.id == stage_config.rcs.propellant) tank = static_cast<int>(i);
+            }
+            stage.rcs.push_back({t.id, t.position_m + Vec3{station, 0.0, 0.0}, t.direction, t.thrust_n,
+                                 stage_config.rcs.isp_s, tank, 0.0, false});
         }
         station += stage_config.length_m;
         stages_.push_back(std::move(stage));
@@ -192,8 +202,14 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
 double Vehicle::propellant_kg() const {
     double total = 0.0;
     for (const auto& s : stages_) {
-        for (const auto& t : s.tanks) total += t.mass_kg;
+        for (const auto& t : s.tanks) total += t.config.contents == config::TankContents::Rcs ? 0.0 : t.mass_kg;
     }
+    return total;
+}
+
+double Vehicle::rcs_propellant_kg() const {
+    double total = 0.0;
+    for (const auto& s : stages_) total += s.propellant_kg(config::TankContents::Rcs);
     return total;
 }
 
@@ -316,12 +332,26 @@ std::vector<std::vector<double>> Vehicle::tank_mass_flows_kgps() const {
             oxidizer += mdot * mr / (1.0 + mr);
             fuel += mdot / (1.0 + mr);
         }
+        // Reaction control: firing thrusters draw their own tank, or ullage gas from the main tanks in proportion to
+        // the oxidizer and fuel left.
+        const double ox_kg = stage.propellant_kg(config::TankContents::Oxidizer);
+        const double fuel_kg = stage.propellant_kg(config::TankContents::Fuel);
+        for (const auto& t : stage.rcs) {
+            if (t.output <= 0.0) continue;
+            const double mdot = t.output * t.thrust_n / (t.isp_s * constants::standard_gravity_mps2);
+            if (t.tank >= 0) {
+                stage_flows[static_cast<size_t>(t.tank)] += mdot;
+            } else if (ox_kg + fuel_kg > 0.0) {
+                oxidizer += mdot * ox_kg / (ox_kg + fuel_kg);
+                fuel += mdot * fuel_kg / (ox_kg + fuel_kg);
+            }
+        }
         // Draw each propellant from the first tank of that kind that still holds some.
         for (auto [contents, flow] : {std::pair{config::TankContents::Oxidizer, oxidizer},
                                       std::pair{config::TankContents::Fuel, fuel}}) {
             for (size_t i = 0; i < stage.tanks.size() && flow > 0.0; ++i) {
                 if (stage.tanks[i].config.contents == contents && stage.tanks[i].mass_kg > 0.0) {
-                    stage_flows[i] = flow;
+                    stage_flows[i] += flow;
                     flow = 0.0;
                 }
             }
@@ -350,6 +380,99 @@ void Vehicle::consume_propellant(double dt_s) {
             }
         }
     }
+    refresh_rcs_supply();
+}
+
+void Vehicle::refresh_rcs_supply() {
+    bool changed = false;
+    for (auto& stage : stages_) {
+        const bool main_dry = stage.propellant_kg(config::TankContents::Oxidizer) <= 0.0 ||
+                              stage.propellant_kg(config::TankContents::Fuel) <= 0.0;
+        for (auto& t : stage.rcs) {
+            const bool starved = t.tank >= 0 ? stage.tanks[static_cast<size_t>(t.tank)].mass_kg <= 0.0 : main_dry;
+            if (starved != t.starved) {
+                t.starved = starved;
+                changed = true;
+            }
+        }
+    }
+    if (changed) rcs_allocator_.reset();
+}
+
+const propulsion::RcsAllocator& Vehicle::rcs_allocator() const {
+    const double cg = mass_properties().cg_station_m;
+    if (!rcs_allocator_ || std::abs(rcs_allocator_->cg_station_m() - cg) > rcs_cg_tolerance_m) {
+        std::vector<propulsion::RcsThrusterGeometry> geometry;
+        for (const auto& s : stages_) {
+            for (const auto& t : s.rcs) geometry.push_back({t.position_m, t.direction, t.starved ? 0.0 : t.thrust_n});
+        }
+        rcs_allocator_.emplace(std::move(geometry), cg);
+    }
+    return *rcs_allocator_;
+}
+
+void Vehicle::reset_rcs() {
+    rcs_allocator_.reset();
+    rcs_modulator_ = {};
+    rcs_duty_.clear();
+    rcs_torque_ = {};
+    rcs_force_ = {};
+    for (auto& s : stages_) {
+        for (auto& t : s.rcs) t.output = 0.0;
+    }
+}
+
+void Vehicle::update_rcs(double dt_s, const VehicleCommand& command) {
+    refresh_rcs_supply();
+    const auto& a = rcs_allocator();
+    rcs_torque_ = {};
+    rcs_force_ = {};
+    if (a.size() == 0) return;
+    const Vec3 capability = a.max_torque_nm();
+    const Vec3& f = command.rcs_torque_fraction;
+    const Vec3 torque{std::clamp(f.x, -1.0, 1.0) * capability.x, std::clamp(f.y, -1.0, 1.0) * capability.y,
+                      std::clamp(f.z, -1.0, 1.0) * capability.z};
+    Vec3 force;
+    const double magnitude = norm(command.rcs_force_fraction);
+    if (magnitude > 0.0) {
+        const Vec3 u = command.rcs_force_fraction / magnitude;
+        force = u * (std::min(magnitude, 1.0) * a.force_capability_n(u));
+    }
+    rcs_duty_ = a.allocate(torque, force, &rcs_duty_);
+    if (rcs_modulator_.firing().size() != rcs_duty_.size()) {
+        double minimum_on_time_s = 0.0;
+        for (const auto& s : stages_) {
+            if (s.rcs.empty()) continue;
+            const double t = s.config.rcs.minimum_on_time_s;
+            minimum_on_time_s = minimum_on_time_s > 0.0 ? std::min(minimum_on_time_s, t) : t;
+        }
+        rcs_modulator_ = propulsion::RcsModulator(rcs_duty_.size(), minimum_on_time_s);
+    }
+    const auto& firing = rcs_modulator_.update(rcs_duty_, dt_s);
+    std::vector<double> output(firing.size());
+    size_t i = 0;
+    for (auto& s : stages_) {
+        for (auto& t : s.rcs) {
+            t.output = firing[i] && !t.starved ? 1.0 : 0.0;  // fixed thrust, on/off
+            output[i++] = t.output;
+        }
+    }
+    rcs_torque_ = a.torque_nm(output);
+    rcs_force_ = a.force_n(output);
+}
+
+Vehicle::RcsCapability Vehicle::rcs_force_capability(const Vec3& direction_body) const {
+    const auto& a = rcs_allocator();
+    std::vector<double> duty;
+    RcsCapability c;
+    c.force_n = a.force_capability_n(direction_body, &duty);
+    size_t i = 0;
+    for (const auto& s : stages_) {
+        for (const auto& t : s.rcs) {
+            c.mass_flow_kgps += duty[i++] * t.thrust_n / (t.isp_s * constants::standard_gravity_mps2);
+        }
+    }
+    return c;
 }
 
 bool Vehicle::any_engine_producing_thrust() const {
@@ -368,18 +491,7 @@ void Vehicle::fail_engine(size_t stage_index, size_t engine_index) {
     e.starved = true;  // never restarts
 }
 
-Vec3 Vehicle::max_rcs_torque_nm() const {
-    double force = 0.0;
-    for (const auto& s : stages_) force += 0.5 * s.config.rcs_thruster_count * s.config.rcs_thrust_n;
-    const double lever = 0.5 * length_m();
-    return {force * 0.5 * diameter_m(), force * lever, force * lever};
-}
-
-double Vehicle::max_rcs_force_n() const {
-    double force = 0.0;
-    for (const auto& s : stages_) force += 0.5 * s.config.rcs_thruster_count * s.config.rcs_thrust_n;
-    return force;
-}
+Vec3 Vehicle::max_rcs_torque_nm() const { return rcs_allocator().max_torque_nm(); }
 
 std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     if (index == 0 || index >= stages_.size()) {
@@ -394,6 +506,7 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
         stage.base_station_m -= shift;
         for (auto& e : stage.engines) e.gimbal_point_m.x -= shift;
         for (auto& fin : stage.grid_fins) fin.geometry.station_m -= shift;
+        for (auto& t : stage.rcs) t.position_m.x -= shift;
         for (auto& flap : stage.flaps) {
             flap.geometry.station_fwd_m -= shift;
             flap.geometry.station_aft_m -= shift;
@@ -405,6 +518,8 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     upper->rebuild_aero();
     id_ += "/" + stages_.back().config.id;
     rebuild_aero();
+    reset_rcs();
+    upper->reset_rcs();
     return upper;
 }
 

@@ -104,9 +104,18 @@ nominal_meco_s = 160.0                   # [E]
 nominal_meco_altitude_m = 65000.0        # [E]
 
 [stage.rcs]
-type = "cold_gas"                        # Super Heavy uses cold-gas thrusters for attitude control
-thruster_count = 8                       # [E]
-thrust_per_thruster_n = 3000.0           # [E]
+type = "cold_gas"                        # gas thrusters fed with autogenous ullage gas from the main tanks [E]
+isp_s = 70.0                             # [E] warm gas (cold N2 ~70 s; gaseous CH4 / O2 of the same order)
+propellant = "main"                      # drawn from the stage's oxidizer and fuel tanks
+minimum_on_time_s = 0.02                 # [E] valve; on/off only, fixed thrust (constant pressure)
+
+[[stage.rcs.pod]]
+id = "forward"
+station_m = 68.0                         # [E] below the hot-stage ring (imagery)
+radius_m = 4.5
+azimuths_deg = [45.0, 135.0, 225.0, 315.0]  # [E]
+thrust_n = 3000.0                        # [E] (the pre-d1 estimate)
+directions = ["tangential_plus", "tangential_minus", "inward"]
 
 # ---------------------------------------------------------------- ship
 [[stage]]
@@ -250,6 +259,23 @@ max_load_g = 6.0                         # [E] structure
 heat_shield_mass_kg = 10500.0            # [E] Block 1 figure
 
 [stage.rcs]
-type = "cold_gas_ullage"
-thruster_count = 6
-thrust_per_thruster_n = 1500.0           # [E]
+type = "cold_gas_ullage"                 # autogenous ullage gas from the main tanks [E]
+isp_s = 70.0                             # [E]
+propellant = "main"
+minimum_on_time_s = 0.02                 # [E] valve; on/off only, fixed thrust (constant pressure)
+
+[[stage.rcs.pod]]
+id = "forward"
+station_m = 46.0                         # [E] forward of the forward flaps; sides (belly at 270 deg)
+radius_m = 4.5
+azimuths_deg = [0.0, 180.0]
+thrust_n = 1500.0                        # [E] (the pre-d1 estimate)
+directions = ["tangential_plus", "tangential_minus", "inward"]
+
+[[stage.rcs.pod]]
+id = "aft"
+station_m = 6.0                          # [E] above the aft flaps
+radius_m = 4.5
+azimuths_deg = [0.0, 180.0]
+thrust_n = 1500.0                        # [E]
+directions = ["tangential_plus", "tangential_minus", "inward", "forward"]  # forward: ullage settling, translation

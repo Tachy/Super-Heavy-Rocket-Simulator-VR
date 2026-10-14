@@ -71,9 +71,10 @@ def tsiolkovsky_delta_v(isp_s: float, initial_mass_kg: float, final_mass_kg: flo
 
 
 def stage_mass_kg(stage: dict) -> tuple[float, float]:
-    """Returns (dry incl. payload/fairing, propellant)."""
-    dry = stage["dry_mass_kg"] + stage.get("payload_mass_kg", 0.0) + stage.get("fairing_mass_kg", 0.0)
-    propellant = sum(t["mass_kg"] for t in stage.get("tank", []))
+    """Returns (dry incl. payload/fairing and RCS supplies, main propellant)."""
+    rcs = sum(t["mass_kg"] for t in stage.get("tank", []) if t["contents"] == "rcs")
+    dry = stage["dry_mass_kg"] + stage.get("payload_mass_kg", 0.0) + stage.get("fairing_mass_kg", 0.0) + rcs
+    propellant = sum(t["mass_kg"] for t in stage.get("tank", []) if t["contents"] != "rcs")
     return dry, propellant
 
 
@@ -112,7 +113,8 @@ def report(vehicle_id: str, payload_kg: float) -> int:
         print(f"  dry {dry / 1e3:9.1f} t   propellant {propellant / 1e3:9.1f} t   "
               f"wet {(dry + propellant) / 1e3:9.1f} t   mass fraction {propellant / (dry + propellant):.3f}")
         for tank in stage.get("tank", []):
-            density = prop["oxidizer_density_kg_m3" if tank["contents"] == "oxidizer" else "fuel_density_kg_m3"]
+            density = (tank["density_kg_m3"] if tank["contents"] == "rcs"
+                       else prop["oxidizer_density_kg_m3" if tank["contents"] == "oxidizer" else "fuel_density_kg_m3"])
             length = tank["mass_kg"] / density / area
             top = tank["base_station_m"] + length
             print(f"  tank {tank['id']:<10} {tank['mass_kg'] / 1e3:8.1f} t  {tank['mass_kg'] / density:8.1f} m3  "

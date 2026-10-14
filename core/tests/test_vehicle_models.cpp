@@ -66,7 +66,7 @@ TEST_CASE("Falcon 9 engine groups: 1 centre + 2 pair + 6 ring, 3-engine set on t
     }
     CHECK(s.recovery_method == "leg_landing");
     CHECK(s.grid_fins.azimuths_rad.size() == 4);
-    CHECK(s.rcs_thruster_count > 0);
+    CHECK_FALSE(s.rcs.thrusters.empty());
     REQUIRE(s.landing_legs.azimuths_rad.size() == 4);
     CHECK(s.landing_legs.footprint_radius_m > 8.0);
     CHECK(s.landing_legs.footprint_radius_m < 10.0);

@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "starsim/math/vec3.hpp"
+
 // Vehicle definitions loaded from config/ (see config/README.md). Plain data, SI units, radians.
 
 namespace starsim::config {
@@ -44,13 +46,30 @@ struct EngineConfig {
     double shutdown_s = 0.0;
 };
 
-enum class TankContents { Oxidizer, Fuel };
+enum class TankContents { Oxidizer, Fuel, Rcs };  // Rcs: a reaction-control supply (e.g. nitrogen)
 
 struct TankConfig {
     std::string id;
     TankContents contents = TankContents::Oxidizer;
     double mass_kg = 0.0;          // loaded propellant
     double base_station_m = 0.0;   // bottom of the tank, from the bottom of the stage
+    double density_kg_m3 = 0.0;    // Rcs tanks only (the main propellants take theirs from the propellant)
+};
+
+// One reaction-control thruster: fixed thrust, on/off.
+struct RcsThrusterConfig {
+    std::string id;
+    math::Vec3 position_m;  // station along the stage axis from the stage bottom, y, z (body axes)
+    math::Vec3 direction;   // unit; the force on the vehicle (the plume points the other way)
+    double thrust_n = 0.0;
+};
+
+// [stage.rcs]: pods ([[stage.rcs.pod]]) are expanded into thrusters by the loader.
+struct RcsConfig {
+    double isp_s = 0.0;
+    std::string propellant;            // "main" (the stage's oxidizer and fuel tanks: ullage gas) or an Rcs tank id
+    double minimum_on_time_s = 0.0;    // shortest pulse (valve)
+    std::vector<RcsThrusterConfig> thrusters;
 };
 
 struct EngineGroupConfig {
@@ -174,8 +193,7 @@ struct StageConfig {
     std::vector<std::string> deorbit_engine_groups;
     LandingLegConfig landing_legs;
     double radiation_pressure_coefficient = 1.3;  // Cr for solar radiation pressure
-    int rcs_thruster_count = 0;                    // reaction control (cold gas)
-    double rcs_thrust_n = 0.0;                     // per thruster
+    RcsConfig rcs;                                 // reaction control (no thrusters: none)
     std::string separation;
     std::vector<TankConfig> tanks;
     std::vector<EngineGroupConfig> engine_groups;
