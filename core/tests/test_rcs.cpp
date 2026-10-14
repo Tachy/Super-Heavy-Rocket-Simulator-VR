@@ -7,6 +7,7 @@
 
 #include "starsim/math/constants.hpp"
 #include "starsim/propulsion/rcs_allocator.hpp"
+#include "starsim/propulsion/rcs_modulator.hpp"
 
 using namespace starsim;
 using math::Vec3;
@@ -78,4 +79,35 @@ TEST_CASE("RCS allocator: lateral force without torque from a symmetric pair of 
     const double f = a.force_capability_n({0.0, 1.0, 0.0}, &d);
     CHECK(f > 3000.0);
     CHECK(norm(a.torque_nm(d)) < 0.02 * f * 30.0);
+}
+
+TEST_CASE("RCS modulator: the mean on-time follows the duty, pulses are never shorter than the minimum", "[rcs]") {
+    constexpr double dt = 0.005, min_on = 0.02;
+    for (const double duty : {0.0, 0.03, 0.1, 0.37, 0.8, 1.0}) {
+        CAPTURE(duty);
+        propulsion::RcsModulator m(1, min_on);
+        int on = 0, run = 0, shortest = 1 << 30;
+        bool previous = false;
+        const int ticks = 2000;  // 10 s
+        for (int k = 0; k < ticks; ++k) {
+            const bool f = m.update({duty}, dt)[0];
+            on += f ? 1 : 0;
+            if (f) ++run;
+            if (!f && previous) {
+                shortest = std::min(shortest, run);
+                run = 0;
+            }
+            previous = f;
+        }
+        CHECK(on * dt == Catch::Approx(duty * ticks * dt).margin(min_on + dt));
+        if (duty > 0.0 && duty < 1.0) CHECK(shortest >= static_cast<int>(std::lround(min_on / dt)));
+        if (duty == 1.0) CHECK(on == ticks);
+    }
+}
+
+TEST_CASE("RCS modulator: a duty that drops to zero leaves nothing owed", "[rcs]") {
+    propulsion::RcsModulator m(1, 0.02);
+    for (int k = 0; k < 3; ++k) m.update({0.5}, 0.005);  // owes 7.5 ms, not yet a pulse
+    m.update({0.0}, 0.005);
+    for (int k = 0; k < 2; ++k) CHECK_FALSE(m.update({0.3}, 0.005)[0]);  // starts from zero again
 }
