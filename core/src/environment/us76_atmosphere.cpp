@@ -89,10 +89,7 @@ AtmosphereState lower_atmosphere(double altitude_m) {
 }
 
 AtmosphereState upper_atmosphere(double altitude_m) {
-    if (altitude_m >= upper.back().altitude_m) {
-        return {0.0, 0.0, upper.back().temperature_k, speed_of_sound(upper.back().temperature_k),
-                std::numeric_limits<double>::infinity()};
-    }
+    if (altitude_m >= upper.back().altitude_m) return vacuum_state();
     const auto next = std::upper_bound(upper.begin(), upper.end(), altitude_m,
                                        [](double z, const UpperPoint& p) { return z < p.altitude_m; });
     const auto& hi = *next;
@@ -105,6 +102,11 @@ AtmosphereState upper_atmosphere(double altitude_m) {
 }
 
 }  // namespace
+
+AtmosphereState vacuum_state() {
+    return {0.0, 0.0, upper.back().temperature_k, speed_of_sound(upper.back().temperature_k),
+            std::numeric_limits<double>::infinity()};
+}
 
 AtmosphereState Us76Atmosphere::at(double altitude_m) const {
     altitude_m = std::max(altitude_m, -5000.0);

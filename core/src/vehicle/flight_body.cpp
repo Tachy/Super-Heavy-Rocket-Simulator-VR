@@ -193,10 +193,7 @@ Vec3 solar_radiation_acceleration(const FlightEnvironment& env, const Vehicle& v
 
 }  // namespace
 
-Vec3 earth_rotation_vector(const frames::FixedToInertial& transform) {
-    const math::Mat3 w = transform.rotation_rate_per_s * transpose(transform.rotation);
-    return {0.5 * (w(2, 1) - w(1, 2)), 0.5 * (w(0, 2) - w(2, 0)), 0.5 * (w(1, 0) - w(0, 1))};
-}
+Vec3 earth_rotation_vector(const frames::FixedToInertial& transform) { return frames::rotation_vector(transform); }
 
 FlightBody::FlightBody(std::unique_ptr<Vehicle> vehicle, const RigidBodyState& state)
     : vehicle_(std::move(vehicle)), state_(state) {}

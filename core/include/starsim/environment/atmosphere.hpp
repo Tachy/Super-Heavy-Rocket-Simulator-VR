@@ -10,6 +10,10 @@ struct AtmosphereState {
     double mean_free_path_m = 0.0;  // infinity in vacuum
 };
 
+// No atmosphere: zero density and pressure, infinite free path; the US76 exosphere temperature (1000 K) keeps the
+// speed of sound and with it the Mach number finite (the state US76 reports above 1000 km).
+AtmosphereState vacuum_state();
+
 class Atmosphere {
 public:
     virtual ~Atmosphere() = default;

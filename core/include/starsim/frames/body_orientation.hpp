@@ -27,4 +27,10 @@ public:
     virtual FixedToInertial fixed_to_gcrf(time::Epoch epoch) const = 0;
 };
 
+// Rotation vector of a body-fixed frame in GCRF axes from the transform's rate (omega_x = dR/dt * R^T).
+inline math::Vec3 rotation_vector(const FixedToInertial& transform) {
+    const math::Mat3 w = transform.rotation_rate_per_s * transpose(transform.rotation);
+    return {0.5 * (w(2, 1) - w(1, 2)), 0.5 * (w(0, 2) - w(2, 0)), 0.5 * (w(1, 0) - w(0, 1))};
+}
+
 }  // namespace starsim::frames

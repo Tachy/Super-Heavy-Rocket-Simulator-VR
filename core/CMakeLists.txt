@@ -80,6 +80,7 @@ add_library(starsim_core STATIC
     src/frames/geodetic.cpp
     src/environment/point_mass_gravity.cpp
     src/environment/eclipse.cpp
+    src/environment/reference_body.cpp
     src/orbit/kepler.cpp
     src/orbit/lambert.cpp
     src/orbit/ballistic_propagator.cpp
