@@ -27,6 +27,15 @@ public:
                          double heading_deg, double tdb_s);
     // Launch from a site of config/launch_sites.toml (with its catch tower, if it has one).
     bool launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg, double tdb_s);
+    // Ascent mission of config/missions (payload, pad, landing zone or drone ship, booster return, ascent autopilot
+    // engaged); false (error pushed) for an unknown or invalid mission.
+    bool start_mission(const godot::String& mission_id, double tdb_s);
+    // Launch site id of the current flight (launch_from_site or the mission), "" before the first.
+    godot::String mission_site_id() const { return site_id_; }
+    // Landing zone of a returning first stage: {present}; present: {origin_itrf_m (its surface: the deck top for a drone
+    // ship), east, north, up (ITRF unit vectors), latitude_deg, longitude_deg, pad_radius_m, has_deck}; with a deck also
+    // {deck_length_m, deck_width_m, freeboard_m, heading_deg (long axis, clockwise from north), sea_height_m}.
+    godot::Dictionary landing_zone() const;
     // Catch tower geometry of a site (no flight needed): {present, origin_itrf_m, east, north, up (ITRF units),
     // tower_direction, across, tower_center_m, tower_size_m, hinge_plus_m, hinge_minus_m (site frame), mount_*,
     // arm_* sizes, arm_open_rad}.
@@ -76,6 +85,13 @@ public:
     godot::Array body_engines(int index) const;
     // Flaps of a body (stations in its body frame, deflection 0 folded leeward .. 90 broadside) for rendering.
     godot::Array body_flaps(int index) const;
+    // Landing legs of a body's lowest stage: {present}; present: {deployment (0 stowed .. 1 locked), touchdown (German,
+    // "" while none), base_station_m (bottom of the stage, body frame), hull_radius_m, foot_station_m (deployed foot from
+    // the base, negative: below it), footprint_radius_m, azimuths_deg (from body +y towards +z)}. Empty for an invalid
+    // index.
+    godot::Dictionary body_legs(int index) const;
+    // Grid fins: [{station_m (body frame), azimuth_deg, radius_m (centre of pressure), area_m2, deflection_deg}].
+    godot::Array body_grid_fins(int index) const;
     godot::Dictionary telemetry(int index) const;
 
 protected:
@@ -88,6 +104,7 @@ private:
     spice::SpiceOrientation earth_ = spice::SpiceOrientation::earth();
     std::unique_ptr<sim::FlightSession> session_;
     std::filesystem::path config_dir_;
+    godot::String site_id_;
 };
 
 }  // namespace starsim::bindings

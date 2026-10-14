@@ -4,11 +4,15 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/mission_config.hpp"
+#include "starsim/frames/geodetic.hpp"
 #include "starsim/contact/tower_geometry.hpp"
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/landing_outcome.hpp"
+#include "starsim/sim/leg_landing_sim.hpp"
 
 namespace starsim::bindings {
 
@@ -34,11 +38,53 @@ bool FlightSim::launch_from_site(const godot::String& vehicle_id, const godot::S
         const auto site = config::load_launch_site(config_dir_, site_id.utf8().get_data());
         session_->launch_from_pad(vehicle_id.utf8().get_data(), sim::launch_site_from_config(site),
                                   heading_deg * constants::deg_to_rad, epoch(tdb_s));
+        site_id_ = site_id;
         return true;
     } catch (const std::exception& e) {
         godot::UtilityFunctions::push_error(godot::String("FlightSim.launch_from_site: ") + e.what());
         return false;
     }
+}
+
+bool FlightSim::start_mission(const godot::String& mission_id, double tdb_s) {
+    if (!session_) {
+        godot::UtilityFunctions::push_error("FlightSim: call setup() first");
+        return false;
+    }
+    try {
+        const auto mission = config::load_ascent_mission(config_dir_, mission_id.utf8().get_data());
+        sim::start_ascent_mission(*session_, mission, config_dir_, epoch(tdb_s));
+        site_id_ = godot::String::utf8(mission.site_id.c_str());
+        return true;
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String("FlightSim.start_mission: ") + e.what());
+        return false;
+    }
+}
+
+godot::Dictionary FlightSim::landing_zone() const {
+    godot::Dictionary d;
+    d["present"] = false;
+    if (!session_ || !session_->landing_zone()) return d;
+    const auto& zone = *session_->landing_zone();
+    const double lat = zone.latitude_rad, lon = zone.longitude_rad;
+    d["present"] = true;
+    d["origin_itrf_m"] = to_godot(frames::geodetic_to_fixed({lat, lon, zone.height_m}));
+    d["east"] = godot::Vector3(-std::sin(lon), std::cos(lon), 0.0);
+    d["north"] = godot::Vector3(-std::sin(lat) * std::cos(lon), -std::sin(lat) * std::sin(lon), std::cos(lat));
+    d["up"] = godot::Vector3(std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat));
+    d["latitude_deg"] = lat * constants::rad_to_deg;
+    d["longitude_deg"] = lon * constants::rad_to_deg;
+    d["pad_radius_m"] = zone.pad_radius_m;
+    d["has_deck"] = zone.deck.has_value();
+    if (zone.deck) {
+        d["deck_length_m"] = 2.0 * zone.deck->half_length_m;
+        d["deck_width_m"] = 2.0 * zone.deck->half_width_m;
+        d["freeboard_m"] = zone.deck->freeboard_m;
+        d["heading_deg"] = zone.deck->heading_rad * constants::rad_to_deg;
+        d["sea_height_m"] = zone.height_m - zone.deck->freeboard_m;
+    }
+    return d;
 }
 
 godot::Dictionary FlightSim::site_tower(const godot::String& site_id) const {
@@ -98,6 +144,7 @@ godot::Dictionary FlightSim::return_state(int64_t index) const {
     if (!session_ || index < 0 || static_cast<size_t>(index) >= session_->body_count()) return d;
     const auto i = static_cast<size_t>(index);
     d["outcome"] = godot::String::utf8(sim::to_string(session_->landing_outcome(i)));
+    d["legs"] = body_legs(static_cast<int>(index));
     const auto* status = session_->return_status(i);
     if (!status) return d;
     d["present"] = true;
@@ -271,6 +318,43 @@ godot::Array FlightSim::body_flaps(int index) const {
     return flaps;
 }
 
+godot::Dictionary FlightSim::body_legs(int index) const {
+    godot::Dictionary d;
+    if (!check_index(index)) return d;
+    const auto& vehicle = session_->body(index).vehicle();
+    d["present"] = vehicle.has_landing_legs();
+    if (!vehicle.has_landing_legs()) return d;
+    const auto& stage = vehicle.stages().front();
+    const auto& legs = stage.config.landing_legs;
+    d["deployment"] = vehicle.leg_deployment();
+    d["touchdown"] = godot::String::utf8(sim::to_string(session_->leg_touchdown(index)));
+    d["base_station_m"] = stage.base_station_m;
+    d["hull_radius_m"] = 0.5 * stage.config.diameter_m;
+    d["foot_station_m"] = legs.foot_station_m;
+    d["footprint_radius_m"] = legs.footprint_radius_m;
+    godot::Array azimuths;
+    for (const double a : legs.azimuths_rad) azimuths.push_back(a * constants::rad_to_deg);
+    d["azimuths_deg"] = azimuths;
+    return d;
+}
+
+godot::Array FlightSim::body_grid_fins(int index) const {
+    godot::Array fins;
+    if (!check_index(index)) return fins;
+    for (const auto& stage : session_->body(index).vehicle().stages()) {
+        for (const auto& f : stage.grid_fins) {
+            godot::Dictionary d;
+            d["station_m"] = f.geometry.station_m;
+            d["azimuth_deg"] = f.geometry.azimuth_rad * constants::rad_to_deg;
+            d["radius_m"] = f.geometry.radius_m;
+            d["area_m2"] = f.geometry.area_m2;
+            d["deflection_deg"] = f.deflection_rad * constants::rad_to_deg;
+            fins.push_back(d);
+        }
+    }
+    return fins;
+}
+
 void FlightSim::engage_ascent_autopilot(double periapsis_km, double apoapsis_km, double inclination_deg,
                                         bool northerly) {
     if (!is_active()) return;
@@ -380,6 +464,11 @@ void FlightSim::_bind_methods() {
                          &FlightSim::launch_from_pad);
     ClassDB::bind_method(D_METHOD("launch_from_site", "vehicle_id", "site_id", "heading_deg", "tdb_s"),
                          &FlightSim::launch_from_site);
+    ClassDB::bind_method(D_METHOD("start_mission", "mission_id", "tdb_s"), &FlightSim::start_mission);
+    ClassDB::bind_method(D_METHOD("mission_site_id"), &FlightSim::mission_site_id);
+    ClassDB::bind_method(D_METHOD("landing_zone"), &FlightSim::landing_zone);
+    ClassDB::bind_method(D_METHOD("body_legs", "index"), &FlightSim::body_legs);
+    ClassDB::bind_method(D_METHOD("body_grid_fins", "index"), &FlightSim::body_grid_fins);
     ClassDB::bind_method(D_METHOD("site_tower", "site_id"), &FlightSim::site_tower);
     ClassDB::bind_method(D_METHOD("tower_state"), &FlightSim::tower_state);
     ClassDB::bind_method(D_METHOD("set_booster_return", "enabled"), &FlightSim::set_booster_return);
