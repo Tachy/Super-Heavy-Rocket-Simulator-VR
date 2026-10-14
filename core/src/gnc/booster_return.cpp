@@ -151,6 +151,7 @@ BoosterReturnParameters booster_return_parameters(const std::string& stage_id, c
     }
     if (profile.return_flight_time_s > 0.0) p.flight_time_s = profile.return_flight_time_s;
     if (profile.boostback_loss_fraction >= 0.0) p.boostback_loss_fraction = profile.boostback_loss_fraction;
+    if (profile.rcs_propellant_kg >= 0.0) p.rcs_propellant_kg = profile.rcs_propellant_kg;
     if (profile.entry_burn_altitude_m > 0.0) {
         p.entry_altitude_m = profile.entry_burn_altitude_m;
         p.entry_delta_v_mps = profile.entry_burn_delta_v_mps;
@@ -411,6 +412,8 @@ double BoosterReturnGuidance::meco_propellant_kg(const vehicle::Vehicle& stack, 
         }
     }
     const double dry_kg = booster.config.dry_mass_kg + booster.extra_mass_kg;
+    // The RCS gas from the main tanks is spent on the way (counted at the end: the rocket equations see it as extra mass).
+    landing_propellant_kg += parameters.rcs_propellant_kg;
     // Entry burn (rocket equation on its delta-v): the propellant to have left after the boostback.
     double after_boostback_kg = landing_propellant_kg;
     if (parameters.entry_altitude_m > 0.0 && parameters.entry_delta_v_mps > 0.0) {

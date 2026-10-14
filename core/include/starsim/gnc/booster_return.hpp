@@ -26,6 +26,9 @@ struct BoosterReturnParameters {
     // [D] MECO planning: boostback delta-v beyond the two-body Lambert arc - the drag-aware aim point lies ~60 m/s
     // further, finite burn and tail-off ~70 m/s more (identified on our full block 3 return: 1616 vs 1488 m/s).
     double boostback_loss_fraction = 0.086;
+    // MECO planning: main-tank propellant the RCS (ullage gas thrusters) spends from MECO to landing-burn ignition (0 for
+    // a stage with its own RCS supply).
+    double rcs_propellant_kg = 0.0;
     std::vector<std::string> boostback_groups{"booster/center", "booster/divert", "booster/middle"};
     // Landing burn: starts with the inner engines (high deceleration close to the ground, small gravity
     // losses) and continues on the centre engines once these can finish it at the design throttle.

@@ -159,6 +159,7 @@ struct ReturnProfile {
     std::vector<std::pair<double, double>> landing_switch_sink_mps;  // per engine switch: sink window {min, max}
     double return_flight_time_s = 0.0;   // boostback start -> touchdown (Lambert arc)
     double boostback_loss_fraction = -1.0;  // MECO planning: boostback delta-v beyond the Lambert arc (< 0: default)
+    double rcs_propellant_kg = -1.0;        // MECO planning: main-tank RCS gas spent before landing-burn ignition (< 0: default)
     double entry_burn_altitude_m = 0.0;  // entry burn ignition while descending (0: none)
     double entry_burn_delta_v_mps = 0.0;
     double entry_burn_throttle = 0.0;

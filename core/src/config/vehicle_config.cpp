@@ -342,6 +342,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             }
             p.return_flight_time_s = doc.number_or(table, "return_flight_time_s", p.return_flight_time_s);
             p.boostback_loss_fraction = doc.number_or(table, "boostback_loss_fraction", p.boostback_loss_fraction);
+            p.rcs_propellant_kg = doc.number_or(table, "rcs_propellant_kg", p.rcs_propellant_kg);
             p.entry_burn_altitude_m = doc.number_or(table, "entry_burn_altitude_m", p.entry_burn_altitude_m);
             p.entry_burn_delta_v_mps = doc.number_or(table, "entry_burn_delta_v_mps", p.entry_burn_delta_v_mps);
             p.entry_burn_throttle = doc.number_or(table, "entry_burn_throttle", p.entry_burn_throttle);

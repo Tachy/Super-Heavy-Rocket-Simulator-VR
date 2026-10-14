@@ -252,4 +252,6 @@ TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned pr
     CHECK(ignition_propellant_kg <= faa_landing_propellant_kg);
     REQUIRE(planned_kg > 0.0);
     CHECK(std::abs(ignition_propellant_kg - planned_kg) < 3.0e3);  // model: two-body flip coast, no drag/gravity loss
+    // The MECO plan budgets the RCS gas from the main tanks (d1 review: without it 1.7 t short).
+    CHECK(ignition_propellant_kg > planned_kg - 1.0e3);
 }

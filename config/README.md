@@ -53,7 +53,8 @@ flow separation (vacuum engines).
   towards the belly at 270 deg) so the landing burn can drop the belly engine (3 -> 2); burns elsewhere run the three
   together (groups of the same engine on the same ring form one symmetric burn set).
 - `[stage.recovery] landing_propellant_kg`: booster - at landing-burn ignition (MECO is planned for it); ship - entry
-  mass in scenarios, the header-tank propellant for flip and landing burn (35 t [E]).
+  mass in scenarios, the header-tank propellant for flip and landing burn (35 t [E]). `rcs_propellant_kg`: main-tank RCS
+  gas a returning booster spends from MECO to landing-burn ignition (the MECO plan adds it; 0 with an own RCS supply).
 - `[stage.rcs]`: reaction control as individual thrusters, on/off with a fixed thrust (constant feed pressure), controlled
   by time: `isp_s`, `propellant` (`"main"`: ullage gas from the stage's oxidizer and fuel tanks, drawn in proportion to
   what is left; or the id of a `[[stage.tank]]` with `contents = "rcs"`, which needs `density_kg_m3` and is not part of
