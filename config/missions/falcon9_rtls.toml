@@ -18,7 +18,8 @@ inclination_deg = 51.6          # ISS plane
 northerly = true
 
 [pitch_program]
-kick_deg = 14.0                 # [E] c1 sweep: CRS-35 MECO T+130 s / 55.9 km (recorded 137 s / 56.6 km)
-# [D] first-stage throttle over mission time {t_s, fraction} from the CRS-35 webcast (G-force and gauge): full thrust to
-# max-Q, a bucket to ~70 % from T+50 to T+60 s, then ~92 %.
-booster_throttle = [[48.0, 1.0], [51.0, 0.7], [60.0, 0.7], [63.0, 0.92]]
+kick_deg = 12.0                 # [E] sweep: CRS-35 MECO T+137 s / 56.4 km (recorded 137 s / 56.6 km)
+# [D] first-stage throttle over mission time {t_s, fraction} from the CRS-35 webcast's G-force dial against the
+# simulated stack (425 t first stage): full thrust to max-Q (1.4 -> 1.9 g as simulated), a bucket to ~72 % from T+50 to
+# T+61 s (1.4 g), then ~95 % (simulated G within ~5 % of the dial to MECO; MECO at T+137 s as recorded).
+booster_throttle = [[49.0, 1.0], [51.0, 0.72], [60.0, 0.72], [62.0, 0.95]]

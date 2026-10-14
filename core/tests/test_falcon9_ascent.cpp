@@ -76,6 +76,15 @@ Ascent fly(const gnc::PitchProgram& program, double payload = payload_kg, double
                                slc40().height_m;
             point.speed_mps = norm(st.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), st.position_gcrf_m));
         }
+        if (std::getenv("STARSIM_DEBUG_ASCENT_G") && static_cast<int>(t) % 5 == 0 && t <= 140.0) {  // vs the webcast dials
+            const auto tr = earth.fixed_to_gcrf(session.epoch());
+            const auto tel = session.telemetry(session.controlled_index());
+            std::printf("  [g] T+%3.0f  %6.2f km  %6.0f km/h  %4.2f g  m %6.1f t  prop %6.1f t  thrust %5.2f MN  q %5.1f kPa\n",
+                        session.mission_time_s(), tel.altitude_m / 1000.0,
+                        norm(st.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), st.position_gcrf_m)) * 3.6,
+                        tel.sensed_acceleration_g, tel.mass_kg / 1000.0, tel.propellant_kg / 1000.0, tel.thrust_n / 1e6,
+                        tel.dynamic_pressure_pa / 1000.0);
+        }
         if (std::getenv("STARSIM_VERBOSE") && static_cast<int>(t) % 20 == 0) {
             std::printf("  t %4.0f  state %d  alt %7.2f km  vr %8.1f  |v| %7.1f  m %7.1f t  prop %6.1f t  thrust %5.2f MN"
                         "  tgo %6.1f  vh %7.1f  dh %7.1f km\n",
@@ -119,13 +128,13 @@ Ascent fly(const gnc::PitchProgram& program, double payload = payload_kg, double
     return a;
 }
 
-// Falcon 9 ascent profile. Throttle [D] from the CRS-35 webcast (G-force dial and stage-1 gauge): full thrust to
-// max-Q, a bucket to ~70 % from T+50 to T+60 s (the G-force falls from 1.8 to 1.4 while the mass drops), then ~92 %
-// (mass flow from G-force and gauge at T+112-132 s: 2.45-2.55 t/s of 2.69 t/s). Pitch kick [E] (sweep "[.tuning]").
+// Falcon 9 ascent profile. Throttle [D] as config/missions/falcon9_rtls.toml (CRS-35 G-force dial against the simulated
+// stack: full thrust, a ~72 % max-Q bucket T+50-61 s, then ~95 %; STARSIM_DEBUG_ASCENT_G=1 prints the simulated G).
+// Pitch kick [E] (sweep "[.tuning]").
 gnc::PitchProgram falcon9_program() {
     gnc::PitchProgram program;
-    program.kick_angle_rad = 14.0 * deg;
-    program.booster_throttle = {{48.0, 1.0}, {51.0, 0.7}, {60.0, 0.7}, {63.0, 0.92}};
+    program.kick_angle_rad = 12.0 * deg;
+    program.booster_throttle = {{49.0, 1.0}, {51.0, 0.72}, {60.0, 0.72}, {62.0, 0.95}};
     return program;
 }
 
@@ -147,10 +156,10 @@ TEST_CASE("Falcon 9 payload override changes the liftoff mass", "[sim][falcon9]"
 }
 
 TEST_CASE("Falcon 9 pitch kick sweep", "[.tuning]") {
-    for (double kick_deg : {10.0, 12.0, 13.0, 14.0, 15.0, 16.0}) {
+    for (double kick_deg : {11.0, 11.5, 12.0, 12.5, 13.0}) {
         auto program = falcon9_program();
         program.kick_angle_rad = kick_deg * deg;
-        fly(program, 12500.0, 61000.0, nullptr, false);
+        fly(program, 12500.0, 66000.0, nullptr, false);
     }
 }
 
@@ -167,14 +176,14 @@ TEST_CASE("Autopilot flies Falcon 9 from SLC-40 into a 200 km orbit", "[gnc][val
 
 TEST_CASE("Falcon 9 ascent follows the CRS-35 webcast telemetry", "[gnc][validation][ascent][falcon9]") {
     // CRS-35 (tests/validation/telemetry/f9_crs35_2026-10-13.csv): stack speed (Earth-relative) and altitude, MECO at
-    // T+137 s with ~15.5 % = 61 t in the first stage (gauge) for the return. Payload: cargo Dragon with trunk [E].
+    // T+137 s with ~15.5 % = 66 t in the first stage (gauge) for the return. Payload: cargo Dragon with trunk [E].
     struct Recorded {
         double t_s, altitude_km, speed_kmh;
     };
     const Recorded recorded[] = {{30.0, 1.4, 485.0}, {60.0, 7.8, 1188.0}, {90.0, 20.2, 2474.0}, {120.0, 40.6, 4672.0}};
     std::vector<ProfilePoint> profile;
     for (const auto& r : recorded) profile.push_back({r.t_s, 0.0, 0.0});
-    const auto a = fly(falcon9_program(), 12500.0, 61000.0, &profile, false);
+    const auto a = fly(falcon9_program(), 12500.0, 66000.0, &profile, false);
     for (size_t i = 0; i < profile.size(); ++i) {
         std::printf("[validation] CRS-35 T+%.0f s: recorded %.1f km %.0f km/h, simulated %.1f km %.0f km/h\n",
                     recorded[i].t_s, recorded[i].altitude_km, recorded[i].speed_kmh, profile[i].altitude_m / 1e3,
