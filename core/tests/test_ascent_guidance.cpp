@@ -291,3 +291,46 @@ TEST_CASE("Small burn uses a reduced engine configuration and stays accurate", "
     CHECK(std::abs(el.semi_major_axis_m - expected_a) < 1500.0);  // ~0.4 m/s
     (void)v_after;
 }
+
+TEST_CASE("An RCS burn uses the thrusters' force and mass flow along +x", "[rcs][burn]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    environment::PointMassGravityConfig two_body;
+    two_body.moon = two_body.sun = two_body.earth_j2 = false;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR, two_body);
+    const double gm = session.gm_earth_m3ps2();
+    const auto t0 = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
+    const orbit::KeplerianElements circular{equatorial_radius_m + 300e3, 0.0, 26.5 * deg, 0.0, 0.0, 0.0};
+    session.place_in_orbit("starship_block3", orbit::state_from_elements(circular, gm), t0, 1);
+    const auto s = session.body(0).state();
+    const auto at_node = orbit::propagate_two_body({s.position_gcrf_m, s.velocity_gcrf_mps}, gm, 600.0);
+    REQUIRE(session.execute_burn({t0 + 600.0, math::normalized(at_node.velocity_mps) * 0.5}));
+    const auto& c = session.burn_configuration();
+    CHECK(c.rcs);
+    const auto capability = session.body(0).vehicle().rcs_force_capability({1.0, 0.0, 0.0});
+    CHECK(c.thrust_n == Catch::Approx(capability.force_n));
+    // The ship's two aft forward thrusters at Isp 70 s: 2 x 1500 / (70 x 9.81) = 4.4 kg/s at full output.
+    CHECK(c.mass_flow_kgps > 0.1);
+    CHECK(c.mass_flow_kgps == Catch::Approx(capability.mass_flow_kgps));
+}
+
+TEST_CASE("A stage without forward thrusters refuses an RCS burn", "[rcs][burn]") {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    environment::PointMassGravityConfig two_body;
+    two_body.moon = two_body.sun = two_body.earth_j2 = false;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR, two_body);
+    const double gm = session.gm_earth_m3ps2();
+    const auto t0 = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
+    auto booster = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    booster.stages.pop_back();  // Super Heavy alone: no thruster points along +x
+    const orbit::KeplerianElements circular{equatorial_radius_m + 300e3, 0.0, 26.5 * deg, 0.0, 0.0, 0.0};
+    const auto sv = orbit::state_from_elements(circular, gm);
+    session.place_body(booster, {sv.position_m, sv.velocity_mps, {}, {}}, t0);
+    CHECK(session.body(0).vehicle().rcs_force_capability({1.0, 0.0, 0.0}).force_n < 1.0);
+    const auto at_node = orbit::propagate_two_body(sv, gm, 600.0);
+    CHECK_FALSE(session.execute_burn({t0 + 600.0, math::normalized(at_node.velocity_mps) * 0.5}));
+    CHECK(std::isfinite(session.body(0).state().position_gcrf_m.x));
+}

@@ -171,8 +171,8 @@ public:
     double gm_earth_m3ps2() const { return gm_earth_; }
 
     // Manoeuvre execution on the controlled body (RCS orientation, timed ignition, closed-loop cutoff).
-    // Rejects burns smaller than the main engines' start + shutdown impulse (they would overshoot);
-    // fine corrections need RCS translation (M9).
+    // Burns smaller than the main engines' start + shutdown impulse (they would overshoot) fly on RCS translation
+    // along +x (the thrusters' force and mass flow), when the vehicle has thrusters along +x; else they are rejected.
     bool execute_burn(const gnc::BurnNode& node);
     // On a given engine set (config group ids of the lowest stage with engines, e.g. the deorbit set): full throttle if
     // its start/shutdown impulse is at most a quarter of the burn, else minimum throttle; false if neither fits. The hull

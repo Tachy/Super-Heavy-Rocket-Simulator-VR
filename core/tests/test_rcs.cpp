@@ -123,6 +123,29 @@ TEST_CASE("RCS allocator: lateral force without torque from a symmetric pair of 
     CHECK(norm(a.torque_nm(d)) < 0.02 * f * 30.0);
 }
 
+TEST_CASE("RCS allocator: a balanced layout turns at full capability without a net force", "[rcs]") {
+    // Rings fore and aft plus two forward (ullage) thrusters aft: pure couples on every axis. A saturated turn must not
+    // borrow the forward thrusters (a push the attitude controller did not ask for).
+    auto t = ring(46.0, 4.5, 1500.0, {0, 180});
+    const auto aft = ring(6.0, 4.5, 1500.0, {0, 180});
+    t.insert(t.end(), aft.begin(), aft.end());
+    t.push_back({{6.0, 4.5, 0.0}, {1.0, 0.0, 0.0}, 1500.0});
+    t.push_back({{6.0, -4.5, 0.0}, {1.0, 0.0, 0.0}, 1500.0});
+    const RcsAllocator a(t, 20.0);
+    CHECK(a.balanced());
+    const Vec3 cap = a.max_torque_nm();
+    for (const Vec3 want : {Vec3{cap.x, 0.0, 0.0}, Vec3{0.0, -cap.y, 0.0}, Vec3{0.0, 0.0, cap.z}}) {
+        CAPTURE(want.x, want.y, want.z);
+        const auto d = a.allocate(want, {});
+        CHECK(norm(a.force_n(d)) < 1.0);
+        CHECK(norm(a.torque_nm(d) - want) < 0.01 * norm(want));
+    }
+    // Beyond the capability (all axes at once) the demand is cut and the force stays small.
+    CHECK(norm(a.force_n(a.allocate(cap * 2.0, {}))) < 0.01 * 1500.0);  // finite force weight: a small leak
+    // A single ring has no pure pitch couple: it turns with a push (torque first).
+    CHECK_FALSE(RcsAllocator(ring(68.0, 4.5, 3000.0, {45, 135, 225, 315}), 30.0).balanced());
+}
+
 TEST_CASE("RCS modulator: the mean on-time follows the duty, pulses are never shorter than the minimum", "[rcs]") {
     constexpr double dt = 0.005, min_on = 0.02;
     for (const double duty : {0.0, 0.03, 0.1, 0.37, 0.8, 1.0}) {

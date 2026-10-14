@@ -297,8 +297,9 @@ bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<Burn
         // and the burn takes less than an hour.
         const auto& vehicle = bodies_[controlled_].body->vehicle();
         rcs.rcs = true;
-        rcs.thrust_n = vehicle.rcs_force_capability({1.0, 0.0, 0.0}).force_n;  // the burn points +x along it
-        rcs.mass_flow_kgps = 1e-9;  // cold gas (ullage) mass neglected [E]
+        const auto capability = vehicle.rcs_force_capability({1.0, 0.0, 0.0});  // the burn points +x along it
+        rcs.thrust_n = capability.force_n;
+        rcs.mass_flow_kgps = capability.mass_flow_kgps;
         if (rcs.thrust_n > 0.0 && dv / (rcs.thrust_n / vehicle.mass_properties().mass_kg) < 3600.0) {
             chosen = &rcs;
         }
@@ -817,9 +818,13 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                 frames::fixed_to_geodetic(transpose(t.rotation) * body.state().position_gcrf_m).height_m;
             const auto command = command_for(i, atmosphere_.at(altitude).pressure_pa);
             body.step(env_, epoch_, tick_s, command);
-            if (i == controlled_) {  // what the thrusters that fired gave (pulses), for the burn executor
+            if (i == controlled_) {
+                // What the thrusters that fired gave (pulses), for the burn executor - only while a translation is
+                // commanded: the net force of attitude pulses before ignition would otherwise start the burn early.
                 last_rcs_acceleration_ =
-                    body.state().attitude.rotate(body.rcs_force_body_n()) / body.vehicle().mass_properties().mass_kg;
+                    norm(command.rcs_force_fraction) > 0.0
+                        ? body.state().attitude.rotate(body.rcs_force_body_n()) / body.vehicle().mass_properties().mass_kg
+                        : math::Vec3{};
             }
         }
         if (tower_) tower_->after_tick(pointers, earth_, epoch_ + tick_s, tick_s);
