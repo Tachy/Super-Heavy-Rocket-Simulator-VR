@@ -28,7 +28,9 @@ the controllers keep their meaning. Only the capability now comes from geometry.
 - A thruster's `direction` is the force on the vehicle. The plume points the other way.
 - Provenance tags on every config value ([S], [E], [D]). Layout positions are [E] from imagery.
 - No magic numbers in code. Weights, tolerances and iteration limits are named constants with a comment.
-- Pulsed is the default fidelity. `RcsFidelity::Continuous` is the switch (session setting).
+- Thrusters are on/off with a fixed thrust (constant pressure), controlled by time only; no continuous mode. The
+  autopilots fly on the pulses too (user 2026-10-14). Not modelled: thrust rise/tail-off, short-pulse Isp loss,
+  pressure blowdown.
 - Liftoff masses must not change: a new RCS tank is carved out of the stage's dry mass.
 - Existing campaigns must keep their outcome: Super Heavy catch 21/21, ship from orbit 14/14, ship from the gate
   20/21, Falcon 9 RTLS 21/21 and ASDS 21/21 + 21/21. If one degrades, check the layout first; a controller retune is
@@ -446,14 +448,11 @@ struct RcsConfig {
 // StageConfig: `RcsConfig rcs;` replaces rcs_thruster_count / rcs_thrust_n.
 
 // vehicle
-enum class RcsFidelity { Pulsed, Continuous };
 struct RcsThruster { std::string id; math::Vec3 position_m; math::Vec3 direction; double thrust_n = 0.0;
                      double isp_s = 0.0; int tank = -1;  /* -1: main tanks */ double output = 0.0;  /* 0..1 */
                      bool starved = false; };
 // Stage: std::vector<RcsThruster> rcs;
 // Vehicle:
-void set_rcs_fidelity(RcsFidelity fidelity);
-RcsFidelity rcs_fidelity() const;
 void update_rcs(double dt_s, const VehicleCommand& command);   // allocation + modulation for this tick
 math::Vec3 rcs_torque_nm() const;   // of the outputs set by update_rcs, about the CG at that time
 math::Vec3 rcs_force_n() const;     // body axes
@@ -500,16 +499,17 @@ TEST_CASE("RCS tanks do not change the liftoff mass and stay out of the propella
 }
 
 TEST_CASE("A roll command spins the Falcon 9 second stage and draws its nitrogen", "[rcs][vehicle]") {
-    // Second stage alone in zero gravity, continuous fidelity: roll acceleration = capability / Ixx, N2 drawn at
-    // sum(output * F) / (Isp g0).
+    // Second stage alone in zero gravity: at a full roll command the tangential thrusters fire every tick, so the
+    // roll acceleration = capability / Ixx; N2 drawn at sum(firing * F) / (Isp g0).
     // (build the stack, separate(1), wrap the upper part in a FlightBody at rest, step 2 s at 200 Hz with
     //  rcs_torque_fraction = {1, 0, 0})
     // CHECK: roll rate == Approx(2 s * max_rcs_torque_nm().x / Ixx).epsilon(0.03); |pitch|,|yaw rate| < 1 % of it;
     //        linear speed < 0.01 m/s; N2 used == Approx(expected).epsilon(0.02).
 }
 
-TEST_CASE("Pulsed and continuous RCS give the same mean torque", "[rcs][vehicle]") {
-    // Same setup, rcs_torque_fraction = {0.13, 0, 0}, 4 s, both fidelities: roll rates agree within 5 %.
+TEST_CASE("A small roll command gives its mean torque in pulses", "[rcs][vehicle]") {
+    // Same setup, rcs_torque_fraction = {0.13, 0, 0}, 4 s: roll rate == Approx(4 s * 0.13 * max_rcs_torque_nm().x / Ixx)
+    // .epsilon(0.05); every thruster's firing runs last >= 4 ticks (record the outputs per tick).
 }
 
 TEST_CASE("An empty RCS tank starves its thrusters", "[rcs][vehicle]") {
@@ -709,14 +709,10 @@ Then run `python tools/vehicle_report.py falcon9_block5` and `starship_block3`. 
       force = u * (std::min(m, 1.0) * a.force_capability_n(u));
   }
   rcs_duty_ = a.allocate(torque, force, &rcs_duty_);
-  if (fidelity_ == RcsFidelity::Pulsed) {
-      if (rcs_modulator_.firing().size() != rcs_duty_.size())
-          rcs_modulator_ = propulsion::RcsModulator(rcs_duty_.size(), minimum_on_time());
-      const auto& firing = rcs_modulator_.update(rcs_duty_, dt_s);
-      // output_i = firing_i ? 1 : 0
-  } else {
-      // output_i = duty_i
-  }
+  if (rcs_modulator_.firing().size() != rcs_duty_.size())
+      rcs_modulator_ = propulsion::RcsModulator(rcs_duty_.size(), minimum_on_time());
+  const auto& firing = rcs_modulator_.update(rcs_duty_, dt_s);
+  // output_i = firing_i ? 1 : 0 (fixed thrust, on/off only)
   rcs_torque_ = a.torque_nm(outputs); rcs_force_ = a.force_n(outputs);
   ```
   `minimum_on_time()` is the smallest `minimum_on_time_s` among the stages that have thrusters. Store `output` on each
@@ -726,7 +722,6 @@ Then run `python tools/vehicle_report.py falcon9_block5` and `starship_block3`. 
 - `consume_propellant()`: an empty rcs tank starves its thrusters. A dry stage (as for the engines) starves its main
   thrusters. A change resets the allocator cache.
 - `separate()`: re-base thruster `position_m.x -= shift`, and reset the allocator cache and modulator on both parts.
-  Copy the fidelity to the upper part.
 - Remove `max_rcs_force_n()`. Callers move to `rcs_force_capability(...)` in Task 4; until then FlightSession uses
   `rcs_force_capability({1,0,0}).force_n` at line 300 and the realised force at line 820 (minimal edits, completed
   in Task 4).
@@ -754,13 +749,12 @@ git commit -m "feat(vehicle): RCS as individual thrusters with propellant and pu
 
 **Files:**
 - Modify: `core/include/starsim/sim/flight_session.hpp` + `core/src/sim/flight_session.cpp` (RCS burn configuration,
-  realised acceleration, `set_rcs_fidelity`), `CLAUDE.md`, `config/README.md`
+  realised acceleration), `CLAUDE.md`, `config/README.md`
 - Test: `core/tests/test_rcs.cpp` (append), existing campaigns
 
 **Interfaces:**
-- Consumes: `Vehicle::rcs_force_capability`, `FlightBody::rcs_force_body_n`, `RcsFidelity` (Task 3).
-- Produces: `void FlightSession::set_rcs_fidelity(vehicle::RcsFidelity fidelity);`. This applies to every body now
-  and later; bodies created by separation inherit it through `Vehicle::separate`.
+- Consumes: `Vehicle::rcs_force_capability`, `FlightBody::rcs_force_body_n` (Task 3).
+- Produces: nothing new for later tasks.
 
 - [ ] **Step 1: Write the failing tests** (append):
 
@@ -792,8 +786,6 @@ Run: `build/core/tests/starsim_core_tests.exe "[rcs][burn]"`. Expected: the mass
   ```
 - Realised acceleration (`flight_session.cpp:819-822`): move it after `body.step(...)`:
   `last_rcs_acceleration_ = body.state().attitude.rotate(body.rcs_force_body_n()) / body.vehicle().mass_properties().mass_kg;`
-- `set_rcs_fidelity`: store it, apply it to all bodies, and apply it in the places where bodies are created
-  (`launch_from_pad`, `place_*`).
 
 - [ ] **Step 4: Run the new tests and the RCS burn test**
 
@@ -818,7 +810,7 @@ Focus 1). A changed value, or a controller retune, is a ledgered `Ruling:` with 
 
 `CLAUDE.md`: in "Architecture", add `propulsion` (RCS allocator + modulator) to the implemented list. Add a bullet
 under "Known issues"/Game structure: RCS as individual thrusters (`[stage.rcs]` pods/thrusters, allocator
-torque-priority box least squares, sigma-delta pulses with minimum on-time, `RcsFidelity`, main-tank gas on
+torque-priority box least squares, on/off pulses with fixed thrust and a minimum on-time (no continuous mode), main-tank gas on
 Starship/Super Heavy, N2 tanks on Falcon 9), with the propellant numbers from Step 5. Remove "RCS translation comes with
 docking, M9" only where it is no longer true (burns below the minimum still pick RCS). `config/README.md`: the
 `[stage.rcs]` keys, `[[stage.rcs.pod]]` directions vocabulary, `[[stage.rcs.thruster]]`, and tank `contents = "rcs"`

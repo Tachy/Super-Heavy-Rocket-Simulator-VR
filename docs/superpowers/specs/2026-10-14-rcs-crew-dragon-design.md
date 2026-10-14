@@ -102,8 +102,10 @@ time reaches `minimum_on_time_s`. A thruster that has fired keeps firing while i
 pulses rather than a continuous trickle: this produces the limit cycle of real attitude hold. The force and moment in
 a tick are the sum over the firing thrusters (`r_i x F_i` about the current CG). Each firing thruster's mass flow
 `F / (Isp g0)` is drawn from its tank. When the tank is empty the thruster is starved, as an engine would be.
-Fidelity flag `RcsFidelity::{Pulsed, Continuous}` (session setting). Continuous applies the duties directly and is
-used by planning models and as a switch for tests. Pulsed is the default.
+Thrusters are on/off only with a fixed thrust (constant feed pressure; user 2026-10-14: "konstanten Druck annehmen
+... fest annehmen und nur über die Zeit steuern. Autopilot arbeitet dann auch damit"). There is no continuous-thrust
+mode: autopilots and manual flight both fly on the pulses. Not modelled (documented): thrust rise and tail-off
+within a pulse, the Isp loss of short pulses, and thrust falling with the tank pressure.
 
 ### Callers
 `AttitudeController` keeps its torque law and passes the remainder to `Vehicle::allocate_rcs`. Its rate limit uses
@@ -218,8 +220,8 @@ deorbit, crew displays.
 
 ## Choices made for the review (the user may change them)
 
-1. RCS fidelity: sigma-delta pulses with a minimum on-time (pulsed by default, continuous as a fidelity flag), rather
-   than true sub-tick pulse widths. Reason: it keeps the fixed 200 Hz tick. The cost is that impulses come in 5 ms
+1. RCS: on/off pulses with fixed thrust (constant pressure) and a minimum on-time, sigma-delta in whole ticks
+   rather than true sub-tick pulse widths; no continuous mode (user 2026-10-14). Reason: it keeps the fixed 200 Hz tick. The cost is that impulses come in 5 ms
    steps, about 2 Ns for a Draco.
 2. Starship and Super Heavy RCS draw gas from the main tanks (no separate tank). Reason: the real vehicles use
    autogenous ullage gas.
