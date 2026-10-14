@@ -60,6 +60,7 @@ RcsConfig load_rcs(const Document& doc, const toml::table& rcs, const std::vecto
             const double thrust = doc.positive(p, "thrust_n");
             const auto azimuths = number_list(doc, p, "azimuths_deg");
             const auto directions = text_list(doc, p, "directions");
+            const bool behind = p["behind_nose_cone"].value_or(false);
             for (size_t k = 0; k < azimuths.size(); ++k) {
                 const double a = azimuths[k] * constants::deg_to_rad;
                 const math::Vec3 radial{0.0, std::cos(a), std::sin(a)}, tangential{0.0, -std::sin(a), std::cos(a)};
@@ -72,7 +73,7 @@ RcsConfig load_rcs(const Document& doc, const toml::table& rcs, const std::vecto
                     else if (d == "aft") direction = {-1.0, 0.0, 0.0};
                     else doc.fail("stage.rcs.pod.directions: unknown '" + d + "'");
                     out.thrusters.push_back({id + "_" + std::to_string(k + 1) + "_" + d,
-                                             math::Vec3{station, 0.0, 0.0} + radial * radius, direction, thrust});
+                                             math::Vec3{station, 0.0, 0.0} + radial * radius, direction, thrust, behind});
                 }
             }
         }
@@ -88,7 +89,7 @@ RcsConfig load_rcs(const Document& doc, const toml::table& rcs, const std::vecto
             const math::Vec3 d{direction[0], direction[1], direction[2]};
             if (!(math::norm(d) > 0.0)) doc.fail("stage.rcs.thruster direction must not be zero");
             out.thrusters.push_back({doc.text(q, "id"), {position[0], position[1], position[2]}, math::normalized(d),
-                                     doc.positive(q, "thrust_n")});
+                                     doc.positive(q, "thrust_n"), q["behind_nose_cone"].value_or(false)});
         }
     }
     if (out.thrusters.empty()) doc.fail("stage.rcs needs [[stage.rcs.pod]] or [[stage.rcs.thruster]] entries");
@@ -155,6 +156,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     s.jettison_after_separation_kg = doc.number_or(t, "jettison_after_separation_kg", 0.0);
     s.radiation_pressure_coefficient = doc.number_or(t, "radiation_pressure_coefficient", 1.3);
     s.separation = doc.text_or(t, "separation");
+    s.nose_cone = t["nose_cone"].value_or(false);
 
     if (auto tanks = t["tank"].as_array()) {
         for (const auto& node : *tanks) {
@@ -176,6 +178,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             s.engine_groups.push_back({doc.text(g, "id"), doc.text(g, "engine"),
                                        static_cast<int>(doc.number(g, "count")), doc.number(g, "ring_radius_m"),
                                        doc.boolean(g, "gimbal"), doc.boolean(g, "relight"), {}});
+            s.engine_groups.back().abort_only = g["abort_only"].value_or(false);
             if (const auto* angles = g["angles_deg"].as_array()) {
                 for (const auto& a : *angles) {
                     const auto value = a.value<double>();
@@ -273,6 +276,9 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.landing_legs.friction = doc.positive(*legs, "friction");
     }
     if (auto rcs = t["rcs"].as_table()) s.rcs = load_rcs(doc, *rcs, s.tanks);
+    for (const auto& thruster : s.rcs.thrusters) {
+        if (thruster.behind_nose_cone && !s.nose_cone) doc.fail("stage.rcs: behind_nose_cone needs nose_cone = true on the stage");
+    }
     if (auto recovery = t["recovery"].as_table()) {
         s.reserve_propellant_kg = doc.number_or(*recovery, "reserve_propellant_kg", 0.0);
         s.landing_propellant_kg = doc.number_or(*recovery, "landing_propellant_kg", 0.0);
@@ -406,6 +412,23 @@ VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_
         }
     }
     return v;
+}
+
+VehicleConfig stack_payload(VehicleConfig launcher, const VehicleConfig& payload) {
+    for (const auto& p : payload.stages) {
+        for (const auto& l : launcher.stages) {
+            if (l.id == p.id) throw ConfigError("stack_payload: stage id '" + p.id + "' occurs in both vehicles");
+        }
+    }
+    launcher.stages.back().payload_mass_kg = 0.0;
+    for (auto stage : payload.stages) {
+        stage.payload = true;
+        launcher.stages.push_back(std::move(stage));
+    }
+    for (const auto& [id, engine] : payload.engines) launcher.engines.emplace(id, engine);
+    launcher.id += "+" + payload.id;
+    launcher.name += " / " + payload.name;
+    return launcher;
 }
 
 std::vector<double> CsvTable::column(std::string_view name) const {

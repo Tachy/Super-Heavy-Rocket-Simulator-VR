@@ -62,6 +62,7 @@ struct RcsThrusterConfig {
     math::Vec3 position_m;  // station along the stage axis from the stage bottom, y, z (body axes)
     math::Vec3 direction;   // unit; the force on the vehicle (the plume points the other way)
     double thrust_n = 0.0;
+    bool behind_nose_cone = false;  // fires only with the stage's nose cone open
 };
 
 // [stage.rcs]: pods ([[stage.rcs.pod]]) are expanded into thrusters by the loader.
@@ -80,6 +81,7 @@ struct EngineGroupConfig {
     bool gimbal = false;
     bool relight = false;
     std::vector<double> angles_rad;  // explicit ring angles (one per engine); empty: evenly spaced from 0
+    bool abort_only = false;         // launch escape (SuperDraco): data only, never lit by the session
 };
 
 struct AeroConfig {
@@ -196,6 +198,8 @@ struct StageConfig {
     double radiation_pressure_coefficient = 1.3;  // Cr for solar radiation pressure
     RcsConfig rcs;                                 // reaction control (no thrusters: none)
     std::string separation;
+    bool nose_cone = false;  // a hinged nose cone (Crew Dragon): thrusters behind it fire only while it is open
+    bool payload = false;    // a payload vehicle's stage (config::stack_payload): its RCS waits until it flies alone
     std::vector<TankConfig> tanks;
     std::vector<EngineGroupConfig> engine_groups;
     AeroConfig aero;
@@ -218,6 +222,10 @@ struct VehicleConfig {
 
 // Loads config/vehicles/<vehicle_id>.toml plus the referenced propellant and engine files.
 VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_view vehicle_id);
+
+// The launcher with a payload vehicle on top (a mission's [payload]): the payload's stages follow the launcher's, marked
+// `payload`; the top launcher stage carries no payload mass. Throws ConfigError if a stage id occurs twice.
+VehicleConfig stack_payload(VehicleConfig launcher, const VehicleConfig& payload);
 
 // Numeric CSV table: '#' comment lines, one header line, then rows of numbers.
 struct CsvTable {

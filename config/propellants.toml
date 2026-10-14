@@ -15,3 +15,11 @@ fuel = "RP-1"
 mixture_ratio = 2.36              # Merlin 1D [E: commonly cited]
 oxidizer_density_kg_m3 = 1200.0   # densified LOX on Falcon 9 (~66 K) [E]
 fuel_density_kg_m3 = 830.0        # chilled RP-1 [E]
+
+[[propellant]]
+id = "mmh_nto"
+oxidizer = "N2O4"
+fuel = "MMH"
+mixture_ratio = 1.65              # [E] typical for Draco-class thrusters
+oxidizer_density_kg_m3 = 1440.0   # [S: NTO at 20 C]
+fuel_density_kg_m3 = 880.0        # [S: MMH at 20 C]

@@ -63,7 +63,10 @@ flow separation (vacuum engines).
   +y towards +z), `thrust_n`, `directions` (at each azimuth one thruster per entry: `tangential_plus`,
   `tangential_minus`, `inward` (force towards the axis, plume outwards), `forward` (+x, plume aft), `aft`) - and/or
   single `[[stage.rcs.thruster]]` - `id`, `position_m` [station, y, z], `direction` (force on the vehicle), `thrust_n`.
-  An RCS tank's mass is part of the stage's real dry mass: carve it out of `dry_mass_kg`.
+  An RCS tank's mass is part of the stage's real dry mass: carve it out of `dry_mass_kg`. `behind_nose_cone = true` (pod
+  or thruster): fires only while the stage's nose cone is open (`[[stage]] nose_cone = true`, Crew Dragon).
+- `[[stage.engine_group]] abort_only = true`: launch escape engines (SuperDraco), loaded as data and never lit by the
+  session (milestone d2).
 - `[stage.catch_pins]`: hardpoints the tower arms catch, one per entry of `azimuths_deg` (from body +y
   towards +z, like the grid fins), `station_m` (from the bottom of the stage), `protrusion_m` (beyond the
   hull), `max_load_n` (structural limit per pin; above it the catch is an impact).
@@ -110,6 +113,9 @@ flow separation (vacuum engines).
   `[pitch_program]` `kick_deg` and `booster_throttle` (`[t_s, fraction]` pairs, increasing times).
 - `falcon9_asds.toml`: the same keys; instead of a `landing_zone` a `[drone_ship]` table (`id`, `latitude_deg`,
   `longitude_deg`, `heading_deg` of the deck's long axis, `sea_height_m` above WGS84): the first stage lands on its deck.
+
+- Payload vehicles: `config::stack_payload` stacks a vehicle (e.g. `crew_dragon`) on the launcher; its stages are
+  `payload` stages, whose thrusters stay blocked until the payload flies alone.
 
 ## Adding another rocket
 1. Add missing engines under `engines/`.

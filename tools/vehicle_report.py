@@ -96,7 +96,18 @@ def report(vehicle_id: str, payload_kg: float) -> int:
         reserve = stage.get("recovery", {}).get("reserve_propellant_kg", 0.0)
         usable = propellant - reserve
 
-        groups = [(g, Engine.load(g["engine"])) for g in stage["engine_group"]]
+        all_groups = [(g, Engine.load(g["engine"])) for g in stage.get("engine_group", [])]
+        groups = [(g, e) for g, e in all_groups if not g.get("abort_only", False)]
+        if propellant <= 0.0 or not groups:
+            # No main propulsion (e.g. Crew Dragon's capsule and trunk): masses, supplies and abort-only engines only.
+            print(f"--- {stage['name']}")
+            print(f"  dry {dry / 1e3:9.1f} t (incl. RCS supplies)   no main propellant")
+            for tank in stage.get("tank", []):
+                print(f"  tank {tank['id']:<10} {tank['mass_kg'] / 1e3:8.3f} t  ({tank['contents']})")
+            for group, engine in all_groups:
+                print(f"  {group['count']:2d} x {engine.id:<15} SL {engine.thrust_n(P0_PA) / 1e3:7.0f} kN   abort only")
+            print()
+            continue
         mdot = sum(g["count"] * e.mass_flow_kgps for g, e in groups)
         thrust_sl = sum(g["count"] * e.thrust_n(P0_PA) for g, e in groups
                         if e.max_ambient_pressure_pa >= P0_PA)

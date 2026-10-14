@@ -1,0 +1,35 @@
+# SpaceX SuperDraco - Crew Dragon launch escape engine (data only in d2: an abort_only group, never lit)
+[sources]
+wiki_superdraco = "https://en.wikipedia.org/wiki/SuperDraco (commonly cited values)"
+
+[engine]
+id = "superdraco"
+name = "SuperDraco"
+cycle = "pressure-fed"
+propellant = "mmh_nto"
+mixture_ratio = 1.65                 # [E]
+chamber_pressure_pa = 69e5           # [S:wiki_superdraco]
+
+[performance]
+reference_pressure_pa = 101325.0
+thrust_ref_n = 71e3                  # [S:wiki_superdraco] sea level
+isp_ref_s = 235.0                    # [S:wiki_superdraco]
+nozzle_exit_diameter_m = 0.25        # [E]
+max_ambient_pressure_pa = 101325.0
+
+[throttle]
+min = 0.2                            # [S:wiki_superdraco] 20-100 %
+max = 1.00
+rate_per_s = 5.0                     # [E]
+
+[gimbal]
+max_angle_deg = 0.0                  # fixed, canted in pairs
+rate_deg_s = 0.0
+
+[mass]
+dry_kg = 0.0                         # in the capsule's dry mass
+vehicle_side_hardware_kg = 0.0
+
+[timing]
+startup_s = 0.1                      # [S:wiki_superdraco] full thrust in 100 ms
+shutdown_s = 0.1                     # [E]

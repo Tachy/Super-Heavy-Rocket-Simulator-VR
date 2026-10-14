@@ -1,0 +1,80 @@
+# Crew Dragon (SpaceX Dragon 2, crew version) - capsule on its trunk. Flies as the payload of falcon9_block5
+# (config::stack_payload via a mission's [payload] table) or alone in orbit. Milestone d2: orbital flight on the Dracos;
+# aerodynamics, heat shield and parachutes follow in d3/d4.
+
+[sources]
+wiki_dragon2 = "https://en.wikipedia.org/wiki/SpaceX_Dragon_2 (commonly cited values)"
+
+[vehicle]
+id = "crew_dragon"
+name = "Crew Dragon"
+display_name = "Crew Capsule"
+propellant = "mmh_nto"
+stages_bottom_to_top = ["trunk", "capsule"]
+
+[[stage]]
+id = "trunk"
+name = "Crew Dragon trunk"
+length_m = 3.7                           # [D] 8.1 m with the trunk [S:wiki_dragon2] minus the 4.4 m capsule
+diameter_m = 3.7                         # [E] on the 3.66 m second stage
+dry_mass_kg = 1500.0                     # [E] solar arrays and radiators included, not modelled separately
+dry_cg_station_m = 1.6                   # [E]
+separation = "spring"
+
+[[stage]]
+id = "capsule"
+name = "Crew Dragon capsule"
+length_m = 4.4                           # [S:wiki_dragon2] with the nose cone
+diameter_m = 4.0                         # [S:wiki_dragon2]
+dry_mass_kg = 8438.0                     # [D] 12.5 t launch mass [S:wiki_dragon2] - 2,562 kg propellant - 1.5 t trunk;
+                                         # includes the crew of four and their seats
+dry_cg_station_m = 1.3                   # [E] low in the blunt body (the lift offset follows in d3)
+separation = "spring"                    # [E] from the trunk (d3)
+nose_cone = true                         # [S] hinged; closed for ascent and entry, open in orbit
+
+[[stage.tank]]
+id = "mmh_nto"
+contents = "rcs"
+mass_kg = 2562.0                         # [S:wiki_dragon2] shared by Dracos and SuperDracos
+density_kg_m3 = 1162.0                   # [D] NTO/MMH at O/F 1.65 (1440 / 880 kg/m^3)
+base_station_m = 0.4                     # [E] tanks in the service section above the heat shield
+
+[stage.rcs]
+type = "hypergolic"                      # Draco, MMH/NTO
+isp_s = 300.0                            # [S:wiki_dragon2] vacuum
+propellant = "mmh_nto"
+minimum_on_time_s = 0.01                 # [E] 2 ticks: Draco valves pulse shorter than cold-gas ones
+
+# [E] layout: no public drawing. Four Dracos under the nose cone push aft (plume forward: the deorbit / -x set, usable
+# only with the cone open); four side pods with tangential +/- and a forward-pushing thruster give pure couples on all
+# axes (balanced layout) and +x translation. Lateral translation (docking) is left to M9.
+[[stage.rcs.pod]]
+id = "nose"
+station_m = 3.9                          # [E] forward bulkhead
+radius_m = 0.6                           # [E]
+azimuths_deg = [45.0, 135.0, 225.0, 315.0]
+thrust_n = 400.0                         # [S:wiki_dragon2]
+directions = ["aft"]
+behind_nose_cone = true
+
+[[stage.rcs.pod]]
+id = "side"
+station_m = 2.4                          # [E] on the 15 deg sidewall
+radius_m = 1.5                           # [E]
+azimuths_deg = [0.0, 90.0, 180.0, 270.0]
+thrust_n = 400.0                         # [S:wiki_dragon2]
+directions = ["tangential_plus", "tangential_minus", "forward"]
+
+[[stage.engine_group]]
+id = "superdraco"                        # launch escape: data only (abort_only: never lit by the session in d2)
+engine = "superdraco"
+count = 8                                # [S:wiki_dragon2] four pairs
+ring_radius_m = 1.8                      # [E]
+angles_deg = [40.0, 50.0, 130.0, 140.0, 220.0, 230.0, 310.0, 320.0]
+gimbal = false
+relight = true
+abort_only = true
+
+[stage.aero]
+reference_diameter_m = 4.0
+nose_length_m = 4.0                      # [E] the blunt cone as the stack's nose (capsule aero: d3)

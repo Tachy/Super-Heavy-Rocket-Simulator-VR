@@ -21,6 +21,7 @@ add_executable(starsim_core_tests
     test_eclipse.cpp
     test_vehicle_models.cpp
     test_rcs.cpp
+    test_crew_dragon.cpp
     test_flight_body.cpp
     test_flight_session.cpp
     test_ascent_guidance.cpp
