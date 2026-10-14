@@ -303,8 +303,10 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   it: 0.4-0.8 km overshoots). The commanded attitude slews at 1.5x the turn rate and its rate is fed forward to the
   entry controller (`EntryCommand::rate_gcrf_radps`; without it the PD loop lagged the turn by ~18 deg of alpha), which
   has an actuator delay of 0.5 s [E] (2x slew or 5 deg/s set off a roll limit cycle on the flaps: departures). Session
-  test from Mach 2.6, 28 km west: gate < 1 m off, caught 0.02 m, 0.95 m/s, 2.1 t left. Open: an energy-short terminal
-  phase (33-39 km from Mach 2.6) stays shallow and misses the gate (not seen from orbit). Ship catch propellant margin:
+  test from Mach 2.6, 28 km west: gate < 1 m off, caught 0.02 m, 0.95 m/s, 2.1 t left. Energy-short terminal phase (36 km
+  from Mach 2.6; not seen from orbit, the deorbit plan arrives with energy to spare): the gate is hit (0.3 m), but the fall
+  turns steep too late for the nose turn (137 deg off the tower direction): the flip pushes away from the tower, the burn
+  aborts and the ship ditches at sea (1.4 t left) - safe, no catch. Ship catch propellant margin:
   5 of 21 dispersed gates arrive with <= 0.7 t (gate +-10 m/s: up to ~39 m/s across after the flip, braked high inside
   the glide cone); campaign case 12 (seed 13) reaches the catch point before the arms have closed, runs dry and drops
   ~1 m onto the arms at 4.5 m/s - judged "gefangen" correctly (carriage absorbs it, pin loads below the limit).
