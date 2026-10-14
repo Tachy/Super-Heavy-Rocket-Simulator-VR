@@ -209,6 +209,9 @@ public:
     // Splits the stack below stage `index`: this vehicle keeps stages [0, index), the returned one
     // stages [index, n). Stations of the upper part are re-based to its own bottom.
     std::unique_ptr<Vehicle> separate(size_t index);
+    // A copy of stages [index, n) as they are now (tanks, nose cone), as separate() would split them off; this vehicle is
+    // unchanged. Planning: the capsule a Crew Dragon will be after its trunk jettison.
+    std::unique_ptr<Vehicle> copy_upper(size_t index) const;
 
 private:
     Vehicle() = default;

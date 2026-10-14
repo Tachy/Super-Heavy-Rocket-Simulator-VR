@@ -117,6 +117,120 @@ void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanc
     flying.entry_guidance = std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters);
 }
 
+const char* to_string(CapsuleReturnStep step) {
+    switch (step) {
+        case CapsuleReturnStep::None: return "-";
+        case CapsuleReturnStep::DeorbitBurn: return "Deorbit-Brennvorgang";
+        case CapsuleReturnStep::TrunkJettison: return "Trunk-Abwurf";
+        case CapsuleReturnStep::NoseConeClose: return "Bugklappe schließen";
+        case CapsuleReturnStep::Coast: return "Freiflug";
+        case CapsuleReturnStep::Entry: return "Wiedereintritt";
+        case CapsuleReturnStep::Gate: return "Tor";
+    }
+    return "?";
+}
+
+gnc::DeorbitParameters FlightSession::capsule_deorbit_parameters() {
+    gnc::DeorbitParameters p;
+    // [E] d3 ledger: an L/D 0.2 capsule under the crew's 4 g has range authority only between ~0 and ~45 deg of bank; at
+    // -2.0 deg the range moves ~1000 km per degree of entry angle (-1.2 deg: ~2400 km)
+    p.entry_flight_path_rad = -2.0 * constants::deg_to_rad;
+    p.nominal_bank_rad = 30.0 * constants::deg_to_rad;
+    p.max_crossrange_m = 40000.0;  // [E] the capsule's lateral reach at L/D 0.2 (reversals)
+    p.gate_height_m = gnc::EntryGuidanceParameters::capsule().gate_height_m;
+    return p;
+}
+
+bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
+    ship_return_ = false;
+    capsule_return_step_ = CapsuleReturnStep::None;
+    deorbit_plan_.reset();
+    gnc::DeorbitPlan refused;
+    if (bodies_.empty()) return false;
+    auto& flying = bodies_[controlled_];
+    const auto& vehicle = flying.body->vehicle();
+    const auto& stages = vehicle.stages();
+    if (stages.back().config.aero.entry_profile != "capsule" || flying.entry_guidance) {
+        refused.reason = "Keine Rückkehr möglich: keine Kapsel im Orbit";
+        deorbit_plan_ = refused;
+        return false;
+    }
+    if (!splashdown_zone_) {
+        refused.reason = "Keine Rückkehr möglich: keine Wasserungszone";
+        deorbit_plan_ = refused;
+        return false;
+    }
+    const auto rcs = vehicle.rcs_force_capability({1.0, 0.0, 0.0});
+    if (!(rcs.force_n > 0.0)) {
+        refused.reason = "Keine Rückkehr möglich: keine Deorbit-Düsen";
+        deorbit_plan_ = refused;
+        return false;
+    }
+    parameters.burn_thrust_n = rcs.force_n;
+    // The capsule after the trunk jettison: its entry model (aero at trim, heat shield, crew load limit).
+    vehicle::FlightBody capsule(vehicle.copy_upper(stages.size() - 1), flying.body->state());
+    const gnc::EntryGuidance onboard(capsule, capsule_entry_target());
+    const double capsule_mass_kg = capsule.vehicle().mass_properties().mass_kg;
+    const auto& s = flying.body->state();
+    const auto plan = [&](double entry_mass_kg) {
+        parameters.entry_mass_kg = entry_mass_kg;
+        return gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_, onboard.model(),
+                                 capsule_entry_target(), vehicle.mass_properties().mass_kg,
+                                 rcs.force_n / rcs.mass_flow_kgps, vehicle.rcs_propellant_kg(),
+                                 capsule_return_reserve_kg, parameters);
+    };
+    deorbit_plan_ = plan(capsule_mass_kg);
+    if (deorbit_plan_->feasible) deorbit_plan_ = plan(capsule_mass_kg - deorbit_plan_->propellant_kg);
+    deorbit_parameters_ = parameters;
+    if (!deorbit_plan_->feasible) return false;
+    if (!execute_burn(deorbit_plan_->node) || !burn_config_.rcs) {
+        deorbit_plan_->feasible = false;
+        deorbit_plan_->reason = "Deorbit-Brennvorgang auf den Düsen nicht möglich";
+        autopilot_.state = AutopilotState::Off;
+        return false;
+    }
+    capsule_return_step_ = CapsuleReturnStep::DeorbitBurn;
+    return true;
+}
+
+void FlightSession::run_capsule_return(Flying& flying) {
+    switch (capsule_return_step_) {
+        case CapsuleReturnStep::TrunkJettison:
+            if (epoch_ >= capsule_step_epoch_) {
+                if (flying.body->vehicle().stages().size() > 1) {
+                    auto capsule = flying.body->separate(flying.body->vehicle().stages().size() - 1,
+                                                         trunk_separation_dv_mps);
+                    capsule->set_ground_height(0.0);
+                    flying.body->set_ground_height(0.0);
+                    bodies_.push_back({std::move(capsule), {}, nullptr, {}});
+                    controlled_ = bodies_.size() - 1;
+                }
+                capsule_return_step_ = CapsuleReturnStep::NoseConeClose;
+                capsule_step_epoch_ = epoch_ + nose_cone_close_delay_s;
+            }
+            break;
+        case CapsuleReturnStep::NoseConeClose:
+            if (epoch_ >= capsule_step_epoch_) {
+                set_nose_cone(controlled_, false);
+                capsule_return_step_ = CapsuleReturnStep::Coast;
+            }
+            break;
+        case CapsuleReturnStep::Coast:
+            if (epoch_ >= entry_start_) {
+                start_entry_guidance(flying, gnc::EntryGuidanceParameters::capsule());
+                capsule_return_step_ = CapsuleReturnStep::Entry;
+            }
+            break;
+        case CapsuleReturnStep::Entry:
+            if (flying.entry_guidance && flying.entry_guidance->phase() == gnc::EntryPhase::Gate) {
+                capsule_return_step_ = CapsuleReturnStep::Gate;
+            }
+            break;
+        default:
+            break;
+    }
+}
+
 bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
     ship_return_ = false;
     deorbit_plan_.reset();
@@ -231,6 +345,9 @@ void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::St
     autopilot_ = {};
     burn_.reset();
     attitude_mode_ = {};
+    payload_separation_.reset();  // d2 minor: an earlier flight's release and cone timer do not carry over
+    nose_cone_epoch_.reset();
+    capsule_return_step_ = CapsuleReturnStep::None;
 }
 
 // Candidate engine configurations of the lowest stage with engines, strongest first: all groups at full
@@ -349,6 +466,7 @@ bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<Burn
     burn_config_ = *chosen;
     burn_.emplace(node);
     autopilot_.state = AutopilotState::Burn;
+    attitude_mode_ = {};  // d2 minor: a mode set before the burn no longer turns the vehicle back after it
     return true;
 }
 
@@ -503,7 +621,16 @@ void FlightSession::run_autopilot() {
             autopilot_.burn = burn_->update(body, epoch_, tick_s, c.thrust_n, c.mass_flow_kgps, c.shutdown_s,
                                             last_rcs_acceleration_, thrust_axis);
             if (c.rcs) {
-                if (autopilot_.burn.complete) autopilot_.state = AutopilotState::Off;
+                if (autopilot_.burn.complete) {
+                    autopilot_.state = AutopilotState::Off;
+                    if (capsule_return_step_ == CapsuleReturnStep::DeorbitBurn) {
+                        autopilot_.state = AutopilotState::Return;
+                        capsule_return_step_ = CapsuleReturnStep::TrunkJettison;
+                        capsule_step_epoch_ = epoch_ + trunk_jettison_delay_s;
+                        capsule_hold_attitude_ = body.state().attitude;
+                        entry_start_ = entry_start_epoch();  // from the state the burn actually left
+                    }
+                }
                 break;
             }
             const bool running = std::any_of(flying.running_groups.begin(), flying.running_groups.end(),
@@ -519,6 +646,10 @@ void FlightSession::run_autopilot() {
             break;
         }
         case AutopilotState::Return:
+            if (capsule_return_step_ != CapsuleReturnStep::None) {
+                run_capsule_return(flying);
+                break;
+            }
             if (!flying.entry_guidance && !flying.ship_landing && epoch_ >= entry_start_) {
                 start_entry_guidance(flying, {});
             }
@@ -817,6 +948,23 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         }
         return command;
     }
+    if (autopilot_.state == AutopilotState::Return && capsule_return_step_ != CapsuleReturnStep::None) {
+        // After the deorbit burn: hold its attitude while the trunk is on, then turn to the trim attitude for the entry
+        // (heat shield to the flow, lift up).
+        const auto& s = flying.body->state();
+        const auto& vehicle = flying.body->vehicle();
+        math::Quat target = capsule_hold_attitude_;
+        if (vehicle.capsule_aero()) {
+            const auto t = earth_.fixed_to_gcrf(epoch_);
+            const math::Vec3 air = s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), s.position_gcrf_m);
+            target = gnc::capsule_trim_attitude(vehicle, air, math::normalized(s.position_gcrf_m), 0.0);
+        }
+        orbit_controller_.steer(*flying.body, ambient_pressure_pa, target.rotate(math::Vec3{1.0, 0.0, 0.0}),
+                                target.rotate(math::Vec3{0.0, 1.0, 0.0}))
+            .apply_to(command);
+        command.rcs_keep_force = true;
+        return command;
+    }
     if (attitude_mode_active()) {
         const auto& s = flying.body->state();
         gnc::AttitudeMode mode = attitude_mode_;
@@ -862,6 +1010,9 @@ double FlightSession::coast_allowance_s() const {
                         autopilot_.state == AutopilotState::PayloadSeparation;
     if (guided) return 0.0;
     if (attitude_mode_active()) return 0.0;  // pulsed RCS hold: ticked
+    if (autopilot_.state == AutopilotState::Return && capsule_return_step_ != CapsuleReturnStep::None) {
+        return 0.0;  // capsule return: timed steps and the turn to the trim attitude, ticked
+    }
     if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0) return 0.0;
     double allowance = max_coast_s;
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);

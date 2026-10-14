@@ -529,6 +529,19 @@ void Vehicle::fail_engine(size_t stage_index, size_t engine_index) {
 
 Vec3 Vehicle::max_rcs_torque_nm() const { return rcs_allocator().max_torque_nm(); }
 
+std::unique_ptr<Vehicle> Vehicle::copy_upper(size_t index) const {
+    auto copy = std::unique_ptr<Vehicle>(new Vehicle());
+    copy->id_ = id_;
+    copy->config_dir_ = config_dir_;
+    copy->stages_ = stages_;
+    copy->nose_cone_open_ = nose_cone_open_;
+    copy->hull_aero_scale_ = hull_aero_scale_;
+    copy->aero_ = std::make_unique<aero::SlenderBodyAero>(*aero_);
+    copy->rebuild_aero();
+    if (index == 0) return copy;
+    return copy->separate(index);
+}
+
 std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     if (index == 0 || index >= stages_.size()) {
         throw std::out_of_range("Vehicle::separate: index must split the stack into two non-empty parts");

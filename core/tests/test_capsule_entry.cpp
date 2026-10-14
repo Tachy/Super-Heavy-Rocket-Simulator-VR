@@ -606,3 +606,127 @@ TEST_CASE("Deorbit plan predicts the entry with the entry mass", "[dragon][deorb
     CHECK(std::abs(downrange[0]) < 1000.0);
     CHECK(std::abs(downrange[1]) > std::abs(downrange[0]));
 }
+
+namespace {
+
+struct ReturnResult {
+    bool reached_gate = false;
+    double burn_s = 0.0;
+    double miss_m = 0.0;
+    double speed_mps = 0.0;
+    double peak_g = 0.0;
+    double entry_interface_s = -1.0;  // seconds after the burn's end
+    bool cone_closed_at_interface = false;
+    bool trunk_separated_at_interface = false;
+    double rcs_left_kg = 0.0;
+    double entry_rcs_kg = 0.0;  // Draco propellant from the interface to the gate
+};
+
+// Flies a planned capsule return to the gate (or 48 h).
+ReturnResult fly_capsule_return(sim::FlightSession& session, time::Epoch t0) {
+    ReturnResult r;
+    double ignition = -1.0, cutoff = -1.0, rcs_at_interface = 0.0;
+    while (session.capsule_return_step() != sim::CapsuleReturnStep::Gate && session.epoch() - t0 < 2.0 * 86400.0) {
+        const auto& body = session.body(session.controlled_index());
+        if (body.impacted()) break;
+        double step = 1.0;
+        if (session.autopilot().state == sim::AutopilotState::Burn) {
+            const double to_ignition = session.autopilot().burn.time_to_ignition_s;
+            if (to_ignition > 900.0) step = to_ignition - 600.0;
+            if (ignition < 0.0 && session.autopilot().burn.ignite) ignition = session.epoch() - t0;
+        } else if (cutoff < 0.0 && ignition >= 0.0) {
+            cutoff = session.epoch() - t0;
+        }
+        session.advance_to(session.epoch() + step, 1000000);
+        const auto tel = session.telemetry(session.controlled_index());
+        if (r.entry_interface_s < 0.0 && cutoff >= 0.0 && tel.altitude_m < 120000.0) {
+            r.entry_interface_s = session.epoch() - t0 - cutoff;
+            r.cone_closed_at_interface = !session.body(session.controlled_index()).vehicle().nose_cone_open();
+            r.trunk_separated_at_interface = session.body_count() == 2;
+            rcs_at_interface = session.body(session.controlled_index()).vehicle().rcs_propellant_kg();
+        }
+        r.peak_g = std::max(r.peak_g, norm(session.body(session.controlled_index()).aero_acceleration_body_mps2()) /
+                                          constants::standard_gravity_mps2);
+        if (std::getenv("STARSIM_VERBOSE") && tel.altitude_m < 130000.0 && std::fmod(session.epoch() - t0, 20.0) < 1.0) {
+            std::printf("t %.0f %s h %.0f v %.0f\n", session.epoch() - t0, sim::to_string(session.capsule_return_step()),
+                        tel.altitude_m, tel.speed_relative_mps);
+        }
+    }
+    r.burn_s = cutoff - ignition;
+    const size_t i = session.controlled_index();
+    r.reached_gate = session.capsule_return_step() == sim::CapsuleReturnStep::Gate;
+    if (session.entry_guidance(i)) {
+        const auto tr = spice_earth().fixed_to_gcrf(session.epoch());
+        const Vec3 pos = transpose(tr.rotation) * session.body(i).state().position_gcrf_m;
+        r.miss_m = horizontal_miss_m(pos, session.entry_guidance(i)->target().position_itrf_m);
+    }
+    r.speed_mps = session.telemetry(i).speed_relative_mps;
+    r.rcs_left_kg = session.body(i).vehicle().rcs_propellant_kg();
+    r.entry_rcs_kg = rcs_at_interface - r.rcs_left_kg;
+    return r;
+}
+
+}  // namespace
+
+TEST_CASE("Crew Dragon returns from orbit to the drogue gate", "[dragon][mission]") {
+    REQUIRE(dragon_raan_rad() >= 0.0);
+    DragonDeorbit d(dragon_raan_rad());
+    auto& s = d.session;
+    const double rcs0 = s.body(0).vehicle().rcs_propellant_kg();
+    REQUIRE(s.plan_capsule_return());
+    const auto& plan = *s.ship_return_plan();
+    const auto r = fly_capsule_return(s, d.t0);
+    std::printf("[validation] Crew Dragon return: deorbit %.1f m/s (%.0f kg) after %.1f h, burn %.0f s (published 7.5-12 "
+                "min), interface %.0f s after the burn; gate miss %.2f km at %.0f m/s (%.0f km/h, published ~560), peak "
+                "%.2f g; Dracos %.0f kg in all, %.1f kg in the entry, %.0f kg left\n",
+                plan.delta_v_mps, plan.propellant_kg, (plan.node.epoch - d.t0) / 3600.0, r.burn_s, r.entry_interface_s,
+                r.miss_m / 1000.0, r.speed_mps, r.speed_mps * 3.6, r.peak_g, rcs0 - r.rcs_left_kg, r.entry_rcs_kg,
+                r.rcs_left_kg);
+    CHECK(r.reached_gate);
+    CHECK(r.trunk_separated_at_interface);
+    CHECK(r.cone_closed_at_interface);
+    CHECK(r.miss_m < 2000.0);
+    CHECK(r.speed_mps == Catch::Approx(156.0).epsilon(0.15));
+    CHECK(r.rcs_left_kg > sim::FlightSession::capsule_return_reserve_kg);
+    const auto& capsule = s.body(s.controlled_index());
+    CHECK_FALSE(capsule.impacted());
+    CHECK_FALSE(capsule.crew_load_warning());
+    CHECK(capsule.vehicle().stages().size() == 1);
+    CHECK(capsule.vehicle().stages().front().config.id == "capsule");
+}
+
+TEST_CASE("No pass within reach refuses the capsule return", "[dragon][mission]") {
+    DragonDeorbit d(0.0, 10.0 * deg);  // the zone at 32.6 N is never overflown
+    const auto mode = gnc::inertial_hold(d.session.body(0).state().attitude);
+    d.session.set_attitude_mode(mode);
+    CHECK_FALSE(d.session.plan_capsule_return());
+    REQUIRE(d.session.ship_return_plan() != nullptr);
+    CHECK_FALSE(d.session.ship_return_plan()->reason.empty());
+    CHECK(d.session.attitude_mode().kind == gnc::AttitudeModeKind::Inertial);
+    CHECK(d.session.capsule_return_step() == sim::CapsuleReturnStep::None);
+    CHECK(d.session.autopilot().state == sim::AutopilotState::Off);
+}
+
+TEST_CASE("The attitude mode ends with the autopilot and with a burn", "[dragon][attitude]") {
+    DragonDeorbit d(0.0);
+    auto& s = d.session;
+    s.set_attitude_mode(gnc::inertial_hold(s.body(0).state().attitude));
+    s.disengage_autopilot();
+    CHECK(s.attitude_mode().kind == gnc::AttitudeModeKind::Free);
+    s.set_attitude_mode(gnc::inertial_hold(s.body(0).state().attitude));
+    const auto& st = s.body(0).state();
+    REQUIRE(s.execute_burn({s.epoch() + 300.0, math::normalized(st.velocity_gcrf_mps) * 0.5}));
+    CHECK(s.attitude_mode().kind == gnc::AttitudeModeKind::Free);
+}
+
+TEST_CASE("place_in_orbit forgets an earlier payload release", "[dragon][sim]") {
+    DragonDeorbit d(0.0);
+    auto& s = d.session;
+    s.set_payload_separation(sim::PayloadSeparation{"capsule", 30.0, 0.3, 600.0});
+    REQUIRE(s.separate_payload());  // the capsule leaves its trunk as a "payload"; the cone timer runs
+    const orbit::KeplerianElements circular{constants::wgs84_semi_major_axis_m + 420e3, 0.0, 51.6 * deg, 0.0, 0.0, 0.0};
+    s.place_in_orbit("crew_dragon", orbit::state_from_elements(circular, s.gm_earth_m3ps2()), s.epoch());
+    s.advance_to(s.epoch() + 700.0, 1000000);
+    CHECK_FALSE(s.body(0).vehicle().nose_cone_open());
+    CHECK_FALSE(s.separate_payload());
+}

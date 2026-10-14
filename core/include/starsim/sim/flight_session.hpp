@@ -47,6 +47,10 @@ enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparati
 
 const char* to_string(AutopilotState state);
 
+// Steps of a capsule's return from orbit (FlightSession::plan_capsule_return).
+enum class CapsuleReturnStep { None, DeorbitBurn, TrunkJettison, NoseConeClose, Coast, Entry, Gate };
+const char* to_string(CapsuleReturnStep step);
+
 struct AutopilotStatus {
     AutopilotState state = AutopilotState::Off;
     gnc::GuidanceCommand guidance;
@@ -150,7 +154,12 @@ public:
     // hot staging, closed-loop upper-stage guidance to the target orbit, cutoff. Pilot input is ignored
     // while engaged.
     void engage_ascent_autopilot(const gnc::AscentTarget& target, const gnc::PitchProgram& program = {});
-    void disengage_autopilot() { autopilot_.state = AutopilotState::Off; }
+    // Also ends an attitude mode and a capsule return (d2 minor: a mode set before outlived the autopilot).
+    void disengage_autopilot() {
+        autopilot_.state = AutopilotState::Off;
+        attitude_mode_ = {};
+        capsule_return_step_ = CapsuleReturnStep::None;
+    }
     // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
     // at the next staging; the booster is then guided independently of the controlled body.
     void set_booster_return(bool enabled, gnc::BoosterReturnParameters parameters = {});
@@ -181,6 +190,20 @@ public:
     // refused (reason in ship_return_plan()) or the burn cannot be flown.
     bool plan_ship_return(const gnc::DeorbitParameters& parameters = {});
     const gnc::DeorbitPlan* ship_return_plan() const { return deorbit_plan_ ? &*deorbit_plan_ : nullptr; }
+    // Return of the controlled capsule (a top stage with entry_profile = "capsule", e.g. Crew Dragon on its trunk) to the
+    // splashdown zone (d3): the onboard computer plans the deorbit burn (gnc::plan_deorbit, finite burn on the RCS along
+    // +x, predicted with the capsule's mass after the trunk jettison) and flies it; the trunk is jettisoned
+    // trunk_jettison_delay_s after the burn, the nose cone closes nose_cone_close_delay_s later, the capsule turns to its
+    // trim attitude and gets its entry guidance entry_lead_s before the interface, which takes it to the drogue gate.
+    // False if refused (reason in ship_return_plan()). Order of events [S]: SpaceX since the return to West Coast
+    // recovery - deorbit burn, then trunk jettison (the trunk falls uprange of the capsule).
+    bool plan_capsule_return(gnc::DeorbitParameters parameters = capsule_deorbit_parameters());
+    static gnc::DeorbitParameters capsule_deorbit_parameters();
+    CapsuleReturnStep capsule_return_step() const { return capsule_return_step_; }
+    static constexpr double trunk_jettison_delay_s = 120.0;   // [E] after the deorbit burn
+    static constexpr double nose_cone_close_delay_s = 120.0;  // [E] after the trunk jettison
+    static constexpr double trunk_separation_dv_mps = 0.3;    // [E] spring push (as the payload separation)
+    static constexpr double capsule_return_reserve_kg = 50.0; // [E] RCS propellant kept for the entry (d3: ~31 kg used)
     // Entry guidance of a body (nullptr if it has none): its latest command (setpoint for the flight director).
     const gnc::EntryCommand* entry_status(size_t index) const;
     // Interactive real-time play: landing re-plans never hold up the simulation (default: off = deterministic).
@@ -357,6 +380,10 @@ private:
     bool ship_return_ = false;                      // the burn is the deorbit burn of a ship return
     gnc::DeorbitParameters deorbit_parameters_;
     time::Epoch entry_start_;                       // state Return: entry guidance from here
+    CapsuleReturnStep capsule_return_step_ = CapsuleReturnStep::None;
+    time::Epoch capsule_step_epoch_;                // the next timed step (trunk jettison, nose cone)
+    math::Quat capsule_hold_attitude_;              // with the trunk on (no capsule aero yet): hold the burn's attitude
+    void run_capsule_return(Flying& flying);
 
     // `forced`: only this set (config group ids), at full and at minimum throttle.
     std::vector<BurnConfiguration> burn_configurations(const std::vector<std::string>* forced = nullptr) const;
