@@ -52,7 +52,14 @@ flow separation (vacuum engines).
   `tools/aero/gen_capsule_aero.py`, never edited by hand) is flown once the stage is the lowest (the trunk jettisoned);
   `entry_profile = "capsule"` (default `"ship"`) selects the entry guidance's phases; `[[stage]] dry_cg_offset_m = [y, z]`
   (lateral dry CG offset that trims the capsule at an angle of attack: `gen_capsule_aero.py --trim` prints it);
-  `[stage.recovery] method = "splashdown"`.
+  `[stage.recovery] method = "splashdown"` with `max_splashdown_speed_mps` (required there: sink at the water up to which
+  the capsule is "gewassert"; faster is an impact).
+- Parachutes (d4): `[[stage.parachute]]` sets: `id`, `role` (`"drogue"` / `"main"`, at most one set each), `count`,
+  `drag_area_m2` (C_D S0 of one canopy, fully open), `attach_station_m` (riser point on the axis, from the stage's
+  bottom), `fill_time_s` (each reefing stage and the final opening fill with the area growing as t^2), `reefing`
+  (`[[area_fraction, hold_s], ...]`, ascending fractions in (0, 1); empty: opens to full), `max_load_n` (per canopy:
+  the set tears beyond it), `deploy_height_m` (mains below drogues), optional `max_deploy_dynamic_pressure_pa` (the
+  deployment waits above it). Only the lowest stage's sets are sequenced (a capsule flying alone).
 - `aero/ship_entry_alpha.csv`: nominal angle of attack over Mach of the belly-first entry (entry guidance profile),
   referenced by `[stage.aero] entry_alpha_table`. The ship's `ascent_drag_table` (the stack's [E]) gives its axial
   drag when it flies alone.
@@ -119,6 +126,9 @@ flow separation (vacuum engines).
 ## Missions (`missions/`)
 - `leo_ascent.toml`: target orbit of the game's ascent autopilot (key P).
 - `ship_return_starbase.toml`: ship return from orbit (`config::load_ship_return_mission`).
+- `crew_dragon_return.toml`: capsule return from orbit (`config::load_capsule_return_mission`,
+  `sim::place_capsule_return_mission`): `[mission]` `vehicle`, `zone` (`splashdown_zones.toml`); `[orbit]` epoch, heights,
+  inclination, RAAN, argument of latitude, `rcs_propellant_kg`; `[deorbit]` as the ship's.
 - `falcon9_rtls.toml` (`config::load_ascent_mission`): `[mission]` vehicle, launch `site`, optional `landing_zone` (a
   site of kind `landing_zone`: the first stage returns to it), `heading_deg`, `payload_t`, `fairing`; `[target]` orbit;
   `[pitch_program]` `kick_deg` and `booster_throttle` (`[t_s, fraction]` pairs, increasing times).

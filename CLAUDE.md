@@ -33,7 +33,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
   aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating, blunt capsule from a
-  modified-Newtonian table with offset-CG trim),
+  modified-Newtonian table with offset-CG trim, reefed parachutes),
   propulsion (engine performance, RCS allocator + pulse modulator).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
@@ -497,6 +497,36 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   12 of 12 at the gate within 1.2 km, 160-178 m/s, <= 3.6 g. The gate is where d4 opens the drogues; until then the
   capsule falls on (bank 0, damped). Diagnostics: `STARSIM_DEBUG_ENTRY=1` (one line per guidance cycle),
   hidden test "Capsule entry single case" with `STARSIM_CAPSULE_SEED=<1-12>`.
+- Crew Dragon parachutes and splashdown (d4 of the same spec, plan `docs/superpowers/plans/2026-10-14-crew-dragon-d4.md`,
+  tests `core/tests/test_parachute.cpp`, `test_capsule_splashdown.cpp`): `[[stage.parachute]]` sets (`aero/parachute`: one
+  canopy's drag area grows as t^2 through its reefing stages; massless canopy on a riser point on the axis - force along
+  the point's air velocity, moment from the offset, omega x r damps the hanging capsule; no opening-shock factor, no
+  pendulum body, no wind). Crew Dragon: 2 drogues 28 m^2 each [D: 53 m/s at 1.8 km, 119 mph S], reefed 35 % for 4 s, and
+  4 mains 815 m^2 each [D: 7.0 m/s at sea level, 15-16 mph S], reefed 6 / 20 / 45 % for 4 s each (10.0 t capsule).
+  Reefing and load limits [E]: the main limit 120 kN per canopy is 2x the nominal reefed peak (60 kN), so mains opened
+  without drogues (~136 m/s) tear - with 150 kN they survived at 6.4 g. Opening loads per canopy are judged every tick
+  (`Vehicle::record_parachute_load`, "Fallschirm gerissen": the set tears). `gnc/parachute_sequencer`: drogues at 5.5 km
+  [S: 18,000 ft] once q <= 15 kPa [E], mains at 1.8 km [S: 6,000 ft] whatever the drogues did (backup; the drogues are
+  released), mains released on the water; only descending flight deploys. `FlightSession` runs a sequencer for each body
+  whose lowest stage has sets (a capsule alone, never stacked), the Dracos stay off once a set is out (user 2026-10-14),
+  and the session ticks below the highest deployment height + 1 km (no coast past it). Splashdown: a body whose lowest
+  stage recovers by `"splashdown"` rests on the water at any tilt up to `max_splashdown_speed_mps` 9 m/s [E: spec]
+  (`FlightBody::touchdown_sink_mps`), outcome `SplashedDown` "gewassert"; faster is "Aufprall" (no separate mains-open
+  flag: 9 m/s is out of reach without mains). Capsule return steps go on Gate -> Drogues -> Mains -> SplashedDown
+  ("Bremsschirme", "Hauptschirme", "gewassert"); `FlightSession::splashdown_miss_m`, `parachute_sequencer(i)`.
+  From the gate (166 m/s): drogues 5.50 km / 164 m/s, mains 1.80 km / 53 m/s 57 s later, water 205 s later at 6.9 m/s,
+  peak 2.8 g. Return mission `config/missions/crew_dragon_return.toml` (`sim::place_capsule_return_mission`, 420 km /
+  51.6 deg, RAAN 60 deg [D]: the first plane with a pass within reach in 48 h): burn after 37.1 h (1005 s), water 0.29 km
+  from the zone centre at 6.9 m/s, deorbit ignition -> splashdown 50.5 min (Crew-10 2025-08-09: 54 min [S]). Campaign
+  `[dragon][mission][validation]` (8 cases: orbit phase +-3 deg about the mission's, MMH/NTO +-10 %, deorbit execution
+  +-1 % / 0.5 deg): 8 of 8 gewassert within 1.09 km, 6.9-7.0 m/s, <= 2.97 g. An ISS-like orbit passes the zone within the
+  capsule's 40 km crossrange only every few days: of the orbit phases 0-315 deg (45 deg steps) only one has a pass in
+  48 h, two in 96 h (45 deg of phase moves the ground track ~270 km at 32.6 N), so the campaign disperses about the
+  mission's pass instead of over all phases (b4). Entry guidance (all vehicles, d4): a reversal due within the next cycle
+  is flown only if reversing now ends closer across than holding (a capsule overshot +5.9 km vs -2.1 km held at 536 m/s
+  and came down 5.8 km off). Webcast telemetry of a Dragon return is not used (published figures cover the tolerances;
+  no free licence). Diagnostics: hidden tests "Crew Dragon return single case" (`STARSIM_DRAGON_CASE=<0-7>`) and
+  "Crew Dragon return: the first feasible orbit plane".
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 
