@@ -46,7 +46,14 @@ struct Engine {
     // Unit thrust direction (body frame) for the current gimbal angles.
     math::Vec3 thrust_direction() const;
     bool producing_thrust() const { return mode != EngineMode::Off && spool > 0.0; }
+    // Fixed and canted (the HLS landing thrusters): steered by differential throttling while running.
+    bool throttle_steered() const { return !gimbaled && axis_body.x < 1.0; }
 };
+
+// Torque about the CG per unit of throttle (vacuum thrust at full throttle along the engine's fixed axis): what
+// differential throttling of a fixed engine buys. Canted thrust lines miss the CG, so a ring of them only cancels by
+// symmetry - each one alone turns the vehicle.
+math::Vec3 throttle_torque_nm(const Engine& engine, double cg_station_m);
 
 struct GridFin {
     aero::GridFinGeometry geometry;  // station in the vehicle body frame
@@ -134,6 +141,9 @@ struct VehicleCommand {
     double gimbal_pitch_rad = 0.0;
     double gimbal_yaw_rad = 0.0;
     double gimbal_roll_rad = 0.0;
+    // Differential throttling: added to the group throttle of each engine (stage order over all stages, then clamped to
+    // the engine's range); empty: none.
+    std::vector<double> engine_throttle_trim;
     // Reaction control: requested torque as a fraction (-1..1) of the capability per body axis (max_rcs_torque_nm).
     math::Vec3 rcs_torque_fraction;
     // Reaction control translation: requested force direction and magnitude as a fraction (|f| <= 1) of the

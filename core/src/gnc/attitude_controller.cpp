@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <cstdlib>
 #include <limits>
 
@@ -36,6 +37,47 @@ Authority gimbal_authority(const vehicle::FlightBody& body, double cg_station_m,
 }
 
 double fraction(double torque, double max) { return max > 0.0 ? torque / max : 0.0; }
+
+// Differential throttling of the running fixed, canted engines (vehicle::Engine::throttle_steered): each one's torque per
+// unit throttle and how far its throttle may move either way - from its group's mean throttle (the trims sum to zero on
+// a symmetric ring, so the mean is the commanded throttle) to the nearer limit.
+struct ThrottleAuthority {
+    std::vector<size_t> index;  // engine index, stage order over all stages
+    std::vector<Vec3> torque_per_unit;
+    std::vector<double> range;
+    size_t engine_count = 0;
+    Vec3 max_torque_nm;  // per axis: every engine at its range with the favourable sign
+};
+
+ThrottleAuthority throttle_authority(const vehicle::FlightBody& body, double cg_station_m) {
+    ThrottleAuthority a;
+    std::map<std::string, std::pair<double, int>> group_throttle;  // sum, count
+    for (const auto& stage : body.vehicle().stages()) {
+        for (const auto& e : stage.engines) {
+            if (e.throttle_steered() && e.mode == vehicle::EngineMode::Running && !e.starved) {
+                auto& [sum, count] = group_throttle[e.group_id];
+                sum += e.throttle;
+                ++count;
+            }
+        }
+    }
+    for (const auto& stage : body.vehicle().stages()) {
+        for (const auto& e : stage.engines) {
+            const size_t i = a.engine_count++;
+            if (!e.throttle_steered() || e.mode != vehicle::EngineMode::Running || e.starved) continue;
+            const auto& [sum, count] = group_throttle[e.group_id];
+            const double base = sum / count;
+            const auto& c = e.performance->config();
+            const double range = std::max(0.0, std::min(base - c.throttle_min, c.throttle_max - base));
+            const Vec3 t = vehicle::throttle_torque_nm(e, cg_station_m);
+            a.index.push_back(i);
+            a.torque_per_unit.push_back(t);
+            a.range.push_back(range);
+            a.max_torque_nm += Vec3{std::abs(t.x), std::abs(t.y), std::abs(t.z)} * range;
+        }
+    }
+    return a;
+}
 
 // Grid fins: body torque per radian of deflection of each fin, from the latest air data.
 struct FinAuthority {
@@ -264,8 +306,23 @@ ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, doub
         out.gimbal.pitch_rad = torque.y / a.lever_moment;
         out.gimbal.yaw_rad = -torque.z / a.lever_moment;
     } else {
-        out.rcs_torque_fraction.y = fraction(torque.y, rcs_max.y);
-        out.rcs_torque_fraction.z = fraction(torque.z, rcs_max.z);
+        // No gimbals: differential throttling of fixed, canted engines first (pitch/yaw only - their thrust has no
+        // tangential part), the rest to the RCS.
+        Vec3 rest{0.0, torque.y, torque.z};
+        const ThrottleAuthority ta = throttle_authority(body, mass.cg_station_m);
+        if (!ta.index.empty()) {
+            FinAuthority fa;
+            fa.torque_per_rad = ta.torque_per_unit;
+            fa.max_deflection_rad = ta.range;
+            const std::vector<double> trims = allocate_fins(fa, rest);
+            out.throttle_trim.assign(ta.engine_count, 0.0);
+            for (size_t k = 0; k < trims.size(); ++k) {
+                out.throttle_trim[ta.index[k]] = trims[k];
+                rest -= ta.torque_per_unit[k] * trims[k];
+            }
+        }
+        out.rcs_torque_fraction.y = fraction(rest.y, rcs_max.y);
+        out.rcs_torque_fraction.z = fraction(rest.z, rcs_max.z);
     }
     if (a.roll_moment > 0.0 && !asymmetric) {
         out.gimbal.roll_rad = torque.x / a.roll_moment;
@@ -311,7 +368,9 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
     const Vec3& w = state.angular_velocity_body_radps;
     const Vec3& inertia = mass.inertia_kg_m2;
     const Authority a = gimbal_authority(body, mass.cg_station_m, ambient_pressure_pa);
-    const Vec3 rcs_max = body.vehicle().max_rcs_torque_nm();
+    // Without gimbals the differentially throttled engines add to the RCS.
+    const Vec3 rcs_max = body.vehicle().max_rcs_torque_nm() +
+                         (a.lever_moment > 0.0 ? Vec3{} : throttle_authority(body, mass.cg_station_m).max_torque_nm);
     Vec3 fin_max =
         gains_.grid_fins && body.vehicle().grid_fin_count() > 0 ? fin_authority(body, mass.cg_station_m).max_torque_nm : Vec3{};
     if (gains_.flaps) fin_max += flap_authority(body, mass.cg_station_m).max_torque_nm;

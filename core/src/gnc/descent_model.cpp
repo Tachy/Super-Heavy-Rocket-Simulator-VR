@@ -123,10 +123,17 @@ DescentModel make_descent_model(const DescentModelInputs& in) {
         set.mass_flow_per_thrust_s_m = vacuum_thrust > 0.0 ? flow / vacuum_thrust : 0.0;
         set.pressure_thrust_loss_n = vacuum_thrust - set.thrust_max_n;
         if (set.thrust_max_n > 0.0 && set.gimbal_max_rad == 0.0) {
-            // A set without gimbals (the landing thrusters) is steered by the RCS. The model has no torque input, so
-            // it gets an equivalent gimbal that gives the RCS torque about the CG (documented simplification: the
-            // implied lateral force torque / lever is ~0.1 % of the thrust; the re-plans every second absorb it).
-            const Vec3 torque = vehicle.max_rcs_torque_nm();
+            // A set without gimbals (the landing thrusters) is steered by differential throttling (canted engines,
+            // trims up to half their throttle range [E]) and the RCS. The model has no torque input, so it gets an
+            // equivalent gimbal that gives that torque about the CG (documented simplification: the implied lateral
+            // force torque / lever is a few % of the thrust; the re-plans every second absorb it).
+            Vec3 torque = vehicle.max_rcs_torque_nm();
+            for (const auto& e : stage.engines) {
+                if (!in_phase(e, p) || !e.throttle_steered()) continue;
+                const auto& c = e.performance->config();
+                const Vec3 t = vehicle::throttle_torque_nm(e, mass.cg_station_m);
+                torque += Vec3{std::abs(t.x), std::abs(t.y), std::abs(t.z)} * (0.5 * (c.throttle_max - c.throttle_min));
+            }
             const double lever = std::abs(m.gimbal_lever_m);
             const double pitch_yaw = std::min(torque.y, torque.z);
             if (lever > 0.0 && pitch_yaw > 0.0) set.gimbal_max_rad = std::atan(pitch_yaw / (lever * set.thrust_max_n));

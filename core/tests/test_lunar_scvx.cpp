@@ -100,11 +100,13 @@ TEST_CASE("A lunar SCvx snapshot is in vacuum, in the Moon's gravity, with the t
     CHECK(snap.model.density_kg_m3.front() == 0.0);
     CHECK(norm(snap.model.earth_rate_radps) == Catch::Approx(2.6617e-6).epsilon(1e-2));
     CHECK(gnc::state_position(snap.initial).x == Catch::Approx(2000.0).margin(1e-3));
-    // The landing set: axial thrust (cant 15 deg) and an equivalent gimbal from the RCS torque.
+    // The landing set: axial thrust (cant 15 deg) and an equivalent gimbal from differential throttling and the RCS.
     const auto& landing = snap.model.engine_sets[2];
     CHECK(landing.thrust_max_n == Catch::Approx(12.0 * 140e3 * std::cos(15.0 * deg)).epsilon(1e-6));
     CHECK(landing.gimbal_max_rad > 0.0);
-    CHECK(landing.gimbal_max_rad < 1.0 * deg);
+    std::printf("[lunar_scvx] landing set equivalent gimbal %.2f deg\n", landing.gimbal_max_rad / deg);
+    CHECK(landing.gimbal_max_rad > 3.0 * deg);   // differential throttling (RCS alone: 0.31 deg)
+    CHECK(landing.gimbal_max_rad < 15.0 * deg);
 }
 
 TEST_CASE("SCvx plans a lunar approach from the high gate to the touchdown point", "[descent][lunar_scvx]") {

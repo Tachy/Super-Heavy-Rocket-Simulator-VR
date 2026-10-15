@@ -250,14 +250,22 @@ double Vehicle::rcs_propellant_kg() const {
     return total;
 }
 
+Vec3 throttle_torque_nm(const Engine& engine, double cg_station_m) {
+    const Vec3 arm = engine.gimbal_point_m - Vec3{cg_station_m, 0.0, 0.0};
+    return cross(arm, engine.axis_body * engine.performance->thrust_n(1.0, 0.0));
+}
+
 void Vehicle::update_engines(double dt_s, const VehicleCommand& command, double ambient_pressure_pa) {
+    size_t index = 0;
     for (auto& stage : stages_) {
         for (auto& e : stage.engines) {
             const auto& cfg = e.performance->config();
             const GroupCommand* group = find_group(command, e.group_id);
             const bool want_run = group != nullptr && group->run;
+            const double trim = index < command.engine_throttle_trim.size() ? command.engine_throttle_trim[index] : 0.0;
+            ++index;
             const double target_throttle =
-                std::clamp(group ? group->throttle : 0.0, cfg.throttle_min, cfg.throttle_max);
+                std::clamp((group ? group->throttle : 0.0) + trim, cfg.throttle_min, cfg.throttle_max);
             const bool can_start = (!e.has_run || e.relight) && !e.starved &&
                                    e.performance->can_operate(ambient_pressure_pa);
 

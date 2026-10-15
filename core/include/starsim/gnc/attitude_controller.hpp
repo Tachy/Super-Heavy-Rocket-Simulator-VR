@@ -19,8 +19,10 @@ struct ControlOutput {
     math::Vec3 rcs_torque_fraction;
     std::vector<double> grid_fin_rad;  // empty: fins neutral
     std::vector<double> flap_rad;      // empty: flaps hold their deflection
+    std::vector<double> throttle_trim;  // differential throttling per engine (stage order); empty: none
 
     void apply_to(vehicle::VehicleCommand& command) const {
+        command.engine_throttle_trim = throttle_trim;
         command.gimbal_pitch_rad = gimbal.pitch_rad;
         command.gimbal_yaw_rad = gimbal.yaw_rad;
         command.gimbal_roll_rad = gimbal.roll_rad;
