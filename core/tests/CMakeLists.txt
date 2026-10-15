@@ -37,6 +37,7 @@ add_executable(starsim_core_tests
     test_lunar_propagation.cpp
     test_engine_placement.cpp
     test_hls_vehicle.cpp
+    test_lunar_terrain.cpp
     test_booster_return.cpp
     test_descent_telemetry.cpp
     test_grid_fins.cpp

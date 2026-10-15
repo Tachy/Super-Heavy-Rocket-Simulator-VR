@@ -65,6 +65,9 @@ add_library(starsim_core STATIC
     src/contact/pin_contact.cpp
     src/contact/catch_trigger.cpp
     src/contact/tower_collision.cpp
+    src/environment/lunar_terrain.cpp
+    src/config/lunar_site_config.cpp
+    src/sim/lunar_site.cpp
     src/contact/landing_surface.cpp
     src/contact/landing_legs.cpp
     src/optim/sparse_matrix.cpp
