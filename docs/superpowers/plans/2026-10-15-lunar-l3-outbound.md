@@ -1638,3 +1638,10 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
   periselene predicted at the last coast (the plan's epoch was minutes off); (5) LLO MCC retries with the Lambert
   guess. `lunar_burns()` records the commanded burns. Debug: `STARSIM_DEBUG_LUNAR_SESSION=1`. Open: the plan's
   propellant check uses the impulsive TLI (~40 m/s gravity loss inside the 5 % reserve). Next: Task 7.
+- Task 7: missions `hls_lunar_llo` / `hls_lunar_nrho` (kind `lunar_landing`), loader, `place_lunar_landing_mission`,
+  `lunar_outbound_parameters`, `start_mission` branch (`MissionStart::refusal`), session accessors `gravity()`,
+  `ephemeris()`, `moon_orientation()`. 4 new test cases, `-Fast` 482/482. Rulings: `flight_time_days` counts from the
+  scenario start (arrival = start + flight time, as the Task 6 tests); placement also refuses a session without a Moon
+  orientation (the game's FlightSim has none yet - l6) and checks the landing site exists; refusal tests check the
+  German message (ConfigError is a runtime_error too). Full suite left for Task 8 (only const accessors added to the
+  session). Next: Task 8.
