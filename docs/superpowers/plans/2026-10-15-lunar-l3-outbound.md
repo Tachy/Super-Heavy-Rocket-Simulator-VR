@@ -671,6 +671,15 @@ flipped - check against the source, do not change the test.
 
 ### Task 4: Outbound planning (TLI, MCC, LOI / NRHO insertion, LLO trims, propellant check)
 
+> **Amendment 2026-10-15 (user decision, implemented in the Task 4 commit; supersedes the NRHO parts below):** the direct
+> transfer meets the NRHO perilune head-on (insertion 3.5 km/s). NRHO outbound = in-direct transfer [S: Kikuchi et al.,
+> ISSFD 2024]: TLI to a 100 km lunar flyby (inclination by grid + golden section), powered swing-by at the flyby
+> periselene (fixed-time position targeting onto the reference at true anomaly 160 deg after `arrival_epoch`), NRHO
+> insertion there. API as built (`lunar_outbound.hpp`): `OutboundPlan::powered_flyby` (optional), `flyby_target`
+> (MCC aim); `mid_course(..., p, plan)`, `powered_flyby(state, epoch, p, plan)` (re-plan), `insertion(..., p, plan)`
+> (NRHO: at `plan.insertion.epoch`). Task 6 consumes these: after the last MCC the NRHO flight has a step
+> `PoweredFlyby` (re-plan at flyby - preparation, burn, back to `Coast`, then the insertion at its epoch).
+
 **Files:**
 - Create: `core/include/starsim/mission/lunar_outbound.hpp`, `core/src/mission/lunar_outbound.cpp`
 - Modify: `core/CMakeLists.txt`, `core/tests/CMakeLists.txt`
@@ -1080,7 +1089,7 @@ TEST_CASE("NRHO station keeping holds the reference for three revolutions", "[mi
   enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar };
   // Steps of a lunar flight (plan_lunar_outbound / plan_lunar_orbit_transfer).
   enum class LunarStep {
-      None, Departure, Tli, Coast, MidCourse, PilotCorrection, Insertion, Trim, InLlo, InNrho, StationKeeping,
+      None, Departure, Tli, Coast, MidCourse, PilotCorrection, PoweredFlyby, Insertion, Trim, InLlo, InNrho, StationKeeping,
     TransferOut, TransferIn   // PilotCorrection: Step 3b
   };
   const char* to_string(LunarStep step);   // German: "aus", "Abflug", "TLI", "Freiflug", "Kurskorrektur",
@@ -1292,7 +1301,10 @@ create the half-tank session from scratch.
         allowance stops at `min(lunar_step_epoch_, lunar_next_repoint_)`. At `lunar_step_epoch_`: if MCCs remain,
         `planner.mid_course(state, epoch_, epoch_ + burn_preparation_s, p)`; a burn -> `lunar_burn(mcc, false)`, step
         `MidCourse`; none -> `++lunar_mcc_index_` and the next epoch. After the last MCC: `planner.insertion(...)` ->
-        `lunar_burn(insertion, true)`, step `Insertion`.
+        `lunar_burn(insertion, true)`, step `Insertion`. **Amended (Task 4):** pass the stored `OutboundPlan` to
+        `mid_course` / `insertion`; for the NRHO, after the last MCC first `planner.powered_flyby(...)` ->
+        `lunar_burn(swing, true)`, step `PoweredFlyby` ("Swing-by"), back to `Coast` with `lunar_step_epoch_` = the
+        insertion's ignition - preparation; MCC epochs after the flyby epoch are skipped.
       - `MidCourse` (back after the burn): `++lunar_mcc_index_`, step `Coast` as above.
       - `Insertion` (back): LLO -> step `Trim`, `lunar_step_epoch_ = epoch_ + 600 s`; NRHO -> step `InNrho`,
         `lunar_step_epoch_` = the next apolune.

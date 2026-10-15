@@ -58,6 +58,7 @@ add_library(starsim_core STATIC
     src/sim/ascent_mission.cpp
     src/sim/capsule_return_mission.cpp
     src/sim/mission_start.cpp
+    src/mission/lunar_outbound.cpp
     src/mission/lunar_transfer.cpp
     src/mission/nrho_reference.cpp
     src/mission/position_targeter.cpp

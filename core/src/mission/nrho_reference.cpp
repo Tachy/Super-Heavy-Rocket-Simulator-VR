@@ -252,6 +252,9 @@ NrhoReference::NrhoReference(const environment::GravityModel& earth_centred_grav
     // the previous perilune up to the apolune and backward from the CR3BP perilune at that epoch after it, so the jump
     // sits just after the apolune where the motion is slow and the Newton step nearly linear; then the whole span is
     // corrected again.
+    // The initial jump grows with every revolution (the free orbit drifts from the CR3BP shape); when Newton cannot
+    // close it, the revolution is seeded again from the free coast itself (anchor weight 0: already continuous). Partial
+    // anchors were tried: a blend of two perilune states is far off both orbits (jumps of 40,000 km).
     Shooter shooter(earth_centred_gravity, patch_epochs_, options);
     std::vector<Vec6> x;
     for (int k = 1; k <= options.revolutions; ++k) {
@@ -259,19 +262,34 @@ NrhoReference::NrhoReference(const environment::GravityModel& earth_centred_grav
         const auto t_previous = patch_epochs_[previous];
         const auto t_next = closest_approach(earth_centred_gravity, ephemeris, patch_states_[previous], t_previous,
                                              t_previous + period_s, perilune_window_s);
-        const auto next_state = convert(ephemeris, perilune, t_next);
+        const auto anchor = convert(ephemeris, perilune, t_next);
+        const auto free = coast(earth_centred_gravity, patch_states_[previous], t_previous, t_next);
         for (int r = 1; r <= 2 * n; ++r) {
-            const auto t = t_previous + phase_after_perilune(r) * (t_next - t_previous);
-            patch_epochs_.push_back(t);
-            patch_states_.push_back(r == 2 * n ? next_state
-                                    : r <= n   ? coast(earth_centred_gravity, patch_states_[previous], t_previous, t)
-                                               : coast(earth_centred_gravity, next_state, t_next, t));
-            if (r == n) apolune_epochs_.push_back(t);
+            patch_epochs_.push_back(t_previous + phase_after_perilune(r) * (t_next - t_previous));
+            if (r == n) apolune_epochs_.push_back(patch_epochs_.back());
         }
         perilune_epochs_.push_back(t_next);
-        x.clear();
-        for (const auto& s : patch_states_) x.push_back(to_scaled(s));
-        iterations_ += shooter.solve(x);
+        const std::vector<StateVector> converged = patch_states_;
+        for (double weight = 1.0;; weight = 0.0) {
+            const StateVector& next_state = weight > 0.0 ? anchor : free;
+            patch_states_ = converged;
+            for (int r = 1; r <= 2 * n; ++r) {
+                const auto t = patch_epochs_[previous + r];
+                patch_states_.push_back(r == 2 * n ? next_state
+                                        : r <= n   ? coast(earth_centred_gravity, converged[previous], t_previous, t)
+                                                   : coast(earth_centred_gravity, next_state, t_next, t));
+            }
+            x.clear();
+            for (const auto& s : patch_states_) x.push_back(to_scaled(s));
+            try {
+                iterations_ += shooter.solve(x);
+            } catch (const std::runtime_error&) {
+                if (weight == 0.0) throw;
+                if (debug_enabled()) std::fprintf(stderr, "NRHO shooting: revolution %d, CR3BP anchor failed\n", k);
+                continue;
+            }
+            break;
+        }
         for (size_t m = 0; m < x.size(); ++m) patch_states_[m] = from_scaled(x[m]);
     }
     max_continuity_error_m_ = shooter.max_jump_m();
