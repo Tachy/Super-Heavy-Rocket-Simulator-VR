@@ -13,9 +13,12 @@ Not an arcade game: physical correctness has top priority.
 ## Working on plans
 - No feature branches (user 2026-10-15): work and commit directly on `main`, and push (`git push origin main`) after
   every completed task - a plan task, a fix pass, a docs update - once its tests are green.
-- Compact the context before each milestone of a plan (`/compact`). Before that, record the state (done, open,
-  decisions, next step) in the plan's ledger/progress file so the work resumes from it. Claude cannot run
-  `/compact` itself: at a milestone boundary it saves the state and asks the user to compact.
+- Clear the context after every completed task (user 2026-10-15: token cost grows with the context; auto-compaction
+  comes too late). Claude cannot run `/clear` or `/compact` itself: it records the state (done, open, decisions, next
+  step) in the plan's ledger/progress file and the memory, commits and pushes, then asks the user for `/clear` and
+  names the next step; after "weiter" it resumes from ledger, memory and `git log`.
+- Keep the context lean: long command output to files (read the tail or grep), files in excerpts, broad searches by a
+  subagent. The user still gets all information: results, numbers, decisions and open points are reported in full.
 
 ## Architecture (non-negotiable)
 ```
@@ -127,7 +130,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Earth is a 256x128 ellipsoid mesh whose facets sit up to ~0.6 km below the true surface; below 500 km a
   2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites.
   Physics ground = flat at the pad height (FlightBody::ground_height_m): gentle contact (<= 3 m/s, <= 10 deg)
-  rests, harder contact is an impact. Sky is black (no atmosphere rendering). Terrain/atmosphere: M8.
+  rests, harder contact is an impact. Sky is black (no atmosphere rendering). Terrain/atmosphere: M8 (incl. Earth DEM tiles for physics, e.g. Copernicus GLO-30 - user 2026-10-15; the lunar l2 terrain path is the template).
 - Circular ascent targets are J2-aware (`gnc/j2_insertion`): when the gravity model has J2
   (`GravityModel::central_j2`), PEG aims at the radius, radial and horizontal speed at the predicted cutoff point whose
   next revolution stays closest to the target radius (Gauss-Newton on a point-mass + J2 revolution, re-solved when the
@@ -577,7 +580,7 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   work on any reference body (`sim::LegSite` with a tracking radius - the site's tile; outside it, or without a lunar
   site, `FlightBody`'s own ground contact, `set_legs_on_site`) and press the feet along the surface normal
   (`contact::SurfaceField`: `PlaneField`, `TerrainField`); Earth landings are bit-identical. FlightBody's ground at the
-  Moon is the terrain (the sphere without one). Earth DEM tiles (e.g. Copernicus GLO-30) are open (user 2026-10-15;
+  Moon is the terrain (the sphere without one). Earth DEM tiles (e.g. Copernicus GLO-30) come with M8 (user 2026-10-15;
   `ReferenceBody::set_terrain` takes a `LunarTerrain` so far).
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
