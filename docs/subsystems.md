@@ -452,3 +452,35 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   (`contact::SurfaceField`: `PlaneField`, `TerrainField`); Earth landings are bit-identical. FlightBody's ground at the
   Moon is the terrain (the sphere without one). Earth DEM tiles (e.g. Copernicus GLO-30) come with M8 (user 2026-10-15;
   `ReferenceBody::set_terrain` takes a `LunarTerrain` so far).
+  l3 outbound (plan `docs/superpowers/plans/2026-10-15-lunar-l3-outbound.md`): `mission/position_targeter` (fixed-time
+  position in the full model; needs a patched-conic first guess on long arcs - Newton from zero diverges over many
+  revolutions; finite burns via `set_finite_burn` / `mission::apply_finite_burn`), `orbit/cr3bp` (CR3BP, fixed-period
+  periodic orbits, instantaneous Earth-Moon rotating frame), `mission/nrho_reference` (9:2 southern L2 NRHO [S: Zimovan
+  2017 seed] by multiple shooting in the full model: perilune anchors from the CR3BP, 4 patches per half revolution
+  crowded to the perilunes, continuation revolution by revolution, free-coast fallback when a revolution's anchor fails;
+  periods 6.25-6.71 d, perilune 2,861-3,670 km over the north pole, apolune 69,804-71,706 km [Gateway: 6.26-6.76 d, rp
+  3,195-3,557 km, Davis et al. AAS 2020]; phase set by the first perilune - no Gateway phasing; only `first_perilune` is
+  exact, use `perilune_epochs()` (true closest approaches), never `first + k P`), `mission/lunar_outbound` (LLO: TLI
+  3,142 m/s impulsive / 3,182 m/s finite, LOI 856 m/s, ~1,147 t; NRHO via a powered lunar swing-by (user 2026-10-15: a
+  direct transfer meets the NRHO perilune head-on, 3.5 km/s) after Kikuchi et al. ISSFD 2024: TLI 3,162 m/s, swing-by
+  243 m/s at 100 km, insertion 224 m/s ~1.3 d later; MCCs, LLO trims, propellant check), `mission/lunar_orbit_transfer`
+  (NRHO -> LLO 660 + 216 = 876 m/s; LLO -> NRHO arrives anywhere on the reference (user 2026-10-15) in one-day windows:
+  725 m/s right after the LLO arrival, ~0.7 km/s within ~2.5 d or 21-30 d, 0.9-1.65 km/s in between - the NRHO plane
+  turns ~86 deg per revolution with the Moon's orbit, the LLO plane stays inertial; NRHO station keeping at apolune
+  when the predicted perilune miss exceeds 1 km [E]: 8.2 m/s per 3 revolutions planned, 1.1-1.4 m/s per burn flown).
+  `FlightSession::plan_lunar_outbound` / `plan_lunar_orbit_transfer` (also from autopilot state Orbit),
+  `AutopilotState::Lunar` ("Mondflug", `core/src/sim/flight_session_lunar.cpp`), `LunarStep`, `lunar_burns()`. The TLI is
+  re-solved for the finite burn at departure (flown as an impulse the 7 min TLI missed the Moon: MCC 1 333 m/s, now
+  3.4 m/s); LOI is timed on the periselene predicted at the last coast; burns too small for the vacuum Raptors fall back
+  to RCS. Coasts are Sun-pointed with a re-aim every 6 h [E] on their own controller (0.5 deg/s slews, 0.002 deg/s rate
+  deadband): ~0.9 t cold gas per day (free coast between: no disturbance torques). Pilot-flown MCCs (user 2026-10-15,
+  `pilot_corrections`): call 600 s before the MCC, `lunar_pilot_cue()` (remaining delta-v, attitude error, window),
+  `complete_pilot_correction()`, the next MCC re-plans from the real state; display with l6 / M7. Missions
+  `hls_lunar_llo` / `hls_lunar_nrho` (`kind = "lunar_landing"`, outbound only until l4; the game's FlightSim has no
+  Moon orientation yet - l6). Results: LLO 99.97-100.00 km after one trim; NRHO 0.58 km worst perilune offset over 3
+  revolutions, NRHO -> LLO 99.97-100.03 km; campaign (TLI +-1 % and 0.5 deg, 8 / 8): MCC 1 183-311 m/s (a 1 % / 0.5 deg TLI error is ~60 m/s, grown ~5x by a
+  day of coast), MCC 2 0.3-0.4 m/s, LLO 99.97-100.01 km, 1,177-1,194 t; NRHO worst perilune offset 0.47-2.88 km,
+  1,124-1,150 t. Bug fixed on the way: the
+  default Earth leg-site plane cut through LEO and wrecked the HLS - leg tracks start only near the body's own ground.
+  Debug: `STARSIM_DEBUG_NRHO`, `STARSIM_DEBUG_OUTBOUND`, `STARSIM_DEBUG_LUNAR_TRANSFER`, `STARSIM_DEBUG_LUNAR_SESSION`.
+  Open: the plan's propellant check uses the impulsive TLI (~40 m/s gravity loss inside the 5 % reserve).

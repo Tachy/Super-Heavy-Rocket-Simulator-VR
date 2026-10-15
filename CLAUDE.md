@@ -35,7 +35,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`.
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
   Moon: body-fixed frame, shape, atmosphere or vacuum),
-  integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation),
+  integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP),
+  mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
   aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating, blunt capsule from a

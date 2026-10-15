@@ -133,7 +133,7 @@ flow separation (vacuum engines).
   sea). Where it waits is set by the mission.
 
 ## Missions (`missions/`)
-- `[mission] kind = "ascent" | "ship_return" | "capsule_return"` (default "ascent"): `config::mission_kind`;
+- `[mission] kind = "ascent" | "ship_return" | "capsule_return" | "lunar_landing"` (default "ascent"): `config::mission_kind`;
   `sim::start_mission` / `FlightSim.start_mission` dispatch on it (an ascent starts at the requested time, a capsule return
   at its `[orbit]` epoch with the deorbit planned, a ship return is refused: it is flown from orbit, key R). Each loader
   refuses a file of another kind.
@@ -150,6 +150,15 @@ flow separation (vacuum engines).
   stage's cutoff), `separation_dv_mps` (spring push), `nose_cone_open_s` (after the separation; < 0: stays closed).
 - `falcon9_asds.toml`: the same keys; instead of a `landing_zone` a `[drone_ship]` table (`id`, `latitude_deg`,
   `longitude_deg`, `heading_deg` of the deck's long axis, `sea_height_m` above WGS84): the first stage lands on its deck.
+- `hls_lunar_llo.toml`, `hls_lunar_nrho.toml` (`kind = "lunar_landing"`, `config::load_lunar_landing_mission`,
+  `sim::place_lunar_landing_mission`; outbound part only until lunar l4): `[mission]` `vehicle`, `site`
+  (`lunar_sites.toml`, must exist); `[orbit]` scenario start (`epoch_utc`, `height_km`, `inclination_deg`,
+  `argument_of_latitude_deg`; the RAAN is computed so the plane passes through the Moon at arrival); `[transfer]`
+  `flight_time_days` (from the scenario start to the arrival), `earliest_departure_h`, `mcc_after_tli_days`;
+  `[lunar_orbit]` `kind = "llo" | "nrho"`, for an LLO `altitude_km`, `inclination_deg`; for an NRHO an `[nrho]` table
+  with the CR3BP seed at apolune (`apolune_position`, `apolune_velocity`, nondimensional), `revolutions` /
+  `synodic_months` (resonance) and `reference_revolutions` (span of the full-model reference). The session needs a Moon
+  orientation (the game's FlightSim has none yet - lunar l6).
 
 - Payload vehicles: `config::stack_payload` stacks a vehicle (e.g. `crew_dragon`) on the launcher; its stages are
   `payload` stages, whose thrusters stay blocked until the payload flies alone.

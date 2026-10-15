@@ -7,10 +7,12 @@
 #include <utility>
 #include <cstdio>
 #include <memory>
+#include <string>
 
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/math/quat.hpp"
 #include "starsim/mission/lunar_outbound.hpp"
 #include "starsim/mission/lunar_transfer.hpp"
 #include "starsim/mission/nrho_reference.hpp"
@@ -231,3 +233,86 @@ TEST_CASE("Pilot override ends the lunar flight; a short plan is refused", "[sim
     CHECK(short_fx.session.lunar_outbound_plan()->reason.find("Treibstoff") != std::string::npos);
     CHECK(short_fx.session.autopilot().state == sim::AutopilotState::Off);
 }
+
+namespace {
+// Execution-error campaign (l3 Task 8): case i flies the LLO (i < 4) or the NRHO with the TLI realised 1 % short or
+// long (sign alternates) and tilted by 0.5 deg about an axis turned by i * 90 deg around the burn direction. The error
+// is applied right after the TLI cutoff; the MCCs, insertion and trims must absorb it.
+void fly_campaign_case(int i) {
+    Fixture fx;
+    mission::LunarOutboundParameters p;
+    const bool llo = i < 4;
+    p.arrival_epoch = fx.t0 + (llo ? 4.0 : 4.5) * 86400.0;
+    if (!llo) {
+        p.orbit = mission::LunarOrbitKind::Nrho;
+        p.nrho = std::make_shared<mission::NrhoReference>(
+            fx.gravity, fx.ephemeris, mission::NrhoSeed{{{1.0221, 0.0, -0.1821}, {0.0, -0.1033, 0.0}}, 9, 2},
+            p.arrival_epoch, mission::NrhoReferenceOptions{.revolutions = 6});
+    }
+    fx.place(p.arrival_epoch);
+    const double m0 = fx.mass_kg();
+    REQUIRE(fx.session.plan_lunar_outbound(p));
+    while (fx.session.lunar_step() != sim::LunarStep::Coast) {
+        REQUIRE(fx.session.epoch() < p.arrival_epoch);
+        fx.session.advance_to(fx.session.epoch() + 10.0, 100000);
+    }
+    const auto& burns = fx.session.lunar_burns();
+    const auto tli = std::find_if(burns.begin(), burns.end(), [](const auto& b) { return b.step == sim::LunarStep::Tli; });
+    REQUIRE(tli != burns.end());
+    const math::Vec3 dv = tli->node.delta_v_gcrf_mps;
+    const math::Vec3 u = normalized(dv);
+    const math::Vec3 e1 = normalized(cross(u, std::abs(u.z) < 0.9 ? math::Vec3{0.0, 0.0, 1.0} : math::Vec3{1.0, 0.0, 0.0}));
+    const math::Vec3 e2 = cross(u, e1);
+    const double phi = i * 90.0 * deg;
+    const double scale = (i % 2 ? 1.0 : -1.0) * 0.01;
+    const auto tilt = math::Quat::from_axis_angle(std::cos(phi) * e1 + std::sin(phi) * e2, 0.5 * deg);
+    fx.session.apply_velocity_error(0, tilt.rotate((1.0 + scale) * dv) - dv);
+
+    double offset_km = 0.0, low = 0.0, high = 0.0;
+    if (llo) {
+        fx.session.advance_to(p.arrival_epoch + 12.0 * 3600.0, 50'000'000);
+        INFO(fx.session.lunar_status());
+        REQUIRE(fx.session.lunar_step() == sim::LunarStep::InLlo);
+        std::tie(low, high) = fx.llo_range(3);
+    } else {
+        fx.session.advance_to(fx.session.lunar_outbound_plan()->insertion.epoch + 2.0 * 3600.0, 50'000'000);
+        INFO(fx.session.lunar_status());
+        REQUIRE(fx.session.lunar_step() == sim::LunarStep::InNrho);
+        for (int rev = 1; rev <= 3; ++rev) {
+            const auto tp = p.nrho->perilune_epochs()[rev];
+            fx.session.advance_to(tp, 50'000'000);
+            const auto& s = fx.session.body(0).state();
+            offset_km = std::max(offset_km, norm(s.position_gcrf_m - p.nrho->state_gcrf(tp).position_m) / 1000.0);
+        }
+    }
+    std::string mccs;
+    for (const auto& b : fx.session.lunar_burns()) {
+        if (b.step != sim::LunarStep::MidCourse) continue;
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%s%.2f", mccs.empty() ? "" : " / ", norm(b.node.delta_v_gcrf_mps));
+        mccs += buf;
+    }
+    if (mccs.empty()) mccs = "none";
+    std::printf("[validation] campaign %d (%s, TLI %+.0f %%, tilt 0.5 deg at %.0f deg): MCC %s m/s, ", i,
+                llo ? "LLO" : "NRHO", scale * 100.0, (i % 4) * 90.0, mccs.c_str());
+    if (llo) std::printf("LLO %.2f x %.2f km", low / 1000.0, high / 1000.0);
+    else std::printf("worst perilune offset %.2f km", offset_km);
+    std::printf(", %.0f t used\n", (m0 - fx.mass_kg()) / 1000.0);
+    if (llo) {
+        CHECK(low > 99e3);  // spec: 100 km circular within 1 km after the trims
+        CHECK(high < 101e3);
+    } else {
+        CHECK(offset_km < 5.0);  // [E] near the reference at the first three perilunes
+    }
+}
+}  // namespace
+
+// One test case per flight so that ctest runs the campaign in parallel.
+TEST_CASE("HLS outbound campaign 0", "[sim][lunar][outbound][campaign][validation][slow]") { fly_campaign_case(0); }
+TEST_CASE("HLS outbound campaign 1", "[sim][lunar][outbound][campaign][validation][slow]") { fly_campaign_case(1); }
+TEST_CASE("HLS outbound campaign 2", "[sim][lunar][outbound][campaign][validation][slow]") { fly_campaign_case(2); }
+TEST_CASE("HLS outbound campaign 3", "[sim][lunar][outbound][campaign][validation][slow]") { fly_campaign_case(3); }
+TEST_CASE("HLS outbound campaign 4", "[sim][lunar][outbound][campaign][validation][slow]") { fly_campaign_case(4); }
+TEST_CASE("HLS outbound campaign 5", "[sim][lunar][outbound][campaign][validation][slow]") { fly_campaign_case(5); }
+TEST_CASE("HLS outbound campaign 6", "[sim][lunar][outbound][campaign][validation][slow]") { fly_campaign_case(6); }
+TEST_CASE("HLS outbound campaign 7", "[sim][lunar][outbound][campaign][validation][slow]") { fly_campaign_case(7); }
