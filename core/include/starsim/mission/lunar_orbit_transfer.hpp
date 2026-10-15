@@ -45,10 +45,12 @@ public:
     TwoBurnTransfer llo_to_nrho(const math::StateVector& state, time::Epoch epoch, const NrhoReference& nrho,
                                 double search_s = 14.0 * 86400.0, double max_total_mps = 1000.0) const;
 
-    // Station keeping in the NRHO at apolune: aims the next perilune of the reference (position targeter); empty when
-    // the predicted perilune miss is below `deadband_m` or the reference does not cover the next perilune.
+    // Station keeping in the NRHO at apolune: a burn `lead_s` after `epoch` aims the next perilune of the reference
+    // (position targeter); empty when the predicted perilune miss is below `deadband_m` or the reference does not
+    // cover the next perilune.
     std::optional<gnc::BurnNode> station_keeping(const math::StateVector& state, time::Epoch epoch,
-                                                 const NrhoReference& nrho, double deadband_m = 1000.0) const;
+                                                 const NrhoReference& nrho, double deadband_m = 1000.0,
+                                                 double lead_s = 60.0) const;  // [E] burn delay after the decision
 
     // Second burn of a transfer flown so far: LLO circularisation at the predicted periselene, or the NRHO velocity
     // match at the targeted perilune.

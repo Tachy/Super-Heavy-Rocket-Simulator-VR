@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/geodetic.hpp"
@@ -32,6 +33,7 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
       gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)) {
     legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
     moon_orientation_ = moon_orientation;
+    lunar_debug_ = std::getenv("STARSIM_DEBUG_LUNAR_SESSION") != nullptr;
 }
 
 const char* to_string(AutopilotState state) {

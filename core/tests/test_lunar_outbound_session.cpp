@@ -273,6 +273,26 @@ TEST_CASE("Pilot override ends the lunar flight; a short plan is refused", "[sim
     CHECK(short_fx.session.autopilot().state == sim::AutopilotState::Off);
 }
 
+TEST_CASE("Lunar outbound: Moon-bound start refused, immediate departure keeps its lead", "[sim][lunar][outbound]") {
+    Fixture fx;
+    mission::LunarOutboundParameters p;
+    p.arrival_epoch = fx.t0 + 4.0 * 86400.0;
+    p.earliest_departure_s = 0.0;
+    fx.place(p.arrival_epoch);
+    REQUIRE(fx.session.plan_lunar_outbound(p));
+    CHECK(fx.session.lunar_outbound_plan()->tli.epoch - fx.t0 >= sim::FlightSession::min_departure_lead_s);
+
+    Fixture moon_fx;
+    const double gm_moon = moon_fx.ephemeris.gm_m3ps2(ephemeris::Body::Moon);
+    const auto rel = orbit::state_from_elements({constants::moon_mean_radius_m + 100e3, 0.0, 1.5, 0.0, 0.0, 0.0}, gm_moon);
+    const auto moon = moon_fx.ephemeris.state_gcrf(ephemeris::Body::Moon, moon_fx.t0);
+    moon_fx.session.place_in_orbit("starship_hls", {rel.position_m + moon.position_m, rel.velocity_mps + moon.velocity_mps},
+                                   moon_fx.t0);
+    CHECK_FALSE(moon_fx.session.plan_lunar_outbound(p));
+    CHECK(moon_fx.session.lunar_status().find("schon beim Mond") != std::string::npos);
+    CHECK(moon_fx.session.autopilot().state == sim::AutopilotState::Off);
+}
+
 namespace {
 // Execution-error campaign (l3 Task 8): case i flies the LLO (i < 4) or the NRHO with the TLI realised 1 % short or
 // long (sign alternates) and tilted by 0.5 deg about an axis turned by i * 90 deg around the burn direction. The error

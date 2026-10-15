@@ -10,6 +10,7 @@
 #include "starsim/contact/tower_geometry.hpp"
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/math/mat3.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/landing_outcome.hpp"
@@ -100,9 +101,9 @@ godot::Dictionary FlightSim::site_tower(const godot::String& site_id) const {
         const auto& c = *site.tower;
         d["present"] = true;
         d["origin_itrf_m"] = to_godot(g.origin_itrf_m());
-        d["east"] = to_godot(contact::column(g.site_to_itrf(), 0));
-        d["north"] = to_godot(contact::column(g.site_to_itrf(), 1));
-        d["up"] = to_godot(contact::column(g.site_to_itrf(), 2));
+        d["east"] = to_godot(math::column(g.site_to_itrf(), 0));
+        d["north"] = to_godot(math::column(g.site_to_itrf(), 1));
+        d["up"] = to_godot(math::column(g.site_to_itrf(), 2));
         d["tower_direction"] = to_godot(g.tower_direction());
         d["across"] = to_godot(g.across());
         d["tower_center_m"] = to_godot(g.tower_box().center);

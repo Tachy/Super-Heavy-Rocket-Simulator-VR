@@ -49,6 +49,7 @@ add_library(starsim_core STATIC
     src/gnc/entry_aero_table.cpp
     src/gnc/entry_attitude.cpp
     src/gnc/orbital_attitude.cpp
+    src/gnc/sun_hold.cpp
     src/gnc/deorbit_planner.cpp
     src/gnc/entry_guidance.cpp
     src/gnc/entry_predictor.cpp

@@ -20,7 +20,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/constants.hpp"
@@ -33,8 +32,6 @@ namespace {
 
 const std::vector<std::string> vacuum_groups{"vacuum"};
 constexpr double far_future_s = 1e9;                               // "nothing timed"
-constexpr double sun_settled_error_rad = 1.0 * constants::deg_to_rad;   // [E]
-constexpr double sun_settled_rate_radps = 0.005 * constants::deg_to_rad;  // [E] ~100 deg drift in 6 h at most
 
 std::optional<time::Epoch> first_after(const std::vector<time::Epoch>& epochs, time::Epoch t) {
     for (const auto& e : epochs) {
@@ -102,6 +99,12 @@ bool FlightSession::plan_lunar_outbound(const mission::LunarOutboundParameters& 
         lunar_status_ = "Kein Mondflug: keine Mondorientierung";
         return false;
     }
+    if (reference_body(controlled_) == ephemeris::Body::Moon) {
+        lunar_status_ = "Kein Mondflug: schon beim Mond";
+        return false;
+    }
+    auto planned = parameters;  // the TLI needs its preparation and half its burn before the centre
+    planned.earliest_departure_s = std::max(planned.earliest_departure_s, min_departure_lead_s);
     const auto configurations = burn_configurations(&vacuum_groups);
     if (configurations.empty()) {
         lunar_status_ = "Kein Mondflug: keine Vakuum-Triebwerke";
@@ -112,7 +115,7 @@ bool FlightSession::plan_lunar_outbound(const mission::LunarOutboundParameters& 
         configurations.front().thrust_n / configurations.front().mass_flow_kgps / constants::standard_gravity_mps2;
     const mission::LunarOutboundPlanner planner(gravity_, *env_.ephemeris, *moon_orientation_);
     try {
-        lunar_plan_ = planner.plan(controlled_state(), epoch_, parameters, vehicle.mass_properties().mass_kg, isp_s,
+        lunar_plan_ = planner.plan(controlled_state(), epoch_, planned, vehicle.mass_properties().mass_kg, isp_s,
                                    vehicle.propellant_kg());
     } catch (const std::exception&) {  // integrator step underflow on a trial arc, ephemeris range
         lunar_plan_.reset();
@@ -123,9 +126,9 @@ bool FlightSession::plan_lunar_outbound(const mission::LunarOutboundParameters& 
         lunar_status_ = lunar_plan_->reason;
         return false;
     }
-    lunar_parameters_ = parameters;
-    lunar_nrho_ = parameters.nrho;
-    lunar_llo_ = parameters.llo;
+    lunar_parameters_ = planned;
+    lunar_nrho_ = planned.nrho;
+    lunar_llo_ = planned.llo;
     lunar_mcc_index_ = 0;
     lunar_flyby_done_ = false;
     lunar_trims_ = 0;
@@ -223,6 +226,7 @@ void FlightSession::lunar_enter_coast() {
     const auto& plan = *lunar_plan_;
     lunar_step_ = LunarStep::Coast;
     attitude_mode_ = {gnc::AttitudeModeKind::Sun, {}, {}, {}};
+    lunar_sun_hold_.start(epoch_);
     lunar_next_repoint_ = epoch_ + sun_repoint_interval_s;
     const time::Epoch mcc = lunar_next_mcc_epoch();
     if (mcc - epoch_ < 0.5 * far_future_s) {
@@ -307,16 +311,13 @@ void FlightSession::run_lunar(Flying& flying) {
         // and throw again on every tick: the flight ends, the vehicle coasts.
         lunar_abort("Mondflug abgebrochen: Planung fehlgeschlagen");
     }
-    if (std::getenv("STARSIM_DEBUG_LUNAR_SESSION")) {  // diagnostics: every status change
-        static std::string last;
-        if (lunar_status_ != last) {
-            last = lunar_status_;
-            const auto rel = mission::moon_relative(*env_.ephemeris, controlled_state(), epoch_);
-            std::printf("[lunar] %.3f d  %-14s  Moon %.0f km  %.1f m/s  %.1f t  %s\n",
-                        (epoch_ - launch_epoch_) / 86400.0, to_string(lunar_step_), norm(rel.position_m) / 1000.0,
-                        norm(rel.velocity_mps), flying.body->vehicle().mass_properties().mass_kg / 1000.0,
-                        lunar_status_.c_str());
-        }
+    if (lunar_debug_ && lunar_status_ != lunar_debug_last_) {  // diagnostics: every status change
+        lunar_debug_last_ = lunar_status_;
+        const auto rel = mission::moon_relative(*env_.ephemeris, controlled_state(), epoch_);
+        std::printf("[lunar] %.3f d  %-14s  Moon %.0f km  %.1f m/s  %.1f t  %s\n",
+                    (epoch_ - launch_epoch_) / 86400.0, to_string(lunar_step_), norm(rel.position_m) / 1000.0,
+                    norm(rel.velocity_mps), flying.body->vehicle().mass_properties().mass_kg / 1000.0,
+                    lunar_status_.c_str());
     }
 }
 
@@ -373,16 +374,19 @@ void FlightSession::run_lunar_steps(Flying& flying) {
             lunar_enter_coast();
             break;
         case LunarStep::Coast: {
-            if (attitude_mode_.kind == gnc::AttitudeModeKind::Sun) {
+            if (attitude_mode_.kind == gnc::AttitudeModeKind::Sun && lunar_sun_hold_.active()) {
                 const auto& s = flying.body->state();
                 const math::Vec3 sun =
                     env_.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch_).position_m - s.position_gcrf_m;
                 const double error = std::acos(
                     std::clamp(dot(s.attitude.rotate(math::Vec3{1.0, 0.0, 0.0}), math::normalized(sun)), -1.0, 1.0));
-                if (error < sun_settled_error_rad && norm(s.angular_velocity_body_radps) < sun_settled_rate_radps) {
-                    attitude_mode_ = {};  // pointed: coast freely
-                    if (std::getenv("STARSIM_DEBUG_LUNAR_SESSION")) {
-                        std::printf("[lunar] Sun pointed: %.2f deg, %.4f deg/s, %.0f kg\n", error / constants::deg_to_rad,
+                const auto held = lunar_sun_hold_.update(error, norm(s.angular_velocity_body_radps), epoch_);
+                if (held != gnc::SunHoldResult::Holding) {
+                    attitude_mode_ = {};  // pointed (or stuck: coast freely instead of spending cold gas)
+                    if (lunar_debug_) {
+                        std::printf("[lunar] Sun %s: %.2f deg, %.4f deg/s, %.0f kg\n",
+                                    held == gnc::SunHoldResult::Settled ? "pointed" : "hold timed out",
+                                    error / constants::deg_to_rad,
                                     norm(s.angular_velocity_body_radps) / constants::deg_to_rad,
                                     flying.body->vehicle().mass_properties().mass_kg);
                     }
@@ -390,8 +394,9 @@ void FlightSession::run_lunar_steps(Flying& flying) {
             }
             if (epoch_ - lunar_next_repoint_ >= 0.0) {
                 attitude_mode_ = {gnc::AttitudeModeKind::Sun, {}, {}, {}};
+                lunar_sun_hold_.start(epoch_);
                 lunar_next_repoint_ = epoch_ + sun_repoint_interval_s;
-                if (std::getenv("STARSIM_DEBUG_LUNAR_SESSION")) {
+                if (lunar_debug_) {
                     const auto& s = flying.body->state();
                     const math::Vec3 sun =
                         env_.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch_).position_m - s.position_gcrf_m;
@@ -437,7 +442,8 @@ void FlightSession::run_lunar_steps(Flying& flying) {
         case LunarStep::Trim: {
             if (epoch_ - lunar_step_epoch_ < 0.0) break;
             const mission::LunarOutboundPlanner planner(gravity_, *env_.ephemeris, *moon_orientation_);
-            const auto trim = lunar_trims_ < max_llo_trims ? planner.llo_trim(controlled_state(), epoch_, *lunar_parameters_)
+            const auto trim = lunar_trims_ < max_llo_trims ? planner.llo_trim(controlled_state(), epoch_, *lunar_parameters_,
+                                                                            burn_preparation_s + small_burn_margin_s)
                                                            : std::nullopt;
             if (trim) {
                 ++lunar_trims_;
@@ -463,7 +469,8 @@ void FlightSession::run_lunar_steps(Flying& flying) {
                 break;
             }
             const mission::LunarOrbitTransfer transfer(gravity_, *env_.ephemeris, *moon_orientation_);
-            if (const auto sk = transfer.station_keeping(controlled_state(), epoch_, *lunar_nrho_)) {
+            if (const auto sk = transfer.station_keeping(controlled_state(), epoch_, *lunar_nrho_, 1000.0,
+                                                          burn_preparation_s + small_burn_margin_s)) {
                 if (lunar_burn(*sk, false, LunarStep::StationKeeping)) {
                     lunar_step_ = LunarStep::StationKeeping;
                     lunar_status_ = "Bahnhaltung: " + german(norm(sk->delta_v_gcrf_mps), 2) + " m/s";

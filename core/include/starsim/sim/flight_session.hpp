@@ -26,6 +26,7 @@
 #include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/gnc/parachute_sequencer.hpp"
 #include "starsim/gnc/ship_landing.hpp"
+#include "starsim/gnc/sun_hold.hpp"
 #include "starsim/mission/lunar_orbit_transfer.hpp"
 #include "starsim/mission/lunar_outbound.hpp"
 #include "starsim/mission/nrho_reference.hpp"
@@ -128,6 +129,8 @@ public:
     static constexpr double tick_s = 0.005;  // 200 Hz
     static constexpr double max_coast_s = 600.0;
     static constexpr double burn_preparation_s = 120.0;  // ticks resume this long before an ignition
+    static constexpr double small_burn_margin_s = 60.0;     // [E] trims / station keeping: planned after the preparation
+    static constexpr double min_departure_lead_s = 1800.0;  // [E] TLI centre after 120 s preparation + half a ~7 min burn
     // [E] a returning ship gets its entry guidance this long before the entry interface (turn to the entry attitude
     // on RCS: ~1.5 min for the 125 deg from the burn attitude)
     static constexpr double entry_lead_s = 300.0;
@@ -491,6 +494,9 @@ private:
     time::Epoch lunar_tli_end_;
     time::Epoch lunar_next_repoint_;
     std::string lunar_status_;
+    gnc::SunHold lunar_sun_hold_;
+    bool lunar_debug_ = false;     // STARSIM_DEBUG_LUNAR_SESSION, read once at construction
+    std::string lunar_debug_last_;  // last status printed by the diagnostics
     struct LunarPilotCall {
         gnc::BurnNode planned;
         time::Epoch window_end;

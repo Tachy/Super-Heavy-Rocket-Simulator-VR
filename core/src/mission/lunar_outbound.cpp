@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#include <stdexcept>
 
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/orbit/lambert.hpp"
@@ -25,6 +26,7 @@ constexpr double min_flyby_to_insertion_s = 0.25 * 86400.0;  // [E] shorter arcs
 constexpr double anomaly_search_step_s = 600.0;
 constexpr double anomaly_search_tolerance_s = 1.0;
 constexpr double apsis_now_s = 1.0;  // an apsis less than this ahead or behind counts as "now"
+constexpr double far_future_s = 1e30;  // "no apsis found yet"
 
 bool debug_enabled() { return std::getenv("STARSIM_DEBUG_OUTBOUND") != nullptr; }
 
@@ -302,11 +304,13 @@ std::optional<gnc::BurnNode> LunarOutboundPlanner::insertion(const StateVector& 
     const time::Epoch t = plan.insertion.epoch;
     if (!p.nrho || !p.nrho->covers(t)) return std::nullopt;
     const auto arrived = position_.coast(state, epoch, t);
+    // Velocity match only: the position error at the perilune is left to the station keeping.
     return gnc::BurnNode{t, p.nrho->state_gcrf(t).velocity_mps - arrived.velocity_mps};
 }
 
 std::optional<gnc::BurnNode> LunarOutboundPlanner::llo_trim(const StateVector& state, time::Epoch epoch,
-                                                            const LunarOutboundParameters& p) const {
+                                                            const LunarOutboundParameters& p,
+                                                            double min_lead_s) const {
     // Two-body about the Moon: the closed-loop burn absorbs the Earth's and the Sun's pull.
     const auto rel = moon_relative(ephemeris_, state, epoch);
     const auto el = orbit::elements_from_state(rel, gm_moon_);
@@ -322,8 +326,14 @@ std::optional<gnc::BurnNode> LunarOutboundPlanner::llo_trim(const StateVector& s
         2.0 * std::atan(std::sqrt((1.0 - e) / (1.0 + e)) * std::tan(0.5 * el.true_anomaly_rad));
     const double mean_anomaly = ecc_anomaly - e * std::sin(ecc_anomaly);
     const double mean_motion = std::sqrt(gm_moon_ / std::pow(el.semi_major_axis_m, 3));
-    const double dt = std::min(time_to_mean_anomaly(mean_anomaly, 0.0, mean_motion),
-                               time_to_mean_anomaly(mean_anomaly, constants::pi, mean_motion));
+    const double period = 2.0 * constants::pi / mean_motion;
+    if (min_lead_s >= period) throw std::invalid_argument("llo_trim: lead longer than one revolution");
+    const double to_periapsis = time_to_mean_anomaly(mean_anomaly, 0.0, mean_motion);
+    const double to_apoapsis = time_to_mean_anomaly(mean_anomaly, constants::pi, mean_motion);
+    double dt = far_future_s;  // the earliest apsis at least min_lead_s ahead
+    for (double c : {to_periapsis, to_apoapsis, to_periapsis + period, to_apoapsis + period}) {
+        if (c >= min_lead_s) dt = std::min(dt, c);
+    }
     const auto apsis = orbit::propagate_two_body(rel, gm_moon_, dt);
     const double r = norm(apsis.position_m);
     // Speed at radius r for the orbit with apsides r and target.

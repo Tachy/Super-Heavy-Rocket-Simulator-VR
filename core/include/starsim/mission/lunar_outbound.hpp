@@ -99,10 +99,10 @@ public:
     std::optional<gnc::BurnNode> insertion(const math::StateVector& state, time::Epoch epoch,
                                            const LunarOutboundParameters& p, const OutboundPlan& plan) const;
 
-    // LLO trim at the next apsis: sets the opposite apsis to the target radius (Moon two-body); empty when both
-    // apsides are within the tolerance.
+    // LLO trim at the first apsis at least `min_lead_s` ahead (shorter than one period): sets the opposite apsis to
+    // the target radius (Moon two-body); empty when both apsides are within the tolerance.
     std::optional<gnc::BurnNode> llo_trim(const math::StateVector& state, time::Epoch epoch,
-                                          const LunarOutboundParameters& p) const;
+                                          const LunarOutboundParameters& p, double min_lead_s = 0.0) const;
 
 private:
     LunarArrivalTarget llo_target(const LunarOutboundParameters& p) const;

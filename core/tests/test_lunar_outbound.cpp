@@ -168,3 +168,22 @@ TEST_CASE("LLO trim sets the opposite apsis", "[mission][lunar][outbound]") {
     CHECK(trim->epoch - fx.t0 < 60.0);  // at this periselene (or within one minute of it)
     CHECK(norm(trim->delta_v_gcrf_mps) < 5.0);
 }
+
+TEST_CASE("LLO trim keeps the minimum lead: the next apsis after it", "[mission][lunar][outbound]") {
+    test::spice_session();
+    Fixture fx;
+    mission::LunarOutboundParameters p;
+    const double gm_moon = fx.ephemeris.gm_m3ps2(ephemeris::Body::Moon);
+    const double r_moon = constants::moon_mean_radius_m;
+    const double rp = r_moon + 95e3, ra = r_moon + 104e3;
+    const auto rel =
+        orbit::state_from_elements({0.5 * (rp + ra), (ra - rp) / (ra + rp), 90.0 * deg, 0.3, 0.0, 0.0}, gm_moon);
+    const auto moon = fx.ephemeris.state_gcrf(ephemeris::Body::Moon, fx.t0);
+    const math::StateVector state{rel.position_m + moon.position_m, rel.velocity_mps + moon.velocity_mps};
+    const double half_period = constants::pi * std::sqrt(std::pow(0.5 * (rp + ra), 3) / gm_moon);
+    const auto trim = fx.planner.llo_trim(state, fx.t0, p, 180.0);  // at periselene now: the aposelene next
+    REQUIRE(trim);
+    CHECK(trim->epoch - fx.t0 >= 180.0);
+    CHECK(std::abs(trim->epoch - fx.t0 - half_period) < 60.0);
+    CHECK(norm(trim->delta_v_gcrf_mps) < 5.0);
+}

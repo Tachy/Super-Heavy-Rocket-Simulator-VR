@@ -28,7 +28,6 @@ constexpr double ascent_tof_step_s = 3.0 * 3600.0;
 constexpr double ascent_phase_step_s = 120.0;
 constexpr int ascent_refined_per_window = 3;      // [E] cheapest two-body candidates refined per window
 constexpr double ascent_tolerance_m = 100.0;      // [E] position aim on the reference
-constexpr double station_keeping_lead_s = 60.0;   // [E] burn delay after the decision
 constexpr double station_keeping_tolerance_m = 100.0;
 
 bool debug_enabled() { return std::getenv("STARSIM_DEBUG_LUNAR_TRANSFER") != nullptr; }
@@ -158,12 +157,13 @@ TwoBurnTransfer LunarOrbitTransfer::llo_to_nrho(const StateVector& state, time::
 }
 
 std::optional<gnc::BurnNode> LunarOrbitTransfer::station_keeping(const StateVector& state, time::Epoch epoch,
-                                                                 const NrhoReference& nrho, double deadband_m) const {
+                                                                 const NrhoReference& nrho, double deadband_m,
+                                                                 double lead_s) const {
     const auto tp = next_perilune(nrho, epoch);
     if (!tp || !nrho.covers(*tp)) return std::nullopt;
     const Vec3 aim = nrho.state_gcrf(*tp).position_m;
     if (norm(position_.coast(state, epoch, *tp).position_m - aim) < deadband_m) return std::nullopt;
-    const auto solution = position_.solve(state, epoch, epoch + station_keeping_lead_s, {aim, *tp}, Vec3{},
+    const auto solution = position_.solve(state, epoch, epoch + lead_s, {aim, *tp}, Vec3{},
                                           station_keeping_tolerance_m);
     if (!solution.converged) return std::nullopt;
     return solution.burn;
@@ -180,6 +180,7 @@ std::optional<gnc::BurnNode> LunarOrbitTransfer::arrival_burn(const StateVector&
     const time::Epoch t = transfer.second.epoch;
     if (!nrho || !nrho->covers(t)) return std::nullopt;
     const auto arrived = position_.coast(state, epoch, t);
+    // Velocity match only: the position error at the perilune is left to the station keeping.
     return gnc::BurnNode{t, nrho->state_gcrf(t).velocity_mps - arrived.velocity_mps};
 }
 

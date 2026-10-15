@@ -86,7 +86,10 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
 ## Guidance, vehicles and missions (M5 onwards)
 
 - GNC (M5): `gnc/ascent_guidance` (pitch program + PEG + terminal v_go steering), `gnc/burn_node`
-  (closed-loop burns), autopilot state machine in `sim::FlightSession`. Burns pick the strongest engine
+  (closed-loop burns), autopilot state machine in `sim::FlightSession` (`core/src/sim/flight_session.cpp`: construction,
+  placement, autopilot loop, tick, pilot actions; `_command.cpp` the per-tick vehicle command; `_burns.cpp` burn
+  configurations, execution, circularisation; `_return.cpp` ship and booster return; `_capsule.cpp` capsule entry and
+  parachutes; `_lunar.cpp` the lunar flight). Burns pick the strongest engine
   configuration whose start/shutdown impulse is <= 1/4 of the delta-v; smaller burns fly on RCS translation along +x
   (the thrusters' force and mass flow) when the vehicle has thrusters along +x (the ship's aft ullage thrusters,
   Falcon 9 second stage), else they are rejected. Game keys: P ascent autopilot (config/missions/leo_ascent.toml),
@@ -109,7 +112,9 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   the aero model (for the blunt tail-first booster the tilted axial drag dominates: the force points to the
   side the top leans to) -, landing burn (explicit fallback 13 -> 3 engines; SCvx 13 -> 5 -> 3): 1-D burn simulation
   for ignition, ZEM/ZEV vertical to the gate, then the approach profile sink = 1 m/s + height / 3 s, braking-profile
-  divert). It uses its own faster attitude controller with grid fins enabled.
+  divert). It uses its own faster attitude controller with grid fins enabled. Files: `booster_return.cpp` (parameters,
+  `update` state machine), `_prediction.cpp` (impact / landing-burn / MECO predictions, drag estimate), `_burns.cpp`
+  (entry burn, explicit ZEM/ZEV landing burn), private `booster_return_detail.hpp` (shared constants and helpers).
   The attitude controller limits the rate command to what the available angular acceleration (gimbal or
   RCS, plus fins) can still stop. Diagnostics: `STARSIM_VERBOSE=1`, `STARSIM_DEBUG_LANDING=1`,
   `STARSIM_DEBUG_HOLD=1` with test "[booster]".
@@ -473,7 +478,14 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   re-solved for the finite burn at departure (flown as an impulse the 7 min TLI missed the Moon: MCC 1 333 m/s, now
   3.4 m/s); LOI is timed on the periselene predicted at the last coast; burns too small for the vacuum Raptors fall back
   to RCS. Coasts are Sun-pointed with a re-aim every 6 h [E] on their own controller (0.5 deg/s slews, 0.002 deg/s rate
-  deadband): ~0.9 t cold gas per day (free coast between: no disturbance torques). Pilot-flown MCCs (user 2026-10-15,
+  deadband): ~0.9 t cold gas per day (free coast between: no disturbance torques); `gnc::SunHold` ends a hold that has
+  not settled (1 deg, 0.005 deg/s) after 30 min [E] - the vehicle then coasts freely until the next re-aim instead of
+  spending cold gas. Leads: trims and station keeping are planned at least the 120 s burn preparation + 60 s [E] ahead
+  (an LLO trim then takes the next apsis after that); the TLI centre is never planned earlier than 30 min [E] after
+  the plan (`FlightSession::min_departure_lead_s`; preparation + half the ~7 min burn), also for
+  `earliest_departure_h = 0`. NRHO insertion and the LLO -> NRHO arrival burn match the reference velocity only; the
+  position error at the perilune is left to the station keeping. `plan_lunar_outbound` refuses a vehicle already
+  Moon-referenced ("Kein Mondflug: schon beim Mond"). Pilot-flown MCCs (user 2026-10-15,
   `pilot_corrections`): call 600 s before the MCC, `lunar_pilot_cue()` (remaining delta-v, attitude error, window),
   `complete_pilot_correction()`, the next MCC re-plans from the real state; display with l6 / M7. Missions
   `hls_lunar_llo` / `hls_lunar_nrho` (`kind = "lunar_landing"`, outbound only until l4; the game's FlightSim has no

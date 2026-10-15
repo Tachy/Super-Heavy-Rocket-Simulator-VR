@@ -154,7 +154,8 @@ flow separation (vacuum engines).
   `sim::place_lunar_landing_mission`; outbound part only until lunar l4): `[mission]` `vehicle`, `site`
   (`lunar_sites.toml`, must exist); `[orbit]` scenario start (`epoch_utc`, `height_km`, `inclination_deg`,
   `argument_of_latitude_deg`; the RAAN is computed so the plane passes through the Moon at arrival); `[transfer]`
-  `flight_time_days` (from the scenario start to the arrival), `earliest_departure_h`, `mcc_after_tli_days`;
+  `flight_time_days` (from the scenario start to the arrival), `earliest_departure_h` (0 = as early as possible; the
+  session never plans the TLI centre earlier than 30 min after the start), `mcc_after_tli_days`;
   `[lunar_orbit]` `kind = "llo" | "nrho"`, for an LLO `altitude_km`, `inclination_deg`; for an NRHO an `[nrho]` table
   with the CR3BP seed at apolune (`apolune_position`, `apolune_velocity`, nondimensional), `revolutions` /
   `synodic_months` (resonance) and `reference_revolutions` (span of the full-model reference). The session needs a Moon

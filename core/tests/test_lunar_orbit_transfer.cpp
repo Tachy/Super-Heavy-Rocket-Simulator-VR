@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/environment/gravity.hpp"
@@ -83,4 +84,16 @@ TEST_CASE("NRHO station keeping holds the reference for three revolutions", "[mi
                 spent, worst_km);
     CHECK(worst_km < 5.0);  // [E]
     CHECK(spent < 10.0);    // [E]
+}
+
+TEST_CASE("NRHO station keeping honours the lead", "[mission][lunar][nrho]") {
+    test::spice_session();
+    Fixture fx;
+    auto s = fx.nrho.state_gcrf(fx.first_perilune);
+    s.velocity_mps += math::Vec3{0.3, -0.3, 0.2};
+    const auto apolune = fx.nrho.apolune_epochs()[0];
+    s = fx.coast.coast(s, fx.first_perilune, apolune);
+    const auto burn = fx.transfer.station_keeping(s, apolune, fx.nrho, 1000.0, 300.0);
+    REQUIRE(burn);
+    CHECK(burn->epoch - apolune == Catch::Approx(300.0).margin(1e-6));
 }
