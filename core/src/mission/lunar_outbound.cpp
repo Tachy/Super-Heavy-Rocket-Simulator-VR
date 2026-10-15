@@ -266,6 +266,8 @@ std::optional<gnc::BurnNode> LunarOutboundPlanner::mid_course(const StateVector&
         if (!solution.converged) return std::nullopt;
         burn = solution.burn;
     } else {
+        // NRHO: MCCs aim at the swing-by point; after it there is nothing to aim at (the insertion is re-planned).
+        if (burn_epoch >= plan.flyby_target.epoch) return std::nullopt;
         const auto solution =
             position_.solve(state, epoch, burn_epoch, plan.flyby_target, Vec3{}, nrho_mcc_tolerance_m);
         if (!solution.converged) return std::nullopt;

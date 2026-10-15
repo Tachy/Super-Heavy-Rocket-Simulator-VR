@@ -16,6 +16,7 @@
 
 #include "starsim/sim/flight_session.hpp"
 
+#include <exception>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -110,8 +111,14 @@ bool FlightSession::plan_lunar_outbound(const mission::LunarOutboundParameters& 
     const double isp_s =
         configurations.front().thrust_n / configurations.front().mass_flow_kgps / constants::standard_gravity_mps2;
     const mission::LunarOutboundPlanner planner(gravity_, *env_.ephemeris, *moon_orientation_);
-    lunar_plan_ = planner.plan(controlled_state(), epoch_, parameters, vehicle.mass_properties().mass_kg, isp_s,
-                               vehicle.propellant_kg());
+    try {
+        lunar_plan_ = planner.plan(controlled_state(), epoch_, parameters, vehicle.mass_properties().mass_kg, isp_s,
+                                   vehicle.propellant_kg());
+    } catch (const std::exception&) {  // integrator step underflow on a trial arc, ephemeris range
+        lunar_plan_.reset();
+        lunar_status_ = "Kein Mondflug: Planung fehlgeschlagen";
+        return false;
+    }
     if (!lunar_plan_->feasible) {
         lunar_status_ = lunar_plan_->reason;
         return false;
@@ -145,8 +152,14 @@ bool FlightSession::plan_lunar_orbit_transfer(mission::LunarOrbitKind target,
         return false;
     }
     const mission::LunarOrbitTransfer transfer(gravity_, *env_.ephemeris, *moon_orientation_);
-    auto plan = down ? transfer.nrho_to_llo(controlled_state(), epoch_, *nrho, llo)
-                     : transfer.llo_to_nrho(controlled_state(), epoch_, *nrho);
+    mission::TwoBurnTransfer plan;
+    try {
+        plan = down ? transfer.nrho_to_llo(controlled_state(), epoch_, *nrho, llo)
+                    : transfer.llo_to_nrho(controlled_state(), epoch_, *nrho);
+    } catch (const std::exception&) {  // integrator step underflow on a trial arc, ephemeris range
+        lunar_status_ = "Kein Transfer: Planung fehlgeschlagen";
+        return false;
+    }
     if (!plan.feasible) {
         lunar_status_ = plan.reason;
         return false;
@@ -287,7 +300,13 @@ void FlightSession::lunar_coast_event() {
 }
 
 void FlightSession::run_lunar(Flying& flying) {
-    run_lunar_steps(flying);
+    try {
+        run_lunar_steps(flying);
+    } catch (const std::exception&) {
+        // A planner that throws (integrator step underflow on a trial arc, ephemeris range) would leave the step due
+        // and throw again on every tick: the flight ends, the vehicle coasts.
+        lunar_abort("Mondflug abgebrochen: Planung fehlgeschlagen");
+    }
     if (std::getenv("STARSIM_DEBUG_LUNAR_SESSION")) {  // diagnostics: every status change
         static std::string last;
         if (lunar_status_ != last) {
@@ -322,6 +341,10 @@ void FlightSession::run_lunar_steps(Flying& flying) {
             // impulse it missed the Moon and MCC 1 took 333 m/s) from the state now; not converged: the impulse.
             auto tli = lunar_plan_->tli;
             const auto configurations = burn_configurations(&vacuum_groups);
+            if (configurations.empty()) {  // engines lost since the planning
+                lunar_abort("Mondflug abgebrochen: keine Vakuum-Triebwerke");
+                break;
+            }
             const mission::FiniteBurnModel engines{flying.body->vehicle().mass_properties().mass_kg,
                                                    configurations.front().thrust_n,
                                                    configurations.front().mass_flow_kgps};
@@ -345,6 +368,8 @@ void FlightSession::run_lunar_steps(Flying& flying) {
             break;
         case LunarStep::PoweredFlyby:
             lunar_flyby_done_ = true;
+            // MCCs belong to the leg to the swing-by; slots after it are dropped (the insertion is re-planned anyway).
+            lunar_mcc_index_ = lunar_parameters_->mcc_after_tli_s.size();
             lunar_enter_coast();
             break;
         case LunarStep::Coast: {

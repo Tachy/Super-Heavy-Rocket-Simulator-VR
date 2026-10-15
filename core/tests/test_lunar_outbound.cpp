@@ -99,6 +99,12 @@ TEST_CASE("Outbound plan to the NRHO", "[mission][lunar][outbound][nrho][validat
     REQUIRE(nrhoi);
     CHECK(nrhoi->epoch == plan.insertion.epoch);
     CHECK(norm(nrhoi->delta_v_gcrf_mps - plan.insertion.delta_v_gcrf_mps) < 1.0);
+    // A mid-course correction after the swing-by would aim at the swing-by point in the past: refused
+    // (final review I1; the solve did not converge before the explicit guard either).
+    auto off_swing = after_swing;
+    off_swing.velocity_mps += math::Vec3{0.0, 20.0, 0.0};
+    const auto late = fx.planner.mid_course(off_swing, swing->epoch, swing->epoch + 6.0 * 3600.0, p, plan);
+    CHECK_FALSE(late);
     // After the insertion the flight is on the reference.
     auto inserted = coast.coast(after_swing, swing->epoch, nrhoi->epoch);
     inserted.velocity_mps += nrhoi->delta_v_gcrf_mps;

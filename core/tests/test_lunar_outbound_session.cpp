@@ -7,6 +7,7 @@
 #include <utility>
 #include <cstdio>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include <catch2/catch_test_macros.hpp>
@@ -205,6 +206,44 @@ TEST_CASE("Pilot-flown mid-course correction", "[sim][lunar][outbound][pilot][sl
         CHECK(f.propellant_t > autopilot.propellant_t);
     }
     CHECK(ignored.mcc2_mps > autopilot.mcc2_mps);  // a skipped correction grows the next one
+}
+
+namespace {
+// A Moon orientation that fails once armed: stands for a planner exception (DOP853 step underflow, ephemeris range).
+struct FailingOrientation : frames::BodyOrientation {
+    const frames::BodyOrientation& inner;
+    bool armed = false;
+    explicit FailingOrientation(const frames::BodyOrientation& o) : inner(o) {}
+    frames::FixedToInertial fixed_to_gcrf(time::Epoch epoch) const override {
+        if (armed) throw std::runtime_error("injected planner failure");
+        return inner.fixed_to_gcrf(epoch);
+    }
+};
+}  // namespace
+
+TEST_CASE("A planner exception in the tick aborts the lunar flight", "[sim][lunar][outbound]") {
+    // Final review I2: an exception must not escape the tick (the flight would stay stuck on the same due step).
+    Fixture fx;
+    FailingOrientation failing{fx.moon};
+    sim::FlightSession session{fx.ephemeris, fx.earth, STARSIM_CONFIG_DIR, {}, &failing};
+    mission::LunarOutboundParameters p;
+    p.arrival_epoch = fx.t0 + 4.0 * 86400.0;
+    session.place_in_orbit("starship_hls", fx.parking(p.arrival_epoch), fx.t0);
+    REQUIRE(session.plan_lunar_outbound(p));
+    failing.armed = true;
+    REQUIRE_NOTHROW(session.advance_to(session.lunar_outbound_plan()->tli.epoch, 50'000'000));
+    CHECK(session.lunar_step() == sim::LunarStep::None);
+    CHECK(session.autopilot().state == sim::AutopilotState::Off);
+    CHECK(session.lunar_status().find("Planung fehlgeschlagen") != std::string::npos);
+
+    // The planning entry point refuses with a German reason instead of throwing.
+    sim::FlightSession second{fx.ephemeris, fx.earth, STARSIM_CONFIG_DIR, {}, &failing};
+    second.place_in_orbit("starship_hls", fx.parking(p.arrival_epoch), fx.t0);
+    bool planned = true;
+    REQUIRE_NOTHROW(planned = second.plan_lunar_outbound(p));
+    CHECK_FALSE(planned);
+    CHECK(second.lunar_status().find("Planung fehlgeschlagen") != std::string::npos);
+    CHECK(second.autopilot().state == sim::AutopilotState::Off);
 }
 
 TEST_CASE("Pilot override ends the lunar flight; a short plan is refused", "[sim][lunar][outbound]") {
