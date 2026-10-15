@@ -11,6 +11,8 @@ Not an arcade game: physical correctness has top priority.
   builds the release PR and CHANGELOG.md from them. Releases are made by the user (merging that PR).
 
 ## Working on plans
+- No feature branches (user 2026-10-15): work and commit directly on `main`, and push (`git push origin main`) after
+  every completed task - a plan task, a fix pass, a docs update - once its tests are green.
 - Compact the context before each milestone of a plan (`/compact`). Before that, record the state (done, open,
   decisions, next step) in the plan's ledger/progress file so the work resumes from it. Claude cannot run
   `/compact` itself: at a milestone boundary it saves the state and asks the user to compact.
