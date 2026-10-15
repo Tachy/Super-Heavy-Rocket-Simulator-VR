@@ -164,7 +164,8 @@ public:
   admissible point within reach if it exceeds the limit (~8-10 deg [E]).
 - Surface stay: the HLS rests on the Moon and follows it (l1); duration a mission parameter. Cryogenic boil-off is not
   modelled (no HLS data; documented as a known gap).
-- Ascent: the landing engines lift off, the Raptors take over after a few tens of metres; vertical rise, then PEG
+- Ascent: the landing engines lift off, the three vacuum Raptors take over after a few tens of metres (user 2026-10-15:
+  fixed, RCS attitude, Isp 380 s - ~10 t saved; aborts on them too); vertical rise, then PEG
   (`gnc/ascent_guidance` without air) to 15 x 100 km, circularisation at aposelene, for the NRHO variant the transfer.
   Launch window: the LLO plane passing over the site.
 - Abort: as `abort_landing` - from the running descent to orbit with the ascent guidance from the current state;

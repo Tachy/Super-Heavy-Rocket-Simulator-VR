@@ -43,6 +43,9 @@ and the post-l3 cleanup are on `main`, 7bf4c2b).
   `sea_level_1` (0.87-2.91 MN) takes over and flies on into the SCvx approach. Isp 380 s instead of ~350 s saves
   ~25-30 t of the ~450 t braking propellant (LLO variant). RCS authority ~1.2e5 N m / ~2e8 kg m^2 ~ 6e-4 rad/s^2: enough
   for Klumpp's slow pitch-over. The switch lights a disjoint set: `sea_level_1` starts `startup_s` ahead.
+- **Ascent on the vacuum Raptors (user 2026-10-15, after Task 5).** Liftoff on the landing thrusters, then the three
+  vacuum Raptors (RCS attitude, Isp 380 s: ~10 t of ascent propellant saved); aborts on them too. Task 8 implements,
+  Task 9's budget uses 380 s for the ascent (re-check the 204 t refusal).
 - **Approach on one sea-level Raptor (Task 3 Ruling).** Three (or two) Raptors at minimum throttle over-brake the
   high gate's ~2.3 m/s^2; SCvx phases {`sea_level_1`} -> {`sea_level_1`} -> {`landing`}.
 
@@ -61,8 +64,8 @@ and the post-l3 cleanup are on `main`, 7bf4c2b).
 - Earth behaviour stays bit-identical: every Earth landing, catch and ascent test keeps its numbers (Tasks 2 and 3 are
   refactors on the Earth side).
 - HLS engines: braking on the three vacuum Raptors (`vacuum`, fixed, RCS attitude), then `sea_level_1` (gimballed);
-  approach on SCvx in three phases {`sea_level_1`} -> {`sea_level_1`} -> {`landing`}; liftoff on `landing`, ascent on the sea-level Raptors
-  (gimballed; the vacuum Raptors are fixed); DOI, plane trim and circularisation by `execute_burn(node)` (the session
+  approach on SCvx in three phases {`sea_level_1`} -> {`sea_level_1`} -> {`landing`}; liftoff on `landing`, ascent on the three vacuum Raptors
+  (user 2026-10-15: fixed, RCS attitude, Isp 380 s; abort to orbit on them as well); DOI, plane trim and circularisation by `execute_burn(node)` (the session
   picks RCS or a Raptor set). The landing thrusters (`landing_only`) are lit only by the landing and ascent guidance.
 - No propellant is ever set mid-mission (user 2026-10-14); a plan that does not close is refused with a German message.
 - No magic numbers: constants with source in `math/constants.hpp`; guidance values as named members with [S]/[E]/[D]
@@ -1552,7 +1555,7 @@ Design decisions (comments in the code):
   Mondumlaufbahn", "Kein Abstieg: keine Landestelle gesetzt", "Kein Abstieg: " + planner reason,
   "Kein Abstieg: " + budget reason.
 - Budget: `lunar_budget(mass, dry, reserve, {{"Bremsphase", braking_dv, 380}, {"Anflug", descent_dv - braking_dv,
-  350}, {"Aufstieg", ascent_dv, 350}})`: the braking on the vacuum Raptors (user 2026-10-15; `braking_delta_v_mps`
+  350}, {"Aufstieg", ascent_dv, 380}})`: braking and ascent on the vacuum Raptors (user 2026-10-15; `braking_delta_v_mps`
   [E] 1600 m/s in LunarLandingSetup - the part above the RVac minimum thrust, measured in Task 6), DOI and the rest of
   the descent on `sea_level_1` (vacuum Isp 350 s; the landing thrusters are 340 s for ~1 % of the descent). Isp from
   the vehicle's engine groups, not literals.
@@ -1760,7 +1763,7 @@ void release(const vehicle::FlightBody& body);
 // gnc/lunar_ascent_guidance.hpp
 struct LunarAscentParameters {
     std::vector<std::string> liftoff_groups{"landing"};
-    std::vector<std::string> ascent_groups{"sea_level_1", "sea_level_2", "sea_level_3"};  // gimballed (RVacs fixed)
+    std::vector<std::string> ascent_groups{"vacuum"};  // user 2026-10-15: fixed RVacs (Isp 380 s), attitude by the RCS
     double raptor_start_height_m = 30.0;     // [E] the Raptors start this high (spec: "after a few tens of metres")
     double vertical_rise_height_m = 150.0;   // [E] PEG from here (Apollo: ~10 s vertical rise)
     double insertion_altitude_above_site_m = 15.0e3;  // [E] Apollo inserted ~18 km up; >= 10.8 km clears all terrain
@@ -1817,6 +1820,12 @@ Design decisions (comments in the code):
   simulation's track is released (`LegLandingSim::release`) and the body (`release_landed`) is integrated again. At
   `raptor_start_height_m` above the liftoff point the ascent set starts (3 s start-up); the landing thrusters stop when
   the Raptors' thrust exceeds the weight (phase Vertical). At `vertical_rise_height_m`: PEG.
+- **Ascent on the vacuum Raptors (user 2026-10-15).** The ascent set is the three fixed vacuum Raptors (symmetric on
+  the ring: thrust through the CG, Isp 380 s instead of 350 s: ~10 t of the ~95 t ascent propellant saved): landing
+  -> vacuum is a disjoint switch as in the braking phase, and with no gimbal acting the attitude controller's body
+  torque goes to the RCS (Task 6's braking path, reused). Thrust 2.68-8.94 MN: at ~130-660 t PEG flies mostly near the
+  minimum (~2 g at burnout on the 120 t HLS); the guidance throttles down to the minimum, never below. Engine-out is
+  not modelled (a fixed RVac out would need `sea_level_1` - noted for later). Aborts fly on the same set.
 - **PEG target:** `radius = R + site_height + insertion_altitude_above_site_m`, horizontal speed = vis-viva at that
   periselene of the ellipse to `R + aposelene_altitude_m`, radial speed 0, `terminal_semi_major_axis_m` = that
   ellipse's; plane: polar through the liftoff point (normal = `normalized(cross(r_hat, north_hat))` for `northerly`, its
@@ -1944,8 +1953,8 @@ TEST_CASE("After a 3-day stay under time warp the HLS ascends into the 100 km LL
         low = std::min(low, fx.altitude_m());
         high = std::max(high, fx.altitude_m());
     }
-    const double dv = 350.0 * constants::standard_gravity_mps2 * std::log(m0 / m1);
-    std::printf("[lunar_ascent] LLO %.2f x %.2f km, %.0f t used (%.0f m/s at 350 s), %s\n", low / 1000.0, high / 1000.0,
+    const double dv = 380.0 * constants::standard_gravity_mps2 * std::log(m0 / m1);
+    std::printf("[lunar_ascent] LLO %.2f x %.2f km, %.0f t used (%.0f m/s at 380 s), %s\n", low / 1000.0, high / 1000.0,
                 (m0 - m1) / 1000.0, dv, fx.session.lunar_status().c_str());
     CHECK(low > 99e3);    // spec: the LLO within 1 km
     CHECK(high < 101e3);
@@ -2008,7 +2017,7 @@ TEST_CASE("An abort without the propellant for orbit is refused and the landing 
   integration from the held pose's current state - position and velocity moving with the Moon - with no jump; clear
   `landed_`, `resting_`), `LegLandingSim::release` (track: `touchdown = None`, `at_rest_s = 0`), the guidance and the
   session steps per the design decisions. `plan_lunar_ascent` checks the propellant with `mission::lunar_budget(mass,
-  dry, reserve, {{"Aufstieg", 1900, 350}})` (the setup's ascent delta-v and reserve when a setup exists, else these
+  dry, reserve, {{"Aufstieg", 1900, 380}})` (the setup's ascent delta-v and reserve when a setup exists, else these
   defaults). In Task 7's SurfaceStay: at the stay's end, if `lunar_landing_setup_->ascent`, call `plan_lunar_ascent(
   *ascent, 0.0)`; else step Landed.
 
@@ -2078,8 +2087,8 @@ bool lunar_mission_complete() const;   // the sequence's last leg reached (statu
 // lunar_landing_mission.hpp
 LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& mission);
 // Rocket-equation budget of the whole mission from the planned outbound flight (TLI, swing-by, insertion / LOI) and the
-// mission's nominal legs; Isp 380 s for the vacuum-Raptor legs (incl. the braking phase), 350 s for the rest of
-// the descent and the ascent.
+// mission's nominal legs; Isp 380 s for the vacuum-Raptor legs (the braking phase and the ascent), 350 s for the rest of
+// the descent.
 mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& mission, const mission::OutboundPlan& plan,
                                            double initial_mass_kg, double dry_mass_kg);
 // start_mission's lunar branch with an optional vehicle override (tests: the 204 t HLS).
