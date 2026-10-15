@@ -70,7 +70,10 @@ add_library(starsim_core STATIC
     src/sim/lunar_landing_mission.cpp
     src/sim/mission_start.cpp
     src/mission/finite_burn.cpp
+    src/mission/lunar_budget.cpp
+    src/mission/lunar_descent.cpp
     src/mission/lunar_orbit_transfer.cpp
+    src/mission/lunar_touchdown.cpp
     src/mission/lunar_outbound.cpp
     src/mission/lunar_transfer.cpp
     src/mission/nrho_reference.cpp
