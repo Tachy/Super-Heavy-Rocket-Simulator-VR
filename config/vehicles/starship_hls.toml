@@ -23,9 +23,10 @@ dry_mass_kg = 120000.0                   # [E] user 2026-10-14: SpaceX publishes
                                          # LEO departure closes <= ~140 t, bottom-up estimate ~204 t (spec l2)
 dry_cg_station_m = 30.0                  # [E] crew cabin, airlock and landing thrusters high on the hull
 payload_mass_kg = 0.0
-# Landing mass [D] (lunar l4, user 2026-10-15) from the l3 arrival masses and a 2.0 km/s descent at Isp 350 s: LLO
-# variant ~662 t (~1,185 t in the LLO), NRHO variant ~503 t (~1,140 t in the NRHO, 876 m/s down to the LLO). Sizes the
-# landing thrusters; the legs were re-checked at both masses (l4 drop tests).
+# Landing mass [D] (l4 mass correction, 2026-10-15): 1,720 t in LEO, TLI 3.14 km/s + LOI 0.86 km/s at Isp 380 s ->
+# ~573 t in the LLO, a ~2 km/s descent -> ~340 t landed (LLO variant), ~260 t (NRHO variant, 0.9-1.0 km/s down to the
+# LLO). Sizes the landing thrusters; the legs are drop-tested at both masses. (l4 first assumed ~1,185 t in the LLO:
+# that was l3's propellant used.)
 [[stage.tank]]
 id = "lox_main"
 contents = "oxidizer"
@@ -103,9 +104,10 @@ azimuths_deg = [0.0, 60.0, 120.0, 180.0, 240.0, 300.0]
 footprint_radius_m = 12.0                # static tip-over across an edge ~26 deg
 foot_station_m = -1.5                    # feet below the skirt
 stroke_m = 0.6
-crush_force_n = 4.5e6                    # per leg: no crush in a 1.5 m/s touchdown on flat ground (reserve); l4: x3
-                                         # (662 / 221 t) - at l2's 1.5 MN the 662 t landings crushed through on 8 deg
-stiffness_n_m = 1.0e7                    # 6-18 mm static in lunar gravity (221-662 t); l4 kept stiffness and damping:
+crush_force_n = 4.5e6                    # per leg: no crush in a 1.5 m/s touchdown on flat ground (reserve); l4 x3
+                                         # for a 662 t landing (l2's 1.5 MN crushed through on 8 deg); kept for the
+                                         # real 260-340 t: the drop tests land both without a bounce
+stiffness_n_m = 1.0e7                    # 6-9 mm static in lunar gravity (221-340 t); l4 kept stiffness and damping:
                                          # x3 left a light HLS balancing on two feet on the LOLA terrain for > 60 s
 damping_n_s_m = 1.0e6                    # the damper takes the touchdown (1 m/s x 1e6 < the crush force)
 friction = 0.6                           # foot pad on regolith

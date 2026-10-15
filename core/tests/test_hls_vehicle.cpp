@@ -42,7 +42,7 @@ TEST_CASE("The Moon GM constant matches the DE440 kernel", "[vehicle][hls]") {
     CHECK(constants::moon_gm_m3ps2 == Catch::Approx(ephemeris.gm_m3ps2(ephemeris::Body::Moon)).epsilon(1e-12));
 }
 
-TEST_CASE("HLS landing thrusters lift ~1.5 lunar weights and can hover", "[vehicle][hls]") {
+TEST_CASE("HLS landing thrusters take over from one Raptor and hover the real landing masses", "[vehicle][hls]") {
     const vehicle::Vehicle v(config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls"), STARSIM_CONFIG_DIR);
     double max_axial = 0.0, min_axial = 0.0;
     int n = 0;
@@ -56,11 +56,17 @@ TEST_CASE("HLS landing thrusters lift ~1.5 lunar weights and can hover", "[vehic
     }
     std::printf("[hls] landing thrust %.0f-%.0f kN axial: hovers %.0f-%.0f t\n", min_axial / 1e3, max_axial / 1e3,
                 min_axial / lunar_g_mps2 / 1e3, max_axial / lunar_g_mps2 / 1e3);
-    // l4 (user 2026-10-15): sized for the real landing mass - LLO variant ~662 t, NRHO variant ~503 t.
+    // l4 mass correction: landing 260-340 t (not ~660 t); the braking drops from one sea-level Raptor (minimum 874 kN)
+    // onto them, so their maximum must exceed that minimum / set_drop_fraction (0.9).
     CHECK(n == 12);
-    CHECK(max_axial / (668e3 * lunar_g_mps2) == Catch::Approx(1.5).margin(0.02));
-    CHECK(min_axial / lunar_g_mps2 < 450e3);  // hovers the lightest landing (NRHO ~503 t, -5 % mass dispersion)
-    CHECK(max_axial / lunar_g_mps2 > 700e3);  // and lifts the heaviest (LLO ~662 t, +5 %)
+    double raptor_min = 0.0;
+    for (const auto& e : v.stages().front().engines) {
+        if (e.group_id == "hls/sea_level_1") raptor_min = e.performance->thrust_n(e.performance->config().throttle_min, 0.0);
+    }
+    REQUIRE(raptor_min > 0.0);
+    CHECK(max_axial > raptor_min / 0.9);
+    CHECK(min_axial / lunar_g_mps2 < 0.95 * 260e3);  // hovers the lightest landing, -5 %
+    CHECK(max_axial / lunar_g_mps2 > 1.5 * 340e3);   // lifts the heaviest with 1.5 lunar weights
 }
 
 TEST_CASE("Fixed legs are deployed from the start and stay deployed", "[vehicle][hls][legs]") {

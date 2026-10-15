@@ -1,8 +1,10 @@
 # HLS landing thruster - methalox, high on the hull (SpaceX HLS concept: landing engines against plume-surface
-# interaction). SpaceX publishes no figures: every value is an estimate [E]. Sized in lunar l4 (user 2026-10-15) for the
-# real landing mass: the HLS leaves LEO fully fuelled and lands with ~662 t (LLO variant: ~1,185 t in the LLO, 2.0 km/s
-# descent at Isp 350 s) or ~503 t (NRHO variant: ~1,140 t, 876 m/s NRHO -> LLO, then the descent). Lunar gravity
-# GM / R^2 = 1.624 m/s^2: 1.5 x 1.624 x 668 t = 1.627 MN axial -> 140 kN per thruster at 15 deg cant.
+# interaction). SpaceX publishes no figures: every value is an estimate [E]. Sized for the real landing mass (l4 mass
+# correction, 2026-10-15): the HLS leaves LEO fully fuelled (1,720 t), is ~573 t in the LLO after TLI and LOI on the
+# vacuum Raptors and lands with ~340 t (LLO variant) or ~260 t (NRHO variant). (l4 first sized them for ~662 t from l3's
+# 1,185 t, which was the propellant USED, not the LLO mass.) Lunar gravity GM / R^2 = 1.624 m/s^2. Two bounds: the
+# braking drops from one sea-level Raptor (minimum 0.3 x 2.91 MN vacuum = 874 kN) onto these, so their
+# maximum must exceed that minimum / 0.9; and at minimum they must hover the lightest landing (260 t - 5 %).
 [sources]
 lunar_spec = "docs/superpowers/specs/2026-10-14-lunar-missions-design.md (l2)"
 
@@ -16,15 +18,14 @@ chamber_pressure_pa = 20e5           # [E]
 
 [performance]
 reference_pressure_pa = 0.0          # vacuum rating
-thrust_ref_n = 140.0e3               # [E] l4 (user 2026-10-15): 12 x 140 kN, axial 1.62 MN = 1.5 lunar weights of the
-                                     # ~668 t LLO-variant landing mass; hover from ~400 t at 40 % (NRHO variant lands
-                                     # ~503 t). l2's 46 kN assumed 221 t.
+thrust_ref_n = 90.0e3                # [E] 12 x 90 kN x cos 15 deg = 1.04 MN axial (> 874 kN / 0.9; 1.9 lunar
+                                     # weights of the 340 t landing). l2's 46 kN assumed 221 t, l4's 140 kN ~662 t.
 isp_ref_s = 340.0                    # [E]
 nozzle_exit_diameter_m = 0.45        # [E]
 max_ambient_pressure_pa = 1000.0     # [E] vacuum only: never used in Earth's atmosphere
 
 [throttle]
-min = 0.40                           # [E] all twelve hover from ~400 t
+min = 0.35                           # [E] 0.365 MN axial: all twelve hover from ~225 t
 max = 1.00
 rate_per_s = 2.0                     # [E]
 

@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/lunar_site_config.hpp"
+#include "lunar_test_support.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/contact/landing_surface.hpp"
 #include "starsim/contact/primitives.hpp"
@@ -166,10 +167,10 @@ TEST_CASE("HLS drop tests on 0, 5 and 8 deg slopes land; 25 deg tips over", "[hl
     CHECK(drop_on_slope(25.0, 30.0) == sim::LegTouchdown::TippedOver);
 }
 
-TEST_CASE("HLS drop tests at the l4 landing masses (503 t and 662 t)", "[hls][legs][lunar]") {
-    // l4: the HLS lands with 380-540 t of propellant (NRHO / LLO variant); the legs sized in l2 at 221 t must still
-    // land 1 m/s + 0.5 m on 0 / 5 / 8 deg and tip over at 25 deg.
-    for (const double propellant_kg : {383e3, 542e3}) {
+TEST_CASE("HLS drop tests at the real landing masses (260 t and 340 t)", "[hls][legs][lunar]") {
+    // l4 mass correction: the HLS lands with 140-220 t of propellant (NRHO / LLO variant); the legs (l4 crush force
+    // 4.5 MN) must land 1 m/s + 0.5 m on 0 / 5 / 8 deg without bouncing the light HLS and tip over at 25 deg.
+    for (const double propellant_kg : {test::hls_landed_light_propellant_kg, test::hls_landed_propellant_kg}) {
         CAPTURE(propellant_kg);
         for (double slope : {0.0, 5.0, 8.0}) {
             CAPTURE(slope);

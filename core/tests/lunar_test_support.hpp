@@ -12,6 +12,13 @@
 
 namespace starsim::test {
 
+// Real HLS masses at the Moon (l4 mass correction, [D]: 1,720 t in LEO, TLI + LOI on the vacuum Raptors).
+inline constexpr double hls_llo_propellant_kg = 453e3;           // 573 t in the LLO after the LOI
+inline constexpr double hls_pdi_propellant_kg = 446e3;           // 566 t at PDI (LLO variant)
+inline constexpr double hls_pdi_light_propellant_kg = 380e3;     // 500 t at PDI (NRHO variant)
+inline constexpr double hls_landed_propellant_kg = 220e3;        // 340 t landed (LLO variant)
+inline constexpr double hls_landed_light_propellant_kg = 140e3;  // 260 t landed (NRHO variant)
+
 // The HLS with `propellant_kg` in its tanks (O/F 3.6); `dry_kg` > 0 replaces its dry mass.
 inline config::VehicleConfig hls_with_propellant(double propellant_kg, double dry_kg = 0.0) {
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls");

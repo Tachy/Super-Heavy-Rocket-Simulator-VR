@@ -26,6 +26,8 @@ and the post-l3 cleanup are on `main`, 7bf4c2b).
 
 ## User decisions for l4 (2026-10-15)
 
+> **Correction 2026-10-15 (l4 Task 9):** ~1,185 t was l3's propellant USED, not the LLO mass; real ~573 t in the LLO, 500-566 t at PDI, 260-340 t landed - see `docs/superpowers/plans/2026-10-15-lunar-l4-mass-correction.md` (landing thrusters 12 x 90 kN, landing thrusters as the last braking set, braking range from the mass).
+
 - **Landing thrusters re-sized [E] to the real landing mass.** The HLS leaves LEO fully fuelled (spec) and lands with
   ~660 t (LLO variant: ~1,185 t in the LLO, ~2.0 km/s descent) or ~500 t (NRHO variant: ~1,140 t in the NRHO, 876 m/s
   down to the LLO, then the descent). l2 sized the 12 thrusters (46 kN) for a 221 t landing mass: at 660 t they give

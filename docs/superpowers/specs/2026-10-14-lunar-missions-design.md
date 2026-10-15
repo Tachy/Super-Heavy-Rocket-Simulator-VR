@@ -152,6 +152,8 @@ public:
 
 ## l4 design: landing and ascent
 
+> **Correction 2026-10-15 (l4 Task 9):** ~1,185 t was l3's propellant USED, not the LLO mass; real ~573 t in the LLO, 500-566 t at PDI, 260-340 t landed - see `docs/superpowers/plans/2026-10-15-lunar-l4-mass-correction.md` (landing thrusters 12 x 90 kN, landing thrusters as the last braking set, braking range from the mass).
+
 - Descent orbit: half a revolution before the site a ~20 m/s burn lowers periselene to 15 km (Apollo profile).
 - Braking phase: from periselene, ~400-500 km before the site, ~6-7 min on the vacuum Raptors (attitude by the RCS; user 2026-10-15: Isp 380 s saves ~25-30 t), then one gimballed sea-level Raptor, with the Apollo lunar
   descent guidance (quadratic acceleration, Klumpp 1974 [S]) to a high gate ~2 km above the terrain a few km before the
