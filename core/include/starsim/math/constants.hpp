@@ -40,6 +40,10 @@ inline constexpr double earth_j2 = 1.0826267e-3;
 // IAU 2015 nominal lunar mean radius used for the Moon sphere.
 inline constexpr double moon_mean_radius_m = 1737400.0;
 
+// Lunar gravitational parameter [S] DE440 (gm_de440.tpc, BODY301_GM = 4902.800118457549 km^3/s^2). For code without
+// an ephemeris at hand; guidance and planning take the GM from the ReferenceBody / ephemeris.
+inline constexpr double moon_gm_m3ps2 = 4.902800118457549e12;
+
 // Mean synodic month (new moon to new moon) [S: Meeus, Astronomical Algorithms, 2nd ed., ch. 49: 29.530588861 d].
 inline constexpr double synodic_month_s = 29.530588861 * 86400.0;
 

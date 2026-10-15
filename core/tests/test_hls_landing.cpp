@@ -85,18 +85,18 @@ sim::LegTouchdown run_drop(Fixture& fx) {
 }
 
 // Drop on a plane of `slope_deg` rising towards `uphill_azimuth_deg`: the foot over the highest ground 0.5 m up,
-// 1 m/s down (spec l4: touchdown <= 1 m/s).
-sim::LegTouchdown drop_on_slope(double slope_deg, double uphill_azimuth_deg) {
+// 1 m/s down (spec l4: touchdown <= 1 m/s), with `propellant_kg` in the tanks.
+sim::LegTouchdown drop_on_slope(double slope_deg, double uphill_azimuth_deg, double propellant_kg = 100.0e3) {
     Fixture fx;
     contact::LandingSurface surface;
     surface.field = std::make_shared<contact::PlaneField>(slope_deg * deg, uphill_azimuth_deg * deg);
     fx.session.set_landing_surface(lunar_site_on_sphere(), surface);
-    place_over_site(fx, hls(100.0e3), 0.5, {0.0, 0.0, -1.0});
+    place_over_site(fx, hls(propellant_kg), 0.5, {0.0, 0.0, -1.0});
     const auto result = run_drop(fx);
     double stroke = 0.0;
     for (double c : fx.session.leg_crushed_m(0)) stroke = std::max(stroke, c);
-    std::printf("[hls] slope %4.1f deg uphill %5.1f deg: %-10s crushed %.3f m\n", slope_deg, uphill_azimuth_deg,
-                sim::to_string(result), stroke);
+    std::printf("[hls] %3.0f t propellant, slope %4.1f deg uphill %5.1f deg: %-10s crushed %.3f m\n",
+                propellant_kg / 1e3, slope_deg, uphill_azimuth_deg, sim::to_string(result), stroke);
     return result;
 }
 
@@ -164,6 +164,20 @@ TEST_CASE("HLS drop tests on 0, 5 and 8 deg slopes land; 25 deg tips over", "[hl
         CHECK(drop_on_slope(slope, 30.0) == sim::LegTouchdown::Landed);  // uphill between two legs (weakest)
     }
     CHECK(drop_on_slope(25.0, 30.0) == sim::LegTouchdown::TippedOver);
+}
+
+TEST_CASE("HLS drop tests at the l4 landing masses (503 t and 662 t)", "[hls][legs][lunar]") {
+    // l4: the HLS lands with 380-540 t of propellant (NRHO / LLO variant); the legs sized in l2 at 221 t must still
+    // land 1 m/s + 0.5 m on 0 / 5 / 8 deg and tip over at 25 deg.
+    for (const double propellant_kg : {383e3, 542e3}) {
+        CAPTURE(propellant_kg);
+        for (double slope : {0.0, 5.0, 8.0}) {
+            CAPTURE(slope);
+            CHECK(drop_on_slope(slope, 0.0, propellant_kg) == sim::LegTouchdown::Landed);
+            CHECK(drop_on_slope(slope, 30.0, propellant_kg) == sim::LegTouchdown::Landed);
+        }
+        CHECK(drop_on_slope(25.0, 30.0, propellant_kg) == sim::LegTouchdown::TippedOver);
+    }
 }
 
 TEST_CASE("An HLS lands on the LOLA terrain at the flattest spot near the site", "[hls][legs][lunar][terrain][data]") {

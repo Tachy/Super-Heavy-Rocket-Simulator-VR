@@ -1,6 +1,8 @@
 # HLS landing thruster - methalox, high on the hull (SpaceX HLS concept: landing engines against plume-surface
-# interaction). SpaceX publishes no figures: every value is an estimate [E] sized by the lunar l2 plan (12 thrusters lift
-# ~1.5 lunar weights of the ~221 t landing mass and can hover).
+# interaction). SpaceX publishes no figures: every value is an estimate [E]. Sized in lunar l4 (user 2026-10-15) for the
+# real landing mass: the HLS leaves LEO fully fuelled and lands with ~662 t (LLO variant: ~1,185 t in the LLO, 2.0 km/s
+# descent at Isp 350 s) or ~503 t (NRHO variant: ~1,140 t, 876 m/s NRHO -> LLO, then the descent). Lunar gravity
+# GM / R^2 = 1.624 m/s^2: 1.5 x 1.624 x 668 t = 1.627 MN axial -> 140 kN per thruster at 15 deg cant.
 [sources]
 lunar_spec = "docs/superpowers/specs/2026-10-14-lunar-missions-design.md (l2)"
 
@@ -14,13 +16,15 @@ chamber_pressure_pa = 20e5           # [E]
 
 [performance]
 reference_pressure_pa = 0.0          # vacuum rating
-thrust_ref_n = 46.0e3                # [E] 12 x 46 kN = 552 kN
+thrust_ref_n = 140.0e3               # [E] l4 (user 2026-10-15): 12 x 140 kN, axial 1.62 MN = 1.5 lunar weights of the
+                                     # ~668 t LLO-variant landing mass; hover from ~400 t at 40 % (NRHO variant lands
+                                     # ~503 t). l2's 46 kN assumed 221 t.
 isp_ref_s = 340.0                    # [E]
 nozzle_exit_diameter_m = 0.45        # [E]
 max_ambient_pressure_pa = 1000.0     # [E] vacuum only: never used in Earth's atmosphere
 
 [throttle]
-min = 0.40                           # [E] all twelve hover from ~131 t
+min = 0.40                           # [E] all twelve hover from ~400 t
 max = 1.00
 rate_per_s = 2.0                     # [E]
 

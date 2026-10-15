@@ -23,8 +23,9 @@ dry_mass_kg = 120000.0                   # [E] user 2026-10-14: SpaceX publishes
                                          # LEO departure closes <= ~140 t, bottom-up estimate ~204 t (spec l2)
 dry_cg_station_m = 30.0                  # [E] crew cabin, airlock and landing thrusters high on the hull
 payload_mass_kg = 0.0
-# Landing mass ~221 t [E]: dry + the ascent propellant to a 100 km LLO (1.9 km/s x 1.1, Isp 350 s) - sizes the landing
-# thrusters and legs below.
+# Landing mass [D] (lunar l4, user 2026-10-15) from the l3 arrival masses and a 2.0 km/s descent at Isp 350 s: LLO
+# variant ~662 t (~1,185 t in the LLO), NRHO variant ~503 t (~1,140 t in the NRHO, 876 m/s down to the LLO). Sizes the
+# landing thrusters; the legs were re-checked at both masses (l4 drop tests).
 [[stage.tank]]
 id = "lox_main"
 contents = "oxidizer"
@@ -102,8 +103,10 @@ azimuths_deg = [0.0, 60.0, 120.0, 180.0, 240.0, 300.0]
 footprint_radius_m = 12.0                # static tip-over across an edge ~26 deg
 foot_station_m = -1.5                    # feet below the skirt
 stroke_m = 0.6
-crush_force_n = 1.5e6                    # per leg: no crush in a 1.5 m/s touchdown on flat ground (reserve)
-stiffness_n_m = 1.0e7                    # ~6 mm static in lunar gravity
+crush_force_n = 4.5e6                    # per leg: no crush in a 1.5 m/s touchdown on flat ground (reserve); l4: x3
+                                         # (662 / 221 t) - at l2's 1.5 MN the 662 t landings crushed through on 8 deg
+stiffness_n_m = 1.0e7                    # 6-18 mm static in lunar gravity (221-662 t); l4 kept stiffness and damping:
+                                         # x3 left a light HLS balancing on two feet on the LOLA terrain for > 60 s
 damping_n_s_m = 1.0e6                    # the damper takes the touchdown (1 m/s x 1e6 < the crush force)
 friction = 0.6                           # foot pad on regolith
 

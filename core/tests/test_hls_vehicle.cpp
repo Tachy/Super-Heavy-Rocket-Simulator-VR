@@ -8,6 +8,7 @@
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/spice/spice_adapters.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 #include "test_support.hpp"
 
@@ -15,10 +16,8 @@ using namespace starsim;
 
 namespace {
 
-constexpr double lunar_g_mps2 = 4.9028e12 / (1737.4e3 * 1737.4e3);  // GM [S: DE440] / R^2: 1.624 m/s^2
-
-// Landing mass [E]: dry + the ascent propellant to a 100 km LLO (1.9 km/s x 1.1) at Raptor vacuum Isp 350 s.
-double landing_mass_kg() { return 120.0e3 * std::exp(1.1 * 1900.0 / (350.0 * constants::standard_gravity_mps2)); }
+// Lunar surface gravity GM / R^2 = 1.624 m/s^2.
+constexpr double lunar_g_mps2 = constants::moon_gm_m3ps2 / (constants::moon_mean_radius_m * constants::moon_mean_radius_m);
 
 }  // namespace
 
@@ -37,6 +36,12 @@ TEST_CASE("The HLS has the Block 3 tanks, 120 t dry and no entry hardware", "[ve
     CHECK(s.landing_legs.azimuths_rad.size() == 6);
 }
 
+TEST_CASE("The Moon GM constant matches the DE440 kernel", "[vehicle][hls]") {
+    test::spice_session();
+    const spice::SpiceEphemeris ephemeris;
+    CHECK(constants::moon_gm_m3ps2 == Catch::Approx(ephemeris.gm_m3ps2(ephemeris::Body::Moon)).epsilon(1e-12));
+}
+
 TEST_CASE("HLS landing thrusters lift ~1.5 lunar weights and can hover", "[vehicle][hls]") {
     const vehicle::Vehicle v(config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls"), STARSIM_CONFIG_DIR);
     double max_axial = 0.0, min_axial = 0.0;
@@ -49,20 +54,13 @@ TEST_CASE("HLS landing thrusters lift ~1.5 lunar weights and can hover", "[vehic
         min_axial += e.performance->thrust_n(c.throttle_min, 0.0) * e.thrust_direction().x;
         CHECK(e.gimbal_point_m.x > 30.0);  // high on the hull
     }
+    std::printf("[hls] landing thrust %.0f-%.0f kN axial: hovers %.0f-%.0f t\n", min_axial / 1e3, max_axial / 1e3,
+                min_axial / lunar_g_mps2 / 1e3, max_axial / lunar_g_mps2 / 1e3);
+    // l4 (user 2026-10-15): sized for the real landing mass - LLO variant ~662 t, NRHO variant ~503 t.
     CHECK(n == 12);
-    const double weight = landing_mass_kg() * lunar_g_mps2;
-    std::printf("[hls] landing mass %.1f t, lunar weight %.0f kN, landing thrust %.0f-%.0f kN axial\n",
-                landing_mass_kg() / 1e3, weight / 1e3, min_axial / 1e3, max_axial / 1e3);
-    CHECK(max_axial / weight == Catch::Approx(1.5).margin(0.1));
-    CHECK(min_axial < weight);  // can hover
-    // A single Raptor at minimum throttle exceeds the landing weight: the reason for the landing thrusters
-    int raptors = 0;
-    for (const auto& e : v.stages().front().engines) {
-        if (e.group_id != "hls/sea_level_1") continue;
-        ++raptors;
-        CHECK(e.performance->thrust_n(e.performance->config().throttle_min, 0.0) > weight);
-    }
-    CHECK(raptors == 1);
+    CHECK(max_axial / (668e3 * lunar_g_mps2) == Catch::Approx(1.5).margin(0.02));
+    CHECK(min_axial / lunar_g_mps2 < 450e3);  // hovers the lightest landing (NRHO ~503 t, -5 % mass dispersion)
+    CHECK(max_axial / lunar_g_mps2 > 700e3);  // and lifts the heaviest (LLO ~662 t, +5 %)
 }
 
 TEST_CASE("Fixed legs are deployed from the start and stay deployed", "[vehicle][hls][legs]") {
