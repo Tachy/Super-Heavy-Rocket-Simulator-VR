@@ -75,6 +75,39 @@ void place_over_site(Fixture& fx, const config::VehicleConfig& cfg, double clear
 
 sim::LegSite lunar_site_on_sphere() { return {ephemeris::Body::Moon, site_lat, site_lon, 0.0, 10000.0}; }
 
+// Runs a placed drop until the legs' judgement (or 60 s).
+sim::LegTouchdown run_drop(Fixture& fx) {
+    const auto t0 = fx.session.epoch();
+    while (fx.session.leg_touchdown(0) == sim::LegTouchdown::None && fx.session.epoch() - t0 < 60.0) {
+        fx.session.advance_to(fx.session.epoch() + 0.1, 100000);
+    }
+    return fx.session.leg_touchdown(0);
+}
+
+// Drop on a plane of `slope_deg` rising towards `uphill_azimuth_deg`: the foot over the highest ground 0.5 m up,
+// 1 m/s down (spec l4: touchdown <= 1 m/s).
+sim::LegTouchdown drop_on_slope(double slope_deg, double uphill_azimuth_deg) {
+    Fixture fx;
+    contact::LandingSurface surface;
+    surface.field = std::make_shared<contact::PlaneField>(slope_deg * deg, uphill_azimuth_deg * deg);
+    fx.session.set_landing_surface(lunar_site_on_sphere(), surface);
+    place_over_site(fx, hls(100.0e3), 0.5, {0.0, 0.0, -1.0});
+    const auto result = run_drop(fx);
+    double stroke = 0.0;
+    for (double c : fx.session.leg_crushed_m(0)) stroke = std::max(stroke, c);
+    std::printf("[hls] slope %4.1f deg uphill %5.1f deg: %-10s crushed %.3f m\n", slope_deg, uphill_azimuth_deg,
+                sim::to_string(result), stroke);
+    return result;
+}
+
+// Static tip-over slope across the weakest edge (between two of six legs): atan(r cos 30 deg / CG height above the feet).
+double tip_over_slope_deg(const config::VehicleConfig& cfg) {
+    const vehicle::Vehicle v(cfg, STARSIM_CONFIG_DIR);
+    const auto& lc = cfg.stages.front().landing_legs;
+    const double h = v.mass_properties().cg_station_m - lc.foot_station_m;
+    return std::atan(lc.footprint_radius_m * std::cos(30.0 * deg) / h) / deg;
+}
+
 }  // namespace
 
 TEST_CASE("An HLS set down gently at a lunar site lands and follows the Moon", "[hls][legs][lunar]") {
@@ -119,4 +152,54 @@ TEST_CASE("An HLS without a lunar landing site rests on the Moon by its own grou
     CHECK(!fx.session.body(0).impacted());
     CHECK(fx.session.body(0).resting());
     CHECK(std::abs(fx.session.telemetry(0).altitude_m - cg) < 2.0);  // CG over the sphere: standing on its skirt
+}
+
+// Slopes up to NASA's Artemis landing-slope limit (~8-10 deg) land; the leg sizing is in starship_hls.toml.
+TEST_CASE("HLS drop tests on 0, 5 and 8 deg slopes land; 25 deg tips over", "[hls][legs][lunar]") {
+    const double tip = tip_over_slope_deg(hls(100.0e3));
+    std::printf("[hls] static tip-over slope across an edge: %.1f deg\n", tip);
+    REQUIRE(tip > 25.0);  // the leg sizing (user 2026-10-15: 12 m footprint)
+    for (double slope : {0.0, 5.0, 8.0}) {
+        CHECK(drop_on_slope(slope, 0.0) == sim::LegTouchdown::Landed);   // uphill towards a leg
+        CHECK(drop_on_slope(slope, 30.0) == sim::LegTouchdown::Landed);  // uphill between two legs (weakest)
+    }
+    CHECK(drop_on_slope(25.0, 30.0) == sim::LegTouchdown::TippedOver);
+}
+
+TEST_CASE("An HLS lands on the LOLA terrain at the flattest spot near the site", "[hls][legs][lunar][terrain][data]") {
+    Fixture fx;
+    const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+    fx.session.set_moon_terrain(terrain);
+    const auto site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain);
+    fx.session.set_lunar_landing_site(site);
+    // Flattest spot of a 50 m lattice within 500 m: the smallest largest tilt of the terrain normal under the footprint
+    // (centre and the six feet) - l4's touchdown-point choice will do this properly.
+    const auto& surface = fx.session.leg_landing().surface();
+    const auto cfg = hls(100.0e3);
+    const double r = cfg.stages.front().landing_legs.footprint_radius_m;
+    double best = 1e9, be = 0.0, bn = 0.0;
+    for (int i = -10; i <= 10; ++i) {
+        for (int j = -10; j <= 10; ++j) {
+            double worst = 0.0;
+            for (int k = -1; k < 6; ++k) {
+                const double a = k * 60.0 * deg;
+                const double e = 50.0 * i - (k < 0 ? 0.0 : r * std::sin(a));
+                const double n = 50.0 * j + (k < 0 ? 0.0 : r * std::cos(a));
+                worst = std::max(worst, std::acos(std::min(1.0, surface.below(e, n).normal.z)));
+            }
+            if (worst < best) {
+                best = worst;
+                be = 50.0 * i;
+                bn = 50.0 * j;
+            }
+        }
+    }
+    const double at_site = std::acos(std::min(1.0, surface.below(0.0, 0.0).normal.z)) / deg;
+    std::printf("[hls] site %.1f m above the sphere, slope there %.2f deg; flattest spot (%.0f, %.0f) m, %.2f deg\n",
+                site.height_m, at_site, be, bn, best / deg);
+    place_over_site(fx, cfg, 0.5, {0.0, 0.0, -1.0}, be, bn);
+    CHECK(run_drop(fx) == sim::LegTouchdown::Landed);
+    // The feet stand on the terrain: spring compression of millimetres, no crush at 1 m/s
+    for (double c : fx.session.leg_crushed_m(0)) CHECK(c < 0.01);
+    CHECK(fx.session.body(0).resting());
 }

@@ -92,16 +92,20 @@ crossflow_table = "aero/ship_crossflow.csv"
 ascent_drag_table = "aero/starship_stack_ascent.csv"
 nose_length_m = 17.0
 
-[stage.landing_legs]                     # all [E]; fixed (always deployed)
+# Legs: all [E]; fixed (always deployed). Sized by the lunar l2 drop tests (user 2026-10-15): a vertical touchdown on a
+# slope lands on the uphill feet first and pivots freely through the slope angle (CG ~21 m up) - the energy gained must
+# stay below the tip barrier over the downhill feet. Slope limit (1 m/s + 0.5 m drop) vs footprint radius: 8 m ~5 deg,
+# 10 m 7 deg, 12 m >= 9 deg (NASA's Artemis landing-slope limit is ~8-10 deg). Six legs: four would tip between two.
+[stage.landing_legs]
 fixed = true
-azimuths_deg = [0.0, 60.0, 120.0, 180.0, 240.0, 300.0]  # six: four would tip at ~14 deg between two legs
-footprint_radius_m = 8.0
+azimuths_deg = [0.0, 60.0, 120.0, 180.0, 240.0, 300.0]
+footprint_radius_m = 12.0                # static tip-over across an edge ~26 deg
 foot_station_m = -1.5                    # feet below the skirt
 stroke_m = 0.6
-crush_force_n = 5.0e5                    # per leg; 6 legs x 0.6 m: 1.8 MJ (~4 m/s at 221 t)
-stiffness_n_m = 4.0e7
-damping_n_s_m = 8.0e5                    # ~0.27 of critical per leg at 221 t
-friction = 0.6                           # [E] foot pad on regolith
+crush_force_n = 1.5e6                    # per leg: no crush in a 1.5 m/s touchdown on flat ground (reserve)
+stiffness_n_m = 1.0e7                    # ~6 mm static in lunar gravity
+damping_n_s_m = 1.0e6                    # the damper takes the touchdown (1 m/s x 1e6 < the crush force)
+friction = 0.6                           # foot pad on regolith
 
 # Ship RCS layout (cold gas from the main tanks).
 
