@@ -1,7 +1,10 @@
 #include "starsim/sim/lunar_site.hpp"
 
+#include <cmath>
 #include <stdexcept>
 #include <utility>
+
+#include "starsim/config/vehicle_config.hpp"
 
 namespace starsim::sim {
 
@@ -37,6 +40,14 @@ std::shared_ptr<const environment::LunarTerrain> load_lunar_terrain(const std::f
         t.first_line = f.first_line;
         t.first_sample = f.first_sample;
         t.grid = grid_of(f);
+        // A site moved or resized after the download would use the old tile silently.
+        const double half_px = 0.5 * (f.lines - 1);
+        const auto [line, sample] = t.position(site.latitude_rad, site.longitude_rad);
+        if (f.product != site.product || std::abs(line - half_px) > 1.0 || std::abs(sample - half_px) > 1.0 ||
+            std::abs(half_px * f.scale_m - site.tile_half_size_m) > f.scale_m) {
+            throw config::ConfigError("Mondgelände: Kachel " + site.id +
+                                      " passt nicht mehr zu lunar_sites.toml - python tools/data_pipeline/fetch.py erneut ausführen");
+        }
         tiles.push_back(std::move(t));
     }
     return std::make_shared<const environment::LunarTerrain>(std::move(global), std::move(tiles), radius);

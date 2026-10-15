@@ -72,3 +72,15 @@ TEST_CASE("Fixed legs are deployed from the start and stay deployed", "[vehicle]
     v.update_landing_legs(1.0);
     CHECK(v.leg_deployment() == 1.0);
 }
+
+TEST_CASE("An upper stage with fixed legs keeps them out after separation", "[vehicle][hls][legs]") {
+    auto stack = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
+    const auto hls = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls");
+    stack.stages[1] = hls.stages[0];  // Super Heavy + HLS
+    stack.engines.insert(hls.engines.begin(), hls.engines.end());
+    vehicle::Vehicle v(stack, STARSIM_CONFIG_DIR);
+    CHECK(v.leg_deployment() == 0.0);  // the booster's front stage has no legs
+    const auto upper = v.separate(1);
+    REQUIRE(upper->has_landing_legs());
+    CHECK(upper->leg_deployment() == 1.0);
+}

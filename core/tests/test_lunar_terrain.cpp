@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
@@ -170,4 +172,25 @@ TEST_CASE("Missing terrain data names the fetch script", "[terrain]") {
     } catch (const std::runtime_error& e) {
         CHECK(std::string(e.what()).find("tools/data_pipeline/fetch.py") != std::string::npos);
     }
+}
+
+TEST_CASE("A tile that no longer matches lunar_sites.toml is refused", "[terrain][data]") {
+    const auto dir = std::filesystem::temp_directory_path() / "starsim_stale_tile_config";
+    std::filesystem::create_directories(dir);
+    std::ifstream in(std::filesystem::path(STARSIM_CONFIG_DIR) / "lunar_sites.toml");
+    std::stringstream text;
+    text << in.rdbuf();
+    std::string s = text.str();
+    const auto at = s.find("latitude_deg = -84.7906");
+    REQUIRE(at != std::string::npos);
+    s.replace(at, 23, "latitude_deg = -84.6906");  // moved 3 km: the downloaded tile is stale
+    std::ofstream(dir / "lunar_sites.toml") << s;
+    try {
+        sim::load_lunar_terrain(dir, STARSIM_DATA_DIR);
+        FAIL("expected an error");
+    } catch (const std::runtime_error& e) {
+        CHECK(std::string(e.what()).find("tools/data_pipeline/fetch.py") != std::string::npos);
+        CHECK(std::string(e.what()).find("mons_mouton_im2") != std::string::npos);
+    }
+    std::filesystem::remove_all(dir);
 }

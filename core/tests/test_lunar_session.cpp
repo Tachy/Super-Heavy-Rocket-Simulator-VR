@@ -1,11 +1,16 @@
 // FlightSession near the Moon (lunar l1): ticks near the lunar ground, LVLH about the Moon.
 
 #include <cmath>
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
+#include <vector>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/environment/lunar_terrain.hpp"
 #include "starsim/environment/reference_body.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/orbital_attitude.hpp"
@@ -13,6 +18,7 @@
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+#include "starsim/vehicle/vehicle.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -36,6 +42,39 @@ config::VehicleConfig ship_config() {
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
     return cfg;
+}
+
+// A flat global grid at `h` m (DN = 2h) with LDEM_16's layout.
+environment::CylindricalGrid flat_global(double h) {
+    environment::CylindricalGrid g;
+    g.grid = {2880, 5760, 0.5, std::vector<std::int16_t>(2880 * 5760, static_cast<std::int16_t>(2.0 * h))};
+    g.pixels_per_degree = 16.0;
+    g.zero_line = 1439.5;
+    g.zero_sample = -0.5;
+    return g;
+}
+
+// Upright (body +x along the local vertical) at rest `height_m` above a selenographic point.
+vehicle::RigidBodyState upright_above_moon(const environment::ReferenceBody& moon, time::Epoch t, double lat,
+                                           double lon, double height_m) {
+    const auto frame = moon.frame(t);
+    const Vec3 fixed = frames::geodetic_to_fixed({lat, lon, height_m}, moon.shape());
+    const Vec3 up = frame.transform.rotation * math::normalized(fixed);
+    const Vec3 y = math::normalized(cross(up, Vec3{0.0, 0.0, 1.0}));
+    const Vec3 z = cross(up, y);
+    math::Mat3 axes;
+    const Vec3 columns[3] = {up, y, z};
+    for (int c = 0; c < 3; ++c) {
+        axes(0, c) = columns[c].x;
+        axes(1, c) = columns[c].y;
+        axes(2, c) = columns[c].z;
+    }
+    vehicle::RigidBodyState s;
+    s.position_gcrf_m = frame.position_gcrf(fixed);
+    s.velocity_gcrf_mps = frame.velocity_gcrf(fixed, {});
+    s.attitude = math::Quat::from_matrix(axes);
+    s.angular_velocity_body_radps = s.attitude.inverse_rotate(frame.rotation_gcrf_radps);
+    return s;
 }
 
 }  // namespace
@@ -84,4 +123,16 @@ TEST_CASE("A session without a Moon orientation keeps the Earth as the only refe
     session.place_body(ship_config(), s, t0);
     CHECK(session.reference_body(0) == ephemeris::Body::Earth);
     CHECK(session.environment().moon == nullptr);
+}
+
+TEST_CASE("Lunar terrain is refused once a body rests on the Moon", "[sim][lunar]") {
+    Fixture fx;
+    const auto cfg = ship_config();
+    const double cg = vehicle::Vehicle(cfg, STARSIM_CONFIG_DIR).mass_properties().cg_station_m;
+    fx.session.place_body(cfg, upright_above_moon(fx.moon, fx.t0, 20.0 * deg, 40.0 * deg, cg + 0.5), fx.t0);
+    fx.session.advance_to(fx.t0 + 30.0, 100000);
+    REQUIRE(fx.session.body(0).resting());
+    auto terrain = std::make_shared<const environment::LunarTerrain>(
+        flat_global(0.0), std::vector<environment::PolarStereographicTile>{}, constants::moon_mean_radius_m);
+    CHECK_THROWS_AS(fx.session.set_moon_terrain(terrain), std::runtime_error);
 }

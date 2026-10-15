@@ -197,7 +197,7 @@ private:
     math::Vec3 external_torque_body_nm_;
     bool caught_ = false;
     bool landed_ = false;  // standing on its legs, held to its body (hold_landed)
-    bool legs_on_site_ = true;
+    bool legs_on_site_ = false;  // set every tick by the leg site for bodies on it
     double heat_rate_w_m2_ = 0.0;
     double heat_load_j_m2_ = 0.0;
     double peak_heat_rate_w_m2_ = 0.0;

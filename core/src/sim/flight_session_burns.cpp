@@ -59,9 +59,15 @@ std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations
         };
         if (forced) {
             std::vector<std::string> selected;
-            for (const auto& g : *forced) selected.push_back(stage.config.id + "/" + g);
-            configurations.push_back(make(selected, false));
-            configurations.push_back(make(selected, true));
+            for (const auto& g : *forced) {
+                const std::string id = stage.config.id + "/" + g;
+                // Only burn engines: a landing-only or launch-escape group is never lit by a burn (lunar l2).
+                if (std::find(groups.begin(), groups.end(), id) != groups.end()) selected.push_back(id);
+            }
+            if (!selected.empty()) {
+                configurations.push_back(make(selected, false));
+                configurations.push_back(make(selected, true));
+            }
             break;
         }
         configurations.push_back(make(groups, false));

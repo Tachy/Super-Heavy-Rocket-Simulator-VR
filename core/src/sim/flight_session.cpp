@@ -618,6 +618,12 @@ void FlightSession::set_landing_surface(const LegSite& site, contact::LandingSur
 
 void FlightSession::set_moon_terrain(std::shared_ptr<const environment::LunarTerrain> terrain) {
     if (!moon_) throw std::runtime_error("Mondgelände braucht die Mondorientierung");
+    // Bodies resting on the Moon stand at the old surface height: the order is terrain first, then placement.
+    for (size_t i = 0; i < bodies_.size(); ++i) {
+        if (bodies_[i].body->resting() && reference_body(i) == ephemeris::Body::Moon) {
+            throw std::runtime_error("Mondgelände muss vor dem Aufsetzen gesetzt werden");
+        }
+    }
     moon_terrain_ = std::move(terrain);
     moon_->set_terrain(moon_terrain_.get());
     // A lunar landing site was built on the old terrain (its height, its surface): it must be set again.

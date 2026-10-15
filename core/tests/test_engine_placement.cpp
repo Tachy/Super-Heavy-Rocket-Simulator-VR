@@ -140,3 +140,19 @@ TEST_CASE("Landing-only engines are never chosen for burns or lit by ignite", "[
     }
     CHECK(landing == 4);
 }
+
+TEST_CASE("A forced burn naming a landing-only group lights no landing engine", "[sim][engines]") {
+    OrbitSession ringed(canted_ship(true));
+    const auto at_node = orbit::propagate_two_body(ringed.orbit_state, ringed.session.gm_earth_m3ps2(), 300.0);
+    const gnc::BurnNode node{ringed.t0 + 300.0, math::normalized(at_node.velocity_mps) * 200.0};
+    CHECK_FALSE(ringed.session.execute_burn(node, {"canted"}));  // only a landing-only group: no configuration
+    REQUIRE(ringed.session.execute_burn(node, {"vacuum", "canted"}));
+    const auto& groups = ringed.session.burn_configuration().groups;
+    CHECK(std::find(groups.begin(), groups.end(), "ship/canted") == groups.end());
+    ringed.session.advance_to(node.epoch + 5.0, 100000);
+    int vacuum = 0;
+    for (const auto& e : ringed.session.body(0).vehicle().stages().front().engines) {
+        if (e.landing_only) CHECK(!e.producing_thrust());
+        if (e.group_id == "ship/vacuum" && e.producing_thrust()) ++vacuum;    }
+    CHECK(vacuum == 3);
+}

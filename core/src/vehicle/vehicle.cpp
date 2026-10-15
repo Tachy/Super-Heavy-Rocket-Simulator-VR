@@ -676,6 +676,10 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     nose_cone_open_ = nose_cone_open_ && has_nose_cone();
     refresh_rcs_availability();  // a payload split off flies alone: its thrusters are free now
     upper->refresh_rcs_availability();
+    // Fixed legs are always out, also on a part split off (the upper part starts with them stowed otherwise).
+    for (Vehicle* part : {this, upper.get()}) {
+        if (part->has_landing_legs() && part->stages_.front().config.landing_legs.fixed) part->set_leg_deployment(1.0);
+    }
     return upper;
 }
 
