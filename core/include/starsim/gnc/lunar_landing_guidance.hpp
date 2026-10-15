@@ -76,6 +76,9 @@ public:
     // The braking set running now (index into braking_sets; the engine-out set replaces its groups).
     const std::vector<std::string>& braking_groups() const { return set_groups_; }
     void set_realtime(bool realtime);
+    // Body x (GCRF) that brings the thrust axis of `groups` onto `direction_gcrf` by the shortest rotation.
+    static math::Vec3 hull_axis_for(const vehicle::FlightBody& body, const math::Vec3& direction_gcrf,
+                                    const std::vector<std::string>& groups);
 
 private:
     ReturnCommand braking(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
@@ -86,9 +89,6 @@ private:
     // terms of the Moon's rotation.
     math::Vec3 effective_gravity_plan(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                       time::Epoch epoch, const environment::BodyFrame& frame, const DescentState& x) const;
-    // Body x (GCRF) that brings the thrust axis of `groups` onto `direction_gcrf` by the shortest rotation.
-    static math::Vec3 hull_axis_for(const vehicle::FlightBody& body, const math::Vec3& direction_gcrf,
-                                    const std::vector<std::string>& groups);
     void start_approach(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     // Set drops and the engine-out switch; the groups to run now.
     std::vector<std::string> braking_groups_now(const vehicle::Vehicle& vehicle, double demand_n, time::Epoch epoch);

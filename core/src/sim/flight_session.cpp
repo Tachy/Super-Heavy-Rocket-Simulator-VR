@@ -136,6 +136,10 @@ void FlightSession::fail_engine(size_t body_index, size_t stage_index, size_t en
 
 bool FlightSession::abort_landing(size_t body_index) {
     auto& flying = bodies_.at(body_index);
+    if (body_index == controlled_ && autopilot_.state == AutopilotState::Lunar &&
+        lunar_step_ == LunarStep::PoweredDescent && lunar_landing_) {
+        return lunar_abort_to_orbit();  // lunar l4: abort to orbit, or refused and the landing continues
+    }
     bool accepted = false;
     if (flying.return_guidance) accepted = flying.return_guidance->request_abort();
     if (flying.ship_landing) accepted = flying.ship_landing->request_abort();
@@ -416,6 +420,7 @@ double FlightSession::coast_allowance_s() const {
     if (autopilot_.state == AutopilotState::Lunar) {
         if (lunar_step_ == LunarStep::PilotCorrection) return 0.0;  // the crew flies: ticked
         if (lunar_step_ == LunarStep::PoweredDescent) return 0.0;   // the descent guidance flies: ticked
+        if (lunar_step_ == LunarStep::Ascent || lunar_step_ == LunarStep::AbortAscent) return 0.0;  // ascent: ticked
         // the next timed step (ignition preparation then comes from the state Burn), and the next Sun re-point
         allowance = std::min(allowance, lunar_step_epoch_ - epoch_);
         if (lunar_step_ == LunarStep::Coast || lunar_step_ == LunarStep::DescentWait) allowance = std::min(allowance, lunar_next_repoint_ - epoch_);

@@ -117,6 +117,8 @@ public:
     // Fixes a stage standing on its legs to the Earth where it is (landed): resting() from now on.
     void hold_landed(const frames::BodyOrientation& earth, time::Epoch epoch);
     void hold_landed(const environment::BodyFrame& frame, ephemeris::Body body);  // on any reference body
+    // Lets a landed body go (liftoff): it is integrated again from its held pose (moving with its body), not resting.
+    void release_landed();
     // Leg landing simulations set this every tick for bodies with legs: true while one owns the body's ground contact
     // (its site); elsewhere the body's own ground contact applies even with its legs out (lunar l2).
     void set_legs_on_site(bool on_site) { legs_on_site_ = on_site; }

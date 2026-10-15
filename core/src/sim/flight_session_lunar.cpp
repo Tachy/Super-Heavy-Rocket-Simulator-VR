@@ -74,6 +74,10 @@ const char* to_string(LunarStep step) {
         case LunarStep::PoweredDescent: return "Landeanflug";
         case LunarStep::Landed: return "gelandet";
         case LunarStep::SurfaceStay: return "Oberflächenaufenthalt";
+        case LunarStep::Ascent: return "Aufstieg";
+        case LunarStep::AscentCoast: return "Freiflug zur Aposelene";
+        case LunarStep::Circularize: return "Zirkularisierung";
+        case LunarStep::AbortAscent: return "Abbruch zum Orbit";
         case LunarStep::Lost: return "verloren";
     }
     return "";
@@ -100,6 +104,8 @@ void FlightSession::reset_lunar() {
     lunar_touchdown_.reset();
     lunar_descent_plan_.reset();
     lunar_landing_setup_.reset();
+    lunar_ascent_.reset();
+    lunar_ascent_parameters_.reset();
 }
 
 bool FlightSession::plan_lunar_outbound(const mission::LunarOutboundParameters& parameters) {
@@ -375,6 +381,11 @@ void FlightSession::run_lunar_steps(Flying& flying) {
         run_lunar_descent_steps(flying);  // judges an impact itself
         return;
     }
+    if (lunar_step_ == LunarStep::Ascent || lunar_step_ == LunarStep::AbortAscent ||
+        lunar_step_ == LunarStep::AscentCoast || lunar_step_ == LunarStep::Circularize) {
+        run_lunar_ascent_steps(flying);  // judges an impact itself
+        return;
+    }
     if (flying.body->impacted()) {
         lunar_abort("Mondflug beendet: Aufschlag");
         return;
@@ -547,6 +558,10 @@ void FlightSession::run_lunar_steps(Flying& flying) {
         case LunarStep::PoweredDescent:
         case LunarStep::Landed:
         case LunarStep::SurfaceStay:
+        case LunarStep::Ascent:
+        case LunarStep::AscentCoast:
+        case LunarStep::Circularize:
+        case LunarStep::AbortAscent:
         case LunarStep::Lost:
             break;
     }

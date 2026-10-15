@@ -91,8 +91,11 @@ void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
         // On this site: near it on its body (an Earth site's plane reaches everywhere). Elsewhere the body keeps its own
         // ground contact even with its legs out (lunar l2: an HLS touching the Moon away from the site).
         const auto pose = site_pose(*body, frame);
+        // Also above the site's plane: on the far side of the Moon (an orbit after the ascent, near the antipode) the
+        // horizontal offset is small too, and the feet "touched" the plane ~3,500 km above them (l4: an impact in orbit).
         const bool on_site = body->reference_body(env, epoch) == site_.body &&
-                             std::hypot(pose.cg_m.x, pose.cg_m.y) <= site_.tracking_radius_m;
+                             std::hypot(pose.cg_m.x, pose.cg_m.y) <= site_.tracking_radius_m &&
+                             pose.cg_m.z > -site_.tracking_radius_m;
         body->set_legs_on_site(on_site);
         if (auto it = tracks_.find(body); it != tracks_.end()) it->second.on_site = on_site;
         if (!on_site || v.leg_deployment() <= 0.0 || body->impacted() || body->resting()) continue;
@@ -160,6 +163,13 @@ void LegLandingSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, 
             tr.at_rest_s = 0.0;
         }
     }
+}
+
+void LegLandingSim::release(const vehicle::FlightBody& body) {
+    auto it = tracks_.find(&body);
+    if (it == tracks_.end()) return;
+    it->second.touchdown = LegTouchdown::None;
+    it->second.at_rest_s = 0.0;
 }
 
 LegTouchdown LegLandingSim::touchdown(const vehicle::FlightBody& body) const {

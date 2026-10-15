@@ -23,6 +23,7 @@
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/gnc/deorbit_planner.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
+#include "starsim/gnc/lunar_ascent_guidance.hpp"
 #include "starsim/gnc/lunar_landing_guidance.hpp"
 #include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/gnc/parachute_sequencer.hpp"
@@ -71,9 +72,12 @@ const char* to_string(CapsuleReturnStep step);
 // PilotCorrection: the crew flies a mid-course correction (lunar_pilot_cue).
 // Descent from the LLO (plan_lunar_landing, l4): DescentWait -> PlaneTrim (if any) -> DescentWait -> Doi -> DescentCoast
 // -> PoweredDescent -> Landed (via SurfaceStay when a stay is requested); PlaneTrim and Doi: that burn is under way.
+// Ascent (plan_lunar_ascent, l4): (SurfaceStay until the liftoff ->) Ascent -> AscentCoast -> Circularize (the burn) ->
+// InLlo; AbortAscent: an abort to orbit from PoweredDescent, then AscentCoast as the ascent.
 enum class LunarStep {
     None, Departure, Tli, Coast, MidCourse, PilotCorrection, PoweredFlyby, Insertion, Trim, InLlo, InNrho, StationKeeping,
-    TransferOut, TransferIn, DescentWait, PlaneTrim, Doi, DescentCoast, PoweredDescent, Landed, SurfaceStay, Lost
+    TransferOut, TransferIn, DescentWait, PlaneTrim, Doi, DescentCoast, PoweredDescent, Landed, SurfaceStay, Ascent,
+    AscentCoast, Circularize, AbortAscent, Lost
 };
 const char* to_string(LunarStep step);
 
@@ -94,6 +98,7 @@ struct LunarLandingSetup {
     double braking_delta_v_mps = 1600.0;  // [E] of it on the vacuum Raptors (Task 6 measures the flown share)
     double ascent_delta_v_mps = 1900.0;   // [E] budget: ascent + circularisation (spec ~1.9 km/s, Apollo LM ~1.85)
     double reserve_kg = 10000.0;          // [E] residuals and unusable propellant
+    std::optional<gnc::LunarAscentParameters> ascent;  // lift off at the stay's end (none: stay Landed)
 };
 
 // Flight director cue of a pilot-flown mid-course correction (lunar l3, Step 3b; displayed with l6 / M7).
@@ -231,6 +236,8 @@ public:
         lunar_step_ = LunarStep::None;
         lunar_pilot_.reset();
         lunar_landing_.reset();  // the pilot flies: no descent guidance command afterwards
+        lunar_ascent_.reset();
+        lunar_ascent_parameters_.reset();
         lunar_descent_plan_.reset();
         lunar_landing_setup_.reset();
     }
@@ -316,6 +323,14 @@ public:
     }
     const gnc::LunarLandingGuidance* lunar_landing_guidance() const { return lunar_landing_.get(); }
     const std::optional<LunarTouchdown>& lunar_touchdown() const { return lunar_touchdown_; }
+    // Ascent of the controlled vehicle standing landed on the Moon (lunar step Landed / SurfaceStay, or a body the leg
+    // simulation judged "gelandet"), `liftoff_delay_s` from now (meanwhile step SurfaceStay): liftoff, PEG to the
+    // insertion, coast to the aposelene, circularisation -> InLlo. False with a German lunar_status() (not landed,
+    // propellant short for orbit).
+    bool plan_lunar_ascent(const gnc::LunarAscentParameters& parameters = {}, double liftoff_delay_s = 0.0);
+    const gnc::LunarAscentGuidance* lunar_ascent_guidance() const { return lunar_ascent_.get(); }
+    static constexpr double default_ascent_delta_v_mps = 1900.0;  // [E] without a landing setup (spec ~1.9 km/s)
+    static constexpr double default_ascent_reserve_kg = 10000.0;  // [E] as LunarLandingSetup::reserve_kg
     static constexpr double sun_repoint_interval_s = 6.0 * 3600.0;  // [E] coast: Sun pointing re-aimed this often
     static constexpr int max_llo_trims = 4;
     static constexpr double descent_attitude_lead_s = 600.0;  // [E] retrograde hold before PDI (~180 deg at 0.5 deg/s)                          // [E]
@@ -373,6 +388,9 @@ public:
     // Gives a returning body's landing or catch up (pilot's abort): it ditches at sea and the tower keeps its arms open.
     // Before the landing burn the abort is remembered and the burn plans for the sea. False when the guidance cannot
     // abort (not returning, no sea at the site, already down or on the arms): then nothing changes.
+    // Lunar l4: the controlled body in step PoweredDescent aborts to orbit (step AbortAscent) when the propellant
+    // suffices (LunarAscentGuidance::abort_delta_v_mps against the rocket equation, reserve as the landing setup's),
+    // else false with "Abbruch nicht möglich: ..." and the landing continues.
     bool abort_landing(size_t body_index);
     // Attitude mode of the controlled body while no autopilot phase steers it (state Off / Orbit; d2). Any mode but Free
     // keeps the session ticking (pulsed RCS hold); Free lets it coast. Pilot input is ignored while a mode is held.
@@ -573,6 +591,13 @@ private:
     std::unique_ptr<gnc::LunarLandingGuidance> lunar_landing_;
     std::optional<LunarTouchdown> lunar_touchdown_;
     mission::TouchdownPoint lunar_touchdown_point_;
+    // The ascent steps (flight_session_lunar_ascent.cpp).
+    void run_lunar_ascent_steps(Flying& flying);
+    void lunar_liftoff(Flying& flying);  // releases the landed body, starts the ascent guidance (step Ascent)
+    bool lunar_abort_to_orbit();         // propellant check, then step AbortAscent; false with the status set
+    std::unique_ptr<gnc::LunarAscentGuidance> lunar_ascent_;
+    std::optional<gnc::LunarAscentParameters> lunar_ascent_parameters_;  // planned liftoff (SurfaceStay until then)
+    bool lunar_auto_abort_tried_ = false;  // the landing guidance gave up: the abort to orbit was tried once
     math::StateVector controlled_state() const;
 
     // `forced`: only this set (config group ids), at full and at minimum throttle.

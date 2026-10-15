@@ -42,9 +42,12 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         }
         return command;
     }
-    if (index == controlled_ && autopilot_.state == AutopilotState::Lunar && lunar_step_ == LunarStep::PoweredDescent &&
-        lunar_landing_) {
-        // Powered lunar descent: flown as the ship's landing burn (gimbals + RCS; the fixed vacuum Raptors: RCS only).
+    const bool lunar_descent = lunar_step_ == LunarStep::PoweredDescent && lunar_landing_;
+    const bool lunar_ascent =
+        (lunar_step_ == LunarStep::Ascent || lunar_step_ == LunarStep::AbortAscent) && lunar_ascent_;
+    if (index == controlled_ && autopilot_.state == AutopilotState::Lunar && (lunar_descent || lunar_ascent)) {
+        // Powered lunar descent and ascent: flown as the ship's landing burn (gimbals + RCS; the fixed vacuum Raptors:
+        // RCS only; the canted landing thrusters: differential throttling).
         if (!flying.body->impacted()) apply_return_command(flying, ship_landing_controller_, ambient_pressure_pa, command);
         return command;
     }

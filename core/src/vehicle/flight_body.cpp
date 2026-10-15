@@ -303,6 +303,12 @@ void FlightBody::hold_landed(const environment::BodyFrame& frame, ephemeris::Bod
     landed_ = true;
 }
 
+// The held pose (follow_pad) already moves with the body: the integration starts from it without a jump.
+void FlightBody::release_landed() {
+    landed_ = false;
+    resting_ = false;
+}
+
 void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt_s, const VehicleCommand& command) {
     if (impacted_) {
         vehicle_->stop_rcs();

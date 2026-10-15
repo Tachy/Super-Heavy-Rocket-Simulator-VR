@@ -33,19 +33,6 @@ namespace {
 
 constexpr double far_future_s = 1e9;  // "nothing timed"
 
-// Vacuum Isp of the engines in `groups` (thrust-weighted, full throttle); 0 when none.
-double group_isp_s(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups) {
-    double thrust_n = 0.0, mass_flow_kgps = 0.0;
-    for (const auto& stage : vehicle.stages()) {
-        for (const auto& e : stage.engines) {
-            if (std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) continue;
-            thrust_n += e.performance->thrust_n(1.0, 0.0);
-            mass_flow_kgps += e.performance->mass_flow_kgps(1.0);
-        }
-    }
-    return mass_flow_kgps > 0.0 ? thrust_n / mass_flow_kgps / constants::standard_gravity_mps2 : 0.0;
-}
-
 // Longest start-up of the engines in `groups`.
 double group_startup_s(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups) {
     double startup_s = 0.0;
@@ -94,8 +81,8 @@ bool FlightSession::plan_lunar_landing(const LunarLandingSetup& setup) {
     const auto& vehicle = bodies_[controlled_].body->vehicle();
     const auto& legs = vehicle.stages().front().config.landing_legs;
     const auto& sets = setup.guidance.braking_sets;
-    const double vacuum_isp_s = sets.empty() ? 0.0 : group_isp_s(vehicle, sets.front());
-    const double approach_isp_s = sets.empty() ? 0.0 : group_isp_s(vehicle, sets.back());
+    const double vacuum_isp_s = sets.empty() ? 0.0 : gnc::groups_vacuum_isp_s(vehicle, sets.front());
+    const double approach_isp_s = sets.empty() ? 0.0 : gnc::groups_vacuum_isp_s(vehicle, sets.back());
     if (legs.azimuths_rad.empty() || vacuum_isp_s <= 0.0 || approach_isp_s <= 0.0) {
         lunar_status_ = "Kein Abstieg: Fahrzeug ohne Landebeine oder Abstiegstriebwerke";
         return false;
@@ -161,16 +148,18 @@ bool FlightSession::lunar_descent_burn(const gnc::BurnNode& node, LunarStep step
     // The session's choice first (RCS or a Raptor set). A 10-20 m/s trim or DOI at ~1,185 t fits neither the cold-gas
     // RCS (over an hour) nor a three-Raptor set (its start/shutdown impulse is more than a quarter of the burn): it flies
     // on the approach set's gimballed Raptor alone (as the SCvx approach does), at the throttle the executor picks.
+    // The ascent's circularisation (~20 m/s at ~400 t) flies the same way; without a landing setup on the HLS's sets.
     bool ok = execute_burn(node);
-    if (!ok && lunar_landing_setup_ && !lunar_landing_setup_->guidance.braking_sets.empty()) {
+    const auto sets = lunar_landing_setup_ ? lunar_landing_setup_->guidance.braking_sets
+                                           : gnc::hls_landing_parameters().braking_sets;
+    if (!ok && !sets.empty()) {
         std::vector<std::string> groups;  // burn_configurations takes the group ids without the stage prefix
-        for (const auto& id : lunar_landing_setup_->guidance.braking_sets.back()) {
-            groups.push_back(id.substr(id.find('/') + 1));
-        }
+        for (const auto& id : sets.back()) groups.push_back(id.substr(id.find('/') + 1));
         ok = execute_burn(node, groups);
     }
     if (!ok) {
-        lunar_abort("Abstieg abgebrochen: Brennvorgang nicht möglich");
+        lunar_abort(std::string(step == LunarStep::Circularize ? "Aufstieg" : "Abstieg") +
+                    " abgebrochen: Brennvorgang nicht möglich");
         return false;
     }
     lunar_burns_.push_back({step, node, bodies_[controlled_].body->vehicle().mass_properties().mass_kg});
@@ -208,6 +197,7 @@ bool FlightSession::begin_powered_descent(const mission::TouchdownPoint& point, 
     lunar_landing_->set_realtime(realtime_planning_);
     lunar_touchdown_.reset();
     lunar_touchdown_point_ = point;
+    lunar_auto_abort_tried_ = false;
     attitude_mode_ = {};
     autopilot_.state = AutopilotState::Lunar;
     lunar_step_ = LunarStep::PoweredDescent;
@@ -267,9 +257,17 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
         }
         case LunarStep::SurfaceStay:
             if (epoch_ - lunar_step_epoch_ < 0.0) break;
+            if (lunar_ascent_parameters_) {  // plan_lunar_ascent with a delay: liftoff now
+                lunar_liftoff(flying);
+                break;
+            }
+            if (lunar_landing_setup_ && lunar_landing_setup_->ascent && plan_lunar_ascent(*lunar_landing_setup_->ascent)) {
+                break;
+            }
             lunar_step_ = LunarStep::Landed;
             lunar_step_epoch_ = epoch_ + far_future_s;
-            lunar_status_ = "gelandet: Oberflächenaufenthalt beendet";
+            // a refused ascent keeps its reason
+            if (!lunar_landing_setup_ || !lunar_landing_setup_->ascent) lunar_status_ = "gelandet: Oberflächenaufenthalt beendet";
             break;
         case LunarStep::PoweredDescent: {
             auto& body = *flying.body;
@@ -283,6 +281,19 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
             };
             if (contact && !lunar_touchdown_) record_contact();
             flying.return_command = lunar_landing_->update(body, env_, epoch_, contact);
+            // Spec: a landing out of reach (the first approach plan failed, or SCvx gives up after repeated unreachable
+            // re-plans - on the Moon its abort plans only set the vehicle down near the point) aborts to orbit. Refused
+            // (propellant): the landing guidance keeps flying.
+            const bool unreachable = lunar_landing_->phase() == gnc::LunarDescentPhase::Aborted ||
+                                     (lunar_landing_->approach() && lunar_landing_->approach()->aborting());
+            if (unreachable && !lunar_auto_abort_tried_) {
+                lunar_auto_abort_tried_ = true;
+                if (lunar_abort_to_orbit()) {
+                    run_lunar_ascent_steps(flying);  // this tick's command from the ascent guidance
+                    break;
+                }
+                lunar_status_ = "Landepunkt nicht erreichbar, Abbruch nicht möglich";
+            }
             for (const auto& stage : body.vehicle().stages()) {
                 for (const auto& e : stage.engines) {
                     const auto& groups = flying.return_command.run_groups;
@@ -290,7 +301,7 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                 }
             }
             if (!lunar_landing_->status().empty() && lunar_landing_->status() != lunar_status_ &&
-                lunar_landing_->phase() == gnc::LunarDescentPhase::Aborted) {
+                lunar_landing_->phase() == gnc::LunarDescentPhase::Aborted && !lunar_auto_abort_tried_) {
                 lunar_status_ = "Landeanflug: " + lunar_landing_->status();
             }
             const auto judged = legs_->touchdown(body);

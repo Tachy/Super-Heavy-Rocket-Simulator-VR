@@ -59,6 +59,8 @@ public:
                     time::Epoch epoch_end, double dt_s);
 
     LegTouchdown touchdown(const vehicle::FlightBody& body) const;
+    // The body lifts off: its judgement starts over (the crush strokes stay).
+    void release(const vehicle::FlightBody& body);
     bool in_contact(const vehicle::FlightBody& body) const;          // any foot in the last tick
     std::vector<double> crushed_m(const vehicle::FlightBody& body) const;  // crush stroke used per foot
 

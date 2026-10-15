@@ -16,6 +16,7 @@
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/lunar_site.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+#include "lunar_test_support.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -23,14 +24,6 @@ using math::Vec3;
 
 namespace {
 constexpr double deg = constants::deg_to_rad;
-
-config::VehicleConfig hls(double propellant_kg) {
-    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls");
-    for (auto& t : cfg.stages.front().tanks) {
-        t.mass_kg = propellant_kg * (t.contents == config::TankContents::Oxidizer ? 3.6 / 4.6 : 1.0 / 4.6);
-    }
-    return cfg;
-}
 
 struct Fixture {
     bool spice = (test::spice_session(), true);
@@ -53,25 +46,8 @@ struct Fixture {
                                                  12.0, mission::LunarDescentParameters{});
     }
 
-    // Moon-relative PDI state: periselene of a (h_site + 15 km) x 100 km polar ellipse, `range_m` of ground arc before
-    // the touchdown point, in the plane through the pole and the point.
     void place_at_pdi(double propellant_kg, double range_m = 450e3) {
-        const double R = constants::moon_mean_radius_m, gm = ephemeris.gm_m3ps2(ephemeris::Body::Moon);
-        const auto rot = moon_me.fixed_to_gcrf(t0).rotation;
-        const Vec3 p = rot * Vec3{std::cos(point.latitude_rad) * std::cos(point.longitude_rad),
-                                  std::cos(point.latitude_rad) * std::sin(point.longitude_rad), std::sin(point.latitude_rad)};
-        const Vec3 pole = rot * Vec3{0.0, 0.0, 1.0};
-        const Vec3 n = math::normalized(cross(p, pole));  // cross(n, p): local north at p
-        const double angle = range_m / (R + point.height_m);
-        const Vec3 r_hat = p * std::cos(angle) + cross(n, p) * std::sin(angle);  // uprange of p: north of it
-        const Vec3 along = -cross(n, r_hat);                                       // towards p: southwards
-        const double rp = R + point.height_m + 15e3, ra = R + 100e3;
-        const double vp = std::sqrt(gm * (2.0 / rp - 2.0 / (rp + ra)));
-        const auto moon = ephemeris.state_gcrf(ephemeris::Body::Moon, t0);
-        const Vec3 r = moon.position_m + r_hat * rp, v = moon.velocity_mps + along * vp;
-        const Vec3 x_body = -along;  // retrograde: ready to brake
-        const auto attitude = math::Quat::from_matrix(math::Mat3::from_columns(x_body, r_hat, cross(x_body, r_hat)));
-        session.place_body(hls(propellant_kg), {r, v, attitude, {}}, t0);
+        test::place_hls_at_pdi(session, ephemeris, moon_me, point, t0, propellant_kg, 0.0, range_m);
     }
 };
 }  // namespace
