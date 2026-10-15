@@ -59,7 +59,7 @@ TEST_CASE("A Falcon 9 MECO plan keeps the entry burn's propellant", "[gnc][falco
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
     const vehicle::Vehicle stack(cfg, STARSIM_CONFIG_DIR);
     const auto site = lz40();
-    const gnc::LandingSite landing{site.latitude_rad, site.longitude_rad, site.height_m, {}, {}, {}};
+    const gnc::LandingSite landing{ephemeris::Body::Earth, site.latitude_rad, site.longitude_rad, site.height_m, {}, {}, {}};
     const auto tr = earth().fixed_to_gcrf(t0);
     const Vec3 r_fixed = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad + 0.6 * constants::deg_to_rad, 60e3});
     const Vec3 up = math::normalized(r_fixed);

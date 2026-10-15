@@ -151,8 +151,8 @@ TEST_CASE("A Falcon 9 drone-ship MECO plan has no boostback", "[gnc][falcon9][as
     const math::StateVector state{tr.position(r_fixed), tr.velocity(r_fixed, east * 1800.0 + up * 900.0)};
     const auto p = asds_parameters();
     const auto near = ship();
-    const gnc::LandingSite a{near.latitude_rad, near.longitude_rad, near.height_m, {}, {}, {}};
-    const gnc::LandingSite b{near.latitude_rad + 2.0 * deg, near.longitude_rad + 3.0 * deg, near.height_m, {}, {}, {}};
+    const gnc::LandingSite a{ephemeris::Body::Earth, near.latitude_rad, near.longitude_rad, near.height_m, {}, {}, {}};
+    const gnc::LandingSite b{ephemeris::Body::Earth, near.latitude_rad + 2.0 * deg, near.longitude_rad + 3.0 * deg, near.height_m, {}, {}, {}};
     const double at_a = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, a, p, 12100.0);
     const double at_b = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, b, p, 12100.0);
     // Entry burn by the rocket equation: (25.6 + 12.1) t x exp(880 / (311 x 9.807)) - 25.6 t = 24.7 t; nine engines'

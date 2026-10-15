@@ -150,6 +150,59 @@ DescentReference initial_guess(const DescentModel& model, const DescentState& in
     return ref;
 }
 
+DescentReference kinematic_guess(const DescentModel& model, const DescentState& initial, int start_phase,
+                                 const DescentTarget& target, const DescentLimits& limits, int n,
+                                 const PhaseDurations& duration_s) {
+    DescentReference ref;
+    double total = 0.0;
+    for (int p = 0; p < descent_phases; ++p) {
+        ref.duration_s[static_cast<size_t>(p)] = p < start_phase ? 0.0 : duration_s[static_cast<size_t>(p)];
+        total += ref.duration_s[static_cast<size_t>(p)];
+    }
+    const Vec3 r0 = state_position(initial), v0 = state_velocity(initial);
+    const Vec3 r1 = target.goal != DescentGoal::Abort
+                        ? target.position_m
+                        : Vec3{target.ground_cg_height_m, target.sea_target_m.y, target.sea_target_m.z};
+    const Vec3 v1 = target.goal != DescentGoal::Abort ? target.velocity_mps : Vec3{};
+    const Quat upright = upright_with_roll(state_attitude(initial));
+    const Vec3& omega = model.earth_rate_radps;
+    double mass = initial[descent_index::mass];
+    const int nodes = descent_node_count(n);
+    for (int k = 0; k < nodes; ++k) {
+        const double s = total > 0.0 ? reference_node_time(ref.duration_s, k, n) / total : 0.0;
+        // Cubic Hermite basis and its derivatives in s (d/dt = d/ds / total).
+        const double s2 = s * s, s3 = s2 * s;
+        const Vec3 r = r0 * (2.0 * s3 - 3.0 * s2 + 1.0) + v0 * (total * (s3 - 2.0 * s2 + s)) + r1 * (3.0 * s2 - 2.0 * s3) +
+                       v1 * (total * (s3 - s2));
+        const Vec3 v = total > 0.0 ? (r0 - r1) * ((6.0 * s2 - 6.0 * s) / total) + v0 * (3.0 * s2 - 4.0 * s + 1.0) +
+                                         v1 * (3.0 * s2 - 2.0 * s)
+                                   : v0;
+        const Vec3 a = total > 0.0 ? (r0 - r1) * ((12.0 * s - 6.0) / (total * total)) + v0 * ((6.0 * s - 4.0) / total) +
+                                         v1 * ((6.0 * s - 2.0) / total)
+                                   : Vec3{};
+        // Thrust acceleration: the path's acceleration minus gravity and the rotating frame's terms.
+        const Vec3 thrust_acceleration = a - model.gravity_mps2 + cross(omega, v) * 2.0 +
+                                         cross(omega, cross(omega, r - model.earth_center_m));
+        const int p = descent_node_phase(k, n);
+        const auto& set = model.engine_sets[static_cast<size_t>(p)];
+        const double thrust = std::clamp(mass * norm(thrust_acceleration), set.thrust_min_n,
+                                         (1.0 - limits.throttle_margin) * set.thrust_max_n);
+        // Attitude along the thrust, the tilt clipped to the phase limit.
+        const Vec3 up{1.0, 0.0, 0.0};
+        const Vec3 dir = norm(thrust_acceleration) > 1e-9 ? thrust_acceleration / norm(thrust_acceleration) : up;
+        const Vec3 axis = cross(up, dir);
+        const double tilt = std::min(std::atan2(norm(axis), dir.x), limits.tilt_max_rad[static_cast<size_t>(p)]);
+        const Quat q = norm(axis) > 1e-12 ? (Quat::from_axis_angle(axis / norm(axis), tilt) * upright).normalized() : upright;
+        ref.x.push_back(k == 0 ? initial : make_state(mass, r, v, nearest_sign(q, state_attitude(initial)), {}));
+        ref.u.push_back({thrust, 0.0, 0.0});
+        if (k < nodes - 1) {
+            const double dt = ref.duration_s[static_cast<size_t>(k / (n - 1))] / (n - 1);
+            mass = std::max(mass - set.mass_flow_per_thrust_s_m * (thrust + set.pressure_thrust_loss_n) * dt, limits.min_mass_kg);
+        }
+    }
+    return ref;
+}
+
 DescentPlan plan_descent(const DescentModel& model, const DescentState& initial, int start_phase, const DescentTarget& target,
                          const ScvxSettings& settings, const DescentPlan* warm_start, double elapsed) {
     DescentPlanner planner;
@@ -178,8 +231,12 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
     plan.nodes_per_phase = n;
     plan.start_phase = start_phase;
     plan.goal = target.goal;
+    const bool kinematic = std::any_of(settings.kinematic_guess_s.begin(), settings.kinematic_guess_s.end(),
+                                       [](double d) { return d > 0.0; });
     plan.reference = warm_start ? warm_start_reference(*warm_start, elapsed, start_phase, n, initial)
-                                : initial_guess(model, initial, start_phase, target, settings.limits, n);
+                     : kinematic ? kinematic_guess(model, initial, start_phase, target, settings.limits, n,
+                                                   settings.kinematic_guess_s)
+                                 : initial_guess(model, initial, start_phase, target, settings.limits, n);
     // Minimum phase durations only shape a fresh plan: on a re-plan they would stretch a nearly finished phase
     // again and again (every replan cycle).
     DescentLimits limits = settings.limits;

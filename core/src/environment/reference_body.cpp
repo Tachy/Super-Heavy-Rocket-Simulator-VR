@@ -19,6 +19,14 @@ math::StateVector ReferenceBody::centre_gcrf(time::Epoch epoch) const {
     return ephemeris_ ? ephemeris_->state_gcrf(id_, epoch) : math::StateVector{};
 }
 
+math::Vec3 ReferenceBody::centre_acceleration_gcrf(time::Epoch epoch) const {
+    constexpr double step_s = 60.0;  // [E] central difference over +-60 s (the Moon's acceleration turns 2.7e-6 rad/s)
+    if (!ephemeris_) return {};
+    const auto after = ephemeris_->state_gcrf(id_, epoch + step_s);
+    const auto before = ephemeris_->state_gcrf(id_, epoch - step_s);
+    return (after.velocity_mps - before.velocity_mps) / (2.0 * step_s);
+}
+
 double ReferenceBody::surface_height_m(const math::Vec3& fixed_m) const {
     return terrain_ ? terrain_->height_at_fixed_m(fixed_m) : 0.0;
 }

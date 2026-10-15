@@ -44,6 +44,7 @@ struct EngineSwitchLimits {
     double max_rate_radps = 0.0;  // ... and hardly turning, pitch/yaw (0: no limit)
     double min_sink_mps = 0.0;    // still sinking at least this fast: the outgoing set at minimum throttle would climb
     double max_sink_mps = 0.0;
+    double min_cg_height_m = 0.0;  // the switch node's CG at least this high above the target ground (0: no limit)
 };
 
 struct DescentLimits {

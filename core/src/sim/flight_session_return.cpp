@@ -155,13 +155,13 @@ gnc::LandingSite FlightSession::return_site(const vehicle::Vehicle& booster) con
     const auto& stage = booster.stages().front();
     if (landing_zone_ && stage.config.recovery_method == "leg_landing" && !stage.config.landing_legs.azimuths_rad.empty()) {
         const auto& z = *landing_zone_;
-        gnc::LandingSite landing{z.latitude_rad, z.longitude_rad, z.height_m, {}, {}, {}};
+        gnc::LandingSite landing{ephemeris::Body::Earth, z.latitude_rad, z.longitude_rad, z.height_m, {}, {}, {}};
         if (z.sea) landing.sea = gnc::SeaSide{z.sea->direction_rad, z.sea->shoreline_distance_m};
         // The feet sit -foot_station_m below the stage bottom when deployed.
         landing.pad = gnc::PadTarget{-stage.config.landing_legs.foot_station_m, z.pad_radius_m};
         return landing;
     }
-    gnc::LandingSite landing{launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m, {}, {}, {}};
+    gnc::LandingSite landing{ephemeris::Body::Earth, launch_site_.latitude_rad, launch_site_.longitude_rad, launch_site_.height_m, {}, {}, {}};
     if (tower_ && !stage.config.catch_pins.azimuths_rad.empty()) {
         const auto& g = tower_->geometry();
         const auto& c = g.config();

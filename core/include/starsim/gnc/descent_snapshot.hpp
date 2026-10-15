@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 
+#include "starsim/environment/reference_body.hpp"
 #include "starsim/frames/body_orientation.hpp"
+#include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/descent_problem.hpp"
 #include "starsim/gnc/landing_site.hpp"
 #include "starsim/time/epoch.hpp"
@@ -22,7 +24,13 @@ struct PlanFrame {
     math::Vec3 direction_to_itrf(const math::Vec3& plan) const { return plan_to_itrf * plan; }
 };
 
-PlanFrame plan_frame(double latitude_rad, double longitude_rad, double height_m);
+PlanFrame plan_frame(double latitude_rad, double longitude_rad, double height_m,
+                     const frames::Ellipsoid& shape = frames::wgs84);
+// On the site body's shape (Moon: the sphere; its x is the sphere's radial).
+PlanFrame plan_frame(const LandingSite& site);
+
+// The site body's frame at `epoch` (Earth: ITRF93 about the origin; Moon: env.moon, std::logic_error without it).
+environment::BodyFrame site_body_frame(const LandingSite& site, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 
 // Direction of the net thrust in body axes when it exerts no pitch/yaw moment: from the thrust centroid of the
 // running engines through the CG. An asymmetric set (two of the ship's three centre Raptors, or the last one) has its
@@ -33,11 +41,11 @@ math::Vec3 thrust_axis_body(const vehicle::Vehicle& vehicle, double cg_station_m
 math::Vec3 thrust_axis_body(const vehicle::Vehicle& vehicle, double cg_station_m, const std::vector<std::string>& groups);
 
 // Current state of the body in the plan frame: velocity relative to the ground, attitude body -> plan, body rate
-// relative to the (rotating) plan frame. `earth`: the Earth-fixed -> GCRF transform at the current epoch.
+// relative to the (rotating) plan frame. `frame`: the site body's frame at the current epoch (site_body_frame).
 // The planning model's thrust acts along its body x through the CG, so the attitude is that of the thrust axis
 // (thrust_axis_body), not of the hull: plans and the lateral control then steer the thrust, and an asymmetric engine
 // set does not push sideways against them.
-DescentState plan_state(const vehicle::FlightBody& body, const frames::FixedToInertial& earth, const PlanFrame& frame);
+DescentState plan_state(const vehicle::FlightBody& body, const environment::BodyFrame& frame, const PlanFrame& plan);
 
 struct SnapshotSettings {
     std::array<std::vector<std::string>, descent_phases> phase_groups;  // engine groups per phase

@@ -2,6 +2,7 @@
 
 #include <optional>
 
+#include "starsim/ephemeris/ephemeris.hpp"
 #include "starsim/math/vec3.hpp"
 
 namespace starsim::gnc {
@@ -31,9 +32,10 @@ struct PadTarget {
 };
 
 struct LandingSite {
+    ephemeris::Body body = ephemeris::Body::Earth;  // lunar l4: the Moon (height above the sphere = terrain height)
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
-    double height_m = 0.0;  // ground (pad) height above WGS84
+    double height_m = 0.0;  // ground (pad) above the body's shape (Earth: WGS84; Moon: the 1737.4 km sphere)
     std::optional<CatchTarget> catch_target;
     std::optional<SeaSide> sea;
     std::optional<PadTarget> pad;  // landing on legs (no catch target)

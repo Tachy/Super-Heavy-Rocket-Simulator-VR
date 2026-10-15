@@ -87,7 +87,7 @@ double landing_throttle(const vehicle::Vehicle& v, const std::vector<std::string
 ScvxLandingGuidance::ScvxLandingGuidance(LandingSite site, ScvxLandingParameters parameters, PlanFunction plan)
     : site_(std::move(site)),
       parameters_(std::move(parameters)),
-      frame_(plan_frame(site_.latitude_rad, site_.longitude_rad, site_.height_m)),
+      frame_(plan_frame(site_)),
       replanner_(parameters_.plan_latency_s, std::move(plan)) {}
 
 PlanRequest ScvxLandingGuidance::request(const DescentSnapshot& snapshot, int start_phase) const {
@@ -221,8 +221,9 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
         next_request_ = epoch + parameters_.replan_interval_s;
     }
 
-    const auto earth = env.earth_orientation.fixed_to_gcrf(epoch);
-    const auto x = plan_state(body, earth, frame_);
+    const auto body_frame = site_body_frame(site_, env, epoch);
+    const auto& earth = body_frame.transform;  // the site body-fixed frame (Earth: ITRF93, Moon: MOON_ME)
+    const auto x = plan_state(body, body_frame, frame_);
     const auto ref = sample_plan(*plan_, model_, epoch - plan_epoch_, parameters_.snapshot.catch_sink_mps);
     while (engine_set_ + 1 < descent_phases) {
         // Slower than the switch window on this set: switch now (its engines at minimum throttle would climb); else
@@ -252,8 +253,10 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
 
     ScvxLandingCommand cmd;
     cmd.run_groups = parameters_.snapshot.phase_groups[static_cast<size_t>(engine_set_)];
-    const Vec3 r_fixed = transpose(earth.rotation) * body.state().position_gcrf_m;
-    const double pressure = env.atmosphere.at(frames::fixed_to_geodetic(r_fixed).height_m).pressure_pa;
+    const Vec3 r_fixed = body_frame.to_fixed(body.state().position_gcrf_m);
+    const double pressure = site_.body == ephemeris::Body::Moon
+                                ? 0.0
+                                : env.atmosphere.at(frames::fixed_to_geodetic(r_fixed).height_m).pressure_pa;
     cmd.throttle = landing_throttle(body.vehicle(), cmd.run_groups, x[descent_index::mass] * track.thrust_acceleration_mps2, pressure);
     cmd.axis_gcrf = earth.rotation * frame_.direction_to_itrf(axis_plan);
     // Planned rotation in the vehicle's own body axes (its roll differs from the plan's).
@@ -261,7 +264,7 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
     const auto to_body = [&](const Vec3& plan_vector) {
         return attitude.inverse_rotate(earth.rotation * frame_.direction_to_itrf(plan_vector));
     };
-    const Vec3 omega_body = attitude.inverse_rotate(vehicle::earth_rotation_vector(earth));
+    const Vec3 omega_body = attitude.inverse_rotate(body_frame.rotation_gcrf_radps);
     cmd.feedforward.rate_body_radps = to_body(ref.rate_plan_radps) + omega_body;
     cmd.feedforward.acceleration_body_radps2 = to_body(ref.angular_acceleration_plan_radps2);
     if (site_.catch_target && !aborting_) {

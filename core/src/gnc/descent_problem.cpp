@@ -186,6 +186,9 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
             }
             b.add_nonnegative(scaled(X(k, descent_index::velocity), -1.0).add_constant(-sw.min_sink_mps));
             b.add_nonnegative(X(k, descent_index::velocity).add_constant(sw.max_sink_mps));
+            if (sw.min_cg_height_m > 0.0) {  // e.g. the Raptors off well above the ground (plume-surface interaction)
+                b.add_nonnegative(X(k, descent_index::position).add_constant(-sw.min_cg_height_m));
+            }
         }
         if (const int from_end = last - k; p == final_phase && from_end < limits.tilt_taper_nodes) {
             tilt = limits.terminal_tilt_rad + (tilt - limits.terminal_tilt_rad) * from_end / limits.tilt_taper_nodes;

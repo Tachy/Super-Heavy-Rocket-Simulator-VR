@@ -81,21 +81,36 @@ void DescentModel::jacobians(const DescentState& x, const Vec3& u, int phase, Ma
 DescentModel make_descent_model(const DescentModelInputs& in) {
     const auto& vehicle = *in.vehicle;
     const auto& stage = vehicle.stages().front();
-    const double pressure = in.atmosphere->at(in.site_height_m).pressure_pa;
+    const double pressure = in.atmosphere ? in.atmosphere->at(in.site_height_m).pressure_pa : 0.0;  // nullptr: vacuum
+    const auto in_phase = [&](const vehicle::Engine& e, int p) {
+        const auto& groups = in.phase_groups[static_cast<size_t>(p)];
+        return !e.starved && std::find(groups.begin(), groups.end(), e.group_id) != groups.end();
+    };
+    // Lever of the planning model's single gimbal point: mean station of the gimballed engines over all phases.
     DescentModel m;
     double gimbal_station = 0.0;
     int gimbal_count = 0;
     for (int p = 0; p < descent_phases; ++p) {
-        const auto& groups = in.phase_groups[static_cast<size_t>(p)];
+        for (const auto& e : stage.engines) {
+            if (!in_phase(e, p) || !e.gimbaled) continue;
+            gimbal_station += e.gimbal_point_m.x;
+            ++gimbal_count;
+        }
+    }
+    const auto mass = vehicle.mass_properties();
+    m.gimbal_lever_m = mass.cg_station_m - (gimbal_count > 0 ? gimbal_station / gimbal_count : 0.0);
+    for (int p = 0; p < descent_phases; ++p) {
         EngineSetModel set;
         double flow = 0.0;
         double vacuum_thrust = 0.0;
         for (const auto& e : stage.engines) {
-            if (e.starved || std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) continue;
+            if (!in_phase(e, p)) continue;
             const auto& c = e.performance->config();
-            set.thrust_max_n += e.performance->thrust_n(1.0, pressure);
-            vacuum_thrust += e.performance->thrust_n(1.0, 0.0);
-            set.thrust_min_n += e.performance->thrust_n(c.throttle_min, pressure);
+            // Canted engines (the HLS landing thrusters) push along their own axis: only the axial part counts.
+            const double axial = e.axis_body.x;
+            set.thrust_max_n += axial * e.performance->thrust_n(1.0, pressure);
+            vacuum_thrust += axial * e.performance->thrust_n(1.0, 0.0);
+            set.thrust_min_n += axial * e.performance->thrust_n(c.throttle_min, pressure);
             flow += e.performance->mass_flow_kgps(1.0);
             if (c.throttle_rate_per_s > 0.0) {
                 set.throttle_rate_per_s = set.throttle_rate_per_s > 0.0 ? std::min(set.throttle_rate_per_s, c.throttle_rate_per_s)
@@ -103,21 +118,30 @@ DescentModel make_descent_model(const DescentModelInputs& in) {
             }
             if (e.gimbaled) {
                 set.gimbal_max_rad = set.gimbal_max_rad > 0.0 ? std::min(set.gimbal_max_rad, c.gimbal_max_rad) : c.gimbal_max_rad;
-                gimbal_station += e.gimbal_point_m.x;
-                ++gimbal_count;
             }
         }
         set.mass_flow_per_thrust_s_m = vacuum_thrust > 0.0 ? flow / vacuum_thrust : 0.0;
         set.pressure_thrust_loss_n = vacuum_thrust - set.thrust_max_n;
+        if (set.thrust_max_n > 0.0 && set.gimbal_max_rad == 0.0) {
+            // A set without gimbals (the landing thrusters) is steered by the RCS. The model has no torque input, so
+            // it gets an equivalent gimbal that gives the RCS torque about the CG (documented simplification: the
+            // implied lateral force torque / lever is ~0.1 % of the thrust; the re-plans every second absorb it).
+            const Vec3 torque = vehicle.max_rcs_torque_nm();
+            const double lever = std::abs(m.gimbal_lever_m);
+            const double pitch_yaw = std::min(torque.y, torque.z);
+            if (lever > 0.0 && pitch_yaw > 0.0) set.gimbal_max_rad = std::atan(pitch_yaw / (lever * set.thrust_max_n));
+        }
         m.engine_sets[static_cast<size_t>(p)] = set;
     }
-    const auto mass = vehicle.mass_properties();
-    m.gimbal_lever_m = mass.cg_station_m - (gimbal_count > 0 ? gimbal_station / gimbal_count : 0.0);
     m.inertia_kg_m2 = mass.inertia_kg_m2;
     m.reference_area_m2 = constants::pi * 0.25 * vehicle.diameter_m() * vehicle.diameter_m();
     const auto& drag = vehicle.aero().drag_curve(true);
     for (double mach = 0.0; mach <= table_mach + 1e-9; mach += m.mach_step) m.cd_by_mach.push_back(drag.cd(mach, true));
-    for (double h = 0.0; h <= table_height_m + 1e-9; h += m.height_step_m) {
+    if (!in.atmosphere) {  // vacuum: one entry each (interpolate returns it)
+        m.density_kg_m3 = {0.0};
+        m.speed_of_sound_mps = {0.0};
+    }
+    for (double h = 0.0; in.atmosphere && h <= table_height_m + 1e-9; h += m.height_step_m) {
         const auto air = in.atmosphere->at(in.site_height_m + h);
         m.density_kg_m3.push_back(air.density_kg_m3);
         m.speed_of_sound_mps.push_back(air.speed_of_sound_mps);

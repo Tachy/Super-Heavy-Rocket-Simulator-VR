@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/math/constants.hpp"
 
 namespace starsim::gnc {
 
@@ -27,11 +29,27 @@ bool contains(const std::vector<std::string>& groups, const std::string& group) 
 
 }  // namespace
 
-PlanFrame plan_frame(double latitude_rad, double longitude_rad, double height_m) {
+PlanFrame plan_frame(double latitude_rad, double longitude_rad, double height_m, const frames::Ellipsoid& shape) {
     const double sl = std::sin(latitude_rad), cl = std::cos(latitude_rad);
     const double so = std::sin(longitude_rad), co = std::cos(longitude_rad);
     return {from_columns({cl * co, cl * so, sl}, {-so, co, 0.0}, {-sl * co, -sl * so, cl}),
-            frames::geodetic_to_fixed({latitude_rad, longitude_rad, height_m})};
+            frames::geodetic_to_fixed({latitude_rad, longitude_rad, height_m}, shape)};
+}
+
+PlanFrame plan_frame(const LandingSite& site) {
+    // The Moon: origin on the terrain at the touchdown point, x along the sphere's radial (a sphere's geodetic
+    // vertical), y east, z north in MOON_ME.
+    const frames::Ellipsoid shape =
+        site.body == ephemeris::Body::Moon ? frames::Ellipsoid{constants::moon_mean_radius_m, 0.0} : frames::wgs84;
+    return plan_frame(site.latitude_rad, site.longitude_rad, site.height_m, shape);
+}
+
+environment::BodyFrame site_body_frame(const LandingSite& site, const vehicle::FlightEnvironment& env, time::Epoch epoch) {
+    if (site.body != ephemeris::Body::Moon) {
+        return environment::BodyFrame::centred_at_origin(env.earth_orientation.fixed_to_gcrf(epoch));
+    }
+    if (!env.moon) throw std::logic_error("lunar landing site without the Moon as a reference body");
+    return env.moon->frame(epoch);
 }
 
 namespace {
@@ -71,7 +89,7 @@ Vec3 thrust_axis_body(const vehicle::Vehicle& vehicle, double cg_station_m, cons
     return axis_through_cg(centroid, thrust, cg_station_m);
 }
 
-DescentState plan_state(const vehicle::FlightBody& body, const frames::FixedToInertial& earth, const PlanFrame& frame) {
+DescentState plan_state(const vehicle::FlightBody& body, const environment::BodyFrame& frame, const PlanFrame& plan) {
     const auto& s = body.state();
     // Hull -> thrust axis: the shortest rotation from body x to the thrust direction.
     const Vec3 thrust_axis = thrust_axis_body(body.vehicle(), body.vehicle().mass_properties().cg_station_m);
@@ -79,12 +97,13 @@ DescentState plan_state(const vehicle::FlightBody& body, const frames::FixedToIn
     const double turn_angle = std::atan2(norm(turn), thrust_axis.x);
     const Quat hull_to_thrust = turn_angle > 0.0 ? Quat::from_axis_angle(turn / norm(turn), turn_angle) : Quat{};
     const Quat attitude = s.attitude * hull_to_thrust;
-    const Mat3 to_fixed = transpose(earth.rotation);
-    const Vec3 omega = vehicle::earth_rotation_vector(earth);  // GCRF
-    const Vec3 r_fixed = to_fixed * s.position_gcrf_m;
-    const Vec3 v_fixed = to_fixed * (s.velocity_gcrf_mps - cross(omega, s.position_gcrf_m));
-    const Quat gcrf_to_plan = Quat::from_matrix(transpose(frame.plan_to_itrf) * to_fixed);
-    return make_state(body.vehicle().mass_properties().mass_kg, frame.to_plan(r_fixed), frame.direction_to_plan(v_fixed),
+    // Earth: centre zero, so every expression is the former ITRF one exactly (subtracting zero vectors is exact).
+    const Mat3 to_fixed = transpose(frame.transform.rotation);
+    const Vec3& omega = frame.rotation_gcrf_radps;
+    const Vec3 r_fixed = frame.to_fixed(s.position_gcrf_m);
+    const Vec3 v_fixed = to_fixed * frame.relative_velocity(s.position_gcrf_m, s.velocity_gcrf_mps);
+    const Quat gcrf_to_plan = Quat::from_matrix(transpose(plan.plan_to_itrf) * to_fixed);
+    return make_state(body.vehicle().mass_properties().mass_kg, plan.to_plan(r_fixed), plan.direction_to_plan(v_fixed),
                       (gcrf_to_plan * attitude).normalized(),
                       hull_to_thrust.inverse_rotate(s.angular_velocity_body_radps - s.attitude.inverse_rotate(omega)));
 }
@@ -92,23 +111,27 @@ DescentState plan_state(const vehicle::FlightBody& body, const frames::FixedToIn
 DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                       time::Epoch epoch, const LandingSite& site, const PlanFrame& frame,
                                       const SnapshotSettings& settings) {
-    const auto t = env.earth_orientation.fixed_to_gcrf(epoch);
+    const auto body_frame = site_body_frame(site, env, epoch);
+    const auto& t = body_frame.transform;
     const Mat3 gcrf_to_plan = transpose(frame.plan_to_itrf) * transpose(t.rotation);
     const auto& vehicle = body.vehicle();
     const auto mass = vehicle.mass_properties();
+    const bool lunar = site.body == ephemeris::Body::Moon;
 
     DescentModelInputs in;
     in.vehicle = &vehicle;
     in.phase_groups = settings.phase_groups;
-    in.atmosphere = &env.atmosphere;
+    in.atmosphere = lunar ? nullptr : &env.atmosphere;
     in.site_height_m = site.height_m;
-    in.gravity_mps2 = gcrf_to_plan * env.gravity.acceleration_mps2(t.rotation * frame.origin_itrf_m, epoch);
-    in.earth_rate_radps = gcrf_to_plan * vehicle::earth_rotation_vector(t);
+    // Gravitation over the touchdown point; the lunar plan frame falls with the Moon (its centre's acceleration out).
+    const Vec3 gravity_gcrf = env.gravity.acceleration_mps2(body_frame.position_gcrf(frame.origin_itrf_m), epoch);
+    in.gravity_mps2 = gcrf_to_plan * (lunar ? gravity_gcrf - env.moon->centre_acceleration_gcrf(epoch) : gravity_gcrf);
+    in.earth_rate_radps = gcrf_to_plan * body_frame.rotation_gcrf_radps;
     in.earth_center_m = frame.to_plan({0.0, 0.0, 0.0});
 
     DescentSnapshot snap;
     snap.model = make_descent_model(in);
-    snap.initial = plan_state(body, t, frame);
+    snap.initial = plan_state(body, body_frame, frame);
     snap.epoch = epoch;
     snap.min_mass_kg = mass.mass_kg - vehicle.propellant_kg() + settings.reserve_kg;
 
@@ -152,7 +175,8 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
         ++engines;
     }
     snap.phase0_spool = engines > 0 ? spool / engines : 1.0;
-    const double pressure = env.atmosphere.at(site.height_m + snap.initial[descent_index::position]).pressure_pa;
+    const double pressure =
+        lunar ? 0.0 : env.atmosphere.at(site.height_m + snap.initial[descent_index::position]).pressure_pa;
     for (const auto& e : vehicle.stages().front().engines) {
         if (!e.starved) snap.thrust_n += e.spool * e.performance->thrust_n(e.throttle, pressure);
     }

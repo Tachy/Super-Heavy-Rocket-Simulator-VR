@@ -53,6 +53,9 @@ public:
     // Air at a height above the shape; vacuum_state() without an atmosphere.
     AtmosphereState air(double height_m) const { return atmosphere_ ? atmosphere_->at(height_m) : vacuum_state(); }
     math::StateVector centre_gcrf(time::Epoch epoch) const;
+    // Acceleration of the body's centre in the GCRF (Earth: zero; Moon: central difference of the ephemeris velocity
+    // - the DE440 Moon's own acceleration, exact to ~1e-9 m/s^2). The plan frame of a lunar landing falls with it.
+    math::Vec3 centre_acceleration_gcrf(time::Epoch epoch) const;
     BodyFrame frame(time::Epoch epoch) const;
 
     // Terrain over the shape (lunar l2; the owner keeps it alive). nullptr: the bare shape.
