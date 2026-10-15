@@ -1622,4 +1622,19 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
   scan (tof 0.25-4 d), refined in the full model: 666 + 59 = 725 m/s right after the LLO arrival. Probe: ~0.7 km/s up
   to ~2.5 d and ~21-30 d after the LLO arrival, 0.9-1.65 km/s in between - Tasks 6/7 stays should use the cheap
   windows. Station keeping 8.2 m/s over 3 revolutions, worst perilune offset 0.01 km. Debug:
-  `STARSIM_DEBUG_LUNAR_TRANSFER=1`. Next: Task 6 (session autopilot `LunarStep`).
+  `STARSIM_DEBUG_LUNAR_TRANSFER=1`.
+- Task 6 (098dc74): session autopilot (`AutopilotState::Lunar`, `LunarStep`, `flight_session_lunar.cpp`), pilot-flown
+  MCCs (Step 3b), full suite 495/495 (599 s parallel). `[validation]` LLO: TLI 3,182 m/s flown as a finite burn, MCC 1
+  3.37 m/s (RCS), MCC 2 skipped, LOI 856 m/s, 99.97 x 100.00 km after one trim, 1,147 t (53 s). NRHO: TLI 3,213, MCC 1
+  7.17, swing-by 244, insertion 224, station keeping 1.14 / 1.39 / 1.25 m/s, worst perilune offset 0.58 km over 3
+  revolutions; NRHO -> LLO 99.97 x 100.03 km (145 s). Pilot: autopilot 1,146.9 t; pilot flies MCC 1 1,151.4 t (MCC 2
+  0.77 m/s); pilot ignores MCC 1 1,169.2 t (MCC 2 7.59 m/s); LLO within 1 km in all (~5 min). Beyond the plan: (1) the
+  TLI is re-solved for the finite burn at departure (`mission::apply_finite_burn`, targeters' `set_finite_burn`,
+  `LunarOutboundPlanner::finite_tli` with continuation 8x..1x) - flown as an impulse the 7 min TLI (~28 deg of the
+  parking orbit) missed the Moon and MCC 1 took 333 m/s; (2) bug fix: the default Earth leg site plane cut through
+  LEO and wrecked the HLS (fixed legs) - leg tracks start only near the body's own ground; (3) Sun pointing on its own
+  controller (0.5 deg/s slews, 0.002 deg/s rate deadband; settled < 0.005 deg/s): the orbit hold's 0.05 deg/s residual
+  turned the HLS ~1000 deg between re-points (0.4-0.6 t cold gas each), now ~0.9 t/day; (4) LOI timed on the
+  periselene predicted at the last coast (the plan's epoch was minutes off); (5) LLO MCC retries with the Lambert
+  guess. `lunar_burns()` records the commanded burns. Debug: `STARSIM_DEBUG_LUNAR_SESSION=1`. Open: the plan's
+  propellant check uses the impulsive TLI (~40 m/s gravity loss inside the 5 % reserve). Next: Task 7.
