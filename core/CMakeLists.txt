@@ -59,6 +59,7 @@ add_library(starsim_core STATIC
     src/sim/capsule_return_mission.cpp
     src/sim/mission_start.cpp
     src/mission/lunar_transfer.cpp
+    src/mission/position_targeter.cpp
     src/contact/primitives.cpp
     src/contact/tower_geometry.cpp
     src/contact/catch_arms.cpp
