@@ -153,7 +153,7 @@ public:
 ## l4 design: landing and ascent
 
 - Descent orbit: half a revolution before the site a ~20 m/s burn lowers periselene to 15 km (Apollo profile).
-- Braking phase: from periselene, ~400-500 km before the site, ~6-7 min on the sea-level Raptors with the Apollo lunar
+- Braking phase: from periselene, ~400-500 km before the site, ~6-7 min on the vacuum Raptors (attitude by the RCS; user 2026-10-15: Isp 380 s saves ~25-30 t), then one gimballed sea-level Raptor, with the Apollo lunar
   descent guidance (quadratic acceleration, Klumpp 1974 [S]) to a high gate ~2 km above the terrain a few km before the
   site. (The curvature and horizon of this phase do not fit the SCvx plan frame.)
 - Approach: SCvx (`gnc/descent_*`, frame from `MOON_ME`, no air, lunar gravity) from the high gate - phase on the Raptors,

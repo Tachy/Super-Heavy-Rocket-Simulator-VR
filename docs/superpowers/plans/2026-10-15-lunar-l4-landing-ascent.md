@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The HLS in the 100 km polar LLO (l3) waits for the landing site's pass, trims its plane, lowers its periselene
-(DOI), brakes from the periselene on the sea-level Raptors with the Apollo lunar descent guidance (Klumpp 1974) to a high
+(DOI), brakes from the periselene on the vacuum Raptors (then one sea-level Raptor) with the Apollo lunar descent guidance (Klumpp 1974) to a high
 gate, flies the approach on SCvx plans (Raptors, then the landing thrusters) to a touchdown point chosen on the LOLA
 terrain, lands on its legs (< 1 m, <= 1 m/s), stays on the surface, lifts off on the landing thrusters, ascends on PEG
 into a 15 x 100 km orbit, circularises at the aposelene and is back in the LLO (< 1 km) - for the NRHO variant then back
@@ -37,6 +37,15 @@ and the post-l3 cleanup are on `main`, 7bf4c2b).
   the cross-track offset (~0.9 m/s per km). The mission epoch in the TOML is chosen so the wait is short (as Apollo
   chose its launch dates). The l3 planners stay unchanged.
 
+- **Braking on the vacuum Raptors (user 2026-10-15).** The braking phase from the periselene (~1.65 km/s, the largest
+  part of the descent) burns on the three vacuum Raptors (fixed, symmetric on the ring: thrust through the CG), the
+  attitude held by the RCS; when the thrust demand falls below their minimum (3 x 30 % = 2.68 MN) the gimballed
+  `sea_level_1` (0.87-2.91 MN) takes over and flies on into the SCvx approach. Isp 380 s instead of ~350 s saves
+  ~25-30 t of the ~450 t braking propellant (LLO variant). RCS authority ~1.2e5 N m / ~2e8 kg m^2 ~ 6e-4 rad/s^2: enough
+  for Klumpp's slow pitch-over. The switch lights a disjoint set: `sea_level_1` starts `startup_s` ahead.
+- **Approach on one sea-level Raptor (Task 3 Ruling).** Three (or two) Raptors at minimum throttle over-brake the
+  high gate's ~2.3 m/s^2; SCvx phases {`sea_level_1`} -> {`sea_level_1`} -> {`landing`}.
+
 ## Global Constraints
 
 - Work on `main` (no feature branch); commit after every task, push (`git push origin main`) when its tests are green.
@@ -51,8 +60,8 @@ and the post-l3 cleanup are on `main`, 7bf4c2b).
   thread (snapshots for the SCvx worker never call SPICE - as on Earth).
 - Earth behaviour stays bit-identical: every Earth landing, catch and ascent test keeps its numbers (Tasks 2 and 3 are
   refactors on the Earth side).
-- HLS engines: braking on the three sea-level Raptors (`sea_level_1..3`, gimballed); approach on SCvx in three phases
-  {3 sea-level Raptors} -> {`sea_level_1`} -> {`landing`}; liftoff on `landing`, ascent on the sea-level Raptors
+- HLS engines: braking on the three vacuum Raptors (`vacuum`, fixed, RCS attitude), then `sea_level_1` (gimballed);
+  approach on SCvx in three phases {`sea_level_1`} -> {`sea_level_1`} -> {`landing`}; liftoff on `landing`, ascent on the sea-level Raptors
   (gimballed; the vacuum Raptors are fixed); DOI, plane trim and circularisation by `execute_burn(node)` (the session
   picks RCS or a Raptor set). The landing thrusters (`landing_only`) are lit only by the landing and ascent guidance.
 - No propellant is ever set mid-mission (user 2026-10-14); a plan that does not close is refused with a German message.
@@ -1205,11 +1214,10 @@ enum class LunarDescentPhase { Braking, Approach, Touchdown, Landed, Aborted };
 const char* to_string(LunarDescentPhase phase);  // German: "Bremsphase", "Anflug", "Aufsetzen", "gelandet", "Abbruch"
 
 struct LunarLandingParameters {
-    // Braking on the sea-level Raptors, dropping engines as the thrust demand falls below a set's minimum (as Apollo
-    // throttled down): the largest set first; a smaller set takes over when the demand stays below
-    // `set_drop_fraction` of its maximum for `set_drop_s`.
-    std::vector<std::vector<std::string>> braking_sets{{"sea_level_1", "sea_level_2", "sea_level_3"},
-                                                        {"sea_level_1", "sea_level_2"}};
+    // Braking on the vacuum Raptors (Isp 380 s, fixed: attitude by the RCS - user 2026-10-15), then the gimballed
+    // sea_level_1 as the thrust demand falls (as Apollo throttled down): a smaller set takes over when the demand stays
+    // below `set_drop_fraction` of its maximum for `set_drop_s`; a set not yet running is lit startup_s ahead.
+    std::vector<std::vector<std::string>> braking_sets{{"vacuum"}, {"sea_level_1"}};
     double set_drop_fraction = 0.9;  // [E]
     double set_drop_s = 2.0;         // [E]
     // High gate (guidance frame: x up, y crossrange, z downrange; origin the touchdown point) [E] - within the SCvx
@@ -1285,7 +1293,10 @@ Design decisions (comments in the code):
 - **Thrust:** direction = the law's thrust acceleration, throttle = `m |a| / T_max(set)` clamped to the set's
   [minimum, 1]. While the demand stays below `set_drop_fraction` x the next smaller set's maximum for `set_drop_s`,
   the smaller set takes over (engines spool down / the remaining ones throttle up; the hull keeps the set's thrust axis
-  through the CG, `thrust_axis_body(vehicle, cg, groups)`). Ignition: the first update lights the first set (Raptor
+  through the CG, `thrust_axis_body(vehicle, cg, groups)`). Vacuum -> `sea_level_1` is a disjoint set: light
+  `sea_level_1` `startup_s` before the predicted drop, then cut the vacuum Raptors (the demand trend over the last
+  seconds predicts it). With the vacuum Raptors running no gimbal acts: the controller's body torque goes to the RCS;
+  the test checks the thrust-axis tracking error (< 1 deg [E]) and prints the RCS propellant used. Ignition: the first update lights the first set (Raptor
   start-up 3 s: the session begins the descent `startup_s` before the PDI epoch - Task 7).
 - **Hand-over:** at braking t_go <= `approach_time_to_go_s` the SCvx guidance starts (first plan synchronously, from
   the current state with the running set as phase 0's engines). If the first plan fails the phase becomes Aborted
@@ -1293,8 +1304,8 @@ Design decisions (comments in the code):
   cuts the engines and the vehicle falls - the test checks only the nominal case).
 - **Touchdown:** engines off on the first leg contact (`leg_contact`), phase Touchdown; the session marks Landed when
   the leg simulation judges "gelandet" (as Falcon 9: >= 3 feet, at rest 2 s), Lost on "umgekippt" / "Aufprall".
-- `hls_landing_parameters()`: `approach.snapshot.phase_groups = {{"sea_level_1","sea_level_2"}, {"sea_level_1"},
-  {"landing"}}`, `approach.settings.limits` from Task 3's Ledger values, `approach.snapshot.catch_sink_mps = 1.0`
+- `hls_landing_parameters()`: `approach.snapshot.phase_groups = {{"sea_level_1"}, {"sea_level_1"}, {"landing"}}`
+  (Task 3 Ruling), `approach.settings.limits` and `kinematic_guess_s` from Task 3's Ledger values, `approach.snapshot.catch_sink_mps = 1.0`
   (spec: ~1 m/s), `approach.lqr_lateral = true`, `approach.final_lateral_effort_fraction` [E] for the RCS-steered set
   (start with 0.2; Task 10's campaign may adjust - record).
 
@@ -1522,6 +1533,7 @@ struct LunarLandingSetup {
     gnc::LunarLandingParameters guidance = gnc::hls_landing_parameters();
     double surface_stay_s = 0.0;          // [E] mission parameter (spec): resting after "gelandet"
     double descent_delta_v_mps = 2000.0;  // [E] budget: DOI + braking + approach (spec ~2.0 km/s, Apollo LM ~2.0)
+    double braking_delta_v_mps = 1600.0;  // [E] of it on the vacuum Raptors (Task 6 measures the flown share)
     double ascent_delta_v_mps = 1900.0;   // [E] budget: ascent + circularisation (spec ~1.9 km/s, Apollo LM ~1.85)
     double reserve_kg = 10000.0;          // [E] residuals and unusable propellant
 };
@@ -1539,9 +1551,11 @@ Design decisions (comments in the code):
   autopilot phase other than Off / Orbit / Lunar(InLlo). Refusals (German): "Kein Abstieg: nicht in einer
   Mondumlaufbahn", "Kein Abstieg: keine Landestelle gesetzt", "Kein Abstieg: " + planner reason,
   "Kein Abstieg: " + budget reason.
-- Budget: `lunar_budget(mass, dry, reserve, {{"Abstieg", descent_dv, isp}, {"Aufstieg", ascent_dv, isp}})` with the
-  vacuum Isp of the `sea_level_1` group (350 s) - a conservative single Isp (the landing thrusters are 340 s for ~1 % of
-  the descent).
+- Budget: `lunar_budget(mass, dry, reserve, {{"Bremsphase", braking_dv, 380}, {"Anflug", descent_dv - braking_dv,
+  350}, {"Aufstieg", ascent_dv, 350}})`: the braking on the vacuum Raptors (user 2026-10-15; `braking_delta_v_mps`
+  [E] 1600 m/s in LunarLandingSetup - the part above the RVac minimum thrust, measured in Task 6), DOI and the rest of
+  the descent on `sea_level_1` (vacuum Isp 350 s; the landing thrusters are 340 s for ~1 % of the descent). Isp from
+  the vehicle's engine groups, not literals.
 - Step machine (in `run_lunar_descent_steps`): DescentWait -> at the trim's ignition lead `lunar_burn(trim, false,
   PlaneTrim)` (small: RCS or one Raptor - `execute_burn(node)` chooses) -> DescentWait -> DOI the same (step Doi) ->
   DescentCoast with `lunar_step_epoch_ = pdi_epoch - startup_s` (the Raptors' 3 s start-up: the braking's first update
@@ -2064,7 +2078,8 @@ bool lunar_mission_complete() const;   // the sequence's last leg reached (statu
 // lunar_landing_mission.hpp
 LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& mission);
 // Rocket-equation budget of the whole mission from the planned outbound flight (TLI, swing-by, insertion / LOI) and the
-// mission's nominal legs; Isp 380 s for the vacuum-Raptor legs, 350 s for descent and ascent.
+// mission's nominal legs; Isp 380 s for the vacuum-Raptor legs (incl. the braking phase), 350 s for the rest of
+// the descent and the ascent.
 mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& mission, const mission::OutboundPlan& plan,
                                            double initial_mass_kg, double dry_mass_kg);
 // start_mission's lunar branch with an optional vehicle override (tests: the 204 t HLS).
