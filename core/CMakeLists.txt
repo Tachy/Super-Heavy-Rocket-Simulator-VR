@@ -28,6 +28,7 @@ add_library(starsim_core STATIC
     src/gnc/attitude_controller.cpp
     src/gnc/ascent_guidance.cpp
     src/gnc/peg_steering.cpp
+    src/gnc/apollo_braking.cpp
     src/gnc/j2_insertion.cpp
     src/gnc/burn_node.cpp
     src/gnc/booster_return.cpp

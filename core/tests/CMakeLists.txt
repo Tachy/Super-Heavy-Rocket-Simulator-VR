@@ -39,6 +39,7 @@ add_executable(starsim_core_tests
     test_flight_session.cpp
     test_ascent_guidance.cpp
     test_peg_steering.cpp
+    test_apollo_braking.cpp
     test_lunar_transfer.cpp
     test_position_targeter.cpp
     test_reference_body.cpp
