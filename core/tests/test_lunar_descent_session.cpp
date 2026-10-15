@@ -15,6 +15,7 @@
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/lunar_site.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+#include "lunar_test_support.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -23,14 +24,6 @@ using math::Vec3;
 namespace {
 constexpr double deg = constants::deg_to_rad;
 
-config::VehicleConfig hls(double propellant_kg, double dry_kg = 0.0) {
-    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls");
-    if (dry_kg > 0.0) cfg.stages.front().dry_mass_kg = dry_kg;
-    for (auto& t : cfg.stages.front().tanks) {
-        t.mass_kg = propellant_kg * (t.contents == config::TankContents::Oxidizer ? 3.6 / 4.6 : 1.0 / 4.6);
-    }
-    return cfg;
-}
 
 struct Fixture {
     bool spice = (test::spice_session(), true);
@@ -58,7 +51,7 @@ struct Fixture {
         const double r = constants::moon_mean_radius_m + 100e3, gm = ephemeris.gm_m3ps2(ephemeris::Body::Moon);
         const Vec3 x = math::normalized(cross(n, pole)), y = cross(n, x);
         const auto moon = ephemeris.state_gcrf(ephemeris::Body::Moon, t0);
-        session.place_in_orbit(hls(propellant_kg, dry_kg),
+        session.place_in_orbit(test::hls_with_propellant(propellant_kg, dry_kg),
                                {moon.position_m + x * r, moon.velocity_mps + y * std::sqrt(gm / r)}, t0);
     }
 };
@@ -66,7 +59,8 @@ struct Fixture {
 
 TEST_CASE("From the LLO the HLS waits for the site, trims, lowers its orbit and lands", "[sim][lunar_descent_session][terrain][data][slow]") {
     Fixture fx;
-    fx.place_in_llo(1065e3, 0.5 * 86400.0);
+    fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);
+    const double m0 = fx.session.body(0).vehicle().mass_properties().mass_kg;
     sim::LunarLandingSetup setup;
     setup.surface_stay_s = 3600.0;
     REQUIRE(fx.session.plan_lunar_landing(setup));
@@ -81,8 +75,9 @@ TEST_CASE("From the LLO the HLS waits for the site, trims, lowers its orbit and 
     if (plan->plane_trim) CHECK(std::find(flown.begin(), flown.end(), sim::LunarStep::PlaneTrim) != flown.end());
     const auto& td = fx.session.lunar_touchdown();
     REQUIRE(td);
-    std::printf("[lunar_descent_session] %s, offset %.2f m, sink %.2f m/s, wait %.2f d, status %s\n",
+    std::printf("[lunar_descent_session] %s, offset %.2f m, sink %.2f m/s, wait %.2f d, %.1f t -> %.1f t landed, status %s\n",
                 sim::to_string(td->outcome), td->offset_m, td->sink_mps, (plan->pdi_epoch - fx.t0) / 86400.0,
+                m0 / 1000.0, fx.session.body(0).vehicle().mass_properties().mass_kg / 1000.0,
                 fx.session.lunar_status().c_str());
     CHECK(td->outcome == sim::LegTouchdown::Landed);
     CHECK(td->offset_m < 1.0);
@@ -94,7 +89,7 @@ TEST_CASE("From the LLO the HLS waits for the site, trims, lowers its orbit and 
 
 TEST_CASE("The pilot takes over in the braking phase: the descent guidance stops for good", "[sim][lunar_descent_session][terrain][data][slow]") {
     Fixture fx;
-    fx.place_in_llo(1065e3, 0.5 * 86400.0);
+    fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);
     REQUIRE(fx.session.plan_lunar_landing({}));
     const auto pdi = fx.session.lunar_descent_plan()->pdi_epoch;
     fx.session.advance_to(pdi + 60.0, 50'000'000);
@@ -126,7 +121,7 @@ TEST_CASE("Descent planning refusals", "[sim][lunar_descent_session][terrain][da
         CHECK(fx.session.lunar_status().find("Treibstoff") != std::string::npos);
     }
     SECTION("no admissible touchdown point (review focus 4)") {
-        fx.place_in_llo(1065e3, 0.5 * 86400.0);
+        fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);
         sim::LunarLandingSetup setup;
         setup.descent.slope_limit_rad = 0.01 * deg;
         CHECK_FALSE(fx.session.plan_lunar_landing(setup));
@@ -134,4 +129,38 @@ TEST_CASE("Descent planning refusals", "[sim][lunar_descent_session][terrain][da
         CHECK(fx.session.lunar_step() == sim::LunarStep::None);
         CHECK(fx.session.lunar_burns().empty());
     }
+}
+
+TEST_CASE("A forced engine set never falls back to the RCS", "[sim][lunar_descent_session][burn_engines]") {
+    Fixture fx;
+    fx.place_in_llo(450e3, 0.5 * 86400.0);  // ~570 t: the HLS in the LLO after a full-tank outbound flight
+    const auto& s = fx.session.body(0).state();
+    const math::Vec3 prograde = math::normalized(
+        s.velocity_gcrf_mps - fx.ephemeris.state_gcrf(ephemeris::Body::Moon, fx.t0).velocity_mps);
+    // 1 m/s is below a Raptor's start/shutdown impulse even at minimum throttle: refused, not flown on cold gas
+    CHECK_FALSE(fx.session.execute_burn({fx.t0 + 600.0, prograde * 1.0}, {"sea_level_1"}));
+    // 17 m/s (a plane trim) fits the single Raptor at minimum throttle
+    REQUIRE(fx.session.execute_burn({fx.t0 + 600.0, prograde * 17.0}, {"sea_level_1"}));
+    CHECK_FALSE(fx.session.burn_configuration().rcs);
+    REQUIRE(fx.session.burn_configuration().groups.size() == 1);
+    CHECK(fx.session.burn_configuration().groups.front() == "hls/sea_level_1");
+}
+
+TEST_CASE("At ~570 t the plane trim and the DOI fly on the single sea-level Raptor, not on cold gas",
+          "[sim][lunar_descent_session][burn_engines][terrain][data]") {
+    Fixture fx;
+    fx.place_in_llo(450e3, 0.5 * 86400.0);
+    const double m0 = fx.session.body(0).vehicle().mass_properties().mass_kg;
+    REQUIRE(fx.session.plan_lunar_landing({}));
+    const auto* plan = fx.session.lunar_descent_plan();
+    REQUIRE(plan);
+    fx.session.advance_to(plan->doi.epoch + 600.0, 50'000'000);
+    REQUIRE_FALSE(fx.session.lunar_burns().empty());
+    CHECK(fx.session.lunar_step() == sim::LunarStep::DescentCoast);
+    const double used = m0 - fx.session.body(0).vehicle().mass_properties().mass_kg;
+    std::printf("[burn_engines] trim %.2f m/s + DOI %.2f m/s at %.0f t: %.2f t used\n",
+                plan->plane_trim ? norm(plan->plane_trim->delta_v_gcrf_mps) : 0.0, norm(plan->doi.delta_v_gcrf_mps),
+                m0 / 1000.0, used / 1000.0);
+    // rocket equation at Isp 350 s (plus a day of Sun pointing): ~3-6 t; cold gas (~66 s) took ~30 t
+    CHECK(used < 8e3);
 }

@@ -1,4 +1,4 @@
-# Lunar landing, mission 1 of the lunar spec (l3: outbound part; l4 adds descent, surface stay and ascent). The HLS,
+# Lunar landing, mission 1 of the lunar spec (l3: outbound; l4: descent, surface stay, ascent). The HLS,
 # refuelled in the LEO depot's orbit, departs from 200 x 200 km on its autopilot: best departure in the parking orbit,
 # TLI on the vacuum Raptors, mid-course corrections, powered lunar swing-by and insertion into the 9:2 NRHO
 # (in-direct transfer, Kikuchi et al. ISSFD 2024). [orbit] is the scenario start.
@@ -31,3 +31,24 @@ apolune_velocity = [0.0, -0.1033, 0.0]
 revolutions = 9                  # [S] per ...
 synodic_months = 2               # [S] ... synodic months
 reference_revolutions = 6        # [E] span of the reference (~39 d)
+
+[descent]
+pdi_altitude_above_site_km = 15.0   # [S] Apollo: PDI at ~50,000 ft above the landing site
+braking_range_km = 450.0            # [E] spec 400-500 km
+max_crossrange_km = 20.0            # [E] user 2026-10-15: wait for a pass within this, plane trim removes it
+slope_limit_deg = 8.0               # [E] NASA Artemis ~8-10 deg; the 12 m stance lands >= 9 deg
+touchdown_search_radius_m = 1000.0  # [E]
+
+[surface]
+stay_hours = 24.0                   # [E] mission parameter (Artemis III plans ~6.5 days; Apollo 17 75 h)
+
+[ascent]
+insertion_altitude_above_site_km = 15.0  # [E] Apollo inserted ~18 km up
+aposelene_km = 100.0                     # the LLO (spec)
+
+[budget]                            # legs not planned at the start (nominal); the outbound legs come from its plan
+descent_delta_v_mps = 2100.0        # [D] l4 C2/C3 flights: DOI 18 + PDI->touchdown 2062-2068 m/s
+ascent_delta_v_mps = 1900.0         # [E] spec ~1.9 km/s (Apollo LM ~1.85)
+nrho_to_llo_delta_v_mps = 876.0     # [D] l3: 660 + 216 m/s
+llo_to_nrho_delta_v_mps = 725.0     # [D] l3: right after the LLO arrival (cheap window)
+reserve_kg = 10000.0                # [E] residuals, unusable propellant

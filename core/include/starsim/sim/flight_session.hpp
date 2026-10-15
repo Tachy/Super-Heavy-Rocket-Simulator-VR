@@ -96,8 +96,8 @@ struct LunarLandingSetup {
     std::optional<mission::BrakingRangeParameters> braking_range = mission::BrakingRangeParameters{};
     gnc::LunarLandingParameters guidance = gnc::hls_landing_parameters();
     double surface_stay_s = 0.0;          // [E] mission parameter (spec): resting after "gelandet"
-    double descent_delta_v_mps = 2000.0;  // [E] budget: DOI + braking + approach (spec ~2.0 km/s, Apollo LM ~2.0)
-    double braking_delta_v_mps = 1600.0;  // [E] of it on the vacuum Raptors (Task 6 measures the flown share)
+    double descent_delta_v_mps = 2100.0;  // [D] budget: DOI + braking + approach (C2/C3 flights: 18 + 2068 m/s from 566 t PDI, 2062 from 500 t)
+    double braking_delta_v_mps = 1150.0;  // [D] of it on the vacuum Raptors (C2 flight: 566 -> 417.5 t at 380 s = 1134 m/s)
     double ascent_delta_v_mps = 1900.0;   // [E] budget: ascent + circularisation (spec ~1.9 km/s, Apollo LM ~1.85)
     double reserve_kg = 10000.0;          // [E] residuals and unusable propellant
     std::optional<gnc::LunarAscentParameters> ascent;  // lift off at the stay's end (none: stay Landed)

@@ -67,9 +67,9 @@ TEST_CASE("The braking range grows with the PDI mass and stays within its limits
 }
 
 TEST_CASE("The budget closes or names the leg where the propellant runs out", "[mission][lunar_descent_plan]") {
-    const auto ok = mission::lunar_budget(1185e3, 120e3, 10e3, {{"Abstieg", 2000.0, 350.0}, {"Aufstieg", 1900.0, 350.0}});
+    const auto ok = mission::lunar_budget(566e3, 120e3, 10e3, {{"Abstieg", 2000.0, 350.0}, {"Aufstieg", 1900.0, 350.0}});
     CHECK(ok.closes);
-    CHECK(ok.final_mass_kg == Catch::Approx(1185e3 * std::exp(-3900.0 / (350.0 * 9.80665))).epsilon(1e-12));
+    CHECK(ok.final_mass_kg == Catch::Approx(566e3 * std::exp(-3900.0 / (350.0 * 9.80665))).epsilon(1e-12));
     const auto short_ = mission::lunar_budget(400e3, 204e3, 10e3, {{"Abstieg", 2000.0, 350.0}, {"Aufstieg", 1900.0, 350.0}});
     CHECK_FALSE(short_.closes);
     CHECK(short_.reason.find("Aufstieg") != std::string::npos);
