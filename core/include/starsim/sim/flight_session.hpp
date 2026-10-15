@@ -296,7 +296,7 @@ public:
     // On any reference body (lunar l2; the Moon needs the Moon orientation).
     void set_landing_surface(const LegSite& site, contact::LandingSurface surface);
     // Lunar terrain for ground, leg contact and the tick-near-ground decision at the Moon (lunar l2; needs the Moon
-    // orientation). nullptr: the sphere.
+    // orientation). nullptr: the sphere. Drops a lunar landing site (set it again on the new terrain).
     void set_moon_terrain(std::shared_ptr<const environment::LunarTerrain> terrain);
     // Leg landings at a lunar site on its terrain (set_moon_terrain first), tracking bodies within the site's tile.
     void set_lunar_landing_site(const LunarSite& site);

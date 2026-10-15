@@ -193,7 +193,17 @@ def fetch_site_tile(site: dict, source: dict, out_dir: Path) -> None:
     for c_lat, c_lon, h in checks:
         text += f"\n[[check]]\nlatitude_deg = {c_lat!r}\nlongitude_deg = {c_lon!r}\nheight_m = {h!r}\n"
     (out_dir / f"{site['id']}.toml").write_text(text, encoding="utf-8")
-    check_orientation(site["id"], out_dir)
+    finish_tile(site["id"], out_dir)
+
+
+def finish_tile(site_id: str, out_dir: Path) -> None:
+    """Orientation check of a written tile; a rejected tile is removed so fetch.py does not take it as present."""
+    try:
+        check_orientation(site_id, out_dir)
+    except Exception:
+        for suffix in (".toml", ".i16"):
+            (out_dir / f"{site_id}{suffix}").unlink(missing_ok=True)
+        raise
 
 
 # ----------------------------------------------------------------------------------------------- orientation check

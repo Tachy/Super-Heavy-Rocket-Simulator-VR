@@ -85,5 +85,27 @@ class Crop(unittest.TestCase):
         self.assertEqual(lt.bilinear(tile, 2.0, 1.0), 23)
 
 
+class RejectedTile(unittest.TestCase):
+    def test_a_tile_failing_the_orientation_check_is_removed(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / "site.toml").write_text("[grid]\n", encoding="utf-8")
+            (out / "site.i16").write_bytes(b"\0\0")
+
+            def failing(site_id, out_dir):
+                raise RuntimeError("mis-oriented")
+
+            original = lt.check_orientation
+            lt.check_orientation = failing
+            try:
+                with self.assertRaises(RuntimeError):
+                    lt.finish_tile("site", out)
+            finally:
+                lt.check_orientation = original
+            self.assertFalse((out / "site.toml").exists())  # fetch.py must not take it as present next time
+            self.assertFalse((out / "site.i16").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

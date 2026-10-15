@@ -42,10 +42,13 @@ private:
 // |(east, north)| x height / R off the vertical (< 1 mm within 100 m of the site).
 class TerrainField final : public SurfaceField {
 public:
-    TerrainField(const environment::ReferenceBody& body, const math::Vec3& origin_fixed_m, const math::Mat3& site_to_fixed);
+    // `terrain` (optional): the body's terrain, shared so the field keeps it alive (the ReferenceBody only points to it).
+    TerrainField(const environment::ReferenceBody& body, const math::Vec3& origin_fixed_m, const math::Mat3& site_to_fixed,
+                 std::shared_ptr<const environment::LunarTerrain> terrain = nullptr);
     SurfaceSupport below(double east_m, double north_m) const override;
 
 private:
+    std::shared_ptr<const environment::LunarTerrain> terrain_;
     environment::ReferenceBody body_;
     math::Vec3 origin_fixed_m_;
     math::Mat3 site_to_fixed_;

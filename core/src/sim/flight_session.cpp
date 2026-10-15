@@ -1302,6 +1302,10 @@ void FlightSession::set_moon_terrain(std::shared_ptr<const environment::LunarTer
     if (!moon_) throw std::runtime_error("Mondgelände braucht die Mondorientierung");
     moon_terrain_ = std::move(terrain);
     moon_->set_terrain(moon_terrain_.get());
+    // A lunar landing site was built on the old terrain (its height, its surface): it must be set again.
+    if (legs_->site().body == ephemeris::Body::Moon) {
+        legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
+    }
 }
 
 void FlightSession::set_lunar_landing_site(const LunarSite& site) {
@@ -1310,7 +1314,8 @@ void FlightSession::set_lunar_landing_site(const LunarSite& site) {
                            site.config.tile_half_size_m};
     const auto frame = LegLandingSim::site_frame(leg_site, moon_->shape());
     contact::LandingSurface surface;
-    surface.field = std::make_shared<contact::TerrainField>(*moon_, frame.origin_fixed_m, frame.site_to_fixed);
+    surface.field =
+        std::make_shared<contact::TerrainField>(*moon_, frame.origin_fixed_m, frame.site_to_fixed, moon_terrain_);
     set_landing_surface(leg_site, std::move(surface));
 }
 

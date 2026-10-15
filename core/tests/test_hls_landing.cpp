@@ -203,3 +203,20 @@ TEST_CASE("An HLS lands on the LOLA terrain at the flattest spot near the site",
     for (double c : fx.session.leg_crushed_m(0)) CHECK(c < 0.01);
     CHECK(fx.session.body(0).resting());
 }
+
+TEST_CASE("Replacing the Moon terrain drops a lunar landing site built on the old one", "[hls][legs][lunar][terrain][data]") {
+    Fixture fx;
+    auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+    const std::weak_ptr<const environment::LunarTerrain> watch = terrain;
+    fx.session.set_moon_terrain(terrain);
+    fx.session.set_lunar_landing_site(
+        sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain));
+    terrain.reset();
+    // The landing surface keeps the terrain it was built on alive (no dangling pointer) ...
+    CHECK(!watch.expired());
+    CHECK(fx.session.leg_landing().surface().below(0.0, 0.0).height_m == Catch::Approx(0.0).margin(1e-6));
+    // ... and a new terrain (here: none) does not leave a lunar site on the old one: the site must be set again.
+    fx.session.set_moon_terrain(nullptr);
+    CHECK(fx.session.leg_landing().site().body == ephemeris::Body::Earth);
+    CHECK(watch.expired());
+}

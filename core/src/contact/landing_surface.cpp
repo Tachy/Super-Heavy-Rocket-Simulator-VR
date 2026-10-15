@@ -16,8 +16,11 @@ SurfaceSupport PlaneField::below(double east_m, double north_m) const {
     return {tan_slope_ * (east_m * uphill_.x + north_m * uphill_.y), false, normal_};
 }
 
-TerrainField::TerrainField(const environment::ReferenceBody& body, const Vec3& origin_fixed_m, const math::Mat3& site_to_fixed)
-    : body_(body), origin_fixed_m_(origin_fixed_m), site_to_fixed_(site_to_fixed) {}
+TerrainField::TerrainField(const environment::ReferenceBody& body, const Vec3& origin_fixed_m, const math::Mat3& site_to_fixed,
+                           std::shared_ptr<const environment::LunarTerrain> terrain)
+    : terrain_(std::move(terrain)), body_(body), origin_fixed_m_(origin_fixed_m), site_to_fixed_(site_to_fixed) {
+    if (terrain_) body_.set_terrain(terrain_.get());
+}
 
 SurfaceSupport TerrainField::below(double east_m, double north_m) const {
     const Vec3 q = origin_fixed_m_ + site_to_fixed_ * Vec3{east_m, north_m, 0.0};
