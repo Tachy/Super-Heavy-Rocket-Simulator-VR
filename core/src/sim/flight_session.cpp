@@ -64,7 +64,7 @@ void FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target, con
         int powered = 0;
         for (const auto& stage : bodies_[controlled_].body->vehicle().stages()) {
             const bool engines = std::any_of(stage.engines.begin(), stage.engines.end(),
-                                             [](const vehicle::Engine& e) { return !e.abort_only; });
+                                             [](const vehicle::Engine& e) { return !e.auxiliary(); });
             powered += !stage.config.payload && engines ? 1 : 0;
         }
         autopilot_.state = powered > 1 ? AutopilotState::Booster : AutopilotState::UpperStage;
@@ -427,7 +427,7 @@ std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations
     for (const auto& stage : vehicle.stages()) {
         std::vector<std::string> groups;
         for (const auto& e : stage.engines) {
-            if (e.abort_only) continue;  // launch escape: never a burn engine
+            if (e.auxiliary()) continue;  // launch escape or landing thrusters: never a burn engine
             if (std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) groups.push_back(e.group_id);
         }
         if (groups.empty()) continue;
@@ -453,7 +453,7 @@ std::vector<FlightSession::BurnConfiguration> FlightSession::burn_configurations
             c.groups = selected;
             double transient = 0.0;
             for (const auto& e : stage.engines) {
-                if (e.starved || e.abort_only || std::find(selected.begin(), selected.end(), e.group_id) == selected.end()) {
+                if (e.starved || e.auxiliary() || std::find(selected.begin(), selected.end(), e.group_id) == selected.end()) {
                     continue;
                 }
                 const auto& cfg = e.performance->config();
@@ -634,7 +634,7 @@ void FlightSession::run_autopilot() {
             ignite();
             bool all_running = true;
             for (const auto& e : body.vehicle().stages().front().engines) {
-                all_running = all_running && (e.mode == vehicle::EngineMode::Running || e.starved || e.abort_only);
+                all_running = all_running && (e.mode == vehicle::EngineMode::Running || e.starved || e.auxiliary());
             }
             if (all_running) {
                 release_clamps();
@@ -1223,7 +1223,7 @@ void FlightSession::ignite() {
     for (const auto& stage : flying.body->vehicle().stages()) {
         bool lit = false;
         for (const auto& e : stage.engines) {
-            if (e.abort_only) continue;  // launch escape: never lit here
+            if (e.auxiliary()) continue;  // launch escape or landing thrusters: never lit here
             flying.running_groups[e.group_id] = true;
             lit = true;
         }

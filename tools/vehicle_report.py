@@ -97,7 +97,9 @@ def report(vehicle_id: str, payload_kg: float) -> int:
         usable = propellant - reserve
 
         all_groups = [(g, Engine.load(g["engine"])) for g in stage.get("engine_group", [])]
-        groups = [(g, e) for g, e in all_groups if not g.get("abort_only", False)]
+        groups = [(g, e) for g, e in all_groups
+                  if not g.get("abort_only", False) and not g.get("landing_only", False)]
+        landing = [(g, e) for g, e in all_groups if g.get("landing_only", False)]
         if propellant <= 0.0 or not groups:
             # No main propulsion (e.g. Crew Dragon's capsule and trunk): masses, supplies and abort-only engines only.
             print(f"--- {stage['name']}")
@@ -141,6 +143,10 @@ def report(vehicle_id: str, payload_kg: float) -> int:
             print(f"  {group['count']:2d} x {engine.id:<15} SL {engine.thrust_n(P0_PA) / 1e3:7.0f} kN "
                   f"({engine.isp_s(P0_PA):5.1f} s)   vac {engine.thrust_n(0.0) / 1e3:7.0f} kN "
                   f"({engine.isp_s(0.0):5.1f} s)   mdot {engine.mass_flow_kgps:6.1f} kg/s")
+        for group, engine in landing:  # landing thrusters: not in the delta-v budget
+            axial = group["count"] * engine.thrust_n(0.0) * math.cos(math.radians(group.get("cant_deg", 0.0)))
+            print(f"  landing thrusters: {group['count']} x {engine.thrust_n(0.0) / 1e3:.0f} kN vac "
+                  f"(axial {axial / 1e3:.0f} kN, station {group.get('station_m', 0.0):.1f} m)")
         print(f"  total thrust SL {thrust_sl / 1e6:6.2f} MN   vac {thrust_vac / 1e6:6.2f} MN   "
               f"mdot {mdot:8.1f} kg/s   Isp_vac,eff {isp_vac_eff:5.1f} s")
         print(f"  ignition mass {m0 / 1e3:9.1f} t   T/W at ignition: SL {thrust_sl / (m0 * G0_MPS2):4.2f}  "

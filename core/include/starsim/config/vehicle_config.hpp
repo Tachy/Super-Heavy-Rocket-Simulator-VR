@@ -82,6 +82,9 @@ struct EngineGroupConfig {
     bool relight = false;
     std::vector<double> angles_rad;  // explicit ring angles (one per engine); empty: evenly spaced from 0
     bool abort_only = false;         // launch escape (SuperDraco): data only, never lit by the session
+    double station_m = 0.0;          // thrust point above the bottom of the stage (0: at the base)
+    double cant_rad = 0.0;           // thrust tilted towards the axis (exhaust away from the hull); no gimbal then
+    bool landing_only = false;       // landing thrusters (HLS): never a burn or ascent engine, flown by landing guidance
 };
 
 struct AeroConfig {

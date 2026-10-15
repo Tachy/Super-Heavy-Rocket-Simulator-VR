@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <stdexcept>
 
 #include "starsim/aero/parachute.hpp"
 #include "starsim/math/constants.hpp"
@@ -32,6 +33,7 @@ const GroupCommand* find_group(const VehicleCommand& command, const std::string&
 }  // namespace
 
 Vec3 Engine::thrust_direction() const {
+    if (axis_body.x != 1.0) return axis_body;  // canted: fixed (no gimbal)
     return normalized(Vec3{1.0, std::tan(gimbal_yaw_rad), std::tan(gimbal_pitch_rad)});
 }
 
@@ -69,12 +71,18 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
                 Engine engine;
                 engine.performance = performances.at(group.engine_id);
                 engine.group_id = stage_config.id + "/" + group.id;
-                engine.gimbal_point_m = {station, group.ring_radius_m * std::cos(angle),
+                if (group.cant_rad != 0.0 && group.gimbal) {
+                    throw std::runtime_error("engine group " + group.id + ": a canted group cannot gimbal");
+                }
+                engine.gimbal_point_m = {station + group.station_m, group.ring_radius_m * std::cos(angle),
                                          group.ring_radius_m * std::sin(angle)};
+                engine.axis_body = {std::cos(group.cant_rad), -std::sin(group.cant_rad) * std::cos(angle),
+                                    -std::sin(group.cant_rad) * std::sin(angle)};
                 engine.ring_angle_rad = angle;
                 engine.gimbaled = group.gimbal;
                 engine.relight = group.relight;
                 engine.abort_only = group.abort_only;
+                engine.landing_only = group.landing_only;
                 stage.engines.push_back(engine);
             }
         }

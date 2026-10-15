@@ -38,6 +38,10 @@ struct Engine {
     bool has_run = false;
     bool starved = false;    // shut down by propellant depletion
     bool abort_only = false; // launch escape (data only): never lit by the session
+    math::Vec3 axis_body{1.0, 0.0, 0.0};  // thrust axis without gimbal (canted engines: towards the hull axis)
+    bool landing_only = false;           // landing thrusters: flown by landing guidance only
+    // Launch escape or landing thrusters: never chosen for burns, never lit by ignite().
+    bool auxiliary() const { return abort_only || landing_only; }
 
     // Unit thrust direction (body frame) for the current gimbal angles.
     math::Vec3 thrust_direction() const;

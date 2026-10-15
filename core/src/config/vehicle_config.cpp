@@ -185,6 +185,12 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                                        static_cast<int>(doc.number(g, "count")), doc.number(g, "ring_radius_m"),
                                        doc.boolean(g, "gimbal"), doc.boolean(g, "relight"), {}});
             s.engine_groups.back().abort_only = g["abort_only"].value_or(false);
+            s.engine_groups.back().station_m = doc.number_or(g, "station_m", 0.0);
+            s.engine_groups.back().cant_rad = doc.number_or(g, "cant_deg", 0.0) * constants::deg_to_rad;
+            s.engine_groups.back().landing_only = g["landing_only"].value_or(false);
+            if (s.engine_groups.back().cant_rad != 0.0 && s.engine_groups.back().gimbal) {
+                doc.fail("engine_group: a canted group cannot gimbal");
+            }
             if (const auto* angles = g["angles_deg"].as_array()) {
                 for (const auto& a : *angles) {
                     const auto value = a.value<double>();
