@@ -1,0 +1,137 @@
+// Descent autopilot from the LLO (l4): one time-warp call from the LLO to the landing (steps not skipped), pilot
+// override in the braking phase, refusals.
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <vector>
+
+#include <catch2/catch_test_macros.hpp>
+
+#include "starsim/config/lunar_site_config.hpp"
+#include "starsim/config/vehicle_config.hpp"
+#include "starsim/math/constants.hpp"
+#include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/lunar_site.hpp"
+#include "starsim/spice/spice_adapters.hpp"
+#include "test_support.hpp"
+
+using namespace starsim;
+using math::Vec3;
+
+namespace {
+constexpr double deg = constants::deg_to_rad;
+
+config::VehicleConfig hls(double propellant_kg, double dry_kg = 0.0) {
+    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_hls");
+    if (dry_kg > 0.0) cfg.stages.front().dry_mass_kg = dry_kg;
+    for (auto& t : cfg.stages.front().tanks) {
+        t.mass_kg = propellant_kg * (t.contents == config::TankContents::Oxidizer ? 3.6 / 4.6 : 1.0 / 4.6);
+    }
+    return cfg;
+}
+
+struct Fixture {
+    bool spice = (test::spice_session(), true);
+    spice::SpiceEphemeris ephemeris;
+    spice::SpiceOrientation earth = spice::SpiceOrientation::earth();
+    spice::SpiceOrientation moon_me = spice::SpiceOrientation::moon_mean_earth();
+    sim::FlightSession session{ephemeris, earth, STARSIM_CONFIG_DIR, {}, &moon_me};
+    time::Epoch t0 = spice::SpiceTimeConverter().from_utc({2026, 11, 6, 0, 0, 0.0});
+    sim::LunarSite site;
+
+    Fixture() {
+        const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+        session.set_moon_terrain(terrain);
+        site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain);
+        session.set_lunar_landing_site(site);
+    }
+    // Circular polar 100 km LLO whose plane contains the site at t0 + align_s (as test_lunar_descent.cpp).
+    void place_in_llo(double propellant_kg, double align_s, double dry_kg = 0.0) {
+        const auto t = t0 + align_s;
+        const auto rot = moon_me.fixed_to_gcrf(t).rotation;
+        const Vec3 pole = rot * Vec3{0.0, 0.0, 1.0};
+        const double lat = site.config.latitude_rad, lon = site.config.longitude_rad;
+        const Vec3 s = rot * Vec3{std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+        const Vec3 n = math::normalized(cross(pole, s));
+        const double r = constants::moon_mean_radius_m + 100e3, gm = ephemeris.gm_m3ps2(ephemeris::Body::Moon);
+        const Vec3 x = math::normalized(cross(n, pole)), y = cross(n, x);
+        const auto moon = ephemeris.state_gcrf(ephemeris::Body::Moon, t0);
+        session.place_in_orbit(hls(propellant_kg, dry_kg),
+                               {moon.position_m + x * r, moon.velocity_mps + y * std::sqrt(gm / r)}, t0);
+    }
+};
+}  // namespace
+
+TEST_CASE("From the LLO the HLS waits for the site, trims, lowers its orbit and lands", "[sim][lunar_descent_session][terrain][data][slow]") {
+    Fixture fx;
+    fx.place_in_llo(1065e3, 0.5 * 86400.0);
+    sim::LunarLandingSetup setup;
+    setup.surface_stay_s = 3600.0;
+    REQUIRE(fx.session.plan_lunar_landing(setup));
+    CHECK_FALSE(fx.session.plan_lunar_landing(setup));   // a descent under way keeps its plan
+    const auto* plan = fx.session.lunar_descent_plan();
+    REQUIRE(plan);
+    // Review focus 1: one warp call over the wait, the trim, the DOI and the PDI.
+    fx.session.advance_to(plan->pdi_epoch + 1200.0, 50'000'000);
+    std::vector<sim::LunarStep> flown;
+    for (const auto& b : fx.session.lunar_burns()) flown.push_back(b.step);
+    CHECK(std::find(flown.begin(), flown.end(), sim::LunarStep::Doi) != flown.end());
+    if (plan->plane_trim) CHECK(std::find(flown.begin(), flown.end(), sim::LunarStep::PlaneTrim) != flown.end());
+    const auto& td = fx.session.lunar_touchdown();
+    REQUIRE(td);
+    std::printf("[lunar_descent_session] %s, offset %.2f m, sink %.2f m/s, wait %.2f d, status %s\n",
+                sim::to_string(td->outcome), td->offset_m, td->sink_mps, (plan->pdi_epoch - fx.t0) / 86400.0,
+                fx.session.lunar_status().c_str());
+    CHECK(td->outcome == sim::LegTouchdown::Landed);
+    CHECK(td->offset_m < 1.0);
+    CHECK(fx.session.lunar_step() == sim::LunarStep::SurfaceStay);
+    fx.session.advance_to(fx.session.epoch() + 2.0 * 3600.0, 50'000'000);
+    CHECK(fx.session.lunar_step() == sim::LunarStep::Landed);   // stay over (no ascent requested)
+    CHECK(fx.session.body(0).resting());
+}
+
+TEST_CASE("The pilot takes over in the braking phase: the descent guidance stops for good", "[sim][lunar_descent_session][terrain][data][slow]") {
+    Fixture fx;
+    fx.place_in_llo(1065e3, 0.5 * 86400.0);
+    REQUIRE(fx.session.plan_lunar_landing({}));
+    const auto pdi = fx.session.lunar_descent_plan()->pdi_epoch;
+    fx.session.advance_to(pdi + 60.0, 50'000'000);
+    REQUIRE(fx.session.lunar_step() == sim::LunarStep::PoweredDescent);
+    fx.session.disengage_autopilot();
+    sim::PilotInput input;
+    input.throttle = 0.0;
+    fx.session.set_input(input);
+    fx.session.cutoff();
+    fx.session.advance_to(fx.session.epoch() + 10.0, 5000);
+    CHECK(fx.session.lunar_step() == sim::LunarStep::None);
+    CHECK(fx.session.autopilot().state == sim::AutopilotState::Off);
+    CHECK(fx.session.lunar_landing_guidance() == nullptr);
+    CHECK_FALSE(fx.session.body(0).vehicle().any_engine_producing_thrust());
+}
+
+TEST_CASE("Descent planning refusals", "[sim][lunar_descent_session][terrain][data]") {
+    Fixture fx;
+    SECTION("not in a lunar orbit") {
+        fx.session.place_in_orbit("starship_hls", orbit::state_from_elements({6578137.0, 0.0, 0.5, 0.0, 0.0, 0.0},
+                                                                             fx.ephemeris.gm_m3ps2(ephemeris::Body::Earth)),
+                                  fx.t0);
+        CHECK_FALSE(fx.session.plan_lunar_landing({}));
+        CHECK(fx.session.lunar_status().find("Mondumlaufbahn") != std::string::npos);
+    }
+    SECTION("propellant short for descent and ascent (204 t dry, half tanks)") {
+        fx.place_in_llo(400e3, 0.5 * 86400.0, 204e3);
+        CHECK_FALSE(fx.session.plan_lunar_landing({}));
+        CHECK(fx.session.lunar_status().find("Treibstoff") != std::string::npos);
+    }
+    SECTION("no admissible touchdown point (review focus 4)") {
+        fx.place_in_llo(1065e3, 0.5 * 86400.0);
+        sim::LunarLandingSetup setup;
+        setup.descent.slope_limit_rad = 0.01 * deg;
+        CHECK_FALSE(fx.session.plan_lunar_landing(setup));
+        CHECK(fx.session.lunar_status().find("Landepunkt") != std::string::npos);
+        CHECK(fx.session.lunar_step() == sim::LunarStep::None);
+        CHECK(fx.session.lunar_burns().empty());
+    }
+}

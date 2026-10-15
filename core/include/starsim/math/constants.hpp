@@ -39,6 +39,8 @@ inline constexpr double earth_j2 = 1.0826267e-3;
 
 // IAU 2015 nominal lunar mean radius used for the Moon sphere.
 inline constexpr double moon_mean_radius_m = 1737400.0;
+// Highest lunar terrain above the 1737.4 km sphere [S: Smith et al. 2010, GRL 37, L18204 (LOLA): 10,786 m].
+inline constexpr double moon_max_terrain_height_m = 10786.0;
 
 // Lunar gravitational parameter [S] DE440 (gm_de440.tpc, BODY301_GM = 4902.800118457549 km^3/s^2). For code without
 // an ephemeris at hand; guidance and planning take the GM from the ReferenceBody / ephemeris.

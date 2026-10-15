@@ -69,9 +69,11 @@ const char* to_string(CapsuleReturnStep step);
 // Steps of a lunar flight (plan_lunar_outbound / plan_lunar_orbit_transfer). Tli, MidCourse, PoweredFlyby, Insertion and
 // StationKeeping: that burn is under way (the autopilot state is Burn meanwhile); the others wait for their next event.
 // PilotCorrection: the crew flies a mid-course correction (lunar_pilot_cue).
+// Descent from the LLO (plan_lunar_landing, l4): DescentWait -> PlaneTrim (if any) -> DescentWait -> Doi -> DescentCoast
+// -> PoweredDescent -> Landed (via SurfaceStay when a stay is requested); PlaneTrim and Doi: that burn is under way.
 enum class LunarStep {
     None, Departure, Tli, Coast, MidCourse, PilotCorrection, PoweredFlyby, Insertion, Trim, InLlo, InNrho, StationKeeping,
-    TransferOut, TransferIn, PoweredDescent, Landed, Lost
+    TransferOut, TransferIn, DescentWait, PlaneTrim, Doi, DescentCoast, PoweredDescent, Landed, SurfaceStay, Lost
 };
 const char* to_string(LunarStep step);
 
@@ -81,6 +83,17 @@ struct LunarTouchdown {
     double offset_m = 0.0;     // horizontal distance of the footprint centre from the touchdown point (judgement)
     double sink_mps = 0.0;     // at the first leg contact, relative to the Moon
     double lateral_mps = 0.0;  // at the first leg contact
+};
+
+// A lunar landing from the LLO (plan_lunar_landing, l4).
+struct LunarLandingSetup {
+    mission::LunarDescentParameters descent;
+    gnc::LunarLandingParameters guidance = gnc::hls_landing_parameters();
+    double surface_stay_s = 0.0;          // [E] mission parameter (spec): resting after "gelandet"
+    double descent_delta_v_mps = 2000.0;  // [E] budget: DOI + braking + approach (spec ~2.0 km/s, Apollo LM ~2.0)
+    double braking_delta_v_mps = 1600.0;  // [E] of it on the vacuum Raptors (Task 6 measures the flown share)
+    double ascent_delta_v_mps = 1900.0;   // [E] budget: ascent + circularisation (spec ~1.9 km/s, Apollo LM ~1.85)
+    double reserve_kg = 10000.0;          // [E] residuals and unusable propellant
 };
 
 // Flight director cue of a pilot-flown mid-course correction (lunar l3, Step 3b; displayed with l6 / M7).
@@ -217,6 +230,9 @@ public:
         capsule_return_step_ = CapsuleReturnStep::None;
         lunar_step_ = LunarStep::None;
         lunar_pilot_.reset();
+        lunar_landing_.reset();  // the pilot flies: no descent guidance command afterwards
+        lunar_descent_plan_.reset();
+        lunar_landing_setup_.reset();
     }
     // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
     // at the next staging; the booster is then guided independently of the controlled body.
@@ -289,10 +305,20 @@ public:
     // with a German lunar_status() otherwise.
     bool begin_powered_descent(const mission::TouchdownPoint& point, double approach_azimuth_rad,
                                gnc::LunarLandingParameters parameters = gnc::hls_landing_parameters());
+    // Descent of the controlled vehicle from a closed lunar orbit (autopilot Off / Orbit or lunar step InLlo): plans the
+    // site pass, plane trim, DOI and PDI (mission::LunarDescentPlanner on the lunar landing site's terrain), checks the
+    // propellant for descent and ascent (mission::lunar_budget) and flies the steps; after "gelandet" the vehicle rests
+    // for surface_stay_s (step SurfaceStay, then Landed). False with a German lunar_status() when refused (a descent
+    // under way keeps its plan and status).
+    bool plan_lunar_landing(const LunarLandingSetup& setup);
+    const mission::LunarDescentPlan* lunar_descent_plan() const {
+        return lunar_descent_plan_ ? &*lunar_descent_plan_ : nullptr;
+    }
     const gnc::LunarLandingGuidance* lunar_landing_guidance() const { return lunar_landing_.get(); }
     const std::optional<LunarTouchdown>& lunar_touchdown() const { return lunar_touchdown_; }
     static constexpr double sun_repoint_interval_s = 6.0 * 3600.0;  // [E] coast: Sun pointing re-aimed this often
-    static constexpr int max_llo_trims = 4;                          // [E]
+    static constexpr int max_llo_trims = 4;
+    static constexpr double descent_attitude_lead_s = 600.0;  // [E] retrograde hold before PDI (~180 deg at 0.5 deg/s)                          // [E]
     static constexpr double llo_trim_interval_s = 600.0;             // [E] after a trim burn, the next check
     // Entry guidance of a body (nullptr if it has none): its latest command (setpoint for the flight director).
     const gnc::EntryCommand* entry_status(size_t index) const;
@@ -535,7 +561,15 @@ private:
     std::vector<LunarBurnRecord> lunar_burns_;
     void lunar_abort(const std::string& status);
     void reset_lunar();
-    void run_lunar_descent_steps(Flying& flying);  // PoweredDescent, Landed, Lost (flight_session_lunar_descent.cpp)
+    // The descent steps from DescentWait to Lost (flight_session_lunar_descent.cpp).
+    void run_lunar_descent_steps(Flying& flying);
+    void lunar_sun_coast(Flying& flying);  // Sun pointing of a coast (Coast, DescentWait) and its re-points
+    void lunar_descent_wait();             // DescentWait for the next descent burn (trim, then DOI)
+    bool lunar_descent_burn(const gnc::BurnNode& node, LunarStep step);  // trim / DOI, recorded
+    std::optional<mission::LunarDescentPlan> lunar_descent_plan_;
+    std::optional<LunarLandingSetup> lunar_landing_setup_;
+    time::Epoch lunar_landed_epoch_;
+    bool lunar_descent_trimmed_ = false;  // the plan's plane trim is flown (the next wait is for the DOI)
     std::unique_ptr<gnc::LunarLandingGuidance> lunar_landing_;
     std::optional<LunarTouchdown> lunar_touchdown_;
     mission::TouchdownPoint lunar_touchdown_point_;

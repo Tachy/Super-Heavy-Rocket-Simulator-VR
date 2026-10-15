@@ -67,8 +67,13 @@ const char* to_string(LunarStep step) {
         case LunarStep::StationKeeping: return "Bahnhaltung";
         case LunarStep::TransferOut: return "Transfer";
         case LunarStep::TransferIn: return "Ankunft";
+        case LunarStep::DescentWait: return "Warten auf Überflug";
+        case LunarStep::PlaneTrim: return "Bahnebenenkorrektur";
+        case LunarStep::Doi: return "Abstiegsbahn (DOI)";
+        case LunarStep::DescentCoast: return "Freiflug zum Abstieg";
         case LunarStep::PoweredDescent: return "Landeanflug";
         case LunarStep::Landed: return "gelandet";
+        case LunarStep::SurfaceStay: return "Oberflächenaufenthalt";
         case LunarStep::Lost: return "verloren";
     }
     return "";
@@ -93,6 +98,8 @@ void FlightSession::reset_lunar() {
     lunar_burns_.clear();
     lunar_landing_.reset();
     lunar_touchdown_.reset();
+    lunar_descent_plan_.reset();
+    lunar_landing_setup_.reset();
 }
 
 bool FlightSession::plan_lunar_outbound(const mission::LunarOutboundParameters& parameters) {
@@ -308,6 +315,42 @@ void FlightSession::lunar_coast_event() {
     }
 }
 
+void FlightSession::lunar_sun_coast(Flying& flying) {
+    if (attitude_mode_.kind == gnc::AttitudeModeKind::Sun && lunar_sun_hold_.active()) {
+        const auto& s = flying.body->state();
+        const math::Vec3 sun =
+            env_.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch_).position_m - s.position_gcrf_m;
+        const double error = std::acos(
+            std::clamp(dot(s.attitude.rotate(math::Vec3{1.0, 0.0, 0.0}), math::normalized(sun)), -1.0, 1.0));
+        const auto held = lunar_sun_hold_.update(error, norm(s.angular_velocity_body_radps), epoch_);
+        if (held != gnc::SunHoldResult::Holding) {
+            attitude_mode_ = {};  // pointed (or stuck: coast freely instead of spending cold gas)
+            if (lunar_debug_) {
+                std::printf("[lunar] Sun %s: %.2f deg, %.4f deg/s, %.0f kg\n",
+                            held == gnc::SunHoldResult::Settled ? "pointed" : "hold timed out",
+                            error / constants::deg_to_rad,
+                            norm(s.angular_velocity_body_radps) / constants::deg_to_rad,
+                            flying.body->vehicle().mass_properties().mass_kg);
+            }
+        }
+    }
+    if (epoch_ - lunar_next_repoint_ >= 0.0) {
+        attitude_mode_ = {gnc::AttitudeModeKind::Sun, {}, {}, {}};
+        lunar_sun_hold_.start(epoch_);
+        lunar_next_repoint_ = epoch_ + sun_repoint_interval_s;
+        if (lunar_debug_) {
+            const auto& s = flying.body->state();
+            const math::Vec3 sun =
+                env_.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch_).position_m - s.position_gcrf_m;
+            std::printf("[lunar] Sun re-point: %.2f deg off, %.4f deg/s, %.0f kg\n",
+                        std::acos(std::clamp(dot(s.attitude.rotate(math::Vec3{1.0, 0.0, 0.0}),
+                                             math::normalized(sun)), -1.0, 1.0)) / constants::deg_to_rad,
+                        norm(s.angular_velocity_body_radps) / constants::deg_to_rad,
+                        flying.body->vehicle().mass_properties().mass_kg);
+        }
+    }
+}
+
 void FlightSession::run_lunar(Flying& flying) {
     try {
         run_lunar_steps(flying);
@@ -327,7 +370,8 @@ void FlightSession::run_lunar(Flying& flying) {
 }
 
 void FlightSession::run_lunar_steps(Flying& flying) {
-    if (lunar_step_ == LunarStep::PoweredDescent || lunar_step_ == LunarStep::Landed || lunar_step_ == LunarStep::Lost) {
+    if (lunar_step_ == LunarStep::PoweredDescent || lunar_step_ == LunarStep::Landed ||
+        lunar_step_ == LunarStep::SurfaceStay || lunar_step_ == LunarStep::Lost) {
         run_lunar_descent_steps(flying);  // judges an impact itself
         return;
     }
@@ -382,43 +426,10 @@ void FlightSession::run_lunar_steps(Flying& flying) {
             lunar_mcc_index_ = lunar_parameters_->mcc_after_tli_s.size();
             lunar_enter_coast();
             break;
-        case LunarStep::Coast: {
-            if (attitude_mode_.kind == gnc::AttitudeModeKind::Sun && lunar_sun_hold_.active()) {
-                const auto& s = flying.body->state();
-                const math::Vec3 sun =
-                    env_.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch_).position_m - s.position_gcrf_m;
-                const double error = std::acos(
-                    std::clamp(dot(s.attitude.rotate(math::Vec3{1.0, 0.0, 0.0}), math::normalized(sun)), -1.0, 1.0));
-                const auto held = lunar_sun_hold_.update(error, norm(s.angular_velocity_body_radps), epoch_);
-                if (held != gnc::SunHoldResult::Holding) {
-                    attitude_mode_ = {};  // pointed (or stuck: coast freely instead of spending cold gas)
-                    if (lunar_debug_) {
-                        std::printf("[lunar] Sun %s: %.2f deg, %.4f deg/s, %.0f kg\n",
-                                    held == gnc::SunHoldResult::Settled ? "pointed" : "hold timed out",
-                                    error / constants::deg_to_rad,
-                                    norm(s.angular_velocity_body_radps) / constants::deg_to_rad,
-                                    flying.body->vehicle().mass_properties().mass_kg);
-                    }
-                }
-            }
-            if (epoch_ - lunar_next_repoint_ >= 0.0) {
-                attitude_mode_ = {gnc::AttitudeModeKind::Sun, {}, {}, {}};
-                lunar_sun_hold_.start(epoch_);
-                lunar_next_repoint_ = epoch_ + sun_repoint_interval_s;
-                if (lunar_debug_) {
-                    const auto& s = flying.body->state();
-                    const math::Vec3 sun =
-                        env_.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch_).position_m - s.position_gcrf_m;
-                    std::printf("[lunar] Sun re-point: %.2f deg off, %.4f deg/s, %.0f kg\n",
-                                std::acos(std::clamp(dot(s.attitude.rotate(math::Vec3{1.0, 0.0, 0.0}),
-                                                     math::normalized(sun)), -1.0, 1.0)) / constants::deg_to_rad,
-                                norm(s.angular_velocity_body_radps) / constants::deg_to_rad,
-                                flying.body->vehicle().mass_properties().mass_kg);
-                }
-            }
+        case LunarStep::Coast:
+            lunar_sun_coast(flying);
             if (epoch_ - lunar_step_epoch_ >= 0.0) lunar_coast_event();
             break;
-        }
         case LunarStep::PilotCorrection: {
             auto& call = *lunar_pilot_;
             call.reference = orbit::propagate_coast(gravity_, call.reference, call.reference_epoch, epoch_).state;
@@ -525,10 +536,17 @@ void FlightSession::run_lunar_steps(Flying& flying) {
             lunar_status_ = "Ankunft: " + german(norm(arrival->delta_v_gcrf_mps), 0) + " m/s";
             break;
         }
+        case LunarStep::DescentWait:
+        case LunarStep::PlaneTrim:
+        case LunarStep::Doi:
+        case LunarStep::DescentCoast:
+            run_lunar_descent_steps(flying);
+            break;
         case LunarStep::InLlo:
         case LunarStep::None:
         case LunarStep::PoweredDescent:
         case LunarStep::Landed:
+        case LunarStep::SurfaceStay:
         case LunarStep::Lost:
             break;
     }
