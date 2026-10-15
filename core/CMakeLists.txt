@@ -30,6 +30,8 @@ add_library(starsim_core STATIC
     src/gnc/j2_insertion.cpp
     src/gnc/burn_node.cpp
     src/gnc/booster_return.cpp
+    src/gnc/booster_return_prediction.cpp
+    src/gnc/booster_return_burns.cpp
     src/gnc/descent_model.cpp
     src/gnc/descent_discretization.cpp
     src/gnc/descent_problem.cpp
