@@ -27,6 +27,11 @@ struct LunarAscentParameters {
     std::vector<std::string> steering_groups{"hls/landing"};
     double steering_alignment_rad = 2.0 * constants::deg_to_rad;  // [E] aligned: thrust axis this close to PEG ...
     double steering_rate_radps = 0.01;                            // [E] ... turning slower than this
+    // [E] while steering, the common throttle stays this far from the minimum and from full throttle: at either limit
+    // differential throttling has no authority (l4 C4: a ~340 t HLS at the 1 g limit sat at the minimum and stayed
+    // 60-90 deg off PEG; at a 3 g limit it sat at full throttle and crashed), as
+    // TerminalDescentParameters::steering_throttle_margin
+    double steering_throttle_margin = 0.1;
     double raptor_start_height_m = 30.0;     // [E] the Raptors start this high (spec: "after a few tens of metres")
     double vertical_rise_height_m = 150.0;   // [E] PEG from here (Apollo: ~10 s vertical rise)
     double insertion_altitude_above_site_m = 15.0e3;  // [E] Apollo inserted ~18 km up; >= 10.8 km clears all terrain
@@ -39,9 +44,12 @@ struct LunarAscentParameters {
     double abort_peg_max_radial = 0.85;
     double abort_delta_v_margin = 0.15;      // [E] gravity and steering losses on the abort's propellant check
     double abort_max_tilt_rad = 30.0 * constants::deg_to_rad;  // [E] abort: thrust tilt towards downrange while sinking
-    // [E] the ascent set throttles down to this thrust acceleration (crew and structure; Apollo's LM ascent stage:
-    // ~3-10 m/s^2), never below its minimum throttle.
-    double max_acceleration_mps2 = constants::standard_gravity_mps2;
+    // [D] the ascent set throttles down to this thrust acceleration, never below its minimum throttle (which sets a floor
+    // of ~1.4-1.8 g near cutoff at 200-150 t). l4 C4 sweep (user 2026-10-15: "find the optimum"; 340 / 260 t landed):
+    // propellant 139.2/109.7 t at 1 g, 138.7/109.7 at 1.5 g, 138.9/109.3 at 1.75 g, 139.7/108.5 at 2 g - flat within
+    // 0.15 t over 1.5-2 g; from 2.5 g PEG's time to go degrades (103-105 km orbits, crash at 3 g). 1.5 g: the LLO
+    // variant's optimum, farthest from that edge.
+    double max_acceleration_mps2 = 1.5 * constants::standard_gravity_mps2;
 };
 
 enum class LunarAscentPhase { Liftoff, Vertical, Arrest, Peg, Cutoff };

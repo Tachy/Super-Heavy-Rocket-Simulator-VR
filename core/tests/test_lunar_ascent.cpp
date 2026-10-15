@@ -84,6 +84,26 @@ struct Fixture {
         return norm(s.position_gcrf_m - c.position_m) - constants::moon_mean_radius_m;
     }
     double mass_kg() const { return session.body(0).vehicle().mass_properties().mass_kg; }
+    // Flies in 0.5 s steps while the step is `step` (review focus 4); returns the peak non-gravitational acceleration
+    // of the free-flying vehicle, from its Moon-relative velocity change plus the Moon's point-mass pull.
+    double fly_peak_acceleration(sim::LunarStep step) {
+        constexpr double dt = 0.5;
+        const double gm = ephemeris.gm_m3ps2(ephemeris::Body::Moon);
+        double peak = 0.0;
+        for (int i = 0; i < 3600 * 2 && session.lunar_step() == step; ++i) {
+            const auto c0 = ephemeris.state_gcrf(ephemeris::Body::Moon, session.epoch());
+            const Vec3 r0 = session.body(0).state().position_gcrf_m - c0.position_m;
+            const Vec3 v0 = session.body(0).state().velocity_gcrf_mps - c0.velocity_mps;
+            const bool free = !session.body(0).resting();
+            session.advance_to(session.epoch() + dt, 1000);
+            const auto c1 = ephemeris.state_gcrf(ephemeris::Body::Moon, session.epoch());
+            const Vec3 v1 = session.body(0).state().velocity_gcrf_mps - c1.velocity_mps;
+            if (free && !session.body(0).resting()) {
+                peak = std::max(peak, norm((v1 - v0) / dt + r0 * (gm / std::pow(norm(r0), 3))));
+            }
+        }
+        return peak;
+    }
     // Low and high altitude over two revolutions of the LLO.
     std::pair<double, double> llo_apsides() {
         double low = 1e12, high = -1e12;
@@ -116,7 +136,7 @@ mission::TouchdownPoint touchdown_point(const Fixture& fx) {
 
 TEST_CASE("A released landed body flies again and the leg judgement starts over", "[sim][lunar_ascent][terrain][data]") {
     Fixture fx;
-    fx.land(hls(542e3));
+    fx.land(hls(test::hls_landed_propellant_kg));
     REQUIRE(fx.session.body(0).resting());
     REQUIRE(fx.session.plan_lunar_ascent({}, 0.0));
     fx.session.advance_to(fx.session.epoch() + 3.0, 2000);
@@ -128,7 +148,7 @@ TEST_CASE("A released landed body flies again and the leg judgement starts over"
 TEST_CASE("A lunar ascent is refused when the vehicle is not landed or lacks the propellant",
           "[sim][lunar_ascent][terrain][data]") {
     Fixture fx;
-    fx.place_over_site(hls(542e3), 50.0, {});  // hovering 50 m up, not landed
+    fx.place_over_site(hls(test::hls_landed_propellant_kg), 50.0, {});  // hovering 50 m up, not landed
     CHECK_FALSE(fx.session.plan_lunar_ascent({}, 0.0));
     CHECK(fx.session.lunar_status().find("nicht gelandet") != std::string::npos);
     Fixture dry;
@@ -140,32 +160,41 @@ TEST_CASE("A lunar ascent is refused when the vehicle is not landed or lacks the
 
 TEST_CASE("After a 3-day stay under time warp the HLS ascends into the 100 km LLO",
           "[sim][lunar_ascent][terrain][data][slow]") {
-    Fixture fx;
-    fx.land(hls(542e3));  // the LLO variant's landing mass ~662 t
-    const auto fixed0 = fx.moon.frame(fx.session.epoch()).to_fixed(fx.session.body(0).state().position_gcrf_m);
-    REQUIRE(fx.session.plan_lunar_ascent({}, 3.0 * 86400.0));
-    // Review focus 5: one warp call over the stay - still landed, no drift on the Moon.
-    fx.session.advance_to(fx.session.epoch() + 3.0 * 86400.0 - 60.0, 50'000'000);
-    CHECK(fx.session.body(0).resting());
-    CHECK(fx.session.leg_touchdown(0) == sim::LegTouchdown::Landed);
-    CHECK(norm(fx.moon.frame(fx.session.epoch()).to_fixed(fx.session.body(0).state().position_gcrf_m) - fixed0) < 0.01);
-    const double m0 = fx.mass_kg();
-    fx.session.advance_to(fx.session.epoch() + 3.0 * 3600.0, 50'000'000);
-    REQUIRE(fx.session.lunar_step() == sim::LunarStep::InLlo);
-    const double m1 = fx.mass_kg();
-    const auto [low, high] = fx.llo_apsides();
-    const double dv = 380.0 * constants::standard_gravity_mps2 * std::log(m0 / m1);
-    std::printf("[lunar_ascent] LLO %.2f x %.2f km, %.1f t used (%.0f m/s at 380 s), %s\n", low / 1000.0, high / 1000.0,
-                (m0 - m1) / 1000.0, dv, fx.session.lunar_status().c_str());
-    CHECK(low > 99e3);  // spec: the LLO within 1 km
-    CHECK(high < 101e3);
-    CHECK(dv == Catch::Approx(1900.0).margin(200.0));  // spec ~1.9 km/s
+    // ~340 t (LLO variant) and ~260 t (NRHO variant) on the surface
+    for (const double propellant_kg : {test::hls_landed_propellant_kg, test::hls_landed_light_propellant_kg}) {
+        Fixture fx;
+        fx.land(hls(propellant_kg));
+        const auto fixed0 = fx.moon.frame(fx.session.epoch()).to_fixed(fx.session.body(0).state().position_gcrf_m);
+        REQUIRE(fx.session.plan_lunar_ascent({}, 3.0 * 86400.0));
+        // Review focus 5: one warp call over the stay - still landed, no drift on the Moon.
+        fx.session.advance_to(fx.session.epoch() + 3.0 * 86400.0 - 60.0, 50'000'000);
+        CHECK(fx.session.body(0).resting());
+        CHECK(fx.session.leg_touchdown(0) == sim::LegTouchdown::Landed);
+        CHECK(norm(fx.moon.frame(fx.session.epoch()).to_fixed(fx.session.body(0).state().position_gcrf_m) - fixed0) <
+              0.01);
+        const double m0 = fx.mass_kg();
+        for (int i = 0; i < 240 && fx.session.lunar_step() != sim::LunarStep::Ascent; ++i) {
+            fx.session.advance_to(fx.session.epoch() + 0.5, 1000);
+        }
+        const double peak = fx.fly_peak_acceleration(sim::LunarStep::Ascent);
+        fx.session.advance_to(fx.session.epoch() + 3.0 * 3600.0, 50'000'000);
+        REQUIRE(fx.session.lunar_step() == sim::LunarStep::InLlo);
+        const double m1 = fx.mass_kg();
+        const auto [low, high] = fx.llo_apsides();
+        const double dv = 380.0 * constants::standard_gravity_mps2 * std::log(m0 / m1);
+        std::printf("[lunar_ascent] liftoff %.1f t: LLO %.2f x %.2f km, %.1f t used (%.0f m/s at 380 s), peak %.2f m/s^2, %s\n",
+                    m0 / 1000.0, low / 1000.0, high / 1000.0, (m0 - m1) / 1000.0, dv, peak,
+                    fx.session.lunar_status().c_str());
+        CHECK(low > 99e3);  // spec: the LLO within 1 km
+        CHECK(high < 101e3);
+        CHECK(dv == Catch::Approx(1900.0).margin(200.0));  // spec ~1.9 km/s
+    }
 }
 
 TEST_CASE("A vacuum-Raptor failure 30 s into PEG: the sea-level Raptors finish the ascent into the LLO",
           "[sim][lunar_ascent][engine_out][terrain][data][slow]") {
     Fixture fx;
-    fx.land(hls(542e3));
+    fx.land(hls(test::hls_landed_propellant_kg));
     const double m0 = fx.mass_kg();
     REQUIRE(fx.session.plan_lunar_ascent({}, 0.0));
     double peg_start = -1.0;
@@ -183,12 +212,13 @@ TEST_CASE("A vacuum-Raptor failure 30 s into PEG: the sea-level Raptors finish t
     }
     REQUIRE(rvac < engines.size());
     fx.session.fail_engine(0, 0, rvac);
+    const double peak = fx.fly_peak_acceleration(sim::LunarStep::Ascent);
     fx.session.advance_to(fx.session.epoch() + 3.0 * 3600.0, 50'000'000);
     REQUIRE(fx.session.lunar_step() == sim::LunarStep::InLlo);
     const double m1 = fx.mass_kg();
     const auto [low, high] = fx.llo_apsides();
-    std::printf("[lunar_ascent] engine out 30 s into PEG: LLO %.2f x %.2f km, %.1f t used, %s\n", low / 1000.0,
-                high / 1000.0, (m0 - m1) / 1000.0, fx.session.lunar_status().c_str());
+    std::printf("[lunar_ascent] engine out 30 s into PEG: LLO %.2f x %.2f km, %.1f t used, peak %.2f m/s^2, %s\n",
+                low / 1000.0, high / 1000.0, (m0 - m1) / 1000.0, peak, fx.session.lunar_status().c_str());
     CHECK(low > 99e3);
     CHECK(high < 101e3);
 }
@@ -196,16 +226,19 @@ TEST_CASE("A vacuum-Raptor failure 30 s into PEG: the sea-level Raptors finish t
 TEST_CASE("An abort 1 km above the touchdown point reaches orbit", "[sim][lunar_ascent][abort][terrain][data][slow]") {
     Fixture fx;
     const auto point = touchdown_point(fx);
-    test::place_hls_at_pdi(fx.session, fx.ephemeris, fx.moon_me, point, fx.t0, 1065e3);
+    const double range = test::pdi_braking_range_m(fx.ephemeris, point, 120e3 + test::hls_pdi_propellant_kg);
+    test::place_hls_at_pdi(fx.session, fx.ephemeris, fx.moon_me, point, fx.t0, test::hls_pdi_propellant_kg, 0.0, range);
     REQUIRE(fx.session.begin_powered_descent(point, 180.0 * deg));
     REQUIRE(descend_to(fx, 1000.0, point));
     const double m0 = fx.mass_kg();
     REQUIRE(fx.session.abort_landing(0));
     CHECK(fx.session.lunar_step() == sim::LunarStep::AbortAscent);
+    const double peak = fx.fly_peak_acceleration(sim::LunarStep::AbortAscent);
     fx.session.advance_to(fx.session.epoch() + 3.0 * 3600.0, 50'000'000);
     CHECK(fx.session.lunar_step() == sim::LunarStep::InLlo);
-    std::printf("[lunar_ascent] abort from 1 km: %.1f t used, altitude %.1f km, %s\n", (m0 - fx.mass_kg()) / 1000.0,
-                fx.altitude_m() / 1000.0, fx.session.lunar_status().c_str());
+    std::printf("[lunar_ascent] abort from 1 km at %.1f t: %.1f t used, altitude %.1f km, peak %.2f m/s^2, %s\n",
+                m0 / 1000.0, (m0 - fx.mass_kg()) / 1000.0, fx.altitude_m() / 1000.0, peak,
+                fx.session.lunar_status().c_str());
     CHECK(fx.altitude_m() > 90e3);
 }
 
@@ -213,10 +246,15 @@ TEST_CASE("An abort without the propellant for orbit is refused and the landing 
           "[sim][lunar_ascent][abort][terrain][data][slow]") {
     Fixture fx;
     const auto point = touchdown_point(fx);
-    // Review focus 3: a heavy dry mass leaves ~20 t of propellant at 1 km - enough to land, far too little for orbit.
-    test::place_hls_at_pdi(fx.session, fx.ephemeris, fx.moon_me, point, fx.t0, 330e3, 420e3);
+    // Review focus 3: a heavy dry mass (420 t) leaves ~31 t of propellant at 1 km - enough to land, far too little for
+    // orbit (~1.9 km/s from ~450 t needs ~180 t).
+    constexpr double dry_kg = 420e3, propellant_kg = 330e3;
+    const double range = test::pdi_braking_range_m(fx.ephemeris, point, dry_kg + propellant_kg);
+    test::place_hls_at_pdi(fx.session, fx.ephemeris, fx.moon_me, point, fx.t0, propellant_kg, dry_kg, range);
     REQUIRE(fx.session.begin_powered_descent(point, 180.0 * deg));
     REQUIRE(descend_to(fx, 1000.0, point));
+    std::printf("[lunar_ascent] refusal case: %.1f t left at 1 km (dry %.0f t)\n", (fx.mass_kg() - dry_kg) / 1000.0,
+                dry_kg / 1000.0);
     CHECK_FALSE(fx.session.abort_landing(0));
     CHECK(fx.session.lunar_status().find("Abbruch nicht möglich") != std::string::npos);
     CHECK(fx.session.lunar_step() == sim::LunarStep::PoweredDescent);
@@ -226,9 +264,9 @@ TEST_CASE("A touchdown point out of reach ends in the automatic abort to orbit",
           "[sim][lunar_ascent][abort][terrain][data][slow]") {
     Fixture fx;
     const auto point = touchdown_point(fx);
-    // PDI only 60 km before the point at orbital speed (the braking phase needs ~450 km): the approach cannot be
+    // PDI only 60 km before the point at orbital speed (the braking phase needs >= 150 km): the approach cannot be
     // planned. (A point 30 km off the track is still reachable on the Raptors.)
-    test::place_hls_at_pdi(fx.session, fx.ephemeris, fx.moon_me, point, fx.t0, 1065e3, 0.0, 60e3);
+    test::place_hls_at_pdi(fx.session, fx.ephemeris, fx.moon_me, point, fx.t0, test::hls_pdi_propellant_kg, 0.0, 60e3);
     REQUIRE(fx.session.begin_powered_descent(point, 180.0 * deg));
     bool aborted = false;
     for (int i = 0; i < 1200 * 10 && fx.session.lunar_step() == sim::LunarStep::PoweredDescent; ++i) {
@@ -240,4 +278,24 @@ TEST_CASE("A touchdown point out of reach ends in the automatic abort to orbit",
     REQUIRE(aborted);
     fx.session.advance_to(fx.session.epoch() + 3.0 * 3600.0, 50'000'000);
     CHECK(fx.session.lunar_step() == sim::LunarStep::InLlo);
+}
+
+// Sweep of the ascent's acceleration limit (hidden: run by name; records LunarAscentParameters::max_acceleration_mps2).
+TEST_CASE("Lunar ascent acceleration limit sweep", "[.][lunar_ascent_sweep]") {
+    for (const double propellant_kg : {test::hls_landed_propellant_kg, test::hls_landed_light_propellant_kg}) {
+        for (const double limit_g : {1.0, 1.25, 1.5, 1.75, 2.0, 2.5}) {
+            Fixture fx;
+            fx.land(hls(propellant_kg));
+            gnc::LunarAscentParameters p;
+            p.max_acceleration_mps2 = limit_g * constants::standard_gravity_mps2;
+            const double m0 = fx.mass_kg();
+            REQUIRE(fx.session.plan_lunar_ascent(p, 0.0));
+            fx.session.advance_to(fx.session.epoch() + 3.0 * 3600.0, 50'000'000);
+            const double m1 = fx.mass_kg();
+            const auto [low, high] = fx.llo_apsides();
+            std::printf("[sweep] %.0f t, limit %.2f g: %s, LLO %.2f x %.2f km, %.2f t used (%.0f m/s at 380 s)\n",
+                        m0 / 1000.0, limit_g, sim::to_string(fx.session.lunar_step()), low / 1000.0, high / 1000.0,
+                        (m0 - m1) / 1000.0, 380.0 * constants::standard_gravity_mps2 * std::log(m0 / m1));
+        }
+    }
 }

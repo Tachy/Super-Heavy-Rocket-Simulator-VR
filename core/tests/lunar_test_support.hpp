@@ -5,10 +5,12 @@
 #include <cmath>
 
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/lunar_landing_guidance.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/mission/lunar_descent.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+#include "starsim/vehicle/vehicle.hpp"
 
 namespace starsim::test {
 
@@ -51,6 +53,21 @@ inline void place_hls_at_pdi(sim::FlightSession& session, const ephemeris::Ephem
     const Vec3 x_body = -along;  // retrograde: ready to brake
     const auto attitude = math::Quat::from_matrix(math::Mat3::from_columns(x_body, r_hat, cross(x_body, r_hat)));
     session.place_body(hls_with_propellant(propellant_kg, dry_kg), {r, v, attitude, {}}, t0);
+}
+
+// Periselene speed of the (h_point + 15 km) x 100 km ellipse place_hls_at_pdi starts on.
+inline double pdi_speed_mps(const ephemeris::Ephemeris& ephemeris, const mission::TouchdownPoint& point) {
+    const double rp = constants::moon_mean_radius_m + point.height_m + 15e3;
+    const double ra = constants::moon_mean_radius_m + 100e3;
+    return std::sqrt(ephemeris.gm_m3ps2(ephemeris::Body::Moon) * (2.0 / rp - 2.0 / (rp + ra)));
+}
+
+// The braking range the mission planner computes for an HLS of `mass_kg` at the place_hls_at_pdi state.
+inline double pdi_braking_range_m(const ephemeris::Ephemeris& ephemeris, const mission::TouchdownPoint& point,
+                                  double mass_kg) {
+    const vehicle::Vehicle v(hls_with_propellant(0.0), STARSIM_CONFIG_DIR);
+    const double thrust_n = gnc::set_max_thrust_n(v, gnc::hls_landing_parameters().braking_sets.front());
+    return mission::braking_range_m(pdi_speed_mps(ephemeris, point), mass_kg, thrust_n, {});
 }
 
 }  // namespace starsim::test

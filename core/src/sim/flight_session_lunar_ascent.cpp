@@ -193,15 +193,16 @@ void FlightSession::run_lunar_ascent_steps(Flying& flying) {
                 lunar_abort("Aufstieg beendet: keine geschlossene Bahn");
                 break;
             }
-            // ~18 m/s at ~400 t: the single sea-level Raptor if its start/shutdown impulse fits, else the landing
-            // thrusters (Isp 340 s, turned by differential throttling) - before the session's RCS choice (a ~40 min
-            // cold-gas burn that started at the main engines' ignition lead, far off its centre).
-            const bool flown = execute_burn(*node, {"sea_level_1"}) || execute_burn(*node, {"landing"});
+            // ~18 m/s at 150-200 t: lunar_small_burn (the single sea-level Raptor while its transients fit) - before the
+            // session's RCS choice (a ~15-40 min cold-gas burn commanded at the main engines' ignition lead, far off its
+            // centre: 93.7 x 101.9 km at 151 t, l4 C4). The landing thrusters are auxiliary engines, never lit by a burn.
+            const bool flown = lunar_small_burn(*node);
             if (flown) {
                 lunar_burns_.push_back({LunarStep::Circularize, *node, body.vehicle().mass_properties().mass_kg});
                 if (lunar_debug_) {
                     std::printf("[lunar] circularisation: %.2f m/s on %s (%.0f kN)\n", norm(node->delta_v_gcrf_mps),
-                                burn_config_.groups.front().c_str(), burn_config_.thrust_n / 1000.0);
+                                burn_config_.rcs ? "RCS" : burn_config_.groups.front().c_str(),
+                                burn_config_.thrust_n / 1000.0);
                 }
             }
             if (flown || lunar_descent_burn(*node, LunarStep::Circularize)) {

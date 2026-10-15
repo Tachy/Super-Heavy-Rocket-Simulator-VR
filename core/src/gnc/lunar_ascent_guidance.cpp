@@ -172,7 +172,9 @@ double LunarAscentGuidance::ascent_throttle(const vehicle::Vehicle& vehicle, con
     const auto [full_n, minimum] = groups_thrust_range_n(vehicle, groups);
     if (full_n <= 0.0) return 1.0;
     const double wanted = parameters_.max_acceleration_mps2 * vehicle.mass_properties().mass_kg / full_n;
-    return std::clamp(wanted, minimum, 1.0);
+    // while the steering set runs, differential throttling needs room both ways: off the minimum and off full throttle
+    const double margin = steering_ ? parameters_.steering_throttle_margin : 0.0;
+    return std::clamp(wanted, std::min(minimum + margin, 1.0 - margin), 1.0 - margin);
 }
 
 LunarAscentCommand LunarAscentGuidance::update(const vehicle::FlightBody& body, const environment::BodyFrame& moon,
@@ -250,7 +252,7 @@ LunarAscentCommand LunarAscentGuidance::update(const vehicle::FlightBody& body, 
         return cmd;
     }
     if (phase_ == LunarAscentPhase::Arrest) {
-        cmd.throttle = 1.0;
+        cmd.throttle = steering_ ? 1.0 - parameters_.steering_throttle_margin : 1.0;  // room for differential steering
         const Vec3 v_h = rel.velocity_mps - r_hat * dot(rel.velocity_mps, r_hat);
         const double full_n = groups_thrust_range_n(vehicle, ascent_groups_).first;
         const double cos_tilt = full_n > 0.0 ? std::min(1.0, arrest_weight_factor * weight_n / full_n) : 1.0;

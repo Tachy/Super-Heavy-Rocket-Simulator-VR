@@ -633,9 +633,10 @@ private:
     // `max_transient_share`: a configuration fits when its start/shutdown impulse is at most this share of the burn.
     bool start_burn(const gnc::BurnNode& node, const std::vector<BurnConfiguration>& configurations,
                     bool rcs_fallback = true, double max_transient_share = 0.25);
-    // [E] lunar_small_burn: the single Raptor's transients may be up to half the burn (the executor's cutoff allows for
-    // the tail-off) - a 10.7 m/s plane trim at ~570 t missed the quarter rule by 0.01 m/s and took 9.4 t of cold gas.
-    static constexpr double small_burn_transient_share = 0.5;
+    // [E] lunar_small_burn: the single Raptor's transients may be up to 0.6 of the burn (the executor's cutoff allows for
+    // the tail-off) - a 10.7 m/s plane trim at ~570 t missed the quarter rule by 0.01 m/s and took 9.4 t of cold gas; the
+    // 18 m/s circularisation at 151 t (transients 0.56) flew on the RCS, ~15 min off-centre: 93.7 x 101.9 km (l4 C4).
+    static constexpr double small_burn_transient_share = 0.6;
 };
 
 }  // namespace starsim::sim

@@ -52,23 +52,13 @@ struct Fixture {
     void place_at_pdi(double propellant_kg, double range_m) {
         test::place_hls_at_pdi(session, ephemeris, moon_me, point, t0, propellant_kg, 0.0, range_m);
     }
-    // Periselene speed of the (h_point + 15 km) x 100 km ellipse place_hls_at_pdi starts on.
-    double pdi_speed_mps() const {
-        const double rp = constants::moon_mean_radius_m + point.height_m + 15e3;
-        const double ra = constants::moon_mean_radius_m + 100e3;
-        return std::sqrt(ephemeris.gm_m3ps2(ephemeris::Body::Moon) * (2.0 / rp - 2.0 / (rp + ra)));
-    }
-    double vacuum_set_max_thrust_n() const {
-        const vehicle::Vehicle v(test::hls_with_propellant(0.0), STARSIM_CONFIG_DIR);
-        return gnc::set_max_thrust_n(v, gnc::hls_landing_parameters().braking_sets.front());
-    }
     // Placed at PDI with the braking range the mission planner computes for this mass.
     void place_at_pdi(double propellant_kg) {
         const double m = 120e3 + propellant_kg;
         const mission::BrakingRangeParameters p;
-        const double range = mission::braking_range_m(pdi_speed_mps(), m, vacuum_set_max_thrust_n(), p);
+        const double range = test::pdi_braking_range_m(ephemeris, point, m);
         std::printf("[lunar_descent] PDI %.0f t, %.1f m/s, range %.1f km (fraction %.2f, factor %.2f)\n", m / 1000.0,
-                    pdi_speed_mps(), range / 1000.0, p.thrust_fraction, p.range_factor);
+                    test::pdi_speed_mps(ephemeris, point), range / 1000.0, p.thrust_fraction, p.range_factor);
         place_at_pdi(propellant_kg, range);
     }
 };
