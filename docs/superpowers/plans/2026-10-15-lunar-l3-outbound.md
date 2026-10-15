@@ -1540,3 +1540,7 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
   - NRHO phase: set by the planned arrival (first perilune = arrival); no Gateway ephemeris (M9).
   - NRHO station keeping: one targeted burn per apolune when the predicted perilune miss exceeds 1 km [E].
   - User 2026-10-15: plan approved, execution native (executing-plans; one opus review at the end).
+- Task 1 (5897cc9): position targeter, `[targeter]` 2/2. Rulings: `normalized()` (plan said `normalize`); local
+  Cramer's-rule 3x3 solve (no Mat3 inverse in `math`); the truth case is a 3.1 km/s TLI-like burn with a first guess
+  3,000 m/s prograde - the plan's 1 km/s / 20 h case is ~8 revolutions and Newton from zero diverged (3,700 km miss),
+  so callers must pass a patched-conic first guess. Executor ledger: `.superpowers/sdd/2026-10-15-lunar-l3-outbound/`.
