@@ -1539,3 +1539,4 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
     alternative - ticking the whole coast - costs ~70 M ticks per transfer.
   - NRHO phase: set by the planned arrival (first perilune = arrival); no Gateway ephemeris (M9).
   - NRHO station keeping: one targeted burn per apolune when the predicted perilune miss exceeds 1 km [E].
+  - User 2026-10-15: plan approved, execution native (executing-plans; one opus review at the end).
