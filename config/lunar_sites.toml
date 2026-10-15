@@ -1,0 +1,13 @@
+# Lunar landing sites (MOON_ME latitude / longitude, the frame of the LOLA maps). The data pipeline crops a LOLA tile
+# around each site (tools/data_pipeline/lunar_tile.py -> data/terrain/<id>.toml).
+[sources]
+artemis_2024 = "NASA, Artemis III candidate landing regions (2024-10-28): nine regions incl. Mons Mouton Plateau and Mons Mouton"
+im2 = "https://en.wikipedia.org/wiki/Mons_Mouton (retrieved 2026-10-15): IM-2 Athena landed 2025-03-06 at 84 deg 47' 26\" S, 29 deg 11' 45\" E"
+
+[[site]]
+id = "mons_mouton_im2"
+name = "Mons Mouton (IM-2)"
+latitude_deg = -84.7906               # [S:im2] in the Mons Mouton region (Artemis III candidates [S:artemis_2024])
+longitude_deg = 29.1957               # [S:im2] east
+tile_half_size_m = 10000.0            # [E] 20 x 20 km tile
+product = "LDEM_80S_20M"

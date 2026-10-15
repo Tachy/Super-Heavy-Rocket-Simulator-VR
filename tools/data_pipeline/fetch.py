@@ -14,6 +14,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+import lunar_tile
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SOURCES_FILE = Path(__file__).with_name("sources.toml")
 
@@ -56,6 +58,9 @@ def main() -> int:
     for source in sources:
         target = REPO_ROOT / source["target"]
         print(f"[{source['id']}] {source['name']}")
+        if source.get("kind") == "lunar_tiles":  # LOLA: range-cropped site tiles + the global grid (lunar_tile.py)
+            lunar_tile.fetch_all(load_sources(), REPO_ROOT, args.force)
+            continue
         if target.exists() and not args.force:
             print("  already present")
         else:

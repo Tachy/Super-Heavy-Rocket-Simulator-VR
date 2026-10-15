@@ -154,3 +154,21 @@ url = "https://x.com/i/broadcasts/1yKAPwdemygxb"
 target = "tests/validation/telemetry/f9_starlink15-25_2026-10-12.csv"
 license = "Factual values displayed in the public SpaceX webcast, transcribed by this project (video not redistributed)"
 credit = "Telemetry: SpaceX webcast; transcription: this project"
+
+[[source]]
+id = "lola_ldem_16"
+name = "LRO LOLA gridded elevation LDEM_16 (global, 16 px/deg) - lunar terrain outside the site tiles"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/cylindrical/img/ldem_16.img"
+target = "data/terrain/ldem_16.toml"
+kind = "lunar_tiles"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
+
+[[source]]
+id = "lola_ldem_80s_20m"
+name = "LRO LOLA polar gridded elevation LDEM_80S_20M (20 m/px, 80-90 S) - cropped to the landing-site tiles of config/lunar_sites.toml"
+url = "https://pds-geosciences.wustl.edu/lro/lro-l-lola-3-rdr-v1/lrolol_1xxx/data/lola_gdr/polar/img/ldem_80s_20m.img"
+target = "data/terrain/mons_mouton_im2.toml"
+kind = "lunar_tiles"
+license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
+credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
