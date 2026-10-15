@@ -80,7 +80,9 @@ flow separation (vacuum engines).
   An RCS tank's mass is part of the stage's real dry mass: carve it out of `dry_mass_kg`. `behind_nose_cone = true` (pod
   or thruster): fires only while the stage's nose cone is open (`[[stage]] nose_cone = true`, Crew Dragon).
 - `[[stage.engine_group]] abort_only = true`: launch escape engines (SuperDraco), loaded as data and never lit by the
-  session (milestone d2).
+  session (milestone d2). `landing_only = true`: landing thrusters (HLS), never in burn configurations or `ignite()`,
+  flown by landing guidance only (lunar l4). `station_m`: thrust point above the stage bottom (default 0, the base);
+  `cant_deg`: thrust tilted towards the axis, the exhaust away from the hull (a canted group cannot gimbal).
 - `[stage.catch_pins]`: hardpoints the tower arms catch, one per entry of `azimuths_deg` (from body +y
   towards +z, like the grid fins), `station_m` (from the bottom of the stage), `protrusion_m` (beyond the
   hull), `max_load_n` (structural limit per pin; above it the catch is an impact).
@@ -98,9 +100,16 @@ flow separation (vacuum engines).
 - `[stage.landing_legs]`: one leg per entry of `azimuths_deg` (at least three), deployed geometry
   (`footprint_radius_m` from the axis, `foot_station_m` below the stage bottom: negative), `deploy_time_s`, and the
   per-leg crush core (`stiffness_n_m` and `damping_n_s_m` until the force reaches `crush_force_n`, then it crushes
-  plastically over at most `stroke_m`; more is an impact) and the foot's Coulomb `friction`.
+  plastically over at most `stroke_m`; more is an impact) and the foot's Coulomb `friction`. `fixed = true`: always
+  deployed (HLS; `deploy_time_s` not needed).
 - Falcon 9 octaweb: `center` (1, the landing engine), `pair` (2 opposite ring engines: with the centre the 3-engine set
   of boostback and entry burn, thrust on the axis), `ring` (the other 6).
+
+## Lunar landing sites (`lunar_sites.toml`)
+- `[[site]]`: `id`, `name`, `latitude_deg` / `longitude_deg` (MOON_ME, the frame of the LOLA maps), `tile_half_size_m`
+  (half the side of the terrain tile), `product` (LOLA product the tile is cropped from: `"LDEM_80S_20M"`).
+  `python tools/data_pipeline/fetch.py` writes the tile to `data/terrain/<id>.toml` / `.i16` (and the global grid
+  `ldem_16`); `sim::load_lunar_terrain` reads them.
 
 ## Launch sites (`launch_sites.toml`)
 - `[[site]]`: `id`, `name`, `latitude_deg`, `longitude_deg`, `height_m` (ground above WGS84), `kind`

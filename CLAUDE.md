@@ -558,6 +558,25 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   integration of the same forces (the DE440 Moon's acceleration as the frame's) 0.020 / 0.025 m; 200 Hz ticks 20 min
   5e-5 m. A Moon-centred `PointMassGravity` is a different model (its frame accelerates as point-mass Earth and Sun pull
   the Moon; DE440's Moon also feels the planets, Earth J2 and tides): 0.33 / 4.4 m in a day.
+  l2 HLS and terrain (plan `docs/superpowers/plans/2026-10-15-lunar-l2-hls-terrain.md`): `config/vehicles/starship_hls.toml`
+  (120 t dry [E], Block 3 tanks and Raptors, no heat shield / flaps / pins, ship RCS; 12 landing thrusters [E] 46 kN at
+  40 m canted 15 deg - 1.5 lunar weights of the ~221 t landing mass, hover from 131 t - `landing_only`: never in burns or
+  `ignite()`). Engine groups take `station_m` / `cant_deg`. Legs [E] fixed, six, footprint radius 12 m (user 2026-10-15):
+  a vertical touchdown on a slope lands on the uphill feet and pivots freely through the slope angle (CG ~21 m up), so the
+  slope limit is set by the stance - 8 m ~5 deg, 10 m 7 deg, 12 m >= 9 deg (NASA's Artemis limit ~8-10 deg); absorber
+  1e7 N/m, 1e6 N s/m, crush 1.5 MN (no crush at 1.5 m/s on flat ground). Drop tests (1 m/s + 0.5 m): 0 / 5 / 8 deg land,
+  25 deg tips over; static tip-over 26 deg. Terrain: `config/lunar_sites.toml` (default `mons_mouton_im2`, IM-2's landing
+  point [S], 5,322 m above the sphere); `fetch.py` crops LOLA `LDEM_80S_20M` (20 m/px, polar stereographic) to
+  20 x 20 km per site by one HTTP range request (61 MB of the 1.8 GB) and fetches the global `LDEM_16` (16 px/deg) -
+  `data/terrain/`; the tile's orientation is checked against LDEM_16 (rms 40 m; mirrored 117-304 m).
+  `environment::LunarTerrain` (tile inside, global grid outside, 1 km smoothstep blend; normals by central differences
+  over 10 m) through `ReferenceBody::set_terrain` / `surface_height_m` / `surface_normal_fixed`;
+  `FlightSession::set_moon_terrain`, `set_lunar_landing_site` (`sim::load_lunar_terrain`, `sim::lunar_site`). Leg landings
+  work on any reference body (`sim::LegSite` with a tracking radius - the site's tile; outside it, or without a lunar
+  site, `FlightBody`'s own ground contact, `set_legs_on_site`) and press the feet along the surface normal
+  (`contact::SurfaceField`: `PlaneField`, `TerrainField`); Earth landings are bit-identical. FlightBody's ground at the
+  Moon is the terrain (the sphere without one). Earth DEM tiles (e.g. Copernicus GLO-30) are open (user 2026-10-15;
+  `ReferenceBody::set_terrain` takes a `LunarTerrain` so far).
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 
