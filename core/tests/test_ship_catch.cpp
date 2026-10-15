@@ -147,7 +147,7 @@ TEST_CASE("Ship flips at the gate and is caught", "[ship][landing][catch]") {
 // Dispersed gate states (fixed seeds): the entry guidance's gate accuracy is metres (b2 campaign), the belly flop adds
 // wind-free scatter; +-10 m per axis, +-10 m/s per axis, landing propellant +-5 %, alpha and bank +-5 deg. One case
 // loses the first engine to be dropped (sea_level_3) in the flip: the switch to two engines comes early.
-TEST_CASE("Ship catch campaign: gate dispersions and an engine failure", "[ship][catch][validation]") {
+TEST_CASE("Ship catch campaign: gate dispersions and an engine failure", "[ship][catch][validation][slow]") {
     std::vector<Gate> cases;
     for (unsigned seed = 1; seed <= 20; ++seed) cases.push_back(dispersed_gate(seed));
     Gate failure = nominal_gate();

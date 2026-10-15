@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <string>
 
@@ -91,7 +92,9 @@ namespace {
 std::filesystem::path patched_config(const std::string& from, const std::string& to) {
     namespace fs = std::filesystem;
     const fs::path src = STARSIM_CONFIG_DIR;
-    const fs::path dir = fs::temp_directory_path() / "starsim_parachute_config";
+    // One directory per patch: test cases run as parallel processes (ctest -j) and must not share it.
+    const fs::path dir =
+        fs::temp_directory_path() / ("starsim_parachute_config_" + std::to_string(std::hash<std::string>{}(from + to)));
     fs::remove_all(dir);
     fs::create_directories(dir);
     fs::copy(src, dir, fs::copy_options::recursive);

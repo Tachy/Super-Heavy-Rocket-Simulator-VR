@@ -109,4 +109,5 @@ target_compile_definitions(starsim_core_tests PRIVATE
 )
 
 include(Catch)
-catch_discover_tests(starsim_core_tests)
+# Catch tags become CTest labels: `ctest -LE slow` skips the long campaigns (tools/build.ps1 -Fast).
+catch_discover_tests(starsim_core_tests ADD_TAGS_AS_LABELS)

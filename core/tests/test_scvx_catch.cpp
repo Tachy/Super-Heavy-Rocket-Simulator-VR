@@ -192,7 +192,7 @@ test::CatchRun fly_dispersed(const Dispersion& d) {
 
 }  // namespace
 
-TEST_CASE("SCvx catch campaign: dispersions and an engine failure", "[gnc][catch][validation]") {
+TEST_CASE("SCvx catch campaign: dispersions and an engine failure", "[gnc][catch][validation][slow]") {
     std::vector<Dispersion> cases;
     for (unsigned seed = 1; seed <= 20; ++seed) cases.push_back(dispersion(seed));
     Dispersion failure;

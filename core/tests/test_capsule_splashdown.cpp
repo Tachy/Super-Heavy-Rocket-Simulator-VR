@@ -389,8 +389,8 @@ void fly_dispersed_campaign(int first, int count) {
 
 }  // namespace
 
-TEST_CASE("Crew Dragon return campaign: cases 0-3", "[dragon][mission][validation]") { fly_dispersed_campaign(0, 4); }
-TEST_CASE("Crew Dragon return campaign: cases 4-7", "[dragon][mission][validation]") { fly_dispersed_campaign(4, 4); }
+TEST_CASE("Crew Dragon return campaign: cases 0-3", "[dragon][mission][validation][slow]") { fly_dispersed_campaign(0, 4); }
+TEST_CASE("Crew Dragon return campaign: cases 4-7", "[dragon][mission][validation][slow]") { fly_dispersed_campaign(4, 4); }
 
 // STARSIM_DRAGON_CASE=<0-7> (with STARSIM_DEBUG_ENTRY=1 / STARSIM_DEBUG_DEORBIT=1 for the guidance).
 TEST_CASE("Crew Dragon return single case", "[.][dragon]") {

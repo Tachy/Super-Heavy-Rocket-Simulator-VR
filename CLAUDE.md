@@ -87,11 +87,17 @@ cd external/godot-cpp; ../godot/bin/godot.windows.editor.double.x86_64.console.e
 ```
 Every build:
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/build.ps1          # core + GDExtension + ctest
+powershell -ExecutionPolicy Bypass -File tools/build.ps1          # core + GDExtension + full ctest (parallel, ~3 min)
 powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings
+powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -Fast                  # without [slow] campaigns (~1 min)
+powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -TestFilter "[cr3bp]"  # only matching tags
 # Godot smoke test (extension loads, float64 end to end)
 external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --path game --script res://tests/smoke_test.gd
 ```
+- Test workflow (user 2026-10-15): during a task run only the touched tags (`-TestFilter`); before every push run
+  `-Fast`; run the full suite (with the `[slow]` campaigns) when a task touches guidance, flight sessions, vehicles or
+  aero, and before a plan's final review. Tag a new test case `[slow]` when it takes more than ~40 s.
+- ctest runs test cases as parallel processes: tests must not share temp files or directories (make names unique).
 - Visual check (needs GPU, no --headless): `godot --path game --script res://tests/render_check.gd --
   --utc=2024-04-08T18:42:00 --focus=earth --view_from=moon --out=<png>`; ground views with
   `--lat= --lon= --look_at_moon --fov=`. Read the PNG to verify rendering changes.

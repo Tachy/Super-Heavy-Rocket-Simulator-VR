@@ -640,7 +640,7 @@ void report_campaign(const char* name, const std::vector<AsdsDispersion>& cases,
 
 }  // namespace
 
-TEST_CASE("Falcon 9 ASDS landing campaign: dispersions at ignition", "[gnc][falcon9][asds][validation]") {
+TEST_CASE("Falcon 9 ASDS landing campaign: dispersions at ignition", "[gnc][falcon9][asds][validation][slow]") {
     // As for RTLS (spec c4): +-10 m, +-3 m/s per axis, +-5 % propellant, +-3 deg, truth aero +-10 %, around the
     // nominal mission's slanted ignition state (~0.8 km short of the deck, ~90 m/s across).
     const auto& n = nominal_return();
@@ -672,11 +672,11 @@ void meco_campaign(const char* name, unsigned first_seed, unsigned last_seed, bo
 
 }  // namespace
 
-TEST_CASE("Falcon 9 ASDS landing campaign: dispersed MECO states (1 of 2)", "[gnc][falcon9][asds][validation]") {
+TEST_CASE("Falcon 9 ASDS landing campaign: dispersed MECO states (1 of 2)", "[gnc][falcon9][asds][validation][slow]") {
     meco_campaign("MECO 1", 101, 110, true);
 }
 
-TEST_CASE("Falcon 9 ASDS landing campaign: dispersed MECO states (2 of 2)", "[gnc][falcon9][asds][validation]") {
+TEST_CASE("Falcon 9 ASDS landing campaign: dispersed MECO states (2 of 2)", "[gnc][falcon9][asds][validation][slow]") {
     meco_campaign("MECO 2", 111, 120, false);
 }
 

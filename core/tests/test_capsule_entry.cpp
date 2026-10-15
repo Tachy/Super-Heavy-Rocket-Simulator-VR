@@ -817,7 +817,7 @@ GateResult fly_campaign_case(int seed, double& peak_g, bool& crew_warning) {
 
 }  // namespace
 
-TEST_CASE("Capsule entry campaign reaches the drogue gate", "[dragon][entry][validation]") {
+TEST_CASE("Capsule entry campaign reaches the drogue gate", "[dragon][entry][validation][slow]") {
     int warnings = 0;
     double worst_miss = 0.0;
     for (int seed = 1; seed <= 12; ++seed) {

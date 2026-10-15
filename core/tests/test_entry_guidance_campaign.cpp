@@ -171,7 +171,7 @@ Outcome fly(const Case& c, int index) {
 }  // namespace
 
 TEST_CASE("Entry guidance brings the ship to the Starbase flip gate from dispersed entries",
-          "[ship][guidance][validation]") {
+          "[ship][guidance][validation][slow]") {
     std::vector<Case> cases{Case{}};
     std::mt19937 rng(20261013);
     std::uniform_real_distribution<double> u(-1.0, 1.0);

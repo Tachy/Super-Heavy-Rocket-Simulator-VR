@@ -256,10 +256,10 @@ std::vector<Case> dispersed_cases(int first, int count) {
 
 // Campaign: the orbit phase sets which pass is taken (wait, crossrange, arrival heading); dispersed orbits, propellant
 // and deorbit-burn execution errors (+-1 % magnitude, 0.5 deg pointing) are flown out by the entry guidance.
-TEST_CASE("Ship return campaign: orbit phase 0-135 deg", "[ship][mission][validation]") { fly_campaign(phase_cases(0, 4), "phase"); }
-TEST_CASE("Ship return campaign: orbit phase 180-315 deg", "[ship][mission][validation]") { fly_campaign(phase_cases(4, 4), "phase"); }
-TEST_CASE("Ship return campaign: dispersions 1-3", "[ship][mission][validation]") { fly_campaign(dispersed_cases(0, 3), "dispersed"); }
-TEST_CASE("Ship return campaign: dispersions 4-6", "[ship][mission][validation]") { fly_campaign(dispersed_cases(3, 3), "dispersed"); }
+TEST_CASE("Ship return campaign: orbit phase 0-135 deg", "[ship][mission][validation][slow]") { fly_campaign(phase_cases(0, 4), "phase"); }
+TEST_CASE("Ship return campaign: orbit phase 180-315 deg", "[ship][mission][validation][slow]") { fly_campaign(phase_cases(4, 4), "phase"); }
+TEST_CASE("Ship return campaign: dispersions 1-3", "[ship][mission][validation][slow]") { fly_campaign(dispersed_cases(0, 3), "dispersed"); }
+TEST_CASE("Ship return campaign: dispersions 4-6", "[ship][mission][validation][slow]") { fly_campaign(dispersed_cases(3, 3), "dispersed"); }
 
 // Diagnostics: one return from the orbit phase in STARSIM_RETURN_PHASE (deg).
 TEST_CASE("Ship return single case", "[.][ship][mission]") {
