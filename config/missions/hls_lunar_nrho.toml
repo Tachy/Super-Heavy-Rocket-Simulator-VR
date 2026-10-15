@@ -1,0 +1,33 @@
+# Lunar landing, mission 1 of the lunar spec (l3: outbound part; l4 adds descent, surface stay and ascent). The HLS,
+# refuelled in the LEO depot's orbit, departs from 200 x 200 km on its autopilot: best departure in the parking orbit,
+# TLI on the vacuum Raptors, mid-course corrections, powered lunar swing-by and insertion into the 9:2 NRHO
+# (in-direct transfer, Kikuchi et al. ISSFD 2024). [orbit] is the scenario start.
+
+[mission]
+name = "HLS-Mondlandung (NRHO)"
+kind = "lunar_landing"           # FlightSim.start_mission dispatches on it (absent: "ascent")
+vehicle = "starship_hls"
+site = "mons_mouton_im2"         # config/lunar_sites.toml (l4 lands there)
+
+[orbit]
+epoch_utc = "2026-11-02T00:00:00"
+height_km = 200.0                # [S] spec: 200 x 200 km after the depot (NASA OIG IG-26-004)
+inclination_deg = 28.5           # [E] Florida launch azimuth east; the RAAN is computed (plane through the Moon at arrival)
+argument_of_latitude_deg = 0.0
+
+[transfer]
+flight_time_days = 4.5           # [E] TLI -> the reference perilune the flight joins (swing-by about then)
+earliest_departure_h = 0.5       # [E]
+mcc_after_tli_days = [1.0, 2.5]  # [E] spec
+
+[lunar_orbit]
+kind = "nrho"
+
+[nrho]
+# 9:2 synodic-resonant southern L2 NRHO, CR3BP state at apolune (Earth-Moon, nondimensional)
+# [S: Zimovan, Howell & Davis 2017, Table 1]; the reference is rebuilt by multiple shooting in the full model.
+apolune_position = [1.0221, 0.0, -0.1821]
+apolune_velocity = [0.0, -0.1033, 0.0]
+revolutions = 9                  # [S] per ...
+synodic_months = 2               # [S] ... synodic months
+reference_revolutions = 6        # [E] span of the reference (~39 d)

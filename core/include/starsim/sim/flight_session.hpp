@@ -284,6 +284,10 @@ public:
     const AutopilotStatus& autopilot() const { return autopilot_; }
     const gnc::AscentGuidance* ascent_guidance() const { return guidance_.get(); }
     double gm_earth_m3ps2() const { return gm_earth_; }
+    // The session's models (mission planning outside the session, e.g. place_lunar_landing_mission).
+    const environment::PointMassGravity& gravity() const { return gravity_; }
+    const ephemeris::Ephemeris& ephemeris() const { return *env_.ephemeris; }
+    const frames::BodyOrientation* moon_orientation() const { return moon_orientation_; }  // nullptr: Earth only
 
     // Manoeuvre execution on the controlled body (RCS orientation, timed ignition, closed-loop cutoff).
     // Burns smaller than the main engines' start + shutdown impulse (they would overshoot), or on a vehicle without main

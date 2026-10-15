@@ -4,6 +4,7 @@
 
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/capsule_return_mission.hpp"
+#include "starsim/sim/lunar_landing_mission.hpp"
 
 namespace starsim::sim {
 
@@ -24,6 +25,15 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
             s.epoch = time.from_utc(m.epoch_utc);
             place_capsule_return_mission(session, m, config_dir, s.epoch);
             s.return_planned = session.plan_capsule_return(capsule_return_parameters(m));
+            break;
+        }
+        case config::MissionKind::LunarLanding: {
+            const auto m = config::load_lunar_landing_mission(config_dir, mission_id);
+            s.epoch = time.from_utc(m.epoch_utc);
+            place_lunar_landing_mission(session, m, config_dir, s.epoch);
+            s.return_planned = session.plan_lunar_outbound(
+                lunar_outbound_parameters(m, session.gravity(), session.ephemeris(), s.epoch));
+            if (!s.return_planned) s.refusal = session.lunar_status();
             break;
         }
         case config::MissionKind::ShipReturn:

@@ -7,12 +7,13 @@
 #include <utility>
 #include <vector>
 
+#include "starsim/math/vec3.hpp"
 #include "starsim/time/utc_date_time.hpp"
 
 namespace starsim::config {
 
 // [mission] kind: what the mission file describes (FlightSim.start_mission dispatches on it). Absent: "ascent".
-enum class MissionKind { Ascent, ShipReturn, CapsuleReturn };
+enum class MissionKind { Ascent, ShipReturn, CapsuleReturn, LunarLanding };
 MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_view mission_id);
 
 // Ship return from orbit (config/missions/<id>.toml): the scenario's start orbit and the deorbit planning settings.
@@ -60,6 +61,30 @@ struct CapsuleReturnMission {
 };
 
 CapsuleReturnMission load_capsule_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
+
+// HLS lunar landing (config/missions/<id>.toml, lunar l3: the outbound part; l4 adds descent, surface stay and
+// ascent): the circular Earth parking orbit at the start (its RAAN is computed: plane through the Moon at arrival), the
+// transfer settings and the lunar orbit (LLO or NRHO) the flight inserts into.
+struct LunarLandingMission {
+    std::string id;
+    std::string name;
+    std::string vehicle_id;
+    std::string site_id;  // config/lunar_sites.toml (l4 lands there)
+    time::UtcDateTime epoch_utc;  // start in the parking orbit
+    double parking_height_m = 0.0;  // circular, above the equatorial radius
+    double parking_inclination_rad = 0.0;
+    double argument_of_latitude_rad = 0.0;
+    double flight_time_s = 0.0;  // start -> arrival (LLO periselene / NRHO perilune the flight joins), planned
+    double earliest_departure_s = 0.0;
+    std::vector<double> mcc_after_tli_s;
+    std::string lunar_orbit;  // "llo" | "nrho"
+    double llo_altitude_m = 0.0;
+    double llo_inclination_rad = 0.0;
+    math::Vec3 nrho_apolune_position{}, nrho_apolune_velocity{};  // CR3BP seed (nondimensional)
+    int nrho_revolutions = 0, nrho_synodic_months = 0, nrho_reference_revolutions = 0;
+};
+
+LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
 
 // Where a mission's drone ship waits ([drone_ship] of an ascent mission): the nominal impact point of its first stage.
 struct MissionDroneShip {
