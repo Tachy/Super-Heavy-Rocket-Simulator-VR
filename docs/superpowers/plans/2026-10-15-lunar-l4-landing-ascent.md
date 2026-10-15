@@ -1824,8 +1824,16 @@ Design decisions (comments in the code):
   the ring: thrust through the CG, Isp 380 s instead of 350 s: ~10 t of the ~95 t ascent propellant saved): landing
   -> vacuum is a disjoint switch as in the braking phase, and with no gimbal acting the attitude controller's body
   torque goes to the RCS (Task 6's braking path, reused). Thrust 2.68-8.94 MN: at ~130-660 t PEG flies mostly near the
-  minimum (~2 g at burnout on the 120 t HLS); the guidance throttles down to the minimum, never below. Engine-out is
-  not modelled (a fixed RVac out would need `sea_level_1` - noted for later). Aborts fly on the same set.
+  minimum (~2 g at burnout on the 120 t HLS); the guidance throttles down to the minimum, never below. Aborts fly on
+  the same set.
+- **Vacuum-Raptor engine-out (user 2026-10-15).** A failed RVac (`fail_engine`; the guidance sees the engine's state)
+  makes the off-axis thrust of the other two a torque no RCS holds: the other two are cut at once, the RCS damps the
+  rates their shutdown transient left and holds the PEG attitude, and the three gimballed sea-level Raptors start
+  (`startup_s`); PEG continues on them (their thrust and flow, Isp 350 s). Below `raptor_start_height_m` + the drop
+  during the start-up the landing thrusters stay or come back on until the sea-level Raptors carry the weight. The
+  same rule holds in Task 6's braking phase (the braking guidance continues on the three sea-level Raptors).
+  Test (Task 8, `[lunar_ascent]`): one RVac failed 30 s into PEG -> the LLO within the same 1 km; the extra propellant
+  printed and ledgered.
 - **PEG target:** `radius = R + site_height + insertion_altitude_above_site_m`, horizontal speed = vis-viva at that
   periselene of the ellipse to `R + aposelene_altitude_m`, radial speed 0, `terminal_semi_major_axis_m` = that
   ellipse's; plane: polar through the liftoff point (normal = `normalized(cross(r_hat, north_hat))` for `northerly`, its
