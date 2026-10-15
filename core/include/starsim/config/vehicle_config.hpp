@@ -144,6 +144,7 @@ struct LandingLegConfig {
     double stiffness_n_m = 0.0;        // before the core crushes
     double damping_n_s_m = 0.0;
     double friction = 0.0;             // Coulomb, foot on the surface
+    bool fixed = false;                // always deployed (HLS): no deployment, deploy_time_s unused
 };
 
 // Heat shield and structure of a vehicle that enters the atmosphere (the ship). Judged while the stage flies alone.

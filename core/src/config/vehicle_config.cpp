@@ -332,7 +332,9 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         }
         s.landing_legs.footprint_radius_m = doc.positive(*legs, "footprint_radius_m");
         s.landing_legs.foot_station_m = doc.number(*legs, "foot_station_m");
-        s.landing_legs.deploy_time_s = doc.positive(*legs, "deploy_time_s");
+        s.landing_legs.fixed = (*legs)["fixed"].value_or(false);
+        s.landing_legs.deploy_time_s = s.landing_legs.fixed ? doc.number_or(*legs, "deploy_time_s", 0.0)
+                                                            : doc.positive(*legs, "deploy_time_s");
         s.landing_legs.stroke_m = doc.positive(*legs, "stroke_m");
         s.landing_legs.crush_force_n = doc.positive(*legs, "crush_force_n");
         s.landing_legs.stiffness_n_m = doc.positive(*legs, "stiffness_n_m");

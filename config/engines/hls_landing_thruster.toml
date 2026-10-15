@@ -1,0 +1,37 @@
+# HLS landing thruster - methalox, high on the hull (SpaceX HLS concept: landing engines against plume-surface
+# interaction). SpaceX publishes no figures: every value is an estimate [E] sized by the lunar l2 plan (12 thrusters lift
+# ~1.5 lunar weights of the ~221 t landing mass and can hover).
+[sources]
+lunar_spec = "docs/superpowers/specs/2026-10-14-lunar-missions-design.md (l2)"
+
+[engine]
+id = "hls_landing_thruster"
+name = "HLS landing thruster"
+cycle = "pressure-fed"               # [E]
+propellant = "methalox"
+mixture_ratio = 3.6                  # [E] as Raptor (shared tanks)
+chamber_pressure_pa = 20e5           # [E]
+
+[performance]
+reference_pressure_pa = 0.0          # vacuum rating
+thrust_ref_n = 46.0e3                # [E] 12 x 46 kN = 552 kN
+isp_ref_s = 340.0                    # [E]
+nozzle_exit_diameter_m = 0.45        # [E]
+max_ambient_pressure_pa = 1000.0     # [E] vacuum only: never used in Earth's atmosphere
+
+[throttle]
+min = 0.40                           # [E] all twelve hover from ~131 t
+max = 1.00
+rate_per_s = 2.0                     # [E]
+
+[gimbal]
+max_angle_deg = 0.0                  # fixed, canted
+rate_deg_s = 0.0
+
+[mass]
+dry_kg = 0.0                         # in the HLS dry mass
+vehicle_side_hardware_kg = 0.0
+
+[timing]
+startup_s = 1.0                      # [E]
+shutdown_s = 0.3                     # [E]

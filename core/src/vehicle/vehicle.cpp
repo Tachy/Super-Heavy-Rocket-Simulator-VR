@@ -125,6 +125,7 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
     }
     rebuild_aero();
     refresh_rcs_availability();
+    if (has_landing_legs() && stages_.front().config.landing_legs.fixed) set_leg_deployment(1.0);  // always out
 }
 
 double Vehicle::length_m() const {
@@ -315,7 +316,7 @@ void Vehicle::set_leg_deployment(double fraction) {
 }
 
 void Vehicle::update_landing_legs(double dt_s) {
-    if (!legs_deploying_) return;
+    if (!legs_deploying_ || leg_deployment_ >= 1.0) return;
     leg_deployment_ = std::min(1.0, leg_deployment_ + dt_s / stages_.front().config.landing_legs.deploy_time_s);
 }
 
