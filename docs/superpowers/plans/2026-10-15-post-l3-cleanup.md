@@ -868,4 +868,30 @@ Then one final review (opus) of `4264952..HEAD`; fix Critical / Important, list 
 
 ## Ledger
 
-- (empty - filled during execution)
+Rulings:
+- Task 1: Ruling: contact/primitives.hpp had an identical column(Mat3,int) that became ambiguous via ADL with math::column — removed it (math's is the same) — cost if wrong: none, same formula.
+- Task 1: Ruling: the plan's tag run (incl. [outbound],[mission]) runs serially in one process (>27 min, pulled in Dragon campaigns) — aborted; verified with -Fast (parallel, 484/484, 1:48); slow lunar flights wait for the Task 5 full suite — cost if wrong: a slow-only regression found in Task 5 instead of here.
+- Task 2: Ruling: launch_site_from_config / drone_ship_site (free functions declared in flight_session.hpp, not in the plan's lists) stay in flight_session.cpp — cost if wrong: none, a later move.
+- Task 2: Ruling: Step 3's "remove while the build stays green" would strip every include (all reach the TU through flight_session.hpp); kept the std/starsim headers each file uses directly (include-what-you-use), dropped only unused ones (descent_snapshot was dead) — cost if wrong: a few redundant includes.
+- Task 3: Ruling: plan's tag run "[gnc],[catch],[booster]" pulled in slow campaigns serially again — aborted; ran "[gnc]~[slow],[catch]~[slow],[booster]~[slow]" (118 cases) + -Fast — cost if wrong: slow-only regression surfaces in Task 5 full suite.
+- Task 3: Ruling: detail header also gets <algorithm> (engine_set uses std::find) and using math::Mat3/Vec3 inside booster_return_detail (moved code unchanged); prediction unit drops the unused Mat3 using; includes trimmed by direct use (burns: geodetic only; main: no kepler) — cost if wrong: none.
+- Task 4: Ruling: test defects fixed in the tests, not the code - HLS separation test also merges hls.engines into the stack (Vehicle threw 'invalid map key'); forced-burn test uses advance_to(..., 100000) (default 4000 ticks stopped short of the node) and additionally checks the 3 RVacs fire and ship/canted is not in the configuration; lunar session test uses an upright attitude helper (upright_above_moon) from the start - cost if wrong: none.
+- Task 5: Ruling: Moon-bound test checks "schon beim Mond" instead of "Mond" (every refusal says "Kein Mondflug") - cost if wrong: none.
+- Task 5: Ruling: bindings/src/flight_sim.cpp still used contact::column removed in Task 1 (bindings not built until the full suite) - switched to math::column - cost if wrong: none, same formula.
+- Task 5: Ruling: Step 6 'record the new numbers' - ctest hides passing output; the slow lunar flights pass their l3 bands (LLO < 1 km, NRHO bands) in the full suite, exact numbers not re-recorded - cost if wrong: docs keep the l3 numbers.
+
+Executed 2026-10-15 inline (executing-plans): Tasks 1-5 complete (4a60a02, 260f7a4, db73a46, f35801e, 4300ef8);
+full suite 518/518 + Godot smoke test. Final review (opus) of 4264952..4300ef8: 0 Critical, 0 Important.
+
+Deferred minors (final review):
+- Automatic MCCs are still planned only `burn_preparation_s` ahead (no `small_burn_margin_s`); harmless while the MCC
+  burn is < 240 s - add the margin or document the exemption.
+- `min_departure_lead_s` (1800 s) comment/docs say "120 s preparation + half a ~7 min burn" (~330 s): state the real
+  reason (margin for the finite-TLI re-solve, equals the planner default); a TLI window < 30 min away now waits one
+  parking-orbit revolution - say so in docs/subsystems.md.
+- `j2_insertion.cpp` Gauss-Newton now refuses a nearly collinear Jacobian by the relative 1e-14 test (was |det| <
+  1e-300); `allocate_fins` returns zero deflections on refusal (practically unreachable) - undocumented.
+- Tests: `upright_above_moon` (test_lunar_session.cpp) could use `Mat3::from_columns`; `++vacuum;    }` in
+  test_engine_placement.cpp needs formatting.
+- Lunar tile staleness check accepts a site moved by < 1 px (comment it).
+- subsystems.md l3 trim / station-keeping numbers were not re-measured after the new leads (bands pass).
