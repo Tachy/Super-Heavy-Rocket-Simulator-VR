@@ -1580,3 +1580,13 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
   `core/src/sim/flight_session.cpp` (1,336 lines) by autopilot state like `flight_session_lunar.cpp`, split
   `gnc/booster_return.cpp` (930 lines) by phase, a shared 3x3 solver in `math` (replaces Task 1's local Cramer solve),
   and the deferred l2 minors.
+- Task 3 (d78bb34): NRHO reference, `[nrho]` 2/2 (14 s), `-Fast` 468/468. `[validation]` 47 iterations, continuity
+  0.74 m; periods 6.684 / 6.616 / 6.376 / 6.253 / 6.713 / 6.509 d; perilune 3,444 / 3,267 / 3,245 / 3,184 / 2,861 /
+  3,670 km (lat +80 to +86 deg); apolune 69,804-71,706 km (lat -73 to -84 deg). Gateway NRHO for comparison [S: Davis
+  et al., AAS 2020]: 6.26-6.76 d, rp 3,195-3,557 km, ra 70,005-71,849 km. Rulings: the plan's apsis-only patches on
+  the resonant grid diverged (apolune -> perilune arcs too nonlinear); the method is now perilune anchors from the
+  CR3BP (velocities scaled with sqrt(GM/L^3)), 4 patches per half revolution crowded to the perilunes, seeded by
+  full-model coasts from the perilunes, continuation revolution by revolution with later perilune epochs = closest
+  approaches (only `first_perilune` is exact - **Tasks 4-6 use `perilune_epochs()`, never `first + k P`**); test
+  bands widened to the source (period > 6.2 d, rp > 2,800 km: one revolution swings to 2,861 km). Rejected: grid
+  anchors, a trailing margin revolution, a least-squares anchor fit (no gain). Debug: `STARSIM_DEBUG_NRHO=1`.
