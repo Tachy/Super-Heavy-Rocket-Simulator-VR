@@ -1645,3 +1645,16 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
   orientation (the game's FlightSim has none yet - l6) and checks the landing site exists; refusal tests check the
   German message (ConfigError is a runtime_error too). Full suite left for Task 8 (only const accessors added to the
   session). Next: Task 8.
+- Task 8 (099609c + final fixes): execution-error campaign as 8 test cases (one flight each, `[slow]`, parallel in
+  ctest): 8 / 8. `[validation]` MCC 1 183-311 m/s (a 1 % / 0.5 deg TLI error is ~60 m/s, grown ~5x by a day of coast),
+  MCC 2 0.30-0.43 m/s; LLO 99.97-100.01 km, 1,177-1,194 t; NRHO worst perilune offset 0.47-2.88 km, 1,124-1,150 t.
+  Docs in `docs/subsystems.md` (lunar section), `config/README.md` (`lunar_landing` keys), CLAUDE.md module list. Full
+  suite 507/507, bindings and smoke test green. Final review (opus): 0 Critical, 2 Important, 9 Minor; review focus 1-5
+  OK. Fixed: planner exceptions no longer escape the tick (flight aborts with "Planung fehlgeschlagen"; the `plan_*`
+  entry points return false); Departure without vacuum engines aborts. I1 (NRHO MCC slot after the swing-by) regraded
+  Minor - the unguarded solve already failed and the slot was skipped - explicit guard kept, slots after the swing-by
+  dropped. Deferred minors (for the post-l3 cleanup / l6): station keeping lead 60 s and LLO trim dt ~0 inside the 120 s
+  preparation; `earliest_departure_h = 0` accepted; Sun hold without a settling timeout; `MissionStart::refusal` /
+  `lunar_status()` not in the bindings; `plan_lunar_outbound` from a Moon-bound orbit; synchronous planning in the tick
+  (NRHO ~40 s); debug block's shared static and per-tick getenv; NRHO insertion / LLO -> NRHO arrival match velocity only
+  (undocumented). Next: post-l3 cleanup plan, then the l4 plan.
