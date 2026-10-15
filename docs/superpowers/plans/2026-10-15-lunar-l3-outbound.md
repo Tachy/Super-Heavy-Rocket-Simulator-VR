@@ -1615,3 +1615,11 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
   320 t / 200 t (the plan's 920 t / 800 t still has 7.6 km/s - Review Focus 3 and Tasks 6-7 need a load that really
   cannot fly the outbound leg); NRHO reference falls back to the free coast when a revolution's CR3BP anchor fails
   (first perilune 2026-11-06 12:00 failed at rev 6). Debug: `STARSIM_DEBUG_OUTBOUND=1`.
+- Task 5 (35a77b0): NRHO <-> LLO transfers and station keeping, `[transfer],[nrho]` 5/5 (27 s each), `-Fast` 474/474.
+  NRHO -> LLO 660 + 216 = 876 m/s. **User decision 2026-10-15: LLO -> NRHO arrives anywhere on the reference** - a
+  perilune arrival cost 2,146 m/s after one revolution (NRHO plane turns ~86 deg per revolution with the Moon's orbit,
+  the LLO plane stays inertial; best perilune +25.9 d: 1,124 m/s). Now one-day arrival windows, Moon two-body Lambert
+  scan (tof 0.25-4 d), refined in the full model: 666 + 59 = 725 m/s right after the LLO arrival. Probe: ~0.7 km/s up
+  to ~2.5 d and ~21-30 d after the LLO arrival, 0.9-1.65 km/s in between - Tasks 6/7 stays should use the cheap
+  windows. Station keeping 8.2 m/s over 3 revolutions, worst perilune offset 0.01 km. Debug:
+  `STARSIM_DEBUG_LUNAR_TRANSFER=1`. Next: Task 6 (session autopilot `LunarStep`).
