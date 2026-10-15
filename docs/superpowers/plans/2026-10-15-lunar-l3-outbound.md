@@ -1080,7 +1080,8 @@ TEST_CASE("NRHO station keeping holds the reference for three revolutions", "[mi
   enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar };
   // Steps of a lunar flight (plan_lunar_outbound / plan_lunar_orbit_transfer).
   enum class LunarStep {
-      None, Departure, Tli, Coast, MidCourse, Insertion, Trim, InLlo, InNrho, StationKeeping, TransferOut, TransferIn
+      None, Departure, Tli, Coast, MidCourse, PilotCorrection, Insertion, Trim, InLlo, InNrho, StationKeeping,
+    TransferOut, TransferIn   // PilotCorrection: Step 3b
   };
   const char* to_string(LunarStep step);   // German: "aus", "Abflug", "TLI", "Freiflug", "Kurskorrektur",
                                            // "Einschuss", "Bahnkorrektur", "in LLO", "in NRHO", "Bahnhaltung",
@@ -1314,6 +1315,29 @@ create the half-tank session from scratch.
     group (from `burn_configuration()` after a dry `execute_burn`? No - compute from the group's engines: thrust and
     mass flow of the three Raptor Vacuums; reuse the helper the session uses to fill `BurnConfiguration`).
 
+- [ ] **Step 3b: Pilot-flown mid-course corrections** (user 2026-10-15; Apollo: the computer planned, the crew flew
+  the burn and trimmed the residuals). Core only; display and controls come with l6 / M7 (`docs/ansichten.md` then).
+  - `LunarOutboundParameters::pilot_corrections = false` and `pilot_call_lead_s = 600.0` [E], `pilot_window_s =
+    1800.0` [E] (Task 7: optional mission keys `pilot_corrections`, default false).
+  - `PilotInput::translation` (`math::Vec3`, body-axis fractions -1..1): RCS translation in manual flight (today only
+    pitch / yaw / roll / throttle exist). Zero keeps every existing flight bit-identical.
+  - New `LunarStep::PilotCorrection` ("Kurskorrektur (Pilot)"). With `pilot_corrections`, an MCC above the threshold
+    does not call `lunar_burn`: at its epoch - `pilot_call_lead_s` the step becomes `PilotCorrection`, the session
+    ticks (no coast allowance past it), the vehicle is commanded from `PilotInput` (as with the autopilot off) and
+    `lunar_status_` announces it ("Kurskorrektur in 10 min: 3,2 m/s").
+  - `std::optional<PilotBurnCue> lunar_pilot_cue() const` - `{gnc::BurnNode planned; math::Vec3
+    remaining_delta_v_gcrf_mps; double attitude_error_rad; double window_end_s;}`: realised delta-v = current velocity
+    minus the gravity-only coast of the state snapshotted at the call (no accelerometer bookkeeping); attitude error
+    between the body +x axis and the remaining delta-v. The flight director's setpoint later (l6).
+  - The step ends on `complete_pilot_correction()` or at the window's end (also untouched): the next MCC - or the
+    insertion if none is left - is re-planned from the real state (as after an autopilot MCC); a skipped correction
+    simply grows the next one. `disengage_autopilot()` ends the lunar steps as before.
+  - Test (added to `test_lunar_outbound_session.cpp`, tag `[sim][lunar][outbound][pilot]`): a scripted test pilot
+    (rate commands nulling `attitude_error_rad`, then +x translation until the remaining delta-v is 10 % of the planned
+    one, then `complete_pilot_correction()`) flies MCC 1 of the LLO case; the flight still reaches the LLO within 1 km
+    after the trims, and the total propellant is higher than in the autopilot case (print both). Second case: the
+    pilot ignores the call - the window closes, MCC 2 is larger than in the autopilot case, LLO still reached.
+
 - [ ] **Step 4: Run** `"[sim][lunar][outbound]"` (all three cases) → PASS. Runtimes go into the ledger; a case over 5 min
 needs a look at the tick count (Sun re-points should be a few minutes of ticks each). Record the printed lines.
 - [ ] **Step 5: Run** the existing `"[lunar]"` and `"[mission]"` tags → unchanged outcomes.
@@ -1544,3 +1568,5 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
   Cramer's-rule 3x3 solve (no Mat3 inverse in `math`); the truth case is a 3.1 km/s TLI-like burn with a first guess
   3,000 m/s prograde - the plan's 1 km/s / 20 h case is ~8 revolutions and Newton from zero diverged (3,700 km miss),
   so callers must pass a patched-conic first guess. Executor ledger: `.superpowers/sdd/2026-10-15-lunar-l3-outbound/`.
+- User 2026-10-15: mid-course corrections can be flown by the pilot (Task 6 Step 3b: switch, call before the burn,
+  cue with remaining delta-v and attitude error, re-plan from the real state); display with l6 / M7.
