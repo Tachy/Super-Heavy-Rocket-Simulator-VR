@@ -116,6 +116,10 @@ public:
     bool caught() const { return caught_; }
     // Fixes a stage standing on its legs to the Earth where it is (landed): resting() from now on.
     void hold_landed(const frames::BodyOrientation& earth, time::Epoch epoch);
+    void hold_landed(const environment::BodyFrame& frame, ephemeris::Body body);  // on any reference body
+    // Leg landing simulations set this every tick for bodies with legs: true while one owns the body's ground contact
+    // (its site); elsewhere the body's own ground contact applies even with its legs out (lunar l2).
+    void set_legs_on_site(bool on_site) { legs_on_site_ = on_site; }
     void mark_impacted() { impacted_ = true; }  // struck the tower or overloaded a catch pin
     bool impacted() const { return impacted_; }
     bool resting() const { return resting_ || landed_; }  // carried by the ground after a gentle touchdown / landed
@@ -141,7 +145,7 @@ public:
     math::Vec3 point_air_velocity_body_mps(double station_m) const;
 
     // Flat ground at this height above WGS84 when the reference body is the Earth (the pad elevation); at the Moon the
-    // ground is the sphere (terrain: lunar l2).
+    // ground is the Moon's terrain (lunar l2; the sphere without one).
     double ground_height_m() const { return ground_height_m_; }
     void set_ground_height(double height_m) { ground_height_m_ = height_m; }
     // Sink rate (m/s, relative to the rotating Earth) at the first ground / water contact.
@@ -168,7 +172,10 @@ private:
     void follow_pad(const environment::BodyFrame& frame);
     void resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame);
     void update_air_data(const environment::ReferenceBody& body, const environment::BodyFrame& frame);
-    double ground_height_on(ephemeris::Body body) const { return body == ephemeris::Body::Earth ? ground_height_m_ : 0.0; }
+    // Ground below a body-fixed point: the flat pad height on the Earth, the terrain (or the sphere) elsewhere.
+    double ground_height_at(const environment::ReferenceBody& body, const math::Vec3& fixed_m) const {
+        return body.id() == ephemeris::Body::Earth ? ground_height_m_ : body.surface_height_m(fixed_m);
+    }
     void judge_parachute_loads();
 
     std::unique_ptr<Vehicle> vehicle_;
@@ -189,7 +196,8 @@ private:
     math::Vec3 external_force_gcrf_n_;
     math::Vec3 external_torque_body_nm_;
     bool caught_ = false;
-    bool landed_ = false;  // standing on its legs, held to the Earth (hold_landed)
+    bool landed_ = false;  // standing on its legs, held to its body (hold_landed)
+    bool legs_on_site_ = true;
     double heat_rate_w_m2_ = 0.0;
     double heat_load_j_m2_ = 0.0;
     double peak_heat_rate_w_m2_ = 0.0;

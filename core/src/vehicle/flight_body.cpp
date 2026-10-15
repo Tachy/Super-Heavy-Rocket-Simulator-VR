@@ -219,8 +219,8 @@ GroundClearance FlightBody::ground_clearance(const FlightEnvironment& env, time:
     const auto body = reference_body_of(env, id);
     const auto frame = body.frame(epoch);
     const auto centred = frame.centred({state_.position_gcrf_m, state_.velocity_gcrf_mps});
-    const double height =
-        frames::fixed_to_geodetic(frame.to_fixed(state_.position_gcrf_m), body.shape()).height_m - ground_height_on(id);
+    const Vec3 fixed = frame.to_fixed(state_.position_gcrf_m);
+    const double height = frames::fixed_to_geodetic(fixed, body.shape()).height_m - ground_height_at(body, fixed);
     return {height, -dot(centred.velocity_mps, math::normalized(centred.position_m))};
 }
 
@@ -294,7 +294,11 @@ void FlightBody::hold_fixed(const environment::BodyFrame& frame, ephemeris::Body
 }
 
 void FlightBody::hold_landed(const frames::BodyOrientation& earth, time::Epoch epoch) {
-    hold_fixed_to_earth(earth, epoch);
+    hold_landed(environment::BodyFrame::centred_at_origin(earth.fixed_to_gcrf(epoch)), ephemeris::Body::Earth);
+}
+
+void FlightBody::hold_landed(const environment::BodyFrame& frame, ephemeris::Body body) {
+    hold_fixed(frame, body);
     caught_ = false;
     landed_ = true;
 }
@@ -381,19 +385,23 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     resolve_ground_contact(body, body.frame(epoch + dt_s));
 }
 
-// Ground = flat at ground_height_m_ (the pad elevation) until terrain exists (M8).
+// Ground = flat at ground_height_m_ (the pad elevation) on the Earth (terrain: M8); the terrain on the Moon (lunar l2).
 // Gentle contact: the ground carries the vehicle (it rests, co-rotating with the Earth, and lifts off as
 // soon as thrust exceeds weight). Hard contact (sink rate or tilt too large): impact.
 void FlightBody::resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame) {
-    if (vehicle_->leg_deployment() > 0.0) return;  // legs moving or out: the leg landing simulation owns the contact
+    // Legs moving or out on a leg landing site: that simulation owns the contact.
+    if (vehicle_->leg_deployment() > 0.0 && legs_on_site_) return;
     const double cg = vehicle_->mass_properties().cg_station_m;
-    const double ground_height = ground_height_on(body.id());
     const Vec3 bottom_fixed = frame.to_fixed(state_.position_gcrf_m + state_.attitude.rotate(Vec3{-cg, 0.0, 0.0}));
     const Vec3 top_fixed =
         frame.to_fixed(state_.position_gcrf_m + state_.attitude.rotate(Vec3{vehicle_->length_m() - cg, 0.0, 0.0}));
     const auto bottom = frames::fixed_to_geodetic(bottom_fixed, body.shape());
-    const double lowest = std::min(bottom.height_m, frames::fixed_to_geodetic(top_fixed, body.shape()).height_m);
-    if (lowest >= ground_height) {
+    const double ground_height = ground_height_at(body, bottom_fixed);
+    // Clearance of the bottom and the top point over their ground (the same as the lowest height against a flat
+    // ground's height).
+    const double lowest = std::min(bottom.height_m - ground_height, frames::fixed_to_geodetic(top_fixed, body.shape()).height_m -
+                                                                         ground_height_at(body, top_fixed));
+    if (lowest >= 0.0) {
         return;
     }
     const Vec3 up = frame.transform.rotation * local_up_fixed(bottom);

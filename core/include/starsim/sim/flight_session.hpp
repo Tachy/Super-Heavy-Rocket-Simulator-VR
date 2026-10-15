@@ -7,6 +7,7 @@
 #include "starsim/contact/landing_surface.hpp"
 #include "starsim/sim/catch_tower_sim.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
+#include "starsim/sim/lunar_site.hpp"
 #include <map>
 #include <memory>
 #include <optional>
@@ -292,6 +293,13 @@ public:
     // Landing on legs: the surface the legs land on (default: the site's ground plane with its shoreline; a drone
     // ship's deck replaces it), and how a body's touchdown ended.
     void set_landing_surface(double latitude_rad, double longitude_rad, double height_m, contact::LandingSurface surface);
+    // On any reference body (lunar l2; the Moon needs the Moon orientation).
+    void set_landing_surface(const LegSite& site, contact::LandingSurface surface);
+    // Lunar terrain for ground, leg contact and the tick-near-ground decision at the Moon (lunar l2; needs the Moon
+    // orientation). nullptr: the sphere.
+    void set_moon_terrain(std::shared_ptr<const environment::LunarTerrain> terrain);
+    // Leg landings at a lunar site on its terrain (set_moon_terrain first), tracking bodies within the site's tile.
+    void set_lunar_landing_site(const LunarSite& site);
     const LegLandingSim& leg_landing() const { return *legs_; }
     LegTouchdown leg_touchdown(size_t body_index) const { return legs_->touchdown(*bodies_.at(body_index).body); }
     std::vector<double> leg_crushed_m(size_t body_index) const { return legs_->crushed_m(*bodies_.at(body_index).body); }
@@ -347,6 +355,7 @@ private:
     environment::PointMassGravity gravity_;
     environment::Us76Atmosphere atmosphere_;
     std::optional<environment::ReferenceBody> moon_;  // lunar l1: with a Moon orientation
+    std::shared_ptr<const environment::LunarTerrain> moon_terrain_;  // lunar l2
     vehicle::FlightEnvironment env_;
     gnc::AttitudeController controller_;
     // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).

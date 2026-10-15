@@ -1190,7 +1190,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         }
         const auto pointers = body_pointers();
         if (tower_) tower_->before_tick(pointers, earth_, epoch_);
-        legs_->before_tick(pointers, earth_, epoch_);
+        legs_->before_tick(pointers, env_, epoch_);
         for (size_t i = 0; i < bodies_.size(); ++i) {
             auto& body = *bodies_[i].body;
             const auto t = earth_.fixed_to_gcrf(epoch_);
@@ -1208,7 +1208,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             }
         }
         if (tower_) tower_->after_tick(pointers, earth_, epoch_ + tick_s, tick_s);
-        legs_->after_tick(pointers, earth_, epoch_ + tick_s, tick_s);
+        legs_->after_tick(pointers, env_, epoch_ + tick_s, tick_s);
         epoch_ += tick_s;
     }
     if (bodies_.empty()) {
@@ -1288,6 +1288,30 @@ vehicle::FlightTelemetry FlightSession::telemetry(size_t index) const {
 void FlightSession::set_landing_surface(double latitude_rad, double longitude_rad, double height_m,
                                         contact::LandingSurface surface) {
     legs_ = std::make_unique<LegLandingSim>(latitude_rad, longitude_rad, height_m, std::move(surface), tick_s);
+}
+
+void FlightSession::set_landing_surface(const LegSite& site, contact::LandingSurface surface) {
+    if (site.body == ephemeris::Body::Moon && !moon_) {
+        throw std::runtime_error("Landeplatz auf dem Mond braucht die Mondorientierung");
+    }
+    const auto shape = site.body == ephemeris::Body::Moon ? moon_->shape() : frames::wgs84;
+    legs_ = std::make_unique<LegLandingSim>(site, shape, std::move(surface), tick_s);
+}
+
+void FlightSession::set_moon_terrain(std::shared_ptr<const environment::LunarTerrain> terrain) {
+    if (!moon_) throw std::runtime_error("Mondgelände braucht die Mondorientierung");
+    moon_terrain_ = std::move(terrain);
+    moon_->set_terrain(moon_terrain_.get());
+}
+
+void FlightSession::set_lunar_landing_site(const LunarSite& site) {
+    if (!moon_ || !moon_terrain_) throw std::runtime_error("Mondlandeplatz braucht das Mondgelände (set_moon_terrain)");
+    const LegSite leg_site{ephemeris::Body::Moon, site.config.latitude_rad, site.config.longitude_rad, site.height_m,
+                           site.config.tile_half_size_m};
+    const auto frame = LegLandingSim::site_frame(leg_site, moon_->shape());
+    contact::LandingSurface surface;
+    surface.field = std::make_shared<contact::TerrainField>(*moon_, frame.origin_fixed_m, frame.site_to_fixed);
+    set_landing_surface(leg_site, std::move(surface));
 }
 
 void FlightSession::reset_leg_landing() {

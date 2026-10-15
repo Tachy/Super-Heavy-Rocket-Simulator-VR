@@ -38,28 +38,34 @@ const char* to_string(LegTouchdown touchdown) {
     return "";
 }
 
-LegLandingSim::LegLandingSim(double latitude_rad, double longitude_rad, double height_m, contact::LandingSurface surface,
-                             double tick_s)
-    : origin_itrf_m_(frames::geodetic_to_fixed({latitude_rad, longitude_rad, height_m})),
-      surface_(std::move(surface)),
-      tick_s_(tick_s) {
-    const double sl = std::sin(latitude_rad), cl = std::cos(latitude_rad);
-    const double so = std::sin(longitude_rad), co = std::cos(longitude_rad);
-    site_to_itrf_ = contact::from_columns({-so, co, 0.0}, {-sl * co, -sl * so, cl}, {cl * co, cl * so, sl});
+LegLandingSim::SiteFrame LegLandingSim::site_frame(const LegSite& site, const frames::Ellipsoid& shape) {
+    const double sl = std::sin(site.latitude_rad), cl = std::cos(site.latitude_rad);
+    const double so = std::sin(site.longitude_rad), co = std::cos(site.longitude_rad);
+    return {frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m}, shape),
+            contact::from_columns({-so, co, 0.0}, {-sl * co, -sl * so, cl}, {cl * co, cl * so, sl})};
 }
 
-Vec3 LegLandingSim::to_site(const Vec3& itrf_m) const { return transpose(site_to_itrf_) * (itrf_m - origin_itrf_m_); }
+LegLandingSim::LegLandingSim(const LegSite& site, const frames::Ellipsoid& shape, contact::LandingSurface surface,
+                             double tick_s)
+    : site_(site), frame_(site_frame(site, shape)), surface_(std::move(surface)), tick_s_(tick_s) {}
 
-contact::SitePose LegLandingSim::site_pose(const vehicle::FlightBody& body, const frames::FixedToInertial& t) const {
-    const math::Mat3 to_fixed = transpose(t.rotation);
-    const math::Mat3 to_site = transpose(site_to_itrf_) * to_fixed;
-    const Vec3 omega = vehicle::earth_rotation_vector(t);
+LegLandingSim::LegLandingSim(double latitude_rad, double longitude_rad, double height_m, contact::LandingSurface surface,
+                             double tick_s)
+    : LegLandingSim(LegSite{ephemeris::Body::Earth, latitude_rad, longitude_rad, height_m}, frames::wgs84,
+                    std::move(surface), tick_s) {}
+
+Vec3 LegLandingSim::to_site(const Vec3& fixed_m) const {
+    return transpose(frame_.site_to_fixed) * (fixed_m - frame_.origin_fixed_m);
+}
+
+contact::SitePose LegLandingSim::site_pose(const vehicle::FlightBody& body, const environment::BodyFrame& frame) const {
+    const math::Mat3 to_site = transpose(frame_.site_to_fixed) * transpose(frame.transform.rotation);
     const auto& s = body.state();
     contact::SitePose p;
-    p.cg_m = this->to_site(to_fixed * s.position_gcrf_m);
-    p.velocity_mps = to_site * (s.velocity_gcrf_mps - cross(omega, s.position_gcrf_m));
+    p.cg_m = this->to_site(frame.to_fixed(s.position_gcrf_m));
+    p.velocity_mps = to_site * frame.relative_velocity(s.position_gcrf_m, s.velocity_gcrf_mps);
     p.body_to_site = to_site * s.attitude.to_matrix();
-    p.angular_velocity_radps = to_site * (s.attitude.rotate(s.angular_velocity_body_radps) - omega);
+    p.angular_velocity_radps = to_site * (s.attitude.rotate(s.angular_velocity_body_radps) - frame.rotation_gcrf_radps);
     p.cg_station_m = body.vehicle().mass_properties().cg_station_m;
     return p;
 }
@@ -75,14 +81,21 @@ LegLandingSim::Track& LegLandingSim::track(const vehicle::FlightBody& body) {
     return it->second;
 }
 
-void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies, const frames::BodyOrientation& earth,
+void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies, const vehicle::FlightEnvironment& env,
                                 time::Epoch epoch) {
-    const auto t = earth.fixed_to_gcrf(epoch);
-    const math::Mat3 site_to_gcrf = t.rotation * site_to_itrf_;
+    const auto frame = vehicle::reference_body_of(env, site_.body).frame(epoch);
+    const math::Mat3 site_to_gcrf = frame.transform.rotation * frame_.site_to_fixed;
     for (auto* body : bodies) {
         const auto& v = body->vehicle();
-        if (!v.has_landing_legs() || v.leg_deployment() <= 0.0 || body->impacted() || body->resting()) continue;
-        const auto pose = site_pose(*body, t);
+        if (!v.has_landing_legs()) continue;
+        // On this site: near it on its body (an Earth site's plane reaches everywhere). Elsewhere the body keeps its own
+        // ground contact even with its legs out (lunar l2: an HLS touching the Moon away from the site).
+        const auto pose = site_pose(*body, frame);
+        const bool on_site = body->reference_body(env, epoch) == site_.body &&
+                             std::hypot(pose.cg_m.x, pose.cg_m.y) <= site_.tracking_radius_m;
+        body->set_legs_on_site(on_site);
+        if (auto it = tracks_.find(body); it != tracks_.end()) it->second.on_site = on_site;
+        if (!on_site || v.leg_deployment() <= 0.0 || body->impacted() || body->resting()) continue;
         if (tracks_.count(body) == 0 && pose.cg_m.z > contact_zone_height_m) continue;
         auto& tr = track(*body);
         if (v.leg_deployment() < 1.0) {  // legs still moving: no support, only the base can touch
@@ -101,15 +114,15 @@ void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
     }
 }
 
-void LegLandingSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, const frames::BodyOrientation& earth,
+void LegLandingSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, const vehicle::FlightEnvironment& env,
                                time::Epoch epoch_end, double dt_s) {
-    const auto t = earth.fixed_to_gcrf(epoch_end);
+    const auto frame = vehicle::reference_body_of(env, site_.body).frame(epoch_end);
     for (auto* body : bodies) {
         auto it = tracks_.find(body);
-        if (it == tracks_.end() || it->second.touchdown != LegTouchdown::None) continue;
+        if (it == tracks_.end() || it->second.touchdown != LegTouchdown::None || !it->second.on_site) continue;
         auto& tr = it->second;
         const auto& c = tr.contact;
-        const auto pose = site_pose(*body, t);
+        const auto pose = site_pose(*body, frame);
         const Vec3 axis = pose.body_to_site * Vec3{1.0, 0.0, 0.0};
         const double tilt = std::acos(std::clamp(axis.z, -1.0, 1.0));
         if (std::getenv("STARSIM_DEBUG_LEGS")) {  // diagnostics
@@ -125,7 +138,7 @@ void LegLandingSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, 
         }
         auto end = [&](LegTouchdown result) {
             tr.touchdown = result;
-            if (result == LegTouchdown::Landed) body->hold_landed(earth, epoch_end);
+            if (result == LegTouchdown::Landed) body->hold_landed(frame, site_.body);
             else body->mark_impacted();
         };
         if (c.stroke_exhausted || c.base_contact) {
