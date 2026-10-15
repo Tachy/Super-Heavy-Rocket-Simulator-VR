@@ -42,7 +42,11 @@ StateVector LunarTransferTargeter::coast(const StateVector& state, time::Epoch f
 LunarArrival LunarTransferTargeter::evaluate(const StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
                                              const Vec3& delta_v) const {
     StateVector start = coast(state, epoch, burn_epoch);
-    start.velocity_mps += delta_v;
+    if (finite_) {
+        start = apply_finite_burn(gravity_, start, burn_epoch, delta_v, *finite_);
+    } else {
+        start.velocity_mps += delta_v;
+    }
 
     auto relative = [&](double t, const integrators::State<6>& y) {
         const auto moon = ephemeris_.state_gcrf(ephemeris::Body::Moon, burn_epoch + t);

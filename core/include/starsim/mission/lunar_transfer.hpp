@@ -7,6 +7,7 @@
 #include "starsim/frames/body_orientation.hpp"
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/state_vector.hpp"
+#include "starsim/mission/finite_burn.hpp"
 
 namespace starsim::mission {
 
@@ -68,6 +69,9 @@ public:
     // Lunar orbit insertion: retrograde burn at periselene to a circular orbit.
     static gnc::BurnNode orbit_insertion(const LunarArrival& arrival, double gm_moon_m3ps2);
 
+    // The burn is flown as a finite burn of these engines (apply_finite_burn); empty: impulsive.
+    void set_finite_burn(std::optional<FiniteBurnModel> model) { finite_ = model; }
+
 private:
     math::StateVector coast(const math::StateVector& state, time::Epoch from, time::Epoch to) const;
 
@@ -76,6 +80,7 @@ private:
     const frames::BodyOrientation& moon_orientation_;
     double gm_earth_;
     double gm_moon_;
+    std::optional<FiniteBurnModel> finite_;
 };
 
 }  // namespace starsim::mission

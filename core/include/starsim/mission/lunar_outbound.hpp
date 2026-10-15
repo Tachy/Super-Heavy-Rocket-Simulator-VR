@@ -41,6 +41,12 @@ struct LunarOutboundParameters {
     // insertion at true anomaly 160 deg (about a day after the swing-by).
     double flyby_altitude_m = 100e3;
     double nrho_insertion_true_anomaly_rad = 160.0 * constants::deg_to_rad;
+    // Pilot-flown mid-course corrections (user 2026-10-15; Apollo: the computer planned, the crew flew the burn and
+    // trimmed the residuals): the correction is announced `pilot_call_lead_s` before its epoch and the window closes
+    // `pilot_window_s` after it.
+    bool pilot_corrections = false;
+    double pilot_call_lead_s = 600.0;  // [E]
+    double pilot_window_s = 1800.0;    // [E]
 };
 
 struct OutboundPlan {
@@ -70,6 +76,13 @@ public:
     // TLI from the parking-orbit state; checks the propellant (mass, Isp, propellant on board).
     OutboundPlan plan(const math::StateVector& state, time::Epoch epoch, const LunarOutboundParameters& p,
                       double mass_kg, double isp_s, double propellant_kg) const;
+
+    // The plan's TLI re-solved for the finite burn the session flies (`engines` at the current mass), from the parking
+    // orbit state at `epoch`; same node epoch, the impulsive TLI as the first guess. LLO: periselene altitude and
+    // inclination; NRHO: the flyby point at its epoch. Empty if not converged.
+    std::optional<gnc::BurnNode> finite_tli(const math::StateVector& state, time::Epoch epoch,
+                                            const LunarOutboundParameters& p, const OutboundPlan& plan,
+                                            const FiniteBurnModel& engines) const;
 
     // Mid-course correction at `burn_epoch` (zero first guess): LLO - B-plane to the periselene; NRHO - the plan's
     // flyby point at its epoch. Empty if below the threshold or not converged.

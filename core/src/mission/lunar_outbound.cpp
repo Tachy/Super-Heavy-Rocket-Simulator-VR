@@ -208,12 +208,61 @@ OutboundPlan LunarOutboundPlanner::plan(const StateVector& state, time::Epoch ep
     return plan;
 }
 
+std::optional<gnc::BurnNode> LunarOutboundPlanner::finite_tli(const StateVector& state, time::Epoch epoch,
+                                                              const LunarOutboundParameters& p, const OutboundPlan& plan,
+                                                              const FiniteBurnModel& engines) const {
+    // Continuation on the burn duration: the impulse is too far off as a first guess for the full ~7 min burn (its arc
+    // no longer comes near the Moon), so thrust and mass flow are scaled down from 8x (same exhaust velocity) and each
+    // solution seeds the next.
+    gnc::BurnNode burn = plan.tli;
+    for (const double scale : {8.0, 4.0, 2.0, 1.0}) {
+        const FiniteBurnModel scaled{engines.mass_kg, engines.thrust_n * scale, engines.mass_flow_kgps * scale};
+        bool converged = false;
+        if (p.orbit == LunarOrbitKind::Llo) {
+            auto targeter = transfer_;
+            targeter.set_finite_burn(scaled);
+            const auto solution = targeter.solve(state, epoch, plan.tli.epoch, llo_target(p), burn.delta_v_gcrf_mps);
+            converged = solution.converged;
+            if (converged) burn = solution.burn;
+        } else {
+            auto targeter = position_;
+            targeter.set_finite_burn(scaled);
+            const auto solution = targeter.solve(state, epoch, plan.tli.epoch, plan.flyby_target, burn.delta_v_gcrf_mps,
+                                                 nrho_mcc_tolerance_m);
+            converged = solution.converged;
+            if (converged) burn = solution.burn;
+        }
+        if (debug_enabled()) {
+            std::printf("[outbound] finite TLI x%.0f: converged %d, %.1f m/s\n", scale, converged,
+                        norm(burn.delta_v_gcrf_mps));
+        }
+        if (!converged) return std::nullopt;
+    }
+    if (debug_enabled()) {
+        std::printf("[outbound] finite TLI: %.1f m/s (impulsive %.1f m/s, %.1f m/s apart)\n", norm(burn.delta_v_gcrf_mps),
+                    norm(plan.tli.delta_v_gcrf_mps), norm(burn.delta_v_gcrf_mps - plan.tli.delta_v_gcrf_mps));
+    }
+    return burn;
+}
+
 std::optional<gnc::BurnNode> LunarOutboundPlanner::mid_course(const StateVector& state, time::Epoch epoch,
                                                               time::Epoch burn_epoch, const LunarOutboundParameters& p,
                                                               const OutboundPlan& plan) const {
     gnc::BurnNode burn;
     if (p.orbit == LunarOrbitKind::Llo) {
-        const auto solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p), Vec3{});
+        auto solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p), Vec3{});
+        // A finite TLI can leave an arc that no longer comes near the Moon: no periselene to start Newton from zero;
+        // then the Lambert guess aimed beside the Moon at the planned arrival.
+        if (!solution.converged) solution = transfer_.solve(state, epoch, burn_epoch, llo_target(p));
+        if (debug_enabled()) {
+            const auto free = transfer_.evaluate(state, epoch, burn_epoch, Vec3{});
+            std::printf("[outbound] MCC: free arc reached %d periselene %.0f km i %.2f deg; solve %d after %d it, "
+                        "%.2f m/s -> %.0f km i %.2f deg\n",
+                        free.reached, free.periselene_altitude_m / 1000.0, free.inclination_rad / constants::deg_to_rad,
+                        solution.converged, solution.iterations, norm(solution.burn.delta_v_gcrf_mps),
+                        solution.arrival.periselene_altitude_m / 1000.0,
+                        solution.arrival.inclination_rad / constants::deg_to_rad);
+        }
         if (!solution.converged) return std::nullopt;
         burn = solution.burn;
     } else {

@@ -2,7 +2,10 @@
 
 #include "starsim/environment/gravity.hpp"
 #include "starsim/gnc/burn_node.hpp"
+#include <optional>
+
 #include "starsim/math/state_vector.hpp"
+#include "starsim/mission/finite_burn.hpp"
 #include "starsim/time/epoch.hpp"
 
 namespace starsim::mission {
@@ -33,8 +36,12 @@ public:
                            const PositionTarget& target, const math::Vec3& initial_delta_v,
                            double tolerance_m = 10.0, int max_iterations = 30) const;
 
+    // The burn is flown as a finite burn of these engines (apply_finite_burn); empty: impulsive.
+    void set_finite_burn(std::optional<FiniteBurnModel> model) { finite_ = model; }
+
 private:
     const environment::GravityModel& gravity_;
+    std::optional<FiniteBurnModel> finite_;
 };
 
 }  // namespace starsim::mission

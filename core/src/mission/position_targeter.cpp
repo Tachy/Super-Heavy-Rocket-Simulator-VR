@@ -43,7 +43,11 @@ PositionSolution PositionTargeter::solve(const StateVector& state, time::Epoch e
     const StateVector at_burn = coast(state, epoch, burn_epoch);
     auto arrive = [&](const Vec3& dv) {
         StateVector s = at_burn;
-        s.velocity_mps += dv;
+        if (finite_) {
+            s = apply_finite_burn(gravity_, at_burn, burn_epoch, dv, *finite_);
+        } else {
+            s.velocity_mps += dv;
+        }
         return coast(s, burn_epoch, target.epoch);
     };
     PositionSolution solution;

@@ -96,7 +96,12 @@ void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
         body->set_legs_on_site(on_site);
         if (auto it = tracks_.find(body); it != tracks_.end()) it->second.on_site = on_site;
         if (!on_site || v.leg_deployment() <= 0.0 || body->impacted() || body->resting()) continue;
-        if (tracks_.count(body) == 0 && pose.cg_m.z > contact_zone_height_m) continue;
+        // A track starts near the ground: near the site's plane AND near the body's own ground (lunar l3: an Earth site's
+        // plane passes through low Earth orbit ~14 deg from the site; an HLS with fixed legs struck it there).
+        if (tracks_.count(body) == 0 &&
+            (pose.cg_m.z > contact_zone_height_m || body->ground_clearance(env, epoch).height_m > contact_zone_height_m)) {
+            continue;
+        }
         auto& tr = track(*body);
         if (v.leg_deployment() < 1.0) {  // legs still moving: no support, only the base can touch
             auto base_only = tr.geometry;

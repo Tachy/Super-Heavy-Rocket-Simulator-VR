@@ -38,6 +38,7 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
       env_{gravity_, atmosphere_, earth, &ephemeris, true, moon_ ? &*moon_ : nullptr},
       gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)) {
     legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
+    moon_orientation_ = moon_orientation;
 }
 
 const char* to_string(AutopilotState state) {
@@ -50,6 +51,7 @@ const char* to_string(AutopilotState state) {
         case AutopilotState::Orbit: return "Orbit erreicht";
         case AutopilotState::Burn: return "Manöver";
         case AutopilotState::Return: return "Rückkehr";
+        case AutopilotState::Lunar: return "Mondflug";
     }
     return "";
 }
@@ -415,6 +417,7 @@ void FlightSession::place_in_orbit(const config::VehicleConfig& config, const ma
     payload_separation_.reset();  // d2 minor: an earlier flight's release and cone timer do not carry over
     nose_cone_epoch_.reset();
     capsule_return_step_ = CapsuleReturnStep::None;
+    reset_lunar();
 }
 
 // Candidate engine configurations of the lowest stage with engines, strongest first: all groups at full
@@ -593,7 +596,7 @@ void FlightSession::apply_angular_rate(size_t body_index, const math::Vec3& rate
 bool FlightSession::attitude_mode_active() const {
     return attitude_mode_.kind != gnc::AttitudeModeKind::Free &&
            (autopilot_.state == AutopilotState::Off || autopilot_.state == AutopilotState::Orbit ||
-            autopilot_.state == AutopilotState::PayloadSeparation);
+            autopilot_.state == AutopilotState::PayloadSeparation || autopilot_.state == AutopilotState::Lunar);
 }
 
 bool FlightSession::separate_payload() {
@@ -690,7 +693,8 @@ void FlightSession::run_autopilot() {
                                             last_rcs_acceleration_, thrust_axis);
             if (c.rcs) {
                 if (autopilot_.burn.complete) {
-                    autopilot_.state = AutopilotState::Off;
+                    // a lunar flight's burn returns to its step machine
+                    autopilot_.state = lunar_step_ != LunarStep::None ? AutopilotState::Lunar : AutopilotState::Off;
                     if (capsule_return_step_ == CapsuleReturnStep::DeorbitBurn) {
                         autopilot_.state = AutopilotState::Return;
                         capsule_return_step_ = CapsuleReturnStep::TrunkJettison;
@@ -708,7 +712,9 @@ void FlightSession::run_autopilot() {
             }
             if (autopilot_.burn.complete) {
                 cutoff();
-                autopilot_.state = ship_return_ ? AutopilotState::Return : AutopilotState::Off;
+                autopilot_.state = lunar_step_ != LunarStep::None ? AutopilotState::Lunar
+                                   : ship_return_                 ? AutopilotState::Return
+                                                                  : AutopilotState::Off;
                 if (ship_return_) entry_start_ = entry_start_epoch();  // from the state the burn actually left
             }
             break;
@@ -722,6 +728,9 @@ void FlightSession::run_autopilot() {
                 const bool capsule = flying.body->vehicle().stages().front().config.aero.entry_profile == "capsule";
                 start_entry_guidance(flying, capsule ? gnc::EntryGuidanceParameters::capsule() : gnc::EntryGuidanceParameters{});
             }
+            break;
+        case AutopilotState::Lunar:
+            run_lunar(flying);
             break;
         default:
             break;
@@ -867,6 +876,7 @@ void FlightSession::reset_mission_state() {
     payload_separation_.reset();
     nose_cone_epoch_.reset();
     capsule_return_step_ = CapsuleReturnStep::None;  // review d3: a return does not carry into a new flight
+    reset_lunar();
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -1048,7 +1058,8 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         const auto ref = vehicle::reference_body_of(env_, flying.body->reference_body(env_, epoch_));
         const auto target = gnc::attitude_target(mode, ref.frame(epoch_).centred({s.position_gcrf_m, s.velocity_gcrf_mps}));
         const gnc::AttitudeController::Feedforward feedforward{s.attitude.inverse_rotate(target.rate_gcrf_radps), {}};
-        orbit_controller_.steer(*flying.body, ambient_pressure_pa, target.axis_gcrf, target.roll_reference_gcrf,
+        const auto& hold = autopilot_.state == AutopilotState::Lunar ? lunar_coast_controller_ : orbit_controller_;
+        hold.steer(*flying.body, ambient_pressure_pa, target.axis_gcrf, target.roll_reference_gcrf,
                                 &feedforward)
             .apply_to(command);
         command.rcs_keep_force = true;  // an orbit: turns must not push the vehicle
@@ -1061,6 +1072,7 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         const math::Vec3 rates{input_.roll * max_roll_rate_radps, input_.yaw * max_pitch_yaw_rate_radps,
                                input_.pitch * max_pitch_yaw_rate_radps};
         controller_.steer_rates(*flying.body, ambient_pressure_pa, rates).apply_to(command);
+        if (norm(input_.translation) > 0.0) command.rcs_force_fraction = input_.translation;  // RCS translation
     } else {
         double max_gimbal = 0.0;
         for (const auto& stage : flying.body->vehicle().stages()) {
@@ -1097,8 +1109,14 @@ double FlightSession::coast_allowance_s() const {
          capsule_return_step_ == CapsuleReturnStep::Mains)) {
         return 0.0;
     }
-    if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0) return 0.0;
+    if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0 || norm(input_.translation) > 0.0) return 0.0;
     double allowance = max_coast_s;
+    if (autopilot_.state == AutopilotState::Lunar) {
+        if (lunar_step_ == LunarStep::PilotCorrection) return 0.0;  // the crew flies: ticked
+        // the next timed step (ignition preparation then comes from the state Burn), and the next Sun re-point
+        allowance = std::min(allowance, lunar_step_epoch_ - epoch_);
+        if (lunar_step_ == LunarStep::Coast) allowance = std::min(allowance, lunar_next_repoint_ - epoch_);
+    }
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
     if (autopilot_.state == AutopilotState::Burn) {
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s);

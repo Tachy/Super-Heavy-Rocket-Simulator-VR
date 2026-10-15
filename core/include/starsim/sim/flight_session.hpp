@@ -26,6 +26,9 @@
 #include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/gnc/parachute_sequencer.hpp"
 #include "starsim/gnc/ship_landing.hpp"
+#include "starsim/mission/lunar_orbit_transfer.hpp"
+#include "starsim/mission/lunar_outbound.hpp"
+#include "starsim/mission/nrho_reference.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
 namespace starsim::sim {
@@ -37,6 +40,8 @@ struct PilotInput {
     double yaw = 0.0;
     double roll = 0.0;
     double throttle = 1.0;
+    // RCS translation, body-axis fractions -1..1 (manual flight; zero keeps every existing flight unchanged).
+    math::Vec3 translation;
 };
 
 enum class ControlMode {
@@ -46,7 +51,8 @@ enum class ControlMode {
 
 // Return: a ship after its deorbit burn (coast to the entry interface, entry, flip, catch).
 // PayloadSeparation: after the upper stage's cutoff, waiting to release a payload vehicle (d2).
-enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return };
+// Lunar: a lunar flight between its burns (FlightSession::plan_lunar_outbound / plan_lunar_orbit_transfer).
+enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar };
 
 const char* to_string(AutopilotState state);
 
@@ -56,6 +62,30 @@ enum class CapsuleReturnStep {
     None, DeorbitBurn, TrunkJettison, NoseConeClose, Coast, Entry, Gate, Drogues, Mains, SplashedDown, Lost
 };
 const char* to_string(CapsuleReturnStep step);
+
+// Steps of a lunar flight (plan_lunar_outbound / plan_lunar_orbit_transfer). Tli, MidCourse, PoweredFlyby, Insertion and
+// StationKeeping: that burn is under way (the autopilot state is Burn meanwhile); the others wait for their next event.
+// PilotCorrection: the crew flies a mid-course correction (lunar_pilot_cue).
+enum class LunarStep {
+    None, Departure, Tli, Coast, MidCourse, PilotCorrection, PoweredFlyby, Insertion, Trim, InLlo, InNrho, StationKeeping,
+    TransferOut, TransferIn
+};
+const char* to_string(LunarStep step);
+
+// Flight director cue of a pilot-flown mid-course correction (lunar l3, Step 3b; displayed with l6 / M7).
+struct PilotBurnCue {
+    gnc::BurnNode planned;
+    math::Vec3 remaining_delta_v_gcrf_mps;  // planned minus realised (current velocity - gravity-only coast of the call)
+    double attitude_error_rad = 0.0;        // body +x against the remaining delta-v
+    double window_end_s = 0.0;              // seconds until the window closes
+};
+
+// A burn of a lunar flight as commanded (impulsive node; PilotCorrection: the plan handed to the crew).
+struct LunarBurnRecord {
+    LunarStep step = LunarStep::None;
+    gnc::BurnNode node;
+    double mass_kg = 0.0;  // at the command
+};
 
 struct AutopilotStatus {
     AutopilotState state = AutopilotState::Off;
@@ -172,6 +202,8 @@ public:
         autopilot_.state = AutopilotState::Off;
         attitude_mode_ = {};
         capsule_return_step_ = CapsuleReturnStep::None;
+        lunar_step_ = LunarStep::None;
+        lunar_pilot_.reset();
     }
     // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
     // at the next staging; the booster is then guided independently of the controlled body.
@@ -222,6 +254,26 @@ public:
     static constexpr double nose_cone_close_delay_s = 120.0;  // [E] after the trunk jettison
     static constexpr double trunk_separation_dv_mps = 0.3;    // [E] spring push (as the payload separation)
     static constexpr double capsule_return_reserve_kg = 50.0; // [E] RCS propellant kept for the entry (d3: ~31 kg used)
+    // Lunar outbound flight of the controlled vehicle (lunar l3): from the Earth parking orbit the onboard computer plans
+    // TLI, mid-course corrections, (NRHO) the powered swing-by and the insertion, and flies them on the autopilot
+    // (state Lunar between the burns); LLO apsis trims follow the LOI, NRHO station keeping at every apolune. False if a
+    // lunar flight or another autopilot phase is under way, without the Moon orientation or vacuum engines, or when the
+    // plan is refused (reason in lunar_outbound_plan() and lunar_status()).
+    bool plan_lunar_outbound(const mission::LunarOutboundParameters& parameters);
+    // From the LLO (step InLlo) or the NRHO (InNrho) to the other one: two burns, the second re-planned on arrival.
+    bool plan_lunar_orbit_transfer(mission::LunarOrbitKind target, std::shared_ptr<const mission::NrhoReference> nrho,
+                                   mission::LloTarget llo = {});
+    LunarStep lunar_step() const { return lunar_step_; }
+    const mission::OutboundPlan* lunar_outbound_plan() const { return lunar_plan_ ? &*lunar_plan_ : nullptr; }
+    const std::string& lunar_status() const { return lunar_status_; }  // German status line
+    const std::vector<LunarBurnRecord>& lunar_burns() const { return lunar_burns_; }  // of this lunar flight
+    // Pilot-flown mid-course correction (LunarOutboundParameters::pilot_corrections): the cue while the step is
+    // PilotCorrection, and the pilot's report that it is flown (the next correction is re-planned from the real state).
+    std::optional<PilotBurnCue> lunar_pilot_cue() const;
+    void complete_pilot_correction();
+    static constexpr double sun_repoint_interval_s = 6.0 * 3600.0;  // [E] coast: Sun pointing re-aimed this often
+    static constexpr int max_llo_trims = 4;                          // [E]
+    static constexpr double llo_trim_interval_s = 600.0;             // [E] after a trim burn, the next check
     // Entry guidance of a body (nullptr if it has none): its latest command (setpoint for the flight director).
     const gnc::EntryCommand* entry_status(size_t index) const;
     // Interactive real-time play: landing re-plans never hold up the simulation (default: off = deterministic).
@@ -377,6 +429,12 @@ private:
     gnc::AttitudeController orbit_controller_{gnc::AttitudeController::Gains{
         0.3, 0.9, false, false, 0.0, 1.0 * constants::deg_to_rad, 0.5 * constants::deg_to_rad,
         0.05 * constants::deg_to_rad, 1.0 * constants::deg_to_rad}};
+    // Lunar coast (attitude modes in the state Lunar): slower slews (0.5 deg/s [E]) and a tight rate deadband
+    // (0.002 deg/s [E]) - the vehicle then coasts freely for hours, and the orbit hold's 0.05 deg/s residual turned
+    // the HLS by ~1000 deg between two Sun re-points (0.4-0.6 t of cold gas each).
+    gnc::AttitudeController lunar_coast_controller_{gnc::AttitudeController::Gains{
+        0.3, 0.9, false, false, 0.0, 0.5 * constants::deg_to_rad, 0.5 * constants::deg_to_rad,
+        0.002 * constants::deg_to_rad, 0.5 * constants::deg_to_rad}};
     gnc::AttitudeMode attitude_mode_;
     std::optional<PayloadSeparation> payload_separation_;
     time::Epoch separation_epoch_;            // state PayloadSeparation: release at
@@ -413,6 +471,44 @@ private:
     time::Epoch capsule_step_epoch_;                // the next timed step (trunk jettison, nose cone)
     math::Quat capsule_hold_attitude_;              // with the trunk on (no capsule aero yet): hold the burn's attitude
     void run_capsule_return(Flying& flying);
+
+    // Lunar flight (flight_session_lunar.cpp).
+    LunarStep lunar_step_ = LunarStep::None;
+    time::Epoch lunar_step_epoch_;  // next timed event of the step machine
+    std::optional<mission::LunarOutboundParameters> lunar_parameters_;
+    std::optional<mission::OutboundPlan> lunar_plan_;
+    std::optional<mission::TwoBurnTransfer> lunar_transfer_;
+    mission::LunarOrbitKind lunar_transfer_target_ = mission::LunarOrbitKind::Llo;
+    std::shared_ptr<const mission::NrhoReference> lunar_nrho_;
+    mission::LloTarget lunar_llo_;
+    size_t lunar_mcc_index_ = 0;
+    bool lunar_flyby_done_ = false;
+    int lunar_trims_ = 0;
+    time::Epoch lunar_tli_end_;
+    time::Epoch lunar_next_repoint_;
+    std::string lunar_status_;
+    struct LunarPilotCall {
+        gnc::BurnNode planned;
+        time::Epoch window_end;
+        // The state at the call coasted on gravity alone, kept at the last tick: current velocity minus its velocity is
+        // the realised delta-v.
+        math::StateVector reference;
+        time::Epoch reference_epoch;
+    };
+    std::optional<LunarPilotCall> lunar_pilot_;
+    const frames::BodyOrientation* moon_orientation_ = nullptr;
+    void run_lunar(Flying& flying);  // the step machine and its diagnostics (STARSIM_DEBUG_LUNAR_SESSION)
+    void run_lunar_steps(Flying& flying);
+    void lunar_coast_event();                 // Coast: the timed event is due (MCC, swing-by, insertion)
+    void lunar_enter_coast();                 // back to Coast: Sun pointing, the next event's epoch
+    time::Epoch lunar_next_mcc_epoch() const;  // TLI end + the next MCC offset (far future if none is left)
+    time::Epoch lunar_ignition_lead(const gnc::BurnNode& node) const;  // ignition - preparation on the vacuum Raptors
+    // Executes and records the burn (step: what it is); the burn returns to the state Lunar.
+    bool lunar_burn(const gnc::BurnNode& node, bool main_engines, LunarStep step);
+    std::vector<LunarBurnRecord> lunar_burns_;
+    void lunar_abort(const std::string& status);
+    void reset_lunar();
+    math::StateVector controlled_state() const;
 
     // `forced`: only this set (config group ids), at full and at minimum throttle.
     std::vector<BurnConfiguration> burn_configurations(const std::vector<std::string>* forced = nullptr) const;
