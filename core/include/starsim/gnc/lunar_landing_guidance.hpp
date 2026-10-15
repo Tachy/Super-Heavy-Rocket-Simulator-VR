@@ -31,14 +31,25 @@ struct TerminalDescentParameters {
     double lateral_damping = 1.0;
     double lead_s = 1.0;                     // [E] ~ the time to turn the thrust a few degrees
     double max_tilt_rad = 4.0 * constants::deg_to_rad;  // [E] thrust tilt for the lateral acceleration
+    // [E] throttle kept at least this above the set's minimum: differential throttling steers only within the distance
+    // to the nearer throttle limit - at the minimum the canted thrusters cannot turn the hull back (l4 C2: a 297 t HLS
+    // overshot to 8 deg on the RCS alone and landed 12 m off).
+    double steering_throttle_margin = 0.1;
+    // [E] ... but that floor at most this fraction of the weight (a light HLS, ~280 t, hovers at 0.45 MN: a floor above
+    // it climbs away); never below the set's minimum.
+    double floor_weight_fraction = 0.95;
 };
 
 struct LunarLandingParameters {
     // Braking on the vacuum Raptors (Isp 380 s, fixed: attitude by the RCS - user 2026-10-15), then the gimballed
-    // sea_level_1 as the thrust demand falls (as Apollo throttled down): a smaller set takes over when the demand stays
-    // below `set_drop_fraction` of its maximum for `set_drop_s`; a set not yet running is lit startup_s ahead.
-    // Group ids carry the stage prefix (engine group_id).
-    std::vector<std::vector<std::string>> braking_sets{{"hls/vacuum"}, {"hls/sea_level_1"}};
+    // sea_level_1, then the landing thrusters as the thrust demand falls (as Apollo throttled down; l4 mass correction:
+    // at the real 300-400 t one Raptor at minimum still over-brakes). A smaller set takes over when the demand stays
+    // below `set_drop_fraction` of its maximum, or below the running set's minimum thrust, for `set_drop_s`; a set not
+    // yet running is lit startup_s ahead. Group ids carry the stage prefix (engine group_id).
+    std::vector<std::vector<std::string>> braking_sets{{"hls/vacuum"}, {"hls/sea_level_1"}, {"hls/landing"}};
+    // 10-20 m/s burns of the descent and ascent (plane trim, DOI, circularisation): one gimballed Raptor (no set fits
+    // them; the landing thrusters are auxiliary engines, never burn engines).
+    std::vector<std::string> small_burn_set{"hls/sea_level_1"};
     // A failed engine in a fixed (ungimballed) set: its off-axis thrust is a torque no RCS holds - the set is cut at
     // once and this gimballed set continues the braking (user 2026-10-15); the later sets follow as planned.
     std::vector<std::string> engine_out_set{"hls/sea_level_1", "hls/sea_level_2", "hls/sea_level_3"};
@@ -50,13 +61,16 @@ struct LunarLandingParameters {
     BrakingTarget high_gate{{700.0, 0.0, -800.0}, {-15.0, 0.0, 25.0}, {0.3, 0.0, -0.8}, 0.0};
     double approach_time_to_go_s = 15.0;  // [E] the SCvx approach takes over at this braking t_go
     double braking_time_to_go_guess_s = 400.0;
-    ScvxLandingParameters approach;  // phase groups {sea_level_1}, {sea_level_1}, {landing}; HLS limits
-    // Once the approach lights its last set (the landing thrusters, planned within pad_final_set_radius_m of the point),
-    // the terminal descent flies them to the touchdown.
+    ScvxLandingParameters approach;  // phase groups {landing} x 3; HLS limits
+    // Once the approach enters its last phase (planned within pad_final_set_radius_m of the point), the terminal
+    // descent flies its set to the touchdown.
     TerminalDescentParameters terminal;
 };
-// The HLS's values (the [E] limits found in Task 3's lunar SCvx test).
+// The HLS's values (the [E] limits found in Task 3's lunar SCvx test, re-tuned for the real mass in the C2 sweep).
 LunarLandingParameters hls_landing_parameters();
+
+// Axial vacuum thrust of the set's usable engines (first stage) at full throttle.
+double set_max_thrust_n(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups);
 
 // Powered descent of a lunar lander: the Apollo braking law from PDI to the high gate, then SCvx plans to the touchdown
 // point (Raptors, then the landing thrusters), engines off on leg contact. Commands as the ship landing

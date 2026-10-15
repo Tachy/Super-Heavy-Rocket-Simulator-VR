@@ -4,8 +4,8 @@
 // - plan_lunar_landing plans once from the LLO (mission::LunarDescentPlanner) and checks the propellant for descent and
 //   ascent (mission::lunar_budget: braking and ascent on the vacuum Raptors - user 2026-10-15 -, DOI and the rest of the
 //   descent on the approach set; Isp from the vehicle's engine groups).
-// - The plane trim and the DOI are flown as planned (closed-loop cutoff on the delta-v, execute_burn(node) picks RCS or
-//   main engines); the PDI uses the predicted epoch and the braking law absorbs the dispersion. A DOI re-plan after the
+// - The plane trim and the DOI are flown as planned (closed-loop cutoff on the delta-v, lunar_small_burn: the single
+//   sea-level Raptor, else the session's choice); the PDI uses the predicted epoch and the braking law absorbs the dispersion. A DOI re-plan after the
 //   trim is a later refinement.
 // - Waits for a burn (DescentWait, days) are Sun-pointed coasts like l3's Coast. After the DOI the vehicle coasts
 //   freely (half a revolution) and turns to the braking attitude (retrograde, horizontal, LVLH hold)
@@ -64,11 +64,14 @@ bool FlightSession::plan_lunar_landing(const LunarLandingSetup& setup) {
     if (!idle) return false;  // a flight or a descent under way keeps its plan
     // A closed orbit about the Moon whose periselene clears the highest terrain.
     bool in_orbit = false;
+    double aposelene_m = 0.0;
+    const double gm_moon = env_.ephemeris->gm_m3ps2(ephemeris::Body::Moon);
     if (moon_ && moon_orientation_ && reference_body(controlled_) == ephemeris::Body::Moon) {
         const auto e = orbit::elements_from_state(mission::moon_relative(*env_.ephemeris, controlled_state(), epoch_),
-                                                  env_.ephemeris->gm_m3ps2(ephemeris::Body::Moon));
+                                                  gm_moon);
         in_orbit = e.eccentricity < 1.0 && e.semi_major_axis_m * (1.0 - e.eccentricity) >
                                                constants::moon_mean_radius_m + constants::moon_max_terrain_height_m;
+        aposelene_m = e.semi_major_axis_m * (1.0 + e.eccentricity);
     }
     if (!in_orbit) {
         lunar_status_ = "Kein Abstieg: nicht in einer Mondumlaufbahn";
@@ -98,11 +101,20 @@ bool FlightSession::plan_lunar_landing(const LunarLandingSetup& setup) {
         return false;
     }
     const auto& site = legs_->site();
+    auto descent = setup.descent;
+    if (setup.braking_range) {
+        // PDI speed: periselene of the descent orbit (the LLO's aposelene, PDI height above the site).
+        const double rp = constants::moon_mean_radius_m + moon_terrain_->height_m(site.latitude_rad, site.longitude_rad) +
+                          descent.pdi_altitude_above_site_m;
+        const double pdi_speed = std::sqrt(gm_moon * (2.0 / rp - 2.0 / (rp + std::max(aposelene_m, rp))));
+        descent.braking_range_m = mission::braking_range_m(
+            pdi_speed, mass_kg, gnc::set_max_thrust_n(vehicle, sets.front()), *setup.braking_range);
+    }
     const mission::LunarDescentPlanner planner(gravity_, *env_.ephemeris, *moon_orientation_);
     mission::LunarDescentPlan plan;
     try {
         plan = planner.plan(controlled_state(), epoch_, *moon_terrain_, site.latitude_rad, site.longitude_rad,
-                            legs.footprint_radius_m, setup.descent);
+                            legs.footprint_radius_m, descent);
     } catch (const std::exception&) {  // integrator step underflow on a trial arc, ephemeris range
         lunar_status_ = "Kein Abstieg: Planung fehlgeschlagen";
         return false;
@@ -113,6 +125,7 @@ bool FlightSession::plan_lunar_landing(const LunarLandingSetup& setup) {
     }
     lunar_descent_plan_ = plan;
     lunar_landing_setup_ = setup;
+    lunar_landing_setup_->descent = descent;
     lunar_descent_trimmed_ = false;
     lunar_landing_.reset();
     lunar_touchdown_.reset();
@@ -145,19 +158,7 @@ void FlightSession::lunar_descent_wait() {
 }
 
 bool FlightSession::lunar_descent_burn(const gnc::BurnNode& node, LunarStep step) {
-    // The session's choice first (RCS or a Raptor set). A 10-20 m/s trim or DOI at ~1,185 t fits neither the cold-gas
-    // RCS (over an hour) nor a three-Raptor set (its start/shutdown impulse is more than a quarter of the burn): it flies
-    // on the approach set's gimballed Raptor alone (as the SCvx approach does), at the throttle the executor picks.
-    // The ascent's circularisation (~20 m/s at ~400 t) flies the same way; without a landing setup on the HLS's sets.
-    bool ok = execute_burn(node);
-    const auto sets = lunar_landing_setup_ ? lunar_landing_setup_->guidance.braking_sets
-                                           : gnc::hls_landing_parameters().braking_sets;
-    if (!ok && !sets.empty()) {
-        std::vector<std::string> groups;  // burn_configurations takes the group ids without the stage prefix
-        for (const auto& id : sets.back()) groups.push_back(id.substr(id.find('/') + 1));
-        ok = execute_burn(node, groups);
-    }
-    if (!ok) {
+    if (!lunar_small_burn(node)) {
         lunar_abort(std::string(step == LunarStep::Circularize ? "Aufstieg" : "Abstieg") +
                     " abgebrochen: Brennvorgang nicht möglich");
         return false;
@@ -168,6 +169,22 @@ bool FlightSession::lunar_descent_burn(const gnc::BurnNode& node, LunarStep step
                     burn_config_.rcs ? "RCS" : burn_config_.groups.front().c_str(), burn_config_.thrust_n / 1000.0);
     }
     return true;
+}
+
+bool FlightSession::lunar_small_burn(const gnc::BurnNode& node) {
+    // A 10-20 m/s trim or DOI fits no Raptor set (their start/shutdown impulse is more than a quarter of the burn), and
+    // at ~570 t (the LLO after a full-tank outbound flight) the session's choice is the cold-gas RCS (Isp ~66 s: ~15 t
+    // per burn instead of ~2.5 t). The approach set's gimballed Raptor alone (as the SCvx approach) flies it at minimum
+    // throttle while its transients are at most small_burn_transient_share of the burn; tiny burns (station keeping)
+    // stay on the session's choice. Without a landing setup: the HLS's sets.
+    const auto set = lunar_landing_setup_ ? lunar_landing_setup_->guidance.small_burn_set
+                                          : gnc::hls_landing_parameters().small_burn_set;
+    if (!set.empty()) {
+        std::vector<std::string> groups;  // burn_configurations takes the group ids without the stage prefix
+        for (const auto& id : set) groups.push_back(id.substr(id.find('/') + 1));
+        if (start_burn(node, burn_configurations(&groups), false, small_burn_transient_share)) return true;
+    }
+    return execute_burn(node);
 }
 
 bool FlightSession::begin_powered_descent(const mission::TouchdownPoint& point, double approach_azimuth_rad,

@@ -102,7 +102,7 @@ TEST_CASE("The vehicle applies the trims to its engines' throttles", "[vehicle][
     for (int i = 0; i < 100; ++i) body.vehicle().update_engines(0.01, command, 0.0);
     const auto& e = body.vehicle().stages().front().engines;
     CHECK(e[first].throttle == Catch::Approx(0.9));
-    CHECK(e[second].throttle == Catch::Approx(0.4));
+    CHECK(e[second].throttle == Catch::Approx(e[second].performance->config().throttle_min));
 }
 
 TEST_CASE("Gimballed engines keep their gimbal allocation (no trims)", "[gnc][differential_throttle]") {

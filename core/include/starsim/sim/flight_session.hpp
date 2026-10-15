@@ -92,6 +92,8 @@ struct LunarTouchdown {
 // A lunar landing from the LLO (plan_lunar_landing, l4).
 struct LunarLandingSetup {
     mission::LunarDescentParameters descent;
+    // The braking range from the mass at planning (l4 mass correction); empty: descent.braking_range_m as set.
+    std::optional<mission::BrakingRangeParameters> braking_range = mission::BrakingRangeParameters{};
     gnc::LunarLandingParameters guidance = gnc::hls_landing_parameters();
     double surface_stay_s = 0.0;          // [E] mission parameter (spec): resting after "gelandet"
     double descent_delta_v_mps = 2000.0;  // [E] budget: DOI + braking + approach (spec ~2.0 km/s, Apollo LM ~2.0)
@@ -99,6 +101,16 @@ struct LunarLandingSetup {
     double ascent_delta_v_mps = 1900.0;   // [E] budget: ascent + circularisation (spec ~1.9 km/s, Apollo LM ~1.85)
     double reserve_kg = 10000.0;          // [E] residuals and unusable propellant
     std::optional<gnc::LunarAscentParameters> ascent;  // lift off at the stay's end (none: stay Landed)
+};
+
+// The whole lunar landing mission as one autopilot sequence (mission 1, l4): after the outbound flight the vehicle
+// (NRHO variant: first transfers NRHO -> LLO) plans the landing, stays, ascends into the LLO and (NRHO variant)
+// transfers back to the NRHO. Each leg is planned from the real state when the previous one ends ("planning nodes").
+struct LunarMissionSequence {
+    LunarLandingSetup landing;  // with `ascent` set
+    bool via_nrho = false;
+    std::shared_ptr<const mission::NrhoReference> nrho;  // NRHO variant
+    mission::LloTarget llo;
 };
 
 // Flight director cue of a pilot-flown mid-course correction (lunar l3, Step 3b; displayed with l6 / M7).
@@ -240,6 +252,8 @@ public:
         lunar_ascent_parameters_.reset();
         lunar_descent_plan_.reset();
         lunar_landing_setup_.reset();
+        lunar_mission_.reset();
+        lunar_mission_leg_ = LunarMissionLeg::None;
     }
     // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
     // at the next staging; the booster is then guided independently of the controlled body.
@@ -329,6 +343,11 @@ public:
     // propellant short for orbit).
     bool plan_lunar_ascent(const gnc::LunarAscentParameters& parameters = {}, double liftoff_delay_s = 0.0);
     const gnc::LunarAscentGuidance* lunar_ascent_guidance() const { return lunar_ascent_.get(); }
+    // Chains the legs of a lunar landing mission after the flight planned now (start_lunar_landing_mission); empty
+    // ends it. A refused leg ends the sequence in its orbit with the planner's reason in lunar_status().
+    void set_lunar_mission(std::optional<LunarMissionSequence> sequence);
+    // The sequence's last leg reached (status "Mission abgeschlossen: ...").
+    bool lunar_mission_complete() const { return lunar_mission_leg_ == LunarMissionLeg::Complete; }
     static constexpr double default_ascent_delta_v_mps = 1900.0;  // [E] without a landing setup (spec ~1.9 km/s)
     static constexpr double default_ascent_reserve_kg = 10000.0;  // [E] as LunarLandingSetup::reserve_kg
     static constexpr double sun_repoint_interval_s = 6.0 * 3600.0;  // [E] coast: Sun pointing re-aimed this often
@@ -584,6 +603,9 @@ private:
     void lunar_sun_coast(Flying& flying);  // Sun pointing of a coast (Coast, DescentWait) and its re-points
     void lunar_descent_wait();             // DescentWait for the next descent burn (trim, then DOI)
     bool lunar_descent_burn(const gnc::BurnNode& node, LunarStep step);  // trim / DOI, recorded
+    // A small lunar burn (trims, DOI, circularisation): the single gimballed sea-level Raptor (the approach set) when
+    // its start/shutdown impulse fits, else the session's choice (RCS or a Raptor set).
+    bool lunar_small_burn(const gnc::BurnNode& node);
     std::optional<mission::LunarDescentPlan> lunar_descent_plan_;
     std::optional<LunarLandingSetup> lunar_landing_setup_;
     time::Epoch lunar_landed_epoch_;
@@ -597,12 +619,23 @@ private:
     bool lunar_abort_to_orbit();         // propellant check, then step AbortAscent; false with the status set
     std::unique_ptr<gnc::LunarAscentGuidance> lunar_ascent_;
     std::optional<gnc::LunarAscentParameters> lunar_ascent_parameters_;  // planned liftoff (SurfaceStay until then)
+    // The mission sequence (set_lunar_mission): which leg the next InLlo / InNrho ends.
+    enum class LunarMissionLeg { None, Outbound, Surface, Return, Complete, Ended };
+    std::optional<LunarMissionSequence> lunar_mission_;
+    LunarMissionLeg lunar_mission_leg_ = LunarMissionLeg::None;
+    void lunar_mission_next();  // in InLlo / InNrho with the autopilot idle: plans the next leg
     bool lunar_auto_abort_tried_ = false;  // the landing guidance gave up: the abort to orbit was tried once
     math::StateVector controlled_state() const;
 
     // `forced`: only this set (config group ids), at full and at minimum throttle.
     std::vector<BurnConfiguration> burn_configurations(const std::vector<std::string>* forced = nullptr) const;
-    bool start_burn(const gnc::BurnNode& node, const std::vector<BurnConfiguration>& configurations);
+    // `rcs_fallback`: below every configuration's minimum impulse the RCS flies the burn (not for a forced set).
+    // `max_transient_share`: a configuration fits when its start/shutdown impulse is at most this share of the burn.
+    bool start_burn(const gnc::BurnNode& node, const std::vector<BurnConfiguration>& configurations,
+                    bool rcs_fallback = true, double max_transient_share = 0.25);
+    // [E] lunar_small_burn: the single Raptor's transients may be up to half the burn (the executor's cutoff allows for
+    // the tail-off) - a 10.7 m/s plane trim at ~570 t missed the quarter rule by 0.01 m/s and took 9.4 t of cold gas.
+    static constexpr double small_burn_transient_share = 0.5;
 };
 
 }  // namespace starsim::sim

@@ -32,6 +32,20 @@ struct LunarDescentParameters {
     double glide_margin_m = 50.0;               // [E] terrain below the cone by at least this
 };
 
+// Ground range of the braking phase for a lander at PDI (l4 mass correction: the HLS reaches PDI with 500-570 t, not
+// ~1,185 t, and a fixed 450 km over-braked it): v^2 / (2 a) with a = thrust_fraction x thrust_n / mass_kg, times
+// range_factor (the Apollo law's thrust falls over the phase), clamped to [min_range_m, max_range_m].
+struct BrakingRangeParameters {
+    // [E] l4 C2 sweep (fraction 0.35/0.45/0.55 x factor 0.8/1.0/1.2, PDI 566 and 500 t): all 18 land within 0.21 m;
+    // shorter ranges cost less (2055-2206 m/s); 0.55 x 1.0 keeps the range mass-dependent above the 150 km floor
+    // (566 t: 164 km, 2068 m/s; 500 t: 150 km, 2062 m/s).
+    double thrust_fraction = 0.55;  // of the first braking set's maximum
+    double range_factor = 1.0;
+    double min_range_m = 150.0e3;   // [E]
+    double max_range_m = 600.0e3;   // [E]
+};
+double braking_range_m(double pdi_speed_mps, double mass_kg, double thrust_n, const BrakingRangeParameters& p);
+
 struct TouchdownPoint {
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;

@@ -55,6 +55,17 @@ struct Fixture {
 };
 }  // namespace
 
+TEST_CASE("The braking range grows with the PDI mass and stays within its limits", "[mission][lunar_descent_plan]") {
+    const mission::BrakingRangeParameters p;
+    const double t = 8.94e6;  // three RVacs
+    const double r500 = mission::braking_range_m(1690.0, 500e3, t, p), r566 = mission::braking_range_m(1690.0, 566e3, t, p);
+    std::printf("[lunar_descent] braking range %.1f km at 500 t, %.1f km at 566 t\n", r500 / 1000.0, r566 / 1000.0);
+    CHECK(r566 > r500);
+    CHECK(r500 >= p.min_range_m);
+    CHECK(mission::braking_range_m(1690.0, 5e6, t, p) == p.max_range_m);
+    CHECK(mission::braking_range_m(1690.0, 1e3, t, p) == p.min_range_m);
+}
+
 TEST_CASE("The budget closes or names the leg where the propellant runs out", "[mission][lunar_descent_plan]") {
     const auto ok = mission::lunar_budget(1185e3, 120e3, 10e3, {{"Abstieg", 2000.0, 350.0}, {"Aufstieg", 1900.0, 350.0}});
     CHECK(ok.closes);

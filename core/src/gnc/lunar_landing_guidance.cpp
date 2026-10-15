@@ -1,5 +1,5 @@
-// Powered descent of a lunar lander (l4): Apollo braking law from PDI to the high gate, SCvx approach on the Raptor,
-// terminal descent on the landing thrusters (Apollo P66), engines off on leg contact.
+// Powered descent of a lunar lander (l4): Apollo braking law from PDI to the high gate, SCvx approach and terminal
+// descent on the landing thrusters (Apollo P66), engines off on leg contact.
 //
 // Design decisions:
 // - Braking frame: the touchdown point's plan frame (x up, y east, z north) turned about x by the approach azimuth:
@@ -8,9 +8,9 @@
 //   ~15 deg of the Moon): gravitation minus the Moon centre's acceleration, minus the Coriolis and centrifugal terms of
 //   the Moon's rotation, all in the guidance frame.
 // - Thrust: along the law's thrust acceleration, throttle = m |a| / T_max(set) clamped to the set's [minimum, 1]. A
-//   smaller set takes over when the demand stays below set_drop_fraction x its maximum for set_drop_s; a disjoint set
-//   (vacuum -> sea_level_1) is lit startup_s before the drop the demand's trend predicts, the old set is cut at the
-//   drop. The hull turns so that the running set's thrust axis through the CG points along the command
+//   smaller set takes over when the demand stays below set_drop_fraction x its maximum, or below the running set's
+//   minimum, for set_drop_s (vacuum -> sea_level_1 -> landing thrusters); a disjoint set is lit startup_s before the
+//   drop the demand's trend predicts, the old set is cut at the drop. The hull turns so that the running set's thrust axis through the CG points along the command
 //   (thrust_axis_body). With the fixed vacuum Raptors no gimbal acts: the attitude controller's torque goes to the RCS.
 // - Engine-out in a fixed set (user 2026-10-15): the other engines of the set are cut at once (their off-axis thrust is
 //   a torque the RCS cannot hold) and engine_out_set continues the law; the later sets follow by the same drop rule.
@@ -19,8 +19,8 @@
 //   plan is made synchronously; if it fails the phase is Aborted ("Anflug nicht planbar", command abort, engines off).
 //   The high gate is low and slow (700 m up, 800 m out, 25 m/s): from Apollo-like gates (2-3 km, 90-108 m/s) SCvx
 //   found junk optima (overshooting the point) or none.
-// - Terminal descent: once the approach lights its last set (the landing thrusters, planned within ~10 m of the point)
-//   a P66-like law flies it (sink rate from the height, offset and lateral velocity nulled; thrust never below the set's
+// - Terminal descent: once the approach enters its last phase (planned within ~10 m of the point) a P66-like law flies
+//   its set (sink rate from the height, offset and lateral velocity nulled; thrust never below the set's
 //   minimum). The thrusters are fixed and canted: the attitude controller turns them by differential throttling (their
 //   thrust lines miss the CG by ~9 m each; user 2026-10-15) plus the RCS - the single off-axis Raptor before them leaves
 //   the hull ~5 deg off the thrust axis at the switch, which the RCS alone needed ~20 s to remove.
@@ -51,11 +51,13 @@ bool contains(const std::vector<std::string>& groups, const std::string& id) {
     return std::find(groups.begin(), groups.end(), id) != groups.end();
 }
 
-// Axial vacuum thrust of the set's usable engines at full throttle.
-double set_max_thrust_n(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups) {
+// Axial vacuum thrust of the set's usable engines at their minimum throttle.
+double set_min_thrust_n(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups) {
     double thrust = 0.0;
     for (const auto& e : vehicle.stages().front().engines) {
-        if (!e.starved && contains(groups, e.group_id)) thrust += e.performance->thrust_n(1.0, 0.0) * e.axis_body.x;
+        if (!e.starved && contains(groups, e.group_id)) {
+            thrust += e.performance->thrust_n(e.performance->config().throttle_min, 0.0) * e.axis_body.x;
+        }
     }
     return thrust;
 }
@@ -91,6 +93,14 @@ bool disjoint(const std::vector<std::string>& a, const std::vector<std::string>&
 
 }  // namespace
 
+double set_max_thrust_n(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups) {
+    double thrust = 0.0;
+    for (const auto& e : vehicle.stages().front().engines) {
+        if (!e.starved && contains(groups, e.group_id)) thrust += e.performance->thrust_n(1.0, 0.0) * e.axis_body.x;
+    }
+    return thrust;
+}
+
 const char* to_string(LunarDescentPhase phase) {
     switch (phase) {
         case LunarDescentPhase::Braking: return "Bremsphase";
@@ -106,10 +116,11 @@ const char* to_string(LunarDescentPhase phase) {
 LunarLandingParameters hls_landing_parameters() {
     LunarLandingParameters p;
     auto& a = p.approach;
-    // One sea-level Raptor flies the approach (three at minimum throttle over-brake the gate), the landing thrusters the
-    // last ~150 m (lunar l4 Task 3).
-    a.snapshot.phase_groups = {std::vector<std::string>{"hls/sea_level_1"}, std::vector<std::string>{"hls/sea_level_1"},
-                               std::vector<std::string>{"hls/landing"}};
+    // The landing thrusters fly the whole approach (l4 mass correction: at the real ~350 t at the high gate one Raptor at
+    // minimum throttle, 874 kN, decelerates at 2.5 m/s^2 against the lunar 1.62 and cannot follow a descent plan); the
+    // last phase (the last ~150 m) is the terminal descent.
+    const std::vector<std::string> landing{"hls/landing"};
+    a.snapshot.phase_groups = {landing, landing, landing};
     a.snapshot.reserve_kg = 5000.0;   // [E]
     a.snapshot.catch_sink_mps = 1.0;  // spec: ~1 m/s at touchdown
     // [E] the landing thrusters steer sideways only by tilting the hull on the RCS: they take over above the point
@@ -122,7 +133,10 @@ LunarLandingParameters hls_landing_parameters() {
     l.switches[0] = {0.0, 0.0, 5.0, 60.0, 0.0};
     l.switches[1] = {2.0 * deg, 0.01, 1.0, 10.0, 150.0};  // landing thrusters from >= 150 m CG height
     l.approach_time_constant_s = 0.0;                     // pad landing
-    l.final_gimbal_fraction = 1.0;  // the landing thrusters' equivalent gimbal (RCS): 0.3 of it could not turn them back
+    // the landing thrusters' equivalent gimbal (differential throttling + RCS) in every phase: 0.3 of it could not turn
+    // them back
+    l.gimbal_fraction = 1.0;
+    l.final_gimbal_fraction = 1.0;
     a.settings.kinematic_guess_s = {50.0, 10.0, 30.0};    // [E] ~1 min on the Raptor, short second phase, ~30 s
     a.lqr_lateral = true;
     // [E] the booster's 0.2 rocked the 700 t HLS on its single Raptor (rates up to 0.7 rad/s); 0.05 tracks within 0.07
@@ -171,7 +185,11 @@ std::vector<std::string> LunarLandingGuidance::braking_groups_now(const vehicle:
     std::vector<std::string> groups = set_groups_;
     if (braking_set_ + 1 >= parameters_.braking_sets.size()) return groups;
     const auto& next = parameters_.braking_sets[braking_set_ + 1];
-    const double threshold = parameters_.set_drop_fraction * set_max_thrust_n(vehicle, next);
+    // Drop below set_drop_fraction of the next set's maximum, or below the running set's minimum: a set held under its
+    // minimum over-brakes and the law's demand collapses (l4 mass correction; the vacuum set's minimum lies above
+    // sea_level_1's maximum - the next set then runs at full thrust until the demand falls into its range).
+    const double threshold =
+        std::max(parameters_.set_drop_fraction * set_max_thrust_n(vehicle, next), set_min_thrust_n(vehicle, set_groups_));
     below_set_s_ = demand_n < threshold ? below_set_s_ + dt : 0.0;
     if (disjoint(set_groups_, next) && !next_lit_) {
         // The demand's trend predicts the drop; the next set starts its start-up ahead of it.
@@ -192,7 +210,8 @@ std::vector<std::string> LunarLandingGuidance::braking_groups_now(const vehicle:
         next_lit_ = false;
         below_set_s_ = 0.0;
         if (debug_) {
-            std::printf("[lunar_descent] set drop to %s (demand %.2f MN)\n", set_groups_.front().c_str(), demand_n / 1e6);
+            std::printf("[lunar_descent] set drop to %s (demand %.2f MN, threshold %.2f MN)\n",
+                        set_groups_.front().c_str(), demand_n / 1e6, threshold / 1e6);
         }
         return set_groups_;
     }
@@ -279,8 +298,8 @@ ReturnCommand LunarLandingGuidance::approach_command(const vehicle::FlightBody& 
     cmd.time_to_go_s = c.time_to_go_s;
     cmd.impact_miss_m = c.offset_m;
     cmd.phase = ReturnPhase::LandingBurn;
-    if (c.run_groups == parameters_.approach.snapshot.phase_groups.back()) {
-        // The last set is lit: the terminal descent flies it.
+    if (static_cast<size_t>(approach_->engine_set()) + 1 >= parameters_.approach.snapshot.phase_groups.size()) {
+        // The last phase has begun: the terminal descent flies its set.
         phase_ = LunarDescentPhase::Terminal;
         status_ = "Endanflug";
         if (debug_) std::printf("[lunar_descent] terminal descent (offset %.1f m)\n", c.offset_m);
@@ -339,23 +358,24 @@ ReturnCommand LunarLandingGuidance::terminal(const vehicle::FlightBody& body, co
     const double w = t.lateral_frequency_rad_s;
     Vec3 a_side{0.0, -w * w * r_lead.y - 2.0 * t.lateral_damping * w * v_lead.y,
                 -w * w * r_lead.z - 2.0 * t.lateral_damping * w * v_lead.z};
-    // The thrust cannot go below the set's minimum: the tilt is measured against at least that (a sink-rate demand
+    // The thrust stays steering_throttle_margin above the set's minimum (differential throttling needs room both ways),
+    // below floor_weight_fraction of the weight: the tilt is measured against at least that floor (a sink-rate demand
     // below it would otherwise leave only the lateral part and turn the thrust sideways).
     const auto& groups = parameters_.approach.snapshot.phase_groups.back();
-    double min_thrust_n = 0.0;
-    for (const auto& e : vehicle.stages().front().engines) {
-        if (!e.starved && contains(groups, e.group_id)) {
-            min_thrust_n += e.performance->thrust_n(e.performance->config().throttle_min, 0.0) * e.axis_body.x;
-        }
-    }
-    const double vertical = std::max(a_up - g.x, min_thrust_n / mass.mass_kg);
+    const double max_thrust_n = set_max_thrust_n(vehicle, groups);
+    const double floor_thrust_n =
+        std::max(set_min_thrust_n(vehicle, groups),
+                 std::min((set_min_throttle(vehicle, groups) + t.steering_throttle_margin) * max_thrust_n,
+                          t.floor_weight_fraction * mass.mass_kg * -g.x));
+    const double floor_throttle = std::min(1.0, floor_thrust_n / max_thrust_n);
+    const double vertical = std::max(a_up - g.x, floor_thrust_n / mass.mass_kg);
     if (const double n = norm(a_side), limit = vertical * std::tan(t.max_tilt_rad); n > limit) a_side = a_side * (limit / n);
     const Vec3 thrust_plan = Vec3{vertical, a_side.y - g.y, a_side.z - g.z};
     ReturnCommand cmd;
     cmd.phase = ReturnPhase::LandingBurn;
     cmd.run_groups = groups;
     const double demand = mass.mass_kg * norm(thrust_plan);
-    cmd.throttle = std::max(landing_throttle(vehicle, groups, demand, 0.0), set_min_throttle(vehicle, groups));
+    cmd.throttle = std::max(landing_throttle(vehicle, groups, demand, 0.0), floor_throttle);
     const Vec3 direction = frame.transform.rotation * plan_.direction_to_itrf(thrust_plan);
     cmd.axis_gcrf = hull_axis_for(body, direction, groups);  // the attitude controller turns it (RCS)
     cmd.time_to_go_s = height / sink;

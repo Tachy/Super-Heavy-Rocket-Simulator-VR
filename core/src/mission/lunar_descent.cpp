@@ -163,6 +163,13 @@ std::string refusal(const char* format, double a, double b = 0.0) {
 }
 }  // namespace
 
+double braking_range_m(double pdi_speed_mps, double mass_kg, double thrust_n, const BrakingRangeParameters& p) {
+    const double acceleration = p.thrust_fraction * thrust_n / mass_kg;
+    const double range = acceleration > 0.0 ? p.range_factor * pdi_speed_mps * pdi_speed_mps / (2.0 * acceleration)
+                                            : p.max_range_m;
+    return std::clamp(range, p.min_range_m, p.max_range_m);
+}
+
 LunarDescentPlanner::LunarDescentPlanner(const environment::GravityModel& gravity,
                                          const ephemeris::Ephemeris& ephemeris,
                                          const frames::BodyOrientation& moon_orientation)
