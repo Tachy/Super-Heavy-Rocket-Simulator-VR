@@ -40,3 +40,22 @@ TEST_CASE("Mat3 multiplication and transpose", "[math]") {
         }
     }
 }
+
+TEST_CASE("Mat3 determinant and linear solve", "[math]") {
+    // Rows [2 1 0; 0 3 1; 1 0 4]: det 25.
+    const Mat3 a = Mat3::from_columns({2.0, 0.0, 1.0}, {1.0, 3.0, 0.0}, {0.0, 1.0, 4.0});
+    CHECK(a(0, 1) == 1.0);
+    CHECK(starsim::math::column(a, 2).z == 4.0);
+    CHECK(starsim::math::determinant(a) == Catch::Approx(25.0));
+    const auto x = starsim::math::solve(a, {0.0, -3.0, 13.0});
+    REQUIRE(x);
+    CHECK(norm(*x - Vec3{1.0, -2.0, 3.0}) < 1e-12);
+    // Dependent columns: refused.
+    CHECK_FALSE(starsim::math::solve(Mat3::from_columns({1.0, 2.0, 3.0}, {0.0, 1.0, 1.0}, {1.0, 3.0, 4.0}),
+                                     {1.0, 0.0, 0.0}));
+    // Badly scaled but regular columns (a Jacobian in m per m/s next to one in m per m): solved.
+    const auto y =
+        starsim::math::solve(Mat3::from_columns({1e6, 0.0, 0.0}, {0.0, 1e-3, 0.0}, {0.0, 0.0, 1.0}), {1e6, 1e-3, 1.0});
+    REQUIRE(y);
+    CHECK(norm(*y - Vec3{1.0, 1.0, 1.0}) < 1e-12);
+}

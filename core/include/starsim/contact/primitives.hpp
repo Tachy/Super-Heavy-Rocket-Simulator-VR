@@ -16,8 +16,6 @@ inline math::Mat3 from_columns(const math::Vec3& a, const math::Vec3& b, const m
     return m;
 }
 
-inline math::Vec3 column(const math::Mat3& m, int c) { return {m(0, c), m(1, c), m(2, c)}; }
-
 // Box with centre, orthonormal axes (columns: local x, y, z in the frame) and half extents.
 struct OrientedBox {
     math::Vec3 center;

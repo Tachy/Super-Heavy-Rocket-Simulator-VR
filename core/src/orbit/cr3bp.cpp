@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "starsim/integrators/dop853.hpp"
+#include "starsim/math/mat3.hpp"
 
 namespace starsim::orbit {
 
@@ -14,15 +15,6 @@ constexpr double integration_tolerance = 1e-13;  // nondimensional, absolute and
 constexpr double correction_tolerance = 1e-11;   // residual norm of the half-period crossing
 constexpr double jacobian_step = 1e-7;           // central-difference step of (x0, z0, vy0)
 constexpr int max_corrections = 30;
-
-// Solves [a b c] x = y by Cramer's rule; false when the columns are (nearly) dependent.
-bool solve_columns(const std::array<Vec3, 3>& col, const Vec3& y, Vec3& x) {
-    const double det = dot(col[0], cross(col[1], col[2]));
-    const double scale = norm(col[0]) * norm(col[1]) * norm(col[2]);
-    if (!std::isfinite(det) || std::abs(det) <= 1e-14 * scale) return false;
-    x = Vec3{dot(y, cross(col[1], col[2])), dot(col[0], cross(y, col[2])), dot(col[0], cross(col[1], y))} / det;
-    return true;
-}
 
 Cr3bpState symmetric_state(const Vec3& u) { return {{u.x, 0.0, u.y}, {0.0, u.z, 0.0}}; }
 }  // namespace
@@ -79,9 +71,9 @@ std::optional<Cr3bpState> correct_periodic_orbit(double mu, const Cr3bpState& gu
             const Vec3 e = jacobian_step * unit[k];
             column[k] = (residual(u + e) - residual(u - e)) / (2.0 * jacobian_step);
         }
-        Vec3 step;
-        if (!solve_columns(column, -g, step)) return std::nullopt;
-        u += step;
+        const auto step = math::solve(math::Mat3::from_columns(column[0], column[1], column[2]), -g);
+        if (!step) return std::nullopt;
+        u += *step;
     }
     return std::nullopt;
 }

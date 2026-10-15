@@ -15,7 +15,6 @@ using math::Vec3;
 
 namespace {
 
-constexpr double gm_earth = 3.986004418e14;
 constexpr double touchdown_speed_mps = 1.0;
 constexpr double trim_deadband_m = 2.0;
 // Entry burn shooting along the ground track: the probe burn is this much longer (secant on the impact prediction).
@@ -432,13 +431,13 @@ double BoosterReturnGuidance::meco_propellant_kg(const vehicle::Vehicle& stack, 
         flip_kg += parameters.flip_duration_s * e.performance->mass_flow_kgps(e.performance->config().throttle_min);
     }
 
-    const auto after_flip = orbit::propagate_two_body(state_gcrf, gm_earth, parameters.flip_duration_s);
+    const auto after_flip = orbit::propagate_two_body(state_gcrf, constants::earth_gm_m3ps2, parameters.flip_duration_s);
     const double time_left = std::max(parameters.flight_time_s - parameters.flip_duration_s, 30.0);
     const Vec3 site_fixed = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
     const Vec3 aim_gcrf =
         earth.fixed_to_gcrf(epoch + parameters.flip_duration_s + time_left).position(site_fixed);
     const Vec3 normal = math::normalized(cross(after_flip.position_m, aim_gcrf));
-    const auto arc = orbit::solve_lambert(after_flip.position_m, aim_gcrf, time_left, gm_earth, normal);
+    const auto arc = orbit::solve_lambert(after_flip.position_m, aim_gcrf, time_left, constants::earth_gm_m3ps2, normal);
     const double delta_v =
         arc ? (1.0 + parameters.boostback_loss_fraction) * norm(arc->departure_velocity_mps - after_flip.velocity_mps)
             : 0.0;
@@ -488,7 +487,7 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         const Vec3 aim_fixed = site_fixed + aim_offset_itrf_ + site_up * mass.cg_station_m;
         const Vec3 aim_gcrf = at_landing.position(aim_fixed);
         const Vec3 normal = math::normalized(cross(s.position_gcrf_m, aim_gcrf));
-        const auto arc = orbit::solve_lambert(s.position_gcrf_m, aim_gcrf, time_left, gm_earth, normal);
+        const auto arc = orbit::solve_lambert(s.position_gcrf_m, aim_gcrf, time_left, constants::earth_gm_m3ps2, normal);
         if (arc && tick_counter_ % 20 == 1) {
             // Shooting on the aim point: where would the Lambert arc really come down (drag, rotation)?
             const auto impact = predict(body, env, epoch, &arc->departure_velocity_mps);

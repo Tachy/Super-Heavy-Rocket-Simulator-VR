@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 
+#include "starsim/math/mat3.hpp"
 #include "starsim/math/vec3.hpp"
 
 namespace starsim::gnc {
@@ -91,27 +92,20 @@ InsertionState j2_circular_insertion(double gm_m3ps2, double radius_m, double in
             for (size_t k = 0; k < f.size(); ++k) f[k] = (f[k] - f0[k]) / fd_step[static_cast<size_t>(j)];
             jac[static_cast<size_t>(j)] = std::move(f);
         }
-        // Normal equations (3 x 3), Cramer's rule.
-        double a[3][3] = {}, b[3] = {};
+        // Normal equations (3 x 3).
+        math::Mat3 a;
+        double b[3] = {};
         for (size_t k = 0; k < f0.size(); ++k) {
             for (int i = 0; i < 3; ++i) {
                 b[i] -= jac[static_cast<size_t>(i)][k] * f0[k];
-                for (int j = 0; j < 3; ++j) a[i][j] += jac[static_cast<size_t>(i)][k] * jac[static_cast<size_t>(j)][k];
+                for (int j = 0; j < 3; ++j) a(i, j) += jac[static_cast<size_t>(i)][k] * jac[static_cast<size_t>(j)][k];
             }
         }
-        const auto det3 = [](const double m[3][3]) {
-            return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
-                   m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-        };
-        const double d = det3(a);
-        if (std::abs(d) < 1e-300) break;
-        for (int c = 0; c < 3; ++c) {
-            double m[3][3];
-            for (int i = 0; i < 3; ++i) {
-                for (int j = 0; j < 3; ++j) m[i][j] = j == c ? b[i] : a[i][j];
-            }
-            p[static_cast<size_t>(c)] += det3(m) / d;
-        }
+        const auto step = math::solve(a, Vec3{b[0], b[1], b[2]});
+        if (!step) break;
+        p[0] += step->x;
+        p[1] += step->y;
+        p[2] += step->z;
     }
     return offset_state(kepler, p);
 }

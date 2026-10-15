@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 
+#include "starsim/math/mat3.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
 
 namespace starsim::mission {
@@ -14,15 +15,6 @@ namespace {
 constexpr double jacobian_step_mps = 1e-3;  // finite-difference step of the delta-v columns
 constexpr double max_step_mps = 500.0;      // Newton step limit (keeps a far first guess on the right arc)
 constexpr int line_search_steps = 6;
-
-// Solves [a b c] x = y by Cramer's rule; false when the columns are (nearly) dependent.
-bool solve_columns(const std::array<Vec3, 3>& col, const Vec3& y, Vec3& x) {
-    const double det = dot(col[0], cross(col[1], col[2]));
-    const double scale = norm(col[0]) * norm(col[1]) * norm(col[2]);
-    if (!std::isfinite(det) || std::abs(det) <= 1e-14 * scale) return false;
-    x = Vec3{dot(y, cross(col[1], col[2])), dot(col[0], cross(y, col[2])), dot(col[0], cross(col[1], y))} / det;
-    return true;
-}
 
 Vec3 unit_axis(int k) {
     return k == 0 ? Vec3{1.0, 0.0, 0.0} : (k == 1 ? Vec3{0.0, 1.0, 0.0} : Vec3{0.0, 0.0, 1.0});
@@ -62,8 +54,9 @@ PositionSolution PositionTargeter::solve(const StateVector& state, time::Epoch e
             const Vec3 e = jacobian_step_mps * unit_axis(k);
             column[k] = (arrive(dv + e).position_m - arrive(dv - e).position_m) / (2.0 * jacobian_step_mps);
         }
-        Vec3 step;
-        if (!solve_columns(column, -1.0 * miss, step)) break;
+        const auto solved = math::solve(math::Mat3::from_columns(column[0], column[1], column[2]), -1.0 * miss);
+        if (!solved) break;
+        Vec3 step = *solved;
         if (norm(step) > max_step_mps) step = step * (max_step_mps / norm(step));
         // Backtracking line search on the miss distance.
         double scale = 1.0;

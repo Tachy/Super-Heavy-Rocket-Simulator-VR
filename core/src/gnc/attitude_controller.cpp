@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "starsim/math/constants.hpp"
+#include "starsim/math/mat3.hpp"
 
 namespace starsim::gnc {
 
@@ -68,28 +69,18 @@ FinAuthority fin_authority(const vehicle::FlightBody& body, double cg_station_m)
 // cannot reach (e.g. roll with a degenerate layout).
 std::vector<double> allocate_fins(const FinAuthority& a, const Vec3& torque) {
     const size_t n = a.torque_per_rad.size();
-    double m[3][3] = {};
+    math::Mat3 m;
     for (const auto& c : a.torque_per_rad) {
         const double v[3] = {c.x, c.y, c.z};
         for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j) m[i][j] += v[i] * v[j];
+            for (int j = 0; j < 3; ++j) m(i, j) += v[i] * v[j];
     }
-    const double trace = m[0][0] + m[1][1] + m[2][2];
+    const double trace = m(0, 0) + m(1, 1) + m(2, 2);
     if (trace <= 0.0) return std::vector<double>(n, 0.0);
-    for (int i = 0; i < 3; ++i) m[i][i] += 1e-6 * trace;
-    const double det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
-                       m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
-                       m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-    const double b[3] = {torque.x, torque.y, torque.z};
-    double y[3];
-    for (int k = 0; k < 3; ++k) {  // Cramer's rule
-        double c[3][3];
-        for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j) c[i][j] = j == k ? b[i] : m[i][j];
-        y[k] = (c[0][0] * (c[1][1] * c[2][2] - c[1][2] * c[2][1]) - c[0][1] * (c[1][0] * c[2][2] - c[1][2] * c[2][0]) +
-                c[0][2] * (c[1][0] * c[2][1] - c[1][1] * c[2][0])) /
-               det;
-    }
+    for (int i = 0; i < 3; ++i) m(i, i) += 1e-6 * trace;
+    const auto solved = math::solve(m, torque);
+    if (!solved) return std::vector<double>(n, 0.0);
+    const double y[3] = {solved->x, solved->y, solved->z};
     std::vector<double> d(n);
     double scale = 1.0;
     for (size_t i = 0; i < n; ++i) {
