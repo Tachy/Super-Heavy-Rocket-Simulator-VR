@@ -55,6 +55,10 @@ add_library(starsim_core STATIC
     src/sim/leg_landing_sim.cpp
     src/sim/landing_outcome.cpp
     src/sim/flight_session.cpp
+    src/sim/flight_session_burns.cpp
+    src/sim/flight_session_capsule.cpp
+    src/sim/flight_session_command.cpp
+    src/sim/flight_session_return.cpp
     src/sim/flight_session_lunar.cpp
     src/sim/ascent_mission.cpp
     src/sim/capsule_return_mission.cpp
