@@ -1051,7 +1051,10 @@ TEST_CASE("NRHO station keeping holds the reference for three revolutions", "[mi
     `orbit_insertion(solution.arrival, gm_moon)`. Comment that `evaluate`'s "periselene" event is the first closest
     approach after the burn (the burn sits at the transfer's aposelene, radial velocity rises through zero at the far
     side).
-  - `llo_to_nrho`: for each perilune `tp` of the reference with `epoch + 1800 s < tp < epoch + search_s`: scan
+  - Amended 2026-10-15 (user, see ledger): `llo_to_nrho` arrives anywhere on the reference (one-day arrival windows,
+    arrival every 2 h, tof 0.25-4 d in 3 h steps plus the LLO departure phase in 120 s steps, three cheapest per window
+    refined); the perilune-only scan below cost 2.1 km/s.
+  - ~~`llo_to_nrho`~~ (superseded): for each perilune `tp` of the reference with `epoch + 1800 s < tp < epoch + search_s`: scan
     departure epochs `td = tp - tof`, `tof` from 1.0 h to 4.0 h in 60 s steps, `td >= epoch + 600 s`; two-body Moon
     state at `td` = `orbit::propagate_two_body(moon_relative(state at epoch), gm_moon, td - epoch)` (adequate for the
     scan), target = Moon-relative reference position at `tp` with the Moon's position at `tp`... use

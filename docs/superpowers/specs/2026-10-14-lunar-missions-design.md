@@ -142,6 +142,10 @@ public:
   powered lunar swing-by at 100 km, NRHO insertion ~1.2 d later at true anomaly 160 deg (swing-by 173 + insertion
   217 = 390 m/s in the source). NRHO -> polar LLO and back by a two-burn transfer (~0.75-0.9 km/s each way [S]); then the LLO
   descent. Station keeping only when the HLS waits several revolutions.
+  Amended 2026-10-15 (user): LLO -> NRHO arrives anywhere on the reference, not only at a perilune - the NRHO plane
+  turns with the Moon's orbit (~86 deg per revolution) while the LLO plane stays inertial, so a perilune arrival costs
+  2.1 km/s after one revolution (1.1 km/s at the best alignment, ~26 d); arcs of 0.25-4 d to any reference point cost
+  ~0.7 km/s within ~2.5 d of the LLO arrival or after ~21-30 d, 0.9-1.65 km/s in between (stay-dependent).
 - Validation: LLO 100 km circular within 1 km after the corrections; TLI ~3.1-3.2 km/s and LOI ~0.82-0.9 km/s; NRHO
   period and perilune / apolune radii vs the literature; the HLS stays near the reference for three revolutions;
   NRHO <-> LLO delta-v in the literature's range.

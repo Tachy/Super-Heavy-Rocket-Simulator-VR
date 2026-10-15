@@ -24,6 +24,7 @@ add_executable(starsim_core_tests
     test_rcs.cpp
     test_crew_dragon.cpp
     test_mission_start.cpp
+    test_lunar_orbit_transfer.cpp
     test_lunar_outbound.cpp
     test_nrho_reference.cpp
     test_capsule_aero.cpp
