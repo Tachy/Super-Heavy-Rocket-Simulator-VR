@@ -19,8 +19,6 @@ constexpr double j2_resolve_angle_rad = 2.0 * constants::deg_to_rad;
 
 constexpr double earth_rotation_rate_radps = 7.2921150e-5;
 constexpr double equatorial_radius_m = 6378137.0;
-constexpr double peg_freeze_time_s = 10.0;  // stop re-solving A, B close to cutoff (ill-conditioned)
-constexpr double terminal_time_s = 5.0;     // switch to velocity-to-be-gained steering
 
 struct LocalFrame {
     Vec3 up, east, north;
@@ -84,7 +82,7 @@ double launch_azimuth_rad(double latitude_rad, double inclination_rad, double or
 }
 
 AscentGuidance::AscentGuidance(AscentTarget target, PitchProgram program, double gm_earth_m3ps2)
-    : target_(target), program_(program), gm_(gm_earth_m3ps2) {
+    : target_(target), program_(program), gm_(gm_earth_m3ps2), peg_(gm_earth_m3ps2) {
     const double rp = equatorial_radius_m + target_.periapsis_altitude_m;
     const double ra = equatorial_radius_m + target_.apoapsis_altitude_m;
     target_radius_m_ = rp;
@@ -102,7 +100,7 @@ void AscentGuidance::start(const vehicle::FlightBody& body, const frames::BodyOr
     plane_normal_ = math::normalized(cross(frame.up, heading));
     liftoff_ = epoch;
     kick_start_s_ = -1.0;
-    peg_converged_ = false;
+    peg_.reset();
     insertion_active_ = false;
 }
 
@@ -187,115 +185,31 @@ void AscentGuidance::update_insertion(const Vec3& r_hat, double r, double vt, do
 GuidanceCommand AscentGuidance::peg(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                     time::Epoch epoch) {
     const auto& s = body.state();
-    const double r = norm(s.position_gcrf_m);
-    const Vec3 r_hat = s.position_gcrf_m / r;
-    const Vec3 n_hat = plane_normal_;
-    const Vec3 theta_hat = math::normalized(cross(n_hat, r_hat));
-    const double vr = dot(s.velocity_gcrf_mps, r_hat);
-    const double vt = dot(s.velocity_gcrf_mps, theta_hat);
-    const double vh = dot(s.velocity_gcrf_mps, n_hat);
-
     const auto perf = current_performance(body.vehicle(), 0.0);
     GuidanceCommand cmd;
     cmd.phase = AscentPhase::ClosedLoop;
-    if (perf.thrust_n <= 0.0) {
-        cmd.thrust_direction_gcrf = math::normalized(s.velocity_gcrf_mps);
-        return cmd;
+    if (perf.thrust_n > 0.0 && peg_.converged()) {
+        const double r = norm(s.position_gcrf_m);
+        const Vec3 r_hat = s.position_gcrf_m / r;
+        const Vec3 theta_hat = math::normalized(cross(plane_normal_, r_hat));
+        update_insertion(r_hat, r, dot(s.velocity_gcrf_mps, theta_hat), peg_.time_to_go_s(), env, epoch);
     }
-    const double mass = body.vehicle().mass_properties().mass_kg;
-    const double a = perf.thrust_n / mass;
-    const double ve = perf.thrust_n / perf.mass_flow_kgps;
-    const double tau = ve / a;
-    if (peg_converged_) update_insertion(r_hat, r, vt, peg_t_, env, epoch);
-    const double r_t = insertion_active_ ? insertion_radius_m_ : target_radius_m_;
-    const double vt_t = insertion_active_ ? insertion_horizontal_mps_ : target_speed_mps_;
-    const double vr_t = insertion_active_ ? insertion_radial_mps_ : 0.0;
-
-    auto solve_ab = [&](double t_go) {
-        const double b0 = -ve * std::log(1.0 - t_go / tau);
-        const double b1 = b0 * tau - ve * t_go;
-        const double c0 = b0 * t_go - b1;
-        const double c1 = c0 * tau - ve * t_go * t_go / 2.0;
-        const double det = b0 * c1 - b1 * c0;
-        const double rhs_v = vr_t - vr;               // target radial speed: 0 (insertion at periapsis; J2: solved)
-        const double rhs_r = r_t - r - vr * t_go;
-        peg_a_ = (rhs_v * c1 - b1 * rhs_r) / det;
-        peg_b_ = (b0 * rhs_r - c0 * rhs_v) / det;
-    };
-    auto estimate_time_to_go = [&](double t_go) {
-        const double c = (gm_ / (r * r) - vt * vt / r) / a;
-        const double fr = peg_a_ + c;
-        const double a_t = a / (1.0 - t_go / tau);
-        const double c_t = (gm_ / (r_t * r_t) - vt_t * vt_t / r_t) / a_t;
-        const double fr_t = peg_a_ + peg_b_ * t_go + c_t;
-        const double fr_dot = (fr_t - fr) / t_go;
-        const double f_theta = 1.0 - fr * fr / 2.0;
-        const double f_theta_dot = -fr * fr_dot;
-        const double f_theta_ddot = -fr_dot * fr_dot / 2.0;
-        const double dh = r_t * vt_t - r * vt;
-        const double r_mean = 0.5 * (r + r_t);
-        double dv = dh / r_mean + ve * t_go * (f_theta_dot + f_theta_ddot * tau) + f_theta_ddot * ve * t_go * t_go / 2.0;
-        dv /= f_theta + f_theta_dot * tau + f_theta_ddot * tau * tau;
-        return tau * (1.0 - std::exp(-dv / ve));
-    };
-
-    if (!peg_converged_) {
-        peg_t_ = std::clamp(tau * (1.0 - std::exp(-std::max(vt_t - vt, 100.0) / ve)), 10.0, 0.95 * tau);
-        for (int i = 0; i < 30; ++i) {
-            solve_ab(peg_t_);
-            peg_t_ = std::clamp(estimate_time_to_go(peg_t_), 0.5, 0.95 * tau);
-        }
-        peg_converged_ = true;
-        peg_last_ = epoch;
-    } else {
-        const double elapsed = epoch - peg_last_;
-        peg_last_ = epoch;
-        peg_t_ -= elapsed;
-        if (peg_t_ > peg_freeze_time_s) {
-            solve_ab(peg_t_);
-            peg_t_ = std::clamp(estimate_time_to_go(peg_t_), 0.5, 0.95 * tau);
-        } else {
-            peg_a_ += peg_b_ * elapsed;  // advance the frozen linear steering law
-        }
-    }
-
-    const double c = (gm_ / (r * r) - vt * vt / r) / a;
-    const double fr = std::clamp(peg_a_ + c, -0.9, 0.9);
-    // Out-of-plane: null the velocity and position offset from the target plane together at the end of the burn
-    // (zero-effort miss / velocity law: acceleration linear in time). A steep target plane from a low-latitude site
-    // (Falcon 9 to 51.6 deg) starts the upper stage ~200 m/s and ~50 km off the plane; a law that only nulls the offset
-    // under constant acceleration overshot it (+110 m/s, ~0.9 deg of inclination).
-    const double t_go = std::max(peg_t_, 5.0);
-    const double plane_offset = dot(s.position_gcrf_m, n_hat);
-    const double fh = std::clamp((-4.0 * vh / t_go - 6.0 * plane_offset / (t_go * t_go)) / a, -0.5, 0.5);
-    const double ft = std::sqrt(std::max(0.0, 1.0 - fr * fr - fh * fh));
-
-    cmd.thrust_direction_gcrf = math::normalized(fr * r_hat + ft * theta_hat + fh * n_hat);
-    cmd.time_to_go_s = peg_t_;
-
-    // Terminal phase (last seconds): steer along the velocity still to be gained, v_go = v_target - v, with
-    // v_target horizontal, in the target plane, at the vis-viva speed for the current radius. Cutoff when
-    // the shutdown transient (half thrust over the shutdown time) supplies the rest - along v_go, so it
-    // adds no radial error. The PEG time-to-go alone runs ~1 s short here (large final radial speed).
-    const double target_semi_major_axis = 0.5 * (target_radius_m_ + equatorial_radius_m + target_.apoapsis_altitude_m);
-    const double required_speed = std::sqrt(gm_ * (2.0 / r - 1.0 / target_semi_major_axis));
-    // Horizontal direction in the CURRENT orbital plane: the residual plane error (~0.05 deg) must not keep
-    // |v_go| from converging (it would overshoot the in-plane speed).
-    const Vec3 h_now = cross(s.position_gcrf_m, s.velocity_gcrf_mps);
-    const Vec3 horizontal_now = math::normalized(cross(h_now, r_hat));
-    // ... turned into the target plane by the out-of-plane speed left (the plane steering above ends ~10 m/s short
-    // of it on a steep plane: 0.1 deg of inclination), within what the tail-off cannot fix anyway.
-    // J2-aware circular insertion: the solved horizontal and radial speed instead of the Kepler speed.
-    const Vec3 v_target = insertion_active_ ? insertion_horizontal_mps_ * horizontal_now + insertion_radial_mps_ * r_hat
-                                            : required_speed * horizontal_now;
-    const Vec3 v_go = v_target - s.velocity_gcrf_mps - vh * n_hat;
-    const double tail_off_dv = 0.5 * a * shutdown_time_s(body.vehicle());
-    if (peg_t_ < terminal_time_s) {
-        cmd.thrust_direction_gcrf = math::normalized(v_go);
-        if (norm(v_go) <= tail_off_dv || dot(v_go, s.velocity_gcrf_mps) < 0.0 || peg_t_ < -5.0) {
-            cmd.cutoff = true;
-            cmd.phase = AscentPhase::Cutoff;
-        }
+    PegTarget target;
+    target.radius_m = insertion_active_ ? insertion_radius_m_ : target_radius_m_;
+    target.horizontal_speed_mps = insertion_active_ ? insertion_horizontal_mps_ : target_speed_mps_;
+    target.radial_speed_mps = insertion_active_ ? insertion_radial_mps_ : 0.0;
+    target.plane_normal = plane_normal_;
+    target.terminal_semi_major_axis_m =
+        insertion_active_ ? 0.0 : 0.5 * (target_radius_m_ + equatorial_radius_m + target_.apoapsis_altitude_m);
+    const auto peg = peg_.update({s.position_gcrf_m, s.velocity_gcrf_mps},
+                                 {perf.thrust_n, perf.mass_flow_kgps, body.vehicle().mass_properties().mass_kg,
+                                  shutdown_time_s(body.vehicle())},
+                                 target, epoch);
+    cmd.thrust_direction_gcrf = peg.thrust_direction;
+    cmd.time_to_go_s = peg.time_to_go_s;
+    if (peg.cutoff) {
+        cmd.cutoff = true;
+        cmd.phase = AscentPhase::Cutoff;
     }
     return cmd;
 }

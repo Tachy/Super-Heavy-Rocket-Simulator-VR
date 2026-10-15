@@ -5,6 +5,7 @@
 
 #include <string>
 
+#include "starsim/gnc/peg_steering.hpp"
 #include "starsim/math/vec3.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -88,12 +89,7 @@ private:
     double insertion_horizontal_mps_ = 0.0;
     void update_insertion(const math::Vec3& r_hat, double r, double vt, double t_go, const vehicle::FlightEnvironment& env,
                           time::Epoch epoch);
-    // PEG state
-    double peg_a_ = 0.0;
-    double peg_b_ = 0.0;
-    double peg_t_ = 0.0;  // time to go
-    bool peg_converged_ = false;
-    time::Epoch peg_last_;
+    PegSteering peg_;
 };
 
 }  // namespace starsim::gnc
