@@ -1602,3 +1602,13 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
   approaches (only `first_perilune` is exact - **Tasks 4-6 use `perilune_epochs()`, never `first + k P`**); test
   bands widened to the source (period > 6.2 d, rp > 2,800 km: one revolution swings to 2,861 km). Rejected: grid
   anchors, a trailing margin revolution, a least-squares anchor fit (no gain). Debug: `STARSIM_DEBUG_NRHO=1`.
+- Task 4 (205b2ef): outbound planner, `[outbound]` 5/5, `-Fast` 472/472. `[validation]` LLO: TLI 3,142 m/s, LOI
+  856 m/s, 1,132 t; MCC after a 0.2 % TLI overburn 49.2 m/s -> 100.000 km, 90.000 deg. **User 2026-10-15: NRHO via
+  powered flyby** - a direct transfer meets the NRHO perilune head-on (reference perilune velocity +1.00 along the
+  Moon's motion, direct arrival -0.94: 160 deg, insertion 3.5 km/s). In-direct transfer [S: Kikuchi, Matsumoto &
+  Ueda, ISSFD 2024: swing-by 100 km, insertion at true anomaly 160 deg ~1.2 d later, 173 + 217 = 390 m/s]. Ours:
+  TLI 3,162 m/s, swing-by 243 m/s (flyby inclination 88.0 deg by grid + golden section), insertion 224 m/s 1.28 d
+  later, 1,070 t (test `[slow]`, 41 s). API change for Task 6 (amendment at Task 4). Rulings: refusal test uses
+  320 t / 200 t (the plan's 920 t / 800 t still has 7.6 km/s - Review Focus 3 and Tasks 6-7 need a load that really
+  cannot fly the outbound leg); NRHO reference falls back to the free coast when a revolution's CR3BP anchor fails
+  (first perilune 2026-11-06 12:00 failed at rev 6). Debug: `STARSIM_DEBUG_OUTBOUND=1`.
