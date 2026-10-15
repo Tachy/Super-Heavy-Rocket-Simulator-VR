@@ -415,6 +415,7 @@ double FlightSession::coast_allowance_s() const {
     double allowance = max_coast_s;
     if (autopilot_.state == AutopilotState::Lunar) {
         if (lunar_step_ == LunarStep::PilotCorrection) return 0.0;  // the crew flies: ticked
+        if (lunar_step_ == LunarStep::PoweredDescent) return 0.0;   // the descent guidance flies: ticked
         // the next timed step (ignition preparation then comes from the state Burn), and the next Sun re-point
         allowance = std::min(allowance, lunar_step_epoch_ - epoch_);
         if (lunar_step_ == LunarStep::Coast) allowance = std::min(allowance, lunar_next_repoint_ - epoch_);

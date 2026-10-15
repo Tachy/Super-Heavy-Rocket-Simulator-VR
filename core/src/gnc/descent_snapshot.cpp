@@ -156,6 +156,7 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
         snap.catch_target.goal = DescentGoal::Pad;
         snap.catch_target.position_m = {mass.cg_station_m + site.pad->contact_bottom_height_m, 0.0, 0.0};
         snap.catch_target.velocity_mps = {-settings.catch_sink_mps, 0.0, 0.0};
+        snap.catch_target.final_set_radius_m = settings.pad_final_set_radius_m;
     }
     snap.abort_target.goal = DescentGoal::Abort;
     // Bottom on the ground (flat at the pad height), on the legs at a pad site.

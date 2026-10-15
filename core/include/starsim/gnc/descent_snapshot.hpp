@@ -61,6 +61,9 @@ struct SnapshotSettings {
     double corridor_margin_m = 5.0;    // [E]
     double corridor_radius_m = 1.5;    // [E] half the standby clearance
     double final_set_radius_m = 3.0;   // [E] the final set (slow to turn) flies above the catch point
+    // Pad landing: every final-set node this close to the touchdown point (soft; 0: no limit). A final set that can
+    // hardly steer sideways (the HLS's landing thrusters on the RCS) must take over above the point (lunar l4).
+    double pad_final_set_radius_m = 0.0;
 };
 
 // Everything the planner needs, taken on the simulation thread (the worker must not touch SPICE, the environment

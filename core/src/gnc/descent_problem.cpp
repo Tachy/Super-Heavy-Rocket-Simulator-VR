@@ -170,7 +170,9 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         const bool firm = p == final_phase && last - k >= limits.final_ease_nodes;
         const double t_min = (firm ? std::max(set.thrust_min_n, limits.final_min_thrust_fraction * set.thrust_max_n)
                                    : set.thrust_min_n) * spool;
-        const double gimbal = limits.gimbal_fraction * set.gimbal_max_rad;
+        const double fraction =
+            p == final_phase && limits.final_gimbal_fraction > 0.0 ? limits.final_gimbal_fraction : limits.gimbal_fraction;
+        const double gimbal = fraction * set.gimbal_max_rad;
         double tilt = limits.tilt_max_rad[static_cast<size_t>(p)];
         const double rate_max = limits.rate_max_radps[static_cast<size_t>(p)];
         if (p > start_phase && k == p * (n - 1)) {

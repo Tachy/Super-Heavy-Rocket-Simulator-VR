@@ -72,6 +72,9 @@ struct DescentLimits {
     // [E] planned gimbal deflection at most this fraction of the limit: the rest is the lateral controller's margin
     // (campaign: 0.4 lost one of 21 cases to saturation, 0.3 none).
     double gimbal_fraction = 0.3;
+    // The same for the final set (0: gimbal_fraction). A set steered by the RCS alone (its equivalent gimbal; the HLS's
+    // landing thrusters) leaves no margin: the attitude controller tracks the plan with the whole RCS anyway.
+    double final_gimbal_fraction = 0.0;
     // [E] pitch/yaw per phase: the 13 ignition engines turn the booster fast (alpha_max ~1.4 rad/s^2), the 3 final
     // engines slowly (~0.1-0.3 rad/s^2), the 5 divert engines in between.
     std::array<double, descent_phases> rate_max_radps{0.2, 0.15, 0.1};

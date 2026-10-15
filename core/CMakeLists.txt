@@ -29,6 +29,7 @@ add_library(starsim_core STATIC
     src/gnc/ascent_guidance.cpp
     src/gnc/peg_steering.cpp
     src/gnc/apollo_braking.cpp
+    src/gnc/lunar_landing_guidance.cpp
     src/gnc/j2_insertion.cpp
     src/gnc/burn_node.cpp
     src/gnc/booster_return.cpp
@@ -65,6 +66,7 @@ add_library(starsim_core STATIC
     src/sim/flight_session_command.cpp
     src/sim/flight_session_return.cpp
     src/sim/flight_session_lunar.cpp
+    src/sim/flight_session_lunar_descent.cpp
     src/sim/ascent_mission.cpp
     src/sim/capsule_return_mission.cpp
     src/sim/lunar_landing_mission.cpp

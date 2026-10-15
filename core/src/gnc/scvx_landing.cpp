@@ -229,7 +229,12 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
         // Slower than the switch window on this set: switch now (its engines at minimum throttle would climb); else
         // at the planned switch, the run-down of the dropped engines ahead.
         const int next = engine_set_ + 1;
-        const bool too_slow = -x[descent_index::velocity] < parameters_.settings.limits.switches[static_cast<size_t>(engine_set_)].min_sink_mps;
+        // Only a set that exceeds the weight at minimum throttle climbs (every Earth set; not the HLS's single Raptor
+        // on the Moon, which hovers on it until the planned switch).
+        const bool climbs = model_.engine_sets[static_cast<size_t>(engine_set_)].thrust_min_n >
+                            x[descent_index::mass] * norm(model_.gravity_mps2);
+        const bool too_slow =
+            climbs && -x[descent_index::velocity] < parameters_.settings.limits.switches[static_cast<size_t>(engine_set_)].min_sink_mps;
         const bool planned = ref.phase >= next ||
                              plan_->phase_at(epoch - plan_epoch_ + switch_lead_s(body.vehicle(), parameters_.snapshot, next)) >= next;
         if (!too_slow && !planned) break;

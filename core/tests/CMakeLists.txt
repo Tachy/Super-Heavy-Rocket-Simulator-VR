@@ -53,6 +53,8 @@ add_executable(starsim_core_tests
     test_terrain_contact.cpp
     test_hls_landing.cpp
     test_lunar_scvx.cpp
+    test_lunar_powered_descent.cpp
+    test_differential_throttle.cpp
     test_booster_return.cpp
     test_descent_telemetry.cpp
     test_grid_fins.cpp

@@ -23,10 +23,12 @@
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/gnc/deorbit_planner.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
+#include "starsim/gnc/lunar_landing_guidance.hpp"
 #include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/gnc/parachute_sequencer.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/gnc/sun_hold.hpp"
+#include "starsim/mission/lunar_descent.hpp"
 #include "starsim/mission/lunar_orbit_transfer.hpp"
 #include "starsim/mission/lunar_outbound.hpp"
 #include "starsim/mission/nrho_reference.hpp"
@@ -69,9 +71,17 @@ const char* to_string(CapsuleReturnStep step);
 // PilotCorrection: the crew flies a mid-course correction (lunar_pilot_cue).
 enum class LunarStep {
     None, Departure, Tli, Coast, MidCourse, PilotCorrection, PoweredFlyby, Insertion, Trim, InLlo, InNrho, StationKeeping,
-    TransferOut, TransferIn
+    TransferOut, TransferIn, PoweredDescent, Landed, Lost
 };
 const char* to_string(LunarStep step);
+
+// How a powered lunar descent ended (lunar l4).
+struct LunarTouchdown {
+    LegTouchdown outcome = LegTouchdown::None;
+    double offset_m = 0.0;     // horizontal distance of the footprint centre from the touchdown point (judgement)
+    double sink_mps = 0.0;     // at the first leg contact, relative to the Moon
+    double lateral_mps = 0.0;  // at the first leg contact
+};
 
 // Flight director cue of a pilot-flown mid-course correction (lunar l3, Step 3b; displayed with l6 / M7).
 struct PilotBurnCue {
@@ -274,6 +284,13 @@ public:
     // PilotCorrection, and the pilot's report that it is flown (the next correction is re-planned from the real state).
     std::optional<PilotBurnCue> lunar_pilot_cue() const;
     void complete_pilot_correction();
+    // Powered descent of the controlled body from now (scenarios; the lunar landing step machine calls it at PDI): needs
+    // the Moon orientation, a lunar landing site (set_lunar_landing_site) and a Moon-referenced body with legs. False
+    // with a German lunar_status() otherwise.
+    bool begin_powered_descent(const mission::TouchdownPoint& point, double approach_azimuth_rad,
+                               gnc::LunarLandingParameters parameters = gnc::hls_landing_parameters());
+    const gnc::LunarLandingGuidance* lunar_landing_guidance() const { return lunar_landing_.get(); }
+    const std::optional<LunarTouchdown>& lunar_touchdown() const { return lunar_touchdown_; }
     static constexpr double sun_repoint_interval_s = 6.0 * 3600.0;  // [E] coast: Sun pointing re-aimed this often
     static constexpr int max_llo_trims = 4;                          // [E]
     static constexpr double llo_trim_interval_s = 600.0;             // [E] after a trim burn, the next check
@@ -518,6 +535,10 @@ private:
     std::vector<LunarBurnRecord> lunar_burns_;
     void lunar_abort(const std::string& status);
     void reset_lunar();
+    void run_lunar_descent_steps(Flying& flying);  // PoweredDescent, Landed, Lost (flight_session_lunar_descent.cpp)
+    std::unique_ptr<gnc::LunarLandingGuidance> lunar_landing_;
+    std::optional<LunarTouchdown> lunar_touchdown_;
+    mission::TouchdownPoint lunar_touchdown_point_;
     math::StateVector controlled_state() const;
 
     // `forced`: only this set (config group ids), at full and at minimum throttle.
