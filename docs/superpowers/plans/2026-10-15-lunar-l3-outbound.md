@@ -1573,6 +1573,9 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
 - User 2026-10-15: `CLAUDE.md` slimmed (597 -> 162 lines); the subsystem notes moved verbatim to `docs/subsystems.md`.
   Task 8's docs step therefore writes the l3 notes into `docs/subsystems.md` (lunar section) and keeps `CLAUDE.md` to
   rules and the index.
+- Task 2 (d2cf5fa): CR3BP, `[cr3bp]` 3/3, full suite 479/479 (1550 s serial). `[validation]` 9:2 NRHO corrected
+  from the Zimovan seed: perilune 3,225 km, apolune 71,171 km, z0 -0.18199 (mu from the DE440 GMs). Rulings: `Vec3`
+  has no `operator[]` (`.x/.y/.z` used); local Cramer solve again (math 3x3 solver stays in the post-l3 cleanup).
 - User 2026-10-15: after l3 (before l4) a separate cleanup step with its own small plan: split
   `core/src/sim/flight_session.cpp` (1,336 lines) by autopilot state like `flight_session_lunar.cpp`, split
   `gnc/booster_return.cpp` (930 lines) by phase, a shared 3x3 solver in `math` (replaces Task 1's local Cramer solve),
