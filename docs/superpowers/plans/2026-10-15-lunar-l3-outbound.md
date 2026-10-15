@@ -1570,3 +1570,10 @@ Record here per task: commit, test results (printed `[validation]` lines), runti
   so callers must pass a patched-conic first guess. Executor ledger: `.superpowers/sdd/2026-10-15-lunar-l3-outbound/`.
 - User 2026-10-15: mid-course corrections can be flown by the pilot (Task 6 Step 3b: switch, call before the burn,
   cue with remaining delta-v and attitude error, re-plan from the real state); display with l6 / M7.
+- User 2026-10-15: `CLAUDE.md` slimmed (597 -> 162 lines); the subsystem notes moved verbatim to `docs/subsystems.md`.
+  Task 8's docs step therefore writes the l3 notes into `docs/subsystems.md` (lunar section) and keeps `CLAUDE.md` to
+  rules and the index.
+- User 2026-10-15: after l3 (before l4) a separate cleanup step with its own small plan: split
+  `core/src/sim/flight_session.cpp` (1,336 lines) by autopilot state like `flight_session_lunar.cpp`, split
+  `gnc/booster_return.cpp` (930 lines) by phase, a shared 3x3 solver in `math` (replaces Task 1's local Cramer solve),
+  and the deferred l2 minors.
