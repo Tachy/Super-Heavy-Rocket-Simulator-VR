@@ -83,6 +83,9 @@ public:
     ReturnCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
                          bool leg_contact);
     void mark_landed() { phase_ = LunarDescentPhase::Landed; }
+    // The approach could not be planned (phase Aborted) and no abort to orbit is possible: fly the terminal law from
+    // here instead of cutting the engines. False (nothing changed) in any other phase.
+    bool land_without_approach();
     LunarDescentPhase phase() const { return phase_; }
     double braking_time_to_go_s() const { return braking_t_go_; }
     const std::string& status() const { return status_; }  // German, e.g. why the approach could not be planned

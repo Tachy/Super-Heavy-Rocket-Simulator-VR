@@ -310,6 +310,12 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                     break;
                 }
                 lunar_status_ = "Landepunkt nicht erreichbar, Abbruch nicht möglich";
+                // Final review l4 I2: without an approach plan the guidance would cut the engines - set down with the
+                // terminal law instead (towards the touchdown point, the sink rate from the height).
+                if (lunar_landing_->land_without_approach()) {
+                    lunar_status_ += ": Endanflug ohne Plan";
+                    flying.return_command = lunar_landing_->update(body, env_, epoch_, contact);
+                }
             }
             for (const auto& stage : body.vehicle().stages()) {
                 for (const auto& e : stage.engines) {
@@ -341,8 +347,10 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                 lunar_landing_->mark_landed();
                 lunar_landed_epoch_ = epoch_;
                 const double stay_s = lunar_landing_setup_ ? lunar_landing_setup_->surface_stay_s : 0.0;
-                lunar_step_ = stay_s > 0.0 ? LunarStep::SurfaceStay : LunarStep::Landed;
-                lunar_step_epoch_ = stay_s > 0.0 ? lunar_landed_epoch_ + stay_s : epoch_ + far_future_s;
+                // A requested ascent lifts off at the stay's end, also after a stay of 0 h (final review l4 I1).
+                const bool stays = stay_s > 0.0 || (lunar_landing_setup_ && lunar_landing_setup_->ascent);
+                lunar_step_ = stays ? LunarStep::SurfaceStay : LunarStep::Landed;
+                lunar_step_epoch_ = stays ? lunar_landed_epoch_ + stay_s : epoch_ + far_future_s;
                 lunar_status_ = "gelandet: " + german(lunar_touchdown_->offset_m, 2) + " m vom Zielpunkt";
             } else {
                 lunar_step_ = LunarStep::Lost;

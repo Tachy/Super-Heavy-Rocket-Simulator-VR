@@ -87,6 +87,26 @@ TEST_CASE("From the LLO the HLS waits for the site, trims, lowers its orbit and 
     CHECK(fx.session.body(0).resting());
 }
 
+TEST_CASE("A surface stay of 0 h with an ascent lifts off at once", "[sim][lunar_descent_session][terrain][data][slow]") {
+    // Final review l4 I1: stay_hours = 0 is a valid mission value; with an ascent requested the HLS must not stay Landed.
+    Fixture fx;
+    fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);
+    sim::LunarLandingSetup setup;
+    setup.surface_stay_s = 0.0;
+    setup.ascent = gnc::LunarAscentParameters{};
+    REQUIRE(fx.session.plan_lunar_landing(setup));
+    const auto* plan = fx.session.lunar_descent_plan();
+    REQUIRE(plan);
+    fx.session.advance_to(plan->pdi_epoch + 1200.0, 50'000'000);
+    REQUIRE(fx.session.lunar_touchdown());
+    REQUIRE(fx.session.lunar_touchdown()->outcome == sim::LegTouchdown::Landed);
+    fx.session.advance_to(fx.session.epoch() + 60.0, 50'000);
+    std::printf("[lunar_descent_session] stay 0 h: step %d, %s\n", static_cast<int>(fx.session.lunar_step()),
+                fx.session.lunar_status().c_str());
+    CHECK(fx.session.lunar_step() != sim::LunarStep::Landed);
+    CHECK_FALSE(fx.session.body(0).resting());   // lifted off
+}
+
 TEST_CASE("The pilot takes over in the braking phase: the descent guidance stops for good", "[sim][lunar_descent_session][terrain][data][slow]") {
     Fixture fx;
     fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);

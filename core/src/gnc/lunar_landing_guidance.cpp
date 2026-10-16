@@ -16,7 +16,8 @@
 //   a torque the RCS cannot hold) and engine_out_set continues the law; the later sets follow by the same drop rule.
 // - Hand-over at braking t_go <= approach_time_to_go_s (15 s: the law's gains 12/t_go^2, 6/t_go outran the attitude loop
 //   of a ~700 t HLS on one Raptor below ~12 s and tumbled it), or when the law has no time to go left: the first SCvx
-//   plan is made synchronously; if it fails the phase is Aborted ("Anflug nicht planbar", command abort, engines off).
+//   plan is made synchronously; if it fails the phase is Aborted ("Anflug nicht planbar", command abort, engines off) -
+//   the session aborts to orbit, or, when that is refused, calls land_without_approach() (terminal law from here).
 //   The high gate is low and slow (700 m up, 800 m out, 25 m/s): from Apollo-like gates (2-3 km, 90-108 m/s) SCvx
 //   found junk optima (overshooting the point) or none.
 // - Terminal descent: once the approach enters its last phase (planned within ~10 m of the point) a P66-like law flies
@@ -281,6 +282,13 @@ void LunarLandingGuidance::start_approach(const vehicle::FlightBody& body, const
         phase_ = LunarDescentPhase::Aborted;
         status_ = "Anflug nicht planbar";
     }
+}
+
+bool LunarLandingGuidance::land_without_approach() {
+    if (phase_ != LunarDescentPhase::Aborted) return false;
+    phase_ = LunarDescentPhase::Terminal;
+    status_ = "Endanflug ohne Plan";
+    return true;
 }
 
 ReturnCommand LunarLandingGuidance::approach_command(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,

@@ -273,6 +273,29 @@ TEST_CASE("A touchdown point out of reach ends in the automatic abort to orbit",
     CHECK(fx.session.lunar_step() == sim::LunarStep::InLlo);
 }
 
+TEST_CASE("A refused automatic abort keeps the engines on in a terminal descent", "[sim][lunar_ascent][abort][terrain][data][slow]") {
+    // Final review l4 I2: the approach cannot be planned and the propellant cannot reach orbit - the HLS must not cut
+    // its engines (it fell from the gate); it flies the terminal law instead.
+    Fixture fx;
+    const auto point = touchdown_point(fx);
+    constexpr double dry_kg = 420e3, propellant_kg = 150e3;  // far too little for orbit (~1.9 km/s needs ~200 t)
+    test::place_hls_at_pdi(fx.session, fx.ephemeris, fx.moon_me, point, fx.t0, propellant_kg, dry_kg, 60e3);
+    REQUIRE(fx.session.begin_powered_descent(point, 180.0 * deg));
+    for (int i = 0; i < 1200 * 10 && fx.session.lunar_status().find("Abbruch nicht möglich") == std::string::npos &&
+                    fx.session.lunar_step() == sim::LunarStep::PoweredDescent;
+         ++i) {
+        fx.session.advance_to(fx.session.epoch() + 0.1, 100);
+    }
+    std::printf("[lunar_ascent] refused automatic abort: step %s, %s\n", sim::to_string(fx.session.lunar_step()),
+                fx.session.lunar_status().c_str());
+    REQUIRE(fx.session.lunar_status().find("Abbruch nicht möglich") != std::string::npos);
+    fx.session.advance_to(fx.session.epoch() + 5.0, 1000);
+    const auto* g = fx.session.lunar_landing_guidance();
+    REQUIRE(g);
+    CHECK(g->phase() == gnc::LunarDescentPhase::Terminal);
+    CHECK(fx.session.body(0).vehicle().any_engine_producing_thrust());
+}
+
 // Sweep of the ascent's acceleration limit (hidden: run by name; records LunarAscentParameters::max_acceleration_mps2).
 TEST_CASE("Lunar ascent acceleration limit sweep", "[.][lunar_ascent_sweep]") {
     for (const double propellant_kg : {test::hls_landed_propellant_kg, test::hls_landed_light_propellant_kg}) {
