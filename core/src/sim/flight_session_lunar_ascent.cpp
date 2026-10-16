@@ -176,6 +176,22 @@ void FlightSession::run_lunar_ascent_steps(Flying& flying) {
                 break;
             }
             const auto e = orbit::elements_from_state(moon_relative(), gm_moon);
+            // A sub-orbital cutoff (PEG saturated, the periselene inside the Moon) needs the whole orbital speed at the
+            // aposelene (1.6 km/s seen in l4 C4, planned as a "circularisation"): flown only when the propellant holds
+            // it on the small-burn set (no reserve: the alternative is the impact), else the ascent ends here.
+            if (e.semi_major_axis_m * (1.0 - e.eccentricity) < constants::moon_mean_radius_m) {
+                const auto set = lunar_landing_setup_ ? lunar_landing_setup_->guidance.small_burn_set
+                                                      : gnc::hls_landing_parameters().small_burn_set;
+                const auto& vehicle = body.vehicle();
+                const double mass_kg = vehicle.mass_properties().mass_kg;
+                const auto budget = mission::lunar_budget(
+                    mass_kg, mass_kg - vehicle.propellant_kg(), 0.0,
+                    {{"Kreisbahn", norm(node->delta_v_gcrf_mps), gnc::groups_vacuum_isp_s(vehicle, set)}});
+                if (!budget.closes) {
+                    lunar_abort("Aufstieg beendet: suborbitaler Brennschluss, Treibstoff reicht nicht für die Kreisbahn");
+                    break;
+                }
+            }
             lunar_step_ = LunarStep::AscentCoast;
             lunar_step_epoch_ = lunar_ignition_lead(*node) - small_burn_margin_s;
             lunar_status_ = "Freiflug zur Aposelene: " +

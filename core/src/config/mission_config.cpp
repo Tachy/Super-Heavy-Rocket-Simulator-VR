@@ -162,6 +162,23 @@ LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& conf
     } else {
         doc.fail("lunar_orbit: unknown kind '" + m.lunar_orbit + "' (llo, nrho)");
     }
+    const auto& descent = doc.table(doc.root, "descent");
+    m.pdi_altitude_above_site_m = doc.positive(descent, "pdi_altitude_above_site_km") * 1000.0;
+    m.braking_range_m = doc.positive(descent, "braking_range_km") * 1000.0;
+    m.max_crossrange_m = doc.positive(descent, "max_crossrange_km") * 1000.0;
+    m.slope_limit_rad = doc.positive(descent, "slope_limit_deg") * deg;
+    m.touchdown_search_radius_m = doc.positive(descent, "touchdown_search_radius_m");
+    m.surface_stay_s = doc.number(doc.table(doc.root, "surface"), "stay_hours") * 3600.0;
+    if (m.surface_stay_s < 0.0) doc.fail("surface: stay_hours must be >= 0");
+    const auto& ascent = doc.table(doc.root, "ascent");
+    m.insertion_altitude_above_site_m = doc.positive(ascent, "insertion_altitude_above_site_km") * 1000.0;
+    m.ascent_aposelene_m = doc.positive(ascent, "aposelene_km") * 1000.0;
+    const auto& budget = doc.table(doc.root, "budget");
+    m.descent_delta_v_mps = doc.positive(budget, "descent_delta_v_mps");
+    m.ascent_delta_v_mps = doc.positive(budget, "ascent_delta_v_mps");
+    m.nrho_to_llo_delta_v_mps = doc.positive(budget, "nrho_to_llo_delta_v_mps");
+    m.llo_to_nrho_delta_v_mps = doc.positive(budget, "llo_to_nrho_delta_v_mps");
+    m.reserve_kg = doc.positive(budget, "reserve_kg");
     return m;
 }
 

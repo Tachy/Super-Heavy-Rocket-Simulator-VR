@@ -9,7 +9,7 @@ vehicle = "starship_hls"
 site = "mons_mouton_im2"         # config/lunar_sites.toml (l4 lands there)
 
 [orbit]
-epoch_utc = "2026-11-02T00:00:00"
+epoch_utc = "2026-11-02T00:00:00"   # [E] descent wait in the LLO 5.8 d - nearly the same for any epoch (l4 Task 9 probe)
 height_km = 200.0                # [S] spec: 200 x 200 km after the depot (NASA OIG IG-26-004)
 inclination_deg = 28.5           # [E] Florida launch azimuth east; the RAAN is computed (plane through the Moon at arrival)
 argument_of_latitude_deg = 0.0

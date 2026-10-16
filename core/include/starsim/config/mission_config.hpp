@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "starsim/math/constants.hpp"
 #include "starsim/math/vec3.hpp"
 #include "starsim/time/utc_date_time.hpp"
 
@@ -82,6 +83,23 @@ struct LunarLandingMission {
     double llo_inclination_rad = 0.0;
     math::Vec3 nrho_apolune_position{}, nrho_apolune_velocity{};  // CR3BP seed (nondimensional)
     int nrho_revolutions = 0, nrho_synodic_months = 0, nrho_reference_revolutions = 0;
+    // [descent] (lunar l4; defaults as mission::LunarDescentParameters)
+    double pdi_altitude_above_site_m = 15.0e3;
+    double braking_range_m = 450.0e3;
+    double max_crossrange_m = 20.0e3;
+    double slope_limit_rad = 8.0 * constants::deg_to_rad;
+    double touchdown_search_radius_m = 1000.0;
+    // [surface]
+    double surface_stay_s = 0.0;
+    // [ascent] (defaults as gnc::LunarAscentParameters)
+    double insertion_altitude_above_site_m = 15.0e3;
+    double ascent_aposelene_m = 100.0e3;
+    // [budget]: nominal delta-v of the legs not planned at the start (the outbound legs come from its plan)
+    double descent_delta_v_mps = 2100.0;
+    double ascent_delta_v_mps = 1900.0;
+    double nrho_to_llo_delta_v_mps = 876.0;
+    double llo_to_nrho_delta_v_mps = 725.0;
+    double reserve_kg = 10000.0;
 };
 
 LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& config_dir, std::string_view mission_id);

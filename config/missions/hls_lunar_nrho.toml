@@ -2,6 +2,8 @@
 # refuelled in the LEO depot's orbit, departs from 200 x 200 km on its autopilot: best departure in the parking orbit,
 # TLI on the vacuum Raptors, mid-course corrections, powered lunar swing-by and insertion into the 9:2 NRHO
 # (in-direct transfer, Kikuchi et al. ISSFD 2024). [orbit] is the scenario start.
+# Does NOT close with the 120 t HLS (l4 Task 9, user 2026-10-16): the start refuses it ("Mission nicht durchführbar") -
+# the flown legs ([budget]) leave ~2 t short of the NRHO before the 10 t reserve.
 
 [mission]
 name = "HLS-Mondlandung (NRHO)"
@@ -49,6 +51,7 @@ aposelene_km = 100.0                     # the LLO (spec)
 [budget]                            # legs not planned at the start (nominal); the outbound legs come from its plan
 descent_delta_v_mps = 2100.0        # [D] l4 C2/C3 flights: DOI 18 + PDI->touchdown 2062-2068 m/s
 ascent_delta_v_mps = 1900.0         # [E] spec ~1.9 km/s (Apollo LM ~1.85)
-nrho_to_llo_delta_v_mps = 876.0     # [D] l3: 660 + 216 m/s
-llo_to_nrho_delta_v_mps = 725.0     # [D] l3: right after the LLO arrival (cheap window)
+nrho_to_llo_delta_v_mps = 956.0     # [D] l4 Task 9 mission flight (l3 test case: 876 m/s)
+llo_to_nrho_delta_v_mps = 990.0     # [D] l4 Task 9 flight: 986 m/s 5.3 d after the LLO arrival (site wait ~4 d + stay;
+                                    # the cheap ~725 m/s window closes ~2.5 d after the arrival, l3)
 reserve_kg = 10000.0                # [E] residuals, unusable propellant

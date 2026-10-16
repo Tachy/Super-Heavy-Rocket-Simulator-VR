@@ -7,8 +7,8 @@
 //   moves ~1 deg/day; no disturbance torques are modelled, so the attitude only drifts with the hold's residual rate).
 //   Ticking a 4-day coast at 200 Hz would cost ~70 M ticks.
 // - Burns: TLI, swing-by, insertion and transfer burns on the vacuum Raptors; MCCs, trims and station keeping by
-//   execute_burn(node) (the session picks the RCS for small ones). A main-engine burn too small for the vacuum set
-//   falls back to execute_burn(node) as well.
+//   lunar_small_burn (the single sea-level Raptor when its start/shutdown impulse fits, else the session's choice -
+//   the RCS for tiny ones). A main-engine burn too small for the vacuum set falls back to lunar_small_burn as well.
 // - After each burn the autopilot returns to the state Lunar (as a ship return returns to Return); the steps Tli,
 //   MidCourse, PoweredFlyby, Insertion and StationKeeping mean "that burn is under way" and are resolved on return.
 // - The coast allowance stops at the next step epoch (lunar_step_epoch_); the ignition preparation comes from Burn.
@@ -106,6 +106,53 @@ void FlightSession::reset_lunar() {
     lunar_landing_setup_.reset();
     lunar_ascent_.reset();
     lunar_ascent_parameters_.reset();
+    lunar_mission_.reset();
+    lunar_mission_leg_ = LunarMissionLeg::None;
+}
+
+void FlightSession::set_lunar_mission(std::optional<LunarMissionSequence> sequence) {
+    lunar_mission_ = std::move(sequence);
+    lunar_mission_leg_ = lunar_mission_ ? LunarMissionLeg::Outbound : LunarMissionLeg::None;
+}
+
+void FlightSession::lunar_mission_next() {
+    const auto& m = *lunar_mission_;
+    const auto end = [&](LunarMissionLeg leg, const std::string& prefix) {
+        lunar_mission_leg_ = leg;
+        lunar_status_ = prefix + lunar_status_;
+    };
+    const bool in_llo = lunar_step_ == LunarStep::InLlo;
+    switch (lunar_mission_leg_) {
+        case LunarMissionLeg::Outbound:
+            if (!in_llo) {  // NRHO variant: down to the LLO first
+                if (!plan_lunar_orbit_transfer(mission::LunarOrbitKind::Llo, m.nrho, m.llo)) {
+                    end(LunarMissionLeg::Ended, "Mission beendet: ");
+                }
+            } else if (plan_lunar_landing(m.landing)) {
+                lunar_mission_leg_ = LunarMissionLeg::Surface;
+            } else {
+                end(LunarMissionLeg::Ended, "Mission beendet: ");
+            }
+            break;
+        case LunarMissionLeg::Surface:  // back in the LLO after the ascent (or an abort to orbit)
+            if (!lunar_touchdown_ || lunar_touchdown_->outcome != LegTouchdown::Landed) {
+                end(LunarMissionLeg::Ended, "Mission abgebrochen: ");
+            } else if (!m.via_nrho) {
+                end(LunarMissionLeg::Complete, "Mission abgeschlossen: ");
+            } else if (plan_lunar_orbit_transfer(mission::LunarOrbitKind::Nrho, m.nrho, m.llo)) {
+                lunar_mission_leg_ = LunarMissionLeg::Return;
+            } else {
+                end(LunarMissionLeg::Ended, "Mission beendet: ");
+            }
+            break;
+        case LunarMissionLeg::Return:
+            if (!in_llo) end(LunarMissionLeg::Complete, "Mission abgeschlossen: ");
+            break;
+        case LunarMissionLeg::None:
+        case LunarMissionLeg::Complete:
+        case LunarMissionLeg::Ended:
+            break;
+    }
 }
 
 bool FlightSession::plan_lunar_outbound(const mission::LunarOutboundParameters& parameters) {
@@ -208,8 +255,9 @@ time::Epoch FlightSession::lunar_ignition_lead(const gnc::BurnNode& node) const 
 }
 
 bool FlightSession::lunar_burn(const gnc::BurnNode& node, bool main_engines, LunarStep step) {
-    // A main-engine burn too small for the vacuum set (start/shutdown impulse) flies on the session's choice.
-    const bool ok = (main_engines && execute_burn(node, vacuum_groups)) || execute_burn(node);
+    // A main-engine burn too small for the vacuum set (start/shutdown impulse) and the small burns (trims, station
+    // keeping) fly as lunar_small_burn: the single sea-level Raptor if it fits, else the session's choice.
+    const bool ok = (main_engines && execute_burn(node, vacuum_groups)) || lunar_small_burn(node);
     if (!ok) {
         lunar_abort("Mondflug abgebrochen: Brennvorgang nicht möglich");
         return false;
@@ -360,6 +408,12 @@ void FlightSession::lunar_sun_coast(Flying& flying) {
 void FlightSession::run_lunar(Flying& flying) {
     try {
         run_lunar_steps(flying);
+        // The sequence plans its next leg in the tick the previous one settles (an orbit step waits far ahead: the
+        // coast allowance would skip it); a burn still flying (state Burn) settles later.
+        if (lunar_mission_ && autopilot_.state == AutopilotState::Lunar &&
+            (lunar_step_ == LunarStep::InLlo || lunar_step_ == LunarStep::InNrho)) {
+            lunar_mission_next();
+        }
     } catch (const std::exception&) {
         // A planner that throws (integrator step underflow on a trial arc, ephemeris range) would leave the step due
         // and throw again on every tick: the flight ends, the vehicle coasts.

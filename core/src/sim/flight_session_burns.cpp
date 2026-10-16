@@ -89,22 +89,23 @@ double FlightSession::minimum_burn_dv_mps() const {
 bool FlightSession::execute_burn(const gnc::BurnNode& node) { return start_burn(node, burn_configurations()); }
 
 bool FlightSession::execute_burn(const gnc::BurnNode& node, const std::vector<std::string>& groups) {
-    return start_burn(node, burn_configurations(&groups));
+    return start_burn(node, burn_configurations(&groups), false);
 }
 
-bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<BurnConfiguration>& configurations) {
-    // Strongest configuration whose start/shutdown impulse is at most a quarter of the burn, so that
-    // the transients stay small against the closed-loop part; otherwise the weakest that still fits.
+bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<BurnConfiguration>& configurations,
+                               bool rcs_fallback, double max_transient_share) {
+    // Strongest configuration whose start/shutdown impulse is at most a quarter (max_transient_share) of the burn, so
+    // that the transients stay small against the closed-loop part; otherwise the weakest that still fits.
     const double dv = norm(node.delta_v_gcrf_mps);
     const BurnConfiguration* chosen = nullptr;
     for (const auto& c : configurations) {
-        if (c.minimum_dv_mps <= 0.25 * dv) {
+        if (c.minimum_dv_mps <= max_transient_share * dv) {
             chosen = &c;
             break;
         }
     }
     BurnConfiguration rcs;
-    if (chosen == nullptr && !bodies_.empty()) {
+    if (chosen == nullptr && rcs_fallback && !bodies_.empty()) {
         // Below the main-engine minimum impulse (or no main engines): RCS translation (no transients) along +x when the
         // vehicle has thrusters along it (ullage thrusters), else along -x (Crew Dragon with only the Dracos under its
         // nose cone) - if the burn takes less than an hour. Lateral axes are not used: one-station layouts (Super Heavy)
