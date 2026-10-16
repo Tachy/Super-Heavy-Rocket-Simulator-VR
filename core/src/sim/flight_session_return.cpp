@@ -51,7 +51,8 @@ void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanc
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
     // gate ahead of the tower's catch axis (b3), else over the pad centre
     const auto target = gnc::ship_entry_target(return_site(flying.body->vehicle()), gnc::ship_landing_parameters());
-    flying.entry_guidance = std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters);
+    flying.entry_guidance =
+        std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters, radiative_heating_);
 }
 
 bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {

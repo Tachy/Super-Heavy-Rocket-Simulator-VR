@@ -29,8 +29,8 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
       moon_(moon_orientation ? std::optional<environment::ReferenceBody>(
                                    environment::ReferenceBody::moon(ephemeris, *moon_orientation))
                              : std::nullopt),
-      radiative_heating_(aero::RadiativeHeatingTable::load(config_dir_)),
-      env_{gravity_, atmosphere_, earth, &ephemeris, true, moon_ ? &*moon_ : nullptr, &radiative_heating_},
+      radiative_heating_(std::make_shared<const aero::RadiativeHeatingTable>(aero::RadiativeHeatingTable::load(config_dir_))),
+      env_{gravity_, atmosphere_, earth, &ephemeris, true, moon_ ? &*moon_ : nullptr, radiative_heating_.get()},
       gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)) {
     legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
     moon_orientation_ = moon_orientation;
@@ -288,7 +288,8 @@ void FlightSession::run_autopilot() {
             }
             if (!flying.entry_guidance && !flying.ship_landing && epoch_ >= entry_start_) {
                 const bool capsule = flying.body->vehicle().stages().front().config.aero.entry_profile == "capsule";
-                start_entry_guidance(flying, capsule ? gnc::EntryGuidanceParameters::capsule() : gnc::EntryGuidanceParameters{});
+                start_entry_guidance(flying, capsule ? gnc::EntryGuidanceParameters::capsule()
+                                                     : return_entry_parameters_.value_or(gnc::EntryGuidanceParameters{}));
             }
             break;
         case AutopilotState::Lunar:
@@ -430,7 +431,10 @@ double FlightSession::coast_allowance_s() const {
         if (lunar_step_ == LunarStep::Ascent || lunar_step_ == LunarStep::AbortAscent) return 0.0;  // ascent: ticked
         // the next timed step (ignition preparation then comes from the state Burn), and the next Sun re-point
         allowance = std::min(allowance, lunar_step_epoch_ - epoch_);
-        if (lunar_step_ == LunarStep::Coast || lunar_step_ == LunarStep::DescentWait) allowance = std::min(allowance, lunar_next_repoint_ - epoch_);
+        if (lunar_step_ == LunarStep::Coast || lunar_step_ == LunarStep::DescentWait ||
+            lunar_step_ == LunarStep::ReturnCoast) {
+            allowance = std::min(allowance, lunar_next_repoint_ - epoch_);
+        }
     }
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
     if (autopilot_.state == AutopilotState::Burn) {

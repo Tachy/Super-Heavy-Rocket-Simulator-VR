@@ -50,6 +50,10 @@ constexpr double gate_scan_step_s = 2.0 * 3600.0;     // [E] the site turns ~3,0
 constexpr int gate_scan_steps = 6;                    // +-12 h: every site pass
 constexpr double gate_bracket_jump_m = 10000e3;       // larger: the target range wrapped past the antipode
 constexpr int gate_refine_iterations = 12;
+// [E] A gate the secant cannot close (the predicted range jumps at a reach boundary next to it: Task 8's MCC stalled at
+// -21 km, the secant's denominator went to zero) is accepted this close: the profiled entry guidance moves its range by
+// ~300 km per degree of initial bank.
+constexpr double gate_accept_m = 50e3;
 constexpr double gate_perigee_tolerance_m = 20.0;
 constexpr double gate_crossrange_tolerance_m = 50.0;
 constexpr double max_gate_step_s = 2.0 * 3600.0;  // secant steps outside a bracket
@@ -513,8 +517,14 @@ std::optional<Vec3> EarthReturnPlanner::aim_at_gate(const StateVector& at_burn, 
     // secant on the interface epoch, regula falsi (Illinois) once bracketed, to the gate tolerance
     auto converge = [&](GateSample a, GateSample b) -> std::optional<GateSample> {
         int kept = 0;  // Illinois: the same bracket end kept twice halves its value
+        GateSample best = std::abs(a.downrange_m) < std::abs(b.downrange_m) ? a : b;
+        const auto accepted = [&]() -> std::optional<GateSample> {
+            return std::abs(best.downrange_m) < gate_accept_m ? std::optional<GateSample>(best) : std::nullopt;
+        };
         for (int k = 0; k < gate_refine_iterations; ++k) {
             if (std::abs(b.downrange_m) < downrange_tolerance_m) return b;
+            if (std::abs(b.downrange_m) < std::abs(best.downrange_m)) best = b;
+            if (a.downrange_m == b.downrange_m || a.t - b.t == 0.0) return accepted();  // no secant
             const bool bracketed = brackets(a, b);
             const double f = a.downrange_m / (a.downrange_m - b.downrange_m);
             double t_new = (a.t - burn_epoch) + f * (b.t - a.t);
@@ -523,7 +533,7 @@ std::optional<Vec3> EarthReturnPlanner::aim_at_gate(const StateVector& at_burn, 
             }
             const double w = (t_new - (a.t - burn_epoch)) / (b.t - a.t);  // warm start along the line a -> b
             const GateSample m = timed(burn_epoch + t_new, a.dv + (b.dv - a.dv) * w);
-            if (!m.ok) return std::nullopt;
+            if (!m.ok) return accepted();
             if (!bracketed) {
                 a = b;
                 b = m;
@@ -538,7 +548,9 @@ std::optional<Vec3> EarthReturnPlanner::aim_at_gate(const StateVector& at_burn, 
                 kept = 0;
             }
         }
-        return std::abs(b.downrange_m) < downrange_tolerance_m ? std::optional<GateSample>(b) : std::nullopt;
+        if (std::abs(b.downrange_m) < downrange_tolerance_m) return b;
+        if (std::abs(b.downrange_m) < std::abs(best.downrange_m)) best = b;
+        return accepted();
     };
 
     const auto first = downrange(plane_delta_v_mps);

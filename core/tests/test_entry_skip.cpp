@@ -1,6 +1,10 @@
 // Entry predictor at lunar-return speeds (lunar l5): radiative heating, skip arcs carried above the atmosphere and the
 // exit orbit of a skip-out.
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 
 #include <catch2/catch_test_macros.hpp>
@@ -8,6 +12,7 @@
 #include "ship_entry_scenario.hpp"
 #include "starsim/aero/radiative_heating.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
+#include "starsim/gnc/entry_corridor.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
 
 using namespace starsim;
@@ -129,6 +134,8 @@ TEST_CASE("Guided lunar-return entry at 9.6 km/s inertial reaches the gate withi
     const gnc::EntryTarget target{end * ((norm(end) - 800.0) / norm(end)), 0.0};
     auto p = gnc::EntryGuidanceParameters::lunar_return();
     p.predictor_j2 = false;
+    p.final_bank_rad = -1.0;  // the constant-bank skip entry (lunar_return() profiles the bank since Task 8)
+    p.initial_bank_rad = 75.0 * deg;
     scenario.fly_guided(schedule, target, p, radiative);
     CHECK(scenario.reached_gate());
     CHECK(scenario.gate_miss_m(target) < 2000.0);
@@ -157,3 +164,75 @@ TEST_CASE("Aerocapture guidance exits near the target apoapsis", "[ship][guidanc
 }
 
 
+
+TEST_CASE("Profiled lunar-return entry at the return speed reaches the gate within the limits", "[ship][guidance][skip]") {
+    // l5 Task 8 finding: at 9,667 m/s relative (the lunar return's interface speed, eastward) no
+    // constant bank both stays in and holds the limits; the bank profile linear in energy (lunar_return(): 40 deg at
+    // the gate) has a window of initial banks. Fly the guidance at the angle with the widest window to the end point of
+    // its middle's prediction.
+    const auto schedule = gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, "aero/ship_entry_alpha.csv");
+    const auto radiative = std::make_shared<const aero::RadiativeHeatingTable>(
+        aero::RadiativeHeatingTable::load(STARSIM_CONFIG_DIR));
+    auto p = gnc::EntryGuidanceParameters::lunar_return();
+    p.predictor_j2 = false;
+    test::EntryStart start;
+    start.speed_relative_mps = 9667.0;
+    start.latitude_rad = 0.0;  // geodetic = geocentric angle (the scenario measures it from the geodetic vertical)
+    test::ShipEntryScenario probe(start);
+    // the guidance's own predictor model (bank rates, profile, skips), as the lunar return budget takes it
+    const gnc::EntryGuidance onboard(probe.body(), schedule, gnc::EntryTarget{}, p, radiative);
+    const auto model = onboard.model();
+    gnc::CorridorQuery q;
+    q.speed_mps = start.speed_relative_mps;
+    q.latitude_rad = start.latitude_rad;
+    q.limits = probe.body().vehicle().stages().front().config.heat_shield;
+    const auto corridor = gnc::entry_corridor(model, q);
+    REQUIRE(corridor.exists);
+    // the constant-bank corridor's middle has no admissible constant bank (the finding)
+    const auto window = gnc::widest_bank_window(model, q, corridor, p.max_bank_rad);
+    REQUIRE(window.exists);
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("corridor %.2f .. %.2f deg; widest window at %.2f deg: %.1f .. %.1f deg\n", corridor.steep_rad / deg,
+                    corridor.shallow_rad / deg, window.flight_path_rad / deg, window.low_rad / deg,
+                    window.high_rad / deg);
+    }
+    CHECK(window.width_rad > 3.0 * deg);
+    start.flight_path_angle_rad = window.flight_path_rad;
+    start.bank_rad = window.middle_rad;
+    p.initial_bank_rad = window.middle_rad;  // as the lunar return budget sets it
+    test::ShipEntryScenario scenario(start);
+    const auto nominal = gnc::predict_entry(model, predictor_start(scenario), window.middle_rad, gnc::EntryTarget{},
+                                            800.0, 0.0, 1.0, 6000.0);
+    REQUIRE(nominal.reached_gate);
+    const math::Vec3 end = nominal.end_position_itrf_m;
+    const gnc::EntryTarget target{end * ((norm(end) - 800.0) / norm(end)), 0.0};
+    scenario.fly_guided(schedule, target, p, radiative);
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("profiled entry: gate %d miss %.0f m, peak heat %.0f kW/m2\n", scenario.reached_gate(),
+                    scenario.gate_miss_m(target), scenario.body().peak_heat_rate_w_m2() / 1000.0);
+    }
+    CHECK(scenario.reached_gate());
+    CHECK(scenario.gate_miss_m(target) < 2000.0);
+    CHECK(scenario.body().peak_heat_rate_w_m2() < 1.2e6);
+    CHECK_FALSE(scenario.body().impacted());
+}
+
+TEST_CASE("A reversal between lift-down banks rolls through lift down", "[ship][guidance][skip]") {
+    // l5 Task 8: +115 -> -115 deg rolled through 0 (lift up) during the supercircular pull-out and skipped out
+    double bank = 115.0 * deg;
+    double lowest_magnitude = bank;
+    for (int i = 0; i < 200; ++i) {
+        bank = gnc::bank_step(bank, -115.0 * deg, 1.0 * deg, true);
+        lowest_magnitude = std::min(lowest_magnitude, std::abs(bank));
+    }
+    CHECK(std::abs(bank + 115.0 * deg) < 1e-9);
+    CHECK(lowest_magnitude > 114.0 * deg);  // never towards lift up
+    // small banks still reverse through 0 (the shorter way)
+    double small = 50.0 * deg;
+    for (int i = 0; i < 99; ++i) small = gnc::bank_step(small, -50.0 * deg, 1.0 * deg, true);
+    CHECK(std::abs(small + 49.0 * deg) < 1e-9);
+    // LEO / capsule entries: straight towards the command
+    double straight = 115.0 * deg;
+    for (int i = 0; i < 115; ++i) straight = gnc::bank_step(straight, -115.0 * deg, 1.0 * deg, false);
+    CHECK(std::abs(straight) < 1e-9);
+}

@@ -19,7 +19,10 @@ struct LunarReturnBudget {
     double tei_delta_v_mps = 0.0;  // NRHO: departure burn + powered flyby
     double braking_delta_v_mps = 0.0;
     double entry_speed_mps = 0.0;  // relative, at the interface (the highest with a corridor of the minimum width)
-    gnc::EntryCorridor corridor;   // at that speed; the planned angle is its middle
+    gnc::EntryCorridor corridor;   // at that speed; the planned angle is its middle (aerocapture)
+    // Direct entry with a bank profile (EntryGuidanceParameters::final_bank_rad): the angle in the corridor with the
+    // widest initial-bank window - the planned angle, its middle the nominal bank (user 2026-10-16).
+    gnc::BankWindow bank_window;
     std::string reason;            // German when refused
 };
 
@@ -49,7 +52,8 @@ void place_lunar_return_ship(FlightSession& session, const config::LunarReturnMi
 // Entry speed and propellant of the return of `ship` from the start state: the highest interface speed whose corridor
 // is at least min_corridor_width wide (onboard predictor at the entry mass, radiative heating, the site's latitude,
 // eastward), the corridor's middle as the planned angle (both set into `setup`, with the entry model for a direct
-// entry), then the propellant fixed point: TEI (finite on `setup.burn_groups`), MCC allowance and braking burn on the
+// entry; a direct entry with a bank profile takes the angle with the widest initial-bank window and its middle as the
+// nominal bank), then the propellant fixed point: TEI (finite on `setup.burn_groups`), MCC allowance and braking burn on the
 // vacuum Isp down to dry + landing propellant (aerocapture: + perigee raise and deorbit on the deorbit engines), coast
 // attitude gas and the reserve. Refused (German): "Kein Eintrittskorridor ...", the planner's refusal, or the tanks.
 // The session's launch site must be the mission's (the gate is the site's tower).

@@ -222,6 +222,12 @@ double angle_between(const Vec3& a, const Vec3& b) { return std::atan2(norm(cros
 
 }  // namespace
 
+double bank_step(double bank_rad, double command_rad, double max_change_rad, bool shorter_way) {
+    if (!shorter_way) return bank_rad + std::clamp(command_rad - bank_rad, -max_change_rad, max_change_rad);
+    const double delta = std::remainder(command_rad - bank_rad, 2.0 * constants::pi);
+    return std::remainder(bank_rad + std::clamp(delta, -max_change_rad, max_change_rad), 2.0 * constants::pi);
+}
+
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
                               double bank_command_rad, const EntryTarget& target, double gate_height_m,
                               double heat_load_so_far_j_m2, double step_s, double max_time_s) {
@@ -235,14 +241,26 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     double t = 0.0;
     double swept_rad = 0.0;  // ground track angle flown (unwraps the range past the antipode)
     AeroSample now = m.aero(r, v, bank);
+    // bank profile (final_bank_rad): magnitude linear in energy from the command now to the final bank at the gate
+    const bool profiled = model.final_bank_rad >= 0.0;
+    const auto energy = [&](const Vec3& rr, const Vec3& vv) { return 0.5 * dot(vv, vv) - model.gm_m3ps2 / norm(rr); };
+    const double energy_start = energy(r, v);
+    const double energy_gate = -model.gm_m3ps2 / (model.earth_radius_m + gate_m);
+    const double command_sign = std::copysign(1.0, bank_command_rad);
     while (t < max_time_s) {
         m.update_basis(r, v);
         m.advance(r, step_s);
         const double max_change = model.bank_rate_at(now.mach) * step_s;
         const bool reversed = start.reversal_time_s >= 0.0 && t >= start.reversal_time_s;
-        const double command = reversed ? -bank_command_rad : bank_command_rad;
-        const double next_bank = bank + std::clamp(command - bank, -max_change, max_change);
-        const double mid_bank = 0.5 * (bank + next_bank);
+        double commanded = bank_command_rad;
+        if (profiled && energy_start > energy_gate) {
+            const double f = std::clamp((energy_start - energy(r, v)) / (energy_start - energy_gate), 0.0, 1.0);
+            const double magnitude = std::abs(bank_command_rad);
+            commanded = command_sign * (magnitude + (model.final_bank_rad - magnitude) * f);
+        }
+        const double command = reversed ? -commanded : commanded;
+        const double next_bank = bank_step(bank, command, max_change, profiled);
+        const double mid_bank = bank + 0.5 * std::remainder(next_bank - bank, 2.0 * constants::pi);  // across 180 deg
         const Derivative k1 = m.derivative(r, v, bank);
         const Derivative k2 = m.derivative(r + k1.dr * (0.5 * step_s), v + k1.dv * (0.5 * step_s), mid_bank);
         const Derivative k3 = m.derivative(r + k2.dr * (0.5 * step_s), v + k2.dv * (0.5 * step_s), mid_bank);

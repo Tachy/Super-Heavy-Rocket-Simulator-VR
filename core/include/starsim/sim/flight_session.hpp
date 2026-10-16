@@ -76,10 +76,15 @@ const char* to_string(CapsuleReturnStep step);
 // -> PoweredDescent -> Landed (via SurfaceStay when a stay is requested); PlaneTrim and Doi: that burn is under way.
 // Ascent (plan_lunar_ascent, l4): (SurfaceStay until the liftoff ->) Ascent -> AscentCoast -> Circularize (the burn) ->
 // InLlo; AbortAscent: an abort to orbit from PoweredDescent, then AscentCoast as the ascent.
+// Return to the Earth (plan_lunar_return, l5): ReturnDeparture (NRHO: the departure burn first) -> Tei -> ReturnCoast
+// (-> ReturnCorrection -> ReturnCoast) -> Braking -> EarthEntry (autopilot state Return: entry, flip, catch); Tei,
+// ReturnCorrection and Braking: that burn is under way. Aerocapture, CaptureCoast and PerigeeRaise: the aerocapture
+// variant (Task 9).
 enum class LunarStep {
     None, Departure, Tli, Coast, MidCourse, PilotCorrection, PoweredFlyby, Insertion, Trim, InLlo, InNrho, StationKeeping,
     TransferOut, TransferIn, DescentWait, PlaneTrim, Doi, DescentCoast, PoweredDescent, Landed, SurfaceStay, Ascent,
-    AscentCoast, Circularize, AbortAscent, Lost
+    AscentCoast, Circularize, AbortAscent, Lost, ReturnDeparture, Tei, ReturnCoast, ReturnCorrection, Braking, EarthEntry,
+    Aerocapture, CaptureCoast, PerigeeRaise
 };
 const char* to_string(LunarStep step);
 
@@ -141,6 +146,7 @@ struct LunarBurnRecord {
     LunarStep step = LunarStep::None;
     gnc::BurnNode node;
     double mass_kg = 0.0;  // at the command
+    math::Vec3 centre_gcrf_m;  // the burn centre: the state at the command coasted to node.epoch (ballistic)
 };
 
 struct AutopilotStatus {
@@ -271,6 +277,8 @@ public:
         lunar_landing_setup_.reset();
         lunar_mission_.reset();
         lunar_mission_leg_ = LunarMissionLeg::None;
+        lunar_return_.reset();
+        return_entry_parameters_.reset();
     }
     // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
     // at the next staging; the booster is then guided independently of the controlled body.
@@ -363,6 +371,12 @@ public:
     // A closed lunar orbit clear of the highest terrain: both apsides (radii from the Moon's centre) above
     // moon_mean_radius_m + moon_max_terrain_height_m (the ascent's sub-orbital cutoff guard).
     static bool lunar_orbit_clears_terrain(double periselene_m, double aposelene_m);
+    // Return of the controlled ship from lunar orbit (l5; autopilot Off / Orbit, Moon-referenced): plans TEI (NRHO:
+    // departure burn + powered flyby), mid-course corrections and the braking burn (mission::EarthReturnPlanner on the
+    // vacuum Raptors) and flies them; direct: then the entry, flip and catch (state Return). False with a German
+    // lunar_status() when refused; a flight under way keeps its plan.
+    bool plan_lunar_return(const LunarReturnSetup& setup);
+    const mission::ReturnPlan* lunar_return_plan() const { return lunar_return_plan_ ? &*lunar_return_plan_ : nullptr; }
     // Chains the legs of a lunar landing mission after the flight planned now (start_lunar_landing_mission); empty
     // ends it. A refused leg ends the sequence in its orbit with the planner's reason in lunar_status().
     void set_lunar_mission(std::optional<LunarMissionSequence> sequence);
@@ -522,7 +536,8 @@ private:
     environment::Us76Atmosphere atmosphere_;
     std::optional<environment::ReferenceBody> moon_;  // lunar l1: with a Moon orientation
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_;  // lunar l2
-    aero::RadiativeHeatingTable radiative_heating_;  // lunar l5: Earth air radiation (config/aero)
+    // lunar l5: Earth air radiation (config/aero); shared with the entry guidance's predictor
+    std::shared_ptr<const aero::RadiativeHeatingTable> radiative_heating_;
     vehicle::FlightEnvironment env_;
     gnc::AttitudeController controller_;
     // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).
@@ -653,6 +668,18 @@ private:
     LunarMissionLeg lunar_mission_leg_ = LunarMissionLeg::None;
     void lunar_mission_next();  // in InLlo / InNrho with the autopilot idle: plans the next leg
     bool lunar_auto_abort_tried_ = false;  // the landing guidance gave up: the abort to orbit was tried once
+    // The return to the Earth (flight_session_lunar_return.cpp, l5).
+    void run_lunar_return_steps(Flying& flying);
+    void lunar_return_enter_coast();   // ReturnCoast: Sun pointing, the next MCC or the braking burn's ignition lead
+    void lunar_return_coast_event();   // ReturnCoast: the timed event is due (MCC or braking burn)
+    void lunar_return_after_braking();  // direct: the entry (state Return); Task 9: the aerocapture
+    double lunar_return_arrival_speed() const;  // relative speed at the entry interface, coasting from now
+    std::optional<LunarReturnSetup> lunar_return_;
+    std::optional<mission::ReturnPlan> lunar_return_plan_;
+    bool lunar_return_departed_ = false;  // NRHO: the departure burn is flown (the powered flyby is next)
+    std::optional<time::Epoch> lunar_return_braking_epoch_;  // predicted braking centre (ReturnCoast)
+    // The entry guidance parameters of a lunar return (lunar_return() / aerocapture()); empty: the LEO ship return's.
+    std::optional<gnc::EntryGuidanceParameters> return_entry_parameters_;
     math::StateVector controlled_state() const;
 
     // `forced`: only this set (config group ids), at full and at minimum throttle.

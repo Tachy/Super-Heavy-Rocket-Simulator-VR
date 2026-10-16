@@ -29,10 +29,11 @@ constexpr double deg = constants::deg_to_rad;
 void print_budget(const char* what, const sim::LunarReturnBudget& b) {
     if (!std::getenv("STARSIM_VERBOSE")) return;
     std::printf("[lunar return] %s: closes %d (%s), propellant %.1f t, TEI %.1f m/s, braking %.1f m/s, entry %.0f m/s, "
-                "corridor %.2f .. %.2f deg (middle %.2f, width %.2f, %s)\n",
+                "corridor %.2f .. %.2f deg (middle %.2f, width %.2f, %s), bank window at %.2f deg: %.1f .. %.1f deg\n",
                 what, b.closes ? 1 : 0, b.reason.c_str(), b.propellant_kg / 1000.0, b.tei_delta_v_mps,
                 b.braking_delta_v_mps, b.entry_speed_mps, b.corridor.steep_rad / deg, b.corridor.shallow_rad / deg,
-                b.corridor.middle_rad / deg, b.corridor.width_rad / deg, b.corridor.limiting.c_str());
+                b.corridor.middle_rad / deg, b.corridor.width_rad / deg, b.corridor.limiting.c_str(),
+                b.bank_window.flight_path_rad / deg, b.bank_window.low_rad / deg, b.bank_window.high_rad / deg);
 }
 
 }  // namespace
@@ -55,7 +56,7 @@ TEST_CASE("Lunar return missions load", "[lunar][return][config]") {
     CHECK_THROWS_AS(config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "hls_lunar_llo"), config::ConfigError);
 }
 
-TEST_CASE("Lunar return start tanks the ship for its return and plans it", "[lunar][return][session]") {
+TEST_CASE("Lunar return start tanks the ship for its return and plans it", "[lunar][return][session][slow]") {
     test::LunarReturnSession t;
     sim::LunarReturnBudget budget;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
@@ -64,8 +65,7 @@ TEST_CASE("Lunar return start tanks the ship for its return and plans it", "[lun
     print_budget("LLO direct", budget);
     INFO(s.refusal);
     REQUIRE(budget.closes);
-    // Task 8: CHECK(s.return_planned);
-    CHECK(s.refusal == "Rückflug-Autopilot fehlt");
+    CHECK(s.return_planned);
     // [D] TEI ~0.9 + braking ~1.1 km/s (l5 Task 6; the plan estimated 1.5) + MCC + coast + 35 t landing + 10 t reserve
     // on 255 t dry: ~250 t
     const auto& v = t.session.body(t.session.controlled_index()).vehicle();
@@ -79,7 +79,7 @@ TEST_CASE("Lunar return start tanks the ship for its return and plans it", "[lun
     const auto moon = t.ephemeris.state_gcrf(ephemeris::Body::Moon, s.epoch);
     const double altitude_m = norm(st.position_gcrf_m - moon.position_m) - constants::moon_mean_radius_m;
     CHECK(std::abs(altitude_m - 100e3) < 1e3);
-    // Task 8: CHECK(t.session.lunar_step() == sim::LunarStep::ReturnDeparture);
+    CHECK(t.session.lunar_step() == sim::LunarStep::ReturnDeparture);
 }
 
 TEST_CASE("Lunar return start refuses without an entry corridor", "[lunar][return][session]") {
@@ -161,7 +161,7 @@ TEST_CASE("start_mission dispatches a lunar return", "[lunar][return][session]")
     const auto s = sim::start_mission(t.session, STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo", {}, t.time);
     CHECK(s.kind == config::MissionKind::LunarReturn);
     INFO(s.refusal);
-    REQUIRE(s.refusal == "Rückflug-Autopilot fehlt");  // Task 8: REQUIRE(s.return_planned);
+    REQUIRE(s.return_planned);
     const auto& v = t.session.body(t.session.controlled_index()).vehicle();
     if (std::getenv("STARSIM_VERBOSE")) {
         std::printf("[lunar return] LLO aircatch: propellant %.1f t\n", v.propellant_kg() / 1000.0);

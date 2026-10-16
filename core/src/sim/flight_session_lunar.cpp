@@ -28,13 +28,8 @@
 
 namespace starsim::sim {
 
-namespace {
-
-const std::vector<std::string> vacuum_groups{"vacuum"};
-
-}  // namespace
-
 using detail::far_future_s;
+using detail::vacuum_groups;
 using detail::first_after;
 using detail::german;
 
@@ -66,6 +61,15 @@ const char* to_string(LunarStep step) {
         case LunarStep::Circularize: return "Zirkularisierung";
         case LunarStep::AbortAscent: return "Abbruch zum Orbit";
         case LunarStep::Lost: return "verloren";
+        case LunarStep::ReturnDeparture: return "Abflug zur Erde";
+        case LunarStep::Tei: return "TEI";
+        case LunarStep::ReturnCoast: return "Rückflug";
+        case LunarStep::ReturnCorrection: return "Kurskorrektur";
+        case LunarStep::Braking: return "Bremsbrennen";
+        case LunarStep::EarthEntry: return "Wiedereintritt";
+        case LunarStep::Aerocapture: return "Aircatch";
+        case LunarStep::CaptureCoast: return "Freiflug zum Apogäum";
+        case LunarStep::PerigeeRaise: return "Perigäumsanhebung";
     }
     return "";
 }
@@ -95,6 +99,11 @@ void FlightSession::reset_lunar() {
     lunar_ascent_parameters_.reset();
     lunar_mission_.reset();
     lunar_mission_leg_ = LunarMissionLeg::None;
+    lunar_return_.reset();
+    lunar_return_plan_.reset();
+    lunar_return_departed_ = false;
+    lunar_return_braking_epoch_.reset();
+    return_entry_parameters_.reset();
 }
 
 void FlightSession::set_lunar_mission(std::optional<LunarMissionSequence> sequence) {
@@ -249,7 +258,9 @@ bool FlightSession::lunar_burn(const gnc::BurnNode& node, bool main_engines, Lun
         lunar_abort("Mondflug abgebrochen: Brennvorgang nicht möglich");
         return false;
     }
-    lunar_burns_.push_back({step, node, bodies_[controlled_].body->vehicle().mass_properties().mass_kg});
+    const auto now = controlled_state();
+    const auto centre = node.epoch - epoch_ > 0.0 ? orbit::propagate_coast(gravity_, now, epoch_, node.epoch).state : now;
+    lunar_burns_.push_back({step, node, bodies_[controlled_].body->vehicle().mass_properties().mass_kg, centre.position_m});
     return ok;
 }
 
@@ -271,7 +282,8 @@ void FlightSession::run_lunar(Flying& flying) {
             (lunar_step_ == LunarStep::InLlo || lunar_step_ == LunarStep::InNrho)) {
             lunar_mission_next();
         }
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        if (lunar_debug_) std::printf("[lunar] planning threw: %s\n", e.what());
         // A planner that throws (integrator step underflow on a trial arc, ephemeris range) would leave the step due
         // and throw again on every tick: the flight ends. Engines of a powered phase are cut (review l4 M1: they stayed
         // lit without steering); the vehicle then coasts or falls.
@@ -299,6 +311,10 @@ void FlightSession::run_lunar_steps(Flying& flying) {
     if (lunar_step_ == LunarStep::Ascent || lunar_step_ == LunarStep::AbortAscent ||
         lunar_step_ == LunarStep::AscentCoast || lunar_step_ == LunarStep::Circularize) {
         run_lunar_ascent_steps(flying);  // judges an impact itself
+        return;
+    }
+    if (lunar_step_ >= LunarStep::ReturnDeparture) {
+        run_lunar_return_steps(flying);  // judges an impact itself
         return;
     }
     if (flying.body->impacted()) {
@@ -478,6 +494,15 @@ void FlightSession::run_lunar_steps(Flying& flying) {
         case LunarStep::Circularize:
         case LunarStep::AbortAscent:
         case LunarStep::Lost:
+        case LunarStep::ReturnDeparture:
+        case LunarStep::Tei:
+        case LunarStep::ReturnCoast:
+        case LunarStep::ReturnCorrection:
+        case LunarStep::Braking:
+        case LunarStep::EarthEntry:
+        case LunarStep::Aerocapture:
+        case LunarStep::CaptureCoast:
+        case LunarStep::PerigeeRaise:
             break;
     }
 }

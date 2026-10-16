@@ -21,6 +21,8 @@ constexpr double converged_bank_rad = 0.1 * constants::deg_to_rad;
 constexpr double bracket_step_rad = 10.0 * constants::deg_to_rad;
 constexpr int max_illinois_iterations = 8;
 constexpr int constraint_bisections = 6;
+// [E] profiled lunar return: above the lowest capturing bank when the limits would cut it to a skip-out
+constexpr double capture_margin_rad = 2.0 * constants::deg_to_rad;
 constexpr double terminal_max_height_m = 40000.0;  // the hand-over Mach number is only trusted in dense air
 constexpr double max_terminal_prediction_s = 900.0;
 constexpr double settled_bank_rad = 5.0 * constants::deg_to_rad;  // no reversal in progress
@@ -62,6 +64,7 @@ EntryGuidance::EntryGuidance(const vehicle::FlightBody& ship, const AlphaSchedul
     model_.aero = EntryAeroTable(ship.vehicle(), schedule);
     model_.radiative = std::move(radiative);
     configure_model(ship);
+    bank_magnitude_rad_ = parameters_.initial_bank_rad;
 }
 
 EntryGuidance::EntryGuidance(const vehicle::FlightBody& capsule, EntryTarget target, EntryGuidanceParameters parameters)
@@ -94,6 +97,7 @@ void EntryGuidance::configure_model(const vehicle::FlightBody& body) {
     model_.nose_max_fraction = parameters_.terminal_nose_max_fraction;
     if (!parameters_.predictor_j2) model_.j2 = 0.0;
     model_.carry_skips = parameters_.carry_skips;
+    model_.final_bank_rad = parameters_.final_bank_rad;
     limits_ = stage.config.heat_shield;
     belly_azimuth_rad_ = stage.config.aero.belly_azimuth_rad;
 }
@@ -189,6 +193,7 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
     // largest bank inside the limits.
     if (violates(s.prediction)) {
         s.constrained = true;
+        const Solution solved = s;
         double lo = 0.0, hi = s.bank_rad;
         EntryPrediction p_lo = predict(0.0);
         if (!violates(p_lo)) {
@@ -205,6 +210,28 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
         }
         s.bank_rad = lo;
         s.prediction = p_lo;
+        // Profiled lunar return: capture before the predicted limits. The limited bank that skips out leaves a second
+        // entry at orbital speed thousands of km off (Task 8 flight 5: cut to 89 deg at 9.67 km/s, skipped, impacted
+        // 6,200 km short); the predicted violation is the late dive of a bank held to the gate, which later cycles
+        // re-solve. Fly the lowest capturing bank plus a margin instead.
+        const auto captured = [](const EntryPrediction& x) { return x.reached_gate && x.skips == 0; };
+        if (parameters_.final_bank_rad >= 0.0 && captured(solved.prediction) && !captured(p_lo)) {
+            double out = lo, in = solved.bank_rad;
+            EntryPrediction p_in = solved.prediction;
+            for (int i = 0; i < constraint_bisections; ++i) {
+                const double mid = 0.5 * (out + in);
+                const EntryPrediction p_mid = predict(mid);
+                if (captured(p_mid)) {
+                    in = mid;
+                    p_in = p_mid;
+                } else {
+                    out = mid;
+                }
+            }
+            const double bank = std::min(in + capture_margin_rad, solved.bank_rad);
+            s.bank_rad = bank;
+            s.prediction = bank == in ? p_in : predict(bank);
+        }
     }
     return s;
 }
@@ -231,9 +258,19 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
         const Solution left = solve(model_, state, body.heat_load_j_m2(), 1.0, bank_magnitude_rad_);
         const Solution right = solve(model_, state, body.heat_load_j_m2(), -1.0, bank_magnitude_rad_);
         sign_ = std::abs(left.prediction.crossrange_m) <= std::abs(right.prediction.crossrange_m) ? 1.0 : -1.0;
+        if (std::getenv("STARSIM_DEBUG_ENTRY")) {
+            std::printf("[entry] sign: +%.1f deg%s cross %.1f km downrange %.1f km | -%.1f deg%s cross %.1f km "
+                        "downrange %.1f km\n",
+                        left.bank_rad / constants::deg_to_rad, left.constrained ? " constrained" : "",
+                        left.prediction.crossrange_m / 1000.0, left.prediction.downrange_error_m / 1000.0,
+                        right.bank_rad / constants::deg_to_rad, right.constrained ? " constrained" : "",
+                        right.prediction.crossrange_m / 1000.0, right.prediction.downrange_error_m / 1000.0);
+        }
     }
     Solution s = solve(model_, state, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
-    if (norm(v_itrf) > parameters_.min_reversal_speed_mps && time_since_reversal_s_ >= parameters_.min_reversal_interval_s) {
+    const double speed_mps = norm(v_itrf);
+    if (speed_mps > parameters_.min_reversal_speed_mps && speed_mps < parameters_.max_reversal_speed_mps &&
+        time_since_reversal_s_ >= parameters_.min_reversal_interval_s) {
         EntryPredictorState now = state;
         now.reversal_time_s = 0.0;
         const Solution reverse_now = solve(model_, now, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
@@ -558,7 +595,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
             entry_cycle(body, r_itrf, v_itrf);
         }
         const double max_change = model_.bank_rate_at(mach) * dt;
-        bank_rad_ += std::clamp(bank_target_rad_ - bank_rad_, -max_change, max_change);
+        bank_rad_ = bank_step(bank_rad_, bank_target_rad_, max_change, parameters_.final_bank_rad >= 0.0);
         command_.alpha_rad = model_.aero.alpha_rad(mach);
         command_.bank_rad = bank_rad_;
         if (capsule_) {  // flight director only: the capsule's RCS flies the bank (capsule_entry_control)

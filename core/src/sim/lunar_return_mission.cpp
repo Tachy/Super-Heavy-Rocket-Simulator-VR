@@ -226,6 +226,18 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
     if (!m.aerocapture) {
         target.entry_model = onboard.model();
         target.gate = gate;
+        if (setup.entry.final_bank_rad >= 0.0) {
+            // A constant bank that stays in dives once below circular speed (Task 8 finding): the profiled entry's
+            // initial bank must lie in its window; plan where the window is widest, aim with its middle.
+            b.bank_window = gnc::widest_bank_window(corridor_model, q, b.corridor, setup.entry.max_bank_rad);
+            if (!b.bank_window.exists) {
+                b.reason = "Kein Eintrittsfenster: keine Querneigung fängt ein und bleibt in den Grenzen";
+                return b;
+            }
+            target.flight_path_rad = b.bank_window.flight_path_rad;
+            target.nominal_bank_rad = b.bank_window.middle_rad;
+            setup.entry.initial_bank_rad = b.bank_window.middle_rad;  // the guidance's warm start
+        }
     }
 
     // Propellant fixed point over the planned burns (plane-only targeting: the gate moves the arrival time by hours,
@@ -313,7 +325,9 @@ MissionStart start_lunar_return_mission(FlightSession& session, const std::files
     if (budget) *budget = b;
     if (!b.closes) return refuse(b.reason);
     place_lunar_return_ship(session, m, ship, epoch, b.propellant_kg, setup.ret);
-    return refuse("Rückflug-Autopilot fehlt");  // Task 8: session.plan_lunar_return(setup)
+    s.return_planned = session.plan_lunar_return(setup);
+    if (!s.return_planned) return refuse(session.lunar_status());
+    return s;
 }
 
 }  // namespace starsim::sim

@@ -13,6 +13,9 @@ namespace starsim::sim::detail {
 
 inline constexpr double far_future_s = 1e9;  // "nothing timed"
 
+// The vacuum Raptors (config group id) of the big lunar burns (TLI, insertion, transfers, TEI, braking).
+inline const std::vector<std::string> vacuum_groups{"vacuum"};
+
 // First epoch of `epochs` after t.
 inline std::optional<time::Epoch> first_after(const std::vector<time::Epoch>& epochs, time::Epoch t) {
     for (const auto& e : epochs) {

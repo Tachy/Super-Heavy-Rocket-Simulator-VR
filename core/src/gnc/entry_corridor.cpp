@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "starsim/frames/geodetic.hpp"
+
 namespace starsim::gnc {
 
 namespace {
@@ -13,24 +15,25 @@ constexpr double tolerance_rad = 0.01 * constants::deg_to_rad;
 constexpr double speed_tolerance_mps = 25.0;
 constexpr double max_prediction_s = 6000.0;
 
-// Earth-fixed interface state on the meridian of longitude 0 from speed, angle and heading.
-EntryPredictorState interface_state(const EntryPredictorModel& m, const CorridorQuery& q, double gamma_rad,
-                                    double bank_rad) {
-    const double r = m.earth_radius_m + q.interface_height_m;
-    const math::Vec3 up{std::cos(q.latitude_rad), 0.0, std::sin(q.latitude_rad)};
+// Earth-fixed interface state on the meridian of longitude 0 from speed, angle and heading: at the geodetic interface
+// height (the predictor judges geodetic heights; on a sphere of the equatorial radius the point at 26 deg sat ~4 km
+// higher, Task 8), the angle against the geocentric horizontal (as EarthReturnPlanner measures it).
+EntryPredictorState interface_state(const CorridorQuery& q, double gamma_rad, double bank_rad) {
+    const math::Vec3 position = frames::geodetic_to_fixed({q.latitude_rad, 0.0, q.interface_height_m});
+    const math::Vec3 up = math::normalized(position);
     const math::Vec3 east{0.0, 1.0, 0.0};
     const math::Vec3 north = cross(up, east);
     const math::Vec3 horizontal = north * std::cos(q.heading_rad) + east * std::sin(q.heading_rad);
     const math::Vec3 v = (horizontal * std::cos(gamma_rad) + up * std::sin(gamma_rad)) * q.speed_mps;
     EntryPredictorState s;
-    s.position_itrf_m = up * r;
+    s.position_itrf_m = position;
     s.velocity_itrf_mps = v;
     s.bank_rad = bank_rad;
     return s;
 }
 
 EntryPrediction fly(const EntryPredictorModel& m, const CorridorQuery& q, double gamma_rad, double bank_rad) {
-    return predict_entry(m, interface_state(m, q, gamma_rad, bank_rad), bank_rad, EntryTarget{}, q.gate_height_m, 0.0,
+    return predict_entry(m, interface_state(q, gamma_rad, bank_rad), bank_rad, EntryTarget{}, q.gate_height_m, 0.0,
                          1.0, max_prediction_s);
 }
 
@@ -64,7 +67,8 @@ double boundary(double good, double bad, F holds) {
 }  // namespace
 
 EntryCorridor entry_corridor(EntryPredictorModel model, const CorridorQuery& query) {
-    model.carry_skips = false;  // a corridor boundary is about the first pass
+    model.carry_skips = false;     // a corridor boundary is about the first pass
+    model.final_bank_rad = -1.0;   // at constant full lift down / up (the classical corridor)
     const bool capture = query.aerocapture_apoapsis_m > 0.0;
     constexpr double lift_up = 0.0;
     constexpr double lift_down = constants::pi;
@@ -107,6 +111,58 @@ EntryCorridor entry_corridor(EntryPredictorModel model, const CorridorQuery& que
     c.width_rad = std::max(0.0, c.shallow_rad - c.steep_rad);
     c.middle_rad = 0.5 * (c.shallow_rad + c.steep_rad);
     return c;
+}
+
+BankWindow entry_bank_window(const EntryPredictorModel& model, const CorridorQuery& query, double flight_path_rad,
+                             double max_bank_rad) {
+    std::string limiting;
+    const auto ok = [&](double bank_rad) {
+        const auto p = fly(model, query, flight_path_rad, bank_rad);
+        return p.reached_gate && p.skips == 0 && within_limits(p, query, limiting);  // a direct entry, no skip
+    };
+    // the longest run of admissible banks on a 2 deg grid, its edges refined by bisection
+    constexpr double grid_rad = 2.0 * constants::deg_to_rad;
+    const int n = static_cast<int>(max_bank_rad / grid_rad);
+    int best_first = -1, best_last = -1, first = -1;
+    for (int i = 0; i <= n + 1; ++i) {
+        const bool good = i <= n && ok(i * grid_rad);
+        if (good && first < 0) first = i;
+        if (!good && first >= 0) {
+            if (i - 1 - first > best_last - best_first) {
+                best_first = first;
+                best_last = i - 1;
+            }
+            first = -1;
+        }
+    }
+    BankWindow w;
+    w.flight_path_rad = flight_path_rad;
+    if (best_first < 0) return w;
+    constexpr double edge_tolerance_rad = 0.25 * constants::deg_to_rad;
+    const auto edge = [&](double good, double bad) {
+        while (std::abs(good - bad) > edge_tolerance_rad) {
+            const double mid = 0.5 * (good + bad);
+            (ok(mid) ? good : bad) = mid;
+        }
+        return good;
+    };
+    w.low_rad = best_first > 0 ? edge(best_first * grid_rad, (best_first - 1) * grid_rad) : 0.0;
+    w.high_rad = best_last < n ? edge(best_last * grid_rad, (best_last + 1) * grid_rad) : best_last * grid_rad;
+    w.width_rad = w.high_rad - w.low_rad;
+    w.middle_rad = 0.5 * (w.low_rad + w.high_rad);
+    w.exists = true;
+    return w;
+}
+
+BankWindow widest_bank_window(const EntryPredictorModel& model, const CorridorQuery& query, const EntryCorridor& corridor,
+                              double max_bank_rad) {
+    constexpr double step_rad = 0.1 * constants::deg_to_rad;
+    BankWindow best;
+    for (double gamma = corridor.steep_rad; gamma <= corridor.shallow_rad + 1e-12; gamma += step_rad) {
+        const auto w = entry_bank_window(model, query, gamma, max_bank_rad);
+        if (w.exists && (!best.exists || w.width_rad > best.width_rad)) best = w;
+    }
+    return best;
 }
 
 double max_entry_speed(const EntryPredictorModel& model, CorridorQuery query, double min_width_rad, double low_mps,

@@ -58,6 +58,9 @@ struct EntryGuidanceParameters {
     // sign closer across wins if it gains more than this [E]. None below min_reversal_speed (belly flop's job).
     double reversal_crossrange_base_m = 2000.0;
     double min_reversal_speed_mps = 600.0;
+    // None above this either (lunar_return(): the supercircular pull-out, where the reversal solutions jump between
+    // skips and dives - Task 8 reversed at 9.7 km/s to -52 deg and was lost).
+    double max_reversal_speed_mps = 1.0e9;
     double min_reversal_interval_s = 20.0;    // [E] dwell between reversals
     double scale_filter_gain = 0.3;   // per cycle, measured / modelled aerodynamic acceleration
     double scale_min_acceleration_mps2 = 1.0;
@@ -70,6 +73,13 @@ struct EntryGuidanceParameters {
     // Lunar l5: the predictor carries skip arcs (EntryPredictorModel::carry_skips) and looks this far ahead.
     bool carry_skips = false;
     double max_time_s = 3000.0;
+    // Lunar l5 (user 2026-10-16): the predictor's bank falls linearly in energy to this at the gate
+    // (EntryPredictorModel::final_bank_rad); the corrector solves the initial bank. < 0: constant bank.
+    double final_bank_rad = -1.0;
+    // Warm start of the first bank solution (magnitude). The profiled range is not monotone in the initial bank (low
+    // skips between the exits and the captures): bracketing from 0 found a skip root that violated the limits and was
+    // cut back to an exit (Task 8). A lunar return starts from the plan's nominal bank.
+    double initial_bank_rad = 0.0;
     // > 0: aerocapture - one pass to this exit apoapsis height (no gate, no terminal phase).
     double aerocapture_apoapsis_m = 0.0;
     double target_inclination_rad = -1.0;  // aerocapture: reversals on the exit orbit's inclination (< 0: none)
@@ -96,6 +106,8 @@ struct EntryGuidanceParameters {
     static EntryGuidanceParameters lunar_return() {
         EntryGuidanceParameters p;
         p.carry_skips = true;
+        p.final_bank_rad = 40.0 * constants::deg_to_rad;  // [E] probe 2026-10-16: the widest initial-bank window
+        p.max_reversal_speed_mps = 8500.0;                 // [E] below the pull-out (relative)
         p.max_time_s = 6000.0;
         return p;
     }

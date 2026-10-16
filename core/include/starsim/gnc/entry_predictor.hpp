@@ -92,6 +92,12 @@ struct EntryPredictorModel {
     // J2 in the Earth-fixed frame, no air) to the next entry; false or a higher apoapsis: the prediction ends at the exit.
     bool carry_skips = false;
     double max_skip_apoapsis_height_m = 1000e3;  // [E] an arc to 1000 km takes ~20 min: still a guided skip
+    // Lunar l5 (user 2026-10-16): the commanded bank magnitude falls linearly in the specific energy (Earth-fixed
+    // v^2/2 - mu/r) from the command at the start to this at the gate (zero speed there), the principle of FNPEG
+    // [S: Lu, "Entry Guidance: A Unified Method", JGCD 37(3), 2014]: lift down through the supercircular pull-out,
+    // then a glide. A constant lift-down bank dives once below circular speed (14-37 g at 9.67 km/s, -5.1 deg).
+    // < 0: constant bank (LEO entries).
+    double final_bank_rad = -1.0;
 };
 
 struct EntryPredictorState {
@@ -140,6 +146,13 @@ struct EntryPrediction {
 // `step_s`), in the Earth-fixed frame: central gravity + J2, Coriolis and centrifugal terms, US 1976 air, constant
 // mass. Drag along -v and lift perpendicular to v, rotated about v by the bank from the local vertical plane; the
 // bank moves from start.bank_rad to `bank_command_rad` at the model's bank rate limit. Pure (no SPICE): worker-safe.
+// The bank after one rate-limited step towards `command`. `shorter_way`: along the shorter way round, in (-pi, pi] -
+// a reversal between lift-down banks rolls through 180 deg (lift down), not through 0: rolling +115 -> -115 deg
+// through lift up during a supercircular pull-out skipped the ship out (l5 Task 8; the lunar return's profiled entry).
+// Otherwise straight towards the command (LEO ship and capsule entries, tuned with it: the capsule campaign missed by
+// 7.9 km rolling the shorter way).
+double bank_step(double bank_rad, double command_rad, double max_change_rad, bool shorter_way);
+
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
                               double bank_command_rad, const EntryTarget& target, double gate_height_m,
                               double heat_load_so_far_j_m2 = 0.0, double step_s = 1.0, double max_time_s = 3000.0);
