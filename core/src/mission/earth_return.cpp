@@ -57,7 +57,16 @@ constexpr double gate_min_probe_s = 600.0;
 constexpr double braking_angle_tolerance_rad = 0.005 * constants::deg_to_rad;
 // patched-conic departure search
 constexpr double llo_sample_s = 60.0;
-constexpr double llo_window_periods = 1.1;  // a search window reaches past one crossing
+constexpr double llo_window_periods = 1.1;
+// NRHO return flyby point on the flyby sphere: coarse grid step (then 1/5 and 1/25 of it around the best point)
+constexpr double flyby_point_step_rad = 10.0 * constants::deg_to_rad;
+constexpr double flyby_position_tolerance_m = 100.0;  // [E] the departure burn's aim at the periselene point
+// [E] NRHO departure searched 0.5-2.5 d before the perilune, the flyby within +-12 h of it (patched conic, cheap)
+constexpr double nrd_lead_min_s = 0.5 * 86400.0;
+constexpr double nrd_lead_max_s = 2.5 * 86400.0;
+constexpr double nrd_lead_step_s = 0.25 * 86400.0;
+constexpr double flyby_offset_max_s = 12.0 * 3600.0;
+constexpr double flyby_offset_step_s = 3.0 * 3600.0;  // a search window reaches past one crossing
 constexpr double departure_tolerance_s = 0.5;
 constexpr double transfer_angle_min_rad = 90.0 * constants::deg_to_rad;
 constexpr double transfer_angle_max_rad = 179.5 * constants::deg_to_rad;
@@ -194,6 +203,7 @@ EarthReturnPlanner::EarthReturnPlanner(const environment::GravityModel& gravity,
     : gravity_(gravity),
       ephemeris_(ephemeris),
       earth_(earth_orientation),
+      position_(gravity),
       gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)),
       gm_moon_(ephemeris.gm_m3ps2(ephemeris::Body::Moon)) {}
 
@@ -274,7 +284,19 @@ EarthArrival EarthReturnPlanner::evaluate(const StateVector& state, time::Epoch 
         const time::Epoch horizon = burn_epoch + max_return_s;
         for (;;) {
             const auto coast = orbit::propagate_coast(gravity_, s, t, horizon, events);
-            if (coast.event_index < 0) return a;  // never came near the Earth
+            if (coast.event_index < 0) {
+                // never came near the Earth: the osculating Earth conic at the horizon steers back (its perigee and
+                // plane; the site where it stands then)
+                const StateVector& end = coast.state;
+                a.perigee_height_m = periapsis_radius(end, gm_earth_) - constants::wgs84_semi_major_axis_m;
+                a.interface_epoch = coast.epoch;
+                a.interface_gcrf = end;
+                const Vec3 n = math::normalized(cross(end.position_m, end.velocity_mps));
+                const Vec3 site = earth_.fixed_to_gcrf(coast.epoch).rotation * target.site_itrf_m;
+                a.crossrange_m = -std::asin(std::clamp(dot(math::normalized(site), n), -1.0, 1.0)) *
+                                 constants::wgs84_semi_major_axis_m;
+                return a;
+            }
             s = coast.state;
             t = coast.epoch;
             if (coast.event_index == 1 && norm(s.position_m) > far_from_earth_m) {
@@ -569,20 +591,6 @@ auto EarthReturnPlanner::departures(const StateVector& state, time::Epoch epoch,
         return (v_p - norm(rel.velocity_mps)) * math::normalized(rel.velocity_mps);
     };
 
-    if (p.orbit == LunarOrbitKind::Nrho) {
-        for (const time::Epoch t : p.nrho->perilune_epochs()) {
-            if (t < first || t > last) continue;
-            const StateVector s = orbit::propagate_coast(gravity_, start, first, t).state;
-            const Vec3 v_inf = excess_velocity(ephemeris_, t, p.flight_time_guess_s, p.target.site_itrf_m, earth_);
-            const StateVector rel = moon_relative(ephemeris_, s, t);
-            const auto v = departure_velocity(rel.position_m, v_inf, gm_moon_);
-            // the hyperbola through the perilune point (its own periapsis lies elsewhere); along the velocity as the
-            // fallback
-            out.push_back({t, v ? *v - rel.velocity_mps : guess_at(s, t, v_inf)});
-        }
-        return out;
-    }
-
     // LLO: per revolution, the point whose outgoing hyperbola (periapsis there, in the orbit plane) leaves along the
     // patched-conic asymptote.
     const StateVector rel0 = moon_relative(ephemeris_, start, first);
@@ -637,6 +645,131 @@ auto EarthReturnPlanner::departures(const StateVector& state, time::Epoch epoch,
     return out;
 }
 
+ReturnBurn EarthReturnPlanner::depart(const StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
+                                      const EarthReturnTarget& target, const Vec3& guess, bool scan_gate) const {
+    if (!target.entry_model) return solve(state, epoch, burn_epoch, target, guess);
+    // direct entry: the plane first, then (scan) the arrival time searched for the site's pass, both ways
+    EarthReturnTarget no_gate = target;
+    no_gate.entry_model.reset();
+    ReturnBurn sol = solve(state, epoch, burn_epoch, no_gate, guess);
+    if (!sol.converged || !scan_gate) return sol;
+    const StateVector at_burn =
+        burn_epoch - epoch == 0.0 ? state : orbit::propagate_coast(gravity_, state, epoch, burn_epoch).state;
+    const auto aimed = aim_at_gate(at_burn, burn_epoch, target, sol.burn.delta_v_gcrf_mps, true);
+    sol.converged = aimed.has_value();
+    if (aimed) {
+        sol.burn.delta_v_gcrf_mps = *aimed;
+        sol.arrival = evaluate(at_burn, burn_epoch, burn_epoch, *aimed, target);
+    }
+    return sol;
+}
+
+EarthReturnPlanner::NrhoReturn EarthReturnPlanner::nrho_return(const StateVector& state, time::Epoch epoch,
+                                                               time::Epoch perilune,
+                                                               const EarthReturnParameters& p) const {
+    NrhoReturn best;
+    const double r_p = constants::moon_mean_radius_m + p.flyby_altitude_m;
+    const time::Epoch earliest = epoch + p.earliest_departure_s;
+
+    // Patched-conic estimate for a departure at t_nrd and a flyby at the periselene point P (Moon-relative) at t_flyby:
+    // departure burn = Moon two-body Lambert arc from the departure point to P (either sense), powered flyby = the
+    // hyperbola through P with the return's excess velocity (patched conic through the site's plane; the targeting trims
+    // it) minus the arc's arrival velocity.
+    struct Option {
+        double cost = std::numeric_limits<double>::infinity();
+        time::Epoch t_nrd, t_flyby;
+        StateVector at_nrd;
+        Vec3 periselene, nrd, rpf_velocity;
+    };
+    Option chosen;
+    auto search = [&](time::Epoch t_nrd, const StateVector& at_nrd, time::Epoch t_flyby) {
+        const StateVector nrd_rel = moon_relative(ephemeris_, at_nrd, t_nrd);
+        const Vec3 v_inf = excess_velocity(ephemeris_, t_flyby, p.flight_time_guess_s, p.target.site_itrf_m, earth_);
+        if (!(norm(v_inf) > 0.0)) return;
+        const Vec3 h = cross(nrd_rel.position_m, nrd_rel.velocity_mps);
+        auto estimate = [&](const Vec3& periselene, Option& o) {
+            const auto v_req = departure_velocity(periselene, v_inf, gm_moon_);
+            if (!v_req) return false;
+            bool found = false;
+            for (const Vec3& normal : {h, -h}) {
+                const auto arc = orbit::solve_lambert(nrd_rel.position_m, periselene, t_flyby - t_nrd, gm_moon_, normal);
+                if (!arc) continue;
+                const Vec3 nrd = arc->departure_velocity_mps - nrd_rel.velocity_mps;
+                const double cost = norm(nrd) + norm(*v_req - arc->arrival_velocity_mps);
+                if (cost < o.cost) {
+                    o = {cost, t_nrd, t_flyby, at_nrd, periselene, nrd, *v_req};
+                    found = true;
+                }
+            }
+            return found;
+        };
+        // the flyby point on the sphere at the flyby height, in the frame of the return asymptote: coarse grid, then
+        // two finer grids around the best point (a 100 km flyby turns the path by up to ~150 deg: the needed turn
+        // depends on the approach)
+        const Vec3 ax = math::normalized(v_inf);
+        const Vec3 ay = math::normalized(cross(Vec3{0.0, 0.0, 1.0}, ax));
+        const Vec3 az = cross(ax, ay);
+        auto point = [&](double lat, double lon) {
+            return (ax * (std::cos(lat) * std::cos(lon)) + ay * (std::cos(lat) * std::sin(lon)) + az * std::sin(lat)) *
+                   r_p;
+        };
+        Option local;
+        double b_lat = 0.0, b_lon = constants::pi;
+        for (const double half : {0.5 * constants::pi, flyby_point_step_rad, flyby_point_step_rad / 5.0}) {
+            const double step = half >= 0.5 * constants::pi ? flyby_point_step_rad : half / 5.0;
+            const double lat0 = b_lat, lon0 = b_lon;
+            for (double lat = lat0 - half; lat <= lat0 + half + 1e-9; lat += step) {
+                if (std::abs(lat) > 0.5 * constants::pi) continue;
+                for (double lon = lon0 - half; lon <= lon0 + half + 1e-9; lon += step) {
+                    if (estimate(point(lat, lon), local)) {
+                        b_lat = lat;
+                        b_lon = lon;
+                    }
+                }
+            }
+        }
+        if (local.cost < chosen.cost) chosen = local;
+    };
+    // the departure time before the perilune and the flyby time about it [E]: both shape the approach and the turn
+    StateVector s = state;
+    time::Epoch t = epoch;
+    for (double lead = nrd_lead_max_s; lead >= nrd_lead_min_s - 1e-6; lead -= nrd_lead_step_s) {
+        // walk forward: the earliest departure (longest lead) first
+        const time::Epoch t_nrd = perilune - lead;
+        if (t_nrd < earliest) continue;
+        s = orbit::propagate_coast(gravity_, s, t, t_nrd).state;
+        t = t_nrd;
+        for (double offset = -flyby_offset_max_s; offset <= flyby_offset_max_s + 1e-6; offset += flyby_offset_step_s) {
+            if (lead + offset < nrd_lead_min_s) continue;  // the arc to the flyby stays at least this long
+            search(t_nrd, s, perilune + offset);
+        }
+    }
+    if (!std::isfinite(chosen.cost)) return best;
+    // Full force model: the departure burn by position targeting onto P at the flyby epoch, the powered flyby there by
+    // the return targeting (plane, perigee, and the gate for a direct entry).
+    const auto moon = ephemeris_.state_gcrf(ephemeris::Body::Moon, chosen.t_flyby);
+    const auto drop = position_.solve(chosen.at_nrd, chosen.t_nrd, chosen.t_nrd,
+                                      {moon.position_m + chosen.periselene, chosen.t_flyby}, chosen.nrd,
+                                      flyby_position_tolerance_m);
+    if (debug_enabled()) {
+        std::fprintf(stderr,
+                     "return NRHO: departure %.2f d before the perilune, flyby %+.1f h from it: estimate %.1f m/s "
+                     "(NRD %.1f), drop %s %.1f m/s\n",
+                     (perilune - chosen.t_nrd) / 86400.0, (chosen.t_flyby - perilune) / 3600.0, chosen.cost,
+                     norm(chosen.nrd), drop.converged ? "converged" : "failed", norm(drop.burn.delta_v_gcrf_mps));
+    }
+    if (!drop.converged) return best;
+    const StateVector& at_flyby = drop.arrival_gcrf;
+    const Vec3 rpf_guess = moon.velocity_mps + chosen.rpf_velocity - at_flyby.velocity_mps;
+    const ReturnBurn flyby = depart(at_flyby, chosen.t_flyby, chosen.t_flyby, p.target, rpf_guess, true);
+    if (debug_enabled()) {
+        std::fprintf(stderr, "return NRHO powered flyby: guess %.1f m/s -> %s %.1f m/s\n", norm(rpf_guess),
+                     flyby.converged ? "converged" : "failed", norm(flyby.burn.delta_v_gcrf_mps));
+    }
+    if (!flyby.converged) return best;
+    return {true, drop.burn, flyby};
+}
+
 ReturnPlan EarthReturnPlanner::plan(const StateVector& state, time::Epoch epoch, const EarthReturnParameters& p,
                                     double mass_kg, double isp_s, double propellant_kg) const {
     ReturnPlan plan;
@@ -644,46 +777,41 @@ ReturnPlan EarthReturnPlanner::plan(const StateVector& state, time::Epoch epoch,
         plan.reason = "Kein Rückflug: NRHO-Referenz fehlt";
         return plan;
     }
-    const auto candidates = departures(state, epoch, p);
     double best = std::numeric_limits<double>::infinity();
     bool over_limit = false;
-    for (const auto& c : candidates) {
-        ReturnBurn sol;
-        if (p.target.entry_model) {
-            // direct entry: the plane first, then the arrival time scanned for the site's pass (both ways)
-            EarthReturnTarget no_gate = p.target;
-            no_gate.entry_model.reset();
-            sol = solve(state, epoch, c.epoch, no_gate, c.delta_v_mps);
-            if (sol.converged) {
-                const StateVector at_burn = orbit::propagate_coast(gravity_, state, epoch, c.epoch).state;
-                const auto aimed = aim_at_gate(at_burn, c.epoch, p.target, sol.burn.delta_v_gcrf_mps, true);
-                sol.converged = aimed.has_value();
-                if (aimed) {
-                    sol.burn.delta_v_gcrf_mps = *aimed;
-                    sol.arrival = evaluate(at_burn, c.epoch, c.epoch, *aimed, p.target);
-                }
-            }
-        } else {
-            sol = solve(state, epoch, c.epoch, p.target, c.delta_v_mps);
-        }
-        const double tei = norm(sol.burn.delta_v_gcrf_mps);
-        if (debug_enabled()) {
-            std::fprintf(stderr, "return departure %+.2f h: guess %.1f m/s -> %s TEI %.1f m/s, braking %.1f m/s (%d it)\n",
-                         (c.epoch - epoch) / 3600.0, norm(c.delta_v_mps), sol.converged ? "converged" : "failed", tei,
-                         sol.arrival.braking_delta_v_mps, sol.iterations);
-        }
-        if (!sol.converged) continue;
-        if (tei > p.max_tei_mps) {
+    // keeps a converged candidate: `departure_mps` the Moon-side delta-v (TEI, or departure burn + powered flyby)
+    auto consider = [&](const ReturnBurn& sol, double departure_mps, std::optional<gnc::BurnNode> nrd) {
+        if (!sol.converged) return;
+        if (departure_mps > p.max_tei_mps) {
             over_limit = true;
-            continue;
+            return;
         }
-        const double cost = tei + sol.arrival.braking_delta_v_mps;
+        const double cost = departure_mps + sol.arrival.braking_delta_v_mps;
         if (cost < best) {
             best = cost;
+            plan.nrho_departure = nrd;
             plan.tei = sol.burn;
             plan.arrival = sol.arrival;
-            plan.tei_delta_v_mps = tei;
+            plan.tei_delta_v_mps = departure_mps;
             plan.braking_delta_v_mps = sol.arrival.braking_delta_v_mps;
+        }
+    };
+    if (p.orbit == LunarOrbitKind::Nrho) {
+        for (const time::Epoch t : p.nrho->perilune_epochs()) {
+            if (t - nrd_lead_min_s < epoch + p.earliest_departure_s || t > epoch + p.search_s) continue;
+            const auto r = nrho_return(state, epoch, t, p);
+            if (!r.found) continue;
+            consider(r.flyby, norm(r.departure.delta_v_gcrf_mps) + norm(r.flyby.burn.delta_v_gcrf_mps), r.departure);
+        }
+    } else {
+        for (const auto& c : departures(state, epoch, p)) {
+            const auto sol = depart(state, epoch, c.epoch, p.target, c.delta_v_mps, true);
+            if (debug_enabled()) {
+                std::fprintf(stderr, "return departure %+.2f h: guess %.1f m/s -> %s TEI %.1f m/s, braking %.1f m/s (%d it)\n",
+                             (c.epoch - epoch) / 3600.0, norm(c.delta_v_mps), sol.converged ? "converged" : "failed",
+                             norm(sol.burn.delta_v_gcrf_mps), sol.arrival.braking_delta_v_mps, sol.iterations);
+            }
+            consider(sol, norm(sol.burn.delta_v_gcrf_mps), std::nullopt);
         }
     }
     char text[160];

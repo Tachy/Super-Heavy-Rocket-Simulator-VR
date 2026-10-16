@@ -71,14 +71,22 @@ struct EarthReturnParameters {
     double mcc_threshold_mps = 0.05;             // [E] as the outbound flight
     double mcc_min_before_braking_s = 6.0 * 3600.0;  // [E] no MCC closer to the braking burn
     double mcc_allowance_mps = 30.0;             // [E] propellant check: mid-course corrections on top of the plan
+    // NRHO: a single burn at a perilune meets the return asymptote head-on (~3.4 km/s, the mirror of l3's outbound).
+    // The return departs as Artemis plans it: a departure burn (NRD) drops to a lunar flyby, the return powered flyby
+    // (RPF) at its periselene leaves for the Earth (user 2026-10-16). Mirror of l3's in-direct transfer [S: Kikuchi,
+    // Matsumoto & Ueda, ISSFD 2024: swing-by at 100 km, NRHO insertion ~1.2 d later]; the departure time and the flyby
+    // point are searched around each perilune.
+    double flyby_altitude_m = 100e3;
 };
 
 struct ReturnPlan {
     bool feasible = false;
     std::string reason;  // German when refused
+    // NRHO: the departure burn dropping to the return flyby; `tei` is then the powered flyby at its periselene.
+    std::optional<gnc::BurnNode> nrho_departure;
     gnc::BurnNode tei;
     EarthArrival arrival;
-    double tei_delta_v_mps = 0.0;
+    double tei_delta_v_mps = 0.0;  // NRHO: departure burn + powered flyby
     double braking_delta_v_mps = 0.0;
 };
 
@@ -108,7 +116,8 @@ public:
                      const EarthReturnTarget& target, const math::Vec3& initial_delta_v_mps, int max_iterations = 30) const;
 
     // TEI from the LLO (departure revolutions within search_s, burn at the patched-conic periapsis of each) or from the
-    // NRHO (its perilunes within search_s); the cheapest converged candidate within max_tei_mps.
+    // NRHO (departure burn before each perilune within search_s, powered flyby near that perilune; departure time and
+    // flyby point searched); the cheapest converged candidate within max_tei_mps (the sum for the NRHO).
     ReturnPlan plan(const math::StateVector& state, time::Epoch epoch, const EarthReturnParameters& p,
                     double mass_kg, double isp_s, double propellant_kg) const;
 
@@ -133,6 +142,14 @@ private:
     struct Departure { time::Epoch epoch; math::Vec3 delta_v_mps; };
     std::vector<Departure> departures(const math::StateVector& state, time::Epoch epoch,
                                       const EarthReturnParameters& p) const;
+    // The Earth-bound burn at `burn_epoch` (TEI or the powered flyby): plane, then (direct, `scan`) the gate.
+    ReturnBurn depart(const math::StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
+                      const EarthReturnTarget& target, const math::Vec3& guess, bool scan_gate) const;
+    // NRHO: departure burn + powered flyby about `perilune` (departure time, flyby time and point searched on the
+    // patched conic, then targeted in the full force model).
+    struct NrhoReturn { bool found = false; gnc::BurnNode departure; ReturnBurn flyby; };
+    NrhoReturn nrho_return(const math::StateVector& state, time::Epoch epoch, time::Epoch perilune,
+                           const EarthReturnParameters& p) const;
     // `state` at `burn_epoch` with the burn applied (finite with the model set)
     math::StateVector burned(const math::StateVector& at_burn, time::Epoch burn_epoch, const math::Vec3& delta_v) const;
     // From a state at or after the braking burn: osculating perigee, interface and predictor.
@@ -152,6 +169,7 @@ private:
     const environment::GravityModel& gravity_;
     const ephemeris::Ephemeris& ephemeris_;
     const frames::BodyOrientation& earth_;
+    PositionTargeter position_;  // the NRHO departure burn onto the flyby's periselene point
     double gm_earth_;
     double gm_moon_;
     std::optional<FiniteBurnModel> finite_;

@@ -144,16 +144,18 @@ TEST_CASE("TEI with the braking burn arrives at the target speed", "[lunar][retu
 }
 
 TEST_CASE("TEI from the NRHO costs less than from the LLO", "[lunar][return][slow]") {
-    // [S] spec: ~0.4-0.5 km/s from the NRHO. Reference built as lunar_outbound_parameters does (hls_lunar_nrho seed).
+    // [S] spec: ~0.4-0.5 km/s from the NRHO - as Artemis: departure burn + return powered flyby at 100 km (a single burn
+    // at the perilune meets the return asymptote head-on: ~3.4 km/s). Reference built as lunar_outbound_parameters does
+    // (hls_lunar_nrho seed).
     Fixture f;
     mission::EarthReturnParameters p;
     p.orbit = mission::LunarOrbitKind::Nrho;
     p.nrho = std::make_shared<mission::NrhoReference>(
         f.gravity, f.ephemeris, mission::NrhoSeed{{{1.0221, 0.0, -0.1821}, {0.0, -0.1033, 0.0}}, 9, 2},
-        f.t0 + 86400.0, mission::NrhoReferenceOptions{.revolutions = 2});
+        f.t0 + 2.0 * 86400.0, mission::NrhoReferenceOptions{.revolutions = 2});
     p.target.site_itrf_m = starbase_itrf();
     p.target.flight_path_rad = -5.5 * deg;
-    p.search_s = 2.0 * 86400.0;  // the first perilune is a day after the plan
+    p.search_s = 3.0 * 86400.0;  // the first perilune two days after the plan: its departure burn 0.8 d after the plan
     const auto start = std::chrono::steady_clock::now();
     const auto plan = f.planner.plan(p.nrho->state_gcrf(f.t0), f.t0, p, ship_mass_kg, rvac_isp_s, ship_propellant_kg);
     print_plan("NRHO", plan, seconds_since(start));
