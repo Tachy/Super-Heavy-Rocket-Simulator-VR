@@ -29,10 +29,13 @@ constexpr double asymptote_lead_s = 3600.0;              // [E] the LLO plane ho
 constexpr double min_entry_speed_mps = 8000.0;           // [E] floor of the entry-speed search (below: LEO entries)
 constexpr double max_entry_speed_mps = 11500.0;          // [E] above the natural lunar return (~11.0 km/s inertial)
 constexpr double entry_heading_rad = 0.5 * constants::pi;  // [E] eastward arrival (l5 Task 6: westward +0.8 km/s)
-// [E] aerocapture: perigee raise out of the pass (~50-60 m/s from a -64 km periapsis, l5 Task 4/6) and the b4 deorbit
-// burn (~100 m/s with margin) on the deorbit engines
-constexpr double aerocapture_raise_mps = 60.0;
+// [E] aerocapture: perigee raise out of the pass and the circularisation at 200 km (l5 Task 9 flight: 43.8 + ~60 m/s)
+// and the b4 deorbit burn (~100 m/s with margin) on the deorbit engines
+constexpr double aerocapture_raise_mps = 120.0;
 constexpr double aerocapture_deorbit_mps = 100.0;
+// [E] aerocapture: banks beyond the one that exits at the apoapsis that stay within the heat-rate limit - the guidance's
+// room for thinner air / less drag (l5 Task 9: the 400 km bank at the classical corridor's 10.1 km/s saw 1.3-2.5 MW/m2)
+constexpr double aerocapture_min_bank_window_rad = 10.0 * constants::deg_to_rad;
 constexpr int max_propellant_iterations = 5;
 constexpr double propellant_tolerance_kg = 100.0;
 
@@ -211,7 +214,11 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
     q.latitude_rad = session.launch_site().latitude_rad;
     q.heading_rad = entry_heading_rad;
     q.limits = stage.heat_shield;
-    if (m.aerocapture) q.aerocapture_apoapsis_m = m.aerocapture_apoapsis_m;
+    if (m.aerocapture) {
+        q.aerocapture_apoapsis_m = m.aerocapture_apoapsis_m;
+        q.min_bank_window_rad = aerocapture_min_bank_window_rad;
+        q.max_bank_rad = setup.entry.max_bank_rad;
+    }
     b.entry_speed_mps =
         gnc::max_entry_speed(corridor_model, q, m.min_corridor_width_rad, min_entry_speed_mps, max_entry_speed_mps);
     if (b.entry_speed_mps < min_entry_speed_mps) {
@@ -223,7 +230,16 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
     auto& target = setup.ret.target;
     target.speed_mps = b.entry_speed_mps;
     target.flight_path_rad = b.corridor.middle_rad;
-    if (!m.aerocapture) {
+    if (m.aerocapture) {
+        // the angle with the widest bank window; the guidance starts at the bank that exits at the apoapsis
+        b.bank_window = gnc::widest_bank_window(corridor_model, q, b.corridor, setup.entry.max_bank_rad);
+        if (!b.bank_window.exists) {
+            b.reason = "Kein Eintrittsfenster: keine Querneigung fängt ein und bleibt in den Grenzen";
+            return b;
+        }
+        target.flight_path_rad = b.bank_window.flight_path_rad;
+        setup.entry.initial_bank_rad = b.bank_window.low_rad;
+    } else {
         target.entry_model = onboard.model();
         target.gate = gate;
         if (setup.entry.final_bank_rad >= 0.0) {

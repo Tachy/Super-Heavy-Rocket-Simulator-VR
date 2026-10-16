@@ -116,3 +116,26 @@ TEST_CASE("The aerocapture corridor to 400 km exists at the admissible speed", "
     print_corridor("ship aerocapture", q.speed_mps, c);
     REQUIRE(c.exists);
 }
+
+// Task 9 (2026-10-16): the classical corridor judges the limits at full lift up only; the bank that exits at 400 km
+// dives deeper - at 10.1 km/s it sees 1.3-2.5 MW/m2 (probe). The aerocapture speed needs a bank window: from the bank
+// that exits at the apoapsis up to the deepest within the limits, at least min_bank_window wide.
+TEST_CASE("The aerocapture speed leaves a bank window to 400 km within the limits", "[ship][guidance][corridor]") {
+    auto [model, limits] = ship_model();
+    gnc::CorridorQuery q;
+    q.limits = limits;
+    q.aerocapture_apoapsis_m = 400e3;
+    q.min_bank_window_rad = 10.0 * deg;
+    q.max_bank_rad = 150.0 * deg;
+    q.speed_mps = gnc::max_entry_speed(model, q, 0.5 * deg, 8000.0, 11000.0);
+    const auto c = gnc::entry_corridor(model, q);
+    const auto w = gnc::widest_bank_window(model, q, c, q.max_bank_rad);
+    print_corridor("ship aerocapture with window", q.speed_mps, c);
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("  window at %.2f deg: %.1f .. %.1f deg\n", w.flight_path_rad / deg, w.low_rad / deg, w.high_rad / deg);
+    }
+    REQUIRE(w.exists);
+    CHECK(w.width_rad >= 10.0 * deg);
+    CHECK(q.speed_mps < 9900.0);  // probe: the 400 km bank at 9.9 km/s is over 1.08 MW/m2 at every angle
+    CHECK(q.speed_mps > 9000.0);
+}

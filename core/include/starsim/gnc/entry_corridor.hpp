@@ -18,6 +18,10 @@ struct CorridorQuery {
     config::HeatShieldConfig limits;           // a limit of 0 is not judged
     double constraint_fraction = 0.9;          // of the heat-rate, heat-load and load limits (as the guidance)
     double aerocapture_apoapsis_m = 0.0;       // > 0: aerocapture corridor to this apoapsis height
+    // max_entry_speed: > 0 also requires a bank window (widest_bank_window) at least this wide, banks up to
+    // max_bank_rad - the aerocapture's limits are judged at the bank that exits at the apoapsis (l5 Task 9)
+    double min_bank_window_rad = 0.0;
+    double max_bank_rad = constants::pi;
 };
 
 struct EntryCorridor {
@@ -40,6 +44,9 @@ EntryCorridor entry_corridor(EntryPredictorModel model, const CorridorQuery& que
 // interface angle: the initial bank magnitudes whose prediction (the model as the guidance flies it) reaches the
 // gate without a skip, within fraction x limits. A constant-bank corridor's middle can have none: lift
 // down enough to stay in dives once below circular speed.
+// Aerocapture query (l5 Task 9): the banks that exit at or below the apoapsis (or stay in) within fraction x limits -
+// from the bank that exits at the apoapsis (low) up to the deepest within the limits (high); the guidance's room for
+// thinner air. The classical corridor judges the limits at full lift up only: the bank to the apoapsis dives deeper.
 struct BankWindow {
     bool exists = false;
     double flight_path_rad = 0.0;
@@ -54,8 +61,8 @@ BankWindow entry_bank_window(const EntryPredictorModel& model, const CorridorQue
 BankWindow widest_bank_window(const EntryPredictorModel& model, const CorridorQuery& query, const EntryCorridor& corridor,
                               double max_bank_rad);
 
-// The highest interface speed in [low, high] whose corridor is at least min_width wide (bisection, 25 m/s).
-// Returns low - 1 when even `low` has none.
+// The highest interface speed in [low, high] whose corridor is at least min_width wide (bisection, 25 m/s) and, with
+// query.min_bank_window_rad > 0, has a bank window at least that wide. Returns low - 1 when even `low` has none.
 double max_entry_speed(const EntryPredictorModel& model, CorridorQuery query, double min_width_rad, double low_mps,
                        double high_mps);
 

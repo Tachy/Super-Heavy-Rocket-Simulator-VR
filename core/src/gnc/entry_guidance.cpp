@@ -105,6 +105,10 @@ void EntryGuidance::configure_model(const vehicle::FlightBody& body) {
 bool EntryGuidance::violates(const EntryPrediction& p) const {
     const double f = parameters_.constraint_fraction;
     if (limits_.max_heat_rate_w_m2 > 0.0 && p.peak_heat_rate_w_m2 > f * limits_.max_heat_rate_w_m2) return true;
+    // Aerocapture: a prediction that stays in is judged on the pass's heat rate only - its dive to the gate is never
+    // flown (the next cycles take bank back). Task 9: the solver ended on such a bank next to the apoapsis cliff, its
+    // dive "violated" the load and the cut-back exited at 3,600 km instead of 400 (as gnc::entry_bank_window).
+    if (aerocapture() && !p.exited) return false;
     if (limits_.max_load_g > 0.0 && p.peak_load_g > f * limits_.max_load_g) return true;
     return p.peak_dynamic_pressure_pa > parameters_.max_dynamic_pressure_pa;
 }
@@ -347,11 +351,12 @@ void EntryGuidance::aerocapture_cycle(const vehicle::FlightBody& body, const Ent
     bank_target_rad_ = sign_ * s.bank_rad;
     if (std::getenv("STARSIM_DEBUG_ENTRY")) {
         std::printf("[aerocapture] v %.0f bank %+.1f%s exit apoapsis %.1f km periapsis %.1f km incl %.2f deg peak %.0f "
-                    "kW/m2 (%d predictions)\n",
+                    "kW/m2 %.2f g %.1f kPa (%d predictions)\n",
                     norm(state.velocity_itrf_mps), bank_target_rad_ / constants::deg_to_rad,
                     s.constrained ? " constrained" : "", s.prediction.exit_apoapsis_height_m / 1000.0,
                     s.prediction.exit_periapsis_height_m / 1000.0, s.prediction.exit_inclination_rad * constants::rad_to_deg,
-                    s.prediction.peak_heat_rate_w_m2 / 1000.0, s.predictions);
+                    s.prediction.peak_heat_rate_w_m2 / 1000.0, s.prediction.peak_load_g,
+                    s.prediction.peak_dynamic_pressure_pa / 1000.0, s.predictions);
     }
     command_.exit_apoapsis_height_m = s.prediction.exit_apoapsis_height_m;
     command_.constrained = s.constrained;

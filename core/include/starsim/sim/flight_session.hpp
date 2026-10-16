@@ -78,13 +78,13 @@ const char* to_string(CapsuleReturnStep step);
 // InLlo; AbortAscent: an abort to orbit from PoweredDescent, then AscentCoast as the ascent.
 // Return to the Earth (plan_lunar_return, l5): ReturnDeparture (NRHO: the departure burn first) -> Tei -> ReturnCoast
 // (-> ReturnCorrection -> ReturnCoast) -> Braking -> EarthEntry (autopilot state Return: entry, flip, catch); Tei,
-// ReturnCorrection and Braking: that burn is under way. Aerocapture, CaptureCoast and PerigeeRaise: the aerocapture
-// variant (Task 9).
+// ReturnCorrection and Braking: that burn is under way. Aerocapture variant (Task 9): Aerocapture (the pass) ->
+// CaptureCoast -> PerigeeRaise (at the apoapsis) -> CaptureCoast -> CaptureCircularize (at the perigee) -> b4.
 enum class LunarStep {
     None, Departure, Tli, Coast, MidCourse, PilotCorrection, PoweredFlyby, Insertion, Trim, InLlo, InNrho, StationKeeping,
     TransferOut, TransferIn, DescentWait, PlaneTrim, Doi, DescentCoast, PoweredDescent, Landed, SurfaceStay, Ascent,
     AscentCoast, Circularize, AbortAscent, Lost, ReturnDeparture, Tei, ReturnCoast, ReturnCorrection, Braking, EarthEntry,
-    Aerocapture, CaptureCoast, PerigeeRaise
+    Aerocapture, CaptureCoast, PerigeeRaise, CaptureCircularize
 };
 const char* to_string(LunarStep step);
 
@@ -672,7 +672,21 @@ private:
     void run_lunar_return_steps(Flying& flying);
     void lunar_return_enter_coast();   // ReturnCoast: Sun pointing, the next MCC or the braking burn's ignition lead
     void lunar_return_coast_event();   // ReturnCoast: the timed event is due (MCC or braking burn)
-    void lunar_return_after_braking();  // direct: the entry (state Return); Task 9: the aerocapture
+    void lunar_return_after_braking();  // direct: the entry (state Return); aerocapture: step Aerocapture
+    void lunar_return_captured(Flying& flying);  // aerocapture exit: the perigee raise planned from the real orbit
+    void lunar_return_raised(Flying& flying);    // perigee raised: apsides checked, the circularisation planned
+    void lunar_return_to_b4();                   // in the circular orbit: b4's deorbit planned
+    // CaptureCoast: coast to `node`, then fly it on the deorbit engines as step `burn`
+    void lunar_capture_coast(Flying& flying, const gnc::BurnNode& node, LunarStep burn);
+    gnc::BurnNode lunar_capture_burn_;           // CaptureCoast: the next capture burn
+    LunarStep lunar_capture_burn_step_ = LunarStep::PerigeeRaise;
+    // [E] the captured orbit counts as circular (b4's start, 200 x 200 km) when its apsides are this close
+    static constexpr double capture_circular_tolerance_m = 20e3;
+    // [E] hand-over to b4 below this body rate (the coast needs < 1e-3 rad/s; b4's wait is uncontrolled)
+    static constexpr double capture_settled_rate_radps = 5e-4;
+    // [E] aerocapture: below this height the pass will not climb out again (nominal passes stay above ~55 km)
+    static constexpr double aerocapture_floor_height_m = 40e3;
+    static constexpr double capture_min_apsis_height_m = 150e3;  // [E] after the raise: both apsides above this
     double lunar_return_arrival_speed() const;  // relative speed at the entry interface, coasting from now
     std::optional<LunarReturnSetup> lunar_return_;
     std::optional<mission::ReturnPlan> lunar_return_plan_;

@@ -116,9 +116,20 @@ EntryCorridor entry_corridor(EntryPredictorModel model, const CorridorQuery& que
 BankWindow entry_bank_window(const EntryPredictorModel& model, const CorridorQuery& query, double flight_path_rad,
                              double max_bank_rad) {
     std::string limiting;
+    const bool capture = query.aerocapture_apoapsis_m > 0.0;
     const auto ok = [&](double bank_rad) {
         const auto p = fly(model, query, flight_path_rad, bank_rad);
-        return p.reached_gate && p.skips == 0 && within_limits(p, query, limiting);  // a direct entry, no skip
+        if (p.skips != 0) return false;
+        if (capture && p.reached_gate) {
+            // stays in: more bank than the apoapsis needs - the guidance's room, judged on the pass's heat rate only
+            // (the load and heat load of the dive to the gate that follows are never flown: the bank comes back)
+            const double max_rate = query.limits.max_heat_rate_w_m2;
+            return max_rate <= 0.0 || p.peak_heat_rate_w_m2 <= query.constraint_fraction * max_rate;
+        }
+        if (!within_limits(p, query, limiting)) return false;
+        if (p.reached_gate) return true;  // a direct entry, no skip
+        return capture && p.exited && p.exit_apoapsis_height_m >= 0.0 &&
+               p.exit_apoapsis_height_m <= query.aerocapture_apoapsis_m;
     };
     // the longest run of admissible banks on a 2 deg grid, its edges refined by bisection
     constexpr double grid_rad = 2.0 * constants::deg_to_rad;
@@ -170,7 +181,10 @@ double max_entry_speed(const EntryPredictorModel& model, CorridorQuery query, do
     const auto wide_enough = [&](double v) {
         query.speed_mps = v;
         const auto c = entry_corridor(model, query);
-        return c.exists && c.width_rad >= min_width_rad;
+        if (!c.exists || c.width_rad < min_width_rad) return false;
+        if (query.min_bank_window_rad <= 0.0) return true;
+        const auto w = widest_bank_window(model, query, c, query.max_bank_rad);
+        return w.exists && w.width_rad >= query.min_bank_window_rad;
     };
     if (!wide_enough(low_mps)) return low_mps - 1.0;
     if (wide_enough(high_mps)) return high_mps;
