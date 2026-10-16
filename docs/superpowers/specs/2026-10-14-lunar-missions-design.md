@@ -179,6 +179,18 @@ public:
 
 ## l5 design: return to Earth
 
+> **Amendment 2026-10-16 (l5 planning, user decision "Bremsbrennen + Varianten"):** a corridor probe on the onboard
+> predictor (ship 290 t, L/D 0.71, nose radius 6 m [E]) showed that at the natural lunar-return entry speed (~10.9 km/s
+> relative) the convective rate alone is ~1.0 MW/m^2 at best (lift-down glide at ~63 km) and the radiative rate adds
+> about as much again, so neither the direct entry nor a single-pass aerocapture fits the 1.2 MW/m^2 [E] limit (heat
+> load is no issue: <= 2.6e8 of 6e8 J/m^2). Research found no published Starship heat-flux limit (tiles ~1650 C: ~0.65
+> MW/m^2 in radiative equilibrium), no source for the 6 m radius, and Tauber-Sutton valid only for 0.3-3 m: the limits
+> stay. The ship therefore **brakes propulsively before the entry interface**: the vacuum Raptors fire retrograde at
+> ~2,000 km altitude [E] on the inbound leg (~1.5 km/s, ~140 t of methalox) down to the highest entry speed whose corridor
+> fits the limits [D: computed by the planning], then the direct entry or the single-pass aerocapture as below. The
+> braking burn is part of the propellant planning (fixed-point iteration) and of every TEI / MCC targeting (modelled as an
+> impulse); in flight it is re-planned as the last targeting burn.
+
 - Start: a Block 3 ship (heat shield, flaps, catch pins) in the LLO or the NRHO. The mission planning computes its
   propellant by planning the whole return with a nominal ship (fixed-point iteration on the mass): TEI, corrections,
   for the aerocapture the perigee raise and the deorbit burn, flip and catch (35 t), a reserve [E].
