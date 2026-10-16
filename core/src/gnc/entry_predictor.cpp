@@ -18,6 +18,30 @@ constexpr double skip_out_height_m = 130000.0;
 constexpr double min_track_speed_mps = 1.0;
 constexpr double near_target_range_m = 50000.0;  // [E] miss metric switch (see predict_entry)
 
+struct Exit {
+    double apoapsis_height_m = 0.0;  // < 0: hyperbolic (no apoapsis)
+    double periapsis_height_m = 0.0;
+    double inclination_rad = 0.0;
+};
+
+// Osculating two-body orbit of an Earth-fixed state (inertial velocity v + w x r, the axes aligned at this instant).
+Exit exit_orbit(const EntryPredictorModel& m, const Vec3& r, const Vec3& v_fixed) {
+    const Vec3 v = v_fixed + cross(Vec3{0.0, 0.0, m.omega_radps}, r);
+    const double rn = norm(r), energy = 0.5 * dot(v, v) - m.gm_m3ps2 / rn;
+    const Vec3 h = cross(r, v);
+    Exit e;
+    e.inclination_rad = std::acos(std::clamp(h.z / norm(h), -1.0, 1.0));
+    if (energy >= 0.0) {
+        e.apoapsis_height_m = -1.0;
+        return e;
+    }
+    const double a = -m.gm_m3ps2 / (2.0 * energy);
+    const double ecc = std::sqrt(std::max(0.0, 1.0 - dot(h, h) / (m.gm_m3ps2 * a)));
+    e.apoapsis_height_m = a * (1.0 + ecc) - m.earth_radius_m;
+    e.periapsis_height_m = a * (1.0 - ecc) - m.earth_radius_m;
+    return e;
+}
+
 struct Derivative {
     Vec3 dr, dv;
 };
@@ -107,7 +131,7 @@ public:
                              l * (q_over_m * m_.lift_scale * m_.aero.cl_area_m2(mach));
         }
         if (m_.nose_radius_m > 0.0) {
-            s.heat_rate_w_m2 = aero::stagnation_heat_rate_w_m2(air.density_kg_m3, speed, m_.nose_radius_m);
+            s.heat_rate_w_m2 = aero::entry_heat_rate_w_m2(air.density_kg_m3, speed, m_.nose_radius_m, m_.radiative.get());
         }
         return s;
     }
@@ -224,7 +248,19 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
         now = next;
         t += step_s;
         if (now.height_m < entry_height_m) entered = true;
-        if (entered && now.height_m > skip_out_height_m) break;
+        if (entered && now.height_m > skip_out_height_m) {
+            const Exit e = exit_orbit(model, r, v);
+            if (model.carry_skips && e.apoapsis_height_m > 0.0 && e.apoapsis_height_m < model.max_skip_apoapsis_height_m) {
+                entered = false;  // carried: the arc comes back down
+                ++p.skips;
+                continue;
+            }
+            p.exited = true;
+            p.exit_apoapsis_height_m = e.apoapsis_height_m;
+            p.exit_periapsis_height_m = e.periapsis_height_m;
+            p.exit_inclination_rad = e.inclination_rad;
+            break;
+        }
     }
     p.end_position_itrf_m = r;
     p.end_velocity_itrf_mps = v;

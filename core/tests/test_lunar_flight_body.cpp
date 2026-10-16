@@ -219,3 +219,21 @@ TEST_CASE("A body with fixed legs and no leg site keeps its own ground contact o
     }
     CHECK((body->resting() || body->impacted()));  // not fallen through the ground
 }
+
+TEST_CASE("The truth air density factor scales the Earth's air density and free path", "[vehicle][lunar]") {
+    LunarFixture fx;
+    const auto plain = environment::ReferenceBody::earth(fx.earth, fx.atmosphere, constants::earth_gm_m3ps2);
+    auto dense = plain;
+    dense.set_air_density_factor(1.15);
+    const auto a = plain.air(60e3), b = dense.air(60e3);
+    CHECK(b.density_kg_m3 == Catch::Approx(1.15 * a.density_kg_m3));
+    CHECK(b.mean_free_path_m == Catch::Approx(a.mean_free_path_m / 1.15));
+    CHECK(b.pressure_pa == a.pressure_pa);  // engine back-pressure is not dispersed
+
+    vehicle::FlightEnvironment env = fx.env;
+    env.air_density_factor = 1.15;
+    CHECK(vehicle::reference_body_of(env, ephemeris::Body::Earth).air(60e3).density_kg_m3 ==
+          Catch::Approx(b.density_kg_m3));
+    CHECK(vehicle::reference_body_of(fx.env, ephemeris::Body::Earth).air(60e3).density_kg_m3 ==
+          Catch::Approx(a.density_kg_m3));
+}

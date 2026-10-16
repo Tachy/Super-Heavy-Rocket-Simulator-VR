@@ -324,6 +324,8 @@ void FlightSession::set_thrust_dispersion(size_t body_index, double factor) {
     bodies_.at(body_index).body->vehicle().set_thrust_factor(factor);
 }
 
+void FlightSession::set_air_density_factor(double factor) { env_.air_density_factor = factor; }
+
 void FlightSession::set_realtime_planning(bool realtime) {
     realtime_planning_ = realtime;
     for (auto& flying : bodies_) {

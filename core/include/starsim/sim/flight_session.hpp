@@ -458,6 +458,8 @@ public:
     void set_aero_dispersion(size_t body_index, double factor);
     // Likewise thrust and mass flow of every engine of a body (Vehicle::set_thrust_factor); guidance stays nominal.
     void set_thrust_dispersion(size_t body_index, double factor);
+    // Truth Earth air density over US76 (lunar l5 campaigns): truth only; the onboard predictor keeps US76.
+    void set_air_density_factor(double factor);
 
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines

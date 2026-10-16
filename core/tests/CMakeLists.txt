@@ -66,6 +66,7 @@ add_executable(starsim_core_tests
     test_radiative_heating.cpp
     test_entry_attitude.cpp
     test_entry_guidance.cpp
+    test_entry_skip.cpp
     test_entry_guidance_campaign.cpp
     test_flight_session_entry.cpp
     test_ship_entry.cpp

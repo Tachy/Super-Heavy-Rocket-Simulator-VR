@@ -201,9 +201,11 @@ Vec3 earth_rotation_vector(const frames::FixedToInertial& transform) { return fr
 
 environment::ReferenceBody reference_body_of(const FlightEnvironment& env, ephemeris::Body id) {
     if (id == ephemeris::Body::Moon && env.moon) return *env.moon;
-    return environment::ReferenceBody::earth(
+    auto earth = environment::ReferenceBody::earth(
         env.earth_orientation, env.atmosphere,
         env.ephemeris ? env.ephemeris->gm_m3ps2(ephemeris::Body::Earth) : constants::earth_gm_m3ps2);
+    earth.set_air_density_factor(env.air_density_factor);
+    return earth;
 }
 
 ephemeris::Body FlightBody::reference_body(const FlightEnvironment& env, time::Epoch epoch) const {

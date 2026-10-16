@@ -1,7 +1,9 @@
 #pragma once
 
 #include <algorithm>
+#include <memory>
 
+#include "starsim/aero/radiative_heating.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/vec3.hpp"
@@ -84,6 +86,12 @@ struct EntryPredictorModel {
     double j2 = constants::earth_j2;
     double earth_radius_m = constants::wgs84_semi_major_axis_m;
     double omega_radps = constants::earth_rotation_rate_radps;  // about ITRF z
+    // Lunar l5: equilibrium radiative heating (Earth air) on top of Sutton-Graves; null: convective only (LEO entries).
+    std::shared_ptr<const aero::RadiativeHeatingTable> radiative;
+    // Lunar l5 skip entry: an exit above the atmosphere whose osculating apoapsis stays below this is carried (Kepler +
+    // J2 in the Earth-fixed frame, no air) to the next entry; false or a higher apoapsis: the prediction ends at the exit.
+    bool carry_skips = false;
+    double max_skip_apoapsis_height_m = 1000e3;  // [E] an arc to 1000 km takes ~20 min: still a guided skip
 };
 
 struct EntryPredictorState {
@@ -119,6 +127,13 @@ struct EntryPrediction {
     double peak_load_g = 0.0;        // aerodynamic acceleration / g0
     double peak_dynamic_pressure_pa = 0.0;
     bool reached_gate = false;       // false: skipped out (above 130 km after dipping below 80 km) or time limit
+    // Exit above the atmosphere (above 130 km after dipping below 80 km) that was not carried: the osculating orbit
+    // there (inertial velocity = Earth-fixed + Earth rotation; central gravity, heights above the equatorial radius).
+    bool exited = false;
+    double exit_apoapsis_height_m = 0.0;  // < 0: hyperbolic (no apoapsis)
+    double exit_periapsis_height_m = 0.0;
+    double exit_inclination_rad = 0.0;    // to the equator (ITRF z)
+    int skips = 0;                        // arcs carried above the atmosphere
 };
 
 // Integrates the entry of a point mass from `start` to the gate height above the target ground (classical RK4,

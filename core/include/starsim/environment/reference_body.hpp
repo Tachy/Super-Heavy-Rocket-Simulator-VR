@@ -51,7 +51,14 @@ public:
     const frames::Ellipsoid& shape() const { return shape_; }
     bool has_atmosphere() const { return atmosphere_ != nullptr; }
     // Air at a height above the shape; vacuum_state() without an atmosphere.
-    AtmosphereState air(double height_m) const { return atmosphere_ ? atmosphere_->at(height_m) : vacuum_state(); }
+    AtmosphereState air(double height_m) const {
+        if (!atmosphere_) return vacuum_state();
+        auto s = atmosphere_->at(height_m);
+        s.density_kg_m3 *= air_density_factor_;  // truth dispersion (lunar l5 campaigns); 1 otherwise
+        s.mean_free_path_m /= air_density_factor_;
+        return s;  // pressure and temperature stay: the engines' back-pressure is not dispersed
+    }
+    void set_air_density_factor(double f) { air_density_factor_ = f; }
     math::StateVector centre_gcrf(time::Epoch epoch) const;
     // Acceleration of the body's centre in the GCRF (Earth: zero; Moon: central difference of the ephemeris velocity
     // - the DE440 Moon's own acceleration, exact to ~1e-9 m/s^2). The plan frame of a lunar landing falls with it.
@@ -78,6 +85,7 @@ private:
     const frames::BodyOrientation* orientation_;
     const Atmosphere* atmosphere_;           // nullptr: vacuum
     const ephemeris::Ephemeris* ephemeris_;  // nullptr: centred at the GCRF origin (the Earth)
+    double air_density_factor_ = 1.0;
     const LunarTerrain* terrain_ = nullptr;
 };
 

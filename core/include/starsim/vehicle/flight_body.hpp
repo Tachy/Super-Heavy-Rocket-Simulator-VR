@@ -36,6 +36,7 @@ struct FlightEnvironment {
     bool solar_radiation_pressure = true;
     const environment::ReferenceBody* moon = nullptr;  // lunar l1: the Moon as a reference body (nullptr: Earth only)
     const aero::RadiativeHeatingTable* radiative_heating = nullptr;  // lunar l5: Earth air radiation (nullptr: none)
+    double air_density_factor = 1.0;  // lunar l5 campaigns: truth air density (Earth) over US76
 };
 
 // Air data at the start of the last tick (what an air-data system would report to the controllers).
