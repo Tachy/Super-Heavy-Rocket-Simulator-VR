@@ -75,6 +75,7 @@ add_library(starsim_core STATIC
     src/sim/ascent_mission.cpp
     src/sim/capsule_return_mission.cpp
     src/sim/lunar_landing_mission.cpp
+    src/sim/lunar_return_mission.cpp
     src/sim/mission_start.cpp
     src/mission/finite_burn.cpp
     src/mission/lunar_budget.cpp

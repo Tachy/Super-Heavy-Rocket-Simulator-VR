@@ -1,0 +1,36 @@
+# Lunar return, mission 2 of the lunar spec (l5): a Block 3 ship in the 100 km polar LLO, tanked by tankers with just the
+# propellant of its return (the start state; tankers, rendezvous and transfer are M9), flies TEI, two mid-course
+# corrections and the braking burn (user 2026-10-16: the vacuum Raptors brake at ~2,000 km to the highest entry speed
+# within the heat-shield limits), then the direct (skip) entry to Starbase and the flip and catch (b2/b3).
+# The start computes the propellant (fixed point over the planned TEI, braking burn and the landing propellant).
+
+[mission]
+name = "Rückkehr vom Mond (LLO, direkt)"
+kind = "lunar_return"            # FlightSim.start_mission dispatches on it
+vehicle = "starship_block3"
+stage = "ship"
+site = "starbase_olp1"
+
+[orbit]
+# [E] l5 Task 6: a direct entry reaches Starbase only when the Moon is south at TEI (Nov 12 2026, Moon -27.6 deg:
+# gate reached; Nov 2, Moon +19 deg: the site stays >= ~4,000 km beyond the entry's reach at every arrival time)
+epoch_utc = "2026-11-12T00:00:00"
+kind = "llo"
+altitude_km = 100.0                 # [S] spec
+inclination_deg = 90.0              # [S] spec: polar; the node is placed so the plane contains the return asymptote
+
+[return]
+variant = "direct"                  # "direct" | "aerocapture"
+flight_time_days = 3.5              # [E] spec ~3-4 days (first guess)
+search_days = 1.0                   # [E] departure revolutions scanned
+mcc_after_tei_days = [1.0, 2.5]     # [E] spec: two corrections
+entry_interface_km = 120.0          # b2
+braking_height_km = 2000.0          # [E] user 2026-10-16 (burn ends ~7 min before the interface: time to turn belly first)
+min_corridor_width_deg = 1.0        # [E] the planned angle sits in the middle: +-0.5 deg of margin
+nominal_bank_deg = 110.0            # [E] l5 Task 6: at ~9.6 km/s 50-80 deg skip out beyond the carry limit, 90 sits on
+                                    # the skip boundary; 110 deg captures with a smooth range
+
+[budget]
+mcc_allowance_mps = 30.0            # [E]
+coast_attitude_kg_per_day = 1000.0  # [D] l3: Sun hold ~0.9 t/day of cold gas
+reserve_kg = 10000.0                # [E] as the lunar landing

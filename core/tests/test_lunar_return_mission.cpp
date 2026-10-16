@@ -1,0 +1,162 @@
+// Mission config lunar_return (l5): loading, the start state in the LLO / NRHO, the entry speed from the corridor and
+// the propellant fixed point; refusals without a corridor and beyond the tanks.
+
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+
+#include <catch2/catch_approx.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
+
+#include "lunar_return_test_support.hpp"
+#include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/mission_config.hpp"
+#include "starsim/frames/geodetic.hpp"
+#include "starsim/math/constants.hpp"
+#include "starsim/sim/lunar_return_mission.hpp"
+#include "starsim/sim/mission_start.hpp"
+
+using namespace starsim;
+using Catch::Matchers::ContainsSubstring;
+using Catch::Matchers::StartsWith;
+
+namespace {
+
+constexpr double deg = constants::deg_to_rad;
+
+void print_budget(const char* what, const sim::LunarReturnBudget& b) {
+    if (!std::getenv("STARSIM_VERBOSE")) return;
+    std::printf("[lunar return] %s: closes %d (%s), propellant %.1f t, TEI %.1f m/s, braking %.1f m/s, entry %.0f m/s, "
+                "corridor %.2f .. %.2f deg (middle %.2f, width %.2f, %s)\n",
+                what, b.closes ? 1 : 0, b.reason.c_str(), b.propellant_kg / 1000.0, b.tei_delta_v_mps,
+                b.braking_delta_v_mps, b.entry_speed_mps, b.corridor.steep_rad / deg, b.corridor.shallow_rad / deg,
+                b.corridor.middle_rad / deg, b.corridor.width_rad / deg, b.corridor.limiting.c_str());
+}
+
+}  // namespace
+
+TEST_CASE("Lunar return missions load", "[lunar][return][config]") {
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    CHECK(config::mission_kind(STARSIM_CONFIG_DIR, "ship_lunar_return_llo") == config::MissionKind::LunarReturn);
+    CHECK(m.stage_id == "ship");
+    CHECK(m.orbit == "llo");
+    CHECK_FALSE(m.aerocapture);
+    CHECK(m.braking_height_m == Catch::Approx(2000e3));
+    CHECK(m.mcc_after_tei_s.size() == 2);
+    const auto a = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
+    CHECK(a.aerocapture);
+    CHECK(a.aerocapture_apoapsis_m == Catch::Approx(400e3));
+    CHECK(a.deorbit.search_window_s > 0.0);
+    const auto n = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_nrho");
+    CHECK(n.orbit == "nrho");
+    CHECK(n.nrho_revolutions == 9);
+    CHECK_THROWS_AS(config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "hls_lunar_llo"), config::ConfigError);
+}
+
+TEST_CASE("Lunar return start tanks the ship for its return and plans it", "[lunar][return][session]") {
+    test::LunarReturnSession t;
+    sim::LunarReturnBudget budget;
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc),
+                                                   nullptr, &budget);
+    print_budget("LLO direct", budget);
+    INFO(s.refusal);
+    REQUIRE(budget.closes);
+    // Task 8: CHECK(s.return_planned);
+    CHECK(s.refusal == "Rückflug-Autopilot fehlt");
+    // [D] TEI ~0.9 + braking ~1.1 km/s (l5 Task 6; the plan estimated 1.5) + MCC + coast + 35 t landing + 10 t reserve
+    // on 255 t dry: ~250 t
+    const auto& v = t.session.body(t.session.controlled_index()).vehicle();
+    CHECK(v.propellant_kg() > 200e3);
+    CHECK(v.propellant_kg() < 400e3);
+    CHECK(v.propellant_kg() == Catch::Approx(budget.propellant_kg).margin(1.0));
+    CHECK(budget.entry_speed_mps > 9000.0);
+    CHECK(budget.corridor.width_rad >= m.min_corridor_width_rad - 1e-9);
+    // a ~100 km polar LLO about the Moon
+    const auto& st = t.session.body(t.session.controlled_index()).state();
+    const auto moon = t.ephemeris.state_gcrf(ephemeris::Body::Moon, s.epoch);
+    const double altitude_m = norm(st.position_gcrf_m - moon.position_m) - constants::moon_mean_radius_m;
+    CHECK(std::abs(altitude_m - 100e3) < 1e3);
+    // Task 8: CHECK(t.session.lunar_step() == sim::LunarStep::ReturnDeparture);
+}
+
+TEST_CASE("Lunar return start refuses without an entry corridor", "[lunar][return][session]") {
+    // Review Focus 2: heat-rate limit lowered to 0.3 MW/m^2: no admissible entry speed above the planner's floor
+    test::LunarReturnSession t;
+    const auto vehicle = test::block3_with_ship([](config::StageConfig& s) { s.heat_shield.max_heat_rate_w_m2 = 0.3e6; });
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc), &vehicle);
+    CHECK_FALSE(s.return_planned);
+    CHECK_THAT(s.refusal, StartsWith("Kein Eintrittskorridor"));
+}
+
+TEST_CASE("Lunar return start refuses a return the tanks cannot hold", "[lunar][return][session]") {
+    // tanks of 200 t (an eighth): the return needs ~250 t (a heavier dry mass fails earlier - no entry corridor)
+    test::LunarReturnSession t;
+    const auto vehicle = test::block3_with_ship([](config::StageConfig& s) {
+        for (auto& tank : s.tanks) tank.mass_kg *= 0.125;
+    });
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc), &vehicle);
+    CHECK_FALSE(s.return_planned);
+    CHECK_THAT(s.refusal, ContainsSubstring("Treibstoff"));
+}
+
+TEST_CASE("The aligned LLO contains the return asymptote", "[lunar][return]") {
+    test::LunarReturnSession t;
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    const time::Epoch epoch = t.time.from_utc(m.epoch_utc);
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id);
+    const auto site_itrf = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    const auto setup = sim::lunar_return_setup(m, site_itrf, t.session.gravity(), t.ephemeris, epoch);
+    sim::place_lunar_return_ship(t.session, m, sim::lunar_return_ship(m, STARSIM_CONFIG_DIR), epoch, 300e3, setup.ret);
+    const auto& st = t.session.body(t.session.controlled_index()).state();
+    const auto moon = t.ephemeris.state_gcrf(ephemeris::Body::Moon, epoch);
+    const math::Vec3 r = st.position_gcrf_m - moon.position_m, v = st.velocity_gcrf_mps - moon.velocity_mps;
+    const math::Vec3 n = math::normalized(cross(r, v));
+    const math::Vec3 s = mission::return_asymptote(t.ephemeris, epoch + 3600.0, setup.ret.flight_time_guess_s,
+                                                   setup.ret.target.site_itrf_m, t.earth);
+    CHECK(std::abs(std::acos(dot(n, s)) - 0.5 * constants::pi) < 0.1 * deg);
+    const auto rot = t.moon.fixed_to_gcrf(epoch).rotation;
+    const math::Vec3 pole{rot(0, 2), rot(1, 2), rot(2, 2)};
+    CHECK(std::abs(std::acos(dot(n, pole)) - 0.5 * constants::pi) < 0.1 * deg);  // polar
+    CHECK(std::abs(norm(r) - constants::moon_mean_radius_m - 100e3) < 1e3);
+    const double circular_mps = std::sqrt(t.ephemeris.gm_m3ps2(ephemeris::Body::Moon) / norm(r));
+    CHECK(std::abs(norm(v) - circular_mps) < 1.0);
+    CHECK(std::abs(dot(math::normalized(r), math::normalized(v))) < 1e-6);
+    CHECK(t.session.body(t.session.controlled_index()).vehicle().propellant_kg() == Catch::Approx(300e3).margin(1.0));
+}
+
+TEST_CASE("start_mission dispatches a lunar return", "[lunar][return][session]") {
+    // the aerocapture variant (its budget adds the perigee raise and the b4 deorbit on the deorbit engine)
+    test::LunarReturnSession t;
+    const auto s = sim::start_mission(t.session, STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo", {}, t.time);
+    CHECK(s.kind == config::MissionKind::LunarReturn);
+    INFO(s.refusal);
+    REQUIRE(s.refusal == "Rückflug-Autopilot fehlt");  // Task 8: REQUIRE(s.return_planned);
+    const auto& v = t.session.body(t.session.controlled_index()).vehicle();
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("[lunar return] LLO aircatch: propellant %.1f t\n", v.propellant_kg() / 1000.0);
+    }
+    CHECK(v.propellant_kg() > 200e3);
+    CHECK(v.propellant_kg() < 400e3);
+}
+
+TEST_CASE("Lunar return start from the NRHO plans the departure burn and the powered flyby",
+          "[lunar][return][session][slow]") {
+    // Artemis-like: departure burn + return powered flyby at 100 km (l5 Task 6: ~0.48 km/s in all)
+    test::LunarReturnSession t;
+    sim::LunarReturnBudget budget;
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_nrho");
+    const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc),
+                                                   nullptr, &budget);
+    print_budget("NRHO direct", budget);
+    INFO(s.refusal);
+    REQUIRE(budget.closes);
+    CHECK(budget.tei_delta_v_mps > 300.0);
+    CHECK(budget.tei_delta_v_mps < 600.0);
+    const auto& v = t.session.body(t.session.controlled_index()).vehicle();
+    CHECK(v.propellant_kg() > 150e3);
+    CHECK(v.propellant_kg() < 400e3);
+}

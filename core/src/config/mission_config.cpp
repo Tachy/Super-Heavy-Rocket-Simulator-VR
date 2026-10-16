@@ -1,5 +1,6 @@
 #include "starsim/config/mission_config.hpp"
 
+#include <cmath>
 #include <cstdint>
 
 #include "starsim/math/constants.hpp"
@@ -17,7 +18,8 @@ MissionKind kind_of(const detail::Document& doc) {
     if (kind == "ship_return") return MissionKind::ShipReturn;
     if (kind == "capsule_return") return MissionKind::CapsuleReturn;
     if (kind == "lunar_landing") return MissionKind::LunarLanding;
-    doc.fail("mission: unknown kind '" + kind + "' (ascent, ship_return, capsule_return, lunar_landing)");
+    if (kind == "lunar_return") return MissionKind::LunarReturn;
+    doc.fail("mission: unknown kind '" + kind + "' (ascent, ship_return, capsule_return, lunar_landing, lunar_return)");
 }
 
 void require_kind(const detail::Document& doc, MissionKind kind, const char* name) {
@@ -47,6 +49,31 @@ int positive_integer(const detail::Document& doc, const toml::table& t, std::str
     const auto v = t[key].value<int64_t>();
     if (!v || *v <= 0) doc.fail("'" + std::string(key) + "' must be a positive integer");
     return static_cast<int>(*v);
+}
+
+// [deorbit] of a ship return (b4)
+ShipReturnDeorbit ship_return_deorbit(const detail::Document& doc, const toml::table& deorbit) {
+    const double deg = constants::deg_to_rad;
+    ShipReturnDeorbit d;
+    d.entry_interface_height_m = doc.positive(deorbit, "entry_interface_km") * 1000.0;
+    d.entry_flight_path_rad = doc.number(deorbit, "entry_flight_path_deg") * deg;
+    if (!(d.entry_flight_path_rad < 0.0)) doc.fail("deorbit: entry_flight_path_deg must be negative");
+    d.nominal_bank_rad = doc.positive(deorbit, "nominal_bank_deg") * deg;
+    d.max_crossrange_m = doc.positive(deorbit, "max_crossrange_km") * 1000.0;
+    d.search_window_s = doc.positive(deorbit, "search_window_h") * 3600.0;
+    return d;
+}
+
+// Burn times in days after a reference, positive and increasing (seconds).
+std::vector<double> increasing_days(const detail::Document& doc, const toml::table& t, std::string_view key) {
+    std::vector<double> seconds;
+    for (const double days : numbers(doc, t, key)) {
+        if (!(days > 0.0) || (!seconds.empty() && days * 86400.0 <= seconds.back())) {
+            doc.fail("'" + std::string(key) + "' must be positive and increasing");
+        }
+        seconds.push_back(days * 86400.0);
+    }
+    return seconds;
 }
 
 }  // namespace
@@ -79,12 +106,7 @@ ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_d
     m.raan_rad = doc.number(*orbit, "raan_deg") * deg;
     m.argument_of_latitude_rad = doc.number(*orbit, "argument_of_latitude_deg") * deg;
     m.propellant_kg = doc.positive(*orbit, "propellant_t") * 1000.0;
-    m.entry_interface_height_m = doc.positive(*deorbit, "entry_interface_km") * 1000.0;
-    m.entry_flight_path_rad = doc.number(*deorbit, "entry_flight_path_deg") * deg;
-    if (!(m.entry_flight_path_rad < 0.0)) doc.fail("deorbit: entry_flight_path_deg must be negative");
-    m.nominal_bank_rad = doc.positive(*deorbit, "nominal_bank_deg") * deg;
-    m.max_crossrange_m = doc.positive(*deorbit, "max_crossrange_km") * 1000.0;
-    m.search_window_s = doc.positive(*deorbit, "search_window_h") * 3600.0;
+    m.deorbit = ship_return_deorbit(doc, *deorbit);
     return m;
 }
 
@@ -178,6 +200,65 @@ LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& conf
     m.ascent_delta_v_mps = doc.positive(budget, "ascent_delta_v_mps");
     m.nrho_to_llo_delta_v_mps = doc.positive(budget, "nrho_to_llo_delta_v_mps");
     m.llo_to_nrho_delta_v_mps = doc.positive(budget, "llo_to_nrho_delta_v_mps");
+    m.reserve_kg = doc.positive(budget, "reserve_kg");
+    return m;
+}
+
+LunarReturnMission load_lunar_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
+    const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    require_kind(doc, MissionKind::LunarReturn, "lunar return");
+    const double deg = constants::deg_to_rad;
+    const auto& mission = doc.table(doc.root, "mission");
+    const auto& orbit = doc.table(doc.root, "orbit");
+    const auto& ret = doc.table(doc.root, "return");
+    const auto& budget = doc.table(doc.root, "budget");
+    LunarReturnMission m;
+    m.id = std::string(mission_id);
+    m.name = doc.text(mission, "name");
+    m.vehicle_id = doc.text(mission, "vehicle");
+    m.stage_id = doc.text(mission, "stage");
+    m.site_id = doc.text(mission, "site");
+    const auto epoch = time::UtcDateTime::parse_iso(doc.text(orbit, "epoch_utc"));
+    if (!epoch) doc.fail("orbit: epoch_utc is not YYYY-MM-DDTHH:MM:SS");
+    m.epoch_utc = *epoch;
+    m.orbit = doc.text(orbit, "kind");
+    if (m.orbit == "llo") {
+        m.llo_altitude_m = doc.positive(orbit, "altitude_km") * 1000.0;
+        m.llo_inclination_rad = doc.number(orbit, "inclination_deg") * deg;
+        if (std::abs(m.llo_inclination_rad - 0.5 * constants::pi) > 1e-9) {
+            doc.fail("orbit: inclination_deg must be 90 (polar; the start places the plane through the return asymptote)");
+        }
+    } else if (m.orbit == "nrho") {
+        const auto& nrho = doc.table(doc.root, "nrho");
+        m.nrho_apolune_position = vec3(doc, nrho, "apolune_position");
+        m.nrho_apolune_velocity = vec3(doc, nrho, "apolune_velocity");
+        m.nrho_revolutions = positive_integer(doc, nrho, "revolutions");
+        m.nrho_synodic_months = positive_integer(doc, nrho, "synodic_months");
+        m.nrho_reference_revolutions = positive_integer(doc, nrho, "reference_revolutions");
+    } else {
+        doc.fail("orbit: unknown kind '" + m.orbit + "' (llo, nrho)");
+    }
+    const auto variant = doc.text(ret, "variant");
+    if (variant != "direct" && variant != "aerocapture") {
+        doc.fail("return: unknown variant '" + variant + "' (direct, aerocapture)");
+    }
+    m.aerocapture = variant == "aerocapture";
+    m.flight_time_s = doc.positive(ret, "flight_time_days") * 86400.0;
+    m.search_s = doc.positive(ret, "search_days") * 86400.0;
+    m.mcc_after_tei_s = increasing_days(doc, ret, "mcc_after_tei_days");
+    m.entry_interface_height_m = doc.positive(ret, "entry_interface_km") * 1000.0;
+    m.braking_height_m = doc.positive(ret, "braking_height_km") * 1000.0;
+    m.min_corridor_width_rad = doc.positive(ret, "min_corridor_width_deg") * deg;
+    m.nominal_bank_rad = doc.positive(ret, "nominal_bank_deg") * deg;
+    if (m.aerocapture) {
+        m.aerocapture_apoapsis_m = doc.positive(ret, "aerocapture_apoapsis_km") * 1000.0;
+        m.perigee_raise_height_m = doc.positive(ret, "perigee_raise_km") * 1000.0;
+        m.deorbit = ship_return_deorbit(doc, doc.table(doc.root, "deorbit"));
+    }
+    m.mcc_allowance_mps = doc.number(budget, "mcc_allowance_mps");
+    if (m.mcc_allowance_mps < 0.0) doc.fail("budget: mcc_allowance_mps must be >= 0");
+    m.coast_attitude_kg_per_day = doc.number(budget, "coast_attitude_kg_per_day");
+    if (m.coast_attitude_kg_per_day < 0.0) doc.fail("budget: coast_attitude_kg_per_day must be >= 0");
     m.reserve_kg = doc.positive(budget, "reserve_kg");
     return m;
 }

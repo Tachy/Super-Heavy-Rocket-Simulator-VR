@@ -14,8 +14,17 @@
 namespace starsim::config {
 
 // [mission] kind: what the mission file describes (FlightSim.start_mission dispatches on it). Absent: "ascent".
-enum class MissionKind { Ascent, ShipReturn, CapsuleReturn, LunarLanding };
+enum class MissionKind { Ascent, ShipReturn, CapsuleReturn, LunarLanding, LunarReturn };
 MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_view mission_id);
+
+// [deorbit] of a ship return from orbit (b4): the deorbit planning settings (gnc::DeorbitParameters).
+struct ShipReturnDeorbit {
+    double entry_interface_height_m = 0.0;
+    double entry_flight_path_rad = 0.0;
+    double nominal_bank_rad = 0.0;
+    double max_crossrange_m = 0.0;
+    double search_window_s = 0.0;
+};
 
 // Ship return from orbit (config/missions/<id>.toml): the scenario's start orbit and the deorbit planning settings.
 struct ShipReturnMission {
@@ -31,11 +40,7 @@ struct ShipReturnMission {
     double raan_rad = 0.0;
     double argument_of_latitude_rad = 0.0;
     double propellant_kg = 0.0;  // in orbit
-    double entry_interface_height_m = 0.0;
-    double entry_flight_path_rad = 0.0;
-    double nominal_bank_rad = 0.0;
-    double max_crossrange_m = 0.0;
-    double search_window_s = 0.0;
+    ShipReturnDeorbit deorbit;
 };
 
 ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
@@ -103,6 +108,34 @@ struct LunarLandingMission {
 };
 
 LunarLandingMission load_lunar_landing_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
+
+// Ship return from lunar orbit (config/missions/<id>.toml, lunar l5): the start orbit (LLO or NRHO), the variant
+// (direct entry / aerocapture) and the return planning settings. The propellant is computed by the start.
+struct LunarReturnMission {
+    std::string id, name, vehicle_id, stage_id, site_id;
+    time::UtcDateTime epoch_utc;
+    std::string orbit;  // "llo" | "nrho"
+    double llo_altitude_m = 100e3;
+    double llo_inclination_rad = 0.5 * constants::pi;
+    math::Vec3 nrho_apolune_position{}, nrho_apolune_velocity{};  // CR3BP seed (nondimensional)
+    int nrho_revolutions = 0, nrho_synodic_months = 0, nrho_reference_revolutions = 0;
+    bool aerocapture = false;  // [return] variant
+    double flight_time_s = 3.5 * 86400.0;
+    double search_s = 86400.0;
+    std::vector<double> mcc_after_tei_s;
+    double entry_interface_height_m = 120e3;
+    double braking_height_m = 2000e3;
+    double min_corridor_width_rad = 1.0 * constants::deg_to_rad;
+    double nominal_bank_rad = 110.0 * constants::deg_to_rad;
+    double aerocapture_apoapsis_m = 400e3;
+    double perigee_raise_height_m = 200e3;
+    ShipReturnDeorbit deorbit;  // [deorbit] (aerocapture): b4 after the capture
+    double mcc_allowance_mps = 30.0;
+    double coast_attitude_kg_per_day = 1000.0;
+    double reserve_kg = 10000.0;
+};
+
+LunarReturnMission load_lunar_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
 
 // Where a mission's drone ship waits ([drone_ship] of an ascent mission): the nominal impact point of its first stage.
 struct MissionDroneShip {

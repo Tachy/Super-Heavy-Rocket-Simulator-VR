@@ -26,6 +26,8 @@ struct MissionStart {
 //   then plan_capsule_return - the autopilot flies all steps to the water;
 // - lunar_landing: start_lunar_landing_mission at the mission's [orbit] epoch_utc (needs a session with the Moon
 //   orientation) - the autopilot flies the outbound flight, the landing, the surface stay and the ascent (mission 1);
+// - lunar_return: start_lunar_return_mission at the mission's [orbit] epoch_utc (Moon orientation needed) - the ship
+//   is tanked for its return in the LLO / NRHO (mission 2, l5);
 // - ship_return: refused (std::invalid_argument): the ship returns from the orbit it flew to (plan_ship_return).
 MissionStart start_mission(FlightSession& session, const std::filesystem::path& config_dir, std::string_view mission_id,
                            time::Epoch requested, const time::TimeScaleConverter& time);

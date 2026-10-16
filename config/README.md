@@ -133,7 +133,7 @@ flow separation (vacuum engines).
   sea). Where it waits is set by the mission.
 
 ## Missions (`missions/`)
-- `[mission] kind = "ascent" | "ship_return" | "capsule_return" | "lunar_landing"` (default "ascent"): `config::mission_kind`;
+- `[mission] kind = "ascent" | "ship_return" | "capsule_return" | "lunar_landing" | "lunar_return"` (default "ascent"): `config::mission_kind`;
   `sim::start_mission` / `FlightSim.start_mission` dispatch on it (an ascent starts at the requested time, a capsule return
   at its `[orbit]` epoch with the deorbit planned, a ship return is refused: it is flown from orbit, key R). Each loader
   refuses a file of another kind.
@@ -168,6 +168,19 @@ flow separation (vacuum engines).
   `[budget]` delta-v of the legs not planned at the start (`descent_delta_v_mps`, `ascent_delta_v_mps`, for the NRHO
   variant `nrho_to_llo_delta_v_mps` / `llo_to_nrho_delta_v_mps`) and `reserve_kg`: the start refuses a mission whose
   budget does not close ("Mission nicht durchführbar: ... fehlen N t").
+- `ship_lunar_return_llo.toml`, `ship_lunar_return_nrho.toml`, `ship_lunar_aircatch_llo.toml` (`kind = "lunar_return"`,
+  `config::load_lunar_return_mission`, `sim::start_lunar_return_mission`; lunar l5): a ship (`[mission]` `vehicle`,
+  `stage`, `site` = the Starbase tower) returns from lunar orbit. `[orbit]` `epoch_utc`, `kind = "llo" | "nrho"`; LLO
+  `altitude_km`, `inclination_deg` (must be 90: the start places the polar plane through the return asymptote); NRHO
+  an `[nrho]` table as the lunar landing's (the reference's first perilune two days after the start). `[return]`
+  `variant = "direct" | "aerocapture"`, `flight_time_days` (first guess), `search_days` (departures scanned),
+  `mcc_after_tei_days`, `entry_interface_km`, `braking_height_km` (the vacuum Raptors brake there to the entry speed),
+  `min_corridor_width_deg` (the entry speed is the highest whose corridor is this wide; the planned angle is its
+  middle), `nominal_bank_deg` (gate targeting); aerocapture also `aerocapture_apoapsis_km`, `perigee_raise_km` and a
+  `[deorbit]` table as `ship_return_starbase.toml`'s (b4 after the capture). `[budget]` `mcc_allowance_mps`,
+  `coast_attitude_kg_per_day`, `reserve_kg`. The start computes the propellant (fixed point over the planned burns down
+  to dry + landing propellant) and refuses without an entry corridor ("Kein Eintrittskorridor ...") or when it exceeds
+  the tanks. A direct entry reaches Starbase only at epochs with the Moon south at the departure (l5 Task 6).
 
 - Payload vehicles: `config::stack_payload` stacks a vehicle (e.g. `crew_dragon`) on the launcher; its stages are
   `payload` stages, whose thrusters stay blocked until the payload flies alone.

@@ -1,0 +1,41 @@
+# Lunar return from the 9:2 NRHO (l5): a Block 3 ship in the NRHO, tanked for its return, departs as Artemis plans it -
+# the departure burn drops to a 100 km lunar flyby, the return powered flyby leaves for the Earth (user 2026-10-16) -
+# then mid-course corrections, the braking burn and the direct entry to Starbase with the flip and catch (b2/b3).
+# The start computes the propellant (fixed point over the planned burns and the landing propellant).
+
+[mission]
+name = "Rückkehr vom Mond (NRHO, direkt)"
+kind = "lunar_return"            # FlightSim.start_mission dispatches on it
+vehicle = "starship_block3"
+stage = "ship"
+site = "starbase_olp1"
+
+[orbit]
+epoch_utc = "2026-11-13T00:00:00"   # [E] Moon south at the departure (as ship_lunar_return_llo); the NRHO return
+                                    # planner does not converge at every epoch (l5 Task 7: Nov 10 and 12 refused)
+kind = "nrho"
+
+[nrho]
+# 9:2 synodic-resonant southern L2 NRHO, CR3BP state at apolune (Earth-Moon, nondimensional)
+# [S: Zimovan, Howell & Davis 2017, Table 1]; the reference is rebuilt by multiple shooting in the full model, its
+# first perilune two days after the start (the departure burn ~0.75 d before it, l5 Task 6).
+apolune_position = [1.0221, 0.0, -0.1821]
+apolune_velocity = [0.0, -0.1033, 0.0]
+revolutions = 9                  # [S] per ...
+synodic_months = 2               # [S] ... synodic months
+reference_revolutions = 2        # [E] span of the reference (~13 d: the departure lies within the first)
+
+[return]
+variant = "direct"
+flight_time_days = 3.5              # [E] spec ~3-4 days (first guess)
+search_days = 3.0                   # [E] the first perilune (two days after the start) and its departure burn
+mcc_after_tei_days = [1.0, 2.5]     # [E] spec: two corrections
+entry_interface_km = 120.0          # b2
+braking_height_km = 2000.0          # [E] user 2026-10-16
+min_corridor_width_deg = 1.0        # [E]
+nominal_bank_deg = 110.0            # [E] l5 Task 6 (see ship_lunar_return_llo)
+
+[budget]
+mcc_allowance_mps = 30.0            # [E]
+coast_attitude_kg_per_day = 1000.0  # [D] l3: Sun hold ~0.9 t/day of cold gas
+reserve_kg = 10000.0                # [E] as the lunar landing

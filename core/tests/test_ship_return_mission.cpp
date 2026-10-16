@@ -69,11 +69,11 @@ time::Epoch place_mission(sim::FlightSession& session, const config::ShipReturnM
 
 gnc::DeorbitParameters deorbit_parameters(const config::ShipReturnMission& m) {
     gnc::DeorbitParameters p;
-    p.entry_interface_height_m = m.entry_interface_height_m;
-    p.entry_flight_path_rad = m.entry_flight_path_rad;
-    p.nominal_bank_rad = m.nominal_bank_rad;
-    p.max_crossrange_m = m.max_crossrange_m;
-    p.search_window_s = m.search_window_s;
+    p.entry_interface_height_m = m.deorbit.entry_interface_height_m;
+    p.entry_flight_path_rad = m.deorbit.entry_flight_path_rad;
+    p.nominal_bank_rad = m.deorbit.nominal_bank_rad;
+    p.max_crossrange_m = m.deorbit.max_crossrange_m;
+    p.search_window_s = m.deorbit.search_window_s;
     return p;
 }
 
@@ -171,8 +171,8 @@ TEST_CASE("Ship return mission loads", "[ship][mission]") {
     CHECK(m.site_id == "starbase_olp1");
     CHECK(m.stage_id == "ship");
     CHECK(m.periapsis_height_m == 200000.0);
-    CHECK(std::abs(m.entry_flight_path_rad + 1.0 * deg) < 1e-12);
-    CHECK(m.search_window_s == 48.0 * 3600.0);
+    CHECK(std::abs(m.deorbit.entry_flight_path_rad + 1.0 * deg) < 1e-12);
+    CHECK(m.deorbit.search_window_s == 48.0 * 3600.0);
 }
 
 TEST_CASE("Ship returns from orbit into the tower's arms", "[ship][catch][session][mission]") {

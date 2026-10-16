@@ -30,6 +30,7 @@
 #include "starsim/gnc/parachute_sequencer.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/gnc/sun_hold.hpp"
+#include "starsim/mission/earth_return.hpp"
 #include "starsim/mission/lunar_descent.hpp"
 #include "starsim/mission/lunar_orbit_transfer.hpp"
 #include "starsim/mission/lunar_outbound.hpp"
@@ -112,6 +113,19 @@ struct LunarMissionSequence {
     bool via_nrho = false;
     std::shared_ptr<const mission::NrhoReference> nrho;  // NRHO variant
     mission::LloTarget llo;
+};
+
+// The ship's return from lunar orbit to Starbase (mission 2, l5; FlightSession::plan_lunar_return, Task 8): TEI,
+// mid-course corrections and the braking burn on `burn_groups`, then the direct entry or (aerocapture) one pass into an
+// Earth orbit, the perigee raise and the ship return from orbit (b4, `deorbit`).
+struct LunarReturnSetup {
+    mission::EarthReturnParameters ret;
+    bool aerocapture = false;
+    gnc::EntryGuidanceParameters entry;
+    double aerocapture_apoapsis_m = 400e3;
+    double perigee_raise_height_m = 200e3;
+    gnc::DeorbitParameters deorbit;
+    std::vector<std::string> burn_groups{"vacuum"};  // [E] user 2026-10-16: the vacuum Raptors (RCS attitude); config ids
 };
 
 // Flight director cue of a pilot-flown mid-course correction (lunar l3, Step 3b; displayed with l6 / M7).
@@ -375,6 +389,7 @@ public:
     // The session's models (mission planning outside the session, e.g. place_lunar_landing_mission).
     const environment::PointMassGravity& gravity() const { return gravity_; }
     const ephemeris::Ephemeris& ephemeris() const { return *env_.ephemeris; }
+    const frames::BodyOrientation& earth_orientation() const { return earth_; }
     const frames::BodyOrientation* moon_orientation() const { return moon_orientation_; }  // nullptr: Earth only
 
     // Manoeuvre execution on the controlled body (RCS orientation, timed ignition, closed-loop cutoff).
