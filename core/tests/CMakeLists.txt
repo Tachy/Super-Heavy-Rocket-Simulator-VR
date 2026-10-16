@@ -26,6 +26,7 @@ add_executable(starsim_core_tests
     test_mission_start.cpp
     test_finite_burn.cpp
     test_lunar_orbit_transfer.cpp
+    test_earth_return.cpp
     test_lunar_descent.cpp
     test_lunar_ascent.cpp
     test_lunar_landing_campaign.cpp

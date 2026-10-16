@@ -82,6 +82,7 @@ add_library(starsim_core STATIC
     src/mission/lunar_orbit_transfer.cpp
     src/mission/lunar_touchdown.cpp
     src/mission/lunar_outbound.cpp
+    src/mission/earth_return.cpp
     src/mission/lunar_transfer.cpp
     src/mission/nrho_reference.cpp
     src/mission/position_targeter.cpp

@@ -55,6 +55,21 @@ std::optional<BurnNode> circularize_at_periapsis(const math::StateVector& state,
     return circularize_at(state, now, gm, 0.0);
 }
 
+std::optional<BurnNode> raise_periapsis_at_apoapsis(const math::StateVector& state, time::Epoch now, double gm,
+                                                    double periapsis_radius_m) {
+    const auto el = orbit::elements_from_state(state, gm);
+    if (el.eccentricity >= 1.0 || el.semi_major_axis_m <= 0.0) return std::nullopt;
+    const double r_a = el.semi_major_axis_m * (1.0 + el.eccentricity);
+    if (periapsis_radius_m > r_a) return std::nullopt;  // would make the apoapsis the periapsis
+    const double a_new = 0.5 * (r_a + periapsis_radius_m);
+    const double v_a = std::sqrt(gm * (2.0 / r_a - 1.0 / el.semi_major_axis_m));
+    const double v_new = std::sqrt(gm * (2.0 / r_a - 1.0 / a_new));
+    if (v_new - v_a <= 0.0) return std::nullopt;
+    const double dt = time_to_anomaly(el, constants::pi, gm);
+    const auto at_node = orbit::propagate_two_body(state, gm, dt);
+    return BurnNode{now + dt, (v_new - v_a) * math::normalized(at_node.velocity_mps)};
+}
+
 double burn_duration_s(double delta_v, double mass_kg, double thrust_n, double mass_flow_kgps) {
     if (thrust_n <= 0.0 || mass_flow_kgps <= 0.0) return 0.0;
     const double ve = thrust_n / mass_flow_kgps;
