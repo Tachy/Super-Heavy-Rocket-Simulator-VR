@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+#include "starsim/aero/radiative_heating.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/frames/geodetic.hpp"
@@ -179,7 +180,7 @@ public:
     }
 
     // Flies on the entry guidance's attitude commands until its phase reaches `stop_phase`, the body breaks up or
-    // lands, the ship skips out above 130 km, or `max_time_s` passes. One sample per second.
+    // lands, the ship skips out above 130 km (unless the guidance carries skips), or `max_time_s` passes. One sample per second.
     std::vector<GuidedSample> run_guided(gnc::EntryGuidance& guidance, gnc::EntryPhase stop_phase,
                                          double max_time_s = 3000.0) {
         std::vector<GuidedSample> samples;
@@ -195,7 +196,10 @@ public:
             if ((k - k0) % 100 == 0) samples.push_back({k * dt, body_->telemetry(env_, now), command});
             if (static_cast<int>(guidance.phase()) >= static_cast<int>(stop_phase)) break;
             if (body_->impacted() || body_->resting()) break;
-            if (body_->skipped_out() && samples.back().telemetry.altitude_m > 130000.0) break;
+            // a skip entry flies its arc above the atmosphere back down (lunar return); otherwise a skip-out ends it
+            if (!guidance.parameters().carry_skips && body_->skipped_out() && samples.back().telemetry.altitude_m > 130000.0) {
+                break;
+            }
             const auto transform = env_.earth_orientation.fixed_to_gcrf(now);
             const auto& s = body_->state();
             const double height = frames::fixed_to_geodetic(transpose(transform.rotation) * s.position_gcrf_m).height_m;
@@ -208,9 +212,54 @@ public:
         return samples;
     }
 
+    // An EntryGuidance (built here, `radiative` heating the truth as the predictor) flies the ship to the gate.
+    std::vector<GuidedSample> fly_guided(const gnc::AlphaSchedule& schedule, const gnc::EntryTarget& target,
+                                         const gnc::EntryGuidanceParameters& parameters,
+                                         std::shared_ptr<const aero::RadiativeHeatingTable> radiative = nullptr,
+                                         double max_time_s = 6000.0) {
+        use_radiative(radiative);
+        gnc::EntryGuidance guidance(*body_, schedule, target, parameters, radiative);
+        auto samples = run_guided(guidance, gnc::EntryPhase::Gate, max_time_s);
+        reached_gate_ = guidance.phase() == gnc::EntryPhase::Gate;
+        return samples;
+    }
+    bool reached_gate() const { return reached_gate_; }
+    double gate_miss_m(const gnc::EntryTarget& target) const {
+        return gnc::ground_range_m(position_itrf_m(), target.position_itrf_m);
+    }
+
+    struct AerocaptureExit {
+        bool exited = false;
+        double apoapsis_height_m = 0.0;  // two-body (central gravity), above the equatorial radius; < 0: hyperbolic
+        double periapsis_height_m = 0.0;
+    };
+    // Aerocapture guidance (no gate target) flies until it reports the exit; the osculating orbit there.
+    AerocaptureExit fly_aerocapture(const gnc::AlphaSchedule& schedule, const gnc::EntryGuidanceParameters& parameters,
+                                    std::shared_ptr<const aero::RadiativeHeatingTable> radiative = nullptr,
+                                    double max_time_s = 3000.0) {
+        use_radiative(radiative);
+        gnc::EntryGuidance guidance(*body_, schedule, gnc::EntryTarget{}, parameters, radiative);
+        run_guided(guidance, gnc::EntryPhase::Exit, max_time_s);
+        AerocaptureExit e;
+        e.exited = guidance.phase() == gnc::EntryPhase::Exit;
+        const math::Vec3 r = body_->state().position_gcrf_m, v = body_->state().velocity_gcrf_mps;
+        const double gm = 3.986004418e14, re = constants::wgs84_semi_major_axis_m;  // as EntryGravity
+        const double a = 1.0 / (2.0 / norm(r) - dot(v, v) / gm);
+        const double ecc = norm(cross(v, cross(r, v)) / gm - r / norm(r));
+        e.apoapsis_height_m = a > 0.0 && ecc < 1.0 ? a * (1.0 + ecc) - re : -1.0;
+        e.periapsis_height_m = a * (1.0 - ecc) - re;
+        return e;
+    }
+
     vehicle::FlightBody& body() { return *body_; }
 
 private:
+    void use_radiative(std::shared_ptr<const aero::RadiativeHeatingTable> radiative) {
+        radiative_ = std::move(radiative);
+        env_.radiative_heating = radiative_.get();
+    }
+    std::shared_ptr<const aero::RadiativeHeatingTable> radiative_;
+    bool reached_gate_ = false;
     EntryGravity gravity_;
     environment::Us76Atmosphere atmosphere_;
     EntryEarth earth_;

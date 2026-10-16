@@ -8,7 +8,7 @@
 
 namespace starsim::gnc {
 
-enum class EntryPhase { Entry, Terminal, Gate };
+enum class EntryPhase { Entry, Terminal, Gate, Exit };  // Exit: an aerocapture left the atmosphere
 
 const char* to_string(EntryPhase phase);
 
@@ -67,6 +67,14 @@ struct EntryGuidanceParameters {
     // little lift authority left, and its bank from the vertical plane degenerates: the corrector swung to lift down
     // and back (d3 campaign: 0.4 km predicted at 690 m/s, 3.8 km flown). 0: never (the ship's terminal phase takes over).
     double hold_bank_below_speed_mps = 0.0;
+    // Lunar l5: the predictor carries skip arcs (EntryPredictorModel::carry_skips) and looks this far ahead.
+    bool carry_skips = false;
+    double max_time_s = 3000.0;
+    // > 0: aerocapture - one pass to this exit apoapsis height (no gate, no terminal phase).
+    double aerocapture_apoapsis_m = 0.0;
+    double target_inclination_rad = -1.0;  // aerocapture: reversals on the exit orbit's inclination (< 0: none)
+    double inclination_deadband_rad = 0.2 * constants::deg_to_rad;  // [E]
+    double exit_height_m = 130e3;  // aerocapture: phase Exit once above this after the dip below 80 km
 
     // A capsule (Crew Dragon, d3): gate at the drogue deployment height (~18,000 ft [S: NASA Crew-2]), bank rate
     // 10 deg/s [E] throughout (Dracos; Apollo rolled at up to ~20 deg/s), no terminal phase, reversals to lower speed.
@@ -81,6 +89,25 @@ struct EntryGuidanceParameters {
         p.reversal_crossrange_base_m = 500.0;
         p.min_reversal_speed_mps = 500.0;
         p.hold_bank_below_speed_mps = 500.0;  // [E]
+        return p;
+    }
+    // Lunar return (l5): the predictor carries skip arcs (Orion-like skip entry, Brunner & Lu 2008 principle) and
+    // looks further ahead.
+    static EntryGuidanceParameters lunar_return() {
+        EntryGuidanceParameters p;
+        p.carry_skips = true;
+        p.max_time_s = 6000.0;
+        return p;
+    }
+    // Aerocapture (l5, "Aircatch"): one pass, the bank magnitude by the predicted exit apoapsis (numerical
+    // predictor-corrector, the principle of FNPAG [S: Lu, Cerimele, Tigges, Matz, AIAA 2015-1520]), constant bank per
+    // cycle; reversals on the exit orbit's inclination; no terminal phase.
+    static EntryGuidanceParameters aerocapture(double apoapsis_m, double inclination_rad) {
+        EntryGuidanceParameters p;
+        p.aerocapture_apoapsis_m = apoapsis_m;
+        p.target_inclination_rad = inclination_rad;
+        p.terminal_phase = false;
+        p.max_time_s = 3000.0;
         return p;
     }
 };
@@ -100,6 +127,7 @@ struct EntryCommand {
     bool constrained = false;            // bank limited by a corridor constraint
     double drag_scale = 1.0;
     double lift_scale = 1.0;
+    double exit_apoapsis_height_m = 0.0;  // aerocapture: latest prediction (< 0: hyperbolic)
 };
 
 // Entry guidance of the ship (onboard computer), from the measured state each cycle:
@@ -117,8 +145,10 @@ struct EntryCommand {
 class EntryGuidance {
 public:
     // `ship`: the entering single-stage vehicle (flaps, heat shield); its current mass properties set the trim.
+    // `radiative`: the predictor adds equilibrium radiative heating (lunar-return speeds); null: convective only.
     EntryGuidance(const vehicle::FlightBody& ship, const AlphaSchedule& schedule, EntryTarget target,
-                  EntryGuidanceParameters parameters = {});
+                  EntryGuidanceParameters parameters = {},
+                  std::shared_ptr<const aero::RadiativeHeatingTable> radiative = nullptr);
     // A capsule (Vehicle::capsule_aero): fixed trim angle of attack, bank only (EntryAeroTable::capsule); the load limit
     // is the crew's ([stage.heat_shield] crew_load_limit_g) when lower than the structure's.
     EntryGuidance(const vehicle::FlightBody& capsule, EntryTarget target,
@@ -147,12 +177,18 @@ public:
 
 private:
     void entry_cycle(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf);
+    void aerocapture_cycle(const vehicle::FlightBody& body, const EntryPredictorState& state);
     void terminal(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const math::Vec3& r_itrf,
                   const math::Vec3& v_itrf, double mach, double dt_s);
     // Horizontal miss at the gate predicted with a terminal steering vector (and the time to go).
     math::Vec3 terminal_miss(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf,
                                const math::Vec3& steering, double* time_to_go_s) const;
     bool violates(const EntryPrediction& p) const;
+    // Corrector miss (> 0: too much energy left - more bank).
+    double miss(const EntryPrediction& p) const;
+    bool aerocapture() const { return parameters_.aerocapture_apoapsis_m > 0.0; }
+    // Aerocapture: |predicted exit inclination - target| (pi when the prediction does not exit).
+    double inclination_error(const EntryPrediction& p) const;
 
     EntryTarget target_;
     EntryGuidanceParameters parameters_;
@@ -163,6 +199,7 @@ private:
     void configure_model(const vehicle::FlightBody& body);
     EntryPhase phase_ = EntryPhase::Entry;
     bool started_ = false;
+    bool dipped_ = false;  // aerocapture: has been below 80 km
     time::Epoch last_update_;
     time::Epoch last_cycle_;
     time::Epoch last_scale_update_;

@@ -25,7 +25,8 @@ constexpr double terminal_max_height_m = 40000.0;  // the hand-over Mach number 
 constexpr double max_terminal_prediction_s = 900.0;
 constexpr double settled_bank_rad = 5.0 * constants::deg_to_rad;  // no reversal in progress
 constexpr double levenberg_marquardt_damping = 1.0e-3;            // relative to the trace of J^T J
-constexpr double min_steering_fraction = 1.0e-3;  // below: the lift direction of the last cycle is kept  // the hand-over Mach number is only trusted in dense air
+constexpr double min_steering_fraction = 1.0e-3;  // below: the lift direction of the last cycle is kept
+constexpr double aerocapture_dip_height_m = 80000.0;  // as the predictor's skip-out test
 
 double sign_of(double x) { return x < 0.0 ? -1.0 : 1.0; }
 
@@ -49,14 +50,17 @@ const char* to_string(EntryPhase phase) {
         case EntryPhase::Entry: return "Eintritt";
         case EntryPhase::Terminal: return "Endanflug";
         case EntryPhase::Gate: return "Tor";
+        case EntryPhase::Exit: return "Austritt";
     }
     return "?";
 }
 
 EntryGuidance::EntryGuidance(const vehicle::FlightBody& ship, const AlphaSchedule& schedule, EntryTarget target,
-                             EntryGuidanceParameters parameters)
+                             EntryGuidanceParameters parameters,
+                             std::shared_ptr<const aero::RadiativeHeatingTable> radiative)
     : target_(target), parameters_(parameters) {
     model_.aero = EntryAeroTable(ship.vehicle(), schedule);
+    model_.radiative = std::move(radiative);
     configure_model(ship);
 }
 
@@ -89,6 +93,7 @@ void EntryGuidance::configure_model(const vehicle::FlightBody& body) {
     model_.nose_min_fraction = parameters_.terminal_nose_min_fraction;
     model_.nose_max_fraction = parameters_.terminal_nose_max_fraction;
     if (!parameters_.predictor_j2) model_.j2 = 0.0;
+    model_.carry_skips = parameters_.carry_skips;
     limits_ = stage.config.heat_shield;
     belly_azimuth_rad_ = stage.config.aero.belly_azimuth_rad;
 }
@@ -100,6 +105,26 @@ bool EntryGuidance::violates(const EntryPrediction& p) const {
     return p.peak_dynamic_pressure_pa > parameters_.max_dynamic_pressure_pa;
 }
 
+// Entry: downrange error at the gate; a prediction that exits (not carried) or is still flying at the time limit (a long
+// carried skip) overshoots by the whole Earth's range - its end point short of the target is no undershoot.
+// Aerocapture: exit apoapsis minus the target; a prediction that stays in (reaches the gate or times out) undershoots.
+double EntryGuidance::miss(const EntryPrediction& p) const {
+    constexpr double overshoot_m = 2.0e7;  // [E] beyond any range: forces more bank
+    if (aerocapture()) {
+        if (p.exited) {
+            return p.exit_apoapsis_height_m < 0.0 ? overshoot_m
+                                                   : p.exit_apoapsis_height_m - parameters_.aerocapture_apoapsis_m;
+        }
+        return -overshoot_m;
+    }
+    if (p.exited || !p.reached_gate) return overshoot_m;
+    return p.downrange_error_m;
+}
+
+double EntryGuidance::inclination_error(const EntryPrediction& p) const {
+    return p.exited ? std::abs(p.exit_inclination_rad - parameters_.target_inclination_rad) : constants::pi;
+}
+
 EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, const EntryPredictorState& state,
                                              double heat_load_j_m2, double sign, double warm_start_rad) const {
     Solution s;
@@ -107,20 +132,21 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
     const auto predict = [&](double magnitude) {
         ++s.predictions;
         return predict_entry(model, state, sign * magnitude, target_, parameters_.gate_height_m,
-                             heat_load_j_m2);
+                             heat_load_j_m2, 1.0, parameters_.max_time_s);
     };
-    // f(m) = downrange error, falling with the bank magnitude m. Bracket from the warm start.
+    // f(m) = miss (downrange error or exit apoapsis error), falling with the bank magnitude m (more bank = less lift up
+    // = less range / less apoapsis). Bracket from the warm start.
     double a = std::clamp(warm_start_rad, 0.0, max_bank);
     EntryPrediction pa = predict(a);
     double b = a;
     EntryPrediction pb = pa;
     double step = bracket_step_rad;
-    const bool more_bank = pa.downrange_error_m > 0.0;
+    const bool more_bank = miss(pa) > 0.0;
     bool bracketed = false, saturated = false;
     while (!bracketed && !saturated) {
         b = std::clamp(more_bank ? b + step : b - step, 0.0, max_bank);
         pb = predict(b);
-        if ((pb.downrange_error_m > 0.0) != more_bank) {
+        if ((miss(pb) > 0.0) != more_bank) {
             bracketed = true;
         } else if (b <= 0.0 || b >= max_bank) {
             saturated = true;  // even the bank limit does not reach the target
@@ -135,15 +161,15 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
         s.prediction = pb;
     } else {
         // Illinois (modified regula falsi) between a and b, whose errors have opposite signs.
-        double fa = pa.downrange_error_m, fb = pb.downrange_error_m;
+        double fa = miss(pa), fb = miss(pb);
         s.bank_rad = std::abs(fa) < std::abs(fb) ? a : b;
         s.prediction = std::abs(fa) < std::abs(fb) ? pa : pb;
         int side = 0;
         for (int i = 0; i < max_illinois_iterations; ++i) {
-            if (std::abs(s.prediction.downrange_error_m) < converged_downrange_m || std::abs(b - a) < converged_bank_rad) break;
+            if (std::abs(miss(s.prediction)) < converged_downrange_m || std::abs(b - a) < converged_bank_rad) break;
             const double c = (a * fb - b * fa) / (fb - fa);
             const EntryPrediction pc = predict(c);
-            const double fc = pc.downrange_error_m;
+            const double fc = miss(pc);
             s.bank_rad = c;
             s.prediction = pc;
             if ((fc > 0.0) == (fa > 0.0)) {
@@ -187,6 +213,10 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     model_.mass_kg = body.vehicle().mass_properties().mass_kg;
     time_since_reversal_s_ += parameters_.cycle_s;
     const EntryPredictorState state{r_itrf, v_itrf, bank_rad_};
+    if (aerocapture()) {
+        aerocapture_cycle(body, state);
+        return;
+    }
 
     const Vec3 up = math::normalized(r_itrf);
     const Vec3 v_h = v_itrf - up * dot(v_itrf, up);
@@ -251,6 +281,42 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     command_.downrange_error_m = s.prediction.downrange_error_m;
     command_.crossrange_m = s.prediction.crossrange_m;
     command_.heading_error_rad = heading_error;
+    command_.constrained = s.constrained;
+}
+
+// Aerocapture: the bank magnitude for the target exit apoapsis; with a target inclination the sign is reversed when the
+// predicted exit inclination is off by more than the deadband and the reversed sign's solution ends closer to it.
+void EntryGuidance::aerocapture_cycle(const vehicle::FlightBody& body, const EntryPredictorState& state) {
+    const bool steer_plane = parameters_.target_inclination_rad >= 0.0;
+    if (sign_ == 0.0) {
+        sign_ = 1.0;
+        if (steer_plane) {
+            const Solution left = solve(model_, state, body.heat_load_j_m2(), 1.0, bank_magnitude_rad_);
+            const Solution right = solve(model_, state, body.heat_load_j_m2(), -1.0, bank_magnitude_rad_);
+            sign_ = inclination_error(left.prediction) <= inclination_error(right.prediction) ? 1.0 : -1.0;
+        }
+    }
+    Solution s = solve(model_, state, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
+    if (steer_plane && time_since_reversal_s_ >= parameters_.min_reversal_interval_s &&
+        inclination_error(s.prediction) > parameters_.inclination_deadband_rad) {
+        const Solution reversed = solve(model_, state, body.heat_load_j_m2(), -sign_, s.bank_rad);
+        if (inclination_error(reversed.prediction) < inclination_error(s.prediction)) {
+            sign_ = -sign_;
+            time_since_reversal_s_ = 0.0;
+            s = reversed;
+        }
+    }
+    bank_magnitude_rad_ = s.bank_rad;
+    bank_target_rad_ = sign_ * s.bank_rad;
+    if (std::getenv("STARSIM_DEBUG_ENTRY")) {
+        std::printf("[aerocapture] v %.0f bank %+.1f%s exit apoapsis %.1f km periapsis %.1f km incl %.2f deg peak %.0f "
+                    "kW/m2 (%d predictions)\n",
+                    norm(state.velocity_itrf_mps), bank_target_rad_ / constants::deg_to_rad,
+                    s.constrained ? " constrained" : "", s.prediction.exit_apoapsis_height_m / 1000.0,
+                    s.prediction.exit_periapsis_height_m / 1000.0, s.prediction.exit_inclination_rad * constants::rad_to_deg,
+                    s.prediction.peak_heat_rate_w_m2 / 1000.0, s.predictions);
+    }
+    command_.exit_apoapsis_height_m = s.prediction.exit_apoapsis_height_m;
     command_.constrained = s.constrained;
 }
 
@@ -469,7 +535,12 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         if (lift_model > 0.0) filter(model_.lift_scale, lift / lift_model);
     }
 
-    if (height - target_.ground_height_m <= parameters_.gate_height_m) phase_ = EntryPhase::Gate;
+    if (aerocapture()) {  // no gate: the pass ends when the ship climbs out of the atmosphere again
+        if (height < aerocapture_dip_height_m) dipped_ = true;
+        if (phase_ == EntryPhase::Entry && dipped_ && height > parameters_.exit_height_m) phase_ = EntryPhase::Exit;
+    } else if (height - target_.ground_height_m <= parameters_.gate_height_m) {
+        phase_ = EntryPhase::Gate;
+    }
     // Hand-over below the terminal Mach number once no bank reversal is in progress (the terminal phase starts from
     // the bank flown), at the latest at the late hand-over Mach number.
     const bool bank_settled = std::abs(bank_target_rad_ - bank_rad_) < settled_bank_rad;
@@ -479,8 +550,10 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         handed_over_ = true;
     }
 
-    if (phase_ == EntryPhase::Entry) {
-        if (epoch - last_cycle_ >= parameters_.cycle_s && speed >= parameters_.hold_bank_below_speed_mps) {
+    if (phase_ == EntryPhase::Exit) bank_target_rad_ = 0.0;  // out of the air: lift up
+    if (phase_ == EntryPhase::Entry || phase_ == EntryPhase::Exit) {
+        if (phase_ == EntryPhase::Entry && epoch - last_cycle_ >= parameters_.cycle_s &&
+            speed >= parameters_.hold_bank_below_speed_mps) {
             last_cycle_ = epoch;
             entry_cycle(body, r_itrf, v_itrf);
         }
@@ -498,7 +571,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
             command_.roll_reference_gcrf = attitude.roll_reference_gcrf;
         }
     }
-    if (phase_ != EntryPhase::Entry && !capsule_) terminal(body, transform.rotation, r_itrf, v_itrf, mach, dt);
+    if ((phase_ == EntryPhase::Terminal || phase_ == EntryPhase::Gate) && !capsule_) terminal(body, transform.rotation, r_itrf, v_itrf, mach, dt);
     command_.phase = phase_;
     command_.drag_scale = model_.drag_scale;
     command_.lift_scale = model_.lift_scale;

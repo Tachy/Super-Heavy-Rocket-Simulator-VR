@@ -203,6 +203,25 @@ double ground_range_m(const Vec3& a_itrf_m, const Vec3& b_itrf_m) {
     return std::atan2(norm(cross(a, b)), dot(a, b)) * constants::wgs84_semi_major_axis_m;
 }
 
+namespace {
+
+// The great-circle angle `gc_rad` (in [0, pi]) from the start to the end, unwrapped by the angle swept along the path:
+// past the antipode the great circle shortens again (a skip and a glide near orbital speed fly more than half around
+// the Earth). The branch closest to the swept angle; the great circle itself while the path stays within half a turn.
+double unwrapped_range_rad(double gc_rad, double swept_rad) {
+    const double turn = 2.0 * constants::pi;
+    const double n = std::floor(swept_rad / turn);
+    double best = gc_rad;
+    for (const double c : {n * turn + gc_rad, (n + 1.0) * turn - gc_rad, n * turn - gc_rad}) {
+        if (c >= 0.0 && std::abs(c - swept_rad) < std::abs(best - swept_rad)) best = c;
+    }
+    return best;
+}
+
+double angle_between(const Vec3& a, const Vec3& b) { return std::atan2(norm(cross(a, b)), dot(a, b)); }
+
+}  // namespace
+
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
                               double bank_command_rad, const EntryTarget& target, double gate_height_m,
                               double heat_load_so_far_j_m2, double step_s, double max_time_s) {
@@ -214,6 +233,7 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     double bank = start.bank_rad;
     bool entered = false;
     double t = 0.0;
+    double swept_rad = 0.0;  // ground track angle flown (unwraps the range past the antipode)
     AeroSample now = m.aero(r, v, bank);
     while (t < max_time_s) {
         m.update_basis(r, v);
@@ -236,12 +256,15 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
         p.peak_dynamic_pressure_pa = std::max(p.peak_dynamic_pressure_pa, next.dynamic_pressure_pa);
         if (next.height_m <= gate_m) {  // interpolate to the gate height
             const double f = std::clamp((now.height_m - gate_m) / (now.height_m - next.height_m), 0.0, 1.0);
-            r = r + (r1 - r) * f;
+            const Vec3 r_gate = r + (r1 - r) * f;
+            swept_rad += angle_between(r, r_gate);
+            r = r_gate;
             v = v + (v1 - v) * f;
             t += f * step_s;
             p.reached_gate = true;
             break;
         }
+        swept_rad += angle_between(r, r1);
         r = r1;
         v = v1;
         bank = next_bank;
@@ -265,13 +288,16 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     p.end_position_itrf_m = r;
     p.end_velocity_itrf_mps = v;
     p.time_s = t;
-    // Far from the target: difference of ranges from the start (monotone in the bank) and the target's distance
+    // Far from the target: difference of ranges from the start (monotone in the bank; the end's unwrapped past the
+    // antipode, the target's within half a turn) and the target's distance
     // from the great circle start -> end. Close to it a range difference cannot tell a target behind the end from
     // one ahead: there the miss in the end's horizontal plane, along / across the track at the end (its velocity's
     // horizontal direction; the direction from the start when the fall is vertical).
     if (ground_range_m(start.position_itrf_m, target.position_itrf_m) > near_target_range_m) {
-        p.downrange_error_m =
-            ground_range_m(start.position_itrf_m, r) - ground_range_m(start.position_itrf_m, target.position_itrf_m);
+        const double end_range_m =
+            unwrapped_range_rad(ground_range_m(start.position_itrf_m, r) / constants::wgs84_semi_major_axis_m, swept_rad) *
+            constants::wgs84_semi_major_axis_m;
+        p.downrange_error_m = end_range_m - ground_range_m(start.position_itrf_m, target.position_itrf_m);
         const Vec3 n = cross(start.position_itrf_m, r);
         if (norm(n) > 1e-6 * norm(r) * norm(r)) {
             p.crossrange_m = -std::asin(std::clamp(dot(math::normalized(target.position_itrf_m), math::normalized(n)),
