@@ -58,6 +58,7 @@ add_library(starsim_core STATIC
     src/gnc/deorbit_planner.cpp
     src/gnc/entry_guidance.cpp
     src/gnc/entry_predictor.cpp
+    src/gnc/entry_corridor.cpp
     src/sim/telemetry_recorder.cpp
     src/sim/catch_tower_sim.cpp
     src/sim/leg_landing_sim.cpp
