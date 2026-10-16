@@ -34,8 +34,9 @@ LunarReturnSetup lunar_return_setup(const config::LunarReturnMission& mission, c
                                     const environment::GravityModel& gravity, const ephemeris::Ephemeris& ephemeris,
                                     time::Epoch epoch);
 
-// The start state (Earth-centred GCRF): LLO - circular and polar, the plane containing the return asymptote at
-// epoch + 1 h (the departure point a quarter revolution ahead); NRHO - the reference at `epoch`.
+// The start state (Earth-centred GCRF): LLO - circular, of the mission's inclination (Moon equator), the plane
+// containing the return asymptote at epoch + 1 h (the departure point a quarter revolution ahead); throws
+// std::runtime_error (German) when the inclination is below the asymptote's declination. NRHO - the reference at `epoch`.
 math::StateVector lunar_return_start_state(const FlightSession& session, const config::LunarReturnMission& mission,
                                            time::Epoch epoch, const mission::EarthReturnParameters& ret);
 

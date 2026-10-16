@@ -1,5 +1,6 @@
 #include "starsim/sim/lunar_return_mission.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <memory>
@@ -139,8 +140,22 @@ math::StateVector lunar_return_start_state(const FlightSession& session, const c
                                                    ret.target.site_itrf_m, session.earth_orientation());
     const auto rot = session.moon_orientation()->fixed_to_gcrf(epoch).rotation;
     const math::Vec3 pole{rot(0, 2), rot(1, 2), rot(2, 2)};
-    // polar plane containing the asymptote; the departure point (velocity along s) lies a quarter revolution ahead
-    const math::Vec3 n = math::normalized(cross(pole, s));
+    // The plane of the mission's inclination containing the asymptote: n = a e1 + b e2 with n.s = 0, e1 the pole's part
+    // across s, e2 = s x e1; n.pole = a cos(declination) = cos(inclination). Of the two planes the one that is
+    // n = cross(pole, s) when polar. The departure point (velocity along s) lies a quarter revolution ahead.
+    const double sin_declination = std::clamp(dot(s, pole), -1.0, 1.0);
+    const double cos_declination = std::sqrt(1.0 - sin_declination * sin_declination);
+    const double a = std::cos(m.llo_inclination_rad) / cos_declination;
+    if (std::abs(a) > 1.0) {
+        char text[160];
+        std::snprintf(text, sizeof text,
+                      "Keine LLO mit %.1f° Bahnneigung enthält die Rückflug-Asymptote (Deklination %.1f°)",
+                      m.llo_inclination_rad / constants::deg_to_rad, std::asin(sin_declination) / constants::deg_to_rad);
+        throw std::runtime_error(text);
+    }
+    const math::Vec3 e1 = math::normalized(pole - s * sin_declination);
+    const math::Vec3 e2 = cross(s, e1);
+    const math::Vec3 n = math::normalized(e1 * a - e2 * std::sqrt(1.0 - a * a));
     const double r = constants::moon_mean_radius_m + m.llo_altitude_m;
     const double v = std::sqrt(ephemeris.gm_m3ps2(ephemeris::Body::Moon) / r);
     const math::Vec3 position = s * -1.0;
@@ -289,7 +304,12 @@ MissionStart start_lunar_return_mission(FlightSession& session, const std::files
     } catch (const std::runtime_error& e) {  // stage missing, NRHO reference not converged (German)
         return refuse(e.what());
     }
-    const auto b = lunar_return_budget(session, config_dir, m, ship, epoch, setup);
+    LunarReturnBudget b;
+    try {
+        b = lunar_return_budget(session, config_dir, m, ship, epoch, setup);
+    } catch (const std::runtime_error& e) {  // no LLO of the mission's inclination through the asymptote (German)
+        b.reason = e.what();
+    }
     if (budget) *budget = b;
     if (!b.closes) return refuse(b.reason);
     place_lunar_return_ship(session, m, ship, epoch, b.propellant_kg, setup.ret);

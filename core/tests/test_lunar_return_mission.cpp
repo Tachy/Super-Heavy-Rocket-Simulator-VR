@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -101,6 +102,32 @@ TEST_CASE("Lunar return start refuses a return the tanks cannot hold", "[lunar][
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc), &vehicle);
     CHECK_FALSE(s.return_planned);
     CHECK_THAT(s.refusal, ContainsSubstring("Treibstoff"));
+}
+
+TEST_CASE("An inclined LLO contains the return asymptote; below its declination none does", "[lunar][return]") {
+    // Polar is the south-pole landing's choice, not the return's: any inclination >= |declination of the asymptote|
+    // (Moon equator) holds a plane through it.
+    test::LunarReturnSession t;
+    auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    const time::Epoch epoch = t.time.from_utc(m.epoch_utc);
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id);
+    const auto site_itrf = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    const auto setup = sim::lunar_return_setup(m, site_itrf, t.session.gravity(), t.ephemeris, epoch);
+    const math::Vec3 s = mission::return_asymptote(t.ephemeris, epoch + 3600.0, setup.ret.flight_time_guess_s,
+                                                   setup.ret.target.site_itrf_m, t.earth);
+    const auto rot = t.moon.fixed_to_gcrf(epoch).rotation;
+    const math::Vec3 pole{rot(0, 2), rot(1, 2), rot(2, 2)};
+    const double declination = std::asin(dot(s, pole));
+    for (const double inclination : {std::abs(declination) + 5.0 * deg, 150.0 * deg}) {
+        m.llo_inclination_rad = inclination;
+        const auto st = sim::lunar_return_start_state(t.session, m, epoch, setup.ret);
+        const auto moon = t.ephemeris.state_gcrf(ephemeris::Body::Moon, epoch);
+        const math::Vec3 n = math::normalized(cross(st.position_m - moon.position_m, st.velocity_mps - moon.velocity_mps));
+        CHECK(std::abs(dot(n, s)) < std::sin(0.1 * deg));
+        CHECK(std::abs(std::acos(dot(n, pole)) - inclination) < 0.1 * deg);
+    }
+    m.llo_inclination_rad = 0.5 * std::abs(declination);
+    CHECK_THROWS_AS(sim::lunar_return_start_state(t.session, m, epoch, setup.ret), std::runtime_error);
 }
 
 TEST_CASE("The aligned LLO contains the return asymptote", "[lunar][return]") {

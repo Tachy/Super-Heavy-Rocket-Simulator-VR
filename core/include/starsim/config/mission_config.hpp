@@ -116,7 +116,7 @@ struct LunarReturnMission {
     time::UtcDateTime epoch_utc;
     std::string orbit;  // "llo" | "nrho"
     double llo_altitude_m = 100e3;
-    double llo_inclination_rad = 0.5 * constants::pi;
+    double llo_inclination_rad = 0.5 * constants::pi;  // Moon equator; the node is placed through the asymptote
     math::Vec3 nrho_apolune_position{}, nrho_apolune_velocity{};  // CR3BP seed (nondimensional)
     int nrho_revolutions = 0, nrho_synodic_months = 0, nrho_reference_revolutions = 0;
     bool aerocapture = false;  // [return] variant

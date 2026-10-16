@@ -171,8 +171,9 @@ flow separation (vacuum engines).
 - `ship_lunar_return_llo.toml`, `ship_lunar_return_nrho.toml`, `ship_lunar_aircatch_llo.toml` (`kind = "lunar_return"`,
   `config::load_lunar_return_mission`, `sim::start_lunar_return_mission`; lunar l5): a ship (`[mission]` `vehicle`,
   `stage`, `site` = the Starbase tower) returns from lunar orbit. `[orbit]` `epoch_utc`, `kind = "llo" | "nrho"`; LLO
-  `altitude_km`, `inclination_deg` (must be 90: the start places the polar plane through the return asymptote); NRHO
-  an `[nrho]` table as the lunar landing's (the reference's first perilune two days after the start). `[return]`
+  `altitude_km`, `inclination_deg` (Moon equator; any value at or above the return asymptote's declination: the start
+  places the plane through the asymptote, below it the start refuses); NRHO an `[nrho]` table as the lunar landing's
+  (the reference's first perilune two days after the start). `[return]`
   `variant = "direct" | "aerocapture"`, `flight_time_days` (first guess), `search_days` (departures scanned),
   `mcc_after_tei_days`, `entry_interface_km`, `braking_height_km` (the vacuum Raptors brake there to the entry speed),
   `min_corridor_width_deg` (the entry speed is the highest whose corridor is this wide; the planned angle is its

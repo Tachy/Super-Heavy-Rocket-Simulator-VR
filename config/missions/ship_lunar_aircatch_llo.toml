@@ -13,7 +13,8 @@ site = "starbase_olp1"
 epoch_utc = "2026-11-12T00:00:00"   # [E] as ship_lunar_return_llo
 kind = "llo"
 altitude_km = 100.0                 # [S] spec
-inclination_deg = 90.0              # [S] spec: polar; the node is placed so the plane contains the return asymptote
+inclination_deg = 90.0              # [E] any inclination >= the return asymptote's declination (Moon equator) works:
+                                    # the node is placed so the plane contains it; polar as the south-pole landing
 
 [return]
 variant = "aerocapture"

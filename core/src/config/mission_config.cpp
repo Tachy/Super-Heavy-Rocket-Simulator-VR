@@ -225,8 +225,8 @@ LunarReturnMission load_lunar_return_mission(const std::filesystem::path& config
     if (m.orbit == "llo") {
         m.llo_altitude_m = doc.positive(orbit, "altitude_km") * 1000.0;
         m.llo_inclination_rad = doc.number(orbit, "inclination_deg") * deg;
-        if (std::abs(m.llo_inclination_rad - 0.5 * constants::pi) > 1e-9) {
-            doc.fail("orbit: inclination_deg must be 90 (polar; the start places the plane through the return asymptote)");
+        if (m.llo_inclination_rad < 0.0 || m.llo_inclination_rad > constants::pi) {
+            doc.fail("orbit: inclination_deg must lie in [0, 180]");
         }
     } else if (m.orbit == "nrho") {
         const auto& nrho = doc.table(doc.root, "nrho");

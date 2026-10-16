@@ -1,4 +1,4 @@
-# Lunar return, mission 2 of the lunar spec (l5): a Block 3 ship in the 100 km polar LLO, tanked by tankers with just the
+# Lunar return, mission 2 of the lunar spec (l5): a Block 3 ship in a 100 km LLO, tanked by tankers with just the
 # propellant of its return (the start state; tankers, rendezvous and transfer are M9), flies TEI, two mid-course
 # corrections and the braking burn (user 2026-10-16: the vacuum Raptors brake at ~2,000 km to the highest entry speed
 # within the heat-shield limits), then the direct (skip) entry to Starbase and the flip and catch (b2/b3).
@@ -17,7 +17,8 @@ site = "starbase_olp1"
 epoch_utc = "2026-11-12T00:00:00"
 kind = "llo"
 altitude_km = 100.0                 # [S] spec
-inclination_deg = 90.0              # [S] spec: polar; the node is placed so the plane contains the return asymptote
+inclination_deg = 90.0              # [E] any inclination >= the return asymptote's declination (Moon equator) works:
+                                    # the node is placed so the plane contains it; polar as the south-pole landing
 
 [return]
 variant = "direct"                  # "direct" | "aerocapture"
