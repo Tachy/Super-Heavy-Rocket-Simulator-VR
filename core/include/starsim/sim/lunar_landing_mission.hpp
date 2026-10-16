@@ -25,7 +25,8 @@ LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& mission
 
 // Rocket-equation budget of the whole mission from the planned outbound flight (TLI, swing-by, insertion / LOI) and the
 // mission's nominal legs (NRHO -> LLO, descent, ascent, LLO -> NRHO). `vacuum_isp_s`: the vacuum Raptors (outbound,
-// transfers, braking phase, ascent); `approach_isp_s`: the rest of the descent (the single sea-level Raptor).
+// transfers, braking phase, ascent); `approach_isp_s`: the rest of the descent (the last braking set's Isp - the
+// landing thrusters since the l4 mass correction).
 mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& mission, const mission::OutboundPlan& plan,
                                            double initial_mass_kg, double dry_mass_kg, double vacuum_isp_s,
                                            double approach_isp_s);

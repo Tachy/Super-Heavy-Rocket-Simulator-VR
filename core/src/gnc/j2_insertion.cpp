@@ -101,6 +101,8 @@ InsertionState j2_circular_insertion(double gm_m3ps2, double radius_m, double in
                 for (int j = 0; j < 3; ++j) a(i, j) += jac[static_cast<size_t>(i)][k] * jac[static_cast<size_t>(j)][k];
             }
         }
+        // math::solve refuses a (near-)singular normal matrix: |det| <= 1e-14 relative to the column norms, i.e. the
+        // Jacobian's columns collinear; the iteration then keeps its last offsets.
         const auto step = math::solve(a, Vec3{b[0], b[1], b[2]});
         if (!step) break;
         p[0] += step->x;

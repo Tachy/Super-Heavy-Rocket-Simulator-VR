@@ -121,7 +121,7 @@ std::vector<double> allocate_fins(const FinAuthority& a, const Vec3& torque) {
     if (trace <= 0.0) return std::vector<double>(n, 0.0);
     for (int i = 0; i < 3; ++i) m(i, i) += 1e-6 * trace;
     const auto solved = math::solve(m, torque);
-    if (!solved) return std::vector<double>(n, 0.0);
+    if (!solved) return std::vector<double>(n, 0.0);  // refused (cannot happen with the regularisation): fins neutral
     const double y[3] = {solved->x, solved->y, solved->z};
     std::vector<double> d(n);
     double scale = 1.0;

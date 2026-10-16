@@ -170,7 +170,9 @@ public:
     static constexpr double max_coast_s = 600.0;
     static constexpr double burn_preparation_s = 120.0;  // ticks resume this long before an ignition
     static constexpr double small_burn_margin_s = 60.0;     // [E] trims / station keeping: planned after the preparation
-    static constexpr double min_departure_lead_s = 1800.0;  // [E] TLI centre after 120 s preparation + half a ~7 min burn
+    // [E] TLI centre after 120 s preparation + half a ~7 min burn; margin for the finite-TLI re-solve. A window < 30 min
+    // away waits one parking revolution.
+    static constexpr double min_departure_lead_s = 1800.0;
     // [E] a returning ship gets its entry guidance this long before the entry interface (turn to the entry attitude
     // on RCS: ~1.5 min for the 125 deg from the burn attitude)
     static constexpr double entry_lead_s = 300.0;
@@ -343,11 +345,16 @@ public:
     // propellant short for orbit).
     bool plan_lunar_ascent(const gnc::LunarAscentParameters& parameters = {}, double liftoff_delay_s = 0.0);
     const gnc::LunarAscentGuidance* lunar_ascent_guidance() const { return lunar_ascent_.get(); }
+    // A closed lunar orbit clear of the highest terrain: both apsides (radii from the Moon's centre) above
+    // moon_mean_radius_m + moon_max_terrain_height_m (the ascent's sub-orbital cutoff guard).
+    static bool lunar_orbit_clears_terrain(double periselene_m, double aposelene_m);
     // Chains the legs of a lunar landing mission after the flight planned now (start_lunar_landing_mission); empty
     // ends it. A refused leg ends the sequence in its orbit with the planner's reason in lunar_status().
     void set_lunar_mission(std::optional<LunarMissionSequence> sequence);
     // The sequence's last leg reached (status "Mission abgeschlossen: ...").
     bool lunar_mission_complete() const { return lunar_mission_leg_ == LunarMissionLeg::Complete; }
+    // The sequence ended early on a refused leg (status "Mission beendet: <reason>").
+    bool lunar_mission_ended() const { return lunar_mission_leg_ == LunarMissionLeg::Ended; }
     static constexpr double default_ascent_delta_v_mps = 1900.0;  // [E] without a landing setup (spec ~1.9 km/s)
     static constexpr double default_ascent_reserve_kg = 10000.0;  // [E] as LunarLandingSetup::reserve_kg
     static constexpr double sun_repoint_interval_s = 6.0 * 3600.0;  // [E] coast: Sun pointing re-aimed this often

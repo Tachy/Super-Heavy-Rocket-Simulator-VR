@@ -62,13 +62,7 @@ vehicle::RigidBodyState upright_above_moon(const environment::ReferenceBody& moo
     const Vec3 up = frame.transform.rotation * math::normalized(fixed);
     const Vec3 y = math::normalized(cross(up, Vec3{0.0, 0.0, 1.0}));
     const Vec3 z = cross(up, y);
-    math::Mat3 axes;
-    const Vec3 columns[3] = {up, y, z};
-    for (int c = 0; c < 3; ++c) {
-        axes(0, c) = columns[c].x;
-        axes(1, c) = columns[c].y;
-        axes(2, c) = columns[c].z;
-    }
+    const math::Mat3 axes = math::Mat3::from_columns(up, y, z);
     vehicle::RigidBodyState s;
     s.position_gcrf_m = frame.position_gcrf(fixed);
     s.velocity_gcrf_mps = frame.velocity_gcrf(fixed, {});

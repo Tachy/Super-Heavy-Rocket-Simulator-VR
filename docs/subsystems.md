@@ -215,7 +215,8 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   60 km crossrange [E] is taken; refused without the landing reserve or without a pass). The burn flies on
   `[stage.recovery] deorbit_engine_groups` - the ship: the belly sea-level Raptor alone (user 2026-10-13), the hull turned
   so that its thrust axis through the CG (`gnc::thrust_axis_body`, ~3 deg off the hull) points along the burn; the burn
-  executor senses along that axis (`FlightSession::execute_burn(node, groups)`). `AutopilotState::Return` ("Rückkehr")
+  executor senses along that axis (`FlightSession::execute_burn(node, groups)`; it flies on the named groups only - no
+  RCS fallback, the deorbit burn is far above the RCS's reach). `AutopilotState::Return` ("Rückkehr")
   coasts to 300 s before the entry interface, then the entry guidance (b2) and the flip and catch (b3) take over.
   From 200 km / 26.5 deg: burn after ~21-22 h (one pass a day passes Starbase within reach), 65-78 m/s, 5.6-6.8 t.
   Campaign `[ship][mission][validation]` (orbit phase 0-315 deg, orbit 190-230 km, 42-48 t, deorbit execution
@@ -503,7 +504,9 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   2026-10-15): l3's "~1,185 t" was the propellant USED; the real HLS has ~573 t in the LLO, ~566 t at PDI (~500 t NRHO
   variant) and lands ~315 t. Landing thrusters re-sized [E] to 12 x 90 kN (throttle 35-100 %), canted 15 deg at 40 m,
   hover 225-642 t; legs crush force 4.5 MN [E]; leg damping 3e6 N s/m [E] (Task 10: at 1e6 the hull rocked on 1-2 feet
-  for ~15 s after the engine cut on a 5 deg slope and walked 1.2 m). Descent: site pass - the LLO waits for a pass of
+  for ~15 s after the engine cut on a 5 deg slope and walked 1.2 m; the regularised friction (0.1 m/s) lets the
+  footprint creep only while the hull settles (~15 s; 0.17 m of the 1.18 m walk on 5.2 deg); a resting body is held fixed
+  to the Moon, so a stay adds none). Descent: site pass - the LLO waits for a pass of
   the polar site within `max_crossrange_km` (20 km) and trims the plane ~90 deg before it (user 2026-10-15); the wait
   cannot be shortened by the mission epoch (Task 9 finding, user 2026-10-16: "refuse honestly" rather than re-target):
   the Moon is tidally locked, so a polar LLO's plane, which contains the arrival asymptote, sits at the same place in

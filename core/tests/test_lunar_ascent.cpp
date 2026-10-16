@@ -127,6 +127,15 @@ mission::TouchdownPoint touchdown_point(const Fixture& fx) {
 }
 }  // namespace
 
+TEST_CASE("A lunar orbit must clear the highest terrain on both apsides", "[sim][lunar_ascent]") {
+    const double r = constants::moon_mean_radius_m;
+    CHECK(sim::FlightSession::lunar_orbit_clears_terrain(r + 15e3, r + 100e3));
+    // moon_max_terrain_height_m = 10,786 m (constants.hpp)
+    CHECK_FALSE(sim::FlightSession::lunar_orbit_clears_terrain(r + 5e3, r + 100e3));   // periselene below the highest terrain
+    CHECK_FALSE(sim::FlightSession::lunar_orbit_clears_terrain(r + 15e3, r + 5e3));    // aposelene below it
+    CHECK_FALSE(sim::FlightSession::lunar_orbit_clears_terrain(r - 1737e3, r + 84e3));  // the C4 sub-orbital cutoff
+}
+
 TEST_CASE("A released landed body flies again and the leg judgement starts over", "[sim][lunar_ascent][terrain][data]") {
     Fixture fx;
     fx.land(hls(test::hls_landed_propellant_kg));
@@ -294,6 +303,12 @@ TEST_CASE("A refused automatic abort keeps the engines on in a terminal descent"
     REQUIRE(g);
     CHECK(g->phase() == gnc::LunarDescentPhase::Terminal);
     CHECK(fx.session.body(0).vehicle().any_engine_producing_thrust());
+    // Review l4 M5: flown on to the outcome (landed or impact; recorded in the l5 ledger).
+    for (int i = 0; i < 600 && !fx.session.lunar_touchdown(); ++i) fx.session.advance_to(fx.session.epoch() + 1.0, 1000);
+    REQUIRE(fx.session.lunar_touchdown());
+    const auto& td = *fx.session.lunar_touchdown();
+    std::printf("[lunar_ascent] refused automatic abort outcome: %s, offset %.1f m, sink %.2f m/s, %.1f t\n",
+                sim::to_string(td.outcome), td.offset_m, td.sink_mps, fx.mass_kg() / 1000.0);
 }
 
 // Sweep of the ascent's acceleration limit (hidden: run by name; records LunarAscentParameters::max_acceleration_mps2).

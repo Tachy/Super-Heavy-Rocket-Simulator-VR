@@ -21,22 +21,17 @@
 #include "starsim/mission/lunar_budget.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
+#include "flight_session_lunar_detail.hpp"
 
 namespace starsim::sim {
 
-namespace {
+using detail::far_future_s;
+using detail::german;
 
-constexpr double far_future_s = 1e9;  // "nothing timed"
-
-std::string german(double value, int decimals) {
-    char text[32];
-    std::snprintf(text, sizeof(text), "%.*f", decimals, value);
-    std::string s = text;
-    std::replace(s.begin(), s.end(), '.', ',');
-    return s;
+bool FlightSession::lunar_orbit_clears_terrain(double periselene_m, double aposelene_m) {
+    const double clearance_m = constants::moon_mean_radius_m + constants::moon_max_terrain_height_m;
+    return periselene_m >= clearance_m && aposelene_m >= clearance_m;
 }
-
-}  // namespace
 
 bool FlightSession::plan_lunar_ascent(const gnc::LunarAscentParameters& parameters, double liftoff_delay_s) {
     if (bodies_.empty() || !moon_) {
@@ -176,10 +171,11 @@ void FlightSession::run_lunar_ascent_steps(Flying& flying) {
                 break;
             }
             const auto e = orbit::elements_from_state(moon_relative(), gm_moon);
-            // A sub-orbital cutoff (PEG saturated, the periselene inside the Moon) needs the whole orbital speed at the
+            // A sub-orbital cutoff (PEG saturated, an apsis below the highest terrain) needs the whole orbital speed at the
             // aposelene (1.6 km/s seen in l4 C4, planned as a "circularisation"): flown only when the propellant holds
             // it on the small-burn set (no reserve: the alternative is the impact), else the ascent ends here.
-            if (e.semi_major_axis_m * (1.0 - e.eccentricity) < constants::moon_mean_radius_m) {
+            if (!lunar_orbit_clears_terrain(e.semi_major_axis_m * (1.0 - e.eccentricity),
+                                            e.semi_major_axis_m * (1.0 + e.eccentricity))) {
                 const auto set = lunar_landing_setup_ ? lunar_landing_setup_->guidance.small_burn_set
                                                       : gnc::hls_landing_parameters().small_burn_set;
                 const auto& vehicle = body.vehicle();
@@ -212,19 +208,17 @@ void FlightSession::run_lunar_ascent_steps(Flying& flying) {
             // ~18 m/s at 150-200 t: lunar_small_burn (the single sea-level Raptor while its transients fit) - before the
             // session's RCS choice (a ~15-40 min cold-gas burn commanded at the main engines' ignition lead, far off its
             // centre: 93.7 x 101.9 km at 151 t, l4 C4). The landing thrusters are auxiliary engines, never lit by a burn.
-            const bool flown = lunar_small_burn(*node);
-            if (flown) {
-                lunar_burns_.push_back({LunarStep::Circularize, *node, body.vehicle().mass_properties().mass_kg});
-                if (lunar_debug_) {
-                    std::printf("[lunar] circularisation: %.2f m/s on %s (%.0f kN)\n", norm(node->delta_v_gcrf_mps),
-                                burn_config_.rcs ? "RCS" : burn_config_.groups.front().c_str(),
-                                burn_config_.thrust_n / 1000.0);
-                }
+            if (!lunar_small_burn(*node)) {  // it already chose the set (review l4 M6: no second attempt)
+                lunar_abort("Aufstieg abgebrochen: Brennvorgang nicht möglich");
+                break;
             }
-            if (flown || lunar_descent_burn(*node, LunarStep::Circularize)) {
-                lunar_step_ = LunarStep::Circularize;
-                lunar_status_ = "Zirkularisierung: " + german(norm(node->delta_v_gcrf_mps), 1) + " m/s";
+            lunar_burns_.push_back({LunarStep::Circularize, *node, body.vehicle().mass_properties().mass_kg});
+            if (lunar_debug_) {
+                std::printf("[lunar] circularisation: %.2f m/s on %s (%.0f kN)\n", norm(node->delta_v_gcrf_mps),
+                            burn_config_.rcs ? "RCS" : burn_config_.groups.front().c_str(), burn_config_.thrust_n / 1000.0);
             }
+            lunar_step_ = LunarStep::Circularize;
+            lunar_status_ = "Zirkularisierung: " + german(norm(node->delta_v_gcrf_mps), 1) + " m/s";
             break;
         }
         case LunarStep::Circularize: {  // the burn is over

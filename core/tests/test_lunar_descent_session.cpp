@@ -107,6 +107,29 @@ TEST_CASE("A surface stay of 0 h with an ascent lifts off at once", "[sim][lunar
     CHECK_FALSE(fx.session.body(0).resting());   // lifted off
 }
 
+TEST_CASE("An ascent refused at the stay's end ends the mission sequence", "[sim][lunar_descent_session][terrain][data][slow]") {
+    // Review l4 M3: the refusal left the sequence in leg Surface without its reason prefixed.
+    Fixture fx;
+    fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);
+    sim::LunarMissionSequence sequence;
+    sequence.landing.surface_stay_s = 36.0;
+    sequence.landing.ascent = gnc::LunarAscentParameters{};
+    sequence.landing.ascent->ascent_groups = {"no_such_group"};   // refused: "keine Aufstiegstriebwerke"
+    REQUIRE(fx.session.plan_lunar_landing(sequence.landing));
+    fx.session.set_lunar_mission(sequence);
+    const auto* plan = fx.session.lunar_descent_plan();
+    REQUIRE(plan);
+    fx.session.advance_to(plan->pdi_epoch + 1200.0, 50'000'000);
+    REQUIRE(fx.session.lunar_touchdown());
+    REQUIRE(fx.session.lunar_touchdown()->outcome == sim::LegTouchdown::Landed);
+    fx.session.advance_to(fx.session.epoch() + 60.0, 50'000);
+    std::printf("[lunar_descent_session] refused ascent: step %d, %s\n", static_cast<int>(fx.session.lunar_step()),
+                fx.session.lunar_status().c_str());
+    CHECK(fx.session.lunar_mission_ended());
+    CHECK(fx.session.lunar_status().rfind("Mission beendet: Kein Aufstieg", 0) == 0);
+    CHECK(fx.session.body(0).resting());
+}
+
 TEST_CASE("The pilot takes over in the braking phase: the descent guidance stops for good", "[sim][lunar_descent_session][terrain][data][slow]") {
     Fixture fx;
     fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);
@@ -126,7 +149,34 @@ TEST_CASE("The pilot takes over in the braking phase: the descent guidance stops
     CHECK_FALSE(fx.session.body(0).vehicle().any_engine_producing_thrust());
 }
 
-TEST_CASE("Descent planning refusals", "[sim][lunar_descent_session][terrain][data]") {
+TEST_CASE("The pilot takes over in the approach phase: the descent guidance stops for good", "[sim][lunar_descent_session][terrain][data][slow]") {
+    // Review l4 M5: the takeover outside the braking phase.
+    Fixture fx;
+    fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);
+    REQUIRE(fx.session.plan_lunar_landing({}));
+    const auto pdi = fx.session.lunar_descent_plan()->pdi_epoch;
+    fx.session.advance_to(pdi + 1.0, 50'000'000);
+    REQUIRE(fx.session.lunar_step() == sim::LunarStep::PoweredDescent);
+    for (int i = 0; i < 1200 * 10 && fx.session.lunar_step() == sim::LunarStep::PoweredDescent &&
+                    fx.session.lunar_landing_guidance()->phase() != gnc::LunarDescentPhase::Approach;
+         ++i) {
+        fx.session.advance_to(fx.session.epoch() + 0.1, 100);
+    }
+    REQUIRE(fx.session.lunar_landing_guidance());
+    REQUIRE(fx.session.lunar_landing_guidance()->phase() == gnc::LunarDescentPhase::Approach);
+    fx.session.disengage_autopilot();
+    sim::PilotInput input;
+    input.throttle = 0.0;
+    fx.session.set_input(input);
+    fx.session.cutoff();
+    fx.session.advance_to(fx.session.epoch() + 10.0, 5000);
+    CHECK(fx.session.lunar_step() == sim::LunarStep::None);
+    CHECK(fx.session.autopilot().state == sim::AutopilotState::Off);
+    CHECK(fx.session.lunar_landing_guidance() == nullptr);
+    CHECK_FALSE(fx.session.body(0).vehicle().any_engine_producing_thrust());
+}
+
+TEST_CASE("Descent planning refusals","[sim][lunar_descent_session][terrain][data]") {
     Fixture fx;
     SECTION("not in a lunar orbit") {
         fx.session.place_in_orbit("starship_hls", orbit::state_from_elements({6578137.0, 0.0, 0.5, 0.0, 0.0, 0.0},

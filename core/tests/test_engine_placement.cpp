@@ -153,6 +153,7 @@ TEST_CASE("A forced burn naming a landing-only group lights no landing engine", 
     int vacuum = 0;
     for (const auto& e : ringed.session.body(0).vehicle().stages().front().engines) {
         if (e.landing_only) CHECK(!e.producing_thrust());
-        if (e.group_id == "ship/vacuum" && e.producing_thrust()) ++vacuum;    }
+        if (e.group_id == "ship/vacuum" && e.producing_thrust()) ++vacuum;
+    }
     CHECK(vacuum == 3);
 }

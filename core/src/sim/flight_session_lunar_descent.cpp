@@ -26,12 +26,14 @@
 #include "starsim/mission/lunar_budget.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
+#include "flight_session_lunar_detail.hpp"
 
 namespace starsim::sim {
 
-namespace {
+using detail::far_future_s;
+using detail::german;
 
-constexpr double far_future_s = 1e9;  // "nothing timed"
+namespace {
 
 // Longest start-up of the engines in `groups`.
 double group_startup_s(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups) {
@@ -44,14 +46,6 @@ double group_startup_s(const vehicle::Vehicle& vehicle, const std::vector<std::s
         }
     }
     return startup_s;
-}
-
-std::string german(double value, int decimals) {
-    char text[32];
-    std::snprintf(text, sizeof(text), "%.*f", decimals, value);
-    std::string s = text;
-    std::replace(s.begin(), s.end(), '.', ',');
-    return s;
 }
 
 }  // namespace
@@ -284,7 +278,12 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
             lunar_step_ = LunarStep::Landed;
             lunar_step_epoch_ = epoch_ + far_future_s;
             // a refused ascent keeps its reason
-            if (!lunar_landing_setup_ || !lunar_landing_setup_->ascent) lunar_status_ = "gelandet: Oberflächenaufenthalt beendet";
+            if (!lunar_landing_setup_ || !lunar_landing_setup_->ascent) {
+                lunar_status_ = "gelandet: Oberflächenaufenthalt beendet";
+            } else if (lunar_mission_) {  // review l4 M3: the sequence ends with the refusal
+                lunar_mission_leg_ = LunarMissionLeg::Ended;
+                lunar_status_ = "Mission beendet: " + lunar_status_;
+            }
             break;
         case LunarStep::PoweredDescent: {
             auto& body = *flying.body;

@@ -40,7 +40,8 @@ std::shared_ptr<const environment::LunarTerrain> load_lunar_terrain(const std::f
         t.first_line = f.first_line;
         t.first_sample = f.first_sample;
         t.grid = grid_of(f);
-        // A site moved or resized after the download would use the old tile silently.
+        // A site moved or resized after the download would use the old tile silently; a site moved by < 1 px still
+        // matches its tile (the centre check below allows 1 px).
         const double half_px = 0.5 * (f.lines - 1);
         const auto [line, sample] = t.position(site.latitude_rad, site.longitude_rad);
         if (f.product != site.product || std::abs(line - half_px) > 1.0 || std::abs(sample - half_px) > 1.0 ||
