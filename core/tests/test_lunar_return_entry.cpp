@@ -20,21 +20,19 @@ namespace {
 constexpr double deg = constants::deg_to_rad;
 
 // Printed by the full flight with STARSIM_VERBOSE ("[lunar return] hand-over: ..."), 2026-10-16, mission
-// ship_lunar_return_llo: 300 s before the entry interface after the braking burn (entry 9,695 m/s, -4.79 deg).
-constexpr double handover_epoch_tdb_s = 848010144.51427424;
-constexpr double handover_propellant_kg = 40961.594461668617;
-const math::Vec3 handover_position_gcrf_m{7652595.271483006, 2902430.5353620369, 1379164.087664051};
-const math::Vec3 handover_velocity_gcrf_mps{-6422.7515679064272, 5153.728496732826, 2796.6612352269972};
-const math::Quat handover_attitude{0.75604314923222615, 0.54098331220318341, -0.035684523440015471,
-                                   -0.36669118779096643};
-constexpr double handover_initial_bank_rad = 114.2 * deg;  // the budget's window middle in that flight
+// ship_lunar_return_llo, after Task 8b (one bank sign's track aimed, lateral offset ~957 km): the hand-over to the
+// entry guidance after the braking burn (entry 9,695 m/s, -4.84 deg).
+constexpr double handover_epoch_tdb_s = 848008899.5954994;
+constexpr double handover_propellant_kg = 38299.974712633535;
+const math::Vec3 handover_position_gcrf_m{4275858.3141308269, 4295318.109720937, 3471568.3346307138};
+const math::Vec3 handover_velocity_gcrf_mps{-8233.8020619169147, 4988.3298088529864, -869.64927265182439};
+const math::Quat handover_attitude{-0.48611775575449828, -0.77773069077875545, 0.31784267710805708,
+                                   0.24041741361597196};
+constexpr double handover_initial_bank_rad = 113.25 * deg;  // the budget's window middle (108.2 .. 118.3 deg)
 
 }  // namespace
 
-// Task 8b (open): the plan aims at the average of both bank signs, the site lies ~1,000 km beside either track and
-// the large reversal at lunar-return speed loses the ship - [!mayfail] until the planner aims at one track.
-TEST_CASE("Lunar return entry from the hand-over state is caught at Starbase",
-          "[lunar][return][entry][catch][slow][!mayfail]") {
+TEST_CASE("Lunar return entry from the hand-over state is caught at Starbase", "[lunar][return][entry][catch][slow]") {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));

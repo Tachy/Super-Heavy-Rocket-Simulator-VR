@@ -100,9 +100,9 @@ TEST_CASE("Lunar return refuses a second plan while flying", "[lunar][return][se
     CHECK(t.session.lunar_return_plan()->tei.epoch - tei_epoch == 0.0);
 }
 
-// The catch is open until Task 8b (see test_lunar_return_entry.cpp): [!mayfail]; TEI, MCC and the braking burn are
-// checked as before.
-TEST_CASE("Lunar return direct: the ship is caught at Starbase", "[lunar][return][session][slow][!mayfail]") {
+// Task 8b (2026-10-16): the plan aims at one bank sign's track (~960 km beside the arrival plane) - caught, 1,055 kW/m2,
+// 4.2 g, 7.9 t left.
+TEST_CASE("Lunar return direct: the ship is caught at Starbase", "[lunar][return][session][slow]") {
     test::LunarReturnSession t;
     start(t);
     const auto& plan = *t.session.lunar_return_plan();

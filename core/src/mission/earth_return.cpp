@@ -58,6 +58,10 @@ constexpr double gate_perigee_tolerance_m = 20.0;
 constexpr double gate_crossrange_tolerance_m = 50.0;
 constexpr double max_gate_step_s = 2.0 * 3600.0;  // secant steps outside a bracket
 constexpr double gate_min_probe_s = 600.0;
+// [E] one bank sign's track aimed at the site: the lateral offset refined until the predicted crossrange is below this
+// (the guidance nulls the rest with small reversals below their speed limit)
+constexpr double lateral_tolerance_m = 2000.0;
+constexpr int lateral_iterations = 6;
 constexpr double braking_angle_tolerance_rad = 0.005 * constants::deg_to_rad;
 // patched-conic departure search
 constexpr double llo_sample_s = 60.0;
@@ -249,16 +253,17 @@ void EarthReturnPlanner::arrive(const StateVector& state, time::Epoch epoch, con
     // crossrange: the site's distance from the arrival plane (plane through the Earth's centre, the interface point and
     // its relative velocity) - Earth rotation during the entry is the predictor's business
     const Vec3 n = math::normalized(cross(r_itrf, v_itrf));
-    a.crossrange_m = -std::asin(std::clamp(dot(math::normalized(target.site_itrf_m), n), -1.0, 1.0)) * R;
+    // (measured from the aimed track's lateral offset)
+    a.crossrange_m =
+        -std::asin(std::clamp(dot(math::normalized(target.site_itrf_m), n), -1.0, 1.0)) * R - target.lateral_offset_m;
+    a.lateral_offset_m = target.lateral_offset_m;
     if (a.reached && target.entry_model) {
-        gnc::EntryPredictorState start{r_itrf, v_itrf, target.nominal_bank_rad};
-        const auto plus = gnc::predict_entry(*target.entry_model, start, target.nominal_bank_rad, target.gate,
-                                             target.gate_height_m, 0.0, predictor_step_s, predictor_max_time_s);
-        start.bank_rad = -target.nominal_bank_rad;
-        const auto minus = gnc::predict_entry(*target.entry_model, start, -target.nominal_bank_rad, target.gate,
-                                              target.gate_height_m, 0.0, predictor_step_s, predictor_max_time_s);
-        a.downrange_error_m = 0.5 * (plus.downrange_error_m + minus.downrange_error_m);
-        if (plus.exited || minus.exited) a.downrange_error_m = exited_downrange_m;
+        const double bank = target.bank_sign * target.nominal_bank_rad;
+        const auto p = gnc::predict_entry(*target.entry_model, gnc::EntryPredictorState{r_itrf, v_itrf, bank}, bank,
+                                          target.gate, target.gate_height_m, 0.0, predictor_step_s,
+                                          predictor_max_time_s);
+        a.downrange_error_m = p.exited ? exited_downrange_m : p.downrange_error_m;
+        a.predicted_crossrange_m = p.crossrange_m;
     }
 }
 
@@ -298,7 +303,9 @@ EarthArrival EarthReturnPlanner::evaluate(const StateVector& state, time::Epoch 
                 const Vec3 n = math::normalized(cross(end.position_m, end.velocity_mps));
                 const Vec3 site = earth_.fixed_to_gcrf(coast.epoch).rotation * target.site_itrf_m;
                 a.crossrange_m = -std::asin(std::clamp(dot(math::normalized(site), n), -1.0, 1.0)) *
-                                 constants::wgs84_semi_major_axis_m;
+                                     constants::wgs84_semi_major_axis_m -
+                                 target.lateral_offset_m;
+                a.lateral_offset_m = target.lateral_offset_m;
                 return a;
             }
             s = coast.state;
@@ -469,16 +476,43 @@ ReturnBurn EarthReturnPlanner::solve(const StateVector& state, time::Epoch epoch
         // stage 2: the gate, along the plane solutions by the interface epoch
         const auto aimed = aim_at_gate(at_burn, burn_epoch, target, dv, false);
         out.converged = aimed.has_value();
-        if (aimed) dv = *aimed;
-        out.arrival = evaluate(at_burn, burn_epoch, burn_epoch, dv, target);
+        EarthReturnTarget measured = target;
+        if (aimed) {
+            dv = aimed->delta_v_mps;
+            measured.lateral_offset_m = aimed->lateral_offset_m;
+        }
+        out.arrival = evaluate(at_burn, burn_epoch, burn_epoch, dv, measured);
     }
     out.burn = {burn_epoch, dv};
     return out;
 }
 
-std::optional<Vec3> EarthReturnPlanner::aim_at_gate(const StateVector& at_burn, time::Epoch burn_epoch,
-                                                    const EarthReturnTarget& target, const Vec3& plane_delta_v_mps,
-                                                    bool scan) const {
+auto EarthReturnPlanner::aim_at_gate(const StateVector& at_burn, time::Epoch burn_epoch,
+                                     const EarthReturnTarget& target, const Vec3& plane_delta_v_mps, bool scan) const
+    -> std::optional<GateAim> {
+    EarthReturnTarget shifted = target;
+    auto dv = aim_at_gate_once(at_burn, burn_epoch, shifted, plane_delta_v_mps, scan);
+    for (int k = 0; dv; ++k) {
+        const auto a = evaluate(at_burn, burn_epoch, burn_epoch, *dv, shifted);
+        if (debug_enabled()) {
+            std::fprintf(stderr, "return track: lateral offset %.3f km, predicted crossrange %.3f km, downrange %.3f km\n",
+                         shifted.lateral_offset_m / 1000.0, a.predicted_crossrange_m / 1000.0,
+                         a.downrange_error_m / 1000.0);
+        }
+        if (!a.reached) return std::nullopt;
+        if (std::abs(a.predicted_crossrange_m) < lateral_tolerance_m) return GateAim{*dv, shifted.lateral_offset_m};
+        if (k == lateral_iterations) break;
+        // the site lies that far beside the track's end: move the aimed plane by it (the arrival time is kept; the
+        // predicted crossrange moves one to one with the offset)
+        shifted.lateral_offset_m -= a.predicted_crossrange_m;
+        dv = aim_at_gate_once(at_burn, burn_epoch, shifted, *dv, false);
+    }
+    return std::nullopt;
+}
+
+std::optional<Vec3> EarthReturnPlanner::aim_at_gate_once(const StateVector& at_burn, time::Epoch burn_epoch,
+                                                         const EarthReturnTarget& target,
+                                                         const Vec3& plane_delta_v_mps, bool scan) const {
     EarthReturnTarget no_gate = target;
     no_gate.entry_model.reset();
     auto evaluate_plane = [&](const Vec3& dv) { return evaluate(at_burn, burn_epoch, burn_epoch, dv, no_gate); };
@@ -553,9 +587,11 @@ std::optional<Vec3> EarthReturnPlanner::aim_at_gate(const StateVector& at_burn, 
         return accepted();
     };
 
-    const auto first = downrange(plane_delta_v_mps);
-    if (!first.reached || first.downrange_error_m == exited_downrange_m) return std::nullopt;
-    const GateSample centre{true, first.interface_epoch, plane_delta_v_mps, first.downrange_error_m};
+    // the plane re-aimed at the arrival time (the lateral offset may have moved since `plane_delta_v_mps`)
+    const auto first = evaluate_plane(plane_delta_v_mps);
+    if (!first.reached) return std::nullopt;
+    const GateSample centre = timed(first.interface_epoch, plane_delta_v_mps);
+    if (!centre.ok) return std::nullopt;
     if (std::abs(centre.downrange_m) < downrange_tolerance_m) return centre.dv;
     if (!scan) {
         // a nearby gate (mid-course corrections, the session's re-plans): secant from a probe beside the arrival; the
@@ -670,8 +706,10 @@ ReturnBurn EarthReturnPlanner::depart(const StateVector& state, time::Epoch epoc
     const auto aimed = aim_at_gate(at_burn, burn_epoch, target, sol.burn.delta_v_gcrf_mps, true);
     sol.converged = aimed.has_value();
     if (aimed) {
-        sol.burn.delta_v_gcrf_mps = *aimed;
-        sol.arrival = evaluate(at_burn, burn_epoch, burn_epoch, *aimed, target);
+        sol.burn.delta_v_gcrf_mps = aimed->delta_v_mps;
+        EarthReturnTarget measured = target;
+        measured.lateral_offset_m = aimed->lateral_offset_m;
+        sol.arrival = evaluate(at_burn, burn_epoch, burn_epoch, aimed->delta_v_mps, measured);
     }
     return sol;
 }

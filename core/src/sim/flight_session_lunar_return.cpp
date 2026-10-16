@@ -67,6 +67,8 @@ bool FlightSession::plan_lunar_return(const LunarReturnSetup& setup) {
         return false;
     }
     lunar_return_ = planned;
+    // the aimed bank sign's track offset: the re-plans (TEI re-solve, corrections) start from it
+    lunar_return_->ret.target.lateral_offset_m = lunar_return_plan_->arrival.lateral_offset_m;
     lunar_return_departed_ = !lunar_return_plan_->nrho_departure;
     lunar_return_braking_epoch_.reset();
     lunar_mcc_index_ = 0;
@@ -113,7 +115,10 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
             auto tei = lunar_return_plan_->tei;
             const auto solved = planner.solve(controlled_state(), epoch_, tei.epoch, lunar_return_->ret.target,
                                               tei.delta_v_gcrf_mps);
-            if (solved.converged) tei = solved.burn;
+            if (solved.converged) {
+                tei = solved.burn;
+                lunar_return_->ret.target.lateral_offset_m = solved.arrival.lateral_offset_m;
+            }
             if (lunar_burn(tei, true, LunarStep::Tei)) {
                 lunar_step_ = LunarStep::Tei;
                 lunar_status_ = "TEI: " + german(norm(tei.delta_v_gcrf_mps), 0) + " m/s";

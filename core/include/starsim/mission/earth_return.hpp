@@ -26,8 +26,8 @@ struct EarthReturnTarget {
     double flight_path_rad = -5.0 * constants::deg_to_rad;  // relative to the rotating Earth (corridor middle)
     double speed_mps = 0.0;                  // relative, after the braking burn; 0: no braking
     double braking_height_m = 2000e3;        // [E] the braking burn's centre on the inbound leg (spec amendment)
-    // Direct entry: the onboard predictor flying `nominal_bank_rad` (both signs averaged) must end at `gate` (b4's
-    // deorbit rule); empty: aerocapture - only the plane is aimed (the site in the arrival plane).
+    // Direct entry: the onboard predictor flying `bank_sign` x `nominal_bank_rad` must end at `gate` (b4's deorbit
+    // rule); empty: aerocapture - only the plane is aimed (the site in the arrival plane).
     std::optional<gnc::EntryPredictorModel> entry_model;
     gnc::EntryTarget gate;
     double gate_height_m = 800.0;
@@ -35,6 +35,13 @@ struct EarthReturnTarget {
     // 90 deg sits on the skip boundary (the predicted range jumps by 100+ km for a millimetre per second at TEI);
     // 110 deg captures and its range is smooth. The guidance flies the bank it needs (up to 150 deg).
     double nominal_bank_rad = 110.0 * constants::deg_to_rad;
+    // [E] Direct entry aims at ONE bank sign's track (l5 Task 8b): at lunar-return speed each sign's track ends
+    // ~1,000 km beside the arrival plane, the average of both left the site that far from either and the guidance's
+    // one large reversal lost the ship. The guidance then starts on this sign (its track ends closest to the site).
+    double bank_sign = 1.0;
+    // Direct entry: the aimed track's end beside the arrival plane; the crossrange is measured from it.
+    // The gate aiming refines it as a fixed point (warm start: the previous plan's value).
+    double lateral_offset_m = 0.0;
 };
 
 // The arrival of a return trajectory (after the modelled braking burn).
@@ -48,8 +55,10 @@ struct EarthArrival {
     double flight_path_rad = 0.0;         // relative
     double speed_mps = 0.0;               // relative
     double perigee_height_m = 0.0;        // osculating, after the braking (two-body)
-    double crossrange_m = 0.0;            // the site's distance from the arrival plane (> 0: right)
+    double crossrange_m = 0.0;            // the site's distance from the arrival plane (> 0: right) - lateral offset
     double downrange_error_m = 0.0;       // direct: predictor at the nominal bank (> 0: overshoot); else 0
+    double predicted_crossrange_m = 0.0;  // direct: predictor at the nominal bank (> 0: site to the right); else 0
+    double lateral_offset_m = 0.0;        // the target's lateral offset this arrival was measured with
 };
 
 struct ReturnBurn {
@@ -162,9 +171,16 @@ private:
     // from the arrival (`scan` false: a nearby gate), or scanned +-12 h both ways for the site's pass and the cheapest
     // crossing refined (`scan` true: TEI). The downrange is badly conditioned in the three delta-v components (the
     // site turns ~1,500 km/h under the arrival; perigee and plane are nearly collinear), well in the epoch.
-    std::optional<math::Vec3> aim_at_gate(const math::StateVector& at_burn, time::Epoch burn_epoch,
-                                          const EarthReturnTarget& target, const math::Vec3& plane_delta_v_mps,
-                                          bool scan) const;
+    // The predictor flies one bank sign, whose track ends beside the arrival plane: the plane is aimed that far off
+    // the site (EarthReturnTarget::lateral_offset_m), refined by the predicted crossrange until the track ends on the
+    // site. Result: the delta-v and the lateral offset it was aimed with.
+    struct GateAim { math::Vec3 delta_v_mps; double lateral_offset_m = 0.0; };
+    std::optional<GateAim> aim_at_gate(const math::StateVector& at_burn, time::Epoch burn_epoch,
+                                       const EarthReturnTarget& target, const math::Vec3& plane_delta_v_mps,
+                                       bool scan) const;
+    std::optional<math::Vec3> aim_at_gate_once(const math::StateVector& at_burn, time::Epoch burn_epoch,
+                                               const EarthReturnTarget& target, const math::Vec3& plane_delta_v_mps,
+                                               bool scan) const;
 
     const environment::GravityModel& gravity_;
     const ephemeris::Ephemeris& ephemeris_;

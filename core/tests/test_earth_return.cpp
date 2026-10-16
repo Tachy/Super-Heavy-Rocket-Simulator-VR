@@ -86,10 +86,12 @@ gnc::EntryPredictorModel ship_entry_model() {
 void print_plan(const char* what, const mission::ReturnPlan& plan, double seconds) {
     if (!verbose()) return;
     std::printf("[return] %s: feasible %d (%s), TEI %.1f m/s, braking %.1f m/s, interface %.1f m/s %.3f deg, "
-                "perigee %.1f km, crossrange %.2f km, downrange %.2f km, flight %.2f d, %.1f s wall\n",
+                "perigee %.1f km, crossrange %.2f km (offset %.1f km, predicted %.2f km), downrange %.2f km, "
+                "flight %.2f d, %.1f s wall\n",
                 what, plan.feasible ? 1 : 0, plan.reason.c_str(), plan.tei_delta_v_mps, plan.braking_delta_v_mps,
                 plan.arrival.speed_mps, plan.arrival.flight_path_rad / deg, plan.arrival.perigee_height_m / 1000.0,
-                plan.arrival.crossrange_m / 1000.0, plan.arrival.downrange_error_m / 1000.0,
+                plan.arrival.crossrange_m / 1000.0, plan.arrival.lateral_offset_m / 1000.0,
+                plan.arrival.predicted_crossrange_m / 1000.0, plan.arrival.downrange_error_m / 1000.0,
                 (plan.arrival.interface_epoch - plan.tei.epoch) / 86400.0, seconds);
 }
 
@@ -224,6 +226,10 @@ TEST_CASE("The braking burn re-planned near the Earth hits speed, angle and the 
     print_plan("direct (gate)", plan, seconds_since(start));
     INFO(plan.reason);
     REQUIRE(plan.feasible);
+    // Task 8b: one bank sign's track aimed - it ends on the site, the arrival plane lies beside it
+    CHECK(std::abs(plan.arrival.predicted_crossrange_m) < 2e3);
+    CHECK(std::abs(plan.arrival.crossrange_m) < 5e3);
+    CHECK(std::abs(plan.arrival.lateral_offset_m) > 20e3);  // 96 km at the constant 110 deg (2026-10-16)
     auto inbound = orbit::propagate_coast(f.gravity, s, t0, plan.tei.epoch).state;
     inbound.velocity_mps += plan.tei.delta_v_gcrf_mps;
     const auto t_brake = f.planner.braking_epoch(inbound, plan.tei.epoch, p.target);
