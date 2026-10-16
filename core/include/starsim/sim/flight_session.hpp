@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "starsim/aero/radiative_heating.hpp"
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/environment/gravity.hpp"
 #include "starsim/environment/reference_body.hpp"
@@ -504,6 +505,7 @@ private:
     environment::Us76Atmosphere atmosphere_;
     std::optional<environment::ReferenceBody> moon_;  // lunar l1: with a Moon orientation
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_;  // lunar l2
+    aero::RadiativeHeatingTable radiative_heating_;  // lunar l5: Earth air radiation (config/aero)
     vehicle::FlightEnvironment env_;
     gnc::AttitudeController controller_;
     // Returning booster: faster attitude loop for the landing-burn divert (gimbal limits unchanged).

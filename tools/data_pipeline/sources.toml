@@ -172,3 +172,13 @@ target = "data/terrain/mons_mouton_im2.toml"
 kind = "lunar_tiles"
 license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
 credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
+
+# ------------------------------------------------------------------ published reference tables (committed)
+
+[[source]]
+id = "radiative_heating_tm102652"
+name = "Equilibrium radiative heating tables for Earth entry (NASA TM-102652, Sutton & Hartung 1990), tables 1-10 transcribed"
+url = "https://ntrs.nasa.gov/api/citations/19900014359/downloads/19900014359.pdf"
+target = "config/aero/radiative_heating_earth.csv"
+license = "public domain (US Government work)"
+credit = "K. Sutton, L. C. Hartung, NASA Langley Research Center; transcription: this project"

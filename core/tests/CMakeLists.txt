@@ -63,6 +63,7 @@ add_executable(starsim_core_tests
     test_grid_fins.cpp
     test_flaps.cpp
     test_entry_heating.cpp
+    test_radiative_heating.cpp
     test_entry_attitude.cpp
     test_entry_guidance.cpp
     test_entry_guidance_campaign.cpp

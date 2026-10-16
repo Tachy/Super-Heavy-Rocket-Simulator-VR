@@ -12,6 +12,10 @@
 #include "starsim/time/epoch.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
+namespace starsim::aero {
+class RadiativeHeatingTable;
+}
+
 namespace starsim::vehicle {
 
 // Rigid-body state of the vehicle's centre of gravity, Earth-centred GCRF.
@@ -31,6 +35,7 @@ struct FlightEnvironment {
     const ephemeris::Ephemeris* ephemeris = nullptr;  // needed for solar radiation pressure
     bool solar_radiation_pressure = true;
     const environment::ReferenceBody* moon = nullptr;  // lunar l1: the Moon as a reference body (nullptr: Earth only)
+    const aero::RadiativeHeatingTable* radiative_heating = nullptr;  // lunar l5: Earth air radiation (nullptr: none)
 };
 
 // Air data at the start of the last tick (what an air-data system would report to the controllers).
@@ -128,7 +133,10 @@ public:
     // Entry (a single stage with a heat shield): stagnation heat rate of the last tick, its integral and peak.
     // Exceeding a limit breaks the vehicle up (impacted() then true, breakup_reason() names the cause in German);
     // heat_warning() from 80 % of a limit. Heating is integrated in step() only (coast() is for vacuum arcs).
+    // heat_rate_w_m2() is convective plus radiative (env.radiative_heating, Earth air only); the radiative share alone:
+    // radiative_heat_rate_w_m2().
     double heat_rate_w_m2() const { return heat_rate_w_m2_; }
+    double radiative_heat_rate_w_m2() const { return radiative_heat_rate_w_m2_; }
     double heat_load_j_m2() const { return heat_load_j_m2_; }
     double peak_heat_rate_w_m2() const { return peak_heat_rate_w_m2_; }
     bool heat_warning() const { return heat_warning_; }
@@ -201,6 +209,7 @@ private:
     bool landed_ = false;  // standing on its legs, held to its body (hold_landed)
     bool legs_on_site_ = false;  // set every tick by the leg site for bodies on it
     double heat_rate_w_m2_ = 0.0;
+    double radiative_heat_rate_w_m2_ = 0.0;
     double heat_load_j_m2_ = 0.0;
     double peak_heat_rate_w_m2_ = 0.0;
     bool heat_warning_ = false;

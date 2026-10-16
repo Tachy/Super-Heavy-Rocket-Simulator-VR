@@ -6,6 +6,7 @@
 
 #include "starsim/aero/entry_heating.hpp"
 #include "starsim/aero/parachute.hpp"
+#include "starsim/aero/radiative_heating.hpp"
 #include "starsim/environment/eclipse.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/integrators/integrate.hpp"
@@ -358,8 +359,14 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     // the aerodynamic forces at the end of the tick (thrust loads are the engines' business).
     if (vehicle_->stages().size() == 1 && vehicle_->stages().front().config.heat_shield.nose_radius_m > 0.0) {
         const auto& shield = vehicle_->stages().front().config.heat_shield;
-        heat_rate_w_m2_ = aero::stagnation_heat_rate_w_m2(air_data_.air.density_kg_m3,
-                                                          norm(air_data_.air_velocity_body_mps), shield.nose_radius_m);
+        const double speed = norm(air_data_.air_velocity_body_mps);
+        const double density = air_data_.air.density_kg_m3;
+        const bool earth_air = body.id() == ephemeris::Body::Earth;  // the radiative tables are Earth air
+        radiative_heat_rate_w_m2_ = earth_air && env.radiative_heating
+                                        ? env.radiative_heating->heat_rate_w_m2(density, speed, shield.nose_radius_m)
+                                        : 0.0;
+        heat_rate_w_m2_ =
+            aero::stagnation_heat_rate_w_m2(density, speed, shield.nose_radius_m) + radiative_heat_rate_w_m2_;
         heat_load_j_m2_ += heat_rate_w_m2_ * dt_s;
         peak_heat_rate_w_m2_ = std::max(peak_heat_rate_w_m2_, heat_rate_w_m2_);
         const Forces end = evaluate(ctx, dt_s, state_);

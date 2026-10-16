@@ -21,6 +21,7 @@ add_library(starsim_core STATIC
     src/aero/grid_fin.cpp
     src/aero/flap.cpp
     src/aero/entry_heating.cpp
+    src/aero/radiative_heating.cpp
     src/aero/capsule_aero.cpp
     src/aero/parachute.cpp
     src/vehicle/vehicle.cpp

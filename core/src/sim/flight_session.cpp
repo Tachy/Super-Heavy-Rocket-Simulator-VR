@@ -29,7 +29,8 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
       moon_(moon_orientation ? std::optional<environment::ReferenceBody>(
                                    environment::ReferenceBody::moon(ephemeris, *moon_orientation))
                              : std::nullopt),
-      env_{gravity_, atmosphere_, earth, &ephemeris, true, moon_ ? &*moon_ : nullptr},
+      radiative_heating_(aero::RadiativeHeatingTable::load(config_dir_)),
+      env_{gravity_, atmosphere_, earth, &ephemeris, true, moon_ ? &*moon_ : nullptr, &radiative_heating_},
       gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)) {
     legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
     moon_orientation_ = moon_orientation;
