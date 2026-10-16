@@ -186,12 +186,9 @@ std::pair<double, double> apsis_heights_m(const test::LunarReturnSession& t) {
 
 }  // namespace
 
-// Task 9a (2026-10-16): captured 52.8 x 421.8 km (934 kW/m2), perigee raise 43.8 m/s, circularisation 61.8 m/s, b4
-// plans its deorbit (63 m/s, ~108 h on). Open (Task 9b): the deorbit Raptor does not light in the full flight (it does
-// from the hand-over state, "Ship return (b4) from the aerocapture's circular orbit") and the landing propellant falls
-// short - [!mayfail] until then.
-TEST_CASE("Lunar return aerocapture: captured - perigee raised - caught by b4",
-          "[lunar][return][session][slow][!mayfail]") {
+// Task 9b (2026-10-16): captured 54.8 x 426.5 km (936 kW/m2), perigee raise 43.2 m/s, circularisation 62.0 m/s, b4's
+// deorbit 63.2 m/s ~93 h on (waited in free drift), caught with 7.6 t left.
+TEST_CASE("Lunar return aerocapture: captured - perigee raised - caught by b4", "[lunar][return][session][slow]") {
     test::LunarReturnSession t;
     start_aircatch(t);
     if (verbose()) {
@@ -264,6 +261,22 @@ TEST_CASE("Lunar return aerocapture: captured - perigee raised - caught by b4",
                 std::fflush(stdout);
             }
         }
+        if (raised && verbose() && t.session.autopilot().state == sim::AutopilotState::Burn) {
+            // Task 9b: b4's deorbit in the full flight (engine modes, propellant, rate while waiting / igniting)
+            static int calls = 0;
+            const auto& burn = t.session.autopilot().burn;
+            if (burn.time_to_ignition_s < 200.0 || ++calls % 50 == 0) {
+                std::printf("[aircatch b4] ign %.0f s, ignite %d, remaining %.2f, %.2f t, rate %.5f, engines:",
+                            burn.time_to_ignition_s, burn.ignite ? 1 : 0, burn.remaining_dv_mps,
+                            body.vehicle().propellant_kg() / 1000.0, norm(body.state().angular_velocity_body_radps));
+                for (const auto& e : body.vehicle().stages().front().engines) {
+                    std::printf(" %s:%d/%.2f%s%s", e.group_id.c_str(), static_cast<int>(e.mode), e.spool,
+                                e.starved ? "S" : "", e.has_run ? "r" : "");
+                }
+                std::printf("\n");
+                std::fflush(stdout);
+            }
+        }
         if (raised && !deorbit_checked && t.session.ship_return_plan()) {
             deorbit_checked = true;
             deorbit_feasible = t.session.ship_return_plan()->feasible;
@@ -298,14 +311,14 @@ TEST_CASE("Lunar return aerocapture: captured - perigee raised - caught by b4",
     CHECK(body.caught());
 }
 
-// Task 9a: x1.6 density / x1.3 aero is still captured by the guidance (the brief expected it beyond reach) - Task 9b
-// picks a dispersion beyond the guidance's reach.
-TEST_CASE("Aerocapture outcome names a capture that stays in the atmosphere",
-          "[lunar][return][session][slow][!mayfail]") {
-    // Review Focus 4: truth air density x 1.6 and truth aero x 1.3 - beyond the guidance's reach.
+// Task 9b probe ("Aerocapture dispersion probe", from the pass hand-over state): density x1.6 / aero x1.3 still exits at
+// 348 km and x2.0 at 420 km (1,146 kW/m2); x2.5 breaks up (heat shield); x3.0 / aero x1.3 stays in the air there, the
+// full flight (dispersed from the start) breaks up: "Aircatch: zerbrochen (Hitzeschild versagt)".
+TEST_CASE("Aerocapture outcome names a capture that stays in the atmosphere", "[lunar][return][session][slow]") {
+    // Review Focus 4: truth air density x 3.0 and truth aero x 1.3 - beyond the guidance's reach.
     test::LunarReturnSession t;
     start_aircatch(t);
-    t.session.set_air_density_factor(1.6);
+    t.session.set_air_density_factor(3.0);
     t.session.set_aero_dispersion(t.session.controlled_index(), 1.3);
     const auto& body = t.session.body(t.session.controlled_index());
     const auto start_epoch = t.session.epoch();
@@ -313,6 +326,7 @@ TEST_CASE("Aerocapture outcome names a capture that stays in the atmosphere",
            t.session.epoch() - start_epoch < 6.0 * 86400.0) {
         t.session.advance_to(t.session.epoch() + 86400.0, 200);
     }
+    t.session.advance_to(t.session.epoch() + 1.0, 200);  // an impact in a call's last tick: the step machine judges it
     INFO(t.session.lunar_status());
     INFO(body.breakup_reason());
     std::printf("[aircatch dispersed] %s | %s | peak heat %.0f kW/m2\n", t.session.lunar_status().c_str(),

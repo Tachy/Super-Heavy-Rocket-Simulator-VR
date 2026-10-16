@@ -71,7 +71,13 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
                                                                                   burn_config_.groups);
         // RCS burns turn and hold on pulses: the orbit controller (rate-limited slews, hold deadband); the ascent
         // controller chattered on the Dracos' pulses (~3 kg of a 1 m/s burn's 7 kg).
-        const auto& steering = !guided && burn_config_.rcs ? orbit_controller_ : controller_;
+        if (burn_drifting()) return command;  // free drift: no RCS until the turn to the burn attitude
+        // Turning to the burn and holding it until the preparation: the coast controller's slow slews and deadbands
+        // (l5 aircatch: the ascent controller's tight hold spent 7.8 t of RCS gas in b4's 108 h wait; the burn 5.5 t).
+        const bool waiting = !guided && !autopilot_.burn.ignite && autopilot_.burn.time_to_ignition_s > burn_preparation_s;
+        const auto& steering = waiting                          ? lunar_coast_controller_
+                               : !guided && burn_config_.rcs ? orbit_controller_
+                                                             : controller_;
         if (thrust_axis.x < 1.0 - 1e-9) {
             // Asymmetric set (the ship's deorbit Raptor): its thrust goes through the CG along an axis tilted against the
             // hull; the hull turns so that this axis points along the burn, its roll kept where it is.

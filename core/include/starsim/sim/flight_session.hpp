@@ -190,6 +190,10 @@ public:
     static constexpr double tick_s = 0.005;  // 200 Hz
     static constexpr double max_coast_s = 600.0;
     static constexpr double burn_preparation_s = 120.0;  // ticks resume this long before an ignition
+    // [E] A burn further away than this (plus the preparation) waits in free drift: no RCS, coasted at any rate (l5
+    // aircatch: holding b4's deorbit attitude for 108 h against the gravity gradient spent 6-8 t of RCS gas). The
+    // ship turns to the burn attitude in this time (0.5 deg/s slews: half a turn and settling in < 10 min).
+    static constexpr double burn_drift_lead_s = 1800.0;
     static constexpr double small_burn_margin_s = 60.0;     // [E] trims / station keeping: planned after the preparation
     // [E] TLI centre after 120 s preparation + half a ~7 min burn; margin for the finite-TLI re-solve. A window < 30 min
     // away waits one parking revolution.
@@ -571,6 +575,7 @@ private:
     std::optional<time::Epoch> nose_cone_epoch_;  // the released payload opens its nose cone at
     size_t nose_cone_body_ = 0;
     bool attitude_mode_active() const;  // a mode is held now (not Free, no autopilot phase steering)
+    bool burn_drifting() const;         // a far burn waits in free drift (burn_drift_lead_s)
     std::vector<Flying> bodies_;
     size_t controlled_ = 0;
     PilotInput input_;

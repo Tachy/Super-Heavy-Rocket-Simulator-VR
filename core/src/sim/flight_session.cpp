@@ -161,6 +161,11 @@ bool FlightSession::attitude_mode_active() const {
             autopilot_.state == AutopilotState::PayloadSeparation || autopilot_.state == AutopilotState::Lunar);
 }
 
+bool FlightSession::burn_drifting() const {
+    return autopilot_.state == AutopilotState::Burn && !autopilot_.burn.ignite &&
+           autopilot_.burn.time_to_ignition_s > burn_preparation_s + burn_drift_lead_s;
+}
+
 bool FlightSession::separate_payload() {
     if (bodies_.empty() || !payload_separation_) return false;
     auto& lower = bodies_[controlled_];
@@ -426,6 +431,9 @@ double FlightSession::coast_allowance_s() const {
     if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0 || norm(input_.translation) > 0.0) return 0.0;
     double allowance = max_coast_s;
     if (autopilot_.state == AutopilotState::Lunar) {
+        // a wreck coasts: one tick first so that the step machine names the outcome and ends the autopilot (l5 Task 9b:
+        // a heat shield failure in the aircatch pass kept the status "Eintritt" and the autopilot on)
+        if (bodies_[controlled_].body->impacted()) return 0.0;
         if (lunar_step_ == LunarStep::PilotCorrection) return 0.0;  // the crew flies: ticked
         if (lunar_step_ == LunarStep::PoweredDescent) return 0.0;   // the descent guidance flies: ticked
         if (lunar_step_ == LunarStep::Ascent || lunar_step_ == LunarStep::AbortAscent) return 0.0;  // ascent: ticked
@@ -438,7 +446,8 @@ double FlightSession::coast_allowance_s() const {
     }
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
     if (autopilot_.state == AutopilotState::Burn) {
-        allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s);
+        const double drift = burn_drifting() ? burn_drift_lead_s : 0.0;  // the turn to the burn attitude is ticked
+        allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s - drift);
     }
     if (autopilot_.state == AutopilotState::Return && !bodies_[controlled_].entry_guidance) {
         allowance = std::min(allowance, entry_start_ - epoch_);
@@ -470,7 +479,10 @@ double FlightSession::coast_allowance_s() const {
         for (const auto& [group, run] : flying.running_groups) {
             if (run) return 0.0;
         }
-        if (norm(body.state().angular_velocity_body_radps) > 1e-3 && &flying == &bodies_[controlled_]) return 0.0;
+        if (norm(body.state().angular_velocity_body_radps) > 1e-3 && &flying == &bodies_[controlled_] &&
+            !burn_drifting()) {
+            return 0.0;
+        }
     }
     return allowance > 1.0 ? allowance : 0.0;
 }

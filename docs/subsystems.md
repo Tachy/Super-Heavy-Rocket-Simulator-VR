@@ -216,7 +216,11 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   `[stage.recovery] deorbit_engine_groups` - the ship: the belly sea-level Raptor alone (user 2026-10-13), the hull turned
   so that its thrust axis through the CG (`gnc::thrust_axis_body`, ~3 deg off the hull) points along the burn; the burn
   executor senses along that axis (`FlightSession::execute_burn(node, groups)`; it flies on the named groups only - no
-  RCS fallback, the deorbit burn is far above the RCS's reach). `AutopilotState::Return` ("Rückkehr")
+  RCS fallback, the deorbit burn is far above the RCS's reach). Any burn more than 30 min [E]
+  (`FlightSession::burn_drift_lead_s`) + the 120 s preparation away waits in free drift (no RCS, coasted at any rate);
+  the ship then turns to the burn attitude on the slow coast controller (0.5 deg/s) and holds it until the preparation
+  (l5 Task 9b: holding the burn attitude through the aircatch's 93-108 h wait against the gravity gradient spent 6-8 t
+  of RCS gas and left too little for the landing; drift: ~0 t, the turn ~1 t). `AutopilotState::Return` ("Rückkehr")
   coasts to 300 s before the entry interface, then the entry guidance (b2) and the flip and catch (b3) take over.
   From 200 km / 26.5 deg: burn after ~21-22 h (one pass a day passes Starbase within reach), 65-78 m/s, 5.6-6.8 t.
   Campaign `[ship][mission][validation]` (orbit phase 0-315 deg, orbit 190-230 km, 42-48 t, deorbit execution
