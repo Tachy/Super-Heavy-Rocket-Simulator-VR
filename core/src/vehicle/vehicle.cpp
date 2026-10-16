@@ -372,7 +372,7 @@ std::vector<std::vector<double>> Vehicle::tank_mass_flows_kgps() const {
         double oxidizer = 0.0, fuel = 0.0;
         for (const auto& e : stage.engines) {
             if (!e.producing_thrust()) continue;
-            const double mdot = e.spool * e.performance->mass_flow_kgps(e.throttle);
+            const double mdot = thrust_factor_ * e.spool * e.performance->mass_flow_kgps(e.throttle);
             const double mr = e.performance->config().mixture_ratio;
             oxidizer += mdot * mr / (1.0 + mr);
             fuel += mdot / (1.0 + mr);
@@ -643,6 +643,7 @@ std::unique_ptr<Vehicle> Vehicle::copy_upper(size_t index) const {
     copy->stages_ = stages_;
     copy->nose_cone_open_ = nose_cone_open_;
     copy->hull_aero_scale_ = hull_aero_scale_;
+    copy->thrust_factor_ = thrust_factor_;
     copy->aero_ = std::make_unique<aero::SlenderBodyAero>(*aero_);
     copy->rebuild_aero();
     if (index == 0) return copy;
@@ -680,6 +681,7 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     rcs_allocator_.reset();  // each part keeps only its own thrusters
     upper->rcs_allocator_.reset();
     upper->hull_aero_scale_ = hull_aero_scale_;  // review d3 M5: the truth aero dispersion stays on both parts
+    upper->thrust_factor_ = thrust_factor_;  // likewise the truth thrust dispersion
     upper->nose_cone_open_ = nose_cone_open_ && upper->has_nose_cone();
     nose_cone_open_ = nose_cone_open_ && has_nose_cone();
     refresh_rcs_availability();  // a payload split off flies alone: its thrusters are free now

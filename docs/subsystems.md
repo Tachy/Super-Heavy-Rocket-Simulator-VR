@@ -440,7 +440,8 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   the Moon; DE440's Moon also feels the planets, Earth J2 and tides): 0.33 / 4.4 m in a day.
   l2 HLS and terrain (plan `docs/superpowers/plans/2026-10-15-lunar-l2-hls-terrain.md`): `config/vehicles/starship_hls.toml`
   (120 t dry [E], Block 3 tanks and Raptors, no heat shield / flaps / pins, ship RCS; 12 landing thrusters [E] 46 kN at
-  40 m canted 15 deg - 1.5 lunar weights of the ~221 t landing mass, hover from 131 t - `landing_only`: never in burns or
+  40 m canted 15 deg - 1.5 lunar weights of the ~221 t landing mass, hover from 131 t; re-sized in l4, below -
+  `landing_only`: never in burns or
   `ignite()`). Engine groups take `station_m` / `cant_deg`. Legs [E] fixed, six, footprint radius 12 m (user 2026-10-15):
   a vertical touchdown on a slope lands on the uphill feet and pivots freely through the slope angle (CG ~21 m up), so the
   slope limit is set by the stance - 8 m ~5 deg, 10 m 7 deg, 12 m >= 9 deg (NASA's Artemis limit ~8-10 deg); absorber
@@ -466,7 +467,7 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   periods 6.25-6.71 d, perilune 2,861-3,670 km over the north pole, apolune 69,804-71,706 km [Gateway: 6.26-6.76 d, rp
   3,195-3,557 km, Davis et al. AAS 2020]; phase set by the first perilune - no Gateway phasing; only `first_perilune` is
   exact, use `perilune_epochs()` (true closest approaches), never `first + k P`), `mission/lunar_outbound` (LLO: TLI
-  3,142 m/s impulsive / 3,182 m/s finite, LOI 856 m/s, ~1,147 t; NRHO via a powered lunar swing-by (user 2026-10-15: a
+  3,142 m/s impulsive / 3,182 m/s finite, LOI 856 m/s, ~1,147 t propellant used; NRHO via a powered lunar swing-by (user 2026-10-15: a
   direct transfer meets the NRHO perilune head-on, 3.5 km/s) after Kikuchi et al. ISSFD 2024: TLI 3,162 m/s, swing-by
   243 m/s at 100 km, insertion 224 m/s ~1.3 d later; MCCs, LLO trims, propellant check), `mission/lunar_orbit_transfer`
   (NRHO -> LLO 660 + 216 = 876 m/s; LLO -> NRHO arrives anywhere on the reference (user 2026-10-15) in one-day windows:
@@ -491,8 +492,55 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   `hls_lunar_llo` / `hls_lunar_nrho` (`kind = "lunar_landing"`, outbound only until l4; the game's FlightSim has no
   Moon orientation yet - l6). Results: LLO 99.97-100.00 km after one trim; NRHO 0.58 km worst perilune offset over 3
   revolutions, NRHO -> LLO 99.97-100.03 km; campaign (TLI +-1 % and 0.5 deg, 8 / 8): MCC 1 183-311 m/s (a 1 % / 0.5 deg TLI error is ~60 m/s, grown ~5x by a
-  day of coast), MCC 2 0.3-0.4 m/s, LLO 99.97-100.01 km, 1,177-1,194 t; NRHO worst perilune offset 0.47-2.88 km,
-  1,124-1,150 t. Bug fixed on the way: the
+  day of coast), MCC 2 0.3-0.4 m/s, LLO 99.97-100.01 km, 1,177-1,194 t propellant used (not the mass in the LLO - ~573 t, see l4); NRHO worst perilune offset 0.47-2.88 km,
+  1,124-1,150 t propellant used. Bug fixed on the way: the
   default Earth leg-site plane cut through LEO and wrecked the HLS - leg tracks start only near the body's own ground.
   Debug: `STARSIM_DEBUG_NRHO`, `STARSIM_DEBUG_OUTBOUND`, `STARSIM_DEBUG_LUNAR_TRANSFER`, `STARSIM_DEBUG_LUNAR_SESSION`.
   Open: the plan's propellant check uses the impulsive TLI (~40 m/s gravity loss inside the 5 % reserve).
+  l4 landing and ascent (plans `docs/superpowers/plans/2026-10-15-lunar-l4-landing-ascent.md` and
+  `...-lunar-l4-mass-correction.md`): mission 1 (`hls_lunar_llo`) flies LEO -> LLO -> descent -> surface stay -> ascent
+  -> LLO end to end (`sim::start_lunar_landing_mission`, legs chained by `FlightSession`). Masses (mass correction
+  2026-10-15): l3's "~1,185 t" was the propellant USED; the real HLS has ~573 t in the LLO, ~566 t at PDI (~500 t NRHO
+  variant) and lands ~315 t. Landing thrusters re-sized [E] to 12 x 90 kN (throttle 35-100 %), canted 15 deg at 40 m,
+  hover 225-642 t; legs crush force 4.5 MN [E]; leg damping 3e6 N s/m [E] (Task 10: at 1e6 the hull rocked on 1-2 feet
+  for ~15 s after the engine cut on a 5 deg slope and walked 1.2 m). Descent: site pass - the LLO waits for a pass of
+  the polar site within `max_crossrange_km` (20 km) and trims the plane ~90 deg before it (user 2026-10-15); the wait
+  cannot be shortened by the mission epoch (Task 9 finding, user 2026-10-16: "refuse honestly" rather than re-target):
+  the Moon is tidally locked, so a polar LLO's plane, which contains the arrival asymptote, sits at the same place in
+  the Moon frame for any epoch - 5.8 d wait for Mons Mouton (any polar plane passes within 158 km of -84.8 deg).
+  DOI on the vacuum Raptors at minimum (periselene 15 km above the site), trims / DOI / circularisation on the single
+  sea-level Raptor (`lunar_small_burn`, transients <= 60 % of the burn [E]). Braking (`gnc/apollo_braking`, Klumpp
+  R-695 quartic targets; Apollo 11 validation 508.5 s vs 507 s flown) on the 3 RVacs + RCS attitude (user 2026-10-15:
+  Isp 380 vs 350), then sea_level_1, then the landing thrusters (user 2026-10-15: the set drops at
+  max(0.9 x next max, running minimum)); braking range from the mass (`mission::braking_range_m`, thrust fraction
+  0.55, factor 1.0, floor 150 km: 164 km at 566 t). Approach: SCvx on the landing thrusters from the high gate
+  (700 m / 800 m / 25 m/s - lower than the spec's ~2 km), "equivalent gimbal" simplification: the canted, ungimballed
+  thrusters steer by differential throttling (~20x the RCS torque, equivalent gimbal 9.4 deg; user 2026-10-15), modelled
+  for SCvx as a gimbal. Terminal descent (Apollo P66 style, `LunarDescentPhase::Terminal`, "Endanflug") from SCvx's
+  last phase: 1 m/s sink, throttle kept >= 0.1 above the minimum (no differential authority at a limit) and <= 0.95 of
+  the weight floor. Engines off on leg contact; judgement as Falcon 9's. Surface stay: resting on the legs for
+  `stay_hours`; no boil-off. Ascent (`gnc/lunar_ascent_guidance`, PEG extracted to `gnc/peg_steering`): vertical rise to 150 m, PEG to
+  15 km x 100 km on the 3 RVacs (user 2026-10-15), the landing thrusters steer by differential throttling until the RVac
+  axis is within 2 deg of PEG (RCS alone left the ~340 t HLS 60-90 deg behind), acceleration limit 1.5 g [D] (sweep
+  1-2.5 g within 0.15 t, user "find the optimum"; 3 g+ crashes: PEG t_go collapses from a vertical start), circularised
+  at the aposelene. RVac engine-out (braking or ascent): the other two cut, the 3 sea-level Raptors take over. Aborts
+  (`abort_landing`, automatic when the approach cannot be planned): Arrest (climb) then PEG once a fresh solve steers
+  below 0.85 radial or the ballistic apex reaches the insertion radius; refused when the propellant cannot reach orbit
+  ("Abbruch nicht möglich", the landing continues). Leg bug fixed (l2): a site's antipode was judged "on site". Budget
+  (`mission::lunar_budget`, mission `[budget]` [D] from the flights): 120 t LLO closes (64 t propellant left in the
+  flight); 204 t LLO refused (9.3 t short); NRHO variant refused at 120 t (2.2 t short: NRHO -> LLO 956 m/s and
+  LLO -> NRHO 990 m/s flown vs 876 / 725 nominal - the return departs 5.3 d after the LLO arrival, outside the cheap
+  window). Results: descent from PDI 566 t: 2068 m/s (380 / 350 s split), landed 0.20 m, 1.04 m/s; with DOI 18 m/s
+  ~2.09 km/s vs Apollo's ~2.06 km/s (DOI ~22 m/s + PDI ~2.04 km/s [S: Bennett, NASA TN D-6846]) - within 1.5 %
+  (not broken down further). Ascent from 340 t: 1955 m/s into 100 x 100 km (ideal Hohmann from the 5.3 km high site
+  ~1.72 km/s) vs Apollo ~1.85 km/s into 17 x 83 km (ideal ~1.69 km/s): the higher, circular target costs ~30 m/s, the
+  rest is the vertical rise, the PEG start from 150 m and the steering seconds - not broken down further. Campaign
+  (`test_lunar_landing_campaign.cpp`, PDI state +-1 km / +-5 m/s per axis, thrust +-2 % via
+  `FlightSession::set_thrust_dispersion`, propellant +-5 %, touchdown spot within 1 km on the LOLA terrain): 21 / 21
+  landed, 0.02-0.78 m (the offset grows with the slope: the hull settles onto the downhill feet), sink 0.98-1.03 m/s,
+  237-256 t from PDI; aborts from 3 / 1 / 0.3 km reach the LLO (148 / 142 / 135 t). Debug:
+  `STARSIM_DEBUG_LUNAR_DESCENT`, `STARSIM_DEBUG_LUNAR_ASCENT`, `STARSIM_DEBUG_SCVX`, `STARSIM_DEBUG_LEGS`; single
+  campaign case `"[.lunar_case]"` with `STARSIM_LUNAR_CASE=<seed>`. Open: no DOI re-plan after the trim (0.2 m flown
+  without), boil-off, a degraded profile for automatic aborts from fast low states (PEG saturates: 111 x 115 km), the
+  status at burn end shows osculating elements (95 x 100 km for a 100 km LLO; l6 telemetry), the sub-orbital cutoff
+  guard is untested (no scenario reproduces it).

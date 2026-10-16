@@ -76,10 +76,11 @@ void place_over_site(Fixture& fx, const config::VehicleConfig& cfg, double clear
 
 sim::LegSite lunar_site_on_sphere() { return {ephemeris::Body::Moon, site_lat, site_lon, 0.0, 10000.0}; }
 
-// Runs a placed drop until the legs' judgement (or 60 s).
+// Runs a placed drop until the legs' judgement (or 300 s: a hull resting nearly upright on two feet of the rough
+// terrain topples onto a third only slowly - the lunar-gravity instability grows by ~e per 4 s from millimetres).
 sim::LegTouchdown run_drop(Fixture& fx) {
     const auto t0 = fx.session.epoch();
-    while (fx.session.leg_touchdown(0) == sim::LegTouchdown::None && fx.session.epoch() - t0 < 60.0) {
+    while (fx.session.leg_touchdown(0) == sim::LegTouchdown::None && fx.session.epoch() - t0 < 300.0) {
         fx.session.advance_to(fx.session.epoch() + 0.1, 100000);
     }
     return fx.session.leg_touchdown(0);

@@ -93,7 +93,8 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
     for (const auto& stage : ctx.vehicle.stages()) {
         for (const auto& e : stage.engines) {
             if (!e.producing_thrust()) continue;
-            const double thrust = e.spool * e.performance->thrust_n(e.throttle, air.pressure_pa);
+            const double thrust =
+                ctx.vehicle.thrust_factor() * e.spool * e.performance->thrust_n(e.throttle, air.pressure_pa);
             const Vec3 force = thrust * e.thrust_direction();
             f.thrust_n += thrust;
             f.nongravitational_body_n += force;

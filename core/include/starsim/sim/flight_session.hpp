@@ -448,6 +448,8 @@ public:
     // Truth-model error injection (tests, training): the hull's aerodynamic force of a body scaled by `factor`; the
     // onboard models (impact prediction, landing planner) keep the nominal tables.
     void set_aero_dispersion(size_t body_index, double factor);
+    // Likewise thrust and mass flow of every engine of a body (Vehicle::set_thrust_factor); guidance stays nominal.
+    void set_thrust_dispersion(size_t body_index, double factor);
 
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines

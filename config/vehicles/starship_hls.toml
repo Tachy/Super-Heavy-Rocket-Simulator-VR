@@ -107,9 +107,10 @@ stroke_m = 0.6
 crush_force_n = 4.5e6                    # per leg: no crush in a 1.5 m/s touchdown on flat ground (reserve); l4 x3
                                          # for a 662 t landing (l2's 1.5 MN crushed through on 8 deg); kept for the
                                          # real 260-340 t: the drop tests land both without a bounce
-stiffness_n_m = 1.0e7                    # 6-9 mm static in lunar gravity (221-340 t); l4 kept stiffness and damping:
-                                         # x3 left a light HLS balancing on two feet on the LOLA terrain for > 60 s
-damping_n_s_m = 1.0e6                    # the damper takes the touchdown (1 m/s x 1e6 < the crush force)
+stiffness_n_m = 1.0e7                    # 6-9 mm static in lunar gravity (221-340 t)
+damping_n_s_m = 3.0e6                    # l4 Task 10: x3 - at 1e6 the hull rocked on 1-2 feet for ~15 s after an
+                                         # engine cut on a 5 deg slope (rocking mode damping ~0.3, CG 21 m up) and
+                                         # walked 1.2 m; 3e6 (~0.9) settles it. 1 m/s x 3e6 < the crush force
 friction = 0.6                           # foot pad on regolith
 
 # Ship RCS layout (cold gas from the main tanks).

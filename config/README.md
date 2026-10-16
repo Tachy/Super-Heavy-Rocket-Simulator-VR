@@ -151,7 +151,7 @@ flow separation (vacuum engines).
 - `falcon9_asds.toml`: the same keys; instead of a `landing_zone` a `[drone_ship]` table (`id`, `latitude_deg`,
   `longitude_deg`, `heading_deg` of the deck's long axis, `sea_height_m` above WGS84): the first stage lands on its deck.
 - `hls_lunar_llo.toml`, `hls_lunar_nrho.toml` (`kind = "lunar_landing"`, `config::load_lunar_landing_mission`,
-  `sim::place_lunar_landing_mission`; outbound part only until lunar l4): `[mission]` `vehicle`, `site`
+  `sim::place_lunar_landing_mission`): `[mission]` `vehicle`, `site`
   (`lunar_sites.toml`, must exist); `[orbit]` scenario start (`epoch_utc`, `height_km`, `inclination_deg`,
   `argument_of_latitude_deg`; the RAAN is computed so the plane passes through the Moon at arrival); `[transfer]`
   `flight_time_days` (from the scenario start to the arrival), `earliest_departure_h` (0 = as early as possible; the
@@ -160,6 +160,14 @@ flow separation (vacuum engines).
   with the CR3BP seed at apolune (`apolune_position`, `apolune_velocity`, nondimensional), `revolutions` /
   `synodic_months` (resonance) and `reference_revolutions` (span of the full-model reference). The session needs a Moon
   orientation (the game's FlightSim has none yet - lunar l6).
+  Since lunar l4 the mission flies on to the surface and back to the LLO (`sim::start_lunar_landing_mission`):
+  `[descent]` `pdi_altitude_above_site_km` (periselene after the DOI), `braking_range_km` (fallback; the planner sizes
+  the range from the mass), `max_crossrange_km` (the LLO waits for a site pass within this; a plane trim removes the
+  rest), `slope_limit_deg`, `touchdown_search_radius_m` (admissible point nearest to the site); `[surface]`
+  `stay_hours`; `[ascent]` `insertion_altitude_above_site_km` (PEG cutoff), `aposelene_km` (circularised there);
+  `[budget]` delta-v of the legs not planned at the start (`descent_delta_v_mps`, `ascent_delta_v_mps`, for the NRHO
+  variant `nrho_to_llo_delta_v_mps` / `llo_to_nrho_delta_v_mps`) and `reserve_kg`: the start refuses a mission whose
+  budget does not close ("Mission nicht durchführbar: ... fehlen N t").
 
 - Payload vehicles: `config::stack_payload` stacks a vehicle (e.g. `crew_dragon`) on the launcher; its stages are
   `payload` stages, whose thrusters stay blocked until the payload flies alone.

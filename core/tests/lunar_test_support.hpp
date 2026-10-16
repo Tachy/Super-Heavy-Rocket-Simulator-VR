@@ -33,9 +33,11 @@ inline config::VehicleConfig hls_with_propellant(double propellant_kg, double dr
 
 // Moon-relative PDI state: periselene of a (h_point + 15 km) x 100 km polar ellipse, `range_m` of ground arc before
 // the touchdown point, in the plane through the pole and the point, heading south; the HLS retrograde, ready to brake.
+// `position_error_m` / `velocity_error_mps` (GCRF) are added to that state (dispersion campaigns).
 inline void place_hls_at_pdi(sim::FlightSession& session, const ephemeris::Ephemeris& ephemeris,
                              const frames::BodyOrientation& moon_me, const mission::TouchdownPoint& point, time::Epoch t0,
-                             double propellant_kg, double dry_kg = 0.0, double range_m = 450e3) {
+                             double propellant_kg, double dry_kg = 0.0, double range_m = 450e3,
+                             const math::Vec3& position_error_m = {}, const math::Vec3& velocity_error_mps = {}) {
     using math::Vec3;
     const double R = constants::moon_mean_radius_m, gm = ephemeris.gm_m3ps2(ephemeris::Body::Moon);
     const auto rot = moon_me.fixed_to_gcrf(t0).rotation;
@@ -49,7 +51,8 @@ inline void place_hls_at_pdi(sim::FlightSession& session, const ephemeris::Ephem
     const double rp = R + point.height_m + 15e3, ra = R + 100e3;
     const double vp = std::sqrt(gm * (2.0 / rp - 2.0 / (rp + ra)));
     const auto moon = ephemeris.state_gcrf(ephemeris::Body::Moon, t0);
-    const Vec3 r = moon.position_m + r_hat * rp, v = moon.velocity_mps + along * vp;
+    const Vec3 r = moon.position_m + r_hat * rp + position_error_m;
+    const Vec3 v = moon.velocity_mps + along * vp + velocity_error_mps;
     const Vec3 x_body = -along;  // retrograde: ready to brake
     const auto attitude = math::Quat::from_matrix(math::Mat3::from_columns(x_body, r_hat, cross(x_body, r_hat)));
     session.place_body(hls_with_propellant(propellant_kg, dry_kg), {r, v, attitude, {}}, t0);
@@ -68,6 +71,19 @@ inline double pdi_braking_range_m(const ephemeris::Ephemeris& ephemeris, const m
     const vehicle::Vehicle v(hls_with_propellant(0.0), STARSIM_CONFIG_DIR);
     const double thrust_n = gnc::set_max_thrust_n(v, gnc::hls_landing_parameters().braking_sets.front());
     return mission::braking_range_m(pdi_speed_mps(ephemeris, point), mass_kg, thrust_n, {});
+}
+
+// Flies the powered descent of body 0 until its CG is `height_m` above the touchdown point (true) or the step changes.
+inline bool descend_to(sim::FlightSession& session, const ephemeris::Ephemeris& ephemeris, double height_m,
+                       const mission::TouchdownPoint& point) {
+    const double target_r = constants::moon_mean_radius_m + point.height_m + height_m;
+    for (int i = 0; i < 1200 * 10; ++i) {
+        if (session.lunar_step() != sim::LunarStep::PoweredDescent) return false;
+        const auto c = ephemeris.state_gcrf(ephemeris::Body::Moon, session.epoch());
+        if (norm(session.body(0).state().position_gcrf_m - c.position_m) <= target_r) return true;
+        session.advance_to(session.epoch() + 0.1, 100);
+    }
+    return false;
 }
 
 }  // namespace starsim::test

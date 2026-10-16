@@ -118,14 +118,7 @@ struct Fixture {
 
 // Flies the powered descent from PDI until the CG is `height_m` above the touchdown point (or the step changes).
 bool descend_to(Fixture& fx, double height_m, const mission::TouchdownPoint& point) {
-    const double target_r = constants::moon_mean_radius_m + point.height_m + height_m;
-    for (int i = 0; i < 1200 * 10; ++i) {
-        if (fx.session.lunar_step() != sim::LunarStep::PoweredDescent) return false;
-        const auto c = fx.ephemeris.state_gcrf(ephemeris::Body::Moon, fx.session.epoch());
-        if (norm(fx.session.body(0).state().position_gcrf_m - c.position_m) <= target_r) return true;
-        fx.session.advance_to(fx.session.epoch() + 0.1, 100);
-    }
-    return false;
+    return test::descend_to(fx.session, fx.ephemeris, height_m, point);
 }
 
 mission::TouchdownPoint touchdown_point(const Fixture& fx) {

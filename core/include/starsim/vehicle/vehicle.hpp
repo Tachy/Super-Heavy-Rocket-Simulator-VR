@@ -193,6 +193,10 @@ public:
     // the onboard models use - is unchanged.
     void set_hull_aero_scale(double factor) { hull_aero_scale_ = factor; }
     double hull_aero_scale() const { return hull_aero_scale_; }
+    // Truth-model dispersion (tests, training): thrust and mass flow of every engine scaled by `factor` in the forces
+    // the vehicle produces; the performance queries the guidance uses (thrust_n, current_performance) stay nominal.
+    void set_thrust_factor(double factor) { thrust_factor_ = factor; }
+    double thrust_factor() const { return thrust_factor_; }
     void update_landing_legs(double dt_s);
     // Parachute sets ([[stage.parachute]], d4). deploy opens the stowed sets of `role` ("drogue" / "main"); a released
     // or torn set stays so. update grows the open sets' drag areas (aero::parachute_drag_area_m2).
@@ -273,6 +277,7 @@ private:
     bool legs_deploying_ = false;
     double leg_deployment_ = 0.0;
     double hull_aero_scale_ = 1.0;
+    double thrust_factor_ = 1.0;
     bool nose_cone_open_ = false;
     mutable std::optional<propulsion::RcsAllocator> rcs_allocator_;
     propulsion::RcsModulator rcs_modulator_;
