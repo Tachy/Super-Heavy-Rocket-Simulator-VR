@@ -251,6 +251,23 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
             const int corridor_slack = penalised(weights.corridor_violation, "corridor_slack");
             b.add_second_order_cone({AffineExpr{radius}.add(corridor_slack, 1.0),
                                      X(k, 2).add_constant(-target.position_m.y), X(k, 3).add_constant(-target.position_m.z)});
+            if (target.tower_keep_out_radius_m > 0.0 && ref.x[at(k)][descent_index::position] < target.tower_top_cg_height_m) {
+                // Tower: n . (r - c) >= R while the hull bottom is below the tower top, n fixed from the tower to the
+                // catch axis. Only those nodes get the row: an idle row with a never-binding radius (as the corridor's)
+                // stalled the first catch plan from a gate (vc 47 after 4 iterations; without the row 8-13 iterations).
+                const double ty = target.position_m.y - target.keep_out_center_m.y;
+                const double tz = target.position_m.z - target.keep_out_center_m.z;
+                const double th = std::hypot(ty, tz);
+                const double ny = th > 1e-6 ? ty / th : 1.0;
+                const double nz = th > 1e-6 ? tz / th : 0.0;
+                AffineExpr keep{-target.tower_keep_out_radius_m - ny * target.keep_out_center_m.y - nz * target.keep_out_center_m.z};
+                const AffineExpr ry = X(k, 2), rz = X(k, 3);
+                for (const auto& [index, c] : ry.terms) keep.add(index, ny * c);
+                for (const auto& [index, c] : rz.terms) keep.add(index, nz * c);
+                keep.add_constant(ny * ry.constant + nz * rz.constant);
+                keep.add(penalised(weights.corridor_violation, "tower_slack"), 1.0);  // soft, like the corridor
+                b.add_nonnegative(keep);
+            }
         } else {
             // Keep-out: n . (r - c) >= R with n the horizontal direction from the centre to the reference.
             const Vec3 rb = state_position(ref.x[at(k)]) - target.keep_out_center_m;

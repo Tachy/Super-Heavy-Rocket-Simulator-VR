@@ -23,6 +23,7 @@ struct CatchTarget {
     double tower_keep_out_radius_m = 0.0; // around the tower axis, incl. the hull radius and a margin
     double mount_keep_out_radius_m = 0.0; // around the pad centre (launch mount), incl. hull radius and margin
     double mount_height_m = 0.0;          // launch mount top above the pad ground
+    double tower_height_m = 0.0;          // tower top above the pad ground (catch keep-out; 0: none)
 };
 
 // Touchdown on landing legs on a pad (landing zone) at the site's centre.

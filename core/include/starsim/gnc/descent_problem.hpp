@@ -25,12 +25,17 @@ struct DescentTarget {
     double corridor_top_m = 0.0;
     double corridor_radius_m = 0.0;
     double final_set_radius_m = 0.0;  // every final-set node this close to the catch axis (0: no limit)
+    // Catch: nodes whose reference CG height is below tower_top_cg_height_m (hull bottom below the tower top) keep
+    // n . (r - keep_out_center_m) >= tower_keep_out_radius_m, n the horizontal unit from the tower to the catch axis
+    // (soft; 0: none). Above the corridor nothing else stopped a divert overshooting into the tower lattice.
+    double tower_keep_out_radius_m = 0.0;
+    double tower_top_cg_height_m = 0.0;
     double ground_cg_height_m = 0.0;  // Abort: CG height at touchdown
     math::Vec3 sea_target_m;          // Abort: point at sea (y, z used)
     // Abort: the end lies at least this far along the direction of sea_target_m (beyond the shoreline: a hard
     // constraint; 0: none - only the soft pull towards sea_target_m).
     double sea_min_distance_m = 0.0;
-    math::Vec3 keep_out_center_m;     // Abort: tower + mount, horizontal centre
+    math::Vec3 keep_out_center_m;     // Abort: tower + mount, horizontal centre; Catch: the tower axis
     double keep_out_radius_m = 0.0;
     // Abort: the launch mount on the pad centre, kept clear by nodes whose reference CG height is below
     // mount_top_cg_height_m (radius 0: none).

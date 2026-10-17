@@ -146,6 +146,11 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
         snap.catch_target.corridor_radius_m = settings.corridor_radius_m;
         snap.catch_target.final_set_radius_m = settings.final_set_radius_m;
         const Vec3 tower = frame.to_plan(c.tower_center_itrf_m);
+        if (c.tower_height_m > 0.0) {
+            snap.catch_target.keep_out_center_m = {0.0, tower.y, tower.z};
+            snap.catch_target.tower_keep_out_radius_m = c.tower_keep_out_radius_m;
+            snap.catch_target.tower_top_cg_height_m = tower.x + c.tower_height_m + mass.cg_station_m + settings.corridor_margin_m;
+        }
         snap.abort_target.keep_out_center_m = {0.0, tower.y, tower.z};
         snap.abort_target.keep_out_radius_m = c.tower_keep_out_radius_m;
         snap.abort_target.mount_keep_out_radius_m = c.mount_keep_out_radius_m;
