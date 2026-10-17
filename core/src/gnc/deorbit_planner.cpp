@@ -348,6 +348,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
             std::snprintf(text, sizeof text, "Zu wenig Treibstoff: Deorbit %.1f t + Landung %.1f t, an Bord %.1f t",
                           plan.propellant_kg / 1000.0, reserve_propellant_kg / 1000.0, available_propellant_kg / 1000.0);
             plan.reason = text;
+            plan.short_of_reserve = true;
             return plan;
         }
         plan.feasible = true;

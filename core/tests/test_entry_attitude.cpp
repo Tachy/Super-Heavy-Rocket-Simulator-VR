@@ -144,12 +144,23 @@ TEST_CASE("Flaps produce commanded pitch, roll and yaw torques; saturation goes 
     trim(*body);
     const auto trimmed = body->vehicle().stages().back().flaps;
     const auto out0 = gnc::AttitudeController::allocate(*body, 0.0, {}, false, true);
-    // Authority scale: one aft flap's moment change over 10 deg.
-    const double scale = 1e6;
+    // Authority scale: one aft flap's moment change over a few deg. The flaps cannot deliver 1e6 N m of yaw here
+    // (iterated on the true moments, l5 Task 10: an aft flap ends folded, ~2 x the RCS left) - the earlier one-call
+    // check only confirmed the linear model.
+    const double scale = 3e5;
+    auto& flaps = body->vehicle().stages().back().flaps;
     for (int axis = 0; axis < 3; ++axis) {
         Vec3 tau;
         (axis == 0 ? tau.x : axis == 1 ? tau.y : tau.z) = scale;
-        const auto out = gnc::AttitudeController::allocate(*body, 0.0, tau, false, true);
+        // The allocation steps within what the rate-limited flaps reach in a few control periods; the flaps follow
+        // their commands (here at once) until the moment is delivered.
+        flaps = trimmed;
+        gnc::ControlOutput out;
+        for (int call = 0; call < 10; ++call) {
+            out = gnc::AttitudeController::allocate(*body, 0.0, tau, false, true);
+            for (size_t k = 0; k < flaps.size(); ++k) flaps[k].deflection_rad = out.flap_rad[k];
+        }
+        flaps = trimmed;
         CAPTURE(axis);
         bool changed = false;
         for (size_t k = 0; k < trimmed.size(); ++k) {

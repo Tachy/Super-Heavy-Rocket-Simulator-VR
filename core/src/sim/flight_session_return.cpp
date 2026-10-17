@@ -140,8 +140,11 @@ void FlightSession::replan_ship_deorbit() {
     deorbit_next_track_ = epoch_ + deorbit_track_interval_s;
     // A later pass is taken when drag moved this one out of reach (it is planned again before its burn); none in the
     // window: the old plan is flown (and planned again at the next tracking time or before its burn).
+    // The landing reserve was checked when the deorbit was committed; a re-plan that only cuts into it is still flown -
+    // the old plan's burn is known to miss now (l5 Task 10, aircatch seed 15: the tracked drag asked 64.4 instead of
+    // 61.0 m/s, 0.3 t into the 35 t reserve; the old burn was flown and the entry missed the gate by 274 km).
     auto node = old_node;
-    if (plan.feasible) {
+    if (plan.feasible || plan.short_of_reserve) {
         deorbit_plan_ = plan;
         if (execute_burn(plan.node, stage.deorbit_engine_groups)) {
             node = plan.node;

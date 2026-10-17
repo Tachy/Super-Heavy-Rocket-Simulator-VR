@@ -149,16 +149,29 @@ struct FlapAuthority {
     std::vector<Vec3> torque_per_rad;
     std::vector<double> deflection_rad;
     std::vector<double> max_deflection_rad;
+    std::vector<double> lower_rad, upper_rad;  // reachable within flap_reach_horizon_s (rate limit), inside the stops
     Vec3 aero_moment_nm;
     Vec3 max_torque_nm;  // per axis, half of each flap's range with the favourable sign
 };
 
 constexpr double flap_difference_step_rad = 1.0 * constants::deg_to_rad;
 constexpr double flap_stop_secant_span_rad = 20.0 * constants::deg_to_rad;  // [E] a third of the peak derivative at a stop
+constexpr double flap_at_stop_rad = 0.5 * constants::deg_to_rad;           // [E] a flap this close to a stop is at it
+// [E] At a stop the 1 deg difference of sin^2 is ~5 % of the 20 deg secant; a quarter separates "vanishing" from a
+// flap whose incidence is not at the sin^2 extremum (flow at an angle to the flap's stop position).
+constexpr double flap_tiny_column_fraction = 0.25;
 // [E] Newton step limit per call: with little authority (thin air) the minimum-norm step asked for far more than the
 // range and the flaps banged between their stops every cycle; half the range keeps large trim changes (a 1e6 N m yaw
 // demand at 65 km moves the aft flaps by more than 20 deg).
 constexpr double flap_max_step_rad = 45.0 * constants::deg_to_rad;
+// [E] The allocation's box: what the rate-limited actuator reaches within this horizon (~5 deg at 20 deg/s). Steps of
+// 40-80 deg that the flaps could not follow made the remainder for the RCS wrong and limit-cycled the aft pair in the
+// terminal phase (l5 Task 10, active-set allocation). Sweep (LEO campaigns 14 flights + lunar fixtures): full range
+// 7/14 LEO gates missed by 0.3-1.9 km; 0.25 s all 14 gates 0 m and the lunar nominal caught 13.2 t; 0.5 s / 1 s / 2 s
+// lost the lunar nominal (dry 0.6 km off, impact, dry) - the terminal phase sits at a stability margin.
+// (A damped least-squares step, 2 % of the trace, was tried against a 2-cycle in an instant-follow unit iteration:
+// it broke 11 of 14 LEO return gates - not used.)
+constexpr double flap_reach_horizon_s = 0.25;
 
 Vec3 flap_moment(const vehicle::Flap& flap, double deflection_rad, const aero::FlapTable& table,
                  const vehicle::AirData& air, const Vec3& rate_body, double cg_station_m) {
@@ -178,20 +191,31 @@ FlapAuthority flap_authority(const vehicle::FlightBody& body, double cg_station_
         if (!stage.flap_table) continue;
         for (const auto& flap : stage.flaps) {
             const double d = flap.deflection_rad;
+            const double max = flap.max_deflection_rad;
             a.aero_moment_nm += flap_moment(flap, d, *stage.flap_table, air, w, cg_station_m);
+            const auto column = [&](double lo, double hi) {
+                return (flap_moment(flap, hi, *stage.flap_table, air, w, cg_station_m) -
+                        flap_moment(flap, lo, *stage.flap_table, air, w, cg_station_m)) /
+                       (hi - lo);
+            };
+            Vec3 per_rad = column(std::max(0.0, d - flap_difference_step_rad), std::min(max, d + flap_difference_step_rad));
             // The flap force goes with sin^2 of its incidence: its derivative vanishes at both stops (folded, broadside).
-            // A local difference there sees no authority and a flap at a stop never comes back (l5 Task 10: flaps held
-            // 90/0/0/90 from 105 km, their roll moment outgrew the RCS at 83 km and the ship rolled away) - near a stop
-            // the secant over the wide span into the range is used instead.
-            const bool near_stop = d < flap_stop_secant_span_rad || d > flap.max_deflection_rad - flap_stop_secant_span_rad;
-            const double step_rad = near_stop ? flap_stop_secant_span_rad : flap_difference_step_rad;
-            const double lo = std::max(0.0, d - step_rad), hi = std::min(flap.max_deflection_rad, d + step_rad);
-            const Vec3 per_rad = (flap_moment(flap, hi, *stage.flap_table, air, w, cg_station_m) -
-                                  flap_moment(flap, lo, *stage.flap_table, air, w, cg_station_m)) /
-                                 (hi - lo);
+            // The local difference of a flap AT a stop sees almost no authority and the flap never comes back (l5 Task 10:
+            // flaps held 90/0/0/90 from 105 km, their roll moment outgrew the RCS at 83 km and the ship rolled away) -
+            // there the secant over a wide span into the range is used. Only at the stop: a flap trimmed near it (the
+            // aerocapture pass holds the forward flaps at ~82 deg) keeps its local column, a secant there chattered 0/90.
+            const bool at_lower = d <= flap_at_stop_rad, at_upper = d >= max - flap_at_stop_rad;
+            if (at_lower || at_upper) {
+                const Vec3 secant = at_lower ? column(0.0, std::min(max, flap_stop_secant_span_rad))
+                                             : column(std::max(0.0, max - flap_stop_secant_span_rad), max);
+                if (norm(per_rad) < flap_tiny_column_fraction * norm(secant)) per_rad = secant;
+            }
             a.torque_per_rad.push_back(per_rad);
             a.deflection_rad.push_back(d);
             a.max_deflection_rad.push_back(flap.max_deflection_rad);
+            const double reach = flap.rate_rad_s > 0.0 ? flap.rate_rad_s * flap_reach_horizon_s : max;
+            a.lower_rad.push_back(std::max(0.0, d - reach));
+            a.upper_rad.push_back(std::min(max, d + reach));
             a.max_torque_nm += Vec3{std::abs(per_rad.x), std::abs(per_rad.y), std::abs(per_rad.z)} *
                                (0.5 * flap.max_deflection_rad);
         }
@@ -202,6 +226,93 @@ FlapAuthority flap_authority(const vehicle::FlightBody& body, double cg_station_
 
 // Fraction of the null-space distance to mid-range removed per call (redundant flap setting, slow drift).
 constexpr double flap_centring_gain = 0.2;
+
+// Box-constrained flap step for the moment `needed` (linear model: sum of column_i delta_i): active set - the
+// minimum-norm step over the free flaps, every flap it would push beyond its box (a stop, or what its rate reaches
+// within flap_reach_horizon_s) is fixed at that bound and the rest
+// re-solved for what the fixed ones leave. Then the flaps drift towards mid-range in the columns' null space, scaled
+// to stay inside the range, so the drift is moment-neutral (a clamp after the step or the drift was not: flaps at a
+// stop took large redundant moves and the allocation chattered 0/90 deg at moderate q - l5 Task 10).
+std::vector<double> allocate_flaps(const FlapAuthority& fa, const Vec3& needed) {
+    const size_t n = fa.torque_per_rad.size();
+    std::vector<double> delta(n, 0.0);
+    std::vector<bool> fixed(n, false);
+    std::vector<size_t> free;
+    for (size_t pass = 0; pass <= n; ++pass) {
+        free.clear();
+        std::vector<Vec3> columns;
+        Vec3 rest = needed;
+        for (size_t i = 0; i < n; ++i) {
+            if (fixed[i]) {
+                rest -= fa.torque_per_rad[i] * delta[i];
+            } else {
+                free.push_back(i);
+                columns.push_back(fa.torque_per_rad[i]);
+            }
+        }
+        if (free.empty()) break;
+        std::vector<double> step = minimum_norm(columns, rest);
+        double largest = 0.0;
+        for (const double x : step) largest = std::max(largest, std::abs(x));
+        if (largest > flap_max_step_rad) {
+            for (auto& x : step) x *= flap_max_step_rad / largest;  // same direction, inside the linear reach
+        }
+        bool clamped = false;
+        for (size_t k = 0; k < free.size(); ++k) {
+            const size_t i = free[k];
+            const double target = fa.deflection_rad[i] + step[k];
+            const double bounded = std::clamp(target, fa.lower_rad[i], fa.upper_rad[i]);
+            delta[i] = bounded - fa.deflection_rad[i];
+            if (bounded != target) {
+                fixed[i] = true;
+                clamped = true;
+            }
+        }
+        if (!clamped) break;
+    }
+    // Moment-neutral drift towards mid-range over ALL flaps (a flap fixed at a stop comes back this way):
+    // z = to_mid - A^T (A A^T)^-1 A to_mid; a flap at a stop that z would push outward is left out and z solved again.
+    std::vector<bool> drifting(n, true);
+    std::vector<double> drift(n, 0.0);
+    for (size_t pass = 0; pass <= n; ++pass) {
+        std::vector<Vec3> columns;
+        std::vector<size_t> index;
+        std::vector<double> to_mid;
+        Vec3 mid_moment;
+        for (size_t i = 0; i < n; ++i) {
+            if (!drifting[i]) continue;
+            const double v = 0.5 * fa.max_deflection_rad[i] - (fa.deflection_rad[i] + delta[i]);
+            columns.push_back(fa.torque_per_rad[i]);
+            index.push_back(i);
+            to_mid.push_back(v);
+            mid_moment += fa.torque_per_rad[i] * v;
+        }
+        std::fill(drift.begin(), drift.end(), 0.0);
+        if (columns.empty()) break;
+        const std::vector<double> range_part = minimum_norm(columns, mid_moment);
+        bool excluded = false;
+        for (size_t k = 0; k < index.size(); ++k) {
+            const size_t i = index[k];
+            drift[i] = to_mid[k] - range_part[k];
+            const double at = fa.deflection_rad[i] + delta[i];
+            const bool outward = (at <= fa.lower_rad[i] && drift[i] < 0.0) || (at >= fa.upper_rad[i] && drift[i] > 0.0);
+            if (outward) {
+                drifting[i] = false;
+                excluded = true;
+            }
+        }
+        if (!excluded) break;
+    }
+    double scale = flap_centring_gain;
+    for (size_t i = 0; i < n; ++i) {
+        const double at = fa.deflection_rad[i] + delta[i];
+        if (drift[i] > 0.0) scale = std::min(scale, (fa.upper_rad[i] - at) / drift[i]);
+        if (drift[i] < 0.0) scale = std::min(scale, (fa.lower_rad[i] - at) / drift[i]);
+    }
+    scale = std::max(0.0, scale);
+    for (size_t i = 0; i < n; ++i) delta[i] += scale * drift[i];
+    return delta;
+}
 
 // Thrust centroid this far off the axis: the engine set is asymmetric (roll by RCS, see allocate).
 constexpr double asymmetric_thrust_offset_m = 0.05;
@@ -270,25 +381,11 @@ ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, doub
         if (fa.active) {
             // Newton step: the flaps add what the modelled aero moment lacks of the wanted net torque.
             const Vec3 needed = torque - fa.aero_moment_nm;
-            std::vector<double> delta = minimum_norm(fa.torque_per_rad, needed);
-            double largest = 0.0;
-            for (const double x : delta) largest = std::max(largest, std::abs(x));
-            if (largest > flap_max_step_rad) {
-                for (auto& x : delta) x *= flap_max_step_rad / largest;  // same direction, inside the linear reach
-            }
-            // Redundant direction(s): drift towards mid-range without changing the moment (to first order).
+            const std::vector<double> delta = allocate_flaps(fa, needed);
             const size_t n = delta.size();
-            std::vector<double> to_mid(n);
-            Vec3 mid_moment;
-            for (size_t i = 0; i < n; ++i) {
-                to_mid[i] = 0.5 * fa.max_deflection_rad[i] - fa.deflection_rad[i];
-                mid_moment += fa.torque_per_rad[i] * to_mid[i];
-            }
-            const std::vector<double> range_part = minimum_norm(fa.torque_per_rad, mid_moment);
             out.flap_rad.resize(n);
             Vec3 achieved;
             for (size_t i = 0; i < n; ++i) {
-                delta[i] += flap_centring_gain * (to_mid[i] - range_part[i]);
                 out.flap_rad[i] = std::clamp(fa.deflection_rad[i] + delta[i], 0.0, fa.max_deflection_rad[i]);
                 achieved += fa.torque_per_rad[i] * (out.flap_rad[i] - fa.deflection_rad[i]);
             }

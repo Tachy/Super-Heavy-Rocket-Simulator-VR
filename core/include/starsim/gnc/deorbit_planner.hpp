@@ -45,6 +45,7 @@ struct DeorbitPlan {
     double downrange_error_m = 0.0;       // nominal bank (> 0: overshoot)
     double crossrange_m = 0.0;            // nominal bank, both signs averaged
     double propellant_kg = 0.0;           // for the burn (rocket equation)
+    bool short_of_reserve = false;        // not feasible only because the landing reserve would be cut (plan complete)
     int passes_checked = 0;
 };
 
