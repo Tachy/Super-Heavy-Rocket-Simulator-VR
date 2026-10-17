@@ -278,10 +278,13 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     const double speed_mps = norm(v_itrf);
     // no new reversal while the last one still rolls: below ~2 km/s a 180 deg roll takes ~60 s at the bank rate, and
     // reversals checked every 20 s reversed again mid-roll (l5 Task 10, seed 2: 2.0, 1.5 and 1.3 km/s, the flown bank
-    // never caught up and the entry ended 38 km across)
-    const bool rolling = std::abs(std::remainder(bank_target_rad_ - bank_rad_, 2.0 * constants::pi)) > settled_bank_rad;
+    // never caught up and the entry ended 38 km across). Only a reversal's roll blocks: a setpoint lagging a new bank
+    // magnitude (or the first roll from 0) is no reversal, and blocking it shifted the capsule campaign's reversals.
+    if (std::abs(std::remainder(bank_target_rad_ - bank_rad_, 2.0 * constants::pi)) <= settled_bank_rad) {
+        reversal_rolling_ = false;
+    }
     if (speed_mps > parameters_.min_reversal_speed_mps && speed_mps < parameters_.max_reversal_speed_mps &&
-        time_since_reversal_s_ >= parameters_.min_reversal_interval_s && !rolling) {
+        time_since_reversal_s_ >= parameters_.min_reversal_interval_s && !reversal_rolling_) {
         EntryPredictorState now = state;
         now.reversal_time_s = 0.0;
         const Solution reverse_now = solve(model_, now, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
@@ -326,6 +329,7 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
         if (reverse) {
             sign_ = -sign_;
             time_since_reversal_s_ = 0.0;
+            reversal_rolling_ = true;
             s = reverse_now;
         }
     }

@@ -244,6 +244,7 @@ private:
     double bank_magnitude_rad_ = 0.0;
     double sign_ = 0.0;              // 0: not chosen yet
     double time_since_reversal_s_ = 1.0e9;
+    bool reversal_rolling_ = false;  // the last range-control reversal still rolls (no new one is checked)
     EntryCommand command_;
     bool terminal_started_ = false;
     bool terminal_predicted_ = false;

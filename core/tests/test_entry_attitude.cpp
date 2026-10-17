@@ -167,3 +167,19 @@ TEST_CASE("Flaps produce commanded pitch, roll and yaw torques; saturation goes 
     }
     CHECK(std::abs(saturated.rcs_torque_fraction.y) > 0.0);
 }
+
+TEST_CASE("Flaps pinned at their stops come back into the range", "[entry][flap][trim]") {
+    // l5 Task 10: the flap force goes with sin^2 of the incidence, its derivative vanishes at both stops - flaps left
+    // at 90/0/0/90 by thin air never came back and their roll moment went to the RCS.
+    World world;
+    auto body = entry_ship(65000.0, 6500.0, 60.0 * deg, world);
+    auto& flaps = body->vehicle().stages().back().flaps;
+    REQUIRE(flaps.size() == 4);
+    for (size_t k = 0; k < flaps.size(); ++k) flaps[k].deflection_rad = (k == 0 || k == 3) ? flaps[k].max_deflection_rad : 0.0;
+    const Trim t = trim(*body);
+    CHECK(norm(t.remainder_fraction) < 0.01);
+    for (double d : t.deflection_rad) {
+        CHECK(d >= 15.0 * deg);
+        CHECK(d <= 75.0 * deg);
+    }
+}
