@@ -43,6 +43,8 @@ void FlightSession::place_entering_ship(const config::VehicleConfig& config, con
 }
 
 void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanceParameters& parameters) {
+    flying.entry_hull_moment_scale = 1.0;  // a new pass estimates afresh
+    flying.entry_attitude_bias_nm = {};
     const auto& stage = flying.body->vehicle().stages().front().config;
     if (stage.aero.entry_profile == "capsule") {
         flying.entry_guidance = std::make_unique<gnc::EntryGuidance>(*flying.body, capsule_entry_target(), parameters);

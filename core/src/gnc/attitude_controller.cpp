@@ -166,10 +166,7 @@ FlapAuthority flap_authority(const vehicle::FlightBody& body, double cg_station_
     const auto& air = body.air_data();
     if (air.air.density_kg_m3 <= 0.0 || body.vehicle().flap_count() == 0) return a;
     const Vec3& w = body.state().angular_velocity_body_radps;
-    const auto hull = body.vehicle().aero().compute(air.air_velocity_body_mps, air.air.density_kg_m3,
-                                                    air.air.speed_of_sound_mps,
-                                                    body.vehicle().any_engine_producing_thrust(), air.mean_free_path_m);
-    a.aero_moment_nm = cross(Vec3{hull.normal_force_station_m - cg_station_m, 0.0, 0.0}, hull.force_body_n);
+    a.aero_moment_nm = AttitudeController::modelled_hull_moment_nm(body);
     constexpr double step_rad = 1.0 * constants::deg_to_rad;
     for (const auto& stage : body.vehicle().stages()) {
         if (!stage.flap_table) continue;
@@ -349,18 +346,9 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
     const auto& state = body.state();
     const auto mass = body.vehicle().mass_properties();
 
-    // Pointing error as a rotation vector in body axes.
-    const Vec3 target_body = state.attitude.inverse_rotate(math::normalized(axis_gcrf));
-    const Vec3 axis_error = cross(Vec3{1.0, 0.0, 0.0}, target_body);
-    const double sin_error = norm(axis_error);
-    const double angle = std::atan2(sin_error, target_body.x);
-    const Vec3 rotation = sin_error > 1e-12 ? axis_error * (angle / sin_error) : Vec3{};
-
-    double roll_error = 0.0;
-    if (norm(roll_reference_gcrf) > 0.0) {
-        const Vec3 ref_body = state.attitude.inverse_rotate(roll_reference_gcrf);
-        roll_error = std::atan2(ref_body.z, ref_body.y);  // rotate +y towards the reference about +x
-    }
+    const Vec3 error = pointing_error(body, axis_gcrf, roll_reference_gcrf);
+    const Vec3 rotation{0.0, error.y, error.z};
+    const double roll_error = error.x;
 
     // Torque = I * kd * (rate_command - rate); for small errors this is I * (wn^2 e - kd w).
     const double wn = gains_.natural_frequency_rad_s;
@@ -413,7 +401,47 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
             }
         }
     }
+    if (feedforward) torque += feedforward->torque_body_nm;
     return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins, gains_.flaps);
+}
+
+Vec3 AttitudeController::modelled_hull_moment_nm(const vehicle::FlightBody& body) {
+    const auto& air = body.air_data();
+    if (air.air.density_kg_m3 <= 0.0) return {};
+    const auto hull = body.vehicle().aero().compute(air.air_velocity_body_mps, air.air.density_kg_m3,
+                                                    air.air.speed_of_sound_mps,
+                                                    body.vehicle().any_engine_producing_thrust(), air.mean_free_path_m);
+    const double cg_station_m = body.vehicle().mass_properties().cg_station_m;
+    return cross(Vec3{hull.normal_force_station_m - cg_station_m, 0.0, 0.0}, hull.force_body_n);
+}
+
+Vec3 AttitudeController::pointing_error(const vehicle::FlightBody& body, const Vec3& axis_gcrf,
+                                        const Vec3& roll_reference_gcrf) {
+    const auto& state = body.state();
+    // the axis error as a rotation vector in body axes
+    const Vec3 target_body = state.attitude.inverse_rotate(math::normalized(axis_gcrf));
+    const Vec3 axis_error = cross(Vec3{1.0, 0.0, 0.0}, target_body);
+    const double sin_error = norm(axis_error);
+    const double angle = std::atan2(sin_error, target_body.x);
+    const Vec3 rotation = sin_error > 1e-12 ? axis_error * (angle / sin_error) : Vec3{};
+    double roll_error = 0.0;
+    if (norm(roll_reference_gcrf) > 0.0) {
+        const Vec3 ref_body = state.attitude.inverse_rotate(roll_reference_gcrf);
+        roll_error = std::atan2(ref_body.z, ref_body.y);  // rotate +y towards the reference about +x
+    }
+    return {roll_error, rotation.y, rotation.z};
+}
+
+Vec3 AttitudeController::integrate_error(const Vec3& integral, const Vec3& error, double dt) const {
+    if (!(gains_.integral_gain > 0.0)) return integral;
+    const auto step = [&](double sum, double e) { return std::abs(e) < gains_.integral_window_rad ? sum + e * dt : sum; };
+    return {step(integral.x, error.x), step(integral.y, error.y), step(integral.z, error.z)};
+}
+
+Vec3 AttitudeController::integral_torque(const vehicle::FlightBody& body, const Vec3& integral) const {
+    const Vec3& inertia = body.vehicle().mass_properties().inertia_kg_m2;
+    const double ki = gains_.integral_gain;
+    return {inertia.x * ki * integral.x, inertia.y * ki * integral.y, inertia.z * ki * integral.z};
 }
 
 }  // namespace starsim::gnc

@@ -529,6 +529,9 @@ private:
         gnc::ReturnCommand return_command;
         std::unique_ptr<gnc::EntryGuidance> entry_guidance;  // entering ship (scenario)
         gnc::EntryCommand entry_command;
+        // entry controller: the estimated true / modelled hull pitch moment (update_hull_moment_scale) ...
+        double entry_hull_moment_scale = 1.0;
+        math::Vec3 entry_attitude_bias_nm;  // ... and the torque the allocation's model lacks for it now
         std::unique_ptr<gnc::ShipLandingGuidance> ship_landing;  // ship from the gate: flip and catch (its command:
                                                                  // return_command)
         std::unique_ptr<gnc::ParachuteSequencer> parachutes;     // lowest stage with parachute sets (capsule)
@@ -543,6 +546,7 @@ private:
                               double ambient_pressure_pa, vehicle::VehicleCommand& command) const;
     double coast_allowance_s() const;  // 0 if fixed ticks are needed now
     void start_entry_guidance(Flying& flying, const gnc::EntryGuidanceParameters& parameters);
+    void update_hull_moment_scale(Flying& flying);  // entering ship: the controller's pitch trim estimate
     time::Epoch entry_start_epoch(double horizon_s = 6000.0) const;  // returning ship: entry interface (coasting from now) - entry_lead_s
     std::vector<vehicle::FlightBody*> body_pointers() const;
 
@@ -565,7 +569,11 @@ private:
     // Entering ship: flaps + RCS, slow (the flaps move at ~20 deg/s: 0.8 rad/s limit-cycles in roll, b1). [E] actuator
     // delay 0.5 s (the flaps' slew): without it the belly flop's nose turn (5 deg/s) set off a roll limit cycle and the
     // ship departed (b4 campaign).
-    gnc::AttitudeController entry_controller_{gnc::AttitudeController::Gains{0.5, 0.9, false, true, 0.5}};
+    // [E] integral action in pitch (l5 Task 10, update_hull_moment_scale): ki = 0.25 wn^3 (stable below 2 zeta wn^3 =
+    // 0.225), integrated within 2 deg (no windup in large turns) - it trims the hull moment the flaps' model lacks (hull
+    // aero x0.92 without it: 11 deg alpha error at 32 kPa, the drag 40 % low and the gate missed by 98 km).
+    gnc::AttitudeController entry_controller_{gnc::AttitudeController::Gains{
+        0.5, 0.9, false, true, 0.5, 0.0, 0.0, 0.0, 0.0, 0.25 * 0.5 * 0.5 * 0.5, 2.0 * constants::deg_to_rad}};
     // Ship flip and landing burn: gimbals with flaps and RCS, faster than in the entry [E].
     // [E] actuator delay: the gimbals slew 30 deg (stop to stop) at 20 deg/s, half of that on average
     gnc::AttitudeController ship_landing_controller_{gnc::AttitudeController::Gains{1.5, 0.9, false, true, 0.75}};

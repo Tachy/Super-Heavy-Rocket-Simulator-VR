@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -22,20 +23,38 @@ namespace {
 
 constexpr double deg = constants::deg_to_rad;
 
-// Printed by the full flight with STARSIM_VERBOSE ("[lunar return] hand-over: ..."), 2026-10-16, mission
-// ship_lunar_return_llo, after Task 8b (one bank sign's track aimed, lateral offset ~957 km): the hand-over to the
-// entry guidance after the braking burn (entry 9,695 m/s, -4.84 deg).
-constexpr double handover_epoch_tdb_s = 848008899.5954994;
-constexpr double handover_propellant_kg = 38299.974712633535;
-const math::Vec3 handover_position_gcrf_m{4275858.3141308269, 4295318.109720937, 3471568.3346307138};
-const math::Vec3 handover_velocity_gcrf_mps{-8233.8020619169147, 4988.3298088529864, -869.64927265182439};
-const math::Quat handover_attitude{-0.48611775575449828, -0.77773069077875545, 0.31784267710805708,
-                                   0.24041741361597196};
+// Printed by the full flight with STARSIM_VERBOSE ("[lunar return] hand-over: ..."), 2026-10-17, mission
+// ship_lunar_return_llo, after l5 Task 10 (held track aimed 300 km beyond the site, entry trim, closed-loop braking):
+// the hand-over to the entry guidance after the braking burn (entry 9,695 m/s, -4.87 deg; the full flight caught 13.6 t).
+// (The Task 8b state aimed the held track at the site itself: any drift to the far side could not be reversed.)
+constexpr double handover_epoch_tdb_s = 848008959.11018324;
+constexpr double handover_propellant_kg = 42958.659955708943;
+const math::Vec3 handover_position_gcrf_m{7086860.4675348997, 2531187.6710331743, 2929169.4508524211};
+const math::Vec3 handover_velocity_gcrf_mps{-6563.1519895914944, 5826.099272684959, 1092.0146363209715};
+const math::Quat handover_attitude{-0.55696594189169446, -0.50181461927849202, 0.23702032888641714,
+                                   0.6178935111697279};
 constexpr double handover_initial_bank_rad = 113.25 * deg;  // the budget's window middle (108.2 .. 118.3 deg)
 
 }  // namespace
 
-TEST_CASE("Lunar return entry from the hand-over state is caught at Starbase", "[lunar][return][entry][catch][slow]") {
+namespace {
+
+struct HandoverFlight {
+    bool caught = false;
+    bool impacted = false;
+    double seconds = 0.0;
+    double peak_heat_w_m2 = 0.0;
+    double peak_load_g = 0.0;
+    double propellant_t = 0.0;
+    double downrange_km = 0.0;
+    double crossrange_km = 0.0;
+    std::string phase;
+    std::string breakup;
+};
+
+// Flies the direct entry from the hand-over state to the catch (or impact, or `limit_s`), with truth air density and
+// hull aero factors.
+HandoverFlight fly_handover(double density_factor, double aero_factor, double limit_s = 7200.0) {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
@@ -48,22 +67,60 @@ TEST_CASE("Lunar return entry from the hand-over state is caught at Starbase", "
     const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(handover_epoch_tdb_s);
     t.session.place_entering_ship(ship, {handover_position_gcrf_m, handover_velocity_gcrf_mps, handover_attitude, {}},
                                   epoch, p);
+    t.session.set_air_density_factor(density_factor);
+    t.session.set_aero_dispersion(0, aero_factor);
     const auto& body = t.session.body(0);
-    double peak_load_g = 0.0;
-    while (!body.caught() && !body.impacted() && body.resting() == false && t.session.epoch() - epoch < 7200.0) {
+    HandoverFlight f;
+    while (!body.caught() && !body.impacted() && body.resting() == false && t.session.epoch() - epoch < limit_s) {
         t.session.advance_to(t.session.epoch() + 1.0, 400);
-        peak_load_g = std::max(peak_load_g, norm(body.aero_acceleration_body_mps2()) / constants::standard_gravity_mps2);
+        f.peak_load_g = std::max(f.peak_load_g, norm(body.aero_acceleration_body_mps2()) / constants::standard_gravity_mps2);
     }
     const auto* es = t.session.entry_status(0);
-    std::printf("[lunar return entry] %s after %.0f s, peak heat %.0f kW/m2 (radiative now %.0f), load %.2f g, "
+    f.caught = body.caught();
+    f.impacted = body.impacted();
+    f.seconds = t.session.epoch() - epoch;
+    f.peak_heat_w_m2 = body.peak_heat_rate_w_m2();
+    f.propellant_t = body.vehicle().propellant_kg() / 1000.0;
+    f.phase = es ? gnc::to_string(es->phase) : "-";
+    f.downrange_km = es ? es->downrange_error_m / 1000.0 : 0.0;
+    f.crossrange_km = es ? es->crossrange_m / 1000.0 : 0.0;
+    f.breakup = body.breakup_reason();
+    std::printf("[lunar return entry] density x%.3f aero x%.3f: %s after %.0f s, peak heat %.0f kW/m2, load %.2f g, "
                 "phase %s, downrange %.1f km, crossrange %.1f km, %.1f t left, %s\n",
-                body.caught() ? "caught" : body.impacted() ? "impacted" : "open", t.session.epoch() - epoch,
-                body.peak_heat_rate_w_m2() / 1000.0, body.radiative_heat_rate_w_m2() / 1000.0, peak_load_g,
-                es ? gnc::to_string(es->phase) : "-", es ? es->downrange_error_m / 1000.0 : 0.0,
-                es ? es->crossrange_m / 1000.0 : 0.0, body.vehicle().propellant_kg() / 1000.0,
-                body.breakup_reason().c_str());
-    CHECK(body.peak_heat_rate_w_m2() < 1.2e6);
-    CHECK(body.caught());
+                density_factor, aero_factor, f.caught ? "caught" : f.impacted ? "impacted" : "open", f.seconds,
+                f.peak_heat_w_m2 / 1000.0, f.peak_load_g, f.phase.c_str(), f.downrange_km, f.crossrange_km,
+                f.propellant_t, f.breakup.c_str());
+    return f;
+}
+
+}  // namespace
+
+TEST_CASE("Lunar return entry from the hand-over state is caught at Starbase", "[lunar][return][entry][catch][slow]") {
+    const auto f = fly_handover(1.0, 1.0);
+    CHECK(f.peak_heat_w_m2 < 1.2e6);
+    CHECK(f.caught);
+}
+
+// l5 Task 10: the entry controller's flaps trim the MODELLED hull moment; with the true hull aero x0.92 a PD law alone
+// held an alpha error growing with the dynamic pressure (11 deg at 32 kPa), the drag ran 40 % low and the ship came
+// 98 km short of the gate. The estimated hull moment scale (FlightSession::update_hull_moment_scale, k = 0.918) trims
+// it: caught.
+TEST_CASE("Lunar return entry with the hull aero 8 % low is caught (hull moment scale)",
+          "[lunar][return][entry][catch][slow]") {
+    const auto f = fly_handover(1.0, 0.92);
+    CHECK(std::abs(f.downrange_km) < 1.0);
+    CHECK(f.caught);
+}
+
+// Hidden probe (Task 10): the direct entry from the hand-over state with truth dispersions from the environment
+// (STARSIM_PROBE_DENSITY, STARSIM_PROBE_AERO, STARSIM_PROBE_SECONDS).
+TEST_CASE("Lunar return entry dispersion probe", "[.][probe][entry]") {
+    const auto factor = [](const char* name, double fallback) {
+        const char* v = std::getenv(name);
+        return v ? std::atof(v) : fallback;
+    };
+    fly_handover(factor("STARSIM_PROBE_DENSITY", 1.0), factor("STARSIM_PROBE_AERO", 1.0),
+                 factor("STARSIM_PROBE_SECONDS", 7200.0));
 }
 
 namespace {

@@ -38,7 +38,8 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         if (!flying.body->impacted()) {
             const auto& e = flying.entry_command;
             const gnc::AttitudeController::Feedforward feedforward{
-                flying.body->state().attitude.inverse_rotate(e.rate_gcrf_radps), {}};
+                flying.body->state().attitude.inverse_rotate(e.rate_gcrf_radps), {},
+                flying.entry_attitude_bias_nm};
             const auto out =
                 entry_controller_.steer(*flying.body, ambient_pressure_pa, e.axis_gcrf, e.roll_reference_gcrf, &feedforward);
             out.apply_to(command);
@@ -52,7 +53,14 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
                             s.angular_velocity_body_radps.y, s.angular_velocity_body_radps.z, out.rcs_torque_fraction.x,
                             out.rcs_torque_fraction.y, out.rcs_torque_fraction.z);
                 for (const double f : out.flap_rad) std::printf(" %.0f", f / constants::deg_to_rad);
-                std::printf("\n");
+                // the hull moment correction as the pointing error a P term would need for it (entry wn 0.5 rad/s)
+                const auto inertia = flying.body->vehicle().mass_properties().inertia_kg_m2;
+                const auto& b = flying.entry_attitude_bias_nm;
+                const auto err = gnc::AttitudeController::pointing_error(*flying.body, e.axis_gcrf, e.roll_reference_gcrf);
+                std::printf(" | error %+.2f/%+.2f/%+.2f deg bias %+.2f/%+.2f/%+.2f deg k %.3f phase %s\n",
+                            err.x / constants::deg_to_rad, err.y / constants::deg_to_rad, err.z / constants::deg_to_rad,
+                            b.x / (inertia.x * 0.25) / constants::deg_to_rad, b.y / (inertia.y * 0.25) / constants::deg_to_rad,
+                            b.z / (inertia.z * 0.25) / constants::deg_to_rad, flying.entry_hull_moment_scale, gnc::to_string(e.phase));
             }
         }
         return command;

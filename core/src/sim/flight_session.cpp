@@ -17,6 +17,21 @@ namespace {
 // A freely falling body this close to its ground is ticked: a coast segment ends with one ground-contact check, so
 // a long one would fall through the ground and judge the touchdown at the speed it has reached far below it.
 constexpr double ground_tick_height_m = 5000.0;
+// [E] the entry controller integrates its pointing error only above this dynamic pressure (the flaps have authority)
+constexpr double integral_min_dynamic_pressure_pa = 200.0;
+// [E] ... above this Mach number only (the hypersonic alpha schedule; lower down its ramps and the terminal phase's
+// steering are tracking errors, no model error) ...
+constexpr double integral_min_mach = 10.0;
+// [E] ... on the part of the pitch error beyond this (nominal tracking stays below ~0.2 deg: the scale stays exactly 1)
+constexpr double integral_error_deadband_rad = 0.3 * constants::deg_to_rad;
+// [E] ... while the modelled hull pitch moment could turn the ship at least this fast (no division near its zero) ...
+constexpr double integral_min_hull_acceleration_radps2 = 0.01;
+// [E] ... while every flap is this far from its stops ...
+constexpr double integral_flap_stop_margin_rad = 2.0 * constants::deg_to_rad;
+// [E] ... within these bounds (the dispersion campaigns use +-10 %), applied beyond this deadband
+constexpr double hull_moment_scale_deadband = 0.02;
+constexpr double hull_moment_scale_min = 0.7;
+constexpr double hull_moment_scale_max = 1.3;
 
 }  // namespace
 
@@ -538,6 +553,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             auto& flying = bodies_[i];
             if (flying.entry_guidance && !flying.ship_landing && !flying.body->impacted()) {
                 flying.entry_command = flying.entry_guidance->update(*flying.body, env_, epoch_);
+                if (!flying.entry_guidance->capsule()) update_hull_moment_scale(flying);
                 if (flying.entry_command.phase == gnc::EntryPhase::Gate && !flying.entry_guidance->capsule()) {
                     // the flip and the catch take over
                     flying.ship_landing = std::make_unique<gnc::ShipLandingGuidance>(return_site(flying.body->vehicle()));
@@ -696,6 +712,49 @@ void FlightSession::deploy_legs(size_t body_index) { bodies_.at(body_index).body
 
 void FlightSession::set_leg_deployment(size_t body_index, double fraction) {
     bodies_.at(body_index).body->vehicle().set_leg_deployment(fraction);
+}
+
+// The entry controller's flaps cancel the MODELLED hull moment; a true hull moment k times it leaves (k - 1) M on the
+// ship, which a PD law only holds with an alpha error growing with the dynamic pressure (l5 Task 10: hull aero x0.92 -
+// 11 deg at 32 kPa, the drag 40 % low, the gate missed by 98 km). k is estimated from the pitch error as an integral
+// action (the controller's ki and window; the torque it adds per step taken as a change of k) on the hypersonic alpha
+// schedule only, and applied in every phase as -(k - 1) M of the model at the moment: it follows Mach number, alpha and
+// dynamic pressure. Pitch only (the symmetric hull's roll and yaw moments vanish without sideslip). Nominal tracking
+// stays inside the error deadband, so k stays exactly 1 - the LEO return's terminal phase and catch flipped on a bias
+// of < 1 deg (a torque integral: alpha 173 deg at the gate).
+void FlightSession::update_hull_moment_scale(Flying& flying) {
+    const auto& body = *flying.body;
+    const auto& air = body.air_data();
+    const double v2 = dot(air.air_velocity_body_mps, air.air_velocity_body_mps);
+    const double q_pa = 0.5 * air.air.density_kg_m3 * v2;
+    const double mach = air.air.speed_of_sound_mps > 0.0 ? std::sqrt(v2) / air.air.speed_of_sound_mps : 0.0;
+    const double hull_pitch_nm = gnc::AttitudeController::modelled_hull_moment_nm(body).y;
+    const double inertia_pitch = body.vehicle().mass_properties().inertia_kg_m2.y;
+    const auto& e = flying.entry_command;
+    double& k = flying.entry_hull_moment_scale;
+    if (e.phase == gnc::EntryPhase::Entry && q_pa > integral_min_dynamic_pressure_pa && mach > integral_min_mach &&
+        std::abs(hull_pitch_nm) > inertia_pitch * integral_min_hull_acceleration_radps2) {
+        // anti-windup: an error the flaps cannot remove at a stop is no model error (the aerocapture pass flew its
+        // forward flaps at 90 deg with the RCS saturated: k ran to 1.14 at nominal and the ship departed)
+        bool at_stop = false;
+        for (const auto& stage : body.vehicle().stages()) {
+            for (const auto& flap : stage.flaps) {
+                at_stop = at_stop || flap.deflection_rad < integral_flap_stop_margin_rad ||
+                          flap.deflection_rad > flap.max_deflection_rad - integral_flap_stop_margin_rad;
+            }
+        }
+        const double error = gnc::AttitudeController::pointing_error(body, e.axis_gcrf, e.roll_reference_gcrf).y;
+        if (!at_stop && std::abs(error) > integral_error_deadband_rad) {
+            const double beyond = error - std::copysign(integral_error_deadband_rad, error);
+            const math::Vec3 step = entry_controller_.integrate_error({}, {0.0, beyond, 0.0}, tick_s);
+            const double torque_nm = entry_controller_.integral_torque(body, step).y;  // wanted more torque ...
+            k = std::clamp(k - torque_nm / hull_pitch_nm, hull_moment_scale_min, hull_moment_scale_max);  // ... = -dk M
+        }
+    }
+    // applied beyond a deadband: nominal flights drift k by a few tenths of a percent in their transients, and the LEO
+    // catch flipped on that (campaign phase 45 deg: k 0.996, tower struck); a true error drives k on past it
+    const double applied = std::copysign(std::max(std::abs(k - 1.0) - hull_moment_scale_deadband, 0.0), k - 1.0);
+    flying.entry_attitude_bias_nm = {0.0, -applied * hull_pitch_nm, 0.0};
 }
 
 }  // namespace starsim::sim

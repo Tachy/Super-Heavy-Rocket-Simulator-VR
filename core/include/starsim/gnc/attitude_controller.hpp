@@ -57,6 +57,12 @@ public:
         // Roll-rate limit when the RCS rolls (no gimbal roll authority), rad/s; 0: none. A blunt capsule's roll inertia
         // is close to its pitch inertia: an unlimited roll there costs as much as an unlimited pitch slew.
         double rcs_max_roll_rate_radps = 0.0;
+        // Integral action (the caller integrates the pointing error, see integral_torque): the torque I * ki * integral
+        // trims what the allocation's model lacks, e.g. the true hull moment against the modelled one - a PD law alone
+        // holds an error proportional to it (l5 Task 10: hull aero x0.92 lost 11 deg of alpha at 32 kPa). ki in 1/s^3;
+        // stable for ki < 2 zeta wn^3. 0: none.
+        double integral_gain = 0.0;
+        double integral_window_rad = 0.0;  // the error is integrated only while within this (no windup in slews)
     };
 
     AttitudeController() = default;
@@ -67,10 +73,23 @@ public:
     struct Feedforward {
         math::Vec3 rate_body_radps;
         math::Vec3 acceleration_body_radps2;
+        math::Vec3 torque_body_nm;  // added to the wanted torque on all three axes (integral_torque)
     };
 
     // `axis_gcrf`: desired direction of the body x-axis (unit). `roll_reference_gcrf` (optional, non-zero):
     // direction the body +y axis should point to, projected perpendicular to the axis.
+    // Pointing error in body axes: roll about +x (zero without a roll reference), then the axis rotation's y and z.
+    static math::Vec3 pointing_error(const vehicle::FlightBody& body, const math::Vec3& axis_gcrf,
+                                     const math::Vec3& roll_reference_gcrf = {});
+
+    // Integral action: `integral` (body axes, rad s) advanced by the pointing error over dt where each axis' error is
+    // within the window; returns the new integral (unchanged without integral gain).
+    math::Vec3 integrate_error(const math::Vec3& integral, const math::Vec3& error, double dt) const;
+    // The hull's aerodynamic moment about the CG as the allocation models it (no truth dispersion), body axes.
+    static math::Vec3 modelled_hull_moment_nm(const vehicle::FlightBody& body);
+    // The torque of the integral, body axes (Feedforward::torque_body_nm).
+    math::Vec3 integral_torque(const vehicle::FlightBody& body, const math::Vec3& integral) const;
+
     ControlOutput steer(const vehicle::FlightBody& body, double ambient_pressure_pa, const math::Vec3& axis_gcrf,
                         const math::Vec3& roll_reference_gcrf = {}, const Feedforward* feedforward = nullptr) const;
 
