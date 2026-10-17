@@ -153,6 +153,13 @@ struct FlapAuthority {
     Vec3 max_torque_nm;  // per axis, half of each flap's range with the favourable sign
 };
 
+constexpr double flap_difference_step_rad = 1.0 * constants::deg_to_rad;
+constexpr double flap_stop_secant_span_rad = 20.0 * constants::deg_to_rad;  // [E] a third of the peak derivative at a stop
+// [E] Newton step limit per call: with little authority (thin air) the minimum-norm step asked for far more than the
+// range and the flaps banged between their stops every cycle; half the range keeps large trim changes (a 1e6 N m yaw
+// demand at 65 km moves the aft flaps by more than 20 deg).
+constexpr double flap_max_step_rad = 45.0 * constants::deg_to_rad;
+
 Vec3 flap_moment(const vehicle::Flap& flap, double deflection_rad, const aero::FlapTable& table,
                  const vehicle::AirData& air, const Vec3& rate_body, double cg_station_m) {
     const Vec3 arm = aero::flap_centroid(flap.geometry, deflection_rad) - Vec3{cg_station_m, 0.0, 0.0};
@@ -167,12 +174,17 @@ FlapAuthority flap_authority(const vehicle::FlightBody& body, double cg_station_
     if (air.air.density_kg_m3 <= 0.0 || body.vehicle().flap_count() == 0) return a;
     const Vec3& w = body.state().angular_velocity_body_radps;
     a.aero_moment_nm = AttitudeController::modelled_hull_moment_nm(body);
-    constexpr double step_rad = 1.0 * constants::deg_to_rad;
     for (const auto& stage : body.vehicle().stages()) {
         if (!stage.flap_table) continue;
         for (const auto& flap : stage.flaps) {
             const double d = flap.deflection_rad;
             a.aero_moment_nm += flap_moment(flap, d, *stage.flap_table, air, w, cg_station_m);
+            // The flap force goes with sin^2 of its incidence: its derivative vanishes at both stops (folded, broadside).
+            // A local difference there sees no authority and a flap at a stop never comes back (l5 Task 10: flaps held
+            // 90/0/0/90 from 105 km, their roll moment outgrew the RCS at 83 km and the ship rolled away) - near a stop
+            // the secant over the wide span into the range is used instead.
+            const bool near_stop = d < flap_stop_secant_span_rad || d > flap.max_deflection_rad - flap_stop_secant_span_rad;
+            const double step_rad = near_stop ? flap_stop_secant_span_rad : flap_difference_step_rad;
             const double lo = std::max(0.0, d - step_rad), hi = std::min(flap.max_deflection_rad, d + step_rad);
             const Vec3 per_rad = (flap_moment(flap, hi, *stage.flap_table, air, w, cg_station_m) -
                                   flap_moment(flap, lo, *stage.flap_table, air, w, cg_station_m)) /
@@ -259,6 +271,11 @@ ControlOutput AttitudeController::allocate(const vehicle::FlightBody& body, doub
             // Newton step: the flaps add what the modelled aero moment lacks of the wanted net torque.
             const Vec3 needed = torque - fa.aero_moment_nm;
             std::vector<double> delta = minimum_norm(fa.torque_per_rad, needed);
+            double largest = 0.0;
+            for (const double x : delta) largest = std::max(largest, std::abs(x));
+            if (largest > flap_max_step_rad) {
+                for (auto& x : delta) x *= flap_max_step_rad / largest;  // same direction, inside the linear reach
+            }
             // Redundant direction(s): drift towards mid-range without changing the moment (to first order).
             const size_t n = delta.size();
             std::vector<double> to_mid(n);

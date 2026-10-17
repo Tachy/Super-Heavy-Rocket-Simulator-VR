@@ -152,9 +152,13 @@ TEST_CASE("Flaps produce commanded pitch, roll and yaw torques; saturation goes 
         const auto out = gnc::AttitudeController::allocate(*body, 0.0, tau, false, true);
         CAPTURE(axis);
         bool changed = false;
-        for (size_t k = 0; k < trimmed.size(); ++k) changed |= std::abs(out.flap_rad[k] - out0.flap_rad[k]) > 1e-4;
-        CHECK(changed);
+        for (size_t k = 0; k < trimmed.size(); ++k) {
+            changed |= std::abs(out.flap_rad[k] - out0.flap_rad[k]) > 1e-4;
+            UNSCOPED_INFO("flap " << k << " at " << trimmed[k].deflection_rad / deg << " deg, step "
+                                  << (out.flap_rad[k] - out0.flap_rad[k]) / deg << " deg");
+        }
         CHECK(norm(out.rcs_torque_fraction) < 0.01);
+        CHECK(changed);
     }
     const auto saturated = gnc::AttitudeController::allocate(*body, 0.0, Vec3{0.0, 1e10, 0.0}, false, true);
     for (size_t k = 0; k < trimmed.size(); ++k) {

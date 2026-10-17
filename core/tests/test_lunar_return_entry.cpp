@@ -70,6 +70,17 @@ HandoverFlight fly_handover(double density_factor, double aero_factor, double li
     t.session.set_air_density_factor(density_factor);
     t.session.set_aero_dispersion(0, aero_factor);
     const auto& body = t.session.body(0);
+    if (const char* flaps = std::getenv("STARSIM_PROBE_FLAPS")) {  // diagnostics: initial flap deflections, "90,0,0,90"
+        auto& vehicle = const_cast<vehicle::FlightBody&>(body).vehicle();
+        const char* c = flaps;
+        for (auto& stage : vehicle.stages()) {
+            for (auto& flap : stage.flaps) {
+                flap.deflection_rad = std::atof(c) * deg;
+                while (*c && *c != ',') ++c;
+                if (*c == ',') ++c;
+            }
+        }
+    }
     HandoverFlight f;
     while (!body.caught() && !body.impacted() && body.resting() == false && t.session.epoch() - epoch < limit_s) {
         t.session.advance_to(t.session.epoch() + 1.0, 400);
