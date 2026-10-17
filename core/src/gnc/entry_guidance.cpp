@@ -286,8 +286,10 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
         now.reversal_time_s = 0.0;
         const Solution reverse_now = solve(model_, now, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
         // measured from each sign's aim point (sign x margin beyond the target; the sign pushes the track its way)
+        const double end_mps = parameters_.lateral_margin_end_speed_mps;
         const double margin_m =
-            parameters_.lateral_margin_m * std::pow(speed_mps / parameters_.lateral_margin_speed_mps, 3.0);
+            parameters_.lateral_margin_m *
+            std::pow(std::max(0.0, speed_mps - end_mps) / (parameters_.lateral_margin_speed_mps - end_mps), 3.0);
         const double c_hold = s.prediction.crossrange_m - sign_ * margin_m;
         const double c_now = reverse_now.prediction.crossrange_m + sign_ * margin_m;
         bool reverse = false;

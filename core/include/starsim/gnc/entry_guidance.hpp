@@ -63,12 +63,14 @@ struct EntryGuidanceParameters {
     double max_reversal_speed_mps = 1.0e9;
     double min_reversal_interval_s = 20.0;    // [E] dwell between reversals
     // Lateral margin (lunar_return(), l5 Task 10): each held sign aims its track this far beyond the target in its own
-    // push direction, shrinking with the speed as (v / lateral_margin_speed)^3 (a deadband funnel in predictive form):
-    // a drift either way stays correctable by a later reversal. 0: aim at the target (LEO ship, capsule). Campaign seed 2
+    // push direction, shrinking with the speed as ((v - end) / (lateral_margin_speed - end))^3 (a deadband funnel in
+    // predictive form): a drift either way stays correctable by a later reversal. 0: aim at the target (LEO ship, capsule). Campaign seed 2
     // (truth lift x0.92): one reversal landed on the target, the held sign then drifted 90 km short in its push
     // direction, where neither holding (bank needed for range) nor reversing helps.
     double lateral_margin_m = 0.0;
     double lateral_margin_speed_mps = 9700.0;
+    // The funnel closes at this speed: m(v) = margin ((v - end) / (speed - end))^3 above it, 0 below (0: v^3 to zero).
+    double lateral_margin_end_speed_mps = 0.0;
     double scale_filter_gain = 0.3;   // per cycle, measured / modelled aerodynamic acceleration
     double scale_min_acceleration_mps2 = 1.0;
     bool predictor_j2 = true;         // false: central gravity (test scenarios without J2)
@@ -121,6 +123,10 @@ struct EntryGuidanceParameters {
         p.final_bank_rad = 40.0 * constants::deg_to_rad;  // [E] probe 2026-10-16: the widest initial-bank window
         p.max_reversal_speed_mps = 8500.0;                 // [E] below the pull-out (relative)
         p.lateral_margin_m = 300e3;                        // [E] as EarthReturnTarget::lateral_margin_m at the interface
+        // [E] l5 Task 10: the v^3 funnel held the track ~35 km out until ~2.5 km/s; the last reversal (2.2 km/s, a
+        // ~75 s roll) did not finish before the terminal phase (seed 18: 10 km across at Mach 3.5, the fall never
+        // steep enough for the nose turn). Closed at 3 km/s: every campaign gate within 0.03 km (direct).
+        p.lateral_margin_end_speed_mps = 3000.0;
         // [E] user 2026-10-17: 25 kPa (b2's estimate, no source) cut the bank back in dense or thin air and the
         // dispersed returns over- or undershot (campaign 3/11 -> 7/11 at 32 kPa); 0.9 x 6 g still bounds the load
         p.max_dynamic_pressure_pa = 32000.0;
