@@ -141,3 +141,21 @@ TEST_CASE("Deorbit planner finds no pass in a short window", "[ship][deorbit]") 
     CHECK_FALSE(p.feasible);
     CHECK(p.reason.find("Überflug") != std::string::npos);
 }
+
+// Onboard tracking (l5 Task 10): the drag coefficient is solved from a day's arc of a coast with a known C_D A / m.
+TEST_CASE("Tracking estimates the orbital drag from a day's arc", "[ship][deorbit]") {
+    const auto s = setup(0.0);
+    const auto& gravity = s.session->environment().gravity;
+    const double truth = 1.2e-3;  // [m2/kg] ~120 m2 of C_D A on 100 t (b4 fixture's drift: ~212 s in 4 days)
+    const time::Epoch now = s.t0 + 86400.0;
+    const auto tracked = gnc::coast_with_drag(gravity, s.orbit, s.t0, now, truth);
+    const auto drag_free = gnc::coast_with_drag(gravity, s.orbit, s.t0, now, 0.0);
+    const double lead_m = dot(tracked.position_m - drag_free.position_m, math::normalized(tracked.velocity_mps));
+    std::printf("drag lead after a day: %.1f km\n", lead_m / 1000.0);
+    CHECK(lead_m > 10e3);  // drag makes the ship gain on the drag-free coast
+    const double estimate = gnc::estimate_drag_area_per_mass(gravity, s.orbit, s.t0, tracked, now, 0.0);
+    CHECK(std::abs(estimate / truth - 1.0) < 0.01);
+    // A short arc cannot tell: the guess comes back.
+    const auto minute = gnc::coast_with_drag(gravity, s.orbit, s.t0, s.t0 + 60.0, truth);
+    CHECK(gnc::estimate_drag_area_per_mass(gravity, s.orbit, s.t0, minute, s.t0 + 60.0, 7e-4) == 7e-4);
+}

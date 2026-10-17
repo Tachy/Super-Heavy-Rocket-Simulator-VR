@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <vector>
 
+#include "starsim/environment/atmosphere.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/vehicle/flight_body.hpp"
@@ -21,6 +22,36 @@ integrators::Dop853Options<6> planning_options() {
     options.relative_tolerance = 1e-10;  // ~cm over an orbit: far below what the entry guidance absorbs
     options.absolute_tolerance = integrators::State<6>{{0.01, 0.01, 0.01, 1e-5, 1e-5, 1e-5}};
     return options;
+}
+
+// Gravity + orbital drag. The density's height and the air's rotation take the GCRF z axis as the Earth's axis
+// (precession ~0.4 deg since J2000: ~0.1 km of ellipsoid height, absorbed by the tracked drag coefficient).
+integrators::OdeFunction<6> coast_dynamics(const environment::GravityModel& gravity, time::Epoch reference_epoch,
+                                           double drag_area_per_mass_m2pkg) {
+    auto ballistic = orbit::ballistic_dynamics(gravity, reference_epoch);
+    if (drag_area_per_mass_m2pkg == 0.0) return ballistic;
+    return [ballistic, drag_area_per_mass_m2pkg](double t_s, const integrators::State<6>& y) {
+        static const environment::Us76Atmosphere atmosphere;
+        auto dy = ballistic(t_s, y);
+        const Vec3 r{y[0], y[1], y[2]};
+        const double height = frames::fixed_to_geodetic(r).height_m;
+        if (height > 1.0e6) return dy;
+        const double density = atmosphere.at(height).density_kg_m3;
+        const Vec3 v_air = Vec3{y[3], y[4], y[5]} - cross(Vec3{0.0, 0.0, constants::earth_rotation_rate_radps}, r);
+        const Vec3 a = -0.5 * density * drag_area_per_mass_m2pkg * norm(v_air) * v_air;
+        dy[3] += a.x;
+        dy[4] += a.y;
+        dy[5] += a.z;
+        return dy;
+    };
+}
+
+orbit::CoastResult propagate(const environment::GravityModel& gravity, double drag_area_per_mass_m2pkg,
+                             const math::StateVector& state0, time::Epoch epoch0, time::Epoch epoch_end,
+                             std::span<const integrators::Event<6>> events, const integrators::Dop853Options<6>& options) {
+    const auto result = integrators::integrate<6>(coast_dynamics(gravity, epoch0, drag_area_per_mass_m2pkg), 0.0,
+                                                  math::pack(state0), epoch_end - epoch0, options, events);
+    return {math::unpack(result.y), epoch0 + result.t_s, result.event_index, result.evaluations};
 }
 
 struct Sample {
@@ -61,7 +92,7 @@ public:
         const auto i = static_cast<size_t>(
             std::clamp(std::floor((epoch - samples_.front().epoch) / sample_s), 0.0, static_cast<double>(samples_.size() - 1)));
         if (epoch - samples_[i].epoch == 0.0) return samples_[i].state;
-        return orbit::propagate_coast(gravity_, samples_[i].state, samples_[i].epoch, epoch, {}, options_).state;
+        return propagate(gravity_, parameters_.drag_area_per_mass_m2pkg, samples_[i].state, samples_[i].epoch, epoch, {}, options_).state;
     }
 
     // State at the end of the burn centred on `burn` (impulsive: at `burn`) and that epoch.
@@ -77,7 +108,7 @@ public:
         const double mass_flow = thrust / exhaust_velocity_mps_;
         const double duration = burn_duration_s(delta_v_mps, mass_kg_, thrust, mass_flow);
         const time::Epoch start = burn - 0.5 * duration;
-        const auto coast = orbit::ballistic_dynamics(gravity_, start);
+        const auto coast = coast_dynamics(gravity_, start, parameters_.drag_area_per_mass_m2pkg);
         const double m0 = mass_kg_;
         const integrators::OdeFunction<6> powered = [&](double t, const integrators::State<6>& y) {
             auto dy = coast(t, y);
@@ -103,7 +134,7 @@ public:
                 return frames::fixed_to_geodetic(r).height_m - parameters_.entry_interface_height_m;
             },
             integrators::Crossing::Falling};
-        const auto coast = orbit::propagate_coast(gravity_, s, end, end + 6000.0, std::span(&interface, 1), options_);
+        const auto coast = propagate(gravity_, parameters_.drag_area_per_mass_m2pkg, s, end, end + 6000.0, std::span(&interface, 1), options_);
         if (coast.event_index != 0) return shot;
         Vec3 r, v;
         to_fixed(earth_, coast.epoch, coast.state, r, v);
@@ -180,7 +211,7 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
             next += parameters.sample_s;
         }
     };
-    integrators::integrate<6>(orbit::ballistic_dynamics(gravity, epoch), 0.0, math::pack(state_gcrf),
+    integrators::integrate<6>(coast_dynamics(gravity, epoch, parameters.drag_area_per_mass_m2pkg), 0.0, math::pack(state_gcrf),
                               parameters.search_window_s, options, {}, observer);
     if (samples.size() < 3) {
         plan.reason = "Bahn nicht berechenbar";
@@ -209,7 +240,10 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
     };
     for (size_t i = 1; i + 1 < samples.size(); ++i) {
         if (!(angle[i] < angle[i - 1] && angle[i] <= angle[i + 1])) continue;
-        if (std::abs(cross_track[i]) > 5.0 * parameters.max_crossrange_m) continue;
+        if (std::abs(cross_track[i]) > 5.0 * parameters.max_crossrange_m) {
+            if (debug) std::printf("[deorbit] pass %+.0f s cross track %.0f km: far\n", samples[i].epoch - epoch, cross_track[i] / 1000.0);
+            continue;
+        }
         const time::Epoch pass = samples[i].epoch;
         ++plan.passes_checked;
 
@@ -324,6 +358,32 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
                   parameters.search_window_s / 3600.0);
     plan.reason = text;
     return plan;
+}
+
+math::StateVector coast_with_drag(const environment::GravityModel& gravity, const math::StateVector& state_gcrf,
+                                  time::Epoch epoch, time::Epoch end, double drag_area_per_mass_m2pkg) {
+    return propagate(gravity, drag_area_per_mass_m2pkg, state_gcrf, epoch, end, {}, planning_options()).state;
+}
+
+double estimate_drag_area_per_mass(const environment::GravityModel& gravity, const math::StateVector& reference,
+                                   time::Epoch reference_epoch, const math::StateVector& now, time::Epoch now_epoch,
+                                   double guess_m2pkg) {
+    const Vec3 along = math::normalized(now.velocity_mps);
+    const auto lead_error = [&](double beta) {  // predicted minus true along-track position
+        return dot(coast_with_drag(gravity, reference, reference_epoch, now_epoch, beta).position_m - now.position_m, along);
+    };
+    // The lead is ~linear in C_D A / m (secant); drag makes the ship gain on a drag-free coast.
+    double b0 = 0.0, e0 = lead_error(b0);
+    double b1 = guess_m2pkg > 0.0 ? guess_m2pkg : 1.0e-3, e1 = lead_error(b1);
+    if (std::abs(e0) < 1000.0) return guess_m2pkg;  // too short an arc to tell
+    for (int i = 0; i < 8 && std::abs(e1) > 1.0 && e1 != e0; ++i) {
+        const double b2 = std::max(0.0, b1 - e1 * (b1 - b0) / (e1 - e0));
+        b0 = b1;
+        e0 = e1;
+        b1 = b2;
+        e1 = lead_error(b1);
+    }
+    return b1;
 }
 
 }  // namespace starsim::gnc

@@ -28,6 +28,10 @@ struct DeorbitParameters {
     double burn_thrust_n = 0.0;
     // > 0: the entry predictor's mass (a capsule drops its trunk after the burn); 0: the mass after the burn.
     double entry_mass_kg = 0.0;
+    // Orbital drag of the coast, C_D A / m (US76 density, air co-rotating with the Earth); 0: drag-free. A tracked
+    // value (estimate_drag_area_per_mass): drag-free, a 4.7-day coast at ~200 km put the pass ~80 km off its plan, out
+    // of the reversals' 60 km reach (l5 Task 10, b4 from the aircatch orbit).
+    double drag_area_per_mass_m2pkg = 0.0;
 };
 
 struct DeorbitPlan {
@@ -55,5 +59,16 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
                          const frames::BodyOrientation& earth, EntryPredictorModel model, const EntryTarget& target,
                          double mass_kg, double exhaust_velocity_mps, double available_propellant_kg,
                          double reserve_propellant_kg, const DeorbitParameters& parameters = {});
+
+// Coast with the planner's dynamics (gravity + drag at `drag_area_per_mass_m2pkg`).
+math::StateVector coast_with_drag(const environment::GravityModel& gravity, const math::StateVector& state_gcrf,
+                                  time::Epoch epoch, time::Epoch end, double drag_area_per_mass_m2pkg);
+
+// Orbit determination of the drag (onboard tracking): the C_D A / m whose coast from the tracked state `reference`
+// at `reference_epoch` arrives where the ship is now (along-track position: drag shows as a lead growing with t^2).
+// Returns `guess` when the arc is too short to tell (the lead is below ~1 km).
+double estimate_drag_area_per_mass(const environment::GravityModel& gravity, const math::StateVector& reference,
+                                   time::Epoch reference_epoch, const math::StateVector& now, time::Epoch now_epoch,
+                                   double guess_m2pkg);
 
 }  // namespace starsim::gnc

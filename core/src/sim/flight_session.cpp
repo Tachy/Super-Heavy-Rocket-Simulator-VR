@@ -267,9 +267,9 @@ void FlightSession::run_autopilot() {
             }
             break;
         case AutopilotState::Burn: {
-            if (deorbit_replan_due_ && ship_return_ && !autopilot_.burn.ignite && autopilot_.burn.time_to_ignition_s > 0.0 &&
-                autopilot_.burn.time_to_ignition_s - deorbit_replan_lead_s <= 1.0) {  // the coast stops <= 1 s short
-                replan_ship_deorbit();  // the far plan: planned again from the state ~2 orbits before the burn
+            if (!autopilot_.burn.ignite && autopilot_.burn.time_to_ignition_s > 0.0 &&
+                deorbit_replan_in_s() <= 1.0) {  // the coast stops <= 1 s short
+                replan_ship_deorbit();  // the far plan: planned again from the tracked state (daily, ~2 orbits before)
             }
             const auto& c = burn_config_;
             const auto& vehicle = body.vehicle();
@@ -467,8 +467,8 @@ double FlightSession::coast_allowance_s() const {
     if (autopilot_.state == AutopilotState::Burn) {
         const double drift = burn_drifting() ? burn_drift_lead_s : 0.0;  // the turn to the burn attitude is ticked
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s - drift);
-        const double replan_s = autopilot_.burn.time_to_ignition_s - deorbit_replan_lead_s;
-        if (deorbit_replan_due_ && replan_s > 0.0) allowance = std::min(allowance, replan_s);  // its tick is not skipped
+        const double replan_s = deorbit_replan_in_s();
+        if (replan_s > 0.0) allowance = std::min(allowance, replan_s);  // its tick is not skipped
     }
     if (autopilot_.state == AutopilotState::Return && !bodies_[controlled_].entry_guidance) {
         allowance = std::min(allowance, entry_start_ - epoch_);
@@ -527,9 +527,8 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             epoch_ += coast;
             if (autopilot_.state == AutopilotState::Burn) {
                 autopilot_.burn.time_to_ignition_s -= coast;  // refreshed on the next tick
-                if (deorbit_replan_due_ && ship_return_ &&
-                    autopilot_.burn.time_to_ignition_s - deorbit_replan_lead_s <= 1.0) {
-                    replan_ship_deorbit();  // the far plan: planned again from the state ~2 orbits before the burn
+                if (deorbit_replan_in_s() <= 1.0) {
+                    replan_ship_deorbit();  // the far plan: planned again from the tracked state (daily, ~2 orbits before)
                 }
             }
             continue;
@@ -556,6 +555,20 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                 if (!flying.entry_guidance->capsule()) update_hull_moment_scale(flying);
                 if (flying.entry_command.phase == gnc::EntryPhase::Gate && !flying.entry_guidance->capsule()) {
                     // the flip and the catch take over
+                    if (std::getenv("STARSIM_DEBUG_FLIP")) {  // diagnostics: the hand-over state, replayable by the
+                        // hidden test "Lunar return catch from a printed gate state" (STARSIM_GATE_STATE)
+                        const auto& st = flying.body->state();
+                        const auto& v = flying.body->vehicle();
+                        std::printf("[gate] state %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g %.17g "
+                                    "%.17g %.17g %.17g %.17g\n",
+                                    epoch_.tdb_seconds_past_j2000(), st.position_gcrf_m.x, st.position_gcrf_m.y,
+                                    st.position_gcrf_m.z, st.velocity_gcrf_mps.x, st.velocity_gcrf_mps.y,
+                                    st.velocity_gcrf_mps.z, st.attitude.w, st.attitude.x, st.attitude.y, st.attitude.z,
+                                    st.angular_velocity_body_radps.x, st.angular_velocity_body_radps.y,
+                                    st.angular_velocity_body_radps.z,
+                                    v.stages().front().propellant_kg(config::TankContents::Fuel),
+                                    v.stages().front().propellant_kg(config::TankContents::Oxidizer));
+                    }
                     flying.ship_landing = std::make_unique<gnc::ShipLandingGuidance>(return_site(flying.body->vehicle()));
                     flying.ship_landing->set_realtime(realtime_planning_);
                 }

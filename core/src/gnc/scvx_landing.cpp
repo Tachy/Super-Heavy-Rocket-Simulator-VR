@@ -174,6 +174,15 @@ bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::
     model_ = snapshot.model;
     auto outcome = replanner_.plan_now(request(snapshot, 0));
     if (!outcome.plan->converged && site_.sea && !aborting_) {
+        if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: the refused catch plan
+            const auto& p = *outcome.plan;
+            const auto& x0 = snapshot.initial;
+            std::printf("[scvx] first catch plan refused: it %d vc %.3g step %.3g defect %.3g status %d dur %.2f/%.2f/%.2f | "
+                        "h %.1f lat %.1f,%.1f v %.1f,%.1f,%.1f m %.0f min %.0f\n",
+                        p.iterations, p.virtual_control, p.last_step, p.nonlinear_defect, static_cast<int>(p.status),
+                        p.reference.duration_s[0], p.reference.duration_s[1], p.reference.duration_s[2], x0[1], x0[2], x0[3],
+                        x0[4], x0[5], x0[6], x0[0], snapshot.min_mass_kg);
+        }
         // The catch is out of reach from the start: plan the abort to the sea right away.
         ++stats_.plans;
         ++stats_.failures;

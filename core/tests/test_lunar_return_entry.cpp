@@ -10,8 +10,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "lunar_return_test_support.hpp"
+#include "return_scenario.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
+#include "starsim/gnc/ship_landing.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/orbit/kepler.hpp"
@@ -340,4 +342,68 @@ TEST_CASE("Aerocapture dispersion probe", "[.][probe][aerocapture]") {
                 exited() ? "exited" : body.impacted() ? "impacted" : "stays in",
                 e.eccentricity < 1.0 ? (e.semi_major_axis_m * (1.0 + e.eccentricity) - constants::wgs84_semi_major_axis_m) / 1000.0 : -1.0,
                 min_height_m / 1000.0, body.peak_heat_rate_w_m2() / 1000.0, body.breakup_reason().c_str());
+}
+
+// Diagnostics (l5 Task 10): the flip and catch of a full flight's gate, replayed in seconds. STARSIM_GATE_STATE = the
+// 16 numbers of a "[gate] state" line (STARSIM_DEBUG_FLIP: TDB, GCRF position and velocity, attitude w x y z, body
+// rates, fuel and oxidiser kg); STARSIM_RETURN_AERO / _DENSITY / _THRUST the flight's truth factors.
+TEST_CASE("Lunar return catch from a printed gate state", "[.lunar_gate_replay]") {
+    const char* text = std::getenv("STARSIM_GATE_STATE");
+    REQUIRE(text != nullptr);
+    double g[16] = {};
+    {
+        const char* p = text;
+        for (double& value : g) {
+            char* end = nullptr;
+            value = std::strtod(p, &end);
+            REQUIRE(end != p);
+            p = end;
+        }
+    }
+    const auto factor = [](const char* name) {
+        const char* v = std::getenv(name);
+        return v ? std::atof(v) : 1.0;
+    };
+    test::LunarReturnSession t;
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
+    auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
+    double fuel_kg = 0.0, oxidiser_kg = 0.0;
+    for (const auto& tank : ship.stages.front().tanks) {
+        if (tank.contents == config::TankContents::Fuel) fuel_kg += tank.mass_kg;
+        if (tank.contents == config::TankContents::Oxidizer) oxidiser_kg += tank.mass_kg;
+    }
+    for (auto& tank : ship.stages.front().tanks) {
+        if (tank.contents == config::TankContents::Fuel) tank.mass_kg *= g[14] / fuel_kg;
+        if (tank.contents == config::TankContents::Oxidizer) tank.mass_kg *= g[15] / oxidiser_kg;
+    }
+    const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(g[0]);
+    vehicle::RigidBodyState state{{g[1], g[2], g[3]}, {g[4], g[5], g[6]}, math::Quat{g[7], g[8], g[9], g[10]}, {g[11], g[12], g[13]}};
+    {  // the gate in the pad's east-north-up frame
+        const auto& site = t.session.launch_site();
+        const double sl = std::sin(site.latitude_rad), cl = std::cos(site.latitude_rad);
+        const double so = std::sin(site.longitude_rad), co = std::cos(site.longitude_rad);
+        const math::Vec3 east{-so, co, 0.0}, north{-sl * co, -sl * so, cl}, up{cl * co, cl * so, sl};
+        const auto tr = t.earth.fixed_to_gcrf(epoch);
+        const math::Vec3 r = transpose(tr.rotation) * state.position_gcrf_m -
+                             frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+        const math::Vec3 v = transpose(tr.rotation) *
+                             (state.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), state.position_gcrf_m));
+        const math::Vec3 nose = transpose(tr.rotation) * state.attitude.rotate({1.0, 0.0, 0.0});
+        const auto enu = [&](const math::Vec3& x) { return math::Vec3{dot(x, east), dot(x, north), dot(x, up)}; };
+        const auto re = enu(r), ve = enu(v), ne = enu(nose);
+        std::printf("[gate replay] gate ENU %.1f %.1f %.1f m, velocity %.1f %.1f %.1f m/s, nose %.3f %.3f %.3f\n", re.x,
+                    re.y, re.z, ve.x, ve.y, ve.z, ne.x, ne.y, ne.z);
+    }
+    t.session.place_landing_ship(ship, state, epoch, gnc::ship_landing_parameters());
+    t.session.set_aero_dispersion(0, factor("STARSIM_RETURN_AERO"));
+    t.session.set_thrust_dispersion(0, factor("STARSIM_RETURN_THRUST"));
+    t.session.set_air_density_factor(factor("STARSIM_RETURN_DENSITY"));
+    const auto run = test::fly_landing(t.session, t.earth, epoch, 120.0);
+    const auto* guidance = t.session.ship_landing(0);
+    std::printf("[gate replay] %s, offset %.2f m, lateral %.2f m/s, sink %.2f m/s, %d plans (%d failed), %.1f t left\n",
+                sim::to_string(run.tower_phase), run.offset_m, run.lateral_mps, run.sink_mps,
+                guidance && guidance->scvx() ? guidance->scvx()->statistics().plans : 0,
+                guidance && guidance->scvx() ? guidance->scvx()->statistics().failures : 0,
+                t.session.body(0).vehicle().propellant_kg() / 1000.0);
 }

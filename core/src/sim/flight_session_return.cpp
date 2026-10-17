@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
@@ -94,7 +95,16 @@ bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
     }
     ship_return_ = true;
     deorbit_replan_due_ = deorbit_plan_->node.epoch - epoch_ > deorbit_replan_age_s;
+    deorbit_track_epoch_ = epoch_;
+    deorbit_track_state_ = {s.position_gcrf_m, s.velocity_gcrf_mps};
+    deorbit_next_track_ = epoch_ + deorbit_track_interval_s;
     return true;
+}
+
+double FlightSession::deorbit_replan_in_s() const {
+    if (!deorbit_replan_due_ || !ship_return_) return std::numeric_limits<double>::infinity();
+    const double lead = autopilot_.burn.time_to_ignition_s - deorbit_replan_lead_s;
+    return std::min(lead, deorbit_next_track_ - epoch_);
 }
 
 void FlightSession::replan_ship_deorbit() {
@@ -105,31 +115,42 @@ void FlightSession::replan_ship_deorbit() {
     const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
     if (configurations.empty() || !deorbit_plan_) return;
     const auto old_node = deorbit_plan_->node;
+    const auto& s = flying.body->state();
     gnc::DeorbitParameters parameters = deorbit_parameters_;
     parameters.search_window_s = old_node.epoch - epoch_ + deorbit_replan_window_s;
+    parameters.drag_area_per_mass_m2pkg =
+        gnc::estimate_drag_area_per_mass(gravity_, deorbit_track_state_, deorbit_track_epoch_,
+                                         {s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_,
+                                         deorbit_parameters_.drag_area_per_mass_m2pkg);
+    deorbit_parameters_.drag_area_per_mass_m2pkg = parameters.drag_area_per_mass_m2pkg;  // the next re-plan's guess
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
     const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters());
     const gnc::EntryGuidance onboard(*flying.body, schedule, target);
-    const auto& s = flying.body->state();
     const auto plan = gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_,
                                         onboard.model(), target, vehicle.mass_properties().mass_kg,
                                         configurations.front().thrust_n / configurations.front().mass_flow_kgps,
                                         vehicle.propellant_kg(), stage.landing_propellant_kg, parameters);
     if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
-        std::printf("[deorbit] re-plan %.0f s before the old node: %s, burn %+.1f s from it, %.2f m/s (old %.2f m/s)\n",
-                    old_node.epoch - epoch_, plan.feasible ? "feasible" : plan.reason.c_str(), plan.node.epoch - old_node.epoch,
-                    norm(plan.node.delta_v_gcrf_mps), norm(old_node.delta_v_gcrf_mps));
+        std::printf("[deorbit] re-plan %.0f s before the old node (tracked %.1f h, CdA/m %.3e m2/kg): %s, burn %+.1f s "
+                    "from it, %.2f m/s (old %.2f m/s), cross %.1f km\n",
+                    old_node.epoch - epoch_, (epoch_ - deorbit_track_epoch_) / 3600.0, parameters.drag_area_per_mass_m2pkg,
+                    plan.feasible ? "feasible" : plan.reason.c_str(), plan.feasible ? plan.node.epoch - old_node.epoch : 0.0,
+                    norm(plan.node.delta_v_gcrf_mps), norm(old_node.delta_v_gcrf_mps), plan.crossrange_m / 1000.0);
     }
+    deorbit_next_track_ = epoch_ + deorbit_track_interval_s;
     // A later pass is taken when drag moved this one out of reach (it is planned again before its burn); none in the
-    // window: the old plan is flown.
-    if (!plan.feasible) return;
-    deorbit_plan_ = plan;
-    if (!execute_burn(plan.node, stage.deorbit_engine_groups)) {
-        deorbit_plan_->node = old_node;
-        execute_burn(old_node, stage.deorbit_engine_groups);
-        return;
+    // window: the old plan is flown (and planned again at the next tracking time or before its burn).
+    auto node = old_node;
+    if (plan.feasible) {
+        deorbit_plan_ = plan;
+        if (execute_burn(plan.node, stage.deorbit_engine_groups)) {
+            node = plan.node;
+        } else {
+            deorbit_plan_->node = old_node;
+            execute_burn(old_node, stage.deorbit_engine_groups);
+        }
     }
-    deorbit_replan_due_ = plan.node.epoch - epoch_ > deorbit_replan_age_s;
+    deorbit_replan_due_ = node.epoch - epoch_ > deorbit_replan_age_s;
 }
 
 time::Epoch FlightSession::entry_start_epoch(double horizon_s) const {

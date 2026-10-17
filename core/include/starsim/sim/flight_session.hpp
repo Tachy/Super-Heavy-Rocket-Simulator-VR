@@ -200,12 +200,17 @@ public:
     // [E] A ship deorbit planned further ahead than this is planned again from the real state deorbit_replan_lead_s
     // before its burn (l5 Task 10: b4 from the aircatch orbit burnt a plan made 4.6 days earlier - the 200 km orbit
     // had decayed with the truth air density x1.13 and the entry fell 4,900 km short). 32 min before the burn the pass
-    // search could no longer bracket it: ~2 orbits. The planner's coast has no drag: over 4 days it moved the pass
-    // ~212 s (~46 km across by the Earth's rotation, out of the 60 km reach) - the re-plan may take a pass up to
-    // deorbit_replan_window_s after the old one, and plans it again before its own burn.
+    // search could no longer bracket it: ~2 orbits. The re-plans coast with the tracked drag (deorbit_track_interval_s);
+    // a re-plan may take a pass up to deorbit_replan_window_s after the old one, and plans it again before its own burn.
     static constexpr double deorbit_replan_age_s = 4.0 * 3600.0;
     static constexpr double deorbit_replan_lead_s = 3.0 * 3600.0;
-    static constexpr double deorbit_replan_window_s = 36.0 * 3600.0;  // [E] beyond the old node
+    // [E] beyond the old node: two more daily passes (l5 Task 10 aircatch seeds 1 / 14: with the tracked drag the
+    // planned pass lay 68-72 km across, out of the 60 km reach; the daily pass drifts ~40 km a day towards the site)
+    static constexpr double deorbit_replan_window_s = 72.0 * 3600.0;
+    // [E] Onboard tracking of a far deorbit: re-planned this often with the drag coefficient (C_D A / m) estimated
+    // from the arc since the first plan (gnc::estimate_drag_area_per_mass); a day at ~200 km leads a drag-free coast
+    // by ~100 km along track (l5 Task 10 aircatch b4: the drag-free plan put the pass 80 km off after 4.7 days).
+    static constexpr double deorbit_track_interval_s = 24.0 * 3600.0;
     static constexpr double small_burn_margin_s = 60.0;     // [E] trims / station keeping: planned after the preparation
     // [E] TLI centre after 120 s preparation + half a ~7 min burn; margin for the finite-TLI re-solve. A window < 30 min
     // away waits one parking revolution.
@@ -622,6 +627,10 @@ private:
     std::optional<gnc::DeorbitPlan> deorbit_plan_;  // last ship return plan (also when refused)
     bool ship_return_ = false;                      // the burn is the deorbit burn of a ship return
     bool deorbit_replan_due_ = false;               // a far deorbit: planned again when its free drift ends
+    time::Epoch deorbit_track_epoch_;               // onboard tracking: the arc from the first plan (drag estimate)
+    math::StateVector deorbit_track_state_;
+    time::Epoch deorbit_next_track_;                // the next tracking re-plan (deorbit_track_interval_s)
+    double deorbit_replan_in_s() const;             // to the next re-plan of a far deorbit (seconds; inf: none)
     gnc::DeorbitParameters deorbit_parameters_;
     time::Epoch entry_start_;                       // state Return: entry guidance from here
     CapsuleReturnStep capsule_return_step_ = CapsuleReturnStep::None;
