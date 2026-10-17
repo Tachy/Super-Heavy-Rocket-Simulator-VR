@@ -228,6 +228,23 @@ double bank_step(double bank_rad, double command_rad, double max_change_rad, boo
     return std::remainder(bank_rad + std::clamp(delta, -max_change_rad, max_change_rad), 2.0 * constants::pi);
 }
 
+double bank_step_held(double bank_rad, double command_rad, double max_change_rad, int& roll_direction) {
+    constexpr double ambiguous_rad = 150.0 * constants::deg_to_rad;   // [E] either way round is about as long
+    constexpr double settled_rad = 5.0 * constants::deg_to_rad;       // [E] as the guidance's settled bank
+    double delta = std::remainder(command_rad - bank_rad, 2.0 * constants::pi);
+    if (std::abs(delta) > ambiguous_rad) {
+        // a roll under way keeps its direction; a new one from a lift-down bank starts through lift down (away from 0,
+        // as bank_step), one from a lift-up bank the shorter way
+        const bool lift_down = std::abs(bank_rad) > 0.5 * constants::pi;
+        const int wanted = roll_direction != 0 ? roll_direction
+                           : lift_down         ? (bank_rad >= 0.0 ? 1 : -1)
+                                               : (delta > 0.0 ? 1 : -1);
+        if ((delta > 0.0) != (wanted > 0)) delta += wanted * 2.0 * constants::pi;
+    }
+    roll_direction = std::abs(delta) > settled_rad ? (delta > 0.0 ? 1 : -1) : 0;
+    return std::remainder(bank_rad + std::clamp(delta, -max_change_rad, max_change_rad), 2.0 * constants::pi);
+}
+
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
                               double bank_command_rad, const EntryTarget& target, double gate_height_m,
                               double heat_load_so_far_j_m2, double step_s, double max_time_s) {
@@ -237,6 +254,7 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     p.heat_load_j_m2 = heat_load_so_far_j_m2;
     Vec3 r = start.position_itrf_m, v = start.velocity_itrf_mps;
     double bank = start.bank_rad;
+    int roll_direction = start.roll_direction;
     bool entered = false;
     double t = 0.0;
     double swept_rad = 0.0;  // ground track angle flown (unwraps the range past the antipode)
@@ -259,7 +277,8 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
             commanded = command_sign * (magnitude + (model.final_bank_rad - magnitude) * f);
         }
         const double command = reversed ? -commanded : commanded;
-        const double next_bank = bank_step(bank, command, max_change, profiled);
+        const double next_bank = profiled ? bank_step_held(bank, command, max_change, roll_direction)
+                                          : bank_step(bank, command, max_change, false);
         const double mid_bank = bank + 0.5 * std::remainder(next_bank - bank, 2.0 * constants::pi);  // across 180 deg
         const Derivative k1 = m.derivative(r, v, bank);
         const Derivative k2 = m.derivative(r + k1.dr * (0.5 * step_s), v + k1.dv * (0.5 * step_s), mid_bank);

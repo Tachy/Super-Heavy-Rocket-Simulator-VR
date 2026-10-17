@@ -237,3 +237,31 @@ TEST_CASE("A reversal between lift-down banks rolls through lift down", "[ship][
     for (int i = 0; i < 115; ++i) straight = gnc::bank_step(straight, -115.0 * deg, 1.0 * deg, false);
     CHECK(std::abs(straight) < 1e-9);
 }
+
+TEST_CASE("A reversal by about 180 deg keeps its roll direction while the command moves", "[ship][guidance][skip]") {
+    // l5 Task 10: -62 -> +112 .. +129 deg - the shorter way flipped with every new command and the bank stood still
+    double bank = -62.0 * deg;
+    int direction = 0;
+    double previous = bank;
+    for (int i = 0; i < 40; ++i) {
+        const double command = (i % 2 == 0 ? 112.0 : 125.0) * deg;  // either side of the opposite of the bank
+        bank = gnc::bank_step_held(bank, command, 3.0 * deg, direction);
+        CHECK(std::remainder(bank - previous, 2.0 * constants::pi) > 0.0);  // from lift up: on the shorter way, through 0
+        previous = bank;
+    }
+    for (int i = 0; i < 100; ++i) bank = gnc::bank_step_held(bank, 118.0 * deg, 3.0 * deg, direction);
+    CHECK(std::abs(bank - 118.0 * deg) < 1e-9);
+    CHECK(direction == 0);
+    // from a lift-down bank an ambiguous reversal starts through lift down (+100 -> -75 deg: up through 180, not via 0)
+    bank = 100.0 * deg;
+    direction = 0;
+    bank = gnc::bank_step_held(bank, -75.0 * deg, 3.0 * deg, direction);
+    CHECK(std::abs(bank - 103.0 * deg) < 1e-9);
+    CHECK(direction == 1);
+    // a command well inside the shorter way is still followed back (a reversal of the reversal)
+    bank = 10.0 * deg;
+    direction = 1;
+    bank = gnc::bank_step_held(bank, -60.0 * deg, 3.0 * deg, direction);
+    CHECK(std::abs(bank - 7.0 * deg) < 1e-9);
+    CHECK(direction == -1);
+}

@@ -104,6 +104,7 @@ struct EntryPredictorState {
     math::Vec3 position_itrf_m;
     math::Vec3 velocity_itrf_mps;  // relative to the rotating Earth
     double bank_rad = 0.0;         // current bank (signed, entry_attitude convention)
+    int roll_direction = 0;        // a roll in progress the shorter way round keeps this direction (+1 / -1, 0: none)
     // Terminal steering instead of the bank: the lift in the velocity frame (x: towards "up" perpendicular to the
     // air velocity, y: to the side, see steering_basis; z unused) times the steering fraction (|.| <= 1), held to the
     // gate like a bank; coefficients at that fraction's alpha.
@@ -152,6 +153,12 @@ struct EntryPrediction {
 // Otherwise straight towards the command (LEO ship and capsule entries, tuned with it: the capsule campaign missed by
 // 7.9 km rolling the shorter way).
 double bank_step(double bank_rad, double command_rad, double max_change_rad, bool shorter_way);
+// The shorter way round with a held direction: while the command lies near the opposite side (more than 150 deg away)
+// a roll under way keeps its direction and a new one from a lift-down bank starts through lift down (from a lift-up
+// bank the shorter way) - a reversal by about 180 deg otherwise
+// flipped its direction with every new command (l5 Task 10: -62 -> +112..+129 deg, the bank dithered 12 s before it
+// rolled and the entry ended 8-21 km across). `roll_direction` is updated (0 once within the settled band).
+double bank_step_held(double bank_rad, double command_rad, double max_change_rad, int& roll_direction);
 
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
                               double bank_command_rad, const EntryTarget& target, double gate_height_m,

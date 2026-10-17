@@ -246,7 +246,7 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
 void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_itrf, const Vec3& v_itrf) {
     model_.mass_kg = body.vehicle().mass_properties().mass_kg;
     time_since_reversal_s_ += parameters_.cycle_s;
-    const EntryPredictorState state{r_itrf, v_itrf, bank_rad_};
+    const EntryPredictorState state{r_itrf, v_itrf, bank_rad_, roll_direction_};
     if (aerocapture()) {
         aerocapture_cycle(body, state);
         return;
@@ -276,8 +276,12 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     }
     Solution s = solve(model_, state, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
     const double speed_mps = norm(v_itrf);
+    // no new reversal while the last one still rolls: below ~2 km/s a 180 deg roll takes ~60 s at the bank rate, and
+    // reversals checked every 20 s reversed again mid-roll (l5 Task 10, seed 2: 2.0, 1.5 and 1.3 km/s, the flown bank
+    // never caught up and the entry ended 38 km across)
+    const bool rolling = std::abs(std::remainder(bank_target_rad_ - bank_rad_, 2.0 * constants::pi)) > settled_bank_rad;
     if (speed_mps > parameters_.min_reversal_speed_mps && speed_mps < parameters_.max_reversal_speed_mps &&
-        time_since_reversal_s_ >= parameters_.min_reversal_interval_s) {
+        time_since_reversal_s_ >= parameters_.min_reversal_interval_s && !rolling) {
         EntryPredictorState now = state;
         now.reversal_time_s = 0.0;
         const Solution reverse_now = solve(model_, now, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
@@ -618,7 +622,9 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
             entry_cycle(body, r_itrf, v_itrf);
         }
         const double max_change = model_.bank_rate_at(mach) * dt;
-        bank_rad_ = bank_step(bank_rad_, bank_target_rad_, max_change, parameters_.final_bank_rad >= 0.0);
+        bank_rad_ = parameters_.final_bank_rad >= 0.0
+                        ? bank_step_held(bank_rad_, bank_target_rad_, max_change, roll_direction_)
+                        : bank_step(bank_rad_, bank_target_rad_, max_change, false);
         command_.alpha_rad = model_.aero.alpha_rad(mach);
         command_.bank_rad = bank_rad_;
         if (capsule_) {  // flight director only: the capsule's RCS flies the bank (capsule_entry_control)

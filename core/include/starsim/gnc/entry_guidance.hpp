@@ -232,6 +232,7 @@ private:
     time::Epoch last_cycle_;
     time::Epoch last_scale_update_;
     double bank_rad_ = 0.0;          // setpoint now (rate limited)
+    int roll_direction_ = 0;         // profiled entry: the direction of a roll under way (bank_step_held)
     double flown_bank_rad_ = 0.0;    // diagnostics: the bank the vehicle flies (STARSIM_DEBUG_ENTRY)
     double bank_target_rad_ = 0.0;   // corrector output with sign
     double bank_magnitude_rad_ = 0.0;
