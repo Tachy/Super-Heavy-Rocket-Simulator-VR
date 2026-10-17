@@ -17,6 +17,11 @@ struct EntryGuidanceParameters {
     // 2-3 s losing ~200 m (webcast telemetry); at 950 m the entry campaign's hardest case (4) misses by 212 m, at
     // 800 m all twelve reach the gate - open (b3 ledger).
     double gate_height_m = 800.0;
+    // [E] a ship sinking faster than this at the gate hands over higher, gate_height_m ((sink / this)^2 - 1) above the
+    // gate (stopping distance ~ v^2; flight 13 relit at ~101 m/s); the steering still aims at the gate point. l5 Task 10:
+    // thin air (x0.88) reached the gate at 106 m/s, the flip ended ~130 m lower than nominal and the catch plan ran
+    // into an arm with 22 t left; the same gate 100 m higher was caught (0: off).
+    double gate_reference_sink_mps = 100.0;
     double cycle_s = 2.0;            // re-prediction interval
     double max_bank_rad = 150.0 * constants::deg_to_rad;
     // Bank rate limits [E]: 1 deg/s hypersonic (faster departs in alpha, b1; seen again with weak flaps), 3 deg/s
@@ -104,6 +109,7 @@ struct EntryGuidanceParameters {
     static EntryGuidanceParameters capsule() {
         EntryGuidanceParameters p;
         p.gate_height_m = 5500.0;
+        p.gate_reference_sink_mps = 0.0;  // the drogues open at their height
         p.bank_rate_radps = 10.0 * constants::deg_to_rad;
         p.fast_bank_rate_radps = 10.0 * constants::deg_to_rad;
         p.max_bank_rad = 165.0 * constants::deg_to_rad;
@@ -212,6 +218,7 @@ public:
 private:
     void entry_cycle(const vehicle::FlightBody& body, const math::Vec3& r_itrf, const math::Vec3& v_itrf);
     void aerocapture_cycle(const vehicle::FlightBody& body, const EntryPredictorState& state);
+    double gate_trigger_height_m(double sink_mps) const;  // hand-over height above the target ground
     void terminal(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const math::Vec3& r_itrf,
                   const math::Vec3& v_itrf, double mach, double dt_s);
     // Horizontal miss at the gate predicted with a terminal steering vector (and the time to go).

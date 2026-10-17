@@ -406,6 +406,12 @@ Vec3 EntryGuidance::terminal_miss(const vehicle::FlightBody& body, const Vec3& r
     return end - end_up * dot(end, end_up);
 }
 
+double EntryGuidance::gate_trigger_height_m(double sink_mps) const {
+    const double reference = parameters_.gate_reference_sink_mps;
+    if (reference <= 0.0 || sink_mps <= reference) return parameters_.gate_height_m;
+    return parameters_.gate_height_m * (sink_mps / reference) * (sink_mps / reference);
+}
+
 void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& itrf_to_gcrf, const Vec3& r_itrf,
                              const Vec3& v_itrf, double mach, double dt_s) {
     const Vec3 up = math::normalized(r_itrf);
@@ -607,7 +613,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         // above 80 km climbed out without Exit and was ticked at 200 Hz for days)
         if (height < aerocapture_dip_height_m || dot(v_rel_gcrf, up_gcrf) > 0.0) dipped_ = true;
         if (phase_ == EntryPhase::Entry && dipped_ && height > parameters_.exit_height_m) phase_ = EntryPhase::Exit;
-    } else if (height - target_.ground_height_m <= parameters_.gate_height_m) {
+    } else if (height - target_.ground_height_m <= gate_trigger_height_m(-dot(v_rel_gcrf, up_gcrf))) {
         phase_ = EntryPhase::Gate;
     }
     // Hand-over below the terminal Mach number once no bank reversal is in progress (the terminal phase starts from

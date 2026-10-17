@@ -379,6 +379,9 @@ TEST_CASE("Lunar return catch from a printed gate state", "[.lunar_gate_replay]"
     }
     const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(g[0]);
     vehicle::RigidBodyState state{{g[1], g[2], g[3]}, {g[4], g[5], g[6]}, math::Quat{g[7], g[8], g[9], g[10]}, {g[11], g[12], g[13]}};
+    if (const char* raise = std::getenv("STARSIM_GATE_RAISE_M")) {  // diagnostics: the same gate this much higher
+        state.position_gcrf_m = state.position_gcrf_m * (1.0 + std::atof(raise) / norm(state.position_gcrf_m));
+    }
     {  // the gate in the pad's east-north-up frame
         const auto& site = t.session.launch_site();
         const double sl = std::sin(site.latitude_rad), cl = std::cos(site.latitude_rad);
