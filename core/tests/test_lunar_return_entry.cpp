@@ -12,6 +12,7 @@
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/math/quat.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/lunar_return_mission.hpp"
 
@@ -195,6 +196,41 @@ TEST_CASE("Lunar return aerocapture from the hand-over state exits near 400 km",
     CHECK(e.eccentricity < 1.0);
     CHECK(std::abs(apoapsis_m - 400e3) < 100e3);
     CHECK(body.peak_heat_rate_w_m2() < 1.2e6);
+}
+
+// l5 Task 10 (aircatch campaign seed 7): a shallow pass whose lowest point stays above 80 km climbed out to a
+// 26,000 km apoapsis without phase Exit - the session ticked the guidance at 200 Hz for days. The hand-over velocity
+// turned 0.3 deg shallower (lowest point 80-120 km; 0.6 deg misses the air at 146 km): the pass must end in Exit.
+TEST_CASE("A shallow aerocapture pass that stays above 80 km ends in Exit", "[lunar][return][entry][aerocapture][slow]") {
+    test::LunarReturnSession t;
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
+    t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
+    auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
+    double full_kg = 0.0;
+    for (const auto& tank : ship.stages.front().tanks) full_kg += tank.mass_kg;
+    for (auto& tank : ship.stages.front().tanks) tank.mass_kg *= aircatch_propellant_kg / full_kg;
+    auto p = gnc::EntryGuidanceParameters::aerocapture(m.aerocapture_apoapsis_m, -1.0);
+    p.initial_bank_rad = aircatch_initial_bank_rad;
+    const auto n = math::normalized(cross(aircatch_position_gcrf_m, aircatch_velocity_gcrf_mps));
+    const auto shallow = math::Quat::from_axis_angle(n, -0.3 * constants::deg_to_rad).rotate(aircatch_velocity_gcrf_mps);
+    const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(aircatch_epoch_tdb_s);
+    t.session.place_entering_ship(ship, {aircatch_position_gcrf_m, shallow, aircatch_attitude, {}}, epoch, p);
+    const auto& body = t.session.body(0);
+    double min_height_m = 1e9;
+    const auto exited = [&] {
+        const auto* es = t.session.entry_status(0);
+        return es && es->phase == gnc::EntryPhase::Exit;
+    };
+    while (!exited() && !body.impacted() && t.session.epoch() - epoch < 3600.0) {
+        t.session.advance_to(t.session.epoch() + 1.0, 400);
+        min_height_m = std::min(min_height_m, t.session.telemetry(0).altitude_m);
+    }
+    std::printf("[aircatch shallow] %s after %.0f s, lowest %.1f km, height %.1f km\n",
+                exited() ? "exited" : body.impacted() ? "impacted" : "open", t.session.epoch() - epoch,
+                min_height_m / 1000.0, t.session.telemetry(0).altitude_m / 1000.0);
+    CHECK(min_height_m > 80e3);  // the case this test is about: never below the dip height
+    CHECK(min_height_m < 120e3);
+    CHECK(exited());
 }
 
 // Hidden probe (Task 9b): the aerocapture pass from the hand-over state with truth dispersions from the environment

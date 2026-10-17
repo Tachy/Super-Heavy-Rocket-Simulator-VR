@@ -252,6 +252,10 @@ void FlightSession::run_autopilot() {
             }
             break;
         case AutopilotState::Burn: {
+            if (deorbit_replan_due_ && ship_return_ && !autopilot_.burn.ignite && autopilot_.burn.time_to_ignition_s > 0.0 &&
+                autopilot_.burn.time_to_ignition_s - deorbit_replan_lead_s <= 1.0) {  // the coast stops <= 1 s short
+                replan_ship_deorbit();  // the far plan: planned again from the state ~2 orbits before the burn
+            }
             const auto& c = burn_config_;
             const auto& vehicle = body.vehicle();
             const math::Vec3 thrust_axis =
@@ -448,6 +452,8 @@ double FlightSession::coast_allowance_s() const {
     if (autopilot_.state == AutopilotState::Burn) {
         const double drift = burn_drifting() ? burn_drift_lead_s : 0.0;  // the turn to the burn attitude is ticked
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s - drift);
+        const double replan_s = autopilot_.burn.time_to_ignition_s - deorbit_replan_lead_s;
+        if (deorbit_replan_due_ && replan_s > 0.0) allowance = std::min(allowance, replan_s);  // its tick is not skipped
     }
     if (autopilot_.state == AutopilotState::Return && !bodies_[controlled_].entry_guidance) {
         allowance = std::min(allowance, entry_start_ - epoch_);
@@ -506,6 +512,10 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             epoch_ += coast;
             if (autopilot_.state == AutopilotState::Burn) {
                 autopilot_.burn.time_to_ignition_s -= coast;  // refreshed on the next tick
+                if (deorbit_replan_due_ && ship_return_ &&
+                    autopilot_.burn.time_to_ignition_s - deorbit_replan_lead_s <= 1.0) {
+                    replan_ship_deorbit();  // the far plan: planned again from the state ~2 orbits before the burn
+                }
             }
             continue;
         }

@@ -91,10 +91,46 @@ bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
         return false;
     }
     ship_return_ = true;
+    deorbit_replan_due_ = deorbit_plan_->node.epoch - epoch_ > deorbit_replan_age_s;
     return true;
 }
 
-time::Epoch FlightSession::entry_start_epoch() const {
+void FlightSession::replan_ship_deorbit() {
+    deorbit_replan_due_ = false;
+    auto& flying = bodies_[controlled_];
+    const auto& vehicle = flying.body->vehicle();
+    const auto& stage = vehicle.stages().front().config;
+    const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
+    if (configurations.empty() || !deorbit_plan_) return;
+    const auto old_node = deorbit_plan_->node;
+    gnc::DeorbitParameters parameters = deorbit_parameters_;
+    parameters.search_window_s = old_node.epoch - epoch_ + deorbit_replan_window_s;
+    const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
+    const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters());
+    const gnc::EntryGuidance onboard(*flying.body, schedule, target);
+    const auto& s = flying.body->state();
+    const auto plan = gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_,
+                                        onboard.model(), target, vehicle.mass_properties().mass_kg,
+                                        configurations.front().thrust_n / configurations.front().mass_flow_kgps,
+                                        vehicle.propellant_kg(), stage.landing_propellant_kg, parameters);
+    if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
+        std::printf("[deorbit] re-plan %.0f s before the old node: %s, burn %+.1f s from it, %.2f m/s (old %.2f m/s)\n",
+                    old_node.epoch - epoch_, plan.feasible ? "feasible" : plan.reason.c_str(), plan.node.epoch - old_node.epoch,
+                    norm(plan.node.delta_v_gcrf_mps), norm(old_node.delta_v_gcrf_mps));
+    }
+    // A later pass is taken when drag moved this one out of reach (it is planned again before its burn); none in the
+    // window: the old plan is flown.
+    if (!plan.feasible) return;
+    deorbit_plan_ = plan;
+    if (!execute_burn(plan.node, stage.deorbit_engine_groups)) {
+        deorbit_plan_->node = old_node;
+        execute_burn(old_node, stage.deorbit_engine_groups);
+        return;
+    }
+    deorbit_replan_due_ = plan.node.epoch - epoch_ > deorbit_replan_age_s;
+}
+
+time::Epoch FlightSession::entry_start_epoch(double horizon_s) const {
     const auto& s = bodies_[controlled_].body->state();
     const integrators::Event<6> interface{
         "entry interface",
@@ -103,7 +139,7 @@ time::Epoch FlightSession::entry_start_epoch() const {
             return frames::fixed_to_geodetic(r).height_m - deorbit_parameters_.entry_interface_height_m;
         },
         integrators::Crossing::Falling};
-    const auto coast = orbit::propagate_coast(gravity_, {s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, epoch_ + 6000.0,
+    const auto coast = orbit::propagate_coast(gravity_, {s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, epoch_ + horizon_s,
                                               std::span(&interface, 1));
     return coast.event_index == 0 ? coast.epoch - entry_lead_s : epoch_;  // no entry ahead: guidance at once
 }

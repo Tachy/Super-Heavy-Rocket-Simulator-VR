@@ -26,6 +26,10 @@ std::optional<BurnNode> circularize_at_periapsis(const math::StateVector& state,
 // not closed or the periapsis is already higher.
 std::optional<BurnNode> raise_periapsis_at_apoapsis(const math::StateVector& state, time::Epoch now, double gm_m3ps2,
                                                     double periapsis_radius_m);
+// Burn at the next apoapsis (prograde or retrograde) that moves the periapsis to `periapsis_radius_m` (two-body); empty
+// if the orbit is not closed or the target lies above the apoapsis.
+std::optional<BurnNode> set_periapsis_at_apoapsis(const math::StateVector& state, time::Epoch now, double gm_m3ps2,
+                                                  double periapsis_radius_m);
 
 // Burn duration for a delta-v from the rocket equation (constant thrust and mass flow).
 double burn_duration_s(double delta_v_mps, double mass_kg, double thrust_n, double mass_flow_kgps);

@@ -204,9 +204,10 @@ TEST_CASE("Mid-course correction after a dispersed TEI is small", "[lunar][retur
     }
 }
 
-TEST_CASE("The braking burn re-planned near the Earth hits speed, angle and the gate range", "[lunar][return][slow]") {
+TEST_CASE("The braking burn re-planned near the Earth hits speed, angle and the crossrange", "[lunar][return][slow]") {
     // From the TEI plan's coast to 1 h before the braking height: braking() converges; evaluate the result: speed
-    // within 5 m/s, angle within 0.02 deg, predicted downrange error at the nominal bank within 5 km.
+    // within 5 m/s, angle within 0.02 deg, predicted crossrange at the nominal bank within 2 km (l5 Task 10: the entry
+    // guidance nulls the downrange - it is not aimed here; it stays within the guidance's reach).
     Fixture f;
     mission::EarthReturnParameters p;
     p.target.site_itrf_m = starbase_itrf();
@@ -249,7 +250,55 @@ TEST_CASE("The braking burn re-planned near the Earth hits speed, angle and the 
     REQUIRE(arrival.reached);
     CHECK(std::abs(arrival.speed_mps - p.target.speed_mps) < 5.0);
     CHECK(std::abs(arrival.flight_path_rad - p.target.flight_path_rad) < 0.02 * deg);
-    CHECK(std::abs(arrival.downrange_error_m) < 5e3);
+    CHECK(std::abs(arrival.predicted_crossrange_m) < 2e3);
+    CHECK(std::abs(arrival.downrange_error_m) < 50e3);
+
+    // l5 Task 10 (campaign seed 2): when the downrange cannot be closed the braking burn must still meet speed and
+    // angle - the entry guidance absorbs a range error, not an angle error (the former retrograde fallback entered
+    // 0.3 deg steep and burnt through). Gate moved 25 deg east, far beyond the entry's reach.
+    auto unreachable = p.target;
+    const double a = 25.0 * deg;
+    const auto& g = p.target.gate.position_itrf_m;
+    unreachable.gate.position_itrf_m = {std::cos(a) * g.x - std::sin(a) * g.y, std::sin(a) * g.x + std::cos(a) * g.y, g.z};
+    unreachable.site_itrf_m = unreachable.gate.position_itrf_m;
+    const auto fallback = f.planner.braking(state_now, now, unreachable);
+    REQUIRE(fallback);
+    auto coasting_far = unreachable;
+    coasting_far.speed_mps = 0.0;
+    const auto far = f.planner.evaluate(state_now, now, fallback->epoch, fallback->delta_v_gcrf_mps, coasting_far);
+    if (verbose()) {
+        std::printf("[return] braking, gate out of reach: %.1f m/s -> %.1f m/s %.3f deg, downrange %.0f km\n",
+                    norm(fallback->delta_v_gcrf_mps), far.speed_mps, far.flight_path_rad / deg,
+                    far.downrange_error_m / 1000.0);
+    }
+    REQUIRE(far.reached);
+    CHECK(std::abs(far.speed_mps - p.target.speed_mps) < 5.0);
+    CHECK(std::abs(far.flight_path_rad - p.target.flight_path_rad) < 0.02 * deg);
+
+    // l5 Task 10: the braking burn realised 1 % long and 0.5 deg off (campaign: ~0.1 deg of entry angle per m/s) -
+    // the entry trim 20 s after it, burnt 60 s later, restores speed and angle.
+    const auto at_brake = orbit::propagate_coast(f.gravity, state_now, now, burn->epoch).state;
+    const Vec3 u = normalized(burn->delta_v_gcrf_mps);
+    const Vec3 side = normalized(cross(u, at_brake.position_m));
+    const Vec3 realised = 1.01 * (std::cos(0.5 * deg) * burn->delta_v_gcrf_mps + std::sin(0.5 * deg) * norm(burn->delta_v_gcrf_mps) * side);
+    auto braked = at_brake;
+    braked.velocity_mps += realised;
+    const time::Epoch trim_now = burn->epoch + 20.0;
+    const auto after = orbit::propagate_coast(f.gravity, braked, burn->epoch, trim_now).state;
+    const auto missed = f.planner.evaluate(after, trim_now, trim_now, Vec3{}, coasting);
+    const auto trim = f.planner.entry_trim(after, trim_now, trim_now + 60.0, p.target);
+    REQUIRE(trim);
+    const auto trimmed = f.planner.evaluate(after, trim_now, trim->epoch, trim->delta_v_gcrf_mps, coasting);
+    if (verbose()) {
+        std::printf("[return] braking +1 %% / 0.5 deg: %.1f m/s %.3f deg; trim %.2f m/s -> %.1f m/s %.3f deg\n",
+                    missed.speed_mps, missed.flight_path_rad / deg, norm(trim->delta_v_gcrf_mps), trimmed.speed_mps,
+                    trimmed.flight_path_rad / deg);
+    }
+    CHECK(std::abs(missed.flight_path_rad - p.target.flight_path_rad) > 0.1 * deg);  // the error is real
+    REQUIRE(trimmed.reached);
+    CHECK(norm(trim->delta_v_gcrf_mps) < 30.0);
+    CHECK(std::abs(trimmed.speed_mps - p.target.speed_mps) < 1.0);
+    CHECK(std::abs(trimmed.flight_path_rad - p.target.flight_path_rad) < 0.01 * deg);
 }
 
 TEST_CASE("TEI from a misaligned LLO waits for the window or refuses", "[lunar][return]") {

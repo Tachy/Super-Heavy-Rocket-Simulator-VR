@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "starsim/gnc/capsule_entry_control.hpp"
 #include "starsim/math/constants.hpp"
@@ -37,8 +39,21 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
             const auto& e = flying.entry_command;
             const gnc::AttitudeController::Feedforward feedforward{
                 flying.body->state().attitude.inverse_rotate(e.rate_gcrf_radps), {}};
-            entry_controller_.steer(*flying.body, ambient_pressure_pa, e.axis_gcrf, e.roll_reference_gcrf, &feedforward)
-                .apply_to(command);
+            const auto out =
+                entry_controller_.steer(*flying.body, ambient_pressure_pa, e.axis_gcrf, e.roll_reference_gcrf, &feedforward);
+            out.apply_to(command);
+            static const bool debug = std::getenv("STARSIM_DEBUG_ENTRY_ATTITUDE") != nullptr;
+            if (debug && std::fmod(epoch_.tdb_seconds_past_j2000(), 1.0) < tick_s) {  // diagnostics: once per second
+                const auto& s = flying.body->state();
+                const math::Vec3 axis = s.attitude.rotate(math::Vec3{1.0, 0.0, 0.0});
+                const double axis_error = std::acos(std::clamp(dot(axis, e.axis_gcrf), -1.0, 1.0));
+                std::printf("[entry attitude] axis error %.1f deg, rates %+.3f/%+.3f/%+.3f rad/s, rcs %+.2f/%+.2f/%+.2f, flaps",
+                            axis_error / constants::deg_to_rad, s.angular_velocity_body_radps.x,
+                            s.angular_velocity_body_radps.y, s.angular_velocity_body_radps.z, out.rcs_torque_fraction.x,
+                            out.rcs_torque_fraction.y, out.rcs_torque_fraction.z);
+                for (const double f : out.flap_rad) std::printf(" %.0f", f / constants::deg_to_rad);
+                std::printf("\n");
+            }
         }
         return command;
     }

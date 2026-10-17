@@ -63,6 +63,10 @@ flow separation (vacuum engines).
 - `aero/ship_entry_alpha.csv`: nominal angle of attack over Mach of the belly-first entry (entry guidance profile),
   referenced by `[stage.aero] entry_alpha_table`. The ship's `ascent_drag_table` (the stack's [E]) gives its axial
   drag when it flies alone.
+- `aero/radiative_heating_earth.csv` (lunar l5): equilibrium stagnation-point radiative heating for Earth air
+  [S: Sutton & Hartung, NASA TM-102652, 1990; 624 rows, 30-84 km, 8-18 km/s, nose radius 0.05-10 m], interpolated by
+  free-stream density, velocity and nose radius; the heat rate of a ship / capsule = convective (Sutton-Graves) +
+  radiative from 8 km/s up (the table's validity: equilibrium air only, no non-equilibrium or ablation coupling).
 - Ship sea-level Raptors: three single-engine groups (`sea_level_1/2` the leeward pair at 30/150 deg, `sea_level_3`
   towards the belly at 270 deg) so the landing burn can drop the belly engine (3 -> 2); burns elsewhere run the three
   together (groups of the same engine on the same ring form one symmetric burn set).

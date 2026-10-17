@@ -62,6 +62,13 @@ struct EntryGuidanceParameters {
     // skips and dives - Task 8 reversed at 9.7 km/s to -52 deg and was lost).
     double max_reversal_speed_mps = 1.0e9;
     double min_reversal_interval_s = 20.0;    // [E] dwell between reversals
+    // Lateral margin (lunar_return(), l5 Task 10): each held sign aims its track this far beyond the target in its own
+    // push direction, shrinking with the speed as (v / lateral_margin_speed)^3 (a deadband funnel in predictive form):
+    // a drift either way stays correctable by a later reversal. 0: aim at the target (LEO ship, capsule). Campaign seed 2
+    // (truth lift x0.92): one reversal landed on the target, the held sign then drifted 90 km short in its push
+    // direction, where neither holding (bank needed for range) nor reversing helps.
+    double lateral_margin_m = 0.0;
+    double lateral_margin_speed_mps = 9700.0;
     double scale_filter_gain = 0.3;   // per cycle, measured / modelled aerodynamic acceleration
     double scale_min_acceleration_mps2 = 1.0;
     bool predictor_j2 = true;         // false: central gravity (test scenarios without J2)
@@ -72,6 +79,10 @@ struct EntryGuidanceParameters {
     double hold_bank_below_speed_mps = 0.0;
     // Lunar l5: the predictor carries skip arcs (EntryPredictorModel::carry_skips) and looks this far ahead.
     bool carry_skips = false;
+    // Direct entry: a prediction that skips (a carried arc) counts as an overshoot - the bank keeps the ship in the
+    // air. l5 Task 10: a planned skip exiting at ~9.3 km/s (far above circular) reached the gate in the predictor;
+    // in air x1.12 / lift x1.04 it rose to a 15,000 km apoapsis and came down 3,600 km short (seeds 4 / 11).
+    bool skip_is_overshoot = false;
     double max_time_s = 3000.0;
     // Lunar l5 (user 2026-10-16): the predictor's bank falls linearly in energy to this at the gate
     // (EntryPredictorModel::final_bank_rad); the corrector solves the initial bank. < 0: constant bank.
@@ -84,7 +95,7 @@ struct EntryGuidanceParameters {
     double aerocapture_apoapsis_m = 0.0;
     double target_inclination_rad = -1.0;  // aerocapture: reversals on the exit orbit's inclination (< 0: none)
     double inclination_deadband_rad = 0.2 * constants::deg_to_rad;  // [E]
-    double exit_height_m = 130e3;  // aerocapture: phase Exit once above this after the dip below 80 km
+    double exit_height_m = 130e3;  // aerocapture: phase Exit once above this after the lowest point
 
     // A capsule (Crew Dragon, d3): gate at the drogue deployment height (~18,000 ft [S: NASA Crew-2]), bank rate
     // 10 deg/s [E] throughout (Dracos; Apollo rolled at up to ~20 deg/s), no terminal phase, reversals to lower speed.
@@ -106,8 +117,13 @@ struct EntryGuidanceParameters {
     static EntryGuidanceParameters lunar_return() {
         EntryGuidanceParameters p;
         p.carry_skips = true;
+        p.skip_is_overshoot = true;
         p.final_bank_rad = 40.0 * constants::deg_to_rad;  // [E] probe 2026-10-16: the widest initial-bank window
         p.max_reversal_speed_mps = 8500.0;                 // [E] below the pull-out (relative)
+        p.lateral_margin_m = 300e3;                        // [E] as EarthReturnTarget::lateral_margin_m at the interface
+        // [E] user 2026-10-17: 25 kPa (b2's estimate, no source) cut the bank back in dense or thin air and the
+        // dispersed returns over- or undershot (campaign 3/11 -> 7/11 at 32 kPa); 0.9 x 6 g still bounds the load
+        p.max_dynamic_pressure_pa = 32000.0;
         p.max_time_s = 6000.0;
         return p;
     }
@@ -211,11 +227,12 @@ private:
     void configure_model(const vehicle::FlightBody& body);
     EntryPhase phase_ = EntryPhase::Entry;
     bool started_ = false;
-    bool dipped_ = false;  // aerocapture: has been below 80 km
+    bool dipped_ = false;  // aerocapture: has been below 80 km or climbs again (the lowest point is behind)
     time::Epoch last_update_;
     time::Epoch last_cycle_;
     time::Epoch last_scale_update_;
     double bank_rad_ = 0.0;          // setpoint now (rate limited)
+    double flown_bank_rad_ = 0.0;    // diagnostics: the bank the vehicle flies (STARSIM_DEBUG_ENTRY)
     double bank_target_rad_ = 0.0;   // corrector output with sign
     double bank_magnitude_rad_ = 0.0;
     double sign_ = 0.0;              // 0: not chosen yet

@@ -100,11 +100,10 @@ TEST_CASE("Lunar return refuses a second plan while flying", "[lunar][return][se
     CHECK(t.session.lunar_return_plan()->tei.epoch - tei_epoch == 0.0);
 }
 
-// Task 8b (2026-10-16): the plan aims at one bank sign's track (~960 km beside the arrival plane) - caught, 1,055 kW/m2,
-// 4.2 g, 7.9 t left.
-TEST_CASE("Lunar return direct: the ship is caught at Starbase", "[lunar][return][session][slow]") {
-    test::LunarReturnSession t;
-    start(t);
+namespace {
+
+// Flies a started direct return to its end (caught, impacted or 8 days), prints the flight and checks the catch.
+void fly_direct_to_catch(test::LunarReturnSession& t) {
     const auto& plan = *t.session.lunar_return_plan();
     const auto& body = t.session.body(t.session.controlled_index());
     const double braking_height_m = 2000e3;  // the mission's [return] braking_height_km
@@ -163,6 +162,35 @@ TEST_CASE("Lunar return direct: the ship is caught at Starbase", "[lunar][return
     CHECK(body.peak_heat_rate_w_m2() < 1.2e6);
     CHECK(body.vehicle().propellant_kg() >= 0.0);
     CHECK(body.caught());
+}
+
+}  // namespace
+
+// Task 8b (2026-10-16): the plan aims at one bank sign's track (~960 km beside the arrival plane) - caught, 1,055 kW/m2,
+// 4.2 g, 7.9 t left.
+TEST_CASE("Lunar return direct: the ship is caught at Starbase", "[lunar][return][session][slow]") {
+    test::LunarReturnSession t;
+    start(t);
+    fly_direct_to_catch(t);
+}
+
+TEST_CASE("Lunar return from the NRHO: departure, powered flyby, caught at Starbase", "[lunar][return][session][slow]") {
+    test::LunarReturnSession t;
+    const auto s = sim::start_mission(t.session, STARSIM_CONFIG_DIR, "ship_lunar_return_nrho", {}, t.time);
+    INFO(s.refusal);
+    REQUIRE(s.return_planned);
+    REQUIRE(t.session.lunar_return_plan() != nullptr);
+    REQUIRE(t.session.lunar_return_plan()->nrho_departure);
+    fly_direct_to_catch(t);
+    const auto* departure = burn_of(t.session, sim::LunarStep::ReturnDeparture);
+    const auto* flyby = burn_of(t.session, sim::LunarStep::Tei);
+    REQUIRE(departure != nullptr);
+    REQUIRE(flyby != nullptr);
+    const double tei_mps = norm(departure->node.delta_v_gcrf_mps) + norm(flyby->node.delta_v_gcrf_mps);
+    std::printf("[lunar return nrho] departure %.1f + powered flyby %.1f = %.1f m/s (spec 400-500)\n",
+                norm(departure->node.delta_v_gcrf_mps), norm(flyby->node.delta_v_gcrf_mps), tei_mps);
+    CHECK(tei_mps > 300.0);
+    CHECK(tei_mps < 600.0);
 }
 
 namespace {

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <memory>
 
 #include "starsim/config/vehicle_config.hpp"
@@ -125,6 +126,19 @@ TEST_CASE("SCvx planning is deterministic", "[gnc][descent][scvx]") {
     const auto c = plan_descent(b->model, x0, 0, target, settings(*b), nullptr, 0.0);
     REQUIRE(a.reference.x.size() == c.reference.x.size());
     for (size_t k = 0; k < a.reference.x.size(); ++k) CHECK(a.reference.x[k] == c.reference.x[k]);
+}
+
+// l5 Task 10 (lunar return campaign seed 4): a ship falling short of the gate reached the landing planner in a state
+// whose subproblem held non-finite data; the SOCP exception left the flight session. A plan that cannot be built is
+// not converged - the caller aborts.
+TEST_CASE("SCvx returns an unconverged plan for a non-finite state instead of throwing", "[gnc][descent][scvx]") {
+    const auto b = block3();
+    auto x0 = ignition_state(*b);
+    const auto target = catch_target(*b, state_attitude(x0));
+    x0[descent_index::velocity] = std::numeric_limits<double>::quiet_NaN();
+    DescentPlan plan;
+    REQUIRE_NOTHROW(plan = plan_descent(b->model, x0, 0, target, settings(*b), nullptr, 0.0));
+    CHECK_FALSE(plan.converged);
 }
 
 TEST_CASE("SCvx re-plans from the final phase with a warm start", "[gnc][descent][scvx]") {

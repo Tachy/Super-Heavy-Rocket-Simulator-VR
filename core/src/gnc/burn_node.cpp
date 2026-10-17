@@ -1,6 +1,8 @@
 #include "starsim/gnc/burn_node.hpp"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
@@ -55,8 +57,8 @@ std::optional<BurnNode> circularize_at_periapsis(const math::StateVector& state,
     return circularize_at(state, now, gm, 0.0);
 }
 
-std::optional<BurnNode> raise_periapsis_at_apoapsis(const math::StateVector& state, time::Epoch now, double gm,
-                                                    double periapsis_radius_m) {
+std::optional<BurnNode> set_periapsis_at_apoapsis(const math::StateVector& state, time::Epoch now, double gm,
+                                                  double periapsis_radius_m) {
     const auto el = orbit::elements_from_state(state, gm);
     if (el.eccentricity >= 1.0 || el.semi_major_axis_m <= 0.0) return std::nullopt;
     const double r_a = el.semi_major_axis_m * (1.0 + el.eccentricity);
@@ -64,10 +66,18 @@ std::optional<BurnNode> raise_periapsis_at_apoapsis(const math::StateVector& sta
     const double a_new = 0.5 * (r_a + periapsis_radius_m);
     const double v_a = std::sqrt(gm * (2.0 / r_a - 1.0 / el.semi_major_axis_m));
     const double v_new = std::sqrt(gm * (2.0 / r_a - 1.0 / a_new));
-    if (v_new - v_a <= 0.0) return std::nullopt;
     const double dt = time_to_anomaly(el, constants::pi, gm);
     const auto at_node = orbit::propagate_two_body(state, gm, dt);
     return BurnNode{now + dt, (v_new - v_a) * math::normalized(at_node.velocity_mps)};
+}
+
+std::optional<BurnNode> raise_periapsis_at_apoapsis(const math::StateVector& state, time::Epoch now, double gm,
+                                                    double periapsis_radius_m) {
+    const auto node = set_periapsis_at_apoapsis(state, now, gm, periapsis_radius_m);
+    if (!node) return std::nullopt;
+    const auto el = orbit::elements_from_state(state, gm);
+    if (el.semi_major_axis_m * (1.0 - el.eccentricity) >= periapsis_radius_m) return std::nullopt;  // already higher
+    return node;
 }
 
 double burn_duration_s(double delta_v, double mass_kg, double thrust_n, double mass_flow_kgps) {
@@ -82,14 +92,22 @@ BurnExecutor::Status BurnExecutor::update(const vehicle::FlightBody& body, time:
     Status st;
     const double mass = body.vehicle().mass_properties().mass_kg;
 
-    // Integrate the thrust acceleration actually delivered since the last tick (sensed delta-v).
+    // Integrate the thrust acceleration actually delivered since the last tick (sensed delta-v: an accelerometer measures
+    // the true thrust, so the truth thrust dispersion is included - l5 Task 10: with the nominal thrust a +1.7 % engine
+    // overran the 1,033 m/s braking burn by ~17 m/s).
     double delivered = 0.0;
     for (const auto& stage : body.vehicle().stages()) {
         for (const auto& e : stage.engines) {
             if (e.producing_thrust()) delivered += e.spool * e.performance->thrust_n(e.throttle, 0.0);
         }
     }
+    delivered *= body.vehicle().thrust_factor();
     if (delivered > 0.0) {
+        if (!started_ && std::getenv("STARSIM_DEBUG_BURN")) {
+            std::printf("[burn] ignition %.1f s from the node (planned %.1f s), dv %.3f m/s\n", now - node_.epoch,
+                        -0.5 * burn_duration_s(norm(node_.delta_v_gcrf_mps), mass, thrust_n, mass_flow_kgps),
+                        norm(node_.delta_v_gcrf_mps));
+        }
         started_ = true;
         remaining_ -= body.state().attitude.rotate(thrust_axis_body) * (delivered / mass * dt_s);
     }
@@ -107,6 +125,10 @@ BurnExecutor::Status BurnExecutor::update(const vehicle::FlightBody& body, time:
     const double tail_off_dv = 0.5 * (thrust_n / mass) * shutdown_time_s;
     if (started_ && (st.remaining_dv_mps <= tail_off_dv || dot(remaining_, node_.delta_v_gcrf_mps) <= 0.0)) {
         complete_ = true;
+        if (std::getenv("STARSIM_DEBUG_BURN")) {
+            std::printf("[burn] cutoff %.1f s from the node, remaining %.3f m/s (along %.3f)\n", now - node_.epoch,
+                        st.remaining_dv_mps, dot(remaining_, math::normalized(node_.delta_v_gcrf_mps)));
+        }
     }
     st.complete = complete_;
     st.ignite = !complete_ && (started_ || st.time_to_ignition_s <= 0.0);

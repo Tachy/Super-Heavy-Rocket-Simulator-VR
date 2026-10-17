@@ -263,7 +263,7 @@ void EarthReturnPlanner::arrive(const StateVector& state, time::Epoch epoch, con
                                           target.gate, target.gate_height_m, 0.0, predictor_step_s,
                                           predictor_max_time_s);
         a.downrange_error_m = p.exited ? exited_downrange_m : p.downrange_error_m;
-        a.predicted_crossrange_m = p.crossrange_m;
+        a.predicted_crossrange_m = p.crossrange_m - target.bank_sign * target.lateral_margin_m;  // from the aim point
     }
 }
 
@@ -922,26 +922,55 @@ std::optional<gnc::BurnNode> EarthReturnPlanner::braking(const StateVector& stat
         t.entry_model.reset();
         return t;
     }());
-    Vec3 dv = -math::normalized(at.velocity_mps) * sized.braking_delta_v_mps;
+    const Vec3 dv = -math::normalized(at.velocity_mps) * sized.braking_delta_v_mps;
+    const auto aimed = aim_interface(at, *tb, target, dv, "braking");
+    if (!aimed) return std::nullopt;
+    return gnc::BurnNode{*tb, *aimed};
+}
+
+std::optional<gnc::BurnNode> EarthReturnPlanner::entry_trim(const StateVector& state, time::Epoch epoch,
+                                                            time::Epoch burn_epoch, const EarthReturnTarget& target) const {
+    const StateVector at = orbit::propagate_coast(gravity_, state, epoch, burn_epoch).state;
+    const auto aimed = aim_interface(at, burn_epoch, target, Vec3{}, "entry trim");
+    if (!aimed || norm(*aimed) < entry_trim_threshold_mps) return std::nullopt;
+    return gnc::BurnNode{burn_epoch, *aimed};
+}
+
+std::optional<Vec3> EarthReturnPlanner::aim_interface(const StateVector& at, time::Epoch burn_epoch,
+                                                      const EarthReturnTarget& target, const Vec3& guess,
+                                                      const char* what) const {
+    // l5 Task 10: speed, angle and (direct) the predicted crossrange - the entry guidance nulls the downrange (it held
+    // ~0 km through the nominal entry) but did not reverse for ~25 km across, and the terminal phase missed the gate.
+    // The former downrange row was badly conditioned (stalled at 1.6-1.9 km in every campaign case) and left the
+    // crossrange free.
     EarthReturnTarget coasting = target;
-    coasting.speed_mps = 0.0;  // the burn itself is the braking
+    coasting.speed_mps = 0.0;  // this burn is the last braking: none modelled after it
     const int n = target.entry_model ? 3 : 2;
-    auto evaluate_burn = [&](const Vec3& x) { return evaluate(at, *tb, *tb, x, coasting); };
+    auto evaluate_burn = [&](const Vec3& x) { return evaluate(at, burn_epoch, burn_epoch, x, coasting); };
     auto residual = [&](const EarthArrival& a) {
         return Vec3{(a.speed_mps - target.speed_mps) / 10.0,
                     (a.flight_path_rad - target.flight_path_rad) / constants::deg_to_rad * 10.0,
-                    a.downrange_error_m / 1e4};
+                    a.predicted_crossrange_m / 1e4};
+    };
+    const auto speed_and_angle = [&](const EarthArrival& a) {
+        return a.reached && std::abs(a.speed_mps - target.speed_mps) < braking_speed_tolerance_mps &&
+               std::abs(a.flight_path_rad - target.flight_path_rad) < braking_angle_tolerance_rad;
     };
     auto done = [&](const EarthArrival& a) {
-        return a.reached && std::abs(a.speed_mps - target.speed_mps) < braking_speed_tolerance_mps &&
-               std::abs(a.flight_path_rad - target.flight_path_rad) < braking_angle_tolerance_rad &&
-               (n < 3 || std::abs(a.downrange_error_m) < downrange_tolerance_m);
+        return speed_and_angle(a) && (n < 3 || std::abs(a.predicted_crossrange_m) < lateral_tolerance_m);
     };
     int iterations = 0;
     EarthArrival arrival;
-    if (!newton(dv, n, 30, iterations, arrival, evaluate_burn, residual, done, "braking",
-                n > 2 ? predictor_difference_mps : finite_difference_mps)) return std::nullopt;
-    return gnc::BurnNode{*tb, dv};
+    // Speed and angle first: from a start far off the corridor (a pass that skips out in the predictor) the crossrange
+    // is meaningless and the 3-row Newton wandered to 830 m/s before it found a 13 m/s trim (campaign seed 9).
+    Vec3 corridor = guess;
+    const bool on_corridor = newton(corridor, 2, 30, iterations, arrival, evaluate_burn, residual, speed_and_angle, what);
+    if (n < 3) return on_corridor ? std::optional<Vec3>(corridor) : std::nullopt;
+    Vec3 dv = on_corridor ? corridor : guess;
+    if (newton(dv, n, 30, iterations, arrival, evaluate_burn, residual, done, what, predictor_difference_mps)) return dv;
+    // not converged with the crossrange: speed and angle alone (the corridor; the guidance reverses for the rest)
+    if (on_corridor) return corridor;
+    return std::nullopt;
 }
 
 }  // namespace starsim::mission

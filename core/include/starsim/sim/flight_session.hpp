@@ -77,14 +77,17 @@ const char* to_string(CapsuleReturnStep step);
 // Ascent (plan_lunar_ascent, l4): (SurfaceStay until the liftoff ->) Ascent -> AscentCoast -> Circularize (the burn) ->
 // InLlo; AbortAscent: an abort to orbit from PoweredDescent, then AscentCoast as the ascent.
 // Return to the Earth (plan_lunar_return, l5): ReturnDeparture (NRHO: the departure burn first) -> Tei -> ReturnCoast
-// (-> ReturnCorrection -> ReturnCoast) -> Braking -> EarthEntry (autopilot state Return: entry, flip, catch); Tei,
-// ReturnCorrection and Braking: that burn is under way. Aerocapture variant (Task 9): Aerocapture (the pass) ->
-// CaptureCoast -> PerigeeRaise (at the apoapsis) -> CaptureCoast -> CaptureCircularize (at the perigee) -> b4.
+// (-> ReturnCorrection -> ReturnCoast) -> Braking -> EntryTrim -> EarthEntry (autopilot state Return: entry, flip,
+// catch); Tei, ReturnCorrection and Braking: that burn is under way; EntryTrim: the correction of the braking burn's
+// execution error is planned (and then flown). Aerocapture variant (Task 9): (Braking -> EntryTrim ->) Aerocapture (the pass) ->
+// CaptureCoast -> PerigeeRaise (at the apoapsis) -> CaptureCoast -> CaptureCircularize (at the perigee) -> b4. An exit
+// too high to circularise (Task 10) flies another pass: CaptureCoast -> RepassTrim (perigee set at the apoapsis) ->
+// Aerocapture.
 enum class LunarStep {
     None, Departure, Tli, Coast, MidCourse, PilotCorrection, PoweredFlyby, Insertion, Trim, InLlo, InNrho, StationKeeping,
     TransferOut, TransferIn, DescentWait, PlaneTrim, Doi, DescentCoast, PoweredDescent, Landed, SurfaceStay, Ascent,
     AscentCoast, Circularize, AbortAscent, Lost, ReturnDeparture, Tei, ReturnCoast, ReturnCorrection, Braking, EarthEntry,
-    Aerocapture, CaptureCoast, PerigeeRaise, CaptureCircularize
+    Aerocapture, CaptureCoast, PerigeeRaise, CaptureCircularize, EntryTrim, RepassTrim
 };
 const char* to_string(LunarStep step);
 
@@ -194,6 +197,15 @@ public:
     // aircatch: holding b4's deorbit attitude for 108 h against the gravity gradient spent 6-8 t of RCS gas). The
     // ship turns to the burn attitude in this time (0.5 deg/s slews: half a turn and settling in < 10 min).
     static constexpr double burn_drift_lead_s = 1800.0;
+    // [E] A ship deorbit planned further ahead than this is planned again from the real state deorbit_replan_lead_s
+    // before its burn (l5 Task 10: b4 from the aircatch orbit burnt a plan made 4.6 days earlier - the 200 km orbit
+    // had decayed with the truth air density x1.13 and the entry fell 4,900 km short). 32 min before the burn the pass
+    // search could no longer bracket it: ~2 orbits. The planner's coast has no drag: over 4 days it moved the pass
+    // ~212 s (~46 km across by the Earth's rotation, out of the 60 km reach) - the re-plan may take a pass up to
+    // deorbit_replan_window_s after the old one, and plans it again before its own burn.
+    static constexpr double deorbit_replan_age_s = 4.0 * 3600.0;
+    static constexpr double deorbit_replan_lead_s = 3.0 * 3600.0;
+    static constexpr double deorbit_replan_window_s = 36.0 * 3600.0;  // [E] beyond the old node
     static constexpr double small_burn_margin_s = 60.0;     // [E] trims / station keeping: planned after the preparation
     // [E] TLI centre after 120 s preparation + half a ~7 min burn; margin for the finite-TLI re-solve. A window < 30 min
     // away waits one parking revolution.
@@ -531,7 +543,7 @@ private:
                               double ambient_pressure_pa, vehicle::VehicleCommand& command) const;
     double coast_allowance_s() const;  // 0 if fixed ticks are needed now
     void start_entry_guidance(Flying& flying, const gnc::EntryGuidanceParameters& parameters);
-    time::Epoch entry_start_epoch() const;  // returning ship: entry interface (coasting from now) - entry_lead_s
+    time::Epoch entry_start_epoch(double horizon_s = 6000.0) const;  // returning ship: entry interface (coasting from now) - entry_lead_s
     std::vector<vehicle::FlightBody*> body_pointers() const;
 
     std::filesystem::path config_dir_;
@@ -576,6 +588,7 @@ private:
     size_t nose_cone_body_ = 0;
     bool attitude_mode_active() const;  // a mode is held now (not Free, no autopilot phase steering)
     bool burn_drifting() const;         // a far burn waits in free drift (burn_drift_lead_s)
+    void replan_ship_deorbit();         // a far deorbit planned again from the state now (deorbit_replan_age_s)
     std::vector<Flying> bodies_;
     size_t controlled_ = 0;
     PilotInput input_;
@@ -600,6 +613,7 @@ private:
     math::Vec3 last_rcs_acceleration_;  // RCS translation of the controlled body in the last tick (GCRF)
     std::optional<gnc::DeorbitPlan> deorbit_plan_;  // last ship return plan (also when refused)
     bool ship_return_ = false;                      // the burn is the deorbit burn of a ship return
+    bool deorbit_replan_due_ = false;               // a far deorbit: planned again when its free drift ends
     gnc::DeorbitParameters deorbit_parameters_;
     time::Epoch entry_start_;                       // state Return: entry guidance from here
     CapsuleReturnStep capsule_return_step_ = CapsuleReturnStep::None;
@@ -677,12 +691,17 @@ private:
     void run_lunar_return_steps(Flying& flying);
     void lunar_return_enter_coast();   // ReturnCoast: Sun pointing, the next MCC or the braking burn's ignition lead
     void lunar_return_coast_event();   // ReturnCoast: the timed event is due (MCC or braking burn)
-    void lunar_return_after_braking();  // direct: the entry (state Return); aerocapture: step Aerocapture
+    void lunar_return_after_braking();  // step EntryTrim: the trim is planned entry_trim_settle_s later
+    void lunar_return_entry_trim();     // plans and flies the trim, or enters at once when none is needed or fits
+    void lunar_return_enter_entry();    // direct: the entry (state Return); aerocapture: step Aerocapture
     void lunar_return_captured(Flying& flying);  // aerocapture exit: the perigee raise planned from the real orbit
     void lunar_return_raised(Flying& flying);    // perigee raised: apsides checked, the circularisation planned
+    void lunar_return_repass(Flying& flying, double apoapsis_m);  // exit too high: perigee set for another pass
+    void lunar_return_next_pass();                                // step Aerocapture at the next perigee
     void lunar_return_to_b4();                   // in the circular orbit: b4's deorbit planned
     // CaptureCoast: coast to `node`, then fly it on the deorbit engines as step `burn`
-    void lunar_capture_coast(Flying& flying, const gnc::BurnNode& node, LunarStep burn);
+    // false: the tanks cannot fly the burn (the lunar flight is aborted with the reason)
+    bool lunar_capture_coast(Flying& flying, const gnc::BurnNode& node, LunarStep burn);
     gnc::BurnNode lunar_capture_burn_;           // CaptureCoast: the next capture burn
     LunarStep lunar_capture_burn_step_ = LunarStep::PerigeeRaise;
     // [E] the captured orbit counts as circular (b4's start, 200 x 200 km) when its apsides are this close
@@ -692,11 +711,26 @@ private:
     // [E] aerocapture: below this height the pass will not climb out again (nominal passes stay above ~55 km)
     static constexpr double aerocapture_floor_height_m = 40e3;
     static constexpr double capture_min_apsis_height_m = 150e3;  // [E] after the raise: both apsides above this
+    // Another aerocapture pass (user 2026-10-17): dense air (+15 %) made the heat-rate limit cut the bank back and the
+    // pass exited to 17,000-21,000 km apoapsis - safe, but circularising cost 1.9-2.1 km/s. [E] above this capture cost
+    // (perigee raise + circularisation) the perigee is set to aerocapture_repass_perigee_height_m at the apoapsis and
+    // the next perigee is another pass (multi-pass aerobraking), up to aerocapture_max_passes in all.
+    static constexpr double aerocapture_repass_dv_mps = 150.0;
+    static constexpr double aerocapture_repass_perigee_height_m = 60e3;
+    static constexpr int aerocapture_max_passes = 3;
+    static constexpr double aerocapture_repass_trim_min_mps = 0.5;  // [E] smaller perigee corrections are not flown
+    int lunar_aerocapture_passes_ = 0;
     double lunar_return_arrival_speed() const;  // relative speed at the entry interface, coasting from now
     std::optional<LunarReturnSetup> lunar_return_;
     std::optional<mission::ReturnPlan> lunar_return_plan_;
     bool lunar_return_departed_ = false;  // NRHO: the departure burn is flown (the powered flyby is next)
     std::optional<time::Epoch> lunar_return_braking_epoch_;  // predicted braking centre (ReturnCoast)
+    bool lunar_entry_trim_commanded_ = false;                // EntryTrim: the trim burn is flying / was flown
+    // [E] l5 Task 10: the trim is planned this long after the braking burn (navigation settles) and burnt
+    // entry_trim_lead_s after the planning; it must end entry_trim_margin_s before the entry guidance starts.
+    static constexpr double entry_trim_settle_s = 20.0;
+    static constexpr double entry_trim_lead_s = 60.0;
+    static constexpr double entry_trim_margin_s = 30.0;
     // The entry guidance parameters of a lunar return (lunar_return() / aerocapture()); empty: the LEO ship return's.
     std::optional<gnc::EntryGuidanceParameters> return_entry_parameters_;
     math::StateVector controlled_state() const;

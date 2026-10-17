@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 #include "starsim/gnc/descent_discretization.hpp"
@@ -218,8 +219,15 @@ optim::SocpResult DescentPlanner::solve(int start_phase, DescentGoal goal, const
             // Another structure (e.g. another node count): rebuild below. Invalid data throws again there.
         }
     }
-    solver = std::make_unique<optim::SocpSolver>(problem);
-    return solver->solve(problem);
+    try {
+        solver = std::make_unique<optim::SocpSolver>(problem);
+        return solver->solve(problem);
+    } catch (const std::invalid_argument& e) {
+        // Non-finite data (a state far outside the model, e.g. a ship falling short of its gate - l5 Task 10): no
+        // solution, the plan stays unconverged and the caller aborts. Structural errors stay programming errors.
+        if (std::string(e.what()).find("non-finite") == std::string::npos) throw;
+        return {};
+    }
 }
 
 DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& initial, int start_phase,

@@ -71,6 +71,8 @@ const char* to_string(LunarStep step) {
         case LunarStep::CaptureCoast: return "Freiflug zum Apogäum";
         case LunarStep::PerigeeRaise: return "Perigäumsanhebung";
         case LunarStep::CaptureCircularize: return "Zirkularisierung";
+        case LunarStep::EntryTrim: return "Eintrittskorrektur";
+        case LunarStep::RepassTrim: return "Perigäumskorrektur";
     }
     return "";
 }
@@ -505,6 +507,8 @@ void FlightSession::run_lunar_steps(Flying& flying) {
         case LunarStep::CaptureCoast:
         case LunarStep::PerigeeRaise:
         case LunarStep::CaptureCircularize:
+        case LunarStep::EntryTrim:
+        case LunarStep::RepassTrim:
             break;
     }
 }

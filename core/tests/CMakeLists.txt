@@ -37,6 +37,7 @@ add_executable(starsim_core_tests
     test_lunar_return_mission.cpp
     test_lunar_return_session.cpp
     test_lunar_return_entry.cpp
+    test_lunar_return_campaign.cpp
     test_lunar_outbound_session.cpp
     test_nrho_reference.cpp
     test_capsule_aero.cpp

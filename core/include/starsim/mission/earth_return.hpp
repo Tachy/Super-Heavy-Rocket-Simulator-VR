@@ -39,6 +39,11 @@ struct EarthReturnTarget {
     // ~1,000 km beside the arrival plane, the average of both left the site that far from either and the guidance's
     // one large reversal lost the ship. The guidance then starts on this sign (its track ends closest to the site).
     double bank_sign = 1.0;
+    // [E] Direct entry (l5 Task 10): the held sign's track is aimed this far beyond the site, away from the side a
+    // reversal moves it to (bank_sign x margin), so that holding and reversing straddle the site and the guidance's
+    // reversal timing lands on it. Aimed at the site itself (0), a truth lift 6.5 % high drifted the track 150 km to
+    // the reversal side, where no reversal helps (campaign seed 11: -160 km at the gate).
+    double lateral_margin_m = 300e3;
     // Direct entry: the aimed track's end beside the arrival plane; the crossrange is measured from it.
     // The gate aiming refines it as a fixed point (warm start: the previous plan's value).
     double lateral_offset_m = 0.0;
@@ -57,7 +62,7 @@ struct EarthArrival {
     double perigee_height_m = 0.0;        // osculating, after the braking (two-body)
     double crossrange_m = 0.0;            // the site's distance from the arrival plane (> 0: right) - lateral offset
     double downrange_error_m = 0.0;       // direct: predictor at the nominal bank (> 0: overshoot); else 0
-    double predicted_crossrange_m = 0.0;  // direct: predictor at the nominal bank (> 0: site to the right); else 0
+    double predicted_crossrange_m = 0.0;  // direct: predictor at the nominal bank, from the aim point (lateral_margin_m)
     double lateral_offset_m = 0.0;        // the target's lateral offset this arrival was measured with
 };
 
@@ -136,9 +141,19 @@ public:
 
     // The braking burn re-planned from the state now as the last targeting burn: burn epoch at the predicted braking
     // height crossing; constraints: relative speed and flight-path angle at the interface, and (direct) the predictor's
-    // downrange error. Empty if not converged.
+    // crossrange (the entry guidance nulls the downrange). Empty if not converged.
     std::optional<gnc::BurnNode> braking(const math::StateVector& state, time::Epoch epoch,
                                          const EarthReturnTarget& target) const;
+
+    // Entry trim after the braking burn (l5 Task 10): the minimum-norm burn at `burn_epoch` that restores the target
+    // relative speed, flight-path angle and (direct) predicted crossrange at the interface; empty below
+    // entry_trim_threshold_mps or not converged. The burn's execution error moves the angle ~0.1 deg per m/s.
+    std::optional<gnc::BurnNode> entry_trim(const math::StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
+                                            const EarthReturnTarget& target) const;
+    // [E] below it the trim is not flown (~0.05 deg of entry angle). l5 Task 10: 2 m/s (~0.2 deg) was set while the
+    // campaign's entry angle error still came right after the braking burn; the aerocapture corridor (+-0.25 deg)
+    // cannot spare 0.2 deg (EI 0.17 deg shallow: exits at 12,000-20,000 km).
+    static constexpr double entry_trim_threshold_mps = 0.5;
 
     // The epoch the inbound coast crosses the braking height (empty: none within 6 days).
     std::optional<time::Epoch> braking_epoch(const math::StateVector& state, time::Epoch epoch,
@@ -166,6 +181,11 @@ private:
                 EarthArrival& a) const;
     // Perigee height the braked conic needs for the target interface conditions (exact at the converged arrival).
     double perigee_target_m(const EarthArrival& a, const EarthReturnTarget& target) const;
+    // The burn at `burn_epoch` from `at` (the state there) that meets the target relative speed and flight-path angle at
+    // the interface and (direct) the predictor's crossrange; none modelled after it. Falls back to speed and angle.
+    std::optional<math::Vec3> aim_interface(const math::StateVector& at, time::Epoch burn_epoch,
+                                            const EarthReturnTarget& target, const math::Vec3& guess,
+                                            const char* what) const;
     // Direct entry, from a plane solution (perigee and crossrange met): the interface epoch moved along the plane
     // solutions (perigee, crossrange and that epoch targeted) until the predictor's downrange error is zero - secant
     // from the arrival (`scan` false: a nearby gate), or scanned +-12 h both ways for the site's pass and the cheapest

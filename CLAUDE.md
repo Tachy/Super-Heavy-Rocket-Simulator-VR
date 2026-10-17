@@ -36,13 +36,15 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
   Moon: body-fixed frame, shape, atmosphere or vacuum),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP),
-  mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning
-  and the mission delta-v budget),
+  mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
+  the mission delta-v budget and the Earth return: TEI, mid-course corrections, braking burn),
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
-  terminal descent, lunar ascent and abort guidance),
+  terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
+  aerocapture guidance),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
-  aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating, blunt capsule from a
+  aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating plus radiative heating
+  from the NASA TM-102652 equilibrium tables, blunt capsule from a
   modified-Newtonian table with offset-CG trim, reefed parachutes),
   propulsion (engine performance, RCS allocator + pulse modulator).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).

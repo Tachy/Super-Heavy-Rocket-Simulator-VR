@@ -136,6 +136,7 @@ TEST_CASE("Guided lunar-return entry at 9.6 km/s inertial reaches the gate withi
     p.predictor_j2 = false;
     p.final_bank_rad = -1.0;  // the constant-bank skip entry (lunar_return() profiles the bank since Task 8)
     p.initial_bank_rad = 75.0 * deg;
+    p.lateral_margin_m = 0.0;  // the target is the prediction's own end point, not a track aimed beside the site
     scenario.fly_guided(schedule, target, p, radiative);
     CHECK(scenario.reached_gate());
     CHECK(scenario.gate_miss_m(target) < 2000.0);

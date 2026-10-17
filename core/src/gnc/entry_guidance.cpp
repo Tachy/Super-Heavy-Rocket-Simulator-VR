@@ -21,8 +21,10 @@ constexpr double converged_bank_rad = 0.1 * constants::deg_to_rad;
 constexpr double bracket_step_rad = 10.0 * constants::deg_to_rad;
 constexpr int max_illinois_iterations = 8;
 constexpr int constraint_bisections = 6;
-// [E] profiled lunar return: above the lowest capturing bank when the limits would cut it to a skip-out
-constexpr double capture_margin_rad = 2.0 * constants::deg_to_rad;
+// [E] profiled lunar return: above the lowest capturing bank when the limits would cut it to a skip-out. l5 Task 10:
+// 2 deg (the bisection itself resolves ~2 deg) skipped out in air x1.12 / lift x1.04 (campaign seeds 4 / 11, 3,600 km
+// short) - the boundary is the nominal model's.
+constexpr double capture_margin_rad = 8.0 * constants::deg_to_rad;
 constexpr double terminal_max_height_m = 40000.0;  // the hand-over Mach number is only trusted in dense air
 constexpr double max_terminal_prediction_s = 900.0;
 constexpr double settled_bank_rad = 5.0 * constants::deg_to_rad;  // no reversal in progress
@@ -126,6 +128,7 @@ double EntryGuidance::miss(const EntryPrediction& p) const {
         return -overshoot_m;
     }
     if (p.exited || !p.reached_gate) return overshoot_m;
+    if (parameters_.skip_is_overshoot && p.skips > 0) return overshoot_m;
     return p.downrange_error_m;
 }
 
@@ -278,7 +281,11 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
         EntryPredictorState now = state;
         now.reversal_time_s = 0.0;
         const Solution reverse_now = solve(model_, now, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
-        const double c_hold = s.prediction.crossrange_m, c_now = reverse_now.prediction.crossrange_m;
+        // measured from each sign's aim point (sign x margin beyond the target; the sign pushes the track its way)
+        const double margin_m =
+            parameters_.lateral_margin_m * std::pow(speed_mps / parameters_.lateral_margin_speed_mps, 3.0);
+        const double c_hold = s.prediction.crossrange_m - sign_ * margin_m;
+        const double c_now = reverse_now.prediction.crossrange_m + sign_ * margin_m;
         bool reverse = false;
         if ((c_hold > 0.0) != (c_now > 0.0)) {
             // The reversal time that ends on the target lies between now and never: it has come when a reversal
@@ -286,7 +293,7 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
             EntryPredictorState next = state;
             next.reversal_time_s = parameters_.cycle_s;
             const Solution reverse_next = solve(model_, next, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
-            const double c_next = reverse_next.prediction.crossrange_m;
+            const double c_next = reverse_next.prediction.crossrange_m + sign_ * margin_m;
             // ... and only if reversing now ends closer across than holding: late in a capsule's entry the crossrange
             // moves fast with the reversal time, and a reversal one cycle early overshot (d4 campaign: -2.1 km held,
             // +5.9 km reversed at 536 m/s, then held from 500 m/s: 5.8 km off the zone).
@@ -305,6 +312,11 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
         } else if (std::abs(c_now) + parameters_.reversal_crossrange_base_m < std::abs(c_hold)) {
             reverse = true;
         }
+        if (std::getenv("STARSIM_DEBUG_ENTRY")) {
+            std::printf("[entry]   reversal check: hold %.1f km, reverse now %.1f km (bank %.1f%s) -> %s\n",
+                        c_hold / 1000.0, c_now / 1000.0, reverse_now.bank_rad / constants::deg_to_rad,
+                        reverse_now.constrained ? " constrained" : "", reverse ? "reverse" : "hold");
+        }
         if (reverse) {
             sign_ = -sign_;
             time_since_reversal_s_ = 0.0;
@@ -314,8 +326,11 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     bank_magnitude_rad_ = s.bank_rad;
     bank_target_rad_ = sign_ * s.bank_rad;
     if (std::getenv("STARSIM_DEBUG_ENTRY")) {
-        std::printf("[entry] v %.0f bank %+.1f%s downrange %.1f km cross %.1f km peak %.2f g q %.1f kPa (%d predictions)\n",
+        std::printf("[entry] v %.0f bank %+.1f%s (flown %+.1f, h %.1f km, scales %.2f/%.2f) downrange %.1f km cross %.1f km "
+                    "peak %.2f g q %.1f kPa (%d predictions)\n",
                     norm(v_itrf), bank_target_rad_ / constants::deg_to_rad, s.constrained ? " constrained" : "",
+                    flown_bank_rad_ / constants::deg_to_rad, (norm(r_itrf) - constants::wgs84_semi_major_axis_m) / 1000.0,
+                    model_.drag_scale, model_.lift_scale,
                     s.prediction.downrange_error_m / 1000.0, s.prediction.crossrange_m / 1000.0, s.prediction.peak_load_g,
                     s.prediction.peak_dynamic_pressure_pa / 1000.0, s.predictions);
     }
@@ -578,7 +593,9 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
     }
 
     if (aerocapture()) {  // no gate: the pass ends when the ship climbs out of the atmosphere again
-        if (height < aerocapture_dip_height_m) dipped_ = true;
+        // the lowest point is behind once below the dip height or climbing again (l5 Task 10: a shallow pass that stayed
+        // above 80 km climbed out without Exit and was ticked at 200 Hz for days)
+        if (height < aerocapture_dip_height_m || dot(v_rel_gcrf, up_gcrf) > 0.0) dipped_ = true;
         if (phase_ == EntryPhase::Entry && dipped_ && height > parameters_.exit_height_m) phase_ = EntryPhase::Exit;
     } else if (height - target_.ground_height_m <= parameters_.gate_height_m) {
         phase_ = EntryPhase::Gate;
@@ -597,6 +614,7 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         if (phase_ == EntryPhase::Entry && epoch - last_cycle_ >= parameters_.cycle_s &&
             speed >= parameters_.hold_bank_below_speed_mps) {
             last_cycle_ = epoch;
+            if (!capsule_) flown_bank_rad_ = measured_bank_rad(axis_gcrf, v_rel_gcrf, up_gcrf);
             entry_cycle(body, r_itrf, v_itrf);
         }
         const double max_change = model_.bank_rate_at(mach) * dt;

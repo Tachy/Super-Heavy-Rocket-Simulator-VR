@@ -129,6 +129,13 @@ bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<Burn
     }
     burn_config_ = *chosen;
     burn_.emplace(node);
+    // the status until the burn's first tick: a coast before it read the previous burn's (l5 Task 10: the deorbit
+    // re-plan saw the old burn's time to ignition and planned again on every coast step)
+    autopilot_.burn = {};
+    autopilot_.burn.time_to_ignition_s =
+        node.epoch - epoch_ -
+        0.5 * gnc::burn_duration_s(dv, bodies_[controlled_].body->vehicle().mass_properties().mass_kg, chosen->thrust_n,
+                                   chosen->mass_flow_kgps);
     autopilot_.state = AutopilotState::Burn;
     attitude_mode_ = {};  // d2 minor: a mode set before the burn no longer turns the vehicle back after it
     capsule_return_step_ = CapsuleReturnStep::None;  // a pilot burn ends a capsule return (its plan sets it after this)

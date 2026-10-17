@@ -3,8 +3,10 @@
 // Design decisions:
 // - Every burn is planned from the real state when its step is due (planning nodes): the TEI (and the NRHO powered
 //   flyby) re-solved for the finite burn at the plan's node epoch, the MCCs at their slot, the braking burn at the
-//   predicted braking-height crossing. A braking burn that does not converge flies the plan's vis-viva impulse
-//   (retrograde at the crossing) - never skipped silently.
+//   predicted braking-height crossing (speed and angle met even when the downrange cannot be closed). A braking burn
+//   that does not converge flies the plan's vis-viva impulse (retrograde at the crossing) - never skipped silently.
+// - Entry trim (Task 10): 20 s after the braking burn its execution error (~0.1 deg of entry angle per m/s; corridor
+//   +-0.5 deg) is measured and trimmed as a small burn 60 s later, if it ends before the entry guidance starts.
 // - Big burns (TEI, NRHO departure, powered flyby, braking) on the vacuum Raptors, the MCCs as lunar_small_burn.
 // - The coast is Sun-pointed as the outbound coast (lunar_sun_coast); its timed event is the next MCC or the braking
 //   burn's ignition lead.
@@ -19,6 +21,7 @@
 #include "starsim/sim/flight_session.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 
 #include "starsim/gnc/burn_node.hpp"
@@ -93,7 +96,7 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
     if (flying.body->impacted()) {
         const auto& cause = flying.body->breakup_reason();
         const bool aerocapture = lunar_step_ == LunarStep::Aerocapture || lunar_step_ == LunarStep::CaptureCoast ||
-                                 lunar_step_ == LunarStep::PerigeeRaise ||
+                                 lunar_step_ == LunarStep::PerigeeRaise || lunar_step_ == LunarStep::RepassTrim ||
                                  lunar_step_ == LunarStep::CaptureCircularize;
         if (aerocapture) {
             flying.entry_guidance.reset();
@@ -154,9 +157,20 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
         case LunarStep::Braking:
             lunar_return_after_braking();
             break;
+        case LunarStep::EntryTrim:
+            if (lunar_entry_trim_commanded_) {  // the trim burn is flown
+                lunar_return_enter_entry();
+            } else if (epoch_ - lunar_step_epoch_ >= 0.0) {
+                lunar_return_entry_trim();
+            }
+            break;
         case LunarStep::Aerocapture: {
             if (!flying.entry_guidance) {
-                if (epoch_ - lunar_step_epoch_ < 0.0) break;
+                if (epoch_ - lunar_step_epoch_ < 0.0) {
+                    if (lunar_aerocapture_passes_ > 1) lunar_sun_coast(flying);  // the orbit to the next pass
+                    break;
+                }
+                attitude_mode_ = {};
                 // The pass from the entry lead on, as planned: one bank sign, no plane steering (the start's
                 // aerocapture(apoapsis, -1)). Task 9: steering on the arrival inclination reversed nearly every cycle
                 // (the target lies between the two signs' exits, 29.2 / 32.4 deg) and each roll through lift up lofted
@@ -192,6 +206,9 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
             lunar_status_ = "Aircatch: " + name + " " + german(norm(lunar_capture_burn_.delta_v_gcrf_mps), 1) + " m/s";
             break;
         }
+        case LunarStep::RepassTrim:  // the perigee correction is flown: the next perigee is another pass
+            lunar_return_next_pass();
+            break;
         case LunarStep::PerigeeRaise:  // the burn is flown (it hands back to the lunar steps)
             lunar_return_raised(flying);
             break;
@@ -309,8 +326,42 @@ double FlightSession::lunar_return_arrival_speed() const {
 }
 
 void FlightSession::lunar_return_after_braking() {
+    // l5 Task 10: ~0.1 deg of entry angle per m/s of the braking burn's execution error, a corridor of +-0.5 deg - the
+    // error is measured after the burn and trimmed (as Apollo's and Orion's last corrections before the interface).
+    lunar_step_ = LunarStep::EntryTrim;
+    lunar_entry_trim_commanded_ = false;
+    lunar_step_epoch_ = epoch_ + entry_trim_settle_s;
+    attitude_mode_ = {};
+    lunar_status_ = "Eintrittskorrektur: Navigation";
+}
+
+void FlightSession::lunar_return_entry_trim() {
+    const auto& target = lunar_return_->ret.target;
+    mission::EarthReturnPlanner planner(gravity_, *env_.ephemeris, earth_);
+    deorbit_parameters_.entry_interface_height_m = target.interface_height_m;  // entry_start_epoch() uses it
+    const auto trim_epoch = epoch_ + entry_trim_lead_s;
+    const auto trim = planner.entry_trim(controlled_state(), epoch_, trim_epoch, target);
+    if (!trim || entry_start_epoch() - trim_epoch < entry_trim_margin_s) {
+        // none needed (below the threshold), not converged, or no time before the entry guidance: enter as braked
+        lunar_return_enter_entry();
+        return;
+    }
+    // as lunar_burn, but a trim that cannot be flown enters as braked instead of ending the flight
+    if (!lunar_small_burn(*trim)) {
+        lunar_return_enter_entry();
+        return;
+    }
+    const auto centre = orbit::propagate_coast(gravity_, controlled_state(), epoch_, trim->epoch).state;
+    lunar_burns_.push_back({LunarStep::EntryTrim, *trim, bodies_[controlled_].body->vehicle().mass_properties().mass_kg,
+                            centre.position_m});
+    lunar_entry_trim_commanded_ = true;
+    lunar_status_ = "Eintrittskorrektur: " + german(norm(trim->delta_v_gcrf_mps), 1) + " m/s";
+}
+
+void FlightSession::lunar_return_enter_entry() {
     const auto& target = lunar_return_->ret.target;
     if (lunar_return_->aerocapture) {
+        lunar_aerocapture_passes_ = 1;
         lunar_step_ = LunarStep::Aerocapture;
         deorbit_parameters_.entry_interface_height_m = target.interface_height_m;  // entry_start_epoch() uses it
         lunar_step_epoch_ = entry_start_epoch();  // the guidance starts at the entry lead
@@ -335,34 +386,84 @@ void FlightSession::lunar_return_captured(Flying& flying) {
         lunar_abort("Aircatch: Bahn nicht geschlossen (Abprall)");
         return;
     }
-    const auto node = gnc::raise_periapsis_at_apoapsis(
-        state, epoch_, constants::earth_gm_m3ps2, constants::wgs84_semi_major_axis_m + lunar_return_->perigee_raise_height_m);
+    const double gm = constants::earth_gm_m3ps2;
+    const double raised_radius_m = constants::wgs84_semi_major_axis_m + lunar_return_->perigee_raise_height_m;
+    const double apoapsis_radius_m = e.semi_major_axis_m * (1.0 + e.eccentricity);
+    const auto node = gnc::raise_periapsis_at_apoapsis(state, epoch_, gm, raised_radius_m);
+    if (lunar_aerocapture_passes_ < aerocapture_max_passes && apoapsis_radius_m > raised_radius_m) {
+        // capture cost: the raise, then the circularisation at the raised perigee (vis-viva)
+        const double v_perigee = std::sqrt(gm * (2.0 / raised_radius_m - 2.0 / (raised_radius_m + apoapsis_radius_m)));
+        const double cost_mps = (node ? norm(node->delta_v_gcrf_mps) : 0.0) + v_perigee - std::sqrt(gm / raised_radius_m);
+        if (cost_mps > aerocapture_repass_dv_mps) {
+            lunar_return_repass(flying, apoapsis_radius_m - constants::wgs84_semi_major_axis_m);
+            return;
+        }
+    }
     if (!node) {  // the perigee is already high enough
         lunar_return_raised(flying);
         return;
     }
-    lunar_capture_coast(flying, *node, LunarStep::PerigeeRaise);
+    if (!lunar_capture_coast(flying, *node, LunarStep::PerigeeRaise)) return;
     const double apoapsis_m = e.semi_major_axis_m * (1.0 + e.eccentricity) - constants::wgs84_semi_major_axis_m;
     lunar_status_ = "Aircatch: Apogäum " + german(apoapsis_m / 1000.0, 0) + " km, Perigäumsanhebung " +
                     german(norm(node->delta_v_gcrf_mps), 1) + " m/s in " + german((node->epoch - epoch_) / 60.0, 0) +
                     " min";
 }
 
-void FlightSession::lunar_capture_coast(Flying& flying, const gnc::BurnNode& node, LunarStep burn) {
-    lunar_capture_burn_ = node;
-    lunar_capture_burn_step_ = burn;
+bool FlightSession::lunar_capture_coast(Flying& flying, const gnc::BurnNode& node, LunarStep burn) {
     const auto configurations = burn_configurations(&flying.body->vehicle().stages().front().config.deorbit_engine_groups);
+    const double mass_kg = flying.body->vehicle().mass_properties().mass_kg;
+    const double dv_mps = norm(node.delta_v_gcrf_mps);
     double half_burn_s = 0.0;
     if (!configurations.empty()) {
-        half_burn_s = 0.5 * gnc::burn_duration_s(norm(node.delta_v_gcrf_mps),
-                                                 flying.body->vehicle().mass_properties().mass_kg,
-                                                 configurations.front().thrust_n, configurations.front().mass_flow_kgps);
+        const auto& c = configurations.front();
+        half_burn_s = 0.5 * gnc::burn_duration_s(dv_mps, mass_kg, c.thrust_n, c.mass_flow_kgps);
+        // l5 Task 10: a pass that exits far too high (campaign seed 2: apogee 9,344 km) asked for a 1,458 m/s
+        // circularisation with 51 t on board - the burn never ended. Refuse a burn the tanks cannot fly.
+        const double needed_kg = mass_kg * (1.0 - std::exp(-dv_mps * c.mass_flow_kgps / c.thrust_n));
+        if (needed_kg > flying.body->vehicle().propellant_kg()) {
+            lunar_abort("Aircatch: " + std::string(to_string(burn)) + " nicht möglich (" + german(dv_mps, 0) +
+                        " m/s, " + german(needed_kg / 1000.0, 1) + " t nötig, " +
+                        german(flying.body->vehicle().propellant_kg() / 1000.0, 1) + " t an Bord)");
+            return false;
+        }
     }
+    lunar_capture_burn_ = node;
+    lunar_capture_burn_step_ = burn;
     lunar_step_ = LunarStep::CaptureCoast;
     lunar_step_epoch_ = node.epoch - half_burn_s - burn_preparation_s;
     attitude_mode_ = {gnc::AttitudeModeKind::Sun, {}, {}, {}};
     lunar_sun_hold_.start(epoch_);
     lunar_next_repoint_ = epoch_ + sun_repoint_interval_s;
+    return true;
+}
+
+void FlightSession::lunar_return_repass(Flying& flying, double apoapsis_m) {
+    const auto node = gnc::set_periapsis_at_apoapsis(
+        controlled_state(), epoch_, constants::earth_gm_m3ps2,
+        constants::wgs84_semi_major_axis_m + aerocapture_repass_perigee_height_m);
+    if (!node || norm(node->delta_v_gcrf_mps) < aerocapture_repass_trim_min_mps) {
+        lunar_return_next_pass();
+        return;
+    }
+    if (!lunar_capture_coast(flying, *node, LunarStep::RepassTrim)) return;
+    lunar_status_ = "Aircatch: Apogäum " + german(apoapsis_m / 1000.0, 0) + " km, Durchgang " +
+                    std::to_string(lunar_aerocapture_passes_ + 1) + " - Perigäumskorrektur " +
+                    german(norm(node->delta_v_gcrf_mps), 1) + " m/s in " + german((node->epoch - epoch_) / 60.0, 0) +
+                    " min";
+}
+
+void FlightSession::lunar_return_next_pass() {
+    ++lunar_aerocapture_passes_;
+    const auto e = orbit::elements_from_state(controlled_state(), constants::earth_gm_m3ps2);
+    const double period_s = constants::two_pi * std::sqrt(std::pow(e.semi_major_axis_m, 3) / constants::earth_gm_m3ps2);
+    lunar_step_ = LunarStep::Aerocapture;
+    lunar_step_epoch_ = entry_start_epoch(1.1 * period_s);  // the guidance starts at the entry lead of the next perigee
+    attitude_mode_ = {gnc::AttitudeModeKind::Sun, {}, {}, {}};  // Sun-pointed as the capture coast
+    lunar_sun_hold_.start(epoch_);
+    lunar_next_repoint_ = epoch_ + sun_repoint_interval_s;
+    lunar_status_ = "Aircatch: Durchgang " + std::to_string(lunar_aerocapture_passes_) + " in " +
+                    german((lunar_step_epoch_ - epoch_) / 3600.0, 1) + " h";
 }
 
 void FlightSession::lunar_return_raised(Flying& flying) {
@@ -379,7 +480,7 @@ void FlightSession::lunar_return_raised(Flying& flying) {
         lunar_return_to_b4();
         return;
     }
-    lunar_capture_coast(flying, *node, LunarStep::CaptureCircularize);
+    if (!lunar_capture_coast(flying, *node, LunarStep::CaptureCircularize)) return;
     lunar_status_ = "Aircatch: Perigäum " + german(periapsis_m / 1000.0, 0) + " km, Zirkularisierung " +
                     german(norm(node->delta_v_gcrf_mps), 1) + " m/s in " + german((node->epoch - epoch_) / 60.0, 0) +
                     " min";
