@@ -22,7 +22,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <exception>
+#include <limits>
 
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/constants.hpp"
@@ -147,7 +149,11 @@ void FlightSession::run_lunar_return_steps(Flying& flying) {
             lunar_return_enter_coast();
             break;
         case LunarStep::ReturnCorrection:
-            ++lunar_mcc_index_;
+            if (lunar_replan_burn_) {
+                lunar_replan_burn_ = false;  // a re-plan's correction: the MCC slots stay as they are
+            } else {
+                ++lunar_mcc_index_;
+            }
             lunar_return_enter_coast();
             break;
         case LunarStep::ReturnCoast:
@@ -280,8 +286,25 @@ void FlightSession::lunar_return_coast_event() {
     const auto state = controlled_state();
     if (lunar_mcc_index_ < p.mcc_after_tei_s.size()) {
         // MCC slot: planned burn_preparation_s ahead (an MCC is a short burn, the preparation covers it)
-        const auto mcc = planner.mid_course(state, epoch_, epoch_ + burn_preparation_s, p);
-        if (!mcc) {  // below the threshold (or not converged): the next one grows
+        bool converged = true;
+        const auto mcc = planner.mid_course(state, epoch_, epoch_ + burn_preparation_s, p, &converged);
+        // The correction back onto the planned arrival failed (not converged: out of reach) or costs more than the
+        // budget's allowance: re-planned from the flight data to the site's cheapest reachable pass - taken when it
+        // is cheaper than flying back (this slot's burn).
+        const bool expensive = mcc && norm(mcc->delta_v_gcrf_mps) > p.mcc_allowance_mps;
+        if (!converged || expensive) {
+            const double back_mps = mcc ? norm(mcc->delta_v_gcrf_mps) + lunar_return_plan_->braking_delta_v_mps
+                                        : std::numeric_limits<double>::infinity();
+            ++lunar_mcc_index_;
+            const bool replanned = replan_lunar_return(back_mps);
+            if (lunar_debug_) {
+                std::printf("[lunar] MCC %s: %s\n", converged ? "over the allowance" : "not converged",
+                            lunar_status_.c_str());
+            }
+            if (replanned) return;
+            if (mcc) --lunar_mcc_index_;  // the correction back flies in this slot (ReturnCorrection counts it)
+        }
+        if (!mcc) {  // below the threshold: the next one grows
             ++lunar_mcc_index_;
             lunar_return_enter_coast();
             return;
@@ -315,6 +338,72 @@ void FlightSession::lunar_return_coast_event() {
         lunar_step_ = LunarStep::Braking;
         lunar_status_ = status + german(norm(braking->delta_v_gcrf_mps), 0) + " m/s";
     }
+}
+
+bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
+    if (!lunar_return_ || !lunar_return_plan_ || lunar_step_ != LunarStep::ReturnCoast || bodies_.empty() ||
+        bodies_[controlled_].body->impacted()) {
+        lunar_status_ = "Nachplanung: nur im Rückflug zur Erde (nach TEI, vor dem Bremsbrennen)";
+        return false;
+    }
+    const auto& p = lunar_return_->ret;
+    const auto configurations = burn_configurations(&vacuum_groups);
+    if (configurations.empty()) {
+        lunar_status_ = "Nachplanung: keine Vakuum-Triebwerke";
+        return false;
+    }
+    mission::EarthReturnPlanner planner(gravity_, *env_.ephemeris, earth_);
+    planner.set_finite_burn(mission::FiniteBurnModel{bodies_[controlled_].body->vehicle().mass_properties().mass_kg,
+                                                     configurations.front().thrust_n,
+                                                     configurations.front().mass_flow_kgps});
+    const auto state = controlled_state();
+    const time::Epoch burn_epoch = epoch_ + burn_preparation_s;
+    const auto brake = planner.braking_epoch(state, epoch_, p.target);
+    if (!brake || burn_epoch > *brake - p.mcc_min_before_braking_s) {
+        lunar_status_ = "Nachplanung: zu nah am Bremsbrennen";
+        return false;
+    }
+    mission::ReturnBurn r;
+    try {
+        r = planner.recovery(state, epoch_, burn_epoch, p.target);
+    } catch (const std::exception&) {  // integrator step underflow on a trial arc
+        r.converged = false;
+    }
+    if (!r.converged) {
+        lunar_status_ = "Nachplanung: kein Weg nach Starbase";
+        return false;
+    }
+    // propellant: the correction and the new braking burn above the landing propellant
+    const auto& vehicle = bodies_[controlled_].body->vehicle();
+    const double ve = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
+    const double dv = norm(r.burn.delta_v_gcrf_mps);
+    const double needed =
+        vehicle.mass_properties().mass_kg * (1.0 - std::exp(-(dv + r.arrival.braking_delta_v_mps) / ve));
+    const double available = vehicle.propellant_kg() - vehicle.stages().front().config.landing_propellant_kg;
+    if (needed > available) {
+        lunar_status_ = "Nachplanung: Treibstoff reicht nicht (" + german((needed - available) / 1000.0, 1) + " t fehlen)";
+        return false;
+    }
+    if (dv + r.arrival.braking_delta_v_mps >= cheaper_than_mps) {
+        lunar_status_ = "Nachplanung: nicht günstiger (" + german(dv + r.arrival.braking_delta_v_mps, 0) + " m/s)";
+        return false;
+    }
+    lunar_return_->ret.target.lateral_offset_m = r.arrival.lateral_offset_m;
+    lunar_return_plan_->arrival = r.arrival;
+    lunar_return_plan_->braking_delta_v_mps = r.arrival.braking_delta_v_mps;
+    ++lunar_replans_;
+    if (dv < p.mcc_threshold_mps) {
+        lunar_status_ = "Nachplanung: keine Korrektur nötig";
+        lunar_return_enter_coast();
+        return true;
+    }
+    // on the vacuum Raptors (a re-plan may move the arrival by hours: tens to hundreds of m/s); small: lunar_small_burn
+    if (!lunar_burn(r.burn, true, LunarStep::ReturnCorrection)) return false;
+    lunar_replan_burn_ = true;
+    lunar_step_ = LunarStep::ReturnCorrection;
+    lunar_status_ = "Nachplanung: Korrektur " + german(dv, 2) + " m/s, Bremsen " +
+                    german(r.arrival.braking_delta_v_mps, 0) + " m/s";
+    return true;
 }
 
 double FlightSession::lunar_return_arrival_speed() const {

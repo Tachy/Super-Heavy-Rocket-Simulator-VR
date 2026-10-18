@@ -8,6 +8,7 @@
 #include "starsim/sim/catch_tower_sim.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
 #include "starsim/sim/lunar_site.hpp"
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -397,6 +398,15 @@ public:
     // vacuum Raptors) and flies them; direct: then the entry, flip and catch (state Return). False with a German
     // lunar_status() when refused; a flight under way keeps its plan.
     bool plan_lunar_return(const LunarReturnSetup& setup);
+    // Re-plans the return from the current flight data (l5 Task 10, user 2026-10-18): in the Earth-bound coast (after
+    // TEI, at least the MCC margin before the braking burn) a correction burn aimed at the site's next reachable pass
+    // (EarthReturnPlanner::recovery), checked against the propellant above the landing propellant, flown as a
+    // correction; the plan's arrival and braking burn follow it. Called automatically when a mid-course correction
+    // does not converge or costs more than the budget's allowance (then taken only when the re-plan's correction +
+    // braking burn is below `cheaper_than_mps`); the pilot / flight control trigger it by hand (l6). False with a
+    // German lunar_status().
+    bool replan_lunar_return(double cheaper_than_mps = std::numeric_limits<double>::infinity());
+    int lunar_return_replans() const { return lunar_replans_; }
     const mission::ReturnPlan* lunar_return_plan() const { return lunar_return_plan_ ? &*lunar_return_plan_ : nullptr; }
     // Chains the legs of a lunar landing mission after the flight planned now (start_lunar_landing_mission); empty
     // ends it. A refused leg ends the sequence in its orbit with the planner's reason in lunar_status().
@@ -738,6 +748,8 @@ private:
     static constexpr int aerocapture_max_passes = 3;
     static constexpr double aerocapture_repass_trim_min_mps = 0.5;  // [E] smaller perigee corrections are not flown
     int lunar_aerocapture_passes_ = 0;
+    int lunar_replans_ = 0;           // re-plans flown from the flight data (replan_lunar_return)
+    bool lunar_replan_burn_ = false;  // the ReturnCorrection in flight is a re-plan's (no MCC slot used)
     double lunar_return_arrival_speed() const;  // relative speed at the entry interface, coasting from now
     std::optional<LunarReturnSetup> lunar_return_;
     std::optional<mission::ReturnPlan> lunar_return_plan_;

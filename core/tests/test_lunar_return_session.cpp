@@ -174,6 +174,29 @@ TEST_CASE("Lunar return direct: the ship is caught at Starbase", "[lunar][return
     fly_direct_to_catch(t);
 }
 
+// l5 Task 10 (user 2026-10-18: a failed correction must be re-planned from the current flight data): a TEI realised
+// far off (a velocity error along the burn after the cutoff) moves the arrival by hours - the correction back onto
+// the planned arrival does not converge and the session re-plans to the site's next reachable pass.
+TEST_CASE("Lunar return: a botched TEI is re-planned from the flight data and caught", "[lunar][return][session][slow]") {
+    test::LunarReturnSession t;
+    start(t);
+    const size_t ship = t.session.controlled_index();
+    const auto t0 = t.session.epoch();
+    while (t.session.lunar_step() != sim::LunarStep::ReturnCoast && t.session.epoch() - t0 < 4.0 * 86400.0) {
+        t.session.advance_to(t.session.epoch() + 60.0, 4000000);
+    }
+    REQUIRE(t.session.lunar_step() == sim::LunarStep::ReturnCoast);
+    const auto* tei = burn_of(t.session, sim::LunarStep::Tei);
+    REQUIRE(tei != nullptr);
+    const char* botch = std::getenv("STARSIM_BOTCH_FRACTION");  // diagnostics: the error as a fraction of the TEI
+    const double fraction = botch ? std::atof(botch) : 0.05;
+    t.session.apply_velocity_error(ship, tei->node.delta_v_gcrf_mps * fraction);
+    fly_direct_to_catch(t);
+    std::printf("[lunar return] botched TEI by %.1f %%: %d re-plan(s), status '%s'\n", 100.0 * fraction,
+                t.session.lunar_return_replans(), t.session.lunar_status().c_str());
+    CHECK(t.session.lunar_return_replans() >= 1);
+}
+
 TEST_CASE("Lunar return from the NRHO: departure, powered flyby, caught at Starbase", "[lunar][return][session][slow]") {
     test::LunarReturnSession t;
     const auto s = sim::start_mission(t.session, STARSIM_CONFIG_DIR, "ship_lunar_return_nrho", {}, t.time);

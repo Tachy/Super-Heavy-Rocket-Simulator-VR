@@ -934,14 +934,21 @@ std::optional<time::Epoch> EarthReturnPlanner::braking_epoch(const StateVector& 
 
 std::optional<gnc::BurnNode> EarthReturnPlanner::mid_course(const StateVector& state, time::Epoch epoch,
                                                             time::Epoch burn_epoch,
-                                                            const EarthReturnParameters& p) const {
+                                                            const EarthReturnParameters& p, bool* converged) const {
+    if (converged) *converged = true;
     if (const auto brake = braking_epoch(state, epoch, p.target);
         brake && burn_epoch > *brake - p.mcc_min_before_braking_s) {
         return std::nullopt;
     }
     const auto sol = solve(state, epoch, burn_epoch, p.target, Vec3{});
+    if (converged) *converged = sol.converged;
     if (!sol.converged || norm(sol.burn.delta_v_gcrf_mps) < p.mcc_threshold_mps) return std::nullopt;
     return sol.burn;
+}
+
+ReturnBurn EarthReturnPlanner::recovery(const StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
+                                        const EarthReturnTarget& target) const {
+    return depart(state, epoch, burn_epoch, target, Vec3{}, true);
 }
 
 std::optional<gnc::BurnNode> EarthReturnPlanner::braking(const StateVector& state, time::Epoch epoch,

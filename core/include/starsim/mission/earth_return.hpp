@@ -135,9 +135,16 @@ public:
     ReturnPlan plan(const math::StateVector& state, time::Epoch epoch, const EarthReturnParameters& p,
                     double mass_kg, double isp_s, double propellant_kg) const;
 
-    // Mid-course correction at `burn_epoch` (zero first guess); empty below the threshold or not converged.
+    // Mid-course correction at `burn_epoch` (zero first guess) back onto the planned arrival (a nearby gate); empty
+    // below the threshold, too close to the braking burn, or not converged (`converged`, if given, false only then).
     std::optional<gnc::BurnNode> mid_course(const math::StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
-                                            const EarthReturnParameters& p) const;
+                                            const EarthReturnParameters& p, bool* converged = nullptr) const;
+
+    // Re-plan from the Earth-bound coast (l5 Task 10, user 2026-10-18: a failed correction must be re-planned from the
+    // current flight data): the correction at `burn_epoch` aimed with the gate scan - the site's pass within +-12 h of
+    // the arrival, the cheapest crossing - instead of back onto the planned arrival. Not converged: no way to the site.
+    ReturnBurn recovery(const math::StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
+                        const EarthReturnTarget& target) const;
 
     // The braking burn re-planned from the state now as the last targeting burn: burn epoch at the predicted braking
     // height crossing; constraints: relative speed and flight-path angle at the interface, and (direct) the predictor's
