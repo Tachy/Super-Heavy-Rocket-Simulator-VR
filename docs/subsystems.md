@@ -641,16 +641,26 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   spent ~19 s per plan in `solve_lambert`'s 4,000-sample bracket scan (now 100 samples first, 4,000 only as the
   fallback). A looser tolerance for the scan's samples saved nothing (6.8 -> 6.4 Newton iterations per sample) and
   was not kept. The plans move by <= 0.13 m/s TEI, 3 s of interface epoch.
-  Aerocapture attitude at peak q (KNOWN FINDING, l6 Task 1, user 2026-10-18: own fix task next): the aircatch
-  campaign moves by tonnes on round-off (seeds 4 / 7: 0.7 / 5.2 t left before, 0.2 / 0.1 t short after the cache and
-  the Lambert bracket - both shown exact to < 1 mm / < 1e-9). Seed 7: the roll slew to the entry bank ends later
-  (flown -58.8 deg instead of -37.8 deg at 369 km), the ship reaches 73 km / 9.8 km/s / ~6.7 kPa with a roll rate of
-  0.011 rad/s (0.004 before), and the entry attitude loop diverges within ~8 s: flaps swing 12 <-> 52 deg every 0.5 s,
-  roll error to +45 deg, axis error 35 deg, yaw rate 0.09 rad/s against a saturated yaw RCS. The guidance answers with
-  the 150 deg bank limit, the pass exits at 12,787 km, and the second pass (`lunar_return_repass`) spends ~2.6 t -
-  the deorbit is then refused. The [aerocapture] debug line prints the flown bank and the height for this. The
-  campaign's seeds 1-7 accept 5 of 7 until the fix.
+  Aerocapture attitude at peak q (l6 Task 1 finding, root cause 2026-10-18, OPEN until header tanks): the aircatch campaign moved by tonnes on
+  round-off (seeds 4 / 7 short of the deorbit after the interpolated ephemeris and the Lambert bracket, both exact to
+  < 1 mm / < 1e-9): the entry attitude loop diverged at 73 km / 9.8 km/s / ~6.7 kPa (roll error to +45 deg, axis error
+  35 deg, yaw rate 0.09 rad/s against a saturated yaw RCS), the guidance answered with the 150 deg bank limit, the
+  pass exited at 12,787 km and the second pass spent the deorbit propellant. Root cause: these seeds carry 61-64 t at
+  the interface - all in the main tanks, LOX aft, so the CG sits aft - and the pitch trim at peak q drove BOTH AFT
+  flaps to the broadside stop (90 deg), where the sin^2 flap force has no derivative. Pitch, roll and yaw were left to
+  the two small forward flaps (roll and yaw coupled) and the RCS (demand 3-10x its torque): a small roll disturbance
+  grew. (The `STARSIM_DEBUG_ENTRY_ATTITUDE` flaps print in config order: aft right, aft left, forward right, forward
+  left.) The aft CG also costs cold gas: the pass alone burns 2.9 / 6.4 / 8.4 t of main-tank RCS gas with 55 / 61 /
+  64 t aboard (the RCS holds the pitch the flaps cannot trim). Tried and dropped (user 2026-10-18): a 10 deg allocation
+  margin below the broadside stop (`flap_authority`: upper box min(max - 10 deg, d + reach)) held the attitude (64 t with a 0.02 rad/s roll
+  kick: axis error 6 deg, apoapsis 428 km) but cost 0.6-1.9 t more gas per pass - 6 of 21 aircatch seeds then lacked
+  1-2 t for the deorbit, and the Mach 2.6 tower catch struck the tower. Fix: header tanks (next task, user 2026-10-18)
+  - the landing propellant forward as on the real ship, so the CG moves forward with propellant; re-tunes
+  `dry_cg_station_m` and every ship return. Fixture (hidden until then): "An aerocapture pass with 64 t aboard damps a
+  roll disturbance at peak q" (`[.header_tanks]`; today 166 deg axis error, apoapsis 12,058 km).
   Debug: `STARSIM_DEBUG_RETURN`, `STARSIM_DEBUG_ENTRY` (incl. constraint and reversal lines), `STARSIM_DEBUG_ENTRY_ATTITUDE`
   (1 Hz axis error, rates, RCS, flaps), `STARSIM_DEBUG_FLIP` ('[gate] state'), `STARSIM_DEBUG_DEORBIT`; hidden tests
   `"[.lunar_return_case]"` (`STARSIM_RETURN_SEED`, `STARSIM_RETURN_AIRCATCH=1`), `"[.lunar_gate_replay]"`
-  (`STARSIM_GATE_STATE`), `"[.lunar_handover_replay]"` (`STARSIM_HANDOVER_STATE`), `"[.lunar_return_epoch_probe]"`.
+  (`STARSIM_GATE_STATE`), `"[.lunar_handover_replay]"` (`STARSIM_HANDOVER_STATE`), `"[.lunar_return_epoch_probe]"`,
+  `"Aerocapture dispersion probe"` (`STARSIM_PROBE_DENSITY`, `_AERO`, `_PROPELLANT_KG`, `_KICK` "h_km,wx,wy,wz": a
+  peak-q attitude repro in ~13 s).

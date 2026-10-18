@@ -370,45 +370,110 @@ TEST_CASE("A shallow aerocapture pass that stays above 80 km ends in Exit", "[lu
     CHECK(exited());
 }
 
-// Hidden probe (Task 9b): the aerocapture pass from the hand-over state with truth dispersions from the environment
-// (STARSIM_PROBE_DENSITY, STARSIM_PROBE_AERO) - where the guidance's reach ends.
-TEST_CASE("Aerocapture dispersion probe", "[.][probe][aerocapture]") {
-    const auto factor = [](const char* name) {
-        const char* v = std::getenv(name);
-        return v ? std::atof(v) : 1.0;
-    };
+namespace {
+
+// The aerocapture pass from the hand-over state with truth dispersions, `propellant_kg` aboard and the body rates
+// `kick_body_radps` added once when the pass first drops below `kick_height_m` (< 0: none); ends at Exit, an impact,
+// or below 40 km after the lowest point.
+struct AircatchPass {
+    bool exited = false;
+    bool impacted = false;
+    double apoapsis_km = -1.0;
+    double min_height_km = 0.0;
+    double peak_heat_w_m2 = 0.0;
+    double max_axis_error_below_80km_deg = 0.0;  // the body x-axis from the commanded one
+    std::string breakup;
+};
+
+AircatchPass fly_aircatch_pass(double density_factor, double aero_factor, double propellant_kg, double kick_height_m = -1.0,
+                               const math::Vec3& kick_body_radps = {}) {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
     double full_kg = 0.0;
     for (const auto& tank : ship.stages.front().tanks) full_kg += tank.mass_kg;
-    for (auto& tank : ship.stages.front().tanks) tank.mass_kg *= aircatch_propellant_kg / full_kg;
+    for (auto& tank : ship.stages.front().tanks) tank.mass_kg *= propellant_kg / full_kg;
     auto p = gnc::EntryGuidanceParameters::aerocapture(m.aerocapture_apoapsis_m, -1.0);
     p.initial_bank_rad = aircatch_initial_bank_rad;
     const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(aircatch_epoch_tdb_s);
     t.session.place_entering_ship(ship, {aircatch_position_gcrf_m, aircatch_velocity_gcrf_mps, aircatch_attitude, {}},
                                   epoch, p);
-    t.session.set_air_density_factor(factor("STARSIM_PROBE_DENSITY"));
-    t.session.set_aero_dispersion(0, factor("STARSIM_PROBE_AERO"));
+    t.session.set_air_density_factor(density_factor);
+    t.session.set_aero_dispersion(0, aero_factor);
     const auto& body = t.session.body(0);
-    double min_height_m = 1e9;
     const auto exited = [&] {
         const auto* es = t.session.entry_status(0);
         return es && es->phase == gnc::EntryPhase::Exit;
     };
+    AircatchPass f;
+    double min_height_m = 1e9;
     while (!exited() && !body.impacted() && t.session.epoch() - epoch < 3600.0 &&
            !(min_height_m < 40e3 && t.session.telemetry(0).altitude_m < 40e3)) {
-        t.session.advance_to(t.session.epoch() + 1.0, 400);
-        min_height_m = std::min(min_height_m, t.session.telemetry(0).altitude_m);
+        t.session.advance_to(t.session.epoch() + 0.1, 400);
+        const double height_m = t.session.telemetry(0).altitude_m;
+        min_height_m = std::min(min_height_m, height_m);
+        if (kick_height_m > 0.0 && min_height_m < kick_height_m) {
+            auto& flying = const_cast<vehicle::FlightBody&>(body);  // the disturbance: a gust / thruster failure
+            auto st = flying.state();
+            st.angular_velocity_body_radps += kick_body_radps;
+            flying.set_state(st);
+            kick_height_m = -1.0;
+        }
+        if (const auto* es = t.session.entry_status(0); es && height_m < 80e3 && norm(es->axis_gcrf) > 0.0) {
+            const math::Vec3 axis = body.state().attitude.rotate(math::Vec3{1.0, 0.0, 0.0});
+            const double error = std::acos(std::clamp(dot(axis, math::normalized(es->axis_gcrf)), -1.0, 1.0));
+            f.max_axis_error_below_80km_deg = std::max(f.max_axis_error_below_80km_deg, error / deg);
+        }
     }
     const auto& s = body.state();
     const auto e = orbit::elements_from_state({s.position_gcrf_m, s.velocity_gcrf_mps}, constants::earth_gm_m3ps2);
-    std::printf("[aircatch probe] density x%.2f aero x%.2f: %s, apoapsis %.1f km, lowest %.1f km, peak %.0f kW/m2, %s\n",
-                factor("STARSIM_PROBE_DENSITY"), factor("STARSIM_PROBE_AERO"),
-                exited() ? "exited" : body.impacted() ? "impacted" : "stays in",
-                e.eccentricity < 1.0 ? (e.semi_major_axis_m * (1.0 + e.eccentricity) - constants::wgs84_semi_major_axis_m) / 1000.0 : -1.0,
-                min_height_m / 1000.0, body.peak_heat_rate_w_m2() / 1000.0, body.breakup_reason().c_str());
+    f.exited = exited();
+    f.impacted = body.impacted();
+    if (e.eccentricity < 1.0) {
+        f.apoapsis_km = (e.semi_major_axis_m * (1.0 + e.eccentricity) - constants::wgs84_semi_major_axis_m) / 1000.0;
+    }
+    f.min_height_km = min_height_m / 1000.0;
+    f.peak_heat_w_m2 = body.peak_heat_rate_w_m2();
+    f.breakup = body.breakup_reason();
+    std::printf("[aircatch pass] density x%.3f aero x%.3f %.1f t: %s, apoapsis %.1f km, lowest %.1f km, peak %.0f kW/m2, "
+                "axis error below 80 km %.1f deg, %.2f t left %s\n",
+                density_factor, aero_factor, propellant_kg / 1000.0,
+                f.exited ? "exited" : f.impacted ? "impacted" : "stays in", f.apoapsis_km, f.min_height_km,
+                f.peak_heat_w_m2 / 1000.0, f.max_axis_error_below_80km_deg, body.vehicle().propellant_kg() / 1000.0,
+                f.breakup.c_str());
+    return f;
+}
+
+}  // namespace
+
+// Aircatch campaign seeds 4/7 (l6 attitude fix): with 61-64 t aboard the CG sits so far aft (the propellant in the main
+// tanks, LOX aft) that the pitch trim at peak q drove both aft flaps to the broadside stop, where the sin^2 flap force
+// has no derivative - roll and yaw were left to the forward pair and the RCS, and a 0.02 rad/s roll disturbance at
+// 74 km grew into a departure (64 t: axis error 166 deg, apoapsis 12,058 km). Seed 7's truth factors.
+// Hidden until the header-tank task (user 2026-10-18): it moves the CG forward with the landing propellant.
+TEST_CASE("An aerocapture pass with 64 t aboard damps a roll disturbance at peak q", "[.header_tanks][aerocapture]") {
+    const auto f = fly_aircatch_pass(0.855, 0.984, 64000.0, 74e3, {0.02, 0.0, 0.0});
+    REQUIRE(f.exited);
+    CHECK(f.max_axis_error_below_80km_deg < 10.0);
+    CHECK(std::abs(f.apoapsis_km - 400.0) < 100.0);
+}
+
+// Hidden probe (Task 9b): the aerocapture pass from the hand-over state with truth dispersions from the environment
+// (STARSIM_PROBE_DENSITY, STARSIM_PROBE_AERO, STARSIM_PROBE_PROPELLANT_KG; STARSIM_PROBE_KICK "h_km,wx,wy,wz": body
+// rates in rad/s added below that height) - where the guidance's reach ends.
+TEST_CASE("Aerocapture dispersion probe", "[.][probe][aerocapture]") {
+    const auto factor = [](const char* name, double fallback) {
+        const char* v = std::getenv(name);
+        return v ? std::atof(v) : fallback;
+    };
+    double kick[4] = {-1.0, 0.0, 0.0, 0.0};
+    if (const char* k = std::getenv("STARSIM_PROBE_KICK")) {
+        std::sscanf(k, "%lf,%lf,%lf,%lf", &kick[0], &kick[1], &kick[2], &kick[3]);
+    }
+    fly_aircatch_pass(factor("STARSIM_PROBE_DENSITY", 1.0), factor("STARSIM_PROBE_AERO", 1.0),
+                      factor("STARSIM_PROBE_PROPELLANT_KG", aircatch_propellant_kg), kick[0] * 1000.0,
+                      {kick[1], kick[2], kick[3]});
 }
 
 // Diagnostics (l5 Task 10): the flip and catch of a full flight's gate, replayed in seconds. STARSIM_GATE_STATE = the
