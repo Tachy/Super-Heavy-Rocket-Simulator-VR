@@ -137,3 +137,31 @@ mission starts), `TankConfig::capacity_kg`, `FlightBody::specific_force_body_mps
 ## Ledger
 
 (progress, decisions, findings - appended per session)
+
+Session 2026-10-18 (one session, Tasks 1-3):
+- Finding that led to revision 2: header tanks alone (dry CG re-tuned to keep the landing-mass CG) moved the 64 t CG
+  by 3 cm only (23.867 -> 23.836 m) - the surplus sat aft in the main tanks. User asked whether the liquid surface
+  tilts with the ship: it did not (always a column on the tank bottom). Upper bound with the liquid at the forward
+  domes: +1.8 m at 35 t, +3.0 m at 64 t.
+- Probe (throwaway, settling on by default, NO headers): `[.header_tanks]` passed - axis error 1.0 deg (was 166),
+  apoapsis 421.1 km, peak 915 kW/m2, 60.22 t left. Settling is the root cause of the aerocapture departure.
+- Task 1 DONE (1924d7f): `vehicle/liquid_settling` - strips across the axis for tilts <= 45 / >= 135 deg (exact aft
+  column), axial slices with analytic circular segments otherwise; 181 tilt rows x 121 offsets x 100 points, rows 0 /
+  180 analytic. Table vs direct: centroid 2 % r, variances 5 % or 0.01 r^2 (shallow residues in a header).
+- Task 2 DONE (e072b61, pushed): Vehicle::settle_propellant (threshold 0.01 m/s^2, tau = sqrt(2 D / a) in
+  [0.5, 60] s, rotation on the sphere), FlightBody specific force from the first RK4 stage, flag
+  `FlightEnvironment::propellant_settling` default false. DEVIATION: engine moments keep the axial CG - the full CG
+  point moved the Falcon 9 / Crew Dragon ascent apoapsis 210 -> 223 km (spec amended).
+- Task 3 DONE (285f2d1, pushed): header tanks (lox_header 27,391.3 kg base 44 m d 3.6; ch4_header 7,608.7 kg base
+  20 m d 3.0), FeedSource + select_feed (session: run_ship_landing), RCS gas fallback, main_propellant_kg,
+  landing_propellant_kg derived (mismatch = error), `config::fill_tanks` (named so: vehicle_config.cpp already has a
+  `load_propellant` for the propellant combination), 15 ship-stage scaling sites in tests switched, the small-tank
+  test scales capacity_kg too. Dry CG 23.516 m [D] (test: landing-mass CG 25.50 m within 0.01). Column inertia of a
+  header uses its own radius. With headers + settling at 64 t (entry direction (0.05, 0, -1)): CG +0.95 m forward.
+  vehicle_report shows header geometry (diameter_m).
+- Tests: -Fast 582/583 - the one red is `fast planning keeps the LLO return plan` on WALL TIME only (19-21 s under
+  the parallel ctest load; standalone 6.7 s before and after these changes; plan values unchanged). Pre-existing
+  load sensitivity - tell the user; candidate fix: measure CPU time or run plan_speed serially.
+- NEXT: Task 4 - settling on by default (FlightEnvironment default true; check every session constructor path),
+  un-hide `[.header_tanks]`, full suite incl. [slow] campaigns + smoke, docs (subsystems.md: ship dry CG, entry mass
+  in tests, aerocapture finding closed, settling paragraph; CLAUDE.md implemented modules), opus review.
