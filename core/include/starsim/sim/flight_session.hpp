@@ -19,6 +19,8 @@
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/environment/gravity.hpp"
 #include "starsim/environment/reference_body.hpp"
+#include "starsim/ephemeris/interpolated_ephemeris.hpp"
+#include "starsim/frames/interpolated_orientation.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/gnc/attitude_controller.hpp"
 #include "starsim/gnc/booster_return.hpp"
@@ -225,9 +227,16 @@ public:
     // `gravity_config`: fidelity flags of the gravity model (default: Earth + J2, Moon, Sun).
     // `moon_orientation` (MOON_ME): the Moon becomes a reference body (lunar l1: ground, air, telemetry and LVLH relative
     // to the nearest body); without it everything is relative to the Earth.
+    // `interpolated_ephemeris` (fidelity flag, l6 Task 1): the Moon, the Sun and the body orientations are sampled from
+    // `ephemeris` / `earth` / `moon_orientation` on a grid and interpolated (InterpolatedEphemeris,
+    // InterpolatedOrientation: sub-mm) instead of asking CSPICE at every force evaluation (75 % of a lunar return's
+    // plan time); false: every call goes to the sources.
     FlightSession(const ephemeris::Ephemeris& ephemeris, const frames::BodyOrientation& earth,
                   std::filesystem::path config_dir, environment::PointMassGravityConfig gravity_config = {},
-                  const frames::BodyOrientation* moon_orientation = nullptr);
+                  const frames::BodyOrientation* moon_orientation = nullptr, bool interpolated_ephemeris = true);
+    // the members refer to each other (the caches below)
+    FlightSession(const FlightSession&) = delete;
+    FlightSession& operator=(const FlightSession&) = delete;
 
     // Places a vehicle on a pad (engines off, clamped). `heading_rad`: direction of body +y.
     void launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -566,6 +575,10 @@ private:
     std::vector<vehicle::FlightBody*> body_pointers() const;
 
     std::filesystem::path config_dir_;
+    // the sources as the session uses them (interpolated or passed through, see the constructor)
+    ephemeris::InterpolatedEphemeris ephemeris_;
+    frames::InterpolatedOrientation earth_cache_;
+    std::optional<frames::InterpolatedOrientation> moon_cache_;
     const frames::BodyOrientation& earth_;
     environment::PointMassGravity gravity_;
     environment::Us76Atmosphere atmosphere_;

@@ -23,7 +23,8 @@ TEST_CASE("The descent snapshot puts the booster into the plan frame", "[gnc][de
     session.set_launch_site(site);
     const auto cfg = test::booster_config("starship_block3", 70000.0);
     const vehicle::FlightBody body(std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR),
-                                   test::state_over_site(site, earth, t0, {30.0, -15.0, 1200.0}, {4.0, -2.0, -250.0}));
+                                   test::state_over_site(site, session.earth_orientation(), t0, {30.0, -15.0, 1200.0},
+                                                         {4.0, -2.0, -250.0}));
     const auto landing = session.return_site(body.vehicle());
     REQUIRE(landing.catch_target.has_value());
     REQUIRE(landing.sea.has_value());

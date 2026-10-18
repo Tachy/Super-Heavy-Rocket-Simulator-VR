@@ -110,6 +110,8 @@ add_library(starsim_core STATIC
     src/optim/socp_solver.cpp
     src/time/utc_date_time.cpp
     src/frames/geodetic.cpp
+    src/frames/interpolated_orientation.cpp
+    src/ephemeris/interpolated_ephemeris.cpp
     src/environment/point_mass_gravity.cpp
     src/environment/eclipse.cpp
     src/environment/reference_body.cpp

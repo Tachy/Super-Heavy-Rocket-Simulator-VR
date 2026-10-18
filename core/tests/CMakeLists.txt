@@ -13,6 +13,7 @@ add_executable(starsim_core_tests
     test_geodetic.cpp
     test_spice_time.cpp
     test_ephemeris_validation.cpp
+    test_interpolated_ephemeris.cpp
     test_orientation_validation.cpp
     test_integrators.cpp
     test_kepler.cpp
@@ -38,6 +39,7 @@ add_executable(starsim_core_tests
     test_lunar_return_session.cpp
     test_lunar_return_entry.cpp
     test_lunar_return_campaign.cpp
+    test_plan_timing.cpp
     test_lunar_outbound_session.cpp
     test_nrho_reference.cpp
     test_capsule_aero.cpp

@@ -37,18 +37,24 @@ constexpr double hull_moment_scale_max = 1.3;
 
 FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames::BodyOrientation& earth,
                              std::filesystem::path config_dir, environment::PointMassGravityConfig gravity_config,
-                             const frames::BodyOrientation* moon_orientation)
+                             const frames::BodyOrientation* moon_orientation, bool interpolated_ephemeris)
     : config_dir_(std::move(config_dir)),
-      earth_(earth),
-      gravity_(ephemeris, earth, gravity_config),
-      moon_(moon_orientation ? std::optional<environment::ReferenceBody>(
-                                   environment::ReferenceBody::moon(ephemeris, *moon_orientation))
-                             : std::nullopt),
+      ephemeris_(ephemeris, interpolated_ephemeris ? ephemeris::InterpolatedEphemeris::default_node_spacing_s : 0.0),
+      earth_cache_(earth, interpolated_ephemeris ? frames::InterpolatedOrientation::default_node_spacing_s : 0.0),
+      moon_cache_(moon_orientation ? std::optional<frames::InterpolatedOrientation>(std::in_place, *moon_orientation,
+                                                                                    interpolated_ephemeris
+                                                                                        ? frames::InterpolatedOrientation::default_node_spacing_s
+                                                                                        : 0.0)
+                                   : std::nullopt),
+      earth_(earth_cache_),
+      gravity_(ephemeris_, earth_, gravity_config),
+      moon_(moon_cache_ ? std::optional<environment::ReferenceBody>(environment::ReferenceBody::moon(ephemeris_, *moon_cache_))
+                        : std::nullopt),
       radiative_heating_(std::make_shared<const aero::RadiativeHeatingTable>(aero::RadiativeHeatingTable::load(config_dir_))),
-      env_{gravity_, atmosphere_, earth, &ephemeris, true, moon_ ? &*moon_ : nullptr, radiative_heating_.get()},
+      env_{gravity_, atmosphere_, earth_, &ephemeris_, true, moon_ ? &*moon_ : nullptr, radiative_heating_.get()},
       gm_earth_(ephemeris.gm_m3ps2(ephemeris::Body::Earth)) {
     legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
-    moon_orientation_ = moon_orientation;
+    moon_orientation_ = moon_cache_ ? &*moon_cache_ : nullptr;
     lunar_debug_ = std::getenv("STARSIM_DEBUG_LUNAR_SESSION") != nullptr;
 }
 

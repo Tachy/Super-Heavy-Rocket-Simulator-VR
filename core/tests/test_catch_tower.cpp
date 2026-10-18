@@ -88,7 +88,8 @@ TEST_CASE("Centred slow arrival: the booster is caught and hangs on the arms", "
     REQUIRE(booster.caught());
     CHECK(session.tower()->phase() == sim::CatchPhase::Caught);
     const auto at = [&](time::Epoch e) {
-        return transpose(spice_earth().fixed_to_gcrf(e).rotation) * booster.state().position_gcrf_m;
+        // in the session's (interpolated) Earth frame
+        return transpose(session.earth_orientation().fixed_to_gcrf(e).rotation) * booster.state().position_gcrf_m;
     };
     const auto caught_at = session.epoch();
     const Vec3 r0 = at(caught_at);

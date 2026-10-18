@@ -408,10 +408,12 @@ void EntryGuidance::aerocapture_cycle(const vehicle::FlightBody& body, const Ent
     bank_magnitude_rad_ = s.bank_rad;
     bank_target_rad_ = sign_ * s.bank_rad;
     if (std::getenv("STARSIM_DEBUG_ENTRY")) {
-        std::printf("[aerocapture] v %.0f bank %+.1f%s exit apoapsis %.1f km periapsis %.1f km incl %.2f deg peak %.0f "
-                    "kW/m2 %.2f g %.1f kPa (%d predictions)\n",
+        std::printf("[aerocapture] v %.0f bank %+.1f%s (flown %+.1f, h %.1f km) exit apoapsis %.1f km periapsis %.1f km "
+                    "incl %.2f deg peak %.0f kW/m2 %.2f g %.1f kPa (%d predictions)\n",
                     norm(state.velocity_itrf_mps), bank_target_rad_ / constants::deg_to_rad,
-                    s.constrained ? " constrained" : "", s.prediction.exit_apoapsis_height_m / 1000.0,
+                    s.constrained ? " constrained" : "", flown_bank_rad_ / constants::deg_to_rad,
+                    (norm(state.position_itrf_m) - constants::wgs84_semi_major_axis_m) / 1000.0,
+                    s.prediction.exit_apoapsis_height_m / 1000.0,
                     s.prediction.exit_periapsis_height_m / 1000.0, s.prediction.exit_inclination_rad * constants::rad_to_deg,
                     s.prediction.peak_heat_rate_w_m2 / 1000.0, s.prediction.peak_load_g,
                     s.prediction.peak_dynamic_pressure_pa / 1000.0, s.predictions);

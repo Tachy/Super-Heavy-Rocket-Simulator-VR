@@ -209,6 +209,17 @@ private:
                                                const EarthReturnTarget& target, const math::Vec3& plane_delta_v_mps,
                                                bool scan) const;
 
+    // Where a public call's time goes (l6 Task 1): reset at the start of plan / recovery, printed with
+    // STARSIM_DEBUG_RETURN. evaluate_s includes predictor_s.
+    struct Profile {
+        int evaluations = 0, predictions = 0, gate_samples = 0, gate_iterations = 0;
+        double evaluate_s = 0.0, predictor_s = 0.0, nrho_search_s = 0.0, nrho_drop_s = 0.0;
+    };
+    void print_profile(const char* what, double wall_s) const;
+    ReturnPlan plan_unprofiled(const math::StateVector& state, time::Epoch epoch, const EarthReturnParameters& p,
+                               double mass_kg, double isp_s, double propellant_kg) const;
+    mutable Profile profile_;
+
     const environment::GravityModel& gravity_;
     const ephemeris::Ephemeris& ephemeris_;
     const frames::BodyOrientation& earth_;

@@ -62,7 +62,9 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
 - Time: `Epoch` stores TDB seconds past J2000. UTC only at the user interface boundary (leap seconds via SPICE LSK).
 - Earth shape: WGS84 ellipsoid. Moon: sphere R = 1737.4 km (+ LOLA terrain later).
 - Default gravity: point masses Earth + Moon + Sun plus Earth J2 (switchable). Earth/Moon/Sun positions
-  come from DE440, only spacecraft are integrated.
+  come from DE440, only spacecraft are integrated. `FlightSession` samples them (and the Earth/Moon orientation) on
+  a grid and interpolates (`InterpolatedEphemeris` 20 min, `InterpolatedOrientation` 10 min: sub-mm; fidelity flag
+  `interpolated_ephemeris`) - CSPICE per force evaluation was 75 % of the planners' time.
 - Simplifications are allowed only when deliberate, documented and switchable (fidelity flags).
 - Rendering: floating origin at the player's head; positions are differenced in double and only then
   converted to float32.

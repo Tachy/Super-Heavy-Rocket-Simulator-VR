@@ -147,11 +147,12 @@ TEST_CASE("A landed stage is held where it stands", "[legs][session]") {
                                                                 STARSIM_CONFIG_DIR),
                              session.body(0).state());
     const auto epoch = session.epoch();
-    body.hold_landed(env().earth, epoch);
-    const Vec3 before = transpose(env().earth.fixed_to_gcrf(epoch).rotation) * body.state().position_gcrf_m;
+    body.hold_landed(session.earth_orientation(), epoch);
+    const auto& earth = session.earth_orientation();  // the frame the session flies in
+    const Vec3 before = transpose(earth.fixed_to_gcrf(epoch).rotation) * body.state().position_gcrf_m;
     for (int i = 0; i < 100; ++i) body.step(session.environment(), epoch + 0.01 * i, 0.01, {});
     body.coast(session.environment(), epoch + 1.0, 59.0);
-    const Vec3 after = transpose(env().earth.fixed_to_gcrf(epoch + 60.0).rotation) * body.state().position_gcrf_m;
+    const Vec3 after = transpose(earth.fixed_to_gcrf(epoch + 60.0).rotation) * body.state().position_gcrf_m;
     CHECK(norm(after - before) < 1e-6);
     CHECK(body.resting());
     CHECK_FALSE(body.caught());

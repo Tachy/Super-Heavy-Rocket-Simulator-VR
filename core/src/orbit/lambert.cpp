@@ -50,45 +50,52 @@ std::optional<LambertSolution> solve_lambert(const Vec3& r1, const Vec3& r2, dou
     };
 
     // Bracket the root on the single-revolution branch z < (2 pi)^2 by scanning valid z (y >= 0) for the
-    // first sign change of F (F rises with z there), then bisect.
+    // first sign change of F (F rises with z there), then bisect. l6 Task 1: the scan runs coarse first (4,000 samples
+    // were most of the NRHO return's flyby search; F is monotonic, so the bisection finds the same root) and fine only
+    // where the coarse one finds no bracket.
     const double z_max = constants::two_pi * constants::two_pi - 1e-9;
     const double z_min = -2000.0;  // hyperbolic transfers down to very short flight times
-    constexpr int samples = 4000;
+    constexpr int coarse_samples = 100;
+    constexpr int fine_samples = 4000;
     double lo = 0.0, hi = 0.0;
-    bool bracketed = false;
-    double previous_z = 0.0;
-    bool previous_valid = false;
-    for (int i = 0; i <= samples && !bracketed; ++i) {
-        const double z = z_min + (z_max - z_min) * i / samples;
-        if (y_of(z) < 0.0) {
-            previous_valid = false;
-            continue;
-        }
-        const double value = f_of(z);
-        if (previous_valid && f_of(previous_z) <= 0.0 && value > 0.0) {
-            lo = previous_z;
-            hi = z;
-            bracketed = true;
-        } else if (!previous_valid && value > 0.0) {
-            // First valid sample already positive: the root lies between the y = 0 edge and here.
-            double invalid = z - (z_max - z_min) / samples;
-            double valid = z;
-            for (int k = 0; k < 100; ++k) {
-                const double mid = 0.5 * (invalid + valid);
-                if (y_of(mid) < 0.0) {
-                    invalid = mid;
-                } else {
-                    valid = mid;
-                }
+    auto scan = [&](int samples) {
+        bool bracketed = false;
+        double previous_z = 0.0, previous_value = 0.0;
+        bool previous_valid = false;
+        for (int i = 0; i <= samples && !bracketed; ++i) {
+            const double z = z_min + (z_max - z_min) * i / samples;
+            if (y_of(z) < 0.0) {
+                previous_valid = false;
+                continue;
             }
-            lo = valid;
-            hi = z;
-            bracketed = f_of(lo) <= 0.0;
+            const double value = f_of(z);
+            if (previous_valid && previous_value <= 0.0 && value > 0.0) {
+                lo = previous_z;
+                hi = z;
+                bracketed = true;
+            } else if (!previous_valid && value > 0.0) {
+                // First valid sample already positive: the root lies between the y = 0 edge and here.
+                double invalid = z - (z_max - z_min) / samples;
+                double valid = z;
+                for (int k = 0; k < 100; ++k) {
+                    const double mid = 0.5 * (invalid + valid);
+                    if (y_of(mid) < 0.0) {
+                        invalid = mid;
+                    } else {
+                        valid = mid;
+                    }
+                }
+                lo = valid;
+                hi = z;
+                bracketed = f_of(lo) <= 0.0;
+            }
+            previous_z = z;
+            previous_value = value;
+            previous_valid = true;
         }
-        previous_z = z;
-        previous_valid = true;
-    }
-    if (!bracketed) {
+        return bracketed;
+    };
+    if (!scan(coarse_samples) && !scan(fine_samples)) {
         return std::nullopt;
     }
     for (int i = 0; i < 200; ++i) {

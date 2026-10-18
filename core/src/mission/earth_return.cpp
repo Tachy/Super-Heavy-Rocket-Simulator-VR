@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -84,6 +85,17 @@ constexpr double transfer_angle_max_rad = 179.5 * constants::deg_to_rad;
 constexpr double transfer_angle_step_rad = 2.5 * constants::deg_to_rad;
 
 bool debug_enabled() { return std::getenv("STARSIM_DEBUG_RETURN") != nullptr; }
+
+// Adds the wall time of its scope to `total_s` (the debug profile).
+struct Stopwatch {
+    double& total_s;
+    std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+    ~Stopwatch() { total_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); }
+};
+
+double seconds_since(std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
 
 // Two-body periapsis radius p / (1 + e) (ellipse or hyperbola).
 double periapsis_radius(const StateVector& s, double gm) {
@@ -262,6 +274,8 @@ void EarthReturnPlanner::arrive(const StateVector& state, time::Epoch epoch, con
     a.lateral_offset_m = target.lateral_offset_m;
     if (a.reached && target.entry_model) {
         const double bank = target.bank_sign * target.nominal_bank_rad;
+        ++profile_.predictions;
+        const Stopwatch watch{profile_.predictor_s};
         const auto p = gnc::predict_entry(*target.entry_model, gnc::EntryPredictorState{r_itrf, v_itrf, bank}, bank,
                                           target.gate, target.gate_height_m, 0.0, predictor_step_s,
                                           predictor_max_time_s);
@@ -272,6 +286,8 @@ void EarthReturnPlanner::arrive(const StateVector& state, time::Epoch epoch, con
 
 EarthArrival EarthReturnPlanner::evaluate(const StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
                                           const Vec3& delta_v_mps, const EarthReturnTarget& target) const {
+    ++profile_.evaluations;
+    const Stopwatch watch{profile_.evaluate_s};
     EarthArrival a;
     const StateVector at_burn =
         burn_epoch - epoch == 0.0 ? state : orbit::propagate_coast(gravity_, state, epoch, burn_epoch).state;
@@ -536,7 +552,10 @@ std::optional<Vec3> EarthReturnPlanner::aim_at_gate_once(const StateVector& at_b
         GateSample s{false, t, from, 0.0};
         int iterations = 0;
         EarthArrival a;
-        if (!newton(s.dv, 3, 30, iterations, a, evaluate_plane, residual, done, "timed")) return s;
+        ++profile_.gate_samples;
+        const bool solved = newton(s.dv, 3, 30, iterations, a, evaluate_plane, residual, done, "timed");
+        profile_.gate_iterations += iterations;
+        if (!solved) return s;
         const auto g = downrange(s.dv);
         s.ok = g.reached && g.downrange_error_m != exited_downrange_m;
         s.downrange_m = g.downrange_error_m;
@@ -801,6 +820,7 @@ EarthReturnPlanner::NrhoReturn EarthReturnPlanner::nrho_return(const StateVector
     // the departure time before the perilune and the flyby time about it [E]: both shape the approach and the turn
     StateVector s = state;
     time::Epoch t = epoch;
+    std::optional<Stopwatch> search_watch(std::in_place, profile_.nrho_search_s);
     for (double lead = nrd_lead_max_s; lead >= nrd_lead_min_s - 1e-6; lead -= nrd_lead_step_s) {
         // walk forward: the earliest departure (longest lead) first
         const time::Epoch t_nrd = perilune - lead;
@@ -818,6 +838,7 @@ EarthReturnPlanner::NrhoReturn EarthReturnPlanner::nrho_return(const StateVector
     // cannot bring the entry to the site (the site's place along the arrival track spans only part of a turn: l5 Task
     // 10), a later or earlier departure can, as a mission planner trades the departure for the landing site. The
     // cheapest converged option wins.
+    search_watch.reset();
     std::sort(options.begin(), options.end(), [](const Option& a, const Option& b) { return a.cost < b.cost; });
     if (options.size() > max_nrho_options) options.resize(max_nrho_options);
     double best_mps = std::numeric_limits<double>::infinity();
@@ -826,9 +847,11 @@ EarthReturnPlanner::NrhoReturn EarthReturnPlanner::nrho_return(const StateVector
         // ~4 % below the patched conic): none left can beat the best found
         if (nrho_estimate_bound_fraction * chosen.cost >= best_mps) break;
         const auto moon = ephemeris_.state_gcrf(ephemeris::Body::Moon, chosen.t_flyby);
+        std::optional<Stopwatch> drop_watch(std::in_place, profile_.nrho_drop_s);
         const auto drop = position_.solve(chosen.at_nrd, chosen.t_nrd, chosen.t_nrd,
                                           {moon.position_m + chosen.periselene, chosen.t_flyby}, chosen.nrd,
                                           flyby_position_tolerance_m);
+        drop_watch.reset();
         if (debug_enabled()) {
             std::fprintf(stderr,
                          "return NRHO: departure %.2f d before the perilune, flyby %+.1f h from it: estimate %.1f m/s "
@@ -855,6 +878,27 @@ EarthReturnPlanner::NrhoReturn EarthReturnPlanner::nrho_return(const StateVector
 
 ReturnPlan EarthReturnPlanner::plan(const StateVector& state, time::Epoch epoch, const EarthReturnParameters& p,
                                     double mass_kg, double isp_s, double propellant_kg) const {
+    profile_ = {};
+    const auto started = std::chrono::steady_clock::now();
+    ReturnPlan plan = plan_unprofiled(state, epoch, p, mass_kg, isp_s, propellant_kg);
+    print_profile("plan", seconds_since(started));
+    return plan;
+}
+
+void EarthReturnPlanner::print_profile(const char* what, double wall_s) const {
+    if (!debug_enabled()) return;
+    std::fprintf(stderr,
+                 "return profile %s: %.1f s wall; evaluate %d calls %.1f s (predictor %d runs %.1f s, coasts %.1f s); "
+                 "gate samples %d, Newton iterations %d (%.1f per sample); NRHO search %.1f s, drop %.1f s\n",
+                 what, wall_s, profile_.evaluations, profile_.evaluate_s, profile_.predictions, profile_.predictor_s,
+                 profile_.evaluate_s - profile_.predictor_s, profile_.gate_samples, profile_.gate_iterations,
+                 profile_.gate_samples > 0 ? double(profile_.gate_iterations) / profile_.gate_samples : 0.0,
+                 profile_.nrho_search_s, profile_.nrho_drop_s);
+}
+
+ReturnPlan EarthReturnPlanner::plan_unprofiled(const StateVector& state, time::Epoch epoch,
+                                               const EarthReturnParameters& p, double mass_kg, double isp_s,
+                                               double propellant_kg) const {
     ReturnPlan plan;
     if (p.orbit == LunarOrbitKind::Nrho && !p.nrho) {
         plan.reason = "Kein Rückflug: NRHO-Referenz fehlt";
@@ -948,7 +992,11 @@ std::optional<gnc::BurnNode> EarthReturnPlanner::mid_course(const StateVector& s
 
 ReturnBurn EarthReturnPlanner::recovery(const StateVector& state, time::Epoch epoch, time::Epoch burn_epoch,
                                         const EarthReturnTarget& target) const {
-    return depart(state, epoch, burn_epoch, target, Vec3{}, true);
+    profile_ = {};
+    const auto started = std::chrono::steady_clock::now();
+    ReturnBurn out = depart(state, epoch, burn_epoch, target, Vec3{}, true);
+    print_profile("recovery", seconds_since(started));
+    return out;
 }
 
 std::optional<gnc::BurnNode> EarthReturnPlanner::braking(const StateVector& state, time::Epoch epoch,
