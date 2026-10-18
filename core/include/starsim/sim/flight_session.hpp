@@ -578,7 +578,8 @@ private:
     // 0.225), integrated within 2 deg (no windup in large turns) - it trims the hull moment the flaps' model lacks (hull
     // aero x0.92 without it: 11 deg alpha error at 32 kPa, the drag 40 % low and the gate missed by 98 km).
     gnc::AttitudeController entry_controller_{gnc::AttitudeController::Gains{
-        0.5, 0.9, false, true, 0.5, 0.0, 0.0, 0.0, 0.0, 0.25 * 0.5 * 0.5 * 0.5, 2.0 * constants::deg_to_rad}};
+        0.5, 0.9, false, true, 0.5, 0.0, 0.0, 0.0, 0.0, 0.25 * 0.5 * 0.5 * 0.5, 2.0 * constants::deg_to_rad,
+        gnc::entry_flap_rest_dynamic_pressure_pa}};
     // Ship flip and landing burn: gimbals with flaps and RCS, faster than in the entry [E].
     // [E] actuator delay: the gimbals slew 30 deg (stop to stop) at 20 deg/s, half of that on average
     gnc::AttitudeController ship_landing_controller_{gnc::AttitudeController::Gains{1.5, 0.9, false, true, 0.75}};

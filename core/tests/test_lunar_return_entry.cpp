@@ -56,19 +56,29 @@ struct HandoverFlight {
 
 // Flies the direct entry from the hand-over state to the catch (or impact, or `limit_s`), with truth air density and
 // hull aero factors.
-HandoverFlight fly_handover(double density_factor, double aero_factor, double limit_s = 7200.0) {
+struct HandoverState {
+    double epoch_tdb_s = handover_epoch_tdb_s;
+    double propellant_kg = handover_propellant_kg;
+    math::Vec3 position_gcrf_m = handover_position_gcrf_m;
+    math::Vec3 velocity_gcrf_mps = handover_velocity_gcrf_mps;
+    math::Quat attitude = handover_attitude;
+    double initial_bank_rad = handover_initial_bank_rad;
+    std::string mission = "ship_lunar_return_llo";
+};
+
+HandoverFlight fly_handover(double density_factor, double aero_factor, double limit_s = 7200.0,
+                            const HandoverState& h = {}) {
     test::LunarReturnSession t;
-    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, h.mission);
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
     double full_kg = 0.0;
     for (const auto& tank : ship.stages.front().tanks) full_kg += tank.mass_kg;
-    for (auto& tank : ship.stages.front().tanks) tank.mass_kg *= handover_propellant_kg / full_kg;
+    for (auto& tank : ship.stages.front().tanks) tank.mass_kg *= h.propellant_kg / full_kg;
     auto p = gnc::EntryGuidanceParameters::lunar_return();
-    p.initial_bank_rad = handover_initial_bank_rad;
-    const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(handover_epoch_tdb_s);
-    t.session.place_entering_ship(ship, {handover_position_gcrf_m, handover_velocity_gcrf_mps, handover_attitude, {}},
-                                  epoch, p);
+    p.initial_bank_rad = h.initial_bank_rad;
+    const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(h.epoch_tdb_s);
+    t.session.place_entering_ship(ship, {h.position_gcrf_m, h.velocity_gcrf_mps, h.attitude, {}}, epoch, p);
     t.session.set_air_density_factor(density_factor);
     t.session.set_aero_dispersion(0, aero_factor);
     const auto& body = t.session.body(0);
@@ -127,6 +137,31 @@ TEST_CASE("Lunar return entry with the hull aero 8 % low is caught (hull moment 
 
 // Hidden probe (Task 10): the direct entry from the hand-over state with truth dispersions from the environment
 // (STARSIM_PROBE_DENSITY, STARSIM_PROBE_AERO, STARSIM_PROBE_SECONDS).
+TEST_CASE("Lunar return entry from a printed hand-over state", "[.lunar_handover_replay]") {
+    // STARSIM_HANDOVER_STATE: the 12 numbers of a '[lunar return] hand-over:' line (epoch, propellant, r, v, q);
+    // STARSIM_HANDOVER_BANK_DEG: the plan's initial bank; STARSIM_HANDOVER_MISSION: the mission id.
+    const char* text = std::getenv("STARSIM_HANDOVER_STATE");
+    REQUIRE(text != nullptr);
+    double g[12] = {};
+    const char* c = text;
+    for (double& value : g) {
+        char* end = nullptr;
+        value = std::strtod(c, &end);
+        REQUIRE(end != c);
+        c = end;
+    }
+    HandoverState h;
+    h.epoch_tdb_s = g[0];
+    h.propellant_kg = g[1];
+    h.position_gcrf_m = {g[2], g[3], g[4]};
+    h.velocity_gcrf_mps = {g[5], g[6], g[7]};
+    h.attitude = math::Quat{g[8], g[9], g[10], g[11]};
+    if (const char* b = std::getenv("STARSIM_HANDOVER_BANK_DEG")) h.initial_bank_rad = std::atof(b) * deg;
+    if (const char* id = std::getenv("STARSIM_HANDOVER_MISSION")) h.mission = id;
+    const auto f = fly_handover(1.0, 1.0, 7200.0, h);
+    CHECK(f.caught);
+}
+
 TEST_CASE("Lunar return entry dispersion probe", "[.][probe][entry]") {
     const auto factor = [](const char* name, double fallback) {
         const char* v = std::getenv(name);

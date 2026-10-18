@@ -187,6 +187,7 @@ public:
         gnc::AttitudeController::Gains gains;
         gains.flaps = true;
         gains.natural_frequency_rad_s = 0.5;
+        gains.flap_rest_dynamic_pressure_pa = gnc::entry_flap_rest_dynamic_pressure_pa;
         const gnc::AttitudeController controller(gains);
         const double dt = 0.01;
         const int k0 = static_cast<int>(std::lround(time_s_ / dt));
@@ -206,7 +207,8 @@ public:
             vehicle::VehicleCommand vc;
             // the rate feedforward as FlightSession flies it (the bank roll, the terminal phase's slew)
             const gnc::AttitudeController::Feedforward feedforward{s.attitude.inverse_rotate(command.rate_gcrf_radps), {}, {},
-                                                                   command.phase != gnc::EntryPhase::Gate};
+                                                                   command.phase != gnc::EntryPhase::Gate,
+                                                                   command.flap_rest_rad};
             controller
                 .steer(*body_, atmosphere_.at(height).pressure_pa, command.axis_gcrf, command.roll_reference_gcrf,
                        &feedforward)

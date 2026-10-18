@@ -194,3 +194,51 @@ TEST_CASE("Flaps pinned at their stops come back into the range", "[entry][flap]
         CHECK(d <= 75.0 * deg);
     }
 }
+
+#include "starsim/gnc/entry_aero_table.hpp"
+
+TEST_CASE("The entry aero table's flap trim cancels the pitch moment", "[entry][flap][trim]") {
+    World world;
+    auto body = entry_ship(65000.0, 6500.0, 60.0 * deg, world);
+    const gnc::AlphaSchedule schedule{{1.0, 30.0}, {60.0 * deg, 60.0 * deg}};
+    const gnc::EntryAeroTable table(body->vehicle(), schedule);
+    const auto rest = table.trim_flap_rad(norm(body->air_data().air_velocity_body_mps) / body->air_data().air.speed_of_sound_mps);
+    auto& flaps = body->vehicle().stages().back().flaps;
+    REQUIRE(rest.size() == flaps.size());
+    for (size_t k = 0; k < flaps.size(); ++k) flaps[k].deflection_rad = rest[k];
+    // the flaps holding, the RCS would cancel the modelled moment: ~none left
+    const auto out = gnc::AttitudeController::allocate(*body, 0.0, {}, false, false);
+    CAPTURE(rest[0] / deg, rest[1] / deg, rest[2] / deg, rest[3] / deg);
+    CHECK(std::abs(out.rcs_torque_fraction.y) < 0.05);
+    CHECK(std::abs(out.rcs_torque_fraction.x) < 0.01);  // symmetric pairs: no roll, no yaw
+    CHECK(std::abs(out.rcs_torque_fraction.z) < 0.01);
+}
+
+TEST_CASE("Flaps without authority rest in the given position", "[entry][flap][trim]") {
+    World world;
+    gnc::AttitudeController::Gains gains;
+    gains.flaps = true;
+    gains.natural_frequency_rad_s = 0.5;
+    gains.flap_rest_dynamic_pressure_pa = 200.0;
+    const gnc::AttitudeController controller(gains);
+    gnc::AttitudeController::Feedforward ff;
+    ff.flap_rest_rad = {30.0 * deg, 35.0 * deg, 40.0 * deg, 45.0 * deg};
+    for (const double height : {110000.0, 65000.0}) {
+        auto body = entry_ship(height, 7000.0, 60.0 * deg, world);
+        auto& flaps = body->vehicle().stages().back().flaps;
+        for (size_t k = 0; k < flaps.size(); ++k) flaps[k].deflection_rad = (k == 0 || k == 3) ? flaps[k].max_deflection_rad : 0.0;
+        const Vec3 axis = body->state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+        const Vec3 roll = body->state().attitude.rotate(Vec3{0.0, 1.0, 0.0});
+        const auto out = controller.steer(*body, 0.0, axis, roll, &ff);
+        const double q = 0.5 * body->air_data().air.density_kg_m3 * std::pow(norm(body->air_data().air_velocity_body_mps), 2);
+        CAPTURE(height, q);
+        REQUIRE(out.flap_rad.size() == ff.flap_rest_rad.size());
+        double difference = 0.0;
+        for (size_t k = 0; k < out.flap_rad.size(); ++k) difference += std::abs(out.flap_rad[k] - ff.flap_rest_rad[k]);
+        if (q < 200.0) {
+            CHECK(difference == Approx(0.0).margin(1e-12));
+        } else {
+            CHECK(difference > 1.0 * deg);  // allocated
+        }
+    }
+}

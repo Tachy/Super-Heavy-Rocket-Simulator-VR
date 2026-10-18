@@ -63,6 +63,10 @@ public:
         // stable for ki < 2 zeta wn^3. 0: none.
         double integral_gain = 0.0;
         double integral_window_rad = 0.0;  // the error is integrated only while within this (no windup in slews)
+        // Flaps without control authority: below this dynamic pressure the flaps hold Feedforward::flap_rest_rad (if
+        // given) instead of being allocated - in the thin air the allocation's tiny columns only wander them; the RCS
+        // flies the attitude there anyway (0: off).
+        double flap_rest_dynamic_pressure_pa = 0.0;
     };
 
     AttitudeController() = default;
@@ -77,6 +81,7 @@ public:
         math::Vec3 acceleration_body_radps2;
         math::Vec3 torque_body_nm;  // added to the wanted torque on all three axes (integral_torque)
         bool roll_rate = false;
+        std::vector<double> flap_rest_rad;  // flap rest position below Gains::flap_rest_dynamic_pressure_pa (empty: none)
     };
 
     // `axis_gcrf`: desired direction of the body x-axis (unit). `roll_reference_gcrf` (optional, non-zero):

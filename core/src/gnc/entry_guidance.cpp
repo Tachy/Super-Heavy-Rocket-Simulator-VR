@@ -28,6 +28,8 @@ constexpr double capture_margin_rad = 8.0 * constants::deg_to_rad;
 constexpr double terminal_max_height_m = 40000.0;  // the hand-over Mach number is only trusted in dense air
 constexpr double max_terminal_prediction_s = 900.0;
 constexpr double settled_bank_rad = 5.0 * constants::deg_to_rad;  // no reversal in progress
+// [E] the flaps' rest trim is taken at the Mach number of this height (where the entry's air starts to load them)
+constexpr double flap_rest_reference_height_m = 80000.0;
 constexpr double levenberg_marquardt_damping = 1.0e-3;            // relative to the trace of J^T J
 constexpr double min_steering_fraction = 1.0e-3;  // below: the lift direction of the last cycle is kept
 constexpr double aerocapture_dip_height_m = 80000.0;  // as the predictor's skip-out test
@@ -702,6 +704,11 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         }
     }
     if ((phase_ == EntryPhase::Terminal || phase_ == EntryPhase::Gate) && !capsule_) terminal(body, transform.rotation, r_itrf, v_itrf, mach, dt);
+    if (!capsule_) {
+        // the coming entry's Mach number: the speed against the sound speed at the entry interface (none above US76)
+        const double sound_mps = atmosphere.at(std::min(height, flap_rest_reference_height_m)).speed_of_sound_mps;
+        command_.flap_rest_rad = model_.aero.trim_flap_rad(speed / sound_mps);
+    }
     command_.phase = phase_;
     command_.drag_scale = model_.drag_scale;
     command_.lift_scale = model_.lift_scale;

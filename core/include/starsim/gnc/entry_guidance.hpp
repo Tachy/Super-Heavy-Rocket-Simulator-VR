@@ -162,6 +162,10 @@ struct EntryGuidanceParameters {
     }
 };
 
+// [E] below this dynamic pressure the entry's flaps rest in EntryCommand::flap_rest_rad (user 2026-10-18): their moment
+// there is a few % of the RCS's and the allocation only wandered them.
+inline constexpr double entry_flap_rest_dynamic_pressure_pa = 200.0;
+
 struct EntryCommand {
     EntryPhase phase = EntryPhase::Entry;
     double alpha_rad = 0.0;              // setpoint (entry phase)
@@ -171,6 +175,9 @@ struct EntryCommand {
     // Terminal phase: angular velocity of the commanded attitude (feedforward: a PD controller tracking the nose turn's
     // 5 deg/s ramp alone lags ~2 zeta w / wn = ~18 deg, which the belly flop loses as angle of attack)
     math::Vec3 rate_gcrf_radps;
+    // Flap rest position (AttitudeController::Feedforward::flap_rest_rad): the pitch trim of the coming entry at the
+    // scheduled alpha (no public data on a thermally best rest angle, user 2026-10-18 [E]); empty for a capsule.
+    std::vector<double> flap_rest_rad;
     double downrange_error_m = 0.0;      // latest prediction (> 0: overshoot)
     double crossrange_m = 0.0;           // > 0: target right of the predicted track
     double heading_error_rad = 0.0;      // target azimuth - track azimuth (> 0: target to the right)

@@ -173,6 +173,12 @@ constexpr double flap_max_step_rad = 45.0 * constants::deg_to_rad;
 // it broke 11 of 14 LEO return gates - not used.)
 constexpr double flap_reach_horizon_s = 0.25;
 
+double dynamic_pressure_pa(const vehicle::FlightBody& body) {
+    const auto& air = body.air_data();
+    const double v = norm(air.air_velocity_body_mps);
+    return 0.5 * air.air.density_kg_m3 * v * v;
+}
+
 Vec3 flap_moment(const vehicle::Flap& flap, double deflection_rad, const aero::FlapTable& table,
                  const vehicle::AirData& air, const Vec3& rate_body, double cg_station_m) {
     const Vec3 arm = aero::flap_centroid(flap.geometry, deflection_rad) - Vec3{cg_station_m, 0.0, 0.0};
@@ -518,6 +524,14 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
         }
     }
     if (feedforward) torque += feedforward->torque_body_nm;
+    if (gains_.flaps && feedforward && feedforward->flap_rest_rad.size() == body.vehicle().flap_count() &&
+        !feedforward->flap_rest_rad.empty() &&
+        dynamic_pressure_pa(body) < gains_.flap_rest_dynamic_pressure_pa) {
+        // no authority: the flaps rest (e.g. in the trim of the coming entry), gimbals / RCS cancel the modelled moment
+        ControlOutput out = allocate(body, ambient_pressure_pa, torque, gains_.grid_fins, false);
+        out.flap_rad = feedforward->flap_rest_rad;
+        return out;
+    }
     return allocate(body, ambient_pressure_pa, torque, gains_.grid_fins, gains_.flaps);
 }
 

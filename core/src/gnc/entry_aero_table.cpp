@@ -60,6 +60,7 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
     }
 
     // Total force (body axes) at Mach number and angle of attack (belly towards the flow), flaps in pitch trim.
+    double trim_delta = 0.0;  // the last trimmed_force's pitch trim (forward pair mid + delta, aft pair mid - delta)
     const auto trimmed_force = [&](double mach, double alpha) {
         const double speed = mach * reference_speed_of_sound_mps;
         const Vec3 u = Vec3{std::cos(alpha), 0.0, 0.0} + belly * std::sin(alpha);  // air velocity direction
@@ -95,6 +96,7 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
             delta = 0.5 * (lo + hi);
         }
         evaluate(delta, force);
+        trim_delta = delta;
         return force / (0.5 * reference_density_kg_m3 * speed * speed);
     };
 
@@ -107,6 +109,11 @@ EntryAeroTable::EntryAeroTable(const vehicle::Vehicle& ship, const AlphaSchedule
         mach_.push_back(mach);
         cd_area_m2_.push_back(-dot(force, u));
         cl_area_m2_.push_back(dot(force, l));
+        trim_delta_rad_.push_back(trim_delta);
+    }
+    for (const auto& s : flaps) {
+        flap_forward_.push_back(s.forward);
+        flap_max_rad_.push_back(s.flap->max_deflection_rad);
     }
     for (double a = alpha_grid_min_deg; a <= alpha_grid_max_deg + 1e-9; a += alpha_grid_step_deg) {
         alpha_grid_rad_.push_back(a * constants::deg_to_rad);
@@ -163,5 +170,16 @@ double EntryAeroTable::cl_area_m2(double mach, double alpha_rad) const { return 
 
 double EntryAeroTable::cd_area_m2(double mach) const { return interpolate(mach_, cd_area_m2_, mach); }
 double EntryAeroTable::cl_area_m2(double mach) const { return interpolate(mach_, cl_area_m2_, mach); }
+
+std::vector<double> EntryAeroTable::trim_flap_rad(double mach) const {
+    std::vector<double> deflections;
+    if (trim_delta_rad_.empty()) return deflections;
+    const double delta = interpolate(mach_, trim_delta_rad_, mach);
+    for (size_t i = 0; i < flap_forward_.size(); ++i) {
+        const double max = flap_max_rad_[i];
+        deflections.push_back(std::clamp(0.5 * max + (flap_forward_[i] ? delta : -delta), 0.0, max));
+    }
+    return deflections;
+}
 
 }  // namespace starsim::gnc
