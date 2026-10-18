@@ -47,7 +47,8 @@ constexpr double braking_speed_tolerance_mps = 0.5;
 // gate search (direct entry): the interface epoch is scanned both ways from the plane solution and a downrange sign
 // change refined until the gate stage can take over
 constexpr double gate_scan_step_s = 2.0 * 3600.0;     // [E] the site turns ~3,000 km per step
-constexpr int gate_scan_steps = 6;                    // +-12 h: every site pass
+constexpr double gate_scan_span_s = 12.0 * 3600.0;    // +-12 h: every site pass
+constexpr double gate_scan_min_step_s = 900.0;        // [E] continuation: the shortest step before a way is closed
 constexpr double gate_bracket_jump_m = 10000e3;       // larger: the target range wrapped past the antipode
 constexpr int gate_refine_iterations = 12;
 // [E] A gate the secant cannot close (the predicted range jumps at a reach boundary next to it: Task 8's MCC stalled at
@@ -75,6 +76,8 @@ constexpr double nrd_lead_max_s = 2.5 * 86400.0;
 constexpr double nrd_lead_step_s = 0.25 * 86400.0;
 constexpr double flyby_offset_max_s = 12.0 * 3600.0;
 constexpr double flyby_offset_step_s = 3.0 * 3600.0;  // a search window reaches past one crossing
+constexpr size_t max_nrho_options = 8;  // [E] departure options tried in the full model per perilune
+constexpr double nrho_estimate_bound_fraction = 0.9;  // [E] the patched-conic estimate times this bounds the option
 constexpr double departure_tolerance_s = 0.5;
 constexpr double transfer_angle_min_rad = 90.0 * constants::deg_to_rad;
 constexpr double transfer_angle_max_rad = 179.5 * constants::deg_to_rad;
@@ -608,18 +611,33 @@ std::optional<Vec3> EarthReturnPlanner::aim_at_gate_once(const StateVector& at_b
         const auto r = converge(centre, second);
         return r ? std::optional<Vec3>(r->dv) : std::nullopt;
     }
-    // Walk the interface epoch both ways from the plane solution; the cheapest converged crossing wins.
+    // Walk the interface epoch both ways from the plane solution over half a day each (every site pass: the site's
+    // along-track position turns once a day); the cheapest converged crossing wins. A step that does not solve is
+    // halved (continuation: l5 Task 10, a 2 h step of the NRHO return's powered flyby crept 30 Newton iterations and
+    // closed the scan at most epochs); the warm start follows the last two solutions.
     std::optional<GateSample> best;
     for (const double direction : {1.0, -1.0}) {
         GateSample previous = centre;
-        for (int k = 1; k <= gate_scan_steps; ++k) {
-            const GateSample s = timed(centre.t + direction * k * gate_scan_step_s, previous.dv);
-            if (!s.ok) break;  // not solved or skipped out: this way is closed
+        std::optional<GateSample> before;
+        double walked_s = 0.0, step_s = gate_scan_step_s;
+        while (walked_s < gate_scan_span_s - 1e-6) {
+            const double dt = direction * std::min(step_s, gate_scan_span_s - walked_s);
+            Vec3 guess = previous.dv;
+            if (before) guess += (previous.dv - before->dv) * (dt / (previous.t - before->t));
+            const GateSample s = timed(previous.t + dt, guess);
+            if (!s.ok) {  // not solved or skipped out: shorter steps, until the way is closed
+                step_s *= 0.5;
+                if (step_s < gate_scan_min_step_s) break;
+                continue;
+            }
+            walked_s += std::abs(dt);
             if (brackets(previous, s)) {
                 if (const auto r = converge(previous, s); r && (!best || norm(r->dv) < norm(best->dv))) best = r;
                 break;
             }
+            before = previous;
             previous = s;
+            step_s = std::min(2.0 * step_s, gate_scan_step_s);
         }
     }
     if (!best) return std::nullopt;
@@ -731,7 +749,7 @@ EarthReturnPlanner::NrhoReturn EarthReturnPlanner::nrho_return(const StateVector
         StateVector at_nrd;
         Vec3 periselene, nrd, rpf_velocity;
     };
-    Option chosen;
+    std::vector<Option> options;  // the best flyby point per departure and flyby time
     auto search = [&](time::Epoch t_nrd, const StateVector& at_nrd, time::Epoch t_flyby) {
         const StateVector nrd_rel = moon_relative(ephemeris_, at_nrd, t_nrd);
         const Vec3 v_inf = excess_velocity(ephemeris_, t_flyby, p.flight_time_guess_s, p.target.site_itrf_m, earth_);
@@ -778,7 +796,7 @@ EarthReturnPlanner::NrhoReturn EarthReturnPlanner::nrho_return(const StateVector
                 }
             }
         }
-        if (local.cost < chosen.cost) chosen = local;
+        if (std::isfinite(local.cost)) options.push_back(local);
     };
     // the departure time before the perilune and the flyby time about it [E]: both shape the approach and the turn
     StateVector s = state;
@@ -794,30 +812,45 @@ EarthReturnPlanner::NrhoReturn EarthReturnPlanner::nrho_return(const StateVector
             search(t_nrd, s, perilune + offset);
         }
     }
-    if (!std::isfinite(chosen.cost)) return best;
-    // Full force model: the departure burn by position targeting onto P at the flyby epoch, the powered flyby there by
-    // the return targeting (plane, perigee, and the gate for a direct entry).
-    const auto moon = ephemeris_.state_gcrf(ephemeris::Body::Moon, chosen.t_flyby);
-    const auto drop = position_.solve(chosen.at_nrd, chosen.t_nrd, chosen.t_nrd,
-                                      {moon.position_m + chosen.periselene, chosen.t_flyby}, chosen.nrd,
-                                      flyby_position_tolerance_m);
-    if (debug_enabled()) {
-        std::fprintf(stderr,
-                     "return NRHO: departure %.2f d before the perilune, flyby %+.1f h from it: estimate %.1f m/s "
-                     "(NRD %.1f), drop %s %.1f m/s\n",
-                     (perilune - chosen.t_nrd) / 86400.0, (chosen.t_flyby - perilune) / 3600.0, chosen.cost,
-                     norm(chosen.nrd), drop.converged ? "converged" : "failed", norm(drop.burn.delta_v_gcrf_mps));
+    // Full force model, the options cheapest first (the estimate ignores the gate): the departure burn by position
+    // targeting onto P at the flyby epoch, the powered flyby there by the return targeting (plane, perigee, and the gate
+    // for a direct entry). The departure and flyby times move the arrival by hours - where the cheapest option's arrival
+    // cannot bring the entry to the site (the site's place along the arrival track spans only part of a turn: l5 Task
+    // 10), a later or earlier departure can, as a mission planner trades the departure for the landing site. The
+    // cheapest converged option wins.
+    std::sort(options.begin(), options.end(), [](const Option& a, const Option& b) { return a.cost < b.cost; });
+    if (options.size() > max_nrho_options) options.resize(max_nrho_options);
+    double best_mps = std::numeric_limits<double>::infinity();
+    for (const Option& chosen : options) {
+        // the estimate nearly bounds an option from below (aiming at the gate only adds; the full model came out up to
+        // ~4 % below the patched conic): none left can beat the best found
+        if (nrho_estimate_bound_fraction * chosen.cost >= best_mps) break;
+        const auto moon = ephemeris_.state_gcrf(ephemeris::Body::Moon, chosen.t_flyby);
+        const auto drop = position_.solve(chosen.at_nrd, chosen.t_nrd, chosen.t_nrd,
+                                          {moon.position_m + chosen.periselene, chosen.t_flyby}, chosen.nrd,
+                                          flyby_position_tolerance_m);
+        if (debug_enabled()) {
+            std::fprintf(stderr,
+                         "return NRHO: departure %.2f d before the perilune, flyby %+.1f h from it: estimate %.1f m/s "
+                         "(NRD %.1f), drop %s %.1f m/s\n",
+                         (perilune - chosen.t_nrd) / 86400.0, (chosen.t_flyby - perilune) / 3600.0, chosen.cost,
+                         norm(chosen.nrd), drop.converged ? "converged" : "failed", norm(drop.burn.delta_v_gcrf_mps));
+        }
+        if (!drop.converged) continue;
+        const StateVector& at_flyby = drop.arrival_gcrf;
+        const Vec3 rpf_guess = moon.velocity_mps + chosen.rpf_velocity - at_flyby.velocity_mps;
+        const ReturnBurn flyby = depart(at_flyby, chosen.t_flyby, chosen.t_flyby, p.target, rpf_guess, true);
+        if (debug_enabled()) {
+            std::fprintf(stderr, "return NRHO powered flyby: guess %.1f m/s -> %s %.1f m/s\n", norm(rpf_guess),
+                         flyby.converged ? "converged" : "failed", norm(flyby.burn.delta_v_gcrf_mps));
+        }
+        const double cost = norm(drop.burn.delta_v_gcrf_mps) + norm(flyby.burn.delta_v_gcrf_mps);
+        if (flyby.converged && cost < best_mps) {
+            best_mps = cost;
+            best = {true, drop.burn, flyby};
+        }
     }
-    if (!drop.converged) return best;
-    const StateVector& at_flyby = drop.arrival_gcrf;
-    const Vec3 rpf_guess = moon.velocity_mps + chosen.rpf_velocity - at_flyby.velocity_mps;
-    const ReturnBurn flyby = depart(at_flyby, chosen.t_flyby, chosen.t_flyby, p.target, rpf_guess, true);
-    if (debug_enabled()) {
-        std::fprintf(stderr, "return NRHO powered flyby: guess %.1f m/s -> %s %.1f m/s\n", norm(rpf_guess),
-                     flyby.converged ? "converged" : "failed", norm(flyby.burn.delta_v_gcrf_mps));
-    }
-    if (!flyby.converged) return best;
-    return {true, drop.burn, flyby};
+    return best;
 }
 
 ReturnPlan EarthReturnPlanner::plan(const StateVector& state, time::Epoch epoch, const EarthReturnParameters& p,

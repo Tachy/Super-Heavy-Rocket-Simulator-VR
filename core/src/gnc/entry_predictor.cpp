@@ -365,7 +365,15 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
         const double end_range_m =
             unwrapped_range_rad(ground_range_m(start.position_itrf_m, r) / constants::wgs84_semi_major_axis_m, swept_rad) *
             constants::wgs84_semi_major_axis_m;
-        p.downrange_error_m = end_range_m - ground_range_m(start.position_itrf_m, target.position_itrf_m);
+        // the target's range along the start's direction of motion: one behind the start is a turn less its distance
+        // ahead (l5 Task 10: the NRHO return's planner took an interface past the site for one before it)
+        double target_range_m = ground_range_m(start.position_itrf_m, target.position_itrf_m);
+        const Vec3 start_track = start.velocity_itrf_mps - math::normalized(start.position_itrf_m) *
+                                                              dot(start.velocity_itrf_mps, math::normalized(start.position_itrf_m));
+        if (dot(target.position_itrf_m, start_track) < 0.0) {
+            target_range_m = 2.0 * constants::pi * constants::wgs84_semi_major_axis_m - target_range_m;
+        }
+        p.downrange_error_m = end_range_m - target_range_m;
         const Vec3 n = cross(start.position_itrf_m, r);
         if (norm(n) > 1e-6 * norm(r) * norm(r)) {
             p.crossrange_m = -std::asin(std::clamp(dot(math::normalized(target.position_itrf_m), math::normalized(n)),

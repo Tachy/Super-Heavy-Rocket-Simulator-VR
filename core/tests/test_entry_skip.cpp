@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <memory>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "ship_entry_scenario.hpp"
@@ -16,6 +17,7 @@
 #include "starsim/gnc/entry_predictor.hpp"
 
 using namespace starsim;
+using Catch::Approx;
 
 namespace {
 
@@ -95,6 +97,34 @@ TEST_CASE("Predictor range unwraps past the antipode", "[ship][guidance][skip]")
     REQUIRE(p.time_s > 3000.0);  // flown well beyond half the Earth's circumference (~20,000 km)
     // a great-circle range alone would read the end past the antipode as short of half a turn
     CHECK(p.downrange_error_m > constants::pi * constants::wgs84_semi_major_axis_m - 1.0e6);
+}
+
+TEST_CASE("Predictor counts a target behind the start as one turn ahead", "[ship][guidance][skip]") {
+    // l5 Task 10 (NRHO return): the short great-circle range alone cannot tell a target behind the interface from one
+    // ahead - the planner converged on an arrival that flew the target's distance forward (impact 6,000 km beyond).
+    const auto schedule = gnc::load_alpha_schedule(STARSIM_CONFIG_DIR, "aero/ship_entry_alpha.csv");
+    test::EntryStart start;
+    start.speed_relative_mps = 7500.0;
+    start.flight_path_angle_rad = -2.0 * deg;
+    test::ShipEntryScenario scenario(start);
+    const auto model = predictor_model(scenario, schedule);
+    const math::Vec3 r0 = scenario.start_position_itrf_m();
+    const math::Vec3 east = math::normalized(scenario.start_velocity_itrf_mps() -
+                                             math::normalized(r0) * dot(scenario.start_velocity_itrf_mps(), math::normalized(r0)));
+    const double angle = 1.0e6 / constants::wgs84_semi_major_axis_m;
+    const auto target_at = [&](double sign) {
+        return gnc::EntryTarget{(math::normalized(r0) * std::cos(angle) + east * (sign * std::sin(angle))) *
+                                    constants::wgs84_semi_major_axis_m,
+                                0.0};
+    };
+    const auto ahead = gnc::predict_entry(model, predictor_start(scenario), 60.0 * deg, target_at(1.0), 800.0);
+    const auto behind = gnc::predict_entry(model, predictor_start(scenario), 60.0 * deg, target_at(-1.0), 800.0);
+    REQUIRE(ahead.reached_gate);
+    REQUIRE(behind.reached_gate);
+    CAPTURE(ahead.downrange_error_m, behind.downrange_error_m);
+    // the same end point; the target behind lies a turn less 1,000 km ahead
+    CHECK(behind.downrange_error_m - ahead.downrange_error_m ==
+          Approx(-(2.0 * constants::pi * constants::wgs84_semi_major_axis_m - 2.0e6)).margin(1.0e3));
 }
 
 TEST_CASE("Predictor heat rate includes the radiative part at lunar speeds", "[ship][guidance][skip]") {

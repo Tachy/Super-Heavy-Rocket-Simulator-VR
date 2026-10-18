@@ -204,6 +204,14 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
     if (violates(s.prediction)) {
         s.constrained = true;
         const Solution solved = s;
+        if (std::getenv("STARSIM_DEBUG_ENTRY")) {  // diagnostics: which limit cuts the solved bank back
+            const auto& p = s.prediction;
+            std::printf("[entry]   constraint: solved %+.1f deg (miss %.1f km, gate %d, skips %d, exited %d) peak heat %.0f "
+                        "kW/m2 load %.2f g q %.1f kPa\n",
+                        sign * s.bank_rad / constants::deg_to_rad, miss(p) / 1000.0, p.reached_gate ? 1 : 0, p.skips,
+                        p.exited ? 1 : 0, p.peak_heat_rate_w_m2 / 1000.0, p.peak_load_g,
+                        p.peak_dynamic_pressure_pa / 1000.0);
+        }
         double lo = 0.0, hi = s.bank_rad;
         EntryPrediction p_lo = predict(0.0);
         if (!violates(p_lo)) {

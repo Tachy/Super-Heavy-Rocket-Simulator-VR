@@ -363,3 +363,18 @@ TEST_CASE("Aerocapture outcome names a capture that stays in the atmosphere", "[
     CHECK(t.session.autopilot().state == sim::AutopilotState::Off);
     CHECK(burn_of(t.session, sim::LunarStep::PerigeeRaise) == nullptr);
 }
+
+TEST_CASE("Lunar return start at a shifted epoch (probe)", "[.lunar_return_epoch_probe]") {
+    // STARSIM_PROBE_MISSION (default ship_lunar_return_nrho), STARSIM_PROBE_HOURS: hours added to the mission epoch.
+    const char* id = std::getenv("STARSIM_PROBE_MISSION");
+    const char* hours = std::getenv("STARSIM_PROBE_HOURS");
+    test::LunarReturnSession t;
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, id ? id : "ship_lunar_return_nrho");
+    const auto epoch = t.time.from_utc(m.epoch_utc) + (hours ? std::atof(hours) : 0.0) * 3600.0;
+    const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, epoch);
+    const auto* plan = t.session.lunar_return_plan();
+    std::printf("[epoch probe] %+.1f h: %s %s departure %.1f m/s braking %.1f m/s\n", hours ? std::atof(hours) : 0.0,
+                s.return_planned ? "planned" : "refused", s.refusal.c_str(), plan ? plan->tei_delta_v_mps : 0.0,
+                plan ? plan->braking_delta_v_mps : 0.0);
+    CHECK(s.return_planned);
+}
