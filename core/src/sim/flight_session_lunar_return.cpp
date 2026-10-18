@@ -381,7 +381,7 @@ bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
     const double dv = norm(r.burn.delta_v_gcrf_mps);
     const double needed =
         vehicle.mass_properties().mass_kg * (1.0 - std::exp(-(dv + r.arrival.braking_delta_v_mps) / ve));
-    const double available = vehicle.propellant_kg() - vehicle.stages().front().config.landing_propellant_kg;
+    const double available = vehicle.main_propellant_kg();  // the headers hold the landing propellant
     if (needed > available) {
         lunar_status_ = "Nachplanung: Treibstoff reicht nicht (" + german((needed - available) / 1000.0, 1) + " t fehlen)";
         return false;

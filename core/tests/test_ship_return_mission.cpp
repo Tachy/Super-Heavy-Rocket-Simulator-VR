@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "return_scenario.hpp"
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/math/constants.hpp"
@@ -45,9 +46,7 @@ time::Epoch place_mission(sim::FlightSession& session, const config::ShipReturnM
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, m.vehicle_id);
     while (!cfg.stages.empty() && cfg.stages.front().id != m.stage_id) cfg.stages.erase(cfg.stages.begin());
     REQUIRE(!cfg.stages.empty());
-    double full = 0.0;
-    for (const auto& tank : cfg.stages[0].tanks) full += tank.mass_kg;
-    for (auto& tank : cfg.stages[0].tanks) tank.mass_kg *= m.propellant_kg / full;
+    config::fill_tanks(cfg.stages[0], m.propellant_kg);
 
     const double rp = equatorial_radius_m + m.periapsis_height_m, ra = equatorial_radius_m + m.apoapsis_height_m;
     const orbit::KeplerianElements elements{0.5 * (rp + ra), (ra - rp) / (ra + rp), m.inclination_rad, m.raan_rad, 0.0,

@@ -3,6 +3,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/vehicle.hpp"
@@ -16,13 +17,11 @@ namespace {
 
 const std::filesystem::path config_dir = STARSIM_CONFIG_DIR;
 
-// The ship alone with `propellant_kg` spread over its tanks in their capacity ratio.
+// The ship alone with `propellant_kg` aboard (headers first).
 Vehicle ship_with(double propellant_kg) {
     auto cfg = config::load_vehicle(config_dir, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
-    double full = 0.0;
-    for (const auto& tank : cfg.stages[0].tanks) full += tank.mass_kg;
-    for (auto& tank : cfg.stages[0].tanks) tank.mass_kg *= propellant_kg / full;
+    config::fill_tanks(cfg.stages[0], propellant_kg);
     return Vehicle(cfg, config_dir);
 }
 
@@ -49,7 +48,7 @@ TEST_CASE("In a belly-first entry the residue moves forward and to the belly", "
     ship.set_liquid_down_body({0.05, 0.0, -1.0});
     const auto entry = ship.mass_properties();
     INFO("CG aft " << aft.cg_station_m << " entry " << entry.cg_station_m << " z " << entry.cg_offset_m.z);
-    CHECK(entry.cg_station_m > aft.cg_station_m + 1.0);
+    CHECK(entry.cg_station_m > aft.cg_station_m + 0.5);  // 64 t: 35 t full headers, 29 t main-tank residue (+0.95 m)
     CHECK(entry.cg_offset_m.z < -0.1);
     CHECK(entry.cg_offset_m.y == Approx(0.0).margin(1e-9));
 }

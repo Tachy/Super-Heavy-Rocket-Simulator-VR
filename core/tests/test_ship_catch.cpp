@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "return_scenario.hpp"
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
 #include "starsim/gnc/ship_landing.hpp"
@@ -42,9 +43,7 @@ config::VehicleConfig ship_with(double propellant_kg) {
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
     auto& ship = cfg.stages[0];
-    double full = 0.0;
-    for (const auto& tank : ship.tanks) full += tank.mass_kg;
-    for (auto& tank : ship.tanks) tank.mass_kg *= propellant_kg / full;
+    config::fill_tanks(ship, propellant_kg);
     for (auto& f : ship.flaps) f.initial_deflection_rad = 0.5 * f.max_deflection_rad;
     return cfg;
 }

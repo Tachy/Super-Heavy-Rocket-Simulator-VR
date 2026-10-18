@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/gnc/descent_planner.hpp"
@@ -68,9 +69,7 @@ std::unique_ptr<Ship> ship_after_flip(double propellant_kg = 27000.0) {
     auto s = std::make_unique<Ship>();
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
-    double full = 0.0;
-    for (const auto& tank : cfg.stages[0].tanks) full += tank.mass_kg;
-    for (auto& tank : cfg.stages[0].tanks) tank.mass_kg *= propellant_kg / full;
+    config::fill_tanks(cfg.stages[0], propellant_kg);
     s->vehicle = std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR);
     gnc::DescentModelInputs in;
     in.vehicle = s->vehicle.get();

@@ -11,6 +11,7 @@
 
 #include "lunar_return_test_support.hpp"
 #include "return_scenario.hpp"
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/gnc/ship_landing.hpp"
@@ -73,9 +74,7 @@ HandoverFlight fly_handover(double density_factor, double aero_factor, double li
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, h.mission);
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
-    double full_kg = 0.0;
-    for (const auto& tank : ship.stages.front().tanks) full_kg += tank.mass_kg;
-    for (auto& tank : ship.stages.front().tanks) tank.mass_kg *= h.propellant_kg / full_kg;
+    config::fill_tanks(ship.stages.front(), h.propellant_kg);
     auto p = gnc::EntryGuidanceParameters::lunar_return();
     p.initial_bank_rad = h.initial_bank_rad;
     const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(h.epoch_tdb_s);
@@ -239,13 +238,7 @@ TEST_CASE("Ship return (b4) from the aerocapture's circular orbit is caught",
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
-    double fuel_kg = 0.0, oxidiser_kg = 0.0;
-    for (const auto& tank : ship.stages.front().tanks) {
-        (tank.contents == config::TankContents::Fuel ? fuel_kg : oxidiser_kg) += tank.mass_kg;
-    }
-    for (auto& tank : ship.stages.front().tanks) {
-        tank.mass_kg *= tank.contents == config::TankContents::Fuel ? b4_fuel_kg / fuel_kg : b4_oxidiser_kg / oxidiser_kg;
-    }
+    config::fill_tanks(ship.stages.front(), b4_oxidiser_kg, b4_fuel_kg);
     const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(b4_epoch_tdb_s);
     t.session.place_in_orbit(ship, {b4_position_gcrf_m, b4_velocity_gcrf_mps}, epoch);
     gnc::DeorbitParameters p;
@@ -301,9 +294,7 @@ TEST_CASE("Lunar return aerocapture from the hand-over state exits near 400 km",
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
-    double full_kg = 0.0;
-    for (const auto& tank : ship.stages.front().tanks) full_kg += tank.mass_kg;
-    for (auto& tank : ship.stages.front().tanks) tank.mass_kg *= aircatch_propellant_kg / full_kg;
+    config::fill_tanks(ship.stages.front(), aircatch_propellant_kg);
     // as the session: one bank sign, no plane steering
     auto p = gnc::EntryGuidanceParameters::aerocapture(m.aerocapture_apoapsis_m, -1.0);
     p.initial_bank_rad = aircatch_initial_bank_rad;
@@ -343,9 +334,7 @@ TEST_CASE("A shallow aerocapture pass that stays above 80 km ends in Exit", "[lu
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
-    double full_kg = 0.0;
-    for (const auto& tank : ship.stages.front().tanks) full_kg += tank.mass_kg;
-    for (auto& tank : ship.stages.front().tanks) tank.mass_kg *= aircatch_propellant_kg / full_kg;
+    config::fill_tanks(ship.stages.front(), aircatch_propellant_kg);
     auto p = gnc::EntryGuidanceParameters::aerocapture(m.aerocapture_apoapsis_m, -1.0);
     p.initial_bank_rad = aircatch_initial_bank_rad;
     const auto n = math::normalized(cross(aircatch_position_gcrf_m, aircatch_velocity_gcrf_mps));
@@ -391,9 +380,7 @@ AircatchPass fly_aircatch_pass(double density_factor, double aero_factor, double
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
-    double full_kg = 0.0;
-    for (const auto& tank : ship.stages.front().tanks) full_kg += tank.mass_kg;
-    for (auto& tank : ship.stages.front().tanks) tank.mass_kg *= propellant_kg / full_kg;
+    config::fill_tanks(ship.stages.front(), propellant_kg);
     auto p = gnc::EntryGuidanceParameters::aerocapture(m.aerocapture_apoapsis_m, -1.0);
     p.initial_bank_rad = aircatch_initial_bank_rad;
     const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(aircatch_epoch_tdb_s);
@@ -500,15 +487,7 @@ TEST_CASE("Lunar return catch from a printed gate state", "[.lunar_gate_replay]"
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
-    double fuel_kg = 0.0, oxidiser_kg = 0.0;
-    for (const auto& tank : ship.stages.front().tanks) {
-        if (tank.contents == config::TankContents::Fuel) fuel_kg += tank.mass_kg;
-        if (tank.contents == config::TankContents::Oxidizer) oxidiser_kg += tank.mass_kg;
-    }
-    for (auto& tank : ship.stages.front().tanks) {
-        if (tank.contents == config::TankContents::Fuel) tank.mass_kg *= g[14] / fuel_kg;
-        if (tank.contents == config::TankContents::Oxidizer) tank.mass_kg *= g[15] / oxidiser_kg;
-    }
+    config::fill_tanks(ship.stages.front(), b4_oxidiser_kg, b4_fuel_kg);
     const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(g[0]);
     vehicle::RigidBodyState state{{g[1], g[2], g[3]}, {g[4], g[5], g[6]}, math::Quat{g[7], g[8], g[9], g[10]}, {g[11], g[12], g[13]}};
     if (const char* raise = std::getenv("STARSIM_GATE_RAISE_M")) {  // diagnostics: the same gate this much higher

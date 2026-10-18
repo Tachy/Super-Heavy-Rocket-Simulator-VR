@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <memory>
 
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/geodetic.hpp"
@@ -64,9 +65,7 @@ Setup setup(double phase_rad, double propellant_kg = 45000.0) {
 
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
-    double full = 0.0;
-    for (const auto& tank : cfg.stages[0].tanks) full += tank.mass_kg;
-    for (auto& tank : cfg.stages[0].tanks) tank.mass_kg *= propellant_kg / full;
+    config::fill_tanks(cfg.stages[0], propellant_kg);
     s.ship = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(cfg, STARSIM_CONFIG_DIR),
                                                    vehicle::RigidBodyState{s.orbit.position_m, s.orbit.velocity_mps, {}, {}});
     const auto& stage = s.ship->vehicle().stages().front();

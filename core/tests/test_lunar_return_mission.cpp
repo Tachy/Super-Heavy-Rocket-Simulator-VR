@@ -96,7 +96,10 @@ TEST_CASE("Lunar return start refuses a return the tanks cannot hold", "[lunar][
     // tanks of 200 t (an eighth): the return needs ~250 t (a heavier dry mass fails earlier - no entry corridor)
     test::LunarReturnSession t;
     const auto vehicle = test::block3_with_ship([](config::StageConfig& s) {
-        for (auto& tank : s.tanks) tank.mass_kg *= 0.125;
+        for (auto& tank : s.tanks) {
+            tank.mass_kg *= 0.125;
+            tank.capacity_kg *= 0.125;  // smaller tanks, not a partial load
+        }
     });
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc), &vehicle);

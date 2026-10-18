@@ -128,10 +128,12 @@ def report(vehicle_id: str, payload_kg: float) -> int:
         for tank in stage.get("tank", []):
             density = (tank["density_kg_m3"] if tank["contents"] == "rcs"
                        else prop["oxidizer_density_kg_m3" if tank["contents"] == "oxidizer" else "fuel_density_kg_m3"])
-            length = tank["mass_kg"] / density / area
+            tank_area = math.pi * (tank.get("diameter_m", stage["diameter_m"]) / 2.0) ** 2
+            length = tank["mass_kg"] / density / tank_area
             top = tank["base_station_m"] + length
+            role = " (header)" if tank.get("role") == "header" else ""
             print(f"  tank {tank['id']:<10} {tank['mass_kg'] / 1e3:8.1f} t  {tank['mass_kg'] / density:8.1f} m3  "
-                  f"station {tank['base_station_m']:5.1f} .. {top:5.1f} m")
+                  f"station {tank['base_station_m']:5.1f} .. {top:5.1f} m{role}")
             if top > stage["length_m"]:
                 warnings.append(f"{stage_id}/{tank['id']}: tank top {top:.1f} m exceeds stage length")
         ox = sum(t["mass_kg"] for t in stage["tank"] if t["contents"] == "oxidizer")

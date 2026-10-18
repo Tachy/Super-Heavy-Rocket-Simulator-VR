@@ -14,6 +14,8 @@ namespace starsim::config {
 
 namespace {
 
+constexpr double landing_propellant_tolerance_kg = 1.0;  // landing_propellant_kg vs the header contents
+
 using detail::Document;
 
 std::vector<double> number_list(const Document& doc, const toml::table& t, std::string_view key) {
@@ -177,8 +179,17 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             s.tanks.push_back({doc.text(tank, "id"), kind, doc.number(tank, "mass_kg"), doc.number(tank, "base_station_m"),
                                kind == TankContents::Rcs ? doc.positive(tank, "density_kg_m3") : 0.0});
             s.tanks.back().capacity_kg = s.tanks.back().mass_kg;  // configured loads are full tanks
+            const auto role = doc.text_or(tank, "role");
+            if (!role.empty() && role != "main" && role != "header") doc.fail("tank role must be 'main' or 'header'");
+            if (role == "header") {
+                if (kind == TankContents::Rcs) doc.fail("a header tank holds oxidizer or fuel");
+                s.tanks.back().role = TankRole::Header;
+            }
+            if (tank.contains("diameter_m")) s.tanks.back().diameter_m = doc.positive(tank, "diameter_m");
         }
     }
+    double header_kg = 0.0;  // the header tanks' contents: the stage's landing propellant
+    for (const auto& k : s.tanks) header_kg += k.role == TankRole::Header ? k.capacity_kg : 0.0;
     if (auto groups = t["engine_group"].as_array()) {
         for (const auto& node : *groups) {
             const auto& g = *node.as_table();
@@ -349,6 +360,11 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     if (auto recovery = t["recovery"].as_table()) {
         s.reserve_propellant_kg = doc.number_or(*recovery, "reserve_propellant_kg", 0.0);
         s.landing_propellant_kg = doc.number_or(*recovery, "landing_propellant_kg", 0.0);
+        if (header_kg > 0.0 && recovery->contains("landing_propellant_kg") &&
+            std::abs(s.landing_propellant_kg - header_kg) > landing_propellant_tolerance_kg) {
+            doc.fail("stage.recovery.landing_propellant_kg must equal the header tanks' contents (or be left out)");
+        }
+        if (header_kg > 0.0) s.landing_propellant_kg = header_kg;  // the headers hold the landing propellant
         s.recovery_method = doc.text_or(*recovery, "method");
         if (s.recovery_method == "splashdown") {
             s.max_splashdown_speed_mps = doc.positive(*recovery, "max_splashdown_speed_mps");

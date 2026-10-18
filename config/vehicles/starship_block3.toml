@@ -127,22 +127,43 @@ length_m = 52.1                          # [D] stack 124.4 m [S:wiki_starship] -
 diameter_m = 9.0
 dry_mass_kg = 255000.0                   # [D] flights 12-14 webcast telemetry (propellant gauge, rocket equation staging ->
                                          # cutoff, 20-26 Starlink V3 ~2 t each): 248 / 260 / 254 t
-dry_cg_station_m = 28.0                  # [D] belly-first trim: with the landing propellant the ship must trim on its
-                                         # flaps near mid-range at alpha 55-75 deg (aero model, b1 plan Task 6);
-                                         # was 20 m [E], ~9 m behind the hull's centre of pressure (untrimmable)
+dry_cg_station_m = 23.516                # [D] keeps the validated landing-mass CG (dry + 35 t: 25.50 m from the base,
+                                         # header-tank plan Task 3): 28 m [D] was the belly-first trim with the landing
+                                         # propellant in the main tanks (flaps near mid-range at alpha 55-75 deg, b1
+                                         # plan Task 6); the LOX header in the nose moves it forward
 payload_mass_kg = 0.0
 
 [[stage.tank]]
 id = "lox_main"
 contents = "oxidizer"
-mass_kg = 1252200.0                      # [D] 1,600 t total [S:wiki_starship] split at O/F 3.6
+mass_kg = 1224808.7                      # [D] 1,600 t total [S:wiki_starship] at O/F 3.6, less the LOX header
 base_station_m = 3.5                     # [E]
 
 [[stage.tank]]
 id = "ch4_main"
 contents = "fuel"
-mass_kg = 347800.0                       # [D]
+mass_kg = 340191.3                       # [D] less the CH4 header
 base_station_m = 20.0                    # [E]
+
+# Header tanks [E] (header-tank plan, user 2026-10-18): the landing propellant (35 t, part of the 1,600 t) feeds the
+# flip and the landing burn - in an entry the main-tank residue lies away from the outlets. Placement from SN-era
+# reports (2020-2022): LOX header in the nose tip, CH4 header a bubble on the CH4 main tank's lower dome; Block 3
+# placement is not published. Short cylinders of the given diameter.
+[[stage.tank]]
+id = "lox_header"
+contents = "oxidizer"
+role = "header"
+mass_kg = 27391.3                        # [D] 35 t at O/F 3.6
+base_station_m = 44.0                    # [E] nose, forward of the forward flaps' hinge line
+diameter_m = 3.6                         # [E] ~23 m^3
+
+[[stage.tank]]
+id = "ch4_header"
+contents = "fuel"
+role = "header"
+mass_kg = 7608.7                         # [D]
+base_station_m = 20.0                    # [E] on the CH4 main tank's lower dome
+diameter_m = 3.0                         # [E] ~17 m^3
 
 # Sea-level Raptors as three single-engine groups. Layout [D] from the flight 13 splashdown video (ship upside down,
 # user 2026-10-13): two sea-level engines on the leeward side, one towards the belly; vacuum engines one leeward, two
@@ -247,9 +268,9 @@ max_load_n = 5.0e6                       # [E] per pin (~1.9 g of a 265 t ship o
 [stage.recovery]
 method = "tower_catch"
 reserve_propellant_kg = 30000.0          # [E]
-landing_propellant_kg = 35000.0          # [E] header tanks (the webcast gauge shows the main tanks only): flip (~8 t) and
-                                         # landing burn; a tower catch ends slower than the splashdowns of flights 13/14.
-                                         # b3 catch campaign: 30 t ran dry in a third of the dispersed cases, 35 t holds
+# landing_propellant_kg: the header tanks' contents (35 t [E]; the webcast gauge shows the main tanks only): flip
+# (~8 t) and landing burn; a tower catch ends slower than the splashdowns of flights 13/14. b3 catch campaign: 30 t
+# ran dry in a third of the dispersed cases, 35 t holds
 deorbit_engine_groups = ["sea_level_3"]  # user 2026-10-13: the belly Raptor alone (in the symmetry plane), thrust
                                          # gimballed through the CG
 

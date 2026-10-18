@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/aero/radiative_heating.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
@@ -84,9 +85,7 @@ public:
         cfg.stages.erase(cfg.stages.begin());
         auto& ship = cfg.stages[0];
         const double propellant = start.mass_propellant_kg >= 0.0 ? start.mass_propellant_kg : ship.landing_propellant_kg;
-        double full = 0.0;
-        for (const auto& tank : ship.tanks) full += tank.mass_kg;
-        for (auto& tank : ship.tanks) tank.mass_kg *= propellant / full;
+        config::fill_tanks(ship, propellant);
         for (auto& f : ship.flaps) f.initial_deflection_rad = 0.5 * f.max_deflection_rad;
         if (tweak) tweak(cfg);
         belly_azimuth_rad_ = ship.aero.belly_azimuth_rad;

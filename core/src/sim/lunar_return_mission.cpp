@@ -8,6 +8,7 @@
 
 #include "starsim/aero/radiative_heating.hpp"
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/entry_aero_table.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
@@ -44,11 +45,6 @@ double capacity_kg(const config::StageConfig& stage) {
     double full = 0.0;
     for (const auto& tank : stage.tanks) full += tank.mass_kg;
     return full;
-}
-
-void scale_tanks(config::StageConfig& stage, double propellant_kg) {
-    const double full = capacity_kg(stage);
-    for (auto& tank : stage.tanks) tank.mass_kg *= propellant_kg / full;
 }
 
 // Vacuum thrust and mass flow of the engines in `groups` (all at full throttle).
@@ -171,7 +167,7 @@ void place_lunar_return_ship(FlightSession& session, const config::LunarReturnMi
                              const mission::EarthReturnParameters& ret) {
     const auto state = lunar_return_start_state(session, m, epoch, ret);
     auto cfg = ship;
-    scale_tanks(cfg.stages.front(), propellant_kg);
+    config::fill_tanks(cfg.stages.front(), propellant_kg);
     const auto moon = session.ephemeris().state_gcrf(ephemeris::Body::Moon, epoch);
     const math::Vec3 x = math::normalized(state.velocity_mps - moon.velocity_mps);  // nose prograde (Moon-relative)
     const math::Vec3 z = math::normalized(state.position_m - moon.position_m);      // belly (body -z) to the Moon
@@ -197,7 +193,7 @@ LunarReturnBudget lunar_return_budget(const FlightSession& session, const std::f
     }
     // Onboard entry model at the entry mass (dry + landing propellant), as the entry guidance will fly it.
     auto entry_cfg = ship;
-    scale_tanks(entry_cfg.stages.front(), stage.landing_propellant_kg);
+    config::fill_tanks(entry_cfg.stages.front(), stage.landing_propellant_kg);
     const vehicle::FlightBody entry_body(std::make_unique<vehicle::Vehicle>(entry_cfg, config_dir),
                                          vehicle::RigidBodyState{});
     const auto& entry_vehicle = entry_body.vehicle();

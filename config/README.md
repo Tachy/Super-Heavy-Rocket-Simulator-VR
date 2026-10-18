@@ -70,8 +70,13 @@ flow separation (vacuum engines).
 - Ship sea-level Raptors: three single-engine groups (`sea_level_1/2` the leeward pair at 30/150 deg, `sea_level_3`
   towards the belly at 270 deg) so the landing burn can drop the belly engine (3 -> 2); burns elsewhere run the three
   together (groups of the same engine on the same ring form one symmetric burn set).
-- `[stage.recovery] landing_propellant_kg`: booster - at landing-burn ignition (MECO is planned for it); ship - entry
-  mass in scenarios, the header-tank propellant for flip and landing burn (35 t [E]). `rcs_propellant_kg`: main-tank RCS
+- `[[stage.tank]]` `role = "header"` (default `"main"`; oxidizer or fuel only) and optional `diameter_m` (default: the
+  stage diameter): Starship's header tanks hold the landing propellant and feed the engines from the belly flip on
+  (the session selects them); the main tanks feed everything before. The configured loads are full tanks (capacities);
+  scenarios load propellant with `config::fill_tanks` (headers first). The gauge (`main_propellant_kg`) shows the main
+  tanks only. Tank liquid settles perpendicular to the apparent gravity (`vehicle/liquid_settling`).
+- `[stage.recovery] landing_propellant_kg`: booster - at landing-burn ignition (MECO is planned for it); ship - derived
+  from the header tanks' contents (35 t [E]; giving a different value is an error). `rcs_propellant_kg`: main-tank RCS
   gas a returning booster spends from MECO to landing-burn ignition (the MECO plan adds it; 0 with an own RCS supply).
 - `[stage.rcs]`: reaction control as individual thrusters, on/off with a fixed thrust (constant feed pressure), controlled
   by time: `isp_s`, `propellant` (`"main"`: ullage gas from the stage's oxidizer and fuel tanks, drawn in proportion to

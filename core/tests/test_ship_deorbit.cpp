@@ -9,6 +9,7 @@
 #include <set>
 #include <string>
 
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
@@ -29,9 +30,7 @@ config::VehicleConfig orbiting_ship(double propellant_kg) {
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
     auto& ship = cfg.stages[0];
-    double full = 0.0;
-    for (const auto& tank : ship.tanks) full += tank.mass_kg;
-    for (auto& tank : ship.tanks) tank.mass_kg *= propellant_kg / full;
+    config::fill_tanks(ship, propellant_kg);
     return cfg;
 }
 

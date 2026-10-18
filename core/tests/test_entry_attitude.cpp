@@ -5,6 +5,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
 #include "starsim/math/constants.hpp"
 
@@ -82,9 +83,7 @@ struct World {
 std::unique_ptr<vehicle::FlightBody> entry_ship(double height_m, double speed_mps, double alpha_rad, World& world) {
     auto cfg = config::load_vehicle(config_dir, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
-    double full = 0.0;
-    for (const auto& tank : cfg.stages[0].tanks) full += tank.mass_kg;
-    for (auto& tank : cfg.stages[0].tanks) tank.mass_kg *= cfg.stages[0].landing_propellant_kg / full;
+    config::fill_tanks(cfg.stages[0], cfg.stages[0].landing_propellant_kg);
     for (auto& f : cfg.stages[0].flaps) f.initial_deflection_rad = 0.5 * f.max_deflection_rad;
     const Vec3 v{speed_mps, 0.0, 0.0}, up{0.0, 0.0, 1.0};
     const vehicle::RigidBodyState state{{0.0, 0.0, 6356752.3 + height_m}, v,

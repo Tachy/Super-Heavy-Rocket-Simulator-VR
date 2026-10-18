@@ -51,6 +51,18 @@ double Stage::propellant_kg(config::TankContents contents) const {
     return total;
 }
 
+double Stage::propellant_kg(config::TankContents contents, config::TankRole role) const {
+    double total = 0.0;
+    for (const auto& t : tanks) {
+        if (t.config.contents == contents && t.config.role == role) total += t.mass_kg;
+    }
+    return total;
+}
+
+bool Stage::has_header_tanks() const {
+    return std::any_of(tanks.begin(), tanks.end(), [](const Tank& t) { return t.config.role == config::TankRole::Header; });
+}
+
 Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::path& config_dir)
     : id_(config.id), config_dir_(config_dir) {
     std::map<std::string, std::shared_ptr<const propulsion::EnginePerformance>> performances;
@@ -63,13 +75,14 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
         stage.config = stage_config;
         stage.base_station_m = station;
         stage.extra_mass_kg = stage_config.payload_mass_kg + stage_config.fairing_mass_kg;
-        const double area = constants::pi * 0.25 * stage_config.diameter_m * stage_config.diameter_m;
         for (const auto& tank_config : stage_config.tanks) {
+            const double diameter = tank_config.diameter_m > 0.0 ? tank_config.diameter_m : stage_config.diameter_m;
+            const double area = constants::pi * 0.25 * diameter * diameter;
             const double density = tank_config.contents == config::TankContents::Oxidizer ? config.propellant.oxidizer_density_kg_m3
                                    : tank_config.contents == config::TankContents::Fuel   ? config.propellant.fuel_density_kg_m3
                                                                                           : tank_config.density_kg_m3;
             const bool settles = tank_config.contents != config::TankContents::Rcs && tank_config.capacity_kg > 0.0;
-            stage.tanks.push_back({tank_config, density, area, tank_config.mass_kg, 0.5 * stage_config.diameter_m,
+            stage.tanks.push_back({tank_config, density, area, tank_config.mass_kg, 0.5 * diameter,
                                    settles ? tank_config.capacity_kg / (density * area) : 0.0});
         }
         for (const auto& group : stage_config.engine_groups) {
@@ -228,7 +241,7 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
             const double base = s.base_station_m + t.config.base_station_m;
             if (settled_aft || t.length_m <= 0.0) {
                 const double h = mass / (t.density_kg_m3 * t.area_m2);
-                parts.push_back({mass, base + 0.5 * h, 0.0, mass * (0.25 * r * r + h * h / 12.0)});
+                parts.push_back({mass, base + 0.5 * h, 0.0, mass * (0.25 * t.radius_m * t.radius_m + h * h / 12.0)});
                 continue;
             }
             if (!t.settling) t.settling = settling_table(t.length_m / t.radius_m);
@@ -286,6 +299,26 @@ double Vehicle::propellant_kg() const {
         for (const auto& t : s.tanks) total += t.config.contents == config::TankContents::Rcs ? 0.0 : t.mass_kg;
     }
     return total;
+}
+
+double Vehicle::main_propellant_kg() const {
+    double total = 0.0;
+    for (const auto& s : stages_) {
+        total += s.propellant_kg(config::TankContents::Oxidizer, config::TankRole::Main) +
+                 s.propellant_kg(config::TankContents::Fuel, config::TankRole::Main);
+    }
+    return total;
+}
+
+void Vehicle::select_feed(size_t stage_index, FeedSource source) {
+    auto& stage = stages_.at(stage_index);
+    if (!stage.has_header_tanks() || stage.feed == source) return;
+    stage.feed = source;
+    const auto role = source == FeedSource::Header ? config::TankRole::Header : config::TankRole::Main;
+    if (stage.propellant_kg(config::TankContents::Oxidizer, role) > 0.0 &&
+        stage.propellant_kg(config::TankContents::Fuel, role) > 0.0) {
+        for (auto& e : stage.engines) e.starved = false;
+    }
 }
 
 double Vehicle::rcs_propellant_kg() const {
@@ -413,6 +446,7 @@ std::vector<std::vector<double>> Vehicle::tank_mass_flows_kgps() const {
     std::vector<std::vector<double>> flows;
     for (const auto& stage : stages_) {
         std::vector<double> stage_flows(stage.tanks.size(), 0.0);
+        const auto engine_role = stage.feed == FeedSource::Header ? config::TankRole::Header : config::TankRole::Main;
         double oxidizer = 0.0, fuel = 0.0;
         for (const auto& e : stage.engines) {
             if (!e.producing_thrust()) continue;
@@ -422,29 +456,39 @@ std::vector<std::vector<double>> Vehicle::tank_mass_flows_kgps() const {
             fuel += mdot / (1.0 + mr);
         }
         // Reaction control: firing thrusters draw their own tank, or ullage gas from the main tanks in proportion to
-        // the oxidizer and fuel left.
-        const double ox_kg = stage.propellant_kg(config::TankContents::Oxidizer);
-        const double fuel_kg = stage.propellant_kg(config::TankContents::Fuel);
+        // the oxidizer and fuel left - from the header tanks only once the main tanks are dry [E] (the gas is
+        // pressurant: the attitude control must not die with the last main-tank residue).
+        const bool main_left = stage.propellant_kg(config::TankContents::Oxidizer, config::TankRole::Main) +
+                                   stage.propellant_kg(config::TankContents::Fuel, config::TankRole::Main) >
+                               0.0;
+        const auto gas_role = main_left ? config::TankRole::Main : config::TankRole::Header;
+        const double ox_kg = stage.propellant_kg(config::TankContents::Oxidizer, gas_role);
+        const double fuel_kg = stage.propellant_kg(config::TankContents::Fuel, gas_role);
+        double gas_oxidizer = 0.0, gas_fuel = 0.0;
         for (const auto& t : stage.rcs) {
             if (t.output <= 0.0) continue;
             const double mdot = t.output * t.thrust_n / (t.isp_s * constants::standard_gravity_mps2);
             if (t.tank >= 0) {
                 stage_flows[static_cast<size_t>(t.tank)] += mdot;
             } else if (ox_kg + fuel_kg > 0.0) {
-                oxidizer += mdot * ox_kg / (ox_kg + fuel_kg);
-                fuel += mdot * fuel_kg / (ox_kg + fuel_kg);
+                gas_oxidizer += mdot * ox_kg / (ox_kg + fuel_kg);
+                gas_fuel += mdot * fuel_kg / (ox_kg + fuel_kg);
             }
         }
-        // Draw each propellant from the first tank of that kind that still holds some.
-        for (auto [contents, flow] : {std::pair{config::TankContents::Oxidizer, oxidizer},
-                                      std::pair{config::TankContents::Fuel, fuel}}) {
+        // Draw each propellant from the first tank of that kind and role that still holds some.
+        const auto draw = [&](config::TankContents contents, config::TankRole role, double flow) {
             for (size_t i = 0; i < stage.tanks.size() && flow > 0.0; ++i) {
-                if (stage.tanks[i].config.contents == contents && stage.tanks[i].mass_kg > 0.0) {
+                const auto& tank = stage.tanks[i];
+                if (tank.config.contents == contents && tank.config.role == role && tank.mass_kg > 0.0) {
                     stage_flows[i] += flow;
                     flow = 0.0;
                 }
             }
-        }
+        };
+        draw(config::TankContents::Oxidizer, engine_role, oxidizer);
+        draw(config::TankContents::Fuel, engine_role, fuel);
+        draw(config::TankContents::Oxidizer, gas_role, gas_oxidizer);
+        draw(config::TankContents::Fuel, gas_role, gas_fuel);
         flows.push_back(std::move(stage_flows));
     }
     return flows;
@@ -457,8 +501,10 @@ void Vehicle::consume_propellant(double dt_s) {
         for (size_t i = 0; i < stage.tanks.size(); ++i) {
             stage.tanks[i].mass_kg = std::max(0.0, stage.tanks[i].mass_kg - flows[s][i] * dt_s);
         }
-        const bool dry = stage.propellant_kg(config::TankContents::Oxidizer) <= 0.0 ||
-                         stage.propellant_kg(config::TankContents::Fuel) <= 0.0;
+        // The selected feed source ran dry (no silent switch to the other one).
+        const auto role = stage.feed == FeedSource::Header ? config::TankRole::Header : config::TankRole::Main;
+        const bool dry = stage.propellant_kg(config::TankContents::Oxidizer, role) <= 0.0 ||
+                         stage.propellant_kg(config::TankContents::Fuel, role) <= 0.0;
         if (dry) {
             for (auto& e : stage.engines) {
                 if (e.mode != EngineMode::Off) {

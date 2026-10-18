@@ -107,6 +107,9 @@ struct Tank {
     mutable std::shared_ptr<const SettlingTable> settling;  // fetched on the first tilted query
 };
 
+// Which tanks feed a stage's engines (header-tank plan): the main tanks, or from the flip on the header tanks.
+enum class FeedSource { Main, Header };
+
 struct Stage {
     config::StageConfig config;
     double base_station_m = 0.0;  // bottom of this stage in the vehicle body frame
@@ -119,8 +122,11 @@ struct Stage {
     std::vector<Parachute> parachutes;
     std::vector<RcsThruster> rcs;
     double extra_mass_kg = 0.0;   // payload + fairing
+    FeedSource feed = FeedSource::Main;
 
     double propellant_kg(config::TankContents contents) const;
+    double propellant_kg(config::TankContents contents, config::TankRole role) const;
+    bool has_header_tanks() const;
 };
 
 struct MassProperties {
@@ -179,6 +185,11 @@ public:
     // Main propellant (oxidizer + fuel: the gauge); reaction-control supplies are rcs_propellant_kg().
     double propellant_kg() const;
     double rcs_propellant_kg() const;
+    // Main tanks only (the webcast gauge: header tanks are not shown).
+    double main_propellant_kg() const;
+    // Selects the tanks that feed stage `stage_index`'s engines; a no-op for a stage without header tanks. Engines
+    // starved by a dry source run again when the new source holds oxidizer and fuel.
+    void select_feed(size_t stage_index, FeedSource source);
 
     // Propellant settling (fidelity flag FlightEnvironment::propellant_settling): the liquid's "down" direction in
     // body axes - minus the specific force, lagged - shared by all oxidizer and fuel tanks; initially -x (settled aft

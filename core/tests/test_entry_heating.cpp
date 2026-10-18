@@ -5,6 +5,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/aero/entry_heating.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
@@ -43,9 +44,7 @@ std::unique_ptr<vehicle::FlightBody> ship(double height_m, const Vec3& velocity,
     cfg.stages.erase(cfg.stages.begin());
     if (heat_rate_limit > 0.0) cfg.stages[0].heat_shield.max_heat_rate_w_m2 = heat_rate_limit;
     // Entry mass: only the landing propellant left (split like the full tanks).
-    double full = 0.0;
-    for (const auto& tank : cfg.stages[0].tanks) full += tank.mass_kg;
-    for (auto& tank : cfg.stages[0].tanks) tank.mass_kg *= cfg.stages[0].landing_propellant_kg / full;
+    config::fill_tanks(cfg.stages[0], cfg.stages[0].landing_propellant_kg);
     const vehicle::RigidBodyState state{{0.0, 6378137.0 + height_m, 0.0}, velocity, {}, {}};  // horizontal flight
     return std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(cfg, config_dir), state);
 }
