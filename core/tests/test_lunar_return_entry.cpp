@@ -50,6 +50,7 @@ struct HandoverFlight {
     double propellant_t = 0.0;
     double downrange_km = 0.0;
     double crossrange_km = 0.0;
+    double gate_height_m = -1.0;  // height where the entry handed over to the flip (-1: never)
     std::string phase;
     std::string breakup;
 };
@@ -97,6 +98,9 @@ HandoverFlight fly_handover(double density_factor, double aero_factor, double li
     while (!body.caught() && !body.impacted() && body.resting() == false && t.session.epoch() - epoch < limit_s) {
         t.session.advance_to(t.session.epoch() + 1.0, 400);
         f.peak_load_g = std::max(f.peak_load_g, norm(body.aero_acceleration_body_mps2()) / constants::standard_gravity_mps2);
+        if (const auto* gate = t.session.entry_status(0); gate && gate->phase == gnc::EntryPhase::Gate && f.gate_height_m < 0.0) {
+            f.gate_height_m = t.session.telemetry(0).altitude_m;
+        }
     }
     const auto* es = t.session.entry_status(0);
     f.caught = body.caught();
@@ -133,6 +137,34 @@ TEST_CASE("Lunar return entry with the hull aero 8 % low is caught (hull moment 
     const auto f = fly_handover(1.0, 0.92);
     CHECK(std::abs(f.downrange_km) < 1.0);
     CHECK(f.caught);
+}
+
+// l5 final review (Review Focus 3): a braking burn that was not flown or cut short - the ship enters faster than
+// planned. The guidance cuts the bank back on the predicted limits; beyond the corridor the outcome is honest. The
+// gate's sink-scaled hand-over height (gate x (sink / 100 m/s)^2) once fired hundreds of km up for such a dive: no
+// flip outside the dense air.
+TEST_CASE("Lunar return entry after a short braking burn hands over to the flip only near the ground",
+          "[lunar][return][entry][slow]") {
+    for (const double missing_mps : {500.0, 1030.0}) {  // half of the burn, none of it (~1,030 m/s planned)
+        // the same two-body perigee at the higher speed (the braking burn changed the speed, not the aim point)
+        HandoverState h;
+        const double mu = constants::earth_gm_m3ps2;
+        const math::Vec3 r = h.position_gcrf_m, v = h.velocity_gcrf_mps;
+        const double r_m = norm(r), hm = norm(cross(r, v)), energy = 0.5 * dot(v, v) - mu / r_m;
+        const double perigee_m = hm * hm / mu / (1.0 + std::sqrt(1.0 + 2.0 * energy * hm * hm / (mu * mu)));
+        const double speed = norm(v) + missing_mps;
+        const double v_perigee = std::sqrt(speed * speed - 2.0 * mu / r_m + 2.0 * mu / perigee_m);
+        const double v_horizontal = perigee_m * v_perigee / r_m;
+        const math::Vec3 up = math::normalized(r);
+        const math::Vec3 along = math::normalized(v - up * dot(v, up));
+        h.velocity_gcrf_mps = along * v_horizontal - up * std::sqrt(speed * speed - v_horizontal * v_horizontal);
+        const auto f = fly_handover(1.0, 1.0, 7200.0, h);
+        std::printf("[lunar return entry] braking short by %.0f m/s: gate at %.0f m, '%s'\n", missing_mps,
+                    f.gate_height_m, f.breakup.c_str());
+        INFO("short by " << missing_mps << " m/s");
+        CHECK(f.gate_height_m < 5000.0);  // never handed over, or near the gate (800 m, more in a fast fall)
+        CHECK((f.caught || f.impacted || !f.breakup.empty()));
+    }
 }
 
 // Hidden probe (Task 10): the direct entry from the hand-over state with truth dispersions from the environment

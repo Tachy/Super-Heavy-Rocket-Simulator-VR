@@ -304,8 +304,8 @@ void FlightSession::lunar_return_coast_event() {
             if (replanned) return;
             if (mcc) --lunar_mcc_index_;  // the correction back flies in this slot (ReturnCorrection counts it)
         }
-        if (!mcc) {  // below the threshold: the next one grows
-            ++lunar_mcc_index_;
+        if (!mcc) {  // below the threshold (the next one grows) or not converged (the slot is used up above)
+            if (converged) ++lunar_mcc_index_;
             lunar_return_enter_coast();
             return;
         }
@@ -359,7 +359,8 @@ bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
     const auto state = controlled_state();
     const time::Epoch burn_epoch = epoch_ + burn_preparation_s;
     const auto brake = planner.braking_epoch(state, epoch_, p.target);
-    if (!brake || burn_epoch > *brake - p.mcc_min_before_braking_s) {
+    // no predicted approach (a TEI far off): the recovery is tried all the same - that is when it matters most
+    if (brake && burn_epoch > *brake - p.mcc_min_before_braking_s) {
         lunar_status_ = "Nachplanung: zu nah am Bremsbrennen";
         return false;
     }
@@ -370,7 +371,8 @@ bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
         r.converged = false;
     }
     if (!r.converged) {
-        lunar_status_ = "Nachplanung: kein Weg nach Starbase";
+        lunar_status_ = brake ? "Nachplanung: kein Weg nach Starbase"
+                              : "Nachplanung: keine Annäherung an die Erde, kein Weg nach Starbase";
         return false;
     }
     // propellant: the correction and the new braking burn above the landing propellant

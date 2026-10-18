@@ -337,6 +337,8 @@ MissionStart start_lunar_return_mission(FlightSession& session, const std::files
         b = lunar_return_budget(session, config_dir, m, ship, epoch, setup);
     } catch (const std::runtime_error& e) {  // no LLO of the mission's inclination through the asymptote (German)
         b.reason = e.what();
+    } catch (const std::exception& e) {  // a planner failure (e.g. Kepler domain): refused in German, not thrown
+        b.reason = std::string("Rückflug nicht planbar: ") + e.what();
     }
     if (budget) *budget = b;
     if (!b.closes) return refuse(b.reason);

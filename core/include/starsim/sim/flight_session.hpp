@@ -743,9 +743,9 @@ private:
     // pass exited to 17,000-21,000 km apoapsis - safe, but circularising cost 1.9-2.1 km/s. [E] above this capture cost
     // (perigee raise + circularisation) the perigee is set to aerocapture_repass_perigee_height_m at the apoapsis and
     // the next perigee is another pass (multi-pass aerobraking), up to aerocapture_max_passes in all.
-    static constexpr double aerocapture_repass_dv_mps = 150.0;
-    static constexpr double aerocapture_repass_perigee_height_m = 60e3;
-    static constexpr int aerocapture_max_passes = 3;
+    static constexpr double aerocapture_repass_dv_mps = 150.0;              // [E] user 2026-10-17 (second pass)
+    static constexpr double aerocapture_repass_perigee_height_m = 60e3;     // [E]
+    static constexpr int aerocapture_max_passes = 3;                        // [E] user 2026-10-17 (up to 3 passes)
     static constexpr double aerocapture_repass_trim_min_mps = 0.5;  // [E] smaller perigee corrections are not flown
     int lunar_aerocapture_passes_ = 0;
     int lunar_replans_ = 0;           // re-plans flown from the flight data (replan_lunar_return)

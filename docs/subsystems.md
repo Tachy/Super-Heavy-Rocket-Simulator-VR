@@ -557,3 +557,84 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   without), boil-off, a degraded profile for automatic aborts from fast low states (PEG saturates: 111 x 115 km), the
   status at burn end shows osculating elements (95 x 100 km for a 100 km LLO; l6 telemetry), the sub-orbital cutoff
   guard is untested (no scenario reproduces it).
+  l5 return to Earth (plan `docs/superpowers/plans/2026-10-16-lunar-l5-return.md`, ledger
+  `.superpowers/sdd/2026-10-16-lunar-l5-return/progress.md`): mission 2 - a Block 3 ship in the LLO or the NRHO
+  (tanked by tankers, M9; the start state carries just the planned propellant) flies TEI -> MCCs -> braking burn ->
+  direct entry and catch at Starbase (`ship_lunar_return_llo`, `_nrho`), or an aerocapture ("Aircatch") into a ~400 km
+  orbit -> perigee raise -> circularisation -> b4 (`ship_lunar_aircatch_llo`); `sim::start_lunar_return_mission`,
+  `FlightSession::plan_lunar_return`, steps in `core/src/sim/flight_session_lunar_return.cpp`.
+  Radiative heating: NASA TM-102652 (Sutton & Hartung 1990) equilibrium stagnation-point tables transcribed
+  (`config/aero/radiative_heating_earth.csv`, 624 rows, 30-84 km, 8-18 km/s, nose radius 0.05-10 m; log-linear in
+  density, linear in speed and radius); Tauber-Sutton cross-check +3 % (60 km, 11 km/s, 2.3 m). `FlightBody` heat rate =
+  Sutton-Graves convective + radiative (Earth air, from 8 km/s). At 60 km / 5 m: 6.8 MW/m^2 at 11 km/s, 0.63 at 9.5 km/s -
+  the reason for the braking burn (user 2026-10-16): no direct lunar-return entry stays below the 1.2 MW/m^2 [E] limit.
+  Known gaps: equilibrium air only (no non-equilibrium radiation, no ablation coupling - the tiles do not ablate),
+  Starship's heat-flux limit and the 6 m nose radius are estimates (no published figure; tiles ~1650 C ~0.65 MW/m^2
+  radiative equilibrium), Tauber-Sutton itself is outside its range (Rn 0.3-3 m).
+  Corridor (`gnc/entry_corridor`; speeds relative to the rotating Earth, east, 120 km): direct (1 deg wide) max 9,688 m/s
+  (-5.53 .. -4.51 deg, steep side limited by Hitzestrom), aerocapture to 400 km (0.5 deg) 10,086 m/s; the real return
+  (~10.5 km/s relative, ~11.0 inertial) has ~0.2 deg; Dragon at 11 km/s 1.68 deg around -6.6 deg (Apollo-like). The
+  planned entry angle is the corridor angle with the widest bank window (`gnc::widest_bank_window`); the aerocapture's
+  entry speed comes from a bank window of >= 10 deg (9.78 km/s). Interface state placed at the geodetic 120 km.
+  Earth return planner (`mission/earth_return`): LLO TEI ~880 m/s (aligned plane, 3.4 d; the Moon moves ~13 deg/day:
+  835 m/s at +15 h for a 13 deg misaligned LLO), MCC 4 m/s for 0.1 % / 34 m/s for 1 % TEI errors, braking burn on the
+  vacuum Raptors centred at ~2,000 km, 1.03-1.15 km/s by vis-viva (the plan's 1.4-1.5 km/s assumed 10.9 relative),
+  entry ~9.7 km/s relative; aerocapture braking ~0.93 km/s. The gate is aimed by moving the arrival epoch (downrange is
+  badly conditioned in the TEI components) with a gate window scan +-12 h by continuation (2 h steps halved to 15 min,
+  warm start extrapolated); the plan aims ONE bank sign's predicted track (lateral offset fixed point, ~957 km).
+  The direct entry reaches Starbase only at epochs where the arrival brings the site within reach (Nov 12 2026 works,
+  Nov 2 not); the user's rule (2026-10-18): plan as mission planners do - find the departure window, no epoch hopping.
+  NRHO: a single perilune TEI costs 3.4 km/s (perilune motion head-on to the return asymptote) -> NRHO departure + 100 km
+  return powered flyby (Artemis architecture, mirror of l3), up to 8 patched-conic departure options tried cheapest
+  first: Nov 13 2026 575.7 m/s (spec 400-500; the epoch sweep -48..+48 h gives 427-742 m/s, 17/17 planned).
+  Predictor (`gnc/entry_predictor`): radiative heating, skips carried, exit orbit, truth air-density factor
+  (`FlightSession::set_air_density_factor`); great-circle range unwrapped by the swept angle (a 28,000 km skip + glide
+  read as 10,857 km) and a target behind the start's track counted as a turn less its distance ahead (the NRHO flight's
+  spurious plan, red since 884bfdd).
+  Entry guidance (`gnc/entry_guidance`, `EntryGuidanceParameters::lunar_return()` / `aerocapture()`): bank linear in
+  energy (FNPEG principle, Lu JGCD 2014; final 40 deg [E], user 2026-10-16) - no constant bank both captures and stays in
+  the limits at 9.7 km/s; capture preferred to the predicted limits (lowest capturing bank + 2 deg); q limit 32 kPa [E]
+  (LEO entries keep 25 kPa; user 2026-10-17); no reversal above 8.5 km/s [E] nor while the range is missed by > 50 km
+  [E]; a lateral funnel (300 km (v / 9.7 km/s)^3 [E], closed at 5 km/s); reversals timed within the 2 s cycle; the bank
+  roll is fed forward to the controller (`EntryCommand::rate_gcrf_radps`, also the roll axis: without it the PD loop
+  lagged ~3 deg in roll and yaw and the sideslip carried the b4 entry 9 km off) and ramped (`bank_step_smooth`,
+  0.5 deg/s^2 [E]: a rate step fed forward at 18 kPa departed the ship); ~180 deg reversals keep their roll direction.
+  Aerocapture: one bank sign, no plane steering (reversals through lift up lofted the pass to 17,800 km), phase Exit; a
+  second pass (up to 3) when perigee raise + circularisation would cost > 150 m/s [E] (dense air).
+  Entry attitude control (Task 10 findings): the flaps cancel the modelled hull moment, so a dispersed hull (x0.92) left
+  an alpha error growing with q (up to 11 deg) - `FlightSession::update_hull_moment_scale` estimates k = true / modelled
+  hull pitch moment from the pitch error (Mach > 10, q > 200 Pa, 0.3 deg deadband, 2 % apply deadband, no integration
+  with a flap within 2 deg of a stop; user 2026-10-17: a scale, not a torque integral, which broke the LEO catches);
+  flap allocation rewritten as a box-constrained active set (`AttitudeController`: free flaps re-solved, box = stops
+  and the 0.25 s [E] flap-rate reach, all-flap moment-neutral centring, a secant only for a flap AT a stop - the sin^2
+  force has a zero derivative there and the old min-norm + clamp chattered 0/90 deg); below 200 Pa [E] the flaps rest in
+  the coming entry's pitch trim (`EntryAeroTable::trim_flap_rad`; user 2026-10-18, no public data on a thermally best
+  rest angle).
+  Braking cut off closed-loop on the entry-interface state (speed and flight-path angle), then an RCS entry trim
+  (threshold 0.5 m/s); the burn executor honours the thrust dispersion. Catch from lunar gates (b3): catch plans keep a
+  soft half-plane 18 m off the tower while the hull bottom is below the tower top (overshoot into the lattice above the
+  arms), and the gate hands over higher when the sink exceeds 100 m/s [E] (gate x (sink / 100)^2). Aircatch b4: burns
+  more than 30 min away wait in free drift; the far deorbit is re-planned every 24 h and 3 h before its burn with the
+  onboard-estimated orbital drag; a re-plan short only of the landing reserve is flown.
+  Re-plan from flight data (user 2026-10-18): `FlightSession::replan_lunar_return` (gate window scan from the live
+  coast via `EarthReturnPlanner::recovery`), automatic when an MCC does not converge or exceeds its 90 m/s allowance and
+  the new plan is cheaper; `lunar_return_replans()`; game key and display in l6. Botched TEI (velocity error = fraction of
+  the TEI delta-v): 1-3 % MCC 22-66 m/s, 5 % re-planned 109 m/s caught 2.2 t, 7 % re-planned 152 m/s caught 0.0 t, 10 %
+  refused honestly (impact).
+  Results: LLO direct flight (Nov 12 2026): TEI ~876-888 m/s, MCCs < 1 m/s, braking ~1,030-1,043 m/s at 2,000 km, entry
+  9,695 m/s -4.8 deg, peak 0.75-1.06 MW/m^2 (radiative ~0.2), 2.6-4.2 g, caught (8-13 t left); aircatch: braking 926 m/s,
+  exit ~53-55 x ~422-427 km (936 kW/m^2), perigee raise 43 m/s + circularisation 62 m/s, b4 deorbit 63 m/s ~93 h later,
+  caught 7.6 t; NRHO direct caught 6.1 t (269.3 + 306.4 m/s). Campaigns (`test_lunar_return_campaign.cpp`, seeds 1-21
+  each: TEI and braking +-0.2 % / 0.1 deg [E] - the closed-loop cutoff residual, user 2026-10-17 -, entry angle +-0.1 deg
+  at the interface, truth hull aero +-10 %, density +-15 %, thrust +-2 %): direct 21 / 21 caught (gates <= 0.03 km,
+  5.9-13.2 t left, peak 0.93-1.16 MW/m^2 - up to 97 % of the limit, 3.4-4.2 g); aircatch 21 / 21 caught (exit perigee
+  41-61 km, apoapsis 413-438 km, b4 gates <= 0.04 km, 0.7-9.6 t left, peak 0.83-1.08 MW/m^2, 2.3-2.5 g). A braking burn
+  short by 500 m/s or not flown at all ends honestly in "Hitzeschild versagt" (final review: the sink-scaled gate
+  height used to hand such a dive over to the flip 1,322 km up - now only below 40 km). Artemis I comparison (magnitude only): Orion entered at ~11 km/s (Dec 2022) and skipped; our ship
+  brakes ~1.0-1.1 km/s and enters at ~9.7 km/s relative (~10.1 inertial), one direct glide. Density x3.0 breaks the
+  aircatch ship up (Hitzeschild versagt), x0.5 exits to a ~10,000 km apoapsis - outside the campaign's +-15 %.
+  Plan time: the gate scan takes ~55 s (LLO) to ~2 min (NRHO) - async planning / a cheaper scan before or with l6.
+  Debug: `STARSIM_DEBUG_RETURN`, `STARSIM_DEBUG_ENTRY` (incl. constraint and reversal lines), `STARSIM_DEBUG_ENTRY_ATTITUDE`
+  (1 Hz axis error, rates, RCS, flaps), `STARSIM_DEBUG_FLIP` ('[gate] state'), `STARSIM_DEBUG_DEORBIT`; hidden tests
+  `"[.lunar_return_case]"` (`STARSIM_RETURN_SEED`, `STARSIM_RETURN_AIRCATCH=1`), `"[.lunar_gate_replay]"`
+  (`STARSIM_GATE_STATE`), `"[.lunar_handover_replay]"` (`STARSIM_HANDOVER_STATE`), `"[.lunar_return_epoch_probe]"`.

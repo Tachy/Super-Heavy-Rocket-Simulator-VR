@@ -646,7 +646,9 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         // above 80 km climbed out without Exit and was ticked at 200 Hz for days)
         if (height < aerocapture_dip_height_m || dot(v_rel_gcrf, up_gcrf) > 0.0) dipped_ = true;
         if (phase_ == EntryPhase::Entry && dipped_ && height > parameters_.exit_height_m) phase_ = EntryPhase::Exit;
-    } else if (height - target_.ground_height_m <= gate_trigger_height_m(-dot(v_rel_gcrf, up_gcrf))) {
+    } else if (height - target_.ground_height_m <=
+               // the sink scaling only in dense air: a fast dive from space (an unflown braking burn) is no flip
+               gate_trigger_height_m(height < terminal_max_height_m ? -dot(v_rel_gcrf, up_gcrf) : 0.0)) {
         phase_ = EntryPhase::Gate;
     }
     // Hand-over below the terminal Mach number once no bank reversal is in progress (the terminal phase starts from

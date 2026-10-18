@@ -1977,7 +1977,7 @@ git push origin main
   radiative heating, gnc entry corridor / aerocapture, mission earth_return), `config/README.md` (radiative table,
   missions), spec (status line), this plan's Ledger, memory `project-lunar-mission.md`
 
-- [ ] **Step 1: Campaigns** (`[lunar][return][validation][slow]`, 7 cases per TEST_CASE as the l4 campaign so ctest runs
+- [x] **Step 1: Campaigns** (`[lunar][return][validation][slow]`, 7 cases per TEST_CASE as the l4 campaign so ctest runs
   them in parallel; seeds 1-21):
   - Direct (21 cases): TEI execution +-1 % / 0.5 deg (`apply_velocity_error` after the burn), braking execution +-1 % /
     0.5 deg, entry angle dispersion +-0.1 deg (applied as a velocity rotation 10 min before the interface), truth aero
@@ -1987,23 +1987,23 @@ git push origin main
   - Aerocapture (21 cases): same dispersions. Expect: exit apoapsis within a band [E] (record min/max; propose the band
     from the spread), perigee after the raise above 150 km in all cases, caught by b4 in all cases.
   - Hidden single cases `STARSIM_RETURN_SEED=<n>` with `STARSIM_VERBOSE=1` (as the ship return campaign).
-- [ ] **Step 2: NRHO variant flight** (`[lunar][return][session][slow]`): start "ship_lunar_return_nrho", caught;
+- [x] **Step 2: NRHO variant flight** (`[lunar][return][session][slow]`): start "ship_lunar_return_nrho", caught;
   TEI delta-v recorded against the spec's 0.4-0.5 km/s.
-- [ ] **Step 3: Artemis I comparison** (magnitude only, in docs): Orion entered at ~11 km/s and skipped (Artemis I,
+- [x] **Step 3: Artemis I comparison** (magnitude only, in docs): Orion entered at ~11 km/s and skipped (Artemis I,
   Dec 2022); our ship enters at the computed speed after ~1.5 km/s of braking - state both, no test.
-- [ ] **Step 4: Docs.** `docs/subsystems.md`: radiative heating (source, interpolation, validity), corridor numbers, max
+- [x] **Step 4: Docs.** `docs/subsystems.md`: radiative heating (source, interpolation, validity), corridor numbers, max
   entry speed, braking burn (height, delta-v, propellant), TEI/MCC numbers, skip / aerocapture guidance, campaign
   results, diagnostics, known gaps (non-equilibrium radiation, ablation-free tiles, Starship heat-flux limit [E]).
-- [ ] **Step 5: Full suite + smoke**
+- [x] **Step 5: Full suite + smoke**
 
 Run: `powershell -ExecutionPolicy Bypass -File tools/build.ps1` (with bindings, all tests incl. `[slow]`) and
 `external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --path game --script res://tests/smoke_test.gd`
 Expected: all pass (record counts and wall time).
 
-- [ ] **Step 6: Final review.** One opus reviewer (superpowers:requesting-code-review) over the l5 commits with the
+- [x] **Step 6: Final review.** One opus reviewer (superpowers:requesting-code-review) over the l5 commits with the
   spec's l5 section + amendment, this plan and its Review Focus. Fix Critical / Important; list deferred minors in the
   Ledger.
-- [ ] **Step 7: Memory, commit, push.** Update `project-lunar-mission.md` (l5 complete, numbers, next: l6), commit:
+- [x] **Step 7: Memory, commit, push.** Update `project-lunar-mission.md` (l5 complete, numbers, next: l6), commit:
 
 ```bash
 git add core docs CLAUDE.md config/README.md
@@ -2026,3 +2026,5 @@ Planning 2026-10-16:
   limit; limits unchanged.
 - Deferred to the user's report (l4 final minors M4): campaign sink <= 1.1 m/s accepted (spec <= 1 m/s, measured
   0.98-1.03); high gate 700/800 m vs the spec's ~2 km.
+
+Final 2026-10-18: Task 10 complete - campaigns direct 21/21, aircatch 21/21, full suite 628/628 + smoke; opus review 0 Critical / 4 Important (fixed: gate hand-over height bounded to dense air, short-braking test, MCC slot skip, re-plan without Earth approach), deferred minors in .superpowers/sdd/2026-10-16-lunar-l5-return/progress.md. L5 COMPLETE.

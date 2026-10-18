@@ -36,6 +36,6 @@ min_corridor_width_deg = 1.0        # [E]
 nominal_bank_deg = 110.0            # [E] l5 Task 6 (see ship_lunar_return_llo)
 
 [budget]
-mcc_allowance_mps = 90.0            # [D] l5 Task 10 campaign: corrections <= 58 m/s + entry trim <= 29 m/s (TEI and braking +-1 % / 0.5 deg)
+mcc_allowance_mps = 90.0            # [D] l5 Task 10 campaign: corrections <= 58 m/s + entry trim <= 29 m/s (TEI and braking +-1 % / 0.5 deg; kept as margin for the +-0.2 % / 0.1 deg campaign)
 coast_attitude_kg_per_day = 1000.0  # [D] l3: Sun hold ~0.9 t/day of cold gas
 reserve_kg = 10000.0                # [E] as the lunar landing

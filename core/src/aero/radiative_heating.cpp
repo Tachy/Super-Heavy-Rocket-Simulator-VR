@@ -12,7 +12,7 @@ namespace starsim::aero {
 
 namespace {
 
-constexpr double min_speed_mps = 8000.0;  // [D] below: < 1 % of the convective rate (table at 8-9 km/s)
+constexpr double min_speed_mps = 8000.0;  // [E] the table starts at 8 km/s (30-48 km; 9 km/s above); below it the term is 0 - small at entry heights (~2 % of the convective rate at 60 km / 6 m) but not in a dense, steep dive (48 km ~25 %), a step at 8 km/s
 
 // Linear interpolation weight of x in [x0, x1] (clamped to [0, 1] when `clamp`).
 double weight(double x, double x0, double x1, bool clamp) {

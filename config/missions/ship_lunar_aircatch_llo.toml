@@ -26,7 +26,7 @@ braking_height_km = 2000.0          # [E] user 2026-10-16
 min_corridor_width_deg = 0.5        # [E] one pass to an apoapsis: the narrower corridor (l5 Task 5: 0.5 deg at 10.1 km/s)
 nominal_bank_deg = 110.0            # [E] unused for the pass (the guidance flies the apoapsis); kept for the file shape
 aerocapture_apoapsis_km = 400.0     # [E] spec
-perigee_raise_km = 200.0            # spec
+perigee_raise_km = 200.0            # [S] spec l5 (b4 starts from a 200 km orbit)
 
 [deorbit]                           # b4 after the capture (as ship_return_starbase)
 entry_interface_km = 120.0
@@ -37,6 +37,6 @@ search_window_h = 168.0             # [E] l5 Task 9: from the captured orbit (32
                                     # 60 km reach - a ground track needs days to come over the site
 
 [budget]
-mcc_allowance_mps = 90.0            # [D] l5 Task 10 campaign: corrections <= 58 m/s + entry trim <= 29 m/s (TEI and braking +-1 % / 0.5 deg)
+mcc_allowance_mps = 90.0            # [D] l5 Task 10 campaign: corrections <= 58 m/s + entry trim <= 29 m/s (TEI and braking +-1 % / 0.5 deg; kept as margin for the +-0.2 % / 0.1 deg campaign)
 coast_attitude_kg_per_day = 1000.0  # [D] l3: Sun hold ~0.9 t/day of cold gas
 reserve_kg = 10000.0                # [E] as the lunar landing
