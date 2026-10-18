@@ -15,6 +15,7 @@
 #include "starsim/propulsion/engine_performance.hpp"
 #include "starsim/propulsion/rcs_allocator.hpp"
 #include "starsim/propulsion/rcs_modulator.hpp"
+#include "starsim/vehicle/liquid_settling.hpp"
 
 namespace starsim::vehicle {
 
@@ -101,6 +102,9 @@ struct Tank {
     double density_kg_m3 = 0.0;
     double area_m2 = 0.0;
     double mass_kg = 0.0;
+    double radius_m = 0.0;
+    double length_m = 0.0;  // of the full load (capacity) in this cross-section; 0: no settling (a column)
+    mutable std::shared_ptr<const SettlingTable> settling;  // fetched on the first tilted query
 };
 
 struct Stage {
@@ -175,6 +179,13 @@ public:
     // Main propellant (oxidizer + fuel: the gauge); reaction-control supplies are rcs_propellant_kg().
     double propellant_kg() const;
     double rcs_propellant_kg() const;
+
+    // Propellant settling (fidelity flag FlightEnvironment::propellant_settling): the liquid's "down" direction in
+    // body axes - minus the specific force, lagged - shared by all oxidizer and fuel tanks; initially -x (settled aft
+    // by thrust or on the pad). Below a threshold (coasts) the liquid holds its position.
+    void settle_propellant(const math::Vec3& specific_force_body_mps2, double dt_s);
+    const math::Vec3& liquid_down_body() const { return liquid_down_body_; }
+    void set_liquid_down_body(const math::Vec3& down_body);  // normalised here
 
     // Discrete engine update for one tick: start/stop transients, throttle and gimbal rate limits,
     // relight rules, flow-separation limits. Must be called once per tick before integration.
@@ -284,6 +295,7 @@ private:
     std::vector<double> rcs_duty_;
     math::Vec3 rcs_torque_;
     math::Vec3 rcs_force_;
+    math::Vec3 liquid_down_body_{-1.0, 0.0, 0.0};
 };
 
 }  // namespace starsim::vehicle

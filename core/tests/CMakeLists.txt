@@ -23,6 +23,7 @@ add_executable(starsim_core_tests
     test_eclipse.cpp
     test_vehicle_models.cpp
     test_liquid_settling.cpp
+    test_vehicle_settling.cpp
     test_rcs.cpp
     test_crew_dragon.cpp
     test_mission_start.cpp

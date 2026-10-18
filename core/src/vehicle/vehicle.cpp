@@ -18,6 +18,12 @@ namespace {
 constexpr double extra_mass_station_fraction = 0.75;
 // The RCS allocation is rebuilt when the CG has moved this far (lever change negligible below).
 constexpr double rcs_cg_tolerance_m = 0.01;
+// Propellant settling [E]: below this specific force the liquid holds its position (orbital drag ~1e-5 m/s^2, RCS
+// translation ~0.02 m/s^2 settles it); it follows the apparent gravity with tau = sqrt(2 D / a) - the time to travel
+// a tank diameter D from rest - kept between the bounds (quasi-static: no slosh).
+constexpr double settling_threshold_mps2 = 0.01;
+constexpr double settling_tau_min_s = 0.5;
+constexpr double settling_tau_max_s = 60.0;
 
 double approach(double value, double target, double max_step) {
     return value + std::clamp(target - value, -max_step, max_step);
@@ -62,7 +68,9 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
             const double density = tank_config.contents == config::TankContents::Oxidizer ? config.propellant.oxidizer_density_kg_m3
                                    : tank_config.contents == config::TankContents::Fuel   ? config.propellant.fuel_density_kg_m3
                                                                                           : tank_config.density_kg_m3;
-            stage.tanks.push_back({tank_config, density, area, tank_config.mass_kg});
+            const bool settles = tank_config.contents != config::TankContents::Rcs && tank_config.capacity_kg > 0.0;
+            stage.tanks.push_back({tank_config, density, area, tank_config.mass_kg, 0.5 * stage_config.diameter_m,
+                                   settles ? tank_config.capacity_kg / (density * area) : 0.0});
         }
         for (const auto& group : stage_config.engine_groups) {
             for (int k = 0; k < group.count; ++k) {
@@ -194,6 +202,12 @@ aero::AeroResult Vehicle::hull_aero(const Vec3& air_velocity_body_mps, const env
 MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* flows, double tau_s) const {
     struct Part { double mass, station, ixx, iyy; double y = 0.0, z = 0.0; };
     std::vector<Part> parts;
+    const Vec3& down = liquid_down_body_;
+    const bool settled_aft = down.x == -1.0 && down.y == 0.0 && down.z == 0.0;  // the exact old code path
+    const double tilt_rad = std::acos(std::clamp(-down.x, -1.0, 1.0));
+    const double lateral = std::hypot(down.y, down.z);
+    const double lateral_y = lateral > 0.0 ? down.y / lateral : 0.0;
+    const double lateral_z = lateral > 0.0 ? down.z / lateral : 0.0;
     for (size_t si = 0; si < stages_.size(); ++si) {
         const auto& s = stages_[si];
         const double r = 0.5 * s.config.diameter_m;
@@ -205,14 +219,25 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
         if (s.extra_mass_kg > 0.0) {
             parts.push_back({s.extra_mass_kg, s.base_station_m + extra_mass_station_fraction * l, 0.0, 0.0});
         }
-        // Settled liquid column; the fluid does not spin with the tank (no roll inertia) [E].
+        // Settled liquid; the fluid does not spin with the tank (no roll inertia) [E]. Settled aft: a column on the
+        // tank bottom; otherwise below a surface perpendicular to liquid_down_body_ (liquid_settling).
         for (size_t ti = 0; ti < s.tanks.size(); ++ti) {
             const auto& t = s.tanks[ti];
             const double mass = std::max(0.0, t.mass_kg - (flows ? (*flows)[si][ti] * tau_s : 0.0));
             if (mass <= 0.0) continue;
-            const double h = mass / (t.density_kg_m3 * t.area_m2);
-            parts.push_back({mass, s.base_station_m + t.config.base_station_m + 0.5 * h, 0.0,
-                             mass * (0.25 * r * r + h * h / 12.0)});
+            const double base = s.base_station_m + t.config.base_station_m;
+            if (settled_aft || t.length_m <= 0.0) {
+                const double h = mass / (t.density_kg_m3 * t.area_m2);
+                parts.push_back({mass, base + 0.5 * h, 0.0, mass * (0.25 * r * r + h * h / 12.0)});
+                continue;
+            }
+            if (!t.settling) t.settling = settling_table(t.length_m / t.radius_m);
+            const double fill = mass / (t.density_kg_m3 * t.area_m2 * t.length_m);
+            const auto m = t.settling->query(fill, tilt_rad);
+            const double rt = t.radius_m;
+            parts.push_back({mass, base + 0.5 * t.length_m + rt * m.axial, 0.0,
+                             mass * rt * rt * (m.axial_var + 0.5 * (m.lateral_var + m.transverse_var)),
+                             rt * m.lateral * lateral_y, rt * m.lateral * lateral_z});
         }
     }
     MassProperties mp;
@@ -235,6 +260,25 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
     mp.inertia_kg_m2 = {ixx, iyy, iyy};
     return mp;
 }
+
+void Vehicle::settle_propellant(const Vec3& specific_force_body_mps2, double dt_s) {
+    const double a = math::norm(specific_force_body_mps2);
+    if (a < settling_threshold_mps2 || dt_s <= 0.0) return;
+    const Vec3 target = specific_force_body_mps2 / -a;
+    const Vec3 v = liquid_down_body_;
+    const double angle = std::acos(std::clamp(math::dot(v, target), -1.0, 1.0));
+    if (angle <= 0.0) return;
+    // Turn on the sphere about v x target (a reversal through 180 deg picks a perpendicular axis): never through zero.
+    Vec3 axis = math::cross(v, target);
+    if (math::norm(axis) < 1e-9) axis = math::cross(v, std::abs(v.x) < 0.9 ? Vec3{1.0, 0.0, 0.0} : Vec3{0.0, 0.0, 1.0});
+    axis = math::normalized(axis);
+    const double tau = std::clamp(std::sqrt(2.0 * diameter_m() / a), settling_tau_min_s, settling_tau_max_s);
+    const double step = angle * (1.0 - std::exp(-dt_s / tau));
+    const double c = std::cos(step), s = std::sin(step);
+    liquid_down_body_ = math::normalized(v * c + math::cross(axis, v) * s + axis * (math::dot(axis, v) * (1.0 - c)));
+}
+
+void Vehicle::set_liquid_down_body(const Vec3& down_body) { liquid_down_body_ = math::normalized(down_body); }
 
 double Vehicle::propellant_kg() const {
     double total = 0.0;
@@ -644,6 +688,7 @@ std::unique_ptr<Vehicle> Vehicle::copy_upper(size_t index) const {
     copy->nose_cone_open_ = nose_cone_open_;
     copy->hull_aero_scale_ = hull_aero_scale_;
     copy->thrust_factor_ = thrust_factor_;
+    copy->liquid_down_body_ = liquid_down_body_;
     copy->aero_ = std::make_unique<aero::SlenderBodyAero>(*aero_);
     copy->rebuild_aero();
     if (index == 0) return copy;
@@ -682,6 +727,7 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     upper->rcs_allocator_.reset();
     upper->hull_aero_scale_ = hull_aero_scale_;  // review d3 M5: the truth aero dispersion stays on both parts
     upper->thrust_factor_ = thrust_factor_;  // likewise the truth thrust dispersion
+    upper->liquid_down_body_ = liquid_down_body_;  // one hull until now: the liquid lies alike
     upper->nose_cone_open_ = nose_cone_open_ && upper->has_nose_cone();
     nose_cone_open_ = nose_cone_open_ && has_nose_cone();
     refresh_rcs_availability();  // a payload split off flies alone: its thrusters are free now

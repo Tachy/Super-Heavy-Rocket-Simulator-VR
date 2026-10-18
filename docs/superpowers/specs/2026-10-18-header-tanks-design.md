@@ -57,7 +57,9 @@ main-tank residue lies away from the outlets, so flip and landing burn can only 
 - `mass_properties()`: oxidizer and fuel tanks with a known capacity use the table when d != -x (the aft column
   stays the exact old code path); the liquid's lateral offset enters `cg_offset_m`; its pitch/yaw inertia is
   m r^2 (sigma_x^2 + (sigma_u^2 + sigma_w^2) / 2), no roll inertia (as today). Rcs tanks stay columns (bladders).
-- Engine moments use the full CG point (lateral offset included), as aero and RCS already do.
+- Engine moments keep the axial CG (as before) [E]: with the full CG point the Falcon 9 / Crew Dragon ascent (capsule
+  trim offset) moved its apoapsis by 13 km; the liquid's lateral offset acts on aero and RCS moments (~4 % of the
+  gimbal authority in the flip).
 - `TankConfig::capacity_kg` = the configured load at config load (configured loads are full tanks); scenarios
   change `mass_kg` only.
 - Moving the CG inside the body frame without an internal reaction is a documented simplification [E].

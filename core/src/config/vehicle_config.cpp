@@ -176,6 +176,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                                                              : TankContents::Rcs;
             s.tanks.push_back({doc.text(tank, "id"), kind, doc.number(tank, "mass_kg"), doc.number(tank, "base_station_m"),
                                kind == TankContents::Rcs ? doc.positive(tank, "density_kg_m3") : 0.0});
+            s.tanks.back().capacity_kg = s.tanks.back().mass_kg;  // configured loads are full tanks
         }
     }
     if (auto groups = t["engine_group"].as_array()) {

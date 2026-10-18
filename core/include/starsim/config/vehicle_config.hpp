@@ -54,6 +54,7 @@ struct TankConfig {
     double mass_kg = 0.0;          // loaded propellant
     double base_station_m = 0.0;   // bottom of the tank, from the bottom of the stage
     double density_kg_m3 = 0.0;    // Rcs tanks only (the main propellants take theirs from the propellant)
+    double capacity_kg = 0.0;      // full load: the configured mass_kg at config load (scenarios change mass_kg only)
 };
 
 // One reaction-control thruster: fixed thrust, on/off.

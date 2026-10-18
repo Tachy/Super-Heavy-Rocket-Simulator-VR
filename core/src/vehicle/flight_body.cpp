@@ -58,6 +58,7 @@ struct TickContext {
     Vec3 rcs_force_n;            // commanded reaction-control translation force, body axes
     Vec3 external_force_gcrf_n;   // contact (tower arms), through the CG
     Vec3 external_torque_body_nm;
+    Vec3* first_specific_force_body = nullptr;  // out: the specific force of the first RK4 stage (tau = 0)
 };
 
 struct Forces {
@@ -99,6 +100,8 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
             const Vec3 force = thrust * e.thrust_direction();
             f.thrust_n += thrust;
             f.nongravitational_body_n += force;
+            // About the axial CG [E]: a lateral offset (capsule trim, settled liquid) acts on aero and RCS moments
+            // only - with it the Falcon 9 / Crew Dragon ascent moved its apoapsis by 13 km (header-tank plan Task 2).
             f.moment_body_nm += cross(e.gimbal_point_m - Vec3{f.mass.cg_station_m, 0.0, 0.0}, force);
         }
     }
@@ -155,6 +158,10 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
 State13 derivative(const TickContext& ctx, double tau_s, const State13& y) {
     const RigidBodyState s = unpack(y);
     const Forces f = evaluate(ctx, tau_s, s);
+    if (tau_s == 0.0 && ctx.first_specific_force_body) {
+        *ctx.first_specific_force_body =
+            (f.nongravitational_body_n + s.attitude.inverse_rotate(ctx.external_force_gcrf_n)) / f.mass.mass_kg;
+    }
     const Vec3& w = s.angular_velocity_body_radps;
     const Vec3& inertia = f.mass.inertia_kg_m2;
     const Vec3 h{inertia.x * w.x, inertia.y * w.y, inertia.z * w.z};
@@ -354,9 +361,11 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
                           vehicle_->rcs_torque_nm(),
                           vehicle_->rcs_force_n(),
                           external_force_gcrf_n_,
-                          external_torque_body_nm_};
+                          external_torque_body_nm_,
+                          &specific_force_body_mps2_};
     const integrators::OdeFunction<13> f = [&ctx](double tau, const State13& y) { return derivative(ctx, tau, y); };
     state_ = unpack(integrators::rk4_step<13>(f, 0.0, pack(state_), dt_s));
+    if (env.propellant_settling) vehicle_->settle_propellant(specific_force_body_mps2_, dt_s);
     // Entry limits of a single stage with a heat shield (the ship): heating from the tick's air data, load from
     // the aerodynamic forces at the end of the tick (thrust loads are the engines' business).
     if (vehicle_->stages().size() == 1 && vehicle_->stages().front().config.heat_shield.nose_radius_m > 0.0) {

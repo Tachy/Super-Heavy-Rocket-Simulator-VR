@@ -37,6 +37,9 @@ struct FlightEnvironment {
     const environment::ReferenceBody* moon = nullptr;  // lunar l1: the Moon as a reference body (nullptr: Earth only)
     const aero::RadiativeHeatingTable* radiative_heating = nullptr;  // lunar l5: Earth air radiation (nullptr: none)
     double air_density_factor = 1.0;  // lunar l5 campaigns: truth air density (Earth) over US76
+    // Fidelity flag (header-tank plan): tank liquid settles perpendicular to the apparent gravity
+    // (Vehicle::settle_propellant); off: always a column on the tank bottom (settled aft).
+    bool propellant_settling = false;
 };
 
 // Air data at the start of the last tick (what an air-data system would report to the controllers).
@@ -149,6 +152,8 @@ public:
     // Accelerometer: aerodynamic acceleration (hull, fins, flaps; body axes) at the end of the last tick. Set while the
     // entry limits are judged (single stage with a heat shield) or the accelerometer is on, zero otherwise.
     const math::Vec3& aero_acceleration_body_mps2() const { return aero_acceleration_body_mps2_; }
+    // Non-gravitational acceleration at the start of the last free-flight tick (thrust, aero, RCS, contact), body axes.
+    const math::Vec3& specific_force_body_mps2() const { return specific_force_body_mps2_; }
     // Guidance that reads the accelerometer turns it on (one more force evaluation per tick).
     void set_accelerometer(bool on) { accelerometer_ = on; }
     const AirData& air_data() const { return air_data_; }
@@ -219,6 +224,7 @@ private:
     bool entered_atmosphere_ = false;
     bool skipped_out_ = false;
     math::Vec3 aero_acceleration_body_mps2_;
+    math::Vec3 specific_force_body_mps2_;
     bool accelerometer_ = false;
     math::Vec3 rcs_force_body_n_;
 };
