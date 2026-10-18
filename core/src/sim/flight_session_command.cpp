@@ -39,7 +39,7 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
             const auto& e = flying.entry_command;
             const gnc::AttitudeController::Feedforward feedforward{
                 flying.body->state().attitude.inverse_rotate(e.rate_gcrf_radps), {},
-                flying.entry_attitude_bias_nm};
+                flying.entry_attitude_bias_nm, e.phase != gnc::EntryPhase::Gate};
             const auto out =
                 entry_controller_.steer(*flying.body, ambient_pressure_pa, e.axis_gcrf, e.roll_reference_gcrf, &feedforward);
             out.apply_to(command);

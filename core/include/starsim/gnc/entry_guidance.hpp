@@ -67,6 +67,9 @@ struct EntryGuidanceParameters {
     // skips and dives - Task 8 reversed at 9.7 km/s to -52 deg and was lost).
     double max_reversal_speed_mps = 1.0e9;
     double min_reversal_interval_s = 20.0;    // [E] dwell between reversals
+    double reversal_max_downrange_error_m = 50e3;  // [E] no reversal check while the range is missed by more
+    // > 0: profiled entries limit the bank setpoint's angular acceleration (bank_step_smooth), the predictor too
+    double bank_acceleration_radps2 = 0.0;
     // Lateral margin (lunar_return(), l5 Task 10): each held sign aims its track this far beyond the target in its own
     // push direction, shrinking with the speed as ((v - end) / (lateral_margin_speed - end))^3 (a deadband funnel in
     // predictive form): a drift either way stays correctable by a later reversal. 0: aim at the target (LEO ship, capsule). Campaign seed 2
@@ -131,8 +134,15 @@ struct EntryGuidanceParameters {
         p.lateral_margin_m = 300e3;                        // [E] as EarthReturnTarget::lateral_margin_m at the interface
         // [E] l5 Task 10: the v^3 funnel held the track ~35 km out until ~2.5 km/s; the last reversal (2.2 km/s, a
         // ~75 s roll) did not finish before the terminal phase (seed 18: 10 km across at Mach 3.5, the fall never
-        // steep enough for the nose turn). Closed at 3 km/s: every campaign gate within 0.03 km (direct).
-        p.lateral_margin_end_speed_mps = 3000.0;
+        // steep enough for the nose turn). Closed at 3 km/s first; with the bank roll fed forward (2026-10-18) the
+        // first reversal (~5 km/s) ends where it is predicted - 8 km beyond the target at a 3 km/s close, and the
+        // second reversal came at 1.6-1.9 km/s, unfinished at the hand-over. Closed at 5 km/s (fixtures caught at 5,
+        // missed at 3 / 4 / 6 km/s; direct campaign 20/21, every gate within 0.03 km).
+        p.lateral_margin_end_speed_mps = 5000.0;
+        // [E] the reversal at ~5 km/s and 17-20 kPa starts as a ramp: a step in the rate fed forward asked 4-16 x the
+        // RCS in yaw, pinned an aft flap and departed (fixture); 0.1-1 deg/s^2 all caught both fixtures, 0.2 and 0.5
+        // the direct campaign 20/21
+        p.bank_acceleration_radps2 = 0.5 * constants::deg_to_rad;
         // [E] user 2026-10-17: 25 kPa (b2's estimate, no source) cut the bank back in dense or thin air and the
         // dispersed returns over- or undershot (campaign 3/11 -> 7/11 at 32 kPa); 0.9 x 6 g still bounds the load
         p.max_dynamic_pressure_pa = 32000.0;
@@ -252,6 +262,9 @@ private:
     double sign_ = 0.0;              // 0: not chosen yet
     double time_since_reversal_s_ = 1.0e9;
     bool reversal_rolling_ = false;  // the last range-control reversal still rolls (no new one is checked)
+    double pending_reversal_in_s_ = -1.0;  // a reversal timed within the cycle (< 0: none)
+    double pending_reversal_bank_rad_ = 0.0;
+    double bank_rate_radps_ = 0.0;   // the setpoint's bank rate (bank_step_smooth)
     EntryCommand command_;
     bool terminal_started_ = false;
     bool terminal_predicted_ = false;

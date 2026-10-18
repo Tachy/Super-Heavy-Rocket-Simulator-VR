@@ -204,7 +204,12 @@ public:
             const auto& s = body_->state();
             const double height = frames::fixed_to_geodetic(transpose(transform.rotation) * s.position_gcrf_m).height_m;
             vehicle::VehicleCommand vc;
-            controller.steer(*body_, atmosphere_.at(height).pressure_pa, command.axis_gcrf, command.roll_reference_gcrf)
+            // the rate feedforward as FlightSession flies it (the bank roll, the terminal phase's slew)
+            const gnc::AttitudeController::Feedforward feedforward{s.attitude.inverse_rotate(command.rate_gcrf_radps), {}, {},
+                                                                   command.phase != gnc::EntryPhase::Gate};
+            controller
+                .steer(*body_, atmosphere_.at(height).pressure_pa, command.axis_gcrf, command.roll_reference_gcrf,
+                       &feedforward)
                 .apply_to(vc);
             body_->step(env_, now, dt, vc);
             time_s_ = (k + 1) * dt;

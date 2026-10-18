@@ -87,6 +87,7 @@ void EntryGuidance::configure_model(const vehicle::FlightBody& body) {
     model_.fast_bank_rate_radps = parameters_.fast_bank_rate_radps;
     model_.fast_bank_mach_low = parameters_.fast_bank_mach_low;
     model_.fast_bank_mach_high = parameters_.fast_bank_mach_high;
+    model_.bank_acceleration_radps2 = parameters_.bank_acceleration_radps2;
     model_.terminal_min_alpha_rad = parameters_.terminal_min_alpha_rad;
     model_.terminal_alpha_authority_rad = parameters_.terminal_alpha_authority_rad;
     model_.nose_fraction = parameters_.terminal_nose_fraction;
@@ -246,7 +247,8 @@ EntryGuidance::Solution EntryGuidance::solve(const EntryPredictorModel& model, c
 void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_itrf, const Vec3& v_itrf) {
     model_.mass_kg = body.vehicle().mass_properties().mass_kg;
     time_since_reversal_s_ += parameters_.cycle_s;
-    const EntryPredictorState state{r_itrf, v_itrf, bank_rad_, roll_direction_};
+    EntryPredictorState state{r_itrf, v_itrf, bank_rad_, roll_direction_};
+    state.bank_rate_radps = bank_rate_radps_;
     if (aerocapture()) {
         aerocapture_cycle(body, state);
         return;
@@ -284,7 +286,10 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
         reversal_rolling_ = false;
     }
     if (speed_mps > parameters_.min_reversal_speed_mps && speed_mps < parameters_.max_reversal_speed_mps &&
-        time_since_reversal_s_ >= parameters_.min_reversal_interval_s && !reversal_rolling_) {
+        time_since_reversal_s_ >= parameters_.min_reversal_interval_s && !reversal_rolling_ &&
+        // the crossrange of a prediction that misses the range is no basis: a constant-bank skip entry 2,600 km short
+        // (no root until the skip arc appears) reversed on it into a skip-out (test "Guided lunar-return entry ...")
+        std::abs(s.prediction.downrange_error_m) < parameters_.reversal_max_downrange_error_m) {
         EntryPredictorState now = state;
         now.reversal_time_s = 0.0;
         const Solution reverse_now = solve(model_, now, body.heat_load_j_m2(), sign_, bank_magnitude_rad_);
@@ -307,6 +312,23 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
             // moves fast with the reversal time, and a reversal one cycle early overshot (d4 campaign: -2.1 km held,
             // +5.9 km reversed at 536 m/s, then held from 500 m/s: 5.8 km off the zone).
             reverse = (c_next > 0.0) == (c_hold > 0.0) && std::abs(c_now) < std::abs(c_hold);
+            if (reverse) {
+                // ... at the time within the cycle where it ends on the target (the crossrange is nearly linear in
+                // the reversal time): at ~5 km/s it moves > 5 km per second of reversal time, and reversing on the
+                // cycle's edge ended up to 11 km across (l5 Task 10, direct seed 20 with the rate feedforward)
+                const double f = std::clamp(c_now / (c_now - c_next), 0.0, 1.0);
+                pending_reversal_in_s_ = f * parameters_.cycle_s;
+                pending_reversal_bank_rad_ = reverse_now.bank_rad + f * (reverse_next.bank_rad - reverse_now.bank_rad);
+                // the predictions fly their solved magnitude before the reversal too: held until it comes (holding
+                // the sign's own solution, 51 instead of 83 deg, ended the seed 20 reversal 10 km across again)
+                s.bank_rad = pending_reversal_bank_rad_;
+                s.constrained = reverse_now.constrained || reverse_next.constrained;
+                if (std::getenv("STARSIM_DEBUG_ENTRY")) {
+                    std::printf("[entry]   reversal in %.2f s: next cycle %.1f km (bank %.1f%s)\n", pending_reversal_in_s_,
+                                c_next / 1000.0, reverse_next.bank_rad / constants::deg_to_rad,
+                                reverse_next.constrained ? " constrained" : "");
+                }
+            }
             if (!reverse && (c_next > 0.0) != (c_hold > 0.0)) {
                 // the bank magnitude for the reversal still to come: its time interpolated between the next cycle
                 // and the end of the prediction (the crossrange over the reversal time is nearly linear)
@@ -326,7 +348,8 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
                         c_hold / 1000.0, c_now / 1000.0, reverse_now.bank_rad / constants::deg_to_rad,
                         reverse_now.constrained ? " constrained" : "", reverse ? "reverse" : "hold");
         }
-        if (reverse) {
+        if (reverse && pending_reversal_in_s_ < 0.0) {
+            roll_direction_ = 0;  // a new roll: its way round by bank_step_held's rule, not a magnitude change's
             sign_ = -sign_;
             time_since_reversal_s_ = 0.0;
             reversal_rolling_ = true;
@@ -633,9 +656,23 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
             if (!capsule_) flown_bank_rad_ = measured_bank_rad(axis_gcrf, v_rel_gcrf, up_gcrf);
             entry_cycle(body, r_itrf, v_itrf);
         }
+        if (pending_reversal_in_s_ >= 0.0 && phase_ == EntryPhase::Entry) {  // a reversal timed within the cycle
+            pending_reversal_in_s_ -= dt;
+            if (pending_reversal_in_s_ <= 0.0) {
+                pending_reversal_in_s_ = -1.0;
+                roll_direction_ = 0;  // a new roll (a magnitude change while waiting set a direction)
+                sign_ = -sign_;
+                time_since_reversal_s_ = 0.0;
+                reversal_rolling_ = true;
+                bank_magnitude_rad_ = pending_reversal_bank_rad_;
+                bank_target_rad_ = sign_ * bank_magnitude_rad_;
+            }
+        }
         const double max_change = model_.bank_rate_at(mach) * dt;
+        const double previous_bank_rad = bank_rad_;
         bank_rad_ = parameters_.final_bank_rad >= 0.0
-                        ? bank_step_held(bank_rad_, bank_target_rad_, max_change, roll_direction_)
+                        ? bank_step_smooth(bank_rad_, bank_target_rad_, model_.bank_rate_at(mach),
+                                           model_.bank_acceleration_radps2, dt, roll_direction_, bank_rate_radps_)
                         : bank_step(bank_rad_, bank_target_rad_, max_change, false);
         command_.alpha_rad = model_.aero.alpha_rad(mach);
         command_.bank_rad = bank_rad_;
@@ -647,6 +684,21 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
             const auto attitude = entry_attitude(v_rel_gcrf, up_gcrf, command_.alpha_rad, bank_rad_, belly_azimuth_rad_);
             command_.axis_gcrf = attitude.axis_gcrf;
             command_.roll_reference_gcrf = attitude.roll_reference_gcrf;
+            // the bank roll as rate feedforward: a PD controller tracking a 1 deg/s roll alone lags 2 zeta / wn ~3 deg
+            // in roll and yaw (sideslip); over a reversal's ~100 s roll the side force carried the track 9 km off the
+            // prediction (l5 Task 10, aircatch b4 seeds 2/3/9: the entry ended 10 km across, the terminal phase saturated)
+            command_.rate_gcrf_radps = Vec3{};
+            if (dt > 0.0 && bank_rad_ != previous_bank_rad) {
+                const auto before =
+                    entry_attitude(v_rel_gcrf, up_gcrf, command_.alpha_rad, previous_bank_rad, belly_azimuth_rad_);
+                math::Quat d = (attitude_from_axes(attitude.axis_gcrf, attitude.roll_reference_gcrf) *
+                                attitude_from_axes(before.axis_gcrf, before.roll_reference_gcrf).conjugate())
+                                   .normalized();
+                if (d.w < 0.0) d = math::Quat{-d.w, -d.x, -d.y, -d.z};
+                const Vec3 axis{d.x, d.y, d.z};
+                const double s = norm(axis);
+                if (s > 1e-12) command_.rate_gcrf_radps = axis * (2.0 * std::atan2(s, d.w) / s / dt);
+            }
         }
     }
     if ((phase_ == EntryPhase::Terminal || phase_ == EntryPhase::Gate) && !capsule_) terminal(body, transform.rotation, r_itrf, v_itrf, mach, dt);

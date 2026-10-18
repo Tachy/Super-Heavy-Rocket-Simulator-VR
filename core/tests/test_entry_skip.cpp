@@ -265,3 +265,33 @@ TEST_CASE("A reversal by about 180 deg keeps its roll direction while the comman
     CHECK(std::abs(bank - 7.0 * deg) < 1e-9);
     CHECK(direction == -1);
 }
+
+TEST_CASE("A smoothed reversal ramps its rate and stops on the command", "[ship][guidance][skip]") {
+    // l5 Task 10: a reversal's rate step fed forward at ~18 kPa departed the ship; the setpoint ramps instead
+    const double max_rate = 1.0 * deg, max_acceleration = 0.5 * deg, dt = 0.005;
+    double bank = 80.0 * deg, rate = 0.2 * deg;  // rolling the other way (a magnitude change) when the reversal comes
+    int direction = 0;
+    double previous_rate = rate, peak_rate = 0.0;
+    int steps = 0;
+    while (std::abs(bank + 100.0 * deg) > 1e-9 && steps < 100000) {
+        bank = gnc::bank_step_smooth(bank, -100.0 * deg, max_rate, max_acceleration, dt, direction, rate);
+        CHECK(std::abs(rate - previous_rate) <= max_acceleration * dt * (1.0 + 1e-9));  // no step in the rate
+        CHECK(bank >= -100.0 * deg - 1e-6);  // no overshoot past the command (beyond a rounding of the last step)
+        peak_rate = std::max(peak_rate, std::abs(rate));
+        previous_rate = rate;
+        ++steps;
+    }
+    CHECK(std::abs(bank + 100.0 * deg) < 1e-9);  // through lift up (the shorter way from a lift-up bank) ...
+    CHECK(peak_rate <= max_rate * (1.0 + 1e-9));
+    CHECK(std::abs(rate) <= max_acceleration * dt * (1.0 + 1e-9) + 1e-12);  // ... and at rest there
+    // a ramp up, a cruise and a ramp down: about 180 deg / 1 deg/s + 1 deg/s / 0.5 deg/s^2 (+ the initial counter-roll)
+    CHECK(steps * dt > 181.0);
+    CHECK(steps * dt < 184.0);
+    // without an acceleration limit: bank_step_held at the rate limit
+    double held = 80.0 * deg, smooth = 80.0 * deg, r = 0.0;
+    int d1 = 0, d2 = 0;
+    held = gnc::bank_step_held(held, -100.0 * deg, max_rate * 2.0, d1);
+    smooth = gnc::bank_step_smooth(smooth, -100.0 * deg, max_rate, 0.0, 2.0, d2, r);
+    CHECK(held == smooth);
+    CHECK(std::abs(r + max_rate) < 1e-12);
+}

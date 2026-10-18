@@ -226,6 +226,43 @@ TEST_CASE("Guided 6-DOF entry flies to the gate", "[ship][guidance]") {
     CHECK(miss < 100.0);
 }
 
+TEST_CASE("Entry command carries the bank roll as rate feedforward", "[ship][guidance][entry]") {
+    const auto schedule = ship_alpha_schedule();
+    test::ShipEntryScenario scenario(test::EntryStart{});
+    gnc::EntryGuidance guidance(scenario.body(), schedule, predicted_target(scenario, schedule, 50.0, 100000.0),
+                                test_parameters());
+    const auto samples = scenario.run_guided(guidance, gnc::EntryPhase::Terminal);
+    REQUIRE(samples.size() > 2);
+    int rolling = 0, holding = 0;
+    double previous_change = 0.0;
+    for (size_t i = 1; i < samples.size(); ++i) {
+        const auto& c = samples[i].command;
+        if (c.phase != gnc::EntryPhase::Entry) continue;
+        const double rate = norm(c.rate_gcrf_radps);
+        // the setpoint changes once per tick (0.01 s) at no more than the fast bank rate ...
+        CHECK(rate <= test_parameters().fast_bank_rate_radps * (1.0 + 1e-9));
+        const double bank_change = std::abs(std::remainder(c.bank_rad - samples[i - 1].command.bank_rad, 2.0 * constants::pi));
+        const double roll_threshold = 0.5 * guidance.parameters().bank_rate_radps * (samples[i].t_s - samples[i - 1].t_s);
+        if (bank_change < 1e-12 && previous_change < 1e-12) {
+            // ... and decays when the bank is held (low-passed, time constant 2 s: < 1/e after the second held)
+            CHECK(rate < 0.4 * test_parameters().fast_bank_rate_radps);
+            ++holding;
+        } else if (bank_change > roll_threshold && previous_change > roll_threshold) {
+            CHECK(rate > 0.5 * guidance.parameters().bank_rate_radps);  // a roll under way is fed forward ...
+            // ... in the direction of the roll: the commanded axes turned by the rate over the second come closer
+            const auto& p = samples[i - 1].command;
+            const double dt_s = samples[i].t_s - samples[i - 1].t_s;
+            const math::Quat turn = math::Quat::from_axis_angle(c.rate_gcrf_radps / rate, rate * dt_s);
+            const auto moved = turn.rotate(p.roll_reference_gcrf);
+            CHECK(norm(moved - c.roll_reference_gcrf) < norm(p.roll_reference_gcrf - c.roll_reference_gcrf));
+            ++rolling;
+        }
+        previous_change = bank_change;
+    }
+    CHECK(rolling > 0);
+    CHECK(holding > 0);
+}
+
 TEST_CASE("Belly flop attitude faces the flow and points the nose along the lift", "[ship][guidance]") {
     const math::Vec3 up{0.0, 0.0, 1.0}, north{1.0, 0.0, 0.0};
     const math::Vec3 falling = -up * 100.0;  // vertical fall: a bank from the vertical plane is undefined

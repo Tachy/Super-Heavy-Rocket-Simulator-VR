@@ -32,6 +32,8 @@ struct EntryPredictorModel {
     double fast_bank_rate_radps = 1.0 * constants::deg_to_rad;
     double fast_bank_mach_low = 5.0;
     double fast_bank_mach_high = 10.0;
+    // > 0: profiled entries also limit the bank's angular acceleration (bank_step_smooth); 0: rate limit only
+    double bank_acceleration_radps2 = 0.0;
     double bank_rate_at(double mach) const {
         const double f = std::clamp((fast_bank_mach_high - mach) / (fast_bank_mach_high - fast_bank_mach_low), 0.0, 1.0);
         return bank_rate_radps + f * (fast_bank_rate_radps - bank_rate_radps);
@@ -118,6 +120,7 @@ struct EntryPredictorState {
     // Frozen basis with a nose direction: the lift direction flown now (unit, along e1 / e2; zero: the steering's).
     math::Vec3 lift_direction;
     double reversal_time_s = -1.0; // the bank command changes sign at this time from the start (< 0: never)
+    double bank_rate_radps = 0.0;  // the bank's rate now (bank_step_smooth; signed)
 };
 
 struct EntryPrediction {
@@ -159,6 +162,12 @@ double bank_step(double bank_rad, double command_rad, double max_change_rad, boo
 // flipped its direction with every new command (l5 Task 10: -62 -> +112..+129 deg, the bank dithered 12 s before it
 // rolled and the entry ended 8-21 km across). `roll_direction` is updated (0 once within the settled band).
 double bank_step_held(double bank_rad, double command_rad, double max_change_rad, int& roll_direction);
+// bank_step_held with an acceleration limit: `bank_rate_radps` (signed, updated) changes by at most
+// max_acceleration dt per step and brakes to stop on the command. A reversal starts as a ramp instead of a step in
+// the rate: fed forward at ~18 kPa the step asked 4-16 x the RCS in yaw, pinned an aft flap and departed (l5 Task 10,
+// lunar entry fixture). max_acceleration <= 0: bank_step_held at max_rate.
+double bank_step_smooth(double bank_rad, double command_rad, double max_rate_radps, double max_acceleration_radps2,
+                        double dt_s, int& roll_direction, double& bank_rate_radps);
 
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
                               double bank_command_rad, const EntryTarget& target, double gate_height_m,

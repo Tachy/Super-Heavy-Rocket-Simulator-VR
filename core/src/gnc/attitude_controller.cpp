@@ -481,10 +481,12 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
         return moment_of_inertia > 0.0 ? torque / moment_of_inertia : 0.0;
     };
     const double gain = wn * wn / kd;
-    const Vec3 ff_rate = feedforward ? Vec3{0.0, feedforward->rate_body_radps.y, feedforward->rate_body_radps.z} : Vec3{};
+    const Vec3 ff_rate = feedforward ? Vec3{feedforward->roll_rate ? feedforward->rate_body_radps.x : 0.0,
+                                            feedforward->rate_body_radps.y, feedforward->rate_body_radps.z}
+                                     : Vec3{};
     const Vec3 ff_acceleration =
         feedforward ? Vec3{0.0, feedforward->acceleration_body_radps2.y, feedforward->acceleration_body_radps2.z} : Vec3{};
-    Vec3 rate{rate_command(roll_error, gain, max_acceleration(a.roll_moment, rcs_max.x, fin_max.x, inertia.x)),
+    Vec3 rate{rate_command(roll_error, gain, max_acceleration(a.roll_moment, rcs_max.x, fin_max.x, inertia.x)) + ff_rate.x,
               rate_command(rotation.y, gain, max_acceleration(a.lever_moment, rcs_max.y, fin_max.y, inertia.y),
                            gains_.actuator_delay_s) + ff_rate.y,
               rate_command(rotation.z, gain, max_acceleration(a.lever_moment, rcs_max.z, fin_max.z, inertia.z),
@@ -506,7 +508,7 @@ ControlOutput AttitudeController::steer(const vehicle::FlightBody& body, double 
                 inertia.z * (kd * (rate.z - w.z) + ff_acceleration.z)};
     if (gains_.hold_deadband_rad > 0.0) {
         const double errors[3] = {roll_error, rotation.y, rotation.z};
-        const double rate_errors[3] = {w.x, w.y - ff_rate.y, w.z - ff_rate.z};
+        const double rate_errors[3] = {w.x - ff_rate.x, w.y - ff_rate.y, w.z - ff_rate.z};
         double* components[3] = {&torque.x, &torque.y, &torque.z};
         for (int i = 0; i < 3; ++i) {
             if (std::abs(errors[i]) < gains_.hold_deadband_rad &&

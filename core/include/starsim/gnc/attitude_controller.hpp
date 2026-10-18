@@ -69,11 +69,14 @@ public:
     explicit AttitudeController(Gains gains) : gains_(gains) {}
 
     // Planned motion the controller should not fight: body rate (relative to inertial space) and angular
-    // acceleration, body axes. The roll components are ignored (roll follows the roll reference).
+    // acceleration, body axes. The roll components are ignored (roll follows the roll reference) unless `roll_rate`:
+    // then the roll rate is fed forward too (an entry's bank roll turns the body about the air velocity, mostly about
+    // body x at the entry's alpha: fed forward in pitch and yaw only it leads the roll into sideslip).
     struct Feedforward {
         math::Vec3 rate_body_radps;
         math::Vec3 acceleration_body_radps2;
         math::Vec3 torque_body_nm;  // added to the wanted torque on all three axes (integral_torque)
+        bool roll_rate = false;
     };
 
     // `axis_gcrf`: desired direction of the body x-axis (unit). `roll_reference_gcrf` (optional, non-zero):

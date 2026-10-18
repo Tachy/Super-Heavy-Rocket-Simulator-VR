@@ -228,7 +228,11 @@ double bank_step(double bank_rad, double command_rad, double max_change_rad, boo
     return std::remainder(bank_rad + std::clamp(delta, -max_change_rad, max_change_rad), 2.0 * constants::pi);
 }
 
-double bank_step_held(double bank_rad, double command_rad, double max_change_rad, int& roll_direction) {
+namespace {
+
+// The signed way to go from `bank_rad` to `command_rad` by bank_step_held's rule (may exceed pi); updates
+// `roll_direction`.
+double held_delta(double bank_rad, double command_rad, int& roll_direction) {
     constexpr double ambiguous_rad = 150.0 * constants::deg_to_rad;   // [E] either way round is about as long
     constexpr double settled_rad = 5.0 * constants::deg_to_rad;       // [E] as the guidance's settled bank
     double delta = std::remainder(command_rad - bank_rad, 2.0 * constants::pi);
@@ -242,7 +246,31 @@ double bank_step_held(double bank_rad, double command_rad, double max_change_rad
         if ((delta > 0.0) != (wanted > 0)) delta += wanted * 2.0 * constants::pi;
     }
     roll_direction = std::abs(delta) > settled_rad ? (delta > 0.0 ? 1 : -1) : 0;
+    return delta;
+}
+
+}  // namespace
+
+double bank_step_held(double bank_rad, double command_rad, double max_change_rad, int& roll_direction) {
+    const double delta = held_delta(bank_rad, command_rad, roll_direction);
     return std::remainder(bank_rad + std::clamp(delta, -max_change_rad, max_change_rad), 2.0 * constants::pi);
+}
+
+double bank_step_smooth(double bank_rad, double command_rad, double max_rate_radps, double max_acceleration_radps2,
+                        double dt_s, int& roll_direction, double& bank_rate_radps) {
+    if (!(max_acceleration_radps2 > 0.0) || !(dt_s > 0.0)) {
+        const double next = bank_step_held(bank_rad, command_rad, max_rate_radps * dt_s, roll_direction);
+        bank_rate_radps = dt_s > 0.0 ? std::remainder(next - bank_rad, 2.0 * constants::pi) / dt_s : 0.0;
+        return next;
+    }
+    const double delta = held_delta(bank_rad, command_rad, roll_direction);
+    // the fastest rate that still stops on the command braking at the limit in steps of dt (v dt + (v - dv) dt + ...
+    // <= |delta|), within the rate limit and without passing it in this step
+    const double dv = max_acceleration_radps2 * dt_s;
+    const double stopping = -0.5 * dv + std::sqrt(0.25 * dv * dv + 2.0 * max_acceleration_radps2 * std::abs(delta));
+    const double wanted = std::copysign(std::min({max_rate_radps, stopping, std::abs(delta) / dt_s}), delta);
+    bank_rate_radps = std::clamp(wanted, bank_rate_radps - dv, bank_rate_radps + dv);
+    return std::remainder(bank_rad + bank_rate_radps * dt_s, 2.0 * constants::pi);
 }
 
 EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredictorState& start,
@@ -254,6 +282,7 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
     p.heat_load_j_m2 = heat_load_so_far_j_m2;
     Vec3 r = start.position_itrf_m, v = start.velocity_itrf_mps;
     double bank = start.bank_rad;
+    double bank_rate = start.bank_rate_radps;
     int roll_direction = start.roll_direction;
     bool entered = false;
     double t = 0.0;
@@ -277,7 +306,9 @@ EntryPrediction predict_entry(const EntryPredictorModel& model, const EntryPredi
             commanded = command_sign * (magnitude + (model.final_bank_rad - magnitude) * f);
         }
         const double command = reversed ? -commanded : commanded;
-        const double next_bank = profiled ? bank_step_held(bank, command, max_change, roll_direction)
+        const double next_bank = profiled ? bank_step_smooth(bank, command, model.bank_rate_at(now.mach),
+                                                             model.bank_acceleration_radps2, step_s, roll_direction,
+                                                             bank_rate)
                                           : bank_step(bank, command, max_change, false);
         const double mid_bank = bank + 0.5 * std::remainder(next_bank - bank, 2.0 * constants::pi);  // across 180 deg
         const Derivative k1 = m.derivative(r, v, bank);
