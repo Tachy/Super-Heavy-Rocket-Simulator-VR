@@ -24,6 +24,7 @@ add_library(starsim_core STATIC
     src/aero/radiative_heating.cpp
     src/aero/capsule_aero.cpp
     src/aero/parachute.cpp
+    src/vehicle/liquid_settling.cpp
     src/vehicle/vehicle.cpp
     src/vehicle/flight_body.cpp
     src/gnc/attitude_controller.cpp

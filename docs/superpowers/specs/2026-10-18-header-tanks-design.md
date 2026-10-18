@@ -1,88 +1,108 @@
-# Header tanks (Starship Block 3) - design
+# Propellant settling and header tanks (Starship Block 3) - design
 
-Date: 2026-10-18. Status: approved in chat by the user ("passt"), spec for review.
+Date: 2026-10-18. Status: approved by the user ("ja, und gleich implementieren, so lange nichts offen ist").
+Revision 2 (replaces the header-only design of bba1792, see "History").
 
 ## Why
 
-The aircatch seeds 4/7 depart at peak q (l6 Task 1 finding, `docs/subsystems.md`, "Aerocapture attitude at peak
-q"): with 61-64 t aboard, all propellant sits in the main tanks, LOX aft, the CG is aft and the pitch trim pins both
-aft flaps at the 90 deg stop. A controller margin held the attitude but cost 1-2 t of cold gas per pass and was
-dropped. User decision 2026-10-18: model the header tanks ("the belly-flip burn depends on the header tanks anyway").
-The landing propellant then sits forward as on the real ship, and the CG moves forward with propellant.
+The aircatch seeds 4/7 depart at peak q (`docs/subsystems.md`, "Aerocapture attitude at peak q"): with 61-64 t
+aboard the CG sits aft and the pitch trim pins both aft flaps at the 90 deg stop. The model puts every tank's
+liquid as a settled column on the tank's AFT bottom, always (`Vehicle::mass_properties`, "Settled liquid column").
+That is only true under thrust or on the pad. In a belly-first entry (alpha 55-75 deg, nose leading) the only
+non-gravitational acceleration is aerodynamic: it pushes the hull towards the leeward side and slightly aft, so the
+liquid runs to the belly side and to the FORWARD end of each tank; its free surface stands perpendicular to the
+apparent gravity (user 2026-10-18: "der Flüssigkeitsspiegel kippt ja mit").
 
-## What the user decided
+Estimate (column against the forward dome = upper bound; dry CG 28 m): CG at 35 t 25.50 -> 27.33 m, at 64 t
+23.87 -> 26.86 m. With the surface tilt (~3 deg: axial / normal aerodynamic force ~0.05) the shift is smaller but of
+the same sign; the CG then varies by ~0.5 m between 35 and 64 t instead of 1.6 m today.
 
-- Feed: the ascent, deorbit and lunar-return burns draw from the main tanks; from the start of the belly flip
-  (flip and landing burn) only the header tanks feed the engines. Main-tank residue stays aboard as dead mass.
-- Filling: the headers are part of the 1,600 t [S]. Header 35 t [E], main tanks 1,565 t. The headers are full at
-  liftoff and stay untouched until the flip.
+History: revision 1 (header tanks alone, dry CG re-tuned to keep the landing-mass CG) moved the 64 t CG by 3 cm
+only - the surplus above 35 t still sat aft in the main tanks. Header tanks stay in the design: in an entry the
+main-tank residue lies away from the outlets, so flip and landing burn can only feed from the headers (user
+2026-10-18: "the belly-flip burn depends on the header tanks anyway").
 
-## Assumptions ([E], sources 2020-2022, SN-era)
+## User decisions
 
-- LOX header in the nose tip, CH4 header a "bubble" on the lower dome of the CH4 main tank (Teslarati / SN4-SN8
-  reports, see the source list in the brainstorm). Block 3 placement is not published.
-- Split at the ship engines' O/F 3.6: LOX header 27.4 t, CH4 header 7.6 t.
-- LOX header: base station ~44 m, diameter ~3.6 m (24 m^3 at 1,141 kg/m^3). CH4 header: base station ~20 m
-  (the CH4 main tank's base), diameter ~3 m. Exact numbers are set in the plan from the stage geometry.
+- Feed: ascent, deorbit and lunar-return burns draw from the main tanks; from the start of the belly flip (flip and
+  landing burn) only the header tanks feed the engines. Main-tank residue stays aboard as dead mass.
+- Filling: the headers are part of the 1,600 t [S]: header 35 t [E], main tanks 1,565 t. Full at liftoff,
+  untouched until the flip.
+- Liquid position follows the apparent gravity (this design, approved 2026-10-18).
 
 ## Design
 
-### 1. Configuration (`config/vehicle_config`)
-- `[[stage.tank]]` gets `role = "main" | "header"` (default `main`) and an optional `diameter_m` (default: the
-  stage diameter). The column height of a tank uses its own cross-section, so a small header has a realistic fill
-  height. Rcs tanks keep their role-less behaviour.
-- `starship_block3.toml`: `lox_main` / `ch4_main` reduced by 35 t (O/F 3.6), new `lox_header` / `ch4_header`.
-- `[stage.recovery] landing_propellant_kg` is derived from the header contents when a stage has header tanks;
-  giving both and differing is a config error. Stages without headers (Super Heavy, Falcon 9) keep the key.
+### 1. Liquid geometry (`vehicle/liquid_settling`, pure)
+- A tank is a cylinder (radius r, length L = capacity / (density x area)); the liquid fills the part below a plane
+  whose normal is the "down" direction d (unit, body axes; d = -specific force / |specific force|).
+- `SettlingTable` (normalised: r = 1, aspect L / r) holds, per tilt theta = angle(d, -x) on a 5 deg grid
+  (0..180 deg), the liquid volume and its first and second moments (axial x, lateral u along d's lateral part,
+  transverse w) over a grid of plane offsets c. Each entry integrates analytic circular segments over axial slices.
+  A query (fill fraction, theta) inverts volume -> c by interpolation in each of the two neighbouring rows and blends
+  them: centroid (axial, lateral) and variances. Tables are cached per aspect ratio (process-wide, thread-safe).
+- Exact cases (tests): theta = 0 is the aft column (centroid -L/2 + h/2, variance h^2/12); theta = 90 deg is a
+  horizontal cylinder (segment centroid 4 sin^3(a/2) / (3 (a - sin a)) for the segment angle a); volume and
+  mirror symmetry (theta <-> 180 deg - theta flips the axial centroid).
 
-### 2. Feed (`vehicle`)
-- Each stage has a feed source `Main | Header` (default `Main`). Engines draw oxidizer and fuel only from tanks of
-  that role (first tank of the kind that still holds some, as today).
-- If the selected source runs dry (oxidizer or fuel), the stage's engines flame out (`starved`) - no silent
-  switch to the other source.
-- Selecting `Header` on a stage without header tanks is a no-op (the stage keeps `Main`).
-- RCS ullage gas (`cold_gas` / `cold_gas_ullage` with `tank = -1`) draws from the main tanks in proportion to
-  oxidizer and fuel; only when the main tanks are dry does it draw from the headers. Documented simplification [E]:
-  the ullage gas is pressurant, not liquid, and the attitude control must not die with the last main-tank residue.
-  RCS availability: starved only when main AND header tanks are dry.
-- Mass, CG and inertia come from `mass_properties()` unchanged in structure (tanks are already parts with their own
-  station); only the per-tank cross-section changes.
-- `propellant_kg()` stays the total (budgets, planners, HUD). New `main_propellant_kg()`: the webcast gauge (main
-  tanks only), used by the flight 12-14 telemetry replays.
-- `split_off` / separation copies the feed source with the stages.
+### 2. Settling state (`vehicle`)
+- `Vehicle` holds one liquid "down" direction for all its tanks (body axes, initial -x: settled aft).
+- `Vehicle::settle_propellant(specific_force_body_mps2, dt_s)`: below 0.01 m/s^2 [E] the liquid holds its last
+  position (coasts, orbital drag); above it the direction turns towards -f / |f| with the time constant
+  tau = clamp(sqrt(2 D / |f|), 0.5 s, 60 s) [E] (D = vehicle diameter: the liquid's travel), as a rotation on the
+  sphere (no blend through zero on reversals). Quasi-static: no slosh dynamics.
+- `FlightBody::step` measures the specific force at the tick start (first RK4 stage: thrust + aero + fins + flaps +
+  parachutes + RCS + contact force, body axes, over mass) and calls `settle_propellant` after the tick when the
+  fidelity flag `FlightEnvironment::propellant_settling` is on. Off: the liquid stays aft and mass properties are
+  bit-identical to today.
+- `mass_properties()`: oxidizer and fuel tanks with a known capacity use the table when d != -x (the aft column
+  stays the exact old code path); the liquid's lateral offset enters `cg_offset_m`; its pitch/yaw inertia is
+  m r^2 (sigma_x^2 + (sigma_u^2 + sigma_w^2) / 2), no roll inertia (as today). Rcs tanks stay columns (bladders).
+- Engine moments use the full CG point (lateral offset included), as aero and RCS already do.
+- `TankConfig::capacity_kg` = the configured load at config load (configured loads are full tanks); scenarios
+  change `mass_kg` only.
+- Moving the CG inside the body frame without an internal reaction is a documented simplification [E].
+- Not modelled: engine starvation when a main-tank outlet is uncovered, slosh, rotation (centripetal) effects.
 
-### 3. Feed switch (`sim` / `gnc`)
-- The ship return selects `Header` at the start of the belly flip, for every path that ends in b3's flip:
-  LEO ship return (catch and splashdown), aircatch b4, lunar return direct. The plan locates the single hand-over
-  point (flip start in the ship landing controller or the session step that starts it).
-- The deorbit and lunar-return planners already reserve `landing_propellant_kg`; with the derived value the
-  reserve equals the header contents, and `vehicle.propellant_kg() - landing_propellant_kg` becomes
-  `main_propellant_kg()` where it means "propellant available before the flip" (the plan lists each call site).
+### 3. Header tanks (`config`, `vehicle`, `sim`)
+- `[[stage.tank]]` gets `role = "main" | "header"` (default main; headers only for oxidizer / fuel) and an
+  optional `diameter_m` (default: the stage diameter).
+- `starship_block3.toml`: `lox_main` / `ch4_main` reduced by 35 t (O/F 3.6), `lox_header` 27.4 t in the nose
+  (base ~44 m, diameter 3.6 m [E]) and `ch4_header` 7.6 t on the CH4 main tank's lower dome (base 20 m, diameter
+  3 m [E]) (2020-2022 SN-era reports; Block 3 placement not published).
+- `landing_propellant_kg` is derived from the header contents when a stage has headers; giving a differing value
+  is a config error.
+- Each stage has a feed source `Main | Header` (default Main). Engines draw only from tanks of that role; a dry
+  source flames the engines out (no silent switch). `Vehicle::select_feed(stage, Header)` on a stage without
+  headers is a no-op; switching to a source that holds propellant clears the engines' `starved` flag.
+- RCS ullage gas draws from the main tanks; only when they are dry from the headers [E] (gas is pressurant).
+  RCS starves only when main and header tanks are dry.
+- `propellant_kg()` stays the total; new `main_propellant_kg()` (the webcast gauge, main tanks only).
+- The flight session selects `Header` on the ship when the ship landing guidance starts (`run_ship_landing`: the
+  belly flip of every ship return - LEO catch / splashdown, aircatch b4, lunar return).
+- `config::load_propellant(stage, total_kg)` and `load_propellant(stage, oxidizer_kg, fuel_kg)` replace the
+  "scale every tank" code in missions and tests: headers first (to capacity), the rest into the main tanks in their
+  capacity ratio; Rcs tanks untouched. Stages without headers behave as the old scaling.
 
-### 4. Mission starts
-- `lunar_return_mission.cpp`'s `scale_tanks` becomes a `config` helper `load_propellant(stage, total_kg)`: headers
-  filled first (in their O/F split), the rest into the main tanks in their ratio; a total below the header capacity
-  goes into the headers only. Every scenario that sets a ship's propellant (entry tests "dry + landing propellant",
-  catch tests, lunar/aircatch missions) uses it.
-
-### 5. Dry CG re-tune
-- `dry_cg_station_m` is chosen so that the CG at landing mass (dry + 35 t, now in the headers) equals today's CG at
-  landing mass (dry 28 m + 35 t in the main tanks). Estimate ~23.4 m [D]. Entry trim, the flight 12-14 replays and
-  the LEO catches at landing mass stay as validated; heavier ships (lunar return 61-64 t) are far less aft-heavy.
-- The provenance comment records the derivation; `docs/subsystems.md` (ship dry CG, entry mass in tests,
-  aerocapture finding) is updated.
+### 4. Dry CG and validation
+- With headers (settling off) the dry CG is re-tuned so the landing-mass CG (dry + 35 t) stays 25.50 m from the
+  ship's base (today's validated entry trim): ~23.5 m [D].
+- Then settling is switched on by default. Full headers at landing mass do not move, so the LEO entries, the flight
+  12-14 replays and the catches keep their trim; ships with main-tank residue (lunar return 61-64 t) get the
+  forward CG. If a validated case moves, the dry CG / the provenance is revisited, not the physics.
 
 ## Testing / success
 
-- Unit tests: tank role and diameter parsing; header-fed engines draw only headers; flame-out when the selected
-  source is dry; RCS gas falls back to the headers; CG moves forward with header propellant; `load_propellant`
-  splits; derived `landing_propellant_kg` and the mismatch error.
-- `[.header_tanks]` ("An aerocapture pass with 64 t aboard damps a roll disturbance at peak q") is un-hidden and
-  green.
-- Aircatch seeds 1-7 caught (7/7), campaigns direct 21/21 and aircatch 21/21, LEO catch campaign, flight 12-14
-  telemetry replays, ship entry/catch tests, lunar return sessions, NRHO flight: all green. Full suite + smoke test.
-- `python tools/vehicle_report.py starship_block3` after the config change.
+- Geometry: exact cases above, volume conservation, table vs direct integration at off-grid points (tolerance
+  documented in the test).
+- Vehicle: aft column bit-identical with settling off; entry-like specific force moves the CG forward and towards
+  the belly; lag time constant; hold below the threshold; reversal through 180 deg stays a unit vector.
+- Headers: role / diameter parsing; header-fed engines draw only headers; flame-out on a dry source; select_feed
+  no-op and un-starve; RCS gas fallback; derived landing propellant and mismatch error; `load_propellant` splits.
+- Mission level: `[.header_tanks]` un-hidden and green; aircatch seeds 1-7 caught; campaigns direct 21/21 and
+  aircatch 21/21; LEO catch campaign; flight 12-14 replays; booster / Falcon 9 returns; full suite + smoke test;
+  `python tools/vehicle_report.py starship_block3`.
 
 ## Out of scope
 
-HLS (lands on its main tanks), Super Heavy, propellant transfer between main and header, sloshing, header boil-off.
+HLS-specific changes (HLS uses the same settling but no headers), propellant transfer, slosh dynamics, boil-off,
+outlet uncovering.
