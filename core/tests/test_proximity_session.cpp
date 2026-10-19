@@ -368,3 +368,45 @@ TEST_CASE("Hold and resume in the final approach", "[iss][proximity][session]") 
     print_contact("ida2 after hold + resume", *c, 0.0);
     CHECK(c->envelope.inside);
 }
+
+// Final review i4 (fix pass).
+
+TEST_CASE("Session refusals carry the guidance's reason", "[iss][proximity][session]") {
+    test::spice_session();
+    proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({-5, 0, 397}));
+    auto& s = d.session;
+    REQUIRE(s.start_proximity("ida2"));
+    s.advance_to(d.t0 + 1.0, 1000000);
+    CHECK_FALSE(s.proximity_retreat());
+    CHECK(s.proximity_status().find("Rückzug nicht möglich") != std::string::npos);
+    CHECK(*s.proximity_phase() == gnc::ProximityPhase::Waypoint);
+}
+
+TEST_CASE("Resume after a breakout uses the live range", "[iss][proximity][session]") {
+    test::spice_session();
+    proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({-4800, 0, 0}));
+    auto& s = d.session;
+    REQUIRE(s.start_proximity("ida2"));
+    s.advance_to(d.t0 + 1.0, 1000000);
+    REQUIRE(s.proximity_abort());
+    fly(d, 1800.0, false);
+    REQUIRE(s.proximity_status().find("ausgeführt") != std::string::npos);
+    s.advance_to(s.epoch() + 6.0 * 3600.0, 1000000);
+    const double range = norm(s.body(0).state().position_gcrf_m - s.body(1).state().position_gcrf_m);
+    std::printf("[validation] 6 h after the breakout from 4.8 km: CG range %.0f m\n", range);
+    REQUIRE(range > 5000.0);
+    CHECK_FALSE(s.proximity_resume());
+    CHECK(s.proximity_status().find("zu weit") != std::string::npos);
+}
+
+TEST_CASE("Changing the rendezvous target ends the proximity flight", "[iss][proximity][session]") {
+    test::spice_session();
+    proximity_test::DragonNearIss d(proximity_test::lvlh_from_cg({-5, 0, 397}));
+    auto& s = d.session;
+    REQUIRE(s.start_proximity("ida2"));
+    s.advance_to(d.t0 + 10.0, 1000000);
+    s.set_rendezvous_target(1, "idss", "ida3");
+    CHECK_FALSE(s.proximity_active());
+    CHECK(norm(s.translation_command()) == 0.0);
+    CHECK(s.autopilot().state == sim::AutopilotState::Off);
+}

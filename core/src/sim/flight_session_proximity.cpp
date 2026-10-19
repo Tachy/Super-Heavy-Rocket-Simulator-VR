@@ -226,8 +226,9 @@ bool FlightSession::proximity_hold() {
         proximity_status_ = "Kein Anflug aktiv";
         return false;
     }
+    proximity_->observe(proximity_input());  // live state (after a breakout the session coasts without updates)
     const bool accepted = proximity_->hold();
-    proximity_status_ = proximity_->status();
+    proximity_status_ = accepted ? proximity_->status() : proximity_->refusal();
     return accepted;
 }
 
@@ -236,8 +237,9 @@ bool FlightSession::proximity_retreat() {
         proximity_status_ = "Kein Anflug aktiv";
         return false;
     }
+    proximity_->observe(proximity_input());  // live state (after a breakout the session coasts without updates)
     const bool accepted = proximity_->retreat();
-    proximity_status_ = proximity_->status();
+    proximity_status_ = accepted ? proximity_->status() : proximity_->refusal();
     return accepted;
 }
 
@@ -246,8 +248,9 @@ bool FlightSession::proximity_abort() {
         proximity_status_ = "Kein Anflug aktiv";
         return false;
     }
+    proximity_->observe(proximity_input());  // live state (after a breakout the session coasts without updates)
     const bool accepted = proximity_->abort();
-    proximity_status_ = proximity_->status();
+    proximity_status_ = accepted ? proximity_->status() : proximity_->refusal();
     return accepted;
 }
 
@@ -256,8 +259,9 @@ bool FlightSession::proximity_resume() {
         proximity_status_ = "Kein Anflug aktiv";
         return false;
     }
+    proximity_->observe(proximity_input());  // live state (after a breakout the session coasts without updates)
     const bool accepted = proximity_->resume();
-    proximity_status_ = proximity_->status();
+    proximity_status_ = accepted ? proximity_->status() : proximity_->refusal();
     if (accepted) {
         if (autopilot_.state == AutopilotState::Off) autopilot_.state = AutopilotState::Proximity;
         attitude_mode_ = proximity_attitude_mode();  // the passive abort coasts: the hold makes the next ticks run

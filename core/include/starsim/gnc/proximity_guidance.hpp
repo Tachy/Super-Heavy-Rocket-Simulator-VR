@@ -55,18 +55,23 @@ public:
     ProximityGuidance(DockingApproach approach, ProximityParameters parameters);
     ProximityOutput update(const ProximityInput& in);
 
-    // Commands (German status; false and no change when refused). Accepted commands take effect in the next update,
+    // Commands (false, a German refusal() and no change when refused). Accepted commands take effect in the next update,
     // which supplies the live state; further commands are refused until then.
     bool hold();     // keep the current relative position; refused in Abort / Contact / Hold
     bool retreat();  // back to the last waypoint reached; refused at/before Waypoint 0, in Abort / Contact / Retreat
     bool abort();    // breakout now; refused in Abort / Contact
-    bool resume();   // from a commanded Hold, a waiting waypoint after a retreat, or Abort (back to Waypoint 0 when the
-                     // CG range <= resume_max_range_m); refused otherwise
+    bool resume();   // from a commanded Hold, a waiting waypoint after a retreat, or Abort after the breakout burn (back
+                     // to Waypoint 0 when the CG range <= resume_max_range_m, outside the keep-out sphere and above
+                     // the deorbit reserve); refused otherwise
 
     ProximityPhase phase() const { return phase_; }
     size_t waypoint() const { return target_; }  // index into path() of the waypoint flown to / held at
     const std::vector<ProximityWaypoint>& path() const { return path_; }
     const std::string& status() const { return status_; }
+    const std::string& refusal() const { return refusal_; }  // German reason of the last refused command
+    // Refreshes the live state the command checks use (resume's range / propellant) without flying: the session
+    // calls it before a command, since after a breakout it coasts without updates.
+    void observe(const ProximityInput& in);
     const std::vector<ProximityEvent>& events() const { return events_; }
     const std::optional<ProximityContact>& contact() const { return contact_; }
 
@@ -102,7 +107,9 @@ private:
     ProximityPhase interrupted_ = ProximityPhase::Waypoint;
     std::string interrupted_status_;
     time::Epoch last_epoch_, arrival_epoch_;
-    double last_cg_range_m_ = 0.0;
+    double last_cg_range_m_ = 0.0, last_propellant_kg_ = 0.0;
+    bool refuse(std::string reason);
+    bool command_open();  // started and no request pending; sets the refusal otherwise
     std::optional<time::Epoch> waypoint_since_;
     math::Vec3 last_transfer_velocity_lvlh_;
     bool retreat_axial_ = false;
@@ -111,7 +118,7 @@ private:
     bool breakout_planned_ = false, breakout_done_ = false, breakout_safe_ = false;
     math::Vec3 abort_target_lvlh_;
     TranslationLoop loop_;
-    std::string status_;
+    std::string status_, refusal_;
     std::vector<ProximityEvent> events_;
     std::optional<ProximityContact> contact_;
 };

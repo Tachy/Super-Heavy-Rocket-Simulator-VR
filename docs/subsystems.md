@@ -957,8 +957,14 @@ corrections, approved by the user 2026-10-19), ledger `.superpowers/sdd/2026-10-
   zu schnell"; inside the sphere off the corridor -> "Abbruch: Sicherheitszone verletzt"; RCS propellant below the
   deorbit reserve (600 kg [E], d3: 598 kg from 420 km) -> "Abbruch: Treibstoffreserve". Commands `hold`, `retreat`
   (from a waypoint or a hold that interrupted one: to the previous waypoint; from a monitor: to the last reached),
-  `abort`, `resume` latch a request resolved in the next update; a second command before then is refused. Retreat at
-  Waypoint 0 and resume without a hold or beyond 5 km are refused with a German status. A start within 10 m [E] of the
+  `abort`, `resume` latch a request resolved in the next update; a second command before then is refused. Every
+  refusal sets a German `refusal()` (the session shows it as `proximity_status()`), e.g. retreat at Waypoint 0, resume
+  without a hold, resume after an abort while the breakout is still flown, beyond 5 km, inside the sphere or below the
+  deorbit reserve (it would abort again at once); the session refreshes the live state (`observe`) before every command
+  because it coasts without updates after a breakout. A retreat to an on-axis waypoint flies the axial law also between
+  the sphere and the waypoint (a CW transfer would start inside its clearance); a monitor retreat at an on-axis
+  waypoint the chaser already sits at goes one waypoint further back (no retreat/arrival loop). A transfer starting
+  inside the 10 m margin (outside the sphere) only has to stay outside its start range. A start within 10 m [E] of the
   first waypoint holds there (i3 arrives within 2-5 m). After the breakout burn the phase stays "Abbruch" (passive,
   status "Ausweichmanöver ausgeführt"[", nicht passiv sicher"]); `resume` flies back to Waypoint 0.
 - **Session** (`flight_session_proximity.cpp`): `start_proximity(station_port, ProximityParameters)` ->
@@ -973,7 +979,8 @@ corrections, approved by the user 2026-10-19), ledger `.superpowers/sdd/2026-10-
   so its fraction is flown in the same tick; `advance_to` keeps ticking during the flight (no coast across a hold or
   the final approach) and may coast only after a completed breakout. The flight ends with the rendezvous target
   (`clear_rendezvous_target` and every path calling it: placing bodies, launch, staging, separation, trunk jettison),
-  with `disengage_autopilot`, and at contact (autopilot off, the flight stays readable).
+  with `disengage_autopilot`, with `set_rendezvous_target` (the flight is bound to its ports), and at contact
+  (autopilot off, the flight stays readable).
 - **Validation.** Guidance alone (CW point mass, dt 0.05 s): IDA-2 62.8 min / 49.8 kg, IDA-3 98.8 min / 112.7 kg (the
   CW sim charges 16.2 kg/(m/s) on every axis: conservative). Session campaigns (full model, 200 Hz, OEM ISS,
   `[proximity]`, not `[slow]`: 10-24 s each):

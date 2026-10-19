@@ -110,7 +110,10 @@ void ProximityGuidance::start_segment(const ProximityInput& in) {
 void ProximityGuidance::start_retreat(const ProximityInput& in, size_t index) {
     target_ = index;
     const std::string status = "Rückzug zu " + path_[index].name;
-    retreat_axial_ = path_[index].on_axis && inside_sphere(in);
+    // on the axis (inside the sphere, or between the sphere and the on-axis waypoint) the axial law flies back; a CW
+    // transfer from there would start inside the transfer clearance
+    retreat_axial_ = path_[index].on_axis &&
+                     (inside_sphere(in) || in.port.position_m.x < path_[index].position_m.x);
     if (retreat_axial_) {
         enter(ProximityPhase::Retreat, status, in.epoch);
     } else {
@@ -133,44 +136,71 @@ void ProximityGuidance::auto_hold(const ProximityInput& in, std::string status) 
     enter(ProximityPhase::Hold, std::move(status), in.epoch);
 }
 
+bool ProximityGuidance::refuse(std::string reason) {
+    refusal_ = std::move(reason);
+    return false;
+}
+
+bool ProximityGuidance::command_open() {
+    if (!started_) return refuse("Befehl nicht möglich: Anflug nicht gestartet");
+    if (request_ != Request::None) return refuse("Befehl nicht möglich: vorheriger Befehl noch offen");
+    return true;
+}
+
+void ProximityGuidance::observe(const ProximityInput& in) {
+    last_cg_range_m_ = norm(in.cg_lvlh.position_m);
+    last_propellant_kg_ = in.propellant_kg;
+}
+
 bool ProximityGuidance::hold() {
-    if (!started_ || request_ != Request::None) return false;
-    if (phase_ == ProximityPhase::Abort || phase_ == ProximityPhase::Contact || phase_ == ProximityPhase::Hold) {
-        return false;
-    }
+    if (!command_open()) return false;
+    if (phase_ == ProximityPhase::Abort) return refuse("Halt nicht möglich: Abbruch läuft");
+    if (phase_ == ProximityPhase::Contact) return refuse("Halt nicht möglich: Kontakt");
+    if (phase_ == ProximityPhase::Hold) return refuse("Halt nicht möglich: bereits im Halt");
     request_ = Request::Hold;
     return true;
 }
 
 bool ProximityGuidance::retreat() {
-    if (!started_ || request_ != Request::None) return false;
-    if (phase_ == ProximityPhase::Abort || phase_ == ProximityPhase::Contact || phase_ == ProximityPhase::Retreat) {
-        return false;
-    }
+    if (!command_open()) return false;
+    if (phase_ == ProximityPhase::Abort) return refuse("Rückzug nicht möglich: Abbruch läuft");
+    if (phase_ == ProximityPhase::Contact) return refuse("Rückzug nicht möglich: Kontakt");
+    if (phase_ == ProximityPhase::Retreat) return refuse("Rückzug nicht möglich: Rückzug läuft bereits");
     const bool at_waypoint = phase_ == ProximityPhase::Waypoint ||
                              (phase_ == ProximityPhase::Hold && interrupted_ == ProximityPhase::Waypoint);
-    if (target_ == 0) return false;  // at or before Waypoint 0
+    if (target_ == 0) return refuse("Rückzug nicht möglich: kein Wegpunkt dahinter");  // at or before Waypoint 0
     retreat_index_ = at_waypoint ? target_ - 1 : reached_;
     request_ = Request::Retreat;
     return true;
 }
 
 bool ProximityGuidance::abort() {
-    if (!started_ || request_ != Request::None) return false;
-    if (phase_ == ProximityPhase::Abort || phase_ == ProximityPhase::Contact) return false;
+    if (!command_open()) return false;
+    if (phase_ == ProximityPhase::Abort) return refuse("Abbruch läuft bereits");
+    if (phase_ == ProximityPhase::Contact) return refuse("Abbruch nicht möglich: Kontakt");
     request_ = Request::Abort;
     return true;
 }
 
 bool ProximityGuidance::resume() {
-    if (!started_ || request_ != Request::None) return false;
+    if (!command_open()) return false;
     const bool from_hold = phase_ == ProximityPhase::Hold && !auto_hold_;
     const bool from_waiting = phase_ == ProximityPhase::Waypoint && waiting_for_go_;
     const bool from_abort = phase_ == ProximityPhase::Abort;
-    if (!from_hold && !from_waiting && !from_abort) return false;
-    if (from_abort && last_cg_range_m_ > p_.resume_max_range_m) {
-        status_ = "Wiederaufnahme nicht möglich: zu weit entfernt";
-        return false;
+    if (!from_hold && !from_waiting && !from_abort) {
+        return refuse("Wiederaufnahme nicht möglich: kein Halt und keine Freigabe offen");
+    }
+    if (from_abort) {
+        // the resume flies back to Waypoint 0: only after the breakout, from a range CW still covers, and with the
+        // reserve (below it, or inside the sphere, the next update would abort again and fire a new breakout)
+        if (!breakout_done_) return refuse("Wiederaufnahme nicht möglich: Ausweichmanöver läuft");
+        if (last_cg_range_m_ > p_.resume_max_range_m) return refuse("Wiederaufnahme nicht möglich: zu weit entfernt");
+        if (last_cg_range_m_ < p_.keep_out_radius_m) {
+            return refuse("Wiederaufnahme nicht möglich: innerhalb der Sicherheitszone");
+        }
+        if (last_propellant_kg_ < p_.deorbit_reserve_kg) {
+            return refuse("Wiederaufnahme nicht möglich: Treibstoffreserve");
+        }
     }
     request_ = Request::Resume;
     return true;
@@ -272,7 +302,11 @@ void ProximityGuidance::monitor(const ProximityInput& in) {
     if (watched) {
         if (corridor == CorridorStatus::Retreat) {
             auto_hold_ = false;
-            start_retreat(in, reached_);
+            // retreating to an on-axis waypoint the chaser is already at or beyond would arrive at once and retreat
+            // again every tick: go one waypoint further back
+            size_t index = reached_;
+            if (index > 0 && path_[index].on_axis && in.port.position_m.x >= path_[index].position_m.x) --index;
+            start_retreat(in, index);
             return;
         }
         if (phase_ == ProximityPhase::Hold) return;
@@ -375,7 +409,7 @@ ProximityOutput ProximityGuidance::fly(const ProximityInput& in) {
 
 ProximityOutput ProximityGuidance::update(const ProximityInput& in) {
     last_epoch_ = in.epoch;
-    last_cg_range_m_ = norm(in.cg_lvlh.position_m);
+    observe(in);
     if (!started_) start(in);
     resolve_request(in);
     transitions(in);

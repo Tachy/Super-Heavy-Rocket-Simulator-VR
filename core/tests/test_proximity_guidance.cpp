@@ -159,3 +159,98 @@ TEST_CASE("Propellant below the deorbit reserve aborts", "[iss][proximity]") {
     CHECK(saw(g, ProximityPhase::Abort));
     CHECK_FALSE(g.contact());
 }
+
+// Final review i4 (fix pass): retreat, resume and refusals.
+
+TEST_CASE("A commanded retreat on the axis just outside the sphere flies back axially", "[iss][proximity]") {
+    auto s = at_waypoint0(CwSim::ida2());
+    gnc::ProximityGuidance g(gnc::DockingApproach::VBar, {});
+    bool reached = false;
+    for (double t = 0.0; t < 3.0 * 3600.0; t += 0.05) {
+        const auto in = s.input();
+        const double r = norm(in.cg_lvlh.position_m);
+        if (g.phase() == ProximityPhase::Approach && r > 200.0 && r < 210.0) {
+            reached = true;
+            break;
+        }
+        s.step(g.update(in).translation_fraction_port, 0.05);
+    }
+    REQUIRE(reached);
+    REQUIRE(g.retreat());
+    g.update(s.input());
+    CHECK(g.phase() == ProximityPhase::Retreat);
+    proximity_test::run(g, s, 1200.0);
+    CHECK_FALSE(saw(g, ProximityPhase::Abort));
+    CHECK(g.phase() == ProximityPhase::Waypoint);  // back at Waypoint 1, waiting for the go
+}
+
+TEST_CASE("A start just outside the keep-out sphere plans a transfer", "[iss][proximity]") {
+    auto s = CwSim::ida2();
+    s.cg = {{0.0, 0.0, 205.0}, {}};  // below the station, inside the 10 m transfer clearance
+    gnc::ProximityGuidance g(gnc::DockingApproach::VBar, {});
+    g.update(s.input());
+    CHECK(g.phase() == ProximityPhase::Transfer);
+}
+
+TEST_CASE("A large deviation at an on-axis waypoint retreats once, not every tick", "[iss][proximity]") {
+    gnc::ProximityParameters p;
+    p.start_waypoint = 2;
+    auto s = CwSim::ida2();
+    s.cg = {{35.0 + 4.0 + 25.0, 10.0, 0.0}, {}};  // 22 deg off the axis beyond Waypoint 2
+    gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
+    proximity_test::run(g, s, 60.0);
+    CHECK(saw(g, ProximityPhase::Retreat));
+    CHECK(g.events().size() < 10);
+}
+
+TEST_CASE("Resume after an abort is checked against the live state", "[iss][proximity]") {
+    gnc::ProximityParameters p;
+    p.start_waypoint = 2;
+    auto s = CwSim::ida2();
+    s.cg = {{35.0 + 4.0 + 20.0, 0.0, 0.0}, {}};
+    gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
+    g.update(s.input());
+    REQUIRE(g.abort());
+    g.update(s.input());
+    REQUIRE(g.phase() == ProximityPhase::Abort);
+    CHECK_FALSE(g.resume());  // breakout still being flown
+    CHECK(g.refusal().find("Ausweichmanöver") != std::string::npos);
+    proximity_test::run(g, s, 600.0);
+    REQUIRE(g.status().find("ausgeführt") != std::string::npos);
+    // drifted far away without guidance updates (the session coasts after a breakout)
+    s.cg = {{-6000.0, 0.0, 0.0}, {}};
+    g.observe(s.input());
+    CHECK_FALSE(g.resume());
+    CHECK(g.refusal().find("zu weit") != std::string::npos);
+    // below the deorbit reserve: no resume (it would abort and fire a new breakout at once)
+    s.cg = {{-1000.0, 0.0, 0.0}, {}};
+    s.propellant_kg = p.deorbit_reserve_kg - 1.0;
+    g.observe(s.input());
+    CHECK_FALSE(g.resume());
+    CHECK(g.refusal().find("Treibstoffreserve") != std::string::npos);
+    s.propellant_kg = 2000.0;
+    g.observe(s.input());
+    CHECK(g.resume());
+}
+
+TEST_CASE("Refused commands give a German reason and leave the phase", "[iss][proximity]") {
+    auto s = at_waypoint0(CwSim::ida2());
+    gnc::ProximityGuidance g(gnc::DockingApproach::VBar, {});
+    CHECK_FALSE(g.hold());
+    CHECK(g.refusal().find("nicht gestartet") != std::string::npos);
+    g.update(s.input());
+    const std::string status = g.status();
+    CHECK_FALSE(g.retreat());
+    CHECK(g.refusal().find("Rückzug nicht möglich") != std::string::npos);
+    CHECK_FALSE(g.resume());
+    CHECK(g.refusal().find("Wiederaufnahme nicht möglich") != std::string::npos);
+    REQUIRE(g.abort());
+    CHECK_FALSE(g.abort());
+    CHECK(g.refusal().find("Befehl") != std::string::npos);  // the abort is still pending
+    g.update(s.input());
+    CHECK_FALSE(g.abort());
+    CHECK(g.refusal().find("Abbruch läuft") != std::string::npos);
+    CHECK_FALSE(g.hold());
+    CHECK(g.phase() == ProximityPhase::Abort);
+    CHECK(status.find("Wegpunkt 0") != std::string::npos);
+}

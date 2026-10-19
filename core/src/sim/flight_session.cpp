@@ -466,6 +466,7 @@ void FlightSession::set_rendezvous_target(size_t target_index, const std::string
     }
     vehicle::port_kinematics(*bodies_[controlled_].body, chaser_port);  // validates both ports (German error)
     vehicle::port_kinematics(*bodies_[target_index].body, target_port);
+    reset_proximity();  // a proximity flight is bound to its ports (start_proximity sets the target before the flight)
     rendezvous_ = RendezvousTarget{target_index, chaser_port, target_port};
 }
 

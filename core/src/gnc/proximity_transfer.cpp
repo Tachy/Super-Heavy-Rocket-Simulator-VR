@@ -71,7 +71,9 @@ Candidate check_breakout_arc(const orbit::RelativeState& s, double n, const Prox
 
 ProximityTransfer plan_proximity_transfer(const orbit::RelativeState& from, const math::Vec3& to_cg_m, double n_radps,
                                           double nominal_s, const ProximityParameters& p) {
-    const double clearance = p.keep_out_radius_m + p.kos_margin_m;
+    // a start inside the margin (but outside the sphere) only needs an arc that does not come closer than it starts
+    const double clearance =
+        std::max(p.keep_out_radius_m, std::min(p.keep_out_radius_m + p.kos_margin_m, norm(from.position_m)));
     for (const double f : {1.0, 0.75, 1.25, 0.5, 1.5}) {
         const double duration = f * nominal_s;
         const auto v = orbit::cw_transfer_velocity(from.position_m, to_cg_m, n_radps, duration);
