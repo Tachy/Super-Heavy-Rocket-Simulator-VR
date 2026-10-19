@@ -129,6 +129,7 @@ add_library(starsim_core STATIC
     src/orbit/cr3bp.cpp
     src/orbit/oem.cpp
     src/orbit/synthetic_station_orbit.cpp
+    src/orbit/clohessy_wiltshire.cpp
     src/spice/spice_session.cpp
     src/spice/spice_time_converter.cpp
     src/spice/spice_ephemeris.cpp
