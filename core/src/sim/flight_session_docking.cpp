@@ -153,6 +153,7 @@ void FlightSession::docking_after_tick() {
         docking_seen_phase_ = phase;
         if (!docking_collision_reported_) docking_status_ = m.status();
         if (phase == contact::DockingPhase::Docked) merge_docked();
+        if (phase == contact::DockingPhase::Separated) separate_docked();
         if (phase == contact::DockingPhase::Failed && proximity_ && !docking_collision_reported_) {
             proximity_->capture_failed(proximity_input(), m.failure());
             proximity_status_ = proximity_->status();
@@ -223,10 +224,100 @@ void FlightSession::detach_compound() {
     const math::Vec3 cg_with = station.vehicle().mass_properties().cg_point_m();
     station.vehicle().set_attached_mass(std::nullopt);
     const math::Vec3 cg_without = station.vehicle().mass_properties().cg_point_m();
-    s.position_gcrf_m += s.attitude.rotate(cg_without - cg_with);  // the station's own CG again
+    const math::Vec3 shift = s.attitude.rotate(cg_without - cg_with);
+    s.position_gcrf_m += shift;  // the station's own CG again, moving with the turning compound
+    s.velocity_gcrf_mps += cross(s.attitude.rotate(s.angular_velocity_body_radps), shift);
     station.set_state(s);
     compound_mass_.reset();
     docked_mass_kg_ = 0.0;
+}
+
+bool FlightSession::undock() {
+    if (!docking_) {
+        docking_status_ = "Abkoppeln nicht möglich: nicht fest angedockt";
+        return false;
+    }
+    if (docked() && autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit) {
+        docking_status_ = "Abkoppeln nicht möglich: Autopilot aktiv";
+        return false;
+    }
+    if (!docking_->undock(epoch_)) {
+        docking_status_ = docking_->mechanism().refusal();
+        return false;
+    }
+    docking_status_ = docking_->mechanism().status();
+    return true;
+}
+
+void FlightSession::separate_docked() {
+    auto& chaser = *bodies_[controlled_].body;
+    auto& station = *bodies_[*station_index_].body;
+    sync_docked();  // the chaser on its port at this tick
+    chaser.release_docked();
+    detach_compound();
+    const double mc = chaser.vehicle().mass_properties().mass_kg;
+    const double ms = station.vehicle().mass_properties().mass_kg;
+    auto cs = chaser.state();
+    auto ss = station.state();
+    docking_separation_.momentum_before = mc * cs.velocity_gcrf_mps + ms * ss.velocity_gcrf_mps;
+    // the springs along the station port axis (outward), split by mass: the pair's momentum is kept
+    const math::Vec3 axis = column(vehicle::port_kinematics(station, docking_->station_port()).axes_gcrf, 0);
+    const double v_rel = contact::separation_relative_speed_mps(docking_->mechanism().parameters(), mc, ms);
+    cs.velocity_gcrf_mps += (v_rel * ms / (mc + ms)) * axis;
+    ss.velocity_gcrf_mps -= (v_rel * mc / (mc + ms)) * axis;
+    chaser.set_state(cs);
+    station.set_state(ss);
+    docking_separation_.momentum_after = mc * cs.velocity_gcrf_mps + ms * ss.velocity_gcrf_mps;
+    docking_separation_.relative_speed_mps = v_rel;
+    // the departure on the docking ports
+    proximity_station_port_ = docking_->station_port();
+    proximity_chaser_port_ = docking_->chaser_port();
+    measure_proximity_authority();
+    departure_.emplace(gnc::DepartureParameters{}, gnc::ProximityParameters{});
+    autopilot_.state = AutopilotState::Departure;
+    attitude_mode_ = proximity_attitude_mode();
+}
+
+void FlightSession::run_departure(Flying& flying) {
+    if (!departure_ || !station_index_ || !rendezvous_) {
+        autopilot_.state = AutopilotState::Off;
+        return;
+    }
+    if (flying.body->impacted()) {
+        autopilot_.state = AutopilotState::Off;
+        attitude_mode_ = {};
+        translation_port_ = {};
+        return;
+    }
+    const size_t events_before = departure_->events().size();
+    const auto in = proximity_input();
+    const auto out = departure_->update(in);
+    docking_status_ = departure_->status();
+    if (docking_debug_) {  // STARSIM_DEBUG_DOCKING: the departure events with the relative state
+        for (size_t i = events_before; i < departure_->events().size(); ++i) {
+            std::printf("[docking] %8.1f s  %s  port x %.2f m, CG range %.1f m, %.1f kg\n", mission_time_s(),
+                        departure_->events()[i].status.c_str(), in.port.position_m.x, norm(in.cg_lvlh.position_m),
+                        in.propellant_kg);
+        }
+    }
+    if (departure_->phase() == gnc::DeparturePhase::Complete) {
+        autopilot_.state = AutopilotState::Off;
+        attitude_mode_ = {};
+        clear_rendezvous_target();  // also ends the docking mechanism; the departure stays readable
+        return;
+    }
+    translation_port_ = out.translation_fraction_port;
+    attitude_mode_ = out.attitude_hold ? proximity_attitude_mode() : gnc::AttitudeMode{};
+    departure_next_check_ = epoch_ + departure_check_s;  // the drift coasts in between
+}
+
+std::optional<gnc::DeparturePhase> FlightSession::departure_phase() const {
+    if (!departure_) return std::nullopt;
+    return departure_->phase();
+}
+
+const std::vector<gnc::DepartureEvent>* FlightSession::departure_events() const {
+    return departure_ ? &departure_->events() : nullptr;
 }
 
 void FlightSession::sync_docked() {

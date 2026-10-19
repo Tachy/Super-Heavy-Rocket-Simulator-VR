@@ -30,6 +30,7 @@ public:
     // The relative pose the mechanism sees (chaser port in the passive port frame).
     contact::DockingPose pose(const vehicle::FlightBody& chaser, const vehicle::FlightBody& station) const;
 
+    bool undock(time::Epoch epoch) { return mechanism_.undock(t0_ ? epoch - *t0_ : 0.0); }  // on the mechanism clock
     contact::DockingMechanism& mechanism() { return mechanism_; }
     const contact::DockingMechanism& mechanism() const { return mechanism_; }
     bool hull_contact() const { return hull_contact_; }  // this tick

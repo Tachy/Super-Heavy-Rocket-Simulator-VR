@@ -98,17 +98,7 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
     set_rendezvous_target(*station_index_, chaser_port, station_port);
     proximity_station_port_ = station_port;
     proximity_chaser_port_ = chaser_port;
-    // authority along the target port axes in the docking attitude (constant: the attitude is held in the port frame)
-    const math::Quat docking = proximity_docking_attitude();
-    const double mass = vehicle.mass_properties().mass_kg;
-    for (int axis = 0; axis < 3; ++axis) {
-        for (const double sign : {1.0, -1.0}) {
-            math::Vec3 u{};
-            (axis == 0 ? u.x : axis == 1 ? u.y : u.z) = sign;
-            const auto c = vehicle.rcs_pure_force_capability(docking.inverse_rotate(target.axes_gcrf * u));
-            proximity_authority_.mps2[2 * axis + (sign < 0.0 ? 1 : 0)] = c.force_n / mass;
-        }
-    }
+    measure_proximity_authority();
     proximity_warnings_.clear();
     for (const auto& impulse : station_impulses_) {
         if (impulse.epoch >= epoch_ && impulse.epoch <= epoch_ + proximity_warning_span_s) {
@@ -131,6 +121,22 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
     attitude_mode_ = proximity_attitude_mode();
     proximity_status_ = "Anflug gestartet";
     return true;
+}
+
+void FlightSession::measure_proximity_authority() {
+    // authority along the target port axes in the docking attitude (constant: the attitude is held in the port frame)
+    const auto& vehicle = bodies_[controlled_].body->vehicle();
+    const auto target = vehicle::port_kinematics(*bodies_[*station_index_].body, proximity_station_port_);
+    const math::Quat docking = proximity_docking_attitude();
+    const double mass = vehicle.mass_properties().mass_kg;
+    for (int axis = 0; axis < 3; ++axis) {
+        for (const double sign : {1.0, -1.0}) {
+            math::Vec3 u{};
+            (axis == 0 ? u.x : axis == 1 ? u.y : u.z) = sign;
+            const auto c = vehicle.rcs_pure_force_capability(docking.inverse_rotate(target.axes_gcrf * u));
+            proximity_authority_.mps2[2 * axis + (sign < 0.0 ? 1 : 0)] = c.force_n / mass;
+        }
+    }
 }
 
 math::Quat FlightSession::proximity_docking_attitude() const {

@@ -128,3 +128,42 @@ TEST_CASE("Docking session: a time warp does not coast through the station", "[i
     REQUIRE(d.session.collision_impulse_ns());
     CHECK(d.session.docking_status() == "Kollision");
 }
+
+TEST_CASE("Undocking: hooks open, springs separate at 0.085 m/s, momentum conserved, departure completes",
+          "[iss][docking]") {
+    auto d = docking_test::DragonAtPort::docked("ida2");
+    auto& s = d.session;
+    REQUIRE(s.docked());
+    REQUIRE(s.undock());
+    CHECK_FALSE(s.undock());
+    CHECK(s.docking_status() == "Abkoppeln nicht möglich: Abkoppeln läuft");
+    REQUIRE(d.fly_until(DockingPhase::Separated, 400.0));
+    const auto& split = s.docking_separation_record();
+    CHECK(split.relative_speed_mps == Catch::Approx(0.085).margin(0.003));
+    CHECK(norm(split.momentum_after - split.momentum_before) < 1e-9 * norm(split.momentum_before));
+    CHECK_FALSE(d.dragon().docked());
+    CHECK_FALSE(s.compound_mass());
+    CHECK(s.autopilot().state == sim::AutopilotState::Departure);
+    const double kg0 = d.dragon().vehicle().rcs_propellant_kg();
+    double t = std::round(s.epoch() - d.t0);
+    const double t_separated = t;
+    while (s.departure_phase() != gnc::DeparturePhase::Complete && t < 3.0 * 3600.0) {
+        t += 10.0;
+        s.advance_to(d.t0 + t, 1000000);
+    }
+    REQUIRE(s.departure_phase() == gnc::DeparturePhase::Complete);
+    CHECK(s.autopilot().state == sim::AutopilotState::Off);
+    CHECK_FALSE(s.collision_impulse_ns());
+    const double kg = kg0 - d.dragon().vehicle().rcs_propellant_kg();
+    CHECK(kg < 60.0);
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("[docking] undock IDA-2: separation %.4f m/s, departure complete %.1f min after the springs, %.1f kg\n",
+                    split.relative_speed_mps, (t - t_separated) / 60.0, kg);
+    }
+}
+
+TEST_CASE("Undocking: refused unless hard docked", "[iss][docking]") {
+    auto d = docking_test::DragonAtPort::place("ida2", 0.30 + 0.40 + 0.5, 0.0, 0.0, 0.0);
+    CHECK_FALSE(d.session.undock());
+    CHECK(d.session.docking_status() == "Abkoppeln nicht möglich: nicht fest angedockt");
+}

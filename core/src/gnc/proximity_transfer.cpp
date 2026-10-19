@@ -38,7 +38,14 @@ struct Candidate {
     bool ok = false;
     double exit_s = 0.0;
     double min_after_exit_m = 0.0;
+    double ellipsoid_exit_s = -1.0;  // < 0: not left (or not asked for)
 };
+
+// (x/a)^2 + (y/b)^2 + (z/c)^2: > 1 outside the ellipsoid.
+double ellipsoid_metric(const math::Vec3& r, const math::Vec3& axes) {
+    const double x = r.x / axes.x, y = r.y / axes.y, z = r.z / axes.z;
+    return x * x + y * y + z * z;
+}
 
 Candidate check_breakout_arc(const orbit::RelativeState& s, double n, const ProximityParameters& p) {
     const double clearance = p.keep_out_radius_m + p.kos_margin_m;
@@ -48,7 +55,11 @@ Candidate check_breakout_arc(const orbit::RelativeState& s, double n, const Prox
     Candidate c;
     c.min_after_exit_m = exited ? start_range : std::numeric_limits<double>::infinity();
     for (double t = b.sample_s; t <= b.horizon_s + 0.5 * b.sample_s; t += b.sample_s) {
-        const double range = norm(orbit::cw_propagate(s, n, t).position_m);
+        const math::Vec3 at = orbit::cw_propagate(s, n, t).position_m;
+        const double range = norm(at);
+        if (b.ellipsoid_semi_axes_m && c.ellipsoid_exit_s < 0.0 && ellipsoid_metric(at, *b.ellipsoid_semi_axes_m) > 1.0) {
+            c.ellipsoid_exit_s = t;
+        }
         if (!exited) {
             if (range < breakout_closing_factor * start_range) return {};
             if (range >= clearance) {
@@ -64,6 +75,7 @@ Candidate check_breakout_arc(const orbit::RelativeState& s, double n, const Prox
         c.min_after_exit_m = std::min(c.min_after_exit_m, range);
     }
     c.ok = exited;
+    if (b.ellipsoid_semi_axes_m && (c.ellipsoid_exit_s < 0.0 || c.ellipsoid_exit_s > b.ellipsoid_exit_limit_s)) c.ok = false;
     return c;
 }
 
@@ -91,7 +103,7 @@ Breakout breakout_delta_v(const orbit::RelativeState& from, double n_radps, cons
         for (const auto& d : directions) {
             const auto c = check_breakout_arc({from.position_m, from.velocity_mps + magnitude * d}, n_radps, p);
             if (c.ok && (!best.safe || c.min_after_exit_m > best.min_range_after_exit_m)) {
-                best = {true, magnitude * d, c.exit_s, c.min_after_exit_m};
+                best = {true, magnitude * d, c.exit_s, c.min_after_exit_m, std::max(c.ellipsoid_exit_s, 0.0)};
             }
         }
         if (best.safe) return best;

@@ -9,7 +9,9 @@
 #include "rendezvous_test_support.hpp"
 #include "starsim/environment/gravity.hpp"
 #include "starsim/gnc/deorbit_planner.hpp"
+#include "starsim/gnc/departure_guidance.hpp"
 #include "starsim/gnc/proximity_transfer.hpp"
+#include "starsim/mission/rendezvous_geometry.hpp"
 #include "starsim/orbit/clohessy_wiltshire.hpp"
 #include "test_support.hpp"
 
@@ -89,4 +91,28 @@ TEST_CASE("CW against the full model over a proximity transfer and a breakout", 
     }
     std::printf("[validation] breakout full model 24 h: closest after the exit %.0f m\n", closest_after_exit);
     CHECK(closest_after_exit > p.keep_out_radius_m);
+}
+
+TEST_CASE("Breakout with the approach-ellipsoid exit: departure from IDA-2", "[iss][proximity][docking]") {
+    gnc::ProximityParameters p;
+    p.breakout.ellipsoid_semi_axes_m = Vec3{2000.0, 1000.0, 1000.0};
+    // 10 m in front of IDA-2 (station CG to port 35 m on V-bar, Dragon CG 4 m behind its port), opening at 0.15 m/s
+    const orbit::RelativeState from{{49.0, 0.0, 0.0}, {0.15, 0.0, 0.0}};
+    const auto b = gnc::breakout_delta_v(from, 1.128e-3, p);
+    REQUIRE(b.safe);
+    CHECK(b.ellipsoid_exit_s > 0.0);
+    CHECK(b.ellipsoid_exit_s <= p.breakout.ellipsoid_exit_limit_s);
+    CHECK(b.min_range_after_exit_m >= p.keep_out_radius_m + p.kos_margin_m);
+    // without the ellipsoid requirement the smallest safe magnitude may stay inside the ellipsoid longer
+    gnc::ProximityParameters q;
+    const auto plain = gnc::breakout_delta_v(from, 1.128e-3, q);
+    REQUIRE(plain.safe);
+    CHECK(norm(plain.delta_v_lvlh_mps) <= norm(b.delta_v_lvlh_mps) + 1e-12);
+}
+
+TEST_CASE("The departure ellipsoid equals the mission's approach ellipsoid", "[iss][docking]") {
+    const gnc::DepartureParameters d;
+    CHECK(d.ellipsoid_semi_axes_m.x == mission::approach_ellipsoid_semi_axes_m[0]);
+    CHECK(d.ellipsoid_semi_axes_m.y == mission::approach_ellipsoid_semi_axes_m[1]);
+    CHECK(d.ellipsoid_semi_axes_m.z == mission::approach_ellipsoid_semi_axes_m[2]);
 }

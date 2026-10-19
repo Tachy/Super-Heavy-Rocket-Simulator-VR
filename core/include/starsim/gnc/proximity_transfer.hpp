@@ -28,11 +28,13 @@ struct Breakout {
     math::Vec3 delta_v_lvlh_mps;
     double exit_s = 0.0;               // when the CW arc leaves the sphere (+ margin)
     double min_range_after_exit_m = 0.0;
+    double ellipsoid_exit_s = 0.0;     // with BreakoutParameters::ellipsoid_semi_axes_m: when the arc leaves it
 };
 // Smallest magnitude of p.breakout.magnitudes_mps with a direction (26 cube directions + the radial-away direction)
 // whose CW arc leaves the sphere within exit_limit_s without first closing in (range never below 0.9 x the start
 // range before the exit) and stays outside keep_out + margin until horizon_s; among those the largest minimum range
-// after the exit. Unsafe (best effort: the largest magnitude, away direction) when none qualifies.
+// after the exit. With p.breakout.ellipsoid_semi_axes_m the arc must also leave that ellipsoid within
+// ellipsoid_exit_limit_s. Unsafe (best effort: the largest magnitude, away direction) when none qualifies.
 Breakout breakout_delta_v(const orbit::RelativeState& from, double n_radps, const ProximityParameters& p);
 
 }  // namespace starsim::gnc

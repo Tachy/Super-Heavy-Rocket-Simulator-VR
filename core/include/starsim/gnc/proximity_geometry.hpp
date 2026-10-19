@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,9 @@ struct BreakoutParameters {
     double horizon_s = 86400.0;    // [E] passively safe for 24 h (ISS visiting-vehicle practice)
     double sample_s = 30.0;        // [E] CW sampling of the safety check
     double exit_limit_s = 1800.0;  // [E] the keep-out sphere must be left within this
+    // Departure (ISS i5): the arc must also leave the approach ellipsoid (semi-axes in LVLH) within the limit.
+    std::optional<math::Vec3> ellipsoid_semi_axes_m;
+    double ellipsoid_exit_limit_s = 3600.0;  // [E] Demo-1 left the approach ellipsoid 17 min after undocking
 };
 
 struct ProximityParameters {

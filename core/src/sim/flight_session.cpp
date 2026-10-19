@@ -76,6 +76,7 @@ const char* to_string(AutopilotState state) {
         case AutopilotState::Lunar: return "Mondflug";
         case AutopilotState::Rendezvous: return "Rendezvous";
         case AutopilotState::Proximity: return "Anflug";
+        case AutopilotState::Departure: return "Abflug";
     }
     return "";
 }
@@ -190,7 +191,7 @@ bool FlightSession::attitude_mode_active() const {
     return attitude_mode_.kind != gnc::AttitudeModeKind::Free &&
            (autopilot_.state == AutopilotState::Off || autopilot_.state == AutopilotState::Orbit ||
             autopilot_.state == AutopilotState::PayloadSeparation || autopilot_.state == AutopilotState::Lunar ||
-            autopilot_.state == AutopilotState::Proximity);
+            autopilot_.state == AutopilotState::Proximity || autopilot_.state == AutopilotState::Departure);
 }
 
 bool FlightSession::burn_drifting() const {
@@ -346,6 +347,9 @@ void FlightSession::run_autopilot() {
             break;
         case AutopilotState::Proximity:
             run_proximity(flying);
+            break;
+        case AutopilotState::Departure:
+            run_departure(flying);
             break;
         default:
             break;
@@ -517,6 +521,7 @@ void FlightSession::reset_mission_state() {
     capsule_return_step_ = CapsuleReturnStep::None;  // review d3: a return does not carry into a new flight
     reset_lunar();
     reset_proximity();
+    departure_.reset();
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -591,8 +596,12 @@ double FlightSession::coast_allowance_s() const {
     }
     if (docking_ticked()) return 0.0;  // contact, capture, hooks or a hull contact: ticked (ISS i5)
     allowance = std::min(allowance, docking_coast_limit_s());  // no coast into the station
+    if (autopilot_.state == AutopilotState::Departure) allowance = std::min(allowance, departure_next_check_ - epoch_);
     // a wreck: one tick ends the proximity flight (the passive drift after a breakout coasts)
-    if (autopilot_.state == AutopilotState::Proximity && bodies_[controlled_].body->impacted()) return 0.0;
+    if ((autopilot_.state == AutopilotState::Proximity || autopilot_.state == AutopilotState::Departure) &&
+        bodies_[controlled_].body->impacted()) {
+        return 0.0;
+    }
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
     if (!station_impulses_.empty()) allowance = std::min(allowance, station_impulses_.front().epoch - epoch_);
     if (autopilot_.state == AutopilotState::Burn) {

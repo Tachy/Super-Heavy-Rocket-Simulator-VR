@@ -29,6 +29,7 @@
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/burn_node.hpp"
 #include "starsim/gnc/deorbit_planner.hpp"
+#include "starsim/gnc/departure_guidance.hpp"
 #include "starsim/gnc/entry_guidance.hpp"
 #include "starsim/gnc/lunar_ascent_guidance.hpp"
 #include "starsim/gnc/lunar_landing_guidance.hpp"
@@ -70,7 +71,7 @@ enum class ControlMode {
 // Rendezvous: a phasing flight to a station between its burns (FlightSession::plan_rendezvous). Proximity: the
 // proximity operations from Waypoint 0 to contact (FlightSession::start_proximity).
 enum class AutopilotState {
-    Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar, Rendezvous, Proximity
+    Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar, Rendezvous, Proximity, Departure
 };
 
 const char* to_string(AutopilotState state);
@@ -653,6 +654,14 @@ public:
         double relative_speed_mps = 0.0;             // separation: spring speed of the pair
     };
     const MomentumRecord& docking_merge_record() const { return docking_merge_; }
+    // Undocking (ISS i5): only when hard docked and the autopilot is Off / Orbit - hooks open (180 s), the separation
+    // springs push the pair apart (momentum kept), then AutopilotState::Departure flies gnc::DepartureGuidance to the
+    // exit of the approach ellipsoid; there the autopilot ends and the rendezvous target is cleared (plan_capsule_return
+    // can follow). False with a German docking_status() when refused.
+    bool undock();
+    std::optional<gnc::DeparturePhase> departure_phase() const;
+    const std::vector<gnc::DepartureEvent>* departure_events() const;
+    const MomentumRecord& docking_separation_record() const { return docking_separation_; }
 
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
@@ -996,6 +1005,13 @@ private:
     void sync_docked();  // the docked chaser follows the station (every tick and after every coast)
     void detach_compound();  // removes the attached chaser mass, the station state back on its own CG
     void docking_diagnostics();
+    MomentumRecord docking_separation_;
+    std::optional<gnc::DepartureGuidance> departure_;
+    time::Epoch departure_next_check_;  // the drift coasts; one guidance tick at least this often
+    static constexpr double departure_check_s = 60.0;  // [E] the ellipsoid exit is read to a minute
+    void separate_docked();  // the springs: the pair apart, the departure engaged
+    void run_departure(Flying& flying);
+    void measure_proximity_authority();  // pure translation authority along the station port axes, docking attitude
     struct RendezvousDebugCommand {  // diagnostics: the state at a burn's command (execution error after it)
         math::StateVector state;
         time::Epoch epoch;
