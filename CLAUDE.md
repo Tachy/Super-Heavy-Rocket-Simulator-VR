@@ -42,7 +42,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   to the ISS: schedule + full-model planner with drag),
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
-  aerocapture guidance, relative navigation between docking ports),
+  aerocapture guidance, relative navigation between docking ports, proximity guidance: waypoints, corridor,
+  hold / retreat / breakout, final approach),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
   aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating plus radiative heating
@@ -52,7 +53,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity,
   ideal LVLH attitude of a station, docking-port kinematics), sim (flight session incl. the ISS as a station body from
   OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
-  Waypoint 0 with drag tracking and re-plan).
+  Waypoint 0 with drag tracking and re-plan, proximity flight to a station port).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.

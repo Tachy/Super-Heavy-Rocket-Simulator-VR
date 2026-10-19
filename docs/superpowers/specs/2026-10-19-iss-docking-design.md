@@ -3,7 +3,8 @@
 Status: approved 2026-10-19. i1 implemented (plan `docs/superpowers/plans/2026-10-19-iss-i1-target-body.md`, notes in
 `docs/subsystems.md`, OEM fixture `tests/validation/fixtures/iss_oem/`). i2 implemented (plan
 `docs/superpowers/plans/2026-10-19-iss-i2-dragon-translation.md`; Draco layout kept, user 2026-10-19). i3 implemented (plan
-`docs/superpowers/plans/2026-10-19-iss-i3-phasing.md`; ends at Waypoint 0, corrections below). Milestone (i),
+`docs/superpowers/plans/2026-10-19-iss-i3-phasing.md`; ends at Waypoint 0, corrections below). i4 implemented (plan
+`docs/superpowers/plans/2026-10-19-iss-i4-proximity.md`; ends at "Kontakt", corrections below). Milestone (i),
 part of plan milestone M9 (rendezvous and ISS docking), after the lunar milestone (l1-l6, main `6da3f70`).
 
 ## Intent
@@ -163,6 +164,23 @@ opened by `plan_rendezvous`; the boost geometry is checked 3 h before the boost 
   before it is cleared.
 
 ## i4 design: proximity operations and final approach
+
+**Corrections (user-approved with the i4 plan, 2026-10-19; they supersede the bullets below where they differ).**
+Sources: Crew-2 / Demo-1 / Crew-5 timelines (Waypoint 1 220 m, Waypoint 2 20 m), Demo-2 final approach 0.30 ->
+0.10 m/s, Crew-4 / Crew-2 relocation fly-around to the zenith port.
+1. **Transfers outside the keep-out sphere are CW two-impulse transfers re-solved every tick** from the live relative
+   state and flown with a deadband, not targeted on the full model (CW vs full model miss 0.95 m over Waypoint 0 -> 1).
+2. **IDA-3 (R-bar) gets a fly-around:** Waypoint 0 -> 250 m [E] in front on V-bar -> 30 deg [E] legs on a 250 m arc
+   about the station CG -> Waypoint 1 220 m above IDA-3 on its axis. IDA-2 goes Waypoint 0 -> Waypoint 1 directly.
+3. **Inside the keep-out sphere a range-scheduled axial approach** (0.30 m/s far, 0.10 m/s at Waypoint 2, 0.10 ->
+   0.075 m/s in the final approach) with lateral convergence onto the axis, also between Waypoint 1 and 2.
+4. **i4 ends at "Kontakt"**, the crossing of the contact plane (`contact_plane_m` = 0 [E]; i5 sets the ring's reach),
+   recorded with the relative port state; no contact physics before i5. The capture envelope (axial 0.05-0.10 m/s,
+   lateral <= 0.04 m/s, offset <= 0.10 m, angle <= 4 deg, rate <= 0.2 deg/s) is [E] here; i5 verifies it against the
+   IDSS IDD.
+5. **Contact speed target 0.075 m/s** [E] (middle of the axial band).
+
+Implementation notes and validation numbers: `docs/subsystems.md`, "Proximity operations (i4)".
 
 - Waypoints in the ISS LVLH frame, V-bar for IDA-2 and R-bar for IDA-3: **Waypoint 0** at the AE boundary / ~400 m
   [S: NASA mission blogs, verified in the plan] with a go/no-go hold; **Waypoint 1** ~220 m on the port axis, just

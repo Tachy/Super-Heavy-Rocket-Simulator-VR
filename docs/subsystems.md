@@ -913,3 +913,84 @@ corrections, approved by the user 2026-10-19), ledger `.superpowers/sdd/2026-10-
   tracking would be the fix. Real Demo-2 in-plane total ~118 m/s.
 - **Diagnostics:** `STARSIM_DEBUG_RENDEZVOUS=1` prints planning exceptions, each burn's execution error
   (delta-v along/radial, position), the boost phase error and a status line per step (time, step, range, mass).
+
+### Proximity operations (i4)
+Plan `docs/superpowers/plans/2026-10-19-iss-i4-proximity.md` (its header has the research and the five spec
+corrections, approved by the user 2026-10-19), ledger `.superpowers/sdd/2026-10-19-iss-i4-proximity/progress.md`.
+- **Profile and sources.** Crew-2 / Demo-1 timelines (Spaceflight Now): Waypoint 0 04:25 (400 m below the ISS), go to
+  enter the keep-out sphere, **Waypoint 1 04:49 220 m in front**, **Waypoint 2 05:00 at 20 m**, contact at IDA-2
+  05:08-05:10; Crew-5 (2022-10-05): hold and docking go/no-go at Waypoint 2. Demo-2 (NASA, 2020-05-31): final approach
+  at **0.30 m/s** (0.98 ft/s), slowed to **0.10 m/s** before soft capture, nose cone open. Zenith port (Crew-4,
+  NASASpaceflight 2022-04; Crew-2 relocation 2021-07-21): Waypoints 0/1/2 then a **fly-around** to the corridor above
+  the complex (geometry unpublished: [E]). Derived [D]: Waypoint 0 -> 1 is 1140 s plus a 5 min hold; all values are
+  `gnc::ProximityParameters` fields with tags.
+- **Spec corrections (user-approved):** (1) Transfers outside the keep-out sphere are CW two-impulse transfers
+  re-solved every tick from the live relative state and flown with a deadband (the multi-impulse corrections fall out
+  of the loop), not targeted on the full model: CW vs full model Waypoint 0 -> 1 miss **0.95 m** (bound 2 m). (2) IDA-3
+  (R-bar) gets a fly-around: Waypoint 0 -> 250 m in front on V-bar -> 30 deg legs on a 250 m arc about the station CG
+  -> Waypoint 1 220 m above IDA-3. IDA-2: Waypoint 0 -> Waypoint 1 directly. (3) Inside the sphere a range-scheduled
+  axial approach (0.30 m/s far, range / 600 s between the limits, 0.10 m/s at Waypoint 2, 0.10 -> 0.075 m/s in the
+  final approach) with lateral convergence onto the axis. (4) i4 ends at "Kontakt", the crossing of the contact plane
+  (`contact_plane_m` = 0 [E]; i5 sets the ring's reach), recorded with the relative port state; no contact physics
+  before i5. Capture envelope [E] (i5 verifies against the IDSS IDD): axial 0.05-0.10 m/s, lateral <= 0.04 m/s,
+  offset <= 0.10 m, angle <= 4 deg, rate <= 0.2 deg/s. (5) Contact speed target 0.075 m/s [E].
+- **Geometry** (`gnc/proximity_geometry`): `proximity_path(port, parameters)` builds the waypoints (LVLH points outside,
+  `on_axis` points on the port axis inside), `corridor_status` (cone of 10 deg [E] half angle about the port axis,
+  never narrower than 0.3 m; beyond 2x the bound: retreat; x <= 0 counts as retreat), the docking attitude (chaser
+  port axes opposed to the target port's, ups equal) and `capture_envelope_check`.
+- **Transfer** (`gnc/proximity_transfer`): CW two-impulse transfer with keep-out clearance (sphere radius + 10 m margin,
+  sampled; a path through the sphere is refused, the guidance then aborts "kein sicherer Transferweg"). The re-solve
+  stops `transfer_final_s` 60 s before arrival; the hold law brakes onto the waypoint. **Breakout:** the smallest of
+  0.3 / 0.5 / 1.0 / 1.5 m/s [E] along the candidate directions that leaves the sphere within 1800 s and stays outside
+  for 24 h (CW, 30 s samples); Task 2: (45,0,0) -> 0.30 m/s +z, closest 222 m; full model 24 h closest after exit
+  236 m.
+- **Translation loop** (`gnc/translation_loop`): desired relative velocity -> translation fraction per axis with a
+  hysteresis deadband (start above 0.02 m/s, stop below 0.005 m/s [E]; fraction = error / (authority x 1 s)) for Draco
+  pulse economy; near the port (final approach) a finer loop (start 0.005 m/s) keeps the offset small. Approach laws:
+  axial speed schedule, lateral velocity = -offset x 0.1/s (max 0.03 m/s), position hold velocity = -error / 60 s
+  (max 0.05 m/s), retreat 0.10 m/s outward along the axis. The lateral gain was raised 0.02 -> 0.1/s: the contact offset
+  is about the deadband's mean error / gain (0.26 m before, 0.03 m after).
+- **State machine** (`gnc::ProximityGuidance`, German phases): "Wegpunkt" (hold, go/no-go 300 s each [E]),
+  "Annäherung" (CW transfer), "Umflug" (fly-around legs), "Anflug" (axial approach to an on-axis waypoint),
+  "Endanflug" (Waypoint 2 -> contact), "Halt", "Rückzug", "Abbruch", "Kontakt". Monitors each tick: leaving the corridor
+  -> "Halt: Korridor verlassen" (beyond 2x the bound: retreat); closing faster than 1.5 x schedule + 0.02 m/s -> "Halt:
+  zu schnell"; inside the sphere off the corridor -> "Abbruch: Sicherheitszone verletzt"; RCS propellant below the
+  deorbit reserve (600 kg [E], d3: 598 kg from 420 km) -> "Abbruch: Treibstoffreserve". Commands `hold`, `retreat`
+  (from a waypoint or a hold that interrupted one: to the previous waypoint; from a monitor: to the last reached),
+  `abort`, `resume` latch a request resolved in the next update; a second command before then is refused. Retreat at
+  Waypoint 0 and resume without a hold or beyond 5 km are refused with a German status. A start within 10 m [E] of the
+  first waypoint holds there (i3 arrives within 2-5 m). After the breakout burn the phase stays "Abbruch" (passive,
+  status "Ausweichmanöver ausgeführt"[", nicht passiv sicher"]); `resume` flies back to Waypoint 0.
+- **Session** (`flight_session_proximity.cpp`): `start_proximity(station_port, ProximityParameters)` ->
+  `AutopilotState::Proximity` ("Anflug"); getters `proximity_phase()`, `proximity_status()`, `proximity_events()`,
+  `proximity_contact()`, `proximity_warnings()` (station impulses within 3 h of the start); commands
+  `proximity_hold/retreat/abort/resume()`. Refused (German) without a station, with the station controlled, a busy
+  autopilot (not Off / Orbit), a rendezvous other than at Waypoint 0, a lunar flight, no docking port on the vehicle, an
+  unknown or unsuitable station port, a start beyond 5 km, or inside the sphere off the start axis. Opens the nose cone
+  and sets the rendezvous target (chaser port: the vehicle's first docking port). The docking attitude is an LVLH hold
+  re-derived every tick from the port kinematics; the translation authority along the target port axes is measured
+  once at the start in that attitude. The guidance runs in the autopilot dispatch before the tick's vehicle command,
+  so its fraction is flown in the same tick; `advance_to` keeps ticking during the flight (no coast across a hold or
+  the final approach) and may coast only after a completed breakout. The flight ends with the rendezvous target
+  (`clear_rendezvous_target` and every path calling it: placing bodies, launch, staging, separation, trunk jettison),
+  with `disengage_autopilot`, and at contact (autopilot off, the flight stays readable).
+- **Validation.** Guidance alone (CW point mass, dt 0.05 s): IDA-2 62.8 min / 49.8 kg, IDA-3 98.8 min / 112.7 kg (the
+  CW sim charges 16.2 kg/(m/s) on every axis: conservative). Session campaigns (full model, 200 Hz, OEM ISS,
+  `[proximity]`, not `[slow]`: 10-24 s each):
+
+  | case | time | propellant | axial | lateral | offset | angle | rate |
+  |---|---|---|---|---|---|---|---|
+  | IDA-2 from Waypoint 0 | 62.0 min | 31.2 kg | 0.079 m/s | 0.0010 m/s | 0.052 m | 0.61 deg | 0.022 deg/s |
+  | IDA-3 (3 fly-around legs) | 98.1 min | 64.0 kg | 0.078 m/s | 0.0018 m/s | 0.035 m | 0.48 deg | - |
+  | 8 dispersed Waypoint 2 starts | - | 1.7-2.0 kg | 0.078-0.080 | <= 0.0024 | 0.030-0.050 | <= 0.59 | <= 0.039 |
+
+  All inside the envelope. From the i3 Waypoint 0 state in the braking attitude (180 deg off, drifting 0.02 m/s):
+  aligned < 2 deg after 170 s, worst Waypoint 0 offset 1.16 m, contact inside, 24.4 kg. Station reboost 0.3 m/s at
+  600 s into the transfer: one warning, Waypoint 1 at 30.2 min (28.8 without), contact inside, no abort. Waypoint 1
+  hold across `advance_to(+290 s)` in one call: offset 1.20 m. Abort at x 9.6 m: breakout done in 10 s, 0.291 m/s,
+  passively safe, 24 h drift closest 285 m. Hold at x 11.4 m for 120 s: drift 0.20 m, 0.0019 m/s; resume -> contact
+  inside. The contact offsets 0.03-0.05 m are pulse effects (no coupled-torque issue).
+- **Diagnostics:** `STARSIM_DEBUG_PROXIMITY=1` prints the guidance events and every 60 s the port state, command,
+  attitude error and propellant.
+- **Open / for i5-i6:** the envelope values and the contact plane are [E] until i5 (IDSS IDD, ring reach); manual
+  proximity control is M7; the game interface (getters above, docking view) is i6.
