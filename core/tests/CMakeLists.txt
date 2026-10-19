@@ -44,6 +44,7 @@ add_executable(starsim_core_tests
     test_iss_station.cpp
     test_dragon_translation.cpp
     test_docking_port.cpp
+    test_relative_navigation.cpp
     test_lunar_outbound.cpp
     test_lunar_landing_mission.cpp
     test_lunar_return_mission.cpp
