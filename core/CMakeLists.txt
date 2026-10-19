@@ -65,6 +65,7 @@ add_library(starsim_core STATIC
     src/sim/telemetry_recorder.cpp
     src/sim/catch_tower_sim.cpp
     src/sim/leg_landing_sim.cpp
+    src/sim/station_start.cpp
     src/sim/landing_outcome.cpp
     src/sim/flight_session.cpp
     src/sim/flight_session_burns.cpp

@@ -8,6 +8,7 @@
 #include "starsim/sim/catch_tower_sim.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
 #include "starsim/sim/lunar_site.hpp"
+#include "starsim/sim/station_start.hpp"
 #include <limits>
 #include <map>
 #include <memory>
@@ -535,6 +536,18 @@ public:
     void set_thrust_dispersion(size_t body_index, double factor);
     // Truth Earth air density over US76 (lunar l5 campaigns): truth only; the onboard predictor keeps US76.
     void set_air_density_factor(double factor);
+    // Fidelity switch: solar radiation pressure on all bodies (default on; the OEM validation turns it off).
+    void set_solar_radiation_pressure(bool on) { env_.solar_radiation_pressure = on; }
+
+    // A space station (a vehicle with [stage.station]) as an uncontrolled body in ideal LVLH attitude; `impulses`
+    // are applied at their epochs (a coast stops there). Call after place_body / launch_from_pad / place_in_orbit -
+    // they clear all bodies, the station included. Returns its body index. Throws std::logic_error for a vehicle
+    // without [stage.station] or when a station exists already.
+    size_t add_station(const config::VehicleConfig& config, const math::StateVector& state_gcrf,
+                       std::vector<StationImpulse> impulses = {});
+    std::optional<size_t> station_index() const { return station_index_; }
+    // A session that starts with a station only (no body placed yet); throws std::logic_error while bodies exist.
+    void set_epoch(time::Epoch epoch);
 
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
@@ -635,6 +648,10 @@ private:
     void replan_ship_deorbit();         // a far deorbit planned again from the state now (deorbit_replan_age_s)
     std::vector<Flying> bodies_;
     size_t controlled_ = 0;
+    std::optional<size_t> station_index_;          // add_station
+    std::vector<StationImpulse> station_impulses_;  // still to apply, sorted by epoch
+    void clear_station();                           // with every bodies_.clear()
+    void apply_station_impulses();                  // those due now
     PilotInput input_;
     ControlMode mode_ = ControlMode::RateCommand;
     time::Epoch epoch_;

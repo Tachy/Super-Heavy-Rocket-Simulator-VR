@@ -1,6 +1,7 @@
 #include "starsim/sim/flight_session.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 #include <cmath>
 #include <cstdlib>
 
@@ -113,6 +114,7 @@ void FlightSession::place_in_orbit(const config::VehicleConfig& config, const ma
     }
     const vehicle::RigidBodyState rigid{state.position_m, state.velocity_mps, math::Quat::from_matrix(m), {}};
     bodies_.clear();
+    clear_station();
     reset_leg_landing();
     bodies_.push_back({std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid), {}, nullptr, {}});
     controlled_ = 0;
@@ -388,12 +390,57 @@ void FlightSession::place_body(const config::VehicleConfig& config, const vehicl
     auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(config, config_dir_), state);
     body->set_ground_height(body->vehicle().splashdown_recovery() ? 0.0 : launch_site_.height_m);  // a capsule: the sea
     bodies_.clear();
+    clear_station();
     reset_leg_landing();
     bodies_.push_back({std::move(body), {}, nullptr, {}});
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
     reset_mission_state();
+}
+
+size_t FlightSession::add_station(const config::VehicleConfig& config, const math::StateVector& state_gcrf,
+                                 std::vector<StationImpulse> impulses) {
+    if (config.stages.empty() || !config.stages.front().body_in_lvlh_rad) {
+        throw std::logic_error("add_station: vehicle has no [stage.station]");
+    }
+    if (station_index_) throw std::logic_error("add_station: the session has a station already");
+    const math::Vec3 ypr = *config.stages.front().body_in_lvlh_rad;  // aerospace 3-2-1: yaw, pitch, roll
+    const math::Quat body_in_lvlh = math::Quat::from_axis_angle({0.0, 0.0, 1.0}, ypr.x) *
+                                    math::Quat::from_axis_angle({0.0, 1.0, 0.0}, ypr.y) *
+                                    math::Quat::from_axis_angle({1.0, 0.0, 0.0}, ypr.z);
+    const vehicle::RigidBodyState rigid{state_gcrf.position_m, state_gcrf.velocity_mps, math::Quat{}, {}};
+    auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(config, config_dir_), rigid);
+    body->set_ideal_lvlh_attitude(body_in_lvlh);
+    const bool alone = bodies_.empty();
+    bodies_.push_back({std::move(body), {}, nullptr, {}});
+    if (alone) controlled_ = 0;  // nothing commands it: the autopilot stays Off
+    station_index_ = bodies_.size() - 1;
+    std::sort(impulses.begin(), impulses.end(),
+              [](const StationImpulse& a, const StationImpulse& b) { return a.epoch < b.epoch; });
+    station_impulses_ = std::move(impulses);
+    return *station_index_;
+}
+
+void FlightSession::set_epoch(time::Epoch epoch) {
+    if (!bodies_.empty()) throw std::logic_error("set_epoch: only for a session without bodies");
+    epoch_ = epoch;
+    launch_epoch_ = epoch;
+}
+
+void FlightSession::clear_station() {
+    station_index_.reset();
+    station_impulses_.clear();
+}
+
+void FlightSession::apply_station_impulses() {
+    while (station_index_ && !station_impulses_.empty() && station_impulses_.front().epoch <= epoch_) {
+        auto& body = *bodies_.at(*station_index_).body;
+        auto state = body.state();
+        state.velocity_gcrf_mps += station_impulses_.front().delta_v_mps * math::normalized(state.velocity_gcrf_mps);
+        body.set_state(state);
+        station_impulses_.erase(station_impulses_.begin());
+    }
 }
 
 void FlightSession::reset_mission_state() {
@@ -420,6 +467,7 @@ void FlightSession::launch_from_pad(const config::VehicleConfig& config, const L
     set_launch_site(site);
     const double stand_height = site.height_m + (tower_ ? site.tower->mount_height_m : 0.0);
     bodies_.clear();
+    clear_station();
     bodies_.push_back({vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad, site.longitude_rad,
                                                    stand_height, heading_rad, earth_, epoch),
                        {}, nullptr, {}});
@@ -470,6 +518,7 @@ double FlightSession::coast_allowance_s() const {
         }
     }
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
+    if (!station_impulses_.empty()) allowance = std::min(allowance, station_impulses_.front().epoch - epoch_);
     if (autopilot_.state == AutopilotState::Burn) {
         const double drift = burn_drifting() ? burn_drift_lead_s : 0.0;  // the turn to the burn attitude is ticked
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s - drift);
@@ -507,7 +556,7 @@ double FlightSession::coast_allowance_s() const {
             if (run) return 0.0;
         }
         if (norm(body.state().angular_velocity_body_radps) > 1e-3 && &flying == &bodies_[controlled_] &&
-            !burn_drifting()) {
+            !burn_drifting() && !body.ideal_attitude()) {
             return 0.0;
         }
     }
@@ -520,6 +569,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             if (nose_cone_body_ < bodies_.size()) set_nose_cone(nose_cone_body_, true);
             nose_cone_epoch_.reset();
         }
+        apply_station_impulses();
         // Parachute sequencers before the coast check: a body that has not ticked yet (placed, staged, released)
         // must already limit its coast to the watch height (review d4: a placed capsule coasted past 5.5 km).
         for (auto& flying : bodies_) {
