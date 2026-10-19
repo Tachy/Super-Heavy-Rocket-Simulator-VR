@@ -29,6 +29,7 @@ add_library(starsim_core STATIC
     src/vehicle/liquid_settling.cpp
     src/vehicle/vehicle.cpp
     src/vehicle/flight_body.cpp
+    src/vehicle/docking_port.cpp
     src/gnc/attitude_controller.cpp
     src/gnc/ascent_guidance.cpp
     src/gnc/peg_steering.cpp
