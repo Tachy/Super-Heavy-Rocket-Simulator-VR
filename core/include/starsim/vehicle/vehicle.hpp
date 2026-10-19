@@ -132,7 +132,10 @@ struct Stage {
 struct MassProperties {
     double mass_kg = 0.0;
     double cg_station_m = 0.0;
-    math::Vec3 cg_offset_m;    // lateral CG offset from the axis (0, y, z): a capsule's trim offset, else zero
+    math::Vec3 cg_offset_m;    // lateral CG offset from the axis (0, y, z): a capsule's trim offset, settled liquid
+    // The lateral offset that acts in roll: the parts that turn with the hull, over the whole mass. Liquid does not turn
+    // with a round tank (no roll inertia either) - its wall pressure passes through the axis.
+    math::Vec3 roll_offset_m;
     math::Vec3 inertia_kg_m2;  // principal moments about the CG: (roll, pitch, yaw) = (Ixx, Iyy, Izz)
     math::Vec3 cg_point_m() const { return {cg_station_m, cg_offset_m.y, cg_offset_m.z}; }
 };

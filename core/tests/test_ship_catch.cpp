@@ -110,7 +110,7 @@ static Gate nominal_gate() {
     return g;
 }
 
-// Dispersed gate of the campaign (fixed seed): +-10 m per axis, +-10 m/s per axis, landing propellant +-5 %, alpha and
+// Dispersed gate of the campaign (fixed seed): +-10 m per axis, +-10 m/s per axis, propellant 35 t + 0-3.5 t, alpha and
 // bank +-5 deg; the nose to the tower.
 static Gate dispersed_gate(unsigned seed) {
     std::mt19937 rng(seed);
@@ -120,7 +120,7 @@ static Gate dispersed_gate(unsigned seed) {
     g.offset_enu_m += Vec3{10.0 * unit(rng), 10.0 * unit(rng), 0.0};
     g.height_m += 10.0 * unit(rng);
     g.velocity_enu_mps += Vec3{10.0 * unit(rng), 10.0 * unit(rng), 10.0 * unit(rng)};
-    g.propellant_kg *= 1.0 + 0.05 * unit(rng);
+    g.propellant_kg += 1750.0 * (1.0 + unit(rng));  // full headers + 0-3.5 t main-tank residue (the 5 % spread width)
     g.alpha_deg += 5.0 * unit(rng);
     g.bank_deg = 5.0 * unit(rng);
     return g;
@@ -144,7 +144,7 @@ TEST_CASE("Ship flips at the gate and is caught", "[ship][landing][catch]") {
 }
 
 // Dispersed gate states (fixed seeds): the entry guidance's gate accuracy is metres (b2 campaign), the belly flop adds
-// wind-free scatter; +-10 m per axis, +-10 m/s per axis, landing propellant +-5 %, alpha and bank +-5 deg. One case
+// wind-free scatter; +-10 m per axis, +-10 m/s per axis, propellant 35 t + 0-3.5 t, alpha and bank +-5 deg. One case
 // loses the first engine to be dropped (sea_level_3) in the flip: the switch to two engines comes early.
 TEST_CASE("Ship catch campaign: gate dispersions and an engine failure", "[ship][catch][validation][slow]") {
     std::vector<Gate> cases;

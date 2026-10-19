@@ -67,7 +67,7 @@ struct Case {
     double speed_mps = 7400.0;
     double range_offset_m = 0.0;   // start further / closer
     double cross_offset_m = 0.0;   // start displaced to the right of its heading
-    double propellant_kg = 25000.0;
+    double propellant_kg = 35000.0;  // the full header tanks (landing_propellant_kg); dispersed: plus main-tank residue
     double crossflow_factor = 1.0; // truth
     double flap_factor = 1.0;      // truth
 };
@@ -181,7 +181,9 @@ TEST_CASE("Entry guidance brings the ship to the Starbase flip gate from dispers
         c.speed_mps = 7400.0 + 40.0 * u(rng);
         c.range_offset_m = 300000.0 * u(rng);
         c.cross_offset_m = 60000.0 * u(rng);
-        c.propellant_kg = 25000.0 + 14000.0 * u(rng);  // +-5 % of the ~280 t entry mass
+        // header-tank plan (user 2026-10-19): the headers are full until the flip, so the +-5 % entry-mass spread
+        // (28 t) is main-tank residue on top of them (0-28 t)
+        c.propellant_kg = 35000.0 + 14000.0 * (1.0 + u(rng));
         c.crossflow_factor = 1.0 + 0.1 * u(rng);
         c.flap_factor = 1.0 + 0.1 * u(rng);
         cases.push_back(c);

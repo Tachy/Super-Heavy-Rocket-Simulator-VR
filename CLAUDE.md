@@ -46,7 +46,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating plus radiative heating
   from the NASA TM-102652 equilibrium tables, blunt capsule from a
   modified-Newtonian table with offset-CG trim, reefed parachutes),
-  propulsion (engine performance, RCS allocator + pulse modulator).
+  propulsion (engine performance, RCS allocator + pulse modulator),
+  vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
   CSPICE lives only in `core/src/spice/` and implements `time::TimeScaleConverter`,

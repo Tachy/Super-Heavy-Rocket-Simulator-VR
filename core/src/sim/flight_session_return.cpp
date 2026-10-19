@@ -305,6 +305,10 @@ void FlightSession::apply_return_command(const Flying& flying, const gnc::Attitu
                             t.x / 1e6, t.y / 1e6, t.z / 1e6, command.gimbal_pitch_rad * 57.3, command.gimbal_yaw_rad * 57.3,
                             gp * 57.3, gy * 57.3, w.x, w.y, w.z, inertia.y * w.y / 1e6, inertia.z * w.z / 1e6, running);
                 for (const auto& f : flying.body->vehicle().stages().front().flaps) std::printf(" %.0f", f.deflection_rad * 57.3);
+                const auto mass = flying.body->vehicle().mass_properties();
+                const auto& down = flying.body->vehicle().liquid_down_body();
+                std::printf(" cg %.2f %.2f/%.2f m liquid %.2f/%.2f/%.2f", mass.cg_station_m, mass.cg_offset_m.y,
+                            mass.cg_offset_m.z, down.x, down.y, down.z);
                 std::printf("\n");
             }
         }

@@ -489,6 +489,11 @@ TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage lan
     while (session.autopilot().state == sim::AutopilotState::UpperStage && session.mission_time_s() < 1200.0) {
         session.advance_to(session.epoch() + 1.0, 400);
     }
+    // ... and its engine's shutdown transient ends (measured inside it, the orbit lacked up to ~6 m/s: 10 km apoapsis).
+    while (session.body(session.controlled_index()).vehicle().any_engine_producing_thrust() &&
+           session.mission_time_s() < 1200.0) {
+        session.advance_to(session.epoch() + 0.1, 40);
+    }
     const auto& upper = session.body(session.controlled_index());
     const auto orbit = orbit::elements_from_state({upper.state().position_gcrf_m, upper.state().velocity_gcrf_mps},
                                                 session.gm_earth_m3ps2());

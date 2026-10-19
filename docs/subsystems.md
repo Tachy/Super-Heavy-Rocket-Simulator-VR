@@ -148,7 +148,8 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   (minimum-norm, per-flap clamp, null space drawn to mid-range), the rest goes to RCS. `gnc/entry_attitude`
   builds the setpoint from angle of attack and bank (belly at `[stage.aero] belly_azimuth_deg`). Nominal alpha
   over Mach `aero/ship_entry_alpha.csv` [D] (55 deg hypersonic, 50 near Mach 8, 60-80 towards the belly flop).
-  Ship dry CG 28 m [D] (the trim requirement: at 20 m it sat ~9 m behind the hull's centre of pressure).
+  Ship dry CG 23.516 m [D] since the header tanks (was 28 m, the trim requirement: at 20 m it sat ~9 m behind the
+  hull's centre of pressure): it keeps the validated landing-mass CG, dry + 35 t at 25.50 m from the ship's base.
   Entry control: 0.5 rad/s and bank changes <= 1 deg/s (0.8 rad/s limit-cycles in roll with 20 deg/s flaps;
   faster bank changes depart in alpha). Validation: replay of flights 12-14 (bank follows the recorded altitude)
   - speed over time above Mach 3 within 1.6 / 2.3 / 4.9 % rms, below Mach 3 over altitude 6.0 / 5.2 %,
@@ -157,7 +158,22 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   (`aero/entry_heating`, nose radius 6 m [E]), heat load, aerodynamic load (thrust not counted); beyond a limit the
   ship breaks up ("Hitzeschild versagt" / "Strukturüberlast", outcome "zerbrochen"), warning from 80 %; skip-out
   event ("Abprall": below 80 km, then above 100 km). Heating is integrated in `step()` only. Entry mass in tests:
-  dry + `landing_propellant_kg` (35 t [E]) in the main tanks (no header tanks modelled).
+  dry + full header tanks (`landing_propellant_kg`, 35 t [E]) + main-tank residue; `config::fill_tanks` fills the
+  headers first. The headers are filled at launch and feed only from the flip, so a returning ship never carries less
+  than 35 t: below that the CG moves AFT as the ship gets lighter (11 t: 24.16 m, the pitch trim at peak q is lost
+  below ~24.5 m; with the old dry CG 28 m in the main tanks it moved forward) - the entry campaign once drew 11-39 t
+  and five cases departed in pitch. Campaigns: entry 35 t + 0-28 t residue, catch gate 35 t + 0-3.5 t.
+  Propellant settling (header-tank plan, `vehicle/liquid_settling`, fidelity flag
+  `FlightEnvironment::propellant_settling`, on): oxidizer and fuel lie below a surface perpendicular to the apparent
+  gravity (minus the specific force from the first RK4 stage), lagged by tau = sqrt(2 D / a) in [0.5, 60] s and held
+  in coasts (< 0.01 m/s^2); per tank a tilted-cylinder table (centroid and variances). At entry attitude the residue
+  lies forward and on the belly (64 t: CG +0.95 m forward) - this fixed the aerocapture departure (below). Engine
+  moments use the axial CG [E] (the full CG point moved the Falcon 9 / Crew Dragon ascent apoapsis 210 -> 223 km).
+  The liquid does not turn with a round tank (no roll inertia; wall pressure through the axis): moments act in roll
+  about `MassProperties::roll_offset_m` (the hull's parts only), in pitch / yaw about the full CG. Before that rule
+  the aero normal force times a 4.4 t residue swinging ~0.1 m sideways gave up to 0.05 MNm of roll - the ship's whole
+  RCS roll authority (1.5 kN [E] thrusters) - and lunar-return seed 8 lost its landing burn. Tanks have flat ends in
+  this model (real domes would keep a small residue in the sump); the RCS allocator still uses the full CG point.
   The ship alone carries the stack's axial drag table [E] (`ascent_drag_table`; before b2 a ship built alone had none).
 - Ship entry guidance (b2, `gnc/entry_guidance`, `gnc/entry_predictor`, `gnc/entry_aero_table`): the onboard computer
   predicts the rest of the entry as a 3-DOF point mass (Earth-fixed, J2, US76, the ship's trimmed C_D A / C_L A over
@@ -185,8 +201,9 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   effort 0.1 of the gimbal authority [E] (more limit-cycles after the flip), attitude controller with
   `Gains::actuator_delay_s` 0.75 s (gimbal slew in the braking; no overshoot). Flaps folded in the burn.
   `FlightSession::place_landing_ship` (scenarios); the entry hands over at the gate. Test from the gate: caught 0.01 m,
-  0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10 m, +-10 m/s, +-5 % propellant, +-5 deg alpha /
-  bank, belly engine failed in the flip): 20 of 21 caught (<= 0.02 m), the failure aborts to the sea.
+  0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10 m, +-10 m/s, propellant 35 t + 0-3.5 t
+  main-tank residue, +-5 deg alpha / bank, belly engine failed in the flip): 20 of 21 caught (<= 0.02 m), the failure
+  aborts to the sea.
   Gate lead: `gnc::ship_entry_target` puts the entry's target 220 m [E] back from the catch axis on the line tower -> pad
   with `EntryTarget::nose_direction_itrf` to the tower. Only that approach is robust: the arms stand across the line,
   a burn arriving from the side (azimuth 45/225 deg) runs into an arm at arm height; flip-push 20 deg off the line
@@ -203,8 +220,9 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   turns steep too late for the nose turn (137 deg off the tower direction): the flip pushes away from the tower, the burn
   aborts and the ship ditches at sea (1.4 t left) - safe, no catch. Ship catch propellant margin:
   5 of 21 dispersed gates arrive with <= 0.7 t (gate +-10 m/s: up to ~39 m/s across after the flip, braked high inside
-  the glide cone); campaign case 12 (seed 13) reaches the catch point before the arms have closed, runs dry and drops
-  ~1 m onto the arms at 4.5 m/s - judged "gefangen" correctly (carriage absorbs it, pin loads below the limit).
+  the glide cone); campaign case 12 (seed 13) reached the catch point before the arms had closed, ran dry and dropped
+  ~1 m onto the arms at 4.5 m/s (judged "gefangen"); with a partly empty header (the old -5 % draw) it dropped at
+  5.5 m/s ("verfehlt"), with full headers it is caught normally.
   Diagnostics: `STARSIM_DEBUG_FLIP=1`, `STARSIM_DEBUG_BURN=1`, `STARSIM_DEBUG_ENTRY=1` with the SCvx / catch flags;
   hidden test "Ship catch single case" with `STARSIM_SHIP_SEED=<1-20>`.
 - Ship return from orbit (b4, `config/missions/ship_return_starbase.toml`, `config::load_ship_return_mission`):
@@ -641,7 +659,7 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   spent ~19 s per plan in `solve_lambert`'s 4,000-sample bracket scan (now 100 samples first, 4,000 only as the
   fallback). A looser tolerance for the scan's samples saved nothing (6.8 -> 6.4 Newton iterations per sample) and
   was not kept. The plans move by <= 0.13 m/s TEI, 3 s of interface epoch.
-  Aerocapture attitude at peak q (l6 Task 1 finding, root cause 2026-10-18, OPEN until header tanks): the aircatch campaign moved by tonnes on
+  Aerocapture attitude at peak q (l6 Task 1 finding, root cause 2026-10-18, CLOSED by propellant settling): the aircatch campaign moved by tonnes on
   round-off (seeds 4 / 7 short of the deorbit after the interpolated ephemeris and the Lambert bracket, both exact to
   < 1 mm / < 1e-9): the entry attitude loop diverged at 73 km / 9.8 km/s / ~6.7 kPa (roll error to +45 deg, axis error
   35 deg, yaw rate 0.09 rad/s against a saturated yaw RCS), the guidance answered with the 150 deg bank limit, the
@@ -654,10 +672,11 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   64 t aboard (the RCS holds the pitch the flaps cannot trim). Tried and dropped (user 2026-10-18): a 10 deg allocation
   margin below the broadside stop (`flap_authority`: upper box min(max - 10 deg, d + reach)) held the attitude (64 t with a 0.02 rad/s roll
   kick: axis error 6 deg, apoapsis 428 km) but cost 0.6-1.9 t more gas per pass - 6 of 21 aircatch seeds then lacked
-  1-2 t for the deorbit, and the Mach 2.6 tower catch struck the tower. Fix: header tanks (next task, user 2026-10-18)
-  - the landing propellant forward as on the real ship, so the CG moves forward with propellant; re-tunes
-  `dry_cg_station_m` and every ship return. Fixture (hidden until then): "An aerocapture pass with 64 t aboard damps a
-  roll disturbance at peak q" (`[.header_tanks]`; today 166 deg axis error, apoapsis 12,058 km).
+  1-2 t for the deorbit, and the Mach 2.6 tower catch struck the tower. Header tanks alone moved the 64 t CG by 3 cm
+  (the surplus sits in the main tanks); the real cause was the liquid model - always a column on the aft domes. With
+  propellant settling the residue lies forward on the belly at entry: fixture "An aerocapture pass with 64 t aboard
+  damps a roll disturbance at peak q" (`[header_tanks][aerocapture]`) 1.3 deg axis error (was 166), apoapsis 420 km,
+  peak 904 kW/m2, 60.9 t left; aircatch seeds 1-7 back to 7 of 7.
   Debug: `STARSIM_DEBUG_RETURN`, `STARSIM_DEBUG_ENTRY` (incl. constraint and reversal lines), `STARSIM_DEBUG_ENTRY_ATTITUDE`
   (1 Hz axis error, rates, RCS, flaps), `STARSIM_DEBUG_FLIP` ('[gate] state'), `STARSIM_DEBUG_DEORBIT`; hidden tests
   `"[.lunar_return_case]"` (`STARSIM_RETURN_SEED`, `STARSIM_RETURN_AIRCATCH=1`), `"[.lunar_gate_replay]"`

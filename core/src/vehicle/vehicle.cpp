@@ -213,7 +213,7 @@ aero::AeroResult Vehicle::hull_aero(const Vec3& air_velocity_body_mps, const env
 }
 
 MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* flows, double tau_s) const {
-    struct Part { double mass, station, ixx, iyy; double y = 0.0, z = 0.0; };
+    struct Part { double mass, station, ixx, iyy; double y = 0.0, z = 0.0; bool liquid = false; };
     std::vector<Part> parts;
     const Vec3& down = liquid_down_body_;
     const bool settled_aft = down.x == -1.0 && down.y == 0.0 && down.z == 0.0;  // the exact old code path
@@ -250,7 +250,7 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
             const double rt = t.radius_m;
             parts.push_back({mass, base + 0.5 * t.length_m + rt * m.axial, 0.0,
                              mass * rt * rt * (m.axial_var + 0.5 * (m.lateral_var + m.transverse_var)),
-                             rt * m.lateral * lateral_y, rt * m.lateral * lateral_z});
+                             rt * m.lateral * lateral_y, rt * m.lateral * lateral_z, true});
         }
     }
     MassProperties mp;
@@ -259,11 +259,13 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
         mp.cg_station_m += p.mass * p.station;
         mp.cg_offset_m.y += p.mass * p.y;
         mp.cg_offset_m.z += p.mass * p.z;
+        if (!p.liquid) mp.roll_offset_m += Vec3{0.0, p.mass * p.y, p.mass * p.z};
     }
     mp.cg_station_m /= mp.mass_kg;
     // Lateral offset (capsule trim): enters the aerodynamic and RCS moments only; the inertia stays on the axis (its
     // parallel-axis term is < 0.1 %, d3 plan ruling 2).
     mp.cg_offset_m = mp.cg_offset_m / mp.mass_kg;
+    mp.roll_offset_m = mp.roll_offset_m / mp.mass_kg;
     double ixx = 0.0, iyy = 0.0;
     for (const auto& p : parts) {
         const double d = p.station - mp.cg_station_m;

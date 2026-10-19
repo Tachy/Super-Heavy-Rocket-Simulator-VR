@@ -165,3 +165,51 @@ Session 2026-10-18 (one session, Tasks 1-3):
 - NEXT: Task 4 - settling on by default (FlightEnvironment default true; check every session constructor path),
   un-hide `[.header_tanks]`, full suite incl. [slow] campaigns + smoke, docs (subsystems.md: ship dry CG, entry mass
   in tests, aerocapture finding closed, settling paragraph; CLAUDE.md implemented modules), opus review.
+
+Session 2026-10-18 (Task 4, steps 1-3):
+- Steps 1-2 done (uncommitted): `FlightEnvironment::propellant_settling = true`; `[header_tanks][aerocapture]` un-hidden
+  and green (axis error 1.3 deg, apoapsis 420.3 km, peak 904 kW/m2, 60.87 t left).
+- Full suite: 650/654. Red: (1) LLO plan_speed wall time (known load sensitivity); (2) entry campaign "Entry guidance
+  brings the ship to the Starbase flip gate from dispersed entries": cases 1/2/3/5/10 depart in pitch at peak q;
+  (3) lunar direct seeds 7-9: seed 8 impacted; (4) ship catch campaign: case 12 "verfehlt" (sink 5.5 m/s).
+- A/B with settling off: (2) and (4) fail identically -> TASK 3 REGRESSION (not seen: -Fast skips [slow]). Cause of
+  (2): the dry CG re-tune (28 -> 23.516 m) was anchored at 35 t only; below 35 t all propellant sits in the headers, so
+  the CG now moves AFT as the ship gets lighter (11 t: 24.16 m, was 27.14; 16.5 t: 24.48, was 26.73). Every failing
+  case carries <= 16.5 t; the pitch-trim limit is ~24.5 m. (4): case 12 was the documented marginal case (runs dry, 1 m
+  drop at 4.5 m/s); now 5.5 m/s.
+- (3) is settling: seed 8 caught with settling off (8.9 t left). Flip identical (on/off); in the landing burn the liquid
+  swings +-10 deg with the gimbal (lateral CG +-0.1 m, lagged) and after the 3->2 engine switch the SCvx plans stop
+  converging (conv 0, defect 1.7-2.5) -> pitch limit cycle to 0.53 rad/s -> abort, impact. Settling off also had a
+  failed plan at the same point: marginal case pushed over. `STARSIM_DEBUG_BURN` now prints CG and liquid direction.
+- OPEN: user decision on (2)/(4) (entry propellant semantics vs dry CG), then (3).
+- Ruling (user 2026-10-19, "Header immer voll"): headers are filled at launch and drawn only from the flip, so a
+  returning ship always carries 35 t in them; test dispersions below 35 t were unphysical. Entry campaign: 35 t + 0-28 t
+  main-tank residue (the old 28 t spread); catch campaign gate: 35 t + 0-3.5 t (the old 5 % spread width). Dry CG stays
+  23.516 m. Cost if wrong: partial-header scenarios (e.g. a leaking header) remain untested below ~24.5 m CG.
+  Result (settling on): entry campaign 12/12 (miss <= 2 m), catch campaign 20/21 (case 12 caught; 20 = engine failure).
+- Seed 8 (user: investigate + fix). Sweep of the replayed gate (thrust 1.011-1.023 x aero 0.97-0.99): settling off
+  11/15 caught, on 0/15 -> systematic, not chaos. Ablation (9 variants each): liquid lateral CG zeroed 7/9, main tanks
+  as columns 6/9, headers as columns 0/9, aero moment without the lateral arm 7/9, RCS allocator on the axial CG 0/9.
+  Mechanism: the 4.4 t main-tank residue (a ~5 cm pool in the flat 9 m tank model) swings with the gimbal and the flip,
+  lateral CG ~0.1 m; aero normal force (up to 2.8 MN in the flip) x that offset = ROLL moment up to 0.05 MNm
+  (pitch/yaw parts ~0). With two engines (asymmetric set) roll goes to the RCS only, and the burn's roll rate is barely
+  damped even with settling off (w.x 0.01 -> 0.06 rad/s against a commanded -0.3..-0.9 MNm): the extra roll
+  disturbance tips the SCvx plans into non-convergence. Catch campaign (headers only, <= 3.5 t residue) unaffected.
+- User (2026-10-19): "rollen erzeugt kein Gegenmoment, da die Tanks ja zylinderfoermig sind und die Fluessigkeit durch
+  die Traegheit an ihrem Platz bleibt" - correct: the wall pressure of a round tank passes through the axis, the liquid
+  neither turns with the hull (no roll inertia, already modelled) nor gives it a roll moment. FIX: `MassProperties::
+  roll_offset_m` (lateral offset of the parts that turn with the hull, over the whole mass); FlightBody's aero and
+  parachute moments take roll about it, pitch / yaw about the full CG (`moment_about_cg`). Settling off: bit-identical.
+  Test "Liquid off the axis gives no roll moment" RED (-1.8e-5 rad/s after one 5 ms tick, broadside 1,500 m/s at
+  60 km) -> GREEN. Seed 8 gate sweep 7/9 caught (settling off 7/9 on the same grid); lunar direct seeds 7-9 3/3
+  (8.6 / 10.9 / 11.2 t left). The RCS allocator still uses the full CG point (~2 % of its roll arm; minor, deferred).
+  User also noted real tanks are domed (flat ends here exaggerate a shallow residue's swing) - follow-up candidate.
+- Full suite 653/655 + smoke test passed. Red: LLO plan_speed wall time (known) and "Falcon 9 drone-ship mission":
+  apoapsis 269 km (280 +- 5). Not the roll fix itself: the PEG cutoff state was identical (|v_go| 6.314 m/s); the test
+  measured the orbit on a 1 s grid right after cutoff, INSIDE the Merlin's shutdown transient (6.4 m/s tail-off) when
+  the cutoff fell just before a grid point. Ruling: the test now waits until no engine produces thrust -> 200 x 281 km,
+  [asds] 17/17. Cost if wrong: none (measurement only).
+- Aircatch seeds 1-7 threshold back to == 7 (known-finding comment removed); docs: subsystems.md (dry CG, entry mass
+  and campaign propellant, settling paragraph incl. the roll rule, aerocapture finding CLOSED, catch campaign),
+  CLAUDE.md implemented modules (vehicle). `STARSIM_DEBUG_BURN` prints CG and liquid direction.
+- NEXT: commit + push, then Step 5 (opus review of the plan's commits bba1792..HEAD), then l6 Task 2.

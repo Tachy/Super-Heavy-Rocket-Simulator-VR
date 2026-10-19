@@ -259,11 +259,9 @@ TEST_CASE("Lunar return campaign (direct): seeds 13-15", "[lunar][return][valida
 TEST_CASE("Lunar return campaign (direct): seeds 16-18", "[lunar][return][validation][slow]") { CHECK(fly_seeds(16, 18, false) == 3); }
 TEST_CASE("Lunar return campaign (direct): seeds 19-21", "[lunar][return][validation][slow]") { CHECK(fly_seeds(19, 21, false) == 3); }
 
-// KNOWN FINDING (l6 Task 1, user 2026-10-18; docs/subsystems.md l5 "Aerocapture attitude at peak q"): seeds 4 and 7
-// fail since the round-off of the interpolated ephemeris / Lambert bracket: the entry attitude loop diverges at peak q
-// (roll-yaw oscillation, yaw RCS saturated), the bank limit exits high and the second pass spends the deorbit
-// propellant. Restored to 7 by the attitude fix task that follows l6 Task 1.
-TEST_CASE("Lunar return campaign (aerocapture): seeds 1-7", "[lunar][return][validation][slow]") { CHECK(fly_seeds(1, 7, true) >= 5); }
+// Seeds 4 and 7 failed after l6 Task 1 (entry attitude departure at peak q with 61-64 t aboard, the liquid always a
+// column on the aft domes); propellant settling (header-tank plan) moves the residue forward at entry and fixed them.
+TEST_CASE("Lunar return campaign (aerocapture): seeds 1-7", "[lunar][return][validation][slow]") { CHECK(fly_seeds(1, 7, true) == 7); }
 TEST_CASE("Lunar return campaign (aerocapture): seeds 8-14", "[lunar][return][validation][slow]") { CHECK(fly_seeds(8, 14, true) == 7); }
 TEST_CASE("Lunar return campaign (aerocapture): seeds 15-21", "[lunar][return][validation][slow]") { CHECK(fly_seeds(15, 21, true) == 7); }
 

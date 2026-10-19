@@ -4,8 +4,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/propellant_loading.hpp"
+#include "starsim/environment/atmosphere.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/vehicle/flight_body.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
 using namespace starsim;
@@ -87,4 +89,53 @@ TEST_CASE("Separation and copies keep the liquid direction", "[settling]") {
         CHECK(d.x == Approx(down.x));
         CHECK(d.z == Approx(down.z));
     }
+}
+
+namespace {
+
+class ZeroGravity final : public environment::GravityModel {
+public:
+    ephemeris::Body central_body() const override { return ephemeris::Body::Earth; }
+    Vec3 acceleration_mps2(const Vec3&, time::Epoch) const override { return {}; }
+};
+
+class FixedEarth final : public frames::BodyOrientation {
+public:
+    frames::FixedToInertial fixed_to_gcrf(time::Epoch) const override { return {math::Mat3::identity(), {}}; }
+};
+
+// Roll rate after one tick of a 40 t ship (5 t main-tank residue) at 60 km over the equator, nose up, moving belly
+// first at 1,500 m/s with the flaps stowed: the hull's normal force passes through the axis.
+double roll_rate_after_tick(const Vec3& liquid_down_body) {
+    ZeroGravity gravity;
+    environment::Us76Atmosphere atmosphere;
+    FixedEarth earth;
+    const vehicle::FlightEnvironment env{gravity, atmosphere, earth, nullptr, false};
+    auto cfg = config::load_vehicle(config_dir, "starship_block3");
+    cfg.stages.erase(cfg.stages.begin());
+    config::fill_tanks(cfg.stages[0], 40000.0);
+    for (auto& f : cfg.stages[0].flaps) f.initial_deflection_rad = 0.0;
+    auto vehicle = std::make_unique<Vehicle>(cfg, config_dir);
+    vehicle->set_liquid_down_body(liquid_down_body);
+    const vehicle::RigidBodyState state{{6378137.0 + 60000.0, 0.0, 0.0}, {0.0, 0.0, -1500.0}, {}, {}};
+    vehicle::FlightBody body(std::move(vehicle), state);
+    body.step(env, time::Epoch::from_tdb_seconds_past_j2000(8.4e8), 0.005, {});
+    return body.state().angular_velocity_body_radps.x;
+}
+
+}  // namespace
+
+// The liquid does not turn with a round tank (no roll inertia): the wall pressure passes through the axis, so a
+// sideways residue gives no roll moment - the hull's normal force acts about the axis in roll, not about the offset CG.
+TEST_CASE("Liquid off the axis gives no roll moment", "[settling]") {
+    const auto ship = ship_with(40000.0);
+    auto side = ship_with(40000.0);
+    side.set_liquid_down_body({0.0, 1.0, 0.0});
+    REQUIRE(std::abs(side.mass_properties().cg_offset_m.y) > 0.01);  // the residue lies on the +y side
+    CHECK(side.mass_properties().roll_offset_m.y == Approx(ship.mass_properties().roll_offset_m.y).margin(1e-12));
+
+    const double column = roll_rate_after_tick({-1.0, 0.0, 0.0});
+    const double sideways = roll_rate_after_tick({0.0, 1.0, 0.0});
+    INFO("roll rate column " << column << " sideways " << sideways);
+    CHECK(sideways == Approx(column).margin(1e-9));
 }

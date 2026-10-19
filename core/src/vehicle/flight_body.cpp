@@ -40,6 +40,14 @@ RigidBodyState unpack(const State13& y) {
             {y[10], y[11], y[12]}};
 }
 
+// Moment of `force` acting on the axis-relative `point_m` (station, y, z): pitch and yaw about the full CG, roll about the
+// lateral offset of the parts that turn with the hull (settled liquid does not: MassProperties::roll_offset_m).
+Vec3 moment_about_cg(const MassProperties& mass, const Vec3& point_m, const Vec3& force) {
+    Vec3 moment = cross(point_m - mass.cg_point_m(), force);
+    moment.x = (point_m.y - mass.roll_offset_m.y) * force.z - (point_m.z - mass.roll_offset_m.z) * force.y;
+    return moment;
+}
+
 Vec3 local_up_fixed(const frames::GeodeticPosition& g) {
     return {std::cos(g.latitude_rad) * std::cos(g.longitude_rad), std::cos(g.latitude_rad) * std::sin(g.longitude_rad),
             std::sin(g.latitude_rad)};
@@ -86,10 +94,8 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
     f.aero.moment_body_nm = f.aero.moment_body_nm * ctx.vehicle.hull_aero_scale();
     f.nongravitational_body_n = f.aero.force_body_n;
     f.aero_body_n = f.aero.force_body_n;
-    // About the CG, which sits off the axis by cg_offset_m on a capsule (zero otherwise: the same moment as before).
-    f.moment_body_nm = cross(Vec3{f.aero.normal_force_station_m - f.mass.cg_station_m, -f.mass.cg_offset_m.y,
-                                  -f.mass.cg_offset_m.z},
-                             f.aero.force_body_n) +
+    // About the CG, which sits off the axis by cg_offset_m on a capsule or with settled liquid (roll: roll_offset_m).
+    f.moment_body_nm = moment_about_cg(f.mass, {f.aero.normal_force_station_m, 0.0, 0.0}, f.aero.force_body_n) +
                        f.aero.moment_body_nm;
 
     for (const auto& stage : ctx.vehicle.stages()) {
@@ -143,7 +149,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
             const Vec3 force = aero::parachute_force_body_n(chute.drag_area_m2, point_velocity, air.density_kg_m3);
             f.nongravitational_body_n += force;
             f.aero_body_n += force;
-            f.moment_body_nm += cross(arm, force);
+            f.moment_body_nm += moment_about_cg(f.mass, {chute.attach_station_m, 0.0, 0.0}, force);
         }
     }
     f.moment_body_nm += ctx.rcs_torque_nm;
