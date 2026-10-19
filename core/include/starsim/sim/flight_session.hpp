@@ -32,6 +32,7 @@
 #include "starsim/gnc/lunar_landing_guidance.hpp"
 #include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/gnc/parachute_sequencer.hpp"
+#include "starsim/gnc/proximity_guidance.hpp"
 #include "starsim/gnc/relative_navigation.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/gnc/sun_hold.hpp"
@@ -64,8 +65,11 @@ enum class ControlMode {
 // Return: a ship after its deorbit burn (coast to the entry interface, entry, flip, catch).
 // PayloadSeparation: after the upper stage's cutoff, waiting to release a payload vehicle (d2).
 // Lunar: a lunar flight between its burns (FlightSession::plan_lunar_outbound / plan_lunar_orbit_transfer).
-// Rendezvous: a phasing flight to a station between its burns (FlightSession::plan_rendezvous).
-enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar, Rendezvous };
+// Rendezvous: a phasing flight to a station between its burns (FlightSession::plan_rendezvous). Proximity: the
+// proximity operations from Waypoint 0 to contact (FlightSession::start_proximity).
+enum class AutopilotState {
+    Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar, Rendezvous, Proximity
+};
 
 const char* to_string(AutopilotState state);
 
@@ -326,6 +330,7 @@ public:
         lunar_return_.reset();
         return_entry_parameters_.reset();
         reset_rendezvous();
+        reset_proximity();
     }
     // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
     // at the next staging; the booster is then guided independently of the controlled body.
@@ -601,6 +606,30 @@ public:
     static constexpr double rendezvous_replan_tolerance_m = 2000.0;  // [E] along-track miss of the boost geometry
     static constexpr double rendezvous_track_min_arc_s = 3.0 * 3600.0;  // [E] shorter arcs do not tell the drag
     static constexpr double dragon_free_molecular_cd = 2.2;  // [E] blunt body in free molecular flow
+
+    // Proximity operations (ISS i4, flight_session_proximity.cpp): from Waypoint 0 (or any point outside the keep-out
+    // sphere within ProximityParameters::max_start_range_m) the controlled body flies the waypoint pattern to the
+    // station port `station_port` on its RCS translation (gnc::ProximityGuidance), in the docking attitude, to contact.
+    // Opens the nose cone; sets the rendezvous target (chaser port: the controlled vehicle's first docking port). False
+    // with a German proximity_status() when refused: no station, the station controlled, the autopilot busy (not Off /
+    // Orbit), a rendezvous other than at Waypoint 0 or a lunar flight under way, no docking port on the vehicle, an
+    // unknown or unsuitable station port, too far, or inside the sphere without start_waypoint on the axis. Ends with
+    // the rendezvous target (clear_rendezvous_target and every path that clears it) and disengage_autopilot; at
+    // contact the autopilot turns off and the flight stays readable.
+    bool start_proximity(const std::string& station_port, gnc::ProximityParameters parameters = {});
+    bool proximity_active() const { return proximity_.has_value(); }
+    std::optional<gnc::ProximityPhase> proximity_phase() const;
+    const std::string& proximity_status() const { return proximity_status_; }
+    const std::vector<gnc::ProximityEvent>* proximity_events() const;  // nullptr without a flight
+    std::optional<gnc::ProximityContact> proximity_contact() const;
+    // German: station impulses (reboosts) within proximity_warning_span_s of the start.
+    const std::vector<std::string>& proximity_warnings() const { return proximity_warnings_; }
+    static constexpr double proximity_warning_span_s = 3.0 * 3600.0;  // [E] the span of a proximity flight
+    // Commands to the guidance: false (German status) without a flight or when the guidance refuses.
+    bool proximity_hold();
+    bool proximity_retreat();
+    bool proximity_abort();
+    bool proximity_resume();
 
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
@@ -905,6 +934,17 @@ private:
     int rendezvous_replans_ = 0;
     bool rendezvous_debug_ = false;  // STARSIM_DEBUG_RENDEZVOUS, read once at construction
     std::string rendezvous_debug_last_;
+    // Proximity operations (flight_session_proximity.cpp).
+    std::optional<gnc::ProximityGuidance> proximity_;
+    std::string proximity_station_port_, proximity_chaser_port_;
+    gnc::AxisAcceleration proximity_authority_;  // pure authority along the target port axes in the docking attitude
+    std::string proximity_status_;
+    std::vector<std::string> proximity_warnings_;
+    void run_proximity(Flying& flying);
+    void reset_proximity();  // from clear_rendezvous_target, reset_mission_state and disengage_autopilot
+    gnc::ProximityInput proximity_input() const;
+    math::Quat proximity_docking_attitude() const;
+    gnc::AttitudeMode proximity_attitude_mode() const;  // the docking attitude as an LVLH hold of the controlled body
     struct RendezvousDebugCommand {  // diagnostics: the state at a burn's command (execution error after it)
         math::StateVector state;
         time::Epoch epoch;

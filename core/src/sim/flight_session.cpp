@@ -73,6 +73,7 @@ const char* to_string(AutopilotState state) {
         case AutopilotState::Return: return "Rückkehr";
         case AutopilotState::Lunar: return "Mondflug";
         case AutopilotState::Rendezvous: return "Rendezvous";
+        case AutopilotState::Proximity: return "Anflug";
     }
     return "";
 }
@@ -186,7 +187,8 @@ void FlightSession::apply_angular_rate(size_t body_index, const math::Vec3& rate
 bool FlightSession::attitude_mode_active() const {
     return attitude_mode_.kind != gnc::AttitudeModeKind::Free &&
            (autopilot_.state == AutopilotState::Off || autopilot_.state == AutopilotState::Orbit ||
-            autopilot_.state == AutopilotState::PayloadSeparation || autopilot_.state == AutopilotState::Lunar);
+            autopilot_.state == AutopilotState::PayloadSeparation || autopilot_.state == AutopilotState::Lunar ||
+            autopilot_.state == AutopilotState::Proximity);
 }
 
 bool FlightSession::burn_drifting() const {
@@ -340,6 +342,9 @@ void FlightSession::run_autopilot() {
         case AutopilotState::Rendezvous:
             run_rendezvous(flying);
             break;
+        case AutopilotState::Proximity:
+            run_proximity(flying);
+            break;
         default:
             break;
     }
@@ -464,6 +469,7 @@ void FlightSession::set_rendezvous_target(size_t target_index, const std::string
 }
 
 void FlightSession::clear_rendezvous_target() {
+    reset_proximity();  // the proximity flight needs the target
     rendezvous_.reset();
     translation_port_ = {};
 }
@@ -504,6 +510,7 @@ void FlightSession::reset_mission_state() {
     nose_cone_epoch_.reset();
     capsule_return_step_ = CapsuleReturnStep::None;  // review d3: a return does not carry into a new flight
     reset_lunar();
+    reset_proximity();
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -576,6 +583,8 @@ double FlightSession::coast_allowance_s() const {
         if (bodies_[controlled_].body->impacted()) return 0.0;  // a wreck: one tick ends the rendezvous (as Lunar)
         allowance = std::min(allowance, rendezvous_step_epoch_ - epoch_);  // the next burn's command or the boost check
     }
+    // a wreck: one tick ends the proximity flight (the passive drift after a breakout coasts)
+    if (autopilot_.state == AutopilotState::Proximity && bodies_[controlled_].body->impacted()) return 0.0;
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
     if (!station_impulses_.empty()) allowance = std::min(allowance, station_impulses_.front().epoch - epoch_);
     if (autopilot_.state == AutopilotState::Burn) {

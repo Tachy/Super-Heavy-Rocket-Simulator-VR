@@ -17,39 +17,19 @@
 #include "starsim/sim/station_start.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "starsim/vehicle/docking_port.hpp"
+#include "proximity_test_support.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
 using math::Vec3;
 
 namespace {
-const std::filesystem::path config_dir = STARSIM_CONFIG_DIR;
-const std::filesystem::path fixture_dir = std::filesystem::path(STARSIM_FIXTURE_DIR) / "iss_oem";
+using proximity_test::config_dir;
 constexpr double deg = constants::deg_to_rad;
 
 // A Dragon (cone open, LVLH hold) `range_m` in front of the ISS port IDA-2, co-moving with it; the ISS as body 1.
-struct DragonAtIss {
-    const spice::SpiceEphemeris ephemeris;
-    const spice::SpiceOrientation earth = spice::SpiceOrientation::earth();
-    const spice::SpiceTimeConverter clock;  // not "time": that would hide the namespace for time::Epoch below
-    sim::FlightSession session{ephemeris, earth, config_dir};
-    time::Epoch t0;
-    explicit DragonAtIss(double range_m) {
-        const auto archive = orbit::OemArchive::scan(fixture_dir, clock);
-        t0 = clock.from_utc({2026, 10, 16, 0, 0, 0.0});
-        const auto iss = sim::iss_start(config::load_vehicle(config_dir, "iss"), archive, clock, earth, t0,
-                                        sim::IssOrbitSource::Oem);
-        sim::FlightSession probe(ephemeris, earth, config_dir);  // reads the port of the ideal-attitude station
-        probe.add_station(iss.vehicle, iss.state_gcrf, iss.epoch);
-        const auto port = vehicle::port_kinematics(probe.body(0), "ida2");
-        const Vec3 position = port.position_gcrf_m + port.axes_gcrf * Vec3{range_m, 0.0, 0.0};
-        const Vec3 velocity =
-            port.velocity_gcrf_mps + cross(port.angular_velocity_gcrf_radps, position - port.position_gcrf_m);
-        session.place_in_orbit(config::load_vehicle(config_dir, "crew_dragon"), {position, velocity}, t0);
-        session.set_nose_cone(0, true);
-        session.add_station(iss.vehicle, iss.state_gcrf, iss.epoch, iss.impulses);
-        session.set_attitude_mode(gnc::lvlh_hold());
-    }
+struct DragonAtIss : proximity_test::DragonNearIss {
+    explicit DragonAtIss(double range_m) : DragonNearIss(proximity_test::in_front_of_ida2(range_m)) {}
 };
 
 // The full rotation from the LVLH hold attitude (body axes = LVLH axes), roll about the nose included.

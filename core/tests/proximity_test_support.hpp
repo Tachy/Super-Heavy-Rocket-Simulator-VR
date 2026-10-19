@@ -2,10 +2,22 @@
 // ISS i4 tests: a CW point-mass chaser with an ideal port-aligned attitude around a station in ideal LVLH attitude.
 // The chaser CG is `chaser_lever` behind its port; the target port sits at `port_lever` from the station CG with the
 // axes `port_to_lvlh`. Translation fractions act with the Dragon's i2 pure authority.
+//
+// DragonNearIss: a session with the ISS from the OEM fixture (body 1) and a Crew Dragon (body 0, LVLH hold) placed by a
+// function of the station's ports and state (i2 rendezvous and i4 proximity session tests).
 #include <algorithm>
+#include <filesystem>
+#include <functional>
 
+#include "starsim/config/vehicle_config.hpp"
+#include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/gnc/proximity_guidance.hpp"
 #include "starsim/orbit/clohessy_wiltshire.hpp"
+#include "starsim/orbit/oem.hpp"
+#include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/station_start.hpp"
+#include "starsim/spice/spice_adapters.hpp"
+#include "starsim/vehicle/docking_port.hpp"
 
 namespace starsim::proximity_test {
 
@@ -75,5 +87,52 @@ inline double run(gnc::ProximityGuidance& g, CwSim& s, double limit_s, double dt
     }
     return t;
 }
+
+inline const std::filesystem::path config_dir = STARSIM_CONFIG_DIR;
+inline const std::filesystem::path fixture_dir = std::filesystem::path(STARSIM_FIXTURE_DIR) / "iss_oem";
+
+// (IDA-2, IDA-3, ISS CG state) -> the Dragon CG state, all GCRF.
+using Placement =
+    std::function<math::StateVector(const vehicle::PortKinematics&, const vehicle::PortKinematics&, const math::StateVector&)>;
+
+// The Dragon CG at LVLH `position_m` from the ISS CG with the LVLH relative velocity `velocity_mps`.
+inline Placement lvlh_from_cg(const math::Vec3& position_m, const math::Vec3& velocity_mps = {}) {
+    return [=](const vehicle::PortKinematics&, const vehicle::PortKinematics&, const math::StateVector& iss) {
+        return orbit::chaser_from_lvlh(iss, {position_m, velocity_mps});
+    };
+}
+// The Dragon CG `range_m` out along the IDA-2 axis, co-moving with the port (no omega x r drift in the port frame).
+inline Placement in_front_of_ida2(double range_m) {
+    return [=](const vehicle::PortKinematics& port, const vehicle::PortKinematics&, const math::StateVector&) {
+        const math::Vec3 position = port.position_gcrf_m + port.axes_gcrf * math::Vec3{range_m, 0.0, 0.0};
+        const math::Vec3 velocity =
+            port.velocity_gcrf_mps + cross(port.angular_velocity_gcrf_radps, position - port.position_gcrf_m);
+        return math::StateVector{position, velocity};
+    };
+}
+
+struct DragonNearIss {
+    const spice::SpiceEphemeris ephemeris;
+    const spice::SpiceOrientation earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter clock;  // not "time": that would hide the namespace for time::Epoch below
+    sim::FlightSession session{ephemeris, earth, config_dir};
+    time::Epoch t0;
+    explicit DragonNearIss(const Placement& place, bool with_station = true, bool cone_open = true) {
+        const auto archive = orbit::OemArchive::scan(fixture_dir, clock);
+        t0 = clock.from_utc({2026, 10, 16, 0, 0, 0.0});
+        const auto iss = sim::iss_start(config::load_vehicle(config_dir, "iss"), archive, clock, earth, t0,
+                                        sim::IssOrbitSource::Oem);
+        sim::FlightSession probe(ephemeris, earth, config_dir);  // reads the ports of the ideal-attitude station
+        probe.add_station(iss.vehicle, iss.state_gcrf, iss.epoch);
+        const auto& station = probe.body(0).state();
+        const auto dragon = place(vehicle::port_kinematics(probe.body(0), "ida2"),
+                                  vehicle::port_kinematics(probe.body(0), "ida3"),
+                                  {station.position_gcrf_m, station.velocity_gcrf_mps});
+        session.place_in_orbit(config::load_vehicle(config_dir, "crew_dragon"), dragon, t0);
+        session.set_nose_cone(0, cone_open);
+        if (with_station) session.add_station(iss.vehicle, iss.state_gcrf, iss.epoch, iss.impulses);
+        session.set_attitude_mode(gnc::lvlh_hold());
+    }
+};
 
 }  // namespace starsim::proximity_test
