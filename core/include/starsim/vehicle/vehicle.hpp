@@ -278,6 +278,14 @@ public:
     // A payload vehicle (config::stack_payload) still on its launcher: a launcher stage below payload stages. A released
     // payload keeps its stages' payload flag, so this - not the flag - tells whether it flies alone.
     bool payload_stacked() const;
+    // A rigidly attached point mass (ISS i5: a docked visitor on a station), vehicle frame; it enters the mass, the CG
+    // (so the body's CG state must be moved with it - FlightSession does) and the inertia (parallel axis about y/z).
+    struct AttachedMass {
+        double mass_kg = 0.0;
+        math::Vec3 position_m;
+    };
+    void set_attached_mass(std::optional<AttachedMass> mass) { attached_mass_ = mass; }
+    const std::optional<AttachedMass>& attached_mass() const { return attached_mass_; }
     bool nose_cone_open() const { return nose_cone_open_; }
     void set_nose_cone_open(bool open);
     const aero::SlenderBodyAero& aero() const { return *aero_; }
@@ -315,6 +323,7 @@ private:
     double hull_aero_scale_ = 1.0;
     double thrust_factor_ = 1.0;
     bool nose_cone_open_ = false;
+    std::optional<AttachedMass> attached_mass_;
     mutable std::optional<propulsion::RcsAllocator> rcs_allocator_;
     propulsion::RcsModulator rcs_modulator_;
     std::vector<double> rcs_duty_;

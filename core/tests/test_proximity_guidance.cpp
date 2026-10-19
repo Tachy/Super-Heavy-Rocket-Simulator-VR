@@ -254,3 +254,40 @@ TEST_CASE("Refused commands give a German reason and leave the phase", "[iss][pr
     CHECK(g.phase() == ProximityPhase::Abort);
     CHECK(status.find("Wegpunkt 0") != std::string::npos);
 }
+
+TEST_CASE("A failed capture retreats to Waypoint 2 and waits for resume", "[iss][proximity][docking]") {
+    gnc::ProximityParameters p;
+    p.start_waypoint = 2;
+    p.contact_plane_m = 0.7;  // the petal mesh plane of the docking interface (i5)
+    auto s = CwSim::ida2();
+    s.cg = {{35.0 + 4.0 + 20.0, 0.0, 0.0}, {}};
+    gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
+    proximity_test::run(g, s, 1800.0);
+    REQUIRE(g.phase() == ProximityPhase::Contact);
+    s.cg.velocity_mps = s.port_to_lvlh * Vec3{0.03, 0.0, 0.0};  // the ring bounced it back out
+    g.capture_failed(s.input(), "abgeprallt");
+    CHECK(g.phase() == ProximityPhase::Retreat);
+    CHECK(g.status() == "Rückzug: Fangen fehlgeschlagen (abgeprallt)");
+    proximity_test::run(g, s, 900.0);
+    CHECK(g.phase() == ProximityPhase::Waypoint);
+    CHECK(g.path()[g.waypoint()].name == "Wegpunkt 2");
+    REQUIRE(g.resume());
+    proximity_test::run(g, s, 1800.0);
+    CHECK(g.phase() == ProximityPhase::Contact);
+    REQUIRE(g.contact());
+    CHECK(g.contact()->envelope.inside);
+}
+
+TEST_CASE("A collision ends the guidance passively", "[iss][proximity][docking]") {
+    gnc::ProximityParameters p;
+    p.start_waypoint = 2;
+    auto s = CwSim::ida2();
+    s.cg = {{35.0 + 4.0 + 20.0, 0.0, 0.0}, {}};
+    gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
+    g.update(s.input());
+    g.collided(s.epoch);
+    CHECK(g.phase() == ProximityPhase::Contact);
+    CHECK(g.status() == "Kollision");
+    CHECK(norm(g.update(s.input()).translation_fraction_port) == 0.0);
+    CHECK_FALSE(g.resume());
+}

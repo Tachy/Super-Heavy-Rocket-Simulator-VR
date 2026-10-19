@@ -27,6 +27,7 @@ InterfaceContact docking_interface_contact(const DockingPose& pose, double ring_
     const double offset = norm(lateral);
     const double overlap = 2.0 * p.petal_height_m;
     if (gap >= overlap) return c;  // petals not yet meshing
+    if (gap < -p.interface_depth_m || offset > p.interface_radius_m) return c;  // not in the interface: no contact
 
     const math::Vec3 x{1.0, 0.0, 0.0};
     const math::Vec3 v_lateral{0.0, ring_velocity.y, ring_velocity.z};

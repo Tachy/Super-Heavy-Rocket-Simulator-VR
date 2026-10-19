@@ -121,6 +121,23 @@ void ProximityGuidance::start_retreat(const ProximityInput& in, size_t index) {
     }
 }
 
+void ProximityGuidance::capture_failed(const ProximityInput& in, const std::string& reason) {
+    if (phase_ != ProximityPhase::Contact || collided_) return;
+    size_t index = path_.size() - 1;  // the last on-axis waypoint: Waypoint 2
+    while (index > 0 && !path_[index].on_axis) --index;
+    request_ = Request::None;
+    loop_.reset();
+    start_retreat(in, index);
+    status_ = "Rückzug: Fangen fehlgeschlagen (" + reason + ")";
+    events_.back().status = status_;
+}
+
+void ProximityGuidance::collided(time::Epoch epoch) {
+    collided_ = true;
+    request_ = Request::None;
+    enter(ProximityPhase::Contact, "Kollision", epoch);
+}
+
 void ProximityGuidance::begin_abort(std::string status, time::Epoch epoch) {
     breakout_planned_ = breakout_done_ = breakout_safe_ = false;
     auto_hold_ = false;

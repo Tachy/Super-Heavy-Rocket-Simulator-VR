@@ -64,6 +64,13 @@ public:
                      // to Waypoint 0 when the CG range <= resume_max_range_m, outside the keep-out sphere and above
                      // the deorbit reserve); refused otherwise
 
+    // Docking outcomes reported by the session (ISS i5). capture_failed: from Contact back along the axis to the last
+    // on-axis waypoint (Waypoint 2), where the guidance waits for resume() ("Rückzug: Fangen fehlgeschlagen (<reason>)").
+    // collided: the flight ends passively in Contact with the status "Kollision" (no command accepted).
+    void capture_failed(const ProximityInput& in, const std::string& reason);
+    void collided(time::Epoch epoch);
+    bool collision() const { return collided_; }
+
     ProximityPhase phase() const { return phase_; }
     size_t waypoint() const { return target_; }  // index into path() of the waypoint flown to / held at
     const std::vector<ProximityWaypoint>& path() const { return path_; }
@@ -113,6 +120,7 @@ private:
     std::optional<time::Epoch> waypoint_since_;
     math::Vec3 last_transfer_velocity_lvlh_;
     bool retreat_axial_ = false;
+    bool collided_ = false;
     math::Vec3 hold_point_;
     bool hold_in_port_frame_ = false;
     bool breakout_planned_ = false, breakout_done_ = false, breakout_safe_ = false;

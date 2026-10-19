@@ -86,6 +86,8 @@ add_library(starsim_core STATIC
     src/sim/flight_session_lunar_ascent.cpp
     src/sim/flight_session_lunar_descent.cpp
     src/sim/flight_session_proximity.cpp
+    src/sim/flight_session_docking.cpp
+    src/sim/docking_sim.cpp
     src/sim/flight_session_rendezvous.cpp
     src/sim/ascent_mission.cpp
     src/sim/capsule_return_mission.cpp

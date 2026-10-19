@@ -6,6 +6,8 @@
 #include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/contact/landing_surface.hpp"
 #include "starsim/sim/catch_tower_sim.hpp"
+#include "starsim/sim/docking_sim.hpp"
+#include "starsim/vehicle/compound_mass.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
 #include "starsim/sim/lunar_site.hpp"
 #include "starsim/sim/station_start.hpp"
@@ -631,6 +633,27 @@ public:
     bool proximity_abort();
     bool proximity_resume();
 
+    // Docking (ISS i5, flight_session_docking.cpp): set_rendezvous_target arms the IDSS docking mechanism when the chaser
+    // port is active and the station port passive (sim::DockingSim: contact, soft capture, retraction, hooks). At hard
+    // capture the pair merges: the station carries the summed mass and the momentum-weighted velocity, the chaser is
+    // held on it (FlightBody::hold_docked) at the mated pose. A failed capture sends the proximity flight back to
+    // Waypoint 2; hull contact with the station is "Kollision" (the flight ends). While docked or capturing the
+    // controlled body takes no flight commands (German refusals).
+    std::optional<contact::DockingPhase> docking_phase() const;
+    const std::string& docking_status() const { return docking_status_; }
+    const std::vector<contact::DockingEvent>* docking_events() const;  // nullptr without a mechanism
+    std::optional<contact::LoadPeaks> docking_loads() const;
+    bool docked() const;
+    bool docking_busy() const;  // capturing (contact .. hooks) or docked
+    std::optional<vehicle::CompoundMass> compound_mass() const { return compound_mass_; }
+    std::optional<double> collision_impulse_ns() const;  // hull contact with the station (N s), from the first one
+    math::Vec3 docking_wrench_balance_n() const;          // sum of the docking forces of the last tick (GCRF): zero
+    struct MomentumRecord {
+        math::Vec3 momentum_before, momentum_after;  // of the pair, GCRF (kg m/s)
+        double relative_speed_mps = 0.0;             // separation: spring speed of the pair
+    };
+    const MomentumRecord& docking_merge_record() const { return docking_merge_; }
+
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
     void cutoff();             // stop all engines
@@ -949,6 +972,30 @@ private:
     gnc::ProximityInput proximity_input() const;
     math::Quat proximity_docking_attitude() const;
     gnc::AttitudeMode proximity_attitude_mode() const;  // the docking attitude as an LVLH hold of the controlled body
+    // Docking (flight_session_docking.cpp).
+    std::optional<DockingSim> docking_;
+    std::string docking_status_;
+    std::optional<vehicle::CompoundMass> compound_mass_;
+    MomentumRecord docking_merge_;
+    math::Vec3 docked_position_station_m_;  // chaser CG in the station body frame while docked
+    math::Quat docked_attitude_station_;    // chaser body -> station body
+    double docked_mass_kg_ = 0.0;           // attached to the station vehicle (Vehicle::set_attached_mass)
+    std::optional<contact::DockingPhase> docking_seen_phase_;
+    bool docking_collision_reported_ = false;
+    bool docking_debug_ = false;  // STARSIM_DEBUG_DOCKING, read once at construction
+    time::Epoch docking_debug_next_;
+    size_t docking_debug_events_ = 0;
+    void arm_docking();  // set_rendezvous_target: a compatible pair at the station
+    void reset_docking();  // clear_rendezvous_target: releases a docked hold and the station's extra mass
+    bool docking_ticked() const;  // the mechanism or the hull contact needs every tick
+    double docking_coast_limit_s() const;  // no coast into the station (DockingSim::coast_limit_s)
+    bool docking_free_drift() const;  // contact .. hooks closing: the controlled body fires no thrusters
+    void docking_before_tick();
+    void docking_after_tick();
+    void merge_docked();
+    void sync_docked();  // the docked chaser follows the station (every tick and after every coast)
+    void detach_compound();  // removes the attached chaser mass, the station state back on its own CG
+    void docking_diagnostics();
     struct RendezvousDebugCommand {  // diagnostics: the state at a burn's command (execution error after it)
         math::StateVector state;
         time::Epoch epoch;

@@ -22,6 +22,9 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     if (flying.parachutes && flying.parachutes->phase() != gnc::ParachutePhase::Armed) {
         return command;  // no steering under the parachutes (user 2026-10-14): the Dracos stay off
     }
+    if (index == controlled_ && docking_free_drift()) {
+        return command;  // ISS i5: free drift from the first contact to the hooks (the mechanism aligns the vehicle)
+    }
     if (flying.ship_landing) {
         if (!flying.body->impacted()) apply_return_command(flying, ship_landing_controller_, ambient_pressure_pa, command);
         return command;

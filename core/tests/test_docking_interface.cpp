@@ -119,3 +119,12 @@ TEST_CASE("Docking interface: the IDSS outline and the dynamic load limit are th
     CHECK(peak < 6500.0);
     CHECK(v > 0.0);  // rebounds without a latch (restitution ~0.46)
 }
+
+TEST_CASE("Docking interface: no contact outside the interface - behind the port or far to the side", "[iss][docking]") {
+    const contact::DockingInterfaceParameters p;
+    const double e = p.ring_extension_m;
+    CHECK_FALSE(contact::docking_interface_contact(pose({-118.0, 3.5, 13.6}), e, p).any_contact);  // behind the port
+    CHECK_FALSE(contact::docking_interface_contact(pose({e - p.interface_depth_m - 0.01, 0, 0}), e, p).any_contact);
+    CHECK_FALSE(contact::docking_interface_contact(pose({e + 0.1, p.interface_radius_m + 0.01, 0}), e, p).any_contact);
+    CHECK(contact::docking_interface_contact(pose({e - 0.5 * p.interface_depth_m, 0, 0}), e, p).ring_contact);
+}

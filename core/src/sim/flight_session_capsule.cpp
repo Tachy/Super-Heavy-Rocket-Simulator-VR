@@ -52,6 +52,10 @@ gnc::DeorbitParameters FlightSession::capsule_deorbit_parameters() {
 bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
     // A return in progress keeps its plan (review d3: a second call reset it mid-way).
     if (capsule_return_step_ != CapsuleReturnStep::None || autopilot_.state == AutopilotState::Return) return false;
+    if (docking_busy()) {  // undock first (ISS i5)
+        docking_status_ = "Rückkehr nicht möglich: angedockt";
+        return false;
+    }
     ship_return_ = false;
     capsule_return_step_ = CapsuleReturnStep::None;
     deorbit_plan_.reset();

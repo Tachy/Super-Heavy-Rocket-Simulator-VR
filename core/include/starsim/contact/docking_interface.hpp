@@ -26,6 +26,9 @@ struct DockingInterfaceParameters {
     double petal_lean_rad = 30.0 * constants::deg_to_rad;  // [E] inward lean of the petal outline from the axis
     double petal_clearance_m = 0.01;        // [E] lateral play of the meshed petals at full ring contact
     double ring_extension_m = 0.30;         // [E] active ring face above the chaser HCS plane (passive ring at 0)
+    // The interface acts only within this region of the ring centres (beyond: the hull contact owns it) [E]:
+    double interface_radius_m = 1.2;        // lateral: the petals can strike within twice the outline radius
+    double interface_depth_m = 0.15;        // ring-face penetration (a 0.25 m/s contact reaches ~0.06 m)
     double ring_inner_radius_m = 0.40;      // [E] ring face (striker band) inner radius
     double ring_outer_radius_m = 0.60;      // [S: = the outline radius]
     // [E] ring-face stiffness and damping: a 0.10 m/s contact on the Dragon-ISS pair (reduced mass ~12 t) peaks at

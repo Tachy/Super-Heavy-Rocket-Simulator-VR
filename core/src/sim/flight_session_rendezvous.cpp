@@ -87,6 +87,7 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
         return false;
     };
     if (bodies_.empty() || !station_index_) return refuse("Kein Rendezvous: keine Station");
+    if (docking_busy()) return refuse("Rendezvous nicht möglich: angedockt");
     if (controlled_ == *station_index_) return refuse("Kein Rendezvous: die Station selbst wird gesteuert");
     if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit) {
         return refuse("Kein Rendezvous: Autopilot aktiv");

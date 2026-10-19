@@ -269,6 +269,10 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
                              rt * m.lateral * lateral_y, rt * m.lateral * lateral_z, true});
         }
     }
+    if (attached_mass_) {
+        parts.push_back({attached_mass_->mass_kg, attached_mass_->position_m.x, 0.0, 0.0, attached_mass_->position_m.y,
+                         attached_mass_->position_m.z});
+    }
     MassProperties mp;
     for (const auto& p : parts) {
         mp.mass_kg += p.mass;

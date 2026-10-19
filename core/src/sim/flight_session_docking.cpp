@@ -1,0 +1,263 @@
+// Docking of the controlled vehicle at the station (ISS i5): the IDSS mechanism (sim::DockingSim) on the session tick,
+// the merge into the compound at hard capture, the docked hold, and the failure paths (failed capture, collision).
+//
+// Design decisions:
+// - The mechanism is armed with the rendezvous target (set_rendezvous_target) when the chaser port is active and the
+//   station port passive; it runs every tick from the first contact (and whenever the chaser is near enough for a hull
+//   contact), before the bodies step - its wrench acts in the step that follows.
+// - The compound (spec correction 4): the station body carries the summed mass (its stage's extra mass) and the
+//   momentum-weighted velocity; the chaser is held on it at the mated pose (the snap is below the guide-pin tolerance)
+//   and follows the station after every tick and coast. The compound CG offset from the station CG (~1 m for a Dragon)
+//   and the Dragon's drag area are not modelled.
+// - A failed capture hands the proximity flight a retreat to Waypoint 2 (it waits there for resume); the mechanism
+//   re-arms once the chaser is back beyond the petal tips. A hull contact ends the flight: "Kollision".
+
+#include "starsim/sim/flight_session.hpp"
+
+#include <cstdio>
+#include <limits>
+
+#include "starsim/math/constants.hpp"
+#include "starsim/vehicle/docking_port.hpp"
+
+namespace starsim::sim {
+
+namespace {
+
+const config::DockingPortConfig* find_port(const vehicle::Vehicle& v, const std::string& id) {
+    for (const auto& stage : v.stages()) {
+        for (const auto& port : stage.config.docking_ports) {
+            if (port.id == id) return &port;
+        }
+    }
+    return nullptr;
+}
+
+config::VehicleConfig stages_of(const vehicle::Vehicle& v) {  // the stage geometry the docking sim needs
+    config::VehicleConfig c;
+    for (const auto& stage : v.stages()) c.stages.push_back(stage.config);
+    return c;
+}
+
+bool capturing(contact::DockingPhase p) {
+    using P = contact::DockingPhase;
+    return p == P::Contact || p == P::SoftCapture || p == P::Retraction || p == P::HooksClosing ||
+           p == P::HooksOpening;
+}
+
+math::Mat3 diagonal(const math::Vec3& d) { return math::Mat3::from_columns({d.x, 0, 0}, {0, d.y, 0}, {0, 0, d.z}); }
+
+}  // namespace
+
+void FlightSession::arm_docking() {
+    if (!rendezvous_ || !station_index_ || rendezvous_->target_index != *station_index_) return;
+    const auto& chaser = bodies_[controlled_].body->vehicle();
+    const auto& station = bodies_[*station_index_].body->vehicle();
+    const auto* cp = find_port(chaser, rendezvous_->chaser_port);
+    const auto* sp = find_port(station, rendezvous_->target_port);
+    if (!cp || !sp || cp->soft_capture != config::SoftCaptureMode::Active ||
+        sp->soft_capture != config::SoftCaptureMode::Passive) {
+        return;
+    }
+    docking_.emplace(rendezvous_->chaser_port, rendezvous_->target_port, stages_of(chaser), stages_of(station));
+    docking_status_ = docking_->mechanism().status();
+}
+
+void FlightSession::reset_docking() {
+    if (docking_ && station_index_ && controlled_ < bodies_.size() && *station_index_ < bodies_.size() &&
+        bodies_[controlled_].body->docked()) {
+        bodies_[controlled_].body->release_docked();  // released in place, no separation push
+        detach_compound();
+    }
+    docking_.reset();
+    compound_mass_.reset();
+    docked_mass_kg_ = 0.0;
+    docking_seen_phase_.reset();
+    docking_collision_reported_ = false;
+    docking_debug_events_ = 0;
+}
+
+std::optional<contact::DockingPhase> FlightSession::docking_phase() const {
+    if (!docking_) return std::nullopt;
+    return docking_->mechanism().phase();
+}
+
+const std::vector<contact::DockingEvent>* FlightSession::docking_events() const {
+    return docking_ ? &docking_->mechanism().events() : nullptr;
+}
+
+std::optional<contact::LoadPeaks> FlightSession::docking_loads() const {
+    if (!docking_) return std::nullopt;
+    return docking_->mechanism().peaks();
+}
+
+bool FlightSession::docked() const {
+    return docking_ && controlled_ < bodies_.size() && bodies_[controlled_].body->docked();
+}
+
+bool FlightSession::docking_busy() const {
+    if (!docking_) return false;
+    const auto p = docking_->mechanism().phase();
+    return docked() || capturing(p) || p == contact::DockingPhase::Docked;
+}
+
+std::optional<double> FlightSession::collision_impulse_ns() const {
+    if (!docking_) return std::nullopt;
+    return docking_->collision_impulse_ns();
+}
+
+math::Vec3 FlightSession::docking_wrench_balance_n() const {
+    return docking_ ? docking_->wrench_balance_n() : math::Vec3{};
+}
+
+bool FlightSession::docking_free_drift() const {
+    if (!docking_) return false;
+    using P = contact::DockingPhase;
+    const auto p = docking_->mechanism().phase();
+    return p == P::Contact || p == P::SoftCapture || p == P::Retraction || p == P::HooksClosing;
+}
+
+bool FlightSession::docking_ticked() const {
+    if (!docking_ || !station_index_ || controlled_ >= bodies_.size() || *station_index_ >= bodies_.size()) return false;
+    return capturing(docking_->mechanism().phase()) || docking_->hull_contact();
+}
+
+double FlightSession::docking_coast_limit_s() const {
+    if (!docking_ || !station_index_ || controlled_ >= bodies_.size() || *station_index_ >= bodies_.size()) {
+        return std::numeric_limits<double>::infinity();
+    }
+    return docking_->coast_limit_s(*bodies_[controlled_].body, *bodies_[*station_index_].body);
+}
+
+void FlightSession::docking_before_tick() {
+    if (!station_index_ || controlled_ >= bodies_.size() || controlled_ == *station_index_) return;
+    docking_->before_tick(*bodies_[controlled_].body, *bodies_[*station_index_].body, epoch_, tick_s);
+}
+
+void FlightSession::docking_after_tick() {
+    if (!station_index_ || controlled_ >= bodies_.size()) return;
+    auto& m = docking_->mechanism();
+    const auto phase = m.phase();
+    if (!docking_collision_reported_ && docking_->hull_contact()) {
+        docking_collision_reported_ = true;
+        docking_status_ = "Kollision";
+        if (proximity_) {
+            proximity_->collided(epoch_);
+            proximity_status_ = "Kollision";
+        }
+        if (autopilot_.state == AutopilotState::Proximity) autopilot_.state = AutopilotState::Off;
+        attitude_mode_ = {};
+        translation_port_ = {};
+    }
+    if (phase != docking_seen_phase_) {
+        docking_seen_phase_ = phase;
+        if (!docking_collision_reported_) docking_status_ = m.status();
+        if (phase == contact::DockingPhase::Docked) merge_docked();
+        if (phase == contact::DockingPhase::Failed && proximity_ && !docking_collision_reported_) {
+            proximity_->capture_failed(proximity_input(), m.failure());
+            proximity_status_ = proximity_->status();
+            autopilot_.state = AutopilotState::Proximity;
+            attitude_mode_ = proximity_attitude_mode();
+        }
+    }
+    if (phase == contact::DockingPhase::Failed) {  // re-arm once the chaser is back beyond the petal tips
+        const auto& ip = m.parameters().interface;
+        const auto pose = docking_->pose(*bodies_[controlled_].body, *bodies_[*station_index_].body);
+        if (pose.position_m.x > ip.ring_extension_m + 2.0 * ip.petal_height_m + m.parameters().bounce_gap_m) m.rearm();
+    }
+    sync_docked();
+    if (docking_debug_) docking_diagnostics();
+}
+
+void FlightSession::merge_docked() {
+    auto& chaser = *bodies_[controlled_].body;
+    auto& station = *bodies_[*station_index_].body;
+    const double mc = chaser.vehicle().mass_properties().mass_kg;
+    const auto mps = station.vehicle().mass_properties();  // the station alone
+    const double ms = mps.mass_kg;
+    auto cs = chaser.state();
+    auto ss = station.state();
+    docking_merge_.momentum_before = mc * cs.velocity_gcrf_mps + ms * ss.velocity_gcrf_mps;
+    // the mated pose: chaser port on the station port, its axes (-x, -y, +z) of the station port's
+    const auto ck = vehicle::port_kinematics(chaser, docking_->chaser_port());
+    const auto sk = vehicle::port_kinematics(station, docking_->station_port());
+    const math::Mat3 rc = cs.attitude.to_matrix();
+    const math::Mat3 port_axes_body = transpose(rc) * ck.axes_gcrf;
+    const math::Vec3 lever_body = transpose(rc) * (ck.position_gcrf_m - cs.position_gcrf_m);
+    const math::Mat3 mated = sk.axes_gcrf * math::Mat3::from_columns({-1, 0, 0}, {0, -1, 0}, {0, 0, 1});
+    const math::Mat3 rc_mated = mated * transpose(port_axes_body);
+    const math::Vec3 cg_mated = sk.position_gcrf_m - rc_mated * lever_body;
+    const math::Mat3 rs = ss.attitude.to_matrix();
+    docked_attitude_station_ = ss.attitude.conjugate() * math::Quat::from_matrix(rc_mated);
+    // the compound: the chaser's mass attached at its CG (station vehicle frame), the body state moved to the compound
+    // CG, the momentum-weighted velocity
+    const math::Vec3 cg_old = station.vehicle().mass_properties().cg_point_m();
+    station.vehicle().set_attached_mass(
+        vehicle::Vehicle::AttachedMass{mc, cg_old + transpose(rs) * (cg_mated - ss.position_gcrf_m)});
+    const math::Vec3 cg_new = station.vehicle().mass_properties().cg_point_m();
+    ss.position_gcrf_m += rs * (cg_new - cg_old);
+    ss.velocity_gcrf_mps = docking_merge_.momentum_before / (mc + ms);
+    station.set_state(ss);
+    docked_position_station_m_ = transpose(rs) * (cg_mated - ss.position_gcrf_m);
+    docked_mass_kg_ = mc;
+    docking_merge_.momentum_after = (mc + ms) * ss.velocity_gcrf_mps;
+    const auto mpc = chaser.vehicle().mass_properties();
+    const math::Mat3 rel = docked_attitude_station_.to_matrix();
+    // about the compound CG (station body frame): the station CG sits at cg_old - cg_new from it
+    compound_mass_ = vehicle::combine_mass(ms, cg_old - cg_new, diagonal(mps.inertia_kg_m2) /* principal axes [E] */, mc,
+                                           docked_position_station_m_,
+                                           rel * diagonal(mpc.inertia_kg_m2) * transpose(rel));
+    chaser.hold_docked();
+    sync_docked();
+    // the flight ends docked
+    reset_proximity();
+    proximity_status_ = "angedockt";
+    if (autopilot_.state == AutopilotState::Proximity) autopilot_.state = AutopilotState::Off;
+    attitude_mode_ = {};
+    translation_port_ = {};
+}
+
+void FlightSession::detach_compound() {
+    auto& station = *bodies_[*station_index_].body;
+    auto s = station.state();
+    const math::Vec3 cg_with = station.vehicle().mass_properties().cg_point_m();
+    station.vehicle().set_attached_mass(std::nullopt);
+    const math::Vec3 cg_without = station.vehicle().mass_properties().cg_point_m();
+    s.position_gcrf_m += s.attitude.rotate(cg_without - cg_with);  // the station's own CG again
+    station.set_state(s);
+    compound_mass_.reset();
+    docked_mass_kg_ = 0.0;
+}
+
+void FlightSession::sync_docked() {
+    if (!docking_ || !station_index_ || controlled_ >= bodies_.size()) return;
+    auto& chaser = *bodies_[controlled_].body;
+    if (!chaser.docked()) return;
+    const auto& ss = bodies_[*station_index_].body->state();
+    const math::Vec3 r = ss.attitude.rotate(docked_position_station_m_);
+    const math::Vec3 omega = ss.attitude.rotate(ss.angular_velocity_body_radps);
+    vehicle::RigidBodyState s;
+    s.attitude = ss.attitude * docked_attitude_station_;
+    s.position_gcrf_m = ss.position_gcrf_m + r;
+    s.velocity_gcrf_mps = ss.velocity_gcrf_mps + cross(omega, r);
+    s.angular_velocity_body_radps = s.attitude.inverse_rotate(omega);
+    chaser.set_state(s);
+}
+
+// STARSIM_DEBUG_DOCKING: every mechanism event, and every second while it is ticked the pose, the force and the loads.
+void FlightSession::docking_diagnostics() {
+    const auto& m = docking_->mechanism();
+    const auto& events = m.events();
+    for (; docking_debug_events_ < events.size(); ++docking_debug_events_) {
+        std::printf("[docking] %8.1f s  %s\n", mission_time_s(), events[docking_debug_events_].status.c_str());
+    }
+    if (!docking_ticked() || epoch_ < docking_debug_next_) return;
+    docking_debug_next_ = epoch_ + 1.0;
+    const auto p = docking_->pose(*bodies_[controlled_].body, *bodies_[*station_index_].body);
+    const auto f = docking_->force_on_chaser_n();
+    std::printf("[docking] %8.1f s  %-16s port (%.3f %.3f %.3f) m v (%.4f %.4f %.4f) m/s  F %.0f N  peak comp %.0f N\n",
+                mission_time_s(), contact::to_string(m.phase()), p.position_m.x, p.position_m.y, p.position_m.z,
+                p.velocity_mps.x, p.velocity_mps.y, p.velocity_mps.z, norm(f), m.peaks().compression_n);
+}
+
+}  // namespace starsim::sim

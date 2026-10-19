@@ -46,6 +46,8 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
         return false;
     };
     if (bodies_.empty() || !station_index_) return refuse("Kein Anflug: keine Station");
+    if (docked()) return refuse("Anflug nicht möglich: angedockt");
+    if (docking_busy()) return refuse("Anflug nicht möglich: Andockvorgang läuft");
     if (controlled_ == *station_index_) return refuse("Kein Anflug: die Station selbst wird gesteuert");
     if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit) {
         return refuse("Kein Anflug: Autopilot aktiv");
@@ -114,6 +116,13 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
                                           " m/s während des Anflugs");
         }
     }
+    if (!docking_) {  // both ports need IDSS soft capture: active on the chaser, passive on the station
+        clear_rendezvous_target();
+        return refuse("Kein Anflug: Andocksystem nicht kompatibel");
+    }
+    // i4 records "Kontakt" where the petals start to mesh: the chaser port at ring extension + both petal heights
+    const auto& ip = docking_->mechanism().parameters().interface;
+    p.contact_plane_m = ip.ring_extension_m + 2.0 * ip.petal_height_m;
     rendezvous_step_ = RendezvousStep::None;  // the phasing (i3) is complete
     proximity_.emplace(approach, p);
     proximity_debug_events_ = 0;

@@ -60,6 +60,7 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
     lunar_debug_ = std::getenv("STARSIM_DEBUG_LUNAR_SESSION") != nullptr;
     rendezvous_debug_ = std::getenv("STARSIM_DEBUG_RENDEZVOUS") != nullptr;
     proximity_debug_ = std::getenv("STARSIM_DEBUG_PROXIMITY") != nullptr;
+    docking_debug_ = std::getenv("STARSIM_DEBUG_DOCKING") != nullptr;
 }
 
 const char* to_string(AutopilotState state) {
@@ -467,11 +468,14 @@ void FlightSession::set_rendezvous_target(size_t target_index, const std::string
     vehicle::port_kinematics(*bodies_[controlled_].body, chaser_port);  // validates both ports (German error)
     vehicle::port_kinematics(*bodies_[target_index].body, target_port);
     reset_proximity();  // a proximity flight is bound to its ports (start_proximity sets the target before the flight)
+    reset_docking();
     rendezvous_ = RendezvousTarget{target_index, chaser_port, target_port};
+    arm_docking();
 }
 
 void FlightSession::clear_rendezvous_target() {
     reset_proximity();  // the proximity flight needs the target
+    reset_docking();    // the docking mechanism too (a docked pair is released without separation)
     rendezvous_.reset();
     translation_port_ = {};
 }
@@ -585,6 +589,8 @@ double FlightSession::coast_allowance_s() const {
         if (bodies_[controlled_].body->impacted()) return 0.0;  // a wreck: one tick ends the rendezvous (as Lunar)
         allowance = std::min(allowance, rendezvous_step_epoch_ - epoch_);  // the next burn's command or the boost check
     }
+    if (docking_ticked()) return 0.0;  // contact, capture, hooks or a hull contact: ticked (ISS i5)
+    allowance = std::min(allowance, docking_coast_limit_s());  // no coast into the station
     // a wreck: one tick ends the proximity flight (the passive drift after a breakout coasts)
     if (autopilot_.state == AutopilotState::Proximity && bodies_[controlled_].body->impacted()) return 0.0;
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
@@ -608,7 +614,7 @@ double FlightSession::coast_allowance_s() const {
         if ((flying.entry_guidance || flying.ship_landing) && !body.impacted() && !body.resting() && !body.caught()) {
             return 0.0;  // steered every tick
         }
-        if (body.impacted() || body.resting() || body.caught()) continue;  // no longer moving on its own
+        if (body.impacted() || body.resting() || body.caught() || body.docked()) continue;  // not moving on its own
         if (!body.can_coast()) return 0.0;
         {
             const auto clearance = body.ground_clearance(env_, epoch_);  // over the body's reference body (lunar l1)
@@ -651,6 +657,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         if (const double coast = std::min(coast_allowance_s(), target - epoch_); coast > 1.0) {
             for (auto& flying : bodies_) flying.body->coast(env_, epoch_, coast);
             epoch_ += coast;
+            sync_docked();
             if (autopilot_.state == AutopilotState::Burn) {
                 autopilot_.burn.time_to_ignition_s -= coast;  // refreshed on the next tick
                 if (deorbit_replan_in_s() <= 1.0) {
@@ -705,6 +712,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         const auto pointers = body_pointers();
         if (tower_) tower_->before_tick(pointers, earth_, epoch_);
         legs_->before_tick(pointers, env_, epoch_);
+        if (docking_) docking_before_tick();
         for (size_t i = 0; i < bodies_.size(); ++i) {
             auto& body = *bodies_[i].body;
             const auto t = earth_.fixed_to_gcrf(epoch_);
@@ -724,6 +732,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         if (tower_) tower_->after_tick(pointers, earth_, epoch_ + tick_s, tick_s);
         legs_->after_tick(pointers, env_, epoch_ + tick_s, tick_s);
         epoch_ += tick_s;
+        if (docking_) docking_after_tick();
     }
     if (bodies_.empty()) {
         epoch_ = target;
@@ -733,6 +742,10 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
 
 void FlightSession::ignite() {
     if (bodies_.empty()) return;
+    if (docking_busy()) {
+        docking_status_ = "Zündung nicht möglich: angedockt";
+        return;
+    }
     auto& flying = bodies_[controlled_];
     for (const auto& stage : flying.body->vehicle().stages()) {
         bool lit = false;
@@ -758,6 +771,10 @@ void FlightSession::release_clamps() {
 
 void FlightSession::stage() {
     if (bodies_.empty() || bodies_[controlled_].body->vehicle().stages().size() < 2) return;
+    if (docking_busy()) {  // the stack is held by the docking mechanism (ISS i5)
+        docking_status_ = "Stufentrennung nicht möglich: angedockt";
+        return;
+    }
     auto& lower = bodies_[controlled_];
     auto upper = lower.body->separate(1);
     for (auto& [group, run] : lower.running_groups) run = false;  // booster engines off after separation
