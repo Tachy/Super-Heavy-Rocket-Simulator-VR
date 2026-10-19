@@ -52,6 +52,8 @@ struct FlightSnapshot {
     };
     std::vector<Body> bodies;
     godot::Dictionary autopilot_status, tower_state, landing_zone, splashdown_zone;
+    godot::Dictionary lunar_state, lunar_site;                       // build_lunar_state / build_lunar_site
+    std::shared_ptr<const environment::LunarTerrain> moon_terrain;  // immutable: queried on the main thread
     bool has_target_orbit = false;
     godot::Vector3 target_plane_normal_gcrf;
     double target_radius_m = 0.0;
@@ -65,6 +67,10 @@ inline constexpr double prediction_refresh_s = 1.0;
 
 // The snapshot before any session exists (or before its first build): no flight, zones and tower {present: false}.
 std::shared_ptr<const FlightSnapshot> empty_snapshot();
+
+// Lunar parts of the snapshot (flight_snapshot_lunar.cpp; FlightSim::lunar_state / lunar_site document the keys).
+godot::Dictionary build_lunar_state(const sim::FlightSession& session);
+godot::Dictionary build_lunar_site(const sim::FlightSession& session);
 
 // Builds the snapshot from the session (worker thread). `previous` supplies the prediction when it is not due.
 std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& session, time::Epoch epoch,

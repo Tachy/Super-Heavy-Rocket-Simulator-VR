@@ -1,9 +1,13 @@
 #include "flight_snapshot.hpp"
 
 #include <cmath>
+#include <limits>
 
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/math/mat3.hpp"
+#include "starsim/mission/lunar_outbound.hpp"
+#include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
 #include "starsim/vehicle/vehicle.hpp"
@@ -46,10 +50,33 @@ godot::Array body_engines(const sim::FlightSession& session, size_t index) {
     return engines;
 }
 
+// Osculating two-body orbit about the reference body (FlightSim::telemetry): inclination against its equator (the
+// body-fixed axes now), altitudes above its equatorial radius / the Moon sphere.
+void add_orbit(const sim::FlightSession& session, size_t index, ephemeris::Body reference, godot::Dictionary& d) {
+    const auto& state = session.body(index).state();
+    const bool moon = reference == ephemeris::Body::Moon && session.moon_orientation();
+    const math::StateVector inertial{state.position_gcrf_m, state.velocity_gcrf_mps};
+    const auto relative = moon ? mission::moon_relative(session.ephemeris(), inertial, session.epoch()) : inertial;
+    const auto& orientation = moon ? *session.moon_orientation() : session.earth_orientation();
+    const math::Mat3 to_fixed_axes = math::transpose(orientation.fixed_to_gcrf(session.epoch()).rotation);
+    const auto e = orbit::elements_from_state({to_fixed_axes * relative.position_m, to_fixed_axes * relative.velocity_mps},
+                                              session.ephemeris().gm_m3ps2(moon ? ephemeris::Body::Moon
+                                                                                : ephemeris::Body::Earth));
+    const double radius_m = moon ? constants::moon_mean_radius_m : frames::wgs84.semi_major_axis_m;
+    d["periapsis_altitude_km"] = (e.semi_major_axis_m * (1.0 - e.eccentricity) - radius_m) / 1000.0;
+    d["apoapsis_altitude_km"] = e.eccentricity < 1.0
+                                    ? (e.semi_major_axis_m * (1.0 + e.eccentricity) - radius_m) / 1000.0
+                                    : std::numeric_limits<double>::infinity();
+    d["inclination_deg"] = e.inclination_rad * constants::rad_to_deg;
+}
+
 godot::Dictionary telemetry(const sim::FlightSession& session, size_t index) {
     godot::Dictionary d;
     const auto t = session.telemetry(index);
     d["altitude_m"] = t.altitude_m;
+    d["altitude_terrain_m"] = t.altitude_terrain_m;
+    d["reference_body"] = t.reference_body == ephemeris::Body::Moon ? "moon" : "earth";
+    add_orbit(session, index, t.reference_body, d);
     d["latitude_deg"] = t.latitude_rad * constants::rad_to_deg;
     d["longitude_deg"] = t.longitude_rad * constants::rad_to_deg;
     d["speed_inertial_mps"] = t.speed_inertial_mps;
@@ -368,6 +395,8 @@ std::shared_ptr<const FlightSnapshot> empty_snapshot() {
     s->landing_zone = absent();
     s->tower_state = absent();
     s->splashdown_zone = absent();
+    s->lunar_state = absent();
+    s->lunar_site = absent();
     return s;
 }
 
@@ -381,6 +410,9 @@ std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& s
     s->tower_state = tower_state(session);
     s->splashdown_zone = splashdown_zone(session);
     s->active = session.active();
+    s->lunar_state = build_lunar_state(session);
+    s->lunar_site = build_lunar_site(session);
+    s->moon_terrain = session.moon_terrain_shared();
     if (!s->active) return s;
     s->mission_time_s = session.mission_time_s();
     s->controlled_index = static_cast<int>(session.controlled_index());

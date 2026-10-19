@@ -1,5 +1,7 @@
 #include "flight_sim.hpp"
 
+#include <cmath>
+
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -37,7 +39,7 @@ void FlightSim::setup(const godot::String& config_dir) {
         snapshot_ = empty_snapshot();
     }
     runner_ = std::make_unique<sim::SessionRunner>(
-        std::make_unique<sim::FlightSession>(ephemeris_, earth_, config_dir_),
+        std::make_unique<sim::FlightSession>(ephemeris_, earth_, config_dir_, environment::PointMassGravityConfig{}, &moon_),
         [this](const sim::FlightSession& session, time::Epoch now) { observe(session, now); });
 }
 
@@ -142,7 +144,7 @@ int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s) 
         const auto s = sim::start_mission(session, config_dir_, id, epoch(tdb_s), time_);
         context_.site_id = godot::String::utf8(s.site_id.c_str());
         context_.mission_start_tdb_s = s.epoch.tdb_seconds_past_j2000();
-        return Outcome{true, {}};
+        return Outcome{s.refusal.empty(), godot::String::utf8(s.refusal.c_str())};
     }));
 }
 
@@ -398,6 +400,40 @@ int64_t FlightSim::plan_burn(double seconds_from_now, double prograde_mps, doubl
 }
 
 godot::Dictionary FlightSim::autopilot_status() const { return snapshot()->autopilot_status; }
+godot::Dictionary FlightSim::lunar_state() const { return snapshot()->lunar_state; }
+godot::Dictionary FlightSim::lunar_site() const { return snapshot()->lunar_site; }
+
+godot::Dictionary FlightSim::moon_terrain(double latitude_deg, double longitude_deg) const {
+    godot::Dictionary d;
+    d["present"] = false;
+    const auto snap = snapshot();
+    if (!snap->moon_terrain) return d;
+    const double lat = latitude_deg * constants::deg_to_rad, lon = longitude_deg * constants::deg_to_rad;
+    const auto& terrain = *snap->moon_terrain;
+    d["present"] = true;
+    d["height_m"] = terrain.height_m(lat, lon);
+    const math::Vec3 up{std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+    d["normal_moon_me"] = to_godot(terrain.normal_fixed((terrain.sphere_radius_m() + terrain.height_m(lat, lon)) * up));
+    d["in_tile"] = terrain.in_tile(lat, lon);
+    return d;
+}
+
+int64_t FlightSim::complete_pilot_correction() {
+    return static_cast<int64_t>(post_active("complete_pilot_correction", [](sim::FlightSession& session) {
+        if (session.lunar_step() != sim::LunarStep::PilotCorrection) {
+            return Outcome{false, godot::String::utf8("Keine Korrektur von Hand anstehend")};
+        }
+        session.complete_pilot_correction();
+        return Outcome{true, godot::String::utf8(session.lunar_status().c_str())};
+    }));
+}
+
+int64_t FlightSim::replan_lunar_return() {
+    return static_cast<int64_t>(post_active("replan_lunar_return", [](sim::FlightSession& session) {
+        const bool ok = session.replan_lunar_return();
+        return Outcome{ok, godot::String::utf8(session.lunar_status().c_str())};
+    }));
+}
 
 godot::PackedVector3Array FlightSim::predict_trajectory(int index, double duration_s, double step_s) const {
     const auto s = snapshot();
@@ -485,6 +521,11 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("plan_burn", "seconds_from_now", "prograde_mps", "normal_mps", "radial_mps"),
                          &FlightSim::plan_burn);
     ClassDB::bind_method(D_METHOD("autopilot_status"), &FlightSim::autopilot_status);
+    ClassDB::bind_method(D_METHOD("lunar_state"), &FlightSim::lunar_state);
+    ClassDB::bind_method(D_METHOD("lunar_site"), &FlightSim::lunar_site);
+    ClassDB::bind_method(D_METHOD("moon_terrain", "latitude_deg", "longitude_deg"), &FlightSim::moon_terrain);
+    ClassDB::bind_method(D_METHOD("complete_pilot_correction"), &FlightSim::complete_pilot_correction);
+    ClassDB::bind_method(D_METHOD("replan_lunar_return"), &FlightSim::replan_lunar_return);
     ClassDB::bind_method(D_METHOD("predict_trajectory", "index", "duration_s", "step_s"),
                          &FlightSim::predict_trajectory);
     ClassDB::bind_method(D_METHOD("target_orbit_points", "count"), &FlightSim::target_orbit_points);

@@ -46,7 +46,8 @@ public:
                              double tdb_s);
     // Mission of config/missions by its [mission] kind: an ascent starts at `tdb_s` (payload, pad, landing zone or drone
     // ship, booster return, ascent autopilot); a capsule return at its own epoch (mission_start_tdb_s()) with the deorbit
-    // planned; not ok for an unknown, invalid or ship-return mission.
+    // planned; a lunar landing (from LEO) or lunar return (from lunar orbit) at its own epoch with all legs planned; not ok
+    // for an unknown, invalid or ship-return mission, or a lunar mission the planner refuses (message: its reason).
     int64_t start_mission(const godot::String& mission_id, double tdb_s);
     // Epoch (TDB s) the current flight began at: the launch, or a return mission's own epoch (the world clock jumps there).
     double mission_start_tdb_s() const;
@@ -147,7 +148,30 @@ public:
     // Return of the controlled capsule to the splashdown zone (deorbit, trunk, entry, parachutes); the plan or the reason
     // it was refused appears in autopilot_status()["return"], the step in ["capsule_step"].
     int64_t plan_capsule_return();
+    // {altitude_m, altitude_terrain_m, latitude_deg, ..., reference_body ("earth" / "moon"), periapsis_altitude_km,
+    // apoapsis_altitude_km (INF on an open orbit), inclination_deg}: the orbit values are osculating two-body elements
+    // about the reference body (the Earth's equator / the Moon's MOON_ME equator measured in GCRF axes - inclination
+    // against the GCRF equator), altitudes above its equatorial radius / the 1737.4 km sphere. Osculating values differ
+    // from the mean orbit (l4: "95 x 100 km at burn end" is the osculating value).
     godot::Dictionary telemetry(int index) const;
+
+    // Lunar flight (l6): {present}; present: {step, status (German), mission_complete, mission_ended, burns: [{step,
+    // epoch_tdb_s, delta_v_mps, mass_kg}], descent: {present, pdi_epoch_tdb_s, touchdown_latitude_deg,
+    // touchdown_longitude_deg, touchdown_height_m, slope_deg, offset_m, periselene_altitude_km}, touchdown: {present,
+    // outcome (German), offset_m, sink_mps, lateral_mps}, return: {present, feasible, reason, tei_delta_v_mps,
+    // braking_delta_v_mps, interface_epoch_tdb_s, interface_speed_mps, interface_angle_deg, replans}, pilot_cue:
+    // {present, burn_epoch_tdb_s, remaining_delta_v_gcrf_mps, remaining_mps, attitude_error_deg, window_end_s}}.
+    godot::Dictionary lunar_state() const;
+    // Lunar landing site of the flight: {present}; present: {id, name, latitude_deg, longitude_deg, height_m (terrain
+    // above the 1737.4 km sphere), position_moon_me_m (on the terrain)}.
+    godot::Dictionary lunar_site() const;
+    // The flight's Moon terrain at a point: {present}; present: {height_m (above the sphere), normal_moon_me, in_tile}.
+    // Runs on the calling thread (the terrain is immutable and shared with the session).
+    godot::Dictionary moon_terrain(double latitude_deg, double longitude_deg) const;
+    // The crew reports its mid-course correction flown (lunar step PilotCorrection).
+    int64_t complete_pilot_correction();
+    // Re-plan of the lunar return from the current flight data (ok: the session's result, message: lunar_status()).
+    int64_t replan_lunar_return();
 
 protected:
     static void _bind_methods();
@@ -171,6 +195,7 @@ private:
     // Members the worker uses are declared before runner_, so the runner (and its thread) is destroyed first.
     spice::SpiceEphemeris ephemeris_;
     spice::SpiceOrientation earth_ = spice::SpiceOrientation::earth();
+    spice::SpiceOrientation moon_ = spice::SpiceOrientation::moon_mean_earth();  // the Moon as a reference body (l6)
     spice::SpiceTimeConverter time_;
     std::filesystem::path config_dir_;
     mutable std::mutex snapshot_mutex_;

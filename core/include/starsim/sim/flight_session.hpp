@@ -520,6 +520,8 @@ public:
     // the Moon terrain (nullptr: the sphere).
     const LunarSite* lunar_landing_site() const { return lunar_site_ ? &*lunar_site_ : nullptr; }
     const environment::LunarTerrain* moon_terrain() const { return moon_terrain_.get(); }
+    // Shared with other threads (immutable): the game's terrain queries (l6).
+    std::shared_ptr<const environment::LunarTerrain> moon_terrain_shared() const { return moon_terrain_; }
     const LegLandingSim& leg_landing() const { return *legs_; }
     LegTouchdown leg_touchdown(size_t body_index) const { return legs_->touchdown(*bodies_.at(body_index).body); }
     std::vector<double> leg_crushed_m(size_t body_index) const { return legs_->crushed_m(*bodies_.at(body_index).body); }

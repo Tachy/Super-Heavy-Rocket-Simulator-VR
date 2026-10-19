@@ -44,6 +44,7 @@ func _initialize() -> void:
 	_check(_check_falcon9(config_dir, tdb) == true, "Falcon 9 checks ran to the end")
 	_check(_check_dragon(config_dir, tdb) == true, "Crew Dragon checks ran to the end")
 	_check(_check_thread(config_dir, tdb) == true, "simulation thread checks ran to the end")
+	_check(_check_lunar(config_dir, tdb) == true, "lunar mission checks ran to the end")
 
 	print("SMOKE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
@@ -174,4 +175,49 @@ func _check_dragon(config_dir: String, tdb: float) -> bool:
 			"invalid body index: empty results")
 	_check(not _ok(ret, ret.plan_capsule_return()), "a second return plan is refused while one runs")
 	_check(not _ok(ret, ret.set_splashdown_zone("no_such_zone")), "unknown splashdown zone is refused")
+	return true
+
+
+# Lunar missions (l6): both kinds start, lunar telemetry, terrain query, refusal, re-plan command.
+func _check_lunar(config_dir: String, tdb: float) -> bool:
+	var started := Time.get_ticks_msec()
+	var ret := FlightSim.new()
+	ret.setup(config_dir)
+	var id: int = ret.start_mission("ship_lunar_return_llo", tdb)
+	_check(ret.wait_idle(120.0), "lunar return planned within 120 s")
+	_check(ret.result(id).get("ok", false), "lunar return mission starts: %s" % ret.result(id).get("message", ""))
+	var t: Dictionary = ret.telemetry(ret.controlled_index())
+	_check(t.get("reference_body", "") == "moon", "return ship is Moon-referenced")
+	_check(absf(float(t.get("altitude_terrain_m", -1.0)) - float(t["altitude_m"])) < 1e-6,
+			"no terrain: terrain altitude = shape altitude")
+	_check(absf(float(t.get("periapsis_altitude_km", 0.0)) - 100.0) < 15.0, "LLO periselene ~100 km (osculating)")
+	var lunar: Dictionary = ret.lunar_state()
+	_check(lunar.get("present", false) and lunar["return"].get("feasible", false), "return plan in lunar_state")
+	_check(float(lunar["return"].get("tei_delta_v_mps", 0.0)) > 700.0, "TEI delta-v plausible (> 700 m/s)")
+	_check(not ret.moon_terrain(-84.8, 0.0).get("present", true), "no terrain loaded for the return mission")
+	var rp: int = ret.replan_lunar_return()
+	_check(ret.wait_idle(120.0) and ret.result(rp).get("done", false), "re-plan command finishes")
+	print("  lunar return start: %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
+
+	started = Time.get_ticks_msec()
+	var land := FlightSim.new()
+	land.setup(config_dir)
+	var lid: int = land.start_mission("hls_lunar_llo", tdb)
+	_check(land.wait_idle(120.0) and land.result(lid).get("ok", false), "lunar landing mission starts")
+	var site: Dictionary = land.lunar_site()
+	_check(site.get("present", false), "landing site present")
+	var ground: Dictionary = land.moon_terrain(site["latitude_deg"], site["longitude_deg"])
+	_check(ground.get("present", false) and ground.get("in_tile", false), "terrain query at the site (tile)")
+	_check(absf(float(ground["height_m"]) - float(site["height_m"])) < 1.0, "terrain height = site height")
+	_check(land.telemetry(land.controlled_index()).get("reference_body", "") == "earth", "HLS starts in LEO")
+	print("  lunar landing start: %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
+
+	started = Time.get_ticks_msec()
+	var nrho := FlightSim.new()
+	nrho.setup(config_dir)
+	var nid: int = nrho.start_mission("hls_lunar_nrho", tdb)
+	nrho.wait_idle(180.0)
+	_check(not nrho.result(nid).get("ok", true) and "nicht durchführbar" in str(nrho.result(nid).get("message", "")),
+			"NRHO landing at 120 t is refused honestly")
+	print("  NRHO landing start (refused): %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
 	return true
