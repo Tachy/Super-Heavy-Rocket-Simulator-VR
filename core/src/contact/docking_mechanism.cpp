@@ -90,8 +90,11 @@ DockingWrench DockingMechanism::joint(const DockingPose& pose) const {
     math::Vec3 force = -k_ * (pose.position_m - rest) - c_ * pose.velocity_mps;
     const double over_stroke = extension_m_ - pose.position_m.x - p_.stroke_m;
     if (over_stroke > 0.0) force.x += p_.end_stop_stiffness_n_per_m * over_stroke;
-    const math::Vec3 theta = rotation_vector(pose.chaser_axes * transpose(mated_axes));
-    return {force, pose.position_m, -kr_ * theta - cr_ * pose.angular_rate_radps};
+    const math::Vec3 theta = rotation_vector(pose.chaser_axes * transpose(mated_axes));  // x: roll (torsion)
+    const math::Vec3& w = pose.angular_rate_radps;
+    const double kb = p_.joint_bending_stiffness_nm_per_rad, kt = p_.joint_torsion_stiffness_nm_per_rad;
+    const math::Vec3 torque{-kt * theta.x - ct_ * w.x, -kb * theta.y - cb_ * w.y, -kb * theta.z - cb_ * w.z};
+    return {force, pose.position_m, torque};
 }
 
 DockingWrench DockingMechanism::before_capture(double t, const DockingPose& pose, double m, double inertia) {
@@ -110,8 +113,8 @@ DockingWrench DockingMechanism::before_capture(double t, const DockingPose& pose
     if (c.latch_ready) {
         k_ = m * p_.joint_frequency_radps * p_.joint_frequency_radps;
         c_ = 2.0 * p_.joint_damping_ratio * m * p_.joint_frequency_radps;
-        kr_ = inertia * p_.joint_rotation_frequency_radps * p_.joint_rotation_frequency_radps;
-        cr_ = 2.0 * p_.joint_damping_ratio * inertia * p_.joint_rotation_frequency_radps;
+        cb_ = 2.0 * p_.joint_damping_ratio * std::sqrt(p_.joint_bending_stiffness_nm_per_rad * inertia);
+        ct_ = 2.0 * p_.joint_damping_ratio * std::sqrt(p_.joint_torsion_stiffness_nm_per_rad * inertia);
         enter(DockingPhase::SoftCapture, "Weichfang: Verriegelung eingerastet", t);
         return joint(pose);
     }

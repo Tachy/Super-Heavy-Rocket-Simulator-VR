@@ -164,7 +164,7 @@ void FlightSession::docking_after_tick() {
     if (phase == contact::DockingPhase::Failed) {  // re-arm once the chaser is back beyond the petal tips
         const auto& ip = m.parameters().interface;
         const auto pose = docking_->pose(*bodies_[controlled_].body, *bodies_[*station_index_].body);
-        if (pose.position_m.x > ip.ring_extension_m + 2.0 * ip.petal_height_m + m.parameters().bounce_gap_m) m.rearm();
+        if (pose.position_m.x > ip.ring_extension_m + 2.0 * ip.petal_height_m + m.parameters().rearm_distance_m) m.rearm();
     }
     sync_docked();
     if (docking_debug_) docking_diagnostics();
@@ -342,9 +342,10 @@ void FlightSession::docking_diagnostics() {
     for (; docking_debug_events_ < events.size(); ++docking_debug_events_) {
         std::printf("[docking] %8.1f s  %s\n", mission_time_s(), events[docking_debug_events_].status.c_str());
     }
-    if (!docking_ticked() || epoch_ < docking_debug_next_) return;
-    docking_debug_next_ = epoch_ + 1.0;
+    if (epoch_ < docking_debug_next_ || bodies_[controlled_].body->docked()) return;
     const auto p = docking_->pose(*bodies_[controlled_].body, *bodies_[*station_index_].body);
+    if (!docking_ticked() && norm(p.position_m) > 2.0) return;  // also the last two metres before the contact
+    docking_debug_next_ = epoch_ + 1.0;
     const auto f = docking_->force_on_chaser_n();
     std::printf("[docking] %8.1f s  %-16s port (%.3f %.3f %.3f) m v (%.4f %.4f %.4f) m/s  F %.0f N  peak comp %.0f N\n",
                 mission_time_s(), contact::to_string(m.phase()), p.position_m.x, p.position_m.y, p.position_m.z,

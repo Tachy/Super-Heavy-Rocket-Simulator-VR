@@ -19,7 +19,10 @@ const char* to_string(DockingPhase phase);  // German
 struct DockingMechanismParameters {
     DockingInterfaceParameters interface;
     double joint_frequency_radps = 0.5;           // [E] attenuation: critically damped, time constant 2 s
-    double joint_rotation_frequency_radps = 0.5;  // [E]
+    // Rotational joint stiffness from the IDSS loads (Table 3.3.1.4-1): half the bending (2,800 N m) / torsion
+    // (1,500 N m) limit at the envelope's 4 deg misalignment / roll [D]; damping from the chaser inertia (ratio below).
+    double joint_bending_stiffness_nm_per_rad = 0.5 * 2800.0 / (4.0 * constants::deg_to_rad);
+    double joint_torsion_stiffness_nm_per_rad = 0.5 * 1500.0 / (4.0 * constants::deg_to_rad);
     double joint_damping_ratio = 1.0;             // [E]
     double stroke_m = 0.10;                       // [E] axial attenuation stroke beyond the rest extension
     double end_stop_stiffness_n_per_m = 2.0e6;    // [E] beyond the stroke
@@ -36,6 +39,7 @@ struct DockingMechanismParameters {
     double separation_energy_j = 43.35;  // [E] middle of 39.2-47.5 N m [S: IDSS IDD E 3.2.3.6.2]
     double bounce_confirm_s = 2.0;       // [E] no contact this long ...
     double bounce_gap_m = 0.05;          // [E] ... and the ring this far beyond the petal tips: capture failed
+    double rearm_distance_m = 1.0;       // [E] the session re-arms a failed mechanism this far beyond the petal tips
     // IDSS IDD E Table 3.3.1.4-1, SCS maximum interface loads (design limit loads) [S]:
     double dynamic_compression_limit_n = 6500.0;  // up to 0.1 s: above it the mechanism releases (Überlast)
     double static_compression_limit_n = 3500.0;   // held longer than static_after_s: Überlast
@@ -94,7 +98,7 @@ private:
     double extension_m_ = 0.0;
     double phase_since_s_ = 0.0, last_contact_s_ = 0.0, static_over_s_ = 0.0;
     bool ring_touched_ = false, ring_blocked_ = false, tips_only_ = true;
-    double k_ = 0.0, c_ = 0.0, kr_ = 0.0, cr_ = 0.0;
+    double k_ = 0.0, c_ = 0.0, cb_ = 0.0, ct_ = 0.0;  // translational stiffness / damping; bending / torsion damping
     bool separation_pending_ = false;
     LoadPeaks peaks_;
     std::string status_ = "bereit", failure_, refusal_;
