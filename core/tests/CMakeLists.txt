@@ -141,6 +141,7 @@ add_executable(starsim_core_tests
     test_phasing_planner.cpp
     test_rendezvous_phasing_session.cpp
     test_proximity_geometry.cpp
+    test_proximity_guidance.cpp
     test_proximity_transfer.cpp
     test_translation_loop.cpp
 )

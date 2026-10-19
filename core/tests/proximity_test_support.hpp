@@ -1,0 +1,79 @@
+#pragma once
+// ISS i4 tests: a CW point-mass chaser with an ideal port-aligned attitude around a station in ideal LVLH attitude.
+// The chaser CG is `chaser_lever` behind its port; the target port sits at `port_lever` from the station CG with the
+// axes `port_to_lvlh`. Translation fractions act with the Dragon's i2 pure authority.
+#include <algorithm>
+
+#include "starsim/gnc/proximity_guidance.hpp"
+#include "starsim/orbit/clohessy_wiltshire.hpp"
+
+namespace starsim::proximity_test {
+
+struct CwSim {
+    double n = 1.128e-3;
+    math::Mat3 port_to_lvlh;      // target port frame in LVLH
+    math::Vec3 port_lever_lvlh;   // station CG -> target port
+    double chaser_lever_m = 4.0;  // chaser port ahead of its CG along its docking axis (= -x_t)
+    orbit::RelativeState cg;      // chaser CG, LVLH
+    gnc::AxisAcceleration authority{{0.1245, 0.1245, 0.0453, 0.0453, 0.0453, 0.0453}};  // target port axes
+    double propellant_kg = 2000.0;
+    double kg_per_mps = 16.2;  // [D] i2 lateral cost (conservative for every axis)
+    time::Epoch epoch;
+
+    static CwSim ida2() {
+        CwSim s;
+        s.port_to_lvlh = math::Mat3::from_columns({1, 0, 0}, {0, -1, 0}, {0, 0, -1});  // axis +x, up -z (zenith)
+        s.port_lever_lvlh = {35.0, 0.0, 0.0};
+        return s;
+    }
+    static CwSim ida3() {
+        CwSim s;
+        s.port_to_lvlh = math::Mat3::from_columns({0, 0, -1}, {0, 1, 0}, {1, 0, 0});  // axis -z, up +x; y = z x x
+        s.port_lever_lvlh = {28.0, 0.0, -5.0};
+        return s;
+    }
+    math::Vec3 chaser_port_lvlh() const {  // the chaser port leads its CG along -x_t (towards the target port)
+        return cg.position_m - chaser_lever_m * (port_to_lvlh * math::Vec3{1, 0, 0});
+    }
+    gnc::ProximityInput input() const {
+        gnc::ProximityInput in;
+        in.epoch = epoch;
+        in.cg_lvlh = cg;
+        const math::Mat3 lvlh_to_port = transpose(port_to_lvlh);
+        in.port.position_m = lvlh_to_port * (chaser_port_lvlh() - port_lever_lvlh);
+        in.port.velocity_mps = lvlh_to_port * cg.velocity_mps;
+        in.port.range_m = norm(in.port.position_m);
+        in.port.closing_speed_mps = -dot(in.port.position_m, in.port.velocity_mps) / std::max(in.port.range_m, 1e-9);
+        in.port_to_lvlh = port_to_lvlh;
+        in.mean_motion_radps = n;
+        in.authority_port = authority;
+        in.propellant_kg = propellant_kg;
+        return in;
+    }
+    // One step: CW drift plus the commanded acceleration (the fraction is in the target port frame; applied as a
+    // velocity change at the start of the step).
+    void step(const math::Vec3& fraction_port, double dt) {
+        const math::Vec3 fp = fraction_port;
+        const math::Vec3 a_port{fp.x * authority.along(0, fp.x), fp.y * authority.along(1, fp.y),
+                                fp.z * authority.along(2, fp.z)};
+        const math::Vec3 dv = port_to_lvlh * a_port * dt;
+        propellant_kg -= norm(dv) * kg_per_mps;
+        cg.velocity_mps += dv;
+        cg = orbit::cw_propagate(cg, n, dt);
+        epoch = epoch + dt;
+    }
+};
+
+// Runs the guidance until contact, abort completion or `limit_s`; returns the simulated seconds.
+inline double run(gnc::ProximityGuidance& g, CwSim& s, double limit_s, double dt = 0.05) {
+    double t = 0.0;
+    for (; t < limit_s; t += dt) {
+        const auto out = g.update(s.input());
+        if (g.phase() == gnc::ProximityPhase::Contact) break;
+        if (g.phase() == gnc::ProximityPhase::Abort && !out.attitude_hold) break;
+        s.step(out.translation_fraction_port, dt);
+    }
+    return t;
+}
+
+}  // namespace starsim::proximity_test

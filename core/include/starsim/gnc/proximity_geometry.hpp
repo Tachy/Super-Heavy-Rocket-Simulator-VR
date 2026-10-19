@@ -68,7 +68,7 @@ struct ProximityParameters {
     double final_speed_start_mps = 0.10;      // [S: Demo-2 0.33 ft/s before soft capture] at Waypoint 2
     double contact_speed_mps = 0.075;         // [E] middle of the axial capture band 0.05-0.10
     double contact_plane_m = 0.0;  // [E] contact when the chaser port reaches this axial distance (i5: ring reach)
-    double lateral_gain_per_s = 0.02;       // [E] lateral velocity = -offset * gain
+    double lateral_gain_per_s = 0.1;        // [E] lateral velocity = -offset * gain (offset ~ deadband mean / gain)
     double lateral_speed_max_mps = 0.03;    // [E] below the lateral capture bound 0.04
     double hold_time_constant_s = 60.0;     // [E] position hold: velocity = -error / this
     double hold_speed_max_mps = 0.05;       // [E]
@@ -79,8 +79,9 @@ struct ProximityParameters {
     double max_start_range_m = 5000.0;      // [E] start within the approach ellipsoid's scale (4 x 2 x 2 km)
     double resume_max_range_m = 5000.0;     // [E] a resume after an abort flies back to Waypoint 0 from within this
     std::size_t start_waypoint = 0;         // first waypoint of the path to fly to (tests: 2 = start at Waypoint 2)
+    double start_tolerance_m = 10.0;        // [E] a start within this of the first waypoint holds there (i3: 2-5 m)
     TranslationLoopParameters loop_far;     // outside the keep-out sphere
-    TranslationLoopParameters loop_near{1.0, 0.01, 0.002};  // [E] inside: finer
+    TranslationLoopParameters loop_near{1.0, 0.005, 0.002};  // [E] inside: finer (contact offset < 0.1 m)
     BreakoutParameters breakout;
 };
 

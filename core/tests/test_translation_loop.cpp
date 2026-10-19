@@ -55,7 +55,7 @@ TEST_CASE("Axial speed schedule", "[iss][proximity]") {
 
 TEST_CASE("Approach and hold velocities", "[iss][proximity]") {
     const gnc::ProximityParameters p;
-    const Vec3 v = gnc::approach_velocity_port({20.0, 0.5, 0.0}, p);
+    const Vec3 v = gnc::approach_velocity_port({20.0, 0.1, 0.0}, p);
     CHECK(v.x == Catch::Approx(-0.10));
     CHECK(v.y == Catch::Approx(-0.01));
     CHECK(norm(Vec3{0, gnc::approach_velocity_port({20.0, 5.0, 5.0}, p).y,
