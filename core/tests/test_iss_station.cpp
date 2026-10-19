@@ -1,12 +1,16 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/orbit/kepler.hpp"
 #include "starsim/orbit/oem.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/station_start.hpp"
@@ -26,7 +30,110 @@ math::Vec3 rtn(const math::StateVector& s, const math::Vec3& d) {
     const auto t = cross(n, r);
     return {dot(d, r), dot(d, t), dot(d, n)};
 }
+
+// A two-body OEM text (2026-10-14T12:00-20:00 UTC, day 287, 4 min rows) with one manoeuvre of `delta_v_mps` along
+// the velocity at `tig_s` after the start; the event table lists the magnitude only, as NASA's does.
+std::string manoeuvre_oem(double tig_s, double delta_v_mps, const std::string& event_name) {
+    constexpr double span_s = 8.0 * 3600.0, step_s = 240.0;
+    const double gm = constants::earth_gm_m3ps2, a = constants::wgs84_semi_major_axis_m + 420.0e3;
+    const double inc = 51.6 * constants::deg_to_rad;
+    math::StateVector s{{a, 0.0, 0.0}, {0.0, std::sqrt(gm / a) * std::cos(inc), std::sqrt(gm / a) * std::sin(inc)}};
+    const auto hms = [](double t_s, int& h, int& m, double& sec) {
+        h = 12 + static_cast<int>(t_s / 3600.0);
+        m = static_cast<int>(std::fmod(t_s, 3600.0) / 60.0);
+        sec = std::fmod(t_s, 60.0);
+    };
+    char line[256];
+    int h, m;
+    double sec;
+    std::string text = "CCSDS_OEM_VERS = 2.0\nCREATION_DATE = 2026-10-14T00:00:00.000\nORIGINATOR = test\n"
+                       "META_START\nOBJECT_NAME = ISS\nOBJECT_ID = 1998-067-A\nCENTER_NAME = Earth\n"
+                       "REF_FRAME = EME2000\nTIME_SYSTEM = UTC\nSTART_TIME = 2026-10-14T12:00:00.000\n"
+                       "USEABLE_START_TIME = 2026-10-14T12:00:00.000\nUSEABLE_STOP_TIME = 2026-10-14T20:00:00.000\n"
+                       "STOP_TIME = 2026-10-14T20:00:00.000\nMETA_STOP\nCOMMENT TRAJECTORY EVENT SUMMARY:\n"
+                       "COMMENT |  EVENT  |  TIG  | ORB |  DV  |  HA  |  HP  |\n";
+    hms(tig_s, h, m, sec);
+    std::snprintf(line, sizeof line, "COMMENT  %-20s 287:%02d:%02d:%06.3f       %.1f     421.0     419.0\n",
+                  event_name.c_str(), h, m, sec, std::abs(delta_v_mps));
+    text += line;
+    text += "COMMENT                                     (3.3)   (227.3)   (226.2)\nCOMMENT End sequence of events\n";
+    double t = 0.0;
+    for (double row = 0.0; row <= span_s; row += step_s) {
+        if (t < tig_s && row > tig_s) {
+            s = orbit::propagate_two_body(s, gm, tig_s - t);
+            s.velocity_mps += delta_v_mps * math::normalized(s.velocity_mps);
+            t = tig_s;
+        }
+        s = orbit::propagate_two_body(s, gm, row - t);
+        t = row;
+        hms(row, h, m, sec);
+        std::snprintf(line, sizeof line, "2026-10-14T%02d:%02d:%06.3f %.9f %.9f %.9f %.12f %.12f %.12f\n", h, m, sec,
+                      s.position_m.x / 1e3, s.position_m.y / 1e3, s.position_m.z / 1e3, s.velocity_mps.x / 1e3,
+                      s.velocity_mps.y / 1e3, s.velocity_mps.z / 1e3);
+        text += line;
+    }
+    return text;
+}
+
+// An archive holding just `text` (its own directory per test case: ctest runs cases in parallel).
+orbit::OemArchive archive_of(const std::string& text, const std::string& case_name,
+                             const time::TimeScaleConverter& time) {
+    const auto dir = std::filesystem::temp_directory_path() / ("starsim_iss_" + case_name);
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir / "ISS.OEM_J2K_EPH_test.txt") << text;
+    return orbit::OemArchive::scan(dir, time);
+}
 }  // namespace
+
+TEST_CASE("Impulse signs from a manoeuvre OEM: retrograde, posigrade, near the window end", "[iss][station]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    const auto earth = spice::SpiceOrientation::earth();
+    const auto iss = config::load_vehicle(config_dir, "iss");
+    const auto t0 = time.from_utc({2026, 10, 14, 12, 1, 0.0});
+    struct Case {
+        double tig_s, delta_v_mps;
+        std::string name;
+        double expected_mps;
+        bool assumed;
+    };
+    for (const auto& c : {Case{4.0 * 3600.0 + 120.0, -1.0, "Debris Avoidance", -1.0, false},
+                          Case{4.0 * 3600.0 + 120.0, 0.5, "Reboost (test)", 0.5, false},  // '(' in the name
+                          Case{7.5 * 3600.0, -1.0, "Debris Avoidance", 1.0, true}}) {   // < 1 rev before the end
+        const auto archive = archive_of(manoeuvre_oem(c.tig_s, c.delta_v_mps, c.name),
+                                        "sign_" + std::to_string(static_cast<int>(c.tig_s)) +
+                                            (c.delta_v_mps > 0.0 ? "p" : "m"),
+                                        time);
+        REQUIRE(archive.size() == 1);
+        const auto s = sim::iss_start(iss, archive, time, earth, t0, sim::IssOrbitSource::Oem);
+        REQUIRE(s.impulses.size() == 1);
+        CHECK(s.impulses.front().name == c.name);
+        CHECK(s.impulses.front().delta_v_mps == Catch::Approx(c.expected_mps));
+        // an undeterminable sign is assumed posigrade (reboosts are) and the note says so
+        CHECK((s.note.find("posigrad") != std::string::npos) == c.assumed);
+    }
+}
+
+TEST_CASE("add_station takes the station's epoch", "[iss][station]") {
+    test::spice_session();
+    const spice::SpiceEphemeris ephemeris;
+    const auto earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter time;
+    const auto archive = orbit::OemArchive::scan(fixture_dir, time);
+    const auto t0 = time.from_utc({2026, 10, 16, 0, 0, 0.0});
+    const auto start = sim::iss_start(config::load_vehicle(config_dir, "iss"), archive, time, earth, t0,
+                                      sim::IssOrbitSource::Oem);
+    CHECK(start.epoch == t0);
+    sim::FlightSession alone(ephemeris, earth, config_dir);
+    alone.add_station(start.vehicle, start.state_gcrf, start.epoch, start.impulses);
+    CHECK(alone.epoch() == t0);  // a session without bodies starts at the station's epoch
+    sim::FlightSession with_vehicle(ephemeris, earth, config_dir);
+    const auto dragon = config::load_vehicle(config_dir, "crew_dragon");
+    with_vehicle.place_in_orbit(dragon, {start.state_gcrf.position_m * 0.99, start.state_gcrf.velocity_mps},
+                                t0 + 60.0);
+    CHECK_THROWS_AS(with_vehicle.add_station(start.vehicle, start.state_gcrf, start.epoch), std::logic_error);
+}
 
 TEST_CASE("ISS start: OEM, synthetic and auto", "[iss][station]") {
     test::spice_session();
@@ -88,7 +195,7 @@ TEST_CASE("A station alone in a session coasts in ideal attitude", "[iss][statio
                                       sim::IssOrbitSource::Oem);
     sim::FlightSession session(ephemeris, earth, config_dir);
     session.set_epoch(t0);  // a session that starts with a station only
-    const size_t index = session.add_station(start.vehicle, start.state_gcrf, start.impulses);
+    const size_t index = session.add_station(start.vehicle, start.state_gcrf, start.epoch, start.impulses);
     CHECK(session.station_index() == index);
     session.advance_to(t0 + 3600.0, 50);  // 50 calls at most: coasting, not 720,000 ticks
     CHECK(session.epoch() - t0 == Catch::Approx(3600.0).margin(1e-6));
@@ -107,15 +214,15 @@ TEST_CASE("Placing a vehicle clears the station", "[iss][station]") {
     sim::FlightSession session(ephemeris, earth, config_dir);
     const auto dragon = config::load_vehicle(config_dir, "crew_dragon");
     session.place_in_orbit(dragon, {start.state_gcrf.position_m * 0.99, start.state_gcrf.velocity_mps}, t0);
-    session.add_station(start.vehicle, start.state_gcrf, start.impulses);
+    session.add_station(start.vehicle, start.state_gcrf, start.epoch, start.impulses);
     REQUIRE(session.station_index());
     CHECK(session.body_count() == 2);
-    CHECK_THROWS_AS(session.add_station(start.vehicle, start.state_gcrf), std::logic_error);  // one station
+    CHECK_THROWS_AS(session.add_station(start.vehicle, start.state_gcrf, start.epoch), std::logic_error);  // one station
     CHECK_THROWS_AS(session.set_epoch(t0), std::logic_error);                                // bodies exist
     session.place_in_orbit(dragon, {start.state_gcrf.position_m * 0.99, start.state_gcrf.velocity_mps}, t0);
     CHECK_FALSE(session.station_index());
     CHECK(session.body_count() == 1);
-    CHECK_THROWS_AS(session.add_station(dragon, start.state_gcrf), std::logic_error);  // no [stage.station]
+    CHECK_THROWS_AS(session.add_station(dragon, start.state_gcrf, start.epoch), std::logic_error);  // no [stage.station]
 }
 
 TEST_CASE("A station impulse changes the velocity at its epoch", "[iss][station]") {
@@ -132,8 +239,8 @@ TEST_CASE("A station impulse changes the velocity at its epoch", "[iss][station]
     for (auto* s : {&with, &without}) {
         s->place_in_orbit(dragon, {start.state_gcrf.position_m * 0.98, start.state_gcrf.velocity_mps}, t0);
     }
-    const auto i = with.add_station(start.vehicle, start.state_gcrf, {{t0 + 1000.0, 1.0, "Reboost"}});
-    const auto j = without.add_station(start.vehicle, start.state_gcrf);
+    const auto i = with.add_station(start.vehicle, start.state_gcrf, start.epoch, {{t0 + 1000.0, 1.0, "Reboost"}});
+    const auto j = without.add_station(start.vehicle, start.state_gcrf, start.epoch);
     with.advance_to(t0 + 2000.0, 100000);
     without.advance_to(t0 + 2000.0, 100000);
     const auto& a = with.body(i).state();
@@ -157,7 +264,7 @@ TEST_CASE("ISS propagated with the session's force model against the OEM", "[iss
     sim::FlightSession session(ephemeris, earth, config_dir);
     session.set_epoch(t0);
     session.set_solar_radiation_pressure(false);  // the OEM's SOLAR_RAD_AREA = 0
-    const size_t index = session.add_station(start.vehicle, start.state_gcrf, start.impulses);
+    const size_t index = session.add_station(start.vehicle, start.state_gcrf, start.epoch, start.impulses);
     for (const double hours : {6.0, 24.0}) {
         session.advance_to(t0 + hours * 3600.0, 100000);
         const auto& s = session.body(index).state();

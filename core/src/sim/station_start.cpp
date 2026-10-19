@@ -27,17 +27,15 @@ double mean_radius_m(const orbit::Oem& oem, time::Epoch from, time::Epoch to) {
 }
 
 // +1 for a raising burn, -1 for a lowering one: the OEM's own mean radius one revolution after the TIG against one
-// revolution before (the event table lists the magnitude only). Where the window does not reach a revolution on
-// both sides, the event's mean height (HA + HP) / 2 against the OEM height one revolution before.
-double impulse_sign(const orbit::Oem& oem, const orbit::OemEvent& event, double period_s) {
+// revolution before (the event table lists the magnitude only). Where the window does not reach a full revolution
+// on both sides the sign cannot be read reliably (one sampled radius swings by several km, a 1 m/s burn moves a by
+// ~1.8 km): nullopt, and the caller assumes a posigrade burn (reboosts are).
+std::optional<double> impulse_sign(const orbit::Oem& oem, const orbit::OemEvent& event, double period_s) {
     const time::Epoch start = oem.header().usable_start, stop = oem.header().usable_stop;
-    const time::Epoch before = std::max(start, event.tig - period_s);
-    if (event.tig + period_s <= stop && event.tig - period_s >= start) {
-        return mean_radius_m(oem, event.tig, event.tig + period_s) >= mean_radius_m(oem, before, event.tig) ? 1.0
-                                                                                                          : -1.0;
-    }
-    const double height_before_m = norm(oem.state_gcrf(before).position_m) - equatorial_radius_m;
-    return 0.5 * (event.apoapsis_height_m + event.periapsis_height_m) >= height_before_m ? 1.0 : -1.0;
+    if (event.tig + period_s > stop || event.tig - period_s < start) return std::nullopt;
+    return mean_radius_m(oem, event.tig, event.tig + period_s) >= mean_radius_m(oem, event.tig - period_s, event.tig)
+               ? 1.0
+               : -1.0;
 }
 
 StationStart from_oem(const config::VehicleConfig& iss, const orbit::Oem& oem, time::Epoch epoch) {
@@ -49,17 +47,22 @@ StationStart from_oem(const config::VehicleConfig& iss, const orbit::Oem& oem, t
     if (header.drag_area_m2) stage.aero.fixed_drag_area_m2 = *header.drag_area_m2;
     if (header.drag_coefficient) stage.aero.fixed_drag_coefficient = *header.drag_coefficient;
     out.state_gcrf = oem.state_gcrf(epoch);
+    out.epoch = epoch;
     const double r = norm(out.state_gcrf.position_m);
     const double period_s = constants::two_pi * std::sqrt(r * r * r / gm);
+    std::string assumed;
     for (const auto& event : oem.events()) {
         if (event.delta_v_mps > 0.0 && event.tig > epoch) {
-            out.impulses.push_back({event.tig, impulse_sign(oem, event, period_s) * event.delta_v_mps, event.name});
+            const auto sign = impulse_sign(oem, event, period_s);
+            if (!sign) assumed += (assumed.empty() ? "" : ", ") + event.name;
+            out.impulses.push_back({event.tig, sign.value_or(1.0) * event.delta_v_mps, event.name});
         }
     }
     std::sort(out.impulses.begin(), out.impulses.end(),
               [](const StationImpulse& a, const StationImpulse& b) { return a.epoch < b.epoch; });
     out.from_oem = true;
     out.note = "ISS-Bahn: NASA-OEM vom " + header.creation_date;
+    if (!assumed.empty()) out.note += "; Manöver am Rand der Daten als posigrad angenommen: " + assumed;
     return out;
 }
 
@@ -87,6 +90,7 @@ StationStart synthetic(const config::VehicleConfig& iss, const orbit::OemArchive
     StationStart out;
     out.vehicle = iss;
     out.state_gcrf = orbit::synthetic_station_state(advanced, gm, earth);
+    out.epoch = epoch;
     out.note = "ISS-Bahn: synthetische Referenzbahn (" + origin + ")";
     return out;
 }

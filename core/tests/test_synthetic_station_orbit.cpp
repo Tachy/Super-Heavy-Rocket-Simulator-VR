@@ -5,11 +5,13 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/orbit/oem.hpp"
 #include "starsim/orbit/synthetic_station_orbit.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+#include "starsim/time/utc_date_time.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -86,4 +88,38 @@ TEST_CASE("Synthetic state: the scenario's argument of latitude, the mean orbit"
     CHECK(unwrap_delta(el.raan_rad, later.raan_rad) == Catch::Approx(0.0).margin(1e-12));
     CHECK(unwrap_delta(el.argument_of_periapsis_rad + el.true_anomaly_rad, 200.0 * deg) ==
           Catch::Approx(0.0).margin(1e-9));
+}
+
+TEST_CASE("True equator frame: x is the GCRF x axis projected onto the true equator", "[iss][synthetic]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    const auto earth = spice::SpiceOrientation::earth();
+    // 2026 (pole ~530" from the GCRF pole) and J2000 (pole ~0.1" off: a node on the GCRF equator is undefined there)
+    for (const auto& utc : {time::UtcDateTime{2026, 10, 14, 12, 0, 0.0}, time::UtcDateTime{2000, 1, 1, 12, 0, 0.0}}) {
+        const auto epoch = time.from_utc(utc);
+        const auto r = orbit::true_equator_to_gcrf(earth, epoch);
+        const math::Vec3 pole = earth.fixed_to_gcrf(epoch).rotation * math::Vec3{0.0, 0.0, 1.0};
+        const math::Vec3 x = math::column(r, 0);
+        CHECK(std::abs(dot(x, pole)) < 1e-12);
+        CHECK(x.x > 0.99999);
+        CHECK(std::abs(x.y) < 1e-6);  // only the second-order product of the pole offsets
+        CHECK(norm(math::column(r, 2) - pole) < 1e-12);
+    }
+}
+
+TEST_CASE("Config reference RAAN is the fixture OEM's mean RAAN at reference_utc", "[iss][synthetic]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    const auto earth = spice::SpiceOrientation::earth();
+    const auto oem = orbit::Oem::load(fixture, time);
+    const auto iss = config::load_vehicle(STARSIM_CONFIG_DIR, "iss");
+    const auto& reference = *iss.stages.front().reference_orbit;
+    const auto mean = orbit::mean_elements_from_oem(oem, gm, earth);
+    const auto at = orbit::advance_mean_elements(mean, time.from_utc(*time::UtcDateTime::parse_iso(reference.reference_utc)),
+                                                 gm, j2, re);
+    if (std::getenv("STARSIM_VERBOSE")) std::printf("mean RAAN at reference_utc: %.4f deg\n", at.raan_rad / deg);
+    CHECK(std::abs(unwrap_delta(at.raan_rad, reference.raan_rad)) / deg < 0.001);
+    // close to the usual GCRF RAAN of the first row (69.36 deg): the frames differ by the pole tilt only
+    const auto gcrf = orbit::elements_from_state(oem.row_state(0), gm);
+    CHECK(std::abs(unwrap_delta(gcrf.raan_rad, reference.raan_rad)) / deg < 0.5);
 }

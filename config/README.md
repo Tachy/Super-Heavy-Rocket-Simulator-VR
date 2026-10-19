@@ -114,6 +114,21 @@ flow separation (vacuum engines).
 - Falcon 9 octaweb: `center` (1, the landing engine), `pair` (2 opposite ring engines: with the centre the 3-engine set
   of boostback and entry burn, thrust on the axis), `ring` (the other 6).
 
+## Space stations (ISS, milestone i)
+- `[[stage]] inertia_kg_m2 = [Ixx, Iyy, Izz]`: principal moments of the dry stage about its own CG (any stage;
+  without it a cylinder from length and diameter).
+- `[stage.aero] fixed_drag_area_m2` + `fixed_drag_coefficient`: drag C_D A along the oncoming flow, replacing the
+  slender-body aero (a station); `solar_area_m2`: fixed area for solar radiation pressure (else the cylinder model).
+- `[stage.station]`: marks the stage as a station flown in ideal LVLH attitude (+XVV, x forward, y starboard,
+  z nadir); `body_in_lvlh_deg = [yaw, pitch, roll]` (torque equilibrium attitude).
+- `[stage.station.reference_orbit]`: the synthetic orbit without any OEM - `altitude_km` (a minus the equatorial
+  radius), `inclination_deg`, `raan_deg` (both in the true equator frame of date), `reference_utc`.
+- `[[stage.docking_port]]`: `id`, `name` (German, shown), `position_m` (stage frame: x station from the stage bottom,
+  y/z body axes), `axis` (outward unit vector), `up` (clocking reference perpendicular to it).
+- `[[stage.collision]]`: `id`, `kind = "capsule"` (segment `a_m`-`b_m`, `radius_m`) or `"box"` (centre `a_m`,
+  body-aligned `half_extents_m`), stage frame.
+- With an OEM, mass, drag area and C_D come from its header instead of the config.
+
 ## Lunar landing sites (`lunar_sites.toml`)
 - `[[site]]`: `id`, `name`, `latitude_deg` / `longitude_deg` (MOON_ME, the frame of the LOLA maps), `tile_half_size_m`
   (half the side of the terrain tile), `product` (LOLA product the tile is cropped from: `"LDEM_80S_20M"`).

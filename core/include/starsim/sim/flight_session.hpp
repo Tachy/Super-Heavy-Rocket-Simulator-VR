@@ -541,9 +541,10 @@ public:
 
     // A space station (a vehicle with [stage.station]) as an uncontrolled body in ideal LVLH attitude; `impulses`
     // are applied at their epochs (a coast stops there). Call after place_body / launch_from_pad / place_in_orbit -
-    // they clear all bodies, the station included. Returns its body index. Throws std::logic_error for a vehicle
-    // without [stage.station] or when a station exists already.
-    size_t add_station(const config::VehicleConfig& config, const math::StateVector& state_gcrf,
+    // they clear all bodies, the station included. `epoch` is the state's: a session without bodies starts there,
+    // otherwise it must be the session's epoch (within one tick). Returns its body index. Throws std::logic_error for
+    // a vehicle without [stage.station], when a station exists already or on an epoch mismatch.
+    size_t add_station(const config::VehicleConfig& config, const math::StateVector& state_gcrf, time::Epoch epoch,
                        std::vector<StationImpulse> impulses = {});
     std::optional<size_t> station_index() const { return station_index_; }
     // A session that starts with a station only (no body placed yet); throws std::logic_error while bodies exist.

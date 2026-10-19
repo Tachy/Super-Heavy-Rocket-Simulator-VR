@@ -30,8 +30,12 @@ math::StateVector rotated(const math::Mat3& r, const math::StateVector& s) {
 
 math::Mat3 true_equator_to_gcrf(const frames::BodyOrientation& earth, time::Epoch epoch) {
     const math::Vec3 pole = math::normalized(earth.fixed_to_gcrf(epoch).rotation * math::Vec3{0.0, 0.0, 1.0});
-    const math::Vec3 node = math::normalized(math::cross(math::Vec3{0.0, 0.0, 1.0}, pole));
-    return math::Mat3::from_columns(node, math::cross(pole, node), pole);
+    // x: the GCRF x axis projected onto the true equator (well defined for any pole tilt, close to the usual GCRF
+    // RAAN origin); the node of the true equator on the GCRF equator would sit near GCRF +y in 2026 and be undefined
+    // at J2000.
+    const math::Vec3 gcrf_x{1.0, 0.0, 0.0};
+    const math::Vec3 x = math::normalized(gcrf_x - dot(gcrf_x, pole) * pole);
+    return math::Mat3::from_columns(x, math::cross(pole, x), pole);
 }
 
 // Vallado, Fundamentals of Astrodynamics and Applications, 4th ed., eq. 9-41 [S]: secular J2 rates of the node,

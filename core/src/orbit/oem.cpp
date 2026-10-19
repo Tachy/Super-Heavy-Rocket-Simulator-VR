@@ -122,7 +122,9 @@ Oem Oem::parse(std::istream& in, const time::TimeScaleConverter& time, const std
             } else if (line.find("End sequence of events") != std::string::npos) {
                 in_events = false;
             } else if (in_events) {
-                if (line.find_first_of("(|=") != std::string::npos) continue;
+                // table rules, column titles and the imperial "(...)" second lines; a name may contain '('
+                const std::string text = trim(line.substr(7));
+                if (!text.empty() && (text.front() == '(' || text.front() == '|' || text.front() == '=')) continue;
                 std::smatch m;
                 if (std::regex_match(line, m, event_row)) {
                     raw_events.push_back({m[1].str(), std::stoi(m[2].str()), std::stoi(m[3].str()),

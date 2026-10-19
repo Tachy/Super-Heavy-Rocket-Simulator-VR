@@ -35,7 +35,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`.
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
   Moon: body-fixed frame, shape, atmosphere or vacuum),
-  integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP),
+  integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP,
+  CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
   the mission delta-v budget and the Earth return: TEI, mid-course corrections, braking burn),
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
@@ -45,9 +46,11 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
   aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating plus radiative heating
   from the NASA TM-102652 equilibrium tables, blunt capsule from a
-  modified-Newtonian table with offset-CG trim, reefed parachutes),
+  modified-Newtonian table with offset-CG trim, reefed parachutes, fixed-area drag of a station),
   propulsion (engine performance, RCS allocator + pulse modulator),
-  vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity).
+  vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity,
+  ideal LVLH attitude of a station), sim (flight session incl. the ISS as a station body from OEM or synthetic orbit).
+  The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
   CSPICE lives only in `core/src/spice/` and implements `time::TimeScaleConverter`,

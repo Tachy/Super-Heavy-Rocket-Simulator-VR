@@ -13,7 +13,8 @@
 namespace starsim::orbit {
 
 // Rotation from the true equator frame of `epoch` to GCRF: z = the Earth's true pole (ITRF z-axis, the J2 axis of
-// the gravity model), x = the ascending node of that equator on the GCRF equator. Station elements refer to this
+// the gravity model), x = the GCRF x axis projected onto that equator (close to the usual GCRF RAAN origin, defined
+// for any pole tilt; the node on the GCRF equator would lie near GCRF +y in 2026). Station elements refer to this
 // frame (the ISS's 51.64 deg are measured from the true equator; in GCRF the 2026 OEM shows ~51.77 deg). [E] the
 // frame's own precession rate (~1e-12 rad/s) is ignored when states are rotated.
 math::Mat3 true_equator_to_gcrf(const frames::BodyOrientation& earth, time::Epoch epoch);

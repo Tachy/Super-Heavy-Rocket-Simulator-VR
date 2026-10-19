@@ -709,3 +709,75 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   waits for a running input / chunk; an advance that throws stalls the runner until the next command (no re-throw
   every chunk), the snapshot is still built, and `FlightSim` reports input / advance / snapshot errors once via
   `push_error` (`SessionRunner::take_error`).
+
+## ISS rendezvous and docking (milestone i)
+
+Spec `docs/superpowers/specs/2026-10-19-iss-docking-design.md` (parts i1-i6; only Crew Dragon docks).
+
+### ISS target body (i1)
+Plan `docs/superpowers/plans/2026-10-19-iss-i1-target-body.md`, ledger
+`.superpowers/sdd/2026-10-19-iss-i1-target-body/progress.md`.
+- **Data source and archive.** NASA "ISS Trajectory Data" (CCSDS OEM, public domain,
+  `tools/data_pipeline/sources.toml`): `fetch.py` downloads the current file and archives it as
+  `data/iss_oem/ISS.OEM_J2K_EPH_<CREATION_DATE>.txt` (`tools/data_pipeline/iss_oem.py`; an already archived creation
+  date is skipped), so the archive grows with every run. Committed fixture: the full 2026-10-14 file in
+  `tests/validation/fixtures/iss_oem/`.
+- **Format facts** (file of 2026-10-14): CCSDS OEM 2.0 KVN, `REF_FRAME = EME2000` (taken as GCRF axes; frame bias
+  ~23 mas, < 1 m at the ISS, not modelled), `TIME_SYSTEM = UTC` (converted to TDB at load time), km and km/s, 15 days on
+  a 4 min grid that restarts at three rows: a 90 s step onto 2026-10-17T17:57:30 and 2026-10-21T04:35:00, a 210 s
+  step onto 2026-10-28T08:42:30; a last 90 s step reaches the stop time 2026-10-29T12:00 (no new segment). The
+  trajectory is continuous across the seams (extrapolation from either side matches to 7-250 m, like ordinary rows).
+  CRLF line ends. Header comments `MASS=460320.00`, `DRAG_AREA=1177.76`, `DRAG_COEFF=1.50`,
+  `SOLAR_RAD_AREA=0.00` and the "TRAJECTORY EVENT SUMMARY" table (event, TIG as day-of-year GMT, optional ORB, DV m/s,
+  HA/HP km; imperial "(...)" second lines skipped).
+- **`orbit/oem`.** `Oem` parses one file (rejects other frames, unordered rows) and interpolates by Lagrange degree 8
+  (CCSDS recommendation) inside runs of equal steps ("segments"): a segment starts at row k when the step after k
+  differs from the step before and the next step equals the step after (a single odd step makes no 1-row segment);
+  the seam row is shared, and no window reaches across a seam. Leave-one-out on the thinned 8 min grid: median 20 m,
+  worst 529 m (one-sided window after a seam), 1.3 m/s; the error scales ~h^9, so the published 4 min grid gives
+  ~4 cm (~1 m one-sided). `OemArchive` (one directory) picks the newest file (by CREATION_DATE) whose usable window
+  contains the epoch; unparsable files are listed in `skipped()`.
+- **`orbit/synthetic_station_orbit`.** For dates without OEM coverage: mean elements averaged over the first
+  revolution of the newest OEM, advanced by the secular J2 rates (RAAN, argument of perigee, mean argument of
+  latitude); the scenario sets the argument of latitude. The elements refer to the **true equator of date** (z = the
+  ITRF pole, the J2 axis of the gravity model; x = the GCRF x axis projected onto that equator,
+  `true_equator_to_gcrf`), not GCRF: in GCRF the OEM shows i = 51.773 deg (precession since J2000) and the advanced
+  RAAN missed the OEM by 0.156 deg after 14 days; in the true-equator frame i = 51.633 deg and the RAAN error after
+  14 days is +0.018 deg. The x axis was first the node of the true equator on the GCRF equator (final review): that
+  lies near GCRF +y in 2026 (RAANs 90.7 deg off the usual value), swings with nutation and is undefined at J2000; the
+  projected GCRF x keeps RAANs within a fraction of a degree of the usual GCRF RAAN today. The state uses the mean elements as
+  osculating ones [E: J2 short-period terms ~+-10 km in radius not restored]. Without any OEM:
+  `[stage.station.reference_orbit]` of `iss.toml` (415 km [E], 51.64 deg [S], RAAN 69.3148 deg [D] at
+  2026-10-14T12:00 UTC; a test keeps it equal to the fixture's mean RAAN). The 2026-10-14 OEM has a mean a - R of 420.7 km (HA/HP 418.6/421.1 km).
+- **ISS vehicle** (`config/vehicles/iss.toml`): one stage, no engines. Mass 460,320 kg, drag area 1,177.76 m^2 and
+  C_D 1.5 [S: OEM header] (replaced by the header of the OEM in use); fixed drag C_D A along the oncoming flow
+  (`aero/fixed_area_aero`, replaces the slender-body aero); SRP with a fixed `solar_area_m2` 2,500 m^2 [E] (the OEM
+  uses 0); principal inertia [E] (not used while the attitude is ideal; needed by the compound body in i5); ports
+  IDA-2 (Harmony forward, +XVV: V-bar) and IDA-3 (Harmony zenith: R-bar) with position, outward axis and clocking
+  `up` [E]; collision capsules (modules) and boxes (truss, arrays) [E] - data for i4/i5. Drag acts at every height
+  US76 covers (to 1,000 km); there was no aero cut-off to lift.
+- **Ideal attitude** (documented simplification): a body with `[stage.station]` snaps to LVLH (+XVV: body x along
+  the velocity, z nadir) rotated by the TEA `body_in_lvlh_deg` [E: yaw -3, pitch -6, roll 0.5 deg] right after each
+  integrator step (`FlightBody::set_ideal_lvlh_attitude`, `frames/lvlh` - moved from `gnc` so `vehicle` stays below
+  it); contact torques do not change it (CMGs taken as strong enough). Translation is free.
+- **Session.** `sim::iss_start(iss, archive, time, earth, epoch, source, argument_of_latitude)` chooses the source by
+  the fidelity flag `iss_orbit` (`IssOrbitSource`): `oem` outside every window is a German error (no fallback),
+  `synthetic`, or `auto` (OEM where covered, else synthetic; `note` says which); `StationStart` carries the state's
+  epoch. `FlightSession::add_station(config, state, epoch, impulses)` adds the station as an uncontrolled body (when
+  it is alone it is the "controlled" index, but nothing commands it) - **call it after `place_body` /
+  `launch_from_pad` / `place_in_orbit`**: they clear all bodies, the station included (`station_index()` is reset, no
+  dangling index). Without bodies the session starts at the station's epoch; with bodies an epoch more than one tick
+  off the session's is a `logic_error`, as are a second station and a vehicle without `[stage.station]`. A station alone still
+  coasts: its orbital rate (1.1e-3 rad/s) exceeds the "rotation settled" threshold (1e-3 rad/s), so the coast check
+  skips bodies in ideal attitude.
+- **Impulses.** OEM events with DV > 0 after the start epoch become impulsive Delta-v along the velocity at their TIG
+  [D] (a coast stops there). The sign comes from the OEM's own mean radius one revolution after vs before the TIG
+  (32 samples each). Within one revolution of the window edges the sign cannot be read (a single sampled radius
+  swings by several km, a 1 m/s burn moves a by ~1.8 km): the burn is assumed posigrade (reboosts are) and the
+  `note` names it. The fixture has only a 0 m/s docking event; the sign paths are tested with generated two-body OEMs
+  (retrograde, posigrade with "(" in the event name, near the window end). Event names may contain "(": only lines
+  starting with "(", "|" or "=" are skipped.
+- **OEM validation** (`[iss]`, SRP off as in the header, start 2026-10-16T00:00 UTC, our full force model with US76):
+  after 6 h R 21.8 m, T -894.5 m, N -13.3 m; after 24 h R -11.7 m, T -3,228.7 m, N -43.0 m (tolerances 1,400 m /
+  4,900 m). Almost all along track: the US76 density at ~420 km differs from NASA's (solar-activity dependent)
+  model; NRLMSISE in M8 should shrink it. Station tests run < 0.5 s each.

@@ -27,6 +27,7 @@ struct StationImpulse {
 struct StationStart {
     config::VehicleConfig vehicle;         // OEM header values applied (mass, drag area, C_D) when from the OEM
     math::StateVector state_gcrf;
+    time::Epoch epoch;                     // of state_gcrf
     std::vector<StationImpulse> impulses;  // events with DV > 0 after the start epoch, sorted by epoch
     bool from_oem = false;
     std::string note;                      // German: which source was used (and why), shown by the mission
