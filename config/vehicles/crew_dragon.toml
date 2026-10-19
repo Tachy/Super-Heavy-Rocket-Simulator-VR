@@ -138,3 +138,4 @@ position_m = [4.0, 0.0, 0.0]             # [E] top of the pressure vessel, below
 axis = [1.0, 0.0, 0.0]                   # forward, along the capsule axis
 up = [0.0, 0.0, -1.0]                    # [E] clocking reference
 behind_nose_cone = true                  # [S] the cone covers it during ascent and entry
+soft_capture = "active"                  # [S: IDSS IDD E 3.1.1.1] Dragon's soft-capture system extends its ring

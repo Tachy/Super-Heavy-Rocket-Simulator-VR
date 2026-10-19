@@ -96,3 +96,19 @@ TEST_CASE("Capture envelope", "[iss][proximity]") {
     spinning.angular_rate_radps = {0.0, 0.3 * deg, 0.0};
     CHECK_FALSE(gnc::capture_envelope_check(spinning).inside);
 }
+
+TEST_CASE("Capture envelope: IDSS roll misalignment and roll rate", "[iss][proximity][docking]") {
+    gnc::RelativePortState s;
+    s.position_m = {0.0, 0.02, 0.0};
+    s.velocity_mps = {-0.075, 0.0, 0.0};
+    s.closing_speed_mps = 0.075;
+    CHECK(gnc::capture_envelope_check(s).inside);
+    s.clocking_rad = 4.5 * constants::deg_to_rad;
+    CHECK_FALSE(gnc::capture_envelope_check(s).inside);
+    CHECK(gnc::capture_envelope_check(s).reason.rfind("Rollwinkel zu groß", 0) == 0);
+    s.clocking_rad = 0.0;
+    s.angular_rate_radps = {0.25 * constants::deg_to_rad, 0.0, 0.0};  // roll rate about the docking axis
+    CHECK(gnc::capture_envelope_check(s).reason.rfind("Rollrate zu groß", 0) == 0);
+    s.angular_rate_radps = {0.0, 0.15 * constants::deg_to_rad, 0.0};  // pitch/yaw inside, roll 0
+    CHECK(gnc::capture_envelope_check(s).inside);
+}

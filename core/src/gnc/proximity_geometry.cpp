@@ -75,9 +75,14 @@ EnvelopeCheck capture_envelope_check(const RelativePortState& state, const Captu
     if (offset_m > envelope.offset_max_m) return violated("Versatz zu groß", offset_m, "m");
     if (state.misalignment_rad > envelope.angle_max_rad)
         return violated("Winkel zu groß", state.misalignment_rad / constants::deg_to_rad, "°");
-    const double rate_radps = norm(state.angular_rate_radps);
+    const math::Vec3& w = state.angular_rate_radps;  // target port frame: x = the docking axis (roll)
+    const double rate_radps = std::hypot(w.y, w.z);
     if (rate_radps > envelope.rate_max_radps)
         return violated("Drehrate zu groß", rate_radps / constants::deg_to_rad, "°/s");
+    if (std::abs(state.clocking_rad) > envelope.roll_max_rad)
+        return violated("Rollwinkel zu groß", std::abs(state.clocking_rad) / constants::deg_to_rad, "°");
+    if (std::abs(w.x) > envelope.roll_rate_max_radps)
+        return violated("Rollrate zu groß", std::abs(w.x) / constants::deg_to_rad, "°/s");
     return {true, ""};
 }
 

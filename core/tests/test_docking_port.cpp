@@ -65,3 +65,10 @@ TEST_CASE("An unknown port id is a German error", "[iss][rendezvous][port]") {
     auto iss = body_of("iss", {{6.8e6, 0.0, 0.0}, {0.0, 7660.0, 0.0}, math::Quat{}, {}});
     CHECK_THROWS_AS(vehicle::port_kinematics(*iss, "ida1"), std::invalid_argument);
 }
+
+TEST_CASE("Docking ports carry the soft-capture mode", "[iss][docking][config]") {
+    const auto dragon = config::load_vehicle(config_dir, "crew_dragon");
+    const auto iss = config::load_vehicle(config_dir, "iss");
+    CHECK(dragon.stages.back().docking_ports.front().soft_capture == config::SoftCaptureMode::Active);
+    for (const auto& port : iss.stages.front().docking_ports) CHECK(port.soft_capture == config::SoftCaptureMode::Passive);
+}

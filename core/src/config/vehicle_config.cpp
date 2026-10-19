@@ -278,6 +278,12 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 doc.fail("stage.docking_port '" + port.id + "': axis and up must be perpendicular unit vectors");
             }
             port.behind_nose_cone = p["behind_nose_cone"].value_or(false);
+            const std::string mode = p["soft_capture"].value_or(std::string("passive"));
+            if (mode == "active") {
+                port.soft_capture = SoftCaptureMode::Active;
+            } else if (mode != "passive") {
+                doc.fail("stage.docking_port '" + port.id + "': soft_capture must be \"active\" or \"passive\"");
+            }
             s.docking_ports.push_back(port);
         }
     }

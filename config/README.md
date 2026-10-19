@@ -125,7 +125,9 @@ flow separation (vacuum engines).
   radius), `inclination_deg`, `raan_deg` (both in the true equator frame of date), `reference_utc`.
 - `[[stage.docking_port]]`: `id`, `name` (German, shown), `position_m` (stage frame: x station from the stage bottom,
   y/z body axes), `axis` (outward unit vector), `up` (clocking reference perpendicular to it), optional
-  `behind_nose_cone` (default false: the port is covered while the vehicle's nose cone is closed - Crew Dragon `idss`).
+  `behind_nose_cone` (default false: the port is covered while the vehicle's nose cone is closed - Crew Dragon `idss`),
+  optional `soft_capture = "active" | "passive"` (default passive; IDSS: the active side extends its soft-capture ring,
+  the passive one stays retracted - Crew Dragon active, the ISS IDAs passive; a docking needs one of each).
 - `[[stage.collision]]`: `id`, `kind = "capsule"` (segment `a_m`-`b_m`, `radius_m`) or `"box"` (`centre_m`,
   body-aligned `half_extents_m`), stage frame.
 - With an OEM, mass, drag area and C_D come from its header instead of the config.

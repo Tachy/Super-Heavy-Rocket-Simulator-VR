@@ -67,7 +67,7 @@ struct ProximityParameters {
     double approach_time_constant_s = 600.0;  // [E] axial speed = range / this between the limits
     double final_speed_start_mps = 0.10;      // [S: Demo-2 0.33 ft/s before soft capture] at Waypoint 2
     double contact_speed_mps = 0.075;         // [E] middle of the axial capture band 0.05-0.10
-    double contact_plane_m = 0.0;  // [E] contact when the chaser port reaches this axial distance (i5: ring reach)
+    double contact_plane_m = 0.0;  // [E] contact when the chaser port reaches this axial distance (i5: the session sets the petal mesh plane)
     double lateral_gain_per_s = 0.1;        // [E] lateral velocity = -offset * gain (offset ~ deadband mean / gain)
     double lateral_speed_max_mps = 0.03;    // [E] below the lateral capture bound 0.04
     double hold_time_constant_s = 60.0;     // [E] position hold: velocity = -error / this
@@ -99,12 +99,14 @@ CorridorStatus corridor_status(const math::Vec3& position_port_m, double cg_rang
 // (axes opposed, ups equal). `chaser_port_axes_body`: columns of the chaser port frame in its body frame.
 math::Quat docking_attitude_gcrf(const math::Mat3& chaser_port_axes_body, const math::Mat3& target_port_axes_gcrf);
 
-struct CaptureEnvelope {  // [E] spec guide values; i5 verifies them against the IDSS IDD Rev. E
+struct CaptureEnvelope {  // [S: IDSS IDD E Table 3.3.1.1-2, Initial Contact Conditions] (verified in i5)
     double axial_min_mps = 0.05, axial_max_mps = 0.10;
     double lateral_max_mps = 0.04;
     double offset_max_m = 0.10;
-    double angle_max_rad = 4.0 * constants::deg_to_rad;
-    double rate_max_radps = 0.2 * constants::deg_to_rad;
+    double angle_max_rad = 4.0 * constants::deg_to_rad;   // pitch/yaw misalignment, vector sum
+    double rate_max_radps = 0.2 * constants::deg_to_rad;  // pitch/yaw rate, vector sum
+    double roll_max_rad = 4.0 * constants::deg_to_rad;
+    double roll_rate_max_radps = 0.2 * constants::deg_to_rad;
 };
 struct EnvelopeCheck {
     bool inside = false;

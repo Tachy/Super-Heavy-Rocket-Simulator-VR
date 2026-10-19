@@ -120,6 +120,9 @@ struct StationReferenceOrbitConfig {
 
 // [[stage.docking_port]]: stage frame (x = station from the stage bottom, y/z body axes); `axis` is the outward unit
 // vector, `up` the clocking reference perpendicular to it.
+// IDSS: one side extends its soft-capture ring (active), the other stays retracted (passive) - ISS i5.
+enum class SoftCaptureMode { Passive, Active };
+
 struct DockingPortConfig {
     std::string id;
     std::string name;
@@ -127,6 +130,7 @@ struct DockingPortConfig {
     math::Vec3 axis;
     math::Vec3 up;
     bool behind_nose_cone = false;  // covered while the stage's nose cone is closed (Crew Dragon)
+    SoftCaptureMode soft_capture = SoftCaptureMode::Passive;  // TOML soft_capture = "active" | "passive"
 };
 
 // [[stage.collision]]: "capsule" = segment a-b with radius; "box" = centre a_m, body-aligned, half_extents_m.
