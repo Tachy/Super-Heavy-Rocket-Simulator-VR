@@ -41,15 +41,16 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   the mission delta-v budget and the Earth return: TEI, mid-course corrections, braking burn),
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
-  aerocapture guidance),
+  aerocapture guidance, relative navigation between docking ports),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
   aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating plus radiative heating
   from the NASA TM-102652 equilibrium tables, blunt capsule from a
   modified-Newtonian table with offset-CG trim, reefed parachutes, fixed-area drag of a station),
-  propulsion (engine performance, RCS allocator + pulse modulator),
+  propulsion (engine performance, RCS allocator incl. pure translation capability + pulse modulator),
   vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity,
-  ideal LVLH attitude of a station), sim (flight session incl. the ISS as a station body from OEM or synthetic orbit).
+  ideal LVLH attitude of a station, docking-port kinematics), sim (flight session incl. the ISS as a station body from
+  OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.

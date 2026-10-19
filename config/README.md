@@ -124,7 +124,8 @@ flow separation (vacuum engines).
 - `[stage.station.reference_orbit]`: the synthetic orbit without any OEM - `altitude_km` (a minus the equatorial
   radius), `inclination_deg`, `raan_deg` (both in the true equator frame of date), `reference_utc`.
 - `[[stage.docking_port]]`: `id`, `name` (German, shown), `position_m` (stage frame: x station from the stage bottom,
-  y/z body axes), `axis` (outward unit vector), `up` (clocking reference perpendicular to it).
+  y/z body axes), `axis` (outward unit vector), `up` (clocking reference perpendicular to it), optional
+  `behind_nose_cone` (default false: the port is covered while the vehicle's nose cone is closed - Crew Dragon `idss`).
 - `[[stage.collision]]`: `id`, `kind = "capsule"` (segment `a_m`-`b_m`, `radius_m`) or `"box"` (`centre_m`,
   body-aligned `half_extents_m`), stage frame.
 - With an OEM, mass, drag area and C_D come from its header instead of the config.

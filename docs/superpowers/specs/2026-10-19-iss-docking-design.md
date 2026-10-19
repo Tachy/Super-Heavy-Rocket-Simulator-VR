@@ -1,7 +1,8 @@
 # ISS rendezvous and docking with Crew Dragon - design
 
 Status: approved 2026-10-19. i1 implemented (plan `docs/superpowers/plans/2026-10-19-iss-i1-target-body.md`, notes in
-`docs/subsystems.md`, OEM fixture `tests/validation/fixtures/iss_oem/`). Milestone (i),
+`docs/subsystems.md`, OEM fixture `tests/validation/fixtures/iss_oem/`). i2 implemented (plan
+`docs/superpowers/plans/2026-10-19-iss-i2-dragon-translation.md`; Draco layout kept, user 2026-10-19). Milestone (i),
 part of plan milestone M9 (rendezvous and ISS docking), after the lunar milestone (l1-l6, main `6da3f70`).
 
 ## Intent

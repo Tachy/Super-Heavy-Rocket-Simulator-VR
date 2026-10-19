@@ -781,3 +781,56 @@ Plan `docs/superpowers/plans/2026-10-19-iss-i1-target-body.md`, ledger
   after 6 h R 21.8 m, T -894.5 m, N -13.3 m; after 24 h R -11.7 m, T -3,228.7 m, N -43.0 m (tolerances 1,400 m /
   4,900 m). Almost all along track: the US76 density at ~420 km differs from NASA's (solar-activity dependent)
   model; NRLMSISE in M8 should shrink it. Station tests run < 0.5 s each.
+
+### Crew Dragon translation and relative navigation (i2)
+Plan `docs/superpowers/plans/2026-10-19-iss-i2-dragon-translation.md`, ledger
+`.superpowers/sdd/2026-10-19-iss-i2-dragon-translation/progress.md`.
+- **Draco layout kept** (user 2026-10-19): the [E] layout of the RCS milestone reaches the approach accelerations
+  without changes. Planning probe (LP bound, cone open, 12.5 t): +-x 1534 N, +-y/+-z 576 N (0.046 m/s^2; 0.040-0.058
+  m/s^2 for CG stations 4.2-4.8 m). Threshold for the test: lateral >= 0.04 m/s^2 [E] (1 m/s in 25 s).
+- **Pure translation capability.** `RcsAllocator::force_capability_n` is not a pure translation: its saturating
+  least squares trades a turn and a cross push (Dragon "lateral" 631 N came with 400 N axial and 92 N m, and ~400 N
+  even with the cone closed). `RcsAllocator::pure_force_capability_n` bisects below it for the largest force whose
+  allocation leaves torque and cross force below 1 % (of the force / of the gross thruster torque);
+  `Vehicle::rcs_pure_force_capability`, `VehicleCommand::rcs_force_pure` (the force fraction refers to it). Burns keep
+  the coupled capability (validated campaigns unchanged). Measured (cone open, 12.5 t): +x 1556.3 N = 0.1245 m/s^2,
+  4.25 kg per m/s (ideal m/(Isp g0) 4.25); -x 1556.3 N, 4.55 kg/(m/s); +-y +-z 566.7 N = 0.0453 m/s^2,
+  16.20 kg/(m/s) (3.8x the ideal: the axial pairs that cancel the side pods' couple fire too; bound 4.5x [E]);
+  residual torque <= 0.01 N m.
+- **Closed nose cone:** pure lateral and -x authority < 1 N. Lateral force needs the nose Dracos (under the cone);
+  the side pods' tangential thrusters sit ~1.6 m forward of the CG and their couple can only be cancelled by
+  differential axial thrust, which leaves no net lateral force.
+- **Dragon port** (`crew_dragon.toml`): `idss` on the capsule, station 4.0 m [E] (top of the pressure vessel, under
+  the cone hinge), axis body +x, clocking `up` body -z [E], `behind_nose_cone = true` [S]: covered while the cone is
+  closed.
+- **Port frame** (`vehicle/docking_port`, `port_kinematics(body, id)`): x = outward docking axis, z = the clocking
+  reference `up`, y = z x x. Lever from the current CG (follows propellant use); port velocity = CG velocity +
+  omega x lever. Two ports are mated with the axes opposed and the ups equal.
+- **Relative state** (`gnc/relative_navigation`, `relative_port_state(chaser, target)`): chaser port relative to
+  the target port in the target port frame, which turns with the target body - a co-moving chaser reads zero velocity
+  (the frame's omega x r is removed). Closing speed = -d(range)/dt (> 0 approaching); misalignment = angle between
+  the chaser axis and the reversed target axis; clocking = chaser up against target up about the target axis
+  (positive about +x_target, (-pi, pi]). Fidelity flag `relative_nav`: only `"ideal"` (true states; GPS / LIDAR /
+  thermal camera models later).
+- **Session API** (`sim::FlightSession`): `set_rendezvous_target(target_index, chaser_port, target_port)`
+  (out_of_range for a bad index or the controlled body, German invalid_argument for an unknown port),
+  `clear_rendezvous_target()`, `relative_port_state()` (nullopt without a target), `set_translation_command(f)`
+  (target port frame, fraction of the pure capability, |f| > 1 scaled to 1; logic_error without a target). Target and
+  command are cleared with the bodies (`place_body` / `launch_from_pad` / `place_in_orbit`) and whenever the
+  controlled body changes (`stage`, payload separation, the capsule's trunk jettison: the chaser port belonged to the
+  old body). The command is flown only in an attitude hold or in rate mode outside the autopilot's own steering
+  (autopilot Off / Orbit / Lunar; `translation_flown()`), and only then the session does not coast (the coast skips
+  the RCS); a stale command elsewhere (a burn's drift wait, a capsule return) neither acts nor stops the time warp
+  (final review). The command is applied next to the attitude hold's torque,
+  **torque first** (`rcs_keep_force = false`): with the force kept (the plan's choice) a full pure translation
+  saturated the Dracos, the hold's torque was cut and the attitude drifted 2.8-13.8 deg in 20 s (nose direction only;
+  5 s settle did not recover it); at 80 % command the hold stayed < 0.7 deg, torque first at 100 % < 0.72 deg. Cost:
+  the hold's turns may push slightly (cross <= 0.064 m/s over 20 s); a saturated translation is cut instead. A
+  pilot's body-axis translation (`input_.translation`) takes precedence over the command in rate mode.
+- **Translation campaign** (`[rendezvous][session][validation]`, Dragon 50 m in front of IDA-2, OEM ISS 2026-10-16,
+  LVLH hold; the hold first rolls the placed Dragon in (~1 deg/s, settled to 0.43 deg after 100 s), then 20 s full
+  command per target-port axis, 5 s settle; dv / expected, cross, propellant / expected, worst full attitude error
+  incl. roll): +x 2.296/2.301 m/s, 0.064, 11.14/11.13 kg, 0.63 deg; -x 2.335/2.334, 0.039, 13.24/13.31, 0.71;
+  +y 0.899/0.908, 0.007, 14.52/14.51, 0.58; -y 0.896/0.909, 0.006, 14.95/14.96, 0.68; +z 0.903/0.917, 0.024,
+  15.13/15.13, 0.68; -z 0.912/0.917, 0.027, 14.29/14.27, 0.59 (tolerances 15 % dv, cross < 10 % + 0.01 m/s, 25 %
+  propellant, 1 deg). Port +-x is the Dragon's body +-x here (both noses along the LVLH velocity). Runs in ~2 s.
