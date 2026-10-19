@@ -262,6 +262,11 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     if (auto station = t["station"].as_table()) {
         const math::Vec3 deg = vec3(doc, *station, "body_in_lvlh_deg");  // yaw, pitch, roll [E] (torque equilibrium attitude)
         s.body_in_lvlh_rad = deg * constants::deg_to_rad;
+        if (auto orbit = (*station)["reference_orbit"].as_table()) {
+            s.reference_orbit = config::StationReferenceOrbitConfig{
+                doc.number(*orbit, "altitude_km") * 1e3, doc.number(*orbit, "inclination_deg") * constants::deg_to_rad,
+                doc.number(*orbit, "raan_deg") * constants::deg_to_rad, doc.text(*orbit, "reference_utc")};
+        }
     }
     if (auto ports = t["docking_port"].as_array()) {
         for (const auto& node : *ports) {

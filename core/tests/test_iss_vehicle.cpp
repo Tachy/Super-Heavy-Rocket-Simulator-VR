@@ -64,6 +64,11 @@ TEST_CASE("ISS config: mass, drag, inertia, ports and primitives", "[iss][config
     CHECK(s.aero.fixed_drag_coefficient == Catch::Approx(1.5));
     REQUIRE(s.inertia_kg_m2.has_value());
     REQUIRE(s.body_in_lvlh_rad.has_value());
+    REQUIRE(s.reference_orbit.has_value());
+    CHECK(s.reference_orbit->altitude_m == Catch::Approx(415.0e3));
+    CHECK(s.reference_orbit->inclination_rad == Catch::Approx(51.64 * constants::deg_to_rad));
+    CHECK(s.reference_orbit->raan_rad == Catch::Approx(338.656 * constants::deg_to_rad));
+    CHECK(s.reference_orbit->reference_utc == "2026-10-14T12:00:00");
     REQUIRE(s.docking_ports.size() == 2);
     CHECK(s.docking_ports[0].id == "ida2");
     CHECK(s.docking_ports[1].id == "ida3");

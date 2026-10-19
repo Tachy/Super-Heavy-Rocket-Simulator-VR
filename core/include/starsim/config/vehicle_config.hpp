@@ -109,6 +109,15 @@ struct AeroConfig {
     double solar_area_m2 = 0.0;           // > 0: fixed area for solar radiation pressure (else the cylinder model)
 };
 
+// [stage.station.reference_orbit]: the synthetic station orbit without any OEM, elements in the true equator frame of
+// reference_utc (UTC text, converted by the session).
+struct StationReferenceOrbitConfig {
+    double altitude_m = 0.0;  // semi-major axis minus the equatorial radius
+    double inclination_rad = 0.0;
+    double raan_rad = 0.0;
+    std::string reference_utc;
+};
+
 // [[stage.docking_port]]: stage frame (x = station from the stage bottom, y/z body axes); `axis` is the outward unit
 // vector, `up` the clocking reference perpendicular to it.
 struct DockingPortConfig {
@@ -270,6 +279,7 @@ struct StageConfig {
     double max_splashdown_speed_mps = 0.0;
     std::optional<math::Vec3> inertia_kg_m2;      // principal moments of the dry stage about its own CG (else a cylinder)
     std::optional<math::Vec3> body_in_lvlh_rad;   // a station: ideal LVLH attitude, yaw / pitch / roll (TEA)
+    std::optional<StationReferenceOrbitConfig> reference_orbit;  // a station: synthetic orbit defaults
     std::vector<DockingPortConfig> docking_ports;
     std::vector<CollisionPrimitiveConfig> collision;
 };

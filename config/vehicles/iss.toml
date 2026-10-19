@@ -35,6 +35,14 @@ solar_area_m2 = 2500.0                   # [E] sun-tracking arrays (8 wings ~ 35
 [stage.station]
 body_in_lvlh_deg = [-3.0, -6.0, 0.5]     # [E] yaw, pitch, roll: a typical torque equilibrium attitude (TEA)
 
+# Synthetic orbit without any OEM (fidelity flag iss_orbit = "synthetic"). Elements refer to the true equator of date
+# (z = the Earth's true pole, x = its ascending node on the GCRF equator), see orbit/synthetic_station_orbit.hpp.
+[stage.station.reference_orbit]
+altitude_km = 415.0                      # [E] typical ISS mean altitude 2024-2026 (the 2026-10-14 OEM: 420.7 km mean a - R)
+inclination_deg = 51.64                  # [S:wiki_iss]
+raan_deg = 338.656                       # [D] mean RAAN of the 2026-10-14 OEM at reference_utc
+reference_utc = "2026-10-14T12:00:00"    # the fixture's first row
+
 # Ports: position in the stage frame (x station, y starboard, z nadir), outward docking axis, clocking reference.
 [[stage.docking_port]]
 id = "ida2"
