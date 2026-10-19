@@ -136,6 +136,7 @@ add_executable(starsim_core_tests
     test_attitude_bench.cpp
     test_tvc_lateral.cpp
     test_clohessy_wiltshire.cpp
+    test_rendezvous_geometry.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE

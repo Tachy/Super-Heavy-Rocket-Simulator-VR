@@ -38,10 +38,14 @@ public:
 
     // The burn is flown as a finite burn of these engines (apply_finite_burn); empty: impulsive.
     void set_finite_burn(std::optional<FiniteBurnModel> model) { finite_ = model; }
+    // Orbital drag of the coasts, C_D A / m (US76, gnc::coast_with_drag); 0 (default): drag-free. The finite burn
+    // itself stays drag-free (minutes).
+    void set_drag_area_per_mass(double m2pkg) { drag_area_per_mass_m2pkg_ = m2pkg; }
 
 private:
     const environment::GravityModel& gravity_;
     std::optional<FiniteBurnModel> finite_;
+    double drag_area_per_mass_m2pkg_ = 0.0;
 };
 
 }  // namespace starsim::mission

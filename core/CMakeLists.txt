@@ -95,6 +95,7 @@ add_library(starsim_core STATIC
     src/mission/lunar_transfer.cpp
     src/mission/nrho_reference.cpp
     src/mission/position_targeter.cpp
+    src/mission/rendezvous_geometry.cpp
     src/contact/primitives.cpp
     src/contact/tower_geometry.cpp
     src/contact/catch_arms.cpp

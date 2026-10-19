@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 
+#include "starsim/gnc/deorbit_planner.hpp"
 #include "starsim/math/mat3.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
 
@@ -26,6 +27,9 @@ PositionTargeter::PositionTargeter(const environment::GravityModel& earth_centre
 
 StateVector PositionTargeter::coast(const StateVector& state, time::Epoch from, time::Epoch to) const {
     if (to - from == 0.0) return state;
+    if (drag_area_per_mass_m2pkg_ > 0.0) {
+        return gnc::coast_with_drag(gravity_, state, from, to, drag_area_per_mass_m2pkg_);
+    }
     return orbit::propagate_coast(gravity_, state, from, to).state;
 }
 
