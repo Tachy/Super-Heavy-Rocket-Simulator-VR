@@ -201,8 +201,16 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
     return command;
 }
 
+bool FlightSession::translation_flown() const {
+    if (!rendezvous_ || norm(translation_port_) <= 0.0) return false;
+    if (attitude_mode_active()) return true;
+    return mode_ == ControlMode::RateCommand &&
+           (autopilot_.state == AutopilotState::Off || autopilot_.state == AutopilotState::Orbit ||
+            autopilot_.state == AutopilotState::Lunar);
+}
+
 void FlightSession::apply_translation(const Flying& flying, vehicle::VehicleCommand& command) const {
-    if (!rendezvous_ || norm(translation_port_) <= 0.0) return;
+    if (!translation_flown()) return;
     const auto target = vehicle::port_kinematics(*bodies_.at(rendezvous_->target_index).body, rendezvous_->target_port);
     command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(target.axes_gcrf * translation_port_);
     // The hold's torque comes first: a full pure translation saturates the Dracos, and with the force kept the hold

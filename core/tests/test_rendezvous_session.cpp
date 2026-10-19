@@ -52,10 +52,11 @@ struct DragonAtIss {
     }
 };
 
+// The full rotation from the LVLH hold attitude (body axes = LVLH axes), roll about the nose included.
 double lvlh_attitude_error_rad(const vehicle::FlightBody& b) {
     const auto& s = b.state();
-    const Vec3 lvlh_x = frames::lvlh_to_inertial({s.position_gcrf_m, s.velocity_gcrf_mps}).rotate({1.0, 0.0, 0.0});
-    return std::acos(std::clamp(dot(s.attitude.rotate({1.0, 0.0, 0.0}), lvlh_x), -1.0, 1.0));
+    const math::Quat error = frames::lvlh_to_inertial({s.position_gcrf_m, s.velocity_gcrf_mps}).conjugate() * s.attitude;
+    return 2.0 * std::acos(std::clamp(std::abs(error.w), 0.0, 1.0));
 }
 }  // namespace
 
@@ -97,8 +98,14 @@ TEST_CASE("Dragon translates along each target port axis under an LVLH hold", "[
     auto& s = d.session;
     s.set_rendezvous_target(1, "idss", "ida2");
     constexpr double burn_s = 20.0, settle_s = 5.0;
-    double t = settle_s;
-    s.advance_to(d.t0 + t, 100000);
+    // the hold first rolls the placed Dragon into the LVLH attitude (~1 deg/s): the campaign starts once it is there
+    double t = 0.0;
+    do {
+        t += settle_s;
+        s.advance_to(d.t0 + t, 100000);
+    } while (lvlh_attitude_error_rad(s.body(0)) > 0.5 * deg && t < 600.0);
+    std::printf("[validation] LVLH hold settled after %.0f s (%.2f deg)\n", t, lvlh_attitude_error_rad(s.body(0)) / deg);
+    REQUIRE(lvlh_attitude_error_rad(s.body(0)) < 0.5 * deg);
     for (const Vec3 u : {Vec3{1.0, 0.0, 0.0}, Vec3{-1.0, 0.0, 0.0}, Vec3{0.0, 1.0, 0.0}, Vec3{0.0, -1.0, 0.0},
                          Vec3{0.0, 0.0, 1.0}, Vec3{0.0, 0.0, -1.0}}) {
         CAPTURE(u.x, u.y, u.z);
@@ -133,4 +140,31 @@ TEST_CASE("Dragon translates along each target port axis under an LVLH hold", "[
         t += settle_s;
         s.advance_to(d.t0 + t, 100000);
     }
+}
+
+TEST_CASE("A translation command blocks coasting only where it is flown", "[iss][rendezvous][session]") {
+    test::spice_session();
+    DragonAtIss d(50.0);
+    auto& s = d.session;
+    s.set_rendezvous_target(1, "idss", "ida2");
+    s.set_attitude_mode({});  // free drift: no hold ticks the session
+    s.set_translation_command({0.0, 0.0, 0.0});
+    CHECK(s.advance_to(d.t0 + 600.0, 100) - d.t0 == Catch::Approx(600.0));  // nothing commanded: coasts
+    s.set_translation_command({0.0, 0.5, 0.0});
+    const time::Epoch flown = s.advance_to(d.t0 + 1200.0, 100);  // rate mode flies it: ticked
+    CHECK(flown - (d.t0 + 600.0) < 1.0);
+    s.set_control_mode(sim::ControlMode::DirectGimbal);  // the command is not applied here: it must not stall the warp
+    CHECK(s.advance_to(flown + 600.0, 100) - flown == Catch::Approx(600.0));
+}
+
+TEST_CASE("Separating the controlled body drops the rendezvous target", "[iss][rendezvous][session]") {
+    test::spice_session();
+    DragonAtIss d(50.0);
+    auto& s = d.session;
+    s.set_rendezvous_target(1, "idss", "ida2");
+    s.set_translation_command({0.0, 0.5, 0.0});
+    s.stage();  // the trunk goes: the capsule becomes the controlled body (index 2)
+    REQUIRE(s.controlled_index() == 2);
+    CHECK_FALSE(s.relative_port_state());
+    CHECK(norm(s.translation_command()) == 0.0);
 }

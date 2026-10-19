@@ -554,14 +554,16 @@ public:
     // Rendezvous (milestone i): relative navigation of the controlled body's port `chaser_port` against port
     // `target_port` of body `target_index` (fidelity flag relative_nav = "ideal": the true states). Throws
     // std::out_of_range for a bad index or the controlled body itself, std::invalid_argument (German) for an unknown
-    // port. Cleared with the bodies (place_body / launch_from_pad / place_in_orbit), like the station.
+    // port. Cleared with the bodies (place_body / launch_from_pad / place_in_orbit), like the station, and when the
+    // controlled body changes (staging, payload separation, trunk jettison).
     void set_rendezvous_target(size_t target_index, const std::string& chaser_port, const std::string& target_port);
     void clear_rendezvous_target();  // also stops the translation command
     std::optional<gnc::RelativePortState> relative_port_state() const;  // nullopt without a target
     // RCS translation of the controlled body in the target port frame: force fractions of the pure translation
     // capability along that direction (|f| > 1 is scaled to 1), held until changed; zero stops it. Applied with
     // rcs_force_pure next to the attitude hold's torque, the torque first (the hold keeps steering; a saturated
-    // translation is cut instead); the session does not coast while it is set. Throws std::logic_error without a
+    // translation is cut instead). Flown only in an attitude hold or in rate mode outside the autopilot's steering
+    // (translation_flown); the session does not coast while it is flown. Throws std::logic_error without a
     // rendezvous target.
     void set_translation_command(const math::Vec3& fraction_port);
     math::Vec3 translation_command() const { return translation_port_; }
@@ -606,6 +608,10 @@ private:
                               double ambient_pressure_pa, vehicle::VehicleCommand& command) const;
     // The translation command as body-axis force fractions of the controlled body (nothing without a command).
     void apply_translation(const Flying& flying, vehicle::VehicleCommand& command) const;
+    // A translation command is set and the controlled body flies it now (an attitude hold, or rate mode outside the
+    // autopilot's own steering). apply_translation only applies it then, and only then it stops the coast (review i2:
+    // a stale command must not tick a burn's drift wait or a capsule return at 200 Hz).
+    bool translation_flown() const;
     double coast_allowance_s() const;  // 0 if fixed ticks are needed now
     void start_entry_guidance(Flying& flying, const gnc::EntryGuidanceParameters& parameters);
     void update_hull_moment_scale(Flying& flying);  // entering ship: the controller's pitch trim estimate

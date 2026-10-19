@@ -205,6 +205,7 @@ bool FlightSession::separate_payload() {
     upper->set_ground_height(launch_site_.height_m);
     bodies_.push_back({std::move(upper), {}, nullptr, {}});
     controlled_ = bodies_.size() - 1;
+    clear_rendezvous_target();  // the target belongs to the controlled body's port
     attitude_mode_ = gnc::inertial_hold(bodies_[controlled_].body->state().attitude);
     if (payload_separation_->nose_cone_open_s >= 0.0) {
         nose_cone_epoch_ = epoch_ + payload_separation_->nose_cone_open_s;
@@ -541,7 +542,7 @@ double FlightSession::coast_allowance_s() const {
         return 0.0;
     }
     if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0 || norm(input_.translation) > 0.0 ||
-        norm(translation_port_) > 0.0) {
+        translation_flown()) {
         return 0.0;  // the coast skips the RCS: a commanded translation is flown tick by tick
     }
     double allowance = max_coast_s;
@@ -746,6 +747,7 @@ void FlightSession::stage() {
     Flying flying{std::move(upper), {}, nullptr, {}};
     bodies_.push_back(std::move(flying));
     controlled_ = bodies_.size() - 1;
+    clear_rendezvous_target();  // the target belongs to the controlled body's port
     ignite();  // hot staging: the upper stage lights immediately
 }
 
