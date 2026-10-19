@@ -8,9 +8,13 @@
 #include <algorithm>
 #include <filesystem>
 #include <functional>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/orbital_attitude.hpp"
+#include "starsim/gnc/proximity_geometry.hpp"
 #include "starsim/gnc/proximity_guidance.hpp"
 #include "starsim/orbit/clohessy_wiltshire.hpp"
 #include "starsim/orbit/oem.hpp"
@@ -111,25 +115,68 @@ inline Placement in_front_of_ida2(double range_m) {
     };
 }
 
+// (IDA-2, IDA-3, ISS CG state) -> the full Dragon state (attitude and rate included).
+using RigidPlacement = std::function<vehicle::RigidBodyState(const vehicle::PortKinematics&, const vehicle::PortKinematics&,
+                                                             const math::StateVector&)>;
+
+// The Dragon port (idss) at `position_port_m` in the frame of the station port `port_id` with the velocity
+// `velocity_port_mps` relative to that rotating frame, in the docking attitude turned by `attitude_offset` (body
+// frame), co-rotating with the station.
+inline RigidPlacement at_port(const std::string& port_id, const math::Vec3& position_port_m,
+                              const math::Vec3& velocity_port_mps = {}, const math::Quat& attitude_offset = {}) {
+    return [=](const vehicle::PortKinematics& ida2, const vehicle::PortKinematics& ida3, const math::StateVector&) {
+        const auto& target = port_id == "ida2" ? ida2 : ida3;
+        // Dragon port axes in the body: x = (1,0,0), up z = (0,0,-1), y = z x x (config crew_dragon idss)
+        const math::Mat3 chaser_axes = math::Mat3::from_columns({1, 0, 0}, {0, -1, 0}, {0, 0, -1});
+        const math::Quat q = gnc::docking_attitude_gcrf(chaser_axes, target.axes_gcrf) * attitude_offset;
+        const math::Vec3 omega = target.angular_velocity_gcrf_radps;
+        const math::Vec3 port = target.position_gcrf_m + target.axes_gcrf * position_port_m;
+        const math::Vec3 port_velocity = target.velocity_gcrf_mps + cross(omega, port - target.position_gcrf_m) +
+                                         target.axes_gcrf * velocity_port_mps;
+        // the lever CG -> idss in GCRF, read from a free body in that attitude
+        const vehicle::FlightBody probe(
+            std::make_unique<vehicle::Vehicle>(config::load_vehicle(config_dir, "crew_dragon"), config_dir),
+            vehicle::RigidBodyState{{7.0e6, 0.0, 0.0}, {0.0, 7.5e3, 0.0}, q, {}});
+        const math::Vec3 lever = vehicle::port_kinematics(probe, "idss").position_gcrf_m - probe.state().position_gcrf_m;
+        return vehicle::RigidBodyState{port - lever, port_velocity - cross(omega, lever), q, q.inverse_rotate(omega)};
+    };
+}
+
 struct DragonNearIss {
     const spice::SpiceEphemeris ephemeris;
     const spice::SpiceOrientation earth = spice::SpiceOrientation::earth();
     const spice::SpiceTimeConverter clock;  // not "time": that would hide the namespace for time::Epoch below
     sim::FlightSession session{ephemeris, earth, config_dir};
     time::Epoch t0;
-    explicit DragonNearIss(const Placement& place, bool with_station = true, bool cone_open = true) {
+    // The Dragon placed by place_in_orbit (body x along the velocity) at the CG state from `place`.
+    explicit DragonNearIss(const Placement& place, bool with_station = true, bool cone_open = true,
+                           std::vector<sim::StationImpulse> extra_impulses = {}) {
+        init([&](const vehicle::PortKinematics& a, const vehicle::PortKinematics& b, const math::StateVector& iss) {
+            session.place_in_orbit(config::load_vehicle(config_dir, "crew_dragon"), place(a, b, iss), t0);
+        }, with_station, cone_open, std::move(extra_impulses));
+    }
+    // The Dragon placed by place_body with the full state from `place`.
+    explicit DragonNearIss(const RigidPlacement& place, bool with_station = true, bool cone_open = true,
+                           std::vector<sim::StationImpulse> extra_impulses = {}) {
+        init([&](const vehicle::PortKinematics& a, const vehicle::PortKinematics& b, const math::StateVector& iss) {
+            session.place_body(config::load_vehicle(config_dir, "crew_dragon"), place(a, b, iss), t0);
+        }, with_station, cone_open, std::move(extra_impulses));
+    }
+
+private:
+    using Placer = std::function<void(const vehicle::PortKinematics&, const vehicle::PortKinematics&, const math::StateVector&)>;
+    void init(const Placer& placer, bool with_station, bool cone_open, std::vector<sim::StationImpulse> extra_impulses) {
         const auto archive = orbit::OemArchive::scan(fixture_dir, clock);
         t0 = clock.from_utc({2026, 10, 16, 0, 0, 0.0});
-        const auto iss = sim::iss_start(config::load_vehicle(config_dir, "iss"), archive, clock, earth, t0,
-                                        sim::IssOrbitSource::Oem);
+        auto iss = sim::iss_start(config::load_vehicle(config_dir, "iss"), archive, clock, earth, t0,
+                                  sim::IssOrbitSource::Oem);
         sim::FlightSession probe(ephemeris, earth, config_dir);  // reads the ports of the ideal-attitude station
         probe.add_station(iss.vehicle, iss.state_gcrf, iss.epoch);
         const auto& station = probe.body(0).state();
-        const auto dragon = place(vehicle::port_kinematics(probe.body(0), "ida2"),
-                                  vehicle::port_kinematics(probe.body(0), "ida3"),
-                                  {station.position_gcrf_m, station.velocity_gcrf_mps});
-        session.place_in_orbit(config::load_vehicle(config_dir, "crew_dragon"), dragon, t0);
+        placer(vehicle::port_kinematics(probe.body(0), "ida2"), vehicle::port_kinematics(probe.body(0), "ida3"),
+               {station.position_gcrf_m, station.velocity_gcrf_mps});
         session.set_nose_cone(0, cone_open);
+        for (auto& impulse : extra_impulses) iss.impulses.push_back(std::move(impulse));
         if (with_station) session.add_station(iss.vehicle, iss.state_gcrf, iss.epoch, iss.impulses);
         session.set_attitude_mode(gnc::lvlh_hold());
     }

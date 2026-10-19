@@ -18,6 +18,7 @@
 #include "starsim/sim/flight_session.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
 
 #include "starsim/frames/lvlh.hpp"
@@ -115,6 +116,8 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
     }
     rendezvous_step_ = RendezvousStep::None;  // the phasing (i3) is complete
     proximity_.emplace(approach, p);
+    proximity_debug_events_ = 0;
+    proximity_debug_next_ = epoch_;
     autopilot_.state = AutopilotState::Proximity;
     attitude_mode_ = proximity_attitude_mode();
     proximity_status_ = "Anflug gestartet";
@@ -161,8 +164,10 @@ void FlightSession::run_proximity(Flying& flying) {
     };
     if (!station_index_ || !rendezvous_) return end("Anflug abgebrochen: keine Station");
     if (flying.body->impacted()) return end("Anflug abgebrochen: Fahrzeug verloren");
-    const auto out = proximity_->update(proximity_input());
+    const auto in = proximity_input();
+    const auto out = proximity_->update(in);
     proximity_status_ = proximity_->status();
+    if (proximity_debug_) proximity_diagnostics(in, out);
     if (proximity_->phase() == gnc::ProximityPhase::Contact) {
         translation_port_ = {};
         attitude_mode_ = {};
@@ -171,6 +176,25 @@ void FlightSession::run_proximity(Flying& flying) {
     }
     translation_port_ = out.translation_fraction_port;
     attitude_mode_ = out.attitude_hold ? proximity_attitude_mode() : gnc::AttitudeMode{};
+}
+
+// STARSIM_DEBUG_PROXIMITY: every guidance event, and every 60 s the port-frame state, the command and the propellant.
+void FlightSession::proximity_diagnostics(const gnc::ProximityInput& in, const gnc::ProximityOutput& out) {
+    const auto& events = proximity_->events();
+    if (events.size() < proximity_debug_events_) proximity_debug_events_ = 0;  // a new flight
+    for (; proximity_debug_events_ < events.size(); ++proximity_debug_events_) {
+        const auto& e = events[proximity_debug_events_];
+        std::printf("[proximity] %8.1f s  %-10s %s\n", mission_time_s(), gnc::to_string(e.phase), e.status.c_str());
+    }
+    if (epoch_ < proximity_debug_next_) return;
+    proximity_debug_next_ = epoch_ + 60.0;
+    const auto& p = in.port;
+    std::printf("[proximity] %8.1f s  port (%.2f %.3f %.3f) m  v (%.4f %.4f %.4f) m/s  cg %.1f m  cmd (%.2f %.2f %.2f)  "
+                "angle %.2f deg  %.1f kg\n",
+                mission_time_s(), p.position_m.x, p.position_m.y, p.position_m.z, p.velocity_mps.x, p.velocity_mps.y,
+                p.velocity_mps.z, norm(in.cg_lvlh.position_m), out.translation_fraction_port.x,
+                out.translation_fraction_port.y, out.translation_fraction_port.z,
+                p.misalignment_rad / constants::deg_to_rad, in.propellant_kg);
 }
 
 void FlightSession::reset_proximity() {

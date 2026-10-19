@@ -940,7 +940,11 @@ private:
     gnc::AxisAcceleration proximity_authority_;  // pure authority along the target port axes in the docking attitude
     std::string proximity_status_;
     std::vector<std::string> proximity_warnings_;
+    bool proximity_debug_ = false;  // STARSIM_DEBUG_PROXIMITY, read once at construction
+    size_t proximity_debug_events_ = 0;
+    time::Epoch proximity_debug_next_;
     void run_proximity(Flying& flying);
+    void proximity_diagnostics(const gnc::ProximityInput& in, const gnc::ProximityOutput& out);
     void reset_proximity();  // from clear_rendezvous_target, reset_mission_state and disengage_autopilot
     gnc::ProximityInput proximity_input() const;
     math::Quat proximity_docking_attitude() const;

@@ -59,6 +59,7 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
     moon_orientation_ = moon_cache_ ? &*moon_cache_ : nullptr;
     lunar_debug_ = std::getenv("STARSIM_DEBUG_LUNAR_SESSION") != nullptr;
     rendezvous_debug_ = std::getenv("STARSIM_DEBUG_RENDEZVOUS") != nullptr;
+    proximity_debug_ = std::getenv("STARSIM_DEBUG_PROXIMITY") != nullptr;
 }
 
 const char* to_string(AutopilotState state) {
