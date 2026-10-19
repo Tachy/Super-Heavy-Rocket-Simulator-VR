@@ -1,6 +1,6 @@
 # Lunar missions: HLS landing and ship return from lunar orbit - design
 
-Status: approved 2026-10-14; l1-l4 implemented 2026-10-15/16, l5 (return, braking burn amendment) implemented 2026-10-18 - next l6. Milestone (l), after the booster MECO milestone (main `82b31eb`).
+Status: approved 2026-10-14; l1-l4 implemented 2026-10-15/16, l5 (return, braking burn amendment) implemented 2026-10-18, l6 (game interface) implemented 2026-10-19 - milestone complete. Milestone (l), after the booster MECO milestone (main `82b31eb`).
 
 ## Intent
 

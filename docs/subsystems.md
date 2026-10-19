@@ -464,8 +464,8 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   bodies on the ground keep theirs, and a ground impact keeps the wreck where it struck on its body. Air, ground contact,
   resting (it follows the Moon), telemetry (`reference_body`, altitude, osculating periapsis / apoapsis and inclination to
   the body's equator) and the session's tick-near-ground decision and LVLH holds use it. `FlightSession` takes a Moon
-  orientation (5th constructor argument, `spice::SpiceOrientation::moon_mean_earth()`); without it (bindings until l6)
-  everything is relative to the Earth as before. Ground at the Moon: the sphere (LOLA tile: l2). Validation
+  orientation (5th constructor argument, `spice::SpiceOrientation::moon_mean_earth()`; the game's `FlightSim` passes it
+  since l6); without it everything is relative to the Earth as before. Ground at the Moon: the sphere (LOLA tile: l2). Validation
   (`test_lunar_propagation.cpp`): 100 km LLO and a 3,000 x 70,000 km orbit one day Earth-centred vs a Moon-centred
   integration of the same forces (the DE440 Moon's acceleration as the frame's) 0.020 / 0.025 m; 200 Hz ticks 20 min
   5e-5 m. A Moon-centred `PointMassGravity` is a different model (its frame accelerates as point-mass Earth and Sun pull
@@ -520,9 +520,9 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   position error at the perilune is left to the station keeping. `plan_lunar_outbound` refuses a vehicle already
   Moon-referenced ("Kein Mondflug: schon beim Mond"). Pilot-flown MCCs (user 2026-10-15,
   `pilot_corrections`): call 600 s before the MCC, `lunar_pilot_cue()` (remaining delta-v, attitude error, window),
-  `complete_pilot_correction()`, the next MCC re-plans from the real state; display with l6 / M7. Missions
-  `hls_lunar_llo` / `hls_lunar_nrho` (`kind = "lunar_landing"`, outbound only until l4; the game's FlightSim has no
-  Moon orientation yet - l6). Results: LLO 99.97-100.00 km after one trim; NRHO 0.58 km worst perilune offset over 3
+  `complete_pilot_correction()`, the next MCC re-plans from the real state; game command since l6, display with the UI
+  specification (M7). Missions
+  `hls_lunar_llo` / `hls_lunar_nrho` (`kind = "lunar_landing"`, outbound only until l4; in the game since l6). Results: LLO 99.97-100.00 km after one trim; NRHO 0.58 km worst perilune offset over 3
   revolutions, NRHO -> LLO 99.97-100.03 km; campaign (TLI +-1 % and 0.5 deg, 8 / 8): MCC 1 183-311 m/s (a 1 % / 0.5 deg TLI error is ~60 m/s, grown ~5x by a
   day of coast), MCC 2 0.3-0.4 m/s, LLO 99.97-100.01 km, 1,177-1,194 t propellant used (not the mass in the LLO - ~573 t, see l4); NRHO worst perilune offset 0.47-2.88 km,
   1,124-1,150 t propellant used. Bug fixed on the way: the
@@ -576,7 +576,7 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   `STARSIM_DEBUG_LUNAR_DESCENT`, `STARSIM_DEBUG_LUNAR_ASCENT`, `STARSIM_DEBUG_SCVX`, `STARSIM_DEBUG_LEGS`; single
   campaign case `"[.lunar_case]"` with `STARSIM_LUNAR_CASE=<seed>`. Open: no DOI re-plan after the trim (0.2 m flown
   without), boil-off, a degraded profile for automatic aborts from fast low states (PEG saturates: 111 x 115 km), the
-  status at burn end shows osculating elements (95 x 100 km for a 100 km LLO; l6 telemetry), the sub-orbital cutoff
+  status at burn end shows osculating elements (95 x 100 km for a 100 km LLO; the l6 telemetry shows the same osculating values), the sub-orbital cutoff
   guard is untested (no scenario reproduces it).
   l5 return to Earth (plan `docs/superpowers/plans/2026-10-16-lunar-l5-return.md`, ledger
   `.superpowers/sdd/2026-10-16-lunar-l5-return/progress.md`): mission 2 - a Block 3 ship in the LLO or the NRHO
@@ -639,7 +639,7 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   onboard-estimated orbital drag; a re-plan short only of the landing reserve is flown.
   Re-plan from flight data (user 2026-10-18): `FlightSession::replan_lunar_return` (gate window scan from the live
   coast via `EarthReturnPlanner::recovery`), automatic when an MCC does not converge or exceeds its 90 m/s allowance and
-  the new plan is cheaper; `lunar_return_replans()`; game key and display in l6. Botched TEI (velocity error = fraction of
+  the new plan is cheaper; `lunar_return_replans()`; game command `replan_lunar_return()` since l6 (key and display with the UI specification). Botched TEI (velocity error = fraction of
   the TEI delta-v): 1-3 % MCC 22-66 m/s, 5 % re-planned 109 m/s caught 2.2 t, 7 % re-planned 152 m/s caught 0.0 t, 10 %
   refused honestly (impact).
   Results: LLO direct flight (Nov 12 2026): TEI ~876-888 m/s, MCCs < 1 m/s, braking ~1,030-1,043 m/s at 2,000 km, entry
@@ -686,3 +686,26 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   (`STARSIM_GATE_STATE`), `"[.lunar_handover_replay]"` (`STARSIM_HANDOVER_STATE`), `"[.lunar_return_epoch_probe]"`,
   `"Aerocapture dispersion probe"` (`STARSIM_PROBE_DENSITY`, `_AERO`, `_PROPELLANT_KG`, `_KICK` "h_km,wx,wy,wz": a
   peak-q attitude repro in ~13 s).
+  l6 game interface (plan `docs/superpowers/plans/2026-10-18-lunar-l6-game-interface.md`, ledger
+  `.superpowers/sdd/2026-10-18-lunar-l6-game-interface/progress.md`): the game's `FlightSim` runs its session on a
+  simulation thread (`sim::SessionRunner`): commands (launch, mission start, plans, pilot actions) are queued and
+  return a command id (0 when refused before posting); `result(id)` -> {done, ok, message} and the signal
+  `command_finished(id, name, ok, message)` (emitted on the main thread from `advance_to` / `wait_idle`) report the
+  outcome. Pilot input goes to a single "latest" slot read before each chunk; `advance_to` only sets the target
+  epoch, the worker advances in chunks of at most 4,000 ticks and builds a snapshot after every command and chunk -
+  all getters read that snapshot (shared containers, read-only); the target counts as reached within one tick.
+  `planning_s()` gives the wall time of a running plan (the world clock stands meanwhile). CSPICE is serialised by a
+  process-wide recursive lock (`detail::lock_spice`, held by every adapter call; without it a second thread corrupted
+  CSPICE's trace stack, `[threads]`). `FlightSim` passes the Moon orientation, so lunar missions run in the game:
+  `start_mission` kinds `lunar_landing` / `lunar_return` (all legs planned at the start; a refusal's reason is the
+  command's message), `lunar_state()` (step, status, burns, descent plan, touchdown, return plan with re-plan count,
+  pilot cue), `lunar_site()`, `moon_terrain(lat, lon)` (calling thread; the terrain is immutable), commands
+  `complete_pilot_correction()` and `replan_lunar_return()`. Telemetry carries `reference_body`, `altitude_terrain_m`
+  (above the lunar terrain, `FlightTelemetry::altitude_terrain_m`) and osculating periapsis / apoapsis / inclination
+  about the reference body (inclination against its equator: a polar LLO reads ~90 deg). Start wall times (smoke):
+  lunar return 6.9 s, lunar landing ~0.1 s, NRHO refusal 2.9 s. Display of these items: with the UI specification
+  (M6 / M7, `docs/ansichten.md`). `[plan_speed]` checks wall time: it failed under the full suite's parallel load
+  (LLO 12-20 s against 10 s; alone ~7 s), so CTest runs it as one `RUN_SERIAL` test. Final review: `idle()` also
+  waits for a running input / chunk; an advance that throws stalls the runner until the next command (no re-throw
+  every chunk), the snapshot is still built, and `FlightSim` reports input / advance / snapshot errors once via
+  `push_error` (`SessionRunner::take_error`).

@@ -74,7 +74,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
 - Every physical model gets unit tests and at least one reference/validation case with a documented tolerance.
 - Small files with one responsibility; prefer composition over inheritance.
 - No magic numbers: physical constants live in `core/include/starsim/math/constants.hpp` with their source.
-- CSPICE is not thread-safe: the `spice` adapters serialise every call with a process-wide lock (l6).
+- CSPICE is not thread-safe: the `spice` adapters serialise every call with a process-wide lock (`detail::lock_spice`).
 
 ## Build & test (Windows, MSVC 2022 Build Tools, CMake, Ninja, SCons)
 One-time setup:
@@ -155,7 +155,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Views and controls of the finished game are specified in `docs/ansichten.md` (German, living document):
   keep it in sync when building M6 (planner), M7 (cockpit/VR) and M8.
 - Flight: `game/vehicle/flight_controller.gd` (input, pilot actions) drives the C++ `FlightSim`
-  (`sim::FlightSession`, 200 Hz); `vehicle_view.gd` draws stages and plumes; `ui/flight_hud.gd` shows telemetry.
+  (`sim::FlightSession`, 200 Hz); `FlightSim` runs `sim::SessionRunner` (own thread), getters read a snapshot,
+  commands return ids (`result(id)`, signal `command_finished`); lunar missions included (`lunar_state`, `lunar_site`,
+  `moon_terrain`). `vehicle_view.gd` draws stages and plumes; `ui/flight_hud.gd` shows telemetry.
   The world clock waits for the flight sim at high time warp.
 - HOTAS: Thrustmaster T.16000M + TWCS, found by device name (`config/input_hotas.toml`). Raw axes (twist,
   throttle lever) only exist when `config/sdl_gamecontrollerdb.txt` is loaded BEFORE engine start via
