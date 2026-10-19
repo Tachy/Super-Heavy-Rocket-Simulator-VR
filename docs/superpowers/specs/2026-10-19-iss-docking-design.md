@@ -4,7 +4,9 @@ Status: approved 2026-10-19. i1 implemented (plan `docs/superpowers/plans/2026-1
 `docs/subsystems.md`, OEM fixture `tests/validation/fixtures/iss_oem/`). i2 implemented (plan
 `docs/superpowers/plans/2026-10-19-iss-i2-dragon-translation.md`; Draco layout kept, user 2026-10-19). i3 implemented (plan
 `docs/superpowers/plans/2026-10-19-iss-i3-phasing.md`; ends at Waypoint 0, corrections below). i4 implemented (plan
-`docs/superpowers/plans/2026-10-19-iss-i4-proximity.md`; ends at "Kontakt", corrections below). Milestone (i),
+`docs/superpowers/plans/2026-10-19-iss-i4-proximity.md`; ends at "Kontakt", corrections below). i5 implemented (plan
+`docs/superpowers/plans/2026-10-19-iss-i5-docking.md`; IDSS mechanism, compound, undocking and departure, corrections
+below). Milestone (i),
 part of plan milestone M9 (rendezvous and ISS docking), after the lunar milestone (l1-l6, main `6da3f70`).
 
 ## Intent
@@ -198,6 +200,27 @@ Implementation notes and validation numbers: `docs/subsystems.md`, "Proximity op
 - Validation: arrival at the ring inside the IDSS envelope, a corridor violation is a failure.
 
 ## i5 design: docking mechanism, undocking and departure
+
+**Corrections (user-approved with the i5 plan, 2026-10-19; they supersede the bullets below where they differ).**
+Sources: IDSS IDD Rev. E (Tables 3.3.1.1-2, 3.3.1.4-1, 3.3.1.2-1, §3.2, §3.2.3.6), Demo-2 (soft -> hard capture
+11 min), Crew-4 / Demo-1 departure (undock burn 0.15 m/s, keep-out sphere 6 min 48 s, approach ellipsoid 17 min).
+1. **Envelope [S]** from IDSS IDD E Table 3.3.1.1-2, plus roll misalignment 4.0 deg and roll rate 0.2 deg/s.
+2. **Petals as a reduced-order conic guide** (one axisymmetric cone with the 1,200 mm outline); the petals guide the
+   light active ring, which conforms laterally and in tilt on its platform within ranges [E] - no Stewart platform.
+3. **Too fast = overload:** the attenuation stroke runs out, the load exceeds the IDSS dynamic compression limit
+   6,500 N, the latches release ("Fangen fehlgeschlagen: Überlast"); slower than 0.05 m/s still captures (documented).
+4. **Compound = the Dragon held on the station:** its mass becomes a point mass of the station vehicle at its CG, the
+   station state moves to the compound CG with the momentum-weighted velocity, the Dragon follows rigidly; the compound
+   inertia is reported, unused while the attitude is ideal; the Dragon's drag area is not added.
+5. **Separation 0.085 m/s [D]** from the IDSS separation energy over the reduced mass; undock burn to 0.15 m/s; departure
+   burn 0 = the smallest passively safe i4 breakout that also leaves the approach ellipsoid within 3600 s [E]; later
+   departure burns not modelled.
+6. **Docking timeline ~10 min [S: Demo-2 11 min]:** attenuation >= 120 s, retraction 300 s, hooks 180 s [E]; undocking:
+   hooks open 180 s [E].
+7. **A failed capture retreats to Waypoint 2 and waits for resume; a hull contact ends the flight "Kollision"** with the
+   contact impulse (no structural model).
+
+Implementation notes and validation numbers: `docs/subsystems.md`, "Docking mechanism, undocking and departure (i5)".
 
 - **Soft-capture ring** of the Dragon [E dimensions from IDSS: ring diameter, three guide petals] against the passive
   IDA ring as a **penalty contact** (spring-damper, stiffness/damping [E]); hull <-> ISS primitives for collisions.

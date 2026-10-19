@@ -43,17 +43,19 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
   aerocapture guidance, relative navigation between docking ports, proximity guidance: waypoints, corridor,
-  hold / retreat / breakout, final approach),
+  hold / retreat / breakout, final approach, departure after undocking),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
-  contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces),
+  contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces;
+  IDSS docking interface and mechanism: soft capture, joint, retraction, hooks, separation; hull vs station primitives),
   aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating plus radiative heating
   from the NASA TM-102652 equilibrium tables, blunt capsule from a
   modified-Newtonian table with offset-CG trim, reefed parachutes, fixed-area drag of a station),
   propulsion (engine performance, RCS allocator incl. pure translation capability + pulse modulator),
   vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity,
-  ideal LVLH attitude of a station, docking-port kinematics), sim (flight session incl. the ISS as a station body from
+  ideal LVLH attitude of a station, docking-port kinematics, docked hold, attached mass, compound mass), sim (flight session incl. the ISS as a station body from
   OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
-  Waypoint 0 with drag tracking and re-plan, proximity flight to a station port).
+  Waypoint 0 with drag tracking and re-plan, proximity flight to a station port, docking into a compound, undocking
+  and departure).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
@@ -110,9 +112,11 @@ powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -TestFilter
 # Godot smoke test (extension loads, float64 end to end)
 external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --path game --script res://tests/smoke_test.gd
 ```
-- Test workflow (user 2026-10-15): during a task run only the touched tags (`-TestFilter`); before every push run
-  `-Fast`; run the full suite (with the `[slow]` campaigns) when a task touches guidance, flight sessions, vehicles or
-  aero, and before a plan's final review. Tag a new test case `[slow]` when it takes more than ~40 s.
+- Test workflow (user 2026-10-19, replaces 2026-10-15): always run only what the change affects - the tags of the
+  touched modules and of the subsystems whose code paths changed (`-TestFilter`, `[slow]` cases of those tags
+  included), also before a push and before a plan's final review; no blanket `-Fast` or full-suite runs. A change to
+  shared code (e.g. `FlightSession::advance_to`, `Vehicle::mass_properties`) whose new branch is inactive for other
+  subsystems does not pull their campaigns in. Tag a new test case `[slow]` when it takes more than ~40 s.
 - ctest runs test cases as parallel processes: tests must not share temp files or directories (make names unique).
 - Visual check (needs GPU, no --headless): `godot --path game --script res://tests/render_check.gd --
   --utc=2024-04-08T18:42:00 --focus=earth --view_from=moon --out=<png>`; ground views with

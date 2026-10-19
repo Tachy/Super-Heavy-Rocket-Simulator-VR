@@ -999,5 +999,82 @@ corrections, approved by the user 2026-10-19), ledger `.superpowers/sdd/2026-10-
   inside. The contact offsets 0.03-0.05 m are pulse effects (no coupled-torque issue).
 - **Diagnostics:** `STARSIM_DEBUG_PROXIMITY=1` prints the guidance events and every 60 s the port state, command,
   attitude error and propellant.
-- **Open / for i5-i6:** the envelope values and the contact plane are [E] until i5 (IDSS IDD, ring reach); manual
+- **Open / for i6:** the envelope is [S] since i5 (IDSS IDD E) and the contact plane is the petal mesh plane; manual
   proximity control is M7; the game interface (getters above, docking view) is i6.
+
+### Docking mechanism, undocking and departure (i5)
+Plan `docs/superpowers/plans/2026-10-19-iss-i5-docking.md` (its header has the research and the seven spec corrections,
+approved by the user 2026-10-19), ledger `.superpowers/sdd/2026-10-19-iss-i5-docking/progress.md`.
+- **Sources.** IDSS Interface Definition Document Rev. E (Oct 2016): Table 3.3.1.1-2 initial contact conditions
+  (axial 0.05-0.10 m/s, lateral 0.04 m/s, pitch/yaw rate 0.2 deg/s and roll rate 0.2 deg/s, lateral misalignment
+  0.10 m, pitch/yaw 4 deg, roll 4 deg - at the first physical touch), §3.2 SCS mating plane at the 1,200 mm petal
+  outline, §3.2.2.1 three inward petals, §3.1.1.1 sequence (petals -> latches on full ring contact -> attenuation ->
+  retraction -> guide pins -> 12 hooks), Table 3.3.1.4-1 SCS loads (compression 3,500 N static / 6,500 N up to 0.1 s,
+  tension 3,900 N, shear 3,200 N, bending 2,800 N m, torsion 1,500 N m), §3.2.3.6 separation energy 39.2-47.5 N m,
+  Table 3.3.1.2-1 IDSS-350T inertia (the ISS inertia is that scaled by mass, [D]). Demo-2: soft capture 10:16, hard
+  capture 10:27 EDT (11 min). Crew-4 / Demo-1: undock burn 1 to 0.15 m/s, keep-out sphere left 6 min 48 s and the
+  approach ellipsoid 17 min after undocking.
+- **Interface** (`contact/docking_interface`, passive port frame, reduced order - spec correction 2): the active ring
+  face 0.30 m [E] out of the Dragon port; ring-face penalty contact (2e5 N/m, 2.9e4 N s/m [E]: a 0.10 m/s impact on the
+  Dragon-ISS pair peaks at ~4.0 kN, 0.25 m/s at ~10 kN); the three petal pairs as one cone (outline radius 0.60 m [S],
+  height 0.20 m, lean 30 deg, meshed clearance 0.01 m [E]): capture radius 0.241 m - beyond it the tips strike the
+  opposing petals (axial contact, no centring). The petals guide the light active ring, which gives way on its platform
+  (2000 N/m up to 0.20 m [E]); the vehicle feels that spring, the stiff petal contact only beyond the range. The ring
+  conforms in tilt up to 6 deg and roll up to 6 deg [E]. Latches: ring faces within 5 mm, deflection within the range,
+  tilt and roll within their ranges. The interface acts only within 1.2 m laterally and 0.15 m ring penetration
+  (beyond: the hull contact; a chaser behind the port read as an 80 MN compression without it).
+- **Mechanism** (`contact/docking_mechanism`): Ready -> Kontakt -> Weichfang (damped 6-DOF joint: translation
+  critically damped at 0.5 rad/s on the chaser mass; rotation from the IDSS loads - half the bending / torsion limit at
+  4 deg, damping ratio 1 with the chaser inertia; axial stroke 0.10 m, then a 2e6 N/m end stop) -> Einzug (after
+  >= 120 s and settled, 0.30 m at 1 mm/s) -> guide pins (5 mm, 0.5 deg) -> Haken schließen (180 s) -> angedockt; first
+  contact -> hard capture 10.0-10.2 min (Demo-2: 11). Failures: no contact for 2 s with the ring 0.05 m beyond the
+  petal tips: "abgeprallt" / "Versatz zu groß" (tips only) / "Winkel zu groß" (ring touched, latch blocked);
+  compression above 6,500 N or above 3,500 N for > 0.1 s: "Überlast" (the latches release, spec correction 3).
+  Tension / shear / bending / torsion above the IDSS limits only warn. Below 0.05 m/s it still captures (documented).
+  Undock: Haken öffnen (180 s) -> getrennt; separation speed sqrt(2 E / mu) with E = 43.35 N m [E]: 0.0844 m/s for the
+  Dragon on the ISS.
+- **Hull collision** (`contact/station_collision`): hull rings every 0.5 m (16 points) over the trunk (3.7 m) and the
+  capsule tapering 4.0 -> 1.8 m [E: `hull_top_diameter_m`], the top metre below the docking port left out; penalty
+  1e6 N/m against the ISS capsules and boxes, within 120 m of the station CG. Any contact: "Kollision" with the
+  impulse (sum |F| dt), the proximity flight ends (no structural model: the Dragon is not destroyed).
+- **Session** (`sim/docking_sim`, `flight_session_docking.cpp`): `set_rendezvous_target` arms the mechanism for an
+  active chaser port and a passive station port (`[[stage.docking_port]] soft_capture`); `start_proximity` refuses
+  other pairs and sets the i4 contact plane to the petal mesh plane (0.70 m). Every tick before the bodies step the
+  mechanism and hull wrenches act on both bodies (equal and opposite; the station torque is dropped - ideal
+  attitude). Free drift (no RCS) from the first contact to the hooks (real Dragon; the session rate damping fought the
+  joint otherwise). Coasting near the station is limited by the clearance (CG to the primitives minus the hull reach;
+  port to port minus the petal reach) over the relative speed in the rotating station frame. **Compound** (spec
+  correction 4): at hard capture the chaser becomes a point mass of the station vehicle at its CG
+  (`Vehicle::set_attached_mass` - a stage extra mass shifted the station CG inside the body and every port by 0.44 m),
+  the station state moves to the compound CG with the momentum-weighted velocity, the chaser is held on it
+  (`FlightBody::hold_docked`) at the mated pose and follows after every tick and coast; `compound_mass()` reports the
+  summed mass and the inertia tensor (unused while the attitude is ideal); the Dragon drag area is not added
+  (~0.6 % of the station C_D A). A failed capture sends the proximity flight back to Waypoint 2
+  (`ProximityGuidance::capture_failed`, status "Rückzug: Fangen fehlgeschlagen (<reason>)"); the mechanism re-arms 1 m
+  beyond the petal tips. While docked or capturing: `start_proximity`, `plan_rendezvous`, `plan_capsule_return`,
+  `ignite`, `stage` are refused (German); getters `docking_phase/status/events/loads`, `docked`, `docking_busy`,
+  `compound_mass`, `collision_impulse_ns`, `docking_merge_record`.
+- **Undocking and departure** (spec correction 5, `gnc/departure_guidance`): `undock()` (docked, autopilot Off / Orbit)
+  -> hooks open -> the springs split the relative speed by mass along the port axis (momentum record exact) ->
+  `AutopilotState::Departure` "Abflug": "Abkoppelimpuls" to 0.15 m/s opening, "Rückzug vom Port" on the axis to 10 m,
+  "Abflugmanöver" = the i4 breakout with the approach-ellipsoid exit required within 3600 s (passively safe 24 h),
+  "Abflug" drift (coasting, a guidance tick every 60 s), "Abflug abgeschlossen" at the ellipsoid exit (autopilot off,
+  rendezvous target cleared). Later departure burns are not modelled; the deorbit planned from the drift orbit replaces
+  them. CW guidance: IDA-2 sphere left after 473 s, ellipsoid after 2290 s, 0.30 m/s, 6.5 kg; IDA-3 475 s / 1610 s
+  (Demo-1 6.8 / 17 min with larger burns). Session IDA-2: departure complete 33 min after the springs, 3.4 kg.
+- **Validation** (`[docking]`; chains, grid and splashdown `[slow]`):
+
+  | case | result |
+  |---|---|
+  | IDA-2 from Waypoint 0 | contact 61.8 min, docked 10.2 min later, 31.2 kg, comp 922 N, shear 93 N, bending 557 N m |
+  | IDA-3 from Waypoint 0 | contact 98.0 min, docked 10.2 min later, 64.0 kg, comp 943 N, shear 118 N, bending 262 N m |
+  | IDSS grid 2^(6-2) x 2 ports (axial, offset, angle, roll, lateral, rate) | 32/32 docked; max comp 1254 N, shear 600 N, bending 2035 N m, torsion 761 N m |
+  | 0.30 m offset / 10 deg / 0.28 m/s | "Versatz zu groß" / "Winkel zu groß" / "Überlast" -> retreat to Waypoint 2 -> resume -> docked |
+  | docked 24 h with a 0.3 m/s reboost | the pair moves together, port error < 1 mm |
+  | undock -> departure -> capsule return | 0.0844 m/s, departure 3.6 kg, deorbit 58 h later (7-day pass search), splashed down, 1871 kg RCS left |
+
+- **Diagnostics:** `STARSIM_DEBUG_DOCKING=1` prints the mechanism and departure events, and every second while ticked
+  (or within 2 m of the port) the pose, the force and the peak compression.
+- **Open / for i6:** the undocking time is not yet chosen for a return opportunity (the mission default searches 48 h:
+  none for the test plane) - the `crew_dragon_iss_departure` mission; the game interface (`docking_state`, `undock`
+  command id, `station_geometry`).
