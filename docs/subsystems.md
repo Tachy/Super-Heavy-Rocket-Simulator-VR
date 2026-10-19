@@ -167,8 +167,11 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   `FlightEnvironment::propellant_settling`, on): oxidizer and fuel lie below a surface perpendicular to the apparent
   gravity (minus the specific force from the first RK4 stage), lagged by tau = sqrt(2 D / a) in [0.5, 60] s and held
   in coasts (< 0.01 m/s^2); per tank a tilted-cylinder table (centroid and variances). At entry attitude the residue
-  lies forward and on the belly (64 t: CG +0.95 m forward) - this fixed the aerocapture departure (below). Engine
-  moments use the axial CG [E] (the full CG point moved the Falcon 9 / Crew Dragon ascent apoapsis 210 -> 223 km).
+  lies forward and on the belly (64 t: CG +0.95 m forward) - this fixed the aerocapture departure (below). Engine,
+  grid fin and flap moments use the axial CG [E] unless `FlightEnvironment::actuator_moments_about_cg_point` (off; the
+  full CG point moved the Falcon 9 / Crew Dragon ascent apoapsis 210 -> 223 km - turning it on needs its own
+  validation over the ascent and return campaigns). Main-fed burns check the main tanks only
+  (`Vehicle::main_propellant_kg`: lunar return plan, aircatch capture burns); the headers carry the landing.
   The liquid does not turn with a round tank (no roll inertia; wall pressure through the axis): moments act in roll
   about `MassProperties::roll_offset_m` (the hull's parts only), in pitch / yaw about the full CG. Before that rule
   the aero normal force times a 4.4 t residue swinging ~0.1 m sideways gave up to 0.05 MNm of roll - the ship's whole

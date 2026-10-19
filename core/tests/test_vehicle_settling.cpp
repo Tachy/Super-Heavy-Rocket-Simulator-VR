@@ -139,3 +139,45 @@ TEST_CASE("Liquid off the axis gives no roll moment", "[settling]") {
     INFO("roll rate column " << column << " sideways " << sideways);
     CHECK(sideways == Approx(column).margin(1e-9));
 }
+
+namespace {
+
+// Pitch rate after one tick in vacuum (1,000 km up, no gravity) of a 40 t ship (5 t main-tank residue) with the three
+// sea-level Raptors at full thrust, gimbals neutral, the liquid on the belly side (-z).
+double pitch_rate_with_thrust(bool about_cg_point) {
+    ZeroGravity gravity;
+    environment::Us76Atmosphere atmosphere;
+    FixedEarth earth;
+    vehicle::FlightEnvironment env{gravity, atmosphere, earth, nullptr, false};
+    env.actuator_moments_about_cg_point = about_cg_point;
+    auto cfg = config::load_vehicle(config_dir, "starship_block3");
+    cfg.stages.erase(cfg.stages.begin());
+    config::fill_tanks(cfg.stages[0], 40000.0);
+    auto vehicle = std::make_unique<Vehicle>(cfg, config_dir);
+    vehicle->set_liquid_down_body({0.0, 0.0, -1.0});
+    vehicle::VehicleCommand command;
+    for (auto& e : vehicle->stages()[0].engines) {
+        if (e.group_id.find("sea_level") == std::string::npos) continue;
+        e.mode = vehicle::EngineMode::Running;
+        e.spool = 1.0;
+        e.throttle = 1.0;
+        command.groups.push_back({e.group_id, true, 1.0});
+    }
+    const vehicle::RigidBodyState state{{6378137.0 + 1.0e6, 0.0, 0.0}, {0.0, 7300.0, 0.0}, {}, {}};
+    vehicle::FlightBody body(std::move(vehicle), state);
+    body.step(env, time::Epoch::from_tdb_seconds_past_j2000(8.4e8), 0.005, command);
+    return body.state().angular_velocity_body_radps.y;
+}
+
+}  // namespace
+
+// Review of the header-tank plan: engine moments about the axial CG are a switchable simplification; with the flag the
+// thrust acts about the full CG point: a belly-side residue (CG offset z < 0) under thrust along +x gives
+// arm (x, 0, -z) x (T, 0, 0) = (0, -z T, 0), a pitch moment.
+TEST_CASE("Engine moments about the full CG point are a fidelity flag", "[settling]") {
+    const double axial = pitch_rate_with_thrust(false);
+    const double full = pitch_rate_with_thrust(true);
+    INFO("pitch rate axial CG " << axial << ", full CG point " << full);
+    CHECK(std::abs(axial) < 1e-9);
+    CHECK(std::abs(full) > 1e-6);
+}

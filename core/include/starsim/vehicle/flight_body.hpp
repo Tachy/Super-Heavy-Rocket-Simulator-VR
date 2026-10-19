@@ -40,6 +40,10 @@ struct FlightEnvironment {
     // Fidelity flag (header-tank plan): tank liquid settles perpendicular to the apparent gravity
     // (Vehicle::settle_propellant); off: always a column on the tank bottom (settled aft).
     bool propellant_settling = true;
+    // Fidelity flag (header-tank plan review): engine, grid fin and flap moments act about the full CG point (pitch /
+    // yaw; roll about MassProperties::roll_offset_m) as the hull's do. Off [E]: about the axial CG - with the full point
+    // the Falcon 9 / Crew Dragon ascent apoapsis moved 210 -> 223 km (header-tank plan Task 2); not yet validated on.
+    bool actuator_moments_about_cg_point = false;
 };
 
 // Air data at the start of the last tick (what an air-data system would report to the controllers).

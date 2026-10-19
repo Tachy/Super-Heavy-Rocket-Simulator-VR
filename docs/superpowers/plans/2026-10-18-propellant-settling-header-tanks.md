@@ -213,3 +213,25 @@ Session 2026-10-18 (Task 4, steps 1-3):
   and campaign propellant, settling paragraph incl. the roll rule, aerocapture finding CLOSED, catch campaign),
   CLAUDE.md implemented modules (vehicle). `STARSIM_DEBUG_BURN` prints CG and liquid direction.
 - NEXT: commit + push, then Step 5 (opus review of the plan's commits bba1792..HEAD), then l6 Task 2.
+
+Final review (opus, bba1792..b79b254): no Critical; 4 Important, 7 Minor. Fix pass:
+- Final: fixed gate replay loaded the b4 propellant instead of the gate's (`fill_tanks(g[15], g[14])`) - diagnostic
+  only; the seed-8 sweep/ablation numbers above came from a 43.1 t load (gate: 39.4 t), the campaign (3/3) stands.
+- Final: fixed main-fed burns counted the headers (lunar return plan, aircatch capture burn now use
+  main_propellant_kg) - "Lunar return plan counts the main tanks only" RED->GREEN.
+- Final: fixed engine/fin/flap moments about the axial CG were not switchable (CLAUDE.md) - fidelity flag
+  `FlightEnvironment::actuator_moments_about_cg_point` (off: bit-identical) - "Engine moments about the full CG point
+  are a fidelity flag" RED->GREEN. Ruling: default stays off - turning it on is a validation task of its own (ascent
+  apoapsis moved 13 km in Task 2) - cost if wrong: landing-burn pitch from a lateral residue (~0.5 MNm per 0.1 m) is
+  missing until then.
+- Final: minor (deferred): catch campaign no longer disperses usable landing propellant (headers always 35 t) -
+  disperse the header load (boil-off, loading tolerance).
+- Final: minor (deferred): propellant_loading divides by the header capacity - guard a zero-capacity header.
+- Final: minor (deferred): ch4_header shares the volume of ch4_main without displacement - say so in the TOML.
+- Final: minor (deferred): specific force at the CG ignores the centripetal term in the flip (~5 m/s^2 at the nose
+  header) - document in subsystems.md.
+- Final: minor (deferred): Tank::settling filled lazily in const mass_properties (mutable) - fill in the constructor.
+- Final: minor (deferred): RCS allocator (and parachute / point-velocity arms) use the full CG point in roll; its 1 cm
+  rebuild tolerance may trigger often while liquid swings.
+- Final: minor (deferred): tests - separation does not check Stage::feed; no zero-capacity tank on the tilted path.
+- Final: minor (deferred): domed tank ends (user 2026-10-19) - a flat-ended tank exaggerates a shallow residue's swing.

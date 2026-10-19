@@ -107,6 +107,25 @@ TEST_CASE("Lunar return start refuses a return the tanks cannot hold", "[lunar][
     CHECK_THAT(s.refusal, ContainsSubstring("Treibstoff"));
 }
 
+// Header-tank plan review: TEI, mid-course corrections and the braking burn feed from the main tanks; the headers
+// hold the landing propellant. 25 t short of the fixed point the total aboard still covers the burns (headers
+// counted), the main tanks do not - the plan must refuse instead of flaming out in the braking burn.
+TEST_CASE("Lunar return plan counts the main tanks only", "[lunar][return][session][header]") {
+    test::LunarReturnSession t;
+    const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    const time::Epoch epoch = t.time.from_utc(m.epoch_utc);
+    const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id);
+    t.session.set_launch_site(sim::launch_site_from_config(site));
+    const auto site_itrf = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    const auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
+    auto setup = sim::lunar_return_setup(m, site_itrf, t.session.gravity(), t.ephemeris, epoch);
+    const auto b = sim::lunar_return_budget(t.session, STARSIM_CONFIG_DIR, m, ship, epoch, setup);
+    REQUIRE(b.closes);
+    sim::place_lunar_return_ship(t.session, m, ship, epoch, b.propellant_kg - 25000.0, setup.ret);
+    CHECK_FALSE(t.session.plan_lunar_return(setup));
+    CHECK_THAT(t.session.lunar_status(), ContainsSubstring("Treibstoff"));
+}
+
 TEST_CASE("An inclined LLO contains the return asymptote; below its declination none does", "[lunar][return]") {
     // Polar is the south-pole landing's choice, not the return's: any inclination >= |declination of the asymptote|
     // (Moon equator) holds a plane through it.

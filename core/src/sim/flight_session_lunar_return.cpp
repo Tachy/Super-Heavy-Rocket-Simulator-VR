@@ -67,7 +67,7 @@ bool FlightSession::plan_lunar_return(const LunarReturnSetup& setup) {
     planned.ret.earliest_departure_s = std::max(planned.ret.earliest_departure_s, min_departure_lead_s);
     try {
         lunar_return_plan_ = planner.plan(controlled_state(), epoch_, planned.ret, vehicle.mass_properties().mass_kg,
-                                          isp_s, vehicle.propellant_kg());
+                                          isp_s, vehicle.main_propellant_kg());  // main-fed; headers: landing
     } catch (const std::exception&) {  // integrator step underflow on a trial arc, ephemeris range
         lunar_return_plan_.reset();
         lunar_status_ = "Kein Rückflug: Planung fehlgeschlagen";
@@ -511,11 +511,13 @@ bool FlightSession::lunar_capture_coast(Flying& flying, const gnc::BurnNode& nod
         half_burn_s = 0.5 * gnc::burn_duration_s(dv_mps, mass_kg, c.thrust_n, c.mass_flow_kgps);
         // l5 Task 10: a pass that exits far too high (campaign seed 2: apogee 9,344 km) asked for a 1,458 m/s
         // circularisation with 51 t on board - the burn never ended. Refuse a burn the tanks cannot fly.
+        // The burn feeds from the main tanks (the headers hold the landing propellant).
         const double needed_kg = mass_kg * (1.0 - std::exp(-dv_mps * c.mass_flow_kgps / c.thrust_n));
-        if (needed_kg > flying.body->vehicle().propellant_kg()) {
+        const double main_kg = flying.body->vehicle().main_propellant_kg();
+        if (needed_kg > main_kg) {
             lunar_abort("Aircatch: " + std::string(to_string(burn)) + " nicht möglich (" + german(dv_mps, 0) +
-                        " m/s, " + german(needed_kg / 1000.0, 1) + " t nötig, " +
-                        german(flying.body->vehicle().propellant_kg() / 1000.0, 1) + " t an Bord)");
+                        " m/s, " + german(needed_kg / 1000.0, 1) + " t nötig, " + german(main_kg / 1000.0, 1) +
+                        " t in den Haupttanks)");
             return false;
         }
     }

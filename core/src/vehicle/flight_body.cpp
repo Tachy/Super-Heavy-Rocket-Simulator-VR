@@ -69,6 +69,14 @@ struct TickContext {
     Vec3* first_specific_force_body = nullptr;  // out: the specific force of the first RK4 stage (tau = 0)
 };
 
+// Moment of an engine, grid fin or flap force; `arm_m` runs from the axial CG (station, 0, 0) to the point of action.
+Vec3 actuator_moment(const TickContext& ctx, const MassProperties& mass, const Vec3& arm_m, const Vec3& force) {
+    if (!ctx.env.actuator_moments_about_cg_point) return cross(arm_m, force);
+    Vec3 moment = cross(arm_m - Vec3{0.0, mass.cg_offset_m.y, mass.cg_offset_m.z}, force);
+    moment.x = (arm_m.y - mass.roll_offset_m.y) * force.z - (arm_m.z - mass.roll_offset_m.z) * force.y;
+    return moment;
+}
+
 struct Forces {
     Vec3 acceleration_gcrf;        // total
     Vec3 nongravitational_body_n;  // thrust + aero, body axes
@@ -106,9 +114,8 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
             const Vec3 force = thrust * e.thrust_direction();
             f.thrust_n += thrust;
             f.nongravitational_body_n += force;
-            // About the axial CG [E]: a lateral offset (capsule trim, settled liquid) acts on aero and RCS moments
-            // only - with it the Falcon 9 / Crew Dragon ascent moved its apoapsis by 13 km (header-tank plan Task 2).
-            f.moment_body_nm += cross(e.gimbal_point_m - Vec3{f.mass.cg_station_m, 0.0, 0.0}, force);
+            // About the axial CG unless FlightEnvironment::actuator_moments_about_cg_point [E].
+            f.moment_body_nm += actuator_moment(ctx, f.mass, e.gimbal_point_m - Vec3{f.mass.cg_station_m, 0.0, 0.0}, force);
         }
     }
     // Grid fins: local flow at each fin including the rotation (gives aerodynamic damping).
@@ -123,7 +130,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
                                                     *stage.grid_fin_table);
             f.nongravitational_body_n += force.force_body_n;
             f.aero_body_n += force.force_body_n;
-            f.moment_body_nm += cross(arm, force.force_body_n);
+            f.moment_body_nm += actuator_moment(ctx, f.mass, arm, force.force_body_n);
         }
     }
     // Flaps: local flow at each flap centroid including the rotation.
@@ -137,7 +144,7 @@ Forces evaluate(const TickContext& ctx, double tau_s, const RigidBodyState& s) {
                 aero::flap_force(flap.geometry, flap.deflection_rad, flap_velocity, fin_air, *stage.flap_table);
             f.nongravitational_body_n += force.force_body_n;
             f.aero_body_n += force.force_body_n;
-            f.moment_body_nm += cross(arm, force.force_body_n);
+            f.moment_body_nm += actuator_moment(ctx, f.mass, arm, force.force_body_n);
         }
     }
     // Parachutes: drag of the riser point's local flow (incl. omega x r: the hanging capsule's damping), massless canopies.

@@ -488,7 +488,7 @@ TEST_CASE("Lunar return catch from a printed gate state", "[.lunar_gate_replay]"
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
-    config::fill_tanks(ship.stages.front(), b4_oxidiser_kg, b4_fuel_kg);
+    config::fill_tanks(ship.stages.front(), g[15], g[14]);  // the gate's oxidiser and fuel
     const auto epoch = time::Epoch::from_tdb_seconds_past_j2000(g[0]);
     vehicle::RigidBodyState state{{g[1], g[2], g[3]}, {g[4], g[5], g[6]}, math::Quat{g[7], g[8], g[9], g[10]}, {g[11], g[12], g[13]}};
     if (const char* raise = std::getenv("STARSIM_GATE_RAISE_M")) {  // diagnostics: the same gate this much higher
