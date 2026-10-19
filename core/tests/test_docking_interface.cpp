@@ -81,7 +81,7 @@ TEST_CASE("Docking interface: latch tolerances - offset, tilt beyond the ring's 
     const double e = p.ring_extension_m;
     const auto touching = Vec3{e - 0.002, 0, 0};
     CHECK(contact::docking_interface_contact(pose(touching), e, p).latch_ready);
-    CHECK_FALSE(contact::docking_interface_contact(pose(touching + Vec3{0, p.latch_offset_max_m + 0.005, 0}), e, p)
+    CHECK_FALSE(contact::docking_interface_contact(pose(touching + Vec3{0, p.petal_clearance_m + p.ring_lateral_range_m + 0.005, 0}), e, p)
                     .latch_ready);
     const auto tilt = [&](double angle) {  // chaser pitched about the passive y axis
         const double c = std::cos(angle), s = std::sin(angle);

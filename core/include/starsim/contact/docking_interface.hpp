@@ -38,7 +38,10 @@ struct DockingInterfaceParameters {
     double friction_slip_mps = 1e-3;         // [E] regularisation speed
     // Latch condition (soft capture, IDSS IDD E 3.1.1.1: rings in full contact, latches on the strikers) [E]:
     double latch_gap_m = 0.005;                               // ring faces within this
-    double latch_offset_max_m = 0.02;                         // ring centres after the petal centring
+    // The petals guide the light active ring, which gives way laterally on its actuator platform (spec correction 2);
+    // the vehicle feels the platform spring, the stiff petal contact only beyond the range [E].
+    double ring_lateral_stiffness_n_per_m = 2000.0;
+    double ring_lateral_range_m = 0.20;  // below the petal capture radius (0.24 m): the conformed ring still centres
     double ring_tilt_max_rad = 6.0 * constants::deg_to_rad;   // the active ring conforms up to this tilt
     double latch_roll_max_rad = 6.0 * constants::deg_to_rad;  // petal flanks / latch strikers in roll
 };
