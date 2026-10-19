@@ -35,10 +35,11 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`.
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
   Moon: body-fixed frame, shape, atmosphere or vacuum),
-  integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP,
+  integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
-  the mission delta-v budget and the Earth return: TEI, mid-course corrections, braking burn),
+  the mission delta-v budget, the Earth return: TEI, mid-course corrections, braking burn, and the coelliptic phasing
+  to the ISS: schedule + full-model planner with drag),
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
   aerocapture guidance, relative navigation between docking ports),
@@ -50,7 +51,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   propulsion (engine performance, RCS allocator incl. pure translation capability + pulse modulator),
   vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity,
   ideal LVLH attitude of a station, docking-port kinematics), sim (flight session incl. the ISS as a station body from
-  OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation).
+  OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
+  Waypoint 0 with drag tracking and re-plan).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.

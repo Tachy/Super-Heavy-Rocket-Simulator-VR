@@ -2,7 +2,8 @@
 
 Status: approved 2026-10-19. i1 implemented (plan `docs/superpowers/plans/2026-10-19-iss-i1-target-body.md`, notes in
 `docs/subsystems.md`, OEM fixture `tests/validation/fixtures/iss_oem/`). i2 implemented (plan
-`docs/superpowers/plans/2026-10-19-iss-i2-dragon-translation.md`; Draco layout kept, user 2026-10-19). Milestone (i),
+`docs/superpowers/plans/2026-10-19-iss-i2-dragon-translation.md`; Draco layout kept, user 2026-10-19). i3 implemented (plan
+`docs/superpowers/plans/2026-10-19-iss-i3-phasing.md`; ends at Waypoint 0, corrections below). Milestone (i),
 part of plan milestone M9 (rendezvous and ISS docking), after the lunar milestone (l1-l6, main `6da3f70`).
 
 ## Intent
@@ -43,7 +44,7 @@ Decisions taken with the user (2026-10-16 and the brainstorm 2026-10-19; memory 
 |---|---|
 | i1 | ISS as a target body: OEM fetch + archive, OEM parser/interpolation, synthetic orbit, ISS vehicle config, ideal LVLH attitude, OEM events, drag in orbit |
 | i2 | Crew Dragon 6-DOF translation (Draco layout review), translation command, relative navigation |
-| i3 | Phasing: separation orbit -> approach ellipsoid entry, full-model targeting, re-plan |
+| i3 | Phasing: separation orbit -> Waypoint 0 (400 m below the ISS), full-model targeting with drag, re-plan |
 | i4 | Proximity operations and final approach: waypoints, keep-out sphere corridor, V-bar / R-bar, hold / retreat / abort |
 | i5 | Docking mechanism: soft capture, latches, attenuation, retraction, hard capture, compound body; undocking and departure |
 | i6 | Missions (orbit start, pad start with launch window, departure), game interface, documentation, end-to-end campaign |
@@ -124,6 +125,27 @@ drift against the J2 formula; back-propagation to a known OEM date. Fixture: the
 - Validation: authority per axis, coupled torque ~ 0, propellant per m/s.
 
 ## i3 design: phasing
+
+**Corrections (user-approved with the i3 plan, 2026-10-19; they supersede the bullets below where they differ).**
+Source: Crew-2 timeline (Spaceflight Now, 2021-04-22): approach initiation burn 7.5 km out, mid-course 25 min later,
+Waypoint 0 400 m below the ISS 45 min after the approach initiation; coelliptic closing 4.9 m/s between 30 and 10 km
+-> dh = 2.9 km [D]; coelliptic coast 2.8 h; Demo-2 burns phase 16.1, boost 44.2, circularisation 57.9 m/s.
+1. **i3 ends at Waypoint 0** (400 m below the ISS, braked to rest in its LVLH frame), not at an approach ellipsoid
+   entry point: the approach initiation transfer crosses the ellipsoid; the go for the approach initiation is the
+   clearance to enter it. i4 starts at Waypoint 0.
+2. **i3 is port-independent** (Crew-2 went to IDA-2 through Waypoint 0 below the station); the campaign runs over
+   phase angles, not ports.
+3. **The phase burn is used only with an earliest arrival:** phase burn + boost at the same perigee add up to the same
+   Hohmann transfer, so every revolution count costs the same in-plane delta-v and the cheapest correct window is the
+   earliest one (the Dragon waits on the separation orbit and boosts when the phase is right). `earliest_arrival_s`
+   slows the catch-up for a crew day.
+4. **Orbit plane:** the J2 node regression is ~0.58 deg/day faster at 205 km than at 415 km; the start plane is aimed
+   to drift onto the ISS plane by the boost (tests now, the i6 launch-window planner later); the remaining plane error
+   is removed by the 3D-targeted coelliptic and approach initiation burns (no separate out-of-plane burn).
+
+Implementation notes and validation numbers: `docs/subsystems.md`, "Phasing (i3)" (among others: the nose cone is
+opened by `plan_rendezvous`; the boost geometry is checked 3 h before the boost with tracked drag and re-planned beyond
+2 km).
 
 - Profile after the real Crew Dragon pattern (coelliptic): phasing burns (NC) to set the phase rate, height adjust
   (NH) to a coelliptic orbit Delta-h below the ISS [E, a few km], coelliptic (NSR), terminal phase initiation (TPI) at a

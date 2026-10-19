@@ -834,3 +834,75 @@ Plan `docs/superpowers/plans/2026-10-19-iss-i2-dragon-translation.md`, ledger
   +y 0.899/0.908, 0.007, 14.52/14.51, 0.58; -y 0.896/0.909, 0.006, 14.95/14.96, 0.68; +z 0.903/0.917, 0.024,
   15.13/15.13, 0.68; -z 0.912/0.917, 0.027, 14.29/14.27, 0.59 (tolerances 15 % dv, cross < 10 % + 0.01 m/s, 25 %
   propellant, 1 deg). Port +-x is the Dragon's body +-x here (both noses along the LVLH velocity). Runs in ~2 s.
+
+### Phasing (i3)
+Plan `docs/superpowers/plans/2026-10-19-iss-i3-phasing.md` (its header has the research and the four spec
+corrections, approved by the user 2026-10-19), ledger `.superpowers/sdd/2026-10-19-iss-i3-phasing/progress.md`.
+- **Profile and sources.** Crew-2 timeline (Spaceflight Now, 2021-04-22): separation, phase burn +37 min, boost +15.4 h,
+  coelliptic burn, approach initiation **7.5 km** out, mid-course 25 min later, **Waypoint 0 400 m below the ISS**
+  45 min after the approach initiation. Demo-2 burn sizes (everydayastronaut.com): phase 16.1, boost 44.2,
+  circularisation 57.9 m/s. Derived [D]: coelliptic closing 4.9 m/s between 30 and 10 km = 1.5 n dh -> **dh 2.9 km**;
+  coelliptic coast 2.8 h. All values are `mission::PhasingParameters` fields with tags.
+- **Spec corrections (user-approved):** (1) i3 ends at Waypoint 0 braked to rest in the station's LVLH frame, not at an
+  approach-ellipsoid entry point (the approach initiation transfer crosses the 4 x 2 x 2 km ellipsoid); i4 starts there.
+  (2) i3 is port-independent (Crew-2 went to IDA-2 through Waypoint 0 below); the campaign runs over phase angles.
+  (3) The phase burn is used only with `earliest_arrival_s`: phase burn + boost at the same perigee add up to the same
+  Hohmann transfer, so every revolution count costs the same in-plane delta-v and the cheapest correct window is the
+  earliest one (wait on the separation orbit, fastest catch-up). (4) Orbit plane: the J2 node regression is ~0.58
+  deg/day faster at 205 km than at 415 km; the tests aim the start plane so that it drifts onto the ISS plane by the
+  boost (`rendezvous_test_support.hpp`; the i6 launch-window planner must do the same), the rest is removed by the
+  3D-targeted coelliptic and approach burns (no separate out-of-plane burn).
+- **Clohessy-Wiltshire** (`orbit/clohessy_wiltshire`, LVLH x V-bar, y H-bar, z R-bar): propagation, two-impulse transfer,
+  `lvlh_relative_state`. Only a first guess and timing aid; against two-body motion 42.7 m after the test arc (bound
+  60 m: the rectilinear V-bar's curvature offset x^2/2r, ledger ruling Task 1).
+- **Geometry** (`mission/rendezvous_geometry`): aim points behind/below the target, approach ellipsoid metric
+  (semi-axes 2000/1000/1000 m [S: NASA]), keep-out sphere 200 m [S]. `PositionTargeter` got an optional drag term
+  (`set_drag_area_per_mass`; 0 leaves the old path byte-identical).
+- **Schedule** (`mission/phasing_schedule`): burn epochs from mean motions with the secular J2 rates. Default: wait on
+  the start orbit until the phase is right, then boost; with `earliest_arrival_s` a prograde phase burn at
+  `first_burn_lead_s` (30 min [E]) raises the apoapsis (at most to the coelliptic height: halves the catch-up rate,
+  11.2 -> 5.7 deg/h) and the boost follows after `phasing_revolutions`. A phase that needs more than one catch-up lap
+  adds `extra_laps`; beyond `mission_limit_s` (28 h [S]) it is refused in German. A start above the coelliptic height
+  or an open orbit is refused (no NaN epochs).
+- **Planner** (`mission/phasing_planner`): each burn is targeted in the full force model with drag on both bodies
+  (`gnc::coast_with_drag`, US76), flown as a finite Draco burn (`apply_finite_burn`) from the state the previous burn
+  leaves. Phase and boost are prograde magnitudes solved by secant (the boost on the radius at the coelliptic epoch:
+  a 180 deg position target is singular out of plane; a waiting plan first solves the boost epoch for the phase);
+  coelliptic -> approach initiation point (7.5 km, dh below) and approach initiation -> Waypoint 0 by the position
+  targeter (CW first guess); the mid-course correction is planned in flight only (skipped below 0.02 m/s [D]: a skipped
+  one carries ~24 m to Waypoint 0); braking leaves the chaser at rest in the target's LVLH frame. Budget by the rocket
+  equation against the Dracos' propellant with `reserve_kg` 900 kg [E] (deorbit ~600 kg + proximity and abort);
+  `min_ellipsoid_metric_before_ai` (planned arc sampled every minute) must stay > 1. `boost_phase_error_m` predicts
+  the along-track miss of the boost geometry from live states.
+- **Drag.** C_D A / m guesses: Dragon C_D 2.2 [E] (free molecular blunt body) on its cross-section; ISS from its OEM
+  header (area x C_D 1.5 / mass). In flight the session tracks both from their arcs (`gnc::estimate_drag_area_per_mass`,
+  the Dragon since its last burn, the station since the plan or its last impulse) once an arc is >= 3 h
+  (`rendezvous_track_min_arc_s` [E]); the estimates replace the plan's fields before every burn. A waiting plan checks
+  the boost geometry `rendezvous_check_lead_s` = 3 h [E] before the boost and re-plans from the live states beyond
+  `rendezvous_replan_tolerance_m` = 2 km [E]; a burn that cannot be targeted before the boost re-plans once, later it
+  aborts (memory feedback-replan-from-flight-data).
+- **Session** (`flight_session_rendezvous.cpp`): `plan_rendezvous(PhasingParameters)` -> `AutopilotState::Rendezvous`,
+  `RendezvousStep` None / Coast ("Phasing") / Burn ("Manöver") / Waypoint0 ("Wegpunkt 0"), `rendezvous_plan()`,
+  German `rendezvous_status()`, `rendezvous_burns()` (`RendezvousBurnRecord`), `rendezvous_replans()`,
+  `rendezvous_warnings()` (a station reboost inside the plan's span). Refused (German) without a station, with the
+  station controlled, a busy autopilot, a rendezvous or lunar flight under way, or the planner's reason. Every burn is
+  re-targeted from the live states at its command epoch and flown through `execute_burn` (Dracos along +x); big burns
+  are commanded `burn_drift_lead_s` before their preparation, mid-course and braking 600 s
+  (`rendezvous_small_turn_lead_s` [E]); between burns the vehicle drifts freely.
+- **Nose cone:** `plan_rendezvous` opens Crew Dragon's nose cone (as the real Dragon after separation; restored on a
+  refusal). With it closed the side Dracos pushed 0.02-0.28 m/s while turning to a burn and Waypoint 0 was missed by
+  83-391 m; open: 2-12 m. A `BurnExecutor` change (sensing attitude pulses before ignition) was tried and reverted: it
+  broke the ship return and lunar return campaigns and was not needed once the cone is open.
+- **Validation.** Plan from 120 deg (`[validation]`): boost 64.65 m/s @+9.80 h, coelliptic 62.47 @+10.55 h, approach
+  initiation 1.86 @+13.35 h, braking 0.13 @+14.10 h; total 129.1 m/s, 537 kg; ellipsoid metric before the approach
+  initiation 20.4; Waypoint 0 miss 0.0 m. Crew day (120 deg, earliest arrival 20 h): phase burn 55.10 m/s, 11
+  revolutions, total 137.1 m/s. Campaign 0-330 deg (48 h limit, 12 cases): 122.5-135.4 m/s, Waypoint 0 after
+  6.5-35.9 h, metric >= 20.4, miss 0.0 m. Refusals: phase beyond the mission limit, without the reserve, chaser above
+  the coelliptic height. Flights (OEM ISS, `[session][validation]`, bounds Waypoint 0 <= 100 m and <= 0.5 m/s [E],
+  flown arc outside the ellipsoid before the approach initiation, never inside the keep-out sphere): 30 deg - boost
+  63.94 @+2.23 h, coelliptic 57.57 @+2.98 h, approach initiation 1.69 @+5.78 h, mid-course skipped, braking 0.15
+  @+6.53 h; Waypoint 0 LVLH (3.0, 0.3, 400.8) m, 0.013 m/s, 539 kg. 150 deg with 1.5x truth air density: boost check
+  error -82.8 km -> 1 re-plan; boost 64.25 @+12.69 h, coelliptic 61.00, approach initiation 1.27, braking 0.09
+  @+17.00 h; Waypoint 0 (-12.1, -0.4, 398.8) m, 0.026 m/s, 575 kg. Real Demo-2 in-plane total ~118 m/s.
+- **Diagnostics:** `STARSIM_DEBUG_RENDEZVOUS=1` prints planning exceptions, each burn's execution error
+  (delta-v along/radial, position), the boost phase error and a status line per step (time, step, range, mass).
