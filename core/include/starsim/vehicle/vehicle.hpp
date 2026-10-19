@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "starsim/aero/capsule_aero.hpp"
+#include "starsim/aero/fixed_area_aero.hpp"
 #include "starsim/aero/flap.hpp"
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/aero/grid_fin.hpp"
@@ -277,7 +278,9 @@ public:
     const aero::SlenderBodyAero& aero() const { return *aero_; }
     // Blunt-capsule aerodynamics when the lowest stage has a capsule table (the capsule alone), else nullptr.
     const aero::CapsuleAero* capsule_aero() const { return capsule_aero_.get(); }
-    // Hull aerodynamics for the flight state: the capsule's when present, else the slender body's.
+    // Fixed C_D A drag when the lowest stage has a fixed drag area (a station), else nullptr.
+    const aero::FixedAreaAero* fixed_area_aero() const { return fixed_area_aero_.get(); }
+    // Hull aerodynamics for the flight state: the fixed area's or the capsule's when present, else the slender body's.
     aero::AeroResult hull_aero(const math::Vec3& air_velocity_body_mps, const environment::AtmosphereState& air,
                                bool powered) const;
 
@@ -299,6 +302,7 @@ private:
     std::vector<Stage> stages_;
     std::unique_ptr<aero::SlenderBodyAero> aero_;
     std::unique_ptr<aero::CapsuleAero> capsule_aero_;
+    std::unique_ptr<aero::FixedAreaAero> fixed_area_aero_;
     bool legs_deploying_ = false;
     double leg_deployment_ = 0.0;
     double hull_aero_scale_ = 1.0;

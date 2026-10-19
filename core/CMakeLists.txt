@@ -25,6 +25,7 @@ add_library(starsim_core STATIC
     src/aero/radiative_heating.cpp
     src/aero/capsule_aero.cpp
     src/aero/parachute.cpp
+    src/aero/fixed_area_aero.cpp
     src/vehicle/liquid_settling.cpp
     src/vehicle/vehicle.cpp
     src/vehicle/flight_body.cpp
@@ -113,6 +114,7 @@ add_library(starsim_core STATIC
     src/optim/socp_solver.cpp
     src/time/utc_date_time.cpp
     src/frames/geodetic.cpp
+    src/frames/lvlh.cpp
     src/frames/interpolated_orientation.cpp
     src/ephemeris/interpolated_ephemeris.cpp
     src/environment/point_mass_gravity.cpp

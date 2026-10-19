@@ -1,32 +1,13 @@
 #include "starsim/gnc/orbital_attitude.hpp"
 
-#include "starsim/math/mat3.hpp"
+#include "starsim/frames/lvlh.hpp"
 
 namespace starsim::gnc {
 
 using math::Quat;
 using math::Vec3;
 
-namespace {
-
-Quat from_columns(const Vec3& x, const Vec3& y, const Vec3& z) {
-    math::Mat3 m;
-    const Vec3 columns[3] = {x, y, z};
-    for (int c = 0; c < 3; ++c) {
-        m(0, c) = columns[c].x;
-        m(1, c) = columns[c].y;
-        m(2, c) = columns[c].z;
-    }
-    return Quat::from_matrix(m);
-}
-
-}  // namespace
-
-Quat lvlh_attitude_gcrf(const math::StateVector& state) {
-    const Vec3 z = -math::normalized(state.position_m);
-    const Vec3 y = -math::normalized(cross(state.position_m, state.velocity_mps));
-    return from_columns(cross(y, z), y, z);
-}
+Quat lvlh_attitude_gcrf(const math::StateVector& state) { return frames::lvlh_to_inertial(state); }
 
 AttitudeTarget attitude_target(const AttitudeMode& mode, const math::StateVector& state) {
     const Vec3 x{1.0, 0.0, 0.0}, y{0.0, 1.0, 0.0};

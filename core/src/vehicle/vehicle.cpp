@@ -204,16 +204,27 @@ void Vehicle::rebuild_aero() {
         capsule_aero_ = std::make_unique<aero::CapsuleAero>(
             aero::load_capsule_aero_table(config_dir_ / low.capsule_table), low.reference_diameter_m, 0.0);
     }
+    fixed_area_aero_.reset();
+    if (const auto& low = stages_.front().config.aero; low.fixed_drag_area_m2 > 0.0) {
+        fixed_area_aero_ = std::make_unique<aero::FixedAreaAero>(aero::FixedAreaAero{low.fixed_drag_area_m2,
+                                                                                    low.fixed_drag_coefficient});
+    }
 }
 
 aero::AeroResult Vehicle::hull_aero(const Vec3& air_velocity_body_mps, const environment::AtmosphereState& air,
                                     bool powered) const {
+    if (fixed_area_aero_) return fixed_area_aero_->compute(air_velocity_body_mps, air.density_kg_m3, air.speed_of_sound_mps);
     if (capsule_aero_) return capsule_aero_->compute(air_velocity_body_mps, air.density_kg_m3, air.speed_of_sound_mps);
     return aero_->compute(air_velocity_body_mps, air.density_kg_m3, air.speed_of_sound_mps, powered, air.mean_free_path_m);
 }
 
 MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* flows, double tau_s) const {
-    struct Part { double mass, station, ixx, iyy; double y = 0.0, z = 0.0; bool liquid = false; };
+    struct Part {
+        double mass, station, ixx, iyy;
+        double y = 0.0, z = 0.0;
+        bool liquid = false;
+        double izz = -1.0;  // < 0: = iyy (axisymmetric)
+    };
     std::vector<Part> parts;
     const Vec3& down = liquid_down_body_;
     const bool settled_aft = down.x == -1.0 && down.y == 0.0 && down.z == 0.0;  // the exact old code path
@@ -225,10 +236,15 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
         const auto& s = stages_[si];
         const double r = 0.5 * s.config.diameter_m;
         const double l = s.config.length_m;
-        // Dry structure as a thin-walled cylinder about its own CG [E].
-        parts.push_back({s.config.dry_mass_kg, s.base_station_m + s.config.dry_cg_station_m,
-                         s.config.dry_mass_kg * r * r, s.config.dry_mass_kg * (0.5 * r * r + l * l / 12.0),
-                         s.config.dry_cg_offset_m.y, s.config.dry_cg_offset_m.z});
+        // Dry structure: the configured principal moments (a station), else a thin-walled cylinder about its own CG [E].
+        if (const auto& i = s.config.inertia_kg_m2) {
+            parts.push_back({s.config.dry_mass_kg, s.base_station_m + s.config.dry_cg_station_m, i->x, i->y,
+                             s.config.dry_cg_offset_m.y, s.config.dry_cg_offset_m.z, false, i->z});
+        } else {
+            parts.push_back({s.config.dry_mass_kg, s.base_station_m + s.config.dry_cg_station_m,
+                             s.config.dry_mass_kg * r * r, s.config.dry_mass_kg * (0.5 * r * r + l * l / 12.0),
+                             s.config.dry_cg_offset_m.y, s.config.dry_cg_offset_m.z});
+        }
         if (s.extra_mass_kg > 0.0) {
             parts.push_back({s.extra_mass_kg, s.base_station_m + extra_mass_station_fraction * l, 0.0, 0.0});
         }
@@ -266,13 +282,14 @@ MassProperties Vehicle::mass_properties(const std::vector<std::vector<double>>* 
     // parallel-axis term is < 0.1 %, d3 plan ruling 2).
     mp.cg_offset_m = mp.cg_offset_m / mp.mass_kg;
     mp.roll_offset_m = mp.roll_offset_m / mp.mass_kg;
-    double ixx = 0.0, iyy = 0.0;
+    double ixx = 0.0, iyy = 0.0, izz = 0.0;
     for (const auto& p : parts) {
         const double d = p.station - mp.cg_station_m;
         ixx += p.ixx;
         iyy += p.iyy + p.mass * d * d;
+        izz += (p.izz < 0.0 ? p.iyy : p.izz) + p.mass * d * d;
     }
-    mp.inertia_kg_m2 = {ixx, iyy, iyy};
+    mp.inertia_kg_m2 = {ixx, iyy, izz};
     return mp;
 }
 

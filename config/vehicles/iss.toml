@@ -1,0 +1,98 @@
+# International Space Station - the docking target of milestone i (spec docs/superpowers/specs/2026-10-19-iss-docking-design.md).
+# Flown in ideal LVLH attitude (+XVV, body x forward, y starboard, z nadir); stations along body x from the aft end of
+# the Russian segment. Mass, drag area and C_D are replaced by the OEM header when the mission uses an OEM.
+
+[sources]
+oem = "NASA JSC FOD/TOPO, ISS Trajectory Data (OEM header, file created 2026-10-14): MASS, DRAG_AREA, DRAG_COEFF"
+wiki_iss = "https://en.wikipedia.org/wiki/International_Space_Station (commonly cited dimensions: 109 m x 73 m)"
+nasa_ida = "NASA, International Docking Adapter (IDA-2 on Harmony forward 2016, IDA-3 on Harmony zenith 2019)"
+
+[vehicle]
+id = "iss"
+name = "ISS"
+display_name = "Raumstation"
+propellant = "mmh_nto"                   # required by the loader; the station carries no modelled propellant
+stages_bottom_to_top = ["station"]
+
+[[stage]]
+id = "station"
+name = "International Space Station"
+length_m = 73.0                          # [S:wiki_iss] pressurised length along body x
+diameter_m = 4.2                         # [E] module diameter (knudsen length only; drag and SRP use fixed areas)
+dry_mass_kg = 460320.0                   # [S:oem]
+dry_cg_station_m = 38.0                  # [E] near the S0 truss over Destiny
+# [E] principal moments: truss + arrays (~150 t over 109 m along y) and the module stack (~300 t over ~70 m along x);
+# not used while the attitude is ideal (i1), needed by the compound body (i5).
+inertia_kg_m2 = [1.6e8, 6.5e7, 2.1e8]
+radiation_pressure_coefficient = 1.3     # [E]
+
+[stage.aero]
+reference_diameter_m = 4.2
+fixed_drag_area_m2 = 1177.76             # [S:oem]
+fixed_drag_coefficient = 1.5             # [S:oem]
+solar_area_m2 = 2500.0                   # [E] sun-tracking arrays (8 wings ~ 35 x 12 m) seen on average; the OEM uses 0
+
+[stage.station]
+body_in_lvlh_deg = [-3.0, -6.0, 0.5]     # [E] yaw, pitch, roll: a typical torque equilibrium attitude (TEA)
+
+# Ports: position in the stage frame (x station, y starboard, z nadir), outward docking axis, clocking reference.
+[[stage.docking_port]]
+id = "ida2"
+name = "IDA-2 (Harmony vorn)"
+position_m = [73.0, 0.0, 0.0]            # [E] forward end of PMA-2/IDA-2 on Harmony
+axis = [1.0, 0.0, 0.0]                   # +XVV: V-bar approach
+up = [0.0, 0.0, -1.0]                    # zenith
+
+[[stage.docking_port]]
+id = "ida3"
+name = "IDA-3 (Harmony oben)"
+position_m = [66.0, 0.0, -5.0]           # [E] Harmony zenith, PMA-3 + IDA-3
+axis = [0.0, 0.0, -1.0]                  # zenith: R-bar approach
+up = [1.0, 0.0, 0.0]                     # forward
+
+# Collision primitives [E dimensions after wiki_iss / NASA module data], stage frame.
+[[stage.collision]]
+id = "russian_segment"                   # Zvezda + Zarya
+kind = "capsule"
+a_m = [0.0, 0.0, 0.0]
+b_m = [26.0, 0.0, 0.0]
+radius_m = 2.1
+
+[[stage.collision]]
+id = "us_modules"                        # Unity + Destiny + Harmony
+kind = "capsule"
+a_m = [26.0, 0.0, 0.0]
+b_m = [69.0, 0.0, 0.0]
+radius_m = 2.2
+
+[[stage.collision]]
+id = "columbus"
+kind = "capsule"
+a_m = [66.0, 2.2, 0.0]
+b_m = [66.0, 9.0, 0.0]
+radius_m = 2.25
+
+[[stage.collision]]
+id = "kibo"
+kind = "capsule"
+a_m = [66.0, -2.2, 0.0]
+b_m = [66.0, -13.5, 0.0]
+radius_m = 2.2
+
+[[stage.collision]]
+id = "truss"
+kind = "box"
+centre_m = [38.0, 0.0, -4.5]
+half_extents_m = [2.5, 54.5, 2.5]
+
+[[stage.collision]]
+id = "arrays_port"                        # four wings, nominal (edge-on to the flow) [E]
+kind = "box"
+centre_m = [38.0, -38.0, -4.5]
+half_extents_m = [17.0, 14.0, 0.2]
+
+[[stage.collision]]
+id = "arrays_starboard"
+kind = "box"
+centre_m = [38.0, 38.0, -4.5]
+half_extents_m = [17.0, 14.0, 0.2]

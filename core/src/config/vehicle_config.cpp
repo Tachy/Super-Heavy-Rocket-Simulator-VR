@@ -18,6 +18,18 @@ constexpr double landing_propellant_tolerance_kg = 1.0;  // landing_propellant_k
 
 using detail::Document;
 
+math::Vec3 vec3(const Document& doc, const toml::table& t, std::string_view key) {
+    const auto* list = t[key].as_array();
+    if (!list || list->size() != 3) doc.fail(std::string(key) + " must be [x, y, z]");
+    double v[3];
+    for (int k = 0; k < 3; ++k) {
+        const auto value = (*list)[static_cast<std::size_t>(k)].value<double>();
+        if (!value) doc.fail(std::string(key) + " must be [x, y, z]");
+        v[k] = *value;
+    }
+    return {v[0], v[1], v[2]};
+}
+
 std::vector<double> number_list(const Document& doc, const toml::table& t, std::string_view key) {
     const auto* list = t[key].as_array();
     if (!list || list->empty()) doc.fail("missing list '" + std::string(key) + "'");
@@ -233,8 +245,54 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         if (s.aero.entry_profile == "capsule" && s.aero.capsule_table.empty()) {  // review d3 M3
             doc.fail("stage.aero: entry_profile = \"capsule\" needs capsule_table");
         }
+        s.aero.fixed_drag_area_m2 = doc.number_or(*aero, "fixed_drag_area_m2", 0.0);
+        s.aero.fixed_drag_coefficient = doc.number_or(*aero, "fixed_drag_coefficient", 0.0);
+        s.aero.solar_area_m2 = doc.number_or(*aero, "solar_area_m2", 0.0);
+        if ((s.aero.fixed_drag_area_m2 > 0.0) != (s.aero.fixed_drag_coefficient > 0.0)) {
+            doc.fail("stage.aero: fixed_drag_area_m2 and fixed_drag_coefficient go together");
+        }
     } else {
         s.aero.reference_diameter_m = s.diameter_m;
+    }
+    if (t.contains("inertia_kg_m2")) {
+        const math::Vec3 i = vec3(doc, t, "inertia_kg_m2");
+        if (!(i.x > 0.0 && i.y > 0.0 && i.z > 0.0)) doc.fail("inertia_kg_m2 must be positive");
+        s.inertia_kg_m2 = i;
+    }
+    if (auto station = t["station"].as_table()) {
+        const math::Vec3 deg = vec3(doc, *station, "body_in_lvlh_deg");  // yaw, pitch, roll [E] (torque equilibrium attitude)
+        s.body_in_lvlh_rad = deg * constants::deg_to_rad;
+    }
+    if (auto ports = t["docking_port"].as_array()) {
+        for (const auto& node : *ports) {
+            const auto& p = *node.as_table();
+            DockingPortConfig port{doc.text(p, "id"), doc.text(p, "name"), vec3(doc, p, "position_m"),
+                                   vec3(doc, p, "axis"), vec3(doc, p, "up")};
+            if (std::abs(norm(port.axis) - 1.0) > 1e-9 || std::abs(norm(port.up) - 1.0) > 1e-9 ||
+                std::abs(dot(port.axis, port.up)) > 1e-9) {
+                doc.fail("stage.docking_port '" + port.id + "': axis and up must be perpendicular unit vectors");
+            }
+            s.docking_ports.push_back(port);
+        }
+    }
+    if (auto prims = t["collision"].as_array()) {
+        for (const auto& node : *prims) {
+            const auto& p = *node.as_table();
+            CollisionPrimitiveConfig c;
+            c.id = doc.text(p, "id");
+            c.kind = doc.text(p, "kind");
+            if (c.kind == "capsule") {
+                c.a_m = vec3(doc, p, "a_m");
+                c.b_m = vec3(doc, p, "b_m");
+                c.radius_m = doc.positive(p, "radius_m");
+            } else if (c.kind == "box") {
+                c.a_m = vec3(doc, p, "centre_m");
+                c.half_extents_m = vec3(doc, p, "half_extents_m");
+            } else {
+                doc.fail("stage.collision '" + c.id + "': kind must be \"capsule\" or \"box\"");
+            }
+            s.collision.push_back(c);
+        }
     }
     if (auto fins = t["grid_fins"].as_table()) {
         const auto* azimuths = (*fins)["azimuths_deg"].as_array();

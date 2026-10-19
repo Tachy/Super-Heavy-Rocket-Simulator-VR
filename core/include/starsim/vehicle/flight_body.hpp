@@ -191,7 +191,18 @@ public:
     // Force of the reaction-control thrusters that fired in the last tick, body axes.
     math::Vec3 rcs_force_body_n() const { return rcs_force_body_n_; }
 
+    // A station in ideal attitude (i1): the body axes follow LVLH (times body_in_lvlh) exactly after every step and
+    // coast; contact torques do not turn it (its CMGs are taken as strong enough - documented simplification). The
+    // translation stays free. The attitude enters no force of such a body (fixed-area drag and SRP).
+    void set_ideal_lvlh_attitude(std::optional<math::Quat> body_in_lvlh) {
+        ideal_lvlh_ = body_in_lvlh;
+        snap_ideal_attitude();
+    }
+    bool ideal_attitude() const { return ideal_lvlh_.has_value(); }
+
 private:
+    void snap_ideal_attitude();
+    std::optional<math::Quat> ideal_lvlh_;
     void follow_pad(const environment::BodyFrame& frame);
     void resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame);
     void update_air_data(const environment::ReferenceBody& body, const environment::BodyFrame& frame);

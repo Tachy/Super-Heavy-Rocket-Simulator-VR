@@ -104,6 +104,29 @@ struct AeroConfig {
     std::string entry_alpha_table;  // nominal entry angle of attack over Mach (mach, alpha_deg); entry guidance
     std::string capsule_table;      // blunt capsule (mach, alpha_deg, ca, cn, cm), used once the stage is the lowest
     std::string entry_profile = "ship";  // entry guidance phases: "ship" (terminal nose turn) or "capsule"
+    double fixed_drag_area_m2 = 0.0;      // > 0: fixed C_D A drag (a station), replaces the slender-body aero
+    double fixed_drag_coefficient = 0.0;
+    double solar_area_m2 = 0.0;           // > 0: fixed area for solar radiation pressure (else the cylinder model)
+};
+
+// [[stage.docking_port]]: stage frame (x = station from the stage bottom, y/z body axes); `axis` is the outward unit
+// vector, `up` the clocking reference perpendicular to it.
+struct DockingPortConfig {
+    std::string id;
+    std::string name;
+    math::Vec3 position_m;
+    math::Vec3 axis;
+    math::Vec3 up;
+};
+
+// [[stage.collision]]: "capsule" = segment a-b with radius; "box" = centre a_m, body-aligned, half_extents_m.
+struct CollisionPrimitiveConfig {
+    std::string id;
+    std::string kind;
+    math::Vec3 a_m;
+    math::Vec3 b_m;
+    double radius_m = 0.0;
+    math::Vec3 half_extents_m;
 };
 
 // One flap of a stage (Starship): flat plate hinged along the hull side, see aero/flap.hpp.
@@ -245,6 +268,10 @@ struct StageConfig {
     // [stage.recovery] max_splashdown_speed_mps (method "splashdown", required there): sink rate at the water up to
     // which the capsule is "gewassert"; faster is an impact.
     double max_splashdown_speed_mps = 0.0;
+    std::optional<math::Vec3> inertia_kg_m2;      // principal moments of the dry stage about its own CG (else a cylinder)
+    std::optional<math::Vec3> body_in_lvlh_rad;   // a station: ideal LVLH attitude, yaw / pitch / roll (TEA)
+    std::vector<DockingPortConfig> docking_ports;
+    std::vector<CollisionPrimitiveConfig> collision;
 };
 
 struct VehicleConfig {

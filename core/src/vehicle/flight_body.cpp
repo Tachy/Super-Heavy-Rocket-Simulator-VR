@@ -9,6 +9,7 @@
 #include "starsim/aero/radiative_heating.hpp"
 #include "starsim/environment/eclipse.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/frames/lvlh.hpp"
 #include "starsim/integrators/integrate.hpp"
 #include "starsim/integrators/rk4.hpp"
 #include "starsim/math/constants.hpp"
@@ -206,8 +207,13 @@ Vec3 solar_radiation_acceleration(const FlightEnvironment& env, const Vehicle& v
     const Vec3 sun_dir = to_sun / distance;
     const Vec3 sun_body = s.attitude.inverse_rotate(sun_dir);
     const double radius = 0.5 * vehicle.diameter_m();
-    const double area = std::abs(sun_body.x) * constants::pi * radius * radius +
-                        std::sqrt(std::max(0.0, 1.0 - sun_body.x * sun_body.x)) * vehicle.length_m() * vehicle.diameter_m();
+    // A fixed solar area (a station's sun-tracking arrays, attitude-independent [E]), else the cylinder seen from the Sun.
+    const double solar_area_m2 = vehicle.stages().front().config.aero.solar_area_m2;
+    const double area =
+        solar_area_m2 > 0.0
+            ? solar_area_m2
+            : std::abs(sun_body.x) * constants::pi * radius * radius +
+                  std::sqrt(std::max(0.0, 1.0 - sun_body.x * sun_body.x)) * vehicle.length_m() * vehicle.diameter_m();
     double cr = 0.0;  // mass-weighted is overkill: use the stack average
     for (const auto& stage : vehicle.stages()) cr += stage.config.radiation_pressure_coefficient;
     cr /= static_cast<double>(vehicle.stages().size());
@@ -333,6 +339,14 @@ void FlightBody::release_landed() {
     resting_ = false;
 }
 
+void FlightBody::snap_ideal_attitude() {
+    if (!ideal_lvlh_) return;
+    // LVLH about the GCRF origin: a station is Earth-referenced (the Moon's LVLH is not needed before a lunar station)
+    const math::StateVector sv{state_.position_gcrf_m, state_.velocity_gcrf_mps};
+    state_.attitude = frames::lvlh_to_inertial(sv) * *ideal_lvlh_;
+    state_.angular_velocity_body_radps = state_.attitude.inverse_rotate(frames::lvlh_rate_inertial_radps(sv));
+}
+
 void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt_s, const VehicleCommand& command) {
     if (impacted_) {
         vehicle_->stop_rcs();
@@ -378,6 +392,7 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
                           &specific_force_body_mps2_};
     const integrators::OdeFunction<13> f = [&ctx](double tau, const State13& y) { return derivative(ctx, tau, y); };
     state_ = unpack(integrators::rk4_step<13>(f, 0.0, pack(state_), dt_s));
+    snap_ideal_attitude();
     if (env.propellant_settling) vehicle_->settle_propellant(specific_force_body_mps2_, dt_s);
     // Entry limits of a single stage with a heat shield (the ship): heating from the tick's air data, load from
     // the aerodynamic forces at the end of the tick (thrust loads are the engines' business).
@@ -532,6 +547,7 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
         State13{{1e-3, 1e-3, 1e-3, 1e-6, 1e-6, 1e-6, 1e-12, 1e-12, 1e-12, 1e-12, 1e-12, 1e-12, 1e-12}};
     const auto result = integrators::integrate<13>(f, 0.0, pack(state_), duration_s, options);
     state_ = unpack(result.y);
+    snap_ideal_attitude();
     reference_ = reference_body(env, epoch + duration_s);
     const auto end_body = reference_body_of(env, *reference_);
     const auto end_frame = end_body.frame(epoch + duration_s);
