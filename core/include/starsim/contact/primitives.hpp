@@ -41,6 +41,9 @@ struct Annulus {
 
 double distance_to_annulus(const Annulus& ring, const math::Vec3& point);  // 0 inside
 
+// Point against a capsule (segment a-b swept by a sphere of radius_m): depth below the surface and outward normal.
+Penetration point_in_capsule(const math::Vec3& a, const math::Vec3& b, double radius_m, const math::Vec3& point);
+
 // Capsule = segment a-b swept by a sphere of `radius_m`; tested by sampling the segment (see the .cpp).
 bool capsule_overlaps_box(const math::Vec3& a, const math::Vec3& b, double radius_m, const OrientedBox& box);
 // How deep the box reaches into the capsule: radius minus the smallest sampled axis distance (> 0: overlap).

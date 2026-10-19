@@ -45,6 +45,20 @@ Penetration point_in_box(const OrientedBox& box, const Vec3& point) {
     return {true, best, column(box.axes, axis) * (l[axis] >= 0.0 ? 1.0 : -1.0)};
 }
 
+Penetration point_in_capsule(const Vec3& a, const Vec3& b, double radius_m, const Vec3& point) {
+    const Vec3 ab = b - a;
+    const double len2 = dot(ab, ab);
+    const double t = len2 > 0.0 ? std::clamp(dot(point - a, ab) / len2, 0.0, 1.0) : 0.0;
+    const Vec3 d = point - (a + t * ab);
+    const double dist = norm(d);
+    if (dist >= radius_m) return {};
+    Vec3 normal = dist > 0.0 ? d / dist : Vec3{};
+    if (dist == 0.0) {  // on the axis: any perpendicular
+        normal = normalized_or_zero(cross(ab, std::abs(ab.x) < 0.9 * std::sqrt(len2) ? Vec3{1, 0, 0} : Vec3{0, 1, 0}));
+    }
+    return {true, radius_m - dist, normal};
+}
+
 double distance_to_box(const OrientedBox& box, const Vec3& point) {
     const Vec3 local = transpose(box.axes) * (point - box.center);
     const Vec3 outside{std::max(std::abs(local.x) - box.half_extents.x, 0.0),

@@ -242,6 +242,7 @@ struct StageConfig {
     std::string name;
     double length_m = 0.0;
     double diameter_m = 0.0;
+    double hull_top_diameter_m = 0.0;  // optional: the hull tapers linearly to this at the top (0: = diameter_m)
     double dry_mass_kg = 0.0;  // includes engines
     double dry_cg_station_m = 0.0;
     math::Vec3 dry_cg_offset_m;  // lateral dry CG offset (y, z) from the axis (capsule trim); x unused (0)

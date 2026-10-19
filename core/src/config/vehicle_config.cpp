@@ -163,6 +163,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     s.name = doc.text(t, "name");
     s.length_m = doc.number(t, "length_m");
     s.diameter_m = doc.number(t, "diameter_m");
+    s.hull_top_diameter_m = t["hull_top_diameter_m"].value_or(0.0);
     s.dry_mass_kg = doc.number(t, "dry_mass_kg");
     s.dry_cg_station_m = doc.number(t, "dry_cg_station_m");
     if (const auto* offset = t["dry_cg_offset_m"].as_array()) {

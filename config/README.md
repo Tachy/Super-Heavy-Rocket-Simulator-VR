@@ -128,6 +128,8 @@ flow separation (vacuum engines).
   `behind_nose_cone` (default false: the port is covered while the vehicle's nose cone is closed - Crew Dragon `idss`),
   optional `soft_capture = "active" | "passive"` (default passive; IDSS: the active side extends its soft-capture ring,
   the passive one stays retracted - Crew Dragon active, the ISS IDAs passive; a docking needs one of each).
+- `[stage] hull_top_diameter_m` (optional): the hull tapers linearly from `diameter_m` at the stage bottom to this at
+  its top - the hull sample points of a visiting vehicle against the station primitives (ISS i5; Crew Dragon capsule).
 - `[[stage.collision]]`: `id`, `kind = "capsule"` (segment `a_m`-`b_m`, `radius_m`) or `"box"` (`centre_m`,
   body-aligned `half_extents_m`), stage frame.
 - With an OEM, mass, drag area and C_D come from its header instead of the config.
