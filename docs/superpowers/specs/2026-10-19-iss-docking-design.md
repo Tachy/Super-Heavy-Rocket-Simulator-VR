@@ -106,7 +106,7 @@ at their TIG [D]; a mission warns when one falls inside its window (real operati
 OEM after 6 h and 24 h: expected a few km, mostly along track (US76 density); the tolerance is set after the first
 measurement and documented. Interpolation against the rows themselves (leave-one-out, < 1 m). Synthetic orbit: RAAN
 drift against the J2 formula; back-propagation to a known OEM date. Fixture: the full OEM file in
-`tests/validation/iss/`.
+`tests/validation/fixtures/iss_oem/`.
 
 ## i2 design: Crew Dragon 6-DOF and relative navigation
 
