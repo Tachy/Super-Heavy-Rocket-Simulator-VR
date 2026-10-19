@@ -61,6 +61,7 @@ add_library(starsim_core STATIC
     src/gnc/relative_navigation.cpp
     src/gnc/proximity_geometry.cpp
     src/gnc/proximity_transfer.cpp
+    src/gnc/translation_loop.cpp
     src/gnc/sun_hold.cpp
     src/gnc/deorbit_planner.cpp
     src/gnc/entry_guidance.cpp

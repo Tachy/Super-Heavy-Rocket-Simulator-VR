@@ -142,6 +142,7 @@ add_executable(starsim_core_tests
     test_rendezvous_phasing_session.cpp
     test_proximity_geometry.cpp
     test_proximity_transfer.cpp
+    test_translation_loop.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE
