@@ -10,6 +10,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/sim/landing_outcome.hpp"
+#include "starsim/vehicle/docking_port.hpp"
 
 namespace starsim::sim {
 
@@ -115,6 +116,7 @@ void FlightSession::place_in_orbit(const config::VehicleConfig& config, const ma
     const vehicle::RigidBodyState rigid{state.position_m, state.velocity_mps, math::Quat::from_matrix(m), {}};
     bodies_.clear();
     clear_station();
+    clear_rendezvous_target();
     reset_leg_landing();
     bodies_.push_back({std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid), {}, nullptr, {}});
     controlled_ = 0;
@@ -391,6 +393,7 @@ void FlightSession::place_body(const config::VehicleConfig& config, const vehicl
     body->set_ground_height(body->vehicle().splashdown_recovery() ? 0.0 : launch_site_.height_m);  // a capsule: the sea
     bodies_.clear();
     clear_station();
+    clear_rendezvous_target();
     reset_leg_landing();
     bodies_.push_back({std::move(body), {}, nullptr, {}});
     controlled_ = 0;
@@ -438,6 +441,36 @@ void FlightSession::clear_station() {
     station_impulses_.clear();
 }
 
+void FlightSession::set_rendezvous_target(size_t target_index, const std::string& chaser_port,
+                                          const std::string& target_port) {
+    if (target_index >= bodies_.size() || target_index == controlled_) {
+        throw std::out_of_range("set_rendezvous_target: no such target body");
+    }
+    vehicle::port_kinematics(*bodies_[controlled_].body, chaser_port);  // validates both ports (German error)
+    vehicle::port_kinematics(*bodies_[target_index].body, target_port);
+    rendezvous_ = RendezvousTarget{target_index, chaser_port, target_port};
+}
+
+void FlightSession::clear_rendezvous_target() {
+    rendezvous_.reset();
+    translation_port_ = {};
+}
+
+std::optional<gnc::RelativePortState> FlightSession::relative_port_state() const {
+    if (!rendezvous_ || controlled_ >= bodies_.size() || rendezvous_->target_index >= bodies_.size()) {
+        return std::nullopt;
+    }
+    return gnc::relative_port_state(vehicle::port_kinematics(*bodies_[controlled_].body, rendezvous_->chaser_port),
+                                    vehicle::port_kinematics(*bodies_[rendezvous_->target_index].body,
+                                                             rendezvous_->target_port));
+}
+
+void FlightSession::set_translation_command(const math::Vec3& fraction_port) {
+    if (!rendezvous_) throw std::logic_error("set_translation_command: no rendezvous target");
+    const double magnitude = norm(fraction_port);
+    translation_port_ = magnitude > 1.0 ? fraction_port / magnitude : fraction_port;
+}
+
 void FlightSession::apply_station_impulses() {
     while (station_index_ && !station_impulses_.empty() && station_impulses_.front().epoch <= epoch_) {
         auto& body = *bodies_.at(*station_index_).body;
@@ -473,6 +506,7 @@ void FlightSession::launch_from_pad(const config::VehicleConfig& config, const L
     const double stand_height = site.height_m + (tower_ ? site.tower->mount_height_m : 0.0);
     bodies_.clear();
     clear_station();
+    clear_rendezvous_target();
     bodies_.push_back({vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad, site.longitude_rad,
                                                    stand_height, heading_rad, earth_, epoch),
                        {}, nullptr, {}});
@@ -506,7 +540,10 @@ double FlightSession::coast_allowance_s() const {
          capsule_return_step_ == CapsuleReturnStep::Mains)) {
         return 0.0;
     }
-    if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0 || norm(input_.translation) > 0.0) return 0.0;
+    if (input_.pitch != 0.0 || input_.yaw != 0.0 || input_.roll != 0.0 || norm(input_.translation) > 0.0 ||
+        norm(translation_port_) > 0.0) {
+        return 0.0;  // the coast skips the RCS: a commanded translation is flown tick by tick
+    }
     double allowance = max_coast_s;
     if (autopilot_.state == AutopilotState::Lunar) {
         // a wreck coasts: one tick first so that the step machine names the outcome and ends the autopilot (l5 Task 9b:

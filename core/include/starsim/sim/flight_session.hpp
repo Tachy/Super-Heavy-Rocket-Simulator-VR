@@ -32,6 +32,7 @@
 #include "starsim/gnc/lunar_landing_guidance.hpp"
 #include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/gnc/parachute_sequencer.hpp"
+#include "starsim/gnc/relative_navigation.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/gnc/sun_hold.hpp"
 #include "starsim/mission/earth_return.hpp"
@@ -550,6 +551,21 @@ public:
     // A session that starts with a station only (no body placed yet); throws std::logic_error while bodies exist.
     void set_epoch(time::Epoch epoch);
 
+    // Rendezvous (milestone i): relative navigation of the controlled body's port `chaser_port` against port
+    // `target_port` of body `target_index` (fidelity flag relative_nav = "ideal": the true states). Throws
+    // std::out_of_range for a bad index or the controlled body itself, std::invalid_argument (German) for an unknown
+    // port. Cleared with the bodies (place_body / launch_from_pad / place_in_orbit), like the station.
+    void set_rendezvous_target(size_t target_index, const std::string& chaser_port, const std::string& target_port);
+    void clear_rendezvous_target();  // also stops the translation command
+    std::optional<gnc::RelativePortState> relative_port_state() const;  // nullopt without a target
+    // RCS translation of the controlled body in the target port frame: force fractions of the pure translation
+    // capability along that direction (|f| > 1 is scaled to 1), held until changed; zero stops it. Applied with
+    // rcs_force_pure next to the attitude hold's torque, the torque first (the hold keeps steering; a saturated
+    // translation is cut instead); the session does not coast while it is set. Throws std::logic_error without a
+    // rendezvous target.
+    void set_translation_command(const math::Vec3& fraction_port);
+    math::Vec3 translation_command() const { return translation_port_; }
+
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
     void cutoff();             // stop all engines
@@ -588,6 +604,8 @@ private:
     void run_parachutes(Flying& flying);
     void apply_return_command(const Flying& flying, const gnc::AttitudeController& controller,
                               double ambient_pressure_pa, vehicle::VehicleCommand& command) const;
+    // The translation command as body-axis force fractions of the controlled body (nothing without a command).
+    void apply_translation(const Flying& flying, vehicle::VehicleCommand& command) const;
     double coast_allowance_s() const;  // 0 if fixed ticks are needed now
     void start_entry_guidance(Flying& flying, const gnc::EntryGuidanceParameters& parameters);
     void update_hull_moment_scale(Flying& flying);  // entering ship: the controller's pitch trim estimate
@@ -653,6 +671,13 @@ private:
     std::vector<StationImpulse> station_impulses_;  // still to apply, sorted by epoch
     void clear_station();                           // with every bodies_.clear()
     void apply_station_impulses();                  // those due now
+    struct RendezvousTarget {
+        size_t target_index = 0;
+        std::string chaser_port;
+        std::string target_port;
+    };
+    std::optional<RendezvousTarget> rendezvous_;  // set_rendezvous_target
+    math::Vec3 translation_port_;                 // set_translation_command, target port frame
     PilotInput input_;
     ControlMode mode_ = ControlMode::RateCommand;
     time::Epoch epoch_;

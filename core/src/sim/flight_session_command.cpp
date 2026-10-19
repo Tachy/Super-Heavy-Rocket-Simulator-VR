@@ -9,6 +9,7 @@
 
 #include "starsim/gnc/capsule_entry_control.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/vehicle/docking_port.hpp"
 
 namespace starsim::sim {
 
@@ -170,6 +171,7 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
                                 &feedforward)
             .apply_to(command);
         command.rcs_keep_force = true;  // an orbit: turns must not push the vehicle
+        if (index == controlled_) apply_translation(flying, command);
         return command;
     }
     // Axis convention: body +y points downrange (launch heading), z = x cross y. Pitch input > 0 tips
@@ -179,7 +181,11 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         const math::Vec3 rates{input_.roll * max_roll_rate_radps, input_.yaw * max_pitch_yaw_rate_radps,
                                input_.pitch * max_pitch_yaw_rate_radps};
         controller_.steer_rates(*flying.body, ambient_pressure_pa, rates).apply_to(command);
-        if (norm(input_.translation) > 0.0) command.rcs_force_fraction = input_.translation;  // RCS translation
+        if (norm(input_.translation) > 0.0) {
+            command.rcs_force_fraction = input_.translation;  // RCS translation (the pilot's, body axes)
+        } else if (index == controlled_) {
+            apply_translation(flying, command);
+        }
     } else {
         double max_gimbal = 0.0;
         for (const auto& stage : flying.body->vehicle().stages()) {
@@ -193,6 +199,16 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         command.gimbal_roll_rad = input_.roll * max_gimbal;
     }
     return command;
+}
+
+void FlightSession::apply_translation(const Flying& flying, vehicle::VehicleCommand& command) const {
+    if (!rendezvous_ || norm(translation_port_) <= 0.0) return;
+    const auto target = vehicle::port_kinematics(*bodies_.at(rendezvous_->target_index).body, rendezvous_->target_port);
+    command.rcs_force_fraction = flying.body->state().attitude.inverse_rotate(target.axes_gcrf * translation_port_);
+    // The hold's torque comes first: a full pure translation saturates the Dracos, and with the force kept the hold
+    // lost up to 14 deg in 20 s; torque first it stays below 1 deg (test_rendezvous_session).
+    command.rcs_keep_force = false;
+    command.rcs_force_pure = true;  // a pure translation: no torque, no cross push (docking)
 }
 
 }  // namespace starsim::sim
