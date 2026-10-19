@@ -17,36 +17,44 @@ DockingSim::DockingSim(std::string chaser_port, std::string station_port, const 
       hull_body_m_(contact::hull_sample_points(chaser_config, collision_p_)) {}
 
 double DockingSim::coast_limit_s(const vehicle::FlightBody& chaser, const vehicle::FlightBody& station) const {
-    constexpr double unlimited = std::numeric_limits<double>::infinity();
-    if (chaser.docked()) return unlimited;
+    if (chaser.docked()) return std::numeric_limits<double>::infinity();
     const auto& cs = chaser.state();
     const auto& ss = station.state();
     const math::Vec3 d = cs.position_gcrf_m - ss.position_gcrf_m;
-    if (norm(d) > collision_p_.check_range_m) return unlimited;
+    const double range = norm(d);
     const math::Vec3 cg_body = chaser.vehicle().mass_properties().cg_point_m();
     double reach = 0.0;
     for (const auto& p : hull_body_m_) reach = std::max(reach, norm(p - cg_body));
-    const math::Vec3 cg_station = station.vehicle().mass_properties().cg_point_m() + ss.attitude.inverse_rotate(d);
-    double clearance = unlimited;
-    for (const auto& c : shape_.capsules) {
-        const auto pen = contact::point_in_capsule(c.a_m, c.b_m, c.radius_m, cg_station);
-        const math::Vec3 ab = c.b_m - c.a_m;
-        const double t = std::clamp(dot(cg_station - c.a_m, ab) / dot(ab, ab), 0.0, 1.0);
-        clearance = std::min(clearance, pen.inside ? 0.0 : norm(cg_station - (c.a_m + t * ab)) - c.radius_m);
+    double clearance = 0.0;
+    if (range > collision_p_.check_range_m) {
+        clearance = range - collision_p_.check_range_m;  // to where the shape check takes over (review i5: no free coast)
+    } else {
+        const math::Vec3 cg_station = station.vehicle().mass_properties().cg_point_m() + ss.attitude.inverse_rotate(d);
+        clearance = std::numeric_limits<double>::infinity();
+        for (const auto& c : shape_.capsules) {
+            const math::Vec3 ab = c.b_m - c.a_m;
+            const double t = std::clamp(dot(cg_station - c.a_m, ab) / dot(ab, ab), 0.0, 1.0);
+            clearance = std::min(clearance, norm(cg_station - (c.a_m + t * ab)) - c.radius_m);
+        }
+        for (const auto& b : shape_.boxes) clearance = std::min(clearance, contact::distance_to_box(b, cg_station));
+        clearance -= reach;
+        const auto& ip = mechanism_.parameters().interface;
+        const auto ck = vehicle::port_kinematics(chaser, chaser_port_);
+        const auto sk = vehicle::port_kinematics(station, station_port_);
+        clearance = std::min(clearance, norm(ck.position_gcrf_m - sk.position_gcrf_m) -
+                                            (ip.ring_extension_m + 2.0 * ip.petal_height_m + ip.interface_radius_m));
     }
-    for (const auto& b : shape_.boxes) clearance = std::min(clearance, contact::distance_to_box(b, cg_station));
-    clearance -= reach;
-    const auto& ip = mechanism_.parameters().interface;
-    const auto ck = vehicle::port_kinematics(chaser, chaser_port_);
-    const auto sk = vehicle::port_kinematics(station, station_port_);
-    clearance = std::min(clearance, norm(ck.position_gcrf_m - sk.position_gcrf_m) -
-                                        (ip.ring_extension_m + 2.0 * ip.petal_height_m + ip.interface_radius_m));
     if (clearance <= 0.0) return 0.0;
     const math::Vec3 omega_s = ss.attitude.rotate(ss.angular_velocity_body_radps);
     const math::Vec3 omega_c = cs.attitude.rotate(cs.angular_velocity_body_radps);
     const double speed =
         norm(cs.velocity_gcrf_mps - ss.velocity_gcrf_mps - cross(omega_s, d)) + norm(omega_c - omega_s) * reach;
-    return clearance / std::max(speed, 1e-6);
+    // The relative motion accelerates (CW: 3 n^2 radially, -n^2 cross-track, Coriolis 2 n v): bound it by
+    // 3 n^2 range + 2 n speed and solve clearance = speed t + accel t^2 / 2 (review i5: a parked chaser coasted deep in).
+    const double n = norm(omega_s);
+    const double accel = 3.0 * n * n * range + 2.0 * n * speed;
+    if (accel <= 0.0) return clearance / std::max(speed, 1e-6);
+    return (-speed + std::sqrt(speed * speed + 2.0 * accel * clearance)) / accel;
 }
 
 contact::DockingPose DockingSim::pose(const vehicle::FlightBody& chaser, const vehicle::FlightBody& station) const {

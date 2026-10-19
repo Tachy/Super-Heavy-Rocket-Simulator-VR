@@ -48,6 +48,17 @@ struct DragonAtPort {
         d.session.set_attitude_mode({});
         return d;
     }
+    // The Dragon port anywhere in the IDA-2 port frame (= station axes (x, -y, -z), origin at station x 73 m), at rest
+    // in the station frame unless `velocity_port_mps`, docking attitude, not turning (so the session may coast).
+    static DragonAtPort place_at(const math::Vec3& position_port_m, const math::Vec3& velocity_port_mps = {}) {
+        test::spice_session();
+        DragonAtPort e(std::make_unique<proximity_test::DragonNearIss>(
+            proximity_test::at_port("ida2", position_port_m, velocity_port_mps)));
+        e.session.set_rendezvous_target(1, "idss", "ida2");
+        e.session.set_attitude_mode({});
+        e.session.apply_angular_rate(0, {});
+        return e;
+    }
     // Docked at `port` (placed 5 mm before the ring faces meet at 0.075 m/s, flown to hard capture).
     static DragonAtPort docked(const std::string& port, const std::vector<Reboost>& reboosts = {}) {
         auto d = place(port, 0.305, 0.0, -0.075, 0.0, {}, reboosts);

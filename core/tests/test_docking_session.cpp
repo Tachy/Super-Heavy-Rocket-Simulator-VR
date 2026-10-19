@@ -167,3 +167,66 @@ TEST_CASE("Undocking: refused unless hard docked", "[iss][docking]") {
     CHECK_FALSE(d.session.undock());
     CHECK(d.session.docking_status() == "Abkoppeln nicht möglich: nicht fest angedockt");
 }
+
+// Final review i5 (fix pass).
+
+TEST_CASE("Docking session: one coast does not cross into the collision check range", "[iss][docking]") {
+    // 130 m out on the IDA-2 axis (CG ~165 m from the station CG), closing at 0.5 m/s, not turning: the session coasts,
+    // but one coast segment must end before the chaser is inside the 120 m check range (~90 s at most)
+    auto d = docking_test::DragonAtPort::place("ida2", 130.0, 0.0, -0.5, 0.0);
+    d.session.apply_angular_rate(0, {});
+    d.session.advance_to(d.t0 + 600.0, 1);  // a single iteration: one coast segment
+    const double coasted = d.session.epoch() - d.t0;
+    CHECK(coasted > 1.0);
+    CHECK(coasted < 120.0);
+}
+
+TEST_CASE("Docking session: a chaser parked beside the station is not coasted deep into it", "[iss][docking]") {
+    // 1 m beside the modules, at rest in the station frame, not turning: the cross-track pull (-n^2 y) closes the gap
+    auto d = docking_test::DragonAtPort::beside_modules(1.0, 0.0);
+    d.session.apply_angular_rate(0, {});
+    d.session.advance_to(d.t0 + 1200.0, 1000000);
+    REQUIRE(d.session.collision_impulse_ns());
+    const auto rel = d.session.relative_port_state();
+    REQUIRE(rel);
+    CHECK(norm(rel->velocity_mps) < 0.1);  // a gentle touch, not a penalty ejection after a deep coast
+}
+
+TEST_CASE("Undocking: a hull contact during the departure ends the flight with Kollision", "[iss][docking]") {
+    auto d = docking_test::DragonAtPort::docked("ida2");
+    auto& s = d.session;
+    REQUIRE(s.undock());
+    REQUIRE(d.fly_until(DockingPhase::Separated, 400.0));
+    // pushed back towards Harmony right after the springs
+    const auto port = vehicle::port_kinematics(d.station(), "ida2");
+    s.apply_velocity_error(0, column(port.axes_gcrf, 0) * (-1.0));  // the undock burn cannot stop it in 2.8 m
+    REQUIRE(docking_test::DragonAtPort::wait_for(s, d.t0, [&] { return s.collision_impulse_ns().has_value(); }, 60.0, 0.5));
+    s.advance_to(s.epoch() + 30.0, 1000000);
+    CHECK(s.autopilot().state == sim::AutopilotState::Off);
+    CHECK(s.docking_status() == "Kollision");
+}
+
+TEST_CASE("Docking session: a chaser parked beyond the truss tip is not coasted deep into it", "[iss][docking]") {
+    // CG 1 m off the truss tip (y 54.5 m) at its mid height, at rest in the station frame: the cross-track pull
+    // -n^2 y (57.5 m) closes the gap within ~200 s; port at station x 34 m (hull over the truss x 35.5-40.5 m)
+    auto d = docking_test::DragonAtPort::place_at({34.0 - 73.0, -(54.5 + 2.0 + 1.0), 4.5});
+    d.session.advance_to(d.t0 + 1200.0, 1000000);
+    REQUIRE(d.session.collision_impulse_ns());
+    const auto rel = d.session.relative_port_state();
+    REQUIRE(rel);
+    CHECK(norm(rel->velocity_mps) < 0.1);  // a gentle touch, not a penalty ejection after a deep coast
+}
+
+TEST_CASE("Docking session: a nearly co-rotating chaser beyond the truss tip is not coasted into it", "[iss][docking]") {
+    // as above, but turning at 0.85 x the station rate (below the 1e-3 rad/s coast threshold): the relative turn gives
+    // almost no speed term, only the CW acceleration bound keeps the coasts short
+    auto d = docking_test::DragonAtPort::place_at({34.0 - 73.0, -(54.5 + 2.0 + 1.0), 4.5});
+    const auto& st = d.station().state();
+    const Vec3 omega_gcrf = st.attitude.rotate(st.angular_velocity_body_radps);
+    d.session.apply_angular_rate(0, d.dragon().state().attitude.inverse_rotate(0.85 * omega_gcrf));
+    d.session.advance_to(d.t0 + 1200.0, 1000000);
+    REQUIRE(d.session.collision_impulse_ns());
+    const auto rel = d.session.relative_port_state();
+    REQUIRE(rel);
+    CHECK(norm(rel->velocity_mps) < 0.1);
+}

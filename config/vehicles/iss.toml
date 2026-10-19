@@ -77,6 +77,20 @@ b_m = [69.0, 0.0, 0.0]
 radius_m = 2.2
 
 [[stage.collision]]
+id = "pma2_ida2"                         # pressurised mating adapter + docking adapter forward of Harmony (i5 review)
+kind = "capsule"
+a_m = [69.0, 0.0, 0.0]
+b_m = [72.5, 0.0, 0.0]                   # [E] ends 0.5 m short of the IDA-2 HCS plane (73 m): a docked Dragon is clear
+radius_m = 1.4                           # [E] PMA / IDA outer radius
+
+[[stage.collision]]
+id = "pma3_ida3"                         # PMA-3 + IDA-3 on the Harmony zenith side
+kind = "capsule"
+a_m = [66.0, 0.0, -2.2]
+b_m = [66.0, 0.0, -4.5]                  # [E] ends 0.5 m short of the IDA-3 HCS plane (z -5 m)
+radius_m = 1.4                           # [E]
+
+[[stage.collision]]
 id = "columbus"
 kind = "capsule"
 a_m = [66.0, 2.2, 0.0]

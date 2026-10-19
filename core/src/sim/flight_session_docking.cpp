@@ -145,7 +145,9 @@ void FlightSession::docking_after_tick() {
             proximity_->collided(epoch_);
             proximity_status_ = "Kollision";
         }
-        if (autopilot_.state == AutopilotState::Proximity) autopilot_.state = AutopilotState::Off;
+        if (autopilot_.state == AutopilotState::Proximity || autopilot_.state == AutopilotState::Departure) {
+            autopilot_.state = AutopilotState::Off;  // the flight ends (review i5: also the departure)
+        }
         attitude_mode_ = {};
         translation_port_ = {};
     }
@@ -284,6 +286,12 @@ void FlightSession::run_departure(Flying& flying) {
         return;
     }
     if (flying.body->impacted()) {
+        autopilot_.state = AutopilotState::Off;
+        attitude_mode_ = {};
+        translation_port_ = {};
+        return;
+    }
+    if (docking_collision_reported_) {  // a hull contact ended the departure (status stays "Kollision")
         autopilot_.state = AutopilotState::Off;
         attitude_mode_ = {};
         translation_port_ = {};
