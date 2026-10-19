@@ -14,6 +14,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+import iss_oem
 import lunar_tile
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -60,6 +61,9 @@ def main() -> int:
         print(f"[{source['id']}] {source['name']}")
         if source.get("kind") == "lunar_tiles":  # LOLA: range-cropped site tiles + the global grid (lunar_tile.py)
             lunar_tile.fetch_all(load_sources(), REPO_ROOT, args.force)
+            continue
+        if source.get("kind") == "iss_oem":  # ISS OEM: always fetched, every version archived (iss_oem.py)
+            iss_oem.fetch(source, REPO_ROOT, download)
             continue
         if target.exists() and not args.force:
             print("  already present")

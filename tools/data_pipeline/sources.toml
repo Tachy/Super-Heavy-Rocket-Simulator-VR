@@ -76,6 +76,17 @@ target = "data/spice/moon_de440_250416.tf"
 license = "NAIF generic kernels: public, free to use"
 credit = "NASA/JPL NAIF generic kernels"
 
+# ------------------------------------------------------------------ ISS trajectory (every fetched version archived)
+
+[[source]]
+id = "iss_oem"
+name = "NASA ISS Trajectory Data (CCSDS OEM, EME2000, ~15 days incl. planned manoeuvres) - every fetched version archived"
+url = "https://nasa-public-data.s3.amazonaws.com/iss-coords/current/ISS_OEM/ISS.OEM_J2K_EPH.txt"
+target = "data/iss_oem"
+kind = "iss_oem"
+license = "NASA data: public domain (NASA data and images are not copyrighted)"
+credit = "NASA Johnson Space Center, Flight Operations Directorate (TOPO): ISS Trajectory Data"
+
 # ------------------------------------------------------------------ textures (raw, converted by prepare.py)
 
 [[source]]

@@ -69,4 +69,21 @@ private:
     std::vector<size_t> segment_start_;
 };
 
+// All OEM files of a directory (the archive data/iss_oem/: one file per CREATION_DATE).
+class OemArchive {
+public:
+    // Files that fail to parse are skipped and listed in skipped(); a missing directory gives an empty archive.
+    static OemArchive scan(const std::filesystem::path& dir, const time::TimeScaleConverter& time);
+    // The newest file (by CREATION_DATE) whose usable window contains `epoch`, or nullptr.
+    const Oem* for_epoch(time::Epoch epoch) const;
+    // The newest file of all (for the synthetic orbit's mean elements), or nullptr.
+    const Oem* latest() const;
+    size_t size() const { return files_.size(); }
+    const std::vector<std::string>& skipped() const { return skipped_; }
+
+private:
+    std::vector<Oem> files_;  // sorted by creation date, oldest first
+    std::vector<std::string> skipped_;
+};
+
 }  // namespace starsim::orbit

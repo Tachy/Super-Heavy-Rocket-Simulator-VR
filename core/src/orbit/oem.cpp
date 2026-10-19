@@ -258,4 +258,32 @@ StateVector Oem::state_gcrf(time::Epoch epoch) const {
     return lagrange(epochs_, states_, start, count, epoch);
 }
 
+// ISO 8601 creation dates sort chronologically as strings.
+OemArchive OemArchive::scan(const std::filesystem::path& dir, const time::TimeScaleConverter& time) {
+    OemArchive archive;
+    std::error_code error;
+    if (!std::filesystem::is_directory(dir, error)) return archive;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, error)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".txt") continue;
+        try {
+            archive.files_.push_back(Oem::load(entry.path(), time));
+        } catch (const std::exception& e) {
+            archive.skipped_.push_back(entry.path().filename().string() + ": " + e.what());
+        }
+    }
+    std::sort(archive.files_.begin(), archive.files_.end(), [](const Oem& a, const Oem& b) {
+        return a.header().creation_date < b.header().creation_date;
+    });
+    return archive;
+}
+
+const Oem* OemArchive::for_epoch(time::Epoch epoch) const {
+    for (auto it = files_.rbegin(); it != files_.rend(); ++it) {
+        if (it->covers(epoch)) return &*it;
+    }
+    return nullptr;
+}
+
+const Oem* OemArchive::latest() const { return files_.empty() ? nullptr : &files_.back(); }
+
 }  // namespace starsim::orbit

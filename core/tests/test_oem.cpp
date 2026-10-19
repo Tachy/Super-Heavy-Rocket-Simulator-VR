@@ -144,3 +144,28 @@ TEST_CASE("OEM interpolation does not straddle a step change", "[iss][oem]") {
     const auto u = oem.row_epoch(k) + 30.0;
     CHECK(norm(oem.state_gcrf(u).position_m - after_only.state_gcrf(u).position_m) < 1e-6);
 }
+
+TEST_CASE("OEM archive picks the newest file covering the epoch", "[iss][oem]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    const auto dir = std::filesystem::path(STARSIM_OUTPUT_DIR) / "oem_archive_case";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    const std::string text = read_all(fixture);
+    // an older version: same rows, earlier creation date
+    std::string older = text;
+    older.replace(older.find("2026-10-14T18:30:01.420"), 23, "2026-10-13T18:30:01.420");
+    std::ofstream(dir / "ISS.OEM_J2K_EPH_2026-10-14T18-30-01.txt", std::ios::binary) << text;
+    std::ofstream(dir / "ISS.OEM_J2K_EPH_2026-10-13T18-30-01.txt", std::ios::binary) << older;
+    std::ofstream(dir / "ISS.OEM_J2K_EPH_broken.txt", std::ios::binary) << "not an OEM";
+    const auto archive = orbit::OemArchive::scan(dir, time);
+    CHECK(archive.size() == 2);
+    CHECK(archive.skipped().size() == 1);
+    const auto t = time.from_utc({2026, 10, 20, 0, 0, 0.0});
+    REQUIRE(archive.for_epoch(t) != nullptr);
+    CHECK(archive.for_epoch(t)->header().creation_date == "2026-10-14T18:30:01.420");
+    CHECK(archive.for_epoch(time.from_utc({2026, 12, 1, 0, 0, 0.0})) == nullptr);
+    CHECK(archive.latest()->header().creation_date == "2026-10-14T18:30:01.420");
+    CHECK(orbit::OemArchive::scan(dir / "missing", time).size() == 0);
+    std::filesystem::remove_all(dir);
+}
