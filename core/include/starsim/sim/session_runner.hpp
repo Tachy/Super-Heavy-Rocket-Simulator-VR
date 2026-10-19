@@ -54,10 +54,13 @@ public:
     // Finished results not yet taken, oldest first (the GDExtension emits command_finished for them).
     std::deque<std::pair<std::uint64_t, Result>> take_finished();
 
-    bool idle() const;                       // no command queued or running, and the target reached (or inactive)
+    // No command queued or running, no input or chunk running, and the target reached (or inactive, or stalled: an
+    // advance threw - the runner then waits for the next command instead of re-throwing every chunk).
+    bool idle() const;
     bool wait_idle(double timeout_s) const;  // true when idle within the timeout (tests, scripts)
     double busy_s() const;                   // wall seconds the current command has been running (0 without one)
     std::string last_error() const;          // of the latest input, advance or observer exception ("" none)
+    std::string take_error();                // last_error() once per new error ("" when already taken or none)
 
 private:
     void run();
@@ -65,6 +68,7 @@ private:
     void run_chunk(std::unique_lock<std::mutex>& lock);    // latest input + one advance chunk; lock as above
     bool idle_locked() const;                              // mutex_ held
     bool target_reached_locked() const;                    // no target, or less than one tick left; mutex_ held
+    void set_error_locked(const std::string& error);       // mutex_ held
 
     std::unique_ptr<FlightSession> session_;
     Observer observer_;
@@ -80,6 +84,9 @@ private:
     std::map<std::uint64_t, Result> results_;  // kept until 1,000 newer ids exist [E]
     std::deque<std::pair<std::uint64_t, Result>> finished_;
     std::string last_error_;
+    bool error_taken_ = true;    // last_error_ already handed out by take_error()
+    bool chunk_running_ = false;  // run_chunk works unlocked (input, advance, observer)
+    bool stalled_ = false;        // the last advance threw; cleared by the next command
     bool active_ = false;  // the session's active(), as of the last command / chunk (worker writes under the lock)
     bool stop_ = false;
     std::thread worker_;  // last: started after every member is initialised

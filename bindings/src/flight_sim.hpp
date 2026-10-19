@@ -150,13 +150,13 @@ public:
     int64_t plan_capsule_return();
     // {altitude_m, altitude_terrain_m, latitude_deg, ..., reference_body ("earth" / "moon"), periapsis_altitude_km,
     // apoapsis_altitude_km (INF on an open orbit), inclination_deg}: the orbit values are osculating two-body elements
-    // about the reference body (the Earth's equator / the Moon's MOON_ME equator measured in GCRF axes - inclination
-    // against the GCRF equator), altitudes above its equatorial radius / the 1737.4 km sphere. Osculating values differ
+    // about the reference body (inclination against its equator: the body-relative state rotated into ITRF / MOON_ME
+    // axes at the current epoch), altitudes above its equatorial radius / the 1737.4 km sphere. Osculating values differ
     // from the mean orbit (l4: "95 x 100 km at burn end" is the osculating value).
     godot::Dictionary telemetry(int index) const;
 
     // Lunar flight (l6): {present}; present: {step, status (German), mission_complete, mission_ended, burns: [{step,
-    // epoch_tdb_s, delta_v_mps, mass_kg}], descent: {present, pdi_epoch_tdb_s, touchdown_latitude_deg,
+    // epoch_tdb_s, delta_v_mps, mass_kg}], descent: {present, feasible, reason, pdi_epoch_tdb_s, touchdown_latitude_deg,
     // touchdown_longitude_deg, touchdown_height_m, slope_deg, offset_m, periselene_altitude_km}, touchdown: {present,
     // outcome (German), offset_m, sink_mps, lateral_mps}, return: {present, feasible, reason, tei_delta_v_mps,
     // braking_delta_v_mps, interface_epoch_tdb_s, interface_speed_mps, interface_angle_deg, replans}, pilot_cue:

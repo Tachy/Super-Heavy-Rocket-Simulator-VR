@@ -107,6 +107,10 @@ godot::Dictionary FlightSim::result(int64_t id) const {
 
 void FlightSim::emit_finished() {
     if (!runner_) return;
+    // Input, advance and snapshot exceptions have no command id: report each once.
+    if (const auto error = runner_->take_error(); !error.empty()) {
+        godot::UtilityFunctions::push_error("FlightSim: " + godot::String::utf8(error.c_str()));
+    }
     for (const auto& [id, r] : runner_->take_finished()) {
         const auto it = commands_.find(id);
         const godot::String name = it != commands_.end() ? it->second.first : godot::String();

@@ -111,6 +111,31 @@ TEST_CASE("runner survives a throwing input and keeps running commands", "[sessi
     CHECK_FALSE(f.runner.result(id).threw);
 }
 
+TEST_CASE("runner is not idle while a slow input runs", "[session_runner]") {
+    // Final review l6: the chunk took the input out of its slot and unlocked - wait_idle returned before the input
+    // had run, its error was not yet stored.
+    RunnerFixture f;
+    f.runner.set_latest([](sim::FlightSession&) {
+        std::this_thread::sleep_for(200ms);
+        throw std::runtime_error("langsam");
+    });
+    std::this_thread::sleep_for(50ms);  // the worker has taken the input
+    REQUIRE(f.runner.wait_idle(10.0));
+    CHECK(f.runner.last_error() == "langsam");
+    CHECK(f.runner.take_error() == "langsam");
+    CHECK(f.runner.take_error().empty());
+}
+
+TEST_CASE("runner observes after a throwing input", "[session_runner]") {
+    RunnerFixture f;
+    REQUIRE(f.runner.wait_idle(10.0));
+    const int before = f.observed;
+    f.runner.set_latest([](sim::FlightSession&) { throw std::runtime_error("Absicht"); });
+    std::this_thread::sleep_for(50ms);
+    REQUIRE(f.runner.wait_idle(10.0));
+    CHECK(f.observed > before);
+}
+
 TEST_CASE("runner follows an earlier target after a new launch", "[session_runner]") {
     RunnerFixture f;
     f.runner.post([](sim::FlightSession& s) { s.launch_from_pad("starship_block3", starbase, 0.0, t0 + 10.0); });

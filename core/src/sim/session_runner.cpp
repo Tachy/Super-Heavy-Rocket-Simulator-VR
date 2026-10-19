@@ -76,7 +76,7 @@ void SessionRunner::run() {
     std::unique_lock lock(mutex_);
     while (true) {
         wake_.wait(lock, [this] {
-            return stop_ || !queue_.empty() || latest_ || (active_ && !target_reached_locked());
+            return stop_ || !queue_.empty() || latest_ || (active_ && !stalled_ && !target_reached_locked());
         });
         if (stop_) return;
         if (!queue_.empty()) {
@@ -92,6 +92,7 @@ void SessionRunner::run_command(std::unique_lock<std::mutex>& lock) {
     auto [id, command] = std::move(queue_.front());
     queue_.pop_front();
     running_id_ = id;
+    stalled_ = false;  // a command may have changed what made the advance throw
     running_since_ = std::chrono::steady_clock::now();
     lock.unlock();
     Result r{true, false, {}};
@@ -107,7 +108,7 @@ void SessionRunner::run_command(std::unique_lock<std::mutex>& lock) {
     running_id_ = 0;
     active_ = active;
     reached_ = now;
-    if (observer_error) last_error_ = *observer_error;
+    if (observer_error) set_error_locked(*observer_error);
     if (const auto it = results_.find(id); it != results_.end()) it->second = r;
     finished_.emplace_back(id, r);
     while (finished_.size() > max_kept_results) finished_.pop_front();
@@ -117,25 +118,40 @@ void SessionRunner::run_chunk(std::unique_lock<std::mutex>& lock) {
     std::optional<Command> latest = std::move(latest_);
     latest_.reset();
     const auto target = target_;
+    chunk_running_ = true;
     lock.unlock();
     time::Epoch now = reached_;
-    const auto error = guarded([&] {
+    const auto input_error = guarded([&] {
         if (latest) (*latest)(*session_);
+    });
+    const auto advance_error = guarded([&] {
         if (session_->active()) {
             now = session_->epoch();
             if (target && !reached(now, *target)) now = session_->advance_to(*target, max_ticks_per_chunk);
         }
-        observer_(*session_, now);
     });
+    // The snapshot follows also after a failed input or advance (the session may have moved).
+    const auto observer_error = guarded([&] { observer_(*session_, now); });
     const bool active = session_->active();
     lock.lock();
+    chunk_running_ = false;
     active_ = active;
     reached_ = now;
-    if (error) last_error_ = *error;
+    // An advance that throws would throw again on the next chunk: stop driving the target until a command arrives.
+    if (advance_error) stalled_ = true;
+    for (const auto* error : {&input_error, &advance_error, &observer_error}) {
+        if (*error) set_error_locked(**error);
+    }
+}
+
+void SessionRunner::set_error_locked(const std::string& error) {
+    last_error_ = error;
+    error_taken_ = false;
 }
 
 bool SessionRunner::idle_locked() const {
-    return queue_.empty() && !latest_ && running_id_ == 0 && (!active_ || target_reached_locked());
+    return queue_.empty() && !latest_ && running_id_ == 0 && !chunk_running_ &&
+           (!active_ || stalled_ || target_reached_locked());
 }
 
 bool SessionRunner::idle() const {
@@ -156,6 +172,13 @@ double SessionRunner::busy_s() const {
 
 std::string SessionRunner::last_error() const {
     std::lock_guard lock(mutex_);
+    return last_error_;
+}
+
+std::string SessionRunner::take_error() {
+    std::lock_guard lock(mutex_);
+    if (error_taken_) return {};
+    error_taken_ = true;
     return last_error_;
 }
 

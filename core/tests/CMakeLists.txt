@@ -141,4 +141,7 @@ target_compile_definitions(starsim_core_tests PRIVATE
 
 include(Catch)
 # Catch tags become CTest labels: `ctest -LE slow` skips the long campaigns (tools/build.ps1 -Fast).
-catch_discover_tests(starsim_core_tests ADD_TAGS_AS_LABELS)
+catch_discover_tests(starsim_core_tests TEST_SPEC "~[plan_speed]" ADD_TAGS_AS_LABELS)
+# Wall-time checks run alone: under the suite's parallel load the LLO plan took 12-20 s against 10 s (l6 review).
+add_test(NAME plan_speed COMMAND starsim_core_tests "[plan_speed]")
+set_tests_properties(plan_speed PROPERTIES RUN_SERIAL TRUE LABELS "plan_speed")
