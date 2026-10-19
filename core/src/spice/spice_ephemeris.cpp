@@ -23,6 +23,7 @@ SpiceInt naif_id(ephemeris::Body body) {
 }  // namespace
 
 ephemeris::StateVector SpiceEphemeris::state_gcrf(ephemeris::Body target, time::Epoch epoch) const {
+    const auto lock = detail::lock_spice();
     if (target == ephemeris::Body::Earth) {
         return {};
     }
@@ -36,6 +37,7 @@ ephemeris::StateVector SpiceEphemeris::state_gcrf(ephemeris::Body target, time::
 
 math::Vec3 SpiceEphemeris::apparent_position_gcrf(ephemeris::Body target, time::Epoch epoch,
                                                   const math::StateVector& observer_gcrf) const {
+    const auto lock = detail::lock_spice();
     const double et = epoch.tdb_seconds_past_j2000();
     SpiceDouble observer_km[6] = {
         observer_gcrf.position_m.x / km_to_m,   observer_gcrf.position_m.y / km_to_m,
@@ -53,6 +55,7 @@ math::Vec3 SpiceEphemeris::apparent_position_gcrf(ephemeris::Body target, time::
 }
 
 double SpiceEphemeris::gm_m3ps2(ephemeris::Body body) const {
+    const auto lock = detail::lock_spice();
     SpiceInt count = 0;
     SpiceDouble gm_km3ps2 = 0.0;
     bodvcd_c(naif_id(body), "GM", 1, &count, &gm_km3ps2);

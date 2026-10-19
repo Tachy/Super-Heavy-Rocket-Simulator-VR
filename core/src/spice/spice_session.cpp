@@ -10,6 +10,11 @@ namespace {
 std::atomic<bool> g_session_active{false};
 }
 
+std::unique_lock<std::recursive_mutex> detail::lock_spice() {
+    static std::recursive_mutex mutex;
+    return std::unique_lock<std::recursive_mutex>(mutex);
+}
+
 std::vector<std::filesystem::path> default_kernel_files(const std::filesystem::path& kernel_dir) {
     return {
         kernel_dir / "naif0012.tls",                         // leap seconds
@@ -24,6 +29,7 @@ std::vector<std::filesystem::path> default_kernel_files(const std::filesystem::p
 }
 
 SpiceSession::SpiceSession(const std::vector<std::filesystem::path>& kernel_files) {
+    const auto lock = detail::lock_spice();
     if (g_session_active.exchange(true)) {
         throw SpiceError("only one SpiceSession may exist at a time");
     }
@@ -48,6 +54,7 @@ SpiceSession::SpiceSession(const std::vector<std::filesystem::path>& kernel_file
 }
 
 SpiceSession::~SpiceSession() {
+    const auto lock = detail::lock_spice();
     kclear_c();
     reset_c();
     g_session_active = false;

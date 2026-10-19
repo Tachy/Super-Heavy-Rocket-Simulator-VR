@@ -12,6 +12,7 @@ add_executable(starsim_core_tests
     test_utc_date_time.cpp
     test_geodetic.cpp
     test_spice_time.cpp
+    test_spice_threads.cpp
     test_ephemeris_validation.cpp
     test_interpolated_ephemeris.cpp
     test_orientation_validation.cpp

@@ -14,8 +14,9 @@ public:
 // The kernel set used by the simulator, in load order (later kernels take precedence).
 std::vector<std::filesystem::path> default_kernel_files(const std::filesystem::path& kernel_dir);
 
-// Owns the global CSPICE kernel pool. CSPICE is process-global and NOT thread-safe:
-// exactly one session may exist, and all SPICE-backed objects must be used from one thread.
+// Owns the global CSPICE kernel pool. CSPICE is process-global and NOT thread-safe: exactly one session may exist;
+// the adapters serialise CSPICE with a process-wide lock, but a SpiceSession must still be opened once, before any
+// adapter call.
 class SpiceSession {
 public:
     explicit SpiceSession(const std::vector<std::filesystem::path>& kernel_files);

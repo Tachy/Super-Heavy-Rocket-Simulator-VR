@@ -74,7 +74,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
 - Every physical model gets unit tests and at least one reference/validation case with a documented tolerance.
 - Small files with one responsibility; prefer composition over inheritance.
 - No magic numbers: physical constants live in `core/include/starsim/math/constants.hpp` with their source.
-- CSPICE is not thread-safe: only the simulation thread calls `ephemeris`.
+- CSPICE is not thread-safe: the `spice` adapters serialise every call with a process-wide lock (l6).
 
 ## Build & test (Windows, MSVC 2022 Build Tools, CMake, Ninja, SCons)
 One-time setup:
