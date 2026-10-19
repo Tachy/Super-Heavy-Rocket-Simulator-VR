@@ -46,6 +46,10 @@ public:
     math::Vec3 max_torque_nm() const { return max_torque_; }
     // Force along `direction_body` (unit) with no torque wanted; `duty` receives the duties that give it.
     double force_capability_n(const math::Vec3& direction_body, std::vector<double>* duty = nullptr) const;
+    // Pure translation along `direction_body`: the largest force the allocation delivers with no torque and no
+    // cross-axis push (residuals below 1 % of the force and of the gross thruster torques), found by bisection below
+    // force_capability_n - which, for a saturating demand, trades a turn and a sideways push for more force.
+    double pure_force_capability_n(const math::Vec3& direction_body, std::vector<double>* duty = nullptr) const;
 
 private:
     std::vector<double> solve(const math::Vec3& torque_nm, const math::Vec3& force_n, double torque_weight,

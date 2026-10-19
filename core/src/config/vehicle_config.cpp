@@ -277,6 +277,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 std::abs(dot(port.axis, port.up)) > 1e-9) {
                 doc.fail("stage.docking_port '" + port.id + "': axis and up must be perpendicular unit vectors");
             }
+            port.behind_nose_cone = p["behind_nose_cone"].value_or(false);
             s.docking_ports.push_back(port);
         }
     }

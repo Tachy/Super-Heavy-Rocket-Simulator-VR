@@ -609,7 +609,8 @@ void Vehicle::update_rcs(double dt_s, const VehicleCommand& command) {
     const double magnitude = norm(command.rcs_force_fraction);
     if (magnitude > 0.0) {
         const Vec3 u = command.rcs_force_fraction / magnitude;
-        force = u * (std::min(magnitude, 1.0) * a.force_capability_n(u));
+        force = u * (std::min(magnitude, 1.0) *
+                     (command.rcs_force_pure ? a.pure_force_capability_n(u) : a.force_capability_n(u)));
     }
     rcs_duty_ = a.allocate(torque, force, &rcs_duty_, command.rcs_keep_force);
     if (rcs_modulator_.firing().size() != rcs_duty_.size()) {
@@ -635,10 +636,18 @@ void Vehicle::update_rcs(double dt_s, const VehicleCommand& command) {
 }
 
 Vehicle::RcsCapability Vehicle::rcs_force_capability(const Vec3& direction_body) const {
+    return rcs_capability(direction_body, false);
+}
+
+Vehicle::RcsCapability Vehicle::rcs_pure_force_capability(const Vec3& direction_body) const {
+    return rcs_capability(direction_body, true);
+}
+
+Vehicle::RcsCapability Vehicle::rcs_capability(const Vec3& direction_body, bool pure) const {
     const auto& a = rcs_allocator();
     std::vector<double> duty;
     RcsCapability c;
-    c.force_n = a.force_capability_n(direction_body, &duty);
+    c.force_n = pure ? a.pure_force_capability_n(direction_body, &duty) : a.force_capability_n(direction_body, &duty);
     size_t i = 0;
     for (const auto& s : stages_) {
         for (const auto& t : s.rcs) {

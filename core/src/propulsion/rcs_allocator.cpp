@@ -68,6 +68,10 @@ constexpr double couple_capability_force_weight = 1e4;
 // the controller relies on the couples alone (no translation while turning). Otherwise (thrusters at one station:
 // Super Heavy, Falcon 9) it turns with a net push, as the real stages do.
 constexpr double couple_fraction_min = 0.1;
+// Pure translation capability: the allowed residual (force against the demand, torque against the gross thruster
+// torque) and the bisection steps (2^-20: ~1e-6 of the coupled capability).
+constexpr double pure_residual = 0.01;
+constexpr int pure_bisection_steps = 20;
 
 double& axis(Vec3& v, int i) { return i == 0 ? v.x : (i == 1 ? v.y : v.z); }
 
@@ -233,6 +237,32 @@ double RcsAllocator::force_capability_n(const Vec3& direction_body, std::vector<
     const double f = std::max(0.0, dot(force_n(d), u));
     if (duty) *duty = std::move(d);
     return f;
+}
+
+double RcsAllocator::pure_force_capability_n(const Vec3& direction_body, std::vector<double>* duty) const {
+    const Vec3 u = math::normalized_or_zero(direction_body);
+    std::vector<double> best(thrusters_.size(), 0.0);
+    double low = 0.0, high = norm(u) > 0.0 ? force_capability_n(u) : 0.0;
+    // Pure when the allocation reproduces the demand: the force within pure_residual of it, the torque within
+    // pure_residual of the gross torque the firing thrusters produce (they cancel).
+    const auto pure = [&](const std::vector<double>& d, double demand_n) {
+        double gross_torque = 0.0;
+        for (size_t i = 0; i < d.size(); ++i) gross_torque += d[i] * norm(rows_[i].torque);
+        return norm(force_n(d) - u * demand_n) <= pure_residual * demand_n &&
+               norm(torque_nm(d)) <= pure_residual * gross_torque;
+    };
+    for (int k = 0; k < pure_bisection_steps && high > 0.0; ++k) {
+        const double mid = 0.5 * (low + high);
+        auto d = allocate({}, u * mid, &best);
+        if (pure(d, mid)) {
+            low = mid;
+            best = std::move(d);
+        } else {
+            high = mid;
+        }
+    }
+    if (duty) *duty = std::move(best);
+    return low;
 }
 
 }  // namespace starsim::propulsion

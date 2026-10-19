@@ -123,6 +123,17 @@ TEST_CASE("RCS allocator: lateral force without torque from a symmetric pair of 
     CHECK(norm(a.torque_nm(d)) < 0.02 * f * 30.0);
 }
 
+TEST_CASE("RCS allocator: pure translation capability is the largest force without torque or cross-push", "[rcs]") {
+    // two +y thrusters 1 m fore and aft of the CG, 100 N and 50 N: only 50 N + 50 N balance about z
+    const RcsAllocator a({{{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, 100.0}, {{-1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, 50.0}}, 0.0);
+    std::vector<double> d;
+    const double pure = a.pure_force_capability_n({0.0, 1.0, 0.0}, &d);
+    CHECK(pure == Catch::Approx(100.0).epsilon(0.01));
+    CHECK(norm(a.force_n(d) - Vec3{0.0, pure, 0.0}) < 0.01 * pure);
+    CHECK(norm(a.torque_nm(d)) < 0.01 * 100.0 * 1.0);
+    CHECK(a.pure_force_capability_n({1.0, 0.0, 0.0}) == 0.0);    // no thruster along x
+}
+
 TEST_CASE("RCS allocator: a balanced layout turns at full capability without a net force", "[rcs]") {
     // Rings fore and aft plus two forward (ullage) thrusters aft: pure couples on every axis. A saturated turn must not
     // borrow the forward thrusters (a push the attitude controller did not ask for).

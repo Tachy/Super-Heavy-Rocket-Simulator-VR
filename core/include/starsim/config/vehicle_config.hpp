@@ -126,6 +126,7 @@ struct DockingPortConfig {
     math::Vec3 position_m;
     math::Vec3 axis;
     math::Vec3 up;
+    bool behind_nose_cone = false;  // covered while the stage's nose cone is closed (Crew Dragon)
 };
 
 // [[stage.collision]]: "capsule" = segment a-b with radius; "box" = centre a_m, body-aligned, half_extents_m.

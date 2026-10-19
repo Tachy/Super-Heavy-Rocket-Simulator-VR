@@ -167,6 +167,9 @@ struct VehicleCommand {
     // vehicle, a saturated torque is cut instead. Orbit manoeuvres set it (an unrequested push moves the orbit);
     // otherwise torque comes first.
     bool rcs_keep_force = false;
+    // rcs_force_fraction is a fraction of the pure translation capability (no torque, no cross-axis push:
+    // rcs_pure_force_capability) - translation commands (docking); burns keep the coupled capability.
+    bool rcs_force_pure = false;
     // Grid fin deflections (rad), one per fin in stage order; missing entries mean neutral.
     std::vector<double> grid_fin_rad;
     // Flap deflections (rad), one per flap in stage order; missing entries hold the current deflection.
@@ -258,6 +261,8 @@ public:
         double mass_flow_kgps = 0.0;
     };
     RcsCapability rcs_force_capability(const math::Vec3& direction_body) const;
+    // Pure translation (no torque, no cross-axis push) along that direction and its propellant flow.
+    RcsCapability rcs_pure_force_capability(const math::Vec3& direction_body) const;
     // Allocation (torque first) and on/off pulses with a minimum on-time for one tick; must be called once per tick
     // before integration. The resulting torque (about the CG) and force of the firing thrusters, body axes:
     void update_rcs(double dt_s, const VehicleCommand& command);
@@ -290,11 +295,13 @@ public:
     // A copy of stages [index, n) as they are now (tanks, nose cone), as separate() would split them off; this vehicle is
     // unchanged. Planning: the capsule a Crew Dragon will be after its trunk jettison.
     std::unique_ptr<Vehicle> copy_upper(size_t index) const;
+    // The RCS allocator for the current CG and the thrusters not starved (capability and coupling queries).
+    const propulsion::RcsAllocator& rcs_allocator() const;
 
 private:
     Vehicle() = default;
     void rebuild_aero();
-    const propulsion::RcsAllocator& rcs_allocator() const;  // for the current CG and the thrusters not starved
+    RcsCapability rcs_capability(const math::Vec3& direction_body, bool pure) const;
     void refresh_rcs_availability();  // starves thrusters whose supply ran dry, blocks those that cannot fire now
 
     std::string id_;

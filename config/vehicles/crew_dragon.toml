@@ -53,7 +53,9 @@ minimum_on_time_s = 0.01                 # [E] 2 ticks: Draco valves pulse short
 
 # [E] layout: no public drawing. Four Dracos under the nose cone push aft (plume forward: the deorbit / -x set, usable
 # only with the cone open); four side pods with tangential +/- and a forward-pushing thruster give pure couples on all
-# axes (balanced layout) and +x translation. Lateral translation (docking) is left to M9.
+# axes (balanced layout) and +x translation. Lateral translation (docking, i2): ~0.046 m/s^2 at 12.5 t with the cone
+# open - the side pods' tangential couple is cancelled by differential axial thrust of the nose and forward Dracos;
+# zero with the cone closed (layout kept, user 2026-10-19).
 [[stage.rcs.pod]]
 id = "nose"
 station_m = 3.9                          # [E] forward bulkhead
@@ -126,3 +128,13 @@ reefing = [[0.06, 4.0], [0.20, 4.0], [0.45, 4.0]]  # [E] three reefed stages
 max_load_n = 120000.0                    # [E] per canopy: 2x the nominal reefed peak (60 kN); mains opened
                                          # without drogues (~136 m/s at 1.8 km: ~140 kN) tear
 deploy_height_m = 1800.0                 # [S:nasa_demo2] ~6,000 ft (Crew-1: ~6,500 ft)
+
+# Docking port (milestone i): the IDSS-compatible docking system on the forward bulkhead, under the hinged nose cone.
+# Stage frame (x station from the capsule bottom); clocking reference: body -z [E].
+[[stage.docking_port]]
+id = "idss"
+name = "Dragon-Andocksystem"
+position_m = [4.0, 0.0, 0.0]             # [E] top of the pressure vessel, below the cone hinge (length 4.4 m with the cone)
+axis = [1.0, 0.0, 0.0]                   # forward, along the capsule axis
+up = [0.0, 0.0, -1.0]                    # [E] clocking reference
+behind_nose_cone = true                  # [S] the cone covers it during ascent and entry
