@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/lunar_site_config.hpp"
+#include "lunar_return_test_support.hpp"
 #include "lunar_test_support.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/contact/landing_surface.hpp"
@@ -19,6 +20,7 @@
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
 #include "starsim/sim/lunar_site.hpp"
+#include "starsim/sim/mission_start.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -235,4 +237,36 @@ TEST_CASE("Replacing the Moon terrain drops a lunar landing site built on the ol
     fx.session.set_moon_terrain(nullptr);
     CHECK(fx.session.leg_landing().site().body == ephemeris::Body::Earth);
     CHECK(watch.expired());
+}
+
+TEST_CASE("telemetry altitude over the lunar terrain", "[lunar_telemetry][terrain][data]") {
+    Fixture fx;
+    const auto terrain = sim::load_lunar_terrain(STARSIM_CONFIG_DIR, STARSIM_DATA_DIR);
+    fx.session.set_moon_terrain(terrain);
+    const auto site = sim::lunar_site(config::load_lunar_site(STARSIM_CONFIG_DIR, "mons_mouton_im2"), *terrain);
+    fx.session.set_lunar_landing_site(site);
+    REQUIRE(fx.session.lunar_landing_site() != nullptr);
+    CHECK(fx.session.lunar_landing_site()->config.id == "mons_mouton_im2");
+    CHECK(fx.session.moon_terrain() == terrain.get());
+    const auto cfg = hls(100.0e3);
+    place_over_site(fx, cfg, 0.5, {0.0, 0.0, -1.0});  // over the site, 0.5 m foot clearance
+    const auto t = fx.session.telemetry(0);
+    REQUIRE(t.reference_body == ephemeris::Body::Moon);
+    const double ground_m = terrain->height_m(t.latitude_rad, t.longitude_rad);
+    CHECK(t.altitude_terrain_m == Catch::Approx(t.altitude_m - ground_m).margin(1e-6));
+    CHECK(ground_m > 1000.0);              // Mons Mouton stands kilometres above the sphere (site.height_m)
+    CHECK(t.altitude_terrain_m > 0.0);     // the CG above the ground below it ...
+    CHECK(t.altitude_terrain_m < 60.0);    // ... by tens of metres, not by the ~5 km of the sphere altitude
+    fx.session.set_moon_terrain(terrain);  // a new terrain drops the site
+    CHECK(fx.session.lunar_landing_site() == nullptr);
+}
+
+TEST_CASE("telemetry altitude without terrain is the shape altitude", "[lunar_telemetry]") {
+    test::LunarReturnSession s;  // no terrain
+    sim::start_mission(s.session, STARSIM_CONFIG_DIR, "ship_lunar_return_llo", {}, s.time);
+    const auto t = s.session.telemetry(0);
+    CHECK(t.reference_body == ephemeris::Body::Moon);
+    CHECK(t.altitude_terrain_m == t.altitude_m);
+    CHECK(s.session.moon_terrain() == nullptr);
+    CHECK(s.session.lunar_landing_site() == nullptr);
 }

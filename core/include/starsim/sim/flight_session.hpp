@@ -516,6 +516,10 @@ public:
     void set_moon_terrain(std::shared_ptr<const environment::LunarTerrain> terrain);
     // Leg landings at a lunar site on its terrain (set_moon_terrain first), tracking bodies within the site's tile.
     void set_lunar_landing_site(const LunarSite& site);
+    // The lunar landing site the legs land on (nullptr: none - also after set_moon_terrain or set_landing_surface) and
+    // the Moon terrain (nullptr: the sphere).
+    const LunarSite* lunar_landing_site() const { return lunar_site_ ? &*lunar_site_ : nullptr; }
+    const environment::LunarTerrain* moon_terrain() const { return moon_terrain_.get(); }
     const LegLandingSim& leg_landing() const { return *legs_; }
     LegTouchdown leg_touchdown(size_t body_index) const { return legs_->touchdown(*bodies_.at(body_index).body); }
     std::vector<double> leg_crushed_m(size_t body_index) const { return legs_->crushed_m(*bodies_.at(body_index).body); }
@@ -584,6 +588,7 @@ private:
     environment::Us76Atmosphere atmosphere_;
     std::optional<environment::ReferenceBody> moon_;  // lunar l1: with a Moon orientation
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_;  // lunar l2
+    std::optional<LunarSite> lunar_site_;                            // set_lunar_landing_site
     // lunar l5: Earth air radiation (config/aero); shared with the entry guidance's predictor
     std::shared_ptr<const aero::RadiativeHeatingTable> radiative_heating_;
     vehicle::FlightEnvironment env_;

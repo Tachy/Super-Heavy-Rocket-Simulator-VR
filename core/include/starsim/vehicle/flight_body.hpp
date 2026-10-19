@@ -57,6 +57,9 @@ struct FlightTelemetry {
     // Position and relative velocity refer to the reference body (Earth: WGS84 / ITRF; Moon: sphere / MOON_ME).
     ephemeris::Body reference_body = ephemeris::Body::Earth;
     double altitude_m = 0.0;              // above the reference body's shape
+    // Above the ground below (Moon: the terrain if loaded; Earth: = altitude_m until the Earth DEM, M8). Set by
+    // FlightSession::telemetry.
+    double altitude_terrain_m = 0.0;
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
     double speed_inertial_mps = 0.0;      // GCRF

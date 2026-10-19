@@ -676,11 +676,17 @@ ephemeris::Body FlightSession::reference_body(size_t index) const {
 }
 
 vehicle::FlightTelemetry FlightSession::telemetry(size_t index) const {
-    return bodies_.at(index).body->telemetry(env_, epoch_);
+    auto t = bodies_.at(index).body->telemetry(env_, epoch_);
+    t.altitude_terrain_m = t.altitude_m;
+    if (t.reference_body == ephemeris::Body::Moon && moon_terrain_) {
+        t.altitude_terrain_m -= moon_terrain_->height_m(t.latitude_rad, t.longitude_rad);
+    }
+    return t;
 }
 
 void FlightSession::set_landing_surface(double latitude_rad, double longitude_rad, double height_m,
                                         contact::LandingSurface surface) {
+    lunar_site_.reset();
     legs_ = std::make_unique<LegLandingSim>(latitude_rad, longitude_rad, height_m, std::move(surface), tick_s);
 }
 
@@ -689,6 +695,7 @@ void FlightSession::set_landing_surface(const LegSite& site, contact::LandingSur
         throw std::runtime_error("Landeplatz auf dem Mond braucht die Mondorientierung");
     }
     const auto shape = site.body == ephemeris::Body::Moon ? moon_->shape() : frames::wgs84;
+    lunar_site_.reset();
     legs_ = std::make_unique<LegLandingSim>(site, shape, std::move(surface), tick_s);
 }
 
@@ -706,6 +713,7 @@ void FlightSession::set_moon_terrain(std::shared_ptr<const environment::LunarTer
     if (legs_->site().body == ephemeris::Body::Moon) {
         legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
     }
+    lunar_site_.reset();
 }
 
 void FlightSession::set_lunar_landing_site(const LunarSite& site) {
@@ -717,6 +725,7 @@ void FlightSession::set_lunar_landing_site(const LunarSite& site) {
     surface.field =
         std::make_shared<contact::TerrainField>(*moon_, frame.origin_fixed_m, frame.site_to_fixed, moon_terrain_);
     set_landing_surface(leg_site, std::move(surface));
+    lunar_site_ = site;
 }
 
 void FlightSession::reset_leg_landing() {
