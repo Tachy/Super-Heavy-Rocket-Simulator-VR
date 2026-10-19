@@ -200,6 +200,18 @@ public:
     }
     bool ideal_attitude() const { return ideal_lvlh_.has_value(); }
 
+    // Docked (ISS i5): held on a station by the session (sim/docking_sim) - not integrated in step() / coast(), no
+    // thrust, no RCS, no propellant use; the session sets its state from the station every tick and after every coast.
+    void hold_docked() {
+        docked_ = true;
+        vehicle_->stop_rcs();
+        rcs_force_body_n_ = {};
+        external_force_gcrf_n_ = {};
+        external_torque_body_nm_ = {};
+    }
+    void release_docked() { docked_ = false; }
+    bool docked() const { return docked_; }
+
 private:
     void snap_ideal_attitude();
     std::optional<math::Quat> ideal_lvlh_;
@@ -230,6 +242,7 @@ private:
     math::Vec3 external_force_gcrf_n_;
     math::Vec3 external_torque_body_nm_;
     bool caught_ = false;
+    bool docked_ = false;
     bool landed_ = false;  // standing on its legs, held to its body (hold_landed)
     bool legs_on_site_ = false;  // set every tick by the leg site for bodies on it
     double heat_rate_w_m2_ = 0.0;

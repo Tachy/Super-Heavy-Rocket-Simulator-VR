@@ -47,6 +47,7 @@ add_executable(starsim_core_tests
     test_docking_interface.cpp
     test_docking_mechanism.cpp
     test_station_collision.cpp
+    test_compound_mass.cpp
     test_relative_navigation.cpp
     test_rendezvous_session.cpp
     test_lunar_outbound.cpp

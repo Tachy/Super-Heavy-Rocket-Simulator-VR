@@ -348,6 +348,12 @@ void FlightBody::snap_ideal_attitude() {
 }
 
 void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt_s, const VehicleCommand& command) {
+    if (docked_) {  // held on its station by the session: nothing fires, nothing is integrated
+        rcs_force_body_n_ = {};
+        external_force_gcrf_n_ = {};
+        external_torque_body_nm_ = {};
+        return;
+    }
     if (impacted_) {
         vehicle_->stop_rcs();
         rcs_force_body_n_ = {};
@@ -512,10 +518,12 @@ void FlightBody::update_air_data(const environment::ReferenceBody& body, const e
 }
 
 bool FlightBody::can_coast() const {
+    if (docked_) return true;
     return !clamped_ && !impacted_ && !vehicle_->any_engine_producing_thrust();
 }
 
 void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double duration_s) {
+    if (docked_) return;  // the session moves it with its station
     if (impacted_ || duration_s <= 0.0) {
         if (impacted_ && wreck_on_ground_ && duration_s > 0.0) {
             follow_pad(reference_body_of(env, held_on_).frame(epoch + duration_s));
