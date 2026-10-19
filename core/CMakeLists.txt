@@ -73,6 +73,7 @@ add_library(starsim_core STATIC
     src/sim/flight_session_lunar.cpp
     src/sim/flight_session_lunar_coast.cpp
     src/sim/flight_session_lunar_return.cpp
+    src/sim/session_runner.cpp
     src/sim/flight_session_lunar_ascent.cpp
     src/sim/flight_session_lunar_descent.cpp
     src/sim/ascent_mission.cpp
