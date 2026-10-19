@@ -125,7 +125,7 @@ flow separation (vacuum engines).
   radius), `inclination_deg`, `raan_deg` (both in the true equator frame of date), `reference_utc`.
 - `[[stage.docking_port]]`: `id`, `name` (German, shown), `position_m` (stage frame: x station from the stage bottom,
   y/z body axes), `axis` (outward unit vector), `up` (clocking reference perpendicular to it).
-- `[[stage.collision]]`: `id`, `kind = "capsule"` (segment `a_m`-`b_m`, `radius_m`) or `"box"` (centre `a_m`,
+- `[[stage.collision]]`: `id`, `kind = "capsule"` (segment `a_m`-`b_m`, `radius_m`) or `"box"` (`centre_m`,
   body-aligned `half_extents_m`), stage frame.
 - With an OEM, mass, drag area and C_D come from its header instead of the config.
 
