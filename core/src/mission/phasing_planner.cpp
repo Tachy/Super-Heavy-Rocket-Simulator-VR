@@ -177,8 +177,8 @@ std::optional<gnc::BurnNode> PhasingPlanner::solve_position(PhasingBurnKind kind
                                                         : s.approach_initiation_epoch;
         aim_epoch = s.waypoint0_epoch;
         aim = point_behind_below(coast(target, epoch, aim_epoch, beta_t), 0.0, p.waypoint0_below_m);
-        if (kind == PhasingBurnKind::ApproachInitiation) {
-            // first guess: the CW two-impulse transfer to Waypoint 0
+        {
+            // first guess: the CW two-impulse transfer to Waypoint 0 (also for the mid-course correction)
             const StateVector target_ai = coast(target, epoch, burn_epoch, beta_t);
             const StateVector chaser_ai = coast(chaser, epoch, burn_epoch, beta_c);
             const auto rel = orbit::lvlh_relative_state(target_ai, chaser_ai);
@@ -191,10 +191,7 @@ std::optional<gnc::BurnNode> PhasingPlanner::solve_position(PhasingBurnKind kind
     }
     const auto solution = targeter.solve(chaser, epoch, burn_epoch, {aim, aim_epoch}, guess, position_tolerance_m);
     if (!solution.converged) return std::nullopt;
-    if (kind == PhasingBurnKind::MidCourse && norm(solution.burn.delta_v_gcrf_mps) < p.mid_course_threshold_mps) {
-        return std::nullopt;
-    }
-    return solution.burn;
+    return solution.burn;  // a mid-course correction below mid_course_threshold_mps is skipped by the caller
 }
 
 gnc::BurnNode PhasingPlanner::braking(const StateVector& chaser, const StateVector& target, time::Epoch epoch,

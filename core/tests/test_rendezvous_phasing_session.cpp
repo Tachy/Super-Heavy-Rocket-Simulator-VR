@@ -31,6 +31,8 @@ struct Flight {
         session.add_station(start.iss.vehicle, start.iss.state_gcrf, start.iss.epoch, start.iss.impulses);
     }
 
+    double min_range_m = 1e12;  // over the whole flight (fly), sampled every minute
+
     // Flies until the step machine ends; returns the smallest approach-ellipsoid metric before the approach initiation.
     double fly(double max_hours) {
         auto& s = session;
@@ -40,6 +42,8 @@ struct Flight {
         while (s.epoch() - end < 0.0 && s.rendezvous_step() != sim::RendezvousStep::None &&
                s.rendezvous_step() != sim::RendezvousStep::Waypoint0) {
             s.advance_to(std::min(s.epoch() + 60.0, end), 100000);
+            min_range_m = std::min(min_range_m, norm(s.body(iss).state().position_gcrf_m -
+                                                     s.body(s.controlled_index()).state().position_gcrf_m));
             const bool before_ai = std::none_of(s.rendezvous_burns().begin(), s.rendezvous_burns().end(), [](const auto& b) {
                 return b.kind == mission::PhasingBurnKind::ApproachInitiation;
             });
@@ -84,6 +88,12 @@ TEST_CASE("Rendezvous plan refusals in the session", "[rendezvous][phasing][sess
     lonely.place_in_orbit(config::load_vehicle(rendezvous_test::config_dir, "crew_dragon"), f.start.dragon, f.start.epoch);
     CHECK_FALSE(lonely.plan_rendezvous({}));
     CHECK(lonely.rendezvous_status() == "Kein Rendezvous: keine Station");
+    // only Crew Dragon docks (the planner budgets the RCS propellant; a Starship would burn its main tanks)
+    sim::FlightSession ship{f.ephemeris, f.earth, rendezvous_test::config_dir};
+    ship.place_in_orbit(config::load_vehicle(rendezvous_test::config_dir, "starship_block3"), f.start.dragon, f.start.epoch);
+    ship.add_station(f.start.iss.vehicle, f.start.iss.state_gcrf, f.start.iss.epoch, f.start.iss.impulses);
+    CHECK_FALSE(ship.plan_rendezvous({}));
+    CHECK(ship.rendezvous_status() == "Kein Rendezvous: nur mit Manövern auf den Steuerdüsen");
 }
 
 TEST_CASE("Rendezvous flight from 30 deg to Waypoint 0", "[rendezvous][phasing][session][validation]") {
@@ -100,7 +110,7 @@ TEST_CASE("Rendezvous flight from 30 deg to Waypoint 0", "[rendezvous][phasing][
     CHECK(norm(r.position_m - Vec3{0.0, 0.0, 400.0}) < 100.0);  // [E] spec
     CHECK(norm(r.velocity_mps) < 0.5);                           // [E] spec
     CHECK(metric > 1.0);
-    CHECK(norm(r.position_m) > mission::keep_out_sphere_radius_m);
+    CHECK(f.min_range_m > mission::keep_out_sphere_radius_m);  // never inside the keep-out sphere
 }
 
 TEST_CASE("Rendezvous flight with a denser truth atmosphere re-plans and arrives", "[rendezvous][phasing][session][validation]") {
@@ -116,4 +126,27 @@ TEST_CASE("Rendezvous flight with a denser truth atmosphere re-plans and arrives
     CHECK(norm(r.position_m - Vec3{0.0, 0.0, 400.0}) < 100.0);
     CHECK(norm(r.velocity_mps) < 0.5);
     CHECK(metric > 1.0);
+    CHECK(f.min_range_m > mission::keep_out_sphere_radius_m);
+}
+
+TEST_CASE("Rendezvous crew-day flight with a denser truth atmosphere checks the boost and arrives",
+          "[rendezvous][phasing][session][validation]") {
+    test::spice_session();
+    Flight f(120.0, 16.0 * 3600.0);
+    f.session.set_air_density_factor(1.5);  // the phase burn flies on the C_D guess; ~15 h on the phase orbit follow
+    mission::PhasingParameters p;
+    p.earliest_arrival_s = 20.0 * 3600.0;
+    REQUIRE(f.session.plan_rendezvous(p));
+    REQUIRE(f.session.rendezvous_plan()->schedule.phasing_revolutions > 0);
+    const double metric = f.fly(28.0);
+    f.report("120 deg crew day, air x1.5");
+    REQUIRE(f.session.rendezvous_step() == sim::RendezvousStep::Waypoint0);
+    CHECK(f.session.epoch() - f.start.epoch >= p.earliest_arrival_s - 600.0);  // the crew day stays (one re-plan slack)
+    // the coelliptic burn absorbs the phase orbit's drag error (~-34 km): 603 kg against ~570 kg planned (i3 review)
+    CHECK(2562.0 - f.session.body(f.session.controlled_index()).vehicle().rcs_propellant_kg() < 2562.0 - p.reserve_kg);
+    const auto r = f.relative();
+    CHECK(norm(r.position_m - Vec3{0.0, 0.0, 400.0}) < 100.0);
+    CHECK(norm(r.velocity_mps) < 0.5);
+    CHECK(metric > 1.0);
+    CHECK(f.min_range_m > mission::keep_out_sphere_radius_m);
 }

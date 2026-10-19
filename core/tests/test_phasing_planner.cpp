@@ -99,6 +99,31 @@ TEST_CASE("Phasing plan from 120 deg: burns, Waypoint 0, budget", "[rendezvous][
     CHECK(norm(arrival.position_m - Vec3{0.0, 0.0, plan.parameters.waypoint0_below_m}) < 100.0);  // [E] spec
 }
 
+TEST_CASE("Mid-course retarget returns a small correction (the caller skips it), never hides a failure",
+          "[rendezvous][phasing]") {
+    test::spice_session();
+    Fixture fx;
+    rendezvous_test::Start start;
+    const auto plan = fx.plan(120.0, fx.parameters(), start);
+    REQUIRE(plan.feasible);
+    const auto& p = plan.parameters;
+    math::StateVector dragon = start.dragon, iss = start.iss.state_gcrf;
+    time::Epoch t = start.epoch;
+    for (const auto& b : plan.burns) {  // fly up to and including the approach initiation
+        if (b.kind == mission::PhasingBurnKind::Braking) break;
+        const auto node = fx.planner.retarget(b.kind, dragon, iss, t, plan, dracos);
+        REQUIRE(node);
+        dragon = gnc::coast_with_drag(fx.gravity, dragon, t, node->epoch, p.chaser_drag_area_per_mass_m2pkg);
+        iss = gnc::coast_with_drag(fx.gravity, iss, t, node->epoch, p.target_drag_area_per_mass_m2pkg);
+        dragon = mission::apply_finite_burn(fx.gravity, dragon, node->epoch, node->delta_v_gcrf_mps, dracos);
+        t = node->epoch;
+    }
+    const auto mid = fx.planner.retarget(mission::PhasingBurnKind::MidCourse, dragon, iss, t, plan, dracos);
+    REQUIRE(mid);  // converged: the correction is (almost) zero after a perfect approach initiation
+    CHECK(norm(mid->delta_v_gcrf_mps) < p.mid_course_threshold_mps);
+    CHECK(mid->epoch == plan.schedule.approach_initiation_epoch + p.mid_course_after_s);
+}
+
 TEST_CASE("Phasing plan uses a phase burn for a crew-day arrival", "[rendezvous][phasing]") {
     test::spice_session();
     Fixture fx;

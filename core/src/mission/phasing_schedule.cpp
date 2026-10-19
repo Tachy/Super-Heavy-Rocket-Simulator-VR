@@ -42,13 +42,14 @@ PhasingSchedule phasing_schedule(const math::StateVector& chaser, const math::St
     PhasingSchedule s;
     const auto ec = orbit::elements_from_state(chaser, gm);
     const auto et = orbit::elements_from_state(target, gm);
-    if (!(ec.semi_major_axis_m > 0.0) || ec.eccentricity >= 1.0 || !(et.semi_major_axis_m > 0.0)) {
+    if (!(ec.semi_major_axis_m > 0.0) || ec.eccentricity >= 1.0 || !(et.semi_major_axis_m > 0.0) ||
+        et.eccentricity >= 1.0) {
         s.reason = "Kein Rendezvous: keine geschlossene Bahn";
         return s;
     }
     const double r_d = ec.semi_major_axis_m, r_i = et.semi_major_axis_m;
     const double r_c = r_i - p.coelliptic_height_m;
-    if (r_d >= r_c) {
+    if (r_d * (1.0 + ec.eccentricity) >= r_c) {  // the apoapsis: an eccentric start must not cross the coelliptic height
         s.reason = "Kein Rendezvous: Bahn nicht unter der koelliptischen Höhe";
         return s;
     }

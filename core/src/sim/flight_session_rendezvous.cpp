@@ -95,6 +95,8 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
         lunar_step_ != LunarStep::None) {
         return refuse("Kein Rendezvous: ein Flug läuft bereits");
     }
+    // only Crew Dragon docks (spec): the budget is the RCS propellant, the burns the Dracos' translation
+    if (!burn_configurations().empty()) return refuse("Kein Rendezvous: nur mit Manövern auf den Steuerdüsen");
     // Crew Dragon flies the phasing with its nose cone open (it opens after the separation): only then its Dracos turn
     // it without a push - closed, a turn to a burn pushed it up to 0.28 m/s (i3: Waypoint 0 missed by 130-390 m).
     auto& vehicle = bodies_[controlled_].body->vehicle();
@@ -152,6 +154,9 @@ void FlightSession::rendezvous_start(mission::PhasingPlan plan) {
     rendezvous_mid_course_ = false;
     rendezvous_boost_check_.reset();
     const auto& s = rendezvous_plan_->schedule;
+    // Only a waiting plan checks the boost geometry: a phase plan's re-plan from the eccentric phase orbit boosts off its
+    // perigee and cost more (i3 review: crew day, air x1.5, 635 kg against 603 kg when the coelliptic burn absorbs the
+    // -34 km phase error; a phase trim burn after the drag tracking would be the fix - open).
     if (s.phasing_revolutions == 0) {
         const time::Epoch check = s.boost_epoch - rendezvous_check_lead_s;
         if (check > epoch_) rendezvous_boost_check_ = check;
@@ -232,13 +237,15 @@ void FlightSession::rendezvous_fly_due_burn() {
     const auto kind = rendezvous_next_kind();
     const auto node = mission::PhasingPlanner(gravity_).retarget(kind, controlled_state(), station_state(), epoch_,
                                                                  *rendezvous_plan_, rendezvous_engines());
+    if (kind == PhasingBurnKind::MidCourse &&
+        (!node || norm(node->delta_v_gcrf_mps) < rendezvous_plan_->parameters.mid_course_threshold_mps)) {
+        // below the threshold, or not converged (then the braking burn still stops the Dragon near Waypoint 0)
+        rendezvous_mid_course_ = false;
+        rendezvous_status_ = node ? "Kurskorrektur nicht nötig" : "Kurskorrektur nicht berechenbar";
+        rendezvous_enter_coast();
+        return;
+    }
     if (!node) {
-        if (kind == PhasingBurnKind::MidCourse) {  // below the threshold (or not converged): the braking burn is next
-            rendezvous_mid_course_ = false;
-            rendezvous_status_ = "Kurskorrektur nicht nötig";
-            rendezvous_enter_coast();
-            return;
-        }
         const bool before_boost = kind == PhasingBurnKind::Phase || kind == PhasingBurnKind::Boost;
         if (before_boost && !rendezvous_retarget_replanned_) {
             rendezvous_retarget_replanned_ = true;

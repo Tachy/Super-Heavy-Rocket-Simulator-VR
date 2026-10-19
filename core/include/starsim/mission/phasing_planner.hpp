@@ -41,7 +41,7 @@ struct PhasingPlan {
 // - Coelliptic: position targeter to the approach initiation point (range 7.5 km, dh below) at its epoch (3D: removes
 //   the residual plane error);
 // - Approach initiation: position targeter (CW first guess) to Waypoint 0 at its epoch;
-// - Mid-course (in flight only): the same target, zero first guess;
+// - Mid-course (in flight only): the same target and first guess;
 // - Braking at Waypoint 0: the velocity that leaves the chaser at rest in the target's LVLH frame.
 class PhasingPlanner {
 public:
@@ -52,7 +52,8 @@ public:
                      const PhasingParameters& parameters, const FiniteBurnModel& engines, double propellant_kg) const;
 
     // The burn of `kind` re-targeted from the live states at `epoch` (before the burn), on the plan's epochs. Empty when
-    // the targeting does not converge, the plan has no such burn, or a mid-course correction is below its threshold.
+    // the targeting does not converge or the plan has no such burn; a small mid-course correction is returned (the caller
+    // skips it below mid_course_threshold_mps).
     std::optional<gnc::BurnNode> retarget(PhasingBurnKind kind, const math::StateVector& chaser,
                                           const math::StateVector& target, time::Epoch epoch, const PhasingPlan& plan,
                                           const FiniteBurnModel& engines) const;

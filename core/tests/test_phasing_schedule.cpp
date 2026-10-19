@@ -86,4 +86,13 @@ TEST_CASE("Schedule refuses a chaser above the coelliptic height", "[rendezvous]
     hyperbolic.semi_major_axis_m = -2.0e7;
     hyperbolic.eccentricity = 1.5;
     CHECK_FALSE(mission::phasing_schedule(orbit::state_from_elements(hyperbolic, gm), target, t0, {}, gm).feasible);
+    // 200 x 500 km: the semi-major axis is below the coelliptic height, the apoapsis crosses the station's (i3 review)
+    orbit::KeplerianElements eccentric;
+    eccentric.semi_major_axis_m = re + 350e3;
+    eccentric.eccentricity = 150e3 / (re + 350e3);
+    eccentric.inclination_rad = 51.64 * deg;
+    eccentric.raan_rad = 1.0;
+    const auto e = mission::phasing_schedule(orbit::state_from_elements(eccentric, gm), target, t0, {}, gm);
+    CHECK_FALSE(e.feasible);
+    CHECK(e.reason == "Kein Rendezvous: Bahn nicht unter der koelliptischen Höhe");
 }
