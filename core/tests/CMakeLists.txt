@@ -139,6 +139,7 @@ add_executable(starsim_core_tests
     test_rendezvous_geometry.cpp
     test_phasing_schedule.cpp
     test_phasing_planner.cpp
+    test_rendezvous_phasing_session.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
 target_compile_definitions(starsim_core_tests PRIVATE

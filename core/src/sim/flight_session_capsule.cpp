@@ -125,6 +125,7 @@ void FlightSession::run_capsule_return(Flying& flying) {
                     bodies_.push_back({std::move(capsule), {}, nullptr, {}});
                     controlled_ = bodies_.size() - 1;
                     clear_rendezvous_target();  // the target belongs to the controlled body's port
+                    reset_rendezvous();
                 }
                 capsule_return_step_ = CapsuleReturnStep::NoseConeClose;
                 capsule_step_epoch_ = epoch_ + nose_cone_close_delay_s;

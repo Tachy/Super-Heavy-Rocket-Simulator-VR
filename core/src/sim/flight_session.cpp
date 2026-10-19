@@ -58,6 +58,7 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
     legs_ = std::make_unique<LegLandingSim>(0.0, 0.0, 0.0, contact::LandingSurface{}, tick_s);
     moon_orientation_ = moon_cache_ ? &*moon_cache_ : nullptr;
     lunar_debug_ = std::getenv("STARSIM_DEBUG_LUNAR_SESSION") != nullptr;
+    rendezvous_debug_ = std::getenv("STARSIM_DEBUG_RENDEZVOUS") != nullptr;
 }
 
 const char* to_string(AutopilotState state) {
@@ -71,6 +72,7 @@ const char* to_string(AutopilotState state) {
         case AutopilotState::Burn: return "Manöver";
         case AutopilotState::Return: return "Rückkehr";
         case AutopilotState::Lunar: return "Mondflug";
+        case AutopilotState::Rendezvous: return "Rendezvous";
     }
     return "";
 }
@@ -117,6 +119,7 @@ void FlightSession::place_in_orbit(const config::VehicleConfig& config, const ma
     bodies_.clear();
     clear_station();
     clear_rendezvous_target();
+    reset_rendezvous();
     reset_leg_landing();
     bodies_.push_back({std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid), {}, nullptr, {}});
     controlled_ = 0;
@@ -206,6 +209,7 @@ bool FlightSession::separate_payload() {
     bodies_.push_back({std::move(upper), {}, nullptr, {}});
     controlled_ = bodies_.size() - 1;
     clear_rendezvous_target();  // the target belongs to the controlled body's port
+    reset_rendezvous();
     attitude_mode_ = gnc::inertial_hold(bodies_[controlled_].body->state().attitude);
     if (payload_separation_->nose_cone_open_s >= 0.0) {
         nose_cone_epoch_ = epoch_ + payload_separation_->nose_cone_open_s;
@@ -290,8 +294,10 @@ void FlightSession::run_autopilot() {
                                             last_rcs_acceleration_, thrust_axis);
             if (c.rcs) {
                 if (autopilot_.burn.complete) {
-                    // a lunar flight's burn returns to its step machine
-                    autopilot_.state = lunar_step_ != LunarStep::None ? AutopilotState::Lunar : AutopilotState::Off;
+                    // a lunar flight's or a rendezvous' burn returns to its step machine
+                    autopilot_.state = lunar_step_ != LunarStep::None           ? AutopilotState::Lunar
+                                       : rendezvous_step_ != RendezvousStep::None ? AutopilotState::Rendezvous
+                                                                                  : AutopilotState::Off;
                     if (capsule_return_step_ == CapsuleReturnStep::DeorbitBurn) {
                         autopilot_.state = AutopilotState::Return;
                         capsule_return_step_ = CapsuleReturnStep::TrunkJettison;
@@ -309,9 +315,10 @@ void FlightSession::run_autopilot() {
             }
             if (autopilot_.burn.complete) {
                 cutoff();
-                autopilot_.state = lunar_step_ != LunarStep::None ? AutopilotState::Lunar
-                                   : ship_return_                 ? AutopilotState::Return
-                                                                  : AutopilotState::Off;
+                autopilot_.state = lunar_step_ != LunarStep::None             ? AutopilotState::Lunar
+                                   : rendezvous_step_ != RendezvousStep::None ? AutopilotState::Rendezvous
+                                   : ship_return_                             ? AutopilotState::Return
+                                                                              : AutopilotState::Off;
                 if (ship_return_) entry_start_ = entry_start_epoch();  // from the state the burn actually left
             }
             break;
@@ -329,6 +336,9 @@ void FlightSession::run_autopilot() {
             break;
         case AutopilotState::Lunar:
             run_lunar(flying);
+            break;
+        case AutopilotState::Rendezvous:
+            run_rendezvous(flying);
             break;
         default:
             break;
@@ -395,6 +405,7 @@ void FlightSession::place_body(const config::VehicleConfig& config, const vehicl
     bodies_.clear();
     clear_station();
     clear_rendezvous_target();
+    reset_rendezvous();
     reset_leg_landing();
     bodies_.push_back({std::move(body), {}, nullptr, {}});
     controlled_ = 0;
@@ -508,6 +519,7 @@ void FlightSession::launch_from_pad(const config::VehicleConfig& config, const L
     bodies_.clear();
     clear_station();
     clear_rendezvous_target();
+    reset_rendezvous();
     bodies_.push_back({vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad, site.longitude_rad,
                                                    stand_height, heading_rad, earth_, epoch),
                        {}, nullptr, {}});
@@ -559,6 +571,10 @@ double FlightSession::coast_allowance_s() const {
             lunar_step_ == LunarStep::ReturnCoast) {
             allowance = std::min(allowance, lunar_next_repoint_ - epoch_);
         }
+    }
+    if (autopilot_.state == AutopilotState::Rendezvous) {
+        if (bodies_[controlled_].body->impacted()) return 0.0;  // a wreck: one tick ends the rendezvous (as Lunar)
+        allowance = std::min(allowance, rendezvous_step_epoch_ - epoch_);  // the next burn's command or the boost check
     }
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
     if (!station_impulses_.empty()) allowance = std::min(allowance, station_impulses_.front().epoch - epoch_);
@@ -748,6 +764,7 @@ void FlightSession::stage() {
     bodies_.push_back(std::move(flying));
     controlled_ = bodies_.size() - 1;
     clear_rendezvous_target();  // the target belongs to the controlled body's port
+    reset_rendezvous();
     ignite();  // hot staging: the upper stage lights immediately
 }
 

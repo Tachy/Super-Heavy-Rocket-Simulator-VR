@@ -19,7 +19,8 @@ struct PhasingParameters {
     double first_burn_lead_s = 1800.0;     // [E] checkout after the separation (Crew-2 phase burn 37 min, Demo-2 49 min)
     double mission_limit_s = 28.0 * 3600.0;  // [S] crew missions dock 24-28 h after the launch
     double earliest_arrival_s = 0.0;       // Waypoint 0 not before (a crew timeline); 0: the earliest window
-    double mid_course_threshold_mps = 0.05;  // [E] smaller corrections are skipped
+    // [D] smaller corrections are skipped: one skipped carries ~0.02 m/s x 1200 s = 24 m to Waypoint 0 (0.05 left 60 m)
+    double mid_course_threshold_mps = 0.02;
     double reserve_kg = 900.0;  // [E] deorbit 598 kg (d3: 139 m/s from 420 km) + proximity operations and abort
     // C_D A / m of the planner's coasts (gnc::coast_with_drag); the session fills them from its tracking.
     double chaser_drag_area_per_mass_m2pkg = 0.0;

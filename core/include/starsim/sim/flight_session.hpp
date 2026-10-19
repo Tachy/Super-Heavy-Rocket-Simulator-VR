@@ -40,6 +40,7 @@
 #include "starsim/mission/lunar_orbit_transfer.hpp"
 #include "starsim/mission/lunar_outbound.hpp"
 #include "starsim/mission/nrho_reference.hpp"
+#include "starsim/mission/phasing_planner.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
 namespace starsim::sim {
@@ -63,7 +64,8 @@ enum class ControlMode {
 // Return: a ship after its deorbit burn (coast to the entry interface, entry, flip, catch).
 // PayloadSeparation: after the upper stage's cutoff, waiting to release a payload vehicle (d2).
 // Lunar: a lunar flight between its burns (FlightSession::plan_lunar_outbound / plan_lunar_orbit_transfer).
-enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar };
+// Rendezvous: a phasing flight to a station between its burns (FlightSession::plan_rendezvous).
+enum class AutopilotState { Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar, Rendezvous };
 
 const char* to_string(AutopilotState state);
 
@@ -95,6 +97,17 @@ enum class LunarStep {
     Aerocapture, CaptureCoast, PerigeeRaise, CaptureCircularize, EntryTrim, RepassTrim
 };
 const char* to_string(LunarStep step);
+
+// Steps of a rendezvous (plan_rendezvous, ISS i3): Coast until the next burn's command epoch, Burn while it is under way
+// (the autopilot state is Burn meanwhile), Waypoint0 after the braking burn (400 m below the station; i4 continues).
+enum class RendezvousStep { None, Coast, Burn, Waypoint0 };
+const char* to_string(RendezvousStep step);
+
+struct RendezvousBurnRecord {
+    mission::PhasingBurnKind kind = mission::PhasingBurnKind::Boost;
+    gnc::BurnNode node;
+    double mass_kg = 0.0;  // at the command
+};
 
 // How a powered lunar descent ended (lunar l4).
 struct LunarTouchdown {
@@ -312,6 +325,7 @@ public:
         lunar_mission_leg_ = LunarMissionLeg::None;
         lunar_return_.reset();
         return_entry_parameters_.reset();
+        reset_rendezvous();
     }
     // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
     // at the next staging; the booster is then guided independently of the controlled body.
@@ -567,6 +581,26 @@ public:
     // rendezvous target.
     void set_translation_command(const math::Vec3& fraction_port);
     math::Vec3 translation_command() const { return translation_port_; }
+
+    // Rendezvous phasing (ISS i3, flight_session_rendezvous.cpp): the controlled body flies the coelliptic profile to
+    // Waypoint 0 below the station (mission::PhasingPlanner) on its burn engines (Crew Dragon: the Dracos along +x),
+    // re-targets every burn from the live states, tracks both bodies' drag from their arcs and re-plans a waiting plan
+    // when the boost geometry drifts beyond rendezvous_replan_tolerance_m. The parameters' drag fields are filled from
+    // the vehicles when 0. False with a German rendezvous_status() when refused (no station, the station controlled, the
+    // autopilot busy, a rendezvous or lunar flight under way, or the planner's reason).
+    bool plan_rendezvous(mission::PhasingParameters parameters);
+    RendezvousStep rendezvous_step() const { return rendezvous_step_; }
+    const mission::PhasingPlan* rendezvous_plan() const { return rendezvous_plan_ ? &*rendezvous_plan_ : nullptr; }
+    const std::string& rendezvous_status() const { return rendezvous_status_; }  // German status line
+    const std::vector<RendezvousBurnRecord>& rendezvous_burns() const { return rendezvous_burns_; }
+    int rendezvous_replans() const { return rendezvous_replans_; }
+    // German: a station impulse (reboost) inside the plan's span, as planned at plan_rendezvous.
+    const std::vector<std::string>& rendezvous_warnings() const { return rendezvous_warnings_; }
+    // [E] the boost phase check ~2 orbits before the boost, as deorbit_replan_lead_s
+    static constexpr double rendezvous_check_lead_s = 3.0 * 3600.0;
+    static constexpr double rendezvous_replan_tolerance_m = 2000.0;  // [E] along-track miss of the boost geometry
+    static constexpr double rendezvous_track_min_arc_s = 3.0 * 3600.0;  // [E] shorter arcs do not tell the drag
+    static constexpr double dragon_free_molecular_cd = 2.2;  // [E] blunt body in free molecular flow
 
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
@@ -833,6 +867,50 @@ private:
     // The entry guidance parameters of a lunar return (lunar_return() / aerocapture()); empty: the LEO ship return's.
     std::optional<gnc::EntryGuidanceParameters> return_entry_parameters_;
     math::StateVector controlled_state() const;
+
+    // Rendezvous phasing (flight_session_rendezvous.cpp).
+    void run_rendezvous(Flying& flying);  // the step machine and its diagnostics (STARSIM_DEBUG_RENDEZVOUS)
+    void run_rendezvous_steps();
+    void rendezvous_after_burn();         // the burn is flown: the next burn, or Waypoint 0
+    void rendezvous_fly_due_burn();       // Coast: retarget and command the burn due
+    void reset_rendezvous();
+    void rendezvous_abort(const std::string& status);
+    bool rendezvous_replan();  // from the live states; false: aborted with the planner's reason
+    void rendezvous_enter_coast();  // step Coast towards the next burn's command epoch (and the boost check)
+    time::Epoch rendezvous_preparation_epoch(const gnc::BurnNode& node) const;  // ignition - burn_preparation_s
+    // a burn is commanded this long before its preparation: the vehicle turns to it in the state Burn, where the burn
+    // executor senses every RCS push (big burns: the drift lead)
+    static double rendezvous_turn_lead_s(mission::PhasingBurnKind kind);
+    // [E] mid-course correction and braking: a turn of up to 180 deg at 1 deg/s and its settling (as
+    // descent_attitude_lead_s); they follow each other within ~20 min, too close for the drift lead
+    static constexpr double rendezvous_small_turn_lead_s = 600.0;
+    void rendezvous_track_drag();
+    mission::FiniteBurnModel rendezvous_engines() const;
+    math::StateVector station_state() const;
+    mission::PhasingBurnKind rendezvous_next_kind() const;
+    void rendezvous_start(mission::PhasingPlan plan);  // stores a feasible plan and enters the coast
+    RendezvousStep rendezvous_step_ = RendezvousStep::None;
+    std::optional<mission::PhasingPlan> rendezvous_plan_;
+    size_t rendezvous_next_ = 0;            // index of the next plan burn
+    bool rendezvous_mid_course_ = false;    // the mid-course correction is next (after the approach initiation)
+    bool rendezvous_retarget_replanned_ = false;  // a failed retarget re-planned once (reset after the next burn)
+    time::Epoch rendezvous_step_epoch_, rendezvous_deadline_, rendezvous_earliest_;
+    std::optional<time::Epoch> rendezvous_boost_check_;
+    math::StateVector rendezvous_chaser_ref_, rendezvous_target_ref_;  // drag tracking arcs from here
+    time::Epoch rendezvous_chaser_ref_epoch_, rendezvous_target_ref_epoch_;
+    size_t rendezvous_target_ref_impulses_ = 0;  // station impulses still pending at the target reference
+    std::string rendezvous_status_;
+    std::vector<RendezvousBurnRecord> rendezvous_burns_;
+    std::vector<std::string> rendezvous_warnings_;
+    int rendezvous_replans_ = 0;
+    bool rendezvous_debug_ = false;  // STARSIM_DEBUG_RENDEZVOUS, read once at construction
+    std::string rendezvous_debug_last_;
+    struct RendezvousDebugCommand {  // diagnostics: the state at a burn's command (execution error after it)
+        math::StateVector state;
+        time::Epoch epoch;
+        mission::FiniteBurnModel engines;
+    };
+    std::optional<RendezvousDebugCommand> rendezvous_debug_command_;
 
     // `forced`: only this set (config group ids), at full and at minimum throttle.
     std::vector<BurnConfiguration> burn_configurations(const std::vector<std::string>* forced = nullptr) const;
