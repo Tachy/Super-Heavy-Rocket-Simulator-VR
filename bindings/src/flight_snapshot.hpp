@@ -1,0 +1,73 @@
+#pragma once
+
+#include <chrono>
+#include <memory>
+#include <optional>
+#include <vector>
+
+#include <godot_cpp/variant/array.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_vector3_array.hpp>
+#include <godot_cpp/variant/quaternion.hpp>
+#include <godot_cpp/variant/string.hpp>
+#include <godot_cpp/variant/variant.hpp>
+#include <godot_cpp/variant/vector3.hpp>
+
+#include "starsim/sim/flight_session.hpp"
+
+namespace starsim::bindings {
+
+// Trajectory prediction the main thread asked for (FlightSim::predict_trajectory); index -1: none.
+struct PredictionRequest {
+    int index = -1;
+    double duration_s = 0.0;
+    double step_s = 0.0;
+    bool operator==(const PredictionRequest&) const = default;
+};
+
+// What the commands set on the simulation thread and the snapshot carries to the main thread. Only the worker
+// touches it (commands and the observer).
+struct SnapshotContext {
+    godot::String site_id;
+    double mission_start_tdb_s = 0.0;
+    PredictionRequest prediction_request;  // copied from the main thread before every build
+    std::optional<std::chrono::steady_clock::time_point> prediction_wall;  // when the last prediction was made
+};
+
+// Everything the main thread reads, built on the simulation thread after every command and chunk (immutable once
+// published). Godot containers are created on the worker and only read afterwards - GDScript must not modify them.
+struct FlightSnapshot {
+    bool active = false;
+    double epoch_tdb_s = 0.0;
+    double mission_time_s = 0.0;
+    double mission_start_tdb_s = 0.0;
+    godot::String site_id;
+    int controlled_index = -1;
+    struct Body {
+        godot::Vector3 position_gcrf_m, velocity_gcrf_mps;
+        godot::Quaternion attitude_gcrf;
+        double cg_station_m = 0.0;
+        godot::Array stages, engines, flaps, grid_fins, rcs, parachutes;
+        godot::Dictionary legs, capsule_state, telemetry, return_state;
+    };
+    std::vector<Body> bodies;
+    godot::Dictionary autopilot_status, tower_state, landing_zone, splashdown_zone;
+    bool has_target_orbit = false;
+    godot::Vector3 target_plane_normal_gcrf;
+    double target_radius_m = 0.0;
+    godot::PackedVector3Array prediction;  // for prediction_request
+    PredictionRequest prediction_request;
+};
+
+// [E] The worker recomputes the requested trajectory prediction at most this often (wall seconds); the trajectory
+// view refreshes on its own REFRESH_S.
+inline constexpr double prediction_refresh_s = 1.0;
+
+// The snapshot before any session exists (or before its first build): no flight, zones and tower {present: false}.
+std::shared_ptr<const FlightSnapshot> empty_snapshot();
+
+// Builds the snapshot from the session (worker thread). `previous` supplies the prediction when it is not due.
+std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& session, time::Epoch epoch,
+                                                     SnapshotContext& context, const FlightSnapshot* previous);
+
+}  // namespace starsim::bindings

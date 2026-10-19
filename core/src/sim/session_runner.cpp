@@ -67,7 +67,7 @@ void SessionRunner::set_latest(Command command) {
 void SessionRunner::set_target(time::Epoch target) {
     {
         std::lock_guard lock(mutex_);
-        if (!target_ || target > *target_) target_ = target;
+        target_ = target;
     }
     wake_.notify_all();
 }

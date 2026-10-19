@@ -33,6 +33,7 @@ func _process(delta: float) -> bool:
 	_elapsed += delta
 	if _step == 0 and _elapsed > 0.5:
 		world.launch_vehicle(_args.get("vehicle", "starship_block3"), world.sites[0])
+		world.flight.sim.wait_idle(60.0)  # the launch runs on the simulation thread
 		print("[flight_check] launched; joypads: ", Input.get_connected_joypads().map(func(d): return Input.get_joy_name(d)))
 		_step = 1
 	elif _step == 1 and _elapsed > 1.5:

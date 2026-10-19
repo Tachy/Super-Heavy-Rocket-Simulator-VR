@@ -75,6 +75,7 @@ func _fly_vehicle(world: World) -> void:
 	world.launch_vehicle(_args["vehicle"], site)
 	world.clock.warp = 0.0
 	var sim := world.flight.sim
+	sim.wait_idle(60.0)  # the launch runs on the simulation thread
 	var fly := float(_args.get("fly", "0"))
 	if fly > 0.0:
 		if _args.has("autopilot"):
@@ -87,9 +88,11 @@ func _fly_vehicle(world: World) -> void:
 		world.clock.set_time(t0 + 3.0 + fly)
 		if _args.has("circularize"):
 			sim.plan_circularization()
+			sim.wait_idle(60.0)
 		if _args.has("burn"):  # --burn=<prograde m/s>,<node in s>,<capture after s>
 			var b := (_args["burn"] as String).split(",")
 			sim.plan_burn(float(b[1]), float(b[0]), 0.0, 0.0)
+			sim.wait_idle(60.0)
 			var t_capture := t0 + 3.0 + fly + float(b[2])
 			_advance(sim, t_capture)
 			world.clock.set_time(t_capture)
@@ -100,10 +103,12 @@ func _fly_vehicle(world: World) -> void:
 	print("render_check: telemetry ", sim.telemetry(sim.controlled_index()))
 
 
-# FlightSim.advance_to integrates at most 20 s per call.
+# The simulation thread advances in chunks; wait until it has reached the target.
 func _advance(sim: FlightSim, target: float) -> void:
 	for i in 1000:
-		if sim.advance_to(target) >= target - 0.01:
+		sim.advance_to(target)
+		sim.wait_idle(5.0)
+		if sim.advance_to(target) >= target - 0.01 or not sim.is_active():
 			return
 
 

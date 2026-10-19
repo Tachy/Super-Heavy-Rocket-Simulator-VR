@@ -110,3 +110,16 @@ TEST_CASE("runner survives a throwing input and keeps running commands", "[sessi
     CHECK(f.runner.result(id).done);
     CHECK_FALSE(f.runner.result(id).threw);
 }
+
+TEST_CASE("runner follows an earlier target after a new launch", "[session_runner]") {
+    RunnerFixture f;
+    f.runner.post([](sim::FlightSession& s) { s.launch_from_pad("starship_block3", starbase, 0.0, t0 + 10.0); });
+    f.runner.set_target(t0 + 11.0);
+    REQUIRE(f.runner.wait_idle(30.0));
+    // A new flight at an earlier epoch (the game re-launches): the old, later target must not drive it.
+    f.runner.post([](sim::FlightSession& s) { s.launch_from_pad("starship_block3", starbase, 0.0, t0); });
+    f.runner.set_target(t0 + 1.0);
+    REQUIRE(f.runner.wait_idle(30.0));
+    CHECK(f.last_epoch_s <= (t0 + 1.0).tdb_seconds_past_j2000());
+    CHECK(f.last_epoch_s > (t0 + 1.0 - sim::FlightSession::tick_s).tdb_seconds_past_j2000());
+}

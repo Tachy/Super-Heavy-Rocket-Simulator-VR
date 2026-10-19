@@ -41,7 +41,8 @@ public:
     std::uint64_t post(Command command);
     // Overwrites the single "latest" slot (pilot input): run once before the next chunk; older values are dropped.
     void set_latest(Command command);
-    // The session advances towards `target` whenever no command waits (never backwards).
+    // The session advances towards `target` whenever no command waits. A new target replaces the old one, also an
+    // earlier one (a new flight may start before the last target); the session itself never steps backwards.
     void set_target(time::Epoch target);
 
     struct Result {

@@ -18,6 +18,8 @@ var navball: NavBall
 var overlay: FlightOverlay
 var ascent_target := {}
 var last_event := ""
+## Launch posted to the simulation thread and not yet finished: {id, site_id, text}.
+var _pending_launch := {}
 
 var _stick := {}     ## [stick] table of config/input_hotas.toml
 var _throttle := {}  ## [throttle] table
@@ -29,6 +31,8 @@ var _lever_initial := NAN
 
 func setup(config_dir: String) -> void:
 	sim.setup(config_dir)
+	if not sim.command_finished.is_connected(_on_command_finished):
+		sim.command_finished.connect(_on_command_finished)
 	ascent_target = TomlLite.load_file(config_dir.path_join("missions/leo_ascent.toml")).get("target", {})
 	var mapping := TomlLite.load_file(config_dir.path_join("input_hotas.toml"))
 	_stick = mapping.get("stick", {})
@@ -40,10 +44,30 @@ func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 9
 		view.queue_free()
 	views.clear()
 	throttle = 1.0
-	var ok := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s)
-	launch_site_id = site["id"] if ok else ""
-	last_event = "%s auf %s" % [vehicle_id, site["name"]] if ok else "Start fehlgeschlagen"
-	return ok
+	var id := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s)
+	launch_site_id = ""
+	_pending_launch = {"id": id, "site_id": site["id"], "text": "%s auf %s" % [vehicle_id, site["name"]]}
+	last_event = "Start wird vorbereitet" if id > 0 else "Start fehlgeschlagen"
+	return id > 0
+
+
+## Outcome of a command on the simulation thread (emitted from FlightSim.advance_to / wait_idle).
+func _on_command_finished(id: int, command: String, ok: bool, _message: String) -> void:
+	match command:
+		"launch_from_site":
+			if id != _pending_launch.get("id", 0):
+				return
+			launch_site_id = _pending_launch["site_id"] if ok else ""
+			last_event = _pending_launch["text"] if ok else "Start fehlgeschlagen"
+			_pending_launch = {}
+		"plan_circularization":
+			last_event = "Zirkularisierung geplant" if ok \
+					else "Kein Manöver: keine Ellipsenbahn oder Δv zu klein für die Haupttriebwerke"
+		"plan_ship_return":
+			if ok:
+				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Fang am Turm"
+			else:
+				last_event = "Keine Rückkehr: %s" % sim.autopilot_status().get("return", {}).get("reason", "kein Schiff im Orbit")
 
 
 ## Advances the simulation to `tdb_s`; returns the time actually reached (the sim may lag at high warp).
@@ -97,13 +121,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 					ascent_target.get("inclination_deg", 26.5), ascent_target.get("northerly", true))
 			last_event = "Aufstiegs-Autopilot aktiv"
 		KEY_O:
-			last_event = "Zirkularisierung geplant" if sim.plan_circularization() \
-					else "Kein Manöver: keine Ellipsenbahn oder Δv zu klein für die Haupttriebwerke"
+			sim.plan_circularization()  # outcome: _on_command_finished
+			last_event = "Zirkularisierung wird geplant"
 		KEY_R:
-			if sim.plan_ship_return():
-				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Fang am Turm"
-			else:
-				last_event = "Keine Rückkehr: %s" % sim.autopilot_status().get("return", {}).get("reason", "kein Schiff im Orbit")
+			sim.plan_ship_return()  # outcome: _on_command_finished
+			last_event = "Rückkehr wird geplant"
 		KEY_X:
 			sim.disengage_autopilot()
 			last_event = "Autopilot aus"
