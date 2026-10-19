@@ -13,8 +13,8 @@ Not an arcade game: physical correctness has top priority.
 ## Working on plans
 - No feature branches (user 2026-10-15): work and commit directly on `main`, and push (`git push origin main`) after
   every completed task - a plan task, a fix pass, a docs update - once its tests are green.
-- Clear the context after every completed task (user 2026-10-15: token cost grows with the context; auto-compaction
-  comes too late). Claude cannot run `/clear` or `/compact` itself: it records the state (done, open, decisions, next
+- Clear the context after every completed plan (user 2026-10-15: token cost grows with the context; auto-compaction
+  comes too late; user 2026-10-19: run a plan through all its tasks, ask for `/clear` only at its end, not per task). Claude cannot run `/clear` or `/compact` itself: it records the state (done, open, decisions, next
   step) in the plan's ledger/progress file and the memory, commits and pushes, then asks the user for `/clear` and
   names the next step; after "weiter" it resumes from ledger, memory and `git log`.
 - Keep the context lean: long command output to files (read the tail or grep), files in excerpts, broad searches by a
