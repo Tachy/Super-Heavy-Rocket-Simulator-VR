@@ -21,6 +21,7 @@ add_executable(starsim_core_tests
     test_kepler.cpp
     test_cr3bp.cpp
     test_orbit_propagation.cpp
+    test_oem.cpp
     test_artemis_validation.cpp
     test_eclipse.cpp
     test_vehicle_models.cpp

@@ -124,6 +124,7 @@ add_library(starsim_core STATIC
     src/orbit/lambert.cpp
     src/orbit/ballistic_propagator.cpp
     src/orbit/cr3bp.cpp
+    src/orbit/oem.cpp
     src/spice/spice_session.cpp
     src/spice/spice_time_converter.cpp
     src/spice/spice_ephemeris.cpp
