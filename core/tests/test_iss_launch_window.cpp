@@ -14,6 +14,8 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/mission/iss_launch_window.hpp"
+#include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -129,4 +131,124 @@ TEST_CASE("Launch window: never before the earliest liftoff, also when the bias 
         INFO(after_s << " s: " << later.reason);
         if (later.feasible) CHECK(later.liftoff - earliest >= 0.0);
     }
+}
+
+namespace {
+const double re = constants::wgs84_semi_major_axis_m;
+
+// Refuelling f1: a tanker from Starbase into a 200 km / 26.5 deg depot, inserted at 120 x 190 km.
+struct TankerFixture {
+    const spice::SpiceOrientation earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter clock;
+    const config::LaunchSiteConfig site = config::load_launch_site(rendezvous_test::config_dir, "starbase_olp1");
+    const time::Epoch start = clock.from_utc({2026, 10, 20, 0, 0, 0.0});
+    config::DepotOrbitConfig depot_config() const {
+        config::DepotOrbitConfig d;
+        d.height_m = 200e3;
+        d.inclination_rad = 26.5 * deg;
+        return d;
+    }
+    const mission::StationStateAt depot = sim::depot_orbit(depot_config(), start, earth);
+    Vec3 pad_itrf() const { return frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m}); }
+    mission::LaunchWindowParameters parameters() const {
+        mission::LaunchWindowParameters p;
+        p.inclination_rad = 26.5 * deg;
+        p.insertion_s = 445.5;
+        p.insertion_arc_rad = 12.2 * deg;
+        p.separation_periapsis_radius_m = re + 120e3;
+        p.separation_apoapsis_radius_m = re + 190e3;
+        p.search_s = 20.0 * 86400.0;
+        p.phasing.mission_limit_s = 48.0 * 3600.0 - p.insertion_s;
+        p.cost = {308e3, 3.4e3, 12e3 / 86400.0};
+        return p;
+    }
+};
+}  // namespace
+
+TEST_CASE("Launch window: candidates - the cheapest feasible orbit, below or above the station",
+          "[iss][launch_window]") {
+    test::spice_session();
+    const TankerFixture f;
+    auto p = f.parameters();
+    p.phasing_orbits = {{re + 150e3, re + 190e3}, {re + 170e3, re + 190e3}, {re + 190e3, re + 190e3},
+                        {re + 220e3, re + 240e3}, {re + 250e3, re + 270e3}};
+    int below = 0, above = 0;
+    time::Epoch earliest = f.start;
+    for (int i = 0; i < 12; ++i) {  // twelve consecutive windows
+        const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, earliest, p, gm);
+        INFO(i << ": " << w.reason);
+        REQUIRE(w.feasible);
+        REQUIRE(w.phasing_orbit);
+        (w.phasing_orbit->periapsis_radius_m > re + 200e3 ? above : below)++;
+        CHECK(w.schedule.above == (w.phasing_orbit->periapsis_radius_m > re + 200e3));
+        CHECK(w.raised - w.separation > 0.0);
+        CHECK(w.schedule.waypoint0_epoch - w.separation <= p.phasing.mission_limit_s);
+        // the choice is the cheapest of the feasible candidates at that crossing
+        for (const auto& c : p.phasing_orbits) {
+            auto single = p;
+            single.phasing_orbits = {c};
+            single.search_s = 1800.0;  // only this crossing
+            const auto other = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, w.liftoff - 600.0, single, gm);
+            if (other.feasible && std::abs(other.liftoff - w.liftoff) < 120.0) {
+                CHECK(w.cost.total_kg() <= other.cost.total_kg() + 1.0);
+            }
+        }
+        if (std::getenv("STARSIM_VERBOSE")) {
+            std::printf("[launch_window f1] liftoff +%.2f d, orbit %.0f x %.0f km, Waypoint 0 +%.1f h, cost %.0f kg\n",
+                        (w.liftoff - f.start) / 86400.0, (w.phasing_orbit->periapsis_radius_m - re) / 1e3,
+                        (w.phasing_orbit->apoapsis_radius_m - re) / 1e3,
+                        (w.schedule.waypoint0_epoch - w.separation) / 3600.0, w.cost.total_kg());
+        }
+        earliest = w.liftoff + 3600.0;
+    }
+    CHECK(below > 0);
+    CHECK(above > 0);
+}
+
+TEST_CASE("Launch window: empty candidates keep the separation orbit (ISS unchanged)", "[iss][launch_window]") {
+    test::spice_session();
+    const Fixture f;
+    const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.station(),
+                                               f.clock.from_utc({2026, 10, 16, 0, 0, 0.0}), f.parameters(), gm);
+    REQUIRE(w.feasible);
+    CHECK_FALSE(w.phasing_orbit);
+    // recorded before f1 (empty candidates must not move it)
+    CHECK(w.liftoff.tdb_seconds_past_j2000() == Catch::Approx(845499835.167408943).epsilon(0.0).margin(1e-6));
+    CHECK(w.schedule.waypoint0_epoch.tdb_seconds_past_j2000() == Catch::Approx(845519535.204464555).epsilon(0.0).margin(1e-6));
+}
+
+TEST_CASE("Launch window: a raise that eats the mission limit is infeasible", "[iss][launch_window]") {
+    test::spice_session();
+    const TankerFixture f;
+    auto p = f.parameters();
+    p.phasing_orbits = {{re + 250e3, re + 270e3}};
+    p.phasing.mission_limit_s = 2.0 * 3600.0;  // two burns half an orbit apart + checkout leave no phasing
+    p.search_s = 3.0 * 86400.0;
+    const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, f.start, p, gm);
+    CHECK_FALSE(w.feasible);
+    CHECK(w.reason.rfind("Kein Startfenster", 0) == 0);
+}
+
+TEST_CASE("Phasing cost against a hand computation", "[iss][launch_window]") {
+    const double r1 = re + 170e3, r_t = re + 200e3;
+    mission::PhasingParameters p;
+    const double r_c = r_t - p.coelliptic_height_m;
+    orbit::KeplerianElements e;
+    e.semi_major_axis_m = r1;
+    e.inclination_rad = 26.5 * deg;
+    mission::RaiseEstimate raise;
+    raise.feasible = true;
+    raise.state = orbit::state_from_elements(e, gm);
+    raise.delta_v_mps = 20.0;
+    mission::PhasingSchedule schedule;
+    schedule.feasible = true;
+    const mission::PhasingCostModel model{308e3, 3.4e3, 12e3 / 86400.0};
+    const double t_s = 30.0 * 3600.0;
+    const auto cost = mission::phasing_cost(raise, schedule, t_s, p, r_t, model, gm);
+    // Hohmann 170 km -> r_c: departure + arrival (vis-viva)
+    const double dv_boost = std::sqrt(gm / r1) * (std::sqrt(2.0 * r_c / (r1 + r_c)) - 1.0) +
+                            std::sqrt(gm / r_c) * (1.0 - std::sqrt(2.0 * r1 / (r1 + r_c)));
+    CHECK(cost.propellant_kg == Catch::Approx(308e3 * (1.0 - std::exp(-(20.0 + dv_boost) / 3.4e3))).epsilon(1e-9));
+    CHECK(cost.boil_off_kg == Catch::Approx(12e3 * 30.0 / 24.0).epsilon(1e-12));
+    CHECK(cost.total_kg() == Catch::Approx(cost.propellant_kg + cost.boil_off_kg));
 }

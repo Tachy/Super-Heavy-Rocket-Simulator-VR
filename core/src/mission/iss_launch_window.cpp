@@ -6,6 +6,7 @@
 
 #include "starsim/environment/gravity.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
+#include "starsim/gnc/burn_node.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/orbit/synthetic_station_orbit.hpp"
@@ -15,6 +16,8 @@ namespace starsim::mission {
 namespace {
 
 using math::Vec3;
+
+constexpr int max_raise_burns = 2;  // an apoapsis and a periapsis raise (refuelling f1)
 
 double raan_rate_radps(double a_m, double inclination_rad) {
     orbit::StationMeanElements mean;
@@ -73,17 +76,116 @@ math::StateVector separation_state_estimate(const Vec3& pad_gcrf_m, const Vec3& 
     return {rp * u, speed * cross(n, u)};
 }
 
+RaiseEstimate raise_estimate(const math::StateVector& separation, const PhasingOrbit& orbit, double gm_m3ps2) {
+    RaiseEstimate r;
+    const time::Epoch t0 = time::Epoch::from_tdb_seconds_past_j2000(0.0);
+    time::Epoch t = t0;
+    math::StateVector s = separation;
+    for (int burn = 0; burn <= max_raise_burns; ++burn) {
+        const auto node = gnc::next_raise_node(s, t, gm_m3ps2, orbit.periapsis_radius_m, orbit.apoapsis_radius_m,
+                                               raise_tolerance_m);
+        if (!node) {
+            r.feasible = true;
+            r.state = s;
+            r.elapsed_s = t - t0;
+            return r;
+        }
+        if (burn == max_raise_burns) break;  // more burns than an apoapsis and a periapsis raise
+        s = orbit::propagate_two_body(s, gm_m3ps2, node->epoch - t);
+        s.velocity_mps = s.velocity_mps + node->delta_v_gcrf_mps;
+        r.delta_v_mps += math::norm(node->delta_v_gcrf_mps);
+        t = node->epoch;
+    }
+    return r;
+}
+
+PhasingCost phasing_cost(const RaiseEstimate& raise, const PhasingSchedule& schedule,
+                         double separation_to_waypoint0_s, const PhasingParameters& p, double target_radius_m,
+                         const PhasingCostModel& model, double gm_m3ps2) {
+    const double r1 = orbit::elements_from_state(raise.state, gm_m3ps2).semi_major_axis_m;
+    const double r_c = target_radius_m - p.coelliptic_height_m;
+    const auto departure = [gm_m3ps2](double from, double to) {
+        return std::sqrt(gm_m3ps2 / from) * (std::sqrt(2.0 * to / (from + to)) - 1.0);
+    };
+    const auto arrival = [gm_m3ps2](double from, double to) {
+        return std::sqrt(gm_m3ps2 / to) * (1.0 - std::sqrt(2.0 * from / (from + to)));
+    };
+    double dv = raise.delta_v_mps + std::abs(departure(r1, r_c)) + std::abs(arrival(r1, r_c));
+    if (schedule.phasing_revolutions > 0) {  // the phase burn raises the apoapsis; the boost takes it back
+        dv += 2.0 * std::abs(departure(r1, schedule.phase_orbit_apoapsis_radius_m));
+    }
+    PhasingCost c;
+    if (model.exhaust_velocity_mps > 0.0) c.propellant_kg = model.mass_kg * (1.0 - std::exp(-dv / model.exhaust_velocity_mps));
+    c.boil_off_kg = model.boil_off_kgps * separation_to_waypoint0_s;
+    return c;
+}
+
 LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrientation& earth,
                                 const StationStateAt& station, time::Epoch earliest, const LaunchWindowParameters& p,
                                 double gm_m3ps2) {
     LaunchWindow w;
-    const double a_chaser = 0.5 * (p.separation_periapsis_radius_m + p.separation_apoapsis_radius_m);
+    const double a_separation = 0.5 * (p.separation_periapsis_radius_m + p.separation_apoapsis_radius_m);
     const double a_station = orbit::elements_from_state(station(earliest), gm_m3ps2).semi_major_axis_m;
     std::string last_reason = "keine Ebenenquerung";
+    // no candidates: the separation orbit is the phasing orbit (the ISS missions, unchanged)
+    std::vector<std::optional<PhasingOrbit>> candidates;
+    if (p.phasing_orbits.empty()) candidates.emplace_back();
+    for (const auto& o : p.phasing_orbits) candidates.emplace_back(o);
+
+    // The window at the crossing near t1 for one candidate: the root with the candidate's plane bias, re-aimed at its
+    // boost; std::nullopt when the crossing lies before the earliest liftoff with the aimed bias.
+    const auto evaluate = [&](time::Epoch t1, const std::optional<PhasingOrbit>& orbit) -> std::optional<LaunchWindow> {
+        const double a_chaser = orbit ? 0.5 * (orbit->periapsis_radius_m + orbit->apoapsis_radius_m) : a_separation;
+        LaunchWindow c;
+        c.phasing_orbit = orbit;
+        double bias = plane_bias_rad(a_chaser, a_station, p.inclination_rad, 0.5 * p.phasing.mission_limit_s);
+        for (int iteration = 0; iteration < p.bias_iterations; ++iteration) {
+            const auto f = [&](time::Epoch e) { return node_difference_rad(pad_itrf_m, earth, station, e, p, bias); };
+            // the bias moves the zero by well under a sample: a widened bracket around the first one, never before
+            // the earliest liftoff (review i6: the re-aimed bias moved a crossing just after it to before it)
+            const time::Epoch lo = std::max(t1 - p.sample_s, earliest), hi = t1 + 2.0 * p.sample_s;
+            if (!(f(lo) <= 0.0 && f(hi) > 0.0)) return std::nullopt;
+            const time::Epoch root = bisect(f, lo, hi);
+            const Vec3 pad = earth.fixed_to_gcrf(root).position(pad_itrf_m);
+            const Vec3 n = gnc::ascent_plane_normal(pad, earth, root, p.inclination_rad, p.northerly);
+            c.liftoff = root;
+            c.separation = root + p.insertion_s;
+            c.separation_state_gcrf = separation_state_estimate(pad, n, p, gm_m3ps2);
+            c.plane_bias_rad = bias;
+            c.raised = c.separation;
+            c.raised_state_gcrf = c.separation_state_gcrf;
+            if (!orbit) {
+                c.schedule = phasing_schedule(c.separation_state_gcrf, station(c.separation), c.separation, p.phasing,
+                                              gm_m3ps2);
+            } else {
+                const auto raise = raise_estimate(c.separation_state_gcrf, *orbit, gm_m3ps2);
+                auto q = p.phasing;  // the limits count from the separation
+                q.mission_limit_s -= raise.elapsed_s;
+                q.earliest_arrival_s = std::max(0.0, q.earliest_arrival_s - raise.elapsed_s);
+                c.schedule = PhasingSchedule{};
+                if (!raise.feasible || q.mission_limit_s <= 0.0) {
+                    c.schedule.reason = "Kein Rendezvous: Phasing-Bahn nicht erreichbar";
+                } else {
+                    c.raised = c.separation + raise.elapsed_s;
+                    c.raised_state_gcrf = raise.state;
+                    c.schedule = phasing_schedule(raise.state, station(c.raised), c.raised, q, gm_m3ps2);
+                    if (c.schedule.feasible) {
+                        c.cost = phasing_cost(raise, c.schedule, c.schedule.waypoint0_epoch - c.separation, p.phasing,
+                                              a_station, p.cost, gm_m3ps2);
+                    }
+                }
+            }
+            if (!c.schedule.feasible) break;
+            // re-aim the bias at the boost (i6 correction 2)
+            bias = plane_bias_rad(a_chaser, a_station, p.inclination_rad, c.schedule.boost_epoch - c.separation);
+        }
+        return c;
+    };
+
     time::Epoch t = earliest;
     while (t - earliest < p.search_s) {
         // the first bias guess: the plane match half way through the mission limit
-        double bias = plane_bias_rad(a_chaser, a_station, p.inclination_rad, 0.5 * p.phasing.mission_limit_s);
+        const double bias = plane_bias_rad(a_separation, a_station, p.inclination_rad, 0.5 * p.phasing.mission_limit_s);
         const auto f = [&](time::Epoch e) { return node_difference_rad(pad_itrf_m, earth, station, e, p, bias); };
         // the next upward zero after t: sample, then bisect
         double f0 = f(t);
@@ -99,40 +201,26 @@ LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrient
             f0 = f2;
         }
         if (!found) break;
-        time::Epoch root = t1;
-        bool bracketed = true;
-        for (int iteration = 0; iteration < p.bias_iterations; ++iteration) {
-            // the bias moves the zero by well under a sample: a widened bracket around the first one, never before
-            // the earliest liftoff (review i6: the re-aimed bias moved a crossing just after it to before it)
-            const time::Epoch lo = std::max(t1 - p.sample_s, earliest), hi = t1 + 2.0 * p.sample_s;
-            if (!(f(lo) <= 0.0 && f(hi) > 0.0)) {
-                bracketed = false;
-                break;
-            }
-            root = bisect(f, lo, hi);
-            const Vec3 pad = earth.fixed_to_gcrf(root).position(pad_itrf_m);
-            const Vec3 n = gnc::ascent_plane_normal(pad, earth, root, p.inclination_rad, p.northerly);
-            w.liftoff = root;
-            w.separation = root + p.insertion_s;
-            w.separation_state_gcrf = separation_state_estimate(pad, n, p, gm_m3ps2);
-            w.plane_bias_rad = bias;
-            w.schedule =
-                phasing_schedule(w.separation_state_gcrf, station(w.separation), w.separation, p.phasing, gm_m3ps2);
-            if (!w.schedule.feasible) break;
-            // re-aim the bias at the boost (i6 correction 2)
-            bias = plane_bias_rad(a_chaser, a_station, p.inclination_rad, w.schedule.boost_epoch - w.separation);
+        // every candidate at this crossing; the cheapest feasible one (ties: the first in the list)
+        std::optional<LaunchWindow> best, any;
+        for (const auto& orbit : candidates) {
+            const auto c = evaluate(t1, orbit);
+            if (!c) continue;
+            if (!any) any = c;
+            if (c->schedule.feasible && (!best || c->cost.total_kg() < best->cost.total_kg())) best = c;
         }
-        if (!bracketed) {  // this crossing lies before the earliest liftoff with the aimed bias: the next one
+        if (!any) {  // this crossing lies before the earliest liftoff with the aimed bias: the next one
             t = t1 + p.sample_s;
             continue;
         }
-        if (w.schedule.feasible) {
-            w.feasible = true;
-            return w;
+        if (best) {
+            best->feasible = true;
+            best->rejected = w.rejected;
+            return *best;
         }
-        last_reason = w.schedule.reason;
+        last_reason = any->schedule.reason;
         ++w.rejected;
-        t = root + 3600.0;  // past this crossing: the next one is ~a day later
+        t = any->liftoff + 3600.0;  // past this crossing: the next one is ~a day later
     }
     char text[64];
     std::snprintf(text, sizeof text, "Kein Startfenster in %g Tagen: ", p.search_s / 86400.0);
