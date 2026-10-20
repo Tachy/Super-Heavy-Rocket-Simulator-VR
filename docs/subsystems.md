@@ -1120,3 +1120,33 @@ ledger `.superpowers/sdd/2026-10-20-iss-i6-missions/progress.md`.
   warnings (ISS source note, reboosts in the mission span). Covered by the smoke test.
 - **Tests:** `[launch_window]`, `[iss_mission]` (`test_iss_launch_window.cpp`, `test_iss_mission_config.cpp`,
   `test_iss_mission_sequence.cpp`, `test_iss_mission_campaign.cpp` with the `[slow]` end-to-end cases).
+
+## Orbital refuelling (milestone r)
+
+Spec `docs/superpowers/specs/2026-10-20-orbital-refuelling-design.md`: depot + tankers + HLS, back-to-back docking,
+boil-off by heat balance, a campaign calculator from one flown tanker flight.
+
+### Vehicles and docking geometry (r1)
+- `starship_tanker` = Block 3 unchanged (`[[stage]] from = "starship_block3:<stage>"`) + four dorsal probes
+  (port `transfer_dock`, `mechanism = "probe_drogue"`, `soft_capture = "active"`) and the transfer connectors
+  `lox_transfer` / `ch4_transfer`. `starship_depot` = Block 3 booster + a ship without heat shield, flaps, catch pins
+  and recovery: 236.5 t dry [E] (255 - 10.5 heat shield - 10 flaps - 1 pins + 3 insulation), four dorsal drogues
+  (passive). The HLS carries the tanker's probes and connectors.
+- A `from` stage is the source vehicle's stage exactly; only `docking_port` and `transfer_connector` entries may be
+  added (any other key, a missing stage / vehicle, a propellant mismatch or a cycle is a `ConfigError`).
+  `tools/vehicle_report.py` follows `from`.
+- Layout [E] (SpaceX publishes no positions): interface plane 0.5 m off the dorsal hull (`[20, 0, 5]`, axis +z,
+  up +x), probes / drogues at stations 12 / 28 m, y +-1.5 m; connectors at 8 m (LOX) / 24 m (CH4), y 0. Mated
+  (`vehicle::mated_stage_transform`, the i5 convention): parallel, rolled 180 deg, centrelines 10 m apart, 1 m between
+  the hulls, every probe on a drogue and every connector on its counterpart (test "Tanker and HLS mate back to back
+  with the depot").
+- `Vehicle::set_tank_mass(stage, tank, kg)`: clamped to `[0, capacity]`; a refilled feed source re-arms starved
+  engines, the cold-gas RCS follows the tanks.
+- Ports mate only with equal mechanisms, probes on the chaser (`vehicle::port_mismatch`);
+  `FlightSession::set_rendezvous_target` refuses others (German message). The IDSS mechanism is armed for IDSS pairs
+  only - the probe/drogue mechanism comes with r3.
+- Tanker translation after a transfer (10 t per main tank, 310 t; pure capability, no torque): +-z (dorsal, the
+  docking axis) 11.3 kN = 0.037 m/s^2, +-y 5.7 kN = 0.018 m/s^2, +x 3.0 kN = 0.010 m/s^2 (settling), -x none.
+- `vehicle_report`: depot ship ideal delta-v 7,328 m/s (no recovery reserve), tanker ship 6,697 m/s.
+- Open for r3: HLS leg-strut clearance at the depot (feet 12 m out, 1.5 m below the skirt).
+- **Tests:** `[refuelling]` (`test_refuelling_vehicles.cpp`).

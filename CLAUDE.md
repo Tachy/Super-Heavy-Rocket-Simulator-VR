@@ -52,7 +52,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   modified-Newtonian table with offset-CG trim, reefed parachutes, fixed-area drag of a station),
   propulsion (engine performance, RCS allocator incl. pure translation capability + pulse modulator),
   vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity,
-  ideal LVLH attitude of a station, docking-port kinematics, docked hold, attached mass, compound mass), sim (flight session incl. the ISS as a station body from
+  ideal LVLH attitude of a station, docking-port kinematics, docked hold, attached mass, compound mass, run-time tank
+  masses, probe/drogue port mating of the refuelling ships), sim (flight session incl. the ISS as a station body from
   OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
   Waypoint 0 with drag tracking and re-plan, proximity flight to a station port, docking into a compound, undocking
   and departure, ISS missions chained by a mission sequence: from the separation orbit, from the pad with a launch

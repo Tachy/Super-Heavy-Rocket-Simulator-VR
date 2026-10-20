@@ -127,7 +127,19 @@ flow separation (vacuum engines).
   y/z body axes), `axis` (outward unit vector), `up` (clocking reference perpendicular to it), optional
   `behind_nose_cone` (default false: the port is covered while the vehicle's nose cone is closed - Crew Dragon `idss`),
   optional `soft_capture = "active" | "passive"` (default passive; IDSS: the active side extends its soft-capture ring,
-  the passive one stays retracted - Crew Dragon active, the ISS IDAs passive; a docking needs one of each).
+  the passive one stays retracted - Crew Dragon active, the ISS IDAs passive; a docking needs one of each),
+  optional `mechanism = "idss" | "probe_drogue"` (default idss) with `elements_m = [[x, y, z], ...]` (probe_drogue
+  only, at least 3: the probe tips on the active port, the drogue mouths on the passive one, stage frame - the
+  Starship tanker / HLS against the depot, refuelling r1). Two ports mate only with equal mechanisms; probes belong to
+  the chaser.
+- `[[stage.transfer_connector]]` (refuelling r1): `id`, `tank` (a main propellant tank of the stage), `position_m`
+  (the coupling face's centre, stage frame). Docked, connectors of the same contents meet.
+
+## Reused stages
+- `[[stage]] from = "<vehicle>:<stage>"`: the stage exactly as `config/vehicles/<vehicle>.toml` configures it
+  (the Starship tanker and the depot's Super Heavy are Block 3's). Only `[[stage.docking_port]]` and
+  `[[stage.transfer_connector]]` may be added; any other key is an error (it would silently diverge from the source).
+  The propellant must be the vehicle's. `tools/vehicle_report.py` follows `from`.
 - `[stage] hull_top_diameter_m` (optional): the hull tapers linearly from `diameter_m` at the stage bottom to this at
   its top - the hull sample points of a visiting vehicle against the station primitives (ISS i5; Crew Dragon capsule).
 - `[[stage.collision]]`: `id`, `kind = "capsule"` (segment `a_m`-`b_m`, `radius_m`) or `"box"` (`centre_m`,

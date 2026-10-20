@@ -1,7 +1,8 @@
 # Orbital refuelling (tanker flights) - design
 
-Status: draft 2026-10-20, awaiting the user's review. Milestone (r), the rest of plan milestone M9 (tanker flights),
-after the ISS milestone (i1-i6, main `ffbb574`).
+Status: approved 2026-10-20. r1 implemented (plan `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
+notes in `docs/subsystems.md` "Orbital refuelling", corrections below). Milestone (r), the rest of plan milestone M9
+(tanker flights), after the ISS milestone (i1-i6, main `ffbb574`).
 
 ## Intent
 
@@ -76,6 +77,13 @@ Each part gets its own plan, execution and final review, as in milestone (i).
   real tank state instead of the configured full load.
 
 ## r1 design: vehicles and docking geometry
+
+Corrections approved with the r1 plan (user 2026-10-20): (1) the tanker and the depot's booster reuse Block 3's
+stages with `[[stage]] from = "<vehicle>:<stage>"`, only ports and connectors may be added; (2) depot dry mass 236.5 t
+[E] (255 - 10.5 heat shield - 10 flaps - 1 catch pins + 3 insulation), dry CG as Block 3; (3) hardware layout [E]:
+interface plane 0.5 m off the dorsal hull at station 20 m, probes / drogues at 12 / 28 m, y +-1.5 m, LOX connector at
+8 m, CH4 at 24 m - centrelines 10 m apart; (4) the HLS legs' clearance at the depot is checked in r3; (5) ports mate
+only with equal mechanisms, probes on the chaser, drogues on the target.
 
 - **Depot** `config/vehicles/starship_depot.toml`: Super Heavy as Block 3; ship stage as Block 3 without the heat
   shield (10.5 t [E], the Block 1 figure) and the flaps (mass [E]), with an insulation layer (mass and effective heat
