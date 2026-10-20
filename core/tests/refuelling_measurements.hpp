@@ -1,7 +1,10 @@
 #pragma once
 // Refuelling r5: the measured numbers of a refuelling flight, read from the mission's leg marks.
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+
+#include <catch2/catch_test_macros.hpp>
 
 #include "starsim/sim/flight_session.hpp"
 
@@ -50,6 +53,13 @@ inline void print(const char* tag, const TankerFlightNumbers& n) {
                 tag, n.residue_after_ascent_kg / 1e3, n.rendezvous_kg / 1e3, n.delivered_oxidizer_kg / 1e3,
                 n.delivered_fuel_kg / 1e3, n.transfer_s, n.settling_gas_kg / 1e3, n.chilldown_kg / 1e3,
                 n.main_at_undock_kg / 1e3, n.main_at_catch_kg / 1e3, n.flight_s / 3600.0);
+}
+
+// Refuelling r6: a flown number against config/refuelling/reference_flights.toml - 1 % or 0.3 t, the larger. A failure
+// means the file is stale: re-measure it (and docs/subsystems.md), never widen the tolerance.
+inline void check_reference(double flown_kg, double file_kg, const char* what) {
+    INFO(what << ": flown " << flown_kg / 1e3 << " t, file " << file_kg / 1e3 << " t (re-measure the file)");
+    CHECK(std::abs(flown_kg - file_kg) <= std::max(0.01 * std::abs(file_kg), 300.0));
 }
 
 }  // namespace starsim::refuelling_test

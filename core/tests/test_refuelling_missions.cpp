@@ -20,6 +20,7 @@
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/refuelling_mission_config.hpp"
+#include "starsim/config/refuelling_reference.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
@@ -332,6 +333,8 @@ TEST_CASE("depot_launch: pad -> orbit, the depot becomes the station, the booste
     std::printf("[r5] depot_launch: station %.0f s after liftoff, %.1f x %.1f km, initial fill %.1f t (main), "
                 "boil-off %.1f kg in 90 min\n",
                 insertion_s, rp / 1e3, ra / 1e3, fill / 1e3, boil_kg);
+    refuelling_test::check_reference(fill, config::load_refuelling_reference(refuelling_test::config_dir).depot.initial_propellant_kg,
+                                     "depot initial fill");
 }
 
 TEST_CASE("tanker_flight_orbit starts behind the depot and plans the phasing", "[refuelling][mission][rendezvous]") {
@@ -479,6 +482,15 @@ TEST_CASE("tanker_flight: pad -> booster caught -> docked -> transfer -> ship ca
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Complete);
     const auto n = refuelling_test::tanker_numbers(f.session);
     refuelling_test::print("tanker_flight", n);
+    const auto ref = config::load_refuelling_reference(refuelling_test::config_dir).tanker;
+    refuelling_test::check_reference(n.residue_after_ascent_kg, ref.residue_after_ascent_kg, "residue after ascent");
+    refuelling_test::check_reference(n.rendezvous_kg, ref.rendezvous_kg, "rendezvous");
+    refuelling_test::check_reference(n.delivered_oxidizer_kg, ref.delivered_oxidizer_kg, "delivered LOX");
+    refuelling_test::check_reference(n.delivered_fuel_kg, ref.delivered_fuel_kg, "delivered CH4");
+    refuelling_test::check_reference(n.chilldown_kg, ref.chilldown_kg, "chill");
+    refuelling_test::check_reference(n.settling_gas_kg, ref.settling_gas_kg, "settling gas");
+    refuelling_test::check_reference(n.main_at_undock_kg, ref.main_at_undock_kg, "main at undock");
+    refuelling_test::check_reference(n.main_at_catch_kg, ref.main_at_catch_kg, "main at catch");
     CHECK(n.residue_after_ascent_kg > 0.0);
     CHECK(n.delivered_oxidizer_kg + n.delivered_fuel_kg > 0.0);
     CHECK(f.session.body(f.session.controlled_index()).caught());
@@ -848,6 +860,11 @@ TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refu
     const auto* raise = refuelling_test::mark(f.lunar, IssMissionLeg::Raise);
     const auto* rv = refuelling_test::mark(f.lunar, IssMissionLeg::Rendezvous);
     REQUIRE(rv);
+    const auto* docked = refuelling_test::mark(f.lunar, IssMissionLeg::Docked);
+    REQUIRE(docked);
+    refuelling_test::check_reference(docked->chaser_main_propellant_kg,
+                                     config::load_refuelling_reference(refuelling_test::config_dir).hls.main_at_docking_kg,
+                                     "HLS main at docking");
     std::printf("[r5] hls_refuel: SECO %.1f s, HLS residue at insertion %.1f t, after the raise %.1f t, main at the "
                 "lunar start %.1f t\n",
                 raise ? raise->epoch - s.epoch : 0.0, raise ? raise->chaser_main_propellant_kg / 1e3 : 0.0,
