@@ -174,3 +174,18 @@ approach_ellipsoid_m = [2000.0, 1000.0, 1000.0]
 waypoint0_below_m = 400.0
 waypoint1_range_m = 220.0
 waypoint2_range_m = 20.0
+
+# Hull for the docking collision check (refuelling r3) [E]: tank section and nose as capsules (stage frame).
+[[stage.collision]]
+id = "tank_section"
+kind = "capsule"
+a_m = [4.5, 0.0, 0.0]
+b_m = [32.0, 0.0, 0.0]
+radius_m = 4.5
+
+[[stage.collision]]
+id = "nose"
+kind = "capsule"
+a_m = [36.0, 0.0, 0.0]
+b_m = [47.0, 0.0, 0.0]
+radius_m = 2.5

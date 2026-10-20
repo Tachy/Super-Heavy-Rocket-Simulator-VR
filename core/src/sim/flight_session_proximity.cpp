@@ -113,13 +113,13 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
                                           " m/s während des Anflugs");
         }
     }
-    if (!docking_) {  // both ports need IDSS soft capture: active on the chaser, passive on the station
+    if (!docking_) {  // an active and a passive port of the same mechanism
         clear_rendezvous_target();
         return refuse("Kein Anflug: Andocksystem nicht kompatibel");
     }
-    // i4 records "Kontakt" where the petals start to mesh: the chaser port at ring extension + both petal heights
-    const auto& ip = docking_->mechanism().parameters().interface;
-    p.contact_plane_m = ip.ring_extension_m + 2.0 * ip.petal_height_m;
+    // i4 records "Kontakt" where the interface starts to mesh: IDSS petals, or probe heads at the drogue mouths
+    p.contact_plane_m = docking_->mechanism().first_contact_m();
+    if (docking_->mechanism().parameters().probe_drogue) p.envelope = gnc::probe_drogue_capture_envelope();
     rendezvous_step_ = RendezvousStep::None;  // the phasing (i3) is complete
     proximity_.emplace(approach, p);
     proximity_debug_events_ = 0;

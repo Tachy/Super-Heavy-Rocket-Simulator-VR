@@ -1,9 +1,11 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "starsim/contact/docking_interface.hpp"
+#include "starsim/contact/probe_drogue_interface.hpp"
 
 namespace starsim::contact {
 
@@ -12,18 +14,25 @@ namespace starsim::contact {
 // guide pins -> 12 hooks (hard capture). Undocking: hooks open -> separation springs. Passive port frame throughout.
 // Too fast a contact runs the joint out of its stroke into the end stop: above the IDSS dynamic compression limit the
 // mechanism releases the latches ("Überlast", spec correction 3).
+// Refuelling r3: the same sequence with the four-probe interface (probe_drogue): the probes' stroke plays the ring's
+// extension; structural latches play the hooks.
 
 enum class DockingPhase { Ready, Contact, SoftCapture, Retraction, HooksClosing, Docked, HooksOpening, Separated, Failed };
 const char* to_string(DockingPhase phase);  // German
 
 struct DockingMechanismParameters {
     DockingInterfaceParameters interface;
+    // Refuelling r3: the four-probe interface instead of the IDSS ring; its extension is the probe stroke.
+    std::optional<ProbeDrogueParameters> probe_drogue;
     double joint_frequency_radps = 0.5;           // [E] attenuation: critically damped, time constant 2 s
     // Rotational joint stiffness from the IDSS loads (Table 3.3.1.4-1): half the bending (2,800 N m) / torsion
     // (1,500 N m) limit at the envelope's 4 deg misalignment / roll [D]; damping from the chaser inertia (ratio below).
     double joint_bending_stiffness_nm_per_rad = 0.5 * 2800.0 / (4.0 * constants::deg_to_rad);
     double joint_torsion_stiffness_nm_per_rad = 0.5 * 1500.0 / (4.0 * constants::deg_to_rad);
     double joint_damping_ratio = 1.0;             // [E]
+    // > 0: bending / torsion stiffness = the chaser's inertia * frequency^2 (a heavy chaser: the IDSS values above
+    // are load limits of a 12 t pair and would leave a 500 t ship swinging for minutes)
+    double joint_rotation_frequency_radps = 0.0;
     double stroke_m = 0.10;                       // [E] axial attenuation stroke beyond the rest extension
     double end_stop_stiffness_n_per_m = 2.0e6;    // [E] beyond the stroke
     double attenuation_min_s = 120.0;             // [E] then retract once settled
@@ -45,6 +54,7 @@ struct DockingMechanismParameters {
     double static_compression_limit_n = 3500.0;   // held longer than static_after_s: Überlast
     double static_after_s = 0.1;
     double tension_limit_n = 3900.0, shear_limit_n = 3200.0, bending_limit_nm = 2800.0, torsion_limit_nm = 1500.0;
+    std::string limit_name = "IDSS-Grenze";  // in the load warnings
 };
 
 struct DockingWrench {
@@ -86,15 +96,19 @@ public:
     const std::vector<DockingEvent>& events() const { return events_; }
     const std::vector<std::string>& warnings() const { return warnings_; }
     double ring_extension_m() const { return extension_m_; }
+    double full_extension_m() const;  // the ring / probes fully extended (before capture)
+    double first_contact_m() const;   // port separation along the axis at the first touch (petal tips / mouths)
+    double reach_m() const;           // CG-free bound: beyond this port distance no part of the interface can touch
     const DockingMechanismParameters& parameters() const { return p_; }
 
 private:
     void enter(DockingPhase phase, std::string status, double t_s);
     void fail(std::string reason, double t_s);
+    InterfaceContact contact(const DockingPose& pose, double extension_m) const;
     DockingWrench joint(const DockingPose& pose) const;
     DockingWrench before_capture(double t_s, const DockingPose& pose, double mass_kg, double inertia_kg_m2);
     void record_loads(const DockingWrench& w, double t_s, double dt_s);
-    void warn(const char* text);
+    void warn(const std::string& text);
 
     DockingMechanismParameters p_;
     DockingPhase phase_ = DockingPhase::Ready;
@@ -102,6 +116,7 @@ private:
     double phase_since_s_ = 0.0, last_contact_s_ = 0.0, static_over_s_ = 0.0;
     bool ring_touched_ = false, ring_blocked_ = false, tips_only_ = true;
     double k_ = 0.0, c_ = 0.0, cb_ = 0.0, ct_ = 0.0;  // translational stiffness / damping; bending / torsion damping
+    double kb_ = 0.0, kt_ = 0.0;                       // bending / torsion stiffness of the joint
     bool separation_pending_ = false;
     LoadPeaks peaks_;
     std::string status_ = "bereit", failure_, refusal_;

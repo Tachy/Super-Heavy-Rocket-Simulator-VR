@@ -6,6 +6,7 @@
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/body_orientation.hpp"
+#include "starsim/frames/lvlh.hpp"
 #include "starsim/gnc/orbital_attitude.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/synthetic_station_orbit.hpp"
@@ -15,6 +16,8 @@
 #include "starsim/vehicle/vehicle.hpp"
 
 namespace starsim::refuelling_test {
+
+using math::Vec3;
 
 inline const std::filesystem::path config_dir = STARSIM_CONFIG_DIR;
 constexpr double oxidizer_fuel_ratio = 3.6;  // Block 3 main tanks [D]
@@ -58,6 +61,43 @@ struct DepotSession {
     time::Epoch t0 = clock.from_utc({2026, 10, 20, 0, 0, 0.0});
     math::StateVector depot = depot_state(earth, t0);
     double depot_propellant_kg = 600.0e3;  // [test] a depot after a few tankers
+};
+
+// The chaser (ship alone) with its transfer_dock at `position_port_m` in the depot's transfer_dock frame, in the
+// docking attitude (axes (-x, -y, +z) of the depot port's: rolled 180 deg, dorsal up), moving with the depot's
+// rotating frame plus `velocity_port_mps`. Body 0 = chaser, body 1 = depot.
+struct TankerAtPort : DepotSession {
+    TankerAtPort(const Vec3& position_port_m, const Vec3& velocity_port_mps = {},
+                 const config::VehicleConfig& chaser = tanker_config(200.0e3)) {
+        sim::FlightSession probe(ephemeris, earth, config_dir);  // the ideal-attitude depot's port
+        probe.add_station(depot_config(depot_propellant_kg), depot, t0);
+        const auto sk = vehicle::port_kinematics(probe.body(0), "transfer_dock");
+        const vehicle::Vehicle v(chaser, config_dir);
+        const auto& port = chaser.stages.back().docking_ports.front();
+        const math::Mat3 port_axes_body = math::Mat3::from_columns(port.axis, cross(port.up, port.axis), port.up);
+        const math::Mat3 desired = sk.axes_gcrf * math::Mat3::from_columns({-1, 0, 0}, {0, -1, 0}, {0, 0, 1});
+        const math::Mat3 r = desired * transpose(port_axes_body);
+        const Vec3 lever_body = port.position_m - v.mass_properties().cg_point_m();
+        const Vec3 port_gcrf = sk.position_gcrf_m + sk.axes_gcrf * position_port_m;
+        const Vec3 cg = port_gcrf - r * lever_body;
+        const Vec3 omega = sk.angular_velocity_gcrf_radps;
+        const Vec3 velocity =
+            sk.velocity_gcrf_mps + sk.axes_gcrf * velocity_port_mps + cross(omega, cg - sk.position_gcrf_m);
+        const math::Quat q = math::Quat::from_matrix(r);
+        session.place_body(chaser, {cg, velocity, q, q.inverse_rotate(omega)}, t0);
+        session.add_station(depot_config(depot_propellant_kg), depot, t0);
+        session.set_attitude_mode(gnc::lvlh_hold(gnc::lvlh_attitude_gcrf({cg, velocity}).conjugate() * q));
+    }
+    // Advances until `done` or `limit_s`; returns the elapsed seconds.
+    template <class Done>
+    double fly(Done done, double limit_s, double step_s = 1.0) {
+        double t = 0.0;
+        while (t < limit_s && !done()) {
+            session.advance_to(session.epoch() + step_s);
+            t += step_s;
+        }
+        return t;
+    }
 };
 
 }  // namespace starsim::refuelling_test

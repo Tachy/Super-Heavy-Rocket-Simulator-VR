@@ -38,11 +38,9 @@ double DockingSim::coast_limit_s(const vehicle::FlightBody& chaser, const vehicl
         }
         for (const auto& b : shape_.boxes) clearance = std::min(clearance, contact::distance_to_box(b, cg_station));
         clearance -= reach;
-        const auto& ip = mechanism_.parameters().interface;
         const auto ck = vehicle::port_kinematics(chaser, chaser_port_);
         const auto sk = vehicle::port_kinematics(station, station_port_);
-        clearance = std::min(clearance, norm(ck.position_gcrf_m - sk.position_gcrf_m) -
-                                            (ip.ring_extension_m + 2.0 * ip.petal_height_m + ip.interface_radius_m));
+        clearance = std::min(clearance, norm(ck.position_gcrf_m - sk.position_gcrf_m) - mechanism_.reach_m());
     }
     if (clearance <= 0.0) return 0.0;
     const math::Vec3 omega_s = ss.attitude.rotate(ss.angular_velocity_body_radps);

@@ -19,10 +19,12 @@ struct StationCollisionParameters {
     double stiffness_n_per_m = 1.0e6;  // [E] hull penalty: omega ~9 rad/s on 12 t (stable at 200 Hz)
     double damping_ns_per_m = 1.1e5;   // [E] damping ratio ~0.5
     double check_range_m = 120.0;      // [E] CG distance below which the hull is checked (ISS half span ~55 m + margin)
+    double leg_root_station_m = 4.0;   // [E] leg strut root above the stage bottom (HLS legs)
 };
 
 // Vehicle body frame (x from the bottom of stage 0): rings every ring_spacing_m over each stage at half its diameter,
-// tapering linearly to half its hull_top_diameter_m; the top stage ends port_clearance_m below its docking port.
+// tapering linearly to half its hull_top_diameter_m; the top stage ends port_clearance_m below a nose docking port
+// (a dorsal port, the refuelling ships, does not cut the hull). Landing legs add points along their struts.
 std::vector<math::Vec3> hull_sample_points(const config::VehicleConfig& vehicle, const StationCollisionParameters& p);
 
 struct StationCapsule {

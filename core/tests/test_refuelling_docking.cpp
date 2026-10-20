@@ -16,8 +16,11 @@
 #include "starsim/gnc/proximity_guidance.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/contact/probe_drogue_interface.hpp"
+#include "starsim/contact/probe_drogue_mechanism.hpp"
+#include "starsim/contact/station_collision.hpp"
 #include "starsim/frames/lvlh.hpp"
 #include "starsim/sim/station_limits.hpp"
+#include "starsim/vehicle/port_mating.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 #include "test_support.hpp"
 
@@ -340,4 +343,144 @@ TEST_CASE("Probe/drogue contact: a head beside the mouth strikes the plate, no l
                                       p.extension_m, p);
     REQUIRE(c.any_contact);
     CHECK(std::abs(c.torque_port_nm.y) > 0.0);
+}
+
+TEST_CASE("IDSS reach and contact plane are unchanged by the generalised mechanism", "[refuelling][docking]") {
+    const contact::DockingMechanism idss;
+    CHECK(idss.full_extension_m() == 0.30);
+    CHECK(idss.first_contact_m() == Catch::Approx(0.70));
+    CHECK(idss.reach_m() == Catch::Approx(0.70 + 1.2));
+}
+
+namespace {
+
+contact::DockingMechanism depot_mechanism() {
+    const auto tanker = config::load_vehicle(config_dir, "starship_tanker");
+    const auto depot = config::load_vehicle(config_dir, "starship_depot");
+    return contact::DockingMechanism(contact::probe_drogue_mechanism(tanker.stages.back().docking_ports.front(),
+                                                                     depot.stages.back().docking_ports.front()));
+}
+
+// Relative 1-D dynamics of a 490 t tanker against a 1,600 t depot at 200 Hz, centred, from 2 cm before the first
+// touch at `closing_mps`, until `done` or `limit_s`; returns the elapsed seconds.
+template <class Done>
+double push_in(contact::DockingMechanism& m, double closing_mps, double limit_s, Done done) {
+    const double mc = 490.0e3, ms = 1600.0e3, mu = mc * ms / (mc + ms), dt = 0.005;
+    double x = m.first_contact_m() + 0.02, v = -closing_mps;
+    double t = 0.0;
+    for (; t < limit_s && !done(); t += dt) {
+        const auto w = m.update(t, {{x, 0.0, 0.0}, {v, 0.0, 0.0}, mated_axes, {}}, mc, 1.0e8, dt);
+        v += w.force_port_n.x / mu * dt;
+        x += v * dt;
+    }
+    return t;
+}
+
+}  // namespace
+
+TEST_CASE("Probe/drogue mechanism: 0.10 m/s soft capture within the loads, retraction, latches, docked",
+          "[refuelling][docking]") {
+    auto m = depot_mechanism();
+    CHECK(m.first_contact_m() == Catch::Approx(0.80));
+    const double t = push_in(m, 0.10, 1500.0, [&] { return m.phase() == contact::DockingPhase::Docked; });
+    INFO(m.status());
+    CHECK(m.phase() == contact::DockingPhase::Docked);
+    CHECK(m.peaks().compression_n < m.parameters().dynamic_compression_limit_n);
+    CHECK(m.peaks().compression_n > 10.0e3);
+    CHECK(t < 20.0 * 60.0);  // soft capture -> docked: attenuation 120 s + retraction 300 s + latches 180 s
+}
+
+TEST_CASE("Probe/drogue mechanism: 0.25 m/s overloads", "[refuelling][docking]") {
+    auto m = depot_mechanism();
+    push_in(m, 0.25, 60.0, [&] { return m.phase() == contact::DockingPhase::Failed; });
+    CHECK(m.phase() == contact::DockingPhase::Failed);
+    CHECK(m.failure() == "Überlast");
+}
+
+TEST_CASE("Hull sampling: the tanker's whole hull clears the mated depot by ~1 m, 1.5 m closer it collides",
+          "[refuelling][docking]") {
+    const auto tanker = config::top_stage_config(config::load_vehicle(config_dir, "starship_tanker"));
+    const auto depot = config::top_stage_config(config::load_vehicle(config_dir, "starship_depot"));
+    const contact::StationCollisionParameters cp;
+    const auto points = contact::hull_sample_points(tanker, cp);
+    double top = 0.0;
+    for (const auto& q : points) top = std::max(top, q.x);
+    CHECK(top > 50.0);  // not cut at the dorsal port (x = 20 m)
+    const auto t = vehicle::mated_stage_transform(tanker.stages.back().docking_ports.front(),
+                                                  depot.stages.back().docking_ports.front());
+    const auto shape = contact::station_shape(depot);
+    std::vector<Vec3> mated, closer, zero(points.size());
+    for (const auto& q : points) {
+        mated.push_back(t.apply(q));
+        closer.push_back(t.apply(q) - Vec3{0.0, 0.0, 1.5});  // towards the depot axis (its dorsal side is +z)
+    }
+    CHECK_FALSE(contact::hull_contact(shape, mated, zero, {}, cp).any);
+    CHECK(contact::hull_contact(shape, closer, zero, {}, cp).any);
+}
+
+TEST_CASE("HLS legs clear the depot when mated (r1 open point)", "[refuelling][docking][hls]") {
+    const auto hls = config::top_stage_config(config::load_vehicle(config_dir, "starship_hls"));
+    const auto depot = config::top_stage_config(config::load_vehicle(config_dir, "starship_depot"));
+    const contact::StationCollisionParameters cp;
+    const auto points = contact::hull_sample_points(hls, cp);
+    double reach = 0.0;
+    for (const auto& q : points) reach = std::max(reach, std::hypot(q.y, q.z));
+    CHECK(reach == Catch::Approx(12.0).margin(0.01));  // the leg feet are sampled
+    const auto t = vehicle::mated_stage_transform(hls.stages.back().docking_ports.front(),
+                                                  depot.stages.back().docking_ports.front());
+    std::vector<Vec3> mated, zero(points.size());
+    for (const auto& q : points) mated.push_back(t.apply(q));
+    const auto contact = contact::hull_contact(contact::station_shape(depot), mated, zero, {}, cp);
+    CHECK_FALSE(contact.any);
+}
+
+TEST_CASE("Tanker from Waypoint 2 to hard capture at the depot", "[refuelling][docking][proximity]") {
+    test::spice_session();
+    refuelling_test::TankerAtPort f({20.0, 0.0, 0.0});
+    gnc::ProximityParameters p;
+    p.start_waypoint = 2;
+    REQUIRE(f.session.start_proximity("transfer_dock", p));
+    const double t = f.fly([&] { return f.session.docked(); }, 3600.0);
+    INFO(f.session.docking_status() << " / " << f.session.proximity_status());
+    REQUIRE(f.session.docked());
+    CHECK(t < 40.0 * 60.0);
+    const auto loads = *f.session.docking_loads();
+    CHECK(loads.compression_n < 1.0e5);
+    const auto merge = f.session.docking_merge_record();
+    CHECK(norm(merge.momentum_after - merge.momentum_before) < 1e-6 * norm(merge.momentum_before));
+    const auto& attached = f.session.body(1).vehicle().attached_mass();
+    REQUIRE(attached);
+    CHECK(attached->mass_kg == Catch::Approx(f.session.body(0).vehicle().mass_properties().mass_kg));
+}
+
+TEST_CASE("Tanker at the depot: 0.4 m/s overloads and retreats to Waypoint 2", "[refuelling][docking][proximity]") {
+    test::spice_session();
+    // inside Waypoint 2 the guidance brakes (0.037 m/s^2): it still hits at ~0.36 m/s, joint damper ~175 kN
+    refuelling_test::TankerAtPort f({1.0, 0.0, 0.0}, {-0.40, 0.0, 0.0});
+    gnc::ProximityParameters p;
+    p.start_waypoint = 2;
+    REQUIRE(f.session.start_proximity("transfer_dock", p));
+    f.fly([&] { return f.session.docking_phase() == contact::DockingPhase::Failed; }, 120.0, 0.1);
+    REQUIRE(f.session.docking_phase() == contact::DockingPhase::Failed);
+    f.fly([&] { return f.session.proximity_phase() == gnc::ProximityPhase::Waypoint; }, 1800.0);
+    CHECK(f.session.proximity_phase() == gnc::ProximityPhase::Waypoint);
+    CHECK_THAT(f.session.proximity_status(), Catch::Matchers::ContainsSubstring("Wegpunkt 2"));
+}
+
+TEST_CASE("Tanker undocks from the depot: springs, departure out of the ellipsoid", "[refuelling][docking][slow]") {
+    test::spice_session();
+    refuelling_test::TankerAtPort f({0.0, 0.0, 0.0});
+    // docked at once (ISS i6 scenario start)
+    f.session.set_rendezvous_target(1, "transfer_dock", "transfer_dock");
+    f.session.dock_in_place();
+    REQUIRE(f.session.docked());
+    const double chaser_kg = f.session.body(0).vehicle().mass_properties().mass_kg;
+    REQUIRE(f.session.undock());
+    f.fly([&] { return f.session.departure_phase() == gnc::DeparturePhase::Complete; }, 4.0 * 3600.0, 10.0);
+    CHECK(f.session.departure_phase() == gnc::DeparturePhase::Complete);
+    const auto sep = f.session.docking_separation_record();
+    const double depot_kg = f.session.body(1).vehicle().mass_properties().mass_kg;
+    CHECK(sep.relative_speed_mps ==
+          Catch::Approx(std::sqrt(2.0 * 150.0 * (1.0 / chaser_kg + 1.0 / depot_kg))).epsilon(0.01));
+    CHECK(f.session.docking_status() != "Kollision");
 }

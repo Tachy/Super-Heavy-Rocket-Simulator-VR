@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace starsim::contact {
 
@@ -37,7 +38,28 @@ double separation_relative_speed_mps(const DockingMechanismParameters& p, double
     return std::sqrt(2.0 * p.separation_energy_j / mu);
 }
 
-DockingMechanism::DockingMechanism(DockingMechanismParameters p) : p_(p), extension_m_(p.interface.ring_extension_m) {}
+DockingMechanism::DockingMechanism(DockingMechanismParameters p) : p_(std::move(p)) { extension_m_ = full_extension_m(); }
+
+double DockingMechanism::full_extension_m() const {
+    return p_.probe_drogue ? p_.probe_drogue->extension_m : p_.interface.ring_extension_m;
+}
+
+double DockingMechanism::first_contact_m() const {
+    if (p_.probe_drogue) return p_.probe_drogue->cone_depth_m + p_.probe_drogue->extension_m;
+    return p_.interface.ring_extension_m + 2.0 * p_.interface.petal_height_m;
+}
+
+double DockingMechanism::reach_m() const {
+    if (!p_.probe_drogue) return first_contact_m() + p_.interface.interface_radius_m;
+    double lateral = 0.0;
+    for (const auto& q : p_.probe_drogue->probes_m) lateral = std::max(lateral, std::hypot(q.y, q.z));
+    return first_contact_m() + lateral + p_.probe_drogue->mouth_radius_m;
+}
+
+InterfaceContact DockingMechanism::contact(const DockingPose& pose, double extension_m) const {
+    return p_.probe_drogue ? probe_drogue_contact(pose, extension_m, *p_.probe_drogue)
+                           : docking_interface_contact(pose, extension_m, p_.interface);
+}
 
 void DockingMechanism::enter(DockingPhase phase, std::string status, double t_s) {
     phase_ = phase;
@@ -48,11 +70,11 @@ void DockingMechanism::enter(DockingPhase phase, std::string status, double t_s)
 
 void DockingMechanism::fail(std::string reason, double t_s) {
     failure_ = reason;
-    extension_m_ = p_.interface.ring_extension_m;
+    extension_m_ = full_extension_m();
     enter(DockingPhase::Failed, "Fangen fehlgeschlagen: " + reason, t_s);
 }
 
-void DockingMechanism::warn(const char* text) {
+void DockingMechanism::warn(const std::string& text) {
     if (std::find(warnings_.begin(), warnings_.end(), text) == warnings_.end()) warnings_.emplace_back(text);
 }
 
@@ -71,6 +93,8 @@ bool DockingMechanism::start_docked(double t_s) {
         return false;
     }
     extension_m_ = 0.0;
+    kb_ = p_.joint_bending_stiffness_nm_per_rad;  // no joint runs while docked; defined all the same
+    kt_ = p_.joint_torsion_stiffness_nm_per_rad;
     enter(DockingPhase::Docked, "angedockt: " + std::to_string(p_.hook_count) + " Haken geschlossen", t_s);
     return true;
 }
@@ -102,15 +126,15 @@ DockingWrench DockingMechanism::joint(const DockingPose& pose) const {
     if (over_stroke > 0.0) force.x += p_.end_stop_stiffness_n_per_m * over_stroke;
     const math::Vec3 theta = rotation_vector(pose.chaser_axes * transpose(mated_axes));  // x: roll (torsion)
     const math::Vec3& w = pose.angular_rate_radps;
-    const double kb = p_.joint_bending_stiffness_nm_per_rad, kt = p_.joint_torsion_stiffness_nm_per_rad;
+    const double kb = kb_, kt = kt_;
     const math::Vec3 torque{-kt * theta.x - ct_ * w.x, -kb * theta.y - cb_ * w.y, -kb * theta.z - cb_ * w.z};
     return {force, pose.position_m, torque};
 }
 
 DockingWrench DockingMechanism::before_capture(double t, const DockingPose& pose, double m, double inertia) {
-    extension_m_ = p_.interface.ring_extension_m;  // before capture the ring is fully extended
-    const auto c = docking_interface_contact(pose, extension_m_, p_.interface);
-    DockingWrench w{c.force_port_n, c.ring_centre_m, {}};
+    extension_m_ = full_extension_m();  // before capture the ring / the probes are fully extended
+    const auto c = contact(pose, extension_m_);
+    DockingWrench w{c.force_port_n, c.ring_centre_m, c.torque_port_nm};
     if (phase_ == DockingPhase::Failed) return w;  // rebounding; rearm() starts a new approach
     if (c.any_contact) {
         last_contact_s_ = t;
@@ -123,13 +147,15 @@ DockingWrench DockingMechanism::before_capture(double t, const DockingPose& pose
     if (c.latch_ready) {
         k_ = m * p_.joint_frequency_radps * p_.joint_frequency_radps;
         c_ = 2.0 * p_.joint_damping_ratio * m * p_.joint_frequency_radps;
-        cb_ = 2.0 * p_.joint_damping_ratio * std::sqrt(p_.joint_bending_stiffness_nm_per_rad * inertia);
-        ct_ = 2.0 * p_.joint_damping_ratio * std::sqrt(p_.joint_torsion_stiffness_nm_per_rad * inertia);
+        const double wr = p_.joint_rotation_frequency_radps;
+        kb_ = wr > 0.0 ? inertia * wr * wr : p_.joint_bending_stiffness_nm_per_rad;
+        kt_ = wr > 0.0 ? inertia * wr * wr : p_.joint_torsion_stiffness_nm_per_rad;
+        cb_ = 2.0 * p_.joint_damping_ratio * std::sqrt(kb_ * inertia);
+        ct_ = 2.0 * p_.joint_damping_ratio * std::sqrt(kt_ * inertia);
         enter(DockingPhase::SoftCapture, "Weichfang: Verriegelung eingerastet", t);
         return joint(pose);
     }
-    if (t - last_contact_s_ > p_.bounce_confirm_s &&
-        c.ring_centre_m.x > 2.0 * p_.interface.petal_height_m + p_.bounce_gap_m) {
+    if (t - last_contact_s_ > p_.bounce_confirm_s && c.gap_m > p_.bounce_gap_m) {
         fail(tips_only_ ? "Versatz zu groß" : (ring_blocked_ ? "Winkel zu groß" : "abgeprallt"), t);
     }
     return w;
@@ -196,10 +222,10 @@ void DockingMechanism::record_loads(const DockingWrench& w, double t, double dt)
     peaks_.shear_n = std::max(peaks_.shear_n, std::hypot(f.y, f.z));
     peaks_.bending_nm = std::max(peaks_.bending_nm, std::hypot(moment.y, moment.z));
     peaks_.torsion_nm = std::max(peaks_.torsion_nm, std::abs(moment.x));
-    if (peaks_.tension_n > p_.tension_limit_n) warn("Zuglast über IDSS-Grenze");
-    if (peaks_.shear_n > p_.shear_limit_n) warn("Querlast über IDSS-Grenze");
-    if (peaks_.bending_nm > p_.bending_limit_nm) warn("Biegemoment über IDSS-Grenze");
-    if (peaks_.torsion_nm > p_.torsion_limit_nm) warn("Torsionsmoment über IDSS-Grenze");
+    if (peaks_.tension_n > p_.tension_limit_n) warn("Zuglast über " + p_.limit_name);
+    if (peaks_.shear_n > p_.shear_limit_n) warn("Querlast über " + p_.limit_name);
+    if (peaks_.bending_nm > p_.bending_limit_nm) warn("Biegemoment über " + p_.limit_name);
+    if (peaks_.torsion_nm > p_.torsion_limit_nm) warn("Torsionsmoment über " + p_.limit_name);
     static_over_s_ = compression > p_.static_compression_limit_n ? static_over_s_ + dt : 0.0;
     if (compression > p_.dynamic_compression_limit_n || static_over_s_ > p_.static_after_s) fail("Überlast", t);
 }

@@ -1,4 +1,5 @@
-// Docking of the controlled vehicle at the station (ISS i5): the IDSS mechanism (sim::DockingSim) on the session tick,
+// Docking of the controlled vehicle at the station (ISS i5): the docking mechanism (sim::DockingSim: IDSS, or the four
+// probes into four drogues of the refuelling ships, refuelling r3) on the session tick,
 // the merge into the compound at hard capture, the docked hold, and the failure paths (failed capture, collision).
 //
 // Design decisions:
@@ -19,6 +20,7 @@
 #include <limits>
 #include <stdexcept>
 
+#include "starsim/contact/probe_drogue_mechanism.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/docking_port.hpp"
 
@@ -57,13 +59,17 @@ void FlightSession::arm_docking() {
     const auto& station = bodies_[*station_index_].body->vehicle();
     const auto* cp = find_port(chaser, rendezvous_->chaser_port);
     const auto* sp = find_port(station, rendezvous_->target_port);
-    // The IDSS mechanism (i5) only; the probe/drogue mechanism comes with refuelling r3.
-    if (!cp || !sp || cp->mechanism != config::DockingMechanism::Idss ||
-        sp->mechanism != config::DockingMechanism::Idss || cp->soft_capture != config::SoftCaptureMode::Active ||
+    // Active chaser port against a passive station port of the same mechanism (vehicle::port_mismatch): IDSS (ISS i5)
+    // or the four probes into four drogues (refuelling r3).
+    if (!cp || !sp || cp->mechanism != sp->mechanism || cp->soft_capture != config::SoftCaptureMode::Active ||
         sp->soft_capture != config::SoftCaptureMode::Passive) {
         return;
     }
-    docking_.emplace(rendezvous_->chaser_port, rendezvous_->target_port, stages_of(chaser), stages_of(station));
+    const auto parameters = cp->mechanism == config::DockingMechanism::ProbeDrogue
+                                ? contact::probe_drogue_mechanism(*cp, *sp)
+                                : contact::DockingMechanismParameters{};
+    docking_.emplace(rendezvous_->chaser_port, rendezvous_->target_port, stages_of(chaser), stages_of(station),
+                     parameters);
     docking_status_ = docking_->mechanism().status();
 }
 
@@ -167,10 +173,9 @@ void FlightSession::docking_after_tick() {
             attitude_mode_ = proximity_attitude_mode();
         }
     }
-    if (phase == contact::DockingPhase::Failed) {  // re-arm once the chaser is back beyond the petal tips
-        const auto& ip = m.parameters().interface;
+    if (phase == contact::DockingPhase::Failed) {  // re-arm once the chaser is back beyond the first-contact plane
         const auto pose = docking_->pose(*bodies_[controlled_].body, *bodies_[*station_index_].body);
-        if (pose.position_m.x > ip.ring_extension_m + 2.0 * ip.petal_height_m + m.parameters().rearm_distance_m) m.rearm();
+        if (pose.position_m.x > m.first_contact_m() + m.parameters().rearm_distance_m) m.rearm();
     }
     sync_docked();
     if (docking_debug_) docking_diagnostics();

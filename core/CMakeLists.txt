@@ -127,6 +127,7 @@ add_library(starsim_core STATIC
     src/contact/landing_legs.cpp
     src/contact/docking_interface.cpp
     src/contact/probe_drogue_interface.cpp
+    src/contact/probe_drogue_mechanism.cpp
     src/contact/docking_mechanism.cpp
     src/contact/station_collision.cpp
     src/optim/sparse_matrix.cpp
