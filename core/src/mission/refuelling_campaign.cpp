@@ -94,7 +94,8 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
         advance(depot, slot->arrival_s, in, m, &r.fill);
         CampaignTanker t;
         t.flight = *slot;
-        const double offered = std::max(0.0, slot->delivered_kg);
+        const bool delivers = slot->delivered_kg > 0.0;  // false for NaN as well
+        const double offered = delivers ? slot->delivered_kg : 0.0;
         const double vent = offered * in.transfer_vent_fraction;
         t.received_kg = std::min(offered - vent, in.depot_capacity_kg - depot.propellant_kg);
         depot.losses.transfer_vent_kg += vent;
@@ -104,7 +105,7 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
         r.fill.push_back({depot.t_s, depot.propellant_kg});
         last_launch_s = slot->launch_s;
         last_arrival_s = slot->arrival_s;
-        if (slot->delivered_kg <= 0.0) {
+        if (!delivers) {
             return finish("Tanker liefert nichts: " + tonnes(slot->delivered_kg) +
                           " nach Aufstieg, Phasenflug und Reserve");
         }

@@ -1,5 +1,6 @@
 // Refuelling r6: campaign calculator, its setup from config, the measured-numbers file.
 #include <cmath>
+#include <cstdio>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -11,6 +12,9 @@
 #include "starsim/mission/refuelling_campaign.hpp"
 #include "starsim/mission/refuelling_costs.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
+#include "starsim/sim/refuelling_campaign_setup.hpp"
+#include "starsim/spice/spice_adapters.hpp"
+#include "test_support.hpp"
 
 using namespace starsim;
 
@@ -146,6 +150,12 @@ TEST_CASE("Campaign refusals", "[refuelling][campaign]") {
         CHECK(r.reason.find("liefert nichts") != std::string::npos);
         CHECK(r.tanker_flights == 1);
     }
+    SECTION("a NaN delivery counts as nothing") {
+        const auto r = mission::refuelling_campaign(simple_inputs(), constant_models(0.0, std::nan(""), 2.0));
+        CHECK_FALSE(r.closes);
+        CHECK(r.reason.find("liefert nichts") != std::string::npos);
+        CHECK(r.tankers.front().depot_after_kg == Catch::Approx(50e3));
+    }
     SECTION("no window") {
         auto m = constant_models(1.0, 100.0, 2.0);
         m.next_tanker = [](double) { return std::optional<mission::CampaignFlight>{}; };
@@ -185,4 +195,89 @@ TEST_CASE("Campaign: a full depot clamps the delivery", "[refuelling][campaign]"
     REQUIRE(r.closes);
     CHECK(r.tankers.back().depot_after_kg == Catch::Approx(320e3));
     CHECK(r.tankers.back().received_kg == Catch::Approx(70e3));  // 250 t + 70 t fills 320 t
+}
+
+namespace {
+struct Sources {
+    bool spice = (test::spice_session(), true);
+    const spice::SpiceEphemeris ephemeris;
+    const spice::SpiceOrientation earth = spice::SpiceOrientation::earth();
+    const spice::SpiceOrientation moon = spice::SpiceOrientation::moon_mean_earth();
+    const spice::SpiceTimeConverter clock;
+    sim::CampaignSources get() const { return {ephemeris, earth, moon, clock, config_dir}; }
+};
+
+void print(const char* tag, const sim::CampaignReport& r) {
+    std::printf("[r6] %s: %s, %d tankers, %.1f d, demand %.1f t (HLS needs %.1f t, dry %.1f t, docks with %.1f t), "
+                "base %.1f t, altitude %.2f t, phasing ref %.1f h, losses boil %.1f / drag %.2f / gas %.2f / vent %.1f t"
+                "%s%s\n",
+                tag, r.result.closes ? "closes" : "open", r.result.tanker_flights, r.result.duration_s / 86400.0,
+                r.demand_kg / 1e3, r.hls_required_mass_kg / 1e3, r.hls_dry_mass_kg / 1e3,
+                r.hls_propellant_at_docking_kg / 1e3, r.tanker_base_delivered_kg / 1e3, r.altitude_cost_kg / 1e3,
+                r.reference_phasing_s / 3600.0, r.result.losses.boil_off_kg / 1e3,
+                r.result.losses.drag_makeup_kg / 1e3, r.result.losses.attitude_gas_kg / 1e3,
+                r.result.losses.transfer_vent_kg / 1e3, r.result.reason.empty() ? "" : " - ",
+                r.result.reason.c_str());
+    for (const auto& t : r.result.tankers) {
+        std::printf("[r6]   launch %.2f d, arrival %.2f d, delivered %.1f t, depot %.1f t\n",
+                    t.flight.launch_s / 86400.0, t.flight.arrival_s / 86400.0, t.flight.delivered_kg / 1e3,
+                    t.depot_after_kg / 1e3);
+    }
+}
+}  // namespace
+
+TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[refuelling][campaign][slow]") {
+    const Sources s;
+    const auto r = sim::plan_refuelling_campaign(s.get(), {});
+    print("reference", r);
+    REQUIRE(r.result.closes);
+    // the first tanker flies the r5 window (79.8 h after the earliest); its schedule runs from the separation at
+    // 120 km to Waypoint 0 within the 48 h limit (the flown 39.7 h count from the Rendezvous mark after the raise)
+    REQUIRE_FALSE(r.result.tankers.empty());
+    CHECK(r.result.tankers.front().flight.launch_s / 3600.0 == Catch::Approx(79.8).margin(0.2));
+    CHECK(r.reference_phasing_s / 3600.0 > 39.7);
+    CHECK(r.reference_phasing_s / 3600.0 < 48.0);
+    CHECK(r.altitude_cost_kg == Catch::Approx(0.0).margin(1e-6));
+    CHECK(r.tanker_base_delivered_kg == Catch::Approx(67.5e3).margin(1.0));
+    // the HLS needs less than full tanks, more than it docks with
+    CHECK(r.hls_required_mass_kg - r.hls_dry_mass_kg < r.hls_capacity_kg);
+    CHECK(r.demand_kg > 0.0);
+    // plausibility only (public 4 to high teens; not tuned): a two-digit count is expected from ~1,400 t / ~66 t
+    CHECK(r.result.tanker_flights >= 4);
+    CHECK(r.result.tanker_flights <= 40);
+    for (size_t k = 1; k < r.result.tankers.size(); ++k) {
+        CHECK(r.result.tankers[k].flight.arrival_s >= r.result.tankers[k - 1].flight.arrival_s + 6.0 * 3600.0);
+    }
+}
+
+TEST_CASE("Campaign levers move the count the physical way", "[refuelling][campaign][slow]") {
+    const Sources s;
+    const auto base = sim::plan_refuelling_campaign(s.get(), {});
+    sim::CampaignLevers higher;
+    higher.depot_height_m = 300.0e3;
+    const auto h = sim::plan_refuelling_campaign(s.get(), higher);
+    print("300 km", h);
+    CHECK(h.altitude_cost_kg > 0.0);
+    CHECK(h.drag_makeup_kgps < base.drag_makeup_kgps);
+    sim::CampaignLevers lighter;
+    lighter.tanker_dry_mass_kg = 199.0e3;
+    const auto l = sim::plan_refuelling_campaign(s.get(), lighter);
+    print("dry -10 t", l);
+    CHECK(l.tanker_base_delivered_kg == Catch::Approx(base.tanker_base_delivered_kg + 9.9e3).margin(1.0));
+    CHECK(l.result.tanker_flights <= base.result.tanker_flights);
+    sim::CampaignLevers poor;
+    poor.depot_insulation_scale = 0.1;
+    const auto p = sim::plan_refuelling_campaign(s.get(), poor);
+    print("insulation x0.1", p);
+    CHECK(p.result.losses.boil_off_kg > base.result.losses.boil_off_kg);
+}
+
+TEST_CASE("Campaign setup refusals", "[refuelling][campaign]") {
+    const Sources s;
+    sim::CampaignLevers greedy;
+    greedy.tanker_reserve_kg = 200.0e3;  // keeps more than it carries
+    const auto r = sim::plan_refuelling_campaign(s.get(), greedy);
+    INFO(r.result.reason);
+    CHECK_FALSE(r.result.closes);
+    CHECK(r.result.reason.find("liefert nichts") != std::string::npos);
 }

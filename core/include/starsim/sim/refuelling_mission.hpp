@@ -5,6 +5,7 @@
 
 #include <filesystem>
 
+#include "starsim/config/mission_config.hpp"
 #include "starsim/config/refuelling_mission_config.hpp"
 #include "starsim/frames/body_orientation.hpp"
 #include "starsim/gnc/deorbit_planner.hpp"
@@ -29,6 +30,12 @@ mission::StationStateAt depot_orbit(const config::DepotOrbitConfig& depot, time:
 // orbit with the periapsis at the start (r3's phasing start).
 math::StateVector phasing_start_state(const math::StateVector& station, double behind_rad, double periapsis_height_m,
                                       double apoapsis_height_m);
+// The stage's main oxidizer and fuel tanks filled with `kg` in the ratio of their capacities (capped at capacity).
+void fill_main_tanks(config::StageConfig& stage, double kg);
+// The launch window parameters of a pad-start refuelling flight (as start_refuelling_flight_mission flies them; r6:
+// the campaign's windows).
+mission::LaunchWindowParameters refuelling_window_parameters(const config::RefuellingFlightMission& mission,
+                                                             const config::AscentMission& ascent);
 // A ship return mission's [deorbit] block as planner parameters; the pass search spans the tanker reserve's preview
 // (FlightSession::tanker_reserve_search_s: from the 26.5 deg depot orbit no pass came within reach in 48 h, r4).
 gnc::DeorbitParameters ship_deorbit_parameters(const config::ShipReturnDeorbit& deorbit);

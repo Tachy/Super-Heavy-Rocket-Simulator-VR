@@ -1,0 +1,268 @@
+#include "starsim/sim/refuelling_campaign_setup.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <stdexcept>
+
+#include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/mission_config.hpp"
+#include "starsim/config/refuelling_reference.hpp"
+#include "starsim/config/vehicle_config.hpp"
+#include "starsim/environment/atmosphere.hpp"
+#include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/lunar_ascent_guidance.hpp"
+#include "starsim/math/constants.hpp"
+#include "starsim/mission/lunar_budget.hpp"
+#include "starsim/mission/refuelling_costs.hpp"
+#include "starsim/mission/tanker_reserve.hpp"
+#include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/lunar_landing_mission.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
+#include "starsim/vehicle/boil_off.hpp"
+#include "starsim/vehicle/vehicle.hpp"
+
+namespace starsim::sim {
+
+namespace {
+
+constexpr double gm = constants::earth_gm_m3ps2;
+constexpr double equatorial_radius_m = constants::wgs84_semi_major_axis_m;
+constexpr double deorbit_perigee_height_m = 50.0e3;
+// [E] the campaign's window search from each earliest launch: the depot phase over Starbase's crossings repeats in
+// weeks (the missions' 12 days found no second 200 km window; at 300 km they came 5 and 12 days apart)
+constexpr double campaign_window_search_s = 60.0 * 86400.0;  // [E] the return's entry perigee; only differences count
+// the single Raptor of phasing, deorbit (r3, r5) and the depot's reboost [E]
+constexpr const char* raptor_group = "sea_level_3";
+
+// Of the top stage's raptor_group (engine groups are qualified by their stage: "ship/sea_level_3").
+double exhaust_velocity_mps(const vehicle::Vehicle& v) {
+    const std::string group = v.stages().back().config.id + "/" + raptor_group;
+    return gnc::groups_vacuum_isp_s(v, {group}) * constants::standard_gravity_mps2;
+}
+
+// The vehicle's top stage alone, tanks as configured (full: built empty, its engines would count as starved and
+// exhaust_velocity_mps would read 0).
+config::VehicleConfig top_stage(const std::filesystem::path& dir, const std::string& id) {
+    return config::top_stage_config(config::load_vehicle(dir, id));
+}
+
+// The main tanks at `kg`, split by their capacities (as fill_main_tanks).
+void set_main(vehicle::Vehicle& v, double kg) {
+    double capacity = 0.0;
+    for (const auto& t : v.stages().back().tanks) {
+        if (t.config.role == config::TankRole::Main) capacity += t.config.capacity_kg;
+    }
+    const size_t stage = v.stages().size() - 1;
+    std::vector<std::pair<std::string, double>> masses;
+    for (const auto& t : v.stages().back().tanks) {
+        if (t.config.role == config::TankRole::Main) masses.emplace_back(t.config.id, kg * t.config.capacity_kg / capacity);
+    }
+    for (const auto& [id, mass] : masses) v.set_tank_mass(stage, id, mass);
+}
+
+double main_capacity_kg(const vehicle::Vehicle& v) {
+    double capacity = 0.0;
+    for (const auto& t : v.stages().back().tanks) {
+        if (t.config.role == config::TankRole::Main) capacity += t.config.capacity_kg;
+    }
+    return capacity;
+}
+
+// Orbit-averaged boil-off (both propellants) with the main tanks at `main_kg`; the vehicle flies the depot's attitude
+// (identity in LVLH: nose along +V, dorsal to nadir).
+double orbit_boil_off_kgps(vehicle::Vehicle& v, double main_kg, const math::StateVector& orbit,
+                           const math::Vec3& sun_gcrf_m) {
+    set_main(v, main_kg);
+    const auto rate = vehicle::orbit_average_boil_off(v, orbit, {}, sun_gcrf_m);
+    return rate.oxidizer_kgps + rate.fuel_kgps;
+}
+
+std::string tonnes(double kg) {
+    char buffer[32];
+    std::snprintf(buffer, sizeof buffer, "%.1f t", kg / 1000.0);
+    return buffer;
+}
+
+struct HlsDemand {
+    std::string refusal;  // German; empty when planned
+    double required_mass_kg = 0.0, dry_mass_kg = 0.0, capacity_kg = 0.0, headers_kg = 0.0;
+};
+
+// The smallest HLS mass that closes the lunar mission's budget from its planned outbound flight (plan decision 2).
+HlsDemand hls_demand(const CampaignSources& src, const config::LunarLandingMission& lunar, time::Epoch lunar_epoch,
+                     const config::VehicleConfig& hls_full) {
+    HlsDemand d;
+    FlightSession session(src.ephemeris, src.earth, src.config_dir, environment::PointMassGravityConfig{}, &src.moon);
+    try {
+        place_lunar_landing_mission(session, lunar, src.config_dir, lunar_epoch, &hls_full);
+    } catch (const std::runtime_error& e) {  // no plane, terrain files missing (German)
+        d.refusal = e.what();
+        return d;
+    }
+    if (!session.plan_lunar_outbound(lunar_outbound_parameters(lunar, session.gravity(), session.ephemeris(),
+                                                               lunar_epoch))) {
+        d.refusal = session.lunar_status();
+        return d;
+    }
+    const auto& v = session.body(session.controlled_index()).vehicle();
+    const auto& sets = lunar_landing_setup(lunar).guidance.braking_sets;
+    const auto legs = lunar_mission_legs(lunar, *session.lunar_outbound_plan(), gnc::groups_vacuum_isp_s(v, sets.front()),
+                                         gnc::groups_vacuum_isp_s(v, sets.back()));
+    d.capacity_kg = v.propellant_kg();
+    d.headers_kg = v.propellant_kg() - v.main_propellant_kg();
+    d.dry_mass_kg = v.mass_properties().mass_kg - v.propellant_kg();
+    d.required_mass_kg = mission::lunar_budget_required_mass(d.dry_mass_kg, lunar.reserve_kg, legs);
+    return d;
+}
+
+}  // namespace
+
+CampaignReport plan_refuelling_campaign(const CampaignSources& src, const CampaignLevers& levers) {
+    CampaignReport report;
+    const auto& dir = src.config_dir;
+    const auto ref = config::load_refuelling_reference(dir);
+    const auto tanker_mission = config::load_refuelling_flight_mission(dir, ref.tanker.mission);
+    const auto hls_mission = config::load_refuelling_flight_mission(dir, ref.hls.mission);
+    const auto tanker_ascent = config::load_ascent_mission(dir, tanker_mission.ascent_id);
+    const auto hls_ascent = config::load_ascent_mission(dir, hls_mission.ascent_id);
+    const auto site = config::load_launch_site(dir, tanker_ascent.site_id);
+    const auto hls_site = config::load_launch_site(dir, hls_ascent.site_id);
+    const time::Epoch start = src.time.from_utc(tanker_mission.earliest_utc);
+    report.start = start;
+    const auto sun_at = [&](time::Epoch t) { return src.ephemeris.state_gcrf(ephemeris::Body::Sun, t).position_m; };
+    const auto pad_of = [](const config::LaunchSiteConfig& s) {
+        return frames::geodetic_to_fixed({s.latitude_rad, s.longitude_rad, s.height_m});
+    };
+
+    // Depot: tanker_flight's [depot] at the altitude lever (plan decision 7)
+    auto depot_cfg = tanker_mission.depot;
+    const double reference_height_m = depot_cfg.height_m;
+    depot_cfg.height_m = levers.depot_height_m.value_or(reference_height_m);
+    const double dh = depot_cfg.height_m - reference_height_m;
+    report.depot_height_m = depot_cfg.height_m;
+    const auto depot_at = depot_orbit(depot_cfg, start, src.earth);
+    const auto reference_depot_at = depot_orbit(tanker_mission.depot, start, src.earth);
+    auto depot_vehicle_cfg = top_stage(dir, depot_cfg.vehicle_id);
+    if (auto& thermal = depot_vehicle_cfg.stages.back().thermal) {
+        thermal->hull.wall_resistance_m2k_w *= levers.depot_insulation_scale;
+    }
+    vehicle::Vehicle depot(depot_vehicle_cfg, dir);
+    report.depot_capacity_kg = main_capacity_kg(depot);
+
+    // Drag makeup end-on (plan decision 4)
+    const double r_ref = equatorial_radius_m + reference_height_m;
+    const double r_new = equatorial_radius_m + depot_cfg.height_m;
+    const double diameter_m = depot_vehicle_cfg.stages.back().diameter_m;
+    report.drag_makeup_kgps = mission::drag_makeup_kgps(
+        environment::Us76Atmosphere{}.at(depot_cfg.height_m).density_kg_m3, std::sqrt(gm / r_new),
+        FlightSession::dragon_free_molecular_cd, constants::pi * 0.25 * diameter_m * diameter_m,
+        exhaust_velocity_mps(depot));
+
+    // Tanker net per flight at the reference phasing time (plan decision 3)
+    auto tanker_cfg = top_stage(dir, tanker_ascent.vehicle_id);
+    const double dry_kg = levers.tanker_dry_mass_kg.value_or(ref.tanker.dry_mass_kg);
+    tanker_cfg.stages.back().dry_mass_kg = dry_kg;
+    vehicle::Vehicle tanker(tanker_cfg, dir);
+    const double reserve_kg = levers.tanker_reserve_kg.value_or(ref.tanker.main_at_undock_kg);
+    const double ve_tanker = exhaust_velocity_mps(tanker);
+    set_main(tanker, ref.tanker.residue_after_ascent_kg - ref.tanker.rendezvous_kg);
+    const double docked_mass_kg = tanker.mass_properties().mass_kg;
+    set_main(tanker, reserve_kg);
+    const double return_mass_kg = tanker.mass_properties().mass_kg;
+    const double rp = equatorial_radius_m + deorbit_perigee_height_m;
+    const double dv_up = (dh >= 0.0 ? 1.0 : -1.0) * mission::hohmann_delta_v_mps(r_ref, r_new, gm);
+    const double dv_back = mission::deorbit_delta_v_mps(r_new, rp, gm) - mission::deorbit_delta_v_mps(r_ref, rp, gm);
+    report.altitude_cost_kg = docked_mass_kg * (std::exp(dv_up / ve_tanker) - 1.0) +
+                              return_mass_kg * (std::exp(dv_back / ve_tanker) - 1.0) *
+                                  mission::TankerReserveParameters{}.burn_margin;
+    report.tanker_base_delivered_kg = ref.tanker.delivered_oxidizer_kg + ref.tanker.delivered_fuel_kg +
+                                      (ref.tanker.dry_mass_kg - dry_kg) * ref.tanker.dry_mass_sensitivity +
+                                      (ref.tanker.main_at_undock_kg - reserve_kg) - report.altitude_cost_kg;
+
+    // Windows (plan decision 1): the flown window logic against the depot; phasing orbits shifted with the depot
+    const auto window_parameters = [&](const config::RefuellingFlightMission& m, const config::AscentMission& a) {
+        auto p = refuelling_window_parameters(m, a);
+        p.separation_periapsis_radius_m += dh;
+        p.separation_apoapsis_radius_m += dh;
+        p.phasing.mission_limit_s = levers.phasing_limit_s.value_or(m.mission_limit_s) - m.window.insertion_s;
+        p.search_s = std::max(p.search_s, campaign_window_search_s);
+        return p;
+    };
+    const auto tanker_window = window_parameters(tanker_mission, tanker_ascent);
+    const auto hls_window = window_parameters(hls_mission, hls_ascent);
+    const auto tanker_pad = pad_of(site);
+    const auto hls_pad = pad_of(hls_site);
+    {
+        auto p = refuelling_window_parameters(tanker_mission, tanker_ascent);
+        const auto w = mission::plan_launch_window(tanker_pad, src.earth, reference_depot_at, start, p, gm);
+        if (!w.feasible) {
+            report.result.reason = "Referenzfenster des Tankers: " + w.reason;
+            return report;
+        }
+        report.reference_phasing_s = w.schedule.waypoint0_epoch - w.separation;
+    }
+    const double base_kg = report.tanker_base_delivered_kg;
+    const double residue_kg = ref.tanker.residue_after_ascent_kg;
+    const double reference_phasing_s = report.reference_phasing_s;
+    mission::CampaignModels models;
+    models.next_tanker = [&, base_kg, residue_kg, reference_phasing_s](double earliest_s) {
+        const auto w = mission::plan_launch_window(tanker_pad, src.earth, depot_at, start + earliest_s, tanker_window, gm);
+        if (!w.feasible) return std::optional<mission::CampaignFlight>{};
+        const double phasing_s = w.schedule.waypoint0_epoch - w.separation;
+        // the tanker's own boil-off over the phasing time's difference to the reference flight
+        const double rate = orbit_boil_off_kgps(tanker, residue_kg, depot_at(w.separation), sun_at(w.separation));
+        return std::optional{mission::CampaignFlight{w.liftoff - start, w.schedule.waypoint0_epoch - start,
+                                                     base_kg + rate * (reference_phasing_s - phasing_s)}};
+    };
+    models.next_hls = [&](double earliest_s) {
+        const auto w = mission::plan_launch_window(hls_pad, src.earth, depot_at, start + earliest_s, hls_window, gm);
+        if (!w.feasible) return std::optional<mission::CampaignFlight>{};
+        return std::optional{mission::CampaignFlight{w.liftoff - start, w.schedule.waypoint0_epoch - start, 0.0}};
+    };
+    models.boil_off_kgps = [&](double t_s, double fill_kg) {
+        return orbit_boil_off_kgps(depot, fill_kg, depot_at(start + t_s), sun_at(start + t_s));
+    };
+    const double drag_kgps = report.drag_makeup_kgps;
+    models.drag_makeup_kgps = [drag_kgps](double) { return drag_kgps; };
+
+    // HLS demand (plan decision 2)
+    const auto lunar = config::load_lunar_landing_mission(dir, hls_mission.lunar_mission_id);
+    report.lunar_mission_id = hls_mission.lunar_mission_id;
+    report.lunar_epoch = src.time.from_utc(lunar.epoch_utc);
+    const auto hls_full = top_stage(dir, hls_ascent.vehicle_id);
+    const auto demand = hls_demand(src, lunar, report.lunar_epoch, hls_full);
+    if (!demand.refusal.empty()) {
+        report.result.reason = demand.refusal;
+        return report;
+    }
+    report.hls_required_mass_kg = demand.required_mass_kg;
+    report.hls_dry_mass_kg = demand.dry_mass_kg;
+    report.hls_capacity_kg = demand.capacity_kg;
+    const double required_propellant_kg = demand.required_mass_kg - demand.dry_mass_kg;
+    if (required_propellant_kg > demand.capacity_kg) {
+        report.result.reason = "HLS-Tanks zu klein: " + tonnes(required_propellant_kg) + " gefordert, " +
+                               tonnes(demand.capacity_kg) + " Tankvolumen";
+        return report;
+    }
+    vehicle::Vehicle hls(hls_full, dir);
+    set_main(hls, ref.hls.main_at_docking_kg);
+    report.hls_propellant_at_docking_kg = hls.propellant_kg();
+    const double wait_kg =
+        levers.hls_wait_s > 0.0
+            ? orbit_boil_off_kgps(hls, required_propellant_kg - demand.headers_kg, depot_at(start), sun_at(start)) *
+                  levers.hls_wait_s
+            : 0.0;
+    mission::CampaignInputs inputs;
+    report.demand_kg = std::max(0.0, required_propellant_kg + wait_kg - report.hls_propellant_at_docking_kg) *
+                           (1.0 + inputs.transfer_vent_fraction) +
+                       ref.tanker.chilldown_kg;
+    inputs.depot_capacity_kg = report.depot_capacity_kg;
+    inputs.depot_initial_kg = levers.depot_initial_kg.value_or(ref.depot.initial_propellant_kg);
+    inputs.demand_kg = report.demand_kg;
+    inputs.launch_interval_s = levers.launch_interval_s;
+    report.result = mission::refuelling_campaign(inputs, models);
+    return report;
+}
+
+}  // namespace starsim::sim

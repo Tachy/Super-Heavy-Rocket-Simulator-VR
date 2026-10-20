@@ -25,18 +25,6 @@ constexpr double equatorial_radius_m = constants::wgs84_semi_major_axis_m;
 // bounced off the depot's drogues once), then the mission ends
 constexpr int capture_retries = 2;
 
-// The stage's main oxidizer and fuel tanks filled with `kg` in the ratio of their capacities (capped at capacity).
-void fill_main_tanks(config::StageConfig& stage, double kg) {
-    double capacity = 0.0;
-    for (const auto& tank : stage.tanks) {
-        if (tank.role == config::TankRole::Main) capacity += tank.capacity_kg;
-    }
-    for (auto& tank : stage.tanks) {
-        if (tank.role != config::TankRole::Main) continue;
-        tank.mass_kg = capacity > 0.0 ? std::min(tank.capacity_kg, kg * tank.capacity_kg / capacity) : 0.0;
-    }
-}
-
 // The depot orbit through a GCRF parking state at `at` (hls_refuel): its plane in the true equator frame of `at`, run
 // back by the J2 rates to `earliest`; the config's argument of latitude holds at `earliest`.
 config::DepotOrbitConfig depot_in_plane(const config::DepotOrbitConfig& depot, const math::StateVector& parking_gcrf,
@@ -101,6 +89,34 @@ math::StateVector phasing_start_state(const math::StateVector& station, double b
     return {rp * r_hat, vp * v_hat};
 }
 
+// The stage's main oxidizer and fuel tanks filled with `kg` in the ratio of their capacities (capped at capacity).
+void fill_main_tanks(config::StageConfig& stage, double kg) {
+    double capacity = 0.0;
+    for (const auto& tank : stage.tanks) {
+        if (tank.role == config::TankRole::Main) capacity += tank.capacity_kg;
+    }
+    for (auto& tank : stage.tanks) {
+        if (tank.role != config::TankRole::Main) continue;
+        tank.mass_kg = capacity > 0.0 ? std::min(tank.capacity_kg, kg * tank.capacity_kg / capacity) : 0.0;
+    }
+}
+
+mission::LaunchWindowParameters refuelling_window_parameters(const config::RefuellingFlightMission& m,
+                                                             const config::AscentMission& ascent) {
+    const double phasing_periapsis_m = m.phasing_periapsis_height_m.value_or(ascent.periapsis_height_m);
+    mission::LaunchWindowParameters p;
+    p.inclination_rad = ascent.inclination_rad;
+    p.northerly = ascent.northerly;
+    p.insertion_s = m.window.insertion_s;
+    p.insertion_arc_rad = m.window.insertion_arc_rad;
+    p.separation_periapsis_radius_m = equatorial_radius_m + phasing_periapsis_m;  // the phasing after the raise
+    p.separation_apoapsis_radius_m = equatorial_radius_m + ascent.apoapsis_height_m;
+    p.search_s = m.window.search_s;
+    p.phasing.mission_limit_s = m.mission_limit_s - m.window.insertion_s;  // from the orbit insertion
+    p.phasing.earliest_arrival_s = std::max(0.0, m.earliest_arrival_s - m.window.insertion_s);
+    return p;
+}
+
 gnc::DeorbitParameters ship_deorbit_parameters(const config::ShipReturnDeorbit& d) {
     gnc::DeorbitParameters p;
     p.entry_interface_height_m = d.entry_interface_height_m;
@@ -156,16 +172,7 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
     q.max_capture_retries = capture_retries;
     if (m.start == config::RefuellingStart::Pad) {
         const Vec3 pad = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
-        mission::LaunchWindowParameters p;
-        p.inclination_rad = ascent.inclination_rad;
-        p.northerly = ascent.northerly;
-        p.insertion_s = m.window.insertion_s;
-        p.insertion_arc_rad = m.window.insertion_arc_rad;
-        p.separation_periapsis_radius_m = equatorial_radius_m + phasing_periapsis_m;  // the phasing after the raise
-        p.separation_apoapsis_radius_m = equatorial_radius_m + ascent.apoapsis_height_m;
-        p.search_s = m.window.search_s;
-        p.phasing.mission_limit_s = m.mission_limit_s - m.window.insertion_s;  // from the orbit insertion
-        p.phasing.earliest_arrival_s = std::max(0.0, m.earliest_arrival_s - m.window.insertion_s);
+        const auto p = refuelling_window_parameters(m, ascent);
         const auto w = mission::plan_launch_window(pad, earth, depot_at, earliest, p, gm);
         s.launch_window = w;
         if (!w.feasible) {
