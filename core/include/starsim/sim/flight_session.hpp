@@ -626,8 +626,8 @@ public:
     // The autopilot is disengaged when it is the controlled body. Throws std::logic_error otherwise.
     size_t make_station(size_t body_index);
     // The caught booster is lifted off the tower (refuelling r5): every caught body that is neither the controlled one,
-    // the station nor the rendezvous target is removed, the tower re-armed (arms open, no load). False (nothing changed)
-    // without a tower in phase Caught.
+    // the station nor the rendezvous target is removed, the tower re-armed (arms open, no load) - also after a missed
+    // or aborted catch. False (nothing changed) without a tower or with one Open / Standby.
     bool release_tower();
     // A session that starts with a station only (no body placed yet); throws std::logic_error while bodies exist.
     void set_epoch(time::Epoch epoch);
@@ -681,6 +681,9 @@ public:
     bool start_proximity(const std::string& station_port, gnc::ProximityParameters parameters = {});
     bool proximity_active() const { return proximity_.has_value(); }
     bool proximity_waiting() const { return proximity_ && proximity_->waiting_for_go(); }  // for resume (r5)
+    bool proximity_waiting_after_capture_failure() const {
+        return proximity_ && proximity_->waiting_after_capture_failure();
+    }
     std::optional<gnc::ProximityPhase> proximity_phase() const;
     const std::string& proximity_status() const { return proximity_status_; }
     const std::vector<gnc::ProximityEvent>* proximity_events() const;  // nullptr without a flight

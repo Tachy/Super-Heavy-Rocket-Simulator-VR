@@ -119,6 +119,22 @@ TEST_CASE("release_tower keeps the indices: booster caught, then lifted off; the
     f.session.advance_to(f.session.epoch() + 60.0);  // runs on without the booster
 }
 
+// Review r5 I2: a tower whose booster catch was aborted (or missed) is re-armed for the ship as well.
+TEST_CASE("release_tower re-arms a tower after an aborted booster catch", "[refuelling][catch][slow]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    const auto m = config::load_ascent_mission(refuelling_test::config_dir, "starship_leo");
+    sim::start_ascent_mission(f.session, m, refuelling_test::config_dir, f.t0);
+    while (f.session.epoch() - f.t0 < 300.0 || f.session.body_count() < 2) f.session.advance_to(f.session.epoch() + 1.0);
+    REQUIRE(f.session.abort_landing(0));  // the booster gives up its return
+    REQUIRE(f.session.tower()->phase() == sim::CatchPhase::Aborted);
+    const size_t bodies = f.session.body_count();
+    REQUIRE(f.session.release_tower());
+    CHECK(f.session.tower()->phase() == sim::CatchPhase::Open);
+    CHECK(f.session.body_count() == bodies);  // nothing caught: nothing lifted off
+    CHECK_FALSE(f.session.release_tower());   // Open: nothing to do
+}
+
 TEST_CASE("Leg marks record the chaser's mass and propellant at every leg change", "[refuelling][iss_mission]") {
     test::spice_session();
     refuelling_test::TankerAtPort f({0.0, 0.0, 0.0});
@@ -676,59 +692,61 @@ TEST_CASE("hls_refuel starts with the depot in the lunar mission's parking plane
 // r5 (found in hls_refuel): the filled HLS (1,585 t main) leaves the nearly empty depot (84 t). Its cold gas gives
 // ~2.5 mm/s^2, the Coriolis term of the LVLH frame ~2 n v ~2 mm/s^2 per m/s: a burn that holds a fixed LVLH velocity
 // never converged (157 t of gas in 11.5 h). The burn's target is the free CW drift after the impulse.
-// r5 (found in hls_refuel_orbit: the light HLS bounced off the depot's drogues): after a retreat the proximity flight
-// waits for a go at Waypoint 2. An autonomous mission resumes up to max_capture_retries times, then ends; 0 (the ISS
-// default) keeps the wait for the pilot.
-TEST_CASE("A waiting proximity flight is resumed by the mission, then the mission ends", "[refuelling][iss_mission][proximity]") {
+// r5 (found in hls_refuel_orbit: the light HLS bounced off the depot's drogues): after a failed capture the proximity
+// flight waits for a go at Waypoint 2. An autonomous mission resumes up to max_capture_retries times, then ends; a
+// retreat the pilot commanded waits for the pilot (review r5 I4), as with 0 retries (the ISS default).
+TEST_CASE("A commanded retreat in an autonomous mission waits for the pilot",
+          "[refuelling][iss_mission][proximity][docking]") {
     test::spice_session();
-    // from Waypoint 2 (20 m) into the approach; a commanded retreat ends waiting for a go, as a failed capture does
-    const auto run = [](int retries) {
-        auto f = std::make_unique<refuelling_test::TankerAtPort>(Vec3{20.0, 0.0, 0.0});
+    const auto with_sequence = [](refuelling_test::TankerAtPort& f, int retries) {
         sim::IssMissionSequence q;
         q.station_port = "transfer_dock";
         q.max_capture_retries = retries;
-        f->session.set_iss_mission(q);
+        f.session.set_iss_mission(q);
         gnc::ProximityParameters p;
         p.start_waypoint = 2;
-        REQUIRE(f->session.start_proximity("transfer_dock", p));
-        f->session.mark_iss_leg_for_test(IssMissionLeg::Proximity);
-        return f;
+        REQUIRE(f.session.start_proximity("transfer_dock", p));
+        f.session.mark_iss_leg_for_test(IssMissionLeg::Proximity);
     };
-    const auto retreat_and_wait = [](refuelling_test::TankerAtPort& f) {
+    const auto proximity_marks = [](const sim::FlightSession& s) {
+        const auto& m = s.iss_mission_marks();
+        return std::count_if(m.begin(), m.end(), [](const auto& x) { return x.leg == IssMissionLeg::Proximity; });
+    };
+    // (a failed capture's resume: the gnc test 'A failed capture retreats to Waypoint 2 and waits for resume' and
+    // the hls_refuel_orbit campaign, where the light HLS bounces off the drogues once)
+    {  // a commanded retreat with retries left: the pilot's decision stands
+        refuelling_test::TankerAtPort f({20.0, 0.0, 0.0});
+        with_sequence(f, 2);
         f.session.advance_to(f.session.epoch() + 60.0);
         REQUIRE(f.session.proximity_retreat());
-        f.fly([&] { return f.session.proximity_waiting() || f.session.iss_mission_leg() == IssMissionLeg::Ended; },
-              4.0 * 3600.0, 5.0);  // back to Waypoint 1 (220 m): a CW transfer
-    };
-    {
-        auto f = run(0);
-        retreat_and_wait(*f);
-        INFO(f->session.proximity_status() << " | " << f->session.docking_status() << " | " << f->session.iss_mission_status());
-        REQUIRE(f->session.proximity_waiting());
-        f->session.advance_to(f->session.epoch() + 10.0);
-        CHECK(f->session.proximity_waiting());  // ISS default: the pilot resumes
-        CHECK(f->session.iss_mission_leg() == IssMissionLeg::Proximity);
+        f.fly([&] { return f.session.proximity_waiting(); }, 4.0 * 3600.0, 5.0);
+        REQUIRE(f.session.proximity_waiting());
+        f.session.advance_to(f.session.epoch() + 10.0);
+        CHECK(f.session.proximity_waiting());
+        CHECK(f.session.iss_mission_leg() == IssMissionLeg::Proximity);
     }
-    {
-        auto f = run(1);
-        const auto resumes = [&] {  // every resume by the mission marks the Proximity leg again
-            const auto& m = f->session.iss_mission_marks();
-            return std::count_if(m.begin(), m.end(), [](const auto& x) { return x.leg == IssMissionLeg::Proximity; });
-        };
-        const auto before = resumes();
-        f->session.advance_to(f->session.epoch() + 60.0);
-        REQUIRE(f->session.proximity_retreat());
-        f->fly([&] { return resumes() > before || f->session.iss_mission_leg() != IssMissionLeg::Proximity; },
-               4.0 * 3600.0, 5.0);
-        CHECK(resumes() == before + 1);  // resumed by the mission
-        CHECK(f->session.iss_mission_leg() == IssMissionLeg::Proximity);
-        CHECK_FALSE(f->session.proximity_waiting());
-        f->session.advance_to(f->session.epoch() + 60.0);
-        REQUIRE(f->session.proximity_retreat());
-        f->fly([&] { return f->session.iss_mission_leg() == IssMissionLeg::Ended; }, 4.0 * 3600.0, 5.0);
-        CHECK(f->session.iss_mission_leg() == IssMissionLeg::Ended);
-        CHECK_THAT(f->session.iss_mission_status(), Catch::Matchers::ContainsSubstring("Andocken fehlgeschlagen"));
-    }
+}
+
+// Review r5 I1: a deorbit called off after it was planned (the main tanks no longer hold the burn) ends the mission
+// with the reason instead of waiting in Return forever.
+TEST_CASE("A deorbit called off after the plan ends the mission", "[refuelling][iss_mission][deorbit]") {
+    test::spice_session();
+    DockedAtDepot f;
+    f.session.set_iss_mission(f.tanker_sequence());
+    f.fly([&] { return f.leg() == IssMissionLeg::Return || f.leg() == IssMissionLeg::Ended; }, 6.0 * 3600.0, 10.0);
+    REQUIRE(f.leg() == IssMissionLeg::Return);
+    // the tanks drained (a leak, or more boil-off than planned): the next re-plan calls the burn off
+    const size_t ship = f.session.controlled_index();
+    f.session.set_tank_mass(ship, 0, "lox_main", 400.0);
+    f.session.set_tank_mass(ship, 0, "ch4_main", 100.0);
+    f.fly([&] { return f.leg() != IssMissionLeg::Return; }, 9.0 * 86400.0, 600.0);
+    std::printf("[r5] called-off deorbit: %s (abort: %s)\n", f.session.iss_mission_status().c_str(),
+                f.session.burn_abort_reason().c_str());
+    INFO(f.session.iss_mission_status());
+    CHECK(f.leg() == IssMissionLeg::Ended);
+    // at once, with the call-off's reason (before: days later "Schiff verloren")
+    CHECK_THAT(f.session.iss_mission_status(), Catch::Matchers::StartsWith("Mission beendet: Zu wenig Treibstoff"));
+    CHECK_FALSE(f.session.body(ship).caught());
 }
 
 TEST_CASE("The full HLS departs from the nearly empty depot", "[refuelling][docking][departure]") {

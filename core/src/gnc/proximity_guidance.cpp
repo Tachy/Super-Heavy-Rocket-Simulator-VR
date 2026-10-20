@@ -113,6 +113,7 @@ void ProximityGuidance::start_segment(const ProximityInput& in) {
 
 void ProximityGuidance::start_retreat(const ProximityInput& in, size_t index) {
     target_ = index;
+    capture_retreat_ = false;  // capture_failed sets it after this call
     const std::string status = "Rückzug zu " + path_[index].name;
     // on the axis (inside the sphere, or between the sphere and the on-axis waypoint) the axial law flies back; a CW
     // transfer from there would start inside the transfer clearance
@@ -132,6 +133,7 @@ void ProximityGuidance::capture_failed(const ProximityInput& in, const std::stri
     request_ = Request::None;
     loop_.reset();
     start_retreat(in, index);
+    capture_retreat_ = true;
     status_ = "Rückzug: Fangen fehlgeschlagen (" + reason + ")";
     events_.back().status = status_;
 }
@@ -224,6 +226,7 @@ bool ProximityGuidance::resume() {
         }
     }
     request_ = Request::Resume;
+    capture_retreat_ = false;  // the wait is answered (the mission must not count it twice before the next update)
     return true;
 }
 

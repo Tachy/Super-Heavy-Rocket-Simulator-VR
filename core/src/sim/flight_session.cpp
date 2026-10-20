@@ -467,7 +467,11 @@ size_t FlightSession::make_station(size_t body_index) {
 }
 
 bool FlightSession::release_tower() {
-    if (!tower_ || tower_->phase() != CatchPhase::Caught || !launch_site_.tower) return false;
+    // re-armed after any catch (caught, missed, aborted: review r5); an Open / Standby tower is ready already
+    if (!tower_ || !launch_site_.tower || tower_->phase() == CatchPhase::Open ||
+        tower_->phase() == CatchPhase::Standby) {
+        return false;
+    }
     for (size_t i = bodies_.size(); i-- > 0;) {
         const bool kept = i == controlled_ || (station_index_ && i == *station_index_) ||
                           (rendezvous_ && i == rendezvous_->target_index);

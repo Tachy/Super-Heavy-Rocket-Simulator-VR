@@ -271,11 +271,26 @@ TEST_CASE("A failed capture retreats to Waypoint 2 and waits for resume", "[iss]
     proximity_test::run(g, s, 900.0);
     CHECK(g.phase() == ProximityPhase::Waypoint);
     CHECK(g.path()[g.waypoint()].name == "Wegpunkt 2");
+    CHECK(g.waiting_after_capture_failure());  // review r5: an autonomous mission may resume this one
     REQUIRE(g.resume());
+    CHECK_FALSE(g.waiting_after_capture_failure());
     proximity_test::run(g, s, 1800.0);
     CHECK(g.phase() == ProximityPhase::Contact);
     REQUIRE(g.contact());
     CHECK(g.contact()->envelope.inside);
+}
+
+TEST_CASE("A commanded retreat waits for resume, not as a failed capture", "[iss][proximity][refuelling]") {
+    gnc::ProximityParameters p;
+    p.start_waypoint = 2;
+    auto s = CwSim::ida2();
+    s.cg = {{35.0 + 4.0 + 20.0, 0.0, 0.0}, {}};
+    gnc::ProximityGuidance g(gnc::DockingApproach::VBar, p);
+    proximity_test::run(g, s, 60.0);
+    REQUIRE(g.retreat());
+    proximity_test::run(g, s, 3600.0);
+    CHECK(g.waiting_for_go());
+    CHECK_FALSE(g.waiting_after_capture_failure());  // the pilot's retreat stands (review r5)
 }
 
 TEST_CASE("A collision ends the guidance passively", "[iss][proximity][docking]") {

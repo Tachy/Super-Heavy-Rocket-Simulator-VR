@@ -145,7 +145,7 @@ bool FlightSession::iss_mission_pending() const {
                    body.impacted();
         case IssMissionLeg::Proximity:
             return docking_busy() || collision_impulse_ns().has_value() || body.impacted() ||
-                   (iss_mission_->max_capture_retries > 0 && proximity_waiting());
+                   (iss_mission_->max_capture_retries > 0 && proximity_waiting_after_capture_failure());
         case IssMissionLeg::Docking:
             return docked() || !docking_busy() || collision_impulse_ns().has_value();
         case IssMissionLeg::Docked:  // the docking autopilot hands over first (start_transfer refuses it active)
@@ -158,7 +158,9 @@ bool FlightSession::iss_mission_pending() const {
             return departure_phase() == gnc::DeparturePhase::Complete || collision_impulse_ns().has_value() ||
                    body.impacted();
         case IssMissionLeg::Return:
-            if (iss_mission_->ship_return) return body.caught() || body.impacted() || body.resting();
+            if (iss_mission_->ship_return) {  // caught or lost - or called off in orbit (review r5)
+                return body.caught() || body.impacted() || body.resting() || (!ship_return_ && autopilot_idle);
+            }
             return capsule_return_step_ == CapsuleReturnStep::SplashedDown ||
                    capsule_return_step_ == CapsuleReturnStep::Lost;
         case IssMissionLeg::WaitContinue:
@@ -219,8 +221,9 @@ void FlightSession::run_iss_mission() {
             return;
         case IssMissionLeg::Proximity:
         case IssMissionLeg::Docking:
-            if (iss_leg_ == IssMissionLeg::Proximity && proximity_waiting() && !docking_busy() && !lost &&
-                !collision_impulse_ns()) {  // waiting at Waypoint 2 after a retreat: resume or give up (r5)
+            if (iss_leg_ == IssMissionLeg::Proximity && q.max_capture_retries > 0 &&
+                proximity_waiting_after_capture_failure() && !docking_busy() && !lost &&
+                !collision_impulse_ns()) {  // waiting at Waypoint 2 after a failed capture: resume or give up (r5)
                 if (iss_capture_retries_ >= q.max_capture_retries) {
                     iss_end("Andocken fehlgeschlagen nach " + std::to_string(iss_capture_retries_) + " Neuversuchen");
                 } else if (proximity_resume()) {
@@ -303,6 +306,8 @@ void FlightSession::run_iss_mission() {
             if (q.ship_return) {
                 if (bodies_[controlled_].body->caught()) {
                     iss_enter(IssMissionLeg::Complete, "Mission abgeschlossen: gefangen");
+                } else if (!ship_return_ && !lost && !bodies_[controlled_].body->resting()) {
+                    iss_end(burn_abort_reason_.empty() ? std::string("Rückkehr abgebrochen") : burn_abort_reason_);
                 } else {
                     iss_end(lost ? "Schiff verloren" : "Schiff nicht gefangen");
                 }

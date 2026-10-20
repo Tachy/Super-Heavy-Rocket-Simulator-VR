@@ -74,6 +74,8 @@ public:
     ProximityPhase phase() const { return phase_; }
     // At a waypoint after a retreat (commanded or a failed capture), waiting for resume() (refuelling r5).
     bool waiting_for_go() const { return phase_ == ProximityPhase::Waypoint && waiting_for_go_; }
+    // ... and that retreat followed a failed capture, not a command (review r5: the pilot's retreat stands).
+    bool waiting_after_capture_failure() const { return waiting_for_go() && capture_retreat_; }
     size_t waypoint() const { return target_; }  // index into path() of the waypoint flown to / held at
     const std::vector<ProximityWaypoint>& path() const { return path_; }
     const std::string& status() const { return status_; }
@@ -111,6 +113,7 @@ private:
     ProximityPhase phase_ = ProximityPhase::Waypoint;
     size_t target_ = 0, reached_ = 0;
     bool started_ = false, waiting_for_go_ = false, go_ = false, auto_hold_ = false;
+    bool capture_retreat_ = false;  // the running retreat / wait follows capture_failed
     Request request_ = Request::None;
     size_t retreat_index_ = 0;  // with Request::Retreat
     ProximityPhase interrupted_ = ProximityPhase::Waypoint;
