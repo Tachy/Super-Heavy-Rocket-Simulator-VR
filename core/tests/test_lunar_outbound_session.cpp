@@ -248,6 +248,7 @@ TEST_CASE("A planner exception in the tick aborts the lunar flight", "[sim][luna
 
 TEST_CASE("Pilot override ends the lunar flight; a short plan is refused", "[sim][lunar][outbound]") {
     Fixture fx;
+    fx.session.set_boil_off(false);  // the HLS vents since r5 (thermal data): here only burns may change the mass
     mission::LunarOutboundParameters p;
     p.arrival_epoch = fx.t0 + 4.0 * 86400.0;
     fx.place(p.arrival_epoch);

@@ -41,6 +41,16 @@ RadiationEnvironment earth_orbit_radiation(const Vec3& position_gcrf_m, const Ve
     env.nadir_direction = -position_gcrf_m / r;
     env.distance_over_radius = r / constants::earth_mean_radius_m;
     env.albedo_phase = std::max(0.0, -dot(env.nadir_direction, env.sun_direction));
+    if (moon_from_vehicle_m != nullptr) {
+        const double d = norm(*moon_from_vehicle_m);
+        env.moon_direction = *moon_from_vehicle_m / d;
+        env.moon_distance_over_radius = d / constants::moon_mean_radius_m;
+        // the sub-vehicle point's solar zenith: its outward normal is -moon_direction
+        const double cos_z = std::max(0.0, -dot(env.moon_direction, env.sun_direction));
+        env.moon_albedo_phase = cos_z;
+        const double night = constants::stefan_boltzmann_w_m2k4 * std::pow(constants::moon_night_temperature_k, 4);
+        env.moon_infrared_w_m2 = std::max((1.0 - constants::moon_bond_albedo) * env.solar_flux_w_m2 * cos_z, night);
+    }
     return env;
 }
 
@@ -50,7 +60,15 @@ double absorbed_flux_w_m2(const Vec3& normal, const RadiationEnvironment& env, d
     const double view = plate_view_factor_to_sphere(std::acos(std::clamp(dot(normal, env.nadir_direction), -1.0, 1.0)),
                                                     env.distance_over_radius);
     const double albedo = constants::earth_bond_albedo * env.solar_flux_w_m2 * env.albedo_phase * view;
-    return absorptivity * (direct + albedo) + emissivity * constants::earth_outgoing_longwave_w_m2 * view;
+    double moon_albedo = 0.0, moon_infrared = 0.0;
+    if (env.moon_distance_over_radius > 0.0) {
+        const double view_moon = plate_view_factor_to_sphere(
+            std::acos(std::clamp(dot(normal, env.moon_direction), -1.0, 1.0)), env.moon_distance_over_radius);
+        moon_albedo = constants::moon_bond_albedo * env.solar_flux_w_m2 * env.moon_albedo_phase * view_moon;
+        moon_infrared = env.moon_infrared_w_m2 * view_moon;
+    }
+    return absorptivity * (direct + albedo + moon_albedo) +
+           emissivity * (constants::earth_outgoing_longwave_w_m2 * view + moon_infrared);
 }
 
 }  // namespace starsim::environment

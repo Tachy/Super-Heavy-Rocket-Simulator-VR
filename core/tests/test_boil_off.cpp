@@ -603,3 +603,44 @@ TEST_CASE("boil-off: not inside the air", "[boil_off][flight]") {
     CHECK(main_propellant(*ship) == before);
     CHECK(ship->boil_off_rate().oxidizer_kgps == 0.0);
 }
+
+// Refuelling r5: the Moon's albedo and infrared (plan decision 9).
+TEST_CASE("Moon radiation: dayside low orbit sees albedo and infrared, the night side a little infrared",
+          "[boil_off][environment]") {
+    const Vec3 moon_centre{3.8e8, 0.0, 0.0};         // GCRF, from the Earth
+    const Vec3 sun_from_earth{-1.496e11, 0.0, 0.0};  // the Moon's Earth-facing side is lit
+    const double h = constants::moon_mean_radius_m + 100.0e3;
+    // over the Moon's subsolar point (on its Sun side, -x from its centre)
+    const Vec3 day = moon_centre + Vec3{-h, 0.0, 0.0};
+    const Vec3 moon_from_day = moon_centre - day;
+    const auto env = environment::earth_orbit_radiation(day, sun_from_earth - day, &moon_from_day);
+    CHECK(env.moon_distance_over_radius == Catch::Approx(h / constants::moon_mean_radius_m));
+    CHECK(env.moon_albedo_phase == Catch::Approx(1.0).margin(1e-6));
+    const double s = env.solar_flux_w_m2;
+    CHECK(env.moon_infrared_w_m2 == Catch::Approx((1.0 - constants::moon_bond_albedo) * s).epsilon(1e-6));
+    // a plate facing the Moon (the Sun and the Earth behind it): the Moon's albedo + infrared with the view factor
+    const double view = environment::plate_view_factor_to_sphere(0.0, env.moon_distance_over_radius);
+    const double moon_part = 0.5 * constants::moon_bond_albedo * s * view + 0.8 * env.moon_infrared_w_m2 * view;
+    const Vec3 to_moon = math::normalized(moon_from_day);
+    CHECK(environment::absorbed_flux_w_m2(to_moon, env, 0.5, 0.8) == Catch::Approx(moon_part).epsilon(1e-6));
+    // night side: no albedo, infrared from the night temperature
+    const Vec3 night = moon_centre + Vec3{h, 0.0, 0.0};
+    const Vec3 moon_from_night = moon_centre - night;
+    const auto dark = environment::earth_orbit_radiation(night, sun_from_earth - night, &moon_from_night);
+    CHECK(dark.moon_albedo_phase == 0.0);
+    CHECK(dark.moon_infrared_w_m2 ==
+          Catch::Approx(constants::stefan_boltzmann_w_m2k4 * std::pow(constants::moon_night_temperature_k, 4)));
+}
+
+TEST_CASE("Moon radiation is negligible in low Earth orbit", "[boil_off][environment]") {
+    const Vec3 r{constants::earth_mean_radius_m + 200.0e3, 0.0, 0.0};
+    const Vec3 sun{0.0, 1.496e11, 0.0}, moon{0.0, -3.84e8, 0.0};
+    const Vec3 moon_from_vehicle = moon - r;
+    const auto env = environment::earth_orbit_radiation(r, sun - r, &moon_from_vehicle);
+    CHECK(environment::plate_view_factor_to_sphere(0.0, env.moon_distance_over_radius) < 3e-5);
+    const auto without = environment::earth_orbit_radiation(r, sun - r, nullptr);
+    CHECK(without.moon_distance_over_radius == 0.0);  // no Moon given: no lunar terms
+    const Vec3 n = math::normalized(moon_from_vehicle);
+    CHECK(environment::absorbed_flux_w_m2(n, env, 0.3, 0.8) - environment::absorbed_flux_w_m2(n, without, 0.3, 0.8) <
+          0.05);
+}

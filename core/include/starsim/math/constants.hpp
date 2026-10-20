@@ -69,6 +69,11 @@ inline constexpr double stefan_boltzmann_w_m2k4 = 5.670374419e-8;
 inline constexpr double earth_bond_albedo = 0.30;
 // Global mean outgoing longwave radiation [S: 239 W/m^2, Trenberth, Fasullo & Kiehl 2009, BAMS 90].
 inline constexpr double earth_outgoing_longwave_w_m2 = 239.0;
+// The Moon's bolometric Bond albedo [S: ~0.11 (0.07-0.16 maria / highlands), Vasavada et al. 2012, JGR 117 E00H18,
+// LRO Diviner] (refuelling r5).
+inline constexpr double moon_bond_albedo = 0.11;
+// Equatorial night-time surface temperature before dawn [S: ~95 K, Vasavada et al. 2012, Diviner].
+inline constexpr double moon_night_temperature_k = 95.0;
 // Mean radius [S: IUGG 6371.0 km]: the spherical Earth of shadows and thermal radiation.
 inline constexpr double earth_mean_radius_m = 6371000.0;
 

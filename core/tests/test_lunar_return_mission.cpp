@@ -214,3 +214,29 @@ TEST_CASE("Lunar return start from the NRHO plans the departure burn and the pow
     CHECK(v.propellant_kg() > 150e3);
     CHECK(v.propellant_kg() < 400e3);
 }
+
+// Probe (refuelling r5, plan decision 9): the Block 3 lunar return from the LLO with boil-off on (the mission keeps
+// boil_off = false; this prints what the flag would cost).
+TEST_CASE("Probe: Block 3 lunar return with boil-off", "[.r5_probe]") {
+    test::LunarReturnSession t;
+    sim::LunarReturnBudget budget;
+    auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    m.boil_off = true;
+    const auto s = sim::start_lunar_return_mission(t.session, STARSIM_CONFIG_DIR, m, t.time.from_utc(m.epoch_utc),
+                                                   nullptr, &budget);
+    INFO(s.refusal);
+    REQUIRE(s.refusal.empty());
+    const double start_kg = t.session.body(t.session.controlled_index()).vehicle().propellant_kg();
+    const auto t0 = t.session.epoch();
+    while (t.session.epoch() - t0 < 8.0 * 86400.0) {
+        t.session.advance_to(t.session.epoch() + 600.0);
+        const auto& b = t.session.body(t.session.controlled_index());
+        if (b.caught() || b.impacted() || b.resting() || t.session.lunar_step() == sim::LunarStep::None) break;
+    }
+    const auto& b = t.session.body(t.session.controlled_index());
+    std::printf("[r5 probe] Block 3 LLO return with boil-off: start %.1f t, end %.1f t (main %.1f t), %.1f d, caught %d, "
+                "impacted %d, status '%s', abort '%s'\n",
+                start_kg / 1e3, b.vehicle().propellant_kg() / 1e3, b.vehicle().main_propellant_kg() / 1e3,
+                (t.session.epoch() - t0) / 86400.0, b.caught(), b.impacted(), t.session.lunar_status().c_str(),
+                t.session.burn_abort_reason().c_str());
+}

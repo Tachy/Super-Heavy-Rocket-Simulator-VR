@@ -137,6 +137,14 @@ azimuths_deg = [0.0, 180.0]
 thrust_n = 1500.0                        # [E]
 directions = ["tangential_plus", "tangential_plus", "tangential_minus", "tangential_minus", "inward", "inward", "forward"]  # forward: ullage settling, translation
 
+# Thermal [E] (refuelling r5, plan decision 7): a long-duration ship insulated like the depot - SpaceX publishes
+# nothing; bare Block 3 steel (absorptivity 0.40, emissivity 0.15, wall 0.01) would boil ~30 t/day full.
+[stage.thermal]
+absorptivity = 0.30                      # [E] as starship_depot
+emissivity = 0.80                        # [E]
+wall_resistance_m2k_w = 63.7             # [D] as starship_depot (Centaur-derived MLI, r2)
+ullage_resistance_m2k_w = 100.0          # [E] dry wall: ullage gas conduction, no convection near free fall
+
 # Docking probes and transfer connectors [E] as the tanker's (refuelling r1): the HLS fills up at the depot. The tank
 # stations are Block 3's (3.5 / 20 m), so the connectors sit on the main tanks. Leg clearance at the depot: r3.
 [[stage.docking_port]]
