@@ -24,7 +24,6 @@ namespace {
 
 constexpr double solar_pressure_1au_pa = 1361.0 / 299792458.0;  // solar constant / c
 constexpr double astronomical_unit_m = 149597870700.0;
-constexpr double earth_mean_radius_m = 6371000.0;
 
 using State13 = integrators::State<13>;
 
@@ -196,7 +195,7 @@ Vec3 solar_radiation_acceleration(const FlightEnvironment& env, const Vehicle& v
     const Vec3 to_sun = env.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch).position_m - s.position_gcrf_m;
     const Vec3 to_moon = env.ephemeris->state_gcrf(ephemeris::Body::Moon, epoch).position_m - s.position_gcrf_m;
     const double earth_shadow = environment::occulted_fraction(to_sun, constants::sun_radius_m, -s.position_gcrf_m,
-                                                               earth_mean_radius_m);
+                                                               constants::earth_mean_radius_m);
     const double moon_shadow = environment::occulted_fraction(to_sun, constants::sun_radius_m, to_moon,
                                                               constants::moon_mean_radius_m);
     const double sunlit = (1.0 - earth_shadow) * (1.0 - moon_shadow);

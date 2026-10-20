@@ -58,4 +58,18 @@ inline constexpr double sun_radius_m = 695700000.0;
 // Mean obliquity of the ecliptic at J2000.0 (IAU 2006): 84381.406 arcsec.
 inline constexpr double obliquity_j2000_rad = 84381.406 / 3600.0 * deg_to_rad;
 
+// Thermal radiation (refuelling r2, boil-off).
+// Total solar irradiance at 1 AU [S: Kopp & Lean 2011, GRL 38, L01706: 1360.8 +- 0.5 W/m^2].
+inline constexpr double solar_constant_w_m2 = 1361.0;
+// [S: IAU 2012 Resolution B2]
+inline constexpr double astronomical_unit_m = 1.495978707e11;
+// [S: CODATA 2018]
+inline constexpr double stefan_boltzmann_w_m2k4 = 5.670374419e-8;
+// Earth's Bond albedo [S: 0.29-0.30, CERES; Stephens et al. 2015, Rev. Geophys. 53] - 0.30 as in the r2 spec.
+inline constexpr double earth_bond_albedo = 0.30;
+// Global mean outgoing longwave radiation [S: 239 W/m^2, Trenberth, Fasullo & Kiehl 2009, BAMS 90].
+inline constexpr double earth_outgoing_longwave_w_m2 = 239.0;
+// Mean radius [S: IUGG 6371.0 km]: the spherical Earth of shadows and thermal radiation.
+inline constexpr double earth_mean_radius_m = 6371000.0;
+
 }  // namespace starsim::constants
