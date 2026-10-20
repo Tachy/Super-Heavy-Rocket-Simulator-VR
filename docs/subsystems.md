@@ -1386,3 +1386,44 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r5-reference-flights.md`, led
 - Diagnostics: `STARSIM_DEBUG_PEG` (the ascent cutoff: radius, speeds, v_go, tail-off) besides the r3/r4 switches.
 - **Tests:** `[refuelling][mission]`, `[iss_mission]`, `[station]`, `[catch]`, `[departure]`, `[lunar]`
   (`test_refuelling_missions.cpp`, `test_refuelling_mission_config.cpp`; campaigns `[slow]`; probes `[.r5_probe]`).
+
+### Campaign calculator (r6)
+Plan `docs/superpowers/plans/2026-10-20-refuelling-r6-campaign.md`, ledger
+`.superpowers/sdd/2026-10-20-refuelling-r6-campaign/progress.md`.
+- **Calculator** `mission::refuelling_campaign` (pure): the depot loses boil-off, drag makeup and attitude gas in daily
+  steps; tankers arrive at their windows (pad turnaround `launch_interval_s` 1 day [E], one depot port: arrivals 6 h
+  apart [E]) and add their delivery less 1.5 % vent [E] (pressurant + displaced gas, not in the flights), clamped to
+  the tank volume; once the fill reaches the demand the HLS window is checked - the campaign closes when the depot still
+  holds the demand at the HLS arrival. German reasons: depot volume, no window, a tanker delivering nothing (also NaN),
+  losses eating the delivery, 60 tankers.
+- **Setup** `sim::plan_refuelling_campaign` (levers `CampaignLevers`, std::nullopt = reference): t = 0 at
+  `tanker_flight`'s earliest (2026-10-20), the depot on its `[depot]` orbit at the altitude lever with the measured
+  initial fill; windows by the flown logic (`plan_launch_window` against the depot, phasing orbits shifted with the
+  depot, search 60 days [E] - the missions' 12 days found no second window); depot boil-off by `orbit_average_boil_off`
+  with the day's fill and Sun (identity in LVLH); drag end-on (Cd 2.2, pi (d/2)^2, US76) made up by one Raptor
+  `sea_level_3`; attitude gas 20 kg/day [E]. Tanker net = measured 67.5 t + its own boil-off over the phasing
+  difference to the reference window (45.2 h separation -> Waypoint 0) + dry lever x 0.99 [D] + reserve lever 1:1 -
+  altitude cost (Hohmann up from 200 km at the docked mass, deorbit difference to a 50 km perigee [E] at the return
+  mass x 1.10). HLS demand: `hls_lunar_llo_depot` placed in a scratch session, outbound planned, budget legs
+  (`lunar_mission_legs`) -> the smallest closing mass (`lunar_budget_required_mass`); demand = (required propellant +
+  HLS boil-off while waiting - propellant at docking 184.5 t) x 1.015 + chill 0.42 t.
+- **Measured numbers** `config/refuelling/reference_flights.toml` [D]: checked by the slow pad flights (`depot_launch`,
+  `tanker_flight`, `hls_refuel`; 1 % or 0.3 t via `refuelling_test::check_reference`) - re-measure on any change.
+- **Answer** (reference, 200 km, 48 h phasing): **12 tanker flights, 170.7 days** (HLS docks 2027-04-08); demand
+  853.6 t (the HLS needs 1,145.1 t: dry 120 t + 1,025 t propellant of 1,600 t), deliveries 65.8-82.1 t (shorter
+  phasing, less tanker boil-off), losses boil-off 77.0 t, drag 4.6 t, gas 3.4 t, vent 13.4 t. Public counts 4 to high
+  teens ("10-ish"): plausible, not tuned.
+- **Cadence finding:** the arrivals (5.2, 19.0, 32.8 d, ...) recur every ~13.8 days whatever the phasing limit - with
+  the fixed 170 x 190 km phasing orbit the depot's phase gap at the daily Starbase crossing shrinks by about what the
+  tanker catches up in a day, so a longer limit only launches earlier to the same arrival (72 h: 17 tankers / 240 d;
+  96 h: 25 / 350 d - more tanker boil-off), a shorter one later (28 h: 11 / 171 d). More arrivals need another
+  phasing orbit per window (not modelled). 300 km: 13 / 112 d (altitude cost 8.0 t per tanker, windows 5 and 12 days
+  apart), 400 km: 14 / 125 d; tanker dry -10 t: 11 / 157 d; depot insulation x 0.1: does not close (3,500 t
+  boil-off); HLS waiting 5 days: 13 / 185 d; launch interval 12 h: unchanged (windows rule).
+- **CLI** `build/core/refuelling_report.exe [--height-km] [--interval-h] [--phasing-limit-h] [--tanker-dry-t]
+  [--reserve-t] [--initial-t] [--insulation] [--hls-wait-d]` (~1 s; exit 0 closes, 2 open, 1 error).
+- **Game:** `FlightSim.transfer_state()`, `depot_state()`, `refuelling_campaign(params)` (worker command, result in
+  `result(id)["data"]`; keys in `bindings/src/flight_sim.hpp`).
+- **Tests:** `[refuelling][campaign]` (`test_refuelling_campaign.cpp`: calculator against hand computations, costs,
+  file, CLI parser/text; the setup's reference and lever campaigns `[slow]`), the reference checks in
+  `test_refuelling_missions.cpp`, the smoke test.

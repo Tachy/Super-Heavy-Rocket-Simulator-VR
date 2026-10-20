@@ -38,7 +38,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
-  the mission delta-v budget, the tanker's return reserve, the Earth return: TEI, mid-course corrections, braking burn, the coelliptic phasing
+  the mission delta-v budget and its required mass, the tanker's return reserve, the refuelling campaign calculator (tanker
+  count from the r5 reference flights: windows, depot boil-off, drag, HLS demand), the Earth return: TEI, mid-course corrections, braking burn, the coelliptic phasing
   to the ISS: schedule + full-model planner with drag, and the ISS launch window),
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
@@ -194,6 +195,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 ## Vehicle configuration
 `config/` holds propellants, engines, vehicles and aero tables as TOML/CSV with provenance tags
 ([S] sourced, [E] estimate, [D] derived) - see `config/README.md`.
+`build/core/refuelling_report.exe [--height-km N ...]` prints the tanker campaign of a lunar mission (refuelling r6,
+levers as flags; measured inputs in `config/refuelling/reference_flights.toml`, checked by the slow r5 flights).
 `python tools/vehicle_report.py <vehicle-id> [--payload-kg N]` prints masses, thrust, burn time
 and the Tsiolkovsky delta-v budget; use it after every config change.
 

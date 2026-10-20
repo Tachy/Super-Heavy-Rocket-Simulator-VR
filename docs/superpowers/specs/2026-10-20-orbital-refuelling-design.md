@@ -1,6 +1,6 @@
 # Orbital refuelling (tanker flights) - design
 
-Status: approved 2026-10-20. r1-r5 implemented (plans `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
+Status: approved 2026-10-20. r1-r6 implemented (milestone complete; r6: `...-r6-campaign.md`) (plans `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
 `...-r2-boil-off.md`, `...-r3-rendezvous-docking.md`, `...-r4-propellant-transfer.md`, `...-r5-reference-flights.md`;
 notes in `docs/subsystems.md` "Orbital refuelling", corrections below). Milestone (r), the rest of plan milestone M9
 (tanker flights), after the ISS milestone (i1-i6, main `ffbb574`).
@@ -220,6 +220,11 @@ Coriolis term with a heavy chaser; an autonomous mission resumes a failed captur
   Dictionary. UI by the user.
 - **CLI:** a small C++ program `refuelling_report` in the core build (the calculator needs core models; a Python tool
   like `vehicle_report.py` would not have them).
+
+Corrections with the user (r6, 2026-10-20; numbers in `docs/subsystems.md` "Campaign calculator (r6)"): the plan's
+nine decisions (real windows, minimum-mass HLS demand, tanker net scaling, depot losses with 20 kg/day gas [E], 1.5 %
+vent [E], file checks, campaign clock, worker command, CLI); the window search spans 60 days. Answer: 12 tanker flights
+in 170.7 days; the cadence is set by the phasing orbit's phase alignment (~13.8 days), not by the phasing limit.
 
 ## Error handling
 
