@@ -1394,12 +1394,16 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r6-campaign.md`, ledger
   steps; tankers arrive at their windows (pad turnaround `launch_interval_s` 1 day [E], one depot port: arrivals 6 h
   apart [E]) and add their delivery less 1.5 % vent [E] (pressurant + displaced gas, not in the flights), clamped to
   the tank volume; once the fill reaches the demand the HLS window is checked - the campaign closes when the depot still
-  holds the demand at the HLS arrival. German reasons: depot volume, no window, a tanker delivering nothing (also NaN),
-  losses eating the delivery, 60 tankers.
+  holds the demand at the HLS arrival. German reasons: depot volume (also: full tanks that cannot bridge the losses
+  until the HLS arrives), no window, a tanker delivering nothing (also NaN), losses eating the delivery (against the
+  fill two tankers back: alternating window gaps), 60 tankers. An initial fill above the volume is clamped; the levers
+  are checked by `sim::campaign_lever_error` (CLI and game).
 - **Setup** `sim::plan_refuelling_campaign` (levers `CampaignLevers`, std::nullopt = reference): t = 0 at
   `tanker_flight`'s earliest (2026-10-20), the depot on its `[depot]` orbit at the altitude lever with the measured
   initial fill; windows by the flown logic (`plan_launch_window` against the depot, phasing orbits shifted with the
-  depot, search 60 days [E] - the missions' 12 days found no second window); depot boil-off by `orbit_average_boil_off`
+  depot, search 60 days [E] - the missions' 12 days found no second window; of the launches reaching the same
+  Waypoint 0 (within 3 h [E]) the latest is flown - the shortest phasing, the least tanker boil-off); depot boil-off by
+  `orbit_average_boil_off`
   with the day's fill and Sun (identity in LVLH); drag end-on (Cd 2.2, pi (d/2)^2, US76) made up by one Raptor
   `sea_level_3`; attitude gas 20 kg/day [E]. Tanker net = measured 67.5 t + its own boil-off over the phasing
   difference to the reference window (45.2 h separation -> Waypoint 0) + dry lever x 0.99 [D] + reserve lever 1:1 -
@@ -1409,17 +1413,18 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r6-campaign.md`, ledger
   HLS boil-off while waiting - propellant at docking 184.5 t) x 1.015 + chill 0.42 t.
 - **Measured numbers** `config/refuelling/reference_flights.toml` [D]: checked by the slow pad flights (`depot_launch`,
   `tanker_flight`, `hls_refuel`; 1 % or 0.3 t via `refuelling_test::check_reference`) - re-measure on any change.
-- **Answer** (reference, 200 km, 48 h phasing): **12 tanker flights, 170.7 days** (HLS docks 2027-04-08); demand
-  853.6 t (the HLS needs 1,145.1 t: dry 120 t + 1,025 t propellant of 1,600 t), deliveries 65.8-82.1 t (shorter
-  phasing, less tanker boil-off), losses boil-off 77.0 t, drag 4.6 t, gas 3.4 t, vent 13.4 t. Public counts 4 to high
-  teens ("10-ish"): plausible, not tuned.
+- **Answer** (reference, 200 km, 48 h phasing): **11 tanker flights, 156.9 days** (HLS docks 2027-03-26 with the
+  depot at 924.6 t); demand 853.6 t (the HLS needs 1,145.1 t: dry 120 t + 1,025 t propellant of 1,600 t), deliveries
+  80.5-96.4 t (the latest launch to each arrival phases 7-25 h instead of the reference's 45.2 h: less tanker
+  boil-off, ~12 t/day), losses boil-off 70.8 t, drag 4.3 t, gas 3.1 t, vent 14.4 t. Public counts 4 to high teens
+  ("10-ish"): plausible, not tuned.
 - **Cadence finding:** the arrivals (5.2, 19.0, 32.8 d, ...) recur every ~13.8 days whatever the phasing limit - with
   the fixed 170 x 190 km phasing orbit the depot's phase gap at the daily Starbase crossing shrinks by about what the
-  tanker catches up in a day, so a longer limit only launches earlier to the same arrival (72 h: 17 tankers / 240 d;
-  96 h: 25 / 350 d - more tanker boil-off), a shorter one later (28 h: 11 / 171 d). More arrivals need another
-  phasing orbit per window (not modelled). 300 km: 13 / 112 d (altitude cost 8.0 t per tanker, windows 5 and 12 days
-  apart), 400 km: 14 / 125 d; tanker dry -10 t: 11 / 157 d; depot insulation x 0.1: does not close (3,500 t
-  boil-off); HLS waiting 5 days: 13 / 185 d; launch interval 12 h: unchanged (windows rule).
+  tanker catches up in a day: launches on consecutive days reach the same Waypoint 0. A longer limit adds no arrivals
+  (72 / 96 h: 11 / 157 d as 48 h), a shorter one loses some (28 h: 11 / 171 d). More arrivals need another phasing
+  orbit per window (not modelled). 300 km: 13 / 112 d (altitude cost 8.0 t per tanker, windows 5 and 12 days apart),
+  400 km: 14 / 125 d; tanker dry -10 t: 10 / 143 d; depot insulation x 0.1: 31 / 433 d (1,851 t boil-off); HLS waiting
+  5 days: 11 / 157 d (the last delivery covers it); launch interval 12 h: unchanged (the windows rule).
 - **CLI** `build/core/refuelling_report.exe [--height-km] [--interval-h] [--phasing-limit-h] [--tanker-dry-t]
   [--reserve-t] [--initial-t] [--insulation] [--hls-wait-d]` (~1 s; exit 0 closes, 2 open, 1 error).
 - **Game:** `FlightSim.transfer_state()`, `depot_state()`, `refuelling_campaign(params)` (worker command, result in

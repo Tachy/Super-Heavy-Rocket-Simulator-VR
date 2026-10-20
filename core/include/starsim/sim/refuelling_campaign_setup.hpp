@@ -52,8 +52,13 @@ struct CampaignReport {
     double drag_makeup_kgps = 0.0;
 };
 
+// The first lever out of range, as a German message (empty: all valid): heights, times and the insulation > 0, the
+// reserve, the initial fill and the HLS wait >= 0, all finite (review I3: one check for the CLI and the game).
+std::string campaign_lever_error(const CampaignLevers& levers);
+
 // The campaign of the r5 reference flights with the levers applied (r6 plan decisions 1-7). Refusals (lunar outbound
-// plan, HLS tanks too small) come back as result.closes == false with a German reason; config errors throw.
+// plan, HLS tanks too small, levers out of range) come back as result.closes == false with a German reason; config
+// errors throw.
 CampaignReport plan_refuelling_campaign(const CampaignSources& sources, const CampaignLevers& levers);
 
 }  // namespace starsim::sim

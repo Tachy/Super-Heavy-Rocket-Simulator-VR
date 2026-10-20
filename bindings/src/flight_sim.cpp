@@ -482,6 +482,7 @@ int64_t FlightSim::refuelling_campaign(const godot::Dictionary& params) {
         else if (key == "hls_wait_d") levers.hls_wait_s = v * constants::seconds_per_day;
         else refusal = "Kampagne: unbekannter Parameter '" + std::string(key.utf8().get_data()) + "'";
     }
+    if (refusal.empty()) refusal = sim::campaign_lever_error(levers);
     return static_cast<int64_t>(post("refuelling_campaign", [this, levers, refusal](sim::FlightSession&) {
         if (!refusal.empty()) return Outcome{false, godot::String::utf8(refusal.c_str())};
         const auto report = sim::plan_refuelling_campaign({ephemeris_, earth_, moon_, time_, config_dir_}, levers);

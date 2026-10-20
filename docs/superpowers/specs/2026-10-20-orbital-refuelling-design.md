@@ -223,8 +223,9 @@ Coriolis term with a heavy chaser; an autonomous mission resumes a failed captur
 
 Corrections with the user (r6, 2026-10-20; numbers in `docs/subsystems.md` "Campaign calculator (r6)"): the plan's
 nine decisions (real windows, minimum-mass HLS demand, tanker net scaling, depot losses with 20 kg/day gas [E], 1.5 %
-vent [E], file checks, campaign clock, worker command, CLI); the window search spans 60 days. Answer: 12 tanker flights
-in 170.7 days; the cadence is set by the phasing orbit's phase alignment (~13.8 days), not by the phasing limit.
+vent [E], file checks, campaign clock, worker command, CLI); the window search spans 60 days and flies the latest
+launch to each arrival (final review). Answer: 11 tanker flights in 156.9 days; the cadence is set by the phasing
+orbit's phase alignment (~13.8 days), not by the phasing limit.
 
 ## Error handling
 

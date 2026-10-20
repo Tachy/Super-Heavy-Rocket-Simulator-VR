@@ -59,11 +59,11 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
         return r;
     }
     Depot depot;
-    depot.propellant_kg = in.depot_initial_kg;
+    depot.propellant_kg = std::min(in.depot_initial_kg, in.depot_capacity_kg);  // review I3
     r.fill.push_back({0.0, depot.propellant_kg});
     double last_launch_s = -in.launch_interval_s;  // the first tanker may launch at t = 0
     double last_arrival_s = -in.port_spacing_s;
-    double previous_after_kg = -1.0;
+    std::vector<double> after_kg;  // the fill after every tanker
     const auto finish = [&](const std::string& reason) {
         r.reason = reason;
         r.losses = depot.losses;
@@ -77,6 +77,11 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
             if (!hls) return finish("Kein Startfenster für das HLS");
             Depot projected = depot;
             advance(projected, hls->arrival_s, in, m, nullptr);
+            if (projected.propellant_kg < in.demand_kg && depot.propellant_kg >= in.depot_capacity_kg) {
+                // review I2: full tanks, yet the losses until the HLS arrives eat into the demand
+                return finish("Depotvolumen reicht nicht für die Verluste bis zur HLS-Ankunft: " +
+                              tonnes(projected.propellant_kg) + " bei Ankunft, " + tonnes(in.demand_kg) + " gefordert");
+            }
             if (projected.propellant_kg >= in.demand_kg) {
                 advance(depot, hls->arrival_s, in, m, &r.fill);
                 r.closes = true;
@@ -109,12 +114,14 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
             return finish("Tanker liefert nichts: " + tonnes(slot->delivered_kg) +
                           " nach Aufstieg, Phasenflug und Reserve");
         }
-        if (previous_after_kg >= 0.0 && depot.propellant_kg <= previous_after_kg &&
+        // review I4: against the fill two tankers back - alternating window gaps lose over one long gap and gain
+        // over the pair
+        if (after_kg.size() >= 2 && depot.propellant_kg <= after_kg[after_kg.size() - 2] &&
             depot.propellant_kg < in.demand_kg) {
             return finish("Verluste übersteigen die Lieferung: Depot " + tonnes(depot.propellant_kg) +
                           " nach Tanker " + std::to_string(r.tankers.size()));
         }
-        previous_after_kg = depot.propellant_kg;
+        after_kg.push_back(depot.propellant_kg);
     }
 }
 

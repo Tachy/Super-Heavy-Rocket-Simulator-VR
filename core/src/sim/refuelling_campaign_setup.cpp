@@ -31,7 +31,12 @@ constexpr double equatorial_radius_m = constants::wgs84_semi_major_axis_m;
 constexpr double deorbit_perigee_height_m = 50.0e3;
 // [E] the campaign's window search from each earliest launch: the depot phase over Starbase's crossings repeats in
 // weeks (the missions' 12 days found no second 200 km window; at 300 km they came 5 and 12 days apart)
-constexpr double campaign_window_search_s = 60.0 * 86400.0;  // [E] the return's entry perigee; only differences count
+constexpr double campaign_window_search_s = 60.0 * 86400.0;
+// [E] review I1: later launches reaching Waypoint 0 within this of the first window's arrival fly the same rendezvous
+// with a shorter phasing (the next arrival comes ~14 days later); they are probed over this span from each launch
+constexpr double same_arrival_s = 3.0 * 3600.0;
+constexpr double later_launch_search_s = 3.0 * 86400.0;
+constexpr double later_launch_step_s = 3600.0;  // [E] the return's entry perigee; only differences count
 // the single Raptor of phasing, deorbit (r3, r5) and the depot's reboost [E]
 constexpr const char* raptor_group = "sea_level_3";
 
@@ -118,8 +123,26 @@ HlsDemand hls_demand(const CampaignSources& src, const config::LunarLandingMissi
 
 }  // namespace
 
+std::string campaign_lever_error(const CampaignLevers& l) {
+    const auto positive = [](const std::optional<double>& v) { return !v || (std::isfinite(*v) && *v > 0.0); };
+    const auto non_negative = [](const std::optional<double>& v) { return !v || (std::isfinite(*v) && *v >= 0.0); };
+    if (!positive(l.depot_height_m)) return "Kampagne: Depothöhe muss positiv sein";
+    if (!positive(l.tanker_dry_mass_kg)) return "Kampagne: Trockenmasse des Tankers muss positiv sein";
+    if (!non_negative(l.tanker_reserve_kg)) return "Kampagne: Reserve des Tankers darf nicht negativ sein";
+    if (!positive(l.phasing_limit_s)) return "Kampagne: Grenze des Phasenflugs muss positiv sein";
+    if (!non_negative(l.depot_initial_kg)) return "Kampagne: Anfangsfüllung darf nicht negativ sein";
+    if (!positive(l.depot_insulation_scale)) return "Kampagne: Isolierfaktor muss positiv sein";
+    if (!positive(l.launch_interval_s)) return "Kampagne: Startabstand muss positiv sein";
+    if (!non_negative(l.hls_wait_s)) return "Kampagne: Wartezeit des HLS darf nicht negativ sein";
+    return {};
+}
+
 CampaignReport plan_refuelling_campaign(const CampaignSources& src, const CampaignLevers& levers) {
     CampaignReport report;
+    if (auto error = campaign_lever_error(levers); !error.empty()) {
+        report.result.reason = std::move(error);
+        return report;
+    }
     const auto& dir = src.config_dir;
     const auto ref = config::load_refuelling_reference(dir);
     const auto tanker_mission = config::load_refuelling_flight_mission(dir, ref.tanker.mission);
@@ -202,13 +225,28 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         }
         report.reference_phasing_s = w.schedule.waypoint0_epoch - w.separation;
     }
+    // The latest launch reaching the same Waypoint 0 as `w` (review I1: the first feasible launch may take extra laps).
+    const auto latest_launch = [&](mission::LaunchWindow w, const math::Vec3& pad, mission::LaunchWindowParameters p) {
+        p.search_s = later_launch_search_s;
+        while (true) {
+            const auto next =
+                mission::plan_launch_window(pad, src.earth, depot_at, w.liftoff + later_launch_step_s, p, gm);
+            if (!next.feasible ||
+                std::abs(next.schedule.waypoint0_epoch - w.schedule.waypoint0_epoch) > same_arrival_s) {
+                return w;
+            }
+            w = next;
+        }
+    };
     const double base_kg = report.tanker_base_delivered_kg;
     const double residue_kg = ref.tanker.residue_after_ascent_kg;
     const double reference_phasing_s = report.reference_phasing_s;
     mission::CampaignModels models;
     models.next_tanker = [&, base_kg, residue_kg, reference_phasing_s](double earliest_s) {
-        const auto w = mission::plan_launch_window(tanker_pad, src.earth, depot_at, start + earliest_s, tanker_window, gm);
-        if (!w.feasible) return std::optional<mission::CampaignFlight>{};
+        const auto first =
+            mission::plan_launch_window(tanker_pad, src.earth, depot_at, start + earliest_s, tanker_window, gm);
+        if (!first.feasible) return std::optional<mission::CampaignFlight>{};
+        const auto w = latest_launch(first, tanker_pad, tanker_window);
         const double phasing_s = w.schedule.waypoint0_epoch - w.separation;
         // the tanker's own boil-off over the phasing time's difference to the reference flight
         const double rate = orbit_boil_off_kgps(tanker, residue_kg, depot_at(w.separation), sun_at(w.separation));
@@ -216,8 +254,9 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
                                                      base_kg + rate * (reference_phasing_s - phasing_s)}};
     };
     models.next_hls = [&](double earliest_s) {
-        const auto w = mission::plan_launch_window(hls_pad, src.earth, depot_at, start + earliest_s, hls_window, gm);
-        if (!w.feasible) return std::optional<mission::CampaignFlight>{};
+        const auto first = mission::plan_launch_window(hls_pad, src.earth, depot_at, start + earliest_s, hls_window, gm);
+        if (!first.feasible) return std::optional<mission::CampaignFlight>{};
+        const auto w = latest_launch(first, hls_pad, hls_window);
         return std::optional{mission::CampaignFlight{w.liftoff - start, w.schedule.waypoint0_epoch - start, 0.0}};
     };
     models.boil_off_kgps = [&](double t_s, double fill_kg) {

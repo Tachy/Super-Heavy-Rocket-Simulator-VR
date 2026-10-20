@@ -287,6 +287,8 @@ func _check_refuelling(config_dir: String, tdb: float) -> bool:
 	_check(sim.wait_idle(10.0) and not sim.result(bad).get("ok", true), "a wrongly typed lever is refused")
 	var unknown: int = sim.refuelling_campaign({"no_such_lever": 1.0})
 	_check(sim.wait_idle(10.0) and not sim.result(unknown).get("ok", true), "an unknown lever is refused")
+	var zero: int = sim.refuelling_campaign({"insulation": 0.0})
+	_check(sim.wait_idle(10.0) and not sim.result(zero).get("ok", true), "a lever out of range is refused")
 	var started := Time.get_ticks_msec()
 	var cid: int = sim.refuelling_campaign({"height_km": 200.0})
 	_check(sim.wait_idle(600.0) and sim.result(cid).get("ok", false), "refuelling_campaign finishes")

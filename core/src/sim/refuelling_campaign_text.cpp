@@ -62,6 +62,7 @@ CampaignLevers campaign_levers_from_args(const std::vector<std::string>& args) {
         }
         it->second.set(v * it->second.scale);
     }
+    if (const auto error = campaign_lever_error(l); !error.empty()) throw std::invalid_argument(error);
     return l;
 }
 

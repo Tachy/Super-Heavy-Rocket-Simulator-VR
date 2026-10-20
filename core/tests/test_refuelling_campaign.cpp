@@ -143,8 +143,11 @@ TEST_CASE("Campaign refusals", "[refuelling][campaign]") {
         CHECK_FALSE(r.closes);
         CHECK(r.reason.find("Verluste") != std::string::npos);
         CHECK(r.tanker_flights < 5);
-        // an emptied depot books only what it held
-        CHECK(r.losses.boil_off_kg < 60e3 * 4);
+        // an emptied depot books only what it held: the initial fill and the deliveries, never the full 60 t/day
+        double held_kg = in.depot_initial_kg;
+        for (const auto& t : r.tankers) held_kg += t.received_kg;
+        CHECK(r.losses.boil_off_kg <= held_kg + 1e-6);
+        CHECK(r.losses.boil_off_kg < 60e3 * r.tankers.back().flight.arrival_s / day);  // the unclamped rate
     }
     SECTION("a tanker that delivers nothing ends the campaign") {
         const auto r = mission::refuelling_campaign(simple_inputs(), constant_models(0.0, 0.0, 2.0));
@@ -235,8 +238,11 @@ TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[r
     REQUIRE(r.result.closes);
     // the first tanker flies the r5 window (79.8 h after the earliest); its schedule runs from the separation at
     // 120 km to Waypoint 0 within the 48 h limit (the flown 39.7 h count from the Rendezvous mark after the raise)
+    // (review I1: the campaign flies the latest launch to that window's Waypoint 0 - a day later, 21 h of phasing)
     REQUIRE_FALSE(r.result.tankers.empty());
-    CHECK(r.result.tankers.front().flight.launch_s / 3600.0 == Catch::Approx(79.8).margin(0.2));
+    const double reference_arrival_s = 79.8 * 3600.0 + 444.3 + r.reference_phasing_s;  // liftoff + SECO + schedule
+    CHECK(r.result.tankers.front().flight.arrival_s == Catch::Approx(reference_arrival_s).margin(3.0 * 3600.0));
+    CHECK(r.result.tankers.front().flight.launch_s / 3600.0 >= 79.8 - 0.2);
     CHECK(r.reference_phasing_s / 3600.0 > 39.7);
     CHECK(r.reference_phasing_s / 3600.0 < 48.0);
     CHECK(r.altitude_cost_kg == Catch::Approx(0.0).margin(1e-6));
@@ -312,4 +318,85 @@ TEST_CASE("refuelling_report: the text names the answer and the reason", "[refue
     r.result.closes = false;
     r.result.reason = "Depotvolumen reicht nicht";
     CHECK(sim::campaign_report_text(r, s.clock).find("Depotvolumen reicht nicht") != std::string::npos);
+}
+
+TEST_CASE("Campaign: a full depot that cannot bridge the gap to the HLS ends at once", "[refuelling][campaign]") {
+    // review I2: 320 t tanks, demand 310 t, 2 t/day boil-off, the HLS 10 days after its launch: 320 - 20 < 310
+    auto in = simple_inputs();
+    in.depot_capacity_kg = 320e3;
+    in.demand_kg = 310e3;
+    auto m = constant_models(2.0, 100.0, 2.0);
+    m.next_hls = [](double e) { return std::optional{mission::CampaignFlight{e, e + 10 * day, 0.0}}; };
+    const auto r = mission::refuelling_campaign(in, m);
+    CHECK_FALSE(r.closes);
+    CHECK(r.reason.find("bis zur HLS-Ankunft") != std::string::npos);
+    CHECK(r.tanker_flights < 6);
+}
+
+TEST_CASE("Campaign: an initial fill above the tank volume is clamped", "[refuelling][campaign]") {
+    // review I3: received must never turn negative
+    auto in = simple_inputs();
+    in.depot_capacity_kg = 320e3;
+    in.depot_initial_kg = 400e3;
+    in.demand_kg = 310e3;
+    const auto r = mission::refuelling_campaign(in, constant_models(0.0, 100.0, 2.0));
+    REQUIRE(r.closes);
+    CHECK(r.fill.front().depot_propellant_kg == Catch::Approx(320e3));
+    for (const auto& t : r.tankers) CHECK(t.received_kg >= 0.0);
+}
+
+TEST_CASE("Campaign: alternating window gaps - a pair of tankers gains, one long gap loses", "[refuelling][campaign]") {
+    // review I4: gaps 5 / 12 days alternate, 10 t/day boil-off, 100 t per tanker: the long gap loses 120 t (more than
+    // one delivery), a pair gains 100 + 100 - 170 = 30 t. Fills after the tankers: 200, 250, 230 (< 250: the old
+    // consecutive guard stopped here), 280, 260, ... 400 at day 90 (the HLS a day later finds 390), 430 at day 107.
+    auto in = simple_inputs();
+    in.depot_initial_kg = 100e3;
+    in.demand_kg = 400e3;
+    in.max_tankers = 40;
+    auto m = constant_models(10.0, 100.0, 0.0);
+    m.next_tanker = [](double e) {
+        // windows at 0, 5, 17, 22, 34, ... days (period 17 d)
+        const double period = 17 * day;
+        const double base = std::floor(e / period) * period;
+        double launch = base;
+        if (e > base) launch = e <= base + 5 * day ? base + 5 * day : base + period;
+        return std::optional{mission::CampaignFlight{launch, launch, 100e3}};
+    };
+    m.next_hls = [](double e) { return std::optional{mission::CampaignFlight{e, e, 0.0}}; };
+    const auto r = mission::refuelling_campaign(in, m);
+    INFO(r.reason);
+    CHECK(r.closes);
+}
+
+TEST_CASE("Campaign levers are validated", "[refuelling][campaign]") {
+    // review I3: one validator for the CLI and the game
+    sim::CampaignLevers ok;
+    CHECK(sim::campaign_lever_error(ok).empty());
+    const auto refused = [](auto set) {
+        sim::CampaignLevers l;
+        set(l);
+        return !sim::campaign_lever_error(l).empty();
+    };
+    CHECK(refused([](sim::CampaignLevers& l) { l.depot_insulation_scale = 0.0; }));
+    CHECK(refused([](sim::CampaignLevers& l) { l.depot_height_m = -100e3; }));
+    CHECK(refused([](sim::CampaignLevers& l) { l.launch_interval_s = -5.0; }));
+    CHECK(refused([](sim::CampaignLevers& l) { l.tanker_reserve_kg = -50e3; }));
+    CHECK(refused([](sim::CampaignLevers& l) { l.hls_wait_s = std::nan(""); }));
+    CHECK(refused([](sim::CampaignLevers& l) { l.phasing_limit_s = 0.0; }));
+}
+
+TEST_CASE("A looser phasing limit never costs tankers", "[refuelling][campaign][slow]") {
+    // review I1: the window chooser flies the latest launch that reaches the same arrival (the shortest phasing)
+    const Sources s;
+    sim::CampaignLevers tight, loose;
+    tight.phasing_limit_s = 28.0 * 3600.0;
+    loose.phasing_limit_s = 72.0 * 3600.0;
+    const auto a = sim::plan_refuelling_campaign(s.get(), tight);
+    const auto b = sim::plan_refuelling_campaign(s.get(), loose);
+    print("28 h", a);
+    print("72 h", b);
+    REQUIRE(a.result.closes);
+    REQUIRE(b.result.closes);
+    CHECK(b.result.tanker_flights <= a.result.tanker_flights);
+    CHECK(b.result.duration_s <= a.result.duration_s + 3600.0);
 }
