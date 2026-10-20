@@ -116,8 +116,19 @@ PropellantConfig load_propellant(const std::filesystem::path& config_dir, const 
         for (const auto& node : *list) {
             const auto& t = *node.as_table();
             if (doc.text(t, "id") == id) {
-                return {id, doc.number(t, "mixture_ratio"), doc.number(t, "oxidizer_density_kg_m3"),
-                        doc.number(t, "fuel_density_kg_m3")};
+                PropellantConfig p{id, doc.number(t, "mixture_ratio"), doc.number(t, "oxidizer_density_kg_m3"),
+                                   doc.number(t, "fuel_density_kg_m3")};
+                // Both or neither of boiling point and latent heat, positive.
+                auto boiling = [&](const char* side, double& point_k, double& latent_j_kg) {
+                    const std::string point_key = std::string(side) + "_boiling_point_k";
+                    const std::string latent_key = std::string(side) + "_latent_heat_j_kg";
+                    if (!t.contains(point_key) && !t.contains(latent_key)) return;
+                    point_k = doc.positive(t, point_key);
+                    latent_j_kg = doc.positive(t, latent_key);
+                };
+                boiling("oxidizer", p.oxidizer_boiling_point_k, p.oxidizer_latent_heat_j_kg);
+                boiling("fuel", p.fuel_boiling_point_k, p.fuel_latent_heat_j_kg);
+                return p;
             }
         }
     }
@@ -398,6 +409,24 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         s.heat_shield.max_heat_load_j_m2 = doc.number(*shield, "max_heat_load_j_m2");
         s.heat_shield.max_load_g = doc.number_or(*shield, "max_load_g", 0.0);
         s.heat_shield.crew_load_limit_g = doc.number_or(*shield, "crew_load_limit_g", 0.0);
+    }
+    if (auto thermal = t["thermal"].as_table()) {
+        auto surface = [&](const toml::table& zone, const std::string& where) {
+            const ThermalSurfaceConfig c{doc.number(zone, "absorptivity"), doc.number(zone, "emissivity"),
+                                         doc.positive(zone, "wall_resistance_m2k_w")};
+            if (!(c.absorptivity > 0.0 && c.absorptivity <= 1.0) || !(c.emissivity > 0.0 && c.emissivity <= 1.0)) {
+                doc.fail(where + ": absorptivity and emissivity must lie in (0, 1]");
+            }
+            return c;
+        };
+        ThermalConfig c;
+        c.hull = surface(*thermal, "stage.thermal");
+        if (auto shield = (*thermal)["shield"].as_table()) {
+            c.shield = surface(*shield, "stage.thermal.shield");
+            c.shield_half_width_rad = doc.positive(*shield, "half_width_deg") * constants::deg_to_rad;
+            if (c.shield_half_width_rad > constants::pi) doc.fail("stage.thermal.shield: half_width_deg <= 180");
+        }
+        s.thermal = c;
     }
     if (auto chutes = t["parachute"].as_array()) {
         for (auto& node : *chutes) {

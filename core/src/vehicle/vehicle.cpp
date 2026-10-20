@@ -84,6 +84,14 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
             const bool settles = tank_config.contents != config::TankContents::Rcs && tank_config.capacity_kg > 0.0;
             stage.tanks.push_back({tank_config, density, area, tank_config.mass_kg, 0.5 * diameter,
                                    settles ? tank_config.capacity_kg / (density * area) : 0.0});
+            auto& tank = stage.tanks.back();
+            if (tank_config.contents == config::TankContents::Oxidizer) {
+                tank.boiling_point_k = config.propellant.oxidizer_boiling_point_k;
+                tank.latent_heat_j_kg = config.propellant.oxidizer_latent_heat_j_kg;
+            } else if (tank_config.contents == config::TankContents::Fuel) {
+                tank.boiling_point_k = config.propellant.fuel_boiling_point_k;
+                tank.latent_heat_j_kg = config.propellant.fuel_latent_heat_j_kg;
+            }
         }
         for (const auto& group : stage_config.engine_groups) {
             for (int k = 0; k < group.count; ++k) {

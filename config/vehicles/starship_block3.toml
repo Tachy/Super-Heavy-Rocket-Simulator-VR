@@ -281,6 +281,21 @@ max_heat_load_j_m2 = 6.0e8               # [E]
 max_load_g = 6.0                         # [E] structure
 heat_shield_mass_kg = 10500.0            # [E] Block 1 figure
 
+# Boil-off heat balance (refuelling r2). Bare stainless hull - the hull is the tank wall (integral tanks, no vacuum
+# jacket): alpha / eps [E] from handbook values for polished stainless steel (~0.4 / 0.1-0.15); effective wall
+# resistance [E] of a wetted 4 mm steel wall with its liquid-side film. Tiles on the windward half [E]: black coating
+# alpha = eps ~0.85, ~4 cm silica tile + felt (evacuated in orbit) ~1.5 m^2K/W.
+[stage.thermal]
+absorptivity = 0.40                      # [E]
+emissivity = 0.15                        # [E]
+wall_resistance_m2k_w = 0.01             # [E]
+
+[stage.thermal.shield]
+absorptivity = 0.85                      # [E]
+emissivity = 0.85                        # [E]
+wall_resistance_m2k_w = 1.5              # [E]
+half_width_deg = 90.0                    # [E] the belly half, around [stage.aero] belly_azimuth_deg
+
 [stage.rcs]
 type = "cold_gas_ullage"                 # autogenous ullage gas from the main tanks [E]
 isp_s = 70.0                             # [E]

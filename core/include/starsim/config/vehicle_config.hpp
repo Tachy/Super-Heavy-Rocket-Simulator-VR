@@ -25,6 +25,11 @@ struct PropellantConfig {
     double mixture_ratio = 0.0;  // oxidizer / fuel by mass
     double oxidizer_density_kg_m3 = 0.0;
     double fuel_density_kg_m3 = 0.0;
+    // Boil-off (refuelling r2): normal boiling point and latent heat of vaporisation; 0: storable, does not boil off.
+    double oxidizer_boiling_point_k = 0.0;
+    double oxidizer_latent_heat_j_kg = 0.0;
+    double fuel_boiling_point_k = 0.0;
+    double fuel_latent_heat_j_kg = 0.0;
 };
 
 struct EngineConfig {
@@ -252,6 +257,21 @@ struct ReturnProfile {
     double entry_burn_throttle = 0.0;
 };
 
+// Surface optics and wall heat path of a hull zone (refuelling r2 boil-off).
+struct ThermalSurfaceConfig {
+    double absorptivity = 0.0;           // solar
+    double emissivity = 0.0;             // infrared (= the infrared absorptivity)
+    double wall_resistance_m2k_w = 0.0;  // effective skin -> propellant: insulation, wall, liquid-side film
+};
+
+// [stage.thermal]: the hull; [stage.thermal.shield]: the windward heat-shield tiles, a zone of +-half_width_deg around
+// [stage.aero] belly_azimuth_deg.
+struct ThermalConfig {
+    ThermalSurfaceConfig hull;
+    std::optional<ThermalSurfaceConfig> shield;
+    double shield_half_width_rad = 0.0;
+};
+
 struct StageConfig {
     std::string id;
     std::string name;
@@ -294,6 +314,7 @@ struct StageConfig {
     CatchPinConfig catch_pins;  // empty azimuths: none
     std::vector<FlapConfig> flaps;
     HeatShieldConfig heat_shield;
+    std::optional<ThermalConfig> thermal;  // [stage.thermal] (refuelling r2): none -> its tanks do not boil off
     std::vector<ParachuteConfig> parachutes;  // [[stage.parachute]] (d4: Crew Dragon drogues and mains)
     // [stage.recovery] max_splashdown_speed_mps (method "splashdown", required there): sink rate at the water up to
     // which the capsule is "gewassert"; faster is an impact.
