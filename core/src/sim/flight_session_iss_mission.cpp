@@ -36,6 +36,7 @@ bool has_docking_port(const vehicle::Vehicle& v) {
 void FlightSession::set_iss_mission(std::optional<IssMissionSequence> sequence) {
     iss_mission_ = std::move(sequence);
     iss_status_.clear();
+    iss_marks_.clear();
     if (!iss_mission_) {
         iss_leg_ = IssMissionLeg::None;
         return;
@@ -57,6 +58,11 @@ void FlightSession::mark_rendezvous_at_waypoint0_for_test() {
 void FlightSession::iss_enter(IssMissionLeg leg, std::string status) {
     iss_leg_ = leg;
     iss_status_ = std::move(status);
+    if (bodies_.empty() || controlled_ >= bodies_.size()) return;
+    const auto& v = bodies_[controlled_].body->vehicle();
+    MissionMark mark{leg, epoch_, v.mass_properties().mass_kg, v.main_propellant_kg(), v.rcs_supply_kg(), 0.0};
+    if (station_index_) mark.station_main_propellant_kg = bodies_[*station_index_].body->vehicle().main_propellant_kg();
+    iss_marks_.push_back(mark);
 }
 
 void FlightSession::iss_end(const std::string& reason) { iss_enter(IssMissionLeg::Ended, "Mission beendet: " + reason); }

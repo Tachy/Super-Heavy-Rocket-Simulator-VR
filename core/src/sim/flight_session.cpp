@@ -441,6 +441,59 @@ void FlightSession::place_body(const config::VehicleConfig& config, const vehicl
     reset_mission_state();
 }
 
+namespace {
+
+// The station's attitude in LVLH from [stage.station] body_in_lvlh_deg (aerospace 3-2-1: yaw, pitch, roll).
+math::Quat station_body_in_lvlh(const config::StageConfig& stage) {
+    const math::Vec3 ypr = *stage.body_in_lvlh_rad;
+    return math::Quat::from_axis_angle({0.0, 0.0, 1.0}, ypr.x) * math::Quat::from_axis_angle({0.0, 1.0, 0.0}, ypr.y) *
+           math::Quat::from_axis_angle({1.0, 0.0, 0.0}, ypr.z);
+}
+
+}  // namespace
+
+size_t FlightSession::make_station(size_t body_index) {
+    if (body_index >= bodies_.size()) throw std::logic_error("make_station: no such body");
+    if (station_index_) throw std::logic_error("make_station: the session has a station already");
+    auto& body = *bodies_[body_index].body;
+    const auto& stages = body.vehicle().stages();
+    if (stages.size() != 1) throw std::logic_error("make_station: a station is one stage (stage the booster first)");
+    if (!stages.back().config.body_in_lvlh_rad) throw std::logic_error("make_station: vehicle has no [stage.station]");
+    if (body.docked()) throw std::logic_error("make_station: the body is docked");
+    if (body_index == controlled_) disengage_autopilot();
+    body.set_ideal_lvlh_attitude(station_body_in_lvlh(stages.back().config));
+    station_index_ = body_index;
+    return body_index;
+}
+
+bool FlightSession::release_tower() {
+    if (!tower_ || tower_->phase() != CatchPhase::Caught || !launch_site_.tower) return false;
+    for (size_t i = bodies_.size(); i-- > 0;) {
+        const bool kept = i == controlled_ || (station_index_ && i == *station_index_) ||
+                          (rendezvous_ && i == rendezvous_->target_index);
+        if (bodies_[i].body->caught() && !kept) erase_body(i);
+    }
+    // re-armed as set_launch_site builds it: arms open, no tracks, no load
+    tower_ = std::make_unique<CatchTowerSim>(*launch_site_.tower, launch_site_.latitude_rad, launch_site_.longitude_rad,
+                                             launch_site_.height_m);
+    return true;
+}
+
+void FlightSession::erase_body(size_t index) {
+    const auto shift = [index](size_t& i) {
+        if (i > index) --i;
+    };
+    if (legs_) legs_->forget(bodies_[index].body.get());
+    bodies_.erase(bodies_.begin() + static_cast<std::ptrdiff_t>(index));
+    shift(controlled_);
+    if (station_index_) shift(*station_index_);
+    if (rendezvous_) shift(rendezvous_->target_index);
+    if (transfer_) {
+        shift(transfer_sides_.delivering);
+        shift(transfer_sides_.receiving);
+    }
+}
+
 size_t FlightSession::add_station(const config::VehicleConfig& config, const math::StateVector& state_gcrf,
                                  time::Epoch epoch, std::vector<StationImpulse> impulses) {
     if (config.stages.size() != 1) {
@@ -453,13 +506,9 @@ size_t FlightSession::add_station(const config::VehicleConfig& config, const mat
     } else if (std::abs(epoch - epoch_) > tick_s) {
         throw std::logic_error("add_station: the station state is not at the session epoch");
     }
-    const math::Vec3 ypr = *config.stages.back().body_in_lvlh_rad;  // aerospace 3-2-1: yaw, pitch, roll
-    const math::Quat body_in_lvlh = math::Quat::from_axis_angle({0.0, 0.0, 1.0}, ypr.x) *
-                                    math::Quat::from_axis_angle({0.0, 1.0, 0.0}, ypr.y) *
-                                    math::Quat::from_axis_angle({1.0, 0.0, 0.0}, ypr.z);
     const vehicle::RigidBodyState rigid{state_gcrf.position_m, state_gcrf.velocity_mps, math::Quat{}, {}};
     auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(config, config_dir_), rigid);
-    body->set_ideal_lvlh_attitude(body_in_lvlh);
+    body->set_ideal_lvlh_attitude(station_body_in_lvlh(config.stages.back()));
     const bool alone = bodies_.empty();
     bodies_.push_back({std::move(body), {}, nullptr, {}});
     if (alone) controlled_ = 0;  // nothing commands it: the autopilot stays Off

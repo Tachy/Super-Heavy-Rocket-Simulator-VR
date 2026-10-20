@@ -51,6 +51,7 @@ public:
     const math::Vec3& origin_fixed_m() const { return frame_.origin_fixed_m; }
     const math::Mat3& site_to_fixed() const { return frame_.site_to_fixed; }
     void clear() { tracks_.clear(); }  // the session replaced its bodies
+    void forget(const vehicle::FlightBody* body) { tracks_.erase(body); }  // the session removed this body
     // Contact wrenches for the coming tick from the current states.
     void before_tick(const std::vector<vehicle::FlightBody*>& bodies, const vehicle::FlightEnvironment& env,
                      time::Epoch epoch);

@@ -604,6 +604,14 @@ public:
     size_t add_station(const config::VehicleConfig& config, const math::StateVector& state_gcrf, time::Epoch epoch,
                        std::vector<StationImpulse> impulses = {});
     std::optional<size_t> station_index() const { return station_index_; }
+    // A flown body becomes the station (refuelling r5: the depot after its ascent): one stage with [stage.station], no
+    // station yet, the body not docked; its attitude switches to the ideal LVLH hold at once (the turn is not flown).
+    // The autopilot is disengaged when it is the controlled body. Throws std::logic_error otherwise.
+    size_t make_station(size_t body_index);
+    // The caught booster is lifted off the tower (refuelling r5): every caught body that is neither the controlled one,
+    // the station nor the rendezvous target is removed, the tower re-armed (arms open, no load). False (nothing changed)
+    // without a tower in phase Caught.
+    bool release_tower();
     // A session that starts with a station only (no body placed yet); throws std::logic_error while bodies exist.
     void set_epoch(time::Epoch epoch);
 
@@ -734,6 +742,16 @@ public:
     IssMissionLeg iss_mission_leg() const { return iss_leg_; }
     const std::string& iss_mission_status() const { return iss_status_; }  // German
     const std::optional<IssMissionSequence>& iss_mission() const { return iss_mission_; }
+    // Mass and propellant at every leg change (refuelling r5: the reference flights' measured numbers).
+    struct MissionMark {
+        IssMissionLeg leg;                        // the leg entered
+        time::Epoch epoch;
+        double chaser_mass_kg = 0.0;              // the controlled body
+        double chaser_main_propellant_kg = 0.0;
+        double chaser_rcs_supply_kg = 0.0;        // Vehicle::rcs_supply_kg
+        double station_main_propellant_kg = 0.0;  // 0 without a station
+    };
+    const std::vector<MissionMark>& iss_mission_marks() const { return iss_marks_; }
     static constexpr double iss_return_lead_margin_s = 1800.0;  // [E] the return is planned this far before the pass
     // Test seams: the rendezvous at Waypoint 0 without a flight, a leg without its flight.
     void mark_rendezvous_at_waypoint0_for_test();
@@ -858,6 +876,7 @@ private:
         std::string target_port;
     };
     std::optional<RendezvousTarget> rendezvous_;  // set_rendezvous_target
+    void erase_body(size_t index);  // removes a body, shifting the stored indices behind it (release_tower)
     math::Vec3 translation_port_;                 // set_translation_command, target port frame
     PilotInput input_;
     ControlMode mode_ = ControlMode::RateCommand;
@@ -1026,6 +1045,7 @@ private:
     std::optional<IssMissionSequence> iss_mission_;
     IssMissionLeg iss_leg_ = IssMissionLeg::None;
     std::string iss_status_;
+    std::vector<MissionMark> iss_marks_;
     void run_iss_mission();            // every tick: the leg change due now
     bool iss_mission_pending() const;  // a leg change is due (the coast stops)
     void iss_end(const std::string& reason);
