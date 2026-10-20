@@ -97,6 +97,7 @@ add_library(starsim_core STATIC
     src/sim/iss_mission.cpp
     src/sim/refuelling_mission.cpp
     src/sim/refuelling_campaign_setup.cpp
+    src/sim/refuelling_campaign_text.cpp
     src/sim/docking_sim.cpp
     src/sim/flight_session_rendezvous.cpp
     src/sim/flight_session_transfer.cpp
@@ -180,3 +181,11 @@ if(MSVC)
 else()
     target_compile_options(starsim_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+# refuelling_report (refuelling r6): how many tanker flights the lunar mission needs, from the command line.
+add_executable(refuelling_report apps/refuelling_report.cpp)
+target_link_libraries(refuelling_report PRIVATE starsim::core)
+target_compile_definitions(refuelling_report PRIVATE
+    STARSIM_KERNEL_DIR="${STARSIM_DATA_DIR}/spice"
+    STARSIM_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
+)

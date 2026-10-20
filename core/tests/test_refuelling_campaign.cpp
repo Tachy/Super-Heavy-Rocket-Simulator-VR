@@ -1,6 +1,7 @@
 // Refuelling r6: campaign calculator, its setup from config, the measured-numbers file.
 #include <cmath>
 #include <cstdio>
+#include <stdexcept>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -13,6 +14,7 @@
 #include "starsim/mission/refuelling_costs.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/refuelling_campaign_setup.hpp"
+#include "starsim/sim/refuelling_campaign_text.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -280,4 +282,34 @@ TEST_CASE("Campaign setup refusals", "[refuelling][campaign]") {
     INFO(r.result.reason);
     CHECK_FALSE(r.result.closes);
     CHECK(r.result.reason.find("liefert nichts") != std::string::npos);
+}
+
+TEST_CASE("refuelling_report: levers from the command line", "[refuelling][campaign]") {
+    const auto l = sim::campaign_levers_from_args({"--height-km", "300", "--tanker-dry-t", "199", "--interval-h", "12",
+                                                   "--insulation", "0.5", "--hls-wait-d", "2"});
+    CHECK(*l.depot_height_m == Catch::Approx(300e3));
+    CHECK(*l.tanker_dry_mass_kg == Catch::Approx(199e3));
+    CHECK(l.launch_interval_s == Catch::Approx(12 * 3600.0));
+    CHECK(l.depot_insulation_scale == Catch::Approx(0.5));
+    CHECK(l.hls_wait_s == Catch::Approx(2 * 86400.0));
+    CHECK_FALSE(l.tanker_reserve_kg.has_value());
+    CHECK_THROWS_AS(sim::campaign_levers_from_args({"--height"}), std::invalid_argument);
+    CHECK_THROWS_AS(sim::campaign_levers_from_args({"--height-km"}), std::invalid_argument);
+    CHECK_THROWS_AS(sim::campaign_levers_from_args({"--height-km", "abc"}), std::invalid_argument);
+    CHECK_THROWS_AS(sim::campaign_levers_from_args({"--height-km", "300x"}), std::invalid_argument);
+    CHECK_THROWS_AS(sim::campaign_levers_from_args({"--insulation", "-1"}), std::invalid_argument);
+    CHECK(*sim::campaign_levers_from_args({"--reserve-t", "0"}).tanker_reserve_kg == 0.0);
+}
+
+TEST_CASE("refuelling_report: the text names the answer and the reason", "[refuelling][campaign]") {
+    const Sources s;
+    sim::CampaignReport r;
+    r.result.closes = true;
+    r.result.tanker_flights = 12;
+    r.result.tankers.resize(12);
+    const auto text = sim::campaign_report_text(r, s.clock);
+    CHECK(text.find("Tanker flights: 12") != std::string::npos);
+    r.result.closes = false;
+    r.result.reason = "Depotvolumen reicht nicht";
+    CHECK(sim::campaign_report_text(r, s.clock).find("Depotvolumen reicht nicht") != std::string::npos);
 }
