@@ -23,4 +23,8 @@ struct BudgetResult {
 BudgetResult lunar_budget(double initial_mass_kg, double dry_mass_kg, double reserve_kg,
                           const std::vector<BudgetLeg>& legs);
 
+// The smallest initial mass that closes the budget (refuelling r6): dry + reserve carried back through every leg's
+// rocket equation, last leg first.
+double lunar_budget_required_mass(double dry_mass_kg, double reserve_kg, const std::vector<BudgetLeg>& legs);
+
 }  // namespace starsim::mission

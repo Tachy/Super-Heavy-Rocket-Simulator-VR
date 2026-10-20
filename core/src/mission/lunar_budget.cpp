@@ -27,4 +27,12 @@ BudgetResult lunar_budget(double initial_mass_kg, double dry_mass_kg, double res
     return result;
 }
 
+double lunar_budget_required_mass(double dry_mass_kg, double reserve_kg, const std::vector<BudgetLeg>& legs) {
+    double m = dry_mass_kg + reserve_kg;
+    for (auto it = legs.rbegin(); it != legs.rend(); ++it) {
+        m *= std::exp(it->delta_v_mps / (it->isp_s * constants::standard_gravity_mps2));
+    }
+    return m;
+}
+
 }  // namespace starsim::mission

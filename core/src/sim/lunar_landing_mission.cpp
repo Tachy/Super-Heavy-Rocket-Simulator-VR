@@ -123,9 +123,9 @@ LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& m) {
     return setup;
 }
 
-mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& m, const mission::OutboundPlan& plan,
-                                           double initial_mass_kg, double dry_mass_kg, double vacuum_isp_s,
-                                           double approach_isp_s) {
+std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMission& m,
+                                                   const mission::OutboundPlan& plan, double vacuum_isp_s,
+                                                   double approach_isp_s) {
     const auto setup = lunar_landing_setup(m);
     const bool nrho = m.lunar_orbit == "nrho";
     std::vector<mission::BudgetLeg> legs{{"TLI", norm(plan.tli.delta_v_gcrf_mps), vacuum_isp_s}};
@@ -140,7 +140,14 @@ mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& m,
     legs.push_back({"Abstieg (Anflug)", m.descent_delta_v_mps - setup.braking_delta_v_mps, approach_isp_s});
     legs.push_back({"Aufstieg", m.ascent_delta_v_mps, vacuum_isp_s});
     if (nrho) legs.push_back({"LLO -> NRHO", m.llo_to_nrho_delta_v_mps, vacuum_isp_s});
-    return mission::lunar_budget(initial_mass_kg, dry_mass_kg, m.reserve_kg, legs);
+    return legs;
+}
+
+mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& m, const mission::OutboundPlan& plan,
+                                           double initial_mass_kg, double dry_mass_kg, double vacuum_isp_s,
+                                           double approach_isp_s) {
+    return mission::lunar_budget(initial_mass_kg, dry_mass_kg, m.reserve_kg,
+                                 lunar_mission_legs(m, plan, vacuum_isp_s, approach_isp_s));
 }
 
 MissionStart start_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,

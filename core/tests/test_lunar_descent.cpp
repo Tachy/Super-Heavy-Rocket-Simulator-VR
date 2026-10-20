@@ -76,6 +76,18 @@ TEST_CASE("The budget closes or names the leg where the propellant runs out", "[
     CHECK(short_.margin_kg < 0.0);
 }
 
+TEST_CASE("The required mass closes the budget with zero margin", "[mission][lunar_descent_plan]") {
+    const std::vector<mission::BudgetLeg> legs{{"Abstieg", 1000.0, 350.0}, {"Aufstieg", 500.0, 380.0}};
+    const double g0 = constants::standard_gravity_mps2;
+    const double expected = 110e3 * std::exp(500.0 / (380.0 * g0)) * std::exp(1000.0 / (350.0 * g0));
+    const double m = mission::lunar_budget_required_mass(100e3, 10e3, legs);
+    CHECK(m == Catch::Approx(expected).epsilon(1e-12));
+    const auto b = mission::lunar_budget(m, 100e3, 10e3, legs);
+    CHECK(b.closes);
+    CHECK(b.margin_kg == Catch::Approx(0.0).margin(1e-6));
+    CHECK(mission::lunar_budget_required_mass(100e3, 10e3, {}) == Catch::Approx(110e3));
+}
+
 TEST_CASE("The flattest admissible touchdown point near the site is chosen", "[mission][lunar_descent_plan][terrain][data]") {
     Fixture fx;
     mission::LunarDescentParameters p;

@@ -23,6 +23,11 @@ void place_lunar_landing_mission(FlightSession& session, const config::LunarLand
 // The landing, surface stay and ascent of the mission ([descent], [surface], [ascent], [budget]).
 LunarLandingSetup lunar_landing_setup(const config::LunarLandingMission& mission);
 
+// The budget legs of the mission (refuelling r6: the campaign's HLS demand), in flight order.
+std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMission& mission,
+                                                   const mission::OutboundPlan& plan, double vacuum_isp_s,
+                                                   double approach_isp_s);
+
 // Rocket-equation budget of the whole mission from the planned outbound flight (TLI, swing-by, insertion / LOI) and the
 // mission's nominal legs (NRHO -> LLO, descent, ascent, LLO -> NRHO). `vacuum_isp_s`: the vacuum Raptors (outbound,
 // transfers, braking phase, ascent); `approach_isp_s`: the rest of the descent (the last braking set's Isp - the
