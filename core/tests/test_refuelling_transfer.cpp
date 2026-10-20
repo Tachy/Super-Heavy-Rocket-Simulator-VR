@@ -18,6 +18,7 @@
 #include "refuelling_test_support.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/mission/tanker_reserve.hpp"
 #include "starsim/sim/propellant_transfer.hpp"
 #include "starsim/vehicle/docking_port.hpp"
 #include "starsim/vehicle/propellant_transfer.hpp"
@@ -490,4 +491,47 @@ TEST_CASE("Zero settling push: the liquid stays forward, the transfer pauses", "
     CHECK(f.session.transfer_state().phase == sim::TransferPhase::Paused);
     CHECK(f.session.transfer_state().status == "Transfer unterbrochen: Treibstoff nicht am Auslass");
     CHECK(f.session.transfer_state().delivered_kg[0] == 0.0);
+}
+
+TEST_CASE("Tanker reserve: the deorbit burn by the rocket equation plus gas, boil-off and residue",
+          "[refuelling][prop_transfer][mission]") {
+    mission::TankerReserveParameters p;
+    p.deorbit_delta_v_mps = 80.0;
+    p.exhaust_velocity_mps = 3300.0;
+    const auto r = mission::tanker_reserve(290.0e3, p);
+    // after the burn 290 + 1.5 + 1 t; burn = 292.5 t (e^(80/3300) - 1) x 1.10 = 7.8955 t
+    CHECK(r.burn_kg == Catch::Approx(7895.5).epsilon(1e-4));
+    CHECK(r.total_kg == Catch::Approx(r.burn_kg + 1500.0 + 2000.0 + 1000.0));
+    CHECK(r.oxidizer_kg == Catch::Approx(r.total_kg * 3.6 / 4.6));
+    CHECK(r.fuel_kg == Catch::Approx(r.total_kg / 4.6));
+}
+
+TEST_CASE("Docked tanker: its reserve from the previewed return, as a transfer request",
+          "[refuelling][prop_transfer][docking][deorbit]") {
+    test::spice_session();
+    DockedPair f;
+    std::string reason;
+    gnc::DeorbitParameters search;  // the depot plane meets Starbase within reach only every few days (r3)
+    search.search_window_s = sim::FlightSession::tanker_reserve_search_s;
+    const auto plan = f.session.ship_return_preview(search);
+    INFO(plan.reason);
+    REQUIRE(plan.feasible);
+    const auto reserve = f.session.tanker_reserve({}, &reason);
+    INFO(reason);
+    REQUIRE(reserve);
+    INFO("deorbit " << plan.delta_v_mps << " m/s, reserve " << reserve->total_kg << " kg (burn " << reserve->burn_kg
+                    << ")");
+    CHECK(plan.delta_v_mps > 30.0);
+    CHECK(plan.delta_v_mps < 200.0);
+    CHECK(reserve->total_kg > 8.0e3);
+    CHECK(reserve->total_kg < 30.0e3);
+    const auto request = f.session.tanker_transfer_request({}, &reason);
+    REQUIRE(request);
+    CHECK(request->direction == sim::TransferDirection::ChaserToStation);
+    CHECK(request->delivering_floor_kg[0] == Catch::Approx(reserve->oxidizer_kg));
+    CHECK(request->delivering_floor_kg[1] == Catch::Approx(reserve->fuel_kg));
+    // not docked: no reserve
+    refuelling_test::TankerAtPort free({20.0, 0.0, 0.0});
+    CHECK_FALSE(free.session.tanker_reserve({}, &reason));
+    CHECK(reason == "Keine Reserve: nicht angedockt");
 }

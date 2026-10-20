@@ -261,4 +261,43 @@ void FlightSession::run_transfer_step(double dt_s) {
     transfer_thrust_n_ = out.thrust ? thrust : 0.0;
 }
 
+std::optional<mission::TankerReserve> FlightSession::tanker_reserve(mission::TankerReserveParameters base,
+                                                                    std::string* reason) const {
+    const auto refuse = [&](const std::string& why) -> std::optional<mission::TankerReserve> {
+        if (reason) *reason = why;
+        return std::nullopt;
+    };
+    if (!docked()) return refuse("Keine Reserve: nicht angedockt");
+    // The delta-v hardly depends on the pass; the depot plane meets the site only every few days within reach (r3).
+    gnc::DeorbitParameters search;
+    search.search_window_s = tanker_reserve_search_s;
+    const auto plan = ship_return_preview(search);
+    if (!plan.feasible) return refuse("Keine Reserve: " + plan.reason);
+    const auto& vehicle = bodies_[controlled_].body->vehicle();
+    const auto& stage = vehicle.stages().front().config;
+    const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
+    if (configurations.empty()) return refuse("Keine Reserve: Deorbit-Triebwerk nicht verfügbar");
+    base.deorbit_delta_v_mps = plan.delta_v_mps;
+    base.exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
+    for (const auto& s : vehicle.stages()) {
+        for (const auto& e : s.engines) {
+            if (e.group_id == configurations.front().groups.front()) {
+                base.mixture_ratio = e.performance->config().mixture_ratio;
+            }
+        }
+    }
+    const double dry_with_headers_kg = vehicle.mass_properties().mass_kg - vehicle.main_propellant_kg();
+    return mission::tanker_reserve(dry_with_headers_kg, base);
+}
+
+std::optional<TransferRequest> FlightSession::tanker_transfer_request(mission::TankerReserveParameters base,
+                                                                     std::string* reason) const {
+    const auto reserve = tanker_reserve(base, reason);
+    if (!reserve) return std::nullopt;
+    TransferRequest r;
+    r.direction = TransferDirection::ChaserToStation;
+    r.delivering_floor_kg = {reserve->oxidizer_kg, reserve->fuel_kg};
+    return r;
+}
+
 }  // namespace starsim::sim

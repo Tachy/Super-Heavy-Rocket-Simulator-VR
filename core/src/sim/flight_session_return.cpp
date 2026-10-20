@@ -113,35 +113,47 @@ std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& p
     return std::string(text);
 }
 
-bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
-    ship_return_ = false;
-    deorbit_plan_.reset();
-    deorbit_parameters_ = parameters;
-    if (bodies_.empty()) return false;
-    auto& flying = bodies_[controlled_];
+gnc::DeorbitPlan FlightSession::ship_deorbit_plan(const gnc::DeorbitParameters& parameters) const {
+    gnc::DeorbitPlan refused;
+    if (bodies_.empty()) {
+        refused.reason = "Keine Rückkehr möglich: kein Fahrzeug";
+        return refused;
+    }
+    const auto& flying = bodies_[controlled_];
     const auto& vehicle = flying.body->vehicle();
     const auto& stage = vehicle.stages().front().config;
-    gnc::DeorbitPlan refused;
     if (stage.aero.entry_alpha_table.empty() || stage.deorbit_engine_groups.empty() || flying.entry_guidance ||
         flying.ship_landing) {
         refused.reason = "Keine Rückkehr möglich: kein Schiff mit Hitzeschild und Deorbit-Triebwerk im Orbit";
-        deorbit_plan_ = refused;
-        return false;
+        return refused;
     }
     const auto configurations = burn_configurations(&stage.deorbit_engine_groups);
     if (configurations.empty()) {
         refused.reason = "Deorbit-Triebwerk nicht verfügbar";
-        deorbit_plan_ = refused;
-        return false;
+        return refused;
     }
     const double exhaust_velocity_mps = configurations.front().thrust_n / configurations.front().mass_flow_kgps;
     const auto schedule = gnc::load_alpha_schedule(config_dir_, stage.aero.entry_alpha_table);
     const auto target = gnc::ship_entry_target(return_site(vehicle), gnc::ship_landing_parameters());
     const gnc::EntryGuidance onboard(*flying.body, schedule, target);
     const auto& s = flying.body->state();
-    deorbit_plan_ = gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_, onboard.model(),
-                                      target, vehicle.mass_properties().mass_kg, exhaust_velocity_mps,
-                                      vehicle.propellant_kg(), stage.landing_propellant_kg, parameters);
+    return gnc::plan_deorbit({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gravity_, earth_, onboard.model(), target,
+                             vehicle.mass_properties().mass_kg, exhaust_velocity_mps, vehicle.propellant_kg(),
+                             stage.landing_propellant_kg, parameters);
+}
+
+gnc::DeorbitPlan FlightSession::ship_return_preview(const gnc::DeorbitParameters& parameters) const {
+    return ship_deorbit_plan(parameters);
+}
+
+bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
+    ship_return_ = false;
+    deorbit_plan_.reset();
+    deorbit_parameters_ = parameters;
+    if (bodies_.empty()) return false;
+    const auto& stage = bodies_[controlled_].body->vehicle().stages().front().config;
+    const auto& s = bodies_[controlled_].body->state();
+    deorbit_plan_ = ship_deorbit_plan(parameters);
     if (!deorbit_plan_->feasible) return false;
     // The earliest pass is the best one with boil-off too (a later one only has less left): it alone is checked.
     if (const auto shortfall = boil_off_shortfall(*deorbit_plan_, commit_burn_margin)) {

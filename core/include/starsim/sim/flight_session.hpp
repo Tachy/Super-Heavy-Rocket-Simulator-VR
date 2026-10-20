@@ -11,6 +11,7 @@
 #include "starsim/vehicle/compound_mass.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
 #include "starsim/sim/lunar_site.hpp"
+#include "starsim/mission/tanker_reserve.hpp"
 #include "starsim/sim/propellant_transfer.hpp"
 #include "starsim/sim/station_start.hpp"
 #include <limits>
@@ -390,6 +391,10 @@ public:
     // refused (reason in ship_return_plan()) or the burn cannot be flown.
     bool plan_ship_return(const gnc::DeorbitParameters& parameters = {});
     const gnc::DeorbitPlan* ship_return_plan() const { return deorbit_plan_ ? &*deorbit_plan_ : nullptr; }
+    // The deorbit plan the controlled ship's return would take now (plan_ship_return's planner and refusals without
+    // the boil-off check; also while docked: the held state), not stored and not flown (refuelling r4).
+    gnc::DeorbitPlan ship_return_preview(const gnc::DeorbitParameters& parameters = {}) const;
+    static constexpr double tanker_reserve_search_s = 8.0 * 86400.0;  // [E] tanker_reserve: the pass search
     // Why the last burn was aborted (German; empty: none). A burn whose engines run dry - e.g. main tanks boiled off
     // while waiting (refuelling r2) - cannot finish: it is cut off, the autopilot goes off.
     const std::string& burn_abort_reason() const { return burn_abort_reason_; }
@@ -706,6 +711,13 @@ public:
     bool start_transfer(const TransferRequest& request);
     void stop_transfer();
     const TransferState& transfer_state() const;  // the running or last transfer, or the refusal
+    // The docked tanker's reserve for its return (mission::tanker_reserve with ship_return_preview's delta-v and the
+    // deorbit set's exhaust velocity and mixture ratio); nullopt with a German *reason when not docked or without a
+    // feasible return. tanker_transfer_request: a ChaserToStation request with that reserve as the floors.
+    std::optional<mission::TankerReserve> tanker_reserve(mission::TankerReserveParameters base = {},
+                                                         std::string* reason = nullptr) const;
+    std::optional<TransferRequest> tanker_transfer_request(mission::TankerReserveParameters base = {},
+                                                           std::string* reason = nullptr) const;
     // A scenario that starts docked (ISS i6): the armed pair (set_rendezvous_target with the chaser's active port on a
     // passive station port) mated at once - the chaser moved to the mated pose moving with the station, the mechanism
     // Docked, the compound merged (momentum kept). Throws std::logic_error without an armed mechanism or outside Ready.
@@ -1142,6 +1154,7 @@ private:
     TransferTanks transfer_tanks() const;
     void run_transfer_step(double dt_s);
     bool refuse_transfer(const char* reason);
+    gnc::DeorbitPlan ship_deorbit_plan(const gnc::DeorbitParameters& parameters) const;  // plan_ship_return's planner
     void end_transfer();  // a collision, undocking or a cleared target stops a running transfer
     void run_departure(Flying& flying);
     void measure_proximity_authority();  // pure translation authority along the station port axes, docking attitude
