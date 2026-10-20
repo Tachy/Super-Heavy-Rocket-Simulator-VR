@@ -148,7 +148,18 @@ int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s) 
         const auto s = sim::start_mission(session, config_dir_, id, epoch(tdb_s), time_);
         context_.site_id = godot::String::utf8(s.site_id.c_str());
         context_.mission_start_tdb_s = s.epoch.tdb_seconds_past_j2000();
-        return Outcome{s.refusal.empty(), godot::String::utf8(s.refusal.c_str())};
+        context_.mission_warnings = godot::Array();
+        std::string joined;
+        for (const auto& w : s.warnings) {
+            context_.mission_warnings.push_back(godot::String::utf8(w.c_str()));
+            joined += (joined.empty() ? "" : "; ") + w;
+        }
+        const bool from_window = s.launch_window && s.launch_window->feasible;
+        context_.iss_liftoff_tdb_s = from_window ? s.launch_window->liftoff.tdb_seconds_past_j2000() : 0.0;
+        context_.iss_separation_tdb_s = from_window ? s.launch_window->separation.tdb_seconds_past_j2000() : 0.0;
+        context_.iss_plane_bias_deg = from_window ? s.launch_window->plane_bias_rad * constants::rad_to_deg : 0.0;
+        if (!s.refusal.empty()) return Outcome{false, godot::String::utf8(s.refusal.c_str())};
+        return Outcome{true, godot::String::utf8(joined.c_str())};
     }));
 }
 
@@ -439,6 +450,47 @@ int64_t FlightSim::replan_lunar_return() {
     }));
 }
 
+godot::Dictionary FlightSim::iss_state() const { return snapshot()->iss_state; }
+godot::Dictionary FlightSim::rendezvous_plan() const { return snapshot()->rendezvous_plan; }
+godot::Dictionary FlightSim::docking_state() const { return snapshot()->docking_state; }
+godot::Dictionary FlightSim::station_geometry() const { return snapshot()->station_geometry; }
+godot::Dictionary FlightSim::iss_mission() const { return snapshot()->iss_mission; }
+
+int64_t FlightSim::proximity_hold() {
+    return static_cast<int64_t>(post_active("proximity_hold", [](sim::FlightSession& session) {
+        const bool ok = session.proximity_hold();
+        return Outcome{ok, godot::String::utf8(session.proximity_status().c_str())};
+    }));
+}
+
+int64_t FlightSim::proximity_retreat() {
+    return static_cast<int64_t>(post_active("proximity_retreat", [](sim::FlightSession& session) {
+        const bool ok = session.proximity_retreat();
+        return Outcome{ok, godot::String::utf8(session.proximity_status().c_str())};
+    }));
+}
+
+int64_t FlightSim::proximity_abort() {
+    return static_cast<int64_t>(post_active("proximity_abort", [](sim::FlightSession& session) {
+        const bool ok = session.proximity_abort();
+        return Outcome{ok, godot::String::utf8(session.proximity_status().c_str())};
+    }));
+}
+
+int64_t FlightSim::proximity_resume() {
+    return static_cast<int64_t>(post_active("proximity_resume", [](sim::FlightSession& session) {
+        const bool ok = session.proximity_resume();
+        return Outcome{ok, godot::String::utf8(session.proximity_status().c_str())};
+    }));
+}
+
+int64_t FlightSim::undock() {
+    return static_cast<int64_t>(post_active("undock", [](sim::FlightSession& session) {
+        const bool ok = session.undock();
+        return Outcome{ok, godot::String::utf8(session.docking_status().c_str())};
+    }));
+}
+
 godot::PackedVector3Array FlightSim::predict_trajectory(int index, double duration_s, double step_s) const {
     const auto s = snapshot();
     if (!body(*s, index)) return {};
@@ -530,6 +582,16 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("moon_terrain", "latitude_deg", "longitude_deg"), &FlightSim::moon_terrain);
     ClassDB::bind_method(D_METHOD("complete_pilot_correction"), &FlightSim::complete_pilot_correction);
     ClassDB::bind_method(D_METHOD("replan_lunar_return"), &FlightSim::replan_lunar_return);
+    ClassDB::bind_method(D_METHOD("iss_state"), &FlightSim::iss_state);
+    ClassDB::bind_method(D_METHOD("rendezvous_plan"), &FlightSim::rendezvous_plan);
+    ClassDB::bind_method(D_METHOD("docking_state"), &FlightSim::docking_state);
+    ClassDB::bind_method(D_METHOD("station_geometry"), &FlightSim::station_geometry);
+    ClassDB::bind_method(D_METHOD("iss_mission"), &FlightSim::iss_mission);
+    ClassDB::bind_method(D_METHOD("proximity_hold"), &FlightSim::proximity_hold);
+    ClassDB::bind_method(D_METHOD("proximity_retreat"), &FlightSim::proximity_retreat);
+    ClassDB::bind_method(D_METHOD("proximity_abort"), &FlightSim::proximity_abort);
+    ClassDB::bind_method(D_METHOD("proximity_resume"), &FlightSim::proximity_resume);
+    ClassDB::bind_method(D_METHOD("undock"), &FlightSim::undock);
     ClassDB::bind_method(D_METHOD("predict_trajectory", "index", "duration_s", "step_s"),
                          &FlightSim::predict_trajectory);
     ClassDB::bind_method(D_METHOD("target_orbit_points", "count"), &FlightSim::target_orbit_points);

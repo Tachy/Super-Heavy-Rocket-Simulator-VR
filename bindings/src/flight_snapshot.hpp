@@ -32,6 +32,9 @@ struct SnapshotContext {
     double mission_start_tdb_s = 0.0;
     PredictionRequest prediction_request;  // copied from the main thread before every build
     std::optional<std::chrono::steady_clock::time_point> prediction_wall;  // when the last prediction was made
+    // ISS missions (i6): from start_mission's result
+    godot::Array mission_warnings;
+    double iss_liftoff_tdb_s = 0.0, iss_separation_tdb_s = 0.0, iss_plane_bias_deg = 0.0;
 };
 
 // Everything the main thread reads, built on the simulation thread after every command and chunk (immutable once
@@ -53,6 +56,7 @@ struct FlightSnapshot {
     std::vector<Body> bodies;
     godot::Dictionary autopilot_status, tower_state, landing_zone, splashdown_zone;
     godot::Dictionary lunar_state, lunar_site;                       // build_lunar_state / build_lunar_site
+    godot::Dictionary iss_state, rendezvous_plan, docking_state, station_geometry, iss_mission;  // ISS i6
     std::shared_ptr<const environment::LunarTerrain> moon_terrain;  // immutable: queried on the main thread
     bool has_target_orbit = false;
     godot::Vector3 target_plane_normal_gcrf;
@@ -71,6 +75,13 @@ std::shared_ptr<const FlightSnapshot> empty_snapshot();
 // Lunar parts of the snapshot (flight_snapshot_lunar.cpp; FlightSim::lunar_state / lunar_site document the keys).
 godot::Dictionary build_lunar_state(const sim::FlightSession& session);
 godot::Dictionary build_lunar_site(const sim::FlightSession& session);
+
+// ISS parts of the snapshot (flight_snapshot_iss.cpp; FlightSim::iss_state etc. document the keys).
+godot::Dictionary build_iss_state(const sim::FlightSession& session);
+godot::Dictionary build_rendezvous_plan(const sim::FlightSession& session);
+godot::Dictionary build_docking_state(const sim::FlightSession& session);
+godot::Dictionary build_station_geometry(const sim::FlightSession& session);
+godot::Dictionary build_iss_mission(const sim::FlightSession& session, const SnapshotContext& context);
 
 // Builds the snapshot from the session (worker thread). `previous` supplies the prediction when it is not due.
 std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& session, time::Epoch epoch,

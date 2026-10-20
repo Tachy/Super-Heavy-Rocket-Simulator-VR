@@ -397,6 +397,7 @@ std::shared_ptr<const FlightSnapshot> empty_snapshot() {
     s->splashdown_zone = absent();
     s->lunar_state = absent();
     s->lunar_site = absent();
+    s->iss_state = s->rendezvous_plan = s->docking_state = s->station_geometry = s->iss_mission = absent();
     return s;
 }
 
@@ -412,6 +413,11 @@ std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& s
     s->active = session.active();
     s->lunar_state = build_lunar_state(session);
     s->lunar_site = build_lunar_site(session);
+    s->iss_state = build_iss_state(session);
+    s->rendezvous_plan = build_rendezvous_plan(session);
+    s->docking_state = build_docking_state(session);
+    s->station_geometry = build_station_geometry(session);
+    s->iss_mission = build_iss_mission(session, context);
     s->moon_terrain = session.moon_terrain_shared();
     if (!s->active) return s;
     s->mission_time_s = session.mission_time_s();

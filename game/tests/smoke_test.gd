@@ -45,6 +45,7 @@ func _initialize() -> void:
 	_check(_check_dragon(config_dir, tdb) == true, "Crew Dragon checks ran to the end")
 	_check(_check_thread(config_dir, tdb) == true, "simulation thread checks ran to the end")
 	_check(_check_lunar(config_dir, tdb) == true, "lunar mission checks ran to the end")
+	_check(_check_iss(config_dir, tdb) == true, "ISS mission checks ran to the end")
 
 	print("SMOKE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
@@ -220,4 +221,51 @@ func _check_lunar(config_dir: String, tdb: float) -> bool:
 	_check(not nrho.result(nid).get("ok", true) and "nicht durchführbar" in str(nrho.result(nid).get("message", "")),
 			"NRHO landing at 120 t is refused honestly")
 	print("  NRHO landing start (refused): %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
+	return true
+
+
+# ISS missions (i6): the three kinds start, ISS / rendezvous / docking telemetry, station geometry, commands.
+func _check_iss(config_dir: String, tdb: float) -> bool:
+	var sim := FlightSim.new()
+	sim.setup(config_dir)
+	var started := Time.get_ticks_msec()
+	var id: int = sim.start_mission("crew_dragon_iss", tdb)
+	_check(sim.wait_idle(120.0), "ISS rendezvous planned within 120 s")
+	_check(sim.result(id).get("ok", false), "crew_dragon_iss starts: %s" % sim.result(id).get("message", ""))
+	print("  ISS rendezvous start: %.1f s" % ((Time.get_ticks_msec() - started) / 1000.0))
+	var iss: Dictionary = sim.iss_state()
+	_check(iss.get("present", false) and iss["ports"].size() == 2, "iss_state with both ports")
+	var plan: Dictionary = sim.rendezvous_plan()
+	_check(plan.get("present", false) and plan.get("feasible", false), "rendezvous_plan feasible")
+	_check(plan.get("burns", []).size() >= 3, "rendezvous_plan has its burns")
+	_check(sim.iss_mission().get("leg", "") == "Phasenflug", "iss_mission in the phasing leg")
+	_check(sim.iss_mission().get("separation_tdb_s", 0.0) > 0.0, "the start is a launch window's separation")
+	var geo: Dictionary = sim.station_geometry()
+	_check(geo.get("present", false) and geo["boxes"].size() + geo["capsules"].size() >= 9,
+			"station_geometry primitives")
+	var hold: int = sim.proximity_hold()
+	_check(sim.wait_idle(10.0) and not sim.result(hold).get("ok", true), "hold refused outside the approach")
+	var und: int = sim.undock()
+	_check(sim.wait_idle(10.0) and not sim.result(und).get("ok", true), "undock refused while not docked")
+	_check(not sim.docking_state().get("docked", false), "not docked during phasing")
+	_check(sim.iss_mission().get("leg", "") == "Phasenflug", "refused commands leave the sequence running")
+
+	var pad := FlightSim.new()
+	pad.setup(config_dir)
+	var pid: int = pad.start_mission("falcon9_crew_dragon_iss", tdb)
+	_check(pad.wait_idle(120.0) and pad.result(pid).get("ok", false), "falcon9_crew_dragon_iss starts")
+	var liftoff: float = pad.iss_mission().get("liftoff_tdb_s", 0.0)
+	_check(liftoff > 0.0, "launch window in iss_mission")
+	_check(absf(pad.mission_start_tdb_s() - liftoff) < 1e-6, "the mission starts at the window")
+	_check(pad.mission_site_id() == "ccsfs_slc40", "pad mission: its launch site")
+
+	var dep := FlightSim.new()
+	dep.setup(config_dir)
+	var did: int = dep.start_mission("crew_dragon_iss_departure", tdb)
+	_check(dep.wait_idle(120.0) and dep.result(did).get("ok", false), "crew_dragon_iss_departure starts")
+	_check(dep.docking_state().get("docked", false), "departure mission starts docked")
+	_check(dep.docking_state().get("hooks_closed", false), "hooks closed while docked")
+	_check(dep.iss_mission().get("undock_tdb_s", 0.0) > dep.mission_start_tdb_s(), "undocking ahead")
+	var ab: int = dep.proximity_abort()
+	_check(dep.wait_idle(10.0) and not dep.result(ab).get("ok", true), "abort refused while docked")
 	return true

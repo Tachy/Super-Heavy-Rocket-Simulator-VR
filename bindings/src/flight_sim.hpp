@@ -173,6 +173,33 @@ public:
     // Re-plan of the lunar return from the current flight data (ok: the session's result, message: lunar_status()).
     int64_t replan_lunar_return();
 
+    // ISS (i6). iss_state: {present}; present: {index, position_gcrf_m, velocity_gcrf_mps, attitude_gcrf, mass_kg (the
+    // compound while docked), docked_mass_kg, ports: [{id, name, position_gcrf_m, axis_gcrf (outward docking axis),
+    // up_gcrf, soft_capture}], warnings (German: reboosts in the rendezvous / proximity span)}.
+    godot::Dictionary iss_state() const;
+    // Phasing plan: {present}; present: {feasible, reason, step, status (German), replans, total_delta_v_mps,
+    // propellant_kg, waypoint0_tdb_s, burns_flown, burns: [{kind (German), epoch_tdb_s, delta_v_mps, flown}]}.
+    godot::Dictionary rendezvous_plan() const;
+    // Proximity / docking / departure: {present}; present: {proximity_phase, docking_phase, departure_phase (German,
+    // "" when none), status, position_port_m / velocity_port_mps (chaser port in the station port frame), range_m,
+    // range_rate_mps, offset_m, misalignment_deg, clocking_deg (with a rendezvous target), latched, hooks_closed,
+    // docked, collision_impulse_ns (0: none), loads: {compression_n, shear_n, bending_nm} (with a mechanism)}.
+    godot::Dictionary docking_state() const;
+    // Station primitives for drawing, in the station vehicle frame (x from the bottom of stage 0, as
+    // body_cg_station_m): {present}; present: {boxes: [{center_m, axis_x, axis_y, axis_z, half_extents_m}],
+    // capsules: [{a_m, b_m, radius_m}], ports: [{id, position_m, axis, up}]}.
+    godot::Dictionary station_geometry() const;
+    // ISS mission sequence: {present}; present: {leg, status (German), port, liftoff_tdb_s, separation_tdb_s,
+    // plane_bias_deg (0 without a launch window), undock_tdb_s, deorbit_tdb_s (0 when not set), warnings}.
+    godot::Dictionary iss_mission() const;
+    // Proximity commands (ok: accepted, message: the German proximity status or refusal) and the undocking
+    // (message: the docking status).
+    int64_t proximity_hold();
+    int64_t proximity_retreat();
+    int64_t proximity_abort();
+    int64_t proximity_resume();
+    int64_t undock();
+
 protected:
     static void _bind_methods();
 
