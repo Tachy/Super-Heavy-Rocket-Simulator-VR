@@ -218,6 +218,7 @@ void FlightSession::dock_in_place() {
 }
 
 void FlightSession::merge_docked() {
+    reset_docked_update();
     auto& chaser = *bodies_[controlled_].body;
     auto& station = *bodies_[*station_index_].body;
     const double mc = chaser.vehicle().mass_properties().mass_kg;
@@ -295,6 +296,7 @@ void FlightSession::refresh_compound() {
 }
 
 void FlightSession::detach_compound() {
+    reset_docked_update();
     auto& station = *bodies_[*station_index_].body;
     auto s = station.state();
     const math::Vec3 cg_with = station.vehicle().mass_properties().cg_point_m();

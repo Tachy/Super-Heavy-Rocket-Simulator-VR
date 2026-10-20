@@ -708,6 +708,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             for (auto& flying : bodies_) flying.body->coast(env_, epoch_, coast);
             epoch_ += coast;
             sync_docked();
+            docked_update(coast, true);
             if (autopilot_.state == AutopilotState::Burn) {
                 autopilot_.burn.time_to_ignition_s -= coast;  // refreshed on the next tick
                 if (deorbit_replan_in_s() <= 1.0) {
@@ -784,6 +785,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         legs_->after_tick(pointers, env_, epoch_ + tick_s, tick_s);
         epoch_ += tick_s;
         if (docking_) docking_after_tick();
+        docked_update(tick_s, false);
     }
     if (bodies_.empty()) {
         epoch_ = target;

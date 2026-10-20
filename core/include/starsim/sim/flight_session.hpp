@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <filesystem>
 #include "starsim/config/drone_ship_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
@@ -1105,6 +1106,15 @@ private:
     time::Epoch departure_next_check_;  // the drift coasts; one guidance tick at least this often
     static constexpr double departure_check_s = 60.0;  // [E] the ellipsoid exit is read to a minute
     void separate_docked();  // the springs: the pair apart, the departure engaged
+    // Docked update (refuelling r4, flight_session_transfer.cpp): a docked pair's boil-off (both bodies, in the
+    // compound's environment, through set_tank_mass) every FlightBody::boil_off_interval_s and after every coast, and
+    // the propellant transfer's steps.
+    double docked_elapsed_s_ = 0.0;
+    std::array<std::vector<vehicle::TankBoilOff>, 2> docked_boil_off_last_;  // chaser, station
+    vehicle::LiquidEnvironment docked_liquid(size_t body_index, const math::Vec3& push_station_mps2) const;
+    double vent_docked_boil_off(double dt_s, const math::Vec3& push_station_mps2);  // returns the vented kg
+    void docked_update(double dt_s, bool after_coast);
+    void reset_docked_update();
     void run_departure(Flying& flying);
     void measure_proximity_authority();  // pure translation authority along the station port axes, docking attitude
     struct RendezvousDebugCommand {  // diagnostics: the state at a burn's command (execution error after it)

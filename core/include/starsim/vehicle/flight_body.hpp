@@ -198,11 +198,18 @@ public:
 
     // Boil-off (refuelling r2): the heat balance is evaluated every boil_off_interval_s of free flight and after every
     // coast; the vented mass is the trapezoid of the last two evaluations' flows per tank. Below
-    // boil_off_min_altitude_m in air (convection and entry heating are not modelled), clamped, caught, landed, resting
-    // or docked nothing boils off (a docked tanker's boil-off belongs to the r4 transfer).
+    // boil_off_min_altitude_m in air (convection and entry heating are not modelled), clamped, caught, landed, resting,
+    // docked or carrying a docked visitor nothing boils off here: a docked pair is vented by the session in the
+    // compound's environment (refuelling r4, FlightSession::set_tank_mass keeps the compound CG).
     static constexpr double boil_off_interval_s = 10.0;         // [E]
     static constexpr double boil_off_min_altitude_m = 100.0e3;  // [E]
     const BoilOffRate& boil_off_rate() const { return boil_off_rate_; }  // at the last evaluation
+    void set_boil_off_rate(const BoilOffRate& rate) { boil_off_rate_ = rate; }  // the session's docked evaluation
+    // The rates now in `liquid` (not applied; empty with the flag off or without an ephemeris).
+    std::vector<TankBoilOff> boil_off_rates_now(const FlightEnvironment& env, time::Epoch epoch,
+                                                const LiquidEnvironment& liquid) const;
+    // The specific force of the last tick or at the end of the last coast (moves the liquid).
+    const math::Vec3& liquid_specific_force_body_mps2() const { return boil_off_specific_force_body_mps2_; }
 
     // A station in ideal attitude (i1): the body axes follow LVLH (times body_in_lvlh) exactly after every step and
     // coast; contact torques do not turn it (its CMGs are taken as strong enough - documented simplification). The

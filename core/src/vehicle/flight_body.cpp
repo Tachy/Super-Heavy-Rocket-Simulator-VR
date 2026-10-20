@@ -340,8 +340,22 @@ void FlightBody::release_landed() {
     resting_ = false;
 }
 
+std::vector<TankBoilOff> FlightBody::boil_off_rates_now(const FlightEnvironment& env, time::Epoch epoch,
+                                                        const LiquidEnvironment& liquid) const {
+    if (!env.boil_off || env.ephemeris == nullptr) return {};
+    const Vec3 sun = env.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch).position_m - state_.position_gcrf_m;
+    const Vec3 moon = env.ephemeris->state_gcrf(ephemeris::Body::Moon, epoch).position_m - state_.position_gcrf_m;
+    return boil_off_rates(*vehicle_, environment::earth_orbit_radiation(state_.position_gcrf_m, sun, &moon),
+                          state_.attitude, &liquid);
+}
+
 void FlightBody::boil_off(const FlightEnvironment& env, time::Epoch epoch, double dt_s) {
     if (!env.boil_off || env.ephemeris == nullptr) return;
+    if (docked_ || vehicle_->attached_mass()) {  // a docked pair is vented by the session (refuelling r4)
+        boil_off_elapsed_s_ = 0.0;
+        boil_off_last_.clear();
+        return;
+    }
     boil_off_elapsed_s_ += dt_s;
     // The margin keeps a sum of ticks (100 x 0.1 s = 9.99...98 s) on its interval.
     if (boil_off_elapsed_s_ < boil_off_interval_s - 1e-9) return;
@@ -354,12 +368,9 @@ void FlightBody::boil_off(const FlightEnvironment& env, time::Epoch epoch, doubl
             return;
         }
     }
-    const Vec3 sun = env.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch).position_m - state_.position_gcrf_m;
-    const Vec3 moon = env.ephemeris->state_gcrf(ephemeris::Body::Moon, epoch).position_m - state_.position_gcrf_m;
-    const LiquidEnvironment liquid{boil_off_specific_force_body_mps2_, state_.angular_velocity_body_radps,
-                                   state_.position_gcrf_m, state_.attitude};
-    auto now = boil_off_rates(*vehicle_, environment::earth_orbit_radiation(state_.position_gcrf_m, sun, &moon),
-                              state_.attitude, &liquid);
+    auto now = boil_off_rates_now(env, epoch,
+                                  {boil_off_specific_force_body_mps2_, state_.angular_velocity_body_radps,
+                                   state_.position_gcrf_m, state_.attitude, {}});
     for (const auto& tank : now) {
         double flow = tank.mass_flow_kgps;
         for (const auto& before : boil_off_last_) {

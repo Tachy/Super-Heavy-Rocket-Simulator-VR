@@ -15,11 +15,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "refuelling_test_support.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/propellant_transfer.hpp"
+#include "starsim/vehicle/docking_port.hpp"
 #include "starsim/vehicle/propellant_transfer.hpp"
 #include "starsim/vehicle/vehicle.hpp"
+#include "test_support.hpp"
 
 using namespace starsim;
 
@@ -286,4 +289,51 @@ TEST_CASE("Stop closes the valves", "[refuelling][prop_transfer]") {
     const auto out = b.transfer->step({});
     CHECK(out.moved_kg[0] == 0.0);
     CHECK_FALSE(out.thrust);
+}
+
+namespace {
+
+double main_kg(const vehicle::FlightBody& body) { return body.vehicle().main_propellant_kg(); }
+
+double port_gap_m(const sim::FlightSession& s) {
+    return norm(vehicle::port_kinematics(s.body(0), "transfer_dock").position_gcrf_m -
+                vehicle::port_kinematics(s.body(1), "transfer_dock").position_gcrf_m);
+}
+
+}  // namespace
+
+TEST_CASE("Docked boil-off: both ships vent through the compound, the hulls stay mated",
+          "[refuelling][prop_transfer][boil_off][docking]") {
+    test::spice_session();
+    refuelling_test::TankerAtPort f({0.0, 0.0, 0.0});
+    f.session.set_rendezvous_target(1, "transfer_dock", "transfer_dock");
+    f.session.dock_in_place();
+    REQUIRE(f.session.docked());
+    const double gap0 = port_gap_m(f.session);
+    const double tanker0 = main_kg(f.session.body(0));
+    const double depot0 = main_kg(f.session.body(1));
+    f.session.advance_to(f.session.epoch() + 2.0 * 3600.0, 100000);
+    const double tanker_loss = tanker0 - main_kg(f.session.body(0));
+    const double depot_loss = depot0 - main_kg(f.session.body(1));
+    INFO("tanker " << tanker_loss << " kg, depot " << depot_loss << " kg in 2 h");
+    CHECK(tanker_loss > 100.0);  // bare stainless: tonnes per day
+    CHECK(depot_loss > 10.0);    // r2: ~450 kg/day full -> ~37 kg in 2 h (600 t: less wall wetted)
+    CHECK(depot_loss < 100.0);
+    CHECK(std::abs(port_gap_m(f.session) - gap0) < 1e-5);  // r3 M2: the depot no longer vents past the compound
+    CHECK(f.session.compound_mass()->mass_kg ==
+          Catch::Approx(f.session.body(1).vehicle().mass_properties().mass_kg));
+    CHECK(f.session.body(0).boil_off_rate().oxidizer_kgps > 0.0);  // shown for the held tanker too
+}
+
+TEST_CASE("Docked boil-off follows the fidelity flag", "[refuelling][prop_transfer][boil_off][docking]") {
+    test::spice_session();
+    refuelling_test::TankerAtPort f({0.0, 0.0, 0.0});
+    f.session.set_boil_off(false);
+    f.session.set_rendezvous_target(1, "transfer_dock", "transfer_dock");
+    f.session.dock_in_place();
+    const double tanker0 = main_kg(f.session.body(0));
+    const double depot0 = main_kg(f.session.body(1));
+    f.session.advance_to(f.session.epoch() + 3600.0, 100000);
+    CHECK(main_kg(f.session.body(0)) == tanker0);
+    CHECK(main_kg(f.session.body(1)) == depot0);
 }
