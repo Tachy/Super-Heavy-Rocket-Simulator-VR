@@ -243,12 +243,9 @@ void FlightSession::merge_docked() {
     docked_position_station_m_ = transpose(rs) * (cg_mated - ss.position_gcrf_m);
     docked_mass_kg_ = mc;
     docking_merge_.momentum_after = (mc + ms) * ss.velocity_gcrf_mps;
-    const auto mpc = chaser.vehicle().mass_properties();
-    const math::Mat3 rel = docked_attitude_station_.to_matrix();
-    // about the compound CG (station body frame): the station CG sits at cg_old - cg_new from it
-    compound_mass_ = vehicle::combine_mass(ms, cg_old - cg_new, diagonal(mps.inertia_kg_m2) /* principal axes [E] */, mc,
-                                           docked_position_station_m_,
-                                           rel * diagonal(mpc.inertia_kg_m2) * transpose(rel));
+    compound_cg_point_m_ = cg_new;
+    docked_chaser_cg_point_m_ = chaser.vehicle().mass_properties().cg_point_m();
+    update_compound_mass();
     chaser.hold_docked();
     sync_docked();
     // the flight ends docked
@@ -257,6 +254,44 @@ void FlightSession::merge_docked() {
     if (autopilot_.state == AutopilotState::Proximity) autopilot_.state = AutopilotState::Off;
     attitude_mode_ = {};
     translation_port_ = {};
+}
+
+void FlightSession::update_compound_mass() {
+    const auto& chaser = bodies_[controlled_].body->vehicle();
+    auto& station = bodies_[*station_index_].body->vehicle();
+    const auto attached = station.attached_mass();
+    station.set_attached_mass(std::nullopt);
+    const auto mps = station.mass_properties();  // the station alone
+    station.set_attached_mass(attached);
+    const auto mpc = chaser.mass_properties();
+    const math::Mat3 rel = docked_attitude_station_.to_matrix();
+    // about the compound CG (station body frame): the station CG sits at its own CG point minus the compound's
+    compound_mass_ = vehicle::combine_mass(mps.mass_kg, mps.cg_point_m() - compound_cg_point_m_,
+                                           diagonal(mps.inertia_kg_m2) /* principal axes [E] */, mpc.mass_kg,
+                                           docked_position_station_m_,
+                                           rel * diagonal(mpc.inertia_kg_m2) * transpose(rel));
+}
+
+void FlightSession::refresh_compound() {
+    auto& chaser = *bodies_[controlled_].body;
+    auto& station = *bodies_[*station_index_].body;
+    auto attached = *station.vehicle().attached_mass();
+    // the chaser's CG moves in its own hull: carry that shift into the station frame (the pair's relative attitude)
+    const math::Vec3 chaser_cg = chaser.vehicle().mass_properties().cg_point_m();
+    attached.position_m += docked_attitude_station_.rotate(chaser_cg - docked_chaser_cg_point_m_);
+    attached.mass_kg = chaser.vehicle().mass_properties().mass_kg;
+    station.vehicle().set_attached_mass(attached);
+    // the station body's state is the compound CG: move it with the new CG point, hulls fixed, velocity kept
+    const math::Vec3 cg_new = station.vehicle().mass_properties().cg_point_m();
+    auto ss = station.state();
+    ss.position_gcrf_m += ss.attitude.rotate(cg_new - compound_cg_point_m_);
+    station.set_state(ss);
+    docked_position_station_m_ = attached.position_m - cg_new;
+    docked_mass_kg_ = attached.mass_kg;
+    compound_cg_point_m_ = cg_new;
+    docked_chaser_cg_point_m_ = chaser_cg;
+    update_compound_mass();
+    sync_docked();
 }
 
 void FlightSession::detach_compound() {

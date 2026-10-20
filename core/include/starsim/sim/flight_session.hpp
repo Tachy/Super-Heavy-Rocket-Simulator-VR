@@ -672,6 +672,10 @@ public:
     const std::vector<contact::DockingEvent>* docking_events() const;  // nullptr without a mechanism
     std::optional<contact::LoadPeaks> docking_loads() const;
     bool docked() const;
+    // A tank of body `body_index` at run time (clamped; refuelling r4 transfer, test mode). For a docked pair the
+    // compound follows: the chaser's mass stays attached at its (hull-fixed) CG, the station body's state moves with
+    // the compound CG (velocity kept: the transfer is internal, venting isotropic), the hulls stay in place.
+    void set_tank_mass(size_t body_index, size_t stage_index, std::string_view tank_id, double mass_kg);
     bool docking_busy() const;  // capturing (contact .. hooks) or docked
     std::optional<vehicle::CompoundMass> compound_mass() const { return compound_mass_; }
     std::optional<double> collision_impulse_ns() const;  // hull contact with the station (N s), from the first one
@@ -1063,11 +1067,15 @@ private:
     math::Vec3 docked_position_station_m_;  // chaser CG in the station body frame while docked
     math::Quat docked_attitude_station_;    // chaser body -> station body
     double docked_mass_kg_ = 0.0;           // attached to the station vehicle (Vehicle::set_attached_mass)
+    math::Vec3 compound_cg_point_m_;        // station vehicle frame, at the last merge / refresh
+    math::Vec3 docked_chaser_cg_point_m_;   // chaser vehicle frame, at the last merge / refresh
     std::optional<contact::DockingPhase> docking_seen_phase_;
     bool docking_collision_reported_ = false;
     bool docking_debug_ = false;  // STARSIM_DEBUG_DOCKING, read once at construction
     time::Epoch docking_debug_next_;
     size_t docking_debug_events_ = 0;
+    void refresh_compound();       // set_tank_mass on a docked pair
+    void update_compound_mass();   // compound_mass_ from the station and the attached chaser
     void arm_docking();  // set_rendezvous_target: a compatible pair at the station
     void reset_docking();  // clear_rendezvous_target: releases a docked hold and the station's extra mass
     bool docking_ticked() const;  // the mechanism or the hull contact needs every tick

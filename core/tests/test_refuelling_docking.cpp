@@ -484,3 +484,60 @@ TEST_CASE("Tanker undocks from the depot: springs, departure out of the ellipsoi
           Catch::Approx(std::sqrt(2.0 * 150.0 * (1.0 / chaser_kg + 1.0 / depot_kg))).epsilon(0.01));
     CHECK(f.session.docking_status() != "Kollision");
 }
+
+namespace {
+
+double tank_kg(const vehicle::FlightBody& body, const std::string& id) {
+    for (const auto& k : body.vehicle().stages()[0].tanks) {
+        if (k.config.id == id) return k.mass_kg;
+    }
+    return 0.0;
+}
+
+}  // namespace
+
+TEST_CASE("Tank changes of a docked pair move the compound CG, not the hulls", "[refuelling][docking]") {
+    test::spice_session();
+    refuelling_test::TankerAtPort f({0.0, 0.0, 0.0});
+    f.session.set_rendezvous_target(1, "transfer_dock", "transfer_dock");
+    f.session.dock_in_place();
+    REQUIRE(f.session.docked());
+    const auto port_before = vehicle::port_kinematics(f.session.body(1), "transfer_dock").position_gcrf_m;
+    const auto chaser_port_before = vehicle::port_kinematics(f.session.body(0), "transfer_dock").position_gcrf_m;
+    const Vec3 v_before = f.session.body(1).state().velocity_gcrf_mps;
+    const double total_before = f.session.body(1).vehicle().mass_properties().mass_kg;
+
+    // 50 t of LOX from the tanker into the depot (what r4 will do in steps)
+    f.session.set_tank_mass(0, 0, "lox_main", tank_kg(f.session.body(0), "lox_main") - 50.0e3);
+    f.session.set_tank_mass(1, 0, "lox_main", tank_kg(f.session.body(1), "lox_main") + 50.0e3);
+
+    CHECK(f.session.body(1).vehicle().mass_properties().mass_kg == Catch::Approx(total_before));
+    CHECK(norm(vehicle::port_kinematics(f.session.body(1), "transfer_dock").position_gcrf_m - port_before) < 1e-6);
+    CHECK(norm(vehicle::port_kinematics(f.session.body(0), "transfer_dock").position_gcrf_m - chaser_port_before) <
+          1e-6);
+    CHECK(norm(f.session.body(1).state().velocity_gcrf_mps - v_before) < 1e-12);
+    CHECK(f.session.body(1).vehicle().attached_mass()->mass_kg ==
+          Catch::Approx(f.session.body(0).vehicle().mass_properties().mass_kg));
+    REQUIRE(f.session.compound_mass());
+    CHECK(f.session.compound_mass()->mass_kg == Catch::Approx(total_before));
+}
+
+TEST_CASE("Emptied tanks keep the compound finite", "[refuelling][docking]") {
+    test::spice_session();
+    refuelling_test::TankerAtPort f({0.0, 0.0, 0.0});
+    f.session.set_rendezvous_target(1, "transfer_dock", "transfer_dock");
+    f.session.dock_in_place();
+    for (const char* tank : {"lox_main", "ch4_main", "lox_header", "ch4_header"}) {
+        f.session.set_tank_mass(0, 0, tank, 0.0);
+        f.session.set_tank_mass(1, 0, tank, 0.0);
+    }
+    const auto& attached = f.session.body(1).vehicle().attached_mass();
+    REQUIRE(attached);
+    CHECK(std::isfinite(attached->position_m.x));
+    CHECK(attached->mass_kg == Catch::Approx(f.session.body(0).vehicle().mass_properties().mass_kg));
+    CHECK(f.session.compound_mass()->mass_kg ==
+          Catch::Approx(f.session.body(1).vehicle().mass_properties().mass_kg));
+    CHECK(std::isfinite(f.session.body(1).state().position_gcrf_m.x));
+    f.session.advance_to(f.session.epoch() + 60.0);
+    CHECK(f.session.docked());
+}

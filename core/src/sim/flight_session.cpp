@@ -470,6 +470,12 @@ size_t FlightSession::add_station(const config::VehicleConfig& config, const mat
     return *station_index_;
 }
 
+void FlightSession::set_tank_mass(size_t body_index, size_t stage_index, std::string_view tank_id, double mass_kg) {
+    bodies_.at(body_index).body->vehicle().set_tank_mass(stage_index, tank_id, mass_kg);
+    const bool in_compound = docked() && station_index_ && (body_index == controlled_ || body_index == *station_index_);
+    if (in_compound) refresh_compound();
+}
+
 void FlightSession::set_epoch(time::Epoch epoch) {
     if (!bodies_.empty()) throw std::logic_error("set_epoch: only for a session without bodies");
     epoch_ = epoch;
