@@ -160,6 +160,34 @@ TEST_CASE("Phasing plan refuses without the reserve", "[rendezvous][phasing]") {
     CHECK(plan.reason.rfind("Kein Rendezvous: Treibstoff", 0) == 0);
 }
 
+TEST_CASE("Phasing plan from above the target: a retrograde boost descends to Waypoint 0", "[rendezvous][phasing]") {
+    test::spice_session();
+    Fixture fx;
+    const auto start = rendezvous_test::start(fx.clock, fx.spice_earth, 90.0, 0.0);
+    // the chaser 60 km above the ISS, 40 deg ahead of it, circular in its plane (refuelling f1)
+    const auto& iss = start.iss.state_gcrf;
+    const Vec3 n = math::normalized(math::cross(iss.position_m, iss.velocity_mps));
+    const Vec3 r_hat = math::Quat::from_axis_angle(n, 40.0 * constants::deg_to_rad).rotate(
+        math::normalized(iss.position_m));
+    const double r = math::norm(iss.position_m) + 60e3;
+    const math::StateVector chaser{r * r_hat, std::sqrt(gm / r) * math::cross(n, r_hat)};
+    auto p = fx.parameters();
+    p.mission_limit_s = 48.0 * 3600.0;
+    const auto plan = fx.planner.plan(chaser, iss, start.epoch, p, dracos, dragon_propellant_kg);
+    REQUIRE(plan.feasible);
+    CHECK(plan.schedule.above);
+    REQUIRE(plan.burns.front().kind == mission::PhasingBurnKind::Boost);
+    const auto boost = fx.planner.retarget(mission::PhasingBurnKind::Boost, chaser, iss, start.epoch, plan, dracos);
+    REQUIRE(boost);
+    const auto at_boost = gnc::coast_with_drag(fx.gravity, chaser, start.epoch, boost->epoch,
+                                               p.chaser_drag_area_per_mass_m2pkg);
+    CHECK(math::dot(boost->delta_v_gcrf_mps, at_boost.velocity_mps) < 0.0);  // retrograde
+    rendezvous_test::Start flown = start;
+    flown.dragon = chaser;
+    const auto rel = fly_plan(fx, plan, flown);
+    CHECK(math::norm(rel.position_m - Vec3{0.0, 0.0, p.waypoint0_below_m}) < 100.0);
+}
+
 TEST_CASE("Phasing campaign over the phase angle", "[rendezvous][phasing][validation]") {
     test::spice_session();
     Fixture fx;

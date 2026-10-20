@@ -27,6 +27,12 @@ struct PhasingParameters {
     double target_drag_area_per_mass_m2pkg = 0.0;
 };
 
+// A phasing orbit a chaser raises to after its insertion (refuelling f1: chosen per launch window).
+struct PhasingOrbit {
+    double periapsis_radius_m = 0.0;
+    double apoapsis_radius_m = 0.0;
+};
+
 // Burn epochs of the coelliptic profile from mean motions with the secular J2 rates (two-body otherwise): the Dragon
 // either waits on its orbit until the phase is right and boosts (phasing_revolutions = 0, the earliest window) or, when
 // that would arrive before earliest_arrival_s, slows the catch-up with a prograde phase burn at first_burn_lead_s (an
@@ -39,6 +45,7 @@ struct PhasingSchedule {
     int phasing_revolutions = 0;
     int extra_laps = 0;
     double phase_orbit_apoapsis_radius_m = 0.0;  // the phase burn's target apoapsis (0 without one)
+    bool above = false;  // the chaser above the target: the target catches up, the boost descends (refuelling f1)
     time::Epoch phase_epoch, boost_epoch, coelliptic_epoch, approach_initiation_epoch, waypoint0_epoch;
 };
 

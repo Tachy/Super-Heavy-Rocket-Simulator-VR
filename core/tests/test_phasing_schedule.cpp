@@ -77,7 +77,7 @@ TEST_CASE("Schedule: a phase beyond the mission limit is refused, a longer limit
     CHECK(lap.extra_laps == 1);
 }
 
-TEST_CASE("Schedule refuses a chaser above the coelliptic height", "[rendezvous][phasing]") {
+TEST_CASE("Schedule refuses a chaser between the coelliptic height and the target", "[rendezvous][phasing]") {
     const auto target = circular(415e3, 1.0);
     const auto s = mission::phasing_schedule(circular(414e3, 0.5), target, t0, {}, gm);
     CHECK_FALSE(s.feasible);
@@ -94,5 +94,51 @@ TEST_CASE("Schedule refuses a chaser above the coelliptic height", "[rendezvous]
     eccentric.raan_rad = 1.0;
     const auto e = mission::phasing_schedule(orbit::state_from_elements(eccentric, gm), target, t0, {}, gm);
     CHECK_FALSE(e.feasible);
-    CHECK(e.reason == "Kein Rendezvous: Bahn nicht unter der koelliptischen Höhe");
+    CHECK(e.reason == "Kein Rendezvous: Bahn kreuzt die Zielbahn");
+}
+
+TEST_CASE("Schedule: a chaser above the target waits for the target to catch up, then descends",
+          "[rendezvous][phasing]") {
+    mission::PhasingParameters p;
+    p.mission_limit_s = 48.0 * 3600.0;
+    const auto target = circular(200e3, 1.0);
+    for (const double ahead_deg : {10.0, 40.0, 80.0}) {  // the chaser ahead of the target
+        CAPTURE(ahead_deg);
+        const auto chaser = circular(260e3, 1.0 + ahead_deg * deg);
+        const auto s = mission::phasing_schedule(chaser, target, t0, p, gm);
+        REQUIRE(s.feasible);
+        CHECK(s.above);
+        CHECK(s.phasing_revolutions == 0);
+        CHECK(s.boost_epoch - t0 >= p.first_burn_lead_s);
+        CHECK(s.waypoint0_epoch - t0 <= p.mission_limit_s);
+    }
+    // the further ahead, the longer the wait (the target catches up at a constant rate)
+    const auto near = mission::phasing_schedule(circular(260e3, 1.0 + 10.0 * deg), target, t0, p, gm);
+    const auto far = mission::phasing_schedule(circular(260e3, 1.0 + 80.0 * deg), target, t0, p, gm);
+    CHECK(far.boost_epoch - near.boost_epoch > 0.0);
+}
+
+TEST_CASE("Schedule: an above orbit whose periapsis crosses the target's is refused", "[rendezvous][phasing]") {
+    orbit::KeplerianElements e;  // 195 x 300 km around a 200 km target: the periapsis dips below
+    e.semi_major_axis_m = re + 247.5e3;
+    e.eccentricity = 52.5e3 / (re + 247.5e3);
+    e.inclination_rad = 51.64 * deg;
+    e.raan_rad = 1.0;
+    const auto s = mission::phasing_schedule(orbit::state_from_elements(e, gm), circular(200e3, 1.0), t0, {}, gm);
+    CHECK_FALSE(s.feasible);
+    CHECK(s.reason == "Kein Rendezvous: Bahn kreuzt die Zielbahn");
+}
+
+TEST_CASE("Schedule: the catch-up rate matches dn = -1.5 n da / a", "[rendezvous][phasing]") {
+    // the boosts of two leads 20 deg apart differ by 20 deg / |dn|
+    mission::PhasingParameters p;
+    p.mission_limit_s = 96.0 * 3600.0;
+    const auto target = circular(200e3, 1.0);
+    const auto a = mission::phasing_schedule(circular(170e3, 1.0 - 30.0 * deg), target, t0, p, gm);
+    const auto b = mission::phasing_schedule(circular(170e3, 1.0 - 50.0 * deg), target, t0, p, gm);
+    REQUIRE(a.feasible);
+    REQUIRE(b.feasible);
+    const double r = re + 185e3, n = std::sqrt(gm / (r * r * r));
+    const double dn = 1.5 * n * 30e3 / r;  // rad/s, two-body at the mean radius (J2 changes it by < 1 %)
+    CHECK(b.boost_epoch - a.boost_epoch == Catch::Approx(20.0 * deg / dn).epsilon(0.02));
 }

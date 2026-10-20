@@ -157,6 +157,7 @@ add_executable(starsim_core_tests
     test_clohessy_wiltshire.cpp
     test_rendezvous_geometry.cpp
     test_phasing_schedule.cpp
+    test_raise_to_orbit.cpp
     test_phasing_planner.cpp
     test_rendezvous_phasing_session.cpp
     test_proximity_geometry.cpp

@@ -80,6 +80,25 @@ std::optional<BurnNode> raise_periapsis_at_apoapsis(const math::StateVector& sta
     return node;
 }
 
+std::optional<BurnNode> next_raise_node(const math::StateVector& state, time::Epoch now, double gm,
+                                        double periapsis_radius_m, double apoapsis_radius_m, double tolerance_m) {
+    const auto el = orbit::elements_from_state(state, gm);
+    if (el.eccentricity >= 1.0 || el.semi_major_axis_m <= 0.0) return std::nullopt;
+    const double r_p = el.semi_major_axis_m * (1.0 - el.eccentricity);
+    const double r_a = el.semi_major_axis_m * (1.0 + el.eccentricity);
+    // 1. a higher apoapsis: burn at the current apoapsis so that the opposite apsis becomes the target apoapsis
+    if (apoapsis_radius_m > r_a + tolerance_m) {
+        const double dt = time_to_anomaly(el, constants::pi, gm);
+        const auto at_node = orbit::propagate_two_body(state, gm, dt);
+        const double r = norm(at_node.position_m);
+        const double v_new = std::sqrt(gm * (2.0 / r - 2.0 / (r + apoapsis_radius_m)));
+        return BurnNode{now + dt, (v_new - norm(at_node.velocity_mps)) * math::normalized(at_node.velocity_mps)};
+    }
+    // 2. the periapsis (raised only: a higher one is left alone)
+    if (r_p < periapsis_radius_m - tolerance_m) return set_periapsis_at_apoapsis(state, now, gm, periapsis_radius_m);
+    return std::nullopt;
+}
+
 double burn_duration_s(double delta_v, double mass_kg, double thrust_n, double mass_flow_kgps) {
     if (thrust_n <= 0.0 || mass_flow_kgps <= 0.0) return 0.0;
     const double ve = thrust_n / mass_flow_kgps;

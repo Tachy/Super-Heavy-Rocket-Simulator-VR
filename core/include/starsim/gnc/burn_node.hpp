@@ -31,6 +31,12 @@ std::optional<BurnNode> raise_periapsis_at_apoapsis(const math::StateVector& sta
 std::optional<BurnNode> set_periapsis_at_apoapsis(const math::StateVector& state, time::Epoch now, double gm_m3ps2,
                                                   double periapsis_radius_m);
 
+// Next apsis burn from `state` towards the orbit periapsis_radius_m x apoapsis_radius_m (two-body; refuelling f1):
+// first the apoapsis (burn at the current apoapsis), then the periapsis (burn at the new apoapsis); empty when both
+// are within tolerance_m or above, or the orbit is open.
+std::optional<BurnNode> next_raise_node(const math::StateVector& state, time::Epoch now, double gm_m3ps2,
+                                        double periapsis_radius_m, double apoapsis_radius_m, double tolerance_m);
+
 // Burn duration for a delta-v from the rocket equation (constant thrust and mass flow).
 double burn_duration_s(double delta_v_mps, double mass_kg, double thrust_n, double mass_flow_kgps);
 

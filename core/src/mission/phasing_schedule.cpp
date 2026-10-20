@@ -49,10 +49,14 @@ PhasingSchedule phasing_schedule(const math::StateVector& chaser, const math::St
     }
     const double r_d = ec.semi_major_axis_m, r_i = et.semi_major_axis_m;
     const double r_c = r_i - p.coelliptic_height_m;
-    if (r_d * (1.0 + ec.eccentricity) >= r_c) {  // the apoapsis: an eccentric start must not cross the coelliptic height
-        s.reason = "Kein Rendezvous: Bahn nicht unter der koelliptischen Höhe";
+    // below: the apoapsis under the coelliptic height (an eccentric start must not cross it); above (refuelling f1):
+    // the periapsis keeps coelliptic_height_m [E] above the target's orbit while the target catches up
+    const bool above = r_d * (1.0 - ec.eccentricity) > r_i + p.coelliptic_height_m;
+    if (r_d * (1.0 + ec.eccentricity) >= r_c && !above) {
+        s.reason = "Kein Rendezvous: Bahn kreuzt die Zielbahn";
         return s;
     }
+    s.above = above;
     const double n_d = latitude_rate(r_d, ec.eccentricity, ec.inclination_rad, gm);
     const double n_i = latitude_rate(r_i, et.eccentricity, et.inclination_rad, gm);
     const double t_h = half_transfer_s(r_d, r_c, gm);
@@ -62,10 +66,14 @@ PhasingSchedule phasing_schedule(const math::StateVector& chaser, const math::St
     double lead = -in_plane_angle_rad(target, chaser.position_m);  // > 0: target ahead
     if (lead < 0.0) lead += constants::two_pi;
     const double tail_s = t_h + p.coelliptic_coast_s + p.approach_transfer_s;
-    const double closing = n_d - n_i;  // rad/s of catch-up on the start orbit (the coelliptic closing is in behind_c)
+    // rad/s of catch-up on the start orbit (the coelliptic closing is in behind_c): below, the chaser gains on the
+    // target (the lead shrinks); above, the target gains (the lead grows)
+    const double closing = std::abs(n_d - n_i);
+    const double above_catch_up = std::fmod(required_at_boost - lead + 2.0 * constants::two_pi, constants::two_pi);
 
     for (int m = 0; m <= max_extra_laps; ++m) {
-        const double catch_up = lead + constants::two_pi * m - required_at_boost;
+        const double catch_up =
+            above ? above_catch_up + constants::two_pi * m : lead + constants::two_pi * m - required_at_boost;
         if (catch_up < 0.0) continue;
         // 1. Wait on the start orbit: the earliest window of this lap.
         const double wait_s = catch_up / closing;
@@ -76,6 +84,7 @@ PhasingSchedule phasing_schedule(const math::StateVector& chaser, const math::St
             s.boost_epoch = epoch + wait_s;
             break;
         }
+        if (above) continue;  // the phase burn only slows a chaser below the target
         // 2. Phase burn at first_burn_lead_s raising the apoapsis to r_a, boost after k revolutions at its point:
         //    catch-up = closing * lead_s + k (2 pi - n_i P(a)) with P = 2 pi / n(a), a = (r_d + r_a) / 2.
         bool found = false;
