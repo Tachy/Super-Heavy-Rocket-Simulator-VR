@@ -156,3 +156,21 @@ TEST_CASE("ISS mission sequence: WaitUndock undocks at its epoch, also through o
     REQUIRE(opened != events.end());
     CHECK(std::abs(opened->t_s - 1234.0) < 0.01);  // the mechanism clock starts at the docked start (t0)
 }
+
+TEST_CASE("ISS mission sequence: an undocking by hand before the undock epoch continues as the departure",
+          "[iss][iss_mission][docking]") {
+    test::spice_session();
+    auto d = docking_test::DragonAtPort::place("ida2", 30.0, 0.0, 0.0, 0.0);
+    auto& s = d.session;
+    s.dock_in_place();
+    sim::IssMissionSequence q;
+    q.station_port = "ida2";
+    q.undock_epoch = d.t0 + 1234.0;
+    s.set_iss_mission(q);
+    s.advance_to(d.t0 + 10.0, 100000);
+    REQUIRE(s.undock());  // the player undocks early (FlightSim::undock)
+    s.advance_to(d.t0 + 1300.0, 1000000);
+    INFO(s.iss_mission_status());
+    CHECK(s.iss_mission_leg() == IssMissionLeg::Departure);
+    CHECK(s.iss_mission_status().rfind("Mission beendet", 0) != 0);
+}

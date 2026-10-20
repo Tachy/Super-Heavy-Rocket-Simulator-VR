@@ -459,6 +459,16 @@ void FlightSession::set_epoch(time::Epoch epoch) {
     launch_epoch_ = epoch;
 }
 
+void FlightSession::clear_bodies() {
+    bodies_.clear();
+    clear_station();
+    clear_rendezvous_target();
+    reset_rendezvous();
+    reset_leg_landing();
+    reset_mission_state();
+    controlled_ = 0;
+}
+
 void FlightSession::clear_station() {
     station_index_.reset();
     station_impulses_.clear();

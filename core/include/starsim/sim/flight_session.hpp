@@ -701,6 +701,10 @@ public:
     void mark_rendezvous_at_waypoint0_for_test();
     void mark_iss_leg_for_test(IssMissionLeg leg) { iss_leg_ = leg; }
 
+    // Removes every body (the station and a mission sequence with them): an empty session, e.g. after a refused
+    // mission start (ISS i6).
+    void clear_bodies();
+
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
     void cutoff();             // stop all engines

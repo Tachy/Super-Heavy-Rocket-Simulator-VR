@@ -203,6 +203,7 @@ MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::fil
     s.warnings.push_back(st.note);
     if (!session.plan_rendezvous(phasing)) {
         s.refusal = session.rendezvous_status();
+        session.clear_bodies();  // the mission does not start
         return s;
     }
     for (const auto& w : session.rendezvous_warnings()) s.warnings.push_back(w);
@@ -275,6 +276,7 @@ MissionStart start_iss_departure_mission(FlightSession& session, const std::file
     const auto pass = session.capsule_return_preview(probe);
     if (!pass.feasible) {
         s.refusal = "Keine Rückkehrgelegenheit: " + pass.reason;
+        session.clear_bodies();  // the probe placement goes: the mission does not start
         return s;
     }
     const time::Epoch undock = pass.node.epoch - mission.undock_to_deorbit_s;

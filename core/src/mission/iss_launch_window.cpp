@@ -1,5 +1,6 @@
 #include "starsim/mission/iss_launch_window.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -99,12 +100,14 @@ LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrient
         }
         if (!found) break;
         time::Epoch root = t1;
+        bool bracketed = true;
         for (int iteration = 0; iteration < p.bias_iterations; ++iteration) {
-            // the bias moves the zero by well under a sample: a widened bracket around the first one
-            time::Epoch lo = t1 - p.sample_s, hi = t1 + 2.0 * p.sample_s;
+            // the bias moves the zero by well under a sample: a widened bracket around the first one, never before
+            // the earliest liftoff (review i6: the re-aimed bias moved a crossing just after it to before it)
+            const time::Epoch lo = std::max(t1 - p.sample_s, earliest), hi = t1 + 2.0 * p.sample_s;
             if (!(f(lo) <= 0.0 && f(hi) > 0.0)) {
-                lo = t1;
-                hi = t1 + p.sample_s;
+                bracketed = false;
+                break;
             }
             root = bisect(f, lo, hi);
             const Vec3 pad = earth.fixed_to_gcrf(root).position(pad_itrf_m);
@@ -118,6 +121,10 @@ LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrient
             if (!w.schedule.feasible) break;
             // re-aim the bias at the boost (i6 correction 2)
             bias = plane_bias_rad(a_chaser, a_station, p.inclination_rad, w.schedule.boost_epoch - w.separation);
+        }
+        if (!bracketed) {  // this crossing lies before the earliest liftoff with the aimed bias: the next one
+            t = t1 + p.sample_s;
+            continue;
         }
         if (w.schedule.feasible) {
             w.feasible = true;

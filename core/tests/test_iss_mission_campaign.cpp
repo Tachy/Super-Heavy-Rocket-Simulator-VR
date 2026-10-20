@@ -265,3 +265,16 @@ TEST_CASE("ISS mission: start_mission dispatches the departure", "[iss][iss_miss
     CHECK(st.return_planned);
     CHECK(f.session.docked());
 }
+
+TEST_CASE("ISS mission: a refused rendezvous leaves no bodies behind", "[iss][iss_mission]") {
+    test::spice_session();
+    Session f;
+    auto m = config::load_iss_rendezvous_mission(rendezvous_test::config_dir, "crew_dragon_iss");
+    m.phase_rad = 30.0 * constants::deg_to_rad;
+    m.mission_limit_s = 1800.0;  // no phasing closes in half an hour
+    const auto st = sim::start_iss_rendezvous_mission(f.session, rendezvous_test::config_dir, m, f.archive, f.clock);
+    CHECK_FALSE(st.return_planned);
+    CHECK_FALSE(st.refusal.empty());
+    CHECK(f.session.body_count() == 0);  // the mission does not start (spec "Error handling")
+    CHECK(f.session.iss_mission_leg() == IssMissionLeg::None);
+}

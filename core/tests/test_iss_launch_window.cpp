@@ -114,3 +114,19 @@ TEST_CASE("Launch window: a phase that never closes in a short limit is refused 
     CHECK(w.rejected >= 1);
 }
 
+TEST_CASE("Launch window: never before the earliest liftoff, also when the bias moves the crossing",
+          "[iss][launch_window]") {
+    test::spice_session();
+    const Fixture f;
+    const auto p = f.parameters();
+    const time::Epoch e0 = f.clock.from_utc({2026, 10, 16, 0, 0, 0.0});
+    const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.station(), e0, p, gm);
+    REQUIRE(w.feasible);
+    // just after the window: the first-guess bias puts this crossing after `earliest`, the boost bias before it
+    for (const double after_s : {5.0, 30.0, 60.0}) {
+        const time::Epoch earliest = w.liftoff + after_s;
+        const auto later = mission::plan_launch_window(f.pad_itrf(), f.earth, f.station(), earliest, p, gm);
+        INFO(after_s << " s: " << later.reason);
+        if (later.feasible) CHECK(later.liftoff - earliest >= 0.0);
+    }
+}

@@ -75,7 +75,8 @@ bool FlightSession::iss_mission_pending() const {
             return docking_busy() || collision_impulse_ns().has_value() || body.impacted();
         case IssMissionLeg::Docking:
             return docked() || !docking_busy() || collision_impulse_ns().has_value();
-        case IssMissionLeg::WaitUndock: return epoch_ >= *iss_mission_->undock_epoch;
+        case IssMissionLeg::WaitUndock:  // the epoch, or undocked by hand before it (review i6)
+            return epoch_ >= *iss_mission_->undock_epoch || !docked();
         case IssMissionLeg::Departure:
             return departure_phase() == gnc::DeparturePhase::Complete || collision_impulse_ns().has_value() ||
                    body.impacted();
@@ -137,7 +138,9 @@ void FlightSession::run_iss_mission() {
             }
             return;
         case IssMissionLeg::WaitUndock:
-            if (undock()) {
+            if (!docked()) {  // the hooks are opening already: the pilot undocked early
+                iss_enter(IssMissionLeg::Departure, "Abflug: " + docking_status_);
+            } else if (undock()) {
                 iss_enter(IssMissionLeg::Departure, "Abflug: " + docking_status_);
             } else {
                 iss_end(docking_status_);

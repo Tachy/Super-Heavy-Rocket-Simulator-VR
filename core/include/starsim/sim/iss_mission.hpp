@@ -24,7 +24,7 @@ mission::LaunchWindow iss_launch_window(const FlightSession& session, const std:
 // start_mission's iss_rendezvous branch: the Dragon at the separation of the first window of the mission's launch
 // after epoch_utc (or phase_rad behind the ISS at epoch_utc, its plane J2-biased to the boost), the ISS of iss_orbit,
 // the phasing planned (plan_rendezvous) and the sequence set (phasing -> proximity -> docking). Refused (German
-// refusal, return_planned false): no window or the planner's reason. Throws std::runtime_error (German) for an
+// refusal, return_planned false, the session emptied): no window or the planner's reason. Throws std::runtime_error (German) for an
 // unknown port or an ISS source without data, before anything is placed.
 MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                           const config::IssRendezvousMission& mission,
@@ -41,8 +41,8 @@ MissionStart start_iss_launch_mission(FlightSession& session, const std::filesys
 // start_mission's iss_departure branch: the first capsule-return pass at least undock_to_deorbit_s after epoch_utc
 // (previewed on the docked Dragon), the Dragon docked at the port (dock_in_place) iss_departure_start_lead_s before the
 // undocking (that pass - undock_to_deorbit_s), the sequence set (undocking -> departure -> capsule return of
-// return_id, aimed at that pass). Epoch: the start. Refused (German refusal): no return pass in the search window
-// (the probe placement stays). Throws std::runtime_error (German) for an unknown port or an ISS source without data.
+// return_id, aimed at that pass). Epoch: the start. Refused (German refusal, the session emptied): no return pass in
+// the search window. Throws std::runtime_error (German) for an unknown port or an ISS source without data.
 MissionStart start_iss_departure_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                          const config::IssDepartureMission& mission, const orbit::OemArchive& archive,
                                          const time::TimeScaleConverter& time);
