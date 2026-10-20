@@ -1,10 +1,13 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "starsim/config/mission_config.hpp"
+#include "starsim/mission/iss_launch_window.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/time/time_scale_converter.hpp"
 
@@ -18,6 +21,8 @@ struct MissionStart {
     // planned (outbound flight, budget) and its legs chained
     bool return_planned = false;
     std::string refusal;  // lunar landing: German reason when refused (start_lunar_landing_mission)
+    std::vector<std::string> warnings;  // ISS missions: the ISS source note, station reboosts in the mission window
+    std::optional<mission::LaunchWindow> launch_window;  // ISS launch / rendezvous from a window's separation
 };
 
 // Starts mission `mission_id` of config/missions on `session` by its [mission] kind:
@@ -28,6 +33,7 @@ struct MissionStart {
 //   orientation) - the autopilot flies the outbound flight, the landing, the surface stay and the ascent (mission 1);
 // - lunar_return: start_lunar_return_mission at the mission's [orbit] epoch_utc (Moon orientation needed) - the ship
 //   is tanked for its return in the LLO / NRHO (mission 2, l5);
+// - iss_rendezvous / iss_launch / iss_departure: sim/iss_mission.hpp (ISS i6; the ISS from data/iss_oem);
 // - ship_return: refused (std::invalid_argument): the ship returns from the orbit it flew to (plan_ship_return).
 MissionStart start_mission(FlightSession& session, const std::filesystem::path& config_dir, std::string_view mission_id,
                            time::Epoch requested, const time::TimeScaleConverter& time);

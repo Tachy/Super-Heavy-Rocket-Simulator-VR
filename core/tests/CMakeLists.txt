@@ -54,6 +54,7 @@ add_executable(starsim_core_tests
     test_iss_launch_window.cpp
     test_iss_mission_config.cpp
     test_iss_mission_sequence.cpp
+    test_iss_mission_campaign.cpp
     test_relative_navigation.cpp
     test_rendezvous_session.cpp
     test_lunar_outbound.cpp

@@ -1,0 +1,181 @@
+#include "starsim/sim/iss_mission.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
+
+#include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/vehicle_config.hpp"
+#include "starsim/frames/geodetic.hpp"
+#include "starsim/math/quat.hpp"
+#include "starsim/orbit/kepler.hpp"
+
+namespace starsim::sim {
+
+namespace {
+
+using math::Vec3;
+constexpr double gm = constants::earth_gm_m3ps2;
+
+// The ISS configuration with the mission's port checked (std::runtime_error, German).
+config::VehicleConfig iss_vehicle(const std::filesystem::path& config_dir, const std::string& station_id,
+                                  const std::string& port, const std::string& mission_id) {
+    auto iss = config::load_vehicle(config_dir, station_id);
+    for (const auto& stage : iss.stages) {
+        for (const auto& p : stage.docking_ports) {
+            if (p.id == port) return iss;
+        }
+    }
+    throw std::runtime_error("Mission " + mission_id + ": unbekannter Andockport '" + port + "' an " + station_id);
+}
+
+// The station's state at any epoch of one source. A scenario argument of latitude (synthetic orbit only) holds at
+// `reference`; other epochs keep its offset from the J2-advanced one, so the station moves on its orbit.
+struct StationSource {
+    config::VehicleConfig iss;
+    const orbit::OemArchive* archive = nullptr;
+    const time::TimeScaleConverter* time = nullptr;
+    const frames::BodyOrientation* earth = nullptr;
+    IssOrbitSource source = IssOrbitSource::Auto;
+    double offset_rad = 0.0;  // about the orbit normal, from the advanced argument of latitude
+
+    StationSource(config::VehicleConfig vehicle, const orbit::OemArchive& a, const time::TimeScaleConverter& t,
+                  const frames::BodyOrientation& e, IssOrbitSource s, std::optional<double> argument_of_latitude_rad,
+                  time::Epoch reference)
+        : iss(std::move(vehicle)), archive(&a), time(&t), earth(&e), source(s) {
+        const auto advanced = start(reference);  // throws the German message without data
+        if (argument_of_latitude_rad && !advanced.from_oem) {
+            const auto set = iss_start(iss, a, t, e, reference, source, argument_of_latitude_rad);
+            const Vec3 n = math::normalized(cross(advanced.state_gcrf.position_m, advanced.state_gcrf.velocity_mps));
+            const Vec3 r0 = math::normalized(advanced.state_gcrf.position_m);
+            const Vec3 r1 = math::normalized(set.state_gcrf.position_m);
+            offset_rad = std::atan2(dot(cross(r0, r1), n), dot(r0, r1));
+        }
+    }
+    StationStart start(time::Epoch epoch) const {
+        auto st = iss_start(iss, *archive, *time, *earth, epoch, source);
+        if (offset_rad != 0.0) {
+            const auto& s = st.state_gcrf;
+            const auto turn = math::Quat::from_axis_angle(math::normalized(cross(s.position_m, s.velocity_mps)), offset_rad);
+            st.state_gcrf = {turn.rotate(s.position_m), turn.rotate(s.velocity_mps)};
+        }
+        return st;
+    }
+    mission::StationStateAt state_at() const {
+        return [this](time::Epoch t) { return start(t).state_gcrf; };
+    }
+};
+
+mission::LaunchWindowParameters window_parameters(const config::AscentMission& ascent,
+                                                  const config::IssLaunchMission& launch) {
+    mission::LaunchWindowParameters p;
+    p.inclination_rad = ascent.inclination_rad;
+    p.northerly = ascent.northerly;
+    p.insertion_s = launch.window.insertion_s;
+    p.insertion_arc_rad = launch.window.insertion_arc_rad;
+    p.separation_periapsis_radius_m = constants::wgs84_semi_major_axis_m + ascent.periapsis_height_m;
+    p.separation_apoapsis_radius_m = constants::wgs84_semi_major_axis_m + ascent.apoapsis_height_m;
+    p.search_s = launch.window.search_s;
+    p.phasing.mission_limit_s = launch.mission_limit_s - launch.window.insertion_s;  // from the separation
+    p.phasing.earliest_arrival_s = std::max(0.0, launch.earliest_arrival_s - launch.window.insertion_s);
+    return p;
+}
+
+mission::LaunchWindow window_for(const std::filesystem::path& config_dir, const config::IssLaunchMission& launch,
+                                 const frames::BodyOrientation& earth, const StationSource& station,
+                                 const time::TimeScaleConverter& time) {
+    const auto ascent = config::load_ascent_mission(config_dir, launch.ascent_id);
+    const auto site = config::load_launch_site(config_dir, ascent.site_id);
+    const Vec3 pad_itrf = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    return mission::plan_launch_window(pad_itrf, earth, station.state_at(), time.from_utc(launch.earliest_utc),
+                                       window_parameters(ascent, launch), gm);
+}
+
+// The 200 x 210 km separation orbit `phase_rad` behind the station at `epoch`, at its periapsis, in the station's
+// plane turned by the J2 bias that makes both planes meet at the boost.
+math::StateVector phased_start(const math::StateVector& iss, time::Epoch epoch, double phase_rad,
+                               const mission::PhasingParameters& phasing, const frames::BodyOrientation& earth) {
+    const auto e_iss = orbit::elements_from_state(iss, gm);
+    orbit::KeplerianElements e;
+    const double rp = constants::wgs84_semi_major_axis_m + 200e3, ra = constants::wgs84_semi_major_axis_m + 210e3;
+    e.semi_major_axis_m = 0.5 * (rp + ra);  // [S] the falcon9_crew_dragon separation orbit
+    e.eccentricity = (ra - rp) / (ra + rp);
+    e.inclination_rad = e_iss.inclination_rad;
+    e.raan_rad = e_iss.raan_rad;
+    e.argument_of_periapsis_rad = e_iss.argument_of_periapsis_rad + e_iss.true_anomaly_rad - phase_rad;
+    e.true_anomaly_rad = 0.0;
+    const auto unbiased = orbit::state_from_elements(e, gm);
+    const Vec3 pole = earth.fixed_to_gcrf(epoch).rotation * Vec3{0.0, 0.0, 1.0};
+    const auto schedule = mission::phasing_schedule(unbiased, iss, epoch, phasing, gm);
+    const double match_s = schedule.feasible ? schedule.boost_epoch - epoch : 0.5 * phasing.mission_limit_s;
+    const auto turn = math::Quat::from_axis_angle(
+        pole, mission::plane_bias_rad(e.semi_major_axis_m, e_iss.semi_major_axis_m, e.inclination_rad, match_s));
+    return {turn.rotate(unbiased.position_m), turn.rotate(unbiased.velocity_mps)};
+}
+
+}  // namespace
+
+orbit::OemArchive iss_archive(const std::filesystem::path& config_dir, const time::TimeScaleConverter& time) {
+    return orbit::OemArchive::scan(config_dir.parent_path() / "data" / "iss_oem", time);
+}
+
+mission::LaunchWindow iss_launch_window(const FlightSession& session, const std::filesystem::path& config_dir,
+                                        const config::IssLaunchMission& mission, const orbit::OemArchive& archive,
+                                        const time::TimeScaleConverter& time) {
+    const StationSource station(iss_vehicle(config_dir, mission.station_id, mission.port, mission.id), archive, time,
+                                session.earth_orientation(), parse_iss_orbit_source(mission.iss_orbit), std::nullopt,
+                                time.from_utc(mission.earliest_utc));
+    return window_for(config_dir, mission, session.earth_orientation(), station, time);
+}
+
+MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::filesystem::path& config_dir,
+                                          const config::IssRendezvousMission& mission,
+                                          const orbit::OemArchive& archive, const time::TimeScaleConverter& time) {
+    MissionStart s;
+    s.kind = config::MissionKind::IssRendezvous;
+    const auto& earth = session.earth_orientation();
+    const time::Epoch requested = time.from_utc(mission.epoch_utc);
+    const StationSource station(iss_vehicle(config_dir, mission.station_id, mission.port, mission.id), archive, time,
+                                earth, parse_iss_orbit_source(mission.iss_orbit), mission.iss_argument_of_latitude_rad,
+                                requested);
+    mission::PhasingParameters phasing;
+    phasing.mission_limit_s = mission.mission_limit_s;
+    phasing.earliest_arrival_s = mission.earliest_arrival_s;
+    math::StateVector dragon;
+    if (mission.phase_rad) {
+        s.epoch = requested;
+        dragon = phased_start(station.start(requested).state_gcrf, requested, *mission.phase_rad, phasing, earth);
+    } else {
+        auto launch = config::load_iss_launch_mission(config_dir, mission.launch_id);
+        launch.earliest_utc = mission.epoch_utc;
+        launch.mission_limit_s = mission.mission_limit_s;
+        launch.earliest_arrival_s = mission.earliest_arrival_s;
+        const auto w = window_for(config_dir, launch, earth, station, time);
+        s.launch_window = w;
+        if (!w.feasible) {
+            s.refusal = w.reason;
+            return s;
+        }
+        s.epoch = w.separation;
+        dragon = w.separation_state_gcrf;
+        phasing.mission_limit_s = mission.mission_limit_s - launch.window.insertion_s;
+        phasing.earliest_arrival_s = std::max(0.0, mission.earliest_arrival_s - launch.window.insertion_s);
+    }
+    const auto st = station.start(s.epoch);
+    session.place_in_orbit(config::load_vehicle(config_dir, mission.vehicle_id), dragon, s.epoch);
+    session.add_station(st.vehicle, st.state_gcrf, st.epoch, st.impulses);
+    s.warnings.push_back(st.note);
+    if (!session.plan_rendezvous(phasing)) {
+        s.refusal = session.rendezvous_status();
+        return s;
+    }
+    for (const auto& w : session.rendezvous_warnings()) s.warnings.push_back(w);
+    IssMissionSequence q;
+    q.station_port = mission.port;
+    q.phasing = phasing;
+    session.set_iss_mission(q);
+    s.return_planned = true;
+    return s;
+}
+
+}  // namespace starsim::sim

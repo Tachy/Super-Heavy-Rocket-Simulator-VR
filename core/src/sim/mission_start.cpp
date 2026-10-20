@@ -4,6 +4,7 @@
 
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/capsule_return_mission.hpp"
+#include "starsim/sim/iss_mission.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/lunar_return_mission.hpp"
 
@@ -38,6 +39,14 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
             s = start_lunar_return_mission(session, config_dir, m, time.from_utc(m.epoch_utc));
             break;
         }
+        case config::MissionKind::IssRendezvous:
+            s = start_iss_rendezvous_mission(session, config_dir,
+                                             config::load_iss_rendezvous_mission(config_dir, mission_id),
+                                             iss_archive(config_dir, time), time);
+            break;
+        case config::MissionKind::IssLaunch:
+        case config::MissionKind::IssDeparture:
+            throw std::invalid_argument("mission '" + std::string(mission_id) + "': not yet available");
         case config::MissionKind::ShipReturn:
             throw std::invalid_argument("mission '" + std::string(mission_id) +
                                         "' is a ship return: it is flown from orbit with plan_ship_return (key R), "
