@@ -1326,3 +1326,63 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r4-propellant-transfer.md`.
   (600 t) 32 kg. Tanker reserve at the depot: deorbit 59.4 m/s -> burn 5.6 t, reserve 10.1 t.
 - **Tests:** `[refuelling][prop_transfer]` (`test_refuelling_transfer.cpp`), with `[config]`, `[boil_off]`,
   `[docking]`, `[hls]`, `[deorbit]`, `[mission]`.
+
+### Reference flights (r5)
+Plan `docs/superpowers/plans/2026-10-20-refuelling-r5-reference-flights.md`, ledger
+`.superpowers/sdd/2026-10-20-refuelling-r5-reference-flights/progress.md`.
+- **Mission chain** (`IssMissionSequence`, `flight_session_iss_mission.cpp`; the ISS paths unchanged): new legs
+  `Raise` (after the ascent the perigee is raised at apoapsis to `raise_periapsis_radius_m`, flown as a phasing burn:
+  belly Raptor with transients up to 0.6, else cold gas), `Transfer` (Docked -> `start_transfer`: the tanker down to
+  its reserve, `MissionTransfer::TankerReserve`, or the chaser's main tanks up to full, `FillChaser`) -> undock ->
+  Departure, the ship return (`ship_return`: `release_tower`, `plan_ship_return`, Return until caught) and
+  `WaitContinue` (coasts to `continue_epoch`, then `continuation`: the lunar mission). `ascent_to_station`: the
+  inserted depot becomes the station (`make_station`: ideal LVLH attitude at once, the turn is not flown). The Ascent
+  leg ends only after the engines' tail-off (the cutoff command left ~12 m/s at 5 g: the apoapsis was read 35 km low,
+  the raise skipped). `max_capture_retries` (refuelling 2 [E], ISS 0: the pilot resumes) resumes a proximity flight
+  waiting at Waypoint 2 after a retreat, then "Andocken fehlgeschlagen nach N Neuversuchen" (the light HLS bounced off
+  the drogues once at 0.08 m/s with 6 mm/s lateral; the chain had waited forever at 200 Hz). Leg marks
+  (`iss_mission_marks`: mass, main propellant, RCS supply, station main propellant) are the measured numbers.
+- **Caught booster** (`release_tower`): before the tanker's deorbit burn the caught booster is removed from the
+  session (indices shifted) and the tower re-armed - the real booster is lifted off within hours, the ship returns days
+  later.
+- **Departure burn** (gnc, all chasers): the target velocity is the free CW drift of the post-impulse state (before: a
+  fixed LVLH velocity; the Coriolis term ~2 n v beat the filled HLS's ~2.5 mm/s^2 of cold gas: 466 t fired in 9.8 h,
+  the HLS was lost). The filled HLS now leaves the nearly empty depot in 143 min on 1.96 t.
+- **Missions** (`config/missions/`, `config/refuelling_mission_config.hpp`, `sim/refuelling_mission`; started at the
+  config's epochs): `depot_launch` (`depot_ascent`: 200 x 200 km), `tanker_flight` / `tanker_flight_orbit`
+  (`tanker_ascent`), `hls_refuel` / `hls_refuel_orbit` (`hls_ascent` on `starship_hls_launch` = Block 3 booster + HLS
+  stage). The depot of the tanker / HLS flights is placed on a synthetic orbit (`[depot]`, J2-advanced mean elements);
+  `hls_refuel` puts it in the lunar mission's parking plane (`lunar_parking_state` at the lunar epoch, converted to
+  the true equator frame and run back by J2: 0.031 deg off after two days). The lunar landing start is split:
+  `continue_lunar_landing_mission` plans the outbound flight and the budget from the live HLS ("zu spät" after its
+  epoch). New config `hls_lunar_llo_depot` (26.5 deg, 2026-11-02).
+- **Tanker** (user decisions 2026-10-20, [E] placeholders until the real tanker is known): with the flown Block 3
+  cargo ship (255 t) it reached 170 x 190 km with 48 t and delivered 17.6 t. Lever probes (`[.r5_probe]`
+  "Tanker ascent levers", all in 170 x 190 km): full booster throttle 26 t, kick 12/16 deg 51/34 t, insertion at 120 km
+  +9.7 t (80 km: the coast's drag ~60 m/s brought it down), ship dry -10/-20 t +10/+20 t, tanks +100 t 40 t (the
+  booster pays the mass), +200 t booster abort; lighter booster or less landing reserve break the catch - the booster
+  return reserve is the bottleneck. Chosen: ship dry **209 t** (`dry_mass_kg` override on its `from` stage: no cargo
+  doors, dispenser, interior; heat shield, flaps, headers stay), insertion **120 x 190 km**, raised to 170 km.
+- **Tanker reserve** from the flown return [D] (r4 items [E] left the caught tanker with 0.00 t): gas 3.5 t (departure
+  0.3 t + entry ~3 t), boil-off 2 t split 56 % CH4 (0.9 of 1.6 t in 19 h).
+- **Numbers** (2026-10-20 epochs, depot 600 t for the tanker, 1,500 t for the HLS):
+  - `depot_launch`: station 453 s after liftoff, 199.6 x 211.7 km, initial fill **55.5 t** main, boil-off 17.6 kg in
+    90 min, booster caught;
+  - `tanker_flight` (pad): window 79.8 h after earliest (48 h uncrewed phasing; the crew's 28 h: 177 h), SECO
+    444.3 s, arc 12.17 deg [D], residue **99.2 t**, rendezvous 17.8 t (phasing 39.7 h, incl. the bare tanker's
+    boil-off), delivered **LOX 54.6 / CH4 12.9 t** in 550 s, gas 0.94 t, chill 0.42 t, main at undock 12.6 t, caught
+    with 2.74 t, 47.1 h;
+  - `tanker_flight_orbit`: rendezvous 15.1 t, delivered 56.4 / 14.4 t, caught with 1.44 t, 34.3 h;
+  - `hls_refuel` (pad): SECO 428.3 s, arc 11.68 deg [D], residue 216.4 t, after the raise 208.3 t, docked with
+    184.5 t, filled to **1,585 t** (depot 1,500 -> 83 t), waited 5.3 days (2.7 t boil-off), lunar mission planned from
+    **1,580 t**; `hls_refuel_orbit`: docked 195 t, TLI 3,152 m/s.
+- **Moon radiation** (`environment::earth_orbit_radiation` with a Moon): albedo 0.11 [S] and infrared from the
+  sub-vehicle regolith in radiative equilibrium, night 95 K [S] (Diviner); negligible in LEO (view factor < 3e-5). The
+  HLS is insulated like the depot [E] (absorptivity 0.30, emissivity 0.80, wall 63.7 m^2K/W): ~0.2 t/day in transit;
+  Mission 1 (LLO) and the lunar campaigns still close. The Block 3 lunar return with boil-off on (probe): the braking
+  burn (1,032 m/s) is aborted for want of propellant after 3.4 d - `ship_lunar_return_*` keep `boil_off = false`.
+- **Not modelled** (r6 loss items): the pressurant for the delivering tank and the vented displaced gas of the
+  receiving one (~1-2 % of the transfer [E]).
+- Diagnostics: `STARSIM_DEBUG_PEG` (the ascent cutoff: radius, speeds, v_go, tail-off) besides the r3/r4 switches.
+- **Tests:** `[refuelling][mission]`, `[iss_mission]`, `[station]`, `[catch]`, `[departure]`, `[lunar]`
+  (`test_refuelling_missions.cpp`, `test_refuelling_mission_config.cpp`; campaigns `[slow]`; probes `[.r5_probe]`).

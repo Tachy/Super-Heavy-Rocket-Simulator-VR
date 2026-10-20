@@ -160,6 +160,9 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
   ISS mit ihren Ports, `rendezvous_plan` die Manöver des Phasenflugs, `docking_state` Annäherung, Andocken und Abflug
   im Portsystem, `station_geometry` die Grundkörper zum Zeichnen und `iss_mission` den Missionsabschnitt. Befehle:
   `proximity_hold` / `_retreat` / `_abort` / `_resume`, `undock`. Die Ansichten selbst legt der Nutzer fest.
+- Betankung (r5): Die Missionen `depot_launch`, `tanker_flight`, `hls_refuel` laufen über dieselbe Abschnittsfolge;
+  neue Abschnitte „Perigäum anheben“, „Treibstofftransfer“, „Warten auf Fortsetzung“ (bis zum Start der Mondmission).
+  Die Spielschnittstelle dafür (`start_mission` für die neuen Arten, `transfer_state`, `depot_state`) folgt in r6.
 
 - Karte: Erde-Mond-System mit Bahnen, Mondbahn, Manöverknoten; Bearbeitung wie in der Missionsplanung.
 - Auswertung nach dem Flug: Telemetrie-Diagramme (wie `tools/plot_telemetry.py`), Soll/Ist-Vergleich,

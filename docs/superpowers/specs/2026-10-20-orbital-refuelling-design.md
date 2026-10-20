@@ -1,7 +1,7 @@
 # Orbital refuelling (tanker flights) - design
 
-Status: approved 2026-10-20. r1-r4 implemented (plans `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
-`...-r2-boil-off.md`, `...-r3-rendezvous-docking.md`, `...-r4-propellant-transfer.md`;
+Status: approved 2026-10-20. r1-r5 implemented (plans `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
+`...-r2-boil-off.md`, `...-r3-rendezvous-docking.md`, `...-r4-propellant-transfer.md`, `...-r5-reference-flights.md`;
 notes in `docs/subsystems.md` "Orbital refuelling", corrections below). Milestone (r), the rest of plan milestone M9
 (tanker flights), after the ISS milestone (i1-i6, main `ffbb574`).
 
@@ -191,6 +191,17 @@ Missions in `config/missions/`, chained by the existing mission sequence:
 
 Measured numbers for the calculator: residue after ascent (tanker and depot), rendezvous propellant, net delivered,
 transfer duration and gas, tanker reserve at the catch, the depot's boil-off per day.
+
+Corrections with the user (r5, 2026-10-20; numbers in `docs/subsystems.md` "Reference flights (r5)"): (1) the plan's
+nine decisions approved (chain generalised in place, depot placed not flown in the tanker / HLS flights, the depot
+snaps to its station attitude, the caught booster leaves the tower, 48 h uncrewed phasing, HLS launch stack and
+insulation, depot in the lunar parking plane, Moon radiation; Block 3 lunar returns keep boil-off off); (2) with the
+flown Block 3 cargo ship the tanker delivered 17.6 t - the user tuned the tanker to 100 t after its ascent: own dry
+mass 209 t [E] (no cargo hardware; heat shield, flaps, headers stay) and insertion at 120 km raised to 170 km at
+apoapsis (flight-profile probes: the booster's return reserve limits everything else); the values are placeholders
+until the real tanker is known; (3) the tanker reserve items come from the flown return (gas 3.5 t, boil-off 56 %
+CH4); (4) found and fixed on the way: the ascent leg changed during the engine tail-off; the departure burn fought the
+Coriolis term with a heavy chaser; an autonomous mission resumes a failed capture up to twice.
 
 ## r6 design: campaign calculator, game interface
 

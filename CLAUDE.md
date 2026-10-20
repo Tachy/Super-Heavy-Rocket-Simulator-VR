@@ -34,7 +34,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
 - `core` is split into small modules with clear interfaces: `math`, `time`, `frames`, `ephemeris`,
   `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`.
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
-  Moon: body-fixed frame, shape, atmosphere or vacuum; thermal radiation environment: Sun, Earth albedo and infrared),
+  Moon: body-fixed frame, shape, atmosphere or vacuum; thermal radiation environment: Sun, Earth and Moon albedo and infrared),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
@@ -61,7 +61,10 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   and departure, ISS missions chained by a mission sequence: from the separation orbit, from the pad with a launch
   window, docked -> undocking -> splashdown; the depot as a station target with its approach limits, Starship phasing
   on the belly Raptor + cold gas, the docked compound following run-time tank masses; ship-to-ship propellant transfer
-  with the settling push and the docked pair's boil-off, the tanker's return reserve).
+  with the settling push and the docked pair's boil-off, the tanker's return reserve; the refuelling reference flights
+  chained by the mission sequence: depot launch -> station, tanker pad -> perigee raise -> docking -> transfer ->
+  departure -> ship return -> catch (the caught booster lifted off the tower), HLS refuel -> lunar mission continued
+  from the live HLS).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
