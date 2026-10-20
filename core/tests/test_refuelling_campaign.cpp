@@ -8,6 +8,7 @@
 #include "starsim/config/refuelling_reference.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/mission/refuelling_campaign.hpp"
 #include "starsim/mission/refuelling_costs.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
 
@@ -63,4 +64,125 @@ TEST_CASE("Hohmann, deorbit and drag makeup against hand values", "[refuelling][
     CHECK(mission::deorbit_delta_v_mps(r2, rp, mu) > d);
     CHECK(mission::drag_makeup_kgps(2.5e-10, 7800.0, 2.2, 63.6, 3600.0) ==
           Catch::Approx(0.5 * 2.5e-10 * 7800.0 * 7800.0 * 2.2 * 63.6 / 3600.0));
+}
+
+namespace {
+constexpr double day = 86400.0;
+
+mission::CampaignModels constant_models(double boil_t_per_day, double tanker_t, double phasing_days) {
+    mission::CampaignModels m;
+    m.boil_off_kgps = [=](double, double) { return boil_t_per_day * 1e3 / day; };
+    m.drag_makeup_kgps = [](double) { return 0.0; };
+    m.next_tanker = [=](double e) {
+        return std::optional{mission::CampaignFlight{e, e + phasing_days * day, tanker_t * 1e3}};
+    };
+    m.next_hls = [](double e) { return std::optional{mission::CampaignFlight{e, e + day, 0.0}}; };
+    return m;
+}
+
+mission::CampaignInputs simple_inputs() {
+    mission::CampaignInputs in;
+    in.depot_capacity_kg = 1000e3;
+    in.depot_initial_kg = 50e3;
+    in.demand_kg = 300e3;
+    in.attitude_gas_kgps = 0.0;
+    in.transfer_vent_fraction = 0.0;
+    in.port_spacing_s = 0.0;
+    return in;
+}
+}  // namespace
+
+TEST_CASE("Campaign against a hand computation", "[refuelling][campaign]") {
+    // Tankers launch daily, arrive after 2 days with 100 t; the depot loses 1 t/day.
+    // T1 arrives day 2: 50 - 2 + 100 = 148 t; T2 day 3: 247 t; T3 day 4: 346 t >= 300 t;
+    // the HLS launches day 3 (one interval after T3), arrives day 4 (port spacing 0): 346 t.
+    const auto r = mission::refuelling_campaign(simple_inputs(), constant_models(1.0, 100.0, 2.0));
+    REQUIRE(r.closes);
+    CHECK(r.tanker_flights == 3);
+    CHECK(r.duration_s == Catch::Approx(4 * day));
+    CHECK(r.depot_at_hls_kg == Catch::Approx(346e3));
+    CHECK(r.losses.boil_off_kg == Catch::Approx(4e3));
+    REQUIRE(r.tankers.size() == 3);
+    CHECK(r.tankers[0].depot_after_kg == Catch::Approx(148e3));
+    CHECK(r.tankers[1].flight.launch_s == Catch::Approx(day));
+    CHECK(r.fill.front().depot_propellant_kg == Catch::Approx(50e3));
+}
+
+TEST_CASE("Campaign: vent and attitude gas are booked as losses", "[refuelling][campaign]") {
+    auto in = simple_inputs();
+    in.transfer_vent_fraction = 0.1;
+    in.attitude_gas_kgps = 1e3 / day;
+    const auto r = mission::refuelling_campaign(in, constant_models(0.0, 100.0, 2.0));
+    REQUIRE(r.closes);
+    // T1 day 2: 50 - 2 + 90 = 138; T2 day 3: 227; T3 day 4: 316 >= 300; HLS day 4.
+    CHECK(r.tanker_flights == 3);
+    CHECK(r.depot_at_hls_kg == Catch::Approx(316e3));
+    CHECK(r.losses.transfer_vent_kg == Catch::Approx(30e3));
+    CHECK(r.losses.attitude_gas_kg == Catch::Approx(4e3));
+}
+
+TEST_CASE("Campaign refusals", "[refuelling][campaign]") {
+    SECTION("demand above the tank volume") {
+        auto in = simple_inputs();
+        in.demand_kg = 1200e3;
+        const auto r = mission::refuelling_campaign(in, constant_models(1.0, 100.0, 2.0));
+        CHECK_FALSE(r.closes);
+        CHECK(r.reason.find("Depotvolumen") != std::string::npos);
+        CHECK(r.tankers.empty());
+    }
+    SECTION("losses eat the delivery") {
+        auto in = simple_inputs();
+        in.launch_interval_s = 2 * day;
+        const auto r = mission::refuelling_campaign(in, constant_models(60.0, 100.0, 2.0));
+        CHECK_FALSE(r.closes);
+        CHECK(r.reason.find("Verluste") != std::string::npos);
+        CHECK(r.tanker_flights < 5);
+        // an emptied depot books only what it held
+        CHECK(r.losses.boil_off_kg < 60e3 * 4);
+    }
+    SECTION("a tanker that delivers nothing ends the campaign") {
+        const auto r = mission::refuelling_campaign(simple_inputs(), constant_models(0.0, 0.0, 2.0));
+        CHECK_FALSE(r.closes);
+        CHECK(r.reason.find("liefert nichts") != std::string::npos);
+        CHECK(r.tanker_flights == 1);
+    }
+    SECTION("no window") {
+        auto m = constant_models(1.0, 100.0, 2.0);
+        m.next_tanker = [](double) { return std::optional<mission::CampaignFlight>{}; };
+        const auto r = mission::refuelling_campaign(simple_inputs(), m);
+        CHECK_FALSE(r.closes);
+        CHECK(r.reason == "Kein Startfenster für Tanker 1");
+    }
+    SECTION("max_tankers") {
+        auto in = simple_inputs();
+        in.max_tankers = 2;
+        const auto r = mission::refuelling_campaign(in, constant_models(1.0, 100.0, 2.0));
+        CHECK_FALSE(r.closes);
+        CHECK(r.reason.find("2 Tankerflügen") != std::string::npos);
+    }
+}
+
+TEST_CASE("Campaign: port spacing pushes an arrival to the next window", "[refuelling][campaign]") {
+    auto in = simple_inputs();
+    in.port_spacing_s = 6.0 * 3600.0;
+    auto m = constant_models(0.0, 100.0, 2.0);
+    // the second tanker's first window would arrive 1 h after the first one: it must take a later window
+    m.next_tanker = [](double e) {
+        const double arrival = e < 1.0 ? 2 * day : (e < day + 3600.0 ? 2 * day + 3600.0 : e + day);
+        return std::optional{mission::CampaignFlight{e, arrival, 100e3}};
+    };
+    const auto r = mission::refuelling_campaign(in, m);
+    REQUIRE(r.tankers.size() >= 2);
+    CHECK(r.tankers[1].flight.arrival_s >= r.tankers[0].flight.arrival_s + in.port_spacing_s);
+    CHECK(r.tankers[1].flight.launch_s > day);
+}
+
+TEST_CASE("Campaign: a full depot clamps the delivery", "[refuelling][campaign]") {
+    auto in = simple_inputs();
+    in.depot_capacity_kg = 320e3;
+    in.demand_kg = 310e3;
+    const auto r = mission::refuelling_campaign(in, constant_models(0.0, 100.0, 2.0));
+    REQUIRE(r.closes);
+    CHECK(r.tankers.back().depot_after_kg == Catch::Approx(320e3));
+    CHECK(r.tankers.back().received_kg == Catch::Approx(70e3));  // 250 t + 70 t fills 320 t
 }
