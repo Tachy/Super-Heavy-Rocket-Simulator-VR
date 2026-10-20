@@ -1,0 +1,34 @@
+# Refuelling r5: hls_refuel from the phasing orbit (fast tests): the HLS 8 deg behind the depot in its 170 x 190 km
+# phasing orbit two days before the lunar epoch, then the same chain (phasing -> docking -> fill -> departure -> lunar).
+[mission]
+name = "HLS: Betankung ab Phasenorbit und Mondmission"
+kind = "hls_refuel"
+ascent = "hls_ascent"             # vehicle, site and phasing orbit
+port = "transfer_dock"
+
+[depot]
+vehicle = "starship_depot"
+port = "transfer_dock"
+height_km = 200.0
+inclination_deg = 26.5
+argument_of_latitude_deg = 0.0
+propellant_t = 1500.0             # [test]
+
+[start]
+mode = "phasing_orbit"
+behind_deg = 8.0
+propellant_t = 208.3              # [D] r5: main tanks after the flown HLS ascent and the perigee raise (170 x 190 km)
+
+[launch_window]
+earliest_utc = "2026-10-31T00:00:00"   # the start epoch: 2 days before the lunar epoch
+search_days = 5.0
+insertion_s = 428.3               # [D] r5: the flown HLS ascent
+insertion_arc_deg = 11.68         # [D] r5
+
+[phasing]
+mission_limit_h = 48.0            # [E] uncrewed
+earliest_arrival_h = 0.0
+periapsis_km = 170.0
+
+[lunar]
+mission = "hls_lunar_llo_depot"

@@ -1,0 +1,46 @@
+# Refuelling r5: hls_lunar_llo from the depot (hls_refuel continues it from the refuelled HLS). [orbit] is the depot
+# orbit: 26.5 deg (Starbase), its plane through the Moon at arrival; epoch_utc is the lunar mission's start, chosen
+# where the Moon's declination at arrival is below 26.5 deg (r5 Task 8 probe). The rest is hls_lunar_llo's.
+
+[mission]
+name = "HLS-Mondlandung (LLO) ab Depot"
+kind = "lunar_landing"           # FlightSim.start_mission dispatches on it (absent: "ascent")
+vehicle = "starship_hls"
+site = "mons_mouton_im2"         # config/lunar_sites.toml (l4 lands there)
+
+[orbit]
+epoch_utc = "2026-11-02T00:00:00"   # [E] descent wait in the LLO 5.8 d - nearly the same for any epoch (l4 Task 9 probe)
+height_km = 200.0                # [S] spec: 200 x 200 km after the depot (NASA OIG IG-26-004)
+inclination_deg = 26.5           # the depot orbit from Starbase (r3); the RAAN is computed (plane through the Moon at arrival)
+argument_of_latitude_deg = 0.0
+
+[transfer]
+flight_time_days = 4.0           # [E] Apollo-like direct transfer (3-4.5 days)
+earliest_departure_h = 0.5       # [E]
+mcc_after_tli_days = [1.0, 2.5]  # [E] spec
+
+[lunar_orbit]
+kind = "llo"
+altitude_km = 100.0              # [S] spec / Artemis LLO
+inclination_deg = 90.0           # [S] spec: polar
+
+[descent]
+pdi_altitude_above_site_km = 15.0   # [S] Apollo: PDI at ~50,000 ft above the landing site
+braking_range_km = 450.0            # [E] spec 400-500 km
+max_crossrange_km = 20.0            # [E] user 2026-10-15: wait for a pass within this, plane trim removes it
+slope_limit_deg = 8.0               # [E] NASA Artemis ~8-10 deg; the 12 m stance lands >= 9 deg
+touchdown_search_radius_m = 1000.0  # [E]
+
+[surface]
+stay_hours = 24.0                   # [E] mission parameter (Artemis III plans ~6.5 days; Apollo 17 75 h)
+
+[ascent]
+insertion_altitude_above_site_km = 15.0  # [E] Apollo inserted ~18 km up
+aposelene_km = 100.0                     # the LLO (spec)
+
+[budget]                            # legs not planned at the start (nominal); the outbound legs come from its plan
+descent_delta_v_mps = 2100.0        # [D] l4 C2/C3 flights: DOI 18 + PDI->touchdown 2062-2068 m/s
+ascent_delta_v_mps = 1900.0         # [E] spec ~1.9 km/s (Apollo LM ~1.85)
+nrho_to_llo_delta_v_mps = 876.0     # [D] l3: 660 + 216 m/s
+llo_to_nrho_delta_v_mps = 725.0     # [D] l3: right after the LLO arrival (cheap window)
+reserve_kg = 10000.0                # [E] residuals, unusable propellant

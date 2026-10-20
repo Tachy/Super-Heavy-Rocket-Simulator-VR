@@ -6,10 +6,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <vector>
 #include <stdexcept>
 
 #include <catch2/catch_approx.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
@@ -21,6 +23,7 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
+#include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
 #include "test_support.hpp"
@@ -349,25 +352,29 @@ TEST_CASE("tanker_flight finds a launch window into the depot plane within the u
                 (s.launch_window->liftoff - f.t0) / 3600.0, s.launch_window->rejected);
 }
 
-TEST_CASE("tanker_flight: the window's separation estimate matches the flown ascent",
+TEST_CASE("Refuelling flights: the window's separation estimate matches the flown ascent",
           "[refuelling][mission][ascent][slow]") {
     test::spice_session();
+    const std::string id = GENERATE(std::string("tanker_flight"), std::string("hls_refuel"));
+    CAPTURE(id);
     refuelling_test::DepotSession f;
-    const auto m = config::load_refuelling_flight_mission(refuelling_test::config_dir, "tanker_flight");
-    const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight", f.t0, f.clock);
+    const spice::SpiceOrientation moon = spice::SpiceOrientation::moon_mean_earth();  // hls_refuel: the lunar plane
+    sim::FlightSession session{f.ephemeris, f.earth, refuelling_test::config_dir, {}, &moon};
+    const auto m = config::load_refuelling_flight_mission(refuelling_test::config_dir, id);
+    const auto s = sim::start_mission(session, refuelling_test::config_dir, id, f.t0, f.clock);
     REQUIRE(s.refusal.empty());
     const auto& w = *s.launch_window;
-    while (f.session.iss_mission_leg() == IssMissionLeg::Ascent && f.session.epoch() - w.liftoff < 1200.0) {
-        f.session.advance_to(f.session.epoch() + 1.0);
+    while (session.iss_mission_leg() == IssMissionLeg::Ascent && session.epoch() - w.liftoff < 1200.0) {
+        session.advance_to(session.epoch() + 1.0);
     }
-    INFO(f.session.iss_mission_status());
-    REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Raise);  // the 120 km insertion is raised at apoapsis
-    const auto& marks = f.session.iss_mission_marks();  // Ascent, Raise
+    INFO(session.iss_mission_status());
+    REQUIRE(session.iss_mission_leg() == IssMissionLeg::Raise);  // the 120 km insertion is raised at apoapsis
+    const auto& marks = session.iss_mission_marks();  // Ascent, Raise
     REQUIRE(marks.size() >= 2u);
     const double seco_s = marks[1].epoch - w.liftoff;
     {
-        const auto e = orbit::elements_from_state({f.session.body(f.session.controlled_index()).state().position_gcrf_m,
-                                                   f.session.body(f.session.controlled_index()).state().velocity_gcrf_mps},
+        const auto e = orbit::elements_from_state({session.body(session.controlled_index()).state().position_gcrf_m,
+                                                   session.body(session.controlled_index()).state().velocity_gcrf_mps},
                                                   constants::earth_gm_m3ps2);
         const double ra = e.semi_major_axis_m * (1.0 + e.eccentricity) - constants::wgs84_semi_major_axis_m;
         std::printf("[r5] at the end of the ascent leg: %s, %.1f x %.1f km\n", sim::to_string(marks[1].leg),
@@ -376,7 +383,7 @@ TEST_CASE("tanker_flight: the window's separation estimate matches the flown asc
         // the leg ends after the engines' tail-off (its ~12 m/s at 5 g lift the apoapsis by ~35 km)
         CHECK(ra == Catch::Approx(190.0e3).margin(5.0e3));
     }
-    const auto& ship = f.session.body(f.session.controlled_index());
+    const auto& ship = session.body(session.controlled_index());
     const Vec3 r = ship.state().position_gcrf_m, v = ship.state().velocity_gcrf_mps;
     const Vec3 n = math::normalized(cross(r, v));
     const auto site = config::load_launch_site(refuelling_test::config_dir, "starbase_olp1");
@@ -387,14 +394,14 @@ TEST_CASE("tanker_flight: the window's separation estimate matches the flown asc
     // the estimate is the state at liftoff + insertion_s; the flown ship is at liftoff + seco_s
     const Vec3 r_est = w.separation_state_gcrf.position_m;
     const double angle = std::acos(std::clamp(dot(math::normalized(r), math::normalized(r_est)), -1.0, 1.0));
-    std::printf("[r5] tanker SECO %.1f s after liftoff (config %.1f), arc %.3f deg (config %.3f), %.3f deg from the "
+    std::printf("[r5] %s SECO %.1f s after liftoff (config %.1f), arc %.3f deg (config %.3f), %.3f deg from the "
                 "estimate, main %.1f t, plane %.4f deg from the depot's\n",
-                seco_s, m.window.insertion_s, arc / deg, m.window.insertion_arc_rad / deg, angle / deg,
+                id.c_str(), seco_s, m.window.insertion_s, arc / deg, m.window.insertion_arc_rad / deg, angle / deg,
                 ship.vehicle().main_propellant_kg() / 1e3,
-                std::acos(std::clamp(dot(n, math::normalized(cross(f.session.body(*f.session.station_index())
+                std::acos(std::clamp(dot(n, math::normalized(cross(session.body(*session.station_index())
                                                                            .state()
                                                                            .position_gcrf_m,
-                                                                       f.session.body(*f.session.station_index())
+                                                                       session.body(*session.station_index())
                                                                            .state()
                                                                            .velocity_gcrf_mps))),
                                      -1.0, 1.0)) /
@@ -582,4 +589,250 @@ TEST_CASE("Tanker ascent levers", "[.r5_probe]") {
                     (ra - constants::wgs84_semi_major_axis_m) / 1e3, main_kg / 1e3, equivalent / 1e3,
                     sim::to_string(f.session.tower()->phase()));
     }
+}
+
+namespace {
+
+// The depot session with the Moon's orientation (lunar missions).
+struct LunarDepotSession : refuelling_test::DepotSession {
+    const spice::SpiceOrientation moon = spice::SpiceOrientation::moon_mean_earth();
+    sim::FlightSession lunar{ephemeris, earth, refuelling_test::config_dir, {}, &moon};
+};
+
+}  // namespace
+
+// Probe (r5 Task 8): the first lunar epoch from 2026-11-02 whose 26.5 deg parking plane reaches the Moon at arrival.
+TEST_CASE("Probe: lunar epochs for a 26.5 deg depot plane", "[.r5_probe]") {
+    test::spice_session();
+    LunarDepotSession f;
+    const auto m = config::load_lunar_landing_mission(refuelling_test::config_dir, "hls_lunar_llo_depot");
+    const time::Epoch first = f.clock.from_utc({2026, 11, 2, 0, 0, 0.0});
+    for (int k = 0; k <= 30; ++k) {
+        const auto t = first + 86400.0 * k;
+        const bool ok = sim::lunar_parking_state(f.lunar, m, t, 26.5 * deg).has_value();
+        std::printf("[r5 probe] 2026-11-02 + %2d d: %s\n", k, ok ? "plane" : "-");
+    }
+}
+
+TEST_CASE("continue_lunar_landing_mission plans like the start from the same placed vehicle",
+          "[sim][lunar][refuelling]") {
+    test::spice_session();
+    LunarDepotSession f;
+    const auto m = config::load_lunar_landing_mission(refuelling_test::config_dir, "hls_lunar_llo");
+    const auto epoch = f.clock.from_utc(m.epoch_utc);
+    const auto a = sim::start_lunar_landing_mission(f.lunar, refuelling_test::config_dir, m, epoch);
+    INFO(a.refusal);
+    REQUIRE(a.refusal.empty());
+    const double tli_a = norm(f.lunar.lunar_outbound_plan()->tli.delta_v_gcrf_mps);
+    sim::FlightSession b{f.ephemeris, f.earth, refuelling_test::config_dir, {}, &f.moon};
+    sim::place_lunar_landing_mission(b, m, refuelling_test::config_dir, epoch);
+    const auto c = sim::continue_lunar_landing_mission(b, refuelling_test::config_dir, m, epoch);
+    INFO(c.refusal);
+    REQUIRE(c.refusal.empty());
+    CHECK(norm(b.lunar_outbound_plan()->tli.delta_v_gcrf_mps) == Catch::Approx(tli_a).epsilon(1e-9));
+    CHECK(b.lunar_status() == f.lunar.lunar_status());
+}
+
+TEST_CASE("Continuation after the lunar epoch is refused", "[sim][lunar][refuelling]") {
+    test::spice_session();
+    LunarDepotSession f;
+    const auto m = config::load_lunar_landing_mission(refuelling_test::config_dir, "hls_lunar_llo_depot");
+    const auto epoch = f.clock.from_utc(m.epoch_utc);
+    sim::place_lunar_landing_mission(f.lunar, m, refuelling_test::config_dir, epoch + 3600.0);
+    const auto c = sim::continue_lunar_landing_mission(f.lunar, refuelling_test::config_dir, m, epoch);
+    CHECK_THAT(c.refusal, Catch::Matchers::ContainsSubstring("zu spät"));
+    CHECK(f.lunar.body_count() == 1u);  // nothing re-placed
+}
+
+TEST_CASE("hls_refuel starts with the depot in the lunar mission's parking plane", "[refuelling][mission][lunar]") {
+    test::spice_session();
+    LunarDepotSession f;
+    const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel_orbit", f.t0, f.clock);
+    INFO(s.refusal);
+    REQUIRE(s.refusal.empty());
+    CHECK(s.kind == config::MissionKind::HlsRefuel);
+    REQUIRE(f.lunar.iss_mission());
+    REQUIRE(f.lunar.iss_mission()->continue_epoch);
+    const auto lunar = config::load_lunar_landing_mission(refuelling_test::config_dir, "hls_lunar_llo_depot");
+    const auto lunar_epoch = f.clock.from_utc(lunar.epoch_utc);
+    CHECK(*f.lunar.iss_mission()->continue_epoch == lunar_epoch);
+    // the depot's plane at the lunar epoch is the parking plane (J2 run back and forth): the depot alone, integrated
+    sim::FlightSession alone{f.ephemeris, f.earth, refuelling_test::config_dir, {}, &f.moon};
+    const auto& start_depot = f.lunar.body(*f.lunar.station_index());
+    alone.add_station(config::top_stage_config(config::load_vehicle(refuelling_test::config_dir, "starship_depot")),
+                      {start_depot.state().position_gcrf_m, start_depot.state().velocity_gcrf_mps}, f.lunar.epoch());
+    while (alone.epoch() < lunar_epoch - 1.0) alone.advance_to(std::min(lunar_epoch, alone.epoch() + 3600.0));
+    REQUIRE(alone.epoch() >= lunar_epoch - 1.0);
+    const auto parking = sim::lunar_parking_state(alone, lunar, lunar_epoch, lunar.parking_inclination_rad);
+    REQUIRE(parking);
+    const auto& depot = alone.body(0).state();
+    const Vec3 n_depot = math::normalized(cross(depot.position_gcrf_m, depot.velocity_gcrf_mps));
+    const Vec3 n_parking = math::normalized(cross(parking->position_m, parking->velocity_mps));
+    const double angle = std::acos(std::clamp(dot(n_depot, n_parking), -1.0, 1.0));
+    std::printf("[r5] depot plane %.3f deg from the lunar parking plane at the lunar epoch\n", angle / deg);
+    CHECK(angle < 0.3 * deg);  // [E] mean vs osculating elements, the J2 rates vs the integrated orbit
+}
+
+// r5 (found in hls_refuel): the filled HLS (1,585 t main) leaves the nearly empty depot (84 t). Its cold gas gives
+// ~2.5 mm/s^2, the Coriolis term of the LVLH frame ~2 n v ~2 mm/s^2 per m/s: a burn that holds a fixed LVLH velocity
+// never converged (157 t of gas in 11.5 h). The burn's target is the free CW drift after the impulse.
+// r5 (found in hls_refuel_orbit: the light HLS bounced off the depot's drogues): after a retreat the proximity flight
+// waits for a go at Waypoint 2. An autonomous mission resumes up to max_capture_retries times, then ends; 0 (the ISS
+// default) keeps the wait for the pilot.
+TEST_CASE("A waiting proximity flight is resumed by the mission, then the mission ends", "[refuelling][iss_mission][proximity]") {
+    test::spice_session();
+    // from Waypoint 2 (20 m) into the approach; a commanded retreat ends waiting for a go, as a failed capture does
+    const auto run = [](int retries) {
+        auto f = std::make_unique<refuelling_test::TankerAtPort>(Vec3{20.0, 0.0, 0.0});
+        sim::IssMissionSequence q;
+        q.station_port = "transfer_dock";
+        q.max_capture_retries = retries;
+        f->session.set_iss_mission(q);
+        gnc::ProximityParameters p;
+        p.start_waypoint = 2;
+        REQUIRE(f->session.start_proximity("transfer_dock", p));
+        f->session.mark_iss_leg_for_test(IssMissionLeg::Proximity);
+        return f;
+    };
+    const auto retreat_and_wait = [](refuelling_test::TankerAtPort& f) {
+        f.session.advance_to(f.session.epoch() + 60.0);
+        REQUIRE(f.session.proximity_retreat());
+        f.fly([&] { return f.session.proximity_waiting() || f.session.iss_mission_leg() == IssMissionLeg::Ended; },
+              4.0 * 3600.0, 5.0);  // back to Waypoint 1 (220 m): a CW transfer
+    };
+    {
+        auto f = run(0);
+        retreat_and_wait(*f);
+        INFO(f->session.proximity_status() << " | " << f->session.docking_status() << " | " << f->session.iss_mission_status());
+        REQUIRE(f->session.proximity_waiting());
+        f->session.advance_to(f->session.epoch() + 10.0);
+        CHECK(f->session.proximity_waiting());  // ISS default: the pilot resumes
+        CHECK(f->session.iss_mission_leg() == IssMissionLeg::Proximity);
+    }
+    {
+        auto f = run(1);
+        const auto resumes = [&] {  // every resume by the mission marks the Proximity leg again
+            const auto& m = f->session.iss_mission_marks();
+            return std::count_if(m.begin(), m.end(), [](const auto& x) { return x.leg == IssMissionLeg::Proximity; });
+        };
+        const auto before = resumes();
+        f->session.advance_to(f->session.epoch() + 60.0);
+        REQUIRE(f->session.proximity_retreat());
+        f->fly([&] { return resumes() > before || f->session.iss_mission_leg() != IssMissionLeg::Proximity; },
+               4.0 * 3600.0, 5.0);
+        CHECK(resumes() == before + 1);  // resumed by the mission
+        CHECK(f->session.iss_mission_leg() == IssMissionLeg::Proximity);
+        CHECK_FALSE(f->session.proximity_waiting());
+        f->session.advance_to(f->session.epoch() + 60.0);
+        REQUIRE(f->session.proximity_retreat());
+        f->fly([&] { return f->session.iss_mission_leg() == IssMissionLeg::Ended; }, 4.0 * 3600.0, 5.0);
+        CHECK(f->session.iss_mission_leg() == IssMissionLeg::Ended);
+        CHECK_THAT(f->session.iss_mission_status(), Catch::Matchers::ContainsSubstring("Andocken fehlgeschlagen"));
+    }
+}
+
+TEST_CASE("The full HLS departs from the nearly empty depot", "[refuelling][docking][departure]") {
+    test::spice_session();
+    refuelling_test::TankerAtPort f({0.0, 0.0, 0.0}, {}, refuelling_test::ship_with("starship_hls", 1585.0e3), 84.0e3);
+    f.session.set_rendezvous_target(1, "transfer_dock", "transfer_dock");
+    f.session.dock_in_place();
+    REQUIRE(f.session.undock());
+    const double m0 = f.session.body(0).vehicle().main_propellant_kg();
+    const double s = f.fly([&] { return f.session.departure_phase() == gnc::DeparturePhase::Complete; },
+                           3.0 * 3600.0, 60.0);
+    const double gas_kg = m0 - f.session.body(0).vehicle().main_propellant_kg();
+    std::printf("[r5] full HLS departure: %.0f min, gas %.2f t\n", s / 60.0, gas_kg / 1e3);
+    CHECK(f.session.departure_phase() == gnc::DeparturePhase::Complete);
+    CHECK(gas_kg < 5.0e3);  // [E] the 600 t depot case: 2.4 t
+}
+
+// Probe (r5 Task 8 diagnostics): where the hls_refuel_orbit chain spends its wall time.
+TEST_CASE("Probe: hls_refuel_orbit timeline", "[.r5_probe]") {
+    test::spice_session();
+    LunarDepotSession f;
+    const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel_orbit", f.t0, f.clock);
+    REQUIRE(s.refusal.empty());
+    const time::Epoch start = f.lunar.epoch();
+    const auto wall0 = std::chrono::steady_clock::now();
+    auto last = wall0;
+    while (f.lunar.epoch() - start < 8.0 * 86400.0 && f.lunar.iss_mission_leg() != IssMissionLeg::Complete &&
+           f.lunar.iss_mission_leg() != IssMissionLeg::Ended) {
+        f.lunar.advance_to(f.lunar.epoch() + 600.0);
+        const auto now = std::chrono::steady_clock::now();
+        const double step_s = std::chrono::duration<double>(now - last).count();
+        last = now;
+        const double wall_s = std::chrono::duration<double>(now - wall0).count();
+        if (step_s > 2.0) {
+            std::printf("[probe] sim %7.2f h  wall %6.0f s (+%5.1f)  leg %-22s autopilot %-12s %s\n",
+                        (f.lunar.epoch() - start) / 3600.0, wall_s, step_s, sim::to_string(f.lunar.iss_mission_leg()),
+                        sim::to_string(f.lunar.autopilot().state), f.lunar.iss_mission_status().c_str());
+            std::fflush(stdout);
+        }
+        if (wall_s > 900.0 || f.lunar.iss_mission_status().find("Freigabe") != std::string::npos) break;
+    }
+    std::printf("[probe] end: sim %.2f h, leg %s, %s\n", (f.lunar.epoch() - start) / 3600.0,
+                sim::to_string(f.lunar.iss_mission_leg()), f.lunar.iss_mission_status().c_str());
+}
+
+TEST_CASE("hls_refuel_orbit: docked, filled, departed, the lunar mission continues with the real tank load",
+          "[refuelling][mission][lunar][slow]") {
+    test::spice_session();
+    LunarDepotSession f;
+    const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel_orbit", f.t0, f.clock);
+    INFO(s.refusal);
+    REQUIRE(s.refusal.empty());
+    const time::Epoch start = f.lunar.epoch();
+    while (f.lunar.epoch() - start < 8.0 * 86400.0 && f.lunar.iss_mission_leg() != IssMissionLeg::Complete &&
+           f.lunar.iss_mission_leg() != IssMissionLeg::Ended) {
+        f.lunar.advance_to(f.lunar.epoch() + 600.0);
+    }
+    INFO(f.lunar.iss_mission_status());
+    REQUIRE(f.lunar.iss_mission_leg() == IssMissionLeg::Complete);
+    REQUIRE(f.lunar.lunar_outbound_plan());
+    const auto& hls = f.lunar.body(f.lunar.controlled_index()).vehicle();
+    const auto* transfer = refuelling_test::mark(f.lunar, IssMissionLeg::Transfer);
+    const auto* departure = refuelling_test::mark(f.lunar, IssMissionLeg::Departure);
+    REQUIRE(transfer);
+    REQUIRE(departure);
+    std::printf("[r5] hls_refuel_orbit: HLS main at docking %.1f t, after the fill %.1f t, at the lunar start %.1f t, "
+                "depot left %.1f t, TLI %.0f m/s\n",
+                transfer->chaser_main_propellant_kg / 1e3, departure->chaser_main_propellant_kg / 1e3,
+                hls.main_propellant_kg() / 1e3,
+                f.lunar.body(*f.lunar.station_index()).vehicle().main_propellant_kg() / 1e3,
+                norm(f.lunar.lunar_outbound_plan()->tli.delta_v_gcrf_mps));
+    CHECK(departure->chaser_main_propellant_kg > transfer->chaser_main_propellant_kg);
+}
+
+TEST_CASE("hls_refuel: pad -> docked -> filled -> lunar mission planned", "[refuelling][mission][lunar][ascent][slow]") {
+    test::spice_session();
+    LunarDepotSession f;
+    const auto s = sim::start_mission(f.lunar, refuelling_test::config_dir, "hls_refuel", f.t0, f.clock);
+    INFO(s.refusal);
+    REQUIRE(s.refusal.empty());
+    while (f.lunar.epoch() - s.epoch < 1200.0 && f.lunar.tower()->phase() != sim::CatchPhase::Caught) {
+        f.lunar.advance_to(f.lunar.epoch() + 1.0);
+    }
+    const time::Epoch start = f.lunar.epoch();
+    while (f.lunar.epoch() - start < 10.0 * 86400.0 && f.lunar.iss_mission_leg() != IssMissionLeg::Complete &&
+           f.lunar.iss_mission_leg() != IssMissionLeg::Ended) {
+        f.lunar.advance_to(f.lunar.epoch() + 600.0);
+    }
+    INFO(f.lunar.iss_mission_status());
+    INFO("breakup: " << f.lunar.body(f.lunar.controlled_index()).breakup_reason() << ", tower "
+                     << sim::to_string(f.lunar.tower()->phase()) << ", liftoff +"
+                     << (f.lunar.epoch() - s.epoch) / 3600.0 << " h");
+    for (const auto& m : f.lunar.iss_mission_marks()) {
+        std::printf("[r5] hls_refuel %-24s +%9.0f s  main %.1f t  station %.1f t\n", sim::to_string(m.leg),
+                    m.epoch - s.epoch, m.chaser_main_propellant_kg / 1e3, m.station_main_propellant_kg / 1e3);
+    }
+    REQUIRE(f.lunar.iss_mission_leg() == IssMissionLeg::Complete);
+    REQUIRE(f.lunar.lunar_outbound_plan());
+    const auto* raise = refuelling_test::mark(f.lunar, IssMissionLeg::Raise);
+    const auto* rv = refuelling_test::mark(f.lunar, IssMissionLeg::Rendezvous);
+    REQUIRE(rv);
+    std::printf("[r5] hls_refuel: SECO %.1f s, HLS residue at insertion %.1f t, after the raise %.1f t, main at the "
+                "lunar start %.1f t\n",
+                raise ? raise->epoch - s.epoch : 0.0, raise ? raise->chaser_main_propellant_kg / 1e3 : 0.0,
+                rv->chaser_main_propellant_kg / 1e3,
+                f.lunar.body(f.lunar.controlled_index()).vehicle().main_propellant_kg() / 1e3);
 }

@@ -1,0 +1,33 @@
+# Refuelling r5: the HLS launches into the depot plane, docks, is filled and undocks; at the lunar mission's epoch the
+# lunar landing continues from the HLS's real state and tank load (spec r5 "hls_refuel").
+[mission]
+name = "HLS: Betankung am Depot und Mondmission"
+kind = "hls_refuel"
+ascent = "hls_ascent"
+port = "transfer_dock"
+
+# The depot, placed in the lunar mission's parking plane (its RAAN from the Moon at arrival, run back by J2).
+[depot]
+vehicle = "starship_depot"
+port = "transfer_dock"
+height_km = 200.0
+inclination_deg = 26.5            # must equal the lunar mission's [orbit] inclination
+argument_of_latitude_deg = 0.0    # at earliest_utc
+propellant_t = 1500.0             # [test] a filled depot after the campaign (r6 computes how many tankers)
+
+[start]
+mode = "pad"
+
+[launch_window]
+earliest_utc = "2026-10-20T00:00:00"   # 13 days before the lunar epoch (2026-11-02): the window closing the 48 h phasing
+search_days = 12.0                # [E] (5 days found none: the depot phase, as for the tanker); the HLS waits until the lunar epoch
+insertion_s = 428.3               # [D] r5: liftoff -> insertion of the flown HLS ascent
+insertion_arc_deg = 11.68         # [D] r5: inertial in-plane arc pad -> insertion, flown
+
+[phasing]
+mission_limit_h = 48.0            # [E] uncrewed
+earliest_arrival_h = 0.0
+periapsis_km = 170.0              # the phasing orbit after the raise at apoapsis (the ascent inserts at 120 km)
+
+[lunar]
+mission = "hls_lunar_llo_depot"

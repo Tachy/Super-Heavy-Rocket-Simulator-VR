@@ -40,6 +40,18 @@ MissionStart start_lunar_landing_mission(FlightSession& session, const std::file
                                          const config::LunarLandingMission& mission, time::Epoch epoch,
                                          const config::VehicleConfig* vehicle = nullptr);
 
+// The mission's circular parking state at `epoch` (GCRF) for `inclination_rad`: the plane through the Moon at arrival
+// (epoch + flight_time_s), as the placement uses it; std::nullopt when the Moon's declination exceeds the inclination.
+std::optional<math::StateVector> lunar_parking_state(const FlightSession& session, const config::LunarLandingMission& mission,
+                                                     time::Epoch epoch, double inclination_rad);
+
+// The lunar landing mission from the controlled body as it flies (refuelling r5: the HLS after the depot): terrain and
+// site set, the touchdown point checked, the outbound flight planned from its live state, the budget closed with its
+// real mass and tank load, the legs chained. Nothing is placed or cleared. Refused (German, autopilot off) as
+// start_lunar_landing_mission, and when the session's epoch is past `epoch` ("zu spät").
+MissionStart continue_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,
+                                            const config::LunarLandingMission& mission, time::Epoch epoch);
+
 // Outbound parameters of the mission started at `epoch` (FlightSession::plan_lunar_outbound); the NRHO variant builds
 // its reference (multiple shooting, ~15 s) with the first perilune at the arrival.
 mission::LunarOutboundParameters lunar_outbound_parameters(const config::LunarLandingMission& mission,

@@ -143,6 +143,9 @@ struct IssMissionSequence {
     std::optional<gnc::DeorbitParameters> ship_return;      // Departure -> release_tower + plan_ship_return -> Return
     std::optional<time::Epoch> continue_epoch;              // Departure -> WaitContinue until then -> continuation
     std::function<std::string(FlightSession&)> continuation;  // German refusal; empty: it took over -> Complete
+    // A proximity flight waiting at Waypoint 2 after a retreat (a failed capture) is resumed this often, then the
+    // mission ends (refuelling r5: autonomous missions); 0 keeps the wait for the pilot (the ISS missions).
+    int max_capture_retries = 0;
 };
 
 struct RendezvousBurnRecord {
@@ -677,6 +680,7 @@ public:
     // contact the autopilot turns off and the flight stays readable.
     bool start_proximity(const std::string& station_port, gnc::ProximityParameters parameters = {});
     bool proximity_active() const { return proximity_.has_value(); }
+    bool proximity_waiting() const { return proximity_ && proximity_->waiting_for_go(); }  // for resume (r5)
     std::optional<gnc::ProximityPhase> proximity_phase() const;
     const std::string& proximity_status() const { return proximity_status_; }
     const std::vector<gnc::ProximityEvent>* proximity_events() const;  // nullptr without a flight
@@ -1060,6 +1064,7 @@ private:
     IssMissionLeg iss_leg_ = IssMissionLeg::None;
     std::string iss_status_;
     std::vector<MissionMark> iss_marks_;
+    int iss_capture_retries_ = 0;
     void run_iss_mission();            // every tick: the leg change due now
     bool iss_mission_pending() const;  // a leg change is due (the coast stops)
     void iss_end(const std::string& reason);

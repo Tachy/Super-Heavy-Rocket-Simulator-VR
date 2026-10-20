@@ -3,6 +3,7 @@
 // ship return to the catch or a continuation (the lunar mission); the depot's ascent ends as the station.
 
 #include <algorithm>
+#include <string>
 
 #include "starsim/sim/flight_session.hpp"
 
@@ -54,6 +55,7 @@ void FlightSession::set_iss_mission(std::optional<IssMissionSequence> sequence) 
     iss_mission_ = std::move(sequence);
     iss_status_.clear();
     iss_marks_.clear();
+    iss_capture_retries_ = 0;
     if (!iss_mission_) {
         iss_leg_ = IssMissionLeg::None;
         return;
@@ -142,7 +144,8 @@ bool FlightSession::iss_mission_pending() const {
             return rendezvous_step_ == RendezvousStep::Waypoint0 || rendezvous_step_ == RendezvousStep::None ||
                    body.impacted();
         case IssMissionLeg::Proximity:
-            return docking_busy() || collision_impulse_ns().has_value() || body.impacted();
+            return docking_busy() || collision_impulse_ns().has_value() || body.impacted() ||
+                   (iss_mission_->max_capture_retries > 0 && proximity_waiting());
         case IssMissionLeg::Docking:
             return docked() || !docking_busy() || collision_impulse_ns().has_value();
         case IssMissionLeg::Docked:  // the docking autopilot hands over first (start_transfer refuses it active)
@@ -216,6 +219,18 @@ void FlightSession::run_iss_mission() {
             return;
         case IssMissionLeg::Proximity:
         case IssMissionLeg::Docking:
+            if (iss_leg_ == IssMissionLeg::Proximity && proximity_waiting() && !docking_busy() && !lost &&
+                !collision_impulse_ns()) {  // waiting at Waypoint 2 after a retreat: resume or give up (r5)
+                if (iss_capture_retries_ >= q.max_capture_retries) {
+                    iss_end("Andocken fehlgeschlagen nach " + std::to_string(iss_capture_retries_) + " Neuversuchen");
+                } else if (proximity_resume()) {
+                    ++iss_capture_retries_;
+                    iss_enter(IssMissionLeg::Proximity, "Annäherung: neuer Anflug " + std::to_string(iss_capture_retries_));
+                } else {
+                    iss_end(proximity_status_);
+                }
+                return;
+            }
             if (collision_impulse_ns()) {
                 iss_end("Kollision");
             } else if (lost) {

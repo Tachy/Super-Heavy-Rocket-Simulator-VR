@@ -50,7 +50,8 @@ ProximityOutput DepartureGuidance::update(const ProximityInput& in) {
             }
             if (phase_ == DeparturePhase::BackOut && in.port.position_m.x >= d_.burn_range_m) {
                 burn_ = breakout_delta_v(in.cg_lvlh, in.mean_motion_radps, p_);
-                burn_target_lvlh_mps_ = in.cg_lvlh.velocity_mps + burn_->delta_v_lvlh_mps;
+                burn_start_lvlh_ = {in.cg_lvlh.position_m, in.cg_lvlh.velocity_mps + burn_->delta_v_lvlh_mps};
+                burn_epoch_ = in.epoch;
                 enter(DeparturePhase::DepartureBurn,
                       burn_->safe ? "Abflugmanöver" : "Abflugmanöver: nicht passiv sicher", in.epoch);
                 break;
@@ -64,11 +65,13 @@ ProximityOutput DepartureGuidance::update(const ProximityInput& in) {
     }
     if (phase_ == DeparturePhase::DepartureBurn) {
         const math::Mat3 to_port = transpose(in.port_to_lvlh);
-        const math::Vec3 error = burn_target_lvlh_mps_ - in.cg_lvlh.velocity_mps;
+        const math::Vec3 target =
+            orbit::cw_propagate(burn_start_lvlh_, in.mean_motion_radps, in.epoch - burn_epoch_).velocity_mps;
+        const math::Vec3 error = target - in.cg_lvlh.velocity_mps;
         if (norm(error) < d_.burn_tolerance_mps && !loop_.firing()) {
             enter(DeparturePhase::Drift, burn_->safe ? "Abflug" : "Abflug: nicht passiv sicher", in.epoch);
         } else {
-            out.translation_fraction_port = loop_.command(to_port * burn_target_lvlh_mps_, to_port * in.cg_lvlh.velocity_mps,
+            out.translation_fraction_port = loop_.command(to_port * target, to_port * in.cg_lvlh.velocity_mps,
                                                           in.authority_port, p_.loop_far);
             return out;
         }

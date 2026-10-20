@@ -10,7 +10,9 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/orbit/synthetic_station_orbit.hpp"
+#include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
+#include "starsim/sim/lunar_landing_mission.hpp"
 
 namespace starsim::sim {
 
@@ -19,6 +21,9 @@ namespace {
 using math::Vec3;
 constexpr double gm = constants::earth_gm_m3ps2;
 constexpr double equatorial_radius_m = constants::wgs84_semi_major_axis_m;
+// [E] an autonomous refuelling flight resumes the approach this often after a failed capture (r5: the light HLS
+// bounced off the depot's drogues once), then the mission ends
+constexpr int capture_retries = 2;
 
 // The stage's main oxidizer and fuel tanks filled with `kg` in the ratio of their capacities (capped at capacity).
 void fill_main_tanks(config::StageConfig& stage, double kg) {
@@ -30,6 +35,25 @@ void fill_main_tanks(config::StageConfig& stage, double kg) {
         if (tank.role != config::TankRole::Main) continue;
         tank.mass_kg = capacity > 0.0 ? std::min(tank.capacity_kg, kg * tank.capacity_kg / capacity) : 0.0;
     }
+}
+
+// The depot orbit through a GCRF parking state at `at` (hls_refuel): its plane in the true equator frame of `at`, run
+// back by the J2 rates to `earliest`; the config's argument of latitude holds at `earliest`.
+config::DepotOrbitConfig depot_in_plane(const config::DepotOrbitConfig& depot, const math::StateVector& parking_gcrf,
+                                        time::Epoch at, time::Epoch earliest, const frames::BodyOrientation& earth) {
+    const math::Mat3 to_tod = transpose(orbit::true_equator_to_gcrf(earth, at));
+    const auto e = orbit::elements_from_state({to_tod * parking_gcrf.position_m, to_tod * parking_gcrf.velocity_mps}, gm);
+    orbit::StationMeanElements mean;
+    mean.epoch = at;
+    mean.semi_major_axis_m = equatorial_radius_m + depot.height_m;
+    mean.inclination_rad = e.inclination_rad;
+    mean.raan_rad = e.raan_rad;
+    mean.argument_of_latitude_rad = e.argument_of_periapsis_rad + e.true_anomaly_rad;
+    const auto back = orbit::advance_mean_elements(mean, earliest, gm, constants::earth_j2, equatorial_radius_m);
+    auto out = depot;
+    out.inclination_rad = back.inclination_rad;
+    out.raan_rad = back.raan_rad;
+    return out;
 }
 
 }  // namespace
@@ -94,7 +118,33 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
     s.kind = m.kind;
     const auto& earth = session.earth_orientation();
     const time::Epoch earliest = time.from_utc(m.earliest_utc);
-    const auto depot_at = depot_orbit(m.depot, earliest, earth);
+    // hls_refuel: the depot orbit lies in the lunar mission's parking plane at its epoch (r5 plan decision 8)
+    config::LunarLandingMission lunar;
+    time::Epoch lunar_epoch{};
+    auto depot_cfg = m.depot;
+    if (m.kind == config::MissionKind::HlsRefuel) {
+        if (!session.moon_orientation()) {
+            s.refusal = "HLS-Betankung: die Sitzung hat keine Mondorientierung";
+            return s;
+        }
+        lunar = config::load_lunar_landing_mission(config_dir, m.lunar_mission_id);
+        if (std::abs(lunar.parking_inclination_rad - m.depot.inclination_rad) > 1e-9) {
+            s.refusal = "HLS-Betankung: Depotbahn und Parkbahn der Mondmission haben verschiedene Neigungen";
+            return s;
+        }
+        lunar_epoch = time.from_utc(lunar.epoch_utc);
+        if (earliest >= lunar_epoch) {
+            s.refusal = "HLS-Betankung: frühester Start nach dem Start der Mondmission";
+            return s;
+        }
+        const auto parking = lunar_parking_state(session, lunar, lunar_epoch, lunar.parking_inclination_rad);
+        if (!parking) {
+            s.refusal = "Kein Parkorbit durch die Mondbahnebene: Bahnneigung unter der Deklination des Mondes";
+            return s;
+        }
+        depot_cfg = depot_in_plane(m.depot, *parking, lunar_epoch, earliest, earth);
+    }
+    const auto depot_at = depot_orbit(depot_cfg, earliest, earth);
     const auto ascent = config::load_ascent_mission(config_dir, m.ascent_id);
     const auto site = config::load_launch_site(config_dir, ascent.site_id);
     auto depot_vehicle = config::top_stage_config(config::load_vehicle(config_dir, m.depot.vehicle_id));
@@ -103,6 +153,7 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
     const double phasing_periapsis_m = m.phasing_periapsis_height_m.value_or(ascent.periapsis_height_m);
     IssMissionSequence q;
     q.station_port = m.depot.port;
+    q.max_capture_retries = capture_retries;
     if (m.start == config::RefuellingStart::Pad) {
         const Vec3 pad = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
         mission::LaunchWindowParameters p;
@@ -119,6 +170,10 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         s.launch_window = w;
         if (!w.feasible) {
             s.refusal = w.reason;
+            return s;
+        }
+        if (m.kind == config::MissionKind::HlsRefuel && w.liftoff >= lunar_epoch) {
+            s.refusal = "HLS-Betankung: Startfenster nach dem Start der Mondmission";
             return s;
         }
         start_ascent_mission(session, ascent, config_dir, w.liftoff);
@@ -152,6 +207,11 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
                                                              : MissionTransfer::FillChaser;
     if (m.kind == config::MissionKind::TankerFlight) {
         q.ship_return = ship_deorbit_parameters(config::load_ship_return_mission(config_dir, m.return_id).deorbit);
+    } else {  // hls_refuel: the lunar landing mission from the refuelled HLS at its epoch
+        q.continue_epoch = lunar_epoch;
+        q.continuation = [config_dir, lunar, lunar_epoch](FlightSession& f) {
+            return continue_lunar_landing_mission(f, config_dir, lunar, lunar_epoch).refusal;
+        };
     }
     session.set_iss_mission(q);
     s.return_planned = true;

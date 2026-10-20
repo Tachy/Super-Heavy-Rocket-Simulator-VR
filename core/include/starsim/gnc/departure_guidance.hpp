@@ -53,7 +53,11 @@ private:
     DeparturePhase phase_ = DeparturePhase::UndockBurn;
     bool started_ = false;
     std::optional<Breakout> burn_;
-    math::Vec3 burn_target_lvlh_mps_;
+    // The state right after an impulsive departure burn (refuelling r5): the burn's target velocity is its free CW drift
+    // at the current epoch - a fixed LVLH velocity would fight the Coriolis term (~2 n v), which a heavy chaser's cold gas
+    // (the filled HLS: ~2.5 mm/s^2) cannot (it fired for hours).
+    orbit::RelativeState burn_start_lvlh_;
+    time::Epoch burn_epoch_;
     TranslationLoop loop_;
     std::string status_;
     std::vector<DepartureEvent> events_;

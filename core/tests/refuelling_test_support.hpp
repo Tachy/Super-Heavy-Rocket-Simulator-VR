@@ -68,7 +68,8 @@ struct DepotSession {
 // rotating frame plus `velocity_port_mps`. Body 0 = chaser, body 1 = depot.
 struct TankerAtPort : DepotSession {
     TankerAtPort(const Vec3& position_port_m, const Vec3& velocity_port_mps = {},
-                 const config::VehicleConfig& chaser = tanker_config(200.0e3)) {
+                 const config::VehicleConfig& chaser = tanker_config(200.0e3), double depot_kg = 600.0e3) {
+        depot_propellant_kg = depot_kg;
         sim::FlightSession probe(ephemeris, earth, config_dir);  // the ideal-attitude depot's port
         probe.add_station(depot_config(depot_propellant_kg), depot, t0);
         const auto sk = vehicle::port_kinematics(probe.body(0), "transfer_dock");

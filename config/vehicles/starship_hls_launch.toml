@@ -1,0 +1,15 @@
+# Refuelling r5: the HLS on Super Heavy for its launch to the depot (r5 plan decision 7). The stages are taken over
+# unchanged ([[stage]] from = "<vehicle>:<stage>", r1); the HLS stage flies its lunar mission after the refuelling.
+
+[vehicle]
+id = "starship_hls_launch"
+name = "Super Heavy Block 3 / Starship HLS"
+display_name = "Lunar Lander Mk3 (Start)"
+propellant = "methalox"
+stages_bottom_to_top = ["booster", "hls"]
+
+[[stage]]
+from = "starship_block3:booster"
+
+[[stage]]
+from = "starship_hls:hls"

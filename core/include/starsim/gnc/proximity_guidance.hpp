@@ -72,6 +72,8 @@ public:
     bool collision() const { return collided_; }
 
     ProximityPhase phase() const { return phase_; }
+    // At a waypoint after a retreat (commanded or a failed capture), waiting for resume() (refuelling r5).
+    bool waiting_for_go() const { return phase_ == ProximityPhase::Waypoint && waiting_for_go_; }
     size_t waypoint() const { return target_; }  // index into path() of the waypoint flown to / held at
     const std::vector<ProximityWaypoint>& path() const { return path_; }
     const std::string& status() const { return status_; }
