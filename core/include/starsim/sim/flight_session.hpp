@@ -1021,6 +1021,7 @@ private:
     void rendezvous_track_drag();
     mission::FiniteBurnModel rendezvous_engines() const;
     math::StateVector station_state() const;
+    const config::StationProximityConfig& station_limits() const;  // the station stage's [stage.station.proximity]
     mission::PhasingBurnKind rendezvous_next_kind() const;
     void rendezvous_start(mission::PhasingPlan plan);  // stores a feasible plan and enters the coast
     RendezvousStep rendezvous_step_ = RendezvousStep::None;

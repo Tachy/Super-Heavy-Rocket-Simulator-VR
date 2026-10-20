@@ -162,3 +162,15 @@ position_m = [8.0, 0.0, 5.0]             # [E]
 id = "ch4_transfer"
 tank = "ch4_main"                        # CH4 main tank 20-32.6 m
 position_m = [24.0, 0.0, 5.0]            # [E]
+
+# Target block (refuelling r3): the depot flies an ideal LVLH attitude like the ISS - nose along +V-bar (end-on drag),
+# dorsal side with the drogues to nadir: tankers approach from below along the R-bar.
+[stage.station]
+body_in_lvlh_deg = [0.0, 0.0, 0.0]
+
+[stage.station.proximity]                # [E] the ISS rules (NASA; the only published set) for a 52 m depot
+keep_out_radius_m = 200.0
+approach_ellipsoid_m = [2000.0, 1000.0, 1000.0]
+waypoint0_below_m = 400.0
+waypoint1_range_m = 220.0
+waypoint2_range_m = 20.0

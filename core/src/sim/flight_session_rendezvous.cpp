@@ -16,6 +16,7 @@
 //   drifts freely (no attitude mode).
 
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/station_limits.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -45,6 +46,10 @@ const char* to_string(RendezvousStep step) {
 math::StateVector FlightSession::station_state() const {
     const auto& s = bodies_.at(*station_index_).body->state();
     return {s.position_gcrf_m, s.velocity_gcrf_mps};
+}
+
+const config::StationProximityConfig& FlightSession::station_limits() const {
+    return bodies_.at(*station_index_).body->vehicle().stages().back().config.station_proximity;
 }
 
 mission::FiniteBurnModel FlightSession::rendezvous_engines() const {
@@ -96,6 +101,7 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
         lunar_step_ != LunarStep::None) {
         return refuse("Kein Rendezvous: ein Flug läuft bereits");
     }
+    p = with_station_limits(p, station_limits());
     // only Crew Dragon docks (spec): the budget is the RCS propellant, the burns the Dracos' translation
     if (!burn_configurations().empty()) return refuse("Kein Rendezvous: nur mit Manövern auf den Steuerdüsen");
     // Crew Dragon flies the phasing with its nose cone open (it opens after the separation): only then its Dracos turn

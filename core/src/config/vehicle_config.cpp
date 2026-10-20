@@ -353,6 +353,31 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 doc.number(*orbit, "altitude_km") * 1e3, doc.number(*orbit, "inclination_deg") * constants::deg_to_rad,
                 doc.number(*orbit, "raan_deg") * constants::deg_to_rad, doc.text(*orbit, "reference_utc")};
         }
+        if (auto prox = (*station)["proximity"].as_table()) {
+            auto& sp = s.station_proximity;
+            const auto optional_positive = [&](const char* key) -> std::optional<double> {
+                if (!prox->contains(key)) return std::nullopt;
+                return doc.positive(*prox, key);
+            };
+            sp.keep_out_radius_m = optional_positive("keep_out_radius_m");
+            sp.waypoint0_below_m = optional_positive("waypoint0_below_m");
+            sp.waypoint1_range_m = optional_positive("waypoint1_range_m");
+            sp.waypoint2_range_m = optional_positive("waypoint2_range_m");
+            sp.flyaround_radius_m = optional_positive("flyaround_radius_m");
+            if (prox->contains("approach_ellipsoid_m")) {
+                const math::Vec3 e = vec3(doc, *prox, "approach_ellipsoid_m");
+                if (!(e.x > 0.0 && e.y > 0.0 && e.z > 0.0)) {
+                    doc.fail("stage.station.proximity.approach_ellipsoid_m must be positive");
+                }
+                sp.approach_ellipsoid_m = e;
+            }
+            if (sp.waypoint1_range_m && sp.waypoint2_range_m && !(*sp.waypoint2_range_m < *sp.waypoint1_range_m)) {
+                doc.fail("stage.station.proximity: waypoint2_range_m must be below waypoint1_range_m");
+            }
+            if (sp.keep_out_radius_m && sp.waypoint1_range_m && !(*sp.keep_out_radius_m < *sp.waypoint1_range_m)) {
+                doc.fail("stage.station.proximity: Waypoint 1 must lie outside the keep-out sphere");
+            }
+        }
     }
     append_docking_ports(doc, t, s);
     if (auto prims = t["collision"].as_array()) {

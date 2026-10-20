@@ -13,6 +13,7 @@
 //   re-arms once the chaser is back beyond the petal tips. A hull contact ends the flight: "Kollision".
 
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/station_limits.hpp"
 
 #include <cstdio>
 #include <limits>
@@ -308,7 +309,8 @@ void FlightSession::separate_docked() {
     proximity_station_port_ = docking_->station_port();
     proximity_chaser_port_ = docking_->chaser_port();
     measure_proximity_authority();
-    departure_.emplace(gnc::DepartureParameters{}, gnc::ProximityParameters{});
+    departure_.emplace(with_station_limits(gnc::DepartureParameters{}, station_limits()),
+                       with_station_limits(gnc::ProximityParameters{}, station_limits()));
     autopilot_.state = AutopilotState::Departure;
     attitude_mode_ = proximity_attitude_mode();
 }

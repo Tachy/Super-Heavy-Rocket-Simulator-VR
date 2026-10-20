@@ -443,16 +443,17 @@ void FlightSession::place_body(const config::VehicleConfig& config, const vehicl
 
 size_t FlightSession::add_station(const config::VehicleConfig& config, const math::StateVector& state_gcrf,
                                  time::Epoch epoch, std::vector<StationImpulse> impulses) {
-    if (config.stages.empty() || !config.stages.front().body_in_lvlh_rad) {
-        throw std::logic_error("add_station: vehicle has no [stage.station]");
+    if (config.stages.size() != 1) {
+        throw std::logic_error("add_station: a station is one stage (add the depot without its booster)");
     }
+    if (!config.stages.back().body_in_lvlh_rad) throw std::logic_error("add_station: vehicle has no [stage.station]");
     if (station_index_) throw std::logic_error("add_station: the session has a station already");
     if (bodies_.empty()) {
         set_epoch(epoch);
     } else if (std::abs(epoch - epoch_) > tick_s) {
         throw std::logic_error("add_station: the station state is not at the session epoch");
     }
-    const math::Vec3 ypr = *config.stages.front().body_in_lvlh_rad;  // aerospace 3-2-1: yaw, pitch, roll
+    const math::Vec3 ypr = *config.stages.back().body_in_lvlh_rad;  // aerospace 3-2-1: yaw, pitch, roll
     const math::Quat body_in_lvlh = math::Quat::from_axis_angle({0.0, 0.0, 1.0}, ypr.x) *
                                     math::Quat::from_axis_angle({0.0, 1.0, 0.0}, ypr.y) *
                                     math::Quat::from_axis_angle({1.0, 0.0, 0.0}, ypr.z);

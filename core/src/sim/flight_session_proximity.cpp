@@ -16,6 +16,7 @@
 //   abort is passive until resume, which sets the hold again at once so that the next ticks run the guidance).
 
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/station_limits.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -47,6 +48,7 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
         return false;
     };
     if (bodies_.empty() || !station_index_) return refuse("Kein Anflug: keine Station");
+    p = with_station_limits(std::move(p), station_limits());
     if (docked()) return refuse("Anflug nicht möglich: angedockt");
     if (docking_busy()) return refuse("Anflug nicht möglich: Andockvorgang läuft");
     if (controlled_ == *station_index_) return refuse("Kein Anflug: die Station selbst wird gesteuert");
@@ -168,7 +170,7 @@ gnc::ProximityInput FlightSession::proximity_input() const {
     const double r = norm(st.position_m);
     in.mean_motion_radps = std::sqrt(constants::earth_gm_m3ps2 / (r * r * r));
     in.authority_port = proximity_authority_;
-    in.propellant_kg = bodies_[controlled_].body->vehicle().rcs_propellant_kg();
+    in.propellant_kg = bodies_[controlled_].body->vehicle().rcs_supply_kg();
     return in;
 }
 

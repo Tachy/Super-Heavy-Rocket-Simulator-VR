@@ -125,6 +125,17 @@ struct StationReferenceOrbitConfig {
     std::string reference_utc;
 };
 
+// [stage.station.proximity] (refuelling r3): the target's approach limits. Unset keys keep the ISS values in code
+// (gnc::ProximityParameters, gnc::DepartureParameters, mission::PhasingParameters).
+struct StationProximityConfig {
+    std::optional<double> keep_out_radius_m;
+    std::optional<math::Vec3> approach_ellipsoid_m;  // semi-axes along LVLH x, y, z
+    std::optional<double> waypoint0_below_m;
+    std::optional<double> waypoint1_range_m;
+    std::optional<double> waypoint2_range_m;
+    std::optional<double> flyaround_radius_m;
+};
+
 // [[stage.docking_port]]: stage frame (x = station from the stage bottom, y/z body axes); `axis` is the outward unit
 // vector, `up` the clocking reference perpendicular to it.
 // IDSS: one side extends its soft-capture ring (active), the other stays retracted (passive) - ISS i5.
@@ -327,6 +338,7 @@ struct StageConfig {
     std::optional<math::Vec3> inertia_kg_m2;      // principal moments of the dry stage about its own CG (else a cylinder)
     std::optional<math::Vec3> body_in_lvlh_rad;   // a station: ideal LVLH attitude, yaw / pitch / roll (TEA)
     std::optional<StationReferenceOrbitConfig> reference_orbit;  // a station: synthetic orbit defaults
+    StationProximityConfig station_proximity;                    // a station: approach limits
     std::vector<DockingPortConfig> docking_ports;
     std::vector<TransferConnectorConfig> transfer_connectors;
     std::vector<CollisionPrimitiveConfig> collision;
