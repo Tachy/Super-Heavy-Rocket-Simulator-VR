@@ -7,6 +7,7 @@
 #include "starsim/sim/iss_mission.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/lunar_return_mission.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
 
 namespace starsim::sim {
 
@@ -55,6 +56,9 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
                                             iss_archive(config_dir, time), time);
             break;
         case config::MissionKind::DepotLaunch:
+            s = start_depot_launch_mission(session, config_dir, config::load_depot_launch_mission(config_dir, mission_id),
+                                           time);
+            break;
         case config::MissionKind::TankerFlight:
         case config::MissionKind::HlsRefuel:
             throw std::invalid_argument("mission '" + std::string(mission_id) + "': kind not yet startable");

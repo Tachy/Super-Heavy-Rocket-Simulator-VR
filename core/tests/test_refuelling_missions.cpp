@@ -13,7 +13,9 @@
 #include "refuelling_test_support.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
+#include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
+#include "starsim/sim/mission_start.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -256,4 +258,52 @@ TEST_CASE("Continuation refusal ends the mission", "[refuelling][iss_mission]") 
     f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 6.0 * 3600.0, 60.0);
     CHECK(f.leg() == IssMissionLeg::Ended);
     CHECK(f.session.iss_mission_status() == "Mission beendet: Mondmission: zu spät");
+}
+
+TEST_CASE("depot_launch starts the depot ascent through start_mission", "[refuelling][mission]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "depot_launch", f.t0, f.clock);
+    INFO(s.refusal);
+    REQUIRE(s.refusal.empty());
+    CHECK(s.kind == config::MissionKind::DepotLaunch);
+    CHECK(s.site_id == "starbase_olp1");
+    CHECK(s.epoch == f.t0);  // the mission's epoch_utc
+    CHECK(f.session.iss_mission_leg() == IssMissionLeg::Ascent);
+    CHECK_FALSE(f.session.station_index());
+}
+
+TEST_CASE("depot_launch: pad -> orbit, the depot becomes the station, the booster is caught",
+          "[refuelling][mission][ascent][slow]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    REQUIRE(sim::start_mission(f.session, refuelling_test::config_dir, "depot_launch", f.t0, f.clock).refusal.empty());
+    while (f.session.epoch() - f.t0 < 1800.0 && f.session.iss_mission_leg() == IssMissionLeg::Ascent) {
+        f.session.advance_to(f.session.epoch() + 1.0);
+    }
+    INFO(f.session.iss_mission_status());
+    REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Complete);
+    REQUIRE(f.session.station_index());
+    const double insertion_s = f.session.iss_mission_marks().back().epoch - f.t0;
+    const auto& depot = f.session.body(*f.session.station_index());
+    const double fill = depot.vehicle().main_propellant_kg();
+    const auto e = orbit::elements_from_state({depot.state().position_gcrf_m, depot.state().velocity_gcrf_mps},
+                                              constants::earth_gm_m3ps2);
+    const double rp = e.semi_major_axis_m * (1.0 - e.eccentricity) - constants::wgs84_semi_major_axis_m;
+    const double ra = e.semi_major_axis_m * (1.0 + e.eccentricity) - constants::wgs84_semi_major_axis_m;
+    while (f.session.epoch() - f.t0 < 1800.0 && f.session.tower()->phase() != sim::CatchPhase::Caught) {
+        f.session.advance_to(f.session.epoch() + 1.0);
+    }
+    CHECK(f.session.tower()->phase() == sim::CatchPhase::Caught);
+    CHECK(rp > 185.0e3);  // [E] insertion within ~15 km of the 200 km target
+    CHECK(ra < 215.0e3);
+    CHECK(fill > 0.0);
+    // one orbit as the station: ideal attitude, boil-off on
+    const double before = f.session.body(*f.session.station_index()).vehicle().main_propellant_kg();
+    f.session.advance_to(f.session.epoch() + 5400.0);
+    const double boil_kg = before - f.session.body(*f.session.station_index()).vehicle().main_propellant_kg();
+    CHECK(boil_kg > 0.0);
+    std::printf("[r5] depot_launch: station %.0f s after liftoff, %.1f x %.1f km, initial fill %.1f t (main), "
+                "boil-off %.1f kg in 90 min\n",
+                insertion_s, rp / 1e3, ra / 1e3, fill / 1e3, boil_kg);
 }
