@@ -8,6 +8,8 @@ kind = "lunar_return"            # FlightSim.start_mission dispatches on it
 vehicle = "starship_block3"
 stage = "ship"
 site = "starbase_olp1"
+boil_off = false                # refuelling r2 (user 2026-10-20): the bare Block 3 hull cannot keep its propellant
+                                # for days; off until r5 (Moon radiation, thermal attitude)
 
 [orbit]
 epoch_utc = "2026-11-12T00:00:00"   # [E] as ship_lunar_return_llo

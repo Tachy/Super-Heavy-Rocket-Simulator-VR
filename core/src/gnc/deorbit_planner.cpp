@@ -343,10 +343,22 @@ DeorbitPlan plan_deorbit(const math::StateVector& state_gcrf, time::Epoch epoch,
         plan.downrange_error_m = shot.downrange_m;
         plan.crossrange_m = shot.crossrange_m;
         plan.propellant_kg = burn_propellant(dv);
-        if (available_propellant_kg - plan.propellant_kg < reserve_propellant_kg) {
-            char text[160];
-            std::snprintf(text, sizeof text, "Zu wenig Treibstoff: Deorbit %.1f t + Landung %.1f t, an Bord %.1f t",
-                          plan.propellant_kg / 1000.0, reserve_propellant_kg / 1000.0, available_propellant_kg / 1000.0);
+        // The earliest pass is the best one with boil-off too: a later pass only has less left.
+        const double boiled_kg = parameters.boil_off_kgps * std::max(0.0, t - epoch);
+        plan.boil_off_kg = boiled_kg;
+        if (available_propellant_kg - boiled_kg - plan.propellant_kg < reserve_propellant_kg) {
+            char text[200];
+            if (boiled_kg > 0.0) {
+                std::snprintf(text, sizeof text,
+                              "Zu wenig Treibstoff: Deorbit %.1f t + Landung %.1f t, an Bord %.1f t, bis zum Brennvorgang "
+                              "in %.1f h verdampft %.1f t",
+                              plan.propellant_kg / 1000.0, reserve_propellant_kg / 1000.0,
+                              available_propellant_kg / 1000.0, (t - epoch) / 3600.0, boiled_kg / 1000.0);
+            } else {
+                std::snprintf(text, sizeof text, "Zu wenig Treibstoff: Deorbit %.1f t + Landung %.1f t, an Bord %.1f t",
+                              plan.propellant_kg / 1000.0, reserve_propellant_kg / 1000.0,
+                              available_propellant_kg / 1000.0);
+            }
             plan.reason = text;
             plan.short_of_reserve = true;
             return plan;

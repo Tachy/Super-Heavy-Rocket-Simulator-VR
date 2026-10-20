@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/environment/gravity.hpp"
@@ -10,6 +11,7 @@
 #include "starsim/frames/body_orientation.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/time/epoch.hpp"
+#include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
 namespace starsim::aero {
@@ -44,6 +46,9 @@ struct FlightEnvironment {
     // yaw; roll about MassProperties::roll_offset_m) as the hull's do. Off [E]: about the axial CG - with the full point
     // the Falcon 9 / Crew Dragon ascent apoapsis moved 210 -> 223 km (header-tank plan Task 2); not yet validated on.
     bool actuator_moments_about_cg_point = false;
+    // Fidelity flag (refuelling r2): cryogenic propellant in the hull tanks of stages with [stage.thermal] boils off
+    // by the hull heat balance (vehicle/boil_off.hpp) in free flight above FlightBody::boil_off_min_altitude_m.
+    bool boil_off = true;
 };
 
 // Air data at the start of the last tick (what an air-data system would report to the controllers).
@@ -191,6 +196,14 @@ public:
     // Force of the reaction-control thrusters that fired in the last tick, body axes.
     math::Vec3 rcs_force_body_n() const { return rcs_force_body_n_; }
 
+    // Boil-off (refuelling r2): the heat balance is evaluated every boil_off_interval_s of free flight and after every
+    // coast; the vented mass is the trapezoid of the last two evaluations' flows per tank. Below
+    // boil_off_min_altitude_m in air (convection and entry heating are not modelled), clamped, caught, landed, resting
+    // or docked nothing boils off (a docked tanker's boil-off belongs to the r4 transfer).
+    static constexpr double boil_off_interval_s = 10.0;         // [E]
+    static constexpr double boil_off_min_altitude_m = 100.0e3;  // [E]
+    const BoilOffRate& boil_off_rate() const { return boil_off_rate_; }  // at the last evaluation
+
     // A station in ideal attitude (i1): the body axes follow LVLH (times body_in_lvlh) exactly after every step and
     // coast; contact torques do not turn it (its CMGs are taken as strong enough - documented simplification). The
     // translation stays free. The attitude enters no force of such a body (fixed-area drag and SRP).
@@ -258,6 +271,16 @@ private:
     math::Vec3 specific_force_body_mps2_;
     bool accelerometer_ = false;
     math::Vec3 rcs_force_body_n_;
+    void boil_off(const FlightEnvironment& env, time::Epoch epoch, double dt_s);
+    void reset_boil_off() {
+        boil_off_elapsed_s_ = 0.0;
+        boil_off_last_.clear();
+        boil_off_rate_ = {};
+    }
+    double boil_off_elapsed_s_ = 0.0;
+    math::Vec3 boil_off_specific_force_body_mps2_;  // of the last tick or at the end of the last coast
+    std::vector<TankBoilOff> boil_off_last_;
+    BoilOffRate boil_off_rate_;
 };
 
 // Earth rotation vector in GCRF from the orientation's rotation rate (omega_x = dR/dt * R^T).

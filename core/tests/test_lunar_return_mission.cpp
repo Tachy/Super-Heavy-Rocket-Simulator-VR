@@ -53,6 +53,11 @@ TEST_CASE("Lunar return missions load", "[lunar][return][config]") {
     const auto n = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_nrho");
     CHECK(n.orbit == "nrho");
     CHECK(n.nrho_revolutions == 9);
+    // Refuelling r2 (user 2026-10-20): the bare Block 3 ship cannot keep its propellant for days - its lunar missions
+    // fly without boil-off until r5 (Moon radiation, thermal attitude).
+    CHECK_FALSE(m.boil_off);
+    CHECK_FALSE(a.boil_off);
+    CHECK_FALSE(n.boil_off);
     CHECK_THROWS_AS(config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "hls_lunar_llo"), config::ConfigError);
 }
 

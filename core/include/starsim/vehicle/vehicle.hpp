@@ -110,6 +110,7 @@ struct Tank {
     mutable std::shared_ptr<const SettlingTable> settling;  // fetched on the first tilted query
     double boiling_point_k = 0.0;   // boil-off (refuelling r2): of its propellant; 0: does not boil
     double latent_heat_j_kg = 0.0;
+    double surface_tension_n_m = 0.0;
 };
 
 // Which tanks feed a stage's engines (header-tank plan): the main tanks, or from the flip on the header tanks.

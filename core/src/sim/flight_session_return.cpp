@@ -58,6 +58,64 @@ void FlightSession::start_entry_guidance(Flying& flying, const gnc::EntryGuidanc
         std::make_unique<gnc::EntryGuidance>(*flying.body, schedule, target, parameters, radiative_heating_);
 }
 
+namespace {
+
+FlightSession::MainPropellant main_tanks(const vehicle::Vehicle& vehicle) {
+    FlightSession::MainPropellant p;
+    for (const auto& stage : vehicle.stages()) {
+        p.oxidizer_kg += stage.propellant_kg(config::TankContents::Oxidizer, config::TankRole::Main);
+        p.fuel_kg += stage.propellant_kg(config::TankContents::Fuel, config::TankRole::Main);
+    }
+    return p;
+}
+
+}  // namespace
+
+FlightSession::MainPropellant FlightSession::main_propellant_at(const vehicle::FlightBody& body, time::Epoch at) const {
+    if (!env_.boil_off || env_.ephemeris == nullptr) return main_tanks(body.vehicle());
+    // Waiting for its burn the ship drifts free (burn_drifting) and turns under the air's torque - which side the Sun
+    // heats changes the boil-off by up to ~2x (r2 campaigns), so no fixed-attitude average will do: a copy is coasted.
+    vehicle::FlightBody ahead(body.vehicle().copy_upper(0), body.state());
+    ahead.set_ground_height(body.ground_height_m());
+    for (time::Epoch t = epoch_; t < at;) {
+        const double dt = std::min(max_coast_s, at - t);
+        ahead.coast(env_, t, dt);
+        t = t + dt;
+    }
+    const auto later = main_tanks(ahead.vehicle());
+    if (std::getenv("STARSIM_DEBUG_DEORBIT")) {
+        const auto now = main_tanks(body.vehicle());
+        std::printf("[deorbit] flown ahead %.1f h: main LOX %.1f -> %.1f t, CH4 %.1f -> %.1f t\n", (at - epoch_) / 3600.0,
+                    now.oxidizer_kg / 1000.0, later.oxidizer_kg / 1000.0, now.fuel_kg / 1000.0, later.fuel_kg / 1000.0);
+    }
+    return later;
+}
+
+std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& plan) const {
+    const auto& body = *bodies_[controlled_].body;
+    const auto now = main_tanks(body.vehicle());
+    const auto at_burn = main_propellant_at(body, plan.node.epoch);
+    plan.boil_off_kg = now.total() - at_burn.total();
+    // LOX and CH4 boil off in another ratio than the engine burns them (~3.2 against 3.6): the one that runs dry first
+    // limits the burn. The deorbit engine set's mixture ratio (all of the ship's Raptors burn the same).
+    double mixture_ratio = 0.0;
+    for (const auto& e : body.vehicle().stages().front().engines) mixture_ratio = e.performance->config().mixture_ratio;
+    const double usable_kg = mixture_ratio > 0.0 ? std::min(at_burn.oxidizer_kg * (1.0 + mixture_ratio) / mixture_ratio,
+                                                            at_burn.fuel_kg * (1.0 + mixture_ratio))
+                                                 : at_burn.total();
+    // [E] the burn's execution dispersion (~1 %), its start and shutdown transients and finite-burn losses on top of
+    // the impulsive propellant (5 % let a burn run dry on its last tonne in the r2 campaigns)
+    constexpr double burn_margin = 1.10;
+    if (usable_kg >= burn_margin * plan.propellant_kg) return std::nullopt;
+    char text[220];
+    std::snprintf(text, sizeof text,
+                  "Zu wenig Treibstoff: Deorbit %.1f t, beim Brennvorgang in %.1f h nutzbar noch %.1f t in den "
+                  "Haupttanks (verdampft %.1f t)",
+                  plan.propellant_kg / 1000.0, (plan.node.epoch - epoch_) / 3600.0, usable_kg / 1000.0,
+                  plan.boil_off_kg / 1000.0);
+    return std::string(text);
+}
+
 bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
     ship_return_ = false;
     deorbit_plan_.reset();
@@ -88,6 +146,13 @@ bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
                                       target, vehicle.mass_properties().mass_kg, exhaust_velocity_mps,
                                       vehicle.propellant_kg(), stage.landing_propellant_kg, parameters);
     if (!deorbit_plan_->feasible) return false;
+    // The earliest pass is the best one with boil-off too (a later one only has less left): it alone is checked.
+    if (const auto shortfall = boil_off_shortfall(*deorbit_plan_)) {
+        deorbit_plan_->feasible = false;
+        deorbit_plan_->short_of_reserve = true;
+        deorbit_plan_->reason = *shortfall;
+        return false;
+    }
     if (!execute_burn(deorbit_plan_->node, stage.deorbit_engine_groups)) {
         deorbit_plan_->feasible = false;
         deorbit_plan_->reason = "Deorbit-Brennvorgang zu klein für das Triebwerk";
@@ -143,6 +208,21 @@ void FlightSession::replan_ship_deorbit() {
     // The landing reserve was checked when the deorbit was committed; a re-plan that only cuts into it is still flown -
     // the old plan's burn is known to miss now (l5 Task 10, aircatch seed 15: the tracked drag asked 64.4 instead of
     // 61.0 m/s, 0.3 t into the 35 t reserve; the old burn was flown and the entry missed the gate by 274 km).
+    // Boil-off since the commitment (r2): when the main tanks will no longer hold the burn, it is called off - the
+    // ship stays in orbit instead of running dry in the burn.
+    {
+        gnc::DeorbitPlan flown = plan.feasible || plan.short_of_reserve ? plan : *deorbit_plan_;
+        if (const auto shortfall = boil_off_shortfall(flown)) {
+            deorbit_plan_ = flown;
+            deorbit_plan_->feasible = false;
+            deorbit_plan_->short_of_reserve = true;
+            deorbit_plan_->reason = *shortfall;
+            burn_abort_reason_ = *shortfall;
+            ship_return_ = false;
+            autopilot_.state = AutopilotState::Off;
+            return;
+        }
+    }
     auto node = old_node;
     if (plan.feasible || plan.short_of_reserve) {
         deorbit_plan_ = plan;

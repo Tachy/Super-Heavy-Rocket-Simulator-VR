@@ -30,6 +30,8 @@ struct PropellantConfig {
     double oxidizer_latent_heat_j_kg = 0.0;
     double fuel_boiling_point_k = 0.0;
     double fuel_latent_heat_j_kg = 0.0;
+    double oxidizer_surface_tension_n_m = 0.0;  // at the boiling point: the Bond number of the liquid in a tank
+    double fuel_surface_tension_n_m = 0.0;
 };
 
 struct EngineConfig {
@@ -270,6 +272,9 @@ struct ThermalConfig {
     ThermalSurfaceConfig hull;
     std::optional<ThermalSurfaceConfig> shield;
     double shield_half_width_rad = 0.0;
+    // Added on the dry wall (the liquid not touching it): the ullage gas between wall and liquid conducts, without
+    // convection near free fall (refuelling r2, Task 5b).
+    double ullage_resistance_m2k_w = 0.0;
 };
 
 struct StageConfig {

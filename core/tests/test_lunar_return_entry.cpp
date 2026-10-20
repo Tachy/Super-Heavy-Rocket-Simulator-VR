@@ -72,6 +72,7 @@ HandoverFlight fly_handover(double density_factor, double aero_factor, double li
                             const HandoverState& h = {}) {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, h.mission);
+    t.session.set_boil_off(m.boil_off);  // placed directly: the mission's fidelity (refuelling r2)
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
     config::fill_tanks(ship.stages.front(), h.propellant_kg);
@@ -236,6 +237,7 @@ TEST_CASE("Ship return (b4) from the aerocapture's circular orbit is caught",
           "[lunar][return][aerocapture][catch][slow]") {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
+    t.session.set_boil_off(m.boil_off);  // placed directly: the mission's fidelity (refuelling r2)
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
     config::fill_tanks(ship.stages.front(), b4_oxidiser_kg, b4_fuel_kg);
@@ -292,6 +294,7 @@ TEST_CASE("Ship return (b4) from the aerocapture's circular orbit is caught",
 TEST_CASE("Lunar return aerocapture from the hand-over state exits near 400 km", "[lunar][return][entry][aerocapture][slow]") {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
+    t.session.set_boil_off(m.boil_off);  // placed directly: the mission's fidelity (refuelling r2)
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
     config::fill_tanks(ship.stages.front(), aircatch_propellant_kg);
@@ -332,6 +335,7 @@ TEST_CASE("Lunar return aerocapture from the hand-over state exits near 400 km",
 TEST_CASE("A shallow aerocapture pass that stays above 80 km ends in Exit", "[lunar][return][entry][aerocapture][slow]") {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
+    t.session.set_boil_off(m.boil_off);  // placed directly: the mission's fidelity (refuelling r2)
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
     config::fill_tanks(ship.stages.front(), aircatch_propellant_kg);
@@ -378,6 +382,7 @@ AircatchPass fly_aircatch_pass(double density_factor, double aero_factor, double
                                const math::Vec3& kick_body_radps = {}) {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_aircatch_llo");
+    t.session.set_boil_off(m.boil_off);  // placed directly: the mission's fidelity (refuelling r2)
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
     config::fill_tanks(ship.stages.front(), propellant_kg);
@@ -486,6 +491,7 @@ TEST_CASE("Lunar return catch from a printed gate state", "[.lunar_gate_replay]"
     };
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
+    t.session.set_boil_off(m.boil_off);  // placed directly: the mission's fidelity (refuelling r2)
     t.session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
     auto ship = sim::lunar_return_ship(m, STARSIM_CONFIG_DIR);
     config::fill_tanks(ship.stages.front(), g[15], g[14]);  // the gate's oxidiser and fuel

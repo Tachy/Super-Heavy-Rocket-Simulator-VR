@@ -309,6 +309,7 @@ MissionStart start_lunar_return_mission(FlightSession& session, const std::files
                                         const config::VehicleConfig* vehicle, LunarReturnBudget* budget) {
     MissionStart s;
     s.kind = config::MissionKind::LunarReturn;
+    session.set_boil_off(m.boil_off);
     s.epoch = epoch;
     const auto refuse = [&](const std::string& reason) {
         session.disengage_autopilot();

@@ -32,6 +32,9 @@ struct DeorbitParameters {
     // value (estimate_drag_area_per_mass): drag-free, a 4.7-day coast at ~200 km put the pass ~80 km off its plan, out
     // of the reversals' 60 km reach (l5 Task 10, b4 from the aircatch orbit).
     double drag_area_per_mass_m2pkg = 0.0;
+    // Refuelling r2: mean boil-off of the main tanks while the ship waits for its burn (vehicle::orbit_average_boil_off);
+    // the propellant at the burn is the available propellant less this rate times the wait. 0: none.
+    double boil_off_kgps = 0.0;
 };
 
 struct DeorbitPlan {
@@ -45,6 +48,7 @@ struct DeorbitPlan {
     double downrange_error_m = 0.0;       // nominal bank (> 0: overshoot)
     double crossrange_m = 0.0;            // nominal bank, both signs averaged
     double propellant_kg = 0.0;           // for the burn (rocket equation)
+    double boil_off_kg = 0.0;             // boiled off until the burn (DeorbitParameters::boil_off_kgps)
     bool short_of_reserve = false;        // not feasible only because the landing reserve would be cut (plan complete)
     int passes_checked = 0;
 };

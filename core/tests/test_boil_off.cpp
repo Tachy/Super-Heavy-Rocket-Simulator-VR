@@ -15,12 +15,15 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/environment/atmosphere.hpp"
 #include "starsim/environment/thermal_radiation.hpp"
+#include "starsim/ephemeris/ephemeris.hpp"
 #include "starsim/frames/lvlh.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/vehicle/boil_off.hpp"
+#include "starsim/vehicle/flight_body.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
 using namespace starsim;
@@ -228,6 +231,70 @@ TEST_CASE("boil_off_rates: hull main tanks only, heat over latent heat, clamped 
     CHECK(total.fuel_kgps > 0.0);
 }
 
+// Task 5b (user 2026-10-20): the wall passes its heat into the liquid only where the liquid wets it. Where the liquid
+// lies decides the Bond number: settled by a residual acceleration, or spread over the walls by surface tension.
+TEST_CASE("settled liquid wets the strips below its surface", "[boil_off][vehicle]") {
+    const auto aft = vehicle::settled_wetted_fractions(0.25, {-1.0, 0.0, 0.0}, 3.0);
+    REQUIRE(aft.size() == static_cast<size_t>(vehicle::boil_off_strips));
+    for (const double f : aft) CHECK(f == Catch::Approx(0.25).margin(0.03));  // a column on the aft end
+    // Pushed to the belly (-z): the belly half wet over its length, the dorsal half dry.
+    const auto side = vehicle::settled_wetted_fractions(0.5, {0.0, 0.0, -1.0}, 3.0);
+    const int belly = static_cast<int>(0.75 * vehicle::boil_off_strips);  // azimuth 270 deg
+    const int dorsal = static_cast<int>(0.25 * vehicle::boil_off_strips);
+    CHECK(side[belly] == Catch::Approx(1.0));
+    CHECK(side[dorsal] == Catch::Approx(0.0));
+    for (const double f : vehicle::settled_wetted_fractions(0.0, {-1.0, 0.0, 0.0}, 3.0)) CHECK(f == 0.0);
+    for (const double f : vehicle::settled_wetted_fractions(1.0, {-1.0, 0.0, 0.0}, 3.0)) CHECK(f == 1.0);
+}
+
+TEST_CASE("Bond number: surface tension wets the walls, a residual acceleration settles", "[boil_off][vehicle]") {
+    CHECK(vehicle::settled_weight(0.3) == 0.0);
+    CHECK(vehicle::settled_weight(1.0) == 0.0);
+    CHECK(vehicle::settled_weight(std::sqrt(10.0)) == Catch::Approx(0.5));
+    CHECK(vehicle::settled_weight(10.0) == 1.0);
+    CHECK(vehicle::settled_weight(1.0e4) == 1.0);
+}
+
+TEST_CASE("apparent gravity on a tank: tide, specific force and rotation", "[boil_off][vehicle]") {
+    const double r = constants::earth_mean_radius_m + 200.0e3;
+    const double n2 = constants::earth_gm_m3ps2 / (r * r * r);
+    vehicle::LiquidEnvironment liquid;
+    liquid.position_gcrf_m = {r, 0.0, 0.0};
+    // Tide: stretched along the radius, squeezed across it.
+    const Vec3 radial = vehicle::apparent_gravity_body_mps2(liquid, {10.0, 0.0, 0.0});
+    CHECK(radial.x == Catch::Approx(2.0 * n2 * 10.0));
+    const Vec3 across = vehicle::apparent_gravity_body_mps2(liquid, {0.0, 10.0, 0.0});
+    CHECK(across.y == Catch::Approx(-n2 * 10.0));
+    // Thrust forward: the liquid goes aft. Rotation about z: outwards.
+    liquid.position_gcrf_m = {1.0e15, 0.0, 0.0};  // no tide
+    liquid.specific_force_body_mps2 = {2.0, 0.0, 0.0};
+    CHECK(vehicle::apparent_gravity_body_mps2(liquid, {}).x == Catch::Approx(-2.0));
+    liquid.specific_force_body_mps2 = {};
+    liquid.angular_velocity_body_radps = {0.0, 0.0, 0.1};
+    CHECK(vehicle::apparent_gravity_body_mps2(liquid, {10.0, 0.0, 0.0}).x == Catch::Approx(0.1 * 0.1 * 10.0));
+}
+
+TEST_CASE("boil_off_rates: a small settled residue boils little, in free fall the walls are wet", "[boil_off][vehicle]") {
+    auto ship = top_stage_alone("starship_block3");
+    ship->set_tank_mass(0, "lox_main", 0.01 * tank_named(*ship, "lox_main").config.capacity_kg);
+    const auto env = deep_space_sun({0.0, 0.0, 1.0});
+    auto lox_heat = [&](const vehicle::LiquidEnvironment* liquid) {
+        for (const auto& t : vehicle::boil_off_rates(*ship, env, {}, liquid)) {
+            if (ship->stages()[t.stage_index].tanks[t.tank_index].config.id == "lox_main") return t.heat_w;
+        }
+        return 0.0;
+    };
+    const double wetted = lox_heat(nullptr);
+    vehicle::LiquidEnvironment thrust;
+    thrust.position_gcrf_m = {1.0e15, 0.0, 0.0};
+    thrust.specific_force_body_mps2 = {1.0, 0.0, 0.0};  // settled aft: 1 % of the tank's length wet
+    CHECK(lox_heat(&thrust) > 0.0);
+    CHECK(lox_heat(&thrust) < 0.1 * wetted);
+    vehicle::LiquidEnvironment free_fall;
+    free_fall.position_gcrf_m = {1.0e15, 0.0, 0.0};  // Bond number ~0: surface tension coats the walls
+    CHECK(lox_heat(&free_fall) == Catch::Approx(wetted));
+}
+
 TEST_CASE("boil_off_rates: tiles on the belly, MLI on the depot, nothing without stage.thermal", "[boil_off][vehicle]") {
     const auto ship = top_stage_alone("starship_block3");
     auto heat = [](const vehicle::Vehicle& v, const Vec3& sun) {
@@ -380,4 +447,159 @@ TEST_CASE("orbit average in the depot orbit: plausibility of depot and bare tank
         CHECK(depot_percent_day < 0.2);
         CHECK(tanker_kg_day > 10.0 * depot_kg_day);
     }
+}
+
+namespace {
+
+class CentralGravity final : public environment::GravityModel {
+public:
+    ephemeris::Body central_body() const override { return ephemeris::Body::Earth; }
+    Vec3 acceleration_mps2(const Vec3& r, time::Epoch) const override {
+        const double d = norm(r);
+        return r * (-constants::earth_gm_m3ps2 / (d * d * d));
+    }
+};
+
+class FixedEarth final : public frames::BodyOrientation {
+public:
+    frames::FixedToInertial fixed_to_gcrf(time::Epoch) const override { return {math::Mat3::identity(), {}}; }
+};
+
+// The Sun fixed in GCRF; the Moon opposite it (never in front of the Sun for a vehicle near the Earth).
+class FixedSun final : public ephemeris::Ephemeris {
+public:
+    explicit FixedSun(const Vec3& sun_gcrf_m) : sun_(sun_gcrf_m) {}
+    math::StateVector state_gcrf(ephemeris::Body target, time::Epoch) const override {
+        if (target == ephemeris::Body::Sun) return {sun_, {}};
+        if (target == ephemeris::Body::Moon) return {sun_ * (-3.844e8 / norm(sun_)), {}};
+        return {};
+    }
+    double gm_m3ps2(ephemeris::Body) const override { return 0.0; }
+    math::Vec3 apparent_position_gcrf(ephemeris::Body target, time::Epoch epoch,
+                                      const math::StateVector&) const override {
+        return state_gcrf(target, epoch).position_m;
+    }
+
+private:
+    Vec3 sun_;
+};
+
+const time::Epoch t0 = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
+
+struct OrbitWorld {
+    explicit OrbitWorld(const Vec3& sun) : ephemeris(sun) {}
+    CentralGravity gravity;
+    environment::Us76Atmosphere atmosphere;
+    FixedEarth earth;
+    FixedSun ephemeris;
+    vehicle::FlightEnvironment env{gravity, atmosphere, earth, &ephemeris, false};
+};
+
+// A vehicle's top stage alone in a circular orbit, held in LVLH (identity: nose along +V, dorsal to nadir).
+std::unique_ptr<vehicle::FlightBody> in_orbit(const std::string& vehicle_id, const math::StateVector& orbit) {
+    auto body = std::make_unique<vehicle::FlightBody>(
+        top_stage_alone(vehicle_id),
+        vehicle::RigidBodyState{orbit.position_m, orbit.velocity_mps, frames::lvlh_to_inertial(orbit), {}});
+    body->set_ideal_lvlh_attitude(math::Quat{});
+    return body;
+}
+
+double main_propellant(const vehicle::FlightBody& body) { return body.vehicle().main_propellant_kg(); }
+
+double all_tanks_kg(const vehicle::Vehicle& v, size_t stage_index) {
+    double sum = 0.0;
+    for (const auto& t : v.stages()[stage_index].tanks) sum += t.mass_kg;
+    return sum;
+}
+
+}  // namespace
+
+TEST_CASE("boil-off in flight: one orbit of coasting vents the orbit average", "[boil_off][flight]") {
+    const auto orbit = circular_orbit(400.0e3, 0.0);
+    const Vec3 sun{constants::astronomical_unit_m, 0.0, 0.0};  // in the plane: an eclipse every orbit
+    OrbitWorld world(sun);
+    auto ship = in_orbit("starship_tanker", orbit);
+    const auto average = vehicle::orbit_average_boil_off(ship->vehicle(), orbit, {}, sun);
+    const double period_s = orbit::orbital_period_s(norm(orbit.position_m), constants::earth_gm_m3ps2);
+    const double before = main_propellant(*ship);
+    constexpr int segments = 60;
+    for (int k = 0; k < segments; ++k) ship->coast(world.env, t0 + period_s * k / segments, period_s / segments);
+    const double vented = before - main_propellant(*ship);
+    CHECK(vented == Catch::Approx((average.oxidizer_kgps + average.fuel_kgps) * period_s).epsilon(0.03));
+    CHECK(ship->boil_off_rate().oxidizer_kgps > 0.0);
+}
+
+TEST_CASE("boil-off in flight: the flag, vehicles without stage.thermal and no ephemeris change nothing",
+          "[boil_off][flight]") {
+    const auto orbit = circular_orbit(400.0e3, 0.0);
+    OrbitWorld world({0.0, constants::astronomical_unit_m, 0.0});
+    world.env.boil_off = false;
+    auto ship = in_orbit("starship_tanker", orbit);
+    const double ship_before = main_propellant(*ship);
+    ship->coast(world.env, t0, 600.0);
+    CHECK(main_propellant(*ship) == ship_before);
+
+    world.env.boil_off = true;
+    auto dragon = in_orbit("crew_dragon", orbit);
+    const double dragon_before = all_tanks_kg(dragon->vehicle(), 0);
+    dragon->coast(world.env, t0, 600.0);
+    CHECK(all_tanks_kg(dragon->vehicle(), 0) == dragon_before);
+
+    vehicle::FlightEnvironment no_ephemeris{world.gravity, world.atmosphere, world.earth, nullptr, false};
+    ship->coast(no_ephemeris, t0, 600.0);
+    CHECK(main_propellant(*ship) == ship_before);
+}
+
+TEST_CASE("boil-off in flight: ticks and one long coast vent the same mass", "[boil_off][flight]") {
+    // Sun along the orbit normal: steady sunlight, constant rate - the cadence must not matter.
+    const auto orbit = circular_orbit(400.0e3, 0.0);
+    OrbitWorld world({0.0, 0.0, constants::astronomical_unit_m});
+    auto long_coast = in_orbit("starship_tanker", orbit);
+    auto short_coasts = in_orbit("starship_tanker", orbit);
+    auto ticks = in_orbit("starship_tanker", orbit);
+    const double before = main_propellant(*long_coast);
+    long_coast->coast(world.env, t0, 600.0);
+    for (int k = 0; k < 60; ++k) short_coasts->coast(world.env, t0 + 10.0 * k, 10.0);
+    for (int k = 0; k < 600; ++k) ticks->step(world.env, t0 + 0.1 * k, 0.1, {});  // 60 s of ticks
+    const double rate = long_coast->boil_off_rate().oxidizer_kgps + long_coast->boil_off_rate().fuel_kgps;
+    CHECK(before - main_propellant(*long_coast) == Catch::Approx(rate * 600.0).epsilon(1e-3));
+    CHECK(before - main_propellant(*short_coasts) == Catch::Approx(before - main_propellant(*long_coast)).epsilon(5e-3));
+    CHECK(before - main_propellant(*ticks) == Catch::Approx(rate * 60.0).epsilon(5e-3));
+}
+
+TEST_CASE("boil-off empties a tank to zero, never below", "[boil_off][flight]") {
+    const auto orbit = circular_orbit(400.0e3, 0.0);
+    OrbitWorld world({0.0, 0.0, constants::astronomical_unit_m});
+    auto ship = in_orbit("starship_tanker", orbit);
+    ship->vehicle().set_tank_mass(0, "lox_main", 1.0);
+    ship->coast(world.env, t0, 600.0);
+    CHECK(tank_named(ship->vehicle(), "lox_main").mass_kg == 0.0);
+    CHECK(std::isfinite(ship->vehicle().mass_properties().mass_kg));
+}
+
+TEST_CASE("boil-off: separation clears the stored rates, the booster does not boil", "[boil_off][flight]") {
+    const auto orbit = circular_orbit(400.0e3, 0.0);
+    OrbitWorld world({0.0, 0.0, constants::astronomical_unit_m});
+    auto cfg = config::load_vehicle(config_dir, "starship_tanker");
+    auto stack = std::make_unique<vehicle::FlightBody>(
+        std::make_unique<vehicle::Vehicle>(cfg, config_dir),
+        vehicle::RigidBodyState{orbit.position_m, orbit.velocity_mps, frames::lvlh_to_inertial(orbit), {}});
+    stack->coast(world.env, t0, 20.0);  // rates stored for stage 1 (the ship)
+    auto ship = stack->separate(1);
+    const double booster_before = all_tanks_kg(stack->vehicle(), 0);
+    const double ship_before = main_propellant(*ship);
+    stack->coast(world.env, t0 + 20.0, 20.0);
+    ship->coast(world.env, t0 + 20.0, 20.0);
+    CHECK(all_tanks_kg(stack->vehicle(), 0) == booster_before);
+    CHECK(main_propellant(*ship) < ship_before);
+}
+
+TEST_CASE("boil-off: not inside the air", "[boil_off][flight]") {
+    OrbitWorld world({constants::astronomical_unit_m, 0.0, 0.0});
+    // 50 km up, coasting: below boil_off_min_altitude_m.
+    auto ship = in_orbit("starship_tanker", circular_orbit(50.0e3, 0.0));
+    const double before = main_propellant(*ship);
+    ship->coast(world.env, t0, 30.0);
+    CHECK(main_propellant(*ship) == before);
+    CHECK(ship->boil_off_rate().oxidizer_kgps == 0.0);
 }

@@ -135,6 +135,9 @@ struct LunarReturnMission {
     double mcc_allowance_mps = 30.0;
     double coast_attitude_kg_per_day = 1000.0;
     double reserve_kg = 10000.0;
+    // [mission] boil_off (refuelling r2): the session's boil-off fidelity flag for this mission (default true). The
+    // Block 3 lunar missions set false until r5 (a bare hull cannot keep its propellant for days; user 2026-10-20).
+    bool boil_off = true;
 };
 
 LunarReturnMission load_lunar_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id);

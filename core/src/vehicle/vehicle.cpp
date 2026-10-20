@@ -88,9 +88,11 @@ Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::pat
             if (tank_config.contents == config::TankContents::Oxidizer) {
                 tank.boiling_point_k = config.propellant.oxidizer_boiling_point_k;
                 tank.latent_heat_j_kg = config.propellant.oxidizer_latent_heat_j_kg;
+                tank.surface_tension_n_m = config.propellant.oxidizer_surface_tension_n_m;
             } else if (tank_config.contents == config::TankContents::Fuel) {
                 tank.boiling_point_k = config.propellant.fuel_boiling_point_k;
                 tank.latent_heat_j_kg = config.propellant.fuel_latent_heat_j_kg;
+                tank.surface_tension_n_m = config.propellant.fuel_surface_tension_n_m;
             }
         }
         for (const auto& group : stage_config.engine_groups) {

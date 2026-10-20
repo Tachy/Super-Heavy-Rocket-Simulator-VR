@@ -291,6 +291,7 @@ void FlightSession::run_autopilot() {
             if (!autopilot_.burn.ignite && autopilot_.burn.time_to_ignition_s > 0.0 &&
                 deorbit_replan_in_s() <= 1.0) {  // the coast stops <= 1 s short
                 replan_ship_deorbit();  // the far plan: planned again from the tracked state (daily, ~2 orbits before)
+                if (autopilot_.state != AutopilotState::Burn) break;  // called off (boil-off, r2)
             }
             const auto& c = burn_config_;
             const auto& vehicle = body.vehicle();
@@ -318,6 +319,20 @@ void FlightSession::run_autopilot() {
                                              [](const auto& g) { return g.second; });
             if (autopilot_.burn.ignite && !running) {
                 for (const auto& g : c.groups) flying.running_groups[g] = true;
+            }
+            // Engines that ran dry (main tanks boiled off while waiting, refuelling r2) cannot finish the burn: cut off
+            // and report instead of waiting for ever.
+            const bool dry = running && std::all_of(vehicle.stages().begin(), vehicle.stages().end(), [&](const auto& st) {
+                return std::all_of(st.engines.begin(), st.engines.end(), [&](const auto& e) {
+                    return std::find(c.groups.begin(), c.groups.end(), e.group_id) == c.groups.end() || e.starved;
+                });
+            });
+            if (dry && !autopilot_.burn.complete) {
+                cutoff();
+                burn_abort_reason_ = "Brennvorgang abgebrochen: kein Treibstoff für die Triebwerke";
+                ship_return_ = false;
+                autopilot_.state = AutopilotState::Off;
+                break;
             }
             if (autopilot_.burn.complete) {
                 cutoff();

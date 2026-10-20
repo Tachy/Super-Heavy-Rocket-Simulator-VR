@@ -118,16 +118,19 @@ PropellantConfig load_propellant(const std::filesystem::path& config_dir, const 
             if (doc.text(t, "id") == id) {
                 PropellantConfig p{id, doc.number(t, "mixture_ratio"), doc.number(t, "oxidizer_density_kg_m3"),
                                    doc.number(t, "fuel_density_kg_m3")};
-                // Both or neither of boiling point and latent heat, positive.
-                auto boiling = [&](const char* side, double& point_k, double& latent_j_kg) {
+                // All or none of boiling point, latent heat and surface tension, positive.
+                auto boiling = [&](const char* side, double& point_k, double& latent_j_kg, double& tension_n_m) {
                     const std::string point_key = std::string(side) + "_boiling_point_k";
                     const std::string latent_key = std::string(side) + "_latent_heat_j_kg";
-                    if (!t.contains(point_key) && !t.contains(latent_key)) return;
+                    const std::string tension_key = std::string(side) + "_surface_tension_n_m";
+                    if (!t.contains(point_key) && !t.contains(latent_key) && !t.contains(tension_key)) return;
                     point_k = doc.positive(t, point_key);
                     latent_j_kg = doc.positive(t, latent_key);
+                    tension_n_m = doc.positive(t, tension_key);
                 };
-                boiling("oxidizer", p.oxidizer_boiling_point_k, p.oxidizer_latent_heat_j_kg);
-                boiling("fuel", p.fuel_boiling_point_k, p.fuel_latent_heat_j_kg);
+                boiling("oxidizer", p.oxidizer_boiling_point_k, p.oxidizer_latent_heat_j_kg,
+                        p.oxidizer_surface_tension_n_m);
+                boiling("fuel", p.fuel_boiling_point_k, p.fuel_latent_heat_j_kg, p.fuel_surface_tension_n_m);
                 return p;
             }
         }
@@ -421,6 +424,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         };
         ThermalConfig c;
         c.hull = surface(*thermal, "stage.thermal");
+        c.ullage_resistance_m2k_w = doc.positive(*thermal, "ullage_resistance_m2k_w");
         if (auto shield = (*thermal)["shield"].as_table()) {
             c.shield = surface(*shield, "stage.thermal.shield");
             c.shield_half_width_rad = doc.positive(*shield, "half_width_deg") * constants::deg_to_rad;

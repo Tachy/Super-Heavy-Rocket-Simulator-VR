@@ -17,7 +17,8 @@ apoapsis_km = 200.0
 inclination_deg = 26.5          # the ascent from Starbase (leo_ascent.toml)
 raan_deg = 0.0
 argument_of_latitude_deg = 0.0
-propellant_t = 45.0             # [E] landing 35 t + deorbit ~6 t + margin
+propellant_t = 50.0             # [E] landing 35 t + deorbit ~6 t + boil-off of the residue while waiting for
+                                # this start's pass (~22 h, ~1.5 t/day settled; refuelling r2) + margin
 
 [deorbit]
 entry_interface_km = 120.0

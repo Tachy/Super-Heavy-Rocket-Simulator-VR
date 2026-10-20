@@ -1,6 +1,7 @@
 // Deorbit planner (b4): from a low Earth orbit the onboard computer finds the pass over Starbase and the retrograde
 // burn that reaches the entry interface at b2's flight-path angle with the entry predictor ending at the gate.
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
@@ -129,6 +130,23 @@ TEST_CASE("Deorbit planner refuses without the landing propellant", "[ship][deor
     INFO(p.reason);
     CHECK_FALSE(p.feasible);
     CHECK(p.reason.find("Treibstoff") != std::string::npos);
+}
+
+// Refuelling r2: the main tanks boil off while the ship waits for its pass; the propellant at the burn counts.
+TEST_CASE("Deorbit planner counts the boil-off until the burn", "[ship][deorbit][boil_off]") {
+    const auto s = setup(0.0);  // 10 t above the landing propellant, the burn ~6 t, the pass ~22 h away
+    gnc::DeorbitParameters slow;
+    slow.boil_off_kgps = 100.0 / constants::seconds_per_day;
+    const auto feasible = plan(s, slow);
+    CHECK(feasible.feasible);
+    CHECK(feasible.boil_off_kg == Catch::Approx(slow.boil_off_kgps * (feasible.node.epoch - s.t0)));
+    gnc::DeorbitParameters bare;
+    bare.boil_off_kgps = 10000.0 / constants::seconds_per_day;  // a bare hull's order of magnitude
+    const auto p = plan(s, bare);
+    INFO(p.reason);
+    CHECK_FALSE(p.feasible);
+    CHECK(p.short_of_reserve);
+    CHECK(p.reason.find("verdampft") != std::string::npos);
 }
 
 TEST_CASE("Deorbit planner finds no pass in a short window", "[ship][deorbit]") {

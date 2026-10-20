@@ -388,6 +388,14 @@ public:
     // refused (reason in ship_return_plan()) or the burn cannot be flown.
     bool plan_ship_return(const gnc::DeorbitParameters& parameters = {});
     const gnc::DeorbitPlan* ship_return_plan() const { return deorbit_plan_ ? &*deorbit_plan_ : nullptr; }
+    // Why the last burn was aborted (German; empty: none). A burn whose engines run dry - e.g. main tanks boiled off
+    // while waiting (refuelling r2) - cannot finish: it is cut off, the autopilot goes off.
+    const std::string& burn_abort_reason() const { return burn_abort_reason_; }
+    struct MainPropellant {  // the main tanks' contents (refuelling r2 boil-off checks)
+        double oxidizer_kg = 0.0;
+        double fuel_kg = 0.0;
+        double total() const { return oxidizer_kg + fuel_kg; }
+    };
     // Return of the controlled capsule (a top stage with entry_profile = "capsule", e.g. Crew Dragon on its trunk) to the
     // splashdown zone (d3): the onboard computer plans the deorbit burn (gnc::plan_deorbit, finite burn on the RCS along
     // +x, predicted with the capsule's mass after the trunk jettison) and flies it; the trunk is jettisoned
@@ -579,6 +587,7 @@ public:
     void set_air_density_factor(double factor);
     // Fidelity switch: solar radiation pressure on all bodies (default on; the OEM validation turns it off).
     void set_solar_radiation_pressure(bool on) { env_.solar_radiation_pressure = on; }
+    void set_boil_off(bool on) { env_.boil_off = on; }  // fidelity flag (refuelling r2)
 
     // A space station (a vehicle with [stage.station]) as an uncontrolled body in ideal LVLH attitude; `impulses`
     // are applied at their epochs (a coast stops there). Call after place_body / launch_from_pad / place_in_orbit -
@@ -842,6 +851,13 @@ private:
     BurnConfiguration burn_config_;
     math::Vec3 last_rcs_acceleration_;  // RCS translation of the controlled body in the last tick (GCRF)
     std::optional<gnc::DeorbitPlan> deorbit_plan_;  // last ship return plan (also when refused)
+    std::string burn_abort_reason_;
+    // Refuelling r2: the main-tank propellant `body` will still have at `at`, flown ahead on a copy of itself (free
+    // drift, air torque, boil-off: the onboard computer's model); the present amounts with the flag off.
+    MainPropellant main_propellant_at(const vehicle::FlightBody& body, time::Epoch at) const;
+    // The deorbit burn of `plan` checked against the controlled ship's main tanks at the node (sets plan.boil_off_kg):
+    // a German refusal when they will not hold the burn.
+    std::optional<std::string> boil_off_shortfall(gnc::DeorbitPlan& plan) const;
     bool ship_return_ = false;                      // the burn is the deorbit burn of a ship return
     bool deorbit_replan_due_ = false;               // a far deorbit: planned again when its free drift ends
     time::Epoch deorbit_track_epoch_;               // onboard tracking: the arc from the first plan (drag estimate)

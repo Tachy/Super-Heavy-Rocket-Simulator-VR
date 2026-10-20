@@ -10,6 +10,8 @@ kind = "lunar_return"            # FlightSim.start_mission dispatches on it
 vehicle = "starship_block3"
 stage = "ship"
 site = "starbase_olp1"
+boil_off = false                # refuelling r2 (user 2026-10-20): the bare Block 3 hull cannot keep its propellant
+                                # for days; off until r5 (Moon radiation, thermal attitude)
 
 [orbit]
 # [E] l5 Task 6: a direct entry reaches Starbase only when the Moon is south at TEI (Nov 12 2026, Moon -27.6 deg:

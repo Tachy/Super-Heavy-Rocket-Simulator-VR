@@ -139,6 +139,7 @@ directions = ["tangential_plus", "tangential_plus", "tangential_minus", "tangent
 absorptivity = 0.30                      # [E]
 emissivity = 0.80                        # [E]
 wall_resistance_m2k_w = 63.7             # [D]
+ullage_resistance_m2k_w = 100.0          # [E] dry wall: ullage gas conduction, no convection near free fall
 
 # Docking drogues and transfer connectors [E] (positions not published; spec r1, plan decision 3): mirror images of
 # the tanker's / HLS's probes - interface plane 0.5 m off the dorsal hull, symmetric in y.

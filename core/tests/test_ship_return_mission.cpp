@@ -174,6 +174,42 @@ TEST_CASE("Ship return mission loads", "[ship][mission]") {
     CHECK(m.deorbit.search_window_s == 48.0 * 3600.0);
 }
 
+// Refuelling r2 (found by boil-off): a burn whose engines run dry cannot finish - it ends with a reason instead of
+// waiting for ever.
+TEST_CASE("A burn on dry main tanks is aborted with a reason", "[ship][session][deorbit][boil_off]") {
+    auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    m.propellant_kg = 35000.0;  // the header tanks only: the main tanks the deorbit Raptor feeds from are empty
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(session, m);
+    const auto& s = session.body(0).state();
+    const gnc::BurnNode node{session.epoch() + 700.0, -math::normalized(s.velocity_gcrf_mps) * 60.0};
+    REQUIRE(session.execute_burn(node, {"sea_level_3"}));
+    for (int k = 0; k < 120 && session.autopilot().state == sim::AutopilotState::Burn; ++k) {
+        session.advance_to(session.epoch() + 60.0, 400000);
+    }
+    CHECK(session.autopilot().state != sim::AutopilotState::Burn);
+    INFO(session.burn_abort_reason());
+    CHECK(session.burn_abort_reason().find("Treibstoff") != std::string::npos);
+}
+
+// Refuelling r2: the onboard computer counts the bare hull's boil-off until the burn - 7 t above the landing
+// propellant leave too little methane for the burn after the ~22 h to the Starbase pass.
+TEST_CASE("Ship return plan counts the boil-off until the pass", "[ship][session][deorbit][boil_off]") {
+    auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    m.propellant_kg = 42000.0;
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(session, m);
+    CHECK_FALSE(session.plan_ship_return(deorbit_parameters(m)));
+    REQUIRE(session.ship_return_plan() != nullptr);
+    INFO(session.ship_return_plan()->reason);
+    CHECK(session.ship_return_plan()->reason.find("verdampft") != std::string::npos);
+
+    sim::FlightSession without(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    without.set_boil_off(false);
+    place_mission(without, m);
+    CHECK(without.plan_ship_return(deorbit_parameters(m)));
+}
+
 TEST_CASE("Ship returns from orbit into the tower's arms", "[ship][catch][session][mission]") {
     const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
@@ -192,7 +228,7 @@ struct Case {
     double phase_deg = 0.0;
     double periapsis_km = 200.0;
     double apoapsis_km = 200.0;
-    double propellant_t = 45.0;
+    double propellant_t = 45.0;  // before the boil-off allowance (fly_campaign adds the predicted boil-off)
     BurnError error;
 };
 
@@ -205,11 +241,24 @@ void fly_campaign(const std::vector<Case>& cases, const char* name) {
         m.periapsis_height_m = c.periapsis_km * 1000.0;
         m.apoapsis_height_m = c.apoapsis_km * 1000.0;
         m.propellant_kg = c.propellant_t * 1000.0;
+        // Mission design (refuelling r2): the ship carries what the wait for its pass boils off on top of the pre-r2
+        // load - the smallest load in 2 t steps that the onboard computer's plan (flown ahead, per propellant)
+        // accepts - so the landing residue stays near the pre-r2 one.
+        constexpr double sizing_step_kg = 2000.0;
+        for (int sizing_round = 0; sizing_round < 10; ++sizing_round) {
+            sim::FlightSession sizing(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+            place_mission(sizing, m);
+            if (sizing.plan_ship_return(deorbit_parameters(m))) break;
+            const auto* p = sizing.ship_return_plan();
+            if (p == nullptr || !p->short_of_reserve) break;  // refused for another reason: the checks below say so
+            m.propellant_kg += sizing_step_kg;
+        }
         sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
         const auto t0 = place_mission(session, m);
-        std::printf("%s case %d: phase %.0f deg, orbit %.1f x %.1f km, %.1f t, burn error %.2f %% / %.2f deg\n", name,
-                    index, c.phase_deg, c.periapsis_km, c.apoapsis_km, c.propellant_t, c.error.scale * 100.0,
-                    c.error.pointing_rad / deg);
+        std::printf("%s case %d: phase %.0f deg, orbit %.1f x %.1f km, %.1f t (%.1f t + boil-off), burn error %.2f %% / "
+                    "%.2f deg\n",
+                    name, index, c.phase_deg, c.periapsis_km, c.apoapsis_km, m.propellant_kg / 1000.0, c.propellant_t,
+                    c.error.scale * 100.0, c.error.pointing_rad / deg);
         const auto run = fly_return(session, deorbit_parameters(m), c.error);
         const auto* plan = session.ship_return_plan();
         std::printf("%s case %d: waited %.1f h\n", name, index, plan ? (plan->node.epoch - t0) / 3600.0 : -1.0);

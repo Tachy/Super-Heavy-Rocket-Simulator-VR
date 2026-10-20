@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <limits>
 
 #include "starsim/aero/entry_heating.hpp"
 #include "starsim/aero/parachute.hpp"
 #include "starsim/aero/radiative_heating.hpp"
 #include "starsim/environment/eclipse.hpp"
+#include "starsim/environment/thermal_radiation.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/frames/lvlh.hpp"
 #include "starsim/integrators/integrate.hpp"
@@ -338,6 +340,41 @@ void FlightBody::release_landed() {
     resting_ = false;
 }
 
+void FlightBody::boil_off(const FlightEnvironment& env, time::Epoch epoch, double dt_s) {
+    if (!env.boil_off || env.ephemeris == nullptr) return;
+    boil_off_elapsed_s_ += dt_s;
+    // The margin keeps a sum of ticks (100 x 0.1 s = 9.99...98 s) on its interval.
+    if (boil_off_elapsed_s_ < boil_off_interval_s - 1e-9) return;
+    const auto body = reference_body_of(env, reference_body(env, epoch));
+    if (body.has_atmosphere()) {
+        const auto geodetic =
+            frames::fixed_to_geodetic(body.frame(epoch).to_fixed(state_.position_gcrf_m), body.shape());
+        if (geodetic.height_m < boil_off_min_altitude_m) {
+            reset_boil_off();
+            return;
+        }
+    }
+    const Vec3 sun = env.ephemeris->state_gcrf(ephemeris::Body::Sun, epoch).position_m - state_.position_gcrf_m;
+    const Vec3 moon = env.ephemeris->state_gcrf(ephemeris::Body::Moon, epoch).position_m - state_.position_gcrf_m;
+    const LiquidEnvironment liquid{boil_off_specific_force_body_mps2_, state_.angular_velocity_body_radps,
+                                   state_.position_gcrf_m, state_.attitude};
+    auto now = boil_off_rates(*vehicle_, environment::earth_orbit_radiation(state_.position_gcrf_m, sun, &moon),
+                              state_.attitude, &liquid);
+    for (const auto& tank : now) {
+        double flow = tank.mass_flow_kgps;
+        for (const auto& before : boil_off_last_) {
+            if (before.stage_index == tank.stage_index && before.tank_index == tank.tank_index) {
+                flow = 0.5 * (flow + before.mass_flow_kgps);
+            }
+        }
+        const auto& t = vehicle_->stages()[tank.stage_index].tanks[tank.tank_index];
+        vehicle_->set_tank_mass(tank.stage_index, t.config.id, t.mass_kg - flow * boil_off_elapsed_s_);
+    }
+    boil_off_rate_ = total_boil_off(*vehicle_, now);
+    boil_off_last_ = std::move(now);
+    boil_off_elapsed_s_ = 0.0;
+}
+
 void FlightBody::snap_ideal_attitude() {
     if (!ideal_lvlh_) return;
     // LVLH about the GCRF origin: a station is Earth-referenced (the Moon's LVLH is not needed before a lunar station)
@@ -439,6 +476,8 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     external_force_gcrf_n_ = {};
     external_torque_body_nm_ = {};
     vehicle_->consume_propellant(dt_s);
+    boil_off_specific_force_body_mps2_ = specific_force_body_mps2_;
+    boil_off(env, epoch + dt_s, dt_s);
 
     resolve_ground_contact(body, body.frame(epoch + dt_s));
 }
@@ -555,11 +594,16 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
     const auto result = integrators::integrate<13>(f, 0.0, pack(state_), duration_s, options);
     state_ = unpack(result.y);
     snap_ideal_attitude();
+    if (env.boil_off && env.ephemeris != nullptr) {  // the drag that settles the liquid (Task 5b)
+        const Forces end = evaluate(ctx, duration_s, state_);
+        boil_off_specific_force_body_mps2_ = end.nongravitational_body_n / end.mass.mass_kg;
+    }
     reference_ = reference_body(env, epoch + duration_s);
     const auto end_body = reference_body_of(env, *reference_);
     const auto end_frame = end_body.frame(epoch + duration_s);
     resolve_ground_contact(end_body, end_frame);
     update_air_data(end_body, end_frame);
+    boil_off(env, epoch + duration_s, duration_s);
 }
 
 std::unique_ptr<FlightBody> FlightBody::separate(size_t index, double separation_dv_mps) {
@@ -584,6 +628,7 @@ std::unique_ptr<FlightBody> FlightBody::separate(size_t index, double separation
     auto upper_body = std::make_unique<FlightBody>(std::move(upper_vehicle), upper_state);
     upper_body->ground_height_m_ = ground_height_m_;
     upper_body->reference_ = reference_;
+    reset_boil_off();  // the lower part's stages changed; the new upper body starts empty
     return upper_body;
 }
 
