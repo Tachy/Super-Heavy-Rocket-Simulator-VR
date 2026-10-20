@@ -462,6 +462,7 @@ void FlightSession::set_epoch(time::Epoch epoch) {
 void FlightSession::clear_station() {
     station_index_.reset();
     station_impulses_.clear();
+    set_iss_mission({});  // a mission sequence belongs to the bodies it flies
 }
 
 void FlightSession::set_rendezvous_target(size_t target_index, const std::string& chaser_port,
@@ -604,6 +605,8 @@ double FlightSession::coast_allowance_s() const {
     }
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
     if (!station_impulses_.empty()) allowance = std::min(allowance, station_impulses_.front().epoch - epoch_);
+    if (iss_mission_pending()) return 0.0;  // a leg change is due: act on the next tick (ISS i6)
+    if (iss_leg_ == IssMissionLeg::WaitUndock) allowance = std::min(allowance, *iss_mission_->undock_epoch - epoch_);
     if (autopilot_.state == AutopilotState::Burn) {
         const double drift = burn_drifting() ? burn_drift_lead_s : 0.0;  // the turn to the burn attitude is ticked
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s - drift);
@@ -675,6 +678,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             }
             continue;
         }
+        if (iss_mission_) run_iss_mission();  // also with the autopilot Off / Orbit (ISS i6)
         if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit &&
             !bodies_.empty()) {
             run_autopilot();

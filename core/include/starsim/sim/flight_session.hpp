@@ -110,6 +110,24 @@ const char* to_string(LunarStep step);
 enum class RendezvousStep { None, Coast, Burn, Waypoint0 };
 const char* to_string(RendezvousStep step);
 
+// ISS mission legs (i6, FlightSession::set_iss_mission): Ascent until the payload is separated, Rendezvous (phasing
+// to Waypoint 0), Proximity (to contact), Docking (capture .. hooks), Docked = complete; departure: WaitUndock,
+// Departure, Return (capsule return to the water), Complete at splashdown. Ended: a refused leg, a lost vehicle or a
+// collision.
+enum class IssMissionLeg { None, Ascent, Rendezvous, Proximity, Docking, Docked, WaitUndock, Departure, Return,
+                           Complete, Ended };
+const char* to_string(IssMissionLeg leg);  // German
+
+struct IssMissionSequence {
+    std::string station_port;  // ida2 / ida3
+    mission::PhasingParameters phasing;
+    gnc::ProximityParameters proximity;
+    bool from_launch = false;                               // starts in Ascent (else Rendezvous / WaitUndock)
+    std::optional<time::Epoch> undock_epoch;                // departure: WaitUndock until then
+    std::optional<gnc::DeorbitParameters> capsule_return;   // departure: planned when the departure is complete
+    std::optional<time::Epoch> deorbit_epoch;               // departure: the previewed pass (lead_s aims at it)
+};
+
 struct RendezvousBurnRecord {
     mission::PhasingBurnKind kind = mission::PhasingBurnKind::Boost;
     gnc::BurnNode node;
@@ -663,6 +681,18 @@ public:
     const std::vector<gnc::DepartureEvent>* departure_events() const;
     const MomentumRecord& docking_separation_record() const { return docking_separation_; }
 
+    // ISS missions (i6, flight_session_iss_mission.cpp): the legs of IssMissionLeg flown in sequence on the session tick
+    // (also with the autopilot Off / Orbit); the coast stops at every leg change and at the undock epoch. A proximity
+    // abort keeps the leg (proximity_resume continues). Empty ends it; cleared with the bodies (as the station).
+    void set_iss_mission(std::optional<IssMissionSequence> sequence);
+    IssMissionLeg iss_mission_leg() const { return iss_leg_; }
+    const std::string& iss_mission_status() const { return iss_status_; }  // German
+    const std::optional<IssMissionSequence>& iss_mission() const { return iss_mission_; }
+    static constexpr double iss_return_lead_margin_s = 1800.0;  // [E] the return is planned this far before the pass
+    // Test seams: the rendezvous at Waypoint 0 without a flight, a leg without its flight.
+    void mark_rendezvous_at_waypoint0_for_test();
+    void mark_iss_leg_for_test(IssMissionLeg leg) { iss_leg_ = leg; }
+
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
     void cutoff();             // stop all engines
@@ -928,6 +958,15 @@ private:
     // The entry guidance parameters of a lunar return (lunar_return() / aerocapture()); empty: the LEO ship return's.
     std::optional<gnc::EntryGuidanceParameters> return_entry_parameters_;
     math::StateVector controlled_state() const;
+
+    // ISS mission sequence (flight_session_iss_mission.cpp).
+    std::optional<IssMissionSequence> iss_mission_;
+    IssMissionLeg iss_leg_ = IssMissionLeg::None;
+    std::string iss_status_;
+    void run_iss_mission();            // every tick: the leg change due now
+    bool iss_mission_pending() const;  // a leg change is due (the coast stops)
+    void iss_end(const std::string& reason);
+    void iss_enter(IssMissionLeg leg, std::string status);
 
     // Rendezvous phasing (flight_session_rendezvous.cpp).
     void run_rendezvous(Flying& flying);  // the step machine and its diagnostics (STARSIM_DEBUG_RENDEZVOUS)
