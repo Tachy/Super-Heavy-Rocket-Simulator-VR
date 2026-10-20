@@ -1075,6 +1075,48 @@ approved by the user 2026-10-19), ledger `.superpowers/sdd/2026-10-19-iss-i5-doc
 
 - **Diagnostics:** `STARSIM_DEBUG_DOCKING=1` prints the mechanism and departure events, and every second while ticked
   (or within 2 m of the port) the pose, the force and the peak compression.
-- **Open / for i6:** the undocking time is not yet chosen for a return opportunity (the mission default searches 48 h:
-  none for the test plane) - the `crew_dragon_iss_departure` mission; the game interface (`docking_state`, `undock`
-  command id, `station_geometry`).
+- **Done in i6:** the undocking timed to a return opportunity (`crew_dragon_iss_departure`) and the game interface
+  (`docking_state`, `undock`, `station_geometry`) - see the i6 section.
+
+### ISS missions, launch window and game interface (i6)
+Plan `docs/superpowers/plans/2026-10-20-iss-i6-missions.md` (six spec corrections, approved by the user 2026-10-20),
+ledger `.superpowers/sdd/2026-10-20-iss-i6-missions/progress.md`.
+- **Missions** (`config/missions/`, `sim/iss_mission.hpp`, dispatched by `sim::start_mission`):
+  `crew_dragon_iss` (`kind = "iss_rendezvous"`: the Dragon at the predicted separation of the first launch window of
+  `falcon9_crew_dragon_iss` after `epoch_utc`, or `phase_deg` behind the ISS in its J2-biased plane),
+  `falcon9_crew_dragon_iss` (`kind = "iss_launch"`: launch window, then the `falcon9_crew_dragon` ascent at its liftoff)
+  and `crew_dragon_iss_departure` (`kind = "iss_departure"`: docked start, undocking timed to a return pass, the
+  `crew_dragon_return` capsule return). The ISS comes from `data/iss_oem/` (`sim::iss_archive`) per `iss_orbit`; a
+  scenario argument of latitude on the synthetic orbit is kept as an in-plane offset from the J2-advanced one, so the
+  station moves through a window search.
+- **Sequence** (`FlightSession::set_iss_mission`, `flight_session_iss_mission.cpp`): the legs Ascent -> Rendezvous
+  (`plan_rendezvous` once the Dragon flies free) -> Proximity (`start_proximity` at Waypoint 0) -> Docking -> Docked,
+  or WaitUndock -> Departure -> Return (`plan_capsule_return` with `lead_s` aimed at the previewed pass) -> Complete.
+  It runs on every tick (also with the autopilot Off / Orbit); the coast stops at every due leg change and at the
+  undock epoch. A proximity abort keeps the leg (resume continues); a collision or a lost vehicle ends the mission
+  ("Mission beendet: ..."). Cleared with the bodies (`clear_station`).
+- **Launch window** (`mission/iss_launch_window`): `AscentGuidance` fixes its inertial target plane at liftoff through
+  the pad (`gnc::ascent_plane_normal`), so the window is the upward zero of the node difference between that plane and
+  the ISS plane turned east by the J2 bias (`mission::plane_bias_rad`, ~0.58 deg/day at 205 vs 415 km), sampled every
+  600 s and bisected, the bias iterated twice onto the schedule's boost epoch. The separation state comes from two
+  calibrated numbers [D] (`falcon9_crew_dragon_iss.toml`): **535 s** liftoff -> separation and **15.0 deg** inertial
+  in-plane arc from the pad. The flown ascent then lands **0.0055 deg** off the planned plane and **0.004 deg** off the
+  predicted phase (200.0 x 210.0 km). A crossing whose phasing does not close in the mission limit is rejected and the
+  search moves a day on (up to `search_days`, default 3 [E]): from 2026-10-16 00:00 UTC the first northerly crossing
+  (+9.45 h) is out of reach in 28 h, the window is +33.05 h (bias 0.033 deg, Waypoint 0 5.5 h after liftoff).
+- **Numbers** (OEM fixture): `crew_dragon_iss` start (window + plan) < 0.1 s, hard capture at IDA-2 7.0 h after
+  the window's liftoff, 583 kg RCS; IDA-3 at 40 deg on the synthetic orbit: docked 9.2 h after the start; pad ->
+  hard capture **7.5 h** after liftoff, 4 rendezvous burns, 0 re-plans, 612 kg. The earliest window is flown
+  (`earliest_arrival_h = 0`); real crews arrive after ~24-28 h for the crew day, set by `earliest_arrival_h`.
+- **Departure timing** [S: Crew-9 2025-03-18, NASA: undock 05:05 UTC, deorbit burn ~21:11 UTC, splashdown 21:57 UTC]:
+  undocking 16.1 h before the deorbit burn. The start previews the first pass at least that long after `epoch_utc`
+  (`FlightSession::capsule_return_preview` on the docked Dragon, `search_window_h` 168), places the docked pair
+  (`FlightSession::dock_in_place`: mated pose, mechanism `start_docked`, compound merge) 600 s [E] before the
+  undocking and flies on to splashdown: undocking 42.7 h after 2026-10-16 00:00, deorbit 16.10 h later as previewed,
+  629 kg RCS for departure + return.
+- **Game interface** (`FlightSim`, `bindings/src/flight_snapshot_iss.cpp`): getters `iss_state`, `rendezvous_plan`,
+  `docking_state`, `station_geometry`, `iss_mission` (keys in `flight_sim.hpp`), commands `proximity_hold`,
+  `proximity_retreat`, `proximity_abort`, `proximity_resume`, `undock`; `start_mission`'s message carries the
+  warnings (ISS source note, reboosts in the mission span). Covered by the smoke test.
+- **Tests:** `[launch_window]`, `[iss_mission]` (`test_iss_launch_window.cpp`, `test_iss_mission_config.cpp`,
+  `test_iss_mission_sequence.cpp`, `test_iss_mission_campaign.cpp` with the `[slow]` end-to-end cases).

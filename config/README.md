@@ -162,7 +162,8 @@ flow separation (vacuum engines).
   sea). Where it waits is set by the mission.
 
 ## Missions (`missions/`)
-- `[mission] kind = "ascent" | "ship_return" | "capsule_return" | "lunar_landing" | "lunar_return"` (default "ascent"): `config::mission_kind`;
+- `[mission] kind = "ascent" | "ship_return" | "capsule_return" | "lunar_landing" | "lunar_return" | "iss_rendezvous" |
+  "iss_launch" | "iss_departure"` (default "ascent"): `config::mission_kind`;
   `sim::start_mission` / `FlightSim.start_mission` dispatch on it (an ascent starts at the requested time, a capsule return
   at its `[orbit]` epoch with the deorbit planned, a ship return is refused: it is flown from orbit, key R). Each loader
   refuses a file of another kind.
@@ -211,6 +212,22 @@ flow separation (vacuum engines).
   `coast_attitude_kg_per_day`, `reserve_kg`. The start computes the propellant (fixed point over the planned burns down
   to dry + landing propellant) and refuses without an entry corridor ("Kein Eintrittskorridor ...") or when it exceeds
   the tanks. A direct entry reaches Starbase only at epochs with the Moon south at the departure (l5 Task 6).
+
+- `crew_dragon_iss.toml` (`kind = "iss_rendezvous"`, `config::load_iss_rendezvous_mission`,
+  `sim::start_iss_rendezvous_mission`; ISS i6): `[mission]` `vehicle`, `station` (vehicle id), `port` (`ida2` / `ida3`),
+  `iss_orbit = "oem" | "synthetic" | "auto"`; `[start]` `epoch_utc`, `launch` (an `iss_launch` mission: the start is
+  the predicted separation of its first window after epoch_utc), optional `phase_deg` (instead: that far behind the
+  ISS at epoch_utc) and `iss_argument_of_latitude_deg` (synthetic orbit); `[phasing]` `mission_limit_h`,
+  `earliest_arrival_h`.
+- `falcon9_crew_dragon_iss.toml` (`kind = "iss_launch"`, `config::load_iss_launch_mission`,
+  `sim::start_iss_launch_mission`): `[mission]` `ascent` (an ascent mission with the Dragon as payload), `station`,
+  `port`, `iss_orbit`; `[launch_window]` `earliest_utc`, `search_days`, `insertion_s` and `insertion_arc_deg` ([D]
+  from the flown ascent: liftoff -> separation and the inertial in-plane arc from the pad); `[phasing]` as above,
+  counted from the liftoff.
+- `crew_dragon_iss_departure.toml` (`kind = "iss_departure"`, `config::load_iss_departure_mission`,
+  `sim::start_iss_departure_mission`): `[mission]` `vehicle`, `station`, `port`, `iss_orbit`, `return` (a
+  `capsule_return` mission: zone and deorbit settings); `[start]` `epoch_utc` (earliest undocking),
+  `rcs_propellant_kg`, `undock_to_deorbit_h`, `search_window_h`, optional `iss_argument_of_latitude_deg`.
 
 - Payload vehicles: `config::stack_payload` stacks a vehicle (e.g. `crew_dragon`) on the launcher; its stages are
   `payload` stages, whose thrusters stay blocked until the payload flies alone.

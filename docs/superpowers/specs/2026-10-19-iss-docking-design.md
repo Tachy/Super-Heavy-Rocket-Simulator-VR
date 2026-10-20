@@ -6,7 +6,8 @@ Status: approved 2026-10-19. i1 implemented (plan `docs/superpowers/plans/2026-1
 `docs/superpowers/plans/2026-10-19-iss-i3-phasing.md`; ends at Waypoint 0, corrections below). i4 implemented (plan
 `docs/superpowers/plans/2026-10-19-iss-i4-proximity.md`; ends at "Kontakt", corrections below). i5 implemented (plan
 `docs/superpowers/plans/2026-10-19-iss-i5-docking.md`; IDSS mechanism, compound, undocking and departure, corrections
-below). Milestone (i),
+below). i6 implemented (plan `docs/superpowers/plans/2026-10-20-iss-i6-missions.md`; missions, launch window, game
+interface, corrections below) - milestone (i) complete. Milestone (i),
 part of plan milestone M9 (rendezvous and ISS docking), after the lunar milestone (l1-l6, main `6da3f70`).
 
 ## Intent
@@ -239,6 +240,21 @@ Implementation notes and validation numbers: `docs/subsystems.md`, "Docking mech
   undock -> separation speed.
 
 ## i6 design: missions, launch window and game interface
+
+**Corrections (user-approved with the i6 plan, 2026-10-20; they supersede the bullets below where they differ).**
+1. **The launch window is searched over days** (from the earliest liftoff up to `search_days`, default 3 [E]): a pad
+   crosses the plane on a northerly pass once per sidereal day; the first crossing whose phasing closes is taken.
+2. **No out-of-plane part in phasing:** the window aims the plane with the J2 bias, iterated twice onto the boost; the
+   residual is removed by the 3D-targeted coelliptic and approach-initiation burns.
+3. **The separation state comes from two calibrated numbers [D]** (liftoff -> separation 535 s, in-plane arc 15.0
+   deg from the flown `falcon9_crew_dragon` ascent); the window planner does not fly the ascent.
+4. **`crew_dragon_iss` starts by default at the predicted separation of the first window** after its `epoch_utc`;
+   `phase_deg` overrides it with a start that far behind the ISS.
+5. **The departure is timed to a previewed return pass:** undocking 16.1 h before the deorbit burn [S: Crew-9], the
+   scenario starting docked 600 s [E] before the undocking; the return is planned aimed at that pass.
+6. **Command names** `proximity_hold`, `proximity_retreat`, `proximity_abort`, `proximity_resume`, `undock`.
+
+Implementation notes and validation numbers: `docs/subsystems.md`, "ISS missions, launch window and game interface (i6)".
 
 **Missions** (`config/missions/`, new `[mission] kind` values):
 - `crew_dragon_iss`: starts in the separation orbit (200 x 210 km, 51.6 deg) with date, port (`ida2` / `ida3`),

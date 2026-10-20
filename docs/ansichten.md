@@ -156,6 +156,11 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 
 ## 6. Karte und Auswertung
 
+- ISS-Missionen (i6): Die Spielschnittstelle liefert schon alles für die Ansichten. `FlightSim.iss_state` enthält die
+  ISS mit ihren Ports, `rendezvous_plan` die Manöver des Phasenflugs, `docking_state` Annäherung, Andocken und Abflug
+  im Portsystem, `station_geometry` die Grundkörper zum Zeichnen und `iss_mission` den Missionsabschnitt. Befehle:
+  `proximity_hold` / `_retreat` / `_abort` / `_resume`, `undock`. Die Ansichten selbst legt der Nutzer fest.
+
 - Karte: Erde-Mond-System mit Bahnen, Mondbahn, Manöverknoten; Bearbeitung wie in der Missionsplanung.
 - Auswertung nach dem Flug: Telemetrie-Diagramme (wie `tools/plot_telemetry.py`), Soll/Ist-Vergleich,
   Ereignisliste, Export als CSV.

@@ -38,8 +38,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
-  the mission delta-v budget, the Earth return: TEI, mid-course corrections, braking burn, and the coelliptic phasing
-  to the ISS: schedule + full-model planner with drag),
+  the mission delta-v budget, the Earth return: TEI, mid-course corrections, braking burn, the coelliptic phasing
+  to the ISS: schedule + full-model planner with drag, and the ISS launch window),
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
   aerocapture guidance, relative navigation between docking ports, proximity guidance: waypoints, corridor,
@@ -55,7 +55,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   ideal LVLH attitude of a station, docking-port kinematics, docked hold, attached mass, compound mass), sim (flight session incl. the ISS as a station body from
   OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
   Waypoint 0 with drag tracking and re-plan, proximity flight to a station port, docking into a compound, undocking
-  and departure).
+  and departure, ISS missions chained by a mission sequence: from the separation orbit, from the pad with a launch
+  window, docked -> undocking -> splashdown).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
@@ -168,7 +169,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Flight: `game/vehicle/flight_controller.gd` (input, pilot actions) drives the C++ `FlightSim`
   (`sim::FlightSession`, 200 Hz); `FlightSim` runs `sim::SessionRunner` (own thread), getters read a snapshot,
   commands return ids (`result(id)`, signal `command_finished`); lunar missions included (`lunar_state`, `lunar_site`,
-  `moon_terrain`). `vehicle_view.gd` draws stages and plumes; `ui/flight_hud.gd` shows telemetry.
+  `moon_terrain`), ISS missions too (`iss_state`, `rendezvous_plan`, `docking_state`, `station_geometry`,
+  `iss_mission`, commands `proximity_*`, `undock`). `vehicle_view.gd` draws stages and plumes; `ui/flight_hud.gd` shows telemetry.
   The world clock waits for the flight sim at high time warp.
 - HOTAS: Thrustmaster T.16000M + TWCS, found by device name (`config/input_hotas.toml`). Raw axes (twist,
   throttle lever) only exist when `config/sdl_gamecontrollerdb.txt` is loaded BEFORE engine start via
