@@ -17,9 +17,11 @@ namespace starsim::gnc {
 // corridor inside the keep-out sphere, the docking attitude and the capture envelope. LVLH of frames/lvlh.hpp
 // (x V-bar, y H-bar, z R-bar = nadir); port frame of vehicle/docking_port.hpp (x out of the port, z its up).
 
-enum class DockingApproach { VBar, RBar };  // IDA-2 forward / IDA-3 zenith
-// From the target port axis in the station LVLH frame: dominant +x -> VBar, dominant -z -> RBar; otherwise
-// std::invalid_argument (German: "Kein Anflugweg für diesen Port").
+// VBar: a forward port (ISS IDA-2). RBar: a zenith port (approach from above after a fly-around, ISS IDA-3); RBarBelow:
+// a nadir port (the depot's drogues, approach straight up the R-bar from Waypoint 0; refuelling r3).
+enum class DockingApproach { VBar, RBar, RBarBelow };
+// From the target port axis in the station LVLH frame: dominant +x -> VBar, dominant -z -> RBar, dominant +z ->
+// RBarBelow; otherwise std::invalid_argument (German: "Kein Anflugweg für diesen Port").
 DockingApproach docking_approach(const math::Vec3& port_axis_lvlh);
 
 enum class WaypointFrame { LvlhFromCg, TargetPort };  // CG-relative in station LVLH / chaser port in target port frame
@@ -47,6 +49,15 @@ struct BreakoutParameters {
     double ellipsoid_exit_limit_s = 3600.0;  // [E] Demo-1 left the approach ellipsoid 17 min after undocking
 };
 
+struct CaptureEnvelope {  // [S: IDSS IDD E Table 3.3.1.1-2, Initial Contact Conditions] (verified in i5)
+    double axial_min_mps = 0.05, axial_max_mps = 0.10;
+    double lateral_max_mps = 0.04;
+    double offset_max_m = 0.10;
+    double angle_max_rad = 4.0 * constants::deg_to_rad;   // pitch/yaw misalignment, vector sum
+    double rate_max_radps = 0.2 * constants::deg_to_rad;  // pitch/yaw rate, vector sum
+    double roll_max_rad = 4.0 * constants::deg_to_rad;
+    double roll_rate_max_radps = 0.2 * constants::deg_to_rad;
+};
 struct ProximityParameters {
     double keep_out_radius_m = 200.0;  // [S: NASA] keep-out sphere about the station CG (= mission::keep_out_sphere_radius_m)
     double kos_margin_m = 10.0;        // [E] transfers outside the sphere keep this clearance
@@ -72,6 +83,7 @@ struct ProximityParameters {
     double final_speed_start_mps = 0.10;      // [S: Demo-2 0.33 ft/s before soft capture] at Waypoint 2
     double contact_speed_mps = 0.075;         // [E] middle of the axial capture band 0.05-0.10
     double contact_plane_m = 0.0;  // [E] contact when the chaser port reaches this axial distance (i5: the session sets the petal mesh plane)
+    CaptureEnvelope envelope;  // checked at the contact plane (IDSS default; probe/drogue: probe_drogue_capture_envelope)
     double lateral_gain_per_s = 0.1;        // [E] lateral velocity = -offset * gain (offset ~ deadband mean / gain)
     double lateral_speed_max_mps = 0.03;    // [E] below the lateral capture bound 0.04
     double hold_time_constant_s = 60.0;     // [E] position hold: velocity = -error / this
@@ -103,19 +115,14 @@ CorridorStatus corridor_status(const math::Vec3& position_port_m, double cg_rang
 // (axes opposed, ups equal). `chaser_port_axes_body`: columns of the chaser port frame in its body frame.
 math::Quat docking_attitude_gcrf(const math::Mat3& chaser_port_axes_body, const math::Mat3& target_port_axes_gcrf);
 
-struct CaptureEnvelope {  // [S: IDSS IDD E Table 3.3.1.1-2, Initial Contact Conditions] (verified in i5)
-    double axial_min_mps = 0.05, axial_max_mps = 0.10;
-    double lateral_max_mps = 0.04;
-    double offset_max_m = 0.10;
-    double angle_max_rad = 4.0 * constants::deg_to_rad;   // pitch/yaw misalignment, vector sum
-    double rate_max_radps = 0.2 * constants::deg_to_rad;  // pitch/yaw rate, vector sum
-    double roll_max_rad = 4.0 * constants::deg_to_rad;
-    double roll_rate_max_radps = 0.2 * constants::deg_to_rad;
-};
 struct EnvelopeCheck {
     bool inside = false;
     std::string reason;  // German, the first violated bound ("" when inside)
 };
 EnvelopeCheck capture_envelope_check(const RelativePortState& state, const CaptureEnvelope& envelope = {});
+
+// Probe/drogue initial contact conditions (refuelling r3 spec) [E]: closing 0.03-0.10 m/s, offset <= 0.10 m, angle and
+// roll <= 1 deg; lateral speed and rates as IDSS.
+CaptureEnvelope probe_drogue_capture_envelope();
 
 }  // namespace starsim::gnc

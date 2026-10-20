@@ -3,6 +3,7 @@
 // at 0.30 -> 0.10 m/s.
 // Spec correction 2: IDA-3 (R-bar) gets a fly-around at 250 m [E] from the V-bar front up to Waypoint 1 above IDA-3.
 // Spec correction 4: i4 ends at the contact plane; the capture envelope here is [E] until i5 checks the IDSS IDD.
+// Refuelling r3: a nadir port (the depot) is approached straight up the R-bar from Waypoint 0; no fly-around.
 #include "starsim/gnc/proximity_geometry.hpp"
 
 #include <algorithm>
@@ -19,6 +20,7 @@ DockingApproach docking_approach(const Vec3& port_axis_lvlh) {
     const double dominant = std::cos(45.0 * constants::deg_to_rad);
     if (u.x > dominant) return DockingApproach::VBar;
     if (-u.z > dominant) return DockingApproach::RBar;
+    if (u.z > dominant) return DockingApproach::RBarBelow;
     throw std::invalid_argument("Kein Anflugweg für diesen Port");
 }
 
@@ -84,6 +86,16 @@ EnvelopeCheck capture_envelope_check(const RelativePortState& state, const Captu
     if (std::abs(w.x) > envelope.roll_rate_max_radps)
         return violated("Rollrate zu groß", std::abs(w.x) / constants::deg_to_rad, "°/s");
     return {true, ""};
+}
+
+CaptureEnvelope probe_drogue_capture_envelope() {
+    CaptureEnvelope e;
+    e.axial_min_mps = 0.03;
+    e.axial_max_mps = 0.10;
+    e.offset_max_m = 0.10;
+    e.angle_max_rad = 1.0 * constants::deg_to_rad;
+    e.roll_max_rad = 1.0 * constants::deg_to_rad;
+    return e;
 }
 
 }  // namespace starsim::gnc

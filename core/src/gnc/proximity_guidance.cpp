@@ -95,7 +95,11 @@ bool ProximityGuidance::plan_transfer(const ProximityInput& in, ProximityPhase p
 
 void ProximityGuidance::start_segment(const ProximityInput& in) {
     const ProximityWaypoint& w = path_[target_];
-    if (w.on_axis && norm(target_cg(in, target_)) < p_.keep_out_radius_m) {
+    // the axial approach also flies when the chaser is on the axis beyond the waypoint (the depot's Waypoint 0 lies on
+    // its R-bar; the ISS's lies on no IDA axis)
+    const bool on_axis_beyond = w.on_axis && in.port.position_m.x > w.position_m.x &&
+                                lateral_m(in.port.position_m) <= corridor_bound_m(in.port.position_m.x);
+    if (w.on_axis && (norm(target_cg(in, target_)) < p_.keep_out_radius_m || on_axis_beyond)) {
         enter(ProximityPhase::Approach, "Anflug auf " + w.name, in.epoch);
         return;
     }
@@ -276,7 +280,7 @@ void ProximityGuidance::transitions(const ProximityInput& in) {
             return;
         case ProximityPhase::FinalApproach:
             if (in.port.position_m.x <= p_.contact_plane_m) {
-                contact_ = ProximityContact{in.epoch, in.port, capture_envelope_check(in.port)};
+                contact_ = ProximityContact{in.epoch, in.port, capture_envelope_check(in.port, p_.envelope)};
                 std::string status = "Kontakt";
                 if (!contact_->envelope.inside) status += " außerhalb der Fangtoleranz: " + contact_->envelope.reason;
                 enter(ProximityPhase::Contact, status, in.epoch);

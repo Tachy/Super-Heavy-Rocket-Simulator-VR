@@ -11,7 +11,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "proximity_test_support.hpp"
 #include "refuelling_test_support.hpp"
+#include "starsim/gnc/proximity_guidance.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/lvlh.hpp"
 #include "starsim/sim/station_limits.hpp"
@@ -167,4 +169,93 @@ TEST_CASE("add_station takes the depot alone; its drogues face nadir, its nose t
     const auto port = vehicle::port_kinematics(f.session.body(0), "transfer_dock");
     CHECK((to_lvlh * column(port.axes_gcrf, 0)).z == Catch::Approx(1.0).margin(1e-6));  // drogues to nadir
     CHECK((to_lvlh * column(port.axes_gcrf, 2)).x == Catch::Approx(1.0).margin(1e-6));  // nose along +V-bar
+}
+
+namespace {
+
+// CW model of the tanker under the depot: target port axes in LVLH x = nadir (dorsal normal), z = +V (nose),
+// y = z x x = -y_lvlh. Authority along the target port axes (Task 1 tanker at ~490 t): +-x_t = the ship's +-z,
+// +-y_t its +-y, +-z_t its +-x.
+proximity_test::CwSim depot_cw() {
+    proximity_test::CwSim s;
+    s.n = std::sqrt(constants::earth_gm_m3ps2 / std::pow(constants::wgs84_semi_major_axis_m + 200.0e3, 3));
+    s.port_to_lvlh = math::Mat3::from_columns({0, 0, 1}, {0, -1, 0}, {1, 0, 0});
+    s.port_lever_lvlh = {2.0, 0.0, 5.0};  // [test] depot CG ~18 m up the hull, port at 20 m, 5 m off the axis
+    s.chaser_lever_m = 5.0;
+    const double m = 490.0e3;
+    s.authority = gnc::AxisAcceleration{{11338.0 / m, 11338.0 / m, 5670.0 / m, 5670.0 / m, 3000.0 / m, 3000.0 / m}};
+    s.propellant_kg = 200.0e3;
+    s.kg_per_mps = m / (70.0 * constants::standard_gravity_mps2);  // cold gas Isp 70 s
+    return s;
+}
+
+gnc::ProximityParameters depot_parameters() {
+    gnc::ProximityParameters p;
+    p.contact_plane_m = 0.80;  // probe/drogue first touch (Task 5: cone depth + stroke)
+    p.envelope = gnc::probe_drogue_capture_envelope();
+    return p;
+}
+
+bool saw(const gnc::ProximityGuidance& g, gnc::ProximityPhase phase) {
+    for (const auto& e : g.events()) {
+        if (e.phase == phase) return true;
+    }
+    return false;
+}
+
+}  // namespace
+
+TEST_CASE("A nadir port is approached along the R-bar from below, no fly-around", "[refuelling][proximity]") {
+    CHECK(gnc::docking_approach({0.0, 0.0, 1.0}) == gnc::DockingApproach::RBarBelow);
+    CHECK(gnc::docking_approach({1.0, 0.0, 0.0}) == gnc::DockingApproach::VBar);  // ISS paths unchanged
+    CHECK(gnc::docking_approach({0.0, 0.0, -1.0}) == gnc::DockingApproach::RBar);
+    const auto path = gnc::proximity_path(gnc::DockingApproach::RBarBelow, gnc::ProximityParameters{});
+    REQUIRE(path.size() == 3);
+    CHECK(path[1].on_axis);
+    CHECK(path[2].on_axis);
+}
+
+TEST_CASE("Tanker from Waypoint 0 to contact under the depot inside the probe/drogue envelope",
+          "[refuelling][proximity]") {
+    auto s = depot_cw();
+    s.cg = {{0.0, 0.0, 400.0}, {}};  // Waypoint 0 at rest, 400 m below the depot CG
+    gnc::ProximityGuidance g(gnc::DockingApproach::RBarBelow, depot_parameters());
+    const double t = proximity_test::run(g, s, 3.0 * 3600.0);
+    REQUIRE(g.contact());
+    INFO(g.contact()->envelope.reason);
+    CHECK(g.contact()->envelope.inside);
+    CHECK(std::hypot(g.contact()->port.position_m.y, g.contact()->port.position_m.z) < 0.10);
+    CHECK_FALSE(saw(g, gnc::ProximityPhase::Transfer));  // straight up the axis
+    CHECK_FALSE(saw(g, gnc::ProximityPhase::Flyaround));
+    CHECK_FALSE(saw(g, gnc::ProximityPhase::Abort));
+    CHECK(saw(g, gnc::ProximityPhase::Approach));
+    CHECK(t < 2.0 * 3600.0);
+}
+
+TEST_CASE("A retreat below the depot stops at Waypoint 2 - the -x thrusters hold the Coriolis drift",
+          "[refuelling][proximity]") {
+    auto s = depot_cw();
+    s.cg = {{0.0, 0.0, 400.0}, {}};
+    gnc::ProximityGuidance g(gnc::DockingApproach::RBarBelow, depot_parameters());
+    proximity_test::run(g, s, 3.0 * 3600.0);
+    REQUIRE(g.phase() == gnc::ProximityPhase::Contact);
+    g.capture_failed(s.input(), "Überlast");
+    for (double t = 0.0; t < 1800.0 && g.phase() != gnc::ProximityPhase::Waypoint; t += 0.05) {
+        s.step(g.update(s.input()).translation_fraction_port, 0.05);
+    }
+    REQUIRE(g.phase() == gnc::ProximityPhase::Waypoint);  // Waypoint 2, waiting for the go
+    for (double t = 0.0; t < 600.0; t += 0.05) s.step(g.update(s.input()).translation_fraction_port, 0.05);
+    const auto in = s.input();
+    CHECK(in.port.position_m.x == Catch::Approx(20.0).margin(1.0));
+    CHECK(std::hypot(in.port.position_m.y, in.port.position_m.z) < 1.0);  // held, no forward drift
+    CHECK(norm(in.port.velocity_mps) < 0.01);
+}
+
+TEST_CASE("The probe/drogue envelope is the spec's", "[refuelling][proximity]") {
+    const auto e = gnc::probe_drogue_capture_envelope();
+    CHECK(e.axial_min_mps == 0.03);
+    CHECK(e.axial_max_mps == 0.10);
+    CHECK(e.offset_max_m == 0.10);
+    CHECK(e.angle_max_rad == Catch::Approx(1.0 * constants::deg_to_rad));
+    CHECK(gnc::ProximityParameters{}.envelope.axial_min_mps == 0.05);  // IDSS default unchanged
 }
