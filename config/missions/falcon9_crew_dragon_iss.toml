@@ -1,0 +1,21 @@
+# Falcon 9 with Crew Dragon from SLC-40 to the ISS (ISS i6): the launch-window planner picks the liftoff at which the
+# ascent's target plane is the ISS plane shifted by the J2 bias and the phasing closes in the mission limit; the
+# ascent and separation of `ascent` follow, then the Dragon flies phasing, proximity operations and docking.
+
+[mission]
+name = "Falcon 9 mit Crew Dragon zur ISS"
+kind = "iss_launch"
+ascent = "falcon9_crew_dragon"      # vehicle, site, pitch program, payload separation, separation orbit
+station = "iss"
+port = "ida2"
+iss_orbit = "auto"
+
+[launch_window]
+earliest_utc = "2026-10-16T00:00:00"
+search_days = 3.0                   # [E] i6 correction 1
+insertion_s = 720.0                 # [D] liftoff -> separation, from the ascent (calibrated in i6 Task 5)
+insertion_arc_deg = 30.0            # [D] pad at liftoff -> separation point, inertial in-plane angle (i6 Task 5)
+
+[phasing]
+mission_limit_h = 28.0              # [S] from the launch
+earliest_arrival_h = 0.0

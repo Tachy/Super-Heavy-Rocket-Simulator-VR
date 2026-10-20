@@ -14,7 +14,9 @@
 namespace starsim::config {
 
 // [mission] kind: what the mission file describes (FlightSim.start_mission dispatches on it). Absent: "ascent".
-enum class MissionKind { Ascent, ShipReturn, CapsuleReturn, LunarLanding, LunarReturn };
+enum class MissionKind {
+    Ascent, ShipReturn, CapsuleReturn, LunarLanding, LunarReturn, IssRendezvous, IssLaunch, IssDeparture
+};
 MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_view mission_id);
 
 // [deorbit] of a ship return from orbit (b4): the deorbit planning settings (gnc::DeorbitParameters).
@@ -177,5 +179,66 @@ struct AscentMission {
 };
 
 AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
+
+// ISS missions (ISS i6). Common [mission] keys: station (vehicle id), port (docking port id on it), iss_orbit
+// ("oem" | "synthetic" | "auto", sim::parse_iss_orbit_source).
+
+// [launch_window] of an ISS launch (mission::LaunchWindowParameters).
+struct IssLaunchWindowConfig {
+    double insertion_s = 0.0;        // [D] liftoff -> payload separation
+    double insertion_arc_rad = 0.0;  // [D] pad at liftoff -> separation point, inertial in-plane angle
+    double search_s = 0.0;           // from earliest_utc
+};
+
+// Falcon 9 + Crew Dragon from the pad to the ISS: the launch window, the ascent mission `ascent_id`, then the docking.
+struct IssLaunchMission {
+    std::string id;
+    std::string name;
+    std::string ascent_id;  // an ascent mission with the Dragon as payload
+    std::string station_id;
+    std::string port;
+    std::string iss_orbit;
+    time::UtcDateTime earliest_utc;
+    IssLaunchWindowConfig window;
+    double mission_limit_s = 0.0;     // liftoff -> Waypoint 0
+    double earliest_arrival_s = 0.0;  // 0: the earliest window
+};
+
+// Crew Dragon from its separation orbit to the ISS: the separation of the first window of `launch_id` after epoch_utc,
+// or (phase_rad) a start that far behind the ISS at epoch_utc.
+struct IssRendezvousMission {
+    std::string id;
+    std::string name;
+    std::string vehicle_id;
+    std::string station_id;
+    std::string port;
+    std::string iss_orbit;
+    std::string launch_id;
+    time::UtcDateTime epoch_utc;
+    std::optional<double> phase_rad;
+    std::optional<double> iss_argument_of_latitude_rad;  // synthetic orbit only
+    double mission_limit_s = 0.0;
+    double earliest_arrival_s = 0.0;
+};
+
+// Crew Dragon docked at the ISS: undocking timed to a return pass, departure, the capsule return `return_id`.
+struct IssDepartureMission {
+    std::string id;
+    std::string name;
+    std::string vehicle_id;
+    std::string station_id;
+    std::string port;
+    std::string iss_orbit;
+    std::string return_id;  // a capsule_return mission (zone, deorbit settings)
+    time::UtcDateTime epoch_utc;  // the earliest undocking
+    double rcs_propellant_kg = 0.0;
+    double undock_to_deorbit_s = 0.0;
+    double search_window_s = 0.0;  // of the return-pass search
+    std::optional<double> iss_argument_of_latitude_rad;
+};
+
+IssLaunchMission load_iss_launch_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
+IssRendezvousMission load_iss_rendezvous_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
+IssDepartureMission load_iss_departure_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
 
 }  // namespace starsim::config

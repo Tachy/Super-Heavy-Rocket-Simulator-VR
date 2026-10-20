@@ -1,0 +1,19 @@
+# Crew Dragon undocks from the ISS and returns (ISS i6): the mission previews the first capsule-return pass at least
+# undock_to_deorbit_h after epoch_utc, starts docked 600 s before the undocking, undocks (i5: hooks, springs, undock
+# burn, departure out of the approach ellipsoid) and hands over to the capsule return of `return` (deorbit, entry,
+# parachutes, splashdown).
+
+[mission]
+name = "Crew Dragon: Abkoppeln und Rückkehr"
+kind = "iss_departure"
+vehicle = "crew_dragon"
+station = "iss"
+port = "ida2"
+iss_orbit = "auto"
+return = "crew_dragon_return"       # splashdown zone and deorbit settings
+
+[start]
+epoch_utc = "2026-10-16T00:00:00"   # the earliest undocking
+rcs_propellant_kg = 2000.0          # [E] after the ISS mission (as crew_dragon_return)
+undock_to_deorbit_h = 16.1          # [S: Crew-9 2025-03-18, undock 05:05 UTC, deorbit burn 21:11 UTC]
+search_window_h = 168.0             # [E] a week of passes (the 48 h of crew_dragon_return found none for some planes)

@@ -1,0 +1,21 @@
+# Crew Dragon from its separation orbit to the ISS (ISS i6): phasing (i3) -> Waypoint 0 -> proximity operations (i4)
+# -> soft and hard capture (i5). The start is the predicted separation of the first launch window of `launch` after
+# epoch_utc (i6 correction 4); phase_deg instead starts in the ISS plane that far behind the station.
+
+[mission]
+name = "Crew Dragon zur ISS"
+kind = "iss_rendezvous"             # FlightSim.start_mission dispatches on it
+vehicle = "crew_dragon"
+station = "iss"
+port = "ida2"                       # "ida2" (Harmony vorn, V-bar) or "ida3" (Harmony oben, R-bar)
+iss_orbit = "auto"                  # "oem" | "synthetic" | "auto" (fidelity flag)
+
+[start]
+epoch_utc = "2026-10-16T00:00:00"   # inside the committed OEM fixture (2026-10-14 ..)
+launch = "falcon9_crew_dragon_iss"  # the launch whose separation state starts the mission
+# phase_deg = 30.0                  # optional: Dragon this far behind the ISS at epoch_utc, in its biased plane
+# iss_argument_of_latitude_deg = 0  # optional, synthetic orbit only: the ISS position in its orbit
+
+[phasing]
+mission_limit_h = 28.0              # [S] crew missions dock 24-28 h after the launch
+earliest_arrival_h = 0.0            # 0: the earliest window (cheapest, i3 correction 3)

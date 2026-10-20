@@ -19,7 +19,34 @@ MissionKind kind_of(const detail::Document& doc) {
     if (kind == "capsule_return") return MissionKind::CapsuleReturn;
     if (kind == "lunar_landing") return MissionKind::LunarLanding;
     if (kind == "lunar_return") return MissionKind::LunarReturn;
-    doc.fail("mission: unknown kind '" + kind + "' (ascent, ship_return, capsule_return, lunar_landing, lunar_return)");
+    if (kind == "iss_rendezvous") return MissionKind::IssRendezvous;
+    if (kind == "iss_launch") return MissionKind::IssLaunch;
+    if (kind == "iss_departure") return MissionKind::IssDeparture;
+    doc.fail("mission: unknown kind '" + kind +
+             "' (ascent, ship_return, capsule_return, lunar_landing, lunar_return, iss_rendezvous, iss_launch, "
+             "iss_departure)");
+}
+
+// [mission] station / port / iss_orbit of an ISS mission.
+void iss_common(const detail::Document& doc, const toml::table& mission, std::string& station, std::string& port,
+                std::string& iss_orbit) {
+    station = doc.text(mission, "station");
+    port = doc.text(mission, "port");
+    iss_orbit = doc.text(mission, "iss_orbit");
+    if (iss_orbit != "oem" && iss_orbit != "synthetic" && iss_orbit != "auto") {
+        doc.fail("mission: iss_orbit '" + iss_orbit + "' (oem, synthetic, auto)");
+    }
+}
+
+time::UtcDateTime utc(const detail::Document& doc, const toml::table& t, std::string_view key) {
+    const auto parsed = time::UtcDateTime::parse_iso(doc.text(t, key));
+    if (!parsed) doc.fail(std::string(key) + " is not YYYY-MM-DDTHH:MM:SS");
+    return *parsed;
+}
+
+std::optional<double> optional_deg(const detail::Document& doc, const toml::table& t, std::string_view key) {
+    if (!t.contains(key)) return std::nullopt;
+    return doc.number(t, key) * constants::deg_to_rad;
 }
 
 void require_kind(const detail::Document& doc, MissionKind kind, const char* name) {
@@ -318,6 +345,68 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
             m.booster_throttle.emplace_back(*t, *f);
         }
     }
+    return m;
+}
+
+IssRendezvousMission load_iss_rendezvous_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
+    const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    require_kind(doc, MissionKind::IssRendezvous, "ISS rendezvous");
+    const auto* mission = doc.root["mission"].as_table();
+    const auto* start = doc.root["start"].as_table();
+    const auto* phasing = doc.root["phasing"].as_table();
+    if (!mission || !start || !phasing) doc.fail("missing [mission], [start] or [phasing]");
+    IssRendezvousMission m;
+    m.id = std::string(mission_id);
+    m.name = doc.text(*mission, "name");
+    m.vehicle_id = doc.text(*mission, "vehicle");
+    iss_common(doc, *mission, m.station_id, m.port, m.iss_orbit);
+    m.epoch_utc = utc(doc, *start, "epoch_utc");
+    m.launch_id = doc.text(*start, "launch");
+    m.phase_rad = optional_deg(doc, *start, "phase_deg");
+    m.iss_argument_of_latitude_rad = optional_deg(doc, *start, "iss_argument_of_latitude_deg");
+    m.mission_limit_s = doc.positive(*phasing, "mission_limit_h") * 3600.0;
+    m.earliest_arrival_s = doc.number(*phasing, "earliest_arrival_h") * 3600.0;
+    return m;
+}
+
+IssLaunchMission load_iss_launch_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
+    const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    require_kind(doc, MissionKind::IssLaunch, "ISS launch");
+    const auto* mission = doc.root["mission"].as_table();
+    const auto* window = doc.root["launch_window"].as_table();
+    const auto* phasing = doc.root["phasing"].as_table();
+    if (!mission || !window || !phasing) doc.fail("missing [mission], [launch_window] or [phasing]");
+    IssLaunchMission m;
+    m.id = std::string(mission_id);
+    m.name = doc.text(*mission, "name");
+    m.ascent_id = doc.text(*mission, "ascent");
+    iss_common(doc, *mission, m.station_id, m.port, m.iss_orbit);
+    m.earliest_utc = utc(doc, *window, "earliest_utc");
+    m.window.search_s = doc.positive(*window, "search_days") * 86400.0;
+    m.window.insertion_s = doc.positive(*window, "insertion_s");
+    m.window.insertion_arc_rad = doc.positive(*window, "insertion_arc_deg") * constants::deg_to_rad;
+    m.mission_limit_s = doc.positive(*phasing, "mission_limit_h") * 3600.0;
+    m.earliest_arrival_s = doc.number(*phasing, "earliest_arrival_h") * 3600.0;
+    return m;
+}
+
+IssDepartureMission load_iss_departure_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
+    const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    require_kind(doc, MissionKind::IssDeparture, "ISS departure");
+    const auto* mission = doc.root["mission"].as_table();
+    const auto* start = doc.root["start"].as_table();
+    if (!mission || !start) doc.fail("missing [mission] or [start]");
+    IssDepartureMission m;
+    m.id = std::string(mission_id);
+    m.name = doc.text(*mission, "name");
+    m.vehicle_id = doc.text(*mission, "vehicle");
+    iss_common(doc, *mission, m.station_id, m.port, m.iss_orbit);
+    m.return_id = doc.text(*mission, "return");
+    m.epoch_utc = utc(doc, *start, "epoch_utc");
+    m.rcs_propellant_kg = doc.positive(*start, "rcs_propellant_kg");
+    m.undock_to_deorbit_s = doc.positive(*start, "undock_to_deorbit_h") * 3600.0;
+    m.search_window_s = doc.positive(*start, "search_window_h") * 3600.0;
+    m.iss_argument_of_latitude_rad = optional_deg(doc, *start, "iss_argument_of_latitude_deg");
     return m;
 }
 
