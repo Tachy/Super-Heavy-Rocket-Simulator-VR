@@ -1,5 +1,6 @@
 // Refuelling r5: the reference flights - session building blocks, the mission chain, the three missions.
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -13,6 +14,8 @@
 #include "refuelling_test_support.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
+#include "starsim/config/refuelling_mission_config.hpp"
+#include "starsim/frames/geodetic.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
@@ -306,4 +309,81 @@ TEST_CASE("depot_launch: pad -> orbit, the depot becomes the station, the booste
     std::printf("[r5] depot_launch: station %.0f s after liftoff, %.1f x %.1f km, initial fill %.1f t (main), "
                 "boil-off %.1f kg in 90 min\n",
                 insertion_s, rp / 1e3, ra / 1e3, fill / 1e3, boil_kg);
+}
+
+TEST_CASE("tanker_flight_orbit starts behind the depot and plans the phasing", "[refuelling][mission][rendezvous]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight_orbit", f.t0, f.clock);
+    INFO(s.refusal);
+    REQUIRE(s.refusal.empty());
+    CHECK(s.kind == config::MissionKind::TankerFlight);
+    CHECK(s.epoch == f.t0);
+    CHECK(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
+    REQUIRE(f.session.station_index());
+    CHECK(f.session.body(*f.session.station_index()).vehicle().main_propellant_kg() == Catch::Approx(600.0e3));
+    const auto m = config::load_refuelling_flight_mission(refuelling_test::config_dir, "tanker_flight_orbit");
+    CHECK(f.session.body(f.session.controlled_index()).vehicle().main_propellant_kg() ==
+          Catch::Approx(m.start_propellant_kg));
+    CHECK(f.session.launch_site().latitude_rad ==
+          Catch::Approx(config::load_launch_site(refuelling_test::config_dir, "starbase_olp1").latitude_rad));
+}
+
+TEST_CASE("tanker_flight finds a launch window into the depot plane within the uncrewed limit",
+          "[refuelling][mission][launch_window]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight", f.t0, f.clock);
+    INFO(s.refusal);
+    REQUIRE(s.refusal.empty());
+    REQUIRE(s.launch_window);
+    CHECK(s.launch_window->feasible);
+    CHECK(s.epoch == s.launch_window->liftoff);
+    CHECK(f.session.iss_mission_leg() == IssMissionLeg::Ascent);
+    REQUIRE(f.session.station_index());
+    std::printf("[r5] tanker window: liftoff %.1f h after earliest, %d crossings rejected\n",
+                (s.launch_window->liftoff - f.t0) / 3600.0, s.launch_window->rejected);
+}
+
+TEST_CASE("tanker_flight: the window's separation estimate matches the flown ascent",
+          "[refuelling][mission][ascent][slow]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    const auto m = config::load_refuelling_flight_mission(refuelling_test::config_dir, "tanker_flight");
+    const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight", f.t0, f.clock);
+    REQUIRE(s.refusal.empty());
+    const auto& w = *s.launch_window;
+    while (f.session.iss_mission_leg() == IssMissionLeg::Ascent && f.session.epoch() - w.liftoff < 1200.0) {
+        f.session.advance_to(f.session.epoch() + 1.0);
+    }
+    INFO(f.session.iss_mission_status());
+    REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
+    const auto& marks = f.session.iss_mission_marks();  // Ascent, Rendezvous
+    REQUIRE(marks.size() >= 2u);
+    const double seco_s = marks[1].epoch - w.liftoff;
+    const auto& ship = f.session.body(f.session.controlled_index());
+    const Vec3 r = ship.state().position_gcrf_m, v = ship.state().velocity_gcrf_mps;
+    const Vec3 n = math::normalized(cross(r, v));
+    const auto site = config::load_launch_site(refuelling_test::config_dir, "starbase_olp1");
+    const Vec3 pad = f.earth.fixed_to_gcrf(w.liftoff).rotation *
+                     frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    const Vec3 pad_in_plane = pad - dot(pad, n) * n;
+    const double arc = std::atan2(dot(cross(pad_in_plane, r), n), dot(pad_in_plane, r));
+    // the estimate is the state at liftoff + insertion_s; the flown ship is at liftoff + seco_s
+    const Vec3 r_est = w.separation_state_gcrf.position_m;
+    const double angle = std::acos(std::clamp(dot(math::normalized(r), math::normalized(r_est)), -1.0, 1.0));
+    std::printf("[r5] tanker SECO %.1f s after liftoff (config %.1f), arc %.3f deg (config %.3f), %.3f deg from the "
+                "estimate, main %.1f t, plane %.4f deg from the depot's\n",
+                seco_s, m.window.insertion_s, arc / deg, m.window.insertion_arc_rad / deg, angle / deg,
+                ship.vehicle().main_propellant_kg() / 1e3,
+                std::acos(std::clamp(dot(n, math::normalized(cross(f.session.body(*f.session.station_index())
+                                                                           .state()
+                                                                           .position_gcrf_m,
+                                                                       f.session.body(*f.session.station_index())
+                                                                           .state()
+                                                                           .velocity_gcrf_mps))),
+                                     -1.0, 1.0)) /
+                    deg);
+    CHECK(std::abs(seco_s - m.window.insertion_s) < 5.0);  // [E] calibrated (i6: Falcon 9 within 1 s)
+    CHECK(angle < 0.1 * deg);                               // [E] i6: 0.004 deg in phase
 }

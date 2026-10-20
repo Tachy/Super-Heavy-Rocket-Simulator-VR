@@ -61,7 +61,9 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
             break;
         case config::MissionKind::TankerFlight:
         case config::MissionKind::HlsRefuel:
-            throw std::invalid_argument("mission '" + std::string(mission_id) + "': kind not yet startable");
+            s = start_refuelling_flight_mission(session, config_dir,
+                                                config::load_refuelling_flight_mission(config_dir, mission_id), time);
+            break;
         case config::MissionKind::ShipReturn:
             throw std::invalid_argument("mission '" + std::string(mission_id) +
                                         "' is a ship return: it is flown from orbit with plan_ship_return (key R), "

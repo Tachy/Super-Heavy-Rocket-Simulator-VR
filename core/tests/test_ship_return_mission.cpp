@@ -15,6 +15,7 @@
 #include "starsim/config/mission_config.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -67,11 +68,7 @@ time::Epoch place_mission(sim::FlightSession& session, const config::ShipReturnM
 }
 
 gnc::DeorbitParameters deorbit_parameters(const config::ShipReturnMission& m) {
-    gnc::DeorbitParameters p;
-    p.entry_interface_height_m = m.deorbit.entry_interface_height_m;
-    p.entry_flight_path_rad = m.deorbit.entry_flight_path_rad;
-    p.nominal_bank_rad = m.deorbit.nominal_bank_rad;
-    p.max_crossrange_m = m.deorbit.max_crossrange_m;
+    auto p = sim::ship_deorbit_parameters(m.deorbit);  // the one mapping (refuelling r5)
     p.search_window_s = m.deorbit.search_window_s;
     return p;
 }
