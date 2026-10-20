@@ -6,6 +6,7 @@
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/thermal_radiation.hpp"
 #include "starsim/math/quat.hpp"
+#include "starsim/math/state_vector.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
 namespace starsim::vehicle {
@@ -56,5 +57,12 @@ std::vector<TankBoilOff> boil_off_rates(const Vehicle& vehicle, const environmen
 
 // The flows summed by contents.
 BoilOffRate total_boil_off(const Vehicle& vehicle, const std::vector<TankBoilOff>& tanks);
+
+// Mean vented flow over one two-body orbit about the Earth (the r6 campaign calculator's daily losses): the vehicle
+// held at `body_in_lvlh` (body -> LVLH of frames/lvlh.hpp: x along the velocity, z nadir), the Sun fixed at
+// `sun_position_gcrf_m` over the orbit, Earth shadow only, tank masses as they are.
+BoilOffRate orbit_average_boil_off(const Vehicle& vehicle, const math::StateVector& orbit_gcrf,
+                                   const math::Quat& body_in_lvlh, const math::Vec3& sun_position_gcrf_m,
+                                   int samples = 360);
 
 }  // namespace starsim::vehicle

@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <cmath>
 
+#include "starsim/frames/lvlh.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/orbit/kepler.hpp"
 
 namespace starsim::vehicle {
 
@@ -73,6 +75,23 @@ BoilOffRate total_boil_off(const Vehicle& vehicle, const std::vector<TankBoilOff
         (contents == config::TankContents::Oxidizer ? rate.oxidizer_kgps : rate.fuel_kgps) += t.mass_flow_kgps;
     }
     return rate;
+}
+
+BoilOffRate orbit_average_boil_off(const Vehicle& vehicle, const math::StateVector& orbit_gcrf,
+                                   const math::Quat& body_in_lvlh, const Vec3& sun_position_gcrf_m, int samples) {
+    const double gm = constants::earth_gm_m3ps2;
+    const double period_s = orbit::orbital_period_s(orbit::elements_from_state(orbit_gcrf, gm).semi_major_axis_m, gm);
+    BoilOffRate mean;
+    for (int k = 0; k < samples; ++k) {
+        const auto state = orbit::propagate_two_body(orbit_gcrf, gm, period_s * k / samples);
+        const auto env = environment::earth_orbit_radiation(state.position_m, sun_position_gcrf_m - state.position_m,
+                                                            nullptr);
+        const auto rate =
+            total_boil_off(vehicle, boil_off_rates(vehicle, env, frames::lvlh_to_inertial(state) * body_in_lvlh));
+        mean.oxidizer_kgps += rate.oxidizer_kgps / samples;
+        mean.fuel_kgps += rate.fuel_kgps / samples;
+    }
+    return mean;
 }
 
 }  // namespace starsim::vehicle

@@ -16,8 +16,10 @@
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/thermal_radiation.hpp"
+#include "starsim/frames/lvlh.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
+#include "starsim/orbit/kepler.hpp"
 #include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
@@ -306,4 +308,76 @@ TEST_CASE("Centaur LO2 sidewall flux: calibration and prediction (AIAA 2007-5845
     // geometry unknown].
     CHECK(ac167 == Catch::Approx(25.0 * btu_hr_ft2).epsilon(0.25));
     CHECK(av003 == Catch::Approx(25.0 * btu_hr_ft2).epsilon(0.25));
+}
+
+namespace {
+
+// Circular orbit of `altitude_m`, inclination `inclination_rad`, node on +x.
+math::StateVector circular_orbit(double altitude_m, double inclination_rad) {
+    const double r = constants::earth_mean_radius_m + altitude_m;
+    const double v = std::sqrt(constants::earth_gm_m3ps2 / r);
+    return {{r, 0.0, 0.0}, {0.0, v * std::cos(inclination_rad), v * std::sin(inclination_rad)}};
+}
+
+double full_propellant_kg(const vehicle::Vehicle& v) {
+    double sum = 0.0;
+    for (const auto& t : v.stages().back().tanks) {
+        if (t.config.contents != config::TankContents::Rcs) sum += t.config.capacity_kg;
+    }
+    return sum;
+}
+
+}  // namespace
+
+TEST_CASE("orbit average: a Sun along the orbit normal gives the constant instantaneous rate", "[boil_off][vehicle]") {
+    // Equatorial orbit, Sun at the north pole: no eclipse, and in LVLH the Sun and the Earth stand still.
+    const auto ship = top_stage_alone("starship_tanker");
+    const auto orbit = circular_orbit(300.0e3, 0.0);
+    const Vec3 sun{0.0, 0.0, constants::astronomical_unit_m};
+    const auto average = vehicle::orbit_average_boil_off(*ship, orbit, {}, sun);
+    const auto attitude = frames::lvlh_to_inertial(orbit);
+    const auto now = vehicle::total_boil_off(
+        *ship, vehicle::boil_off_rates(*ship,
+                                       environment::earth_orbit_radiation(orbit.position_m, sun - orbit.position_m,
+                                                                          nullptr),
+                                       attitude));
+    CHECK(average.oxidizer_kgps == Catch::Approx(now.oxidizer_kgps).epsilon(1e-6));
+    CHECK(average.fuel_kgps == Catch::Approx(now.fuel_kgps).epsilon(1e-6));
+}
+
+TEST_CASE("orbit average: eclipse lowers the rate", "[boil_off][vehicle]") {
+    const auto ship = top_stage_alone("starship_tanker");
+    const auto orbit = circular_orbit(300.0e3, 0.0);
+    const auto in_plane = vehicle::orbit_average_boil_off(*ship, orbit, {}, {constants::astronomical_unit_m, 0.0, 0.0});
+    const auto polar_sun = vehicle::orbit_average_boil_off(*ship, orbit, {}, {0.0, 0.0, constants::astronomical_unit_m});
+    // In the plane the Sun is eclipsed part of the orbit and passes along the axis (end-on); from the pole it stays
+    // broadside and never sets.
+    CHECK(in_plane.oxidizer_kgps > 0.0);
+    CHECK(in_plane.oxidizer_kgps + in_plane.fuel_kgps < polar_sun.oxidizer_kgps + polar_sun.fuel_kgps);
+}
+
+TEST_CASE("orbit average in the depot orbit: plausibility of depot and bare tanker", "[boil_off][vehicle]") {
+    // 200 km, 26.5 deg (the lunar missions' start orbit), Sun in the orbit plane (the longest eclipse) and at 60 deg
+    // beta; depot and tanker nose along +V, dorsal to nadir (identity in LVLH, r3's depot attitude).
+    const auto orbit = circular_orbit(200.0e3, 26.5 * constants::deg_to_rad);
+    const auto depot = top_stage_alone("starship_depot");
+    const auto tanker = top_stage_alone("starship_tanker");
+    for (const Vec3 sun_dir : {Vec3{1.0, 0.0, 0.0}, Vec3{0.5, -0.866 * std::sin(26.5 * constants::deg_to_rad),
+                                                         0.866 * std::cos(26.5 * constants::deg_to_rad)}}) {
+        const Vec3 sun = sun_dir * constants::astronomical_unit_m;
+        const auto d = vehicle::orbit_average_boil_off(*depot, orbit, {}, sun);
+        const auto t = vehicle::orbit_average_boil_off(*tanker, orbit, {}, sun);
+        const double depot_kg_day = (d.oxidizer_kgps + d.fuel_kgps) * constants::seconds_per_day;
+        const double tanker_kg_day = (t.oxidizer_kgps + t.fuel_kgps) * constants::seconds_per_day;
+        const double depot_percent_day = 100.0 * depot_kg_day / full_propellant_kg(*depot);
+        if (verbose()) {
+            std::cout << "depot " << depot_kg_day << " kg/day (" << depot_percent_day << " %/day), tanker "
+                      << tanker_kg_day << " kg/day\n";
+        }
+        // Plausibility only [documented]: conventionally insulated cryogenic tanks in orbit lose ~0.1 %/day; a large
+        // depot with MLI less. A bare tanker loses orders of magnitude more.
+        CHECK(depot_percent_day > 0.005);
+        CHECK(depot_percent_day < 0.2);
+        CHECK(tanker_kg_day > 10.0 * depot_kg_day);
+    }
 }
