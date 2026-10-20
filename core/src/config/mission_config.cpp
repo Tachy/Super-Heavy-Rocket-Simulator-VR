@@ -1,4 +1,5 @@
 #include "starsim/config/mission_config.hpp"
+#include "starsim/config/refuelling_mission_config.hpp"
 
 #include <cmath>
 #include <cstdint>
@@ -22,9 +23,12 @@ MissionKind kind_of(const detail::Document& doc) {
     if (kind == "iss_rendezvous") return MissionKind::IssRendezvous;
     if (kind == "iss_launch") return MissionKind::IssLaunch;
     if (kind == "iss_departure") return MissionKind::IssDeparture;
+    if (kind == "depot_launch") return MissionKind::DepotLaunch;
+    if (kind == "tanker_flight") return MissionKind::TankerFlight;
+    if (kind == "hls_refuel") return MissionKind::HlsRefuel;
     doc.fail("mission: unknown kind '" + kind +
              "' (ascent, ship_return, capsule_return, lunar_landing, lunar_return, iss_rendezvous, iss_launch, "
-             "iss_departure)");
+             "iss_departure, depot_launch, tanker_flight, hls_refuel)");
 }
 
 // [mission] station / port / iss_orbit of an ISS mission.
@@ -408,6 +412,73 @@ IssDepartureMission load_iss_departure_mission(const std::filesystem::path& conf
     m.undock_to_deorbit_s = doc.positive(*start, "undock_to_deorbit_h") * 3600.0;
     m.search_window_s = doc.positive(*start, "search_window_h") * 3600.0;
     m.iss_argument_of_latitude_rad = optional_deg(doc, *start, "iss_argument_of_latitude_deg");
+    return m;
+}
+
+// Refuelling r5 (declared in refuelling_mission_config.hpp; here for the file's helpers).
+DepotLaunchMission load_depot_launch_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
+    const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    require_kind(doc, MissionKind::DepotLaunch, "depot launch");
+    const auto* mission = doc.root["mission"].as_table();
+    const auto* start = doc.root["start"].as_table();
+    if (!mission || !start) doc.fail("missing [mission] or [start]");
+    DepotLaunchMission m;
+    m.id = std::string(mission_id);
+    m.name = doc.text(*mission, "name");
+    m.ascent_id = doc.text(*mission, "ascent");
+    m.epoch_utc = utc(doc, *start, "epoch_utc");
+    return m;
+}
+
+RefuellingFlightMission load_refuelling_flight_mission(const std::filesystem::path& config_dir,
+                                                       std::string_view mission_id) {
+    const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    const double deg = constants::deg_to_rad;
+    RefuellingFlightMission m;
+    m.id = std::string(mission_id);
+    m.kind = kind_of(doc);
+    if (m.kind != MissionKind::TankerFlight && m.kind != MissionKind::HlsRefuel) {
+        doc.fail("not a tanker_flight / hls_refuel mission ([mission] kind)");
+    }
+    const auto* mission = doc.root["mission"].as_table();
+    const auto* depot = doc.root["depot"].as_table();
+    const auto* start = doc.root["start"].as_table();
+    const auto* window = doc.root["launch_window"].as_table();
+    const auto* phasing = doc.root["phasing"].as_table();
+    if (!depot || !start || !window || !phasing) doc.fail("missing [depot], [start], [launch_window] or [phasing]");
+    m.name = doc.text(*mission, "name");
+    m.ascent_id = doc.text(*mission, "ascent");
+    m.port = doc.text_or(*mission, "port", "transfer_dock");
+    m.depot.vehicle_id = doc.text_or(*depot, "vehicle", "starship_depot");
+    m.depot.port = doc.text_or(*depot, "port", "transfer_dock");
+    m.depot.height_m = doc.positive(*depot, "height_km") * 1e3;
+    m.depot.inclination_rad = doc.positive(*depot, "inclination_deg") * deg;
+    m.depot.raan_rad = doc.number_or(*depot, "raan_deg", 0.0) * deg;
+    m.depot.argument_of_latitude_rad = doc.number_or(*depot, "argument_of_latitude_deg", 0.0) * deg;
+    m.depot.propellant_kg = doc.positive(*depot, "propellant_t") * 1e3;
+    const auto mode = doc.text(*start, "mode");
+    if (mode == "pad") {
+        m.start = RefuellingStart::Pad;
+    } else if (mode == "phasing_orbit") {
+        m.start = RefuellingStart::PhasingOrbit;
+        m.phasing_behind_rad = doc.positive(*start, "behind_deg") * deg;
+        m.start_propellant_kg = doc.positive(*start, "propellant_t") * 1e3;
+    } else {
+        doc.fail("[start] mode must be \"pad\" or \"phasing_orbit\"");
+    }
+    m.earliest_utc = utc(doc, *window, "earliest_utc");
+    m.window.search_s = doc.positive(*window, "search_days") * 86400.0;
+    m.window.insertion_s = doc.positive(*window, "insertion_s");
+    m.window.insertion_arc_rad = doc.positive(*window, "insertion_arc_deg") * deg;
+    m.mission_limit_s = doc.positive(*phasing, "mission_limit_h") * 3600.0;
+    m.earliest_arrival_s = doc.number(*phasing, "earliest_arrival_h") * 3600.0;
+    if (m.kind == MissionKind::TankerFlight) {
+        m.return_id = doc.text(*mission, "return");
+    } else {
+        const auto* lunar = doc.root["lunar"].as_table();
+        if (!lunar) doc.fail("missing [lunar]");
+        m.lunar_mission_id = doc.text(*lunar, "mission");
+    }
     return m;
 }
 

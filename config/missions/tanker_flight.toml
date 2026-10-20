@@ -1,0 +1,32 @@
+# Refuelling r5: one tanker flight in the full model (spec r5 "tanker_flight"): launch window into the depot plane ->
+# ascent with booster catch -> phasing -> proximity -> docking -> transfer down to the computed reserve -> undocking
+# and departure -> deorbit -> entry -> flip and catch on the header tanks.
+[mission]
+name = "Tankerflug zum Depot"
+kind = "tanker_flight"
+ascent = "tanker_ascent"
+port = "transfer_dock"
+return = "ship_return_starbase"   # its [deorbit] block (entry interface, bank, crossrange)
+
+# The depot, placed (not flown in this mission): synthetic orbit advanced by J2 (r5 plan decision 2).
+[depot]
+vehicle = "starship_depot"
+port = "transfer_dock"
+height_km = 200.0
+inclination_deg = 26.5            # true equator frame
+raan_deg = 0.0                    # at earliest_utc
+argument_of_latitude_deg = 0.0    # at earliest_utc
+propellant_t = 600.0              # [test] a depot after a few tankers (r3/r4 tests)
+
+[start]
+mode = "pad"                      # "pad" | "phasing_orbit"
+
+[launch_window]
+earliest_utc = "2026-10-20T00:00:00"
+search_days = 12.0                # [E] r3: the crossings close the phasing on few days
+insertion_s = 520.0               # [test] liftoff -> orbit insertion; calibrated from the flown ascent (r5 Task 5)
+insertion_arc_deg = 20.0          # [test] inertial in-plane arc pad -> insertion point; calibrated (r5 Task 5)
+
+[phasing]
+mission_limit_h = 48.0            # [E] uncrewed (the crew's 28 h opened the first window after 177 h, r3)
+earliest_arrival_h = 0.0

@@ -1,0 +1,9 @@
+# Refuelling r5: the depot launches first; the ship becomes the station in its orbit, the residue after the ascent is
+# its initial fill (measured, for the r6 campaign).
+[mission]
+name = "Depotstart"
+kind = "depot_launch"
+ascent = "depot_ascent"
+
+[start]
+epoch_utc = "2026-10-20T00:00:00"

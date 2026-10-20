@@ -1,0 +1,19 @@
+# Refuelling r5: the depot's ascent from Starbase into the depot orbit (spec r5 "depot_launch"). The pitch program is
+# starship_leo's (same booster, a ship stage ~19 t lighter dry); the booster is caught.
+[mission]
+name = "Depot in den Erdorbit"
+vehicle = "starship_depot"
+site = "starbase_olp1"
+heading_deg = 90.0
+payload_t = 0.0
+fairing = false
+
+[target]
+periapsis_km = 200.0          # the lunar missions' start orbit (spec r3)
+apoapsis_km = 200.0
+inclination_deg = 26.5
+northerly = true
+
+[pitch_program]
+kick_deg = 14.0
+booster_throttle = [[60.0, 0.85], [64.0, 0.76], [76.0, 0.76], [82.0, 0.83], [112.0, 0.83], [126.0, 0.76]]

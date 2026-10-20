@@ -15,7 +15,8 @@ namespace starsim::config {
 
 // [mission] kind: what the mission file describes (FlightSim.start_mission dispatches on it). Absent: "ascent".
 enum class MissionKind {
-    Ascent, ShipReturn, CapsuleReturn, LunarLanding, LunarReturn, IssRendezvous, IssLaunch, IssDeparture
+    Ascent, ShipReturn, CapsuleReturn, LunarLanding, LunarReturn, IssRendezvous, IssLaunch, IssDeparture,
+    DepotLaunch, TankerFlight, HlsRefuel  // refuelling r5 (refuelling_mission_config.hpp)
 };
 MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_view mission_id);
 

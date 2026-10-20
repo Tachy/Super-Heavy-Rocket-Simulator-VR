@@ -1,0 +1,32 @@
+# Refuelling r5: tanker_flight from the phasing orbit (fast tests): the tanker 8 deg behind the depot in the ascent's
+# 170 x 190 km orbit, then the same chain as tanker_flight (phasing -> ... -> catch).
+[mission]
+name = "Tankerflug ab Phasenorbit"
+kind = "tanker_flight"
+ascent = "tanker_ascent"          # vehicle, site and phasing orbit
+port = "transfer_dock"
+return = "ship_return_starbase"
+
+[depot]
+vehicle = "starship_depot"
+port = "transfer_dock"
+height_km = 200.0
+inclination_deg = 26.5
+raan_deg = 0.0
+argument_of_latitude_deg = 0.0
+propellant_t = 600.0              # [test]
+
+[start]
+mode = "phasing_orbit"
+behind_deg = 8.0
+propellant_t = 150.0              # [test] main tanks; replaced by the flown ascent's residue (r5 Task 5) [D]
+
+[launch_window]
+earliest_utc = "2026-10-20T00:00:00"   # the start epoch of the phasing-orbit start
+search_days = 12.0
+insertion_s = 520.0
+insertion_arc_deg = 20.0
+
+[phasing]
+mission_limit_h = 48.0            # [E] uncrewed
+earliest_arrival_h = 0.0

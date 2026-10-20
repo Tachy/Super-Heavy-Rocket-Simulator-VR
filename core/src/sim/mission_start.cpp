@@ -54,6 +54,10 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
                                             config::load_iss_departure_mission(config_dir, mission_id),
                                             iss_archive(config_dir, time), time);
             break;
+        case config::MissionKind::DepotLaunch:
+        case config::MissionKind::TankerFlight:
+        case config::MissionKind::HlsRefuel:
+            throw std::invalid_argument("mission '" + std::string(mission_id) + "': kind not yet startable");
         case config::MissionKind::ShipReturn:
             throw std::invalid_argument("mission '" + std::string(mission_id) +
                                         "' is a ship return: it is flown from orbit with plan_ship_return (key R), "

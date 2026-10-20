@@ -195,7 +195,7 @@ flow separation (vacuum engines).
 
 ## Missions (`missions/`)
 - `[mission] kind = "ascent" | "ship_return" | "capsule_return" | "lunar_landing" | "lunar_return" | "iss_rendezvous" |
-  "iss_launch" | "iss_departure"` (default "ascent"): `config::mission_kind`;
+  "iss_launch" | "iss_departure" | "depot_launch" | "tanker_flight" | "hls_refuel"` (default "ascent"): `config::mission_kind`;
   `sim::start_mission` / `FlightSim.start_mission` dispatch on it (an ascent starts at the requested time, a capsule return
   at its `[orbit]` epoch with the deorbit planned, a ship return is refused: it is flown from orbit, key R). Each loader
   refuses a file of another kind.
@@ -260,6 +260,17 @@ flow separation (vacuum engines).
   `sim::start_iss_departure_mission`): `[mission]` `vehicle`, `station`, `port`, `iss_orbit`, `return` (a
   `capsule_return` mission: zone and deorbit settings); `[start]` `epoch_utc` (earliest undocking),
   `rcs_propellant_kg`, `undock_to_deorbit_h`, `search_window_h`, optional `iss_argument_of_latitude_deg`.
+- Refuelling reference flights (r5, `config/refuelling_mission_config.hpp`, `sim::refuelling_mission`):
+  - `depot_launch.toml` (`kind = "depot_launch"`, `config::load_depot_launch_mission`): `[mission]` `ascent` (the
+    depot stack's ascent mission, `depot_ascent.toml`); `[start]` `epoch_utc`. In orbit the depot becomes the station.
+  - `tanker_flight.toml`, `tanker_flight_orbit.toml` (`kind = "tanker_flight"`) and `hls_refuel*.toml`
+    (`kind = "hls_refuel"`), `config::load_refuelling_flight_mission`: `[mission]` `ascent` (the chaser's ascent
+    mission: vehicle, site, phasing orbit), `port` (default `transfer_dock`), `return` (tanker: a `ship_return`
+    mission whose `[deorbit]` block is flown); `[depot]` `vehicle`, `port`, `height_km`, `inclination_deg`,
+    `raan_deg`, `argument_of_latitude_deg` (at earliest_utc; hls_refuel: the RAAN comes from the lunar plane),
+    `propellant_t`; `[start]` `mode = "pad" | "phasing_orbit"` (phasing orbit: `behind_deg`, `propellant_t` main
+    tanks); `[launch_window]` as `iss_launch` (insertion = liftoff -> orbit insertion); `[phasing]` as above;
+    hls_refuel: `[lunar]` `mission` (the `lunar_landing` mission continued after the refuelling).
 
 - Payload vehicles: `config::stack_payload` stacks a vehicle (e.g. `crew_dragon`) on the launcher; its stages are
   `payload` stages, whose thrusters stay blocked until the payload flies alone.
