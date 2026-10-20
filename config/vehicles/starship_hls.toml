@@ -153,8 +153,21 @@ elements_m = [[12.0, -1.5, 5.0], [12.0, 1.5, 5.0], [28.0, -1.5, 5.0], [28.0, 1.5
 id = "lox_transfer"
 tank = "lox_main"                        # LOX main tank from 3.5 m
 position_m = [8.0, 0.0, 5.0]             # [E]
+line_diameter_m = 0.15                   # [E] one line per propellant (SpaceX publishes no size)
+discharge_coefficient = 0.6              # [E] lumped line, valve and coupling losses
+chilldown_kg = 150.0                     # [E] ~300 kg of line and coupling steel from ~250 K (c 450 J/kgK) over 213 kJ/kg
+                                         # ~100 kg, +50 %
 
 [[stage.transfer_connector]]
 id = "ch4_transfer"
 tank = "ch4_main"                        # CH4 main tank 20-32.6 m
 position_m = [24.0, 0.0, 5.0]            # [E]
+line_diameter_m = 0.15                   # [E]
+discharge_coefficient = 0.6              # [E]
+chilldown_kg = 60.0                      # [E] the same steel over 510 kJ/kg ~37 kg, +50 %
+
+# Transfer pressures [E] (refuelling r4; spec: pressure-driven, Ars Technica 2024): the delivering ship holds its ullage
+# at 3.5 bar (spec 3-4 bar), the receiving ship vents to 1.5 bar - 2 bar drive LOX at ~230 kg/s, CH4 at ~140 kg/s.
+[stage.propellant_transfer]
+delivery_pressure_pa = 3.5e5
+receive_pressure_pa = 1.5e5

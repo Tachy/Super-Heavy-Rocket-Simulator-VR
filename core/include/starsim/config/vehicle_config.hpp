@@ -159,11 +159,24 @@ struct DockingPortConfig {
 
 // [[stage.transfer_connector]] (refuelling r1): a ship-to-ship propellant coupling on the hull, fed by one main tank;
 // the coupling face's centre in the stage frame. Two docked ships' connectors of the same contents meet.
+// r4: the line through it (the smaller C_d A of a coupled pair governs the flow) and the propellant vented to chill
+// it before each transfer.
 struct TransferConnectorConfig {
     std::string id;
     std::string tank_id;
     TankContents contents = TankContents::Oxidizer;  // the tank's, filled in by the loader
     math::Vec3 position_m;
+    double line_diameter_m = 0.0;
+    double discharge_coefficient = 0.0;  // lumped line, valve and coupling losses: mdot = C_d A sqrt(2 rho dp)
+    double chilldown_kg = 0.0;
+};
+
+// [stage.propellant_transfer] (refuelling r4): the ullage pressures of a ship-to-ship transfer. The delivering ship
+// holds its ullage at delivery_pressure_pa, the receiving ship vents down to receive_pressure_pa; their difference
+// drives the flow.
+struct PropellantTransferConfig {
+    double delivery_pressure_pa = 0.0;
+    double receive_pressure_pa = 0.0;
 };
 
 // [[stage.collision]]: "capsule" = segment a-b with radius; "box" = centre a_m, body-aligned, half_extents_m.
@@ -341,6 +354,7 @@ struct StageConfig {
     StationProximityConfig station_proximity;                    // a station: approach limits
     std::vector<DockingPortConfig> docking_ports;
     std::vector<TransferConnectorConfig> transfer_connectors;
+    std::optional<PropellantTransferConfig> propellant_transfer;  // [stage.propellant_transfer] (refuelling r4)
     std::vector<CollisionPrimitiveConfig> collision;
 };
 

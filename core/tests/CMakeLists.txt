@@ -52,6 +52,7 @@ add_executable(starsim_core_tests
     test_boil_off.cpp
     test_refuelling_docking.cpp
     test_refuelling_rendezvous.cpp
+    test_refuelling_transfer.cpp
     test_docking_session.cpp
     test_departure_guidance.cpp
     test_docking_campaign.cpp

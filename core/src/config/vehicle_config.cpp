@@ -236,8 +236,26 @@ void append_transfer_connectors(const Document& doc, const toml::table& t, Stage
                          "': tank must be a main propellant tank of the stage");
             }
             connector.contents = tank->contents;
+            connector.line_diameter_m = doc.positive(c, "line_diameter_m");
+            connector.discharge_coefficient = doc.positive(c, "discharge_coefficient");
+            connector.chilldown_kg = doc.number(c, "chilldown_kg");
+            if (connector.chilldown_kg < 0.0) {
+                doc.fail("stage.transfer_connector '" + connector.id + "': chilldown_kg must not be negative");
+            }
             s.transfer_connectors.push_back(connector);
         }
+    }
+}
+
+// [stage.propellant_transfer]: delivery_pressure_pa, receive_pressure_pa (both positive, receive below delivery).
+void read_propellant_transfer(const Document& doc, const toml::table& t, StageConfig& s) {
+    if (auto block = t["propellant_transfer"].as_table()) {
+        PropellantTransferConfig p{doc.positive(*block, "delivery_pressure_pa"),
+                                   doc.positive(*block, "receive_pressure_pa")};
+        if (p.receive_pressure_pa >= p.delivery_pressure_pa) {
+            doc.fail("stage.propellant_transfer: receive_pressure_pa must be below delivery_pressure_pa");
+        }
+        s.propellant_transfer = p;
     }
 }
 
@@ -286,6 +304,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
         }
     }
     append_transfer_connectors(doc, t, s);
+    read_propellant_transfer(doc, t, s);
     double header_kg = 0.0;  // the header tanks' contents: the stage's landing propellant
     for (const auto& k : s.tanks) header_kg += k.role == TankRole::Header ? k.capacity_kg : 0.0;
     if (auto groups = t["engine_group"].as_array()) {
@@ -652,7 +671,8 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
         doc.fail("stage.from must be \"<vehicle>:<stage>\", got \"" + from + "\"");
     }
     for (const auto& [key, value] : t) {
-        if (key != "from" && key != "docking_port" && key != "transfer_connector" && key != "rcs_pod") {
+        if (key != "from" && key != "docking_port" && key != "transfer_connector" && key != "rcs_pod" &&
+            key != "propellant_transfer") {
             doc.fail("stage.from = \"" + from + "\": '" + std::string(key.str()) + "' cannot be set on a reused stage");
         }
     }
@@ -668,6 +688,7 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
     StageConfig s = *it;
     append_docking_ports(doc, t, s);
     append_transfer_connectors(doc, t, s);
+    read_propellant_transfer(doc, t, s);
     if (auto pods = t["rcs_pod"].as_array()) {
         // refuelling r3: docking thrusters added to a reused ship (the tanker's -x pair)
         if (s.rcs.thrusters.empty()) doc.fail("stage.from = \"" + from + "\": rcs_pod needs [stage.rcs] on the source stage");
