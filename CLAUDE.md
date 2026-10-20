@@ -39,7 +39,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
   the mission delta-v budget and its required mass, the tanker's return reserve, the refuelling campaign calculator (tanker
-  count from the r5 reference flights: windows, depot boil-off, drag, HLS demand), the Earth return: TEI, mid-course corrections, braking burn, the coelliptic phasing
+  count from the r5 reference flights: windows with the phasing orbit chosen per window, depot boil-off, drag, HLS demand), the Earth return: TEI, mid-course corrections, braking burn, the coelliptic phasing (from below or above the target)
   to the ISS: schedule + full-model planner with drag, and the ISS launch window),
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and

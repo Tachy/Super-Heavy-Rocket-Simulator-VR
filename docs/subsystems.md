@@ -1331,8 +1331,8 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r4-propellant-transfer.md`.
 Plan `docs/superpowers/plans/2026-10-20-refuelling-r5-reference-flights.md`, ledger
 `.superpowers/sdd/2026-10-20-refuelling-r5-reference-flights/progress.md`.
 - **Mission chain** (`IssMissionSequence`, `flight_session_iss_mission.cpp`; the ISS paths unchanged): new legs
-  `Raise` (after the ascent the perigee is raised at apoapsis to `raise_periapsis_radius_m`, flown as a phasing burn:
-  belly Raptor with transients up to 0.6, else cold gas), `Transfer` (Docked -> `start_transfer`: the tanker down to
+  `Raise` (after the ascent the apsis burns to `raise_to`, the window's phasing orbit - f1 below - flown as phasing
+  burns: belly Raptor with transients up to 0.6, else cold gas), `Transfer` (Docked -> `start_transfer`: the tanker down to
   its reserve, `MissionTransfer::TankerReserve`, or the chaser's main tanks up to full, `FillChaser`) -> undock ->
   Departure, the ship return (`ship_return`: `release_tower`, `plan_ship_return`, Return until caught) and
   `WaitContinue` (coasts to `continue_epoch`, then `continuation`: the lunar mission). `ascent_to_station`: the
@@ -1413,7 +1413,7 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r6-campaign.md`, ledger
   HLS boil-off while waiting - propellant at docking 184.5 t) x 1.015 + chill 0.42 t.
 - **Measured numbers** `config/refuelling/reference_flights.toml` [D]: checked by the slow pad flights (`depot_launch`,
   `tanker_flight`, `hls_refuel`; 1 % or 0.3 t via `refuelling_test::check_reference`) - re-measure on any change.
-- **Answer** (reference, 200 km, 48 h phasing): **11 tanker flights, 156.9 days** (HLS docks 2027-03-26 with the
+- **Answer of r6** (superseded by f1 below; reference, 200 km, 48 h phasing): **11 tanker flights, 156.9 days** (HLS docks 2027-03-26 with the
   depot at 924.6 t); demand 853.6 t (the HLS needs 1,145.1 t: dry 120 t + 1,025 t propellant of 1,600 t), deliveries
   80.5-96.4 t (the latest launch to each arrival phases 7-25 h instead of the reference's 45.2 h: less tanker
   boil-off, ~12 t/day), losses boil-off 70.8 t, drag 4.3 t, gas 3.1 t, vent 14.4 t. Public counts 4 to high teens
@@ -1426,9 +1426,57 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r6-campaign.md`, ledger
   400 km: 14 / 125 d; tanker dry -10 t: 10 / 143 d; depot insulation x 0.1: 31 / 433 d (1,851 t boil-off); HLS waiting
   5 days: 11 / 157 d (the last delivery covers it); launch interval 12 h: unchanged (the windows rule).
 - **CLI** `build/core/refuelling_report.exe [--height-km] [--interval-h] [--phasing-limit-h] [--tanker-dry-t]
-  [--reserve-t] [--initial-t] [--insulation] [--hls-wait-d]` (~1 s; exit 0 closes, 2 open, 1 error).
+  [--reserve-t] [--initial-t] [--insulation] [--hls-wait-d] [--reference-phasing]` (~1 s; exit 0 closes, 2 open,
+  1 error).
 - **Game:** `FlightSim.transfer_state()`, `depot_state()`, `refuelling_campaign(params)` (worker command, result in
   `result(id)["data"]`; keys in `bindings/src/flight_sim.hpp`).
 - **Tests:** `[refuelling][campaign]` (`test_refuelling_campaign.cpp`: calculator against hand computations, costs,
   file, CLI parser/text; the setup's reference and lever campaigns `[slow]`), the reference checks in
   `test_refuelling_missions.cpp`, the smoke test.
+
+### Phasing orbit per launch window (f1)
+Spec `docs/superpowers/specs/2026-10-21-refuelling-followups-design.md` (f1), plan
+`docs/superpowers/plans/2026-10-21-refuelling-f1-phasing-per-window.md`, ledger
+`.superpowers/sdd/2026-10-21-refuelling-f1-phasing-per-window/progress.md`.
+- **Why:** r6's arrivals recurred every ~13.8 d - one fixed 170 x 190 km phasing orbit closes only a narrow band of
+  phase gaps in 48 h. Now each window picks its phasing orbit (the tanker only; the depot stays passive).
+- **Schedule** (`mission::phasing_schedule`): a chaser **above** the target (periapsis more than
+  `coelliptic_height_m` above the target's orbit, else "Bahn kreuzt die Zielbahn") waits until the lower, faster target
+  has caught up to the same `required_at_boost`, then a retrograde boost descends to the coelliptic orbit
+  (`PhasingSchedule::above`; the phase burn stays below-only; `PhasingPlanner` solves the signed boost unchanged).
+- **Raise** (`gnc::next_raise_node`): below the depot one burn at apoapsis (periapsis), above it the apoapsis first,
+  then the periapsis at the new apoapsis. Flown, the sequence is fixed at the start (`raise_periapsis_pending_`): the
+  osculating apsides swing ~10 km with J2, a re-check kept adding burns. The next burn waits for the tail-off (the
+  leg stays pending so the session ticks; a burn started during it counted the residual thrust as its ignition). A
+  dry raise ends the mission with `burn_abort_reason`. Flown 120 x 190 -> 250 x 270 km planned: 263.8 x 270.0 km.
+- **Window** (`mission::plan_launch_window`): `LaunchWindowParameters::phasing_orbits` (empty: the separation orbit,
+  ISS unchanged to the microsecond - test) and `PhasingCostModel`; at each crossing every candidate's raise is
+  estimated two-body (`raise_estimate`) and its schedule run from the raised state with the remaining limit; the
+  cheapest feasible one wins (`phasing_cost`: raise + Hohmann boost to the coelliptic orbit (+ phase burn) by the rocket
+  equation, plus boil-off to Waypoint 0). `LaunchWindow::phasing_orbit`, `cost`, `raised`, `raised_state_gcrf`.
+- **Config** `[phasing]` of `tanker_flight` / `hls_refuel`: `candidates_km` [E] (150, 160, 170, 180, 190 x 190 km
+  below; 220 x 240, 250 x 270 km above), `planning_mass_t` [D] 308 / 328, `planning_boil_off_t_per_day` [D] probe
+  2026-10-21: tanker 15.9 (99.2 t main), HLS 0.45 (208 t), `window_margin_h` [E] 4: the window closes 4 h before the
+  limit, the flown phasing keeps the full limit (a window needing 47.0 of 48 h failed its re-plan 40 h in).
+  `periapsis_km = 170` stays as the reference set.
+- **Calculator:** delivery = base + tanker boil-off over the phasing difference - (chosen raise/boost propellant -
+  the reference window's); the HLS's extra over its reference window is `CampaignFlight::extra_demand_kg`, held in the
+  depot at its arrival; `CampaignFlight::phasing_orbit`; the depot-height lever shifts the candidates (the insertion
+  stays), so `altitude_cost_kg` keeps only the deorbit difference. Lever `reference_phasing` (CLI
+  `--reference-phasing`, game key `reference_phasing`; tankers' `phasing_periapsis_km` / `phasing_apoapsis_km`).
+- **Reference flights re-measured** (`reference_flights.toml`, 2026-10-21): tanker residue 99.8 t, rendezvous 15.4 t,
+  delivered 56.5 / 13.9 t (70.4 t), at catch 1.94 t; HLS main at docking 187.6 t. Above-depot pad flight: 220 x 240 km,
+  Waypoint 0 9.9 h after liftoff (window 10.0 h).
+- **Answer** (200 km, 48 h): **12 tanker flights, 46.5 days** (HLS docks 2026-12-05; demand 850.5 t; losses boil-off
+  21.0 t, drag 1.3 t, gas 0.9 t, vent 12.6 t); `--reference-phasing`: 12 / 170.7 d. Orbits chosen: 150 x 190 km when
+  the depot is ahead, 220 x 240 / 250 x 270 km when it is behind; launches every ~1.95 d in runs of four per ~13.8 d
+  phase cycle. **Cadence finding:** the pad turnaround of 24 h [E] against plane crossings ~23.4 h apart lets only
+  every other crossing fly (`--interval-h 12`: 12 / 23.1 d); the gaps between the runs are phases no candidate closes
+  in 48 h. Levers: 300 km 13 / 31.9 d; tanker dry -10 t 11 / 45.9 d; insulation x 0.1 16 / 60.2 d; 28 h 11 / 75.2 d;
+  72 h 14 / 34.5 d - the calculator takes the first window (fewest days), so a looser limit opens earlier windows with
+  longer phasing and more tanker boil-off: fewer days, more tankers.
+- **Tests:** `[burn_node]` (`test_raise_to_orbit.cpp`), `[rendezvous][phasing]` (mirrored schedule, catch-up rate
+  against 1.5 n da/a within 2 %, the planner's retrograde boost to Waypoint 0), `[iss][launch_window]` (candidates,
+  ISS unchanged, a raise eating the limit, the cost by hand), `[refuelling][iss_mission]` (two-burn raise, dry raise),
+  `[refuelling][config]`, `[refuelling][mission][slow]` (above-depot flight to docking), `[refuelling][campaign]`
+  (HLS extra demand by hand, reference phasing and per-window campaigns `[slow]`), probe `[.f1_probe]`.
