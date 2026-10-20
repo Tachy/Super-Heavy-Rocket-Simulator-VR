@@ -175,7 +175,51 @@ void append_docking_ports(const Document& doc, const toml::table& t, StageConfig
             } else if (mode != "passive") {
                 doc.fail("stage.docking_port '" + port.id + "': soft_capture must be \"active\" or \"passive\"");
             }
+            const std::string mechanism = p["mechanism"].value_or(std::string("idss"));
+            if (mechanism == "probe_drogue") {
+                port.mechanism = DockingMechanism::ProbeDrogue;
+            } else if (mechanism != "idss") {
+                doc.fail("stage.docking_port '" + port.id + "': mechanism must be \"idss\" or \"probe_drogue\"");
+            }
+            if (const auto* elements = p["elements_m"].as_array()) {
+                for (const auto& e : *elements) {
+                    const auto* xyz = e.as_array();
+                    if (!xyz || xyz->size() != 3) {
+                        doc.fail("stage.docking_port '" + port.id + "': elements_m needs [x, y, z] entries");
+                    }
+                    const auto x = (*xyz)[0].value<double>(), y = (*xyz)[1].value<double>(),
+                               z = (*xyz)[2].value<double>();
+                    if (!x || !y || !z) doc.fail("stage.docking_port '" + port.id + "': elements_m must be numbers");
+                    port.elements_m.push_back({*x, *y, *z});
+                }
+            }
+            constexpr size_t min_probe_drogue_elements = 3;  // fewer do not fix the mated pose
+            if (port.mechanism == DockingMechanism::ProbeDrogue && port.elements_m.size() < min_probe_drogue_elements) {
+                doc.fail("stage.docking_port '" + port.id + "': probe_drogue needs at least 3 elements_m");
+            }
+            if (port.mechanism == DockingMechanism::Idss && !port.elements_m.empty()) {
+                doc.fail("stage.docking_port '" + port.id + "': elements_m belong to a probe_drogue port");
+            }
             s.docking_ports.push_back(port);
+        }
+    }
+}
+
+// [[stage.transfer_connector]]: id, tank (a main tank of this stage), position_m. Needs the stage's tanks parsed.
+void append_transfer_connectors(const Document& doc, const toml::table& t, StageConfig& s) {
+    if (auto list = t["transfer_connector"].as_array()) {
+        for (const auto& node : *list) {
+            const auto& c = *node.as_table();
+            TransferConnectorConfig connector{doc.text(c, "id"), doc.text(c, "tank"), TankContents::Oxidizer,
+                                              vec3(doc, c, "position_m")};
+            const auto tank = std::find_if(s.tanks.begin(), s.tanks.end(),
+                                           [&](const TankConfig& k) { return k.id == connector.tank_id; });
+            if (tank == s.tanks.end() || tank->role != TankRole::Main || tank->contents == TankContents::Rcs) {
+                doc.fail("stage.transfer_connector '" + connector.id +
+                         "': tank must be a main propellant tank of the stage");
+            }
+            connector.contents = tank->contents;
+            s.transfer_connectors.push_back(connector);
         }
     }
 }
@@ -224,6 +268,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
             if (tank.contains("diameter_m")) s.tanks.back().diameter_m = doc.positive(tank, "diameter_m");
         }
     }
+    append_transfer_connectors(doc, t, s);
     double header_kg = 0.0;  // the header tanks' contents: the stage's landing propellant
     for (const auto& k : s.tanks) header_kg += k.role == TankRole::Header ? k.capacity_kg : 0.0;
     if (auto groups = t["engine_group"].as_array()) {
@@ -561,6 +606,7 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
     if (it == source.stages.end()) doc.fail("stage.from = \"" + from + "\": no such stage");
     StageConfig s = *it;
     append_docking_ports(doc, t, s);
+    append_transfer_connectors(doc, t, s);
     return s;
 }
 

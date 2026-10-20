@@ -123,6 +123,10 @@ struct StationReferenceOrbitConfig {
 // IDSS: one side extends its soft-capture ring (active), the other stays retracted (passive) - ISS i5.
 enum class SoftCaptureMode { Passive, Active };
 
+// The docking hardware of a port: the IDSS ring (ISS i5) or the Starship probe/drogue set (refuelling r1: four probes
+// on the tanker / HLS into four drogues on the depot, dorsal side). TOML mechanism = "idss" (default) | "probe_drogue".
+enum class DockingMechanism { Idss, ProbeDrogue };
+
 struct DockingPortConfig {
     std::string id;
     std::string name;
@@ -131,6 +135,17 @@ struct DockingPortConfig {
     math::Vec3 up;
     bool behind_nose_cone = false;  // covered while the stage's nose cone is closed (Crew Dragon)
     SoftCaptureMode soft_capture = SoftCaptureMode::Passive;  // TOML soft_capture = "active" | "passive"
+    DockingMechanism mechanism = DockingMechanism::Idss;
+    std::vector<math::Vec3> elements_m;  // probe_drogue: probe tips (active port) / drogue mouths (passive), stage frame
+};
+
+// [[stage.transfer_connector]] (refuelling r1): a ship-to-ship propellant coupling on the hull, fed by one main tank;
+// the coupling face's centre in the stage frame. Two docked ships' connectors of the same contents meet.
+struct TransferConnectorConfig {
+    std::string id;
+    std::string tank_id;
+    TankContents contents = TankContents::Oxidizer;  // the tank's, filled in by the loader
+    math::Vec3 position_m;
 };
 
 // [[stage.collision]]: "capsule" = segment a-b with radius; "box" = centre a_m, body-aligned, half_extents_m.
@@ -287,6 +302,7 @@ struct StageConfig {
     std::optional<math::Vec3> body_in_lvlh_rad;   // a station: ideal LVLH attitude, yaw / pitch / roll (TEA)
     std::optional<StationReferenceOrbitConfig> reference_orbit;  // a station: synthetic orbit defaults
     std::vector<DockingPortConfig> docking_ports;
+    std::vector<TransferConnectorConfig> transfer_connectors;
     std::vector<CollisionPrimitiveConfig> collision;
 };
 

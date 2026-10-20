@@ -11,6 +11,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/vehicle/port_mating.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
 using namespace starsim;
@@ -119,6 +120,80 @@ TEST_CASE("Bad `from` stages are config errors", "[refuelling][config]") {
         {"from_no_vehicle", "from = \"no_such_vehicle:ship\"\n", "no_such_vehicle.toml"},
         {"from_syntax", "from = \"starship_block3\"\n", "must be \"<vehicle>:<stage>\""},
         {"from_cycle", "from = \"test_vehicle:ship\"\n", "chain too long"},
+    };
+    for (const auto& c : cases) {
+        CAPTURE(c.name);
+        const auto dir = config_with(c.name, vehicle_with_stage(c.body));
+        CHECK_THROWS_WITH(config::load_vehicle(dir, "test_vehicle"), Catch::Matchers::ContainsSubstring(c.message));
+    }
+}
+
+namespace {
+
+config::DockingPortConfig dorsal_port(config::SoftCaptureMode side) {
+    config::DockingPortConfig p;
+    p.id = "transfer_dock";
+    p.mechanism = config::DockingMechanism::ProbeDrogue;
+    p.position_m = {20.0, 0.0, 5.0};
+    p.axis = {0.0, 0.0, 1.0};
+    p.up = {1.0, 0.0, 0.0};
+    p.soft_capture = side;
+    p.elements_m = {{12.0, -1.5, 5.0}, {12.0, 1.5, 5.0}, {28.0, -1.5, 5.0}, {28.0, 1.5, 5.0}};
+    return p;
+}
+
+}  // namespace
+
+TEST_CASE("Back-to-back mating puts the ships parallel, 10 m apart, rolled 180 deg", "[refuelling][docking]") {
+    const auto t = vehicle::mated_stage_transform(dorsal_port(config::SoftCaptureMode::Active),
+                                                  dorsal_port(config::SoftCaptureMode::Passive));
+    const math::Vec3 nose = t.rotation * math::Vec3{1.0, 0.0, 0.0};
+    CHECK(nose.x == Catch::Approx(1.0));  // both noses the same way
+    const math::Vec3 dorsal = t.rotation * math::Vec3{0.0, 0.0, 1.0};
+    CHECK(dorsal.z == Catch::Approx(-1.0));  // backs face each other
+    const math::Vec3 axis_point = t.apply({20.0, 0.0, 0.0});
+    CHECK(axis_point.x == Catch::Approx(20.0));
+    CHECK(axis_point.y == Catch::Approx(0.0).margin(1e-12));
+    CHECK(axis_point.z == Catch::Approx(10.0));  // centrelines 10 m apart
+}
+
+TEST_CASE("Ports mate only with the same mechanism and probes against drogues", "[refuelling][docking]") {
+    const auto probes = dorsal_port(config::SoftCaptureMode::Active);
+    const auto drogues = dorsal_port(config::SoftCaptureMode::Passive);
+    CHECK_FALSE(vehicle::port_mismatch(probes, drogues).has_value());
+    CHECK(vehicle::port_mismatch(probes, probes).has_value());
+    CHECK(vehicle::port_mismatch(drogues, probes).has_value());
+
+    const auto dragon = config::load_vehicle(config_dir, "crew_dragon");
+    const auto iss = config::load_vehicle(config_dir, "iss");
+    REQUIRE(dragon.stages.back().docking_ports.size() == 1);  // the capsule (stages: trunk, capsule)
+    const auto& idss = dragon.stages.back().docking_ports.front();
+    CHECK(idss.mechanism == config::DockingMechanism::Idss);  // existing ports default to IDSS
+    CHECK(idss.elements_m.empty());
+    CHECK_FALSE(vehicle::port_mismatch(idss, iss.stages.front().docking_ports.front()).has_value());
+    CHECK(vehicle::port_mismatch(idss, drogues).has_value());  // a Dragon cannot dock to a depot drogue
+}
+
+TEST_CASE("Bad probe/drogue ports and transfer connectors are config errors", "[refuelling][config]") {
+    const std::string ship = "from = \"starship_block3:ship\"\n";
+    const std::string port_head = "[[stage.docking_port]]\nid = \"p\"\nname = \"P\"\nposition_m = [20.0, 0.0, 5.0]\n"
+                                  "axis = [0.0, 0.0, 1.0]\nup = [1.0, 0.0, 0.0]\n";
+    const std::string connector_head = "[[stage.transfer_connector]]\nid = \"c\"\nposition_m = [8.0, 0.0, 5.0]\n";
+    struct Case {
+        const char* name;
+        std::string body;
+        const char* message;
+    };
+    const Case cases[] = {
+        {"pd_no_elements", ship + port_head + "mechanism = \"probe_drogue\"\n", "at least 3 elements_m"},
+        {"pd_two_elements",
+         ship + port_head + "mechanism = \"probe_drogue\"\nelements_m = [[12.0, 0.0, 5.0], [28.0, 0.0, 5.0]]\n",
+         "at least 3 elements_m"},
+        {"idss_elements", ship + port_head + "elements_m = [[12.0, 0.0, 5.0], [28.0, 0.0, 5.0], [20.0, 1.0, 5.0]]\n",
+         "belong to a probe_drogue port"},
+        {"pd_mechanism", ship + port_head + "mechanism = \"magnet\"\n", "mechanism must be"},
+        {"tc_no_tank", ship + connector_head + "tank = \"nope\"\n", "main propellant tank"},
+        {"tc_header", ship + connector_head + "tank = \"lox_header\"\n", "main propellant tank"},
     };
     for (const auto& c : cases) {
         CAPTURE(c.name);

@@ -56,7 +56,9 @@ void FlightSession::arm_docking() {
     const auto& station = bodies_[*station_index_].body->vehicle();
     const auto* cp = find_port(chaser, rendezvous_->chaser_port);
     const auto* sp = find_port(station, rendezvous_->target_port);
-    if (!cp || !sp || cp->soft_capture != config::SoftCaptureMode::Active ||
+    // The IDSS mechanism (i5) only; the probe/drogue mechanism comes with refuelling r3.
+    if (!cp || !sp || cp->mechanism != config::DockingMechanism::Idss ||
+        sp->mechanism != config::DockingMechanism::Idss || cp->soft_capture != config::SoftCaptureMode::Active ||
         sp->soft_capture != config::SoftCaptureMode::Passive) {
         return;
     }

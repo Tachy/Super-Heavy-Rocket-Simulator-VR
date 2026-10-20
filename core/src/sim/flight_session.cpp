@@ -11,6 +11,7 @@
 #include "starsim/orbit/ballistic_propagator.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/vehicle/docking_port.hpp"
+#include "starsim/vehicle/port_mating.hpp"
 
 namespace starsim::sim {
 
@@ -482,6 +483,11 @@ void FlightSession::set_rendezvous_target(size_t target_index, const std::string
     }
     vehicle::port_kinematics(*bodies_[controlled_].body, chaser_port);  // validates both ports (German error)
     vehicle::port_kinematics(*bodies_[target_index].body, target_port);
+    if (const auto problem =
+            vehicle::port_mismatch(vehicle::port_config(bodies_[controlled_].body->vehicle(), chaser_port),
+                                   vehicle::port_config(bodies_[target_index].body->vehicle(), target_port))) {
+        throw std::invalid_argument(*problem);
+    }
     reset_proximity();  // a proximity flight is bound to its ports (start_proximity sets the target before the flight)
     reset_docking();
     rendezvous_ = RendezvousTarget{target_index, chaser_port, target_port};

@@ -594,7 +594,7 @@ public:
     // Rendezvous (milestone i): relative navigation of the controlled body's port `chaser_port` against port
     // `target_port` of body `target_index` (fidelity flag relative_nav = "ideal": the true states). Throws
     // std::out_of_range for a bad index or the controlled body itself, std::invalid_argument (German) for an unknown
-    // port. Cleared with the bodies (place_body / launch_from_pad / place_in_orbit), like the station, and when the
+    // port or ports that cannot mate (vehicle::port_mismatch). Cleared with the bodies (place_body / launch_from_pad / place_in_orbit), like the station, and when the
     // controlled body changes (staging, payload separation, trunk jettison).
     void set_rendezvous_target(size_t target_index, const std::string& chaser_port, const std::string& target_port);
     void clear_rendezvous_target();  // also stops the translation command
