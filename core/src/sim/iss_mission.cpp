@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
 
 #include "starsim/config/launch_site_config.hpp"
@@ -9,6 +10,7 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/ascent_mission.hpp"
 
 namespace starsim::sim {
 
@@ -113,6 +115,18 @@ math::StateVector phased_start(const math::StateVector& iss, time::Epoch epoch, 
     return {turn.rotate(unbiased.position_m), turn.rotate(unbiased.velocity_mps)};
 }
 
+// German: the station impulses (reboosts) in [from, to].
+void reboost_warnings(const StationStart& st, time::Epoch from, time::Epoch to, const time::TimeScaleConverter& time,
+                      std::vector<std::string>& out) {
+    for (const auto& impulse : st.impulses) {
+        if (impulse.epoch < from || impulse.epoch > to) continue;
+        char dv[32];
+        std::snprintf(dv, sizeof dv, "%.2f m/s", impulse.delta_v_mps);
+        out.push_back("Bahnmanöver der ISS um " + time.to_utc(impulse.epoch).to_iso_string().substr(0, 19) +
+                      " UTC: " + dv + " (" + impulse.name + ")");
+    }
+}
+
 }  // namespace
 
 orbit::OemArchive iss_archive(const std::filesystem::path& config_dir, const time::TimeScaleConverter& time) {
@@ -174,6 +188,39 @@ MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::fil
     q.station_port = mission.port;
     q.phasing = phasing;
     session.set_iss_mission(q);
+    s.return_planned = true;
+    return s;
+}
+
+MissionStart start_iss_launch_mission(FlightSession& session, const std::filesystem::path& config_dir,
+                                      const config::IssLaunchMission& mission, const orbit::OemArchive& archive,
+                                      const time::TimeScaleConverter& time) {
+    MissionStart s;
+    s.kind = config::MissionKind::IssLaunch;
+    const auto& earth = session.earth_orientation();
+    const StationSource station(iss_vehicle(config_dir, mission.station_id, mission.port, mission.id), archive, time,
+                                earth, parse_iss_orbit_source(mission.iss_orbit), std::nullopt,
+                                time.from_utc(mission.earliest_utc));
+    const auto w = window_for(config_dir, mission, earth, station, time);
+    s.launch_window = w;
+    if (!w.feasible) {
+        s.refusal = w.reason;
+        return s;
+    }
+    const auto ascent = config::load_ascent_mission(config_dir, mission.ascent_id);
+    start_ascent_mission(session, ascent, config_dir, w.liftoff);
+    const auto st = station.start(w.liftoff);
+    session.add_station(st.vehicle, st.state_gcrf, st.epoch, st.impulses);  // after the launch (it clears the bodies)
+    IssMissionSequence q;
+    q.station_port = mission.port;
+    q.from_launch = true;
+    q.phasing.mission_limit_s = mission.mission_limit_s - mission.window.insertion_s;  // from the separation
+    q.phasing.earliest_arrival_s = std::max(0.0, mission.earliest_arrival_s - mission.window.insertion_s);
+    session.set_iss_mission(q);
+    s.epoch = w.liftoff;
+    s.site_id = ascent.site_id;
+    s.warnings.push_back(st.note);
+    reboost_warnings(st, w.liftoff, w.liftoff + mission.mission_limit_s, time, s.warnings);
     s.return_planned = true;
     return s;
 }

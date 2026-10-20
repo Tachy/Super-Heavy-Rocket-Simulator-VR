@@ -45,6 +45,9 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
                                              iss_archive(config_dir, time), time);
             break;
         case config::MissionKind::IssLaunch:
+            s = start_iss_launch_mission(session, config_dir, config::load_iss_launch_mission(config_dir, mission_id),
+                                         iss_archive(config_dir, time), time);
+            break;
         case config::MissionKind::IssDeparture:
             throw std::invalid_argument("mission '" + std::string(mission_id) + "': not yet available");
         case config::MissionKind::ShipReturn:

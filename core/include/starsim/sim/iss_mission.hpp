@@ -30,4 +30,12 @@ MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::fil
                                           const config::IssRendezvousMission& mission,
                                           const orbit::OemArchive& archive, const time::TimeScaleConverter& time);
 
+// start_mission's iss_launch branch: the launch window from earliest_utc, then the ascent mission at the window's
+// liftoff, the ISS added, the sequence set (ascent -> phasing after the separation -> proximity -> docking). Epoch:
+// the liftoff. Refused (German refusal, nothing launched): no window. Warnings: the ISS source note and station
+// reboosts between the liftoff and the mission limit.
+MissionStart start_iss_launch_mission(FlightSession& session, const std::filesystem::path& config_dir,
+                                      const config::IssLaunchMission& mission, const orbit::OemArchive& archive,
+                                      const time::TimeScaleConverter& time);
+
 }  // namespace starsim::sim
