@@ -120,6 +120,7 @@ add_library(starsim_core STATIC
     src/mission/phasing_schedule.cpp
     src/mission/phasing_planner.cpp
     src/mission/tanker_reserve.cpp
+    src/mission/refuelling_costs.cpp
     src/contact/primitives.cpp
     src/contact/tower_geometry.cpp
     src/contact/catch_arms.cpp

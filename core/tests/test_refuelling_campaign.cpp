@@ -1,10 +1,14 @@
 // Refuelling r6: campaign calculator, its setup from config, the measured-numbers file.
+#include <cmath>
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/refuelling_reference.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/math/constants.hpp"
+#include "starsim/mission/refuelling_costs.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
 
 using namespace starsim;
@@ -43,3 +47,20 @@ TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelli
     CHECK(tanker.stages.back().dry_mass_kg == Catch::Approx(r.tanker.dry_mass_kg));
 }
 
+TEST_CASE("Hohmann, deorbit and drag makeup against hand values", "[refuelling][campaign]") {
+    const double mu = constants::earth_gm_m3ps2;
+    const double r1 = constants::wgs84_semi_major_axis_m + 200e3;
+    const double r2 = constants::wgs84_semi_major_axis_m + 300e3;
+    const double a = 0.5 * (r1 + r2);
+    const double expected = (std::sqrt(mu * (2 / r1 - 1 / a)) - std::sqrt(mu / r1)) +
+                            (std::sqrt(mu / r2) - std::sqrt(mu * (2 / r2 - 1 / a)));
+    CHECK(mission::hohmann_delta_v_mps(r1, r2, mu) == Catch::Approx(expected).epsilon(1e-12));
+    CHECK(mission::hohmann_delta_v_mps(r2, r1, mu) == Catch::Approx(expected).epsilon(1e-12));
+    CHECK(expected == Catch::Approx(58.5).margin(0.1));  // 58.5 m/s from 200 to 300 km
+    const double rp = constants::wgs84_semi_major_axis_m + 50e3;
+    const double d = std::sqrt(mu / r1) - std::sqrt(mu * (2 / r1 - 2 / (r1 + rp)));
+    CHECK(mission::deorbit_delta_v_mps(r1, rp, mu) == Catch::Approx(d).epsilon(1e-12));
+    CHECK(mission::deorbit_delta_v_mps(r2, rp, mu) > d);
+    CHECK(mission::drag_makeup_kgps(2.5e-10, 7800.0, 2.2, 63.6, 3600.0) ==
+          Catch::Approx(0.5 * 2.5e-10 * 7800.0 * 7800.0 * 2.2 * 63.6 / 3600.0));
+}
