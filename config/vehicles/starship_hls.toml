@@ -136,3 +136,25 @@ radius_m = 4.5
 azimuths_deg = [0.0, 180.0]
 thrust_n = 1500.0                        # [E]
 directions = ["tangential_plus", "tangential_plus", "tangential_minus", "tangential_minus", "inward", "inward", "forward"]  # forward: ullage settling, translation
+
+# Docking probes and transfer connectors [E] as the tanker's (refuelling r1): the HLS fills up at the depot. The tank
+# stations are Block 3's (3.5 / 20 m), so the connectors sit on the main tanks. Leg clearance at the depot: r3.
+[[stage.docking_port]]
+id = "transfer_dock"
+name = "Transfer-Andockstelle (Rücken)"
+mechanism = "probe_drogue"
+position_m = [20.0, 0.0, 5.0]            # [E] centre of the four probes, in the interface plane
+axis = [0.0, 0.0, 1.0]                   # dorsal normal
+up = [1.0, 0.0, 0.0]                     # nose
+soft_capture = "active"                  # the probes
+elements_m = [[12.0, -1.5, 5.0], [12.0, 1.5, 5.0], [28.0, -1.5, 5.0], [28.0, 1.5, 5.0]]  # [E] probe tips
+
+[[stage.transfer_connector]]
+id = "lox_transfer"
+tank = "lox_main"                        # LOX main tank from 3.5 m
+position_m = [8.0, 0.0, 5.0]             # [E]
+
+[[stage.transfer_connector]]
+id = "ch4_transfer"
+tank = "ch4_main"                        # CH4 main tank 20-32.6 m
+position_m = [24.0, 0.0, 5.0]            # [E]

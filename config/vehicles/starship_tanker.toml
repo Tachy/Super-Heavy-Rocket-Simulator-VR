@@ -17,3 +17,26 @@ from = "starship_block3:booster"
 
 [[stage]]
 from = "starship_block3:ship"
+
+# Docking probes and transfer connectors [E] (positions not published; spec r1, plan decision 3): the interface plane
+# lies 0.5 m off the dorsal hull (z = +4.5 m; belly at -z). Mated with the depot's drogues the ships lie parallel,
+# rolled 180 deg, 10 m between the centrelines. The layout is symmetric in y so the rolled ship meets it.
+[[stage.docking_port]]
+id = "transfer_dock"
+name = "Transfer-Andockstelle (Rücken)"
+mechanism = "probe_drogue"
+position_m = [20.0, 0.0, 5.0]            # [E] centre of the four probes, in the interface plane
+axis = [0.0, 0.0, 1.0]                   # dorsal normal
+up = [1.0, 0.0, 0.0]                     # nose
+soft_capture = "active"                  # the probes
+elements_m = [[12.0, -1.5, 5.0], [12.0, 1.5, 5.0], [28.0, -1.5, 5.0], [28.0, 1.5, 5.0]]  # [E] probe tips
+
+[[stage.transfer_connector]]
+id = "lox_transfer"
+tank = "lox_main"                        # LOX main tank 3.5-20.4 m
+position_m = [8.0, 0.0, 5.0]             # [E]
+
+[[stage.transfer_connector]]
+id = "ch4_transfer"
+tank = "ch4_main"                        # CH4 main tank 20-32.6 m
+position_m = [24.0, 0.0, 5.0]            # [E]

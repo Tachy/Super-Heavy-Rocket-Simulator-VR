@@ -1,5 +1,8 @@
 // Refuelling r1: tanker, depot and HLS vehicles, run-time tank masses, probe/drogue mating geometry.
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -200,4 +203,93 @@ TEST_CASE("Bad probe/drogue ports and transfer connectors are config errors", "[
         const auto dir = config_with(c.name, vehicle_with_stage(c.body));
         CHECK_THROWS_WITH(config::load_vehicle(dir, "test_vehicle"), Catch::Matchers::ContainsSubstring(c.message));
     }
+}
+
+namespace {
+
+const config::DockingPortConfig& transfer_dock(const config::StageConfig& s) {
+    for (const auto& p : s.docking_ports) {
+        if (p.id == "transfer_dock") return p;
+    }
+    throw std::runtime_error("no transfer_dock on stage " + s.id);
+}
+
+// Mates `chaser` (its top stage) to the depot's top stage: every probe on a drogue, every connector on the depot's
+// connector of the same contents, and the hulls clear of each other.
+void check_mates_with_depot(const std::string& chaser_id) {
+    const auto depot = config::load_vehicle(config_dir, "starship_depot").stages.back();
+    const auto chaser = config::load_vehicle(config_dir, chaser_id).stages.back();
+    const auto& cp = transfer_dock(chaser);
+    const auto& dp = transfer_dock(depot);
+    REQUIRE_FALSE(vehicle::port_mismatch(cp, dp).has_value());
+    const auto t = vehicle::mated_stage_transform(cp, dp);
+    constexpr double match_m = 1e-9;
+    REQUIRE(cp.elements_m.size() == dp.elements_m.size());
+    for (const auto& probe : cp.elements_m) {
+        const math::Vec3 at = t.apply(probe);
+        double nearest_m = 1e9;
+        for (const auto& drogue : dp.elements_m) nearest_m = std::min(nearest_m, math::norm(at - drogue));
+        CHECK(nearest_m < match_m);
+    }
+    REQUIRE(chaser.transfer_connectors.size() == 2);
+    for (const auto& c : chaser.transfer_connectors) {
+        CAPTURE(c.id);
+        const math::Vec3 at = t.apply(c.position_m);
+        bool met = false;
+        for (const auto& d : depot.transfer_connectors) {
+            met = met || (d.contents == c.contents && math::norm(at - d.position_m) < match_m);
+        }
+        CHECK(met);
+    }
+    const math::Vec3 chaser_axis = t.apply({0.0, 0.0, 0.0});
+    const double gap_m = std::hypot(chaser_axis.y, chaser_axis.z) - 0.5 * (chaser.diameter_m + depot.diameter_m);
+    constexpr double min_hull_gap_m = 0.5;  // [E] the probes' reach
+    CHECK(gap_m > min_hull_gap_m);
+    CHECK((t.rotation * math::Vec3{1.0, 0.0, 0.0}).x == Catch::Approx(1.0));  // noses the same way
+}
+
+}  // namespace
+
+TEST_CASE("Tanker and HLS mate back to back with the depot", "[refuelling][docking]") {
+    check_mates_with_depot("starship_tanker");
+    check_mates_with_depot("starship_hls");
+}
+
+TEST_CASE("The depot is a Block 3 ship without entry hardware, 236.5 t dry", "[refuelling][vehicle]") {
+    const auto depot = config::load_vehicle(config_dir, "starship_depot");
+    const auto block3 = config::load_vehicle(config_dir, "starship_block3");
+    REQUIRE(depot.stages.size() == 2);
+    CHECK(depot.stages.front().dry_mass_kg == block3.stages.front().dry_mass_kg);  // the same Super Heavy
+    const auto& s = depot.stages.back();
+    CHECK(s.dry_mass_kg == 236500.0);
+    double propellant_kg = 0.0;
+    for (const auto& t : s.tanks) propellant_kg += t.mass_kg;
+    CHECK(propellant_kg == Catch::Approx(1.6e6));
+    CHECK(s.flaps.empty());
+    CHECK(s.heat_shield.nose_radius_m == 0.0);
+    CHECK(s.catch_pins.azimuths_rad.empty());
+    CHECK(s.recovery_method.empty());
+    CHECK(transfer_dock(s).soft_capture == config::SoftCaptureMode::Passive);
+    CHECK(transfer_dock(s).elements_m.size() == 4);
+}
+
+TEST_CASE("A tanker after its transfer translates along the docking axis on its cold-gas RCS",
+          "[refuelling][vehicle][rcs]") {
+    auto tanker = top_stage_alone("starship_tanker");
+    constexpr double residue_kg = 10000.0;  // [E] what is left in each main tank after the transfer (r4 computes it)
+    tanker->set_tank_mass(0, "lox_main", residue_kg);
+    tanker->set_tank_mass(0, "ch4_main", residue_kg);
+    const double mass_kg = tanker->mass_properties().mass_kg;
+    const math::Vec3 axes[] = {{0, 0, 1}, {0, 0, -1}, {0, 1, 0}, {0, -1, 0}, {1, 0, 0}, {-1, 0, 0}};
+    for (const auto& u : axes) {
+        const auto c = tanker->rcs_pure_force_capability(u);
+        std::printf("[validation] tanker translation (%+.0f,%+.0f,%+.0f): %.0f N = %.5f m/s^2 at %.0f t\n", u.x, u.y,
+                    u.z, c.force_n, c.force_n / mass_kg, mass_kg / 1000.0);
+    }
+    CHECK(tanker->rcs_pure_force_capability({0.0, 0.0, 1.0}).force_n > 0.0);   // dorsal: the docking axis
+    CHECK(tanker->rcs_pure_force_capability({0.0, 0.0, -1.0}).force_n > 0.0);  // back off
+    CHECK(tanker->rcs_pure_force_capability({0.0, 1.0, 0.0}).force_n > 0.0);
+    CHECK(tanker->rcs_pure_force_capability({0.0, -1.0, 0.0}).force_n > 0.0);
+    CHECK(tanker->rcs_pure_force_capability({1.0, 0.0, 0.0}).force_n > 0.0);  // settling thrust (r4)
+    CHECK(tanker->rcs_pure_force_capability({-1.0, 0.0, 0.0}).force_n == Catch::Approx(0.0).margin(1.0));  // none aft
 }

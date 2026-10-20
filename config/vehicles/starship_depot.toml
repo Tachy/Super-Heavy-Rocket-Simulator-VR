@@ -1,0 +1,154 @@
+# Starship propellant depot (refuelling r1): a Block 3 ship that stays in Earth orbit and is filled by tankers (NASA /
+# SpaceX HLS concept). Without heat shield, flaps, catch pins and recovery (it never returns), with an insulation layer
+# against boil-off (thermal properties: r2). Four docking drogues on the dorsal side. Super Heavy as Block 3.
+# dry_mass_kg always INCLUDES the installed engines.
+
+[sources]
+oig_2026 = "NASA OIG IG-26-004, March 2026 (LEO depot, >10 tankers, HLS fills up in LEO)"
+wiki_hls = "https://en.wikipedia.org/wiki/Starship_HLS (retrieved 2026-10-20: depot without heat shield and fins)"
+spacex_v3 = "SpaceX Starship V3 update, May 2026, via https://www.teslarati.com/spacex-unveils-sweeping-starship-v3-upgrades-ahead-may-19-launch/"
+wiki_starship = "https://en.wikipedia.org/wiki/SpaceX_Starship (retrieved 2026-10-12)"
+
+[vehicle]
+id = "starship_depot"
+name = "Starship Depot (Super Heavy Block 3 / Depot)"
+display_name = "Depot Mk3"
+propellant = "methalox"
+stages_bottom_to_top = ["booster", "depot"]
+
+[[stage]]
+from = "starship_block3:booster"
+
+[[stage]]
+id = "depot"
+name = "Starship Depot"
+length_m = 52.1                          # [D] as the Block 3 ship
+diameter_m = 9.0
+dry_mass_kg = 236500.0                   # [E] Block 3 ship 255 t - heat shield 10.5 t - four flaps 10 t [E] - catch pins
+                                         # 1 t [E] + insulation 3 t [E] (~2 kg/m^2 MLI on ~1,300 m^2 of tank hull)
+dry_cg_station_m = 23.516                # [E] as Block 3: the removed masses sit fore, aft and along the belly
+payload_mass_kg = 0.0
+
+[[stage.tank]]
+id = "lox_main"
+contents = "oxidizer"
+mass_kg = 1224808.7                      # [D] 1,600 t total [S:wiki_starship] at O/F 3.6, less the LOX header
+base_station_m = 3.5                     # [E]
+
+[[stage.tank]]
+id = "ch4_main"
+contents = "fuel"
+mass_kg = 340191.3                       # [D] less the CH4 header
+base_station_m = 20.0                    # [E]
+
+# Header tanks [E] (header-tank plan, user 2026-10-18): the landing propellant (35 t, part of the 1,600 t) feeds the
+# flip and the landing burn - in an entry the main-tank residue lies away from the outlets. Placement from SN-era
+# reports (2020-2022): LOX header in the nose tip, CH4 header a bubble on the CH4 main tank's lower dome; Block 3
+# placement is not published. Short cylinders of the given diameter.
+[[stage.tank]]
+id = "lox_header"
+contents = "oxidizer"
+role = "header"
+mass_kg = 27391.3                        # [D] 35 t at O/F 3.6
+base_station_m = 44.0                    # [E] nose, forward of the forward flaps' hinge line
+diameter_m = 3.6                         # [E] ~23 m^3
+
+[[stage.tank]]
+id = "ch4_header"
+contents = "fuel"
+role = "header"
+mass_kg = 7608.7                         # [D]
+base_station_m = 20.0                    # [E] on the CH4 main tank's lower dome
+diameter_m = 3.0                         # [E] ~17 m^3
+
+# Sea-level Raptors as three single-engine groups. Layout [D] from the flight 13 splashdown video (ship upside down,
+# user 2026-10-13): two sea-level engines on the leeward side, one towards the belly; vacuum engines one leeward, two
+# towards the belly. The landing burn steps down 3 -> 2: the belly engine shuts down, the leeward pair (sea_level_1/2)
+# lands - its thrust centroid lies in the symmetry plane (pitch offset only, symmetric to the side pins).
+[[stage.engine_group]]
+id = "sea_level_1"
+engine = "raptor3"
+count = 1
+ring_radius_m = 1.3                      # [E]
+angles_deg = [30.0]                      # [D] leeward pair (belly at 270 deg); ring radius [E]
+gimbal = true
+relight = true
+
+[[stage.engine_group]]
+id = "sea_level_2"
+engine = "raptor3"
+count = 1
+ring_radius_m = 1.3                      # [E]
+angles_deg = [150.0]                     # [D] leeward pair
+gimbal = true
+relight = true
+
+[[stage.engine_group]]
+id = "sea_level_3"
+engine = "raptor3"
+count = 1
+ring_radius_m = 1.3                      # [E]
+angles_deg = [270.0]                     # [D] towards the belly
+gimbal = true
+relight = true
+
+[[stage.engine_group]]
+id = "vacuum"
+engine = "raptor_vacuum3"
+count = 3
+ring_radius_m = 3.0                      # [E]
+angles_deg = [90.0, 210.0, 330.0]        # [D] one leeward, two towards the belly (flight 13 splashdown video)
+gimbal = false
+relight = true
+
+[stage.aero]                             # ascent only (the depot never enters)
+reference_diameter_m = 9.0
+crossflow_table = "aero/ship_crossflow.csv"
+ascent_drag_table = "aero/starship_stack_ascent.csv"
+nose_length_m = 17.0
+
+[stage.rcs]
+type = "cold_gas_ullage"                 # autogenous ullage gas from the main tanks [E]
+isp_s = 70.0                             # [E]
+propellant = "main"
+minimum_on_time_s = 0.02                 # [E] valve; on/off only, fixed thrust (constant pressure)
+
+[[stage.rcs.pod]]
+id = "forward"
+station_m = 46.0                         # [E] forward of the forward flaps; sides (belly at 270 deg)
+radius_m = 4.5
+azimuths_deg = [0.0, 180.0]
+thrust_n = 1500.0                        # [E] (the pre-d1 estimate)
+directions = ["tangential_plus", "tangential_plus", "tangential_minus", "tangential_minus", "inward", "inward"]
+# [E] two of each: the pre-d1 per-axis estimate (roll 20, pitch / yaw 117 kNm) available on all axes at once - with one
+# of each, roll and pitch shared their thrusters and the entry's nose turn ran out of torque (d1 campaigns)
+
+[[stage.rcs.pod]]
+id = "aft"
+station_m = 6.0                          # [E] above the aft flaps
+radius_m = 4.5
+azimuths_deg = [0.0, 180.0]
+thrust_n = 1500.0                        # [E]
+directions = ["tangential_plus", "tangential_plus", "tangential_minus", "tangential_minus", "inward", "inward", "forward"]  # forward: ullage settling, translation
+
+# Docking drogues and transfer connectors [E] (positions not published; spec r1, plan decision 3): mirror images of
+# the tanker's / HLS's probes - interface plane 0.5 m off the dorsal hull, symmetric in y.
+[[stage.docking_port]]
+id = "transfer_dock"
+name = "Transfer-Andockstelle (Rücken)"
+mechanism = "probe_drogue"
+position_m = [20.0, 0.0, 5.0]            # [E] centre of the four drogue mouths
+axis = [0.0, 0.0, 1.0]                   # dorsal normal (belly at -z)
+up = [1.0, 0.0, 0.0]                     # nose
+soft_capture = "passive"                 # the drogues
+elements_m = [[12.0, -1.5, 5.0], [12.0, 1.5, 5.0], [28.0, -1.5, 5.0], [28.0, 1.5, 5.0]]  # [E] drogue mouths
+
+[[stage.transfer_connector]]
+id = "lox_transfer"
+tank = "lox_main"                        # LOX main tank 3.5-20.4 m
+position_m = [8.0, 0.0, 5.0]             # [E]
+
+[[stage.transfer_connector]]
+id = "ch4_transfer"
+tank = "ch4_main"                        # CH4 main tank 20-32.6 m
+position_m = [24.0, 0.0, 5.0]            # [E]
