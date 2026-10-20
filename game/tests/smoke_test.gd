@@ -46,6 +46,7 @@ func _initialize() -> void:
 	_check(_check_thread(config_dir, tdb) == true, "simulation thread checks ran to the end")
 	_check(_check_lunar(config_dir, tdb) == true, "lunar mission checks ran to the end")
 	_check(_check_iss(config_dir, tdb) == true, "ISS mission checks ran to the end")
+	_check(_check_refuelling(config_dir, tdb) == true, "refuelling checks ran to the end")
 
 	print("SMOKE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
@@ -268,4 +269,31 @@ func _check_iss(config_dir: String, tdb: float) -> bool:
 	_check(dep.iss_mission().get("undock_tdb_s", 0.0) > dep.mission_start_tdb_s(), "undocking ahead")
 	var ab: int = dep.proximity_abort()
 	_check(dep.wait_idle(10.0) and not dep.result(ab).get("ok", true), "abort refused while docked")
+	return true
+
+
+# Refuelling r6: the campaign command, transfer and depot getters.
+func _check_refuelling(config_dir: String, tdb: float) -> bool:
+	var sim := FlightSim.new()
+	sim.setup(config_dir)
+	_check(not sim.transfer_state().get("present", true), "no transfer without a docked pair")
+	_check(not sim.depot_state().get("present", true), "no depot before a refuelling mission")
+	var id: int = sim.start_mission("tanker_flight_orbit", tdb)
+	_check(sim.wait_idle(120.0) and sim.result(id).get("ok", false), "tanker_flight_orbit starts")
+	var depot: Dictionary = sim.depot_state()
+	_check(depot.get("present", false) and depot.get("main_propellant_kg", 0.0) > 0.0, "depot_state with its fill")
+	_check(depot.get("capacity_kg", 0.0) > depot.get("main_propellant_kg", 0.0), "depot_state with its tank volume")
+	var bad: int = sim.refuelling_campaign({"height_km": "x"})
+	_check(sim.wait_idle(10.0) and not sim.result(bad).get("ok", true), "a wrongly typed lever is refused")
+	var unknown: int = sim.refuelling_campaign({"no_such_lever": 1.0})
+	_check(sim.wait_idle(10.0) and not sim.result(unknown).get("ok", true), "an unknown lever is refused")
+	var started := Time.get_ticks_msec()
+	var cid: int = sim.refuelling_campaign({"height_km": 200.0})
+	_check(sim.wait_idle(600.0) and sim.result(cid).get("ok", false), "refuelling_campaign finishes")
+	var data: Dictionary = sim.result(cid).get("data", {})
+	_check(data.get("tanker_flights", 0) >= 4 and data.get("tankers", []).size() == data.get("tanker_flights", -1),
+			"campaign result with its tankers")
+	_check(data.get("losses", {}).has("boil_off_t"), "campaign result with its losses")
+	print("  refuelling campaign: %d tankers, %.1f d (%.1f s)" % [data.get("tanker_flights", 0),
+			data.get("duration_d", 0.0), (Time.get_ticks_msec() - started) / 1000.0])
 	return true

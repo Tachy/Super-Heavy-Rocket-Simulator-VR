@@ -13,6 +13,7 @@
 #include "starsim/math/mat3.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/mission_start.hpp"
+#include "starsim/sim/refuelling_campaign_setup.hpp"
 
 namespace starsim::bindings {
 
@@ -99,6 +100,7 @@ godot::Dictionary FlightSim::result(int64_t id) const {
     } else if (it != commands_.end()) {
         d["ok"] = it->second.second->ok;
         d["message"] = it->second.second->message;
+        d["data"] = it->second.second->data;
     } else {
         d["message"] = "unknown command id";
     }
@@ -455,6 +457,38 @@ godot::Dictionary FlightSim::rendezvous_plan() const { return snapshot()->rendez
 godot::Dictionary FlightSim::docking_state() const { return snapshot()->docking_state; }
 godot::Dictionary FlightSim::station_geometry() const { return snapshot()->station_geometry; }
 godot::Dictionary FlightSim::iss_mission() const { return snapshot()->iss_mission; }
+godot::Dictionary FlightSim::transfer_state() const { return snapshot()->transfer_state; }
+godot::Dictionary FlightSim::depot_state() const { return snapshot()->depot_state; }
+
+int64_t FlightSim::refuelling_campaign(const godot::Dictionary& params) {
+    sim::CampaignLevers levers;
+    std::string refusal;
+    const godot::Array keys = params.keys();
+    for (int64_t k = 0; k < keys.size() && refusal.empty(); ++k) {
+        const godot::String key = keys[k];
+        const godot::Variant value = params[keys[k]];
+        if (value.get_type() != godot::Variant::FLOAT && value.get_type() != godot::Variant::INT) {
+            refusal = "Kampagne: '" + std::string(key.utf8().get_data()) + "' ist keine Zahl";
+            break;
+        }
+        const double v = value;
+        if (key == "height_km") levers.depot_height_m = v * 1e3;
+        else if (key == "interval_h") levers.launch_interval_s = v * 3600.0;
+        else if (key == "phasing_limit_h") levers.phasing_limit_s = v * 3600.0;
+        else if (key == "tanker_dry_t") levers.tanker_dry_mass_kg = v * 1e3;
+        else if (key == "reserve_t") levers.tanker_reserve_kg = v * 1e3;
+        else if (key == "initial_t") levers.depot_initial_kg = v * 1e3;
+        else if (key == "insulation") levers.depot_insulation_scale = v;
+        else if (key == "hls_wait_d") levers.hls_wait_s = v * constants::seconds_per_day;
+        else refusal = "Kampagne: unbekannter Parameter '" + std::string(key.utf8().get_data()) + "'";
+    }
+    return static_cast<int64_t>(post("refuelling_campaign", [this, levers, refusal](sim::FlightSession&) {
+        if (!refusal.empty()) return Outcome{false, godot::String::utf8(refusal.c_str())};
+        const auto report = sim::plan_refuelling_campaign({ephemeris_, earth_, moon_, time_, config_dir_}, levers);
+        return Outcome{report.result.closes, godot::String::utf8(report.result.reason.c_str()),
+                       campaign_dictionary(report, time_)};
+    }));
+}
 
 int64_t FlightSim::proximity_hold() {
     return static_cast<int64_t>(post_active("proximity_hold", [](sim::FlightSession& session) {
@@ -592,6 +626,9 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("proximity_abort"), &FlightSim::proximity_abort);
     ClassDB::bind_method(D_METHOD("proximity_resume"), &FlightSim::proximity_resume);
     ClassDB::bind_method(D_METHOD("undock"), &FlightSim::undock);
+    ClassDB::bind_method(D_METHOD("transfer_state"), &FlightSim::transfer_state);
+    ClassDB::bind_method(D_METHOD("depot_state"), &FlightSim::depot_state);
+    ClassDB::bind_method(D_METHOD("refuelling_campaign", "params"), &FlightSim::refuelling_campaign);
     ClassDB::bind_method(D_METHOD("predict_trajectory", "index", "duration_s", "step_s"),
                          &FlightSim::predict_trajectory);
     ClassDB::bind_method(D_METHOD("target_orbit_points", "count"), &FlightSim::target_orbit_points);

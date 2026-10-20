@@ -199,6 +199,20 @@ public:
     int64_t proximity_abort();
     int64_t proximity_resume();
     int64_t undock();
+    // Refuelling (r6). Propellant transfer of the docked pair: {present} (false while idle); present: {phase,
+    // status (German), elapsed_s, delivered_oxidizer_kg, delivered_fuel_kg, flow_oxidizer_kgps, flow_fuel_kgps,
+    // settling_gas_kg, settling_thrust_n, chilldown_kg, boil_off_kg (both ships since the start)}.
+    godot::Dictionary transfer_state() const;
+    // The depot (a station with transfer connectors): {present}; present: {main_propellant_kg, capacity_kg,
+    // fill_fraction, boil_off_kg_per_day (at the last evaluation), docked}.
+    godot::Dictionary depot_state() const;
+    // The tanker campaign (sim::plan_refuelling_campaign; the session is untouched, seconds of window searches on the
+    // worker). params (all optional floats): height_km, interval_h, phasing_limit_h, tanker_dry_t, reserve_t,
+    // initial_t, insulation, hls_wait_d; an unknown key or a non-number is refused. result(id): ok = the campaign
+    // closes, message = its German reason, data = {closes, reason, tanker_flights, duration_d, demand_t,
+    // hls_required_t, depot_at_hls_t, tankers: [{launch_utc, arrival_utc, delivered_t, depot_after_t}],
+    // fill: [[day, t]], losses: {boil_off_t, drag_t, gas_t, vent_t}, lunar_mission, lunar_epoch_utc}.
+    int64_t refuelling_campaign(const godot::Dictionary& params);
 
 protected:
     static void _bind_methods();
@@ -207,6 +221,7 @@ private:
     struct Outcome {  // written by the command on the worker, read once the runner reports it done
         bool ok = false;
         godot::String message;
+        godot::Dictionary data;  // result(id)["data"] (refuelling_campaign)
     };
     using SessionCommand = std::function<Outcome(sim::FlightSession&)>;
 

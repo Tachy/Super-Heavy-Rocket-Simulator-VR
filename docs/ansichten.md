@@ -162,7 +162,12 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
   `proximity_hold` / `_retreat` / `_abort` / `_resume`, `undock`. Die Ansichten selbst legt der Nutzer fest.
 - Betankung (r5): Die Missionen `depot_launch`, `tanker_flight`, `hls_refuel` laufen über dieselbe Abschnittsfolge;
   neue Abschnitte „Perigäum anheben“, „Treibstofftransfer“, „Warten auf Fortsetzung“ (bis zum Start der Mondmission).
-  Die Spielschnittstelle dafür (`start_mission` für die neuen Arten, `transfer_state`, `depot_state`) folgt in r6.
+  Spielschnittstelle (r6): `start_mission` startet die neuen Arten; `FlightSim.transfer_state` zeigt den laufenden
+  Treibstofftransfer (Phase, Fluss, gelieferte Mengen, Absetzgas), `depot_state` Füllstand, Tankvolumen und Boil-off
+  des Depots. Der Befehl `refuelling_campaign(params)` rechnet die Tankerkampagne mit den Stellgrößen (Depothöhe,
+  Startabstand, Phasenflug-Grenze, Trockenmasse und Reserve des Tankers, Anfangsfüllung, Isolierung, Wartezeit des HLS);
+  `result(id)["data"]` enthält Anzahl der Tankerflüge, Dauer, Bedarf, die Flüge mit Start/Ankunft/Lieferung, den
+  Füllstandsverlauf und die Verluste. Eine Ansicht dafür (z. B. in der Missionsplanung) legt der Nutzer fest.
 
 - Karte: Erde-Mond-System mit Bahnen, Mondbahn, Manöverknoten; Bearbeitung wie in der Missionsplanung.
 - Auswertung nach dem Flug: Telemetrie-Diagramme (wie `tools/plot_telemetry.py`), Soll/Ist-Vergleich,
