@@ -48,6 +48,7 @@ add_executable(starsim_core_tests
     test_docking_mechanism.cpp
     test_station_collision.cpp
     test_compound_mass.cpp
+    test_refuelling_vehicles.cpp
     test_docking_session.cpp
     test_departure_guidance.cpp
     test_docking_campaign.cpp

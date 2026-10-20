@@ -333,6 +333,25 @@ double Vehicle::main_propellant_kg() const {
     return total;
 }
 
+void Vehicle::set_tank_mass(size_t stage_index, std::string_view tank_id, double mass_kg) {
+    if (stage_index >= stages_.size()) {
+        throw std::invalid_argument("Unbekannte Stufe " + std::to_string(stage_index));
+    }
+    auto& stage = stages_[stage_index];
+    const auto tank = std::find_if(stage.tanks.begin(), stage.tanks.end(),
+                                   [&](const Tank& t) { return t.config.id == tank_id; });
+    if (tank == stage.tanks.end()) {
+        throw std::invalid_argument("Unbekannter Tank '" + std::string(tank_id) + "'");
+    }
+    tank->mass_kg = std::clamp(mass_kg, 0.0, tank->config.capacity_kg);
+    const auto role = stage.feed == FeedSource::Header ? config::TankRole::Header : config::TankRole::Main;
+    if (stage.propellant_kg(config::TankContents::Oxidizer, role) > 0.0 &&
+        stage.propellant_kg(config::TankContents::Fuel, role) > 0.0) {
+        for (auto& e : stage.engines) e.starved = false;
+    }
+    refresh_rcs_availability();
+}
+
 void Vehicle::select_feed(size_t stage_index, FeedSource source) {
     auto& stage = stages_.at(stage_index);
     if (!stage.has_header_tanks() || stage.feed == source) return;

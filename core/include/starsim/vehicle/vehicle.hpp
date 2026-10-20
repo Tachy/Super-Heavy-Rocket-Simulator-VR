@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "starsim/aero/capsule_aero.hpp"
@@ -194,6 +195,10 @@ public:
     double rcs_propellant_kg() const;
     // Main tanks only (the webcast gauge: header tanks are not shown).
     double main_propellant_kg() const;
+    // Sets one tank's mass at run time (refuelling r1: transfer, boil-off, the propellant test mode), clamped to
+    // [0, capacity]. A refilled feed source re-arms starved engines; the RCS availability follows the tanks.
+    // Throws std::invalid_argument (German) for an unknown stage index or tank id.
+    void set_tank_mass(size_t stage_index, std::string_view tank_id, double mass_kg);
     // Selects the tanks that feed stage `stage_index`'s engines; a no-op for a stage without header tanks. Engines
     // starved by a dry source run again when the new source holds oxidizer and fuel.
     void select_feed(size_t stage_index, FeedSource source);
