@@ -117,6 +117,19 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
         clear_rendezvous_target();
         return refuse("Kein Anflug: Andocksystem nicht kompatibel");
     }
+    // the guidance holds, retreats and brakes along every port axis (refuelling r3: a ship without -x could not stop
+    // its Coriolis drift below the depot) and aborts below its reserve - refuse such a start instead
+    static const char* const axis_names[6] = {"+x", "-x", "+y", "-y", "+z", "-z"};
+    for (int k = 0; k < 6; ++k) {
+        if (!(proximity_authority_.mps2[static_cast<size_t>(k)] > 0.0)) {
+            clear_rendezvous_target();
+            return refuse(std::string("Kein Anflug: keine Schubrichtung entlang ") + axis_names[k] + " des Ports");
+        }
+    }
+    if (!(vehicle.rcs_supply_kg() > p.deorbit_reserve_kg)) {
+        clear_rendezvous_target();
+        return refuse("Kein Anflug: kein Treibstoff");
+    }
     // i4 records "Kontakt" where the interface starts to mesh: IDSS petals, or probe heads at the drogue mouths
     p.contact_plane_m = docking_->mechanism().first_contact_m();
     if (docking_->mechanism().parameters().probe_drogue) p.envelope = gnc::probe_drogue_capture_envelope();

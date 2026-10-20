@@ -541,3 +541,28 @@ TEST_CASE("Emptied tanks keep the compound finite", "[refuelling][docking]") {
     f.session.advance_to(f.session.epoch() + 60.0);
     CHECK(f.session.docked());
 }
+
+TEST_CASE("Proximity start refuses a tanker without propellant or without a thrust axis (review r3 I2)",
+          "[refuelling][proximity]") {
+    test::spice_session();
+    gnc::ProximityParameters p;
+    p.start_waypoint = 2;
+    {
+        refuelling_test::TankerAtPort f({20.0, 0.0, 0.0}, {}, refuelling_test::tanker_config(0.0));
+        bool started = true;
+        REQUIRE_NOTHROW(started = f.session.start_proximity("transfer_dock", p));
+        CHECK_FALSE(started);
+        CHECK(f.session.proximity_status() == "Kein Anflug: kein Treibstoff");
+        CHECK_FALSE(f.session.docking_phase());  // the target is cleared
+    }
+    {
+        auto no_aft = refuelling_test::tanker_config(200.0e3);
+        auto& thrusters = no_aft.stages.back().rcs.thrusters;
+        thrusters.erase(std::remove_if(thrusters.begin(), thrusters.end(),
+                                       [](const config::RcsThrusterConfig& t) { return t.direction.x < -0.99; }),
+                        thrusters.end());
+        refuelling_test::TankerAtPort f({20.0, 0.0, 0.0}, {}, no_aft);
+        CHECK_FALSE(f.session.start_proximity("transfer_dock", p));
+        CHECK_THAT(f.session.proximity_status(), Catch::Matchers::ContainsSubstring("keine Schubrichtung"));
+    }
+}

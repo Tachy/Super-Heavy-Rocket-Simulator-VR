@@ -64,6 +64,27 @@ TEST_CASE("A tanker without main propellant is refused the rendezvous, no throw"
     CHECK_FALSE(f.session.rendezvous_status().empty());
 }
 
+TEST_CASE("A tanker with a failed belly Raptor plans on the cold gas or is refused, no throw (review r3 I1)",
+          "[refuelling][rendezvous]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    f.session.place_in_orbit(refuelling_test::tanker_config(200.0e3), tanker_behind(f, 8.0), f.t0);
+    f.session.add_station(refuelling_test::depot_config(f.depot_propellant_kg), f.depot, f.t0);
+    const auto& engines = f.session.body(0).vehicle().stages()[0].engines;
+    for (size_t i = 0; i < engines.size(); ++i) {
+        if (engines[i].group_id.ends_with("/sea_level_3")) f.session.fail_engine(0, 0, i);
+    }
+    bool planned = false;
+    REQUIRE_NOTHROW(planned = f.session.plan_rendezvous({}));
+    INFO(f.session.rendezvous_status());
+    if (planned) {
+        for (const auto& b : f.session.rendezvous_plan()->burns) CHECK(std::isfinite(norm(b.node.delta_v_gcrf_mps)));
+    } else {
+        CHECK_FALSE(f.session.rendezvous_status().empty());
+        CHECK(f.session.rendezvous_status() != "Kein Rendezvous: keine Triebwerke für die Manöver");  // the cold gas is there
+    }
+}
+
 TEST_CASE("The tanker flies the phasing to Waypoint 0 below the depot", "[refuelling][rendezvous]") {
     test::spice_session();
     refuelling_test::DepotSession f;

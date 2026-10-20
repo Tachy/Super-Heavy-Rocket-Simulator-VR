@@ -73,7 +73,8 @@ mission::FiniteBurnModel FlightSession::rendezvous_engines(double delta_v_mps) c
     if (rendezvous_main_engines() && delta_v_mps >= rendezvous_rcs_below_mps()) {
         const auto& groups = vehicle.stages().front().config.deorbit_engine_groups;
         const auto set = groups.empty() ? burn_configurations() : burn_configurations(&groups);
-        return {mass, set.front().thrust_n, set.front().mass_flow_kgps};
+        // a failed belly Raptor leaves the set empty: the cold gas flies every burn (as start_burn falls back)
+        if (!set.empty()) return {mass, set.front().thrust_n, set.front().mass_flow_kgps};
     }
     // RCS translation as start_burn picks it: along +x, else along -x
     auto capability = vehicle.rcs_force_capability({1.0, 0.0, 0.0});
