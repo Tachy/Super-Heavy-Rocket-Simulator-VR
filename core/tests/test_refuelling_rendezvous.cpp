@@ -130,3 +130,27 @@ TEST_CASE("Depot launch window from Starbase: the plane passes the pad about onc
     std::printf("[r3] depot window: liftoff %.1f h after t0, %d earlier crossings rejected (%.1f h per crossing)\n",
                 hours, w1.rejected, hours / (w1.rejected + 1));
 }
+
+TEST_CASE("Tanker from its phasing orbit to hard capture at the depot", "[refuelling][rendezvous][docking][slow]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    f.session.place_in_orbit(refuelling_test::tanker_config(200.0e3), tanker_behind(f, 8.0), f.t0);
+    f.session.add_station(refuelling_test::depot_config(f.depot_propellant_kg), f.depot, f.t0);
+    REQUIRE(f.session.plan_rendezvous({}));
+    sim::IssMissionSequence sequence;  // the generic legs: Rendezvous -> Proximity -> Docking -> Docked
+    sequence.station_port = "transfer_dock";
+    f.session.set_iss_mission(sequence);
+    REQUIRE(f.session.iss_mission_leg() == sim::IssMissionLeg::Rendezvous);
+    double t = 0.0;
+    for (; t < 36.0 * 3600.0 && f.session.iss_mission_leg() != sim::IssMissionLeg::Docked &&
+           f.session.iss_mission_leg() != sim::IssMissionLeg::Ended;
+         t += 30.0) {
+        f.session.advance_to(f.session.epoch() + 30.0);
+    }
+    INFO(f.session.iss_mission_status() << " | " << f.session.proximity_status() << " | "
+                                        << f.session.docking_status());
+    REQUIRE(f.session.iss_mission_leg() == sim::IssMissionLeg::Docked);
+    REQUIRE(f.session.docked());
+    std::printf("[r3] tanker campaign: docked after %.1f h, peak compression %.1f kN\n", t / 3600.0,
+                f.session.docking_loads()->compression_n / 1000.0);
+}

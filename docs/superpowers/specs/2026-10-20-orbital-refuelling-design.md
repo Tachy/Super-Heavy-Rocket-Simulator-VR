@@ -1,7 +1,7 @@
 # Orbital refuelling (tanker flights) - design
 
-Status: approved 2026-10-20. r1 and r2 implemented (plans `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
-`...-r2-boil-off.md`;
+Status: approved 2026-10-20. r1-r3 implemented (plans `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
+`...-r2-boil-off.md`, `...-r3-rendezvous-docking.md`;
 notes in `docs/subsystems.md` "Orbital refuelling", corrections below). Milestone (r), the rest of plan milestone M9
 (tanker flights), after the ISS milestone (i1-i6, main `ffbb574`).
 
@@ -147,6 +147,16 @@ r5 (Moon radiation, thermal attitude); (4) validation against Centaur flight rec
 - **Compound:** the depot carries the tanker as attached mass (existing mechanism, momentum conserved); new is the
   continuous update during the transfer.
 - The ISS tags `[iss]`, `[docking]`, `[proximity]`, `[rendezvous]` stay green through the generalisation.
+
+Corrections approved with the r3 plan (user 2026-10-20): (1) the tanker and the HLS get two -x cold-gas thrusters
+[E] - with +x along-track thrust only, `v_along + 2 n x_radial` is conserved and a hold or retreat below the depot
+cannot stop the forward drift ("+x only" above was wrong); (2) the phasing burns run on the single belly Raptor
+(`sea_level_3`, the deorbit set), not a vacuum Raptor (the vacuum group lights its three together), below ~7 m/s on
+the cold-gas RCS; (3) a station is one stage (the depot without its booster); (4) a chaser already on the port axis
+beyond an on-axis waypoint approaches along the axis (the depot's Waypoint 0 lies on its R-bar). Finding: from
+Starbase the plane crosses the pad every ~22 h, but within the crew phasing limit of 28 h only every few days'
+crossing closes the phase (first window after 7.4 days in the test) - the launch interval is set by the phasing,
+not by the plane (open for r6).
 
 ## r4 design: propellant transfer
 

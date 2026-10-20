@@ -129,6 +129,10 @@ flow separation (vacuum engines).
   slender-body aero (a station); `solar_area_m2`: fixed area for solar radiation pressure (else the cylinder model).
 - `[stage.station]`: marks the stage as a station flown in ideal LVLH attitude (+XVV, x forward, y starboard,
   z nadir); `body_in_lvlh_deg = [yaw, pitch, roll]` (torque equilibrium attitude).
+- `[stage.station.proximity]` (refuelling r3, all optional): the target's approach limits over the code's ISS
+  defaults - `keep_out_radius_m`, `approach_ellipsoid_m = [x, y, z]` (LVLH semi-axes), `waypoint0_below_m`,
+  `waypoint1_range_m`, `waypoint2_range_m` (below Waypoint 1), `flyaround_radius_m`. A station is one stage (the
+  depot is added without its booster).
 - `[stage.station.reference_orbit]`: the synthetic orbit without any OEM - `altitude_km` (a minus the equatorial
   radius), `inclination_deg`, `raan_deg` (both in the true equator frame of date), `reference_utc`.
 - `[[stage.docking_port]]`: `id`, `name` (German, shown), `position_m` (stage frame: x station from the stage bottom,
@@ -152,7 +156,9 @@ flow separation (vacuum engines).
 - `[stage] hull_top_diameter_m` (optional): the hull tapers linearly from `diameter_m` at the stage bottom to this at
   its top - the hull sample points of a visiting vehicle against the station primitives (ISS i5; Crew Dragon capsule).
 - `[[stage.collision]]`: `id`, `kind = "capsule"` (segment `a_m`-`b_m`, `radius_m`) or `"box"` (`centre_m`,
-  body-aligned `half_extents_m`), stage frame.
+  body-aligned `half_extents_m`), stage frame (the ISS modules; the depot's tank section and nose, refuelling r3).
+  A visiting vehicle's hull is sampled up to a nose docking port (a dorsal port does not cut it) plus its landing
+  legs along the struts.
 - With an OEM, mass, drag area and C_D come from its header instead of the config.
 
 ## Lunar landing sites (`lunar_sites.toml`)

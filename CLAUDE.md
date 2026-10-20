@@ -43,10 +43,11 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
   aerocapture guidance, relative navigation between docking ports, proximity guidance: waypoints, corridor,
-  hold / retreat / breakout, final approach, departure after undocking),
+  hold / retreat / breakout, final approach, R-bar approach from below (the depot), departure after undocking),
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces;
-  IDSS docking interface and mechanism: soft capture, joint, retraction, hooks, separation; hull vs station primitives),
+  IDSS docking interface and mechanism: soft capture, joint, retraction, hooks, separation; probe/drogue interface
+  (four probes into four drogues) on the same mechanism; hull and landing legs vs station primitives),
   aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating plus radiative heating
   from the NASA TM-102652 equilibrium tables, blunt capsule from a
   modified-Newtonian table with offset-CG trim, reefed parachutes, fixed-area drag of a station),
@@ -58,7 +59,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
   Waypoint 0 with drag tracking and re-plan, proximity flight to a station port, docking into a compound, undocking
   and departure, ISS missions chained by a mission sequence: from the separation orbit, from the pad with a launch
-  window, docked -> undocking -> splashdown).
+  window, docked -> undocking -> splashdown; the depot as a station target with its approach limits, Starship phasing
+  on the belly Raptor + cold gas, the docked compound following run-time tank masses).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.

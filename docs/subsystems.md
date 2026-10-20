@@ -1143,12 +1143,13 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight.
 - `Vehicle::set_tank_mass(stage, tank, kg)`: clamped to `[0, capacity]`; a refilled feed source re-arms starved
   engines, the cold-gas RCS follows the tanks.
 - Ports mate only with equal mechanisms, probes on the chaser (`vehicle::port_mismatch`);
-  `FlightSession::set_rendezvous_target` refuses others (German message). The IDSS mechanism is armed for IDSS pairs
-  only - the probe/drogue mechanism comes with r3.
+  `FlightSession::set_rendezvous_target` refuses others (German message). The session arms the IDSS or the
+  probe/drogue mechanism for an active / passive pair of the same kind (r3).
 - Tanker translation after a transfer (10 t per main tank, 310 t; pure capability, no torque): +-z (dorsal, the
-  docking axis) 11.3 kN = 0.037 m/s^2, +-y 5.7 kN = 0.018 m/s^2, +x 3.0 kN = 0.010 m/s^2 (settling), -x none.
+  docking axis) 11.3 kN = 0.037 m/s^2, +-y 5.7 kN = 0.018 m/s^2, +x 3.0 kN = 0.010 m/s^2 (settling), -x none
+  (r3: 3.0 kN with the docking pair).
 - `vehicle_report`: depot ship ideal delta-v 7,328 m/s (no recovery reserve), tanker ship 6,697 m/s.
-- Open for r3: HLS leg-strut clearance at the depot (feet 12 m out, 1.5 m below the skirt).
+- HLS leg-strut clearance at the depot (feet 12 m out, 1.5 m below the skirt): checked in r3, clear.
 - **Tests:** `[refuelling]` (`test_refuelling_vehicles.cpp`).
 
 ### Boil-off by heat balance (r2)
@@ -1217,3 +1218,63 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight.
 - Open: active cooling (solar-powered cryocoolers, user question 2026-10-20) would be a cooling power per tank
   subtracted in the balance - not modelled, SpaceX has announced none.
 - **Tests:** `[boil_off]` (`test_boil_off.cpp`).
+
+### Starship rendezvous and probe/drogue docking (r3)
+Plan `docs/superpowers/plans/2026-10-20-refuelling-r3-rendezvous-docking.md`. The ISS stack (station body, phasing
+planner, proximity guidance, docking mechanism and sim, compound) is generalised; the ISS paths are unchanged.
+- **-x docking thrusters** (user 2026-10-20): the tanker (`[[stage.rcs_pod]] docking` on its reused ship stage) and
+  the HLS (forward pod + "aft") get two 1,500 N cold-gas thrusters pushing along -x [E] at station 46 m. Without
+  along-track thrust `v_along + 2 n x_radial` is conserved (CW), so +V thrust alone can only raise the tanker under
+  the depot - holds and retreats below it, and the departure, need -x. The Block 3 ship keeps none. Translation at
+  10 t main propellant: equal +-x (3,000 N each). `Vehicle::rcs_supply_kg()`: main-tank cold gas counts the main
+  oxidizer + fuel tanks (not the headers: the landing reserve), else the RCS tanks; proximity and phasing budget it.
+- **Target block** (`[stage.station.proximity]`, `sim::with_station_limits`): keep-out radius, approach ellipsoid,
+  Waypoint 0 / 1 / 2 and fly-around radius override the code's ISS defaults only where the target sets them; the
+  ISS sets none. The depot takes the ISS values [E] (200 m, 4 x 2 x 2 km, 400 / 220 / 20 m), flies the ideal LVLH
+  attitude nose along +V-bar, dorsal side (the drogues) to nadir. A station is one stage: `add_station` refuses a
+  stack ("the depot without its booster", `config::top_stage_config`). Target drag without a fixed area: C_D 2.2 on
+  the end-on disk.
+- **R-bar from below** (`gnc::DockingApproach::RBarBelow`, port axis dominant towards nadir): Waypoint 0 400 m below
+  the depot lies on its port axis - the guidance flies the axial approach straight up from there (new rule: a chaser
+  on the axis beyond an on-axis waypoint inside the corridor approaches along it; the ISS's Waypoint 0 lies on no IDA
+  axis). No fly-around, no CW transfer.
+- **Probe/drogue interface** (`contact::probe_drogue_contact`, all [E]): four probe heads (radius 0.05 m) in conical
+  drogues (mouth 0.35 m, seat 0.06 m, depth 0.50 m; capture radius 0.30 m); per head the cone wall, the seat (the
+  probe's attenuator) and the plate beside the mouth, each a spring-damper with friction 0.1; the heads' forces give a
+  torque about their centre. A head on its seat within 2 deg tilt / roll latches (soft capture).
+- **Mechanism** (`contact::probe_drogue_mechanism`): the IDSS phase machine with the probe stroke (0.30 m) as the
+  ring extension (first contact at 0.80 m port distance), four structural latches as the hooks (180 s). Joint:
+  translation `k = m_c w^2`, rotation `k = I w^2`, w = 0.5 rad/s, critically damped; a 0.10 m/s contact peaks at
+  ~`2 m_c w v` (49 kN for 490 t). Limits [E] ("Auslegungsgrenze"): dynamic compression 100 kN, static 60 kN,
+  tension 60 kN, shear 50 kN, bending / torsion 2 MN m; 0.25 m/s overloads. Separation springs 150 J (~0.03 m/s).
+  Envelope (spec): closing 0.03-0.10 m/s, offset <= 0.10 m, angle and roll <= 1 deg. The session arms the mechanism
+  for an active / passive pair of the same kind; contact plane, re-arm distance and the DockingSim coast limit come
+  from the mechanism (`first_contact_m`, `reach_m`).
+- **Hull collision:** only a nose port (axis +x, Crew Dragon) ends the sampled hull below it - the ships' dorsal port
+  cut the tanker at 19 m before; the HLS legs are sampled along their struts (root 4 m above the stage bottom [E] to
+  the deployed foot, 12 m out). The depot has two capsules [E] (tank section r 4.5 m, nose r 2.5 m). Mated, the
+  tanker's hull clears the depot by ~1 m, 1.5 m closer it collides; the HLS legs clear it (r1 open point closed).
+- **Phasing** (`plan_rendezvous` accepts Starship): burns on the deorbit set - the single belly Raptor
+  (`sea_level_3`, spec correction: the vacuum group lights its three together) - with transients up to 0.6 of the
+  burn; below that (~7 m/s) the burn flies on the cold-gas RCS along +x and is re-targeted with that model. Budget:
+  `rcs_supply_kg` (the main tanks). Between the burns a Starship holds the docking orientation (LVLH rolled 180 deg).
+  Refused with no main propellant ("Kein Rendezvous: kein Treibstoff").
+- **Compound refresh** (`FlightSession::set_tank_mass`, r4's interface): a tank change of either docked body moves
+  the compound CG (the station body's state), keeps the velocity (internal transfer) and the hulls in place; the
+  attached mass follows the chaser's hull-fixed CG; `compound_mass()` is recomputed.
+- **Numbers** (tanker 200 t main propellant, depot 600 t, 200 km / 26.5 deg):
+  - phasing from 170 x 190 km, 8 deg behind: 5 burns (Raptor and cold gas), 12.0 t main propellant (burns, RCS,
+    boil-off), Waypoint 0 missed by 13.9 m / 0.13 m/s;
+  - Waypoint 2 -> docked (session test): contact at 0.075 m/s, offset 0.07 m; contact -> docked 10 min; peak
+    compression 19.1 kN;
+  - campaign from the phasing orbit (`IssMissionSequence`, port `transfer_dock`): docked after 12.6 h (Waypoint 0
+    -> contact 49 min, contact at 0.075 m/s / 0.05 m), peak compression 22.0 kN;
+  - launch window from Starbase: the 26.5 deg plane crosses the pad every ~22 h (the two daily crossings merge just
+    above the pad latitude), but within the crew phasing limit of 28 h the 170 x 190 km tanker catches up only
+    ~25 deg while the depot's phase moves ~90 deg per day: the first feasible window was the 8th crossing (177 h),
+    none in the following 12 days. Open for the r6 cadence: a longer uncrewed phasing limit or a lower phasing orbit.
+- Diagnostics: `STARSIM_DEBUG_RENDEZVOUS`, `STARSIM_DEBUG_PROXIMITY`, `STARSIM_DEBUG_DOCKING` as for the ISS.
+- **Tests:** `[refuelling]` with `[rcs]`, `[config]`, `[station]`, `[proximity]`, `[contact]`, `[docking]`,
+  `[rendezvous]`, `[launch_window]` (`test_refuelling_docking.cpp`, `test_refuelling_rendezvous.cpp`; the campaign
+  and the undocking are `[slow]`).
+- Deferred: the depot's attitude-hold gas (r6), docked boil-off (r4), HLS thermal (r5).
