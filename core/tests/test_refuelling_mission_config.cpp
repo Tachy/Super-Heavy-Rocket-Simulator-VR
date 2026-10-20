@@ -51,7 +51,9 @@ TEST_CASE("depot_launch and tanker_flight configurations load", "[refuelling][co
     CHECK(t.return_id == "ship_return_starbase");
     const auto ta = config::load_ascent_mission(config_dir, "tanker_ascent");
     CHECK(ta.vehicle_id == "starship_tanker");
-    CHECK(ta.periapsis_height_m == Catch::Approx(170.0e3));
+    CHECK(ta.periapsis_height_m == Catch::Approx(120.0e3));  // user 2026-10-20: insertion at 120 km, then the raise
+    REQUIRE(t.phasing_periapsis_height_m);
+    CHECK(*t.phasing_periapsis_height_m == Catch::Approx(170.0e3));
     CHECK(ta.apoapsis_height_m == Catch::Approx(190.0e3));
 
     const auto o = config::load_refuelling_flight_mission(config_dir, "tanker_flight_orbit");

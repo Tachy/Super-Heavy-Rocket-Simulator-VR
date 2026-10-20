@@ -3,6 +3,7 @@
 // Refuelling r5: the reference flights' mission files - depot_launch, tanker_flight, hls_refuel (config/missions/).
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -45,6 +46,9 @@ struct RefuellingFlightMission {
     IssLaunchWindowConfig window;      // Pad (insertion = liftoff -> orbit insertion)
     double mission_limit_s = 0.0;
     double earliest_arrival_s = 0.0;
+    // [phasing] periapsis_km: the phasing orbit's perigee when the ascent inserts lower (user 2026-10-20: the tanker
+    // at 120 km) - raised at the first apoapsis; absent: the ascent's target is the phasing orbit.
+    std::optional<double> phasing_periapsis_height_m;
     std::string return_id;             // tanker_flight: the ship_return mission whose [deorbit] block is flown
     std::string lunar_mission_id;      // hls_refuel: the lunar landing mission continued after the refuelling
 };

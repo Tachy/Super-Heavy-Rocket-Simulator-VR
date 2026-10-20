@@ -1,5 +1,7 @@
-# Refuelling r5: a tanker's ascent from Starbase into the phasing orbit below the 200 km depot (r3: 170 x 190 km).
-# The pitch program is starship_leo's; the booster is caught.
+# Refuelling r5: a tanker's ascent from Starbase towards the phasing orbit below the 200 km depot (r3: 170 x 190 km).
+# User 2026-10-20: it inserts at a 120 km perigee (+9.7 t residue against 170 km) and raises it to 170 km at the first
+# apoapsis (tanker_flight [phasing] periapsis_km); at 80 km the coast's drag (~60 m/s) brought it back down. The pitch
+# program is starship_leo's (kick, throttle sweeps gave no gain); the booster is caught.
 [mission]
 name = "Tanker in den Phasenorbit"
 vehicle = "starship_tanker"
@@ -9,7 +11,7 @@ payload_t = 0.0
 fairing = false
 
 [target]
-periapsis_km = 170.0          # r3's phasing orbit below the depot
+periapsis_km = 120.0          # insertion; raised to 170 km at apoapsis (user 2026-10-20)
 apoapsis_km = 190.0
 inclination_deg = 26.5
 northerly = true

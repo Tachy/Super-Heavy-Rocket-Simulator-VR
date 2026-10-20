@@ -12,6 +12,7 @@ const char* to_string(IssMissionLeg leg) {
     switch (leg) {
         case IssMissionLeg::None: return "keine";
         case IssMissionLeg::Ascent: return "Aufstieg";
+        case IssMissionLeg::Raise: return "Perigäum anheben";
         case IssMissionLeg::Rendezvous: return "Phasenflug";
         case IssMissionLeg::Proximity: return "Annäherung";
         case IssMissionLeg::Docking: return "Andocken";
@@ -105,14 +106,38 @@ void FlightSession::iss_start_transfer() {
     iss_enter(IssMissionLeg::Transfer, "Treibstofftransfer");
 }
 
+void FlightSession::iss_start_raise() {
+    const auto& s = bodies_[controlled_].body->state();
+    const auto node = gnc::raise_periapsis_at_apoapsis({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gm_earth_,
+                                                       *iss_mission_->raise_periapsis_radius_m);
+    if (!node) {  // already at or above the phasing perigee
+        if (plan_rendezvous(iss_mission_->phasing)) {
+            iss_enter(IssMissionLeg::Rendezvous, "Phasenflug: " + rendezvous_status_);
+        } else {
+            iss_end(rendezvous_status_);
+        }
+        return;
+    }
+    // as a phasing burn: the deorbit set (the belly Raptor) with transients up to small_burn_transient_share, else
+    // the cold gas
+    const auto& groups = bodies_[controlled_].body->vehicle().stages().front().config.deorbit_engine_groups;
+    const bool started = start_burn(*node, groups.empty() ? burn_configurations() : burn_configurations(&groups), true,
+                                    small_burn_transient_share);
+    if (!started) return iss_end("Perigäum anheben nicht möglich");
+    iss_enter(IssMissionLeg::Raise, "Perigäum anheben");
+}
+
 bool FlightSession::iss_mission_pending() const {
     if (!iss_mission_ || bodies_.empty() || controlled_ >= bodies_.size()) return false;
     const auto& body = *bodies_[controlled_].body;
     const bool autopilot_idle = autopilot_.state == AutopilotState::Off || autopilot_.state == AutopilotState::Orbit;
     switch (iss_leg_) {
-        case IssMissionLeg::Ascent:
-            return autopilot_idle && has_docking_port(body.vehicle()) && !body.vehicle().payload_stacked() &&
+        case IssMissionLeg::Ascent:  // after the engines' tail-off (r5: ~12 m/s at 5 g left after the cutoff command)
+            return autopilot_idle && !body.vehicle().any_engine_producing_thrust() && has_docking_port(body.vehicle()) &&
+                   !body.vehicle().payload_stacked() &&
                    (!iss_mission_->ascent_to_station || body.vehicle().stages().size() == 1);
+        case IssMissionLeg::Raise:  // the burn is flown (the autopilot leaves Burn) or the vehicle is lost
+            return autopilot_idle || body.impacted();
         case IssMissionLeg::Rendezvous:
             return rendezvous_step_ == RendezvousStep::Waypoint0 || rendezvous_step_ == RendezvousStep::None ||
                    body.impacted();
@@ -161,6 +186,17 @@ void FlightSession::run_iss_mission() {
             if (q.ascent_to_station) {
                 make_station(controlled_);
                 iss_enter(IssMissionLeg::Complete, "Mission abgeschlossen: Depot im Orbit");
+            } else if (q.raise_periapsis_radius_m) {
+                iss_start_raise();
+            } else if (plan_rendezvous(q.phasing)) {
+                iss_enter(IssMissionLeg::Rendezvous, "Phasenflug: " + rendezvous_status_);
+            } else {
+                iss_end(rendezvous_status_);
+            }
+            return;
+        case IssMissionLeg::Raise:
+            if (lost) {
+                iss_end("Fahrzeug verloren");
             } else if (plan_rendezvous(q.phasing)) {
                 iss_enter(IssMissionLeg::Rendezvous, "Phasenflug: " + rendezvous_status_);
             } else {

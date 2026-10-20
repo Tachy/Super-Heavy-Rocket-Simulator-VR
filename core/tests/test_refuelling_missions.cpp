@@ -5,12 +5,15 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <functional>
+#include <vector>
 #include <stdexcept>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "refuelling_measurements.hpp"
 #include "refuelling_test_support.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
@@ -19,6 +22,7 @@
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -357,10 +361,21 @@ TEST_CASE("tanker_flight: the window's separation estimate matches the flown asc
         f.session.advance_to(f.session.epoch() + 1.0);
     }
     INFO(f.session.iss_mission_status());
-    REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
-    const auto& marks = f.session.iss_mission_marks();  // Ascent, Rendezvous
+    REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Raise);  // the 120 km insertion is raised at apoapsis
+    const auto& marks = f.session.iss_mission_marks();  // Ascent, Raise
     REQUIRE(marks.size() >= 2u);
     const double seco_s = marks[1].epoch - w.liftoff;
+    {
+        const auto e = orbit::elements_from_state({f.session.body(f.session.controlled_index()).state().position_gcrf_m,
+                                                   f.session.body(f.session.controlled_index()).state().velocity_gcrf_mps},
+                                                  constants::earth_gm_m3ps2);
+        const double ra = e.semi_major_axis_m * (1.0 + e.eccentricity) - constants::wgs84_semi_major_axis_m;
+        std::printf("[r5] at the end of the ascent leg: %s, %.1f x %.1f km\n", sim::to_string(marks[1].leg),
+                    (e.semi_major_axis_m * (1.0 - e.eccentricity) - constants::wgs84_semi_major_axis_m) / 1e3,
+                    ra / 1e3);
+        // the leg ends after the engines' tail-off (its ~12 m/s at 5 g lift the apoapsis by ~35 km)
+        CHECK(ra == Catch::Approx(190.0e3).margin(5.0e3));
+    }
     const auto& ship = f.session.body(f.session.controlled_index());
     const Vec3 r = ship.state().position_gcrf_m, v = ship.state().velocity_gcrf_mps;
     const Vec3 n = math::normalized(cross(r, v));
@@ -386,4 +401,185 @@ TEST_CASE("tanker_flight: the window's separation estimate matches the flown asc
                     deg);
     CHECK(std::abs(seco_s - m.window.insertion_s) < 5.0);  // [E] calibrated (i6: Falcon 9 within 1 s)
     CHECK(angle < 0.1 * deg);                               // [E] i6: 0.004 deg in phase
+}
+
+namespace {
+
+// Flies until the mission ends (advance_to coasts where nothing is ticked).
+void fly_mission(refuelling_test::DepotSession& f, double limit_s) {
+    const time::Epoch start = f.session.epoch();
+    while (f.session.epoch() - start < limit_s && f.session.iss_mission_leg() != IssMissionLeg::Complete &&
+           f.session.iss_mission_leg() != IssMissionLeg::Ended) {
+        f.session.advance_to(f.session.epoch() + 600.0);
+    }
+    if (verbose()) {
+        const auto& marks = f.session.iss_mission_marks();
+        for (const auto& m : marks) {
+            std::printf("[r5] %-24s +%8.0f s  mass %.1f t  main %.2f t  station %.1f t\n", sim::to_string(m.leg),
+                        m.epoch - marks.front().epoch, m.chaser_mass_kg / 1e3, m.chaser_main_propellant_kg / 1e3,
+                        m.station_main_propellant_kg / 1e3);
+        }
+    }
+}
+
+}  // namespace
+
+TEST_CASE("tanker_flight_orbit: phasing orbit -> docked -> transfer -> caught at Starbase",
+          "[refuelling][mission][docking][ship][slow]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    REQUIRE(sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight_orbit", f.t0, f.clock)
+                .refusal.empty());
+    fly_mission(f, 12.0 * 86400.0);
+    INFO(f.session.iss_mission_status());
+    REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Complete);
+    const auto n = refuelling_test::tanker_numbers(f.session);
+    refuelling_test::print("tanker_flight_orbit", n);
+    CHECK(n.delivered_oxidizer_kg + n.delivered_fuel_kg > 0.0);
+    CHECK(n.main_at_catch_kg >= 0.0);  // the reserve held: caught, not starved
+    CHECK(f.session.body(f.session.controlled_index()).caught());
+}
+
+TEST_CASE("tanker_flight: pad -> booster caught -> docked -> transfer -> ship caught",
+          "[refuelling][mission][docking][ship][ascent][slow]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    const auto s = sim::start_mission(f.session, refuelling_test::config_dir, "tanker_flight", f.t0, f.clock);
+    REQUIRE(s.refusal.empty());
+    // the ascent and the booster return are ticked: 1 s calls until the booster is caught
+    while (f.session.epoch() - s.epoch < 1200.0 && f.session.tower()->phase() != sim::CatchPhase::Caught) {
+        f.session.advance_to(f.session.epoch() + 1.0);
+    }
+    REQUIRE(f.session.tower()->phase() == sim::CatchPhase::Caught);
+    fly_mission(f, 12.0 * 86400.0);
+    INFO(f.session.iss_mission_status());
+    REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Complete);
+    const auto n = refuelling_test::tanker_numbers(f.session);
+    refuelling_test::print("tanker_flight", n);
+    CHECK(n.residue_after_ascent_kg > 0.0);
+    CHECK(n.delivered_oxidizer_kg + n.delivered_fuel_kg > 0.0);
+    CHECK(f.session.body(f.session.controlled_index()).caught());
+    CHECK(f.session.body_count() == 2u);  // tanker + depot: the booster was lifted off the tower
+}
+
+// User 2026-10-20: the tanker inserts at a 120 km perigee (less propellant on the ascent; at 80 km the drag of the
+// coast to apoapsis, ~60 m/s, brought it back down) and raises it to the phasing orbit's 170 km at the first apoapsis.
+TEST_CASE("After the ascent the sequence raises the perigee at apoapsis, then plans the phasing",
+          "[refuelling][iss_mission][rendezvous]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    const auto depot = f.depot;
+    f.session.place_in_orbit(refuelling_test::tanker_config(100.0e3),
+                             sim::phasing_start_state(depot, 8.0 * deg, 120.0e3, 190.0e3), f.t0);
+    f.session.add_station(refuelling_test::depot_config(f.depot_propellant_kg), depot, f.t0);
+    sim::IssMissionSequence q;
+    q.station_port = "transfer_dock";
+    q.from_launch = true;
+    q.phasing.mission_limit_s = 48.0 * 3600.0;
+    q.raise_periapsis_radius_m = constants::wgs84_semi_major_axis_m + 170.0e3;
+    f.session.set_iss_mission(q);
+    double t = 0.0;
+    while (t < 4.0 * 3600.0 && f.session.iss_mission_leg() != IssMissionLeg::Rendezvous &&
+           f.session.iss_mission_leg() != IssMissionLeg::Ended) {
+        f.session.advance_to(f.session.epoch() + 10.0);
+        t += 10.0;
+    }
+    INFO(f.session.iss_mission_status());
+    INFO(f.session.body(f.session.controlled_index()).breakup_reason());
+    INFO("elapsed " << t << " s");
+    REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
+    REQUIRE(refuelling_test::mark(f.session, IssMissionLeg::Raise));
+    const auto& s = f.session.body(f.session.controlled_index()).state();
+    const auto e = orbit::elements_from_state({s.position_gcrf_m, s.velocity_gcrf_mps}, constants::earth_gm_m3ps2);
+    const double rp = e.semi_major_axis_m * (1.0 - e.eccentricity) - constants::wgs84_semi_major_axis_m;
+    CHECK(rp == Catch::Approx(170.0e3).margin(3.0e3));  // [E] the burn's execution and J2 osculation
+    const double used_kg = 100.0e3 - refuelling_test::mark(f.session, IssMissionLeg::Rendezvous)->chaser_main_propellant_kg;
+    std::printf("[r5] perigee raise 120 -> %.1f km: %.2f t main propellant (incl. boil-off)\n", rp / 1e3, used_kg / 1e3);
+    CHECK(used_kg < 5.0e3);  // ~15 m/s on ~360 t
+}
+
+// Probe (user 2026-10-20: levers in the flight for the tanker's residue): the tanker ascent with one change at a
+// time; prints the main-tank residue at insertion, the equivalent residue in the 170 x 190 km phasing orbit (a lower
+// insertion perigee pays the raise at apoapsis on the belly Raptor, c ~3.4 km/s [E]) and whether the booster is caught.
+TEST_CASE("Tanker ascent levers", "[.r5_probe]") {
+    test::spice_session();
+    struct Variant {
+        const char* name;
+        std::function<void(config::AscentMission&)> change;
+        std::function<void(config::VehicleConfig&)> vehicle = [](config::VehicleConfig&) {};
+    };
+    // the ship's main tanks grown by kg (nose volume, at their O/F) with [E] 3 % of it as tank structure
+    const auto bigger_tanks = [](double kg) {
+        return [kg](config::VehicleConfig& v) {
+            auto& ship = v.stages.back();
+            double main = 0.0;
+            for (const auto& t : ship.tanks) main += t.role == config::TankRole::Main ? t.capacity_kg : 0.0;
+            for (auto& t : ship.tanks) {
+                if (t.role != config::TankRole::Main) continue;
+                t.capacity_kg += kg * t.capacity_kg / main;
+                t.mass_kg = t.capacity_kg;
+            }
+            ship.dry_mass_kg += 0.03 * kg;
+        };
+    };
+    const auto lighter = [](double kg) { return [kg](config::VehicleConfig& v) { v.stages.back().dry_mass_kg -= kg; }; };
+    const auto none = [](config::AscentMission&) {};
+    const auto kick = [](double k_deg, double rp_km) {
+        return [k_deg, rp_km](config::AscentMission& m) {
+            m.kick_angle_rad = k_deg * deg;
+            m.periapsis_height_m = rp_km * 1e3;
+        };
+    };
+    const auto booster = [](double dry_kg, double landing_kg) {
+        return [dry_kg, landing_kg](config::VehicleConfig& v) {
+            v.stages.front().dry_mass_kg += dry_kg;
+            v.stages.front().landing_propellant_kg += landing_kg;
+        };
+    };
+    const std::vector<Variant> variants = {
+        {"baseline (repeat)", none},
+        {"booster dry -20 t", none, booster(-20.0e3, 0.0)},
+        {"booster dry -40 t", none, booster(-40.0e3, 0.0)},
+        {"booster landing 41 t (-10)", none, booster(0.0, -10.0e3)},
+        {"80 x 190 + ship dry -10 t", kick(14.0, 80.0), lighter(10.0e3)},
+        {"80 x 190 + booster dry -40 t", kick(14.0, 80.0), booster(-40.0e3, 0.0)},
+    };
+    const double target_rp = constants::wgs84_semi_major_axis_m + 170.0e3;
+    for (const auto& variant : variants) {
+        refuelling_test::DepotSession f;
+        auto m = config::load_ascent_mission(refuelling_test::config_dir, "tanker_ascent");
+        variant.change(m);
+        auto vehicle = config::load_vehicle(refuelling_test::config_dir, m.vehicle_id);
+        variant.vehicle(vehicle);
+        sim::start_ascent_mission(f.session, m, refuelling_test::config_dir, f.t0, &vehicle);
+        double insertion_s = 0.0, main_kg = 0.0, rp = 0.0, ra = 0.0;
+        while (f.session.epoch() - f.t0 < 1200.0) {
+            f.session.advance_to(f.session.epoch() + 1.0);
+            const auto& ship = f.session.body(f.session.controlled_index());
+            if (insertion_s == 0.0 && f.session.autopilot().state == sim::AutopilotState::Orbit &&
+                ship.vehicle().stages().size() == 1) {
+                insertion_s = f.session.epoch() - f.t0;
+                main_kg = ship.vehicle().main_propellant_kg();
+                const auto e = orbit::elements_from_state({ship.state().position_gcrf_m, ship.state().velocity_gcrf_mps},
+                                                          constants::earth_gm_m3ps2);
+                rp = e.semi_major_axis_m * (1.0 - e.eccentricity);
+                ra = e.semi_major_axis_m * (1.0 + e.eccentricity);
+            }
+            if (insertion_s > 0.0 && f.session.tower()->phase() != sim::CatchPhase::Open &&
+                f.session.tower()->phase() != sim::CatchPhase::Standby && f.session.tower()->phase() != sim::CatchPhase::Closing) {
+                break;
+            }
+        }
+        double equivalent = main_kg;
+        if (rp > 0.0 && rp < target_rp - 1.0e3) {  // raise the perigee at apoapsis to 170 km
+            const double mu = constants::earth_gm_m3ps2;
+            const double dv = std::sqrt(mu * (2.0 / ra - 2.0 / (target_rp + ra))) - std::sqrt(mu * (2.0 / ra - 2.0 / (rp + ra)));
+            const double mass = f.session.body(f.session.controlled_index()).vehicle().mass_properties().mass_kg;
+            equivalent = main_kg - mass * -std::expm1(-dv / 3400.0);
+        }
+        std::printf("[r5 probe] %-28s insertion %.0f s, %.1f x %.1f km, main %.1f t, in 170 x 190: %.1f t, booster %s\n",
+                    variant.name, insertion_s, (rp - constants::wgs84_semi_major_axis_m) / 1e3,
+                    (ra - constants::wgs84_semi_major_axis_m) / 1e3, main_kg / 1e3, equivalent / 1e3,
+                    sim::to_string(f.session.tower()->phase()));
+    }
 }

@@ -106,7 +106,8 @@ TEST_CASE("A stage taken over with `from` is the source vehicle's stage", "[refu
         const auto& b = tanker.stages[i];
         CAPTURE(a.id);
         CHECK(b.id == a.id);
-        CHECK(b.dry_mass_kg == a.dry_mass_kg);
+        // the tanker ship carries its own dry mass (user 2026-10-20, r5: 209 t [E] without cargo hardware)
+        CHECK(b.dry_mass_kg == (a.id == "ship" ? 209000.0 : a.dry_mass_kg));
         CHECK(b.dry_cg_station_m == a.dry_cg_station_m);
         REQUIRE(b.tanks.size() == a.tanks.size());
         for (size_t k = 0; k < a.tanks.size(); ++k) {
@@ -122,6 +123,16 @@ TEST_CASE("A stage taken over with `from` is the source vehicle's stage", "[refu
     CHECK(tanker.engines.size() == block3.engines.size());
 }
 
+// User 2026-10-20 (r5): a variant may carry its own dry mass on a reused stage (the tanker); the rest stays the source's.
+TEST_CASE("A reused stage takes its own dry mass", "[refuelling][config]") {
+    const auto dir = config_with("from_dry_mass_ok", vehicle_with_stage("from = \"starship_block3:ship\"\ndry_mass_kg = 200000.0\n"));
+    const auto v = config::load_vehicle(dir, "test_vehicle");
+    const auto block3 = config::load_vehicle(config_dir, "starship_block3");
+    CHECK(v.stages.back().dry_mass_kg == 200000.0);
+    CHECK(v.stages.back().dry_cg_station_m == block3.stages.back().dry_cg_station_m);
+    CHECK(v.stages.back().tanks.size() == block3.stages.back().tanks.size());
+}
+
 TEST_CASE("Bad `from` stages are config errors", "[refuelling][config]") {
     struct Case {
         const char* name;
@@ -129,7 +140,8 @@ TEST_CASE("Bad `from` stages are config errors", "[refuelling][config]") {
         const char* message;
     };
     const Case cases[] = {
-        {"from_override", "from = \"starship_block3:ship\"\ndry_mass_kg = 1.0\n", "cannot be set on a reused stage"},
+        {"from_override", "from = \"starship_block3:ship\"\nlength_m = 1.0\n", "cannot be set on a reused stage"},
+        {"from_dry_mass", "from = \"starship_block3:ship\"\ndry_mass_kg = 0.0\n", "'dry_mass_kg' must be positive"},
         {"from_no_stage", "from = \"starship_block3:nose\"\n", "no such stage"},
         {"from_no_vehicle", "from = \"no_such_vehicle:ship\"\n", "no_such_vehicle.toml"},
         {"from_syntax", "from = \"starship_block3\"\n", "must be \"<vehicle>:<stage>\""},

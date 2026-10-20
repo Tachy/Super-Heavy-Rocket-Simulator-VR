@@ -7,8 +7,9 @@
 namespace starsim::sim {
 
 void start_ascent_mission(FlightSession& session, const config::AscentMission& mission,
-                          const std::filesystem::path& config_dir, time::Epoch epoch) {
-    auto vehicle = config::load_vehicle(config_dir, mission.vehicle_id);
+                          const std::filesystem::path& config_dir, time::Epoch epoch,
+                          const config::VehicleConfig* configured) {
+    auto vehicle = configured ? *configured : config::load_vehicle(config_dir, mission.vehicle_id);
     vehicle.stages.back().payload_mass_kg = mission.payload_kg;
     if (!mission.fairing) vehicle.stages.back().fairing_mass_kg = 0.0;
     std::optional<PayloadSeparation> separation;

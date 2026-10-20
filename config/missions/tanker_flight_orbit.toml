@@ -19,14 +19,15 @@ propellant_t = 600.0              # [test]
 [start]
 mode = "phasing_orbit"
 behind_deg = 8.0
-propellant_t = 48.3               # [D] r5: main tanks after the flown tanker ascent (170 x 190 km)
+propellant_t = 99.2               # [D] r5: main tanks after the flown tanker ascent and the perigee raise (170 x 190 km)
 
 [launch_window]
 earliest_utc = "2026-10-20T00:00:00"   # the start epoch of the phasing-orbit start
 search_days = 12.0
-insertion_s = 454.9               # [D] r5: the flown tanker ascent
-insertion_arc_deg = 12.11         # [D] r5
+insertion_s = 445.5               # [D] r5: the flown tanker ascent
+insertion_arc_deg = 12.20         # [D] r5
 
 [phasing]
 mission_limit_h = 48.0            # [E] uncrewed
 earliest_arrival_h = 0.0
+periapsis_km = 170.0              # the phasing orbit after the raise at apoapsis (the ascent inserts at 120 km)

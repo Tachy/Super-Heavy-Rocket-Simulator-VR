@@ -672,7 +672,7 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
     }
     for (const auto& [key, value] : t) {
         if (key != "from" && key != "docking_port" && key != "transfer_connector" && key != "rcs_pod" &&
-            key != "propellant_transfer") {
+            key != "propellant_transfer" && key != "dry_mass_kg") {
             doc.fail("stage.from = \"" + from + "\": '" + std::string(key.str()) + "' cannot be set on a reused stage");
         }
     }
@@ -686,6 +686,8 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
                                  [&](const StageConfig& s) { return s.id == stage_id; });
     if (it == source.stages.end()) doc.fail("stage.from = \"" + from + "\": no such stage");
     StageConfig s = *it;
+    // a variant's own dry mass (user 2026-10-20, refuelling r5: the tanker without cargo hardware); CG as the source
+    if (t.contains("dry_mass_kg")) s.dry_mass_kg = doc.positive(t, "dry_mass_kg");
     append_docking_ports(doc, t, s);
     append_transfer_connectors(doc, t, s);
     read_propellant_transfer(doc, t, s);

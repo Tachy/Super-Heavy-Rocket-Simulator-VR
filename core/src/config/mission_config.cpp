@@ -472,6 +472,7 @@ RefuellingFlightMission load_refuelling_flight_mission(const std::filesystem::pa
     m.window.insertion_arc_rad = doc.positive(*window, "insertion_arc_deg") * deg;
     m.mission_limit_s = doc.positive(*phasing, "mission_limit_h") * 3600.0;
     m.earliest_arrival_s = doc.number(*phasing, "earliest_arrival_h") * 3600.0;
+    if (phasing->contains("periapsis_km")) m.phasing_periapsis_height_m = doc.positive(*phasing, "periapsis_km") * 1e3;
     if (m.kind == MissionKind::TankerFlight) {
         m.return_id = doc.text(*mission, "return");
     } else {

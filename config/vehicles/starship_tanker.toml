@@ -17,6 +17,12 @@ from = "starship_block3:booster"
 
 [[stage]]
 from = "starship_block3:ship"
+# [E] placeholder until the real tanker is known (user 2026-10-20): a tanker ship without cargo doors, dispenser and
+# interior (heat shield, flaps and header tanks stay), lighter by the V3 weight targets - chosen so that the tanker has
+# 100 t main propellant after its ascent (with the 120 km insertion of tanker_ascent). Block 3's 255 t [D] is the
+# flown cargo ship (flights 12-14); with it the tanker kept 48 t. 209 t (-46 t) gives 102 t at insertion, ~99 t
+# after the perigee raise (r5). CG as Block 3's.
+dry_mass_kg = 209000.0
 
 # Docking probes and transfer connectors [E] (positions not published; spec r1, plan decision 3): the interface plane
 # lies 0.5 m off the dorsal hull (z = +4.5 m; belly at -z). Mated with the depot's drogues the ships lie parallel,

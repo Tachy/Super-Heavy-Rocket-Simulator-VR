@@ -99,6 +99,8 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
     const auto site = config::load_launch_site(config_dir, ascent.site_id);
     auto depot_vehicle = config::top_stage_config(config::load_vehicle(config_dir, m.depot.vehicle_id));
     fill_main_tanks(depot_vehicle.stages.back(), m.depot.propellant_kg);
+    // the phasing orbit: the ascent's target, or with its perigee raised at apoapsis (user 2026-10-20: the tanker)
+    const double phasing_periapsis_m = m.phasing_periapsis_height_m.value_or(ascent.periapsis_height_m);
     IssMissionSequence q;
     q.station_port = m.depot.port;
     if (m.start == config::RefuellingStart::Pad) {
@@ -108,7 +110,7 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         p.northerly = ascent.northerly;
         p.insertion_s = m.window.insertion_s;
         p.insertion_arc_rad = m.window.insertion_arc_rad;
-        p.separation_periapsis_radius_m = equatorial_radius_m + ascent.periapsis_height_m;
+        p.separation_periapsis_radius_m = equatorial_radius_m + phasing_periapsis_m;  // the phasing after the raise
         p.separation_apoapsis_radius_m = equatorial_radius_m + ascent.apoapsis_height_m;
         p.search_s = m.window.search_s;
         p.phasing.mission_limit_s = m.mission_limit_s - m.window.insertion_s;  // from the orbit insertion
@@ -123,6 +125,7 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         session.add_station(depot_vehicle, depot_at(w.liftoff), w.liftoff);  // after the launch (it clears the bodies)
         q.from_launch = true;
         q.phasing = p.phasing;
+        if (m.phasing_periapsis_height_m) q.raise_periapsis_radius_m = equatorial_radius_m + phasing_periapsis_m;
         s.epoch = w.liftoff;
         s.site_id = ascent.site_id;
     } else {
@@ -132,10 +135,9 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         auto chaser = config::top_stage_config(config::load_vehicle(config_dir, ascent.vehicle_id));
         fill_main_tanks(chaser.stages.back(), m.start_propellant_kg);
         const auto depot = depot_at(earliest);
-        session.place_in_orbit(chaser,
-                               phasing_start_state(depot, m.phasing_behind_rad, ascent.periapsis_height_m,
-                                                   ascent.apoapsis_height_m),
-                               earliest);
+        session.place_in_orbit(
+            chaser, phasing_start_state(depot, m.phasing_behind_rad, phasing_periapsis_m, ascent.apoapsis_height_m),
+            earliest);
         session.set_launch_site(launch_site_from_config(site));  // the return site
         session.add_station(depot_vehicle, depot, earliest);
         if (!session.plan_rendezvous(phasing)) {

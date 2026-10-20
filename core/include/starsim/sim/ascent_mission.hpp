@@ -10,7 +10,9 @@ namespace starsim::sim {
 // Sets up `session` for an ascent mission at `epoch`: the vehicle with the mission's payload (and fairing) on the pad,
 // the landing zone or drone ship of a returning first stage, booster return on, a payload vehicle stacked on top and
 // released after cutoff ([payload]), and the ascent autopilot engaged with the mission's target and pitch program.
+// `vehicle`: a changed configuration of the mission's vehicle instead of its file (studies, refuelling r5 probes).
 void start_ascent_mission(FlightSession& session, const config::AscentMission& mission,
-                          const std::filesystem::path& config_dir, time::Epoch epoch);
+                          const std::filesystem::path& config_dir, time::Epoch epoch,
+                          const config::VehicleConfig* vehicle = nullptr);
 
 }  // namespace starsim::sim

@@ -499,11 +499,14 @@ TEST_CASE("Tanker reserve: the deorbit burn by the rocket equation plus gas, boi
     p.deorbit_delta_v_mps = 80.0;
     p.exhaust_velocity_mps = 3300.0;
     const auto r = mission::tanker_reserve(290.0e3, p);
-    // after the burn 290 + 1.5 + 1 t; burn = 292.5 t (e^(80/3300) - 1) x 1.10 = 7.8955 t
-    CHECK(r.burn_kg == Catch::Approx(7895.5).epsilon(1e-4));
-    CHECK(r.total_kg == Catch::Approx(r.burn_kg + 1500.0 + 2000.0 + 1000.0));
-    CHECK(r.oxidizer_kg == Catch::Approx(r.total_kg * 3.6 / 4.6));
-    CHECK(r.fuel_kg == Catch::Approx(r.total_kg / 4.6));
+    // r5 measured items: gas 3.5 t, boil-off 2 t of which 56 % CH4. After the burn 290 + 3.5 + 1 t;
+    // burn = 294.5 t (e^(80/3300) - 1) x 1.10 = 7.9495 t
+    CHECK(r.burn_kg == Catch::Approx(7949.5).epsilon(1e-4));
+    CHECK(r.total_kg == Catch::Approx(r.burn_kg + 3500.0 + 2000.0 + 1000.0));
+    const double at_ratio = r.burn_kg + 3500.0 + 1000.0;
+    CHECK(r.oxidizer_kg == Catch::Approx(at_ratio * 3.6 / 4.6 + 0.44 * 2000.0));
+    CHECK(r.fuel_kg == Catch::Approx(at_ratio / 4.6 + 0.56 * 2000.0));
+    CHECK(r.oxidizer_kg + r.fuel_kg == Catch::Approx(r.total_kg));
 }
 
 TEST_CASE("Docked tanker: its reserve from the previewed return, as a transfer request",

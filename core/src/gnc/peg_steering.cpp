@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 
 namespace starsim::gnc {
 
@@ -138,6 +140,12 @@ PegCommand PegSteering::update(const PegState& state, const PegVehicle& vehicle,
     if (t_ < terminal_time_s) {
         cmd.thrust_direction = math::normalized(v_go);
         if (norm(v_go) <= tail_off_dv || dot(v_go, state.velocity_mps) < 0.0 || t_ < -5.0) cmd.cutoff = true;
+        if (cmd.cutoff && std::getenv("STARSIM_DEBUG_PEG")) {  // diagnostics: why and where the burn ends
+            std::printf("[peg] cutoff: r %.1f km (target %.1f), vr %.2f m/s (target %.2f), vt %.2f m/s (required %.2f), "
+                        "|v_go| %.2f (tail-off %.2f), v_go.v %.1f, t_go %.2f s, a %.2f m/s^2\n",
+                        r / 1e3, r_t / 1e3, vr, vr_t, vt, kepler ? required_speed : vt_t, norm(v_go), tail_off_dv,
+                        dot(v_go, state.velocity_mps), t_, a);
+        }
     }
     return cmd;
 }
