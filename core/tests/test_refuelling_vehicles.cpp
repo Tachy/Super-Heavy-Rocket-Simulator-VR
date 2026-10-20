@@ -13,8 +13,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include "proximity_test_support.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/vehicle/port_mating.hpp"
+#include "test_support.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
 using namespace starsim;
@@ -49,6 +51,14 @@ TEST_CASE("set_tank_mass sets one tank at run time, clamped to its capacity", "[
 
     CHECK_THROWS_AS(ship->set_tank_mass(0, "no_such_tank", 1.0), std::invalid_argument);
     CHECK_THROWS_AS(ship->set_tank_mass(3, "lox_main", 1.0), std::invalid_argument);
+}
+
+TEST_CASE("A refill does not revive a failed engine", "[refuelling][vehicle]") {
+    auto ship = top_stage_alone("starship_block3");
+    ship->fail_engine(0, 0);
+    ship->set_tank_mass(0, "lox_main", 1.0e6);
+    CHECK(ship->stages()[0].engines[0].starved);  // fail_engine: never restarts
+    CHECK_FALSE(ship->stages()[0].engines[1].starved);
 }
 
 TEST_CASE("A refilled dry ship has its engines and cold-gas RCS back", "[refuelling][vehicle]") {
@@ -175,6 +185,27 @@ TEST_CASE("Ports mate only with the same mechanism and probes against drogues", 
     CHECK(idss.elements_m.empty());
     CHECK_FALSE(vehicle::port_mismatch(idss, iss.stages.front().docking_ports.front()).has_value());
     CHECK(vehicle::port_mismatch(idss, drogues).has_value());  // a Dragon cannot dock to a depot drogue
+}
+
+TEST_CASE("A Starship near the ISS is refused a proximity flight, not thrown out", "[refuelling][proximity]") {
+    test::spice_session();
+    const spice::SpiceEphemeris ephemeris;
+    const auto earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter clock;
+    sim::FlightSession session{ephemeris, earth, config_dir};
+    const auto archive = orbit::OemArchive::scan(proximity_test::fixture_dir, clock);
+    const auto t0 = clock.from_utc({2026, 10, 16, 0, 0, 0.0});
+    auto iss = sim::iss_start(config::load_vehicle(config_dir, "iss"), archive, clock, earth, t0,
+                              sim::IssOrbitSource::Oem);
+    auto tanker = config::load_vehicle(config_dir, "starship_tanker");
+    tanker.stages.erase(tanker.stages.begin());  // the ship alone
+    session.place_in_orbit(tanker, orbit::chaser_from_lvlh(iss.state_gcrf, {{-1000.0, 0.0, 0.0}, {}}), t0);
+    session.add_station(iss.vehicle, iss.state_gcrf, iss.epoch, iss.impulses);
+
+    bool started = true;
+    REQUIRE_NOTHROW(started = session.start_proximity("ida2"));
+    CHECK_FALSE(started);
+    CHECK_THAT(session.proximity_status(), Catch::Matchers::ContainsSubstring("Andocksysteme passen nicht"));
 }
 
 TEST_CASE("Bad probe/drogue ports and transfer connectors are config errors", "[refuelling][config]") {

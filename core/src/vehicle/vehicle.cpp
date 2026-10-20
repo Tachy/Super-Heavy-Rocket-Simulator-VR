@@ -347,7 +347,7 @@ void Vehicle::set_tank_mass(size_t stage_index, std::string_view tank_id, double
     const auto role = stage.feed == FeedSource::Header ? config::TankRole::Header : config::TankRole::Main;
     if (stage.propellant_kg(config::TankContents::Oxidizer, role) > 0.0 &&
         stage.propellant_kg(config::TankContents::Fuel, role) > 0.0) {
-        for (auto& e : stage.engines) e.starved = false;
+        for (auto& e : stage.engines) e.starved = e.failed;
     }
     refresh_rcs_availability();
 }
@@ -359,7 +359,7 @@ void Vehicle::select_feed(size_t stage_index, FeedSource source) {
     const auto role = source == FeedSource::Header ? config::TankRole::Header : config::TankRole::Main;
     if (stage.propellant_kg(config::TankContents::Oxidizer, role) > 0.0 &&
         stage.propellant_kg(config::TankContents::Fuel, role) > 0.0) {
-        for (auto& e : stage.engines) e.starved = false;
+        for (auto& e : stage.engines) e.starved = e.failed;
     }
 }
 
@@ -694,6 +694,7 @@ void Vehicle::fail_engine(size_t stage_index, size_t engine_index) {
     e.mode = EngineMode::Off;
     e.spool = 0.0;
     e.starved = true;  // never restarts
+    e.failed = true;
 }
 
 Vec3 Vehicle::max_rcs_torque_nm() const { return rcs_allocator().max_torque_nm(); }

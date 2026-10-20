@@ -25,6 +25,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/clohessy_wiltshire.hpp"
 #include "starsim/vehicle/docking_port.hpp"
+#include "starsim/vehicle/port_mating.hpp"
 #include "flight_session_lunar_detail.hpp"
 
 namespace starsim::sim {
@@ -73,6 +74,10 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
         target = vehicle::port_kinematics(station, station_port);
     } catch (const std::invalid_argument&) {
         return refuse("Kein Anflug: unbekannter Port " + station_port);
+    }
+    if (const auto problem = vehicle::port_mismatch(vehicle::port_config(vehicle, chaser_port),
+                                                    vehicle::port_config(station.vehicle(), station_port))) {
+        return refuse("Kein Anflug: " + *problem);
     }
     const auto st = station_state();
     const math::Mat3 port_to_lvlh = port_axes_lvlh(st, target);
