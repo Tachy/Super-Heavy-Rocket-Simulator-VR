@@ -34,7 +34,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
 - `core` is split into small modules with clear interfaces: `math`, `time`, `frames`, `ephemeris`,
   `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`.
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
-  Moon: body-fixed frame, shape, atmosphere or vacuum),
+  Moon: body-fixed frame, shape, atmosphere or vacuum; thermal radiation environment: Sun, Earth albedo and infrared),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
@@ -53,7 +53,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   propulsion (engine performance, RCS allocator incl. pure translation capability + pulse modulator),
   vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity,
   ideal LVLH attitude of a station, docking-port kinematics, docked hold, attached mass, compound mass, run-time tank
-  masses, probe/drogue port mating of the refuelling ships), sim (flight session incl. the ISS as a station body from
+  masses, probe/drogue port mating of the refuelling ships, propellant boil-off by a hull heat balance in flight and
+  orbit-averaged), sim (flight session incl. the ISS as a station body from
   OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
   Waypoint 0 with drag tracking and re-plan, proximity flight to a station port, docking into a compound, undocking
   and departure, ISS missions chained by a mission sequence: from the separation orbit, from the pad with a launch

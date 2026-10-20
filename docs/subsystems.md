@@ -1150,3 +1150,70 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight.
 - `vehicle_report`: depot ship ideal delta-v 7,328 m/s (no recovery reserve), tanker ship 6,697 m/s.
 - Open for r3: HLS leg-strut clearance at the depot (feet 12 m out, 1.5 m below the skirt).
 - **Tests:** `[refuelling]` (`test_refuelling_vehicles.cpp`).
+
+### Boil-off by heat balance (r2)
+- **Model** (`vehicle/boil_off`): every hull tank (main tank of the stage diameter) of a stage with `[stage.thermal]`
+  is a cylinder of its full-load length, 36 strips around the circumference. Per strip a quasi-steady balance
+  `absorbed = eps sigma T^4 + (T - T_boil) / R_wall`, solved by Newton; the strips' leaks summed are the tank's heat,
+  clamped at 0 (no condensation), over the latent heat the vented flow. Starship's hull *is* the tank wall (integral
+  tanks, no vacuum jacket): the bare hull's `R_wall` is tiny; the vacuum inside tiles / felt and between MLI layers is
+  part of their effective resistance.
+- **Sources** (`environment/thermal_radiation`): Sun 1361 W/m^2 at 1 AU with the Earth / Moon disk occultation;
+  Earth albedo 0.30 x solar flux x view factor x `max(0, cos zenith of the Sun below the vehicle)` [E]; Earth IR
+  239 W/m^2 x view factor (absorbed with the emissivity). View factor: exact plate-to-sphere (tilted element,
+  horizon-crossing formula). Spherical Earth of mean radius.
+- **Wetted wall** (Task 5b, user 2026-10-20): only the wall the liquid touches feeds it; on the dry part the heat
+  must also cross the ullage gas (`ullage_resistance_m2k_w` 100 m^2K/W [E]: gas conduction, no convection near free
+  fall), so a dry wall runs hot and re-radiates. Where the liquid lies: the apparent gravity at the tank's centre =
+  Earth tide + (-specific force: drag at the end of each coast, thrust in ticks) + centrifugal of the rotation
+  (`vehicle::apparent_gravity_body_mps2`); Bond number rho a r^2 / sigma (`surface_tension_n_m` [E]): Bo <= 1 the
+  wetting liquid spreads over the walls (Centaur's zero-g coasts), Bo >= 10 settled below a flat surface across the
+  apparent gravity (`settled_wetted_fractions`), log-linear between [E]. At 200 km drag ~1.2e-5 m/s^2 and the tide
+  ~4e-5 m/s^2 give Bo ~20-90 for a full-radius tank: settled. A 10 t residue loses ~1.4 t in 22 h (fully wetted it
+  would have been ~20 t); methane goes relatively faster (the forward CH4 tank's residue lies along a side wall).
+- **Simplifications** (switchable as a whole by the fidelity flag `boil_off`, default on; `FlightSession::set_boil_off`):
+  no skin heat capacity, no conduction around the circumference (also not from the dry to the wet part); no tank
+  pressure / temperature / subcooling / stratification (the loaded subcooling is not credited: conservative); the dry
+  wall's small leak is vented like boil-off; the liquid geometry is quasi-static (no settling lag, no slosh), Euler and
+  Coriolis terms left out; domes, ends, header and RCS tanks take no heat; no shadow of other vehicles or flaps; the
+  Moon only shadows (its albedo / IR are not modelled).
+- **Deorbit planning** (`FlightSession::plan_ship_return`, re-plans): the earliest pass is checked by flying a copy
+  of the ship ahead to the node (free drift under the air's torque turns the hull - a fixed-attitude average was off
+  by up to 80 %); LOX and CH4 boil off in another ratio than the Raptor burns them, so the scarcer one limits the burn;
+  usable >= 1.10 x the burn propellant [E] (1.05 ran dry on the last tonne). Short: refused with "... verdampft ...";
+  a re-plan that finds the tanks short calls the burn off (the ship stays in orbit). `DeorbitPlan::boil_off_kg`.
+  A burn whose engines all starve is cut off with `FlightSession::burn_abort_reason()` instead of waiting for ever
+  (found when the first r2 runs hung in `while (Burn)`).
+- **Missions:** `ship_return_starbase` starts with 50 t [E] (was 45 t); the ship return campaigns size their start in
+  2 t steps until the onboard plan holds (+0-10 t by orbit phase). The Block 3 lunar missions (`ship_lunar_return_*`,
+  `ship_lunar_aircatch_llo`) set `[mission] boil_off = false` (user 2026-10-20): a bare ship cannot keep its
+  propellant for days (78.8 t in 93.5 h fully wetted) - off until r5 (Moon radiation, thermal attitude).
+- **Flight:** `FlightBody` evaluates every 10 s of free flight [E] and after every coast, vents by the trapezoid of
+  the last two evaluations per tank (`Vehicle::set_tank_mass`, stops at 0), not below 100 km in air [E], not clamped /
+  caught / landed / resting / docked (docked boil-off: r4). `FlightBody::boil_off_rate()` = flows at the last
+  evaluation. Separation clears the stored rates.
+- **Orbit average** `vehicle::orbit_average_boil_off` (for r6): one two-body orbit, LVLH-held attitude, Sun fixed,
+  Earth shadow.
+- **Validation** (`[boil_off][validation]`, `tools/validation/centaur_boil_off_calibration.py`): Centaur LO2 sidewall
+  fluxes from flight reconstructions (De Kruif & Kutter, AIAA 2007-5845, Table 2; sunlit coasts, broadside, rotisserie;
+  coast geometry [E]: axis along the orbit normal, Sun in the plane at noon mid-coast):
+
+  | Flight | Insulation, orbit | Flight W/m^2 | Model W/m^2 |
+  |---|---|---|---|
+  | AC-206 | white foam, 167 x 1,132 km | 72.6 | 72.5 (calibration: R = 1.586 m^2K/W [D]) |
+  | AC-167 | white foam, 185 x 267 km | 78.9 | 76.3 (-3 %) |
+  | AV-003 | white foam, 167 x 4,165 km | 78.9 | 63.1 (-20 %) |
+  | TC-11/15 | 3-layer MLI, transfer orbit | 9.46 (avg of 6.3 / 12.6) | 9.46 (calibration: R = 8.22 [D], sun only) |
+
+  Tolerance 25 % (the sister flights TC-11 / TC-15 differ by 2x; coast geometry unknown). Paint alpha 0.25 / eps 0.88
+  and MLI cover 0.30 / 0.80 [E].
+- **Values:** depot `R_wall` 63.7 m^2K/W [D] = MLI-3 x 31/4 (30 effective layers [E], leak ~ 1/(n+1)), cover
+  0.30 / 0.80 [E]. Block 3 ship (and tanker): bare stainless 0.40 / 0.15, 0.01 m^2K/W [E]; tiles 0.85 / 0.85,
+  1.5 m^2K/W, +-90 deg around the belly [E]. Methalox: LOX 90.19 K / 213.1 kJ/kg, CH4 111.67 K / 510.8 kJ/kg
+  [S: NIST]. The HLS has no `[stage.thermal]` yet (r5, with the Moon's radiation).
+- **Numbers** (200 km, 26.5 deg, LVLH identity = nose +V, dorsal nadir; `STARSIM_VERBOSE=1`): depot (full)
+  444 kg/day = 0.028 %/day at beta 0, 461 kg/day = 0.029 %/day at beta 60 deg; bare tanker 15.9 t/day (beta 0),
+  22.9 t/day (beta 60). Plausibility only: conventionally insulated cryogenic tanks in orbit ~0.1 %/day.
+- Open: active cooling (solar-powered cryocoolers, user question 2026-10-20) would be a cooling power per tank
+  subtracted in the balance - not modelled, SpaceX has announced none.
+- **Tests:** `[boil_off]` (`test_boil_off.cpp`).

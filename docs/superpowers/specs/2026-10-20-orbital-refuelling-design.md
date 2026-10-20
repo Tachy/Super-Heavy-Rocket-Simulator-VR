@@ -1,6 +1,7 @@
 # Orbital refuelling (tanker flights) - design
 
-Status: approved 2026-10-20. r1 implemented (plan `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
+Status: approved 2026-10-20. r1 and r2 implemented (plans `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
+`...-r2-boil-off.md`;
 notes in `docs/subsystems.md` "Orbital refuelling", corrections below). Milestone (r), the rest of plan milestone M9
 (tanker flights), after the ISS milestone (i1-i6, main `ffbb574`).
 
@@ -101,6 +102,13 @@ only with equal mechanisms, probes on the chaser, drogues on the target.
 - **Runtime tank mass:** `Vehicle::set_tank_mass(tank, kg)`, clamped to `[0, capacity]`, updating mass properties.
 
 ## r2 design: boil-off by heat balance
+
+Implemented (plan `docs/superpowers/plans/2026-10-20-refuelling-r2-boil-off.md`, notes in `docs/subsystems.md`
+"Boil-off by heat balance (r2)"). Corrections with the user during execution (2026-10-20): (1) only the wetted wall
+feeds the liquid - its place by the Bond number (tide, drag, rotation), the dry wall through the ullage gas; (2) the
+ship return checks its main tanks per propellant at the deorbit node by flying a copy of itself ahead, a short burn is
+refused / called off, a burn on starved engines is aborted; (3) the Block 3 lunar missions run without boil-off until
+r5 (Moon radiation, thermal attitude); (4) validation against Centaur flight reconstructions (AIAA 2007-5845).
 
 - Lives in `vehicle` (the tank state), radiation sources from `environment`. Configured by `[stage.thermal]`
   (absorptivity, emissivity, effective wall heat resistance per tank or per stage [E]). Fidelity flag `boil_off`.
