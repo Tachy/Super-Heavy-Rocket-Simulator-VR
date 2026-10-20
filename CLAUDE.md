@@ -38,7 +38,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
-  the mission delta-v budget, the Earth return: TEI, mid-course corrections, braking burn, the coelliptic phasing
+  the mission delta-v budget, the tanker's return reserve, the Earth return: TEI, mid-course corrections, braking burn, the coelliptic phasing
   to the ISS: schedule + full-model planner with drag, and the ISS launch window),
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
@@ -55,12 +55,13 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity,
   ideal LVLH attitude of a station, docking-port kinematics, docked hold, attached mass, compound mass, run-time tank
   masses, probe/drogue port mating of the refuelling ships, propellant boil-off by a hull heat balance in flight and
-  orbit-averaged), sim (flight session incl. the ISS as a station body from
+  orbit-averaged, ship-to-ship transfer physics: line flow, outlet coverage, settling time), sim (flight session incl. the ISS as a station body from
   OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
   Waypoint 0 with drag tracking and re-plan, proximity flight to a station port, docking into a compound, undocking
   and departure, ISS missions chained by a mission sequence: from the separation orbit, from the pad with a launch
   window, docked -> undocking -> splashdown; the depot as a station target with its approach limits, Starship phasing
-  on the belly Raptor + cold gas, the docked compound following run-time tank masses).
+  on the belly Raptor + cold gas, the docked compound following run-time tank masses; ship-to-ship propellant transfer
+  with the settling push and the docked pair's boil-off, the tanker's return reserve).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.

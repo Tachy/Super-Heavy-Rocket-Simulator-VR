@@ -1,7 +1,7 @@
 # Orbital refuelling (tanker flights) - design
 
-Status: approved 2026-10-20. r1-r3 implemented (plans `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
-`...-r2-boil-off.md`, `...-r3-rendezvous-docking.md`;
+Status: approved 2026-10-20. r1-r4 implemented (plans `docs/superpowers/plans/2026-10-20-refuelling-r1-vehicles.md`,
+`...-r2-boil-off.md`, `...-r3-rendezvous-docking.md`, `...-r4-propellant-transfer.md`;
 notes in `docs/subsystems.md` "Orbital refuelling", corrections below). Milestone (r), the rest of plan milestone M9
 (tanker flights), after the ISS milestone (i1-i6, main `ffbb574`).
 
@@ -171,6 +171,12 @@ not by the plane (open for r6).
   [E]) or depot full.
 - **Losses:** line chill-down [E]; boil-off continues during the transfer.
 - **Result:** duration, delivered LOX and CH4, gas used, losses.
+
+Decisions approved with the r4 plan (user 2026-10-20): lines 0.15 m / C_d 0.6, 3.5 / 1.5 bar, chill-down 150 / 60 kg
+per connector [E]; the push as an average impulse per 10 s step, outlet covered at Bo >= 10 within 30 deg [E]; the
+docked pair's boil-off by the session; the tanker reserve by the rocket equation from the previewed deorbit
+(8-day pass search) + gas 1.5 t, boil-off 2 t, unusable 1 t [E]; floors honoured at the line's closing; both
+directions in one model; FlightSim interface in r6.
 
 ## r5 design: reference flights
 

@@ -1191,7 +1191,7 @@ boil-off by heat balance, a campaign calculator from one flown tanker flight.
   propellant for days (78.8 t in 93.5 h fully wetted) - off until r5 (Moon radiation, thermal attitude).
 - **Flight:** `FlightBody` evaluates every 10 s of free flight [E] and after every coast, vents by the trapezoid of
   the last two evaluations per tank (`Vehicle::set_tank_mass`, stops at 0), not below 100 km in air [E], not clamped /
-  caught / landed / resting / docked (docked boil-off: r4). `FlightBody::boil_off_rate()` = flows at the last
+  caught / landed / resting / docked or carrying a visitor (a docked pair: the session, r4). `FlightBody::boil_off_rate()` = flows at the last
   evaluation. Separation clears the stored rates.
 - **Orbit average** `vehicle::orbit_average_boil_off` (for r6): one two-body orbit, LVLH-held attitude, Sun fixed,
   Earth shadow.
@@ -1277,4 +1277,51 @@ planner, proximity guidance, docking mechanism and sim, compound) is generalised
 - **Tests:** `[refuelling]` with `[rcs]`, `[config]`, `[station]`, `[proximity]`, `[contact]`, `[docking]`,
   `[rendezvous]`, `[launch_window]` (`test_refuelling_docking.cpp`, `test_refuelling_rendezvous.cpp`; the campaign
   and the undocking are `[slow]`).
-- Deferred: the depot's attitude-hold gas (r6), docked boil-off (r4), HLS thermal (r5).
+- Deferred: the depot's attitude-hold gas (r6), HLS thermal (r5). Docked boil-off: done in r4.
+
+### Propellant transfer (r4)
+Plan `docs/superpowers/plans/2026-10-20-refuelling-r4-propellant-transfer.md`.
+- **Hardware** [E] (SpaceX publishes nothing): per `[[stage.transfer_connector]]` `line_diameter_m` 0.15,
+  `discharge_coefficient` 0.6, `chilldown_kg` 150 (LOX) / 60 (CH4) - ~300 kg of line and coupling steel from ~250 K
+  over the latent heat, +50 %; per ship `[stage.propellant_transfer]`: the delivering ship holds its ullage at 3.5 bar
+  (spec 3-4 bar), the receiving ship vents to 1.5 bar. Tanker, depot and HLS carry both.
+- **Flow** (`vehicle/propellant_transfer`): orifice law `mdot = C_d A sqrt(2 rho dp)` per line, the coupled pair's
+  smaller C_d A, densities of the loaded propellant (subcooled): LOX 232 kg/s, CH4 141 kg/s at 2 bar. No back-flow,
+  no hydrostatic head (~0.2 kPa under the push).
+- **Settling:** the chaser's +x cold gas pushes the compound at 1e-4 g [E, spec] (capped by its pure +x capability;
+  gas at the RCS Isp from its main tanks in proportion to their oxidizer and fuel). Modelled as the average thrust,
+  applied as one velocity impulse per 10 s step (0.01 m/s) to the compound - no pulses, no torque (the depot's ideal
+  attitude takes it). Settle time `sqrt(2 L / a)` [E] for the longest involved tank (186 s for 16.9 m). A delivering
+  outlet (aft dome, -x) is covered when the apparent gravity at the tank centre - tide and rotation about the compound
+  CG (`LiquidEnvironment::cg_offset_body_m`), minus drag and push - gives Bo >= 10 (r2 `settled_weight` = 1) within
+  30 deg [E] of -x (`vehicle::outlet_check`). Drag alone pushes the liquid to the nose (the depot flies nose along +V),
+  the push brings it aft.
+- **Sequence** (`sim/propellant_transfer`, pure state machine): Settling -> Chilldown (120 s [E], the chill-down
+  mass vented from the delivering tanks) -> Flowing -> Complete; an uncovered outlet pauses Chilldown / Flowing
+  ("Transfer unterbrochen: Treibstoff nicht am Auslass", without gas "... kein Kaltgas zum Setzen"), a covered one
+  resumes. A line closes at the delivering floor, a full receiving tank or its limit; floors hold at the line's closing
+  (gas and boil-off after that come out of the reserve's items: tens of kg).
+- **Session** (`FlightSession::start_transfer(TransferRequest)`, `stop_transfer`, `transfer_state`;
+  `flight_session_transfer.cpp`): both directions (`ChaserToStation` tanker -> depot, `StationToChaser` depot -> HLS
+  with per-line limits); the push always comes from the chaser. Steps every `request.step_s` (10 s) of epoch - the
+  coast is limited to the next step, the step fires within half a tick (the Epoch at 8e8 s past J2000 rounds to
+  ~1e-7 s, so sums of ticks missed a 1e-9 test by one tick). Tank moves through `set_tank_mass` (compound refresh).
+  Refusals (German): not docked, autopilot active, no coupled connectors, no transfer pressures, nothing to move;
+  a second start ("Transfer läuft bereits") and undocking ("Abkoppeln nicht möglich: Treibstofftransfer läuft") are
+  refused while one runs; a cleared target or a detach stops it.
+- **Docked boil-off** (r3 M2): a station carrying a visitor (and the held chaser) no longer vents in `FlightBody`; the
+  session evaluates both bodies every 10 s and after every coast in the compound's environment and vents through
+  `set_tank_mass` (trapezoid), so the compound CG and the mated hulls stay exact (the depot venting by itself had
+  moved the port gap by 0.11 mm in 2 h). `FlightBody::boil_off_rate()` shows the session's value.
+- **Tanker reserve** (`mission::tanker_reserve`, `FlightSession::tanker_reserve` / `tanker_transfer_request`): the
+  deorbit burn by the rocket equation from the mass after it (ship without main propellant, headers full, + gas
+  1.5 t [E] + unusable 1 t [E]) with the delta-v of `ship_return_preview` (plan_ship_return's planner without the
+  boil-off check; 8-day pass search [E]: from the 26.5 deg depot orbit no pass came within reach in 48 h), x 1.10
+  (r2 commit margin), + gas + boil-off until the burn 2 t [E] + unusable; split at the deorbit set's mixture ratio.
+- **Numbers** (tanker 200 t main propellant -> depot 600 t, 200 km / 26.5 deg, floors 10.0 / 2.8 t [test]):
+  940 s (186 s settling + 120 s chill-down + ~630 s LOX flow), delivered LOX 144.6 t / CH4 40.3 t, settling gas 1.83 t
+  at 1,333 N, chill-down 0.42 t, boil-off of both ships 12.6 kg; tanker left with LOX 10.0 t / CH4 2.75 t. Depot -> HLS
+  (50 t aboard) 20 / 5.5 t: 400 s, 595 kg of the HLS's gas. Docked 2 h without transfer: tanker (200 t) 532 kg, depot
+  (600 t) 32 kg. Tanker reserve at the depot: deorbit 59.4 m/s -> burn 5.6 t, reserve 10.1 t.
+- **Tests:** `[refuelling][prop_transfer]` (`test_refuelling_transfer.cpp`), with `[config]`, `[boil_off]`,
+  `[docking]`, `[hls]`, `[deorbit]`, `[mission]`.
