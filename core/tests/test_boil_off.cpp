@@ -1,11 +1,14 @@
 // Refuelling r2: propellant boil-off by a heat balance on the hull.
 
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <iterator>
-#include <stdexcept>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
 
 #include <catch2/catch_approx.hpp>
@@ -14,6 +17,8 @@
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/thermal_radiation.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/math/quat.hpp"
+#include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
 using namespace starsim;
@@ -154,4 +159,151 @@ TEST_CASE("stage.thermal rejects optics outside 0..1", "[boil_off][config]") {
     std::ofstream(path) << text;
     CHECK_THROWS_AS(config::load_vehicle(dir, "starship_depot"), config::ConfigError);
     std::filesystem::remove_all(dir);
+}
+
+namespace {
+
+// Far from the Earth (no albedo, no infrared), the Sun along `sun` (unit, body frame = environment frame).
+environment::RadiationEnvironment deep_space_sun(const Vec3& sun) {
+    environment::RadiationEnvironment env;
+    env.sun_direction = sun;
+    env.solar_flux_w_m2 = constants::solar_constant_w_m2;
+    env.sunlit_fraction = 1.0;
+    env.nadir_direction = {-1.0, 0.0, 0.0};
+    env.distance_over_radius = 1.0e6;
+    env.albedo_phase = 0.0;
+    return env;
+}
+
+bool verbose() { return std::getenv("STARSIM_VERBOSE") != nullptr; }
+
+}  // namespace
+
+TEST_CASE("strip balance: conducting wall passes the absorbed flux, an insulating one none", "[boil_off][vehicle]") {
+    const double tb = 90.19, absorbed = 500.0, eps = 0.15;
+    const double sigma_tb4 = eps * constants::stefan_boltzmann_w_m2k4 * std::pow(tb, 4);
+    // Nearly no resistance: the skin sits at the boiling point, everything but its own tiny emission goes in.
+    CHECK(vehicle::strip_heat_leak_w_m2(absorbed, {0.4, eps, 1e-6}, tb) ==
+          Catch::Approx(absorbed - sigma_tb4).epsilon(1e-4));
+    // Nearly perfect insulation: radiative equilibrium skin, leak (T - Tb) / R.
+    const double r = 1e9;
+    const double t_eq = std::pow(absorbed / (eps * constants::stefan_boltzmann_w_m2k4), 0.25);
+    CHECK(vehicle::strip_heat_leak_w_m2(absorbed, {0.4, eps, r}, tb) * r + tb == Catch::Approx(t_eq).epsilon(1e-6));
+    // Nothing absorbed: the wall loses heat (negative leak).
+    CHECK(vehicle::strip_heat_leak_w_m2(0.0, {0.4, eps, 0.01}, tb) < 0.0);
+}
+
+TEST_CASE("cylinder broadside to the Sun absorbs alpha S D L", "[boil_off][vehicle]") {
+    const config::ThermalConfig bare{{0.4, 0.15, 1e-6}, std::nullopt, 0.0};
+    const vehicle::HullSection section{4.5, 10.0};
+    const double tb = 90.19;
+    const auto env = deep_space_sun({0.0, 1.0, 0.0});
+    const double emitted = 0.15 * constants::stefan_boltzmann_w_m2k4 * std::pow(tb, 4) * constants::two_pi * 4.5 * 10.0;
+    CHECK(vehicle::section_heat_w(section, bare, 1.5 * constants::pi, tb, env, {}) ==
+          Catch::Approx(0.4 * constants::solar_constant_w_m2 * 9.0 * 10.0 - emitted).epsilon(5e-3));
+    // End-on: the walls see no sun and lose their emission - negative.
+    CHECK(vehicle::section_heat_w(section, bare, 1.5 * constants::pi, tb, deep_space_sun({1.0, 0.0, 0.0}), {}) ==
+          Catch::Approx(-emitted).epsilon(1e-3));
+}
+
+TEST_CASE("boil_off_rates: hull main tanks only, heat over latent heat, clamped at zero", "[boil_off][vehicle]") {
+    const auto ship = top_stage_alone("starship_block3");
+    const auto sunlit = vehicle::boil_off_rates(*ship, deep_space_sun({0.0, 0.0, 1.0}), {});  // sun on the dorsal side
+    REQUIRE(sunlit.size() == 2);  // lox_main, ch4_main - no headers
+    for (const auto& t : sunlit) {
+        const auto& tank = ship->stages()[t.stage_index].tanks[t.tank_index];
+        CHECK(tank.config.role == config::TankRole::Main);
+        CHECK(t.heat_w > 0.0);
+        CHECK(t.mass_flow_kgps == Catch::Approx(t.heat_w / tank.latent_heat_j_kg));
+    }
+    // Sun along the axis: the walls lose heat - no condensation, flows clamp at 0.
+    for (const auto& t : vehicle::boil_off_rates(*ship, deep_space_sun({1.0, 0.0, 0.0}), {})) {
+        CHECK(t.heat_w == 0.0);
+        CHECK(t.mass_flow_kgps == 0.0);
+    }
+    const auto total = vehicle::total_boil_off(*ship, sunlit);
+    CHECK(total.oxidizer_kgps > 0.0);
+    CHECK(total.fuel_kgps > 0.0);
+}
+
+TEST_CASE("boil_off_rates: tiles on the belly, MLI on the depot, nothing without stage.thermal", "[boil_off][vehicle]") {
+    const auto ship = top_stage_alone("starship_block3");
+    auto heat = [](const vehicle::Vehicle& v, const Vec3& sun) {
+        double sum = 0.0;
+        for (const auto& t : vehicle::boil_off_rates(v, deep_space_sun(sun), {})) sum += t.heat_w;
+        return sum;
+    };
+    CHECK(heat(*ship, {0.0, 0.0, -1.0}) < 0.5 * heat(*ship, {0.0, 0.0, 1.0}));  // belly (tiles) vs dorsal (bare)
+    const auto depot = top_stage_alone("starship_depot");
+    CHECK(heat(*depot, {0.0, 0.0, 1.0}) < 0.02 * heat(*ship, {0.0, 0.0, 1.0}));
+    const auto dragon = top_stage_alone("crew_dragon");
+    CHECK(vehicle::boil_off_rates(*dragon, deep_space_sun({0.0, 0.0, 1.0}), {}).empty());
+}
+
+namespace {
+
+// Centaur LO2 sidewall in a sunlit park-orbit coast (AIAA 2007-5845): axis along the orbit normal, rolling (the strip
+// sum is roll-independent), the Sun in the orbit plane at noon in mid-coast [E]; mean wall flux over the coast from
+// perigee. Mirrors tools/validation/centaur_boil_off_calibration.py.
+double centaur_wall_flux_w_m2(const config::ThermalSurfaceConfig& surface, double perigee_km, double apogee_km,
+                              double coast_min, bool earth) {
+    const double re = constants::earth_mean_radius_m, mu = constants::earth_gm_m3ps2;
+    const double rp = re + perigee_km * 1e3, ra = re + apogee_km * 1e3;
+    const double a = 0.5 * (rp + ra), e = (ra - rp) / (ra + rp), n = std::sqrt(mu / (a * a * a));
+    auto at = [&](double t, double& r, double& nu) {
+        double ecc_anomaly = n * t;
+        for (int k = 0; k < 50; ++k) {
+            ecc_anomaly -= (ecc_anomaly - e * std::sin(ecc_anomaly) - n * t) / (1.0 - e * std::cos(ecc_anomaly));
+        }
+        r = a * (1.0 - e * std::cos(ecc_anomaly));
+        nu = 2.0 * std::atan2(std::sqrt(1.0 + e) * std::sin(0.5 * ecc_anomaly),
+                              std::sqrt(1.0 - e) * std::cos(0.5 * ecc_anomaly));
+    };
+    double r_mid = 0.0, nu_mid = 0.0;
+    at(0.5 * coast_min * 60.0, r_mid, nu_mid);
+    const config::ThermalConfig thermal{surface, std::nullopt, 0.0};
+    const vehicle::HullSection section{1.524, 1.0};  // 10 ft tank [S]; the length cancels
+    // Body x (the tank axis) -> frame z (the orbit normal); body y/z -> the orbit plane.
+    const math::Quat body_to_frame = math::Quat::from_axis_angle({0.0, 1.0, 0.0}, -0.5 * constants::pi);
+    constexpr int samples = 60;
+    double sum = 0.0;
+    for (int k = 0; k < samples; ++k) {
+        double r = 0.0, nu = 0.0;
+        at((k + 0.5) / samples * coast_min * 60.0, r, nu);
+        environment::RadiationEnvironment env;
+        env.sun_direction = {std::cos(nu_mid), std::sin(nu_mid), 0.0};
+        env.solar_flux_w_m2 = constants::solar_constant_w_m2;
+        env.sunlit_fraction = 1.0;  // the reconstructions cover the sunlit part
+        env.nadir_direction = {-std::cos(nu), -std::sin(nu), 0.0};
+        env.distance_over_radius = earth ? r / re : 1.0e6;
+        env.albedo_phase = earth ? std::max(0.0, std::cos(nu - nu_mid)) : 0.0;
+        sum += vehicle::section_heat_w(section, thermal, 0.0, 90.19, env, body_to_frame) /
+               (constants::two_pi * section.radius_m * section.length_m);
+    }
+    return sum / samples;
+}
+
+constexpr double btu_hr_ft2 = 3.15459;  // W/m^2 [S: NIST SP 811]
+
+}  // namespace
+
+TEST_CASE("Centaur LO2 sidewall flux: calibration and prediction (AIAA 2007-5845 Table 2)", "[boil_off][validation]") {
+    // White-painted foam [E: paint alpha 0.25, eps 0.88]; resistance calibrated [D] on AC-206 (23 Btu/hr-ft^2).
+    const config::ThermalSurfaceConfig foam{0.25, 0.88, 1.586};
+    const double ac206 = centaur_wall_flux_w_m2(foam, 167.0, 1132.0, 58.0, true);
+    const double ac167 = centaur_wall_flux_w_m2(foam, 185.0, 267.0, 59.0, true);
+    const double av003 = centaur_wall_flux_w_m2(foam, 167.0, 4165.0, 78.0, true);
+    // 3-layer MLI [E: cover alpha 0.30, eps 0.80]; calibrated [D] on the TC-11/TC-15 average (3 Btu/hr-ft^2), high
+    // elliptical transfer coasts: sun only.
+    const double tc = centaur_wall_flux_w_m2({0.30, 0.80, 8.22}, 0.0, 0.0, 1.0, false);
+    if (verbose()) {
+        std::cout << "Centaur flux W/m^2: AC-206 " << ac206 << " AC-167 " << ac167 << " AV-003 " << av003 << " TC "
+                  << tc << "\n";
+    }
+    CHECK(ac206 == Catch::Approx(23.0 * btu_hr_ft2).epsilon(0.03));  // calibration consistency
+    CHECK(tc == Catch::Approx(3.0 * btu_hr_ft2).epsilon(0.03));
+    // Validation: other orbits with AC-206's wall. Tolerance 25 % [documented: TC-11 vs TC-15 differ by 2x, coast
+    // geometry unknown].
+    CHECK(ac167 == Catch::Approx(25.0 * btu_hr_ft2).epsilon(0.25));
+    CHECK(av003 == Catch::Approx(25.0 * btu_hr_ft2).epsilon(0.25));
 }

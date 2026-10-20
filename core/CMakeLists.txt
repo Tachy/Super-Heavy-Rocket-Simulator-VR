@@ -32,6 +32,7 @@ add_library(starsim_core STATIC
     src/vehicle/docking_port.cpp
     src/vehicle/port_mating.cpp
     src/vehicle/compound_mass.cpp
+    src/vehicle/boil_off.cpp
     src/gnc/attitude_controller.cpp
     src/gnc/ascent_guidance.cpp
     src/gnc/peg_steering.cpp
