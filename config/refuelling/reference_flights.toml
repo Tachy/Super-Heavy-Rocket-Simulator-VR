@@ -1,0 +1,24 @@
+# Refuelling r6: measured numbers of the r5 reference flights (pad starts, 2026-10-20 epochs) - the campaign
+# calculator's inputs. [D] all: read from the flights' leg marks (core/tests/refuelling_measurements.hpp) and checked by
+# the slow r5 campaigns (1 % or 0.3 t). Re-measure after any change to the vehicles, ascents, phasing or transfer.
+
+[depot]
+mission = "depot_launch"
+initial_propellant_t = 55.5        # [D] main tanks after the ascent (199.6 x 211.7 km)
+
+[tanker]
+mission = "tanker_flight"
+dry_mass_t = 209.0                 # [D] the configured tanker (starship_tanker) the numbers belong to
+residue_after_ascent_t = 99.2      # [D] main tanks at the Rendezvous mark (170 x 190 km after the raise)
+rendezvous_t = 17.8                # [D] Rendezvous -> Docked: burns, RCS gas, boil-off (phasing 39.7 h)
+delivered_oxidizer_t = 54.6        # [D] into the depot
+delivered_fuel_t = 12.9            # [D]
+chilldown_t = 0.42                 # [D] vented
+settling_gas_t = 0.94              # [D]
+main_at_undock_t = 12.6            # [D] the reserve kept for the return
+main_at_catch_t = 2.74             # [D] what the reserve left over
+dry_mass_sensitivity = 0.99        # [D] r5 probes: ship dry -10 / -20 t -> residue +9.9 / +19.8 t
+
+[hls]
+mission = "hls_refuel"
+main_at_docking_t = 184.5          # [D] HLS main tanks at the Docked mark

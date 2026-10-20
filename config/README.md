@@ -271,6 +271,13 @@ flow separation (vacuum engines).
     `propellant_t`; `[start]` `mode = "pad" | "phasing_orbit"` (phasing orbit: `behind_deg`, `propellant_t` main
     tanks); `[launch_window]` as `iss_launch` (insertion = liftoff -> orbit insertion); `[phasing]` as above;
     hls_refuel: `[lunar]` `mission` (the `lunar_landing` mission continued after the refuelling).
+- `refuelling/reference_flights.toml` (refuelling r6, `config::load_refuelling_reference`): the measured numbers of
+  the r5 pad flights [D] that the campaign calculator (`sim::plan_refuelling_campaign`, `refuelling_report`) starts
+  from - `[depot]` `mission`, `initial_propellant_t`; `[tanker]` `mission`, `dry_mass_t` (the configured tanker),
+  `residue_after_ascent_t`, `rendezvous_t`, `delivered_oxidizer_t`, `delivered_fuel_t`, `chilldown_t`,
+  `settling_gas_t`, `main_at_undock_t`, `main_at_catch_t`, `dry_mass_sensitivity` (residue per kg of dry mass);
+  `[hls]` `mission`, `main_at_docking_t`. The slow r5 campaigns check them (1 % or 0.3 t): re-measure after any change
+  to the vehicles, ascents, phasing or transfer.
 
 - Payload vehicles: `config::stack_payload` stacks a vehicle (e.g. `crew_dragon`) on the launcher; its stages are
   `payload` stages, whose thrusters stay blocked until the payload flies alone.
