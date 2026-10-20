@@ -122,6 +122,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   included), also before a push and before a plan's final review; no blanket `-Fast` or full-suite runs. A change to
   shared code (e.g. `FlightSession::advance_to`, `Vehicle::mass_properties`) whose new branch is inactive for other
   subsystems does not pull their campaigns in. Tag a new test case `[slow]` when it takes more than ~40 s.
+- Long test runs (user 2026-10-20): a run that may take longer than 10 minutes goes to the background with its output
+  in a file; check its state every 10 minutes (failures so far, a case hanging or far beyond its usual time). When
+  tests are going wrong, stop the run early and fix the cause instead of waiting for the end.
 - ctest runs test cases as parallel processes: tests must not share temp files or directories (make names unique).
 - Visual check (needs GPU, no --headless): `godot --path game --script res://tests/render_check.gd --
   --utc=2024-04-08T18:42:00 --focus=earth --view_from=moon --out=<png>`; ground views with
