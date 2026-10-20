@@ -197,6 +197,9 @@ public:
     // Main propellant (oxidizer + fuel: the gauge); reaction-control supplies are rcs_propellant_kg().
     double propellant_kg() const;
     double rcs_propellant_kg() const;
+    // What the RCS can draw: main-tank cold gas (rcs.propellant "main") counts the stage's main oxidizer and fuel
+    // tanks (not the headers: the landing reserve), otherwise its Rcs tanks (refuelling r3: Starship proximity budgets).
+    double rcs_supply_kg() const;
     // Main tanks only (the webcast gauge: header tanks are not shown).
     double main_propellant_kg() const;
     // Sets one tank's mass at run time (refuelling r1: transfer, boil-off, the propellant test mode), clamped to

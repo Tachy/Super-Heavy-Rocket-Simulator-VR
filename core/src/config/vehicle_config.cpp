@@ -54,6 +54,35 @@ std::vector<std::string> text_list(const Document& doc, const toml::table& t, st
     return out;
 }
 
+// [[stage.rcs.pod]] / [[stage.rcs_pod]] entries: a set of directions at each azimuth of a ring -> thrusters.
+void append_rcs_pods(const Document& doc, const toml::array& pods, std::vector<RcsThrusterConfig>& out) {
+    for (const auto& node : pods) {
+        const auto& p = *node.as_table();
+        const std::string id = doc.text(p, "id");
+        const double station = doc.number(p, "station_m");
+        const double radius = doc.positive(p, "radius_m");
+        const double thrust = doc.positive(p, "thrust_n");
+        const auto azimuths = number_list(doc, p, "azimuths_deg");
+        const auto directions = text_list(doc, p, "directions");
+        const bool behind = p["behind_nose_cone"].value_or(false);
+        for (size_t k = 0; k < azimuths.size(); ++k) {
+            const double a = azimuths[k] * constants::deg_to_rad;
+            const math::Vec3 radial{0.0, std::cos(a), std::sin(a)}, tangential{0.0, -std::sin(a), std::cos(a)};
+            for (const auto& d : directions) {
+                math::Vec3 direction;
+                if (d == "tangential_plus") direction = tangential;
+                else if (d == "tangential_minus") direction = -tangential;
+                else if (d == "inward") direction = -radial;
+                else if (d == "forward") direction = {1.0, 0.0, 0.0};
+                else if (d == "aft") direction = {-1.0, 0.0, 0.0};
+                else doc.fail("stage.rcs.pod.directions: unknown '" + d + "'");
+                out.push_back({id + "_" + std::to_string(k + 1) + "_" + d,
+                           math::Vec3{station, 0.0, 0.0} + radial * radius, direction, thrust, behind});
+            }
+        }
+    }
+}
+
 // [stage.rcs]: thrusters from pods (a set of directions at each azimuth of a ring) and single [[stage.rcs.thruster]]s.
 RcsConfig load_rcs(const Document& doc, const toml::table& rcs, const std::vector<TankConfig>& tanks) {
     RcsConfig out;
@@ -65,33 +94,7 @@ RcsConfig load_rcs(const Document& doc, const toml::table& rcs, const std::vecto
         })) {
         doc.fail("stage.rcs.propellant must be \"main\" or the id of a tank with contents = \"rcs\"");
     }
-    if (auto pods = rcs["pod"].as_array()) {
-        for (const auto& node : *pods) {
-            const auto& p = *node.as_table();
-            const std::string id = doc.text(p, "id");
-            const double station = doc.number(p, "station_m");
-            const double radius = doc.positive(p, "radius_m");
-            const double thrust = doc.positive(p, "thrust_n");
-            const auto azimuths = number_list(doc, p, "azimuths_deg");
-            const auto directions = text_list(doc, p, "directions");
-            const bool behind = p["behind_nose_cone"].value_or(false);
-            for (size_t k = 0; k < azimuths.size(); ++k) {
-                const double a = azimuths[k] * constants::deg_to_rad;
-                const math::Vec3 radial{0.0, std::cos(a), std::sin(a)}, tangential{0.0, -std::sin(a), std::cos(a)};
-                for (const auto& d : directions) {
-                    math::Vec3 direction;
-                    if (d == "tangential_plus") direction = tangential;
-                    else if (d == "tangential_minus") direction = -tangential;
-                    else if (d == "inward") direction = -radial;
-                    else if (d == "forward") direction = {1.0, 0.0, 0.0};
-                    else if (d == "aft") direction = {-1.0, 0.0, 0.0};
-                    else doc.fail("stage.rcs.pod.directions: unknown '" + d + "'");
-                    out.thrusters.push_back({id + "_" + std::to_string(k + 1) + "_" + d,
-                                             math::Vec3{station, 0.0, 0.0} + radial * radius, direction, thrust, behind});
-                }
-            }
-        }
-    }
+    if (auto pods = rcs["pod"].as_array()) append_rcs_pods(doc, *pods, out.thrusters);
     if (auto list = rcs["thruster"].as_array()) {
         for (const auto& node : *list) {
             const auto& q = *node.as_table();
@@ -606,8 +609,8 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
 }
 
 // [[stage]] from = "<vehicle>:<stage>": that vehicle's stage exactly as configured there (refuelling r1: the tanker
-// and the depot's booster are Block 3's). Only docking ports and transfer connectors may be added; any other key would
-// silently diverge from the source and is an error.
+// and the depot's booster are Block 3's). Only docking ports, transfer connectors and RCS pods (r3) may be added; any
+// other key would silently diverge from the source and is an error.
 StageConfig load_stage_from(const std::filesystem::path& config_dir, const Document& doc, const toml::table& t,
                             const std::string& propellant_id) {
     constexpr int max_from_depth = 4;  // a longer chain is a cycle
@@ -624,7 +627,7 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
         doc.fail("stage.from must be \"<vehicle>:<stage>\", got \"" + from + "\"");
     }
     for (const auto& [key, value] : t) {
-        if (key != "from" && key != "docking_port" && key != "transfer_connector") {
+        if (key != "from" && key != "docking_port" && key != "transfer_connector" && key != "rcs_pod") {
             doc.fail("stage.from = \"" + from + "\": '" + std::string(key.str()) + "' cannot be set on a reused stage");
         }
     }
@@ -640,6 +643,11 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
     StageConfig s = *it;
     append_docking_ports(doc, t, s);
     append_transfer_connectors(doc, t, s);
+    if (auto pods = t["rcs_pod"].as_array()) {
+        // refuelling r3: docking thrusters added to a reused ship (the tanker's -x pair)
+        if (s.rcs.thrusters.empty()) doc.fail("stage.from = \"" + from + "\": rcs_pod needs [stage.rcs] on the source stage");
+        append_rcs_pods(doc, *pods, s.rcs.thrusters);
+    }
     return s;
 }
 
@@ -692,6 +700,11 @@ VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_
         }
     }
     return v;
+}
+
+VehicleConfig top_stage_config(VehicleConfig vehicle) {
+    if (vehicle.stages.size() > 1) vehicle.stages.erase(vehicle.stages.begin(), vehicle.stages.end() - 1);
+    return vehicle;
 }
 
 VehicleConfig stack_payload(VehicleConfig launcher, const VehicleConfig& payload) {

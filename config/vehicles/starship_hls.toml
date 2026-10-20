@@ -127,7 +127,7 @@ station_m = 46.0                         # [E] forward of the forward flaps; sid
 radius_m = 4.5
 azimuths_deg = [0.0, 180.0]
 thrust_n = 1500.0                        # [E] (the pre-d1 estimate)
-directions = ["tangential_plus", "tangential_plus", "tangential_minus", "tangential_minus", "inward", "inward"]
+directions = ["tangential_plus", "tangential_plus", "tangential_minus", "tangential_minus", "inward", "inward", "aft"]  # aft: -x for docking at the depot [E] (refuelling r3)
 
 [[stage.rcs.pod]]
 id = "aft"

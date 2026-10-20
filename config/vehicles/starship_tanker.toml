@@ -40,3 +40,15 @@ position_m = [8.0, 0.0, 5.0]             # [E]
 id = "ch4_transfer"
 tank = "ch4_main"                        # CH4 main tank 20-32.6 m
 position_m = [24.0, 0.0, 5.0]            # [E]
+
+# Docking thrusters [E] (refuelling r3, user 2026-10-20): two cold-gas thrusters pushing along -x at the forward pod.
+# In the docking attitude the ship's x axis lies along the V-bar; without -x a hold or retreat below the depot cannot
+# stop the Coriolis drift forward (v_along + 2 n x_radial is conserved without along-track thrust). Same size as the
+# aft pod's "forward" pair. SpaceX publishes no thruster layout.
+[[stage.rcs_pod]]
+id = "docking"
+station_m = 46.0
+radius_m = 4.5
+azimuths_deg = [0.0, 180.0]
+thrust_n = 1500.0
+directions = ["aft"]

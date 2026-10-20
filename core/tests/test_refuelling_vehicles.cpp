@@ -115,7 +115,8 @@ TEST_CASE("A stage taken over with `from` is the source vehicle's stage", "[refu
             CHECK(b.tanks[k].capacity_kg == a.tanks[k].capacity_kg);
         }
         CHECK(b.engine_groups.size() == a.engine_groups.size());
-        CHECK(b.rcs.thrusters.size() == a.rcs.thrusters.size());
+        // the ship adds its -x docking pair (refuelling r3)
+        CHECK(b.rcs.thrusters.size() == a.rcs.thrusters.size() + (a.id == "ship" ? 2 : 0));
         CHECK(b.flaps.size() == a.flaps.size());
     }
     CHECK(tanker.engines.size() == block3.engines.size());
@@ -322,5 +323,5 @@ TEST_CASE("A tanker after its transfer translates along the docking axis on its 
     CHECK(tanker->rcs_pure_force_capability({0.0, 1.0, 0.0}).force_n > 0.0);
     CHECK(tanker->rcs_pure_force_capability({0.0, -1.0, 0.0}).force_n > 0.0);
     CHECK(tanker->rcs_pure_force_capability({1.0, 0.0, 0.0}).force_n > 0.0);  // settling thrust (r4)
-    CHECK(tanker->rcs_pure_force_capability({-1.0, 0.0, 0.0}).force_n == Catch::Approx(0.0).margin(1.0));  // none aft
+    CHECK(tanker->rcs_pure_force_capability({-1.0, 0.0, 0.0}).force_n > 0.0);  // the docking pair (refuelling r3)
 }

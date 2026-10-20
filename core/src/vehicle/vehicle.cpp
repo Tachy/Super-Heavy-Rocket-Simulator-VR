@@ -379,6 +379,20 @@ double Vehicle::rcs_propellant_kg() const {
     return total;
 }
 
+double Vehicle::rcs_supply_kg() const {
+    double total = 0.0;
+    for (const auto& s : stages_) {
+        if (s.rcs.empty()) continue;
+        if (s.config.rcs.propellant == "main") {
+            total += s.propellant_kg(config::TankContents::Oxidizer, config::TankRole::Main) +
+                     s.propellant_kg(config::TankContents::Fuel, config::TankRole::Main);
+        } else {
+            total += s.propellant_kg(config::TankContents::Rcs);
+        }
+    }
+    return total;
+}
+
 Vec3 throttle_torque_nm(const Engine& engine, double cg_station_m) {
     const Vec3 arm = engine.gimbal_point_m - Vec3{cg_station_m, 0.0, 0.0};
     return cross(arm, engine.axis_body * engine.performance->thrust_n(1.0, 0.0));

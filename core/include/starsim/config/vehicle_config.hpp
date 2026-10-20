@@ -346,6 +346,9 @@ struct VehicleConfig {
 // Loads config/vehicles/<vehicle_id>.toml plus the referenced propellant and engine files.
 VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_view vehicle_id);
 
+// The top stage alone, as it flies after staging (a ship in orbit, the depot as a station).
+VehicleConfig top_stage_config(VehicleConfig vehicle);
+
 // The launcher with a payload vehicle on top (a mission's [payload]): the payload's stages follow the launcher's, marked
 // `payload`; the top launcher stage carries no payload mass. Throws ConfigError if a stage id occurs twice.
 VehicleConfig stack_payload(VehicleConfig launcher, const VehicleConfig& payload);
