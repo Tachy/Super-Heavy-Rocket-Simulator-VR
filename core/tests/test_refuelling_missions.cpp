@@ -159,12 +159,12 @@ TEST_CASE("Leg marks record the chaser's mass and propellant at every leg change
 
 namespace {
 
-// Refuelling f1: the tanker just inserted at 120 x 190 km (at its periapsis), 40 deg ahead of the depot (station),
+// Refuelling f1: the tanker just inserted at 120 x 190 km (at its periapsis), `ahead_deg` ahead of the depot (station),
 // its mission at the end of the ascent leg with a raise to `to`.
 struct RaiseFixture : refuelling_test::DepotSession {
-    explicit RaiseFixture(double main_kg) {
+    explicit RaiseFixture(double main_kg, double ahead_deg = 40.0) {
         const double re = constants::wgs84_semi_major_axis_m;
-        const auto ahead = refuelling_test::depot_state(earth, t0, 40.0 * deg);
+        const auto ahead = refuelling_test::depot_state(earth, t0, ahead_deg * deg);
         const double rp = re + 120e3, ra = re + 190e3;
         const double vp = std::sqrt(constants::earth_gm_m3ps2 * (2.0 / rp - 2.0 / (rp + ra)));
         const math::StateVector tanker{rp * math::normalized(ahead.position_m),
@@ -215,6 +215,20 @@ TEST_CASE("Raise: two burns to an orbit above the depot, then the phasing plan",
     std::printf("[f1] raise 120 x 190 -> %.1f x %.1f km: %.2f t main propellant\n", (rp - re) / 1e3, (ra - re) / 1e3,
                 used_kg / 1e3);
     CHECK(used_kg < 12e3);  // ~44 + 21 m/s on ~310 t: ~6 t, plus the bare tanker's boil-off over ~3 h (~3.5 t)
+}
+
+TEST_CASE("Raise: every below-depot candidate can be planned after its flown raise", "[refuelling][iss_mission]") {
+    // review I1: the osculating apoapsis after a raise near the coelliptic height (197.1 km) must stay below it
+    test::spice_session();
+    const double re = constants::wgs84_semi_major_axis_m;
+    const double periapsis_km = GENERATE(150.0, 170.0, 180.0);  // 190 x 190 km: refused by the window (I1)
+    CAPTURE(periapsis_km);
+    RaiseFixture f(100e3, -10.0);  // 10 deg behind: a lower orbit catches up
+    f.sequence.raise_to = mission::PhasingOrbit{re + periapsis_km * 1e3, re + 190e3};
+    f.start();
+    f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
+    INFO(f.session.iss_mission_status());
+    CHECK(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
 }
 
 TEST_CASE("Raise: a burn that runs dry ends the mission with its reason", "[refuelling][iss_mission]") {

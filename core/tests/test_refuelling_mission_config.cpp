@@ -58,7 +58,7 @@ TEST_CASE("depot_launch and tanker_flight configurations load", "[refuelling][co
     CHECK(ta.apoapsis_height_m == Catch::Approx(190.0e3));
 
     // f1: the candidate phasing orbits and the planning values of their cost
-    REQUIRE(t.phasing_candidates_m.size() == 7u);
+    REQUIRE(t.phasing_candidates_m.size() == 6u);
     CHECK(t.phasing_candidates_m.front().first == Catch::Approx(150.0e3));
     CHECK(t.phasing_candidates_m.front().second == Catch::Approx(190.0e3));
     CHECK(t.phasing_candidates_m.back().first == Catch::Approx(250.0e3));
@@ -66,7 +66,7 @@ TEST_CASE("depot_launch and tanker_flight configurations load", "[refuelling][co
     CHECK(t.planning_mass_kg == Catch::Approx(308.0e3));
     CHECK(t.planning_boil_off_kgps == Catch::Approx(15.9e3 / 86400.0));
     const auto h = config::load_refuelling_flight_mission(config_dir, "hls_refuel");
-    CHECK(h.phasing_candidates_m.size() == 7u);
+    CHECK(h.phasing_candidates_m.size() == 6u);
     CHECK(h.planning_mass_kg == Catch::Approx(328.0e3));
 
     const auto o = config::load_refuelling_flight_mission(config_dir, "tanker_flight_orbit");
@@ -148,7 +148,7 @@ TEST_CASE("Refuelling window parameters: the insertion orbit and the candidates"
     const auto p = sim::refuelling_window_parameters(t, a, 3400.0);
     CHECK(p.separation_periapsis_radius_m == Catch::Approx(re + 120.0e3));  // the insertion, the raise follows
     CHECK(p.separation_apoapsis_radius_m == Catch::Approx(re + 190.0e3));
-    REQUIRE(p.phasing_orbits.size() == 7u);
+    REQUIRE(p.phasing_orbits.size() == 6u);
     CHECK(p.phasing_orbits.front().periapsis_radius_m == Catch::Approx(re + 150.0e3));
     CHECK(p.phasing_orbits.back().apoapsis_radius_m == Catch::Approx(re + 270.0e3));
     CHECK(p.cost.mass_kg == Catch::Approx(308.0e3));

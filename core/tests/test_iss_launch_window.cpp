@@ -229,6 +229,24 @@ TEST_CASE("Launch window: a raise that eats the mission limit is infeasible", "[
     CHECK(w.reason.rfind("Kein Startfenster", 0) == 0);
 }
 
+TEST_CASE("Launch window: a candidate too close to the coelliptic height is refused", "[iss][launch_window]") {
+    // review I1: flown, the osculating apoapsis of a 190 x 190 km orbit swings over the coelliptic height 197.1 km
+    // (J2) and the phasing plan refuses it - the window must not choose it
+    test::spice_session();
+    const TankerFixture f;
+    auto p = f.parameters();
+    p.phasing_orbits = {{re + 190e3, re + 190e3}};
+    p.search_s = 3.0 * 86400.0;
+    const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, f.start, p, gm);
+    CHECK_FALSE(w.feasible);
+    CHECK(w.reason.find("zu nah an der Zielbahn") != std::string::npos);
+    p.phasing_orbits = {{re + 180e3, re + 190e3}, {re + 190e3, re + 190e3}};  // 180 x 190 km keeps its clearance
+    p.search_s = 20.0 * 86400.0;
+    const auto ok = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, f.start, p, gm);
+    REQUIRE(ok.feasible);
+    CHECK(ok.phasing_orbit->periapsis_radius_m == Catch::Approx(re + 180e3));
+}
+
 TEST_CASE("Phasing cost against a hand computation", "[iss][launch_window]") {
     const double r1 = re + 170e3, r_t = re + 200e3;
     mission::PhasingParameters p;

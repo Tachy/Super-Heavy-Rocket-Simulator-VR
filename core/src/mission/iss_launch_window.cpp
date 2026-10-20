@@ -18,6 +18,8 @@ namespace {
 using math::Vec3;
 
 constexpr int max_raise_burns = 2;  // an apoapsis and a periapsis raise (refuelling f1)
+// [E] review I1: the J2 swing of the osculating apsides at ~200 km (flown: 190 x 190 km read over 197.1 km)
+constexpr double phasing_clearance_m = 10.0e3;
 
 double raan_rate_radps(double a_m, double inclination_rad) {
     orbit::StationMeanElements mean;
@@ -163,7 +165,15 @@ LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrient
                 q.mission_limit_s -= raise.elapsed_s;
                 q.earliest_arrival_s = std::max(0.0, q.earliest_arrival_s - raise.elapsed_s);
                 c.schedule = PhasingSchedule{};
-                if (!raise.feasible || q.mission_limit_s <= 0.0) {
+                // review I1: the flown plan reads the osculating apsides, which J2 swings by up to ~10 km - a phasing
+                // orbit whose mean radius lies within that of the coelliptic height (below) or of the target's orbit
+                // plus the coelliptic height (above) passes here but is refused in flight
+                const double r_c = a_station - p.phasing.coelliptic_height_m;
+                const bool clear = a_chaser <= r_c - phasing_clearance_m ||
+                                   a_chaser >= a_station + p.phasing.coelliptic_height_m + phasing_clearance_m;
+                if (!clear) {
+                    c.schedule.reason = "Kein Rendezvous: Phasing-Bahn zu nah an der Zielbahn";
+                } else if (!raise.feasible || q.mission_limit_s <= 0.0) {
                     c.schedule.reason = "Kein Rendezvous: Phasing-Bahn nicht erreichbar";
                 } else {
                     c.raised = c.separation + raise.elapsed_s;

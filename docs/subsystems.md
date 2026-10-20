@@ -1454,7 +1454,10 @@ Spec `docs/superpowers/specs/2026-10-21-refuelling-followups-design.md` (f1), pl
   estimated two-body (`raise_estimate`) and its schedule run from the raised state with the remaining limit; the
   cheapest feasible one wins (`phasing_cost`: raise + Hohmann boost to the coelliptic orbit (+ phase burn) by the rocket
   equation, plus boil-off to Waypoint 0). `LaunchWindow::phasing_orbit`, `cost`, `raised`, `raised_state_gcrf`.
-- **Config** `[phasing]` of `tanker_flight` / `hls_refuel`: `candidates_km` [E] (150, 160, 170, 180, 190 x 190 km
+  A candidate whose mean radius lies within 10 km [E] of the coelliptic height (below) or of the target's orbit plus
+  that height (above) is refused ("zu nah an der Zielbahn", review I1: flown, the osculating apoapsis of 190 x 190 km
+  swung over 197.1 km with J2 and the phasing plan refused it).
+- **Config** `[phasing]` of `tanker_flight` / `hls_refuel`: `candidates_km` [E] (150, 160, 170, 180 x 190 km
   below; 220 x 240, 250 x 270 km above), `planning_mass_t` [D] 308 / 328, `planning_boil_off_t_per_day` [D] probe
   2026-10-21: tanker 15.9 (99.2 t main), HLS 0.45 (208 t), `window_margin_h` [E] 4: the window closes 4 h before the
   limit, the flown phasing keeps the full limit (a window needing 47.0 of 48 h failed its re-plan 40 h in).

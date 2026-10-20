@@ -29,7 +29,7 @@ mission_limit_h = 48.0            # [E] uncrewed
 earliest_arrival_h = 0.0
 periapsis_km = 170.0              # the reference phasing orbit (r5; --reference-phasing) after the raise at apoapsis
 # [E] f1: the phasing orbits (periapsis, apoapsis km) the launch window chooses from (as the tanker's)
-candidates_km = [[150.0, 190.0], [160.0, 190.0], [170.0, 190.0], [180.0, 190.0], [190.0, 190.0],
+candidates_km = [[150.0, 190.0], [160.0, 190.0], [170.0, 190.0], [180.0, 190.0],
                  [220.0, 240.0], [250.0, 270.0]]
 window_margin_h = 4.0             # [E] f1: the window closes this much before the limit (raise and drag move the arrival)
 planning_mass_t = 328.0           # [D] r5: HLS dry 120 t + main residue 208 t after the ascent (choice of the orbit)
