@@ -467,6 +467,14 @@ int64_t FlightSim::refuelling_campaign(const godot::Dictionary& params) {
     for (int64_t k = 0; k < keys.size() && refusal.empty(); ++k) {
         const godot::String key = keys[k];
         const godot::Variant value = params[keys[k]];
+        if (key == "reference_phasing") {  // f1: the r5 single phasing orbit
+            if (value.get_type() != godot::Variant::BOOL) {
+                refusal = "Kampagne: 'reference_phasing' ist kein Wahrheitswert";
+                break;
+            }
+            levers.reference_phasing = value;
+            continue;
+        }
         if (value.get_type() != godot::Variant::FLOAT && value.get_type() != godot::Variant::INT) {
             refusal = "Kampagne: '" + std::string(key.utf8().get_data()) + "' ist keine Zahl";
             break;

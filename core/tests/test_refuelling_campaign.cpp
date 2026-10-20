@@ -45,10 +45,10 @@ TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelli
     CHECK(r.depot.mission == "depot_launch");
     CHECK(r.depot.initial_propellant_kg == Catch::Approx(55.5e3));
     CHECK(r.tanker.mission == "tanker_flight");
-    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(67.5e3));
+    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(70.4e3));  // f1 re-measured
     CHECK(r.tanker.dry_mass_sensitivity == Catch::Approx(0.99));
     CHECK(r.hls.mission == "hls_refuel");
-    CHECK(r.hls.main_at_docking_kg == Catch::Approx(184.5e3));
+    CHECK(r.hls.main_at_docking_kg == Catch::Approx(187.6e3));
     // the reference tanker is the configured one
     const auto tanker = config::top_stage_config(config::load_vehicle(config_dir, "starship_tanker"));
     CHECK(tanker.stages.back().dry_mass_kg == Catch::Approx(r.tanker.dry_mass_kg));
@@ -112,6 +112,23 @@ TEST_CASE("Campaign against a hand computation", "[refuelling][campaign]") {
     CHECK(r.tankers[0].depot_after_kg == Catch::Approx(148e3));
     CHECK(r.tankers[1].flight.launch_s == Catch::Approx(day));
     CHECK(r.fill.front().depot_propellant_kg == Catch::Approx(50e3));
+}
+
+TEST_CASE("Campaign: the HLS's extra demand must be in the depot at its arrival", "[refuelling][campaign]") {
+    // As the hand computation, but the HLS's phasing orbit costs it 50 t more than its reference window (f1): at
+    // T3's 346 t the HLS (arriving day 4) would find less than 300 + 50 t, so T4 flies (day 5: 445 t); the HLS
+    // launches one interval after T4 and arrives day 5.
+    auto models = constant_models(1.0, 100.0, 2.0);
+    models.next_hls = [](double e) {
+        mission::CampaignFlight f{e, e + day, 0.0};
+        f.extra_demand_kg = 50e3;
+        return std::optional{f};
+    };
+    const auto r = mission::refuelling_campaign(simple_inputs(), models);
+    REQUIRE(r.closes);
+    CHECK(r.tanker_flights == 4);
+    CHECK(r.duration_s == Catch::Approx(5 * day));
+    CHECK(r.depot_at_hls_kg == Catch::Approx(445e3));
 }
 
 TEST_CASE("Campaign: vent and attitude gas are booked as losses", "[refuelling][campaign]") {
@@ -236,17 +253,18 @@ TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[r
     const auto r = sim::plan_refuelling_campaign(s.get(), {});
     print("reference", r);
     REQUIRE(r.result.closes);
-    // the first tanker flies the r5 window (79.8 h after the earliest); its schedule runs from the separation at
-    // 120 km to Waypoint 0 within the 48 h limit (the flown 39.7 h count from the Rendezvous mark after the raise)
-    // (review I1: the campaign flies the latest launch to that window's Waypoint 0 - a day later, 21 h of phasing)
+    // f1: the first tanker flies the first window from the earliest (the cheapest feasible phasing orbit at that
+    // crossing); the reference flight's schedule runs from the separation to Waypoint 0 within the 48 h limit less
+    // the 4 h window margin
     REQUIRE_FALSE(r.result.tankers.empty());
-    const double reference_arrival_s = 79.8 * 3600.0 + 444.3 + r.reference_phasing_s;  // liftoff + SECO + schedule
-    CHECK(r.result.tankers.front().flight.arrival_s == Catch::Approx(reference_arrival_s).margin(3.0 * 3600.0));
-    CHECK(r.result.tankers.front().flight.launch_s / 3600.0 >= 79.8 - 0.2);
-    CHECK(r.reference_phasing_s / 3600.0 > 39.7);
-    CHECK(r.reference_phasing_s / 3600.0 < 48.0);
+    CHECK(r.result.tankers.front().flight.launch_s >= 0.0);
+    CHECK(r.result.tankers.front().flight.launch_s < 4.0 * 86400.0);  // a window within the first days, not 13.8 d
+    CHECK(r.reference_phasing_s > 0.0);
+    CHECK(r.reference_phasing_s / 3600.0 <= 44.0);
     CHECK(r.altitude_cost_kg == Catch::Approx(0.0).margin(1e-6));
-    CHECK(r.tanker_base_delivered_kg == Catch::Approx(67.5e3).margin(1.0));
+    const auto file = config::load_refuelling_reference(config_dir);  // the measured flight's delivery
+    CHECK(r.tanker_base_delivered_kg ==
+          Catch::Approx(file.tanker.delivered_oxidizer_kg + file.tanker.delivered_fuel_kg).margin(1.0));
     // the HLS needs less than full tanks, more than it docks with
     CHECK(r.hls_required_mass_kg - r.hls_dry_mass_kg < r.hls_capacity_kg);
     CHECK(r.demand_kg > 0.0);
@@ -280,6 +298,40 @@ TEST_CASE("Campaign levers move the count the physical way", "[refuelling][campa
     CHECK(p.result.losses.boil_off_kg > base.result.losses.boil_off_kg);
 }
 
+TEST_CASE("Reference phasing reproduces the single-orbit campaign", "[refuelling][campaign][slow]") {
+    const Sources s;
+    sim::CampaignLevers ref;
+    ref.reference_phasing = true;
+    const auto r = sim::plan_refuelling_campaign(s.get(), ref);
+    print("reference phasing", r);
+    REQUIRE(r.result.closes);
+    for (const auto& t : r.result.tankers) {
+        REQUIRE(t.flight.phasing_orbit);
+        CHECK(t.flight.phasing_orbit->periapsis_radius_m ==
+              Catch::Approx(constants::wgs84_semi_major_axis_m + 170.0e3).margin(1.0));
+    }
+}
+
+TEST_CASE("Per-window phasing: more arrivals, fewer days", "[refuelling][campaign][slow]") {
+    const Sources s;
+    sim::CampaignLevers ref;
+    ref.reference_phasing = true;
+    const auto single = sim::plan_refuelling_campaign(s.get(), ref);
+    const auto chosen = sim::plan_refuelling_campaign(s.get(), {});
+    print("per-window phasing", chosen);
+    REQUIRE(single.result.closes);
+    REQUIRE(chosen.result.closes);
+    CHECK(chosen.result.duration_s < single.result.duration_s);
+    // shorter phasing means less boil-off per tanker; the count may still differ by one either way
+    CHECK(chosen.result.tanker_flights <= single.result.tanker_flights + 1);
+    int above = 0;
+    for (const auto& t : chosen.result.tankers) {
+        REQUIRE(t.flight.phasing_orbit);
+        above += t.flight.phasing_orbit->periapsis_radius_m > constants::wgs84_semi_major_axis_m + 200.0e3;
+    }
+    CHECK(above > 0);
+}
+
 TEST_CASE("Campaign setup refusals", "[refuelling][campaign]") {
     const Sources s;
     sim::CampaignLevers greedy;
@@ -305,6 +357,11 @@ TEST_CASE("refuelling_report: levers from the command line", "[refuelling][campa
     CHECK_THROWS_AS(sim::campaign_levers_from_args({"--height-km", "300x"}), std::invalid_argument);
     CHECK_THROWS_AS(sim::campaign_levers_from_args({"--insulation", "-1"}), std::invalid_argument);
     CHECK(*sim::campaign_levers_from_args({"--reserve-t", "0"}).tanker_reserve_kg == 0.0);
+    // f1: a flag without a value
+    CHECK_FALSE(l.reference_phasing);
+    const auto r = sim::campaign_levers_from_args({"--reference-phasing", "--height-km", "250"});
+    CHECK(r.reference_phasing);
+    CHECK(*r.depot_height_m == Catch::Approx(250e3));
 }
 
 TEST_CASE("refuelling_report: the text names the answer and the reason", "[refuelling][campaign]") {
@@ -313,8 +370,11 @@ TEST_CASE("refuelling_report: the text names the answer and the reason", "[refue
     r.result.closes = true;
     r.result.tanker_flights = 12;
     r.result.tankers.resize(12);
+    r.result.tankers.front().flight.phasing_orbit =
+        mission::PhasingOrbit{constants::wgs84_semi_major_axis_m + 150.0e3, constants::wgs84_semi_major_axis_m + 190.0e3};
     const auto text = sim::campaign_report_text(r, s.clock);
     CHECK(text.find("Tanker flights: 12") != std::string::npos);
+    CHECK(text.find("150 x 190 km") != std::string::npos);  // f1: the chosen phasing orbit
     r.result.closes = false;
     r.result.reason = "Depotvolumen reicht nicht";
     CHECK(sim::campaign_report_text(r, s.clock).find("Depotvolumen reicht nicht") != std::string::npos);
@@ -385,8 +445,10 @@ TEST_CASE("Campaign levers are validated", "[refuelling][campaign]") {
     CHECK(refused([](sim::CampaignLevers& l) { l.phasing_limit_s = 0.0; }));
 }
 
-TEST_CASE("A looser phasing limit never costs tankers", "[refuelling][campaign][slow]") {
-    // review I1: the window chooser flies the latest launch that reaches the same arrival (the shortest phasing)
+TEST_CASE("A looser phasing limit never costs days", "[refuelling][campaign][slow]") {
+    // review I1: the window chooser flies the latest launch that reaches the same arrival (the shortest phasing).
+    // f1: the calculator takes the first window, so it minimises the days: a looser limit opens earlier windows with
+    // longer phasing (more tanker boil-off) - it may cost tankers (72 h: 12 in 27.1 d vs 28 h: 10 in 64.0 d)
     const Sources s;
     sim::CampaignLevers tight, loose;
     tight.phasing_limit_s = 28.0 * 3600.0;
@@ -397,6 +459,5 @@ TEST_CASE("A looser phasing limit never costs tankers", "[refuelling][campaign][
     print("72 h", b);
     REQUIRE(a.result.closes);
     REQUIRE(b.result.closes);
-    CHECK(b.result.tanker_flights <= a.result.tanker_flights);
     CHECK(b.result.duration_s <= a.result.duration_s + 3600.0);
 }

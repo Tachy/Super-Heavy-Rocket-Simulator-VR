@@ -57,6 +57,9 @@ void require_kind(const detail::Document& doc, MissionKind kind, const char* nam
     if (kind_of(doc) != kind) doc.fail(std::string("not a ") + name + " mission ([mission] kind)");
 }
 
+// [E] refuelling f1: a phasing orbit below this decays within hours
+constexpr double min_phasing_height_km = 100.0;
+
 // A TOML array of numbers (`size` entries when size > 0).
 std::vector<double> numbers(const detail::Document& doc, const toml::table& t, std::string_view key, size_t size = 0) {
     const auto* array = t[key].as_array();
@@ -473,6 +476,24 @@ RefuellingFlightMission load_refuelling_flight_mission(const std::filesystem::pa
     m.mission_limit_s = doc.positive(*phasing, "mission_limit_h") * 3600.0;
     m.earliest_arrival_s = doc.number(*phasing, "earliest_arrival_h") * 3600.0;
     if (phasing->contains("periapsis_km")) m.phasing_periapsis_height_m = doc.positive(*phasing, "periapsis_km") * 1e3;
+    if (const auto* candidates = (*phasing)["candidates_km"].as_array()) {
+        for (const auto& node : *candidates) {
+            const auto* pair = node.as_array();
+            const auto p = pair && pair->size() == 2 ? (*pair)[0].value<double>() : std::nullopt;
+            const auto a = pair && pair->size() == 2 ? (*pair)[1].value<double>() : std::nullopt;
+            if (!p || !a) doc.fail("[phasing] candidates_km must hold [periapsis, apoapsis] pairs");
+            if (!(*p >= min_phasing_height_km) || !(*a >= *p)) {
+                doc.fail("[phasing] candidates_km: periapsis below " + std::to_string(int(min_phasing_height_km)) +
+                         " km or above the apoapsis");
+            }
+            m.phasing_candidates_m.emplace_back(*p * 1e3, *a * 1e3);
+        }
+        m.planning_mass_kg = doc.positive(*phasing, "planning_mass_t") * 1e3;
+        m.planning_boil_off_kgps = doc.number(*phasing, "planning_boil_off_t_per_day") * 1e3 / 86400.0;
+        if (m.planning_boil_off_kgps < 0.0) doc.fail("[phasing] planning_boil_off_t_per_day must not be negative");
+        m.window_margin_s = doc.number_or(*phasing, "window_margin_h", 0.0) * 3600.0;
+        if (m.window_margin_s < 0.0) doc.fail("[phasing] window_margin_h must not be negative");
+    }
     if (m.kind == MissionKind::TankerFlight) {
         m.return_id = doc.text(*mission, "return");
     } else {

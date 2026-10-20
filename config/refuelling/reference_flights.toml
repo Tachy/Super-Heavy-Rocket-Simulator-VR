@@ -9,16 +9,16 @@ initial_propellant_t = 55.5        # [D] main tanks after the ascent (199.6 x 21
 [tanker]
 mission = "tanker_flight"
 dry_mass_t = 209.0                 # [D] the configured tanker (starship_tanker) the numbers belong to
-residue_after_ascent_t = 99.2      # [D] main tanks at the Rendezvous mark (170 x 190 km after the raise)
-rendezvous_t = 17.8                # [D] Rendezvous -> Docked: burns, RCS gas, boil-off (phasing 39.7 h)
-delivered_oxidizer_t = 54.6        # [D] into the depot
-delivered_fuel_t = 12.9            # [D]
+residue_after_ascent_t = 99.8      # [D] f1 2026-10-21: main tanks at the Rendezvous mark (after the raise to the window's orbit)
+rendezvous_t = 15.4                # [D] f1 2026-10-21: Rendezvous -> Docked: burns, RCS gas, boil-off
+delivered_oxidizer_t = 56.5        # [D] f1 2026-10-21: into the depot
+delivered_fuel_t = 13.9            # [D] f1 2026-10-21
 chilldown_t = 0.42                 # [D] vented
-settling_gas_t = 0.94              # [D]
+settling_gas_t = 0.96              # [D] f1 2026-10-21
 main_at_undock_t = 12.6            # [D] the reserve kept for the return
-main_at_catch_t = 2.74             # [D] what the reserve left over
+main_at_catch_t = 1.94             # [D] f1 2026-10-21: what the reserve left over
 dry_mass_sensitivity = 0.99        # [D] r5 probes: ship dry -10 / -20 t -> residue +9.9 / +19.8 t
 
 [hls]
 mission = "hls_refuel"
-main_at_docking_t = 184.5          # [D] HLS main tanks at the Docked mark
+main_at_docking_t = 187.6          # [D] f1 2026-10-21: HLS main tanks at the Docked mark

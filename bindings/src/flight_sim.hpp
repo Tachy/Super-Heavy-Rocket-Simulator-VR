@@ -207,10 +207,12 @@ public:
     // fill_fraction, boil_off_kg_per_day (at the last evaluation), docked}.
     godot::Dictionary depot_state() const;
     // The tanker campaign (sim::plan_refuelling_campaign; the session is untouched, seconds of window searches on the
-    // worker). params (all optional floats): height_km, interval_h, phasing_limit_h, tanker_dry_t, reserve_t,
-    // initial_t, insulation, hls_wait_d; an unknown key or a non-number is refused. result(id): ok = the campaign
+    // worker). params (optional; floats unless noted): height_km, interval_h, phasing_limit_h, tanker_dry_t, reserve_t,
+    // initial_t, insulation, hls_wait_d, reference_phasing (bool, f1); an unknown key or a wrong type is refused.
+    // result(id): ok = the campaign
     // closes, message = its German reason, data = {closes, reason, tanker_flights, duration_d, demand_t,
-    // hls_required_t, depot_at_hls_t, tankers: [{launch_utc, arrival_utc, delivered_t, depot_after_t}],
+    // hls_required_t, depot_at_hls_t, tankers: [{launch_utc, arrival_utc, delivered_t, depot_after_t,
+    // phasing_periapsis_km, phasing_apoapsis_km}],
     // fill: [[day, t]], losses: {boil_off_t, drag_t, gas_t, vent_t}, lunar_mission, lunar_epoch_utc}.
     int64_t refuelling_campaign(const godot::Dictionary& params);
 

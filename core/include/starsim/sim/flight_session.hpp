@@ -48,6 +48,7 @@
 #include "starsim/mission/lunar_orbit_transfer.hpp"
 #include "starsim/mission/lunar_outbound.hpp"
 #include "starsim/mission/nrho_reference.hpp"
+#include "starsim/mission/iss_launch_window.hpp"
 #include "starsim/mission/phasing_planner.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 
@@ -138,7 +139,8 @@ struct IssMissionSequence {
     std::optional<gnc::DeorbitParameters> capsule_return;   // departure: planned when the departure is complete
     std::optional<time::Epoch> deorbit_epoch;               // departure: the previewed pass (lead_s aims at it)
     bool ascent_to_station = false;                         // depot_launch: Ascent -> make_station -> Complete
-    std::optional<double> raise_periapsis_radius_m;         // Ascent -> Raise (at apoapsis, deorbit set) -> Rendezvous
+    // Ascent -> Raise (apsis burns on the deorbit set, refuelling f1) -> Rendezvous
+    std::optional<mission::PhasingOrbit> raise_to;
     std::optional<MissionTransfer> transfer;                // Docked -> Transfer -> undock -> Departure
     std::optional<gnc::DeorbitParameters> ship_return;      // Departure -> release_tower + plan_ship_return -> Return
     std::optional<time::Epoch> continue_epoch;              // Departure -> WaitContinue until then -> continuation
@@ -1072,8 +1074,10 @@ private:
     bool iss_mission_pending() const;  // a leg change is due (the coast stops)
     void iss_end(const std::string& reason);
     void iss_enter(IssMissionLeg leg, std::string status);
-    void iss_start_transfer();
-    void iss_start_raise();     // after the ascent: the perigee raise at apoapsis (-> Raise) or straight to the phasing  // Docked with a transfer: start it (-> Transfer) or end the mission
+    void iss_start_transfer();  // Docked with a transfer: start it (-> Transfer) or end the mission
+    // After the ascent (`first`) or a raise burn: the next apsis burn to raise_to (-> Raise) or the phasing plan.
+    void iss_start_raise(bool first);
+    bool raise_periapsis_pending_ = false;  // after an apoapsis raise: the periapsis raise at the new apoapsis follows
 
     // Rendezvous phasing (flight_session_rendezvous.cpp).
     void run_rendezvous(Flying& flying);  // the step machine and its diagnostics (STARSIM_DEBUG_RENDEZVOUS)

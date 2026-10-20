@@ -27,6 +27,7 @@
 #include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
+#include "starsim/vehicle/boil_off.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -154,6 +155,77 @@ TEST_CASE("Leg marks record the chaser's mass and propellant at every leg change
     REQUIRE(marks.size() == 2u);
     CHECK(marks[1].leg == IssMissionLeg::Departure);
     CHECK(marks[1].epoch - marks[0].epoch == Catch::Approx(30.0).margin(0.01));
+}
+
+namespace {
+
+// Refuelling f1: the tanker just inserted at 120 x 190 km (at its periapsis), 40 deg ahead of the depot (station),
+// its mission at the end of the ascent leg with a raise to `to`.
+struct RaiseFixture : refuelling_test::DepotSession {
+    explicit RaiseFixture(double main_kg) {
+        const double re = constants::wgs84_semi_major_axis_m;
+        const auto ahead = refuelling_test::depot_state(earth, t0, 40.0 * deg);
+        const double rp = re + 120e3, ra = re + 190e3;
+        const double vp = std::sqrt(constants::earth_gm_m3ps2 * (2.0 / rp - 2.0 / (rp + ra)));
+        const math::StateVector tanker{rp * math::normalized(ahead.position_m),
+                                       vp * math::normalized(ahead.velocity_mps)};
+        session.place_in_orbit(refuelling_test::tanker_config(main_kg), tanker, t0);
+        session.add_station(refuelling_test::depot_config(depot_propellant_kg), depot, t0);
+        sequence.from_launch = true;
+        sequence.station_port = "transfer_dock";
+        sequence.phasing.mission_limit_s = 48.0 * 3600.0;
+    }
+    void start() { session.set_iss_mission(sequence); }
+    void fly_until(IssMissionLeg leg, double limit_s) {
+        const time::Epoch end = session.epoch() + limit_s;
+        while (session.epoch() < end && session.iss_mission_leg() != leg &&
+               session.iss_mission_leg() != IssMissionLeg::Ended) {
+            session.advance_to(session.epoch() + 10.0);
+        }
+    }
+    std::pair<double, double> apsides() const {
+        const auto& s = session.body(0).state();
+        const auto el = orbit::elements_from_state({s.position_gcrf_m, s.velocity_gcrf_mps}, constants::earth_gm_m3ps2);
+        return {el.semi_major_axis_m * (1.0 - el.eccentricity), el.semi_major_axis_m * (1.0 + el.eccentricity)};
+    }
+    sim::IssMissionSequence sequence;
+};
+
+}  // namespace
+
+TEST_CASE("Raise: two burns to an orbit above the depot, then the phasing plan", "[refuelling][iss_mission]") {
+    test::spice_session();
+    const double re = constants::wgs84_semi_major_axis_m;
+    RaiseFixture f(100e3);
+    f.sequence.raise_to = mission::PhasingOrbit{re + 250e3, re + 270e3};
+    f.start();
+    CHECK(f.session.iss_mission_leg() == IssMissionLeg::Ascent);
+    f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
+    INFO(f.session.iss_mission_status());
+    REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
+    const auto& marks = f.session.iss_mission_marks();
+    CHECK(std::count_if(marks.begin(), marks.end(), [](const auto& m) { return m.leg == IssMissionLeg::Raise; }) == 2);
+    // [E] two-body burns from osculating apsides: J2 short-period terms (~10 km in a) shift the raised orbit; the
+    // phasing plan that follows runs in the full model from the live state
+    const auto [rp, ra] = f.apsides();
+    CHECK(rp == Catch::Approx(re + 250e3).margin(20e3));
+    CHECK(ra == Catch::Approx(re + 270e3).margin(20e3));
+    CHECK(rp > re + 200e3 + mission::PhasingParameters{}.coelliptic_height_m);  // above the depot: the mirrored case
+    const double used_kg = 100e3 - marks.back().chaser_main_propellant_kg;
+    std::printf("[f1] raise 120 x 190 -> %.1f x %.1f km: %.2f t main propellant\n", (rp - re) / 1e3, (ra - re) / 1e3,
+                used_kg / 1e3);
+    CHECK(used_kg < 12e3);  // ~44 + 21 m/s on ~310 t: ~6 t, plus the bare tanker's boil-off over ~3 h (~3.5 t)
+}
+
+TEST_CASE("Raise: a burn that runs dry ends the mission with its reason", "[refuelling][iss_mission]") {
+    test::spice_session();
+    const double re = constants::wgs84_semi_major_axis_m;
+    RaiseFixture f(50.0);  // almost empty main tanks
+    f.sequence.raise_to = mission::PhasingOrbit{re + 250e3, re + 270e3};
+    f.start();
+    f.fly_until(IssMissionLeg::Rendezvous, 2.0 * 3600.0);
+    CHECK(f.session.iss_mission_leg() == IssMissionLeg::Ended);
+    CHECK(f.session.iss_mission_status().find("kein Treibstoff") != std::string::npos);
 }
 
 namespace {
@@ -371,6 +443,50 @@ TEST_CASE("tanker_flight finds a launch window into the depot plane within the u
                 (s.launch_window->liftoff - f.t0) / 3600.0, s.launch_window->rejected);
 }
 
+// Probe (f1 plan, Task 4): the planning boil-off rates of the phasing-orbit choice - the bare tanker with its residue
+// and the insulated HLS with its residue after the ascent, orbit-averaged on the depot orbit at 2026-10-20.
+TEST_CASE("Probe: planning boil-off of the tanker and the HLS", "[.f1_probe]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    const auto sun = f.ephemeris.state_gcrf(ephemeris::Body::Sun, f.t0).position_m;
+    for (const auto& [id, residue_kg] : {std::pair{std::string("starship_tanker"), 99.2e3},
+                                         std::pair{std::string("starship_hls_launch"), 208.0e3}}) {
+        const vehicle::Vehicle v(refuelling_test::ship_with(id, residue_kg), refuelling_test::config_dir);
+        const auto rate = vehicle::orbit_average_boil_off(v, f.depot, {}, sun);
+        std::printf("[f1 probe] %s with %.1f t main: %.2f t/day\n", id.c_str(), residue_kg / 1e3,
+                    (rate.oxidizer_kgps + rate.fuel_kgps) * 86400.0 / 1e3);
+    }
+}
+
+TEST_CASE("tanker_flight: an above-depot window is flown to docking", "[refuelling][mission][slow]") {
+    test::spice_session();
+    const double re = constants::wgs84_semi_major_axis_m;
+    refuelling_test::DepotSession f;
+    auto m = config::load_refuelling_flight_mission(refuelling_test::config_dir, "tanker_flight");
+    m.phasing_candidates_m = {{220.0e3, 240.0e3}, {250.0e3, 270.0e3}};  // only orbits above the depot (f1)
+    const auto s = sim::start_refuelling_flight_mission(f.session, refuelling_test::config_dir, m, f.clock);
+    INFO(s.refusal);
+    REQUIRE(s.refusal.empty());
+    REQUIRE(s.launch_window->phasing_orbit);
+    REQUIRE(s.launch_window->phasing_orbit->periapsis_radius_m > re + 200.0e3);
+    REQUIRE(s.launch_window->schedule.above);
+    const auto start = std::chrono::steady_clock::now();
+    while (f.session.epoch() - s.epoch < 60.0 * 3600.0 && f.session.iss_mission_leg() != IssMissionLeg::Docking &&
+           f.session.iss_mission_leg() != IssMissionLeg::Docked && f.session.iss_mission_leg() != IssMissionLeg::Ended) {
+        f.session.advance_to(f.session.epoch() + 60.0);
+    }
+    INFO(f.session.iss_mission_status());
+    CHECK((f.session.iss_mission_leg() == IssMissionLeg::Docking || f.session.iss_mission_leg() == IssMissionLeg::Docked));
+    const auto wp0 = refuelling_test::mark(f.session, IssMissionLeg::Proximity);
+    REQUIRE(wp0);
+    std::printf("[f1] above-depot flight: liftoff +%.1f h, orbit %.0f x %.0f km, Waypoint 0 %.1f h after liftoff "
+                "(window %.1f h), main %.1f t at Waypoint 0, wall %.0f s\n",
+                (s.epoch - f.t0) / 3600.0, (s.launch_window->phasing_orbit->periapsis_radius_m - re) / 1e3,
+                (s.launch_window->phasing_orbit->apoapsis_radius_m - re) / 1e3, (wp0->epoch - s.epoch) / 3600.0,
+                (s.launch_window->schedule.waypoint0_epoch - s.epoch) / 3600.0, wp0->chaser_main_propellant_kg / 1e3,
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
+}
+
 TEST_CASE("Refuelling flights: the window's separation estimate matches the flown ascent",
           "[refuelling][mission][ascent][slow]") {
     test::spice_session();
@@ -511,7 +627,8 @@ TEST_CASE("After the ascent the sequence raises the perigee at apoapsis, then pl
     q.station_port = "transfer_dock";
     q.from_launch = true;
     q.phasing.mission_limit_s = 48.0 * 3600.0;
-    q.raise_periapsis_radius_m = constants::wgs84_semi_major_axis_m + 170.0e3;
+    q.raise_to = mission::PhasingOrbit{constants::wgs84_semi_major_axis_m + 170.0e3,
+                                       constants::wgs84_semi_major_axis_m + 190.0e3};
     f.session.set_iss_mission(q);
     double t = 0.0;
     while (t < 4.0 * 3600.0 && f.session.iss_mission_leg() != IssMissionLeg::Rendezvous &&

@@ -37,17 +37,9 @@ constexpr double campaign_window_search_s = 60.0 * 86400.0;
 constexpr double same_arrival_s = 3.0 * 3600.0;
 constexpr double later_launch_search_s = 3.0 * 86400.0;
 constexpr double later_launch_step_s = 3600.0;  // [E] the return's entry perigee; only differences count
-// the single Raptor of phasing, deorbit (r3, r5) and the depot's reboost [E]
-constexpr const char* raptor_group = "sea_level_3";
-
-// Of the top stage's raptor_group (engine groups are qualified by their stage: "ship/sea_level_3").
-double exhaust_velocity_mps(const vehicle::Vehicle& v) {
-    const std::string group = v.stages().back().config.id + "/" + raptor_group;
-    return gnc::groups_vacuum_isp_s(v, {group}) * constants::standard_gravity_mps2;
-}
 
 // The vehicle's top stage alone, tanks as configured (full: built empty, its engines would count as starved and
-// exhaust_velocity_mps would read 0).
+// phasing_exhaust_velocity_mps would read 0).
 config::VehicleConfig top_stage(const std::filesystem::path& dir, const std::string& id) {
     return config::top_stage_config(config::load_vehicle(dir, id));
 }
@@ -180,7 +172,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     report.drag_makeup_kgps = mission::drag_makeup_kgps(
         environment::Us76Atmosphere{}.at(depot_cfg.height_m).density_kg_m3, std::sqrt(gm / r_new),
         FlightSession::dragon_free_molecular_cd, constants::pi * 0.25 * diameter_m * diameter_m,
-        exhaust_velocity_mps(depot));
+        phasing_exhaust_velocity_mps(depot));
 
     // Tanker net per flight at the reference phasing time (plan decision 3)
     auto tanker_cfg = top_stage(dir, tanker_ascent.vehicle_id);
@@ -188,42 +180,70 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     tanker_cfg.stages.back().dry_mass_kg = dry_kg;
     vehicle::Vehicle tanker(tanker_cfg, dir);
     const double reserve_kg = levers.tanker_reserve_kg.value_or(ref.tanker.main_at_undock_kg);
-    const double ve_tanker = exhaust_velocity_mps(tanker);
-    set_main(tanker, ref.tanker.residue_after_ascent_kg - ref.tanker.rendezvous_kg);
-    const double docked_mass_kg = tanker.mass_properties().mass_kg;
+    const double ve_tanker = phasing_exhaust_velocity_mps(tanker);
     set_main(tanker, reserve_kg);
     const double return_mass_kg = tanker.mass_properties().mass_kg;
     const double rp = equatorial_radius_m + deorbit_perigee_height_m;
-    const double dv_up = (dh >= 0.0 ? 1.0 : -1.0) * mission::hohmann_delta_v_mps(r_ref, r_new, gm);
+    // f1: the way up to another depot height is in each window's phasing cost (its candidate orbits shift with the
+    // depot); the altitude cost keeps the deorbit difference
     const double dv_back = mission::deorbit_delta_v_mps(r_new, rp, gm) - mission::deorbit_delta_v_mps(r_ref, rp, gm);
-    report.altitude_cost_kg = docked_mass_kg * (std::exp(dv_up / ve_tanker) - 1.0) +
-                              return_mass_kg * (std::exp(dv_back / ve_tanker) - 1.0) *
+    report.altitude_cost_kg = return_mass_kg * (std::exp(dv_back / ve_tanker) - 1.0) *
                                   mission::TankerReserveParameters{}.burn_margin;
     report.tanker_base_delivered_kg = ref.tanker.delivered_oxidizer_kg + ref.tanker.delivered_fuel_kg +
                                       (ref.tanker.dry_mass_kg - dry_kg) * ref.tanker.dry_mass_sensitivity +
                                       (ref.tanker.main_at_undock_kg - reserve_kg) - report.altitude_cost_kg;
 
-    // Windows (plan decision 1): the flown window logic against the depot; phasing orbits shifted with the depot
-    const auto window_parameters = [&](const config::RefuellingFlightMission& m, const config::AscentMission& a) {
-        auto p = refuelling_window_parameters(m, a);
-        p.separation_periapsis_radius_m += dh;
-        p.separation_apoapsis_radius_m += dh;
-        p.phasing.mission_limit_s = levers.phasing_limit_s.value_or(m.mission_limit_s) - m.window.insertion_s;
+    // Windows (plan decision 1): the flown window logic against the depot. f1: the insertion stays, the candidate
+    // phasing orbits shift with the depot
+    const auto window_parameters = [&](const config::RefuellingFlightMission& m, const config::AscentMission& a,
+                                       double exhaust_velocity_mps) {
+        auto p = refuelling_window_parameters(m, a, exhaust_velocity_mps);
+        for (auto& o : p.phasing_orbits) {
+            o.periapsis_radius_m += dh;
+            o.apoapsis_radius_m += dh;
+        }
+        p.phasing.mission_limit_s =
+            levers.phasing_limit_s.value_or(m.mission_limit_s) - m.window.insertion_s - m.window_margin_s;
         p.search_s = std::max(p.search_s, campaign_window_search_s);
         return p;
     };
-    const auto tanker_window = window_parameters(tanker_mission, tanker_ascent);
-    const auto hls_window = window_parameters(hls_mission, hls_ascent);
+    const double ve_hls = phasing_exhaust_velocity_mps(vehicle::Vehicle(top_stage(dir, hls_ascent.vehicle_id), dir));
+    auto tanker_window = window_parameters(tanker_mission, tanker_ascent, ve_tanker);
+    auto hls_window = window_parameters(hls_mission, hls_ascent, ve_hls);
+    if (levers.reference_phasing) {  // f1 lever: the r5 single phasing orbit, shifted with the depot
+        const auto single = [&](const config::RefuellingFlightMission& m, const config::AscentMission& a, double ve,
+                                mission::LaunchWindowParameters& p) {
+            p.phasing_orbits = refuelling_window_parameters(m, a, ve, true).phasing_orbits;
+            for (auto& o : p.phasing_orbits) {
+                o.periapsis_radius_m += dh;
+                o.apoapsis_radius_m += dh;
+            }
+        };
+        single(tanker_mission, tanker_ascent, ve_tanker, tanker_window);
+        single(hls_mission, hls_ascent, ve_hls, hls_window);
+    }
     const auto tanker_pad = pad_of(site);
     const auto hls_pad = pad_of(hls_site);
+    // The reference flights' own windows (the measured numbers were flown in them): their phasing time and cost are
+    // the baselines of every window's delivery (f1: the propellant of the chosen orbit against the reference's)
+    mission::PhasingCost tanker_reference_cost, hls_reference_cost;
     {
-        auto p = refuelling_window_parameters(tanker_mission, tanker_ascent);
+        const auto p = refuelling_window_parameters(tanker_mission, tanker_ascent, ve_tanker);
         const auto w = mission::plan_launch_window(tanker_pad, src.earth, reference_depot_at, start, p, gm);
         if (!w.feasible) {
             report.result.reason = "Referenzfenster des Tankers: " + w.reason;
             return report;
         }
         report.reference_phasing_s = w.schedule.waypoint0_epoch - w.separation;
+        tanker_reference_cost = w.cost;
+        // the HLS's against the same depot orbit (its measured flight phased into the lunar plane's depot) [E]
+        const auto ph = refuelling_window_parameters(hls_mission, hls_ascent, ve_hls);
+        const auto wh = mission::plan_launch_window(hls_pad, src.earth, reference_depot_at, start, ph, gm);
+        if (!wh.feasible) {
+            report.result.reason = "Referenzfenster des HLS: " + wh.reason;
+            return report;
+        }
+        hls_reference_cost = wh.cost;
     }
     // The latest launch reaching the same Waypoint 0 as `w` (review I1: the first feasible launch may take extra laps).
     const auto latest_launch = [&](mission::LaunchWindow w, const math::Vec3& pad, mission::LaunchWindowParameters p) {
@@ -248,16 +268,23 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         if (!first.feasible) return std::optional<mission::CampaignFlight>{};
         const auto w = latest_launch(first, tanker_pad, tanker_window);
         const double phasing_s = w.schedule.waypoint0_epoch - w.separation;
-        // the tanker's own boil-off over the phasing time's difference to the reference flight
+        // the tanker's own boil-off over the phasing time's difference to the reference flight, and the propellant
+        // of the chosen phasing orbit's raise and boost against the reference window's (f1)
         const double rate = orbit_boil_off_kgps(tanker, residue_kg, depot_at(w.separation), sun_at(w.separation));
-        return std::optional{mission::CampaignFlight{w.liftoff - start, w.schedule.waypoint0_epoch - start,
-                                                     base_kg + rate * (reference_phasing_s - phasing_s)}};
+        mission::CampaignFlight flight{w.liftoff - start, w.schedule.waypoint0_epoch - start,
+                                       base_kg + rate * (reference_phasing_s - phasing_s) -
+                                           (w.cost.propellant_kg - tanker_reference_cost.propellant_kg)};
+        flight.phasing_orbit = w.phasing_orbit;
+        return std::optional{flight};
     };
     models.next_hls = [&](double earliest_s) {
         const auto first = mission::plan_launch_window(hls_pad, src.earth, depot_at, start + earliest_s, hls_window, gm);
         if (!first.feasible) return std::optional<mission::CampaignFlight>{};
         const auto w = latest_launch(first, hls_pad, hls_window);
-        return std::optional{mission::CampaignFlight{w.liftoff - start, w.schedule.waypoint0_epoch - start, 0.0}};
+        mission::CampaignFlight flight{w.liftoff - start, w.schedule.waypoint0_epoch - start, 0.0};
+        flight.extra_demand_kg = std::max(0.0, w.cost.propellant_kg - hls_reference_cost.propellant_kg);
+        flight.phasing_orbit = w.phasing_orbit;
+        return std::optional{flight};
     };
     models.boil_off_kgps = [&](double t_s, double fill_kg) {
         return orbit_boil_off_kgps(depot, fill_kg, depot_at(start + t_s), sun_at(start + t_s));

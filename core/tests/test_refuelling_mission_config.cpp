@@ -11,6 +11,7 @@
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/refuelling_mission_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
 
 using namespace starsim;
 
@@ -55,6 +56,18 @@ TEST_CASE("depot_launch and tanker_flight configurations load", "[refuelling][co
     REQUIRE(t.phasing_periapsis_height_m);
     CHECK(*t.phasing_periapsis_height_m == Catch::Approx(170.0e3));
     CHECK(ta.apoapsis_height_m == Catch::Approx(190.0e3));
+
+    // f1: the candidate phasing orbits and the planning values of their cost
+    REQUIRE(t.phasing_candidates_m.size() == 7u);
+    CHECK(t.phasing_candidates_m.front().first == Catch::Approx(150.0e3));
+    CHECK(t.phasing_candidates_m.front().second == Catch::Approx(190.0e3));
+    CHECK(t.phasing_candidates_m.back().first == Catch::Approx(250.0e3));
+    CHECK(t.phasing_candidates_m.back().second == Catch::Approx(270.0e3));
+    CHECK(t.planning_mass_kg == Catch::Approx(308.0e3));
+    CHECK(t.planning_boil_off_kgps == Catch::Approx(15.9e3 / 86400.0));
+    const auto h = config::load_refuelling_flight_mission(config_dir, "hls_refuel");
+    CHECK(h.phasing_candidates_m.size() == 7u);
+    CHECK(h.planning_mass_kg == Catch::Approx(328.0e3));
 
     const auto o = config::load_refuelling_flight_mission(config_dir, "tanker_flight_orbit");
     CHECK(o.start == config::RefuellingStart::PhasingOrbit);
@@ -106,4 +119,47 @@ earliest_arrival_h = 0.0
     hls.replace(hls.find("kind = \"tanker_flight\""), 22, "kind = \"hls_refuel\"  ");
     const auto no_lunar = with_mission("cfg_lunar", "t", hls);
     CHECK_THROWS_WITH(config::load_refuelling_flight_mission(no_lunar, "t"), Catch::Matchers::ContainsSubstring("lunar"));
+    // f1: candidate phasing orbits
+    const auto candidates = [&](const std::string& name, const std::string& lines) {
+        return with_mission(name, "t", mode("pad") + lines);
+    };
+    const auto good = candidates("cfg_cand_ok", "candidates_km = [[150.0, 190.0], [250.0, 270.0]]\n"
+                                                "planning_mass_t = 308.0\nplanning_boil_off_t_per_day = 12.0\n");
+    CHECK(config::load_refuelling_flight_mission(good, "t").phasing_candidates_m.size() == 2u);
+    const auto inverted = candidates("cfg_cand_inv", "candidates_km = [[200.0, 190.0]]\n"
+                                                     "planning_mass_t = 308.0\nplanning_boil_off_t_per_day = 12.0\n");
+    CHECK_THROWS_WITH(config::load_refuelling_flight_mission(inverted, "t"),
+                      Catch::Matchers::ContainsSubstring("candidates_km"));
+    const auto low = candidates("cfg_cand_low", "candidates_km = [[90.0, 190.0]]\n"
+                                                "planning_mass_t = 308.0\nplanning_boil_off_t_per_day = 12.0\n");
+    CHECK_THROWS_WITH(config::load_refuelling_flight_mission(low, "t"), Catch::Matchers::ContainsSubstring("candidates_km"));
+    const auto triple = candidates("cfg_cand_3", "candidates_km = [[150.0, 190.0, 200.0]]\n"
+                                                 "planning_mass_t = 308.0\nplanning_boil_off_t_per_day = 12.0\n");
+    CHECK_THROWS_WITH(config::load_refuelling_flight_mission(triple, "t"), Catch::Matchers::ContainsSubstring("pairs"));
+    const auto no_mass = candidates("cfg_cand_mass", "candidates_km = [[150.0, 190.0]]\nplanning_boil_off_t_per_day = 12.0\n");
+    CHECK_THROWS_WITH(config::load_refuelling_flight_mission(no_mass, "t"),
+                      Catch::Matchers::ContainsSubstring("planning_mass_t"));
+}
+
+TEST_CASE("Refuelling window parameters: the insertion orbit and the candidates", "[refuelling][config][mission]") {
+    const double re = constants::wgs84_semi_major_axis_m;
+    const auto t = config::load_refuelling_flight_mission(config_dir, "tanker_flight");
+    const auto a = config::load_ascent_mission(config_dir, t.ascent_id);
+    const auto p = sim::refuelling_window_parameters(t, a, 3400.0);
+    CHECK(p.separation_periapsis_radius_m == Catch::Approx(re + 120.0e3));  // the insertion, the raise follows
+    CHECK(p.separation_apoapsis_radius_m == Catch::Approx(re + 190.0e3));
+    REQUIRE(p.phasing_orbits.size() == 7u);
+    CHECK(p.phasing_orbits.front().periapsis_radius_m == Catch::Approx(re + 150.0e3));
+    CHECK(p.phasing_orbits.back().apoapsis_radius_m == Catch::Approx(re + 270.0e3));
+    CHECK(p.cost.mass_kg == Catch::Approx(308.0e3));
+    CHECK(p.cost.exhaust_velocity_mps == Catch::Approx(3400.0));
+    CHECK(p.cost.boil_off_kgps == Catch::Approx(15.9e3 / 86400.0));
+    // the window closes window_margin_h before the limit (the flown re-plans get the full limit)
+    CHECK(t.window_margin_s == Catch::Approx(4.0 * 3600.0));
+    CHECK(p.phasing.mission_limit_s == Catch::Approx(t.mission_limit_s - t.window.insertion_s - t.window_margin_s));
+    // the reference set: the single r5 phasing orbit
+    const auto r = sim::refuelling_window_parameters(t, a, 3400.0, true);
+    REQUIRE(r.phasing_orbits.size() == 1u);
+    CHECK(r.phasing_orbits.front().periapsis_radius_m == Catch::Approx(re + 170.0e3));
+    CHECK(r.phasing_orbits.front().apoapsis_radius_m == Catch::Approx(re + 190.0e3));
 }

@@ -6,6 +6,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "starsim/math/constants.hpp"
+
 namespace starsim::sim {
 
 namespace {
@@ -14,6 +16,7 @@ constexpr double seconds_per_hour = 3600.0;
 constexpr double seconds_per_day = 86400.0;
 constexpr double kg_per_t = 1000.0;
 constexpr double m_per_km = 1000.0;
+constexpr double equatorial_radius_m = constants::wgs84_semi_major_axis_m;
 
 double parse_number(const std::string& flag, const std::string& text) {
     size_t used = 0;
@@ -53,6 +56,11 @@ CampaignLevers campaign_levers_from_args(const std::vector<std::string>& args) {
         {"--hls-wait-d", {seconds_per_day, true, [&](double v) { l.hls_wait_s = v; }}},
     };
     for (size_t k = 0; k < args.size(); k += 2) {
+        if (args[k] == "--reference-phasing") {  // f1: a flag without a value
+            l.reference_phasing = true;
+            --k;
+            continue;
+        }
         const auto it = flags.find(args[k]);
         if (it == flags.end()) throw std::invalid_argument("unknown flag '" + args[k] + "'");
         if (k + 1 >= args.size()) throw std::invalid_argument(args[k] + ": value missing");
@@ -71,7 +79,7 @@ std::string campaign_report_text(const CampaignReport& r, const time::TimeScaleC
     // to the second: YYYY-MM-DDTHH:MM:SS
     const auto utc_at = [&](time::Epoch t) { return time.to_utc(t).to_iso_string().substr(0, 19); };
     const auto utc = [&](double t_s) { return utc_at(r.start + t_s); };
-    out << "Refuelling campaign (r6) from " << utc_at(r.start) << "\n";
+    out << "Refuelling campaign (r6, f1) from " << utc_at(r.start) << "\n";
     out << line("  depot %.0f km, tank volume %.1f t, drag makeup %.1f kg/day\n", r.depot_height_m / m_per_km,
                 r.depot_capacity_kg / kg_per_t, r.drag_makeup_kgps * seconds_per_day);
     out << "  lunar mission " << r.lunar_mission_id;
@@ -84,13 +92,19 @@ std::string campaign_report_text(const CampaignReport& r, const time::TimeScaleC
                 "cost %.2f t\n",
                 r.demand_kg / kg_per_t, r.tanker_base_delivered_kg / kg_per_t, r.reference_phasing_s / seconds_per_hour,
                 r.altitude_cost_kg / kg_per_t);
-    out << "\n   #  launch (d)  arrival (d)  launch UTC            delivered (t)  depot after (t)\n";
+    out << "\n   #  launch (d)  arrival (d)  launch UTC            phasing orbit    delivered (t)  depot after (t)\n";
     for (size_t k = 0; k < r.result.tankers.size(); ++k) {
         const auto& t = r.result.tankers[k];
-        char buffer[160];
-        std::snprintf(buffer, sizeof buffer, "  %2zu  %10.2f  %11.2f  %-20s  %13.1f  %15.1f\n", k + 1,
+        char orbit[32] = "-";
+        if (const auto& o = t.flight.phasing_orbit) {  // f1: the window's choice
+            std::snprintf(orbit, sizeof orbit, "%.0f x %.0f km", (o->periapsis_radius_m - equatorial_radius_m) / m_per_km,
+                          (o->apoapsis_radius_m - equatorial_radius_m) / m_per_km);
+        }
+        char buffer[192];
+        std::snprintf(buffer, sizeof buffer, "  %2zu  %10.2f  %11.2f  %-20s  %-15s  %13.1f  %15.1f\n", k + 1,
                       t.flight.launch_s / seconds_per_day, t.flight.arrival_s / seconds_per_day,
-                      utc(t.flight.launch_s).c_str(), t.flight.delivered_kg / kg_per_t, t.depot_after_kg / kg_per_t);
+                      utc(t.flight.launch_s).c_str(), orbit, t.flight.delivered_kg / kg_per_t,
+                      t.depot_after_kg / kg_per_t);
         out << buffer;
     }
     if (r.result.hls) {

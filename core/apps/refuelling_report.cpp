@@ -1,6 +1,6 @@
 // refuelling_report: how many tanker flights the lunar mission needs (refuelling r6). Usage:
 //   refuelling_report [--height-km 200] [--interval-h 24] [--phasing-limit-h 48] [--tanker-dry-t 209]
-//                     [--reserve-t 12.6] [--initial-t 55.5] [--insulation 1] [--hls-wait-d 0]
+//                     [--reserve-t 12.6] [--initial-t 55.5] [--insulation 1] [--hls-wait-d 0] [--reference-phasing]
 // Without flags: the r5 reference flights (config/refuelling/reference_flights.toml). Exit code 0 when the campaign
 // closes, 2 when it does not, 1 on an error.
 #include <iostream>

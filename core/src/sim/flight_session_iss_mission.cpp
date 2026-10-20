@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <string>
 
+#include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
 
 namespace starsim::sim {
@@ -13,7 +14,7 @@ const char* to_string(IssMissionLeg leg) {
     switch (leg) {
         case IssMissionLeg::None: return "keine";
         case IssMissionLeg::Ascent: return "Aufstieg";
-        case IssMissionLeg::Raise: return "Perigäum anheben";
+        case IssMissionLeg::Raise: return "Phasing-Bahn anheben";
         case IssMissionLeg::Rendezvous: return "Phasenflug";
         case IssMissionLeg::Proximity: return "Annäherung";
         case IssMissionLeg::Docking: return "Andocken";
@@ -108,11 +109,25 @@ void FlightSession::iss_start_transfer() {
     iss_enter(IssMissionLeg::Transfer, "Treibstofftransfer");
 }
 
-void FlightSession::iss_start_raise() {
+void FlightSession::iss_start_raise(bool first) {
     const auto& s = bodies_[controlled_].body->state();
-    const auto node = gnc::raise_periapsis_at_apoapsis({s.position_gcrf_m, s.velocity_gcrf_mps}, epoch_, gm_earth_,
-                                                       *iss_mission_->raise_periapsis_radius_m);
-    if (!node) {  // already at or above the phasing perigee
+    const math::StateVector state{s.position_gcrf_m, s.velocity_gcrf_mps};
+    const auto& to = *iss_mission_->raise_to;
+    // The burn sequence is fixed at the start (refuelling f1): the osculating apsides swing by several km with J2, so a
+    // re-check after each burn would keep adding burns. First: the apoapsis raise if needed (then the periapsis raise
+    // at the new apoapsis follows), else the periapsis raise alone.
+    std::optional<gnc::BurnNode> node;
+    if (first) {
+        node = gnc::next_raise_node(state, epoch_, gm_earth_, to.periapsis_radius_m, to.apoapsis_radius_m,
+                                    mission::raise_tolerance_m);
+        const auto el = orbit::elements_from_state(state, gm_earth_);
+        raise_periapsis_pending_ =
+            node && to.apoapsis_radius_m > el.semi_major_axis_m * (1.0 + el.eccentricity) + mission::raise_tolerance_m;
+    } else if (raise_periapsis_pending_) {
+        raise_periapsis_pending_ = false;
+        node = gnc::set_periapsis_at_apoapsis(state, epoch_, gm_earth_, to.periapsis_radius_m);
+    }
+    if (!node) {  // at (or above) the phasing orbit
         if (plan_rendezvous(iss_mission_->phasing)) {
             iss_enter(IssMissionLeg::Rendezvous, "Phasenflug: " + rendezvous_status_);
         } else {
@@ -125,8 +140,8 @@ void FlightSession::iss_start_raise() {
     const auto& groups = bodies_[controlled_].body->vehicle().stages().front().config.deorbit_engine_groups;
     const bool started = start_burn(*node, groups.empty() ? burn_configurations() : burn_configurations(&groups), true,
                                     small_burn_transient_share);
-    if (!started) return iss_end("Perigäum anheben nicht möglich");
-    iss_enter(IssMissionLeg::Raise, "Perigäum anheben");
+    if (!started) return iss_end("Phasing-Bahn anheben nicht möglich");
+    iss_enter(IssMissionLeg::Raise, "Phasing-Bahn anheben");
 }
 
 bool FlightSession::iss_mission_pending() const {
@@ -191,8 +206,8 @@ void FlightSession::run_iss_mission() {
             if (q.ascent_to_station) {
                 make_station(controlled_);
                 iss_enter(IssMissionLeg::Complete, "Mission abgeschlossen: Depot im Orbit");
-            } else if (q.raise_periapsis_radius_m) {
-                iss_start_raise();
+            } else if (q.raise_to) {
+                iss_start_raise(true);
             } else if (plan_rendezvous(q.phasing)) {
                 iss_enter(IssMissionLeg::Rendezvous, "Phasenflug: " + rendezvous_status_);
             } else {
@@ -202,10 +217,13 @@ void FlightSession::run_iss_mission() {
         case IssMissionLeg::Raise:
             if (lost) {
                 iss_end("Fahrzeug verloren");
-            } else if (plan_rendezvous(q.phasing)) {
-                iss_enter(IssMissionLeg::Rendezvous, "Phasenflug: " + rendezvous_status_);
+            } else if (!burn_abort_reason_.empty()) {  // a raise burn that ran dry is not flown (r5 minor)
+                iss_end(burn_abort_reason_);
+            } else if (bodies_[controlled_].body->vehicle().any_engine_producing_thrust()) {
+                // f1: wait for the tail-off - a next burn started during it counted the residual thrust as its
+                // ignition (the leg stays pending, so the session keeps ticking instead of coasting)
             } else {
-                iss_end(rendezvous_status_);
+                iss_start_raise(false);  // the next apsis burn, or the phasing plan once at the phasing orbit
             }
             return;
         case IssMissionLeg::Rendezvous:

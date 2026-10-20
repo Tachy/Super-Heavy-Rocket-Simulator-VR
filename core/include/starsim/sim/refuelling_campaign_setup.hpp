@@ -27,6 +27,7 @@ struct CampaignLevers {
     double depot_insulation_scale = 1.0;       // x the depot's wall resistance
     double launch_interval_s = 86400.0;        // [E] pad turnaround
     double hls_wait_s = 0.0;                   // HLS docked -> TLI (its boil-off is demanded)
+    bool reference_phasing = false;            // f1: only the r5 phasing orbit (170 x 190 km) instead of the candidates
 };
 
 struct CampaignSources {

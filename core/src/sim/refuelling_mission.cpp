@@ -7,6 +7,7 @@
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/lunar_ascent_guidance.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/orbit/synthetic_station_orbit.hpp"
@@ -24,6 +25,8 @@ constexpr double equatorial_radius_m = constants::wgs84_semi_major_axis_m;
 // [E] an autonomous refuelling flight resumes the approach this often after a failed capture (r5: the light HLS
 // bounced off the depot's drogues once), then the mission ends
 constexpr int capture_retries = 2;
+// the single Raptor of the raise, phasing and deorbit (r3, r5) and the depot's reboost [E]
+constexpr const char* phasing_raptor_group = "sea_level_3";
 
 // The depot orbit through a GCRF parking state at `at` (hls_refuel): its plane in the true equator frame of `at`, run
 // back by the J2 rates to `earliest`; the config's argument of latitude holds at `earliest`.
@@ -101,18 +104,36 @@ void fill_main_tanks(config::StageConfig& stage, double kg) {
     }
 }
 
+double phasing_exhaust_velocity_mps(const vehicle::Vehicle& v) {
+    // engine groups are qualified by their stage: "ship/sea_level_3"
+    const std::string group = v.stages().back().config.id + "/" + phasing_raptor_group;
+    return gnc::groups_vacuum_isp_s(v, {group}) * constants::standard_gravity_mps2;
+}
+
 mission::LaunchWindowParameters refuelling_window_parameters(const config::RefuellingFlightMission& m,
-                                                             const config::AscentMission& ascent) {
-    const double phasing_periapsis_m = m.phasing_periapsis_height_m.value_or(ascent.periapsis_height_m);
+                                                             const config::AscentMission& ascent,
+                                                             double exhaust_velocity_mps, bool reference_phasing) {
     mission::LaunchWindowParameters p;
     p.inclination_rad = ascent.inclination_rad;
     p.northerly = ascent.northerly;
     p.insertion_s = m.window.insertion_s;
     p.insertion_arc_rad = m.window.insertion_arc_rad;
-    p.separation_periapsis_radius_m = equatorial_radius_m + phasing_periapsis_m;  // the phasing after the raise
+    // f1: the separation on the insertion orbit; the raise to the phasing orbit is part of the window's estimate
+    p.separation_periapsis_radius_m = equatorial_radius_m + ascent.periapsis_height_m;
     p.separation_apoapsis_radius_m = equatorial_radius_m + ascent.apoapsis_height_m;
+    if (m.phasing_periapsis_height_m && (reference_phasing || m.phasing_candidates_m.empty())) {
+        p.phasing_orbits = {{equatorial_radius_m + *m.phasing_periapsis_height_m,
+                             equatorial_radius_m + ascent.apoapsis_height_m}};
+    } else {
+        for (const auto& [periapsis_m, apoapsis_m] : m.phasing_candidates_m) {
+            p.phasing_orbits.push_back({equatorial_radius_m + periapsis_m, equatorial_radius_m + apoapsis_m});
+        }
+    }
+    p.cost = {m.planning_mass_kg, exhaust_velocity_mps, m.planning_boil_off_kgps};
     p.search_s = m.window.search_s;
-    p.phasing.mission_limit_s = m.mission_limit_s - m.window.insertion_s;  // from the orbit insertion
+    // from the orbit insertion, window_margin_s short of the limit: the flown raise and the drag of a long phasing
+    // move the arrival (f1: a window needing 47.0 of 48 h no longer closed at the re-plan 40 h in)
+    p.phasing.mission_limit_s = m.mission_limit_s - m.window.insertion_s - m.window_margin_s;
     p.phasing.earliest_arrival_s = std::max(0.0, m.earliest_arrival_s - m.window.insertion_s);
     return p;
 }
@@ -165,14 +186,17 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
     const auto site = config::load_launch_site(config_dir, ascent.site_id);
     auto depot_vehicle = config::top_stage_config(config::load_vehicle(config_dir, m.depot.vehicle_id));
     fill_main_tanks(depot_vehicle.stages.back(), m.depot.propellant_kg);
-    // the phasing orbit: the ascent's target, or with its perigee raised at apoapsis (user 2026-10-20: the tanker)
+    // the orbit start's phasing orbit: the ascent's target, or with the reference perigee (r5)
     const double phasing_periapsis_m = m.phasing_periapsis_height_m.value_or(ascent.periapsis_height_m);
     IssMissionSequence q;
     q.station_port = m.depot.port;
     q.max_capture_retries = capture_retries;
     if (m.start == config::RefuellingStart::Pad) {
         const Vec3 pad = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
-        const auto p = refuelling_window_parameters(m, ascent);
+        // the phasing engine of the chaser alone, tanks as configured (an empty vehicle's engines count as starved)
+        const vehicle::Vehicle chaser(config::top_stage_config(config::load_vehicle(config_dir, ascent.vehicle_id)),
+                                      config_dir);
+        const auto p = refuelling_window_parameters(m, ascent, phasing_exhaust_velocity_mps(chaser));
         const auto w = mission::plan_launch_window(pad, earth, depot_at, earliest, p, gm);
         s.launch_window = w;
         if (!w.feasible) {
@@ -187,7 +211,8 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         session.add_station(depot_vehicle, depot_at(w.liftoff), w.liftoff);  // after the launch (it clears the bodies)
         q.from_launch = true;
         q.phasing = p.phasing;
-        if (m.phasing_periapsis_height_m) q.raise_periapsis_radius_m = equatorial_radius_m + phasing_periapsis_m;
+        q.phasing.mission_limit_s += m.window_margin_s;  // the flown phasing keeps the full limit
+        q.raise_to = w.phasing_orbit;  // f1: the window's choice (none: the insertion orbit is the phasing orbit)
         s.epoch = w.liftoff;
         s.site_id = ascent.site_id;
     } else {

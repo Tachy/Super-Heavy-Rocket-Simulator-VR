@@ -77,12 +77,14 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
             if (!hls) return finish("Kein Startfenster für das HLS");
             Depot projected = depot;
             advance(projected, hls->arrival_s, in, m, nullptr);
-            if (projected.propellant_kg < in.demand_kg && depot.propellant_kg >= in.depot_capacity_kg) {
+            // f1: the HLS's extra phasing demand comes on top (its share of the vent with it)
+            const double required_kg = in.demand_kg + hls->extra_demand_kg * (1.0 + in.transfer_vent_fraction);
+            if (projected.propellant_kg < required_kg && depot.propellant_kg >= in.depot_capacity_kg) {
                 // review I2: full tanks, yet the losses until the HLS arrives eat into the demand
                 return finish("Depotvolumen reicht nicht für die Verluste bis zur HLS-Ankunft: " +
-                              tonnes(projected.propellant_kg) + " bei Ankunft, " + tonnes(in.demand_kg) + " gefordert");
+                              tonnes(projected.propellant_kg) + " bei Ankunft, " + tonnes(required_kg) + " gefordert");
             }
-            if (projected.propellant_kg >= in.demand_kg) {
+            if (projected.propellant_kg >= required_kg) {
                 advance(depot, hls->arrival_s, in, m, &r.fill);
                 r.closes = true;
                 r.hls = hls;

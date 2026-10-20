@@ -8,12 +8,18 @@
 #include <string>
 #include <vector>
 
+#include "starsim/mission/phasing_schedule.hpp"
+
 namespace starsim::mission {
 
 struct CampaignFlight {
     double launch_s = 0.0;      // from the campaign start
     double arrival_s = 0.0;     // at the depot (Waypoint 0)
     double delivered_kg = 0.0;  // tankers: what it hands over (before the transfer vent)
+    // the HLS: what its phasing orbit costs beyond its reference window's - the depot must hold that much more at its
+    // arrival (refuelling f1)
+    double extra_demand_kg = 0.0;
+    std::optional<PhasingOrbit> phasing_orbit;  // the window's choice (f1; none: the separation orbit)
 };
 
 struct CampaignModels {

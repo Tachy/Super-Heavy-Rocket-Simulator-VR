@@ -88,6 +88,10 @@ godot::Dictionary campaign_dictionary(const sim::CampaignReport& r, const time::
         e["arrival_utc"] = utc(r.start + t.flight.arrival_s);
         e["delivered_t"] = t.flight.delivered_kg / kg_per_t;
         e["depot_after_t"] = t.depot_after_kg / kg_per_t;
+        if (const auto& o = t.flight.phasing_orbit) {  // f1: the window's choice
+            e["phasing_periapsis_km"] = (o->periapsis_radius_m - constants::wgs84_semi_major_axis_m) / 1e3;
+            e["phasing_apoapsis_km"] = (o->apoapsis_radius_m - constants::wgs84_semi_major_axis_m) / 1e3;
+        }
         tankers.push_back(e);
     }
     d["tankers"] = tankers;
