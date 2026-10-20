@@ -91,7 +91,7 @@ FlightSession::MainPropellant FlightSession::main_propellant_at(const vehicle::F
     return later;
 }
 
-std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& plan) const {
+std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const {
     const auto& body = *bodies_[controlled_].body;
     const auto now = main_tanks(body.vehicle());
     const auto at_burn = main_propellant_at(body, plan.node.epoch);
@@ -103,10 +103,7 @@ std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& p
     const double usable_kg = mixture_ratio > 0.0 ? std::min(at_burn.oxidizer_kg * (1.0 + mixture_ratio) / mixture_ratio,
                                                             at_burn.fuel_kg * (1.0 + mixture_ratio))
                                                  : at_burn.total();
-    // [E] the burn's execution dispersion (~1 %), its start and shutdown transients and finite-burn losses on top of
-    // the impulsive propellant (5 % let a burn run dry on its last tonne in the r2 campaigns)
-    constexpr double burn_margin = 1.10;
-    if (usable_kg >= burn_margin * plan.propellant_kg) return std::nullopt;
+    if (usable_kg >= margin * plan.propellant_kg) return std::nullopt;
     char text[220];
     std::snprintf(text, sizeof text,
                   "Zu wenig Treibstoff: Deorbit %.1f t, beim Brennvorgang in %.1f h nutzbar noch %.1f t in den "
@@ -147,7 +144,7 @@ bool FlightSession::plan_ship_return(const gnc::DeorbitParameters& parameters) {
                                       vehicle.propellant_kg(), stage.landing_propellant_kg, parameters);
     if (!deorbit_plan_->feasible) return false;
     // The earliest pass is the best one with boil-off too (a later one only has less left): it alone is checked.
-    if (const auto shortfall = boil_off_shortfall(*deorbit_plan_)) {
+    if (const auto shortfall = boil_off_shortfall(*deorbit_plan_, commit_burn_margin)) {
         deorbit_plan_->feasible = false;
         deorbit_plan_->short_of_reserve = true;
         deorbit_plan_->reason = *shortfall;
@@ -212,14 +209,14 @@ void FlightSession::replan_ship_deorbit() {
     // ship stays in orbit instead of running dry in the burn.
     {
         gnc::DeorbitPlan flown = plan.feasible || plan.short_of_reserve ? plan : *deorbit_plan_;
-        if (const auto shortfall = boil_off_shortfall(flown)) {
+        if (const auto shortfall = boil_off_shortfall(flown, call_off_burn_margin)) {
             deorbit_plan_ = flown;
             deorbit_plan_->feasible = false;
             deorbit_plan_->short_of_reserve = true;
             deorbit_plan_->reason = *shortfall;
-            burn_abort_reason_ = *shortfall;
             ship_return_ = false;
-            autopilot_.state = AutopilotState::Off;
+            disengage_autopilot();
+            burn_abort_reason_ = *shortfall;
             return;
         }
     }

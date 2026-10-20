@@ -56,6 +56,17 @@ TEST_CASE("An ascent mission starts at the requested epoch with its site", "[mis
     CHECK(session.autopilot().state == sim::AutopilotState::PreLaunch);
 }
 
+// r2 review: a lunar return mission turns boil-off off; the next mission in the same session must have it again.
+TEST_CASE("Every mission start sets the boil-off flag of its mission", "[mission][sim][boil_off]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    session.set_boil_off(false);  // as a lunar return mission leaves it
+    sim::start_mission(session, STARSIM_CONFIG_DIR, "starship_leo", time::Epoch::from_tdb_seconds_past_j2000(8.4e8),
+                       time);
+    CHECK(session.environment().boil_off);
+}
+
 TEST_CASE("A capsule return mission starts at its own epoch and plans the deorbit", "[mission][sim][dragon]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;

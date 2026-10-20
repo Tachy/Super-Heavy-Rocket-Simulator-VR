@@ -14,6 +14,7 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
                            time::Epoch requested, const time::TimeScaleConverter& time) {
     MissionStart s;
     s.kind = config::mission_kind(config_dir, mission_id);
+    session.set_boil_off(true);  // a mission without its own setting: boil-off on (a lunar return sets its own)
     switch (s.kind) {
         case config::MissionKind::Ascent: {
             const auto m = config::load_ascent_mission(config_dir, mission_id);

@@ -329,9 +329,9 @@ void FlightSession::run_autopilot() {
             });
             if (dry && !autopilot_.burn.complete) {
                 cutoff();
-                burn_abort_reason_ = "Brennvorgang abgebrochen: kein Treibstoff für die Triebwerke";
                 ship_return_ = false;
-                autopilot_.state = AutopilotState::Off;
+                disengage_autopilot();  // the lunar / rendezvous step machines end with it (no half state)
+                burn_abort_reason_ = "Brennvorgang abgebrochen: kein Treibstoff für die Triebwerke";
                 break;
             }
             if (autopilot_.burn.complete) {

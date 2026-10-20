@@ -857,7 +857,13 @@ private:
     MainPropellant main_propellant_at(const vehicle::FlightBody& body, time::Epoch at) const;
     // The deorbit burn of `plan` checked against the controlled ship's main tanks at the node (sets plan.boil_off_kg):
     // a German refusal when they will not hold the burn.
-    std::optional<std::string> boil_off_shortfall(gnc::DeorbitPlan& plan) const;
+    std::optional<std::string> boil_off_shortfall(gnc::DeorbitPlan& plan, double margin) const;
+    // Usable main-tank propellant over the burn's impulsive propellant [E]. Committing: the execution dispersion
+    // (~1 %), start / shutdown transients and finite-burn losses (1.05 let a burn run dry on its last tonne in the r2
+    // campaigns). Calling a committed burn off at a re-plan: only when it cannot be flown at all (r2 review: the
+    // commit margin there stranded ships with 9 % to spare; a committed plan may cut into its reserve, as for drag).
+    static constexpr double commit_burn_margin = 1.10;
+    static constexpr double call_off_burn_margin = 1.02;
     bool ship_return_ = false;                      // the burn is the deorbit burn of a ship return
     bool deorbit_replan_due_ = false;               // a far deorbit: planned again when its free drift ends
     time::Epoch deorbit_track_epoch_;               // onboard tracking: the arc from the first plan (drag estimate)
