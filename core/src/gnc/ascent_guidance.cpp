@@ -81,6 +81,15 @@ double launch_azimuth_rad(double latitude_rad, double inclination_rad, double or
     return std::atan2(orbital_speed_mps * std::sin(inertial) - surface_speed, orbital_speed_mps * std::cos(inertial));
 }
 
+math::Vec3 ascent_plane_normal(const Vec3& position_gcrf_m, const frames::BodyOrientation& earth, time::Epoch epoch,
+                               double inclination_rad, bool northerly) {
+    const auto frame = local_frame(position_gcrf_m, earth, epoch);
+    const double s = std::clamp(std::cos(inclination_rad) / std::cos(frame.latitude_rad), -1.0, 1.0);
+    const double inertial = northerly ? std::asin(s) : constants::pi - std::asin(s);
+    const Vec3 heading = std::sin(inertial) * frame.east + std::cos(inertial) * frame.north;
+    return math::normalized(cross(frame.up, heading));
+}
+
 AscentGuidance::AscentGuidance(AscentTarget target, PitchProgram program, double gm_earth_m3ps2)
     : target_(target), program_(program), gm_(gm_earth_m3ps2), peg_(gm_earth_m3ps2) {
     const double rp = equatorial_radius_m + target_.periapsis_altitude_m;
@@ -93,11 +102,8 @@ void AscentGuidance::start(const vehicle::FlightBody& body, const frames::BodyOr
     const auto frame = local_frame(body.state().position_gcrf_m, earth, epoch);
     const double latitude = frame.latitude_rad;
     azimuth_rad_ = gnc::launch_azimuth_rad(latitude, target_.inclination_rad, target_speed_mps_, target_.northerly);
-    // Target plane: through the Earth's centre, containing the site and the inertial launch direction.
-    const double s = std::clamp(std::cos(target_.inclination_rad) / std::cos(latitude), -1.0, 1.0);
-    const double inertial = target_.northerly ? std::asin(s) : constants::pi - std::asin(s);
-    const Vec3 heading = std::sin(inertial) * frame.east + std::cos(inertial) * frame.north;
-    plane_normal_ = math::normalized(cross(frame.up, heading));
+    plane_normal_ = ascent_plane_normal(body.state().position_gcrf_m, earth, epoch, target_.inclination_rad,
+                                        target_.northerly);
     liftoff_ = epoch;
     kick_start_s_ = -1.0;
     peg_.reset();

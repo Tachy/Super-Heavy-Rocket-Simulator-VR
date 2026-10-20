@@ -106,6 +106,7 @@ add_library(starsim_core STATIC
     src/mission/nrho_reference.cpp
     src/mission/position_targeter.cpp
     src/mission/rendezvous_geometry.cpp
+    src/mission/iss_launch_window.cpp
     src/mission/phasing_schedule.cpp
     src/mission/phasing_planner.cpp
     src/contact/primitives.cpp

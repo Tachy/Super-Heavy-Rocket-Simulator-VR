@@ -47,6 +47,11 @@ struct GuidanceCommand {
 // corrected for the Earth's rotation (Vallado, "Fundamentals of Astrodynamics", sec. 6.4).
 double launch_azimuth_rad(double latitude_rad, double inclination_rad, double orbital_speed_mps, bool northerly);
 
+// The inertial target plane AscentGuidance fixes at liftoff: through the Earth's centre, containing the site (local
+// geodetic up) and the inertial launch direction of `inclination_rad` (northerly: towards the ascending node).
+math::Vec3 ascent_plane_normal(const math::Vec3& position_gcrf_m, const frames::BodyOrientation& earth,
+                               time::Epoch epoch, double inclination_rad, bool northerly);
+
 // Ascent guidance: vertical rise, pitch kick, gravity turn (zero angle of attack) on the booster;
 // closed-loop Powered Explicit Guidance (linear-tangent steering, Space Shuttle PEG as formulated on
 // OrbiterWiki "Powered Explicit Guidance") on the upper stage, with out-of-plane correction towards the

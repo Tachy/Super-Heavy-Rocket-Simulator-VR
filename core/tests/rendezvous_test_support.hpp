@@ -10,6 +10,7 @@
 #include "starsim/environment/gravity.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
+#include "starsim/mission/iss_launch_window.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/orbit/oem.hpp"
 #include "starsim/orbit/synthetic_station_orbit.hpp"
@@ -26,15 +27,6 @@ struct Start {
     math::StateVector dragon;
     time::Epoch epoch;
 };
-
-// Secular RAAN rate (J2) of a near-circular orbit.
-inline double raan_rate(double a, double inclination) {
-    orbit::StationMeanElements mean;
-    mean.semi_major_axis_m = a;
-    mean.inclination_rad = inclination;
-    return orbit::j2_secular_rates(mean, constants::earth_gm_m3ps2, constants::earth_j2,
-                                   environment::earth_j2_reference_radius_m).raan_radps;
-}
 
 inline Start start(const spice::SpiceTimeConverter& clock, const frames::BodyOrientation& earth, double lead_deg,
                    double plane_match_s) {
@@ -55,8 +47,8 @@ inline Start start(const spice::SpiceTimeConverter& clock, const frames::BodyOri
     e.true_anomaly_rad = 0.0;  // at perigee
     s.dragon = orbit::state_from_elements(e, gm);
     // Plane bias: the Dragon's node regresses faster; shifted ahead so that both planes coincide after plane_match_s.
-    const double bias = (raan_rate(e_iss.semi_major_axis_m, e_iss.inclination_rad) -
-                         raan_rate(e.semi_major_axis_m, e.inclination_rad)) * plane_match_s;
+    const double bias =
+        mission::plane_bias_rad(e.semi_major_axis_m, e_iss.semi_major_axis_m, e.inclination_rad, plane_match_s);
     const auto turn = math::Quat::from_axis_angle({0.0, 0.0, 1.0}, bias);
     s.dragon = {turn.rotate(s.dragon.position_m), turn.rotate(s.dragon.velocity_mps)};
     return s;
