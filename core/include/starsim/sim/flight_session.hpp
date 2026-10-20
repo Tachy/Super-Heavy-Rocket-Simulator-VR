@@ -2,6 +2,7 @@
 
 #include <array>
 #include <filesystem>
+#include <functional>
 #include "starsim/config/drone_ship_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/splashdown_zone_config.hpp"
@@ -116,10 +117,17 @@ const char* to_string(RendezvousStep step);
 // ISS mission legs (i6, FlightSession::set_iss_mission): Ascent until the payload is separated, Rendezvous (phasing
 // to Waypoint 0), Proximity (to contact), Docking (capture .. hooks), Docked = complete; departure: WaitUndock,
 // Departure, Return (capsule return to the water), Complete at splashdown. Ended: a refused leg, a lost vehicle or a
-// collision.
-enum class IssMissionLeg { None, Ascent, Rendezvous, Proximity, Docking, Docked, WaitUndock, Departure, Return,
-                           Complete, Ended };
+// collision. Refuelling r5: Docked -> Transfer -> Departure when the sequence has a transfer; Return also flies a ship
+// return to the catch; WaitContinue holds a departed vehicle until its continuation (the lunar mission) takes over.
+enum class IssMissionLeg { None, Ascent, Rendezvous, Proximity, Docking, Docked, Transfer, WaitUndock, Departure,
+                           Return, WaitContinue, Complete, Ended };
 const char* to_string(IssMissionLeg leg);  // German
+
+// The transfer of a docked chaser (refuelling r5): a tanker delivers down to its computed return reserve; the station
+// fills the chaser's main tanks up to full (down to its own empty tanks).
+enum class MissionTransfer { TankerReserve, FillChaser };
+
+class FlightSession;
 
 struct IssMissionSequence {
     std::string station_port;  // ida2 / ida3
@@ -129,6 +137,11 @@ struct IssMissionSequence {
     std::optional<time::Epoch> undock_epoch;                // departure: WaitUndock until then
     std::optional<gnc::DeorbitParameters> capsule_return;   // departure: planned when the departure is complete
     std::optional<time::Epoch> deorbit_epoch;               // departure: the previewed pass (lead_s aims at it)
+    bool ascent_to_station = false;                         // depot_launch: Ascent -> make_station -> Complete
+    std::optional<MissionTransfer> transfer;                // Docked -> Transfer -> undock -> Departure
+    std::optional<gnc::DeorbitParameters> ship_return;      // Departure -> release_tower + plan_ship_return -> Return
+    std::optional<time::Epoch> continue_epoch;              // Departure -> WaitContinue until then -> continuation
+    std::function<std::string(FlightSession&)> continuation;  // German refusal; empty: it took over -> Complete
 };
 
 struct RendezvousBurnRecord {
@@ -1050,6 +1063,7 @@ private:
     bool iss_mission_pending() const;  // a leg change is due (the coast stops)
     void iss_end(const std::string& reason);
     void iss_enter(IssMissionLeg leg, std::string status);
+    void iss_start_transfer();  // Docked with a transfer: start it (-> Transfer) or end the mission
 
     // Rendezvous phasing (flight_session_rendezvous.cpp).
     void run_rendezvous(Flying& flying);  // the step machine and its diagnostics (STARSIM_DEBUG_RENDEZVOUS)

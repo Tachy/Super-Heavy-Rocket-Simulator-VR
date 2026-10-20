@@ -1,5 +1,6 @@
 // Refuelling r5: the reference flights - session building blocks, the mission chain, the three missions.
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -124,4 +125,135 @@ TEST_CASE("Leg marks record the chaser's mass and propellant at every leg change
     REQUIRE(marks.size() == 2u);
     CHECK(marks[1].leg == IssMissionLeg::Departure);
     CHECK(marks[1].epoch - marks[0].epoch == Catch::Approx(30.0).margin(0.01));
+}
+
+namespace {
+
+// The docked pair of r4 (tanker 200 t at the depot 600 t), Starbase as the return site.
+struct DockedAtDepot : refuelling_test::TankerAtPort {
+    explicit DockedAtDepot(const config::VehicleConfig& chaser = refuelling_test::tanker_config(200.0e3))
+        : TankerAtPort({0.0, 0.0, 0.0}, {}, chaser) {
+        session.set_launch_site(
+            sim::launch_site_from_config(config::load_launch_site(refuelling_test::config_dir, "starbase_olp1")));
+        session.set_rendezvous_target(1, "transfer_dock", "transfer_dock");
+        session.dock_in_place();
+    }
+    sim::IssMissionSequence tanker_sequence() const {
+        sim::IssMissionSequence q;
+        q.station_port = "transfer_dock";
+        q.transfer = sim::MissionTransfer::TankerReserve;
+        gnc::DeorbitParameters p;
+        p.search_window_s = sim::FlightSession::tanker_reserve_search_s;
+        q.ship_return = p;
+        return q;
+    }
+    IssMissionLeg leg() const { return session.iss_mission_leg(); }
+};
+
+}  // namespace
+
+TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit planned", "[refuelling][iss_mission]") {
+    test::spice_session();
+    DockedAtDepot f;
+    f.session.set_iss_mission(f.tanker_sequence());
+    REQUIRE(f.leg() == IssMissionLeg::Transfer);  // a docked start with a transfer begins with it
+    f.fly([&] { return f.leg() == IssMissionLeg::Departure || f.leg() == IssMissionLeg::Ended; }, 3600.0, 10.0);
+    INFO(f.session.iss_mission_status());
+    REQUIRE(f.leg() == IssMissionLeg::Departure);
+    CHECK(f.session.transfer_state().phase == sim::TransferPhase::Complete);
+    CHECK(f.session.transfer_state().delivered_kg[0] > 140.0e3);  // r4: 144.6 t LOX
+    f.fly([&] { return f.leg() != IssMissionLeg::Departure; }, 4.0 * 3600.0, 10.0);
+    INFO(f.session.iss_mission_status());
+    REQUIRE(f.leg() == IssMissionLeg::Return);
+    REQUIRE(f.session.ship_return_plan());
+    CHECK(f.session.ship_return_plan()->feasible);
+    const auto& marks = f.session.iss_mission_marks();
+    REQUIRE(marks.size() >= 3u);
+    CHECK(marks.front().leg == IssMissionLeg::Transfer);
+    if (verbose()) {
+        for (const auto& m : marks) {
+            std::printf("[r5] %-24s +%8.0f s  main %.1f t  station %.1f t\n", sim::to_string(m.leg),
+                        m.epoch - marks.front().epoch, m.chaser_main_propellant_kg / 1e3,
+                        m.station_main_propellant_kg / 1e3);
+        }
+    }
+}
+
+TEST_CASE("Docked tanker: the ship return flies to the catch", "[refuelling][iss_mission][ship][slow]") {
+    test::spice_session();
+    DockedAtDepot f;
+    f.session.set_iss_mission(f.tanker_sequence());
+    f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 10.0 * 86400.0,
+          600.0);
+    INFO(f.session.iss_mission_status());
+    REQUIRE(f.leg() == IssMissionLeg::Complete);
+    const auto& tanker = f.session.body(f.session.controlled_index());
+    CHECK(tanker.caught());
+    const double main_kg = tanker.vehicle().main_propellant_kg();
+    std::printf("[r5] tanker caught: main tanks %.2f t, headers %.2f t\n", main_kg / 1e3,
+                (tanker.vehicle().propellant_kg() - main_kg) / 1e3);
+}
+
+TEST_CASE("A stopped transfer ends the mission", "[refuelling][iss_mission]") {
+    test::spice_session();
+    DockedAtDepot f;
+    f.session.set_iss_mission(f.tanker_sequence());
+    f.fly([&] { return f.session.transfer_state().phase == sim::TransferPhase::Flowing; }, 600.0, 10.0);
+    REQUIRE(f.session.transfer_state().phase == sim::TransferPhase::Flowing);
+    f.session.stop_transfer();
+    f.fly([&] { return f.leg() != IssMissionLeg::Transfer; }, 60.0, 1.0);
+    CHECK(f.leg() == IssMissionLeg::Ended);
+    CHECK_THAT(f.session.iss_mission_status(), Catch::Matchers::StartsWith("Mission beendet"));
+    CHECK(f.session.docked());  // no undocking after a failed transfer
+}
+
+TEST_CASE("Ship return refused ends the mission", "[refuelling][iss_mission]") {
+    test::spice_session();
+    DockedAtDepot f;
+    auto q = f.tanker_sequence();
+    q.ship_return->search_window_s = 600.0;  // [test] no pass within reach in 10 min
+    f.session.set_iss_mission(q);
+    f.fly([&] { return f.leg() == IssMissionLeg::Return || f.leg() == IssMissionLeg::Ended; }, 6.0 * 3600.0, 10.0);
+    CHECK(f.leg() == IssMissionLeg::Ended);
+    CHECK_THAT(f.session.iss_mission_status(), Catch::Matchers::StartsWith("Mission beendet"));
+}
+
+TEST_CASE("WaitContinue coasts to its epoch and hands over to the continuation", "[refuelling][iss_mission]") {
+    test::spice_session();
+    DockedAtDepot f(refuelling_test::ship_with("starship_hls", 1000.0e3));
+    sim::IssMissionSequence q;
+    q.station_port = "transfer_dock";
+    q.transfer = sim::MissionTransfer::FillChaser;
+    const time::Epoch at = f.session.epoch() + 2.0 * 86400.0;
+    q.continue_epoch = at;
+    time::Epoch called{};
+    q.continuation = [&](sim::FlightSession& s) {
+        called = s.epoch();
+        return std::string();
+    };
+    f.session.set_iss_mission(q);
+    const auto wall = std::chrono::steady_clock::now();
+    f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 3.0 * 86400.0,
+          3600.0);
+    INFO(f.session.iss_mission_status());
+    REQUIRE(f.leg() == IssMissionLeg::Complete);
+    CHECK(std::abs(called - at) <= 0.5 * sim::FlightSession::tick_s + 1e-6);
+    // the depot's 600 t went into the HLS (less chill-down and boil-off), its main tanks not full yet
+    const auto& hls = f.session.body(f.session.controlled_index()).vehicle();
+    CHECK(hls.main_propellant_kg() > 1000.0e3 + 600.0e3 - 30.0e3);  // [test] chill-down / settling-gas headroom
+    CHECK(std::chrono::duration<double>(std::chrono::steady_clock::now() - wall).count() < 60.0);  // coasted
+}
+
+TEST_CASE("Continuation refusal ends the mission", "[refuelling][iss_mission]") {
+    test::spice_session();
+    DockedAtDepot f(refuelling_test::ship_with("starship_hls", 1000.0e3));
+    sim::IssMissionSequence q;
+    q.station_port = "transfer_dock";
+    q.transfer = sim::MissionTransfer::FillChaser;
+    q.continue_epoch = f.session.epoch() + 3.0 * 3600.0;
+    q.continuation = [](sim::FlightSession&) { return std::string("Mondmission: zu spät"); };
+    f.session.set_iss_mission(q);
+    f.fly([&] { return f.leg() == IssMissionLeg::Complete || f.leg() == IssMissionLeg::Ended; }, 6.0 * 3600.0, 60.0);
+    CHECK(f.leg() == IssMissionLeg::Ended);
+    CHECK(f.session.iss_mission_status() == "Mission beendet: Mondmission: zu spät");
 }

@@ -694,6 +694,9 @@ double FlightSession::coast_allowance_s() const {
     if (!station_impulses_.empty()) allowance = std::min(allowance, station_impulses_.front().epoch - epoch_);
     if (iss_mission_pending()) return 0.0;  // a leg change is due: act on the next tick (ISS i6)
     if (iss_leg_ == IssMissionLeg::WaitUndock) allowance = std::min(allowance, *iss_mission_->undock_epoch - epoch_);
+    if (iss_leg_ == IssMissionLeg::WaitContinue) {
+        allowance = std::min(allowance, *iss_mission_->continue_epoch - epoch_);
+    }
     if (autopilot_.state == AutopilotState::Burn) {
         const double drift = burn_drifting() ? burn_drift_lead_s : 0.0;  // the turn to the burn attitude is ticked
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s - drift);
