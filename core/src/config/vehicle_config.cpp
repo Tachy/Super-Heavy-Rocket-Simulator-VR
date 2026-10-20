@@ -157,6 +157,29 @@ EngineConfig load_engine(const std::filesystem::path& config_dir, const std::str
     return e;
 }
 
+// [[stage.docking_port]] entries of a stage table (also the additions to a reused stage, see load_stage_from).
+void append_docking_ports(const Document& doc, const toml::table& t, StageConfig& s) {
+    if (auto ports = t["docking_port"].as_array()) {
+        for (const auto& node : *ports) {
+            const auto& p = *node.as_table();
+            DockingPortConfig port{doc.text(p, "id"), doc.text(p, "name"), vec3(doc, p, "position_m"),
+                                   vec3(doc, p, "axis"), vec3(doc, p, "up")};
+            if (std::abs(norm(port.axis) - 1.0) > 1e-9 || std::abs(norm(port.up) - 1.0) > 1e-9 ||
+                std::abs(dot(port.axis, port.up)) > 1e-9) {
+                doc.fail("stage.docking_port '" + port.id + "': axis and up must be perpendicular unit vectors");
+            }
+            port.behind_nose_cone = p["behind_nose_cone"].value_or(false);
+            const std::string mode = p["soft_capture"].value_or(std::string("passive"));
+            if (mode == "active") {
+                port.soft_capture = SoftCaptureMode::Active;
+            } else if (mode != "passive") {
+                doc.fail("stage.docking_port '" + port.id + "': soft_capture must be \"active\" or \"passive\"");
+            }
+            s.docking_ports.push_back(port);
+        }
+    }
+}
+
 StageConfig load_stage(const Document& doc, const toml::table& t) {
     StageConfig s;
     s.id = doc.text(t, "id");
@@ -269,25 +292,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 doc.number(*orbit, "raan_deg") * constants::deg_to_rad, doc.text(*orbit, "reference_utc")};
         }
     }
-    if (auto ports = t["docking_port"].as_array()) {
-        for (const auto& node : *ports) {
-            const auto& p = *node.as_table();
-            DockingPortConfig port{doc.text(p, "id"), doc.text(p, "name"), vec3(doc, p, "position_m"),
-                                   vec3(doc, p, "axis"), vec3(doc, p, "up")};
-            if (std::abs(norm(port.axis) - 1.0) > 1e-9 || std::abs(norm(port.up) - 1.0) > 1e-9 ||
-                std::abs(dot(port.axis, port.up)) > 1e-9) {
-                doc.fail("stage.docking_port '" + port.id + "': axis and up must be perpendicular unit vectors");
-            }
-            port.behind_nose_cone = p["behind_nose_cone"].value_or(false);
-            const std::string mode = p["soft_capture"].value_or(std::string("passive"));
-            if (mode == "active") {
-                port.soft_capture = SoftCaptureMode::Active;
-            } else if (mode != "passive") {
-                doc.fail("stage.docking_port '" + port.id + "': soft_capture must be \"active\" or \"passive\"");
-            }
-            s.docking_ports.push_back(port);
-        }
-    }
+    append_docking_ports(doc, t, s);
     if (auto prims = t["collision"].as_array()) {
         for (const auto& node : *prims) {
             const auto& p = *node.as_table();
@@ -522,6 +527,43 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     return s;
 }
 
+// [[stage]] from = "<vehicle>:<stage>": that vehicle's stage exactly as configured there (refuelling r1: the tanker
+// and the depot's booster are Block 3's). Only docking ports and transfer connectors may be added; any other key would
+// silently diverge from the source and is an error.
+StageConfig load_stage_from(const std::filesystem::path& config_dir, const Document& doc, const toml::table& t,
+                            const std::string& propellant_id) {
+    constexpr int max_from_depth = 4;  // a longer chain is a cycle
+    thread_local int depth = 0;
+    if (depth >= max_from_depth) doc.fail("stage.from: chain too long (a cycle?)");
+    struct DepthGuard {
+        DepthGuard() { ++depth; }
+        ~DepthGuard() { --depth; }
+    } guard;
+
+    const std::string from = doc.text(t, "from");
+    const auto colon = from.find(':');
+    if (colon == std::string::npos || colon == 0 || colon + 1 == from.size()) {
+        doc.fail("stage.from must be \"<vehicle>:<stage>\", got \"" + from + "\"");
+    }
+    for (const auto& [key, value] : t) {
+        if (key != "from" && key != "docking_port" && key != "transfer_connector") {
+            doc.fail("stage.from = \"" + from + "\": '" + std::string(key.str()) + "' cannot be set on a reused stage");
+        }
+    }
+    const auto source = load_vehicle(config_dir, from.substr(0, colon));
+    if (source.propellant.id != propellant_id) {
+        doc.fail("stage.from = \"" + from + "\": propellant '" + source.propellant.id + "' differs from '" +
+                 propellant_id + "'");
+    }
+    const std::string stage_id = from.substr(colon + 1);
+    const auto it = std::find_if(source.stages.begin(), source.stages.end(),
+                                 [&](const StageConfig& s) { return s.id == stage_id; });
+    if (it == source.stages.end()) doc.fail("stage.from = \"" + from + "\": no such stage");
+    StageConfig s = *it;
+    append_docking_ports(doc, t, s);
+    return s;
+}
+
 }  // namespace
 
 const EngineConfig& VehicleConfig::engine(const std::string& engine_id) const {
@@ -545,7 +587,9 @@ VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_
     std::map<std::string, StageConfig> stages_by_id;
     if (auto stages = doc.root["stage"].as_array()) {
         for (const auto& node : *stages) {
-            auto stage = load_stage(doc, *node.as_table());
+            const auto& table = *node.as_table();
+            auto stage = table.contains("from") ? load_stage_from(config_dir, doc, table, v.propellant.id)
+                                                : load_stage(doc, table);
             stages_by_id[stage.id] = std::move(stage);
         }
     }

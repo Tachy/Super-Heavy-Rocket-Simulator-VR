@@ -1,12 +1,14 @@
 // Refuelling r1: tanker, depot and HLS vehicles, run-time tank masses, probe/drogue mating geometry.
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/vehicle/vehicle.hpp"
@@ -56,4 +58,71 @@ TEST_CASE("A refilled dry ship has its engines and cold-gas RCS back", "[refuell
     ship->set_tank_mass(0, "ch4_main", 80000.0);
     CHECK_FALSE(ship->stages()[0].engines.front().starved);
     CHECK(ship->rcs_pure_force_capability({0.0, 0.0, 1.0}).force_n > 0.0);
+}
+
+namespace {
+
+// A config directory of its own (ctest runs cases in parallel): engines, propellants, Block 3 and one test vehicle.
+std::filesystem::path config_with(const std::string& name, const std::string& vehicle_toml) {
+    const auto dir = std::filesystem::temp_directory_path() / ("starsim_refuelling_" + name);
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "vehicles");
+    std::filesystem::copy(config_dir / "engines", dir / "engines", std::filesystem::copy_options::recursive);
+    std::filesystem::copy_file(config_dir / "propellants.toml", dir / "propellants.toml");
+    std::filesystem::copy_file(config_dir / "vehicles" / "starship_block3.toml",
+                               dir / "vehicles" / "starship_block3.toml");
+    std::ofstream(dir / "vehicles" / "test_vehicle.toml") << vehicle_toml;
+    return dir;
+}
+
+std::string vehicle_with_stage(const std::string& stage_body) {
+    return "[vehicle]\nid = \"test_vehicle\"\nname = \"Test\"\npropellant = \"methalox\"\n"
+           "stages_bottom_to_top = [\"ship\"]\n\n[[stage]]\n" +
+           stage_body;
+}
+
+}  // namespace
+
+TEST_CASE("A stage taken over with `from` is the source vehicle's stage", "[refuelling][config]") {
+    const auto block3 = config::load_vehicle(config_dir, "starship_block3");
+    const auto tanker = config::load_vehicle(config_dir, "starship_tanker");
+    REQUIRE(tanker.stages.size() == block3.stages.size());
+    for (size_t i = 0; i < block3.stages.size(); ++i) {
+        const auto& a = block3.stages[i];
+        const auto& b = tanker.stages[i];
+        CAPTURE(a.id);
+        CHECK(b.id == a.id);
+        CHECK(b.dry_mass_kg == a.dry_mass_kg);
+        CHECK(b.dry_cg_station_m == a.dry_cg_station_m);
+        REQUIRE(b.tanks.size() == a.tanks.size());
+        for (size_t k = 0; k < a.tanks.size(); ++k) {
+            CHECK(b.tanks[k].id == a.tanks[k].id);
+            CHECK(b.tanks[k].mass_kg == a.tanks[k].mass_kg);
+            CHECK(b.tanks[k].capacity_kg == a.tanks[k].capacity_kg);
+        }
+        CHECK(b.engine_groups.size() == a.engine_groups.size());
+        CHECK(b.rcs.thrusters.size() == a.rcs.thrusters.size());
+        CHECK(b.flaps.size() == a.flaps.size());
+    }
+    CHECK(tanker.engines.size() == block3.engines.size());
+}
+
+TEST_CASE("Bad `from` stages are config errors", "[refuelling][config]") {
+    struct Case {
+        const char* name;
+        const char* body;
+        const char* message;
+    };
+    const Case cases[] = {
+        {"from_override", "from = \"starship_block3:ship\"\ndry_mass_kg = 1.0\n", "cannot be set on a reused stage"},
+        {"from_no_stage", "from = \"starship_block3:nose\"\n", "no such stage"},
+        {"from_no_vehicle", "from = \"no_such_vehicle:ship\"\n", "no_such_vehicle.toml"},
+        {"from_syntax", "from = \"starship_block3\"\n", "must be \"<vehicle>:<stage>\""},
+        {"from_cycle", "from = \"test_vehicle:ship\"\n", "chain too long"},
+    };
+    for (const auto& c : cases) {
+        CAPTURE(c.name);
+        const auto dir = config_with(c.name, vehicle_with_stage(c.body));
+        CHECK_THROWS_WITH(config::load_vehicle(dir, "test_vehicle"), Catch::Matchers::ContainsSubstring(c.message));
+    }
 }

@@ -1,0 +1,19 @@
+# Starship tanker (refuelling r1): a Block 3 ship that carries propellant to the depot. Same hull, tanks and engines as
+# starship_block3.toml - its stages are taken over unchanged ([[stage]] from = "<vehicle>:<stage>"); the ship adds four
+# docking probes on the dorsal side and the transfer connectors (spec 2026-10-20-orbital-refuelling-design.md).
+
+[sources]
+spacex_v3 = "SpaceX Starship V3 update, May 2026, via https://www.teslarati.com/spacex-unveils-sweeping-starship-v3-upgrades-ahead-may-19-launch/ (four docking drogues and dedicated propellant transfer connections)"
+
+[vehicle]
+id = "starship_tanker"
+name = "Starship Tanker (Super Heavy Block 3 / Ship Block 3)"
+display_name = "Tanker Mk3"
+propellant = "methalox"
+stages_bottom_to_top = ["booster", "ship"]
+
+[[stage]]
+from = "starship_block3:booster"
+
+[[stage]]
+from = "starship_block3:ship"

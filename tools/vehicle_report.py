@@ -26,6 +26,19 @@ def load_toml(path: Path) -> dict:
         return tomllib.load(f)
 
 
+def resolve_stages(vehicle: dict) -> dict:
+    """Stages by id; a `from = "<vehicle>:<stage>"` stage is the source vehicle's stage plus its added entries."""
+    stages = {}
+    for stage in vehicle["stage"]:
+        if "from" in stage:
+            source_id, stage_id = stage["from"].split(":")
+            source = load_toml(CONFIG_DIR / "vehicles" / f"{source_id}.toml")
+            added = {k: v for k, v in stage.items() if k != "from"}
+            stage = {**resolve_stages(source)[stage_id], **added}
+        stages[stage["id"]] = stage
+    return stages
+
+
 @dataclass(frozen=True)
 class Engine:
     id: str
@@ -82,7 +95,7 @@ def report(vehicle_id: str, payload_kg: float) -> int:
     vehicle = load_toml(CONFIG_DIR / "vehicles" / f"{vehicle_id}.toml")
     propellants = {p["id"]: p for p in load_toml(CONFIG_DIR / "propellants.toml")["propellant"]}
     prop = propellants[vehicle["vehicle"]["propellant"]]
-    stages = {s["id"]: s for s in vehicle["stage"]}
+    stages = resolve_stages(vehicle)
     order = vehicle["vehicle"]["stages_bottom_to_top"]
     stages[order[-1]]["payload_mass_kg"] = payload_kg
     warnings: list[str] = []
