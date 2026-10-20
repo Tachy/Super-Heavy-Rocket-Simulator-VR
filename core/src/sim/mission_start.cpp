@@ -49,7 +49,10 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
                                          iss_archive(config_dir, time), time);
             break;
         case config::MissionKind::IssDeparture:
-            throw std::invalid_argument("mission '" + std::string(mission_id) + "': not yet available");
+            s = start_iss_departure_mission(session, config_dir,
+                                            config::load_iss_departure_mission(config_dir, mission_id),
+                                            iss_archive(config_dir, time), time);
+            break;
         case config::MissionKind::ShipReturn:
             throw std::invalid_argument("mission '" + std::string(mission_id) +
                                         "' is a ship return: it is flown from orbit with plan_ship_return (key R), "

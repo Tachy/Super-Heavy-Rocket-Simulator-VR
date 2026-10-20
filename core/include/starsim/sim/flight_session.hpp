@@ -680,6 +680,14 @@ public:
     std::optional<gnc::DeparturePhase> departure_phase() const;
     const std::vector<gnc::DepartureEvent>* departure_events() const;
     const MomentumRecord& docking_separation_record() const { return docking_separation_; }
+    // A scenario that starts docked (ISS i6): the armed pair (set_rendezvous_target with the chaser's active port on a
+    // passive station port) mated at once - the chaser moved to the mated pose moving with the station, the mechanism
+    // Docked, the compound merged (momentum kept). Throws std::logic_error without an armed mechanism or outside Ready.
+    void dock_in_place();
+    // The capsule return plan_capsule_return(parameters) would plan now (the same refusals, also while docked: the
+    // held state), not stored and not flown (ISS i6: the undocking is timed to it).
+    gnc::DeorbitPlan capsule_return_preview(gnc::DeorbitParameters parameters) const;
+    static constexpr double iss_departure_start_lead_s = 600.0;  // [E] a departure scenario starts before undocking
 
     // ISS missions (i6, flight_session_iss_mission.cpp): the legs of IssMissionLeg flown in sequence on the session tick
     // (also with the autopilot Off / Orbit); the coast stops at every leg change and at the undock epoch. A proximity
@@ -1041,6 +1049,13 @@ private:
     void docking_before_tick();
     void docking_after_tick();
     void merge_docked();
+    struct MatedPose {
+        math::Quat attitude;
+        math::Vec3 cg_gcrf_m;
+    };
+    MatedPose mated_pose(const vehicle::FlightBody& chaser, const vehicle::FlightBody& station) const;
+    // plan_capsule_return's planning; fills the parameters' burn thrust and entry mass
+    gnc::DeorbitPlan capsule_deorbit_plan(gnc::DeorbitParameters& parameters) const;
     void sync_docked();  // the docked chaser follows the station (every tick and after every coast)
     void detach_compound();  // removes the attached chaser mass, the station state back on its own CG
     void docking_diagnostics();

@@ -49,41 +49,31 @@ gnc::DeorbitParameters FlightSession::capsule_deorbit_parameters() {
     return p;
 }
 
-bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
-    // A return in progress keeps its plan (review d3: a second call reset it mid-way).
-    if (capsule_return_step_ != CapsuleReturnStep::None || autopilot_.state == AutopilotState::Return) return false;
-    if (docking_busy()) {  // undock first (ISS i5)
-        docking_status_ = "Rückkehr nicht möglich: angedockt";
-        return false;
-    }
-    ship_return_ = false;
-    capsule_return_step_ = CapsuleReturnStep::None;
-    deorbit_plan_.reset();
+gnc::DeorbitPlan FlightSession::capsule_deorbit_plan(gnc::DeorbitParameters& parameters) const {
     gnc::DeorbitPlan refused;
-    if (bodies_.empty()) return false;
-    auto& flying = bodies_[controlled_];
+    if (bodies_.empty()) {
+        refused.reason = "Keine Rückkehr möglich: keine Kapsel im Orbit";
+        return refused;
+    }
+    const auto& flying = bodies_[controlled_];
     const auto& vehicle = flying.body->vehicle();
     const auto& stages = vehicle.stages();
     if (stages.back().config.aero.entry_profile != "capsule" || flying.entry_guidance) {
         refused.reason = "Keine Rückkehr möglich: keine Kapsel im Orbit";
-        deorbit_plan_ = refused;
-        return false;
+        return refused;
     }
     if (vehicle.payload_stacked()) {  // review d3 M2: the capsule must fly alone (released from the second stage)
         refused.reason = "Keine Rückkehr möglich: Kapsel noch auf der Oberstufe";
-        deorbit_plan_ = refused;
-        return false;
+        return refused;
     }
     if (!splashdown_zone_) {
         refused.reason = "Keine Rückkehr möglich: keine Wasserungszone";
-        deorbit_plan_ = refused;
-        return false;
+        return refused;
     }
     const auto rcs = vehicle.rcs_force_capability({1.0, 0.0, 0.0});
     if (!(rcs.force_n > 0.0)) {
         refused.reason = "Keine Rückkehr möglich: keine Deorbit-Düsen";
-        deorbit_plan_ = refused;
-        return false;
+        return refused;
     }
     parameters.burn_thrust_n = rcs.force_n;
     // The capsule after the trunk jettison: its entry model (aero at trim, heat shield, crew load limit).
@@ -98,8 +88,27 @@ bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
                                  rcs.force_n / rcs.mass_flow_kgps, vehicle.rcs_propellant_kg(),
                                  capsule_return_reserve_kg, parameters);
     };
-    deorbit_plan_ = plan(capsule_mass_kg);
-    if (deorbit_plan_->feasible) deorbit_plan_ = plan(capsule_mass_kg - deorbit_plan_->propellant_kg);
+    auto result = plan(capsule_mass_kg);
+    if (result.feasible) result = plan(capsule_mass_kg - result.propellant_kg);
+    return result;
+}
+
+gnc::DeorbitPlan FlightSession::capsule_return_preview(gnc::DeorbitParameters parameters) const {
+    return capsule_deorbit_plan(parameters);
+}
+
+bool FlightSession::plan_capsule_return(gnc::DeorbitParameters parameters) {
+    // A return in progress keeps its plan (review d3: a second call reset it mid-way).
+    if (capsule_return_step_ != CapsuleReturnStep::None || autopilot_.state == AutopilotState::Return) return false;
+    if (docking_busy()) {  // undock first (ISS i5)
+        docking_status_ = "Rückkehr nicht möglich: angedockt";
+        return false;
+    }
+    ship_return_ = false;
+    capsule_return_step_ = CapsuleReturnStep::None;
+    deorbit_plan_.reset();
+    if (bodies_.empty()) return false;
+    deorbit_plan_ = capsule_deorbit_plan(parameters);
     deorbit_parameters_ = parameters;
     if (!deorbit_plan_->feasible) return false;
     if (!execute_burn(deorbit_plan_->node) || !burn_config_.rcs) {

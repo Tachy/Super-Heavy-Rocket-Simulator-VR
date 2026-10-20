@@ -2,6 +2,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
+
 #include "docking_test_support.hpp"
 #include "rendezvous_test_support.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -113,4 +117,42 @@ TEST_CASE("ISS mission sequence: cleared with the bodies", "[iss][iss_mission]")
                              {dragon.position_gcrf_m, dragon.velocity_gcrf_mps}, d.session.epoch());
     CHECK(d.session.iss_mission_leg() == IssMissionLeg::None);
     CHECK_FALSE(d.session.iss_mission());
+}
+
+TEST_CASE("ISS mission sequence: dock_in_place mates the pair rigidly with momentum conserved",
+          "[iss][iss_mission][docking]") {
+    test::spice_session();
+    auto d = docking_test::DragonAtPort::place("ida2", 30.0, 0.0, 0.0, 0.0);  // 30 m out, at rest
+    auto& s = d.session;
+    s.dock_in_place();
+    CHECK(s.docked());
+    CHECK(norm(s.relative_port_state()->position_m) < 1e-6);
+    const auto& r = s.docking_merge_record();
+    CHECK(norm(r.momentum_after - r.momentum_before) / norm(r.momentum_before) < 1e-12);
+    s.advance_to(d.t0 + 3600.0, 1000000);
+    CHECK(norm(s.relative_port_state()->position_m) < 0.001);
+    CHECK_THROWS_AS(s.dock_in_place(), std::logic_error);  // docked already
+    REQUIRE(s.undock());
+}
+
+TEST_CASE("ISS mission sequence: WaitUndock undocks at its epoch, also through one long call",
+          "[iss][iss_mission][docking]") {
+    test::spice_session();
+    auto d = docking_test::DragonAtPort::place("ida2", 30.0, 0.0, 0.0, 0.0);
+    auto& s = d.session;
+    s.dock_in_place();
+    sim::IssMissionSequence q;
+    q.station_port = "ida2";
+    q.undock_epoch = d.t0 + 1234.0;
+    s.set_iss_mission(q);
+    CHECK(s.iss_mission_leg() == IssMissionLeg::WaitUndock);
+    s.advance_to(d.t0 + 1300.0, 1000000);  // one call across the undock epoch
+    CHECK(s.iss_mission_leg() == IssMissionLeg::Departure);
+    CHECK(s.docking_phase() == contact::DockingPhase::HooksOpening);
+    const auto& events = *s.docking_events();
+    const auto opened = std::find_if(events.begin(), events.end(), [](const auto& e) {
+        return e.phase == contact::DockingPhase::HooksOpening;
+    });
+    REQUIRE(opened != events.end());
+    CHECK(std::abs(opened->t_s - 1234.0) < 0.01);  // the mechanism clock starts at the docked start (t0)
 }

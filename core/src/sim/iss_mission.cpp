@@ -10,7 +10,9 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/sim/ascent_mission.hpp"
+#include "starsim/sim/capsule_return_mission.hpp"
 
 namespace starsim::sim {
 
@@ -127,6 +129,26 @@ void reboost_warnings(const StationStart& st, time::Epoch from, time::Epoch to, 
     }
 }
 
+// The Dragon docked at `port` at `epoch`: placed near the station, the station added, the nose cone open, the docking
+// mechanism armed and mated at once (FlightSession::dock_in_place).
+StationStart place_docked(FlightSession& session, const config::VehicleConfig& dragon, const StationSource& station,
+                          const std::string& port, time::Epoch epoch) {
+    const auto st = station.start(epoch);
+    std::string chaser_port;
+    for (const auto& stage : dragon.stages) {
+        if (!stage.docking_ports.empty() && chaser_port.empty()) chaser_port = stage.docking_ports.front().id;
+    }
+    if (chaser_port.empty()) throw std::runtime_error("Das Fahrzeug " + dragon.id + " hat keinen Andockport");
+    // anywhere near the station (dock_in_place moves it to the mated pose)
+    const Vec3 radial = math::normalized(st.state_gcrf.position_m);
+    session.place_in_orbit(dragon, {st.state_gcrf.position_m - 100.0 * radial, st.state_gcrf.velocity_mps}, epoch);
+    const size_t index = session.add_station(st.vehicle, st.state_gcrf, st.epoch, st.impulses);
+    session.set_nose_cone(session.controlled_index(), true);
+    session.set_rendezvous_target(index, chaser_port, port);
+    session.dock_in_place();
+    return st;
+}
+
 }  // namespace
 
 orbit::OemArchive iss_archive(const std::filesystem::path& config_dir, const time::TimeScaleConverter& time) {
@@ -221,6 +243,52 @@ MissionStart start_iss_launch_mission(FlightSession& session, const std::filesys
     s.site_id = ascent.site_id;
     s.warnings.push_back(st.note);
     reboost_warnings(st, w.liftoff, w.liftoff + mission.mission_limit_s, time, s.warnings);
+    s.return_planned = true;
+    return s;
+}
+
+MissionStart start_iss_departure_mission(FlightSession& session, const std::filesystem::path& config_dir,
+                                         const config::IssDepartureMission& mission, const orbit::OemArchive& archive,
+                                         const time::TimeScaleConverter& time) {
+    MissionStart s;
+    s.kind = config::MissionKind::IssDeparture;
+    const time::Epoch earliest = time.from_utc(mission.epoch_utc);
+    const StationSource station(iss_vehicle(config_dir, mission.station_id, mission.port, mission.id), archive, time,
+                                session.earth_orientation(), parse_iss_orbit_source(mission.iss_orbit),
+                                mission.iss_argument_of_latitude_rad, earliest);
+    auto dragon = config::load_vehicle(config_dir, mission.vehicle_id);
+    for (auto& stage : dragon.stages) {
+        for (auto& tank : stage.tanks) {
+            if (tank.contents == config::TankContents::Rcs) tank.mass_kg = mission.rcs_propellant_kg;
+        }
+    }
+    const auto ret = config::load_capsule_return_mission(config_dir, mission.return_id);
+    const auto zone = config::load_splashdown_zone(config_dir, ret.zone_id);
+    auto p = capsule_return_parameters(ret);
+    p.search_window_s = mission.search_window_s;
+    // the probe: docked at the earliest undocking, the first pass at least undock_to_deorbit_s later
+    s.epoch = earliest;
+    place_docked(session, dragon, station, mission.port, earliest);
+    session.set_splashdown_zone(zone);
+    auto probe = p;
+    probe.lead_s = mission.undock_to_deorbit_s;
+    const auto pass = session.capsule_return_preview(probe);
+    if (!pass.feasible) {
+        s.refusal = "Keine Rückkehrgelegenheit: " + pass.reason;
+        return s;
+    }
+    const time::Epoch undock = pass.node.epoch - mission.undock_to_deorbit_s;
+    s.epoch = undock - FlightSession::iss_departure_start_lead_s;
+    const auto st = place_docked(session, dragon, station, mission.port, s.epoch);
+    session.set_splashdown_zone(zone);
+    IssMissionSequence q;
+    q.station_port = mission.port;
+    q.undock_epoch = undock;
+    q.capsule_return = p;
+    q.deorbit_epoch = pass.node.epoch;
+    session.set_iss_mission(q);
+    s.warnings.push_back(st.note);
+    reboost_warnings(st, s.epoch, pass.node.epoch, time, s.warnings);
     s.return_planned = true;
     return s;
 }

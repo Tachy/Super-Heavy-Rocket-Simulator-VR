@@ -213,3 +213,55 @@ TEST_CASE("ISS mission: no launch window - refused, nothing launched", "[iss][is
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::None);
     CHECK(f.session.body_count() == 0);
 }
+
+TEST_CASE("ISS mission: crew_dragon_iss_departure - undock timed to the pass, splashdown",
+          "[iss][iss_mission][docking][slow]") {
+    test::spice_session();
+    Session f;
+    const auto m = config::load_iss_departure_mission(rendezvous_test::config_dir, "crew_dragon_iss_departure");
+    const auto st = sim::start_iss_departure_mission(f.session, rendezvous_test::config_dir, m, f.archive, f.clock);
+    INFO(st.refusal);
+    REQUIRE(st.return_planned);
+    auto& s = f.session;
+    CHECK(s.docked());
+    CHECK(s.iss_mission_leg() == IssMissionLeg::WaitUndock);
+    REQUIRE(s.iss_mission());
+    REQUIRE(s.iss_mission()->deorbit_epoch);
+    const auto planned_deorbit = *s.iss_mission()->deorbit_epoch;
+    const auto undock_epoch = *s.iss_mission()->undock_epoch;
+    CHECK(undock_epoch - st.epoch == Catch::Approx(sim::FlightSession::iss_departure_start_lead_s));
+    CHECK(planned_deorbit - undock_epoch == Catch::Approx(m.undock_to_deorbit_s));
+    CHECK(undock_epoch - f.clock.from_utc(m.epoch_utc) >= 0.0);
+    const double rcs0 = s.body(s.controlled_index()).vehicle().rcs_propellant_kg();
+    const auto done = [&] { return s.iss_mission_leg() == IssMissionLeg::Complete; };
+    const auto start = s.epoch();
+    while (!done() && s.epoch() - start < 4.0 * 86400.0 && s.iss_mission_leg() != IssMissionLeg::Ended) {
+        double step = 60.0;
+        if (s.autopilot().state == sim::AutopilotState::Burn && s.autopilot().burn.time_to_ignition_s > 900.0) {
+            step = s.autopilot().burn.time_to_ignition_s - 600.0;
+        }
+        s.advance_to(s.epoch() + step, 10000000);
+    }
+    INFO(s.iss_mission_status());
+    CHECK(s.iss_mission_leg() == IssMissionLeg::Complete);
+    CHECK(s.capsule_return_step() == sim::CapsuleReturnStep::SplashedDown);
+    REQUIRE(s.ship_return_plan());
+    CHECK(std::abs(s.ship_return_plan()->node.epoch - planned_deorbit) < 1800.0);  // the previewed pass was taken
+    if (verbose()) {
+        std::printf("[iss_mission] departure: undock +%.1f h after epoch_utc, deorbit %.2f h after the undocking "
+                    "(planned %.2f), RCS used %.0f kg\n",
+                    (undock_epoch - f.clock.from_utc(m.epoch_utc)) / 3600.0,
+                    (s.ship_return_plan()->node.epoch - undock_epoch) / 3600.0, (planned_deorbit - undock_epoch) / 3600.0,
+                    rcs0 - s.body(s.controlled_index()).vehicle().rcs_propellant_kg());
+    }
+}
+
+TEST_CASE("ISS mission: start_mission dispatches the departure", "[iss][iss_mission]") {
+    test::spice_session();
+    Session f;
+    const auto st = sim::start_mission(f.session, rendezvous_test::config_dir, "crew_dragon_iss_departure", {}, f.clock);
+    INFO(st.refusal);
+    CHECK(st.kind == config::MissionKind::IssDeparture);
+    CHECK(st.return_planned);
+    CHECK(f.session.docked());
+}

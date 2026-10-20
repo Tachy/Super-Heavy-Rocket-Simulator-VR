@@ -168,3 +168,15 @@ TEST_CASE("Docking mechanism: separation speed from the IDSS spring energy", "[i
     CHECK(contact::separation_relative_speed_mps(p, 12000.0, 460320.0) == Catch::Approx(std::sqrt(2.0 * 43.35 / mu)));
     CHECK(contact::separation_relative_speed_mps(p, 12000.0, 460320.0) == Catch::Approx(0.0862).margin(0.002));
 }
+
+TEST_CASE("Docking mechanism: start_docked enters Docked from Ready only", "[docking]") {
+    contact::DockingMechanism m;
+    REQUIRE(m.start_docked(5.0));
+    CHECK(m.phase() == contact::DockingPhase::Docked);
+    CHECK(m.hard_captured());
+    CHECK(m.ring_extension_m() == 0.0);  // retracted, as after a capture
+    CHECK_FALSE(m.start_docked(6.0));
+    CHECK_FALSE(m.refusal().empty());
+    CHECK(m.undock(10.0));  // the docked state undocks as after a capture
+    CHECK(m.phase() == contact::DockingPhase::HooksOpening);
+}

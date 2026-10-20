@@ -38,4 +38,13 @@ MissionStart start_iss_launch_mission(FlightSession& session, const std::filesys
                                       const config::IssLaunchMission& mission, const orbit::OemArchive& archive,
                                       const time::TimeScaleConverter& time);
 
+// start_mission's iss_departure branch: the first capsule-return pass at least undock_to_deorbit_s after epoch_utc
+// (previewed on the docked Dragon), the Dragon docked at the port (dock_in_place) iss_departure_start_lead_s before the
+// undocking (that pass - undock_to_deorbit_s), the sequence set (undocking -> departure -> capsule return of
+// return_id, aimed at that pass). Epoch: the start. Refused (German refusal): no return pass in the search window
+// (the probe placement stays). Throws std::runtime_error (German) for an unknown port or an ISS source without data.
+MissionStart start_iss_departure_mission(FlightSession& session, const std::filesystem::path& config_dir,
+                                         const config::IssDepartureMission& mission, const orbit::OemArchive& archive,
+                                         const time::TimeScaleConverter& time);
+
 }  // namespace starsim::sim

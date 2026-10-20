@@ -31,6 +31,11 @@ public:
     contact::DockingPose pose(const vehicle::FlightBody& chaser, const vehicle::FlightBody& station) const;
 
     bool undock(time::Epoch epoch) { return mechanism_.undock(t0_ ? epoch - *t0_ : 0.0); }  // on the mechanism clock
+    // Docked at once (ISS i6 scenario start): the mechanism clock starts at `epoch`.
+    bool start_docked(time::Epoch epoch) {
+        if (!t0_) t0_ = epoch;
+        return mechanism_.start_docked(epoch - *t0_);
+    }
     contact::DockingMechanism& mechanism() { return mechanism_; }
     const contact::DockingMechanism& mechanism() const { return mechanism_; }
     bool hull_contact() const { return hull_contact_; }  // this tick

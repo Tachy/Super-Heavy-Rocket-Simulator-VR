@@ -65,6 +65,16 @@ void DockingMechanism::rearm() {
     status_ = "bereit";
 }
 
+bool DockingMechanism::start_docked(double t_s) {
+    if (phase_ != DockingPhase::Ready) {
+        refusal_ = "Andocken nicht möglich: Mechanismus nicht bereit";
+        return false;
+    }
+    extension_m_ = 0.0;
+    enter(DockingPhase::Docked, "angedockt: " + std::to_string(p_.hook_count) + " Haken geschlossen", t_s);
+    return true;
+}
+
 bool DockingMechanism::undock(double t_s) {
     if (phase_ == DockingPhase::HooksOpening || phase_ == DockingPhase::Separated) {
         refusal_ = "Abkoppeln nicht möglich: Abkoppeln läuft";

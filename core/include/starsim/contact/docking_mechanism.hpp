@@ -72,6 +72,9 @@ public:
     DockingWrench update(double t_s, const DockingPose& pose, double chaser_mass_kg, double chaser_inertia_kg_m2,
                          double dt_s);
     bool undock(double t_s);  // Docked -> HooksOpening; false + refusal() otherwise
+    // Ready -> Docked directly (a scenario that starts docked, ISS i6): ring retracted, hooks closed, the event at t_s
+    // as after a hard capture. False + refusal() outside Ready.
+    bool start_docked(double t_s);
     bool separation_due();    // true once, when Separated is reached
     void rearm();             // Failed -> Ready (a new approach); no-op otherwise
     bool hard_captured() const { return phase_ == DockingPhase::Docked; }

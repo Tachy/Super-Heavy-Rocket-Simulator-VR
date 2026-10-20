@@ -16,6 +16,7 @@
 
 #include <cstdio>
 #include <limits>
+#include <stdexcept>
 
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/docking_port.hpp"
@@ -172,6 +173,42 @@ void FlightSession::docking_after_tick() {
     if (docking_debug_) docking_diagnostics();
 }
 
+FlightSession::MatedPose FlightSession::mated_pose(const vehicle::FlightBody& chaser,
+                                                  const vehicle::FlightBody& station) const {
+    // chaser port on the station port, its axes (-x, -y, +z) of the station port's
+    const auto& cs = chaser.state();
+    const auto ck = vehicle::port_kinematics(chaser, docking_->chaser_port());
+    const auto sk = vehicle::port_kinematics(station, docking_->station_port());
+    const math::Mat3 rc = cs.attitude.to_matrix();
+    const math::Mat3 port_axes_body = transpose(rc) * ck.axes_gcrf;
+    const math::Vec3 lever_body = transpose(rc) * (ck.position_gcrf_m - cs.position_gcrf_m);
+    const math::Mat3 mated = sk.axes_gcrf * math::Mat3::from_columns({-1, 0, 0}, {0, -1, 0}, {0, 0, 1});
+    const math::Mat3 rc_mated = mated * transpose(port_axes_body);
+    return {math::Quat::from_matrix(rc_mated), sk.position_gcrf_m - rc_mated * lever_body};
+}
+
+void FlightSession::dock_in_place() {
+    if (!docking_ || !station_index_) throw std::logic_error("dock_in_place: no armed docking mechanism");
+    if (docking_->mechanism().phase() != contact::DockingPhase::Ready) {
+        throw std::logic_error("dock_in_place: the mechanism is not ready");
+    }
+    auto& chaser = *bodies_[controlled_].body;
+    const auto& station = *bodies_[*station_index_].body;
+    const auto pose = mated_pose(chaser, station);
+    const auto& ss = station.state();
+    const math::Vec3 w = ss.attitude.rotate(ss.angular_velocity_body_radps);
+    auto cs = chaser.state();
+    cs.attitude = pose.attitude;
+    cs.position_gcrf_m = pose.cg_gcrf_m;
+    cs.velocity_gcrf_mps = ss.velocity_gcrf_mps + cross(w, pose.cg_gcrf_m - ss.position_gcrf_m);
+    cs.angular_velocity_body_radps = pose.attitude.conjugate().rotate(w);
+    chaser.set_state(cs);
+    docking_->start_docked(epoch_);
+    docking_seen_phase_ = contact::DockingPhase::Docked;
+    docking_status_ = docking_->mechanism().status();
+    merge_docked();
+}
+
 void FlightSession::merge_docked() {
     auto& chaser = *bodies_[controlled_].body;
     auto& station = *bodies_[*station_index_].body;
@@ -181,17 +218,11 @@ void FlightSession::merge_docked() {
     auto cs = chaser.state();
     auto ss = station.state();
     docking_merge_.momentum_before = mc * cs.velocity_gcrf_mps + ms * ss.velocity_gcrf_mps;
-    // the mated pose: chaser port on the station port, its axes (-x, -y, +z) of the station port's
-    const auto ck = vehicle::port_kinematics(chaser, docking_->chaser_port());
-    const auto sk = vehicle::port_kinematics(station, docking_->station_port());
-    const math::Mat3 rc = cs.attitude.to_matrix();
-    const math::Mat3 port_axes_body = transpose(rc) * ck.axes_gcrf;
-    const math::Vec3 lever_body = transpose(rc) * (ck.position_gcrf_m - cs.position_gcrf_m);
-    const math::Mat3 mated = sk.axes_gcrf * math::Mat3::from_columns({-1, 0, 0}, {0, -1, 0}, {0, 0, 1});
-    const math::Mat3 rc_mated = mated * transpose(port_axes_body);
-    const math::Vec3 cg_mated = sk.position_gcrf_m - rc_mated * lever_body;
+    const auto pose = mated_pose(chaser, station);
+    const math::Mat3 rc_mated = pose.attitude.to_matrix();
+    const math::Vec3 cg_mated = pose.cg_gcrf_m;
     const math::Mat3 rs = ss.attitude.to_matrix();
-    docked_attitude_station_ = ss.attitude.conjugate() * math::Quat::from_matrix(rc_mated);
+    docked_attitude_station_ = ss.attitude.conjugate() * pose.attitude;
     // the compound: the chaser's mass attached at its CG (station vehicle frame), the body state moved to the compound
     // CG, the momentum-weighted velocity
     const math::Vec3 cg_old = station.vehicle().mass_properties().cg_point_m();
