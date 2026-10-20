@@ -58,11 +58,12 @@ Vec3 apparent_gravity_body_mps2(const LiquidEnvironment& liquid, const Vec3& off
     const Vec3 r = liquid.position_gcrf_m;
     const double distance = norm(r);
     const Vec3 r_hat = r / distance;
-    const Vec3 d = liquid.body_to_gcrf.rotate(offset_body_m);
+    const Vec3 offset = liquid.cg_offset_body_m + offset_body_m;  // from the reference point
+    const Vec3 d = liquid.body_to_gcrf.rotate(offset);
     const Vec3 tide_gcrf = (r_hat * (3.0 * dot(r_hat, d)) - d) * (constants::earth_gm_m3ps2 / (distance * distance * distance));
     const Vec3& w = liquid.angular_velocity_body_radps;
     return liquid.body_to_gcrf.inverse_rotate(tide_gcrf) - liquid.specific_force_body_mps2 -
-           cross(w, cross(w, offset_body_m));
+           cross(w, cross(w, offset));
 }
 
 double settled_weight(double bond_number) {
