@@ -297,6 +297,7 @@ void FlightSession::refresh_compound() {
 
 void FlightSession::detach_compound() {
     reset_docked_update();
+    end_transfer();
     auto& station = *bodies_[*station_index_].body;
     auto s = station.state();
     const math::Vec3 cg_with = station.vehicle().mass_properties().cg_point_m();
@@ -313,6 +314,10 @@ void FlightSession::detach_compound() {
 bool FlightSession::undock() {
     if (!docking_) {
         docking_status_ = "Abkoppeln nicht möglich: nicht fest angedockt";
+        return false;
+    }
+    if (transfer_ && transfer_->active()) {
+        docking_status_ = "Abkoppeln nicht möglich: Treibstofftransfer läuft";
         return false;
     }
     if (docked() && autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit) {

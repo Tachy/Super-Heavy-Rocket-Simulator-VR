@@ -11,6 +11,7 @@
 #include "starsim/vehicle/compound_mass.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
 #include "starsim/sim/lunar_site.hpp"
+#include "starsim/sim/propellant_transfer.hpp"
 #include "starsim/sim/station_start.hpp"
 #include <limits>
 #include <map>
@@ -694,6 +695,17 @@ public:
     std::optional<gnc::DeparturePhase> departure_phase() const;
     const std::vector<gnc::DepartureEvent>* departure_events() const;
     const MomentumRecord& docking_separation_record() const { return docking_separation_; }
+    // Propellant transfer (refuelling r4, flight_session_transfer.cpp): between the docked pair's transfer connectors
+    // of equal contents (main tanks), driven by the delivering ship's ullage pressure against the receiving ship's
+    // ([stage.propellant_transfer]); the chaser's +x cold gas pushes the compound to settle the liquid (average
+    // thrust, an impulse every request.step_s, gas from its main tanks). Masses and CGs follow (set_tank_mass), both
+    // ships keep boiling off. False with a German transfer_state().status when refused: not docked, the autopilot
+    // active, no coupled connectors or no transfer pressures on either ship, nothing to move; a second start while one
+    // runs is refused in docking_status() ("Transfer läuft bereits") and keeps the running state. Undocking is refused
+    // while a transfer runs.
+    bool start_transfer(const TransferRequest& request);
+    void stop_transfer();
+    const TransferState& transfer_state() const;  // the running or last transfer, or the refusal
     // A scenario that starts docked (ISS i6): the armed pair (set_rendezvous_target with the chaser's active port on a
     // passive station port) mated at once - the chaser moved to the mated pose moving with the station, the mechanism
     // Docked, the compound merged (momentum kept). Throws std::logic_error without an armed mechanism or outside Ready.
@@ -1115,6 +1127,22 @@ private:
     double vent_docked_boil_off(double dt_s, const math::Vec3& push_station_mps2);  // returns the vented kg
     void docked_update(double dt_s, bool after_coast);
     void reset_docked_update();
+    std::optional<PropellantTransfer> transfer_;
+    TransferState transfer_refusal_;  // shown while no transfer was started
+    time::Epoch transfer_next_;       // the next transfer step
+    double transfer_thrust_n_ = 0.0;  // the settling push of the running step
+    struct TransferSides {            // resolved at the start
+        size_t delivering = 0, receiving = 0;  // body indices
+        std::array<size_t, 2> delivering_stage{}, receiving_stage{};
+        std::array<std::string, 2> delivering_tank, receiving_tank;
+        size_t gas_stage = 0;  // the chaser's stage that pays the settling gas
+        double pressure_difference_pa = 0.0;
+        double longest_tank_m = 0.0;
+    } transfer_sides_;
+    TransferTanks transfer_tanks() const;
+    void run_transfer_step(double dt_s);
+    bool refuse_transfer(const char* reason);
+    void end_transfer();  // a collision, undocking or a cleared target stops a running transfer
     void run_departure(Flying& flying);
     void measure_proximity_authority();  // pure translation authority along the station port axes, docking attitude
     struct RendezvousDebugCommand {  // diagnostics: the state at a burn's command (execution error after it)

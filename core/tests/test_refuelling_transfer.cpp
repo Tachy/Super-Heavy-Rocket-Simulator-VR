@@ -337,3 +337,157 @@ TEST_CASE("Docked boil-off follows the fidelity flag", "[refuelling][prop_transf
     CHECK(main_kg(f.session.body(0)) == tanker0);
     CHECK(main_kg(f.session.body(1)) == depot0);
 }
+
+namespace {
+
+struct DockedPair : refuelling_test::TankerAtPort {
+    explicit DockedPair(const config::VehicleConfig& chaser = refuelling_test::tanker_config(200.0e3))
+        : TankerAtPort({0.0, 0.0, 0.0}, {}, chaser) {
+        session.set_rendezvous_target(1, "transfer_dock", "transfer_dock");
+        session.dock_in_place();
+    }
+    double tank(size_t body, const std::string& id) const {
+        for (const auto& k : session.body(body).vehicle().stages()[0].tanks) {
+            if (k.config.id == id) return k.mass_kg;
+        }
+        return 0.0;
+    }
+    double all_propellant() const {
+        double kg = 0.0;
+        for (size_t b = 0; b < 2; ++b) {
+            for (const auto& k : session.body(b).vehicle().stages()[0].tanks) kg += k.mass_kg;
+        }
+        return kg;
+    }
+    bool is_running() const {
+        const auto p = session.transfer_state().phase;
+        return p == sim::TransferPhase::Settling || p == sim::TransferPhase::Chilldown ||
+               p == sim::TransferPhase::Flowing || p == sim::TransferPhase::Paused;
+    }
+    void run_to_end(double limit_s, double chunk_s) {
+        for (double t = 0.0; t < limit_s && is_running(); t += chunk_s) {
+            session.advance_to(session.epoch() + chunk_s, 1000000);
+        }
+    }
+};
+
+sim::TransferRequest tanker_request() {
+    sim::TransferRequest r;
+    r.delivering_floor_kg = {10.0e3, 2.8e3};  // [test] the reserve of Task 6 is ~this size
+    return r;
+}
+
+}  // namespace
+
+TEST_CASE("Tanker to depot: settle, chill, flow to the reserve; masses close, hulls stay mated",
+          "[refuelling][prop_transfer][docking]") {
+    test::spice_session();
+    DockedPair f;
+    REQUIRE(f.session.docked());
+    const double lox0 = f.tank(0, "lox_main"), depot_lox0 = f.tank(1, "lox_main");
+    const double total0 = f.all_propellant();
+    const double gap0 = port_gap_m(f.session);
+    REQUIRE(f.session.start_transfer(tanker_request()));
+    CHECK(f.session.transfer_state().phase == sim::TransferPhase::Settling);
+    f.run_to_end(3600.0, 60.0);
+    const auto& s = f.session.transfer_state();
+    INFO(s.status << ": " << s.elapsed_s << " s, LOX " << s.delivered_kg[0] << " CH4 " << s.delivered_kg[1]
+                  << " gas " << s.settling_gas_kg << " chill " << s.chilldown_kg[0] + s.chilldown_kg[1]
+                  << " boil-off " << s.boil_off_kg << " thrust " << s.settling_thrust_n);
+    REQUIRE(s.phase == sim::TransferPhase::Complete);
+    // the LOX line closed last at its floor; CH4 paid a little gas after its line closed
+    CHECK(f.tank(0, "lox_main") == Catch::Approx(10.0e3).margin(50.0));
+    CHECK(f.tank(0, "ch4_main") == Catch::Approx(2.8e3).margin(200.0));
+    CHECK(f.tank(0, "ch4_main") > 2.5e3);
+    // every kilogram is accounted for: delivered stays in the pair, the rest left it
+    CHECK(total0 - f.all_propellant() ==
+          Catch::Approx(s.settling_gas_kg + s.chilldown_kg[0] + s.chilldown_kg[1] + s.boil_off_kg).margin(1.0));
+    CHECK(f.tank(1, "lox_main") - depot_lox0 > s.delivered_kg[0] - 50.0);  // minus the depot's boil-off
+    CHECK(s.delivered_kg[0] > 140.0e3);
+    CHECK(s.delivered_kg[0] < lox0 - 10.0e3);
+    // ~190 s settling + 120 s chill-down + ~630 s LOX flow (232 kg/s)
+    CHECK(s.elapsed_s == Catch::Approx(940.0).margin(40.0));
+    // 1e-4 g on ~1,360 t: ~1.33 kN for ~940 s at Isp 70 s
+    CHECK(s.settling_thrust_n == Catch::Approx(1.0e-4 * 9.80665 * f.session.compound_mass()->mass_kg).epsilon(0.02));
+    CHECK(s.settling_gas_kg == Catch::Approx(1.8e3).epsilon(0.15));
+    CHECK(std::abs(port_gap_m(f.session) - gap0) < 1e-5);
+    CHECK(f.session.docked());
+}
+
+TEST_CASE("Transfer results do not depend on how the time is advanced", "[refuelling][prop_transfer][docking]") {
+    test::spice_session();
+    DockedPair a, b;
+    REQUIRE(a.session.start_transfer(tanker_request()));
+    REQUIRE(b.session.start_transfer(tanker_request()));
+    a.run_to_end(3600.0, 1.0);
+    b.run_to_end(3600.0, 1200.0);
+    REQUIRE(a.session.transfer_state().phase == sim::TransferPhase::Complete);
+    REQUIRE(b.session.transfer_state().phase == sim::TransferPhase::Complete);
+    for (size_t k = 0; k < 2; ++k) {
+        CHECK(a.session.transfer_state().delivered_kg[k] ==
+              Catch::Approx(b.session.transfer_state().delivered_kg[k]).epsilon(1e-4));
+    }
+    CHECK(a.session.transfer_state().elapsed_s == Catch::Approx(b.session.transfer_state().elapsed_s).margin(1e-6));
+}
+
+TEST_CASE("Depot to HLS: the limits end the transfer", "[refuelling][prop_transfer][docking][hls]") {
+    test::spice_session();
+    DockedPair f(refuelling_test::ship_with("starship_hls", 50.0e3));
+    REQUIRE(f.session.docked());
+    const double hls_lox0 = f.tank(0, "lox_main");
+    sim::TransferRequest r;
+    r.direction = sim::TransferDirection::StationToChaser;
+    r.limit_kg = {20.0e3, 5.5e3};
+    REQUIRE(f.session.start_transfer(r));
+    f.run_to_end(3600.0, 60.0);
+    const auto& s = f.session.transfer_state();
+    INFO(s.status << ": " << s.elapsed_s << " s, gas " << s.settling_gas_kg);
+    REQUIRE(s.phase == sim::TransferPhase::Complete);
+    CHECK(s.delivered_kg[0] == Catch::Approx(20.0e3).margin(1.0));
+    CHECK(s.delivered_kg[1] == Catch::Approx(5.5e3).margin(1.0));
+    // the HLS pays the settling gas from its own main tanks (it has no [stage.thermal]: no boil-off)
+    CHECK(f.tank(0, "lox_main") - hls_lox0 == Catch::Approx(20.0e3 - s.settling_gas_kg * 3.6 / 4.6).epsilon(0.02));
+}
+
+TEST_CASE("Transfer refusals and stop", "[refuelling][prop_transfer][docking]") {
+    test::spice_session();
+    {
+        refuelling_test::TankerAtPort f({20.0, 0.0, 0.0});
+        CHECK_FALSE(f.session.start_transfer(tanker_request()));
+        CHECK(f.session.transfer_state().status == "Transfer nicht möglich: nicht angedockt");
+    }
+    {
+        DockedPair f(refuelling_test::tanker_config(10.0e3));  // 7.8 t LOX / 2.2 t CH4: below the floors
+        CHECK_FALSE(f.session.start_transfer(tanker_request()));
+        CHECK(f.session.transfer_state().status == "Transfer nicht möglich: nichts zu übertragen");
+    }
+    {
+        DockedPair f;
+        REQUIRE(f.session.start_transfer(tanker_request()));
+        CHECK_FALSE(f.session.start_transfer(tanker_request()));
+        CHECK(f.session.docking_status() == "Transfer läuft bereits");
+        CHECK(f.session.transfer_state().phase == sim::TransferPhase::Settling);  // the running transfer is kept
+        CHECK_FALSE(f.session.undock());
+        CHECK(f.session.docking_status() == "Abkoppeln nicht möglich: Treibstofftransfer läuft");
+        f.session.advance_to(f.session.epoch() + 400.0, 1000000);
+        REQUIRE(f.session.transfer_state().phase == sim::TransferPhase::Flowing);
+        f.session.stop_transfer();
+        CHECK(f.session.transfer_state().phase == sim::TransferPhase::Stopped);
+        const double lox = f.tank(0, "lox_main");
+        f.session.advance_to(f.session.epoch() + 60.0, 1000000);
+        CHECK(f.tank(0, "lox_main") > lox - 50.0);  // only boil-off, no flow, no gas
+        CHECK(f.session.undock());
+    }
+}
+
+TEST_CASE("Zero settling push: the liquid stays forward, the transfer pauses", "[refuelling][prop_transfer][docking]") {
+    test::spice_session();
+    DockedPair f;
+    auto r = tanker_request();
+    r.settling_acceleration_mps2 = 0.0;
+    REQUIRE(f.session.start_transfer(r));
+    f.session.advance_to(f.session.epoch() + 60.0, 1000000);
+    CHECK(f.session.transfer_state().phase == sim::TransferPhase::Paused);
+    CHECK(f.session.transfer_state().status == "Transfer unterbrochen: Treibstoff nicht am Auslass");
+    CHECK(f.session.transfer_state().delivered_kg[0] == 0.0);
+}

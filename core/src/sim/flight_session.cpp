@@ -686,6 +686,7 @@ double FlightSession::coast_allowance_s() const {
             return 0.0;
         }
     }
+    if (transfer_ && transfer_->active()) allowance = std::min(allowance, transfer_next_ - epoch_);  // r4 steps
     return allowance > 1.0 ? allowance : 0.0;
 }
 
