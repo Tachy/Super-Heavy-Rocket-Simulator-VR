@@ -15,6 +15,7 @@
 #include "refuelling_test_support.hpp"
 #include "starsim/gnc/proximity_guidance.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/contact/probe_drogue_interface.hpp"
 #include "starsim/frames/lvlh.hpp"
 #include "starsim/sim/station_limits.hpp"
 #include "starsim/vehicle/vehicle.hpp"
@@ -258,4 +259,85 @@ TEST_CASE("The probe/drogue envelope is the spec's", "[refuelling][proximity]") 
     CHECK(e.offset_max_m == 0.10);
     CHECK(e.angle_max_rad == Catch::Approx(1.0 * constants::deg_to_rad));
     CHECK(gnc::ProximityParameters{}.envelope.axial_min_mps == 0.05);  // IDSS default unchanged
+}
+
+namespace {
+
+contact::ProbeDrogueParameters depot_probes() {
+    const auto tanker = config::load_vehicle(config_dir, "starship_tanker");
+    const auto depot = config::load_vehicle(config_dir, "starship_depot");
+    return contact::probe_drogue_parameters(tanker.stages.back().docking_ports.front(),
+                                            depot.stages.back().docking_ports.front());
+}
+
+const math::Mat3 mated_axes = math::Mat3::from_columns({-1, 0, 0}, {0, -1, 0}, {0, 0, 1});
+
+contact::DockingPose pose_at(const Vec3& position_m, const Vec3& velocity_mps = {},
+                             const math::Mat3& axes = mated_axes) {
+    return {position_m, velocity_mps, axes, {}};
+}
+
+}  // namespace
+
+TEST_CASE("Probe/drogue geometry from the r1 ports: probes and drogues pair up when mated", "[refuelling][contact]") {
+    const auto p = depot_probes();
+    REQUIRE(p.probes_m.size() == 4);
+    REQUIRE(p.drogues_m.size() == 4);
+    for (const auto& probe : p.probes_m) {
+        CHECK(probe.x == 0.0);  // in the interface plane
+        const Vec3 mated{-probe.x, -probe.y, probe.z};
+        double nearest = 1e9;
+        for (const auto& d : p.drogues_m) nearest = std::min(nearest, std::hypot(mated.y - d.y, mated.z - d.z));
+        CHECK(nearest < 1e-9);
+    }
+}
+
+TEST_CASE("Probe/drogue contact: free above the mouths, centring in the cone, seated heads latch",
+          "[refuelling][contact]") {
+    const auto p = depot_probes();
+    const double first = p.cone_depth_m + p.extension_m;  // port separation at the first touch
+    auto c = contact::probe_drogue_contact(pose_at({first + 0.01, 0.0, 0.0}), p.extension_m, p);
+    CHECK_FALSE(c.any_contact);
+    CHECK(c.gap_m == Catch::Approx(0.01).margin(1e-9));
+
+    // 0.08 m off-centre (along y), halfway down the cone: the walls push towards the axis and out
+    c = contact::probe_drogue_contact(pose_at({first - 0.40, 0.08, 0.0}), p.extension_m, p);
+    REQUIRE(c.any_contact);
+    CHECK(c.petal_contact);
+    CHECK(c.force_port_n.y < 0.0);
+    CHECK(c.force_port_n.x > 0.0);
+    CHECK_FALSE(c.latch_ready);
+
+    // centred, heads in the seats at full extension: latch ready, no penetration force
+    c = contact::probe_drogue_contact(pose_at({p.extension_m + 0.005, 0.0, 0.0}), p.extension_m, p);
+    CHECK(c.latch_ready);
+    CHECK(norm(c.force_port_n) < 1e-6);
+
+    // mated (retracted): every head on its seat, no force
+    c = contact::probe_drogue_contact(pose_at({0.0, 0.0, 0.0}), 0.0, p);
+    CHECK(norm(c.force_port_n) < 1e-6);
+}
+
+TEST_CASE("Probe/drogue contact: a head beside the mouth strikes the plate, no latch; tilted heads give a torque",
+          "[refuelling][contact]") {
+    const auto p = depot_probes();
+    const double first = p.cone_depth_m + p.extension_m;
+    auto c = contact::probe_drogue_contact(pose_at({first - 0.05, 0.6, 0.0}, {-0.05, 0.0, 0.0}), p.extension_m, p);
+    CHECK(c.tip_strike);
+    CHECK(c.force_port_n.x > 0.0);
+    CHECK_FALSE(c.latch_ready);
+
+    // rolled 180 deg about the docking axis and pushed in: no head reaches a seat it could latch in (the roll limit)
+    const math::Mat3 rolled = mated_axes * math::Mat3::from_columns({1, 0, 0}, {0, -1, 0}, {0, 0, -1});
+    c = contact::probe_drogue_contact(pose_at({p.extension_m, 0.0, 0.0}, {}, rolled), p.extension_m, p);
+    CHECK_FALSE(c.latch_ready);
+
+    // pitched 2 deg about y: the deeper pair touches first - the contact force has a moment about the head centre
+    const double a = 2.0 * constants::deg_to_rad;
+    const math::Mat3 pitch =
+        math::Mat3::from_columns({std::cos(a), 0, -std::sin(a)}, {0, 1, 0}, {std::sin(a), 0, std::cos(a)});
+    c = contact::probe_drogue_contact(pose_at({p.extension_m + 0.10, 0.0, 0.0}, {}, mated_axes * pitch),
+                                      p.extension_m, p);
+    REQUIRE(c.any_contact);
+    CHECK(std::abs(c.torque_port_nm.y) > 0.0);
 }

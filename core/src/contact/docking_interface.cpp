@@ -23,6 +23,7 @@ InterfaceContact docking_interface_contact(const DockingPose& pose, double ring_
     const math::Vec3 ring_velocity = pose.velocity_mps + cross(pose.angular_rate_radps, ring_extension_m * xc);
     c.capture_radius_m = p.petal_clearance_m + 2.0 * p.petal_height_m * std::tan(p.petal_lean_rad);
     const double gap = c.ring_centre_m.x;  // ring face to ring face along the passive axis (the ring conforms in tilt)
+    c.gap_m = gap - 2.0 * p.petal_height_m;
     const math::Vec3 lateral{0.0, c.ring_centre_m.y, c.ring_centre_m.z};
     const double offset = norm(lateral);
     const double overlap = 2.0 * p.petal_height_m;

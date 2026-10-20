@@ -1,5 +1,7 @@
 #pragma once
 
+#include <limits>
+
 #include "starsim/math/constants.hpp"
 #include "starsim/math/mat3.hpp"
 #include "starsim/math/vec3.hpp"
@@ -51,6 +53,7 @@ struct DockingInterfaceParameters {
 
 struct InterfaceContact {
     math::Vec3 force_port_n;     // on the chaser at the active ring centre, passive port frame (the passive body: -force)
+    math::Vec3 torque_port_nm;   // pure couple on the chaser about ring_centre_m (probe/drogue: the heads' forces)
     math::Vec3 ring_centre_m;    // where the force acts: the active ring face centre, passive port frame
     bool any_contact = false;
     bool ring_contact = false;   // ring faces touching
@@ -59,6 +62,9 @@ struct InterfaceContact {
     bool latch_ready = false;    // latch condition met
     double compression_n = 0.0;  // axial load on the interface (+: compression)
     double capture_radius_m = 0.0;
+    // How far the interface is from meshing (> 0: apart): IDSS the ring face beyond the petal overlap, probe/drogue the
+    // lowest head over the mouth plane. The mechanism calls a capture failed when it stays above bounce_gap_m.
+    double gap_m = std::numeric_limits<double>::infinity();
 };
 
 // `ring_extension_m`: current extension of the active ring (contact before capture uses the full extension).
