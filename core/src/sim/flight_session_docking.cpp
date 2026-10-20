@@ -79,6 +79,8 @@ void FlightSession::reset_docking() {
         bodies_[controlled_].body->release_docked();  // released in place, no separation push
         detach_compound();
     }
+    end_transfer();  // review r4: also when the bodies were cleared first (a new scenario) - no stale step epoch
+    reset_docked_update();
     docking_.reset();
     compound_mass_.reset();
     docked_mass_kg_ = 0.0;

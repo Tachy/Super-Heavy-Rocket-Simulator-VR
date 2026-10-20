@@ -27,6 +27,7 @@ struct TransferRequest {
     double max_settled_tilt_rad = 30.0 * constants::deg_to_rad;  // [E] the aft dome's outlet stays covered
     double chilldown_s = 120.0;                                  // [E]
     double step_s = 10.0;                                        // [E] update cadence (flow, thrust, boil-off)
+    double max_pause_s = 600.0;  // [E] a longer pause aborts (the push would drain the reserve, undocking blocked)
 };
 
 struct TransferLine {

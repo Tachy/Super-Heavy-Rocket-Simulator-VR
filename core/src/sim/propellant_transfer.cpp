@@ -51,6 +51,7 @@ void PropellantTransfer::add_settling(double gas_kg, double thrust_n) {
 void PropellantTransfer::pause(const TransferStepInput& in) {
     if (state_.phase != TransferPhase::Paused) {
         paused_from_ = state_.phase == TransferPhase::Flowing ? TransferPhase::Flowing : TransferPhase::Chilldown;
+        phase_elapsed_s_ = 0.0;  // the pause's own time (max_pause_s)
     }
     state_.phase = TransferPhase::Paused;
     state_.status = in.thrust_available ? "Transfer unterbrochen: Treibstoff nicht am Auslass"
@@ -90,6 +91,13 @@ TransferStepOutput PropellantTransfer::step(const TransferStepInput& in) {
         }
         break;
     case TransferPhase::Paused:
+        if (!(in.settled && in.thrust_available) && phase_elapsed_s_ >= request_.max_pause_s - 1e-9) {
+            // review r4: an endless pause would push on the reserve's gas and block the undocking
+            state_.phase = TransferPhase::Stopped;
+            state_.status = in.thrust_available ? "Transfer abgebrochen: Treibstoff nicht am Auslass"
+                                                : "Transfer abgebrochen: kein Kaltgas zum Setzen";
+            break;
+        }
         if (in.settled && in.thrust_available) {
             state_.phase = paused_from_;
             state_.status = paused_from_ == TransferPhase::Flowing ? "Transfer läuft" : "Leitungen werden gekühlt";

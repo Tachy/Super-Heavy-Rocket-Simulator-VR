@@ -535,3 +535,35 @@ TEST_CASE("Docked tanker: its reserve from the previewed return, as a transfer r
     CHECK_FALSE(free.session.tanker_reserve({}, &reason));
     CHECK(reason == "Keine Reserve: nicht angedockt");
 }
+
+TEST_CASE("A pause longer than max_pause_s aborts the transfer: no endless push (review r4)",
+          "[refuelling][prop_transfer]") {
+    Bench b;
+    b.start();
+    b.run(400.0, [](double) { return true; });  // flowing
+    REQUIRE(b.transfer->state().phase == sim::TransferPhase::Flowing);
+    b.run(b.request.max_pause_s - 10.0, [](double) { return false; });
+    CHECK(b.transfer->state().phase == sim::TransferPhase::Paused);
+    b.run(20.0, [](double) { return false; });
+    CHECK(b.transfer->state().phase == sim::TransferPhase::Stopped);
+    CHECK(b.transfer->state().status == "Transfer abgebrochen: Treibstoff nicht am Auslass");
+    CHECK_FALSE(b.transfer->active());
+    Bench dry;
+    dry.start();
+    dry.run(dry.request.max_pause_s + 20.0, [](double) { return false; }, false);
+    CHECK(dry.transfer->state().phase == sim::TransferPhase::Stopped);
+    CHECK(dry.transfer->state().status == "Transfer abgebrochen: kein Kaltgas zum Setzen");
+}
+
+TEST_CASE("A new scenario on the session ends a running transfer (review r4)", "[refuelling][prop_transfer][docking]") {
+    test::spice_session();
+    DockedPair f;
+    REQUIRE(f.session.start_transfer(tanker_request()));
+    const auto state = f.session.body(0).state();
+    f.session.place_body(refuelling_test::tanker_config(200.0e3), state, f.session.epoch() + 3600.0);
+    CHECK(f.session.transfer_state().phase == sim::TransferPhase::Stopped);
+    const auto target = f.session.epoch() + 3600.0;
+    f.session.advance_to(target, 100);  // coasts: a stale step epoch would force 200 Hz ticks
+    CHECK(f.session.epoch().tdb_seconds_past_j2000() ==
+          Catch::Approx(target.tdb_seconds_past_j2000()).margin(1.0));
+}

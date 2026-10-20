@@ -1299,7 +1299,8 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r4-propellant-transfer.md`.
 - **Sequence** (`sim/propellant_transfer`, pure state machine): Settling -> Chilldown (120 s [E], the chill-down
   mass vented from the delivering tanks) -> Flowing -> Complete; an uncovered outlet pauses Chilldown / Flowing
   ("Transfer unterbrochen: Treibstoff nicht am Auslass", without gas "... kein Kaltgas zum Setzen"), a covered one
-  resumes. A line closes at the delivering floor, a full receiving tank or its limit; floors hold at the line's closing
+  resumes; a pause longer than `max_pause_s` (600 s [E]) aborts ("Transfer abgebrochen: ...": the push would drain the
+  reserve and block the undocking). A line closes at the delivering floor, a full receiving tank or its limit; floors hold at the line's closing
   (gas and boil-off after that come out of the reserve's items: tens of kg).
 - **Session** (`FlightSession::start_transfer(TransferRequest)`, `stop_transfer`, `transfer_state`;
   `flight_session_transfer.cpp`): both directions (`ChaserToStation` tanker -> depot, `StationToChaser` depot -> HLS
@@ -1308,7 +1309,7 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r4-propellant-transfer.md`.
   ~1e-7 s, so sums of ticks missed a 1e-9 test by one tick). Tank moves through `set_tank_mass` (compound refresh).
   Refusals (German): not docked, autopilot active, no coupled connectors, no transfer pressures, nothing to move;
   a second start ("Transfer läuft bereits") and undocking ("Abkoppeln nicht möglich: Treibstofftransfer läuft") are
-  refused while one runs; a cleared target or a detach stops it.
+  refused while one runs; a cleared target, a detach or a new scenario on the session stops it.
 - **Docked boil-off** (r3 M2): a station carrying a visitor (and the held chaser) no longer vents in `FlightBody`; the
   session evaluates both bodies every 10 s and after every coast in the compound's environment and vents through
   `set_tank_mass` (trapezoid), so the compound CG and the mated hulls stay exact (the depot venting by itself had
