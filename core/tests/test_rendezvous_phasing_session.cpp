@@ -88,12 +88,12 @@ TEST_CASE("Rendezvous plan refusals in the session", "[rendezvous][phasing][sess
     lonely.place_in_orbit(config::load_vehicle(rendezvous_test::config_dir, "crew_dragon"), f.start.dragon, f.start.epoch);
     CHECK_FALSE(lonely.plan_rendezvous({}));
     CHECK(lonely.rendezvous_status() == "Kein Rendezvous: keine Station");
-    // only Crew Dragon docks (the planner budgets the RCS propellant; a Starship would burn its main tanks)
+    // a Starship is planned too since refuelling r3 (Raptor and cold gas on its main tanks): here the phase refuses it
     sim::FlightSession ship{f.ephemeris, f.earth, rendezvous_test::config_dir};
     ship.place_in_orbit(config::load_vehicle(rendezvous_test::config_dir, "starship_block3"), f.start.dragon, f.start.epoch);
     ship.add_station(f.start.iss.vehicle, f.start.iss.state_gcrf, f.start.iss.epoch, f.start.iss.impulses);
     CHECK_FALSE(ship.plan_rendezvous({}));
-    CHECK(ship.rendezvous_status() == "Kein Rendezvous: nur mit Manövern auf den Steuerdüsen");
+    CHECK(ship.rendezvous_status().find("nicht innerhalb") != std::string::npos);
 }
 
 TEST_CASE("Rendezvous flight from 30 deg to Waypoint 0", "[rendezvous][phasing][session][validation]") {

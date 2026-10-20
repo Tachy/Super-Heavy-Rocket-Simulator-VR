@@ -12,8 +12,10 @@
 // - A waiting plan (no phase burn) checks the boost geometry rendezvous_check_lead_s before the boost with the tracked
 //   drag and re-plans from the live states beyond rendezvous_replan_tolerance_m (memory feedback-replan-from-flight-data);
 //   a burn that cannot be targeted before the boost re-plans once, later it aborts.
-// - The coast allowance stops at the next step epoch (the command or the boost check); between the burns the vehicle
-//   drifts freely (no attitude mode).
+// - The coast allowance stops at the next step epoch (the command or the boost check); between the burns Crew Dragon
+//   drifts freely (no attitude mode), a Starship holds its docking orientation in LVLH.
+// - Refuelling r3: a main-engine chaser (the tanker, the HLS) burns on the belly Raptor (its deorbit set), below that
+//   engine's minimum impulse on the cold-gas RCS; its budget is the main tanks (rcs_supply_kg).
 
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/station_limits.hpp"
@@ -52,17 +54,44 @@ const config::StationProximityConfig& FlightSession::station_limits() const {
     return bodies_.at(*station_index_).body->vehicle().stages().back().config.station_proximity;
 }
 
-mission::FiniteBurnModel FlightSession::rendezvous_engines() const {
+bool FlightSession::rendezvous_main_engines() const { return !burn_configurations().empty(); }
+
+// A main-engine chaser (refuelling r3: Starship) burns on its deorbit set - the single belly Raptor - with transients
+// up to small_burn_transient_share of the burn; below that minimum on the cold-gas RCS along +x (nose along the
+// delta-v), as start_burn chooses.
+double FlightSession::rendezvous_rcs_below_mps() const {
+    const auto& groups = bodies_[controlled_].body->vehicle().stages().front().config.deorbit_engine_groups;
+    const auto set = groups.empty() ? burn_configurations() : burn_configurations(&groups);
+    double minimum = std::numeric_limits<double>::infinity();
+    for (const auto& c : set) minimum = std::min(minimum, c.minimum_dv_mps);
+    return minimum / small_burn_transient_share;
+}
+
+mission::FiniteBurnModel FlightSession::rendezvous_engines(double delta_v_mps) const {
     const auto& vehicle = bodies_[controlled_].body->vehicle();
     const double mass = vehicle.mass_properties().mass_kg;
-    const auto configurations = burn_configurations();
-    if (!configurations.empty()) {
-        return {mass, configurations.front().thrust_n, configurations.front().mass_flow_kgps};
+    if (rendezvous_main_engines() && delta_v_mps >= rendezvous_rcs_below_mps()) {
+        const auto& groups = vehicle.stages().front().config.deorbit_engine_groups;
+        const auto set = groups.empty() ? burn_configurations() : burn_configurations(&groups);
+        return {mass, set.front().thrust_n, set.front().mass_flow_kgps};
     }
     // RCS translation as start_burn picks it: along +x, else along -x
     auto capability = vehicle.rcs_force_capability({1.0, 0.0, 0.0});
     if (!(capability.force_n > 0.0)) capability = vehicle.rcs_force_capability({-1.0, 0.0, 0.0});
     return {mass, capability.force_n, capability.mass_flow_kgps};
+}
+
+double FlightSession::rendezvous_budget_kg() const {
+    const auto& vehicle = bodies_[controlled_].body->vehicle();
+    if (!rendezvous_main_engines()) return vehicle.rcs_propellant_kg();  // Crew Dragon: the Draco tanks
+    return vehicle.rcs_supply_kg();  // the main tanks (engines and cold gas); the headers are the landing reserve
+}
+
+bool FlightSession::execute_rendezvous_burn(const gnc::BurnNode& node) {
+    if (!rendezvous_main_engines()) return execute_burn(node);
+    const auto& groups = bodies_[controlled_].body->vehicle().stages().front().config.deorbit_engine_groups;
+    return start_burn(node, groups.empty() ? burn_configurations() : burn_configurations(&groups), true,
+                      small_burn_transient_share);
 }
 
 void FlightSession::reset_rendezvous() {
@@ -102,8 +131,6 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
         return refuse("Kein Rendezvous: ein Flug läuft bereits");
     }
     p = with_station_limits(p, station_limits());
-    // only Crew Dragon docks (spec): the budget is the RCS propellant, the burns the Dracos' translation
-    if (!burn_configurations().empty()) return refuse("Kein Rendezvous: nur mit Manövern auf den Steuerdüsen");
     // Crew Dragon flies the phasing with its nose cone open (it opens after the separation): only then its Dracos turn
     // it without a push - closed, a turn to a burn pushed it up to 0.28 m/s (i3: Waypoint 0 missed by 130-390 m).
     auto& vehicle = bodies_[controlled_].body->vehicle();
@@ -121,15 +148,18 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
     if (!(p.target_drag_area_per_mass_m2pkg > 0.0)) {
         const auto& station = bodies_[*station_index_].body->vehicle();
         const auto& aero = station.stages().front().config.aero;
-        p.target_drag_area_per_mass_m2pkg =
-            aero.fixed_drag_area_m2 * aero.fixed_drag_coefficient / station.mass_properties().mass_kg;
+        const double radius = 0.5 * station.diameter_m();
+        const double cd_area = aero.fixed_drag_area_m2 > 0.0 ? aero.fixed_drag_area_m2 * aero.fixed_drag_coefficient
+                                                             : dragon_free_molecular_cd * constants::pi * radius * radius;
+        p.target_drag_area_per_mass_m2pkg = cd_area / station.mass_properties().mass_kg;  // the depot flies nose first
     }
+    if (!(rendezvous_budget_kg() > 0.0)) return refuse_closed("Kein Rendezvous: kein Treibstoff");
     const auto engines = rendezvous_engines();
     if (!(engines.thrust_n > 0.0)) return refuse_closed("Kein Rendezvous: keine Triebwerke für die Manöver");
     mission::PhasingPlan plan;
     try {
         plan = mission::PhasingPlanner(gravity_).plan(controlled_state(), station_state(), epoch_, p, engines,
-                                                      vehicle.rcs_propellant_kg());
+                                                      rendezvous_budget_kg());
     } catch (const std::exception& e) {
         if (rendezvous_debug_) std::printf("[rendezvous] planning threw: %s\n", e.what());
         return refuse_closed("Kein Rendezvous: Planung fehlgeschlagen");
@@ -145,7 +175,7 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
     rendezvous_target_ref_impulses_ = station_impulses_.size();
     for (const auto& impulse : station_impulses_) {
         if (impulse.epoch >= epoch_ && impulse.epoch <= plan.schedule.waypoint0_epoch) {
-            rendezvous_warnings_.push_back("Achtung: Bahnanhebung der ISS um " + german(impulse.delta_v_mps, 2) +
+            rendezvous_warnings_.push_back("Achtung: Bahnanhebung der Station um " + german(impulse.delta_v_mps, 2) +
                                            " m/s während des Rendezvous");
         }
     }
@@ -176,7 +206,7 @@ PhasingBurnKind FlightSession::rendezvous_next_kind() const {
 }
 
 time::Epoch FlightSession::rendezvous_preparation_epoch(const gnc::BurnNode& node) const {
-    const auto engines = rendezvous_engines();
+    const auto engines = rendezvous_engines(norm(node.delta_v_gcrf_mps));
     const double duration_s =
         gnc::burn_duration_s(norm(node.delta_v_gcrf_mps), engines.mass_kg, engines.thrust_n, engines.mass_flow_kgps);
     return node.epoch - 0.5 * duration_s - burn_preparation_s;
@@ -189,7 +219,11 @@ double FlightSession::rendezvous_turn_lead_s(PhasingBurnKind kind) {
 
 void FlightSession::rendezvous_enter_coast() {
     rendezvous_step_ = RendezvousStep::Coast;
-    attitude_mode_ = {};  // free drift between the burns
+    // Crew Dragon drifts between the burns; a Starship holds nose along +V, belly to nadir (the docking attitude's
+    // orientation, rolled 180 deg from LVLH) - its drag and boil-off stay defined (refuelling r3)
+    attitude_mode_ = rendezvous_main_engines()
+                         ? gnc::lvlh_hold(math::Quat::from_axis_angle({1.0, 0.0, 0.0}, constants::pi))
+                         : gnc::AttitudeMode{};
     const auto& plan = *rendezvous_plan_;
     const auto kind = rendezvous_next_kind();
     // the planned node (the mid-course correction has none: its epoch, no delta-v)
@@ -226,8 +260,7 @@ bool FlightSession::rendezvous_replan() {
     p.mission_limit_s = rendezvous_deadline_ - epoch_;
     p.earliest_arrival_s = std::max(0.0, rendezvous_earliest_ - epoch_);
     auto plan = mission::PhasingPlanner(gravity_).plan(controlled_state(), station_state(), epoch_, p,
-                                                       rendezvous_engines(),
-                                                       bodies_[controlled_].body->vehicle().rcs_propellant_kg());
+                                                       rendezvous_engines(), rendezvous_budget_kg());
     if (!plan.feasible) {
         rendezvous_abort(plan.reason);
         return false;
@@ -242,8 +275,15 @@ bool FlightSession::rendezvous_replan() {
 
 void FlightSession::rendezvous_fly_due_burn() {
     const auto kind = rendezvous_next_kind();
-    const auto node = mission::PhasingPlanner(gravity_).retarget(kind, controlled_state(), station_state(), epoch_,
-                                                                 *rendezvous_plan_, rendezvous_engines());
+    const mission::PhasingPlanner planner(gravity_);
+    auto node = planner.retarget(kind, controlled_state(), station_state(), epoch_, *rendezvous_plan_, rendezvous_engines());
+    if (node && rendezvous_main_engines() && norm(node->delta_v_gcrf_mps) < rendezvous_rcs_below_mps()) {
+        // below the Raptor's minimum impulse: the long cold-gas burn, targeted as such
+        const auto rcs = rendezvous_engines(0.0);
+        if (auto fine = planner.retarget(kind, controlled_state(), station_state(), epoch_, *rendezvous_plan_, rcs)) {
+            node = fine;
+        }
+    }
     if (kind == PhasingBurnKind::MidCourse &&
         (!node || norm(node->delta_v_gcrf_mps) < rendezvous_plan_->parameters.mid_course_threshold_mps)) {
         // below the threshold, or not converged (then the braking burn still stops the Dragon near Waypoint 0)
@@ -263,13 +303,13 @@ void FlightSession::rendezvous_fly_due_burn() {
         return;
     }
     const double mass = bodies_[controlled_].body->vehicle().mass_properties().mass_kg;
-    if (!execute_burn(*node)) {
+    if (!execute_rendezvous_burn(*node)) {
         rendezvous_abort("Rendezvous abgebrochen: Brennvorgang nicht möglich");
         return;
     }
     rendezvous_burns_.push_back({kind, *node, mass});
     if (rendezvous_debug_) {  // diagnostics: the planner's prediction of the burn, compared after it
-        rendezvous_debug_command_ = {controlled_state(), epoch_, rendezvous_engines()};
+        rendezvous_debug_command_ = {controlled_state(), epoch_, rendezvous_engines(norm(node->delta_v_gcrf_mps))};
     }
     if (kind == PhasingBurnKind::MidCourse) {
         rendezvous_mid_course_ = false;

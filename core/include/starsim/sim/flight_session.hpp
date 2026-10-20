@@ -635,7 +635,7 @@ public:
     static constexpr double rendezvous_check_lead_s = 3.0 * 3600.0;
     static constexpr double rendezvous_replan_tolerance_m = 2000.0;  // [E] along-track miss of the boost geometry
     static constexpr double rendezvous_track_min_arc_s = 3.0 * 3600.0;  // [E] shorter arcs do not tell the drag
-    static constexpr double dragon_free_molecular_cd = 2.2;  // [E] blunt body in free molecular flow
+    static constexpr double dragon_free_molecular_cd = 2.2;  // [E] blunt body / ship end-on in free molecular flow (Dragon, Starship)
 
     // Proximity operations (ISS i4, flight_session_proximity.cpp): from Waypoint 0 (or any point outside the keep-out
     // sphere within ProximityParameters::max_start_range_m) the controlled body flies the waypoint pattern to the
@@ -1023,7 +1023,13 @@ private:
     // descent_attitude_lead_s); they follow each other within ~20 min, too close for the drift lead
     static constexpr double rendezvous_small_turn_lead_s = 600.0;
     void rendezvous_track_drag();
-    mission::FiniteBurnModel rendezvous_engines() const;
+    // Refuelling r3: a main-engine chaser (Starship) burns on its deorbit set, below rendezvous_rcs_below_mps on the
+    // cold-gas RCS; its budget is the RCS supply (the main tanks). Crew Dragon: the Dracos, the RCS tanks.
+    bool rendezvous_main_engines() const;
+    mission::FiniteBurnModel rendezvous_engines(double delta_v_mps = std::numeric_limits<double>::infinity()) const;
+    double rendezvous_rcs_below_mps() const;
+    double rendezvous_budget_kg() const;
+    bool execute_rendezvous_burn(const gnc::BurnNode& node);
     math::StateVector station_state() const;
     const config::StationProximityConfig& station_limits() const;  // the station stage's [stage.station.proximity]
     mission::PhasingBurnKind rendezvous_next_kind() const;
