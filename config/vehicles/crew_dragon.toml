@@ -42,6 +42,7 @@ nose_cone = true                         # [S] hinged; closed for ascent and ent
 [[stage.tank]]
 id = "mmh_nto"
 contents = "rcs"
+propellant_management_device = true      # [E] user 2026-10-21: diaphragm tank, always covered
 mass_kg = 2562.0                         # [S:wiki_dragon2] shared by Dracos and SuperDracos
 density_kg_m3 = 1162.0                   # [D] NTO/MMH at O/F 1.65 (1440 / 880 kg/m^3)
 base_station_m = 0.4                     # [E] tanks in the service section above the heat shield

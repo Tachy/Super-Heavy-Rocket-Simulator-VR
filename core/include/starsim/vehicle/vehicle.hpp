@@ -21,6 +21,8 @@
 
 namespace starsim::vehicle {
 
+struct LiquidEnvironment;  // boil_off.hpp
+
 // Body frame: x along the vehicle axis towards the nose, origin at the bottom of the lowest stage
 // ("station" = x coordinate). y/z complete a right-handed frame; engine 0 of each ring sits at +y.
 
@@ -129,6 +131,9 @@ struct Stage {
     std::vector<RcsThruster> rcs;
     double extra_mass_kg = 0.0;   // payload + fairing
     FeedSource feed = FeedSource::Main;
+    // Refuelling f3: how far the main-tank liquid is settled over the outlets (0..1; Vehicle::update_settling). Starts
+    // settled (pad, or placed after its insertion burn).
+    double settled = 1.0;
 
     double propellant_kg(config::TankContents contents) const;
     double propellant_kg(config::TankContents contents, config::TankRole role) const;
@@ -216,6 +221,16 @@ public:
     void settle_propellant(const math::Vec3& specific_force_body_mps2, double dt_s);
     const math::Vec3& liquid_down_body() const { return liquid_down_body_; }
     void set_liquid_down_body(const math::Vec3& down_body);  // normalised here
+
+    // Settling before an in-orbit ignition (refuelling f3). A stage needs settling when it feeds from its main tanks and
+    // one of them (not PMD, not an RCS tank) holds liquid. Its travel: the ullage of the longest such tank (length x
+    // (1 - fill)), at least settling_min_travel_m. update_settling moves Stage::settled towards 1 at 1/sqrt(2L/a) while
+    // every such outlet is covered (outlet_check, settling_max_tilt_rad) and back towards 0 at the same rate otherwise,
+    // a = the weakest apparent gravity at the tank centres; without acceleration the liquid stays where it is.
+    bool needs_settling(size_t stage_index) const;
+    double settling_travel_m(size_t stage_index) const;
+    void update_settling(const LiquidEnvironment& liquid, double dt_s);
+    bool stage_settled(size_t stage_index) const;  // no settling needed, or settled
 
     // Discrete engine update for one tick: start/stop transients, throttle and gimbal rate limits,
     // relight rules, flow-separation limits. Must be called once per tick before integration.

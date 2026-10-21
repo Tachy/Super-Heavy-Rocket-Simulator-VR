@@ -3,6 +3,7 @@
 #include <cstddef>
 
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/vehicle/boil_off.hpp"
 
 namespace starsim::vehicle {
@@ -34,5 +35,10 @@ OutletCheck outlet_check(const Vehicle& vehicle, size_t stage_index, size_t tank
 // Time for liquid at rest to cross a tank of `length_m` under `acceleration_mps2`: sqrt(2 L / a) [E] (kinematic, no
 // slosh or drainage); infinite without acceleration.
 double settling_time_s(double length_m, double acceleration_mps2);
+
+// Refuelling f3: the shortest travel of the liquid in a tank (a near-full tank would settle and unsettle at once) [E],
+// and the largest tilt of the apparent gravity from -x that still covers an outlet (the r4 transfer's value).
+constexpr double settling_min_travel_m = 1.0;
+constexpr double settling_max_tilt_rad = 30.0 * constants::deg_to_rad;
 
 }  // namespace starsim::vehicle

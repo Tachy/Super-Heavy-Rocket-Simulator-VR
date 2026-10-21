@@ -2,11 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <stdexcept>
 
 #include "starsim/aero/parachute.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/vehicle/boil_off.hpp"
+#include "starsim/vehicle/propellant_transfer.hpp"
 
 namespace starsim::vehicle {
 
@@ -325,6 +328,53 @@ void Vehicle::settle_propellant(const Vec3& specific_force_body_mps2, double dt_
 }
 
 void Vehicle::set_liquid_down_body(const Vec3& down_body) { liquid_down_body_ = math::normalized(down_body); }
+
+namespace {
+
+// A tank whose outlet needs settled liquid before an ignition (refuelling f3).
+bool settling_tank(const Tank& t) {
+    return t.config.role == config::TankRole::Main && t.config.contents != config::TankContents::Rcs &&
+           !t.config.propellant_management_device && t.mass_kg > 0.0 && t.length_m > 0.0 && t.config.capacity_kg > 0.0;
+}
+
+}  // namespace
+
+bool Vehicle::needs_settling(size_t stage_index) const {
+    const auto& stage = stages_.at(stage_index);
+    if (stage.feed != FeedSource::Main) return false;
+    return std::any_of(stage.tanks.begin(), stage.tanks.end(), settling_tank);
+}
+
+double Vehicle::settling_travel_m(size_t stage_index) const {
+    double travel = 0.0;
+    for (const auto& t : stages_.at(stage_index).tanks) {
+        if (settling_tank(t)) travel = std::max(travel, t.length_m * (1.0 - t.mass_kg / t.config.capacity_kg));
+    }
+    return std::max(travel, settling_min_travel_m);
+}
+
+void Vehicle::update_settling(const LiquidEnvironment& liquid, double dt_s) {
+    for (size_t s = 0; s < stages_.size(); ++s) {
+        auto& stage = stages_[s];
+        if (!needs_settling(s)) continue;
+        bool covered = true;
+        double a = std::numeric_limits<double>::infinity();
+        for (size_t i = 0; i < stage.tanks.size(); ++i) {
+            const auto& t = stage.tanks[i];
+            if (!settling_tank(t)) continue;
+            covered = covered && outlet_check(*this, s, i, liquid, settling_max_tilt_rad).covered;
+            const double centre_m = stage.base_station_m + t.config.base_station_m + 0.5 * t.length_m;
+            a = std::min(a, norm(apparent_gravity_body_mps2(liquid, Vec3{centre_m, 0.0, 0.0} - mass_properties().cg_point_m())));
+        }
+        const double t_settle = settling_time_s(settling_travel_m(s), a);
+        if (!std::isfinite(t_settle)) continue;  // no acceleration: the liquid stays where it is
+        stage.settled = std::clamp(stage.settled + (covered ? 1.0 : -1.0) * dt_s / t_settle, 0.0, 1.0);
+    }
+}
+
+bool Vehicle::stage_settled(size_t stage_index) const {
+    return !needs_settling(stage_index) || stages_.at(stage_index).settled >= 1.0;
+}
 
 double Vehicle::propellant_kg() const {
     double total = 0.0;

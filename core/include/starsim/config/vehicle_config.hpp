@@ -67,6 +67,7 @@ struct TankConfig {
     double capacity_kg = 0.0;      // full load: the configured mass_kg at config load (scenarios change mass_kg only)
     TankRole role = TankRole::Main;
     double diameter_m = 0.0;       // 0: the stage diameter (a header is a small tank inside the hull)
+    bool propellant_management_device = false;  // [E] refuelling f3: always covers its outlet (PMD / diaphragm)
 };
 
 // One reaction-control thruster: fixed thrust, on/off.

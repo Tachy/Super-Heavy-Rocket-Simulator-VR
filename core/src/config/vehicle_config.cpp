@@ -301,6 +301,9 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 s.tanks.back().role = TankRole::Header;
             }
             if (tank.contains("diameter_m")) s.tanks.back().diameter_m = doc.positive(tank, "diameter_m");
+            if (tank.contains("propellant_management_device")) {
+                s.tanks.back().propellant_management_device = doc.boolean(tank, "propellant_management_device");
+            }
         }
     }
     append_transfer_connectors(doc, t, s);
