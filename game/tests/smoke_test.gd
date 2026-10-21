@@ -244,6 +244,8 @@ func _check_iss(config_dir: String, tdb: float) -> bool:
 	var geo: Dictionary = sim.station_geometry()
 	_check(geo.get("present", false) and geo["boxes"].size() + geo["capsules"].size() >= 9,
 			"station_geometry primitives")
+	_check(geo["ports"][0].get("mechanism", "") == "idss" and iss["ports"][0].get("mechanism", "") == "idss",
+			"ISS ports export their mechanism")
 	var hold: int = sim.proximity_hold()
 	_check(sim.wait_idle(10.0) and not sim.result(hold).get("ok", true), "hold refused outside the approach")
 	var und: int = sim.undock()
@@ -283,6 +285,9 @@ func _check_refuelling(config_dir: String, tdb: float) -> bool:
 	var depot: Dictionary = sim.depot_state()
 	_check(depot.get("present", false) and depot.get("main_propellant_kg", 0.0) > 0.0, "depot_state with its fill")
 	_check(depot.get("capacity_kg", 0.0) > depot.get("main_propellant_kg", 0.0), "depot_state with its tank volume")
+	var depot_geo: Dictionary = sim.station_geometry()
+	_check(depot_geo.get("present", false) and depot_geo["ports"][0].get("mechanism", "") == "probe_drogue"
+			and depot_geo["ports"][0].get("elements_m", []).size() == 4, "depot port with its four drogues")
 	var bad: int = sim.refuelling_campaign({"height_km": "x"})
 	_check(sim.wait_idle(10.0) and not sim.result(bad).get("ok", true), "a wrongly typed lever is refused")
 	var unknown: int = sim.refuelling_campaign({"no_such_lever": 1.0})

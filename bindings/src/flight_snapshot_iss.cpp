@@ -12,6 +12,9 @@ namespace {
 godot::Vector3 to_godot(const math::Vec3& v) { return {v.x, v.y, v.z}; }
 godot::String german(const std::string& s) { return godot::String::utf8(s.c_str()); }
 math::Vec3 axis_column(const math::Mat3& m, int c) { return {m(0, c), m(1, c), m(2, c)}; }
+const char* mechanism_name(config::DockingMechanism m) {
+    return m == config::DockingMechanism::ProbeDrogue ? "probe_drogue" : "idss";
+}
 
 godot::Dictionary absent() {
     godot::Dictionary d;
@@ -53,6 +56,10 @@ godot::Dictionary build_iss_state(const sim::FlightSession& session) {
             port["axis_gcrf"] = to_godot(axis_column(k.axes_gcrf, 0));
             port["up_gcrf"] = to_godot(axis_column(k.axes_gcrf, 2));
             port["soft_capture"] = p.soft_capture == config::SoftCaptureMode::Active ? "active" : "passive";
+            port["mechanism"] = mechanism_name(p.mechanism);
+            godot::Array elements;  // probe/drogue: the probes or drogues, stage frame (r1 minor)
+            for (const auto& e : p.elements_m) elements.push_back(to_godot(e));
+            port["elements_m"] = elements;
             ports.push_back(port);
         }
     }
@@ -172,6 +179,10 @@ godot::Dictionary build_station_geometry(const sim::FlightSession& session) {
             e["position_m"] = to_godot(p.position_m + math::Vec3{base, 0.0, 0.0});
             e["axis"] = to_godot(p.axis);
             e["up"] = to_godot(p.up);
+            e["mechanism"] = mechanism_name(p.mechanism);
+            godot::Array elements;  // probe/drogue: the probes or drogues, in the same frame as position_m
+            for (const auto& el : p.elements_m) elements.push_back(to_godot(el + math::Vec3{base, 0.0, 0.0}));
+            e["elements_m"] = elements;
             ports.push_back(e);
         }
         base += stage.length_m;
