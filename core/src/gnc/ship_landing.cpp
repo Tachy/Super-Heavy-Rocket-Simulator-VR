@@ -34,7 +34,9 @@ ShipLandingParameters ship_landing_parameters() {
     // [E] lateral LQR effort: the booster's 0.2 swung the ship's gimbals stop to stop after the flip (20 deg/s slew)
     s.lateral_effort_fraction = 0.1;
     auto& l = s.settings.limits;
-    l.tilt_max_rad = {20.0 * deg, 15.0 * deg, 15.0 * deg};  // [E] the more engines, the more gimbal authority
+    // [E] the more engines, the more gimbal authority. The lateral phase took 15 deg until f3: it saturated on the
+    // divert after the flip (lunar return seed 1, ~27 m/s across: overshoot, hover, headers dry).
+    l.tilt_max_rad = {20.0 * deg, 20.0 * deg, 15.0 * deg};
     l.rate_max_radps = {0.3, 0.2, 0.2};                     // [E] the ship is shorter and lighter than the booster
     // 3 -> 2 at 20-40 m/s sink [D]: flight 14 video shows two engines from ~200 m (user 2026-10-13), where flights
     // 13/14 sank at 31 / 35 m/s (webcast telemetry). The planner's third phase flies the same pair (no switch).
