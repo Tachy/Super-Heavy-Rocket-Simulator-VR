@@ -314,6 +314,8 @@ public:
     // A payload vehicle (config::stack_payload) still on its launcher: a launcher stage below payload stages. A released
     // payload keeps its stages' payload flag, so this - not the flag - tells whether it flies alone.
     bool payload_stacked() const;
+    // A stage with [stage.thermal] (refuelling r2): only such tanks boil off.
+    bool has_thermal() const;
     // A rigidly attached point mass (ISS i5: a docked visitor on a station), vehicle frame; it enters the mass, the CG
     // (so the body's CG state must be moved with it - FlightSession does) and the inertia (parallel axis about y/z).
     struct AttachedMass {

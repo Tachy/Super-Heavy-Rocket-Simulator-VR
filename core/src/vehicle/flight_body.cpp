@@ -321,6 +321,7 @@ void FlightBody::hold_fixed(const environment::BodyFrame& frame, ephemeris::Body
     reference_ = body;
     caught_ = true;
     resting_ = false;
+    forget_boil_off();
     follow_pad(frame);
 }
 
@@ -338,6 +339,7 @@ void FlightBody::hold_landed(const environment::BodyFrame& frame, ephemeris::Bod
 void FlightBody::release_landed() {
     landed_ = false;
     resting_ = false;
+    forget_boil_off();
 }
 
 std::vector<TankBoilOff> FlightBody::boil_off_rates_now(const FlightEnvironment& env, time::Epoch epoch,
@@ -350,7 +352,7 @@ std::vector<TankBoilOff> FlightBody::boil_off_rates_now(const FlightEnvironment&
 }
 
 void FlightBody::boil_off(const FlightEnvironment& env, time::Epoch epoch, double dt_s) {
-    if (!env.boil_off || env.ephemeris == nullptr) return;
+    if (!env.boil_off || env.ephemeris == nullptr || !vehicle_->has_thermal()) return;
     if (docked_ || vehicle_->attached_mass()) {  // a docked pair is vented by the session (refuelling r4)
         boil_off_elapsed_s_ = 0.0;
         boil_off_last_.clear();
@@ -432,7 +434,8 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
         external_torque_body_nm_ = {};
         return;
     }
-    resting_ = false;  // re-established by the ground contact below
+    const bool was_resting = resting_;  // on the ground nothing boils off (as in coast())
+    resting_ = false;                   // re-established by the ground contact below
 
     const TickContext ctx{env,
                           *vehicle_,
@@ -492,7 +495,11 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     external_torque_body_nm_ = {};
     vehicle_->consume_propellant(dt_s);
     boil_off_specific_force_body_mps2_ = specific_force_body_mps2_;
-    boil_off(env, epoch + dt_s, dt_s);
+    if (was_resting) {
+        forget_boil_off();
+    } else {
+        boil_off(env, epoch + dt_s, dt_s);
+    }
 
     resolve_ground_contact(body, body.frame(epoch + dt_s));
 }
@@ -636,19 +643,21 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
     const auto result = integrators::integrate<13>(f, 0.0, pack(state_), duration_s, options);
     state_ = unpack(result.y);
     snap_ideal_attitude();
-    if ((env.boil_off && env.ephemeris != nullptr) || env.ignition_settling) {  // the drag that settles the liquid
+    // the drag that settles the liquid (a vehicle without [stage.thermal] needs it only for the settling)
+    if ((env.boil_off && env.ephemeris != nullptr && vehicle_->has_thermal()) || env.ignition_settling) {
         const Forces end = evaluate(ctx, duration_s, state_);
         boil_off_specific_force_body_mps2_ = end.nongravitational_body_n / end.mass.mass_kg;
     }
-    track_reference(body, body.frame(epoch + duration_s));
+    // the orbit reference at the end of the coast (f3 final review M8: a coast into the Moon's sphere kept the Earth)
+    reference_ = reference_body(env, epoch + duration_s);
+    const auto end_body = reference_body_of(env, *reference_);
+    const auto end_frame = end_body.frame(epoch + duration_s);
+    track_reference(end_body, end_frame);
     if (env.ignition_settling) {  // refuelling f3: the coast moves the liquid with the residual acceleration
         auto liquid = liquid_now();
         liquid.specific_force_body_mps2 = boil_off_specific_force_body_mps2_;
         vehicle_->update_settling(liquid, duration_s);
     }
-    reference_ = reference_body(env, epoch + duration_s);
-    const auto end_body = reference_body_of(env, *reference_);
-    const auto end_frame = end_body.frame(epoch + duration_s);
     resolve_ground_contact(end_body, end_frame);
     update_air_data(end_body, end_frame);
     boil_off(env, epoch + duration_s, duration_s);

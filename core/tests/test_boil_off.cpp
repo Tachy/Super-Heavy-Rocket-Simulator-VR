@@ -594,6 +594,46 @@ TEST_CASE("boil-off: separation clears the stored rates, the booster does not bo
     CHECK(main_propellant(*ship) < ship_before);
 }
 
+TEST_CASE("boil-off: a hold forgets the last rates; the first coast after it vents at the new rate",
+          "[boil_off][flight]") {
+    // Before the hold the Sun stands along the orbit normal (broadside), after it ahead of the nose (end-on): an
+    // average with the rate from before the hold would vent clearly more than a ship that never boiled.
+    const auto orbit = circular_orbit(400.0e3, 0.0);
+    OrbitWorld broadside({0.0, 0.0, constants::astronomical_unit_m});
+    OrbitWorld end_on({0.0, constants::astronomical_unit_m, 0.0});
+    auto held = in_orbit("starship_tanker", orbit);
+    auto fresh = in_orbit("starship_tanker", orbit);
+    held->coast(broadside.env, t0, 600.0);
+    broadside.env.boil_off = false;
+    fresh->coast(broadside.env, t0, 600.0);  // the same path, nothing vented and no rates stored
+    for (const char* id : {"lox_main", "ch4_main"}) {
+        fresh->vehicle().set_tank_mass(0, id, tank_named(held->vehicle(), id).mass_kg);
+    }
+    held->hold_docked();
+    held->release_docked();
+    const double held_before = main_propellant(*held);
+    const double fresh_before = main_propellant(*fresh);
+    held->coast(end_on.env, t0 + 600.0, 600.0);
+    fresh->coast(end_on.env, t0 + 600.0, 600.0);
+    CHECK(held_before - main_propellant(*held) ==
+          Catch::Approx(fresh_before - main_propellant(*fresh)).epsilon(1e-9));
+}
+
+TEST_CASE("boil-off at time warp: 600 s coasts through the eclipse vent the orbit average", "[boil_off][flight]") {
+    const auto orbit = circular_orbit(400.0e3, 0.0);
+    const Vec3 sun{constants::astronomical_unit_m, 0.0, 0.0};  // in the plane: an eclipse every orbit
+    OrbitWorld world(sun);
+    auto ship = in_orbit("starship_tanker", orbit);
+    const auto average = vehicle::orbit_average_boil_off(ship->vehicle(), orbit, {}, sun);
+    const double period_s = orbit::orbital_period_s(norm(orbit.position_m), constants::earth_gm_m3ps2);
+    const double before = main_propellant(*ship);
+    constexpr double coast_s = 600.0;  // FlightSession::max_coast_s
+    const double span_s = 5.0 * period_s;
+    for (double t = 0.0; t < span_s - 1e-9; t += coast_s) ship->coast(world.env, t0 + t, std::min(coast_s, span_s - t));
+    const double vented = before - main_propellant(*ship);
+    CHECK(vented == Catch::Approx((average.oxidizer_kgps + average.fuel_kgps) * span_s).epsilon(0.03));
+}
+
 TEST_CASE("boil-off: not inside the air", "[boil_off][flight]") {
     OrbitWorld world({constants::astronomical_unit_m, 0.0, 0.0});
     // 50 km up, coasting: below boil_off_min_altitude_m.

@@ -232,12 +232,16 @@ public:
     // thrust, no RCS, no propellant use; the session sets its state from the station every tick and after every coast.
     void hold_docked() {
         docked_ = true;
+        forget_boil_off();
         vehicle_->stop_rcs();
         rcs_force_body_n_ = {};
         external_force_gcrf_n_ = {};
         external_torque_body_nm_ = {};
     }
-    void release_docked() { docked_ = false; }
+    void release_docked() {
+        docked_ = false;
+        forget_boil_off();
+    }
     bool docked() const { return docked_; }
 
 private:
@@ -294,9 +298,14 @@ private:
     math::Vec3 rcs_force_body_n_;
     void boil_off(const FlightEnvironment& env, time::Epoch epoch, double dt_s);
     void reset_boil_off() {
+        forget_boil_off();
+        boil_off_rate_ = {};
+    }
+    // A hold (docked, caught, landed, resting) ends the trapezoid: the first evaluation after it starts afresh instead
+    // of averaging with the flow from before the hold (r2 deferred minor). The last rate stays for the display.
+    void forget_boil_off() {
         boil_off_elapsed_s_ = 0.0;
         boil_off_last_.clear();
-        boil_off_rate_ = {};
     }
     double boil_off_elapsed_s_ = 0.0;
     math::Vec3 boil_off_specific_force_body_mps2_;  // of the last tick or at the end of the last coast

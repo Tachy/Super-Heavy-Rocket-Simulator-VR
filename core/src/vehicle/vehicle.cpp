@@ -646,6 +646,10 @@ void Vehicle::consume_propellant(double dt_s) {
     refresh_rcs_availability();
 }
 
+bool Vehicle::has_thermal() const {
+    return std::any_of(stages_.begin(), stages_.end(), [](const Stage& s) { return s.config.thermal.has_value(); });
+}
+
 bool Vehicle::payload_stacked() const {
     return !stages_.empty() && !stages_.front().config.payload && stages_.back().config.payload;
 }

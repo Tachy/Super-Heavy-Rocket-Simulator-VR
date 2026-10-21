@@ -139,6 +139,40 @@ TEST_CASE("Telemetry in Earth orbit reports orbit elements about the Earth", "[v
     CHECK(tm.inclination_rad == Catch::Approx(51.6 * deg).margin(0.3 * deg));
 }
 
+TEST_CASE("A ship resting on the Moon keeps its propellant with boil-off on", "[vehicle][lunar][boil_off]") {
+    LunarFixture fx;
+    // at the subsolar point: in free flight the hull would boil there (a polar night site boils nothing anyway)
+    const Vec3 sun_fixed = fx.moon.frame(fx.t0).to_fixed(fx.ephemeris.state_gcrf(ephemeris::Body::Sun, fx.t0).position_m);
+    const double sun_lat = std::asin(sun_fixed.z / norm(sun_fixed)), sun_lon = std::atan2(sun_fixed.y, sun_fixed.x);
+    const double cg = ship(lunar_orbit(fx.moon, fx.t0))->vehicle().mass_properties().cg_station_m;
+    auto body = ship(above_moon(fx.moon, fx.t0, sun_lat, sun_lon, cg + 0.5, 1.0));
+    time::Epoch t = fx.t0;
+    for (int i = 0; i < 2000 && !body->resting(); ++i, t = t + 0.005) body->step(fx.env, t, 0.005, {});
+    REQUIRE(body->resting());
+    const auto sunlit = body->boil_off_rates_now(fx.env, t, {{1.62, 0.0, 0.0}, {}, body->state().position_gcrf_m,
+                                                             body->state().attitude, {}});
+    double sunlit_kgps = 0.0;
+    for (const auto& k : sunlit) sunlit_kgps += k.mass_flow_kgps;
+    REQUIRE(sunlit_kgps > 0.0);  // the site would boil: the check below is not empty
+    const double before_kg = body->vehicle().main_propellant_kg();
+    for (int i = 0; i < 200; ++i, t = t + 0.1) body->step(fx.env, t, 0.1, {});  // 20 s: two boil-off intervals
+    CHECK(body->resting());
+    CHECK(body->vehicle().main_propellant_kg() == before_kg);
+}
+
+TEST_CASE("A coast into the Moon's sphere ends with the Moon as the orbit reference", "[vehicle][lunar]") {
+    LunarFixture fx;
+    const auto centre = fx.moon.centre_gcrf(fx.t0);
+    const Vec3 out = math::normalized(-centre.position_m);  // from the Moon towards the Earth
+    auto body = ship({centre.position_m + 101.0e6 * out, centre.velocity_mps, {}, {}});
+    body->coast(fx.env, fx.t0, 1.5);  // records the Earth
+    // 60,500 km from the Moon, falling straight at it with 1 km/s: hyperbolic about the Moon, bound about the Earth
+    body->set_state({centre.position_m + 60.5e6 * out, centre.velocity_mps - 1000.0 * out, {}, {}});
+    body->coast(fx.env, fx.t0 + 1.5, 1000.0);  // inside 60,000 km at the end
+    REQUIRE(body->reference_body(fx.env, fx.t0 + 1001.5) == ephemeris::Body::Moon);
+    CHECK_FALSE(body->in_orbit());  // judged about the Moon, not the Earth
+}
+
 TEST_CASE("The reference body switches with hysteresis at 60,000 / 100,000 km from the Moon", "[vehicle][lunar]") {
     LunarFixture fx;
     const auto centre = fx.moon.centre_gcrf(fx.t0);
