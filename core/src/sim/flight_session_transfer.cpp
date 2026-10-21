@@ -121,6 +121,9 @@ bool FlightSession::start_transfer(const TransferRequest& request) {
         return false;
     }
     if (!docked()) return refuse_transfer("Transfer nicht möglich: nicht angedockt");
+    if (docking_->mechanism().phase() != contact::DockingPhase::Docked) {  // the hooks open for the undocking (r4 minor)
+        return refuse_transfer("Transfer nicht möglich: Abkoppeln läuft");
+    }
     if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit) {
         return refuse_transfer("Transfer nicht möglich: Autopilot aktiv");
     }
@@ -141,10 +144,10 @@ bool FlightSession::start_transfer(const TransferRequest& request) {
         if (!dp || !rp) return refuse_transfer("Transfer nicht möglich: kein Transfersystem");
         sides.delivering_tank[k] = dc->tank_id;
         sides.receiving_tank[k] = rc->tank_id;
-        sides.pressure_difference_pa = dp->delivery_pressure_pa - rp->receive_pressure_pa;
         const auto* dt = find_tank(dv, sides.delivering_stage[k], dc->tank_id);
         const auto* rt = find_tank(rv, sides.receiving_stage[k], rc->tank_id);
-        lines[k] = {vehicle::pair_discharge_area_m2(*dc, *rc), dt->density_kg_m3, dc->chilldown_kg + rc->chilldown_kg};
+        lines[k] = {vehicle::pair_discharge_area_m2(*dc, *rc), dt->density_kg_m3, dc->chilldown_kg + rc->chilldown_kg,
+                    dp->delivery_pressure_pa - rp->receive_pressure_pa};
         sides.longest_tank_m = std::max({sides.longest_tank_m, dt->length_m, rt->length_m});
     }
     sides.gas_stage = sides.delivering == chaser ? sides.delivering_stage[0] : sides.receiving_stage[0];
@@ -184,13 +187,9 @@ void FlightSession::run_transfer_step(double dt_s) {
     const auto& d = transfer_sides_;
     const double compound_kg = station.vehicle().mass_properties().mass_kg;  // carries the chaser's mass
     if (dt_s > 0.0) {
-        // 1. the push of the step that ended: average thrust as one impulse along the chaser's +x
+        // 1. the push of the step that ended: average thrust as one impulse along the chaser's +x - as much as the gas
+        // drawn for it gives (r4 minor: near empty tanks the draw falls short)
         if (transfer_thrust_n_ > 0.0) {
-            auto s = station.state();
-            s.velocity_gcrf_mps +=
-                chaser.state().attitude.rotate(Vec3{1.0, 0.0, 0.0}) * (transfer_thrust_n_ * dt_s / compound_kg);
-            station.set_state(s);
-            sync_docked();
             // gas from the chaser's main tanks in proportion to their oxidizer and fuel (Vehicle::tank_mass_flows_kgps)
             const auto& st = chaser.vehicle().stages()[d.gas_stage];
             const double gas = transfer_thrust_n_ * dt_s / (st.config.rcs.isp_s * constants::standard_gravity_mps2);
@@ -210,7 +209,13 @@ void FlightSession::run_transfer_step(double dt_s) {
                     drawn += kg;
                 }
             }
-            transfer_->add_settling(drawn, transfer_thrust_n_);
+            const double drawn_share = gas > 0.0 ? drawn / gas : 0.0;
+            const double impulse_ns = transfer_thrust_n_ * dt_s * drawn_share;
+            auto s = station.state();
+            s.velocity_gcrf_mps += chaser.state().attitude.rotate(Vec3{1.0, 0.0, 0.0}) * (impulse_ns / compound_kg);
+            station.set_state(s);
+            sync_docked();
+            transfer_->add_settling(drawn, transfer_thrust_n_ * drawn_share, impulse_ns);
         }
         // 2. both ships' boil-off over the step, in the pushed compound's environment
         const Vec3 push = docked_attitude_station_.rotate(Vec3{transfer_thrust_n_ / compound_kg, 0.0, 0.0});
@@ -245,7 +250,6 @@ void FlightSession::run_transfer_step(double dt_s) {
     in.settled = settled;
     in.thrust_available = capability > 0.0 && gas_left;
     in.settle_time_s = a > 0.0 ? vehicle::settling_time_s(d.longest_tank_m, a) : 0.0;
-    in.pressure_difference_pa = d.pressure_difference_pa;
     const auto out = transfer_->step(in);
     // 4. move the propellant (the compound follows)
     for (size_t k = 0; k < 2; ++k) {

@@ -1236,7 +1236,6 @@ private:
         std::array<size_t, 2> delivering_stage{}, receiving_stage{};
         std::array<std::string, 2> delivering_tank, receiving_tank;
         size_t gas_stage = 0;  // the chaser's stage that pays the settling gas
-        double pressure_difference_pa = 0.0;
         double longest_tank_m = 0.0;
     } transfer_sides_;
     TransferTanks transfer_tanks() const;

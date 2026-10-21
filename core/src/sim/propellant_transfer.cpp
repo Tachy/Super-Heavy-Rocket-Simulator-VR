@@ -42,9 +42,10 @@ void PropellantTransfer::stop() {
     state_.flow_kgps = {};
 }
 
-void PropellantTransfer::add_settling(double gas_kg, double thrust_n) {
+void PropellantTransfer::add_settling(double gas_kg, double thrust_n, double impulse_ns) {
     state_.settling_gas_kg += gas_kg;
     state_.settling_thrust_n = thrust_n;
+    state_.settling_impulse_ns += impulse_ns;
 }
 
 // A pause during Settling resumes into Chilldown: when the outlets are covered again, the liquid has settled.
@@ -101,7 +102,10 @@ TransferStepOutput PropellantTransfer::step(const TransferStepInput& in) {
         if (in.settled && in.thrust_available) {
             state_.phase = paused_from_;
             state_.status = paused_from_ == TransferPhase::Flowing ? "Transfer läuft" : "Leitungen werden gekühlt";
-            if (paused_from_ == TransferPhase::Chilldown) phase_elapsed_s_ = 0.0;  // chilled again from the start
+            if (paused_from_ == TransferPhase::Chilldown) {  // the lines warmed in the pause: chilled (and vented) again
+                phase_elapsed_s_ = 0.0;
+                chill_round_kg_ = {};
+            }
         }
         break;
     case TransferPhase::Chilldown:
@@ -111,12 +115,13 @@ TransferStepOutput PropellantTransfer::step(const TransferStepInput& in) {
         }
         for (size_t k = 0; k < 2; ++k) {
             if (!state_.line_open[k]) continue;
-            const double left = lines_[k].chilldown_kg - state_.chilldown_kg[k];
+            const double left = lines_[k].chilldown_kg - chill_round_kg_[k];
             const double room = std::max(in.tanks.delivering_kg[k] - request_.delivering_floor_kg[k], 0.0);
             const double vent =
                 std::clamp(std::min(left, lines_[k].chilldown_kg * in.dt_s / request_.chilldown_s), 0.0, room);
             out.vented_kg[k] = vent;
             state_.chilldown_kg[k] += vent;
+            chill_round_kg_[k] += vent;
         }
         if (phase_elapsed_s_ >= request_.chilldown_s - 1e-9) {
             state_.phase = TransferPhase::Flowing;
@@ -133,7 +138,7 @@ TransferStepOutput PropellantTransfer::step(const TransferStepInput& in) {
         for (size_t k = 0; k < 2; ++k) {
             if (!state_.line_open[k]) continue;
             const double flow = vehicle::line_mass_flow_kgps(lines_[k].discharge_area_m2, lines_[k].density_kg_m3,
-                                                             in.pressure_difference_pa);
+                                                             lines_[k].pressure_difference_pa);
             const double moved = std::max(
                 0.0, std::min({flow * in.dt_s, in.tanks.delivering_kg[k] - request_.delivering_floor_kg[k],
                                in.tanks.receiving_capacity_kg[k] - in.tanks.receiving_kg[k],

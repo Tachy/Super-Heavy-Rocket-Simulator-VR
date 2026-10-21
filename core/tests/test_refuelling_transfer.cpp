@@ -176,16 +176,17 @@ TEST_CASE("The compound CG offset moves the tide and the rotation, not the speci
 
 namespace {
 
-sim::TransferLine lox_line() { return {0.6 * std::numbers::pi / 4.0 * 0.15 * 0.15, 1200.0, 300.0}; }
-sim::TransferLine ch4_line() { return {0.6 * std::numbers::pi / 4.0 * 0.15 * 0.15, 440.0, 120.0}; }
+sim::TransferLine lox_line() { return {0.6 * std::numbers::pi / 4.0 * 0.15 * 0.15, 1200.0, 300.0, 2.0e5}; }
+sim::TransferLine ch4_line() { return {0.6 * std::numbers::pi / 4.0 * 0.15 * 0.15, 440.0, 120.0, 2.0e5}; }
 
 // A pure run: the tanks move as the machine says, settled when `settled(t)`.
 struct Bench {
     sim::TransferTanks tanks{{156.5e3, 43.5e3}, {469.6e3, 130.4e3}, {1224.8e3, 340.2e3}};
     sim::TransferRequest request;
     std::optional<sim::PropellantTransfer> transfer;
+    std::array<sim::TransferLine, 2> lines{lox_line(), ch4_line()};
     Bench() { request.delivering_floor_kg = {10.0e3, 2.8e3}; }
-    void start() { transfer.emplace(std::array{lox_line(), ch4_line()}, request, tanks); }
+    void start() { transfer.emplace(lines, request, tanks); }
     template <class Settled>
     void run(double limit_s, Settled settled, bool thrust_available = true) {
         for (double t = 0.0; t < limit_s && transfer->active(); t += request.step_s) {
@@ -195,7 +196,6 @@ struct Bench {
             in.settled = settled(t);
             in.thrust_available = thrust_available;
             in.settle_time_s = 185.65;
-            in.pressure_difference_pa = 2.0e5;
             const auto out = transfer->step(in);
             for (size_t k = 0; k < 2; ++k) {
                 tanks.delivering_kg[k] -= out.moved_kg[k] + out.vented_kg[k];
@@ -231,6 +231,36 @@ TEST_CASE("Transfer phases: settling, chill-down, flow to the floors, complete",
     CHECK(s.delivered_kg[1] == Catch::Approx(43.5e3 - 120.0 - 2.8e3));
     // LOX at 232.3 kg/s: 146.2 t in ~630 s of flow after 190 + 120 s
     CHECK(s.elapsed_s == Catch::Approx(190.0 + 120.0 + 630.0).margin(10.0));
+}
+
+TEST_CASE("Each line flows with its own pressure difference", "[refuelling][prop_transfer]") {
+    Bench b;
+    b.lines[1].pressure_difference_pa = 0.5e5;  // e.g. a CH4 connector on a stage with another tank pressure
+    b.start();
+    b.run(400.0, [](double) { return true; });
+    REQUIRE(b.transfer->state().phase == sim::TransferPhase::Flowing);
+    for (size_t k = 0; k < 2; ++k) {
+        CAPTURE(k);
+        CHECK(b.transfer->state().flow_kgps[k] ==
+              Catch::Approx(vehicle::line_mass_flow_kgps(b.lines[k].discharge_area_m2, b.lines[k].density_kg_m3,
+                                                         b.lines[k].pressure_difference_pa)));
+    }
+}
+
+TEST_CASE("A pause in the chill-down chills the lines again and vents again", "[refuelling][prop_transfer]") {
+    // r4 deferred minor: the lines warm during the pause; the second chill-down vented nothing
+    Bench b;
+    b.start();
+    b.run(250.0, [](double) { return true; });  // 190 s settling, 60 s into the 120 s chill-down
+    REQUIRE(b.transfer->state().phase == sim::TransferPhase::Chilldown);
+    const double first_kg = b.transfer->state().chilldown_kg[0];
+    REQUIRE(first_kg == Catch::Approx(150.0));
+    b.run(20.0, [](double) { return false; });
+    REQUIRE(b.transfer->state().phase == sim::TransferPhase::Paused);
+    b.run(130.0, [](double) { return true; });
+    CHECK(b.transfer->state().phase == sim::TransferPhase::Flowing);
+    CHECK(b.transfer->state().chilldown_kg[0] == Catch::Approx(first_kg + 300.0));
+    CHECK(b.transfer->state().chilldown_kg[1] == Catch::Approx(60.0 + 120.0));
 }
 
 TEST_CASE("A full receiver or a limit closes a line; nothing to move opens none", "[refuelling][prop_transfer]") {
@@ -411,6 +441,8 @@ TEST_CASE("Tanker to depot: settle, chill, flow to the reserve; masses close, hu
     // 1e-4 g on ~1,360 t: ~1.33 kN for ~940 s at Isp 70 s
     CHECK(s.settling_thrust_n == Catch::Approx(1.0e-4 * 9.80665 * f.session.compound_mass()->mass_kg).epsilon(0.02));
     CHECK(s.settling_gas_kg == Catch::Approx(1.8e3).epsilon(0.15));
+    const double isp_s = f.session.body(0).vehicle().stages()[0].config.rcs.isp_s;
+    CHECK(s.settling_impulse_ns == Catch::Approx(s.settling_gas_kg * isp_s * constants::standard_gravity_mps2));
     CHECK(std::abs(port_gap_m(f.session) - gap0) < 1e-5);
     CHECK(f.session.docked());
 }
@@ -478,7 +510,26 @@ TEST_CASE("Transfer refusals and stop", "[refuelling][prop_transfer][docking]") 
         f.session.advance_to(f.session.epoch() + 60.0, 1000000);
         CHECK(f.tank(0, "lox_main") > lox - 50.0);  // only boil-off, no flow, no gas
         CHECK(f.session.undock());
+        CHECK_FALSE(f.session.start_transfer(tanker_request()));  // the hooks open: no new transfer
+        CHECK(f.session.transfer_state().status == "Transfer nicht möglich: Abkoppeln läuft");
     }
+}
+
+TEST_CASE("The settling push gives only the impulse of the gas it drew", "[refuelling][prop_transfer][docking]") {
+    // r4 deferred minor: near empty tanks the full impulse was applied although the gas draw fell short
+    test::spice_session();
+    DockedPair f(refuelling_test::tanker_config(100.0));  // 78 kg LOX, 22 kg CH4: the gas runs out while settling
+    auto r = tanker_request();
+    r.delivering_floor_kg = {0.0, 0.0};
+    REQUIRE(f.session.start_transfer(r));
+    f.session.advance_to(f.session.epoch() + 300.0, 1000000);
+    const auto& s = f.session.transfer_state();
+    INFO(s.status << ", gas " << s.settling_gas_kg << " kg, impulse " << s.settling_impulse_ns << " Ns");
+    CHECK(s.phase == sim::TransferPhase::Paused);
+    CHECK(s.status == "Transfer unterbrochen: kein Kaltgas zum Setzen");
+    const double isp_s = f.session.body(0).vehicle().stages()[0].config.rcs.isp_s;
+    CHECK(s.settling_impulse_ns <= s.settling_gas_kg * isp_s * constants::standard_gravity_mps2 * (1.0 + 1e-9));
+    CHECK(s.settling_impulse_ns > 0.0);
 }
 
 TEST_CASE("Zero settling push: the liquid stays forward, the transfer pauses", "[refuelling][prop_transfer][docking]") {

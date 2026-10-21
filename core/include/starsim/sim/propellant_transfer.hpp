@@ -34,6 +34,7 @@ struct TransferLine {
     double discharge_area_m2 = 0.0;  // C_d A of the coupled pair
     double density_kg_m3 = 0.0;      // of the delivered liquid
     double chilldown_kg = 0.0;       // both connectors' together, vented from the delivering tank
+    double pressure_difference_pa = 0.0;  // delivery minus receive pressure of this line's two stages
 };
 
 struct TransferTanks {
@@ -48,7 +49,6 @@ struct TransferStepInput {
     bool settled = false;           // every involved delivering tank's outlet covered (vehicle::outlet_check)
     bool thrust_available = false;  // the chaser can push (+x capability and cold gas left)
     double settle_time_s = 0.0;     // the longest involved tank's settling time at the achieved push
-    double pressure_difference_pa = 0.0;
 };
 
 struct TransferStepOutput {
@@ -67,6 +67,7 @@ struct TransferState {
     std::array<bool, 2> line_open{};
     double settling_gas_kg = 0.0;
     double settling_thrust_n = 0.0;  // of the last step
+    double settling_impulse_ns = 0.0;  // given to the compound since the start (only what the drawn gas gives)
     double boil_off_kg = 0.0;        // both ships, since the start
 };
 
@@ -75,7 +76,7 @@ public:
     PropellantTransfer(std::array<TransferLine, 2> lines, TransferRequest request, const TransferTanks& tanks);
     TransferStepOutput step(const TransferStepInput& in);
     void stop();
-    void add_settling(double gas_kg, double thrust_n);
+    void add_settling(double gas_kg, double thrust_n, double impulse_ns);
     void add_boil_off(double kg) { state_.boil_off_kg += kg; }
     bool active() const;  // Settling, Chilldown, Flowing or Paused: the valves armed, the settling push on
     const TransferState& state() const { return state_; }
@@ -92,6 +93,7 @@ private:
     TransferState state_;
     TransferPhase paused_from_ = TransferPhase::Chilldown;
     double phase_elapsed_s_ = 0.0;
+    std::array<double, 2> chill_round_kg_{};  // vented in the current chill-down (state_.chilldown_kg: all of them)
 };
 
 }  // namespace starsim::sim
