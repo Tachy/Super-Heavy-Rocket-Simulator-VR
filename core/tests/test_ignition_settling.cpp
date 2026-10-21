@@ -18,6 +18,7 @@
 #include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/propellant_transfer.hpp"
 #include "starsim/gnc/burn_node.hpp"
+#include "starsim/orbit/kepler.hpp"
 #include "starsim/vehicle/flight_body.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 #include "test_support.hpp"
@@ -519,4 +520,75 @@ TEST_CASE("Settling: a hold that never settles lights after the hold limit and i
     CHECK(f.any_failed());
     CHECK_THAT(f.session.burn_abort_reason(), Catch::Matchers::StartsWith("Gasansaugung"));
     CHECK(f.session.epoch() - node.epoch > sim::FlightSession::settling_hold_factor * lead - 0.5 * lead);
+}
+
+namespace {
+
+// One prograde burn 2 h ahead flown with advance steps of `step_s`: ignition / cutoff epochs, the velocity change over
+// the burn, the end state (f4 Task 11: the end states differed by ~8 m/s between 10 s and 600 s steps).
+struct StepRun {
+    std::optional<time::Epoch> lit, out;
+    math::Vec3 r_lit, v_lit, v_out, r_end, v_end;
+    time::Epoch end_epoch;
+    double attitude_error_rad = 0.0;
+};
+StepRun fly_with_steps(double step_s, double periapsis_height_m) {
+    TankerInOrbit f(100e3, periapsis_height_m, periapsis_height_m + 70e3);
+    run_to(f.session, f.t0 + 2.0 * 3600.0, 600.0);
+    // 100 m/s prograde along the velocity at the node (two-body), 2 h ahead: a raise, no entry afterwards
+    const auto& st0 = f.session.body(0).state();
+    const auto at_node = orbit::propagate_two_body({st0.position_gcrf_m, st0.velocity_gcrf_mps},
+                                                   constants::earth_gm_m3ps2, 7200.0);
+    const gnc::BurnNode node{f.session.epoch() + 7200.0, math::normalized(at_node.velocity_mps) * 100.0};
+    REQUIRE(f.session.execute_burn(node));
+    StepRun s;
+    const time::Epoch end = node.epoch + 1800.0;
+    while (f.session.epoch() < end - 0.01) {
+        const bool before = f.vehicle().any_engine_producing_thrust();
+        // fine steps around the burn in both runs: only the coast before it is chunked differently
+        const double step = std::abs(f.session.epoch() - node.epoch) < 900.0 ? 0.05 : step_s;
+        f.session.advance_to(std::min(f.session.epoch() + step, end));
+        const bool after = f.vehicle().any_engine_producing_thrust();
+        const auto& st = f.session.body(0).state();
+        if (!before && after && !s.lit) {
+            s.lit = f.session.epoch();
+            s.v_lit = st.velocity_gcrf_mps;
+            s.r_lit = st.position_gcrf_m;
+            const math::Vec3 nose = st.attitude.rotate({1.0, 0.0, 0.0});
+            s.attitude_error_rad = std::acos(std::clamp(dot(nose, math::normalized(node.delta_v_gcrf_mps)), -1.0, 1.0));
+        }
+        if (before && !after && s.lit && !s.out) {
+            s.out = f.session.epoch();
+            s.v_out = st.velocity_gcrf_mps;
+        }
+    }
+    s.end_epoch = f.session.epoch();
+    s.r_end = f.session.body(0).state().position_gcrf_m;
+    s.v_end = f.session.body(0).state().velocity_gcrf_mps;
+    return s;
+}
+
+}  // namespace
+
+TEST_CASE("Diagnostic: a burn after 10 s and after 600 s steps", "[.step_dependence]") {
+    test::spice_session();
+    for (const double periapsis_m : {120e3, 200e3}) {
+    std::printf("[step] periapsis %.0f km\n", periapsis_m / 1e3);
+    const auto fine = fly_with_steps(10.0, periapsis_m), coarse = fly_with_steps(600.0, periapsis_m);
+    for (const auto* s : {&fine, &coarse}) {
+        REQUIRE(s->lit);
+        REQUIRE(s->out);
+        std::printf("[step] lit %+.3f s, out %+.3f s, |dv| %.3f m/s, attitude error %.3f deg\n",
+                    *s->lit - *fine.lit, *s->out - *fine.lit, norm(s->v_out - s->v_lit),
+                    s->attitude_error_rad / constants::deg_to_rad);
+    }
+    const auto a_of = [](const StepRun& s) {
+        return orbit::elements_from_state({s.r_end, s.v_end}, constants::earth_gm_m3ps2).semi_major_axis_m;
+    };
+    std::printf("[step] at ignition: |dr| %.3f m, |dv| %.4f m/s\n", norm(coarse.r_lit - fine.r_lit),
+                norm(coarse.v_lit - fine.v_lit));
+    std::printf("[step] end epochs %+.3f s; a %.1f / %.1f km; |dr| %.1f m, |dv| %.3f m/s\n",
+                coarse.end_epoch - fine.end_epoch, a_of(fine) / 1e3, a_of(coarse) / 1e3, norm(coarse.r_end - fine.r_end),
+                norm(coarse.v_end - fine.v_end));
+    }
 }

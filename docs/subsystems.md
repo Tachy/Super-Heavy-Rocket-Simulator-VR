@@ -1541,8 +1541,14 @@ catch tilt and the RCS allocator fixes below apply either way).
 - **Ship catch** (b3): the pushes before TEI and the Earth braking shift the lunar-return gates by ~1.4 s / 20 m; the
   lateral phase's tilt limit is 20 deg since (see "Ship catch propellant margin"). One direct seed of 21 still misses
   (which one moves with the gate timing); follow-up "ship catch robustness" (flip hand-over state, upright abort).
-- **Step dependence (pre-existing, not f3):** the same 100 m/s burn ends ~8 m/s apart in speed between 10 s and 600 s
-  `advance_to` steps also with the flag off; f3's own test checks only that no step size ingests.
+- **Step dependence (pre-existing, measured in f4):** the same 100 m/s prograde burn 2 h ahead, flown after 10 s or
+  600 s `advance_to` steps (hidden case `[.step_dependence]`): from a 120 x 190 km orbit the states already differ at
+  the ignition by 21 km / 35 m/s and end 122 km / 125 m/s apart; from 200 x 270 km by 156 m / 0.18 m/s and 13 m /
+  0.011 m/s. The burn executor itself agrees (ignition within 50 ms, delta-v within 0.2 %). The cause is the free drift
+  before the burn (`burn_drift_lead_s`: no attitude control): at a 120 km perigee the air torque tumbles the ship
+  chaotically, so its drag area - and the orbit - depend on how the coast is segmented. Physical sensitivity of an
+  uncontrolled ship in thick air, not a numerics fault; kept (decision f4). The f1 phasing orbits (>= 150 km) and the
+  missions' burn re-targeting from the live state are not affected in practice.
 - **Reference flights re-measured** (2026-10-21, f3): tanker residue 99.7 t, rendezvous 16.7 t (+1.3 t: the phasing
   pushes), delivered 55.4 / 13.6 t (69.0 t), at catch 2.13 t; HLS main at docking 187.3 t; full HLS departure 1.96 t
   of push gas.
