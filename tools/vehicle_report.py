@@ -26,15 +26,33 @@ def load_toml(path: Path) -> dict:
         return tomllib.load(f)
 
 
-def resolve_stages(vehicle: dict) -> dict:
+# The rules of core/src/config/vehicle_config.cpp (load_stage_from): only these keys on a reused stage, lists appended.
+FROM_ADDED_KEYS = {"docking_port", "transfer_connector", "rcs_pod", "propellant_transfer", "dry_mass_kg"}
+MAX_FROM_DEPTH = 4  # a longer chain is a cycle
+
+
+def resolve_stages(vehicle: dict, config_dir: Path = CONFIG_DIR, depth: int = 0) -> dict:
     """Stages by id; a `from = "<vehicle>:<stage>"` stage is the source vehicle's stage plus its added entries."""
+    if depth >= MAX_FROM_DEPTH:
+        raise SystemExit("stage.from: chain too long (a cycle?)")
     stages = {}
     for stage in vehicle["stage"]:
         if "from" in stage:
-            source_id, stage_id = stage["from"].split(":")
-            source = load_toml(CONFIG_DIR / "vehicles" / f"{source_id}.toml")
-            added = {k: v for k, v in stage.items() if k != "from"}
-            stage = {**resolve_stages(source)[stage_id], **added}
+            source_id, _, stage_id = stage["from"].partition(":")
+            if not source_id or not stage_id or ":" in stage_id:
+                raise SystemExit(f'stage.from must be "<vehicle>:<stage>", got "{stage["from"]}"')
+            for key in stage.keys() - FROM_ADDED_KEYS - {"from"}:
+                raise SystemExit(f'stage.from = "{stage["from"]}": {key!r} cannot be set on a reused stage')
+            source = load_toml(config_dir / "vehicles" / f"{source_id}.toml")
+            source_stages = resolve_stages(source, config_dir, depth + 1)
+            if stage_id not in source_stages:
+                raise SystemExit(f'stage.from = "{stage["from"]}": no such stage')
+            merged = dict(source_stages[stage_id])
+            for key, value in stage.items():
+                if key == "from":
+                    continue
+                merged[key] = merged.get(key, []) + value if isinstance(value, list) else value
+            stage = merged
         stages[stage["id"]] = stage
     return stages
 
