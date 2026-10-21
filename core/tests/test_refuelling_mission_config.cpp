@@ -150,6 +150,9 @@ earliest_arrival_h = 0.0
     const auto empty = candidates("cfg_cand_empty", "candidates_km = []\n");
     CHECK_THROWS_WITH(config::load_refuelling_flight_mission(empty, "t"),
                       Catch::Matchers::ContainsSubstring("candidates_km must not be empty"));
+    // f4 final review: nan passed number_or and every 'must not be negative' check
+    const auto nan_margin = candidates("cfg_margin_nan", "window_margin_h = nan\n");
+    CHECK_THROWS_WITH(config::load_refuelling_flight_mission(nan_margin, "t"), Catch::Matchers::ContainsSubstring("finite"));
     const auto margin = candidates("cfg_margin", "window_margin_h = 2.0\n");
     CHECK(config::load_refuelling_flight_mission(margin, "t").window_margin_s == Catch::Approx(7200.0));
     // the reference phasing (a calculator lever) needs the single phasing orbit's periapsis

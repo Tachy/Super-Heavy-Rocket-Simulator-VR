@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 #include <toml++/toml.hpp>
@@ -753,6 +754,17 @@ VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_
             doc.fail("stage '" + id + "' listed in stages_bottom_to_top is not defined");
         }
         v.stages.push_back(it->second);
+    }
+    // f4 final review: port and connector lookups take the first match across the vehicle - an id on two stages would
+    // shadow the upper one
+    std::set<std::string> port_ids, connector_ids;
+    for (const auto& stage : v.stages) {
+        for (const auto& p : stage.docking_ports) {
+            if (!port_ids.insert(p.id).second) doc.fail("docking port id '" + p.id + "' on two stages");
+        }
+        for (const auto& c : stage.transfer_connectors) {
+            if (!connector_ids.insert(c.id).second) doc.fail("transfer connector id '" + c.id + "' on two stages");
+        }
     }
     for (const auto& stage : v.stages) {
         for (const auto& group : stage.engine_groups) {

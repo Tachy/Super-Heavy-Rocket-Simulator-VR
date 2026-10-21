@@ -159,6 +159,21 @@ TEST_CASE("Bad `from` stages are config errors", "[refuelling][config]") {
         const auto dir = config_with(c.name, vehicle_with_stage(c.body));
         CHECK_THROWS_WITH(config::load_vehicle(dir, "test_vehicle"), Catch::Matchers::ContainsSubstring(c.message));
     }
+    // f4 final review: a port id on two stages (lookups take the first across the vehicle: the other is shadowed)
+    const std::string dorsal_port = "[[stage.docking_port]]\nid = \"p\"\nname = \"P\"\nposition_m = [20.0, 0.0, 5.0]\n"
+                                    "axis = [0.0, 0.0, 1.0]\nup = [1.0, 0.0, 0.0]\n";
+    const auto two_stage_dir = config_with(
+        "dup_port_stages",
+        "[vehicle]\nid = \"test_vehicle\"\nname = \"Test\"\npropellant = \"methalox\"\n"
+        "stages_bottom_to_top = [\"booster\", \"ship\"]\n\n[[stage]]\nfrom = \"starship_block3:booster\"\n" + dorsal_port +
+            "\n[[stage]]\nfrom = \"starship_block3:ship\"\n" + dorsal_port);
+    CHECK_THROWS_WITH(config::load_vehicle(two_stage_dir, "test_vehicle"),
+                      Catch::Matchers::ContainsSubstring("docking port id 'p' on two stages"));
+    // f4 final review: a config number that is not finite is an error where it is read
+    const auto nan_dir = config_with("nan_dry", vehicle_with_stage("from = \"starship_block3:ship\"\ndry_mass_kg = nan\n"));
+    CHECK_THROWS_WITH(config::load_vehicle(nan_dir, "test_vehicle"), Catch::Matchers::ContainsSubstring("finite"));
+    const auto inf_dir = config_with("inf_dry", vehicle_with_stage("from = \"starship_block3:ship\"\ndry_mass_kg = inf\n"));
+    CHECK_THROWS_WITH(config::load_vehicle(inf_dir, "test_vehicle"), Catch::Matchers::ContainsSubstring("finite"));
     // two stages with one id: the second must not replace the first silently
     const auto dir = config_with("dup_stage", vehicle_with_stage("from = \"starship_block3:ship\"\n\n[[stage]]\n"
                                                                  "from = \"starship_block3:ship\"\n"));
