@@ -53,4 +53,11 @@ struct SettlingPush {
 };
 SettlingPush settling_push(const Vehicle& vehicle, size_t stage_index);
 
+// The most gas one settling push of the stage's main-tank burns takes at any fill f of its settling tanks (all at the
+// same fill, the rest of the vehicle as now): travel L(f) = the longest tank x (1 - f) (at least
+// settling_min_travel_m), mass m(f) = the vehicle without that propellant + f x their capacity, gas = mass flow x
+// settling_lead_factor x sqrt(2 L m / F) - largest at a middle fill. For budgets planned before the tanks drain; feed
+// source ignored. Zero without settling tanks or +x capability.
+double settling_gas_bound_kg(const Vehicle& vehicle, size_t stage_index);
+
 }  // namespace starsim::vehicle

@@ -96,6 +96,7 @@ RaiseEstimate raise_estimate(const math::StateVector& separation, const PhasingO
         s = orbit::propagate_two_body(s, gm_m3ps2, node->epoch - t);
         s.velocity_mps = s.velocity_mps + node->delta_v_gcrf_mps;
         r.delta_v_mps += math::norm(node->delta_v_gcrf_mps);
+        ++r.burns;
         t = node->epoch;
     }
     return r;
@@ -113,11 +114,14 @@ PhasingCost phasing_cost(const RaiseEstimate& raise, const PhasingSchedule& sche
         return std::sqrt(gm_m3ps2 / to) * (1.0 - std::sqrt(2.0 * from / (from + to)));
     };
     double dv = raise.delta_v_mps + std::abs(departure(r1, r_c)) + std::abs(arrival(r1, r_c));
+    int burns = raise.burns + 2;
     if (schedule.phasing_revolutions > 0) {  // the phase burn raises the apoapsis; the boost takes it back
         dv += 2.0 * std::abs(departure(r1, schedule.phase_orbit_apoapsis_radius_m));
+        burns += 2;
     }
     PhasingCost c;
     if (model.exhaust_velocity_mps > 0.0) c.propellant_kg = model.mass_kg * (1.0 - std::exp(-dv / model.exhaust_velocity_mps));
+    c.propellant_kg += model.gas_per_burn_kg * burns;
     c.boil_off_kg = model.boil_off_kgps * separation_to_waypoint0_s;
     return c;
 }

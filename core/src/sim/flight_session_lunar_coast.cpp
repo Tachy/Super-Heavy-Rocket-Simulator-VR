@@ -23,7 +23,7 @@ time::Epoch FlightSession::lunar_next_mcc_epoch() const {
     if (lunar_mcc_index_ < p.mcc_after_tli_s.size()) {
         const time::Epoch t = lunar_tli_end_ + p.mcc_after_tli_s[lunar_mcc_index_];
         const double lead = p.pilot_corrections ? p.pilot_call_lead_s : 0.0;
-        if (big - t > burn_preparation_s + lead) return t;
+        if (big - t > burn_lead_s() + lead) return t;
     }
     return epoch_ + far_future_s;
 }

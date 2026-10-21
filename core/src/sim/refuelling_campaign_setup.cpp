@@ -109,7 +109,9 @@ HlsDemand hls_demand(const CampaignSources& src, const config::LunarLandingMissi
     d.capacity_kg = v.propellant_kg();
     d.headers_kg = v.propellant_kg() - v.main_propellant_kg();
     d.dry_mass_kg = v.mass_properties().mass_kg - v.propellant_kg();
-    d.required_mass_kg = mission::lunar_budget_required_mass(d.dry_mass_kg, lunar.reserve_kg, legs);
+    // f3: each in-orbit ignition settles first (its bound over the fill: the tanks drain over the legs)
+    const double settling_kg = session.settling_gas_bound_kg() * static_cast<double>(lunar_in_orbit_ignitions(legs));
+    d.required_mass_kg = mission::lunar_budget_required_mass(d.dry_mass_kg, lunar.reserve_kg + settling_kg, legs);
     return d;
 }
 
@@ -196,8 +198,8 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     // Windows (plan decision 1): the flown window logic against the depot. f1: the insertion stays, the candidate
     // phasing orbits shift with the depot
     const auto window_parameters = [&](const config::RefuellingFlightMission& m, const config::AscentMission& a,
-                                       double exhaust_velocity_mps) {
-        auto p = refuelling_window_parameters(m, a, exhaust_velocity_mps);
+                                       double exhaust_velocity_mps, double gas_per_burn_kg) {
+        auto p = refuelling_window_parameters(m, a, exhaust_velocity_mps, gas_per_burn_kg);
         for (auto& o : p.phasing_orbits) {
             o.periapsis_radius_m += dh;
             o.apoapsis_radius_m += dh;
@@ -207,13 +209,18 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         p.search_s = std::max(p.search_s, campaign_window_search_s);
         return p;
     };
-    const double ve_hls = phasing_exhaust_velocity_mps(vehicle::Vehicle(top_stage(dir, hls_ascent.vehicle_id), dir));
-    auto tanker_window = window_parameters(tanker_mission, tanker_ascent, ve_tanker);
-    auto hls_window = window_parameters(hls_mission, hls_ascent, ve_hls);
+    const vehicle::Vehicle hls_vehicle(top_stage(dir, hls_ascent.vehicle_id), dir);
+    const double ve_hls = phasing_exhaust_velocity_mps(hls_vehicle);
+    // f3: the phasing burns settle first (the campaign plans with the default fidelity)
+    const bool settling = true;  // FlightEnvironment::ignition_settling's default
+    const double gas_tanker = phasing_settling_gas_kg(tanker, settling);
+    const double gas_hls = phasing_settling_gas_kg(hls_vehicle, settling);
+    auto tanker_window = window_parameters(tanker_mission, tanker_ascent, ve_tanker, gas_tanker);
+    auto hls_window = window_parameters(hls_mission, hls_ascent, ve_hls, gas_hls);
     if (levers.reference_phasing) {  // f1 lever: the r5 single phasing orbit, shifted with the depot
         const auto single = [&](const config::RefuellingFlightMission& m, const config::AscentMission& a, double ve,
                                 mission::LaunchWindowParameters& p) {
-            p.phasing_orbits = refuelling_window_parameters(m, a, ve, true).phasing_orbits;
+            p.phasing_orbits = refuelling_window_parameters(m, a, ve, 0.0, true).phasing_orbits;
             for (auto& o : p.phasing_orbits) {
                 o.periapsis_radius_m += dh;
                 o.apoapsis_radius_m += dh;
@@ -228,7 +235,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     // the baselines of every window's delivery (f1: the propellant of the chosen orbit against the reference's)
     mission::PhasingCost tanker_reference_cost, hls_reference_cost;
     {
-        const auto p = refuelling_window_parameters(tanker_mission, tanker_ascent, ve_tanker);
+        const auto p = refuelling_window_parameters(tanker_mission, tanker_ascent, ve_tanker, gas_tanker);
         const auto w = mission::plan_launch_window(tanker_pad, src.earth, reference_depot_at, start, p, gm);
         if (!w.feasible) {
             report.result.reason = "Referenzfenster des Tankers: " + w.reason;
@@ -237,7 +244,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         report.reference_phasing_s = w.schedule.waypoint0_epoch - w.separation;
         tanker_reference_cost = w.cost;
         // the HLS's against the same depot orbit (its measured flight phased into the lunar plane's depot) [E]
-        const auto ph = refuelling_window_parameters(hls_mission, hls_ascent, ve_hls);
+        const auto ph = refuelling_window_parameters(hls_mission, hls_ascent, ve_hls, gas_hls);
         const auto wh = mission::plan_launch_window(hls_pad, src.earth, reference_depot_at, start, ph, gm);
         if (!wh.feasible) {
             report.result.reason = "Referenzfenster des HLS: " + wh.reason;

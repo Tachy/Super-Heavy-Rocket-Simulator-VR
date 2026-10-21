@@ -38,6 +38,11 @@ TEST_CASE("lunar_mission_legs: the LLO mission's legs in flight order", "[refuel
     CHECK(legs[3].isp_s == Catch::Approx(330.0));  // the approach on the landing set
     CHECK(legs[4].name == "Aufstieg");
     CHECK(legs[2].delta_v_mps + legs[3].delta_v_mps == Catch::Approx(m.descent_delta_v_mps));
+    // f3: TLI, LOI and the braking light in orbit; the approach continues the braking, the ascent lights landed
+    CHECK(sim::lunar_in_orbit_ignitions(legs) == 3u);
+    const double free = sim::lunar_mission_budget(m, plan, 1500e3, 120e3, 375.0, 330.0, 0.0).margin_kg;
+    CHECK(sim::lunar_mission_budget(m, plan, 1500e3, 120e3, 375.0, 330.0, 400.0).margin_kg ==
+          Catch::Approx(free - 3.0 * 400.0).epsilon(1e-12));
 }
 
 TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelling][campaign][config]") {

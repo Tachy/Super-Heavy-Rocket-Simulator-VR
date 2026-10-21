@@ -250,7 +250,7 @@ time::Epoch FlightSession::lunar_ignition_lead(const gnc::BurnNode& node) const 
                                           bodies_[controlled_].body->vehicle().mass_properties().mass_kg,
                                           configurations.front().thrust_n, configurations.front().mass_flow_kgps);
     }
-    return node.epoch - 0.5 * duration_s - burn_preparation_s;
+    return node.epoch - 0.5 * duration_s - burn_lead_s();
 }
 
 bool FlightSession::lunar_burn(const gnc::BurnNode& node, bool main_engines, LunarStep step) {
@@ -408,7 +408,7 @@ void FlightSession::run_lunar_steps(Flying& flying) {
             if (epoch_ - lunar_step_epoch_ < 0.0) break;
             const mission::LunarOutboundPlanner planner(gravity_, *env_.ephemeris, *moon_orientation_);
             const auto trim = lunar_trims_ < max_llo_trims ? planner.llo_trim(controlled_state(), epoch_, *lunar_parameters_,
-                                                                            burn_preparation_s + small_burn_margin_s)
+                                                                            burn_lead_s() + small_burn_margin_s)
                                                            : std::nullopt;
             if (trim) {
                 ++lunar_trims_;
@@ -435,7 +435,7 @@ void FlightSession::run_lunar_steps(Flying& flying) {
             }
             const mission::LunarOrbitTransfer transfer(gravity_, *env_.ephemeris, *moon_orientation_);
             if (const auto sk = transfer.station_keeping(controlled_state(), epoch_, *lunar_nrho_, 1000.0,
-                                                          burn_preparation_s + small_burn_margin_s)) {
+                                                          burn_lead_s() + small_burn_margin_s)) {
                 if (lunar_burn(*sk, false, LunarStep::StationKeeping)) {
                     lunar_step_ = LunarStep::StationKeeping;
                     lunar_status_ = "Bahnhaltung: " + german(norm(sk->delta_v_gcrf_mps), 2) + " m/s";

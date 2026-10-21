@@ -115,6 +115,9 @@ struct Tank {
     double surface_tension_n_m = 0.0;
 };
 
+// Refuelling f3: a main tank whose outlet needs settled liquid before an ignition (no PMD, not RCS gas), full or empty.
+bool settling_tank_kind(const Tank& tank);
+
 // Which tanks feed a stage's engines (header-tank plan): the main tanks, or from the flip on the header tanks.
 enum class FeedSource { Main, Header };
 
@@ -341,6 +344,8 @@ public:
 
 private:
     Vehicle() = default;
+    bool rcs_allocator_current() const;  // the cached allocator exists and its CG is within tolerance
+    std::vector<propulsion::RcsThrusterGeometry> rcs_geometry() const;
     void rebuild_aero();
     RcsCapability rcs_capability(const math::Vec3& direction_body, bool pure) const;
     void refresh_rcs_availability();  // starves thrusters whose supply ran dry, blocks those that cannot fire now

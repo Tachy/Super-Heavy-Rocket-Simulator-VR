@@ -154,6 +154,8 @@ bool FlightSession::plan_rendezvous(mission::PhasingParameters p) {
                                                              : dragon_free_molecular_cd * constants::pi * radius * radius;
         p.target_drag_area_per_mass_m2pkg = cd_area / station.mass_properties().mass_kg;  // the depot flies nose first
     }
+    // f3: each phasing burn settles first (the phasing drains the tanks little: the gas with the tanks as now)
+    p.reserve_per_burn_kg = settling_gas_kg();
     if (!(rendezvous_budget_kg() > 0.0)) return refuse_closed("Kein Rendezvous: kein Treibstoff");
     const auto engines = rendezvous_engines();
     if (!(engines.thrust_n > 0.0)) return refuse_closed("Kein Rendezvous: keine Triebwerke für die Manöver");
@@ -210,7 +212,7 @@ time::Epoch FlightSession::rendezvous_preparation_epoch(const gnc::BurnNode& nod
     const auto engines = rendezvous_engines(norm(node.delta_v_gcrf_mps));
     const double duration_s =
         gnc::burn_duration_s(norm(node.delta_v_gcrf_mps), engines.mass_kg, engines.thrust_n, engines.mass_flow_kgps);
-    return node.epoch - 0.5 * duration_s - burn_preparation_s;
+    return node.epoch - 0.5 * duration_s - burn_lead_s();
 }
 
 double FlightSession::rendezvous_turn_lead_s(PhasingBurnKind kind) {

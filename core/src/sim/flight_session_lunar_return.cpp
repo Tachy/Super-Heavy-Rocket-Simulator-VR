@@ -258,7 +258,7 @@ void FlightSession::lunar_return_enter_coast() {
         const bool before_braking =
             !lunar_return_braking_epoch_ || *lunar_return_braking_epoch_ - mcc >= p.mcc_min_before_braking_s;
         if (before_braking && mcc - epoch_ > 0.0) {
-            lunar_step_epoch_ = mcc - burn_preparation_s;
+            lunar_step_epoch_ = mcc - burn_lead_s();
             lunar_status_ = "Rückflug: Kurskorrektur " + std::to_string(lunar_mcc_index_ + 1) + " in " +
                             german((mcc - epoch_) / 3600.0, 1) + " h";
             return;
@@ -276,7 +276,7 @@ void FlightSession::lunar_return_enter_coast() {
                                                  bodies_[controlled_].body->vehicle().mass_properties().mass_kg,
                                                  configurations.front().thrust_n, configurations.front().mass_flow_kgps);
     }
-    lunar_step_epoch_ = *lunar_return_braking_epoch_ - half_burn_s - burn_preparation_s;
+    lunar_step_epoch_ = *lunar_return_braking_epoch_ - half_burn_s - burn_lead_s();
     lunar_status_ = "Rückflug: Bremsbrennen in " + german((*lunar_return_braking_epoch_ - epoch_) / 3600.0, 1) + " h";
 }
 
@@ -287,7 +287,7 @@ void FlightSession::lunar_return_coast_event() {
     if (lunar_mcc_index_ < p.mcc_after_tei_s.size()) {
         // MCC slot: planned burn_preparation_s ahead (an MCC is a short burn, the preparation covers it)
         bool converged = true;
-        const auto mcc = planner.mid_course(state, epoch_, epoch_ + burn_preparation_s, p, &converged);
+        const auto mcc = planner.mid_course(state, epoch_, epoch_ + burn_lead_s(), p, &converged);
         // The correction back onto the planned arrival failed (not converged: out of reach) or costs more than the
         // budget's allowance: re-planned from the flight data to the site's cheapest reachable pass - taken when it
         // is cheaper than flying back (this slot's burn).
@@ -328,7 +328,7 @@ void FlightSession::lunar_return_coast_event() {
     std::string status = "Bremsbrennen: ";
     if (!braking) {
         // the plan's vis-viva impulse, retrograde at the predicted crossing
-        const auto crossing = lunar_return_braking_epoch_ ? *lunar_return_braking_epoch_ : epoch_ + burn_preparation_s;
+        const auto crossing = lunar_return_braking_epoch_ ? *lunar_return_braking_epoch_ : epoch_ + burn_lead_s();
         const auto at = orbit::propagate_coast(gravity_, state, epoch_, crossing).state;
         braking = gnc::BurnNode{crossing,
                                 -math::normalized(at.velocity_mps) * lunar_return_plan_->braking_delta_v_mps};
@@ -357,7 +357,7 @@ bool FlightSession::replan_lunar_return(double cheaper_than_mps) {
                                                      configurations.front().thrust_n,
                                                      configurations.front().mass_flow_kgps});
     const auto state = controlled_state();
-    const time::Epoch burn_epoch = epoch_ + burn_preparation_s;
+    const time::Epoch burn_epoch = epoch_ + burn_lead_s();
     const auto brake = planner.braking_epoch(state, epoch_, p.target);
     // no predicted approach (a TEI far off): the recovery is tried all the same - that is when it matters most
     if (brake && burn_epoch > *brake - p.mcc_min_before_braking_s) {
@@ -524,7 +524,7 @@ bool FlightSession::lunar_capture_coast(Flying& flying, const gnc::BurnNode& nod
     lunar_capture_burn_ = node;
     lunar_capture_burn_step_ = burn;
     lunar_step_ = LunarStep::CaptureCoast;
-    lunar_step_epoch_ = node.epoch - half_burn_s - burn_preparation_s;
+    lunar_step_epoch_ = node.epoch - half_burn_s - burn_lead_s();
     attitude_mode_ = {gnc::AttitudeModeKind::Sun, {}, {}, {}};
     lunar_sun_hold_.start(epoch_);
     lunar_next_repoint_ = epoch_ + sun_repoint_interval_s;

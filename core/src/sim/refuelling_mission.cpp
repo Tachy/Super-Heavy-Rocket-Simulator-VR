@@ -10,6 +10,7 @@
 #include "starsim/gnc/lunar_ascent_guidance.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
+#include "starsim/vehicle/propellant_transfer.hpp"
 #include "starsim/orbit/synthetic_station_orbit.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
@@ -110,9 +111,14 @@ double phasing_exhaust_velocity_mps(const vehicle::Vehicle& v) {
     return gnc::groups_vacuum_isp_s(v, {group}) * constants::standard_gravity_mps2;
 }
 
+double phasing_settling_gas_kg(const vehicle::Vehicle& v, bool ignition_settling) {
+    return ignition_settling ? vehicle::settling_gas_bound_kg(v, v.stages().size() - 1) : 0.0;
+}
+
 mission::LaunchWindowParameters refuelling_window_parameters(const config::RefuellingFlightMission& m,
                                                              const config::AscentMission& ascent,
-                                                             double exhaust_velocity_mps, bool reference_phasing) {
+                                                             double exhaust_velocity_mps, double gas_per_burn_kg,
+                                                             bool reference_phasing) {
     mission::LaunchWindowParameters p;
     p.inclination_rad = ascent.inclination_rad;
     p.northerly = ascent.northerly;
@@ -129,7 +135,7 @@ mission::LaunchWindowParameters refuelling_window_parameters(const config::Refue
             p.phasing_orbits.push_back({equatorial_radius_m + periapsis_m, equatorial_radius_m + apoapsis_m});
         }
     }
-    p.cost = {m.planning_mass_kg, exhaust_velocity_mps, m.planning_boil_off_kgps};
+    p.cost = {m.planning_mass_kg, exhaust_velocity_mps, m.planning_boil_off_kgps, gas_per_burn_kg};
     p.search_s = m.window.search_s;
     // from the orbit insertion, window_margin_s short of the limit: the flown raise and the drag of a long phasing
     // move the arrival (f1: a window needing 47.0 of 48 h no longer closed at the re-plan 40 h in)
@@ -196,7 +202,8 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         // the phasing engine of the chaser alone, tanks as configured (an empty vehicle's engines count as starved)
         const vehicle::Vehicle chaser(config::top_stage_config(config::load_vehicle(config_dir, ascent.vehicle_id)),
                                       config_dir);
-        const auto p = refuelling_window_parameters(m, ascent, phasing_exhaust_velocity_mps(chaser));
+        const auto p = refuelling_window_parameters(m, ascent, phasing_exhaust_velocity_mps(chaser),
+                                                    phasing_settling_gas_kg(chaser, session.ignition_settling()));
         const auto w = mission::plan_launch_window(pad, earth, depot_at, earliest, p, gm);
         s.launch_window = w;
         if (!w.feasible) {

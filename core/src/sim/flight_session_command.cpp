@@ -101,7 +101,8 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         if (burn_drifting()) return command;  // free drift: no RCS until the turn to the burn attitude
         // Turning to the burn and holding it until the preparation: the coast controller's slow slews and deadbands
         // (l5 aircatch: the ascent controller's tight hold spent 7.8 t of RCS gas in b4's 108 h wait; the burn 5.5 t).
-        const bool waiting = !guided && !autopilot_.burn.ignite && autopilot_.burn.time_to_ignition_s > burn_preparation_s;
+        const bool waiting = !guided && !autopilot_.burn.ignite &&
+                             autopilot_.burn.time_to_ignition_s > burn_preparation_s + settling_lead_s_;
         const auto& steering = waiting                          ? lunar_coast_controller_
                                : !guided && burn_config_.rcs ? orbit_controller_
                                                              : controller_;

@@ -231,7 +231,9 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   limit is 20 deg [E] since (seed 1 caught, 3.9 t left; `[ship][catch]` unchanged at 20 of 21). Open (own follow-up
   "ship catch robustness"): direct seed 12 ends the flip 25 m short of the catch axis at 29 m/s across (~17 m/s^2 to stop,
   ~3.6 m/s^2 from 20 deg of tilt): the plans do not converge, the catch aborts at ~180 m - and the abort tumbles the ship
-  (tilt 95-145 deg) into the sea instead of holding it upright. The campaign case seeds 10-12 expects 2 of 3 until then.
+  (tilt 95-145 deg) into the sea instead of holding it upright. Once the burns started their settling lead earlier (the
+  turn before the push, f3) seed 12 is caught and seed 18 misses the same way (12.3 t left): which seed of 21 it is
+  moves with the gate timing, so each campaign case of three allows one miss until then (direct 20 of 21).
   Diagnostics: `STARSIM_DEBUG_FLIP=1`, `STARSIM_DEBUG_BURN=1`, `STARSIM_DEBUG_ENTRY=1` with the SCvx / catch flags;
   hidden test "Ship catch single case" with `STARSIM_SHIP_SEED=<1-20>`.
 - Ship return from orbit (b4, `config/missions/ship_return_starbase.toml`, `config::load_ship_return_mission`):

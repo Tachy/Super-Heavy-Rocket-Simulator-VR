@@ -329,13 +329,15 @@ void Vehicle::settle_propellant(const Vec3& specific_force_body_mps2, double dt_
 
 void Vehicle::set_liquid_down_body(const Vec3& down_body) { liquid_down_body_ = math::normalized(down_body); }
 
+bool settling_tank_kind(const Tank& t) {
+    return t.config.role == config::TankRole::Main && t.config.contents != config::TankContents::Rcs &&
+           !t.config.propellant_management_device && t.length_m > 0.0 && t.config.capacity_kg > 0.0;
+}
+
 namespace {
 
-// A tank whose outlet needs settled liquid before an ignition (refuelling f3).
-bool settling_tank(const Tank& t) {
-    return t.config.role == config::TankRole::Main && t.config.contents != config::TankContents::Rcs &&
-           !t.config.propellant_management_device && t.mass_kg > 0.0 && t.length_m > 0.0 && t.config.capacity_kg > 0.0;
-}
+// A tank whose outlet needs settled liquid before an ignition now (refuelling f3).
+bool settling_tank(const Tank& t) { return settling_tank_kind(t) && t.mass_kg > 0.0; }
 
 }  // namespace
 
@@ -675,17 +677,22 @@ void Vehicle::set_nose_cone_open(bool open) {
     refresh_rcs_availability();
 }
 
-const propulsion::RcsAllocator& Vehicle::rcs_allocator() const {
-    const Vec3 cg = mass_properties().cg_point_m();
-    if (!rcs_allocator_ || norm(rcs_allocator_->cg_m() - cg) > rcs_cg_tolerance_m) {
-        std::vector<propulsion::RcsThrusterGeometry> geometry;
-        for (const auto& s : stages_) {
-            for (const auto& t : s.rcs) {
-                geometry.push_back({t.position_m, t.direction, t.starved || t.blocked ? 0.0 : t.thrust_n});
-            }
+bool Vehicle::rcs_allocator_current() const {
+    return rcs_allocator_ && norm(rcs_allocator_->cg_m() - mass_properties().cg_point_m()) <= rcs_cg_tolerance_m;
+}
+
+std::vector<propulsion::RcsThrusterGeometry> Vehicle::rcs_geometry() const {
+    std::vector<propulsion::RcsThrusterGeometry> geometry;
+    for (const auto& s : stages_) {
+        for (const auto& t : s.rcs) {
+            geometry.push_back({t.position_m, t.direction, t.starved || t.blocked ? 0.0 : t.thrust_n});
         }
-        rcs_allocator_.emplace(std::move(geometry), cg);
     }
+    return geometry;
+}
+
+const propulsion::RcsAllocator& Vehicle::rcs_allocator() const {
+    if (!rcs_allocator_current()) rcs_allocator_.emplace(rcs_geometry(), mass_properties().cg_point_m());
     return *rcs_allocator_;
 }
 
@@ -748,7 +755,11 @@ Vehicle::RcsCapability Vehicle::rcs_pure_force_capability(const Vec3& direction_
 }
 
 Vehicle::RcsCapability Vehicle::rcs_capability(const Vec3& direction_body, bool pure) const {
-    const auto& a = rcs_allocator();
+    // A query (the f3 planners) leaves the flight's allocator where it is: rebuilt here at another CG it would move the
+    // attitude control's reference within rcs_cg_tolerance_m and change the flight. A stale one is rebuilt locally.
+    std::optional<propulsion::RcsAllocator> local;
+    if (!rcs_allocator_current()) local.emplace(rcs_geometry(), mass_properties().cg_point_m());
+    const auto& a = local ? *local : *rcs_allocator_;
     std::vector<double> duty;
     RcsCapability c;
     c.force_n = pure ? a.pure_force_capability_n(direction_body, &duty) : a.force_capability_n(direction_body, &duty);

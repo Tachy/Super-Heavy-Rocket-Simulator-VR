@@ -85,7 +85,7 @@ MissionStart plan_from_live_state(FlightSession& session, const config::LunarLan
     const auto& sets = setup.guidance.braking_sets;
     const auto budget = lunar_mission_budget(m, *session.lunar_outbound_plan(), mass_kg, mass_kg - v.propellant_kg(),
                                              gnc::groups_vacuum_isp_s(v, sets.front()),
-                                             gnc::groups_vacuum_isp_s(v, sets.back()));
+                                             gnc::groups_vacuum_isp_s(v, sets.back()), session.settling_gas_bound_kg());
     if (!budget.closes) return refuse("Mission nicht durchführbar: " + budget.reason);
     LunarMissionSequence sequence;
     sequence.landing = setup;
@@ -143,11 +143,18 @@ std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMis
     return legs;
 }
 
+size_t lunar_in_orbit_ignitions(const std::vector<mission::BudgetLeg>& legs) {
+    constexpr size_t surface_legs = 2;  // the approach continues the braking burn; the ascent lights on the surface
+    return legs.size() > surface_legs ? legs.size() - surface_legs : 0;
+}
+
 mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& m, const mission::OutboundPlan& plan,
                                            double initial_mass_kg, double dry_mass_kg, double vacuum_isp_s,
-                                           double approach_isp_s) {
-    return mission::lunar_budget(initial_mass_kg, dry_mass_kg, m.reserve_kg,
-                                 lunar_mission_legs(m, plan, vacuum_isp_s, approach_isp_s));
+                                           double approach_isp_s, double settling_gas_kg) {
+    const auto legs = lunar_mission_legs(m, plan, vacuum_isp_s, approach_isp_s);
+    return mission::lunar_budget(initial_mass_kg, dry_mass_kg,
+                                 m.reserve_kg + settling_gas_kg * static_cast<double>(lunar_in_orbit_ignitions(legs)),
+                                 legs);
 }
 
 MissionStart start_lunar_landing_mission(FlightSession& session, const std::filesystem::path& config_dir,

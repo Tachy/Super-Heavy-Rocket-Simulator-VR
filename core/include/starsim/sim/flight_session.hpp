@@ -264,9 +264,8 @@ public:
     // ship turns to the burn attitude in this time (0.5 deg/s slews: half a turn and settling in < 10 min).
     static constexpr double burn_drift_lead_s = 1800.0;
     // Refuelling f3: an unsettled ignition is held at most this many leads after its planned epoch while the push still
-    // gives force [E]; the coast stops this long before the push starts [E].
+    // gives force [E].
     static constexpr double settling_hold_factor = 3.0;
-    static constexpr double settling_coast_margin_s = 30.0;
     // [E] A ship deorbit planned further ahead than this is planned again from the real state deorbit_replan_lead_s
     // before its burn (l5 Task 10: b4 from the aircatch orbit burnt a plan made 4.6 days earlier - the 200 km orbit
     // had decayed with the truth air density x1.13 and the entry fell 4,900 km short). 32 min before the burn the pass
@@ -624,10 +623,19 @@ public:
     void set_solar_radiation_pressure(bool on) { env_.solar_radiation_pressure = on; }
     void set_boil_off(bool on) { env_.boil_off = on; }  // fidelity flag (refuelling r2)
     void set_ignition_settling(bool on) { env_.ignition_settling = on; }  // fidelity flag (refuelling f3)
+    bool ignition_settling() const { return env_.ignition_settling; }
     // Settling before an in-orbit ignition (refuelling f3). The push for the controlled vehicle's burn stage (zero when
-    // it needs none, is not in orbit or the flag is off): its lead before the ignition and its gas.
+    // it needs none, is not in orbit or the flag is off): its lead before the ignition.
     double settling_lead_s() const;
+    // How long before an ignition its burn starts: the turn to the burn attitude (burn_preparation_s), then the push -
+    // a push during the turn is spent (TLI: ~1 deg/s puts ~1e-2 m/s^2 of centrifugal acceleration on the tanks
+    // against the push's 2e-3: the ignition was held 3 s and the TLI flew late, MCC 1 grew from 3 to 11 m/s).
+    double burn_lead_s() const { return burn_preparation_s + settling_lead_s(); }
+    // The planners' reservations (zero with the flag off or without a need to settle; in orbit or not): the gas of a push
+    // with the tanks as now (the next ignition) and its bound over the fill (vehicle::settling_gas_bound_kg: budgets
+    // across burns that drain the tanks).
     double settling_gas_kg() const;
+    double settling_gas_bound_kg() const;
     // Manual push (expert / manual mode): cold gas along +x until switched off; refused while docked.
     bool settle(bool on);
     bool settling() const { return settling_push_ || settle_manual_; }
@@ -945,6 +953,9 @@ private:
     double settling_lead_s_ = 0.0;
     std::optional<time::Epoch> settling_hold_start_;
     math::Vec3 settling_acceleration_gcrf_;
+    // STARSIM_DEBUG_SETTLING: the running push's start epoch and propellant (gas drawn = the difference).
+    std::optional<std::pair<time::Epoch, double>> settling_debug_start_;
+    double settling_debug_dv_mps_ = 0.0;
     vehicle::SettlingPush settling_push_now() const;
     std::optional<size_t> burn_stage_index() const;  // the lowest stage with burn engines
     std::optional<gnc::DeorbitPlan> deorbit_plan_;  // last ship return plan (also when refused)

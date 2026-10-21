@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 
 #include "starsim/config/vehicle_config.hpp"
@@ -197,7 +198,7 @@ bool FlightSession::attitude_mode_active() const {
 
 bool FlightSession::burn_drifting() const {
     return autopilot_.state == AutopilotState::Burn && !autopilot_.burn.ignite &&
-           autopilot_.burn.time_to_ignition_s > burn_preparation_s + burn_drift_lead_s;
+           autopilot_.burn.time_to_ignition_s > burn_preparation_s + settling_lead_s_ + burn_drift_lead_s;
 }
 
 bool FlightSession::separate_payload() {
@@ -330,7 +331,13 @@ void FlightSession::run_autopilot() {
             }
             bool hold = false;
             if (autopilot_.burn.ignite && !running && settling_push_ && !settled) {
-                if (!settling_hold_start_) settling_hold_start_ = epoch_;
+                if (!settling_hold_start_) {
+                    settling_hold_start_ = epoch_;
+                    if (std::getenv("STARSIM_DEBUG_SETTLING")) {
+                        std::printf("[settling] hold: not settled at the ignition (%.3f), rate %.4f rad/s\n",
+                                    vehicle.stages()[*stage].settled, norm(body.state().angular_velocity_body_radps));
+                    }
+                }
                 hold = norm(settling_acceleration_gcrf_) > 0.0 &&
                        epoch_ - *settling_hold_start_ < settling_hold_factor * settling_lead_s_;
             }
@@ -721,7 +728,7 @@ double FlightSession::coast_allowance_s() const {
     }
     if (autopilot_.state == AutopilotState::Burn) {
         const double drift = burn_drifting() ? burn_drift_lead_s : 0.0;  // the turn to the burn attitude is ticked
-        const double preparation = std::max(burn_preparation_s, settling_lead_s_ + settling_coast_margin_s);
+        const double preparation = burn_preparation_s + settling_lead_s_;  // f3: the turn ends before the push
         allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - preparation - drift);
         const double replan_s = deorbit_replan_in_s();
         if (replan_s > 0.0) allowance = std::min(allowance, replan_s);  // its tick is not skipped
@@ -860,6 +867,28 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                     push ? body.state().attitude.rotate(body.rcs_force_body_n()) / body.vehicle().mass_properties().mass_kg
                          : math::Vec3{};
                 if (settling_push_ && body.vehicle().any_engine_producing_thrust()) settling_push_ = false;
+                static const bool debug_settling = std::getenv("STARSIM_DEBUG_SETTLING") != nullptr;
+                if (debug_settling && push) settling_debug_dv_mps_ += norm(settling_acceleration_gcrf_) * tick_s;
+                if (debug_settling && push && !settling_debug_start_) {
+                    settling_debug_start_ = std::pair{epoch_, body.vehicle().propellant_kg()};
+                    settling_debug_dv_mps_ = 0.0;
+                    const auto stage = burn_stage_index();
+                    std::printf("[settling] start %.1f s before the ignition, settled %.2f, rate %.4f rad/s\n",
+                                autopilot_.burn.time_to_ignition_s, stage ? body.vehicle().stages()[*stage].settled : -1.0,
+                                norm(body.state().angular_velocity_body_radps));
+                } else if (debug_settling && !settling() && settling_debug_start_) {
+                    const auto stage = burn_stage_index();
+                    const double pushed_s = epoch_ + tick_s - settling_debug_start_->first;
+                    std::printf("[settling] mean push %.5f m/s2 (capability %.5f m/s2)\n", settling_debug_dv_mps_ / pushed_s,
+                                body.vehicle().rcs_pure_force_capability({1.0, 0.0, 0.0}).force_n /
+                                    body.vehicle().mass_properties().mass_kg);
+                    std::printf("[settling] push %.1f s, %.0f kg drawn, lead %.1f s, settled %d, main %.1f t\n",
+                                pushed_s,
+                                settling_debug_start_->second - body.vehicle().propellant_kg(), settling_lead_s_,
+                                stage ? static_cast<int>(body.vehicle().stage_settled(*stage)) : -1,
+                                body.vehicle().main_propellant_kg() / 1000.0);
+                    settling_debug_start_.reset();
+                }
                 // What the thrusters that fired gave (pulses), for the burn executor - only while a translation is
                 // commanded: the net force of attitude pulses before ignition would otherwise start the burn early.
                 last_rcs_acceleration_ =

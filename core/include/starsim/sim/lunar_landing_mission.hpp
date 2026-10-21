@@ -31,10 +31,15 @@ std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMis
 // Rocket-equation budget of the whole mission from the planned outbound flight (TLI, swing-by, insertion / LOI) and the
 // mission's nominal legs (NRHO -> LLO, descent, ascent, LLO -> NRHO). `vacuum_isp_s`: the vacuum Raptors (outbound,
 // transfers, braking phase, ascent); `approach_isp_s`: the rest of the descent (the last braking set's Isp - the
-// landing thrusters since the l4 mass correction).
+// landing thrusters since the l4 mass correction). Refuelling f3: the reserve grows by `settling_gas_kg` per in-orbit
+// ignition (FlightSession::settling_gas_bound_kg).
 mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& mission, const mission::OutboundPlan& plan,
                                            double initial_mass_kg, double dry_mass_kg, double vacuum_isp_s,
-                                           double approach_isp_s);
+                                           double approach_isp_s, double settling_gas_kg);
+
+// The legs that start with an ignition in orbit (refuelling f3: each settles first): all but the descent's approach
+// (it continues the braking burn) and the ascent (it lights on the surface).
+size_t lunar_in_orbit_ignitions(const std::vector<mission::BudgetLeg>& legs);
 
 // start_mission's lunar branch (`vehicle`: an override, e.g. the 204 t HLS): place, check a touchdown point within the
 // slope limit at the site (approach of a polar pass, both directions), plan the outbound flight, check the budget, then

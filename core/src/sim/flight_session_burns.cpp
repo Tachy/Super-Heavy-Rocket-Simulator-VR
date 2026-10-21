@@ -167,7 +167,17 @@ vehicle::SettlingPush FlightSession::settling_push_now() const {
 
 double FlightSession::settling_lead_s() const { return settling_push_now().lead_s; }
 
-double FlightSession::settling_gas_kg() const { return settling_push_now().gas_kg; }
+double FlightSession::settling_gas_kg() const {
+    const auto stage = burn_stage_index();
+    if (!stage || !env_.ignition_settling) return 0.0;
+    return vehicle::settling_push(bodies_[controlled_].body->vehicle(), *stage).gas_kg;
+}
+
+double FlightSession::settling_gas_bound_kg() const {
+    const auto stage = burn_stage_index();
+    if (!stage || !env_.ignition_settling) return 0.0;
+    return vehicle::settling_gas_bound_kg(bodies_[controlled_].body->vehicle(), *stage);
+}
 
 bool FlightSession::settle(bool on) {
     if (on && docking_busy()) return false;

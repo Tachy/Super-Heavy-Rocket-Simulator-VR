@@ -35,13 +35,17 @@ void fill_main_tanks(config::StageConfig& stage, double kg);
 // The launch window parameters of a pad-start refuelling flight (as start_refuelling_flight_mission flies them; r6:
 // the campaign's windows). f1: the separation on the ascent's insertion orbit, the phasing orbit chosen from the
 // mission's candidates (`reference_phasing`: only the [phasing] periapsis_km orbit, r5) by their cost with the
-// mission's planning values and `exhaust_velocity_mps` (phasing_exhaust_velocity_mps).
+// mission's planning values, `exhaust_velocity_mps` (phasing_exhaust_velocity_mps) and the settling gas per burn
+// (refuelling f3: phasing_settling_gas_kg).
 mission::LaunchWindowParameters refuelling_window_parameters(const config::RefuellingFlightMission& mission,
                                                              const config::AscentMission& ascent,
-                                                             double exhaust_velocity_mps,
+                                                             double exhaust_velocity_mps, double gas_per_burn_kg,
                                                              bool reference_phasing = false);
 // The vacuum exhaust velocity of the single belly Raptor that flies the raise and the phasing burns (deorbit set).
 double phasing_exhaust_velocity_mps(const vehicle::Vehicle& vehicle);
+// Refuelling f3: the settling gas a phasing burn of the ship reserves (its bound over the fill,
+// vehicle::settling_gas_bound_kg); 0 with the fidelity flag `ignition_settling` off.
+double phasing_settling_gas_kg(const vehicle::Vehicle& vehicle, bool ignition_settling);
 // A ship return mission's [deorbit] block as planner parameters; the pass search spans the tanker reserve's preview
 // (FlightSession::tanker_reserve_search_s: from the 26.5 deg depot orbit no pass came within reach in 48 h, r4).
 gnc::DeorbitParameters ship_deorbit_parameters(const config::ShipReturnDeorbit& deorbit);

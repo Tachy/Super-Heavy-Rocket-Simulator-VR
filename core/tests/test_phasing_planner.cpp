@@ -160,6 +160,25 @@ TEST_CASE("Phasing plan refuses without the reserve", "[rendezvous][phasing]") {
     CHECK(plan.reason.rfind("Kein Rendezvous: Treibstoff", 0) == 0);
 }
 
+TEST_CASE("Phasing budget: the settling gas per burn is reserved", "[rendezvous][phasing]") {
+    test::spice_session();
+    Fixture fx;
+    const auto start = rendezvous_test::start(fx.clock, fx.spice_earth, 90.0, 0.0);
+    const auto plan_with = [&](double reserve_per_burn_kg, double on_board_kg) {
+        auto p = fx.parameters();
+        p.reserve_per_burn_kg = reserve_per_burn_kg;
+        return fx.planner.plan(start.dragon, start.iss.state_gcrf, start.epoch, p, dracos, on_board_kg);
+    };
+    const auto free = plan_with(0.0, dragon_propellant_kg);
+    REQUIRE(free.feasible);
+    const double needed_kg =
+        free.propellant_kg + free.parameters.reserve_kg + 400.0 * static_cast<double>(free.burns.size());
+    const auto short_by_one = plan_with(400.0, needed_kg - 1.0);
+    CHECK_FALSE(short_by_one.feasible);
+    CHECK(short_by_one.reason.rfind("Kein Rendezvous: Treibstoff reicht nicht", 0) == 0);
+    CHECK(plan_with(400.0, needed_kg + 1.0).feasible);
+}
+
 TEST_CASE("Phasing plan from above the target: a retrograde boost descends to Waypoint 0", "[rendezvous][phasing]") {
     test::spice_session();
     Fixture fx;

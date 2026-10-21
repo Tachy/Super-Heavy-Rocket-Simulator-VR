@@ -270,3 +270,28 @@ TEST_CASE("Phasing cost against a hand computation", "[iss][launch_window]") {
     CHECK(cost.boil_off_kg == Catch::Approx(12e3 * 30.0 / 24.0).epsilon(1e-12));
     CHECK(cost.total_kg() == Catch::Approx(cost.propellant_kg + cost.boil_off_kg));
 }
+
+TEST_CASE("Phasing cost: the settling gas of each burn", "[iss][launch_window]") {
+    const double r1 = re + 170e3, r_t = re + 200e3;
+    mission::PhasingParameters p;
+    orbit::KeplerianElements e;
+    e.semi_major_axis_m = r1;
+    e.inclination_rad = 26.5 * deg;
+    mission::RaiseEstimate raise;
+    raise.feasible = true;
+    raise.state = orbit::state_from_elements(e, gm);
+    raise.delta_v_mps = 20.0;
+    raise.burns = 1;
+    mission::PhasingSchedule schedule;
+    schedule.feasible = true;
+    mission::PhasingCostModel model{308e3, 3.4e3, 0.0};
+    const double without = mission::phasing_cost(raise, schedule, 0.0, p, r_t, model, gm).propellant_kg;
+    model.gas_per_burn_kg = 350.0;
+    // one raise burn + the boost's departure and arrival (no phase burn)
+    CHECK(mission::phasing_cost(raise, schedule, 0.0, p, r_t, model, gm).propellant_kg ==
+          Catch::Approx(without + 3.0 * 350.0).epsilon(1e-12));
+    schedule.phasing_revolutions = 2;  // + the phase burn and its return
+    const double phased = mission::phasing_cost(raise, schedule, 0.0, p, r_t, {308e3, 3.4e3, 0.0}, gm).propellant_kg;
+    CHECK(mission::phasing_cost(raise, schedule, 0.0, p, r_t, model, gm).propellant_kg ==
+          Catch::Approx(phased + 5.0 * 350.0).epsilon(1e-12));
+}

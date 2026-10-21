@@ -86,7 +86,7 @@ bool FlightSession::plan_lunar_landing(const LunarLandingSetup& setup) {
     }
     const double mass_kg = vehicle.mass_properties().mass_kg;
     const auto budget = mission::lunar_budget(
-        mass_kg, mass_kg - vehicle.propellant_kg(), setup.reserve_kg,
+        mass_kg, mass_kg - vehicle.propellant_kg(), setup.reserve_kg + settling_gas_kg(),  // f3: the braking settles
         {{"Bremsphase", setup.braking_delta_v_mps, vacuum_isp_s},
          {"Anflug", setup.descent_delta_v_mps - setup.braking_delta_v_mps, approach_isp_s},
          {"Aufstieg", setup.ascent_delta_v_mps, vacuum_isp_s}});

@@ -296,9 +296,10 @@ PhasingPlan PhasingPlanner::plan(const StateVector& chaser, const StateVector& t
 
     // 3. Budget against the propellant on board and the reserve.
     out.propellant_kg = engines.mass_kg * (1.0 - std::exp(-out.total_delta_v_mps / exhaust_mps));
-    if (out.propellant_kg + p.reserve_kg > propellant_kg) {
+    const double reserve_kg = p.reserve_kg + p.reserve_per_burn_kg * static_cast<double>(out.burns.size());
+    if (out.propellant_kg + reserve_kg > propellant_kg) {
         out.reason = "Kein Rendezvous: Treibstoff reicht nicht (" + std::to_string(std::lround(out.propellant_kg)) +
-                     " kg + Reserve " + std::to_string(std::lround(p.reserve_kg)) + " kg, an Bord " +
+                     " kg + Reserve " + std::to_string(std::lround(reserve_kg)) + " kg, an Bord " +
                      std::to_string(std::lround(propellant_kg)) + " kg)";
         return out;
     }

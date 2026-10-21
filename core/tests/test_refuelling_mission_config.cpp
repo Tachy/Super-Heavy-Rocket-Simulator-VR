@@ -145,7 +145,7 @@ TEST_CASE("Refuelling window parameters: the insertion orbit and the candidates"
     const double re = constants::wgs84_semi_major_axis_m;
     const auto t = config::load_refuelling_flight_mission(config_dir, "tanker_flight");
     const auto a = config::load_ascent_mission(config_dir, t.ascent_id);
-    const auto p = sim::refuelling_window_parameters(t, a, 3400.0);
+    const auto p = sim::refuelling_window_parameters(t, a, 3400.0, 0.0);
     CHECK(p.separation_periapsis_radius_m == Catch::Approx(re + 120.0e3));  // the insertion, the raise follows
     CHECK(p.separation_apoapsis_radius_m == Catch::Approx(re + 190.0e3));
     REQUIRE(p.phasing_orbits.size() == 6u);
@@ -158,7 +158,7 @@ TEST_CASE("Refuelling window parameters: the insertion orbit and the candidates"
     CHECK(t.window_margin_s == Catch::Approx(4.0 * 3600.0));
     CHECK(p.phasing.mission_limit_s == Catch::Approx(t.mission_limit_s - t.window.insertion_s - t.window_margin_s));
     // the reference set: the single r5 phasing orbit
-    const auto r = sim::refuelling_window_parameters(t, a, 3400.0, true);
+    const auto r = sim::refuelling_window_parameters(t, a, 3400.0, 0.0, true);
     REQUIRE(r.phasing_orbits.size() == 1u);
     CHECK(r.phasing_orbits.front().periapsis_radius_m == Catch::Approx(re + 170.0e3));
     CHECK(r.phasing_orbits.front().apoapsis_radius_m == Catch::Approx(re + 190.0e3));

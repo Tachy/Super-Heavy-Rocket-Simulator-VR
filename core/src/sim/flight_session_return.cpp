@@ -103,13 +103,15 @@ std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& p
     const double usable_kg = mixture_ratio > 0.0 ? std::min(at_burn.oxidizer_kg * (1.0 + mixture_ratio) / mixture_ratio,
                                                             at_burn.fuel_kg * (1.0 + mixture_ratio))
                                                  : at_burn.total();
-    if (usable_kg >= margin * plan.propellant_kg) return std::nullopt;
-    char text[220];
+    // f3: the settling push before the burn takes its gas from the main tanks
+    const double settling_kg = settling_gas_kg();
+    if (usable_kg >= margin * plan.propellant_kg + settling_kg) return std::nullopt;
+    char text[260];
     std::snprintf(text, sizeof text,
-                  "Zu wenig Treibstoff: Deorbit %.1f t, beim Brennvorgang in %.1f h nutzbar noch %.1f t in den "
-                  "Haupttanks (verdampft %.1f t)",
-                  plan.propellant_kg / 1000.0, (plan.node.epoch - epoch_) / 3600.0, usable_kg / 1000.0,
-                  plan.boil_off_kg / 1000.0);
+                  "Zu wenig Treibstoff: Deorbit %.1f t + Settling %.1f t, beim Brennvorgang in %.1f h nutzbar noch "
+                  "%.1f t in den Haupttanks (verdampft %.1f t)",
+                  plan.propellant_kg / 1000.0, settling_kg / 1000.0, (plan.node.epoch - epoch_) / 3600.0,
+                  usable_kg / 1000.0, plan.boil_off_kg / 1000.0);
     return std::string(text);
 }
 

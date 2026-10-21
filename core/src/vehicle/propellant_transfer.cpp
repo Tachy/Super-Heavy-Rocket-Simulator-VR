@@ -52,6 +52,29 @@ SettlingPush settling_push(const Vehicle& vehicle, size_t stage_index) {
     return push;
 }
 
+double settling_gas_bound_kg(const Vehicle& vehicle, size_t stage_index) {
+    double longest_m = 0.0, held_kg = 0.0, capacity_kg = 0.0;
+    for (const auto& t : vehicle.stages().at(stage_index).tanks) {
+        if (!settling_tank_kind(t)) continue;
+        longest_m = std::max(longest_m, t.length_m);
+        held_kg += t.mass_kg;
+        capacity_kg += t.config.capacity_kg;
+    }
+    if (!(capacity_kg > 0.0)) return 0.0;
+    const auto capability = vehicle.rcs_pure_force_capability({1.0, 0.0, 0.0});
+    if (!(capability.force_n > 0.0)) return 0.0;
+    const double without_kg = vehicle.mass_properties().mass_kg - held_kg;
+    constexpr int samples = 1000;  // the fill in 0.1 % steps (the maximum is smooth)
+    double largest = 0.0;
+    for (int i = 0; i <= samples; ++i) {
+        const double fill = static_cast<double>(i) / samples;
+        const double travel_m = std::max(longest_m * (1.0 - fill), settling_min_travel_m);
+        const double acceleration = capability.force_n / (without_kg + fill * capacity_kg);
+        largest = std::max(largest, settling_time_s(travel_m, acceleration));
+    }
+    return capability.mass_flow_kgps * settling_lead_factor * largest;
+}
+
 double settling_time_s(double length_m, double acceleration_mps2) {
     if (!(acceleration_mps2 > 0.0)) return std::numeric_limits<double>::infinity();
     return std::sqrt(2.0 * length_m / acceleration_mps2);

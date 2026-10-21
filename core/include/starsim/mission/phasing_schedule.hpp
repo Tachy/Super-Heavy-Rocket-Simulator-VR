@@ -22,6 +22,8 @@ struct PhasingParameters {
     // [D] smaller corrections are skipped: one skipped carries ~0.02 m/s x 1200 s = 24 m to Waypoint 0 (0.05 left 60 m)
     double mid_course_threshold_mps = 0.02;
     double reserve_kg = 900.0;  // [E] deorbit 598 kg (d3: 139 m/s from 420 km) + proximity operations and abort
+    // Refuelling f3: the settling gas each burn's ignition takes from the propellant (the session fills it).
+    double reserve_per_burn_kg = 0.0;
     // C_D A / m of the planner's coasts (gnc::coast_with_drag); the session fills them from its tracking.
     double chaser_drag_area_per_mass_m2pkg = 0.0;
     double target_drag_area_per_mass_m2pkg = 0.0;

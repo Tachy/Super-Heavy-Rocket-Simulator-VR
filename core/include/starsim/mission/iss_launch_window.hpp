@@ -24,6 +24,7 @@ struct PhasingCostModel {
     double mass_kg = 0.0;               // after the ascent
     double exhaust_velocity_mps = 0.0;  // the phasing engine set
     double boil_off_kgps = 0.0;
+    double gas_per_burn_kg = 0.0;  // refuelling f3: the settling push before each ignition
 };
 
 struct PhasingCost {
@@ -41,13 +42,14 @@ struct RaiseEstimate {
     math::StateVector state;  // after the last burn
     double elapsed_s = 0.0;   // separation -> last burn
     double delta_v_mps = 0.0;
+    int burns = 0;
 };
 
 RaiseEstimate raise_estimate(const math::StateVector& separation, const PhasingOrbit& orbit, double gm_m3ps2);
 
 // The cost of a raised chaser's schedule towards a target on a circular orbit of target_radius_m: raise delta-v +
-// the Hohmann boost to the coelliptic orbit (+ the phase burn and its return) by the rocket equation, plus boil-off
-// over separation_to_waypoint0_s.
+// the Hohmann boost to the coelliptic orbit (+ the phase burn and its return) by the rocket equation, plus the
+// settling gas of each of those burns (f3) and boil-off over separation_to_waypoint0_s.
 PhasingCost phasing_cost(const RaiseEstimate& raise, const PhasingSchedule& schedule,
                          double separation_to_waypoint0_s, const PhasingParameters& parameters, double target_radius_m,
                          const PhasingCostModel& model, double gm_m3ps2);

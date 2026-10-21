@@ -12,6 +12,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "refuelling_test_support.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/boil_off.hpp"
@@ -227,6 +228,70 @@ TEST_CASE("Suborbital ignitions are not checked", "[ignition_settling][sim]") {
     CHECK_FALSE(f.any_failed());
     CHECK(f.vehicle().any_engine_producing_thrust());
 }
+TEST_CASE("Settling gas bound: the most gas of any main fill", "[ignition_settling][vehicle]") {
+    auto v = tanker();
+    double capacity_lox = 0.0, capacity_ch4 = 0.0;
+    for (const auto& t : v->stages()[0].tanks) {
+        if (t.config.id == "lox_main") capacity_lox = t.config.capacity_kg;
+        if (t.config.id == "ch4_main") capacity_ch4 = t.config.capacity_kg;
+    }
+    REQUIRE(capacity_lox > 0.0);
+    const double bound = vehicle::settling_gas_bound_kg(*v, 0);
+    double largest = 0.0;
+    for (int i = 1; i <= 100; ++i) {  // both main tanks at the same fill: the travel grows, the mass shrinks
+        const double fill = 0.01 * i;
+        v->set_tank_mass(0, "lox_main", fill * capacity_lox);
+        v->set_tank_mass(0, "ch4_main", fill * capacity_ch4);
+        const double gas = vehicle::settling_push(*v, 0).gas_kg;
+        CHECK(gas <= bound * (1.0 + 1e-9));
+        largest = std::max(largest, gas);
+    }
+    CHECK(bound == Catch::Approx(largest).epsilon(0.01));
+    CHECK(vehicle::settling_gas_bound_kg(*v, 0) == Catch::Approx(bound).epsilon(1e-12));  // independent of the fill
+    v->select_feed(0, vehicle::FeedSource::Header);
+    CHECK(vehicle::settling_gas_bound_kg(*v, 0) == Catch::Approx(bound).epsilon(1e-12));  // plans the main-tank burns
+}
+
+TEST_CASE("An RCS capability query leaves the flight's thruster allocation untouched", "[ignition_settling][vehicle]") {
+    // f3: the planners query the +x capability; the allocator kept for the flight must not move to the query's CG
+    // (a query ahead of a 30 h depot approach shifted its attitude control and the approach ended in a retreat)
+    auto queried = tanker(), untouched = tanker();
+    queried->rcs_pure_force_capability({1.0, 0.0, 0.0});
+    for (auto* v : {queried.get(), untouched.get()}) v->set_tank_mass(0, "lox_main", 50.0e3 - 30.0);  // < 1 cm of CG
+    const auto a = queried->max_rcs_torque_nm(), b = untouched->max_rcs_torque_nm();
+    CHECK(a.x == b.x);
+    CHECK(a.y == b.y);
+    CHECK(a.z == b.z);
+}
+
+TEST_CASE("Settling gas: the session's estimates for the planners", "[ignition_settling][sim]") {
+    test::spice_session();
+    TankerInOrbit f(100e3);
+    const auto push = vehicle::settling_push(f.vehicle(), 0);
+    REQUIRE(push.gas_kg > 0.0);
+    CHECK(f.session.settling_gas_kg() == Catch::Approx(push.gas_kg).epsilon(1e-12));
+    CHECK(f.session.settling_gas_bound_kg() == Catch::Approx(vehicle::settling_gas_bound_kg(f.vehicle(), 0)).epsilon(1e-12));
+    f.session.set_ignition_settling(false);
+    CHECK(f.session.settling_gas_kg() == 0.0);
+    CHECK(f.session.settling_gas_bound_kg() == 0.0);
+}
+
+TEST_CASE("Settling gas: the session's phasing plan reserves it per burn", "[ignition_settling][sim][refuelling]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    f.session.place_in_orbit(refuelling_test::tanker_config(100e3),
+                             sim::phasing_start_state(f.depot, 8.0 * constants::deg_to_rad, 170.0e3, 190.0e3), f.t0);
+    f.session.add_station(refuelling_test::depot_config(f.depot_propellant_kg), f.depot, f.t0);
+    mission::PhasingParameters p;
+    p.mission_limit_s = 48.0 * 3600.0;
+    const bool planned = f.session.plan_rendezvous(p);
+    INFO(f.session.rendezvous_status());
+    REQUIRE(planned);
+    REQUIRE(f.session.rendezvous_plan() != nullptr);
+    CHECK(f.session.rendezvous_plan()->parameters.reserve_per_burn_kg == Catch::Approx(f.session.settling_gas_kg()));
+    CHECK(f.session.settling_gas_kg() > 0.0);
+}
+
 TEST_CASE("BurnExecutor credit lowers the remaining delta-v without starting the burn", "[ignition_settling][burn_node]") {
     const gnc::BurnNode node{time::Epoch::from_tdb_seconds_past_j2000(8.4e8), {10.0, 0.0, 0.0}};
     const vehicle::FlightBody body(tanker(), vehicle::RigidBodyState{});
@@ -307,6 +372,33 @@ TEST_CASE("Settling: the coast stops before the lead in 10 s and in 600 s steps"
         CHECK(f->session.burn_abort_reason().empty());
         CHECK_FALSE(f->session.settling());
     }
+}
+
+TEST_CASE("Settling: the turn to the burn ends before the push, the ignition is not held", "[ignition_settling][sim]") {
+    test::spice_session();
+    TankerInOrbit f(100e3);
+    run_to(f.session, f.t0 + 2.0 * 3600.0, 600.0);
+    REQUIRE_FALSE(f.vehicle().stage_settled(0));
+    auto node = prograde(f.session, 7200.0, 100.0);
+    node.delta_v_gcrf_mps = -1.0 * node.delta_v_gcrf_mps;  // retrograde: half a turn from a prograde-ish attitude
+    REQUIRE(f.session.execute_burn(node));
+    std::optional<time::Epoch> push_start;
+    double rate_at_push = 0.0, lead = 0.0;
+    while (!f.vehicle().any_engine_producing_thrust() && f.session.epoch() < node.epoch) {
+        f.session.advance_to(f.session.epoch() + 0.5);
+        if (f.session.settling() && !push_start) {
+            push_start = f.session.epoch();
+            rate_at_push = norm(f.session.body(0).state().angular_velocity_body_radps);
+            lead = f.session.settling_lead_s();
+        }
+    }
+    REQUIRE(push_start);
+    REQUIRE(f.vehicle().any_engine_producing_thrust());
+    CHECK(rate_at_push < 0.2 * constants::deg_to_rad);  // the turn is over: the push settles at its full rate
+    // push from its lead, the ignition at its end and the engines' start-up: no hold
+    INFO("push to thrust " << f.session.epoch() - *push_start << " s, lead " << lead << " s");
+    CHECK(f.session.epoch() - *push_start < lead + 4.0);
+    CHECK_FALSE(f.any_failed());
 }
 
 TEST_CASE("Settling: a lead longer than the time left holds the ignition", "[ignition_settling][sim]") {
