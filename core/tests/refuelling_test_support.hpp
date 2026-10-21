@@ -22,12 +22,13 @@ using math::Vec3;
 inline const std::filesystem::path config_dir = STARSIM_CONFIG_DIR;
 constexpr double oxidizer_fuel_ratio = 3.6;  // Block 3 main tanks [D]
 
-// The depot orbit of the lunar missions' start (spec r3): 200 km circular, 26.5 deg, RAAN 0 (true equator frame).
+// The depot orbit of the lunar missions' start (spec r3): 200 km circular, 26.5 deg, RAAN 0 (true equator frame);
+// `height_m` other than 200 km for the reboost tests (f2).
 inline math::StateVector depot_state(const frames::BodyOrientation& earth, time::Epoch epoch,
-                                     double argument_of_latitude_rad = 0.0) {
+                                     double argument_of_latitude_rad = 0.0, double height_m = 200.0e3) {
     orbit::StationMeanElements m;
     m.epoch = epoch;
-    m.semi_major_axis_m = constants::wgs84_semi_major_axis_m + 200.0e3;
+    m.semi_major_axis_m = constants::wgs84_semi_major_axis_m + height_m;
     m.inclination_rad = 26.5 * constants::deg_to_rad;
     m.argument_of_latitude_rad = argument_of_latitude_rad;
     return orbit::synthetic_station_state(m, constants::earth_gm_m3ps2, earth);

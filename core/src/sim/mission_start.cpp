@@ -13,6 +13,7 @@ namespace starsim::sim {
 
 MissionStart start_mission(FlightSession& session, const std::filesystem::path& config_dir, std::string_view mission_id,
                            time::Epoch requested, const time::TimeScaleConverter& time) {
+    session.set_supervisor(nullptr);  // refuelling f2: a new mission ends a campaign
     MissionStart s;
     s.kind = config::mission_kind(config_dir, mission_id);
     session.set_boil_off(true);  // a mission without its own setting: boil-off on (a lunar return sets its own)

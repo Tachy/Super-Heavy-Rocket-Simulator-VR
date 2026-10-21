@@ -252,6 +252,27 @@ struct PayloadSeparation {
     double nose_cone_open_s = 600.0;  // after the separation; < 0: stays closed
 };
 
+class FlightSession;
+
+struct ReboostRecord {  // refuelling f2: one station reboost
+    time::Epoch start, end;
+    double propellant_kg = 0.0;  // main tanks (Raptor or cold gas, settling)
+    int burns = 0;
+    bool cold_gas = false;       // a burn flew on the cold gas (the Raptor's transients too large)
+    bool completed = false;
+    std::string reason;          // German when not completed
+};
+
+// Refuelling f2: a driver above the mission sequences (sim::RefuellingCampaignFlight). FlightSession::advance_to calls
+// update() before every tick or coast segment (it may launch, place or remove bodies there, like a command) and ends
+// every coast at wake_epoch().
+class SessionSupervisor {
+public:
+    virtual ~SessionSupervisor() = default;
+    virtual void update(FlightSession& session) = 0;
+    virtual std::optional<time::Epoch> wake_epoch() const = 0;
+};
+
 // All flying bodies of one mission (the stack, and after staging booster and ship) on a common
 // fixed tick. The pilot controls one body; separated bodies coast with their engines off.
 // Not thread-safe (SPICE): use from the simulation thread only.
@@ -306,14 +327,23 @@ public:
     FlightSession& operator=(const FlightSession&) = delete;
 
     // Places a vehicle on a pad (engines off, clamped). `heading_rad`: direction of body +y.
+    // `keep_station` (refuelling f2): every body but the station is removed; the new vehicle becomes body 0
+    // (controlled), the station body 1 with its state, tanks, ideal attitude and pending impulses; the mission sequence
+    // and the rendezvous target are cleared. Throws std::logic_error without a station or when `epoch` is not the
+    // session epoch (within one tick).
     void launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
-                         time::Epoch epoch);
+                         time::Epoch epoch, bool keep_station = false);
     // The same with a loaded (possibly modified, e.g. the mission's payload) vehicle configuration.
     void launch_from_pad(const config::VehicleConfig& config, const LaunchSite& site, double heading_rad,
-                         time::Epoch epoch);
+                         time::Epoch epoch, bool keep_station = false);
     // Places a vehicle (stages from `first_stage` upwards) on a given orbit, nose along the velocity.
     // ... or from a loaded configuration (all its stages; a mission's propellant loads).
-    void place_in_orbit(const config::VehicleConfig& config, const math::StateVector& state_gcrf, time::Epoch epoch);
+    void place_in_orbit(const config::VehicleConfig& config, const math::StateVector& state_gcrf, time::Epoch epoch,
+                        bool keep_station = false);  // keep_station: as launch_from_pad
+    // Refuelling f2: an existing vehicle (e.g. Vehicle::copy_upper of another session's body, tank load included) as
+    // the only, controlled body - as place_body.
+    void place_vehicle(std::unique_ptr<vehicle::Vehicle> vehicle, const vehicle::RigidBodyState& state,
+                       time::Epoch epoch);
     void place_in_orbit(const std::string& vehicle_id, const math::StateVector& state_gcrf, time::Epoch epoch,
                         size_t first_stage = 0);
     // Fidelity flag: catch towers of launch sites (default on). Takes effect at the next set_launch_site().
@@ -644,8 +674,8 @@ public:
 
     // A space station (a vehicle with [stage.station]) as an uncontrolled body in ideal LVLH attitude; `impulses`
     // are applied at their epochs (a coast stops there). Call after place_body / launch_from_pad / place_in_orbit -
-    // they clear all bodies, the station included. `epoch` is the state's: a session without bodies starts there,
-    // otherwise it must be the session's epoch (within one tick). Returns its body index. Throws std::logic_error for
+    // they clear all bodies, the station included (unless keep_station). `epoch` is the state's: a session without
+    // bodies starts there, otherwise it must be the session's epoch (within one tick). Returns its body index. Throws std::logic_error for
     // a vehicle without [stage.station], when a station exists already or on an epoch mismatch.
     size_t add_station(const config::VehicleConfig& config, const math::StateVector& state_gcrf, time::Epoch epoch,
                        std::vector<StationImpulse> impulses = {});
@@ -658,6 +688,19 @@ public:
     // the station nor the rendezvous target is removed, the tower re-armed (arms open, no load) - also after a missed
     // or aborted catch. False (nothing changed) without a tower or with one Open / Standby.
     bool release_tower();
+    // Refuelling f2: the station alone (the depot) raises its orbit to `height_m` circular on `engine_groups`: a
+    // Hohmann pair from its energy-mean semi-major axis (the first burn reboost_lead_s ahead; transients over
+    // small_burn_transient_share: the cold gas) with the settling push before each ignition (f3). The station is the
+    // controlled body during the burns and the station again after the last one - or when a burn is refused or
+    // aborted (last_reboost then says why). False with a German reboost_status() when refused: no station, other
+    // bodies present, no engine groups, already within raise_tolerance_m of the height or above, a reboost running.
+    bool start_station_reboost(double height_m, std::vector<std::string> engine_groups);
+    bool station_reboost_active() const { return reboost_.has_value(); }
+    static constexpr double reboost_lead_s = 1800.0;  // [E] the depot's turn on 1.5 kN thrusters and the settling
+    const std::string& reboost_status() const { return reboost_status_; }
+    const std::optional<ReboostRecord>& last_reboost() const { return last_reboost_; }
+    // The station's mean height above the equatorial radius from its J2 energy (f2); std::logic_error without one.
+    double station_mean_height_m() const;
     // A session that starts with a station only (no body placed yet); throws std::logic_error while bodies exist.
     void set_epoch(time::Epoch epoch);
 
@@ -814,9 +857,16 @@ public:
     void mark_rendezvous_at_waypoint0_for_test();
     void mark_iss_leg_for_test(IssMissionLeg leg) { iss_leg_ = leg; }
 
-    // Removes every body (the station and a mission sequence with them): an empty session, e.g. after a refused
-    // mission start (ISS i6).
+    // Removes every body (the station, a mission sequence and a supervisor with them): an empty session, e.g. after a
+    // refused mission start (ISS i6).
     void clear_bodies();
+    // Refuelling f2: every body but the station is removed (a departed tanker, a caught booster; a docked pair is
+    // released first); the station alone is the controlled index with the autopilot off (as add_station alone), the
+    // mission sequence and the rendezvous target cleared. Throws std::logic_error without a station.
+    void keep_only_station();
+    // Refuelling f2: the campaign driver (see SessionSupervisor); cleared by clear_bodies and every start_mission.
+    void set_supervisor(std::shared_ptr<SessionSupervisor> supervisor) { supervisor_ = std::move(supervisor); }
+    const SessionSupervisor* supervisor() const { return supervisor_.get(); }
 
     // Pilot actions on the controlled body.
     void ignite();             // start all engine groups of the lowest stage that still has engines
@@ -929,6 +979,25 @@ private:
     std::optional<size_t> station_index_;          // add_station
     std::vector<StationImpulse> station_impulses_;  // still to apply, sorted by epoch
     void clear_station();                           // with every bodies_.clear()
+    // Before a new body: every body removed - or (keep_station, refuelling f2) every body but the station, which moves
+    // to index 0 (the caller inserts the new body in front of it).
+    void clear_for_new_body(bool keep_station, time::Epoch epoch);
+    std::shared_ptr<SessionSupervisor> supervisor_;  // refuelling f2
+    struct Reboost {  // refuelling f2 (flight_session_reboost.cpp)
+        double height_m = 0.0;
+        std::vector<std::string> groups;
+        time::Epoch second_burn;  // half a transfer orbit after the first
+        bool burning = false;
+        size_t station_body = 0;
+        double start_main_kg = 0.0;
+        ReboostRecord record;
+        std::vector<StationImpulse> impulses;  // the station's, kept for its return
+    };
+    std::optional<Reboost> reboost_;
+    std::string reboost_status_;
+    std::optional<ReboostRecord> last_reboost_;
+    void run_reboost();  // every tick while a reboost runs: the next burn or the end
+    void end_reboost(bool completed, std::string reason);
     void apply_station_impulses();                  // those due now
     struct RendezvousTarget {
         size_t target_index = 0;

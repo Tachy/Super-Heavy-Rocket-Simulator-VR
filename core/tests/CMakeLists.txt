@@ -56,6 +56,7 @@ add_executable(starsim_core_tests
     test_ignition_settling.cpp
     test_refuelling_missions.cpp
     test_refuelling_campaign.cpp
+    test_refuelling_campaign_flight.cpp
     test_refuelling_mission_config.cpp
     test_docking_session.cpp
     test_departure_guidance.cpp

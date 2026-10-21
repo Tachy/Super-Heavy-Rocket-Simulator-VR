@@ -108,7 +108,7 @@ void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::St
 }
 
 void FlightSession::place_in_orbit(const config::VehicleConfig& config, const math::StateVector& state,
-                                   time::Epoch epoch) {
+                                   time::Epoch epoch, bool keep_station) {
     auto vehicle = std::make_unique<vehicle::Vehicle>(config, config_dir_);
     // Body x along the velocity, body z along the orbit normal.
     const math::Vec3 x = math::normalized(state.velocity_mps);
@@ -122,12 +122,10 @@ void FlightSession::place_in_orbit(const config::VehicleConfig& config, const ma
         m(2, c) = columns[c].z;
     }
     const vehicle::RigidBodyState rigid{state.position_m, state.velocity_mps, math::Quat::from_matrix(m), {}};
-    bodies_.clear();
-    clear_station();
-    clear_rendezvous_target();
-    reset_rendezvous();
+    clear_for_new_body(keep_station, epoch);
     reset_leg_landing();
-    bodies_.push_back({std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid), {}, nullptr, {}});
+    bodies_.insert(bodies_.begin(), {std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid), {}, nullptr, {}});
+    if (station_index_) station_index_ = 1;  // kept: behind the new body
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
@@ -461,12 +459,14 @@ std::vector<vehicle::FlightBody*> FlightSession::body_pointers() const {
 
 void FlightSession::place_body(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
                                time::Epoch epoch) {
-    auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(config, config_dir_), state);
+    place_vehicle(std::make_unique<vehicle::Vehicle>(config, config_dir_), state, epoch);
+}
+
+void FlightSession::place_vehicle(std::unique_ptr<vehicle::Vehicle> vehicle, const vehicle::RigidBodyState& state,
+                                  time::Epoch epoch) {
+    auto body = std::make_unique<vehicle::FlightBody>(std::move(vehicle), state);
     body->set_ground_height(body->vehicle().splashdown_recovery() ? 0.0 : launch_site_.height_m);  // a capsule: the sea
-    bodies_.clear();
-    clear_station();
-    clear_rendezvous_target();
-    reset_rendezvous();
+    clear_for_new_body(false, epoch);
     reset_leg_landing();
     bodies_.push_back({std::move(body), {}, nullptr, {}});
     controlled_ = 0;
@@ -576,7 +576,42 @@ void FlightSession::set_epoch(time::Epoch epoch) {
     launch_epoch_ = epoch;
 }
 
+void FlightSession::clear_for_new_body(bool keep_station, time::Epoch epoch) {
+    if (!keep_station) {
+        reboost_.reset();  // everything goes, the released depot too
+        bodies_.clear();
+        clear_station();
+        clear_rendezvous_target();
+        reset_rendezvous();
+        return;
+    }
+    if (reboost_) throw std::logic_error("keep_station: a station reboost is running");  // no station until it ends
+    if (!station_index_) throw std::logic_error("keep_station: the session has no station");
+    if (std::abs(epoch - epoch_) > tick_s) throw std::logic_error("keep_station: the epoch is not the session epoch");
+    clear_rendezvous_target();  // releases a docked pair, ends proximity and docking
+    reset_rendezvous();
+    set_iss_mission({});
+    for (size_t i = bodies_.size(); i-- > 0;) {
+        if (i != *station_index_) erase_body(i);  // shifts station_index_ down to 0
+    }
+}
+
+void FlightSession::keep_only_station() {
+    if (reboost_) throw std::logic_error("keep_only_station: a station reboost is running");
+    if (!station_index_) throw std::logic_error("keep_only_station: the session has no station");
+    clear_rendezvous_target();
+    reset_rendezvous();
+    set_iss_mission({});
+    for (size_t i = bodies_.size(); i-- > 0;) {
+        if (i != *station_index_) erase_body(i);
+    }
+    controlled_ = 0;
+    reset_mission_state();  // autopilot off: nothing commands the station
+}
+
 void FlightSession::clear_bodies() {
+    supervisor_.reset();
+    reboost_.reset();
     bodies_.clear();
     clear_station();
     clear_rendezvous_target();
@@ -659,25 +694,24 @@ void FlightSession::reset_mission_state() {
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
-                                    time::Epoch epoch) {
-    launch_from_pad(config::load_vehicle(config_dir_, vehicle_id), site, heading_rad, epoch);
+                                    time::Epoch epoch, bool keep_station) {
+    launch_from_pad(config::load_vehicle(config_dir_, vehicle_id), site, heading_rad, epoch, keep_station);
 }
 
 void FlightSession::launch_from_pad(const config::VehicleConfig& config, const LaunchSite& site, double heading_rad,
-                                    time::Epoch epoch) {
+                                    time::Epoch epoch, bool keep_station) {
     auto vehicle = std::make_unique<vehicle::Vehicle>(config, config_dir_);
+    clear_for_new_body(keep_station, epoch);  // refuses before anything changes
     set_launch_site(site);
     const double stand_height = site.height_m + (tower_ ? site.tower->mount_height_m : 0.0);
-    bodies_.clear();
-    clear_station();
-    clear_rendezvous_target();
-    reset_rendezvous();
-    bodies_.push_back({vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad, site.longitude_rad,
-                                                   stand_height, heading_rad, earth_, epoch),
-                       {}, nullptr, {}});
+    bodies_.insert(bodies_.begin(), {vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad,
+                                                                 site.longitude_rad, stand_height, heading_rad, earth_,
+                                                                 epoch),
+                                     {}, nullptr, {}});
+    if (station_index_) station_index_ = 1;  // kept: behind the new body
     // The stack stands on the launch mount: its top is the ground until staging (a stack released without
     // thrust settles back onto it instead of dropping through the mount's open centre).
-    bodies_.back().body->set_ground_height(stand_height);
+    bodies_.front().body->set_ground_height(stand_height);
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
@@ -693,6 +727,7 @@ double FlightSession::coast_allowance_s() const {
                         autopilot_.state == AutopilotState::PayloadSeparation;
     if (guided) return 0.0;
     if (attitude_mode_active()) return 0.0;  // pulsed RCS hold: ticked
+    if (reboost_ && autopilot_.state != AutopilotState::Burn) return 0.0;  // f2: the next reboost step needs a tick
     if (autopilot_.state == AutopilotState::Return &&
         (capsule_return_step_ == CapsuleReturnStep::TrunkJettison ||
          capsule_return_step_ == CapsuleReturnStep::NoseConeClose || capsule_return_step_ == CapsuleReturnStep::Coast)) {
@@ -797,6 +832,11 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             nose_cone_epoch_.reset();
         }
         apply_station_impulses();
+        if (supervisor_) {  // refuelling f2: the campaign driver acts first (it may launch or remove bodies)
+            const auto keep = supervisor_;  // it may remove itself (a mission start)
+            keep->update(*this);
+            if (bodies_.empty() || target - epoch_ < tick_s) break;
+        }
         // Parachute sequencers before the coast check: a body that has not ticked yet (placed, staged, released)
         // must already limit its coast to the watch height (review d4: a placed capsule coasted past 5.5 km).
         for (auto& flying : bodies_) {
@@ -805,7 +845,11 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                     flying.body->vehicle().stages().front().config.parachutes);
             }
         }
-        if (const double coast = std::min(coast_allowance_s(), target - epoch_); coast > 1.0) {
+        double coast = std::min(coast_allowance_s(), target - epoch_);
+        if (supervisor_) {  // f2: the coast ends at the driver's next event (a launch)
+            if (const auto wake = supervisor_->wake_epoch(); wake && *wake > epoch_) coast = std::min(coast, *wake - epoch_);
+        }
+        if (coast > 1.0) {
             for (auto& flying : bodies_) flying.body->coast(env_, epoch_, coast);
             epoch_ += coast;
             sync_docked();
@@ -820,6 +864,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         }
         report_gas_ingestion();
         if (iss_mission_) run_iss_mission();  // also with the autopilot Off / Orbit (ISS i6)
+        if (reboost_) run_reboost();          // refuelling f2: the station's burns
         if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit &&
             !bodies_.empty()) {
             run_autopilot();
