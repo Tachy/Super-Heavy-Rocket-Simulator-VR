@@ -29,4 +29,9 @@ UprightDescentCommand upright_descent(const math::Vec3& from_tower_m, const math
                                       double height_m, double min_accel_mps2, double max_accel_mps2, double gravity_mps2,
                                       const UprightDescentParameters& p = {});
 
+// Propellant the upright descent needs to stop a sink: dv = sink + g t with t = sink / (f (a_max - g)) along the sink
+// profile, rocket equation at exhaust velocity ve. A thrust that cannot hold the weight: the whole mass.
+double upright_stop_propellant_kg(double mass_kg, double sink_mps, double max_accel_mps2, double gravity_mps2,
+                                  double exhaust_velocity_mps, const UprightDescentParameters& p = {});
+
 }  // namespace starsim::gnc

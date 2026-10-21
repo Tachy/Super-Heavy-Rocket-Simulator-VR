@@ -81,6 +81,8 @@ public:
     ScvxLandingCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 
     bool aborting() const { return aborting_; }
+    // A converged abort plan is being flown.
+    bool has_abort_plan() const { return plan_ && plan_->goal == DescentGoal::Abort && plan_->converged; }
     int engine_set() const { return engine_set_; }  // phase whose engine set runs
     // Gives the target up now (pilot or tower command): the next plan goes to the sea. False (no effect) without a sea.
     bool request_abort();

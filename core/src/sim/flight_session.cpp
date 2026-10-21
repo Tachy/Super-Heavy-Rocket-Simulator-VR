@@ -997,8 +997,18 @@ void FlightSession::stage() {
 ReturnResult FlightSession::ship_return_result(size_t index) const {
     const auto outcome = landing_outcome(index);
     const auto* g = ship_landing(index);
-    if (!g || !g->has_contact()) return return_result(outcome, 0.0, 0.0);
-    return return_result(outcome, g->contact_tilt_rad(), g->contact_sink_mps());
+    if (g && g->has_contact()) return return_result(outcome, g->contact_tilt_rad(), g->contact_sink_mps());
+    if (outcome == LandingOutcome::Flying) return ReturnResult::Flying;
+    // No contact tick seen by the guidance (the caller stopped on the contact tick): the body's state now is the contact
+    // state - its axis tilt from the local vertical and its Earth-fixed sink.
+    const auto t = earth_.fixed_to_gcrf(epoch_);
+    const auto& s = bodies_.at(index).body->state();
+    const auto geo = frames::fixed_to_geodetic(transpose(t.rotation) * s.position_gcrf_m);
+    const math::Vec3 up = t.rotation * math::Vec3{std::cos(geo.latitude_rad) * std::cos(geo.longitude_rad),
+                                      std::cos(geo.latitude_rad) * std::sin(geo.longitude_rad), std::sin(geo.latitude_rad)};
+    const math::Vec3 v_fixed = s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), s.position_gcrf_m);
+    const double tilt = std::acos(std::clamp(dot(s.attitude.rotate(math::Vec3{1.0, 0.0, 0.0}), up), -1.0, 1.0));
+    return return_result(outcome, tilt, -dot(v_fixed, up));
 }
 
 LandingOutcome FlightSession::landing_outcome(size_t index) const {

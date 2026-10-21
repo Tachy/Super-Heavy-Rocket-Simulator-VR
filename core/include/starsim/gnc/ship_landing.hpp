@@ -1,12 +1,14 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/gnc/entry_predictor.hpp"
 #include "starsim/gnc/scvx_landing.hpp"
+#include "starsim/gnc/upright_descent.hpp"
 #include "starsim/math/constants.hpp"
 
 namespace starsim::gnc {
@@ -24,6 +26,17 @@ struct ShipLandingParameters {
     // [E] the flip pushes the ship ~100-200 m along its nose (thrust across the path while it turns): the entry's gate
     // lies this far back from the catch axis on the line tower -> pad, the nose pointing to the tower
     double gate_lead_m = 220.0;
+    // Ship catch robustness (2026-10-21): the last-resort abort (gnc::upright_descent) after this many failed first
+    // plans (neither the catch nor the sea in reach), or when an abort has no converged abort plan after the grace
+    // time or leans the hull beyond the guard tilt.
+    UprightDescentParameters upright_descent;
+    int first_plans_before_descent = 3;                               // [E]
+    double abort_plan_grace_s = 2.0;                                  // [E] two re-plan cycles
+    // [E] abort plans fly up to ~24 deg (20 deg limit + thrust axis + tracking); seed 18 tumbled from 45 deg on
+    double upright_guard_tilt_rad = 35.0 * constants::deg_to_rad;
+    double descent_two_engine_sink_mps = 20.0;                        // [D] the 3 -> 2 switch window starts at 20 m/s
+    // [E] an abort switches to the descent once the usable propellant is below this times a vertical stop's need
+    double descent_propellant_margin = 1.3;
     ScvxLandingParameters scvx;                                  // ship preset: ship_landing_parameters()
 };
 
@@ -42,6 +55,8 @@ EntryTarget ship_entry_target(const LandingSite& site, const ShipLandingParamete
 //  LandingBurn - once the axis is within the flip tolerance: SCvx plans to the catch on the ship's pins (re-plans,
 //                abort to the sea after repeated unreachable catches - ScvxLandingGuidance); a failed first plan is
 //                retried every first_plan_retry_s while the flip attitude and thrust are held.
+//  Upright descent (either phase, sticky) - the last-resort abort: no plan reaches the catch or the sea, or an abort
+//                plan is missing / leans the hull too far: gnc::upright_descent keeps the hull upright and slows it.
 //  Landed      - pins on the arms, touchdown or impact: engines off.
 // Commands as the booster's return guidance (ReturnCommand), so the session flies both the same way.
 class ShipLandingGuidance {
@@ -61,6 +76,8 @@ public:
     // The flip: from the gate until the axis is within the flip tolerance; height of the CG above the site then.
     double flip_duration_s() const { return flip_duration_s_; }
     double flip_end_height_m() const { return flip_end_height_m_; }
+    // The last-resort abort flies (sticky): upright descent instead of plans.
+    bool upright_descent_active() const { return upright_descent_; }
     // First tick resting or impacted: axis tilt from the local vertical and sink speed (Earth-fixed).
     bool has_contact() const { return contact_; }
     double contact_tilt_rad() const { return contact_tilt_rad_; }
@@ -69,6 +86,13 @@ public:
 private:
     void print_gate_state(const char* label, const vehicle::FlightBody& body, const frames::FixedToInertial& transform,
                           time::Epoch epoch) const;
+    // The upright descent's engines: three while sinking faster than the 3 -> 2 window, then the landing pair.
+    const std::vector<std::string>& descent_groups(double sink_mps) const {
+        return sink_mps > parameters_.descent_two_engine_sink_mps ? parameters_.flip_groups
+                                                                  : parameters_.scvx.snapshot.phase_groups[1];
+    }
+    void fly_upright_descent(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                             const frames::FixedToInertial& transform, const math::Vec3& site_up, ReturnCommand& cmd) const;
 
     LandingSite site_;
     ShipLandingParameters parameters_;
@@ -82,6 +106,8 @@ private:
     int first_plan_attempts_ = 0;
     bool catch_contact_ = false;
     bool abort_requested_ = false;
+    bool upright_descent_ = false;
+    std::optional<time::Epoch> abort_since_;
     bool contact_ = false;
     double contact_tilt_rad_ = 0.0;
     double contact_sink_mps_ = 0.0;

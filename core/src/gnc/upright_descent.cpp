@@ -44,4 +44,13 @@ UprightDescentCommand upright_descent(const Vec3& from_tower_m, const Vec3& velo
     return {a / a_norm, a_norm};
 }
 
+double upright_stop_propellant_kg(double mass_kg, double sink_mps, double max_accel_mps2, double gravity_mps2,
+                                  double exhaust_velocity_mps, const UprightDescentParameters& p) {
+    if (sink_mps <= 0.0) return 0.0;
+    const double braking = p.deceleration_fraction * (max_accel_mps2 - gravity_mps2);
+    if (braking <= 0.0) return mass_kg;
+    const double dv = sink_mps + gravity_mps2 * sink_mps / braking;
+    return mass_kg * (1.0 - std::exp(-dv / exhaust_velocity_mps));
+}
+
 }  // namespace starsim::gnc

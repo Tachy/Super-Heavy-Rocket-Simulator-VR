@@ -58,6 +58,7 @@ struct Gate {
     // guidance turns the nose to the tower, a dispersed gate velocity must not turn it ("": the gate velocity).
     std::optional<Vec3> attitude_velocity_enu_mps;
     std::string failed_group;          // this engine fails 1 s into the flip ("": none)
+    bool abort_in_flip = false;        // the pilot gives the catch up 1 s into the flip
     double propellant_kg = 35000.0;    // the ship's landing_propellant_kg [E]
     gnc::ShipLandingParameters parameters = gnc::ship_landing_parameters();
 };
@@ -79,6 +80,10 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
                                                     gate.bank_deg * deg, cfg.stages[0].aero.belly_azimuth_rad);
     state.angular_velocity_body_radps = state.attitude.inverse_rotate(vehicle::earth_rotation_vector(t));
     session.place_landing_ship(cfg, state, t0, gate.parameters);
+    if (gate.abort_in_flip) {
+        session.advance_to(t0 + 1.0, 1000);
+        session.abort_landing(0);
+    }
     if (!gate.failed_group.empty()) {
         session.advance_to(t0 + 1.0, 1000);
         const auto& engines = session.body(0).vehicle().stages().front().engines;
@@ -90,6 +95,9 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
     run.result = session.ship_return_result(0);
     const auto* g = session.ship_landing(0);
     if (g) std::printf("flip %.1f s, ends at %.0f m; ", g->flip_duration_s(), g->flip_end_height_m());
+    if (g && g->has_contact()) {
+        std::printf("contact tilt %.1f deg, sink %.1f m/s; ", g->contact_tilt_rad() / deg, g->contact_sink_mps());
+    }
     std::printf("ship from the gate: %s (%s), offset %.2f m, lateral %.2f m/s, sink %.2f m/s, first plan attempts %d, %d plans "
                 "(%d failed), %.1f t propellant left\n",
                 sim::to_string(run.tower_phase), sim::to_string(run.result), run.offset_m, run.lateral_mps, run.sink_mps, g ? g->first_plan_attempts() : -1,
@@ -144,6 +152,15 @@ TEST_CASE("Ship flips at the gate and is caught", "[ship][landing][catch]") {
     CHECK(run.outcome == sim::LandingOutcome::Caught);
 }
 
+// Ship catch robustness (2026-10-21): a catch given up comes down upright and slow, never tumbling, never on the tower.
+TEST_CASE("Ship catch: an abort requested in the flip comes down upright", "[ship][landing][catch]") {
+    Gate g = nominal_gate();
+    g.abort_in_flip = true;
+    const auto run = fly_from_gate(g);
+    CHECK(run.result == sim::ReturnResult::UprightAbort);
+    CHECK_FALSE(run.tower_struck);
+}
+
 // Dispersed gate states (fixed seeds): the entry guidance's gate accuracy is metres (b2 campaign), the belly flop adds
 // wind-free scatter; +-10 m per axis, +-10 m/s per axis, propellant 35 t + 0-3.5 t, alpha and bank +-5 deg. One case
 // loses the first engine to be dropped (sea_level_3) in the flip: the switch to two engines comes early.
@@ -154,19 +171,18 @@ TEST_CASE("Ship catch campaign: gate dispersions and an engine failure", "[ship]
     failure.failed_group = "ship/sea_level_3";
     cases.push_back(failure);
 
-    int caught = 0;
+    int caught = 0, lost = 0;
     for (size_t i = 0; i < cases.size(); ++i) {
         CAPTURE(i);
         std::printf("case %2zu: ", i);
         const auto run = fly_from_gate(cases[i]);
         std::fflush(stdout);
         CHECK_FALSE(run.tower_struck);  // never, in any case
-        if (run.caught_within_tolerance()) {
-            ++caught;
-        } else {
-            CHECK((run.outcome == sim::LandingOutcome::Splashdown || run.outcome == sim::LandingOutcome::Landed));
-        }
+        if (run.caught_within_tolerance()) ++caught;
+        if (run.result == sim::ReturnResult::Lost) ++lost;
     }
-    std::printf("caught %d of %zu\n", caught, cases.size());
-    CHECK(caught >= 19);  // >= 90 % of 21, as the booster
+    std::printf("caught %d of %zu, lost %d\n", caught, cases.size(), lost);
+    // Ship catch robustness (2026-10-21): the engine-failure case may abort - upright; none lost (was >= 19 caught)
+    CHECK(caught >= 20);
+    CHECK(lost == 0);
 }

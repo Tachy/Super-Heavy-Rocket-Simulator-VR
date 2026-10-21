@@ -17,6 +17,16 @@ const Vec3 up{0.0, 0.0, 1.0};
 double tilt(const Vec3& axis) { return std::acos(std::clamp(axis.z, -1.0, 1.0)); }
 }  // namespace
 
+TEST_CASE("Upright descent: propellant to stop a sink", "[ship][landing]") {
+    const gnc::UprightDescentParameters p;
+    // 280 t sinking 30 m/s, 20 m/s^2 of thrust, ve 3240 m/s: dv = 30 + 9.81 * 30 / (0.5 * 10.19) = 87.8 m/s
+    const double dv = 30.0 + 9.81 * 30.0 / (p.deceleration_fraction * (20.0 - 9.81));
+    CHECK(gnc::upright_stop_propellant_kg(280e3, 30.0, 20.0, 9.81, 3240.0, p) ==
+          Catch::Approx(280e3 * (1.0 - std::exp(-dv / 3240.0))));
+    CHECK(gnc::upright_stop_propellant_kg(280e3, 0.0, 20.0, 9.81, 3240.0, p) == 0.0);  // not sinking
+    CHECK(gnc::upright_stop_propellant_kg(280e3, 30.0, 9.0, 9.81, 3240.0, p) > 280e3 - 1.0);  // cannot stop: all of it
+}
+
 TEST_CASE("Upright descent: brakes a fast sink and stays upright", "[ship][landing]") {
     const gnc::UprightDescentParameters p;
     // 30 m up at 40 m/s: the profile wants sqrt(4 + 2 * 0.5 * 30.2 * 30) = 30 m/s

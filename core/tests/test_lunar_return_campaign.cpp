@@ -16,6 +16,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/landing_outcome.hpp"
 #include "starsim/sim/mission_start.hpp"
 
 using namespace starsim;
@@ -89,6 +90,7 @@ std::pair<double, double> apsis_heights_m(const sim::FlightSession& s) {
 
 struct Run {
     bool caught = false, impacted = false, exited = false, raised = false;
+    sim::ReturnResult result = sim::ReturnResult::Flying;  // ship catch robustness: caught / upright abort / lost
     double tei_mps = 0.0, braking_mps = 0.0, trim_mps = 0.0, entry_speed_mps = 0.0, entry_angle_rad = 0.0;
     double gate_down_km = 0.0, gate_cross_km = 0.0;  // entry guidance at the gate (direct)
     double braked_t = 0.0, interface_t = 0.0;  // propellant after the braking burn and at the interface
@@ -212,6 +214,7 @@ Run fly(const Dispersion& d, bool aircatch) {
     }
     r.caught = body.caught();
     r.impacted = body.impacted();
+    r.result = s.ship_return_result(ship);
     r.peak_heat_w_m2 = body.peak_heat_rate_w_m2();
     r.propellant_t = body.vehicle().propellant_kg() / 1000.0;
     r.status = s.lunar_status();
@@ -237,7 +240,7 @@ int fly_seeds(unsigned first, unsigned last, bool aircatch) {
             std::printf(", exit %.1f x %.1f km, raised %.1f x %.1f km", r.exit_apsides.first / 1000.0,
                         r.exit_apsides.second / 1000.0, r.raised_apsides.first / 1000.0, r.raised_apsides.second / 1000.0);
         }
-        std::printf(" | %s | %s, %.1f t left, %s%s%s\n", r.braking_status.c_str(), r.caught ? "caught" : r.impacted ? "impacted" : "open", r.propellant_t,
+        std::printf(" | %s | %s, %.1f t left, %s%s%s\n", r.braking_status.c_str(), r.caught ? "caught" : sim::to_string(r.result), r.propellant_t,
                     r.status.c_str(), r.breakup.empty() ? "" : " / ", r.breakup.c_str());
         std::fflush(stdout);
         bool ok = r.caught && r.peak_heat_w_m2 < 1.2e6;
@@ -250,18 +253,16 @@ int fly_seeds(unsigned first, unsigned last, bool aircatch) {
 
 }  // namespace
 
-// Three seeds per case so ctest runs the campaigns in parallel (~8 min per direct flight).
-// Since refuelling f3 one direct seed of 21 misses the catch (docs/subsystems.md, "Ship catch propellant margin"): the
-// flip ends short of the catch axis too fast across for any tilt and the catch aborts. Which seed it is moves with the
-// gate timing (seed 12, then 18 once the burns started their settling lead earlier), so each case allows one miss
-// until the ship catch robustness follow-up; the campaign stands at 20 of 21.
-TEST_CASE("Lunar return campaign (direct): seeds 1-3", "[lunar][return][validation][slow]") { CHECK(fly_seeds(1, 3, false) >= 2); }
-TEST_CASE("Lunar return campaign (direct): seeds 4-6", "[lunar][return][validation][slow]") { CHECK(fly_seeds(4, 6, false) >= 2); }
-TEST_CASE("Lunar return campaign (direct): seeds 7-9", "[lunar][return][validation][slow]") { CHECK(fly_seeds(7, 9, false) >= 2); }
-TEST_CASE("Lunar return campaign (direct): seeds 10-12", "[lunar][return][validation][slow]") { CHECK(fly_seeds(10, 12, false) >= 2); }
-TEST_CASE("Lunar return campaign (direct): seeds 13-15", "[lunar][return][validation][slow]") { CHECK(fly_seeds(13, 15, false) >= 2); }
-TEST_CASE("Lunar return campaign (direct): seeds 16-18", "[lunar][return][validation][slow]") { CHECK(fly_seeds(16, 18, false) >= 2); }
-TEST_CASE("Lunar return campaign (direct): seeds 19-21", "[lunar][return][validation][slow]") { CHECK(fly_seeds(19, 21, false) >= 2); }
+// Three seeds per case so ctest runs the campaigns in parallel (~2 min per case of three).
+// Since the ship catch robustness plan (2026-10-21) every direct seed is caught: refuelling f3 had left one of 21
+// missing (seed 18: the landing burn's lateral LQR out-tilted its plans; ship lateral effort 0.1 -> 0.03).
+TEST_CASE("Lunar return campaign (direct): seeds 1-3", "[lunar][return][validation][slow]") { CHECK(fly_seeds(1, 3, false) == 3); }
+TEST_CASE("Lunar return campaign (direct): seeds 4-6", "[lunar][return][validation][slow]") { CHECK(fly_seeds(4, 6, false) == 3); }
+TEST_CASE("Lunar return campaign (direct): seeds 7-9", "[lunar][return][validation][slow]") { CHECK(fly_seeds(7, 9, false) == 3); }
+TEST_CASE("Lunar return campaign (direct): seeds 10-12", "[lunar][return][validation][slow]") { CHECK(fly_seeds(10, 12, false) == 3); }
+TEST_CASE("Lunar return campaign (direct): seeds 13-15", "[lunar][return][validation][slow]") { CHECK(fly_seeds(13, 15, false) == 3); }
+TEST_CASE("Lunar return campaign (direct): seeds 16-18", "[lunar][return][validation][slow]") { CHECK(fly_seeds(16, 18, false) == 3); }
+TEST_CASE("Lunar return campaign (direct): seeds 19-21", "[lunar][return][validation][slow]") { CHECK(fly_seeds(19, 21, false) == 3); }
 
 // Seeds 4 and 7 failed after l6 Task 1 (entry attitude departure at peak q with 61-64 t aboard, the liquid always a
 // column on the aft domes); propellant settling (header-tank plan) moves the residue forward at entry and fixed them.

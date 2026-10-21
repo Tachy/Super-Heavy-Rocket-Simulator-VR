@@ -17,6 +17,26 @@ constexpr double deg = constants::deg_to_rad;
 constexpr double no_sink_limit_mps = 1.0e3;  // an engine-set switch without a sink window
 constexpr double catch_missed_height_m = 5.0;  // CG this far below the catch point: the catch is over (as the booster)
 
+// Thrust of the running engines of `groups` at minimum and full throttle, and their exhaust velocity.
+struct GroupThrust {
+    double min_n = 0.0;
+    double max_n = 0.0;
+    double exhaust_velocity_mps = 0.0;
+};
+
+GroupThrust group_thrust(const vehicle::Vehicle& vehicle, const std::vector<std::string>& groups, double pressure_pa) {
+    GroupThrust t;
+    double mass_flow_kgps = 0.0;
+    for (const auto& e : vehicle.stages().front().engines) {
+        if (e.starved || e.failed || std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) continue;
+        t.min_n += e.performance->thrust_n(e.performance->config().throttle_min, pressure_pa);
+        t.max_n += e.performance->thrust_n(1.0, pressure_pa);
+        mass_flow_kgps += e.performance->mass_flow_kgps(1.0);
+    }
+    t.exhaust_velocity_mps = mass_flow_kgps > 0.0 ? t.max_n / mass_flow_kgps : 0.0;
+    return t;
+}
+
 Vec3 up_at(double latitude_rad, double longitude_rad) {
     return {std::cos(latitude_rad) * std::cos(longitude_rad), std::cos(latitude_rad) * std::sin(longitude_rad),
             std::sin(latitude_rad)};
@@ -147,7 +167,8 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
             flip_end_height_m_ = frames::fixed_to_geodetic(r_fixed).height_m - site_.height_m;
             if (std::getenv("STARSIM_DEBUG_GATE")) print_gate_state("flip-end", body, transform, epoch);  // diagnostics
         }
-        if (tilt < parameters_.flip_tolerance_rad && settled && epoch >= next_attempt_ && site_.catch_target) {
+        if (tilt < parameters_.flip_tolerance_rad && settled && epoch >= next_attempt_ && site_.catch_target &&
+            !upright_descent_) {
             ++first_plan_attempts_;
             auto guidance = std::make_unique<ScvxLandingGuidance>(site_, parameters_.scvx);
             if (abort_requested_) guidance->request_abort();
@@ -156,10 +177,12 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
                 phase_ = ReturnPhase::LandingBurn;
             } else {
                 next_attempt_ = epoch + parameters_.first_plan_retry_s;
+                // neither the catch nor the sea in reach: holding the flip thrust would hover the headers dry
+                if (first_plan_attempts_ >= parameters_.first_plans_before_descent) upright_descent_ = true;
             }
         }
     }
-    if (phase_ == ReturnPhase::LandingBurn) {
+    if (phase_ == ReturnPhase::LandingBurn && !upright_descent_) {
         const auto c = scvx_->update(body, env, epoch);
         cmd.run_groups = c.run_groups;
         cmd.throttle = c.throttle;
@@ -179,7 +202,29 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
                              site_up * (site_.catch_target->pin_station_m - mass.cg_station_m);
         const bool catch_over = !c.abort && (catch_contact_ || dot(r_fixed - r_catch, site_up) < -catch_missed_height_m);
         if (catch_over) phase_ = ReturnPhase::Landed;
+        // An abort without a converged abort plan after the grace time, or one that leans the hull beyond the guard:
+        // the upright descent instead (sticky).
+        if (c.abort) {
+            if (!abort_since_) abort_since_ = epoch;
+            const Vec3 axis = body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+            const double tilt = std::acos(std::clamp(dot(axis, up_gcrf), -1.0, 1.0));
+            const bool no_plan = !scvx_->has_abort_plan() && epoch - *abort_since_ > parameters_.abort_plan_grace_s;
+            // Propellant left only for a vertical stop: upright and slow before the distance to the sea (an abort plan
+            // flying for the water ran the headers dry and hit it at 9.5 m/s).
+            const Vec3 v_fixed = transpose(transform.rotation) *
+                                 (body.state().velocity_gcrf_mps -
+                                  cross(vehicle::earth_rotation_vector(transform), body.state().position_gcrf_m));
+            const double sink = -dot(v_fixed, site_up);
+            const auto thrust = group_thrust(body.vehicle(), descent_groups(sink), env.atmosphere.at(site_.height_m).pressure_pa);
+            const double usable = body.vehicle().propellant_kg() - parameters_.scvx.snapshot.reserve_kg;
+            const double need = upright_stop_propellant_kg(mass.mass_kg, sink, thrust.max_n / mass.mass_kg,
+                                                           constants::standard_gravity_mps2, thrust.exhaust_velocity_mps,
+                                                           parameters_.upright_descent);
+            const bool short_of_propellant = usable < parameters_.descent_propellant_margin * need;
+            if (no_plan || short_of_propellant || tilt > parameters_.upright_guard_tilt_rad) upright_descent_ = true;
+        }
     }
+    if (upright_descent_ && phase_ != ReturnPhase::Landed) fly_upright_descent(body, env, transform, site_up, cmd);
     if ((body.resting() || body.impacted()) && !contact_) {
         contact_ = true;
         const Vec3 axis = body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
@@ -195,6 +240,43 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
     }
     cmd.phase = phase_;
     return cmd;
+}
+
+// The last-resort abort (gnc::upright_descent): three engines while sinking faster than the 3 -> 2 window, then the
+// landing pair; thrust limits of the running engines at the local pressure; arms open, flaps folded, free roll.
+void ShipLandingGuidance::fly_upright_descent(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                              const frames::FixedToInertial& transform, const Vec3& site_up,
+                                              ReturnCommand& cmd) const {
+    const auto& vehicle = body.vehicle();
+    const auto mass = vehicle.mass_properties();
+    const Vec3 r_fixed = transpose(transform.rotation) * body.state().position_gcrf_m;
+    const Vec3 v_fixed = transpose(transform.rotation) *
+                         (body.state().velocity_gcrf_mps -
+                          cross(vehicle::earth_rotation_vector(transform), body.state().position_gcrf_m));
+    const Vec3 pad = frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m});
+    const double cg_height = dot(r_fixed - pad, site_up);
+    const double pressure = env.atmosphere.at(site_.height_m + cg_height).pressure_pa;
+    const double sink = -dot(v_fixed, site_up);
+    const auto& groups = descent_groups(sink);
+    const auto thrust = group_thrust(vehicle, groups, pressure);
+    const Vec3 tower = site_.catch_target ? site_.catch_target->tower_center_itrf_m : pad;
+    const auto c = upright_descent(r_fixed - tower, v_fixed, site_up, cg_height - mass.cg_station_m,
+                                   thrust.min_n / mass.mass_kg, thrust.max_n / mass.mass_kg,
+                                   constants::standard_gravity_mps2, parameters_.upright_descent);
+    cmd.run_groups = groups;
+    cmd.throttle = landing_throttle(vehicle, groups, mass.mass_kg * c.acceleration_mps2, pressure);
+    if (std::getenv("STARSIM_DEBUG_FLIP")) {  // diagnostics
+        std::printf("[upright] h %.1f sink %.1f groups %zu accel %.2f (%.2f-%.2f) throttle %.2f propellant %.0f kg\n",
+                    cg_height - mass.cg_station_m, sink, groups.size(), c.acceleration_mps2, thrust.min_n / mass.mass_kg,
+                    thrust.max_n / mass.mass_kg, cmd.throttle, vehicle.propellant_kg());
+    }
+    cmd.axis_gcrf = transform.rotation * c.axis;
+    cmd.roll_reference_gcrf = {};
+    cmd.scvx = false;
+    cmd.abort = true;
+    cmd.feedforward.reset();
+    cmd.torque_body_nm.reset();
+    cmd.flap_rad.assign(vehicle.stages().front().flaps.size(), 0.0);
 }
 
 bool ShipLandingGuidance::request_abort() {
