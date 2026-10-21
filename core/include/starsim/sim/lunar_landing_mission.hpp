@@ -37,8 +37,9 @@ mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& mi
                                            double initial_mass_kg, double dry_mass_kg, double vacuum_isp_s,
                                            double approach_isp_s, double settling_gas_kg);
 
-// The legs that start with an ignition in orbit (refuelling f3: each settles first): all but the descent's approach
-// (it continues the braking burn) and the ascent (it lights on the surface).
+// The in-flight ignitions of the legs (refuelling f3: each settles first; f4: per leg as flown - DOI + PDI, the
+// ascent's circularization, two-burn NRHO transfers). A lower bound: mid-course corrections, a plane trim and NRHO
+// station keeping are not budgeted legs.
 size_t lunar_in_orbit_ignitions(const std::vector<mission::BudgetLeg>& legs);
 
 // start_mission's lunar branch (`vehicle`: an override, e.g. the 204 t HLS): place, check a touchdown point within the

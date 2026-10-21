@@ -1,5 +1,6 @@
 #include "starsim/sim/lunar_landing_mission.hpp"
 
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 
@@ -132,20 +133,22 @@ std::vector<mission::BudgetLeg> lunar_mission_legs(const config::LunarLandingMis
     if (nrho) {
         if (plan.powered_flyby) legs.push_back({"Swing-by", norm(plan.powered_flyby->delta_v_gcrf_mps), vacuum_isp_s});
         legs.push_back({"Einschuss", norm(plan.insertion.delta_v_gcrf_mps), vacuum_isp_s});
-        legs.push_back({"NRHO -> LLO", m.nrho_to_llo_delta_v_mps, vacuum_isp_s});
+        legs.push_back({"NRHO -> LLO", m.nrho_to_llo_delta_v_mps, vacuum_isp_s, 2});  // departure + LLO arrival
     } else {
         legs.push_back({"LOI", norm(plan.insertion.delta_v_gcrf_mps), vacuum_isp_s});
     }
-    legs.push_back({"Abstieg (Bremsphase)", setup.braking_delta_v_mps, vacuum_isp_s});
-    legs.push_back({"Abstieg (Anflug)", m.descent_delta_v_mps - setup.braking_delta_v_mps, approach_isp_s});
-    legs.push_back({"Aufstieg", m.ascent_delta_v_mps, vacuum_isp_s});
-    if (nrho) legs.push_back({"LLO -> NRHO", m.llo_to_nrho_delta_v_mps, vacuum_isp_s});
+    legs.push_back({"Abstieg (Bremsphase)", setup.braking_delta_v_mps, vacuum_isp_s, 2});  // DOI + PDI
+    // the approach continues the braking burn
+    legs.push_back({"Abstieg (Anflug)", m.descent_delta_v_mps - setup.braking_delta_v_mps, approach_isp_s, 0});
+    legs.push_back({"Aufstieg", m.ascent_delta_v_mps, vacuum_isp_s, 1});  // lit landed; the circularization in orbit
+    if (nrho) legs.push_back({"LLO -> NRHO", m.llo_to_nrho_delta_v_mps, vacuum_isp_s, 2});
     return legs;
 }
 
 size_t lunar_in_orbit_ignitions(const std::vector<mission::BudgetLeg>& legs) {
-    constexpr size_t surface_legs = 2;  // the approach continues the braking burn; the ascent lights on the surface
-    return legs.size() > surface_legs ? legs.size() - surface_legs : 0;
+    size_t ignitions = 0;
+    for (const auto& leg : legs) ignitions += static_cast<size_t>(std::max(leg.ignitions, 0));
+    return ignitions;
 }
 
 mission::BudgetResult lunar_mission_budget(const config::LunarLandingMission& m, const mission::OutboundPlan& plan,

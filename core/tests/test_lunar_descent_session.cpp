@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <optional>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -15,6 +16,7 @@
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/lunar_site.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+#include "starsim/vehicle/propellant_transfer.hpp"
 #include "lunar_test_support.hpp"
 #include "test_support.hpp"
 
@@ -85,6 +87,69 @@ TEST_CASE("From the LLO the HLS waits for the site, trims, lowers its orbit and 
     fx.session.advance_to(fx.session.epoch() + 2.0 * 3600.0, 50'000'000);
     CHECK(fx.session.lunar_step() == sim::LunarStep::Landed);   // stay over (no ascent requested)
     CHECK(fx.session.body(0).resting());
+}
+
+namespace {
+
+// Flies a planned descent from 30 min before the PDI one session step at a time, holding the HLS's main-tank liquid
+// settled (or shaking it loose) before every step through test access to the flown vehicle (the coast between the
+// steps moves it). Returns when the braking Raptors were lit - they give thrust, or an unsettled start lost them -
+// and whether the settling push ran before.
+struct PdiRun {
+    std::optional<time::Epoch> lit;
+    bool pushed = false;
+};
+PdiRun fly_pdi(Fixture& fx, double settled, double after_pdi_s) {
+    const auto pdi = fx.session.lunar_descent_plan()->pdi_epoch;
+    fx.session.advance_to(pdi - 1800.0, 50'000'000);
+    auto& stage = const_cast<vehicle::FlightBody&>(fx.session.body(0)).vehicle().stages()[0];
+    PdiRun run;
+    while (fx.session.epoch() < pdi + after_pdi_s && !run.lit) {
+        stage.settled = settled;
+        fx.session.advance_to(pdi + after_pdi_s, 1);
+        run.pushed = run.pushed || fx.session.settling();
+        if (fx.session.body(0).vehicle().any_engine_producing_thrust() || !fx.session.burn_abort_reason().empty()) {
+            run.lit = fx.session.epoch();
+        }
+    }
+    return run;
+}
+
+}  // namespace
+
+TEST_CASE("PDI: settled propellant needs no push and lights on time",
+          "[sim][lunar_descent_session][ignition_settling][terrain][data][slow]") {
+    // f3 final review M10: the push ran even when settled and moved the ignition one lead early
+    Fixture fx;
+    fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);
+    sim::LunarLandingSetup setup;
+    REQUIRE(fx.session.plan_lunar_landing(setup));
+    const auto pdi = fx.session.lunar_descent_plan()->pdi_epoch;
+    const auto run = fly_pdi(fx, 1.0, 120.0);
+    INFO(fx.session.lunar_status() << " / " << sim::to_string(fx.session.lunar_step()) << ", abort: "
+         << fx.session.burn_abort_reason());
+    REQUIRE(run.lit);
+    CHECK_FALSE(run.pushed);
+    CHECK(*run.lit - pdi > -10.0);  // [E] the braking Raptors' start-up before the PDI, not a whole lead
+    CHECK(*run.lit - pdi < 5.0);
+}
+
+TEST_CASE("PDI: unsettled propellant holds the ignition while the push settles it",
+          "[sim][lunar_descent_session][ignition_settling][terrain][data][slow]") {
+    // f3 final review M9: the PDI lit after the push without the hold the burns have
+    Fixture fx;
+    fx.place_in_llo(test::hls_llo_propellant_kg, 0.5 * 86400.0);
+    sim::LunarLandingSetup setup;
+    REQUIRE(fx.session.plan_lunar_landing(setup));
+    const auto pdi = fx.session.lunar_descent_plan()->pdi_epoch;
+    const double lead = vehicle::settling_push(fx.session.body(0).vehicle(), 0).lead_s;  // the push's lead
+    REQUIRE(lead > 10.0);
+    const auto run = fly_pdi(fx, 0.0, sim::FlightSession::settling_hold_factor * lead + 300.0);
+    INFO(fx.session.lunar_status() << " / " << sim::to_string(fx.session.lunar_step()) << ", abort: "
+         << fx.session.burn_abort_reason());
+    REQUIRE(run.lit);
+    CHECK(run.pushed);
+    CHECK(*run.lit - pdi > 0.5 * lead);  // held past the planned ignition (bounded: it lights in the end)
 }
 
 TEST_CASE("A surface stay of 0 h with an ascent lifts off at once", "[sim][lunar_descent_session][terrain][data][slow]") {

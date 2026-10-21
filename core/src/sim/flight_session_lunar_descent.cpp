@@ -261,14 +261,31 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                                 german((plan.pdi_epoch - epoch_) / 60.0, 0) + " min";
                 break;
             }
-            const double lead = settling_lead_s();
-            if (lead > 0.0 && !settling_push_) {  // settled during the push; it ends when the engines give thrust
+            const double lead = settling_lead_s();  // 0 without a need to settle (or without +x capability)
+            const auto stage = burn_stage_index();
+            const bool settled = !stage || flying.body->vehicle().stage_settled(*stage);
+            const auto& sets = setup.guidance.braking_sets;
+            const auto light = plan.pdi_epoch - (sets.empty() ? 0.0 : group_startup_s(flying.body->vehicle(), sets.front()));
+            if (lead > 0.0 && !settling_push_ && !settled) {  // it ends when the engines give thrust
                 settling_push_ = true;
-                const auto& sets = setup.guidance.braking_sets;
-                lunar_step_epoch_ = plan.pdi_epoch - (sets.empty() ? 0.0 : group_startup_s(flying.body->vehicle(), sets.front()));
+                settling_hold_start_ = light;
+                lunar_step_epoch_ = light;
                 lunar_status_ = "Freiflug zum Abstieg: Settling, PDI in " + german((plan.pdi_epoch - epoch_) / 60.0, 0) + " min";
                 break;
             }
+            if (!settling_push_ && epoch_ < light - 1e-9) {  // settled already: no push, the Raptors light on time (M10)
+                lunar_step_epoch_ = light;
+                break;
+            }
+            // pushing and still not settled at the ignition: hold it while the push gives force, bounded as the burns'
+            // hold (f3 final review M9)
+            if (settling_push_ && !settled && lead > 0.0 && settling_hold_start_ &&
+                epoch_ - *settling_hold_start_ < settling_hold_factor * settling_push_now().lead_s &&
+                settling_push_now().acceleration_mps2 > 0.0) {
+                lunar_step_epoch_ = epoch_;
+                break;
+            }
+            settling_hold_start_.reset();
             if (!begin_powered_descent(plan.touchdown, plan.approach_azimuth_rad, setup.guidance)) {
                 const std::string status = lunar_status_;
                 lunar_abort(status);

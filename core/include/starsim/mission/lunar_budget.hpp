@@ -10,6 +10,7 @@ struct BudgetLeg {
     std::string name;  // German (refusal text), e.g. "Abstieg"
     double delta_v_mps = 0.0;
     double isp_s = 0.0;  // vacuum
+    int ignitions = 1;   // engine starts in flight (refuelling f3/f4: each needs settled propellant)
 };
 
 struct BudgetResult {

@@ -38,11 +38,16 @@ TEST_CASE("lunar_mission_legs: the LLO mission's legs in flight order", "[refuel
     CHECK(legs[3].isp_s == Catch::Approx(330.0));  // the approach on the landing set
     CHECK(legs[4].name == "Aufstieg");
     CHECK(legs[2].delta_v_mps + legs[3].delta_v_mps == Catch::Approx(m.descent_delta_v_mps));
-    // f3: TLI, LOI and the braking light in orbit; the approach continues the braking, the ascent lights landed
-    CHECK(sim::lunar_in_orbit_ignitions(legs) == 3u);
+    // f3 (f4: per leg, as flown): TLI, LOI, DOI + PDI, the ascent's circularization; the approach continues the
+    // braking, the ascent itself lights on the surface
+    CHECK(sim::lunar_in_orbit_ignitions(legs) == 5u);
     const double free = sim::lunar_mission_budget(m, plan, 1500e3, 120e3, 375.0, 330.0, 0.0).margin_kg;
     CHECK(sim::lunar_mission_budget(m, plan, 1500e3, 120e3, 375.0, 330.0, 400.0).margin_kg ==
-          Catch::Approx(free - 3.0 * 400.0).epsilon(1e-12));
+          Catch::Approx(free - 5.0 * 400.0).epsilon(1e-12));
+    // the NRHO path adds the two-burn transfers down to the LLO and back up
+    auto nrho = m;
+    nrho.lunar_orbit = "nrho";
+    CHECK(sim::lunar_in_orbit_ignitions(sim::lunar_mission_legs(nrho, plan, 375.0, 330.0)) == 9u);
 }
 
 TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelling][campaign][config]") {
