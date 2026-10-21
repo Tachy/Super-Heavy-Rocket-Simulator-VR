@@ -26,9 +26,10 @@ MissionKind kind_of(const detail::Document& doc) {
     if (kind == "depot_launch") return MissionKind::DepotLaunch;
     if (kind == "tanker_flight") return MissionKind::TankerFlight;
     if (kind == "hls_refuel") return MissionKind::HlsRefuel;
+    if (kind == "refuelling_campaign_flown") return MissionKind::RefuellingCampaignFlown;
     doc.fail("mission: unknown kind '" + kind +
              "' (ascent, ship_return, capsule_return, lunar_landing, lunar_return, iss_rendezvous, iss_launch, "
-             "iss_departure, depot_launch, tanker_flight, hls_refuel)");
+             "iss_departure, depot_launch, tanker_flight, hls_refuel, refuelling_campaign_flown)");
 }
 
 // [mission] station / port / iss_orbit of an ISS mission.
@@ -430,6 +431,41 @@ DepotLaunchMission load_depot_launch_mission(const std::filesystem::path& config
     m.name = doc.text(*mission, "name");
     m.ascent_id = doc.text(*mission, "ascent");
     m.epoch_utc = utc(doc, *start, "epoch_utc");
+    return m;
+}
+
+RefuellingCampaignFlownMission load_refuelling_campaign_flown_mission(const std::filesystem::path& config_dir,
+                                                                      std::string_view mission_id) {
+    const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    require_kind(doc, MissionKind::RefuellingCampaignFlown, "refuelling campaign flown");
+    const auto& mission = doc.table(doc.root, "mission");
+    const auto& depot = doc.table(doc.root, "depot");
+    const auto& keeping = doc.table(doc.root, "station_keeping");
+    const auto& flights = doc.table(doc.root, "flights");
+    const auto& comparison = doc.table(doc.root, "comparison");
+    RefuellingCampaignFlownMission m;
+    m.id = std::string(mission_id);
+    m.name = doc.text(mission, "name");
+    const auto start = doc.text(depot, "start");
+    if (start != "launch" && start != "placed") doc.fail("[depot] start must be \"launch\" or \"placed\"");
+    m.depot_placed = start == "placed";
+    if (m.depot_placed) m.placed_shortfall_tankers = doc.positive(depot, "shortfall_tankers");
+    m.keeping_min_height_m = doc.positive(keeping, "min_height_km") * 1000.0;
+    m.keeping_target_height_m = doc.positive(keeping, "target_height_km") * 1000.0;
+    if (m.keeping_target_height_m <= m.keeping_min_height_m) {
+        doc.fail("[station_keeping] target_height_km must lie above min_height_km");
+    }
+    m.keeping_min_lead_s = doc.positive(keeping, "min_lead_h") * 3600.0;
+    const auto* groups = keeping["engine_groups"].as_array();
+    if (!groups || groups->empty()) doc.fail("[station_keeping] engine_groups: a non-empty list of engine groups");
+    for (const auto& node : *groups) {
+        const auto id = node.value<std::string>();
+        if (!id || id->empty()) doc.fail("[station_keeping] engine_groups: group ids are strings");
+        m.keeping_engine_groups.push_back(*id);
+    }
+    m.return_first_tanker = doc.boolean(flights, "return_first_tanker");
+    m.fill_tolerance = doc.positive(comparison, "fill_tolerance");
+    m.duration_tolerance_s = doc.positive(comparison, "duration_days") * 86400.0;
     return m;
 }
 

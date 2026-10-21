@@ -60,9 +60,29 @@ struct RefuellingFlightMission {
     std::string lunar_mission_id;      // hls_refuel: the lunar landing mission continued after the refuelling
 };
 
+// refuelling_campaign_flown (f2): the campaign flown in one session with the reference flights' missions
+// (config/refuelling/reference_flights.toml) - the depot launched (depot_launch) or placed (tanker_flight's [depot] at
+// its earliest_utc), its station keeping, the first tanker's return, the comparison's tolerances.
+struct RefuellingCampaignFlownMission {
+    std::string id, name;
+    bool depot_placed = false;                // [depot] start = "launch" | "placed"
+    double placed_shortfall_tankers = 0.0;    // placed: fill = demand - this x the tanker's net delivery [test]
+    double keeping_min_height_m = 0.0;        // [station_keeping] below this mean height: reboost
+    double keeping_target_height_m = 0.0;     // ... to this circular height
+    double keeping_min_lead_s = 0.0;          // ... only when the next arrival is further away
+    std::vector<std::string> keeping_engine_groups;
+    bool return_first_tanker = true;          // [flights]
+    double fill_tolerance = 0.0;              // [comparison] share of the calculator's depot fill
+    double duration_tolerance_s = 0.0;
+};
+
 DepotLaunchMission load_depot_launch_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
 // Kinds tanker_flight and hls_refuel; ConfigError (via detail::Document) for anything else or bad values.
 RefuellingFlightMission load_refuelling_flight_mission(const std::filesystem::path& config_dir,
                                                        std::string_view mission_id);
+// Kind refuelling_campaign_flown; ConfigError for anything else or bad values (heights > 0 with the target above the
+// minimum, tolerances > 0, engine groups given, start "launch" / "placed", a placed start with shortfall_tankers > 0).
+RefuellingCampaignFlownMission load_refuelling_campaign_flown_mission(const std::filesystem::path& config_dir,
+                                                                      std::string_view mission_id);
 
 }  // namespace starsim::config

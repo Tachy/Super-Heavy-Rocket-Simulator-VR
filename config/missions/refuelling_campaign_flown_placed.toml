@@ -1,0 +1,22 @@
+# Refuelling f2: the flown campaign (spec f2) with the depot placed instead of launched - the short check: two
+# tankers and the HLS, compared with the campaign calculator.
+[mission]
+name = "Betankungskampagne (geflogen, Depot platziert)"
+kind = "refuelling_campaign_flown"
+
+[depot]
+start = "placed"                   # tanker_flight's [depot] orbit at its earliest_utc
+shortfall_tankers = 1.5            # [test] fill = demand - 1.5 net tanker deliveries -> two tankers and the HLS
+
+[station_keeping]
+min_height_km = 195.0              # [E] spec f2: mean height (J2 energy) below this -> reboost
+target_height_km = 200.0           # [E] circular
+min_lead_h = 24.0                  # [E] only when the next arrival is further away
+engine_groups = ["sea_level_3"]    # the belly Raptor (cold gas when its transients exceed 60 % of a burn)
+
+[flights]
+return_first_tanker = true         # spec f2: only the first tanker flies its return (side session, plan decision 3)
+
+[comparison]
+fill_tolerance = 0.02              # [E] spec f2: depot fill per arrival
+duration_days = 1.0                # [E] spec f2

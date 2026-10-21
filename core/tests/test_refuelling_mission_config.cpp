@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -183,4 +184,65 @@ TEST_CASE("Refuelling window parameters: the insertion orbit and the candidates"
     REQUIRE(r.phasing_orbits.size() == 1u);
     CHECK(r.phasing_orbits.front().periapsis_radius_m == Catch::Approx(re + 170.0e3));
     CHECK(r.phasing_orbits.front().apoapsis_radius_m == Catch::Approx(re + 190.0e3));
+}
+
+TEST_CASE("refuelling_campaign_flown configs load", "[refuelling][config][campaign_flown]") {
+    CHECK(config::mission_kind(config_dir, "refuelling_campaign_flown") ==
+          config::MissionKind::RefuellingCampaignFlown);
+    const auto m = config::load_refuelling_campaign_flown_mission(config_dir, "refuelling_campaign_flown");
+    CHECK_FALSE(m.depot_placed);
+    CHECK(m.keeping_min_height_m == Catch::Approx(195.0e3));
+    CHECK(m.keeping_target_height_m == Catch::Approx(200.0e3));
+    CHECK(m.keeping_min_lead_s == Catch::Approx(86400.0));
+    CHECK(m.keeping_engine_groups == std::vector<std::string>{"sea_level_3"});
+    CHECK(m.return_first_tanker);
+    CHECK(m.fill_tolerance == Catch::Approx(0.02));
+    CHECK(m.duration_tolerance_s == Catch::Approx(86400.0));
+    const auto p = config::load_refuelling_campaign_flown_mission(config_dir, "refuelling_campaign_flown_placed");
+    CHECK(p.depot_placed);
+    CHECK(p.placed_shortfall_tankers == Catch::Approx(1.5));
+    CHECK_THROWS(config::load_refuelling_campaign_flown_mission(config_dir, "tanker_flight"));  // wrong kind
+}
+
+TEST_CASE("refuelling_campaign_flown refuses bad values", "[refuelling][config][campaign_flown]") {
+    const std::string base = R"([mission]
+name = "x"
+kind = "refuelling_campaign_flown"
+[depot]
+start = "%START%"
+%SHORTFALL%
+[station_keeping]
+min_height_km = 195.0
+target_height_km = %TARGET%
+min_lead_h = 24.0
+engine_groups = %GROUPS%
+[flights]
+return_first_tanker = true
+[comparison]
+fill_tolerance = %FILL%
+duration_days = 1.0
+)";
+    const auto text = [&](std::string start, std::string shortfall, std::string target, std::string groups,
+                          std::string fill) {
+        std::string t = base;
+        const auto put = [&](const std::string& key, const std::string& value) {
+            t.replace(t.find(key), key.size(), value);
+        };
+        put("%START%", start);
+        put("%SHORTFALL%", shortfall);
+        put("%TARGET%", target);
+        put("%GROUPS%", groups);
+        put("%FILL%", fill);
+        return t;
+    };
+    const auto load = [&](const std::string& name, const std::string& t) {
+        return config::load_refuelling_campaign_flown_mission(with_mission("f2_" + name, "c", t), "c");
+    };
+    CHECK_NOTHROW(load("ok", text("launch", "", "200.0", "[\"sea_level_3\"]", "0.02")));
+    CHECK_THROWS(load("target", text("launch", "", "195.0", "[\"sea_level_3\"]", "0.02")));  // not above the minimum
+    CHECK_THROWS(load("fill", text("launch", "", "200.0", "[\"sea_level_3\"]", "-0.02")));
+    CHECK_THROWS(load("start", text("orbit", "", "200.0", "[\"sea_level_3\"]", "0.02")));
+    CHECK_THROWS(load("shortfall", text("placed", "", "200.0", "[\"sea_level_3\"]", "0.02")));  // placed needs it
+    CHECK_NOTHROW(load("placed", text("placed", "shortfall_tankers = 1.5", "200.0", "[\"sea_level_3\"]", "0.02")));
+    CHECK_THROWS(load("groups", text("launch", "", "200.0", "[]", "0.02")));
 }
