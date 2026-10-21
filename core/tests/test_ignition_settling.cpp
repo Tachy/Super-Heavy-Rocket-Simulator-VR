@@ -4,6 +4,7 @@
 #include <cmath>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <catch2/catch_approx.hpp>
@@ -15,6 +16,8 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/propellant_transfer.hpp"
+#include "starsim/gnc/burn_node.hpp"
+#include "starsim/vehicle/flight_body.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 #include "test_support.hpp"
 
@@ -48,14 +51,16 @@ vehicle::VehicleCommand light_all(const vehicle::Vehicle& v) {
     return c;
 }
 
-// A tanker coasting from the apoapsis (190 km) of a `periapsis_height_m` x 190 km orbit, no depot and no mission.
+// A tanker coasting from the apoapsis (or periapsis) of a `periapsis_height_m` x 190 km orbit, no depot and no mission.
 struct TankerInOrbit : refuelling_test::DepotSession {
-    explicit TankerInOrbit(double main_kg, double periapsis_height_m = 120e3, double apoapsis_height_m = 190e3) {
+    explicit TankerInOrbit(double main_kg, double periapsis_height_m = 120e3, double apoapsis_height_m = 190e3,
+                           double ahead_deg = 0.0, bool at_periapsis = false) {
         const double re = constants::wgs84_semi_major_axis_m;
-        const auto along = refuelling_test::depot_state(earth, t0, 0.0);
+        const auto along = refuelling_test::depot_state(earth, t0, ahead_deg * constants::deg_to_rad);
         const double rp = re + periapsis_height_m, ra = re + apoapsis_height_m;
-        const double va = std::sqrt(constants::earth_gm_m3ps2 * (2.0 / ra - 2.0 / (rp + ra)));
-        const math::StateVector s{ra * math::normalized(along.position_m), va * math::normalized(along.velocity_mps)};
+        const double r = at_periapsis ? rp : ra;
+        const double v = std::sqrt(constants::earth_gm_m3ps2 * (2.0 / r - 2.0 / (rp + ra)));
+        const math::StateVector s{r * math::normalized(along.position_m), v * math::normalized(along.velocity_mps)};
         session.place_in_orbit(refuelling_test::tanker_config(main_kg), s, t0);
     }
     const vehicle::Vehicle& vehicle() const { return session.body(0).vehicle(); }
@@ -142,7 +147,8 @@ TEST_CASE("Vehicle configs flag the PMD tanks", "[ignition_settling][config]") {
     CHECK(found);
     for (const std::string id : {"starship_depot", "starship_block3", "starship_hls"}) {
         INFO(id);
-        for (const auto& t : config::load_vehicle(config_dir, id).stages.back().tanks) {
+        const auto config = config::load_vehicle(config_dir, id);  // kept alive across the loop
+        for (const auto& t : config.stages.back().tanks) {
             CHECK(t.propellant_management_device == (t.role == config::TankRole::Header));
         }
     }
@@ -221,10 +227,38 @@ TEST_CASE("Suborbital ignitions are not checked", "[ignition_settling][sim]") {
     CHECK_FALSE(f.any_failed());
     CHECK(f.vehicle().any_engine_producing_thrust());
 }
+TEST_CASE("BurnExecutor credit lowers the remaining delta-v without starting the burn", "[ignition_settling][burn_node]") {
+    const gnc::BurnNode node{time::Epoch::from_tdb_seconds_past_j2000(8.4e8), {10.0, 0.0, 0.0}};
+    const vehicle::FlightBody body(tanker(), vehicle::RigidBodyState{});
+    gnc::BurnExecutor ex(node);
+    ex.credit({0.8, 0.0, 0.0});
+    const auto st = ex.update(body, node.epoch - 100.0, 0.005, 2.0e6, 650.0, 1.0);
+    CHECK(st.remaining_dv_mps == Catch::Approx(9.2));
+    CHECK_FALSE(st.ignite);
+}
 
-TEST_CASE("Gas ingestion ends the refuelling mission with its reason", "[ignition_settling][refuelling][iss_mission]") {
+namespace {
+
+// Advances in steps of at most `step_s` to `target`; true when the settling push was seen at a step's end.
+bool run_to(sim::FlightSession& s, time::Epoch target, double step_s) {
+    bool seen = false;
+    while (s.epoch() < target - 0.01) {  // advance_to stops a fraction of a tick short
+        s.advance_to(std::min(s.epoch() + step_s, target));
+        seen = seen || s.settling();
+    }
+    return seen;
+}
+
+// Prograde along the current velocity, `ahead_s` from now.
+gnc::BurnNode prograde(const sim::FlightSession& s, double ahead_s, double dv_mps) {
+    return {s.epoch() + ahead_s, math::normalized(s.body(0).state().velocity_gcrf_mps) * dv_mps};
+}
+
+}  // namespace
+
+TEST_CASE("The autopilot settles before a raise burn and the burn flies", "[ignition_settling][refuelling][iss_mission]") {
     test::spice_session();
-    TankerInOrbit f(100e3);
+    TankerInOrbit f(100e3, 120e3, 190e3, -10.0, true);  // as the f1 below-candidate cases
     sim::IssMissionSequence q;
     q.from_launch = true;
     q.station_port = "transfer_dock";
@@ -234,14 +268,78 @@ TEST_CASE("Gas ingestion ends the refuelling mission with its reason", "[ignitio
     f.session.add_station(refuelling_test::depot_config(f.depot_propellant_kg), f.depot, f.t0);
     f.session.advance_to(f.session.epoch() + 2.0 * 3600.0);  // the liquid leaves the outlets
     REQUIRE_FALSE(f.vehicle().stage_settled(0));
+    const double lead = f.session.settling_lead_s();
+    CHECK(lead > 30.0);
+    CHECK(lead < 300.0);
+    const double gas_estimate = f.session.settling_gas_kg();
+    const double supply0 = f.vehicle().rcs_supply_kg();
     f.session.set_iss_mission(q);
-    // no push yet (Task 3): the coast to the raise burn unsettles the liquid, the burn ingests
+    bool seen = false;
     const time::Epoch end = f.session.epoch() + 4.0 * 3600.0;
     while (f.session.epoch() < end && f.session.iss_mission_leg() != sim::IssMissionLeg::Ended &&
            f.session.iss_mission_leg() != sim::IssMissionLeg::Rendezvous) {
         f.session.advance_to(f.session.epoch() + 10.0);
+        seen = seen || f.session.settling();
     }
     INFO(f.session.iss_mission_status());
-    CHECK(f.session.iss_mission_leg() == sim::IssMissionLeg::Ended);
-    CHECK_THAT(f.session.iss_mission_status(), Catch::Matchers::ContainsSubstring("Gasansaugung"));
+    CHECK(seen);
+    CHECK(f.session.iss_mission_leg() == sim::IssMissionLeg::Rendezvous);
+    CHECK_FALSE(f.any_failed());
+    CHECK(f.session.burn_abort_reason().empty());
+    CHECK(gas_estimate > 0.0);
+    CHECK(supply0 - f.vehicle().rcs_supply_kg() > gas_estimate);  // the raise burn's propellant on top of the gas
+}
+
+// The final states are not compared: the 10 s and 600 s runs end ~8 m/s apart with the flag off too (pre-existing).
+TEST_CASE("Settling: the coast stops before the lead in 10 s and in 600 s steps", "[ignition_settling][sim]") {
+    test::spice_session();
+    TankerInOrbit fine(100e3), coarse(100e3);
+    for (auto* f : {&fine, &coarse}) {
+        run_to(f->session, f->t0 + 2.0 * 3600.0, 600.0);  // both at the same epoch
+        REQUIRE_FALSE(f->vehicle().stage_settled(0));
+        REQUIRE(f->session.execute_burn(prograde(f->session, 7200.0, 100.0)));
+    }
+    const time::Epoch end = fine.t0 + 2.0 * 3600.0 + 7200.0 + 600.0;
+    CHECK(run_to(fine.session, end, 10.0));
+    run_to(coarse.session, end, 600.0);
+    for (auto* f : {&fine, &coarse}) {
+        CHECK_FALSE(f->any_failed());
+        CHECK(f->session.burn_abort_reason().empty());
+        CHECK_FALSE(f->session.settling());
+    }
+}
+
+TEST_CASE("Settling: a lead longer than the time left holds the ignition", "[ignition_settling][sim]") {
+    test::spice_session();
+    TankerInOrbit f(100e3);
+    f.session.advance_to(f.session.epoch() + 2.0 * 3600.0);
+    REQUIRE_FALSE(f.vehicle().stage_settled(0));
+    const double lead = f.session.settling_lead_s();
+    const auto node = prograde(f.session, 20.0, 100.0);
+    REQUIRE(f.session.execute_burn(node));
+    REQUIRE(lead > 40.0);
+    std::optional<time::Epoch> lit;
+    while (f.session.epoch() < node.epoch + 600.0) {
+        f.session.advance_to(f.session.epoch() + 1.0);
+        if (!lit && f.vehicle().any_engine_producing_thrust()) lit = f.session.epoch();
+    }
+    CHECK_FALSE(f.any_failed());
+    CHECK(f.session.burn_abort_reason().empty());
+    REQUIRE(lit);
+    CHECK(*lit - node.epoch > 0.0);  // held past the planned ignition
+    CHECK(*lit - node.epoch < sim::FlightSession::settling_hold_factor * lead);
+}
+
+TEST_CASE("Manual settle: the push runs until switched off and settles the tanks", "[ignition_settling][sim]") {
+    test::spice_session();
+    TankerInOrbit f(100e3);
+    f.session.advance_to(f.session.epoch() + 2.0 * 3600.0);
+    REQUIRE_FALSE(f.vehicle().stage_settled(0));
+    const double lead = f.session.settling_lead_s();
+    CHECK(f.session.settle(true));
+    CHECK(f.session.settling());
+    run_to(f.session, f.session.epoch() + lead, 10.0);
+    CHECK(f.vehicle().stage_settled(0));
+    CHECK(f.session.settle(false));
+    CHECK_FALSE(f.session.settling());
 }

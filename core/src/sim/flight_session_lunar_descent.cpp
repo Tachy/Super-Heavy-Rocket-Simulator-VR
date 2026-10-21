@@ -255,9 +255,18 @@ void FlightSession::run_lunar_descent_steps(Flying& flying) {
                     math::Mat3::from_columns({-1.0, 0.0, 0.0}, {0.0, 0.0, -1.0}, {0.0, -1.0, 0.0})));
                 const auto& sets = setup.guidance.braking_sets;
                 const double startup_s = sets.empty() ? 0.0 : group_startup_s(flying.body->vehicle(), sets.front());
-                lunar_step_epoch_ = plan.pdi_epoch - startup_s;
+                // refuelling f3: the settling push its lead before the braking Raptors light
+                lunar_step_epoch_ = plan.pdi_epoch - startup_s - settling_lead_s();
                 lunar_status_ = "Freiflug zum Abstieg: Bremslage, PDI in " +
                                 german((plan.pdi_epoch - epoch_) / 60.0, 0) + " min";
+                break;
+            }
+            const double lead = settling_lead_s();
+            if (lead > 0.0 && !settling_push_) {  // settled during the push; it ends when the engines give thrust
+                settling_push_ = true;
+                const auto& sets = setup.guidance.braking_sets;
+                lunar_step_epoch_ = plan.pdi_epoch - (sets.empty() ? 0.0 : group_startup_s(flying.body->vehicle(), sets.front()));
+                lunar_status_ = "Freiflug zum Abstieg: Settling, PDI in " + german((plan.pdi_epoch - epoch_) / 60.0, 0) + " min";
                 break;
             }
             if (!begin_powered_descent(plan.touchdown, plan.approach_azimuth_rad, setup.guidance)) {

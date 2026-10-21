@@ -41,6 +41,17 @@ OutletCheck outlet_check(const Vehicle& vehicle, size_t stage_index, size_t tank
     return out;
 }
 
+SettlingPush settling_push(const Vehicle& vehicle, size_t stage_index) {
+    SettlingPush push;
+    if (!vehicle.needs_settling(stage_index)) return push;
+    const auto capability = vehicle.rcs_pure_force_capability({1.0, 0.0, 0.0});
+    if (!(capability.force_n > 0.0)) return push;
+    push.acceleration_mps2 = capability.force_n / vehicle.mass_properties().mass_kg;
+    push.lead_s = settling_lead_factor * settling_time_s(vehicle.settling_travel_m(stage_index), push.acceleration_mps2);
+    push.gas_kg = capability.mass_flow_kgps * push.lead_s;
+    return push;
+}
+
 double settling_time_s(double length_m, double acceleration_mps2) {
     if (!(acceleration_mps2 > 0.0)) return std::numeric_limits<double>::infinity();
     return std::sqrt(2.0 * length_m / acceleration_mps2);

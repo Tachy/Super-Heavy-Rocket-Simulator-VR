@@ -297,6 +297,7 @@ void FlightSession::run_autopilot() {
             const auto& vehicle = body.vehicle();
             const math::Vec3 thrust_axis =
                 c.rcs ? c.thrust_axis_body : gnc::thrust_axis_body(vehicle, vehicle.mass_properties().cg_station_m, c.groups);
+            if (norm(settling_acceleration_gcrf_) > 0.0) burn_->credit(settling_acceleration_gcrf_ * tick_s);
             autopilot_.burn = burn_->update(body, epoch_, tick_s, c.thrust_n, c.mass_flow_kgps, c.shutdown_s,
                                             last_rcs_acceleration_, thrust_axis);
             if (c.rcs) {
@@ -317,7 +318,23 @@ void FlightSession::run_autopilot() {
             }
             const bool running = std::any_of(flying.running_groups.begin(), flying.running_groups.end(),
                                              [](const auto& g) { return g.second; });
-            if (autopilot_.burn.ignite && !running) {
+            // Refuelling f3: the settling push from its lead before the ignition until the engines give thrust; an
+            // ignition that comes before the liquid is settled waits for it while the push gives force (bounded).
+            const auto stage = burn_stage_index();
+            const bool settled = !stage || vehicle.stage_settled(*stage);
+            if (vehicle.any_engine_producing_thrust() || autopilot_.burn.complete) {
+                settling_push_ = false;
+            } else if (settling_lead_s_ > 0.0 && !running && autopilot_.burn.time_to_ignition_s <= settling_lead_s_ &&
+                       !settled) {
+                settling_push_ = true;
+            }
+            bool hold = false;
+            if (autopilot_.burn.ignite && !running && settling_push_ && !settled) {
+                if (!settling_hold_start_) settling_hold_start_ = epoch_;
+                hold = norm(settling_acceleration_gcrf_) > 0.0 &&
+                       epoch_ - *settling_hold_start_ < settling_hold_factor * settling_lead_s_;
+            }
+            if (autopilot_.burn.ignite && !running && !hold) {
                 for (const auto& g : c.groups) flying.running_groups[g] = true;
             }
             // Engines that ran dry (main tanks boiled off while waiting, refuelling r2) cannot finish the burn: cut off
@@ -697,13 +714,15 @@ double FlightSession::coast_allowance_s() const {
     if (nose_cone_epoch_) allowance = std::min(allowance, *nose_cone_epoch_ - epoch_);
     if (!station_impulses_.empty()) allowance = std::min(allowance, station_impulses_.front().epoch - epoch_);
     if (iss_mission_pending()) return 0.0;  // a leg change is due: act on the next tick (ISS i6)
+    if (settling()) return 0.0;  // refuelling f3: the push is ticked
     if (iss_leg_ == IssMissionLeg::WaitUndock) allowance = std::min(allowance, *iss_mission_->undock_epoch - epoch_);
     if (iss_leg_ == IssMissionLeg::WaitContinue) {
         allowance = std::min(allowance, *iss_mission_->continue_epoch - epoch_);
     }
     if (autopilot_.state == AutopilotState::Burn) {
         const double drift = burn_drifting() ? burn_drift_lead_s : 0.0;  // the turn to the burn attitude is ticked
-        allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - burn_preparation_s - drift);
+        const double preparation = std::max(burn_preparation_s, settling_lead_s_ + settling_coast_margin_s);
+        allowance = std::min(allowance, autopilot_.burn.time_to_ignition_s - preparation - drift);
         const double replan_s = deorbit_replan_in_s();
         if (replan_s > 0.0) allowance = std::min(allowance, replan_s);  // its tick is not skipped
     }
@@ -828,13 +847,23 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             const auto t = earth_.fixed_to_gcrf(epoch_);
             const double altitude =
                 frames::fixed_to_geodetic(transpose(t.rotation) * body.state().position_gcrf_m).height_m;
-            const auto command = command_for(i, atmosphere_.at(altitude).pressure_pa);
+            auto command = command_for(i, atmosphere_.at(altitude).pressure_pa);
+            const bool push = i == controlled_ && settling() && !body.docked();
+            if (push) {  // refuelling f3: cold gas along +x settles the liquid aft
+                command.rcs_force_fraction = {1.0, 0.0, 0.0};
+                command.rcs_force_pure = true;
+                command.rcs_keep_force = true;
+            }
             body.step(env_, epoch_, tick_s, command);
             if (i == controlled_) {
+                settling_acceleration_gcrf_ =
+                    push ? body.state().attitude.rotate(body.rcs_force_body_n()) / body.vehicle().mass_properties().mass_kg
+                         : math::Vec3{};
+                if (settling_push_ && body.vehicle().any_engine_producing_thrust()) settling_push_ = false;
                 // What the thrusters that fired gave (pulses), for the burn executor - only while a translation is
                 // commanded: the net force of attitude pulses before ignition would otherwise start the burn early.
                 last_rcs_acceleration_ =
-                    norm(command.rcs_force_fraction) > 0.0
+                    norm(command.rcs_force_fraction) > 0.0 && !push  // the push reaches the burn as a credit
                         ? body.state().attitude.rotate(body.rcs_force_body_n()) / body.vehicle().mass_properties().mass_kg
                         : math::Vec3{};
             }

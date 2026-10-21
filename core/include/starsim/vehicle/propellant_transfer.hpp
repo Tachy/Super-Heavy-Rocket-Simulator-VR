@@ -40,5 +40,17 @@ double settling_time_s(double length_m, double acceleration_mps2);
 // and the largest tilt of the apparent gravity from -x that still covers an outlet (the r4 transfer's value).
 constexpr double settling_min_travel_m = 1.0;
 constexpr double settling_max_tilt_rad = 30.0 * constants::deg_to_rad;
+// The settling push before an ignition starts this many settling times ahead [E].
+constexpr double settling_lead_factor = 1.25;
+
+// The cold-gas push that settles stage `stage_index` before an ignition (refuelling f3): the full pure +x translation
+// capability; lead = settling_lead_factor x sqrt(2L/a), gas = its mass flow over the lead. Zero without a need to settle
+// or without +x capability.
+struct SettlingPush {
+    double acceleration_mps2 = 0.0;
+    double lead_s = 0.0;
+    double gas_kg = 0.0;
+};
+SettlingPush settling_push(const Vehicle& vehicle, size_t stage_index);
 
 }  // namespace starsim::vehicle

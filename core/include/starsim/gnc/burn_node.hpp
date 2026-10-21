@@ -55,6 +55,9 @@ public:
     };
 
     explicit BurnExecutor(BurnNode node) : node_(node), remaining_(node.delta_v_gcrf_mps) {}
+    // Delta-v delivered before the ignition (refuelling f3: the settling push along the burn) - part of the manoeuvre,
+    // does not start the burn.
+    void credit(const math::Vec3& delta_v_gcrf_mps) { remaining_ -= delta_v_gcrf_mps; }
 
     const BurnNode& node() const { return node_; }
 

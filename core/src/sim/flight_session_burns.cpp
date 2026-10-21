@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "starsim/vehicle/propellant_transfer.hpp"
+
 namespace starsim::sim {
 
 // Candidate engine configurations of the lowest stage with engines, strongest first: all groups at full
@@ -129,6 +131,9 @@ bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<Burn
     }
     burn_config_ = *chosen;
     burn_.emplace(node);
+    settling_lead_s_ = chosen->rcs ? 0.0 : settling_lead_s();  // cold gas needs no settled liquid
+    settling_push_ = false;
+    settling_hold_start_.reset();
     burn_abort_reason_.clear();
     // the status until the burn's first tick: a coast before it read the previous burn's (l5 Task 10: the deorbit
     // re-plan saw the old burn's time to ignition and planned again on every coast step)
@@ -140,6 +145,33 @@ bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<Burn
     autopilot_.state = AutopilotState::Burn;
     attitude_mode_ = {};  // d2 minor: a mode set before the burn no longer turns the vehicle back after it
     capsule_return_step_ = CapsuleReturnStep::None;  // a pilot burn ends a capsule return (its plan sets it after this)
+    return true;
+}
+
+std::optional<size_t> FlightSession::burn_stage_index() const {
+    if (bodies_.empty()) return std::nullopt;
+    const auto& stages = bodies_[controlled_].body->vehicle().stages();
+    for (size_t s = 0; s < stages.size(); ++s) {
+        for (const auto& e : stages[s].engines) {
+            if (!e.auxiliary()) return s;
+        }
+    }
+    return std::nullopt;
+}
+
+vehicle::SettlingPush FlightSession::settling_push_now() const {
+    const auto stage = burn_stage_index();
+    if (!stage || !env_.ignition_settling || !bodies_[controlled_].body->in_orbit()) return {};
+    return vehicle::settling_push(bodies_[controlled_].body->vehicle(), *stage);
+}
+
+double FlightSession::settling_lead_s() const { return settling_push_now().lead_s; }
+
+double FlightSession::settling_gas_kg() const { return settling_push_now().gas_kg; }
+
+bool FlightSession::settle(bool on) {
+    if (on && docking_busy()) return false;
+    settle_manual_ = on;
     return true;
 }
 

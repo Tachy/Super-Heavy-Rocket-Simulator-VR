@@ -51,6 +51,7 @@
 #include "starsim/mission/iss_launch_window.hpp"
 #include "starsim/mission/phasing_planner.hpp"
 #include "starsim/vehicle/flight_body.hpp"
+#include "starsim/vehicle/propellant_transfer.hpp"
 
 namespace starsim::sim {
 
@@ -262,6 +263,10 @@ public:
     // aircatch: holding b4's deorbit attitude for 108 h against the gravity gradient spent 6-8 t of RCS gas). The
     // ship turns to the burn attitude in this time (0.5 deg/s slews: half a turn and settling in < 10 min).
     static constexpr double burn_drift_lead_s = 1800.0;
+    // Refuelling f3: an unsettled ignition is held at most this many leads after its planned epoch while the push still
+    // gives force [E]; the coast stops this long before the push starts [E].
+    static constexpr double settling_hold_factor = 3.0;
+    static constexpr double settling_coast_margin_s = 30.0;
     // [E] A ship deorbit planned further ahead than this is planned again from the real state deorbit_replan_lead_s
     // before its burn (l5 Task 10: b4 from the aircatch orbit burnt a plan made 4.6 days earlier - the 200 km orbit
     // had decayed with the truth air density x1.13 and the entry fell 4,900 km short). 32 min before the burn the pass
@@ -362,6 +367,8 @@ public:
     void disengage_autopilot() {
         autopilot_.state = AutopilotState::Off;
         attitude_mode_ = {};
+        settling_push_ = false;
+        settling_hold_start_.reset();
         capsule_return_step_ = CapsuleReturnStep::None;
         lunar_step_ = LunarStep::None;
         lunar_pilot_.reset();
@@ -617,6 +624,13 @@ public:
     void set_solar_radiation_pressure(bool on) { env_.solar_radiation_pressure = on; }
     void set_boil_off(bool on) { env_.boil_off = on; }  // fidelity flag (refuelling r2)
     void set_ignition_settling(bool on) { env_.ignition_settling = on; }  // fidelity flag (refuelling f3)
+    // Settling before an in-orbit ignition (refuelling f3). The push for the controlled vehicle's burn stage (zero when
+    // it needs none, is not in orbit or the flag is off): its lead before the ignition and its gas.
+    double settling_lead_s() const;
+    double settling_gas_kg() const;
+    // Manual push (expert / manual mode): cold gas along +x until switched off; refused while docked.
+    bool settle(bool on);
+    bool settling() const { return settling_push_ || settle_manual_; }
 
     // A space station (a vehicle with [stage.station]) as an uncontrolled body in ideal LVLH attitude; `impulses`
     // are applied at their epochs (a coast stops there). Call after place_body / launch_from_pad / place_in_orbit -
@@ -924,6 +938,15 @@ private:
     std::optional<gnc::BurnExecutor> burn_;
     BurnConfiguration burn_config_;
     math::Vec3 last_rcs_acceleration_;  // RCS translation of the controlled body in the last tick (GCRF)
+    // Refuelling f3: the autopilot's settling push (Burn, lunar PDI) and the manual one; the burn's lead, the start of
+    // a held ignition and the push's acceleration in the last tick (GCRF, credited to the burn).
+    bool settling_push_ = false;
+    bool settle_manual_ = false;
+    double settling_lead_s_ = 0.0;
+    std::optional<time::Epoch> settling_hold_start_;
+    math::Vec3 settling_acceleration_gcrf_;
+    vehicle::SettlingPush settling_push_now() const;
+    std::optional<size_t> burn_stage_index() const;  // the lowest stage with burn engines
     std::optional<gnc::DeorbitPlan> deorbit_plan_;  // last ship return plan (also when refused)
     std::string burn_abort_reason_;
     // Refuelling f3: an engine of the controlled vehicle ingested gas at its start - cut off, autopilot off, reason.
