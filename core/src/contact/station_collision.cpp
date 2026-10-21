@@ -16,9 +16,12 @@ std::vector<math::Vec3> hull_sample_points(const config::VehicleConfig& vehicle,
         const auto& s = vehicle.stages[i];
         double top = base + s.length_m;
         const bool top_stage = i + 1 == vehicle.stages.size();
-        // a nose port (axis along +x: Crew Dragon) ends the hull below it; dorsal ports (the ships) do not
-        if (top_stage && !s.docking_ports.empty() && s.docking_ports.front().axis.x > 0.5) {
-            top = base + s.docking_ports.front().position_m.x - p.port_clearance_m;
+        // a nose port (axis along +x: Crew Dragon) ends the hull below it - the lowest one if there are several;
+        // dorsal ports (the ships) do not
+        if (top_stage) {
+            for (const auto& port : s.docking_ports) {
+                if (port.axis.x > 0.5) top = std::min(top, base + port.position_m.x - p.port_clearance_m);
+            }
         }
         const double r0 = 0.5 * s.diameter_m;
         const double r1 = 0.5 * (s.hull_top_diameter_m > 0.0 ? s.hull_top_diameter_m : s.diameter_m);

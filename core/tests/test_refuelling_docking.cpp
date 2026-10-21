@@ -286,13 +286,13 @@ TEST_CASE("Probe/drogue geometry from the r1 ports: probes and drogues pair up w
     const auto p = depot_probes();
     REQUIRE(p.probes_m.size() == 4);
     REQUIRE(p.drogues_m.size() == 4);
+    std::vector<Vec3> mated_m, drogues_yz_m;
     for (const auto& probe : p.probes_m) {
         CHECK(probe.x == 0.0);  // in the interface plane
-        const Vec3 mated{-probe.x, -probe.y, probe.z};
-        double nearest = 1e9;
-        for (const auto& d : p.drogues_m) nearest = std::min(nearest, std::hypot(mated.y - d.y, mated.z - d.z));
-        CHECK(nearest < 1e-9);
+        mated_m.push_back({0.0, -probe.y, probe.z});
     }
+    for (const auto& d : p.drogues_m) drogues_yz_m.push_back({0.0, d.y, d.z});
+    CHECK(proximity_test::probe_pairing_problem(mated_m, drogues_yz_m, 1e-9) == std::nullopt);
 }
 
 TEST_CASE("Probe/drogue contact: free above the mouths, centring in the cone, seated heads latch",

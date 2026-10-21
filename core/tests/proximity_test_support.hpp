@@ -9,6 +9,8 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -181,5 +183,20 @@ private:
         session.set_attitude_mode(gnc::lvlh_hold());
     }
 };
+
+// Every probe meets its own drogue within tol_m (refuelling): the problem, or nullopt when they pair one to one.
+inline std::optional<std::string> probe_pairing_problem(const std::vector<math::Vec3>& probes_m,
+                                                        const std::vector<math::Vec3>& drogues_m, double tol_m) {
+    std::set<std::size_t> used;
+    for (const auto& probe : probes_m) {
+        std::optional<std::size_t> hit;
+        for (std::size_t k = 0; k < drogues_m.size(); ++k) {
+            if (math::norm(probe - drogues_m[k]) < tol_m) hit = k;
+        }
+        if (!hit) return "probe without drogue";
+        if (!used.insert(*hit).second) return "two probes in one drogue";
+    }
+    return std::nullopt;
+}
 
 }  // namespace starsim::proximity_test

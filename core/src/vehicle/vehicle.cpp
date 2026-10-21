@@ -405,6 +405,9 @@ void Vehicle::set_tank_mass(size_t stage_index, std::string_view tank_id, double
     if (tank == stage.tanks.end()) {
         throw std::invalid_argument("Unbekannter Tank '" + std::string(tank_id) + "'");
     }
+    if (!std::isfinite(mass_kg)) {
+        throw std::invalid_argument("Tankmasse '" + std::string(tank_id) + "' ist keine Zahl");
+    }
     tank->mass_kg = std::clamp(mass_kg, 0.0, tank->config.capacity_kg);
     const auto role = stage.feed == FeedSource::Header ? config::TankRole::Header : config::TankRole::Main;
     if (stage.propellant_kg(config::TankContents::Oxidizer, role) > 0.0 &&

@@ -24,8 +24,8 @@ using math::Vec3;
 
 namespace {
 
-constexpr double solar_pressure_1au_pa = 1361.0 / 299792458.0;  // solar constant / c
-constexpr double astronomical_unit_m = 149597870700.0;
+constexpr double solar_pressure_1au_pa = constants::solar_constant_w_m2 / constants::speed_of_light_mps;
+constexpr double astronomical_unit_m = constants::astronomical_unit_m;
 
 using State13 = integrators::State<13>;
 

@@ -25,7 +25,7 @@ from = "starship_block3:ship"
 dry_mass_kg = 209000.0
 
 # Docking probes and transfer connectors [E] (positions not published; spec r1, plan decision 3): the interface plane
-# lies 0.5 m off the dorsal hull (z = +4.5 m; belly at -z). Mated with the depot's drogues the ships lie parallel,
+# z = +5.0 m lies 0.5 m off the dorsal hull (radius 4.5 m; belly at -z). Mated with the depot's drogues the ships lie parallel,
 # rolled 180 deg, 10 m between the centrelines. The layout is symmetric in y so the rolled ship meets it.
 [[stage.docking_port]]
 id = "transfer_dock"

@@ -43,6 +43,22 @@ TEST_CASE("Hull sample points of the Crew Dragon: trunk, tapered capsule, dockin
     CHECK(max_r_top < 1.5);                                  // the capsule narrows towards the top
 }
 
+TEST_CASE("Hull sample points stop below a nose port listed after a dorsal port", "[iss][docking]") {
+    auto dragon = config::load_vehicle(config_dir, "crew_dragon");
+    auto& top = dragon.stages.back();
+    REQUIRE_FALSE(top.docking_ports.empty());
+    const auto nose = top.docking_ports.front();
+    auto dorsal = nose;
+    dorsal.id = "dorsal";
+    dorsal.position_m = {1.0, 0.0, 2.0};
+    dorsal.axis = {0.0, 0.0, 1.0};
+    top.docking_ports.insert(top.docking_ports.begin(), dorsal);  // the nose port is no longer the first
+    const contact::StationCollisionParameters p;
+    double max_x = 0.0;
+    for (const auto& q : contact::hull_sample_points(dragon, p)) max_x = std::max(max_x, q.x);
+    CHECK(max_x <= 3.7 + nose.position_m.x - p.port_clearance_m + 1e-9);
+}
+
 TEST_CASE("Hull contact: a Dragon point inside the Harmony capsule is pushed out; outside nothing", "[iss][docking]") {
     const auto iss = config::load_vehicle(config_dir, "iss");
     const auto shape = contact::station_shape(iss);

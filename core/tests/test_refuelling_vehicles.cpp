@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -51,6 +52,12 @@ TEST_CASE("set_tank_mass sets one tank at run time, clamped to its capacity", "[
 
     CHECK_THROWS_AS(ship->set_tank_mass(0, "no_such_tank", 1.0), std::invalid_argument);
     CHECK_THROWS_AS(ship->set_tank_mass(3, "lox_main", 1.0), std::invalid_argument);
+    const double before_kg = ship->mass_properties().mass_kg;
+    CHECK_THROWS_AS(ship->set_tank_mass(0, "lox_main", std::numeric_limits<double>::quiet_NaN()),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(ship->set_tank_mass(0, "lox_main", std::numeric_limits<double>::infinity()),
+                    std::invalid_argument);
+    CHECK(ship->mass_properties().mass_kg == before_kg);
 }
 
 TEST_CASE("A refill does not revive a failed engine", "[refuelling][vehicle]") {
@@ -152,6 +159,11 @@ TEST_CASE("Bad `from` stages are config errors", "[refuelling][config]") {
         const auto dir = config_with(c.name, vehicle_with_stage(c.body));
         CHECK_THROWS_WITH(config::load_vehicle(dir, "test_vehicle"), Catch::Matchers::ContainsSubstring(c.message));
     }
+    // two stages with one id: the second must not replace the first silently
+    const auto dir = config_with("dup_stage", vehicle_with_stage("from = \"starship_block3:ship\"\n\n[[stage]]\n"
+                                                                 "from = \"starship_block3:ship\"\n"));
+    CHECK_THROWS_WITH(config::load_vehicle(dir, "test_vehicle"),
+                      Catch::Matchers::ContainsSubstring("stage 'ship' defined twice"));
 }
 
 namespace {
@@ -241,6 +253,13 @@ TEST_CASE("Bad probe/drogue ports and transfer connectors are config errors", "[
         {"pd_mechanism", ship + port_head + "mechanism = \"magnet\"\n", "mechanism must be"},
         {"tc_no_tank", ship + connector_head + "tank = \"nope\"\n", "main propellant tank"},
         {"tc_header", ship + connector_head + "tank = \"lox_header\"\n", "main propellant tank"},
+        {"dup_port", ship + port_head + port_head, "docking port id 'p' twice"},
+        {"dup_connector",
+         ship + connector_head + "tank = \"lox_main\"\nline_diameter_m = 0.15\ndischarge_coefficient = 0.6\n"
+                                 "chilldown_kg = 0.0\n" +
+             connector_head + "tank = \"ch4_main\"\nline_diameter_m = 0.15\ndischarge_coefficient = 0.6\n"
+                              "chilldown_kg = 0.0\n",
+         "transfer connector id 'c' twice"},
     };
     for (const auto& c : cases) {
         CAPTURE(c.name);
@@ -269,12 +288,16 @@ void check_mates_with_depot(const std::string& chaser_id) {
     const auto t = vehicle::mated_stage_transform(cp, dp);
     constexpr double match_m = 1e-9;
     REQUIRE(cp.elements_m.size() == dp.elements_m.size());
-    for (const auto& probe : cp.elements_m) {
-        const math::Vec3 at = t.apply(probe);
-        double nearest_m = 1e9;
-        for (const auto& drogue : dp.elements_m) nearest_m = std::min(nearest_m, math::norm(at - drogue));
-        CHECK(nearest_m < match_m);
-    }
+    std::vector<math::Vec3> probes_m;
+    for (const auto& probe : cp.elements_m) probes_m.push_back(t.apply(probe));
+    CHECK(proximity_test::probe_pairing_problem(probes_m, dp.elements_m, match_m) == std::nullopt);
+    // a layout that does not pair one to one is caught: a drogue off by 1 m, two drogues on one point
+    auto shifted = dp.elements_m;
+    shifted[0].x += 1.0;
+    CHECK(proximity_test::probe_pairing_problem(probes_m, shifted, match_m) == "probe without drogue");
+    auto doubled = dp.elements_m;
+    doubled[1] = doubled[0];
+    CHECK(proximity_test::probe_pairing_problem(probes_m, doubled, match_m).has_value());
     REQUIRE(chaser.transfer_connectors.size() == 2);
     for (const auto& c : chaser.transfer_connectors) {
         CAPTURE(c.id);

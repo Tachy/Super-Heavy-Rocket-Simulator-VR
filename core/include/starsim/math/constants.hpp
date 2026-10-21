@@ -63,6 +63,8 @@ inline constexpr double obliquity_j2000_rad = 84381.406 / 3600.0 * deg_to_rad;
 inline constexpr double solar_constant_w_m2 = 1361.0;
 // [S: IAU 2012 Resolution B2]
 inline constexpr double astronomical_unit_m = 1.495978707e11;
+// [S: SI definition of the metre]
+inline constexpr double speed_of_light_mps = 299792458.0;
 // [S: CODATA 2018]
 inline constexpr double stefan_boltzmann_w_m2k4 = 5.670374419e-8;
 // Earth's Bond albedo [S: 0.29-0.30, CERES; Stephens et al. 2015, Rev. Geophys. 53] - 0.30 as in the r2 spec.

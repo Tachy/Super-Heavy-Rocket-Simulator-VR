@@ -217,6 +217,10 @@ void append_docking_ports(const Document& doc, const toml::table& t, StageConfig
             if (port.mechanism == DockingMechanism::Idss && !port.elements_m.empty()) {
                 doc.fail("stage.docking_port '" + port.id + "': elements_m belong to a probe_drogue port");
             }
+            if (std::any_of(s.docking_ports.begin(), s.docking_ports.end(),
+                            [&](const DockingPortConfig& q) { return q.id == port.id; })) {
+                doc.fail("stage.docking_port: docking port id '" + port.id + "' twice");
+            }
             s.docking_ports.push_back(port);
         }
     }
@@ -241,6 +245,10 @@ void append_transfer_connectors(const Document& doc, const toml::table& t, Stage
             connector.chilldown_kg = doc.number(c, "chilldown_kg");
             if (connector.chilldown_kg < 0.0) {
                 doc.fail("stage.transfer_connector '" + connector.id + "': chilldown_kg must not be negative");
+            }
+            if (std::any_of(s.transfer_connectors.begin(), s.transfer_connectors.end(),
+                            [&](const TransferConnectorConfig& q) { return q.id == connector.id; })) {
+                doc.fail("stage.transfer_connector: transfer connector id '" + connector.id + "' twice");
             }
             s.transfer_connectors.push_back(connector);
         }
@@ -728,7 +736,10 @@ VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_
             const auto& table = *node.as_table();
             auto stage = table.contains("from") ? load_stage_from(config_dir, doc, table, v.propellant.id)
                                                 : load_stage(doc, table);
-            stages_by_id[stage.id] = std::move(stage);
+            const std::string id = stage.id;
+            if (!stages_by_id.emplace(id, std::move(stage)).second) {
+                doc.fail("stage '" + id + "' defined twice");
+            }
         }
     }
     const auto* order = vehicle["stages_bottom_to_top"].as_array();

@@ -41,8 +41,8 @@ contents = "fuel"
 mass_kg = 340191.3                       # [D] less the CH4 header
 base_station_m = 20.0                    # [E]
 
-# Header tanks [E] (header-tank plan, user 2026-10-18): the landing propellant (35 t, part of the 1,600 t) feeds the
-# flip and the landing burn - in an entry the main-tank residue lies away from the outlets. Placement from SN-era
+# Header tanks [E] kept from Block 3 (the depot never enters or lands): 35 t, part of the 1,600 t. No transfer
+# connector reaches them (connectors take main tanks only), so the usable depot fill is 1,600 - 35 t. Placement from SN-era
 # reports (2020-2022): LOX header in the nose tip, CH4 header a bubble on the CH4 main tank's lower dome; Block 3
 # placement is not published. Short cylinders of the given diameter.
 [[stage.tank]]
@@ -51,7 +51,7 @@ contents = "oxidizer"
 role = "header"
 propellant_management_device = true      # [E] user 2026-10-21: always covers its outlet (SpaceX details not public)
 mass_kg = 27391.3                        # [D] 35 t at O/F 3.6
-base_station_m = 44.0                    # [E] nose, forward of the forward flaps' hinge line
+base_station_m = 44.0                    # [E] nose (Block 3 station)
 diameter_m = 3.6                         # [E] ~23 m^3
 
 [[stage.tank]]
@@ -65,8 +65,7 @@ diameter_m = 3.0                         # [E] ~17 m^3
 
 # Sea-level Raptors as three single-engine groups. Layout [D] from the flight 13 splashdown video (ship upside down,
 # user 2026-10-13): two sea-level engines on the leeward side, one towards the belly; vacuum engines one leeward, two
-# towards the belly. The landing burn steps down 3 -> 2: the belly engine shuts down, the leeward pair (sea_level_1/2)
-# lands - its thrust centroid lies in the symmetry plane (pitch offset only, symmetric to the side pins).
+# towards the belly. Kept from Block 3 (the depot never lands; its Raptors only reboost).
 [[stage.engine_group]]
 id = "sea_level_1"
 engine = "raptor3"
@@ -117,17 +116,17 @@ minimum_on_time_s = 0.02                 # [E] valve; on/off only, fixed thrust 
 
 [[stage.rcs.pod]]
 id = "forward"
-station_m = 46.0                         # [E] forward of the forward flaps; sides (belly at 270 deg)
+station_m = 46.0                         # [E] Block 3 station (the depot has no flaps); sides (belly at 270 deg)
 radius_m = 4.5
 azimuths_deg = [0.0, 180.0]
 thrust_n = 1500.0                        # [E] (the pre-d1 estimate)
 directions = ["tangential_plus", "tangential_plus", "tangential_minus", "tangential_minus", "inward", "inward"]
 # [E] two of each: the pre-d1 per-axis estimate (roll 20, pitch / yaw 117 kNm) available on all axes at once - with one
-# of each, roll and pitch shared their thrusters and the entry's nose turn ran out of torque (d1 campaigns)
+# of each, roll and pitch shared their thrusters (Block 3 d1 entry campaigns; kept for the depot)
 
 [[stage.rcs.pod]]
 id = "aft"
-station_m = 6.0                          # [E] above the aft flaps
+station_m = 6.0                          # [E] Block 3 station (the depot has no flaps)
 radius_m = 4.5
 azimuths_deg = [0.0, 180.0]
 thrust_n = 1500.0                        # [E]
