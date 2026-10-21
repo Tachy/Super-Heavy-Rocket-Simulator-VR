@@ -30,6 +30,9 @@ struct RigidBodyState {
     math::Vec3 angular_velocity_body_radps;
 };
 
+// The default of FlightEnvironment::ignition_settling (refuelling f3; the campaign plans with it - f3 minor M7).
+inline constexpr bool ignition_settling_default = true;
+
 // Everything outside the vehicle that acts on it. Gravity must be Earth-centred; the Earth is the reference body unless
 // `moon` is given and the vehicle is near it.
 struct FlightEnvironment {
@@ -46,7 +49,7 @@ struct FlightEnvironment {
     bool propellant_settling = true;
     // Fidelity flag (refuelling f3): main-tank liquid must be settled over the outlets before an in-orbit ignition
     // (Vehicle::update_settling / set_ignition_check); off: never checked, the progress is not moved.
-    bool ignition_settling = true;
+    bool ignition_settling = ignition_settling_default;
     // Fidelity flag (header-tank plan review): engine, grid fin and flap moments act about the full CG point (pitch /
     // yaw; roll about MassProperties::roll_offset_m) as the hull's do. Off [E]: about the axial CG - with the full point
     // the Falcon 9 / Crew Dragon ascent apoapsis moved 210 -> 223 km (header-tank plan Task 2); not yet validated on.

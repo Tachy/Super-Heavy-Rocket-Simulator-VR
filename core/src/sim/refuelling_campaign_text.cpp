@@ -56,11 +56,11 @@ CampaignLevers campaign_levers_from_args(const std::vector<std::string>& args) {
         {"--hls-wait-d", {seconds_per_day, true, [&](double v) { l.hls_wait_s = v; }}},
     };
     for (size_t k = 0; k < args.size(); k += 2) {
-        if (args[k] == "--reference-phasing") {  // f1: a flag without a value
+        while (k < args.size() && args[k] == "--reference-phasing") {  // f1: a flag without a value
             l.reference_phasing = true;
-            --k;
-            continue;
+            ++k;
         }
+        if (k >= args.size()) break;
         const auto it = flags.find(args[k]);
         if (it == flags.end()) throw std::invalid_argument("unknown flag '" + args[k] + "'");
         if (k + 1 >= args.size()) throw std::invalid_argument(args[k] + ": value missing");

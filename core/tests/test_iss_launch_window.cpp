@@ -247,6 +247,21 @@ TEST_CASE("Launch window: a candidate too close to the coelliptic height is refu
     CHECK(ok.phasing_orbit->periapsis_radius_m == Catch::Approx(re + 180e3));
 }
 
+TEST_CASE("Launch window: the refusal names every candidate's reason", "[iss][launch_window]") {
+    // f1 minor M4: only the first bracketed candidate's reason was reported
+    test::spice_session();
+    const TankerFixture f;
+    auto p = f.parameters();
+    p.phasing_orbits = {{re + 250e3, re + 270e3}, {re + 190e3, re + 190e3}};
+    p.phasing.mission_limit_s = 2.0 * 3600.0;  // the raise above eats the limit; 190 x 190 km is too close
+    p.search_s = 3.0 * 86400.0;
+    const auto w = mission::plan_launch_window(f.pad_itrf(), f.earth, f.depot, f.start, p, gm);
+    REQUIRE_FALSE(w.feasible);
+    INFO(w.reason);
+    CHECK(w.reason.find("zu nah an der Zielbahn") != std::string::npos);
+    CHECK(w.reason.find("; ") != std::string::npos);  // and the other candidate's
+}
+
 TEST_CASE("Phasing cost against a hand computation", "[iss][launch_window]") {
     const double r1 = re + 170e3, r_t = re + 200e3;
     mission::PhasingParameters p;

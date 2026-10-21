@@ -2,6 +2,10 @@
 # calculator's inputs. [D] all: read from the flights' leg marks (core/tests/refuelling_measurements.hpp) and checked by
 # the slow r5 campaigns (1 % or 0.3 t). Re-measure after any change to the vehicles, ascents, phasing or transfer.
 
+# f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
+# a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
+inputs_digest = "4076d220b67343f9"
+
 [depot]
 mission = "depot_launch"
 initial_propellant_t = 55.5        # [D] main tanks after the ascent (199.6 x 211.7 km)

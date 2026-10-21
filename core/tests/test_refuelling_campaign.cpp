@@ -1,10 +1,15 @@
 // Refuelling r6: campaign calculator, its setup from config, the measured-numbers file.
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
+#include <string>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/refuelling_reference.hpp"
@@ -83,6 +88,50 @@ TEST_CASE("Hohmann, deorbit and drag makeup against hand values", "[refuelling][
 }
 
 namespace {
+
+// The configs the reference flights read (vehicles, engines, propellants, missions, the launch site), line ends as LF.
+const char* const reference_flight_inputs[] = {
+    "vehicles/starship_block3.toml",  "vehicles/starship_tanker.toml",   "vehicles/starship_depot.toml",
+    "vehicles/starship_hls.toml",     "vehicles/starship_hls_launch.toml", "engines/raptor3.toml",
+    "engines/raptor_vacuum3.toml",    "engines/hls_landing_thruster.toml", "propellants.toml",
+    "missions/depot_ascent.toml",     "missions/depot_launch.toml",        "missions/tanker_ascent.toml",
+    "missions/tanker_flight.toml",    "missions/hls_ascent.toml",          "missions/hls_refuel.toml",
+    "missions/ship_return_starbase.toml", "launch_sites.toml",
+};
+
+// FNV-1a 64 over the files, as 16 hex digits.
+std::string inputs_digest() {
+    std::uint64_t h = 14695981039346656037ull;
+    for (const char* name : reference_flight_inputs) {
+        std::ifstream in(config_dir / name, std::ios::binary);
+        REQUIRE(in);
+        for (char c; in.get(c);) {
+            if (c == '\r') continue;
+            h = (h ^ static_cast<unsigned char>(c)) * 1099511628211ull;
+        }
+    }
+    char text[17];
+    std::snprintf(text, sizeof text, "%016llx", static_cast<unsigned long long>(h));
+    return text;
+}
+
+}  // namespace
+
+TEST_CASE("The measured numbers belong to the current configs", "[refuelling][campaign][config]") {
+    // r6 minor: a cheap drift guard - the slow r5 flights re-measure reference_flights.toml; this catches a config
+    // change made without that (C++ model changes are not caught)
+    std::ifstream in(config_dir / "refuelling" / "reference_flights.toml");
+    REQUIRE(in);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    const std::string key = "inputs_digest = \"";
+    const auto at = text.find(key);
+    const std::string stored = at == std::string::npos ? std::string() : text.substr(at + key.size(), 16);
+    const std::string now = inputs_digest();
+    INFO("inputs changed: re-measure via the slow r5 flights, then set inputs_digest = \"" << now << "\"");
+    CHECK(stored == now);
+}
+
+namespace {
 constexpr double day = 86400.0;
 
 mission::CampaignModels constant_models(double boil_t_per_day, double tanker_t, double phasing_days) {
@@ -152,6 +201,67 @@ TEST_CASE("Campaign: vent and attitude gas are booked as losses", "[refuelling][
     CHECK(r.depot_at_hls_kg == Catch::Approx(316e3));
     CHECK(r.losses.transfer_vent_kg == Catch::Approx(30e3));
     CHECK(r.losses.attitude_gas_kg == Catch::Approx(4e3));
+}
+
+TEST_CASE("Vent: the gross draw that delivers a net mass", "[refuelling][campaign]") {
+    // r6 minor: the vent is a share of the gross (as the tanker side books it), so gross = net / (1 - f)
+    CHECK(mission::gross_for_net_kg(10e3, 0.5) == Catch::Approx(20e3));
+    CHECK(mission::gross_for_net_kg(10e3, 0.0) == Catch::Approx(10e3));
+    // the HLS's extra demand: 30 t at f = 0.5 asks 60 t gross, not 45 t - T3's 346 t (vent 0.5 on 200 t tankers:
+    // 100 t net each) no longer covers 300 + 60 t
+    auto in = simple_inputs();
+    in.transfer_vent_fraction = 0.5;
+    auto models = constant_models(1.0, 200.0, 2.0);
+    models.next_hls = [](double e) {
+        mission::CampaignFlight f{e, e + day, 0.0};
+        f.extra_demand_kg = 30e3;
+        return std::optional{f};
+    };
+    const auto r = mission::refuelling_campaign(in, models);
+    REQUIRE(r.closes);
+    CHECK(r.tanker_flights == 4);
+    in.transfer_vent_fraction = 1.0;  // nothing would arrive
+    CHECK_FALSE(mission::refuelling_campaign(in, models).closes);
+}
+
+TEST_CASE("Campaign: the HLS's wait at the depot boils off with the Sun of its arrival", "[refuelling][campaign]") {
+    // r6 minor: the wait was booked once with the Sun at the campaign start; now a model of the arrival time.
+    // Demand 343 t: T3's 346 t would do without the wait; with 1 t per day of arrival (4 t at day 4) T4 flies.
+    auto in = simple_inputs();
+    in.demand_kg = 343e3;
+    auto models = constant_models(1.0, 100.0, 2.0);
+    models.hls_wait_kg = [](double arrival_s) { return 1e3 * arrival_s / day; };
+    const auto r = mission::refuelling_campaign(in, models);
+    REQUIRE(r.closes);
+    CHECK(r.tanker_flights == 4);
+    CHECK(r.hls_wait_kg == Catch::Approx(5e3));  // the HLS arrives on day 5
+    // the wait must fit into the HLS's tanks beside its required propellant
+    in.hls_tank_room_kg = 1e3;
+    const auto small = mission::refuelling_campaign(in, models);
+    CHECK_FALSE(small.closes);
+    CHECK_THAT(small.reason, Catch::Matchers::StartsWith("HLS-Tanks zu klein für die Wartezeit"));
+}
+
+TEST_CASE("Campaign: a cheaper HLS phasing lowers the fill it needs", "[refuelling][campaign]") {
+    // f1 minor M3: the HLS's extra demand was one-sided (max 0). Demand 260 t, the HLS's window 20 t cheaper than its
+    // reference: T2's 247 t at day 3 suffice; at -1000 t the requirement stops at zero, not below
+    auto in = simple_inputs();
+    in.demand_kg = 260e3;
+    auto models = constant_models(1.0, 100.0, 2.0);
+    models.next_hls = [](double e) {
+        mission::CampaignFlight f{e, e + day, 0.0};
+        f.extra_demand_kg = -20e3;
+        return std::optional{f};
+    };
+    const auto r = mission::refuelling_campaign(in, models);
+    REQUIRE(r.closes);
+    CHECK(r.tanker_flights == 2);
+    models.next_hls = [](double e) {
+        mission::CampaignFlight f{e, e + day, 0.0};
+        f.extra_demand_kg = -1000e3;
+        return std::optional{f};
+    };
+    CHECK(mission::refuelling_campaign(in, models).tanker_flights <= 1);
 }
 
 TEST_CASE("Campaign refusals", "[refuelling][campaign]") {
@@ -372,6 +482,13 @@ TEST_CASE("refuelling_report: levers from the command line", "[refuelling][campa
     const auto r = sim::campaign_levers_from_args({"--reference-phasing", "--height-km", "250"});
     CHECK(r.reference_phasing);
     CHECK(*r.depot_height_m == Catch::Approx(250e3));
+    // f1 minor M6: the flag anywhere, twice; a value missing after it
+    const auto middle = sim::campaign_levers_from_args({"--height-km", "250", "--reference-phasing", "--interval-h", "12"});
+    CHECK(middle.reference_phasing);
+    CHECK(middle.launch_interval_s == Catch::Approx(12 * 3600.0));
+    CHECK(sim::campaign_levers_from_args({"--height-km", "250", "--reference-phasing"}).reference_phasing);
+    CHECK(sim::campaign_levers_from_args({"--reference-phasing", "--reference-phasing"}).reference_phasing);
+    CHECK_THROWS_AS(sim::campaign_levers_from_args({"--reference-phasing", "--height-km"}), std::invalid_argument);
 }
 
 TEST_CASE("refuelling_report: the text names the answer and the reason", "[refuelling][campaign]") {

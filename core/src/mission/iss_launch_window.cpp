@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
+#include <vector>
 
 #include "starsim/environment/gravity.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
@@ -217,11 +219,16 @@ LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrient
         if (!found) break;
         // every candidate at this crossing; the cheapest feasible one (ties: the first in the list)
         std::optional<LaunchWindow> best, any;
+        std::vector<std::string> reasons;  // every candidate's (f1 minor M4: only the first one's was reported)
         for (const auto& orbit : candidates) {
             const auto c = evaluate(t1, orbit);
             if (!c) continue;
             if (!any) any = c;
             if (c->schedule.feasible && (!best || c->cost.total_kg() < best->cost.total_kg())) best = c;
+            if (!c->schedule.feasible &&
+                std::find(reasons.begin(), reasons.end(), c->schedule.reason) == reasons.end()) {
+                reasons.push_back(c->schedule.reason);
+            }
         }
         if (!any) {  // this crossing lies before the earliest liftoff with the aimed bias: the next one
             t = t1 + p.sample_s;
@@ -232,7 +239,8 @@ LaunchWindow plan_launch_window(const Vec3& pad_itrf_m, const frames::BodyOrient
             best->rejected = w.rejected;
             return *best;
         }
-        last_reason = any->schedule.reason;
+        last_reason.clear();
+        for (const auto& reason : reasons) last_reason += (last_reason.empty() ? "" : "; ") + reason;
         ++w.rejected;
         t = any->liftoff + 3600.0;  // past this crossing: the next one is ~a day later
     }

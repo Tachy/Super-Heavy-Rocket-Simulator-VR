@@ -53,6 +53,10 @@ std::optional<CampaignFlight> next_slot(const std::function<std::optional<Campai
 
 CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModels& m) {
     CampaignResult r;
+    if (!(in.transfer_vent_fraction >= 0.0 && in.transfer_vent_fraction < 1.0)) {
+        r.reason = "Abblaseanteil des Transfers muss zwischen 0 und 1 liegen";
+        return r;
+    }
     if (in.demand_kg > in.depot_capacity_kg) {
         r.reason = "Depotvolumen reicht nicht: " + tonnes(in.demand_kg) + " gefordert, " +
                    tonnes(in.depot_capacity_kg) + " Tankvolumen";
@@ -71,15 +75,24 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
         return r;
     };
     while (true) {
-        if (depot.propellant_kg >= in.demand_kg) {
-            // enough now: does it last until the HLS arrives?
-            const auto hls = next_slot(m.next_hls, last_launch_s + in.launch_interval_s, last_arrival_s, in);
-            if (!hls) return finish("Kein Startfenster für das HLS");
+        // Does the depot last until the HLS arrives? Checked at every step, not only once the demand is in: the
+        // HLS's extra demand may be negative - a phasing window cheaper than its reference (f4, f1 minor M3).
+        const bool enough = depot.propellant_kg >= in.demand_kg;
+        const auto hls = next_slot(m.next_hls, last_launch_s + in.launch_interval_s, last_arrival_s, in);
+        if (enough && !hls) return finish("Kein Startfenster für das HLS");
+        if (hls) {
+            // the HLS's boil-off while it waits loaded for its launch, with its arrival's Sun (r6 minor)
+            const double wait_kg = m.hls_wait_kg ? m.hls_wait_kg(hls->arrival_s) : 0.0;
+            if (wait_kg > in.hls_tank_room_kg) {
+                return finish("HLS-Tanks zu klein für die Wartezeit: " + tonnes(wait_kg) + " Verdampfung, " +
+                              tonnes(in.hls_tank_room_kg) + " frei");
+            }
             Depot projected = depot;
             advance(projected, hls->arrival_s, in, m, nullptr);
-            // f1: the HLS's extra phasing demand comes on top (its share of the vent with it)
-            const double required_kg = in.demand_kg + hls->extra_demand_kg * (1.0 + in.transfer_vent_fraction);
-            if (projected.propellant_kg < required_kg && depot.propellant_kg >= in.depot_capacity_kg) {
+            // f1: the extra phasing demand and the wait come on top, grossed up by the vent; never below zero
+            const double required_kg =
+                std::max(0.0, in.demand_kg + gross_for_net_kg(hls->extra_demand_kg + wait_kg, in.transfer_vent_fraction));
+            if (enough && projected.propellant_kg < required_kg && depot.propellant_kg >= in.depot_capacity_kg) {
                 // review I2: full tanks, yet the losses until the HLS arrives eat into the demand
                 return finish("Depotvolumen reicht nicht für die Verluste bis zur HLS-Ankunft: " +
                               tonnes(projected.propellant_kg) + " bei Ankunft, " + tonnes(required_kg) + " gefordert");
@@ -90,6 +103,7 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
                 r.hls = hls;
                 r.duration_s = hls->arrival_s;
                 r.depot_at_hls_kg = depot.propellant_kg;
+                r.hls_wait_kg = wait_kg;
                 return finish("");
             }
         }

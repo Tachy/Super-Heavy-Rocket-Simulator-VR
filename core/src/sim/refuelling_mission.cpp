@@ -1,6 +1,7 @@
 #include "starsim/sim/refuelling_mission.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 #include <cmath>
 
 #include "starsim/config/launch_site_config.hpp"
@@ -127,6 +128,9 @@ mission::LaunchWindowParameters refuelling_window_parameters(const config::Refue
     // f1: the separation on the insertion orbit; the raise to the phasing orbit is part of the window's estimate
     p.separation_periapsis_radius_m = equatorial_radius_m + ascent.periapsis_height_m;
     p.separation_apoapsis_radius_m = equatorial_radius_m + ascent.apoapsis_height_m;
+    if (reference_phasing && !m.phasing_periapsis_height_m) {  // f1 minor M5: no silent fall-back to the candidates
+        throw std::invalid_argument("Referenz-Phasing braucht [phasing] periapsis_km in " + m.id);
+    }
     if (m.phasing_periapsis_height_m && (reference_phasing || m.phasing_candidates_m.empty())) {
         p.phasing_orbits = {{equatorial_radius_m + *m.phasing_periapsis_height_m,
                              equatorial_radius_m + ascent.apoapsis_height_m}};

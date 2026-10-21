@@ -479,7 +479,11 @@ RefuellingFlightMission load_refuelling_flight_mission(const std::filesystem::pa
     m.mission_limit_s = doc.positive(*phasing, "mission_limit_h") * 3600.0;
     m.earliest_arrival_s = doc.number(*phasing, "earliest_arrival_h") * 3600.0;
     if (phasing->contains("periapsis_km")) m.phasing_periapsis_height_m = doc.positive(*phasing, "periapsis_km") * 1e3;
+    // f1 minor M5: the margin applies with or without candidates
+    m.window_margin_s = doc.number_or(*phasing, "window_margin_h", 0.0) * 3600.0;
+    if (m.window_margin_s < 0.0) doc.fail("[phasing] window_margin_h must not be negative");
     if (const auto* candidates = (*phasing)["candidates_km"].as_array()) {
+        if (candidates->empty()) doc.fail("[phasing] candidates_km must not be empty (leave it out for none)");
         for (const auto& node : *candidates) {
             const auto* pair = node.as_array();
             const auto p = pair && pair->size() == 2 ? (*pair)[0].value<double>() : std::nullopt;
@@ -494,8 +498,6 @@ RefuellingFlightMission load_refuelling_flight_mission(const std::filesystem::pa
         m.planning_mass_kg = doc.positive(*phasing, "planning_mass_t") * 1e3;
         m.planning_boil_off_kgps = doc.number(*phasing, "planning_boil_off_t_per_day") * 1e3 / 86400.0;
         if (m.planning_boil_off_kgps < 0.0) doc.fail("[phasing] planning_boil_off_t_per_day must not be negative");
-        m.window_margin_s = doc.number_or(*phasing, "window_margin_h", 0.0) * 3600.0;
-        if (m.window_margin_s < 0.0) doc.fail("[phasing] window_margin_h must not be negative");
     }
     if (m.kind == MissionKind::TankerFlight) {
         m.return_id = doc.text(*mission, "return");

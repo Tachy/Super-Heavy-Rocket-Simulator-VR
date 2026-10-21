@@ -145,6 +145,18 @@ earliest_arrival_h = 0.0
     const auto no_mass = candidates("cfg_cand_mass", "candidates_km = [[150.0, 190.0]]\nplanning_boil_off_t_per_day = 12.0\n");
     CHECK_THROWS_WITH(config::load_refuelling_flight_mission(no_mass, "t"),
                       Catch::Matchers::ContainsSubstring("planning_mass_t"));
+    // f1 minor M5: an empty list is an error, not "no candidates but planning values required"; the window margin is
+    // read without candidates too
+    const auto empty = candidates("cfg_cand_empty", "candidates_km = []\n");
+    CHECK_THROWS_WITH(config::load_refuelling_flight_mission(empty, "t"),
+                      Catch::Matchers::ContainsSubstring("candidates_km must not be empty"));
+    const auto margin = candidates("cfg_margin", "window_margin_h = 2.0\n");
+    CHECK(config::load_refuelling_flight_mission(margin, "t").window_margin_s == Catch::Approx(7200.0));
+    // the reference phasing (a calculator lever) needs the single phasing orbit's periapsis
+    const auto m = config::load_refuelling_flight_mission(ok, "t");
+    const auto tanker_ascent = config::load_ascent_mission(config_dir, "tanker_ascent");
+    CHECK_THROWS_WITH(sim::refuelling_window_parameters(m, tanker_ascent, 3300.0, 0.0, true),
+                      Catch::Matchers::ContainsSubstring("periapsis_km"));
 }
 
 TEST_CASE("Refuelling window parameters: the insertion orbit and the candidates", "[refuelling][config][mission]") {
