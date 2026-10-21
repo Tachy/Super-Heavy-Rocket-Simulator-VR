@@ -120,4 +120,35 @@ math::StateVector synthetic_station_state(const StationMeanElements& mean, doubl
     return rotated(true_equator_to_gcrf(earth, mean.epoch), state_from_elements(el, gm_m3ps2));
 }
 
+double energy_mean_semi_major_axis_m(const math::StateVector& s, const math::Vec3& pole, double gm, double j2,
+                                     double radius_m) {
+    const double r = norm(s.position_m);
+    const double sin_lat = dot(s.position_m, pole) / r;
+    const double k = 0.5 * gm * j2 * radius_m * radius_m;
+    const double energy =
+        0.5 * dot(s.velocity_mps, s.velocity_mps) - gm / r + k * (3.0 * sin_lat * sin_lat - 1.0) / (r * r * r);
+    const math::Vec3 h = cross(s.position_m, s.velocity_mps);
+    const double cos_i = dot(h, pole) / norm(h);
+    const double mean_p = 1.5 * (1.0 - cos_i * cos_i) - 1.0;  // <3 sin^2(lat) - 1>
+    double a = -gm / (2.0 * energy);
+    for (int i = 0; i < 3; ++i) a = -gm / (2.0 * (energy - k * mean_p / (a * a * a)));  // <U> at the mean a
+    return a;
+}
+
+StationMeanElements station_mean_elements_from_state(const math::StateVector& s, time::Epoch epoch, double gm,
+                                                     double j2, double radius_m, const frames::BodyOrientation& earth) {
+    const math::Mat3 to_gcrf = true_equator_to_gcrf(earth, epoch);
+    const math::Mat3 to_tod = transpose(to_gcrf);
+    const math::Vec3 pole_gcrf = to_gcrf * math::Vec3{0.0, 0.0, 1.0};
+    const auto e = elements_from_state({to_tod * s.position_m, to_tod * s.velocity_mps}, gm);
+    StationMeanElements m;
+    m.epoch = epoch;
+    m.semi_major_axis_m = energy_mean_semi_major_axis_m(s, pole_gcrf, gm, j2, radius_m);
+    m.eccentricity = e.eccentricity;
+    m.inclination_rad = e.inclination_rad;
+    m.raan_rad = e.raan_rad;
+    m.argument_of_latitude_rad = e.argument_of_periapsis_rad + e.true_anomaly_rad;
+    return m;
+}
+
 }  // namespace starsim::orbit

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -122,4 +123,76 @@ TEST_CASE("Config reference RAAN is the fixture OEM's mean RAAN at reference_utc
     // close to the usual GCRF RAAN of the first row (69.36 deg): the frames differ by the pole tilt only
     const auto gcrf = orbit::elements_from_state(oem.row_state(0), gm);
     CHECK(std::abs(unwrap_delta(gcrf.raan_rad, reference.raan_rad)) / deg < 0.5);
+}
+
+namespace {
+
+// Refuelling f2 tests: point mass + J2 about +z (the test's true pole), RK4 [test].
+math::Vec3 j2_acceleration(const math::Vec3& r) {
+    const double rn = norm(r), z2 = (r.z / rn) * (r.z / rn);
+    const double k = 1.5 * j2 * gm * re * re / std::pow(rn, 5);
+    return -gm / (rn * rn * rn) * r +
+           math::Vec3{k * r.x * (5.0 * z2 - 1.0), k * r.y * (5.0 * z2 - 1.0), k * r.z * (5.0 * z2 - 3.0)};
+}
+
+math::StateVector rk4_step(const math::StateVector& s, double h) {
+    const auto f = [](const math::StateVector& x) {
+        return math::StateVector{x.velocity_mps, j2_acceleration(x.position_m)};
+    };
+    const auto add = [](const math::StateVector& a, const math::StateVector& d, double k) {
+        return math::StateVector{a.position_m + k * d.position_m, a.velocity_mps + k * d.velocity_mps};
+    };
+    const auto k1 = f(s), k2 = f(add(s, k1, h / 2)), k3 = f(add(s, k2, h / 2)), k4 = f(add(s, k3, h));
+    return {s.position_m + h / 6 * (k1.position_m + 2 * k2.position_m + 2 * k3.position_m + k4.position_m),
+            s.velocity_mps + h / 6 * (k1.velocity_mps + 2 * k2.velocity_mps + 2 * k3.velocity_mps + k4.velocity_mps)};
+}
+
+// 200 km circular, 26.5 deg, node on +x.
+math::StateVector leo_state() {
+    const double r = re + 200.0e3, i = 26.5 * deg;
+    const double v = std::sqrt(gm / r);
+    return {{r, 0.0, 0.0}, {0.0, v * std::cos(i), v * std::sin(i)}};
+}
+
+// The Earth's axes fixed to GCRF: the true pole is +z.
+class FixedEarth final : public frames::BodyOrientation {
+public:
+    frames::FixedToInertial fixed_to_gcrf(time::Epoch) const override { return {math::Mat3::identity(), {}}; }
+};
+
+}  // namespace
+
+TEST_CASE("Energy-mean semi-major axis holds over a J2 revolution where the osculating one swings", "[synthetic]") {
+    const math::Vec3 pole{0.0, 0.0, 1.0};
+    auto s = leo_state();
+    double osc_min = 1e30, osc_max = -1e30, mean_min = 1e30, mean_max = -1e30, osc_sum = 0.0, mean_sum = 0.0;
+    int n = 0;
+    for (double t = 0.0; t < 5300.0; t += 5.0, s = rk4_step(s, 5.0), ++n) {
+        const double osc = orbit::elements_from_state(s, gm).semi_major_axis_m;
+        const double mean = orbit::energy_mean_semi_major_axis_m(s, pole, gm, j2, re);
+        osc_min = std::min(osc_min, osc), osc_max = std::max(osc_max, osc), osc_sum += osc;
+        mean_min = std::min(mean_min, mean), mean_max = std::max(mean_max, mean), mean_sum += mean;
+    }
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("osculating range %.1f m, mean range %.1f m, averages differ %.1f m\n", osc_max - osc_min,
+                    mean_max - mean_min, osc_sum / n - mean_sum / n);
+    }
+    CHECK(osc_max - osc_min > 2000.0);                    // the J2 short-period swing (+-2 km at 26.5 deg)
+    CHECK(mean_max - mean_min < 50.0);                    // [E] the energy mean is flat
+    CHECK(std::abs(osc_sum / n - mean_sum / n) < 100.0);  // [E] and it is the osculating one's average
+}
+
+TEST_CASE("Mean elements from a flown state predict the orbit a day later", "[synthetic]") {
+    const FixedEarth earth;
+    const time::Epoch t0 = time::Epoch::from_tdb_seconds_past_j2000(0.0);
+    auto s = leo_state();
+    const auto mean = orbit::station_mean_elements_from_state(s, t0, gm, j2, re, earth);
+    CHECK(mean.inclination_rad == Catch::Approx(26.5 * deg).margin(1e-4));
+    for (double t = 0.0; t < 86400.0; t += 5.0) s = rk4_step(s, 5.0);
+    const auto later = orbit::advance_mean_elements(mean, t0 + 86400.0, gm, j2, re);
+    const auto predicted = orbit::synthetic_station_state(later, gm, earth);
+    const double angle = std::acos(
+        std::clamp(dot(math::normalized(predicted.position_m), math::normalized(s.position_m)), -1.0, 1.0));
+    if (std::getenv("STARSIM_VERBOSE")) std::printf("phase error after 1 day %.4f rad\n", angle);
+    CHECK(angle < 0.01);  // [E] ~65 km along the track after 16 revolutions (osculating phase kept)
 }

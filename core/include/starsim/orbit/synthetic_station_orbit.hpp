@@ -52,4 +52,18 @@ StationMeanElements advance_mean_elements(const StationMeanElements& mean, time:
 math::StateVector synthetic_station_state(const StationMeanElements& mean, double gm_m3ps2,
                                          const frames::BodyOrientation& earth);
 
+// The semi-major axis of the mean motion from the J2 energy [D] (refuelling f2): the axisymmetric J2 field conserves
+// E = v^2/2 - mu/r + U, U = mu J2 R^2 (3 sin^2(lat) - 1) / (2 r^3); the osculating a follows E - U and swings with the
+// latitude (+-2 km at 200 km / 26.5 deg), the mean one follows E - <U> with <3 sin^2(lat) - 1> = 3/2 sin^2(i) - 1 and
+// <1/r^3> = 1/a^3 (near-circular). Drag lowers it secularly. `pole_gcrf`: the J2 axis (the true pole) in GCRF.
+double energy_mean_semi_major_axis_m(const math::StateVector& state_gcrf, const math::Vec3& pole_gcrf,
+                                     double gm_m3ps2, double j2, double radius_m);
+
+// Mean elements of a flown station at `epoch` (refuelling f2: the flown depot for the campaign calculator): the
+// semi-major axis from the J2 energy, eccentricity, inclination, RAAN and argument of latitude osculating in the true
+// equator frame of `epoch` [E: their short-period terms, ~0.01 deg, kept]; the argument of perigee 0.
+StationMeanElements station_mean_elements_from_state(const math::StateVector& state_gcrf, time::Epoch epoch,
+                                                     double gm_m3ps2, double j2, double radius_m,
+                                                     const frames::BodyOrientation& earth);
+
 }  // namespace starsim::orbit
