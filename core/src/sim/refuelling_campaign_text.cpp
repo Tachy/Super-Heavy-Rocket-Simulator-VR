@@ -125,4 +125,66 @@ std::string campaign_report_text(const CampaignReport& r, const time::TimeScaleC
     return out.str();
 }
 
+std::string campaign_flight_text(const CampaignFlightState& st, const std::vector<std::string>& misses,
+                                 const time::TimeScaleConverter& time) {
+    std::ostringstream out;
+    const auto utc_at = [&](time::Epoch t) { return time.to_utc(t).to_iso_string().substr(0, 19); };
+    const time::Epoch start = st.start.value_or(time::Epoch{});
+    const auto day = [&](time::Epoch t) { return (t - start) / seconds_per_day; };
+    out << "Flown refuelling campaign (f2)";
+    if (st.start) out << " from " << utc_at(start);
+    out << " - " << to_string(st.phase) << ": " << st.status << "\n";
+    if (st.calculator) {
+        out << line("  calculator: %.0f tankers, %.1f days; HLS needs %.1f t propellant\n",
+                    st.calculator->result.tanker_flights, st.calculator->result.duration_s / seconds_per_day,
+                    st.hls_required_propellant_kg / kg_per_t);
+    }
+    out << "\n     #  launch (d)  arrival (d)  phasing orbit    delivered (t)  depot after (t)  calculator (t)\n";
+    for (const auto& r : st.rows) {
+        char orbit[32] = "-";
+        if (r.phasing_orbit) {
+            std::snprintf(orbit, sizeof orbit, "%.0f x %.0f km",
+                          (r.phasing_orbit->periapsis_radius_m - equatorial_radius_m) / m_per_km,
+                          (r.phasing_orbit->apoapsis_radius_m - equatorial_radius_m) / m_per_km);
+        }
+        char name[16];
+        std::snprintf(name, sizeof name, r.hls ? "HLS" : "%2d", r.number);
+        char row[256];
+        std::snprintf(row, sizeof row, "  %4s  %10.2f  %11.2f  %-15s  %13.1f  %15.1f", name, day(r.launch),
+                      day(r.arrival), orbit, r.delivered_kg / kg_per_t, r.depot_after_kg / kg_per_t);
+        out << row;
+        if (r.calculator) out << line("  %14.1f", r.calculator->depot_after_kg / kg_per_t);
+        if (r.failed) out << "  FAILED";
+        if (!r.note.empty()) out << "  " << r.note;
+        out << "\n";
+    }
+    const auto& l = st.losses;
+    out << line("\n  losses: boil-off (remainder) %.1f t, station keeping %.1f t, attitude gas %.2f t, vent %.1f t\n",
+                l.boil_off_kg / kg_per_t, l.station_keeping_kg / kg_per_t, l.attitude_gas_kg / kg_per_t,
+                l.transfer_vent_kg / kg_per_t);
+    double reboost_kg = 0.0;
+    for (const auto& r : st.reboosts) reboost_kg += r.propellant_kg;
+    out << line("  station keeping: %.0f reboosts, %.1f t\n", static_cast<double>(st.reboosts.size()),
+                reboost_kg / kg_per_t);
+    if (st.hls_arrival) {
+        out << line("  HLS at the depot %.2f d with %.1f t propellant\n", day(*st.hls_arrival),
+                    st.hls_propellant_kg / kg_per_t);
+    }
+    if (st.first_return) {
+        out << "  first tanker return: " << to_string(*st.first_return)
+            << line(", main %.2f t", st.first_return_main_kg / kg_per_t);
+        if (!st.first_return_note.empty()) out << " (" << st.first_return_note << ")";
+        out << "\n";
+    }
+    out << line("\nTanker flights: %.0f flown (campaign ", st.tankers_flown);
+    if (st.hls_arrival) {
+        out << line("%.1f days)\n", day(*st.hls_arrival));
+    } else {
+        out << "not complete)\n";
+    }
+    out << (misses.empty() ? "Comparison: passed\n" : "Comparison: FAILED\n");
+    for (const auto& m : misses) out << "  " << m << "\n";
+    return out.str();
+}
+
 }  // namespace starsim::sim

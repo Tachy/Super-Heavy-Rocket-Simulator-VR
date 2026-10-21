@@ -211,6 +211,15 @@ public:
     // The depot (a station with transfer connectors): {present}; present: {main_propellant_kg, capacity_kg,
     // fill_fraction, boil_off_kg_per_day (at the last evaluation), docked}.
     godot::Dictionary depot_state() const;
+    // Refuelling f2: the flown campaign (start_mission("refuelling_campaign_flown" / "..._placed")): {present} (false
+    // without one); present: {phase, status (German), tankers_flown, tankers_planned, depot_propellant_kg, start_tdb_s,
+    // next_launch_tdb_s (absent when none), next_is_hls, rows: [{number (0: HLS), hls, failed, note, launch_tdb_s,
+    // arrival_tdb_s, delivered_kg, depot_after_kg, calc_launch_tdb_s, calc_arrival_tdb_s, calc_depot_after_kg (calc_*
+    // absent without a calculator row)}], losses: {boil_off_kg, station_keeping_kg, attitude_gas_kg,
+    // transfer_vent_kg}, reboosts (count), calc_tanker_flights, calc_duration_s, hls_arrival_tdb_s, hls_propellant_kg,
+    // hls_required_propellant_kg, first_return (German), misses (German, once complete; empty: the comparison
+    // passed)}.
+    godot::Dictionary campaign_flight_state() const;
     // The tanker campaign (sim::plan_refuelling_campaign; the session is untouched, seconds of window searches on the
     // worker). params (optional; floats unless noted): height_km, interval_h, phasing_limit_h, tanker_dry_t, reserve_t,
     // initial_t, insulation, hls_wait_d, reference_phasing (bool, f1); an unknown key or a wrong type is refused.

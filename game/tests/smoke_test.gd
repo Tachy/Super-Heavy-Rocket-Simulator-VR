@@ -280,6 +280,7 @@ func _check_refuelling(config_dir: String, tdb: float) -> bool:
 	sim.setup(config_dir)
 	_check(not sim.transfer_state().get("present", true), "no transfer without a docked pair")
 	_check(not sim.depot_state().get("present", true), "no depot before a refuelling mission")
+	_check(not sim.campaign_flight_state().get("present", true), "no flown campaign before one is started")
 	var id: int = sim.start_mission("tanker_flight_orbit", tdb)
 	_check(sim.wait_idle(120.0) and sim.result(id).get("ok", false), "tanker_flight_orbit starts")
 	var depot: Dictionary = sim.depot_state()

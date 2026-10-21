@@ -459,6 +459,7 @@ godot::Dictionary FlightSim::station_geometry() const { return snapshot()->stati
 godot::Dictionary FlightSim::iss_mission() const { return snapshot()->iss_mission; }
 godot::Dictionary FlightSim::transfer_state() const { return snapshot()->transfer_state; }
 godot::Dictionary FlightSim::depot_state() const { return snapshot()->depot_state; }
+godot::Dictionary FlightSim::campaign_flight_state() const { return snapshot()->campaign_flight_state; }
 
 int64_t FlightSim::refuelling_campaign(const godot::Dictionary& params) {
     sim::CampaignLevers levers;
@@ -645,6 +646,7 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("settle", "enabled"), &FlightSim::settle);
     ClassDB::bind_method(D_METHOD("transfer_state"), &FlightSim::transfer_state);
     ClassDB::bind_method(D_METHOD("depot_state"), &FlightSim::depot_state);
+    ClassDB::bind_method(D_METHOD("campaign_flight_state"), &FlightSim::campaign_flight_state);
     ClassDB::bind_method(D_METHOD("refuelling_campaign", "params"), &FlightSim::refuelling_campaign);
     ClassDB::bind_method(D_METHOD("predict_trajectory", "index", "duration_s", "step_s"),
                          &FlightSim::predict_trajectory);

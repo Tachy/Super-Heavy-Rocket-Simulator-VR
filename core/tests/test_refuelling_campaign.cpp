@@ -673,3 +673,26 @@ TEST_CASE("A looser phasing limit never costs days", "[refuelling][campaign][slo
     REQUIRE(b.result.closes);
     CHECK(b.result.duration_s <= a.result.duration_s + 3600.0);
 }
+
+TEST_CASE("Flown campaign text: rows, losses, verdict", "[refuelling][campaign][campaign_flown]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter clock;
+    sim::CampaignFlightState st;
+    st.phase = sim::CampaignFlightPhase::Complete;
+    st.start = clock.from_utc({2026, 10, 20, 0, 0, 0.0});
+    sim::CampaignFlownRow row;
+    row.number = 1;
+    row.launch = *st.start + 3.0 * 86400.0;
+    row.arrival = *st.start + 4.5 * 86400.0;
+    row.delivered_kg = 70.4e3;
+    row.depot_after_kg = 122.6e3;
+    st.rows.push_back(row);
+    st.tankers_flown = 1;
+    const auto text = sim::campaign_flight_text(st, {}, clock);
+    CHECK_THAT(text, Catch::Matchers::ContainsSubstring("70.4"));
+    CHECK_THAT(text, Catch::Matchers::ContainsSubstring("122.6"));
+    CHECK_THAT(text, Catch::Matchers::ContainsSubstring("Comparison: passed"));
+    const auto failed = sim::campaign_flight_text(st, {"Tankerzahl: geflogen 1, Rechner 2"}, clock);
+    CHECK_THAT(failed, Catch::Matchers::ContainsSubstring("Tankerzahl"));
+    CHECK_THAT(failed, Catch::Matchers::ContainsSubstring("Comparison: FAILED"));
+}

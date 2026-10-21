@@ -14,6 +14,7 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/refuelling_campaign_flight.hpp"
 #include "starsim/sim/refuelling_campaign_setup.hpp"
 #include "starsim/time/time_scale_converter.hpp"
 
@@ -60,6 +61,7 @@ struct FlightSnapshot {
     godot::Dictionary lunar_state, lunar_site;                       // build_lunar_state / build_lunar_site
     godot::Dictionary iss_state, rendezvous_plan, docking_state, station_geometry, iss_mission;  // ISS i6
     godot::Dictionary transfer_state, depot_state;  // refuelling r6
+    godot::Dictionary campaign_flight_state;        // refuelling f2
     std::shared_ptr<const environment::LunarTerrain> moon_terrain;  // immutable: queried on the main thread
     bool has_target_orbit = false;
     godot::Vector3 target_plane_normal_gcrf;
@@ -90,6 +92,7 @@ godot::Dictionary build_iss_mission(const sim::FlightSession& session, const Sna
 // refuelling_campaign document the keys).
 godot::Dictionary build_transfer_state(const sim::FlightSession& session);
 godot::Dictionary build_depot_state(const sim::FlightSession& session);
+godot::Dictionary build_campaign_flight_state(const sim::FlightSession& session);  // f2
 godot::Dictionary campaign_dictionary(const sim::CampaignReport& report, const time::TimeScaleConverter& time);
 
 // Builds the snapshot from the session (worker thread). `previous` supplies the prediction when it is not due.

@@ -49,6 +49,63 @@ godot::Dictionary build_transfer_state(const sim::FlightSession& session) {
     return d;
 }
 
+godot::Dictionary build_campaign_flight_state(const sim::FlightSession& session) {
+    const auto* driver = dynamic_cast<const sim::RefuellingCampaignFlight*>(session.supervisor());
+    if (!driver) return absent();
+    const auto& st = driver->state();
+    godot::Dictionary d;
+    d["present"] = true;
+    d["phase"] = godot::String::utf8(sim::to_string(st.phase));
+    d["status"] = german(st.status);
+    d["tankers_flown"] = st.tankers_flown;
+    d["tankers_planned"] = st.tankers_planned;
+    d["depot_propellant_kg"] = st.depot_propellant_kg;
+    if (st.start) d["start_tdb_s"] = st.start->tdb_seconds_past_j2000();
+    if (st.next_launch) d["next_launch_tdb_s"] = st.next_launch->tdb_seconds_past_j2000();
+    d["next_is_hls"] = st.next_is_hls;
+    godot::Array rows;
+    for (const auto& r : st.rows) {
+        godot::Dictionary row;
+        row["number"] = r.number;
+        row["hls"] = r.hls;
+        row["failed"] = r.failed;
+        row["note"] = german(r.note);
+        row["launch_tdb_s"] = r.launch.tdb_seconds_past_j2000();
+        row["arrival_tdb_s"] = r.arrival.tdb_seconds_past_j2000();
+        row["delivered_kg"] = r.delivered_kg;
+        row["depot_after_kg"] = r.depot_after_kg;
+        if (r.calculator && st.calculator) {
+            row["calc_launch_tdb_s"] = (st.calculator->start + r.calculator->flight.launch_s).tdb_seconds_past_j2000();
+            row["calc_arrival_tdb_s"] =
+                (st.calculator->start + r.calculator->flight.arrival_s).tdb_seconds_past_j2000();
+            row["calc_depot_after_kg"] = r.calculator->depot_after_kg;
+        }
+        rows.push_back(row);
+    }
+    d["rows"] = rows;
+    godot::Dictionary losses;
+    losses["boil_off_kg"] = st.losses.boil_off_kg;
+    losses["station_keeping_kg"] = st.losses.station_keeping_kg;
+    losses["attitude_gas_kg"] = st.losses.attitude_gas_kg;
+    losses["transfer_vent_kg"] = st.losses.transfer_vent_kg;
+    d["losses"] = losses;
+    d["reboosts"] = static_cast<int64_t>(st.reboosts.size());
+    if (st.calculator) {
+        d["calc_tanker_flights"] = st.calculator->result.tanker_flights;
+        d["calc_duration_s"] = st.calculator->result.duration_s;
+    }
+    if (st.hls_arrival) d["hls_arrival_tdb_s"] = st.hls_arrival->tdb_seconds_past_j2000();
+    d["hls_propellant_kg"] = st.hls_propellant_kg;
+    d["hls_required_propellant_kg"] = st.hls_required_propellant_kg;
+    if (st.first_return) d["first_return"] = godot::String::utf8(sim::to_string(*st.first_return));
+    godot::Array misses;
+    if (st.phase == sim::CampaignFlightPhase::Complete) {
+        for (const auto& m : driver->comparison_misses()) misses.push_back(german(m));
+    }
+    d["misses"] = misses;
+    return d;
+}
+
 godot::Dictionary build_depot_state(const sim::FlightSession& session) {
     const auto index = session.station_index();
     if (!index) return absent();

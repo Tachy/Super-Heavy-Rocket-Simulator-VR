@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "starsim/sim/refuelling_campaign_flight.hpp"
 #include "starsim/sim/refuelling_campaign_setup.hpp"
 #include "starsim/time/time_scale_converter.hpp"
 
@@ -18,5 +19,11 @@ CampaignLevers campaign_levers_from_args(const std::vector<std::string>& args);
 // The report as text: inputs, the per-tanker table (launch / arrival in days and UTC, delivered, depot after), the
 // losses and the answer line "Tanker flights: N" - or the reason when the campaign does not close.
 std::string campaign_report_text(const CampaignReport& report, const time::TimeScaleConverter& time);
+
+// Refuelling f2 (refuelling_report --fly / --fly-placed): the flown campaign as text - one row per flight (launch,
+// arrival, phasing orbit, delivered, depot after: flown and the calculator's), the losses, the reboosts, the first
+// tanker's return, then "Comparison: passed" or "Comparison: FAILED" with the misses (comparison_misses).
+std::string campaign_flight_text(const CampaignFlightState& state, const std::vector<std::string>& misses,
+                                 const time::TimeScaleConverter& time);
 
 }  // namespace starsim::sim
