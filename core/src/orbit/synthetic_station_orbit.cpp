@@ -1,5 +1,6 @@
 #include "starsim/orbit/synthetic_station_orbit.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -133,6 +134,53 @@ double energy_mean_semi_major_axis_m(const math::StateVector& s, const math::Vec
     double a = -gm / (2.0 * energy);
     for (int i = 0; i < 3; ++i) a = -gm / (2.0 * (energy - k * mean_p / (a * a * a)));  // <U> at the mean a
     return a;
+}
+
+namespace {
+
+math::Vec3 j2_acceleration(const math::Vec3& r, double gm, double j2, double radius_m, const math::Vec3& pole) {
+    const double rn = norm(r);
+    const double z = dot(r, pole) / rn;  // sine of the latitude
+    const double k = 1.5 * j2 * gm * radius_m * radius_m / (rn * rn * rn * rn);
+    return -gm / (rn * rn * rn) * r + k * ((5.0 * z * z - 1.0) * (r / rn) - 2.0 * z * pole);
+}
+
+}  // namespace
+
+MeanOrbitShape j2_mean_orbit(const math::StateVector& state, double gm, double j2, double radius_m,
+                             const math::Vec3& pole) {
+    const auto first = elements_from_state(state, gm);
+    MeanOrbitShape out;
+    if (!(first.semi_major_axis_m > 0.0) || first.eccentricity >= 1.0) {  // open: nothing to average
+        out.semi_major_axis_m = first.semi_major_axis_m;
+        out.eccentricity = first.eccentricity;
+        out.inclination_rad = first.inclination_rad;
+        return out;
+    }
+    const double period_s = constants::two_pi * std::sqrt(std::pow(first.semi_major_axis_m, 3) / gm);
+    const double h = period_s / j2_mean_orbit_samples;
+    const auto f = [&](const math::StateVector& x) {
+        return math::StateVector{x.velocity_mps, j2_acceleration(x.position_m, gm, j2, radius_m, pole)};
+    };
+    const auto add = [](const math::StateVector& a, const math::StateVector& d, double k) {
+        return math::StateVector{a.position_m + k * d.position_m, a.velocity_mps + k * d.velocity_mps};
+    };
+    math::StateVector s = state;
+    double a_sum = 0.0;
+    math::Vec3 e_sum{}, h_sum{};
+    for (int i = 0; i < j2_mean_orbit_samples; ++i) {
+        const double r = norm(s.position_m), v2 = dot(s.velocity_mps, s.velocity_mps);
+        a_sum += 1.0 / (2.0 / r - v2 / gm);
+        e_sum += ((v2 - gm / r) * s.position_m - dot(s.position_m, s.velocity_mps) * s.velocity_mps) / gm;
+        h_sum += cross(s.position_m, s.velocity_mps);
+        const auto k1 = f(s), k2 = f(add(s, k1, h / 2)), k3 = f(add(s, k2, h / 2)), k4 = f(add(s, k3, h));
+        s = {s.position_m + h / 6 * (k1.position_m + 2.0 * k2.position_m + 2.0 * k3.position_m + k4.position_m),
+             s.velocity_mps + h / 6 * (k1.velocity_mps + 2.0 * k2.velocity_mps + 2.0 * k3.velocity_mps + k4.velocity_mps)};
+    }
+    out.semi_major_axis_m = a_sum / j2_mean_orbit_samples;
+    out.eccentricity = norm(e_sum / static_cast<double>(j2_mean_orbit_samples));
+    out.inclination_rad = std::acos(std::clamp(dot(math::normalized(h_sum), pole), -1.0, 1.0));
+    return out;
 }
 
 StationMeanElements station_mean_elements_from_state(const math::StateVector& s, time::Epoch epoch, double gm,

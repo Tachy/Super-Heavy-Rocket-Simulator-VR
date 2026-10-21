@@ -196,3 +196,27 @@ TEST_CASE("Mean elements from a flown state predict the orbit a day later", "[sy
     if (std::getenv("STARSIM_VERBOSE")) std::printf("phase error after 1 day %.4f rad\n", angle);
     CHECK(angle < 0.01);  // [E] ~65 km along the track after 16 revolutions (osculating phase kept)
 }
+
+TEST_CASE("J2-mean orbit: the apsides of a 188 x 198 km orbit hold where the osculating ones swing", "[synthetic]") {
+    // f2: the flown phasing plan read the osculating apsides (J2: +-10 km) and refused orbits the window had chosen
+    const math::Vec3 pole{0.0, 0.0, 1.0};
+    const double rp = re + 188.0e3, ra = re + 198.0e3, a = 0.5 * (rp + ra), i = 26.5 * deg;
+    const double vp = std::sqrt(gm * (2.0 / rp - 1.0 / a));
+    math::StateVector s{{rp, 0.0, 0.0}, {0.0, vp * std::cos(i), vp * std::sin(i)}};
+    double osc_min = 1e30, osc_max = -1e30, mean_min = 1e30, mean_max = -1e30;
+    for (double t = 0.0; t < 5400.0; t += 450.0) {
+        const auto osc = orbit::elements_from_state(s, gm);
+        const auto mean = orbit::j2_mean_orbit(s, gm, j2, re, pole);
+        const double osc_apo = osc.semi_major_axis_m * (1.0 + osc.eccentricity);
+        const double mean_apo = mean.semi_major_axis_m * (1.0 + mean.eccentricity);
+        osc_min = std::min(osc_min, osc_apo), osc_max = std::max(osc_max, osc_apo);
+        mean_min = std::min(mean_min, mean_apo), mean_max = std::max(mean_max, mean_apo);
+        for (int k = 0; k < 90; ++k) s = rk4_step(s, 5.0);
+    }
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("apoapsis: osculating %.1f-%.1f km, mean %.2f-%.2f km\n", (osc_min - re) / 1e3, (osc_max - re) / 1e3,
+                    (mean_min - re) / 1e3, (mean_max - re) / 1e3);
+    }
+    CHECK(osc_max - osc_min > 4000.0);   // the J2 short-period swing
+    CHECK(mean_max - mean_min < 1000.0);  // [E] the mean apoapsis holds
+}

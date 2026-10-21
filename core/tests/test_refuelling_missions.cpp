@@ -23,6 +23,8 @@
 #include "starsim/config/refuelling_reference.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/environment/gravity.hpp"
+#include "starsim/orbit/synthetic_station_orbit.hpp"
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
@@ -188,6 +190,14 @@ struct RaiseFixture : refuelling_test::DepotSession {
         const auto el = orbit::elements_from_state({s.position_gcrf_m, s.velocity_gcrf_mps}, constants::earth_gm_m3ps2);
         return {el.semi_major_axis_m * (1.0 - el.eccentricity), el.semi_major_axis_m * (1.0 + el.eccentricity)};
     }
+    // f2: the J2-mean apsides (the osculating ones swing +-10 km)
+    std::pair<double, double> mean_apsides() const {
+        const auto& s = session.body(0).state();
+        const auto m = orbit::j2_mean_orbit({s.position_gcrf_m, s.velocity_gcrf_mps}, constants::earth_gm_m3ps2,
+                                            constants::earth_j2, environment::earth_j2_reference_radius_m,
+                                            math::Vec3{0.0, 0.0, 1.0});
+        return {m.semi_major_axis_m * (1.0 - m.eccentricity), m.semi_major_axis_m * (1.0 + m.eccentricity)};
+    }
     sim::IssMissionSequence sequence;
 };
 
@@ -236,14 +246,34 @@ TEST_CASE("Raise: a candidate below the insertion periapsis never lowers it", "[
     test::spice_session();
     const double re = constants::wgs84_semi_major_axis_m;
     RaiseFixture f(100e3);
-    // the apoapsis raise at the 190 km apoapsis makes 190 km the periapsis; the 100 km candidate is not burnt down to
+    // f2: a target periapsis below the 190 km apoapsis: the apoapsis is raised at the 120 km periapsis, which stays -
+    // the 100 km candidate is not burnt down to
     f.sequence.raise_to = mission::PhasingOrbit{re + 100e3, re + 270e3};
+    const double rp0 = f.mean_apsides().first;  // the fixture's osculating 120 km periapsis is ~127 km mean
     f.start();
     f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
     INFO(f.session.iss_mission_status());
-    const auto [rp, ra] = f.apsides();
-    CHECK(rp > re + 160e3);  // [E] J2 short-period terms move the osculating periapsis by ~15 km (bug: ~114 km)
-    CHECK(ra == Catch::Approx(re + 270e3).margin(20e3));
+    const auto [rp, ra] = f.mean_apsides();
+    CHECK(rp == Catch::Approx(rp0).margin(3e3));  // [E] the mean periapsis kept (never lowered)
+    CHECK(ra == Catch::Approx(re + 270e3).margin(3e3));
+}
+
+TEST_CASE("Raise: a below-depot orbit above the insertion apoapsis ends at its own mean orbit", "[refuelling][iss_mission]") {
+    // f2: the flown campaign's launched depot (8 km higher) shifted the 150 x 190 km candidate to 158 x 198 km; the
+    // apoapsis raise at the 190 km apoapsis flew 190 x 198 km (the periapsis raise never lowers), next to the depot,
+    // and burns sized from the osculating apsides overshot - every such window failed
+    test::spice_session();
+    const double re = constants::wgs84_semi_major_axis_m;
+    RaiseFixture f(100e3, -10.0);
+    f.sequence.raise_to = mission::PhasingOrbit{re + 158e3, re + 198e3};
+    f.start();
+    f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
+    const auto& marks = f.session.iss_mission_marks();
+    CHECK(std::count_if(marks.begin(), marks.end(), [](const auto& m) { return m.leg == IssMissionLeg::Raise; }) == 2);
+    const auto [rp, ra] = f.mean_apsides();
+    std::printf("[f2] raise 120 x 190 -> mean %.1f x %.1f km\n", (rp - re) / 1e3, (ra - re) / 1e3);
+    CHECK(rp == Catch::Approx(re + 158e3).margin(3e3));  // [E]
+    CHECK(ra == Catch::Approx(re + 198e3).margin(3e3));  // [E]
 }
 
 TEST_CASE("Raise: the phasing deadline counts from the separation, not from the end of the raise",
@@ -737,9 +767,12 @@ TEST_CASE("After the ascent the sequence raises the perigee at apoapsis, then pl
     REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
     REQUIRE(refuelling_test::mark(f.session, IssMissionLeg::Raise));
     const auto& s = f.session.body(f.session.controlled_index()).state();
-    const auto e = orbit::elements_from_state({s.position_gcrf_m, s.velocity_gcrf_mps}, constants::earth_gm_m3ps2);
+    // f2: the raise reaches the J2-mean periapsis (the osculating one swings +-10 km)
+    const auto e = orbit::j2_mean_orbit({s.position_gcrf_m, s.velocity_gcrf_mps}, constants::earth_gm_m3ps2,
+                                        constants::earth_j2, environment::earth_j2_reference_radius_m,
+                                        math::Vec3{0.0, 0.0, 1.0});
     const double rp = e.semi_major_axis_m * (1.0 - e.eccentricity) - constants::wgs84_semi_major_axis_m;
-    CHECK(rp == Catch::Approx(170.0e3).margin(3.0e3));  // [E] the burn's execution and J2 osculation
+    CHECK(rp == Catch::Approx(170.0e3).margin(3.0e3));  // [E] the burn's execution
     const double used_kg = 100.0e3 - refuelling_test::mark(f.session, IssMissionLeg::Rendezvous)->chaser_main_propellant_kg;
     std::printf("[r5] perigee raise 120 -> %.1f km: %.2f t main propellant (incl. boil-off)\n", rp / 1e3, used_kg / 1e3);
     CHECK(used_kg < 5.0e3);  // ~15 m/s on ~360 t

@@ -1,7 +1,8 @@
 # Refuelling r6: measured numbers of the r5 reference flights (pad starts, 2026-10-20 epochs) - the campaign
 # calculator's inputs. [D] all: read from the flights' leg marks (core/tests/refuelling_measurements.hpp) and checked by
 # the slow r5 campaigns (1 % or 0.3 t). Re-measure after any change to the vehicles, ascents, phasing or transfer.
-# f2 2026-10-21: re-measured after the rendezvous cold-gas limit (burns over 300 s of cold gas fly on the Raptor).
+# f2 2026-10-21: re-measured after the rendezvous cold-gas limit (burns over 300 s of cold gas fly on the Raptor)
+# and the raise from the J2-mean apsides (the 150 x 190 km raise now reaches its mean orbit: 2.5 t more).
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
@@ -14,14 +15,14 @@ initial_propellant_t = 55.5        # [D] main tanks after the ascent (199.6 x 21
 [tanker]
 mission = "tanker_flight"
 dry_mass_t = 209.0                 # [D] the configured tanker (starship_tanker) the numbers belong to
-residue_after_ascent_t = 99.7      # [D] f3 2026-10-21: main tanks at the Rendezvous mark (after the raise to the window's orbit)
+residue_after_ascent_t = 97.2      # [D] f2 2026-10-21: main tanks at the Rendezvous mark (after the raise to the window's orbit)
 rendezvous_t = 17.0                # [D] f2 2026-10-21: Rendezvous -> Docked: burns, RCS gas (+ settling pushes), boil-off
-delivered_oxidizer_t = 55.2        # [D] f2 2026-10-21: into the depot
-delivered_fuel_t = 13.5            # [D] f2 2026-10-21
+delivered_oxidizer_t = 53.1        # [D] f2 2026-10-21: into the depot
+delivered_fuel_t = 13.2            # [D] f2 2026-10-21
 chilldown_t = 0.42                 # [D] vented
-settling_gas_t = 0.94              # [D] f2 2026-10-21: the transfer's settling push (r4)
+settling_gas_t = 0.92              # [D] f2 2026-10-21: the transfer's settling push (r4)
 main_at_undock_t = 12.6            # [D] the reserve kept for the return
-main_at_catch_t = 2.17             # [D] f2 2026-10-21: what the reserve left over
+main_at_catch_t = 1.88             # [D] f2 2026-10-21: what the reserve left over
 dry_mass_sensitivity = 0.99        # [D] r5 probes: ship dry -10 / -20 t -> residue +9.9 / +19.8 t
 # [D] f2 2026-10-21: the tanker with 99.7 t main in a 24 h free coast (the phasing flight between its burns), the flown
 # heat balance: 3.38 t/day at 150 x 190 km, 3.65 t/day at 220 x 260 km. The orbit average at a fixed LVLH attitude

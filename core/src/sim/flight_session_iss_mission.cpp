@@ -5,7 +5,10 @@
 #include <algorithm>
 #include <string>
 
+#include "starsim/environment/gravity.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/orbit/synthetic_station_orbit.hpp"
 #include "starsim/sim/flight_session.hpp"
 
 namespace starsim::sim {
@@ -119,18 +122,23 @@ void FlightSession::iss_start_raise(bool first) {
     // The burn sequence is fixed at the start (refuelling f1): the osculating apsides swing by several km with J2, so a
     // re-check after each burn would keep adding burns. First: the apoapsis raise if needed (then the periapsis raise
     // at the new apoapsis follows), else the periapsis raise alone.
+    // f2: the burns sized from the J2-mean apsides (the osculating ones swing +-10 km at 200 km; an apoapsis raise
+    // planned from them overshot by several km and the below-depot orbits then crossed the depot's)
+    const auto mean = orbit::j2_mean_orbit(state, gm_earth_, constants::earth_j2,
+                                           environment::earth_j2_reference_radius_m, math::Vec3{0.0, 0.0, 1.0});
+    const double mean_rp = mean.semi_major_axis_m * (1.0 - mean.eccentricity);
+    const double mean_ra = mean.semi_major_axis_m * (1.0 + mean.eccentricity);
     std::optional<gnc::BurnNode> node;
     if (first) {
         raise_start_epoch_ = epoch_;  // the separation: the window's phasing limit counts from here (f1 minor M2)
-        node = gnc::next_raise_node(state, epoch_, gm_earth_, to.periapsis_radius_m, to.apoapsis_radius_m,
-                                    mission::raise_tolerance_m);
-        const auto el = orbit::elements_from_state(state, gm_earth_);
-        raise_periapsis_pending_ =
-            node && to.apoapsis_radius_m > el.semi_major_axis_m * (1.0 + el.eccentricity) + mission::raise_tolerance_m;
+        node = gnc::next_raise_node_mean(state, epoch_, gm_earth_, mean_rp, mean_ra, to.periapsis_radius_m,
+                                         to.apoapsis_radius_m, mission::raise_tolerance_m);
+        raise_periapsis_pending_ = node && to.apoapsis_radius_m > mean_ra + mission::raise_tolerance_m;
     } else if (raise_periapsis_pending_) {
         raise_periapsis_pending_ = false;
         // raised only, as the window's estimate (f1 minor M1: a candidate below the new periapsis lowered it)
-        node = gnc::raise_periapsis_at_apoapsis(state, epoch_, gm_earth_, to.periapsis_radius_m);
+        node = gnc::next_raise_node_mean(state, epoch_, gm_earth_, mean_rp, mean_ra, to.periapsis_radius_m,
+                                         to.apoapsis_radius_m, mission::raise_tolerance_m, true);
     }
     if (!node) {  // at (or above) the phasing orbit
         auto phasing = iss_mission_->phasing;

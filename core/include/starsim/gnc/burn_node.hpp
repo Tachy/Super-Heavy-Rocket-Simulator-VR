@@ -32,10 +32,19 @@ std::optional<BurnNode> set_periapsis_at_apoapsis(const math::StateVector& state
                                                   double periapsis_radius_m);
 
 // Next apsis burn from `state` towards the orbit periapsis_radius_m x apoapsis_radius_m (two-body; refuelling f1):
-// first the apoapsis (burn at the current apoapsis), then the periapsis (burn at the new apoapsis); empty when both
-// are within tolerance_m or above, or the orbit is open.
+// first the apoapsis, then the periapsis (burn at the new apoapsis); empty when both are within tolerance_m or above,
+// or the orbit is open. The apoapsis is raised at the current apoapsis when the target periapsis lies above it (the
+// old apoapsis becomes the periapsis, raised next), else at the current periapsis (f2: at the apoapsis a target below
+// it ended as the old apoapsis - the 120 x 190 -> 158 x 198 km raise flew 190 x 198 km, next to the depot).
 std::optional<BurnNode> next_raise_node(const math::StateVector& state, time::Epoch now, double gm_m3ps2,
                                         double periapsis_radius_m, double apoapsis_radius_m, double tolerance_m);
+// Refuelling f2: next_raise_node's burn sized from the orbit's mean apsides (J2-mean: the osculating ones swing by
+// +-10 km at 200 km, apsis burns planned from them overshot by several km); the node at the osculating apsis.
+// `periapsis_only`: the second burn of a sequence (the periapsis raise at the apoapsis; never lowered).
+std::optional<BurnNode> next_raise_node_mean(const math::StateVector& state, time::Epoch now, double gm_m3ps2,
+                                             double mean_periapsis_radius_m, double mean_apoapsis_radius_m,
+                                             double periapsis_radius_m, double apoapsis_radius_m, double tolerance_m,
+                                             bool periapsis_only = false);
 
 // Burn duration for a delta-v from the rocket equation (constant thrust and mass flow).
 double burn_duration_s(double delta_v_mps, double mass_kg, double thrust_n, double mass_flow_kgps);

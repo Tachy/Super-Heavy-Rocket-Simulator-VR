@@ -59,6 +59,19 @@ math::StateVector synthetic_station_state(const StationMeanElements& mean, doubl
 double energy_mean_semi_major_axis_m(const math::StateVector& state_gcrf, const math::Vec3& pole_gcrf,
                                      double gm_m3ps2, double j2, double radius_m);
 
+// The J2-mean shape of an orbit (refuelling f2, user 2026-10-21): the osculating semi-major axis, eccentricity vector
+// and angular momentum averaged over one revolution of a point mass + J2 propagation (RK4, j2_mean_orbit_samples
+// steps) from `state_gcrf` [E: the secular drift over the revolution is kept]. The raise to a phasing orbit read the
+// osculating apsides, which J2 swings by +-10 km at 200 km, and overshot by several km.
+struct MeanOrbitShape {
+    double semi_major_axis_m = 0.0;
+    double eccentricity = 0.0;
+    double inclination_rad = 0.0;  // against `pole_gcrf`'s equator
+};
+inline constexpr int j2_mean_orbit_samples = 360;
+MeanOrbitShape j2_mean_orbit(const math::StateVector& state_gcrf, double gm_m3ps2, double j2, double radius_m,
+                             const math::Vec3& pole_gcrf);
+
 // Mean elements of a flown station at `epoch` (refuelling f2: the flown depot for the campaign calculator): the
 // semi-major axis from the J2 energy, eccentricity, inclination, RAAN and argument of latitude osculating in the true
 // equator frame of `epoch` [E: their short-period terms, ~0.01 deg, kept]; the argument of perigee 0.

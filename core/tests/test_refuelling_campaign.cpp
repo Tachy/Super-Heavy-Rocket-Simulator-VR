@@ -65,7 +65,7 @@ TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelli
     CHECK(r.depot.mission == "depot_launch");
     CHECK(r.depot.initial_propellant_kg == Catch::Approx(55.5e3));
     CHECK(r.tanker.mission == "tanker_flight");
-    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(68.7e3));  // f2 re-measured
+    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(66.3e3));  // f2 re-measured
     CHECK(r.tanker.dry_mass_sensitivity == Catch::Approx(0.99));
     CHECK(r.hls.mission == "hls_refuel");
     CHECK(r.hls.main_at_docking_kg == Catch::Approx(193.6e3));  // f2 re-measured
@@ -445,8 +445,9 @@ TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[r
     }
     REQUIRE(r.result.hls);
     CHECK(r.result.hls->window.has_value());
-    CHECK(r.result.tanker_flights == 13);
-    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(49.7).margin(0.05));
+    // the answer (f2: 14 tankers / 51.7 d after the re-measured delivery, 66.3 t - the raise reaches its mean orbit)
+    CHECK(r.result.tanker_flights == 14);
+    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(51.7).margin(0.05));
 }
 
 TEST_CASE("Campaign live start: the flown depot's orbit, fill and last flight", "[refuelling][campaign]") {

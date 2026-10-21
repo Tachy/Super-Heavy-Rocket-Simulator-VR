@@ -324,7 +324,9 @@ gnc::BurnNode prograde(const sim::FlightSession& s, double ahead_s, double dv_mp
 
 TEST_CASE("The autopilot settles before a raise burn and the burn flies", "[ignition_settling][refuelling][iss_mission]") {
     test::spice_session();
-    TankerInOrbit f(100e3, 120e3, 190e3, -10.0, true);  // as the f1 below-candidate cases
+    // f2: 30 deg behind (was 10): the raise reaches its mean orbit now, and after the 2 h coast below the phase from
+    // 10 deg no longer closed within a lap - the case is about the settling push before the raise burn, not the window
+    TankerInOrbit f(100e3, 120e3, 190e3, -30.0, true);
     sim::IssMissionSequence q;
     q.from_launch = true;
     q.station_port = "transfer_dock";
