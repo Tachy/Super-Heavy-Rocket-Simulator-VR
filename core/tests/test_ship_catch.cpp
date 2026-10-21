@@ -180,6 +180,8 @@ TEST_CASE("Ship catch campaign: gate dispersions and an engine failure", "[ship]
         CHECK_FALSE(run.tower_struck);  // never, in any case
         if (run.caught_within_tolerance()) ++caught;
         if (run.result == sim::ReturnResult::Lost) ++lost;
+        // every case ends caught or in an upright abort (not lost, not still flying when the run ends)
+        CHECK((run.result == sim::ReturnResult::Caught || run.result == sim::ReturnResult::UprightAbort));
     }
     std::printf("caught %d of %zu, lost %d\n", caught, cases.size(), lost);
     // Ship catch robustness (2026-10-21): the engine-failure case may abort - upright; none lost (was >= 19 caught)
