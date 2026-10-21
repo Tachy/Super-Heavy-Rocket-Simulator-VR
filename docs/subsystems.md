@@ -201,12 +201,11 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   (layout [D] from the flight 13 splashdown video; its thrust centroid lies in the symmetry plane). Thrust of an
   asymmetric set goes through the CG along an axis tilted against the hull (~1.5 deg for the pair): plan states carry
   that thrust-axis attitude (`gnc::thrust_axis_body`), else the LQR (no integrator) holds a ~2 m offset. Ship LQR
-  effort 0.1 of the gimbal authority [E] (more limit-cycles after the flip), attitude controller with
+  effort 0.03 of the gimbal authority [E] (0.1 until the ship catch robustness plan, see below), attitude controller with
   `Gains::actuator_delay_s` 0.75 s (gimbal slew in the braking; no overshoot). Flaps folded in the burn.
   `FlightSession::place_landing_ship` (scenarios); the entry hands over at the gate. Test from the gate: caught 0.01 m,
   0.94 m/s sink, 5.7 t left; campaign `[ship][catch][validation]` (+-10 m, +-10 m/s, propellant 35 t + 0-3.5 t
-  main-tank residue, +-5 deg alpha / bank, belly engine failed in the flip): 20 of 21 caught (<= 0.02 m), the failure
-  aborts to the sea.
+  main-tank residue, +-5 deg alpha / bank, belly engine failed in the flip): 20 of 21 caught, the engine-failure case aborts upright (none lost).
   Gate lead: `gnc::ship_entry_target` puts the entry's target 220 m [E] back from the catch axis on the line tower -> pad
   with `EntryTarget::nose_direction_itrf` to the tower. Only that approach is robust: the arms stand across the line,
   a burn arriving from the side (azimuth 45/225 deg) runs into an arm at arm height; flip-push 20 deg off the line
@@ -228,13 +227,28 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   5.5 m/s ("verfehlt"), with full headers it is caught normally. Refuelling f3 (settling pushes before TEI and the Earth
   braking, ~0.45 t each) shifted the lunar-return gates by ~1.4 s / 20 m: seed 1 left the flip with ~27 m/s across, the
   lateral phase saturated at its 15 deg tilt, overshot ~35 m, hovered and ran the headers dry -> the lateral phase's tilt
-  limit is 20 deg [E] since (seed 1 caught, 3.9 t left; `[ship][catch]` unchanged at 20 of 21). Open (own follow-up
-  "ship catch robustness"): direct seed 12 ends the flip 25 m short of the catch axis at 29 m/s across (~17 m/s^2 to stop,
-  ~3.6 m/s^2 from 20 deg of tilt): the plans do not converge, the catch aborts at ~180 m - and the abort tumbles the ship
-  (tilt 95-145 deg) into the sea instead of holding it upright. Once the burns started their settling lead earlier (the
-  turn before the push, f3) seed 12 is caught and seed 18 misses the same way (12.3 t left): which seed of 21 it is
-  moves with the gate timing, so each campaign case of three allows one miss until then (direct 20 of 21).
-  Diagnostics: `STARSIM_DEBUG_FLIP=1`, `STARSIM_DEBUG_BURN=1`, `STARSIM_DEBUG_ENTRY=1` with the SCvx / catch flags;
+  limit is 20 deg [E] since (seed 1 caught, 3.9 t left; `[ship][catch]` unchanged at 20 of 21). Ship catch robustness
+  (2026-10-21, plan `docs/superpowers/plans/2026-10-21-ship-catch-robustness.md`): the numbers above for the remaining
+  f3 miss (25 m short at 29 m/s across) were seed 12's; the replayed seed-18 gate (`[ship][catch][lunar]`, printed GCRF
+  state with the flight's truth factors) showed a different cause: its flip ends 148 m from the axis at 32 m/s towards
+  it and the first plan converges, but the lateral LQR (its model has no actuator delay, 0.75 s on the ship) out-tilted
+  the plans (hull 0.23 vs reference 0.18 rad), braked ~4 m/s too much across, the re-plans jumped between a 9 s and a
+  23 s final phase and stopped converging near the 3 -> 2 switch, the catch aborted and the unconverged abort plans
+  swung the hull to 45-54 deg. Lateral effort on the replay: 0.1 / 0.07 miss, 0.05-0.02 catch (17 plans, none failed,
+  axis on the reference to ~0.005 rad) -> 0.03. A braking flip (thrust against the cross speed before the hand-over)
+  was designed in the spec and dropped: no failing case needs it.
+  Upright abort (`gnc::upright_descent`, a deterministic law: tilt <= 15 deg, away from the tower inside 60 m, sink
+  profile sqrt(2^2 + 2 * 0.5 * (a_max - g) * h) with its deceleration fed forward, never below the engines' minimum
+  thrust): it takes over an abort with no converged abort plan 2 s after the abort, an abort leaning beyond 35 deg, an
+  abort whose usable propellant falls below 1.3 x a vertical stop's need (`upright_stop_propellant_kg`), and a flip
+  whose first three plans reach neither the catch nor the sea. Pilot abort 1 s into the flip: the abort plans flew
+  ~460 m for the water and ran the headers dry (water at 9.5 m/s, 18.7 deg); now water at 2.85 m/s, 14.9 deg, 1.7 t
+  left. Return result `sim::ReturnResult` (caught / upright abort: contact tilt < 20 deg and sink <= 5 m/s [E] / lost),
+  `FlightSession::ship_return_result`. Open: a low-propellant abort (21-23 t at the gate) is carried by the flip push
+  next to the tower; the descent then starts ~22 m from it at ~200 m / 42 m/s and strikes it - an abort-planning
+  problem (keep-out with unconverged re-plans) for a later plan. Campaigns: direct 21 of 21, aerocapture 21 of 21.
+  Diagnostics: `STARSIM_DEBUG_FLIP=1` (also `[upright]` lines), `STARSIM_DEBUG_GATE=1` (gate and flip-end state
+  relative to the catch axis), `STARSIM_DEBUG_BURN=1`, `STARSIM_DEBUG_ENTRY=1` with the SCvx / catch flags;
   hidden test "Ship catch single case" with `STARSIM_SHIP_SEED=<1-20>`.
 - Ship return from orbit (b4, `config/missions/ship_return_starbase.toml`, `config::load_ship_return_mission`):
   `FlightSession::plan_ship_return` (game key R) plans the deorbit burn on the onboard computer (`gnc/deorbit_planner`:
@@ -1543,8 +1557,8 @@ catch tilt and the RCS allocator fixes below apply either way).
   planner query moved the attitude control's reference within the 1 cm tolerance and turned the depot approach into a
   retreat. Queries now use a local allocator when the cache is stale.
 - **Ship catch** (b3): the pushes before TEI and the Earth braking shift the lunar-return gates by ~1.4 s / 20 m; the
-  lateral phase's tilt limit is 20 deg since (see "Ship catch propellant margin"). One direct seed of 21 still misses
-  (which one moves with the gate timing); follow-up "ship catch robustness" (flip hand-over state, upright abort).
+  lateral phase's tilt limit is 20 deg since (see "Ship catch propellant margin"). Since the ship catch robustness
+  plan all 21 direct seeds are caught (ship lateral LQR effort 0.03; upright abort; see "Ship catch propellant margin").
 - **Step dependence (pre-existing, measured in f4):** the same 100 m/s prograde burn 2 h ahead, flown after 10 s or
   600 s `advance_to` steps (hidden case `[.step_dependence]`): from a 120 x 190 km orbit the states already differ at
   the ignition by 21 km / 35 m/s and end 122 km / 125 m/s apart; from 200 x 270 km by 156 m / 0.18 m/s and 13 m /
