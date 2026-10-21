@@ -231,6 +231,12 @@ public:
     double settling_travel_m(size_t stage_index) const;
     void update_settling(const LiquidEnvironment& liquid, double dt_s);
     bool stage_settled(size_t stage_index) const;  // no settling needed, or settled
+    // Gas ingestion check (refuelling f3), set per tick by the FlightBody (in orbit, fidelity flag on): an engine that
+    // starts on a stage needing settling that is not settled ingests gas and is lost (as fail_engine; deterministic
+    // [E]). gas_ingestion() reports it until cleared.
+    void set_ignition_check(bool active) { ignition_check_ = active; }
+    bool gas_ingestion() const { return gas_ingestion_; }
+    void clear_gas_ingestion() { gas_ingestion_ = false; }
 
     // Discrete engine update for one tick: start/stop transients, throttle and gimbal rate limits,
     // relight rules, flow-separation limits. Must be called once per tick before integration.
@@ -357,6 +363,8 @@ private:
     math::Vec3 rcs_torque_;
     math::Vec3 rcs_force_;
     math::Vec3 liquid_down_body_{-1.0, 0.0, 0.0};
+    bool ignition_check_ = false;
+    bool gas_ingestion_ = false;
 };
 
 }  // namespace starsim::vehicle

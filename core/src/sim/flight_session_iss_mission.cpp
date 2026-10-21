@@ -199,6 +199,11 @@ void FlightSession::run_iss_mission() {
         case IssMissionLeg::Departure: iss_status_ = "Abflug: " + docking_status_; break;
         default: break;
     }
+    // Refuelling f3: an unsettled in-orbit ignition lost the engines - whatever leg flew it, the mission ends.
+    if (iss_leg_ != IssMissionLeg::None && iss_leg_ != IssMissionLeg::Complete && iss_leg_ != IssMissionLeg::Ended &&
+        burn_abort_reason_.rfind("Gasansaugung", 0) == 0) {
+        return iss_end(burn_abort_reason_);
+    }
     if (!iss_mission_pending()) return;
     const bool lost = bodies_[controlled_].body->impacted();
     switch (iss_leg_) {

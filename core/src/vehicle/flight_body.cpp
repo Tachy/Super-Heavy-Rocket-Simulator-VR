@@ -411,6 +411,8 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     const auto body = reference_body_of(env, *reference_);
     const auto frame = body.frame(epoch);
     const auto geodetic = frames::fixed_to_geodetic(frame.to_fixed(state_.position_gcrf_m), body.shape());
+    track_reference(body, frame);
+    vehicle_->set_ignition_check(env.ignition_settling && !clamped_ && !caught_ && !landed_ && in_orbit());
     vehicle_->update_engines(dt_s, command, body.air(geodetic.height_m).pressure_pa);
     vehicle_->update_grid_fins(dt_s, command);
     vehicle_->update_landing_legs(dt_s);
@@ -423,6 +425,7 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     judge_parachute_loads();
 
     if (clamped_ || caught_ || landed_) {
+        for (auto& stage : vehicle_->stages()) stage.settled = 1.0;  // the ground holds the liquid down
         vehicle_->consume_propellant(dt_s);
         follow_pad(reference_body_of(env, held_on_).frame(epoch + dt_s));
         external_force_gcrf_n_ = {};
@@ -447,6 +450,7 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     state_ = unpack(integrators::rk4_step<13>(f, 0.0, pack(state_), dt_s));
     snap_ideal_attitude();
     if (env.propellant_settling) vehicle_->settle_propellant(specific_force_body_mps2_, dt_s);
+    if (env.ignition_settling) vehicle_->update_settling(liquid_now(), dt_s);
     // Entry limits of a single stage with a heat shield (the ship): heating from the tick's air data, load from
     // the aerodynamic forces at the end of the tick (thrust loads are the engines' business).
     if (vehicle_->stages().size() == 1 && vehicle_->stages().front().config.heat_shield.nose_radius_m > 0.0) {
@@ -566,6 +570,27 @@ void FlightBody::update_air_data(const environment::ReferenceBody& body, const e
     air_data_.mean_free_path_m = air.mean_free_path_m;
 }
 
+void FlightBody::track_reference(const environment::ReferenceBody& body, const environment::BodyFrame& frame) {
+    orbit_centre_ = {frame.centre_gcrf_m, frame.centre_velocity_gcrf_mps};
+    orbit_gm_m3ps2_ = body.gm_m3ps2();
+    orbit_radius_m_ = body.shape().semi_major_axis_m;
+}
+
+bool FlightBody::in_orbit() const {
+    const Vec3 r = state_.position_gcrf_m - orbit_centre_.position_m;
+    const Vec3 v = state_.velocity_gcrf_mps - orbit_centre_.velocity_mps;
+    const double energy = 0.5 * dot(v, v) - orbit_gm_m3ps2_ / norm(r);
+    if (!(energy < 0.0)) return false;
+    const double a = -orbit_gm_m3ps2_ / (2.0 * energy);
+    const double h2 = dot(cross(r, v), cross(r, v));
+    const double e = std::sqrt(std::max(0.0, 1.0 - h2 / (orbit_gm_m3ps2_ * a)));
+    return a * (1.0 - e) > orbit_radius_m_;
+}
+
+LiquidEnvironment FlightBody::liquid_now() const {
+    return {specific_force_body_mps2_, state_.angular_velocity_body_radps, state_.position_gcrf_m, state_.attitude, {}};
+}
+
 bool FlightBody::can_coast() const {
     if (docked_) return true;
     return !clamped_ && !impacted_ && !vehicle_->any_engine_producing_thrust();
@@ -605,9 +630,15 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
     const auto result = integrators::integrate<13>(f, 0.0, pack(state_), duration_s, options);
     state_ = unpack(result.y);
     snap_ideal_attitude();
-    if (env.boil_off && env.ephemeris != nullptr) {  // the drag that settles the liquid (Task 5b)
+    if ((env.boil_off && env.ephemeris != nullptr) || env.ignition_settling) {  // the drag that settles the liquid
         const Forces end = evaluate(ctx, duration_s, state_);
         boil_off_specific_force_body_mps2_ = end.nongravitational_body_n / end.mass.mass_kg;
+    }
+    track_reference(body, body.frame(epoch + duration_s));
+    if (env.ignition_settling) {  // refuelling f3: the coast moves the liquid with the residual acceleration
+        auto liquid = liquid_now();
+        liquid.specific_force_body_mps2 = boil_off_specific_force_body_mps2_;
+        vehicle_->update_settling(liquid, duration_s);
     }
     reference_ = reference_body(env, epoch + duration_s);
     const auto end_body = reference_body_of(env, *reference_);

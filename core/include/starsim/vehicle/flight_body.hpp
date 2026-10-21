@@ -9,7 +9,9 @@
 #include "starsim/environment/reference_body.hpp"
 #include "starsim/ephemeris/ephemeris.hpp"
 #include "starsim/frames/body_orientation.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
+#include "starsim/math/state_vector.hpp"
 #include "starsim/time/epoch.hpp"
 #include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/vehicle.hpp"
@@ -42,6 +44,9 @@ struct FlightEnvironment {
     // Fidelity flag (header-tank plan): tank liquid settles perpendicular to the apparent gravity
     // (Vehicle::settle_propellant); off: always a column on the tank bottom (settled aft).
     bool propellant_settling = true;
+    // Fidelity flag (refuelling f3): main-tank liquid must be settled over the outlets before an in-orbit ignition
+    // (Vehicle::update_settling / set_ignition_check); off: never checked, the progress is not moved.
+    bool ignition_settling = true;
     // Fidelity flag (header-tank plan review): engine, grid fin and flap moments act about the full CG point (pitch /
     // yaw; roll about MassProperties::roll_offset_m) as the hull's do. Off [E]: about the axial CG - with the full point
     // the Falcon 9 / Crew Dragon ascent apoapsis moved 210 -> 223 km (header-tank plan Task 2); not yet validated on.
@@ -124,6 +129,9 @@ public:
     // session coasts <= 600 s; a body that starts Moon-referenced must not coast into the Earth's air in one segment).
     void coast(const FlightEnvironment& env, time::Epoch epoch, double duration_s);
     bool can_coast() const;  // engines off, not clamped, not on the ground
+    // In orbit (refuelling f3): the osculating periapsis about the reference body of the last step / coast (the Earth
+    // before the first) lies above its equatorial radius on a closed orbit.
+    bool in_orbit() const;
 
     bool clamped() const { return clamped_; }
     void release_clamps() { clamped_ = false; }
@@ -255,6 +263,12 @@ private:
     math::Quat attitude_fixed_;  // body -> body-fixed axes of held_on_
     // Chosen at the last step / coast; undecided (a body just built or placed): the Moon within the release distance.
     std::optional<ephemeris::Body> reference_;
+    // The reference body's centre, GM and equatorial radius at the last step / coast (in_orbit); the Earth before.
+    math::StateVector orbit_centre_;
+    double orbit_gm_m3ps2_ = constants::earth_gm_m3ps2;
+    double orbit_radius_m_ = constants::wgs84_semi_major_axis_m;
+    void track_reference(const environment::ReferenceBody& body, const environment::BodyFrame& frame);
+    LiquidEnvironment liquid_now() const;
     bool wreck_on_ground_ = false;  // struck the ground: the wreck stays where it struck (pad_fixed_m_ on held_on_)
     void hold_wreck(const environment::BodyFrame& frame, ephemeris::Body body);
     ephemeris::Body held_on_ = ephemeris::Body::Earth;    // the body pad_fixed_m_ / attitude_fixed_ refer to

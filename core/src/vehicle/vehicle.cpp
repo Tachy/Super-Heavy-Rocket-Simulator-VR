@@ -450,7 +450,8 @@ Vec3 throttle_torque_nm(const Engine& engine, double cg_station_m) {
 
 void Vehicle::update_engines(double dt_s, const VehicleCommand& command, double ambient_pressure_pa) {
     size_t index = 0;
-    for (auto& stage : stages_) {
+    for (size_t stage_index = 0; stage_index < stages_.size(); ++stage_index) {
+        auto& stage = stages_[stage_index];
         for (auto& e : stage.engines) {
             const auto& cfg = e.performance->config();
             const GroupCommand* group = find_group(command, e.group_id);
@@ -462,7 +463,13 @@ void Vehicle::update_engines(double dt_s, const VehicleCommand& command, double 
             const bool can_start = (!e.has_run || e.relight) && !e.starved &&
                                    e.performance->can_operate(ambient_pressure_pa);
 
-            if (want_run && e.mode == EngineMode::Off && can_start) {
+            if (want_run && e.mode == EngineMode::Off && can_start && ignition_check_ && !stage_settled(stage_index)) {
+                // Refuelling f3: gas at the outlets - the turbopumps ingest it and the engine is lost [E].
+                e.has_run = true;
+                e.starved = true;
+                e.failed = true;
+                gas_ingestion_ = true;
+            } else if (want_run && e.mode == EngineMode::Off && can_start) {
                 e.mode = EngineMode::Starting;
                 e.has_run = true;
                 e.throttle = target_throttle;

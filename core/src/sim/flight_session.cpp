@@ -774,6 +774,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             }
             continue;
         }
+        report_gas_ingestion();
         if (iss_mission_) run_iss_mission();  // also with the autopilot Off / Orbit (ISS i6)
         if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit &&
             !bodies_.empty()) {
@@ -848,6 +849,17 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         epoch_ = target;
     }
     return epoch_;
+}
+
+void FlightSession::report_gas_ingestion() {
+    if (bodies_.empty()) return;
+    auto& vehicle = bodies_[controlled_].body->vehicle();
+    if (!vehicle.gas_ingestion()) return;
+    vehicle.clear_gas_ingestion();
+    cutoff();
+    ship_return_ = false;
+    disengage_autopilot();  // the lunar / rendezvous step machines end with it (no half state)
+    burn_abort_reason_ = gas_ingestion_reason;
 }
 
 void FlightSession::ignite() {

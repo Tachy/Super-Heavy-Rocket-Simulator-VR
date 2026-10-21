@@ -357,6 +357,8 @@ public:
     // while engaged.
     void engage_ascent_autopilot(const gnc::AscentTarget& target, const gnc::PitchProgram& program = {});
     // Also ends an attitude mode and a capsule return (d2 minor: a mode set before outlived the autopilot).
+    // Refuelling f3: the abort reason of an unsettled in-orbit ignition (starts with "Gasansaugung", the spec's reason).
+    static constexpr const char* gas_ingestion_reason = "Gasansaugung: Treibstoff nicht gesetzt, Triebwerke ausgefallen";
     void disengage_autopilot() {
         autopilot_.state = AutopilotState::Off;
         attitude_mode_ = {};
@@ -614,6 +616,7 @@ public:
     // Fidelity switch: solar radiation pressure on all bodies (default on; the OEM validation turns it off).
     void set_solar_radiation_pressure(bool on) { env_.solar_radiation_pressure = on; }
     void set_boil_off(bool on) { env_.boil_off = on; }  // fidelity flag (refuelling r2)
+    void set_ignition_settling(bool on) { env_.ignition_settling = on; }  // fidelity flag (refuelling f3)
 
     // A space station (a vehicle with [stage.station]) as an uncontrolled body in ideal LVLH attitude; `impulses`
     // are applied at their epochs (a coast stops there). Call after place_body / launch_from_pad / place_in_orbit -
@@ -923,6 +926,8 @@ private:
     math::Vec3 last_rcs_acceleration_;  // RCS translation of the controlled body in the last tick (GCRF)
     std::optional<gnc::DeorbitPlan> deorbit_plan_;  // last ship return plan (also when refused)
     std::string burn_abort_reason_;
+    // Refuelling f3: an engine of the controlled vehicle ingested gas at its start - cut off, autopilot off, reason.
+    void report_gas_ingestion();
     // Refuelling r2: the main-tank propellant `body` will still have at `at`, flown ahead on a copy of itself (free
     // drift, air torque, boil-off: the onboard computer's model); the present amounts with the flag off.
     MainPropellant main_propellant_at(const vehicle::FlightBody& body, time::Epoch at) const;
