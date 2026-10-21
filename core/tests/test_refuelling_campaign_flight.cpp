@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 #include <catch2/catch_approx.hpp>
@@ -16,15 +17,19 @@
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/mission/iss_launch_window.hpp"
+#include "starsim/vehicle/boil_off.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 #include "starsim/orbit/synthetic_station_orbit.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/config/refuelling_mission_config.hpp"
+#include "starsim/config/refuelling_reference.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
+#include "starsim/spice/spice_adapters.hpp"
+#include "starsim/sim/refuelling_campaign_flight.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -267,6 +272,169 @@ TEST_CASE("A campaign tanker launches beside the kept depot and flies its chain 
     CHECK(f.session.station_index().has_value());
 }
 
+namespace {
+
+// A session with the Moon orientation (the campaign's HLS demand plans the lunar outbound flight).
+struct CampaignSession {
+    bool spice = (test::spice_session(), true);
+    const spice::SpiceEphemeris ephemeris;
+    const spice::SpiceOrientation earth = spice::SpiceOrientation::earth();
+    const spice::SpiceOrientation moon = spice::SpiceOrientation::moon_mean_earth();
+    const spice::SpiceTimeConverter clock;
+    sim::FlightSession session{ephemeris, earth, refuelling_test::config_dir, environment::PointMassGravityConfig{},
+                               &moon};
+    const sim::RefuellingCampaignFlight* driver() const {
+        return dynamic_cast<const sim::RefuellingCampaignFlight*>(session.supervisor());
+    }
+    bool phase_is(sim::CampaignFlightPhase p) const { return driver() && driver()->state().phase == p; }
+    // Advances in `step_s` calls until `done` or `limit_s` of world time.
+    template <class Done>
+    void fly(Done done, double limit_s, double step_s = 3600.0) {
+        const auto t0 = session.epoch();
+        while (!done() && session.epoch() - t0 < limit_s && session.active()) {
+            session.advance_to(session.epoch() + step_s);
+        }
+    }
+    bool ended() const {
+        return phase_is(sim::CampaignFlightPhase::Complete) || phase_is(sim::CampaignFlightPhase::Ended);
+    }
+};
+
+config::RefuellingCampaignFlownMission placed_mission() {
+    return config::load_refuelling_campaign_flown_mission(refuelling_test::config_dir,
+                                                          "refuelling_campaign_flown_placed");
+}
+
+void print_rows(const sim::CampaignFlightState& st) {
+    for (const auto& r : st.rows) {
+        std::printf("[f2] %s %d: launch %.2f d arrival %.2f d (calc %.2f / %.2f d), phasing %.1f h, residue %.1f t, "
+                    "rendezvous %.1f t, undock %.1f t, delivered %.1f t (calc %.1f t) depot %.1f t (calc %.1f t)%s%s\n",
+                    r.hls ? "HLS" : "tanker", r.number, (r.launch - *st.start) / 86400.0,
+                    (r.arrival - *st.start) / 86400.0, r.calculator ? r.calculator->flight.launch_s / 86400.0 : 0.0,
+                    r.calculator ? r.calculator->flight.arrival_s / 86400.0 : 0.0, r.phasing_s / 3600.0,
+                    r.residue_kg / 1e3, r.rendezvous_kg / 1e3, r.main_at_undock_kg / 1e3, r.delivered_kg / 1e3,
+                    r.calculator ? r.calculator->flight.delivered_kg / 1e3 : 0.0, r.depot_after_kg / 1e3,
+                    r.calculator ? r.calculator->depot_after_kg / 1e3 : 0.0, r.failed ? " FAILED " : " ",
+                    r.note.c_str());
+    }
+    if (st.calculator && st.calculator->result.hls) {
+        std::printf("[f2] calculator HLS: launch %.2f d arrival %.2f d, %d tankers, %.2f d\n",
+                    st.calculator->result.hls->launch_s / 86400.0, st.calculator->result.hls->arrival_s / 86400.0,
+                    st.calculator->result.tanker_flights, st.calculator->result.duration_s / 86400.0);
+    }
+}
+
+}  // namespace
+
+TEST_CASE("Flown campaign start: the placed depot is the station and the first flight is planned",
+          "[campaign_flown][refuelling]") {
+    CampaignSession c;
+    const auto s =
+        sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown_placed", {}, c.clock);
+    REQUIRE(s.refusal.empty());
+    REQUIRE(c.driver());
+    c.fly([&] { return !c.phase_is(sim::CampaignFlightPhase::Planning); }, 600.0, 60.0);
+    const auto& st = c.driver()->state();
+    INFO(st.status);
+    REQUIRE(st.phase == sim::CampaignFlightPhase::WaitLaunch);
+    REQUIRE(st.calculator);
+    CHECK(st.calculator->result.tanker_flights == 2);  // shortfall 1.5 net deliveries
+    REQUIRE(st.next_launch);
+    CHECK(*st.next_launch > c.session.epoch());
+    CHECK_FALSE(st.next_is_hls);
+    CHECK(c.session.body_count() == 1u);
+}
+
+TEST_CASE("Flown campaign: one time-warp call launches at the planned liftoff", "[campaign_flown][refuelling]") {
+    CampaignSession c;
+    sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown_placed", {}, c.clock);
+    c.fly([&] { return c.phase_is(sim::CampaignFlightPhase::WaitLaunch); }, 600.0, 60.0);
+    REQUIRE(c.phase_is(sim::CampaignFlightPhase::WaitLaunch));
+    const auto liftoff = *c.driver()->state().next_launch;
+    c.session.advance_to(liftoff + 10.0 * 86400.0);  // returns early: the ascent's ticks use the call's max_ticks
+    REQUIRE(c.phase_is(sim::CampaignFlightPhase::Flying));
+    REQUIRE_FALSE(c.driver()->state().rows.empty());
+    CHECK(std::abs(c.driver()->state().rows.back().launch - liftoff) <= sim::FlightSession::tick_s);
+}
+
+TEST_CASE("Flown campaign: a failed tanker flight is recorded and the campaign re-plans",
+          "[campaign_flown][refuelling]") {
+    CampaignSession c;
+    sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown_placed", {}, c.clock);
+    c.fly([&] { return c.phase_is(sim::CampaignFlightPhase::Flying); }, 10.0 * 86400.0);
+    REQUIRE(c.phase_is(sim::CampaignFlightPhase::Flying));
+    c.session.mark_iss_leg_for_test(IssMissionLeg::Ended);
+    c.fly([&] { return c.phase_is(sim::CampaignFlightPhase::WaitLaunch) || c.ended(); }, 600.0, 1.0);
+    const auto& st = c.driver()->state();
+    INFO(st.status);
+    REQUIRE(st.phase == sim::CampaignFlightPhase::WaitLaunch);
+    REQUIRE(st.rows.size() == 1u);
+    CHECK(st.rows[0].failed);
+    CHECK(st.tankers_flown == 0);
+    CHECK(c.session.body_count() == 1u);  // only the depot
+    CHECK(c.session.station_index().has_value());
+}
+
+TEST_CASE("Flown campaign: station keeping when the depot is low and the next arrival far",
+          "[campaign_flown][refuelling][reboost]") {
+    CampaignSession c;
+    auto m = placed_mission();
+    m.keeping_min_height_m = 205.0e3;  // the placed 200 km depot is "low"
+    m.keeping_target_height_m = 210.0e3;
+    m.keeping_min_lead_s = 3600.0;  // the first arrival is days away
+    const auto s = sim::start_refuelling_campaign_flight(c.session, refuelling_test::config_dir, m, c.clock);
+    REQUIRE(s.refusal.empty());
+    c.fly([&] { return c.phase_is(sim::CampaignFlightPhase::WaitLaunch) || c.ended(); }, 86400.0, 60.0);
+    const auto& st = c.driver()->state();
+    INFO(st.status);
+    REQUIRE(st.phase == sim::CampaignFlightPhase::WaitLaunch);
+    for (const auto& r : st.reboosts) {
+        std::printf("[f2] reboost %.2f-%.2f h: %d burns, cold gas %d, %.1f kg, %s\n", (r.start - *st.start) / 3600.0,
+                    (r.end - *st.start) / 3600.0, r.burns, r.cold_gas ? 1 : 0, r.propellant_kg,
+                    r.completed ? "completed" : r.reason.c_str());
+    }
+    REQUIRE(st.reboosts.size() == 1u);
+    CHECK(st.reboosts[0].completed);
+    CHECK(c.session.station_mean_height_m() == Catch::Approx(210.0e3).margin(1.0e3));
+    CHECK(st.losses.station_keeping_kg == Catch::Approx(st.reboosts[0].propellant_kg));
+}
+
+TEST_CASE("Flown campaign needs a session with the Moon orientation", "[campaign_flown][refuelling]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;  // Earth only
+    const auto s = sim::start_refuelling_campaign_flight(f.session, refuelling_test::config_dir, placed_mission(),
+                                                         f.clock);
+    CHECK_FALSE(s.refusal.empty());
+    CHECK(f.session.supervisor() == nullptr);
+}
+
+TEST_CASE("Flown campaign, placed depot: two tankers and the HLS", "[campaign_flown][refuelling][slow]") {
+    CampaignSession c;
+    sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown_placed", {}, c.clock);
+    c.fly([&] { return c.ended(); }, 40.0 * 86400.0);
+    const auto& st = c.driver()->state();
+    print_rows(st);
+    INFO(st.status);
+    REQUIRE(st.phase == sim::CampaignFlightPhase::Complete);
+    REQUIRE(st.calculator);
+    CHECK(st.tankers_flown == st.calculator->result.tanker_flights);
+    REQUIRE(st.rows.size() == 3u);
+    CHECK(st.rows.back().hls);
+    for (const auto& r : st.rows) {
+        if (!r.hls) CHECK(r.delivered_kg > 50.0e3);
+    }
+    CHECK(st.hls_propellant_kg >= st.hls_required_propellant_kg);
+    REQUIRE(st.first_return);
+    INFO(st.first_return_note);
+    CHECK((*st.first_return == sim::ReturnResult::Caught || *st.first_return == sim::ReturnResult::UprightAbort));
+    CHECK(st.losses.attitude_gas_kg > 0.0);
+    CHECK(st.losses.transfer_vent_kg > 0.0);
+    const auto misses = c.driver()->comparison_misses();
+    for (const auto& line : misses) UNSCOPED_INFO(line);
+    CHECK(misses.empty());
+    CHECK(c.session.body_count() == 1u);
+}
+
 TEST_CASE("Probe: reboost timeline", "[.f2_probe]") {
     test::spice_session();
     refuelling_test::DepotSession f;
@@ -291,4 +459,54 @@ TEST_CASE("Probe: reboost timeline", "[.f2_probe]") {
     }
     if (f.session.last_reboost()) std::printf("end: %s\n", f.session.last_reboost()->reason.c_str());
     if (f.session.station_index()) std::printf("end mean %.3f km\n", mean_height_km(f.session));
+}
+
+TEST_CASE("Probe: flown tanker boil-off in a free coast against the orbit average", "[.f2_probe]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    const auto sun = f.ephemeris.state_gcrf(ephemeris::Body::Sun, f.t0).position_m;
+    const bool hls = std::getenv("PROBE_HLS") != nullptr;
+    const auto cfg = hls ? refuelling_test::ship_with("starship_hls_launch", 200.0e3) : refuelling_test::tanker_config(99.7e3);
+    const vehicle::Vehicle v(cfg, refuelling_test::config_dir);
+    const auto avg = vehicle::orbit_average_boil_off(v, f.depot, {}, sun);
+    std::printf("[f2 probe] orbit average (LVLH identity): %.2f t/day\n",
+                (avg.oxidizer_kgps + avg.fuel_kgps) * 86400.0 / 1e3);
+    for (const double perigee_km : {150.0, 220.0}) {
+        f.session.place_in_orbit(cfg, sim::phasing_start_state(f.depot, 0.1, perigee_km * 1e3, (perigee_km + 40.0) * 1e3),
+                                 f.t0);
+        const double m0 = f.session.body(0).vehicle().main_propellant_kg();
+        for (int h = 1; h <= 24; ++h) {
+            f.session.advance_to(f.t0 + h * 3600.0);
+            if (h == 6 || h == 12 || h == 24) {
+                const auto& b = f.session.body(0);
+                std::printf("[f2 probe] %.0f km: after %2d h lost %.2f t (%.2f t/day), rate now %.2f t/day, rotation %.4f rad/s\n",
+                            perigee_km, h, (m0 - b.vehicle().main_propellant_kg()) / 1e3,
+                            (m0 - b.vehicle().main_propellant_kg()) / 1e3 * 24.0 / h,
+                            (b.boil_off_rate().oxidizer_kgps + b.boil_off_rate().fuel_kgps) * 86400.0 / 1e3,
+                            norm(b.state().angular_velocity_body_radps));
+            }
+        }
+    }
+}
+
+TEST_CASE("The measured phasing boil-off of the tanker and the HLS matches a free coast",
+          "[campaign_flown][refuelling][boil_off]") {
+    test::spice_session();
+    const auto ref = config::load_refuelling_reference(refuelling_test::config_dir);
+    for (const auto& [id, main_kg, measured_kgps] :
+         {std::tuple{std::string("starship_tanker"), 99.7e3, ref.tanker.phasing_boil_off_kgps},
+          std::tuple{std::string("starship_hls_launch"), 200.0e3, ref.hls.phasing_boil_off_kgps}}) {
+        double lost_kg = 0.0;
+        for (const double perigee_km : {150.0, 220.0}) {  // the phasing candidates' range (24 h each)
+            refuelling_test::DepotSession f;
+            f.session.place_in_orbit(refuelling_test::ship_with(id, main_kg),
+                                     sim::phasing_start_state(f.depot, 0.1, perigee_km * 1e3, (perigee_km + 40.0) * 1e3),
+                                     f.t0);
+            const double m0 = f.session.body(0).vehicle().main_propellant_kg();
+            for (int h = 1; h <= 24; ++h) f.session.advance_to(f.t0 + h * 3600.0);  // as the phasing flight
+            lost_kg += m0 - f.session.body(0).vehicle().main_propellant_kg();
+        }
+        INFO(id);
+        CHECK(lost_kg / 2.0 / 86400.0 == Catch::Approx(measured_kgps).epsilon(0.1));  // [E] the mean of both
+    }
 }

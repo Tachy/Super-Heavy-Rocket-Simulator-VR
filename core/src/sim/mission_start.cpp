@@ -7,6 +7,7 @@
 #include "starsim/sim/iss_mission.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/lunar_return_mission.hpp"
+#include "starsim/sim/refuelling_campaign_flight.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
 
 namespace starsim::sim {
@@ -64,6 +65,10 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
         case config::MissionKind::HlsRefuel:
             s = start_refuelling_flight_mission(session, config_dir,
                                                 config::load_refuelling_flight_mission(config_dir, mission_id), time);
+            break;
+        case config::MissionKind::RefuellingCampaignFlown:
+            s = start_refuelling_campaign_flight(
+                session, config_dir, config::load_refuelling_campaign_flown_mission(config_dir, mission_id), time);
             break;
         case config::MissionKind::ShipReturn:
             throw std::invalid_argument("mission '" + std::string(mission_id) +

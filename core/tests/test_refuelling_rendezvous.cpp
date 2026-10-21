@@ -182,6 +182,9 @@ TEST_CASE("Tanker from its phasing orbit to hard capture at the depot", "[refuel
     REQUIRE(f.session.plan_rendezvous({}));
     sim::IssMissionSequence sequence;  // the generic legs: Rendezvous -> Proximity -> Docking -> Docked
     sequence.station_port = "transfer_dock";
+    // as the refuelling missions (r5): a capture that bounces off is flown again (f2: with the Raptor flying the long
+    // phasing burns the tanker arrived differently and its first capture bounced)
+    sequence.max_capture_retries = 2;
     f.session.set_iss_mission(sequence);
     REQUIRE(f.session.iss_mission_leg() == sim::IssMissionLeg::Rendezvous);
     double t = 0.0;
@@ -196,4 +199,26 @@ TEST_CASE("Tanker from its phasing orbit to hard capture at the depot", "[refuel
     REQUIRE(f.session.docked());
     std::printf("[r3] tanker campaign: docked after %.1f h, peak compression %.1f kN\n", t / 3600.0,
                 f.session.docking_loads()->compression_n / 1000.0);
+}
+
+TEST_CASE("A long cold-gas rendezvous burn goes to the Raptor once its minimum impulse fits (f2)",
+          "[refuelling][rendezvous][campaign_flown]") {
+    // f2: the HLS's belly Raptor put every burn below ~25 m/s on the 3 kN cold gas; a 24 m/s braking burn took ~40 min
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    f.session.place_in_orbit(refuelling_test::ship_with("starship_hls_launch", 190.0e3), tanker_behind(f, 8.0), f.t0);
+    f.session.add_station(refuelling_test::depot_config(f.depot_propellant_kg), f.depot, f.t0);
+    const double cold_gas_n = f.session.rendezvous_burn_model(0.5).thrust_n;  // a short burn: cold gas
+    CHECK(cold_gas_n < 1.0e4);
+    const double mass_kg = f.session.body(0).vehicle().mass_properties().mass_kg;
+    const double longest_cold_gas_mps = sim::FlightSession::rendezvous_max_cold_gas_burn_s * cold_gas_n / mass_kg;
+    CHECK(f.session.rendezvous_burn_model(0.9 * longest_cold_gas_mps).thrust_n == cold_gas_n);
+    CHECK(f.session.rendezvous_burn_model(24.4).thrust_n > 1.0e6);  // the braking burn of the f2 campaign: Raptor
+    // never weaker for a larger burn
+    double last_n = 0.0;
+    for (double dv = 0.1; dv < 300.0; dv *= 1.05) {
+        const double n = f.session.rendezvous_burn_model(dv).thrust_n;
+        CHECK(n >= last_n);
+        last_n = n;
+    }
 }

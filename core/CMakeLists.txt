@@ -98,6 +98,7 @@ add_library(starsim_core STATIC
     src/sim/iss_mission.cpp
     src/sim/refuelling_mission.cpp
     src/sim/refuelling_campaign_setup.cpp
+    src/sim/refuelling_campaign_flight.cpp
     src/sim/refuelling_campaign_text.cpp
     src/sim/docking_sim.cpp
     src/sim/flight_session_rendezvous.cpp

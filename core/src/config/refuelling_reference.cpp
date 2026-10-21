@@ -33,8 +33,10 @@ RefuellingReference load_refuelling_reference(const std::filesystem::path& confi
     r.tanker.main_at_undock_kg = tonnes(*tanker, "main_at_undock_t");
     r.tanker.main_at_catch_kg = tonnes(*tanker, "main_at_catch_t");
     r.tanker.dry_mass_sensitivity = doc.number(*tanker, "dry_mass_sensitivity");
+    r.tanker.phasing_boil_off_kgps = tonnes(*tanker, "phasing_boil_off_t_per_day") / 86400.0;
     r.hls.mission = doc.text(*hls, "mission");
     r.hls.main_at_docking_kg = tonnes(*hls, "main_at_docking_t");
+    r.hls.phasing_boil_off_kgps = tonnes(*hls, "phasing_boil_off_t_per_day") / 86400.0;
     return r;
 }
 

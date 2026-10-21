@@ -23,10 +23,14 @@ struct RefuellingReference {
         double main_at_undock_kg = 0.0;  // the reserve kept for the return
         double main_at_catch_kg = 0.0;
         double dry_mass_sensitivity = 0.0;  // residue gained per kg of dry mass removed
+        // f2: its main tanks' boil-off in the free coast of the phasing flight (the flown heat balance; the campaign
+        // books the phasing time's difference to the reference with it)
+        double phasing_boil_off_kgps = 0.0;
     } tanker;
     struct Hls {
         std::string mission;
         double main_at_docking_kg = 0.0;
+        double phasing_boil_off_kgps = 0.0;  // f2: as the tanker's
     } hls;
 };
 

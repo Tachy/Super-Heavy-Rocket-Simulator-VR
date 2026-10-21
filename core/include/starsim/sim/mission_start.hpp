@@ -34,7 +34,11 @@ struct MissionStart {
 // - lunar_return: start_lunar_return_mission at the mission's [orbit] epoch_utc (Moon orientation needed) - the ship
 //   is tanked for its return in the LLO / NRHO (mission 2, l5);
 // - iss_rendezvous / iss_launch / iss_departure: sim/iss_mission.hpp (ISS i6; the ISS from data/iss_oem);
+// - depot_launch / tanker_flight / hls_refuel: sim/refuelling_mission.hpp (refuelling r5);
+// - refuelling_campaign_flown: sim/refuelling_campaign_flight.hpp (refuelling f2: the whole campaign in this
+//   session, driven by its supervisor);
 // - ship_return: refused (std::invalid_argument): the ship returns from the orbit it flew to (plan_ship_return).
+// Every start removes a previous campaign's supervisor first.
 MissionStart start_mission(FlightSession& session, const std::filesystem::path& config_dir, std::string_view mission_id,
                            time::Epoch requested, const time::TimeScaleConverter& time);
 

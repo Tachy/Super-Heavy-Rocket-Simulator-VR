@@ -67,16 +67,27 @@ double FlightSession::rendezvous_rcs_below_mps() const {
     return minimum / small_burn_transient_share;
 }
 
+double FlightSession::rendezvous_transient_share(double delta_v_mps) const {
+    const auto& vehicle = bodies_[controlled_].body->vehicle();
+    auto capability = vehicle.rcs_force_capability({1.0, 0.0, 0.0});
+    if (!(capability.force_n > 0.0)) capability = vehicle.rcs_force_capability({-1.0, 0.0, 0.0});
+    const double cold_gas_s = capability.force_n > 0.0 && std::isfinite(delta_v_mps)
+                                  ? delta_v_mps * vehicle.mass_properties().mass_kg / capability.force_n
+                                  : 0.0;
+    return cold_gas_s > rendezvous_max_cold_gas_burn_s ? 1.0 : small_burn_transient_share;
+}
+
 mission::FiniteBurnModel FlightSession::rendezvous_engines(double delta_v_mps) const {
     const auto& vehicle = bodies_[controlled_].body->vehicle();
     const double mass = vehicle.mass_properties().mass_kg;
-    if (rendezvous_main_engines() && delta_v_mps >= rendezvous_rcs_below_mps()) {
+    const double share = rendezvous_transient_share(delta_v_mps);
+    if (rendezvous_main_engines() && delta_v_mps >= rendezvous_rcs_below_mps() * small_burn_transient_share / share) {
         const auto& groups = vehicle.stages().front().config.deorbit_engine_groups;
         const auto set = groups.empty() ? burn_configurations() : burn_configurations(&groups);
         // the configuration start_burn will fly (r3 minor M1: a burn between the two minimum impulses flies at the
         // minimum throttle); a failed belly Raptor leaves the set empty: the cold gas flies every burn
         for (const auto& c : set) {
-            if (c.minimum_dv_mps <= small_burn_transient_share * delta_v_mps) return {mass, c.thrust_n, c.mass_flow_kgps};
+            if (c.minimum_dv_mps <= share * delta_v_mps) return {mass, c.thrust_n, c.mass_flow_kgps};
         }
     }
     // RCS translation as start_burn picks it: along +x, else along -x
@@ -95,7 +106,7 @@ bool FlightSession::execute_rendezvous_burn(const gnc::BurnNode& node) {
     if (!rendezvous_main_engines()) return execute_burn(node);
     const auto& groups = bodies_[controlled_].body->vehicle().stages().front().config.deorbit_engine_groups;
     return start_burn(node, groups.empty() ? burn_configurations() : burn_configurations(&groups), true,
-                      small_burn_transient_share);
+                      rendezvous_transient_share(norm(node.delta_v_gcrf_mps)));
 }
 
 void FlightSession::reset_rendezvous() {
@@ -319,6 +330,9 @@ void FlightSession::rendezvous_fly_due_burn() {
     rendezvous_burns_.push_back({kind, *node, mass});
     if (rendezvous_debug_) {  // diagnostics: the planner's prediction of the burn, compared after it
         rendezvous_debug_command_ = {controlled_state(), epoch_, rendezvous_engines(norm(node->delta_v_gcrf_mps))};
+        std::printf("[rendezvous] %s on %s: %.0f N, cold gas below %.2f m/s, in %.0f s\n", mission::german_name(kind),
+                    burn_config_.rcs ? "cold gas" : "engines", burn_config_.thrust_n, rendezvous_rcs_below_mps(),
+                    node->epoch - epoch_);
     }
     if (kind == PhasingBurnKind::MidCourse) {
         rendezvous_mid_course_ = false;

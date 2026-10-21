@@ -58,8 +58,11 @@ void FlightSession::run_reboost() {
     auto& r = *reboost_;
     if (r.burning) {
         if (autopilot_.state == AutopilotState::Burn) return;  // flying (turn, settling, burn)
-        r.burning = false;
         if (!burn_abort_reason_.empty()) return end_reboost(false, "Reboost abgebrochen: " + burn_abort_reason_);
+        // the tail-off first, as the Raise leg (f1): a burn planned during it lit the Raptor again on the unsettled
+        // liquid (f2 probe: gas ingestion on a 1000 t depot right after its first burn)
+        if (bodies_[controlled_].body->vehicle().any_engine_producing_thrust()) return;
+        r.burning = false;
     }
     // A Hohmann pair from the energy-mean semi-major axis [D]: the depot's osculating apsides swing by +-10 km with J2
     // (f2 probe: periapsis 175-193 km on a 191 km mean orbit), so apsis burns planned from them (the Raise leg's

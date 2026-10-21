@@ -733,6 +733,8 @@ public:
     const std::string& rendezvous_status() const { return rendezvous_status_; }  // German status line
     // The finite-burn model a rendezvous burn of `delta_v_mps` is planned with (infinite: the strongest burn).
     mission::FiniteBurnModel rendezvous_burn_model(double delta_v_mps) const { return rendezvous_engines(delta_v_mps); }
+    // f2: the longest rendezvous burn the cold gas flies (longer: the burn set once its minimum impulse fits)
+    static constexpr double rendezvous_max_cold_gas_burn_s = 300.0;  // [E]
     // The phasing flight's arrival deadline at Waypoint 0 (none before a rendezvous is planned).
     std::optional<time::Epoch> rendezvous_deadline() const {
         if (rendezvous_step_ == RendezvousStep::None) return std::nullopt;
@@ -1223,6 +1225,11 @@ private:
     bool rendezvous_main_engines() const;
     mission::FiniteBurnModel rendezvous_engines(double delta_v_mps = std::numeric_limits<double>::infinity()) const;
     double rendezvous_rcs_below_mps() const;
+    // Refuelling f2 (user 2026-10-21): the cold gas flies a rendezvous burn only while it lasts at most
+    // rendezvous_max_cold_gas_burn_s; a longer one goes to the burn set once its minimum impulse fits the burn (the
+    // transients up to the whole burn): the light HLS's belly Raptor put every burn below 25 m/s on the 3 kN cold gas,
+    // a 24 m/s braking burn after a re-plan took ~40 min and missed Waypoint 0 by 5 km.
+    double rendezvous_transient_share(double delta_v_mps) const;
     double rendezvous_budget_kg() const;
     bool execute_rendezvous_burn(const gnc::BurnNode& node);
     math::StateVector station_state() const;

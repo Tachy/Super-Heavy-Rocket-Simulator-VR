@@ -226,7 +226,6 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         return p;
     };
     const vehicle::Vehicle hls_vehicle(top_stage(dir, hls_ascent.vehicle_id), dir);
-    vehicle::Vehicle hls_phasing(top_stage(dir, hls_ascent.vehicle_id), dir);  // its boil-off while phasing
     const double ve_hls = phasing_exhaust_velocity_mps(hls_vehicle);
     // f3: the phasing burns settle first (the campaign plans with the default fidelity; one source for the windows'
     // gas and the HLS demand - f3 minor M7)
@@ -291,18 +290,18 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         }
     };
     const double base_kg = report.tanker_base_delivered_kg;
-    const double residue_kg = ref.tanker.residue_after_ascent_kg;
     const double reference_phasing_s = report.reference_phasing_s;
     mission::CampaignModels models;
-    models.next_tanker = [&, base_kg, residue_kg, reference_phasing_s](double earliest_s) {
+    models.next_tanker = [&, base_kg, reference_phasing_s](double earliest_s) {
         const auto first =
             mission::plan_launch_window(tanker_pad, src.earth, depot_at, start + earliest_s, tanker_window, gm);
         if (!first.feasible) return std::optional<mission::CampaignFlight>{};
         const auto w = latest_launch(first, tanker_pad, tanker_window);
         const double phasing_s = w.schedule.waypoint0_epoch - w.separation;
-        // the tanker's own boil-off over the phasing time's difference to the reference flight, and the propellant
-        // of the chosen phasing orbit's raise and boost against the reference window's (f1)
-        const double rate = orbit_boil_off_kgps(tanker, residue_kg, depot_at(w.separation), sun_at(w.separation));
+        // the tanker's own boil-off over the phasing time's difference to the reference flight (f2: the flown free
+        // coast's rate, measured), and the propellant of the chosen phasing orbit's raise and boost against the
+        // reference window's (f1)
+        const double rate = ref.tanker.phasing_boil_off_kgps;
         mission::CampaignFlight flight{w.liftoff - start, w.schedule.waypoint0_epoch - start,
                                        base_kg + rate * (reference_phasing_s - phasing_s) -
                                            (w.cost.propellant_kg - tanker_reference_cost.propellant_kg)};
@@ -317,8 +316,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         mission::CampaignFlight flight{w.liftoff - start, w.schedule.waypoint0_epoch - start, 0.0};
         // f1 minor M3: signed - a cheaper window than the reference needs less - and with the HLS's own boil-off over
         // the phasing time's difference (as the tankers' deliveries)
-        const double rate =
-            orbit_boil_off_kgps(hls_phasing, ref.hls.main_at_docking_kg, depot_at(w.separation), sun_at(w.separation));
+        const double rate = ref.hls.phasing_boil_off_kgps;  // f2: the flown free coast's, measured
         flight.extra_demand_kg = w.cost.propellant_kg - hls_reference_cost.propellant_kg +
                                  rate * (w.schedule.waypoint0_epoch - w.separation - hls_reference_phasing_s);
         flight.phasing_orbit = w.phasing_orbit;
