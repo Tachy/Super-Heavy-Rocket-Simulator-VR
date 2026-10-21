@@ -56,6 +56,8 @@ add_library(starsim_core STATIC
     src/gnc/descent_tracking.cpp
     src/gnc/scvx_landing.cpp
     src/gnc/ship_landing.cpp
+    src/gnc/flip_brake.cpp
+    src/gnc/upright_descent.cpp
     src/gnc/tvc_lateral.cpp
     src/gnc/attitude_slew.cpp
     src/gnc/capsule_entry_control.cpp

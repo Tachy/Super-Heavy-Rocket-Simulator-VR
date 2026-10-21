@@ -112,6 +112,7 @@ add_executable(starsim_core_tests
     test_flight_session_entry.cpp
     test_ship_entry.cpp
     test_ship_landing.cpp
+    test_ship_catch_laws.cpp
     test_ship_deorbit.cpp
     test_deorbit_planner.cpp
     test_ship_return_mission.cpp
