@@ -39,7 +39,6 @@ struct RefuellingFlightMission {
     std::string id, name;
     MissionKind kind = MissionKind::TankerFlight;  // or HlsRefuel
     std::string ascent_id;                         // the chaser's ascent mission (vehicle, site, target orbit)
-    std::string port = "transfer_dock";            // the chaser's port
     DepotOrbitConfig depot;
     time::UtcDateTime earliest_utc;
     RefuellingStart start = RefuellingStart::Pad;

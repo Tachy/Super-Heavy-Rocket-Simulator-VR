@@ -451,7 +451,10 @@ RefuellingFlightMission load_refuelling_flight_mission(const std::filesystem::pa
     if (!depot || !start || !window || !phasing) doc.fail("missing [depot], [start], [launch_window] or [phasing]");
     m.name = doc.text(*mission, "name");
     m.ascent_id = doc.text(*mission, "ascent");
-    m.port = doc.text_or(*mission, "port", "transfer_dock");
+    if (mission->contains("port")) {  // r5 minor: it was parsed and never used
+        doc.fail("[mission] port is not used: the chaser docks with its first docking port ([depot] port names the "
+                 "depot's)");
+    }
     m.depot.vehicle_id = doc.text_or(*depot, "vehicle", "starship_depot");
     m.depot.port = doc.text_or(*depot, "port", "transfer_dock");
     m.depot.height_m = doc.positive(*depot, "height_km") * 1e3;

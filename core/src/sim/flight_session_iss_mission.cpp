@@ -54,6 +54,8 @@ double main_free_kg(const vehicle::Vehicle& v, config::TankContents contents) {
 
 void FlightSession::set_iss_mission(std::optional<IssMissionSequence> sequence) {
     iss_mission_ = std::move(sequence);
+    ++iss_generation_;  // a continuation that sets a new sequence must not be ended as the old one (r5 minor)
+    raise_start_epoch_.reset();
     iss_status_.clear();
     iss_marks_.clear();
     iss_capture_retries_ = 0;
@@ -64,7 +66,8 @@ void FlightSession::set_iss_mission(std::optional<IssMissionSequence> sequence) 
     if (iss_mission_->from_launch) {
         iss_enter(IssMissionLeg::Ascent, "Aufstieg");
     } else if (iss_mission_->transfer && docked()) {
-        iss_start_transfer();
+        // through the Docked gate: an active docking autopilot hands over first (r5 minor: start_transfer refused it)
+        iss_enter(IssMissionLeg::Docked, "Angedockt");
     } else if (iss_mission_->undock_epoch) {
         iss_enter(IssMissionLeg::WaitUndock, "Angedockt: Abkoppeln geplant");
     } else {
@@ -118,6 +121,7 @@ void FlightSession::iss_start_raise(bool first) {
     // at the new apoapsis follows), else the periapsis raise alone.
     std::optional<gnc::BurnNode> node;
     if (first) {
+        raise_start_epoch_ = epoch_;  // the separation: the window's phasing limit counts from here (f1 minor M2)
         node = gnc::next_raise_node(state, epoch_, gm_earth_, to.periapsis_radius_m, to.apoapsis_radius_m,
                                     mission::raise_tolerance_m);
         const auto el = orbit::elements_from_state(state, gm_earth_);
@@ -125,10 +129,17 @@ void FlightSession::iss_start_raise(bool first) {
             node && to.apoapsis_radius_m > el.semi_major_axis_m * (1.0 + el.eccentricity) + mission::raise_tolerance_m;
     } else if (raise_periapsis_pending_) {
         raise_periapsis_pending_ = false;
-        node = gnc::set_periapsis_at_apoapsis(state, epoch_, gm_earth_, to.periapsis_radius_m);
+        // raised only, as the window's estimate (f1 minor M1: a candidate below the new periapsis lowered it)
+        node = gnc::raise_periapsis_at_apoapsis(state, epoch_, gm_earth_, to.periapsis_radius_m);
     }
     if (!node) {  // at (or above) the phasing orbit
-        if (plan_rendezvous(iss_mission_->phasing)) {
+        auto phasing = iss_mission_->phasing;
+        if (raise_start_epoch_) {  // the raise burns took their time out of the limit (f1 minor M2)
+            const double used_s = epoch_ - *raise_start_epoch_;
+            phasing.mission_limit_s -= used_s;
+            phasing.earliest_arrival_s = std::max(0.0, phasing.earliest_arrival_s - used_s);
+        }
+        if (plan_rendezvous(phasing)) {
             iss_enter(IssMissionLeg::Rendezvous, "Phasenflug: " + rendezvous_status_);
         } else {
             iss_end(rendezvous_status_);
@@ -273,7 +284,9 @@ void FlightSession::run_iss_mission() {
             iss_start_transfer();
             return;
         case IssMissionLeg::Transfer:
-            if (transfer_state().phase == TransferPhase::Stopped) {
+            if (collision_impulse_ns()) {  // r5 minor: a collision stops the transfer; report the collision
+                iss_end("Kollision");
+            } else if (transfer_state().phase == TransferPhase::Stopped) {
                 iss_end(transfer_state().status);
             } else if (undock()) {
                 iss_enter(IssMissionLeg::Departure, "Abflug: " + docking_status_);
@@ -344,8 +357,9 @@ void FlightSession::run_iss_mission() {
             return;
         case IssMissionLeg::WaitContinue: {
             const auto continuation = q.continuation;  // the continuation may replace the sequence
+            const auto generation = iss_generation_;
             const std::string refusal = continuation(*this);
-            if (!iss_mission_) return;
+            if (!iss_mission_ || iss_generation_ != generation) return;  // ended, or a new sequence runs
             if (refusal.empty()) {
                 iss_enter(IssMissionLeg::Complete, "Mission fortgesetzt");
             } else {

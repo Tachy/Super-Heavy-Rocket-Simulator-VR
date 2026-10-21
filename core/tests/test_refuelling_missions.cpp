@@ -231,6 +231,38 @@ TEST_CASE("Raise: every below-depot candidate can be planned after its flown rai
     CHECK(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
 }
 
+TEST_CASE("Raise: a candidate below the insertion periapsis never lowers it", "[refuelling][iss_mission]") {
+    // f1 minor M1: the second raise burn set the periapsis (also downwards) while the window's estimate only raises
+    test::spice_session();
+    const double re = constants::wgs84_semi_major_axis_m;
+    RaiseFixture f(100e3);
+    // the apoapsis raise at the 190 km apoapsis makes 190 km the periapsis; the 100 km candidate is not burnt down to
+    f.sequence.raise_to = mission::PhasingOrbit{re + 100e3, re + 270e3};
+    f.start();
+    f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
+    INFO(f.session.iss_mission_status());
+    const auto [rp, ra] = f.apsides();
+    CHECK(rp > re + 160e3);  // [E] J2 short-period terms move the osculating periapsis by ~15 km (bug: ~114 km)
+    CHECK(ra == Catch::Approx(re + 270e3).margin(20e3));
+}
+
+TEST_CASE("Raise: the phasing deadline counts from the separation, not from the end of the raise",
+          "[refuelling][iss_mission]") {
+    // f1 minor M2: the window's limit runs from the separation; the flown deadline started after the raise burns
+    test::spice_session();
+    const double re = constants::wgs84_semi_major_axis_m;
+    RaiseFixture f(100e3);
+    f.sequence.raise_to = mission::PhasingOrbit{re + 250e3, re + 270e3};
+    f.start();
+    const auto separation = f.session.epoch();
+    f.fly_until(IssMissionLeg::Rendezvous, 4.0 * 3600.0);
+    INFO(f.session.iss_mission_status());
+    REQUIRE(f.session.iss_mission_leg() == IssMissionLeg::Rendezvous);
+    REQUIRE(f.session.rendezvous_deadline().has_value());
+    CHECK(*f.session.rendezvous_deadline() - separation ==
+          Catch::Approx(f.sequence.phasing.mission_limit_s).margin(2.0 * sim::FlightSession::tick_s + 1.0));
+}
+
 TEST_CASE("Raise: a burn that runs dry ends the mission with its reason", "[refuelling][iss_mission]") {
     test::spice_session();
     const double re = constants::wgs84_semi_major_axis_m;
@@ -271,7 +303,9 @@ TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit 
     test::spice_session();
     DockedAtDepot f;
     f.session.set_iss_mission(f.tanker_sequence());
-    REQUIRE(f.leg() == IssMissionLeg::Transfer);  // a docked start with a transfer begins with it
+    REQUIRE(f.leg() == IssMissionLeg::Docked);  // a docked start with a transfer begins at the Docked gate (f4)
+    f.session.advance_to(f.session.epoch() + 1.0);
+    REQUIRE(f.leg() == IssMissionLeg::Transfer);  // ... and starts it on a following tick
     f.fly([&] { return f.leg() == IssMissionLeg::Departure || f.leg() == IssMissionLeg::Ended; }, 3600.0, 10.0);
     INFO(f.session.iss_mission_status());
     REQUIRE(f.leg() == IssMissionLeg::Departure);
@@ -284,7 +318,8 @@ TEST_CASE("Docked tanker: transfer down to the reserve, undock, depart, deorbit 
     CHECK(f.session.ship_return_plan()->feasible);
     const auto& marks = f.session.iss_mission_marks();
     REQUIRE(marks.size() >= 3u);
-    CHECK(marks.front().leg == IssMissionLeg::Transfer);
+    CHECK(marks[0].leg == IssMissionLeg::Docked);  // f4: a docked start passes the Docked gate
+    CHECK(marks[1].leg == IssMissionLeg::Transfer);
     if (verbose()) {
         for (const auto& m : marks) {
             std::printf("[r5] %-24s +%8.0f s  main %.1f t  station %.1f t\n", sim::to_string(m.leg),
@@ -357,6 +392,52 @@ TEST_CASE("WaitContinue coasts to its epoch and hands over to the continuation",
     const auto& hls = f.session.body(f.session.controlled_index()).vehicle();
     CHECK(hls.main_propellant_kg() > 1000.0e3 + 600.0e3 - 30.0e3);  // [test] chill-down / settling-gas headroom
     CHECK(std::chrono::duration<double>(std::chrono::steady_clock::now() - wall).count() < 60.0);  // coasted
+}
+
+TEST_CASE("A continuation that installs a new sequence keeps it running", "[refuelling][iss_mission]") {
+    // r5 minor: the old leg's Complete overwrote the new sequence's first leg
+    test::spice_session();
+    DockedAtDepot f(refuelling_test::ship_with("starship_hls", 1000.0e3));
+    sim::IssMissionSequence q;
+    q.station_port = "transfer_dock";
+    q.transfer = sim::MissionTransfer::FillChaser;
+    q.continue_epoch = f.session.epoch() + 3.0 * 3600.0;
+    q.continuation = [](sim::FlightSession& s) {
+        sim::IssMissionSequence next;  // a new flight to the station: it starts with the rendezvous leg
+        next.station_port = "transfer_dock";
+        s.set_iss_mission(next);
+        return std::string();
+    };
+    f.session.set_iss_mission(q);
+    const auto& marks = f.session.iss_mission_marks();
+    f.fly([&] { return !marks.empty() && marks.front().leg == IssMissionLeg::Rendezvous; }, 6.0 * 3600.0, 60.0);
+    INFO(f.session.iss_mission_status());
+    REQUIRE_FALSE(marks.empty());
+    CHECK(marks.front().leg == IssMissionLeg::Rendezvous);  // set_iss_mission cleared the old sequence's marks
+    CHECK(std::none_of(marks.begin(), marks.end(), [](const auto& m) { return m.leg == IssMissionLeg::Complete; }));
+}
+
+TEST_CASE("A sequence set after a hard capture goes through the Docked gate into the transfer",
+          "[refuelling][iss_mission]") {
+    // r5 minor: set_iss_mission started the transfer at once, past the gate that waits for the docking autopilot
+    test::spice_session();
+    refuelling_test::TankerAtPort f({20.0, 0.0, 0.0}, {}, refuelling_test::ship_with("starship_hls", 1000.0e3));
+    gnc::ProximityParameters p;
+    p.start_waypoint = 2;
+    REQUIRE(f.session.start_proximity("transfer_dock", p));
+    f.fly([&] { return f.session.docked(); }, 3600.0);
+    REQUIRE(f.session.docked());
+    sim::IssMissionSequence q;
+    q.station_port = "transfer_dock";
+    q.transfer = sim::MissionTransfer::FillChaser;
+    f.session.set_iss_mission(q);
+    f.fly([&] { return f.session.iss_mission_leg() != IssMissionLeg::Docked; }, 600.0);
+    INFO(f.session.iss_mission_status());
+    CHECK(f.session.iss_mission_leg() == IssMissionLeg::Transfer);
+    const auto& marks = f.session.iss_mission_marks();
+    REQUIRE(marks.size() >= 2);
+    CHECK(marks[0].leg == IssMissionLeg::Docked);
+    CHECK(marks[1].leg == IssMissionLeg::Transfer);
 }
 
 TEST_CASE("Continuation refusal ends the mission", "[refuelling][iss_mission]") {

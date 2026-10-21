@@ -109,7 +109,7 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
     proximity_warnings_.clear();
     for (const auto& impulse : station_impulses_) {
         if (impulse.epoch >= epoch_ && impulse.epoch <= epoch_ + proximity_warning_span_s) {
-            proximity_warnings_.push_back("Achtung: Bahnanhebung der ISS um " + german(impulse.delta_v_mps, 2) +
+            proximity_warnings_.push_back("Achtung: Bahnanhebung der Station um " + german(impulse.delta_v_mps, 2) +
                                           " m/s während des Anflugs");
         }
     }

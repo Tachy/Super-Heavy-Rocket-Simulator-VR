@@ -525,6 +525,13 @@ void FlightSession::erase_body(size_t index) {
     bodies_.erase(bodies_.begin() + static_cast<std::ptrdiff_t>(index));
     shift(controlled_);
     if (station_index_) shift(*station_index_);
+    if (nose_cone_epoch_) {  // r5 minor: the payload whose nose cone opens keeps its index (or the opening is dropped)
+        if (nose_cone_body_ == index) {
+            nose_cone_epoch_.reset();
+        } else {
+            shift(nose_cone_body_);
+        }
+    }
     if (rendezvous_) shift(rendezvous_->target_index);
     if (transfer_) {
         shift(transfer_sides_.delivering);

@@ -687,6 +687,13 @@ public:
     RendezvousStep rendezvous_step() const { return rendezvous_step_; }
     const mission::PhasingPlan* rendezvous_plan() const { return rendezvous_plan_ ? &*rendezvous_plan_ : nullptr; }
     const std::string& rendezvous_status() const { return rendezvous_status_; }  // German status line
+    // The finite-burn model a rendezvous burn of `delta_v_mps` is planned with (infinite: the strongest burn).
+    mission::FiniteBurnModel rendezvous_burn_model(double delta_v_mps) const { return rendezvous_engines(delta_v_mps); }
+    // The phasing flight's arrival deadline at Waypoint 0 (none before a rendezvous is planned).
+    std::optional<time::Epoch> rendezvous_deadline() const {
+        if (rendezvous_step_ == RendezvousStep::None) return std::nullopt;
+        return rendezvous_deadline_;
+    }
     const std::vector<RendezvousBurnRecord>& rendezvous_burns() const { return rendezvous_burns_; }
     int rendezvous_replans() const { return rendezvous_replans_; }
     // German: a station impulse (reboost) inside the plan's span, as planned at plan_rendezvous.
@@ -1110,6 +1117,8 @@ private:
     std::string iss_status_;
     std::vector<MissionMark> iss_marks_;
     int iss_capture_retries_ = 0;
+    unsigned iss_generation_ = 0;                  // counts set_iss_mission calls (a continuation may set one)
+    std::optional<time::Epoch> raise_start_epoch_;  // the separation of a raise sequence (f1: the limit runs from it)
     void run_iss_mission();            // every tick: the leg change due now
     bool iss_mission_pending() const;  // a leg change is due (the coast stops)
     void iss_end(const std::string& reason);

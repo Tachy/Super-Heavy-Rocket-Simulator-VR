@@ -4,7 +4,6 @@
 name = "Tankerflug ab Phasenorbit"
 kind = "tanker_flight"
 ascent = "tanker_ascent"          # vehicle, site and phasing orbit
-port = "transfer_dock"
 return = "ship_return_starbase"
 
 [depot]

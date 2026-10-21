@@ -5,7 +5,6 @@
 name = "Tankerflug zum Depot"
 kind = "tanker_flight"
 ascent = "tanker_ascent"
-port = "transfer_dock"
 return = "ship_return_starbase"   # its [deorbit] block (entry interface, bank, crossrange)
 
 # The depot, placed (not flown in this mission): synthetic orbit advanced by J2 (r5 plan decision 2).

@@ -272,7 +272,8 @@ TEST_CASE("A station reboost during the transfer is absorbed", "[iss][proximity]
                                     {sim::StationImpulse{boost, 0.3, "Testanhebung"}});
     REQUIRE(d.session.start_proximity("ida2"));
     for (const auto& w : d.session.proximity_warnings()) std::printf("[validation] %s\n", w.c_str());
-    CHECK(d.session.proximity_warnings().size() == 1);
+    REQUIRE(d.session.proximity_warnings().size() == 1);
+    CHECK(d.session.proximity_warnings()[0].rfind("Achtung: Bahnanhebung der Station", 0) == 0);  // any station
     const double kg0 = d.session.body(0).vehicle().rcs_propellant_kg();
     fly(d, 3.0 * 3600.0);
     std::printf("[validation] station reboost 0.3 m/s during the transfer:\n");

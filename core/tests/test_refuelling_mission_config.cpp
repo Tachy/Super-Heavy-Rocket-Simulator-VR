@@ -119,6 +119,12 @@ earliest_arrival_h = 0.0
     hls.replace(hls.find("kind = \"tanker_flight\""), 22, "kind = \"hls_refuel\"  ");
     const auto no_lunar = with_mission("cfg_lunar", "t", hls);
     CHECK_THROWS_WITH(config::load_refuelling_flight_mission(no_lunar, "t"), Catch::Matchers::ContainsSubstring("lunar"));
+    // r5 minor: the chaser docks with its first port; a [mission] port would be silently ignored
+    std::string port = mode("pad");
+    port.insert(port.find("ascent = "), "port = \"transfer_dock\"\n");
+    const auto with_port = with_mission("cfg_port", "t", port);
+    CHECK_THROWS_WITH(config::load_refuelling_flight_mission(with_port, "t"),
+                      Catch::Matchers::ContainsSubstring("[mission] port"));
     // f1: candidate phasing orbits
     const auto candidates = [&](const std::string& name, const std::string& lines) {
         return with_mission(name, "t", mode("pad") + lines);

@@ -4,7 +4,6 @@
 name = "HLS: Betankung am Depot und Mondmission"
 kind = "hls_refuel"
 ascent = "hls_ascent"
-port = "transfer_dock"
 
 # The depot, placed in the lunar mission's parking plane (its RAAN from the Moon at arrival, run back by J2).
 [depot]
