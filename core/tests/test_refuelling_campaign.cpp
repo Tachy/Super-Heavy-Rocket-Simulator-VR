@@ -60,7 +60,7 @@ TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelli
     CHECK(r.depot.mission == "depot_launch");
     CHECK(r.depot.initial_propellant_kg == Catch::Approx(55.5e3));
     CHECK(r.tanker.mission == "tanker_flight");
-    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(69.0e3));  // f3 re-measured
+    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(70.4e3));  // f4 re-measured
     CHECK(r.tanker.dry_mass_sensitivity == Catch::Approx(0.99));
     CHECK(r.hls.mission == "hls_refuel");
     CHECK(r.hls.main_at_docking_kg == Catch::Approx(187.3e3));

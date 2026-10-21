@@ -1237,8 +1237,8 @@ planner, proximity guidance, docking mechanism and sim, compound) is generalised
   10 t main propellant: equal +-x (3,000 N each). `Vehicle::rcs_supply_kg()`: main-tank cold gas counts the main
   oxidizer + fuel tanks (not the headers: the landing reserve), else the RCS tanks; proximity and phasing budget it.
 - **Target block** (`[stage.station.proximity]`, `sim::with_station_limits`): keep-out radius, approach ellipsoid,
-  Waypoint 0 / 1 / 2 and fly-around radius override the code's ISS defaults only where the target sets them; the
-  ISS sets none. The depot takes the ISS values [E] (200 m, 4 x 2 x 2 km, 400 / 220 / 20 m), flies the ideal LVLH
+  Waypoint 0 / 1 / 2 and fly-around radius override the code's ISS defaults - and a caller's own values (f4: safety
+  limits of the target a caller must not loosen) - only where the target sets them; the ISS sets none. The depot takes the ISS values [E] (200 m, 4 x 2 x 2 km, 400 / 220 / 20 m), flies the ideal LVLH
   attitude nose along +V-bar, dorsal side (the drogues) to nadir. A station is one stage: `add_station` refuses a
   stack ("the depot without its booster", `config::top_stage_config`). Target drag without a fixed area: C_D 2.2 on
   the end-on disk.
@@ -1346,7 +1346,7 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r5-reference-flights.md`, led
   `WaitContinue` (coasts to `continue_epoch`, then `continuation`: the lunar mission). `ascent_to_station`: the
   inserted depot becomes the station (`make_station`: ideal LVLH attitude at once, the turn is not flown). The Ascent
   leg ends only after the engines' tail-off (the cutoff command left ~12 m/s at 5 g: the apoapsis was read 35 km low,
-  the raise skipped). `max_capture_retries` (refuelling 2 [E], ISS 0: the pilot resumes) resumes a proximity flight
+  the raise skipped) - of the controlled body only: the separated booster's tail-off does not move the ship's apsides. `max_capture_retries` (refuelling 2 [E], ISS 0: the pilot resumes) resumes a proximity flight
   waiting at Waypoint 2 after a retreat, then "Andocken fehlgeschlagen nach N Neuversuchen" (the light HLS bounced off
   the drogues once at 0.08 m/s with 6 mm/s lateral; the chain had waited forever at 200 Hz). Leg marks
   (`iss_mission_marks`: mass, main propellant, RCS supply, station main propellant) are the measured numbers.
@@ -1355,7 +1355,8 @@ Plan `docs/superpowers/plans/2026-10-20-refuelling-r5-reference-flights.md`, led
   later.
 - **Departure burn** (gnc, all chasers): the target velocity is the free CW drift of the post-impulse state (before: a
   fixed LVLH velocity; the Coriolis term ~2 n v beat the filled HLS's ~2.5 mm/s^2 of cold gas: 466 t fired in 9.8 h,
-  the HLS was lost). The filled HLS now leaves the nearly empty depot in 143 min on 1.96 t.
+  the HLS was lost). The filled HLS now leaves the nearly empty depot in 143 min on 1.96 t. This also changed the ISS
+  departure (i5 section: its numbers predate it; the departure tests pass unchanged).
 - **Missions** (`config/missions/`, `config/refuelling_mission_config.hpp`, `sim/refuelling_mission`; started at the
   config's epochs): `depot_launch` (`depot_ascent`: 200 x 200 km), `tanker_flight` / `tanker_flight_orbit`
   (`tanker_ascent`), `hls_refuel` / `hls_refuel_orbit` (`hls_ascent` on `starship_hls_launch` = Block 3 booster + HLS
@@ -1468,7 +1469,8 @@ Spec `docs/superpowers/specs/2026-10-21-refuelling-followups-design.md` (f1), pl
 - **Config** `[phasing]` of `tanker_flight` / `hls_refuel`: `candidates_km` [E] (150, 160, 170, 180 x 190 km
   below; 220 x 240, 250 x 270 km above), `planning_mass_t` [D] 308 / 328, `planning_boil_off_t_per_day` [D] probe
   2026-10-21: tanker 15.9 (99.2 t main), HLS 0.45 (208 t), `window_margin_h` [E] 4: the window closes 4 h before the
-  limit, the flown phasing keeps the full limit (a window needing 47.0 of 48 h failed its re-plan 40 h in).
+  limit, the flown phasing keeps the full limit (a window needing 47.0 of 48 h failed its re-plan 40 h in) - counted
+  from the separation as in the window (f4: the flown deadline used to start after the raise burns, ~1-3 h later).
   `periapsis_km = 170` stays as the reference set.
 - **Calculator:** delivery = base + tanker boil-off over the phasing difference - (chosen raise/boost propellant -
   the reference window's); the HLS's extra over its reference window is `CampaignFlight::extra_demand_kg`, held in the
@@ -1521,10 +1523,12 @@ catch tilt and the RCS allocator fixes below apply either way).
   limits include the lead): the turn to the burn attitude ends before the push - found: a TLI push during a ~1 deg/s
   turn (centrifugal ~1e-2 m/s^2 at the tanks against the push's 1.75e-3) left the HLS 0.91 settled at ignition, the
   ignition was held 3 s and MCC 1 grew from 3.2 to 11.1 m/s. Lunar PDI: the descent coast starts the push one lead
-  before the braking engines (no hold there: PDI lights on time). The hold judges the push by its capability, not the
+  before the braking engines only when not settled; while unsettled at the ignition it holds as the burns do (f4; it
+  pushed always and lit without a hold before). The hold judges the push by its capability, not the
   last tick's measured push (final review I1: an ignition already due on the burn's first tick lit unsettled).
-  Manual `FlightSession::settle(bool)` (game `FlightSim.settle(enabled)`): refused while docked or while a proximity
-  approach flies (engaging one switches it off: the approach owns the RCS), cleared by a new flight.
+  Manual `FlightSession::settle(bool)` (game `FlightSim.settle(enabled)`): refused while docked, while a proximity
+  approach flies (engaging one switches it off: the approach owns the RCS) or while an autopilot cold-gas burn or the
+  rendezvous flies (f4: an RCS burn clears it), cleared by a new flight.
   Snapshot: `autopilot_status().settling`, `burn_abort_reason`, `body_stages()[i].settled`.
 - **Numbers:** tanker / Block 3 / HLS leads 42-96 s, 0.2-0.75 t per push (HLS TLI 42 s / 0.49 t full, MCC at 609 t
   main 88 s / 0.74 t; tanker raise 80 s). **Finding:** gas ~ sqrt(F) for a given travel (t ~ 1/sqrt(F), mass flow ~ F):
@@ -1551,9 +1555,10 @@ catch tilt and the RCS allocator fixes below apply either way).
   missions' burn re-targeting from the live state are not affected in practice.
 - **Reference flights re-measured** (2026-10-21, f3): tanker residue 99.7 t, rendezvous 16.7 t (+1.3 t: the phasing
   pushes), delivered 55.4 / 13.6 t (69.0 t), at catch 2.13 t; HLS main at docking 187.3 t; full HLS departure 1.96 t
-  of push gas.
+  of push gas. f4 again (below): rendezvous 15.3 t, delivered 56.5 / 13.9 t (70.4 t), at catch 1.81 t.
 - **Answer** (200 km, 48 h): **13 tanker flights, 49.7 days** (f1: 12 / 46.5 d; HLS docks 2026-12-05 at 920.9 t;
-  demand 861.2 t; losses boil-off 22.4 t, drag 1.35 t, gas 0.99 t, vent 13.6 t).
+  demand 861.2 t; losses boil-off 22.4 t, drag 1.35 t, gas 0.99 t, vent 13.6 t). f4: unchanged 13 / 49.7 d (demand
+  868.3 t, depot at the HLS 938.8 t, vent 13.8 t).
 - **Diagnostics:** `STARSIM_DEBUG_SETTLING=1` prints each push (start before ignition, settled, body rate; mean push
   against the capability; duration, gas, lead) and every held ignition.
 - **Tests:** `[ignition_settling]` (`test_ignition_settling.cpp`: progress and travel, PMD and header feed, ingestion
@@ -1561,3 +1566,51 @@ catch tilt and the RCS allocator fixes below apply either way).
   ignition, manual settle, the turn before the push, the allocator query, the gas bound and the session's estimates
   and reservations), `[rendezvous][phasing]` (reserve per burn), `[iss][launch_window]` (gas per burn by hand),
   `[refuelling][campaign]` (in-orbit ignitions of the lunar legs).
+
+### Deferred minors (f4)
+
+Plan `docs/superpowers/plans/2026-10-21-refuelling-f4-deferred-minors.md`: the minors of the r1-r6, f1 and f3 final
+reviews, each fixed (with a test) or decided here.
+- **Fixed - vehicle / config:** `set_tank_mass` refuses NaN / infinite masses; duplicate stage, docking-port and
+  transfer-connector ids are config errors; hull sampling stops below the lowest nose port, whichever port is listed
+  first; `tools/vehicle_report.py` resolves `from` stages by the C++ rules (cycle bound, `<vehicle>:<stage>`, allowed
+  keys, lists appended; `tools/test_vehicle_report.py`); SRP constants from `constants.hpp` (`speed_of_light_mps`);
+  probe/drogue pairing tests check one-to-one pairs and bad layouts; `[mission] port` of refuelling missions is a
+  config error (it was parsed and never used: the chaser docks with its first port).
+- **Fixed - boil-off / coast:** a hold (docked, caught, landed) and the release forget the last rates (the first
+  coast after days docked averaged with the flow from before); a body resting on the Moon no longer boils in `step()`;
+  vehicles without `[stage.thermal]` skip the evaluation; a coast that ends in the Moon's sphere tracks the Moon as the
+  orbit reference (f3 M8); a 600 s-segment test through the eclipse matches the orbit average (3 %).
+- **Fixed - burns:** failed engines report "Triebwerke ausgefallen" (not "kein Treibstoff"); the deorbit boil-off
+  check uses the deorbit group's mixture ratio; a re-plan keeps the boil-off until its burn; rendezvous burns are
+  modelled at the throttle they fly (minimum throttle between the two minimum impulses, r3 M1 - the reference tanker's
+  rendezvous fell 16.7 -> 15.3 t).
+- **Fixed - transfer:** the pressure difference per line; a chill-down after a pause vents again (the lines warmed);
+  no transfer start while the hooks open; the settling push gives only the impulse of the gas it drew
+  (`TransferState::settling_impulse_ns`).
+- **Fixed - mission chain:** a generation counter keeps a sequence set by a continuation; a docked start passes the
+  Docked gate (an extra Docked mark before Transfer); a collision during the transfer ends as "Kollision"; the second
+  raise burn only raises the periapsis (f1 M1); the phasing deadline counts from the separation (f1 M2); the nose-cone
+  body index shifts in `erase_body`; the reboost warning says "der Station".
+- **Fixed - calculator:** the vent grosses up as net / (1 - f) (`mission::gross_for_net_kg`); the HLS's wait boils off
+  with the Sun of its arrival (`CampaignModels::hls_wait_kg`) and must fit its free tank volume; the HLS's TLI starts
+  from the depot altitude; the HLS's extra demand is signed and includes its phasing boil-off difference (the HLS
+  window is checked before every tanker); every candidate's refusal reason is reported; `candidates_km = []` and
+  `reference_phasing` without `periapsis_km` are refused, `window_margin_h` is read without candidates; the CLI flag
+  parsing no longer relies on unsigned wrap-around; one source for the settling flag (`vehicle::ignition_settling_default`);
+  lunar in-orbit ignitions per budget leg (`BudgetLeg::ignitions`: LLO 3 -> 5, NRHO 6/7 -> 9/10; a lower bound - MCCs,
+  plane trim and NRHO station keeping are not budgeted legs). `reference_flights.toml` carries `inputs_digest` (FNV-1a
+  of the configs the flights read): a config change without a re-measure fails the fast `[refuelling][campaign][config]`
+  check (C++ model changes are not caught).
+- **Fixed - bindings:** `iss_state` / `station_geometry` ports export `mechanism` and `elements_m`.
+- **Decided, not changed:**
+  - depot header tanks (35 t) stay aboard: transfer connectors take main tanks only, usable depot fill 1,600 - 35 t;
+  - probe/drogue contact: the force steps from the cone wall to the mouth plate at the rim (mm penetration, 2 kN/cm);
+    a nearest-face rule would move capture outcomes of the slow campaigns for no physical gain;
+  - `load_stage_from` reloads the source vehicle per reused stage (milliseconds, once per load);
+  - the FlightSim campaign command holds the simulation clock for ~0.5-1 s (`SessionRunner` accepts long calls, as a
+    return plan);
+  - `DeorbitParameters::boil_off_kgps` stays an offline planning knob (the session flies a copy ahead);
+  - Raise tail-off wait without a timeout (f1 M7): no public path keeps an engine running with the autopilot idle in
+    the Raise leg (the autopilot burn cuts pilot-lit engines; disengage + ignite re-plans the next raise);
+  - the step dependence of burn end states (above): the free drift at a 120 km perigee, not the burn executor.
