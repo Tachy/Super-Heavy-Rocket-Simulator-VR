@@ -15,6 +15,12 @@
 #include "refuelling_test_support.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
+#include "starsim/mission/iss_launch_window.hpp"
+#include "starsim/vehicle/vehicle.hpp"
+#include "starsim/orbit/synthetic_station_orbit.hpp"
+#include "starsim/frames/geodetic.hpp"
+#include "starsim/config/vehicle_config.hpp"
+#include "starsim/config/refuelling_mission_config.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
@@ -221,6 +227,44 @@ TEST_CASE("Reboost: a refused burn leaves the depot a station", "[campaign_flown
     REQUIRE(f.session.station_index() == std::optional<size_t>{0});
     CHECK(f.session.body(0).ideal_attitude());
     f.session.advance_to(f.session.epoch() + 3600.0);  // a station again: it coasts
+}
+
+TEST_CASE("A campaign tanker launches beside the kept depot and flies its chain to the raise",
+          "[campaign_flown][refuelling][ascent]") {
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    const auto& dir = refuelling_test::config_dir;
+    const auto m = config::load_refuelling_flight_mission(dir, "tanker_flight");
+    const auto ascent = config::load_ascent_mission(dir, m.ascent_id);
+    const auto site = config::load_launch_site(dir, ascent.site_id);
+    f.session.add_station(refuelling_test::depot_config(300.0e3), f.depot, f.t0);
+    const vehicle::Vehicle chaser(config::top_stage_config(config::load_vehicle(dir, ascent.vehicle_id)), dir);
+    const auto p = sim::refuelling_window_parameters(m, ascent, sim::phasing_exhaust_velocity_mps(chaser),
+                                                     sim::phasing_settling_gas_kg(chaser, f.session.ignition_settling()));
+    const auto mean = orbit::station_mean_elements_from_state(f.depot, f.t0, constants::earth_gm_m3ps2,
+                                                              constants::earth_j2, constants::wgs84_semi_major_axis_m,
+                                                              f.earth);
+    const auto pad = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    const auto w = mission::plan_launch_window(pad, f.earth, sim::station_orbit(mean, f.earth), f.t0, p,
+                                               constants::earth_gm_m3ps2);
+    REQUIRE(w.feasible);
+    // off the liftoff: refused, nothing changed
+    CHECK_FALSE(sim::launch_campaign_flight(f.session, dir, m, w, p).refusal.empty());
+    CHECK(f.session.body_count() == 1u);
+    f.session.advance_to(w.liftoff);
+    const auto s = sim::launch_campaign_flight(f.session, dir, m, w, p);
+    REQUIRE(s.refusal.empty());
+    REQUIRE(f.session.iss_mission());
+    CHECK_FALSE(f.session.iss_mission()->ship_return.has_value());
+    CHECK(f.session.iss_mission()->transfer == sim::MissionTransfer::TankerReserve);
+    CHECK(f.session.station_index().has_value());
+    while (f.session.iss_mission_leg() == IssMissionLeg::Ascent && f.session.epoch() - w.liftoff < 1200.0) {
+        f.session.advance_to(f.session.epoch() + 1.0);
+    }
+    INFO(f.session.iss_mission_status());
+    CHECK((f.session.iss_mission_leg() == IssMissionLeg::Raise ||
+           f.session.iss_mission_leg() == IssMissionLeg::Rendezvous));
+    CHECK(f.session.station_index().has_value());
 }
 
 TEST_CASE("Probe: reboost timeline", "[.f2_probe]") {
