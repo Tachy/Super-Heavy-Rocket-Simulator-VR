@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "starsim/mission/iss_launch_window.hpp"
 #include "starsim/mission/phasing_schedule.hpp"
 
 namespace starsim::mission {
@@ -21,6 +22,7 @@ struct CampaignFlight {
     // arrival (refuelling f1)
     double extra_demand_kg = 0.0;
     std::optional<PhasingOrbit> phasing_orbit;  // the window's choice (f1; none: the separation orbit)
+    std::optional<LaunchWindow> window;         // f2: the planned window (the flown campaign launches it)
 };
 
 struct CampaignModels {
@@ -47,6 +49,11 @@ struct CampaignInputs {
     int max_tankers = 60;
     // free HLS tank volume beside its required propellant: the wait's boil-off must fit into it (r6 minor)
     double hls_tank_room_kg = std::numeric_limits<double>::infinity();
+    // f2 live re-plan: the last flight before t = 0 (negative times; launch interval and port spacing count from it)
+    // and the earliest launch
+    double previous_launch_s = -std::numeric_limits<double>::infinity();
+    double previous_arrival_s = -std::numeric_limits<double>::infinity();
+    double earliest_launch_s = 0.0;
 };
 
 struct CampaignLosses {

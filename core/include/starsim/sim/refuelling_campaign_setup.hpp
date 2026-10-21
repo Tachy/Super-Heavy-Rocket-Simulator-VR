@@ -11,6 +11,8 @@
 
 #include "starsim/ephemeris/ephemeris.hpp"
 #include "starsim/frames/body_orientation.hpp"
+#include "starsim/math/state_vector.hpp"
+#include "starsim/mission/iss_launch_window.hpp"
 #include "starsim/mission/refuelling_campaign.hpp"
 #include "starsim/time/epoch.hpp"
 #include "starsim/time/time_scale_converter.hpp"
@@ -38,6 +40,24 @@ struct CampaignSources {
     std::filesystem::path config_dir;
 };
 
+// The smallest HLS mass that closes the lunar mission from its planned outbound flight (r6 plan decision 2).
+struct CampaignHlsDemand {
+    double required_mass_kg = 0.0, dry_mass_kg = 0.0, capacity_kg = 0.0, headers_kg = 0.0;
+};
+
+// Refuelling f2: a re-plan from the flown campaign - t = 0 at `epoch`, the depot from its flown state
+// (orbit::station_mean_elements_from_state: its mean height for the drag and the shifted phasing orbits), its fill, the
+// last flight (the launch interval and the port spacing count from it), no launch earlier than launch_lead_s, and the
+// HLS demand of the first plan (empty: planned, as without a live start).
+struct CampaignLive {
+    time::Epoch epoch;
+    math::StateVector depot_gcrf;
+    double depot_propellant_kg = 0.0;
+    std::optional<time::Epoch> previous_launch, previous_arrival;
+    double launch_lead_s = 3600.0;  // [E] pad readiness after a decision
+    std::optional<CampaignHlsDemand> demand;
+};
+
 struct CampaignReport {
     mission::CampaignResult result;
     time::Epoch start;  // t = 0: the tanker mission's earliest_utc
@@ -51,6 +71,8 @@ struct CampaignReport {
     double altitude_cost_kg = 0.0;          // per tanker (signed: < 0 below the reference)
     double reference_phasing_s = 0.0;
     double drag_makeup_kgps = 0.0;
+    CampaignHlsDemand hls_demand;
+    mission::LaunchWindowParameters tanker_window, hls_window;  // as the windows were planned (f2: flown with them)
 };
 
 // The first lever out of range, as a German message (empty: all valid): heights, times and the insulation > 0, the
@@ -59,7 +81,9 @@ std::string campaign_lever_error(const CampaignLevers& levers);
 
 // The campaign of the r5 reference flights with the levers applied (r6 plan decisions 1-7). Refusals (lunar outbound
 // plan, HLS tanks too small, levers out of range) come back as result.closes == false with a German reason; config
-// errors throw.
-CampaignReport plan_refuelling_campaign(const CampaignSources& sources, const CampaignLevers& levers);
+// errors throw. `live` (f2): re-planned from the flown campaign's state (the depot height lever is then refused: the
+// flown depot's own height counts).
+CampaignReport plan_refuelling_campaign(const CampaignSources& sources, const CampaignLevers& levers,
+                                        const CampaignLive* live = nullptr);
 
 }  // namespace starsim::sim

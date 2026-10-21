@@ -65,8 +65,9 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
     Depot depot;
     depot.propellant_kg = std::min(in.depot_initial_kg, in.depot_capacity_kg);  // review I3
     r.fill.push_back({0.0, depot.propellant_kg});
-    double last_launch_s = -in.launch_interval_s;  // the first tanker may launch at t = 0
-    double last_arrival_s = -in.port_spacing_s;
+    // the first flight may launch at earliest_launch_s (t = 0); a live re-plan carries its last flight (f2)
+    double last_launch_s = std::max(in.previous_launch_s, in.earliest_launch_s - in.launch_interval_s);
+    double last_arrival_s = std::max(in.previous_arrival_s, -in.port_spacing_s);
     std::vector<double> after_kg;  // the fill after every tanker
     const auto finish = [&](const std::string& reason) {
         r.reason = reason;

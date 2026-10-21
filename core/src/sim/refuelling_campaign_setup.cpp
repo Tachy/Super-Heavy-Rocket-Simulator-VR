@@ -16,6 +16,7 @@
 #include "starsim/mission/lunar_budget.hpp"
 #include "starsim/mission/refuelling_costs.hpp"
 #include "starsim/mission/tanker_reserve.hpp"
+#include "starsim/orbit/synthetic_station_orbit.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
@@ -83,7 +84,7 @@ std::string tonnes(double kg) {
 
 struct HlsDemand {
     std::string refusal;  // German; empty when planned
-    double required_mass_kg = 0.0, dry_mass_kg = 0.0, capacity_kg = 0.0, headers_kg = 0.0;
+    CampaignHlsDemand values;
 };
 
 // The smallest HLS mass that closes the lunar mission's budget from its planned outbound flight (plan decision 2).
@@ -107,12 +108,13 @@ HlsDemand hls_demand(const CampaignSources& src, const config::LunarLandingMissi
     const auto& sets = lunar_landing_setup(lunar).guidance.braking_sets;
     const auto legs = lunar_mission_legs(lunar, *session.lunar_outbound_plan(), gnc::groups_vacuum_isp_s(v, sets.front()),
                                          gnc::groups_vacuum_isp_s(v, sets.back()));
-    d.capacity_kg = v.propellant_kg();
-    d.headers_kg = v.propellant_kg() - v.main_propellant_kg();
-    d.dry_mass_kg = v.mass_properties().mass_kg - v.propellant_kg();
+    auto& out = d.values;
+    out.capacity_kg = v.propellant_kg();
+    out.headers_kg = v.propellant_kg() - v.main_propellant_kg();
+    out.dry_mass_kg = v.mass_properties().mass_kg - v.propellant_kg();
     // f3: each in-orbit ignition settles first (its bound over the fill: the tanks drain over the legs)
     const double settling_kg = session.settling_gas_bound_kg() * static_cast<double>(lunar_in_orbit_ignitions(legs));
-    d.required_mass_kg = mission::lunar_budget_required_mass(d.dry_mass_kg, lunar.reserve_kg + settling_kg, legs);
+    out.required_mass_kg = mission::lunar_budget_required_mass(out.dry_mass_kg, lunar.reserve_kg + settling_kg, legs);
     return d;
 }
 
@@ -132,10 +134,15 @@ std::string campaign_lever_error(const CampaignLevers& l) {
     return {};
 }
 
-CampaignReport plan_refuelling_campaign(const CampaignSources& src, const CampaignLevers& levers) {
+CampaignReport plan_refuelling_campaign(const CampaignSources& src, const CampaignLevers& levers,
+                                        const CampaignLive* live) {
     CampaignReport report;
     if (auto error = campaign_lever_error(levers); !error.empty()) {
         report.result.reason = std::move(error);
+        return report;
+    }
+    if (live && levers.depot_height_m) {
+        report.result.reason = "Kampagne: im geflogenen Lauf gilt die Höhe des Depots";
         return report;
     }
     const auto& dir = src.config_dir;
@@ -146,7 +153,9 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     const auto hls_ascent = config::load_ascent_mission(dir, hls_mission.ascent_id);
     const auto site = config::load_launch_site(dir, tanker_ascent.site_id);
     const auto hls_site = config::load_launch_site(dir, hls_ascent.site_id);
-    const time::Epoch start = src.time.from_utc(tanker_mission.earliest_utc);
+    // the reference windows (the measured flights' baselines) stay at the config's start; a live re-plan (f2) starts now
+    const time::Epoch config_start = src.time.from_utc(tanker_mission.earliest_utc);
+    const time::Epoch start = live ? live->epoch : config_start;
     report.start = start;
     const auto sun_at = [&](time::Epoch t) { return src.ephemeris.state_gcrf(ephemeris::Body::Sun, t).position_m; };
     const auto pad_of = [](const config::LaunchSiteConfig& s) {
@@ -157,10 +166,16 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     auto depot_cfg = tanker_mission.depot;
     const double reference_height_m = depot_cfg.height_m;
     depot_cfg.height_m = levers.depot_height_m.value_or(reference_height_m);
+    std::optional<orbit::StationMeanElements> flown;  // f2: the flown depot's mean orbit
+    if (live) {
+        flown = orbit::station_mean_elements_from_state(live->depot_gcrf, live->epoch, gm, constants::earth_j2,
+                                                        equatorial_radius_m, src.earth);
+        depot_cfg.height_m = flown->semi_major_axis_m - equatorial_radius_m;
+    }
     const double dh = depot_cfg.height_m - reference_height_m;
     report.depot_height_m = depot_cfg.height_m;
-    const auto depot_at = depot_orbit(depot_cfg, start, src.earth);
-    const auto reference_depot_at = depot_orbit(tanker_mission.depot, start, src.earth);
+    const auto depot_at = flown ? station_orbit(*flown, src.earth) : depot_orbit(depot_cfg, start, src.earth);
+    const auto reference_depot_at = depot_orbit(tanker_mission.depot, config_start, src.earth);
     auto depot_vehicle_cfg = top_stage(dir, depot_cfg.vehicle_id);
     if (auto& thermal = depot_vehicle_cfg.stages.back().thermal) {
         thermal->hull.wall_resistance_m2k_w *= levers.depot_insulation_scale;
@@ -245,7 +260,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     double hls_reference_phasing_s = 0.0;
     {
         const auto p = refuelling_window_parameters(tanker_mission, tanker_ascent, ve_tanker, gas_tanker);
-        const auto w = mission::plan_launch_window(tanker_pad, src.earth, reference_depot_at, start, p, gm);
+        const auto w = mission::plan_launch_window(tanker_pad, src.earth, reference_depot_at, config_start, p, gm);
         if (!w.feasible) {
             report.result.reason = "Referenzfenster des Tankers: " + w.reason;
             return report;
@@ -254,7 +269,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         tanker_reference_cost = w.cost;
         // the HLS's against the same depot orbit (its measured flight phased into the lunar plane's depot) [E]
         const auto ph = refuelling_window_parameters(hls_mission, hls_ascent, ve_hls, gas_hls);
-        const auto wh = mission::plan_launch_window(hls_pad, src.earth, reference_depot_at, start, ph, gm);
+        const auto wh = mission::plan_launch_window(hls_pad, src.earth, reference_depot_at, config_start, ph, gm);
         if (!wh.feasible) {
             report.result.reason = "Referenzfenster des HLS: " + wh.reason;
             return report;
@@ -292,6 +307,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
                                        base_kg + rate * (reference_phasing_s - phasing_s) -
                                            (w.cost.propellant_kg - tanker_reference_cost.propellant_kg)};
         flight.phasing_orbit = w.phasing_orbit;
+        flight.window = w;
         return std::optional{flight};
     };
     models.next_hls = [&](double earliest_s) {
@@ -306,6 +322,7 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         flight.extra_demand_kg = w.cost.propellant_kg - hls_reference_cost.propellant_kg +
                                  rate * (w.schedule.waypoint0_epoch - w.separation - hls_reference_phasing_s);
         flight.phasing_orbit = w.phasing_orbit;
+        flight.window = w;
         return std::optional{flight};
     };
     models.boil_off_kgps = [&](double t_s, double fill_kg) {
@@ -321,11 +338,18 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     const auto hls_full = top_stage(dir, hls_ascent.vehicle_id);
     auto lunar_at_depot = lunar;  // r6 minor: the HLS leaves for the Moon from the depot's altitude
     lunar_at_depot.parking_height_m += dh;
-    const auto demand = hls_demand(src, lunar_at_depot, report.lunar_epoch, hls_full, settling);
-    if (!demand.refusal.empty()) {
-        report.result.reason = demand.refusal;
+    HlsDemand planned;
+    if (live && live->demand) {
+        planned.values = *live->demand;  // f2: the first plan's (the lunar outbound flight is planned once)
+    } else {
+        planned = hls_demand(src, lunar_at_depot, report.lunar_epoch, hls_full, settling);
+    }
+    if (!planned.refusal.empty()) {
+        report.result.reason = planned.refusal;
         return report;
     }
+    const auto& demand = planned.values;
+    report.hls_demand = demand;
     report.hls_required_mass_kg = demand.required_mass_kg;
     report.hls_dry_mass_kg = demand.dry_mass_kg;
     report.hls_capacity_kg = demand.capacity_kg;
@@ -355,6 +379,14 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     inputs.depot_initial_kg = levers.depot_initial_kg.value_or(ref.depot.initial_propellant_kg);
     inputs.demand_kg = report.demand_kg;
     inputs.launch_interval_s = levers.launch_interval_s;
+    if (live) {  // f2: the flown depot's fill and the last flight
+        inputs.depot_initial_kg = live->depot_propellant_kg;
+        if (live->previous_launch) inputs.previous_launch_s = *live->previous_launch - start;
+        if (live->previous_arrival) inputs.previous_arrival_s = *live->previous_arrival - start;
+        inputs.earliest_launch_s = live->launch_lead_s;
+    }
+    report.tanker_window = tanker_window;
+    report.hls_window = hls_window;
     report.result = mission::refuelling_campaign(inputs, models);
     return report;
 }

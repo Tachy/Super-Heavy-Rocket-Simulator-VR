@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <vector>
+#include <optional>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -12,6 +15,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "starsim/config/mission_config.hpp"
+#include "starsim/config/refuelling_mission_config.hpp"
 #include "starsim/config/refuelling_reference.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
@@ -20,6 +24,7 @@
 #include "starsim/sim/lunar_landing_mission.hpp"
 #include "starsim/sim/refuelling_campaign_setup.hpp"
 #include "starsim/sim/refuelling_campaign_text.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -314,6 +319,45 @@ TEST_CASE("Campaign refusals", "[refuelling][campaign]") {
     }
 }
 
+TEST_CASE("Campaign: the last flight before the start constrains the first launch and arrival",
+          "[refuelling][campaign]") {
+    mission::CampaignInputs in;
+    in.depot_capacity_kg = 1000.0e3;
+    in.depot_initial_kg = 0.0;
+    in.demand_kg = 50.0e3;
+    in.previous_launch_s = -0.5 * 86400.0;  // a launch 12 h ago: the next one from +12 h
+    in.previous_arrival_s = 2.0 * 3600.0;   // arriving in 2 h: no arrival before 8 h (6 h port spacing)
+    in.earliest_launch_s = 3600.0;
+    mission::CampaignModels m;
+    m.boil_off_kgps = [](double, double) { return 0.0; };
+    m.drag_makeup_kgps = [](double) { return 0.0; };
+    std::vector<double> asked;
+    m.next_tanker = [&](double earliest) {  // a window every 3 h, arriving 1 h after its launch
+        asked.push_back(earliest);
+        const double launch = std::ceil(earliest / 10800.0) * 10800.0;
+        return std::optional<mission::CampaignFlight>{{launch, launch + 3600.0, 60.0e3}};
+    };
+    m.next_hls = [](double earliest) {
+        const double launch = std::ceil(earliest / 10800.0) * 10800.0 + 86400.0;
+        return std::optional<mission::CampaignFlight>{{launch, launch + 3600.0, 0.0}};
+    };
+    const auto r = mission::refuelling_campaign(in, m);
+    REQUIRE(r.closes);
+    REQUIRE_FALSE(r.tankers.empty());
+    CHECK(r.tankers.front().flight.launch_s >= 0.5 * 86400.0 - 1.0);
+    CHECK(r.tankers.front().flight.arrival_s >= 8.0 * 3600.0 - 1.0);
+    REQUIRE_FALSE(asked.empty());
+    CHECK(asked.front() >= 0.5 * 86400.0 - 1.0);
+    // without a previous flight the earliest launch holds the first one back
+    mission::CampaignInputs fresh = in;
+    fresh.previous_launch_s = -std::numeric_limits<double>::infinity();
+    fresh.previous_arrival_s = -std::numeric_limits<double>::infinity();
+    asked.clear();
+    mission::refuelling_campaign(fresh, m);
+    REQUIRE_FALSE(asked.empty());
+    CHECK(asked.front() == Catch::Approx(3600.0));
+}
+
 TEST_CASE("Campaign: port spacing pushes an arrival to the next window", "[refuelling][campaign]") {
     auto in = simple_inputs();
     in.port_spacing_s = 6.0 * 3600.0;
@@ -394,6 +438,47 @@ TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[r
     for (size_t k = 1; k < r.result.tankers.size(); ++k) {
         CHECK(r.result.tankers[k].flight.arrival_s >= r.result.tankers[k - 1].flight.arrival_s + 6.0 * 3600.0);
     }
+    // f2: every flight carries its planned window, and the answer without a live start is unchanged
+    for (const auto& t : r.result.tankers) {
+        REQUIRE(t.flight.window);
+        CHECK(t.flight.window->liftoff - r.start == Catch::Approx(t.flight.launch_s).margin(1e-3));
+    }
+    REQUIRE(r.result.hls);
+    CHECK(r.result.hls->window.has_value());
+    CHECK(r.result.tanker_flights == 13);
+    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(49.7).margin(0.05));
+}
+
+TEST_CASE("Campaign live start: the flown depot's orbit, fill and last flight", "[refuelling][campaign]") {
+    const Sources s;
+    const auto first = sim::plan_refuelling_campaign(s.get(), {});
+    REQUIRE(first.result.closes);
+    // a depot 10 days in, on tanker_flight's [depot] orbit advanced by J2, with 300 t
+    const auto tanker = config::load_refuelling_flight_mission(config_dir, "tanker_flight");
+    const time::Epoch epoch = first.start + 10.0 * 86400.0;
+    sim::CampaignLive live;
+    live.epoch = epoch;
+    live.depot_gcrf = sim::depot_orbit(tanker.depot, first.start, s.earth)(epoch);
+    live.depot_propellant_kg = 300.0e3;
+    live.previous_launch = epoch - 6.0 * 3600.0;
+    live.demand = first.hls_demand;
+    const auto r = sim::plan_refuelling_campaign(s.get(), {}, &live);
+    print("live", r);
+    INFO(r.result.reason);
+    REQUIRE(r.result.closes);
+    CHECK(r.start == epoch);
+    CHECK(r.demand_kg == Catch::Approx(first.demand_kg));  // the cached demand
+    CHECK(r.result.tanker_flights < first.result.tanker_flights);  // 300 t instead of 55.5 t
+    REQUIRE_FALSE(r.result.tankers.empty());
+    const auto& f = r.result.tankers.front().flight;
+    REQUIRE(f.window);
+    CHECK(f.window->liftoff - r.start == Catch::Approx(f.launch_s).margin(1e-3));
+    CHECK(f.launch_s >= 18.0 * 3600.0 - 1.0);  // the previous launch 6 h ago + 24 h turnaround
+    // the energy mean of the synthetic state (mean elements used as osculating ones: up to ~2 km off) [E]
+    CHECK(r.depot_height_m == Catch::Approx(200.0e3).margin(3.0e3));
+    sim::CampaignLevers height;
+    height.depot_height_m = 250.0e3;
+    CHECK_FALSE(sim::plan_refuelling_campaign(s.get(), height, &live).result.closes);  // refused with a live start
 }
 
 TEST_CASE("Campaign levers move the count the physical way", "[refuelling][campaign][slow]") {

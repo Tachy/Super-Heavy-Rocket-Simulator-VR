@@ -75,6 +75,10 @@ mission::StationStateAt depot_orbit(const config::DepotOrbitConfig& depot, time:
     m.inclination_rad = depot.inclination_rad;
     m.raan_rad = depot.raan_rad;
     m.argument_of_latitude_rad = depot.argument_of_latitude_rad;
+    return station_orbit(m, earth);
+}
+
+mission::StationStateAt station_orbit(const orbit::StationMeanElements& m, const frames::BodyOrientation& earth) {
     return [m, &earth](time::Epoch t) {
         const auto at = orbit::advance_mean_elements(m, t, gm, constants::earth_j2, equatorial_radius_m);
         return orbit::synthetic_station_state(at, gm, earth);
@@ -158,6 +162,43 @@ gnc::DeorbitParameters ship_deorbit_parameters(const config::ShipReturnDeorbit& 
     return p;
 }
 
+IssMissionSequence pad_flight_sequence(const config::RefuellingFlightMission& m,
+                                       const mission::LaunchWindowParameters& p, const mission::LaunchWindow& w) {
+    IssMissionSequence q;
+    q.station_port = m.depot.port;
+    q.max_capture_retries = capture_retries;
+    q.from_launch = true;
+    q.phasing = p.phasing;
+    q.phasing.mission_limit_s += m.window_margin_s;  // the flown phasing keeps the full limit
+    q.raise_to = w.phasing_orbit;  // f1: the window's choice (none: the insertion orbit is the phasing orbit)
+    q.transfer = m.kind == config::MissionKind::TankerFlight ? MissionTransfer::TankerReserve
+                                                             : MissionTransfer::FillChaser;
+    return q;
+}
+
+MissionStart launch_campaign_flight(FlightSession& session, const std::filesystem::path& config_dir,
+                                    const config::RefuellingFlightMission& m, const mission::LaunchWindow& w,
+                                    const mission::LaunchWindowParameters& p) {
+    MissionStart s;
+    s.kind = m.kind;
+    s.launch_window = w;
+    if (!w.feasible) {
+        s.refusal = w.reason;
+        return s;
+    }
+    if (std::abs(session.epoch() - w.liftoff) > FlightSession::tick_s) {
+        s.refusal = "Kampagnenflug: die Sitzung steht nicht am Startzeitpunkt";
+        return s;
+    }
+    const auto ascent = config::load_ascent_mission(config_dir, m.ascent_id);
+    start_ascent_mission(session, ascent, config_dir, w.liftoff, nullptr, true);
+    session.set_iss_mission(pad_flight_sequence(m, p, w));
+    s.epoch = w.liftoff;
+    s.site_id = ascent.site_id;
+    s.return_planned = true;
+    return s;
+}
+
 MissionStart start_refuelling_flight_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                              const config::RefuellingFlightMission& m,
                                              const time::TimeScaleConverter& time) {
@@ -220,10 +261,7 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
         }
         start_ascent_mission(session, ascent, config_dir, w.liftoff);
         session.add_station(depot_vehicle, depot_at(w.liftoff), w.liftoff);  // after the launch (it clears the bodies)
-        q.from_launch = true;
-        q.phasing = p.phasing;
-        q.phasing.mission_limit_s += m.window_margin_s;  // the flown phasing keeps the full limit
-        q.raise_to = w.phasing_orbit;  // f1: the window's choice (none: the insertion orbit is the phasing orbit)
+        q = pad_flight_sequence(m, p, w);
         s.epoch = w.liftoff;
         s.site_id = ascent.site_id;
     } else {

@@ -11,6 +11,7 @@
 #include "starsim/gnc/deorbit_planner.hpp"
 #include "starsim/math/state_vector.hpp"
 #include "starsim/mission/iss_launch_window.hpp"
+#include "starsim/orbit/synthetic_station_orbit.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/time/time_scale_converter.hpp"
@@ -26,6 +27,9 @@ MissionStart start_depot_launch_mission(FlightSession& session, const std::files
 // (true equator frame, as the synthetic ISS). `earth` must outlive the returned function.
 mission::StationStateAt depot_orbit(const config::DepotOrbitConfig& depot, time::Epoch reference,
                                     const frames::BodyOrientation& earth);
+// A station orbit from mean elements, advanced by the J2 rates (true equator frame; refuelling f2: the flown depot).
+// `earth` must outlive the returned function.
+mission::StationStateAt station_orbit(const orbit::StationMeanElements& mean, const frames::BodyOrientation& earth);
 // `behind_rad` of argument of latitude behind `station`, in its plane, on a periapsis_height_m x apoapsis_height_m
 // orbit with the periapsis at the start (r3's phasing start).
 math::StateVector phasing_start_state(const math::StateVector& station, double behind_rad, double periapsis_height_m,
@@ -49,6 +53,19 @@ double phasing_settling_gas_kg(const vehicle::Vehicle& vehicle, bool ignition_se
 // A ship return mission's [deorbit] block as planner parameters; the pass search spans the tanker reserve's preview
 // (FlightSession::tanker_reserve_search_s: from the 26.5 deg depot orbit no pass came within reach in 48 h, r4).
 gnc::DeorbitParameters ship_deorbit_parameters(const config::ShipReturnDeorbit& deorbit);
+// The chain of a pad-start refuelling flight (r5) in `window` with `parameters` (its phasing limits): Ascent -> Raise
+// (the window's phasing orbit) -> Rendezvous -> Proximity -> Docking -> Transfer (tanker: down to its reserve; HLS:
+// filled from the station) -> Departure. No ship return, no continuation (the callers add them).
+IssMissionSequence pad_flight_sequence(const config::RefuellingFlightMission& mission,
+                                       const mission::LaunchWindowParameters& parameters,
+                                       const mission::LaunchWindow& window);
+// Refuelling f2: a flight of the flown campaign - `mission`'s ascent launched at window.liftoff beside the session's
+// station (keep_station; the session must be at that epoch), the chain of pad_flight_sequence. MissionStart.refusal
+// (German) when the window is not feasible or the session is not at its liftoff (nothing changed then).
+MissionStart launch_campaign_flight(FlightSession& session, const std::filesystem::path& config_dir,
+                                    const config::RefuellingFlightMission& mission,
+                                    const mission::LaunchWindow& window,
+                                    const mission::LaunchWindowParameters& parameters);
 // tanker_flight / hls_refuel: the depot placed from [depot]; the chaser launched in its window (Pad) or placed behind
 // the depot (PhasingOrbit); the chain to the transfer and on (tanker: ship return to the catch).
 MissionStart start_refuelling_flight_mission(FlightSession& session, const std::filesystem::path& config_dir,
