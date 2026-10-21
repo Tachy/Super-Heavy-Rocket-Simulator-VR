@@ -636,7 +636,8 @@ public:
     // across burns that drain the tanks).
     double settling_gas_kg() const;
     double settling_gas_bound_kg() const;
-    // Manual push (expert / manual mode): cold gas along +x until switched off; refused while docked.
+    // Manual push (expert / manual mode): cold gas along +x until switched off; refused while docked or while a
+    // proximity approach flies (it switches the push off); a new flight clears it.
     bool settle(bool on);
     bool settling() const { return settling_push_ || settle_manual_; }
 

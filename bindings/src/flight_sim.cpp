@@ -537,7 +537,7 @@ int64_t FlightSim::undock() {
 int64_t FlightSim::settle(bool enabled) {
     return static_cast<int64_t>(post_active("settle", [enabled](sim::FlightSession& session) {
         const bool ok = session.settle(enabled);
-        return Outcome{ok, godot::String::utf8(ok ? "" : "Settling nicht möglich: angedockt")};
+        return Outcome{ok, godot::String::utf8(ok ? "" : "Settling nicht möglich: angedockt oder im Anflug")};
     }));
 }
 

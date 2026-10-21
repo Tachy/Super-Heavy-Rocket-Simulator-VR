@@ -126,6 +126,27 @@ TEST_CASE("HLS outbound autopilot to the NRHO and down to the LLO", "[sim][lunar
     CHECK(high < 101e3);
 }
 
+TEST_CASE("Outbound MCCs are planned their turn and settling lead ahead", "[sim][lunar][outbound][ignition_settling][slow]") {
+    // f3 final review I2: the outbound MCC was planned only burn_preparation_s ahead, so a push for a main-engine MCC
+    // overlapped the turn. Checked on the plan (the 3 m/s MCC of this flight flies on the RCS, which needs no push).
+    Fixture fx;
+    mission::LunarOutboundParameters p;
+    p.arrival_epoch = fx.t0 + 4.0 * 86400.0;
+    fx.place(p.arrival_epoch);
+    REQUIRE(fx.session.plan_lunar_outbound(p));
+    double lead = 0.0;
+    while (fx.session.lunar_step() != sim::LunarStep::MidCourse && fx.session.epoch() < p.arrival_epoch) {
+        lead = fx.session.settling_lead_s();  // with the tanks of the planning tick
+        fx.session.advance_to(fx.session.epoch() + 5.0, 50'000'000);
+    }
+    INFO(fx.session.lunar_status());
+    REQUIRE(fx.session.lunar_step() == sim::LunarStep::MidCourse);
+    REQUIRE(lead > 0.0);
+    const auto& mcc = fx.session.lunar_burns().back();
+    REQUIRE(mcc.step == sim::LunarStep::MidCourse);
+    CHECK(mcc.node.epoch - fx.session.epoch() > sim::FlightSession::burn_preparation_s + lead - 5.0);
+}
+
 namespace {
 enum class Crew { Autopilot, FliesMcc1, IgnoresMcc1 };
 struct PilotFlight {

@@ -180,7 +180,7 @@ double FlightSession::settling_gas_bound_kg() const {
 }
 
 bool FlightSession::settle(bool on) {
-    if (on && docking_busy()) return false;
+    if (on && (docking_busy() || proximity_active())) return false;  // the approach and capture own the RCS
     settle_manual_ = on;
     return true;
 }

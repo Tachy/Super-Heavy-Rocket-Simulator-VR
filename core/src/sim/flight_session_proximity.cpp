@@ -135,6 +135,7 @@ bool FlightSession::start_proximity(const std::string& station_port, gnc::Proxim
     if (docking_->mechanism().parameters().probe_drogue) p.envelope = gnc::probe_drogue_capture_envelope();
     rendezvous_step_ = RendezvousStep::None;  // the phasing (i3) is complete
     proximity_.emplace(approach, p);
+    settle_manual_ = false;  // f3 final review I4: the approach flies the RCS; a manual push would override it
     proximity_debug_events_ = 0;
     proximity_debug_next_ = epoch_;
     autopilot_.state = AutopilotState::Proximity;

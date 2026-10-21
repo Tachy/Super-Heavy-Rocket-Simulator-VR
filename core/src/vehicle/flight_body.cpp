@@ -588,7 +588,13 @@ bool FlightBody::in_orbit() const {
 }
 
 LiquidEnvironment FlightBody::liquid_now() const {
-    return {specific_force_body_mps2_, state_.angular_velocity_body_radps, state_.position_gcrf_m, state_.attitude, {}};
+    LiquidEnvironment liquid{specific_force_body_mps2_, state_.angular_velocity_body_radps, state_.position_gcrf_m,
+                             state_.attitude, {}};
+    if (orbit_gm_m3ps2_ > 0.0) {  // the tracked reference body (the Moon in lunar orbit); before the first step: Earth
+        liquid.centre_gcrf_m = orbit_centre_.position_m;
+        liquid.gm_m3ps2 = orbit_gm_m3ps2_;
+    }
+    return liquid;
 }
 
 bool FlightBody::can_coast() const {

@@ -422,6 +422,46 @@ TEST_CASE("Settling: a lead longer than the time left holds the ignition", "[ign
     CHECK(*lit - node.epoch < sim::FlightSession::settling_hold_factor * lead);
 }
 
+TEST_CASE("Settling: an ignition already due when the burn starts is held, not lit unsettled", "[ignition_settling][sim]") {
+    // final review I1: the hold read the last tick's measured push, still zero on the burn's first tick
+    test::spice_session();
+    TankerInOrbit f(100e3);
+    f.session.advance_to(f.session.epoch() + 2.0 * 3600.0);
+    REQUIRE_FALSE(f.vehicle().stage_settled(0));
+    const auto node = prograde(f.session, 2.0, 100.0);  // half the burn is longer than 2 s: ignition overdue
+    REQUIRE(f.session.execute_burn(node));
+    run_to(f.session, node.epoch + 600.0, 1.0);
+    CHECK_FALSE(f.any_failed());
+    CHECK(f.session.burn_abort_reason().empty());
+}
+
+TEST_CASE("Settling in lunar orbit: the Moon's tide acts on the liquid", "[ignition_settling][vehicle]") {
+    // final review I3: the apparent gravity took the Earth's tide at the Moon (~1e-10 instead of ~3e-5 m/s^2)
+    const double gm_moon = constants::moon_gm_m3ps2, r = constants::moon_mean_radius_m + 100e3;
+    const math::Vec3 moon{3.844e8, 0.0, 0.0};
+    vehicle::LiquidEnvironment liquid{{}, {}, moon + math::Vec3{r, 0.0, 0.0}, math::Quat{}, {}, moon, gm_moon};
+    const auto g = vehicle::apparent_gravity_body_mps2(liquid, {20.0, 0.0, 0.0});  // 20 m out along the radius
+    CHECK(norm(g) == Catch::Approx(2.0 * gm_moon * 20.0 / (r * r * r)).epsilon(1e-3));
+}
+
+TEST_CASE("Manual settle: proximity guidance takes the RCS, a new placement clears it", "[ignition_settling][sim]") {
+    // final review I4: a manual push left on replaced the approach's translation into the capture
+    test::spice_session();
+    refuelling_test::TankerAtPort f({20.0, 0.0, 0.0});
+    REQUIRE(f.session.settle(true));
+    gnc::ProximityParameters p;
+    p.start_waypoint = 2;
+    REQUIRE(f.session.start_proximity("transfer_dock", p));
+    CHECK_FALSE(f.session.settling());
+    CHECK_FALSE(f.session.settle(true));  // refused while the approach flies
+    TankerInOrbit g(100e3);
+    REQUIRE(g.session.settle(true));
+    const auto& s = g.session.body(0).state();
+    const math::StateVector at{s.position_gcrf_m, s.velocity_gcrf_mps};
+    g.session.place_in_orbit(refuelling_test::tanker_config(100e3), at, g.session.epoch());
+    CHECK_FALSE(g.session.settling());
+}
+
 TEST_CASE("Manual settle: the push runs until switched off and settles the tanks", "[ignition_settling][sim]") {
     test::spice_session();
     TankerInOrbit f(100e3);

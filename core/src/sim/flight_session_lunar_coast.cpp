@@ -62,9 +62,9 @@ void FlightSession::lunar_coast_event() {
     const mission::LunarOutboundPlanner planner(gravity_, *env_.ephemeris, *moon_orientation_);
     const auto state = controlled_state();
     if (lunar_next_mcc_epoch() - epoch_ < 0.5 * far_future_s) {
-        // Planned burn_preparation_s ahead without small_burn_margin_s: an MCC is < 240 s of burn, the preparation
-        // covers it.
-        const double lead = p.pilot_corrections ? p.pilot_call_lead_s : burn_preparation_s;
+        // Planned burn_lead_s() ahead without small_burn_margin_s: an MCC is < 240 s of burn, the preparation covers
+        // it; the settling lead keeps the push after the turn (f3 final review I2).
+        const double lead = p.pilot_corrections ? p.pilot_call_lead_s : burn_lead_s();
         const auto mcc = planner.mid_course(state, epoch_, epoch_ + lead, p, plan);
         if (!mcc) {  // below the threshold (or not converged): the next one grows
             ++lunar_mcc_index_;

@@ -138,6 +138,7 @@ void FlightSession::place_in_orbit(const config::VehicleConfig& config, const ma
     nose_cone_epoch_.reset();
     capsule_return_step_ = CapsuleReturnStep::None;
     reset_lunar();
+    settle_manual_ = false;  // f3: a manual push does not carry into a new flight
 }
 
 std::vector<math::Vec3> FlightSession::predict_trajectory(size_t index, double duration_s, double step_s) const {
@@ -338,7 +339,9 @@ void FlightSession::run_autopilot() {
                                     vehicle.stages()[*stage].settled, norm(body.state().angular_velocity_body_radps));
                     }
                 }
-                hold = norm(settling_acceleration_gcrf_) > 0.0 &&
+                // the push's capability, not the last tick's measured push: on a burn's first tick no push has run
+                // yet (final review I1: an ignition already due lit unsettled)
+                hold = settling_push_now().acceleration_mps2 > 0.0 &&
                        epoch_ - *settling_hold_start_ < settling_hold_factor * settling_lead_s_;
             }
             if (autopilot_.burn.ignite && !running && !hold) {
@@ -638,6 +641,7 @@ void FlightSession::reset_mission_state() {
     reset_lunar();
     reset_proximity();
     departure_.reset();
+    settle_manual_ = false;  // f3: a manual push does not carry into a new flight
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,

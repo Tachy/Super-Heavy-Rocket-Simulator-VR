@@ -5,6 +5,7 @@
 
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/thermal_radiation.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/math/quat.hpp"
 #include "starsim/math/state_vector.hpp"
 #include "starsim/vehicle/vehicle.hpp"
@@ -61,10 +62,13 @@ struct LiquidEnvironment {
     math::Vec3 position_gcrf_m;  // of the free-falling reference point (the body's CG, or a docked pair's compound CG)
     math::Quat body_to_gcrf;
     math::Vec3 cg_offset_body_m;  // refuelling r4: this body's CG from the reference point (docked: the compound CG)
+    // f3: the body the vehicle orbits (its tide): the Earth by default, the Moon in lunar orbit
+    math::Vec3 centre_gcrf_m;
+    double gm_m3ps2 = constants::earth_gm_m3ps2;
 };
 
-// Apparent gravity on liquid `offset_body_m` from the CG (body axes): the Earth's tide minus the specific force plus
-// the centrifugal acceleration of the rotation; tide and rotation act about the reference point.
+// Apparent gravity on liquid `offset_body_m` from the CG (body axes): the orbited body's tide minus the specific force
+// plus the centrifugal acceleration of the rotation; tide and rotation act about the reference point.
 math::Vec3 apparent_gravity_body_mps2(const LiquidEnvironment& liquid, const math::Vec3& offset_body_m);
 
 // How far the liquid follows the apparent gravity, by the Bond number rho a r^2 / sigma: 0 at Bo <= 1 (surface tension

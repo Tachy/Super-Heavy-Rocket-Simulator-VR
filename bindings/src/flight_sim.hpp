@@ -200,8 +200,9 @@ public:
     int64_t proximity_abort();
     int64_t proximity_resume();
     int64_t undock();
-    // Refuelling f3: the manual settling push (cold gas along +x until switched off; refused while docked). The
-    // snapshot shows it as autopilot_status()["settling"], the progress per stage as body_stages()[i]["settled"].
+    // Refuelling f3: the manual settling push (cold gas along +x until switched off; refused while docked or
+    // approaching). The snapshot shows it as autopilot_status()["settling"], the progress per stage as
+    // body_stages()[i]["settled"].
     int64_t settle(bool enabled);
     // Refuelling (r6). Propellant transfer of the docked pair: {present} (false while idle); present: {phase,
     // status (German), elapsed_s, delivered_oxidizer_kg, delivered_fuel_kg, flow_oxidizer_kgps, flow_fuel_kgps,

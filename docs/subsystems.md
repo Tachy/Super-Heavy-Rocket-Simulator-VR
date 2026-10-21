@@ -1496,7 +1496,8 @@ Spec `docs/superpowers/specs/2026-10-21-refuelling-followups-design.md` (f1), pl
 Spec `docs/superpowers/specs/2026-10-21-refuelling-followups-design.md` (f3), plan
 `docs/superpowers/plans/2026-10-21-refuelling-f3-settling.md`, ledger
 `.superpowers/sdd/2026-10-21-refuelling-f3-settling/progress.md`. Fidelity flag `FlightEnvironment::ignition_settling`
-(default on; `FlightSession::set_ignition_settling`): off reproduces the old behaviour (no push, check or reserve).
+(default on; `FlightSession::set_ignition_settling`): off means no push, no ingestion check and no reserve (the
+catch tilt and the RCS allocator fixes below apply either way).
 - **Settling state** (`Stage::settled` 0..1, `Vehicle::update_settling`): while every outlet of the stage's main tanks
   is covered (`outlet_check`: Bond number >= 10, apparent gravity within 30 deg of -x) the progress rises at
   1/sqrt(2L/a), otherwise it falls at the same rate; a = the weakest apparent gravity at the tank centres, no
@@ -1504,6 +1505,9 @@ Spec `docs/superpowers/specs/2026-10-21-refuelling-followups-design.md` (f3), pl
   settle and unsettle at once). Ticks and coasts update it (the coast with its end-of-segment residual acceleration);
   clamped, caught or landed: 1; every vehicle starts settled. Tanks with `propellant_management_device = true` [E]
   (Starship header tanks of Block 3 and the depot, Dragon `mmh_nto`) are always covered; header feed needs no settling.
+  The tide is the orbited body's (`LiquidEnvironment::centre_gcrf_m`, `gm_m3ps2` from the tracked reference body;
+  final review I3: the Earth's tide at the Moon, ~1e-10 instead of ~3e-5 m/s^2 in LLO, kept lunar-orbit tanks
+  settled for days).
 - **Gas ingestion** (`Vehicle::update_engines`, Off -> Starting): only in orbit (`FlightBody::in_orbit`: closed orbit,
   osculating periapsis above the reference body's equatorial radius) - suborbital and landed ignitions are not checked.
   An unsettled stage's engines fail (`failed`, `starved`); the session cuts off, disengages and sets
@@ -1517,7 +1521,10 @@ Spec `docs/superpowers/specs/2026-10-21-refuelling-followups-design.md` (f3), pl
   limits include the lead): the turn to the burn attitude ends before the push - found: a TLI push during a ~1 deg/s
   turn (centrifugal ~1e-2 m/s^2 at the tanks against the push's 1.75e-3) left the HLS 0.91 settled at ignition, the
   ignition was held 3 s and MCC 1 grew from 3.2 to 11.1 m/s. Lunar PDI: the descent coast starts the push one lead
-  before the braking engines. Manual `FlightSession::settle(bool)` (game `FlightSim.settle(enabled)`, refused docked).
+  before the braking engines (no hold there: PDI lights on time). The hold judges the push by its capability, not the
+  last tick's measured push (final review I1: an ignition already due on the burn's first tick lit unsettled).
+  Manual `FlightSession::settle(bool)` (game `FlightSim.settle(enabled)`): refused while docked or while a proximity
+  approach flies (engaging one switches it off: the approach owns the RCS), cleared by a new flight.
   Snapshot: `autopilot_status().settling`, `burn_abort_reason`, `body_stages()[i].settled`.
 - **Numbers:** tanker / Block 3 / HLS leads 42-96 s, 0.2-0.75 t per push (HLS TLI 42 s / 0.49 t full, MCC at 609 t
   main 88 s / 0.74 t; tanker raise 80 s). **Finding:** gas ~ sqrt(F) for a given travel (t ~ 1/sqrt(F), mass flow ~ F):
