@@ -39,7 +39,7 @@ struct CampaignFlownRow {
     double residue_kg = 0.0;          // chaser main tanks at the Rendezvous mark
     double rendezvous_kg = 0.0;       // Rendezvous -> Docked
     double main_at_undock_kg = 0.0;   // chaser main tanks at the Departure mark
-    std::optional<mission::CampaignTanker> calculator;  // the first plan's tanker of the same number
+    std::optional<mission::CampaignTanker> calculator;  // the first plan's k-th tanker for the k-th delivering one
 };
 
 struct CampaignFlightLosses {  // flown and booked, from the start to the end

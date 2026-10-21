@@ -258,11 +258,12 @@ void RefuellingCampaignFlight::watch_flight(FlightSession& s) {
         state_.losses.transfer_vent_kg += vent * row.delivered_kg;
     }
     row.depot_after_kg = main_kg(s, depot);
-    if (!row.hls && state_.calculator) {
-        const auto& calc = state_.calculator->result.tankers;
-        if (row.number >= 1 && static_cast<size_t>(row.number) <= calc.size()) row.calculator = calc[row.number - 1];
-    }
     if (!row.hls && !row.failed) ++state_.tankers_flown;
+    // the k-th delivering tanker against the first plan's k-th (f2: a failed flight does not shift the pairs)
+    if (!row.hls && !row.failed && state_.calculator) {
+        const auto& calc = state_.calculator->result.tankers;
+        if (static_cast<size_t>(state_.tankers_flown) <= calc.size()) row.calculator = calc[state_.tankers_flown - 1];
+    }
     if (!row.hls && !row.failed && row.number == 1 && mission_.return_first_tanker) fly_first_return(s);
     const bool hls_done = row.hls && !row.failed;
     s.keep_only_station();
