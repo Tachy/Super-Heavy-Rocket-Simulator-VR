@@ -534,6 +534,13 @@ int64_t FlightSim::undock() {
     }));
 }
 
+int64_t FlightSim::settle(bool enabled) {
+    return static_cast<int64_t>(post_active("settle", [enabled](sim::FlightSession& session) {
+        const bool ok = session.settle(enabled);
+        return Outcome{ok, godot::String::utf8(ok ? "" : "Settling nicht möglich: angedockt")};
+    }));
+}
+
 godot::PackedVector3Array FlightSim::predict_trajectory(int index, double duration_s, double step_s) const {
     const auto s = snapshot();
     if (!body(*s, index)) return {};
@@ -635,6 +642,7 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("proximity_abort"), &FlightSim::proximity_abort);
     ClassDB::bind_method(D_METHOD("proximity_resume"), &FlightSim::proximity_resume);
     ClassDB::bind_method(D_METHOD("undock"), &FlightSim::undock);
+    ClassDB::bind_method(D_METHOD("settle", "enabled"), &FlightSim::settle);
     ClassDB::bind_method(D_METHOD("transfer_state"), &FlightSim::transfer_state);
     ClassDB::bind_method(D_METHOD("depot_state"), &FlightSim::depot_state);
     ClassDB::bind_method(D_METHOD("refuelling_campaign", "params"), &FlightSim::refuelling_campaign);

@@ -56,13 +56,15 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   vehicle (mass properties, Starship header tanks with a feed source, propellant settling with the apparent gravity,
   ideal LVLH attitude of a station, docking-port kinematics, docked hold, attached mass, compound mass, run-time tank
   masses, probe/drogue port mating of the refuelling ships, propellant boil-off by a hull heat balance in flight and
-  orbit-averaged, ship-to-ship transfer physics: line flow, outlet coverage, settling time), sim (flight session incl. the ISS as a station body from
+  orbit-averaged, ship-to-ship transfer physics: line flow, outlet coverage, settling time; per-stage settling progress
+  before an ignition, PMD tanks, gas ingestion of an unsettled in-orbit ignition, the settling push and its gas bound), sim (flight session incl. the ISS as a station body from
   OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
   Waypoint 0 with drag tracking and re-plan, proximity flight to a station port, docking into a compound, undocking
   and departure, ISS missions chained by a mission sequence: from the separation orbit, from the pad with a launch
   window, docked -> undocking -> splashdown; the depot as a station target with its approach limits, Starship phasing
   on the belly Raptor + cold gas, the docked compound following run-time tank masses; ship-to-ship propellant transfer
-  with the settling push and the docked pair's boil-off, the tanker's return reserve; the refuelling reference flights
+  with the settling push and the docked pair's boil-off, the tanker's return reserve; the autopilot's settling push
+  before in-orbit ignitions (burns start turn + lead ahead; planners reserve the gas); the refuelling reference flights
   chained by the mission sequence: depot launch -> station, tanker pad -> perigee raise -> docking -> transfer ->
   departure -> ship return -> catch (the caught booster lifted off the tower), HLS refuel -> lunar mission continued
   from the live HLS).

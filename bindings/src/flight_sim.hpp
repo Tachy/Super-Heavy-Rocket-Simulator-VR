@@ -98,7 +98,8 @@ public:
     int64_t plan_ship_return();
     // Node `seconds_from_now` ahead with orbit-relative components (prograde, normal, radial-out), m/s.
     int64_t plan_burn(double seconds_from_now, double prograde_mps, double normal_mps, double radial_mps);
-    // {state, phase, time_to_go_s, direction (GCRF), burn: {time_to_ignition_s, remaining_dv_mps,
+    // {state, phase, time_to_go_s, direction (GCRF), settling (f3: the push is on), burn_abort_reason (German; e.g.
+    //  "Gasansaugung ..." after an unsettled in-orbit ignition), burn: {time_to_ignition_s, remaining_dv_mps,
     //  burn_duration_s, direction}, return: {feasible, reason, delta_v_mps, propellant_t, burn_in_s, entry_in_s,
     //  crossrange_km}}
     godot::Dictionary autopilot_status() const;
@@ -114,7 +115,7 @@ public:
     godot::Vector3 body_position_gcrf_m(int index) const;
     godot::Quaternion body_attitude_gcrf(int index) const;
     double body_cg_station_m(int index) const;
-    // [{name, base_station_m, length_m, diameter_m, nose_length_m}] bottom to top
+    // [{name, base_station_m, length_m, diameter_m, nose_length_m, settled (f3: 0..1)}] bottom to top
     godot::Array body_stages(int index) const;
     // [{position_m (body, relative to the bottom), firing, throttle, spool}]
     godot::Array body_engines(int index) const;
@@ -199,6 +200,9 @@ public:
     int64_t proximity_abort();
     int64_t proximity_resume();
     int64_t undock();
+    // Refuelling f3: the manual settling push (cold gas along +x until switched off; refused while docked). The
+    // snapshot shows it as autopilot_status()["settling"], the progress per stage as body_stages()[i]["settled"].
+    int64_t settle(bool enabled);
     // Refuelling (r6). Propellant transfer of the docked pair: {present} (false while idle); present: {phase,
     // status (German), elapsed_s, delivered_oxidizer_kg, delivered_fuel_kg, flow_oxidizer_kgps, flow_fuel_kgps,
     // settling_gas_kg, settling_thrust_n, chilldown_kg, boil_off_kg (both ships since the start)}.

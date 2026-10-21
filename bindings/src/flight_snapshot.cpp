@@ -28,6 +28,7 @@ godot::Array body_stages(const sim::FlightSession& session, size_t index) {
         d["length_m"] = stage.config.length_m;
         d["diameter_m"] = stage.config.diameter_m;
         d["nose_length_m"] = stage.config.aero.nose_length_m;
+        d["settled"] = stage.settled;  // refuelling f3: 0..1, the liquid over the main-tank outlets
         stages.push_back(d);
     }
     return stages;
@@ -316,6 +317,8 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
     d["direction"] = to_godot(burning ? ap.burn.direction_gcrf : ap.guidance.thrust_direction_gcrf);
     d["has_direction"] = ap.state == sim::AutopilotState::Booster || ap.state == sim::AutopilotState::UpperStage ||
                          burning;
+    d["settling"] = session.settling();  // refuelling f3: the cold-gas push (autopilot or manual) is on
+    d["burn_abort_reason"] = godot::String::utf8(session.burn_abort_reason().c_str());
     if (burning) {
         godot::Dictionary b;
         b["time_to_ignition_s"] = ap.burn.time_to_ignition_s;

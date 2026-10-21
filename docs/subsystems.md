@@ -1491,3 +1491,60 @@ Spec `docs/superpowers/specs/2026-10-21-refuelling-followups-design.md` (f1), pl
   ISS unchanged, a raise eating the limit, the cost by hand), `[refuelling][iss_mission]` (two-burn raise, dry raise),
   `[refuelling][config]`, `[refuelling][mission][slow]` (above-depot flight to docking), `[refuelling][campaign]`
   (HLS extra demand by hand, reference phasing and per-window campaigns `[slow]`), probe `[.f1_probe]`.
+
+### Settling before an in-orbit ignition (f3)
+Spec `docs/superpowers/specs/2026-10-21-refuelling-followups-design.md` (f3), plan
+`docs/superpowers/plans/2026-10-21-refuelling-f3-settling.md`, ledger
+`.superpowers/sdd/2026-10-21-refuelling-f3-settling/progress.md`. Fidelity flag `FlightEnvironment::ignition_settling`
+(default on; `FlightSession::set_ignition_settling`): off reproduces the old behaviour (no push, check or reserve).
+- **Settling state** (`Stage::settled` 0..1, `Vehicle::update_settling`): while every outlet of the stage's main tanks
+  is covered (`outlet_check`: Bond number >= 10, apparent gravity within 30 deg of -x) the progress rises at
+  1/sqrt(2L/a), otherwise it falls at the same rate; a = the weakest apparent gravity at the tank centres, no
+  acceleration: unchanged. L = the longest ullage, tank length x (1 - fill), at least 1 m [E] (a near-full tank would
+  settle and unsettle at once). Ticks and coasts update it (the coast with its end-of-segment residual acceleration);
+  clamped, caught or landed: 1; every vehicle starts settled. Tanks with `propellant_management_device = true` [E]
+  (Starship header tanks of Block 3 and the depot, Dragon `mmh_nto`) are always covered; header feed needs no settling.
+- **Gas ingestion** (`Vehicle::update_engines`, Off -> Starting): only in orbit (`FlightBody::in_orbit`: closed orbit,
+  osculating periapsis above the reference body's equatorial radius) - suborbital and landed ignitions are not checked.
+  An unsettled stage's engines fail (`failed`, `starved`); the session cuts off, disengages and sets
+  `burn_abort_reason` "Gasansaugung: Treibstoff nicht gesetzt, Triebwerke ausgefallen"; ISS / refuelling mission
+  sequences end on it.
+- **Settling push** (`vehicle::settling_push`): cold gas along +x at the full pure-translation capability (Starship:
+  3,000 N, 4.37 kg/s); lead = 1.25 [E] x sqrt(2L/a). The autopilot runs it from its lead until the engines give thrust
+  (an RCS overlay on the command); its delta-v is credited to the burn (`BurnExecutor::credit`). An ignition before
+  the stage is settled waits while the push still gives force, at most 3 leads [E]. Burns start `burn_lead_s()` =
+  120 s preparation + the lead before ignition (lunar, Earth return, rendezvous schedules; the waiting, drift and coast
+  limits include the lead): the turn to the burn attitude ends before the push - found: a TLI push during a ~1 deg/s
+  turn (centrifugal ~1e-2 m/s^2 at the tanks against the push's 1.75e-3) left the HLS 0.91 settled at ignition, the
+  ignition was held 3 s and MCC 1 grew from 3.2 to 11.1 m/s. Lunar PDI: the descent coast starts the push one lead
+  before the braking engines. Manual `FlightSession::settle(bool)` (game `FlightSim.settle(enabled)`, refused docked).
+  Snapshot: `autopilot_status().settling`, `burn_abort_reason`, `body_stages()[i].settled`.
+- **Numbers:** tanker / Block 3 / HLS leads 42-96 s, 0.2-0.75 t per push (HLS TLI 42 s / 0.49 t full, MCC at 609 t
+  main 88 s / 0.74 t; tanker raise 80 s). **Finding:** gas ~ sqrt(F) for a given travel (t ~ 1/sqrt(F), mass flow ~ F):
+  weaker cold gas thrusters would settle on less gas, at the cost of a longer lead.
+- **Planner reservations** (Task 4): the session's phasing plans reserve the push with the tanks as now per burn
+  (`PhasingParameters::reserve_per_burn_kg`), the window cost adds `PhasingCostModel::gas_per_burn_kg` per raise,
+  boost (and phase) burn, the deorbit check requires the next push on top of its margin, the descent budget one push;
+  budgets planned before the tanks drain use `vehicle::settling_gas_bound_kg` (the largest push gas at any fill; it
+  peaks at a middle fill: longer travel against less mass) per in-orbit ignition - lunar mission budget and campaign
+  HLS demand: all legs but the approach (continues the braking burn) and the surface ascent (lit landed).
+- **Found and fixed:** `Vehicle::rcs_capability` rebuilt the flight's cached RCS allocator at the query's CG; the new
+  planner query moved the attitude control's reference within the 1 cm tolerance and turned the depot approach into a
+  retreat. Queries now use a local allocator when the cache is stale.
+- **Ship catch** (b3): the pushes before TEI and the Earth braking shift the lunar-return gates by ~1.4 s / 20 m; the
+  lateral phase's tilt limit is 20 deg since (see "Ship catch propellant margin"). One direct seed of 21 still misses
+  (which one moves with the gate timing); follow-up "ship catch robustness" (flip hand-over state, upright abort).
+- **Step dependence (pre-existing, not f3):** the same 100 m/s burn ends ~8 m/s apart in speed between 10 s and 600 s
+  `advance_to` steps also with the flag off; f3's own test checks only that no step size ingests.
+- **Reference flights re-measured** (2026-10-21, f3): tanker residue 99.7 t, rendezvous 16.7 t (+1.3 t: the phasing
+  pushes), delivered 55.4 / 13.6 t (69.0 t), at catch 2.13 t; HLS main at docking 187.3 t; full HLS departure 1.96 t
+  of push gas.
+- **Answer** (200 km, 48 h): **13 tanker flights, 49.7 days** (f1: 12 / 46.5 d; HLS docks 2026-12-05 at 920.9 t;
+  demand 861.2 t; losses boil-off 22.4 t, drag 1.35 t, gas 0.99 t, vent 13.6 t).
+- **Diagnostics:** `STARSIM_DEBUG_SETTLING=1` prints each push (start before ignition, settled, body rate; mean push
+  against the capability; duration, gas, lead) and every held ignition.
+- **Tests:** `[ignition_settling]` (`test_ignition_settling.cpp`: progress and travel, PMD and header feed, ingestion
+  in / out of orbit and with the flag off, the push before a raise burn, coast stop in 10 s and 600 s steps, the held
+  ignition, manual settle, the turn before the push, the allocator query, the gas bound and the session's estimates
+  and reservations), `[rendezvous][phasing]` (reserve per burn), `[iss][launch_window]` (gas per burn by hand),
+  `[refuelling][campaign]` (in-orbit ignitions of the lunar legs).
