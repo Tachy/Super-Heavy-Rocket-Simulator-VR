@@ -540,3 +540,16 @@ TEST_CASE("Lunar return catch from a printed gate state", "[.lunar_gate_replay]"
     };
     replay_gate(g, factor("STARSIM_RETURN_AERO"), factor("STARSIM_RETURN_DENSITY"), factor("STARSIM_RETURN_THRUST"));
 }
+
+// Ship catch robustness (2026-10-21): the gate of lunar-return direct seed 18, the one of 21 that missed since
+// refuelling f3 - the landing burn's attitude lagged its re-planned reference, the re-plans stopped converging near
+// the 3 -> 2 engine switch and the catch aborted.
+TEST_CASE("Lunar return seed-18 gate is caught", "[ship][catch][lunar]") {
+    const double seed18[16] = {848010481.76666546,   -2303163.2930843853, 5251548.8077884363,  2784887.0713356393,
+                               -344.80324421150925,  -241.62089640034384, -35.169364115429531, 0.75127393148601607,
+                               -0.59132762504812575, -0.23785828951925145, -0.17129668365576775, -0.075085288294500299,
+                               0.018449976961259034, -0.025684817876441189, 8443.9801185259676, 30406.388246525152};
+    const auto run = replay_gate(seed18, 1.014, 1.105, 1.019);  // the flight's aero, density and thrust factors
+    CHECK(run.result == sim::ReturnResult::Caught);
+    CHECK(run.caught_within_tolerance());
+}

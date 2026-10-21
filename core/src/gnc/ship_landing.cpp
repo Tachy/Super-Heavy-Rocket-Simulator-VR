@@ -31,8 +31,13 @@ ShipLandingParameters ship_landing_parameters() {
                                std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"},
                                std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"}};
     s.snapshot.reserve_kg = 1000.0;  // [E] the ship's landing propellant is small (header tanks)
-    // [E] lateral LQR effort: the booster's 0.2 swung the ship's gimbals stop to stop after the flip (20 deg/s slew)
-    s.lateral_effort_fraction = 0.1;
+    // [E] lateral LQR effort: the booster's 0.2 swung the ship's gimbals stop to stop after the flip (20 deg/s slew);
+    // 0.1 until the ship catch robustness plan (2026-10-21): the LQR's model has no actuator delay (0.75 s on the
+    // ship), and with ~30 m/s across after the flip (lunar-return direct seed 18) the hull out-tilted the plan, braked
+    // ~4 m/s too much across, the re-plans jumped to a long slow final phase and stopped converging - catch aborted.
+    // Seed-18 replay: 0.1 / 0.07 miss, 0.05 / 0.04 / 0.03 / 0.02 catch (17 plans, none failed, 0.04-0.05 m): the
+    // middle of that band.
+    s.lateral_effort_fraction = 0.03;
     auto& l = s.settings.limits;
     // [E] the more engines, the more gimbal authority. The lateral phase took 15 deg until f3: it saturated on the
     // divert after the flip (lunar return seed 1, ~27 m/s across: overshoot, hover, headers dry).
