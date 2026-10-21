@@ -2,6 +2,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <iterator>
+#include <limits>
+#include <set>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -51,6 +54,25 @@ TEST_CASE("A tanker plans the coelliptic phasing to the depot on Raptor and cold
     CHECK(plan->parameters.waypoint0_below_m == 400.0);  // the depot's target block
     CHECK(plan->parameters.chaser_drag_area_per_mass_m2pkg > 0.0);
     CHECK(plan->parameters.target_drag_area_per_mass_m2pkg > 0.0);  // the depot has no fixed drag area
+}
+
+TEST_CASE("Rendezvous burns are modelled at the throttle they fly", "[refuelling][rendezvous]") {
+    // r3 minor M1: burns between the two Raptor minimum impulses fly at minimum throttle (start_burn) but were
+    // modelled at full throttle
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    f.session.place_in_orbit(refuelling_test::tanker_config(200.0e3), tanker_behind(f, 8.0), f.t0);
+    f.session.add_station(refuelling_test::depot_config(f.depot_propellant_kg), f.depot, f.t0);
+    const double full_n = f.session.rendezvous_burn_model(std::numeric_limits<double>::infinity()).thrust_n;
+    std::set<double> thrusts_n;
+    for (double dv = 0.1; dv < 300.0; dv *= 1.05) {
+        const double n = f.session.rendezvous_burn_model(dv).thrust_n;
+        if (!thrusts_n.empty()) CHECK(n >= *thrusts_n.rbegin());  // never weaker for a larger burn
+        thrusts_n.insert(n);
+    }
+    REQUIRE(thrusts_n.size() == 3);  // cold gas, the belly Raptor at minimum throttle, at full throttle
+    CHECK(*thrusts_n.rbegin() == full_n);
+    CHECK(*std::next(thrusts_n.begin()) < full_n);  // the Raptor at its minimum throttle
 }
 
 TEST_CASE("A tanker without main propellant is refused the rendezvous, no throw", "[refuelling][rendezvous]") {

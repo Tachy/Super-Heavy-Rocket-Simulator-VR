@@ -73,8 +73,11 @@ mission::FiniteBurnModel FlightSession::rendezvous_engines(double delta_v_mps) c
     if (rendezvous_main_engines() && delta_v_mps >= rendezvous_rcs_below_mps()) {
         const auto& groups = vehicle.stages().front().config.deorbit_engine_groups;
         const auto set = groups.empty() ? burn_configurations() : burn_configurations(&groups);
-        // a failed belly Raptor leaves the set empty: the cold gas flies every burn (as start_burn falls back)
-        if (!set.empty()) return {mass, set.front().thrust_n, set.front().mass_flow_kgps};
+        // the configuration start_burn will fly (r3 minor M1: a burn between the two minimum impulses flies at the
+        // minimum throttle); a failed belly Raptor leaves the set empty: the cold gas flies every burn
+        for (const auto& c : set) {
+            if (c.minimum_dv_mps <= small_burn_transient_share * delta_v_mps) return {mass, c.thrust_n, c.mass_flow_kgps};
+        }
     }
     // RCS translation as start_burn picks it: along +x, else along -x
     auto capability = vehicle.rcs_force_capability({1.0, 0.0, 0.0});
@@ -280,11 +283,14 @@ void FlightSession::rendezvous_fly_due_burn() {
     const auto kind = rendezvous_next_kind();
     const mission::PhasingPlanner planner(gravity_);
     auto node = planner.retarget(kind, controlled_state(), station_state(), epoch_, *rendezvous_plan_, rendezvous_engines());
-    if (node && rendezvous_main_engines() && norm(node->delta_v_gcrf_mps) < rendezvous_rcs_below_mps()) {
-        // below the Raptor's minimum impulse: the long cold-gas burn, targeted as such
-        const auto rcs = rendezvous_engines(0.0);
-        if (auto fine = planner.retarget(kind, controlled_state(), station_state(), epoch_, *rendezvous_plan_, rcs)) {
-            node = fine;
+    if (node) {
+        // a smaller burn flies weaker (the Raptor at its minimum throttle, or the long cold-gas burn below its minimum
+        // impulse): targeted again with the model it flies
+        const auto flown = rendezvous_engines(norm(node->delta_v_gcrf_mps));
+        if (flown.thrust_n != rendezvous_engines().thrust_n) {
+            if (auto fine = planner.retarget(kind, controlled_state(), station_state(), epoch_, *rendezvous_plan_, flown)) {
+                node = fine;
+            }
         }
     }
     if (kind == PhasingBurnKind::MidCourse &&
