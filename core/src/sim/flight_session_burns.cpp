@@ -132,6 +132,7 @@ bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<Burn
     burn_config_ = *chosen;
     burn_.emplace(node);
     settling_lead_s_ = chosen->rcs ? 0.0 : settling_lead_s();  // cold gas needs no settled liquid
+    if (chosen->rcs) settle_manual_ = false;  // f3 final review M11: the burn flies the RCS translation
     settling_push_ = false;
     settling_hold_start_.reset();
     burn_abort_reason_.clear();
@@ -180,7 +181,11 @@ double FlightSession::settling_gas_bound_kg() const {
 }
 
 bool FlightSession::settle(bool on) {
-    if (on && (docking_busy() || proximity_active())) return false;  // the approach and capture own the RCS
+    // the approach, the capture and the autopilot's cold-gas burns own the RCS translation
+    const bool rcs_burn = autopilot_.state == AutopilotState::Burn && burn_config_.rcs;
+    if (on && (docking_busy() || proximity_active() || rcs_burn || autopilot_.state == AutopilotState::Rendezvous)) {
+        return false;
+    }
     settle_manual_ = on;
     return true;
 }

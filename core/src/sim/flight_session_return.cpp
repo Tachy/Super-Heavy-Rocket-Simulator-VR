@@ -97,9 +97,16 @@ std::optional<std::string> FlightSession::boil_off_shortfall(gnc::DeorbitPlan& p
     const auto at_burn = main_propellant_at(body, plan.node.epoch);
     plan.boil_off_kg = now.total() - at_burn.total();
     // LOX and CH4 boil off in another ratio than the engine burns them (~3.2 against 3.6): the one that runs dry first
-    // limits the burn. The deorbit engine set's mixture ratio (all of the ship's Raptors burn the same).
+    // limits the burn. The deorbit engine set's mixture ratio (r2 minor: not just the last engine's).
+    const auto& stage = body.vehicle().stages().front();
     double mixture_ratio = 0.0;
-    for (const auto& e : body.vehicle().stages().front().engines) mixture_ratio = e.performance->config().mixture_ratio;
+    for (const auto& e : stage.engines) {
+        const bool deorbit_engine = std::any_of(
+            stage.config.deorbit_engine_groups.begin(), stage.config.deorbit_engine_groups.end(),
+            [&](const std::string& g) { return e.group_id == stage.config.id + "/" + g; });
+        if (deorbit_engine || (mixture_ratio == 0.0 && !e.auxiliary())) mixture_ratio = e.performance->config().mixture_ratio;
+        if (deorbit_engine) break;
+    }
     const double usable_kg = mixture_ratio > 0.0 ? std::min(at_burn.oxidizer_kg * (1.0 + mixture_ratio) / mixture_ratio,
                                                             at_burn.fuel_kg * (1.0 + mixture_ratio))
                                                  : at_burn.total();
@@ -221,8 +228,8 @@ void FlightSession::replan_ship_deorbit() {
     // 61.0 m/s, 0.3 t into the 35 t reserve; the old burn was flown and the entry missed the gate by 274 km).
     // Boil-off since the commitment (r2): when the main tanks will no longer hold the burn, it is called off - the
     // ship stays in orbit instead of running dry in the burn.
+    gnc::DeorbitPlan flown = plan.feasible || plan.short_of_reserve ? plan : *deorbit_plan_;
     {
-        gnc::DeorbitPlan flown = plan.feasible || plan.short_of_reserve ? plan : *deorbit_plan_;
         if (const auto shortfall = boil_off_shortfall(flown, call_off_burn_margin)) {
             deorbit_plan_ = flown;
             deorbit_plan_->feasible = false;
@@ -236,13 +243,15 @@ void FlightSession::replan_ship_deorbit() {
     }
     auto node = old_node;
     if (plan.feasible || plan.short_of_reserve) {
-        deorbit_plan_ = plan;
+        deorbit_plan_ = flown;  // the plan with the boil-off until its burn (r2 minor: the planner's has none)
         if (execute_burn(plan.node, stage.deorbit_engine_groups)) {
             node = plan.node;
         } else {
             deorbit_plan_->node = old_node;
             execute_burn(old_node, stage.deorbit_engine_groups);
         }
+    } else {
+        deorbit_plan_->boil_off_kg = flown.boil_off_kg;  // the old plan, flown on: its boil-off from now
     }
     deorbit_replan_due_ = node.epoch - epoch_ > deorbit_replan_age_s;
 }

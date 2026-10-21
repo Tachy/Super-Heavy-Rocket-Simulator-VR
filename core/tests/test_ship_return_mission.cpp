@@ -2,6 +2,7 @@
 // the deorbit burn, the belly Raptor flies it, the ship coasts, enters on its entry guidance and is caught at the tower.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -187,6 +188,39 @@ TEST_CASE("A burn on dry main tanks is aborted with a reason", "[ship][session][
     CHECK(session.autopilot().state != sim::AutopilotState::Burn);
     INFO(session.burn_abort_reason());
     CHECK(session.burn_abort_reason().find("Treibstoff") != std::string::npos);
+}
+
+TEST_CASE("A burn whose engines failed is aborted as a failure, not as empty tanks", "[ship][session][deorbit][boil_off]") {
+    const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(session, m);
+    const auto& s = session.body(0).state();
+    const gnc::BurnNode node{session.epoch() + 700.0, -math::normalized(s.velocity_gcrf_mps) * 60.0};
+    REQUIRE(session.execute_burn(node, {"sea_level_3"}));
+    const auto& engines = session.body(0).vehicle().stages()[0].engines;
+    for (size_t e = 0; e < engines.size(); ++e) {
+        if (engines[e].group_id.ends_with("sea_level_3")) session.fail_engine(0, 0, e);
+    }
+    for (int k = 0; k < 120 && session.autopilot().state == sim::AutopilotState::Burn; ++k) {
+        session.advance_to(session.epoch() + 60.0, 400000);
+    }
+    CHECK(session.autopilot().state != sim::AutopilotState::Burn);
+    CHECK_THAT(session.burn_abort_reason(), Catch::Matchers::ContainsSubstring("ausgefallen"));
+}
+
+TEST_CASE("A deorbit re-plan keeps the boil-off until its burn", "[ship][session][deorbit][boil_off]") {
+    // r2 deferred minor: the re-plan stored the planner's plan, whose boil-off is 0 (the flown copy's was dropped)
+    const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    place_mission(session, m);
+    REQUIRE(session.plan_ship_return(deorbit_parameters(m)));
+    REQUIRE(session.ship_return_plan()->boil_off_kg > 0.0);
+    const auto burn = session.ship_return_plan()->node.epoch;
+    REQUIRE(burn - session.epoch() > sim::FlightSession::deorbit_replan_age_s);
+    const auto replanned = burn - sim::FlightSession::deorbit_replan_lead_s + 600.0;
+    while (session.epoch() < replanned) session.advance_to(session.epoch() + 1800.0, 400000);
+    REQUIRE(session.ship_return_plan() != nullptr);
+    CHECK(session.ship_return_plan()->boil_off_kg > 0.0);
 }
 
 // Refuelling r2: the onboard computer counts the bare hull's boil-off until the burn - 7 t above the landing

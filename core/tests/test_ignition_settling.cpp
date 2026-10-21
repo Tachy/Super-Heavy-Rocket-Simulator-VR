@@ -475,3 +475,48 @@ TEST_CASE("Manual settle: the push runs until switched off and settles the tanks
     CHECK(f.session.settle(false));
     CHECK_FALSE(f.session.settling());
 }
+
+TEST_CASE("Manual settle: refused while docked", "[ignition_settling][sim]") {
+    test::spice_session();
+    refuelling_test::TankerAtPort f({0.0, 0.0, 0.0});
+    f.session.set_rendezvous_target(1, "transfer_dock", "transfer_dock");
+    f.session.dock_in_place();
+    REQUIRE(f.session.docked());
+    CHECK_FALSE(f.session.settle(true));  // the docked pair's RCS belongs to the transfer
+}
+
+TEST_CASE("Manual settle: an autopilot RCS burn clears it and refuses it while it flies", "[ignition_settling][sim]") {
+    // f3 final review M11: a manual push replaced the RCS burn's translation
+    test::spice_session();
+    TankerInOrbit f(100e3);
+    REQUIRE(f.session.settle(true));
+    const auto node = prograde(f.session, 120.0, 0.3);  // below the Raptors' minimum impulse: cold gas
+    REQUIRE(f.session.execute_burn(node));
+    REQUIRE(f.session.burn_configuration().rcs);
+    CHECK_FALSE(f.session.settling());
+    CHECK_FALSE(f.session.settle(true));
+    run_to(f.session, node.epoch + 600.0, 10.0);
+    CHECK(f.session.autopilot().state != sim::AutopilotState::Burn);
+    CHECK(f.session.burn_abort_reason().empty());
+    CHECK(f.session.settle(true));  // free again after the burn
+}
+
+TEST_CASE("Settling: a hold that never settles lights after the hold limit and ingests gas", "[ignition_settling][sim]") {
+    // f3 final review M13: the hold's time limit
+    test::spice_session();
+    TankerInOrbit f(100e3);
+    f.session.advance_to(f.session.epoch() + 2.0 * 3600.0);
+    const double lead = f.session.settling_lead_s();
+    const auto node = prograde(f.session, 600.0, 100.0);
+    REQUIRE(f.session.execute_burn(node));
+    // the liquid is shaken loose every second: the push never settles it (test access to the flown vehicle)
+    auto& stage = const_cast<vehicle::FlightBody&>(f.session.body(0)).vehicle().stages()[0];
+    const auto limit = node.epoch + sim::FlightSession::settling_hold_factor * lead + 300.0;
+    while (f.session.epoch() < limit && f.session.burn_abort_reason().empty()) {
+        stage.settled = 0.0;
+        f.session.advance_to(f.session.epoch() + 1.0);
+    }
+    CHECK(f.any_failed());
+    CHECK_THAT(f.session.burn_abort_reason(), Catch::Matchers::StartsWith("Gasansaugung"));
+    CHECK(f.session.epoch() - node.epoch > sim::FlightSession::settling_hold_factor * lead - 0.5 * lead);
+}

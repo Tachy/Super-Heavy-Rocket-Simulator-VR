@@ -355,10 +355,17 @@ void FlightSession::run_autopilot() {
                 });
             });
             if (dry && !autopilot_.burn.complete) {
+                // a failed engine is starved too (fail_engine): report the failure, not empty tanks (r2 minor)
+                const bool failed = std::any_of(vehicle.stages().begin(), vehicle.stages().end(), [&](const auto& st) {
+                    return std::any_of(st.engines.begin(), st.engines.end(), [&](const auto& e) {
+                        return e.failed && std::find(c.groups.begin(), c.groups.end(), e.group_id) != c.groups.end();
+                    });
+                });
                 cutoff();
                 ship_return_ = false;
                 disengage_autopilot();  // the lunar / rendezvous step machines end with it (no half state)
-                burn_abort_reason_ = "Brennvorgang abgebrochen: kein Treibstoff für die Triebwerke";
+                burn_abort_reason_ = failed ? "Brennvorgang abgebrochen: Triebwerke ausgefallen"
+                                            : "Brennvorgang abgebrochen: kein Treibstoff für die Triebwerke";
                 break;
             }
             if (autopilot_.burn.complete) {
