@@ -280,7 +280,10 @@ void FlightSession::place_landing_ship(const config::VehicleConfig& config, cons
 
 // Flip and landing burn of a ship: engine groups and throttle for this tick (attitude in command_for).
 void FlightSession::run_ship_landing(Flying& flying) {
-    if (flying.body->impacted()) return;
+    if (flying.body->impacted()) {
+        if (!flying.ship_landing->has_contact()) flying.ship_landing->update(*flying.body, env_, epoch_);  // contact record
+        return;
+    }
     // From the belly flip on the header tanks feed the engines: the main-tank residue lies away from the outlets
     // (header-tank plan; a no-op without headers).
     flying.body->vehicle().select_feed(0, vehicle::FeedSource::Header);

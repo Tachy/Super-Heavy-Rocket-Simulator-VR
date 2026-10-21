@@ -14,6 +14,33 @@ record. Campaign thresholds tighten to "no lost, no miss".
 
 **Spec:** `docs/superpowers/specs/2026-10-21-ship-catch-robustness-design.md`
 
+## Re-scope (user 2026-10-21, after Task 1 Step 8)
+
+The seed-18 reproduction showed a landing-burn tracking oscillation, not a flip that ends too fast across (spec
+section "Re-scope"). Changes, binding over the task texts below:
+
+- **Task 1:** the "hard gate" is the replayed seed-18 gate state, not a tuned `Gate`: the hidden replay test of
+  `core/tests/test_lunar_return_entry.cpp` is factored into `replay_gate(state16, aero, density, thrust)` returning
+  the `CatchRun` with `result`; the seed-18 numbers (`tmp/seed18_gate.txt`, factors 1.014 / 1.105 / 1.019) become a
+  constant there. Task 1 commits the classification, the contact record, the gate diagnostics and the replay helper;
+  the seed-18 test is added RED in Task 3.
+- **Task 2:** the flip brake law is removed again (files, CMake entries, its tests); the upright descent law stays.
+- **Task 3 (replaces "Braking flip and hand-over"): landing burn tracking.**
+  - Step 1: test `"Lunar return seed-18 gate is caught"` (`[ship][catch][lunar]`): `replay_gate(seed18)` ->
+    `result == Caught` and `caught_within_tolerance()`. Run it, expect FAIL ("Abbruch").
+  - Step 2: systematic debugging with `STARSIM_DEBUG_SCVX` (tracking lines: `axis` vs `ref`) - candidates in this
+    order, one hypothesis at a time, each measured on the replay: (a) the re-plan reference jump (the new plan's
+    start attitude vs the old plan's reference at the switch epoch; plan latency 0.5 s); (b) the attitude lag (actuator
+    delay 0.75 s vs the LQR effort 0.1); (c) the 3 -> 2 switch (thrust-centroid shift, `switch_prerotation_s` = 0 for
+    the ship); (d) plans that start from a state their attitude model cannot follow (rate / tilt at the snapshot).
+    Ledger each hypothesis with its numbers.
+  - Step 3: fix the cause found (smallest change, [E] values with the measured reason); the replay is caught.
+  - Step 4: run `[ship][landing]`, `[ship][catch]~[slow]`, then the `[ship][catch][validation]` campaign (background)
+    - not worse than before (20 of 21); commit + push `fix(gnc): ...` naming the cause.
+- **Task 4:** unchanged in intent (upright abort); its unreachable-gate test uses `nominal_gate()` with too little
+  propellant (not `hard_gate()`); `upright_descent` takes `min_accel_mps2` (Task 2 ruling).
+- **Task 5 / 6:** unchanged; docs also correct the seed-12 / seed-18 record in `docs/subsystems.md`.
+
 ## Global Constraints
 
 - Answer the user in German; code, comments, commits in English (Conventional Commits); UI strings in the core German.

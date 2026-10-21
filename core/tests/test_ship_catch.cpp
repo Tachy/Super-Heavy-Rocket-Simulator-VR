@@ -86,12 +86,13 @@ test::CatchRun fly_from_gate(const Gate& gate, double* flip_s = nullptr) {
             if (engines[i].group_id == gate.failed_group) session.fail_engine(0, 0, i);
         }
     }
-    const auto run = test::fly_landing(session, earth(), t0, 120.0);
+    auto run = test::fly_landing(session, earth(), t0, 120.0);
+    run.result = session.ship_return_result(0);
     const auto* g = session.ship_landing(0);
     if (g) std::printf("flip %.1f s, ends at %.0f m; ", g->flip_duration_s(), g->flip_end_height_m());
-    std::printf("ship from the gate: %s, offset %.2f m, lateral %.2f m/s, sink %.2f m/s, first plan attempts %d, %d plans "
+    std::printf("ship from the gate: %s (%s), offset %.2f m, lateral %.2f m/s, sink %.2f m/s, first plan attempts %d, %d plans "
                 "(%d failed), %.1f t propellant left\n",
-                sim::to_string(run.tower_phase), run.offset_m, run.lateral_mps, run.sink_mps, g ? g->first_plan_attempts() : -1,
+                sim::to_string(run.tower_phase), sim::to_string(run.result), run.offset_m, run.lateral_mps, run.sink_mps, g ? g->first_plan_attempts() : -1,
                 g && g->scvx() ? g->scvx()->statistics().plans : 0, g && g->scvx() ? g->scvx()->statistics().failures : 0,
                 session.body(0).vehicle().propellant_kg() / 1000.0);
     (void)flip_s;

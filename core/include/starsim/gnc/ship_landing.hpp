@@ -61,8 +61,15 @@ public:
     // The flip: from the gate until the axis is within the flip tolerance; height of the CG above the site then.
     double flip_duration_s() const { return flip_duration_s_; }
     double flip_end_height_m() const { return flip_end_height_m_; }
+    // First tick resting or impacted: axis tilt from the local vertical and sink speed (Earth-fixed).
+    bool has_contact() const { return contact_; }
+    double contact_tilt_rad() const { return contact_tilt_rad_; }
+    double contact_sink_mps() const { return contact_sink_mps_; }
 
 private:
+    void print_gate_state(const char* label, const vehicle::FlightBody& body, const frames::FixedToInertial& transform,
+                          time::Epoch epoch) const;
+
     LandingSite site_;
     ShipLandingParameters parameters_;
     ReturnPhase phase_ = ReturnPhase::Flip;
@@ -75,6 +82,9 @@ private:
     int first_plan_attempts_ = 0;
     bool catch_contact_ = false;
     bool abort_requested_ = false;
+    bool contact_ = false;
+    double contact_tilt_rad_ = 0.0;
+    double contact_sink_mps_ = 0.0;
 };
 
 }  // namespace starsim::gnc

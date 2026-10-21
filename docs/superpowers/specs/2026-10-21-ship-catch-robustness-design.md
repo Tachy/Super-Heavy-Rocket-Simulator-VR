@@ -27,7 +27,25 @@ Approach (user-approved): **A - the flip brakes across** (the alternatives, a pr
 or a planner-only fix, were rejected: the first does not cover flip dispersions or engine failures and touches the
 delicate terminal entry phase, the second leaves the hand-over in an unreachable state).
 
-## 1. Braking flip (`gnc/ship_landing`)
+## Re-scope after the reproduction (user 2026-10-21)
+
+Replaying seed 18 (the current miss) showed that the premise above holds for the old seed 12, not for seed 18: its flip
+ends 148 m from the axis at 32 m/s towards it, 472 m up, and the first plan converges. The miss is a growing
+attitude / lateral oscillation in the landing burn: the hull axis lags the plan's reference axis by ~1 s (actuator
+delay 0.75 s), the reference jumps 3-6 deg at each re-plan, the re-plans stop converging around the 3 -> 2 engine
+switch (~190 m), the ship stops sinking and the unconverged abort plans swing the hull to 45-54 deg. User decision:
+sections 1-2 (flip brake, hand-over) are replaced by **section 1' (landing burn tracking)**; the flip brake law is
+removed (no failing case needs it); sections 3-4 stay.
+
+## 1'. Landing burn tracking (`gnc/scvx_landing`, `gnc/ship_landing`)
+
+- Reproduce in seconds from the printed seed-18 gate state (`[.lunar_gate_replay]` path, made a regular test).
+- Find the lever that carries the oscillation by systematic debugging (re-plan reference jumps, attitude lag /
+  actuator delay vs the LQR, the 3 -> 2 switch, plans started from a state the plan's attitude model cannot follow);
+  fix the cause, not the symptom; every changed value [E] with its measured reason.
+- Criteria: the seed-18 gate is caught; the ship catch campaign and the lunar return direct seeds are not worse.
+
+## 1. Braking flip (`gnc/ship_landing`) - superseded by 1' (kept for the record)
 
 The flip is unchanged until the tilt is below `flip_flaps_until_tilt_rad` (30 deg): three Raptors at 80 %, forward
 flaps broadside, roll reference for the pins across the arms. From there a new sub-phase **flip brake** commands the
@@ -43,7 +61,7 @@ thrust axis instead of the vertical:
 - The roll reference (pins across the arms) is unchanged.
 - The entry guidance and the gate are unchanged.
 
-## 2. Hand-over to SCvx
+## 2. Hand-over to SCvx - superseded by 1' (kept for the record)
 
 - Hand-over when tilt < `handover_tilt_max_rad` (35 deg [E], replaces the 15 deg `flip_tolerance_rad` as the plan
   start condition) and the pitch/yaw rate < `flip_settled_rate_radps` (0.2 rad/s), **and** the first plan converges.
@@ -75,10 +93,9 @@ these requirements hold regardless:
 
 ## 4. Tests and criteria
 
-- Unit tests: the flip brake law (reference velocity, tilt limit, direction to the axis, no overshoot command); the
-  upright-descent law (stays upright, brakes, keeps clear of the tower).
-- Fixed hand-over case (fast): `place_landing_ship` at a gate whose flip ends like seed 18 (~29 m/s across, ~25 m
-  short of the axis) -> caught.
+- Unit tests: the upright-descent law (stays upright, brakes, keeps clear of the tower).
+- Fixed case (fast): the seed-18 gate state replayed (`place_landing_ship` from the printed GCRF state with the
+  flight's aero / density / thrust factors) -> caught.
 - Abort case: an unreachable gate (energy-short or an engine failed before the hand-over) -> upright abort.
 - Campaign thresholds:
   - lunar return direct: 3 of 3 caught per case (was 2 of 3);
@@ -86,7 +103,7 @@ these requirements hold regardless:
     (the belly-engine-failure case may abort).
 - Re-measure the refuelling reference flights (tanker catch propellant, today 1.81 t at catch; inputs digest); the
   campaign answer (13 tankers / 49.7 d) is expected unchanged.
-- `docs/subsystems.md` ship flip and catch: the flip brake, the hand-over, the upright abort; the "Open" note and the
+- `docs/subsystems.md` ship flip and catch: the tracking fix, the upright abort, the corrected seed-12 / seed-18 record; the "Open" note and the
   "one miss allowed" rationale go.
 
 ## Out of scope

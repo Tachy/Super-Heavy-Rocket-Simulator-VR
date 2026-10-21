@@ -77,6 +77,7 @@ struct CatchRun {
     sim::CatchPhase tower_phase = sim::CatchPhase::Open;
     bool tower_struck = false;
     sim::LandingOutcome outcome = sim::LandingOutcome::Flying;
+    sim::ReturnResult result = sim::ReturnResult::Flying;  // ship returns: caught / upright abort / lost
     bool caught_within_tolerance() const {
         return tower_phase == sim::CatchPhase::Caught && contact && offset_m < 1.0 && lateral_mps < 0.5;
     }

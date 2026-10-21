@@ -994,6 +994,13 @@ void FlightSession::stage() {
     ignite();  // hot staging: the upper stage lights immediately
 }
 
+ReturnResult FlightSession::ship_return_result(size_t index) const {
+    const auto outcome = landing_outcome(index);
+    const auto* g = ship_landing(index);
+    if (!g || !g->has_contact()) return return_result(outcome, 0.0, 0.0);
+    return return_result(outcome, g->contact_tilt_rad(), g->contact_sink_mps());
+}
+
 LandingOutcome FlightSession::landing_outcome(size_t index) const {
     const auto t = earth_.fixed_to_gcrf(epoch_);
     const auto& body = *bodies_.at(index).body;

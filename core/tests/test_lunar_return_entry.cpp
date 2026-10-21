@@ -469,26 +469,12 @@ TEST_CASE("Aerocapture dispersion probe", "[.][probe][aerocapture]") {
                       {kick[1], kick[2], kick[3]});
 }
 
-// Diagnostics (l5 Task 10): the flip and catch of a full flight's gate, replayed in seconds. STARSIM_GATE_STATE = the
-// 16 numbers of a "[gate] state" line (STARSIM_DEBUG_FLIP: TDB, GCRF position and velocity, attitude w x y z, body
-// rates, fuel and oxidiser kg); STARSIM_RETURN_AERO / _DENSITY / _THRUST the flight's truth factors.
-TEST_CASE("Lunar return catch from a printed gate state", "[.lunar_gate_replay]") {
-    const char* text = std::getenv("STARSIM_GATE_STATE");
-    REQUIRE(text != nullptr);
-    double g[16] = {};
-    {
-        const char* p = text;
-        for (double& value : g) {
-            char* end = nullptr;
-            value = std::strtod(p, &end);
-            REQUIRE(end != p);
-            p = end;
-        }
-    }
-    const auto factor = [](const char* name) {
-        const char* v = std::getenv(name);
-        return v ? std::atof(v) : 1.0;
-    };
+namespace {
+
+// The flip and catch of a full flight's gate, replayed in seconds: g = the 16 numbers of a "[gate] state" line
+// (STARSIM_DEBUG_FLIP: TDB, GCRF position and velocity, attitude w x y z, body rates, fuel and oxidiser kg) and the
+// flight's truth factors.
+test::CatchRun replay_gate(const double (&g)[16], double aero, double density, double thrust) {
     test::LunarReturnSession t;
     const auto m = config::load_lunar_return_mission(STARSIM_CONFIG_DIR, "ship_lunar_return_llo");
     t.session.set_boil_off(m.boil_off);  // placed directly: the mission's fidelity (refuelling r2)
@@ -517,14 +503,40 @@ TEST_CASE("Lunar return catch from a printed gate state", "[.lunar_gate_replay]"
                     re.y, re.z, ve.x, ve.y, ve.z, ne.x, ne.y, ne.z);
     }
     t.session.place_landing_ship(ship, state, epoch, gnc::ship_landing_parameters());
-    t.session.set_aero_dispersion(0, factor("STARSIM_RETURN_AERO"));
-    t.session.set_thrust_dispersion(0, factor("STARSIM_RETURN_THRUST"));
-    t.session.set_air_density_factor(factor("STARSIM_RETURN_DENSITY"));
-    const auto run = test::fly_landing(t.session, t.earth, epoch, 120.0);
+    t.session.set_aero_dispersion(0, aero);
+    t.session.set_thrust_dispersion(0, thrust);
+    t.session.set_air_density_factor(density);
+    auto run = test::fly_landing(t.session, t.earth, epoch, 120.0);
+    run.result = t.session.ship_return_result(0);
     const auto* guidance = t.session.ship_landing(0);
-    std::printf("[gate replay] %s, offset %.2f m, lateral %.2f m/s, sink %.2f m/s, %d plans (%d failed), %.1f t left\n",
-                sim::to_string(run.tower_phase), run.offset_m, run.lateral_mps, run.sink_mps,
+    std::printf("[gate replay] %s (%s), offset %.2f m, lateral %.2f m/s, sink %.2f m/s, %d plans (%d failed), %.1f t left\n",
+                sim::to_string(run.tower_phase), sim::to_string(run.result), run.offset_m, run.lateral_mps, run.sink_mps,
                 guidance && guidance->scvx() ? guidance->scvx()->statistics().plans : 0,
                 guidance && guidance->scvx() ? guidance->scvx()->statistics().failures : 0,
                 t.session.body(0).vehicle().propellant_kg() / 1000.0);
+    return run;
+}
+
+}  // namespace
+
+// Diagnostics (l5 Task 10): STARSIM_GATE_STATE = the 16 numbers of a "[gate] state" line; STARSIM_RETURN_AERO /
+// _DENSITY / _THRUST the flight's truth factors.
+TEST_CASE("Lunar return catch from a printed gate state", "[.lunar_gate_replay]") {
+    const char* text = std::getenv("STARSIM_GATE_STATE");
+    REQUIRE(text != nullptr);
+    double g[16] = {};
+    {
+        const char* p = text;
+        for (double& value : g) {
+            char* end = nullptr;
+            value = std::strtod(p, &end);
+            REQUIRE(end != p);
+            p = end;
+        }
+    }
+    const auto factor = [](const char* name) {
+        const char* v = std::getenv(name);
+        return v ? std::atof(v) : 1.0;
+    };
+    replay_gate(g, factor("STARSIM_RETURN_AERO"), factor("STARSIM_RETURN_DENSITY"), factor("STARSIM_RETURN_THRUST"));
 }

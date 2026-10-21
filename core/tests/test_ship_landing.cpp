@@ -15,6 +15,7 @@
 #include "starsim/gnc/descent_planner.hpp"
 #include "starsim/gnc/ship_landing.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/sim/landing_outcome.hpp"
 #include "starsim/vehicle/vehicle.hpp"
 
 using namespace starsim;
@@ -118,4 +119,17 @@ TEST_CASE("SCvx plans a ship catch from after the flip", "[ship][landing]") {
     CHECK(norm(gnc::state_position(plan.reference.x.back()) - target.position_m) < 0.5);
 }
 
-
+TEST_CASE("Ship return result: caught, upright abort or lost", "[ship][landing]") {
+    using sim::LandingOutcome;
+    using sim::ReturnResult;
+    CHECK(sim::return_result(LandingOutcome::Caught, 0.0, 0.0) == ReturnResult::Caught);
+    CHECK(sim::return_result(LandingOutcome::Flying, 0.0, 0.0) == ReturnResult::Flying);
+    CHECK(sim::return_result(LandingOutcome::Splashdown, 5.0 * deg, 2.5) == ReturnResult::UprightAbort);
+    CHECK(sim::return_result(LandingOutcome::Landed, 8.0 * deg, 1.0) == ReturnResult::UprightAbort);
+    CHECK(sim::return_result(LandingOutcome::Impact, 12.0 * deg, 4.5) == ReturnResult::UprightAbort);  // upright, slow
+    CHECK(sim::return_result(LandingOutcome::Splashdown, 120.0 * deg, 2.0) == ReturnResult::Lost);   // tumbled
+    CHECK(sim::return_result(LandingOutcome::Splashdown, 5.0 * deg, 30.0) == ReturnResult::Lost);    // hard
+    CHECK(sim::return_result(LandingOutcome::TippedOver, 5.0 * deg, 1.0) == ReturnResult::Lost);
+    CHECK(sim::return_result(LandingOutcome::BrokenUp, 0.0, 0.0) == ReturnResult::Lost);
+    CHECK(std::string(sim::to_string(ReturnResult::UprightAbort)) == "aufrecht abgebrochen");
+}

@@ -60,6 +60,26 @@ EntryTarget ship_entry_target(const LandingSite& site, const ShipLandingParamete
     return target;
 }
 
+// Diagnostics (STARSIM_DEBUG_GATE): the ship relative to the catch axis in the site's east/north/up, the axis relative
+// to the pad centre, height of the CG above the site, Earth-fixed velocity and the propellant aboard.
+void ShipLandingGuidance::print_gate_state(const char* label, const vehicle::FlightBody& body,
+                                           const frames::FixedToInertial& transform, time::Epoch epoch) const {
+    (void)epoch;
+    const Vec3 up = up_at(site_.latitude_rad, site_.longitude_rad);
+    const Vec3 east = math::normalized(cross(Vec3{0.0, 0.0, 1.0}, up));
+    const Vec3 north = cross(up, east);
+    const Vec3 r = transpose(transform.rotation) * body.state().position_gcrf_m;
+    const Vec3 v = transpose(transform.rotation) *
+                   (body.state().velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(transform), body.state().position_gcrf_m));
+    const Vec3 pad = frames::geodetic_to_fixed({site_.latitude_rad, site_.longitude_rad, site_.height_m});
+    const Vec3 axis = site_.catch_target ? site_.catch_target->pin_point_itrf_m : pad;
+    const Vec3 to_axis = axis - r;
+    std::printf("[%s] to-axis E %.1f N %.1f m, height %.1f m, v E %.2f N %.2f U %.2f m/s, axis from pad E %.2f N %.2f m, "
+                "propellant %.0f kg\n",
+                label, dot(to_axis, east), dot(to_axis, north), dot(r - pad, up), dot(v, east), dot(v, north), dot(v, up),
+                dot(axis - pad, east), dot(axis - pad, north), body.vehicle().propellant_kg());
+}
+
 ShipLandingGuidance::ShipLandingGuidance(LandingSite site, ShipLandingParameters parameters)
     : site_(std::move(site)), parameters_(std::move(parameters)) {}
 
@@ -78,6 +98,7 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
         started_ = true;
         next_attempt_ = epoch;
         flip_start_ = epoch;
+        if (std::getenv("STARSIM_DEBUG_GATE")) print_gate_state("gate", body, transform, epoch);  // diagnostics
     }
     if (phase_ == ReturnPhase::Flip) {
         cmd.run_groups = parameters_.flip_groups;
@@ -119,6 +140,7 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
             flip_duration_s_ = epoch - flip_start_;
             const Vec3 r_fixed = transpose(transform.rotation) * body.state().position_gcrf_m;
             flip_end_height_m_ = frames::fixed_to_geodetic(r_fixed).height_m - site_.height_m;
+            if (std::getenv("STARSIM_DEBUG_GATE")) print_gate_state("flip-end", body, transform, epoch);  // diagnostics
         }
         if (tilt < parameters_.flip_tolerance_rad && settled && epoch >= next_attempt_ && site_.catch_target) {
             ++first_plan_attempts_;
@@ -152,6 +174,14 @@ ReturnCommand ShipLandingGuidance::update(const vehicle::FlightBody& body, const
                              site_up * (site_.catch_target->pin_station_m - mass.cg_station_m);
         const bool catch_over = !c.abort && (catch_contact_ || dot(r_fixed - r_catch, site_up) < -catch_missed_height_m);
         if (catch_over) phase_ = ReturnPhase::Landed;
+    }
+    if ((body.resting() || body.impacted()) && !contact_) {
+        contact_ = true;
+        const Vec3 axis = body.state().attitude.rotate(Vec3{1.0, 0.0, 0.0});
+        contact_tilt_rad_ = std::acos(std::clamp(dot(axis, up_gcrf), -1.0, 1.0));
+        const Vec3 v_fixed = body.state().velocity_gcrf_mps -
+                             cross(vehicle::earth_rotation_vector(transform), body.state().position_gcrf_m);
+        contact_sink_mps_ = -dot(v_fixed, up_gcrf);
     }
     if (body.resting() || body.impacted()) phase_ = ReturnPhase::Landed;
     if (phase_ == ReturnPhase::Landed) {

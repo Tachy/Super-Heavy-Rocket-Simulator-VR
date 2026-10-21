@@ -33,6 +33,28 @@ Vec3 site_enu_m(const LaunchSite& site, const Vec3& itrf_m) {
     return {dot(d, Vec3{-so, co, 0.0}), dot(d, Vec3{-sl * co, -sl * so, cl}), dot(d, Vec3{cl * co, cl * so, sl})};
 }
 
+const char* to_string(ReturnResult result) {
+    switch (result) {
+        case ReturnResult::Flying: return "fliegt";
+        case ReturnResult::Caught: return "gefangen";
+        case ReturnResult::UprightAbort: return "aufrecht abgebrochen";
+        case ReturnResult::Lost: return "verloren";
+    }
+    return "?";
+}
+
+ReturnResult return_result(LandingOutcome outcome, double contact_tilt_rad, double contact_sink_mps) {
+    switch (outcome) {
+        case LandingOutcome::Flying: return ReturnResult::Flying;
+        case LandingOutcome::Caught: return ReturnResult::Caught;
+        case LandingOutcome::BrokenUp:
+        case LandingOutcome::TippedOver: return ReturnResult::Lost;
+        default: break;
+    }
+    const bool upright = contact_tilt_rad < upright_abort_max_tilt_rad && contact_sink_mps <= upright_abort_max_sink_mps;
+    return upright ? ReturnResult::UprightAbort : ReturnResult::Lost;
+}
+
 LandingOutcome landing_outcome(const vehicle::FlightBody& body, const LaunchSite& site, const Vec3& position_itrf_m) {
     if (body.caught()) return LandingOutcome::Caught;
     if (!body.breakup_reason().empty()) return LandingOutcome::BrokenUp;

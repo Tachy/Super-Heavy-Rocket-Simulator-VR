@@ -242,6 +242,7 @@ LaunchSite drone_ship_site(const config::DroneShipConfig& ship, double latitude_
                            double sea_height_m, double heading_rad);
 
 enum class LandingOutcome;
+enum class ReturnResult;
 
 // Release of a mission's payload vehicle (config::stack_payload) from the upper stage.
 struct PayloadSeparation {
@@ -829,6 +830,9 @@ public:
     vehicle::FlightTelemetry telemetry(size_t index) const;
     // How the flight of body `index` ended so far (Flying while it is in the air).
     LandingOutcome landing_outcome(size_t index) const;
+    // How the ship's return ended (sim::return_result): Flying until contact; without a ship landing guidance the
+    // landing outcome alone (tilt and sink 0).
+    ReturnResult ship_return_result(size_t index) const;
     // Seconds since liftoff (clamp release); before liftoff: since the vehicle was placed on the pad.
     double mission_time_s() const { return epoch_ - launch_epoch_; }
 
