@@ -60,7 +60,10 @@ func _test_gauges() -> void:
 	# Limit of 4 per side: range / closing rate only fit when the apsides are absent (open orbit here).
 	sel = GaugeRules.select(_telemetry({"altitude_m": 200.0e3, "apoapsis_altitude_km": INF}),
 			_body({"engines": [], "docking": docking}), {}, 0.0)
-	_check("range" in sel["right"] and "closing_rate" in sel["right"], "range and closing rate with active docking")
+	_check(sel["right"] == ["speed_surface", "speed_inertial", "altitude", "range"],
+			"range appears with active docking (closing rate is cut by the 4-per-side limit)")
+	_check(GaugeRules._right_conditions(_telemetry(), _body({"docking": docking})).any(
+			func(c): return c[0] == "closing_rate" and c[1]), "closing rate condition true with active docking")
 	sel = GaugeRules.select(_telemetry({"apoapsis_altitude_km": INF, "altitude_m": 200.0e3}), _body(), {}, 0.0)
 	_check(not ("apoapsis" in sel["right"]) and not ("periapsis" in sel["right"]), "no apsides on an open orbit")
 	_check(GaugeRules.docking_active(docking) and not GaugeRules.docking_active({"present": true, "range_m": 1.0,
