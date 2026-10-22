@@ -32,7 +32,8 @@ mode2_separation_delay_s = 1.16          # [D] drogue 0.16 s + recovery mortar 1
 # Give-up rules (spec: early give-up fires over water, at the latest at this height above ground)
 min_firing_height_m = 1500.0             # [E] mode 1 main fully open after ~3 s / ~300 m of fall
 sea_target_margin_m = 2000.0             # [E] given-up ship aims this far beyond the shoreline
-min_catch_propellant_kg = 25000.0        # [E] placeholder - Task 3 of the plan measures it
+min_catch_propellant_kg = 30000.0        # [D] nominal gate (test "Ship catch: lowest catchable gate load", 2026-10-22):
+                                         # 28 t caught, 27 t missed -> 28 t + 2 t margin [E]
 
 # Judging [E unless sourced]
 max_load_g = 20.0                        # [E] sustained longer than max_load_duration_s

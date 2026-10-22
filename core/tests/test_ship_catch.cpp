@@ -145,6 +145,22 @@ TEST_CASE("Ship catch single case", "[.][ship-single]") {
     fly_from_gate(g);
 }
 
+// Crew escape calibration (plan Task 3): the lowest propellant load at the nominal gate that is still caught, in 1 t
+// steps from the landing load down (config/crew_escape min_catch_propellant_kg = this + margin).
+TEST_CASE("Ship catch: lowest catchable gate load", "[.][ship-single]") {
+    double lowest_caught_kg = -1.0;
+    for (double propellant_kg = 35000.0; propellant_kg >= 10000.0; propellant_kg -= 1000.0) {
+        Gate g = nominal_gate();
+        g.propellant_kg = propellant_kg;
+        const auto run = fly_from_gate(g);
+        const bool caught = run.caught_within_tolerance() && !run.tower_struck;
+        std::printf("calibration: %.0f t -> %s\n", propellant_kg / 1000.0, caught ? "caught" : "missed");
+        if (!caught) break;
+        lowest_caught_kg = propellant_kg;
+    }
+    std::printf("calibration: lowest caught gate load %.0f t\n", lowest_caught_kg / 1000.0);
+}
+
 TEST_CASE("Ship flips at the gate and is caught", "[ship][landing][catch]") {
     const auto run = fly_from_gate(nominal_gate());
     CHECK(run.caught_within_tolerance());
