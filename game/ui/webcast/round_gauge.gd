@@ -11,7 +11,10 @@ const SIGNED_SPAN_RAD := 0.75 * PI  ## each side of the top
 const VALUE_SIZE := 24
 const UNIT_SIZE := 12
 const LABEL_SIZE := 13
-const LABEL_GAP_PX := 22.0
+const LABEL_GAP_PX := 22.0      ## ring to the label's baseline
+const VALUE_RAISE_PX := 4.0     ## the value sits this far above the centre (room for the unit)
+const UNIT_BASELINE_PX := 22.0  ## below the centre
+const UNIT_ALPHA := 0.8
 
 var label := ""
 var unit := ""
@@ -45,9 +48,9 @@ func _draw() -> void:
 				TRACK_START_RAD + clampf(fraction, 0.0, 1.0) * TRACK_SPAN_RAD)
 	var value_font := WebcastStyle.value_font()
 	var label_font := WebcastStyle.label_font()
-	WebcastStyle.draw_text(self, Vector2(0.0, WebcastStyle.center_offset(value_font, VALUE_SIZE) - 4.0), text,
+	WebcastStyle.draw_text(self, Vector2(0.0, WebcastStyle.center_offset(value_font, VALUE_SIZE) - VALUE_RAISE_PX), text,
 			value_font, VALUE_SIZE)
-	WebcastStyle.draw_text(self, Vector2(0.0, 22.0), unit, label_font, UNIT_SIZE, Color(1, 1, 1, 0.8))
+	WebcastStyle.draw_text(self, Vector2(0.0, UNIT_BASELINE_PX), unit, label_font, UNIT_SIZE, Color(1, 1, 1, UNIT_ALPHA))
 	WebcastStyle.draw_text(self, Vector2(0.0, RADIUS_PX + LABEL_GAP_PX), label.to_upper(), label_font, LABEL_SIZE)
 
 

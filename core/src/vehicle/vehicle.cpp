@@ -67,7 +67,11 @@ bool Stage::has_header_tanks() const {
 }
 
 Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::path& config_dir)
-    : id_(config.id), display_name_(config.display_name), config_dir_(config_dir) {
+    : id_(config.id),
+      // the vehicle's name only while all its named stages are there (not for a ship placed without its booster)
+      display_name_(config.named_stage_count == 0 || config.stages.size() == config.named_stage_count ? config.display_name
+                                                                                                     : std::string()),
+      config_dir_(config_dir) {
     std::map<std::string, std::shared_ptr<const propulsion::EnginePerformance>> performances;
     for (const auto& [engine_id, engine_config] : config.engines) {
         performances[engine_id] = std::make_shared<propulsion::EnginePerformance>(engine_config);
@@ -384,6 +388,27 @@ double Vehicle::propellant_kg() const {
         for (const auto& t : s.tanks) total += t.config.contents == config::TankContents::Rcs ? 0.0 : t.mass_kg;
     }
     return total;
+}
+
+double Vehicle::propellant_capacity_kg() const {
+    double total = 0.0;
+    for (const auto& s : stages_) {
+        for (const auto& t : s.tanks) total += t.config.contents == config::TankContents::Rcs ? 0.0 : t.config.capacity_kg;
+    }
+    return total;
+}
+
+std::string Vehicle::shown_name() const {
+    if (!display_name_.empty()) return display_name_;
+    for (const auto& s : stages_) {
+        const bool main_engines = std::any_of(s.engines.begin(), s.engines.end(),
+                                              [](const Engine& e) { return !e.auxiliary(); });
+        if (main_engines && !s.config.display_name.empty()) return s.config.display_name;
+    }
+    for (auto it = stages_.rbegin(); it != stages_.rend(); ++it) {
+        if (!it->config.display_name.empty()) return it->config.display_name;
+    }
+    return {};
 }
 
 double Vehicle::main_propellant_kg() const {

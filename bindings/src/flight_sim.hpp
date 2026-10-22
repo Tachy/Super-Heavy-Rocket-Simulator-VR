@@ -57,6 +57,8 @@ public:
     double mission_start_tdb_s() const;
     // Launch site id of the current flight (launch_from_site or the mission), "" before the first.
     godot::String mission_site_id() const;
+    // [mission] display_name of the started mission (German, no trademarks), "" for a free launch or none configured.
+    godot::String mission_display_name() const;
     // Landing zone of a returning first stage: {present}; present: {origin_itrf_m (its surface: the deck top for a drone
     // ship), east, north, up (ITRF unit vectors), latitude_deg, longitude_deg, pad_radius_m, has_deck}; with a deck also
     // {deck_length_m, deck_width_m, freeboard_m, heading_deg (long axis, clockwise from north), sea_height_m}.
@@ -124,7 +126,10 @@ public:
     godot::Array body_stages(int index) const;
     // Stable identity of a body (survives reindexing when bodies separate or are removed), 0 for an invalid index.
     int64_t body_serial(int index) const;
-    // [{position_m (body, relative to the bottom), firing, throttle, spool, stage (index into body_stages)}]
+    // Name shown for a body (vehicle::Vehicle::shown_name: display names only, no trademarks), "" for an invalid index.
+    godot::String body_display_name(int index) const;
+    // [{position_m (body, relative to the bottom), firing, throttle, spool, vacuum, auxiliary (launch escape or landing
+    // thrusters: not main propulsion), stage (index into body_stages)}]
     godot::Array body_engines(int index) const;
     // Flaps of a body (stations in its body frame, deflection 0 folded leeward .. 90 broadside) for rendering.
     godot::Array body_flaps(int index) const;
@@ -160,7 +165,8 @@ public:
     // apoapsis_altitude_km (INF on an open orbit), inclination_deg}: the orbit values are osculating two-body elements
     // about the reference body (inclination against its equator: the body-relative state rotated into ITRF / MOON_ME
     // axes at the current epoch), altitudes above its equatorial radius / the 1737.4 km sphere. Osculating values differ
-    // from the mean orbit (l4: "95 x 100 km at burn end" is the osculating value).
+    // from the mean orbit (l4: "95 x 100 km at burn end" is the osculating value). propellant_kg / propellant_capacity_kg:
+    // oxidizer + fuel of the main and header tanks, now and full (the webcast propellant gauge).
     godot::Dictionary telemetry(int index) const;
 
     // Lunar flight (l6): {present}; present: {step, status (German), mission_complete, mission_ended, burns: [{step,

@@ -6,7 +6,7 @@
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
-inputs_digest = "43e7a5c83cb9da29"
+inputs_digest = "c13ac23c6d7c9927"  # external view: display names added only (no physics), no re-measure
 
 [depot]
 mission = "depot_launch"

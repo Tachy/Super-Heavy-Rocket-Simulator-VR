@@ -1,30 +1,25 @@
 class_name EngineGauge
 extends Control
-## Engine layout of the lowest stage that has engines on its cross-section (body y to the right, body z down), each
-## engine lit while it fires (vacuum engines drawn larger, as their nozzles are); around it two arcs with the stage's
-## remaining main-tank propellant: LOX on the left, CH4 on the right, both filling from the bottom up. Drawn around
-## the control's position.
+## Engine layout of the lowest stage that has main engines, on its cross-section (body y to the right, body z down),
+## the same size as the round gauges (user 2026-10-22); each engine lit while it fires, vacuum engines drawn larger
+## (as their nozzles are). Drawn around the control's position. Auxiliary engines (launch escape, landing thrusters)
+## are filtered out before (GaugeRules.main_engines).
 
-const STAGE_RADIUS_PX := 50.0   ## stage cross-section outline
-const TANK_RADIUS_PX := 64.0    ## propellant arcs
-## Each arc spans this angle from the bottom gap up to the top gap.
-const TANK_SPAN_RAD := 0.75 * PI
-const TANK_GAP_RAD := 0.125 * PI  ## half the gap at the bottom (labels) and at the top
+const STAGE_RADIUS_PX := RoundGauge.RADIUS_PX  ## stage cross-section outline
 ## [E] Engine dot radius as a fraction of the engine spacing (half the spacing would make them touch), limits (px).
 const ENGINE_DOT_FRACTION := 0.42
-const ENGINE_DOT_MIN_PX := 2.5
-const ENGINE_DOT_MAX_PX := 12.0
+const ENGINE_DOT_MIN_PX := 2.0
+const ENGINE_DOT_MAX_PX := 9.0
 ## [E] Vacuum engines' dot size relative to sea-level engines (larger nozzle exit).
 const VACUUM_DOT_SCALE := 1.4
 ## [E] Engine positions are drawn on this fraction of the outline radius: the outer ring of a booster sits close to
 ## the hull, its dots still need room inside the outline.
 const ENGINE_AREA_FRACTION := 0.82
-const ENGINE_RIM_PX := 3.0  ## gap between the outer engines and the stage outline
-const LABEL_SIZE := 13
+const ENGINE_RIM_PX := 2.0  ## gap between the outer engines and the stage outline
+const UNLIT_STROKE_PX := 1.5
+const LABEL := "Triebwerke"
 
 var dots: Array = []  ## from layout(): {"position": Vector2 (stage radius = 1), "firing": bool, "vacuum": bool}
-var oxidizer_fraction := -1.0  ## < 0: no oxidizer tank, arc hidden
-var fuel_fraction := -1.0
 
 
 func _init() -> void:
@@ -34,12 +29,6 @@ func _init() -> void:
 func show_stage(engines: Array, stages: Array) -> void:
 	var stage := lowest_engine_stage(engines)
 	dots = layout(engines, stage, _stage_radius_m(stages, stage, engines))
-	oxidizer_fraction = -1.0
-	fuel_fraction = -1.0
-	if stage >= 0 and stage < stages.size():
-		var s: Dictionary = stages[stage]
-		oxidizer_fraction = _fraction(s, "oxidizer_kg", "oxidizer_capacity_kg")
-		fuel_fraction = _fraction(s, "fuel_kg", "fuel_capacity_kg")
 	queue_redraw()
 
 
@@ -66,8 +55,7 @@ static func layout(engines: Array, stage: int, radius_m: float) -> Array:
 
 
 func _draw() -> void:
-	var c := Vector2.ZERO
-	WebcastStyle.draw_ring(self, c, STAGE_RADIUS_PX, WebcastStyle.DIM)
+	WebcastStyle.draw_ring(self, Vector2.ZERO, STAGE_RADIUS_PX, WebcastStyle.DIM)
 	var dot_px := _dot_radius_px()
 	for dot: Dictionary in dots:
 		var p: Vector2 = dot["position"] * ENGINE_AREA_FRACTION * STAGE_RADIUS_PX
@@ -75,20 +63,9 @@ func _draw() -> void:
 		if dot["firing"]:
 			WebcastStyle.draw_dot(self, p, r)
 		else:
-			WebcastStyle.draw_arc_stroke(self, p, r, 0.0, TAU, WebcastStyle.DIM, 1.5)
-	var font := WebcastStyle.label_font()
-	var bottom_left := 0.5 * PI + TANK_GAP_RAD   # screen angles, clockwise from +x
-	var bottom_right := 0.5 * PI - TANK_GAP_RAD
-	if oxidizer_fraction >= 0.0:
-		WebcastStyle.draw_arc_stroke(self, c, TANK_RADIUS_PX, bottom_left, bottom_left + TANK_SPAN_RAD, WebcastStyle.DIM)
-		WebcastStyle.draw_arc_stroke(self, c, TANK_RADIUS_PX, bottom_left, bottom_left + oxidizer_fraction * TANK_SPAN_RAD)
-		WebcastStyle.draw_text(self, Vector2(-14.0, TANK_RADIUS_PX + 8.0), "LOX", font, LABEL_SIZE, WebcastStyle.WHITE,
-				WebcastStyle.Align.RIGHT)
-	if fuel_fraction >= 0.0:
-		WebcastStyle.draw_arc_stroke(self, c, TANK_RADIUS_PX, bottom_right, bottom_right - TANK_SPAN_RAD, WebcastStyle.DIM)
-		WebcastStyle.draw_arc_stroke(self, c, TANK_RADIUS_PX, bottom_right, bottom_right - fuel_fraction * TANK_SPAN_RAD)
-		WebcastStyle.draw_text(self, Vector2(14.0, TANK_RADIUS_PX + 8.0), "CH4", font, LABEL_SIZE, WebcastStyle.WHITE,
-				WebcastStyle.Align.LEFT)
+			WebcastStyle.draw_arc_stroke(self, p, r, 0.0, TAU, WebcastStyle.DIM, UNLIT_STROKE_PX)
+	WebcastStyle.draw_text(self, Vector2(0.0, RoundGauge.RADIUS_PX + RoundGauge.LABEL_GAP_PX), LABEL.to_upper(),
+			WebcastStyle.label_font(), RoundGauge.LABEL_SIZE)
 
 
 ## Dot radius (px, sea-level size) from the engine spacing, so that a 33-engine booster and a 6-engine ship both read
@@ -118,10 +95,3 @@ static func _stage_radius_m(stages: Array, stage: int, engines: Array) -> float:
 			var p: Vector3 = e["position_m"]
 			radius = maxf(radius, Vector2(p.y, p.z).length())
 	return maxf(radius, 1.0)
-
-
-static func _fraction(stage: Dictionary, amount_key: String, capacity_key: String) -> float:
-	var capacity := float(stage.get(capacity_key, 0.0))
-	if capacity <= 0.0:
-		return -1.0
-	return clampf(float(stage.get(amount_key, 0.0)) / capacity, 0.0, 1.0)

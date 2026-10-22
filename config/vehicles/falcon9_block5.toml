@@ -14,6 +14,7 @@ stages_bottom_to_top = ["first_stage", "second_stage"]
 [[stage]]
 id = "first_stage"
 name = "Falcon 9 Block 5 first stage"
+display_name = "Medium Launcher Stufe 1"  # [D] display name of the part flying alone, no trademark
 length_m = 41.2                          # [S:wiki_f9]
 diameter_m = 3.66                        # [S:wiki_f9]
 dry_mass_kg = 25400.0                    # [S:wiki_f9] 25.6 t incl. the 0.2 t of RCS nitrogen below [E]
@@ -156,6 +157,7 @@ directions = ["tangential_plus", "tangential_minus", "inward", "inward"]
 [[stage]]
 id = "second_stage"
 name = "Falcon 9 Block 5 second stage"
+display_name = "Medium Launcher Stufe 2"  # [D] display name of the part flying alone, no trademark
 length_m = 13.8                          # [S:wiki_f9]
 diameter_m = 3.66
 dry_mass_kg = 3820.0                     # [S:wiki_f9] 3.9 t incl. the 80 kg of RCS nitrogen below [E]

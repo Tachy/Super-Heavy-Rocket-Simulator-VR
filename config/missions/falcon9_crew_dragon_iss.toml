@@ -4,6 +4,7 @@
 
 [mission]
 name = "Falcon 9 mit Crew Dragon zur ISS"
+display_name = "Crew-Flug zur Raumstation" # shown in the webcast overlay (no trademarks)
 kind = "iss_launch"
 ascent = "falcon9_crew_dragon"      # vehicle, site, pitch program, payload separation, separation orbit
 station = "iss"

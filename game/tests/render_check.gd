@@ -11,6 +11,8 @@
 extends SceneTree
 
 const FRAMES_TO_SETTLE := 6
+## The flight session's fixed tick (200 Hz, sim::FlightSession): --t_plus aims a tick late (the grid need not hit T-0).
+const SIM_TICK_S := 0.005
 
 var _args := {}
 var _main: Node
@@ -57,7 +59,7 @@ func _process(_delta: float) -> bool:
 	if _frames == FRAMES_TO_SETTLE:
 		if _args.has("webcast"):
 			var arc := (_main.get("overlay_host") as OverlayHost).overlay.timeline_arc
-			print("render_check: timeline window ", arc.window, " now ", arc.now_tdb_s, " events ", arc.events.size())
+			print("render_check: timeline scale ", arc.time_scale, " now ", arc.now_tdb_s, " events ", arc.events.size())
 		var out: String = _args.get("out", "user://render_check.png")
 		var error := root.get_viewport().get_texture().get_image().save_png(out)
 		print("render_check: saved %s (error %d)" % [out, error])
@@ -150,7 +152,7 @@ func _mission_target(sim: FlightSim) -> float:
 		print("render_check: no event %s in %s" % [spec[0], timeline.get("events", []).map(func(e): return e["kind"])])
 	var t0 = timeline.get("t0_tdb_s")
 	var zero := float(t0) if t0 != null else sim.mission_start_tdb_s()
-	return zero + float(_args.get("t_plus", "75"))
+	return zero + float(_args.get("t_plus", "75")) + SIM_TICK_S  # the sim stops on its tick grid, never just short
 
 
 # The simulation thread advances in chunks; wait until it has reached the target.

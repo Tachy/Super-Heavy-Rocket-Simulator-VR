@@ -20,6 +20,8 @@ enum class MissionKind {
     RefuellingCampaignFlown                // refuelling f2
 };
 MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_view mission_id);
+// [mission] display_name (German, no trademarks: the webcast overlay); empty when the file has none.
+std::string mission_display_name(const std::filesystem::path& config_dir, std::string_view mission_id);
 
 // [deorbit] of a ship return from orbit (b4): the deorbit planning settings (gnc::DeorbitParameters).
 struct ShipReturnDeorbit {

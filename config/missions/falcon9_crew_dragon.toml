@@ -4,6 +4,7 @@
 
 [mission]
 name = "Falcon 9 mit Crew Dragon"
+display_name = "Medium Launcher mit Crew-Kapsel" # shown in the webcast overlay (no trademarks)
 vehicle = "falcon9_block5"
 site = "ccsfs_slc40"                    # Crew-9 launched from SLC-40 [S]
 landing_zone = "ccsfs_lz40"

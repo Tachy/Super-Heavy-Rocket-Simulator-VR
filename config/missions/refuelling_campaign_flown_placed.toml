@@ -2,6 +2,7 @@
 # tankers and the HLS, compared with the campaign calculator.
 [mission]
 name = "Betankungskampagne (geflogen, Depot platziert)"
+display_name = "Betankungskampagne (Depot platziert)" # shown in the webcast overlay (no trademarks)
 kind = "refuelling_campaign_flown"
 
 [depot]

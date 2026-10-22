@@ -7,6 +7,7 @@
 
 #include "starsim/config/crew_escape_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/mission_config.hpp"
 #include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/contact/tower_geometry.hpp"
 #include "starsim/gnc/burn_node.hpp"
@@ -144,6 +145,7 @@ int64_t FlightSim::launch_from_site(const godot::String& vehicle_id, const godot
         }
         session.reset_timeline();  // a fresh mission log; the clamped vehicle starts on the pad
         context_.site_id = site_id;
+        context_.mission_display_name = godot::String();
         context_.mission_start_tdb_s = tdb_s;
         return Outcome{true, {}};
     }));
@@ -156,6 +158,7 @@ int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, 
         options.wait_on_pad = wait_on_pad;
         const auto s = sim::start_mission(session, config_dir_, id, epoch(tdb_s), time_, options);
         context_.site_id = godot::String::utf8(s.site_id.c_str());
+        context_.mission_display_name = godot::String::utf8(config::mission_display_name(config_dir_, id).c_str());
         context_.mission_start_tdb_s = s.epoch.tdb_seconds_past_j2000();
         context_.mission_warnings = godot::Array();
         std::string joined;
@@ -180,6 +183,7 @@ int64_t FlightSim::launch_from_pad(const godot::String& vehicle_id, double latit
         const double deg = constants::deg_to_rad;
         session.launch_from_pad(vehicle, {latitude_deg * deg, longitude_deg * deg, height_m}, heading_deg * deg,
                                 epoch(tdb_s));
+        context_.mission_display_name = godot::String();
         context_.mission_start_tdb_s = tdb_s;
         return Outcome{true, {}};
     }));
@@ -187,6 +191,7 @@ int64_t FlightSim::launch_from_pad(const godot::String& vehicle_id, double latit
 
 double FlightSim::mission_start_tdb_s() const { return snapshot()->mission_start_tdb_s; }
 godot::String FlightSim::mission_site_id() const { return snapshot()->site_id; }
+godot::String FlightSim::mission_display_name() const { return snapshot()->mission_display_name; }
 godot::Dictionary FlightSim::landing_zone() const { return snapshot()->landing_zone; }
 godot::Dictionary FlightSim::tower_state() const { return snapshot()->tower_state; }
 godot::Dictionary FlightSim::splashdown_zone() const { return snapshot()->splashdown_zone; }
@@ -469,6 +474,12 @@ godot::Dictionary FlightSim::depot_state() const { return snapshot()->depot_stat
 godot::Dictionary FlightSim::campaign_flight_state() const { return snapshot()->campaign_flight_state; }
 godot::Dictionary FlightSim::crew_escape_state() const { return snapshot()->crew_escape_state; }
 godot::Dictionary FlightSim::mission_timeline() const { return snapshot()->mission_timeline; }
+godot::String FlightSim::body_display_name(int index) const {
+    const auto snap = snapshot();
+    return index >= 0 && static_cast<size_t>(index) < snap->bodies.size() ? snap->bodies[index].display_name
+                                                                         : godot::String();
+}
+
 int64_t FlightSim::body_serial(int index) const {
     const auto snap = snapshot();
     return index >= 0 && static_cast<size_t>(index) < snap->bodies.size() ? snap->bodies[index].serial : int64_t{0};
@@ -612,6 +623,7 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("start_mission", "mission_id", "tdb_s", "wait_on_pad"), &FlightSim::start_mission,
                          DEFVAL(false));
     ClassDB::bind_method(D_METHOD("mission_site_id"), &FlightSim::mission_site_id);
+    ClassDB::bind_method(D_METHOD("mission_display_name"), &FlightSim::mission_display_name);
     ClassDB::bind_method(D_METHOD("mission_start_tdb_s"), &FlightSim::mission_start_tdb_s);
     ClassDB::bind_method(D_METHOD("wait_idle", "timeout_s"), &FlightSim::wait_idle);
     ClassDB::bind_method(D_METHOD("planning_s"), &FlightSim::planning_s);
@@ -680,6 +692,7 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("crew_escape_state"), &FlightSim::crew_escape_state);
     ClassDB::bind_method(D_METHOD("mission_timeline"), &FlightSim::mission_timeline);
     ClassDB::bind_method(D_METHOD("body_serial", "index"), &FlightSim::body_serial);
+    ClassDB::bind_method(D_METHOD("body_display_name", "index"), &FlightSim::body_display_name);
     ClassDB::bind_method(D_METHOD("set_crew_escape", "id"), &FlightSim::set_crew_escape);
     ClassDB::bind_method(D_METHOD("refuelling_campaign", "params"), &FlightSim::refuelling_campaign);
     ClassDB::bind_method(D_METHOD("predict_trajectory", "index", "duration_s", "step_s"),

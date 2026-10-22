@@ -19,6 +19,7 @@ stages_bottom_to_top = ["trunk", "capsule"]
 [[stage]]
 id = "trunk"
 name = "Crew Dragon trunk"
+display_name = "Trunk"  # [D] display name of the part flying alone, no trademark
 length_m = 3.7                           # [D] 8.1 m with the trunk [S:wiki_dragon2] minus the 4.4 m capsule
 diameter_m = 3.7                         # [E] on the 3.66 m second stage
 dry_mass_kg = 1500.0                     # [E] solar arrays and radiators included, not modelled separately
@@ -28,6 +29,7 @@ separation = "spring"
 [[stage]]
 id = "capsule"
 name = "Crew Dragon capsule"
+display_name = "Crew Capsule"  # [D] display name of the part flying alone, no trademark
 length_m = 4.4                           # [S:wiki_dragon2] with the nose cone
 diameter_m = 4.0                         # [S:wiki_dragon2]
 hull_top_diameter_m = 1.8                # [E] sidewall tapering from the 4 m base (station hull contact, ISS i5)

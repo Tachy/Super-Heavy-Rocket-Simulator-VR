@@ -3,6 +3,7 @@
 # and departure -> deorbit -> entry -> flip and catch on the header tanks.
 [mission]
 name = "Tankerflug zum Depot"
+display_name = "Tankerflug zum Depot"   # shown in the webcast overlay (no trademarks)
 kind = "tanker_flight"
 ascent = "tanker_ascent"
 return = "ship_return_starbase"   # its [deorbit] block (entry interface, bank, crossrange)

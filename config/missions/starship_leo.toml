@@ -4,6 +4,7 @@
 
 [mission]
 name = "Starship in einen niedrigen Erdorbit"
+display_name = "Testflug in den Erdorbit" # shown in the webcast overlay (no trademarks)
 vehicle = "starship_block3"
 site = "starbase_olp1"
 heading_deg = 90.0              # body +y on the pad

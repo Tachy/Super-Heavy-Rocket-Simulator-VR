@@ -2,6 +2,7 @@
 # window planned live from the flown depot, the HLS refuelled at the end; compared with the campaign calculator.
 [mission]
 name = "Betankungskampagne (geflogen)"
+display_name = "Betankungskampagne"     # shown in the webcast overlay (no trademarks)
 kind = "refuelling_campaign_flown"
 
 [depot]

@@ -2,6 +2,7 @@
 # its initial fill (measured, for the r6 campaign).
 [mission]
 name = "Depotstart"
+display_name = "Depotstart"             # shown in the webcast overlay (no trademarks)
 kind = "depot_launch"
 ascent = "depot_ascent"
 

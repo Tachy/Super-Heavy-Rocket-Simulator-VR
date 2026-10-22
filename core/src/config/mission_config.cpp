@@ -117,6 +117,12 @@ MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_vi
     return kind_of(detail::Document(config_dir / "missions" / (std::string(mission_id) + ".toml")));
 }
 
+std::string mission_display_name(const std::filesystem::path& config_dir, std::string_view mission_id) {
+    const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
+    const auto* mission = doc.root["mission"].as_table();
+    return mission ? doc.text_or(*mission, "display_name") : std::string();
+}
+
 ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
     const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
     require_kind(doc, MissionKind::ShipReturn, "ship return");

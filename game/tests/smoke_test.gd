@@ -98,6 +98,12 @@ func _check_thread(config_dir: String, tdb: float) -> bool:
 	_check(sim.body_serial(0) >= 1, "body serial is stable and positive")
 	_check((sim.body_engines(0)[0] as Dictionary).has("stage"), "engines carry their stage index")
 	_check(float((sim.body_stages(0)[0] as Dictionary).get("oxidizer_capacity_kg", 0.0)) > 0.0, "stages carry tank capacities")
+	_check(sim.mission_display_name() == "Testflug in den Erdorbit", "mission display name (%s)" % sim.mission_display_name())
+	_check(sim.body_display_name(0) != "" and not sim.body_display_name(0).contains("Starship"),
+			"body display name without trademark (%s)" % sim.body_display_name(0))
+	_check(float(sim.telemetry(0).get("propellant_capacity_kg", 0.0)) >= float(sim.telemetry(0).get("propellant_kg", 1.0)),
+			"telemetry carries the propellant load's capacity")
+	_check((sim.body_engines(0)[0] as Dictionary).has("auxiliary"), "engines carry the auxiliary flag")
 	# a fresh sim: the old one still has its advance target
 	var countdown_sim := FlightSim.new()
 	countdown_sim.setup(config_dir)

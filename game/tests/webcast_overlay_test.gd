@@ -11,19 +11,21 @@ func _initialize() -> void:
 	_test_fade()
 	_test_engines()
 	_test_values()
+	_test_arc()
+	_test_overlay()
 	_test_host()
 	print("WEBCAST OVERLAY TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 
 
 func _test_clock() -> void:
-	_check(TopBar.format_mission_clock(-41.3) == "T- 00:00:42", "T- counts down to zero (%s)" % TopBar.format_mission_clock(-41.3))
-	_check(TopBar.format_mission_clock(0.0) == "T+ 00:00:00", "T-0 is T+ 00:00:00")
-	_check(TopBar.format_mission_clock(75.9) == "T+ 00:01:15", "T+ 75.9 s (%s)" % TopBar.format_mission_clock(75.9))
+	_check(MissionClock.format_mission_clock(-41.3) == "T- 00:00:42", "T- counts down to zero (%s)" % MissionClock.format_mission_clock(-41.3))
+	_check(MissionClock.format_mission_clock(0.0) == "T+ 00:00:00", "T-0 is T+ 00:00:00")
+	_check(MissionClock.format_mission_clock(75.9) == "T+ 00:01:15", "T+ 75.9 s (%s)" % MissionClock.format_mission_clock(75.9))
 	var days := 3.0 * 86400.0 + 4.0 * 3600.0 + 12.0 * 60.0 + 9.0
-	_check(TopBar.format_mission_clock(days) == "T+ 3 d 04:12:09", "days (%s)" % TopBar.format_mission_clock(days))
-	_check(TopBar.format_mission_clock(-days - 0.5) == "T- 3 d 04:12:10", "long wait before T-0 (%s)"
-			% TopBar.format_mission_clock(-days - 0.5))
+	_check(MissionClock.format_mission_clock(days) == "T+ 3 d 04:12:09", "days (%s)" % MissionClock.format_mission_clock(days))
+	_check(MissionClock.format_mission_clock(-days - 0.5) == "T- 3 d 04:12:10", "long wait before T-0 (%s)"
+			% MissionClock.format_mission_clock(-days - 0.5))
 	_check(TopBar.format_utc("2024-04-08T18:42:07.512") == "2024-04-08 18:42:07 UTC", "UTC line")
 
 
@@ -85,12 +87,49 @@ func _test_values() -> void:
 	for id in WebcastOverlay.GAUGES:
 		var spec: Dictionary = WebcastOverlay.GAUGES[id]
 		_check(spec.has("label") and spec.has("unit") and float(spec["full_scale"]) > 0.0, "gauge spec %s" % id)
-	_check(WebcastOverlay.object_name([{"name": "Super Heavy Block 3"}, {"name": "Starship Block 3"}])
-			== "Super Heavy Block 3 + Starship Block 3", "stack name")
-	_check(WebcastOverlay.object_name([{"name": "F9 S1"}, {"name": "F9 S2"}, {"name": "Trunk"}, {"name": "Capsule"}])
-			== "F9 S1 + Capsule", "long stack: bottom and top stage")
-	_check(WebcastOverlay.object_name([{"name": "Starship Block 3"}]) == "Starship Block 3", "single stage")
-	_check(WebcastOverlay.object_name([]) == "", "no stages: no name")
+	var p := {"propellant_kg": 250.0, "propellant_capacity_kg": 1000.0}
+	_check(absf(WebcastOverlay.gauge_value("propellant", p, docking) - 25.0) < 1e-12, "propellant in % of the full load")
+	_check(WebcastOverlay.gauge_value("propellant", {}, docking) == 0.0, "no load: 0 %")
+
+
+func _test_arc() -> void:
+	var now := 1.0e9
+	var events := PackedFloat64Array([now - 50.0, now + 12.0, now + 80.0, now + 400.0])
+	var sc := TimelineWindow.target_scale(events, now)
+	_check(TimelineArc.fraction_of(0.0, sc) == 0.5 and TimelineArc.fade_alpha(0.5) == 1.0, "now at the apex, opaque")
+	_check(TimelineArc.point_of(0.5).is_equal_approx(Vector2.ZERO), "the apex is the control's position")
+	var nearest := TimelineArc.fade_alpha(TimelineArc.fraction_of(12.0, sc))
+	_check(nearest >= 0.9, "the nearest next event is (nearly) opaque (%.3f)" % nearest)
+	_check(TimelineArc.fraction_of(12.0, sc) > 0.5 and TimelineArc.fraction_of(-50.0, sc) < 0.5,
+			"future right of the apex, past left")
+	var far := TimelineArc.point_of(1.0)
+	_check(far.y > 0.0 and far.y < 100.0 and far.x > 250.0, "flat and wide arc (end at %s)" % str(far))
+	_check(TimelineArc.label_sides(3, 3) == [false, true, false] and TimelineArc.label_sides(4, 2) == [true, false],
+			"labels alternate below / above, anchored on the event index")
+
+
+func _test_overlay() -> void:
+	var overlay := WebcastOverlay.new()
+	var t := {"altitude_m": 1000.0, "propellant_kg": 1.0, "propellant_capacity_kg": 2.0}
+	var engine := {"stage": 0, "position_m": Vector3(0.0, 1.0, 0.0), "firing": true}
+	overlay.show_gauges({"left": ["engines", "g_load"], "right": ["altitude"]}, t, [engine], [{"diameter_m": 9.0}], {},
+			"Booster Mk3")
+	var shown: Array = []
+	for id in overlay.gauges:
+		if overlay.gauges[id].visible:
+			shown.append(id)
+	_check(shown.size() == 2 and "g_load" in shown and "altitude" in shown and overlay.engine_gauge.visible,
+			"exactly the selected gauges shown (%s)" % str(shown))
+	_check(overlay.group_name == "Booster Mk3", "the body's display name under its gauges")
+	overlay.show_gauges({"left": [], "right": ["altitude"]}, t, [], [], {}, "Booster Mk3")
+	_check(not overlay.engine_gauge.visible and not overlay.gauges["g_load"].visible, "deselected gauges hidden")
+	overlay.show_gauges({"left": [], "right": []}, {}, [], [], {}, "Booster Mk3")
+	_check(overlay.group_name == "", "no gauges: no name")
+	overlay.show_clock({"t0_tdb_s": null, "events": []}, 100.0, "Testflug")
+	_check(overlay.mission_clock.clock == "" and overlay.mission_clock.mission_name == "Testflug", "no T-0: no clock")
+	overlay.show_clock({"t0_tdb_s": 25.0, "events": []}, 100.0, "Testflug")
+	_check(overlay.mission_clock.clock == "T+ 00:01:15", "T+ from the timeline's T-0")
+	overlay.free()
 
 
 func _test_host() -> void:

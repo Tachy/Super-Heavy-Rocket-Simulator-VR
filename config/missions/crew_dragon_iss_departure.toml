@@ -5,6 +5,7 @@
 
 [mission]
 name = "Crew Dragon: Abkoppeln und Rückkehr"
+display_name = "Abkoppeln von der Raumstation und Rückkehr" # shown in the webcast overlay (no trademarks)
 kind = "iss_departure"
 vehicle = "crew_dragon"
 station = "iss"

@@ -27,7 +27,7 @@ def load_toml(path: Path) -> dict:
 
 
 # The rules of core/src/config/vehicle_config.cpp (load_stage_from): only these keys on a reused stage, lists appended.
-FROM_ADDED_KEYS = {"docking_port", "transfer_connector", "rcs_pod", "propellant_transfer", "dry_mass_kg"}
+FROM_ADDED_KEYS = {"docking_port", "transfer_connector", "rcs_pod", "propellant_transfer", "dry_mass_kg", "display_name"}
 MAX_FROM_DEPTH = 4  # a longer chain is a cycle
 
 

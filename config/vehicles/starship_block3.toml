@@ -21,6 +21,7 @@ stages_bottom_to_top = ["booster", "ship"]
 [[stage]]
 id = "booster"
 name = "Super Heavy Block 3"
+display_name = "Booster Mk3"  # [D] display name of the part flying alone, no trademark
 length_m = 72.3                          # [S:wiki_sh]
 diameter_m = 9.0                         # [S:wiki_sh]
 dry_mass_kg = 210000.0                   # [D] +-40 t: flights 12-14 telemetry - stack mass balance (gauge + acceleration, minus
@@ -123,6 +124,7 @@ directions = ["tangential_plus", "tangential_minus", "inward"]
 [[stage]]
 id = "ship"
 name = "Starship Block 3"
+display_name = "Raumschiff Mk3"  # [D] display name of the part flying alone, no trademark
 length_m = 52.1                          # [D] stack 124.4 m [S:wiki_starship] - booster 72.3 m
 diameter_m = 9.0
 dry_mass_kg = 255000.0                   # [D] flights 12-14 webcast telemetry (propellant gauge, rocket equation staging ->

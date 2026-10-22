@@ -6,6 +6,7 @@
 
 [mission]
 name = "Rückkehr vom Mond (LLO, direkt, bemannt)"
+display_name = "Rückkehr vom Mond (LLO, bemannt)" # shown in the webcast overlay (no trademarks)
 kind = "lunar_return"            # FlightSim.start_mission dispatches on it
 vehicle = "starship_block3"
 stage = "ship"

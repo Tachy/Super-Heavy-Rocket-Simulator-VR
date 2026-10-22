@@ -59,6 +59,7 @@ godot::Array body_engines(const sim::FlightSession& session, size_t index) {
             d["throttle"] = e.throttle;
             d["spool"] = e.spool;
             d["vacuum"] = e.performance->config().reference_pressure_pa == 0.0;
+            d["auxiliary"] = e.auxiliary();  // launch escape or landing thrusters: not main propulsion
             engines.push_back(d);
         }
     }
@@ -104,6 +105,7 @@ godot::Dictionary telemetry(const sim::FlightSession& session, size_t index) {
     d["angle_of_attack_deg"] = t.angle_of_attack_rad * constants::rad_to_deg;
     d["mass_kg"] = t.mass_kg;
     d["propellant_kg"] = t.propellant_kg;
+    d["propellant_capacity_kg"] = session.body(index).vehicle().propellant_capacity_kg();  // main + header tanks
     d["thrust_n"] = t.thrust_n;
     d["sensed_acceleration_g"] = t.sensed_acceleration_g;
     d["engines_running"] = t.engines_running;
@@ -386,6 +388,7 @@ FlightSnapshot::Body build_body(const sim::FlightSession& session, size_t index)
     b.attitude_gcrf = godot::Quaternion(q.x, q.y, q.z, q.w);
     b.cg_station_m = body.vehicle().mass_properties().cg_station_m;
     b.serial = session.body_serial(index);
+    b.display_name = godot::String::utf8(body.vehicle().shown_name().c_str());
     b.stages = body_stages(session, index);
     b.engines = body_engines(session, index);
     b.flaps = body_flaps(session, index);
@@ -444,6 +447,7 @@ std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& s
                                                      SnapshotContext& context, const FlightSnapshot* previous) {
     auto s = std::make_shared<FlightSnapshot>();
     s->site_id = context.site_id;
+    s->mission_display_name = context.mission_display_name;
     s->mission_start_tdb_s = context.mission_start_tdb_s;
     s->epoch_tdb_s = epoch.tdb_seconds_past_j2000();
     s->landing_zone = landing_zone(session);

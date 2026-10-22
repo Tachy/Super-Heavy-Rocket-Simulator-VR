@@ -17,6 +17,7 @@ stages_bottom_to_top = ["hls"]
 [[stage]]
 id = "hls"
 name = "Starship HLS"
+display_name = "Lunar Lander Mk3"  # [D] display name of the part flying alone, no trademark
 length_m = 52.1                          # [D] as the Block 3 ship
 diameter_m = 9.0
 dry_mass_kg = 120000.0                   # [E] user 2026-10-14: SpaceX publishes none; ~100-120 t Musk's older target,

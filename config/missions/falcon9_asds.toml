@@ -6,6 +6,7 @@
 
 [mission]
 name = "Falcon 9 mit Landung auf dem Drohnenschiff"
+display_name = "Medium Launcher: Landung auf dem Drohnenschiff" # shown in the webcast overlay (no trademarks)
 vehicle = "falcon9_block5"
 site = "ccsfs_slc40"
 heading_deg = 45.0              # body +y on the pad (launch azimuth ~43 deg for 53 deg)

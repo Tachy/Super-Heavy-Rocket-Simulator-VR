@@ -17,13 +17,18 @@ func _telemetry(over: Dictionary = {}) -> Dictionary:
 	var t := {
 		"altitude_m": 50.0e3, "knudsen": 0.001, "dynamic_pressure_pa": 5000.0, "clamped": false,
 		"heat_rate_w_m2": 0.0, "apoapsis_altitude_km": 120.0, "periapsis_altitude_km": -2000.0,
+		"propellant_kg": 500.0, "propellant_capacity_kg": 1000.0,
 	}
 	t.merge(over, true)
 	return t
 
 
+func _engine(firing: bool, auxiliary := false) -> Dictionary:
+	return {"firing": firing, "auxiliary": auxiliary, "stage": 0, "position_m": Vector3.ZERO}
+
+
 func _body(over: Dictionary = {}) -> Dictionary:
-	var b := {"engines": [1], "stages": [], "docking": {}}
+	var b := {"engines": [_engine(false)], "stages": [], "docking": {}}
 	b.merge(over, true)
 	return b
 
@@ -43,9 +48,25 @@ func _test_gauges() -> void:
 	sel = GaugeRules.select(_telemetry({"knudsen": 1.0}), _body(), {}, 0.0)
 	_check(not ("mach" in sel["left"]), "Mach hidden at Knudsen 1")
 	sel = GaugeRules.select(_telemetry({"clamped": true}), _body(), {}, 0.0)
-	_check(not ("g_load" in sel["left"]), "a clamped body has no g load")
+	_check(not ("g_load" in sel["left"]) and not ("mach" in sel["left"]), "on the pad: no g load, no Mach")
+	var coast := _telemetry({"dynamic_pressure_pa": 0.0, "knudsen": 1.0e6, "altitude_m": 300.0e3})
+	sel = GaugeRules.select(coast, _body({"engines": [_engine(false)]}), {}, 0.0)
+	_check(not ("g_load" in sel["left"]), "orbital coast: no constant 0 g")
+	sel = GaugeRules.select(coast, _body({"engines": [_engine(true)]}), {}, 0.0)
+	_check("g_load" in sel["left"], "a burn in orbit: g load shown")
+	sel = GaugeRules.select(_telemetry({"dynamic_pressure_pa": 50.0}), _body(), {}, 0.0)
+	_check(not ("mach" in sel["left"]), "Mach needs dynamic pressure above its minimum")
+	sel = GaugeRules.select(_telemetry({"dynamic_pressure_pa": 30.0e3, "mach": 1.5}), _body({"engines": [_engine(true)]}),
+			{}, 0.0)
+	_check("g_load" in sel["left"] and "mach" in sel["left"], "ascent: g load and Mach shown")
 	sel = GaugeRules.select(_telemetry(), _body({"engines": []}), {}, 0.0)
 	_check(not ("engines" in sel["left"]), "no engines gauge without engines")
+	sel = GaugeRules.select(_telemetry(), _body({"engines": [_engine(true, true)]}), {}, 0.0)
+	_check(not ("engines" in sel["left"]), "abort-only / landing thrusters are no engines gauge")
+	sel = GaugeRules.select(_telemetry({"propellant_capacity_kg": 1000.0}), _body(), {}, 0.0)
+	_check(sel["left"].slice(0, 2) == ["engines", "propellant"], "propellant right after the engines")
+	sel = GaugeRules.select(_telemetry({"propellant_capacity_kg": 0.0}), _body(), {}, 0.0)
+	_check(not ("propellant" in sel["left"]), "no propellant gauge without a tank load")
 
 	# Everything true at once: limits and priority order.
 	var docking := {"present": true, "range_m": 50.0, "docked": false}
@@ -53,7 +74,7 @@ func _test_gauges() -> void:
 			{}, 0.0)
 	_check(sel["left"].size() <= GaugeRules.MAX_PER_SIDE and sel["right"].size() <= GaugeRules.MAX_PER_SIDE,
 			"never more than 4 per side")
-	_check(sel["left"] == ["engines", "heat_flux", "heat_load", "g_load"], "left side by priority")
+	_check(sel["left"] == ["engines", "propellant", "heat_flux", "heat_load"], "left side by priority")
 	_check(sel["right"] == ["range", "closing_rate", "altitude", "speed_inertial"], "docking: range and closing rate shown")
 	sel = GaugeRules.select(_telemetry({"altitude_m": 400.0e3}), _body(), {}, 0.0)
 	_check(sel["right"] == ["speed_inertial", "altitude", "apoapsis", "periapsis"], "orbit: apsides shown")
@@ -70,52 +91,73 @@ func _test_gauges() -> void:
 
 func _test_window() -> void:
 	var now := 1.0e9
-	var events := PackedFloat64Array([now - 70.0, now + 30.0, now + 400.0, now + 3.0 * 86400.0])
-	var w := TimelineWindow.target_span(events, now)
-	_check(w.x <= now - 70.0 and w.y >= now + 400.0 and w.y < now + 3.0 * 86400.0,
-			"window contains -70 s and +400 s, ends before +3 d (%s)" % str(w - Vector2(now, now)))
-	w = TimelineWindow.target_span(PackedFloat64Array(), now)
-	_check(w.y - w.x >= TimelineWindow.MIN_SPAN_S, "empty event list: span >= 60 s")
-	w = TimelineWindow.target_span(PackedFloat64Array([now - 10.0]), now)
-	_check(w.y - w.x >= TimelineWindow.MIN_SPAN_S and w.y > now, "no future event: end after now")
-	var near := TimelineWindow.target_span(PackedFloat64Array([now - 1000.0, now + 100.0, now + 200.0, now + 300.0,
-			now + 900.0]), now)
-	_check(absf(near.y - (now + 300.0 + 130.0)) < 1e-6 and absf(near.x - (now - 1000.0 - 130.0)) < 1e-6,
-			"third next event plus 10 %% margin (%s)" % str(near - Vector2(now, now)))
-	w = TimelineWindow.target_span(PackedFloat64Array([now + 6.0 * 3600.0]), now)
-	_check(w.x <= now and w.y >= now + 6.0 * 3600.0, "no past event, single event 6 h ahead is inside")
-	w = TimelineWindow.target_span(PackedFloat64Array([now - 70.0, now + 30.0, now + 3.0 * 86400.0]), now)
-	_check(w.y >= now + 30.0 and w.y < now + 3.0 * 86400.0, "second next event 3 d away stays out")
-	w = TimelineWindow.target_span(PackedFloat64Array([now - 10.0 * 86400.0, now - 86400.0, now + 2.0 * 86400.0]), now)
-	_check(w.x <= now - 86400.0 and w.y >= now + 2.0 * 86400.0, "only distant past events: next event inside")
+	var edge := TimelineWindow.visible_half_fraction()  # inner edge of the fade zone (half-arc fraction)
+	var scale := Vector2(100.0, 1000.0)
+	var ok := true
+	var last := -INF
+	for i in 41:
+		var dt := -2000.0 + 100.0 * i
+		var p := TimelineWindow.arc_position(dt, scale)
+		ok = ok and p > last and absf(p + TimelineWindow.arc_position(-dt, scale)) < 1e-12
+		last = p
+	_check(ok, "arc position monotone and symmetric for the past")
+	_check(TimelineWindow.arc_position(0.0, scale) == 0.0, "now at the apex")
+	_check(absf(TimelineWindow.arc_position(1000.0, scale) - edge) < 1e-12, "the reach at the fade zone's inner edge")
+
+	var events := PackedFloat64Array([now - 70.0, now + 30.0, now + 400.0, now + 900.0, now + 3.0 * 86400.0])
+	var sc := TimelineWindow.target_scale(events, now)
+	_check(absf(TimelineWindow.arc_position(900.0, sc) - edge) < 1e-9, "third next event at the fade edge")
+	_check(TimelineWindow.arc_position(3.0 * 86400.0, sc) > 1.0, "a fourth event lies off the arc")
+	_check(TimelineWindow.arc_position(30.0, sc) >= TimelineWindow.NEAR_MIN_POSITION - 1e-6, "next event clear of the apex")
+
+	# Launch: a next event 30 s and one 3 d ahead - both on the arc, the 30 s one clearly nearer the apex.
+	sc = TimelineWindow.target_scale(PackedFloat64Array([now + 30.0, now + 3.0 * 86400.0]), now)
+	var p30 := TimelineWindow.arc_position(30.0, sc)
+	var p3d := TimelineWindow.arc_position(3.0 * 86400.0, sc)
+	_check(p30 > 0.0 and p3d <= edge + 1e-9 and p30 < 0.5 * p3d, "30 s and 3 d both visible, 30 s nearer (%.3f, %.3f)"
+			% [p30, p3d])
+	_check(p30 >= TimelineWindow.NEAR_MIN_POSITION - 1e-6, "the 30 s event gets room (%.3f)" % p30)
+	# Rough proportions: 60 s and 160 s ahead are spaced about linearly (no compression needed).
+	sc = TimelineWindow.target_scale(PackedFloat64Array([now + 60.0, now + 160.0]), now)
+	var ratio := TimelineWindow.arc_position(60.0, sc) / TimelineWindow.arc_position(160.0, sc)
+	_check(ratio > 60.0 / 160.0 and ratio < 0.6, "near events keep rough proportions (%.3f)" % ratio)
+
+	sc = TimelineWindow.target_scale(PackedFloat64Array(), now)
+	_check(absf(sc.y - TimelineWindow.MIN_SPAN_S) < 1e-9, "no events: MIN_SPAN_S")
+	sc = TimelineWindow.target_scale(PackedFloat64Array([now - 1000.0]), now)
+	_check(absf(TimelineWindow.arc_position(-1000.0, sc) + edge) < 1e-9, "no next event: the last past event at the left edge")
+	sc = TimelineWindow.target_scale(PackedFloat64Array([now - 10.0 * 86400.0, now + 6.0 * 3600.0]), now)
+	_check(absf(TimelineWindow.arc_position(6.0 * 3600.0, sc) - edge) < 1e-9, "a single event 6 h ahead: scale of hours")
 	var e := TimelineWindow.ease(Vector2(0, 10), Vector2(100, 200), 2.0)
 	_check(absf(e.x - 100.0 * (1.0 - exp(-1.0))) < 1e-9, "ease: one time constant per 2 s")
-	_check(TimelineWindow.ease(Vector2(0, 10), Vector2(5, 20), 0.0) == Vector2(0, 10), "ease: zero delta keeps window")
+	_check(TimelineWindow.ease(Vector2(0, 10), Vector2(5, 20), 0.0) == Vector2(0, 10), "ease: zero delta keeps the scale")
 
 
 func _test_labels() -> void:
-	var t0 := 1.0e9
+	var now := 1.0e9
 	var events: Array = []
 	var kinds := ["ignition", "cutoff", "max_q", "meco", "docking"]
 	for i in 60:
-		events.append({"kind": kinds[i % kinds.size()], "tdb_s": t0 + i * 52.0 * 86400.0 / 59.0})
-	var window := Vector2(t0, t0 + 52.0 * 86400.0)
-	var shown := TimelineWindow.visible_labels(events, window, 1000.0)
+		events.append({"kind": kinds[i % kinds.size()], "tdb_s": now + (i - 30) * 3600.0})
+	var scale := Vector2(3600.0, 30.0 * 3600.0)
+	var shown := TimelineWindow.visible_labels(events, now, scale, 1000.0)
 	_check(shown.size() < events.size() and shown.size() > 0, "60 events thinned (%d shown)" % shown.size())
 	var ok := true
 	for i in range(1, shown.size()):
-		var dpx: float = (shown[i]["tdb_s"] - shown[i - 1]["tdb_s"]) / (window.y - window.x) * 1000.0
-		ok = ok and dpx >= TimelineWindow.MIN_LABEL_PX
-	_check(ok, "no two labels closer than 70 px")
+		var a := TimelineWindow.arc_position(float(shown[i - 1]["tdb_s"]) - now, scale)
+		var b := TimelineWindow.arc_position(float(shown[i]["tdb_s"]) - now, scale)
+		ok = ok and 0.5 * (b - a) * 1000.0 >= TimelineWindow.MIN_LABEL_PX
+	_check(ok, "no two labels closer than 70 px on the arc")
 
-	var pair := [{"kind": "ignition", "tdb_s": 10.0}, {"kind": "meco", "tdb_s": 12.0}]
-	shown = TimelineWindow.visible_labels(pair, Vector2(0.0, 100.0), 500.0)
+	var linear := Vector2(1.0e6, 100.0)  # knee >> reach: nearly linear
+	var pair := [{"kind": "ignition", "tdb_s": now + 10.0}, {"kind": "meco", "tdb_s": now + 12.0}]
+	shown = TimelineWindow.visible_labels(pair, now, linear, 500.0)
 	_check(shown.size() == 1 and shown[0]["kind"] == "meco", "higher priority kind survives")
-	pair = [{"kind": "max_q", "tdb_s": 10.0}, {"kind": "max_q", "tdb_s": 12.0}]
-	shown = TimelineWindow.visible_labels(pair, Vector2(0.0, 100.0), 500.0)
-	_check(shown.size() == 1 and shown[0]["tdb_s"] == 10.0, "equal priority keeps the earlier event")
-	shown = TimelineWindow.visible_labels(pair, Vector2(50.0, 100.0), 500.0)
-	_check(shown.is_empty(), "events outside the window are dropped")
+	pair = [{"kind": "max_q", "tdb_s": now + 10.0}, {"kind": "max_q", "tdb_s": now + 12.0}]
+	shown = TimelineWindow.visible_labels(pair, now, linear, 500.0)
+	_check(shown.size() == 1 and shown[0]["tdb_s"] == now + 10.0, "equal priority keeps the earlier event")
+	shown = TimelineWindow.visible_labels([{"kind": "max_q", "tdb_s": now + 500.0}], now, linear, 500.0)
+	_check(shown.is_empty(), "events off the arc are dropped")
 
 
 func _check(condition: bool, message: String) -> void:

@@ -2,6 +2,7 @@
 # starship_leo's (same booster, a ship stage ~19 t lighter dry); the booster is caught.
 [mission]
 name = "Depot in den Erdorbit"
+display_name = "Depot in den Erdorbit"  # shown in the webcast overlay (no trademarks)
 vehicle = "starship_depot"
 site = "starbase_olp1"
 heading_deg = 90.0

@@ -1,18 +1,25 @@
 class_name TimelineWindow
 extends RefCounted
-## Time window of the mission-timeline arc and its label thinning. Pure functions, no nodes.
+## Time-to-arc mapping of the mission-timeline arc and its label thinning. Pure functions, no nodes.
+## User 2026-10-22: "now" is always the arc's apex, the future to the right, the past mirrored to the left; no strict
+## time scale ("one only needs to know what comes next"), but spacing roughly follows the time spans: a compressive
+## (logarithmic) mapping. Arc positions run from -1 (left end) over 0 (apex, now) to +1 (right end).
 
 const MIN_SPAN_S := 60.0
 const EASE_TIME_S := 2.0
 const MIN_LABEL_PX := 70.0
-## Margin on both ends, as a fraction of the span. [E]
-const MARGIN_FRACTION := 0.1
-## Number of upcoming events the window reaches.
+## Outer part of the arc length over which line, dots and labels fade out at each end (smoothstep). [E] user
+## 2026-10-22: the arc ends fade as in the webcasts.
+const ARC_FADE_FRACTION := 0.15
+## Number of upcoming events the arc reaches. No gap rule (the former MAX_GAP_RATIO): the compression fits a
+## next event days away next to one seconds away.
 const FUTURE_EVENTS := 3
-## A further event is left out when it lies more than this many times the span so far beyond the previous one
-## (a far-off event, e.g. days away, would squash the near ones to a point). Never applies to the first next
-## event, which is always inside the window. [E]
-const MAX_GAP_RATIO := 20.0
+## [E] The nearest next event sits at least this far from the apex (fraction of the half-arc) when several are
+## shown; the compression grows until it does.
+const NEAR_MIN_POSITION := 0.25
+## Bisection steps of the compression knee (log-spaced between KNEE_MIN_S and the reach).
+const KNEE_ITERATIONS := 50
+const KNEE_MIN_S := 1.0e-3
 
 ## Label priority, high to low; kinds not listed rank last.
 const PRIORITY: Array[String] = [
@@ -25,8 +32,11 @@ const PRIORITY: Array[String] = [
 const _EQUAL_RANK := {"caught": "caught", "landed": "caught", "splashdown": "caught", "impact": "caught"}
 
 
-## (start, end) of the window around `now_tdb`: last past event .. third next event, with margins.
-static func target_span(events_tdb: PackedFloat64Array, now_tdb: float) -> Vector2:
+## The arc's scale for `now_tdb`: Vector2(knee_s, reach_s) for arc_position. The reach is the time to the furthest of
+## the next FUTURE_EVENTS events (with none, the time since the last past event; with neither, MIN_SPAN_S; never
+## below MIN_SPAN_S / 2): it maps to the inner edge of the fade zone. The knee sets the compression: as mild as
+## possible (knee = reach) unless the nearest next event would then lie closer than NEAR_MIN_POSITION to the apex.
+static func target_scale(events_tdb: PackedFloat64Array, now_tdb: float) -> Vector2:
 	var past := -INF
 	var future: Array[float] = []
 	for t in events_tdb:
@@ -35,41 +45,57 @@ static func target_span(events_tdb: PackedFloat64Array, now_tdb: float) -> Vecto
 		else:
 			future.append(t)
 	future.sort()
-	var has_past := is_finite(past)
-	var lo := past if has_past else now_tdb
-	var hi := now_tdb
-	var reached := 0
-	for t in future:
-		if reached >= FUTURE_EVENTS:
-			break
-		if reached > 0 and t - hi > MAX_GAP_RATIO * maxf(hi - lo, MIN_SPAN_S):
-			break
-		hi = t
-		reached += 1
-	var span := maxf(hi - lo, MIN_SPAN_S)
-	var start := lo - MARGIN_FRACTION * span
-	if reached == 0:
-		return Vector2(start, now_tdb + maxf(MARGIN_FRACTION * span, MIN_SPAN_S))
-	return Vector2(start, hi + MARGIN_FRACTION * span)
+	var reach := MIN_SPAN_S
+	if not future.is_empty():
+		reach = future[mini(FUTURE_EVENTS, future.size()) - 1] - now_tdb
+	elif is_finite(past):
+		reach = now_tdb - past
+	reach = maxf(reach, 0.5 * MIN_SPAN_S)
+	var knee := reach
+	if not future.is_empty():
+		var nearest := future[0] - now_tdb
+		if arc_position(nearest, Vector2(knee, reach)) < NEAR_MIN_POSITION:
+			var lo := log(KNEE_MIN_S)  # bisection on log(knee): the position of the nearest grows as the knee shrinks
+			var hi := log(reach)
+			for i in KNEE_ITERATIONS:
+				var mid := 0.5 * (lo + hi)
+				if arc_position(nearest, Vector2(exp(mid), reach)) < NEAR_MIN_POSITION:
+					hi = mid
+				else:
+					lo = mid
+			knee = exp(lo)
+	return Vector2(knee, reach)
 
 
-## Exponential approach of the displayed window to the target (frame-rate independent).
+## Arc position of an event `dt_s` from now (negative: past) for `scale` = Vector2(knee_s, reach_s): monotone, 0 at
+## now, +-visible_half_fraction() at +-reach, logarithmic beyond the knee. |position| > 1 lies off the arc.
+static func arc_position(dt_s: float, scale: Vector2) -> float:
+	var knee := maxf(scale.x, KNEE_MIN_S)
+	return signf(dt_s) * visible_half_fraction() * log(1.0 + absf(dt_s) / knee) / log(1.0 + scale.y / knee)
+
+
+## Part of the half-arc (apex to end) that is not faded: the reach maps to its edge.
+static func visible_half_fraction() -> float:
+	return 1.0 - 2.0 * ARC_FADE_FRACTION
+
+
+## Exponential approach of the displayed scale to the target (frame-rate independent): events glide.
 static func ease(current: Vector2, target: Vector2, delta_real_s: float) -> Vector2:
 	return current.lerp(target, 1.0 - exp(-maxf(delta_real_s, 0.0) / EASE_TIME_S))
 
 
-## Events (dictionaries with "kind" and "tdb_s") inside `window`, thinned so that no two labels are closer than
-## MIN_LABEL_PX on an arc of `arc_px`. The higher-priority kind stays; equal priority keeps the earlier event.
-static func visible_labels(events: Array, window: Vector2, arc_px: float) -> Array:
-	var span := window.y - window.x
-	if span <= 0.0:
-		return []
+## Events (dictionaries with "kind" and "tdb_s") on the arc (|position| <= 1), thinned so that no two labels are
+## closer than MIN_LABEL_PX on an arc of `arc_px`. The higher-priority kind stays; equal priority keeps the earlier
+## event. Sorted by time.
+static func visible_labels(events: Array, now_tdb: float, scale: Vector2, arc_px: float) -> Array:
 	var inside: Array = []
 	for e in events:
-		var t := float(e["tdb_s"])
-		if t >= window.x and t <= window.y:
+		if absf(arc_position(float(e["tdb_s"]) - now_tdb, scale)) <= 1.0:
 			inside.append(e)
 	inside.sort_custom(func(a, b): return float(a["tdb_s"]) < float(b["tdb_s"]))
+	var px: Array[float] = []
+	for e in inside:
+		px.append(0.5 * (arc_position(float(e["tdb_s"]) - now_tdb, scale) + 1.0) * arc_px)
 	var order := range(inside.size())
 	order.sort_custom(func(a, b):
 		var ra := _rank(inside[a]["kind"])
@@ -77,10 +103,9 @@ static func visible_labels(events: Array, window: Vector2, arc_px: float) -> Arr
 		return ra < rb or (ra == rb and a < b))
 	var kept: Array[int] = []
 	for i in order:
-		var px := (float(inside[i]["tdb_s"]) - window.x) / span * arc_px
 		var free := true
 		for k in kept:
-			if absf((float(inside[k]["tdb_s"]) - window.x) / span * arc_px - px) < MIN_LABEL_PX:
+			if absf(px[k] - px[i]) < MIN_LABEL_PX:
 				free = false
 				break
 		if free:

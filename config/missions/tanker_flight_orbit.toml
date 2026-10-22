@@ -2,6 +2,7 @@
 # 170 x 190 km orbit, then the same chain as tanker_flight (phasing -> ... -> catch).
 [mission]
 name = "Tankerflug ab Phasenorbit"
+display_name = "Tankerflug ab Phasenorbit" # shown in the webcast overlay (no trademarks)
 kind = "tanker_flight"
 ascent = "tanker_ascent"          # vehicle, site and phasing orbit
 return = "ship_return_starbase"

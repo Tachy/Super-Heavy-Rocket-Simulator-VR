@@ -29,6 +29,7 @@ add_executable(starsim_core_tests
     test_liquid_settling.cpp
     test_vehicle_settling.cpp
     test_header_tanks.cpp
+    test_display_names.cpp
     test_rcs.cpp
     test_crew_dragon.cpp
     test_mission_start.cpp

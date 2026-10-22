@@ -21,6 +21,11 @@ crew_escape/<id>.toml   ejection seats of a crewed ship return (referenced by mi
   - `[S:<ref>]` sourced value, `<ref>` points to the `[sources]` table at the top of the file
   - `[E]` engineering estimate (no public data); calibrate against flight telemetry
   - `[D]` derived from other values in the file (the comment shows how)
+- Display names (shown in the game, German, no trademarks; the `name` fields keep the real names and are never shown
+  in the webcast overlay): `[vehicle] display_name` for the whole vehicle; `[[stage]] display_name` (optional) for a
+  stage that flies as a separate body (booster, ship, capsule, trunk). A part split off at staging is shown by its
+  lowest stage with main engines, else its topmost named stage (`vehicle::Vehicle::shown_name`).
+  `[mission] display_name` (optional) names the mission under the overlay's mission clock.
 
 ## Engine thrust model
 Each engine is defined at one reference ambient pressure (sea level or vacuum):
@@ -167,7 +172,7 @@ flow separation (vacuum engines).
 - `[[stage]] from = "<vehicle>:<stage>"`: the stage exactly as `config/vehicles/<vehicle>.toml` configures it
   (the Starship tanker and the depot's Super Heavy are Block 3's). Only `[[stage.docking_port]]`,
   `[[stage.transfer_connector]]`, `[[stage.rcs_pod]]` (r3: same keys as `[[stage.rcs.pod]]`; the source stage needs
-  `[stage.rcs]`) and `[stage.propellant_transfer]` (r4) may be added; any other key is an error (it would silently diverge from the source).
+  `[stage.rcs]`) and `[stage.propellant_transfer]` (r4) may be added, `dry_mass_kg` and `display_name` overridden; any other key is an error (it would silently diverge from the source).
   The propellant must be the vehicle's. `tools/vehicle_report.py` follows `from`.
 - `[stage] hull_top_diameter_m` (optional): the hull tapers linearly from `diameter_m` at the stage bottom to this at
   its top - the hull sample points of a visiting vehicle against the station primitives (ISS i5; Crew Dragon capsule).

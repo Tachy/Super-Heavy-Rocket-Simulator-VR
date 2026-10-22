@@ -22,6 +22,7 @@ from = "starship_block3:booster"
 [[stage]]
 id = "depot"
 name = "Starship Depot"
+display_name = "Depot Mk3"  # [D] display name of the part flying alone, no trademark
 length_m = 52.1                          # [D] as the Block 3 ship
 diameter_m = 9.0
 dry_mass_kg = 236500.0                   # [E] Block 3 ship 255 t - heat shield 10.5 t - four flaps 10 t [E] - catch pins

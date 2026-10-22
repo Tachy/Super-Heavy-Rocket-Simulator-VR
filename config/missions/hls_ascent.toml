@@ -3,6 +3,7 @@
 # periapsis_km). The pitch program is starship_leo's; the booster is caught.
 [mission]
 name = "HLS in den Phasenorbit"
+display_name = "Mondlander in den Phasenorbit" # shown in the webcast overlay (no trademarks)
 vehicle = "starship_hls_launch"
 site = "starbase_olp1"
 heading_deg = 90.0

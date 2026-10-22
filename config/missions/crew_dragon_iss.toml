@@ -4,6 +4,7 @@
 
 [mission]
 name = "Crew Dragon zur ISS"
+display_name = "Crew-Kapsel zur Raumstation" # shown in the webcast overlay (no trademarks)
 kind = "iss_rendezvous"             # FlightSim.start_mission dispatches on it
 vehicle = "crew_dragon"
 station = "iss"

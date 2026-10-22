@@ -4,6 +4,7 @@
 # program is starship_leo's (kick, throttle sweeps gave no gain); the booster is caught.
 [mission]
 name = "Tanker in den Phasenorbit"
+display_name = "Tanker in den Phasenorbit" # shown in the webcast overlay (no trademarks)
 vehicle = "starship_tanker"
 site = "starbase_olp1"
 heading_deg = 90.0

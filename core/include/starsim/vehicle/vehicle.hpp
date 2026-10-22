@@ -198,6 +198,10 @@ public:
     // The configured display name of the whole vehicle; empty for a part split off by separate() (both parts are named
     // by their stages then).
     const std::string& display_name() const { return display_name_; }
+    // The name shown for this body (webcast overlay): the vehicle's display name; for a part, the display name of its
+    // lowest stage with main (non-auxiliary) engines, else of its topmost stage that has one (capsule + trunk: the
+    // capsule); empty when no stage is named.
+    std::string shown_name() const;
     const std::vector<Stage>& stages() const { return stages_; }
     std::vector<Stage>& stages() { return stages_; }
     double length_m() const;
@@ -211,8 +215,10 @@ public:
     // What the RCS can draw: main-tank cold gas (rcs.propellant "main") counts the stage's main oxidizer and fuel
     // tanks (not the headers: the landing reserve), otherwise its Rcs tanks (refuelling r3: Starship proximity budgets).
     double rcs_supply_kg() const;
-    // Main tanks only (the webcast gauge: header tanks are not shown).
+    // Main tanks only (header tanks are not counted).
     double main_propellant_kg() const;
+    // Full load of everything propellant_kg() counts (main and header tanks; the webcast propellant gauge's 100 %).
+    double propellant_capacity_kg() const;
     // Sets one tank's mass at run time (refuelling r1: transfer, boil-off, the propellant test mode), clamped to
     // [0, capacity]. A refilled feed source re-arms starved engines; the RCS availability follows the tanks.
     // Throws std::invalid_argument (German) for an unknown stage index or tank id.

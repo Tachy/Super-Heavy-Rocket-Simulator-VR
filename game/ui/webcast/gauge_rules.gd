@@ -19,7 +19,7 @@ const ORBIT_MIN_ALTITUDE_M := 100.0e3
 
 
 ## Returns {"left": Array[String], "right": Array[String]}.
-## Left (vehicle) priority: engines, heat_flux, heat_load, g_load, dynamic_pressure, mach.
+## Left (vehicle) priority: engines, propellant, heat_flux, heat_load, g_load, mach, dynamic_pressure.
 ## Right (trajectory) priority depends on the situation: docking [range, closing_rate, altitude, speed_inertial];
 ## orbit [speed_inertial, altitude, apoapsis, periapsis]; otherwise [speed_surface, altitude, vertical_speed,
 ## speed_inertial]. Each gauge also needs its own condition; at most MAX_PER_SIDE per side.
@@ -39,14 +39,25 @@ static func docking_active(docking: Dictionary) -> bool:
 
 static func _left_conditions(t: Dictionary, body: Dictionary) -> Array:
 	var heat: bool = float(t.get("heat_rate_w_m2", 0.0)) > HEAT_RATE_MIN_W_M2
+	var engines := main_engines(body.get("engines", []))
+	var firing: bool = engines.any(func(e: Dictionary) -> bool: return e.get("firing", false))
+	var free: bool = not t.get("clamped", false)
+	var aero: bool = float(t.get("dynamic_pressure_pa", 0.0)) > DYNAMIC_PRESSURE_MIN_PA
 	return [
-		["engines", not body.get("engines", []).is_empty()],
+		["engines", not engines.is_empty()],
+		["propellant", float(t.get("propellant_capacity_kg", 0.0)) > 0.0],
 		["heat_flux", heat],  # heating before g / q / Mach: it must not be cut during entry by the side limit
 		["heat_load", heat],
-		["g_load", not t.get("clamped", false)],
-		["dynamic_pressure", float(t.get("dynamic_pressure_pa", 0.0)) > DYNAMIC_PRESSURE_MIN_PA],
-		["mach", float(t.get("knudsen", INF)) < KNUDSEN_CONTINUUM_MAX],
+		["g_load", free and (firing or aero)],  # no constant 0 g on the pad or in free fall
+		["mach", free and aero and float(t.get("knudsen", INF)) < KNUDSEN_CONTINUUM_MAX],
+		["dynamic_pressure", aero],  # after Mach: with engines and propellant an ascent shows g and Mach (fix 1)
 	]
+
+
+## The engines of main propulsion: launch escape (Crew Dragon SuperDracos, `abort_only`) and landing thrusters
+## (`landing_only`) are flagged `auxiliary` by FlightSim.body_engines and are not part of the engine gauge.
+static func main_engines(engines: Array) -> Array:
+	return engines.filter(func(e: Dictionary) -> bool: return not e.get("auxiliary", false))
 
 
 ## The right side depends on the flight situation: docking approach, orbit, or ascent / entry / landing / pad.

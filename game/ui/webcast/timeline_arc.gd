@@ -1,34 +1,36 @@
 class_name TimelineArc
 extends Control
-## Mission timeline as a 120 deg arc whose apex is the control's position (its centre lies RADIUS_PX below; a control
-## placed off screen would be culled): the time window maps linearly onto the arc (left = earlier), events are dots
-## (filled = happened, hollow = predicted) with radial labels from TimelineWindow.visible_labels, and a marker for
-## "now". Both ends fade out.
+## Mission timeline as a flat arc whose apex is the control's position (its centre lies RADIUS_PX below; a control
+## placed off screen would be culled). "Now" is always the apex (user 2026-10-22): TimelineWindow.arc_position maps
+## the time from now compressively onto the arc, so events enter on the right, pass the apex and leave on the left
+## (the scale eases, so they glide). Events are dots
+## (filled = happened, hollow = predicted) with labels from TimelineWindow.visible_labels, written along the arc and
+## alternating below and above the line; the flown part (left of the apex) is brighter. Both ends fade out.
 
-const RADIUS_PX := 230.0
-const SPAN_RAD := TAU / 3.0  ## 120 deg
-## Outer part of the arc length over which line, dots and labels fade out at each end (smoothstep). [E] user
-## 2026-10-22: the arc ends fade as in the webcasts.
-const ARC_FADE_FRACTION := 0.15
+## [E] Flat and wide (webcast reference image, user 2026-10-22): ~610 px chord, ~70 px rise.
+const RADIUS_PX := 720.0
+const HALF_ANGLE_RAD := 0.44
+const ARC_FADE_FRACTION := TimelineWindow.ARC_FADE_FRACTION
 const SEGMENTS := 96
 const DOT_RADIUS_PX := 4.5
 const LABEL_SIZE := 14
-const LABEL_GAP_PX := 12.0
+const LABEL_GAP_PX := 9.0       ## line to the near edge of a label
 ## [E] Opacity of the arc after "now" (still to come) relative to the flown part.
 const FUTURE_ALPHA := 0.45
-const NOW_MARKER_PX := 9.0
+const NOW_TICK_PX := 8.0        ## half length of the "now" tick across the line
+const NOW_TICK_WIDTH_PX := 3.0
 
-var window := Vector2.ZERO  ## (start, end) TDB s of the displayed window
+var time_scale := Vector2.ZERO  ## TimelineWindow scale (knee_s, reach_s) shown; zero: nothing drawn
 var now_tdb_s := 0.0
-var events: Array = []      ## mission_timeline()["events"]
+var events: Array = []      ## mission_timeline()["events"], sorted by time
 
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
-func show_timeline(new_window: Vector2, new_now_tdb_s: float, new_events: Array) -> void:
-	window = new_window
+func show_timeline(new_scale: Vector2, new_now_tdb_s: float, new_events: Array) -> void:
+	time_scale = new_scale
 	now_tdb_s = new_now_tdb_s
 	events = new_events
 	queue_redraw()
@@ -43,27 +45,38 @@ static func fade_alpha(fraction: float) -> float:
 
 ## Arc length in px (TimelineWindow.visible_labels thins the labels on it).
 static func arc_px() -> float:
-	return RADIUS_PX * SPAN_RAD
+	return RADIUS_PX * 2.0 * HALF_ANGLE_RAD
+
+
+## Fraction along the arc (0 = left end, 0.5 = the apex, 1 = right end) of an event `dt_s` from now.
+static func fraction_of(dt_s: float, arc_scale: Vector2) -> float:
+	return 0.5 * (TimelineWindow.arc_position(dt_s, arc_scale) + 1.0)
 
 
 ## Angle from the vertical (negative = left) of `fraction` along the arc.
 static func angle_of(fraction: float) -> float:
-	return (fraction - 0.5) * SPAN_RAD
+	return (2.0 * fraction - 1.0) * HALF_ANGLE_RAD
 
 
+## Point at `fraction` along the arc, relative to the apex; `radius` > RADIUS_PX lies above the line.
 static func point_of(fraction: float, radius := RADIUS_PX) -> Vector2:
 	var a := angle_of(fraction)
 	return Vector2(0.0, RADIUS_PX) + Vector2(sin(a), -cos(a)) * radius
 
 
-func _fraction_of(tdb_s: float) -> float:
-	return (tdb_s - window.x) / (window.y - window.x)
+## Sides of `count` visible labels (true = below the line), alternating along the arc. The first label's side comes
+## from its index in the whole event list, so the others keep their sides while events leave on the left.
+static func label_sides(first_event_index: int, count: int) -> Array:
+	var sides: Array = []
+	for k in count:
+		sides.append((first_event_index + k) % 2 == 0)
+	return sides
 
 
 func _draw() -> void:
-	if window.y <= window.x:
+	if time_scale.y <= 0.0:
 		return
-	var now_f := _fraction_of(now_tdb_s)
+	var now_f := 0.5
 	var points := PackedVector2Array()
 	var colors := PackedColorArray()
 	var halo := PackedColorArray()
@@ -77,7 +90,7 @@ func _draw() -> void:
 	draw_polyline_colors(points, colors, WebcastStyle.STROKE_PX, true)
 
 	for e: Dictionary in events:
-		var f := _fraction_of(float(e["tdb_s"]))
+		var f := fraction_of(float(e["tdb_s"]) - now_tdb_s, time_scale)
 		var a := fade_alpha(f)
 		if a <= 0.0:
 			continue
@@ -85,40 +98,37 @@ func _draw() -> void:
 			WebcastStyle.draw_arc_stroke(self, point_of(f), DOT_RADIUS_PX, 0.0, TAU, Color(WebcastStyle.WHITE, a))
 		else:
 			WebcastStyle.draw_dot(self, point_of(f), DOT_RADIUS_PX, Color(WebcastStyle.WHITE, a))
-	var font := WebcastStyle.label_font()
-	for e: Dictionary in TimelineWindow.visible_labels(events, window, arc_px()):
-		var f := _fraction_of(float(e["tdb_s"]))
-		_draw_label(str(e["label"]), f, Color(WebcastStyle.WHITE, fade_alpha(f)), font)
-	_draw_now_marker(now_f)
-	draw_set_transform_matrix(Transform2D.IDENTITY)
+	var shown := TimelineWindow.visible_labels(events, now_tdb_s, time_scale, arc_px())
+	if not shown.is_empty():
+		var sides := label_sides(events.find(shown[0]), shown.size())
+		var font := WebcastStyle.label_font()
+		for k in shown.size():
+			var f := fraction_of(float(shown[k]["tdb_s"]) - now_tdb_s, time_scale)
+			var below: bool = sides[k]
+			_draw_label(str(shown[k]["label"]), f, below, Color(WebcastStyle.WHITE, fade_alpha(f)), font)
+	_draw_now_tick(now_f)
 
 
-## Radial label outside the dot. Right of the top it reads outward, left of it inward (towards the dot), so that
-## every label reads from left to right.
-func _draw_label(text: String, f: float, color: Color, font: Font) -> void:
+## Label written along the arc (rotated to the local tangent, upright), centred on its dot, below or above the line.
+func _draw_label(text: String, f: float, below: bool, color: Color, font: Font) -> void:
 	if color.a <= 0.0:
 		return
-	var a := angle_of(f)
-	var start := point_of(f, RADIUS_PX + LABEL_GAP_PX)
-	var baseline := WebcastStyle.center_offset(font, LABEL_SIZE)
-	if a >= 0.0:
-		draw_set_transform(start, a - 0.5 * PI)
-		WebcastStyle.draw_text(self, Vector2(0.0, baseline), text, font, LABEL_SIZE, color, WebcastStyle.Align.LEFT)
-	else:
-		draw_set_transform(start, a + 0.5 * PI)
-		WebcastStyle.draw_text(self, Vector2(0.0, baseline), text, font, LABEL_SIZE, color, WebcastStyle.Align.RIGHT)
+	var ascent := font.get_ascent(LABEL_SIZE)
+	var descent := font.get_descent(LABEL_SIZE)
+	draw_set_transform(point_of(f), angle_of(f))
+	var baseline := LABEL_GAP_PX + ascent if below else -LABEL_GAP_PX - descent
+	WebcastStyle.draw_text(self, Vector2(0.0, baseline), text, font, LABEL_SIZE, color)
 	draw_set_transform_matrix(Transform2D.IDENTITY)
 
 
-## Small triangle inside the arc pointing at "now".
-func _draw_now_marker(f: float) -> void:
+## A short bright tick across the line at "now" (the apex).
+func _draw_now_tick(f: float) -> void:
 	var alpha := fade_alpha(f)
 	if alpha <= 0.0:
 		return
 	var a := angle_of(f)
 	var outward := Vector2(sin(a), -cos(a))
-	var side := Vector2(-outward.y, outward.x)
-	var tip := point_of(f, RADIUS_PX - 5.0)
-	var base := tip - outward * NOW_MARKER_PX
-	var triangle := PackedVector2Array([tip, base + side * NOW_MARKER_PX * 0.6, base - side * NOW_MARKER_PX * 0.6])
-	draw_colored_polygon(triangle, Color(WebcastStyle.WHITE, alpha))
+	var p := point_of(f)
+	draw_line(p - outward * NOW_TICK_PX, p + outward * NOW_TICK_PX, Color(WebcastStyle.HALO, WebcastStyle.HALO.a * alpha),
+			NOW_TICK_WIDTH_PX + WebcastStyle.HALO_PX - WebcastStyle.STROKE_PX, true)
+	draw_line(p - outward * NOW_TICK_PX, p + outward * NOW_TICK_PX, Color(WebcastStyle.WHITE, alpha), NOW_TICK_WIDTH_PX, true)

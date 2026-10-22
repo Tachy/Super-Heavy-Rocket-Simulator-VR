@@ -305,6 +305,7 @@ struct ThermalConfig {
 struct StageConfig {
     std::string id;
     std::string name;
+    std::string display_name;  // shown for a part flying alone (no trademarks); empty: none (optional key)
     double length_m = 0.0;
     double diameter_m = 0.0;
     double hull_top_diameter_m = 0.0;  // optional: the hull tapers linearly to this at the top (0: = diameter_m)
@@ -363,6 +364,9 @@ struct VehicleConfig {
     std::string id;
     std::string name;
     std::string display_name;
+    // Stages the display name belongs to (all loaded, or the stack of stack_payload); a vehicle built from fewer (a
+    // ship placed alone) is named by its stages instead (vehicle::Vehicle::shown_name). 0: no check.
+    size_t named_stage_count = 0;
     PropellantConfig propellant;
     std::vector<StageConfig> stages;              // bottom to top
     std::map<std::string, EngineConfig> engines;  // all engines referenced by the stages

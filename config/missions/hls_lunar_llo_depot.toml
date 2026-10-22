@@ -4,6 +4,7 @@
 
 [mission]
 name = "HLS-Mondlandung (LLO) ab Depot"
+display_name = "Mondlandung (LLO) ab Depot" # shown in the webcast overlay (no trademarks)
 kind = "lunar_landing"           # FlightSim.start_mission dispatches on it (absent: "ascent")
 vehicle = "starship_hls"
 site = "mons_mouton_im2"         # config/lunar_sites.toml (l4 lands there)

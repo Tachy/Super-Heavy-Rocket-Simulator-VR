@@ -272,6 +272,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     StageConfig s;
     s.id = doc.text(t, "id");
     s.name = doc.text(t, "name");
+    s.display_name = doc.text_or(t, "display_name");
     s.length_m = doc.number(t, "length_m");
     s.diameter_m = doc.number(t, "diameter_m");
     s.hull_top_diameter_m = t["hull_top_diameter_m"].value_or(0.0);
@@ -684,7 +685,7 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
     }
     for (const auto& [key, value] : t) {
         if (key != "from" && key != "docking_port" && key != "transfer_connector" && key != "rcs_pod" &&
-            key != "propellant_transfer" && key != "dry_mass_kg") {
+            key != "propellant_transfer" && key != "dry_mass_kg" && key != "display_name") {
             doc.fail("stage.from = \"" + from + "\": '" + std::string(key.str()) + "' cannot be set on a reused stage");
         }
     }
@@ -700,6 +701,7 @@ StageConfig load_stage_from(const std::filesystem::path& config_dir, const Docum
     StageConfig s = *it;
     // a variant's own dry mass (user 2026-10-20, refuelling r5: the tanker without cargo hardware); CG as the source
     if (t.contains("dry_mass_kg")) s.dry_mass_kg = doc.positive(t, "dry_mass_kg");
+    s.display_name = doc.text_or(t, "display_name", s.display_name);  // a variant's own name (the tanker's ship)
     append_docking_ports(doc, t, s);
     append_transfer_connectors(doc, t, s);
     read_propellant_transfer(doc, t, s);
@@ -755,6 +757,7 @@ VehicleConfig load_vehicle(const std::filesystem::path& config_dir, std::string_
         }
         v.stages.push_back(it->second);
     }
+    v.named_stage_count = v.stages.size();
     // f4 final review: port and connector lookups take the first match across the vehicle - an id on two stages would
     // shadow the upper one
     std::set<std::string> port_ids, connector_ids;
@@ -793,6 +796,7 @@ VehicleConfig stack_payload(VehicleConfig launcher, const VehicleConfig& payload
         launcher.stages.push_back(std::move(stage));
     }
     for (const auto& [id, engine] : payload.engines) launcher.engines.emplace(id, engine);
+    launcher.named_stage_count = launcher.stages.size();  // the launcher's display name names the whole stack
     launcher.id += "+" + payload.id;
     launcher.name += " / " + payload.name;
     return launcher;

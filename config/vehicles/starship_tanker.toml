@@ -17,6 +17,7 @@ from = "starship_block3:booster"
 
 [[stage]]
 from = "starship_block3:ship"
+display_name = "Tanker Mk3"  # [D] display name of the part flying alone, no trademark
 # [E] placeholder until the real tanker is known (user 2026-10-20): a tanker ship without cargo doors, dispenser and
 # interior (heat shield, flaps and header tanks stay), lighter by the V3 weight targets - chosen so that the tanker has
 # 100 t main propellant after its ascent (with the 120 km insertion of tanker_ascent). Block 3's 255 t [D] is the

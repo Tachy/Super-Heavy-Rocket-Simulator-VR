@@ -32,6 +32,7 @@ struct PredictionRequest {
 // touches it (commands and the observer).
 struct SnapshotContext {
     godot::String site_id;
+    godot::String mission_display_name;  // [mission] display_name of the started mission ("" for a free launch)
     double mission_start_tdb_s = 0.0;
     PredictionRequest prediction_request;  // copied from the main thread before every build
     std::optional<std::chrono::steady_clock::time_point> prediction_wall;  // when the last prediction was made
@@ -48,12 +49,14 @@ struct FlightSnapshot {
     double mission_time_s = 0.0;
     double mission_start_tdb_s = 0.0;
     godot::String site_id;
+    godot::String mission_display_name;
     int controlled_index = -1;
     struct Body {
         godot::Vector3 position_gcrf_m, velocity_gcrf_mps;
         godot::Quaternion attitude_gcrf;
         double cg_station_m = 0.0;
         int64_t serial = 0;  // FlightSession::body_serial: stable identity
+        godot::String display_name;  // vehicle::Vehicle::shown_name
         godot::Array stages, engines, flaps, grid_fins, rcs, parachutes;
         godot::Dictionary legs, capsule_state, telemetry, return_state;
     };
