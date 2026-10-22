@@ -405,6 +405,12 @@ int64_t FlightSim::disengage_autopilot() {
     }));
 }
 
+int64_t FlightSim::engage_orbit_autopilot() {
+    return static_cast<int64_t>(post_active("engage_orbit_autopilot", [](sim::FlightSession& session) {
+        return Outcome{session.engage_orbit_autopilot(), {}};
+    }));
+}
+
 int64_t FlightSim::plan_circularization() {
     return static_cast<int64_t>(post_active("plan_circularization", [](sim::FlightSession& session) {
         return Outcome{session.plan_circularization_at_apoapsis(), {}};
@@ -666,6 +672,7 @@ void FlightSim::_bind_methods() {
                                   "northerly"),
                          &FlightSim::engage_ascent_autopilot);
     ClassDB::bind_method(D_METHOD("disengage_autopilot"), &FlightSim::disengage_autopilot);
+    ClassDB::bind_method(D_METHOD("engage_orbit_autopilot"), &FlightSim::engage_orbit_autopilot);
     ClassDB::bind_method(D_METHOD("plan_circularization"), &FlightSim::plan_circularization);
     ClassDB::bind_method(D_METHOD("plan_ship_return"), &FlightSim::plan_ship_return);
     ClassDB::bind_method(D_METHOD("plan_burn", "seconds_from_now", "prograde_mps", "normal_mps", "radial_mps"),

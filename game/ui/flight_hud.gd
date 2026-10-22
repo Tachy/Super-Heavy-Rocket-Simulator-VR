@@ -2,9 +2,11 @@ class_name FlightHud
 extends PanelContainer
 ## Telemetry of the controlled vehicle (top right) plus the pilot's key reference.
 
-const KEY_HELP := "I Zünden · L Klammern lösen · K Aus · G Stufentrennung · M Steuermodus\n" \
-		+ "W/S Nicken · A/D Gieren · Q/E Rollen · Shift/Strg Schub (oder HOTAS)\n" \
-		+ "P Aufstiegs-Autopilot · O Zirkularisieren an Apoapsis · X Autopilot aus"
+## The external view flies on the autopilot (user 2026-10-22): only the onboard-computer commands; manual control
+## (pilot keys, HOTAS) comes with the cockpit.
+const KEY_HELP := "Außenansicht: der Autopilot fliegt (Handsteuerung später im Cockpit)\n" \
+		+ "P Aufstiegs-Autopilot · O Zirkularisieren an Apoapsis · R Rückkehr zum Turm\n" \
+		+ "Tab / Umschalt+Tab Objekt wechseln"
 
 var world: World
 var _label := Label.new()

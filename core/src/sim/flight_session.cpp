@@ -100,6 +100,14 @@ void FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target, con
     }
 }
 
+bool FlightSession::engage_orbit_autopilot() {
+    if (bodies_.empty() || autopilot_.state != AutopilotState::Off) return false;
+    const auto& body = *bodies_[controlled_].body;
+    if (body.clamped() || body.impacted()) return false;
+    autopilot_.state = AutopilotState::Orbit;
+    return true;
+}
+
 void FlightSession::place_in_orbit(const std::string& vehicle_id, const math::StateVector& state, time::Epoch epoch,
                                    size_t first_stage) {
     auto config = config::load_vehicle(config_dir_, vehicle_id);

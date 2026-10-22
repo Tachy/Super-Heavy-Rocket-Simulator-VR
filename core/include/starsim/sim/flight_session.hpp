@@ -428,6 +428,11 @@ public:
         reset_rendezvous();
         reset_proximity();
     }
+    // External view (user 2026-10-22: manual control only in the cockpit): the controlled body flying with the
+    // autopilot off is handed to the state Orbit (it coasts, as after the ascent autopilot's cutoff; the onboard
+    // commands - circularise, return, burns - start from there). False without a body, with the autopilot engaged, or
+    // with the body clamped on the pad (the ascent autopilot's job) or impacted.
+    bool engage_orbit_autopilot();
     // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
     // at the next staging; the booster is then guided independently of the controlled body.
     void set_booster_return(bool enabled, gnc::BoosterReturnParameters parameters = {});

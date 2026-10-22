@@ -83,6 +83,7 @@ func _fly_vehicle(world: World) -> void:
 		if candidate["id"] == _args.get("site", ""):
 			site = candidate
 	var t0 := world.clock.tdb_s
+	world.flight.manual_control = true  # the script flies by its own commands, not the external view's autopilot
 	world.launch_vehicle(_args["vehicle"], site)
 	world.clock.warp = 0.0
 	var sim := world.flight.sim

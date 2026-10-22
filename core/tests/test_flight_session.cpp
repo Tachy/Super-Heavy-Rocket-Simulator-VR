@@ -62,3 +62,29 @@ TEST_CASE("Coast segments agree with fixed ticks", "[sim]") {
     std::printf("[validation] 1 h LEO coast vs 200 Hz ticks: |dr| = %.3f m\n", dr);
     CHECK(dr < 1.0);
 }
+
+// External view (user 2026-10-22): a vehicle flying with the autopilot off is handed to the state Orbit; the clamped
+// stack on the pad is left to the ascent autopilot, an engaged autopilot is not touched.
+TEST_CASE("Orbit autopilot engaged for a free-flying vehicle only", "[sim]") {
+    test::spice_session();
+    const spice::SpiceEphemeris ephemeris;
+    const auto earth = spice::SpiceOrientation::earth();
+    const auto t0 = time::Epoch::from_tdb_seconds_past_j2000(8.4e8);
+    const double deg = constants::deg_to_rad;
+
+    sim::FlightSession pad(ephemeris, earth, STARSIM_CONFIG_DIR);
+    CHECK_FALSE(pad.engage_orbit_autopilot());  // no body
+    pad.launch_from_pad("starship_block3", {25.99686 * deg, -97.15394 * deg, 10.0}, 90.0 * deg, t0);
+    CHECK_FALSE(pad.engage_orbit_autopilot());  // clamped: the ascent autopilot's job
+    CHECK(pad.autopilot().state == sim::AutopilotState::Off);
+
+    sim::FlightSession orbiting(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const math::StateVector leo{{6778137.0, 0.0, 0.0}, {0.0, 7668.6 * 0.9, 7668.6 * 0.436}};
+    orbiting.place_in_orbit("starship_block3", leo, t0, 1);
+    REQUIRE(orbiting.autopilot().state == sim::AutopilotState::Off);
+    CHECK(orbiting.engage_orbit_autopilot());
+    CHECK(orbiting.autopilot().state == sim::AutopilotState::Orbit);
+    CHECK_FALSE(orbiting.engage_orbit_autopilot());  // already engaged
+    orbiting.advance_to(t0 + 60.0);
+    CHECK(orbiting.autopilot().state == sim::AutopilotState::Orbit);  // it coasts on in the state Orbit
+}

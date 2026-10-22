@@ -99,6 +99,9 @@ public:
     // Guidance and manoeuvres.
     int64_t engage_ascent_autopilot(double periapsis_km, double apoapsis_km, double inclination_deg, bool northerly);
     int64_t disengage_autopilot();
+    // External view: a free-flying controlled body with the autopilot off goes to the state Orbit
+    // (sim::FlightSession::engage_orbit_autopilot); not ok when nothing changed (engaged, clamped, impacted).
+    int64_t engage_orbit_autopilot();
     int64_t plan_circularization();
     // Return of the ship from orbit to the site's tower (onboard deorbit plan, burn, entry, catch); the plan or the
     // reason it was refused appears in autopilot_status()["return"].

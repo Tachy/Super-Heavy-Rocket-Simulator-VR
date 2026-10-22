@@ -1,14 +1,20 @@
 class_name FlightController
 extends Node
 ## Owns the C++ flight session: pilot input (HOTAS + keyboard), pilot actions, vehicle views.
-## Keyboard: W/S pitch, A/D yaw, Q/E roll, Shift/Ctrl throttle, I ignition, L release clamps,
-## K cutoff, G stage separation, M control mode, P ascent autopilot (config/missions/leo_ascent.toml),
-## O circularize at apoapsis, R return the ship to the site's tower (config/missions/ship_return_starbase.toml),
-## X autopilot off. HOTAS (stick + throttle found by name): config/input_hotas.toml.
+## The external views always fly on the autopilot (user 2026-10-22): engage_autopilot() hands the controlled vehicle
+## to it, and only the onboard-computer commands are active: P ascent autopilot (config/missions/leo_ascent.toml),
+## O circularize at apoapsis, R return the ship to the site's tower (config/missions/ship_return_starbase.toml).
+## Manual control (manual_control, later only in the cockpit and only for the selected vehicle): W/S pitch, A/D yaw,
+## Q/E roll, Shift/Ctrl throttle, I ignition, L release clamps, K cutoff, G stage separation, M control mode,
+## X autopilot off; HOTAS (stick + throttle found by name): config/input_hotas.toml.
 
 const THROTTLE_KEY_RATE := 0.5  # per second
 ## [E] Countdown of a free launch (T-minus at the start, s); the sequence then runs from the countdown clock.
 const LAUNCH_COUNTDOWN_S := 60.0
+## Single pilot actions of manual control (inactive in the external view).
+const MANUAL_KEYS: Array[Key] = [KEY_I, KEY_L, KEY_K, KEY_G, KEY_M, KEY_X]
+## autopilot_status().state of a disengaged autopilot (sim::to_string(AutopilotState::Off)).
+const AUTOPILOT_OFF := "aus"
 
 var sim := FlightSim.new()
 var launch_site_id := ""  ## site of the current flight (its tower shows the flight's arm state)
@@ -20,6 +26,8 @@ var navball: NavBall
 var overlay: FlightOverlay
 var ascent_target := {}
 var last_event := ""
+## Manual control (pilot keys, HOTAS, I/L/K/G/M/X). Off in the external views; the cockpit (later) turns it on.
+var manual_control := false
 ## Launch posted to the simulation thread and not yet finished: {id, site_id, text}.
 var _pending_launch := {}
 
@@ -62,6 +70,11 @@ func _on_command_finished(id: int, command: String, ok: bool, _message: String) 
 			launch_site_id = _pending_launch["site_id"] if ok else ""
 			last_event = _pending_launch["text"] if ok else "Start fehlgeschlagen"
 			_pending_launch = {}
+			if ok and not manual_control:
+				_engage_ascent()  # the clamped vehicle counts down and lifts off at T-0 on the autopilot
+		"engage_orbit_autopilot":
+			if ok:
+				last_event = "Autopilot: Orbit halten"
 		"plan_circularization":
 			last_event = "Zirkularisierung geplant" if ok \
 					else "Kein Manöver: keine Ellipsenbahn oder Δv zu klein für die Haupttriebwerke"
@@ -96,6 +109,28 @@ func place_views(parent: Node3D, camera_gcrf_m: Vector3) -> void:
 		view.update_view(sim, camera_gcrf_m)
 
 
+## External view: the controlled vehicle flies on the autopilot. With the autopilot off, a vehicle clamped on the pad
+## gets the ascent autopilot (as key P), one in orbit (periapsis above the surface) the orbit state; an engaged
+## autopilot, a landed or a sub-orbital vehicle is left as it is. A launch still being set up engages on completion.
+func engage_autopilot() -> void:
+	if manual_control or not sim.is_active() or not _pending_launch.is_empty():
+		return
+	if str(sim.autopilot_status().get("state", "")) != AUTOPILOT_OFF:
+		return
+	var telemetry: Dictionary = sim.telemetry(sim.controlled_index())
+	if telemetry.get("clamped", false):
+		_engage_ascent()
+	elif not telemetry.get("impacted", false) and float(telemetry.get("periapsis_altitude_km", -1.0)) > 0.0:
+		sim.engage_orbit_autopilot()  # outcome: _on_command_finished
+
+
+func _engage_ascent() -> void:
+	sim.set_booster_return(true)  # the booster flies back and is caught after staging
+	sim.engage_ascent_autopilot(ascent_target.get("periapsis_km", 200.0), ascent_target.get("apoapsis_km", 200.0),
+			ascent_target.get("inclination_deg", 26.5), ascent_target.get("northerly", true))
+	last_event = "Aufstiegs-Autopilot aktiv"
+
+
 func controlled_position_gcrf() -> Vector3:
 	return sim.body_position_gcrf_m(sim.controlled_index()) if sim.is_active() else Vector3.ZERO
 
@@ -104,6 +139,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo or not sim.is_active():
 		return
+	if not manual_control and key.keycode in MANUAL_KEYS:
+		return  # external view: no single pilot actions
 	match key.keycode:
 		KEY_I:
 			sim.ignite()
@@ -118,10 +155,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			sim.stage()
 			last_event = "Stufentrennung"
 		KEY_P:
-			sim.set_booster_return(true)  # the booster flies back and is caught after staging
-			sim.engage_ascent_autopilot(ascent_target.get("periapsis_km", 200.0), ascent_target.get("apoapsis_km", 200.0),
-					ascent_target.get("inclination_deg", 26.5), ascent_target.get("northerly", true))
-			last_event = "Aufstiegs-Autopilot aktiv"
+			_engage_ascent()
 		KEY_O:
 			sim.plan_circularization()  # outcome: _on_command_finished
 			last_event = "Zirkularisierung wird geplant"
@@ -166,6 +200,9 @@ func _update_instruments() -> void:
 
 
 func _read_input(delta: float) -> void:
+	if not manual_control:  # external view: no stick, keys or lever; the autopilot flies
+		sim.set_input(0.0, 0.0, 0.0, throttle)
+		return
 	var pitch := _key_axis(KEY_S, KEY_W)
 	var yaw := _key_axis(KEY_A, KEY_D)
 	var roll := _key_axis(KEY_Q, KEY_E)

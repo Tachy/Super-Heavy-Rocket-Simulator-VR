@@ -124,9 +124,10 @@ func update_world() -> void:
 	moon_label.position = moon.position
 
 
-## Puts a vehicle on a launch site at the current instant and focuses the camera on it.
-func launch_vehicle(vehicle_id: String, site: Dictionary) -> bool:
-	if not flight.launch(vehicle_id, site, clock.tdb_s):
+## Puts a vehicle on a launch site at the current instant and focuses the camera on it; the ascent autopilot counts
+## down `countdown_s` and lifts off at T-0.
+func launch_vehicle(vehicle_id: String, site: Dictionary, countdown_s := FlightController.LAUNCH_COUNTDOWN_S) -> bool:
+	if not flight.launch(vehicle_id, site, clock.tdb_s, 90.0, countdown_s):
 		return false
 	clock.warp = 1.0
 	set_focus(FOCUS_VEHICLE)
@@ -164,6 +165,7 @@ func set_focus(new_focus: String) -> void:
 			camera.distance_m = 260.0
 			camera.pitch = -0.15
 			camera.yaw = 0.8
+			flight.engage_autopilot()  # the external view flies on the autopilot (user 2026-10-22)
 		_:
 			for site in sites:
 				if site["id"] == focus:
