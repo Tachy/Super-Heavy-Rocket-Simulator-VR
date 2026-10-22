@@ -5,7 +5,8 @@ extends Control
 ## the time from now compressively onto the arc, so events enter on the right, pass the apex and leave on the left
 ## (the scale eases, so they glide). Events are dots
 ## (filled = happened, hollow = predicted) with labels from TimelineWindow.visible_labels, written along the arc and
-## alternating below and above the line; the flown part (left of the apex) is brighter. Both ends fade out.
+## alternating below and above the line (a label that would cover the mission clock under the apex goes to the other
+## side, or is left out when both collide); the flown part (left of the apex) is brighter. Both ends fade out.
 
 ## [E] Flat and wide (webcast reference image, user 2026-10-22): ~610 px chord, ~70 px rise.
 const RADIUS_PX := 720.0
@@ -19,10 +20,16 @@ const LABEL_GAP_PX := 9.0       ## line to the near edge of a label
 const FUTURE_ALPHA := 0.45
 const NOW_TICK_PX := 8.0        ## half length of the "now" tick across the line
 const NOW_TICK_WIDTH_PX := 3.0
+## label_side results: thinned out, below or above the line.
+const SIDE_NONE := 0
+const SIDE_BELOW := 1
+const SIDE_ABOVE := 2
 
 var time_scale := Vector2.ZERO  ## TimelineWindow scale (knee_s, reach_s) shown; zero: nothing drawn
 var now_tdb_s := 0.0
 var events: Array = []      ## mission_timeline()["events"], sorted by time
+## Area no label may cover, relative to the apex (the mission clock and name under it); empty: none.
+var keep_out := Rect2()
 
 
 func _init() -> void:
@@ -104,9 +111,31 @@ func _draw() -> void:
 		var font := WebcastStyle.label_font()
 		for k in shown.size():
 			var f := fraction_of(float(shown[k]["tdb_s"]) - now_tdb_s, time_scale)
-			var below: bool = sides[k]
-			_draw_label(str(shown[k]["label"]), f, below, Color(WebcastStyle.WHITE, fade_alpha(f)), font)
+			var text := str(shown[k]["label"])
+			var side := label_side(text, f, sides[k], font, keep_out)
+			if side != SIDE_NONE:
+				_draw_label(text, f, side == SIDE_BELOW, Color(WebcastStyle.WHITE, fade_alpha(f)), font)
 	_draw_now_tick(now_f)
+
+
+## Screen-aligned bounding box (relative to the apex) of a label drawn by _draw_label.
+static func label_rect(text: String, f: float, below: bool, font: Font) -> Rect2:
+	var ascent := font.get_ascent(LABEL_SIZE)
+	var descent := font.get_descent(LABEL_SIZE)
+	var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, LABEL_SIZE).x
+	var baseline := LABEL_GAP_PX + ascent if below else -LABEL_GAP_PX - descent
+	var xform := Transform2D(angle_of(f), point_of(f))
+	var local := Rect2(-0.5 * width, baseline - ascent, width, ascent + descent)
+	return xform * local  # Transform2D * Rect2: the axis-aligned box of the rotated rectangle
+
+
+## Side of a label: the preferred one unless its box meets `avoid` (the mission clock), then the other; neither:
+## SIDE_NONE (thinned out).
+static func label_side(text: String, f: float, prefer_below: bool, font: Font, avoid: Rect2) -> int:
+	for below: bool in [prefer_below, not prefer_below]:
+		if not avoid.has_area() or not label_rect(text, f, below, font).intersects(avoid):
+			return SIDE_BELOW if below else SIDE_ABOVE
+	return SIDE_NONE
 
 
 ## Label written along the arc (rotated to the local tangent, upright), centred on its dot, below or above the line.

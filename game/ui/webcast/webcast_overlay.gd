@@ -117,6 +117,7 @@ func _process(delta: float) -> void:
 func show_clock(timeline: Dictionary, now: float, mission: String) -> void:
 	var t0 = timeline.get("t0_tdb_s")
 	mission_clock.show_values(MissionClock.format_mission_clock(now - float(t0)) if t0 != null else "", mission)
+	timeline_arc.keep_out = mission_clock.occupied_rect()  # same position (the apex): arc labels stay off the clock
 
 
 ## Shows exactly the selected gauges ({"left": ids, "right": ids}) of a body, and its name under them.

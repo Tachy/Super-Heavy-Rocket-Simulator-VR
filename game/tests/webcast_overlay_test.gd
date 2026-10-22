@@ -12,10 +12,40 @@ func _initialize() -> void:
 	_test_engines()
 	_test_values()
 	_test_arc()
+	_test_label_layout()
 	_test_overlay()
 	_test_host()
 	print("WEBCAST OVERLAY TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
+
+
+## Arc labels near "now" must not cover the mission clock and name under the apex (Task 4c follow-up).
+func _test_label_layout() -> void:
+	var font := WebcastStyle.label_font()
+	var clock := MissionClock.text_rect("T+ 1 d 00:00:22", "Rückkehr vom Mond (LLO)", WebcastStyle.value_font(), font)
+	_check(clock.has_area() and clock.position.y > 0.0, "clock area lies below the apex")
+	var free := true
+	var moved_up := false
+	var both_sides := [false, false]
+	for i in range(-40, 41):
+		var f := 0.5 + 0.005 * i  # events from just left to just right of the apex
+		for prefer_below: bool in [true, false]:
+			var side := TimelineArc.label_side("Zündung", f, prefer_below, font, clock)
+			if side == TimelineArc.SIDE_NONE:
+				continue
+			free = free and not TimelineArc.label_rect("Zündung", f, side == TimelineArc.SIDE_BELOW, font).intersects(clock)
+			if prefer_below and side == TimelineArc.SIDE_ABOVE:
+				moved_up = true
+				both_sides[0 if f < 0.5 else 1] = true
+	_check(free, "no placed label covers the clock")
+	_check(moved_up and both_sides[0] and both_sides[1], "labels below the line near the apex move above, both sides")
+	_check(TimelineArc.label_side("Zündung", 0.1, true, font, clock) == TimelineArc.SIDE_BELOW,
+			"far from the apex a label keeps its side")
+	_check(TimelineArc.label_side("Zündung", 0.5, true, font, Rect2()) == TimelineArc.SIDE_BELOW,
+			"no clock: the alternation is kept")
+	var everywhere := Rect2(-2000.0, -2000.0, 4000.0, 4000.0)
+	_check(TimelineArc.label_side("Zündung", 0.5, true, font, everywhere) == TimelineArc.SIDE_NONE,
+			"both sides colliding: the label is left out")
 
 
 func _test_clock() -> void:

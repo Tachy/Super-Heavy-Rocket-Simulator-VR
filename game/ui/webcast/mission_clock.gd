@@ -34,6 +34,29 @@ func _draw() -> void:
 				NAME_SIZE, Color(1, 1, 1, NAME_ALPHA))
 
 
+## Area covered by the clock and the mission name, relative to the control's position (empty Rect2 when neither is
+## shown): the timeline arc keeps its labels out of it.
+func occupied_rect() -> Rect2:
+	return text_rect(clock, mission_name, WebcastStyle.value_font(), WebcastStyle.label_font())
+
+
+static func text_rect(clock_text: String, name_text: String, clock_font: Font, name_font: Font) -> Rect2:
+	var rect := Rect2()
+	if clock_text != "":
+		rect = _line_rect(clock_text, clock_font, CLOCK_SIZE, CLOCK_BASELINE_PX)
+	if name_text != "":
+		var line := _line_rect(name_text.to_upper(), name_font, NAME_SIZE, NAME_BASELINE_PX)
+		rect = line if not rect.has_area() else rect.merge(line)
+	return rect
+
+
+## A centred line of text around its baseline.
+static func _line_rect(text: String, font: Font, size: int, baseline_px: float) -> Rect2:
+	var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var ascent := font.get_ascent(size)
+	return Rect2(-0.5 * width, baseline_px - ascent, width, ascent + font.get_descent(size))
+
+
 ## "T- hh:mm:ss" before T-0 (counting down to zero), "T+ hh:mm:ss" from T-0 on; days as "T+ 3 d 04:12:09".
 static func format_mission_clock(clock_s: float) -> String:
 	var before := clock_s < 0.0
