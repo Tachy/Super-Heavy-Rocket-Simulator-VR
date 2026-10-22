@@ -26,10 +26,12 @@ orbit::StationMeanElements DepotOrbitTrack::advance(const Segment& s, time::Epoc
         const double a0 = piece.semi_major_axis_m;
         double dt_s = epoch - piece.epoch;
         bool reboost = false;
-        if (keeping_ && s.decay_mps < 0.0 && dt_s > 0.0) {
-            const double to_floor_s = (keeping_->floor_semi_major_axis_m - a0) / s.decay_mps;  // >= 0 above the floor
+        // only a crossing from above: a segment that starts below the floor (a live plan from a low depot whose next
+        // arrival is too close for the flown rule's reboost) decays on to its next change (f2 review I2)
+        if (keeping_ && s.decay_mps < 0.0 && dt_s > 0.0 && a0 >= keeping_->floor_semi_major_axis_m) {
+            const double to_floor_s = (keeping_->floor_semi_major_axis_m - a0) / s.decay_mps;
             if (to_floor_s < dt_s) {
-                dt_s = std::max(0.0, to_floor_s);
+                dt_s = to_floor_s;
                 reboost = true;
             }
         }

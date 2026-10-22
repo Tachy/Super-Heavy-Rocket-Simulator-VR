@@ -691,6 +691,7 @@ void FlightSession::reset_mission_state() {
     reset_proximity();
     departure_.reset();
     settle_manual_ = false;  // f3: a manual push does not carry into a new flight
+    burn_abort_reason_.clear();  // f2 review I1: a gas ingestion ended the last flight, not the next one
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,

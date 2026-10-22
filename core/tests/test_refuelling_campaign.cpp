@@ -145,6 +145,13 @@ TEST_CASE("Depot orbit track: decay, impulses and the phase they move (f2)", "[r
     const auto just_before = kept.at(boosts[0] - 1.0), just_after = kept.at(boosts[0] + 1.0);
     CHECK(std::remainder(just_after.argument_of_latitude_rad - just_before.argument_of_latitude_rad,
                          constants::two_pi) == Catch::Approx(2.0 * n).epsilon(0.01));  // + the J2 rate's ~0.4 %
+    // f2 review I2: a start below the floor is not lifted at once (nothing flies or books that reboost) - it decays
+    // on to its next change
+    auto low = m;
+    low.semi_major_axis_m = re + 194.5e3;
+    const mission::DepotOrbitTrack below(low, -1000.0 / day, mu, j2, re, keep);
+    CHECK(below.reboosts(m.epoch - 1.0, m.epoch + 3.0 * day).empty());
+    CHECK(below.at(m.epoch + 2.0 * day).semi_major_axis_m == Catch::Approx(re + 192.5e3).margin(1e-6));
     // the same 5 days without keeping fall 5 km: the kept phase lags behind the free one
     const mission::DepotOrbitTrack free_fall(m, -1000.0 / day, mu, j2, re);
     CHECK(std::remainder(free_fall.at(m.epoch + 12.0 * day).argument_of_latitude_rad -

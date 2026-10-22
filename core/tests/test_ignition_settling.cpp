@@ -197,6 +197,11 @@ TEST_CASE("Unsettled ignition in orbit: the engines ingest gas and fail", "[igni
     CHECK(f.any_failed());
     CHECK_FALSE(f.vehicle().any_engine_producing_thrust());
     CHECK_THAT(f.session.burn_abort_reason(), Catch::Matchers::StartsWith("Gasansaugung"));
+    // f2 review I1: a new flight does not inherit it - the ISS mission chain ends any leg on a gas ingestion reason, so
+    // a stale one failed every later campaign flight at liftoff (launch_from_pad, keep_only_station, clear_bodies and
+    // the reboost all start through reset_mission_state)
+    f.session.clear_bodies();
+    CHECK(f.session.burn_abort_reason().empty());
 }
 
 TEST_CASE("Settled ignition in orbit lights normally; the flag off never ingests", "[ignition_settling][sim]") {

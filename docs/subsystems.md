@@ -1657,7 +1657,7 @@ Plan `docs/superpowers/plans/2026-10-21-refuelling-f2-flown-campaign.md`, ledger
   axis in segments (linear decay, the phase from the changing mean motion, -3/4 n/a da/dt t^2) with the keeping floor
   and target (also in the future the window search sees); `CampaignModels::depot_orbit_event` changes it at t = 0 and
   after every transfer (push `transfer_push_dv_mps` 0.55 [D], decay rho(US76) Cd 2.2 x end-on area x sqrt(mu a) / m x
-  `drag_decay_factor` 1.076 [D]: the free depot 0.3294 vs 0.3062 km/day, the 14 flown post-transfer heights fit 1.08)
+  `drag_decay_factor` 1.076 [D]: the free depot 0.3294 vs 0.3062 km/day - its test guards this measurement; independent: the 14 flown post-transfer heights fit 1.08)
   and books the reboosts it flew. Flown heights 207.5 -> 209.8 km over 53 days; the first plan's track stayed within
   200 km of the flown depot until its windows parted (below).
 - **Delivery calibration** (user 2026-10-21): the flown tankers delivered more than the calculator's model of their

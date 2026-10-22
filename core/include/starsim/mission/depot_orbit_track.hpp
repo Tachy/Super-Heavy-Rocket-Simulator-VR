@@ -15,8 +15,8 @@
 
 namespace starsim::mission {
 
-// Station keeping: when the decaying mean semi-major axis reaches the floor, a reboost [E: instantaneous] lifts it to
-// the target.
+// Station keeping: when the decaying mean semi-major axis reaches the floor from above, a reboost [E: instantaneous]
+// lifts it to the target (a segment starting below the floor decays on to its next change).
 struct DepotKeeping {
     double floor_semi_major_axis_m = 0.0;
     double target_semi_major_axis_m = 0.0;
