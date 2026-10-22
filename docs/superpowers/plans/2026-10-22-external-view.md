@@ -356,7 +356,10 @@ public:
 - `top_bar.gd`: UTC `YYYY-MM-DD hh:mm:ss UTC`, mission clock `T- hh:mm:ss` / `T+ hh:mm:ss` (days: `T+ 3 d 04:12:09`),
   hidden when `clock_s` is null; the viewed object's name.
 - `timeline_arc.gd`: an arc of 120° bottom centre, events as dots (filled = past, hollow = predicted) with labels from
-  `TimelineWindow.visible_labels`, "now" marker, body name under labels of non-viewed bodies.
+  `TimelineWindow.visible_labels`, "now" marker. Labels stand alone (Liftoff, Max Q, MECO, SECO, ...): no body names
+  on the arc (user 2026-10-22: it is clear which part they belong to). Both ends of the arc
+  fade out smoothly as in the webcasts (user 2026-10-22): line, dots and labels lose opacity over the outer
+  `ARC_FADE_FRACTION := 0.15` [E] of the arc length at each end (smoothstep), so events slide in and out softly.
 - [ ] **Step 1:** Add `--webcast` to `render_check.gd` (starts `starship_leo`, advances to T+75 s, saves PNG).
 - [ ] **Step 2:** Implement widgets, host, toggle, font pipeline entry.
 - [ ] **Step 3:** Render checks (GPU, not headless): T+75 s ascent, a ship entry (heat gauges), a docked ISS mission

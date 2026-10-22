@@ -32,7 +32,9 @@ planner) builds on. Getting the VR/desktop split, the overlay and the camera rig
    - **Bottom centre:** the **timeline arc** with the mission events (Liftoff, Max Q, MECO, stage separation,
      boostback, entry, catch, burns, docking, ...) and a marker for "now". The arc shows the **whole mission with
      all participating objects** (booster and ship after separation, tankers and depot, ...); it does **not**
-     change when the viewed object changes. Each event knows its object, so the arc can label or tint it.
+     change when the viewed object changes. Labels stand alone (Liftoff, Max Q, MECO, SECO, ...) without the
+     name of the vehicle part (user: it is clear which part they belong to).
+     Both ends of the arc fade out smoothly, as in the webcasts.
 5. **Gauges are chosen by relevance, live:** a gauge is shown only while its value is simulated and meaningful
    for the viewed object, and disappears otherwise. Examples: heat flux only during entry heating; Mach only in
    continuum flow (existing Knudsen rule in `flight_hud.gd`); engine layout only for an object with engines; crew
