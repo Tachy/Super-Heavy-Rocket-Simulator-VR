@@ -27,9 +27,12 @@
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
 #include "starsim/sim/mission_start.hpp"
+#include "starsim/environment/atmosphere.hpp"
+#include "starsim/mission/depot_orbit_track.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "starsim/sim/refuelling_campaign_flight.hpp"
+#include "starsim/sim/refuelling_campaign_text.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -509,4 +512,31 @@ TEST_CASE("The measured phasing boil-off of the tanker and the HLS matches a fre
         INFO(id);
         CHECK(lost_kg / 2.0 / 86400.0 == Catch::Approx(measured_kgps).epsilon(0.1));  // [E] the mean of both
     }
+}
+
+TEST_CASE("The free depot's flown decay matches the calculator's drag decay with its measured factor (f2)",
+          "[campaign_flown][refuelling]") {
+    // a placed depot with 300 t coasts 6 days alone: its mean height (J2 energy) falls as the calculator's track
+    // predicts it - rho Cd A sqrt(mu a) / m times reference_flights.toml's drag_decay_factor [D]
+    test::spice_session();
+    refuelling_test::DepotSession f;
+    f.session.add_station(refuelling_test::depot_config(300.0e3), f.depot, f.t0);
+    const double h0 = f.session.station_mean_height_m();
+    const auto& depot = f.session.body(0).vehicle();
+    const double mass = depot.mass_properties().mass_kg;
+    const double diameter_m = depot.stages().back().config.diameter_m;
+    f.session.advance_to(f.t0 + 6.0 * 86400.0);
+    const double h1 = f.session.station_mean_height_m();
+    const double h = 0.5 * (h0 + h1);
+    const double model = -config::load_refuelling_reference(refuelling_test::config_dir).depot.drag_decay_factor *
+                         mission::drag_decay_mps(environment::Us76Atmosphere{}.at(h).density_kg_m3,
+                                                 sim::FlightSession::dragon_free_molecular_cd * constants::pi * 0.25 *
+                                                     diameter_m * diameter_m,
+                                                 mass, constants::wgs84_semi_major_axis_m + h, constants::earth_gm_m3ps2);
+    const double flown = (h0 - h1) / (6.0 * 86400.0);
+    if (std::getenv("STARSIM_VERBOSE")) {
+        std::printf("[f2] free depot %.1f t: %.3f -> %.3f km, %.4f km/day flown, %.4f km/day model\n", mass / 1e3,
+                    h0 / 1e3, h1 / 1e3, flown * 86.4, model * 86.4);
+    }
+    CHECK(flown == Catch::Approx(model).epsilon(0.01));  // measured 2026-10-22: 0.3294 km/day
 }

@@ -19,6 +19,7 @@
 #include "starsim/config/refuelling_reference.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/mission/depot_orbit_track.hpp"
 #include "starsim/mission/refuelling_campaign.hpp"
 #include "starsim/mission/refuelling_costs.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
@@ -88,6 +89,70 @@ TEST_CASE("A tanker's delivery offset follows its phasing orbit's class against 
     CHECK(sim::campaign_delivery_offset_kg(t, below, depot) == 1.0e3);
     CHECK(sim::campaign_delivery_offset_kg(t, above, depot) == -2.0e3);
     CHECK(sim::campaign_delivery_offset_kg(t, std::nullopt, depot) == 1.0e3);  // the separation orbit
+}
+
+TEST_CASE("Depot orbit track: decay, impulses and the phase they move (f2)", "[refuelling][campaign]") {
+    const double mu = constants::earth_gm_m3ps2, j2 = constants::earth_j2, re = constants::wgs84_semi_major_axis_m;
+    orbit::StationMeanElements m;
+    m.epoch = time::Epoch::from_tdb_seconds_past_j2000(0.0);
+    m.semi_major_axis_m = re + 200e3;
+    m.inclination_rad = 26.5 * constants::deg_to_rad;
+    const double day = 86400.0;
+    // without changes: the J2-advanced mean elements
+    const mission::DepotOrbitTrack still(m, 0.0, mu, j2, re);
+    const auto fixed = orbit::advance_mean_elements(m, m.epoch + 3.0 * day, mu, j2, re);
+    CHECK(still.at(m.epoch + 3.0 * day).argument_of_latitude_rad ==
+          Catch::Approx(fixed.argument_of_latitude_rad).margin(1e-12));
+    CHECK(still.at(m.epoch + 3.0 * day).raan_rad == Catch::Approx(fixed.raan_rad).margin(1e-12));
+    // decay: a falls linearly, the phase runs ahead by 3/4 n / a |da/dt| t^2 (hand value: 0.33 km/day over 6 days, the
+    // flown free depot of 536 t at 198 km: 940 km ahead in the session probe)
+    const double decay = -330.0 / day;
+    const mission::DepotOrbitTrack falling(m, decay, mu, j2, re);
+    const auto later = falling.at(m.epoch + 6.0 * day);
+    CHECK(later.semi_major_axis_m == Catch::Approx(m.semi_major_axis_m - 6.0 * 330.0).margin(1e-6));
+    const double n = std::sqrt(mu / std::pow(m.semi_major_axis_m, 3));
+    const double ahead_m = std::remainder(later.argument_of_latitude_rad -
+                                              orbit::advance_mean_elements(m, later.epoch, mu, j2, re)
+                                                  .argument_of_latitude_rad,
+                                          constants::two_pi) *
+                           m.semi_major_axis_m;
+    CHECK(ahead_m == Catch::Approx(0.75 * n * 330.0 / day * std::pow(6.0 * day, 2)).epsilon(1e-9));
+    CHECK(ahead_m / 1e3 == Catch::Approx(940.0).epsilon(0.05));  // the session probe's lead (f2 2026-10-22)
+    // an impulse: a jumps, the phase stays continuous, the decay rate changes from there
+    mission::DepotOrbitTrack pushed(m, decay, mu, j2, re);
+    const time::Epoch t1 = m.epoch + 2.0 * day;
+    const double da = mission::along_track_delta_a_m(m.semi_major_axis_m, 0.55, mu);
+    CHECK(da == Catch::Approx(2.0 * m.semi_major_axis_m * 0.55 / std::sqrt(mu / m.semi_major_axis_m)));
+    CHECK(da == Catch::Approx(930.0).epsilon(0.01));  // ~0.9 km per transfer
+    const auto before = pushed.at(t1);
+    pushed.change(t1, da, 0.0);
+    const auto after = pushed.at(t1);
+    CHECK(after.semi_major_axis_m == Catch::Approx(before.semi_major_axis_m + da).margin(1e-6));
+    CHECK(after.argument_of_latitude_rad == Catch::Approx(before.argument_of_latitude_rad).margin(1e-12));
+    CHECK(pushed.at(t1 + day).semi_major_axis_m == Catch::Approx(after.semi_major_axis_m).margin(1e-6));
+    CHECK(pushed.at(t1 - day).semi_major_axis_m == Catch::Approx(m.semi_major_axis_m + decay * day).margin(1e-6));
+    CHECK_THROWS_AS(pushed.change(t1 - 1.0, 0.0, 0.0), std::invalid_argument);
+    // keeping: 200 km decaying at 1 km/day with a 195 km floor and a 200 km target - a reboost every 5 days, the
+    // phase continuous over each
+    const mission::DepotKeeping keep{re + 195e3, re + 200e3};
+    const mission::DepotOrbitTrack kept(m, -1000.0 / day, mu, j2, re, keep);
+    const auto boosts = kept.reboosts(m.epoch, m.epoch + 12.0 * day);
+    REQUIRE(boosts.size() == 2u);
+    CHECK(boosts[0] - m.epoch == Catch::Approx(5.0 * day).margin(1e-6));
+    CHECK(boosts[1] - m.epoch == Catch::Approx(10.0 * day).margin(1e-6));
+    CHECK(kept.reboosts(m.epoch + 6.0 * day, m.epoch + 12.0 * day).size() == 1u);
+    CHECK(kept.at(m.epoch + 7.0 * day).semi_major_axis_m == Catch::Approx(re + 198e3).margin(1e-6));
+    const auto just_before = kept.at(boosts[0] - 1.0), just_after = kept.at(boosts[0] + 1.0);
+    CHECK(std::remainder(just_after.argument_of_latitude_rad - just_before.argument_of_latitude_rad,
+                         constants::two_pi) == Catch::Approx(2.0 * n).epsilon(0.01));  // + the J2 rate's ~0.4 %
+    // the same 5 days without keeping fall 5 km: the kept phase lags behind the free one
+    const mission::DepotOrbitTrack free_fall(m, -1000.0 / day, mu, j2, re);
+    CHECK(std::remainder(free_fall.at(m.epoch + 12.0 * day).argument_of_latitude_rad -
+                             kept.at(m.epoch + 12.0 * day).argument_of_latitude_rad,
+                         constants::two_pi) > 0.0);
+    // drag decay: rho Cd A sqrt(mu a) / m
+    CHECK(mission::drag_decay_mps(2.5e-10, 140.0, 536e3, m.semi_major_axis_m, mu) ==
+          Catch::Approx(-2.5e-10 * 140.0 * std::sqrt(mu * m.semi_major_axis_m) / 536e3));
 }
 
 TEST_CASE("Hohmann, deorbit and drag makeup against hand values", "[refuelling][campaign]") {
@@ -177,6 +242,30 @@ mission::CampaignInputs simple_inputs() {
     return in;
 }
 }  // namespace
+
+TEST_CASE("Campaign: the depot's orbit events at the start and after every transfer book their reboosts (f2)",
+          "[refuelling][campaign]") {
+    // as the hand computation below, with a 2 t reboost after every transfer: 148 - 2 = 146 t, 146 - 1 + 100 - 2 =
+    // 243 t, 243 - 1 + 100 - 2 = 340 t >= 300 t
+    auto m = constant_models(1.0, 100.0, 2.0);
+    std::vector<std::pair<double, bool>> calls;
+    m.depot_orbit_event = [&](double t_s, double, bool transfer) {
+        calls.emplace_back(t_s, transfer);
+        return transfer ? 2e3 : 0.0;
+    };
+    const auto r = mission::refuelling_campaign(simple_inputs(), m);
+    REQUIRE(r.closes);
+    CHECK(r.tanker_flights == 3);
+    CHECK(r.depot_at_hls_kg == Catch::Approx(340e3));
+    CHECK(r.losses.drag_makeup_kg == Catch::Approx(6e3));
+    REQUIRE(r.tankers.size() == 3);
+    CHECK(r.tankers[0].depot_after_kg == Catch::Approx(146e3));
+    REQUIRE(calls.size() == 4u);
+    CHECK(calls[0] == std::pair{0.0, false});
+    CHECK(calls[1].first == Catch::Approx(2 * day));
+    CHECK(calls[3].first == Catch::Approx(4 * day));
+    CHECK(calls[3].second);
+}
 
 TEST_CASE("Campaign against a hand computation", "[refuelling][campaign]") {
     // Tankers launch daily, arrive after 2 days with 100 t; the depot loses 1 t/day.
@@ -462,9 +551,11 @@ TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[r
     REQUIRE(r.result.hls);
     CHECK(r.result.hls->window.has_value());
     // the answer (f2: 14 tankers / 51.7 d after the re-measured delivery, 66.3 t - the raise reaches its mean orbit;
-    // 13 / 49.7 d with the flown campaign's per-class calibration, +1.7 t below / +2.25 t above the depot)
+    // 13 / 49.7 d with the flown campaign's per-class calibration, +1.7 t below / +2.25 t above the depot; 14 / 54.7 d
+    // with the depot's orbit followed: drag decay and the transfers' pushes move its phase and so the windows; 13 /
+    // 52.5 d with the flown decay factor 1.076)
     CHECK(r.result.tanker_flights == 13);
-    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(49.7).margin(0.05));
+    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(52.5).margin(0.05));
 }
 
 TEST_CASE("Campaign live start: the flown depot's orbit, fill and last flight", "[refuelling][campaign]") {

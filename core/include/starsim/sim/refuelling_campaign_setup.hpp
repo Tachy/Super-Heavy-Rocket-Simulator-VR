@@ -13,6 +13,7 @@
 #include "starsim/ephemeris/ephemeris.hpp"
 #include "starsim/frames/body_orientation.hpp"
 #include "starsim/math/state_vector.hpp"
+#include "starsim/mission/depot_orbit_track.hpp"
 #include "starsim/mission/iss_launch_window.hpp"
 #include "starsim/mission/refuelling_campaign.hpp"
 #include "starsim/time/epoch.hpp"
@@ -71,7 +72,9 @@ struct CampaignReport {
     double tanker_base_delivered_kg = 0.0;  // reference phasing time, levers applied
     double altitude_cost_kg = 0.0;          // per tanker (signed: < 0 below the reference)
     double reference_phasing_s = 0.0;
-    double drag_makeup_kgps = 0.0;
+    double drag_makeup_kgps = 0.0;  // the drag as a makeup flow (f2: the track lowers the orbit instead)
+    double depot_height_at_hls_m = 0.0;  // f2: the depot's mean height (track) at the HLS arrival
+    std::optional<mission::DepotOrbitTrack> depot_track;  // f2: the depot's mean orbit as planned
     CampaignHlsDemand hls_demand;
     mission::LaunchWindowParameters tanker_window, hls_window;  // as the windows were planned (f2: flown with them)
 };

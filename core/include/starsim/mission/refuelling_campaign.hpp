@@ -34,6 +34,10 @@ struct CampaignModels {
     // The HLS's own boil-off while it waits for its launch with its tanks loaded for the mission, by its arrival time
     // (r6 minor: the day's Sun); empty: none.
     std::function<double(double arrival_s)> hls_wait_kg;
+    // f2: the depot's orbit events - called at t = 0 (transfer false) and after every tanker's transfer at its
+    // arrival (true) with the depot's fill; returns the propellant of a station keeping reboost (booked as
+    // drag_makeup_kg). Empty: none (the drag makeup flow books the station keeping).
+    std::function<double(double t_s, double depot_propellant_kg, bool transfer)> depot_orbit_event;
 };
 
 struct CampaignInputs {

@@ -39,6 +39,14 @@ void advance(Depot& d, double to_s, const CampaignInputs& in, const CampaignMode
     }
 }
 
+// f2: the depot's orbit event (t = 0 or a transfer): a station keeping reboost draws from the depot.
+void orbit_event(Depot& d, const CampaignModels& m, bool transfer) {
+    if (!m.depot_orbit_event) return;
+    const double kg = std::clamp(m.depot_orbit_event(d.t_s, d.propellant_kg, transfer), 0.0, d.propellant_kg);
+    d.losses.drag_makeup_kg += kg;
+    d.propellant_kg -= kg;
+}
+
 // The first window at or after `earliest` that arrives port_spacing_s after `last_arrival_s`.
 std::optional<CampaignFlight> next_slot(const std::function<std::optional<CampaignFlight>(double)>& next,
                                         double earliest, double last_arrival_s, const CampaignInputs& in) {
@@ -64,6 +72,7 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
     }
     Depot depot;
     depot.propellant_kg = std::min(in.depot_initial_kg, in.depot_capacity_kg);  // review I3
+    orbit_event(depot, m, false);
     r.fill.push_back({0.0, depot.propellant_kg});
     // the first flight may launch at earliest_launch_s (t = 0); a live re-plan carries its last flight (f2)
     double last_launch_s = std::max(in.previous_launch_s, in.earliest_launch_s - in.launch_interval_s);
@@ -122,6 +131,7 @@ CampaignResult refuelling_campaign(const CampaignInputs& in, const CampaignModel
         t.received_kg = std::min(offered - vent, in.depot_capacity_kg - depot.propellant_kg);
         depot.losses.transfer_vent_kg += vent;
         depot.propellant_kg += t.received_kg;
+        orbit_event(depot, m, true);
         t.depot_after_kg = depot.propellant_kg;
         r.tankers.push_back(t);
         r.fill.push_back({depot.t_s, depot.propellant_kg});

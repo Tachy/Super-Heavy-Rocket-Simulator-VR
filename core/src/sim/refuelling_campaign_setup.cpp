@@ -7,12 +7,14 @@
 
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
+#include "starsim/config/refuelling_mission_config.hpp"
 #include "starsim/config/refuelling_reference.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/lunar_ascent_guidance.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/mission/depot_orbit_track.hpp"
 #include "starsim/mission/lunar_budget.hpp"
 #include "starsim/mission/refuelling_costs.hpp"
 #include "starsim/mission/tanker_reserve.hpp"
@@ -180,7 +182,17 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     }
     const double dh = depot_cfg.height_m - reference_height_m;
     report.depot_height_m = depot_cfg.height_m;
-    const auto depot_at = flown ? station_orbit(*flown, src.earth) : depot_orbit(depot_cfg, start, src.earth);
+    // f2 (user 2026-10-22): the depot's mean orbit followed through the campaign - drag decay, the transfers' settling
+    // pushes, the station keeping reboosts (models.depot_orbit_event below); a fixed orbit missed the flown phase
+    // the flown campaign's station keeping rule [E: the flown rule checks at its plans and waits for min_lead_s]
+    const auto flown_rule = config::load_refuelling_campaign_flown_mission(dir, "refuelling_campaign_flown");
+    const mission::DepotKeeping keeping{equatorial_radius_m + flown_rule.keeping_min_height_m,
+                                        equatorial_radius_m + flown_rule.keeping_target_height_m};
+    mission::DepotOrbitTrack track(flown ? *flown : depot_mean_elements(depot_cfg, start), 0.0, gm,
+                                   constants::earth_j2, equatorial_radius_m, keeping);
+    const mission::StationStateAt depot_at = [&track, &src](time::Epoch t) {
+        return orbit::synthetic_station_state(track.at(t), gm, src.earth);
+    };
     const auto reference_depot_at = depot_orbit(tanker_mission.depot, config_start, src.earth);
     auto depot_vehicle_cfg = top_stage(dir, depot_cfg.vehicle_id);
     if (auto& thermal = depot_vehicle_cfg.stages.back().thermal) {
@@ -333,8 +345,34 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     models.boil_off_kgps = [&](double t_s, double fill_kg) {
         return orbit_boil_off_kgps(depot, fill_kg, depot_at(start + t_s), sun_at(start + t_s));
     };
-    const double drag_kgps = report.drag_makeup_kgps;
-    models.drag_makeup_kgps = [drag_kgps](double) { return drag_kgps; };
+    // f2: the drag lowers the depot's orbit (the track) instead of a continuous makeup; the track's keeping reboosts
+    // it at the floor, booked at the next orbit event at the Raptor's exhaust velocity (the flown light depot reboosts
+    // on cold gas when the Raptor's transients exceed 60 % of the burn) [E: reboosts after the last transfer unbooked]
+    models.drag_makeup_kgps = [](double) { return 0.0; };
+    const double drag_area_m2 = FlightSession::dragon_free_molecular_cd * constants::pi * 0.25 * diameter_m * diameter_m;
+    const double ve_depot = phasing_exhaust_velocity_mps(depot);
+    vehicle::Vehicle depot_mass(depot_vehicle_cfg, dir);
+    const auto mass_with = [&](double fill_kg) {
+        set_main(depot_mass, fill_kg);
+        return depot_mass.mass_properties().mass_kg;
+    };
+    const double reboost_dv_mps =
+        mission::hohmann_delta_v_mps(keeping.floor_semi_major_axis_m, keeping.target_semi_major_axis_m, gm);
+    double last_event_s = 0.0;
+    models.depot_orbit_event = [&](double t_s, double fill_kg, bool transfer) {
+        const time::Epoch t = start + t_s;
+        // the reboosts the track flew since the last event, booked at today's fill [E]
+        const double reboost_kg = static_cast<double>(track.reboosts(start + last_event_s, t).size()) *
+                                  mass_with(fill_kg) * (1.0 - std::exp(-reboost_dv_mps / ve_depot));
+        last_event_s = t_s;
+        const double a = track.at(t).semi_major_axis_m;
+        const double delta_a = transfer ? mission::along_track_delta_a_m(a, ref.tanker.transfer_push_dv_mps, gm) : 0.0;
+        const double rho = environment::Us76Atmosphere{}.at(a + delta_a - equatorial_radius_m).density_kg_m3;
+        track.change(t, delta_a,
+                     ref.depot.drag_decay_factor *
+                         mission::drag_decay_mps(rho, drag_area_m2, mass_with(fill_kg), a + delta_a, gm));
+        return std::min(fill_kg, reboost_kg);
+    };
 
     // HLS demand (plan decision 2)
     const auto lunar = config::load_lunar_landing_mission(dir, hls_mission.lunar_mission_id);
@@ -393,6 +431,11 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
     report.tanker_window = tanker_window;
     report.hls_window = hls_window;
     report.result = mission::refuelling_campaign(inputs, models);
+    if (report.result.hls) {
+        report.depot_height_at_hls_m =
+            track.at(start + report.result.hls->arrival_s).semi_major_axis_m - equatorial_radius_m;
+    }
+    report.depot_track = track;
     return report;
 }
 

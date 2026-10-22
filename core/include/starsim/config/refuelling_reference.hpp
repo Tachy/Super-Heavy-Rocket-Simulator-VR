@@ -12,6 +12,7 @@ struct RefuellingReference {
     struct Depot {
         std::string mission;
         double initial_propellant_kg = 0.0;  // main tanks after the ascent
+        double drag_decay_factor = 1.0;      // f2: the flown mean-orbit decay against the plain drag formula
     } depot;
     struct Tanker {
         std::string mission;
@@ -29,6 +30,8 @@ struct RefuellingReference {
         // f2: what the flown campaign's tankers delivered beyond the calculator's model of their own window, per
         // phasing orbit class (signed; the depot's mean radius splits the classes)
         double campaign_offset_below_kg = 0.0, campaign_offset_above_kg = 0.0;
+        // f2: the depot's velocity gain from a transfer's settling push along the velocity (raises its orbit)
+        double transfer_push_dv_mps = 0.0;
     } tanker;
     struct Hls {
         std::string mission;

@@ -22,6 +22,8 @@ RefuellingReference load_refuelling_reference(const std::filesystem::path& confi
     RefuellingReference r;
     r.depot.mission = doc.text(*depot, "mission");
     r.depot.initial_propellant_kg = tonnes(*depot, "initial_propellant_t");
+    r.depot.drag_decay_factor = doc.number(*depot, "drag_decay_factor");
+    if (!(r.depot.drag_decay_factor > 0.0)) doc.fail("'drag_decay_factor' must be > 0");
     r.tanker.mission = doc.text(*tanker, "mission");
     r.tanker.dry_mass_kg = tonnes(*tanker, "dry_mass_t");
     r.tanker.residue_after_ascent_kg = tonnes(*tanker, "residue_after_ascent_t");
@@ -36,6 +38,8 @@ RefuellingReference load_refuelling_reference(const std::filesystem::path& confi
     r.tanker.phasing_boil_off_kgps = tonnes(*tanker, "phasing_boil_off_t_per_day") / 86400.0;
     r.tanker.campaign_offset_below_kg = doc.number(*tanker, "campaign_offset_below_t") * kg_per_t;
     r.tanker.campaign_offset_above_kg = doc.number(*tanker, "campaign_offset_above_t") * kg_per_t;
+    r.tanker.transfer_push_dv_mps = doc.number(*tanker, "transfer_push_dv_mps");
+    if (!(r.tanker.transfer_push_dv_mps >= 0.0)) doc.fail("'transfer_push_dv_mps' must be >= 0");
     r.hls.mission = doc.text(*hls, "mission");
     r.hls.main_at_docking_kg = tonnes(*hls, "main_at_docking_t");
     r.hls.phasing_boil_off_kgps = tonnes(*hls, "phasing_boil_off_t_per_day") / 86400.0;

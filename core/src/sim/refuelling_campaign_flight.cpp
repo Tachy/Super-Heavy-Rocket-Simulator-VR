@@ -134,12 +134,6 @@ void RefuellingCampaignFlight::book_attitude_gas(FlightSession& s, double dt_s) 
 
 void RefuellingCampaignFlight::begin(FlightSession& s) {
     state_.start = s.epoch();
-    const auto& b = s.body(*s.station_index()).state();
-    first_depot_at_ = station_orbit(
-        orbit::station_mean_elements_from_state({b.position_gcrf_m, b.velocity_gcrf_mps}, s.epoch(),
-                                                constants::earth_gm_m3ps2, constants::earth_j2,
-                                                constants::wgs84_semi_major_axis_m, sources_.earth),
-        sources_.earth);
     plan_next(s);  // the first plan becomes the calculator's answer
 }
 
@@ -153,7 +147,12 @@ void RefuellingCampaignFlight::plan_next(FlightSession& s) {
     live.previous_launch = last_launch_;
     live.previous_arrival = last_arrival_;
     live.demand = demand_;
-    if (first_depot_at_) depot_lead_m_ = lead_m(first_depot_at_(live.epoch), b.position_gcrf_m);
+    if (state_.calculator && state_.calculator->depot_track) {  // against the first plan's depot (its track)
+        const auto planned = orbit::synthetic_station_state(state_.calculator->depot_track->at(live.epoch),
+                                                            constants::earth_gm_m3ps2, sources_.earth);
+        depot_lead_m_ = lead_m(planned, b.position_gcrf_m);
+    }
+    depot_height_m_ = s.station_mean_height_m();
     const auto report = plan_refuelling_campaign(sources_, {}, &live);
     if (!demand_ && report.demand_kg > 0.0) demand_ = report.hls_demand;
     if (mission_.depot_placed && !placed_fill_set_) {  // decision 10: demand - k net deliveries, then the real plan
@@ -219,6 +218,7 @@ void RefuellingCampaignFlight::launch(FlightSession& s) {
     row.arrival = s.epoch();
     row.phasing_orbit = next_->window->phasing_orbit;
     row.depot_lead_m = depot_lead_m_;
+    row.depot_height_planned_m = depot_height_m_;
     row.note = std::exchange(moved_note_, {});
     state_.rows.push_back(row);
     last_launch_ = s.epoch();
@@ -275,6 +275,8 @@ void RefuellingCampaignFlight::watch_flight(FlightSession& s) {
         state_.losses.transfer_vent_kg += vent * row.delivered_kg;
     }
     row.depot_after_kg = main_kg(s, depot);
+    row.depot_height_after_m = s.station_mean_height_m();
+    row.settling_impulse_ns = s.transfer_state().settling_impulse_ns;
     if (!row.hls && !row.failed) ++state_.tankers_flown;
     // the k-th delivering tanker against the first plan's k-th (f2: a failed flight does not shift the pairs)
     if (!row.hls && !row.failed && state_.calculator) {

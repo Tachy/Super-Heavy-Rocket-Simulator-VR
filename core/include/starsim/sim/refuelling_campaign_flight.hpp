@@ -39,8 +39,11 @@ struct CampaignFlownRow {
     double residue_kg = 0.0;          // chaser main tanks at the Rendezvous mark
     double rendezvous_kg = 0.0;       // Rendezvous -> Docked
     double main_at_undock_kg = 0.0;   // chaser main tanks at the Departure mark
-    // diagnostic: the flown depot ahead (+) of the first plan's depot along its orbit when this flight was planned
+    // diagnostic: the flown depot ahead (+) of the first plan's depot (its track) when this flight was planned
     double depot_lead_m = 0.0;
+    // diagnostics: the depot's mean height (J2 energy) at the planning and at the flight's end; the transfer's
+    // settling impulse on the docked pair
+    double depot_height_planned_m = 0.0, depot_height_after_m = 0.0, settling_impulse_ns = 0.0;
     std::optional<mission::CampaignTanker> calculator;  // the first plan's k-th tanker for the k-th delivering one
 };
 
@@ -105,8 +108,8 @@ private:
     double delivered_total_kg_ = 0.0, hls_received_kg_ = 0.0, initial_fill_kg_ = 0.0;
     double depot_vent_kg_ = 0.0;  // the vent booked on the depot (the HLS's is drawn from the HLS)
     std::string moved_note_;      // decision 2: the next row's note
-    mission::StationStateAt first_depot_at_;  // the first plan's depot orbit (the lead diagnostic)
-    double depot_lead_m_ = 0.0;               // at the latest plan
+    double depot_lead_m_ = 0.0;               // at the latest plan: against the first plan's depot track
+    double depot_height_m_ = 0.0;             // at the latest plan
     bool placed_fill_set_ = false;
 };
 

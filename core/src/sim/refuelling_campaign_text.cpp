@@ -80,7 +80,7 @@ std::string campaign_report_text(const CampaignReport& r, const time::TimeScaleC
     const auto utc_at = [&](time::Epoch t) { return time.to_utc(t).to_iso_string().substr(0, 19); };
     const auto utc = [&](double t_s) { return utc_at(r.start + t_s); };
     out << "Refuelling campaign (r6, f1) from " << utc_at(r.start) << "\n";
-    out << line("  depot %.0f km, tank volume %.1f t, drag makeup %.1f kg/day\n", r.depot_height_m / m_per_km,
+    out << line("  depot %.0f km, tank volume %.1f t, drag (as makeup) %.1f kg/day\n", r.depot_height_m / m_per_km,
                 r.depot_capacity_kg / kg_per_t, r.drag_makeup_kgps * seconds_per_day);
     out << "  lunar mission " << r.lunar_mission_id;
     if (!r.lunar_mission_id.empty()) out << " (" << utc_at(r.lunar_epoch) << ")";
@@ -110,9 +110,11 @@ std::string campaign_report_text(const CampaignReport& r, const time::TimeScaleC
     if (r.result.hls) {
         out << line("\n  HLS launch %.2f d, docks %.2f d with the depot at %.1f t\n", r.result.hls->launch_s / seconds_per_day,
                     r.result.hls->arrival_s / seconds_per_day, r.result.depot_at_hls_kg / kg_per_t);
+        out << line("  depot mean height then %.1f km (drag, the transfers' settling pushes, station keeping)\n",
+                    r.depot_height_at_hls_m / m_per_km);
     }
     const auto& loss = r.result.losses;
-    out << line("  losses: boil-off %.1f t, drag makeup %.2f t, attitude gas %.2f t, ", loss.boil_off_kg / kg_per_t,
+    out << line("  losses: boil-off %.1f t, station keeping %.2f t, attitude gas %.2f t, ", loss.boil_off_kg / kg_per_t,
                 loss.drag_makeup_kg / kg_per_t, loss.attitude_gas_kg / kg_per_t);
     out << line("transfer vent %.1f t\n\n", loss.transfer_vent_kg / kg_per_t);
     if (r.result.closes) {
@@ -161,6 +163,8 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
         out << line("        depot lead %.0f km; phasing %.1f h, residue %.1f t, rendezvous %.1f t",
                     r.depot_lead_m / m_per_km, r.phasing_s / 3600.0, r.residue_kg / kg_per_t,
                     r.rendezvous_kg / kg_per_t);
+        out << line("; depot %.1f -> %.1f km, settling %.0f kNs", r.depot_height_planned_m / m_per_km,
+                    r.depot_height_after_m / m_per_km, r.settling_impulse_ns / 1000.0);
         if (r.calculator) {
             const auto& f = r.calculator->flight;
             out << line("; calculator delivers %.1f t", f.delivered_kg / kg_per_t);

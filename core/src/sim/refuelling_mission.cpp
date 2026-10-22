@@ -67,15 +67,19 @@ MissionStart start_depot_launch_mission(FlightSession& session, const std::files
     return s;
 }
 
-mission::StationStateAt depot_orbit(const config::DepotOrbitConfig& depot, time::Epoch reference,
-                                    const frames::BodyOrientation& earth) {
+orbit::StationMeanElements depot_mean_elements(const config::DepotOrbitConfig& depot, time::Epoch reference) {
     orbit::StationMeanElements m;
     m.epoch = reference;
     m.semi_major_axis_m = equatorial_radius_m + depot.height_m;
     m.inclination_rad = depot.inclination_rad;
     m.raan_rad = depot.raan_rad;
     m.argument_of_latitude_rad = depot.argument_of_latitude_rad;
-    return station_orbit(m, earth);
+    return m;
+}
+
+mission::StationStateAt depot_orbit(const config::DepotOrbitConfig& depot, time::Epoch reference,
+                                    const frames::BodyOrientation& earth) {
+    return station_orbit(depot_mean_elements(depot, reference), earth);
 }
 
 mission::StationStateAt station_orbit(const orbit::StationMeanElements& m, const frames::BodyOrientation& earth) {

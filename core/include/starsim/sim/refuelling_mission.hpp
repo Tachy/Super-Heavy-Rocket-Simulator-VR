@@ -27,6 +27,8 @@ MissionStart start_depot_launch_mission(FlightSession& session, const std::files
 // (true equator frame, as the synthetic ISS). `earth` must outlive the returned function.
 mission::StationStateAt depot_orbit(const config::DepotOrbitConfig& depot, time::Epoch reference,
                                     const frames::BodyOrientation& earth);
+// The [depot] mean elements at `reference` (circular; the depot_orbit's start).
+orbit::StationMeanElements depot_mean_elements(const config::DepotOrbitConfig& depot, time::Epoch reference);
 // A station orbit from mean elements, advanced by the J2 rates (true equator frame; refuelling f2: the flown depot).
 // `earth` must outlive the returned function.
 mission::StationStateAt station_orbit(const orbit::StationMeanElements& mean, const frames::BodyOrientation& earth);
