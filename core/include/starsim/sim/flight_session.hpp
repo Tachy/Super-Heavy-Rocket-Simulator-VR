@@ -14,6 +14,8 @@
 #include "starsim/vehicle/compound_mass.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
 #include "starsim/sim/lunar_site.hpp"
+#include "starsim/sim/mission_event_observer.hpp"
+#include "starsim/sim/mission_timeline.hpp"
 #include "starsim/mission/tanker_reserve.hpp"
 #include "starsim/sim/propellant_transfer.hpp"
 #include "starsim/sim/station_start.hpp"
@@ -901,6 +903,13 @@ public:
     // Seconds since liftoff (clamp release); before liftoff: since the vehicle was placed on the pad.
     double mission_time_s() const { return epoch_ - launch_epoch_; }
 
+    // Mission events (external view): recorded by the pilot actions and hooks with an exact moment (liftoff, stage and
+    // payload / trunk separation, hard capture, undocking, crew ejection) and by a MissionEventObserver after every
+    // tick and coast. Mission-wide: kept across campaign launches, reset by reset_timeline (start_mission).
+    const MissionTimeline& timeline() const { return timeline_; }
+    // Empty, a pad mission when any body is clamped; the observer forgets every body and samples them as they are now.
+    void reset_timeline();
+
 private:
     struct Flying {
         std::unique_ptr<vehicle::FlightBody> body;
@@ -1054,6 +1063,9 @@ private:
     ControlMode mode_ = ControlMode::RateCommand;
     time::Epoch epoch_;
     time::Epoch launch_epoch_;
+    MissionTimeline timeline_;
+    MissionEventObserver observer_;
+    void record_event(MissionEventKind kind, size_t index);  // body `index` now
     LaunchSite launch_site_;
     std::optional<LaunchSite> landing_zone_;
     std::optional<config::SplashdownZoneConfig> splashdown_zone_;

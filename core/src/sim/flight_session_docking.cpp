@@ -166,8 +166,14 @@ void FlightSession::docking_after_tick() {
     if (phase != docking_seen_phase_) {
         docking_seen_phase_ = phase;
         if (!docking_collision_reported_) docking_status_ = m.status();
-        if (phase == contact::DockingPhase::Docked) merge_docked();
-        if (phase == contact::DockingPhase::Separated) separate_docked();
+        if (phase == contact::DockingPhase::Docked) {
+            merge_docked();
+            record_event(MissionEventKind::Docking, controlled_);  // hard capture
+        }
+        if (phase == contact::DockingPhase::Separated) {
+            separate_docked();
+            record_event(MissionEventKind::Undocking, controlled_);  // the springs push the pair apart
+        }
         if (phase == contact::DockingPhase::Failed && proximity_ && !docking_collision_reported_) {
             proximity_->capture_failed(proximity_input(), m.failure());
             proximity_status_ = proximity_->status();

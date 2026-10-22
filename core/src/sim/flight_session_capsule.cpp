@@ -133,6 +133,7 @@ void FlightSession::run_capsule_return(Flying& flying) {
                 if (flying.body->vehicle().stages().size() > 1) {
                     auto capsule = flying.body->separate(flying.body->vehicle().stages().size() - 1,
                                                          trunk_separation_dv_mps);
+                    record_event(MissionEventKind::StageSeparation, controlled_);  // the trunk
                     capsule->set_ground_height(0.0);
                     flying.body->set_ground_height(0.0);
                     bodies_.push_back(new_flying(std::move(capsule)));

@@ -203,6 +203,7 @@ void FlightSession::run_crew_escape() {
             (!st.early || water || h <= c.config.min_firing_height_m)) {
             c.fire_epoch = epoch_;
             st.fired = true;
+            record_event(MissionEventKind::CrewEjection, controlled_);  // the first seat fires now
         }
     }
     if (c.fire_epoch) {

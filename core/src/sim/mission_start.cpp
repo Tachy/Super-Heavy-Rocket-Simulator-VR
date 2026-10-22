@@ -75,6 +75,7 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
                                         "' is a ship return: it is flown from orbit with plan_ship_return (key R), "
                                         "not started");
     }
+    session.reset_timeline();  // the mission's own log: its setup (placing, docking in place) is no event
     return s;
 }
 

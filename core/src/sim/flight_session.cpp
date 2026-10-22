@@ -211,6 +211,7 @@ bool FlightSession::separate_payload() {
     if (index == 0) return false;
     auto upper = lower.body->separate(index, payload_separation_->dv_mps);
     for (auto& [group, run] : lower.running_groups) run = false;
+    record_event(MissionEventKind::StageSeparation, controlled_);  // the lower part, before the upper is a body
     upper->set_ground_height(launch_site_.height_m);
     bodies_.push_back(new_flying(std::move(upper)));
     controlled_ = bodies_.size() - 1;
@@ -878,6 +879,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                     replan_ship_deorbit();  // the far plan: planned again from the tracked state (daily, ~2 orbits before)
                 }
             }
+            observer_.observe(*this, timeline_);
             continue;
         }
         report_gas_ingestion();
@@ -984,6 +986,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         epoch_ += tick_s;
         if (docking_) docking_after_tick();
         docked_update(tick_s, false);
+        observer_.observe(*this, timeline_);  // at most every MissionEventObserver::observe_interval_s
     }
     if (bodies_.empty()) {
         epoch_ = target;
@@ -1029,6 +1032,18 @@ void FlightSession::release_clamps() {
     if (bodies_.empty() || !bodies_[controlled_].body->clamped()) return;
     bodies_[controlled_].body->release_clamps();
     launch_epoch_ = epoch_;  // T+0 = liftoff
+    record_event(MissionEventKind::Liftoff, controlled_);
+}
+
+void FlightSession::record_event(MissionEventKind kind, size_t index) {
+    timeline_.record(mission_event(*this, index, kind));
+}
+
+void FlightSession::reset_timeline() {
+    const bool on_pad = std::any_of(bodies_.begin(), bodies_.end(), [](const Flying& f) { return f.body->clamped(); });
+    timeline_.reset(on_pad);
+    observer_.reset();
+    observer_.observe(*this, timeline_);  // the bodies as placed: the first tick's engine start is an event
 }
 
 void FlightSession::stage() {
@@ -1038,8 +1053,16 @@ void FlightSession::stage() {
         return;
     }
     auto& lower = bodies_[controlled_];
+    // Hot staging: the stack's first stage (it lifted off with this serial) separates under thrust - its main engine
+    // cutoff is commanded now (the centre engines may run on into the boostback flip, so the observer sees no cutoff).
+    if (lower.body->vehicle().any_engine_producing_thrust() &&
+        has_recorded(timeline_, MissionEventKind::Liftoff, lower.serial) &&
+        !has_recorded(timeline_, MissionEventKind::Meco, lower.serial)) {
+        record_event(MissionEventKind::Meco, controlled_);
+    }
     auto upper = lower.body->separate(1);
     for (auto& [group, run] : lower.running_groups) run = false;  // booster engines off after separation
+    record_event(MissionEventKind::StageSeparation, controlled_);  // the lower part, before the upper is a body
     lower.body->set_ground_height(launch_site_.height_m);  // separated stages: the real ground, not the mount
     upper->set_ground_height(launch_site_.height_m);
     if (returns_after_staging(lower.body->vehicle())) {
