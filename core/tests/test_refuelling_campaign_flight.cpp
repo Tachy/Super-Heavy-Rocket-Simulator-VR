@@ -425,6 +425,8 @@ TEST_CASE("Flown campaign, placed depot: two tankers and the HLS", "[campaign_fl
     CHECK(st.rows.back().hls);
     for (const auto& r : st.rows) {
         if (!r.hls) CHECK(r.delivered_kg > 50.0e3);
+        REQUIRE(r.planned_arrival);  // the live plan before the launch (the comparison's arrivals)
+        CHECK(std::abs(r.arrival - *r.planned_arrival) < 86400.0);
     }
     CHECK(st.hls_propellant_kg >= st.hls_required_propellant_kg);
     REQUIRE(st.first_return);
@@ -512,6 +514,26 @@ TEST_CASE("The measured phasing boil-off of the tanker and the HLS matches a fre
         INFO(id);
         CHECK(lost_kg / 2.0 / 86400.0 == Catch::Approx(measured_kgps).epsilon(0.1));  // [E] the mean of both
     }
+}
+
+TEST_CASE("Flown campaign: the depot launched, every tanker, the HLS - compared with the calculator",
+          "[campaign_flown][refuelling][slow]") {
+    CampaignSession c;
+    const auto s =
+        sim::start_mission(c.session, refuelling_test::config_dir, "refuelling_campaign_flown", {}, c.clock);
+    REQUIRE(s.refusal.empty());
+    c.fly([&] { return c.ended(); }, 120.0 * 86400.0);
+    const auto& st = c.driver()->state();
+    const auto misses = c.driver()->comparison_misses();
+    std::printf("%s\n", sim::campaign_flight_text(st, misses, c.clock).c_str());
+    INFO(st.status);
+    REQUIRE(st.phase == sim::CampaignFlightPhase::Complete);
+    for (const auto& line : misses) UNSCOPED_INFO(line);
+    CHECK(misses.empty());
+    REQUIRE(st.first_return);
+    INFO(st.first_return_note);
+    CHECK((*st.first_return == sim::ReturnResult::Caught || *st.first_return == sim::ReturnResult::UprightAbort));
+    CHECK(st.hls_propellant_kg >= st.hls_required_propellant_kg);
 }
 
 TEST_CASE("The free depot's flown decay matches the calculator's drag decay with its measured factor (f2)",

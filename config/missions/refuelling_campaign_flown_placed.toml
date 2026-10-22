@@ -19,4 +19,4 @@ return_first_tanker = true         # spec f2: only the first tanker flies its re
 
 [comparison]
 fill_tolerance = 0.02              # [E] spec f2: depot fill per arrival
-duration_days = 1.0                # [E] spec f2
+duration_days = 1.0                # [E] spec f2: each arrival against the live plan before its launch

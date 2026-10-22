@@ -175,6 +175,7 @@ void RefuellingCampaignFlight::plan_next(FlightSession& s) {
     next_parameters_ = tanker ? report.tanker_window : report.hls_window;
     state_.tankers_planned = state_.tankers_flown + report.result.tanker_flights;
     state_.next_launch = next_->window->liftoff;
+    next_arrival_ = report.start + next_->arrival_s;
     state_.next_is_hls = !tanker;
     // decision 2: a window later than the previous plan's next one (a flight still under way, a re-plan)
     if (planned_second_launch_ && std::abs(*state_.next_launch - *planned_second_launch_) > 3600.0) {
@@ -218,6 +219,7 @@ void RefuellingCampaignFlight::launch(FlightSession& s) {
     row.arrival = s.epoch();
     row.phasing_orbit = next_->window->phasing_orbit;
     row.depot_lead_m = depot_lead_m_;
+    row.planned_arrival = next_arrival_;
     row.depot_height_planned_m = depot_height_m_;
     row.note = std::exchange(moved_note_, {});
     state_.rows.push_back(row);
@@ -344,13 +346,18 @@ std::vector<std::string> RefuellingCampaignFlight::comparison_misses() const {
                       calc.tanker_flights);
         misses.emplace_back(line);
     }
-    if (!state_.hls_arrival || !state_.start) {
-        misses.emplace_back("HLS nicht angekommen");
-    } else if (const double flown_s = *state_.hls_arrival - *state_.start;
-               std::abs(flown_s - calc.duration_s) > mission_.duration_tolerance_s) {
-        std::snprintf(line, sizeof line, "Dauer: geflogen %.2f d, Rechner %.2f d", flown_s / 86400.0,
-                      calc.duration_s / 86400.0);
-        misses.emplace_back(line);
+    if (!state_.hls_arrival || !state_.start) misses.emplace_back("HLS nicht angekommen");
+    // user 2026-10-22: the arrivals (the HLS's: the duration) against the live plan made just before each launch;
+    // the first plan's duration is only reported - its windows flip at thresholds (the latest launch to the same
+    // arrival, 3 h) under ~100 km of phase and cascade by a phase cycle
+    for (const auto& r : state_.rows) {
+        if (r.failed || !r.planned_arrival || !state_.start) continue;
+        if (std::abs(r.arrival - *r.planned_arrival) > mission_.duration_tolerance_s) {
+            std::snprintf(line, sizeof line, "%s: Ankunft geflogen %.2f d, geplant %.2f d",
+                          r.hls ? "HLS" : ("Tanker " + std::to_string(r.number)).c_str(),
+                          (r.arrival - *state_.start) / 86400.0, (*r.planned_arrival - *state_.start) / 86400.0);
+            misses.emplace_back(line);
+        }
     }
     for (const auto& r : state_.rows) {
         if (r.hls || r.failed || !r.calculator) continue;

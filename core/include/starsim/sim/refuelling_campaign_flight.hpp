@@ -44,6 +44,9 @@ struct CampaignFlownRow {
     // diagnostics: the depot's mean height (J2 energy) at the planning and at the flight's end; the transfer's
     // settling impulse on the docked pair
     double depot_height_planned_m = 0.0, depot_height_after_m = 0.0, settling_impulse_ns = 0.0;
+    // the live plan's Waypoint 0 for this flight, planned just before its launch (user 2026-10-22: the comparison's
+    // arrivals and the duration; the first plan's windows flip at thresholds and cascade by a phase cycle)
+    std::optional<time::Epoch> planned_arrival;
     std::optional<mission::CampaignTanker> calculator;  // the first plan's k-th tanker for the k-th delivering one
 };
 
@@ -110,6 +113,7 @@ private:
     std::string moved_note_;      // decision 2: the next row's note
     double depot_lead_m_ = 0.0;               // at the latest plan: against the first plan's depot track
     double depot_height_m_ = 0.0;             // at the latest plan
+    std::optional<time::Epoch> next_arrival_;  // the latest plan's Waypoint 0 of the next flight
     bool placed_fill_set_ = false;
 };
 

@@ -137,7 +137,7 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
     if (st.start) out << " from " << utc_at(start);
     out << " - " << to_string(st.phase) << ": " << st.status << "\n";
     if (st.calculator) {
-        out << line("  calculator: %.0f tankers, %.1f days; HLS needs %.1f t propellant\n",
+        out << line("  calculator (first plan, reported): %.0f tankers, %.1f days; HLS needs %.1f t propellant\n",
                     st.calculator->result.tanker_flights, st.calculator->result.duration_s / seconds_per_day,
                     st.hls_required_propellant_kg / kg_per_t);
     }
@@ -160,7 +160,8 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
         if (!r.note.empty()) out << "  " << r.note;
         out << "\n";
         // the flight's own numbers beside the calculator's booking (f2: the per-orbit calibration reads them)
-        out << line("        depot lead %.0f km; phasing %.1f h, residue %.1f t, rendezvous %.1f t",
+        if (r.planned_arrival) out << line("        planned arrival %.2f d;", day(*r.planned_arrival));
+        out << line(" depot lead %.0f km; phasing %.1f h, residue %.1f t, rendezvous %.1f t",
                     r.depot_lead_m / m_per_km, r.phasing_s / 3600.0, r.residue_kg / kg_per_t,
                     r.rendezvous_kg / kg_per_t);
         out << line("; depot %.1f -> %.1f km, settling %.0f kNs", r.depot_height_planned_m / m_per_km,
