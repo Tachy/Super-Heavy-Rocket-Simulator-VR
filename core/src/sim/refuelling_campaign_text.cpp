@@ -157,6 +157,19 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
         if (r.failed) out << "  FAILED";
         if (!r.note.empty()) out << "  " << r.note;
         out << "\n";
+        // the flight's own numbers beside the calculator's booking (f2: the per-orbit calibration reads them)
+        out << line("        depot lead %.0f km; phasing %.1f h, residue %.1f t, rendezvous %.1f t",
+                    r.depot_lead_m / m_per_km, r.phasing_s / 3600.0, r.residue_kg / kg_per_t,
+                    r.rendezvous_kg / kg_per_t);
+        if (r.calculator) {
+            const auto& f = r.calculator->flight;
+            out << line("; calculator delivers %.1f t", f.delivered_kg / kg_per_t);
+            if (f.window) {
+                out << line(", phasing %.1f h, cost %.1f t", (f.window->schedule.waypoint0_epoch - f.window->separation) / 3600.0,
+                            f.window->cost.propellant_kg / kg_per_t);
+            }
+        }
+        out << "\n";
     }
     const auto& l = st.losses;
     out << line("\n  losses: boil-off (remainder) %.1f t, station keeping %.1f t, attitude gas %.2f t, vent %.1f t\n",

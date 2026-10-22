@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 
+#include "starsim/config/refuelling_reference.hpp"
 #include "starsim/ephemeris/ephemeris.hpp"
 #include "starsim/frames/body_orientation.hpp"
 #include "starsim/math/state_vector.hpp"
@@ -78,6 +79,11 @@ struct CampaignReport {
 // The first lever out of range, as a German message (empty: all valid): heights, times and the insulation > 0, the
 // reserve, the initial fill and the HLS wait >= 0, all finite (review I3: one check for the CLI and the game).
 std::string campaign_lever_error(const CampaignLevers& levers);
+
+// f2: the flown campaign's calibration of a tanker's delivery by its phasing orbit's class - above the depot when the
+// orbit's periapsis lies above the depot's mean radius, else (and without a phasing orbit: the separation orbit) below.
+double campaign_delivery_offset_kg(const config::RefuellingReference::Tanker& tanker,
+                                   const std::optional<mission::PhasingOrbit>& orbit, double depot_radius_m);
 
 // The campaign of the r5 reference flights with the levers applied (r6 plan decisions 1-7). Refusals (lunar outbound
 // plan, HLS tanks too small, levers out of range) come back as result.closes == false with a German reason; config

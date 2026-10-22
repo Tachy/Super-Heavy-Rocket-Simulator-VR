@@ -67,11 +67,27 @@ TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelli
     CHECK(r.tanker.mission == "tanker_flight");
     CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(66.3e3));  // f2 re-measured
     CHECK(r.tanker.dry_mass_sensitivity == Catch::Approx(0.99));
+    CHECK(r.tanker.campaign_offset_below_kg == Catch::Approx(1.7e3));  // f2 flown campaign
+    CHECK(r.tanker.campaign_offset_above_kg == Catch::Approx(2.25e3));
     CHECK(r.hls.mission == "hls_refuel");
     CHECK(r.hls.main_at_docking_kg == Catch::Approx(193.6e3));  // f2 re-measured
     // the reference tanker is the configured one
     const auto tanker = config::top_stage_config(config::load_vehicle(config_dir, "starship_tanker"));
     CHECK(tanker.stages.back().dry_mass_kg == Catch::Approx(r.tanker.dry_mass_kg));
+}
+
+TEST_CASE("A tanker's delivery offset follows its phasing orbit's class against the depot (f2)",
+          "[refuelling][campaign]") {
+    config::RefuellingReference::Tanker t;
+    t.campaign_offset_below_kg = 1.0e3;
+    t.campaign_offset_above_kg = -2.0e3;
+    const double re = constants::wgs84_semi_major_axis_m;
+    const double depot = re + 205e3;
+    const mission::PhasingOrbit below{re + 158e3, re + 198e3};
+    const mission::PhasingOrbit above{re + 258e3, re + 278e3};
+    CHECK(sim::campaign_delivery_offset_kg(t, below, depot) == 1.0e3);
+    CHECK(sim::campaign_delivery_offset_kg(t, above, depot) == -2.0e3);
+    CHECK(sim::campaign_delivery_offset_kg(t, std::nullopt, depot) == 1.0e3);  // the separation orbit
 }
 
 TEST_CASE("Hohmann, deorbit and drag makeup against hand values", "[refuelling][campaign]") {
@@ -445,9 +461,10 @@ TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[r
     }
     REQUIRE(r.result.hls);
     CHECK(r.result.hls->window.has_value());
-    // the answer (f2: 14 tankers / 51.7 d after the re-measured delivery, 66.3 t - the raise reaches its mean orbit)
-    CHECK(r.result.tanker_flights == 14);
-    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(51.7).margin(0.05));
+    // the answer (f2: 14 tankers / 51.7 d after the re-measured delivery, 66.3 t - the raise reaches its mean orbit;
+    // 13 / 49.7 d with the flown campaign's per-class calibration, +1.7 t below / +2.25 t above the depot)
+    CHECK(r.result.tanker_flights == 13);
+    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(49.7).margin(0.05));
 }
 
 TEST_CASE("Campaign live start: the flown depot's orbit, fill and last flight", "[refuelling][campaign]") {

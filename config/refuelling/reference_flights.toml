@@ -29,6 +29,12 @@ dry_mass_sensitivity = 0.99        # [D] r5 probes: ship dry -10 / -20 t -> resi
 # gives 15.9 t/day (the walls stay wet; the flown free drift settles the liquid) - the flown campaign's tanker 2 (9 h
 # phasing) delivered 18 t less than the calculator booked with it.
 phasing_boil_off_t_per_day = 3.5
+# [D] f2 2026-10-22: the full flown campaign (refuelling_report --fly, 14 tankers) delivered more than the calculator's
+# model of each flown window (reference delivery + phasing boil-off difference + phasing cost difference): below the
+# depot 5 flights +0.6..+3.2 t, above 9 flights +1.0..+3.7 t (sd ~1 t per flight, the rendezvous varies 13-21 t).
+# The means calibrate the calculator per phasing orbit class (user decision 2026-10-21, fill tolerance stays 2 %).
+campaign_offset_below_t = 1.7
+campaign_offset_above_t = 2.25
 
 [hls]
 mission = "hls_refuel"

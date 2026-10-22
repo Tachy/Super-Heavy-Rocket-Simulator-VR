@@ -26,6 +26,9 @@ struct RefuellingReference {
         // f2: its main tanks' boil-off in the free coast of the phasing flight (the flown heat balance; the campaign
         // books the phasing time's difference to the reference with it)
         double phasing_boil_off_kgps = 0.0;
+        // f2: what the flown campaign's tankers delivered beyond the calculator's model of their own window, per
+        // phasing orbit class (signed; the depot's mean radius splits the classes)
+        double campaign_offset_below_kg = 0.0, campaign_offset_above_kg = 0.0;
     } tanker;
     struct Hls {
         std::string mission;

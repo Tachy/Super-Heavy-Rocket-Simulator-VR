@@ -134,6 +134,12 @@ std::string campaign_lever_error(const CampaignLevers& l) {
     return {};
 }
 
+double campaign_delivery_offset_kg(const config::RefuellingReference::Tanker& tanker,
+                                   const std::optional<mission::PhasingOrbit>& orbit, double depot_radius_m) {
+    const bool above = orbit && orbit->periapsis_radius_m > depot_radius_m;
+    return above ? tanker.campaign_offset_above_kg : tanker.campaign_offset_below_kg;
+}
+
 CampaignReport plan_refuelling_campaign(const CampaignSources& src, const CampaignLevers& levers,
                                         const CampaignLive* live) {
     CampaignReport report;
@@ -304,7 +310,8 @@ CampaignReport plan_refuelling_campaign(const CampaignSources& src, const Campai
         const double rate = ref.tanker.phasing_boil_off_kgps;
         mission::CampaignFlight flight{w.liftoff - start, w.schedule.waypoint0_epoch - start,
                                        base_kg + rate * (reference_phasing_s - phasing_s) -
-                                           (w.cost.propellant_kg - tanker_reference_cost.propellant_kg)};
+                                           (w.cost.propellant_kg - tanker_reference_cost.propellant_kg) +
+                                           campaign_delivery_offset_kg(ref.tanker, w.phasing_orbit, r_new)};
         flight.phasing_orbit = w.phasing_orbit;
         flight.window = w;
         return std::optional{flight};
