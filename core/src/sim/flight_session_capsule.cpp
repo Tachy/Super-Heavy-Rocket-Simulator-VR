@@ -135,7 +135,7 @@ void FlightSession::run_capsule_return(Flying& flying) {
                                                          trunk_separation_dv_mps);
                     capsule->set_ground_height(0.0);
                     flying.body->set_ground_height(0.0);
-                    bodies_.push_back({std::move(capsule), {}, nullptr, {}});
+                    bodies_.push_back(new_flying(std::move(capsule)));
                     controlled_ = bodies_.size() - 1;
                     clear_rendezvous_target();  // the target belongs to the controlled body's port
                     reset_rendezvous();

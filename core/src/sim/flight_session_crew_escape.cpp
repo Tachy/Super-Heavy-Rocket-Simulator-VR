@@ -73,7 +73,7 @@ void FlightSession::crew_fire_seat(size_t member) {
     auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(c.seat_vehicle, config_dir_), seat);
     body->set_ground_height(ship.ground_height_m());
     const auto telemetry = ship.telemetry(env_, epoch_);
-    Flying flying{std::move(body), {}, nullptr, {}};
+    Flying flying = new_flying(std::move(body));
     flying.crew_member = true;
     bodies_.push_back(std::move(flying));
     auto& m = c.state.members[member];

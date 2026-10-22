@@ -879,6 +879,9 @@ public:
     void stage();              // separate the lowest stage; the upper part becomes the controlled body
 
     size_t body_count() const { return bodies_.size(); }
+    // Stable identity of body `index`: unique for the session lifetime, starts at 1, never reused (not even after
+    // clear_bodies), unchanged when the bodies are reindexed by staging or removal.
+    uint32_t body_serial(size_t index) const { return bodies_.at(index).serial; }
     size_t controlled_index() const { return controlled_; }
     const vehicle::FlightBody& body(size_t index) const { return *bodies_.at(index).body; }
     vehicle::FlightTelemetry telemetry(size_t index) const;
@@ -913,7 +916,15 @@ private:
                                                                  // return_command)
         std::unique_ptr<gnc::ParachuteSequencer> parachutes;     // lowest stage with parachute sets (capsule)
         bool crew_member = false;  // a seat / parachutist body: its chutes are timed by the crew escape, not here
+        uint32_t serial = 0;       // stable identity (body_serial); bodies are reindexed, serials are not
     };
+    // A new Flying around `body` with the next serial (serials start at 1 and are never reused).
+    Flying new_flying(std::unique_ptr<vehicle::FlightBody> body) {
+        Flying flying;
+        flying.body = std::move(body);
+        flying.serial = next_serial_++;
+        return flying;
+    }
     // Crew escape run time (set_crew_escape): per seat its sequencer, rail direction and load / clearance trackers.
     struct CrewRuntime {
         config::CrewEscapeConfig config;
@@ -1006,6 +1017,7 @@ private:
     bool burn_drifting() const;         // a far burn waits in free drift (burn_drift_lead_s)
     void replan_ship_deorbit();         // a far deorbit planned again from the state now (deorbit_replan_age_s)
     std::vector<Flying> bodies_;
+    uint32_t next_serial_ = 1;  // next body serial; never reset, not even by clear_bodies
     size_t controlled_ = 0;
     std::optional<size_t> station_index_;          // add_station
     std::vector<StationImpulse> station_impulses_;  // still to apply, sorted by epoch

@@ -124,7 +124,7 @@ void FlightSession::place_in_orbit(const config::VehicleConfig& config, const ma
     const vehicle::RigidBodyState rigid{state.position_m, state.velocity_mps, math::Quat::from_matrix(m), {}};
     clear_for_new_body(keep_station, epoch);
     reset_leg_landing();
-    bodies_.insert(bodies_.begin(), {std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid), {}, nullptr, {}});
+    bodies_.insert(bodies_.begin(), new_flying(std::make_unique<vehicle::FlightBody>(std::move(vehicle), rigid)));
     if (station_index_) station_index_ = 1;  // kept: behind the new body
     controlled_ = 0;
     epoch_ = epoch;
@@ -212,7 +212,7 @@ bool FlightSession::separate_payload() {
     auto upper = lower.body->separate(index, payload_separation_->dv_mps);
     for (auto& [group, run] : lower.running_groups) run = false;
     upper->set_ground_height(launch_site_.height_m);
-    bodies_.push_back({std::move(upper), {}, nullptr, {}});
+    bodies_.push_back(new_flying(std::move(upper)));
     controlled_ = bodies_.size() - 1;
     clear_rendezvous_target();  // the target belongs to the controlled body's port
     reset_rendezvous();
@@ -468,7 +468,7 @@ void FlightSession::place_vehicle(std::unique_ptr<vehicle::Vehicle> vehicle, con
     body->set_ground_height(body->vehicle().splashdown_recovery() ? 0.0 : launch_site_.height_m);  // a capsule: the sea
     clear_for_new_body(false, epoch);
     reset_leg_landing();
-    bodies_.push_back({std::move(body), {}, nullptr, {}});
+    bodies_.push_back(new_flying(std::move(body)));
     controlled_ = 0;
     epoch_ = epoch;
     launch_epoch_ = epoch;
@@ -565,7 +565,7 @@ size_t FlightSession::add_station(const config::VehicleConfig& config, const mat
     auto body = std::make_unique<vehicle::FlightBody>(std::make_unique<vehicle::Vehicle>(config, config_dir_), rigid);
     body->set_ideal_lvlh_attitude(station_body_in_lvlh(config.stages.back()));
     const bool alone = bodies_.empty();
-    bodies_.push_back({std::move(body), {}, nullptr, {}});
+    bodies_.push_back(new_flying(std::move(body)));
     if (alone) controlled_ = 0;  // nothing commands it: the autopilot stays Off
     station_index_ = bodies_.size() - 1;
     std::sort(impulses.begin(), impulses.end(),
@@ -717,10 +717,9 @@ void FlightSession::launch_from_pad(const config::VehicleConfig& config, const L
     clear_for_new_body(keep_station, epoch);  // refuses before anything changes
     set_launch_site(site);
     const double stand_height = site.height_m + (tower_ ? site.tower->mount_height_m : 0.0);
-    bodies_.insert(bodies_.begin(), {vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad,
-                                                                 site.longitude_rad, stand_height, heading_rad, earth_,
-                                                                 epoch),
-                                     {}, nullptr, {}});
+    bodies_.insert(bodies_.begin(), new_flying(vehicle::FlightBody::on_pad(std::move(vehicle), site.latitude_rad,
+                                                                           site.longitude_rad, stand_height, heading_rad,
+                                                                           earth_, epoch)));
     if (station_index_) station_index_ = 1;  // kept: behind the new body
     // The stack stands on the launch mount: its top is the ground until staging (a stack released without
     // thrust settles back onto it instead of dropping through the mount's open centre).
@@ -1051,7 +1050,7 @@ void FlightSession::stage() {
             landing, return_parameters(lower.body->vehicle().stages().front().config));
         lower.return_guidance->set_realtime(realtime_planning_);
     }
-    Flying flying{std::move(upper), {}, nullptr, {}};
+    Flying flying = new_flying(std::move(upper));
     bodies_.push_back(std::move(flying));
     controlled_ = bodies_.size() - 1;
     clear_rendezvous_target();  // the target belongs to the controlled body's port
