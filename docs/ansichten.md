@@ -153,6 +153,10 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 - Kameras an Bord: Booster-Triebwerke, Ship-Triebwerke, Ship nach vorn, Hot-Staging-Ring.
 - Bodenbeobachter an Startplatz/Landeplatz (heute vorhanden).
 - Freie Kamera (6DOF-Navigation wie in der Missionsplanung).
+- [Entschieden, Darstellung später] Rettung der Crew (Schleudersitze, Spec 2026-10-22): Bei jedem Abbruch einer
+  bemannten Rückkehr steigt die Crew aus; die Ansicht folgt dem Piloten aus seiner Sicht (Ausstieg, Bremsschirm,
+  Hauptschirm, Aufsetzen), daneben das leere Ship bis zum Aufschlag. Datenquelle: `FlightSim.crew_escape_state()`
+  (je Crewmitglied Lage, Phase, g-Last, Aufsetzpunkt) und die Körper der Sitze und Personen.
 
 ## 6. Karte und Auswertung
 

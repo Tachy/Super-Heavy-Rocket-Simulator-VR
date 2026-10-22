@@ -68,7 +68,9 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   chained by the mission sequence: depot launch -> station, tanker pad -> perigee raise -> docking -> transfer ->
   departure -> ship return -> catch (the caught booster lifted off the tower), HLS refuel -> lunar mission continued
   from the live HLS); the refuelling campaign flown in one session (supervisor: live planning from the flown depot,
-  station-keeping reboosts, comparison with the calculator).
+  station-keeping reboosts, comparison with the calculator); the crew escape of a crewed ship return (catch
+  feasibility through the entry, give-up to the sea, ejection seats with their envelope and modes, each crew member a
+  body to the touchdown, the empty ship to its impact; ship data untouched).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
