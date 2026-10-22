@@ -84,6 +84,15 @@ func _test_values() -> void:
 	_check(absf(WebcastOverlay.gauge_value("heat_load", t, docking) - 30.0) < 1e-9, "heat load in MJ/m2")
 	_check(WebcastOverlay.gauge_value("range", t, docking) == 42.0, "range in m")
 	_check(absf(WebcastOverlay.gauge_value("closing_rate", t, docking) - 0.12) < 1e-12, "closing rate positive when closing")
+	var tr := {"distance_earth_m": 250.0e6, "distance_moon_m": 140.0e6, "speed_earth_mps": 1200.0,
+		"speed_moon_mps": 900.0}
+	_check(absf(WebcastOverlay.gauge_value("distance_earth", tr, docking) - 250000.0) < 1e-6, "Earth distance in km")
+	_check(absf(WebcastOverlay.gauge_value("distance_moon", tr, docking) - 140000.0) < 1e-6, "Moon distance in km")
+	_check(absf(WebcastOverlay.gauge_value("speed_earth", tr, docking) - 4320.0) < 1e-9, "speed about the Earth in km/h")
+	_check(absf(WebcastOverlay.gauge_value("speed_moon", tr, docking) - 3240.0) < 1e-9, "speed about the Moon in km/h")
+	for id in GaugeRules.select({"altitude_m": 1.0e8, "apoapsis_altitude_km": INF, "distance_moon_m": 1.0}, {}, {},
+			0.0)["right"]:
+		_check(WebcastOverlay.GAUGES.has(id), "transfer gauge %s has a spec" % id)
 	for id in WebcastOverlay.GAUGES:
 		var spec: Dictionary = WebcastOverlay.GAUGES[id]
 		_check(spec.has("label") and spec.has("unit") and float(spec["full_scale"]) > 0.0, "gauge spec %s" % id)

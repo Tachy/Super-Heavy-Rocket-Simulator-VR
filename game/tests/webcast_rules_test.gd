@@ -87,6 +87,54 @@ func _test_gauges() -> void:
 	_check(not ("apoapsis" in sel["right"]) and not ("periapsis" in sel["right"]), "no apsides on an open orbit")
 	_check(GaugeRules.docking_active(docking) and not GaugeRules.docking_active({"present": true, "range_m": 1.0,
 			"docked": true}) and not GaugeRules.docking_active({}), "docking active only when approaching")
+	_test_transfer()
+
+
+## Task 4c: the Earth-Moon transfer situation (AROW-like gauges).
+func _test_transfer() -> void:
+	var transfer_ids := ["distance_earth", "distance_moon", "speed_earth", "speed_moon"]
+	var moon := {"distance_moon_m": 300.0e6, "speed_moon_mps": 1500.0, "distance_earth_m": 90.0e6,
+			"speed_earth_mps": 3000.0, "dynamic_pressure_pa": 0.0, "knudsen": 1.0e6}
+	# Translunar coast: Earth reference, 84,000 km up, apogee near the Moon's distance.
+	var tli := _telemetry(moon)
+	tli.merge({"altitude_m": 84.0e6, "apoapsis_altitude_km": 390.0e3, "periapsis_altitude_km": 200.0}, true)
+	var sel := GaugeRules.select(tli, _body(), {}, 0.0)
+	_check(sel["right"] == transfer_ids, "translunar coast: transfer gauges (%s)" % [sel["right"]])
+	# Trans-Earth coast near the Moon: open about the Moon.
+	var tei := _telemetry(moon)
+	tei.merge({"altitude_m": 20.0e6, "apoapsis_altitude_km": INF}, true)
+	_check(GaugeRules.select(tei, _body(), {}, 0.0)["right"] == transfer_ids, "open orbit far from the Moon: transfer")
+	# LLO, NRHO, LEO and GEO stay "orbit".
+	var llo := _telemetry(moon)
+	llo.merge({"altitude_m": 100.0e3 + 1.0, "apoapsis_altitude_km": 110.0, "periapsis_altitude_km": 90.0}, true)
+	var orbit_ids := ["speed_inertial", "altitude", "apoapsis", "periapsis"]
+	_check(GaugeRules.select(llo, _body(), {}, 0.0)["right"] == orbit_ids, "LLO: orbit with the inertial speed")
+	var nrho := _telemetry(moon)
+	nrho.merge({"altitude_m": 68.0e6, "apoapsis_altitude_km": 68.5e3, "periapsis_altitude_km": 1500.0}, true)
+	_check(GaugeRules.select(nrho, _body(), {}, 0.0)["right"] == orbit_ids, "NRHO near its apolune: orbit")
+	var geo := _telemetry({"altitude_m": 35.786e6, "apoapsis_altitude_km": 35786.0, "periapsis_altitude_km": 35786.0})
+	_check(GaugeRules.select(geo, _body(), {}, 0.0)["right"] == orbit_ids, "GEO: orbit")
+	var leo := _telemetry({"altitude_m": 400.0e3, "apoapsis_altitude_km": 420.0, "periapsis_altitude_km": 380.0})
+	_check(GaugeRules.select(leo, _body(), {}, 0.0)["right"] == orbit_ids, "LEO: orbit, unchanged")
+	# Just after a TLI: apogee far out but still low: not yet transfer.
+	var after_tli := tli.duplicate()
+	after_tli["altitude_m"] = 1.0e6
+	_check(GaugeRules.select(after_tli, _body(), {}, 0.0)["right"] == orbit_ids, "1,000 km after TLI: still orbit")
+	# Hysteresis: once in transfer it holds slightly below the entry limit and ends clearly below it.
+	var state := {}
+	GaugeRules.select(tli, _body(), state, 0.0)
+	var edge := tli.duplicate()
+	edge["altitude_m"] = 0.9 * GaugeRules.TRANSFER_MIN_ALTITUDE_M
+	_check(GaugeRules.select(edge, _body(), state, 1.0)["right"] == transfer_ids, "transfer holds inside the band")
+	_check(GaugeRules.select(edge, _body(), {}, 1.0)["right"] != transfer_ids, "the band is not entered from outside")
+	edge["altitude_m"] = 0.7 * GaugeRules.TRANSFER_MIN_ALTITUDE_M
+	_check(GaugeRules.select(edge, _body(), state, 2.0)["right"][0] == "speed_inertial", "transfer ends below the band")
+	# Without a Moon in the session: no Moon gauges.
+	var earth_only := tli.duplicate()
+	earth_only.erase("distance_moon_m")
+	earth_only.erase("speed_moon_mps")
+	_check(GaugeRules.select(earth_only, _body(), {}, 0.0)["right"] == ["distance_earth", "speed_earth"],
+			"no Moon in the session: Earth distance and speed only")
 
 
 func _test_window() -> void:

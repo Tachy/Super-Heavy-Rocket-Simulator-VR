@@ -24,6 +24,10 @@ const GAUGES := {
 	"vertical_speed": {"label": "Vertikal", "unit": "m/s", "full_scale": 2000.0, "decimals": 1, "signed": true},
 	"apoapsis": {"label": "Apoapsis", "unit": "km", "full_scale": 400000.0, "log_min": 10.0, "decimals": 0},
 	"periapsis": {"label": "Periapsis", "unit": "km", "full_scale": 400000.0, "log_min": 10.0, "decimals": 0},
+	"distance_earth": {"label": "Erdabstand", "unit": "km", "full_scale": 500000.0, "log_min": 1000.0, "decimals": 0},
+	"distance_moon": {"label": "Mondabstand", "unit": "km", "full_scale": 500000.0, "log_min": 1000.0, "decimals": 0},
+	"speed_earth": {"label": "v Erde", "unit": "km/h", "full_scale": 40000.0, "decimals": 0},
+	"speed_moon": {"label": "v Mond", "unit": "km/h", "full_scale": 40000.0, "decimals": 0},
 	"range": {"label": "Abstand", "unit": "m", "full_scale": 1.0e6, "log_min": 0.1, "decimals": 1},
 	"closing_rate": {"label": "Annäherung", "unit": "m/s", "full_scale": 1.0, "decimals": 2, "signed": true},
 	"g_load": {"label": "Beschleunigung", "unit": "g", "full_scale": 6.0, "decimals": 2},
@@ -204,6 +208,10 @@ static func gauge_value(id: String, t: Dictionary, docking: Dictionary) -> float
 		"vertical_speed": return float(t.get("vertical_speed_mps", 0.0))
 		"apoapsis": return float(t.get("apoapsis_altitude_km", 0.0))
 		"periapsis": return float(t.get("periapsis_altitude_km", 0.0))
+		"distance_earth": return float(t.get("distance_earth_m", 0.0)) / 1000.0
+		"distance_moon": return float(t.get("distance_moon_m", 0.0)) / 1000.0
+		"speed_earth": return float(t.get("speed_earth_mps", 0.0)) * 3.6
+		"speed_moon": return float(t.get("speed_moon_mps", 0.0)) * 3.6
 		"range": return float(docking.get("range_m", 0.0))
 		"closing_rate": return -float(docking.get("range_rate_mps", 0.0))
 		"g_load": return float(t.get("sensed_acceleration_g", 0.0))
