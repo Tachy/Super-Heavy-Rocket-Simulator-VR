@@ -54,16 +54,14 @@ func _test_gauges() -> void:
 	_check(sel["left"].size() <= GaugeRules.MAX_PER_SIDE and sel["right"].size() <= GaugeRules.MAX_PER_SIDE,
 			"never more than 4 per side")
 	_check(sel["left"] == ["engines", "heat_flux", "heat_load", "g_load"], "left side by priority")
-	_check(sel["right"] == ["speed_surface", "speed_inertial", "altitude", "apoapsis"], "right side by priority")
-	sel = GaugeRules.select(_telemetry({"altitude_m": 120.0e3}), _body({"engines": [], "docking": docking}), {}, 0.0)
-	_check("vertical_speed" in sel["right"], "vertical speed below 150 km")
-	# Limit of 4 per side: range / closing rate only fit when the apsides are absent (open orbit here).
-	sel = GaugeRules.select(_telemetry({"altitude_m": 200.0e3, "apoapsis_altitude_km": INF}),
-			_body({"engines": [], "docking": docking}), {}, 0.0)
-	_check(sel["right"] == ["speed_surface", "speed_inertial", "altitude", "range"],
-			"range appears with active docking (closing rate is cut by the 4-per-side limit)")
-	_check(GaugeRules._right_conditions(_telemetry(), _body({"docking": docking})).any(
-			func(c): return c[0] == "closing_rate" and c[1]), "closing rate condition true with active docking")
+	_check(sel["right"] == ["range", "closing_rate", "altitude", "speed_inertial"], "docking: range and closing rate shown")
+	sel = GaugeRules.select(_telemetry({"altitude_m": 400.0e3}), _body(), {}, 0.0)
+	_check(sel["right"] == ["speed_inertial", "altitude", "apoapsis", "periapsis"], "orbit: apsides shown")
+	sel = GaugeRules.select(_telemetry({"altitude_m": 20.0e3}), _body(), {}, 0.0)
+	_check(sel["right"] == ["speed_surface", "altitude", "vertical_speed", "speed_inertial"],
+			"ascent: surface speed, altitude, vertical speed shown")
+	sel = GaugeRules.select(_telemetry({"altitude_m": 200.0e3, "apoapsis_altitude_km": INF}), _body(), {}, 0.0)
+	_check(sel["right"] == ["speed_surface", "altitude", "speed_inertial"], "open orbit: no apsides, no vertical speed")
 	sel = GaugeRules.select(_telemetry({"apoapsis_altitude_km": INF, "altitude_m": 200.0e3}), _body(), {}, 0.0)
 	_check(not ("apoapsis" in sel["right"]) and not ("periapsis" in sel["right"]), "no apsides on an open orbit")
 	_check(GaugeRules.docking_active(docking) and not GaugeRules.docking_active({"present": true, "range_m": 1.0,

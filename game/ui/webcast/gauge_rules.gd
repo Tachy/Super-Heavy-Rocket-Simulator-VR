@@ -19,6 +19,10 @@ const ORBIT_MIN_ALTITUDE_M := 100.0e3
 
 
 ## Returns {"left": Array[String], "right": Array[String]}.
+## Left (vehicle) priority: engines, heat_flux, heat_load, g_load, dynamic_pressure, mach.
+## Right (trajectory) priority depends on the situation: docking [range, closing_rate, altitude, speed_inertial];
+## orbit [speed_inertial, altitude, apoapsis, periapsis]; otherwise [speed_surface, altitude, vertical_speed,
+## speed_inertial]. Each gauge also needs its own condition; at most MAX_PER_SIDE per side.
 ## `body` = {"engines": Array, "stages": Array, "docking": Dictionary}; "docking" is the docking state of this body
 ## (empty when the session's docking state belongs to another body).
 static func select(telemetry: Dictionary, body: Dictionary, state: Dictionary, now_s: float) -> Dictionary:
@@ -45,19 +49,32 @@ static func _left_conditions(t: Dictionary, body: Dictionary) -> Array:
 	]
 
 
+## The right side depends on the flight situation: docking approach, orbit, or ascent / entry / landing / pad.
 static func _right_conditions(t: Dictionary, body: Dictionary) -> Array:
 	var altitude_m := float(t.get("altitude_m", 0.0))
+	var docking := docking_active(body.get("docking", {}))
 	var in_orbit := altitude_m > ORBIT_MIN_ALTITUDE_M and is_finite(float(t.get("apoapsis_altitude_km", INF)))
-	return [
-		["speed_surface", true],
-		["speed_inertial", true],
-		["altitude", true],
-		["vertical_speed", altitude_m < VERTICAL_SPEED_MAX_ALTITUDE_M],
-		["apoapsis", in_orbit],
-		["periapsis", in_orbit],
-		["range", docking_active(body.get("docking", {}))],
-		["closing_rate", docking_active(body.get("docking", {}))],
-	]
+	var conditions := {
+		"speed_surface": true,
+		"speed_inertial": true,
+		"altitude": true,
+		"vertical_speed": altitude_m < VERTICAL_SPEED_MAX_ALTITUDE_M,
+		"apoapsis": in_orbit,
+		"periapsis": in_orbit,
+		"range": docking,
+		"closing_rate": docking,
+	}
+	var ids: Array[String]
+	if docking:
+		ids = ["range", "closing_rate", "altitude", "speed_inertial"]
+	elif in_orbit:
+		ids = ["speed_inertial", "altitude", "apoapsis", "periapsis"]
+	else:
+		ids = ["speed_surface", "altitude", "vertical_speed", "speed_inertial"]
+	var result: Array = []
+	for id in ids:
+		result.append([id, conditions[id]])
+	return result
 
 
 ## Applies the hysteresis and the per-side limit; `conditions` is in priority order.
