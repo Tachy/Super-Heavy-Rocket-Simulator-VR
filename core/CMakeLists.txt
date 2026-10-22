@@ -90,6 +90,8 @@ add_library(starsim_core STATIC
     src/sim/flight_session_capsule.cpp
     src/sim/flight_session_command.cpp
     src/sim/flight_session_return.cpp
+    src/sim/flight_session_crew_escape.cpp
+    src/sim/crew_escape.cpp
     src/sim/flight_session_lunar.cpp
     src/sim/flight_session_lunar_coast.cpp
     src/sim/flight_session_lunar_return.cpp

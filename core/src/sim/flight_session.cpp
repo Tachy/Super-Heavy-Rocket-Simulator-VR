@@ -537,6 +537,16 @@ void FlightSession::erase_body(size_t index) {
         shift(transfer_sides_.delivering);
         shift(transfer_sides_.receiving);
     }
+    if (crew_) {
+        for (auto& m : crew_->state.members) {
+            if (!m.body_index) continue;
+            if (*m.body_index == index) {
+                m.body_index.reset();
+            } else {
+                shift(*m.body_index);
+            }
+        }
+    }
 }
 
 size_t FlightSession::add_station(const config::VehicleConfig& config, const math::StateVector& state_gcrf,
@@ -577,6 +587,7 @@ void FlightSession::set_epoch(time::Epoch epoch) {
 }
 
 void FlightSession::clear_for_new_body(bool keep_station, time::Epoch epoch) {
+    crew_.reset();  // a newly placed flight is uncrewed until set_crew_escape
     if (!keep_station) {
         reboost_.reset();  // everything goes, the released depot too
         bodies_.clear();
@@ -612,6 +623,7 @@ void FlightSession::keep_only_station() {
 void FlightSession::clear_bodies() {
     supervisor_.reset();
     reboost_.reset();
+    crew_.reset();  // a new flight is uncrewed until set_crew_escape
     bodies_.clear();
     clear_station();
     clear_rendezvous_target();
@@ -791,6 +803,11 @@ double FlightSession::coast_allowance_s() const {
         allowance = std::min(allowance, entry_start_ - epoch_);
     }
     if (tower_) allowance = std::min(allowance, tower_->coast_limit_s(body_pointers(), earth_, epoch_));
+    if (crew_ && crew_->state.armed) {  // seats fire, sequence and are judged every tick until the crew is down
+        for (const auto& m : crew_->state.members) {
+            if (m.outcome == CrewOutcome::Flying || (m.body_index && !m.touchdown_enu_m)) return 0.0;
+        }
+    }
     for (const auto& flying : bodies_) {
         const auto& body = *flying.body;
         if (flying.return_guidance && flying.return_guidance->phase() != gnc::ReturnPhase::Landed &&
@@ -841,7 +858,8 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         // Parachute sequencers before the coast check: a body that has not ticked yet (placed, staged, released)
         // must already limit its coast to the watch height (review d4: a placed capsule coasted past 5.5 km).
         for (auto& flying : bodies_) {
-            if (!flying.parachutes && !flying.body->vehicle().stages().front().config.parachutes.empty()) {
+            if (!flying.parachutes && !flying.crew_member &&
+                !flying.body->vehicle().stages().front().config.parachutes.empty()) {
                 flying.parachutes = std::make_unique<gnc::ParachuteSequencer>(
                     flying.body->vehicle().stages().front().config.parachutes);
             }
@@ -874,6 +892,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
                 autopilot_.guidance = guidance_->update(*bodies_[controlled_].body, env_, epoch_, closed_loop);
             }
         }
+        if (crew_) run_crew_escape();  // before the guidance: a give-up must precede this tick's gate hand-over
         for (size_t i = 0; i < bodies_.size(); ++i) {
             if (bodies_[i].return_guidance) {
                 if (tower_) bodies_[i].return_guidance->set_catch_contact(tower_->in_contact(*bodies_[i].body));
@@ -1041,6 +1060,8 @@ void FlightSession::stage() {
 }
 
 ReturnResult FlightSession::ship_return_result(size_t index) const {
+    // crew escape: a crewed ship that was given up is lost (a water landing with crew is no option, user 2026-10-22)
+    if (crew_ && crew_->state.armed && index == controlled_) return ReturnResult::Lost;
     const auto outcome = landing_outcome(index);
     const auto* g = ship_landing(index);
     if (g && g->has_contact()) return return_result(outcome, g->contact_tilt_rad(), g->contact_sink_mps());

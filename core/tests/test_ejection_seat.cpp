@@ -1,6 +1,8 @@
 // Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md), Task 2: the seat envelope and the seat
 // sequencer (ACES II-class modes).
 
+#include <algorithm>
+
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
@@ -69,9 +71,22 @@ TEST_CASE("Mode 1 sequence", "[crew_escape][gnc]") {
     CHECK(r.rocket_thrust > 0.0);
     CHECK(r.late_thrust == 0.0);
     CHECK(r.mains == 1);
-    CHECK(r.main_t == Catch::Approx(crew().mode1_main_delay_s).margin(0.006));
+    // the main goes with the seat-man separation, at the mode's delay but not before the rocket burned out (the rocket
+    // carries the seat with its occupant; nothing pushes the occupant alone)
+    CHECK(r.main_t == Catch::Approx(std::max(crew().mode1_main_delay_s, crew().rocket.back().time_s)).margin(0.006));
     CHECK(r.drogues == 0);
-    CHECK(r.separations == 1);  // the seat falls away as the main opens
+    CHECK(r.separations == 1);
+}
+
+TEST_CASE("No rail thrust after the separation", "[crew_escape][gnc]") {
+    gnc::SeatSequencer s(crew(), SeatMode::Mode2);
+    bool separated = false;
+    for (int i = 0; i <= 400; ++i) {
+        const auto a = s.update({i * 0.005, 1000.0, q_of_eas(200.0), false});
+        if (separated) CHECK(a.rail_thrust_n == 0.0);
+        if (a.separate) separated = true;
+    }
+    CHECK(separated);
 }
 
 TEST_CASE("Mode 2 sequence", "[crew_escape][gnc]") {

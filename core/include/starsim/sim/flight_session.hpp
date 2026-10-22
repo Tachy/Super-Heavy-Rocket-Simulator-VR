@@ -4,10 +4,12 @@
 #include <filesystem>
 #include <functional>
 #include "starsim/config/drone_ship_config.hpp"
+#include "starsim/config/crew_escape_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/contact/landing_surface.hpp"
 #include "starsim/sim/catch_tower_sim.hpp"
+#include "starsim/sim/crew_escape.hpp"
 #include "starsim/sim/docking_sim.hpp"
 #include "starsim/vehicle/compound_mass.hpp"
 #include "starsim/sim/leg_landing_sim.hpp"
@@ -885,6 +887,14 @@ public:
     // How the ship's return ended (sim::return_result): Flying until contact; without a ship landing guidance the
     // landing outcome alone (tilt and sink 0).
     ReturnResult ship_return_result(size_t index) const;
+    // Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md): a crewed ship return carries ejection seats.
+    // With a config the onboard computer checks the controlled ship's catch feasibility through the entry (failed flip
+    // engine, too little propellant: the ship is given up to the sea) and arms the seats on every abort after the flip;
+    // the seats fire inside their envelope (an early give-up over water or at the minimum firing height), each crew
+    // member flies as its own body to the touchdown, the given-up ship is flown on to its impact (ReturnResult::Lost).
+    // nullopt (the default; clear_bodies resets it): uncrewed, nothing changes. Set it after placing the ship.
+    void set_crew_escape(std::optional<config::CrewEscapeConfig> config);
+    const CrewEscapeState* crew_escape_state() const { return crew_ ? &crew_->state : nullptr; }
     // Seconds since liftoff (clamp release); before liftoff: since the vehicle was placed on the pad.
     double mission_time_s() const { return epoch_ - launch_epoch_; }
 
@@ -902,7 +912,26 @@ private:
         std::unique_ptr<gnc::ShipLandingGuidance> ship_landing;  // ship from the gate: flip and catch (its command:
                                                                  // return_command)
         std::unique_ptr<gnc::ParachuteSequencer> parachutes;     // lowest stage with parachute sets (capsule)
+        bool crew_member = false;  // a seat / parachutist body: its chutes are timed by the crew escape, not here
     };
+    // Crew escape run time (set_crew_escape): per seat its sequencer, rail direction and load / clearance trackers.
+    struct CrewRuntime {
+        config::CrewEscapeConfig config;
+        config::VehicleConfig seat_vehicle, parachutist_vehicle;
+        CrewEscapeState state;
+        std::vector<double> sink_mps;          // per member, Earth-fixed, last tick before its touchdown
+        std::vector<std::optional<gnc::SeatSequencer>> sequencers;
+        std::vector<math::Vec3> rail_gcrf;     // fixed at the seat's firing
+        std::vector<LoadJudge> loads;
+        std::vector<bool> out_of_hull;         // the seat left the hatch (hull clearance counted from then on)
+        std::optional<time::Epoch> fire_epoch;  // first seat
+        double ship_speed_mps = 0.0;           // Earth-fixed, last tick before the impact
+    };
+    void run_crew_escape();
+    void crew_arm(const std::string& reason, bool early);
+    void crew_fire_seat(size_t member);
+    void crew_judge(size_t member);
+    double crew_height_m(const vehicle::FlightBody& body) const;  // above the flat site ground
 
     vehicle::VehicleCommand command_for(size_t index, double ambient_pressure_pa) const;
     void run_autopilot();
@@ -1184,6 +1213,7 @@ private:
     static constexpr double entry_trim_margin_s = 30.0;
     // The entry guidance parameters of a lunar return (lunar_return() / aerocapture()); empty: the LEO ship return's.
     std::optional<gnc::EntryGuidanceParameters> return_entry_parameters_;
+    std::unique_ptr<CrewRuntime> crew_;  // set_crew_escape
     math::StateVector controlled_state() const;
 
     // ISS mission sequence (flight_session_iss_mission.cpp).

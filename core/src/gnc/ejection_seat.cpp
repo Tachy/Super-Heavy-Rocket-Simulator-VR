@@ -48,14 +48,18 @@ SeatActions SeatSequencer::update(const SeatInput& in) {
     const auto& c = *config_;
     SeatActions a;
     const double t = in.t_since_fire_s;
-    a.rail_thrust_n = config::thrust_at(c.catapult, t) + config::thrust_at(c.rocket, t);
+    const bool seated = phase_ == SeatPhase::Waiting || phase_ == SeatPhase::Catapult || phase_ == SeatPhase::Rocket ||
+                        phase_ == SeatPhase::Drogue;
+    a.rail_thrust_n = seated ? config::thrust_at(c.catapult, t) + config::thrust_at(c.rocket, t) : 0.0;
     if (phase_ == SeatPhase::Waiting) phase_ = SeatPhase::Catapult;
     if (phase_ == SeatPhase::Catapult && config::thrust_at(c.catapult, t) <= 0.0 && t > c.catapult.front().time_s) {
         phase_ = SeatPhase::Rocket;
     }
     const bool rocket_phase = phase_ == SeatPhase::Catapult || phase_ == SeatPhase::Rocket;
     if (mode_ == SeatMode::Mode1) {
-        if (rocket_phase && t >= c.mode1_main_delay_s) {
+        // the rocket carries seat and occupant: the separation (and the main) not before its burnout
+        const double burnout_s = std::max(c.catapult.back().time_s, c.rocket.back().time_s);
+        if (rocket_phase && t >= std::max(c.mode1_main_delay_s, burnout_s)) {
             a.separate = a.deploy_main = true;
             phase_ = SeatPhase::Main;
         }
