@@ -1,12 +1,13 @@
 # Ansichten und Bedienung im fertigen Simulator
 
-Stand: 12.10.2026. Lebendes Dokument: Es wird bei jeder Änderung an Ansichten oder Bedienung mitgepflegt.
+Stand: 22.10.2026. Lebendes Dokument: Es wird bei jeder Änderung an Ansichten oder Bedienung mitgepflegt.
 Markierungen: **[Entschieden]** = mit dem Nutzer abgestimmt, **[Vorschlag]** = Entwurf, noch zu bestätigen.
 
 ## 1. Grundsätze
 
 - **[Entschieden]** Alle Ansichten gibt es auf dem Desktop und in VR (OpenXR, PC-VR). VR und Desktop sind
-  getrennte Startmodi (Muster aus Stunt Track Racer VR, siehe Plan M7).
+  getrennte Startmodi (Muster aus Stunt Track Racer VR, siehe Plan M7): `Start-Desktop.cmd` und `Start-VR.cmd`
+  (Headset an, OpenXR-Laufzeit läuft; ohne Headset zeigt das Spiel eine Meldung und beendet sich).
 - **[Entschieden]** Die Oberfläche ist deutsch, Einheiten SI (Anzeige: km, km/h, m/s, t, MN, kPa).
 - **[Entschieden]** Alle Eingabebelegungen (HOTAS, VR-Controller, Tastatur, Maus) sind änderbar und werden
   über einen **Einstellungsassistenten** abgefragt (Abschnitt 7).
@@ -18,7 +19,7 @@ Markierungen: **[Entschieden]** = mit dem Nutzer abgestimmt, **[Vorschlag]** = E
 |---|---|---|---|
 | Missionsplanung | Mission entwerfen: Start, Ziele, Landeplätze, Manöver | 6DOF-Navigation (HOTAS / VR), Maus | M6 |
 | Cockpit | Fliegen aus dem Pilotensitz | HOTAS, Berührung der Bildschirme | M7 |
-| Außenansichten | Fahrzeug von außen, Kameras an Bord | Maus / Kopf, Umschalten | vorhanden, Ausbau M7/M8 |
+| Außenansichten | Fahrzeug von außen, Webcast-Overlay, Kameras an Bord | Maus / Kopf, Tab | Webcast-Ansicht vorhanden (Desktop + VR), Ausbau M7/M8 |
 | Karte | Erde-Mond-System, Bahnen, Manöver im Flug | wie Missionsplanung | vorhanden, Ausbau M6 |
 | Auswertung | Telemetrie, Soll/Ist, Export | Maus | M6 |
 
@@ -148,8 +149,41 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 
 ## 5. Außenansichten
 
+### Webcast-Overlay [Entschieden, umgesetzt 2026-10-22]
+
+Die Außenansicht trägt ein Overlay im Stil der Starship-Webcasts (Spec `docs/superpowers/specs/2026-10-22-external-view-design.md`).
+Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis es das Cockpit gibt.
+- **Oben:** UTC der Simulation, daneben der Zeitraffer.
+- **Zeitbogen:** flacher Bogen oben in der Mitte, "jetzt" am Scheitel. Ereignisse laufen rechts herein und links hinaus,
+  die Enden blenden aus. Die Zeitskala ist gestaucht (grob nach relativer Zeit, kein strenger Maßstab) und um "jetzt"
+  symmetrisch; sie richtet sich nach den nächsten zwei bis drei Ereignissen und gleitet ohne Sprünge. Beschriftungen
+  stehen tangential am Bogen und wechseln zwischen oben und unten; es erscheinen keine Teilnamen (Booster, Ship) am Bogen.
+- **Uhr:** T-/T+ unter dem Scheitel des Bogens, darunter der Missionsname. T-0 ist der Start (Abheben), bei
+  Missionen ohne Start die erste Zündung bzw. das Abkoppeln.
+- **Ereignisse:** Vergangene Ereignisse sind volle Punkte (Abheben, Max Q, MECO, Stufentrennung, SECO, Boostback,
+  Landebrennen, Fangen, Zündung, Abkoppeln ...); MECO/SECO zählen ab dem Abschaltbefehl. **Vorhersagen des Bordrechners**
+  sind hohle Punkte; ein Ereignis erscheint erst, wenn der Bordrechner seinen Zeitpunkt festgelegt hat.
+- **Anzeigen:** links Zustand des Fahrzeugs (Triebwerke, Wärmestrom, Wärmelast, g-Last, Staudruck, Mach), rechts die
+  Bahn, je nach Situation: **Annäherung** (Abstand, Annäherungsgeschwindigkeit, Höhe, Geschwindigkeit), **Transfer**
+  (Abstand und Geschwindigkeit zu Erde und Mond, Höhe > 5000 km und Apoapsis > 100000 km), **Orbit** (inertiale
+  Geschwindigkeit, Höhe, Apo-/Periapsis), sonst (Oberflächengeschwindigkeit, Höhe, Vertikalgeschwindigkeit,
+  inertiale Geschwindigkeit). Höchstens 4 Anzeigen je Seite; sinnlose Werte (Mach/g am Boden) werden ausgeblendet und
+  neue Anzeigen halten 5 s. Treibstoff ist **eine** Anzeige (Füllung der Haupttanks in Prozent). Das Triebwerksbild
+  hat dieselbe Größe wie die runden Anzeigen. Die Zuordnung soll später datengetrieben in
+  `config/ui/webcast_gauges.toml` stehen und vom Einstellungsassistenten änderbar sein [Entschieden, Folgeplan].
+- **Bedienung (Desktop):** rechte Maustaste halten = Nicken und Drehen um die Lotrechte; Mausrad = Zoom
+  (logarithmisch); die linke Taste bleibt frei. **Tab / Umschalt+Tab** wechseln das Objekt, dem die Kamera folgt
+  (Booster, Ship, Kapsel, Station ...). **F1** alter HUD. **F12** zentriert in VR neu (außerdem automatisch 2 s nach dem
+  Start).
+- **VR:** das Overlay liegt auf einer gekrümmten Fläche (Radius 2 m, 64° horizontal) an der Grundpose des Kopfes
+  (nach F12 neu gesetzt), nicht am Kopf festgeklebt. Die manuelle VR-Sitzung mit dem Headset steht noch aus.
+- **Missionsstart:** Startmissionen stehen ab dem Anfordern auf der Rampe und heben zum geplanten T-0 ab
+  (Fensterstart bei ISS-Missionen); der Countdown läuft als T-.
+
+### Weitere Außenansichten
+
 [Vorschlag] Umschaltbar per Taste / Bildschirm:
-- Verfolgerkamera um das Fahrzeug (heute vorhanden), mit lokaler Vertikalen als "oben".
+- Verfolgerkamera um das Fahrzeug (vorhanden, siehe oben), mit lokaler Vertikalen als "oben".
 - Kameras an Bord: Booster-Triebwerke, Ship-Triebwerke, Ship nach vorn, Hot-Staging-Ring.
 - Bodenbeobachter an Startplatz/Landeplatz (heute vorhanden).
 - Freie Kamera (6DOF-Navigation wie in der Missionsplanung).
@@ -193,4 +227,7 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 - Belegung der VR-Freiheitsgrade 5 und 6 (Vorschlag in Abschnitt 3).
 - Rückwärtsbewegung mit dem TWCS: Wippe oder Hebel mit künstlicher Mitte?
 - Cockpit Starship-Stil: Wie viele Fenster, wo sitzen die drei Plätze relativ zu den Fenstern?
+- UI-Sprache: heute deutsch; die Anzeigenamen der Fahrzeuge und Stufen bleiben vorerst englisch (`display_name` in
+  der Config, keine Markennamen). Die Sprachen legt der Nutzer später fest.
+- Fahrzeugmodell beim Wiedereintritt: Hitzeschild und Klappen sichtbar, ggf. Anstell-/Rollwinkel-Anzeigen [Entschieden, Folgeplan].
 - Sollen die zwei Crewmitglieder auch Aufgaben übernehmen (z. B. Checklisten), oder nur Ansagen?

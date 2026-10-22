@@ -21,7 +21,7 @@ crew_escape/<id>.toml   ejection seats of a crewed ship return (referenced by mi
   - `[S:<ref>]` sourced value, `<ref>` points to the `[sources]` table at the top of the file
   - `[E]` engineering estimate (no public data); calibrate against flight telemetry
   - `[D]` derived from other values in the file (the comment shows how)
-- Display names (shown in the game, German, no trademarks; the `name` fields keep the real names and are never shown
+- Display names (shown in the game, English for now - the UI language is decided later, no trademarks; the `name` fields keep the real names and are never shown
   in the webcast overlay): `[vehicle] display_name` for the whole vehicle; `[[stage]] display_name` (optional) for a
   stage that flies as a separate body (booster, ship, capsule, trunk). A part split off at staging is shown by its
   lowest stage with main engines, else its topmost named stage (`vehicle::Vehicle::shown_name`).
@@ -141,7 +141,7 @@ flow separation (vacuum engines).
   depot is added without its booster).
 - `[stage.station.reference_orbit]`: the synthetic orbit without any OEM - `altitude_km` (a minus the equatorial
   radius), `inclination_deg`, `raan_deg` (both in the true equator frame of date), `reference_utc`.
-- `[[stage.docking_port]]`: `id`, `name` (German, shown), `position_m` (stage frame: x station from the stage bottom,
+- `[[stage.docking_port]]`: `id`, `name` (shown; English for now), `position_m` (stage frame: x station from the stage bottom,
   y/z body axes), `axis` (outward unit vector), `up` (clocking reference perpendicular to it), optional
   `behind_nose_cone` (default false: the port is covered while the vehicle's nose cone is closed - Crew Dragon `idss`),
   optional `soft_capture = "active" | "passive"` (default passive; IDSS: the active side extends its soft-capture ring,
@@ -202,7 +202,7 @@ flow separation (vacuum engines).
   `arm_closed_gap_m / 2 + arm_width_m / 2` from the catch axis.
 
 ## Splashdown zones (`splashdown_zones.toml`)
-- `[[zone]]`: `id`, `name` (German), `latitude_deg`, `longitude_deg`, `radius_m`. A capsule's entry guidance aims its
+- `[[zone]]`: `id`, `name` (shown; English for now), `latitude_deg`, `longitude_deg`, `radius_m`. A capsule's entry guidance aims its
   drogue gate over the centre at sea level (`FlightSession::set_splashdown_zone`).
 
 ## Drone ships (`drone_ships.toml`)

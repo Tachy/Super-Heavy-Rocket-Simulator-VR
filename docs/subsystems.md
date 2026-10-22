@@ -1830,6 +1830,11 @@ Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure dat
   - Not predicted (no guidance holds a time): the boostback ignition (the flip ends on attitude), Falcon 9's entry
     burn, the splashdown (parachute descent), the docking (the final approach has holds) and a propellant transfer's
     end. Max Q is never predicted.
+- **Transfer telemetry** (Task 4c): `FlightBody` telemetry carries `speed_inertial_mps` (|v| about the reference body,
+  not the Earth's centre: the ruling is that the lunar orbit's speed is shown about the Moon), `distance_earth_m` /
+  `distance_moon_m` (from the centres) and `speed_earth_mps` (|v_gcrf|) / `speed_moon_mps` (|v_gcrf - v_moon|). They are
+  in the telemetry CSV and the legacy HUD and drive the webcast's transfer situation (`gauge_rules.gd`: altitude
+  > 5000 km and apoapsis > 100000 km [E], with hysteresis `TRANSFER_EXIT_FACTOR` 0.8).
 - **Tests:** `[timeline]` (`test_mission_timeline.cpp`): T-0 rules; the recorded ascent, booster return, flip and
   catch, cold staging, lunar-return loft, undocking; scheduled liftoff with pad hold (one 4000-tick call coasts 5.96 h,
   altitude within 0.1 m of the pad); waiting ISS launch; countdown of a waiting ascent; predicted deorbit events before

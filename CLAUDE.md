@@ -72,6 +72,9 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   feasibility through the entry, give-up to the sea, ejection seats with their envelope and modes, each crew member a
   body to the touchdown, the empty ship to its impact; ship data untouched).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
+  sim also holds the mission timeline (`sim::MissionTimeline`: recorded events, onboard-computer predictions, T-0, scheduled
+  liftoff with pad hold via `FlightSession::schedule_liftoff` / `StartOptions::wait_on_pad`); vehicle telemetry has the
+  inertial speed about the reference body and Earth / Moon distances and speeds.
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
   CSPICE lives only in `core/src/spice/` and implements `time::TimeScaleConverter`,
@@ -132,6 +135,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   included), also before a push and before a plan's final review; no blanket `-Fast` or full-suite runs. A change to
   shared code (e.g. `FlightSession::advance_to`, `Vehicle::mass_properties`) whose new branch is inactive for other
   subsystems does not pull their campaigns in. Tag a new test case `[slow]` when it takes more than ~40 s.
+- `-TestFilter` runs the test exe serially in one process: for many cases or `[slow]` campaigns build with `-NoTests`
+  and use `ctest --test-dir build -j 24 -L "^(tag1|tag2)$"`.
 - Long test runs (user 2026-10-20): a run that may take longer than 10 minutes goes to the background with its output
   in a file; check its state every 10 minutes (failures so far, a case hanging or far beyond its usual time). When
   tests are going wrong, stop the run early and fix the cause instead of waiting for the end.
@@ -193,7 +198,13 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   throttle lever) only exist when `config/sdl_gamecontrollerdb.txt` is loaded BEFORE engine start via
   `SDL_GAMECONTROLLERCONFIG_FILE` (done by `Start-Desktop.cmd`); Godot's built-in mappings drop them and
   `Input.add_joy_mapping` at runtime has no effect. Probe axes: `res://tests/joy_probe.gd`.
-- Start the game with `Start-Desktop.cmd` (repo root).
+- Start the game with `Start-Desktop.cmd` (repo root); `Start-VR.cmd` starts the OpenXR mode (`openxr/enabled=false` in
+  project.godot: headless runs never touch the runtime).
+- External view (plan 2026-10-22): `game/xr/` (`xr_manager.gd`: start modes, F12 recentre + automatic 2 s after start;
+  `vr_overlay_panel.gd`: curved panel, 2 m / 64 deg), `game/ui/webcast/` (webcast overlay: timeline arc, round gauges
+  chosen by `gauge_rules.gd` per situation, engine gauge, UTC + T-/T+ clock; the old HUD stays behind F1). Camera:
+  `world/orbit_camera.gd` + `camera_math.gd` (right mouse button orbits around the local vertical, wheel zoom is
+  logarithmic), `view_target.gd` + Tab / Shift+Tab switch the followed body. Spec `docs/superpowers/specs/2026-10-22-external-view-design.md`.
 - VR (M7): reuse the VR/desktop start-mode pattern of the sibling project `../Stunt-Track-Racer-VR`
   (`scripts/autoload/xr_manager.gd`, `Start-VR.cmd` / `Start-Desktop.cmd`); details in the plan, M7.
 
