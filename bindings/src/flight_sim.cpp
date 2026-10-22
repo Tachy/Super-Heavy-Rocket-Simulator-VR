@@ -183,6 +183,7 @@ int64_t FlightSim::launch_from_pad(const godot::String& vehicle_id, double latit
         const double deg = constants::deg_to_rad;
         session.launch_from_pad(vehicle, {latitude_deg * deg, longitude_deg * deg, height_m}, heading_deg * deg,
                                 epoch(tdb_s));
+        session.reset_timeline();  // a fresh mission log, as launch_from_site
         context_.mission_display_name = godot::String();
         context_.mission_start_tdb_s = tdb_s;
         return Outcome{true, {}};

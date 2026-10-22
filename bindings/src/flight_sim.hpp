@@ -43,8 +43,9 @@ public:
                             double heading_deg, double tdb_s);
     // Launch from a site of config/launch_sites.toml (with its catch tower, if it has one).
     // countdown_s > 0: the vehicle stands clamped on the pad and liftoff is scheduled at tdb_s + max(countdown_s, the
-    // ignition lead); a free launch has no autopilot, so the T- clock (mission_timeline) counts to it until the pilot
-    // releases the clamps. The mission log (mission_timeline) starts fresh with every launch.
+    // ignition lead); the ascent autopilot (engaged by the game's external view) lifts off at T-0. Without it the T-
+    // clock (mission_timeline) counts down to T-0 and holds there until a liftoff. The mission log (mission_timeline)
+    // starts fresh with every launch (also launch_from_pad).
     int64_t launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg,
                              double tdb_s, double countdown_s = 0.0);
     // Mission of config/missions by its [mission] kind: an ascent starts at `tdb_s` (payload, pad, landing zone or drone

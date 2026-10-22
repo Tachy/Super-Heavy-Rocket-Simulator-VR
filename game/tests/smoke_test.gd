@@ -110,8 +110,23 @@ func _check_thread(config_dir: String, tdb: float) -> bool:
 	_check(_ok(countdown_sim, countdown_sim.launch_from_site("starship_block3", "starbase_olp1", 0.0, tdb, 30.0)), "countdown launch starts")
 	var clock = countdown_sim.mission_timeline().get("clock_s")
 	_check(clock != null and absf(float(clock) + 30.0) < 1e-3, "countdown launch: T-30 clock at the start (%s)" % str(clock))
+	for i in 10:  # past T-0 without the autopilot: nobody releases the clamps
+		_advance(countdown_sim, tdb + 45.0)
+	clock = countdown_sim.mission_timeline().get("clock_s")
+	_check(clock != null and float(clock) == 0.0, "no liftoff past T-0: the clock holds at T-0 (%s)" % str(clock))
+	# launch_from_pad starts a fresh mission log (the LEO mission above had lifted off)
+	_check(_ok(sim, sim.launch_from_pad("starship_block3", 25.99686, -97.15394, 10.0, 90.0, tdb + 300.0)),
+			"launch_from_pad on a flown session")
+	var fresh_kinds: Array = []
+	for e in sim.mission_timeline().get("events", []):
+		fresh_kinds.append(e["kind"])
+	_check(not fresh_kinds.has("liftoff"), "launch_from_pad: a fresh mission log (%s)" % str(fresh_kinds))
 	sim.setup(config_dir)  # re-setup joins the old thread
 	_check(not sim.is_active(), "re-setup starts empty")
+	var empty: Dictionary = sim.mission_timeline()
+	_check(empty.has("t0_tdb_s") and empty["t0_tdb_s"] == null and empty["clock_s"] == null
+			and empty.get("events") is Array and (empty["events"] as Array).is_empty(),
+			"no flight: the mission log has the full shape, empty (%s)" % str(empty))
 	return true
 
 

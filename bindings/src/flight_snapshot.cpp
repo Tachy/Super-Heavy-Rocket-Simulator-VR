@@ -445,7 +445,9 @@ std::shared_ptr<const FlightSnapshot> empty_snapshot() {
     s->lunar_site = absent();
     s->iss_state = s->rendezvous_plan = s->docking_state = s->station_geometry = s->iss_mission = absent();
     s->transfer_state = s->depot_state = s->campaign_flight_state = s->crew_escape_state = absent();
-    s->mission_timeline = absent();
+    s->mission_timeline["t0_tdb_s"] = godot::Variant();  // the shape of build_mission_timeline: no T-0, no events
+    s->mission_timeline["clock_s"] = godot::Variant();
+    s->mission_timeline["events"] = godot::Array();
     return s;
 }
 
