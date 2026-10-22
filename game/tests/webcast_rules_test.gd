@@ -128,9 +128,55 @@ func _test_window() -> void:
 	_check(absf(TimelineWindow.arc_position(-1000.0, sc) + edge) < 1e-9, "no next event: the last past event at the left edge")
 	sc = TimelineWindow.target_scale(PackedFloat64Array([now - 10.0 * 86400.0, now + 6.0 * 3600.0]), now)
 	_check(absf(TimelineWindow.arc_position(6.0 * 3600.0, sc) - edge) < 1e-9, "a single event 6 h ahead: scale of hours")
+	_test_glide(now)
 	var e := TimelineWindow.ease(Vector2(0, 10), Vector2(100, 200), 2.0)
 	_check(absf(e.x - 100.0 * (1.0 - exp(-1.0))) < 1e-9, "ease: one time constant per 2 s")
 	_check(TimelineWindow.ease(Vector2(0, 10), Vector2(5, 20), 0.0) == Vector2(0, 10), "ease: zero delta keeps the scale")
+
+
+## Fix 2: with fixed events the scale stays put, so the nearest event glides steadily to the apex (no jump at the end);
+## it is chosen anew once that event has passed.
+func _test_glide(now: float) -> void:
+	var events := PackedFloat64Array([now - 40.0, now + 60.0, now + 160.0, now + 3.0 * 86400.0, now + 4.0 * 86400.0])
+	var holder := TimelineWindow.new()
+	var first := holder.scale_target(events, now)
+	var edge := TimelineWindow.visible_half_fraction()
+	_check(absf(TimelineWindow.arc_position(3.0 * 86400.0, first) - edge) < 1e-9, "furthest of the next 3 at the fade edge")
+	var step_s := 0.5
+	var last := INF
+	var last_step := 0.0
+	var max_step := 0.0
+	var max_growth := 0.0
+	var steady := true
+	var t := now
+	while t <= now + 60.0 - step_s:
+		var scale := holder.scale_target(events, t)
+		steady = steady and scale == first
+		var p := TimelineWindow.arc_position(now + 60.0 - t, scale)
+		if is_finite(last):
+			var step := last - p
+			steady = steady and step > 0.0
+			max_step = maxf(max_step, step)
+			if last_step > 0.0:
+				max_growth = maxf(max_growth, step / last_step)
+			last_step = step
+		last = p
+		t += step_s
+	var final_step := last  # the last 0.5 s down to the apex
+	_check(steady, "scale fixed and the nearest event moving monotonically towards the apex")
+	_check(maxf(max_step, final_step) < 0.06 and max_growth < 1.6,
+			"smooth glide: largest step %.4f of the half-arc per 0.5 s (last %.4f), growth %.2f per step"
+			% [max_step, final_step, max_growth])
+	var after := holder.scale_target(events, now + 61.0)
+	_check(after != first and absf(TimelineWindow.arc_position(4.0 * 86400.0 - 61.0, after) - edge) < 1e-9,
+			"after it passed, a new scale for the next three")
+	var moved := events.duplicate()
+	moved[2] = now + 160.0 + 0.5 * TimelineWindow.RESCALE_TOLERANCE * first.y
+	holder.reset()
+	holder.scale_target(events, now)
+	_check(holder.scale_target(moved, now + 1.0) == first, "a small prediction change keeps the scale")
+	moved[2] = now + 160.0 + 2.0 * TimelineWindow.RESCALE_TOLERANCE * first.y
+	_check(holder.scale_target(moved, now + 1.0) != first, "a prediction moving by more than the tolerance rescales")
 
 
 func _test_labels() -> void:

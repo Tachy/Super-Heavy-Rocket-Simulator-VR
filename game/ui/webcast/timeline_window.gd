@@ -67,6 +67,51 @@ static func target_scale(events_tdb: PackedFloat64Array, now_tdb: float) -> Vect
 	return Vector2(knee, reach)
 
 
+## [E] A predicted next event that moves by more than this fraction of the shown reach counts as a new event set.
+const RESCALE_TOLERANCE := 0.05
+
+## Instance state of the scale target (one per arc): the set of next events it was chosen for and the scale.
+var _next_key := PackedFloat64Array()
+var _target := Vector2.ZERO
+
+
+## Scale target that stays fixed while the next events stay the same (fix 2: a target recomputed every frame kept the
+## nearest event pinned at NEAR_MIN_POSITION, so it jumped to the apex in its last seconds). It is chosen anew by
+## target_scale when an event passes now, a new one is predicted, or a predicted time moves by more than
+## RESCALE_TOLERANCE of the reach; in between every event glides steadily towards the apex.
+func scale_target(events_tdb: PackedFloat64Array, now_tdb: float) -> Vector2:
+	var key := next_events(events_tdb, now_tdb)
+	if _target == Vector2.ZERO or _changed(key):
+		_next_key = key
+		_target = target_scale(events_tdb, now_tdb)
+	return _target
+
+
+## Forgets the chosen scale (a new mission or a time jump).
+func reset() -> void:
+	_next_key = PackedFloat64Array()
+	_target = Vector2.ZERO
+
+
+## The next FUTURE_EVENTS event times after `now_tdb`, sorted.
+static func next_events(events_tdb: PackedFloat64Array, now_tdb: float) -> PackedFloat64Array:
+	var future: Array[float] = []
+	for t in events_tdb:
+		if t > now_tdb:
+			future.append(t)
+	future.sort()
+	return PackedFloat64Array(future.slice(0, FUTURE_EVENTS))
+
+
+func _changed(key: PackedFloat64Array) -> bool:
+	if key.size() != _next_key.size():
+		return true
+	for i in key.size():
+		if absf(key[i] - _next_key[i]) > RESCALE_TOLERANCE * _target.y:
+			return true
+	return false
+
+
 ## Arc position of an event `dt_s` from now (negative: past) for `scale` = Vector2(knee_s, reach_s): monotone, 0 at
 ## now, +-visible_half_fraction() at +-reach, logarithmic beyond the knee. |position| > 1 lies off the arc.
 static func arc_position(dt_s: float, scale: Vector2) -> float:

@@ -47,6 +47,7 @@ var _rule_state := {}
 var _serial := -1
 var _log_scale := Vector2.ZERO  ## log of the shown timeline scale (knee_s, reach_s): eased in log space
 var _scale_t0: Variant = null   ## T-0 the scale belongs to
+var _scale_target := TimelineWindow.new()  ## the scale chosen for the current set of next events
 var _last_now := 0.0
 var _snap := true
 
@@ -160,11 +161,14 @@ func _update_timeline(timeline: Dictionary, now: float, delta: float) -> void:
 	var times := PackedFloat64Array()
 	for e: Dictionary in events:
 		times.append(float(e["tdb_s"]))
-	var target := TimelineWindow.target_scale(times, now)
-	var target_log := Vector2(log(target.x), log(target.y))
 	var t0 = timeline.get("t0_tdb_s")
 	var jumped := absf(now - _last_now) > exp(_log_scale.y)  # more than the shown reach in one frame
-	if _snap or jumped or t0 != _scale_t0:
+	var fresh: bool = _snap or jumped or t0 != _scale_t0
+	if fresh:
+		_scale_target.reset()
+	var target := _scale_target.scale_target(times, now)  # fixed while the next events stay the same
+	var target_log := Vector2(log(target.x), log(target.y))
+	if fresh:
 		_log_scale = target_log  # first frame, a time jump or a new mission: no easing
 		_scale_t0 = t0
 		_snap = false
