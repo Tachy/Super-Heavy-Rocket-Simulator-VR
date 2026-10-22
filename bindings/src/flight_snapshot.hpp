@@ -53,6 +53,7 @@ struct FlightSnapshot {
         godot::Vector3 position_gcrf_m, velocity_gcrf_mps;
         godot::Quaternion attitude_gcrf;
         double cg_station_m = 0.0;
+        int64_t serial = 0;  // FlightSession::body_serial: stable identity
         godot::Array stages, engines, flaps, grid_fins, rcs, parachutes;
         godot::Dictionary legs, capsule_state, telemetry, return_state;
     };
@@ -63,6 +64,7 @@ struct FlightSnapshot {
     godot::Dictionary transfer_state, depot_state;  // refuelling r6
     godot::Dictionary campaign_flight_state;        // refuelling f2
     godot::Dictionary crew_escape_state;            // crew escape
+    godot::Dictionary mission_timeline;             // build_mission_timeline
     std::shared_ptr<const environment::LunarTerrain> moon_terrain;  // immutable: queried on the main thread
     bool has_target_orbit = false;
     godot::Vector3 target_plane_normal_gcrf;
@@ -96,6 +98,8 @@ godot::Dictionary build_depot_state(const sim::FlightSession& session);
 godot::Dictionary build_campaign_flight_state(const sim::FlightSession& session);  // f2
 // Crew escape (flight_snapshot_crew_escape.cpp; FlightSim::crew_escape_state documents the keys).
 godot::Dictionary build_crew_escape_state(const sim::FlightSession& session);
+// Mission timeline (flight_snapshot_timeline.cpp; FlightSim::mission_timeline documents the keys).
+godot::Dictionary build_mission_timeline(const sim::FlightSession& session, time::Epoch epoch);
 godot::Dictionary campaign_dictionary(const sim::CampaignReport& report, const time::TimeScaleConverter& time);
 
 // Builds the snapshot from the session (worker thread). `previous` supplies the prediction when it is not due.

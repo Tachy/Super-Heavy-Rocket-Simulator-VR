@@ -42,13 +42,17 @@ public:
     int64_t launch_from_pad(const godot::String& vehicle_id, double latitude_deg, double longitude_deg, double height_m,
                             double heading_deg, double tdb_s);
     // Launch from a site of config/launch_sites.toml (with its catch tower, if it has one).
+    // countdown_s > 0: the vehicle stands clamped on the pad and liftoff is scheduled at tdb_s + max(countdown_s, the
+    // ignition lead); a free launch has no autopilot, so the T- clock (mission_timeline) counts to it until the pilot
+    // releases the clamps. The mission log (mission_timeline) starts fresh with every launch.
     int64_t launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg,
-                             double tdb_s);
+                             double tdb_s, double countdown_s = 0.0);
     // Mission of config/missions by its [mission] kind: an ascent starts at `tdb_s` (payload, pad, landing zone or drone
     // ship, booster return, ascent autopilot); a capsule return at its own epoch (mission_start_tdb_s()) with the deorbit
     // planned; a lunar landing (from LEO) or lunar return (from lunar orbit) at its own epoch with all legs planned; not ok
     // for an unknown, invalid or ship-return mission, or a lunar mission the planner refuses (message: its reason).
-    int64_t start_mission(const godot::String& mission_id, double tdb_s);
+    // wait_on_pad: launch missions stand on the pad and lift off at their scheduled T-0 (sim::StartOptions).
+    int64_t start_mission(const godot::String& mission_id, double tdb_s, bool wait_on_pad = false);
     // Epoch (TDB s) the current flight began at: the launch, or a return mission's own epoch (the world clock jumps there).
     double mission_start_tdb_s() const;
     // Launch site id of the current flight (launch_from_site or the mission), "" before the first.
@@ -116,8 +120,11 @@ public:
     godot::Quaternion body_attitude_gcrf(int index) const;
     double body_cg_station_m(int index) const;
     // [{name, base_station_m, length_m, diameter_m, nose_length_m, settled (f3: 0..1)}] bottom to top
+    // (also oxidizer_kg, fuel_kg, oxidizer_capacity_kg, fuel_capacity_kg: the main tanks)
     godot::Array body_stages(int index) const;
-    // [{position_m (body, relative to the bottom), firing, throttle, spool}]
+    // Stable identity of a body (survives reindexing when bodies separate or are removed), 0 for an invalid index.
+    int64_t body_serial(int index) const;
+    // [{position_m (body, relative to the bottom), firing, throttle, spool, stage (index into body_stages)}]
     godot::Array body_engines(int index) const;
     // Flaps of a body (stations in its body frame, deflection 0 folded leeward .. 90 broadside) for rendering.
     godot::Array body_flaps(int index) const;
@@ -229,6 +236,10 @@ public:
     // Each fired member is also an ordinary body (body_stages etc.). return_state(i) of the ship: phase, guidance,
     // abort, upright_descent, result (sim::ReturnResult, German).
     godot::Dictionary crew_escape_state() const;
+    // Mission log: {t0_tdb_s (null: none yet), clock_s (snapshot epoch - T-0, negative = T-; null: none), events:
+    // [{kind (snake_case id: "liftoff", "max_q", "meco", ...), label (German), tdb_s, body_serial (0: mission-wide),
+    // body_name, predicted}]} recorded and predicted events sorted by tdb_s.
+    godot::Dictionary mission_timeline() const;
     // Makes the current flight crewed with config/crew_escape/<id>.toml (empty id: uncrewed). Set it after the ship is
     // placed or the mission started (a new placement makes the flight uncrewed). Not ok for an unknown id.
     int64_t set_crew_escape(const godot::String& id);

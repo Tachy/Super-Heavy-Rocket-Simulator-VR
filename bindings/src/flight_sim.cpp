@@ -132,23 +132,29 @@ bool FlightSim::wait_idle(double timeout_s) {
 double FlightSim::planning_s() const { return runner_ ? runner_->busy_s() : 0.0; }
 
 int64_t FlightSim::launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg,
-                                    double tdb_s) {
+                                    double tdb_s, double countdown_s) {
     const std::string vehicle = vehicle_id.utf8().get_data(), site = site_id.utf8().get_data();
-    return static_cast<int64_t>(post("launch_from_site", [this, vehicle, site, site_id, heading_deg,
-                                                          tdb_s](sim::FlightSession& session) {
+    return static_cast<int64_t>(post("launch_from_site", [this, vehicle, site, site_id, heading_deg, tdb_s,
+                                                          countdown_s](sim::FlightSession& session) {
         const auto config = config::load_launch_site(config_dir_, site);
         session.launch_from_pad(vehicle, sim::launch_site_from_config(config), heading_deg * constants::deg_to_rad,
                                 epoch(tdb_s));
+        if (countdown_s > 0.0) {
+            session.schedule_liftoff(epoch(tdb_s + std::max(countdown_s, session.liftoff_ignition_lead_s())));
+        }
+        session.reset_timeline();  // a fresh mission log; the clamped vehicle starts on the pad
         context_.site_id = site_id;
         context_.mission_start_tdb_s = tdb_s;
         return Outcome{true, {}};
     }));
 }
 
-int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s) {
+int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, bool wait_on_pad) {
     const std::string id = mission_id.utf8().get_data();
-    return static_cast<int64_t>(post("start_mission", [this, id, tdb_s](sim::FlightSession& session) {
-        const auto s = sim::start_mission(session, config_dir_, id, epoch(tdb_s), time_);
+    return static_cast<int64_t>(post("start_mission", [this, id, tdb_s, wait_on_pad](sim::FlightSession& session) {
+        sim::StartOptions options;
+        options.wait_on_pad = wait_on_pad;
+        const auto s = sim::start_mission(session, config_dir_, id, epoch(tdb_s), time_, options);
         context_.site_id = godot::String::utf8(s.site_id.c_str());
         context_.mission_start_tdb_s = s.epoch.tdb_seconds_past_j2000();
         context_.mission_warnings = godot::Array();
@@ -462,6 +468,11 @@ godot::Dictionary FlightSim::transfer_state() const { return snapshot()->transfe
 godot::Dictionary FlightSim::depot_state() const { return snapshot()->depot_state; }
 godot::Dictionary FlightSim::campaign_flight_state() const { return snapshot()->campaign_flight_state; }
 godot::Dictionary FlightSim::crew_escape_state() const { return snapshot()->crew_escape_state; }
+godot::Dictionary FlightSim::mission_timeline() const { return snapshot()->mission_timeline; }
+int64_t FlightSim::body_serial(int index) const {
+    const auto snap = snapshot();
+    return index >= 0 && static_cast<size_t>(index) < snap->bodies.size() ? snap->bodies[index].serial : int64_t{0};
+}
 
 int64_t FlightSim::set_crew_escape(const godot::String& id) {
     const std::string crew_id = id.utf8().get_data();
@@ -596,9 +607,10 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("launch_from_pad", "vehicle_id", "latitude_deg", "longitude_deg", "height_m",
                                   "heading_deg", "tdb_s"),
                          &FlightSim::launch_from_pad);
-    ClassDB::bind_method(D_METHOD("launch_from_site", "vehicle_id", "site_id", "heading_deg", "tdb_s"),
-                         &FlightSim::launch_from_site);
-    ClassDB::bind_method(D_METHOD("start_mission", "mission_id", "tdb_s"), &FlightSim::start_mission);
+    ClassDB::bind_method(D_METHOD("launch_from_site", "vehicle_id", "site_id", "heading_deg", "tdb_s", "countdown_s"),
+                         &FlightSim::launch_from_site, DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("start_mission", "mission_id", "tdb_s", "wait_on_pad"), &FlightSim::start_mission,
+                         DEFVAL(false));
     ClassDB::bind_method(D_METHOD("mission_site_id"), &FlightSim::mission_site_id);
     ClassDB::bind_method(D_METHOD("mission_start_tdb_s"), &FlightSim::mission_start_tdb_s);
     ClassDB::bind_method(D_METHOD("wait_idle", "timeout_s"), &FlightSim::wait_idle);
@@ -666,6 +678,8 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("depot_state"), &FlightSim::depot_state);
     ClassDB::bind_method(D_METHOD("campaign_flight_state"), &FlightSim::campaign_flight_state);
     ClassDB::bind_method(D_METHOD("crew_escape_state"), &FlightSim::crew_escape_state);
+    ClassDB::bind_method(D_METHOD("mission_timeline"), &FlightSim::mission_timeline);
+    ClassDB::bind_method(D_METHOD("body_serial", "index"), &FlightSim::body_serial);
     ClassDB::bind_method(D_METHOD("set_crew_escape", "id"), &FlightSim::set_crew_escape);
     ClassDB::bind_method(D_METHOD("refuelling_campaign", "params"), &FlightSim::refuelling_campaign);
     ClassDB::bind_method(D_METHOD("predict_trajectory", "index", "duration_s", "step_s"),

@@ -29,6 +29,17 @@ godot::Array body_stages(const sim::FlightSession& session, size_t index) {
         d["diameter_m"] = stage.config.diameter_m;
         d["nose_length_m"] = stage.config.aero.nose_length_m;
         d["settled"] = stage.settled;  // refuelling f3: 0..1, the liquid over the main-tank outlets
+        // main tanks: current load and full load
+        double oxidizer_capacity_kg = 0.0, fuel_capacity_kg = 0.0;
+        for (const auto& t : stage.tanks) {
+            if (t.config.role != config::TankRole::Main) continue;
+            if (t.config.contents == config::TankContents::Oxidizer) oxidizer_capacity_kg += t.config.capacity_kg;
+            if (t.config.contents == config::TankContents::Fuel) fuel_capacity_kg += t.config.capacity_kg;
+        }
+        d["oxidizer_kg"] = stage.propellant_kg(config::TankContents::Oxidizer, config::TankRole::Main);
+        d["fuel_kg"] = stage.propellant_kg(config::TankContents::Fuel, config::TankRole::Main);
+        d["oxidizer_capacity_kg"] = oxidizer_capacity_kg;
+        d["fuel_capacity_kg"] = fuel_capacity_kg;
         stages.push_back(d);
     }
     return stages;
@@ -36,9 +47,12 @@ godot::Array body_stages(const sim::FlightSession& session, size_t index) {
 
 godot::Array body_engines(const sim::FlightSession& session, size_t index) {
     godot::Array engines;
+    int64_t stage_index = -1;
     for (const auto& stage : session.body(index).vehicle().stages()) {
+        ++stage_index;
         for (const auto& e : stage.engines) {
             godot::Dictionary d;
+            d["stage"] = stage_index;  // index into body_stages
             d["position_m"] = to_godot(e.gimbal_point_m);
             d["direction"] = to_godot(e.thrust_direction());
             d["firing"] = e.producing_thrust();
@@ -371,6 +385,7 @@ FlightSnapshot::Body build_body(const sim::FlightSession& session, size_t index)
     b.velocity_gcrf_mps = to_godot(body.state().velocity_gcrf_mps);
     b.attitude_gcrf = godot::Quaternion(q.x, q.y, q.z, q.w);
     b.cg_station_m = body.vehicle().mass_properties().cg_station_m;
+    b.serial = session.body_serial(index);
     b.stages = body_stages(session, index);
     b.engines = body_engines(session, index);
     b.flaps = body_flaps(session, index);
@@ -421,6 +436,7 @@ std::shared_ptr<const FlightSnapshot> empty_snapshot() {
     s->lunar_site = absent();
     s->iss_state = s->rendezvous_plan = s->docking_state = s->station_geometry = s->iss_mission = absent();
     s->transfer_state = s->depot_state = s->campaign_flight_state = s->crew_escape_state = absent();
+    s->mission_timeline = absent();
     return s;
 }
 
@@ -445,6 +461,7 @@ std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& s
     s->depot_state = build_depot_state(session);
     s->campaign_flight_state = build_campaign_flight_state(session);
     s->crew_escape_state = build_crew_escape_state(session);
+    s->mission_timeline = build_mission_timeline(session, epoch);
     s->moon_terrain = session.moon_terrain_shared();
     if (!s->active) return s;
     s->mission_time_s = session.mission_time_s();

@@ -88,6 +88,22 @@ func _check_thread(config_dir: String, tdb: float) -> bool:
 	sim.wait_idle(10.0)
 	_check(not sim.result(bad).get("ok", true) and str(sim.result(bad).get("message", "")) != "",
 			"unknown mission: refused with a message")
+	# External view: mission timeline, body serials, tank levels, countdown start.
+	_advance(sim, tdb + 200.0)
+	var timeline: Dictionary = sim.mission_timeline()
+	var kinds: Array = []
+	for e in timeline.get("events", []):
+		kinds.append(e["kind"])
+	_check(kinds.has("liftoff"), "mission timeline contains the liftoff (%s)" % str(kinds))
+	_check(sim.body_serial(0) >= 1, "body serial is stable and positive")
+	_check((sim.body_engines(0)[0] as Dictionary).has("stage"), "engines carry their stage index")
+	_check(float((sim.body_stages(0)[0] as Dictionary).get("oxidizer_capacity_kg", 0.0)) > 0.0, "stages carry tank capacities")
+	# a fresh sim: the old one still has its advance target
+	var countdown_sim := FlightSim.new()
+	countdown_sim.setup(config_dir)
+	_check(_ok(countdown_sim, countdown_sim.launch_from_site("starship_block3", "starbase_olp1", 0.0, tdb, 30.0)), "countdown launch starts")
+	var clock = countdown_sim.mission_timeline().get("clock_s")
+	_check(clock != null and absf(float(clock) + 30.0) < 1e-3, "countdown launch: T-30 clock at the start (%s)" % str(clock))
 	sim.setup(config_dir)  # re-setup joins the old thread
 	_check(not sim.is_active(), "re-setup starts empty")
 	return true

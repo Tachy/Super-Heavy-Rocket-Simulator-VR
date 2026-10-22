@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
+#include <string>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -26,6 +27,12 @@
 #include "test_support.hpp"
 
 using namespace starsim;
+
+TEST_CASE("Event kinds have snake_case ids", "[timeline]") {
+    CHECK(std::string(sim::id_of(sim::MissionEventKind::MaxQ)) == "max_q");
+    CHECK(std::string(sim::id_of(sim::MissionEventKind::StageSeparation)) == "stage_separation");
+    CHECK(std::string(sim::id_of(sim::MissionEventKind::Liftoff)) == "liftoff");
+}
 
 TEST_CASE("Body serials are unique and survive reindexing", "[timeline]") {
     test::spice_session();

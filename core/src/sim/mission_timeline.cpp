@@ -31,6 +31,32 @@ const char* to_string(MissionEventKind kind) {
     return "";
 }
 
+const char* id_of(MissionEventKind kind) {
+    switch (kind) {
+        case MissionEventKind::EngineStart: return "engine_start";
+        case MissionEventKind::Liftoff: return "liftoff";
+        case MissionEventKind::MaxQ: return "max_q";
+        case MissionEventKind::Meco: return "meco";
+        case MissionEventKind::StageSeparation: return "stage_separation";
+        case MissionEventKind::Seco: return "seco";
+        case MissionEventKind::Ignition: return "ignition";
+        case MissionEventKind::Cutoff: return "cutoff";
+        case MissionEventKind::Boostback: return "boostback";
+        case MissionEventKind::LandingBurn: return "landing_burn";
+        case MissionEventKind::EntryInterface: return "entry_interface";
+        case MissionEventKind::Parachutes: return "parachutes";
+        case MissionEventKind::CrewEjection: return "crew_ejection";
+        case MissionEventKind::Docking: return "docking";
+        case MissionEventKind::Undocking: return "undocking";
+        case MissionEventKind::Caught: return "caught";
+        case MissionEventKind::Landed: return "landed";
+        case MissionEventKind::Splashdown: return "splashdown";
+        case MissionEventKind::Impact: return "impact";
+        case MissionEventKind::Launch: return "launch";
+    }
+    return "";
+}
+
 namespace {
 bool is_action(MissionEventKind kind) {
     return kind == MissionEventKind::Ignition || kind == MissionEventKind::Undocking;
