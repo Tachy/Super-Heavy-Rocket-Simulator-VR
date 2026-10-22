@@ -308,7 +308,9 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         if (phase_ == ReturnPhase::Coast && descending && (height < 30e3 || tick_counter_ % 20 == 0)) {
             const auto burn = predict_landing_burn(body, env, epoch);
             if (burn.stop_height_m <= 0.0) phase_ = ReturnPhase::LandingBurn;
-            if (pending_entry_burn(body.vehicle())) {  // the burn prediction does not know the entry burn ahead
+            if (phase_ == ReturnPhase::LandingBurn) {
+                // lit now: its own time to go takes over below
+            } else if (pending_entry_burn(body.vehicle())) {  // the burn prediction does not know the entry burn ahead
                 forecast_.landing_ignition.reset();
                 forecast_.touchdown.reset();
             } else {

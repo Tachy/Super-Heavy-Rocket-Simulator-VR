@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/landing_outcome.hpp"
 #include "starsim/sim/mission_event_observer.hpp"
 #include "starsim/sim/mission_timeline.hpp"
 
@@ -52,8 +53,11 @@ public:
     }
     // An event of body `index` at `epoch`, if it is still ahead and (once per body) not recorded yet.
     // `serial`: the body the event will belong to when it is not body `index` itself (a part separated before it).
-    void add_for(size_t index, MissionEventKind kind, time::Epoch epoch, std::optional<uint32_t> serial = std::nullopt) {
-        if (!(epoch - s_.epoch() > 0.0)) return;
+    // `past`: an event that has happened but is not decided yet (the catch between the pins' first touch and the body
+    // at rest in the arms) - shown at its epoch although that lies behind.
+    void add_for(size_t index, MissionEventKind kind, time::Epoch epoch, std::optional<uint32_t> serial = std::nullopt,
+                 bool past = false) {
+        if (!past && !(epoch - s_.epoch() > 0.0)) return;
         auto e = mission_event(s_, index, kind);
         if (serial) e.body_serial = *serial;
         if (once_per_body(kind) && has_recorded(s_.timeline(), kind, e.body_serial)) return;
@@ -106,9 +110,14 @@ std::optional<double> booster_burn_time_s(const FlightSession& s, const vehicle:
     if (!(flow_now_kgps > 0.0) || !(reference_kgps > 0.0)) return std::nullopt;
     const double since_liftoff_s = s.epoch() - guidance->liftoff_epoch();
     double left_kg = std::max(above_kg, 0.0), t_s = 0.0;
+    std::optional<double> last_throttle;  // the schedule holds its value over long spans: one engine sum per value
+    double flow_kgps = 0.0;
     while (t_s < meco_forecast_horizon_s) {
         const double throttle = guidance->booster_throttle(since_liftoff_s + t_s + 0.5 * meco_forecast_step_s);
-        const double flow_kgps = flow_now_kgps * engine_flow_kgps(throttle) / reference_kgps;
+        if (!last_throttle || throttle != *last_throttle) {
+            last_throttle = throttle;
+            flow_kgps = flow_now_kgps * engine_flow_kgps(throttle) / reference_kgps;
+        }
         if (!(flow_kgps > 0.0)) return std::nullopt;
         if (flow_kgps * meco_forecast_step_s >= left_kg) return t_s + left_kg / flow_kgps;
         left_kg -= flow_kgps * meco_forecast_step_s;
@@ -152,6 +161,13 @@ void add_returns(const FlightSession& s, Collector& c) {
             if (f.touchdown) {
                 c.add_for(i, f.catch_target ? MissionEventKind::Caught : MissionEventKind::Landed, *f.touchdown);
             }
+        }
+        // pins on the arms, not yet at rest there: the catch at its moment until the tower decides and the observer has
+        // recorded it (then the dedupe drops it); a miss or an impact ends it
+        const auto outcome = s.landing_outcome(i);
+        if (const auto contact = s.catch_contact_epoch(i);
+            contact && (outcome == LandingOutcome::Flying || outcome == LandingOutcome::Caught)) {
+            c.add_for(i, MissionEventKind::Caught, *contact, std::nullopt, true);
         }
         if (const auto* landing = s.ship_landing(i)) {
             if (const auto at = landing->catch_epoch()) c.add_for(i, MissionEventKind::Caught, *at);
@@ -208,7 +224,8 @@ std::vector<MissionEvent> predicted_mission_events(const FlightSession& s) {
         if (flying_it) {
             c.add_burn(plan->node);
             // a capsule still on its trunk: the capsule enters - after the jettison a new body with the next serial (the
-            // trunk keeps the stack's)
+            // trunk keeps the stack's). Assumes no other body is created before the jettison (none in a capsule return:
+            // the step machine runs the burn, then the jettison); otherwise the serial is off until the jettison.
             const auto step = s.capsule_return_step();
             const bool trunk_on = (step == CapsuleReturnStep::DeorbitBurn || step == CapsuleReturnStep::TrunkJettison) &&
                                   s.body(s.controlled_index()).vehicle().stages().size() > 1;

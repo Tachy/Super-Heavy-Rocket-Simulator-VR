@@ -200,6 +200,11 @@ struct PredictionTrack {
     }
 };
 
+// A catch of the body `serial` is on the timeline, predicted or recorded.
+bool caught_shown(const sim::MissionTimeline& t, uint32_t serial) {
+    return predicted_of(t, MissionEventKind::Caught, serial) || recorded_of(t, MissionEventKind::Caught, serial);
+}
+
 void print_prediction(const char* label, const PredictionTrack& p, const MissionEvent* recorded) {
     if (!std::getenv("STARSIM_VERBOSE") || !p.first || !recorded) return;
     std::printf("  [prediction] %-12s first seen %.1f s before: error %+.2f s; last seen %.1f s before: error %+.2f s\n",
@@ -322,6 +327,7 @@ TEST_CASE("Booster return records boostback, landing burn and the catch", "[time
     const auto& t = session.timeline();
     std::optional<uint32_t> booster;
     PredictionTrack cutoff_prediction, landing_burn_prediction, catch_prediction;  // onboard predictions (Task 4b)
+    int after_contact = 0, without_catch = 0;  // samples after the first pin contact; of these without a Caught
     while (session.epoch() - t0 < 900.0 && !find_event(t, MissionEventKind::Caught)) {
         session.advance_to(session.epoch() + 1.0, 1000);
         if (!booster) {
@@ -331,6 +337,12 @@ TEST_CASE("Booster return records boostback, landing burn and the catch", "[time
             cutoff_prediction.sample(predicted_of(t, MissionEventKind::Cutoff, *booster), session.epoch());
             landing_burn_prediction.sample(predicted_of(t, MissionEventKind::LandingBurn, *booster), session.epoch());
             catch_prediction.sample(predicted_of(t, MissionEventKind::Caught, *booster), session.epoch());
+            for (size_t i = 0; i < session.body_count(); ++i) {  // from the pins' first touch a catch dot is shown
+                if (session.body_serial(i) == *booster && session.catch_contact_epoch(i)) {
+                    ++after_contact;
+                    if (!caught_shown(t, *booster)) ++without_catch;
+                }
+            }
         }
         if (booster) {
             bool down = false;
@@ -374,6 +386,8 @@ TEST_CASE("Booster return records boostback, landing burn and the catch", "[time
     CHECK(catch_prediction.max_error_within_s(caught->epoch, 1e9) <= 20.0);
     CHECK(catch_prediction.max_error_within_s(caught->epoch, 30.0) <= 5.0);
     CHECK(catch_prediction.max_error_within_s(caught->epoch, 10.0) <= 1.5);
+    CHECK(after_contact > 0);
+    CHECK(without_catch == 0);
     CHECK(predicted_of(t, K::LandingBurn, *booster) == nullptr);
     CHECK(predicted_of(t, K::Caught, *booster) == nullptr);
 }
@@ -519,15 +533,22 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
         t0);
     const auto& t = session.timeline();
     PredictionTrack landing_burn_prediction, catch_prediction;  // onboard predictions (Task 4b)
+    int after_contact = 0, without_catch = 0;
     while (session.epoch() - t0 < 600.0 && session.landing_outcome(0) == sim::LandingOutcome::Flying) {
         session.advance_to(session.epoch() + 1.0, 1000);
         landing_burn_prediction.sample(predicted_of(t, MissionEventKind::LandingBurn), session.epoch());
         catch_prediction.sample(predicted_of(t, MissionEventKind::Caught), session.epoch());
+        if (session.catch_contact_epoch(0)) {  // from the pins' first touch a catch dot is shown
+            ++after_contact;
+            if (!caught_shown(t, session.body_serial(0))) ++without_catch;
+        }
     }
     session.advance_to(session.epoch() + 1.0, 1000);  // one more observation
     print_events(t);
     CHECK(count_of(t, MissionEventKind::LandingBurn) == 1);
     CHECK(count_of(t, MissionEventKind::Caught) == 1);
+    CHECK(after_contact > 0);
+    CHECK(without_catch == 0);
 
     // Onboard predictions: the gate (flip on the landing burn) from the entry guidance, the catch from the burn's plan.
     const auto* landing_burn = find_event(t, MissionEventKind::LandingBurn);

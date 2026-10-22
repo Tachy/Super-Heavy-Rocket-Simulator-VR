@@ -535,6 +535,7 @@ void FlightSession::erase_body(size_t index) {
         if (i > index) --i;
     };
     if (legs_) legs_->forget(bodies_[index].body.get());
+    if (tower_) tower_->forget(bodies_[index].body.get());  // a later body at the same address starts afresh
     bodies_.erase(bodies_.begin() + static_cast<std::ptrdiff_t>(index));
     shift(controlled_);
     if (station_index_) shift(*station_index_);
