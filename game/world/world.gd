@@ -85,15 +85,19 @@ func _process(delta: float) -> void:
 ## Recomputes the whole scene for clock.tdb_s. Public so tests can render a fixed instant.
 func update_world() -> void:
 	# The flight simulation may lag behind the clock at high time warp; the clock then waits for it.
+	var t := clock.tdb_s
 	if flight.sim.is_active():
 		flight.sim.set_realtime_planning(clock.warp <= 1.0)  # landing re-plans never stall real-time play
 		var reached := flight.advance(clock.tdb_s, _delta)
 		if clock.tdb_s - reached > 0.05:  # sim at its per-frame tick limit: hold the clock back
 			clock.tdb_s = reached
+		# The scene is drawn at the instant of the simulation snapshot (the sim thread trails the clock by about a
+		# frame, unevenly): Earth, pad and tower at the clock time but vehicles at the snapshot made the vehicles jump
+		# by up to several metres against the pad every frame (Earth rotation ~420 m/s).
+		t = reached
 	for view in towers:
 		var at_site: bool = flight.sim.is_active() and view.site_id == flight.launch_site_id
 		view.update_state(flight.sim.tower_state() if at_site else {})
-	var t := clock.tdb_s
 	earth.fixed_to_gcrf = core.earth_fixed_to_gcrf(t)
 	moon.fixed_to_gcrf = core.moon_fixed_to_gcrf(t)
 	moon_gcrf_m = core.body_position_gcrf_m("moon", t)

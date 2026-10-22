@@ -113,6 +113,9 @@ python tools/data_pipeline/prepare.py      # converts data/raw -> data/textures,
 # Engine sources (git-ignored, pinned)
 git clone --depth 1 --branch 4.7.2-stable https://github.com/godotengine/godot.git external/godot   # ed1daf0
 git clone https://github.com/godotengine/godot-cpp.git external/godot-cpp                           # b051e69
+# Engine patches (tools/godot_patches/): openxr-double-projection.patch builds the OpenXR eye projections in double
+# (Godot's float helper loses the far plane at near 1 m / far 3e7 m: broken stereo culling, vehicles vanish in VR)
+cd external/godot; git apply ../../tools/godot_patches/openxr-double-projection.patch
 
 # Godot double-precision editor (~15 min on 24 cores; needs misc/scripts/install_accesskit.py
 # and install_d3d12_sdk_windows.py run once)
@@ -201,7 +204,10 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Start the game with `Start-Desktop.cmd` (repo root); `Start-VR.cmd` starts the OpenXR mode (`openxr/enabled=false` in
   project.godot: headless runs never touch the runtime).
 - External view (plan 2026-10-22): `game/xr/` (`xr_manager.gd`: start modes, F12 recentre + automatic 2 s after start;
-  `vr_overlay_panel.gd`: curved panel, 2 m / 64 deg), `game/ui/webcast/` (webcast overlay: timeline arc, round gauges
+  `vr_overlay_panel.gd`: curved panel, 2 m / 64 deg, a scene mesh (mirrored on the desktop window) whose shader
+  `shaders/vr_panel.gdshader` pins its clip depth so the distance-scaled near plane never clips it; it carries the
+  webcast overlay and, in VR, the TimePanel top left; `vr_panel_mouse.gd`: captured mouse drives a pointer on it like the
+  sibling's track editor), `game/ui/webcast/` (webcast overlay: timeline arc, round gauges
   chosen by `gauge_rules.gd` per situation, engine gauge, UTC + T-/T+ clock; the old HUD stays behind F1). Camera:
   `world/orbit_camera.gd` + `camera_math.gd` (right mouse button orbits around the local vertical, wheel zoom is
   logarithmic), `view_target.gd` + Tab / Shift+Tab switch the followed body. Spec `docs/superpowers/specs/2026-10-22-external-view-design.md`.

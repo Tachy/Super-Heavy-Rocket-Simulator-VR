@@ -1,0 +1,57 @@
+diff --git a/modules/openxr/extensions/platform/openxr_d3d12_extension.cpp b/modules/openxr/extensions/platform/openxr_d3d12_extension.cpp
+index 2652eb7..1898f73 100644
+--- a/modules/openxr/extensions/platform/openxr_d3d12_extension.cpp
++++ b/modules/openxr/extensions/platform/openxr_d3d12_extension.cpp
+@@ -273,6 +273,14 @@ bool OpenXRD3D12Extension::get_swapchain_image_data(XrSwapchain p_swapchain, int
+ }
+ 
+ bool OpenXRD3D12Extension::create_projection_fov(const XrFovf p_fov, double p_z_near, double p_z_far, Projection &r_camera_matrix) {
++	// starsim patch: build the projection in real_t (double in precision=double builds). The float helper below loses
++	// the far plane for large far/near ratios (near 1 m, far 3e7 m), which breaks the stereo culling frustum.
++	if (p_z_far > p_z_near) {
++		r_camera_matrix.set_frustum(Math::tan(p_fov.angleLeft) * p_z_near, Math::tan(p_fov.angleRight) * p_z_near,
++				Math::tan(p_fov.angleDown) * p_z_near, Math::tan(p_fov.angleUp) * p_z_near, p_z_near, p_z_far);
++		return true;
++	}
++
+ 	OpenXRUtil::XrMatrix4x4f matrix;
+ 	OpenXRUtil::XrMatrix4x4f_CreateProjectionFov(&matrix, p_fov, (float)p_z_near, (float)p_z_far);
+ 
+diff --git a/modules/openxr/extensions/platform/openxr_opengl_extension.cpp b/modules/openxr/extensions/platform/openxr_opengl_extension.cpp
+index 27eb512..f6dbd38 100644
+--- a/modules/openxr/extensions/platform/openxr_opengl_extension.cpp
++++ b/modules/openxr/extensions/platform/openxr_opengl_extension.cpp
+@@ -286,6 +286,14 @@ bool OpenXROpenGLExtension::get_swapchain_image_data(XrSwapchain p_swapchain, in
+ }
+ 
+ bool OpenXROpenGLExtension::create_projection_fov(const XrFovf p_fov, double p_z_near, double p_z_far, Projection &r_camera_matrix) {
++	// starsim patch: build the projection in real_t (double in precision=double builds). The float helper below loses
++	// the far plane for large far/near ratios (near 1 m, far 3e7 m), which breaks the stereo culling frustum.
++	if (p_z_far > p_z_near) {
++		r_camera_matrix.set_frustum(Math::tan(p_fov.angleLeft) * p_z_near, Math::tan(p_fov.angleRight) * p_z_near,
++				Math::tan(p_fov.angleDown) * p_z_near, Math::tan(p_fov.angleUp) * p_z_near, p_z_near, p_z_far);
++		return true;
++	}
++
+ 	OpenXRUtil::XrMatrix4x4f matrix;
+ 	OpenXRUtil::XrMatrix4x4f_CreateProjectionFov(&matrix, p_fov, (float)p_z_near, (float)p_z_far);
+ 
+diff --git a/modules/openxr/extensions/platform/openxr_vulkan_extension.cpp b/modules/openxr/extensions/platform/openxr_vulkan_extension.cpp
+index a0262ec..32e906b 100644
+--- a/modules/openxr/extensions/platform/openxr_vulkan_extension.cpp
++++ b/modules/openxr/extensions/platform/openxr_vulkan_extension.cpp
+@@ -450,6 +450,14 @@ bool OpenXRVulkanExtension::get_swapchain_image_data(XrSwapchain p_swapchain, in
+ }
+ 
+ bool OpenXRVulkanExtension::create_projection_fov(const XrFovf p_fov, double p_z_near, double p_z_far, Projection &r_camera_matrix) {
++	// starsim patch: build the projection in real_t (double in precision=double builds). The float helper below loses
++	// the far plane for large far/near ratios (near 1 m, far 3e7 m), which breaks the stereo culling frustum.
++	if (p_z_far > p_z_near) {
++		r_camera_matrix.set_frustum(Math::tan(p_fov.angleLeft) * p_z_near, Math::tan(p_fov.angleRight) * p_z_near,
++				Math::tan(p_fov.angleDown) * p_z_near, Math::tan(p_fov.angleUp) * p_z_near, p_z_near, p_z_far);
++		return true;
++	}
++
+ 	OpenXRUtil::XrMatrix4x4f matrix;
+ 	OpenXRUtil::XrMatrix4x4f_CreateProjectionFov(&matrix, p_fov, (float)p_z_near, (float)p_z_far);
+ 

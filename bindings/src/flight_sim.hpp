@@ -29,8 +29,10 @@ namespace starsim::bindings {
 // The session runs on its own simulation thread (sim::SessionRunner, l6). Commands are queued and return a command id
 // (> 0; 0 when refused before posting, e.g. no setup()); their outcome arrives as result(id) -> {done, ok, message} and
 // the signal command_finished(id, name, ok, message), emitted on the main thread from advance_to and wait_idle.
-// Getters read the latest snapshot, built on the simulation thread after every command and step chunk: the returned
-// containers are shared with it and must be treated as read-only.
+// Getters read a snapshot, built on the simulation thread after every command and step chunk: the returned containers
+// are shared with it and must be treated as read-only. advance_to pins the latest snapshot for the frame, so every
+// getter until the next advance_to reads the same instant (the thread publishes several per frame; mixing them made
+// vehicles jump against the pad drawn at the returned epoch); wait_idle releases the pin, later getters read the latest.
 class FlightSim : public godot::RefCounted {
     GDCLASS(FlightSim, godot::RefCounted)
 
@@ -78,8 +80,8 @@ public:
     int64_t set_realtime_planning(bool enabled);
     godot::Dictionary return_state(int64_t index) const;
     bool is_active() const;
-    // Sets the simulation thread's target epoch, emits command_finished for finished commands and returns the epoch the
-    // snapshot has reached (never ahead of the target; `tdb_s` without an active flight).
+    // Sets the simulation thread's target epoch, emits command_finished for finished commands, pins the latest snapshot
+    // for the getters (see above) and returns its epoch (never ahead of the target; `tdb_s` without an active flight).
     double advance_to(double tdb_s);
     double mission_time_s() const;
     // Waits until no command is queued or running and the target is reached; true when idle within the timeout.
@@ -274,7 +276,8 @@ private:
     };
     using SessionCommand = std::function<Outcome(sim::FlightSession&)>;
 
-    std::shared_ptr<const FlightSnapshot> snapshot() const;
+    std::shared_ptr<const FlightSnapshot> snapshot() const;         // main thread: the pinned one, else the latest
+    std::shared_ptr<const FlightSnapshot> latest_snapshot() const;  // any thread: the latest published
     // Snapshot body `index`, nullptr (error pushed) when there is none.
     const FlightSnapshot::Body* body(const FlightSnapshot& s, int index) const;
     std::uint64_t post(const char* name, SessionCommand command);
@@ -291,6 +294,7 @@ private:
     std::filesystem::path config_dir_;
     mutable std::mutex snapshot_mutex_;
     std::shared_ptr<const FlightSnapshot> snapshot_;  // latest published
+    std::shared_ptr<const FlightSnapshot> frame_snapshot_;  // main thread: pinned by advance_to, released by wait_idle
     SnapshotContext context_;                         // worker-owned (written by commands and the observer)
     mutable std::mutex request_mutex_;
     mutable PredictionRequest prediction_request_;    // main thread writes, worker copies

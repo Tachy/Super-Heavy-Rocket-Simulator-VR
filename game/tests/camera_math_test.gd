@@ -79,6 +79,7 @@ func _initialize() -> void:
 			"after recentre the head sits at the base pose (render origin)")
 
 	_check_vr_panel_mesh()
+	_check_vr_panel_placement()
 
 
 # VR overlay panel: every vertex on the 2 m sphere around the eye, inside +-H_FOV/2 of -Z, front faces inward.
@@ -106,7 +107,16 @@ func _check_vr_panel_mesh() -> void:
 		var normal := (vertices[indices[3 * t + 1]] - a).cross(vertices[indices[3 * t + 2]] - a)
 		inward = inward and normal.dot(a) > 0.0  # clockwise seen from the origin = outward right-hand normal
 	_check(inward, "panel mesh: all triangles wound as front faces seen from the eye")
-	# Placement: after any recentre the panel's world pose is the base pose (centred on the eye, facing the view).
+	var material := VrOverlayPanel.build_material(null)
+	_check(material.shader != null and material.render_priority == RenderingServer.MATERIAL_RENDER_PRIORITY_MAX,
+			"panel material: near-plane-proof panel shader, max priority")
+	var panel := VrOverlayPanel.new()
+	_check(panel.extra_cull_margin > 1000.0, "panel: cull margin beyond the largest near plane (1 km)")
+	panel.free()
+
+
+# Placement: after any recentre the panel's world pose is the base pose (centred on the eye, facing the view).
+func _check_vr_panel_placement() -> void:
 	var placed := true
 	var panel := VrOverlayPanel.new()
 	for yaw in [0.0, 1.1, -2.5, 3.0]:
@@ -119,11 +129,6 @@ func _check_vr_panel_mesh() -> void:
 			placed = placed and world.origin.length() < 1e-9 and world.basis.is_equal_approx(base)
 	panel.free()
 	_check(placed, "panel placement: world pose == base pose after a recentre (several yaws / head offsets)")
-	var material := VrOverlayPanel.build_material(null)
-	_check(material.blend_mode == BaseMaterial3D.BLEND_MODE_PREMULT_ALPHA and material.no_depth_test
-			and material.cull_mode == BaseMaterial3D.CULL_BACK
-			and material.render_priority == RenderingServer.MATERIAL_RENDER_PRIORITY_MAX,
-			"panel material: premultiplied, no depth test, cull back, max priority")
 
 
 func _process(_delta: float) -> bool:

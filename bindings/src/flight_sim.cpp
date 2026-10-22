@@ -41,6 +41,7 @@ void FlightSim::setup(const godot::String& config_dir) {
         std::lock_guard lock(snapshot_mutex_);
         snapshot_ = empty_snapshot();
     }
+    frame_snapshot_.reset();
     runner_ = std::make_unique<sim::SessionRunner>(
         std::make_unique<sim::FlightSession>(ephemeris_, earth_, config_dir_, environment::PointMassGravityConfig{}, &moon_),
         [this](const sim::FlightSession& session, time::Epoch now) { observe(session, now); });
@@ -51,13 +52,17 @@ void FlightSim::observe(const sim::FlightSession& session, time::Epoch now) {
         std::lock_guard lock(request_mutex_);
         context_.prediction_request = prediction_request_;
     }
-    const auto previous = snapshot();
+    const auto previous = latest_snapshot();
     auto next = build_snapshot(session, now, context_, previous.get());
     std::lock_guard lock(snapshot_mutex_);
     snapshot_ = std::move(next);
 }
 
 std::shared_ptr<const FlightSnapshot> FlightSim::snapshot() const {
+    return frame_snapshot_ ? frame_snapshot_ : latest_snapshot();
+}
+
+std::shared_ptr<const FlightSnapshot> FlightSim::latest_snapshot() const {
     std::lock_guard lock(snapshot_mutex_);
     return snapshot_ ? snapshot_ : empty_snapshot();
 }
@@ -126,6 +131,7 @@ void FlightSim::emit_finished() {
 
 bool FlightSim::wait_idle(double timeout_s) {
     const bool idle = !runner_ || runner_->wait_idle(timeout_s);
+    frame_snapshot_.reset();  // the caller waited for results: later getters read the latest snapshot
     emit_finished();
     return idle;
 }
@@ -272,9 +278,9 @@ bool FlightSim::is_active() const { return snapshot()->active; }
 
 double FlightSim::advance_to(double tdb_s) {
     if (runner_) runner_->set_target(epoch(tdb_s));
+    frame_snapshot_ = latest_snapshot();  // before the signals: their handlers read this frame's instant
     emit_finished();
-    const auto s = snapshot();
-    return s->active ? s->epoch_tdb_s : tdb_s;
+    return frame_snapshot_->active ? frame_snapshot_->epoch_tdb_s : tdb_s;
 }
 
 double FlightSim::mission_time_s() const { return snapshot()->mission_time_s; }

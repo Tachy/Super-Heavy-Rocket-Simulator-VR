@@ -18,8 +18,13 @@ func _ready() -> void:
 	overlay_host.overlay.world = world
 	add_child(overlay_host)
 	var xr := get_node_or_null("/root/XrManager")
+	var panel := TimePanel.new()
+	panel.world = world
 	if xr != null and xr.xr_active:
-		# VR: the overlay sits on a curved panel fixed to the base pose (not the head)
+		# VR: canvas layers are not drawn in the headset. The overlay and the menu (top left, as on the desktop) share a
+		# curved panel fixed to the base pose (not the head), driven by a mouse pointer.
+		overlay_host.viewport.add_child(panel)
+		add_child(VrPanelMouse.new(overlay_host.viewport, panel))
 		var vr_panel := VrOverlayPanel.new()
 		xr.origin.add_child(vr_panel)
 		vr_panel.setup(overlay_host.viewport.get_texture())
@@ -27,12 +32,10 @@ func _ready() -> void:
 		xr.recentered.connect(func() -> void: vr_panel.place(xr.recenter_pose()))
 	else:
 		overlay_host.show_on_desktop(WEBCAST_LAYER)
-	var ui := CanvasLayer.new()
-	ui.layer = PANEL_LAYER
-	add_child(ui)
-	var panel := TimePanel.new()
-	panel.world = world
-	ui.add_child(panel)
+		var ui := CanvasLayer.new()
+		ui.layer = PANEL_LAYER
+		add_child(ui)
+		ui.add_child(panel)
 	legacy_hud.name = "LegacyHud"
 	legacy_hud.layer = LEGACY_HUD_LAYER
 	legacy_hud.visible = false
