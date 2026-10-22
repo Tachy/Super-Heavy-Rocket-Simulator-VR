@@ -9,6 +9,7 @@ propellants.toml        propellant combinations (densities, nominal mixture rati
 engines/<id>.toml       one engine type (performance, throttle, gimbal, mass, timing)
 vehicles/<id>.toml      one vehicle version: stages, tanks, engine groups, aero, separation
 aero/<id>.csv           aerodynamic coefficient tables referenced by vehicles
+crew_escape/<id>.toml   ejection seats of a crewed ship return (referenced by missions; ship data untouched)
 ```
 
 ## Conventions
@@ -151,6 +152,16 @@ flow separation (vacuum engines).
 - `[stage.propellant_transfer]` (refuelling r4): `delivery_pressure_pa` (the delivering ship holds its ullage there),
   `receive_pressure_pa` (the receiving ship vents down to it; must be below delivery). Without it the ship cannot
   transfer propellant.
+
+## Crew escape (`crew_escape/`)
+- `[crew_escape]`: `seat_vehicle` (seat + occupant body until the seat-man separation) and `parachutist_vehicle`
+  (occupant under the main canopy), both in `vehicles/`; `rail_direction` (ship body axes, normalised),
+  `rail_length_m`, `stagger_s`; envelope `envelope_max_height_m`, `envelope_max_eas_mps`; modes `mode1_max_eas_mps`,
+  `mode_low_height_m`, `mode1_main_delay_s`, `mode2_drogue_delay_s`, `mode2_separation_delay_s`; give-up
+  `min_firing_height_m`, `sea_target_margin_m`, `min_catch_propellant_kg`; judging `max_load_g`, `max_load_duration_s`,
+  `min_clearance_m`, `plume_half_angle_deg`, `plume_length_m`, `max_touchdown_sink_mps`; thrust tables `catapult`,
+  `rocket` (`[[time_s, thrust_n]]`, ascending times, along the rail, from the seat's firing).
+- `[[seat]] position_m`: one per crew member in the firing order, in the ship's stage frame (x from the stage bottom).
 
 ## Reused stages
 - `[[stage]] from = "<vehicle>:<stage>"`: the stage exactly as `config/vehicles/<vehicle>.toml` configures it

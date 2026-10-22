@@ -14,6 +14,7 @@ add_library(starsim_core STATIC
     src/config/splashdown_zone_config.cpp
     src/config/launch_site_config.cpp
     src/config/mission_config.cpp
+    src/config/crew_escape_config.cpp
     src/config/refuelling_reference.cpp
     src/environment/us76_atmosphere.cpp
     src/propulsion/engine_performance.cpp

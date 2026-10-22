@@ -1,0 +1,41 @@
+# Ejection seat with its occupant (crew escape, docs/superpowers/specs/2026-10-22-crew-escape-design.md): one body from
+# the firing until the seat-man separation. An ACES II-class zero-zero seat. The catapult / rocket thrust and the
+# deployment timing are not vehicle data: they live in config/crew_escape/*.toml (gnc::SeatSequencer times the
+# drogue; the deploy_height_m below is required by the loader and unused here - no ParachuteSequencer on crew bodies).
+
+[sources]
+aces_occupant = "https://en.wikipedia.org/wiki/ACES_II (propulsion sized for 103 lb to 245 lb occupants)"
+aces_modes = "DTIC ADA133628, Douglas ACES II Revision C (modes over the 0-600 KEAS envelope; drogue gun, recovery mortar 1.0 s later)"
+
+[vehicle]
+id = "ejection_seat"
+name = "Schleudersitz"
+display_name = "Schleudersitz"
+propellant = "mmh_nto"                   # required by the loader; the seat carries no modelled propellant
+stages_bottom_to_top = ["seat"]
+
+[[stage]]
+id = "seat"
+name = "Schleudersitz mit Insasse"
+length_m = 1.5                           # [E] seat back with head box, occupant seated
+diameter_m = 0.8                         # [E]
+dry_mass_kg = 170.0                      # [E] seat ~70 kg + occupant with suit and survival kit ~100 kg
+                                         # (inside the 47-111 kg design range [S:aces_occupant] + suit)
+dry_cg_station_m = 0.7                   # [E]
+
+[stage.aero]
+reference_diameter_m = 0.8
+fixed_drag_area_m2 = 0.9                 # [E] seat + seated occupant broadside to the flow
+fixed_drag_coefficient = 1.0             # [E] (the area carries C_D)
+
+# Drogue [E]: a 5 ft (1.5 m) hemisflo canopy, S0 1.82 m^2 at C_D ~0.4 -> 0.73 m^2; it stabilises and slows the seat
+# before the separation (mode 2/3, [S:aces_modes]).
+[[stage.parachute]]
+id = "drogue"
+role = "drogue"
+count = 1
+drag_area_m2 = 0.73                      # [D] 1.82 m^2 x 0.4
+attach_station_m = 1.5                   # [E] top of the seat back
+fill_time_s = 0.2                        # [E] small canopy, mortar deployed
+max_load_n = 40000.0                     # [E] beyond: "Fallschirm gerissen"
+deploy_height_m = 15240.0                # unused (see the header); the envelope ceiling

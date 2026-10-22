@@ -1,0 +1,43 @@
+# Crew member under the personnel main canopy after the seat-man separation (crew escape,
+# docs/superpowers/specs/2026-10-22-crew-escape-design.md) down to the touchdown on water or land.
+
+[sources]
+gq5000 = "USNI Proceedings 2004-07 'Pilots deserve better chutes': GQ Type 5000 aeroconical, 21 ft, ~22 ft/s (slots closed) / ~20 ft/s"
+ap3456 = "RAF AP3456 part 2 sect 3 ch 3 (scottbouch.com/rtfm): aeroconical ~6 m/s (20 ft/s); 8 m/s (26 ft/s) impact max to avoid significant injury"
+
+[vehicle]
+id = "parachutist"
+name = "Fallschirmspringer"
+display_name = "Crewmitglied"
+propellant = "mmh_nto"                   # required by the loader; nothing is modelled
+stages_bottom_to_top = ["crew_member"]
+
+[[stage]]
+id = "crew_member"
+name = "Crewmitglied am Fallschirm"
+length_m = 1.8                           # [E]
+diameter_m = 0.5                         # [E]
+dry_mass_kg = 100.0                      # [E] occupant with suit and survival kit (as ejection_seat.toml)
+dry_cg_station_m = 1.0                   # [E]
+
+[stage.recovery]
+method = "splashdown"                    # rests on the water (or the flat ground) when slow enough
+max_splashdown_speed_mps = 8.0           # [S:ap3456] 26 ft/s impact limit
+
+[stage.aero]
+reference_diameter_m = 0.5
+fixed_drag_area_m2 = 0.5                 # [E] the person hanging upright
+fixed_drag_coefficient = 1.0             # [E]
+
+# Main canopy: sink 6.7 m/s at sea level ([S:gq5000] ~22 ft/s; [S:ap3456] ~6 m/s) with 100 kg:
+# C_D S = 2 m g / (rho0 v^2) = 2 x 100 x 9.81 / (1.225 x 6.7^2) = 35.7 m^2 minus the body's 0.5 -> 35 m^2 [D].
+[[stage.parachute]]
+id = "main"
+role = "main"
+count = 1
+drag_area_m2 = 35.0                      # [D] see above
+attach_station_m = 1.8                   # [E] risers at the shoulders
+fill_time_s = 1.5                        # [E] mortar deployed; ACES II main fully open 2.5-4 s after the handle pull
+                                         # [S: 127th Wing ANG 'Eyes on parachutes']
+max_load_n = 25000.0                     # [E] ~25 g on 100 kg: beyond it the canopy tears
+deploy_height_m = 4572.0                 # unused (gnc::SeatSequencer deploys it); the low-mode height (15,000 ft)

@@ -1,0 +1,59 @@
+# Crew escape of a crewed Starship return (docs/superpowers/specs/2026-10-22-crew-escape-design.md): ejection seats
+# that fire when the onboard computer gives the ship up. Referenced by crewed missions ([mission] crew_escape). The
+# ship's own data stay untouched (user 2026-10-22): the seats are placed in its stage frame here, the ship keeps its
+# mass and CG when they leave.
+
+[sources]
+whiteman = "Whiteman AFB, '442nd egress troops deal with ACES' : rocket catapult 5,000 lbf for 0.55 s"
+dtic_aces = "DTIC ADA133628, Douglas ACES II Revision C: 0-600 KEAS envelope; modes; recovery mortar 1.0 s after the drogue gun, bridle cut 0.15 s later"
+lsi_drogue = "Life Support International PAR-1610-00: drogue deploys ~0.16 s after the seat leaves the rail (modes 2 and 3)"
+ejection_modes = "Kure Ansiklopedi 'Ejection seat' (secondary): mode 1 below 250 KEAS and 15,000 ft"
+ap3456 = "RAF AP3456 part 2 sect 3 ch 3: 8 m/s (26 ft/s) touchdown limit"
+
+[crew_escape]
+id = "starship_crew"
+seat_vehicle = "ejection_seat"
+parachutist_vehicle = "parachutist"
+# Rails: the ship's body +z is its back (the belly is -z; leeward in the belly flop), tilted 10 deg towards the nose [E]
+rail_direction = [0.17365, 0.0, 0.98481]
+rail_length_m = 1.0                      # [E] the seat clears the hatch after this travel
+stagger_s = 0.4                          # [E] multi-seat sequencing ~0.3-0.5 s; order aft to forward
+
+# Envelope [S:dtic_aces] 600 KEAS; ceiling 50,000 ft [E: commonly cited ACES II ceiling]
+envelope_max_height_m = 15240.0
+envelope_max_eas_mps = 308.7             # [D] 600 kn
+# Modes [S:ejection_modes]: mode 1 below 250 KEAS and 15,000 ft; above 15,000 ft mode 3 holds the drogue until there
+mode1_max_eas_mps = 128.6                # [D] 250 kn
+mode_low_height_m = 4572.0               # [D] 15,000 ft
+mode1_main_delay_s = 0.2                 # [E] mode 1: main mortar as the seat leaves the cockpit [S:dtic_aces]
+mode2_drogue_delay_s = 0.16              # [S:lsi_drogue]
+mode2_separation_delay_s = 1.16          # [D] drogue 0.16 s + recovery mortar 1.0 s later [S:dtic_aces]
+
+# Give-up rules (spec: early give-up fires over water, at the latest at this height above ground)
+min_firing_height_m = 1500.0             # [E] mode 1 main fully open after ~3 s / ~300 m of fall
+sea_target_margin_m = 2000.0             # [E] given-up ship aims this far beyond the shoreline
+min_catch_propellant_kg = 25000.0        # [E] placeholder - Task 3 of the plan measures it
+
+# Judging [E unless sourced]
+max_load_g = 20.0                        # [E] sustained longer than max_load_duration_s
+max_load_duration_s = 0.1                # [E]
+min_clearance_m = 1.0                    # [E] to the ship hull, its plume and the tower
+plume_half_angle_deg = 15.0              # [E]
+plume_length_m = 100.0                   # [E]
+max_touchdown_sink_mps = 8.0             # [S:ap3456]
+
+# Rocket catapult [S:whiteman]: 22.2 kN for 0.55 s along the rail; split into the tube (catapult) stroke [E 0.17 s]
+# and the sustainer, summing to the constant thrust. Time from the seat's own firing, thrust in N.
+catapult = [[0.0, 0.0], [0.02, 22241.0], [0.17, 22241.0], [0.18, 0.0]]
+rocket = [[0.17, 0.0], [0.18, 22241.0], [0.53, 22241.0], [0.55, 0.0]]
+
+# Seats in the firing order (aft to forward) [E]: crew deck high in the ship stage (x from the stage bottom), inside the
+# 4.5 m hull radius on the back.
+[[seat]]
+position_m = [43.0, 0.0, 3.5]
+[[seat]]
+position_m = [44.2, 0.0, 3.5]
+[[seat]]
+position_m = [45.4, 0.0, 3.5]
+[[seat]]
+position_m = [46.6, 0.0, 3.5]
