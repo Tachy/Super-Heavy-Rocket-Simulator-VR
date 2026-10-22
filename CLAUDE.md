@@ -36,10 +36,10 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
   Moon: body-fixed frame, shape, atmosphere or vacuum; thermal radiation environment: Sun, Earth and Moon albedo and infrared),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
-  CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates),
+  CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates, energy- and J2-mean semi-major axis),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
   the mission delta-v budget and its required mass, the tanker's return reserve, the refuelling campaign calculator (tanker
-  count from the r5 reference flights: windows with the phasing orbit chosen per window, depot boil-off, drag, HLS demand), the Earth return: TEI, mid-course corrections, braking burn, the coelliptic phasing (from below or above the target)
+  count from the r5 reference flights: windows with the phasing orbit chosen per window, depot boil-off, the depot's mean orbit followed: drag decay, transfer pushes, station keeping; HLS demand), the Earth return: TEI, mid-course corrections, braking burn, the coelliptic phasing (from below or above the target)
   to the ISS: schedule + full-model planner with drag, and the ISS launch window),
   gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
@@ -67,7 +67,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   before in-orbit ignitions (burns start turn + lead ahead; planners reserve the gas); the refuelling reference flights
   chained by the mission sequence: depot launch -> station, tanker pad -> perigee raise -> docking -> transfer ->
   departure -> ship return -> catch (the caught booster lifted off the tower), HLS refuel -> lunar mission continued
-  from the live HLS).
+  from the live HLS); the refuelling campaign flown in one session (supervisor: live planning from the flown depot,
+  station-keeping reboosts, comparison with the calculator).
   The data pipeline archives every fetched ISS OEM in `data/iss_oem/` (one file per creation date).
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 - External libraries are wrapped behind interfaces inside one module; nothing else includes them.
@@ -198,7 +199,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 `config/` holds propellants, engines, vehicles and aero tables as TOML/CSV with provenance tags
 ([S] sourced, [E] estimate, [D] derived) - see `config/README.md`.
 `build/core/refuelling_report.exe [--height-km N ...]` prints the tanker campaign of a lunar mission (refuelling r6,
-levers as flags; measured inputs in `config/refuelling/reference_flights.toml`, checked by the slow r5 flights).
+levers as flags; measured inputs in `config/refuelling/reference_flights.toml`, checked by the slow r5 flights;
+`--fly` flies the whole campaign in one session and compares, ~22 min; `--fly-placed` ~5 min).
 `python tools/vehicle_report.py <vehicle-id> [--payload-kg N]` prints masses, thrust, burn time
 and the Tsiolkovsky delta-v budget; use it after every config change.
 

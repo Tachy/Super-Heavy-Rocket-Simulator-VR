@@ -1628,3 +1628,65 @@ reviews, each fixed (with a test) or decided here.
   - Raise tail-off wait without a timeout (f1 M7): no public path keeps an engine running with the autopilot idle in
     the Raise leg (the autopilot burn cuts pilot-lit engines; disengage + ignite re-plans the next raise);
   - the step dependence of burn end states (above): the free drift at a 120 km perigee, not the burn executor.
+
+### Flown campaign (f2)
+Plan `docs/superpowers/plans/2026-10-21-refuelling-f2-flown-campaign.md`, ledger
+`.superpowers/sdd/2026-10-21-refuelling-f2-flown-campaign/progress.md`.
+- **Driver** `sim::RefuellingCampaignFlight` (a `SessionSupervisor`: `FlightSession` calls `update` every tick and stops
+  a time-warp call at `wake_epoch`): mission `refuelling_campaign_flown` (depot launched by `depot_launch`) or
+  `refuelling_campaign_flown_placed` (depot placed with demand minus 1.5 net deliveries, two tankers). Phases
+  DepotAscent -> Planning -> WaitLaunch -> Flying -> (StationKeeping) -> ... -> Complete / Ended. Every plan is the
+  calculator re-planned from the flown depot (`CampaignLive`: its state, fill, last launch and arrival, 1 h pad
+  readiness [E]); the first plan is the comparison's baseline. Flights are sequential (calculator rows never overlap);
+  each launches with `keep_station` beside the kept depot (`launch_campaign_flight`); after it the chaser is dropped
+  (`keep_only_station`). Only the first tanker flies its return, in a blocking side session (`place_vehicle`): caught,
+  2.95 t main left. A failed flight re-plans from the next window. Booked on the depot: attitude gas 20 kg/day [E] (1 kg
+  batches), the transfer vent 1.5 % [E].
+- **Mean orbit:** `orbit::energy_mean_semi_major_axis_m` (the J2 energy, the osculating a swings +-2 km at 200 km /
+  26.5 deg) and `station_mean_elements_from_state`; a pure point mass + J2 propagation holds its phase within +-20 km
+  over 5 days (the eccentricity term). The raise to a phasing orbit sizes its burns from `orbit::j2_mean_orbit`
+  (averaged over one revolution; the osculating apsides swing +-10 km) and raises a higher apoapsis at the periapsis.
+- **Station keeping:** `[station_keeping]` below 195 km mean height (J2 energy), nothing in flight and the next
+  arrival more than 24 h away -> a Hohmann pair to 200 km [E] from the energy-mean a (first burn 30 min ahead, the
+  second half a transfer later, the engines' tail-off awaited). At 636 t the belly Raptor's transients exceed 60 % of a
+  ~2 m/s burn, so the burns fly cold gas: 191 -> 200 km cost 6.5 t (Raptor ideal ~0.8 t). The full run needed none.
+- **Depot orbit in the calculator** (user 2026-10-22): the flown depot drifts - drag lowers it (a free 572 t depot at
+  198 km: 0.33 km/day) and every transfer's settling push raises it, prograde because the docked pair flies nose along
+  +V-bar (0.547 m/s per tanker transfer, 0.527-0.566 = impulse / pair mass; the HLS's ~3.4 m/s). With a fixed orbit
+  the first plan's depot phase was 2,600 km off after 25 days. `mission::DepotOrbitTrack` keeps the mean semi-major
+  axis in segments (linear decay, the phase from the changing mean motion, -3/4 n/a da/dt t^2) with the keeping floor
+  and target (also in the future the window search sees); `CampaignModels::depot_orbit_event` changes it at t = 0 and
+  after every transfer (push `transfer_push_dv_mps` 0.55 [D], decay rho(US76) Cd 2.2 x end-on area x sqrt(mu a) / m x
+  `drag_decay_factor` 1.076 [D]: the free depot 0.3294 vs 0.3062 km/day, the 14 flown post-transfer heights fit 1.08)
+  and books the reboosts it flew. Flown heights 207.5 -> 209.8 km over 53 days; the first plan's track stayed within
+  200 km of the flown depot until its windows parted (below).
+- **Delivery calibration** (user 2026-10-21): the flown tankers delivered more than the calculator's model of their
+  own windows - below the depot +0.6..+3.2 t (5 flights), above +1.0..+3.7 t (9), sd ~1 t (the rendezvous varies
+  13-21 t); `campaign_offset_below_t` 1.7 / `campaign_offset_above_t` 2.25 [D] by the phasing orbit's periapsis
+  against the depot's mean radius. The calculator books the tanker's phasing boil-off with the flown free coast's
+  3.5 t/day (the orbit average at a fixed LVLH attitude said 15.9) and the HLS's 0.47 t/day [D].
+- **Comparison** (user 2026-10-22): count equal to the first plan; the fill after the k-th delivering tanker within
+  2 % of the first plan's k-th; each arrival (the HLS's: the duration) within 1 d of the live plan made just before
+  its launch; the HLS holds its required propellant; the first return caught or upright abort. The first plan's
+  duration is only reported: its windows flip at thresholds - the latest launch to the same arrival (3 h) differs
+  under ~100 km of depot phase (tanker 6: plan 20.49 d, flown 19.51 d), the 24 h pad turnaround then moves every
+  later launch and a window cycle drops out.
+- **Full run** (`refuelling_report --fly`, ~22 min; ctest `Flown campaign: the depot launched*` `[slow]`): depot
+  launched 2026-10-20, 14 tankers, 0 failures, HLS at the depot 59.44 d with 1,090.8 t (needs 1,041.4 t); first plan
+  14 tankers / 53.2 d; arrivals within 0.07 d of their live plans; fills within 2 % (largest: tanker 13, 864.4 vs
+  850.9 t, +1.6 %); deliveries 58.6-72.5 t; losses boil-off (remainder) 31.6 t, attitude gas 1.2 t, vent 27.3 t,
+  station keeping 0. Placed variant (`--fly-placed`, ~5 min): 2 tankers + HLS, passes.
+- **Calculator answer** (default, depot placed at 200 km): **13 tanker flights, 52.5 days** (f3/f4: 13 / 49.7;
+  with the per-class calibration and the depot's orbit followed). `--reference-phasing`: 14 / 224.7 d (the single
+  phasing orbit against a drifting depot).
+- **Known limits:** flights strictly sequential; the side return blocks the session; the calculator's keeping floor
+  acts continuously (the flown rule checks at its plans and waits for 24 h to the next arrival) and books the reboosts
+  at the Raptor's exhaust velocity (the flown light depot flies them on cold gas); the transfer push at the arrival
+  (flown ~3 h later); reboosts after the last transfer unbooked.
+- **Follow-ups:** a consistent J2-mean rendezvous (raise, schedule and planner on one mean model - the J2-mean
+  schedule alone failed against the osculating raise/planner); the depot's cold gas keeps pushing with empty main
+  tanks (headers counted in `main_dry`); light-depot reboosts on cold gas (6.5 t).
+- **Game:** `FlightSim.campaign_flight_state()` (key `present`; rows, losses, reboosts, the first plan).
+- **Tests:** `[campaign_flown]` (`test_refuelling_campaign_flight.cpp`: supervisor, keep_station, place_vehicle,
+  reboost, live start, the free depot's decay, the placed and the full campaign `[slow]`), the track and the orbit
+  events in `test_refuelling_campaign.cpp`.
