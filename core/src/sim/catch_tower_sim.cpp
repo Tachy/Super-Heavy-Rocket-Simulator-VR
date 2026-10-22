@@ -129,6 +129,7 @@ void CatchTowerSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
         }
         auto& tr = track(*body);
         tr.contact = contact::catch_contact(tr.geometry, pose, arms);
+        if (tr.contact.any_contact() && !tr.first_contact) tr.first_contact = epoch;  // the catch moment
         if (tr.contact.any_contact()) {
             body->apply_external_wrench(site_to_gcrf * tr.contact.force_n,
                                         body->state().attitude.inverse_rotate(site_to_gcrf * tr.contact.torque_nm));
@@ -202,6 +203,12 @@ void CatchTowerSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, 
             phase_ = CatchPhase::Missed;
         }
     }
+}
+
+std::optional<time::Epoch> CatchTowerSim::first_contact_epoch(const vehicle::FlightBody& body) const {
+    const auto it = tracks_.find(&body);
+    if (it == tracks_.end()) return std::nullopt;
+    return it->second.first_contact;
 }
 
 bool CatchTowerSim::in_contact(const vehicle::FlightBody& body) const {

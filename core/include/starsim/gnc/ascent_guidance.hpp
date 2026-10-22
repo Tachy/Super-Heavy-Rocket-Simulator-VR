@@ -75,6 +75,10 @@ public:
     // The upper stage's cutoff as the closed loop predicts it (onboard prediction for the mission timeline): the epoch
     // of its last update plus PEG's time to go; none before the closed loop has run with thrust.
     const std::optional<time::Epoch>& cutoff_epoch() const { return cutoff_epoch_; }
+    // The booster's throttle the open loop commands `t_s` after liftoff (PitchProgram::booster_throttle; full without
+    // a schedule), and the liftoff it counts from (start()).
+    double booster_throttle(double t_s) const;
+    time::Epoch liftoff_epoch() const { return liftoff_; }
 
 private:
     GuidanceCommand open_loop(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);

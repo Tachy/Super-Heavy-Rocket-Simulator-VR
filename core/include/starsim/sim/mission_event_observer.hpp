@@ -19,9 +19,10 @@ bool has_recorded(const MissionTimeline& t, MissionEventKind kind, uint32_t seri
 
 // Mission events seen from the outside of the flight (external view, Task 3): engine starts and cutoffs, the burns of a
 // returning booster (named by its return guidance's phase), Max Q, the entry interface, the parachutes and the landing
-// outcomes of every body, recorded into a MissionTimeline. Events with an exact moment (liftoff, separations - with
-// MECO when the stack's first stage separates under thrust (hot staging) -, docking, undocking, crew ejection) are
-// recorded by FlightSession directly.
+// outcomes of every body (a catch, known once the body rests in the arms, stamped with the pins' first touch on them),
+// recorded into a MissionTimeline. Events with an exact moment (liftoff, separations - with MECO when the stack's first
+// stage separates under thrust (hot staging) -, docking, undocking, crew ejection) are recorded by FlightSession
+// directly.
 // FlightSession::advance_to calls observe() after every tick and every coast; it samples at most every
 // observe_interval_s, so an event is recorded up to that late (after a coast: at the coast's end).
 class MissionEventObserver {

@@ -295,11 +295,13 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     }
     REQUIRE(meco_at_30);
     REQUIRE(separation_at_30);
-    // Measured 2026-10-22: +0.87 s at T+30 s. The criterion run forward at the flow and cutoff propellant of the moment
-    // is late by up to 12 s in the max-Q throttle bucket and ~0.26 s per second to go near MECO (the return's
-    // cutoff propellant grows with the downrange speed) - converging: +0.79 s 3 s before.
-    CHECK(std::abs(*meco_at_30 - meco->epoch) <= 2.0);
-    CHECK(std::abs(*separation_at_30 - separation->epoch) <= 2.0);  // hot staging: separation in the MECO's tick
+    // Measured 2026-10-22 (flow along the throttle schedule, the cutoff propellant of the moment): +6.97 s at T+30 s,
+    // +6.1..+8.3 s over the booster phase (+8.2 s in the max-Q bucket) - late by the return's cutoff propellant, which
+    // grows with the downrange speed; converging: +1.46 s 5.7 s before. (At the flow now alone: +0.87 s at T+30 s by
+    // cancellation, up to 12 s off in the bucket.)
+    CHECK(std::abs(*meco_at_30 - meco->epoch) <= 8.0);
+    CHECK(std::abs(*separation_at_30 - separation->epoch) <= 8.0);  // hot staging: separation in the MECO's tick
+    CHECK(meco_prediction.max_error_within_s(meco->epoch, 1e9) <= 9.0);
     CHECK(meco_prediction.max_error_within_s(meco->epoch, 3.0) <= 1.0);
     // PEG: -1.94 s at the first closed-loop tick, within 0.29 s over the last 120 s, +0.24 s at the end.
     REQUIRE(seco_prediction.first);
@@ -362,15 +364,16 @@ TEST_CASE("Booster return records boostback, landing burn and the catch", "[time
     REQUIRE(landing_burn_prediction.first);
     REQUIRE(catch_prediction.first);
     // Measured 2026-10-22: cutoff -1.57 s at the boostback's start, 0.16 s within the last 10 s; landing burn -5.4 s at
-    // the apex, within 4.8 s on the way down, 1.4 s within the last 30 s; catch -20 s at the apex (ignition plus the
-    // one-dimensional burn duration), then the SCvx plan's end: 4.7 s before the recorded catch, which waits for the
-    // booster at rest in the arms (CatchTowerSim: 2 s at rest after the carriage has stopped).
+    // the apex, within 4.8 s on the way down, 1.4 s within the last 30 s; catch (recorded at the pins' first touch):
+    // -16 s at the apex (ignition plus the one-dimensional burn duration), then the SCvx plan's end, 4.3 s within the
+    // last 30 s, 0.9 s within the last 10 s.
     CHECK(*cutoff_prediction.first_seen - boostback->epoch <= 1.0);  // from the boostback's first second
     CHECK(cutoff_prediction.max_error_within_s(cutoff->epoch, 1e9) <= 2.0);
     CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 7.0);
     CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 30.0) <= 2.0);
-    CHECK(catch_prediction.max_error_within_s(caught->epoch, 1e9) <= 25.0);
-    CHECK(catch_prediction.max_error_within_s(caught->epoch, 30.0) <= 6.0);
+    CHECK(catch_prediction.max_error_within_s(caught->epoch, 1e9) <= 20.0);
+    CHECK(catch_prediction.max_error_within_s(caught->epoch, 30.0) <= 5.0);
+    CHECK(catch_prediction.max_error_within_s(caught->epoch, 10.0) <= 1.5);
     CHECK(predicted_of(t, K::LandingBurn, *booster) == nullptr);
     CHECK(predicted_of(t, K::Caught, *booster) == nullptr);
 }
@@ -536,10 +539,10 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
     REQUIRE(landing_burn_prediction.first);
     REQUIRE(catch_prediction.first);
     CHECK(*landing_burn_prediction.first_seen - t0 <= 1.0);  // from the entry guidance's first cycle
-    // Measured 2026-10-22: the gate -0.83 s 179 s before, 0.07 s within the last 30 s; the catch: the plan's end is the
-    // pins on the arms, 11-13 s before the recorded catch (the ship at rest in the arms after the carriage has stopped).
+    // Measured 2026-10-22: the gate -0.83 s 179 s before, 0.07 s within the last 30 s; the catch (the plan's end vs the
+    // pins' first touch on the arms): -2.9 s 18 s before, -1.3 s at the end.
     CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 1.0);
-    CHECK(catch_prediction.max_error_within_s(caught->epoch, 1e9) <= 14.0);
+    CHECK(catch_prediction.max_error_within_s(caught->epoch, 1e9) <= 4.0);
     CHECK(t.predicted().empty());
 }
 
@@ -599,7 +602,8 @@ TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cu
         std::printf("  [prediction] MECO at T+30 s: error %+.2f s\n", *meco_at_30 - meco->epoch);
     }
     REQUIRE(meco_at_30);
-    CHECK(std::abs(*meco_at_30 - meco->epoch) <= 2.0);  // measured 2026-10-22: -0.08 s
+    // measured 2026-10-22: +7.35 s (the return's cutoff propellant grows; +9.8 s at most, +9 s in the bucket)
+    CHECK(std::abs(*meco_at_30 - meco->epoch) <= 8.0);
     const uint32_t booster = meco->body_serial;
     size_t mecos = 0;
     std::optional<time::Epoch> next_start;  // the booster's next burn
@@ -915,6 +919,38 @@ TEST_CASE("A planned burn on cold gas records its ignition and cutoff", "[timeli
     CHECK(ignition->body_name == "Crew Dragon capsule");
     CHECK(node.epoch - ignition->epoch >= 0.0);
     CHECK(find_predicted(t, MissionEventKind::Ignition) == nullptr);
+}
+
+TEST_CASE("A capsule return predicts the capsule's entry interface, not the trunk's", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto m = config::load_capsule_return_mission(STARSIM_CONFIG_DIR, "crew_dragon_return");
+    sim::place_capsule_return_mission(session, m, config::load_vehicle(STARSIM_CONFIG_DIR, m.vehicle_id),
+                                      STARSIM_CONFIG_DIR, time.from_utc(m.epoch_utc));
+    REQUIRE(session.plan_capsule_return(sim::capsule_return_parameters(m)));
+    const auto& t = session.timeline();
+    const auto stack = session.body_serial(session.controlled_index());
+    const auto start = session.epoch();
+    session.advance_to(session.epoch() + 1.0, 100000);
+    const auto* entry = predicted_of(t, MissionEventKind::EntryInterface);
+    REQUIRE(entry);
+    const auto predicted_serial = entry->body_serial;
+    CHECK(predicted_serial != stack);  // the stack's serial stays with the trunk at the jettison
+    CHECK(entry->body_name == "Crew Dragon capsule");
+    // to the jettison: big steps to the burn, then on
+    while (session.body_count() < 2 && session.epoch() - start < 3.0 * 86400.0) {
+        double step = 10.0;
+        if (session.autopilot().state == sim::AutopilotState::Burn && session.autopilot().burn.time_to_ignition_s > 900.0) {
+            step = session.autopilot().burn.time_to_ignition_s - 600.0;
+        }
+        session.advance_to(session.epoch() + step, 1000000);
+    }
+    REQUIRE(session.body_count() == 2);
+    CHECK(session.body_serial(session.controlled_index()) == predicted_serial);  // the capsule
+    const auto* after = predicted_of(t, MissionEventKind::EntryInterface);
+    REQUIRE(after);
+    CHECK(after->body_serial == predicted_serial);
 }
 
 TEST_CASE("A cold-gas burn stopped by a disengage records its cutoff", "[timeline]") {

@@ -2,6 +2,7 @@
 
 #include <array>
 #include <map>
+#include <optional>
 #include <vector>
 
 #include "starsim/contact/catch_arms.hpp"
@@ -38,6 +39,8 @@ public:
     void after_tick(const std::vector<vehicle::FlightBody*>& bodies, const frames::BodyOrientation& earth,
                     time::Epoch epoch_end, double dt_s);
     bool in_contact(const vehicle::FlightBody& body) const;  // pins on the arms in the last tick
+    // The first tick with the pins on the arms (the catch moment, as the webcast calls it); none before.
+    std::optional<time::Epoch> first_contact_epoch(const vehicle::FlightBody& body) const;
     // Longest coast segment before a freely moving body could enter the tower zone (0: tick now).
     double coast_limit_s(const std::vector<vehicle::FlightBody*>& bodies, const frames::BodyOrientation& earth,
                          time::Epoch epoch) const;
@@ -48,6 +51,7 @@ private:
         contact::CatchBodyGeometry geometry;
         contact::CatchContact contact;
         double at_rest_s = 0.0;
+        std::optional<time::Epoch> first_contact;
     };
 
     static bool catchable(const vehicle::FlightBody& body);

@@ -32,6 +32,11 @@ const gnc::ReturnCommand* FlightSession::return_status(size_t index) const {
     return flying.return_guidance ? &flying.return_command : nullptr;
 }
 
+std::optional<time::Epoch> FlightSession::catch_contact_epoch(size_t index) const {
+    if (!tower_) return std::nullopt;
+    return tower_->first_contact_epoch(*bodies_.at(index).body);
+}
+
 const gnc::EntryCommand* FlightSession::entry_status(size_t index) const {
     const auto& flying = bodies_.at(index);
     return flying.entry_guidance ? &flying.entry_command : nullptr;

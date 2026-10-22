@@ -568,6 +568,8 @@ public:
     const gnc::BoosterReturnGuidance* return_guidance(size_t index) const { return bodies_.at(index).return_guidance.get(); }
     // Return guidance of a body (nullptr if it has none) and its latest command.
     const gnc::ReturnCommand* return_status(size_t index) const;
+    // The catch moment of body `index`: its first tick with the pins on the tower's arms (none without a tower / contact).
+    std::optional<time::Epoch> catch_contact_epoch(size_t index) const;
     // Any main-engine group of body `index` is commanded to run (pilot, autopilot or guidance) - engines that stop
     // while still commanded starved, failed or broke up (the mission event log's uncommanded cutoff).
     bool engines_commanded(size_t index) const;
@@ -909,6 +911,7 @@ public:
     // Stable identity of body `index`: unique for the session lifetime, starts at 1, never reused (not even after
     // clear_bodies), unchanged when the bodies are reindexed by staging or removal.
     uint32_t body_serial(size_t index) const { return bodies_.at(index).serial; }
+    uint32_t next_body_serial() const { return next_serial_; }  // the serial the next new body gets
     size_t controlled_index() const { return controlled_; }
     const vehicle::FlightBody& body(size_t index) const { return *bodies_.at(index).body; }
     vehicle::FlightTelemetry telemetry(size_t index) const;

@@ -115,24 +115,22 @@ GuidanceCommand AscentGuidance::update(const vehicle::FlightBody& body, const ve
                                        time::Epoch epoch, bool closed_loop) {
     if (closed_loop) return peg(body, env, epoch);
     GuidanceCommand cmd = open_loop(body, env, epoch);
-    const auto& schedule = program_.booster_throttle;
-    const double t = epoch - liftoff_;
-    if (!schedule.empty()) {
-        if (t <= schedule.front().first) {
-            cmd.throttle = schedule.front().second;
-        } else if (t >= schedule.back().first) {
-            cmd.throttle = schedule.back().second;
-        } else {
-            for (size_t i = 1; i < schedule.size(); ++i) {
-                if (t > schedule[i].first) continue;
-                const auto& [t0, f0] = schedule[i - 1];
-                const auto& [t1, f1] = schedule[i];
-                cmd.throttle = f0 + (f1 - f0) * (t - t0) / (t1 - t0);
-                break;
-            }
-        }
-    }
+    cmd.throttle = booster_throttle(epoch - liftoff_);
     return cmd;
+}
+
+double AscentGuidance::booster_throttle(double t_s) const {
+    const auto& schedule = program_.booster_throttle;
+    if (schedule.empty()) return 1.0;
+    if (t_s <= schedule.front().first) return schedule.front().second;
+    if (t_s >= schedule.back().first) return schedule.back().second;
+    for (size_t i = 1; i < schedule.size(); ++i) {
+        if (t_s > schedule[i].first) continue;
+        const auto& [t0, f0] = schedule[i - 1];
+        const auto& [t1, f1] = schedule[i];
+        return f0 + (f1 - f0) * (t_s - t0) / (t1 - t0);
+    }
+    return schedule.back().second;
 }
 
 GuidanceCommand AscentGuidance::open_loop(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,

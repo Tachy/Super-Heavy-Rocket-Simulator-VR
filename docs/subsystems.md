@@ -1781,7 +1781,9 @@ Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure dat
 - **Recorded:** by `FlightSession` at exact moments (liftoff, stage / payload / trunk separation with MECO at hot
   staging, hard capture, undocking at the physical separation - mechanism phase Separated, `hooks_open_s` 180 s after
   the command -, crew ejection) and by `MissionEventObserver` (0.1 s sampling while ticking, after each coast: engine
-  starts / cutoffs, booster return phases, Max Q, entry interface, parachutes, landing outcomes). A planned burn flown
+  starts / cutoffs, booster return phases, Max Q, entry interface, parachutes, landing outcomes; a catch - known once
+  the body rests in the arms - is stamped with the pins' first touch on them, `CatchTowerSim::first_contact_epoch`:
+  the catch moment as the webcast calls it, ruling 2026-10-22). A planned burn flown
   on RCS translation (no main engine fires: Crew Dragon, a small Starship burn on cold gas) records Ignition and Cutoff
   at the burn executor's start and end (both in one tick when it starts and ends in the same tick; a disengage of a
   lit burn records its Cutoff), named by the upper stage (its thrusters); RCS attitude control and proximity
@@ -1802,11 +1804,13 @@ Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure dat
   burn, parachutes, catch / landing / splashdown) is no longer predicted once recorded for that body:
   - MECO and stage separation (AutopilotState::Booster, from liftoff): the booster's propellant above the cutoff
     propellant the autopilot set on its last tick (`booster_cutoff_propellant_kg`: the return's need or the reserve) at
-    the stage's actual flow now; the autopilot stages in the MECO's tick. Measured (starship_leo): +0.9 s at T+30 s,
-    late by up to 12 s in the max-Q throttle bucket and ~0.26 s per second to go near MECO (the return's cutoff
-    propellant grows with the downrange speed); Falcon 9 RTLS -0.1 s at T+30 s (but up to 37 s off around Max Q, 8 s
-    within the last 30 s). Not on the pad: the return's cutoff
-    propellant is only planned in flight.
+    the stage's actual flow now scaled along the open loop's throttle schedule (`AscentGuidance::booster_throttle`,
+    incl. the max-Q bucket; ruling 2026-10-22: part of the onboard computer's own plan), integrated in 1 s steps [E];
+    the autopilot stages in the MECO's tick. Measured: starship_leo +7.0 s at T+30 s, +6.1..+8.3 s over the booster
+    phase (+8.2 s in the bucket), +1.5 s 6 s before; Falcon 9 RTLS +7.4 s at T+30 s, +6..+9.8 s (+9 s in the bucket).
+    The prediction is late by the return's cutoff propellant, which grows with the downrange speed (the value of the
+    moment is used). At the flow now alone it was +0.9 s at T+30 s by cancellation but 12 s (Starship) / 37 s
+    (Falcon 9) off in the bucket. Not on the pad: the return's cutoff propellant is only planned in flight.
   - SECO: `AscentGuidance::cutoff_epoch` (closed-loop update + PEG time to go) from the upper stage's first
     closed-loop tick: -1.9 s then, within 0.3 s over the last 120 s.
   - Booster return (`BoosterReturnGuidance::forecast`): the boostback's cutoff (Cutoff: velocity to be gained less the
@@ -1815,23 +1819,24 @@ Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure dat
     landing-burn prediction takes - within 5.4 s, 1.4 s in the last 30 s; the stop height run forward linearly was
     26 s early mid-fall; with an entry burn (Falcon 9) only after it: the burn prediction does not know it and was
     130 s early before it); the touchdown (Caught / Landed: that ignition plus the burn prediction's duration, then the
-    landing burn's time to go - the SCvx plan's end).
+    landing burn's time to go - the SCvx plan's end; Super Heavy: -16 s at the apex, 4.3 s within 30 s, 0.9 s within
+    10 s of the pins' first touch).
   - Ship / capsule entry (`EntryGuidance::gate_epoch`: the corrector's or the terminal steering's predicted time to
     the gate): the ship's landing burn (flip at the gate; ship_return_starbase: +28 s 26 min ahead, 0.3 s within 2 min)
     or the capsule's drogues (Parachutes; Crew Dragon: within 3.5 s, 1.8 s at the end). Then
-    `ShipLandingGuidance::catch_epoch` (the landing burn plan's end).
+    `ShipLandingGuidance::catch_epoch` (the landing burn plan's end; -2.9 s 18 s ahead, -1.3 s at the end).
+  - The entry interface of a capsule return whose trunk is still on carries the capsule's serial: the trunk keeps the
+    stack's at the jettison, the capsule becomes the next body (`FlightSession::next_body_serial`).
   - Not predicted (no guidance holds a time): the boostback ignition (the flip ends on attitude), Falcon 9's entry
     burn, the splashdown (parachute descent), the docking (the final approach has holds) and a propellant transfer's
     end. Max Q is never predicted.
-  - Known gap: a predicted catch is the pins on the arms (the plan's end); the recorded Caught waits for the body at
-    rest in the arms (`CatchTowerSim`: 2 s after the carriage stopped) - 4.7 s later for the booster, 11-13 s for the
-    ship.
 - **Tests:** `[timeline]` (`test_mission_timeline.cpp`): T-0 rules; the recorded ascent, booster return, flip and
   catch, cold staging, lunar-return loft, undocking; scheduled liftoff with pad hold (one 4000-tick call coasts 5.96 h,
   altitude within 0.1 m of the pad); waiting ISS launch; countdown of a waiting ascent; predicted deorbit events before
   and after the re-plan; the Dragon's RCS burn (Ignition / Cutoff, predicted ignition within 1 s); predicted vs recorded
   undocking; the onboard predictions of MECO / separation / SECO (starship_leo), MECO (Falcon 9), the booster's
-  boostback cutoff, landing burn and catch, the ship's landing burn and catch (tolerances from the measurements above).
+  boostback cutoff, landing burn and catch, the ship's landing burn and catch (tolerances from the measurements above),
+  the capsule's entry interface serial through the trunk jettison.
   Hidden probe `"Return prediction probe"` (STARSIM_VERBOSE=1, STARSIM_PROBE_CAPSULE for the Crew Dragon): a ship /
   capsule return from orbit with the predictions' errors; STARSIM_DEBUG_PREDICTIONS prints every sample.
 

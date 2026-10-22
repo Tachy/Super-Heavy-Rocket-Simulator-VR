@@ -187,7 +187,14 @@ void MissionEventObserver::observe_body(const FlightSession& s, size_t index, Bo
 
     // Landing outcome: the change from Flying.
     const auto outcome = outcome_kind(s.landing_outcome(index));
-    if (m.flying && outcome && !first) t.record(mission_event(s, index, *outcome));
+    if (m.flying && outcome && !first) {
+        auto e = mission_event(s, index, *outcome);
+        // the catch is the pins' first touch on the arms (the webcast's catch), known as one once the body rests there
+        if (*outcome == MissionEventKind::Caught) {
+            if (const auto contact = s.catch_contact_epoch(index)) e.epoch = *contact;
+        }
+        t.record(std::move(e));
+    }
     m.flying = !outcome;
 }
 

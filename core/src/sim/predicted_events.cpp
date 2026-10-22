@@ -51,9 +51,11 @@ public:
         events_.push_back(std::move(e));
     }
     // An event of body `index` at `epoch`, if it is still ahead and (once per body) not recorded yet.
-    void add_for(size_t index, MissionEventKind kind, time::Epoch epoch) {
+    // `serial`: the body the event will belong to when it is not body `index` itself (a part separated before it).
+    void add_for(size_t index, MissionEventKind kind, time::Epoch epoch, std::optional<uint32_t> serial = std::nullopt) {
         if (!(epoch - s_.epoch() > 0.0)) return;
         auto e = mission_event(s_, index, kind);
+        if (serial) e.body_serial = *serial;
         if (once_per_body(kind) && has_recorded(s_.timeline(), kind, e.body_serial)) return;
         e.epoch = epoch;
         e.predicted = true;
@@ -77,8 +79,47 @@ private:
     std::vector<MissionEvent> events_;
 };
 
+// [E] MECO forecast: the booster's flow integrated along the throttle schedule in steps of this, at most this far ahead
+constexpr double meco_forecast_step_s = 1.0;
+constexpr double meco_forecast_horizon_s = 1000.0;
+
+// Seconds until the booster has burned `above_kg`: its actual flow now, scaled along the open loop's throttle schedule
+// (the engines running now at the scheduled throttle, within their throttle range). None without flow.
+std::optional<double> booster_burn_time_s(const FlightSession& s, const vehicle::Vehicle& vehicle, double above_kg) {
+    const auto* guidance = s.ascent_guidance();
+    if (!guidance) return std::nullopt;
+    double flow_now_kgps = 0.0;
+    const auto flows_kgps = vehicle.tank_mass_flows_kgps();  // the engines' actual flow (throttle, spool, dispersion)
+    for (const double f : flows_kgps.front()) flow_now_kgps += f;
+    const auto& engines = vehicle.stages().front().engines;
+    const auto engine_flow_kgps = [&](std::optional<double> throttle) {  // nullopt: each engine's throttle now
+        double sum = 0.0;
+        for (const auto& e : engines) {
+            if (!e.producing_thrust()) continue;
+            const auto& cfg = e.performance->config();
+            const double f = throttle ? std::clamp(*throttle, cfg.throttle_min, cfg.throttle_max) : e.throttle;
+            sum += e.performance->mass_flow_kgps(f);
+        }
+        return sum;
+    };
+    const double reference_kgps = engine_flow_kgps(std::nullopt);
+    if (!(flow_now_kgps > 0.0) || !(reference_kgps > 0.0)) return std::nullopt;
+    const double since_liftoff_s = s.epoch() - guidance->liftoff_epoch();
+    double left_kg = std::max(above_kg, 0.0), t_s = 0.0;
+    while (t_s < meco_forecast_horizon_s) {
+        const double throttle = guidance->booster_throttle(since_liftoff_s + t_s + 0.5 * meco_forecast_step_s);
+        const double flow_kgps = flow_now_kgps * engine_flow_kgps(throttle) / reference_kgps;
+        if (!(flow_kgps > 0.0)) return std::nullopt;
+        if (flow_kgps * meco_forecast_step_s >= left_kg) return t_s + left_kg / flow_kgps;
+        left_kg -= flow_kgps * meco_forecast_step_s;
+        t_s += meco_forecast_step_s;
+    }
+    return std::nullopt;
+}
+
 // Ascent: the booster's cutoff by the autopilot's own criterion run forward (the propellant above the cutoff
-// propellant at the flow now; the autopilot stages in the MECO's tick), the upper stage's by the closed loop.
+// propellant, burned along the throttle schedule; the autopilot stages in the MECO's tick), the upper stage's by the
+// closed loop.
 void add_ascent(const FlightSession& s, Collector& c) {
     const size_t i = s.controlled_index();
     const auto state = s.autopilot().state;
@@ -89,11 +130,9 @@ void add_ascent(const FlightSession& s, Collector& c) {
         const auto& booster = vehicle.stages().front();
         const double propellant_kg =
             booster.propellant_kg(config::TankContents::Oxidizer) + booster.propellant_kg(config::TankContents::Fuel);
-        double flow_kgps = 0.0;
-        const auto flows_kgps = vehicle.tank_mass_flows_kgps();  // the engines' actual flow (throttle, spool)
-        for (const double f : flows_kgps.front()) flow_kgps += f;
-        if (!(flow_kgps > 0.0)) return;
-        const auto meco = s.epoch() + std::max(propellant_kg - *cutoff_kg, 0.0) / flow_kgps;
+        const auto burn_s = booster_burn_time_s(s, vehicle, propellant_kg - *cutoff_kg);
+        if (!burn_s) return;
+        const auto meco = s.epoch() + *burn_s;
         c.add_for(i, MissionEventKind::Meco, meco);
         c.add_for(i, MissionEventKind::StageSeparation, meco);
     } else if (state == AutopilotState::UpperStage) {
@@ -168,7 +207,13 @@ std::vector<MissionEvent> predicted_mission_events(const FlightSession& s) {
                                (active_node && std::abs(*active_node - plan->node.epoch) < same_burn_s);
         if (flying_it) {
             c.add_burn(plan->node);
-            c.add(MissionEventKind::EntryInterface, plan->entry_interface_epoch);
+            // a capsule still on its trunk: the capsule enters - after the jettison a new body with the next serial (the
+            // trunk keeps the stack's)
+            const auto step = s.capsule_return_step();
+            const bool trunk_on = (step == CapsuleReturnStep::DeorbitBurn || step == CapsuleReturnStep::TrunkJettison) &&
+                                  s.body(s.controlled_index()).vehicle().stages().size() > 1;
+            c.add_for(s.controlled_index(), MissionEventKind::EntryInterface, plan->entry_interface_epoch,
+                      trunk_on ? std::optional<uint32_t>(s.next_body_serial()) : std::nullopt);
         }
     }
 
