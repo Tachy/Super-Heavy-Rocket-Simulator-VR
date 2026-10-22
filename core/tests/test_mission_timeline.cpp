@@ -166,9 +166,15 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
 
     double q_peak_pa = 0.0;  // the stack's q while climbing, sampled by the test
     time::Epoch q_peak_epoch = t0;
+    std::optional<time::Epoch> seco_command;  // the tick whose autopilot commanded the upper stage's cutoff
     const auto& t = session.timeline();
     while (session.epoch() - t0 < 900.0 && !find_event(t, MissionEventKind::Seco)) {
-        session.advance_to(session.epoch() + 0.1, 100);
+        const bool upper = session.autopilot().state == sim::AutopilotState::UpperStage;
+        const auto& g = session.autopilot().guidance;  // single ticks at the cutoff
+        const bool near = upper && g.phase == gnc::AscentPhase::ClosedLoop && g.time_to_go_s < 1.0;
+        const auto before = session.epoch();
+        session.advance_to(before + (near ? 1.5 * sim::FlightSession::tick_s : 0.1), 100);  // near: one tick
+        if (upper && session.autopilot().state != sim::AutopilotState::UpperStage) seco_command = before;
         if (session.body_count() == 0) break;
         const auto tm = session.telemetry(0);
         if (tm.vertical_speed_mps > 0.0 && tm.dynamic_pressure_pa > q_peak_pa) {
@@ -197,6 +203,8 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     CHECK(meco->body_name == "Super Heavy Block 3");
     CHECK(find_event(t, K::StageSeparation)->body_name == "Super Heavy Block 3");
     CHECK(seco->body_name == "Starship Block 3");
+    REQUIRE(seco_command);
+    CHECK(std::abs(seco->epoch - *seco_command) <= sim::FlightSession::tick_s);  // the command, not the tail-off end
     CHECK(find_event(t, K::EntryInterface) == nullptr);  // the 200 km orbit: no entry
     CHECK(*t.t0() == liftoff->epoch);
 }
@@ -380,28 +388,88 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
     CHECK(count_of(session.timeline(), MissionEventKind::Caught) == 1);
 }
 
-TEST_CASE("Falcon 9 cold staging records MECO without a second cutoff", "[timeline]") {
+TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cutoff", "[timeline]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
-    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    // The same deterministic flight twice: 0.5 s steps find the half second of the autopilot's MECO command (it ends the
+    // booster phase: MECO + staging), the second flight steps through it tick by tick.
+    std::optional<time::Epoch> window;
+    {
+        sim::FlightSession probe(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+        sim::start_mission(probe, STARSIM_CONFIG_DIR, "falcon9_rtls", t0, time);
+        while (!window && probe.epoch() - t0 < 600.0) {
+            const bool booster = probe.autopilot().state == sim::AutopilotState::Booster;
+            const auto before = probe.epoch();
+            probe.advance_to(before + 0.5, 1000);
+            if (booster && probe.autopilot().state != sim::AutopilotState::Booster) window = before;
+        }
+    }
+    REQUIRE(window);
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
     sim::start_mission(session, STARSIM_CONFIG_DIR, "falcon9_rtls", t0, time);
     const auto& t = session.timeline();
-    std::optional<time::Epoch> separation;
-    while (session.epoch() - t0 < 600.0 && (!separation || session.epoch() - *separation < 20.0)) {
-        session.advance_to(session.epoch() + 0.5, 1000);
-        if (!separation) {
-            if (const auto* e = find_event(t, MissionEventKind::StageSeparation)) separation = e->epoch;
+    std::optional<time::Epoch> meco_command;  // the tick whose autopilot ended the booster phase
+    double thrust_after_command_n = 0.0;      // the booster's thrust right after that tick: still tailing off
+    while (session.epoch() - t0 < 600.0 && (!meco_command || session.epoch() - *meco_command < 60.0)) {
+        const bool booster = session.autopilot().state == sim::AutopilotState::Booster;
+        const auto before = session.epoch();
+        const bool near = booster && before >= *window - 0.01;
+        // one tick: 1.5 ticks ahead (a target exactly one tick ahead may round below it and run none)
+        const double to_window_s = *window - before + 0.001;
+        const double step = near ? 1.5 * sim::FlightSession::tick_s : to_window_s > 0.0 ? std::min(0.5, to_window_s) : 0.5;
+        session.advance_to(before + step, 1000);
+        if (booster && session.autopilot().state != sim::AutopilotState::Booster) {
+            meco_command = before;
+            thrust_after_command_n = session.telemetry(0).thrust_n;
         }
     }
     print_events(t);
     const auto* meco = find_event(t, MissionEventKind::Meco);
+    const auto* separation = find_event(t, MissionEventKind::StageSeparation);
     REQUIRE(meco);
     REQUIRE(separation);
+    REQUIRE(meco_command);
+    CHECK(std::abs(meco->epoch - *meco_command) <= sim::FlightSession::tick_s);
+    CHECK(meco->epoch <= separation->epoch);
+    CHECK(meco < separation);  // listed first: our Falcon 9 stages in the MECO's tick
+    CHECK(thrust_after_command_n > 0.0);
     CHECK(meco->body_name == "Falcon 9 Block 5 first stage");
-    for (const auto& e : t.recorded()) {  // the tail-off after the MECO is no event of its own
-        if (e.body_serial == meco->body_serial && e.kind == MissionEventKind::Cutoff) CHECK(e.epoch - meco->epoch > 5.0);
+    const uint32_t booster = meco->body_serial;
+    size_t mecos = 0;
+    std::optional<time::Epoch> next_start;  // the booster's next burn
+    for (const auto& e : t.recorded()) {
+        if (e.body_serial != booster) continue;
+        if (e.kind == MissionEventKind::Meco) ++mecos;
+        const bool start = e.kind == MissionEventKind::Boostback || e.kind == MissionEventKind::Ignition ||
+                           e.kind == MissionEventKind::LandingBurn;
+        if (start && e.epoch > meco->epoch && !next_start) next_start = e.epoch;
     }
+    CHECK(mecos == 1);
+    for (const auto& e : t.recorded()) {  // the tail-off after the MECO is no event of its own
+        if (e.body_serial == booster && e.kind == MissionEventKind::Cutoff && e.epoch > meco->epoch) {
+            CHECK((next_start && e.epoch > *next_start));
+        }
+    }
+}
+
+TEST_CASE("Engines that fail without a command record a cutoff", "[timeline]") {
+    test::spice_session();
+    const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 13, 12, 0, 0.0});
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const double r = constants::wgs84_semi_major_axis_m + 300e3;
+    const double v = std::sqrt(constants::earth_gm_m3ps2 / r);
+    session.place_in_orbit("starship_block3", {{r, 0.0, 0.0}, {0.0, v, 0.0}}, t0, 1);  // the ship alone
+    session.ignite();
+    session.advance_to(t0 + 10.0, 100000);
+    REQUIRE(session.telemetry(0).engines_running > 0);
+    const auto& engines = session.body(0).vehicle().stages().front().engines;
+    for (size_t k = 0; k < engines.size(); ++k) session.fail_engine(0, 0, k);
+    session.advance_to(t0 + 20.0, 100000);
+    print_events(session.timeline());
+    CHECK(session.engines_commanded(0));  // nobody commanded the shutdown
+    CHECK(session.telemetry(0).engines_running == 0);
+    CHECK(count_of(session.timeline(), MissionEventKind::Cutoff) == 1);
 }
 
 namespace {

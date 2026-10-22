@@ -24,13 +24,6 @@ std::optional<MissionEventKind> start_kind(const FlightSession& s, size_t index,
     return MissionEventKind::Ignition;
 }
 
-// The last past event of body `serial`, if any.
-const MissionEvent* last_of(const MissionTimeline& t, uint32_t serial) {
-    const auto& r = t.recorded();
-    const auto it = std::find_if(r.rbegin(), r.rend(), [&](const MissionEvent& e) { return e.body_serial == serial; });
-    return it == r.rend() ? nullptr : &*it;
-}
-
 // The name an event shows: the part that acts (controller ruling, external view review). Engine events and a separation
 // name the lowest stage (its engines; the separated part; SECO: the lowest stage of the upper part is the launcher's
 // upper stage, a stacked payload above it does not act); the stack's pad events and Max Q name the whole vehicle
@@ -127,7 +120,8 @@ void MissionEventObserver::observe_body(const FlightSession& s, size_t index, Bo
         if (const auto kind = start_kind(s, index, t)) t.record(mission_event(s, index, *kind));
         m.burn_with_upper = false;
         m.burn_ascent_upper = false;
-    } else if (!first && m.engines_running > 0 && engines == 0) {
+    } else if (!first && m.engines_running > 0 && engines == 0 && s.engines_commanded(index)) {
+        // only an uncommanded shutdown (starved, failed, broken up): FlightSession records a commanded one at its command
         auto kind = MissionEventKind::Cutoff;
         // the stack lifted off with this serial: its lowest stage is the stack's first stage
         if (m.burn_with_upper && !clamped && has_recorded(t, MissionEventKind::Liftoff, serial) &&
@@ -137,11 +131,7 @@ void MissionEventObserver::observe_body(const FlightSession& s, size_t index, Bo
             kind = MissionEventKind::Seco;
             m.seco_done = true;
         }
-        // A cold staging: stage() recorded the MECO under the tail-off thrust; its end is no further cutoff.
-        const auto* last = last_of(t, serial);
-        const bool tail_off = kind == MissionEventKind::Cutoff && last &&
-                              (last->kind == MissionEventKind::Meco || last->kind == MissionEventKind::StageSeparation);
-        if (!tail_off) t.record(mission_event(s, index, kind));
+        t.record(mission_event(s, index, kind));
     }
     if (engines > 0) {  // what the running burn was seen as (the autopilot moves on before the engines are down)
         m.burn_with_upper = m.burn_with_upper || with_upper;

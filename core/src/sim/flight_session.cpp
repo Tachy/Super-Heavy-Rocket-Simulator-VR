@@ -947,6 +947,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
             if (flying.ship_landing) run_ship_landing(flying);
             if (flying.parachutes && !flying.body->impacted()) run_parachutes(flying);
         }
+        note_engine_commands();  // every command of this tick is set
         const auto pointers = body_pointers();
         if (tower_) tower_->before_tick(pointers, earth_, epoch_);
         legs_->before_tick(pointers, env_, epoch_);
@@ -1055,6 +1056,41 @@ void FlightSession::release_clamps() {
     record_event(MissionEventKind::Liftoff, controlled_);
 }
 
+bool FlightSession::engines_commanded(size_t index) const {
+    const auto& groups = bodies_.at(index).running_groups;
+    return std::any_of(groups.begin(), groups.end(), [](const auto& g) { return g.second; });
+}
+
+void FlightSession::note_engine_commands() {
+    for (size_t i = 0; i < bodies_.size(); ++i) {
+        auto& f = bodies_[i];
+        if (engines_commanded(i)) {
+            f.commanded = true;
+            f.commanded_with_upper = f.commanded_with_upper || f.body->vehicle().stages().size() >= 2;
+            f.commanded_ascent_upper =
+                f.commanded_ascent_upper || (i == controlled_ && autopilot_.state == AutopilotState::UpperStage);
+            continue;
+        }
+        if (!f.commanded) continue;
+        f.commanded = false;
+        // a command to engines already down (starved or failed: the observer recorded that) is no event
+        if (f.body->vehicle().any_engine_producing_thrust()) {
+            auto kind = MissionEventKind::Cutoff;
+            // the stack lifted off with this serial: its lowest stage is the stack's first stage
+            if (f.commanded_with_upper && !f.body->clamped() &&
+                has_recorded(timeline_, MissionEventKind::Liftoff, f.serial) &&
+                !has_recorded(timeline_, MissionEventKind::Meco, f.serial)) {
+                kind = MissionEventKind::Meco;
+            } else if (f.commanded_ascent_upper && !has_recorded(timeline_, MissionEventKind::Seco, f.serial)) {
+                kind = MissionEventKind::Seco;
+            }
+            record_event(kind, i);
+        }
+        f.commanded_with_upper = false;
+        f.commanded_ascent_upper = false;
+    }
+}
+
 void FlightSession::record_event(MissionEventKind kind, size_t index) {
     timeline_.record(mission_event(*this, index, kind));
 }
@@ -1129,6 +1165,9 @@ void FlightSession::stage() {
     }
     auto upper = lower.body->separate(1);
     for (auto& [group, run] : lower.running_groups) run = false;  // booster engines off after separation
+    lower.commanded = false;  // the MECO above (or the engines were off): no further cutoff event for this command
+    lower.commanded_with_upper = false;
+    lower.commanded_ascent_upper = false;
     record_event(MissionEventKind::StageSeparation, controlled_);  // the lower part, before the upper is a body
     lower.body->set_ground_height(launch_site_.height_m);  // separated stages: the real ground, not the mount
     upper->set_ground_height(launch_site_.height_m);

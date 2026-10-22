@@ -568,6 +568,9 @@ public:
     const gnc::BoosterReturnGuidance* return_guidance(size_t index) const { return bodies_.at(index).return_guidance.get(); }
     // Return guidance of a body (nullptr if it has none) and its latest command.
     const gnc::ReturnCommand* return_status(size_t index) const;
+    // Any main-engine group of body `index` is commanded to run (pilot, autopilot or guidance) - engines that stop
+    // while still commanded starved, failed or broke up (the mission event log's uncommanded cutoff).
+    bool engines_commanded(size_t index) const;
     const AutopilotStatus& autopilot() const { return autopilot_; }
     const gnc::AscentGuidance* ascent_guidance() const { return guidance_.get(); }
     double gm_earth_m3ps2() const { return gm_earth_; }
@@ -945,6 +948,11 @@ private:
         std::unique_ptr<gnc::ParachuteSequencer> parachutes;     // lowest stage with parachute sets (capsule)
         bool crew_member = false;  // a seat / parachutist body: its chutes are timed by the crew escape, not here
         uint32_t serial = 0;       // stable identity (body_serial); bodies are reindexed, serials are not
+        // Mission events (note_engine_commands): engines commanded at the last tick, and what the commanded burn was
+        // seen as - with an upper stage attached / as the controlled body in AutopilotState::UpperStage.
+        bool commanded = false;
+        bool commanded_with_upper = false;
+        bool commanded_ascent_upper = false;
     };
     // A new Flying around `body` with the next serial (serials start at 1 and are never reused).
     Flying new_flying(std::unique_ptr<vehicle::FlightBody> body) {
@@ -1092,6 +1100,9 @@ private:
     // liftoff)
     void disengage_scheduled_events();
     void record_event(MissionEventKind kind, size_t index);  // body `index` now
+    // Once per tick after every command source (pilot, autopilot, guidance): a body whose last running main-engine group
+    // was switched off while its engines give thrust records MECO / SECO / Cutoff now - the command, not the tail-off.
+    void note_engine_commands();
     LaunchSite launch_site_;
     std::optional<LaunchSite> landing_zone_;
     std::optional<config::SplashdownZoneConfig> splashdown_zone_;
