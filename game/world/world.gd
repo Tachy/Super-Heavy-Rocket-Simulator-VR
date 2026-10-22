@@ -177,12 +177,13 @@ func _update_camera(t: float) -> void:
 		camera.site_east_gcrf = rotation * Vector3(-sin(lon), cos(lon), 0.0)
 		camera.site_north_gcrf = rotation * Vector3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat))
 	elif focus == FOCUS_VEHICLE and flight.sim.is_active():
-		camera.focus_center_gcrf_m = flight.controlled_position_gcrf()
-		camera.orbit_local_up_gcrf = camera.focus_center_gcrf_m.normalized()
+		camera.target_gcrf_m = flight.controlled_position_gcrf()
+		camera.reference_center_gcrf_m = Vector3.ZERO
+		camera.reference_body = "earth"
 	else:
-		camera.focus_center_gcrf_m = moon_gcrf_m if focus == FOCUS_MOON else Vector3.ZERO
-		camera.orbit_local_up_gcrf = Vector3.ZERO
-	camera.update_pose()
+		camera.target_gcrf_m = moon_gcrf_m if focus == FOCUS_MOON else Vector3.ZERO
+		camera.reference_body = ""
+	camera.update_pose(_delta)
 
 
 func _place_sun(sun_from_camera_m: Vector3) -> void:

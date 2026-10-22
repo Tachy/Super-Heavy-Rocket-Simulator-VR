@@ -1,5 +1,5 @@
 @echo off
-rem Desktop version of the simulator (VR start mode follows in milestone M7).
+rem Desktop version of the simulator (VR: Start-VR.cmd). OpenXR stays off.
 rem Uses the double-precision Godot build from external\godot (see CLAUDE.md); override with start.cfg:
 rem   GODOT=C:\path\to\godot.windows.editor.double.x86_64.exe
 setlocal
@@ -14,6 +14,6 @@ if not exist "%GODOT%" (
 rem Raw HOTAS axes (twist, throttle lever) need these SDL mappings before the engine starts.
 set "SDL_GAMECONTROLLERCONFIG_FILE=%~dp0config\sdl_gamecontrollerdb.txt"
 echo Preparing the project ...
-"%GODOT%" --headless --path "%~dp0game" --import >nul 2>&1
-start "" "%GODOT%" --path "%~dp0game"
+"%GODOT%" --headless --xr-mode off --path "%~dp0game" --import >nul 2>&1
+start "" "%GODOT%" --xr-mode off --path "%~dp0game" -- --no-xr
 exit /b 0
