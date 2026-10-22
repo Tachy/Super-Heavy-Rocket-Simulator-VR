@@ -121,6 +121,24 @@ target = "data/raw/hyg_v44.csv.gz"
 license = "CC BY-SA 4.0 (attribution, share-alike for the derived star list)"
 credit = "HYG Database by David Nash (astronexus), CC BY-SA 4.0"
 
+# ------------------------------------------------------------------ fonts (webcast overlay)
+
+[[source]]
+id = "font_barlow"
+name = "Barlow Medium (font, labels and clocks of the webcast overlay)"
+url = "https://raw.githubusercontent.com/google/fonts/main/ofl/barlow/Barlow-Medium.ttf"
+target = "data/fonts/Barlow-Medium.ttf"
+license = "SIL Open Font License 1.1 (https://openfontlicense.org)"
+credit = "Barlow by Jeremy Tribby (Tribby Design), google/fonts repository"
+
+[[source]]
+id = "font_barlow_condensed"
+name = "Barlow Condensed SemiBold (font, values of the webcast overlay)"
+url = "https://raw.githubusercontent.com/google/fonts/main/ofl/barlowcondensed/BarlowCondensed-SemiBold.ttf"
+target = "data/fonts/BarlowCondensed-SemiBold.ttf"
+license = "SIL Open Font License 1.1 (https://openfontlicense.org)"
+credit = "Barlow Condensed by Jeremy Tribby (Tribby Design), google/fonts repository"
+
 # ------------------------------------------------------------------ own telemetry tables (committed)
 # Numbers shown in SpaceX's public webcasts (speed, altitude, propellant gauge, engine icons, mission clock), read by
 # our own OCR tool (tools/telemetry/webcast_telemetry.py). Only the transcribed values are kept; the videos are

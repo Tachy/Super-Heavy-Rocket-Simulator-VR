@@ -3,6 +3,10 @@
 # Vehicle: --vehicle=starship_block3 --site=starbase_olp1 [--fly=40] (ignite, liftoff at 3 s, fly N s)
 #          [--autopilot] (ascent autopilot instead of manual) [--circularize] (plan node afterwards)
 # Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed).
+# Webcast overlay: --webcast [--mission=starship_leo] (start the mission at --utc) [--t_plus=75] (advance to T+75 s)
+#          or [--at_event=entry_interface,<offset s>] (to an event of the mission timeline, recorded or predicted)
+#          [--wait_on_pad] (a launch window's wait on the pad: T-) [--view=1] (Tab presses: switch the viewed object)
+#          [--legacy_hud] (F1: the old HUD too)
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -43,12 +47,17 @@ func _process(_delta: float) -> bool:
 			_view_from(world, _args["view_from"])
 		if _args.has("vehicle"):
 			_fly_vehicle(world)
+		if _args.has("webcast"):
+			_fly_mission(world)
 		if _args.has("tower_arms_deg"):
 			for view in world.towers:
 				view.preview_opening_rad = deg_to_rad(float(_args["tower_arms_deg"]))
 				view.update_state({})
 	_frames += 1
 	if _frames == FRAMES_TO_SETTLE:
+		if _args.has("webcast"):
+			var arc := (_main.get("overlay_host") as OverlayHost).overlay.timeline_arc
+			print("render_check: timeline window ", arc.window, " now ", arc.now_tdb_s, " events ", arc.events.size())
 		var out: String = _args.get("out", "user://render_check.png")
 		var error := root.get_viewport().get_texture().get_image().save_png(out)
 		print("render_check: saved %s (error %d)" % [out, error])
@@ -101,6 +110,47 @@ func _fly_vehicle(world: World) -> void:
 	if _args.has("pitch"): cam.pitch = float(_args["pitch"])
 	if _args.has("distance"): cam.distance_m = float(_args["distance"])
 	print("render_check: telemetry ", sim.telemetry(sim.controlled_index()))
+
+
+# Starts a mission at the clock's instant and flies it to the requested mission time or timeline event.
+func _fly_mission(world: World) -> void:
+	var sim := world.flight.sim
+	var id := sim.start_mission(_args.get("mission", "starship_leo"), world.clock.tdb_s, _args.has("wait_on_pad"))
+	sim.wait_idle(600.0)
+	print("render_check: mission start ", sim.result(id))
+	world.flight.launch_site_id = sim.mission_site_id()
+	world.set_focus(World.FOCUS_VEHICLE)
+	world.clock.warp = 0.0
+	var target := _mission_target(sim)
+	if _args.has("at_event"):  # predicted events move while flying: approach, then aim again
+		_advance(sim, target - 600.0)
+		target = _mission_target(sim)
+	_advance(sim, target)
+	target = maxf(target, _mission_target(sim))  # T-0 is the recorded liftoff once it happened
+	_advance(sim, target)
+	world.clock.set_time(sim.advance_to(target))
+	for i in int(_args.get("view", "0")):
+		world.view_target.cycle(sim, 1)
+	if _args.has("legacy_hud"):
+		(_main.get("legacy_hud") as CanvasLayer).visible = true
+	(_main.get("overlay_host") as OverlayHost).overlay.snap_timeline()
+	var index := world.view_target.resolve(sim)
+	print("render_check: mission clock ", sim.mission_timeline().get("clock_s"), "  viewed ", index, "  telemetry ",
+			sim.telemetry(index))
+
+
+## TDB of --t_plus after T-0 (default 75 s), or of --at_event=<kind>[,<offset s>] (its first occurrence).
+func _mission_target(sim: FlightSim) -> float:
+	var timeline: Dictionary = sim.mission_timeline()
+	if _args.has("at_event"):
+		var spec := (_args["at_event"] as String).split(",")
+		for e: Dictionary in timeline.get("events", []):
+			if e["kind"] == spec[0]:
+				return float(e["tdb_s"]) + (float(spec[1]) if spec.size() > 1 else 0.0)
+		print("render_check: no event %s in %s" % [spec[0], timeline.get("events", []).map(func(e): return e["kind"])])
+	var t0 = timeline.get("t0_tdb_s")
+	var zero := float(t0) if t0 != null else sim.mission_start_tdb_s()
+	return zero + float(_args.get("t_plus", "75"))
 
 
 # The simulation thread advances in chunks; wait until it has reached the target.
