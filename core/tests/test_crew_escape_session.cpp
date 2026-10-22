@@ -237,6 +237,57 @@ TEST_CASE("A catch abort after the flip ejects the crew", "[crew_escape][session
     CHECK(session.ship_return_result(0) == sim::ReturnResult::Lost);
 }
 
+TEST_CASE("A crewed ship that is caught keeps its crew aboard", "[crew_escape][session][slow]") {
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    set_starbase(session);
+    const auto cfg = ship_with(35000.0);
+    session.place_landing_ship(cfg, belly_state(session, cfg, to_tower * -220.0 + Vec3{0, 0, 950}, to_tower * 3.0 + Vec3{0, 0, -100}),
+                               t0());
+    session.set_crew_escape(crew());
+    for (int i = 0; i < 240 && !session.body(0).caught(); ++i) session.advance_to(session.epoch() + 0.5, 100000);
+    session.advance_to(session.epoch() + 10.0, 100000);  // the arms settle
+    REQUIRE(session.body(0).caught());
+    const auto& s = *session.crew_escape_state();
+    CHECK_FALSE(s.armed);
+    CHECK_FALSE(s.fired);
+    for (const auto& m : s.members) CHECK(m.outcome == sim::CrewOutcome::Rescued);
+}
+
+// Final review I1: a catch that misses (no abort flag: the CG passes the catch point) must arm the seats too.
+TEST_CASE("A missed catch ejects the crew", "[crew_escape][session][slow]") {
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    set_starbase(session);
+    const auto cfg = ship_with(27000.0);  // the calibration's first missed gate load
+    session.place_landing_ship(cfg, belly_state(session, cfg, to_tower * -220.0 + Vec3{0, 0, 950}, to_tower * 3.0 + Vec3{0, 0, -100}),
+                               t0());
+    session.set_crew_escape(crew());
+    fly_out(session, 600.0);  // runs dry hovering at the arms (~93 m) and drops onto them
+    print(session, "missed catch");
+    const auto& s = *session.crew_escape_state();
+    CHECK(s.armed);
+    CHECK(s.fired);
+    for (const auto& m : s.members) {
+        CHECK(m.outcome != sim::CrewOutcome::Flying);
+        CHECK(m.reason.find("außerhalb") == std::string::npos);
+    }
+}
+
+// Final review I2: an aerocapture pass is no catch attempt - a failed flip engine is judged on the final entry.
+TEST_CASE("An aerocapture pass does not give the ship up", "[crew_escape][session]") {
+    sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    set_starbase(session);
+    const auto cfg = ship_with(35000.0);
+    gnc::EntryGuidanceParameters p = gnc::EntryGuidanceParameters::lunar_return();
+    p.aerocapture_apoapsis_m = 400e3;
+    session.place_entering_ship(cfg, belly_state(session, cfg, {-2000e3, 0.0, 100e3}, {10500.0, 0.0, -300.0}, 55.0),
+                                t0(), p);
+    session.set_crew_escape(crew());
+    fail_group(session, "ship/sea_level_2");
+    session.advance_to(t0() + 30.0, 100000);
+    CHECK_FALSE(session.crew_escape_state()->armed);
+    CHECK_FALSE(session.entry_guidance(0)->given_up());
+}
+
 TEST_CASE("Tumbling ship: seats fire along the hull", "[crew_escape][session]") {
     sim::FlightSession session(spice_ephemeris(), earth(), STARSIM_CONFIG_DIR);
     set_starbase(session);

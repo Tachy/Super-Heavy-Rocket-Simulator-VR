@@ -158,7 +158,9 @@ void FlightSession::run_crew_escape() {
 
     // The give-up: the catch is not possible (entry, up to the gate) or a catch abort after the flip.
     if (!st.armed && !ship_down && returning) {
-        if (ship.entry_guidance && !ship.ship_landing) {
+        // an aerocapture pass is no catch attempt (final review I2): the final entry after the capture is judged
+        const bool aerocapture = ship.entry_guidance && ship.entry_guidance->parameters().aerocapture_apoapsis_m > 0.0;
+        if (ship.entry_guidance && !ship.ship_landing && !aerocapture) {
             const auto f = gnc::catch_feasibility(ship.body->vehicle(), gnc::ship_landing_parameters().flip_groups,
                                                   c.config.min_catch_propellant_kg);
             if (!f.feasible) {
@@ -170,6 +172,19 @@ void FlightSession::run_crew_escape() {
             const auto* scvx = ship.ship_landing->scvx();
             if (ship.return_command.abort || ship.ship_landing->upright_descent_active() || (scvx && scvx->aborting())) {
                 crew_arm("Fang abgebrochen", false);
+            } else if (ship.ship_landing->phase() == gnc::ReturnPhase::Landed && !ship.body->caught() &&
+                       !(tower_ && tower_->in_contact(*ship.body))) {
+                crew_arm("Fang verfehlt", false);  // final review I1: the CG passed the catch point, no abort flag
+            } else if (!ship.return_command.run_groups.empty()) {
+                // final review I1: every commanded engine starved or failed (ran dry hovering at the arms)
+                bool any_alive = false;
+                for (const auto& e : ship.body->vehicle().stages().front().engines) {
+                    const auto& groups = ship.return_command.run_groups;
+                    if (std::find(groups.begin(), groups.end(), e.group_id) != groups.end() && !e.starved && !e.failed) {
+                        any_alive = true;
+                    }
+                }
+                if (!any_alive) crew_arm("Triebwerke ohne Treibstoff: Fang nicht möglich", false);
             }
         }
     }
@@ -196,7 +211,7 @@ void FlightSession::run_crew_escape() {
             if (m.body_index || m.outcome != CrewOutcome::Flying) continue;
             if (epoch_ - *c.fire_epoch < k * c.config.stagger_s) continue;
             if (ship_down) {
-                lose(m, "außerhalb der Schleudersitz-Grenzen");
+                lose(m, "Schiff aufgeschlagen vor dem Ausstieg");  // the stagger left this seat too late
             } else {
                 crew_fire_seat(k);
             }

@@ -1712,7 +1712,11 @@ water"; data + game interface first, the pilot's view rendered later; **the ship
 - **Catch feasibility** (`gnc::catch_feasibility`, crewed ships only): a failed flip-group engine or propellant below
   `min_catch_propellant_kg` = 30 t [D: nominal gate 28 t caught, 27 t missed (hidden test "Ship catch: lowest
   catchable gate load") + 2 t]. Checked every tick of the entry up to the gate (the same tick before the gate
-  hand-over); after the flip every abort (SCvx abort to the sea, upright descent, `abort_landing`) arms the seats.
+  hand-over); after the flip every abort (SCvx abort to the sea, upright descent, `abort_landing`) arms the seats,
+  and so do a missed catch (phase Landed without pins on the arms) and every commanded engine starved or failed (final
+  review I1: at 27 t the ship ran dry hovering at the arms at ~93 m and dropped onto them - 3 seats out, the fourth
+  0.4 s stagger slot too late: "Schiff aufgeschlagen vor dem Ausstieg"). An aerocapture pass is not judged; the final
+  entry after the capture is (final review I2).
 - **Give-up in the entry** (`EntryGuidance::give_up`, `gnc::sea_give_up_target`): the target moves to the pad + sea
   direction x (shoreline + 2 km) [E], the gate height to 0, no gate hand-over, no flip: the entry / terminal steering fly
   the belly flop down to the impact. Unit case: 12 km / 120 m/s, 2 km west of the pad -> impact 2,500 m east (the
@@ -1743,7 +1747,9 @@ water"; data + game interface first, the pilot's view rendered later; **the ship
 - **Game:** `FlightSim.crew_escape_state()` (members with phase, mode, loads, clearance, position / attitude, touchdown,
   outcome; the ship's impact), `return_state(i)` of the ship (phase, guidance, abort, upright_descent, result),
   `set_crew_escape(id)`; each fired member is an ordinary body.
-- **Known limits:** no wind (M8), no zero-zero apex reference (no published ACES II number found), the seat's
+- **Known limits:** the load check is the magnitude of the specific force against 20 g for > 0.1 s [E], not per axis
+  against sourced spinal / lateral limits, and there is no opening-shock reference case (final review I3, ruled: no
+  per-axis source in hand); no Mach limit in the envelope (height + EAS only); no wind (M8), no zero-zero apex reference (no published ACES II number found), the seat's
   attitude is free (no STAPAC), no seat-seat collision check, crew landing on land beside the pad after a late give-up
   is reported, not avoided.
 - **Tests:** `[crew_escape]` (`test_crew_escape_config.cpp`, `test_ejection_seat.cpp`, `test_catch_feasibility.cpp`,
