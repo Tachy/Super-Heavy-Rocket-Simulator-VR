@@ -106,6 +106,19 @@ func _check_vr_panel_mesh() -> void:
 		var normal := (vertices[indices[3 * t + 1]] - a).cross(vertices[indices[3 * t + 2]] - a)
 		inward = inward and normal.dot(a) > 0.0  # clockwise seen from the origin = outward right-hand normal
 	_check(inward, "panel mesh: all triangles wound as front faces seen from the eye")
+	# Placement: after any recentre the panel's world pose is the base pose (centred on the eye, facing the view).
+	var placed := true
+	var panel := VrOverlayPanel.new()
+	for yaw in [0.0, 1.1, -2.5, 3.0]:
+		for head_position in [Vector3.ZERO, Vector3(0.2, 1.6, -0.4), Vector3(-0.5, 0.9, 0.7)]:
+			var head := Transform3D(Basis.from_euler(Vector3(0.3, yaw, -0.2)), head_position)
+			var recenter := CameraMath.recenter_offset(head)
+			var base := CameraMath.orbit_basis(CameraMath.horizon_frame(Vector3(0.3, 0.8, -0.52).normalized(), Vector3.FORWARD), yaw, 0.2)
+			panel.place(recenter)
+			var world := CameraMath.vr_origin_transform(base, recenter) * panel.transform
+			placed = placed and world.origin.length() < 1e-9 and world.basis.is_equal_approx(base)
+	panel.free()
+	_check(placed, "panel placement: world pose == base pose after a recentre (several yaws / head offsets)")
 	var material := VrOverlayPanel.build_material(null)
 	_check(material.blend_mode == BaseMaterial3D.BLEND_MODE_PREMULT_ALPHA and material.no_depth_test
 			and material.cull_mode == BaseMaterial3D.CULL_BACK

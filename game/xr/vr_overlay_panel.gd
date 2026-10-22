@@ -19,6 +19,12 @@ func _init() -> void:
 	extra_cull_margin = RADIUS_M
 
 
+## Centre the panel on the head pose of the last recentre (origin space): its world pose is then the base pose,
+## i.e. in front of the head at the render origin (world = vr_origin_transform(base, recenter) * recenter = base).
+func place(recenter_pose: Transform3D) -> void:
+	transform = recenter_pose
+
+
 func setup(texture: ViewportTexture) -> void:
 	material_override = build_material(texture)
 

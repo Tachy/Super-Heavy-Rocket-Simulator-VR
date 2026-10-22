@@ -23,6 +23,8 @@ func _ready() -> void:
 		var vr_panel := VrOverlayPanel.new()
 		xr.origin.add_child(vr_panel)
 		vr_panel.setup(overlay_host.viewport.get_texture())
+		vr_panel.place(xr.recenter_pose())
+		xr.recentered.connect(func() -> void: vr_panel.place(xr.recenter_pose()))
 	else:
 		overlay_host.show_on_desktop(WEBCAST_LAYER)
 	var ui := CanvasLayer.new()

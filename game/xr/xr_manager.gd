@@ -12,6 +12,7 @@ signal recentered
 
 const VR_ARG := "--vr"
 const DESKTOP_ARG := "--no-xr"
+const AUTO_RECENTER_DELAY_S := 2.0  ## [E] one recentre after the start (pattern of the sibling project), so the view is in front
 
 var origin: XROrigin3D
 var camera: XRCamera3D  ## VR only (null on the desktop, where the OrbitCamera is the current camera)
@@ -20,6 +21,7 @@ var xr_active := false
 
 var _base := Basis.IDENTITY
 var _recenter := Transform3D.IDENTITY
+var _auto_recenter_timer_s := 0.0
 
 
 func _ready() -> void:
@@ -52,6 +54,7 @@ func _ready() -> void:
 		get_viewport().use_xr = true
 		xr_active = true
 		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)  # the headset paces the frames
+		_auto_recenter_timer_s = AUTO_RECENTER_DELAY_S
 		print("[XR] VR mode")
 	else:
 		origin.current = false
@@ -85,6 +88,18 @@ func recenter() -> void:
 	_apply()
 	print("[XR] recentred at head pose ", camera.transform.origin)
 	recentered.emit()
+
+
+## Head pose (yaw + position) in origin space that the last recentre took as the base pose; identity before the first.
+func recenter_pose() -> Transform3D:
+	return _recenter
+
+
+func _process(delta: float) -> void:
+	if _auto_recenter_timer_s > 0.0:
+		_auto_recenter_timer_s -= delta
+		if _auto_recenter_timer_s <= 0.0:
+			recenter()
 
 
 func _apply() -> void:
