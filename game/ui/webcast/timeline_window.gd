@@ -10,7 +10,8 @@ const MARGIN_FRACTION := 0.1
 ## Number of upcoming events the window reaches.
 const FUTURE_EVENTS := 3
 ## A further event is left out when it lies more than this many times the span so far beyond the previous one
-## (a far-off event, e.g. days away, would squash the near ones to a point). [E]
+## (a far-off event, e.g. days away, would squash the near ones to a point). Never applies to the first next
+## event, which is always inside the window. [E]
 const MAX_GAP_RATIO := 20.0
 
 ## Label priority, high to low; kinds not listed rank last.
@@ -41,7 +42,7 @@ static func target_span(events_tdb: PackedFloat64Array, now_tdb: float) -> Vecto
 	for t in future:
 		if reached >= FUTURE_EVENTS:
 			break
-		if t - hi > MAX_GAP_RATIO * maxf(hi - lo, MIN_SPAN_S):
+		if reached > 0 and t - hi > MAX_GAP_RATIO * maxf(hi - lo, MIN_SPAN_S):
 			break
 		hi = t
 		reached += 1

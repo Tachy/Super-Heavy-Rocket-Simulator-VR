@@ -55,6 +55,12 @@ func _test_gauges() -> void:
 			"never more than 4 per side")
 	_check(sel["left"] == ["engines", "heat_flux", "heat_load", "g_load"], "left side by priority")
 	_check(sel["right"] == ["speed_surface", "speed_inertial", "altitude", "apoapsis"], "right side by priority")
+	sel = GaugeRules.select(_telemetry({"altitude_m": 120.0e3}), _body({"engines": [], "docking": docking}), {}, 0.0)
+	_check("vertical_speed" in sel["right"], "vertical speed below 150 km")
+	# Limit of 4 per side: range / closing rate only fit when the apsides are absent (open orbit here).
+	sel = GaugeRules.select(_telemetry({"altitude_m": 200.0e3, "apoapsis_altitude_km": INF}),
+			_body({"engines": [], "docking": docking}), {}, 0.0)
+	_check("range" in sel["right"] and "closing_rate" in sel["right"], "range and closing rate with active docking")
 	sel = GaugeRules.select(_telemetry({"apoapsis_altitude_km": INF, "altitude_m": 200.0e3}), _body(), {}, 0.0)
 	_check(not ("apoapsis" in sel["right"]) and not ("periapsis" in sel["right"]), "no apsides on an open orbit")
 	_check(GaugeRules.docking_active(docking) and not GaugeRules.docking_active({"present": true, "range_m": 1.0,
@@ -75,6 +81,12 @@ func _test_window() -> void:
 			now + 900.0]), now)
 	_check(absf(near.y - (now + 300.0 + 130.0)) < 1e-6 and absf(near.x - (now - 1000.0 - 130.0)) < 1e-6,
 			"third next event plus 10 %% margin (%s)" % str(near - Vector2(now, now)))
+	w = TimelineWindow.target_span(PackedFloat64Array([now + 6.0 * 3600.0]), now)
+	_check(w.x <= now and w.y >= now + 6.0 * 3600.0, "no past event, single event 6 h ahead is inside")
+	w = TimelineWindow.target_span(PackedFloat64Array([now - 70.0, now + 30.0, now + 3.0 * 86400.0]), now)
+	_check(w.y >= now + 30.0 and w.y < now + 3.0 * 86400.0, "second next event 3 d away stays out")
+	w = TimelineWindow.target_span(PackedFloat64Array([now - 10.0 * 86400.0, now - 86400.0, now + 2.0 * 86400.0]), now)
+	_check(w.x <= now - 86400.0 and w.y >= now + 2.0 * 86400.0, "only distant past events: next event inside")
 	var e := TimelineWindow.ease(Vector2(0, 10), Vector2(100, 200), 2.0)
 	_check(absf(e.x - 100.0 * (1.0 - exp(-1.0))) < 1e-9, "ease: one time constant per 2 s")
 	_check(TimelineWindow.ease(Vector2(0, 10), Vector2(5, 20), 0.0) == Vector2(0, 10), "ease: zero delta keeps window")
