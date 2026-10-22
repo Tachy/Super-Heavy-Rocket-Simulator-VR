@@ -159,7 +159,7 @@ func set_focus(new_focus: String) -> void:
 			camera.distance_m = 1.1e9
 			camera.pitch = -1.2
 		FOCUS_VEHICLE:
-			view_target.serial = 0  # a new flight: the controlled body
+			view_target.follow()  # a new flight: follow the controlled body
 			_camera_serial = 0
 			camera.distance_m = 260.0
 			camera.pitch = -0.15

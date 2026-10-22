@@ -71,5 +71,7 @@ static func build_material(texture: Texture2D) -> StandardMaterial3D:
 	material.cull_mode = BaseMaterial3D.CULL_BACK
 	material.render_priority = RenderingServer.MATERIAL_RENDER_PRIORITY_MAX
 	material.albedo_texture = texture
-	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
+	# The SubViewport texture has no mipmaps (a mipmap filter would sample a missing chain); the panel is drawn near its
+	# native resolution, so plain bilinear filtering keeps the MSDF text sharp.
+	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
 	return material

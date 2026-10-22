@@ -56,6 +56,9 @@ func _run(config_dir: String, tdb: float) -> bool:
 	var first_serial := target.serial
 	_check(_ok(sim, sim.stage()), "stage separation")
 	_check(sim.body_count() == 2, "two bodies after staging (%d)" % sim.body_count())
+	var after_stage := target.resolve(sim)
+	_check(target.follow_controlled and after_stage == sim.controlled_index() and target.serial != first_serial
+			and target.serial == sim.body_serial(after_stage), "follow mode: the view moves to the new controlled body")
 	var seen := {}
 	for i in 3:
 		target.cycle(sim, 1)
@@ -73,6 +76,29 @@ func _run(config_dir: String, tdb: float) -> bool:
 	var resolved := target.resolve(sim)
 	_check(resolved == sim.controlled_index() and target.serial == sim.body_serial(resolved)
 			and target.serial != old_serial, "gone serial: falls back to the controlled body")
+
+	# An explicit Tab selection stays on its serial across a later separation (Falcon 9 + Dragon: booster, then trunk
+	# stage); a following view moves on to the Dragon.
+	_check(_ok(sim, sim.start_mission("falcon9_crew_dragon", tdb)), "Falcon 9 with Crew Dragon")
+	target.follow()
+	var follower := ViewTarget.new()
+	_check(_ok(sim, sim.stage()) and sim.body_count() == 2, "first stage separation: two bodies")
+	follower.resolve(sim)
+	target.resolve(sim)
+	target.cycle(sim, 1)
+	_check(not target.follow_controlled and target.serial != sim.body_serial(sim.controlled_index()),
+			"Tab onto the booster pins the view (follow off)")
+	var pinned := target.serial
+	_check(_ok(sim, sim.stage()) and sim.body_count() == 3, "second stage separation: three bodies")
+	var pinned_index := target.resolve(sim)
+	_check(target.serial == pinned and sim.body_serial(pinned_index) == pinned, "pinned view stays on the booster")
+	var followed := follower.resolve(sim)
+	_check(followed == sim.controlled_index() and follower.follow_controlled, "following view moves on to the Dragon")
+	target.cycle(sim, 1)
+	target.cycle(sim, 1)
+	_check(target.serial == sim.body_serial(sim.controlled_index()) and target.follow_controlled,
+			"Tab back onto the controlled body turns follow on again")
+	follower.free()
 
 	# Distance clamp on a switch.
 	_check(is_equal_approx(ViewTarget.clamp_distance_m(1.0, 100.0), 60.0), "close distance clamped to 0.6 lengths")

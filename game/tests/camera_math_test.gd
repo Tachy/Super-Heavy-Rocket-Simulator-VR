@@ -138,14 +138,14 @@ func _process(_delta: float) -> bool:
 		_check(xr.origin is XROrigin3D, "XrManager owns an XROrigin3D")
 		xr.set_base(Basis(Vector3.UP, 0.5))
 		_check(xr.origin.transform.origin == Vector3.ZERO, "set_base keeps the origin at the render origin")
-	_check(_check_up_blend(), "OrbitCamera up-blend checks ran to the end")
+	_check_up_blend()
 	print("CAMERA MATH TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 	return false
 
 
 # OrbitCamera: Earth -> Moon reference change blends "up" over UP_BLEND_S without a jump or roll (Review Focus 5).
-func _check_up_blend() -> bool:
+func _check_up_blend() -> void:
 	var camera := OrbitCamera.new()
 	root.add_child(camera)
 	_check(camera.current, "desktop: the OrbitCamera is the current camera")
@@ -174,7 +174,6 @@ func _check_up_blend() -> bool:
 	camera.update_pose(CameraMath.UP_BLEND_S / steps)
 	_check(camera.basis.is_equal_approx(moon_view), "after UP_BLEND_S the Moon's local vertical is up")
 	camera.queue_free()
-	return true
 
 
 func _check(condition: bool, label: String) -> void:
