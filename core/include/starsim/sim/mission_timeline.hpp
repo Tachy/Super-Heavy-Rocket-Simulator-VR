@@ -75,7 +75,11 @@ class FlightSession;
 // burn executor), the ship / capsule deorbit burn and entry interface, the burns of the lunar outbound, descent and
 // return plans and of the rendezvous plan not yet commanded (Ignition at the impulsive node; the return's entry
 // interface), the docked pair's separation (Undocking: the undocking epoch plus the hooks' opening time) and the
-// campaign supervisor's next launch (Launch, mission-wide). Only events after the session epoch.
+// campaign supervisor's next launch (Launch, mission-wide); the onboard computer's predictions: MECO and separation
+// (the booster's cutoff criterion run forward), SECO (PEG's time to go), a returning booster's boostback cutoff, landing
+// burn and touchdown (BoosterReturnGuidance::forecast), a ship's landing burn / a capsule's parachutes at the entry
+// guidance's predicted gate and a ship's catch (its landing plan's end). Only events after the session epoch; an event
+// a body has once is no longer predicted once recorded for that body.
 std::vector<MissionEvent> predicted_mission_events(const FlightSession& s);
 
 }  // namespace starsim::sim

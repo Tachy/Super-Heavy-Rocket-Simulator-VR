@@ -573,6 +573,9 @@ public:
     bool engines_commanded(size_t index) const;
     const AutopilotStatus& autopilot() const { return autopilot_; }
     const gnc::AscentGuidance* ascent_guidance() const { return guidance_.get(); }
+    // AutopilotState::Booster: the booster propellant (oxidizer + fuel) at which the autopilot cuts it off, as set on its
+    // last tick - what the return needs (BoosterReturnGuidance::meco_propellant_kg) or the configured reserve.
+    const std::optional<double>& booster_cutoff_propellant_kg() const { return booster_cutoff_propellant_kg_; }
     double gm_earth_m3ps2() const { return gm_earth_; }
     // The session's models (mission planning outside the session, e.g. place_lunar_landing_mission).
     const environment::PointMassGravity& gravity() const { return gravity_; }
@@ -1115,6 +1118,7 @@ private:
     std::optional<gnc::BoosterReturnParameters> booster_return_;
     double gm_earth_;
     AutopilotStatus autopilot_;
+    std::optional<double> booster_cutoff_propellant_kg_;  // see booster_cutoff_propellant_kg()
     std::unique_ptr<gnc::AscentGuidance> guidance_;
     std::optional<gnc::BurnExecutor> burn_;
     BurnConfiguration burn_config_;

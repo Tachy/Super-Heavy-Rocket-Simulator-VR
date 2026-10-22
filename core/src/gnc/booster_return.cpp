@@ -162,6 +162,11 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
     last_update_ = epoch;
     ++tick_counter_;
     ReturnCommand cmd;
+    // the forecasts of the phases left behind are void
+    if (phase_ != ReturnPhase::Boostback) forecast_.boostback_cutoff.reset();
+    if (phase_ != ReturnPhase::Coast) forecast_.landing_ignition.reset();
+    if (phase_ != ReturnPhase::Coast && phase_ != ReturnPhase::LandingBurn) forecast_.touchdown.reset();
+    forecast_.catch_target = site_.catch_target.has_value() && !abort_requested_ && !ditch_;
 
     if (phase_ == ReturnPhase::Flip || phase_ == ReturnPhase::Boostback) {
         const double time_left = std::max(boostback_start_ + parameters_.flight_time_s - epoch, 30.0);
@@ -195,6 +200,12 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
             // Cutoff when the remaining delta-v equals the shutdown tail-off impulse.
             const auto engines = engine_set(body.vehicle(), parameters_.boostback_groups, pressure);
             const double tail_off_mps = 0.5 * engines.thrust_n / mass.mass_kg * engines.shutdown_s;
+            if (engines.thrust_n > 0.0 && engines.mass_flow_kgps > 0.0) {  // the cutoff criterion run forward
+                const double to_gain_mps = std::max(norm(v_go) - tail_off_mps, 0.0);
+                const double exhaust_mps = engines.thrust_n / engines.mass_flow_kgps;
+                forecast_.boostback_cutoff =
+                    epoch + mass.mass_kg / engines.mass_flow_kgps * (1.0 - std::exp(-to_gain_mps / exhaust_mps));
+            }
             if (norm(v_go) < std::max(tail_off_mps, 0.5)) phase_ = ReturnPhase::Coast;
         }
         cmd.phase = phase_;
@@ -213,7 +224,9 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         const bool aero_steering = fin_station > 0.0 && dynamic_pressure > aero_steering_min_q_pa;
         if (tick_counter_ % (aero_steering ? 40 : 200) == 0) {
             const auto impact = predict(body, env, epoch);
+            impact_epoch_.reset();
             if (impact.valid) {
+                impact_epoch_ = epoch + impact.time_s;
                 const Vec3 miss = horizontal_miss(impact);
                 impact_miss_m_ = norm(miss);
                 trim_itrf_ = {};
@@ -288,10 +301,19 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
             steer_itrf_ = {};
             impact_miss_m_ = 0.0;
             entry_predicted_ = false;
+            forecast_.landing_ignition.reset();
+            forecast_.touchdown.reset();
+            impact_epoch_.reset();
         }
         if (phase_ == ReturnPhase::Coast && descending && (height < 30e3 || tick_counter_ % 20 == 0)) {
             const auto burn = predict_landing_burn(body, env, epoch);
             if (burn.stop_height_m <= 0.0) phase_ = ReturnPhase::LandingBurn;
+            if (pending_entry_burn(body.vehicle())) {  // the burn prediction does not know the entry burn ahead
+                forecast_.landing_ignition.reset();
+                forecast_.touchdown.reset();
+            } else {
+                forecast_landing(burn, height - target_bottom_height_m_, -dot(v_fixed, site_up));
+            }
         }
         cmd.phase = phase_;
         if (phase_ == ReturnPhase::Coast) return cmd;
@@ -354,14 +376,31 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
         } else {
             explicit_landing(body, env, epoch, cmd);
         }
+        if (cmd.abort) forecast_.catch_target = false;
+        if (phase_ == ReturnPhase::LandingBurn) forecast_.touchdown = epoch + cmd.time_to_go_s;
     }
     if (phase_ == ReturnPhase::Landed) {
+        forecast_.touchdown.reset();
         cmd.run_groups.clear();
         cmd.axis_gcrf = transform.rotation * site_up;
     }
     cmd.deploy_legs = legs_deployed_;
     cmd.phase = phase_;
     return cmd;
+}
+
+void BoosterReturnGuidance::forecast_landing(const BurnPrediction& burn, double height_m, double sink_mps) {
+    // The ignition from the guidance's two predictions: the ballistic impact less the fall, at the sink speed now, over
+    // the height the landing burn takes (its start height above its stop height). At the ignition that height is the
+    // height left. (The stop height alone run forward linearly was 26 s early in the fall's middle: the
+    // stop height falls fast while the stage is fast and high; this stays within ~5 s, see the timeline test.)
+    if (!impact_epoch_ || !(sink_mps > 0.0)) {
+        forecast_.landing_ignition.reset();
+        forecast_.touchdown.reset();
+        return;
+    }
+    forecast_.landing_ignition = *impact_epoch_ - std::max(height_m - burn.stop_height_m, 0.0) / sink_mps;
+    forecast_.touchdown = *forecast_.landing_ignition + burn.duration_s;
 }
 
 void BoosterReturnGuidance::set_realtime(bool realtime) {

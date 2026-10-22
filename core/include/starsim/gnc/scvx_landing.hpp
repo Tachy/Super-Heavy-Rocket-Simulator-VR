@@ -84,6 +84,8 @@ public:
     // A converged abort plan is being flown.
     bool has_abort_plan() const { return plan_ && plan_->goal == DescentGoal::Abort && plan_->converged; }
     int engine_set() const { return engine_set_; }  // phase whose engine set runs
+    // End of the active plan (the catch or touchdown it flies to); none before the first plan.
+    std::optional<time::Epoch> plan_end_epoch() const;
     // Gives the target up now (pilot or tower command): the next plan goes to the sea. False (no effect) without a sea.
     bool request_abort();
     void set_realtime(bool realtime) { parameters_.realtime = realtime; }

@@ -73,6 +73,12 @@ public:
     // once down or with the pins on the arms.
     bool request_abort();
     int first_plan_attempts() const { return first_plan_attempts_; }
+    // The catch the landing burn's plan flies to (its end); none before the first plan, once landed, while aborting
+    // and in the upright descent (onboard prediction for the mission timeline).
+    std::optional<time::Epoch> catch_epoch() const {
+        if (phase_ != ReturnPhase::LandingBurn || !scvx_ || upright_descent_ || scvx_->aborting()) return std::nullopt;
+        return scvx_->plan_end_epoch();
+    }
     // The flip: from the gate until the axis is within the flip tolerance; height of the CG above the site then.
     double flip_duration_s() const { return flip_duration_s_; }
     double flip_end_height_m() const { return flip_end_height_m_; }

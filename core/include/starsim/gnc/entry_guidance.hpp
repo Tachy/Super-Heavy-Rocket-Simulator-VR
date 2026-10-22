@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
 #include "starsim/math/quat.hpp"
@@ -222,6 +224,13 @@ public:
     // never hands over at a gate: the entry / terminal steering fly the belly flop down to the impact.
     void give_up(const EntryTarget& sea);
     bool given_up() const { return given_up_; }
+    // The gate as the latest prediction reaches it (onboard prediction for the mission timeline): the cycle's epoch plus
+    // the predicted time to the gate height - the entry corrector's solution or the terminal steering's prediction.
+    // None before the first, when the prediction misses the gate, for an aerocapture or a given-up ship, and once there.
+    std::optional<time::Epoch> gate_epoch() const {
+        if (phase_ == EntryPhase::Gate || given_up_) return std::nullopt;
+        return gate_epoch_;
+    }
 
     struct Solution {
         double bank_rad = 0.0;  // magnitude
@@ -289,6 +298,7 @@ private:
     math::Vec3 terminal_e1_, terminal_e2_;  // steering basis (see EntryPredictorState::basis_frozen)
     math::Vec3 terminal_zem_itrf_;             // predicted horizontal miss at the gate
     double terminal_prediction_age_s_ = 0.0;
+    std::optional<time::Epoch> gate_epoch_;  // latest predicted arrival at the gate height
 };
 
 }  // namespace starsim::gnc

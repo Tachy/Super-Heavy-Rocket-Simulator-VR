@@ -107,6 +107,23 @@ public:
     ReturnCommand update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 
     ReturnPhase phase() const { return phase_; }
+    // What the guidance's own criteria predict for the events ahead (onboard predictions for the mission timeline).
+    // Each holds only while its phase computes it:
+    //  boostback_cutoff - Boostback: the velocity still to be gained (less the tail-off) on the boostback engines
+    //                     (rocket equation at the current mass and full thrust);
+    //  landing_ignition - Coast, descending: the ballistic impact prediction less the fall, at the sink speed now, over
+    //                     the height the landing-burn prediction takes (start height - stop height); none before both
+    //                     predictions exist and while an entry burn is ahead or running (the burn prediction does
+    //                     not know it);
+    //  touchdown        - Coast: that ignition plus the predicted burn duration; LandingBurn: the burn's time to go
+    //                     (SCvx plan or explicit law); none once landed. `catch_target`: the touchdown is a catch.
+    struct Forecast {
+        std::optional<time::Epoch> boostback_cutoff;
+        std::optional<time::Epoch> landing_ignition;
+        std::optional<time::Epoch> touchdown;
+        bool catch_target = false;
+    };
+    const Forecast& forecast() const { return forecast_; }
     // Pins on the tower arms (reported by the tower each tick): the landing burn ends.
     void set_catch_contact(bool contact) { catch_contact_ = contact; }
     // A foot on the ground (reported by the leg landing each tick): the landing burn ends.
@@ -215,6 +232,9 @@ private:
     double entry_altitude_change_m_ = 0.0;   // the entry burn's ignition altitude above (or below) entry_altitude_m
     time::Epoch last_update_;              // previous update (entry burn integration)
     std::optional<time::Epoch> plan_end_;  // SCvx pad landing: end of the active plan
+    Forecast forecast_;
+    std::optional<time::Epoch> impact_epoch_;  // Coast: the latest ballistic impact prediction
+    void forecast_landing(const BurnPrediction& burn, double height_m, double sink_mps);
 
     void entry_burn(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch,
                     ReturnCommand& cmd);

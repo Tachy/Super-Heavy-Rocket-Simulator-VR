@@ -268,6 +268,7 @@ void FlightSession::run_autopilot() {
                     return_site(body.vehicle()), return_parameters(booster.config),
                     booster.config.landing_propellant_kg);
             }
+            booster_cutoff_propellant_kg_ = reserve_kg;
             if (propellant <= reserve_kg) {
                 stage();  // MECO + hot staging; the upper stage becomes the controlled body
                 autopilot_.state = AutopilotState::UpperStage;
@@ -1052,6 +1053,7 @@ void FlightSession::release_clamps() {
     if (bodies_.empty() || !bodies_[controlled_].body->clamped()) return;
     bodies_[controlled_].body->release_clamps();
     launch_epoch_ = epoch_;  // T+0 = liftoff
+    booster_cutoff_propellant_kg_.reset();  // set by the booster phase's first tick
     scheduled_liftoff_.reset();  // flown (the timeline keeps its schedule; its T-0 is the recorded liftoff now)
     record_event(MissionEventKind::Liftoff, controlled_);
 }

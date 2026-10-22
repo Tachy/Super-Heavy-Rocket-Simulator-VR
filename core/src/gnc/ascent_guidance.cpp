@@ -99,6 +99,7 @@ AscentGuidance::AscentGuidance(AscentTarget target, PitchProgram program, double
 }
 
 void AscentGuidance::start(const vehicle::FlightBody& body, const frames::BodyOrientation& earth, time::Epoch epoch) {
+    cutoff_epoch_.reset();
     const auto frame = local_frame(body.state().position_gcrf_m, earth, epoch);
     const double latitude = frame.latitude_rad;
     azimuth_rad_ = gnc::launch_azimuth_rad(latitude, target_.inclination_rad, target_speed_mps_, target_.northerly);
@@ -213,6 +214,7 @@ GuidanceCommand AscentGuidance::peg(const vehicle::FlightBody& body, const vehic
                                  target, epoch);
     cmd.thrust_direction_gcrf = peg.thrust_direction;
     cmd.time_to_go_s = peg.time_to_go_s;
+    if (perf.thrust_n > 0.0 && peg_.converged()) cutoff_epoch_ = epoch + peg.time_to_go_s;
     if (peg.cutoff) {
         cmd.cutoff = true;
         cmd.phase = AscentPhase::Cutoff;

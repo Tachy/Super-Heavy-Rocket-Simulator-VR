@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -71,6 +72,9 @@ public:
     const math::Vec3& target_plane_normal_gcrf() const { return plane_normal_; }
     double target_radius_m() const { return target_radius_m_; }
     double target_speed_mps() const { return target_speed_mps_; }
+    // The upper stage's cutoff as the closed loop predicts it (onboard prediction for the mission timeline): the epoch
+    // of its last update plus PEG's time to go; none before the closed loop has run with thrust.
+    const std::optional<time::Epoch>& cutoff_epoch() const { return cutoff_epoch_; }
 
 private:
     GuidanceCommand open_loop(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
@@ -95,6 +99,7 @@ private:
     void update_insertion(const math::Vec3& r_hat, double r, double vt, double t_go, const vehicle::FlightEnvironment& env,
                           time::Epoch epoch);
     PegSteering peg_;
+    std::optional<time::Epoch> cutoff_epoch_;
 };
 
 }  // namespace starsim::gnc

@@ -214,6 +214,11 @@ bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::
     return true;
 }
 
+std::optional<time::Epoch> ScvxLandingGuidance::plan_end_epoch() const {
+    if (!plan_) return std::nullopt;
+    return plan_epoch_ + plan_->duration_s();
+}
+
 ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                                time::Epoch epoch) {
     if (auto outcome = replanner_.collect(epoch, !parameters_.realtime)) accept(*outcome);

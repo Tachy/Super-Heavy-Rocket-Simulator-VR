@@ -380,6 +380,8 @@ void EntryGuidance::entry_cycle(const vehicle::FlightBody& body, const Vec3& r_i
     command_.downrange_error_m = s.prediction.downrange_error_m;
     command_.crossrange_m = s.prediction.crossrange_m;
     command_.heading_error_rad = heading_error;
+    gate_epoch_.reset();
+    if (s.prediction.reached_gate) gate_epoch_ = last_cycle_ + s.prediction.time_s;  // the cycle runs at last_cycle_
     command_.constrained = s.constrained;
 }
 
@@ -491,7 +493,9 @@ void EntryGuidance::terminal(const vehicle::FlightBody& body, const math::Mat3& 
         terminal_prediction_age_s_ = 0.0;
         terminal_predicted_ = true;
         Vec3 p = terminal_steering_;
-        const Vec3 z0 = terminal_miss(body, r_itrf, v_itrf, p, nullptr);
+        double gate_time_to_go_s = 0.0;
+        const Vec3 z0 = terminal_miss(body, r_itrf, v_itrf, p, &gate_time_to_go_s);
+        gate_epoch_ = last_update_ + gate_time_to_go_s;  // update() set last_update_ to this cycle's epoch
         const double d = parameters_.terminal_newton_step;
         // finite differences pointing into the unit disk (beyond it the fraction is clamped: no slope)
         const double d1s = norm(p + Vec3{d, 0.0, 0.0}) <= 1.0 ? d : -d;

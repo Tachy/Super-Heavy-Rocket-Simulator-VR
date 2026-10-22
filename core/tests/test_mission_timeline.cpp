@@ -2,8 +2,11 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,6 +18,7 @@
 #include "starsim/gnc/entry_attitude.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/capsule_return_mission.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/iss_mission.hpp"
 #include "starsim/sim/landing_outcome.hpp"
@@ -155,6 +159,63 @@ const MissionEvent* find_event(const sim::MissionTimeline& t, MissionEventKind k
     return nullptr;
 }
 
+// The predicted event of this kind (of the body `serial`; 0: any body).
+const MissionEvent* predicted_of(const sim::MissionTimeline& t, MissionEventKind kind, uint32_t serial = 0) {
+    for (const auto& e : t.predicted()) {
+        if (e.kind == kind && (serial == 0 || e.body_serial == serial)) return &e;
+    }
+    return nullptr;
+}
+
+// The recorded event of this kind of the body `serial` (the first after `after`, if given).
+const MissionEvent* recorded_of(const sim::MissionTimeline& t, MissionEventKind kind, uint32_t serial,
+                                std::optional<time::Epoch> after = std::nullopt) {
+    for (const auto& e : t.recorded()) {
+        if (e.kind == kind && e.body_serial == serial && (!after || e.epoch > *after)) return &e;
+    }
+    return nullptr;
+}
+
+// A prediction as sampled: the epochs of the sample and of the predicted event.
+struct PredictionTrack {
+    std::vector<std::pair<time::Epoch, time::Epoch>> samples;
+    std::optional<time::Epoch> first_seen, first, last_seen, last;
+    void sample(const MissionEvent* e, time::Epoch now) {
+        if (!e) return;
+        samples.emplace_back(now, e->epoch);
+        if (!first) {
+            first_seen = now;
+            first = e->epoch;
+        }
+        last_seen = now;
+        last = e->epoch;
+    }
+    // The largest error |predicted - actual| of the samples taken at most `lead_s` before `actual` (0: none).
+    double max_error_within_s(time::Epoch actual, double lead_s) const {
+        double worst = 0.0;
+        for (const auto& [now, predicted] : samples) {
+            if (actual - now <= lead_s) worst = std::max(worst, std::abs(predicted - actual));
+        }
+        return worst;
+    }
+};
+
+void print_prediction(const char* label, const PredictionTrack& p, const MissionEvent* recorded) {
+    if (!std::getenv("STARSIM_VERBOSE") || !p.first || !recorded) return;
+    std::printf("  [prediction] %-12s first seen %.1f s before: error %+.2f s; last seen %.1f s before: error %+.2f s\n",
+                label, recorded->epoch - *p.first_seen, *p.first - recorded->epoch, recorded->epoch - *p.last_seen,
+                *p.last - recorded->epoch);
+    if (std::getenv("STARSIM_DEBUG_PREDICTIONS")) {  // every sample
+        for (const auto& [now, predicted] : p.samples) {
+            std::printf("  [sample] %-12s %.1f s before: error %+.2f s\n", label, recorded->epoch - now, predicted - recorded->epoch);
+        }
+    }
+    for (const double lead : {120.0, 60.0, 30.0, 10.0}) {
+        std::printf("  [prediction] %-12s max error within %3.0f s before: %.2f s\n", label, lead,
+                    p.max_error_within_s(recorded->epoch, lead));
+    }
+}
+
 void print_events(const sim::MissionTimeline& t) {
     if (!std::getenv("STARSIM_VERBOSE")) return;
     for (const auto& e : t.recorded()) {
@@ -175,7 +236,17 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     time::Epoch q_peak_epoch = t0;
     std::optional<time::Epoch> seco_command;  // the tick whose autopilot commanded the upper stage's cutoff
     const auto& t = session.timeline();
+    // onboard predictions (Task 4b): MECO and separation at T+30 s, SECO from the upper stage's closed loop
+    std::optional<time::Epoch> meco_at_30, separation_at_30;
+    PredictionTrack meco_prediction, seco_prediction;
     while (session.epoch() - t0 < 900.0 && !find_event(t, MissionEventKind::Seco)) {
+        if (const auto* lifted = find_event(t, MissionEventKind::Liftoff);
+            lifted && !meco_at_30 && session.epoch() - lifted->epoch >= 30.0) {
+            if (const auto* p = predicted_of(t, MissionEventKind::Meco)) meco_at_30 = p->epoch;
+            if (const auto* p = predicted_of(t, MissionEventKind::StageSeparation)) separation_at_30 = p->epoch;
+        }
+        meco_prediction.sample(predicted_of(t, MissionEventKind::Meco), session.epoch());
+        seco_prediction.sample(predicted_of(t, MissionEventKind::Seco), session.epoch());
         const bool upper = session.autopilot().state == sim::AutopilotState::UpperStage;
         const auto& g = session.autopilot().guidance;  // single ticks at the cutoff
         const bool near = upper && g.phase == gnc::AscentPhase::ClosedLoop && g.time_to_go_s < 1.0;
@@ -214,6 +285,29 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     CHECK(std::abs(seco->epoch - *seco_command) <= sim::FlightSession::tick_s);  // the command, not the tail-off end
     CHECK(find_event(t, K::EntryInterface) == nullptr);  // the 200 km orbit: no entry
     CHECK(*t.t0() == liftoff->epoch);
+
+    // Onboard predictions: the booster's cutoff criterion run forward, PEG's time to go.
+    const auto* separation = find_event(t, K::StageSeparation);
+    print_prediction("MECO", meco_prediction, meco);
+    print_prediction("SECO", seco_prediction, seco);
+    if (std::getenv("STARSIM_VERBOSE") && meco_at_30) {
+        std::printf("  [prediction] MECO at T+30 s: error %+.2f s\n", *meco_at_30 - meco->epoch);
+    }
+    REQUIRE(meco_at_30);
+    REQUIRE(separation_at_30);
+    // Measured 2026-10-22: +0.87 s at T+30 s. The criterion run forward at the flow and cutoff propellant of the moment
+    // is late by up to 12 s in the max-Q throttle bucket and ~0.26 s per second to go near MECO (the return's
+    // cutoff propellant grows with the downrange speed) - converging: +0.79 s 3 s before.
+    CHECK(std::abs(*meco_at_30 - meco->epoch) <= 2.0);
+    CHECK(std::abs(*separation_at_30 - separation->epoch) <= 2.0);  // hot staging: separation in the MECO's tick
+    CHECK(meco_prediction.max_error_within_s(meco->epoch, 3.0) <= 1.0);
+    // PEG: -1.94 s at the first closed-loop tick, within 0.29 s over the last 120 s, +0.24 s at the end.
+    REQUIRE(seco_prediction.first);
+    CHECK(*seco_prediction.first_seen - separation->epoch <= 1.0);  // as soon as the upper stage's closed loop runs
+    CHECK(std::abs(*seco_prediction.first - seco->epoch) <= 3.0);
+    CHECK(seco_prediction.max_error_within_s(seco->epoch, 120.0) <= 0.5);
+    CHECK(predicted_of(t, K::Meco) == nullptr);  // recorded: no longer predicted
+    CHECK(predicted_of(t, K::Seco) == nullptr);
 }
 
 TEST_CASE("Booster return records boostback, landing burn and the catch", "[timeline]") {
@@ -225,10 +319,16 @@ TEST_CASE("Booster return records boostback, landing burn and the catch", "[time
 
     const auto& t = session.timeline();
     std::optional<uint32_t> booster;
+    PredictionTrack cutoff_prediction, landing_burn_prediction, catch_prediction;  // onboard predictions (Task 4b)
     while (session.epoch() - t0 < 900.0 && !find_event(t, MissionEventKind::Caught)) {
         session.advance_to(session.epoch() + 1.0, 1000);
         if (!booster) {
             if (const auto* meco = find_event(t, MissionEventKind::Meco)) booster = meco->body_serial;
+        }
+        if (booster) {
+            cutoff_prediction.sample(predicted_of(t, MissionEventKind::Cutoff, *booster), session.epoch());
+            landing_burn_prediction.sample(predicted_of(t, MissionEventKind::LandingBurn, *booster), session.epoch());
+            catch_prediction.sample(predicted_of(t, MissionEventKind::Caught, *booster), session.epoch());
         }
         if (booster) {
             bool down = false;
@@ -245,6 +345,34 @@ TEST_CASE("Booster return records boostback, landing burn and the catch", "[time
     REQUIRE(booster);
     using K = MissionEventKind;
     CHECK(contains_in_order(t.recorded(), {K::Boostback, K::LandingBurn, K::Caught}, *booster));
+
+    // Onboard predictions of the return guidance: the boostback's cutoff, the landing burn's ignition, the catch.
+    const auto* boostback = recorded_of(t, K::Boostback, *booster);
+    REQUIRE(boostback);
+    const auto* cutoff = recorded_of(t, K::Cutoff, *booster, boostback->epoch);
+    const auto* landing_burn = recorded_of(t, K::LandingBurn, *booster);
+    const auto* caught = recorded_of(t, K::Caught, *booster);
+    REQUIRE(cutoff);
+    REQUIRE(landing_burn);
+    REQUIRE(caught);
+    print_prediction("cutoff", cutoff_prediction, cutoff);
+    print_prediction("landing burn", landing_burn_prediction, landing_burn);
+    print_prediction("catch", catch_prediction, caught);
+    REQUIRE(cutoff_prediction.first);
+    REQUIRE(landing_burn_prediction.first);
+    REQUIRE(catch_prediction.first);
+    // Measured 2026-10-22: cutoff -1.57 s at the boostback's start, 0.16 s within the last 10 s; landing burn -5.4 s at
+    // the apex, within 4.8 s on the way down, 1.4 s within the last 30 s; catch -20 s at the apex (ignition plus the
+    // one-dimensional burn duration), then the SCvx plan's end: 4.7 s before the recorded catch, which waits for the
+    // booster at rest in the arms (CatchTowerSim: 2 s at rest after the carriage has stopped).
+    CHECK(*cutoff_prediction.first_seen - boostback->epoch <= 1.0);  // from the boostback's first second
+    CHECK(cutoff_prediction.max_error_within_s(cutoff->epoch, 1e9) <= 2.0);
+    CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 7.0);
+    CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 30.0) <= 2.0);
+    CHECK(catch_prediction.max_error_within_s(caught->epoch, 1e9) <= 25.0);
+    CHECK(catch_prediction.max_error_within_s(caught->epoch, 30.0) <= 6.0);
+    CHECK(predicted_of(t, K::LandingBurn, *booster) == nullptr);
+    CHECK(predicted_of(t, K::Caught, *booster) == nullptr);
 }
 
 TEST_CASE("An undocking mission starts its clock at the undocking", "[timeline]") {
@@ -386,13 +514,33 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
         cfg, belly_state(session, cfg, t0, {-28000.0, 0.0, 26000.0}, {speed * std::cos(gamma), 0.0, speed * std::sin(gamma)},
                          65.0),
         t0);
+    const auto& t = session.timeline();
+    PredictionTrack landing_burn_prediction, catch_prediction;  // onboard predictions (Task 4b)
     while (session.epoch() - t0 < 600.0 && session.landing_outcome(0) == sim::LandingOutcome::Flying) {
         session.advance_to(session.epoch() + 1.0, 1000);
+        landing_burn_prediction.sample(predicted_of(t, MissionEventKind::LandingBurn), session.epoch());
+        catch_prediction.sample(predicted_of(t, MissionEventKind::Caught), session.epoch());
     }
     session.advance_to(session.epoch() + 1.0, 1000);  // one more observation
-    print_events(session.timeline());
-    CHECK(count_of(session.timeline(), MissionEventKind::LandingBurn) == 1);
-    CHECK(count_of(session.timeline(), MissionEventKind::Caught) == 1);
+    print_events(t);
+    CHECK(count_of(t, MissionEventKind::LandingBurn) == 1);
+    CHECK(count_of(t, MissionEventKind::Caught) == 1);
+
+    // Onboard predictions: the gate (flip on the landing burn) from the entry guidance, the catch from the burn's plan.
+    const auto* landing_burn = find_event(t, MissionEventKind::LandingBurn);
+    const auto* caught = find_event(t, MissionEventKind::Caught);
+    REQUIRE(landing_burn);
+    REQUIRE(caught);
+    print_prediction("landing burn", landing_burn_prediction, landing_burn);
+    print_prediction("catch", catch_prediction, caught);
+    REQUIRE(landing_burn_prediction.first);
+    REQUIRE(catch_prediction.first);
+    CHECK(*landing_burn_prediction.first_seen - t0 <= 1.0);  // from the entry guidance's first cycle
+    // Measured 2026-10-22: the gate -0.83 s 179 s before, 0.07 s within the last 30 s; the catch: the plan's end is the
+    // pins on the arms, 11-13 s before the recorded catch (the ship at rest in the arms after the carriage has stopped).
+    CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 1.0);
+    CHECK(catch_prediction.max_error_within_s(caught->epoch, 1e9) <= 14.0);
+    CHECK(t.predicted().empty());
 }
 
 TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cutoff", "[timeline]") {
@@ -418,7 +566,12 @@ TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cu
     const auto& t = session.timeline();
     std::optional<time::Epoch> meco_command;  // the tick whose autopilot ended the booster phase
     double thrust_after_command_n = 0.0;      // the booster's thrust right after that tick: still tailing off
+    std::optional<time::Epoch> meco_at_30;    // the onboard prediction at T+30 s (Task 4b)
     while (session.epoch() - t0 < 600.0 && (!meco_command || session.epoch() - *meco_command < 60.0)) {
+        if (const auto* lifted = find_event(t, MissionEventKind::Liftoff);
+            lifted && !meco_at_30 && session.epoch() - lifted->epoch >= 30.0) {
+            if (const auto* p = predicted_of(t, MissionEventKind::Meco)) meco_at_30 = p->epoch;
+        }
         const bool booster = session.autopilot().state == sim::AutopilotState::Booster;
         const auto before = session.epoch();
         const bool near = booster && before >= *window - 0.01;
@@ -442,6 +595,11 @@ TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cu
     CHECK(meco < separation);  // listed first: our Falcon 9 stages in the MECO's tick
     CHECK(thrust_after_command_n > 0.0);
     CHECK(meco->body_name == "Falcon 9 Block 5 first stage");
+    if (std::getenv("STARSIM_VERBOSE") && meco_at_30) {
+        std::printf("  [prediction] MECO at T+30 s: error %+.2f s\n", *meco_at_30 - meco->epoch);
+    }
+    REQUIRE(meco_at_30);
+    CHECK(std::abs(*meco_at_30 - meco->epoch) <= 2.0);  // measured 2026-10-22: -0.08 s
     const uint32_t booster = meco->body_serial;
     size_t mecos = 0;
     std::optional<time::Epoch> next_start;  // the booster's next burn
@@ -822,14 +980,63 @@ TEST_CASE("Mission event probe", "[.][probe][timeline_probe]") {  // STARSIM_PRO
     const auto st = sim::start_mission(session, STARSIM_CONFIG_DIR, mission ? mission : "starship_leo", t0, time);
     const auto start = session.epoch();
     const double limit_s = duration ? std::atof(duration) : 600.0;
+    const char* step = std::getenv("STARSIM_PROBE_STEP_S");  // also samples the predicted events at this step
+    const double step_s = step ? std::atof(step) : 60.0;
+    std::map<std::pair<MissionEventKind, uint32_t>, PredictionTrack> predictions;
     while (session.epoch() - start < limit_s && session.body_count() > 0) {
-        session.advance_to(session.epoch() + 60.0, 10000000);
+        session.advance_to(session.epoch() + step_s, 10000000);
+        for (const auto& e : session.timeline().predicted()) predictions[{e.kind, e.body_serial}].sample(&e, session.epoch());
     }
     for (const auto& e : session.timeline().recorded()) {
         std::printf("  [probe] T%+10.1f %-16s body %u %s\n", e.epoch - start, sim::to_string(e.kind), e.body_serial,
                     e.body_name.c_str());
+        if (const auto it = predictions.find({e.kind, e.body_serial}); it != predictions.end()) {
+            print_prediction(sim::to_string(e.kind), it->second, recorded_of(session.timeline(), e.kind, e.body_serial));
+        }
     }
     std::printf("  [probe] flown %.0f s, leg %s: %s; %zu bodies\n", session.epoch() - start,
                 sim::to_string(session.iss_mission_leg()), session.iss_mission_status().c_str(), session.body_count());
     (void)st;
+}
+
+// The ship return from orbit (ship_return_starbase) to the catch - with STARSIM_PROBE_CAPSULE the Crew Dragon return to
+// the splashdown -, sampling the predicted events every second near the events: prints the onboard predictions' errors
+// against the recorded events (Task 4b measurements; STARSIM_VERBOSE=1).
+TEST_CASE("Return prediction probe", "[.][probe][timeline_probe]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    if (std::getenv("STARSIM_PROBE_CAPSULE")) {
+        const auto m = config::load_capsule_return_mission(STARSIM_CONFIG_DIR, "crew_dragon_return");
+        sim::place_capsule_return_mission(session, m, config::load_vehicle(STARSIM_CONFIG_DIR, m.vehicle_id),
+                                          STARSIM_CONFIG_DIR, time.from_utc(m.epoch_utc));
+        REQUIRE(session.plan_capsule_return(sim::capsule_return_parameters(m)));
+    } else {
+        const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+        place_ship_return(session, m, time.from_utc(m.epoch_utc));
+        auto p = sim::ship_deorbit_parameters(m.deorbit);
+        p.search_window_s = m.deorbit.search_window_s;
+        REQUIRE(session.plan_ship_return(p));
+    }
+    const auto& t = session.timeline();
+    std::map<std::pair<MissionEventKind, uint32_t>, PredictionTrack> predictions;
+    const auto start = session.epoch();
+    const auto flying = [&] {
+        return session.body_count() > 0 &&
+               session.landing_outcome(session.controlled_index()) == sim::LandingOutcome::Flying;
+    };
+    while (session.epoch() - start < 3.0 * 86400.0 && flying()) {
+        const bool far = session.autopilot().state == sim::AutopilotState::Burn && !session.autopilot().burn.ignite &&
+                         session.autopilot().burn.time_to_ignition_s > 120.0;
+        session.advance_to(session.epoch() + (far ? 600.0 : 1.0), 10000000);
+        for (const auto& e : t.predicted()) predictions[{e.kind, e.body_serial}].sample(&e, session.epoch());
+    }
+    session.advance_to(session.epoch() + 1.0, 1000);
+    for (const auto& e : t.recorded()) {
+        std::printf("  [probe] T%+10.1f %-16s body %u %s\n", e.epoch - start, sim::to_string(e.kind), e.body_serial,
+                    e.body_name.c_str());
+        if (const auto it = predictions.find({e.kind, e.body_serial}); it != predictions.end()) {
+            print_prediction(sim::to_string(e.kind), it->second, &e);
+        }
+    }
 }
