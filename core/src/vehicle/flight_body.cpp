@@ -702,12 +702,22 @@ FlightTelemetry FlightBody::telemetry(const FlightEnvironment& env, time::Epoch 
     t.longitude_rad = geodetic.longitude_rad;
     const Vec3 up = frame.transform.rotation * local_up_fixed(geodetic);
     const Vec3 relative = frame.relative_velocity(state_.position_gcrf_m, state_.velocity_gcrf_mps);
-    t.speed_inertial_mps = norm(state_.velocity_gcrf_mps);
+    const auto centred = frame.centred({state_.position_gcrf_m, state_.velocity_gcrf_mps});
+    t.speed_inertial_mps = norm(centred.velocity_mps);
     t.speed_relative_mps = norm(relative);
     t.vertical_speed_mps = dot(relative, up);
     t.flight_path_angle_rad = std::atan2(t.vertical_speed_mps, norm(relative - t.vertical_speed_mps * up));
+    t.distance_earth_m = norm(state_.position_gcrf_m);  // the GCRF is Earth-centred
+    t.speed_earth_mps = norm(state_.velocity_gcrf_mps);
+    if (env.moon) {
+        const auto moon = id == ephemeris::Body::Moon ? math::StateVector{frame.centre_gcrf_m, frame.centre_velocity_gcrf_mps}
+                                                      : env.moon->centre_gcrf(epoch);
+        t.distance_moon_m = norm(state_.position_gcrf_m - moon.position_m);
+        t.speed_moon_mps = norm(state_.velocity_gcrf_mps - moon.velocity_mps);
+    } else {
+        t.distance_moon_m = t.speed_moon_mps = std::numeric_limits<double>::quiet_NaN();
+    }
 
-    const auto centred = frame.centred({state_.position_gcrf_m, state_.velocity_gcrf_mps});
     const auto el = orbit::elements_from_state(centred, body.gm_m3ps2());
     const double radius = body.shape().semi_major_axis_m;
     t.periapsis_altitude_m = el.semi_major_axis_m * (1.0 - el.eccentricity) - radius;

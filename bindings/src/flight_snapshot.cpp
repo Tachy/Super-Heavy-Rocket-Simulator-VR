@@ -97,6 +97,12 @@ godot::Dictionary telemetry(const sim::FlightSession& session, size_t index) {
     d["longitude_deg"] = t.longitude_rad * constants::rad_to_deg;
     d["speed_inertial_mps"] = t.speed_inertial_mps;
     d["speed_relative_mps"] = t.speed_relative_mps;
+    d["distance_earth_m"] = t.distance_earth_m;
+    d["speed_earth_mps"] = t.speed_earth_mps;
+    if (!std::isnan(t.distance_moon_m)) {  // only with a Moon in the session
+        d["distance_moon_m"] = t.distance_moon_m;
+        d["speed_moon_mps"] = t.speed_moon_mps;
+    }
     d["vertical_speed_mps"] = t.vertical_speed_mps;
     d["flight_path_angle_deg"] = t.flight_path_angle_rad * constants::rad_to_deg;
     d["mach"] = t.mach;

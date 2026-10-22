@@ -120,10 +120,22 @@ TEST_CASE("Telemetry near the Moon is relative to the Moon, also before the firs
     CHECK(tm.altitude_m == Catch::Approx(100e3).margin(1.0));
     CHECK(tm.periapsis_altitude_m == Catch::Approx(100e3).margin(1.0));
     CHECK(tm.apoapsis_altitude_m == Catch::Approx(100e3).margin(1.0));
-    CHECK(tm.speed_inertial_mps == Catch::Approx(norm(body->state().velocity_gcrf_mps)));  // GCRF, unchanged meaning
+    // Inertial speed about the Moon's centre: the circular speed at 100 km (within 1 %).
+    const double circular_mps = std::sqrt(fx.moon.gm_m3ps2() / (constants::moon_mean_radius_m + 100e3));
+    CHECK(tm.speed_inertial_mps == Catch::Approx(circular_mps).epsilon(0.01));
     CHECK(tm.speed_relative_mps == Catch::Approx(1633.0).margin(10.0));  // relative to the rotating Moon
     CHECK(tm.dynamic_pressure_pa == 0.0);  // vacuum
     CHECK(std::abs(tm.vertical_speed_mps) < 0.5);
+    // Both bodies' centres: the Earth-centred speed differs from the Moon-centred one by up to the Moon's ~1 km/s.
+    const auto centre = fx.moon.centre_gcrf(fx.t0);
+    const auto& s = body->state();
+    CHECK(tm.distance_earth_m == Catch::Approx(norm(s.position_gcrf_m)));
+    CHECK(tm.speed_earth_mps == Catch::Approx(norm(s.velocity_gcrf_mps)));
+    CHECK(tm.distance_moon_m == Catch::Approx(constants::moon_mean_radius_m + 100e3).margin(1.0));
+    CHECK(tm.speed_moon_mps == Catch::Approx(tm.speed_inertial_mps));
+    CHECK(tm.distance_earth_m == Catch::Approx(norm(centre.position_m)).epsilon(0.01));
+    CHECK(std::abs(tm.speed_earth_mps - tm.speed_moon_mps) <= norm(centre.velocity_mps) + 1e-6);
+    CHECK(std::abs(tm.speed_earth_mps - tm.speed_moon_mps) > 100.0);  // really a different centre
 }
 
 TEST_CASE("Telemetry in Earth orbit reports orbit elements about the Earth", "[vehicle][lunar]") {
@@ -137,6 +149,19 @@ TEST_CASE("Telemetry in Earth orbit reports orbit elements about the Earth", "[v
     CHECK(tm.apoapsis_altitude_m == Catch::Approx(200e3).margin(1.0));
     // Inclination to the true equator of date (ITRF z): within the ~0.2 deg of precession-nutation of GCRF's.
     CHECK(tm.inclination_rad == Catch::Approx(51.6 * deg).margin(0.3 * deg));
+    // Near the Earth the inertial speed is the Earth-centred (GCRF) one.
+    CHECK(tm.speed_inertial_mps == norm(rel.velocity_mps));
+    CHECK(tm.speed_earth_mps == tm.speed_inertial_mps);
+    CHECK(tm.distance_earth_m == norm(rel.position_m));
+    const auto moon = fx.moon.centre_gcrf(fx.t0);
+    CHECK(tm.distance_moon_m == Catch::Approx(norm(rel.position_m - moon.position_m)));
+    CHECK(tm.speed_moon_mps == Catch::Approx(norm(rel.velocity_mps - moon.velocity_mps)));
+    // Without a Moon in the environment its distance and speed are NaN.
+    vehicle::FlightEnvironment earth_only{fx.gravity, fx.atmosphere, fx.earth, &fx.ephemeris, false};
+    const auto te = body->telemetry(earth_only, fx.t0);
+    CHECK(std::isnan(te.distance_moon_m));
+    CHECK(std::isnan(te.speed_moon_mps));
+    CHECK(te.speed_inertial_mps == norm(rel.velocity_mps));
 }
 
 TEST_CASE("A ship resting on the Moon keeps its propellant with boil-off on", "[vehicle][lunar][boil_off]") {

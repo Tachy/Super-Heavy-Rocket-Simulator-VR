@@ -75,8 +75,15 @@ struct FlightTelemetry {
     double altitude_terrain_m = 0.0;
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
-    double speed_inertial_mps = 0.0;      // GCRF
+    // Relative to the reference body's centre, non-rotating ICRF-aligned axes (Earth: |v_gcrf|; Moon: |v - v_moon|).
+    double speed_inertial_mps = 0.0;
     double speed_relative_mps = 0.0;      // relative to the rotating reference body (what webcasts show)
+    // Both bodies whatever the reference (external view, transfer gauges), inertial about their centres. The Moon's
+    // two are NaN without a Moon in the environment (FlightEnvironment::moon == nullptr).
+    double distance_earth_m = 0.0;        // from the Earth's centre
+    double speed_earth_mps = 0.0;         // |v_gcrf|
+    double distance_moon_m = 0.0;         // from the Moon's centre
+    double speed_moon_mps = 0.0;          // |v_gcrf - v_moon_gcrf|
     double vertical_speed_mps = 0.0;      // relative, along the local vertical
     double flight_path_angle_rad = 0.0;   // relative velocity above the local horizontal
     double mach = 0.0;                    // meaningful only in continuum flow (knudsen < 0.01)
