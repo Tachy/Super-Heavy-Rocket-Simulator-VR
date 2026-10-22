@@ -51,7 +51,8 @@ struct StartOptions {
 // - refuelling_campaign_flown: sim/refuelling_campaign_flight.hpp (refuelling f2: the whole campaign in this
 //   session, driven by its supervisor);
 // - ship_return: refused (std::invalid_argument): the ship returns from the orbit it flew to (plan_ship_return).
-// Every start removes a previous campaign's supervisor first.
+// Every start removes a previous campaign's supervisor first. A start that succeeds (no refusal) begins the mission's
+// own log (FlightSession::reset_timeline); a refused one keeps the running flight's log.
 MissionStart start_mission(FlightSession& session, const std::filesystem::path& config_dir, std::string_view mission_id,
                            time::Epoch requested, const time::TimeScaleConverter& time,
                            const StartOptions& options = {});

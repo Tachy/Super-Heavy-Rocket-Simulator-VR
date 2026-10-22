@@ -50,7 +50,8 @@ class MissionTimeline {
 public:
     void reset(bool starts_on_pad);
     void record(MissionEvent event);  // past event (predicted forced false), kept sorted by epoch
-    void set_predicted(std::vector<MissionEvent> events);  // replaces all predicted events
+    // Replaces all predicted events; forces predicted = true on each and sorts them by epoch (stable).
+    void set_predicted(std::vector<MissionEvent> events);
     void set_scheduled_liftoff(std::optional<time::Epoch> t0);
 
     const std::vector<MissionEvent>& recorded() const { return recorded_; }
@@ -59,7 +60,8 @@ public:
     // T-0 in order: first recorded Liftoff; on a pad mission the scheduled liftoff; otherwise the first recorded
     // Ignition / Undocking, then the earliest predicted one; else none.
     std::optional<time::Epoch> t0() const;
-    std::optional<double> mission_clock_s(time::Epoch now) const;  // now - t0; negative = T-
+    // now - t0; negative = T-. A pad mission without a recorded liftoff holds at 0 once its scheduled T-0 has passed.
+    std::optional<double> mission_clock_s(time::Epoch now) const;
 
 private:
     bool starts_on_pad_ = false;

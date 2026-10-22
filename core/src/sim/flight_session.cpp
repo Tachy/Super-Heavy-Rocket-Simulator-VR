@@ -213,6 +213,9 @@ bool FlightSession::separate_payload() {
     if (index == 0) return false;
     auto upper = lower.body->separate(index, payload_separation_->dv_mps);
     for (auto& [group, run] : lower.running_groups) run = false;
+    lower.commanded = false;  // as in stage(): a separation under thrust records no further cutoff for this command
+    lower.commanded_with_upper = false;
+    lower.commanded_ascent_upper = false;
     record_event(MissionEventKind::StageSeparation, controlled_);  // the lower part, before the upper is a body
     upper->set_ground_height(launch_site_.height_m);
     bodies_.push_back(new_flying(std::move(upper)));

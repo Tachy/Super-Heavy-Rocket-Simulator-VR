@@ -100,7 +100,13 @@ std::optional<time::Epoch> MissionTimeline::t0() const {
 std::optional<double> MissionTimeline::mission_clock_s(time::Epoch now) const {
     const auto zero = t0();
     if (!zero) return std::nullopt;
-    return now - *zero;
+    const double clock_s = now - *zero;
+    // A pad mission past its scheduled T-0 without a liftoff holds at T-0 (like a launch hold): no T+ on the pad that
+    // would jump back at the real liftoff.
+    const bool lifted_off = std::any_of(recorded_.begin(), recorded_.end(),
+                                        [](const MissionEvent& e) { return e.kind == MissionEventKind::Liftoff; });
+    if (starts_on_pad_ && !lifted_off) return std::min(clock_s, 0.0);
+    return clock_s;
 }
 
 }  // namespace starsim::sim

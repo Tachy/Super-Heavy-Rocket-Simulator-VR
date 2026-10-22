@@ -1,9 +1,13 @@
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -85,6 +89,17 @@ TEST_CASE("T-0 of a pad mission is the scheduled liftoff, then the real one", "[
 
     timeline.record(event(MissionEventKind::Liftoff, 101.5));
     CHECK(*timeline.t0() == kBase + 101.5);
+}
+
+TEST_CASE("A pad mission past its T-0 without a liftoff holds the clock at T-0", "[timeline]") {
+    sim::MissionTimeline timeline;
+    timeline.reset(true);
+    timeline.set_scheduled_liftoff(kBase + 100.0);
+    CHECK(*timeline.mission_clock_s(kBase + 40.0) == -60.0);
+    CHECK(*timeline.mission_clock_s(kBase + 100.0) == 0.0);
+    CHECK(*timeline.mission_clock_s(kBase + 160.0) == 0.0);  // a hold on the pad: no T+ before the liftoff
+    timeline.record(event(MissionEventKind::Liftoff, 170.0));
+    CHECK(*timeline.mission_clock_s(kBase + 175.0) == 5.0);  // then from the real liftoff
 }
 
 TEST_CASE("An engine start before liftoff is no T-0", "[timeline]") {
@@ -441,6 +456,43 @@ TEST_CASE("start_mission resets the timeline; campaign launches do not", "[timel
     session.advance_to(session.epoch() + 1.0, 100000);
     CHECK(std::count_if(t.recorded().begin(), t.recorded().end(),
                         [](const MissionEvent& e) { return e.kind == MissionEventKind::Liftoff; }) == 2);
+}
+
+TEST_CASE("A refused start_mission keeps the running flight's log", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    // a config copy whose ISS launch finds no window: a 1 h search, a mission limit just past the insertion
+    const auto dir = std::filesystem::temp_directory_path() / "starsim_timeline_refused_start";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    std::filesystem::copy(STARSIM_CONFIG_DIR, dir / "config", std::filesystem::copy_options::recursive);
+    const auto mission_file = dir / "config" / "missions" / "falcon9_crew_dragon_iss.toml";
+    std::stringstream text;
+    text << std::ifstream(mission_file).rdbuf();
+    std::string toml = text.str();
+    const auto replace = [&](const std::string& from, const std::string& to) {
+        const auto at = toml.find(from);
+        REQUIRE(at != std::string::npos);
+        toml.replace(at, from.size(), to);
+    };
+    replace("search_days = 3.0", "search_days = 0.04");
+    replace("mission_limit_h = 28.0", "mission_limit_h = 0.5");
+    std::ofstream(mission_file) << toml;
+
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto t0 = time.from_utc({2026, 10, 16, 0, 0, 0.0});
+    sim::start_mission(session, STARSIM_CONFIG_DIR, "starship_leo", t0, time);
+    session.advance_to(t0 + 15.0, 100000);
+    const auto& t = session.timeline();
+    REQUIRE(find_event(t, MissionEventKind::Liftoff));
+    const size_t events = t.recorded().size();
+
+    const auto refused = sim::start_mission(session, dir / "config", "falcon9_crew_dragon_iss", session.epoch(), time);
+    INFO(refused.refusal);
+    CHECK_FALSE(refused.refusal.empty());
+    CHECK(t.recorded().size() == events);
+    CHECK(find_event(t, MissionEventKind::Liftoff));
+    std::filesystem::remove_all(dir);
 }
 
 namespace {
@@ -1054,6 +1106,40 @@ TEST_CASE("Mission event probe", "[.][probe][timeline_probe]") {  // STARSIM_PRO
     std::printf("  [probe] flown %.0f s, leg %s: %s; %zu bodies\n", session.epoch() - start,
                 sim::to_string(session.iss_mission_leg()), session.iss_mission_status().c_str(), session.body_count());
     (void)st;
+}
+
+// Cost of the predicted events per FlightSession::advance_to (final review, item 10): every advance_to call rebuilds the
+// predicted list once; this times one extra predicted_mission_events call per step against the advance_to calls.
+// STARSIM_PROBE_MISSION (starship_leo), STARSIM_PROBE_S (400), STARSIM_PROBE_STEP_S (1/60: a game frame).
+TEST_CASE("Predicted events cost probe", "[.][probe][timeline_probe]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const char* mission = std::getenv("STARSIM_PROBE_MISSION");
+    const char* duration = std::getenv("STARSIM_PROBE_S");
+    const char* step = std::getenv("STARSIM_PROBE_STEP_S");
+    const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    sim::start_mission(session, STARSIM_CONFIG_DIR, mission ? mission : "starship_leo", t0, time);
+    const auto start = session.epoch();
+    const double limit_s = duration ? std::atof(duration) : 400.0;
+    const double step_s = step ? std::atof(step) : 1.0 / 60.0;
+    using clock = std::chrono::steady_clock;
+    double advance_ms = 0.0, predict_ms = 0.0;
+    size_t calls = 0, events = 0;
+    while (session.epoch() - start < limit_s && session.body_count() > 0) {
+        const auto a = clock::now();
+        session.advance_to(session.epoch() + step_s, 10000000);
+        const auto b = clock::now();
+        events += sim::predicted_mission_events(session).size();
+        const auto c = clock::now();
+        advance_ms += std::chrono::duration<double, std::milli>(b - a).count();
+        predict_ms += std::chrono::duration<double, std::milli>(c - b).count();
+        ++calls;
+    }
+    std::printf("  [probe] %zu advance_to calls: %.1f ms in advance_to, one predicted list %.4f ms (%.1f events) = "
+                "%.2f %% of advance_to without it\n",
+                calls, advance_ms, predict_ms / calls, static_cast<double>(events) / calls,
+                100.0 * predict_ms / (advance_ms - predict_ms));
 }
 
 // The ship return from orbit (ship_return_starbase) to the catch - with STARSIM_PROBE_CAPSULE the Crew Dragon return to
