@@ -31,9 +31,9 @@ func _body(over: Dictionary = {}) -> Dictionary:
 func _test_gauges() -> void:
 	var state := {}
 	var hot := _telemetry({"heat_rate_w_m2": 2e3})
-	var coasting := _body({"engines": []})  # with engines the 4-per-side limit would cut heat flux
+	var coasting := _body()  # entry-like: engines present, g, q > 100 Pa, Knudsen < 0.1
 	var sel := GaugeRules.select(hot, coasting, state, 0.0)
-	_check("heat_flux" in sel["left"], "heat flux appears at 2e3 W/m2")
+	_check("heat_flux" in sel["left"] and "heat_load" in sel["left"], "heat flux and load appear at 2e3 W/m2 with engines")
 	var cool := _telemetry()
 	sel = GaugeRules.select(cool, coasting, state, 4.0)
 	_check("heat_flux" in sel["left"], "heat flux stays 4 s after dropping to 0")
@@ -53,7 +53,7 @@ func _test_gauges() -> void:
 			{}, 0.0)
 	_check(sel["left"].size() <= GaugeRules.MAX_PER_SIDE and sel["right"].size() <= GaugeRules.MAX_PER_SIDE,
 			"never more than 4 per side")
-	_check(sel["left"] == ["engines", "g_load", "dynamic_pressure", "mach"], "left side by priority")
+	_check(sel["left"] == ["engines", "heat_flux", "heat_load", "g_load"], "left side by priority")
 	_check(sel["right"] == ["speed_surface", "speed_inertial", "altitude", "apoapsis"], "right side by priority")
 	sel = GaugeRules.select(_telemetry({"apoapsis_altitude_km": INF, "altitude_m": 200.0e3}), _body(), {}, 0.0)
 	_check(not ("apoapsis" in sel["right"]) and not ("periapsis" in sel["right"]), "no apsides on an open orbit")

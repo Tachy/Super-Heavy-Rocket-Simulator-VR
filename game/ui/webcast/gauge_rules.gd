@@ -37,11 +37,11 @@ static func _left_conditions(t: Dictionary, body: Dictionary) -> Array:
 	var heat: bool = float(t.get("heat_rate_w_m2", 0.0)) > HEAT_RATE_MIN_W_M2
 	return [
 		["engines", not body.get("engines", []).is_empty()],
+		["heat_flux", heat],  # heating before g / q / Mach: it must not be cut during entry by the side limit
+		["heat_load", heat],
 		["g_load", not t.get("clamped", false)],
 		["dynamic_pressure", float(t.get("dynamic_pressure_pa", 0.0)) > DYNAMIC_PRESSURE_MIN_PA],
 		["mach", float(t.get("knudsen", INF)) < KNUDSEN_CONTINUUM_MAX],
-		["heat_flux", heat],
-		["heat_load", heat],
 	]
 
 
