@@ -28,8 +28,16 @@ dry_mass_kg = 210000.0                   # [D] +-40 t: flights 12-14 telemetry -
                                          # the ship: 165-215 t) and the descent ballistic coefficient (~20 % below Block 1/2,
                                          # if the drag shape is unchanged). Previously 255 t [E].
 dry_cg_station_m = 24.0                  # [E]
-separation = "hot_staging"
 jettison_after_separation_kg = 0.0       # hot-stage truss integrated, not jettisoned [S:wiki_sh, nsf_b3]
+
+# Hot staging (FlightSession::stage, ascent trajectory and staging Task 1): MECO cuts the outer engines, the 3 centre
+# engines run on at minimum throttle [S:wiki_starship], the ship's engines start while joined, the separation follows
+# once they are at thrust - the ship's start-up time (raptor3 / raptor_vacuum3 startup_s 3.0 s [E]): the flight 14
+# telemetry has no samples from T+138.75 s to T+146.25 s across the staging. The centre engines stay lit into the flip
+# ([stage.recovery] flips on the final landing set).
+[stage.staging]
+kind = "hot"
+run_on_engine_groups = ["center"]
 
 [[stage.tank]]
 id = "lox_main"

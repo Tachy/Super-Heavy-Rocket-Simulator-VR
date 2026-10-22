@@ -24,7 +24,6 @@ length_m = 3.7                           # [D] 8.1 m with the trunk [S:wiki_drag
 diameter_m = 3.7                         # [E] on the 3.66 m second stage
 dry_mass_kg = 1500.0                     # [E] solar arrays and radiators included, not modelled separately
 dry_cg_station_m = 1.6                   # [E]
-separation = "spring"
 
 [[stage]]
 id = "capsule"
@@ -38,7 +37,6 @@ dry_mass_kg = 8438.0                     # [D] 12.5 t launch mass [S:wiki_dragon
 dry_cg_station_m = 1.3                   # [E] low in the blunt body
 dry_cg_offset_m = [0.0964, 0.0]          # [D] gen_capsule_aero.py --trim --cg-station-m 1.135 --entry-mass-kg 10538: L/D 0.20 [E: spec]
                                          # at the entry mass (2.1 t of propellant); lift in the body x-y plane
-separation = "spring"                    # [E] from the trunk (d3)
 nose_cone = true                         # [S] hinged; closed for ascent and entry, open in orbit
 
 [[stage.tank]]

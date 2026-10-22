@@ -1778,8 +1778,9 @@ Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure dat
 (`mission_timeline.hpp`): recorded (past) and predicted events, each with body serial and the acting part's name.
 - **T-0 rules:** the first recorded Liftoff; on a pad mission the scheduled liftoff; else the first recorded Ignition /
   Undocking, then the earliest predicted one. The mission clock is `now - T-0` (T- before, T+ after).
-- **Recorded:** by `FlightSession` at exact moments (liftoff, stage / payload / trunk separation with MECO at hot
-  staging, hard capture, undocking at the physical separation - mechanism phase Separated, `hooks_open_s` 180 s after
+- **Recorded:** by `FlightSession` at exact moments (liftoff, stage / payload / trunk separation; the staging
+  sequence's MECO at hot staging and the upper stage's ignition at its command - the observer skips an Ignition recorded
+  within two samples -, hard capture, undocking at the physical separation - mechanism phase Separated, `hooks_open_s` 180 s after
   the command -, crew ejection) and by `MissionEventObserver` (0.1 s sampling while ticking, after each coast: engine
   starts / cutoffs, booster return phases, Max Q, entry interface, parachutes, landing outcomes; a catch - known once
   the body rests in the arms - is stamped with the pins' first touch on them, `CatchTowerSim::first_contact_epoch`:
@@ -1806,7 +1807,9 @@ Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure dat
     propellant the autopilot set on its last tick (`booster_cutoff_propellant_kg`: the return's need or the reserve) at
     the stage's actual flow now scaled along the open loop's throttle schedule (`AscentGuidance::booster_throttle`,
     incl. the max-Q bucket; ruling 2026-10-22: part of the onboard computer's own plan), integrated in 1 s steps [E];
-    the autopilot stages in the MECO's tick. Measured: starship_leo +7.0 s at T+30 s, +6.1..+8.3 s over the booster
+    the separation and the upper stage's ignition follow the staging sequence's timing (`separation_after_meco_s`,
+    `upper_ignition_after_meco_s`; in the state Staging from the sequence's own epochs). Measured: starship_leo
+    +7.0 s at T+30 s, +6.1..+8.3 s over the booster
     phase (+8.2 s in the bucket), +1.5 s 6 s before; Falcon 9 RTLS +7.4 s at T+30 s, +6..+9.8 s (+9 s in the bucket).
     The prediction is late by the return's cutoff propellant, which grows with the downrange speed (the value of the
     moment is used). At the flow now alone it was +0.9 s at T+30 s by cancellation but 12 s (Starship) / 37 s
@@ -1844,4 +1847,84 @@ Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure dat
   the capsule's entry interface serial through the trunk jettison.
   Hidden probe `"Return prediction probe"` (STARSIM_VERBOSE=1, STARSIM_PROBE_CAPSULE for the Crew Dragon): a ship /
   capsule return from orbit with the predictions' errors; STARSIM_DEBUG_PREDICTIONS prints every sample.
+
+## Ascent trajectory and staging
+
+Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
+`docs/superpowers/specs/2026-10-22-ascent-trajectory-staging-design.md`.
+
+### Staging sequence (Task 1)
+- **Cause:** `FlightSession::stage()` cut the booster and separated in the same tick; the engines' shutdown tail-off
+  (Raptor 0.5 s, Merlin 0.3 s) then pushed the light booster alone - right after separation it was 17 m/s (Falcon 9)
+  to 34-61 m/s (Starship) faster than the upper stage.
+- **Now** (`[stage.staging]` of the lower stage, `config::StagingConfig`; `sim::StagingSequence`,
+  `flight_session_staging.cpp`): `stage()` starts a sequence, `AutopilotState::Staging` lies between Booster and
+  UpperStage and holds the guidance's last command (no steering change while joined); every event at its own tick.
+  - Cold (Falcon 9): MECO (every group off: the tail-off acts on the joined stack), `separation_delay_s` 4.5 s [D]
+    later the separation with `separation_dv_mps` 1.0 m/s [E] (pushers), `upper_ignition_delay_s` 6.0 s [D] after it
+    the second stage lights. [D] from our CRS-35 / Starlink 15-25 webcast tables (engine icon dark -> dials split ->
+    stage 2 speed minimum less the MVac spool), see the TOML comment.
+  - Hot (Super Heavy, also depot / tanker / HLS launch through `from`): MECO keeps `run_on_engine_groups` (the centre
+    3) at minimum throttle, the ship's engines start while joined (thrust on the stack), the separation (no push)
+    comes on the tick none of them is still starting: the ship's start-up 3.0 s [E] (flight 14's table has no samples
+    from T+138.75 to T+146.25 s). The booster keeps the centre engines into its flip.
+  - Measured (`[staging]`, `test_staging_sequence.cpp`): Falcon 9 booster -1.00 m/s along track right after the
+    separation (the push); Starship booster -0.03 m/s at the separation, then -4.6 / -8.9 / -12.4 / -15.1 / -17.8 m/s
+    over the next 5 s (it falls back).
+  - Without a `[stage.staging]` (trunk, payload stacks) or with the lower stage not burning, `stage()` separates at
+    once as before. A second `stage()` during a sequence is ignored (one separation).
+  - Timeline: the hot MECO and the upper stage's ignition are recorded at their command (the ignition with the
+    serial the upper part gets); the observer skips an Ignition the session recorded within two samples. Predictions:
+    separation at MECO + `separation_after_meco_s`, the upper ignition at MECO + `upper_ignition_after_meco_s`.
+  - Diagnostics: `STARSIM_DEBUG_STAGING=1` prints both parts' rates and relative speed at the split.
+- **Booster flip:** `[stage.recovery] flip_engine_groups` (unset: the final landing set - Super Heavy's centre
+  engines, as before; `[]`: engines off, the RCS turns the stage). MECO planning takes the flip from
+  `flip_duration_s` (default 10 s [E]; Falcon 9: 50 s [D]) plus the sequence's MECO -> separation interval (hot: the
+  run-on engines burn at minimum throttle through it, as the flip engines do; starship_leo then reaches landing
+  ignition with 52.2 t for 51.0 t planned - 48.6 t without the interval).
+- **Open discrepancy - Falcon 9 flip time:** on its nitrogen thrusters the stage needs 50.8 s from separation to the
+  boostback (96 of 196 kg N2); CRS-35 lit its boostback ~14 s after the separation (speed table). The flip is
+  torque-limited: the flip runs on `return_controller_` (no rate limit; the 2 deg/s limit is the coast controller's,
+  the 5 deg/s `max_pitch_yaw_rate_radps` is the pilot's rate command), 8 x 450 N [E] at the interstage give 25.8 kNm
+  on a pitch inertia of 1.0e7 kg m2 = 2.6e-3 rad/s2 - bang-bang over ~165 deg ~65 s, the boostback lights at 15 deg
+  pointing error. A 14 s flip needs ~15x the torque, and N2 beyond the 200 kg [E] supply at Isp 70 s. No source for
+  the real thrusters' thrust was found (SpaceX / Wikipedia / spec sheets name only "nitrogen cold gas thrusters"), so
+  the [E] sizing stays and the measured 50 s is the planning value; boostback_loss_fraction 0.19 follows from it.
+- **SCvx landing (depot catch):** the depot's booster reaches ignition ~70 m and ~10 m/s across the approach (also at
+  HEAD: its coast removes a ~200 m cross miss in the air by aero steering, which leaves the cross velocity), now ~25 m
+  further out than before. Its first plan then dropped the 13 -> 5 engines 1.72 s into their 3 s start-up while the
+  plan counted the 5 at full thrust (57 % spool): the tracking fell behind, the attitude swung up to 40 deg and the catch
+  was aborted. Now ignition engines that the next set drops run until they are at thrust:
+  `DescentLimits::phase0_min_s` = the rest of their start-up (from the plan's start: re-plans less the latency), set by
+  `ScvxLandingGuidance` for start phase 0 when the next set drops engines (Super Heavy; not Falcon 9, whose next set adds
+  engines; not in an abort). Caught; starship_leo and depot re-plans 22/22 and 23/23 converged (HEAD 23/23). Tried and
+  rejected: the bound for every plan (the planner unit test from a 1.2 km ignition stalled, the Falcon 9 abort tipped
+  over), waiting with the switch in the guidance only (still aborted), modelling the spool into the later sets
+  (starship_leo re-plans stopped converging low down).
+
+### Re-baselined reference numbers (Task 1)
+- Falcon 9 `boostback_loss_fraction` 0.12 -> 0.19 [D]: identified again on the full RTLS with the 50 s RCS flip
+  (0.12 arrived at the landing burn with 10.0 t instead of 12.1 t; now 12.0 t). `test_falcon9_rtls` entry-burn
+  leverage bound 3.5 -> 4.0 t (3.6 t with the longer flip and loss).
+- Falcon 9 RTLS mission: MECO T+137 s -> separation T+141 s, entry burn T+354 s, landing burn T+428 s at 2.74 km /
+  276 m/s / 12.0 t, landed 0.00 m off at T+464 s (CRS-35 touchdown T+442 s).
+- Falcon 9 drone ship (`falcon9_asds.toml`): the deck moves from 32.9272 / -76.0990 to 32.8819 / -76.1490 deg [D]
+  (the hidden "nominal impact point" probe, now 10 s after the separation): the tail-off no longer pushes the stage
+  alone (~7 km shorter). The ASDS campaigns start 10 s after the separation instead of after MECO.
+- CRS-35 ascent check (`test_falcon9_ascent`): its MECO sample is the end of the booster phase (state Staging), not
+  the first UpperStage tick (that is the upper ignition now, 10.5 s later).
+- Falcon 9 MECO prediction at T+30 s: +7.35 -> +8.44 s (bound 8 -> 9 s): the cutoff propellant includes the 54.5 s
+  MECO -> boostback and the loss 0.19.
+- Starship booster return predictions (`[timeline]`): landing burn -5.4 -> -13.3 s and catch -16 -> -23.5 s at the
+  apex (first sample, sink near 0: ill-conditioned), unchanged from 120 s on (4.9 / 4.6 s); bounds 7 / 20 -> 15 / 25 s
+  plus 6 s within 120 s.
+- ISS window (`falcon9_crew_dragon_iss.toml`): `insertion_s` 535 -> 547 s, `insertion_arc_deg` 15.0 -> 14.78 [D] (the
+  cold sequence adds 4.5 + 6 s before the second stage burns).
+- Refuelling reference flights (`config/refuelling/reference_flights.toml`, re-measured by the slow r5 tanker_flight):
+  residue 97.2 -> 97.3 t, rendezvous 17.0 -> 15.64 t, delivered LOX / CH4 53.1 / 13.2 -> 54.1 / 13.6 t, settling gas
+  0.92 -> 0.94 t, main at catch 1.88 -> 1.19 t (the tanker's ascent and staging moved its phasing start; the
+  rendezvous cost varies 13-21 t between flights); depot and HLS numbers unchanged; `inputs_digest` a19eb2bbbaf8285c.
+  With these the flown campaign needed 14 tankers against the calculator's 13 (tanker 8: depot 547.5 t flown, 560.4 t
+  calculated): `campaign_offset_above_t` / `below_t` 2.25 / 1.7 -> 1.6 / -0.5 t [D], the mean flown - modelled delivery
+  of the flights whose phasing class flown and calculator agree on (7 above, 3 below).
 

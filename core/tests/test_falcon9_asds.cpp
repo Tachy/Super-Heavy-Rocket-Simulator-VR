@@ -396,10 +396,10 @@ TEST_CASE("Falcon 9 drone-ship mission: nominal impact point of the first stage"
         const Vec3 v = b.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), b.position_gcrf_m);
         const double gamma = std::asin(dot(math::normalized(v), math::normalized(b.position_gcrf_m)));
         const double h = frames::fixed_to_geodetic(transpose(tr.rotation) * b.position_gcrf_m).height_m;
-        std::printf("[falcon9] MECO T+%.1f s: %.1f km, %.0f km/h, flight path %.1f deg (Starlink 15-25: T+149 s, 60 km, "
+        std::printf("[falcon9] separation T+%.1f s: %.1f km, %.0f km/h, flight path %.1f deg (Starlink 15-25: T+149 s, 60 km, "
                     "~8000 km/h)\n", meco_s, h / 1e3, norm(v) * 3.6, gamma / deg);
     }
-    // After the engines' tail-off and the separation (~20 m/s, ~10 km at the impact); the coast's RCS trim moves the
+    // 10 s after the separation (staging sequence: MECO, 4.5 s coast joined, push); the coast's RCS trim moves the
     // impact point only ~0.1 km in these seconds.
     session.advance_to(session.epoch() + 10.0, 4000);
     const auto& stage = session.body(0);
@@ -412,7 +412,7 @@ TEST_CASE("Falcon 9 drone-ship mission: nominal impact point of the first stage"
     const auto geo = frames::fixed_to_geodetic(impact.position_itrf_m);
     const auto tr = earth().fixed_to_gcrf(session.epoch());
     const auto meco = frames::fixed_to_geodetic(transpose(tr.rotation) * stage.state().position_gcrf_m);
-    std::printf("[falcon9] MECO T+%.1f s; at T+%.1f s %.1f km with %.1f t; impact after %.0f s at latitude %.4f deg, "
+    std::printf("[falcon9] separation T+%.1f s; at T+%.1f s %.1f km with %.1f t; impact after %.0f s at latitude %.4f deg, "
                 "longitude %.4f deg\n", meco_s, session.mission_time_s(), meco.height_m / 1e3, stage.vehicle().propellant_kg() / 1e3, impact.time_s,
                 geo.latitude_rad / deg, geo.longitude_rad / deg);
 }
@@ -539,7 +539,7 @@ sim::LaunchSite ship_of_mission() {
                                 d.sea_height_m, d.heading_rad);
 }
 
-// The nominal drone-ship mission, flown once: the first stage 10 s after MECO (tail-off and separation done) and at
+// The nominal drone-ship mission, flown once: the first stage 10 s after the separation and at
 // its landing-burn ignition. Both campaigns start from these states.
 struct NominalReturn {
     vehicle::RigidBodyState after_meco;
@@ -659,7 +659,7 @@ TEST_CASE("Falcon 9 ASDS landing campaign: dispersions at ignition", "[gnc][falc
 
 namespace {
 
-// Spec c4: the stage 10 s after MECO with +-200 m, +-5 m/s per axis (~2.5 km of impact spread), +-5 % propellant,
+// Spec c4: the stage 10 s after the separation with +-200 m, +-5 m/s per axis (~2.5 km of impact spread), +-5 % propellant,
 // truth aero +-10 %: the coast, the entry burn and the fins bring it onto the deck. Since d1 (individual thrusters) the
 // RCS cannot translate the stage in the coast (its pods sit at one station): the entry burn removes the miss (user
 // 2026-10-14) - its ignition altitude along the track, its length and lean for the rest. Two halves (ctest runs them in

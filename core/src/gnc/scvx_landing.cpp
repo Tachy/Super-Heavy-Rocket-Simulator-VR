@@ -101,6 +101,16 @@ PlanRequest ScvxLandingGuidance::request(const DescentSnapshot& snapshot, int st
     r.settings.limits.min_mass_kg = snapshot.min_mass_kg;
     r.settings.limits.phase0_initial_spool = snapshot.phase0_spool;
     r.settings.limits.phase0_startup_s = snapshot.startup_s;
+    // ignition engines the next set drops run until they are at thrust (the rest of their start-up)
+    const auto& groups = parameters_.snapshot.phase_groups;
+    const bool drops = std::any_of(groups[0].begin(), groups[0].end(),
+                                   [&](const std::string& g) { return !contains(groups[1], g); });
+    if (start_phase == 0 && drops && !aborting_) {
+        // counted from the plan's start (a re-plan starts the latency after the snapshot)
+        const double offset_s = plan_ ? parameters_.plan_latency_s : 0.0;
+        r.settings.limits.phase0_min_s =
+            std::max((1.0 - std::min(snapshot.phase0_spool, 1.0)) * snapshot.startup_s - offset_s, 0.0);
+    }
     if (plan_) {
         r.start_offset_s = parameters_.plan_latency_s;
         r.initial = predict_on_plan(snapshot.model, *plan_, snapshot.epoch - plan_epoch_, r.start_offset_s, snapshot.initial);

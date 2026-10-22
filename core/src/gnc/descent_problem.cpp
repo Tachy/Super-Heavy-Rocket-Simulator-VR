@@ -318,7 +318,9 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
             b.add_equality(s);
             continue;
         }
-        b.add_nonnegative(AffineExpr{s}.add_constant(-limits.min_phase_s[static_cast<size_t>(p)]));
+        const double min_s = p == 0 ? std::max(limits.min_phase_s[0], limits.phase0_min_s)
+                                    : limits.min_phase_s[static_cast<size_t>(p)];
+        b.add_nonnegative(AffineExpr{s}.add_constant(-min_s));
         b.add_nonnegative(AffineExpr{limits.max_phase_s - ref.duration_s[static_cast<size_t>(p)]}.add(sub.ds[p], -duration_scale_s));
     }
     // Gentle end (see DescentLimits::terminal_thrust_margin): a cone on the last node's thrust.

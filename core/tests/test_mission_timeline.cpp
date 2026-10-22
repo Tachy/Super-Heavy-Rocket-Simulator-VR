@@ -60,6 +60,7 @@ TEST_CASE("Body serials are unique and survive reindexing", "[timeline]") {
     session.release_clamps();
     session.advance_to(t0 + 10.0);
     session.stage();
+    session.advance_to(t0 + 15.0);  // hot staging: separated once the ship's engines are at thrust
     REQUIRE(session.body_count() == 2);
 
     const uint32_t a = session.body_serial(0);
@@ -320,7 +321,7 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     // grows with the downrange speed; converging: +1.46 s 5.7 s before. (At the flow now alone: +0.87 s at T+30 s by
     // cancellation, up to 12 s off in the bucket.)
     CHECK(std::abs(*meco_at_30 - meco->epoch) <= 8.0);
-    CHECK(std::abs(*separation_at_30 - separation->epoch) <= 8.0);  // hot staging: separation in the MECO's tick
+    CHECK(std::abs(*separation_at_30 - separation->epoch) <= 8.0);  // hot staging: the ship's start-up after the MECO
     CHECK(meco_prediction.max_error_within_s(meco->epoch, 1e9) <= 9.0);
     CHECK(meco_prediction.max_error_within_s(meco->epoch, 3.0) <= 1.0);
     // PEG: -1.94 s at the first closed-loop tick, within 0.29 s over the last 120 s, +0.24 s at the end.
@@ -393,12 +394,16 @@ TEST_CASE("Booster return records boostback, landing burn and the catch", "[time
     // Measured 2026-10-22: cutoff -1.57 s at the boostback's start, 0.16 s within the last 10 s; landing burn -5.4 s at
     // the apex, within 4.8 s on the way down, 1.4 s within the last 30 s; catch (recorded at the pins' first touch):
     // -16 s at the apex (ignition plus the one-dimensional burn duration), then the SCvx plan's end, 4.3 s within the
-    // last 30 s, 0.9 s within the last 10 s.
+    // last 30 s, 0.9 s within the last 10 s. With the hot-staging sequence: landing burn -13.3 s, catch -23.5 s at the
+    // apex (its first sample, where the fall rate is near 0: the height over the sink is ill-conditioned there and moves
+    // with the apex state), unchanged from 120 s on (4.9 / 4.6 s).
     CHECK(*cutoff_prediction.first_seen - boostback->epoch <= 1.0);  // from the boostback's first second
     CHECK(cutoff_prediction.max_error_within_s(cutoff->epoch, 1e9) <= 2.0);
-    CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 7.0);
+    CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 15.0);
+    CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 120.0) <= 6.0);
     CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 30.0) <= 2.0);
-    CHECK(catch_prediction.max_error_within_s(caught->epoch, 1e9) <= 20.0);
+    CHECK(catch_prediction.max_error_within_s(caught->epoch, 1e9) <= 25.0);
+    CHECK(catch_prediction.max_error_within_s(caught->epoch, 120.0) <= 6.0);
     CHECK(catch_prediction.max_error_within_s(caught->epoch, 30.0) <= 5.0);
     CHECK(catch_prediction.max_error_within_s(caught->epoch, 10.0) <= 1.5);
     CHECK(after_contact > 0);
@@ -624,7 +629,7 @@ TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cu
     const spice::SpiceTimeConverter time;
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
     // The same deterministic flight twice: 0.5 s steps find the half second of the autopilot's MECO command (it ends the
-    // booster phase: MECO + staging), the second flight steps through it tick by tick.
+    // booster phase: MECO, the staging sequence), the second flight steps through it tick by tick.
     std::optional<time::Epoch> window;
     {
         sim::FlightSession probe(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
@@ -668,15 +673,16 @@ TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cu
     REQUIRE(meco_command);
     CHECK(std::abs(meco->epoch - *meco_command) <= sim::FlightSession::tick_s);
     CHECK(meco->epoch <= separation->epoch);
-    CHECK(meco < separation);  // listed first: our Falcon 9 stages in the MECO's tick
+    CHECK(meco < separation);  // listed first
     CHECK(thrust_after_command_n > 0.0);
     CHECK(meco->body_name == "Falcon 9 Block 5 first stage");
     if (std::getenv("STARSIM_VERBOSE") && meco_at_30) {
         std::printf("  [prediction] MECO at T+30 s: error %+.2f s\n", *meco_at_30 - meco->epoch);
     }
     REQUIRE(meco_at_30);
-    // measured 2026-10-22: +7.35 s (the return's cutoff propellant grows; +9.8 s at most, +9 s in the bucket)
-    CHECK(std::abs(*meco_at_30 - meco->epoch) <= 8.0);
+    // measured 2026-10-22: +7.35 s (the return's cutoff propellant grows; +9.8 s at most, +9 s in the bucket); +8.44 s
+    // with the staging sequence (the 54.5 s MECO -> boostback of the RCS flip and boostback_loss_fraction 0.19)
+    CHECK(std::abs(*meco_at_30 - meco->epoch) <= 9.0);
     const uint32_t booster = meco->body_serial;
     size_t mecos = 0;
     std::optional<time::Epoch> next_start;  // the booster's next burn

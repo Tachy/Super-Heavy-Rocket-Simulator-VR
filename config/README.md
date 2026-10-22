@@ -7,7 +7,7 @@ propellants.toml        propellant combinations (densities, nominal mixture rati
                         `<oxidizer|fuel>_boiling_point_k`, `_latent_heat_j_kg`, `_surface_tension_n_m`, all or
                         none - absent: storable)
 engines/<id>.toml       one engine type (performance, throttle, gimbal, mass, timing)
-vehicles/<id>.toml      one vehicle version: stages, tanks, engine groups, aero, separation
+vehicles/<id>.toml      one vehicle version: stages, tanks, engine groups, aero, staging
 aero/<id>.csv           aerodynamic coefficient tables referenced by vehicles
 crew_escape/<id>.toml   ejection seats of a crewed ship return (referenced by missions; ship data untouched)
 ```
@@ -115,8 +115,15 @@ flow separation (vacuum engines).
   `boostback_engine_groups`, `entry_engine_groups` (group ids of this stage), `return_flight_time_s` (boostback start
   to touchdown), `entry_burn_altitude_m` / `entry_burn_delta_v_mps` / `entry_burn_throttle` (entry burn lit while
   descending below that altitude, retrograde, for that delta-v), `landing_engine_phases` (3 group lists: ignition,
-  divert, final set), `landing_phase_throttles` (3 design throttles that time the ignition) and
-  `landing_switch_sink_mps` (2 `[min, max]` sink windows of the engine switches).
+  divert, final set), `landing_phase_throttles` (3 design throttles that time the ignition),
+  `landing_switch_sink_mps` (2 `[min, max]` sink windows of the engine switches) and `flip_engine_groups` (the flip
+  after separation at minimum throttle; left out: the final landing set; `[]`: engines off, the RCS turns the stage).
+- `[stage.staging]` (a lower stage; left out: `stage()` separates at once): the staging sequence to the stage above.
+  `kind = "cold"`: MECO cuts every engine (the tail-off acts on the joined stack), `separation_delay_s` later the
+  separation with `separation_dv_mps` (pushers: relative speed of the parts), `upper_ignition_delay_s` after it the
+  upper stage lights. `kind = "hot"`: MECO keeps `run_on_engine_groups` lit at minimum throttle, the stage above lights
+  while joined and separates (no push) on the tick its engines are at thrust; delays and push are not allowed.
+  Stages taken with `from` keep the source's sequence.
 - `[stage.recovery.drone_ship]`: the return to a drone ship; its keys override the profile above (left out: taken from
   it). `boostback = false`: no flip or boostback (the stage coasts on its ascent arc). `landing_phase_max_tilt_deg`
   (3 values, either table): planned thrust tilt limit per landing engine set (default: Super Heavy's 25 / 20 / 10).

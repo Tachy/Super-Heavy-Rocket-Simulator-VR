@@ -126,9 +126,25 @@ std::optional<double> booster_burn_time_s(const FlightSession& s, const vehicle:
     return std::nullopt;
 }
 
+// The upper stage's ignition in a staging sequence: named after the stage above the stack's lowest and belonging to the
+// body it becomes at the separation (the next serial) - unless it is the separated upper part `index` itself.
+void add_upper_ignition(const FlightSession& s, Collector& c, size_t index, time::Epoch epoch, bool joined) {
+    if (!(epoch - s.epoch() > 0.0)) return;
+    auto e = mission_event(s, index, MissionEventKind::Ignition);
+    if (joined) {
+        const auto& stages = s.body(index).vehicle().stages();
+        if (stages.size() < 2) return;
+        e.body_serial = s.next_body_serial();
+        e.body_name = stages[1].config.name;
+    }
+    e.epoch = epoch;
+    e.predicted = true;
+    c.push(std::move(e));
+}
+
 // Ascent: the booster's cutoff by the autopilot's own criterion run forward (the propellant above the cutoff
-// propellant, burned along the throttle schedule; the autopilot stages in the MECO's tick), the upper stage's by the
-// closed loop.
+// propellant, burned along the throttle schedule), the staging sequence's separation and upper-stage ignition from it
+// (StagingSequence), the upper stage's cutoff by the closed loop.
 void add_ascent(const FlightSession& s, Collector& c) {
     const size_t i = s.controlled_index();
     const auto state = s.autopilot().state;
@@ -143,7 +159,19 @@ void add_ascent(const FlightSession& s, Collector& c) {
         if (!burn_s) return;
         const auto meco = s.epoch() + *burn_s;
         c.add_for(i, MissionEventKind::Meco, meco);
-        c.add_for(i, MissionEventKind::StageSeparation, meco);
+        c.add_for(i, MissionEventKind::StageSeparation, meco + separation_after_meco_s(vehicle));
+        if (booster.config.staging) add_upper_ignition(s, c, i, meco + upper_ignition_after_meco_s(vehicle), true);
+    } else if (state == AutopilotState::Staging) {
+        const auto& seq = s.staging();
+        if (!seq) return;
+        if (!seq->separation_epoch) {  // joined: the controlled body is the stack
+            const auto& vehicle = s.body(i).vehicle();
+            const auto upper_ignition = seq->meco_epoch + upper_ignition_after_meco_s(vehicle);
+            c.add_for(i, MissionEventKind::StageSeparation, seq->meco_epoch + separation_after_meco_s(vehicle));
+            if (!seq->upper_ignition_epoch) add_upper_ignition(s, c, i, upper_ignition, true);
+        } else if (!seq->upper_ignition_epoch) {  // cold, separated: the controlled body is the upper stage
+            add_upper_ignition(s, c, i, *seq->separation_epoch + seq->config.upper_ignition_delay_s, false);
+        }
     } else if (state == AutopilotState::UpperStage) {
         if (const auto* g = s.ascent_guidance(); g && g->cutoff_epoch()) {
             c.add_for(i, MissionEventKind::Seco, *g->cutoff_epoch());

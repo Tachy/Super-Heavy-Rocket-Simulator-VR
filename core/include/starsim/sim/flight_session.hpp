@@ -18,6 +18,7 @@
 #include "starsim/sim/mission_timeline.hpp"
 #include "starsim/mission/tanker_reserve.hpp"
 #include "starsim/sim/propellant_transfer.hpp"
+#include "starsim/sim/staging_sequence.hpp"
 #include "starsim/sim/station_start.hpp"
 #include <limits>
 #include <map>
@@ -81,7 +82,9 @@ enum class ControlMode {
 // Rendezvous: a phasing flight to a station between its burns (FlightSession::plan_rendezvous). Proximity: the
 // proximity operations from Waypoint 0 to contact (FlightSession::start_proximity).
 enum class AutopilotState {
-    Off, PreLaunch, Booster, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar, Rendezvous, Proximity, Departure
+    // Staging: MECO -> separation -> upper-stage ignition (FlightSession::stage(), StagingSequence)
+    Off, PreLaunch, Booster, Staging, UpperStage, PayloadSeparation, Orbit, Burn, Return, Lunar, Rendezvous, Proximity,
+    Departure
 };
 
 const char* to_string(AutopilotState state);
@@ -910,7 +913,12 @@ public:
     void ignite();             // start all engine groups of the lowest stage that still has engines
     void cutoff();             // stop all engines
     void release_clamps();
-    void stage();              // separate the lowest stage; the upper part becomes the controlled body
+    // Separate the lowest stage; the upper part becomes the controlled body. A lower stage under thrust with a
+    // [stage.staging] runs its sequence over the next ticks (MECO now; separation and upper-stage ignition at their own
+    // ticks, see StagingSequence); without one, or with its engines off, it separates now. Ignored while a sequence runs.
+    void stage();
+    // The staging sequence under way (none: no staging in progress).
+    const std::optional<StagingSequence>& staging() const { return staging_; }
 
     size_t body_count() const { return bodies_.size(); }
     // Stable identity of body `index`: unique for the session lifetime, starts at 1, never reused (not even after
@@ -992,6 +1000,15 @@ private:
     double crew_height_m(const vehicle::FlightBody& body) const;  // above the flat site ground
 
     vehicle::VehicleCommand command_for(size_t index, double ambient_pressure_pa) const;
+    vehicle::VehicleCommand steering_command_for(size_t index, double ambient_pressure_pa) const;
+    // Staging sequence (flight_session_staging.cpp): the steps due this tick; the stack index split at the lowest stage
+    // (push dv_mps), the upper part a new body (the index returned) with its engines as commanded; the lowest stage of
+    // `flying` with main engines lit; the run-on / upper-stage throttles of the sequence in a command.
+    void run_staging();
+    size_t separate_lowest_stage(size_t index, double dv_mps);
+    static void light_lowest_engines(Flying& flying);
+    void apply_staging_throttle(size_t index, vehicle::VehicleCommand& command) const;
+    std::optional<size_t> index_of_serial(uint32_t serial) const;
     void run_autopilot();
     void run_return_guidance(Flying& flying);
     void run_ship_landing(Flying& flying);
@@ -1127,6 +1144,7 @@ private:
     double gm_earth_;
     AutopilotStatus autopilot_;
     std::optional<double> booster_cutoff_propellant_kg_;  // see booster_cutoff_propellant_kg()
+    std::optional<StagingSequence> staging_;               // see staging()
     std::unique_ptr<gnc::AscentGuidance> guidance_;
     std::optional<gnc::BurnExecutor> burn_;
     BurnConfiguration burn_config_;

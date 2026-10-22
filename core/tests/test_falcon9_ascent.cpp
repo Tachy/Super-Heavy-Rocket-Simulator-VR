@@ -97,7 +97,9 @@ Ascent fly(const gnc::PitchProgram& program, double payload = payload_kg, double
                         dot(st.velocity_gcrf_mps, session.ascent_guidance()->target_plane_normal_gcrf()),
                         dot(st.position_gcrf_m, session.ascent_guidance()->target_plane_normal_gcrf()) / 1000.0);
         }
-        if (a.meco_s < 0.0 && session.autopilot().state == sim::AutopilotState::UpperStage) {
+        // MECO: the booster phase ends (the staging sequence follows)
+        if (a.meco_s < 0.0 && session.autopilot().state != sim::AutopilotState::Booster &&
+            session.autopilot().state != sim::AutopilotState::PreLaunch) {
             a.meco_s = session.mission_time_s();
             const auto tr = earth.fixed_to_gcrf(session.epoch());
             a.meco_speed_mps = norm(st.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), st.position_gcrf_m));

@@ -90,6 +90,8 @@ add_library(starsim_core STATIC
     src/sim/flight_session_capsule.cpp
     src/sim/flight_session_command.cpp
     src/sim/flight_session_return.cpp
+    src/sim/flight_session_staging.cpp
+    src/sim/staging_sequence.cpp
     src/sim/flight_session_crew_escape.cpp
     src/sim/crew_escape.cpp
     src/sim/mission_event_observer.cpp

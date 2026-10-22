@@ -75,7 +75,7 @@ TEST_CASE("A Falcon 9 MECO plan keeps the entry burn's propellant", "[gnc][falco
     // velocity (311 s): ~1.6 t (the CRS-35 gauge: 3.5 -> 3.1 % of 425 t = 1.7 t), more after the boostback's leverage.
     std::printf("[falcon9] MECO propellant with entry burn %.1f t, without %.1f t\n", a / 1e3, b / 1e3);
     CHECK(a - b > 1500.0);
-    CHECK(a - b < 3500.0);
+    CHECK(a - b < 4000.0);  // 3.6 t with the 50 s RCS flip and boostback_loss_fraction 0.19 (staging sequence)
 }
 
 TEST_CASE("A falling Falcon 9 stage flies its entry burn on the centre engine", "[gnc][falcon9][rtls]") {

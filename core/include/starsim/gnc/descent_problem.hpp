@@ -95,6 +95,11 @@ struct DescentLimits {
     // keeps the full pressure-loss term meanwhile (a few kg too much; documented simplification).
     double phase0_initial_spool = 1.0;
     double phase0_startup_s = 0.0;
+    // Phase 0 lasts at least this long, fresh plans and re-plans alike (0: none): the rest of the start-up of ignition
+    // engines that the next set drops - an engine is not switched off before it is at thrust (Super Heavy 13 -> 5: a
+    // plan dropping 8 engines 1.7 s into their 3 s start counted the other 5 at full thrust, the tracking fell behind
+    // and the depot booster's catch failed). Set by ScvxLandingGuidance.
+    double phase0_min_s = 0.0;
     // Re-plans: the thrust at the start (the measured thrust, > 0) can only change at the engines' throttle rate over
     // this window - the time until the plan takes effect. Without it a re-plan from a state slightly off its cones
     // brakes at once, within the latency the engines cannot follow, and the next plan finds the booster further off.

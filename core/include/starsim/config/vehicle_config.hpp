@@ -277,11 +277,30 @@ struct ReturnProfile {
     std::vector<double> landing_phase_max_tilt_rad;               // planned thrust tilt limit per set (gimbal authority)
     std::vector<std::pair<double, double>> landing_switch_sink_mps;  // per engine switch: sink window {min, max}
     double return_flight_time_s = 0.0;   // boostback start -> touchdown (Lambert arc)
+    double flip_duration_s = 0.0;        // MECO planning: separation -> boostback ignition (0: the guidance default)
     double boostback_loss_fraction = -1.0;  // MECO planning: boostback delta-v beyond the Lambert arc (< 0: default)
     double rcs_propellant_kg = -1.0;        // MECO planning: main-tank RCS gas spent before landing-burn ignition (< 0: default)
     double entry_burn_altitude_m = 0.0;  // entry burn ignition while descending (0: none)
     double entry_burn_delta_v_mps = 0.0;
     double entry_burn_throttle = 0.0;
+    // Engine groups the flip after separation runs on, at minimum throttle (gimbal authority); unset: the final landing
+    // set (Super Heavy's centre engines); empty: the engines stay off and the RCS turns the stage (Falcon 9).
+    std::optional<std::vector<std::string>> flip_engine_groups;
+};
+
+// [stage.staging] of a lower stage: how the stage above it separates (ascent trajectory and staging, Task 1).
+//  Cold (Falcon 9): MECO - every group off, the tail-off acts on the joined stack - then separation_delay_s later the
+//    separation with a push of separation_dv_mps (relative speed of the parts), upper_ignition_delay_s after it the
+//    upper stage's ignition.
+//  Hot (Super Heavy): MECO with run_on_engine_groups kept lit at minimum throttle, the upper stage's engines start
+//    while joined; the separation (no push) on the tick they are all at thrust. The delays are unused (0).
+struct StagingConfig {
+    enum class Kind { Hot, Cold };
+    Kind kind = Kind::Cold;
+    double separation_delay_s = 0.0;
+    double upper_ignition_delay_s = 0.0;
+    double separation_dv_mps = 0.0;
+    std::vector<std::string> run_on_engine_groups;  // group ids of this stage (no stage prefix)
 };
 
 // Surface optics and wall heat path of a hull zone (refuelling r2 boil-off).
@@ -335,7 +354,8 @@ struct StageConfig {
     LandingLegConfig landing_legs;
     double radiation_pressure_coefficient = 1.3;  // Cr for solar radiation pressure
     RcsConfig rcs;                                 // reaction control (no thrusters: none)
-    std::string separation;
+    // [stage.staging]: the staging sequence to the stage above; none: stage() separates at once (a trunk, a payload).
+    std::optional<StagingConfig> staging;
     bool nose_cone = false;  // a hinged nose cone (Crew Dragon): thrusters behind it fire only while it is open
     bool payload = false;    // a payload vehicle's stage (config::stack_payload): its RCS waits until it flies alone
     std::vector<TankConfig> tanks;

@@ -356,8 +356,8 @@ godot::Dictionary autopilot_status(const sim::FlightSession& session) {
     d["time_to_go_s"] = ap.guidance.time_to_go_s;
     const bool burning = ap.state == sim::AutopilotState::Burn;
     d["direction"] = to_godot(burning ? ap.burn.direction_gcrf : ap.guidance.thrust_direction_gcrf);
-    d["has_direction"] = ap.state == sim::AutopilotState::Booster || ap.state == sim::AutopilotState::UpperStage ||
-                         burning;
+    d["has_direction"] = ap.state == sim::AutopilotState::Booster || ap.state == sim::AutopilotState::Staging ||
+                         ap.state == sim::AutopilotState::UpperStage || burning;
     d["settling"] = session.settling();  // refuelling f3: the cold-gas push (autopilot or manual) is on
     d["burn_abort_reason"] = godot::String::utf8(session.burn_abort_reason().c_str());
     if (burning) {

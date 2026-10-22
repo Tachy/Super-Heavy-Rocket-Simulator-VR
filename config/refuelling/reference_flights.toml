@@ -6,7 +6,7 @@
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
-inputs_digest = "c13ac23c6d7c9927"  # external view: display names added only (no physics), no re-measure
+inputs_digest = "a19eb2bbbaf8285c"  # ascent staging Task 1: staging sequence, tanker re-measured (depot / HLS unchanged)
 
 [depot]
 mission = "depot_launch"
@@ -19,14 +19,16 @@ drag_decay_factor = 1.076
 [tanker]
 mission = "tanker_flight"
 dry_mass_t = 209.0                 # [D] the configured tanker (starship_tanker) the numbers belong to
-residue_after_ascent_t = 97.2      # [D] f2 2026-10-21: main tanks at the Rendezvous mark (after the raise to the window's orbit)
-rendezvous_t = 17.0                # [D] f2 2026-10-21: Rendezvous -> Docked: burns, RCS gas (+ settling pushes), boil-off
-delivered_oxidizer_t = 53.1        # [D] f2 2026-10-21: into the depot
-delivered_fuel_t = 13.2            # [D] f2 2026-10-21
+residue_after_ascent_t = 97.3      # [D] staging 2026-10-23 (f2 2026-10-21: 97.2): main tanks at the Rendezvous mark
+                                   # (after the raise to the window's orbit)
+rendezvous_t = 15.64               # [D] staging 2026-10-23 (f2: 17.0; it varies 13-21 t): Rendezvous -> Docked: burns,
+                                   # RCS gas (+ settling pushes), boil-off
+delivered_oxidizer_t = 54.1        # [D] staging 2026-10-23 (f2: 53.1): into the depot
+delivered_fuel_t = 13.6            # [D] staging 2026-10-23 (f2: 13.2)
 chilldown_t = 0.42                 # [D] vented
-settling_gas_t = 0.92              # [D] f2 2026-10-21: the transfer's settling push (r4)
+settling_gas_t = 0.94              # [D] staging 2026-10-23 (f2: 0.92): the transfer's settling push (r4)
 main_at_undock_t = 12.6            # [D] the reserve kept for the return
-main_at_catch_t = 1.88             # [D] f2 2026-10-21: what the reserve left over
+main_at_catch_t = 1.19             # [D] staging 2026-10-23 (f2: 1.88): what the reserve left over
 dry_mass_sensitivity = 0.99        # [D] r5 probes: ship dry -10 / -20 t -> residue +9.9 / +19.8 t
 # [D] f2 2026-10-21: the tanker with 99.7 t main in a 24 h free coast (the phasing flight between its burns), the flown
 # heat balance: 3.38 t/day at 150 x 190 km, 3.65 t/day at 220 x 260 km. The orbit average at a fixed LVLH attitude
@@ -37,8 +39,11 @@ phasing_boil_off_t_per_day = 3.5
 # model of each flown window (reference delivery + phasing boil-off difference + phasing cost difference): below the
 # depot 5 flights +0.6..+3.2 t, above 9 flights +1.0..+3.7 t (sd ~1 t per flight, the rendezvous varies 13-21 t).
 # The means calibrate the calculator per phasing orbit class (user decision 2026-10-21, fill tolerance stays 2 %).
-campaign_offset_below_t = 1.7
-campaign_offset_above_t = 2.25
+# [D] staging 2026-10-23: re-calibrated after the tanker re-measure (reference delivery +1.4 t): the flown campaign
+# against the calculator's model of the flown window, flights whose class both agree on: above 7 flights -3.0..+2.6 t
+# (mean -0.66 t on 2.25), below 3 flights -2.7..-1.7 t (mean -2.23 t on 1.7).
+campaign_offset_below_t = -0.5
+campaign_offset_above_t = 1.6
 # [D] f2 2026-10-22: the depot's velocity gain from a tanker transfer's settling push (prograde: the pair flies nose
 # along +V-bar): the 14 flown transfers' impulse / docked pair mass, 0.527-0.566 m/s (the push is 1e-4 g x its time).
 # The calculator raises the depot's mean orbit by it (2 a dv / v ~ 0.9 km).

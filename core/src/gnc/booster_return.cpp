@@ -71,6 +71,7 @@ BoosterReturnParameters booster_return_parameters(const std::string& stage_id, c
         p.landing_divert_groups = ids(profile.landing_engine_phases[1]);
         p.landing_groups = ids(profile.landing_engine_phases[2]);
     }
+    p.flip_groups = profile.flip_engine_groups ? ids(*profile.flip_engine_groups) : p.landing_groups;
     if (profile.landing_phase_throttles.size() == 3) {
         p.scvx.ignition_throttle = profile.landing_phase_throttles[0];
         p.scvx.divert_throttle = profile.landing_phase_throttles[1];
@@ -90,6 +91,7 @@ BoosterReturnParameters booster_return_parameters(const std::string& stage_id, c
         p.scvx.switch_speed_mps = 0.5 * (switches[1].min_sink_mps + switches[1].max_sink_mps);
     }
     if (profile.return_flight_time_s > 0.0) p.flight_time_s = profile.return_flight_time_s;
+    if (profile.flip_duration_s > 0.0) p.flip_duration_s = profile.flip_duration_s;
     if (profile.boostback_loss_fraction >= 0.0) p.boostback_loss_fraction = profile.boostback_loss_fraction;
     if (profile.rcs_propellant_kg >= 0.0) p.rcs_propellant_kg = profile.rcs_propellant_kg;
     if (profile.entry_burn_altitude_m > 0.0) {
@@ -190,8 +192,8 @@ ReturnCommand BoosterReturnGuidance::update(const vehicle::FlightBody& body, con
 
         const double pointing = std::acos(std::clamp(dot(body_axis, cmd.axis_gcrf), -1.0, 1.0));
         if (phase_ == ReturnPhase::Flip) {
-            // Turn with the centre engines idling (gimbal authority), then go to full boostback thrust.
-            cmd.run_groups = parameters_.landing_groups;
+            // Turn with the flip engines idling (gimbal authority; none: on the RCS), then go to full boostback thrust.
+            cmd.run_groups = parameters_.flip_groups;
             cmd.throttle = 0.0;  // limited to the minimum throttle by the engines
             if (pointing < parameters_.flip_tolerance_rad) phase_ = ReturnPhase::Boostback;
         } else {

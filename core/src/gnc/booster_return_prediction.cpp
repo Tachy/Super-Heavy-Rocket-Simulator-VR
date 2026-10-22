@@ -248,7 +248,7 @@ double BoosterReturnGuidance::meco_propellant_kg(const vehicle::Vehicle& stack, 
 
     double flip_kg = 0.0;
     for (const auto& e : booster.engines) {
-        const auto& groups = parameters.landing_groups;
+        const auto& groups = parameters.flip_groups;
         if (e.starved || std::find(groups.begin(), groups.end(), e.group_id) == groups.end()) continue;
         flip_kg += parameters.flip_duration_s * e.performance->mass_flow_kgps(e.performance->config().throttle_min);
     }

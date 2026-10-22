@@ -70,6 +70,7 @@ const char* to_string(AutopilotState state) {
         case AutopilotState::Off: return "aus";
         case AutopilotState::PreLaunch: return "Startvorbereitung";
         case AutopilotState::Booster: return "Booster";
+        case AutopilotState::Staging: return "Stufentrennung";
         case AutopilotState::UpperStage: return "Oberstufe";
         case AutopilotState::PayloadSeparation: return "Nutzlasttrennung";
         case AutopilotState::Orbit: return "Orbit erreicht";
@@ -138,6 +139,7 @@ void FlightSession::place_in_orbit(const config::VehicleConfig& config, const ma
     epoch_ = epoch;
     launch_epoch_ = epoch;
     autopilot_ = {};
+    staging_.reset();
     burn_.reset();
     attitude_mode_ = {};
     payload_separation_.reset();  // d2 minor: an earlier flight's release and cone timer do not carry over
@@ -274,18 +276,23 @@ void FlightSession::run_autopilot() {
             double reserve_kg = booster.config.reserve_propellant_kg;
             if (booster.config.landing_propellant_kg > 0.0 && returns_after_staging(body.vehicle())) {
                 const auto& s = body.state();
+                // the flip starts at the separation: the staging sequence's MECO -> separation interval goes with it
+                // (hot staging: the run-on engines burn at minimum throttle through it, as the flip engines do)
+                auto parameters = return_parameters(booster.config);
+                parameters.flip_duration_s += separation_after_meco_s(body.vehicle());
                 reserve_kg = gnc::BoosterReturnGuidance::meco_propellant_kg(
                     body.vehicle(), {s.position_gcrf_m, s.velocity_gcrf_mps}, earth_, epoch_,
-                    return_site(body.vehicle()), return_parameters(booster.config),
-                    booster.config.landing_propellant_kg);
+                    return_site(body.vehicle()), parameters, booster.config.landing_propellant_kg);
             }
             booster_cutoff_propellant_kg_ = reserve_kg;
             if (propellant <= reserve_kg) {
-                stage();  // MECO + hot staging; the upper stage becomes the controlled body
-                autopilot_.state = AutopilotState::UpperStage;
+                stage();  // MECO: the staging sequence (state Staging) or, without one, the separation now
+                if (autopilot_.state == AutopilotState::Booster) autopilot_.state = AutopilotState::UpperStage;
             }
             break;
         }
+        case AutopilotState::Staging:
+            break;  // run_staging steps the sequence; the stack holds the guidance's last command
         case AutopilotState::UpperStage:
             if (autopilot_.guidance.cutoff) {
                 cutoff();
@@ -716,6 +723,7 @@ void FlightSession::apply_station_impulses() {
 
 void FlightSession::reset_mission_state() {
     autopilot_ = {};
+    staging_.reset();
     guidance_.reset();
     burn_.reset();
     ship_return_ = false;
@@ -763,9 +771,10 @@ double FlightSession::coast_allowance_s() const {
     if (bodies_.empty()) return 0.0;
     const bool hold = pad_hold();
     const bool guided = (autopilot_.state == AutopilotState::PreLaunch && !hold) ||
-                        autopilot_.state == AutopilotState::Booster || autopilot_.state == AutopilotState::UpperStage ||
+                        autopilot_.state == AutopilotState::Booster || autopilot_.state == AutopilotState::Staging ||
+                        autopilot_.state == AutopilotState::UpperStage ||
                         autopilot_.state == AutopilotState::PayloadSeparation;
-    if (guided) return 0.0;
+    if (guided || staging_) return 0.0;  // a manual staging sequence is ticked too
     if (attitude_mode_active()) return 0.0;  // pulsed RCS hold: ticked
     if (reboost_ && autopilot_.state != AutopilotState::Burn) return 0.0;  // f2: the next reboost step needs a tick
     if (autopilot_.state == AutopilotState::Return &&
@@ -916,6 +925,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         report_gas_ingestion();
         if (iss_mission_) run_iss_mission();  // also with the autopilot Off / Orbit (ISS i6)
         if (reboost_) run_reboost();          // refuelling f2: the station's burns
+        if (staging_) run_staging();          // before the autopilot: the sequence may end its state Staging
         if (autopilot_.state != AutopilotState::Off && autopilot_.state != AutopilotState::Orbit &&
             !bodies_.empty()) {
             run_autopilot();
@@ -1044,7 +1054,10 @@ void FlightSession::ignite() {
         docking_status_ = "Zündung nicht möglich: angedockt";
         return;
     }
-    auto& flying = bodies_[controlled_];
+    light_lowest_engines(bodies_[controlled_]);
+}
+
+void FlightSession::light_lowest_engines(Flying& flying) {
     for (const auto& stage : flying.body->vehicle().stages()) {
         bool lit = false;
         for (const auto& e : stage.engines) {
@@ -1161,44 +1174,6 @@ bool FlightSession::pad_hold() const {
                                      [](const auto& g) { return g.second; });
     return flying.body->clamped() && !running && !flying.body->vehicle().any_engine_producing_thrust() &&
            epoch_ < *scheduled_liftoff_ - liftoff_ignition_lead_s();
-}
-
-void FlightSession::stage() {
-    if (bodies_.empty() || bodies_[controlled_].body->vehicle().stages().size() < 2) return;
-    if (docking_busy()) {  // the stack is held by the docking mechanism (ISS i5)
-        docking_status_ = "Stufentrennung nicht möglich: angedockt";
-        return;
-    }
-    auto& lower = bodies_[controlled_];
-    // Hot staging: the stack's first stage (it lifted off with this serial) separates under thrust - its main engine
-    // cutoff is commanded now (the centre engines may run on into the boostback flip, so the observer sees no cutoff).
-    if (lower.body->vehicle().any_engine_producing_thrust() &&
-        has_recorded(timeline_, MissionEventKind::Liftoff, lower.serial) &&
-        !has_recorded(timeline_, MissionEventKind::Meco, lower.serial)) {
-        record_event(MissionEventKind::Meco, controlled_);
-    }
-    auto upper = lower.body->separate(1);
-    for (auto& [group, run] : lower.running_groups) run = false;  // booster engines off after separation
-    lower.commanded = false;  // the MECO above (or the engines were off): no further cutoff event for this command
-    lower.commanded_with_upper = false;
-    lower.commanded_ascent_upper = false;
-    record_event(MissionEventKind::StageSeparation, controlled_);  // the lower part, before the upper is a body
-    lower.body->set_ground_height(launch_site_.height_m);  // separated stages: the real ground, not the mount
-    upper->set_ground_height(launch_site_.height_m);
-    if (returns_after_staging(lower.body->vehicle())) {
-        const auto landing = return_site(lower.body->vehicle());
-        lower.body->set_ground_height(landing.height_m);
-        lower.body->set_accelerometer(true);  // the return guidance estimates the drag online
-        lower.return_guidance = std::make_unique<gnc::BoosterReturnGuidance>(
-            landing, return_parameters(lower.body->vehicle().stages().front().config));
-        lower.return_guidance->set_realtime(realtime_planning_);
-    }
-    Flying flying = new_flying(std::move(upper));
-    bodies_.push_back(std::move(flying));
-    controlled_ = bodies_.size() - 1;
-    clear_rendezvous_target();  // the target belongs to the controlled body's port
-    reset_rendezvous();
-    ignite();  // hot staging: the upper stage lights immediately
 }
 
 ReturnResult FlightSession::ship_return_result(size_t index) const {

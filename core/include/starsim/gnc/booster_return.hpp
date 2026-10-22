@@ -34,6 +34,9 @@ struct BoosterReturnParameters {
     // losses) and continues on the centre engines once these can finish it at the design throttle.
     std::vector<std::string> landing_ignition_groups{"booster/center", "booster/divert", "booster/middle"};
     std::vector<std::string> landing_groups{"booster/center"};
+    // The flip after separation turns on these at minimum throttle (gimbal authority; booster_return_parameters: the
+    // profile's flip_engine_groups, else landing_groups); empty: engines off, the RCS turns the stage (Falcon 9).
+    std::vector<std::string> flip_groups{"booster/center"};
     // SCvx landing (V3 baseline 13 -> 5 -> 3): the divert set between the ignition and the centre engines.
     std::vector<std::string> landing_divert_groups{"booster/center", "booster/divert"};
     // Entry burn (Falcon 9; Super Heavy has none): lit while descending below entry_altitude_m, retrograde (relative
@@ -192,7 +195,7 @@ public:
     // ignition; the ascent autopilot cuts off when the booster is down to it. Without a boostback: the run-down and the
     // entry burn only (the site does not matter). `stack` is the vehicle before
     // separation (its lowest stage is the booster) at `state_gcrf`. Sums the run-down of the engines running now,
-    // the flip (flip_duration_s on the landing engines at minimum throttle, two-body coast) and the boostback: the
+    // the flip (flip_duration_s on the flip engines at minimum throttle, two-body coast) and the boostback: the
     // rocket equation (vacuum exhaust velocity) on the delta-v of the Lambert arc from the state after the flip to
     // the site at the end of flight_time_s, as the guidance flies it, plus boostback_loss_fraction (drag shift of the
     // aim point, finite burn). Without a Lambert arc only the landing propellant and the flip are counted.

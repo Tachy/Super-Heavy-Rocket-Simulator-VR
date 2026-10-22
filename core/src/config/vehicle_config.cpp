@@ -268,6 +268,37 @@ void read_propellant_transfer(const Document& doc, const toml::table& t, StageCo
     }
 }
 
+// [stage.staging] of stage `s` (its engine groups loaded).
+StagingConfig load_staging(const Document& doc, const toml::table& t, const StageConfig& s) {
+    StagingConfig c;
+    const auto kind = doc.text(t, "kind");
+    if (kind != "hot" && kind != "cold") doc.fail("stage.staging.kind must be 'hot' or 'cold'");
+    c.kind = kind == "hot" ? StagingConfig::Kind::Hot : StagingConfig::Kind::Cold;
+    c.separation_delay_s = doc.number_or(t, "separation_delay_s", 0.0);
+    c.upper_ignition_delay_s = doc.number_or(t, "upper_ignition_delay_s", 0.0);
+    c.separation_dv_mps = doc.number_or(t, "separation_dv_mps", 0.0);
+    if (c.separation_delay_s < 0.0 || c.upper_ignition_delay_s < 0.0 || c.separation_dv_mps < 0.0) {
+        doc.fail("stage.staging: delays and separation_dv_mps must not be negative");
+    }
+    if (const auto* groups = t["run_on_engine_groups"].as_array()) {
+        for (const auto& node : *groups) {
+            const auto id = node.value<std::string>().value_or("");
+            const bool known = std::any_of(s.engine_groups.begin(), s.engine_groups.end(),
+                                           [&](const auto& g) { return g.id == id; });
+            if (!known) doc.fail("stage.staging.run_on_engine_groups: '" + id + "' is not an engine group of stage '" + s.id + "'");
+            c.run_on_engine_groups.push_back(id);
+        }
+    }
+    if (c.kind == StagingConfig::Kind::Hot &&
+        (c.separation_delay_s != 0.0 || c.upper_ignition_delay_s != 0.0 || c.separation_dv_mps != 0.0)) {
+        doc.fail("stage.staging: hot staging separates at the upper stage's thrust (no delays, no push)");
+    }
+    if (c.kind == StagingConfig::Kind::Cold && !c.run_on_engine_groups.empty()) {
+        doc.fail("stage.staging: cold staging cuts every engine at MECO (no run_on_engine_groups)");
+    }
+    return c;
+}
+
 StageConfig load_stage(const Document& doc, const toml::table& t) {
     StageConfig s;
     s.id = doc.text(t, "id");
@@ -288,7 +319,6 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     s.fairing_mass_kg = doc.number_or(t, "fairing_mass_kg", 0.0);
     s.jettison_after_separation_kg = doc.number_or(t, "jettison_after_separation_kg", 0.0);
     s.radiation_pressure_coefficient = doc.number_or(t, "radiation_pressure_coefficient", 1.3);
-    s.separation = doc.text_or(t, "separation");
     s.nose_cone = t["nose_cone"].value_or(false);
 
     if (auto tanks = t["tank"].as_array()) {
@@ -571,6 +601,7 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     for (const auto& thruster : s.rcs.thrusters) {
         if (thruster.behind_nose_cone && !s.nose_cone) doc.fail("stage.rcs: behind_nose_cone needs nose_cone = true on the stage");
     }
+    if (const auto* staging = t["staging"].as_table()) s.staging = load_staging(doc, *staging, s);
     if (auto recovery = t["recovery"].as_table()) {
         s.reserve_propellant_kg = doc.number_or(*recovery, "reserve_propellant_kg", 0.0);
         s.landing_propellant_kg = doc.number_or(*recovery, "landing_propellant_kg", 0.0);
@@ -647,11 +678,15 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 if (p.landing_switch_sink_mps.size() != 2) doc.fail("landing_switch_sink_mps must list 2 switch windows");
             }
             p.return_flight_time_s = doc.number_or(table, "return_flight_time_s", p.return_flight_time_s);
+            p.flip_duration_s = doc.number_or(table, "flip_duration_s", p.flip_duration_s);
             p.boostback_loss_fraction = doc.number_or(table, "boostback_loss_fraction", p.boostback_loss_fraction);
             p.rcs_propellant_kg = doc.number_or(table, "rcs_propellant_kg", p.rcs_propellant_kg);
             p.entry_burn_altitude_m = doc.number_or(table, "entry_burn_altitude_m", p.entry_burn_altitude_m);
             p.entry_burn_delta_v_mps = doc.number_or(table, "entry_burn_delta_v_mps", p.entry_burn_delta_v_mps);
             p.entry_burn_throttle = doc.number_or(table, "entry_burn_throttle", p.entry_burn_throttle);
+            if (const auto* groups = table["flip_engine_groups"].as_array()) {
+                p.flip_engine_groups = group_list(*groups, "flip engine");
+            }
             if (p.entry_burn_altitude_m > 0.0 && p.entry_engine_groups.empty()) {
                 doc.fail("an entry burn (entry_burn_altitude_m) needs entry_engine_groups");
             }

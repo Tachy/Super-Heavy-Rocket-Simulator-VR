@@ -16,9 +16,11 @@ fairing = true
 
 [drone_ship]
 id = "asds_atlantic"
-latitude_deg = 32.9272          # [D] nominal impact point of this mission's first stage, predicted 10 s after MECO (T+152 s)
-                                # with drag and the finite entry burn, no steering (test "... nominal impact point ...")
-longitude_deg = -76.0990
+latitude_deg = 32.8819          # [D] nominal impact point of this mission's first stage, predicted 10 s after the separation
+                                # (MECO T+152 s, separation T+156.6 s) with drag and the finite entry burn, no steering
+                                # (test "... nominal impact point ..."); before the staging sequence 32.9272 / -76.0990:
+                                # the tail-off no longer pushes the separated stage alone (~7 km shorter)
+longitude_deg = -76.1490
 heading_deg = 45.0              # [E] long axis along the ground track
 sea_height_m = -35.0            # [E] geoid off the Carolinas (EGM2008 ~-35 m)
 

@@ -34,9 +34,10 @@ TEST_CASE("Flight session: pad, ignition, liftoff, staging", "[sim]") {
     CHECK_FALSE(session.body(0).impacted());
 
     session.stage();
+    CHECK(session.body_count() == 1);  // hot staging: the ship's engines start while joined (staging sequence)
+    session.advance_to(t0 + 28.0);     // separated once they are at thrust (start-up 3 s), the booster shut down
     REQUIRE(session.body_count() == 2);
     CHECK(session.controlled_index() == 1);
-    session.advance_to(t0 + 28.0);
     CHECK(session.telemetry(0).engines_running == 0);  // booster shut down
     CHECK(session.telemetry(1).engines_running == 3);  // ship: sea-level Raptors only (RVacs blocked at low altitude)
 }

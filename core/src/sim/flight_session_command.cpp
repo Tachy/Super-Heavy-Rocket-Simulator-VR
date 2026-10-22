@@ -14,6 +14,12 @@
 namespace starsim::sim {
 
 vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_pressure_pa) const {
+    auto command = steering_command_for(index, ambient_pressure_pa);
+    apply_staging_throttle(index, command);  // a staging sequence sets its run-on and upper-stage throttles
+    return command;
+}
+
+vehicle::VehicleCommand FlightSession::steering_command_for(size_t index, double ambient_pressure_pa) const {
     vehicle::VehicleCommand command;
     const auto& flying = bodies_[index];
     for (const auto& [group, run] : flying.running_groups) {
@@ -86,7 +92,9 @@ vehicle::VehicleCommand FlightSession::command_for(size_t index, double ambient_
         }
         return command;
     }
-    const bool guided = autopilot_.state == AutopilotState::Booster || autopilot_.state == AutopilotState::UpperStage;
+    // Staging: the stack (then the upper stage until its ignition) holds the guidance's last command
+    const bool guided = autopilot_.state == AutopilotState::Booster || autopilot_.state == AutopilotState::Staging ||
+                        autopilot_.state == AutopilotState::UpperStage;
     if (guided || autopilot_.state == AutopilotState::Burn) {
         const double throttle = guided ? autopilot_.guidance.throttle : burn_config_.throttle;
         for (auto& group : command.groups) group.throttle = throttle;

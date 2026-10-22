@@ -21,6 +21,13 @@ std::optional<MissionEventKind> start_kind(const FlightSession& s, size_t index,
         if (has_recorded(t, MissionEventKind::LandingBurn, s.body_serial(index))) return std::nullopt;
         return MissionEventKind::LandingBurn;
     }
+    // the staging sequence records the upper stage's ignition at its command: seen here up to a sample later
+    const auto serial = s.body_serial(index);
+    const bool recorded = std::any_of(t.recorded().begin(), t.recorded().end(), [&](const MissionEvent& e) {
+        return e.kind == MissionEventKind::Ignition && e.body_serial == serial &&
+               !(s.epoch() - e.epoch > 2.0 * MissionEventObserver::observe_interval_s);
+    });
+    if (recorded) return std::nullopt;
     return MissionEventKind::Ignition;
 }
 
