@@ -35,7 +35,9 @@ follow physics").
    program by optimisation: the least total propellant to SECO (equivalently: the most propellant left in the upper stage
    at insertion) for the target orbit, the payload and the booster recovery. The first stage keeps flying a zero
    angle-of-attack gravity turn after the kick (structural loads), with throttling around max-Q; the upper stage keeps
-   PEG (already propellant-optimal). Applies to every vehicle and target the free launch offers.
+   PEG (already propellant-optimal). Applies to **every launch from a pad** - the free launch and every mission and
+   mission chain (`starship_leo`, `falcon9_*`, ISS, depot, tanker, HLS, the flown campaign): the webcast-tuned
+   `kick_deg` values leave the mission files (user 2026-10-22: "optimise everywhere, physics decides").
 2. **Booster recovery is a constraint, decided by the computer.**
    - Super Heavy is always caught at the tower (standing decision). A target the stack cannot reach with a catch is
      refused before liftoff with a German message - never flown expendable.
@@ -57,8 +59,8 @@ follow physics").
    at their new, separate instants (the onboard-computer predictions and the webcast arc already show these events).
 5. **Validation**: a free launch to flight 14's target (and to a Starlink / CRS-35 target for Falcon 9) is compared with
    the recorded telemetry (MECO time, altitude, speed, flight-path angle; SECO) with documented tolerances - as a check
-   of the physics, not as tuning. The existing tuned reference missions keep their values and tests; they become the
-   comparison cases. A clear deviation is fixed in the model, not in the profile: the ascent drag tables
+   of the physics, not as tuning. The reference missions' tests are re-baselined on the optimised profile; the recorded
+   telemetry stays the comparison. A clear deviation is fixed in the model, not in the profile: the ascent drag tables
    (`config/aero/*_ascent.csv`) are generic [E] trends never calibrated, and the reference missions' throttle level
    (0.944 x the gauge) was fitted to the recorded speed, which may have absorbed drag errors (user question 2026-10-22).
    Where the telemetry separates drag from thrust (coast phases, known engine counts), calibrate the drag; record the
@@ -93,16 +95,30 @@ follow physics").
 - Optimised at launch (not fixed reference profiles) - 2026-10-22.
 - Realistic staging sequence as above - 2026-10-22.
 - Super Heavy always returns; Falcon 9 chooses pad or drone ship by itself - 2026-10-22.
+- The optimisation and the staging sequence apply to every flight, missions and chains included; reference numbers
+  are re-baselined (catch, landing reserve, timeline, ISS launch window, refuelling r5 / f2 campaigns) - 2026-10-22.
 
 ## My calls (marked for the user's review)
 
 - **The optimised quantity is the kick angle** (one parameter, as an open-loop first-stage program in practice), bounded
   to a plausible range; the kick timing (vertical rise to clear the tower) stays. A second free parameter only if the
   one-parameter optimum leaves a visible kink.
-- **Throttle around max-Q in the free launch**: a dynamic-pressure limit per vehicle (`[stage] max_dynamic_pressure_pa`,
-  provenance tagged) the first stage throttles to, instead of a time schedule tied to one flight. The tuned reference
-  missions keep their time schedules. Rationale: a time schedule fitted to one trajectory is not physics for another
-  target.
+- **Throttle around max-Q**: a dynamic-pressure limit per vehicle (`[stage] max_dynamic_pressure_pa`, provenance
+  tagged) the first stage throttles to, instead of a time schedule tied to one flight - in every launch, so the
+  missions' `booster_throttle` schedules go too (consistent with "physics decides"). Rationale: a time schedule fitted
+  to one trajectory is not physics for another target. The flights' recorded throttle shapes stay the check in the
+  validation cases. A late-boost acceleration limit (the Starship schedule's drop before MECO) only if a vehicle has a
+  sourced g limit.
+- **Objective**: the most upper-stage propellant at SECO with the booster recovery as a hard constraint (Super Heavy:
+  `meco_propellant_kg` decides MECO in every trial flight). Falcon 9: RTLS whenever feasible with a reserve, else the
+  drone ship (SpaceX practice), even if the drone ship would leave more upper-stage margin.
+- **Hot-staging physics**: the booster's three centre engines run at minimum throttle (Raptor 30 %: ~5 m/s^2 on ~520 t)
+  through the separation and flip, the ship has ~9.5 m/s^2 at thrust - with the sequence right the booster falls back
+  physically; a gain over the ship at separation is a defect the separation test asserts against.
+- **Validation cases**: flight 14 flies its own recorded target (262 x 275 km, 30.5 deg, its payload and propellant
+  load), engine-outs excluded and stated; Falcon 9 compares with CRS-35 (RTLS from SLC-40, ISS plane). Tolerances are
+  set from the telemetry's reading accuracy; a miss is a documented discrepancy investigated in the model (drag, thrust,
+  masses), never closed by tuning the profile.
 - **Free-launch target**: the configured `leo_ascent.toml` orbit; where the site's latitude makes the configured
   inclination unreachable (Florida > 26.5 deg), the lowest reachable inclination (due east).
 - **Falcon 9 payload in the free launch**: unchanged (whatever the free launch carries today).
