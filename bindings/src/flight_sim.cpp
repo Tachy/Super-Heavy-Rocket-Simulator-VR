@@ -5,6 +5,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include "starsim/config/crew_escape_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/contact/tower_geometry.hpp"
@@ -460,6 +461,23 @@ godot::Dictionary FlightSim::iss_mission() const { return snapshot()->iss_missio
 godot::Dictionary FlightSim::transfer_state() const { return snapshot()->transfer_state; }
 godot::Dictionary FlightSim::depot_state() const { return snapshot()->depot_state; }
 godot::Dictionary FlightSim::campaign_flight_state() const { return snapshot()->campaign_flight_state; }
+godot::Dictionary FlightSim::crew_escape_state() const { return snapshot()->crew_escape_state; }
+
+int64_t FlightSim::set_crew_escape(const godot::String& id) {
+    const std::string crew_id = id.utf8().get_data();
+    return static_cast<int64_t>(post("set_crew_escape", [this, crew_id](sim::FlightSession& session) {
+        if (crew_id.empty()) {
+            session.set_crew_escape(std::nullopt);
+            return Outcome{true, {}};
+        }
+        try {
+            session.set_crew_escape(config::load_crew_escape(config_dir_, crew_id));
+        } catch (const std::exception& e) {
+            return Outcome{false, godot::String::utf8(e.what())};
+        }
+        return Outcome{true, {}};
+    }));
+}
 
 int64_t FlightSim::refuelling_campaign(const godot::Dictionary& params) {
     sim::CampaignLevers levers;
@@ -647,6 +665,8 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("transfer_state"), &FlightSim::transfer_state);
     ClassDB::bind_method(D_METHOD("depot_state"), &FlightSim::depot_state);
     ClassDB::bind_method(D_METHOD("campaign_flight_state"), &FlightSim::campaign_flight_state);
+    ClassDB::bind_method(D_METHOD("crew_escape_state"), &FlightSim::crew_escape_state);
+    ClassDB::bind_method(D_METHOD("set_crew_escape", "id"), &FlightSim::set_crew_escape);
     ClassDB::bind_method(D_METHOD("refuelling_campaign", "params"), &FlightSim::refuelling_campaign);
     ClassDB::bind_method(D_METHOD("predict_trajectory", "index", "duration_s", "step_s"),
                          &FlightSim::predict_trajectory);

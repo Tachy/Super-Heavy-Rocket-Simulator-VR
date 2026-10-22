@@ -239,6 +239,25 @@ godot::Dictionary return_state(const sim::FlightSession& session, size_t index, 
     d["outcome"] = godot::String::utf8(sim::to_string(session.landing_outcome(index)));
     d["legs"] = legs;
     const auto* status = session.return_status(index);
+    if (const auto* ship = session.ship_landing(index); !status && ship) {  // the ship from the gate (flip, catch, abort)
+        const auto* scvx = ship->scvx();
+        d["present"] = true;
+        d["phase"] = godot::String::utf8(gnc::to_string(ship->phase()));
+        d["guidance"] = godot::String::utf8(ship->upright_descent_active() ? "aufrecht" : "SCvx");
+        d["abort"] = ship->upright_descent_active() || (scvx && scvx->aborting());
+        d["upright_descent"] = ship->upright_descent_active();
+        d["result"] = godot::String::utf8(sim::to_string(session.ship_return_result(index)));
+        d["plans"] = scvx ? scvx->statistics().plans : 0;
+        d["max_plan_ms"] = scvx ? scvx->statistics().max_solve_ms : 0.0;
+        return d;
+    }
+    if (const auto* crew = session.crew_escape_state(); !status && crew && crew->armed && index == session.controlled_index()) {
+        d["present"] = true;  // a crewed ship given up in the entry (no flip): flown to its impact
+        d["phase"] = godot::String::utf8("aufgegeben");
+        d["abort"] = true;
+        d["result"] = godot::String::utf8(sim::to_string(session.ship_return_result(index)));
+        return d;
+    }
     if (!status) return d;
     d["present"] = true;
     d["phase"] = godot::String::utf8(gnc::to_string(status->phase));
@@ -401,7 +420,7 @@ std::shared_ptr<const FlightSnapshot> empty_snapshot() {
     s->lunar_state = absent();
     s->lunar_site = absent();
     s->iss_state = s->rendezvous_plan = s->docking_state = s->station_geometry = s->iss_mission = absent();
-    s->transfer_state = s->depot_state = s->campaign_flight_state = absent();
+    s->transfer_state = s->depot_state = s->campaign_flight_state = s->crew_escape_state = absent();
     return s;
 }
 
@@ -425,6 +444,7 @@ std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& s
     s->transfer_state = build_transfer_state(session);
     s->depot_state = build_depot_state(session);
     s->campaign_flight_state = build_campaign_flight_state(session);
+    s->crew_escape_state = build_crew_escape_state(session);
     s->moon_terrain = session.moon_terrain_shared();
     if (!s->active) return s;
     s->mission_time_s = session.mission_time_s();

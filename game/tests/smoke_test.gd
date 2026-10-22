@@ -289,6 +289,18 @@ func _check_refuelling(config_dir: String, tdb: float) -> bool:
 	var depot_geo: Dictionary = sim.station_geometry()
 	_check(depot_geo.get("present", false) and depot_geo["ports"][0].get("mechanism", "") == "probe_drogue"
 			and depot_geo["ports"][0].get("elements_m", []).size() == 4, "depot port with its four drogues")
+	# Crew escape: uncrewed by default; a crew-escape config makes the flight crewed (four seats, nothing armed).
+	_check(not sim.crew_escape_state().get("present", true), "no crew escape on an uncrewed flight")
+	var crewed: int = sim.set_crew_escape("starship_crew")
+	_check(sim.wait_idle(10.0) and sim.result(crewed).get("ok", false), "set_crew_escape starship_crew")
+	var crew: Dictionary = sim.crew_escape_state()
+	_check(crew.get("present", false) and not crew.get("armed", true) and crew.get("members", []).size() == 4,
+			"crew_escape_state with four seats, not armed")
+	var no_crew: int = sim.set_crew_escape("no_such_crew")
+	_check(sim.wait_idle(10.0) and not sim.result(no_crew).get("ok", true), "an unknown crew escape is refused")
+	var uncrewed: int = sim.set_crew_escape("")
+	_check(sim.wait_idle(10.0) and sim.result(uncrewed).get("ok", false)
+			and not sim.crew_escape_state().get("present", true), "set_crew_escape('') makes the flight uncrewed")
 	var bad: int = sim.refuelling_campaign({"height_km": "x"})
 	_check(sim.wait_idle(10.0) and not sim.result(bad).get("ok", true), "a wrongly typed lever is refused")
 	var unknown: int = sim.refuelling_campaign({"no_such_lever": 1.0})

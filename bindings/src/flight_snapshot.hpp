@@ -62,6 +62,7 @@ struct FlightSnapshot {
     godot::Dictionary iss_state, rendezvous_plan, docking_state, station_geometry, iss_mission;  // ISS i6
     godot::Dictionary transfer_state, depot_state;  // refuelling r6
     godot::Dictionary campaign_flight_state;        // refuelling f2
+    godot::Dictionary crew_escape_state;            // crew escape
     std::shared_ptr<const environment::LunarTerrain> moon_terrain;  // immutable: queried on the main thread
     bool has_target_orbit = false;
     godot::Vector3 target_plane_normal_gcrf;
@@ -93,6 +94,8 @@ godot::Dictionary build_iss_mission(const sim::FlightSession& session, const Sna
 godot::Dictionary build_transfer_state(const sim::FlightSession& session);
 godot::Dictionary build_depot_state(const sim::FlightSession& session);
 godot::Dictionary build_campaign_flight_state(const sim::FlightSession& session);  // f2
+// Crew escape (flight_snapshot_crew_escape.cpp; FlightSim::crew_escape_state documents the keys).
+godot::Dictionary build_crew_escape_state(const sim::FlightSession& session);
 godot::Dictionary campaign_dictionary(const sim::CampaignReport& report, const time::TimeScaleConverter& time);
 
 // Builds the snapshot from the session (worker thread). `previous` supplies the prediction when it is not due.

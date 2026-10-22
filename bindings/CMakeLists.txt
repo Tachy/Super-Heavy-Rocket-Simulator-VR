@@ -23,6 +23,7 @@ add_library(starsim_gdext SHARED
     src/flight_snapshot_lunar.cpp
     src/flight_snapshot_iss.cpp
     src/flight_snapshot_refuelling.cpp
+    src/flight_snapshot_crew_escape.cpp
 )
 target_link_libraries(starsim_gdext PRIVATE starsim::core godot::cpp)
 if(MSVC)

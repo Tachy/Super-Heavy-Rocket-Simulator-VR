@@ -220,6 +220,18 @@ public:
     // hls_required_propellant_kg, first_return (German), misses (German, once complete; empty: the comparison
     // passed)}.
     godot::Dictionary campaign_flight_state() const;
+    // Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md): {present} (false for an uncrewed flight);
+    // present: {armed, fired, early, reason (German), give_up_time_s (mission time), members: [{phase, mode (German),
+    // fire_time_s, load_g, peak_load_g, min_clearance_m, outcome, reason (German), body_index (-1: not fired / gone),
+    // position_gcrf_m, velocity_gcrf_mps, attitude_gcrf, latitude_rad, longitude_rad, height_m (while it has a body),
+    // touchdown_enu_m, touchdown_over_water, touchdown_sink_mps (once down)}], ship_impact: {present, enu_m (site frame:
+    // east, north, up from the pad centre), speed_mps, tower_distance_m, shore_distance_m (> 0 seaward), over_water}}.
+    // Each fired member is also an ordinary body (body_stages etc.). return_state(i) of the ship: phase, guidance,
+    // abort, upright_descent, result (sim::ReturnResult, German).
+    godot::Dictionary crew_escape_state() const;
+    // Makes the current flight crewed with config/crew_escape/<id>.toml (empty id: uncrewed). Set it after the ship is
+    // placed or the mission started (a new placement makes the flight uncrewed). Not ok for an unknown id.
+    int64_t set_crew_escape(const godot::String& id);
     // The tanker campaign (sim::plan_refuelling_campaign; the session is untouched, seconds of window searches on the
     // worker). params (optional; floats unless noted): height_km, interval_h, phasing_limit_h, tanker_dry_t, reserve_t,
     // initial_t, insulation, hls_wait_d, reference_phasing (bool, f1); an unknown key or a wrong type is refused.
