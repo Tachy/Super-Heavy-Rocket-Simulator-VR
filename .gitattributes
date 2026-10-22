@@ -1,0 +1,2 @@
+# Engine patches must keep the engine sources' LF line endings for git apply
+tools/godot_patches/*.patch -text
