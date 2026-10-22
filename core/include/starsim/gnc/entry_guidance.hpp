@@ -218,6 +218,10 @@ public:
     const EntryTarget& target() const { return target_; }
     const EntryGuidanceParameters& parameters() const { return parameters_; }
     void skip_to(EntryPhase phase) { phase_ = phase; }
+    // Crew escape: the onboard computer gives the ship up. From now on it aims at `sea` (gnc::sea_give_up_target) and
+    // never hands over at a gate: the entry / terminal steering fly the belly flop down to the impact.
+    void give_up(const EntryTarget& sea);
+    bool given_up() const { return given_up_; }
 
     struct Solution {
         double bank_rad = 0.0;  // magnitude
@@ -256,6 +260,7 @@ private:
     bool capsule_ = false;
     void configure_model(const vehicle::FlightBody& body);
     EntryPhase phase_ = EntryPhase::Entry;
+    bool given_up_ = false;
     bool started_ = false;
     bool dipped_ = false;  // aerocapture: has been below 80 km or climbs again (the lowest point is behind)
     time::Epoch last_update_;

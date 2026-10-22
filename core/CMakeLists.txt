@@ -64,6 +64,7 @@ add_library(starsim_core STATIC
     src/gnc/parachute_sequencer.cpp
     src/gnc/ejection_seat.cpp
     src/gnc/catch_feasibility.cpp
+    src/gnc/sea_target.cpp
     src/gnc/entry_aero_table.cpp
     src/gnc/entry_attitude.cpp
     src/gnc/orbital_attitude.cpp
