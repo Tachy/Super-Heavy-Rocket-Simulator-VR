@@ -17,7 +17,8 @@ const GROUP_NAME_ALPHA := 0.9
 ## Gauge specs: label (German), unit, full scale of the arc, log_min > 0 = logarithmic arc from log_min to full scale,
 ## maximum decimals (fewer for large values), signed = the arc fills left/right from the top.
 const GAUGES := {
-	"propellant": {"label": "Treibstoff", "unit": "%", "full_scale": 100.0, "decimals": 0},
+	# Treibstoff (Haupt- und Header-Tanks): all main-engine propellant of the body, main + header tanks
+	"propellant":{"label": "Treibstoff", "unit": "%", "full_scale": 100.0, "decimals": 0},
 	"speed_surface": {"label": "Geschwindigkeit", "unit": "km/h", "full_scale": 30000.0, "decimals": 0},
 	"speed_inertial": {"label": "Inertial", "unit": "km/h", "full_scale": 40000.0, "decimals": 0},
 	"altitude": {"label": "Höhe", "unit": "km", "full_scale": 400000.0, "log_min": 0.1, "decimals": 1},

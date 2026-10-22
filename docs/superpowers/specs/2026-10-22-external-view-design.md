@@ -105,6 +105,11 @@ planner) builds on. Getting the VR/desktop split, the overlay and the camera rig
 - F12 = usual VR recentre only (Goal 3).
 - Timeline arc = whole mission, all objects; clock = T- before T-0, then T+ only, for the whole mission.
 - T-0 = liftoff for launches; the first action (first burn ignition, or undocking) for missions starting in orbit.
+- (2026-10-22, after the final review) The external views always fly on the autopilot: "Wird in die Außenansichten
+  gewechselt, geht der Simulator sofort in den Autopiloten. Handsteuerung wird es später nur im Cockpit geben und nur
+  für das gerade gewählte Fahrzeug." Entering the external view engages the autopilot of the controlled vehicle if it
+  is off (on the pad the ascent autopilot, in orbit the orbit state); pilot keys, HOTAS axes and the single pilot
+  actions (I, L, K, G, M, X) are inactive there; the onboard-computer commands (P, O, R, proximity) stay.
 
 ## My calls (marked so the user can check them)
 

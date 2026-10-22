@@ -153,7 +153,7 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 
 Die Außenansicht trägt ein Overlay im Stil der Starship-Webcasts (Spec `docs/superpowers/specs/2026-10-22-external-view-design.md`).
 Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis es das Cockpit gibt.
-- **Oben:** UTC der Simulation, daneben der Zeitraffer.
+- **Oben:** UTC der Simulation (der Zeitraffer steht im Zeit-Panel, nicht im Overlay).
 - **Zeitbogen:** flacher Bogen oben in der Mitte, "jetzt" am Scheitel. Ereignisse laufen rechts herein und links hinaus,
   die Enden blenden aus. Die Zeitskala ist gestaucht (grob nach relativer Zeit, kein strenger Maßstab) und um "jetzt"
   symmetrisch; sie richtet sich nach den nächsten zwei bis drei Ereignissen und gleitet ohne Sprünge. Beschriftungen
@@ -163,22 +163,37 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
 - **Ereignisse:** Vergangene Ereignisse sind volle Punkte (Abheben, Max Q, MECO, Stufentrennung, SECO, Boostback,
   Landebrennen, Fangen, Zündung, Abkoppeln ...); MECO/SECO zählen ab dem Abschaltbefehl. **Vorhersagen des Bordrechners**
   sind hohle Punkte; ein Ereignis erscheint erst, wenn der Bordrechner seinen Zeitpunkt festgelegt hat.
-- **Anzeigen:** links Zustand des Fahrzeugs (Triebwerke, Wärmestrom, Wärmelast, g-Last, Staudruck, Mach), rechts die
+- **Anzeigen:** links Zustand des Fahrzeugs in dieser Rangfolge (Triebwerke, Treibstoff, Wärmestrom, Wärmelast,
+  g-Last, Mach, Staudruck), rechts die
   Bahn, je nach Situation: **Annäherung** (Abstand, Annäherungsgeschwindigkeit, Höhe, Geschwindigkeit), **Transfer**
   (Abstand und Geschwindigkeit zu Erde und Mond, Höhe > 5000 km und Apoapsis > 100000 km), **Orbit** (inertiale
   Geschwindigkeit, Höhe, Apo-/Periapsis), sonst (Oberflächengeschwindigkeit, Höhe, Vertikalgeschwindigkeit,
   inertiale Geschwindigkeit). Höchstens 4 Anzeigen je Seite; sinnlose Werte (Mach/g am Boden) werden ausgeblendet und
-  neue Anzeigen halten 5 s. Treibstoff ist **eine** Anzeige (Füllung der Haupttanks in Prozent). Das Triebwerksbild
+  neue Anzeigen halten 5 s. Treibstoff ist **eine** Anzeige: Treibstoff (Haupt- und Header-Tanks), also aller
+  Treibstoff der Haupttriebwerke des Körpers in Prozent der Füllung. Das Triebwerksbild
   hat dieselbe Größe wie die runden Anzeigen. Die Zuordnung soll später datengetrieben in
   `config/ui/webcast_gauges.toml` stehen und vom Einstellungsassistenten änderbar sein [Entschieden, Folgeplan].
 - **Bedienung (Desktop):** rechte Maustaste halten = Nicken und Drehen um die Lotrechte; Mausrad = Zoom
-  (logarithmisch); die linke Taste bleibt frei. **Tab / Umschalt+Tab** wechseln das Objekt, dem die Kamera folgt
-  (Booster, Ship, Kapsel, Station ...). **F1** alter HUD. **F12** zentriert in VR neu (außerdem automatisch 2 s nach dem
+  (logarithmisch); die linke Taste bleibt frei. Die Kamera folgt zunächst dem gesteuerten Fahrzeug, auch über jede
+  Trennung hinweg (nach dem Hot Staging dem Ship, bei Falcon 9 der Dragon). **Tab / Umschalt+Tab** wechseln das Objekt,
+  dem die Kamera folgt (Booster, Ship, Kapsel, Station ...), und halten die Kamera auf diesem Objekt fest; schaltet
+  Tab wieder auf das gesteuerte Fahrzeug, folgt sie ihm erneut (ebenso, wenn das gewählte Objekt verschwindet oder
+  ein neuer Flug beginnt). **F1** alter HUD. **F12** zentriert in VR neu (außerdem automatisch 2 s nach dem
   Start).
 - **VR:** das Overlay liegt auf einer gekrümmten Fläche (Radius 2 m, 64° horizontal) an der Grundpose des Kopfes
   (nach F12 neu gesetzt), nicht am Kopf festgeklebt. Die manuelle VR-Sitzung mit dem Headset steht noch aus.
-- **Missionsstart:** Startmissionen stehen ab dem Anfordern auf der Rampe und heben zum geplanten T-0 ab
-  (Fensterstart bei ISS-Missionen); der Countdown läuft als T-.
+- **Autopilot** [Entschieden 2026-10-22]: In den Außenansichten fliegt immer der Autopilot. Beim Wechsel in die
+  Außenansicht übernimmt er das gesteuerte Fahrzeug, falls er aus ist: auf der Rampe der Aufstiegs-Autopilot (wie
+  Taste P), im Orbit ohne Plan der Orbit-Zustand des Autopiloten. Handsteuerung (Nicken/Gieren/Rollen, Schub, HOTAS)
+  und die Einzelaktionen I (Zünden), L (Klammern lösen), K (Aus), G (Stufentrennung), M (Steuermodus) und
+  X (Autopilot aus) sind hier ohne Wirkung; es bleiben die Befehle an den Bordrechner: P (Aufstieg), O (Zirkularisieren),
+  R (Rückkehr zum Turm) und die Annäherungsbefehle. Handsteuerung gibt es später nur im Cockpit und nur für das gerade
+  gewählte Fahrzeug.
+- **Missionsstart:** Das Spiel startet frei aus dem Zeit-Panel: das Fahrzeug steht auf der Rampe, der Countdown läuft
+  60 s als T- (`FlightController.LAUNCH_COUNTDOWN_S`), und der Aufstiegs-Autopilot hebt zum T-0 ab. Ohne Abheben bleibt
+  die Uhr bei T-0 stehen (wie ein Startabbruch auf der Rampe), statt auf der Rampe T+ zu zählen. Missionen, die auf der
+  Rampe auf ihr T-0 warten (`start_mission` mit `wait_on_pad`, Fensterstart bei ISS-Missionen), gibt es im Kern und in
+  den Bindings und in `render_check` (`--mission= --wait_on_pad`); eine Missionsauswahl im Spiel folgt.
 
 ### Weitere Außenansichten
 
