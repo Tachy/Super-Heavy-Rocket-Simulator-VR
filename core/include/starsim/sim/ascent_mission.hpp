@@ -19,10 +19,12 @@ void start_ascent_mission(FlightSession& session, const config::AscentMission& m
 
 // start_ascent_mission for a liftoff at `liftoff`. With `wait_from` (StartOptions::wait_on_pad) the vehicle stands on
 // the pad from then (from the liftoff when wait_from is not earlier) and the liftoff is scheduled (FlightSession::
-// schedule_liftoff); without, it is placed at the liftoff and lifts off as soon as its engines run. Returns the epoch
-// the vehicle was placed at (the session epoch).
+// schedule_liftoff), never less than liftoff_ignition_lead_s() after the placement (the engines must reach full thrust
+// by T-0): a `fixed_liftoff` (a launch window, a configured epoch) is kept and the vehicle placed that lead before it,
+// otherwise (a countdown) T-0 moves to the placement + lead. Without `wait_from` the vehicle is placed at the liftoff
+// and lifts off as soon as its engines run. Returns the epoch the vehicle was placed at (the session epoch).
 time::Epoch start_ascent_mission_for_liftoff(FlightSession& session, const config::AscentMission& mission,
                                              const std::filesystem::path& config_dir, time::Epoch liftoff,
-                                             std::optional<time::Epoch> wait_from);
+                                             std::optional<time::Epoch> wait_from, bool fixed_liftoff = true);
 
 }  // namespace starsim::sim

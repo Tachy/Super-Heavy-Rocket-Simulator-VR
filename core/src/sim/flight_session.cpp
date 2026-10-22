@@ -138,6 +138,7 @@ void FlightSession::place_in_orbit(const config::VehicleConfig& config, const ma
     reset_lunar();
     settle_manual_ = false;  // f3: a manual push does not carry into a new flight
     scheduled_liftoff_.reset();
+    rcs_burn_lit_ = false;
 }
 
 std::vector<math::Vec3> FlightSession::predict_trajectory(size_t index, double duration_s, double step_s) const {
@@ -306,14 +307,12 @@ void FlightSession::run_autopilot() {
                                             last_rcs_acceleration_, thrust_axis);
             if (c.rcs) {
                 // no main engine fires: the planned burn's own start and end are its events (the observer sees none)
-                if (autopilot_.burn.ignite && !autopilot_.burn.complete && !rcs_burn_lit_) {
+                // (complete implies it fired: a burn that starts and ends in one tick records both)
+                if ((autopilot_.burn.ignite || autopilot_.burn.complete) && !rcs_burn_lit_) {
                     rcs_burn_lit_ = true;
                     timeline_.record(burn_event(MissionEventKind::Ignition));
                 }
-                if (autopilot_.burn.complete && rcs_burn_lit_) {
-                    rcs_burn_lit_ = false;
-                    timeline_.record(burn_event(MissionEventKind::Cutoff));
-                }
+                if (autopilot_.burn.complete) end_rcs_burn_events();
                 if (autopilot_.burn.complete) {
                     // a lunar flight's or a rendezvous' burn returns to its step machine
                     autopilot_.state = lunar_step_ != LunarStep::None           ? AutopilotState::Lunar
@@ -718,6 +717,7 @@ void FlightSession::reset_mission_state() {
     settle_manual_ = false;  // f3: a manual push does not carry into a new flight
     burn_abort_reason_.clear();  // f2 review I1: a gas ingestion ended the last flight, not the next one
     scheduled_liftoff_.reset();
+    rcs_burn_lit_ = false;
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -1072,6 +1072,20 @@ void FlightSession::reset_timeline() {
     timeline_.set_scheduled_liftoff(scheduled_liftoff_);
     observer_.observe(*this, timeline_);  // the bodies as placed: the first tick's engine start is an event
     timeline_.set_predicted(predicted_mission_events(*this));
+}
+
+void FlightSession::end_rcs_burn_events() {
+    if (!rcs_burn_lit_) return;
+    rcs_burn_lit_ = false;
+    timeline_.record(burn_event(MissionEventKind::Cutoff));
+}
+
+void FlightSession::disengage_scheduled_events() {
+    end_rcs_burn_events();  // a burn on RCS stopped by the disengage ends now
+    if (autopilot_.state == AutopilotState::PreLaunch && scheduled_liftoff_) {  // the hold on the pad is called off
+        scheduled_liftoff_.reset();
+        timeline_.set_scheduled_liftoff(std::nullopt);
+    }
 }
 
 void FlightSession::schedule_liftoff(std::optional<time::Epoch> t0) {

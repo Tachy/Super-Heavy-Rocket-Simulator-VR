@@ -62,24 +62,29 @@ std::vector<MissionEvent> predicted_mission_events(const FlightSession& s) {
     }
     if (!s.active() || s.controlled_index() >= s.body_count()) return c.take();
 
-    if (const auto& t0 = s.scheduled_liftoff()) c.add(MissionEventKind::Liftoff, *t0);
+    // the scheduled liftoff while the ascent autopilot is armed for it
+    if (const auto& t0 = s.scheduled_liftoff(); t0 && s.autopilot().state == AutopilotState::PreLaunch) {
+        c.add(MissionEventKind::Liftoff, *t0);
+    }
     if (const auto liftoff = s.lunar_ascent_liftoff_epoch()) c.add(MissionEventKind::Liftoff, *liftoff);
     if (const auto separation = s.undock_separation_epoch()) c.add(MissionEventKind::Undocking, *separation);
 
-    // The pending burn: its ignition from the executor (a finite burn starts before its impulsive node); the plan's
-    // node it flies is covered by it.
+    // The burn the autopilot flies covers the plan's node (pending or lit); a pending one shows its ignition from the
+    // executor (a finite burn starts before its impulsive node).
     const auto& autopilot = s.autopilot();
-    std::optional<time::Epoch> pending_node;
-    if (autopilot.state == AutopilotState::Burn && s.burn() && !autopilot.burn.ignite && !autopilot.burn.complete) {
-        pending_node = s.burn()->node().epoch;
-        c.cover(*pending_node);
-        c.add(MissionEventKind::Ignition, s.epoch() + autopilot.burn.time_to_ignition_s, true);
+    std::optional<time::Epoch> active_node;
+    if (autopilot.state == AutopilotState::Burn && s.burn()) {
+        active_node = s.burn()->node().epoch;
+        c.cover(*active_node);
+        if (!autopilot.burn.ignite && !autopilot.burn.complete) {
+            c.add(MissionEventKind::Ignition, s.epoch() + autopilot.burn.time_to_ignition_s, true);
+        }
     }
 
-    // Ship / capsule deorbit: while its burn is pending or the return is under way.
+    // Ship / capsule deorbit: while the autopilot flies its burn (pending or lit) or the return is under way.
     if (const auto* plan = s.ship_return_plan(); plan && plan->feasible) {
         const bool flying_it = autopilot.state == AutopilotState::Return ||
-                               (pending_node && std::abs(*pending_node - plan->node.epoch) < same_burn_s);
+                               (active_node && std::abs(*active_node - plan->node.epoch) < same_burn_s);
         if (flying_it) {
             c.add_burn(plan->node);
             c.add(MissionEventKind::EntryInterface, plan->entry_interface_epoch);

@@ -29,7 +29,10 @@ struct StartOptions {
     // Launch missions (ascent, iss_launch, depot_launch, and tanker_flight / hls_refuel from the pad) stand on the pad
     // from `requested` and lift off at their scheduled T-0 (FlightSession::schedule_liftoff): the window's liftoff, the
     // config's epoch (depot_launch) or, for an ascent, `requested` + countdown ([mission] countdown_s, else
-    // `countdown_s` below). A T-0 before `requested` is flown as without waiting (placed at T-0). Stations of these
+    // `countdown_s` below). T-0 always lies at least FlightSession::liftoff_ignition_lead_s() after the placement: a
+    // window's liftoff or the configured epoch is kept and the vehicle placed earlier when `requested` is later than
+    // T-0 minus the lead (or than T-0); an ascent's countdown T-0 moves to `requested` + the lead. iss_launch: the
+    // placement is moved up to where the ISS orbit source is the one of the liftoff (iss_mission.hpp). Stations of these
     // missions are placed at the session epoch. false: placed at the liftoff, lifting off at once (the default).
     bool wait_on_pad = false;
     double countdown_s = 0.0;

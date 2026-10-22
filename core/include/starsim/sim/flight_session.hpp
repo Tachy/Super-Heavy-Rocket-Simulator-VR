@@ -408,6 +408,7 @@ public:
     // Refuelling f3: the abort reason of an unsettled in-orbit ignition (starts with "Gasansaugung", the spec's reason).
     static constexpr const char* gas_ingestion_reason = "Gasansaugung: Treibstoff nicht gesetzt, Triebwerke ausgefallen";
     void disengage_autopilot() {
+        disengage_scheduled_events();
         autopilot_.state = AutopilotState::Off;
         attitude_mode_ = {};
         settling_push_ = false;
@@ -1086,6 +1087,10 @@ private:
     std::optional<time::Epoch> scheduled_liftoff_;  // schedule_liftoff
     bool rcs_burn_lit_ = false;  // the planned burn on RCS translation has started (its Ignition is recorded)
     bool pad_hold() const;       // PreLaunch waiting for a scheduled ignition: the clamped stack may coast
+    void end_rcs_burn_events();  // a lit RCS burn: its Cutoff now
+    // disengage_autopilot: a lit RCS burn's Cutoff; a pad hold called off drops its schedule (no T-0, no predicted
+    // liftoff)
+    void disengage_scheduled_events();
     void record_event(MissionEventKind kind, size_t index);  // body `index` now
     LaunchSite launch_site_;
     std::optional<LaunchSite> landing_zone_;

@@ -15,6 +15,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
+#include "starsim/sim/iss_mission.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/sim/lunar_return_mission.hpp"
 #include "starsim/sim/mission_event_observer.hpp"
@@ -468,6 +469,88 @@ TEST_CASE("An ascent waiting on the pad counts down from the requested epoch", "
     CHECK(config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo").countdown_s == std::nullopt);
 }
 
+TEST_CASE("A countdown shorter than the engine start moves T-0, the clock never runs back", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto requested = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    sim::StartOptions options;
+    options.wait_on_pad = true;  // countdown_s 0
+    sim::start_mission(session, STARSIM_CONFIG_DIR, "starship_leo", requested, time, options);
+    const auto& t = session.timeline();
+    REQUIRE(t.t0());
+    CHECK(*t.t0() - requested == session.liftoff_ignition_lead_s());
+    double last = *t.mission_clock_s(session.epoch());
+    bool monotonic = true;
+    while (session.epoch() - requested < 10.0) {
+        session.advance_to(session.epoch() + 0.05, 1000);
+        const double clock = *t.mission_clock_s(session.epoch());
+        monotonic = monotonic && clock >= last;
+        last = clock;
+    }
+    CHECK(monotonic);
+    const auto* liftoff = find_event(t, MissionEventKind::Liftoff);
+    REQUIRE(liftoff);
+    CHECK(std::abs(liftoff->epoch - *t.t0()) <= sim::FlightSession::tick_s);
+}
+
+TEST_CASE("A window liftoff closer than the engine start places the vehicle earlier", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    sim::FlightSession probe(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto window = sim::start_mission(probe, STARSIM_CONFIG_DIR, "falcon9_crew_dragon_iss", {}, time);
+    REQUIRE(window.launch_window);
+    const auto liftoff = window.launch_window->liftoff;
+    sim::StartOptions options;
+    options.wait_on_pad = true;
+    const auto st =
+        sim::start_mission(session, STARSIM_CONFIG_DIR, "falcon9_crew_dragon_iss", liftoff - 1.0, time, options);
+    REQUIRE(st.return_planned);
+    REQUIRE(session.timeline().t0());
+    CHECK(*session.timeline().t0() == liftoff);  // the window is kept
+    CHECK(liftoff - session.epoch() == session.liftoff_ignition_lead_s());
+    CHECK(st.epoch == session.epoch());
+}
+
+TEST_CASE("An ISS launch waits only where the station source of its liftoff covers", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    sim::StartOptions options;
+    options.wait_on_pad = true;
+    const auto requested = time.from_utc({2026, 9, 1, 0, 0, 0.0});  // long before the archived OEM
+    const auto st = sim::start_mission(session, STARSIM_CONFIG_DIR, "falcon9_crew_dragon_iss", requested, time, options);
+    INFO(st.refusal);
+    REQUIRE(st.return_planned);
+    REQUIRE(st.launch_window);
+    const auto archive = sim::iss_archive(STARSIM_CONFIG_DIR, time);
+    CHECK(session.epoch() - requested >= 0.0);
+    if (const auto* oem = archive.for_epoch(st.launch_window->liftoff)) {  // the OEM: the wait starts at its coverage
+        CHECK(session.epoch() == oem->header().usable_start);
+    }
+    CHECK(archive.for_epoch(session.epoch()) == archive.for_epoch(st.launch_window->liftoff));  // same file (or none)
+    CHECK(session.epoch() - st.launch_window->liftoff < 0.0);
+}
+
+TEST_CASE("Disengaging on the pad drops the scheduled liftoff", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto requested = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    sim::StartOptions options;
+    options.wait_on_pad = true;
+    options.countdown_s = 3600.0;
+    sim::start_mission(session, STARSIM_CONFIG_DIR, "starship_leo", requested, time, options);
+    session.advance_to(requested + 60.0, 4000);
+    REQUIRE(find_predicted(session.timeline(), MissionEventKind::Liftoff));
+    session.disengage_autopilot();
+    session.advance_to(requested + 120.0, 40000);
+    CHECK(find_predicted(session.timeline(), MissionEventKind::Liftoff) == nullptr);
+    CHECK_FALSE(session.timeline().t0().has_value());
+    CHECK(session.body(0).clamped());
+}
+
 TEST_CASE("An ISS launch can wait on the pad for its window", "[timeline]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
@@ -552,6 +635,18 @@ TEST_CASE("Predicted events follow the plan", "[timeline]") {
     const auto second = *session.ship_return_plan();
     CHECK(second.entry_interface_epoch != first.entry_interface_epoch);
     check_plan(second);
+
+    // while the deorbit burn is lit the entry interface stays predicted (the burn is the plan's node)
+    while (!session.autopilot().burn.ignite && session.autopilot().state == sim::AutopilotState::Burn) {
+        session.advance_to(session.epoch() + 10.0, 400000);
+    }
+    session.advance_to(session.epoch() + 2.0, 1000);
+    REQUIRE(session.autopilot().state == sim::AutopilotState::Burn);
+    REQUIRE(session.autopilot().burn.ignite);
+    const auto* entry = find_predicted(t, MissionEventKind::EntryInterface);
+    REQUIRE(entry);
+    CHECK(std::abs(entry->epoch - second.entry_interface_epoch) < 1e-6);
+    CHECK(find_predicted(t, MissionEventKind::Ignition) == nullptr);  // lit: no ignition ahead
 }
 
 TEST_CASE("A planned burn on cold gas records its ignition and cutoff", "[timeline]") {
@@ -589,6 +684,29 @@ TEST_CASE("A planned burn on cold gas records its ignition and cutoff", "[timeli
     CHECK(find_predicted(t, MissionEventKind::Ignition) == nullptr);
 }
 
+TEST_CASE("A cold-gas burn stopped by a disengage records its cutoff", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    const double r = constants::wgs84_semi_major_axis_m + 400e3;
+    const math::StateVector orbit{{r, 0.0, 0.0}, {0.0, std::sqrt(session.gm_earth_m3ps2() / r), 0.0}};
+    session.place_in_orbit("crew_dragon", orbit, t0);
+    session.reset_timeline();
+    const auto& s = session.body(session.controlled_index()).state();
+    REQUIRE(session.execute_burn({t0 + 400.0, 5.0 * math::normalized(s.velocity_gcrf_mps)}));  // ~40 s on the Dracos
+    const auto& t = session.timeline();
+    while (!find_event(t, MissionEventKind::Ignition) && session.epoch() - t0 < 900.0) {
+        session.advance_to(session.epoch() + 1.0, 1000);
+    }
+    REQUIRE(find_event(t, MissionEventKind::Ignition));
+    REQUIRE(session.autopilot().state == sim::AutopilotState::Burn);
+    session.disengage_autopilot();
+    CHECK(count_of(t, MissionEventKind::Cutoff) == 1);
+    session.advance_to(session.epoch() + 10.0, 10000);
+    CHECK(count_of(t, MissionEventKind::Cutoff) == 1);
+}
+
 TEST_CASE("The predicted undocking is the separation the mission records", "[timeline]") {
     test::spice_session();
     const spice::SpiceTimeConverter time;
@@ -603,7 +721,8 @@ TEST_CASE("The predicted undocking is the separation the mission records", "[tim
     const auto* predicted = find_predicted(t, MissionEventKind::Undocking);
     REQUIRE(predicted);
     const auto predicted_separation = predicted->epoch;
-    CHECK(std::abs(predicted_separation - command - 180.0) < 1e-3);  // the hooks open first (DockingMechanismParameters::hooks_open_s)
+    // the hooks open first
+    CHECK(std::abs(predicted_separation - command - contact::DockingMechanismParameters{}.hooks_open_s) < 1e-3);
     while (session.epoch() - st.epoch < 3600.0 && !find_event(t, MissionEventKind::Undocking)) {
         session.advance_to(session.epoch() + 10.0, 10000000);
         if (session.docking_phase() == contact::DockingPhase::HooksOpening) {  // in progress: still the separation

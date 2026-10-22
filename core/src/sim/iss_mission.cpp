@@ -117,6 +117,27 @@ math::StateVector phased_start(const math::StateVector& iss, time::Epoch epoch, 
     return {turn.rotate(unbiased.position_m), turn.rotate(unbiased.velocity_mps)};
 }
 
+// The wait on the pad (StartOptions::wait_on_pad) from where the ISS comes from the same source as at the liftoff -
+// the OEM file the window was planned with, or the synthetic orbit: a station placed from another file (or the synthetic
+// orbit before the file's coverage) would reach the liftoff off the planned one, and IssOrbitSource::Oem has no state
+// outside the coverage. Moved up to the first such epoch; none before the liftoff: no wait (nullopt).
+std::optional<time::Epoch> station_consistent_wait(const StationSource& station, std::optional<time::Epoch> wait_from,
+                                                   time::Epoch liftoff) {
+    constexpr int max_steps = 16;   // files passed over (the archive holds a few)
+    constexpr double past_s = 1.0;  // beyond a file's usable stop (its covers() includes the stop)
+    if (!wait_from || station.source == IssOrbitSource::Synthetic) return wait_from;
+    const orbit::Oem* at_liftoff = station.archive->for_epoch(liftoff);
+    time::Epoch pad = *wait_from;
+    for (int i = 0; i < max_steps && pad < liftoff; ++i) {
+        const orbit::Oem* at_pad = station.archive->for_epoch(pad);
+        if (at_pad == at_liftoff) return pad;
+        const time::Epoch next = at_pad ? at_pad->header().usable_stop + past_s : at_liftoff->header().usable_start;
+        if (!(pad < next)) break;
+        pad = next;
+    }
+    return std::nullopt;
+}
+
 // German: the station impulses (reboosts) in [from, to].
 void reboost_warnings(const StationStart& st, time::Epoch from, time::Epoch to, const time::TimeScaleConverter& time,
                       std::vector<std::string>& out) {
@@ -231,7 +252,8 @@ MissionStart start_iss_launch_mission(FlightSession& session, const std::filesys
         return s;
     }
     const auto ascent = config::load_ascent_mission(config_dir, mission.ascent_id);
-    s.epoch = start_ascent_mission_for_liftoff(session, ascent, config_dir, w.liftoff, wait_from);
+    s.epoch = start_ascent_mission_for_liftoff(session, ascent, config_dir, w.liftoff,
+                                               station_consistent_wait(station, wait_from, w.liftoff));
     const auto st = station.start(s.epoch);
     session.add_station(st.vehicle, st.state_gcrf, st.epoch, st.impulses);  // after the launch (it clears the bodies)
     IssMissionSequence q;

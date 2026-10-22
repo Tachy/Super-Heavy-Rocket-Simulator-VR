@@ -40,10 +40,22 @@ void start_ascent_mission(FlightSession& session, const config::AscentMission& m
 
 time::Epoch start_ascent_mission_for_liftoff(FlightSession& session, const config::AscentMission& mission,
                                              const std::filesystem::path& config_dir, time::Epoch liftoff,
-                                             std::optional<time::Epoch> wait_from) {
-    const time::Epoch pad = wait_from && *wait_from - liftoff < 0.0 ? *wait_from : liftoff;
+                                             std::optional<time::Epoch> wait_from, bool fixed_liftoff) {
+    time::Epoch pad = wait_from && *wait_from - liftoff < 0.0 ? *wait_from : liftoff;
     start_ascent_mission(session, mission, config_dir, pad);
-    if (wait_from) session.schedule_liftoff(liftoff);
+    if (!wait_from) return pad;
+    // the engines need the lead before T-0: a fixed liftoff moves the placement earlier, a countdown T-0 later
+    const double lead_s = session.liftoff_ignition_lead_s();
+    time::Epoch t0 = liftoff;
+    if (liftoff - pad < lead_s) {
+        if (fixed_liftoff) {
+            pad = liftoff - lead_s;
+            start_ascent_mission(session, mission, config_dir, pad);
+        } else {
+            t0 = pad + lead_s;
+        }
+    }
+    session.schedule_liftoff(t0);
     return pad;
 }
 
