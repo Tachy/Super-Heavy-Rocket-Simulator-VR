@@ -78,6 +78,40 @@ func _initialize() -> void:
 	_check(head_global.origin.length() < 1e-9 and head_global.basis.is_equal_approx(base),
 			"after recentre the head sits at the base pose (render origin)")
 
+	_check_vr_panel_mesh()
+
+
+# VR overlay panel: every vertex on the 2 m sphere around the eye, inside +-H_FOV/2 of -Z, front faces inward.
+func _check_vr_panel_mesh() -> void:
+	var arrays := VrOverlayPanel.build_mesh().surface_get_arrays(0)
+	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var half_h := deg_to_rad(VrOverlayPanel.H_FOV_DEG) / 2.0
+	var max_radius_error := 0.0
+	var max_azimuth := 0.0
+	var max_elevation := 0.0
+	for v in vertices:
+		max_radius_error = maxf(max_radius_error, absf(v.length() - VrOverlayPanel.RADIUS_M))
+		max_azimuth = maxf(max_azimuth, absf(atan2(v.x, -v.z)))
+		max_elevation = maxf(max_elevation, absf(asin(v.y / v.length())))
+	_check(vertices.size() == (VrOverlayPanel.SEGMENTS_H + 1) * (VrOverlayPanel.SEGMENTS_V + 1),
+			"panel mesh: 64 x 36 segments")
+	_check(max_radius_error < 1e-3, "panel mesh: every vertex 2.0 m from the eye (max error %s m)"
+			% String.num_scientific(max_radius_error))
+	_check(max_azimuth <= half_h + 1e-6, "panel mesh: azimuth within +-H_FOV/2 (max %.3f deg)" % rad_to_deg(max_azimuth))
+	_check(max_elevation <= half_h * 9.0 / 16.0 + 1e-6, "panel mesh: 16:9 vertical span (max %.3f deg)" % rad_to_deg(max_elevation))
+	var inward := true
+	for t in indices.size() / 3:
+		var a := vertices[indices[3 * t]]
+		var normal := (vertices[indices[3 * t + 1]] - a).cross(vertices[indices[3 * t + 2]] - a)
+		inward = inward and normal.dot(a) > 0.0  # clockwise seen from the origin = outward right-hand normal
+	_check(inward, "panel mesh: all triangles wound as front faces seen from the eye")
+	var material := VrOverlayPanel.build_material(null)
+	_check(material.blend_mode == BaseMaterial3D.BLEND_MODE_PREMULT_ALPHA and material.no_depth_test
+			and material.cull_mode == BaseMaterial3D.CULL_BACK
+			and material.render_priority == RenderingServer.MATERIAL_RENDER_PRIORITY_MAX,
+			"panel material: premultiplied, no depth test, cull back, max priority")
+
 
 func _process(_delta: float) -> bool:
 	_frames += 1

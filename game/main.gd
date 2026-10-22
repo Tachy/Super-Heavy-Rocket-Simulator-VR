@@ -18,8 +18,13 @@ func _ready() -> void:
 	overlay_host.overlay.world = world
 	add_child(overlay_host)
 	var xr := get_node_or_null("/root/XrManager")
-	if xr == null or not xr.xr_active:
-		overlay_host.show_on_desktop(WEBCAST_LAYER)  # in VR the curved panel shows overlay_host.viewport
+	if xr != null and xr.xr_active:
+		# VR: the overlay sits on a curved panel fixed to the base pose (not the head)
+		var vr_panel := VrOverlayPanel.new()
+		xr.origin.add_child(vr_panel)
+		vr_panel.setup(overlay_host.viewport.get_texture())
+	else:
+		overlay_host.show_on_desktop(WEBCAST_LAYER)
 	var ui := CanvasLayer.new()
 	ui.layer = PANEL_LAYER
 	add_child(ui)
