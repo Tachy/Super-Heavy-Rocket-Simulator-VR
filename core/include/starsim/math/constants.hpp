@@ -20,6 +20,8 @@ inline constexpr double sutton_graves_earth_si = 1.7415e-4;
 
 // Standard atmosphere sea-level pressure, exact by definition.
 inline constexpr double standard_pressure_pa = 101325.0;
+// US Standard Atmosphere 1976 sea-level density (NOAA-S/T 76-1562, Table I): the reference of equivalent airspeed.
+inline constexpr double standard_sea_level_density_kg_m3 = 1.225;
 
 // Seconds per Julian day; Julian date of the J2000.0 epoch (2000-01-01 12:00:00 TT).
 inline constexpr double seconds_per_day = 86400.0;
