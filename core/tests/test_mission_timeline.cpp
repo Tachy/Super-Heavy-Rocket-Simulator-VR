@@ -13,12 +13,14 @@
 #include "starsim/config/propellant_loading.hpp"
 #include "starsim/gnc/entry_attitude.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/sim/lunar_return_mission.hpp"
 #include "starsim/sim/mission_event_observer.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/mission_timeline.hpp"
+#include "starsim/sim/refuelling_mission.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -284,8 +286,6 @@ namespace {
 constexpr double deg = constants::deg_to_rad;
 
 // The ship alone; `propellant_kg` < 0: its landing propellant (as the entry tests).
-// The ship alone; `propellant_kg` < 0: its landing propellant (as the entry tests).
-// The ship alone; `propellant_kg` < 0: its landing propellant (as the entry tests).
 config::VehicleConfig ship_alone(double propellant_kg) {
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
     cfg.stages.erase(cfg.stages.begin());
@@ -401,6 +401,221 @@ TEST_CASE("Falcon 9 cold staging records MECO without a second cutoff", "[timeli
     for (const auto& e : t.recorded()) {  // the tail-off after the MECO is no event of its own
         if (e.body_serial == meco->body_serial && e.kind == MissionEventKind::Cutoff) CHECK(e.epoch - meco->epoch > 5.0);
     }
+}
+
+namespace {
+const MissionEvent* find_predicted(const sim::MissionTimeline& t, MissionEventKind kind) {
+    for (const auto& e : t.predicted()) {
+        if (e.kind == kind) return &e;
+    }
+    return nullptr;
+}
+}  // namespace
+
+TEST_CASE("A scheduled liftoff waits on the pad and lifts off at T-0", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto e = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    sim::start_mission(session, STARSIM_CONFIG_DIR, "starship_leo", e, time);  // on the pad, ascent autopilot engaged
+    const auto t0 = e + 6.0 * 3600.0;
+    session.schedule_liftoff(t0);
+    const auto& t = session.timeline();
+    REQUIRE(t.t0());
+    CHECK(*t.t0() == t0);
+    CHECK(*t.mission_clock_s(session.epoch()) == -6.0 * 3600.0);
+    CHECK(session.liftoff_ignition_lead_s() == 3.5);  // Raptor 3 start-up 3.0 s + 0.5 s hold margin
+    const double pad_altitude_m = session.telemetry(0).altitude_m;
+
+    // the hold coasts: one call reaches its target with few ticks
+    const auto hold_end = t0 - session.liftoff_ignition_lead_s() - sim::FlightSession::burn_preparation_s - 10.0;
+    CHECK(session.advance_to(hold_end, 4000) == hold_end);
+    CHECK(session.body(0).clamped());
+    CHECK(std::abs(session.telemetry(0).altitude_m - pad_altitude_m) < 0.1);
+    const auto* predicted = find_predicted(t, MissionEventKind::Liftoff);
+    REQUIRE(predicted);
+    CHECK(predicted->epoch == t0);
+    CHECK(find_event(t, MissionEventKind::EngineStart) == nullptr);
+
+    session.advance_to(t0 - 10.0, 1000000);
+    CHECK(std::abs(session.telemetry(0).altitude_m - pad_altitude_m) < 0.1);
+    session.advance_to(t0 + 20.0, 1000000);
+    print_events(t);
+    const auto* start = find_event(t, MissionEventKind::EngineStart);
+    const auto* liftoff = find_event(t, MissionEventKind::Liftoff);
+    REQUIRE(start);
+    REQUIRE(liftoff);
+    CHECK(liftoff->epoch - t0 >= 0.0);
+    CHECK(liftoff->epoch - t0 <= 1.0);
+    CHECK(start->epoch - t0 >= -3.5 - 0.1);
+    CHECK(start->epoch - t0 <= 0.0);
+    CHECK(session.telemetry(session.controlled_index()).altitude_m - pad_altitude_m > 10.0);
+}
+
+TEST_CASE("An ascent waiting on the pad counts down from the requested epoch", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto requested = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    sim::StartOptions options;
+    options.wait_on_pad = true;
+    options.countdown_s = 600.0;  // starship_leo has no [mission] countdown_s
+    sim::start_mission(session, STARSIM_CONFIG_DIR, "starship_leo", requested, time, options);
+    CHECK(session.epoch() == requested);
+    REQUIRE(session.timeline().t0());
+    CHECK(*session.timeline().t0() == requested + 600.0);
+    CHECK(*session.timeline().mission_clock_s(session.epoch()) == -600.0);
+    CHECK(config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo").countdown_s == std::nullopt);
+}
+
+TEST_CASE("An ISS launch can wait on the pad for its window", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto m = config::load_iss_launch_mission(STARSIM_CONFIG_DIR, "falcon9_crew_dragon_iss");
+    const auto requested = time.from_utc(m.earliest_utc);
+    sim::StartOptions options;
+    options.wait_on_pad = true;
+    const auto st = sim::start_mission(session, STARSIM_CONFIG_DIR, "falcon9_crew_dragon_iss", requested, time, options);
+    INFO(st.refusal);
+    REQUIRE(st.return_planned);
+    REQUIRE(st.launch_window);
+    CHECK(session.epoch() == requested);
+    REQUIRE(session.timeline().t0());
+    CHECK(*session.timeline().t0() == st.launch_window->liftoff);
+    CHECK(*session.timeline().mission_clock_s(session.epoch()) < 0.0);
+    REQUIRE(session.station_index());
+    CHECK(session.body(0).clamped());
+}
+
+namespace {
+// The ship of ship_return_starbase on its start orbit (as test_ship_return_mission.cpp places it).
+void place_ship_return(sim::FlightSession& session, const config::ShipReturnMission& m, time::Epoch t0) {
+    session.set_launch_site(sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id)));
+    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, m.vehicle_id);
+    while (!cfg.stages.empty() && cfg.stages.front().id != m.stage_id) cfg.stages.erase(cfg.stages.begin());
+    REQUIRE(!cfg.stages.empty());
+    config::fill_tanks(cfg.stages[0], m.propellant_kg);
+    const double re = constants::wgs84_semi_major_axis_m;
+    const double rp = re + m.periapsis_height_m, ra = re + m.apoapsis_height_m;
+    const orbit::KeplerianElements elements{0.5 * (rp + ra), (ra - rp) / (ra + rp), m.inclination_rad, m.raan_rad, 0.0,
+                                            m.argument_of_latitude_rad};
+    const auto s = orbit::state_from_elements(elements, session.gm_earth_m3ps2());
+    const math::Vec3 x = math::normalized(s.velocity_mps);
+    const math::Vec3 z = math::normalized(s.position_m);
+    const math::Vec3 y = cross(z, x);
+    math::Mat3 r;
+    const math::Vec3 columns[3] = {x, y, z};
+    for (int c = 0; c < 3; ++c) {
+        r(0, c) = columns[c].x;
+        r(1, c) = columns[c].y;
+        r(2, c) = columns[c].z;
+    }
+    session.place_body(cfg, {s.position_m, s.velocity_mps, math::Quat::from_matrix(r), {}}, t0);
+}
+}  // namespace
+
+TEST_CASE("Predicted events follow the plan", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto m = config::load_ship_return_mission(STARSIM_CONFIG_DIR, "ship_return_starbase");
+    place_ship_return(session, m, time.from_utc(m.epoch_utc));
+    auto p = sim::ship_deorbit_parameters(m.deorbit);
+    p.search_window_s = m.deorbit.search_window_s;
+    REQUIRE(session.plan_ship_return(p));
+    const auto first = *session.ship_return_plan();
+    REQUIRE(first.node.epoch - session.epoch() > sim::FlightSession::deorbit_replan_age_s);
+    session.advance_to(session.epoch() + 60.0, 100000);
+    const auto& t = session.timeline();
+    const auto check_plan = [&](const gnc::DeorbitPlan& plan) {
+        const auto* ignition = find_predicted(t, MissionEventKind::Ignition);
+        const auto* entry = find_predicted(t, MissionEventKind::EntryInterface);
+        REQUIRE(ignition);
+        REQUIRE(entry);
+        // the ignition comes half the burn before the impulsive node
+        CHECK(plan.node.epoch - ignition->epoch >= 0.0);
+        CHECK(plan.node.epoch - ignition->epoch < 120.0);
+        CHECK(std::abs(entry->epoch - plan.entry_interface_epoch) < 1e-6);
+        CHECK(std::count_if(t.predicted().begin(), t.predicted().end(), [](const MissionEvent& e) {
+                  return e.kind == MissionEventKind::Ignition;
+              }) == 1);  // the pending burn stands for the plan's
+    };
+    check_plan(first);
+    REQUIRE(t.t0());  // an orbit mission: T- until the deorbit burn
+    CHECK(*t.mission_clock_s(session.epoch()) < 0.0);
+
+    // the far plan is planned again deorbit_replan_lead_s before its burn: the predicted events follow it
+    const auto replanned = first.node.epoch - sim::FlightSession::deorbit_replan_lead_s + 600.0;
+    while (session.epoch() < replanned) session.advance_to(session.epoch() + 1800.0, 400000);
+    REQUIRE(session.ship_return_plan());
+    const auto second = *session.ship_return_plan();
+    CHECK(second.entry_interface_epoch != first.entry_interface_epoch);
+    check_plan(second);
+}
+
+TEST_CASE("A planned burn on cold gas records its ignition and cutoff", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    const double r = constants::wgs84_semi_major_axis_m + 400e3;
+    const math::StateVector orbit{{r, 0.0, 0.0}, {0.0, std::sqrt(session.gm_earth_m3ps2() / r), 0.0}};
+    session.place_in_orbit("crew_dragon", orbit, t0);  // no main engines: the burn flies on the Dracos
+    session.reset_timeline();
+    const auto serial = session.body_serial(session.controlled_index());
+    const auto& s = session.body(session.controlled_index()).state();
+    const gnc::BurnNode node{t0 + 400.0, 0.5 * math::normalized(s.velocity_gcrf_mps)};
+    REQUIRE(session.execute_burn(node));
+    session.advance_to(t0 + 1.0, 1000);
+    const auto* predicted = find_predicted(session.timeline(), MissionEventKind::Ignition);
+    REQUIRE(predicted);
+    const auto predicted_ignition = predicted->epoch;
+    CHECK(predicted->body_name == "Crew Dragon capsule");  // the thrusters' part, not the trunk below it
+    while (session.autopilot().state == sim::AutopilotState::Burn && session.epoch() - t0 < 1800.0) {
+        session.advance_to(session.epoch() + 10.0, 100000);
+    }
+    const auto& t = session.timeline();
+    print_events(t);
+    REQUIRE(session.autopilot().state != sim::AutopilotState::Burn);
+    CHECK(contains_in_order(t.recorded(), {MissionEventKind::Ignition, MissionEventKind::Cutoff}, serial));
+    CHECK(count_of(t, MissionEventKind::Ignition) == 1);
+    CHECK(count_of(t, MissionEventKind::Cutoff) == 1);
+    const auto* ignition = find_event(t, MissionEventKind::Ignition);
+    REQUIRE(ignition);
+    CHECK(std::abs(ignition->epoch - predicted_ignition) < 1.0);
+    CHECK(ignition->body_name == "Crew Dragon capsule");
+    CHECK(node.epoch - ignition->epoch >= 0.0);
+    CHECK(find_predicted(t, MissionEventKind::Ignition) == nullptr);
+}
+
+TEST_CASE("The predicted undocking is the separation the mission records", "[timeline]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(timeline_ephemeris(), timeline_earth(), STARSIM_CONFIG_DIR);
+    const auto st = sim::start_mission(session, STARSIM_CONFIG_DIR, "crew_dragon_iss_departure", {}, time);
+    INFO(st.refusal);
+    REQUIRE(st.return_planned);
+    REQUIRE(session.iss_mission());
+    const auto command = *session.iss_mission()->undock_epoch;
+    session.advance_to(session.epoch() + 1.0, 1000);
+    const auto& t = session.timeline();
+    const auto* predicted = find_predicted(t, MissionEventKind::Undocking);
+    REQUIRE(predicted);
+    const auto predicted_separation = predicted->epoch;
+    CHECK(std::abs(predicted_separation - command - 180.0) < 1e-3);  // the hooks open first (DockingMechanismParameters::hooks_open_s)
+    while (session.epoch() - st.epoch < 3600.0 && !find_event(t, MissionEventKind::Undocking)) {
+        session.advance_to(session.epoch() + 10.0, 10000000);
+        if (session.docking_phase() == contact::DockingPhase::HooksOpening) {  // in progress: still the separation
+            const auto* p = find_predicted(t, MissionEventKind::Undocking);
+            REQUIRE(p);
+            CHECK(std::abs(p->epoch - predicted_separation) < 0.1);
+        }
+    }
+    const auto* undocking = find_event(t, MissionEventKind::Undocking);
+    REQUIRE(undocking);
+    CHECK(std::abs(undocking->epoch - predicted_separation) < 0.1);
+    CHECK(find_predicted(t, MissionEventKind::Undocking) == nullptr);
 }
 
 TEST_CASE("Mission event probe", "[.][probe][timeline_probe]") {  // STARSIM_PROBE_MISSION, STARSIM_PROBE_S: prints the log

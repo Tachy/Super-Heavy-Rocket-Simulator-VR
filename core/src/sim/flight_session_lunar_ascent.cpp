@@ -75,6 +75,13 @@ bool FlightSession::plan_lunar_ascent(const gnc::LunarAscentParameters& paramete
     return true;
 }
 
+std::optional<time::Epoch> FlightSession::lunar_ascent_liftoff_epoch() const {
+    // the stay ends in an ascent: planned with a delay, or the landing setup's ascent (planned when the stay ends)
+    const bool ascends = lunar_ascent_parameters_ || (lunar_landing_setup_ && lunar_landing_setup_->ascent);
+    if (lunar_step_ == LunarStep::SurfaceStay && ascends) return lunar_step_epoch_;
+    return std::nullopt;
+}
+
 void FlightSession::lunar_liftoff(Flying& flying) {
     auto& body = *flying.body;
     const auto frame = moon_->frame(epoch_);

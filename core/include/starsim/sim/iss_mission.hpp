@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 
 #include "starsim/config/mission_config.hpp"
 #include "starsim/mission/iss_launch_window.hpp"
@@ -34,9 +35,12 @@ MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::fil
 // liftoff, the ISS added, the sequence set (ascent -> phasing after the separation -> proximity -> docking). Epoch:
 // the liftoff. Refused (German refusal, nothing launched): no window. Warnings: the ISS source note and station
 // reboosts between the liftoff and the mission limit.
+// `wait_from`: on the pad from then, the window's liftoff scheduled (StartOptions::wait_on_pad); the ISS is placed at
+// the session epoch.
 MissionStart start_iss_launch_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                       const config::IssLaunchMission& mission, const orbit::OemArchive& archive,
-                                      const time::TimeScaleConverter& time);
+                                      const time::TimeScaleConverter& time,
+                                      std::optional<time::Epoch> wait_from = std::nullopt);
 
 // start_mission's iss_departure branch: the first capsule-return pass at least undock_to_deorbit_s after epoch_utc
 // (previewed on the docked Dragon), the Dragon docked at the port (dock_in_place) iss_departure_start_lead_s before the

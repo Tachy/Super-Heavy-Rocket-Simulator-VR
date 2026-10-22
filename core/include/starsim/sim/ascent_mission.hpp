@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 
 #include "starsim/config/mission_config.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -15,5 +16,13 @@ namespace starsim::sim {
 void start_ascent_mission(FlightSession& session, const config::AscentMission& mission,
                           const std::filesystem::path& config_dir, time::Epoch epoch,
                           const config::VehicleConfig* vehicle = nullptr, bool keep_station = false);
+
+// start_ascent_mission for a liftoff at `liftoff`. With `wait_from` (StartOptions::wait_on_pad) the vehicle stands on
+// the pad from then (from the liftoff when wait_from is not earlier) and the liftoff is scheduled (FlightSession::
+// schedule_liftoff); without, it is placed at the liftoff and lifts off as soon as its engines run. Returns the epoch
+// the vehicle was placed at (the session epoch).
+time::Epoch start_ascent_mission_for_liftoff(FlightSession& session, const config::AscentMission& mission,
+                                             const std::filesystem::path& config_dir, time::Epoch liftoff,
+                                             std::optional<time::Epoch> wait_from);
 
 }  // namespace starsim::sim

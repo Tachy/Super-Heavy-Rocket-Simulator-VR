@@ -22,6 +22,17 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   T+152-176 s (flight 14 ~152-187 s), apogee 91.8 km at T+236 s (98.9 km, T+240 s), landing-burn ignition T+390 s
   (~T+398 s) at 287 m/s / 2.2 km (flights 13/14: ~355 m/s at ~2.9 km; subsonic drag is not measured). The earlier
   "~207 t, boostback ~1.5 km/s" came from the default full-thrust ascent (MECO at ~97 km climbing at 1.7 km/s).
+- **Scheduled liftoff and pad hold** (external view, Task 4): `FlightSession::schedule_liftoff(t0)` gives the stack on
+  the pad a T-0. The ascent autopilot (`PreLaunch`) then holds: the engines start `liftoff_ignition_lead_s()` before
+  T-0 (longest first-stage `startup_s` + `liftoff_hold_margin_s` 0.5 s [E]; Raptor 3: 3.5 s) and the clamps open at
+  the first tick with all engines running at or after T-0 (test: engine start T-3.49 s, liftoff at T-0 within a tick).
+  While waiting the clamped stack coasts (`FlightBody::coast` keeps a clamped body on its pad, co-rotating) until
+  `burn_preparation_s` before the ignition, so hours on the pad cost a few coast segments. Without a schedule the
+  liftoff follows the engine start at once (unchanged). `sim::StartOptions{wait_on_pad, countdown_s}` of
+  `start_mission`: launch missions (ascent, iss_launch, depot_launch, tanker_flight / hls_refuel from the pad) stand on
+  the pad from `requested` and lift off at the window's liftoff (depot_launch: its epoch; ascent: `requested` +
+  `[mission] countdown_s`, else the option's `countdown_s`); their stations are placed at the session epoch. The default
+  (`wait_on_pad = false`) places the vehicle at the liftoff as before.
 - Circular ascent targets are J2-aware (`gnc/j2_insertion`): when the gravity model has J2
   (`GravityModel::central_j2`), PEG aims at the radius, radial and horizontal speed at the predicted cutoff point whose
   next revolution stays closest to the target radius (Gauss-Newton on a point-mass + J2 revolution, re-solved when the
@@ -1755,4 +1766,32 @@ water"; data + game interface first, the pilot's view rendered later; **the ship
 - **Tests:** `[crew_escape]` (`test_crew_escape_config.cpp`, `test_ejection_seat.cpp`, `test_catch_feasibility.cpp`,
   `test_entry_give_up.cpp`, `test_crew_escape_session.cpp`, `test_crew_escape_mission.cpp`; `[slow]`: the entry
   engine failure, the flip abort, the crewed orbit and lunar returns).
+
+## Mission timeline
+
+Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure data in `sim::MissionTimeline`
+(`mission_timeline.hpp`): recorded (past) and predicted events, each with body serial and the acting part's name.
+- **T-0 rules:** the first recorded Liftoff; on a pad mission the scheduled liftoff; else the first recorded Ignition /
+  Undocking, then the earliest predicted one. The mission clock is `now - T-0` (T- before, T+ after).
+- **Recorded:** by `FlightSession` at exact moments (liftoff, stage / payload / trunk separation with MECO at hot
+  staging, hard capture, undocking at the physical separation - mechanism phase Separated, `hooks_open_s` 180 s after
+  the command -, crew ejection) and by `MissionEventObserver` (0.1 s sampling while ticking, after each coast: engine
+  starts / cutoffs, booster return phases, Max Q, entry interface, parachutes, landing outcomes). A planned burn flown
+  on RCS translation (no main engine fires: Crew Dragon, a small Starship burn on cold gas) records Ignition and Cutoff
+  at the burn executor's start and end, named by the upper stage (its thrusters); RCS attitude control and proximity
+  translation are no events.
+- **Predicted** (`predicted_mission_events`, `predicted_events.cpp`; set at the end of every `advance_to`): the
+  scheduled liftoff, a lunar ascent's liftoff, the docked pair's separation (`FlightSession::undock_separation_epoch`:
+  the ISS mission's undocking epoch + hooks opening, or the hooks' end while they open - the predicted dot and the
+  recorded event agree within a tick), the pending burn's ignition (from the executor's time to ignition: a finite burn
+  starts before its impulsive node), the deorbit burn and entry interface of a ship / capsule return, the not yet
+  commanded burns of the lunar outbound, descent (incl. PDI) and return plans (with the braking burn and the entry
+  interface) and of the rendezvous plan, and the campaign supervisor's next launch (Launch). A plan burn within
+  `same_burn_s` 600 s [E] of the pending or a commanded burn is that burn (re-targeted at the command) and not shown
+  twice. Re-plans move the predicted events (test: the deorbit re-plan 3 h before the burn).
+- **Tests:** `[timeline]` (`test_mission_timeline.cpp`): T-0 rules; the recorded ascent, booster return, flip and
+  catch, cold staging, lunar-return loft, undocking; scheduled liftoff with pad hold (one 4000-tick call coasts 5.96 h,
+  altitude within 0.1 m of the pad); waiting ISS launch; countdown of a waiting ascent; predicted deorbit events before
+  and after the re-plan; the Dragon's RCS burn (Ignition / Cutoff, predicted ignition within 1 s); predicted vs recorded
+  undocking.
 

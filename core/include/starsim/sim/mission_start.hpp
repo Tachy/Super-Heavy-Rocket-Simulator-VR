@@ -25,6 +25,16 @@ struct MissionStart {
     std::optional<mission::LaunchWindow> launch_window;  // ISS launch / rendezvous from a window's separation
 };
 
+struct StartOptions {
+    // Launch missions (ascent, iss_launch, depot_launch, and tanker_flight / hls_refuel from the pad) stand on the pad
+    // from `requested` and lift off at their scheduled T-0 (FlightSession::schedule_liftoff): the window's liftoff, the
+    // config's epoch (depot_launch) or, for an ascent, `requested` + countdown ([mission] countdown_s, else
+    // `countdown_s` below). A T-0 before `requested` is flown as without waiting (placed at T-0). Stations of these
+    // missions are placed at the session epoch. false: placed at the liftoff, lifting off at once (the default).
+    bool wait_on_pad = false;
+    double countdown_s = 0.0;
+};
+
 // Starts mission `mission_id` of config/missions on `session` by its [mission] kind:
 // - ascent: start_ascent_mission at `requested`;
 // - capsule_return: place_capsule_return_mission at the mission's [orbit] epoch_utc (its RAAN belongs to that epoch),
@@ -40,6 +50,7 @@ struct MissionStart {
 // - ship_return: refused (std::invalid_argument): the ship returns from the orbit it flew to (plan_ship_return).
 // Every start removes a previous campaign's supervisor first.
 MissionStart start_mission(FlightSession& session, const std::filesystem::path& config_dir, std::string_view mission_id,
-                           time::Epoch requested, const time::TimeScaleConverter& time);
+                           time::Epoch requested, const time::TimeScaleConverter& time,
+                           const StartOptions& options = {});
 
 }  // namespace starsim::sim

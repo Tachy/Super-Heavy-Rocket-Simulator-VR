@@ -183,6 +183,9 @@ struct AscentMission {
     bool northerly = true;
     double kick_angle_rad = 0.0;
     std::vector<std::pair<double, double>> booster_throttle;  // {mission time s, fraction}
+    // [mission] countdown_s: requested epoch -> T-0 when the mission waits on the pad (sim::StartOptions); none: the
+    // start option's default
+    std::optional<double> countdown_s;
 };
 
 AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::string_view mission_id);

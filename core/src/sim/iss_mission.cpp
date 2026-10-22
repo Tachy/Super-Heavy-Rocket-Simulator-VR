@@ -217,7 +217,7 @@ MissionStart start_iss_rendezvous_mission(FlightSession& session, const std::fil
 
 MissionStart start_iss_launch_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                       const config::IssLaunchMission& mission, const orbit::OemArchive& archive,
-                                      const time::TimeScaleConverter& time) {
+                                      const time::TimeScaleConverter& time, std::optional<time::Epoch> wait_from) {
     MissionStart s;
     s.kind = config::MissionKind::IssLaunch;
     const auto& earth = session.earth_orientation();
@@ -231,8 +231,8 @@ MissionStart start_iss_launch_mission(FlightSession& session, const std::filesys
         return s;
     }
     const auto ascent = config::load_ascent_mission(config_dir, mission.ascent_id);
-    start_ascent_mission(session, ascent, config_dir, w.liftoff);
-    const auto st = station.start(w.liftoff);
+    s.epoch = start_ascent_mission_for_liftoff(session, ascent, config_dir, w.liftoff, wait_from);
+    const auto st = station.start(s.epoch);
     session.add_station(st.vehicle, st.state_gcrf, st.epoch, st.impulses);  // after the launch (it clears the bodies)
     IssMissionSequence q;
     q.station_port = mission.port;
@@ -240,7 +240,6 @@ MissionStart start_iss_launch_mission(FlightSession& session, const std::filesys
     q.phasing.mission_limit_s = mission.mission_limit_s - mission.window.insertion_s;  // from the separation
     q.phasing.earliest_arrival_s = std::max(0.0, mission.earliest_arrival_s - mission.window.insertion_s);
     session.set_iss_mission(q);
-    s.epoch = w.liftoff;
     s.site_id = ascent.site_id;
     s.warnings.push_back(st.note);
     reboost_warnings(st, w.liftoff, w.liftoff + mission.mission_limit_s, time, s.warnings);

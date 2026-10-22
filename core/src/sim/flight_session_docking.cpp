@@ -340,6 +340,18 @@ bool FlightSession::undock() {
     return true;
 }
 
+std::optional<time::Epoch> FlightSession::undock_separation_epoch() const {
+    if (!docking_) return std::nullopt;
+    if (const auto opening = docking_->separation_epoch()) return opening;
+    if (docking_->mechanism().phase() == contact::DockingPhase::Docked && iss_leg_ == IssMissionLeg::WaitUndock &&
+        iss_mission_ && iss_mission_->undock_epoch) {
+        // run_iss_mission commands the undocking at its epoch (or at once when that has passed)
+        const time::Epoch command = epoch_ < *iss_mission_->undock_epoch ? *iss_mission_->undock_epoch : epoch_;
+        return command + docking_->mechanism().parameters().hooks_open_s;
+    }
+    return std::nullopt;
+}
+
 void FlightSession::separate_docked() {
     auto& chaser = *bodies_[controlled_].body;
     auto& station = *bodies_[*station_index_].body;

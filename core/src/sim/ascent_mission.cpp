@@ -38,4 +38,13 @@ void start_ascent_mission(FlightSession& session, const config::AscentMission& m
         {mission.periapsis_height_m, mission.apoapsis_height_m, mission.inclination_rad, mission.northerly}, program);
 }
 
+time::Epoch start_ascent_mission_for_liftoff(FlightSession& session, const config::AscentMission& mission,
+                                             const std::filesystem::path& config_dir, time::Epoch liftoff,
+                                             std::optional<time::Epoch> wait_from) {
+    const time::Epoch pad = wait_from && *wait_from - liftoff < 0.0 ? *wait_from : liftoff;
+    start_ascent_mission(session, mission, config_dir, pad);
+    if (wait_from) session.schedule_liftoff(liftoff);
+    return pad;
+}
+
 }  // namespace starsim::sim

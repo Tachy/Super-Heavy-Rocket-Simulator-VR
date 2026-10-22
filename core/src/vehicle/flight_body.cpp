@@ -618,7 +618,8 @@ void FlightBody::coast(const FlightEnvironment& env, time::Epoch epoch, double d
         return;
     }
     vehicle_->stop_rcs();  // a pulse in progress ends: its mass flow must not run through the whole segment
-    if (resting_ || caught_ || landed_) {  // stays on the ground / on the tower, co-rotating with its body
+    // stays on the pad (clamped: a scheduled liftoff's hold), the ground or the tower, co-rotating with its body
+    if (clamped_ || resting_ || caught_ || landed_) {
         follow_pad(reference_body_of(env, held_on_).frame(epoch + duration_s));
         return;
     }

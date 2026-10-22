@@ -4,6 +4,7 @@
 // its config's epoch (the ISS missions' convention), not at start_mission's `requested`.
 
 #include <filesystem>
+#include <optional>
 
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/refuelling_mission_config.hpp"
@@ -20,8 +21,10 @@ namespace starsim::sim {
 
 // depot_launch: the depot stack from its pad; at orbit insertion the ship becomes the station (sequence
 // ascent_to_station), the booster flies on to the catch.
+// `wait_from`: on the pad from then, the liftoff scheduled (StartOptions::wait_on_pad, start_ascent_mission_for_liftoff).
 MissionStart start_depot_launch_mission(FlightSession& session, const std::filesystem::path& config_dir,
-                                        const config::DepotLaunchMission& mission, const time::TimeScaleConverter& time);
+                                        const config::DepotLaunchMission& mission, const time::TimeScaleConverter& time,
+                                        std::optional<time::Epoch> wait_from = std::nullopt);
 
 // The depot of a refuelling flight at any epoch: its [depot] mean elements at `reference` advanced by the J2 rates
 // (true equator frame, as the synthetic ISS). `earth` must outlive the returned function.
@@ -70,8 +73,10 @@ MissionStart launch_campaign_flight(FlightSession& session, const std::filesyste
                                     const mission::LaunchWindowParameters& parameters);
 // tanker_flight / hls_refuel: the depot placed from [depot]; the chaser launched in its window (Pad) or placed behind
 // the depot (PhasingOrbit); the chain to the transfer and on (tanker: ship return to the catch).
+// `wait_from` (a Pad start): as start_depot_launch_mission; the depot is placed at the session epoch.
 MissionStart start_refuelling_flight_mission(FlightSession& session, const std::filesystem::path& config_dir,
                                              const config::RefuellingFlightMission& mission,
-                                             const time::TimeScaleConverter& time);
+                                             const time::TimeScaleConverter& time,
+                                             std::optional<time::Epoch> wait_from = std::nullopt);
 
 }  // namespace starsim::sim

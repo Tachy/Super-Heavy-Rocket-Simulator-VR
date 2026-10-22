@@ -86,6 +86,11 @@ public:
     // as after a hard capture. False + refusal() outside Ready.
     bool start_docked(double t_s);
     bool separation_due();    // true once, when Separated is reached
+    // While the hooks open: when the springs separate the pair (mechanism clock); nullopt otherwise.
+    std::optional<double> separation_t_s() const {
+        if (phase_ != DockingPhase::HooksOpening) return std::nullopt;
+        return phase_since_s_ + p_.hooks_open_s;
+    }
     void rearm();             // Failed -> Ready (a new approach); no-op otherwise
     bool hard_captured() const { return phase_ == DockingPhase::Docked; }
     DockingPhase phase() const { return phase_; }

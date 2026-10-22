@@ -395,6 +395,15 @@ public:
     // hot staging, closed-loop upper-stage guidance to the target orbit, cutoff. Pilot input is ignored
     // while engaged.
     void engage_ascent_autopilot(const gnc::AscentTarget& target, const gnc::PitchProgram& program = {});
+    // Scheduled liftoff (T-0) of the vehicle on the pad; nullopt: lift off as soon as the engines run. With a schedule
+    // the ascent autopilot (PreLaunch) holds on the pad, ignites liftoff_ignition_lead_s() before T-0 and releases the
+    // clamps at the first tick with all engines running at or after T-0; the hold coasts until burn_preparation_s
+    // before the ignition. Also sets the timeline's scheduled liftoff. A new flight clears it, so does the liftoff.
+    void schedule_liftoff(std::optional<time::Epoch> t0);
+    const std::optional<time::Epoch>& scheduled_liftoff() const { return scheduled_liftoff_; }
+    // The longest start-up of the controlled vehicle's first-stage engines plus liftoff_hold_margin_s (Raptor 3: 3.5 s).
+    double liftoff_ignition_lead_s() const;
+    static constexpr double liftoff_hold_margin_s = 0.5;  // [E] all engines at full thrust this long before T-0
     // Also ends an attitude mode and a capsule return (d2 minor: a mode set before outlived the autopilot).
     // Refuelling f3: the abort reason of an unsettled in-orbit ignition (starts with "Gasansaugung", the spec's reason).
     static constexpr const char* gas_ingestion_reason = "Gasansaugung: Treibstoff nicht gesetzt, Triebwerke ausgefallen";
@@ -518,6 +527,8 @@ public:
     // propellant short for orbit).
     bool plan_lunar_ascent(const gnc::LunarAscentParameters& parameters = {}, double liftoff_delay_s = 0.0);
     const gnc::LunarAscentGuidance* lunar_ascent_guidance() const { return lunar_ascent_.get(); }
+    // The planned liftoff of the ascent from the lunar surface (SurfaceStay ending in an ascent); nullopt otherwise.
+    std::optional<time::Epoch> lunar_ascent_liftoff_epoch() const;
     // A closed lunar orbit clear of the highest terrain: both apsides (radii from the Moon's centre) above
     // moon_mean_radius_m + moon_max_terrain_height_m (the ascent's sub-orbital cutoff guard).
     static bool lunar_orbit_clears_terrain(double periselene_m, double aposelene_m);
@@ -594,6 +605,10 @@ public:
     };
     const BurnConfiguration& burn_configuration() const { return burn_config_; }
     const gnc::BurnExecutor* burn() const { return burn_ ? &*burn_ : nullptr; }
+    bool burn_on_rcs() const { return burn_ && burn_config_.rcs; }  // the burn flies on RCS translation (cold gas)
+    // An event of the burn of the controlled body now: named as the observer names engine events, a burn on RCS by the
+    // upper stage (its thrusters: Crew Dragon's capsule, not the trunk).
+    MissionEvent burn_event(MissionEventKind kind) const;
 
     // Coasting prediction of a body (no thrust): GCRF positions every `step_s`, until impact or `duration_s`.
     std::vector<math::Vec3> predict_trajectory(size_t index, double duration_s, double step_s) const;
@@ -811,6 +826,9 @@ public:
     // exit of the approach ellipsoid; there the autopilot ends and the rendezvous target is cleared (plan_capsule_return
     // can follow). False with a German docking_status() when refused.
     bool undock();
+    // When the docked pair is expected to separate (the Undocking event): hooks opening - their end; hard docked with
+    // the ISS mission waiting for its undocking epoch - that epoch plus the hooks' opening time; otherwise nullopt.
+    std::optional<time::Epoch> undock_separation_epoch() const;
     std::optional<gnc::DeparturePhase> departure_phase() const;
     const std::vector<gnc::DepartureEvent>* departure_events() const;
     const MomentumRecord& docking_separation_record() const { return docking_separation_; }
@@ -1065,6 +1083,9 @@ private:
     time::Epoch launch_epoch_;
     MissionTimeline timeline_;
     MissionEventObserver observer_;
+    std::optional<time::Epoch> scheduled_liftoff_;  // schedule_liftoff
+    bool rcs_burn_lit_ = false;  // the planned burn on RCS translation has started (its Ignition is recorded)
+    bool pad_hold() const;       // PreLaunch waiting for a scheduled ignition: the clamped stack may coast
     void record_event(MissionEventKind kind, size_t index);  // body `index` now
     LaunchSite launch_site_;
     std::optional<LaunchSite> landing_zone_;

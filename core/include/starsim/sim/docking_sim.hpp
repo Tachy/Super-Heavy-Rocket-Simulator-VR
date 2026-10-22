@@ -36,6 +36,12 @@ public:
         if (!t0_) t0_ = epoch;
         return mechanism_.start_docked(epoch - *t0_);
     }
+    // While the hooks open: the epoch of the separation (DockingMechanism::separation_t_s); nullopt otherwise.
+    std::optional<time::Epoch> separation_epoch() const {
+        const auto t = mechanism_.separation_t_s();
+        if (!t) return std::nullopt;
+        return t0_ ? *t0_ + *t : std::optional<time::Epoch>{};
+    }
     contact::DockingMechanism& mechanism() { return mechanism_; }
     const contact::DockingMechanism& mechanism() const { return mechanism_; }
     bool hull_contact() const { return hull_contact_; }  // this tick

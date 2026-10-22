@@ -13,15 +13,18 @@
 namespace starsim::sim {
 
 MissionStart start_mission(FlightSession& session, const std::filesystem::path& config_dir, std::string_view mission_id,
-                           time::Epoch requested, const time::TimeScaleConverter& time) {
+                           time::Epoch requested, const time::TimeScaleConverter& time, const StartOptions& options) {
     session.set_supervisor(nullptr);  // refuelling f2: a new mission ends a campaign
     MissionStart s;
     s.kind = config::mission_kind(config_dir, mission_id);
     session.set_boil_off(true);  // a mission without its own setting: boil-off on (a lunar return sets its own)
+    const std::optional<time::Epoch> wait_from =
+        options.wait_on_pad ? std::optional<time::Epoch>(requested) : std::nullopt;
     switch (s.kind) {
         case config::MissionKind::Ascent: {
             const auto m = config::load_ascent_mission(config_dir, mission_id);
-            start_ascent_mission(session, m, config_dir, requested);
+            const double countdown_s = options.wait_on_pad ? m.countdown_s.value_or(options.countdown_s) : 0.0;
+            start_ascent_mission_for_liftoff(session, m, config_dir, requested + countdown_s, wait_from);
             s.site_id = m.site_id;
             s.epoch = requested;
             break;
@@ -50,7 +53,7 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
             break;
         case config::MissionKind::IssLaunch:
             s = start_iss_launch_mission(session, config_dir, config::load_iss_launch_mission(config_dir, mission_id),
-                                         iss_archive(config_dir, time), time);
+                                         iss_archive(config_dir, time), time, wait_from);
             break;
         case config::MissionKind::IssDeparture:
             s = start_iss_departure_mission(session, config_dir,
@@ -59,12 +62,13 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
             break;
         case config::MissionKind::DepotLaunch:
             s = start_depot_launch_mission(session, config_dir, config::load_depot_launch_mission(config_dir, mission_id),
-                                           time);
+                                           time, wait_from);
             break;
         case config::MissionKind::TankerFlight:
         case config::MissionKind::HlsRefuel:
             s = start_refuelling_flight_mission(session, config_dir,
-                                                config::load_refuelling_flight_mission(config_dir, mission_id), time);
+                                                config::load_refuelling_flight_mission(config_dir, mission_id), time,
+                                                wait_from);
             break;
         case config::MissionKind::RefuellingCampaignFlown:
             s = start_refuelling_campaign_flight(

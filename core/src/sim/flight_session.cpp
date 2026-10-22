@@ -137,6 +137,7 @@ void FlightSession::place_in_orbit(const config::VehicleConfig& config, const ma
     capsule_return_step_ = CapsuleReturnStep::None;
     reset_lunar();
     settle_manual_ = false;  // f3: a manual push does not carry into a new flight
+    scheduled_liftoff_.reset();
 }
 
 std::vector<math::Vec3> FlightSession::predict_trajectory(size_t index, double duration_s, double step_s) const {
@@ -238,12 +239,14 @@ void FlightSession::run_autopilot() {
     auto& body = *flying.body;
     switch (autopilot_.state) {
         case AutopilotState::PreLaunch: {
+            // a scheduled liftoff: the engines start liftoff_ignition_lead_s() before T-0, the clamps open at T-0
+            if (scheduled_liftoff_ && epoch_ < *scheduled_liftoff_ - liftoff_ignition_lead_s()) break;
             ignite();
             bool all_running = true;
             for (const auto& e : body.vehicle().stages().front().engines) {
                 all_running = all_running && (e.mode == vehicle::EngineMode::Running || e.starved || e.auxiliary());
             }
-            if (all_running) {
+            if (all_running && (!scheduled_liftoff_ || !(epoch_ < *scheduled_liftoff_))) {
                 release_clamps();
                 guidance_->start(body, earth_, epoch_);
                 autopilot_.state = AutopilotState::Booster;
@@ -302,6 +305,15 @@ void FlightSession::run_autopilot() {
             autopilot_.burn = burn_->update(body, epoch_, tick_s, c.thrust_n, c.mass_flow_kgps, c.shutdown_s,
                                             last_rcs_acceleration_, thrust_axis);
             if (c.rcs) {
+                // no main engine fires: the planned burn's own start and end are its events (the observer sees none)
+                if (autopilot_.burn.ignite && !autopilot_.burn.complete && !rcs_burn_lit_) {
+                    rcs_burn_lit_ = true;
+                    timeline_.record(burn_event(MissionEventKind::Ignition));
+                }
+                if (autopilot_.burn.complete && rcs_burn_lit_) {
+                    rcs_burn_lit_ = false;
+                    timeline_.record(burn_event(MissionEventKind::Cutoff));
+                }
                 if (autopilot_.burn.complete) {
                     // a lunar flight's or a rendezvous' burn returns to its step machine
                     autopilot_.state = lunar_step_ != LunarStep::None           ? AutopilotState::Lunar
@@ -705,6 +717,7 @@ void FlightSession::reset_mission_state() {
     departure_.reset();
     settle_manual_ = false;  // f3: a manual push does not carry into a new flight
     burn_abort_reason_.clear();  // f2 review I1: a gas ingestion ended the last flight, not the next one
+    scheduled_liftoff_.reset();
 }
 
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
@@ -735,8 +748,9 @@ void FlightSession::launch_from_pad(const config::VehicleConfig& config, const L
 // input, rotation settled, and far enough from a planned ignition.
 double FlightSession::coast_allowance_s() const {
     if (bodies_.empty()) return 0.0;
-    const bool guided = autopilot_.state == AutopilotState::PreLaunch || autopilot_.state == AutopilotState::Booster ||
-                        autopilot_.state == AutopilotState::UpperStage ||
+    const bool hold = pad_hold();
+    const bool guided = (autopilot_.state == AutopilotState::PreLaunch && !hold) ||
+                        autopilot_.state == AutopilotState::Booster || autopilot_.state == AutopilotState::UpperStage ||
                         autopilot_.state == AutopilotState::PayloadSeparation;
     if (guided) return 0.0;
     if (attitude_mode_active()) return 0.0;  // pulsed RCS hold: ticked
@@ -758,6 +772,9 @@ double FlightSession::coast_allowance_s() const {
         return 0.0;  // the coast skips the RCS: a commanded translation is flown tick by tick
     }
     double allowance = max_coast_s;
+    if (hold) {  // ticks resume burn_preparation_s before the ignition (as before a burn)
+        allowance = std::min(allowance, *scheduled_liftoff_ - liftoff_ignition_lead_s() - burn_preparation_s - epoch_);
+    }
     if (autopilot_.state == AutopilotState::Lunar) {
         // a wreck coasts: one tick first so that the step machine names the outcome and ends the autopilot (l5 Task 9b:
         // a heat shield failure in the aircatch pass kept the status "Eintritt" and the autopilot on)
@@ -818,6 +835,7 @@ double FlightSession::coast_allowance_s() const {
             return 0.0;  // steered every tick
         }
         if (body.impacted() || body.resting() || body.caught() || body.docked()) continue;  // not moving on its own
+        if (hold && body.clamped()) continue;  // held on the pad, engines off
         if (!body.can_coast()) return 0.0;
         {
             const auto clearance = body.ground_clearance(env_, epoch_);  // over the body's reference body (lunar l1)
@@ -991,6 +1009,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
     if (bodies_.empty()) {
         epoch_ = target;
     }
+    timeline_.set_predicted(predicted_mission_events(*this));
     return epoch_;
 }
 
@@ -1032,6 +1051,7 @@ void FlightSession::release_clamps() {
     if (bodies_.empty() || !bodies_[controlled_].body->clamped()) return;
     bodies_[controlled_].body->release_clamps();
     launch_epoch_ = epoch_;  // T+0 = liftoff
+    scheduled_liftoff_.reset();  // flown (the timeline keeps its schedule; its T-0 is the recorded liftoff now)
     record_event(MissionEventKind::Liftoff, controlled_);
 }
 
@@ -1039,11 +1059,44 @@ void FlightSession::record_event(MissionEventKind kind, size_t index) {
     timeline_.record(mission_event(*this, index, kind));
 }
 
+MissionEvent FlightSession::burn_event(MissionEventKind kind) const {
+    auto e = mission_event(*this, controlled_, kind);
+    if (burn_on_rcs()) e.body_name = bodies_[controlled_].body->vehicle().stages().back().config.name;
+    return e;
+}
+
 void FlightSession::reset_timeline() {
     const bool on_pad = std::any_of(bodies_.begin(), bodies_.end(), [](const Flying& f) { return f.body->clamped(); });
     timeline_.reset(on_pad);
     observer_.reset();
+    timeline_.set_scheduled_liftoff(scheduled_liftoff_);
     observer_.observe(*this, timeline_);  // the bodies as placed: the first tick's engine start is an event
+    timeline_.set_predicted(predicted_mission_events(*this));
+}
+
+void FlightSession::schedule_liftoff(std::optional<time::Epoch> t0) {
+    scheduled_liftoff_ = t0;
+    timeline_.set_scheduled_liftoff(t0);
+    timeline_.set_predicted(predicted_mission_events(*this));
+}
+
+double FlightSession::liftoff_ignition_lead_s() const {
+    double startup_s = 0.0;
+    if (!bodies_.empty()) {
+        for (const auto& e : bodies_[controlled_].body->vehicle().stages().front().engines) {
+            if (!e.auxiliary()) startup_s = std::max(startup_s, e.performance->config().startup_s);
+        }
+    }
+    return startup_s + liftoff_hold_margin_s;
+}
+
+bool FlightSession::pad_hold() const {
+    if (autopilot_.state != AutopilotState::PreLaunch || !scheduled_liftoff_ || bodies_.empty()) return false;
+    const auto& flying = bodies_[controlled_];
+    const bool running = std::any_of(flying.running_groups.begin(), flying.running_groups.end(),
+                                     [](const auto& g) { return g.second; });
+    return flying.body->clamped() && !running && !flying.body->vehicle().any_engine_producing_thrust() &&
+           epoch_ < *scheduled_liftoff_ - liftoff_ignition_lead_s();
 }
 
 void FlightSession::stage() {

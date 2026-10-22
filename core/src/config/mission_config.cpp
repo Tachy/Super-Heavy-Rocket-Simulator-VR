@@ -326,6 +326,10 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
         m.drone_ship = d;
     }
     m.heading_rad = doc.number(*mission, "heading_deg") * deg;
+    if (mission->contains("countdown_s")) {
+        m.countdown_s = doc.number(*mission, "countdown_s");
+        if (*m.countdown_s < 0.0) doc.fail("countdown_s must be >= 0");
+    }
     m.payload_kg = doc.number_or(*mission, "payload_t", 0.0) * 1000.0;
     m.fairing = (*mission)["fairing"].value_or(true);
     if (const auto* payload = doc.root["payload"].as_table()) {

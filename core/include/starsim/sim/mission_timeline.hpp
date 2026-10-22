@@ -66,4 +66,14 @@ private:
     std::vector<MissionEvent> predicted_;
 };
 
+class FlightSession;
+
+// The future events of the session's active plans (predicted; FlightSession::advance_to stores them in its timeline after every
+// call): the scheduled liftoff and a lunar ascent's liftoff (Liftoff), the pending burn's ignition (Ignition, from the
+// burn executor), the ship / capsule deorbit burn and entry interface, the burns of the lunar outbound, descent and
+// return plans and of the rendezvous plan not yet commanded (Ignition at the impulsive node; the return's entry
+// interface), the docked pair's separation (Undocking: the undocking epoch plus the hooks' opening time) and the
+// campaign supervisor's next launch (Launch, mission-wide). Only events after the session epoch.
+std::vector<MissionEvent> predicted_mission_events(const FlightSession& s);
+
 }  // namespace starsim::sim

@@ -134,6 +134,7 @@ bool FlightSession::start_burn(const gnc::BurnNode& node, const std::vector<Burn
     settling_lead_s_ = chosen->rcs ? 0.0 : settling_lead_s();  // cold gas needs no settled liquid
     if (chosen->rcs) settle_manual_ = false;  // f3 final review M11: the burn flies the RCS translation
     settling_push_ = false;
+    rcs_burn_lit_ = false;
     settling_hold_start_.reset();
     burn_abort_reason_.clear();
     // the status until the burn's first tick: a coast before it read the previous burn's (l5 Task 10: the deorbit
