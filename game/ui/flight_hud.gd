@@ -29,7 +29,8 @@ func _process(_delta: float) -> void:
 			sim.body_stages(index).map(func(s: Dictionary) -> String: return s["name"])[-1] if sim.body_count() > 0 else ""])
 	lines.append("Höhe            %9.2f km" % (t["altitude_m"] / 1000.0))
 	lines.append("Geschwindigkeit %9.0f km/h" % (t["speed_relative_mps"] * 3.6))
-	lines.append("  inertial      %9.0f m/s" % t["speed_inertial_mps"])
+	lines.append("  inertial (Bezugskörper) %9.0f m/s" % t["speed_inertial_mps"])
+	lines.append("  inertial Erde %9.0f m/s" % t.get("speed_earth_mps", 0.0))
 	lines.append("  vertikal      %9.0f m/s" % t["vertical_speed_mps"])
 	lines.append("Bahnwinkel      %9.1f °" % t["flight_path_angle_deg"])
 	# Mach only means something in continuum flow; above ~90 km the gas is rarefied.

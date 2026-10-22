@@ -91,6 +91,7 @@ add_executable(starsim_core_tests
     test_position_targeter.cpp
     test_reference_body.cpp
     test_lunar_flight_body.cpp
+    test_telemetry_recorder.cpp
     test_lunar_session.cpp
     test_lunar_propagation.cpp
     test_engine_placement.cpp
