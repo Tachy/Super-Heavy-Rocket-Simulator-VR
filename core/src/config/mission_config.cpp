@@ -131,6 +131,7 @@ ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_d
     m.vehicle_id = doc.text(*mission, "vehicle");
     m.stage_id = doc.text(*mission, "stage");
     m.site_id = doc.text(*mission, "site");
+    m.crew_escape_id = doc.text_or(*mission, "crew_escape");
     const auto epoch = time::UtcDateTime::parse_iso(doc.text(*orbit, "epoch_utc"));
     if (!epoch) doc.fail("orbit: epoch_utc is not YYYY-MM-DDTHH:MM:SS");
     m.epoch_utc = *epoch;
@@ -254,6 +255,7 @@ LunarReturnMission load_lunar_return_mission(const std::filesystem::path& config
     m.stage_id = doc.text(mission, "stage");
     m.site_id = doc.text(mission, "site");
     m.boil_off = mission["boil_off"].value_or(true);
+    m.crew_escape_id = doc.text_or(mission, "crew_escape");
     const auto epoch = time::UtcDateTime::parse_iso(doc.text(orbit, "epoch_utc"));
     if (!epoch) doc.fail("orbit: epoch_utc is not YYYY-MM-DDTHH:MM:SS");
     m.epoch_utc = *epoch;

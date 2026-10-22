@@ -340,6 +340,7 @@ MissionStart start_lunar_return_mission(FlightSession& session, const std::files
     if (budget) *budget = b;
     if (!b.closes) return refuse(b.reason);
     place_lunar_return_ship(session, m, ship, epoch, b.propellant_kg, setup.ret);
+    if (!m.crew_escape_id.empty()) session.set_crew_escape(config::load_crew_escape(config_dir, m.crew_escape_id));
     s.return_planned = session.plan_lunar_return(setup);
     if (!s.return_planned) return refuse(session.lunar_status());
     return s;

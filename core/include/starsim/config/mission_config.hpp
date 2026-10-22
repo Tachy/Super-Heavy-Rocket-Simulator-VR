@@ -45,6 +45,7 @@ struct ShipReturnMission {
     double argument_of_latitude_rad = 0.0;
     double propellant_kg = 0.0;  // in orbit
     ShipReturnDeorbit deorbit;
+    std::string crew_escape_id;  // [mission] crew_escape (config/crew_escape/): crewed - ejection seats; empty: uncrewed
 };
 
 ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id);
@@ -140,6 +141,7 @@ struct LunarReturnMission {
     // [mission] boil_off (refuelling r2): the session's boil-off fidelity flag for this mission (default true). The
     // Block 3 lunar missions set false until r5 (a bare hull cannot keep its propellant for days; user 2026-10-20).
     bool boil_off = true;
+    std::string crew_escape_id;  // [mission] crew_escape (config/crew_escape/): crewed - ejection seats; empty: uncrewed
 };
 
 LunarReturnMission load_lunar_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id);

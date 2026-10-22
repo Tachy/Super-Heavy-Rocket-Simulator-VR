@@ -132,6 +132,7 @@ add_executable(starsim_core_tests
     test_catch_feasibility.cpp
     test_entry_give_up.cpp
     test_crew_escape_session.cpp
+    test_crew_escape_mission.cpp
     test_ship_entry_telemetry.cpp
     test_optim_sparse.cpp
     test_optim_ordering.cpp
