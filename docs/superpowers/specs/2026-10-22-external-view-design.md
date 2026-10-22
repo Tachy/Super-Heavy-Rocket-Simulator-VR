@@ -34,7 +34,14 @@ planner) builds on. Getting the VR/desktop split, the overlay and the camera rig
      all participating objects** (booster and ship after separation, tankers and depot, ...); it does **not**
      change when the viewed object changes. Labels stand alone (Liftoff, Max Q, MECO, SECO, ...) without the
      name of the vehicle part (user: it is clear which part they belong to).
-     Both ends of the arc fade out smoothly, as in the webcasts.
+     Both ends of the arc fade out smoothly, as in the webcasts. User 2026-10-22 (webcast reference image): the arc
+     is flat; "now" is always at its apex (centre top); events enter on the right, pass the apex and leave on the
+     left; the time scale stays adaptive but symmetric about "now"; labels run tangential to the arc, alternating
+     below and above the line.
+   - The mission clock (T- / T+) sits under the arc's apex as in the webcast, with the mission name below it;
+     the UTC stays on top (user 2026-10-22).
+   - Engine layout gauge has the same size as the other round gauges; propellant is one round gauge like the
+     others (percent of the main-tank load), not split by oxidizer/fuel.
 5. **Gauges are chosen by relevance, live:** a gauge is shown only while its value is simulated and meaningful
    for the viewed object, and disappears otherwise. Examples: heat flux only during entry heating; Mach only in
    continuum flow (existing Knudsen rule in `flight_hud.gd`); engine layout only for an object with engines; crew
