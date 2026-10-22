@@ -28,7 +28,7 @@ the game interface; rendering comes later (user).
 4. **The empty ship simulated on (user):**
    - Without a flip: the flaps fly the belly flop down and steer it away from the tower and the coast into the sea;
      impact point, impact speed, distance to the tower and to the shoreline.
-   - After the flip: the existing abort / upright descent flies on without the crew's mass to the sea; same report.
+   - After the flip: the existing abort / upright descent flies on to the sea (ship mass and CG unchanged); same report.
 5. **Game interface:** a session-wide state (like `lunar_state`, `iss_state`): armed, abort reason, firing time,
    per member position/velocity (GCRF and lat/lon/height), attitude, phase, current and peak load (g), canopy state,
    touchdown point (water or land), outcome; the ship's impact report. Each crew member is also an ordinary body, so
@@ -52,7 +52,12 @@ the game interface; rendering comes later (user).
 - Physics first, SI internally, `[S]/[E]/[D]` provenance on every number, constants with sources, config not code.
 - Small modules: seat sequencing in `gnc`, seat/person bodies via config (`config/vehicles/`), session wiring in `sim`,
   bindings thin.
-- Uncrewed ships (tankers, depot, test ships) are unchanged; only a crewed mission/vehicle arms the system.
+- Uncrewed ships (tankers, depot, test ships) are unchanged; only a crewed mission arms the system.
+- **The ship's data stay as they are (user 2026-10-22):** the rescue system is functional only - no change to
+  `starship_block3.toml` or any ship data (dry mass, centre of gravity, inertia, tanks, engines, aero). Seats and
+  crew live in their own config (seat positions relative to the ship stage, hatch direction, crew count), referenced
+  by the crewed missions; the ship keeps its mass and CG when the seats leave (deliberate, documented simplification:
+  ~0.8 t of ~260 t, after the give-up only).
 - Existing campaigns (ship catch 20/21 + upright abort, lunar direct 21/21, aerocapture 21/21, refuelling) keep their
   numbers for the catch; they stay uncrewed, so their aborts keep the upright abort to the sea.
 
@@ -90,8 +95,7 @@ the game interface; rendering comes later (user).
   uncrewed and unchanged (their aborts keep the upright abort to the sea). New crewed variants of the orbit return
   and the lunar direct return carry the tests.
 - **Gate/entry feasibility check:** crewed ships only; uncrewed ships keep today's flip + upright abort.
-- **Crew count:** 4 by default [E], configurable per crewed mission; seats + crew are carved out of the ship's
-  existing dry mass (no change to the masses of any existing flight) and leave the ship on firing.
+- **Crew count:** 4 by default [E], configurable per crewed mission.
 - **Stagger:** fixed interval between seats [E ~0.3-0.5 s, sourced from multi-seat sequences].
 - **Load check:** peak acceleration per axis against published seat limits (e.g. spinal ~ catapult/rocket peaks,
   opening shock) [S]; exceeding = lost/injured reason reported.
