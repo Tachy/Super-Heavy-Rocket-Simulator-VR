@@ -7,6 +7,8 @@ extends Node
 ## X autopilot off. HOTAS (stick + throttle found by name): config/input_hotas.toml.
 
 const THROTTLE_KEY_RATE := 0.5  # per second
+## [E] Countdown of a free launch (T-minus at the start, s); the sequence then runs from the countdown clock.
+const LAUNCH_COUNTDOWN_S := 60.0
 
 var sim := FlightSim.new()
 var launch_site_id := ""  ## site of the current flight (its tower shows the flight's arm state)
@@ -39,12 +41,12 @@ func setup(config_dir: String) -> void:
 	_throttle = mapping.get("throttle", {})
 
 
-func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 90.0) -> bool:
+func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 90.0, countdown_s := LAUNCH_COUNTDOWN_S) -> bool:
 	for view in views:
 		view.queue_free()
 	views.clear()
 	throttle = 1.0
-	var id := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s)
+	var id := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s, countdown_s)
 	launch_site_id = ""
 	_pending_launch = {"id": id, "site_id": site["id"], "text": "%s auf %s" % [vehicle_id, site["name"]]}
 	last_event = "Start wird vorbereitet" if id > 0 else "Start fehlgeschlagen"

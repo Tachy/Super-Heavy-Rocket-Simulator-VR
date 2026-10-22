@@ -32,6 +32,7 @@ var sun_light := DirectionalLight3D.new()
 var stars := StarField.new()
 var moon_orbit := OrbitLine.new()
 var flight := FlightController.new()
+var view_target := ViewTarget.new()  ## the simulated body the external view shows (Tab / Shift+Tab)
 var earth_label := Label3D.new()
 var moon_label := Label3D.new()
 var sites: Array = []  ## launch sites from config/launch_sites.toml
@@ -55,6 +56,7 @@ func _ready() -> void:
 	sites = TomlLite.load_file(Paths.config_dir().path_join("launch_sites.toml")).get("site", [])
 	flight.setup(Paths.config_dir())
 	add_child(flight)
+	add_child(view_target)
 
 	add_child(clock)
 	add_child(camera)
@@ -70,6 +72,7 @@ func _ready() -> void:
 
 
 var _delta := 0.0
+var _camera_serial := 0  ## serial the camera distance was last fitted to
 
 
 func _process(delta: float) -> void:
@@ -156,6 +159,8 @@ func set_focus(new_focus: String) -> void:
 			camera.distance_m = 1.1e9
 			camera.pitch = -1.2
 		FOCUS_VEHICLE:
+			view_target.serial = 0  # a new flight: the controlled body
+			_camera_serial = 0
 			camera.distance_m = 260.0
 			camera.pitch = -0.15
 			camera.yaw = 0.8
@@ -177,13 +182,37 @@ func _update_camera(t: float) -> void:
 		camera.site_east_gcrf = rotation * Vector3(-sin(lon), cos(lon), 0.0)
 		camera.site_north_gcrf = rotation * Vector3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat))
 	elif focus == FOCUS_VEHICLE and flight.sim.is_active():
-		camera.target_gcrf_m = flight.controlled_position_gcrf()
-		camera.reference_center_gcrf_m = Vector3.ZERO
-		camera.reference_body = "earth"
+		_update_vehicle_camera()
 	else:
 		camera.target_gcrf_m = moon_gcrf_m if focus == FOCUS_MOON else Vector3.ZERO
 		camera.reference_body = ""
 	camera.update_pose(_delta)
+
+
+## Orbit camera on the viewed object's CG, with the local vertical of the body it is flying around.
+func _update_vehicle_camera() -> void:
+	var index := view_target.resolve(flight.sim)
+	if index < 0:
+		return
+	if view_target.serial != _camera_serial:  # a switch: yaw/pitch stay, the distance fits the new object
+		if _camera_serial != 0:
+			camera.distance_m = ViewTarget.clamp_distance_m(camera.distance_m, view_target.object_length_m(flight.sim, index))
+		_camera_serial = view_target.serial
+	camera.target_gcrf_m = view_target.cg_gcrf_m(flight.sim, index)
+	camera.reference_body = str(flight.sim.telemetry(index).get("reference_body", "earth"))
+	camera.reference_center_gcrf_m = moon_gcrf_m if camera.reference_body == "moon" else Vector3.ZERO
+
+
+## Tab / Shift+Tab switch the viewed object. Handled in _input (before GUI focus traversal), so it also works while a
+## control such as the UTC field of the time panel holds the focus; only when the vehicle view is active.
+func _input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo or key.keycode != KEY_TAB:
+		return
+	if focus != FOCUS_VEHICLE or not flight.sim.is_active():
+		return
+	view_target.cycle(flight.sim, -1 if key.shift_pressed else 1)
+	get_viewport().set_input_as_handled()
 
 
 func _place_sun(sun_from_camera_m: Vector3) -> void:
