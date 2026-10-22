@@ -195,6 +195,9 @@ public:
     explicit Vehicle(const config::VehicleConfig& config, const std::filesystem::path& config_dir);
 
     const std::string& id() const { return id_; }
+    // The configured display name of the whole vehicle; empty for a part split off by separate() (both parts are named
+    // by their stages then).
+    const std::string& display_name() const { return display_name_; }
     const std::vector<Stage>& stages() const { return stages_; }
     std::vector<Stage>& stages() { return stages_; }
     double length_m() const;
@@ -353,6 +356,7 @@ private:
     void refresh_rcs_availability();  // starves thrusters whose supply ran dry, blocks those that cannot fire now
 
     std::string id_;
+    std::string display_name_;
     std::filesystem::path config_dir_;
     std::vector<Stage> stages_;
     std::unique_ptr<aero::SlenderBodyAero> aero_;

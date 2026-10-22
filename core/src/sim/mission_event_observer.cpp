@@ -3,7 +3,6 @@
 #include "starsim/sim/mission_event_observer.hpp"
 
 #include <algorithm>
-#include <set>
 
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/landing_outcome.hpp"
@@ -14,11 +13,45 @@ namespace {
 
 // An engine start of body `index` by what the body is doing; none for a body with return guidance (its phases name
 // the burns: after hot staging the centre engines run on through the flip, so the boostback is no relight).
-std::optional<MissionEventKind> start_kind(const FlightSession& s, size_t index) {
+// A ship on its landing guidance: the first start is its landing burn (flip and catch), a relight adds nothing.
+std::optional<MissionEventKind> start_kind(const FlightSession& s, size_t index, const MissionTimeline& t) {
     if (s.body(index).clamped()) return MissionEventKind::EngineStart;
     if (s.return_status(index)) return std::nullopt;
-    if (s.ship_landing(index)) return MissionEventKind::LandingBurn;  // the ship's flip and catch
+    if (s.ship_landing(index)) {
+        if (has_recorded(t, MissionEventKind::LandingBurn, s.body_serial(index))) return std::nullopt;
+        return MissionEventKind::LandingBurn;
+    }
     return MissionEventKind::Ignition;
+}
+
+// The last past event of body `serial`, if any.
+const MissionEvent* last_of(const MissionTimeline& t, uint32_t serial) {
+    const auto& r = t.recorded();
+    const auto it = std::find_if(r.rbegin(), r.rend(), [&](const MissionEvent& e) { return e.body_serial == serial; });
+    return it == r.rend() ? nullptr : &*it;
+}
+
+// The name an event shows: the part that acts (controller ruling, external view review). Engine events and a separation
+// name the lowest stage (its engines; the separated part; SECO: the lowest stage of the upper part is the launcher's
+// upper stage, a stacked payload above it does not act); the stack's pad events and Max Q name the whole vehicle
+// (display name, else its lowest stage); everything else the upper (last) stage - the crewed or docking part.
+const std::string& event_name(const vehicle::Vehicle& v, MissionEventKind kind) {
+    const auto& stages = v.stages();
+    switch (kind) {
+        case MissionEventKind::Meco:
+        case MissionEventKind::Seco:
+        case MissionEventKind::StageSeparation:
+        case MissionEventKind::Ignition:
+        case MissionEventKind::Cutoff:
+        case MissionEventKind::Boostback:
+        case MissionEventKind::LandingBurn: return stages.front().config.name;
+        case MissionEventKind::EngineStart:
+        case MissionEventKind::Liftoff:
+        case MissionEventKind::MaxQ:
+            if (stages.size() >= 2 && !v.display_name().empty()) return v.display_name();
+            return stages.front().config.name;
+        default: return stages.back().config.name;
+    }
 }
 
 // The burn a return guidance phase starts.
@@ -51,8 +84,7 @@ std::optional<MissionEventKind> outcome_kind(LandingOutcome outcome) {
 }  // namespace
 
 MissionEvent mission_event(const FlightSession& s, size_t index, MissionEventKind kind) {
-    return MissionEvent{kind, s.epoch(), s.body_serial(index), s.body(index).vehicle().stages().back().config.name,
-                        false};
+    return MissionEvent{kind, s.epoch(), s.body_serial(index), event_name(s.body(index).vehicle(), kind), false};
 }
 
 bool has_recorded(const MissionTimeline& t, MissionEventKind kind, uint32_t serial) {
@@ -69,15 +101,14 @@ void MissionEventObserver::observe(const FlightSession& s, MissionTimeline& t) {
     const auto now = s.epoch();
     if (last_ && now - *last_ < observe_interval_s && now >= *last_) return;
     last_ = now;
-    std::set<uint32_t> present;
+    ++sample_;
     for (size_t i = 0; i < s.body_count(); ++i) {
-        const uint32_t serial = s.body_serial(i);
-        present.insert(serial);
-        const auto [it, first] = bodies_.try_emplace(serial);
+        const auto [it, first] = bodies_.try_emplace(s.body_serial(i));
+        it->second.sample = sample_;
         observe_body(s, i, it->second, first, t);
     }
     for (auto it = bodies_.begin(); it != bodies_.end();) {  // serials are never reused: a removed body is gone
-        it = present.count(it->first) ? std::next(it) : bodies_.erase(it);
+        it = it->second.sample == sample_ ? std::next(it) : bodies_.erase(it);
     }
 }
 
@@ -93,7 +124,7 @@ void MissionEventObserver::observe_body(const FlightSession& s, size_t index, Bo
     // Engines: starts and cutoffs.
     const int engines = tm.engines_running;
     if (!first && m.engines_running == 0 && engines > 0) {
-        if (const auto kind = start_kind(s, index)) t.record(mission_event(s, index, *kind));
+        if (const auto kind = start_kind(s, index, t)) t.record(mission_event(s, index, *kind));
         m.burn_with_upper = false;
         m.burn_ascent_upper = false;
     } else if (!first && m.engines_running > 0 && engines == 0) {
@@ -106,7 +137,11 @@ void MissionEventObserver::observe_body(const FlightSession& s, size_t index, Bo
             kind = MissionEventKind::Seco;
             m.seco_done = true;
         }
-        t.record(mission_event(s, index, kind));
+        // A cold staging: stage() recorded the MECO under the tail-off thrust; its end is no further cutoff.
+        const auto* last = last_of(t, serial);
+        const bool tail_off = kind == MissionEventKind::Cutoff && last &&
+                              (last->kind == MissionEventKind::Meco || last->kind == MissionEventKind::StageSeparation);
+        if (!tail_off) t.record(mission_event(s, index, kind));
     }
     if (engines > 0) {  // what the running burn was seen as (the autopilot moves on before the engines are down)
         m.burn_with_upper = m.burn_with_upper || with_upper;
@@ -124,8 +159,11 @@ void MissionEventObserver::observe_body(const FlightSession& s, size_t index, Bo
         m.return_phase.reset();
     }
 
-    // Max Q: the peak of q while climbing, recorded at its epoch once q has fallen clearly below it.
-    if (!m.max_q_done) {
+    // Max Q: the peak of q while climbing, recorded at its epoch once q has fallen clearly below it. Only on an ascent:
+    // never above the entry interface and no entry guidance (a skip or an aerocapture pass climbs at entry q).
+    const bool earth = tm.reference_body == ephemeris::Body::Earth;
+    if (earth && tm.altitude_m > entry_interface_altitude_m) m.been_above_entry_interface = true;
+    if (!m.max_q_done && !m.been_above_entry_interface && !s.entry_status(index)) {
         if (tm.vertical_speed_mps > 0.0 && tm.dynamic_pressure_pa > m.q_peak_pa) {
             m.q_peak_pa = tm.dynamic_pressure_pa;
             m.q_peak_epoch = s.epoch();
@@ -138,13 +176,16 @@ void MissionEventObserver::observe_body(const FlightSession& s, size_t index, Bo
         }
     }
 
-    // Entry interface: down through it after having been above (once per descent).
-    if (tm.reference_body == ephemeris::Body::Earth) {
+    // Entry interface: down through it after having been above (once per descent), coasting on an orbit whose periapsis
+    // lies in the air - not the dip of a low insertion orbit to its perigee, not a powered descent.
+    if (earth) {
         if (tm.altitude_m > entry_interface_altitude_m) {
             m.above_entry_interface = true;
         } else if (m.above_entry_interface) {
             m.above_entry_interface = false;
-            t.record(mission_event(s, index, MissionEventKind::EntryInterface));
+            if (engines == 0 && tm.periapsis_altitude_m < entry_max_periapsis_altitude_m) {
+                t.record(mission_event(s, index, MissionEventKind::EntryInterface));
+            }
         }
     }
 

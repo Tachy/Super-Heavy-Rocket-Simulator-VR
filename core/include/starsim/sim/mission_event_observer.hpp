@@ -30,6 +30,9 @@ public:
     static constexpr double max_q_drop_fraction = 0.9;  // [E] Max Q is past once q fell below this x its peak
     static constexpr double max_q_min_pa = 10e3;        // [E] smaller peaks are no Max Q (a ship's q after staging)
     static constexpr double entry_interface_altitude_m = 120e3;  // [S] conventional entry interface
+    // [E] a descent through the entry interface is an entry when the orbit's periapsis (above the equatorial radius)
+    // lies below this: entries aim at 40-80 km, the lowest insertion orbits (tanker: 120 km perigee) stay above.
+    static constexpr double entry_max_periapsis_altitude_m = 100e3;
 
     void reset();  // forgets every body and the last sample
     // Samples every body (at most every observe_interval_s; always after a coast, which is longer) and records what
@@ -47,6 +50,8 @@ private:
         time::Epoch q_peak_epoch;
         bool max_q_done = false;
         bool above_entry_interface = false;
+        bool been_above_entry_interface = false;  // ever (Max Q is only tracked before)
+        uint64_t sample = 0;                      // the last observe() that saw the body
         bool chutes_out = false;
         bool flying = true;  // landing outcome Flying at the last sample
     };
@@ -54,6 +59,7 @@ private:
 
     std::map<uint32_t, BodyMemory> bodies_;  // by body serial
     std::optional<time::Epoch> last_;
+    uint64_t sample_ = 0;
 };
 
 }  // namespace starsim::sim

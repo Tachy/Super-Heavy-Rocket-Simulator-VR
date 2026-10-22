@@ -67,7 +67,7 @@ bool Stage::has_header_tanks() const {
 }
 
 Vehicle::Vehicle(const config::VehicleConfig& config, const std::filesystem::path& config_dir)
-    : id_(config.id), config_dir_(config_dir) {
+    : id_(config.id), display_name_(config.display_name), config_dir_(config_dir) {
     std::map<std::string, std::shared_ptr<const propulsion::EnginePerformance>> performances;
     for (const auto& [engine_id, engine_config] : config.engines) {
         performances[engine_id] = std::make_shared<propulsion::EnginePerformance>(engine_config);
@@ -880,6 +880,7 @@ double Vehicle::max_splashdown_speed_mps() const {
 std::unique_ptr<Vehicle> Vehicle::copy_upper(size_t index) const {
     auto copy = std::unique_ptr<Vehicle>(new Vehicle());
     copy->id_ = id_;
+    copy->display_name_ = display_name_;
     copy->config_dir_ = config_dir_;
     copy->stages_ = stages_;
     copy->nose_cone_open_ = nose_cone_open_;
@@ -917,6 +918,7 @@ std::unique_ptr<Vehicle> Vehicle::separate(size_t index) {
     upper->aero_ = std::make_unique<aero::SlenderBodyAero>(aero_->geometry(), aero_->drag_curve());
     upper->rebuild_aero();
     id_ += "/" + stages_.back().config.id;
+    display_name_.clear();  // a part now
     rebuild_aero();
     stop_rcs();
     upper->stop_rcs();
