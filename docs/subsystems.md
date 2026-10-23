@@ -478,10 +478,13 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   (`FlightBody::touchdown_sink_mps`), outcome `SplashedDown` "gewassert"; faster is "Aufprall" (no separate mains-open
   flag: 9 m/s is out of reach without mains). Capsule return steps go on Gate -> Drogues -> Mains -> SplashedDown
   ("Bremsschirme", "Hauptschirme", "gewassert"); `FlightSession::splashdown_miss_m`, `parachute_sequencer(i)`.
-  From the gate (166 m/s): drogues 5.50 km / 164 m/s, mains 1.80 km / 53 m/s 57 s later, water 205 s later at 6.9 m/s,
+  The water is the EGM2008 geoid (M8 Plan A Task 5; San Diego zone N = -37.0 m, was the ellipsoid): the entry target and
+  the miss sit on the zone's geoid; the sequencer's heights are above the ground below the capsule (the Earth terrain's
+  surface when set, else the geoid there, which is also the flat model's ground of the capsule and the trunk).
+  From the gate (166 m/s): drogues 5.50 km / 163 m/s (164 before the geoid sea), mains 1.80 km / 53 m/s 57 s later, water 205 s later at 6.9 m/s,
   peak 2.8 g. Return mission `config/missions/crew_dragon_return.toml` (`sim::place_capsule_return_mission`, 420 km /
-  51.6 deg, RAAN 60 deg [D]: the first plane with a pass within reach in 48 h): burn after 37.1 h (1005 s), water 0.29 km
-  from the zone centre at 6.9 m/s, deorbit ignition -> splashdown 50.5 min (Crew-10 2025-08-09: 54 min [S]). Campaign
+  51.6 deg, RAAN 60 deg [D]: the first plane with a pass within reach in 48 h): burn after 37.1 h (1006 s), water 0.41 km
+  from the zone centre at 6.9 m/s (1005 s / 0.29 km before the geoid sea, M8 Plan A Task 5), deorbit ignition -> splashdown 50.5 min (Crew-10 2025-08-09: 54 min [S]). Campaign
   `[dragon][mission][validation]` (8 cases: orbit phase +-3 deg about the mission's, MMH/NTO +-10 %, deorbit execution
   +-1 % / 0.5 deg): 8 of 8 gewassert within 1.09 km, 6.9-7.0 m/s, <= 2.97 g. An ISS-like orbit passes the zone within the
   capsule's 40 km crossrange only every few days: of the orbit phases 0-315 deg (45 deg steps) only one has a pass in
@@ -2281,7 +2284,7 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     RTLS return (its MECO plan keeps the 12.1 t landing propellant) is feasible - also where the drone ship would leave
     more (SpaceX practice, spec) - else a drone ship from `config/drone_ships.toml` at the stage's impact predicted 10 s after the
     separation (`BoosterReturnGuidance::predict_impact`, drag and the entry burn, no steering: the falcon9_asds.toml
-    derivation), deck along the ground track there; its sea at -35 m [E] (geoid). The kick is searched with the ship at
+    derivation), deck along the ground track there; its sea the EGM2008 geoid at the station (`FlightSession::sea_height_m`, coarse grid -43.2 m at 32 N 76 W; M8 Plan A Task 5, was -35 m [E]). The kick is searched with the ship at
     a provisional station 600 km [E] downrange (the MECO plan without a boostback does not depend on the ship; near the
     pad its deck would replace the ground). Neither feasible: refused.
   - Drone ship list (follow-ups Task 6): `asds_atlantic`, `asds_atlantic_2` (home port Port Canaveral [S]) and
@@ -2327,7 +2330,7 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   12 deg [E] (as RTLS); falcon9_asds 13 deg [D] (MECO path 24.7 deg, T+152 s, 64.7 km, 8373 km/h vs Starlink 15-25
   T+149 s, 60 km, ~8000 km/h, ~25 deg) and its drone ship at 33.2240 / -75.7724 [D] (the stage's impact 10 s after the
   separation; history 32.9272 / -76.0990 before the staging sequence, 32.8819 / -76.1490 with it), deck heading 45 deg
-  [E], sea -35 m [E]; landing_zone = ccsfs_lz40 on falcon9_rtls and falcon9_crew_dragon (now SLC-40's own landing zone).
+  [E], sea on the EGM2008 geoid (M8 Plan A Task 5, was -35 m [E]); landing_zone = ccsfs_lz40 on falcon9_rtls and falcon9_crew_dragon (now SLC-40's own landing zone).
 - **Free launch:** the game's `launch_from_site` carries the target (`leo_ascent.toml`) unless manual control is on;
   the command places the stack, schedules T-0, publishes a snapshot with `autopilot_status()["planning"] = true` and
   plans (`sim::engage_pad_ascent(session, target)` on a clamped stack: the request from the placed stack - the

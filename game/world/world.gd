@@ -240,6 +240,7 @@ func _setup_bodies(data_dir: String) -> void:
 	add_child(earth)
 	ground_patch.setup(_earth_material)
 	ground_patch.sites = sites
+	ground_patch.flight_sim = flight.sim  # its Earth terrain (absent: the flat rule)
 	earth.add_child(ground_patch)
 	for site: Dictionary in sites:
 		earth.add_child(_make_pad(site))

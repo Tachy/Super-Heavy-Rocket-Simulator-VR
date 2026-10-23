@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <optional>
+#include <string>
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -16,6 +17,7 @@
 #include "starsim/math/mat3.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_profile_planner.hpp"
+#include "starsim/sim/earth_terrain_loader.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/refuelling_campaign_setup.hpp"
 
@@ -56,9 +58,26 @@ void FlightSim::setup(const godot::String& config_dir) {
         snapshot_ = empty_snapshot();
     }
     frame_snapshot_.reset();
+    auto session =
+        std::make_unique<sim::FlightSession>(ephemeris_, earth_, config_dir_, environment::PointMassGravityConfig{}, &moon_);
+    // The Earth terrain (M8): set before any body rests on the ground; without the downloaded data the flat ground.
+    earth_terrain_.reset();
+    const auto data_dir = config_dir_.parent_path() / "data";
+    if (sim::earth_terrain_available(data_dir)) {
+        try {
+            session->set_earth_terrain(sim::load_earth_terrain(config_dir_, data_dir));
+            earth_terrain_ = session->earth_terrain_shared();
+            godot::UtilityFunctions::print(godot::String::utf8("Erdgelände geladen"));
+        } catch (const std::exception& e) {
+            const std::string message = std::string("Erdgelände nicht ladbar - flacher Boden: ") + e.what();
+            godot::UtilityFunctions::print(godot::String::utf8(message.c_str()));
+        }
+    } else {
+        godot::UtilityFunctions::print(
+            godot::String::utf8("Erdgelände fehlt - flacher Boden (python tools/data_pipeline/fetch.py)"));
+    }
     runner_ = std::make_unique<sim::SessionRunner>(
-        std::make_unique<sim::FlightSession>(ephemeris_, earth_, config_dir_, environment::PointMassGravityConfig{}, &moon_),
-        [this](const sim::FlightSession& session, time::Epoch now) { observe(session, now); });
+        std::move(session), [this](const sim::FlightSession& session, time::Epoch now) { observe(session, now); });
 }
 
 void FlightSim::observe(const sim::FlightSession& session, time::Epoch now) {
@@ -501,6 +520,17 @@ godot::Dictionary FlightSim::moon_terrain(double latitude_deg, double longitude_
     return d;
 }
 
+godot::Dictionary FlightSim::earth_surface(double latitude_deg, double longitude_deg) const {
+    godot::Dictionary d;
+    d["present"] = false;
+    if (!earth_terrain_) return d;
+    const double lat = latitude_deg * constants::deg_to_rad, lon = longitude_deg * constants::deg_to_rad;
+    d["present"] = true;
+    d["height_m"] = earth_terrain_->height_ellipsoid_m(lat, lon);
+    d["water"] = earth_terrain_->water(lat, lon);
+    return d;
+}
+
 int64_t FlightSim::complete_pilot_correction() {
     return static_cast<int64_t>(post_active("complete_pilot_correction", [](sim::FlightSession& session) {
         if (session.lunar_step() != sim::LunarStep::PilotCorrection) {
@@ -729,6 +759,7 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("lunar_state"), &FlightSim::lunar_state);
     ClassDB::bind_method(D_METHOD("lunar_site"), &FlightSim::lunar_site);
     ClassDB::bind_method(D_METHOD("moon_terrain", "latitude_deg", "longitude_deg"), &FlightSim::moon_terrain);
+    ClassDB::bind_method(D_METHOD("earth_surface", "latitude_deg", "longitude_deg"), &FlightSim::earth_surface);
     ClassDB::bind_method(D_METHOD("complete_pilot_correction"), &FlightSim::complete_pilot_correction);
     ClassDB::bind_method(D_METHOD("replan_lunar_return"), &FlightSim::replan_lunar_return);
     ClassDB::bind_method(D_METHOD("iss_state"), &FlightSim::iss_state);

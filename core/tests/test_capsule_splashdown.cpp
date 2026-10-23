@@ -6,13 +6,16 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <cstdlib>
+#include <memory>
 #include <random>
 #include <vector>
 
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/splashdown_zone_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/environment/earth_terrain.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/parachute_sequencer.hpp"
 #include "starsim/math/constants.hpp"
@@ -186,6 +189,67 @@ TEST_CASE("A capsule placed below the main height opens its mains at once", "[dr
     CHECK(chutes[1].state == vehicle::ParachuteState::Open);
     const auto d = fly_down(s.session);
     CHECK(d.outcome == sim::LandingOutcome::SplashedDown);
+}
+
+TEST_CASE("capsule splashdown target on the geoid", "[dragon][splashdown][session]") {
+    // M8 Plan A Task 5: the zone's water is the EGM2008 geoid (San Diego zone, coarse grid: N = -37.0 m).
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    const auto zone = config::load_splashdown_zone(STARSIM_CONFIG_DIR, "pacific_san_diego");
+    session.set_splashdown_zone(zone);
+    const double sea_m = session.sea_height_m(zone.latitude_rad, zone.longitude_rad);
+    std::printf("[splashdown] geoid at the San Diego zone: %.2f m\n", sea_m);
+    CHECK(sea_m < -30.0);
+    CHECK(sea_m > -42.0);
+    const auto target = session.capsule_entry_target();
+    CHECK(target.ground_height_m == sea_m);
+    CHECK(frames::fixed_to_geodetic(target.position_itrf_m).height_m == Catch::Approx(sea_m).margin(1e-6));
+}
+
+TEST_CASE("Parachutes deploy at their height above the geoid sea", "[dragon][splashdown][session]") {
+    // Controller ruling 5 (M8 Plan A Task 5): the sequencer's height is above the water below the capsule (the geoid,
+    // -37.0 m at the San Diego zone), so the mains placed 1200 m above the ellipsoid open at ~1237 m.
+    Scenario s(1200.0, 45.0, 85.0 * deg);
+    const double sea_m = s.session.sea_height_m(s.zone.latitude_rad, s.zone.longitude_rad);
+    s.session.advance_to(s.session.epoch() + 0.1);
+    const auto* seq = s.session.parachute_sequencer(0);
+    REQUIRE(seq != nullptr);
+    REQUIRE(seq->main_height_m());
+    CHECK(*seq->main_height_m() == Catch::Approx(1200.0 - sea_m).margin(1.0));
+    CHECK(s.session.body(0).ground_height_m() == Catch::Approx(sea_m).margin(0.5));  // the flat model's water
+    const auto d = fly_down(s.session);
+    CHECK(d.outcome == sim::LandingOutcome::SplashedDown);
+}
+
+TEST_CASE("Parachutes deploy at their height above the terrain below the capsule", "[dragon][splashdown][session]") {
+    // With the Earth terrain set, the ground below the capsule is the terrain's surface (here synthetic land 300 m
+    // above the ellipsoid under a -20 m geoid).
+    sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+    const auto global = [](double value_m, double dn_scale_m) {
+        environment::GeographicGrid g;
+        g.grid = {3, 4, dn_scale_m,
+                  std::vector<std::int16_t>(12, static_cast<std::int16_t>(std::lround(value_m / dn_scale_m)))};
+        g.north_latitude_deg = 90.0;
+        g.west_longitude_deg = -180.0;
+        g.step_latitude_deg = 90.0;
+        g.step_longitude_deg = 90.0;
+        g.global_longitude = true;
+        return g;
+    };
+    const auto terrain = std::make_shared<const environment::EarthTerrain>(
+        environment::Geoid(global(-20.0, 0.01)), global(300.0, 1.0), std::vector<environment::GeographicGrid>{},
+        std::vector<environment::GeographicGrid>{}, std::vector<environment::Plateau>{});
+    session.set_earth_terrain(terrain);
+    const auto zone = config::load_splashdown_zone(STARSIM_CONFIG_DIR, "pacific_san_diego");
+    const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 14, 6, 0, 0.0});
+    session.set_splashdown_zone(zone);
+    session.place_body(capsule_config(), falling_state(zone, 1500.0, 45.0, 85.0 * deg, t0), t0);
+    const double surface_m = terrain->height_ellipsoid_m(zone.latitude_rad, zone.longitude_rad);
+    CHECK(surface_m > 250.0);
+    session.advance_to(t0 + 0.1);
+    const auto* seq = session.parachute_sequencer(0);
+    REQUIRE(seq != nullptr);
+    REQUIRE(seq->main_height_m());
+    CHECK(*seq->main_height_m() == Catch::Approx(1500.0 - surface_m).margin(1.0));
 }
 
 TEST_CASE("Drogues held back by dynamic pressure: the mains tear and the capsule hits the water",

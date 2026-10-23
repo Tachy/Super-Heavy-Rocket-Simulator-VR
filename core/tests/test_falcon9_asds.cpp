@@ -97,6 +97,21 @@ TEST_CASE("The drone ship's deck loads and becomes a landing zone", "[config][fa
     CHECK_THROWS(config::load_drone_ship(STARSIM_CONFIG_DIR, "nowhere"));
 }
 
+TEST_CASE("drone ship deck at the geoid plus freeboard", "[sim][falcon9][asds]") {
+    // M8 Plan A Task 5: the ship floats on the EGM2008 geoid at its station (the session's sea height), not on a fixed
+    // -35 m sea.
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    const sim::RecoveryChoice recovery{sim::RecoveryKind::DroneShip, "asds_atlantic", 32.0 * deg, -76.0 * deg, 0.0};
+    const auto site = sim::recovery_landing_site(session, recovery);
+    REQUIRE(site);
+    REQUIRE(site->deck);
+    const double sea_m = session.sea_height_m(32.0 * deg, -76.0 * deg);
+    std::printf("[falcon9] geoid at the drone ship station: %.2f m\n", sea_m);
+    CHECK(sea_m < -20.0);  // EGM2008 (coarse 1-deg grid) off the Carolinas: -43.2 m
+    CHECK(sea_m > -45.0);
+    CHECK(site->height_m == sea_m + 3.0);
+}
+
 TEST_CASE("A Falcon 9 stage returning to a drone ship aims at its deck", "[gnc][falcon9][asds]") {
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
     session.set_launch_site(ship());
@@ -349,7 +364,9 @@ TEST_CASE("Starting the drone-ship mission puts the ship out as the landing zone
     REQUIRE(session.landing_zone());
     REQUIRE(session.landing_zone()->deck);
     CHECK(session.landing_zone()->latitude_rad == plan.recovery.latitude_rad);
-    CHECK(session.landing_zone()->height_m == sim::drone_ship_sea_height_m + 3.0);
+    // The deck on the geoid at the ship's station (M8 Plan A Task 5: was a fixed -35 m sea).
+    CHECK(session.landing_zone()->height_m ==
+          session.sea_height_m(session.landing_zone()->latitude_rad, session.landing_zone()->longitude_rad) + 3.0);
     // The ship waits ~600 km down the ground track (spec), north-east of the Cape.
     const auto pad = config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id);
     const auto& ship = *session.landing_zone();

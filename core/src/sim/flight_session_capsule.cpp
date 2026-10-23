@@ -9,9 +9,12 @@ namespace starsim::sim {
 
 gnc::EntryTarget FlightSession::capsule_entry_target() const {
     if (!splashdown_zone_) throw std::logic_error("FlightSession: no splashdown zone set");
+    // The zone's water: the EGM2008 geoid there (M8 Plan A Task 5; was the ellipsoid).
+    const double sea_m = sea_height_m(splashdown_zone_->latitude_rad, splashdown_zone_->longitude_rad);
     gnc::EntryTarget target;
-    target.position_itrf_m = frames::geodetic_to_fixed({splashdown_zone_->latitude_rad, splashdown_zone_->longitude_rad, 0.0});
-    target.ground_height_m = 0.0;
+    target.position_itrf_m =
+        frames::geodetic_to_fixed({splashdown_zone_->latitude_rad, splashdown_zone_->longitude_rad, sea_m});
+    target.ground_height_m = sea_m;
     return target;
 }
 
@@ -134,8 +137,9 @@ void FlightSession::run_capsule_return(Flying& flying) {
                     auto capsule = flying.body->separate(flying.body->vehicle().stages().size() - 1,
                                                          trunk_separation_dv_mps);
                     record_event(MissionEventKind::StageSeparation, controlled_);  // the trunk
-                    capsule->set_ground_height(0.0);
-                    flying.body->set_ground_height(0.0);
+                    // the flat model's water below them: the geoid (run_parachutes follows it under the capsule)
+                    capsule->set_ground_height(sea_below_m(capsule->state().position_gcrf_m, epoch_));
+                    flying.body->set_ground_height(sea_below_m(flying.body->state().position_gcrf_m, epoch_));
                     bodies_.push_back(new_flying(std::move(capsule)));
                     controlled_ = bodies_.size() - 1;
                     clear_rendezvous_target();  // the target belongs to the controlled body's port
@@ -186,11 +190,17 @@ void FlightSession::run_parachutes(Flying& flying) {
     auto& body = *flying.body;
     const auto t = earth_.fixed_to_gcrf(epoch_);
     const auto& s = body.state();
-    const double altitude = frames::fixed_to_geodetic(transpose(t.rotation) * s.position_gcrf_m).height_m;
+    const auto geodetic = frames::fixed_to_geodetic(transpose(t.rotation) * s.position_gcrf_m);
+    const double altitude = geodetic.height_m;
+    // The ground below the capsule (controller ruling 5, M8 Plan A Task 5): the Earth terrain's surface when set (its
+    // sea: the geoid), else the geoid there - capsules come down at sea, and the flat model's ground follows it.
+    const double lat = geodetic.latitude_rad, lon = geodetic.longitude_rad;
+    const double ground_m = earth_terrain_ ? earth_terrain_->height_ellipsoid_m(lat, lon) : sea_height_m(lat, lon);
+    if (!earth_terrain_) body.set_ground_height(ground_m);
     const math::Vec3 air = s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), s.position_gcrf_m);
     const double q = 0.5 * atmosphere_.at(altitude).density_kg_m3 * dot(air, air);
     const double sink = -dot(air, math::normalized(s.position_gcrf_m));
-    const auto a = flying.parachutes->update({altitude - body.ground_height_m(), q, sink, body.resting()});
+    const auto a = flying.parachutes->update({altitude - ground_m, q, sink, body.resting()});
     auto& v = body.vehicle();
     if (a.release_drogues) v.release_parachutes("drogue");
     if (a.deploy_drogues) v.deploy_parachutes("drogue");
@@ -202,11 +212,18 @@ double FlightSession::splashdown_miss_m(size_t index) const {
     if (!splashdown_zone_) throw std::logic_error("FlightSession: no splashdown zone set");
     const auto t = earth_.fixed_to_gcrf(epoch_);
     const math::Vec3 r = transpose(t.rotation) * bodies_.at(index).body->state().position_gcrf_m;
-    const math::Vec3 z =
-        frames::geodetic_to_fixed({splashdown_zone_->latitude_rad, splashdown_zone_->longitude_rad, 0.0});
+    const math::Vec3 z = frames::geodetic_to_fixed(
+        {splashdown_zone_->latitude_rad, splashdown_zone_->longitude_rad,
+         sea_height_m(splashdown_zone_->latitude_rad, splashdown_zone_->longitude_rad)});
     const math::Vec3 up = math::normalized(r);
     const math::Vec3 d = r - z;
     return norm(d - up * dot(d, up));
+}
+
+double FlightSession::sea_below_m(const math::Vec3& position_gcrf_m, time::Epoch epoch) const {
+    const auto t = earth_.fixed_to_gcrf(epoch);
+    const auto g = frames::fixed_to_geodetic(transpose(t.rotation) * position_gcrf_m);
+    return sea_height_m(g.latitude_rad, g.longitude_rad);
 }
 
 }  // namespace starsim::sim

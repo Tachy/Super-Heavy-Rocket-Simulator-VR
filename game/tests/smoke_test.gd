@@ -151,8 +151,20 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	_check(f9.mission_site_id() == "ccsfs_slc40", "RTLS: launch site of the mission")
 	_check(_ok(f9, f9.start_mission("falcon9_asds", tdb)), "Falcon 9 drone-ship mission starts on the same FlightSim")
 	zone = f9.landing_zone()
-	_check(zone.get("has_deck", false) and absf(float(zone.get("deck_length_m", 0.0)) - 91.0) < 1e-9
-			and absf(float(zone.get("sea_height_m", 0.0)) + 35.0) < 1e-6, "ASDS: the drone ship's deck from the config")
+	# The ship floats on the EGM2008 geoid at its station (M8 Plan A Task 5; was a fixed -35 m): the Earth terrain's
+	# sea there when loaded, else the coarse geoid (-20 .. -50 m off the Carolinas).
+	var ship_sea: Dictionary = f9.earth_surface(float(zone.get("latitude_deg", 0.0)), float(zone.get("longitude_deg", 0.0)))
+	var sea_m := float(zone.get("sea_height_m", 0.0))
+	var sea_ok := absf(sea_m - float(ship_sea.get("height_m", 0.0))) < 1e-6 if ship_sea.get("present", false) \
+			else (sea_m < -20.0 and sea_m > -50.0)
+	_check(zone.get("has_deck", false) and absf(float(zone.get("deck_length_m", 0.0)) - 91.0) < 1e-9 and sea_ok,
+			"ASDS: the drone ship's deck from the config, on the geoid")
+	if ship_sea.get("present", false):  # the Earth terrain (data/ fetched): the ship's sea is water, OLP-1 its plateau
+		var olp := f9.earth_surface(25.99686, -97.15394)
+		_check(ship_sea.get("water", false) and not olp.get("water", true)
+				and absf(float(olp.get("height_m", 0.0)) - 10.0) < 1e-6, "Earth terrain: sea at the ship, pad plateau at OLP-1")
+	else:
+		print("  (Erdgelände fehlt: earth_surface not checked)")
 	var legs: Dictionary = f9.body_legs(0)
 	_check(legs.get("present", false) and (legs.get("azimuths_deg", []) as Array).size() == 4
 			and float(legs.get("deployment", 1.0)) == 0.0 and legs.get("touchdown", "x") == "", "Falcon 9 stack: four stowed legs")

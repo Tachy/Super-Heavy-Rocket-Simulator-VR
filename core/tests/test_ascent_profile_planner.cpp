@@ -120,7 +120,7 @@ double impact_miss_of_ship_m(const sim::AscentProfileRequest& request, const sim
                                                {request.payload_kg, request.fairing, request.payload, {}});
     session.launch_from_pad(stack, sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, request.site_id)),
                             request.heading_rad, request.liftoff);
-    const auto ship = sim::recovery_landing_site(STARSIM_CONFIG_DIR, plan.recovery);
+    const auto ship = sim::recovery_landing_site(session, plan.recovery);
     REQUIRE(ship);
     REQUIRE(ship->deck);
     session.set_landing_zone(*ship);

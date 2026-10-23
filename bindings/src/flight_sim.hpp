@@ -193,6 +193,10 @@ public:
     // The flight's Moon terrain at a point: {present}; present: {height_m (above the sphere), normal_moon_me, in_tile}.
     // Runs on the calling thread (the terrain is immutable and shared with the session).
     godot::Dictionary moon_terrain(double latitude_deg, double longitude_deg) const;
+    // The Earth terrain at a point: {present}; present: {height_m (the surface above the WGS84 ellipsoid; sea: the
+    // EGM2008 geoid), water}. Loaded in setup() from data/ (absent: the flat ground); runs on the calling thread (the
+    // terrain is immutable and shared with the session).
+    godot::Dictionary earth_surface(double latitude_deg, double longitude_deg) const;
     // The crew reports its mid-course correction flown (lunar step PilotCorrection).
     int64_t complete_pilot_correction();
     // Re-plan of the lunar return from the current flight data (ok: the session's result, message: lunar_status()).
@@ -300,6 +304,7 @@ private:
     spice::SpiceOrientation moon_ = spice::SpiceOrientation::moon_mean_earth();  // the Moon as a reference body (l6)
     spice::SpiceTimeConverter time_;
     std::filesystem::path config_dir_;
+    std::shared_ptr<const environment::EarthTerrain> earth_terrain_;  // setup(): the session's, nullptr without data/
     mutable std::mutex snapshot_mutex_;
     std::shared_ptr<const FlightSnapshot> snapshot_;  // latest published
     std::shared_ptr<const FlightSnapshot> frame_snapshot_;  // main thread: pinned by advance_to, released by wait_idle

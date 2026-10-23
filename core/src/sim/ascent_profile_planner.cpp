@@ -103,7 +103,7 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
     const auto stack = request_stack(dir, request);
     session.launch_from_pad(stack, launch_site_from_config(config::load_launch_site(dir, request.site_id)),
                             request.heading_rad, request.liftoff);
-    if (const auto zone = recovery_landing_site(dir, request.recovery)) session.set_landing_zone(*zone);
+    if (const auto zone = recovery_landing_site(like, request.recovery)) session.set_landing_zone(*zone);
     session.set_booster_return(true);
     gnc::PitchProgram program;
     program.kick_angle_rad = kick_angle_rad;
@@ -404,14 +404,16 @@ private:
 
 }  // namespace
 
-std::optional<LaunchSite> recovery_landing_site(const std::filesystem::path& config_dir, const RecoveryChoice& recovery) {
+std::optional<LaunchSite> recovery_landing_site(const FlightSession& session, const RecoveryChoice& recovery) {
+    const auto& config_dir = session.config_dir();
     switch (recovery.kind) {
         case RecoveryKind::TowerCatch: return std::nullopt;
         case RecoveryKind::LandingZone:
             return launch_site_from_config(config::load_launch_site(config_dir, recovery.zone_or_ship_id));
         case RecoveryKind::DroneShip:
             return drone_ship_site(config::load_drone_ship(config_dir, recovery.zone_or_ship_id), recovery.latitude_rad,
-                                   recovery.longitude_rad, drone_ship_sea_height_m, recovery.heading_rad);
+                                   recovery.longitude_rad,
+                                   session.sea_height_m(recovery.latitude_rad, recovery.longitude_rad), recovery.heading_rad);
     }
     return std::nullopt;
 }
@@ -528,7 +530,7 @@ AscentProfile engage_planned_ascent(FlightSession& session, const AscentProfileR
         session.schedule_liftoff(std::nullopt);  // the countdown is called off: no T-0 to hold at
         return profile;
     }
-    if (const auto zone = recovery_landing_site(session.config_dir(), profile.recovery)) session.set_landing_zone(*zone);
+    if (const auto zone = recovery_landing_site(session, profile.recovery)) session.set_landing_zone(*zone);
     session.set_booster_return(true);
     gnc::PitchProgram program;
     program.kick_angle_rad = profile.kick_angle_rad;

@@ -1045,6 +1045,8 @@ private:
     void run_return_guidance(Flying& flying);
     void run_ship_landing(Flying& flying);
     void run_parachutes(Flying& flying);
+    // The sea below a GCRF position at `epoch`: sea_height_m at its geodetic latitude / longitude.
+    double sea_below_m(const math::Vec3& position_gcrf_m, time::Epoch epoch) const;
     void apply_return_command(const Flying& flying, const gnc::AttitudeController& controller,
                               double ambient_pressure_pa, vehicle::VehicleCommand& command) const;
     // The translation command as body-axis force fractions of the controlled body (nothing without a command).

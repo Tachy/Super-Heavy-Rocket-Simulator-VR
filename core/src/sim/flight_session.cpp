@@ -513,7 +513,9 @@ void FlightSession::place_body(const config::VehicleConfig& config, const vehicl
 void FlightSession::place_vehicle(std::unique_ptr<vehicle::Vehicle> vehicle, const vehicle::RigidBodyState& state,
                                   time::Epoch epoch) {
     auto body = std::make_unique<vehicle::FlightBody>(std::move(vehicle), state);
-    body->set_ground_height(body->vehicle().splashdown_recovery() ? 0.0 : launch_site_.height_m);  // a capsule: the sea
+    // a capsule: the sea below it (the geoid; run_parachutes follows it), else the pad
+    body->set_ground_height(body->vehicle().splashdown_recovery() ? sea_below_m(state.position_gcrf_m, epoch)
+                                                                  : launch_site_.height_m);
     clear_for_new_body(false, epoch);
     reset_leg_landing();
     bodies_.push_back(new_flying(std::move(body)));

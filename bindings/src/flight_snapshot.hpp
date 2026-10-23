@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/variant.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include "starsim/environment/lunar_terrain.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/refuelling_campaign_flight.hpp"
 #include "starsim/sim/refuelling_campaign_setup.hpp"

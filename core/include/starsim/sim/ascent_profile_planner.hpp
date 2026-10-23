@@ -24,15 +24,14 @@ struct RecoveryChoice {
     double heading_rad = 0.0;     // DroneShip: the deck's long axis, clockwise from north (along the ground track)
 };
 
-// [E] The sea surface a drone ship floats on, above WGS84: the geoid off the US Atlantic coast (EGM2008 ~-30 .. -35 m;
-// config/missions/falcon9_asds.toml uses -35 m off the Carolinas).
-inline constexpr double drone_ship_sea_height_m = -35.0;
 // [D] The drone ship waits at the first stage's impact predicted this long after its separation (the derivation of
 // config/missions/falcon9_asds.toml: the staging sequence's push is over, the coast's RCS trim moves the point ~0.1 km).
 inline constexpr double drone_ship_prediction_after_separation_s = 10.0;
 
-// The landing zone or drone ship of `recovery` as the session's landing site (none for a tower catch).
-std::optional<LaunchSite> recovery_landing_site(const std::filesystem::path& config_dir, const RecoveryChoice& recovery);
+// The landing zone or drone ship of `recovery` as the session's landing site (none for a tower catch), read from
+// `session`'s config directory. A drone ship floats on `session`'s sea at its station (FlightSession::sea_height_m:
+// the terrain's fine EGM2008 geoid when set, else the coarse one).
+std::optional<LaunchSite> recovery_landing_site(const FlightSession& session, const RecoveryChoice& recovery);
 
 // A launch from a pad the onboard computer plans before liftoff (ascent trajectory and staging, Task 3).
 // Threads: the planner reads `like`'s interpolated ephemeris and orientation, whose caches fill lazily and are not
