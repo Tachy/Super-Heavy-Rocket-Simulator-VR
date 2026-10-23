@@ -1,0 +1,41 @@
+# Validation case (ascent trajectory and staging, Task 6): Starship flight 14 (2026-09-28, B21 / S41) flown to its own
+# recorded insertion orbit, with its payload and propellant load, through the onboard computer's plan (sim::plan_launch: kick,
+# catch, MECO from the booster's return) - test "Starship ascent to flight 14's orbit against its webcast telemetry".
+# The recorded flight (tests/validation/telemetry/flight14_2026-09-28.csv, flights.toml) is the comparison, never an
+# input to the profile. Not modelled (stated, not corrected): the booster engine out from T+76 s (32 of 33 lit) and the
+# ship's RVac out from T+438 s; flight 14's booster splashed down in the gulf (ours returns to the tower).
+
+[mission]
+name = "Validierung: Testflug 14"
+display_name = "Testflug 14 (Nachflug)"  # shown in the webcast overlay (no trademarks)
+vehicle = "starship_block3"
+site = "starbase_olp1"          # [S:flights.toml] Starbase; OLP-1 [E] (flight 14's pad not recorded)
+heading_deg = 90.0              # body +y on the pad (as starship_leo)
+# [E] 26 Starlink V3 (press reports, retrieved 2026-10-23, e.g. https://innovation-village.com/spacex-successfully-
+# launches-starship-into-orbit-for-the-first-time/; one pre-launch report: ~20) at ~2 t each [E] (the figure of the
+# ship dry-mass derivation, starship_block3.toml - dry + payload is what the telemetry fixes)
+payload_t = 52.0
+fairing = false
+
+[target]
+# [D] flight 14's insertion orbit, its periapsis at its SECO altitude. The recorded 262 x 275 km, 30.5 deg
+# [S:flights.toml] is the orbit after an in-orbit perigee raise: a Kepler fit of the ship's altitude readings
+# (tests/validation/telemetry/flight14_2026-09-28.csv, T+515-1498 s, 620 readings, rms 0.3 km) gives -44 x 276 km
+# after SECO (~T+505 s at 165 km, still climbing) and 262 x 277 km after the burn at T+1520-1640 s (fit T+1700-2600 s,
+# rms 0.2 km). A transatmospheric periapsis cannot be the ascent guidance's target (PEG inserts at the periapsis: below
+# the surface the trial flights crash), and a direct insertion into 262 x 275 km with the payload and the catch leaves
+# the ship dry before cutoff (the planner refuses it): the target keeps the recorded apoapsis and puts the periapsis at
+# the recorded SECO altitude (~105 m/s more than flight 14's insertion, docs/subsystems.md "Ascent trajectory and
+# staging").
+periapsis_km = 165.0
+apoapsis_km = 276.0
+inclination_deg = 30.5
+northerly = true
+
+[propellant]
+# Loaded before the engines start [D]: the booster's propellant gauge reads 96.8 % of the 3,650 t capacity from T-6 s
+# to T+5 s display (flight14_2026-09-28.csv; the dials show the state ~3.5 s late). With it and the payload the stack
+# weighs 5,650 t on the pad and 5,602 t at the release after the engines' start-up (mass_estimate.py fits 5,542-5,603 t
+# at liftoff; full tanks and no payload: 5,715 t).
+# The ship's gauge is first shown at T+146 s (98.2 % five seconds after its ignition): full (not named).
+booster = 3533.2

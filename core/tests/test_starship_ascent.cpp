@@ -1,21 +1,15 @@
-// Starship (Block 3) ascent mission against the webcast telemetry of flights 13 and 14: the operational ascent throttle
-// and the max-Q limit of the first stage, MECO planned for the booster's return to the tower.
+// Starship (Block 3) ascent against flight 14's webcast telemetry (ascent trajectory and staging, Task 6): the
+// validation mission (config/missions/flight14_ascent.toml: its insertion orbit, payload and propellant load) flown
+// through the onboard computer's plan - the kick, the catch and MECO from the booster's return are planned, nothing is
+// fitted to the recording. The recording is the check.
 
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
-#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "starsim/config/launch_site_config.hpp"
-#include "starsim/config/mission_config.hpp"
-#include "starsim/config/vehicle_config.hpp"
-#include "starsim/gnc/ascent_guidance.hpp"
-#include "starsim/frames/geodetic.hpp"
+#include "ascent_validation.hpp"
 #include "starsim/math/constants.hpp"
-#include "starsim/sim/ascent_mission.hpp"
-#include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -24,129 +18,113 @@ using namespace starsim;
 namespace {
 
 constexpr double deg = constants::deg_to_rad;
-constexpr double recorded_meco_propellant_kg = 500e3;  // [D] gauge ~13.5 % of 3,650 t at MECO, flights 13 / 14
+const char* const table = "flight14_2026-09-28.csv";
 
-struct StackSample {
-    double t_s = 0.0, altitude_km = 0.0, speed_kmh = 0.0;
-};
+// [D] The table shows the stack's state 3.50 s late against the clamps' release (T+0 of the simulation): its early
+// speed (8-40 m/s, drag-free) extrapolates to zero at T+3.50 s -
+//   python tools/telemetry/liftoff_time.py tests/validation/telemetry/flight14_2026-09-28.csv
+//   -> quadratic: speed zero at T+3.50 s, acceleration 4.79 m/s^2 at T+8.8 s
+// (flight 13: 3.24 s; Falcon 9 CRS-35 / Starlink 15-25: 3.42 / 3.26 s). Compared without it the stack ran ~12 % fast
+// at T+30 s (the former "open discrepancy").
+constexpr double time_base_s = 3.50;
+// [D] The altitude dial lags the speed dial by another 1.95 s (same command: the displayed speed integrated through the
+// vertical rise matches the 0.1 km readings of T+12-32 s with a mean error of 2 m): its time base T+5.45 s. Compared on
+// the speed dial's time base the altitude ran 14 % high at T+30 s.
+constexpr double altitude_time_base_s = 5.45;
 
-struct StarshipAscent {
-    std::vector<StackSample> samples;  // at the requested times, until MECO
-    double meco_s = -1.0, meco_altitude_km = 0.0, meco_speed_kmh = 0.0;
-};
+// Recorded MECO (display time): the last booster reading T+138.75 s (5943 km/h, 51.0 km, still accelerating) before
+// the staging gap (no readings T+139-146 s): MECO at T+139.5 +- 0.75 s.
+constexpr double recorded_meco_display_s = 139.5;
+constexpr double recorded_meco_uncertainty_s = 0.75;
+// Recorded SECO (display time): the ship's speed levels at 26,507-26,509 km/h from T+507.25 s (the tail-off ends);
+// the cutoff T+506.5 +- 1 s.
+constexpr double recorded_seco_display_s = 506.5;
+constexpr double recorded_seco_uncertainty_s = 1.0;
 
-const spice::SpiceEphemeris& mission_ephemeris() {
-    test::spice_session();
-    static const spice::SpiceEphemeris ephemeris;
-    return ephemeris;
-}
+// Open discrepancies (docs/subsystems.md "Ascent trajectory and staging", Task 6), as fractions of the recorded value
+// (measured + ~2 % [E]: a regression beyond the documented gap fails). Up to max-Q the model follows the flight within
+// the readings (allowance 0: T+30 s -0.9 % speed, -2.1 % altitude). From max-Q (the recorded q holds at 38-39 kPa from
+// T+58 s display, peak_dynamic_pressure.py) flight 14 throttles below the operational throttle (gauge flow 0.78-0.90 of
+// the rated against our 0.88: our q peaks at 38.7 kPa, under the 38.9 kPa limit, so our limiter never throttles) and one
+// centre engine is out from T+76 s (32 of 33, not modelled): T+60 / 90 / 120 s +1.7 / +6.9 / +9.0 % fast, +0.6 / +7.4 /
+// +11.2 % high.
+constexpr double max_q_hold_display_s = 58.0;
+constexpr double after_max_q_speed_allowance = 0.11;
+constexpr double after_max_q_altitude_allowance = 0.13;
+// MECO: ours comes from the catch's return plan (294 t left in the booster); flight 14 staged with ~500 t by its gauge
+// (not followed after staging, decision 2026-10-14) after the slower ascent above: T+129.8 against T+136.0 s (-4.6 %),
+// 6559 against 5943 km/h (+10.4 %), 52.5 against 51.0 km (+3.0 %), path 30.3 against 27.8 deg.
+constexpr double meco_time_allowance = 0.06;
+constexpr double meco_speed_allowance = 0.12;
+constexpr double meco_altitude_allowance = 0.05;
+constexpr double meco_gamma_allowance_deg = 4.0;
+// SECO: flight 14 flew its last ~67 s on 5 of 6 engines (RVac out at T+438 s), staged ~600 km/h slower and inserted
+// ~105 m/s lower (periapsis -44 km, ours 165 km): ours cuts off T+447 against T+503 s (-11.1 %).
+constexpr double seco_time_allowance = 0.13;
 
-const frames::BodyOrientation& mission_earth() {
-    test::spice_session();
-    static const auto earth = spice::SpiceOrientation::earth();
-    return earth;
-}
-
-time::Epoch mission_t0() {
-    test::spice_session();
-    return spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
-}
-
-// The kick the onboard computer plans for the mission (sim::plan_launch at its start).
-double planned_kick_rad(const config::AscentMission& mission) {
-    sim::FlightSession session(mission_ephemeris(), mission_earth(), STARSIM_CONFIG_DIR);
-    const auto plan = sim::start_ascent_mission(session, mission, STARSIM_CONFIG_DIR, mission_t0());
-    REQUIRE(plan.feasible);
-    return plan.kick_angle_rad;
-}
-
-// Flies the mission until the stack separates; samples the stack at `times` (mission time). `meco_propellant_kg` > 0:
-// no booster return, MECO with this much left in the booster (as recorded) instead of the return guidance's plan,
-// on the pitch kick `kick_angle_rad`; otherwise the mission as started (its planned kick).
-StarshipAscent fly_mission(const config::AscentMission& mission, const std::vector<double>& times,
-                           double meco_propellant_kg = 0.0, double kick_angle_rad = 0.0) {
-    sim::FlightSession session(mission_ephemeris(), mission_earth(), STARSIM_CONFIG_DIR);
-    const auto t0 = mission_t0();
-    if (meco_propellant_kg > 0.0) {
-        auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, mission.vehicle_id);
-        cfg.stages.back().payload_mass_kg = mission.payload_kg;
-        cfg.stages.front().reserve_propellant_kg = meco_propellant_kg;
-        session.launch_from_pad(cfg, sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, mission.site_id)),
-                                mission.heading_rad, t0);
-        gnc::PitchProgram program;
-        program.kick_angle_rad = kick_angle_rad;
-        session.engage_ascent_autopilot(
-            {mission.periapsis_height_m, mission.apoapsis_height_m, mission.inclination_rad, mission.northerly}, program);
-    } else {
-        sim::start_ascent_mission(session, mission, STARSIM_CONFIG_DIR, t0);
-    }
-    StarshipAscent a;
-    size_t next = 0;
-    for (double t = 0.0; t < 300.0; t += 0.5) {
-        session.advance_to(t0 + t, 1000);
-        const auto& b = session.body(session.controlled_index());
-        const auto tel = session.telemetry(session.controlled_index());
-        const double t_mission = session.mission_time_s();
-        if (std::getenv("STARSIM_DEBUG_ASCENT_G") && std::fmod(t, 5.0) < 0.25) {
-            std::printf("  [g] T+%3.0f  %6.2f km  %6.0f km/h  %4.2f g  m %7.1f t  prop %7.1f t  thrust %6.1f MN\n", t_mission,
-                        tel.altitude_m / 1e3, tel.speed_relative_mps * 3.6, tel.sensed_acceleration_g, tel.mass_kg / 1e3,
-                        tel.propellant_kg / 1e3, tel.thrust_n / 1e6);
-        }
-        if (session.autopilot().state == sim::AutopilotState::Booster && next < times.size() && t_mission >= times[next]) {
-            a.samples.push_back({times[next++], tel.altitude_m / 1e3, tel.speed_relative_mps * 3.6});
-        }
-        if (a.meco_s < 0.0 && session.autopilot().state != sim::AutopilotState::Booster && t_mission > 10.0) {
-            a.meco_s = t_mission;
-            a.meco_altitude_km = tel.altitude_m / 1e3;
-            a.meco_speed_kmh = tel.speed_relative_mps * 3.6;
-        }
-        if (a.meco_s > 0.0 || b.impacted()) break;
-    }
-    return a;
+const test::FlownAscent& flight14() {
+    static const test::FlownAscent flown = [] {
+        test::spice_session();
+        const spice::SpiceTimeConverter time;
+        return test::fly_validation_ascent("flight14_ascent", time.from_utc({2026, 9, 28, 12, 48, 59.0}));  // [S:flights.toml]
+    }();
+    return flown;
 }
 
 }  // namespace
 
-TEST_CASE("Starship ascent follows the webcast telemetry of flights 13 and 14", "[gnc][validation][ascent]") {
-    // Recorded (tests/validation/telemetry, flights 13 / 14, displayed altitude above the pad and speed relative to the
-    // ground): T+30 s 1.6 km 518 / 513 km/h, T+60 s 8.5 / 8.3 km 1404 / 1408 km/h, T+90 s 20.8 / 20.1 km 2787 / 2758 km/h,
-    // T+120 s 39.0 / 37.4 km 4878 / 4817 km/h; MECO ~T+140 s at ~53 km, ~5900-6000 km/h with ~13.5 % = ~500 t left in
-    // the booster (gauge): flown with that MECO, not the return guidance's plan (~310 t: the gauge is not consistent
-    // with the engines after staging and is not followed - test "Block 3 plans MECO ...").
-    struct Recorded {
-        double t_s, altitude_km, speed_kmh;
-    };
-    const Recorded recorded[] = {{30.0, 1.6, 515.0}, {60.0, 8.4, 1406.0}, {90.0, 20.5, 2772.0}, {120.0, 38.2, 4848.0}};
-    std::vector<double> times;
-    for (const auto& r : recorded) times.push_back(r.t_s);
-    const auto mission = config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo");
-    // the kick the computer plans for this target (with the catch); the flight then MECOs at the recorded propellant
-    const auto a = fly_mission(mission, times, recorded_meco_propellant_kg, planned_kick_rad(mission));
-    REQUIRE(a.samples.size() == times.size());
-    for (size_t i = 0; i < times.size(); ++i) {
-        std::printf("[validation] Starship T+%.0f s: recorded %.1f km %.0f km/h, simulated %.1f km %.0f km/h\n",
-                    recorded[i].t_s, recorded[i].altitude_km, recorded[i].speed_kmh, a.samples[i].altitude_km,
-                    a.samples[i].speed_kmh);
-        // ascent Task 2 (the speed-fitted throttle schedule replaced by the gauge's operational throttle 0.88 and the
-        // q limit, not tuned): +12.4 / +7.8 / +9.3 / +9.6 % at T+30 / 60 / 90 / 120 s (bound 0.12 -> 0.13); the stack
-        // is faster than the flights at the gauge's own flow - an open model discrepancy (docs/subsystems.md "Ascent
-        // trajectory and staging"); Task 6 rewrites this check
-        CHECK(std::abs(a.samples[i].speed_kmh / recorded[i].speed_kmh - 1.0) < 0.13);
-    }
-    std::printf("[validation] Starship MECO: recorded ~T+140 s, ~53 km, ~5950 km/h; simulated T+%.0f s, %.1f km, %.0f km/h\n",
-                a.meco_s, a.meco_altitude_km, a.meco_speed_kmh);
-    CHECK(std::abs(a.meco_s - 140.0) < 15.0);  // ascent Task 2: T+126 s (bound 12 -> 15 s), the same discrepancy
-    CHECK(std::abs(a.meco_speed_kmh / 5950.0 - 1.0) < 0.1);
-    CHECK(std::abs(a.meco_altitude_km / 53.0 - 1.0) < 0.15);
-}
+TEST_CASE("Starship ascent to flight 14's insertion orbit against its webcast telemetry",
+          "[gnc][validation][ascent][slow]") {
+    const auto& a = flight14();
+    REQUIRE(a.plan.feasible);
+    REQUIRE(a.seco_s > 0.0);
+    std::printf("[validation] flight 14: kick %.2f deg, MECO T+%.2f s with %.1f t in the booster, SECO T+%.1f s, "
+                "%.1f x %.1f km, i %.2f deg, %.1f t left in the ship\n",
+                a.plan.kick_angle_rad / deg, a.meco.t_s, a.booster_meco_propellant_t, a.seco_s, a.periapsis_km,
+                a.apoapsis_km, a.inclination_deg, a.upper_propellant_at_seco_t);
+    // the insertion orbit flown
+    CHECK(std::abs(a.periapsis_km - 165.0) < 5.0);
+    CHECK(std::abs(a.apoapsis_km - 276.0) < 5.0);
+    CHECK(std::abs(a.inclination_deg - 30.5) < 0.1);
 
-TEST_CASE("Starship pitch kick sweep", "[.tuning]") {
-    const auto mission = config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo");
-    for (double kick_deg : {10.0, 11.0, 12.0, 13.0, 14.0}) {
-        const auto a = fly_mission(mission, {60.0, 90.0, 120.0}, recorded_meco_propellant_kg, kick_deg * deg);
-        std::printf("kick %4.1f deg: T+60 %.1f km %.0f km/h, T+90 %.1f km %.0f km/h, T+120 %.1f km %.0f km/h; MECO T+%.0f s %.1f "
-                    "km %.0f km/h\n", kick_deg, a.samples[0].altitude_km, a.samples[0].speed_kmh, a.samples[1].altitude_km,
-                    a.samples[1].speed_kmh, a.samples[2].altitude_km, a.samples[2].speed_kmh, a.meco_s, a.meco_altitude_km,
-                    a.meco_speed_kmh);
+    // every recorded sample of the booster phase (engine-outs not modelled: flight 14's 33rd engine is out from T+76 s)
+    for (double t : {30.0, 60.0, 90.0, 120.0}) {
+        const bool after_max_q = t >= max_q_hold_display_s;
+        const auto speed = test::compare_speed(table, a, t, time_base_s, after_max_q ? after_max_q_speed_allowance : 0.0);
+        const auto altitude = test::compare_altitude(table, a, t, altitude_time_base_s,
+                                                     after_max_q ? after_max_q_altitude_allowance : 0.0);
+        test::print("flight 14", speed);
+        test::print("flight 14", altitude);
+        CHECK(speed.within());
+        CHECK(altitude.within());
+    }
+
+    // MECO: the recorded state at the recorded MECO against the simulated state at the simulated MECO. The last
+    // readings before the staging gap: speed at MECO; the altitude dial shows the state `lag` earlier, compared with the
+    // simulation that much before its MECO (the path angle from its rate and the speed of that instant).
+    const double last_reading_s = recorded_meco_display_s - recorded_meco_uncertainty_s;
+    const double lag = altitude_time_base_s - time_base_s;
+    const auto r = test::recorded_stack(table, last_reading_s);
+    const auto r_lag = test::recorded_stack(table, last_reading_s - lag);
+    const auto s_lag = a.at(a.meco.t_s - lag);
+    const double recorded_gamma_deg = std::asin(r.altitude_rate_km_s * 3600.0 / r_lag.speed_kmh) / deg;
+    const double gamma_reading_deg =
+        test::altitude_resolution_km / 2.0 * 3600.0 / r_lag.speed_kmh / deg;  // the rate over the +-2 s line
+    const test::Comparison meco[] = {
+        {"MECO time [s]", recorded_meco_display_s - time_base_s, a.meco.t_s,
+         recorded_meco_uncertainty_s + test::time_base_uncertainty_s, meco_time_allowance},
+        {"MECO speed [km/h]", r.speed_kmh, a.meco.speed_kmh,
+         test::speed_resolution_kmh + std::abs(r.speed_rate_kmh_s) * 2.0 * recorded_meco_uncertainty_s,
+         meco_speed_allowance},
+        {"MECO altitude [km]", r.altitude_km, s_lag.altitude_km,
+         test::altitude_resolution_km + std::abs(r.altitude_rate_km_s) * 2.0 * recorded_meco_uncertainty_s,
+         meco_altitude_allowance},
+        {"MECO path angle [deg]", recorded_gamma_deg, s_lag.gamma_deg, gamma_reading_deg + meco_gamma_allowance_deg, 0.0},
+        {"SECO time [s]", recorded_seco_display_s - time_base_s, a.seco_s,
+         recorded_seco_uncertainty_s + test::time_base_uncertainty_s, seco_time_allowance},
+    };
+    for (const auto& c : meco) {
+        test::print("flight 14", c);
+        CHECK(c.within());
     }
 }

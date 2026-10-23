@@ -41,7 +41,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   the mission delta-v budget and its required mass, the tanker's return reserve, the refuelling campaign calculator (tanker
   count from the r5 reference flights: windows with the phasing orbit chosen per window, depot boil-off, the depot's mean orbit followed: drag decay, transfer pushes, station keeping; HLS demand), the Earth return: TEI, mid-course corrections, braking burn, the coelliptic phasing (from below or above the target)
   to the ISS: schedule + full-model planner with drag, and the ISS launch window),
-  gnc (among others: PEG steering module, Apollo braking law, lunar landing guidance with SCvx approach and
+  gnc (among others: PEG steering module, the first stage's max-Q limiter and operational throttle, Apollo braking law, lunar landing guidance with SCvx approach and
   terminal descent, lunar ascent and abort guidance, entry corridor, lunar-return entry with an energy-linear bank profile and
   aerocapture guidance, relative navigation between docking ports, proximity guidance: waypoints, corridor,
   hold / retreat / breakout, final approach, R-bar approach from below (the depot), departure after undocking),
@@ -57,7 +57,7 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   ideal LVLH attitude of a station, docking-port kinematics, docked hold, attached mass, compound mass, run-time tank
   masses, probe/drogue port mating of the refuelling ships, propellant boil-off by a hull heat balance in flight and
   orbit-averaged, ship-to-ship transfer physics: line flow, outlet coverage, settling time; per-stage settling progress
-  before an ignition, PMD tanks, gas ingestion of an unsettled in-orbit ignition, the settling push and its gas bound), sim (flight session incl. the ISS as a station body from
+  before an ignition, PMD tanks, gas ingestion of an unsettled in-orbit ignition, the settling push and its gas bound), sim (flight session incl. the staging sequence (cold: MECO -> separation -> upper ignition; hot: the ship lights while joined) and the pre-launch ascent planner (`sim::plan_launch`: the first-stage kick by trial ascents for the least propellant, the recovery - tower, landing zone or drone ship - as a hard constraint, refusals; every launch from a pad, validated against flight 14 and CRS-35), the ISS as a station body from
   OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
   Waypoint 0 with drag tracking and re-plan, proximity flight to a station port, docking into a compound, undocking
   and departure, ISS missions chained by a mission sequence: from the separation orbit, from the pad with a launch

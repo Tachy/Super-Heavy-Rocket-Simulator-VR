@@ -194,6 +194,15 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   die Uhr bei T-0 stehen (wie ein Startabbruch auf der Rampe), statt auf der Rampe T+ zu zählen. Missionen, die auf der
   Rampe auf ihr T-0 warten (`start_mission` mit `wait_on_pad`, Fensterstart bei ISS-Missionen), gibt es im Kern und in
   den Bindings und in `render_check` (`--mission= --wait_on_pad`); eine Missionsauswahl im Spiel folgt.
+- **Startvorbereitung** [Entschieden 2026-10-22, umgesetzt]: Vor jedem Start von der Rampe (freier Start, Taste P auf
+  der Rampe, jede Mission) berechnet der Bordrechner die Aufstiegsbahn zum Ziel (Kippwinkel, Bergung der ersten Stufe:
+  Fangturm, Landezone oder Drohnenschiff). Solange er rechnet (Sekunden bis knapp eine Minute), steht das Fahrzeug auf
+  der Rampe, die Weltuhr und das T- stehen still, und das Webcast-Overlay zeigt in der Namenszeile (und als letztes
+  Ereignis) **"Startvorbereitung: Bahn wird berechnet"**; danach läuft der Countdown weiter. Ist das Ziel mit der
+  Bergung nicht erreichbar, bleibt das Fahrzeug auf der Rampe, der Autopilot aus, und die Meldung lautet
+  **"Start abgelehnt: <Grund>"** (z. B. "Start abgelehnt: Kein Fangturm am Startplatz.", "Ziel mit Booster-Rückkehr
+  nicht erreichbar (...)"). Beim Missionsstart (`start_mission`) erscheint die Anzeige noch nicht (die Uhr steht
+  trotzdem, bis der Plan da ist).
 
 ### Weitere Außenansichten
 

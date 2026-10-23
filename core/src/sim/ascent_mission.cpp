@@ -1,9 +1,35 @@
 #include "starsim/sim/ascent_mission.hpp"
 
+#include <algorithm>
+#include <stdexcept>
+
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/propellant_loading.hpp"
 #include "starsim/config/vehicle_config.hpp"
 
 namespace starsim::sim {
+namespace {
+
+// The mission's [propellant] loads into the named stages (the others stay full).
+void load_propellant(config::VehicleConfig& vehicle, const config::AscentMission& mission) {
+    for (const auto& [stage_id, kg] : mission.propellant_load_kg) {
+        auto stage = std::find_if(vehicle.stages.begin(), vehicle.stages.end(),
+                                  [&](const config::StageConfig& s) { return s.id == stage_id; });
+        if (stage == vehicle.stages.end()) {
+            throw std::invalid_argument("mission " + mission.id + ": [propellant] names no stage '" + stage_id + "'");
+        }
+        double capacity_kg = 0.0;
+        for (const auto& t : stage->tanks) {
+            if (t.contents != config::TankContents::Rcs) capacity_kg += t.capacity_kg;
+        }
+        if (kg > capacity_kg) {
+            throw std::invalid_argument("mission " + mission.id + ": [propellant] " + stage_id + " above its capacity");
+        }
+        config::fill_tanks(*stage, kg);
+    }
+}
+
+}  // namespace
 
 config::VehicleConfig ascent_stack(config::VehicleConfig vehicle, const std::filesystem::path& config_dir,
                                    double payload_kg, bool fairing, const std::optional<config::MissionPayload>& payload) {
@@ -37,8 +63,10 @@ AscentProfile start_ascent_mission(FlightSession& session, const config::AscentM
     auto vehicle = configured ? *configured : config::load_vehicle(config_dir, mission.vehicle_id);
     vehicle.stages.back().payload_mass_kg = mission.payload_kg;
     if (!mission.fairing) vehicle.stages.back().fairing_mass_kg = 0.0;
+    load_propellant(vehicle, mission);
     if (payload_vehicle) vehicle = config::stack_payload(std::move(vehicle), *payload_vehicle);
-    if (configured) request.stack = vehicle;  // a changed vehicle: planned as it stands
+    // a changed vehicle or a recorded propellant load: planned as it stands
+    if (configured || !mission.propellant_load_kg.empty()) request.stack = vehicle;
     session.launch_from_pad(vehicle, launch_site_from_config(config::load_launch_site(config_dir, mission.site_id)),
                             mission.heading_rad, epoch, keep_station);
     session.set_payload_separation(separation);  // after launch_from_pad (a new launch resets it)

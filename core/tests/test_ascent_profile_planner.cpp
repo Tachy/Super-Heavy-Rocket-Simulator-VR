@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -385,6 +386,24 @@ TEST_CASE("Mission starts plan their ascent; no mission file carries a kick", "[
     CHECK(refused.reason == "Kein Fangturm am Startplatz.");
     CHECK(session.autopilot().state == sim::AutopilotState::Off);
     CHECK(session.body(session.controlled_index()).clamped());
+}
+
+TEST_CASE("An ascent mission's [propellant] loads the named stages", "[sim][ascent_planner][mission]") {
+    // the validation mission flight14_ascent carries flight 14's booster load (gauge 96.8 % of 3,650 t)
+    const auto flight14 = config::load_ascent_mission(STARSIM_CONFIG_DIR, "flight14_ascent");
+    REQUIRE(flight14.propellant_load_kg.size() == 1);
+    CHECK(flight14.propellant_load_kg[0].first == "booster");
+    CHECK(flight14.propellant_load_kg[0].second == 3533.2e3);
+    CHECK(config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo").propellant_load_kg.empty());  // full
+    CHECK_THROWS(config::load_ascent_mission(changed_starship_leo("load_negative", "", "\n[propellant]\nbooster = -1.0\n"),
+                                             "starship_leo"));
+    // a stage the vehicle does not have, or more than its tanks hold: refused before anything is planned
+    sim::FlightSession session(test_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    auto mission = config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo");
+    mission.propellant_load_kg = {{"nose", 1.0e3}};
+    CHECK_THROWS_AS(sim::start_ascent_mission(session, mission, STARSIM_CONFIG_DIR, liftoff()), std::invalid_argument);
+    mission.propellant_load_kg = {{"booster", 3651.0e3}};
+    CHECK_THROWS_AS(sim::start_ascent_mission(session, mission, STARSIM_CONFIG_DIR, liftoff()), std::invalid_argument);
 }
 
 TEST_CASE("A free launch holds on the pad until the plan is in", "[sim][ascent_planner]") {

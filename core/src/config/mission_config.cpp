@@ -351,6 +351,11 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
     if (m.apoapsis_height_m < m.periapsis_height_m) doc.fail("target: apoapsis below periapsis");
     m.inclination_rad = doc.number(*target, "inclination_deg") * deg;
     m.northerly = (*target)["northerly"].value_or(true);
+    if (const auto* load = doc.root["propellant"].as_table()) {
+        for (const auto& [stage, value] : *load) {
+            m.propellant_load_kg.emplace_back(std::string(stage.str()), doc.positive(*load, stage.str()) * 1000.0);
+        }
+    }
     return m;
 }
 

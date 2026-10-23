@@ -34,7 +34,11 @@ Validation: the reader matched hand-taken screenshots exactly on an earlier flig
 reading for reading; flight 14's gauge readings were checked against unwrapped gauge images.
 
 Caveats: the displayed speed is presumably relative to the ground; altitude is rounded to whole km (derive
-vertical speed over several seconds). Rebuild a table:
+vertical speed over several seconds). Time base: the dials show the state late against the vehicle's release - the
+speed dial ~3.2-3.5 s (its early rise extrapolates to zero at T+3.24-3.50 s on all four tables), the altitude dial
+another ~2-2.5 s; compare a simulation released at T+0 at t_s minus these
+(`python tools/telemetry/liftoff_time.py <table.csv> [--simulated <dump.csv>]`; the ascent validation tests,
+docs/subsystems.md "Ascent trajectory and staging"). Rebuild a table:
 
 ```
 python tools/telemetry/webcast_telemetry.py locate <video>

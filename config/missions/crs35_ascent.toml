@@ -1,0 +1,24 @@
+# Validation case (ascent trajectory and staging, Task 6): Falcon 9 CRS-35 (2026-10-13, cargo Dragon, RTLS to LZ-40)
+# flown to its insertion orbit with its payload through the onboard computer's plan (sim::plan_launch: kick, recovery
+# - LZ-40 when the RTLS closes -, MECO from the return) - test "Falcon 9 ascent to CRS-35's orbit against its webcast
+# telemetry". The recorded flight (tests/validation/telemetry/f9_crs35_2026-10-13.csv) is the comparison, never an
+# input to the profile. Nine engines lit through the whole first-stage burn (engine icon): no engine-out.
+
+[mission]
+name = "Validierung: CRS-35"
+display_name = "Frachtflug zur Raumstation (Nachflug)"  # shown in the webcast overlay (no trademarks)
+vehicle = "falcon9_block5"
+site = "ccsfs_slc40"            # [S:flights.toml] SLC-40, return to LZ-40
+heading_deg = 45.0              # body +y on the pad (towards the ISS plane, north-east)
+payload_t = 12.5                # [E] cargo Dragon with its trunk load (flights.toml: ~12-13 t)
+fairing = false                 # Dragon flies without a fairing
+
+[target]
+# [D] the second stage's altitude holds at 197-198 km for the minute after SECO (T+563-625 s, the speed flat at
+# 27,010 km/h): a near-circular insertion at ~200 km; ISS plane [S].
+periapsis_km = 200.0
+apoapsis_km = 200.0
+inclination_deg = 51.6
+northerly = true
+
+# Propellant: full (the first stage's gauge falls from 98.8 % at T+5.25 s at 0.63 %/s, the rated flow: full at liftoff).

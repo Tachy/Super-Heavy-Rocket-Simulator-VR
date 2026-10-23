@@ -16,6 +16,7 @@
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+#include "ascent_validation.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -37,14 +38,10 @@ struct Ascent {
     bool impacted = false;
 };
 
-// Flies the Falcon 9 stack (payload_kg) from SLC-40 towards a 200 km orbit in the ISS plane (CRS / crew flights).
-// `reserve_kg` > 0: the first stage cuts off with this much propellant left (an RTLS keeps it for the return).
-// `profile`: altitude [m] and Earth-relative speed [m/s] of the stack at the given mission times (until staging).
-struct ProfilePoint {
-    double t_s = 0.0, altitude_m = 0.0, speed_mps = 0.0;
-};
-Ascent fly(const gnc::PitchProgram& program, double payload = payload_kg, double reserve_kg = 0.0,
-           std::vector<ProfilePoint>* profile = nullptr, bool fairing = true) {
+// Flies the Falcon 9 stack (payload_kg) from SLC-40 towards a 200 km orbit in the ISS plane (CRS / crew flights) on
+// `program`, the first stage to its configured reserve (no return).
+Ascent fly(const gnc::PitchProgram& program) {
+    const double payload = payload_kg;
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();
@@ -53,11 +50,8 @@ Ascent fly(const gnc::PitchProgram& program, double payload = payload_kg, double
     const auto t0 = time.from_utc({2026, 10, 13, 10, 33, 0.0});
     auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
     cfg.stages.back().payload_mass_kg = payload;
-    if (!fairing) cfg.stages.back().fairing_mass_kg = 0.0;  // Dragon flies without a fairing
-    if (reserve_kg > 0.0) cfg.stages.front().reserve_propellant_kg = reserve_kg;
     session.launch_from_pad(cfg, slc40(), 45.0 * deg, t0);
     session.engage_ascent_autopilot({200e3, 200e3, 51.6 * deg, true}, program);
-    size_t next_point = 0;
 
     Ascent a;
     for (double t = 0.0; t < 900.0 && session.autopilot().state != sim::AutopilotState::Orbit; t += 1.0) {
@@ -69,13 +63,6 @@ Ascent fly(const gnc::PitchProgram& program, double payload = payload_kg, double
         }
         const auto& st = b.state();
         const double r = norm(st.position_gcrf_m);
-        if (profile && next_point < profile->size() && session.mission_time_s() >= (*profile)[next_point].t_s) {
-            const auto tr = earth.fixed_to_gcrf(session.epoch());
-            auto& point = (*profile)[next_point++];
-            point.altitude_m = frames::fixed_to_geodetic(transpose(tr.rotation) * st.position_gcrf_m).height_m -
-                               slc40().height_m;
-            point.speed_mps = norm(st.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), st.position_gcrf_m));
-        }
         if (std::getenv("STARSIM_DEBUG_ASCENT_G") && static_cast<int>(t) % 5 == 0 && t <= 140.0) {  // vs the webcast dials
             const auto tr = earth.fixed_to_gcrf(session.epoch());
             const auto tel = session.telemetry(session.controlled_index());
@@ -130,8 +117,56 @@ Ascent fly(const gnc::PitchProgram& program, double payload = payload_kg, double
     return a;
 }
 
+// CRS-35 (ascent trajectory and staging, Task 6): the validation mission config/missions/crs35_ascent.toml (its orbit
+// and payload) flown through the onboard computer's plan - kick, recovery (LZ-40) and MECO from the return planned, not
+// fitted - against tests/validation/telemetry/f9_crs35_2026-10-13.csv.
+const char* const crs35_table = "f9_crs35_2026-10-13.csv";
+// [D] The table shows the stack's state 3.42 s late against the release:
+//   python tools/telemetry/liftoff_time.py tests/validation/telemetry/f9_crs35_2026-10-13.csv
+//   -> quadratic: speed zero at T+3.42 s, acceleration 4.42 m/s^2 at T+9.2 s
+constexpr double crs35_time_base_s = 3.42;
+// [D] The altitude dial lags the speed dial by another 2.45 s (same command, mean error 0 m over T+12-32 s): T+5.87 s.
+constexpr double crs35_altitude_time_base_s = 5.87;
+// Recorded MECO (display time, the speed graphic's time base): the acceleration falls below half its value before the
+// cutoff (~108 km/h/s) between T+137.75 and T+138.25 s - MECO at T+138.0 +- 0.5 s (the engine icon goes dark at
+// T+137.0 s: it is not delayed like the dials).
+constexpr double recorded_meco_display_s = 138.0;
+constexpr double recorded_meco_uncertainty_s = 0.5;
+// Recorded SECO (display time): no readings T+496-563 s; the rocket-equation fit of the second stage's speed
+// (T+430-496 s, rms 0.9 m/s) reaches the final 27,012 km/h at T+515 s: SECO T+515 +- 3 s.
+constexpr double recorded_seco_display_s = 515.0;
+constexpr double recorded_seco_uncertainty_s = 3.0;
+// Open discrepancies (docs/subsystems.md "Ascent trajectory and staging", Task 6), fractions of the recorded value
+// (measured + ~2 % [E]). Before max-Q the recording accelerates ~0.5 m/s^2 harder (speed slope 4.42 against 3.95 m/s^2
+// at 8-40 m/s; G dial 1.5 against 1.40-1.48 g): with the gauge's masses its thrust comes out 3-7 % above nine Merlins
+// at 845 kN while after max-Q it agrees within the G dial's 0.05 g (0.98-1.00) - no single thrust, Isp or mass error
+// explains both, not calibrated. T+30 s -9.5 % speed, -8.5 % altitude.
+constexpr double early_speed_allowance = 0.11;
+constexpr double early_altitude_allowance = 0.11;
+// After max-Q: CRS-35 throttles earlier and deeper (G 1.4-1.6 at T+50-60 s, gauge flow ~72 %; ours holds the transonic
+// q from Mach 0.9 at >= 0.80): T+60 / 90 / 120 s +2.3 / +4.6 / +4.2 % fast, -8.2 / -2.1 / +2.6 % high.
+constexpr double late_speed_allowance = 0.06;
+constexpr double late_altitude_allowance = 0.10;
+// MECO / SECO: T+132.7 against 134.6 s (-1.4 %), 6596 against 6490 km/h (+1.6 %), 58.2 against 57.4 km (+1.4 %); the
+// planned kick (11.6 deg) flies a steeper arc (path 41.3 against 36.6 deg); SECO T+508.0 against ~511.6 s (-0.7 %).
+constexpr double meco_time_allowance = 0.03;
+constexpr double meco_speed_allowance = 0.03;
+constexpr double meco_altitude_allowance = 0.04;
+constexpr double meco_gamma_allowance_deg = 6.0;
+constexpr double seco_time_allowance = 0.02;
+
+const test::FlownAscent& crs35() {
+    static const test::FlownAscent flown = [] {
+        test::spice_session();
+        const spice::SpiceTimeConverter time;
+        return test::fly_validation_ascent("crs35_ascent", time.from_utc({2026, 10, 13, 10, 33, 0.0}));  // [S:flights.toml]
+    }();
+    return flown;
+}
+
 // Falcon 9 ascent profile: the throttle from the first stage's max-Q limit ([stage] max_dynamic_pressure_pa;
-// STARSIM_DEBUG_ASCENT_G=1 prints the simulated G against the CRS-35 G-force dial). Pitch kick [E] (sweep "[.tuning]").
+// STARSIM_DEBUG_ASCENT_G=1 prints the simulated G against the CRS-35 G-force dial). Pitch kick 12 deg [E] (a fixed
+// program for the guidance check; missions plan theirs, the CRS-35 validation below).
 gnc::PitchProgram falcon9_program() {
     gnc::PitchProgram program;
     program.kick_angle_rad = 12.0 * deg;
@@ -155,14 +190,6 @@ TEST_CASE("Falcon 9 payload override changes the liftoff mass", "[sim][falcon9]"
     CHECK(session.body(0).vehicle().mass_properties().mass_kg - m0 == Catch::Approx(payload_kg).margin(1.0));
 }
 
-TEST_CASE("Falcon 9 pitch kick sweep", "[.tuning]") {
-    for (double kick_deg : {11.0, 11.5, 12.0, 12.5, 13.0}) {
-        auto program = falcon9_program();
-        program.kick_angle_rad = kick_deg * deg;
-        fly(program, 12500.0, 66000.0, nullptr, false);
-    }
-}
-
 TEST_CASE("Autopilot flies Falcon 9 from SLC-40 into a 200 km orbit", "[gnc][validation][ascent][falcon9]") {
     const auto a = fly(falcon9_program());
     REQUIRE_FALSE(a.impacted);  // review focus: the stack stands on the ground (no mount at SLC-40)
@@ -174,30 +201,51 @@ TEST_CASE("Autopilot flies Falcon 9 from SLC-40 into a 200 km orbit", "[gnc][val
     CHECK(a.propellant_t < 30.0);  // review focus: an untested drag table would show as an implausibly easy ascent
 }
 
-TEST_CASE("Falcon 9 ascent follows the CRS-35 webcast telemetry", "[gnc][validation][ascent][falcon9]") {
-    // CRS-35 (tests/validation/telemetry/f9_crs35_2026-10-13.csv): stack speed (Earth-relative) and altitude, MECO at
-    // T+137 s with ~15.5 % = 66 t in the first stage (gauge) for the return. Payload: cargo Dragon with trunk [E].
-    struct Recorded {
-        double t_s, altitude_km, speed_kmh;
-    };
-    const Recorded recorded[] = {{30.0, 1.4, 485.0}, {60.0, 7.8, 1188.0}, {90.0, 20.2, 2474.0}, {120.0, 40.6, 4672.0}};
-    std::vector<ProfilePoint> profile;
-    for (const auto& r : recorded) profile.push_back({r.t_s, 0.0, 0.0});
-    const auto a = fly(falcon9_program(), 12500.0, 66000.0, &profile, false);
-    for (size_t i = 0; i < profile.size(); ++i) {
-        std::printf("[validation] CRS-35 T+%.0f s: recorded %.1f km %.0f km/h, simulated %.1f km %.0f km/h\n",
-                    recorded[i].t_s, recorded[i].altitude_km, recorded[i].speed_kmh, profile[i].altitude_m / 1e3,
-                    profile[i].speed_mps * 3.6);
+TEST_CASE("Falcon 9 ascent to CRS-35's orbit against its webcast telemetry", "[gnc][validation][ascent][falcon9]") {
+    const auto& a = crs35();
+    REQUIRE(a.plan.feasible);
+    REQUIRE(a.seco_s > 0.0);
+    CHECK(a.plan.recovery.kind == sim::RecoveryKind::LandingZone);  // CRS-35 returned to LZ-40
+    std::printf("[validation] CRS-35: kick %.2f deg, MECO T+%.2f s with %.1f t in the first stage, SECO T+%.1f s, "
+                "%.1f x %.1f km, i %.2f deg, %.1f t left in the second stage\n",
+                a.plan.kick_angle_rad / deg, a.meco.t_s, a.booster_meco_propellant_t, a.seco_s, a.periapsis_km,
+                a.apoapsis_km, a.inclination_deg, a.upper_propellant_at_seco_t);
+
+    // every recorded sample of the first-stage burn (nine engines lit throughout)
+    for (double t : {30.0, 60.0, 90.0, 120.0}) {
+        const bool before_max_q = t < 50.0;
+        const auto speed = test::compare_speed(crs35_table, a, t, crs35_time_base_s,
+                                               before_max_q ? early_speed_allowance : late_speed_allowance);
+        const auto altitude = test::compare_altitude(crs35_table, a, t, crs35_altitude_time_base_s,
+                                                     before_max_q ? early_altitude_allowance : late_altitude_allowance);
+        test::print("CRS-35", speed);
+        test::print("CRS-35", altitude);
+        CHECK(speed.within());
+        CHECK(altitude.within());
     }
-    std::printf("[validation] CRS-35 MECO: recorded T+137 s, 56.6 km, 6441 km/h; simulated T+%.0f s, %.1f km, %.0f km/h\n",
-                a.meco_s, a.meco_altitude_km, a.meco_speed_mps * 3.6);
-    REQUIRE(a.state == sim::AutopilotState::Orbit);
-    // Open discrepancy (docs/subsystems.md "Ascent trajectory and staging", Task 6 validates the ascent): at the
-    // gauge's rated flow the simulated stack is faster than CRS-35 from the start (T+30 s +9 %); measured with the
-    // Mach-dependent q limit +12.4 % at T+60 s, +13.8 % at T+120 s. The bound catches a further regression.
-    CHECK(std::abs(profile[1].speed_mps * 3.6 / recorded[1].speed_kmh - 1.0) < 0.15);
-    CHECK(std::abs(profile[3].speed_mps * 3.6 / recorded[3].speed_kmh - 1.0) < 0.15);
-    CHECK(std::abs(a.meco_s / 137.0 - 1.0) < 0.1);
-    CHECK(std::abs(a.meco_altitude_km / 56.6 - 1.0) < 0.1);
-    CHECK(std::abs(a.meco_speed_mps * 3.6 / 6441.0 - 1.0) < 0.1);
+
+    // MECO: the recorded state at the recorded MECO against the simulated state at its MECO; the altitude dial shows the
+    // state `lag` earlier, compared with the simulation that much before its MECO.
+    const double lag = crs35_altitude_time_base_s - crs35_time_base_s;
+    const auto r = test::recorded_stack(crs35_table, recorded_meco_display_s);
+    const auto r_lag = test::recorded_stack(crs35_table, recorded_meco_display_s - lag);
+    const auto s_lag = a.at(a.meco.t_s - lag);
+    const double recorded_gamma_deg = std::asin(r.altitude_rate_km_s * 3600.0 / r_lag.speed_kmh) / deg;
+    const double gamma_reading_deg = test::altitude_resolution_km / 2.0 * 3600.0 / r_lag.speed_kmh / deg;
+    const test::Comparison checks[] = {
+        {"MECO time [s]", recorded_meco_display_s - crs35_time_base_s, a.meco.t_s,
+         recorded_meco_uncertainty_s + test::time_base_uncertainty_s, meco_time_allowance},
+        {"MECO speed [km/h]", r.speed_kmh, a.meco.speed_kmh,
+         test::speed_resolution_kmh + std::abs(r.speed_rate_kmh_s) * recorded_meco_uncertainty_s, meco_speed_allowance},
+        {"MECO altitude [km]", r.altitude_km, s_lag.altitude_km,
+         test::altitude_resolution_km + std::abs(r.altitude_rate_km_s) * recorded_meco_uncertainty_s,
+         meco_altitude_allowance},
+        {"MECO path angle [deg]", recorded_gamma_deg, s_lag.gamma_deg, gamma_reading_deg + meco_gamma_allowance_deg, 0.0},
+        {"SECO time [s]", recorded_seco_display_s - crs35_time_base_s, a.seco_s,
+         recorded_seco_uncertainty_s + test::time_base_uncertainty_s, seco_time_allowance},
+    };
+    for (const auto& c : checks) {
+        test::print("CRS-35", c);
+        CHECK(c.within());
+    }
 }
