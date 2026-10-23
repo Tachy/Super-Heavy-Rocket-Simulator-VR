@@ -50,6 +50,8 @@ TEST_CASE("SLC-40 and its landing zone LZ-40 load", "[config][falcon9]") {
     CHECK(pad.kind == "launch_pad");
     CHECK_FALSE(pad.tower.has_value());
     CHECK(pad.pad_radius_m == 0.0);
+    CHECK(pad.landing_zone_id == "ccsfs_lz40");
+    CHECK(config::load_launch_site(STARSIM_CONFIG_DIR, "ksc_lc39a").landing_zone_id.empty());
     const auto lz = config::load_launch_site(STARSIM_CONFIG_DIR, "ccsfs_lz40");
     CHECK(lz.kind == "landing_zone");
     CHECK(lz.pad_radius_m > 20.0);

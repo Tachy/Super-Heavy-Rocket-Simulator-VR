@@ -202,6 +202,12 @@ public:
     static double meco_propellant_kg(const vehicle::Vehicle& stack, const math::StateVector& state_gcrf,
                                      const frames::BodyOrientation& earth, time::Epoch epoch, const LandingSite& site,
                                      const BoosterReturnParameters& parameters, double landing_propellant_kg);
+    // The boostback delta-v meco_propellant_kg plans from `state_gcrf` (the stack at MECO): the Lambert arc from the state
+    // after the flip to `site` at the end of flight_time_s, plus boostback_loss_fraction. None when no arc exists (the
+    // MECO plan then counts no boostback: a plan that cannot be flown) or the parameters fly no boostback.
+    static std::optional<double> boostback_delta_v_mps(const math::StateVector& state_gcrf,
+                                                       const frames::BodyOrientation& earth, time::Epoch epoch,
+                                                       const LandingSite& site, const BoosterReturnParameters& parameters);
 
 private:
     LandingSite site_;  // target of the return (moved to the sea point when ditching)

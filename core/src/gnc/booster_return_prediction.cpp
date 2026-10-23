@@ -253,16 +253,7 @@ double BoosterReturnGuidance::meco_propellant_kg(const vehicle::Vehicle& stack, 
         flip_kg += parameters.flip_duration_s * e.performance->mass_flow_kgps(e.performance->config().throttle_min);
     }
 
-    const auto after_flip = orbit::propagate_two_body(state_gcrf, constants::earth_gm_m3ps2, parameters.flip_duration_s);
-    const double time_left = std::max(parameters.flight_time_s - parameters.flip_duration_s, 30.0);
-    const Vec3 site_fixed = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
-    const Vec3 aim_gcrf =
-        earth.fixed_to_gcrf(epoch + parameters.flip_duration_s + time_left).position(site_fixed);
-    const Vec3 normal = math::normalized(cross(after_flip.position_m, aim_gcrf));
-    const auto arc = orbit::solve_lambert(after_flip.position_m, aim_gcrf, time_left, constants::earth_gm_m3ps2, normal);
-    const double delta_v =
-        arc ? (1.0 + parameters.boostback_loss_fraction) * norm(arc->departure_velocity_mps - after_flip.velocity_mps)
-            : 0.0;
+    const double delta_v = boostback_delta_v_mps(state_gcrf, earth, epoch, site, parameters).value_or(0.0);
 
     // Rocket equation on the booster alone after the flip: with dry mass m_d and propellant Q, the boostback leaves
     // Q - (m_d + Q)(1 - e) >= landing  <=>  Q >= (landing + m_d (1 - e)) / e,   e = exp(-delta_v / c).
@@ -270,6 +261,22 @@ double BoosterReturnGuidance::meco_propellant_kg(const vehicle::Vehicle& stack, 
     const double exhaust_mps = engines.mass_flow_kgps > 0.0 ? engines.vacuum_thrust_n / engines.mass_flow_kgps : 1.0;
     const double e = std::exp(-delta_v / exhaust_mps);
     return run_down_kg + flip_kg + (after_boostback_kg + dry_kg * (1.0 - e)) / e;
+}
+
+std::optional<double> BoosterReturnGuidance::boostback_delta_v_mps(const math::StateVector& state_gcrf,
+                                                                   const frames::BodyOrientation& earth, time::Epoch epoch,
+                                                                   const LandingSite& site,
+                                                                   const BoosterReturnParameters& parameters) {
+    if (!parameters.boostback) return std::nullopt;
+    const auto after_flip = orbit::propagate_two_body(state_gcrf, constants::earth_gm_m3ps2, parameters.flip_duration_s);
+    const double time_left = std::max(parameters.flight_time_s - parameters.flip_duration_s, 30.0);
+    const Vec3 site_fixed = frames::geodetic_to_fixed({site.latitude_rad, site.longitude_rad, site.height_m});
+    const Vec3 aim_gcrf =
+        earth.fixed_to_gcrf(epoch + parameters.flip_duration_s + time_left).position(site_fixed);
+    const Vec3 normal = math::normalized(cross(after_flip.position_m, aim_gcrf));
+    const auto arc = orbit::solve_lambert(after_flip.position_m, aim_gcrf, time_left, constants::earth_gm_m3ps2, normal);
+    if (!arc) return std::nullopt;
+    return (1.0 + parameters.boostback_loss_fraction) * norm(arc->departure_velocity_mps - after_flip.velocity_mps);
 }
 
 BoosterReturnGuidance::Impact BoosterReturnGuidance::predict(const vehicle::FlightBody& body,

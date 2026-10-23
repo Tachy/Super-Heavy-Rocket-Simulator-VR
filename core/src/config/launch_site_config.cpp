@@ -65,6 +65,10 @@ LaunchSiteConfig load_launch_site(const std::filesystem::path& config_dir, std::
                 doc.fail("site '" + s.id + "': kind must be \"launch_pad\" or \"landing_zone\"");
             }
             if (s.kind == "landing_zone") s.pad_radius_m = doc.positive(t, "pad_radius_m");
+            s.landing_zone_id = doc.text_or(t, "landing_zone");
+            if (!s.landing_zone_id.empty() && s.kind != "launch_pad") {
+                doc.fail("site '" + s.id + "': only a launch pad has a landing_zone");
+            }
             if (auto tower = t["tower"].as_table()) s.tower = load_tower(doc, *tower);
             if (auto sea = t["sea"].as_table()) s.sea = load_sea(doc, *sea);
             return s;

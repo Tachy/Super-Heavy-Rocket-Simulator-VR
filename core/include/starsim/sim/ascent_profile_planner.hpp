@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -11,6 +12,29 @@
 
 namespace starsim::sim {
 
+// How the first stage comes back (ascent trajectory and staging, Task 4; chosen by plan_launch).
+enum class RecoveryKind { TowerCatch, LandingZone, DroneShip };
+
+struct RecoveryChoice {
+    RecoveryKind kind = RecoveryKind::TowerCatch;
+    std::string zone_or_ship_id;  // TowerCatch: the launch site; LandingZone: its site id; DroneShip: drone_ships.toml
+    double latitude_rad = 0.0;    // where the stage comes down (the tower's pad, the zone, the ship's station)
+    double longitude_rad = 0.0;
+    double heading_rad = 0.0;     // DroneShip: the deck's long axis, clockwise from north (along the ground track)
+};
+
+// [E] The sea surface a drone ship floats on, above WGS84: the geoid off the US Atlantic coast (EGM2008 ~-30 .. -35 m;
+// config/missions/falcon9_asds.toml uses -35 m off the Carolinas).
+inline constexpr double drone_ship_sea_height_m = -35.0;
+// The drone ship the onboard computer sends out (the only one configured: config/drone_ships.toml).
+inline constexpr const char* default_drone_ship_id = "asds_atlantic";
+// [D] The drone ship waits at the first stage's impact predicted this long after its separation (the derivation of
+// config/missions/falcon9_asds.toml: the staging sequence's push is over, the coast's RCS trim moves the point ~0.1 km).
+inline constexpr double drone_ship_prediction_after_separation_s = 10.0;
+
+// The landing zone or drone ship of `recovery` as the session's landing site (none for a tower catch).
+std::optional<LaunchSite> recovery_landing_site(const std::filesystem::path& config_dir, const RecoveryChoice& recovery);
+
 // A launch from a pad the onboard computer plans before liftoff (ascent trajectory and staging, Task 3).
 struct AscentProfileRequest {
     std::string vehicle_id;
@@ -21,7 +45,15 @@ struct AscentProfileRequest {
     std::optional<config::MissionPayload> payload;  // a payload vehicle on top of the stack (exclusive with payload_kg)
     double payload_kg = 0.0;
     bool fairing = true;
-    std::optional<LaunchSite> landing_zone;  // the first stage's landing zone or drone ship (none: the site's tower)
+    RecoveryChoice recovery;  // the first stage's return (plan_launch chooses it)
+};
+
+// The first stage's impact predicted without a boostback, drone_ship_prediction_after_separation_s after its
+// separation (drag and the entry burn, no steering: BoosterReturnGuidance::predict_impact).
+struct BoosterImpact {
+    double latitude_rad = 0.0;
+    double longitude_rad = 0.0;
+    double heading_rad = 0.0;  // the ground track at the impact, clockwise from north
 };
 
 // The first-stage pitch program the planner chose: the kick that leaves the upper stage the most propellant at SECO
@@ -32,6 +64,11 @@ struct AscentProfile {
     double kick_angle_rad = 0.0;
     double upper_propellant_at_seco_kg = 0.0;
     int trial_flights = 0;  // flown for this answer (0: from the memo)
+    // plan_launch: the target flown (the inclination raised to the site's latitude when below it) and the recovery
+    RecoveryChoice recovery;
+    gnc::AscentTarget target;
+    // A drone-ship request: the stage's impact on the chosen kick's trial (the ship's station)
+    std::optional<BoosterImpact> booster_impact;
 };
 
 // [E] The kick range searched: wide around the optima (Starship to 200 km / 26.5 deg: 14.9 deg; Falcon 9 RTLS to the ISS
@@ -46,7 +83,8 @@ inline constexpr double kick_tolerance_rad = 0.1 * constants::deg_to_rad;
 // the kick `kick_angle_rad`, flown at the flight's tick to the upper stage's cutoff (the booster's return itself is not
 // flown: the MECO plan settles it). Returns the propellant (oxidizer + fuel) left in the upper stage once the engines'
 // tail-off has ended; NaN when the flight is infeasible (no cutoff before the stage runs dry, the orbit flown off the
-// target, the booster's MECO plan unusable).
+// target, the booster's return not planned or its MECO plan unusable: not finite, or a boostback without its Lambert arc;
+// a drone-ship request whose stage impact cannot be predicted).
 double fly_ascent_trial(const FlightSession& like, const AscentProfileRequest& request, double kick_angle_rad);
 
 // The kick of the request's ascent: searched on trial flights (fly_ascent_trial) in [min_kick_angle_rad,
@@ -54,5 +92,16 @@ double fly_ascent_trial(const FlightSession& like, const AscentProfileRequest& r
 // steps as the safeguard. Memoised per process by the request (its liftoff epoch excluded: the optimum does not depend
 // on it), so a repeated mission start flies no trial.
 AscentProfile plan_ascent_profile(const FlightSession& like, const AscentProfileRequest& request);
+
+// The launch as the onboard computer plans it (spec goal 2): a target inclination below the site's latitude is raised to
+// it (due east, the lowest reachable); the recovery is chosen, then the kick (plan_ascent_profile):
+//  - a stage caught by a tower ("tower_catch", Super Heavy): the site's tower; none, or no plan with the catch: refused;
+//  - a stage on legs ("leg_landing", Falcon 9): the site's landing zone (RTLS) when the plan with the RTLS return is
+//    feasible, else the drone ship at the stage's predicted no-boostback impact (booster_impact), heading along the
+//    ground track; neither: refused.
+// A plan is feasible only when every trial checked the return at MECO for real: a finite propellant plan and, with a
+// boostback, its Lambert arc found (BoosterReturnGuidance::boostback_delta_v_mps) - a failed arc counts no boostback.
+// request.recovery is ignored (chosen here); the result carries the recovery and the target flown.
+AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest request);
 
 }  // namespace starsim::sim

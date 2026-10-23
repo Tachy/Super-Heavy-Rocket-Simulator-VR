@@ -6,7 +6,8 @@
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
-inputs_digest = "c924f219bd0caf00"  # ascent Task 2: max-Q limit + operational ascent throttle, depot / tanker / HLS re-measured
+inputs_digest = "cdb0af8389a934bf"  # ascent Task 4: launch_sites.toml gained SLC-40's landing_zone (not read by these
+                                    # flights: no re-measure); Task 2: max-Q limit + operational ascent throttle, re-measured
 
 [depot]
 mission = "depot_launch"

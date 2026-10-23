@@ -11,10 +11,14 @@
 #include <sstream>
 #include <vector>
 
+#include "starsim/config/drone_ship_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
+#include "starsim/sim/staging_sequence.hpp"
 
 namespace starsim::sim {
 
@@ -41,10 +45,45 @@ constexpr double golden = 0.381966011250105;  // (3 - sqrt 5) / 2
 constexpr double expansion = 1.618033988749895;  // bracketing: each step this much longer than the last
 constexpr int max_trials = 16;                   // [E] safeguard; Starship and Falcon 9 converge in 4
 
+// [E] Provisional station of the drone ship while the kick is searched, this far downrange along the launch azimuth: away
+// from the pad (its deck replaces the ground near it), the MECO plan without a boostback does not depend on it; the ship
+// is then placed at the predicted impact (Starlink-class: ~600 km downrange).
+constexpr double provisional_ship_downrange_m = 600e3;
+
 struct Trial {
     double propellant_kg = nan;
     std::string reason;  // German, when infeasible
+    std::optional<BoosterImpact> booster_impact;  // drone-ship requests
 };
+
+// Where `stage` (a first stage coasting without a boostback) comes down: BoosterReturnGuidance::predict_impact with
+// drag and its entry burn ahead, on the session's landing site (the drone ship's deck).
+std::optional<BoosterImpact> predict_booster_impact(const FlightSession& session, const vehicle::FlightBody& stage) {
+    const auto p = session.return_parameters(stage.vehicle().stages().front().config);
+    const auto burn = gnc::BoosterReturnGuidance::entry_burn_ahead(stage.vehicle(), p);
+    const auto impact = gnc::BoosterReturnGuidance::predict_impact(stage, session.environment(), session.epoch(),
+                                                                   session.landing_zone()->height_m, nullptr, &burn);
+    if (!impact.valid) return std::nullopt;
+    const auto geo = frames::fixed_to_geodetic(impact.position_itrf_m);
+    const math::Vec3 east{-std::sin(geo.longitude_rad), std::cos(geo.longitude_rad), 0.0};
+    const math::Vec3 north{-std::sin(geo.latitude_rad) * std::cos(geo.longitude_rad),
+                           -std::sin(geo.latitude_rad) * std::sin(geo.longitude_rad), std::cos(geo.latitude_rad)};
+    const auto& v = impact.velocity_itrf_mps;
+    return BoosterImpact{geo.latitude_rad, geo.longitude_rad, std::atan2(dot(v, east), dot(v, north))};
+}
+
+// The boostback of the stack's return planned from the state now has a Lambert arc (the session's MECO plan:
+// FlightSession's Booster state, flip from the MECO to the separation included); true without a boostback.
+bool boostback_arc_found(const FlightSession& session, const vehicle::FlightBody& stack) {
+    auto parameters = session.return_parameters(stack.vehicle().stages().front().config);
+    if (!parameters.boostback) return true;
+    parameters.flip_duration_s += separation_after_meco_s(stack.vehicle());
+    const auto& s = stack.state();
+    const auto delta_v = gnc::BoosterReturnGuidance::boostback_delta_v_mps(
+        {s.position_gcrf_m, s.velocity_gcrf_mps}, session.earth_orientation(), session.epoch(),
+        session.return_site(stack.vehicle()), parameters);
+    return delta_v && std::isfinite(*delta_v);
+}
 
 double stage_propellant_kg(const vehicle::Stage& stage) {
     return stage.propellant_kg(config::TankContents::Oxidizer) + stage.propellant_kg(config::TankContents::Fuel);
@@ -58,22 +97,38 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
                                     request.fairing, request.payload);
     session.launch_from_pad(stack, launch_site_from_config(config::load_launch_site(dir, request.site_id)),
                             request.heading_rad, request.liftoff);
-    if (request.landing_zone) session.set_landing_zone(*request.landing_zone);
+    if (const auto zone = recovery_landing_site(dir, request.recovery)) session.set_landing_zone(*zone);
     session.set_booster_return(true);
     gnc::PitchProgram program;
     program.kick_angle_rad = kick_angle_rad;
     session.engage_ascent_autopilot(request.target, program);
 
+    const char* return_unplannable = "Die Rückkehr der ersten Stufe ist nicht planbar.";
+    const bool drone_ship = request.recovery.kind == RecoveryKind::DroneShip;
+    const std::string booster_id = stack.stages.front().id;
     bool upper_lit = false;
     bool near_end = false;  // cut off, the engines' tail-off under way
+    // The return checked at MECO (the last Booster tick): the boostback's Lambert arc of the plan (a failed arc makes
+    // meco_propellant_kg count no boostback: finite, but not flyable).
+    std::optional<bool> arc_found;
+    bool meco_checked = false;
+    double booster_kg = nan, booster_rate_kgps = 0.0;  // booster propellant at the last check, burned per second
+    time::Epoch booster_epoch;
+    std::optional<time::Epoch> separation;
+    std::optional<BoosterImpact> impact;
     const int check_ticks = static_cast<int>(std::ceil(trial_check_interval_s / FlightSession::tick_s));
     while (session.epoch() - request.liftoff < trial_max_flight_s) {
-        // single ticks over the cutoff: the propellant is read at SECO itself, not up to a check interval later
+        // single ticks over the cutoff: the propellant is read at SECO itself, not up to a check interval later; so is
+        // the return at MECO (within two checks' propellant of the cutoff) and the separation (the staging sequence)
+        const auto state_before = session.autopilot().state;
         const auto* guidance = session.ascent_guidance();
-        const bool near_cutoff = session.autopilot().state == AutopilotState::UpperStage && guidance &&
-                                 guidance->cutoff_epoch() &&
+        const bool near_cutoff = state_before == AutopilotState::UpperStage && guidance && guidance->cutoff_epoch() &&
                                  *guidance->cutoff_epoch() - session.epoch() < 2.0 * trial_check_interval_s;
-        const int ticks = near_cutoff || near_end ? 1 : check_ticks;
+        const auto& cutoff_kg = session.booster_cutoff_propellant_kg();
+        const bool near_meco = state_before == AutopilotState::Booster && cutoff_kg &&
+                               booster_kg - *cutoff_kg < 2.0 * trial_check_interval_s * booster_rate_kgps;
+        const bool single = near_cutoff || near_end || near_meco || state_before == AutopilotState::Staging;
+        const int ticks = single ? 1 : check_ticks;
         const auto before = session.epoch();
         // half a tick beyond: advance_to ticks while at least a whole tick is left (rounding)
         if (!(session.advance_to(before + (ticks + 0.5) * FlightSession::tick_s, ticks) > before)) break;
@@ -81,10 +136,31 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
         const auto index = session.controlled_index();
         const auto& body = session.body(index);
         if (body.impacted()) return {nan, "Die Rakete ist abgestürzt."};
+        if (!separation && session.body_count() > 1) separation = session.epoch();
+        if (drone_ship && separation && !impact &&
+            !(session.epoch() - *separation < drone_ship_prediction_after_separation_s)) {
+            for (size_t i = 0; i < session.body_count() && !impact; ++i) {
+                const auto& b = session.body(i);
+                if (i != index && b.vehicle().stages().front().config.id == booster_id) {
+                    impact = predict_booster_impact(session, b);
+                    if (!impact) return {nan, "Der Aufschlagpunkt der ersten Stufe ist nicht vorhersagbar."};
+                }
+            }
+        }
         if (state == AutopilotState::Booster) {
             const auto& reserve = session.booster_cutoff_propellant_kg();
-            if (reserve && !std::isfinite(*reserve)) return {nan, "Die Rückkehr der ersten Stufe ist nicht planbar."};
+            if (reserve && !std::isfinite(*reserve)) return {nan, return_unplannable};
+            if (!session.returns_after_staging(body.vehicle())) return {nan, return_unplannable};
+            arc_found = boostback_arc_found(session, body);
+            const double kg = stage_propellant_kg(body.vehicle().stages().front());
+            if (std::isfinite(booster_kg)) booster_rate_kgps = (booster_kg - kg) / (session.epoch() - booster_epoch);
+            booster_kg = kg;
+            booster_epoch = session.epoch();
             continue;
+        }
+        if (!meco_checked && arc_found) {
+            meco_checked = true;
+            if (!*arc_found) return {nan, return_unplannable};
         }
         if (state == AutopilotState::UpperStage) {
             // The booster's return is settled by the MECO plan; flying it on would cost ~45 % of the trial time
@@ -127,7 +203,8 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
             std::abs(apoapsis_m - target.apoapsis_altitude_m) > orbit_tolerance_m) {
             return {nan, "Die Oberstufe erreicht den Zielorbit nicht."};
         }
-        return {stage_propellant_kg(body.vehicle().stages().front()), {}};
+        if (drone_ship && !impact) return {nan, "Der Aufschlagpunkt der ersten Stufe ist nicht vorhersagbar."};
+        return {stage_propellant_kg(body.vehicle().stages().front()), {}, impact};
     }
     if (std::getenv("STARSIM_DEBUG_ASCENT_PLANNER")) {
         std::printf("  [ascent planner] no SECO: state %s at %.1f s after placement, T+%.1f s, %zu bodies\n",
@@ -150,10 +227,9 @@ std::string memo_key(const FlightSession& like, const AscentProfileRequest& r) {
             << r.payload->nose_cone_open_s;
     }
     key << '|';
-    if (const auto& z = r.landing_zone) {
-        key << z->latitude_rad << ',' << z->longitude_rad << ',' << z->height_m << ',' << z->pad_radius_m << ','
-            << z->tower.has_value() << ',' << z->deck.has_value();
-    }
+    const auto& c = r.recovery;
+    key << static_cast<int>(c.kind) << ',' << c.zone_or_ship_id << ',' << c.latitude_rad << ',' << c.longitude_rad << ','
+        << c.heading_rad;
     return key.str();
 }
 
@@ -194,6 +270,7 @@ public:
         result.feasible = true;
         result.kick_angle_rad = points_[*best].kick_rad;
         result.upper_propellant_at_seco_kg = points_[*best].propellant_kg;
+        result.booster_impact = points_[*best].booster_impact;
         return result;
     }
 
@@ -201,6 +278,7 @@ private:
     struct Point {
         double kick_rad = 0.0;
         double propellant_kg = nan;
+        std::optional<BoosterImpact> booster_impact;
     };
 
     void evaluate(double kick_rad) {
@@ -213,7 +291,7 @@ private:
                         std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count());
         }
         if (std::isnan(trial.propellant_kg)) last_reason_ = trial.reason;
-        points_.push_back({kick_rad, trial.propellant_kg});
+        points_.push_back({kick_rad, trial.propellant_kg, trial.booster_impact});
         std::sort(points_.begin(), points_.end(), [](const Point& a, const Point& b) { return a.kick_rad < b.kick_rad; });
     }
 
@@ -310,6 +388,19 @@ private:
 
 }  // namespace
 
+std::optional<LaunchSite> recovery_landing_site(const std::filesystem::path& config_dir, const RecoveryChoice& recovery) {
+    switch (recovery.kind) {
+        case RecoveryKind::TowerCatch: return std::nullopt;
+        case RecoveryKind::LandingZone:
+            return launch_site_from_config(config::load_launch_site(config_dir, recovery.zone_or_ship_id));
+        case RecoveryKind::DroneShip:
+            return drone_ship_site(config::load_drone_ship(config_dir, recovery.zone_or_ship_id), recovery.latitude_rad,
+                                   recovery.longitude_rad, drone_ship_sea_height_m, recovery.heading_rad);
+    }
+    return std::nullopt;
+}
+
+
 double fly_ascent_trial(const FlightSession& like, const AscentProfileRequest& request, double kick_angle_rad) {
     return fly_trial(like, request, kick_angle_rad).propellant_kg;
 }
@@ -327,6 +418,68 @@ AscentProfile plan_ascent_profile(const FlightSession& like, const AscentProfile
     const auto profile = KickSearch(like, request).run();
     std::lock_guard lock(memo_mutex());
     memo()[key] = profile;
+    return profile;
+}
+
+AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest request) {
+    const auto& dir = like.config_dir();
+    const auto site = config::load_launch_site(dir, request.site_id);
+    // The lowest inclination a launch reaches is the site's latitude (due east); a lower target is raised to it.
+    request.target.inclination_rad = std::max(request.target.inclination_rad, std::abs(site.latitude_rad));
+    int trial_flights = 0;
+    auto planned = [&](const RecoveryChoice& recovery) {
+        request.recovery = recovery;
+        auto profile = plan_ascent_profile(like, request);
+        trial_flights += profile.trial_flights;
+        profile.trial_flights = trial_flights;
+        profile.recovery = recovery;
+        profile.target = request.target;
+        return profile;
+    };
+    auto refused = [&](AscentProfile profile, const std::string& reason) {
+        profile.feasible = false;
+        profile.reason = profile.reason.empty() ? reason + "." : reason + " (" + profile.reason + ")";
+        return profile;
+    };
+    const char* unreachable = "Ziel mit Booster-Rückkehr nicht erreichbar";
+
+    const std::string method = config::load_vehicle(dir, request.vehicle_id).stages.front().recovery_method;
+    if (method == "tower_catch") {
+        AscentProfile none;
+        none.target = request.target;
+        if (!site.tower) return refused(none, "Kein Fangturm am Startplatz");
+        auto profile = planned({RecoveryKind::TowerCatch, site.id, site.latitude_rad, site.longitude_rad, 0.0});
+        return profile.feasible ? profile : refused(profile, unreachable);
+    }
+    if (method != "leg_landing") {
+        AscentProfile none;
+        none.target = request.target;
+        return refused(none, "Die erste Stufe hat keine Rückkehr");
+    }
+    // Falcon 9: back to the site's landing zone whenever that closes with the RTLS return (SpaceX practice), even where
+    // the drone ship would leave the upper stage more.
+    if (!site.landing_zone_id.empty()) {
+        const auto zone = config::load_launch_site(dir, site.landing_zone_id);
+        auto profile = planned({RecoveryKind::LandingZone, zone.id, zone.latitude_rad, zone.longitude_rad, 0.0});
+        if (profile.feasible) return profile;
+    }
+    // The drone ship: the kick searched with the ship at a provisional station downrange (the return without a
+    // boostback plans its MECO independent of it), then the ship placed at the stage's predicted impact.
+    const double speed_mps = std::sqrt(constants::earth_gm_m3ps2 /
+                                       (constants::wgs84_semi_major_axis_m + request.target.periapsis_altitude_m));
+    const double azimuth = gnc::launch_azimuth_rad(site.latitude_rad, request.target.inclination_rad, speed_mps,
+                                                   request.target.northerly);
+    const double arc = provisional_ship_downrange_m / constants::wgs84_semi_major_axis_m;
+    const double lat = std::asin(std::sin(site.latitude_rad) * std::cos(arc) +
+                                 std::cos(site.latitude_rad) * std::sin(arc) * std::cos(azimuth));
+    const double lon = site.longitude_rad + std::atan2(std::sin(azimuth) * std::sin(arc) * std::cos(site.latitude_rad),
+                                                       std::cos(arc) - std::sin(site.latitude_rad) * std::sin(lat));
+    auto profile = planned({RecoveryKind::DroneShip, default_drone_ship_id, lat, lon, azimuth});
+    if (!profile.feasible) return refused(profile, unreachable);
+    if (!profile.booster_impact) return refused(profile, "Der Aufschlagpunkt der ersten Stufe ist nicht vorhersagbar");
+    const auto& impact = *profile.booster_impact;
+    profile.recovery = {RecoveryKind::DroneShip, default_drone_ship_id, impact.latitude_rad, impact.longitude_rad,
+                        impact.heading_rad};
     return profile;
 }
 

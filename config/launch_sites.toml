@@ -75,6 +75,8 @@ name = "CCSFS SLC-40"
 latitude_deg = 28.56194     # [S] Wikipedia "Cape Canaveral Space Launch Complex 40": 28°33'43"N 80°34'38"W
 longitude_deg = -80.57722
 height_m = -20.0            # [E] ~5 m above sea level, geoid ~-25 m (no tower: a stack stands on the ground)
+landing_zone = "ccsfs_lz40" # [S] Wikipedia "Cape Canaveral Space Launch Complex 40" / CRS-35: first stages return to
+                            # LZ-40 inside the complex (the onboard computer's RTLS choice)
 
 [site.sea]
 direction_deg = 90.0        # [E] towards the Atlantic (verify against imagery)

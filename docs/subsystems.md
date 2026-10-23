@@ -2124,3 +2124,28 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   the ship never pitches below its flight-path angle in the first 60 s after the separation (no kink). Falcon 9 RTLS
   (falcon9_rtls's request, probe): 11.57 deg, 2.2 t, 4 trials, 10.8 s. Longer than the free launch's 10 s countdown:
   it must hold for the plan (spec).
+
+### Recovery choice and refusals (Task 4)
+- `sim::plan_launch(like, request)` raises a target inclination below the site's latitude to it (due east: the lowest
+  reachable), chooses the recovery (`RecoveryChoice`: TowerCatch / LandingZone / DroneShip; replaces the request's
+  landing site, part of the memo key), then plans the kick. By the first stage's `recovery_method`:
+  - `tower_catch` (Super Heavy): the site's tower; none -> "Kein Fangturm am Startplatz."; no plan with the catch ->
+    "Ziel mit Booster-Rückkehr nicht erreichbar (<trial reason>)". Never expendable.
+  - `leg_landing` (Falcon 9): the site's `landing_zone` (launch_sites.toml; SLC-40 -> LZ-40 [S]) when the plan with the
+    RTLS return (its MECO plan keeps the 12.1 t landing propellant) is feasible - also where the drone ship would leave
+    more (SpaceX practice, spec) - else the drone ship `asds_atlantic` at the stage's impact predicted 10 s after the
+    separation (`BoosterReturnGuidance::predict_impact`, drag and the entry burn, no steering: the falcon9_asds.toml
+    derivation), deck along the ground track there; its sea at -35 m [E] (geoid). The kick is searched with the ship at
+    a provisional station 600 km [E] downrange (the MECO plan without a boostback does not depend on the ship; near the
+    pad its deck would replace the ground). Neither feasible: refused.
+- Recovery feasibility is checked for real in every trial (Task 3 review note): the session must return the stage
+  (`returns_after_staging`), the MECO plan be finite, and with a boostback its Lambert arc be found from the stack's
+  state at the last Booster tick (the trial single-ticks within two checks' propellant of the cutoff):
+  `BoosterReturnGuidance::boostback_delta_v_mps` (split out of `meco_propellant_kg`, which counted a failed arc as no
+  boostback - finite, but not flyable).
+- Measured (parallel test load): Falcon 9 CRS-35 class (12.5 t, 200 km / 51.6 deg, SLC-40) -> LZ-40, 11.57 deg, 2.2 t,
+  4 trials, 11.7 s. Starlink class (16.5 t, 200 x 280 km / 53 deg, SLC-40): RTLS infeasible -> drone ship at 33.1419 N
+  / 75.8444 W, heading 44.8 deg, kick 13.93 deg, 1.0 t, 15 trials, 35.6 s; the configured falcon9_asds station
+  (33.2240 / -75.7724, flown with the configured 13 deg kick) lies ~11 km away. The CRS-35 request from LC-39A (no
+  landing zone): drone ship at 33.2590 / -75.4291, 14.94 deg, 7.0 t, 5 trials. Starship 2000 km circular: refused after
+  10 trials (23.6 s). Starship from LC-39A to 26.5 deg: flown at 28.608 deg, 14.82 deg, 88.1 t.
