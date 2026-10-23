@@ -33,6 +33,16 @@ func setup(texture: ViewportTexture) -> void:
 	material_override = build_material(texture)
 
 
+## The mouse pointer composited over the overlay (above embedded popups): its texture and size, tip at `cursor_px`.
+func set_pointer(texture: Texture2D, size_px: Vector2) -> void:
+	material_override.set_shader_parameter("pointer", texture)
+	material_override.set_shader_parameter("pointer_size_px", size_px)
+
+
+func move_pointer(cursor_px: Vector2) -> void:
+	material_override.set_shader_parameter("pointer_px", cursor_px)
+
+
 ## Sphere section around the origin: azimuth +-H_FOV/2, elevation from the 16:9 span, front faces towards the origin.
 static func build_mesh() -> ArrayMesh:
 	var half_h := deg_to_rad(H_FOV_DEG) / 2.0
@@ -73,4 +83,5 @@ static func build_material(texture: Texture2D) -> ShaderMaterial:
 	# The SubViewport texture has no mipmaps (the shader samples it with plain bilinear filtering, which keeps the MSDF
 	# text sharp at the panel's near-native resolution).
 	material.set_shader_parameter("overlay", texture)
+	material.set_shader_parameter("overlay_size_px", Vector2(OverlayHost.SIZE))
 	return material

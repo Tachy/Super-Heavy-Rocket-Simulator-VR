@@ -24,10 +24,13 @@ func _ready() -> void:
 		# VR: canvas layers are not drawn in the headset. The overlay and the menu (top left, as on the desktop) share a
 		# curved panel fixed to the base pose (not the head), driven by a mouse pointer.
 		overlay_host.viewport.add_child(panel)
-		add_child(VrPanelMouse.new(overlay_host.viewport, panel))
+		var mouse := VrPanelMouse.new(overlay_host.viewport, panel)
 		var vr_panel := VrOverlayPanel.new()
 		xr.origin.add_child(vr_panel)
 		vr_panel.setup(overlay_host.viewport.get_texture())
+		vr_panel.set_pointer(mouse.pointer_viewport.get_texture(), Vector2(VrPanelMouse.POINTER_SIZE))
+		mouse.pointer_moved.connect(vr_panel.move_pointer)
+		add_child(mouse)
 		vr_panel.place(xr.recenter_pose())
 		xr.recentered.connect(func() -> void: vr_panel.place(xr.recenter_pose()))
 	else:
