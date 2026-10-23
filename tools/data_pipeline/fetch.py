@@ -14,7 +14,6 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-import geoid
 import iss_oem
 import lunar_tile
 
@@ -67,6 +66,8 @@ def main() -> int:
             iss_oem.fetch(source, REPO_ROOT, download)
             continue
         if source.get("kind") == "geoid":  # EGM2008: PROJ CDN GeoTIFF -> int16 grid (geoid.py)
+            import geoid  # lazy: needs numpy (and rasterio), the other sources do not
+
             geoid.fetch(source, REPO_ROOT, download, args.force)
             continue
         if target.exists() and not args.force:
