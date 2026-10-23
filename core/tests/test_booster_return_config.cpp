@@ -21,9 +21,9 @@ TEST_CASE("Falcon 9 return parameters come from its recovery config", "[gnc][fal
     CHECK(p.landing_divert_groups == Groups{"first_stage/center", "first_stage/pair"});
     CHECK(p.landing_groups == Groups{"first_stage/center"});
     CHECK(p.flight_time_s == 260.0);
-    CHECK(p.boostback_loss_fraction == 0.19);
+    CHECK(p.boostback_loss_fraction == 0.13);
     CHECK(p.flip_groups.empty());  // the flip on the nitrogen thrusters, engines off
-    CHECK(p.flip_duration_s == 50.0);
+    CHECK(p.flip_duration_s == 13.6);
     CHECK(p.entry_altitude_m == 56600.0);
     CHECK(p.entry_delta_v_mps == 125.0);
     CHECK(p.entry_throttle == 0.4);

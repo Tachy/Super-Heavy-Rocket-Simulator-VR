@@ -176,6 +176,9 @@ TEST_CASE("The Falcon 9 booster flips on RCS with its engines off", "[staging]")
     std::printf("[staging] Falcon 9 booster: boostback %.1f s after the separation, %.1f kg N2 in the flip\n", *boostback_s,
                 rcs_at_separation_kg - session.body(0).vehicle().rcs_supply_kg());
     CHECK_FALSE(lit_in_flip);
+    // separation -> boostback ignition: 13 / 14 / 14 s on CRS-35, Bandwagon-3 and Crew-13 (SpaceX mission timelines,
+    // config/vehicles/falcon9_block5.toml [sources]); mean 13.7 s
+    CHECK(std::abs(*boostback_s - 13.7) < 3.0);
 }
 
 TEST_CASE("A manual stage command during the sequence separates once", "[staging]") {

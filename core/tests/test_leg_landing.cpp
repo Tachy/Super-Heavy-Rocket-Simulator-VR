@@ -193,8 +193,9 @@ TEST_CASE("Tilted touchdowns: 5 deg lands, steep ones are lost", "[legs][session
     }
     {
         sim::FlightSession session(env().ephemeris, env().earth, STARSIM_CONFIG_DIR);
-        // 25 deg at 2 m/s: the lowest leg takes the whole blow and its crush core runs out (the stage is lost).
-        drop(session, 0.05, {0.0, 0.0, -2.0}, 25.0 * deg);
+        // 25 deg at 3 m/s: the lowest leg takes the whole blow and its crush core runs out (the stage is lost). At 2 m/s
+        // the 6.5 kN nitrogen thrusters (follow-ups Task 7) now hold the attitude and it lands, 6.3 m off.
+        drop(session, 0.05, {0.0, 0.0, -3.0}, 25.0 * deg);
         CHECK(run_drop(session).touchdown == sim::LegTouchdown::Impact);
         CHECK(session.body(0).impacted());
     }

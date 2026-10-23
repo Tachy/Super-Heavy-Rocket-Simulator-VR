@@ -75,7 +75,7 @@ TEST_CASE("A Falcon 9 MECO plan keeps the entry burn's propellant", "[gnc][falco
     // velocity (311 s): ~1.6 t (the CRS-35 gauge: 3.5 -> 3.1 % of 425 t = 1.7 t), more after the boostback's leverage.
     std::printf("[falcon9] MECO propellant with entry burn %.1f t, without %.1f t\n", a / 1e3, b / 1e3);
     CHECK(a - b > 1500.0);
-    CHECK(a - b < 4000.0);  // 3.6 t with the 50 s RCS flip and boostback_loss_fraction 0.19 (staging sequence)
+    CHECK(a - b < 4000.0);  // 3.0 t with the 13.6 s RCS flip and boostback_loss_fraction 0.13 (3.6 t with 50 s / 0.19)
 }
 
 TEST_CASE("A falling Falcon 9 stage flies its entry burn on the centre engine", "[gnc][falcon9][rtls]") {
@@ -281,7 +281,7 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
         return std::pair{h, norm(s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(tr), s.position_gcrf_m))};
     };
     double meco_s = -1.0, meco_propellant_kg = 0.0, entry_s = -1.0, entry_h = 0.0, landing_s = -1.0, landing_h = 0.0,
-           landing_v = 0.0, landing_propellant_kg = 0.0;
+           landing_v = 0.0, landing_propellant_kg = 0.0, boostback_s = -1.0, n2_at_separation_kg = 0.0;
     gnc::ReturnPhase last_phase = gnc::ReturnPhase::Flip;
     for (double t = 0.0; t < 900.0; t += 0.05) {
         session.advance_to(t0 + t, 100);
@@ -290,6 +290,7 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
         if (meco_s < 0.0) {
             meco_s = session.mission_time_s();
             meco_propellant_kg = stage.vehicle().propellant_kg();
+            n2_at_separation_kg = stage.vehicle().rcs_supply_kg();
         }
         const auto* status = session.return_status(0);
         if (!status) break;
@@ -305,6 +306,7 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
                             gnc::to_string(status->phase), h / 1e3, v, stage.vehicle().propellant_kg() / 1e3, status->impact_miss_m);
             }
             last_phase = status->phase;
+            if (status->phase == gnc::ReturnPhase::Boostback && boostback_s < 0.0) boostback_s = session.mission_time_s();
             if (status->phase == gnc::ReturnPhase::EntryBurn && entry_s < 0.0) {
                 entry_s = session.mission_time_s();
                 entry_h = height_speed(stage).first;
@@ -325,7 +327,12 @@ TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on
                 meco_s, meco_propellant_kg / 1e3, entry_s, entry_h / 1e3, landing_s, landing_h / 1e3, landing_v,
                 landing_propellant_kg / 1e3, sim::to_string(session.landing_outcome(0)), session.mission_time_s(),
                 std::hypot(p.x, p.y), stage.vehicle().propellant_kg() / 1e3);
+    std::printf("[validation] Falcon 9 RTLS: separation -> boostback %.1f s (13.7 s); N2 %.0f kg at the separation, %.0f kg "
+                "left at the touchdown\n",
+                boostback_s - meco_s, n2_at_separation_kg, stage.vehicle().rcs_supply_kg());
     CHECK(meco_s > 0.0);
+    CHECK(std::abs(boostback_s - meco_s - 13.7) < 3.0);  // SpaceX timelines: CRS-35 / Bandwagon-3 / Crew-13 mean
+    CHECK(stage.vehicle().rcs_supply_kg() > 0.0);
     CHECK(entry_s > 0.0);
     CHECK(landing_s > 0.0);
     CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);

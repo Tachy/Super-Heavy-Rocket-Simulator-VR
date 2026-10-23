@@ -207,7 +207,7 @@ TEST_CASE("RCS thrusters are loaded for every stage", "[rcs][config]") {
 TEST_CASE("RCS tanks do not change the liftoff mass and stay out of the propellant gauge", "[rcs][config]") {
     const auto cfg = config::load_vehicle(config_dir, "falcon9_block5");
     const vehicle::Vehicle v(cfg, config_dir);
-    CHECK(v.rcs_propellant_kg() == Catch::Approx(200.0 + 80.0));
+    CHECK(v.rcs_propellant_kg() == Catch::Approx(600.0 + 80.0));
     double main = 0.0;
     for (const auto& s : cfg.stages) {
         for (const auto& t : s.tanks) {
@@ -215,8 +215,8 @@ TEST_CASE("RCS tanks do not change the liftoff mass and stay out of the propella
         }
     }
     CHECK(v.propellant_kg() == Catch::Approx(main));
-    // 25.6 t + 3.9 t dry before d1: the N2 was carved out of them.
-    CHECK(cfg.stages[0].dry_mass_kg + 200.0 == Catch::Approx(25600.0));
+    // 25.6 t + 3.9 t dry before d1: the N2 was carved out of them (first stage 600 kg since follow-ups Task 7).
+    CHECK(cfg.stages[0].dry_mass_kg + 600.0 == Catch::Approx(25600.0));
     CHECK(cfg.stages[1].dry_mass_kg + 80.0 == Catch::Approx(3900.0));
 }
 

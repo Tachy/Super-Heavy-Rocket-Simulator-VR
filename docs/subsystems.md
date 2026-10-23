@@ -392,7 +392,8 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   validated with - roll 20, pitch / yaw 117 kNm - available on all axes at once; with one of each, roll and pitch shared
   their thrusters, the entry's nose turn ran out of torque and catches from entries hit the arms) incl. two aft ullage
   thrusters along +x,
-  Falcon 9 8 x 450 N at the interstage and 8 x 200 N on the second stage; layouts [E]), on/off with a fixed thrust
+  Falcon 9 8 x 6.5 kN at the interstage [D] (follow-ups Task 7: sized on the measured flip time; 450 N [E] before) and
+  8 x 200 N on the second stage; layouts [E]), on/off with a fixed thrust
   (constant pressure; user 2026-10-14: no continuous mode, the autopilots fly on the pulses). Per tick
   `Vehicle::update_rcs` allocates the commanded torque / force fractions (`propulsion/rcs_allocator`: box QP solved by
   an exact active set on the 6 x n effectiveness about the current CG, rebuilt when the CG moves > 1 cm or a supply runs
@@ -1899,17 +1900,59 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   - Diagnostics: `STARSIM_DEBUG_STAGING=1` prints both parts' rates and relative speed at the split.
 - **Booster flip:** `[stage.recovery] flip_engine_groups` (unset: the final landing set - Super Heavy's centre
   engines, as before; `[]`: engines off, the RCS turns the stage). MECO planning takes the flip from
-  `flip_duration_s` (default 10 s [E]; Falcon 9: 50 s [D]) plus the sequence's MECO -> separation interval (hot: the
+  `flip_duration_s` (default 10 s [E]; Falcon 9: 13.6 s [D], follow-ups Task 7) plus the sequence's MECO -> separation interval (hot: the
   run-on engines burn at minimum throttle through it, as the flip engines do; starship_leo then reaches landing
   ignition with 52.2 t for 51.0 t planned - 48.6 t without the interval).
-- **Open discrepancy - Falcon 9 flip time:** on its nitrogen thrusters the stage needs 50.8 s from separation to the
-  boostback (96 of 196 kg N2); CRS-35 lit its boostback ~14 s after the separation (speed table). The flip is
-  torque-limited: the flip runs on `return_controller_` (no rate limit; the 2 deg/s limit is the coast controller's,
-  the 5 deg/s `max_pitch_yaw_rate_radps` is the pilot's rate command), 8 x 450 N [E] at the interstage give 25.8 kNm
-  on a pitch inertia of 1.0e7 kg m2 = 2.6e-3 rad/s2 - bang-bang over ~165 deg ~65 s, the boostback lights at 15 deg
-  pointing error. A 14 s flip needs ~15x the torque, and N2 beyond the 200 kg [E] supply at Isp 70 s. No source for
-  the real thrusters' thrust was found (SpaceX / Wikipedia / spec sheets name only "nitrogen cold gas thrusters"), so
-  the [E] sizing stays and the measured 50 s is the planning value; boostback_loss_fraction 0.19 follows from it.
+- **Falcon 9 flip time (closed by follow-ups Task 7, 2026-10-23).** Before: 8 x 450 N [E] at the interstage gave
+  25.8 kNm on a pitch inertia of 1.0e7 kg m2; the flip (on `return_controller_`, no rate limit; the boostback lights at
+  15 deg pointing error) took 50.8-53 s from separation to the boostback against ~14 s on CRS-35, and the 50 s was the
+  planning value (boostback_loss_fraction 0.19). Research (user decision 2026-10-23: research first, then fix the
+  vehicle data; no new guidance mechanism):
+
+  | Quantity | Value | Source | Tag |
+  |---|---|---|---|
+  | Thrusters, layout | nitrogen cold gas on the interstage, 2 packs of 4 at the top of the booster; they flip the stage and point it in the coast | everydayastronaut.com "Definitive guide to Starship", Falcon 9 section (`ea_rcs`) | [S] |
+  | Thrust per thruster | not published (SpaceX, Wikipedia, NASA/AIAA spec sheets, user guide: "nitrogen gas thrusters" only; the "~20 kN" in the same guide is Starship's hot gas thrusters) | - | 6.5 kN [D] |
+  | N2 supply (COPV count / volume / pressure) | not published | - | 600 kg [D] |
+  | Separation -> boostback startup, CRS-35 | T+2:18 -> T+2:31 = 13 s (MECO T+2:15, flip T+2:22) | SpaceX mission timeline via spacelaunchschedule.com (`tl_crs35`) | [S] |
+  | Separation -> boostback startup, Bandwagon-3 (RTLS) | T+2:18 -> T+2:32 = 14 s | `tl_bandwagon3` | [S] |
+  | Separation -> boostback startup, Crew-13 (RTLS LZ-40) | T+2:27 -> T+2:41 = 14 s | `tl_crew13` | [S] |
+  | Mean | 13.7 s | - | [D] |
+  | CRS-35 webcast clock (our speed table) | separation T+141.5 s (dials split); stage-1 speed leaves its ballistic -8..-9 km/h per 0.5 s at T+154.5 s (13.0 s), full deceleration (-47 km/h per 0.5 s) from T+160.5 s | `tests/validation/telemetry/f9_crs35_2026-10-13.csv` | [D] |
+  | Boostback lit before the turn is complete? | not settled: the sources describe the flip on cold gas, then the boostback (the timelines list "flip" 4 s after the separation and the boostback startup as separate events); no source reports the engines helping the turn; the CRS-35 speed ramp (6 s to full deceleration) fits the 3 Merlins' start-up plus the last degrees of pointing - the model already lights at 15 deg error | `ea_rcs`, the three timelines, our telemetry | open point, no model gap found |
+  | Pitch inertia of the empty stage | not published; the model gives 1.0-1.1e7 kg m2 at the separation (25.6 t dry + ~53 t propellant) | - | [D] (model) |
+
+  Derived: the thrust is sized on the existing flip controller and the 15 deg gate so that the flown separation ->
+  boostback is the 13.7 s mean: sweep (staging test, ample N2) 3.5 / 4 / 5 / 7 / 8 / 9 kN -> 20.4 / 19.0 / 17.0 / 14.3 /
+  13.3 / 12.6 s; 6.5 kN with 600 kg N2 -> 13.6 s (one pack's two inward thrusters: 13 kN at ~29 m = 3.7e5 Nm on 1.0e7
+  kg m2; the aero moment at q ~ 200 Pa helps early in the turn: 0.034 rad/s2 against 0.024 from the RCS at 5 kN). The
+  N2 at Isp 70 s [E]: the full RTLS uses 441 kg (ascent 70, flip 349, coast trims and landing 22 kg), 159 kg left at
+  the touchdown = 36 % margin (>= 20 % [E]); 600 kg [D] carved out of the 25.6 t dry mass (dry_mass_kg 25.4 -> 25.0 t,
+  total unchanged). A 6.5 kN cold-gas thruster is large (N2 flow 9.5 kg/s each) and rests only on the measured flip
+  time: no source gives or bounds the thrust. `flip_duration_s` 50 -> 13.6 s [D] (the flown flip); `boostback_loss_fraction` 0.19 ->
+  0.13 [D], re-identified on the full RTLS (0.19 -> 12.8 t, 0.165 -> 13.0 t, 0.13 -> 12.1 t at the landing-burn
+  ignition for 12.1 t planned).
+  - Re-baselined (old -> new): RTLS mission MECO T+137 / 59.9 t -> separation T+140 / 52.8 t, boostback T+153.8 s
+    (13.6 s after the separation), entry burn T+356 s at 57.0 -> 58.2 km, landing burn T+422 -> 423 s at 2.83 -> 2.99 km
+    / 282 -> 287 m/s / 12.0 -> 12.1 t, landed T+460 -> 456 s, 5.0 -> 5.8 t left; new checks: separation -> boostback
+    within 3 s of 13.7 s (`test_falcon9_rtls`, `test_staging_sequence`), N2 left at the touchdown > 0 (159 kg). Staging
+    test: flip 53.0 -> 13.6 s, 92.7 -> 348.5 kg N2. MECO plan from a fixed state: 64.1 / 60.5 -> 50.8 / 47.8 t (with /
+    without entry burn; leverage 3.6 -> 3.0 t, bound 4.0 t kept). RCS capability (first stage) roll / pitch / yaw 24 /
+    265 / 265 kNm. Drone ship: MECO 24.6 -> 24.5 t, 8367 -> 8376 km/h; landing burn 2.97 -> 2.95 km; N2 426 kg left at
+    the touchdown; campaigns unchanged (landed 21/21, 11/11, 10/10). ISS window (`falcon9_crew_dragon_iss.toml`):
+    `insertion_s` 547 -> 540 s, `insertion_arc_deg` 14.78 -> 15.08 [D] (phase error 0.006 deg). Leg drop "steep ones are
+    lost": 25 deg at 2 m/s now lands 6.3 m off (the 6.5 kN thrusters hold the attitude against the blow; 450 N could
+    not) - the case runs at 3 m/s (impact, stroke 0.502 m).
+  - **INTERIM open discrepancy - CRS-35 MECO, the boostback costs too little (user 2026-10-23: allowance widened for
+    now, cause to be found in follow-ups Task 7b, then the allowance tightened back to 0.03):** the CRS-35 check
+    (`test_falcon9_ascent`) MECO speed 6596 -> 6985 km/h against 6490 recorded (+1.6 -> +7.6 %; `meco_speed_allowance`
+    0.03 -> 0.096 = the measured 7.6 % + 2 %, bound 224 -> 652 km/h);
+    MECO T+132.7 -> 135.5 s (134.6 recorded), 58.2 -> 59.7 km (57.4), path angle 41.3 -> 38.2 deg (36.6), kick 11.57 ->
+    12.27 deg, 60.8 -> 53.6 t kept at MECO (gauge ~66 t). The 37 s shorter flip makes the return cheaper (the stage
+    no longer coasts ~50 km further downrange before the boostback), so the planner gives the ascent more. The real
+    stage keeps more: CRS-35's boostback burns ~55 s (speed table: lit ~T+154.5 s, stage-1 speed minimum T+199 s,
+    burning until ~T+209.5 s, 621 m/s back; timeline T+2:31-3:25 = 54 s; Bandwagon-3 43 s, Crew-13 46 s) against our 43
+    s (T+153.8-197.0 s, 676 m/s back at apogee 114.5 km). The 50 s flip had hidden this gap.
 - **SCvx landing (depot catch):** the depot's booster reaches ignition ~70 m and ~10 m/s across the approach (also at
   HEAD: its coast removes a ~200 m cross miss in the air by aero steering, which leaves the cross velocity), now ~25 m
   further out than before. Its first plan then dropped the 13 -> 5 engines 1.72 s into their 3 s start-up while the
