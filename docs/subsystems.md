@@ -1957,6 +1957,10 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     stage keeps more: CRS-35's boostback burns ~55 s (speed table: lit ~T+154.5 s, stage-1 speed minimum T+199 s,
     burning until ~T+209.5 s, 621 m/s back; timeline T+2:31-3:25 = 54 s; Bandwagon-3 43 s, Crew-13 46 s) against our 43
     s (T+153.8-197.0 s, 676 m/s back at apogee 114.5 km). The 50 s flip had hidden this gap.
+    **Task 7b diagnosis (2026-10-23): the boostback is not the cause** - CRS-35's boostback needs 2014 m/s against our
+    2100 m/s and burns 38-41 t against our 38.8 t; its 55 s come from a soft start and a trim at the end, not from more
+    delta-v; the MECO speed gap is the ascent's (section "Falcon 9 boostback against CRS-35 (follow-ups Task 7b)").
+    Allowance kept at 0.097 until the ascent side is resolved.
 - **SCvx landing (depot catch):** the depot's booster reaches ignition ~70 m and ~10 m/s across the approach (also at
   HEAD: its coast removes a ~200 m cross miss in the air by aero steering, which leaves the cross velocity), now ~25 m
   further out than before. Its first plan then dropped the 13 -> 5 engines 1.72 s into their 3 s start-up while the
@@ -2400,3 +2404,59 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   the reference missions (starship_leo, the Falcon 9 missions, ISS, refuelling) fly as before, their numbers stand.
 - **Removed:** the old telemetry tests (starship_leo with the recorded 500 t MECO and the planned kick; CRS-35 on a
   fixed 12 deg kick, T+60 / 120 s within 15 % only) and the kick sweeps "[.tuning]" (kicks are planned).
+
+### Falcon 9 boostback against CRS-35 (follow-ups Task 7b)
+Question (Task 7): with the flown 13.6 s flip the planner keeps 53.6 t at MECO (gauge ~66 t), MECO comes 7.6 % fast,
+and our boostback burns 43 s against CRS-35's ~55 s - does the boostback cost too little? **Answer: no.** Diagnosis
+only, nothing changed in the model.
+- **Method.** `tools/telemetry/boostback_fit.py`: a planar point mass (spherical Earth, no drag - q < 20 Pa above 80 km)
+  with a free initial state and a piecewise-linear thrust acceleration (knots every 3-4 s) fitted to the speed and
+  altitude readings (time bases 3.42 / 5.87 s, section "Validation against flight 14 and CRS-35"). The propellant of a
+  burn follows from its delta-v and its end mass alone; the end mass is bounded below by the gauge after the burn
+  (3.5 % = 14.9 t at the entry burn + 25.6 t dry with the N2 tanks = 40.8 t) and above by the thrust ceiling (in the
+  steady phase, where 1/a falls by 1/c per second as for a constant thrust, the mass is at most 2796 kN / a; three
+  Merlins in vacuum, our engine model). Checked on our own flight (hidden test "Falcon 9 CRS-35 first stage profile
+  dump", `STARSIM_BOOSTBACK_DUMP=<csv>`): fitted 2101 m/s, end mass 39.1 t, start 77.9 t, 38.8 t burned against the
+  flown 2100 m/s, 39.2 / 78.0 / 38.8 t. Fits on CRS-35: knots 3 s rms 0.64 m/s / 0.23 km, 2014 m/s; knots 5 s 2019
+  m/s; constant-thrust model (worse fit, rms 6 m/s) 2026-2068 m/s.
+- **Phase by phase** (CRS-35 in true time = display - 3.42 s; ours: `crs35_ascent`, the dump above):
+
+  | Phase | CRS-35 | Ours |
+  |---|---|---|
+  | MECO | T+134.6 s, 6490 km/h, 57.4 km, path 36.6 deg; gauge 16.3 % = 69 t (display T+136.25 s) | T+135.5 s, 6985 km/h, 59.7 km, 38.2 deg; 53.6 t |
+  | Separation | T+138 s (timeline 2:18) | T+140.0 s, 52.8 t, 62 km from LZ-40 |
+  | State at T+143 s (fit) | 68.7 km, vertical 1016 m/s, horizontal 1461 m/s | 71.3 km, 1126 m/s, 1541 m/s |
+  | Boostback ignition | ~T+151-152 s (timeline 2:31) | T+153.8 s (flip 13.6 s) |
+  | Boostback thrust | ~T+152-170 s soft start: 24-31 m/s2 at 75-85 t = ~1.8-2.3 MN; T+172-202 s steady: 38.5 -> 53 m/s2, growing as a constant thrust (1/c within ~2 %) of 2.57-2.80 MN = 0.92-1.00 of three Merlins (two give at most 1.86 MN: three engines); ~T+202-207 s thrust-down | 2.80 MN (three Merlins, full) from ignition to cutoff, no trim |
+  | Boostback duration | ~55 s (T+151-206.5 s) | 43.2 s (T+153.8-197.0 s) |
+  | Thrust delta-v | 2014 m/s (2014-2068 over the fits), tilted 1.5 -> 5.6 deg down | 2100 m/s, tilted 5.8 deg down |
+  | Mass start -> end, burned | 79.0-85.8 t -> 40.8-44.3 t, 38.2-41.4 t (end mass at the gauge / at the thrust ceiling) | 78.0 -> 39.2 t, 38.8 t |
+  | Propellant at boostback ignition | 53.7-60.5 t (start mass - 25.0 t structure - ~0.3 t N2) | 52.8 t |
+  | End of burn | 616-621 m/s at 112 km (T+206.5 s); ~555 m/s horizontal back; apogee ~116.4 km at ~T+237 s | 677 m/s at 114.9 km (T+197 s; 633 m/s at T+206.5 s); 555 m/s back; apogee 122.9 km at T+239 s |
+  | Entry burn (display times) | T+355 s, 56.6 -> 35.9 km, 125 m/s, gauge 3.5 -> 3.1 % (~1.7 t) | T+356.5 s, 57.8 -> 38.7 km, 2.0 t |
+  | Landing burn (display times) | T+420 s, ~3.2 km, ~300 m/s, 12.1 t; touchdown T+442 s | T+423.5 s, 2.94 km, 287 m/s, 12.06 t; touchdown T+453.5 s |
+
+- **Findings.**
+  - The flight's boostback needs **less** delta-v than ours (2014 against 2100 m/s): its MECO is slower (~75 m/s less
+    horizontal speed at T+143 s), and both end with ~555 m/s back. The aim (Lambert arc, `return_flight_time_s` 260 s)
+    and the end state agree; aero during the burn is negligible on both (q < 20 Pa); a slower burn adds no gravity loss
+    to a horizontal burn (the vertical speeds follow gravity plus the small downward thrust share on both).
+  - Its 55 s are a **thrust profile, not a cost**: ~18 s of soft start at ~2/3 thrust and ~5 s of trim at the end;
+    the steady part is three engines at 0.92-1.00. The propellant is set by delta-v and end mass: 38.2-41.4 t against
+    our 38.8 t - at most 2.6 t more than ours (end mass at the thrust ceiling), as little as ours at the gauge's end mass.
+    `boostback_loss_fraction` 0.13 stays (it is identified on the landing-burn propellant, which matches).
+  - The **gauge's 66-69 t at MECO is out of reach**: the thrust ceiling bounds the propellant at boostback ignition
+    to <= 60.5 t (MECO <= ~61 t with the run-down) - the same pattern as Starlink 15-25 (47 t at MECO -> 25.9 t at the
+    entry burn without a burn). Not followed (physics first).
+  - The **MECO speed gap is the ascent's**: at equal true time the flight is slower before MECO (T+130.8 s: 6111
+    against our 6409 km/h, +4.9 %; T+120 s +4.2 %, Task 6), and our stack accelerates harder near MECO (along the path
+    T+125.8-130.8 s: 35.7 m/s2 sensed for the flight - 107.8 km/h/s + g sin(path) - against our 37.8 m/s2: with our
+    thrust a stack ~13 t (6 %) heavier, or ~6 % less thrust; the G dial reads 2-3 % below ours at T+129.5-130.8 s). MECO itself comes 0.9 s
+    later than recorded (+1.7 % speed). Before Task 7 the 50 s flip made MECO 1.9 s early (T+132.7 s), which hid the
+    ascent's excess (+1.6 % at MECO). Even the bracket's upper end (2.6 t more at MECO) would move MECO ~1 s earlier,
+    ~1.8 % of the 7.6 %.
+- **Open (user decision 2026-10-23, Task 7b gate):** the ascent's late acceleration excess (Task 6 open item (3):
+  thrust / mass flow against liftoff and upper-stack mass, not separable from the dials alone). New evidence for it: the
+  boostback's thrust ceiling bounds the first stage's propellant at MECO to 54-61 t (ours 53.6 t), so a heavier stack
+  near MECO must come from the upper stack or the thrust, not from the first stage's propellant. The CRS-35
+  `meco_speed_allowance` stays 0.097 (INTERIM) until then.
