@@ -20,6 +20,9 @@ enum class MissionKind {
     RefuellingCampaignFlown                // refuelling f2
 };
 MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_view mission_id);
+// Whether starting the mission plans its ascent on the pad (sim::engage_planned_ascent): kinds Ascent, IssLaunch,
+// DepotLaunch; TankerFlight / HlsRefuel with [start] mode = "pad"; RefuellingCampaignFlown with [depot] start = "launch".
+bool mission_plans_on_pad(const std::filesystem::path& config_dir, std::string_view mission_id);
 // [mission] display_name (German, no trademarks: the webcast overlay); empty when the file has none.
 std::string mission_display_name(const std::filesystem::path& config_dir, std::string_view mission_id);
 

@@ -246,3 +246,16 @@ duration_days = 1.0
     CHECK_NOTHROW(load("placed", text("placed", "shortfall_tankers = 1.5", "200.0", "[\"sea_level_3\"]", "0.02")));
     CHECK_THROWS(load("groups", text("launch", "", "200.0", "[]", "0.02")));
 }
+
+TEST_CASE("mission_plans_on_pad: pad starts only", "[mission_config]") {
+    for (const char* id : {"starship_leo", "falcon9_rtls", "falcon9_crew_dragon_iss", "depot_launch", "tanker_flight",
+                           "hls_refuel", "refuelling_campaign_flown"}) {
+        INFO(id);
+        CHECK(config::mission_plans_on_pad(config_dir, id));
+    }
+    for (const char* id : {"hls_refuel_orbit", "tanker_flight_orbit", "refuelling_campaign_flown_placed",
+                           "ship_return_starbase", "hls_lunar_nrho"}) {
+        INFO(id);
+        CHECK_FALSE(config::mission_plans_on_pad(config_dir, id));
+    }
+}

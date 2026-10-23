@@ -39,20 +39,6 @@ private:
     bool& flag_;
 };
 
-// Missions that may stand on the pad while the onboard computer plans their ascent (sim::engage_planned_ascent).
-bool may_plan_ascent(config::MissionKind kind) {
-    using K = config::MissionKind;
-    switch (kind) {
-        case K::Ascent:
-        case K::IssLaunch:
-        case K::DepotLaunch:
-        case K::TankerFlight:
-        case K::HlsRefuel:
-        case K::RefuellingCampaignFlown: return true;
-        default: return false;
-    }
-}
-
 }  // namespace
 
 FlightSim::~FlightSim() { runner_.reset(); }
@@ -212,7 +198,7 @@ int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, 
         // a launch from the pad plans its ascent inside sim::start_mission (seconds to ~45 s): the planning flag is
         // published first ("Startvorbereitung" on the session as it stands - the call places the vehicle)
         std::optional<PlanningFlag> planning;
-        if (may_plan_ascent(config::mission_kind(config_dir_, id))) {
+        if (config::mission_plans_on_pad(config_dir_, id)) {
             planning.emplace(context_.planning);
             observe(session, session.epoch());
         }

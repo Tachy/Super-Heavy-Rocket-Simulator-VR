@@ -117,6 +117,20 @@ MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_vi
     return kind_of(detail::Document(config_dir / "missions" / (std::string(mission_id) + ".toml")));
 }
 
+bool mission_plans_on_pad(const std::filesystem::path& config_dir, std::string_view mission_id) {
+    switch (mission_kind(config_dir, mission_id)) {
+        case MissionKind::Ascent:
+        case MissionKind::IssLaunch:
+        case MissionKind::DepotLaunch: return true;
+        case MissionKind::TankerFlight:
+        case MissionKind::HlsRefuel:
+            return load_refuelling_flight_mission(config_dir, mission_id).start == RefuellingStart::Pad;
+        case MissionKind::RefuellingCampaignFlown:
+            return !load_refuelling_campaign_flown_mission(config_dir, mission_id).depot_placed;
+        default: return false;
+    }
+}
+
 std::string mission_display_name(const std::filesystem::path& config_dir, std::string_view mission_id) {
     const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
     const auto* mission = doc.root["mission"].as_table();

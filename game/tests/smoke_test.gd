@@ -189,6 +189,16 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	_check(not _ok(ship, ship.abort_landing(0)), "abort refused for a body that is not returning")
 	_check(ship.is_active() and ship.tower_state().get("phase", "") != "Abbruch",
 			"abort before staging changes nothing (tower not aborted)")
+	# a refuelling flight that starts on its phasing orbit does not plan an ascent: the flag never shows
+	var orbit := FlightSim.new()
+	orbit.setup(config_dir)
+	var orbit_id := orbit.start_mission("tanker_flight_orbit", tdb)
+	var orbit_planning := false
+	wait_start = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - wait_start < 120000 and not orbit.result(orbit_id).get("done", false):
+		orbit_planning = orbit_planning or orbit.autopilot_status().get("planning", false)
+		OS.delay_msec(5)
+	_check(not orbit_planning, "start_mission from a phasing orbit never publishes the planning flag")
 	return true
 
 
