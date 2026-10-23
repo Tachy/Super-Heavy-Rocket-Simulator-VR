@@ -70,6 +70,11 @@ def main() -> int:
 
             geoid.fetch(source, REPO_ROOT, download, args.force)
             continue
+        if source.get("kind") == "earth_terrain":  # ETOPO + GLO-30 + 3DEP height tiles (earth_terrain.py)
+            import earth_terrain  # lazy: needs numpy, rasterio and pyproj
+
+            earth_terrain.fetch(source, REPO_ROOT, download, args.force)
+            continue
         if target.exists() and not args.force:
             print("  already present")
         else:

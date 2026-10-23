@@ -106,7 +106,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
 ## Build & test (Windows, MSVC 2022 Build Tools, CMake, Ninja, SCons)
 One-time setup:
 ```powershell
-# Runtime data (SPICE kernels, textures, star catalogue) and CSPICE sources
+# Runtime data (SPICE kernels, textures, star catalogue) and CSPICE sources; the geoid and Earth terrain sources need
+# pip install -r tools/data_pipeline/requirements.txt (numpy, rasterio, pyproj); Earth terrain: several GB of raw downloads
 python tools/data_pipeline/fetch.py
 python tools/data_pipeline/prepare.py      # converts data/raw -> data/textures, data/stars (needs Pillow)
 

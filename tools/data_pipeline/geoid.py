@@ -21,6 +21,8 @@ from pathlib import Path
 
 import numpy as np
 
+import grid_file
+
 LINES = 4321
 SAMPLES = 8640
 NODES_PER_DEGREE = 24  # 2.5' = 1/24 deg
@@ -99,24 +101,12 @@ def bilinear_m(cm: np.ndarray, lat_deg: float, lon_deg: float) -> float:
 
 
 def grid_header_text(checks: list[tuple[float, float, float]]) -> str:
-    text = ("# EGM2008 geoid undulation, 2.5' nodes - written by tools/data_pipeline/geoid.py\n"
-            "[grid]\n"
-            'product = "EGM2008_2.5min"\n'
-            'projection = "geographic"\n'
-            'height_reference = "egm2008_undulation"\n'
-            "sphere_radius_m = 6378137.0\n"
-            f"dn_scale_m = {DN_SCALE_M}\n"
-            'heights = "egm2008_25.i16"\n'
-            f"lines = {LINES}\n"
-            f"samples = {SAMPLES}\n"
-            f"north_latitude_deg = {NORTH_LATITUDE_DEG}\n"
-            f"west_longitude_deg = {WEST_LONGITUDE_DEG}\n"
-            f"step_latitude_deg = {STEP_DEG!r}\n"
-            f"step_longitude_deg = {STEP_DEG!r}\n"
-            "global_longitude = true\n")
-    for lat, lon, h in checks:
-        text += f"\n[[check]]\nlatitude_deg = {lat!r}\nlongitude_deg = {lon!r}\nheight_m = {h!r}\n"
-    return text
+    return grid_file.header_text(
+        "EGM2008 geoid undulation, 2.5' nodes - written by tools/data_pipeline/geoid.py",
+        product="EGM2008_2.5min", height_reference="egm2008_undulation", dn_scale_m=DN_SCALE_M,
+        heights="egm2008_25.i16", lines=LINES, samples=SAMPLES, north_latitude_deg=NORTH_LATITUDE_DEG,
+        west_longitude_deg=WEST_LONGITUDE_DEG, step_latitude_deg=STEP_DEG, step_longitude_deg=STEP_DEG,
+        global_longitude=True, checks=checks)
 
 
 # ----------------------------------------------------------------------------------------------- files

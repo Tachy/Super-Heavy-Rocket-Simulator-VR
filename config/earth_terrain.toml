@@ -1,0 +1,20 @@
+# Earth terrain tiles (M8): the areas for which the data pipeline (tools/data_pipeline/earth_terrain.py) cuts a local
+# (3DEP 1 m bare earth) and a regional (Copernicus GLO-30, ~1 arcsec) height tile; everywhere else the global ETOPO 2022
+# relief applies. Provenance tags: [S] sourced, [E] estimate, [D] derived.
+
+[[area]]
+id = "starbase"
+latitude_deg = 25.99686          # [S] centre: OLP-1
+longitude_deg = -97.15394
+local_half_size_m = 5000.0       # [E] level 1 (spec: ~10 x 10 km)
+regional_half_size_m = 100000.0  # [E] level 2 (spec: ~200 x 200 km)
+
+[[area]]
+id = "cape"                      # LC-39A, SLC-40, LZ-40 in one local tile
+latitude_deg = 28.585
+longitude_deg = -80.590
+local_half_size_m = 6000.0       # [E] covers LC-39A (28.608, -80.604) and SLC-40 (28.562, -80.577) + 1 km margin
+regional_half_size_m = 100000.0
+
+[global]
+relief_step_arcmin = 2.0         # [E] impacts away from the areas; 117 MB as int16

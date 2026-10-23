@@ -211,6 +211,19 @@ kind = "geoid"
 license = "NGA EGM2008: public domain (derived from work by NGA)"
 credit = "NGA (National Geospatial-Intelligence Agency), EGM2008; grid distributed by the PROJ data CDN (cdn.proj.org)"
 
+[[source]]
+id = "earth_terrain"
+name = "Earth height tiles: NOAA ETOPO 2022 60 arc-second surface (global relief), Copernicus DEM GLO-30 (regional) and USGS 3DEP 1 m bare earth (local), with NOAA GEOID18 for NAVD88 - terrain physics around the launch areas"
+url = "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif"
+target = "data/terrain/earth/global_relief.toml"
+kind = "earth_terrain"
+# other endpoints used by tools/data_pipeline/earth_terrain.py (documented here, not downloaded by the generic fetch):
+#   GLO-30  https://copernicus-dem-30m.s3.amazonaws.com/<tile>/<tile>.tif   (AWS open data, 1-degree COG tiles)
+#   3DEP    https://tnmaccess.nationalmap.gov/api/v1/products  dataset "Digital Elevation Model (DEM) 1 meter"
+geoid18_url = "https://cdn.proj.org/us_noaa_g2018u0.tif"
+license = "ETOPO 2022 and USGS 3DEP: public domain (US Government works); NOAA GEOID18: public domain; Copernicus DEM GLO-30: free and open licence (ESA/EU, redistribution allowed with attribution)"
+credit = "NOAA NCEI ETOPO 2022 (doi:10.25921/fd45-gt74); USGS 3D Elevation Program; NOAA NGS GEOID18 (via cdn.proj.org); Contains modified Copernicus DEM GLO-30 data (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA, all rights reserved"
+
 # ------------------------------------------------------------------ published reference tables (committed)
 
 [[source]]
