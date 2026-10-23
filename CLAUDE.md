@@ -143,7 +143,10 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
 - Long test runs (user 2026-10-20): a run that may take longer than 10 minutes goes to the background with its output
   in a file; check its state every 10 minutes (failures so far, a case hanging or far beyond its usual time). When
   tests are going wrong, stop the run early and fix the cause instead of waiting for the end.
-- ctest runs test cases as parallel processes: tests must not share temp files or directories (make names unique).
+- ctest runs test cases as parallel processes: tests must not share temp files or directories (make names unique)
+  (exception: the write-once plan cache `build/plan_cache`, Task 5 of the 2026-10-23 follow-ups: content-addressed,
+  files renamed into place, wiped on every test relink, active only through `STARSIM_PLAN_CACHE_DIR` set by the test
+  CMake; a test that asserts trial flights calls `sim::disable_plan_cache()`).
 - Visual check (needs GPU, no --headless): `godot --path game --script res://tests/render_check.gd --
   --utc=2024-04-08T18:42:00 --focus=earth --view_from=moon --out=<png>`; ground views with
   `--lat= --lon= --look_at_moon --fov=`. Read the PNG to verify rendering changes.

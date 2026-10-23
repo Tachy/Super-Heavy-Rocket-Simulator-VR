@@ -2258,10 +2258,23 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     (tanker 5: 420.5 vs 420.6 t, tanker 8: 628.7 vs 629.6 t, largest tanker 12: 907.6 vs 909.0 t); the class mix
     asserted instead of the pairwise flips: first plan 8 of 12 above the depot, flown 7 of 12 (difference 1, at most 3);
     7 pairwise flips reported. Comparison passed.
-- **Test time:** every test process plans its own launches (the memo lives per process; no on-disk cache - the spec
+- **Test time:** every test process plans its own launches (the memo lives per process; the game has no on-disk cache - the spec
   wants planning at launch): 60 cases of the affected labels grew by ~28 s each (+1700 s CPU in all under the 24-way
   parallel load; a Starship plan 4-6 trials, ~4 s each serial, ~20-30 s under load; the Falcon 9 drone-ship request 15
   trials, ~45 s). Cases that only test pad mechanics through `start_mission` pay it too.
+  Follow-ups Task 5: the test processes share their plans through a write-once disk cache
+  (`sim/ascent_plan_cache.hpp`; only when `STARSIM_PLAN_CACHE_DIR` is set - the test CMake sets it to
+  `build/plan_cache`, the game never does). Disk key = memo key + liftoff epoch (hexfloat) + FNV-1a hash of the config
+  directory's contents; the file is written to a temp name and renamed into place; the directory is wiped on every
+  relink of the test exe. The epoch is in the disk key although the memo leaves it out: a plan made by another process
+  at another hour differs in the kick's last bits, and the tanker flight's rendezvous then moved by 1.6 t (17.37 ->
+  18.97 t, the reference-flight check failed) and the kink test's `start_ascent_mission` kick no longer equalled its
+  plan's - with the epoch a hit is bit-identical to the plan the process would have made itself (RTLS mission with
+  `STARSIM_VERBOSE=1`: all 76 output lines equal with and without the cache). Tests that assert trial flights call
+  `sim::disable_plan_cache()`; `plan_speed` runs without the cache. Measured 2026-10-23, `ctest -j 24` on the labels
+  ascent / ascent_planner / staging / falcon9 / rtls / asds (69 cases, all passed in each run): no cache 174 s wall /
+  1895 s summed per-test time; empty cache 171 s / 1772 s; warm cache 133 s / 973 s (-49 %). The wall time is bound by
+  the tanker flight (133-174 s alone); the warm cache saves only on a rerun without relinking.
 
 ### Validation against flight 14 and CRS-35 (Task 6)
 - **Missions** (`config/missions/flight14_ascent.toml`, `crs35_ascent.toml`): each recorded flight's target, payload

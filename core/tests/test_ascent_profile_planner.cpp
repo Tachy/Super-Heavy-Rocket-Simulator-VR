@@ -22,6 +22,7 @@
 #include "starsim/gnc/booster_return.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/ascent_mission.hpp"
+#include "starsim/sim/ascent_plan_cache.hpp"
 #include "starsim/sim/ascent_profile_planner.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
@@ -144,6 +145,7 @@ double impact_miss_of_ship_m(const sim::AscentProfileRequest& request, const sim
 }  // namespace
 
 TEST_CASE("The planner's kick is the optimum of a kick sweep", "[sim][ascent_planner][slow]") {
+    sim::disable_plan_cache();  // asserts trial flights
     const auto request = starship_request(100.0);  // own memo key
     struct Point {
         double kick_deg, propellant_kg;
@@ -218,6 +220,7 @@ TEST_CASE("The optimised arc has no kink at staging", "[sim][ascent_planner]") {
 }
 
 TEST_CASE("A repeated request is answered from the memo", "[sim][ascent_planner]") {
+    sim::disable_plan_cache();  // asserts trial flights
     auto request = starship_request(200.0);  // own memo key
     const auto first = timed_plan(request);
     REQUIRE(first.feasible);
@@ -292,6 +295,7 @@ TEST_CASE("Starship at a site without a tower is refused", "[sim][ascent_planner
 }
 
 TEST_CASE("An unreachable target is refused", "[sim][ascent_planner]") {
+    sim::disable_plan_cache();  // asserts trial flights
     auto request = starship_request(300.0);  // own memo key
     request.target.periapsis_altitude_m = 2000e3;
     request.target.apoapsis_altitude_m = 2000e3;

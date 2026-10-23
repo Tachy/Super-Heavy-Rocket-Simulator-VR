@@ -97,7 +97,8 @@ double fly_ascent_trial(const FlightSession& like, const AscentProfileRequest& r
 // The kick of the request's ascent: searched on trial flights (fly_ascent_trial) in [min_kick_angle_rad,
 // max_kick_angle_rad] to kick_tolerance_rad - Newton steps on a parabola through the best three trials, golden-section
 // steps as the safeguard. Memoised per process by the request (its liftoff epoch excluded: the optimum does not depend
-// on it), so a repeated mission start flies no trial.
+// on it), so a repeated mission start flies no trial. Test processes also share plans through a disk cache
+// (ascent_plan_cache.hpp, keyed with the liftoff epoch; only when STARSIM_PLAN_CACHE_DIR is set).
 AscentProfile plan_ascent_profile(const FlightSession& like, const AscentProfileRequest& request);
 
 // The launch as the onboard computer plans it (spec goal 2): a target inclination below the site's latitude is raised to

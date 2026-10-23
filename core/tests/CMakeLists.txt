@@ -124,6 +124,7 @@ add_executable(starsim_core_tests
     test_starship_ascent.cpp
     ascent_validation.cpp
     test_ascent_profile_planner.cpp
+    test_ascent_plan_cache.cpp
     test_j2_insertion.cpp
     test_landing_legs.cpp
     test_leg_landing.cpp
@@ -195,7 +196,14 @@ target_compile_definitions(starsim_core_tests PRIVATE
 
 include(Catch)
 # Catch tags become CTest labels: `ctest -LE slow` skips the long campaigns (tools/build.ps1 -Fast).
-catch_discover_tests(starsim_core_tests TEST_SPEC "~[plan_speed]" ADD_TAGS_AS_LABELS)
+# Plans are shared across the test processes through a write-once cache (core/include/starsim/sim/ascent_plan_cache.hpp);
+# the directory is wiped after every link, so changed code never reuses an old plan. plan_speed gets no cache.
+set(STARSIM_PLAN_CACHE_DIR "${CMAKE_BINARY_DIR}/plan_cache")
+add_custom_command(TARGET starsim_core_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${STARSIM_PLAN_CACHE_DIR}"
+    VERBATIM)
+catch_discover_tests(starsim_core_tests TEST_SPEC "~[plan_speed]" ADD_TAGS_AS_LABELS
+    PROPERTIES ENVIRONMENT "STARSIM_PLAN_CACHE_DIR=${STARSIM_PLAN_CACHE_DIR}")
 # Wall-time checks run alone: under the suite's parallel load the LLO plan took 12-20 s against 10 s (l6 review).
 add_test(NAME plan_speed COMMAND starsim_core_tests "[plan_speed]")
 set_tests_properties(plan_speed PROPERTIES RUN_SERIAL TRUE LABELS "plan_speed")

@@ -18,6 +18,7 @@
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
+#include "starsim/sim/ascent_plan_cache.hpp"
 #include "starsim/sim/staging_sequence.hpp"
 
 namespace starsim::sim {
@@ -431,7 +432,18 @@ AscentProfile plan_ascent_profile(const FlightSession& like, const AscentProfile
             return cached;
         }
     }
+    const bool disk_cache = plan_cache_dir().has_value();  // tests only (STARSIM_PLAN_CACHE_DIR)
+    const auto disk_key = disk_cache ? plan_cache_key(key, request.liftoff) : std::string();
+    if (disk_cache) {
+        if (auto stored = load_cached_plan(disk_key, like.config_dir())) {  // another test process planned it
+            stored->trial_flights = 0;
+            std::lock_guard lock(memo_mutex());
+            memo()[key] = *stored;
+            return *stored;
+        }
+    }
     const auto profile = KickSearch(like, request).run();
+    if (disk_cache) store_cached_plan(disk_key, like.config_dir(), profile);
     std::lock_guard lock(memo_mutex());
     memo()[key] = profile;
     return profile;
