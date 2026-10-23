@@ -173,8 +173,10 @@ std::optional<double> booster_burn_time_s(const FlightSession& s, const vehicle:
                                      env.atmosphere.at(h - meco_forecast_density_step_m).density_kg_m3) /
                                     (2.0 * meco_forecast_density_step_m) * v * std::sin(gamma);
         const double other_mps2 = -drag_n / m - g * std::sin(gamma);
-        const double acceleration = gnc::max_q_thrust_acceleration_mps2(program.max_dynamic_pressure_pa, density,
-                                                                        density_rate, v, other_mps2);
+        const double limit_pa =
+            gnc::dynamic_pressure_limit_pa(program, air.speed_of_sound_mps > 0.0 ? v / air.speed_of_sound_mps : 0.0);
+        const double acceleration =
+            gnc::max_q_thrust_acceleration_mps2(limit_pa, density, density_rate, v, other_mps2);
         const double throttle = std::min(gnc::ascent_throttle_cap(program),
                                          std::isfinite(acceleration) && thrust_along > 0.0
                                              ? gnc::booster_throttle_for_thrust(vehicle, m * acceleration / thrust_along,

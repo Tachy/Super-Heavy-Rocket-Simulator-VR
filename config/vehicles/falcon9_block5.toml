@@ -20,12 +20,20 @@ diameter_m = 3.66                        # [S:wiki_f9]
 dry_mass_kg = 25400.0                    # [S:wiki_f9] 25.6 t incl. the 0.2 t of RCS nitrogen below [E]
 dry_cg_station_m = 12.0                  # [E]
 jettison_after_separation_kg = 0.0
-# [D] the ascent guidance throttles the stack to hold q at or below this: the peak dynamic pressure of CRS-35 (the
-# webcast's speed and altitude with US76 air; q flattens at ~29.5 kPa in the throttle bucket, T+52-61 s, and peaks
-# after it):
+# [D] q limit over Mach ([mach, pa], linear between): the ascent guidance throttles the stack to hold q at or below
+# it. Both flights hold q transonically with the engines throttled (gauge flow) and let it rise once supersonic:
 #   python tools/telemetry/peak_dynamic_pressure.py tests/validation/telemetry/f9_crs35_2026-10-13.csv
-#   -> peak q 31559 Pa at T+70.0 s (h 11.16 km, v 421.0 m/s, Mach 1.43)
-max_dynamic_pressure_pa = 31559.0
+#       --capacity-t 425 --rated-flow-tps 2.75
+#   -> throttled T+52..66 s: Mach 0.92..1.26 (q flat 28.7-29.6 kPa over Mach 0.92-1.12, then rising as the engines
+#      throttle up); full thrust: highest q 31559 Pa at T+70 s (Mach 1.43)
+#   (the same for f9_starlink15-25_2026-10-12.csv)
+#   -> q flat 31.0-31.5 kPa over Mach 0.97-1.13, throttled T+56..68 s (Mach 1.01-1.38, q rising to 34.9 kPa);
+#      full thrust: highest q 35567 Pa at T+72 s (Mach 1.55)
+# Transonic (Mach 0.90-1.12): the lower of the two holds, CRS-35's 29.6 kPa (Starlink 15-25 held 31.5); elsewhere the
+# highest q flown at full thrust, 35.6 kPa (no evidence of a lower limit); ramps where the records leave the hold
+# (from Mach 0.80, to Mach 1.45). The post-bucket ~95 % of the former CRS-35 schedule (a G-dial fit) is not data: the
+# gauge shows the rated flow after the bucket (mass_estimate.py "mean flow" T+66-100 s: 0.997 / 0.993).
+max_dynamic_pressure_pa = [[0.80, 35567.0], [0.90, 29600.0], [1.12, 29600.0], [1.45, 35567.0]]
 
 # Cold staging (FlightSession::stage, ascent trajectory and staging Task 1). Event times from our webcast telemetry
 # (tests/validation/telemetry, 0.5 s samples): MECO = the engine icon going dark, separation = the speed dials splitting

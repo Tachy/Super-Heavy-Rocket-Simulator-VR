@@ -27,10 +27,10 @@ struct PitchProgram {
     // over the first 90 s (tuning test "[.tuning]"); later the faster V3 turns over more slowly.
     double kick_angle_rad = 10.0 * 3.14159265358979 / 180.0;
     double kick_duration_s = 12.0;
-    // The first stage's dynamic-pressure limit ([stage] max_dynamic_pressure_pa of the vehicle's lowest stage, filled in
-    // by FlightSession::engage_ascent_autopilot when 0): the booster throttles to hold q at or below it (0: no limit,
-    // full thrust). The upper stage always flies full (PEG).
-    double max_dynamic_pressure_pa = 0.0;
+    // The first stage's dynamic-pressure limit over Mach ({mach, pa}, increasing Mach; [stage] max_dynamic_pressure_pa
+    // of the vehicle's lowest stage, filled in by FlightSession::engage_ascent_autopilot when empty): the booster
+    // throttles to hold q at or below it (empty: no limit). The upper stage always flies full (PEG).
+    std::vector<std::pair<double, double>> max_dynamic_pressure_by_mach;
     // The booster's operational ascent throttle ([stage] max_ascent_throttle of the lowest stage, filled in like the
     // q limit when 0): the open loop never commands more; the q limit acts below it. 0 or 1: full thrust.
     double max_ascent_throttle = 0.0;
@@ -38,6 +38,9 @@ struct PitchProgram {
 
 // The booster's ascent throttle cap of a program (max_ascent_throttle; 1 when unset).
 double ascent_throttle_cap(const PitchProgram& program);
+
+// The program's dynamic-pressure limit at `mach`: linear between its points, held beyond the ends; 0 without a limit.
+double dynamic_pressure_limit_pa(const PitchProgram& program, double mach);
 
 // [E] Time constant of the max-Q limiter: q is brought to the limit as dq/dt = (limit - q) / tau. 1 s: short against
 // q's own build-up near max-Q (q / (dq/dt) ~ 20-30 s), so the full thrust holds until ~95 % of the limit; long enough
@@ -101,7 +104,7 @@ public:
     // of its last update plus PEG's time to go; none before the closed loop has run with thrust.
     const std::optional<time::Epoch>& cutoff_epoch() const { return cutoff_epoch_; }
     // The booster's throttle now: the operational cap (ascent_throttle_cap) while the dynamic pressure is below
-    // PitchProgram::max_dynamic_pressure_pa, throttled to hold it at the limit (max_q_thrust_acceleration_mps2 on the air
+    // PitchProgram::max_dynamic_pressure_by_mach at the Mach number now, throttled to hold it at the limit (max_q_thrust_acceleration_mps2 on the air
     // data and accelerometer of the last tick; the engines' minimum respected).
     double booster_throttle(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                             time::Epoch epoch) const;

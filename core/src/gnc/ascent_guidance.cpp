@@ -161,6 +161,19 @@ double ascent_throttle_cap(const PitchProgram& program) {
     return program.max_ascent_throttle > 0.0 ? std::min(program.max_ascent_throttle, 1.0) : 1.0;
 }
 
+double dynamic_pressure_limit_pa(const PitchProgram& program, double mach) {
+    const auto& points = program.max_dynamic_pressure_by_mach;
+    if (points.empty()) return 0.0;
+    if (!(mach > points.front().first)) return points.front().second;
+    for (size_t i = 1; i < points.size(); ++i) {
+        if (mach > points[i].first) continue;
+        const auto& [m0, q0] = points[i - 1];
+        const auto& [m1, q1] = points[i];
+        return q0 + (q1 - q0) * (mach - m0) / (m1 - m0);
+    }
+    return points.back().second;
+}
+
 double AscentGuidance::booster_throttle(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                         time::Epoch epoch) const {
     return std::min(ascent_throttle_cap(program_), max_q_throttle(body, env, epoch));
@@ -168,15 +181,15 @@ double AscentGuidance::booster_throttle(const vehicle::FlightBody& body, const v
 
 double AscentGuidance::max_q_throttle(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
                                       time::Epoch epoch) const {
-    const double limit_pa = program_.max_dynamic_pressure_pa;
-    if (!(limit_pa > 0.0)) return 1.0;
+    if (program_.max_dynamic_pressure_by_mach.empty()) return 1.0;
     const auto& v = body.vehicle();
     const auto& s = body.state();
     const auto& air = body.air_data();
     const Vec3& air_velocity_body = air.air_velocity_body_mps;
     const double speed = norm(air_velocity_body);
     const double density = air.air.density_kg_m3;
-    if (!(speed > min_limited_air_speed_mps) || !(density > 0.0)) return 1.0;
+    if (!(speed > min_limited_air_speed_mps) || !(density > 0.0) || !(air.air.speed_of_sound_mps > 0.0)) return 1.0;
+    const double limit_pa = dynamic_pressure_limit_pa(program_, speed / air.air.speed_of_sound_mps);
     const Vec3 along_gcrf = s.attitude.rotate(air_velocity_body / speed);
     // the air's density change along the path: d rho / dh (US76, scaled as the truth air) times the climb rate
     const auto frame = local_frame(s.position_gcrf_m, env.earth_orientation, epoch);

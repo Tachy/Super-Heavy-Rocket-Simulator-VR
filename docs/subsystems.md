@@ -309,10 +309,11 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   drag reproduces ..."). Burns seen: CRS-35 entry burn on the centre engine only, landing burn 1 -> 3 -> 1; Starlink 15-25
   entry burn on 3, landing burn on 1 (~40 % throttle by the gauge). The drone-ship descent stays ~2 km higher than a
   zero-lift fall (grid-fin lift). Ascent (since ascent Task 2): full thrust (no `max_ascent_throttle`: the 425 t
-  tanks' gauge flow is the rated flow) under the max-Q limit `max_dynamic_pressure_pa` 31559 Pa [D] (CRS-35's peak q);
-  the CRS-35 schedule (bucket ~72 % T+50-61 s, then ~95 %) is gone (`STARSIM_DEBUG_ASCENT_G=1` prints the simulated G);
-  pitch kick 12 deg [E]; CRS-35 T+60 / 120 s 1359 / 5291 km/h (recorded 1188 / 4672; with the schedule 1219 / 4807),
-  MECO T+132 s / 59.0 km / 6402 km/h vs recorded 137 / 56.6 / 6441. The upper stage's plane steering nulls out-of-plane speed and offset together
+  tanks' gauge flow is the rated flow) under the Mach-dependent q limit `max_dynamic_pressure_pa` [D] (transonic hold
+  29.6 kPa, 35.6 kPa supersonic: section "Ascent trajectory and staging"); the CRS-35 schedule (bucket ~72 % T+50-61 s,
+  then ~95 %) is gone (`STARSIM_DEBUG_ASCENT_G=1` prints the simulated G); pitch kick 12 deg [E]; CRS-35 T+60 / 120 s
+  1335 / 5316 km/h (recorded 1188 / 4672; with the schedule 1219 / 4807: an open discrepancy), MECO T+131 s / 58.0 km /
+  6412 km/h vs recorded 137 / 56.6 / 6441. The upper stage's plane steering nulls out-of-plane speed and offset together
   (ZEM/ZEV) and the terminal v_go removes the rest; inclinations of steep planes are judged against the true equator of
   date (GCRF elements carry ~0.15 deg of precession by 2026). `FlightSession::launch_from_pad` also takes a loaded
   `VehicleConfig` (mission payload; Dragon flies without a fairing); every launch starts with the autopilot off (no ascent
@@ -1945,8 +1946,19 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     gradient (scaled as the truth air) times the climb rate. Thrust to throttle: `gnc::booster_throttle_for_thrust`
     (the producing engines' common range, linear thrust).
   - Values: Starship `max_dynamic_pressure_pa` 38909 Pa [D] = flight 14's peak q (its q holds 38-39 kPa from T+58 to
-    T+71 s, a max-Q hold), Falcon 9 31559 Pa [D] = CRS-35's peak q (T+70 s, after its bucket at ~29.5 kPa); new tool
-    `tools/telemetry/peak_dynamic_pressure.py` (speed + altitude + US76, the core's model). Super Heavy
+    T+71 s, a max-Q hold: the gauge shows the engines throttled at Mach 1.39-1.70, flight 13 at Mach 1.62-1.88, both
+    supersonic - no transonic hold, so Starship keeps one value). Falcon 9 over Mach (fix round 1 after the review):
+    `[[0.80, 35567], [0.90, 29600], [1.12, 29600], [1.45, 35567]]` [D]. Both Falcon 9 records hold q transonically with
+    the engines throttled (gauge flow) and let it rise once supersonic - CRS-35 flat at 28.7-29.6 kPa over Mach
+    0.92-1.12 (throttled T+52-66 s), Starlink 15-25 flat at 31.0-31.5 kPa over Mach 0.97-1.13 (throttled T+56-68 s);
+    at full thrust they reach 31.6 kPa (Mach 1.43) and 35.6 kPa (Mach 1.55). Transonic: the lower hold (CRS-35's);
+    elsewhere the highest q flown at full thrust (no evidence of a lower limit); ramps where the records leave the hold.
+    Transonic loads are the binding case of a launcher (why it buckets there); a single peak-q value (first version:
+    CRS-35's 31.6 kPa, reached supersonic after the bucket) let the stack through the transonic band 2 kPa high. The
+    post-bucket ~95 % of the old schedule was a G-dial fit: the gauge shows the rated flow after the bucket (0.997 /
+    0.993, T+66-100 s), so full thrust there is data. New tool `tools/telemetry/peak_dynamic_pressure.py` (speed +
+    altitude + US76, the core's model; with `--capacity-t` / `--rated-flow-tps` the gauge's throttled phases, their
+    Mach range and the q held in them). Super Heavy
     `max_ascent_throttle` 0.88 [D] (user 2026-10-23: the flown throttle is vehicle data, 280 tf stays the engines'
     capability): the propellant gauge's mean flow T+20-56 s against the rated 28.00 t/s, 0.873 (flight 14) / 0.894
     (flight 13), `tools/telemetry/mass_estimate.py` (new summary line "mean flow"). After max-Q (T+70-125 s) the flow
@@ -1954,27 +1966,39 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     425 t tanks' gauge flow is the rated flow; the "92-94 %" note of `falcon9_block5.toml` belongs to the rejected
     395.7 t load).
   - Measured (`[ascent]` "The ascent holds dynamic pressure at the vehicle limit", free launches): Falcon 9 max q
-    31568 Pa (1.000 of the limit), lowest throttle 0.842, full thrust below 90 %; the free Starship (kick 10 deg, 0.88)
-    peaks at 33.8 kPa (0.87 of the limit, never limited).
+    32.2 kPa, at most 1.000 of the limit at its Mach (transonic hold at 29.6 kPa), lowest throttle 0.805, full thrust
+    below 90 %; the free Starship (kick 10 deg, 0.88) peaks at 33.8 kPa (0.87 of the limit, never limited).
   - MECO forecast: the limiter and the cap run forward on a point mass (section "Mission timeline"); free launches
-    within 0.6 s (Starship) / 2.0 s (Falcon 9) over the booster phase ("MECO forecast follows the limiter").
+    within 0.02 s (Starship) / 1.2 s (Falcon 9) over the booster phase ("MECO forecast follows the limiter").
 - **Open discrepancy - Starship vs flight 14:** at the gauge's own flow the stack is faster than the flights (test
   "Starship ascent follows the webcast telemetry ...", flown with the recorded 500 t MECO): T+30 / 60 / 90 / 120 s
   2.3 / 10.2 / 24.9 / 47.4 km, 579 / 1516 / 3029 / 5313 km/h against 1.6 / 8.4 / 20.5 / 38.2 km, 515 / 1406 / 2772 /
   4848 km/h (+12.4 / +7.8 / +9.3 / +9.6 %); MECO T+126 s / 52.9 km / 5869 km/h against ~T+140 s / ~53 km / ~5950
   km/h. Not tuned (bounds 0.12 -> 0.13 and 12 -> 15 s; Task 6 rewrites the check). The mass_estimate fit gives a
   liftoff mass of 5542-5603 t (ours 5715 t) - the excess is in thrust per flow or drag, not mass.
+- **Open discrepancy - Falcon 9 vs CRS-35** (review of Task 2): `test_falcon9_ascent` "... CRS-35 webcast telemetry"
+  T+30 / 60 / 90 / 120 s 529 / 1335 / 2864 / 5316 km/h against 485 / 1188 / 2474 / 4672 km/h (+9 / +12.4 / +15.8 /
+  +13.8 %); with the former schedule +2.6 % / +2.9 % at T+60 / 120 s - its deep 72 % bucket and 95 % afterwards (a G-dial
+  fit the gauge contradicts) hid the excess. The excess is there before any throttling (T+30 s +9 %, 2.1 against
+  1.4 km) at the gauge's rated flow, the same sign and size as Starship's: a common cause in thrust per flow, drag or
+  the webcast clock (the old docs saw the real stack ~2.5 s late), not in the q limit (the Mach-dependent transonic
+  hold moved T+60 s only from +14.4 % to +12.4 %). Bound: speed at T+60 / 120 s within 15 % (catches a further
+  regression). Follow-up: Task 6 (ascent validation against the flights) - drag table, Isp / thrust per flow, liftoff
+  time of the tables.
 - **SCvx fresh plans** 30 -> 60 iterations [E] (`ScvxSettings::fresh_max_iterations`): the Falcon 9 ASDS MECO campaign
   case seed 107 (aero x0.91, ignition 3.8 km high, 1.3 km short, 14.8 t) had its first deck plan refused at 30 and
   splashed down 172 m beside the deck; it converges in 42 and lands. Re-plans keep their 10.
 
 ### Re-baselined reference numbers (Task 2)
-- Falcon 9 drone ship (`falcon9_asds.toml`): deck 32.8819 / -76.1490 -> 33.2139 / -75.7839 deg [D] (the hidden
-  "nominal impact point" probe: separation T+150.7 s at 75.1 km, 8245 km/h, 30.6 deg path; ~42 km further). Mission
+- Falcon 9 drone ship (`falcon9_asds.toml`): deck 32.8819 / -76.1490 -> 33.2240 / -75.7724 deg [D] (the hidden
+  "nominal impact point" probe: separation T+150.4 s at 75.3 km, 8249 km/h, 30.7 deg path - Starlink 15-25: 60 km,
+  ~25 deg; ~43 km further). The widening below stays needed with the Mach-dependent limit (the deck moved only 1.5 km
+  from the scalar limit's 33.2139 / -75.7839): the higher, steeper arc comes from the faster stack (open discrepancy
+  above) and the 13 deg kick, not from the q limit. Mission
   landed 0.00 m off; entry burn T+429 s, landing burn T+514 s at 3.03 km / 274 m/s / 12.0 t (Starlink 15-25: T+364 /
   476 s; bounds 25 -> 75 / 50 s: the 13 deg kick and the higher arc - Task 3 optimises the kick).
-- CRS-35 check (`test_falcon9_ascent`): MECO T+132 s / 59.0 km / 6402 km/h (recorded 137 / 56.6 / 6441, within the
-  10 % bounds); T+60 / 120 s 1359 / 5291 km/h (recorded 1188 / 4672).
+- CRS-35 check (`test_falcon9_ascent`): MECO T+131 s / 58.0 km / 6412 km/h (recorded 137 / 56.6 / 6441, within the
+  10 % bounds); T+60 / 120 s 1335 / 5316 km/h (recorded 1188 / 4672), now asserted within 15 %.
 - Super Heavy return on starship_leo ("Block 3 plans MECO ..."): boostback T+148-169 s from 273 t, apogee 103.1 km at
   T+221 s, landing-burn ignition T+383 s with 52.4 t (51.0 t planned): apogee and ignition bounds 15 -> 25 s (flight 14
   T+240 / ~398 s; MECO earlier with the faster stack).

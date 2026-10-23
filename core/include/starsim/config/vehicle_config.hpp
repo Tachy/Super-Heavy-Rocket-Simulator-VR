@@ -335,8 +335,9 @@ struct StageConfig {
     double fairing_mass_kg = 0.0;
     double jettison_after_separation_kg = 0.0;
     // A first stage's structural dynamic-pressure limit: the ascent guidance throttles the stack to hold q at or below
-    // it (gnc::PitchProgram::max_dynamic_pressure_pa). 0: no limit.
-    double max_dynamic_pressure_pa = 0.0;
+    // it (gnc::PitchProgram::max_dynamic_pressure_by_mach). {mach, pa} points, increasing Mach, linear between them and
+    // held beyond the ends (TOML max_dynamic_pressure_pa: one number = one point, or [[mach, pa], ...]); empty: no limit.
+    std::vector<std::pair<double, double>> max_dynamic_pressure_by_mach;
     // A first stage's operational ascent throttle (gnc::PitchProgram::max_ascent_throttle): the ascent never commands
     // more; the engines' rating stays their capability for every other burn. 1: full thrust.
     double max_ascent_throttle = 1.0;

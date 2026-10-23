@@ -16,12 +16,13 @@ fairing = true
 
 [drone_ship]
 id = "asds_atlantic"
-latitude_deg = 33.2139          # [D] nominal impact point of this mission's first stage, predicted 10 s after the separation
-                                # (separation T+150.7 s, 75.1 km, 8245 km/h, 30.6 deg) with drag and the finite entry burn,
+latitude_deg = 33.2240          # [D] nominal impact point of this mission's first stage, predicted 10 s after the separation
+                                # (separation T+150.4 s, 75.3 km, 8249 km/h, 30.7 deg) with drag and the finite entry burn,
                                 # no steering (test "... nominal impact point ..."). History: 32.9272 / -76.0990 before the
-                                # staging sequence, 32.8819 / -76.1490 with it (separation T+156.6 s); now the max-Q limit
-                                # replaces the CRS-35 throttle schedule (its ~95 % after the bucket): ~42 km further
-longitude_deg = -75.7839
+                                # staging sequence, 32.8819 / -76.1490 with it (separation T+156.6 s); now the Mach-
+                                # dependent q limit replaces the CRS-35 throttle schedule (full thrust after the transonic
+                                # hold, as the gauge shows): a higher, steeper arc, ~43 km further
+longitude_deg = -75.7724
 heading_deg = 45.0              # [E] long axis along the ground track
 sea_height_m = -35.0            # [E] geoid off the Carolinas (EGM2008 ~-35 m)
 

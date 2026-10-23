@@ -318,8 +318,24 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     s.payload_mass_kg = doc.number_or(t, "payload_mass_kg", 0.0);
     s.fairing_mass_kg = doc.number_or(t, "fairing_mass_kg", 0.0);
     s.jettison_after_separation_kg = doc.number_or(t, "jettison_after_separation_kg", 0.0);
-    s.max_dynamic_pressure_pa = doc.number_or(t, "max_dynamic_pressure_pa", 0.0);
-    if (s.max_dynamic_pressure_pa < 0.0) doc.fail("max_dynamic_pressure_pa must be >= 0 (0: no limit)");
+    if (const auto* points = t["max_dynamic_pressure_pa"].as_array()) {  // [[mach, pa], ...]
+        for (const auto& node : *points) {
+            const auto* pair = node.as_array();
+            const auto mach = pair && pair->size() == 2 ? (*pair)[0].value<double>() : std::nullopt;
+            const auto pa = pair && pair->size() == 2 ? (*pair)[1].value<double>() : std::nullopt;
+            if (!mach || !pa || !(*mach >= 0.0) || !(*pa > 0.0) || !std::isfinite(*mach) || !std::isfinite(*pa)) {
+                doc.fail("max_dynamic_pressure_pa entries must be [mach >= 0, pa > 0]");
+            }
+            if (!s.max_dynamic_pressure_by_mach.empty() && !(*mach > s.max_dynamic_pressure_by_mach.back().first)) {
+                doc.fail("max_dynamic_pressure_pa Mach numbers must increase");
+            }
+            s.max_dynamic_pressure_by_mach.emplace_back(*mach, *pa);
+        }
+    } else if (t.contains("max_dynamic_pressure_pa")) {
+        const double pa = doc.number(t, "max_dynamic_pressure_pa");
+        if (!(pa > 0.0)) doc.fail("max_dynamic_pressure_pa must be > 0 (left out: no limit)");
+        s.max_dynamic_pressure_by_mach.emplace_back(0.0, pa);
+    }
     s.max_ascent_throttle = doc.number_or(t, "max_ascent_throttle", 1.0);
     if (!(s.max_ascent_throttle > 0.0) || s.max_ascent_throttle > 1.0) doc.fail("max_ascent_throttle must be in (0, 1]");
     s.radiation_pressure_coefficient = doc.number_or(t, "radiation_pressure_coefficient", 1.3);

@@ -192,6 +192,11 @@ TEST_CASE("Falcon 9 ascent follows the CRS-35 webcast telemetry", "[gnc][validat
     std::printf("[validation] CRS-35 MECO: recorded T+137 s, 56.6 km, 6441 km/h; simulated T+%.0f s, %.1f km, %.0f km/h\n",
                 a.meco_s, a.meco_altitude_km, a.meco_speed_mps * 3.6);
     REQUIRE(a.state == sim::AutopilotState::Orbit);
+    // Open discrepancy (docs/subsystems.md "Ascent trajectory and staging", Task 6 validates the ascent): at the
+    // gauge's rated flow the simulated stack is faster than CRS-35 from the start (T+30 s +9 %); measured with the
+    // Mach-dependent q limit +12.4 % at T+60 s, +13.8 % at T+120 s. The bound catches a further regression.
+    CHECK(std::abs(profile[1].speed_mps * 3.6 / recorded[1].speed_kmh - 1.0) < 0.15);
+    CHECK(std::abs(profile[3].speed_mps * 3.6 / recorded[3].speed_kmh - 1.0) < 0.15);
     CHECK(std::abs(a.meco_s / 137.0 - 1.0) < 0.1);
     CHECK(std::abs(a.meco_altitude_km / 56.6 - 1.0) < 0.1);
     CHECK(std::abs(a.meco_speed_mps * 3.6 / 6441.0 - 1.0) < 0.1);
