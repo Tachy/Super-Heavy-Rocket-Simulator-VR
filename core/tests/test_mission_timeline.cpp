@@ -261,6 +261,7 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     std::optional<time::Epoch> meco_at_30, separation_at_30;
     PredictionTrack meco_prediction, seco_prediction;
     std::optional<time::Epoch> kick_end;  // the open loop's pitch kick has ended
+    int predicted_before_kick_end = 0;    // samples with a MECO / separation / upper ignition forecast before it
     while (session.epoch() - t0 < 900.0 && !find_event(t, MissionEventKind::Seco)) {
         if (const auto* lifted = find_event(t, MissionEventKind::Liftoff);
             lifted && !meco_at_30 && session.epoch() - lifted->epoch >= 30.0) {
@@ -271,6 +272,11 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
         seco_prediction.sample(predicted_of(t, MissionEventKind::Seco), session.epoch());
         if (const auto* g = session.ascent_guidance(); g && !kick_end && g->kick_start_epoch()) {
             kick_end = *g->kick_start_epoch() + g->program().kick_duration_s;
+        }
+        if (!kick_end || session.epoch() - *kick_end < 0.0) {  // from T+0 to the kick's end: no booster forecast yet
+            for (const auto kind : {MissionEventKind::Meco, MissionEventKind::StageSeparation, MissionEventKind::Ignition}) {
+                if (predicted_of(t, kind)) ++predicted_before_kick_end;
+            }
         }
         const bool upper = session.autopilot().state == sim::AutopilotState::UpperStage;
         const auto& g = session.autopilot().guidance;  // single ticks at the cutoff
@@ -328,9 +334,11 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     CHECK(std::abs(*meco_at_30 - meco->epoch) <= 8.0);
     CHECK(std::abs(*separation_at_30 - separation->epoch) <= 8.0);  // hot staging: the ship's start-up after the MECO
     // Ascent Task 5 (the planned kick 14.85 deg instead of 14): during the vertical rise and the kick the return's MECO
-    // plan from the near-vertical state swings (+10 .. +96 s); from the kick's end on the bound holds as before.
+    // plan from the near-vertical state swings (+10 .. +96 s); from the kick's end on the bound holds as before. The
+    // booster's forecasts are therefore withheld until the kick has ended (final review item 1).
     REQUIRE(kick_end);
-    CHECK(meco_prediction.max_error_within_s(meco->epoch, meco->epoch - *kick_end) <= 9.0);
+    CHECK(predicted_before_kick_end == 0);
+    CHECK(meco_prediction.max_error_within_s(meco->epoch, 1e9) <= 9.0);  // every sample shown
     CHECK(meco_prediction.max_error_within_s(meco->epoch, 3.0) <= 1.0);
     // PEG: -1.94 s at the first closed-loop tick, within 0.29 s over the last 120 s, +0.24 s at the end.
     REQUIRE(seco_prediction.first);

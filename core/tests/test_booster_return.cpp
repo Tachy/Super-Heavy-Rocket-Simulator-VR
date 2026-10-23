@@ -31,8 +31,8 @@ constexpr double deg = constants::deg_to_rad;
 // used here as the cap on the Block 3 booster's propellant at landing-burn ignition.
 constexpr double faa_landing_propellant_kg = 74.0e3;
 
-// The flight-like ascent: mission starship_leo (booster throttle of flights 13 / 14, kick 14 deg, MECO planned for the
-// return to the Starbase tower). The default pitch program at full thrust cuts off at ~97 km climbing at 1.7 km/s,
+// The flight-like ascent: mission starship_leo (the operational throttle and the max-Q limit of the vehicle file, the
+// kick planned before the launch - 14.85 deg -, MECO planned for the return to the Starbase tower). The default pitch program at full thrust cuts off at ~97 km climbing at 1.7 km/s,
 // which leaves the boostback little to turn around (~1.5 km/s instead of ~2.2).
 void start_flight_like_ascent(sim::FlightSession& session, time::Epoch t0) {
     sim::start_ascent_mission(session, config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo"), STARSIM_CONFIG_DIR,

@@ -96,7 +96,7 @@ func _process(delta: float) -> void:
 	var mission := sim.mission_display_name() if active else ""
 	if mission == "" and active:  # no mission name configured: the viewed (else the controlled) vehicle's
 		mission = sim.body_display_name(index if index >= 0 else sim.controlled_index())
-	if active and sim.autopilot_status().get("planning", false):
+	if sim.autopilot_status().get("planning", false):  # also a mission start planned before its vehicle is placed
 		mission = FlightController.PLANNING_EVENT  # the countdown holds while the onboard computer plans
 	show_clock(timeline, now, mission)
 	_update_timeline(timeline, now, delta)

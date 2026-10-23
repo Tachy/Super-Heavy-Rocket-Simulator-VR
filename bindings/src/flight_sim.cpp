@@ -1,6 +1,7 @@
 #include "flight_sim.hpp"
 
 #include <cmath>
+#include <optional>
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
@@ -25,6 +26,32 @@ constexpr size_t max_kept_commands = 1000;  // [E] like the runner's results: ol
 
 godot::Vector3 to_godot(const math::Vec3& v) { return {v.x, v.y, v.z}; }
 time::Epoch epoch(double tdb_s) { return time::Epoch::from_tdb_seconds_past_j2000(tdb_s); }
+
+// The snapshot's planning flag while a command plans a launch: cleared on every exit, a throw included.
+class PlanningFlag {
+public:
+    explicit PlanningFlag(bool& flag) : flag_(flag) { flag_ = true; }
+    ~PlanningFlag() { flag_ = false; }
+    PlanningFlag(const PlanningFlag&) = delete;
+    PlanningFlag& operator=(const PlanningFlag&) = delete;
+
+private:
+    bool& flag_;
+};
+
+// Missions that may stand on the pad while the onboard computer plans their ascent (sim::engage_planned_ascent).
+bool may_plan_ascent(config::MissionKind kind) {
+    using K = config::MissionKind;
+    switch (kind) {
+        case K::Ascent:
+        case K::IssLaunch:
+        case K::DepotLaunch:
+        case K::TankerFlight:
+        case K::HlsRefuel:
+        case K::RefuellingCampaignFlown: return true;
+        default: return false;
+    }
+}
 
 }  // namespace
 
@@ -140,12 +167,12 @@ double FlightSim::planning_s() const { return runner_ ? runner_->busy_s() : 0.0;
 
 FlightSim::Outcome FlightSim::engage_planned(sim::FlightSession& session, const gnc::AscentTarget& target) {
     const bool clamped = session.active() && session.body(session.controlled_index()).clamped();
+    std::optional<PlanningFlag> planning;
     if (clamped) {
-        context_.planning = true;
+        planning.emplace(context_.planning);
         observe(session, session.epoch());  // "Startvorbereitung": the pad and the planning flag while the plan runs
     }
     const auto reason = session.engage_ascent_autopilot(target);
-    context_.planning = false;
     return Outcome{reason.empty(), godot::String::utf8(reason.c_str())};
 }
 
@@ -182,7 +209,15 @@ int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, 
     return static_cast<int64_t>(post("start_mission", [this, id, tdb_s, wait_on_pad](sim::FlightSession& session) {
         sim::StartOptions options;
         options.wait_on_pad = wait_on_pad;
+        // a launch from the pad plans its ascent inside sim::start_mission (seconds to ~45 s): the planning flag is
+        // published first ("Startvorbereitung" on the session as it stands - the call places the vehicle)
+        std::optional<PlanningFlag> planning;
+        if (may_plan_ascent(config::mission_kind(config_dir_, id))) {
+            planning.emplace(context_.planning);
+            observe(session, session.epoch());
+        }
         const auto s = sim::start_mission(session, config_dir_, id, epoch(tdb_s), time_, options);
+        planning.reset();
         context_.site_id = godot::String::utf8(s.site_id.c_str());
         context_.mission_display_name = godot::String::utf8(config::mission_display_name(config_dir_, id).c_str());
         context_.mission_start_tdb_s = s.epoch.tdb_seconds_past_j2000();

@@ -475,6 +475,8 @@ std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& s
     s->crew_escape_state = build_crew_escape_state(session);
     s->mission_timeline = build_mission_timeline(session, epoch);
     s->moon_terrain = session.moon_terrain_shared();
+    // a mission start plans its launch before the session holds the vehicle: the flag also without a flight
+    s->autopilot_status["planning"] = context.planning;
     if (!s->active) return s;
     s->mission_time_s = session.mission_time_s();
     s->controlled_index = static_cast<int>(session.controlled_index());

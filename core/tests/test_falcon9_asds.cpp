@@ -527,9 +527,9 @@ TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage lan
     CHECK(landing_h < 4000.0);
     CHECK(std::abs(landing_v - 270.0) < 40.0);
     // Timeline [D] of Starlink 15-25: entry burn T+364 s, landing burn T+476 s. Ascent Task 2 (the max-Q limit instead
-    // of the CRS-35 schedule's ~95 % after the bucket, the 13 deg kick kept): separation at 75 km on a 30.6 deg path
-    // (Starlink 15-25: 60 km, ~25 deg) - the higher arc puts entry burn and landing burn at T+429 / T+514 s (bounds
-    // 25 -> 75 / 50 s; Task 3 optimises the kick)
+    // of the CRS-35 schedule's ~95 % after the bucket, then still the mission's fixed 13 deg kick): separation at 75 km
+    // on a 30.6 deg path (Starlink 15-25: 60 km, ~25 deg) - the higher arc put entry burn and landing burn at T+429 /
+    // T+514 s (bounds 25 -> 75 / 50 s). Since Task 5 the kick is planned before the launch (13.93 deg).
     CHECK(std::abs(entry_s - 364.0) < 75.0);
     CHECK(std::abs(landing_s - 476.0) < 50.0);
 }

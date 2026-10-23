@@ -228,6 +228,15 @@ TEST_CASE("A repeated request is answered from the memo", "[sim][ascent_planner]
     CHECK(second.feasible);
     CHECK(second.kick_angle_rad == first.kick_angle_rad);
     CHECK(second.upper_propellant_at_seco_kg == first.upper_propellant_at_seco_kg);
+
+    // the same request from a session with another gravity model is planned anew (the trials fly that model)
+    environment::PointMassGravityConfig no_j2;
+    no_j2.earth_j2 = false;
+    const spice::SpiceEphemeris other_ephemeris;  // ("ephemeris" names the namespace here)
+    sim::FlightSession other(other_ephemeris, earth(), STARSIM_CONFIG_DIR, no_j2);
+    const auto third = sim::plan_ascent_profile(other, request);
+    CHECK(third.trial_flights > 0);
+    CHECK(third.feasible);
 }
 
 // Task 4: the onboard computer chooses the booster recovery, refuses unreachable launches and flies due east when the

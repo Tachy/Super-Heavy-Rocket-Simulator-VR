@@ -108,6 +108,10 @@ AscentProfile plan_ascent_profile(const FlightSession& like, const AscentProfile
 //    ground track; neither: refused.
 // A plan is feasible only when every trial checked the return at MECO for real: a finite propellant plan and, with a
 // boostback, its Lambert arc found (BoosterReturnGuidance::boostback_delta_v_mps) - a failed arc counts no boostback.
+// What the RTLS / catch reserve holds is the MECO plan's: the stage's landing_propellant_kg plus run-down, flip and the
+// boostback by the rocket equation on the Lambert arc with boostback_loss_fraction on top - not a flown return. The Lambert-arc
+// check itself is weak (an arc is found for almost any MECO state); a return that does not fit shows as an early MECO
+// (the plan keeps more propellant) and the trial then fails the orbit check.
 // request.recovery is ignored (chosen here); the result carries the recovery and the target flown.
 AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest request);
 

@@ -63,6 +63,16 @@ struct Comparison {
 };
 void print(const std::string& flight, const Comparison& c);
 
+// [E] Margin of an allowance over its measured gap: a regression beyond the documented discrepancy fails.
+inline constexpr double allowance_margin = 0.02;
+// One recorded sample's documented gaps (|simulated / recorded - 1| as measured, 0 where the model follows the flight
+// within the readings): each sample gates with its own allowance (gap + allowance_margin), not with a band's.
+struct SampleGap {
+    double t_s = 0.0;
+    double speed = 0.0, altitude = 0.0;
+};
+inline double allowance(double gap) { return gap > 0.0 ? gap + allowance_margin : 0.0; }
+
 // The stack's speed (altitude) at display time `t_s` of `table` against the simulation at t_s - time_base_s (the dial
 // shows the state time_base_s late: the speed and the altitude dial have their own, liftoff_time.py), with the reading
 // tolerances from the local rates.

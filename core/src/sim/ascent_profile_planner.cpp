@@ -235,6 +235,8 @@ std::string memo_key(const FlightSession& like, const AscentProfileRequest& r) {
     key << like.config_dir().string() << '|' << r.vehicle_id << '|' << r.site_id << '|' << r.heading_rad << '|'
         << r.target.periapsis_altitude_m << '|' << r.target.apoapsis_altitude_m << '|' << r.target.inclination_rad << '|'
         << r.target.northerly << '|' << r.payload_kg << '|' << r.fairing << '|';
+    const auto& g = like.gravity().config();  // the trials fly `like`'s gravity model
+    key << static_cast<int>(g.central_body) << ',' << g.earth << ',' << g.moon << ',' << g.sun << ',' << g.earth_j2 << '|';
     if (r.payload) {
         key << r.payload->vehicle_id << ',' << r.payload->separation_delay_s << ',' << r.payload->separation_dv_mps << ','
             << r.payload->nose_cone_open_s;

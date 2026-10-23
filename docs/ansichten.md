@@ -201,8 +201,9 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   Ereignis) **"Startvorbereitung: Bahn wird berechnet"**; danach läuft der Countdown weiter. Ist das Ziel mit der
   Bergung nicht erreichbar, bleibt das Fahrzeug auf der Rampe, der Autopilot aus, und die Meldung lautet
   **"Start abgelehnt: <Grund>"** (z. B. "Start abgelehnt: Kein Fangturm am Startplatz.", "Ziel mit Booster-Rückkehr
-  nicht erreichbar (...)"). Beim Missionsstart (`start_mission`) erscheint die Anzeige noch nicht (die Uhr steht
-  trotzdem, bis der Plan da ist).
+  nicht erreichbar (...)"). Beim Missionsstart (`start_mission` einer Mission, die von der Rampe startet) erscheint
+  die Anzeige ebenso, schon bevor das Fahrzeug zu sehen ist: Platzierung und Planung laufen in einem Befehl, das
+  Fahrzeug erscheint erst mit dem fertigen Plan.
 
 ### Weitere Außenansichten
 

@@ -40,7 +40,8 @@ func set_pointer(texture: Texture2D, size_px: Vector2) -> void:
 
 
 func move_pointer(cursor_px: Vector2) -> void:
-	material_override.set_shader_parameter("pointer_px", cursor_px)
+	# the pointer texture's origin, so that the arrow's tip (inset in its texture) lies on the cursor
+	material_override.set_shader_parameter("pointer_px", cursor_px - VrPanelMouse.Pointer.TIP)
 
 
 ## Sphere section around the origin: azimuth +-H_FOV/2, elevation from the 16:9 span, front faces towards the origin.

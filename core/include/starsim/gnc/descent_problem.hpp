@@ -124,8 +124,10 @@ struct DescentWeights {
     double corridor_violation = 10.0;  // [E] per metre outside the catch corridor, per node (~100 t of propellant)
     double final_lateral_time_s = 2.0;  // [E] lateral speed counts as the offset it builds up in this time
     // [E] per 1e4 kg of the soft reserve used (DescentLimits::soft_reserve_kg): 100x the propellant's own weight, so a
-    // plan draws on the reserve only when its target is out of reach above the floor (and not to trade it for lateral
-    // precision: 1 m of final-set offset at one node is worth 1 kg of reserve), 10x below the virtual control's.
+    // plan draws on the reserve mainly when its target is out of reach above the floor; 10x below the virtual
+    // control's. Against the lateral penalty the weights break even at 1 kg of reserve per metre of final-set offset at
+    // one node (final_lateral 0.01 per m and node, reserve_use 0.01 per kg): a plan does trade reserve for lateral
+    // precision where 1 kg removes more than 1 m-node of offset.
     double reserve_use = 100.0;
 };
 

@@ -2,8 +2,8 @@
 
 The tables' t_s is the webcast clock (T+0 = the announced liftoff). A rocket released at full thrust accelerates at
 once (T/W - 1) g, but the displayed speed of every Block 3 / Falcon 9 table stays at 0 until T+2-3 s and its early
-rise extrapolates to zero only at T+3.4-4.1 s: the telemetry graphics show the state ~3 s late (or the clock leads the
-release). A simulation released at its T+0 is compared at t_s - delta.
+rise extrapolates to zero only at T+3.24-3.50 s (measured: flight 13 3.24, Starlink 15-25 3.26, CRS-35 3.42, flight 14
+3.50 s): the telemetry graphics show the state ~3.4 s late (or the clock leads the release). A simulation released at its T+0 is compared at t_s - delta.
 
   python tools/telemetry/liftoff_time.py <table.csv> [--simulated sim.csv] [--from-mps 8] [--to-mps 40]
 

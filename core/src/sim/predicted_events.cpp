@@ -218,10 +218,18 @@ void add_upper_ignition(const FlightSession& s, Collector& c, size_t index, time
 // Ascent: the booster's cutoff by the autopilot's own criterion run forward (the propellant above the cutoff
 // propellant, burned under the max-Q limiter), the staging sequence's separation and upper-stage ignition from it
 // (StagingSequence), the upper stage's cutoff by the closed loop.
+// The booster's predictions start when the open loop's pitch kick has ended: the cutoff threshold is the return's live
+// "MECO now" plan held constant over the forecast, and from the near-vertical state of the rise and the kick that plan
+// swings (MECO forecasts up to 96 s late); from the kick's end on the forecast holds its bound.
 void add_ascent(const FlightSession& s, Collector& c) {
     const size_t i = s.controlled_index();
     const auto state = s.autopilot().state;
     if (state == AutopilotState::Booster) {
+        const auto* guidance = s.ascent_guidance();
+        if (!guidance || !guidance->kick_start_epoch() ||
+            s.epoch() - *guidance->kick_start_epoch() < guidance->program().kick_duration_s) {
+            return;
+        }
         const auto& cutoff_kg = s.booster_cutoff_propellant_kg();
         if (!cutoff_kg) return;
         const auto& vehicle = s.body(i).vehicle();

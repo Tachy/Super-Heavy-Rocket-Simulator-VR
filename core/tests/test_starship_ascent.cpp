@@ -41,16 +41,18 @@ constexpr double recorded_meco_uncertainty_s = 0.75;
 constexpr double recorded_seco_display_s = 506.5;
 constexpr double recorded_seco_uncertainty_s = 1.0;
 
-// Open discrepancies (docs/subsystems.md "Ascent trajectory and staging", Task 6), as fractions of the recorded value
-// (measured + ~2 % [E]: a regression beyond the documented gap fails). Up to max-Q the model follows the flight within
-// the readings (allowance 0: T+30 s -0.9 % speed, -2.1 % altitude). From max-Q (the recorded q holds at 38-39 kPa from
-// T+58 s display, peak_dynamic_pressure.py) flight 14 throttles below the operational throttle (gauge flow 0.78-0.90 of
-// the rated against our 0.88: our q peaks at 38.7 kPa, under the 38.9 kPa limit, so our limiter never throttles) and one
-// centre engine is out from T+76 s (32 of 33, not modelled): T+60 / 90 / 120 s +1.7 / +6.9 / +9.0 % fast, +0.6 / +7.4 /
-// +11.2 % high.
-constexpr double max_q_hold_display_s = 58.0;
-constexpr double after_max_q_speed_allowance = 0.11;
-constexpr double after_max_q_altitude_allowance = 0.13;
+// Open discrepancies (docs/subsystems.md "Ascent trajectory and staging", Task 6), per recorded sample as fractions of
+// the recorded value (test::allowance: the measured gap + test::allowance_margin; a regression beyond it fails). Up to
+// max-Q the model follows the flight within the readings (gap 0: T+30 s -0.9 % speed, -2.1 % altitude). From max-Q (the
+// recorded q holds at 38-39 kPa from T+58 s display, peak_dynamic_pressure.py) flight 14 throttles below the
+// operational throttle (gauge flow 0.78-0.90 of the rated against our 0.88: our q peaks at 38.7 kPa, under the 38.9 kPa
+// limit, so our limiter never throttles) and one centre engine is out from T+76 s (32 of 33, not modelled).
+constexpr test::SampleGap sample_gaps[] = {
+    {30.0, 0.0, 0.0},
+    {60.0, 0.017, 0.006},  // +1.7 % fast, +0.6 % high
+    {90.0, 0.069, 0.074},  // +6.9 %, +7.4 %
+    {120.0, 0.090, 0.112},  // +9.0 %, +11.2 %
+};
 // MECO: ours comes from the catch's return plan (294 t left in the booster); flight 14 staged with ~500 t by its gauge
 // (not followed after staging, decision 2026-10-14) after the slower ascent above: T+129.8 against T+136.0 s (-4.6 %),
 // 6559 against 5943 km/h (+10.4 %), 52.5 against 51.0 km (+3.0 %), path 30.3 against 27.8 deg.
@@ -88,11 +90,10 @@ TEST_CASE("Starship ascent to flight 14's insertion orbit against its webcast te
     CHECK(std::abs(a.inclination_deg - 30.5) < 0.1);
 
     // every recorded sample of the booster phase (engine-outs not modelled: flight 14's 33rd engine is out from T+76 s)
-    for (double t : {30.0, 60.0, 90.0, 120.0}) {
-        const bool after_max_q = t >= max_q_hold_display_s;
-        const auto speed = test::compare_speed(table, a, t, time_base_s, after_max_q ? after_max_q_speed_allowance : 0.0);
-        const auto altitude = test::compare_altitude(table, a, t, altitude_time_base_s,
-                                                     after_max_q ? after_max_q_altitude_allowance : 0.0);
+    for (const auto& gap : sample_gaps) {
+        const auto speed = test::compare_speed(table, a, gap.t_s, time_base_s, test::allowance(gap.speed));
+        const auto altitude =
+            test::compare_altitude(table, a, gap.t_s, altitude_time_base_s, test::allowance(gap.altitude));
         test::print("flight 14", speed);
         test::print("flight 14", altitude);
         CHECK(speed.within());
@@ -102,6 +103,9 @@ TEST_CASE("Starship ascent to flight 14's insertion orbit against its webcast te
     // MECO: the recorded state at the recorded MECO against the simulated state at the simulated MECO. The last
     // readings before the staging gap: speed at MECO; the altitude dial shows the state `lag` earlier, compared with the
     // simulation that much before its MECO (the path angle from its rate and the speed of that instant).
+    // Reading tolerance at MECO: rate x 2 x uncertainty - the last reading lies at the lower end of the MECO's interval
+    // (T+139.5 +- 0.75 s), so the stack may still accelerate over the whole interval after it (CRS-35 reads at the
+    // centre of its MECO interval: rate x 1 x uncertainty).
     const double last_reading_s = recorded_meco_display_s - recorded_meco_uncertainty_s;
     const double lag = altitude_time_base_s - time_base_s;
     const auto r = test::recorded_stack(table, last_reading_s);

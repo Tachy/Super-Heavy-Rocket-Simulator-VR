@@ -85,7 +85,9 @@ AscentLaunch start_ascent_mission_for_liftoff(FlightSession& session, const conf
     if (liftoff - pad < lead_s) {
         if (fixed_liftoff) {
             pad = liftoff - lead_s;
-            profile = start_ascent_mission(session, mission, config_dir, pad);  // the plan from the memo
+            // placed again: the plan from the memo - except a mission with a [propellant] load, which is never
+            // memoised (planned as it stands) and is planned a second time here
+            profile = start_ascent_mission(session, mission, config_dir, pad);
         } else {
             t0 = pad + lead_s;
         }

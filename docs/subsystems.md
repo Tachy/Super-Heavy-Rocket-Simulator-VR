@@ -1815,16 +1815,22 @@ Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure dat
   has; only from what the guidance computes or its own criterion run forward - no nominal profiles), with the kind and
   body serial the event will be recorded with; an event a body has once (MECO, separation, SECO, Boostback, landing
   burn, parachutes, catch / landing / splashdown) is no longer predicted once recorded for that body:
-  - MECO and stage separation (AutopilotState::Booster, from liftoff): the booster's propellant above the cutoff
+  - MECO and stage separation (AutopilotState::Booster, from the end of the open loop's pitch kick - kick start +
+    `kick_duration_s`; final review: the cutoff threshold is the return's live "MECO now" plan held constant over the
+    forecast, and from the near-vertical state of the rise and the kick that plan swings - forecasts up to 96 s late in
+    the first ~16 s -, so MECO, separation and the upper ignition are withheld until the kick has ended; the timeline
+    test asserts none of them is shown before): the booster's propellant above the cutoff
     propellant the autopilot set on its last tick (`booster_cutoff_propellant_kg`: the return's need or the reserve) at
     the stage's actual flow now scaled with the throttle the open loop will command - since ascent Task 2 the
     operational cap and the max-Q limiter run forward on a point mass (`booster_burn_time_s` in `predicted_events.cpp`:
     the open loop's vertical rise, kick and gravity turn, the vehicle's drag table, US76, central gravity, 0.5 s steps
-    [E]; free launches: within 0.6 s (Starship) / 2.0 s (Falcon 9) of the flown MECO over the whole booster phase);
+    [E]; free launches: within 0.02 s (Starship) / 0.32 s (Falcon 9) of the flown MECO from the kick's end on,
+    final review; the first measurement was 0.6 / 2.0 s over the whole booster phase);
     the separation and the upper stage's ignition follow the staging sequence's timing (`separation_after_meco_s`,
     `upper_ignition_after_meco_s`; in the state Staging from the sequence's own epochs). Measured (ascent Task 2):
     starship_leo +5.0 s at T+30 s, at most 7.2 s within 120 s, 2.2 s within 10 s; Falcon 9 RTLS +7.9 s at T+30 s
-    (with the schedule: +7.0 / +7.4 s at T+30 s).
+    (with the schedule: +7.0 / +7.4 s at T+30 s). Final review (planned kick, shown from the kick's end):
+    starship_leo +5.59 s at T+30 s, at most 6.58 s over every shown sample, 2.21 s within 10 s.
     The prediction is late by the return's cutoff propellant, which grows with the downrange speed (the value of the
     moment is used). At the flow now alone it was +0.9 s at T+30 s by cancellation but 12 s (Starship) / 37 s
     (Falcon 9) off in the bucket. Not on the pad: the return's cutoff propellant is only planned in flight.
@@ -1980,14 +1986,20 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     32.2 kPa, at most 1.000 of the limit at its Mach (transonic hold at 29.6 kPa), lowest throttle 0.805, full thrust
     below 90 %; the free Starship (kick 10 deg, 0.88) peaks at 33.8 kPa (0.87 of the limit, never limited).
   - MECO forecast: the limiter and the cap run forward on a point mass (section "Mission timeline"); free launches
-    within 0.02 s (Starship) / 1.2 s (Falcon 9) over the booster phase ("MECO forecast follows the limiter").
+    within 0.02 s (Starship) / 0.32 s (Falcon 9) of the flown MECO over the booster phase from the kick's end, when the
+    forecast is first shown ("MECO forecast follows the limiter", re-measured in the final review; before the
+    suppression Falcon 9's samples during the rise and kick reached 1.2 s).
 - **Open discrepancy - Starship vs flight 14** (resolved up to max-Q in Task 6: the dials' time base and flight 14's
   booster load; see "Validation against flight 14 and CRS-35"): at the gauge's own flow the stack is faster than the flights (test
   "Starship ascent follows the webcast telemetry ...", flown with the recorded 500 t MECO): T+30 / 60 / 90 / 120 s
   2.3 / 10.2 / 24.9 / 47.4 km, 579 / 1516 / 3029 / 5313 km/h against 1.6 / 8.4 / 20.5 / 38.2 km, 515 / 1406 / 2772 /
   4848 km/h (+12.4 / +7.8 / +9.3 / +9.6 %); MECO T+126 s / 52.9 km / 5869 km/h against ~T+140 s / ~53 km / ~5950
-  km/h. Not tuned (bounds 0.12 -> 0.13 and 12 -> 15 s; Task 6 rewrites the check). The mass_estimate fit gives a
-  liftoff mass of 5542-5603 t (ours 5715 t) - the excess is in thrust per flow or drag, not mass.
+  km/h. Not tuned (bounds 0.12 -> 0.13 and 12 -> 15 s; Task 6 rewrites the check). The conclusion of that time ("the
+  excess is in thrust per flow or drag, not mass") did not hold: Task 6 found the dials' time base (3.50 s late, the
+  "+12 %" at T+30 s) and flight 14's propellant load (the mass_estimate fit's 5542-5603 t against our full 5715 t) as
+  the causes - with both the model follows flight 14 within the readings up to max-Q, no thrust or drag error is needed
+  there (section "Validation against flight 14 and CRS-35": the remaining gaps after max-Q are flight 14's throttling
+  and its engine out).
 - **Open discrepancy - Falcon 9 vs CRS-35** (review of Task 2; Task 6: the T+30 s excess was the dials' time base,
   the remaining gaps in "Validation against flight 14 and CRS-35"): `test_falcon9_ascent` "... CRS-35 webcast telemetry"
   T+30 / 60 / 90 / 120 s 529 / 1335 / 2864 / 5316 km/h against 485 / 1188 / 2474 / 4672 km/h (+9 / +12.4 / +15.8 /
@@ -2000,7 +2012,12 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   time of the tables.
 - **SCvx fresh plans** 30 -> 60 iterations [E] (`ScvxSettings::fresh_max_iterations`): the Falcon 9 ASDS MECO campaign
   case seed 107 (aero x0.91, ignition 3.8 km high, 1.3 km short, 14.8 t) had its first deck plan refused at 30 and
-  splashed down 172 m beside the deck; it converges in 42 and lands. Re-plans keep their 10.
+  splashed down 172 m beside the deck; it converges in 42 and lands. Re-plans keep their 10. Cost: the simulation
+  waits for a fresh plan, and one that does not converge is now refused after 60 iterations instead of 30 - twice the
+  wait before the abort / give-up path starts. Measured (final review, replay of
+  `falcon9_asds_seed117_741m.txt` as a fresh plan without the soft reserve: it never converges): ~25 ms per iteration,
+  refused after 1.58 s instead of 0.81 s (the simulation thread stands that long; a converging plan pays only its
+  own iterations, seed 107 42).
 
 ### Re-baselined reference numbers (Task 2)
 - Falcon 9 drone ship (`falcon9_asds.toml`): deck 32.8819 / -76.1490 -> 33.2240 / -75.7724 deg [D] (the hidden
@@ -2046,14 +2063,17 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   (`ship_landing_parameters`: both fractions below 0).
 - **Fix 1 - soft part of the reserve** (`DescentLimits::soft_reserve_kg`, `DescentWeights::reserve_use` 100 per 1e4 kg
   [E]): a plan may end that far below the floor at 100x the propellant's own weight (exact L1 penalty: zero when the
-  target is reachable above it; 1 m of final-set offset at one node is worth only 1 kg of reserve, so the lateral penalty
-  does not buy reserve; the virtual control stays 10x dearer); below it the floor is hard. Shares
+  target is reachable above it; the virtual control stays 10x dearer); below it the floor is hard. Against the
+  final-set lateral penalty (`final_lateral` 0.01 per m and node) the weights break even at 1 kg of reserve per metre
+  of offset at one node (correction, final review: the first wording said the lateral penalty did not buy reserve - it
+  does wherever 1 kg removes more than 1 m-node of offset; "Results" below: the ASDS plans spend the margin on it). Shares
   (`ScvxLandingParameters`): first plans 0; re-plans of the target `replan_reserve_fraction` 0.5 [E] - plans of a
   marginal burn sit on the floor, and a re-plan from a measured state slightly off the previous plan needs a little
   more; abort plans `abort_reserve_fraction` 1.0 [D] - the stage is given up, reaching the water is what matters. The
   741 m snapshot converges in 3 iterations, 101 kg into the reserve (fixture
   `tests/validation/fixtures/scvx/falcon9_asds_seed117_741m.txt`); the 848 m one stays on the floor.
-- **Fix 2 - one Falcon 9 gimbal allowance** (`[stage.recovery] landing_gimbal_fraction` 0.45 [D], the whole landing
+- **Fix 2 - one Falcon 9 gimbal allowance** (`[stage.recovery] landing_gimbal_fraction` 0.45 [E] - the derivation below
+  leaves a band 0.40-0.45, the value is chosen from it (final review); 0 in the file means the default; the whole landing
   burn, RTLS and drone ship; the default `DescentLimits::gimbal_fraction` 0.3 is Super Heavy's, from its catch
   campaign: 3 Raptors near minimum throttle, a limit cycle at 0.4). With the soft reserve alone seed 117 failed again at
   471 m - there the defect sits in the attitude at the start (the plan needs another tilt than the measured one:
@@ -2127,7 +2147,9 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   trial and its two neighbours (a Newton step on d(propellant)/d(kick), slope and curvature from the three trials),
   also when the best is the outermost (clamped to 1.618 x the spacing beyond it); golden section where the fit is
   convex or leaves the bracket and towards an infeasible neighbour; stop when the next step is < 0.1 deg [E]. Memoised
-  per process by the request without its liftoff epoch (the optimum does not depend on the hour).
+  per process by the request without its liftoff epoch (the optimum does not depend on the hour), with the `like`
+  session's gravity model in the key (final review: the trials fly that model; a session with another
+  `PointMassGravityConfig` gets its own plan).
 - Measured: Starship to 200 km / 26.5 deg (starship_leo's request) 14.85 deg, 88.5 t at SECO, 4 trials, 15-26 s wall
   (parallel test load / serial); the 1-deg sweep 6..22 deg peaks at 15 deg (88.5 t; 6 and 22 deg do not reach the
   orbit), refined at 0.2 deg at 14.8 deg (88.493 t) - smooth, no visible trial noise. MECO flight-path angle 31.2 deg;
@@ -2148,11 +2170,19 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     derivation), deck along the ground track there; its sea at -35 m [E] (geoid). The kick is searched with the ship at
     a provisional station 600 km [E] downrange (the MECO plan without a boostback does not depend on the ship; near the
     pad its deck would replace the ground). Neither feasible: refused.
+  - Limits (final review): the drone ship's station is not checked to lie at sea - there is no land mask until the
+    M8 terrain (an impact predicted over land would place the deck there). Without a feasible trial the search probes
+    the middle of the widest kick gap left and gives up once every gap is below 2.5 deg (`initial_step_rad`): a launch
+    whose feasible kick band is narrower than that and falls between the samples can be refused - conservative (never
+    a launch that cannot fly).
 - Recovery feasibility is checked for real in every trial (Task 3 review note): the session must return the stage
   (`returns_after_staging`), the MECO plan be finite, and with a boostback its Lambert arc be found from the stack's
   state at the last Booster tick (the trial single-ticks within two checks' propellant of the cutoff):
   `BoosterReturnGuidance::boostback_delta_v_mps` (split out of `meco_propellant_kg`, which counted a failed arc as no
-  boostback - finite, but not flyable).
+  boostback - finite, but not flyable). What the reserve holds is the MECO plan's: the stage's `landing_propellant_kg`
+  plus run-down, flip and the boostback by the rocket equation on the Lambert arc with `boostback_loss_fraction` on
+  top - no return is flown in the trials. The Lambert-arc check is weak (an arc is found for almost every MECO state);
+  a return that does not fit shows as an early MECO (more propellant kept) and the trial then fails the orbit check.
 - Measured (parallel test load): Falcon 9 CRS-35 class (12.5 t, 200 km / 51.6 deg, SLC-40) -> LZ-40, 11.57 deg, 2.2 t,
   4 trials, 11.7 s. Starlink class (16.5 t, 200 x 280 km / 53 deg, SLC-40): RTLS infeasible -> drone ship at 33.1419 N
   / 75.8444 W, heading 44.8 deg, kick 13.93 deg, 1.0 t, 15 trials, 35.6 s; the configured falcon9_asds station
@@ -2187,7 +2217,12 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   the plan, never the default `PitchProgram` (test "A free launch holds on the pad until the plan is in"). Refused:
   the command is not ok with the reason (game: "Start abgelehnt: Kein Fangturm am Startplatz."), the vehicle stays on
   its pad. Key P on a clamped stack plans the same way. `engage_ascent_autopilot(target, program)` flies a given
-  program (trial flights, studies, guidance tests).
+  program (trial flights, studies, guidance tests); re-engaged during a staging sequence of the controlled body
+  (joined, or separated before the upper ignition) it keeps the state Staging (final review: it set Booster, and the
+  joined stack would have cut off again). `FlightSim.start_mission` of a mission that launches from a pad (ascent,
+  iss_launch, depot_launch, tanker_flight, hls_refuel, the flown campaign) publishes the planning flag before
+  `sim::start_mission` (placement and planning are one call; the flag is in `autopilot_status()` also while the
+  session holds no flight yet) and clears it afterwards; the flag is a scope guard (cleared on a throw too).
 - **Orbit check of elliptic targets:** the trials judged every target on the radius flown over the next revolution;
   PEG inserts J2-aware only into circular targets and aims the osculating apsides otherwise, so the tankers'
   120 x 190 km reached 120 x 180 km flown and every trial was refused. An elliptic target is now judged on the
@@ -2200,7 +2235,8 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   - Mission timeline (`A Starship ascent records ...`): during the vertical rise and the kick the return's MECO plan
     from the near-vertical state swings (+10 .. +96 s at the planned 14.85 deg; at 14 deg it stayed within 9 s by
     chance); the whole-flight bound of 9 s now starts at the kick's end (T+30 s: +5.6 s, within 120 s before MECO the
-    swing ends ~T+16 s).
+    swing ends ~T+16 s). Final review: the forecast is not shown before the kick's end (first seen 109.2 s before MECO,
+    +5.19 s; at most 6.58 s off over every shown sample, 2.21 s within 10 s; T+30 s +5.59 s).
   - Windows: tanker_flight `insertion_s` 436.1 -> 432.2 s, `insertion_arc_deg` 11.93 -> 12.25; hls_refuel 421.4 ->
     415.7 s, 11.37 -> 11.78 deg (the flown ascents with their planned kicks).
   - Reference flights (`reference_flights.toml`, re-measured by the slow r5 flights): depot fill 69.6 -> 70.7 t;
@@ -2235,7 +2271,12 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   `core/tests/ascent_validation.*`, `STARSIM_ASCENT_DUMP=<dir>` writes the flown samples). Every recorded sample is
   asserted (T+30 / 60 / 90 / 120 s speed and altitude, MECO time / speed / altitude / path angle, SECO time): bound =
   reading tolerance (speed 1 km/h, altitude 0.05 km, +-0.25 s per reading and +-0.25 s time base, times the local
-  rate) + a named allowance per documented open discrepancy (measured + ~2 % [E]; 0 where the model follows).
+  rate) + a named allowance per documented open discrepancy (measured + ~2 % [E]; 0 where the model follows). Final
+  review: the T+30 / 60 / 90 / 120 s samples carry one allowance each (`test::SampleGap`: the measured gap +
+  `test::allowance_margin` 2 % [E]) instead of one band per phase, so each sample gates on its own gap. The MECO
+  reading tolerance is the local rate x 2 x the MECO's uncertainty on flight 14 (its last reading lies at the lower
+  end of the MECO interval, the stack may accelerate over the whole interval after it) and x 1 on CRS-35 (read at the
+  interval's centre).
 - **New mission key `[propellant]`** (`<stage id> = t`, `AscentMission::propellant_load_kg`): loaded before the engines
   start (`config::fill_tanks`; an unknown stage or more than the tanks hold is refused by `start_ascent_mission`); the
   request is then planned as it stands (not memoised). Flight 14: booster 3,533.2 t [D] (gauge 96.8 % of 3,650 t from

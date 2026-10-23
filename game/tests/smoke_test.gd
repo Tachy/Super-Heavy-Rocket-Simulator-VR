@@ -134,7 +134,17 @@ func _check_thread(config_dir: String, tdb: float) -> bool:
 func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	var f9 := FlightSim.new()
 	f9.setup(config_dir)
-	_check(_ok(f9, f9.start_mission("falcon9_rtls", tdb)), "Falcon 9 RTLS mission starts")
+	# the first launch planned in this process (no memo yet): the planning flag is published while start_mission plans,
+	# although the session holds no flight yet, and cleared afterwards
+	var rtls_id := f9.start_mission("falcon9_rtls", tdb)
+	var planning_seen := false
+	var wait_start := Time.get_ticks_msec()
+	while not planning_seen and Time.get_ticks_msec() - wait_start < 5000 and not f9.result(rtls_id).get("done", false):
+		planning_seen = f9.autopilot_status().get("planning", false)
+		OS.delay_msec(5)
+	_check(planning_seen, "start_mission of a pad launch publishes the planning flag while it plans")
+	_check(_ok(f9, rtls_id), "Falcon 9 RTLS mission starts")
+	_check(not f9.autopilot_status().get("planning", true), "the planning flag is cleared after start_mission")
 	var zone: Dictionary = f9.landing_zone()
 	_check(zone.get("present", false) and not zone.get("has_deck", true), "RTLS: landing zone without a deck")
 	_check(absf(float(zone.get("pad_radius_m", 0.0)) - 42.7) < 1e-9, "RTLS: LZ-40 pad radius from the config")

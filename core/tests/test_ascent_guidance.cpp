@@ -1,6 +1,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -15,6 +16,7 @@
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/spice/spice_adapters.hpp"
+#include "starsim/vehicle/vehicle.hpp"
 #include "test_support.hpp"
 
 using namespace starsim;
@@ -243,6 +245,71 @@ TEST_CASE("The q limit over Mach interpolates and holds beyond its ends", "[gnc]
     REQUIRE(p.max_dynamic_pressure_by_mach.size() == 1);
     CHECK(gnc::dynamic_pressure_limit_pa(p, 0.5) == Catch::Approx(38909.0));
     CHECK(gnc::dynamic_pressure_limit_pa(p, 2.0) == Catch::Approx(38909.0));
+}
+
+TEST_CASE("The ascent throttle cap of a program", "[gnc][ascent]") {
+    gnc::PitchProgram p;
+    CHECK(gnc::ascent_throttle_cap(p) == 1.0);  // unset: full thrust
+    p.max_ascent_throttle = 0.8;
+    CHECK(gnc::ascent_throttle_cap(p) == 0.8);
+    p.max_ascent_throttle = 1.3;
+    CHECK(gnc::ascent_throttle_cap(p) == 1.0);  // never above full
+    p.max_ascent_throttle = -0.5;
+    CHECK(gnc::ascent_throttle_cap(p) == 1.0);
+}
+
+TEST_CASE("The max-Q limiter law", "[gnc][ascent]") {
+    const double inf = std::numeric_limits<double>::infinity();
+    // nothing to limit: no limit, no air, (almost) no speed
+    CHECK(gnc::max_q_thrust_acceleration_mps2(0.0, 0.5, 0.0, 300.0, 0.0) == inf);
+    CHECK(gnc::max_q_thrust_acceleration_mps2(30e3, 0.0, 0.0, 300.0, 0.0) == inf);
+    CHECK(gnc::max_q_thrust_acceleration_mps2(30e3, 0.5, 0.0, 1.0, 0.0) == inf);
+    // at the limit in level air: the thrust cancels the other accelerations (q held)
+    const double rho = 0.5, v = 300.0, q = 0.5 * rho * v * v;  // 22.5 kPa
+    CHECK(gnc::max_q_thrust_acceleration_mps2(q, rho, 0.0, v, -12.0) == Catch::Approx(12.0));
+    // below it, climbing into thinner air: dq/dt = rho v a + v^2/2 drho/dt = (limit - q) / tau
+    const double limit = 30e3, drho = -1e-4, other = -12.0;
+    const double a = gnc::max_q_thrust_acceleration_mps2(limit, rho, drho, v, other);
+    const double speed_rate = a + other;
+    CHECK(rho * v * speed_rate + 0.5 * v * v * drho ==
+          Catch::Approx((limit - q) / gnc::max_q_time_constant_s));
+    CHECK(a == Catch::Approx((7500.0 + 4.5) / 150.0 + 12.0));  // by hand
+    // above it: the law asks for less thrust than the drag and gravity take
+    CHECK(gnc::max_q_thrust_acceleration_mps2(20e3, rho, 0.0, v, other) < -other);
+}
+
+TEST_CASE("The booster throttle for a thrust", "[gnc][ascent]") {
+    // a local engine table: 1 MN at full throttle in vacuum, throttle 0.4..1, 1 m^2 nozzle exit, on all nine engines of
+    // the first stage
+    auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    const std::string id = cfg.stages.front().engine_groups.front().engine_id;
+    auto& e = cfg.engines.at(id);
+    e.thrust_ref_n = 1e6;
+    e.isp_ref_s = 300.0;
+    e.reference_pressure_pa = 0.0;
+    e.nozzle_exit_area_m2 = 1.0;
+    e.throttle_min = 0.4;
+    e.throttle_max = 1.0;
+    vehicle::Vehicle v(cfg, STARSIM_CONFIG_DIR);
+    auto& engines = v.stages().front().engines;
+    REQUIRE(engines.size() == 9);
+    CHECK(gnc::booster_throttle_for_thrust(v, 4.5e6, 0.0) == 1.0);  // no engine producing thrust: their maximum
+    for (auto& engine : engines) {
+        engine.mode = vehicle::EngineMode::Running;
+        engine.spool = 1.0;
+    }
+    CHECK(gnc::booster_throttle_for_thrust(v, 4.5e6, 0.0) == Catch::Approx(0.5));
+    CHECK(gnc::booster_throttle_for_thrust(v, 1e6, 0.0) == Catch::Approx(0.4));   // the engines' minimum
+    CHECK(gnc::booster_throttle_for_thrust(v, 2e7, 0.0) == Catch::Approx(1.0));   // their maximum
+    // the ambient pressure on the nozzle exit: 9 x (0.7 MN - 0.1 MN) = 5.4 MN at 0.7
+    CHECK(gnc::booster_throttle_for_thrust(v, 5.4e6, 1e5) == Catch::Approx(0.7));
+    // spool: at half thrust build-up each engine gives half
+    for (auto& engine : engines) engine.spool = 0.5;
+    CHECK(gnc::booster_throttle_for_thrust(v, 2.25e6, 0.0) == Catch::Approx(0.5));
+    // one engine out: eight share the thrust
+    for (auto& engine : engines) engine.spool = 1.0;
+    engines.front().mode = vehicle::EngineMode::Off;
+    CHECK(gnc::booster_throttle_for_thrust(v, 4e6, 0.0) == Catch::Approx(0.5));
 }
 
 TEST_CASE("The ascent holds dynamic pressure at the vehicle limit", "[gnc][ascent]") {

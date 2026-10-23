@@ -80,13 +80,14 @@ func _push_at_cursor(event: InputEventMouse) -> void:
 	get_viewport().set_input_as_handled()
 
 
-## The mouse pointer's arrow, tip at the viewport's origin (the captured system cursor is not in the headset or the
-## mirror).
+## The mouse pointer's arrow, tip at TIP in its viewport (the captured system cursor is not in the headset or the
+## mirror); the panel places the texture at the cursor minus TIP (VrOverlayPanel.move_pointer).
 class Pointer:
 	extends Control
 
-	const SHAPE: Array[Vector2] = [Vector2(1, 1), Vector2(1, 23), Vector2(7, 18), Vector2(11, 27), Vector2(15, 25),
-			Vector2(11, 17), Vector2(18, 17)]  ## 1 px inset: the outline stays inside the pointer viewport
+	const TIP := Vector2(1, 1)  ## 1 px inset: the outline stays inside the pointer viewport
+	const SHAPE: Array[Vector2] = [TIP, Vector2(1, 23), Vector2(7, 18), Vector2(11, 27), Vector2(15, 25),
+			Vector2(11, 17), Vector2(18, 17)]
 
 	func _init() -> void:
 		name = "VrPointer"

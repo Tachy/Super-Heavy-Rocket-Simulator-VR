@@ -107,6 +107,15 @@ void FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target, con
             powered += !stage.config.payload && engines ? 1 : 0;
         }
         autopilot_.state = powered > 1 ? AutopilotState::Booster : AutopilotState::UpperStage;
+        // a staging sequence under way for this body (the joined stack, or the separated upper part before its
+        // ignition): Staging - the sequence ends it in UpperStage; Booster would cut the joined stack off again
+        if (staging_) {
+            const uint32_t serial = bodies_[controlled_].serial;
+            if (serial == staging_->stack_serial ? !staging_->separation_epoch
+                                                 : staging_->separation_epoch && serial == staging_->upper_serial) {
+                autopilot_.state = AutopilotState::Staging;
+            }
+        }
     }
 }
 

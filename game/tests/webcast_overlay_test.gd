@@ -15,6 +15,7 @@ func _initialize() -> void:
 	_test_label_layout()
 	_test_overlay()
 	_test_host()
+	_test_vr_pointer()
 	print("WEBCAST OVERLAY TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 
@@ -179,6 +180,17 @@ func _test_host() -> void:
 	_check(host.viewport.render_target_update_mode == SubViewport.UPDATE_ALWAYS, "updated every frame")
 	_check(host.overlay is WebcastOverlay and host.overlay.get_parent() == host.viewport, "overlay inside the viewport")
 	host.free()
+
+
+## VR pointer: the arrow's tip (inset in its texture) lands on the cursor, not 1 px beside it.
+func _test_vr_pointer() -> void:
+	_check(VrPanelMouse.Pointer.SHAPE[0] == VrPanelMouse.Pointer.TIP, "the arrow's first point is its tip")
+	var panel := VrOverlayPanel.new()
+	panel.material_override = VrOverlayPanel.build_material(null)
+	panel.move_pointer(Vector2(400.0, 300.0))
+	var origin: Vector2 = panel.material_override.get_shader_parameter("pointer_px")
+	_check(origin + VrPanelMouse.Pointer.TIP == Vector2(400.0, 300.0), "pointer tip at the cursor (origin %s)" % str(origin))
+	panel.free()
 
 
 func _check(condition: bool, message: String) -> void:

@@ -4,6 +4,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <optional>
@@ -124,7 +125,14 @@ TEST_CASE("Hot staging: the ship lights while joined and separates at thrust; th
     REQUIRE(ignition);
     CHECK(ignition->epoch == meco->epoch);  // the ship lights in the MECO's tick, joined
     CHECK(ignition->body_name == "Starship Block 3");
+    // separated as soon as the ship's engines are at thrust: after their start-up, at most one tick later
+    double startup_s = 0.0;
+    for (const auto& e : session.body(ship).vehicle().stages().front().engines) {
+        if (!e.auxiliary()) startup_s = std::max(startup_s, e.performance->config().startup_s);
+    }
+    REQUIRE(startup_s > 0.0);
     CHECK(separation->epoch - meco->epoch > 0.0);
+    CHECK(separation->epoch - meco->epoch <= startup_s + sim::FlightSession::tick_s + 1e-9);
 
     std::vector<double> relative_mps{along_track_mps(session, 0, ship)};
     for (int i = 1; i <= 5; ++i) {
@@ -189,4 +197,38 @@ TEST_CASE("A manual stage command during the sequence separates once", "[staging
     session.stage();  // the ship alone: a single stage, nothing to separate
     CHECK(session.body_count() == 2);
     CHECK(count(session.timeline(), MissionEventKind::StageSeparation) == 1);
+}
+
+TEST_CASE("Re-engaging the ascent autopilot during a staging sequence keeps it in Staging", "[staging]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    const double tick = sim::FlightSession::tick_s;
+    gnc::AscentTarget target{200e3, 200e3, 26.5 * constants::deg_to_rad, true};
+    gnc::PitchProgram program;
+    program.kick_angle_rad = 14.0 * constants::deg_to_rad;
+    for (const char* mission : {"starship_leo", "falcon9_rtls"}) {  // hot: joined; cold: the separated upper stage
+        sim::FlightSession session(staging_ephemeris(), staging_earth(), STARSIM_CONFIG_DIR);
+        sim::start_mission(session, STARSIM_CONFIG_DIR, mission, time.from_utc({2026, 10, 13, 10, 40, 0.0}), time);
+        const auto t0 = session.epoch();
+        while (session.epoch() - t0 < 400.0 && (session.autopilot().state == sim::AutopilotState::PreLaunch ||
+                                                session.autopilot().state == sim::AutopilotState::Booster)) {
+            session.advance_to(session.epoch() + 0.1, 1000);
+        }
+        REQUIRE(session.staging());
+        const bool hot = session.staging()->config.kind == config::StagingConfig::Kind::Hot;
+        if (!hot) {  // cold: on to the separation, the upper stage not yet lit
+            while (!session.staging()->separation_epoch) session.advance_to(session.epoch() + 1.5 * tick, 10);
+            REQUIRE(session.staging());
+            REQUIRE_FALSE(session.staging()->upper_ignition_epoch);
+        }
+        INFO(mission);
+        REQUIRE(session.autopilot().state == sim::AutopilotState::Staging);
+        session.engage_ascent_autopilot(target, program);
+        CHECK(session.autopilot().state == sim::AutopilotState::Staging);  // not Booster on the joined stack
+        // the sequence still ends in the upper stage's flight
+        for (int i = 0; i < 2000 && session.staging(); ++i) session.advance_to(session.epoch() + 1.5 * tick, 10);
+        CHECK_FALSE(session.staging());
+        CHECK(session.autopilot().state == sim::AutopilotState::UpperStage);
+        CHECK(session.body_count() == 2);
+    }
 }

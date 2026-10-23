@@ -397,14 +397,16 @@ public:
 
     // Ascent autopilot: ignition, liftoff at full thrust, booster profile, MECO at the landing reserve,
     // hot staging, closed-loop upper-stage guidance to the target orbit, cutoff. Pilot input is ignored
-    // while engaged. This overload flies `program` as given (trial flights, studies, a re-engage in flight).
+    // while engaged. This overload flies `program` as given (trial flights, studies, a re-engage in flight); during a
+    // staging sequence of the controlled body (joined, or separated before the upper ignition) it engages in Staging.
     void engage_ascent_autopilot(const gnc::AscentTarget& target, const gnc::PitchProgram& program);
     // The same as the onboard computer engages it (ascent trajectory and staging, Task 5): on a stack clamped on a
     // configured launch site (launch_from_pad with a LaunchSite::id) the launch is planned first (sim::plan_launch: the
     // recovery, the reachable target and the kick, on trial flights on this thread - the countdown holds meanwhile) and
     // flown with the booster's return; a refused plan leaves the autopilot off, calls off a scheduled liftoff and
-    // returns the German reason. In flight: the default program (only the closed loop is left to fly). Returns "" when
-    // engaged.
+    // returns the German reason. Not clamped (in flight): engaged at once with the default `PitchProgram`, not planned
+    // (the guidance takes over from the state now; a staging sequence under way keeps the state Staging). Returns ""
+    // when engaged.
     std::string engage_ascent_autopilot(const gnc::AscentTarget& target);
     // Scheduled liftoff (T-0) of the vehicle on the pad; nullopt: lift off as soon as the engines run. With a schedule
     // the ascent autopilot (PreLaunch) holds on the pad, ignites liftoff_ignition_lead_s() before T-0 and releases the

@@ -136,17 +136,19 @@ constexpr double recorded_meco_uncertainty_s = 0.5;
 // (T+430-496 s, rms 0.9 m/s) reaches the final 27,012 km/h at T+515 s: SECO T+515 +- 3 s.
 constexpr double recorded_seco_display_s = 515.0;
 constexpr double recorded_seco_uncertainty_s = 3.0;
-// Open discrepancies (docs/subsystems.md "Ascent trajectory and staging", Task 6), fractions of the recorded value
-// (measured + ~2 % [E]). Before max-Q the recording accelerates ~0.5 m/s^2 harder (speed slope 4.42 against 3.95 m/s^2
-// at 8-40 m/s; G dial 1.5 against 1.40-1.48 g): with the gauge's masses its thrust comes out 3-7 % above nine Merlins
-// at 845 kN while after max-Q it agrees within the G dial's 0.05 g (0.98-1.00) - no single thrust, Isp or mass error
-// explains both, not calibrated. T+30 s -9.5 % speed, -8.5 % altitude.
-constexpr double early_speed_allowance = 0.11;
-constexpr double early_altitude_allowance = 0.11;
-// After max-Q: CRS-35 throttles earlier and deeper (G 1.4-1.6 at T+50-60 s, gauge flow ~72 %; ours holds the transonic
-// q from Mach 0.9 at >= 0.80): T+60 / 90 / 120 s +2.3 / +4.6 / +4.2 % fast, -8.2 / -2.1 / +2.6 % high.
-constexpr double late_speed_allowance = 0.06;
-constexpr double late_altitude_allowance = 0.10;
+// Open discrepancies (docs/subsystems.md "Ascent trajectory and staging", Task 6), per recorded sample as fractions of
+// the recorded value (test::allowance: the measured gap + test::allowance_margin). Before max-Q the recording
+// accelerates ~0.5 m/s^2 harder (speed slope 4.42 against 3.95 m/s^2 at 8-40 m/s; G dial 1.5 against 1.40-1.48 g): with
+// the gauge's masses its thrust comes out 3-7 % above nine Merlins at 845 kN while after max-Q it agrees within the G
+// dial's 0.05 g (0.98-1.00) - no single thrust, Isp or mass error explains both, not calibrated. After max-Q CRS-35
+// throttles earlier and deeper (G 1.4-1.6 at T+50-60 s, gauge flow ~72 %; ours holds the transonic q from Mach 0.9 at
+// >= 0.80).
+constexpr test::SampleGap crs35_sample_gaps[] = {
+    {30.0, 0.095, 0.085},   // -9.5 % speed, -8.5 % altitude
+    {60.0, 0.023, 0.082},   // +2.3 % fast, -8.2 % low
+    {90.0, 0.046, 0.021},   // +4.6 %, -2.1 %
+    {120.0, 0.042, 0.026},  // +4.2 %, +2.6 %
+};
 // MECO / SECO: T+132.7 against 134.6 s (-1.4 %), 6596 against 6490 km/h (+1.6 %), 58.2 against 57.4 km (+1.4 %); the
 // planned kick (11.6 deg) flies a steeper arc (path 41.3 against 36.6 deg); SECO T+508.0 against ~511.6 s (-0.7 %).
 constexpr double meco_time_allowance = 0.03;
@@ -212,12 +214,10 @@ TEST_CASE("Falcon 9 ascent to CRS-35's orbit against its webcast telemetry", "[g
                 a.apoapsis_km, a.inclination_deg, a.upper_propellant_at_seco_t);
 
     // every recorded sample of the first-stage burn (nine engines lit throughout)
-    for (double t : {30.0, 60.0, 90.0, 120.0}) {
-        const bool before_max_q = t < 50.0;
-        const auto speed = test::compare_speed(crs35_table, a, t, crs35_time_base_s,
-                                               before_max_q ? early_speed_allowance : late_speed_allowance);
-        const auto altitude = test::compare_altitude(crs35_table, a, t, crs35_altitude_time_base_s,
-                                                     before_max_q ? early_altitude_allowance : late_altitude_allowance);
+    for (const auto& gap : crs35_sample_gaps) {
+        const auto speed = test::compare_speed(crs35_table, a, gap.t_s, crs35_time_base_s, test::allowance(gap.speed));
+        const auto altitude = test::compare_altitude(crs35_table, a, gap.t_s, crs35_altitude_time_base_s,
+                                                     test::allowance(gap.altitude));
         test::print("CRS-35", speed);
         test::print("CRS-35", altitude);
         CHECK(speed.within());
@@ -226,6 +226,8 @@ TEST_CASE("Falcon 9 ascent to CRS-35's orbit against its webcast telemetry", "[g
 
     // MECO: the recorded state at the recorded MECO against the simulated state at its MECO; the altitude dial shows the
     // state `lag` earlier, compared with the simulation that much before its MECO.
+    // Reading tolerance at MECO: rate x 1 x uncertainty - the reading is taken at the centre of the MECO's interval
+    // (T+138.0 +- 0.5 s; flight 14 reads at its lower end: 2 x).
     const double lag = crs35_altitude_time_base_s - crs35_time_base_s;
     const auto r = test::recorded_stack(crs35_table, recorded_meco_display_s);
     const auto r_lag = test::recorded_stack(crs35_table, recorded_meco_display_s - lag);

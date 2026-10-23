@@ -40,7 +40,8 @@ struct SnapshotContext {
     godot::Array mission_warnings;
     double iss_liftoff_tdb_s = 0.0, iss_separation_tdb_s = 0.0, iss_plane_bias_deg = 0.0;
     // The onboard computer plans a launch on the pad (launch_from_site with a target, engage_ascent_autopilot on a
-    // clamped stack): autopilot_status()["planning"] while the command runs (ascent trajectory and staging, Task 5).
+    // clamped stack, start_mission of a pad launch - also before the session holds a flight): autopilot_status()
+    // ["planning"] while the command runs (ascent trajectory and staging, Task 5; final review item 2).
     bool planning = false;
 };
 
