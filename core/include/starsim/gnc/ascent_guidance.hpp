@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -88,6 +89,12 @@ math::Vec3 ascent_plane_normal(const math::Vec3& position_gcrf_m, const frames::
 class AscentGuidance {
 public:
     AscentGuidance(AscentTarget target, PitchProgram program, double gm_earth_m3ps2);
+
+    // A circular target (apsides within 1 m): inserted J2-aware on the flown radius; otherwise the Kepler (osculating)
+    // apsides at cutoff.
+    static bool circular_target(const AscentTarget& target) {
+        return std::abs(target.apoapsis_altitude_m - target.periapsis_altitude_m) < 1.0;
+    }
 
     // Must be called once at liftoff (fixes launch azimuth and target plane).
     void start(const vehicle::FlightBody& body, const frames::BodyOrientation& earth, time::Epoch epoch);

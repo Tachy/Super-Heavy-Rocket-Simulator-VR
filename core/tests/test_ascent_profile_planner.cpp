@@ -5,6 +5,10 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -179,10 +183,10 @@ TEST_CASE("The optimised arc has no kink at staging", "[sim][ascent_planner]") {
     REQUIRE(plan.feasible);
 
     // the planned kick flown as a mission
-    auto mission = config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo");
-    mission.kick_angle_rad = plan.kick_angle_rad;
+    const auto mission = config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo");
     auto& session = like_session();
-    sim::start_ascent_mission(session, mission, STARSIM_CONFIG_DIR, request.liftoff);
+    REQUIRE(sim::start_ascent_mission(session, mission, STARSIM_CONFIG_DIR, request.liftoff).kick_angle_rad ==
+            plan.kick_angle_rad);
     std::optional<double> meco_fpa_rad, separation_s;
     double worst_below_rad = -1e9;  // flight-path angle - pitch, worst in the first 60 s after the separation
     for (double t = 0.5; t < 600.0; t += 0.5) {
@@ -297,4 +301,137 @@ TEST_CASE("An inclination below the site latitude flies due east", "[sim][ascent
     CHECK(plan.target.inclination_rad == std::abs(site.latitude_rad));
     CHECK(plan.recovery.kind == sim::RecoveryKind::TowerCatch);
     CHECK(plan.recovery.zone_or_ship_id == "ksc_lc39a");
+}
+
+// Task 5: every launch from a pad goes through the planner - mission starts, mission chains and the free launch.
+
+namespace {
+
+// The sources of like_session() (the test cases below sit outside this namespace, where `ephemeris` names a namespace).
+const spice::SpiceEphemeris& test_ephemeris() { return ephemeris(); }
+
+std::string file_text(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// A config dir holding only missions/starship_leo.toml: the configured file with `insert` after its "[mission]" line
+// and `append` at its end (loader tests; a directory per case: ctest runs cases in parallel).
+std::filesystem::path changed_starship_leo(const std::string& name, const std::string& insert, const std::string& append) {
+    auto text = file_text(std::filesystem::path(STARSIM_CONFIG_DIR) / "missions" / "starship_leo.toml");
+    const std::string header = "[mission]\n";
+    const auto at = text.find(header);
+    REQUIRE(at != std::string::npos);
+    text.insert(at + header.size(), insert);
+    const auto dir = std::filesystem::temp_directory_path() / ("starsim_ascent_planner_" + name);
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir / "missions");
+    std::ofstream(dir / "missions" / "starship_leo.toml", std::ios::binary) << text << append;
+    return dir;
+}
+
+}  // namespace
+
+TEST_CASE("Mission starts plan their ascent; no mission file carries a kick", "[sim][ascent_planner]") {
+    // No ascent mission carries a profile or a recovery: the onboard computer plans both at the start.
+    int ascents = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::path(STARSIM_CONFIG_DIR) / "missions")) {
+        const auto id = entry.path().stem().string();
+        if (entry.path().extension() != ".toml") continue;
+        const auto text = file_text(entry.path());
+        // leo_ascent.toml (the free launch's target) is no mission: no [mission] table
+        if (text.find("[mission]") == std::string::npos ||
+            config::mission_kind(STARSIM_CONFIG_DIR, id) != config::MissionKind::Ascent) {
+            continue;
+        }
+        ++ascents;
+        INFO(id);
+        for (const char* key : {"[pitch_program]", "kick_deg", "booster_throttle", "[drone_ship]", "landing_zone"}) {
+            CHECK(text.find(key) == std::string::npos);
+        }
+        CHECK_NOTHROW(config::load_ascent_mission(STARSIM_CONFIG_DIR, id));
+    }
+    CHECK(ascents >= 7);
+    // ... and the loader refuses them (a stale file would otherwise fly a kick nobody planned)
+    CHECK_THROWS(config::load_ascent_mission(changed_starship_leo("kick", "", "\n[pitch_program]\nkick_deg = 14.0\n"),
+                                             "starship_leo"));
+    CHECK_THROWS(config::load_ascent_mission(
+        changed_starship_leo("throttle", "booster_throttle = [[0.0, 0.8]]\n", ""), "starship_leo"));
+    CHECK_THROWS(config::load_ascent_mission(changed_starship_leo("zone", "landing_zone = \"ccsfs_lz40\"\n", ""),
+                                             "starship_leo"));
+    CHECK_THROWS(config::load_ascent_mission(
+        changed_starship_leo("ship", "", "\n[drone_ship]\nid = \"asds_atlantic\"\n"), "starship_leo"));
+
+    // A mission start flies the planned kick with the chosen recovery (Falcon 9 RTLS: LZ-40).
+    auto& session = like_session();
+    const auto rtls = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");
+    const auto started = sim::start_ascent_mission(session, rtls, STARSIM_CONFIG_DIR, liftoff());
+    REQUIRE(started.feasible);
+    const auto plan = timed_plan(falcon9_request("falcon9_rtls"), true);  // the same request: from the memo
+    CHECK(started.kick_angle_rad == plan.kick_angle_rad);
+    REQUIRE(session.ascent_guidance());
+    CHECK(session.ascent_guidance()->program().kick_angle_rad == plan.kick_angle_rad);
+    CHECK(session.autopilot().state == sim::AutopilotState::PreLaunch);
+    const auto lz = config::load_launch_site(STARSIM_CONFIG_DIR, "ccsfs_lz40");
+    REQUIRE(session.landing_zone());
+    CHECK(session.landing_zone()->latitude_rad == lz.latitude_rad);
+    CHECK(session.landing_zone()->longitude_rad == lz.longitude_rad);
+
+    // A refused plan refuses the start: the stack stays on the pad, the autopilot off.
+    auto moved = config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo");
+    moved.site_id = "ccsfs_slc40";  // no tower to catch Super Heavy
+    const auto refused = sim::start_ascent_mission(session, moved, STARSIM_CONFIG_DIR, liftoff());
+    CHECK_FALSE(refused.feasible);
+    CHECK(refused.reason == "Kein Fangturm am Startplatz.");
+    CHECK(session.autopilot().state == sim::AutopilotState::Off);
+    CHECK(session.body(session.controlled_index()).clamped());
+}
+
+TEST_CASE("A free launch holds on the pad until the plan is in", "[sim][ascent_planner]") {
+    sim::FlightSession session(test_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    const auto t0 = liftoff();
+    const auto request = starship_request();
+    session.launch_from_pad(request.vehicle_id,
+                            sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, request.site_id)),
+                            request.heading_rad, t0);
+    session.schedule_liftoff(t0 + session.liftoff_ignition_lead_s());  // T-0 as early as the engines allow
+    // The countdown passes T-0 before the plan is in (the game engages the autopilot once the launch command is done):
+    // the stack holds on the pad - no ignition on the default pitch program.
+    session.advance_to(t0 + 20.0);
+    REQUIRE(session.body(0).clamped());
+    CHECK(session.autopilot().state == sim::AutopilotState::Off);
+    CHECK_FALSE(session.body(0).vehicle().any_engine_producing_thrust());
+
+    const auto planned_at = session.epoch();
+    const auto reason = session.engage_ascent_autopilot(request.target);  // plans on the clamped stack
+    REQUIRE(reason.empty());
+    CHECK(session.epoch() == planned_at);  // the countdown held while the computer planned
+    // the free launch flies the vehicle file as configured: its own payload, fairing kept
+    auto as_placed = request;
+    as_placed.payload_kg = config::load_vehicle(STARSIM_CONFIG_DIR, request.vehicle_id).stages.back().payload_mass_kg;
+    as_placed.fairing = true;
+    const auto plan = timed_plan(as_placed, true);  // from the memo
+    REQUIRE(plan.feasible);
+    REQUIRE(session.ascent_guidance());
+    CHECK(session.ascent_guidance()->program().kick_angle_rad == plan.kick_angle_rad);
+    CHECK(session.ascent_guidance()->program().kick_angle_rad != gnc::PitchProgram{}.kick_angle_rad);
+
+    // liftoff once the plan is in: the engines start now and the clamps open when they run
+    std::optional<time::Epoch> lifted;
+    for (double t = 0.05; t < 10.0 && !lifted; t += 0.05) {
+        session.advance_to(planned_at + t, 100);
+        if (!session.body(0).clamped()) lifted = session.epoch();
+    }
+    REQUIRE(lifted);
+    CHECK(*lifted - planned_at >= session.liftoff_ignition_lead_s() - sim::FlightSession::liftoff_hold_margin_s - 1e-6);
+
+    // A free launch the computer refuses: the reason, the stack stays on the pad with the countdown called off.
+    sim::FlightSession refused(test_ephemeris(), earth(), STARSIM_CONFIG_DIR);
+    refused.launch_from_pad(request.vehicle_id,
+                            sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "ccsfs_slc40")),
+                            request.heading_rad, t0);
+    refused.schedule_liftoff(t0 + 10.0);
+    CHECK(refused.engage_ascent_autopilot(request.target) == "Kein Fangturm am Startplatz.");
+    CHECK(refused.autopilot().state == sim::AutopilotState::Off);
+    CHECK_FALSE(refused.scheduled_liftoff());
 }

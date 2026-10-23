@@ -263,10 +263,8 @@ TEST_CASE("The Falcon 9 RTLS mission loads", "[config][falcon9]") {
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");
     CHECK(m.vehicle_id == "falcon9_block5");
     CHECK(m.site_id == "ccsfs_slc40");
-    CHECK(m.landing_zone_id == "ccsfs_lz40");
     CHECK(m.payload_kg == 12500.0);
     CHECK_FALSE(m.fairing);
-    CHECK(std::abs(m.kick_angle_rad / constants::deg_to_rad - 12.0) < 1e-12);
 }
 
 TEST_CASE("Falcon 9 RTLS mission: liftoff to orbit and the first stage landed on LZ-40", "[gnc][falcon9][rtls][validation]") {

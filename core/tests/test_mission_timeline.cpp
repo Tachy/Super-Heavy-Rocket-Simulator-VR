@@ -260,6 +260,7 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     // onboard predictions (Task 4b): MECO and separation at T+30 s, SECO from the upper stage's closed loop
     std::optional<time::Epoch> meco_at_30, separation_at_30;
     PredictionTrack meco_prediction, seco_prediction;
+    std::optional<time::Epoch> kick_end;  // the open loop's pitch kick has ended
     while (session.epoch() - t0 < 900.0 && !find_event(t, MissionEventKind::Seco)) {
         if (const auto* lifted = find_event(t, MissionEventKind::Liftoff);
             lifted && !meco_at_30 && session.epoch() - lifted->epoch >= 30.0) {
@@ -268,6 +269,9 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
         }
         meco_prediction.sample(predicted_of(t, MissionEventKind::Meco), session.epoch());
         seco_prediction.sample(predicted_of(t, MissionEventKind::Seco), session.epoch());
+        if (const auto* g = session.ascent_guidance(); g && !kick_end && g->kick_start_epoch()) {
+            kick_end = *g->kick_start_epoch() + g->program().kick_duration_s;
+        }
         const bool upper = session.autopilot().state == sim::AutopilotState::UpperStage;
         const auto& g = session.autopilot().guidance;  // single ticks at the cutoff
         const bool near = upper && g.phase == gnc::AscentPhase::ClosedLoop && g.time_to_go_s < 1.0;
@@ -323,7 +327,10 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     // +4.99 s at T+30 s, at most 7.2 s within 120 s.
     CHECK(std::abs(*meco_at_30 - meco->epoch) <= 8.0);
     CHECK(std::abs(*separation_at_30 - separation->epoch) <= 8.0);  // hot staging: the ship's start-up after the MECO
-    CHECK(meco_prediction.max_error_within_s(meco->epoch, 1e9) <= 9.0);
+    // Ascent Task 5 (the planned kick 14.85 deg instead of 14): during the vertical rise and the kick the return's MECO
+    // plan from the near-vertical state swings (+10 .. +96 s); from the kick's end on the bound holds as before.
+    REQUIRE(kick_end);
+    CHECK(meco_prediction.max_error_within_s(meco->epoch, meco->epoch - *kick_end) <= 9.0);
     CHECK(meco_prediction.max_error_within_s(meco->epoch, 3.0) <= 1.0);
     // PEG: -1.94 s at the first closed-loop tick, within 0.29 s over the last 120 s, +0.24 s at the end.
     REQUIRE(seco_prediction.first);

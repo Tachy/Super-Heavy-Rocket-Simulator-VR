@@ -1695,8 +1695,8 @@ Plan `docs/superpowers/plans/2026-10-21-refuelling-f2-flown-campaign.md`, ledger
   14 tankers / 53.2 d; arrivals within 0.07 d of their live plans; fills within 2 % (largest: tanker 13, 864.4 vs
   850.9 t, +1.6 %); deliveries 58.6-72.5 t; losses boil-off (remainder) 31.6 t, attitude gas 1.2 t, vent 27.3 t,
   station keeping 0. Placed variant (`--fly-placed`, ~5 min): 2 tankers + HLS, passes.
-- **Calculator answer** (default, depot placed at 200 km): **14 tanker flights, 52.3 days** since ascent Task 2 (63.6 t
-  per reference tanker; before 13 / 52.5, f3/f4: 13 / 49.7;
+- **Calculator answer** (default, depot placed at 200 km): **12 tanker flights, 50.6 days** since ascent Task 5 (the
+  planned kick: 74.25 t per reference tanker; ascent Task 2: 14 / 52.3 with 63.6 t; before 13 / 52.5, f3/f4: 13 / 49.7;
   with the per-class calibration and the depot's orbit followed). `--reference-phasing`: 14 / 224.7 d (the single
   phasing orbit against a drifting depot).
 - **Known limits:** flights strictly sequential; the side return blocks the session; the calculator's keeping floor
@@ -2149,3 +2149,67 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   (33.2240 / -75.7724, flown with the configured 13 deg kick) lies ~11 km away. The CRS-35 request from LC-39A (no
   landing zone): drone ship at 33.2590 / -75.4291, 14.94 deg, 7.0 t, 5 trials. Starship 2000 km circular: refused after
   10 trials (23.6 s). Starship from LC-39A to 26.5 deg: flown at 28.608 deg, 14.82 deg, 88.1 t.
+
+### Every launch through the planner (Task 5)
+- **Missions and chains:** `sim::start_ascent_mission` builds the planner request from the mission (vehicle, site,
+  heading, target, payload) and calls `sim::engage_planned_ascent`: `plan_launch` with the session itself as `like` (on
+  the simulation thread), then the chosen landing zone / drone ship, the booster's return on and the ascent autopilot
+  with the target flown and the planned kick. A refused plan leaves the stack on the pad with the autopilot off and calls
+  off a scheduled liftoff; `start_mission`, the ISS launch, depot launch, tanker / HLS flights and the flown campaign's
+  pad launches return its German reason as their refusal. A study's changed vehicle (`start_ascent_mission(..., &vehicle)`)
+  is planned as it stands (`AscentProfileRequest::stack`, never memoised: its id names the unchanged file).
+- **Mission files:** `[pitch_program]`, `kick_deg`, `booster_throttle`, `landing_zone` and `[drone_ship]` are gone from
+  every ascent mission and the loader refuses them (`AscentMission` lost `kick_angle_rad`, `landing_zone_id`,
+  `drone_ship`). History of the removed values: starship_leo / depot / tanker / HLS ascent kick 14 deg [D] (the sweep
+  "Starship pitch kick sweep": altitude at T+60/90/120 s within ~1 km of flights 13/14, 9.1 / 21.3 / 38.4 km vs
+  8.4 / 20.5 / 38.2, MECO T+135 s 48 km; the tanker's "kick, throttle sweeps gave no gain" was a sweep on the old
+  throttle schedule); falcon9_rtls 12 deg [E] (CRS-35 MECO T+137 s / 56.4 km vs 137 s / 56.6 km), falcon9_crew_dragon
+  12 deg [E] (as RTLS); falcon9_asds 13 deg [D] (MECO path 24.7 deg, T+152 s, 64.7 km, 8373 km/h vs Starlink 15-25
+  T+149 s, 60 km, ~8000 km/h, ~25 deg) and its drone ship at 33.2240 / -75.7724 [D] (the stage's impact 10 s after the
+  separation; history 32.9272 / -76.0990 before the staging sequence, 32.8819 / -76.1490 with it), deck heading 45 deg
+  [E], sea -35 m [E]; landing_zone = ccsfs_lz40 on falcon9_rtls and falcon9_crew_dragon (now SLC-40's own landing zone).
+- **Free launch:** the game's `launch_from_site` carries the target (`leo_ascent.toml`) unless manual control is on;
+  the command places the stack, schedules T-0, publishes a snapshot with `autopilot_status()["planning"] = true` and
+  plans (`FlightSession::engage_ascent_autopilot(target)` on a clamped stack: the request from the placed stack - the
+  vehicle file by id with its own payload, fairing kept, so it is memoised - or the loaded configuration as `stack`).
+  While the command runs the session does not advance: the world clock holds at the pad snapshot's epoch, the T- clock
+  stands ("Startvorbereitung: Bahn wird berechnet" as last_event and in the webcast's name line); the liftoff follows
+  the plan, never the default `PitchProgram` (test "A free launch holds on the pad until the plan is in"). Refused:
+  the command is not ok with the reason (game: "Start abgelehnt: Kein Fangturm am Startplatz."), the vehicle stays on
+  its pad. Key P on a clamped stack plans the same way. `engage_ascent_autopilot(target, program)` flies a given
+  program (trial flights, studies, guidance tests).
+- **Orbit check of elliptic targets:** the trials judged every target on the radius flown over the next revolution;
+  PEG inserts J2-aware only into circular targets and aims the osculating apsides otherwise, so the tankers'
+  120 x 190 km reached 120 x 180 km flown and every trial was refused. An elliptic target is now judged on the
+  osculating apsides at the end of the tail-off (the planner's `circular_target` is the guidance's own rule).
+- **Planned kicks** (memo per process, measured 2026-10-23): starship_leo 14.85 deg (88.5 t at SECO, as Task 3);
+  tanker_ascent 18.07 deg - 145.5 t at SECO against ~130 t at the old 14 deg: the 120 km perigee favours a flatter
+  arc than the webcast-matched profile; the Falcon 9 missions as Task 4 (RTLS 11.57 deg; ASDS 13.93 deg with the ship
+  at 33.1419 / -75.8444).
+- **Re-baselined:**
+  - Mission timeline (`A Starship ascent records ...`): during the vertical rise and the kick the return's MECO plan
+    from the near-vertical state swings (+10 .. +96 s at the planned 14.85 deg; at 14 deg it stayed within 9 s by
+    chance); the whole-flight bound of 9 s now starts at the kick's end (T+30 s: +5.6 s, within 120 s before MECO the
+    swing ends ~T+16 s).
+  - Windows: tanker_flight `insertion_s` 436.1 -> 432.2 s, `insertion_arc_deg` 11.93 -> 12.25; hls_refuel 421.4 ->
+    415.7 s, 11.37 -> 11.78 deg (the flown ascents with their planned kicks).
+  - Reference flights (`reference_flights.toml`, re-measured by the slow r5 flights): depot fill 69.6 -> 70.7 t;
+    tanker residue 93.0 -> 105.6 t, rendezvous 15.49 -> 17.37 t, delivered LOX / CH4 50.9 / 12.7 -> 59.4 / 14.85 t,
+    settling gas 0.90 -> 0.98 t, main at catch 1.08 -> 1.21 t; HLS main at docking 182.4 -> 202.8 t;
+    `inputs_digest` afc1cbc547f04fbd.
+  - Campaign offsets (the flown campaign against the calculator's model of the flown window, flights whose class
+    both agree on): above 1.6 -> 2.0 t (4 flights -2.6..+2.1 t), below -0.5 -> 1.1 t (1 flight +1.6 t) [D].
+  - Calculator (default): 14 tankers / 52.3 d -> **12 tankers / 50.6 d**.
+  - Flown campaign, placed (`refuelling_report --fly-placed`): before 2 tankers, 8.6 d (HLS at the depot 8.59 d with
+    1053.0 t, first return caught with 1.27 t); after 2 tankers, 8.6 d, comparison passed (deliveries 73.8 / 75.5 t against 60.5 / 63.3 t, HLS at the
+    depot 8.62 d with 1062.7 t, first return caught with 2.57 t).
+  - Full flown campaign (ctest `Flown campaign: the depot launched*`): 12 tankers flown, 52.9 d, every tanker docked,
+    HLS at the depot 52.94 d with 1079.7 t (needs 1041.4 t), first return caught (2.58 t); first plan 12 tankers /
+    44.7 d. **Open:** the fill comparison misses at tankers 5 and 8 (420.5 vs 410.5 t, +2.4 %; 628.7 vs 616.3 t,
+    +2.0 %; tolerance 2 %): both flew below the depot (158 x 198 km, 23.5 / 11.3 h phasing) where the first plan's k-th
+    flight was above it (43 / 39 h, the costlier raise: -7.4 / -8.4 t delivered). The offsets are converged (agreeing
+    flights now +0.0 t on average); the miss is the first plan's class flips, not the delivery model.
+- **Test time:** every test process plans its own launches (the memo lives per process; no on-disk cache - the spec
+  wants planning at launch): 60 cases of the affected labels grew by ~28 s each (+1700 s CPU in all under the 24-way
+  parallel load; a Starship plan 4-6 trials, ~4 s each serial, ~20-30 s under load; the Falcon 9 drone-ship request 15
+  trials, ~45 s). Cases that only test pad mechanics through `start_mission` pay it too.

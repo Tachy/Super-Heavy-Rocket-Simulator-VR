@@ -89,12 +89,17 @@ double stage_propellant_kg(const vehicle::Stage& stage) {
     return stage.propellant_kg(config::TankContents::Oxidizer) + stage.propellant_kg(config::TankContents::Fuel);
 }
 
+config::VehicleConfig request_stack(const std::filesystem::path& dir, const AscentProfileRequest& request) {
+    if (request.stack) return *request.stack;
+    return ascent_stack(config::load_vehicle(dir, request.vehicle_id), dir, request.payload_kg, request.fairing,
+                        request.payload);
+}
+
 Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, double kick_angle_rad) {
     const auto& dir = like.config_dir();
     // The trial reads `like`'s (already interpolated) sources directly: no second interpolation layer.
     FlightSession session(like.ephemeris(), like.earth_orientation(), dir, like.gravity().config(), nullptr, false);
-    const auto stack = ascent_stack(config::load_vehicle(dir, request.vehicle_id), dir, request.payload_kg,
-                                    request.fairing, request.payload);
+    const auto stack = request_stack(dir, request);
     session.launch_from_pad(stack, launch_site_from_config(config::load_launch_site(dir, request.site_id)),
                             request.heading_rad, request.liftoff);
     if (const auto zone = recovery_landing_site(dir, request.recovery)) session.set_landing_zone(*zone);
@@ -180,22 +185,30 @@ Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, 
             near_end = true;
             continue;
         }
-        // The orbit judged on the radius flown over the next revolution (the session's coast prediction): PEG's J2-aware
-        // insertion aims that, the osculating apsides at cutoff differ by design (199.7 x 212 km for a 200 km target).
+        // The orbit judged as the guidance aims it. A circular target: on the radius flown over the next revolution (the
+        // session's coast prediction) - PEG's J2-aware insertion aims that, the osculating apsides at cutoff differ by
+        // design (199.7 x 212 km for a 200 km target). An elliptic target (the tankers' 120 x 190 km): PEG aims the
+        // osculating (Kepler) apsides at cutoff; J2 makes the radius flown differ from them (120 x 180 km).
         const auto& s = body.state();
-        const double period_s = constants::two_pi * std::sqrt(std::pow(orbit::elements_from_state(
-            {s.position_gcrf_m, s.velocity_gcrf_mps}, session.gm_earth_m3ps2()).semi_major_axis_m, 3.0) /
-            session.gm_earth_m3ps2());
+        const auto elements =
+            orbit::elements_from_state({s.position_gcrf_m, s.velocity_gcrf_mps}, session.gm_earth_m3ps2());
         double periapsis_m = std::numeric_limits<double>::infinity(), apoapsis_m = -periapsis_m;
-        for (const auto& p : session.predict_trajectory(index, std::isfinite(period_s) ? period_s : 0.0,
-                                                        orbit_check_step_s)) {
-            const double h = math::norm(p) - constants::wgs84_semi_major_axis_m;  // the target's altitudes
-            periapsis_m = std::min(periapsis_m, h);
-            apoapsis_m = std::max(apoapsis_m, h);
+        if (gnc::AscentGuidance::circular_target(request.target)) {
+            const double period_s = constants::two_pi * std::sqrt(std::pow(elements.semi_major_axis_m, 3.0) /
+                                                                  session.gm_earth_m3ps2());
+            for (const auto& p : session.predict_trajectory(index, std::isfinite(period_s) ? period_s : 0.0,
+                                                            orbit_check_step_s)) {
+                const double h = math::norm(p) - constants::wgs84_semi_major_axis_m;  // the target's altitudes
+                periapsis_m = std::min(periapsis_m, h);
+                apoapsis_m = std::max(apoapsis_m, h);
+            }
+        } else {
+            periapsis_m = elements.semi_major_axis_m * (1.0 - elements.eccentricity) - constants::wgs84_semi_major_axis_m;
+            apoapsis_m = elements.semi_major_axis_m * (1.0 + elements.eccentricity) - constants::wgs84_semi_major_axis_m;
         }
         const auto& target = request.target;
         if (std::getenv("STARSIM_DEBUG_ASCENT_PLANNER")) {
-            std::printf("  [ascent planner] SECO T+%.1f s: flown %.1f .. %.1f km, %.1f kg in the upper stage\n",
+            std::printf("  [ascent planner] SECO T+%.1f s: orbit %.1f .. %.1f km, %.1f kg in the upper stage\n",
                         session.mission_time_s(), periapsis_m / 1e3, apoapsis_m / 1e3,
                         stage_propellant_kg(body.vehicle().stages().front()));
         }
@@ -406,6 +419,7 @@ double fly_ascent_trial(const FlightSession& like, const AscentProfileRequest& r
 }
 
 AscentProfile plan_ascent_profile(const FlightSession& like, const AscentProfileRequest& request) {
+    if (request.stack) return KickSearch(like, request).run();  // a changed vehicle: its id is no key
     const auto key = memo_key(like, request);
     {
         std::lock_guard lock(memo_mutex());
@@ -443,7 +457,7 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
     };
     const char* unreachable = "Ziel mit Booster-Rückkehr nicht erreichbar";
 
-    const std::string method = config::load_vehicle(dir, request.vehicle_id).stages.front().recovery_method;
+    const std::string method = request_stack(dir, request).stages.front().recovery_method;
     if (method == "tower_catch") {
         AscentProfile none;
         none.target = request.target;
@@ -480,6 +494,20 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
     const auto& impact = *profile.booster_impact;
     profile.recovery = {RecoveryKind::DroneShip, default_drone_ship_id, impact.latitude_rad, impact.longitude_rad,
                         impact.heading_rad};
+    return profile;
+}
+
+AscentProfile engage_planned_ascent(FlightSession& session, const AscentProfileRequest& request) {
+    const auto profile = plan_launch(session, request);
+    if (!profile.feasible) {
+        session.schedule_liftoff(std::nullopt);  // the countdown is called off: no T-0 to hold at
+        return profile;
+    }
+    if (const auto zone = recovery_landing_site(session.config_dir(), profile.recovery)) session.set_landing_zone(*zone);
+    session.set_booster_return(true);
+    gnc::PitchProgram program;
+    program.kick_angle_rad = profile.kick_angle_rad;
+    session.engage_ascent_autopilot(profile.target, program);
     return profile;
 }
 

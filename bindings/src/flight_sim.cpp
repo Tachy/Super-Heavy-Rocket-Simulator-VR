@@ -138,11 +138,29 @@ bool FlightSim::wait_idle(double timeout_s) {
 
 double FlightSim::planning_s() const { return runner_ ? runner_->busy_s() : 0.0; }
 
+FlightSim::Outcome FlightSim::engage_planned(sim::FlightSession& session, const gnc::AscentTarget& target) {
+    const bool clamped = session.active() && session.body(session.controlled_index()).clamped();
+    if (clamped) {
+        context_.planning = true;
+        observe(session, session.epoch());  // "Startvorbereitung": the pad and the planning flag while the plan runs
+    }
+    const auto reason = session.engage_ascent_autopilot(target);
+    context_.planning = false;
+    return Outcome{reason.empty(), godot::String::utf8(reason.c_str())};
+}
+
 int64_t FlightSim::launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg,
-                                    double tdb_s, double countdown_s) {
+                                    double tdb_s, double countdown_s, const godot::Dictionary& ascent_target) {
     const std::string vehicle = vehicle_id.utf8().get_data(), site = site_id.utf8().get_data();
-    return static_cast<int64_t>(post("launch_from_site", [this, vehicle, site, site_id, heading_deg, tdb_s,
-                                                          countdown_s](sim::FlightSession& session) {
+    std::optional<gnc::AscentTarget> target;
+    if (!ascent_target.is_empty()) {
+        target = gnc::AscentTarget{double(ascent_target.get("periapsis_km", 200.0)) * 1000.0,
+                                   double(ascent_target.get("apoapsis_km", 200.0)) * 1000.0,
+                                   double(ascent_target.get("inclination_deg", 0.0)) * constants::deg_to_rad,
+                                   bool(ascent_target.get("northerly", true))};
+    }
+    return static_cast<int64_t>(post("launch_from_site", [this, vehicle, site, site_id, heading_deg, tdb_s, countdown_s,
+                                                          target](sim::FlightSession& session) {
         const auto config = config::load_launch_site(config_dir_, site);
         session.launch_from_pad(vehicle, sim::launch_site_from_config(config), heading_deg * constants::deg_to_rad,
                                 epoch(tdb_s));
@@ -153,7 +171,9 @@ int64_t FlightSim::launch_from_site(const godot::String& vehicle_id, const godot
         context_.site_id = site_id;
         context_.mission_display_name = godot::String();
         context_.mission_start_tdb_s = tdb_s;
-        return Outcome{true, {}};
+        if (!target) return Outcome{true, {}};
+        session.set_booster_return(true);  // the booster flies back and is caught or lands after staging
+        return engage_planned(session, *target);
     }));
 }
 
@@ -397,10 +417,9 @@ int64_t FlightSim::plan_capsule_return() {
 
 int64_t FlightSim::engage_ascent_autopilot(double periapsis_km, double apoapsis_km, double inclination_deg,
                                            bool northerly) {
-    return static_cast<int64_t>(post_active("engage_ascent_autopilot", [=](sim::FlightSession& session) {
-        session.engage_ascent_autopilot(
-            {periapsis_km * 1000.0, apoapsis_km * 1000.0, inclination_deg * constants::deg_to_rad, northerly});
-        return Outcome{true, {}};
+    return static_cast<int64_t>(post_active("engage_ascent_autopilot", [=, this](sim::FlightSession& session) {
+        return engage_planned(session, {periapsis_km * 1000.0, apoapsis_km * 1000.0,
+                                        inclination_deg * constants::deg_to_rad, northerly});
     }));
 }
 
@@ -631,8 +650,9 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("launch_from_pad", "vehicle_id", "latitude_deg", "longitude_deg", "height_m",
                                   "heading_deg", "tdb_s"),
                          &FlightSim::launch_from_pad);
-    ClassDB::bind_method(D_METHOD("launch_from_site", "vehicle_id", "site_id", "heading_deg", "tdb_s", "countdown_s"),
-                         &FlightSim::launch_from_site, DEFVAL(0.0));
+    ClassDB::bind_method(D_METHOD("launch_from_site", "vehicle_id", "site_id", "heading_deg", "tdb_s", "countdown_s",
+                                  "ascent_target"),
+                         &FlightSim::launch_from_site, DEFVAL(0.0), DEFVAL(godot::Dictionary()));
     ClassDB::bind_method(D_METHOD("start_mission", "mission_id", "tdb_s", "wait_on_pad"), &FlightSim::start_mission,
                          DEFVAL(false));
     ClassDB::bind_method(D_METHOD("mission_site_id"), &FlightSim::mission_site_id);

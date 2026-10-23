@@ -61,7 +61,7 @@ OrbitResult fly_to_orbit(const gnc::AscentTarget& target, bool booster_engine_ou
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
     session.launch_from_pad("starship_block3", {25.99686 * deg, -97.15394 * deg, 10.0}, 90.0 * deg, t0);
-    session.engage_ascent_autopilot(target);
+    session.engage_ascent_autopilot(target, gnc::PitchProgram{});  // the guidance as given, no pre-launch plan
 
     bool failed = false;
     for (double t = 0.0; t < 900.0 && session.autopilot().state != sim::AutopilotState::Orbit; t += 1.0) {
@@ -169,7 +169,7 @@ LimitedBoosterPhase fly_limited_booster_phase(const std::string& vehicle_id, con
     const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
     const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, vehicle_id);
     session.launch_from_pad(cfg, site, heading_rad, t0);
-    session.engage_ascent_autopilot(target);
+    session.engage_ascent_autopilot(target, gnc::PitchProgram{});  // the guidance as given, no pre-launch plan
     LimitedBoosterPhase a;
     gnc::PitchProgram limits;  // the stage's q limit over Mach, as the guidance takes it
     limits.max_dynamic_pressure_by_mach = cfg.stages.front().max_dynamic_pressure_by_mach;

@@ -15,6 +15,8 @@ const LAUNCH_COUNTDOWN_S := 60.0
 const MANUAL_KEYS: Array[Key] = [KEY_I, KEY_L, KEY_K, KEY_G, KEY_M, KEY_X]
 ## autopilot_status().state of a disengaged autopilot (sim::to_string(AutopilotState::Off)).
 const AUTOPILOT_OFF := "aus"
+## last_event while the onboard computer plans a launch on the pad (the countdown holds meanwhile).
+const PLANNING_EVENT := "Startvorbereitung: Bahn wird berechnet"
 
 var sim := FlightSim.new()
 var launch_site_id := ""  ## site of the current flight (its tower shows the flight's arm state)
@@ -54,24 +56,34 @@ func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 9
 		view.queue_free()
 	views.clear()
 	throttle = 1.0
-	var id := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s, countdown_s)
+	# External view: the onboard computer plans the launch to the configured target and engages the ascent autopilot in
+	# the same command (the countdown holds until the plan is in); manual control only places the vehicle.
+	var target := {} if manual_control else ascent_target
+	var id := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s, countdown_s, target)
 	launch_site_id = ""
 	_pending_launch = {"id": id, "site_id": site["id"], "text": "%s auf %s" % [vehicle_id, site["name"]]}
-	last_event = "Start wird vorbereitet" if id > 0 else "Start fehlgeschlagen"
+	if id <= 0:
+		last_event = "Start fehlgeschlagen"
+	else:
+		last_event = "Start wird vorbereitet" if target.is_empty() else PLANNING_EVENT
 	return id > 0
 
 
 ## Outcome of a command on the simulation thread (emitted from FlightSim.advance_to / wait_idle).
-func _on_command_finished(id: int, command: String, ok: bool, _message: String) -> void:
+func _on_command_finished(id: int, command: String, ok: bool, message: String) -> void:
 	match command:
 		"launch_from_site":
 			if id != _pending_launch.get("id", 0):
 				return
-			launch_site_id = _pending_launch["site_id"] if ok else ""
-			last_event = _pending_launch["text"] if ok else "Start fehlgeschlagen"
+			# a refused plan leaves the vehicle on its pad: the site stays the flight's (its tower view)
+			launch_site_id = _pending_launch["site_id"] if ok or sim.is_active() else ""
+			if ok:
+				last_event = _pending_launch["text"]  # the clamped vehicle counts down and lifts off at T-0
+			else:
+				last_event = "Start abgelehnt: %s" % message if message != "" else "Start fehlgeschlagen"
 			_pending_launch = {}
-			if ok and not manual_control:
-				_engage_ascent()  # the clamped vehicle counts down and lifts off at T-0 on the autopilot
+		"engage_ascent_autopilot":
+			last_event = "Aufstiegs-Autopilot aktiv" if ok else "Start abgelehnt: %s" % message
 		"engage_orbit_autopilot":
 			if ok:
 				last_event = "Autopilot: Orbit halten"
@@ -124,11 +136,13 @@ func engage_autopilot() -> void:
 		sim.engage_orbit_autopilot()  # outcome: _on_command_finished
 
 
+## On the pad the onboard computer plans the launch first (outcome: _on_command_finished).
 func _engage_ascent() -> void:
 	sim.set_booster_return(true)  # the booster flies back and is caught after staging
 	sim.engage_ascent_autopilot(ascent_target.get("periapsis_km", 200.0), ascent_target.get("apoapsis_km", 200.0),
 			ascent_target.get("inclination_deg", 26.5), ascent_target.get("northerly", true))
-	last_event = "Aufstiegs-Autopilot aktiv"
+	var on_pad: bool = sim.is_active() and sim.telemetry(sim.controlled_index()).get("clamped", false)
+	last_event = PLANNING_EVENT if on_pad else "Aufstiegs-Autopilot aktiv"
 
 
 func controlled_position_gcrf() -> Vector3:

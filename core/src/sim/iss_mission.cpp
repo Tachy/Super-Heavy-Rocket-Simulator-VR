@@ -252,8 +252,13 @@ MissionStart start_iss_launch_mission(FlightSession& session, const std::filesys
         return s;
     }
     const auto ascent = config::load_ascent_mission(config_dir, mission.ascent_id);
-    s.epoch = start_ascent_mission_for_liftoff(session, ascent, config_dir, w.liftoff,
-                                               station_consistent_wait(station, wait_from, w.liftoff));
+    const auto launch = start_ascent_mission_for_liftoff(session, ascent, config_dir, w.liftoff,
+                                                         station_consistent_wait(station, wait_from, w.liftoff));
+    s.epoch = launch.placed;
+    if (!launch.profile.feasible) {
+        s.refusal = launch.profile.reason;
+        return s;
+    }
     const auto st = station.start(s.epoch);
     session.add_station(st.vehicle, st.state_gcrf, st.epoch, st.impulses);  // after the launch (it clears the bodies)
     IssMissionSequence q;

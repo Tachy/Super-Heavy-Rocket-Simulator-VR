@@ -804,11 +804,8 @@ TEST_CASE("Tanker ascent levers", "[.r5_probe]") {
     };
     const auto lighter = [](double kg) { return [kg](config::VehicleConfig& v) { v.stages.back().dry_mass_kg -= kg; }; };
     const auto none = [](config::AscentMission&) {};
-    const auto kick = [](double k_deg, double rp_km) {
-        return [k_deg, rp_km](config::AscentMission& m) {
-            m.kick_angle_rad = k_deg * deg;
-            m.periapsis_height_m = rp_km * 1e3;
-        };
+    const auto perigee = [](double rp_km) {  // the kick is planned for it at the start (ascent Task 5)
+        return [rp_km](config::AscentMission& m) { m.periapsis_height_m = rp_km * 1e3; };
     };
     const auto booster = [](double dry_kg, double landing_kg) {
         return [dry_kg, landing_kg](config::VehicleConfig& v) {
@@ -821,8 +818,8 @@ TEST_CASE("Tanker ascent levers", "[.r5_probe]") {
         {"booster dry -20 t", none, booster(-20.0e3, 0.0)},
         {"booster dry -40 t", none, booster(-40.0e3, 0.0)},
         {"booster landing 41 t (-10)", none, booster(0.0, -10.0e3)},
-        {"80 x 190 + ship dry -10 t", kick(14.0, 80.0), lighter(10.0e3)},
-        {"80 x 190 + booster dry -40 t", kick(14.0, 80.0), booster(-40.0e3, 0.0)},
+        {"80 x 190 + ship dry -10 t", perigee(80.0), lighter(10.0e3)},
+        {"80 x 190 + booster dry -40 t", perigee(80.0), booster(-40.0e3, 0.0)},
     };
     const double target_rp = constants::wgs84_semi_major_axis_m + 170.0e3;
     for (const auto& variant : variants) {

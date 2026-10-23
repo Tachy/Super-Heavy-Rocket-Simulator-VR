@@ -24,7 +24,9 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
         case config::MissionKind::Ascent: {
             const auto m = config::load_ascent_mission(config_dir, mission_id);
             const double countdown_s = options.wait_on_pad ? m.countdown_s.value_or(options.countdown_s) : 0.0;
-            start_ascent_mission_for_liftoff(session, m, config_dir, requested + countdown_s, wait_from, false);
+            const auto launch =
+                start_ascent_mission_for_liftoff(session, m, config_dir, requested + countdown_s, wait_from, false);
+            if (!launch.profile.feasible) s.refusal = launch.profile.reason;
             s.site_id = m.site_id;
             s.epoch = requested;
             break;

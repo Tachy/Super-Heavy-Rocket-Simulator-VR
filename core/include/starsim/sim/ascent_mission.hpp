@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "starsim/config/mission_config.hpp"
+#include "starsim/sim/ascent_profile_planner.hpp"
 #include "starsim/sim/flight_session.hpp"
 
 namespace starsim::sim {
@@ -13,23 +14,30 @@ namespace starsim::sim {
 config::VehicleConfig ascent_stack(config::VehicleConfig vehicle, const std::filesystem::path& config_dir,
                                    double payload_kg, bool fairing, const std::optional<config::MissionPayload>& payload);
 
-// Sets up `session` for an ascent mission at `epoch`: the vehicle with the mission's payload (and fairing) on the pad,
-// the landing zone or drone ship of a returning first stage, booster return on, a payload vehicle stacked on top and
-// released after cutoff ([payload]), and the ascent autopilot engaged with the mission's target and pitch program.
+// Sets up `session` for an ascent mission at `epoch`: the vehicle with the mission's payload (and fairing) on the pad, a
+// payload vehicle stacked on top and released after cutoff ([payload]), and the launch planned and engaged by the onboard
+// computer (engage_planned_ascent: the recovery - tower, landing zone or drone ship -, the reachable target and the
+// kick). Returns the plan; a refused one leaves the stack on the pad with the autopilot off (its German reason).
 // `vehicle`: a changed configuration of the mission's vehicle instead of its file (studies, refuelling r5 probes).
 // `keep_station`: beside the session's station (refuelling f2, FlightSession::launch_from_pad).
-void start_ascent_mission(FlightSession& session, const config::AscentMission& mission,
-                          const std::filesystem::path& config_dir, time::Epoch epoch,
-                          const config::VehicleConfig* vehicle = nullptr, bool keep_station = false);
+AscentProfile start_ascent_mission(FlightSession& session, const config::AscentMission& mission,
+                                   const std::filesystem::path& config_dir, time::Epoch epoch,
+                                   const config::VehicleConfig* vehicle = nullptr, bool keep_station = false);
+
+// start_ascent_mission_for_liftoff: where the vehicle was placed (the session epoch) and the launch's plan.
+struct AscentLaunch {
+    time::Epoch placed;
+    AscentProfile profile;
+};
 
 // start_ascent_mission for a liftoff at `liftoff`. With `wait_from` (StartOptions::wait_on_pad) the vehicle stands on
 // the pad from then (from the liftoff when wait_from is not earlier) and the liftoff is scheduled (FlightSession::
 // schedule_liftoff), never less than liftoff_ignition_lead_s() after the placement (the engines must reach full thrust
 // by T-0): a `fixed_liftoff` (a launch window, a configured epoch) is kept and the vehicle placed that lead before it,
 // otherwise (a countdown) T-0 moves to the placement + lead. Without `wait_from` the vehicle is placed at the liftoff
-// and lifts off as soon as its engines run. Returns the epoch the vehicle was placed at (the session epoch).
-time::Epoch start_ascent_mission_for_liftoff(FlightSession& session, const config::AscentMission& mission,
-                                             const std::filesystem::path& config_dir, time::Epoch liftoff,
-                                             std::optional<time::Epoch> wait_from, bool fixed_liftoff = true);
+// and lifts off as soon as its engines run. A refused plan schedules nothing.
+AscentLaunch start_ascent_mission_for_liftoff(FlightSession& session, const config::AscentMission& mission,
+                                              const std::filesystem::path& config_dir, time::Epoch liftoff,
+                                              std::optional<time::Epoch> wait_from, bool fixed_liftoff = true);
 
 }  // namespace starsim::sim

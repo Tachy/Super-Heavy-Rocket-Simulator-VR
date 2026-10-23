@@ -61,7 +61,7 @@ TEST_CASE("The explicit fallback guidance ditches the booster at sea next to the
     target.periapsis_altitude_m = 200e3;
     target.apoapsis_altitude_m = 200e3;
     target.inclination_rad = 26.6 * deg;
-    session.engage_ascent_autopilot(target);
+    session.engage_ascent_autopilot(target, gnc::PitchProgram{});  // the guidance as given, no pre-launch plan
 
     const bool verbose = std::getenv("STARSIM_VERBOSE") != nullptr;
     double last_sink_rate = 0.0;  // last tick before ground contact
@@ -161,7 +161,7 @@ TEST_CASE("A booster recovered by tower catch gets no return guidance at a site 
     target.periapsis_altitude_m = 200e3;
     target.apoapsis_altitude_m = 200e3;
     target.inclination_rad = 26.6 * deg;
-    session.engage_ascent_autopilot(target);
+    session.engage_ascent_autopilot(target, gnc::PitchProgram{});  // the guidance as given, no pre-launch plan
     for (double t = 0.0; t < 400.0 && session.body_count() < 2; t += 0.5) session.advance_to(t0 + t, 1000);
     REQUIRE(session.body_count() >= 2);
     CHECK(session.return_status(0) == nullptr);

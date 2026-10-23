@@ -1,6 +1,6 @@
 # Starship (Block 3 / V3) from Starbase into a low Earth orbit with the booster returning to the tower (catch). The
-# ascent autopilot plans MECO for the booster's return ([stage.recovery] landing_propellant_kg). Booster throttle from
-# our webcast telemetry of flights 13 and 14 (tests/validation/telemetry).
+# onboard computer plans the pitch kick and the catch at the start (sim::plan_launch); the ascent autopilot plans MECO
+# for the booster's return ([stage.recovery] landing_propellant_kg).
 
 [mission]
 name = "Starship in einen niedrigen Erdorbit"
@@ -16,7 +16,3 @@ periapsis_km = 200.0
 apoapsis_km = 200.0
 inclination_deg = 26.5          # Starbase is at 26.0 deg N: due east gives ~26 deg
 northerly = true
-
-[pitch_program]
-kick_deg = 14.0                 # [D] sweep "Starship pitch kick sweep" ([.tuning]): altitude at T+60/90/120 s within
-                                # ~1 km of flights 13/14 (9.1 / 21.3 / 38.4 km vs 8.4 / 20.5 / 38.2), MECO T+135 s 48 km

@@ -1,8 +1,10 @@
 # Falcon 9 launch from SLC-40 with a Starlink-class payload and the first stage landing on a drone ship (ASDS, milestone
-# c4): the ascent autopilot plans MECO for the drone-ship return (run-down, entry burn, landing propellant); the first
-# stage coasts without a boostback, turns engines first on its RCS, flies its three-engine entry burn (steering onto the
-# deck) and lands on one engine; the second stage flies on to orbit. Modelled on Starlink 15-25 (2026-10-12; that flight
-# launched from Vandenberg - this mission flies the Florida 53 deg shell).
+# c4; the onboard computer chooses the drone ship - the RTLS return leaves the upper stage short of this orbit - and
+# puts it at the stage's predicted impact, sim::plan_launch): the ascent autopilot plans MECO for the drone-ship return
+# (run-down, entry burn, landing propellant); the first stage coasts without a boostback, turns engines first on its RCS,
+# flies its three-engine entry burn (steering onto the deck) and lands on one engine; the second stage flies on to
+# orbit. Modelled on Starlink 15-25 (2026-10-12; that flight launched from Vandenberg - this mission flies the Florida
+# 53 deg shell).
 
 [mission]
 name = "Falcon 9 mit Landung auf dem Drohnenschiff"
@@ -14,24 +16,8 @@ payload_t = 16.5                # [E] Starlink class: our vehicle model carries 
                                 # with 0.3 t left in stage 2, 18 t does not); 16.5 t keeps a margin
 fairing = true
 
-[drone_ship]
-id = "asds_atlantic"
-latitude_deg = 33.2240          # [D] nominal impact point of this mission's first stage, predicted 10 s after the separation
-                                # (separation T+150.4 s, 75.3 km, 8249 km/h, 30.7 deg) with drag and the finite entry burn,
-                                # no steering (test "... nominal impact point ..."). History: 32.9272 / -76.0990 before the
-                                # staging sequence, 32.8819 / -76.1490 with it (separation T+156.6 s); now the Mach-
-                                # dependent q limit replaces the CRS-35 throttle schedule (full thrust after the transonic
-                                # hold, as the gauge shows): a higher, steeper arc, ~43 km further
-longitude_deg = -75.7724
-heading_deg = 45.0              # [E] long axis along the ground track
-sea_height_m = -35.0            # [E] geoid off the Carolinas (EGM2008 ~-35 m)
-
 [target]
 periapsis_km = 200.0            # [E] Starlink insertion (the satellites raise their own orbit)
 apoapsis_km = 280.0
 inclination_deg = 53.0          # Starlink shell (Florida launches north-east)
 northerly = true
-
-[pitch_program]
-kick_deg = 13.0                 # [D] MECO flight path 24.7 deg (T+152 s, 64.7 km, 8373 km/h; Starlink 15-25: T+149 s,
-                                # 60 km, ~8000 km/h, ~25 deg from the altitude rate)

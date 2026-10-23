@@ -313,24 +313,22 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
     const double deg = constants::deg_to_rad;
     const auto* mission = doc.root["mission"].as_table();
     const auto* target = doc.root["target"].as_table();
-    const auto* program = doc.root["pitch_program"].as_table();
-    if (!mission || !target || !program) doc.fail("missing [mission], [target] or [pitch_program]");
+    if (!mission || !target) doc.fail("missing [mission] or [target]");
+    // The onboard computer plans the profile and the recovery (ascent trajectory and staging, Task 5): a file that
+    // still carries them would fly numbers nobody planned.
+    if (doc.root.contains("pitch_program") || doc.root.contains("drone_ship")) {
+        doc.fail("[pitch_program] and [drone_ship] are planned at the start, not configured");
+    }
+    for (const char* key : {"kick_deg", "booster_throttle", "landing_zone"}) {
+        if (mission->contains(key) || target->contains(key)) {
+            doc.fail(std::string(key) + " is planned at the start, not configured");
+        }
+    }
     AscentMission m;
     m.id = std::string(mission_id);
     m.name = doc.text(*mission, "name");
     m.vehicle_id = doc.text(*mission, "vehicle");
     m.site_id = doc.text(*mission, "site");
-    m.landing_zone_id = doc.text_or(*mission, "landing_zone");
-    if (const auto* ship = doc.root["drone_ship"].as_table()) {
-        if (!m.landing_zone_id.empty()) doc.fail("a mission has either a landing_zone or a [drone_ship]");
-        MissionDroneShip d;
-        d.id = doc.text(*ship, "id");
-        d.latitude_rad = doc.number(*ship, "latitude_deg") * deg;
-        d.longitude_rad = doc.number(*ship, "longitude_deg") * deg;
-        d.heading_rad = doc.number(*ship, "heading_deg") * deg;
-        d.sea_height_m = doc.number(*ship, "sea_height_m");
-        m.drone_ship = d;
-    }
     m.heading_rad = doc.number(*mission, "heading_deg") * deg;
     if (mission->contains("countdown_s")) {
         m.countdown_s = doc.number(*mission, "countdown_s");
@@ -353,7 +351,6 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
     if (m.apoapsis_height_m < m.periapsis_height_m) doc.fail("target: apoapsis below periapsis");
     m.inclination_rad = doc.number(*target, "inclination_deg") * deg;
     m.northerly = (*target)["northerly"].value_or(true);
-    m.kick_angle_rad = doc.positive(*program, "kick_deg") * deg;
     return m;
 }
 

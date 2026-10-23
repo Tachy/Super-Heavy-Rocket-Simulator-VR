@@ -57,7 +57,13 @@ MissionStart start_depot_launch_mission(FlightSession& session, const std::files
     MissionStart s;
     s.kind = config::MissionKind::DepotLaunch;
     const auto ascent = config::load_ascent_mission(config_dir, mission.ascent_id);
-    s.epoch = start_ascent_mission_for_liftoff(session, ascent, config_dir, time.from_utc(mission.epoch_utc), wait_from);
+    const auto launch =
+        start_ascent_mission_for_liftoff(session, ascent, config_dir, time.from_utc(mission.epoch_utc), wait_from);
+    s.epoch = launch.placed;
+    if (!launch.profile.feasible) {
+        s.refusal = launch.profile.reason;
+        return s;
+    }
     IssMissionSequence q;
     q.from_launch = true;
     q.ascent_to_station = true;
@@ -195,7 +201,10 @@ MissionStart launch_campaign_flight(FlightSession& session, const std::filesyste
         return s;
     }
     const auto ascent = config::load_ascent_mission(config_dir, m.ascent_id);
-    start_ascent_mission(session, ascent, config_dir, w.liftoff, nullptr, true);
+    if (const auto plan = start_ascent_mission(session, ascent, config_dir, w.liftoff, nullptr, true); !plan.feasible) {
+        s.refusal = plan.reason;
+        return s;
+    }
     session.set_iss_mission(pad_flight_sequence(m, p, w));
     s.epoch = w.liftoff;
     s.site_id = ascent.site_id;
@@ -263,7 +272,12 @@ MissionStart start_refuelling_flight_mission(FlightSession& session, const std::
             s.refusal = "HLS-Betankung: Startfenster nach dem Start der Mondmission";
             return s;
         }
-        s.epoch = start_ascent_mission_for_liftoff(session, ascent, config_dir, w.liftoff, wait_from);
+        const auto launch = start_ascent_mission_for_liftoff(session, ascent, config_dir, w.liftoff, wait_from);
+        s.epoch = launch.placed;
+        if (!launch.profile.feasible) {
+            s.refusal = launch.profile.reason;
+            return s;
+        }
         session.add_station(depot_vehicle, depot_at(s.epoch), s.epoch);  // after the launch (it clears the bodies)
         q = pad_flight_sequence(m, p, w);
         s.site_id = ascent.site_id;

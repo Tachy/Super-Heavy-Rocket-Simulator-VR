@@ -35,15 +35,38 @@ struct StarshipAscent {
     double meco_s = -1.0, meco_altitude_km = 0.0, meco_speed_kmh = 0.0;
 };
 
-// Flies the mission until the stack separates; samples the stack at `times` (mission time). `meco_propellant_kg` > 0:
-// no booster return, MECO with this much left in the booster (as recorded) instead of the return guidance's plan.
-StarshipAscent fly_mission(const config::AscentMission& mission, const std::vector<double>& times,
-                           double meco_propellant_kg = 0.0) {
+const spice::SpiceEphemeris& mission_ephemeris() {
     test::spice_session();
     static const spice::SpiceEphemeris ephemeris;
+    return ephemeris;
+}
+
+const frames::BodyOrientation& mission_earth() {
+    test::spice_session();
     static const auto earth = spice::SpiceOrientation::earth();
-    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
-    const auto t0 = spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
+    return earth;
+}
+
+time::Epoch mission_t0() {
+    test::spice_session();
+    return spice::SpiceTimeConverter{}.from_utc({2026, 10, 12, 12, 0, 0.0});
+}
+
+// The kick the onboard computer plans for the mission (sim::plan_launch at its start).
+double planned_kick_rad(const config::AscentMission& mission) {
+    sim::FlightSession session(mission_ephemeris(), mission_earth(), STARSIM_CONFIG_DIR);
+    const auto plan = sim::start_ascent_mission(session, mission, STARSIM_CONFIG_DIR, mission_t0());
+    REQUIRE(plan.feasible);
+    return plan.kick_angle_rad;
+}
+
+// Flies the mission until the stack separates; samples the stack at `times` (mission time). `meco_propellant_kg` > 0:
+// no booster return, MECO with this much left in the booster (as recorded) instead of the return guidance's plan,
+// on the pitch kick `kick_angle_rad`; otherwise the mission as started (its planned kick).
+StarshipAscent fly_mission(const config::AscentMission& mission, const std::vector<double>& times,
+                           double meco_propellant_kg = 0.0, double kick_angle_rad = 0.0) {
+    sim::FlightSession session(mission_ephemeris(), mission_earth(), STARSIM_CONFIG_DIR);
+    const auto t0 = mission_t0();
     if (meco_propellant_kg > 0.0) {
         auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, mission.vehicle_id);
         cfg.stages.back().payload_mass_kg = mission.payload_kg;
@@ -51,7 +74,7 @@ StarshipAscent fly_mission(const config::AscentMission& mission, const std::vect
         session.launch_from_pad(cfg, sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, mission.site_id)),
                                 mission.heading_rad, t0);
         gnc::PitchProgram program;
-        program.kick_angle_rad = mission.kick_angle_rad;
+        program.kick_angle_rad = kick_angle_rad;
         session.engage_ascent_autopilot(
             {mission.periapsis_height_m, mission.apoapsis_height_m, mission.inclination_rad, mission.northerly}, program);
     } else {
@@ -97,7 +120,8 @@ TEST_CASE("Starship ascent follows the webcast telemetry of flights 13 and 14", 
     std::vector<double> times;
     for (const auto& r : recorded) times.push_back(r.t_s);
     const auto mission = config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo");
-    const auto a = fly_mission(mission, times, recorded_meco_propellant_kg);
+    // the kick the computer plans for this target (with the catch); the flight then MECOs at the recorded propellant
+    const auto a = fly_mission(mission, times, recorded_meco_propellant_kg, planned_kick_rad(mission));
     REQUIRE(a.samples.size() == times.size());
     for (size_t i = 0; i < times.size(); ++i) {
         std::printf("[validation] Starship T+%.0f s: recorded %.1f km %.0f km/h, simulated %.1f km %.0f km/h\n",
@@ -117,10 +141,9 @@ TEST_CASE("Starship ascent follows the webcast telemetry of flights 13 and 14", 
 }
 
 TEST_CASE("Starship pitch kick sweep", "[.tuning]") {
-    auto mission = config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo");
+    const auto mission = config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo");
     for (double kick_deg : {10.0, 11.0, 12.0, 13.0, 14.0}) {
-        mission.kick_angle_rad = kick_deg * deg;
-        const auto a = fly_mission(mission, {60.0, 90.0, 120.0}, recorded_meco_propellant_kg);
+        const auto a = fly_mission(mission, {60.0, 90.0, 120.0}, recorded_meco_propellant_kg, kick_deg * deg);
         std::printf("kick %4.1f deg: T+60 %.1f km %.0f km/h, T+90 %.1f km %.0f km/h, T+120 %.1f km %.0f km/h; MECO T+%.0f s %.1f "
                     "km %.0f km/h\n", kick_deg, a.samples[0].altitude_km, a.samples[0].speed_kmh, a.samples[1].altitude_km,
                     a.samples[1].speed_kmh, a.samples[2].altitude_km, a.samples[2].speed_kmh, a.meco_s, a.meco_altitude_km,

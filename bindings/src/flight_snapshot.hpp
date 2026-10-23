@@ -39,6 +39,9 @@ struct SnapshotContext {
     // ISS missions (i6): from start_mission's result
     godot::Array mission_warnings;
     double iss_liftoff_tdb_s = 0.0, iss_separation_tdb_s = 0.0, iss_plane_bias_deg = 0.0;
+    // The onboard computer plans a launch on the pad (launch_from_site with a target, engage_ascent_autopilot on a
+    // clamped stack): autopilot_status()["planning"] while the command runs (ascent trajectory and staging, Task 5).
+    bool planning = false;
 };
 
 // Everything the main thread reads, built on the simulation thread after every command and chunk (immutable once

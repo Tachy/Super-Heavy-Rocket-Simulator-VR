@@ -10,6 +10,7 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
+#include "starsim/sim/ascent_profile_planner.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/vehicle/docking_port.hpp"
 #include "starsim/vehicle/port_mating.hpp"
@@ -107,6 +108,33 @@ void FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target, con
         }
         autopilot_.state = powered > 1 ? AutopilotState::Booster : AutopilotState::UpperStage;
     }
+}
+
+std::string FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target) {
+    if (bodies_.empty() || !bodies_[controlled_].body->clamped()) {
+        engage_ascent_autopilot(target, gnc::PitchProgram{});
+        return {};
+    }
+    if (launch_site_.id.empty() || !pad_stack_) {
+        schedule_liftoff(std::nullopt);
+        return "Startplanung nicht möglich: kein konfigurierter Startplatz.";
+    }
+    AscentProfileRequest request;
+    request.site_id = launch_site_.id;
+    request.heading_rad = pad_heading_rad_;
+    request.liftoff = epoch_;
+    request.target = target;
+    if (!pad_vehicle_id_.empty()) {
+        // the vehicle file as configured: ascent_stack with its own payload and the fairing kept is the same stack
+        request.vehicle_id = pad_vehicle_id_;
+        request.payload_kg = pad_stack_->stages.back().payload_mass_kg;
+        request.fairing = true;
+    } else {
+        request.vehicle_id = pad_stack_->id;
+        request.stack = pad_stack_;
+    }
+    const auto profile = engage_planned_ascent(*this, request);
+    return profile.feasible ? std::string() : profile.reason;
 }
 
 bool FlightSession::engage_orbit_autopilot() {
@@ -444,7 +472,7 @@ void FlightSession::run_autopilot() {
 }
 
 LaunchSite launch_site_from_config(const config::LaunchSiteConfig& site) {
-    return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower, site.sea, site.pad_radius_m, {}};
+    return {site.latitude_rad, site.longitude_rad, site.height_m, site.tower, site.sea, site.pad_radius_m, {}, site.id};
 }
 
 LaunchSite drone_ship_site(const config::DroneShipConfig& ship, double latitude_rad, double longitude_rad,
@@ -752,6 +780,7 @@ void FlightSession::reset_mission_state() {
 void FlightSession::launch_from_pad(const std::string& vehicle_id, const LaunchSite& site, double heading_rad,
                                     time::Epoch epoch, bool keep_station) {
     launch_from_pad(config::load_vehicle(config_dir_, vehicle_id), site, heading_rad, epoch, keep_station);
+    pad_vehicle_id_ = vehicle_id;
 }
 
 void FlightSession::launch_from_pad(const config::VehicleConfig& config, const LaunchSite& site, double heading_rad,
@@ -771,6 +800,9 @@ void FlightSession::launch_from_pad(const config::VehicleConfig& config, const L
     epoch_ = epoch;
     launch_epoch_ = epoch;
     reset_mission_state();  // a new flight never inherits the previous one's autopilot, burn or return plan
+    pad_stack_ = config;
+    pad_vehicle_id_.clear();
+    pad_heading_rad_ = heading_rad;
 }
 
 // How long all bodies may coast from now: nothing firing or commanded, no ascent guidance, no pilot

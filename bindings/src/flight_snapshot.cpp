@@ -480,6 +480,7 @@ std::shared_ptr<const FlightSnapshot> build_snapshot(const sim::FlightSession& s
     s->controlled_index = static_cast<int>(session.controlled_index());
     for (size_t i = 0; i < session.body_count(); ++i) s->bodies.push_back(build_body(session, i));
     s->autopilot_status = autopilot_status(session);
+    s->autopilot_status["planning"] = context.planning;
     if (const auto* guidance = session.ascent_guidance()) {
         const math::Vec3 n = guidance->target_plane_normal_gcrf();
         s->has_target_orbit = true;

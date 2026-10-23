@@ -332,31 +332,33 @@ TEST_CASE("The Falcon 9 drone-ship mission loads", "[config][falcon9][asds]") {
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
     CHECK(m.vehicle_id == "falcon9_block5");
     CHECK(m.site_id == "ccsfs_slc40");
-    CHECK(m.landing_zone_id.empty());
-    REQUIRE(m.drone_ship);
-    CHECK(m.drone_ship->id == "asds_atlantic");
     CHECK(m.payload_kg > 15000.0);
     CHECK(m.payload_kg < 17500.0);
     CHECK(m.fairing);
     CHECK(std::abs(m.inclination_rad / deg - 53.0) < 1e-9);
-    // The ship waits ~600 km down the ground track (spec), north-east of the Cape.
-    const auto pad = config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id);
-    const double distance_m = constants::wgs84_semi_major_axis_m * std::acos(std::sin(pad.latitude_rad) * std::sin(m.drone_ship->latitude_rad) +
-                                                               std::cos(pad.latitude_rad) * std::cos(m.drone_ship->latitude_rad) *
-                                                                   std::cos(m.drone_ship->longitude_rad - pad.longitude_rad));
-    std::printf("[falcon9] drone ship %.0f km from the pad\n", distance_m / 1e3);
-    CHECK(distance_m > 450e3);
-    CHECK(distance_m < 750e3);
 }
 
 TEST_CASE("Starting the drone-ship mission puts the ship out as the landing zone", "[sim][falcon9][asds]") {
+    // The onboard computer chooses the drone ship (the RTLS return leaves the upper stage short of this orbit) and puts
+    // it at the stage's predicted impact (sim::plan_launch).
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
-    sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, start());
+    const auto plan = sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, start());
+    REQUIRE(plan.feasible);
+    CHECK(plan.recovery.kind == sim::RecoveryKind::DroneShip);
     REQUIRE(session.landing_zone());
     REQUIRE(session.landing_zone()->deck);
-    CHECK(session.landing_zone()->latitude_rad == m.drone_ship->latitude_rad);
-    CHECK(session.landing_zone()->height_m == m.drone_ship->sea_height_m + 3.0);
+    CHECK(session.landing_zone()->latitude_rad == plan.recovery.latitude_rad);
+    CHECK(session.landing_zone()->height_m == sim::drone_ship_sea_height_m + 3.0);
+    // The ship waits ~600 km down the ground track (spec), north-east of the Cape.
+    const auto pad = config::load_launch_site(STARSIM_CONFIG_DIR, m.site_id);
+    const auto& ship = *session.landing_zone();
+    const double distance_m = constants::wgs84_semi_major_axis_m * std::acos(std::sin(pad.latitude_rad) * std::sin(ship.latitude_rad) +
+                                                               std::cos(pad.latitude_rad) * std::cos(ship.latitude_rad) *
+                                                                   std::cos(ship.longitude_rad - pad.longitude_rad));
+    std::printf("[falcon9] drone ship %.0f km from the pad\n", distance_m / 1e3);
+    CHECK(distance_m > 450e3);
+    CHECK(distance_m < 750e3);
     CHECK(session.autopilot().state != sim::AutopilotState::Off);
     CHECK(session.returns_after_staging(session.body(0).vehicle()));
     CHECK(session.return_parameters(session.body(0).vehicle().stages().front().config).boostback == false);
@@ -365,7 +367,7 @@ TEST_CASE("Starting the drone-ship mission puts the ship out as the landing zone
 
 TEST_CASE("A plain launch after a mission does not inherit its autopilot", "[sim][falcon9][asds]") {
     // Review finding: start_mission engages the autopilot; a later free launch on the same session must start idle.
-    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_rtls");  // a quicker plan than the ASDS
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
     const auto t0 = start();
     sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
@@ -534,12 +536,16 @@ TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage lan
 
 namespace {
 
-// The drone ship where the mission puts it.
-sim::LaunchSite ship_of_mission() {
-    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds");
-    const auto& d = *m.drone_ship;
-    return sim::drone_ship_site(config::load_drone_ship(STARSIM_CONFIG_DIR, d.id), d.latitude_rad, d.longitude_rad,
-                                d.sea_height_m, d.heading_rad);
+// The drone ship where the onboard computer puts it for the mission (sim::plan_launch: the stage's predicted impact).
+const sim::LaunchSite& ship_of_mission() {
+    static const sim::LaunchSite ship = [] {
+        sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+        sim::start_ascent_mission(session, config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds"),
+                                  STARSIM_CONFIG_DIR, start());
+        REQUIRE(session.landing_zone());
+        return *session.landing_zone();
+    }();
+    return ship;
 }
 
 // The nominal drone-ship mission, flown once: the first stage 10 s after the separation and at

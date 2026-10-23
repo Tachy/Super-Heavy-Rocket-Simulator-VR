@@ -21,8 +21,10 @@ mode = "pad"
 [launch_window]
 earliest_utc = "2026-10-20T00:00:00"   # 13 days before the lunar epoch (2026-11-02): the window closing the 48 h phasing
 search_days = 12.0                # [E] (5 days found none: the depot phase, as for the tanker); the HLS waits until the lunar epoch
-insertion_s = 421.4               # [D] ascent Task 2 (r5: 428.3): liftoff -> insertion of the flown HLS ascent
-insertion_arc_deg = 11.37         # [D] ascent Task 2 (r5: 11.68): inertial in-plane arc pad -> insertion, flown
+insertion_s = 415.7               # [D] ascent Task 5 (Task 2: 421.4, r5: 428.3): liftoff -> insertion of the flown HLS
+                                  # ascent (the planned kick)
+insertion_arc_deg = 11.78         # [D] ascent Task 5 (Task 2: 11.37, r5: 11.68): inertial in-plane arc pad -> insertion,
+                                  # flown
 
 [phasing]
 mission_limit_h = 48.0            # [E] uncrewed

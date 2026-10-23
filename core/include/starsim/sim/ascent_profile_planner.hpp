@@ -5,6 +5,7 @@
 #include <string>
 
 #include "starsim/config/mission_config.hpp"
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -36,6 +37,8 @@ inline constexpr double drone_ship_prediction_after_separation_s = 10.0;
 std::optional<LaunchSite> recovery_landing_site(const std::filesystem::path& config_dir, const RecoveryChoice& recovery);
 
 // A launch from a pad the onboard computer plans before liftoff (ascent trajectory and staging, Task 3).
+// Threads: the planner reads `like`'s interpolated ephemeris and orientation, whose caches fill lazily and are not
+// thread-safe - run it on the thread that ticks `like` (the simulation thread, inside a posted command), never beside it.
 struct AscentProfileRequest {
     std::string vehicle_id;
     std::string site_id;
@@ -46,6 +49,9 @@ struct AscentProfileRequest {
     double payload_kg = 0.0;
     bool fairing = true;
     RecoveryChoice recovery;  // the first stage's return (plan_launch chooses it)
+    // The stack as placed instead of vehicle_id with payload_kg / fairing / payload (a study's changed vehicle, a free
+    // launch of a loaded configuration): flown as given and never memoised (its id names the file it was changed from).
+    std::optional<config::VehicleConfig> stack;
 };
 
 // The first stage's impact predicted without a boostback, drone_ship_prediction_after_separation_s after its
@@ -82,8 +88,9 @@ inline constexpr double kick_tolerance_rad = 0.1 * constants::deg_to_rad;
 // request's stack on its pad, booster return on (MECO at the return's planned propellant), the ascent autopilot with
 // the kick `kick_angle_rad`, flown at the flight's tick to the upper stage's cutoff (the booster's return itself is not
 // flown: the MECO plan settles it). Returns the propellant (oxidizer + fuel) left in the upper stage once the engines'
-// tail-off has ended; NaN when the flight is infeasible (no cutoff before the stage runs dry, the orbit flown off the
-// target, the booster's return not planned or its MECO plan unusable: not finite, or a boostback without its Lambert arc;
+// tail-off has ended; NaN when the flight is infeasible (no cutoff before the stage runs dry, the orbit off the target
+// by more than 5 km as the guidance aims it - a circular target on the radius flown over the next revolution, an
+// elliptic one on the osculating apsides at cutoff -, the booster's return not planned or its MECO plan unusable: not finite, or a boostback without its Lambert arc;
 // a drone-ship request whose stage impact cannot be predicted).
 double fly_ascent_trial(const FlightSession& like, const AscentProfileRequest& request, double kick_angle_rad);
 
@@ -103,5 +110,11 @@ AscentProfile plan_ascent_profile(const FlightSession& like, const AscentProfile
 // boostback, its Lambert arc found (BoosterReturnGuidance::boostback_delta_v_mps) - a failed arc counts no boostback.
 // request.recovery is ignored (chosen here); the result carries the recovery and the target flown.
 AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest request);
+
+// Every launch from a pad (Task 5: missions, mission chains, the free launch): `session`'s stack, placed on the request's
+// site and clamped, is planned (plan_launch with `session` as `like`) and, when feasible, flown - the chosen landing
+// zone or drone ship set, the booster's return on, the ascent autopilot engaged with the target flown and the planned
+// kick. Refused: the autopilot is left as it is (off on a fresh pad), a scheduled liftoff called off. Returns the plan.
+AscentProfile engage_planned_ascent(FlightSession& session, const AscentProfileRequest& request);
 
 }  // namespace starsim::sim

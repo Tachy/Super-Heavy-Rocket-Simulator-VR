@@ -45,11 +45,14 @@ public:
                             double heading_deg, double tdb_s);
     // Launch from a site of config/launch_sites.toml (with its catch tower, if it has one).
     // countdown_s > 0: the vehicle stands clamped on the pad and liftoff is scheduled at tdb_s + max(countdown_s, the
-    // ignition lead); the ascent autopilot (engaged by the game's external view) lifts off at T-0. Without it the T-
-    // clock (mission_timeline) counts down to T-0 and holds there until a liftoff. The mission log (mission_timeline)
-    // starts fresh with every launch (also launch_from_pad).
+    // ignition lead); the ascent autopilot lifts off at T-0. Without it the T-clock (mission_timeline) counts down to
+    // T-0 and holds there until a liftoff. The mission log (mission_timeline) starts fresh with every launch (also
+    // launch_from_pad). `ascent_target` ({periapsis_km, apoapsis_km, inclination_deg, northerly}; empty: the vehicle is
+    // only placed): the onboard computer then plans the launch on the simulation thread - autopilot_status()["planning"],
+    // the snapshot and the clock hold on the pad meanwhile ("Startvorbereitung") - and engages the ascent autopilot with
+    // the booster's return; a refused plan makes the command not ok with the German reason (the vehicle stays on the pad).
     int64_t launch_from_site(const godot::String& vehicle_id, const godot::String& site_id, double heading_deg,
-                             double tdb_s, double countdown_s = 0.0);
+                             double tdb_s, double countdown_s = 0.0, const godot::Dictionary& ascent_target = {});
     // Mission of config/missions by its [mission] kind: an ascent starts at `tdb_s` (payload, pad, landing zone or drone
     // ship, booster return, ascent autopilot); a capsule return at its own epoch (mission_start_tdb_s()) with the deorbit
     // planned; a lunar landing (from LEO) or lunar return (from lunar orbit) at its own epoch with all legs planned; not ok
@@ -99,6 +102,8 @@ public:
     int64_t stage();
 
     // Guidance and manoeuvres.
+    // On a clamped stack the onboard computer plans the launch first (as launch_from_site with a target); not ok with
+    // the German reason when it refuses.
     int64_t engage_ascent_autopilot(double periapsis_km, double apoapsis_km, double inclination_deg, bool northerly);
     int64_t disengage_autopilot();
     // External view: a free-flying controlled body with the autopilot off goes to the state Orbit
@@ -284,6 +289,9 @@ private:
     // Commands that need an active flight: refused with a German message otherwise.
     std::uint64_t post_active(const char* name, std::function<Outcome(sim::FlightSession&)> command);
     void observe(const sim::FlightSession& session, time::Epoch epoch);  // worker: builds and publishes the snapshot
+    // worker: the ascent autopilot engaged as the onboard computer does (FlightSession::engage_ascent_autopilot(target));
+    // on a clamped stack the planning flag is published first (the snapshot on the pad while the plan runs)
+    Outcome engage_planned(sim::FlightSession& session, const gnc::AscentTarget& target);
     void emit_finished();                                                // main thread: command_finished signals
 
     // Members the worker uses are declared before runner_, so the runner (and its thread) is destroyed first.

@@ -233,14 +233,17 @@ flow separation (vacuum engines).
 - `crew_dragon_return.toml`: capsule return from orbit (`config::load_capsule_return_mission`,
   `sim::place_capsule_return_mission`): `[mission]` `vehicle`, `zone` (`splashdown_zones.toml`); `[orbit]` epoch, heights,
   inclination, RAAN, argument of latitude, `rcs_propellant_kg`; `[deorbit]` as the ship's.
-- `falcon9_rtls.toml` (`config::load_ascent_mission`): `[mission]` vehicle, launch `site`, optional `landing_zone` (a
-  site of kind `landing_zone`: the first stage returns to it), `heading_deg`, `payload_t`, `fairing`; `[target]` orbit;
-  `[pitch_program]` `kick_deg` (the first stage's throttle comes from its `max_ascent_throttle` and `max_dynamic_pressure_pa`).
+- `falcon9_rtls.toml` (`config::load_ascent_mission`): `[mission]` vehicle, launch `site`, `heading_deg`, `payload_t`,
+  `fairing`; `[target]` orbit. No profile and no recovery: the onboard computer plans them at the start
+  (`sim::plan_launch`: the pitch kick by trial flights, the tower catch, the site's landing zone (RTLS) or a drone ship at
+  the stage's predicted impact; the first stage's throttle comes from its `max_ascent_throttle` and
+  `max_dynamic_pressure_pa`). The loader refuses `[pitch_program]`, `kick_deg`, `booster_throttle`, `landing_zone` and
+  `[drone_ship]`.
 - `falcon9_crew_dragon.toml`: the same keys with a `[payload]` table instead of `payload_t` (exclusive): `vehicle` (a
   vehicle of `vehicles/`, stacked on the launcher by `config::stack_payload`), `separation_delay_s` (after the upper
   stage's cutoff), `separation_dv_mps` (spring push), `nose_cone_open_s` (after the separation; < 0: stays closed).
-- `falcon9_asds.toml`: the same keys; instead of a `landing_zone` a `[drone_ship]` table (`id`, `latitude_deg`,
-  `longitude_deg`, `heading_deg` of the deck's long axis, `sea_height_m` above WGS84): the first stage lands on its deck.
+- `falcon9_asds.toml`: the same keys; the Starlink-class payload leaves the RTLS return short of the orbit, so the
+  computer sends the drone ship (`drone_ships.toml`) to the stage's predicted impact and the stage lands on its deck.
 - `hls_lunar_llo.toml`, `hls_lunar_nrho.toml` (`kind = "lunar_landing"`, `config::load_lunar_landing_mission`,
   `sim::place_lunar_landing_mission`): `[mission]` `vehicle`, `site`
   (`lunar_sites.toml`, must exist); `[orbit]` scenario start (`epoch_utc`, `height_km`, `inclination_deg`,

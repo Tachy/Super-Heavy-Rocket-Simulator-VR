@@ -1,6 +1,6 @@
 # Refuelling r5: the HLS's ascent from Starbase towards the phasing orbit below the 200 km depot, as the tanker's
 # (tanker_ascent.toml): insertion at a 120 km perigee, raised to 170 km at the first apoapsis (hls_refuel [phasing]
-# periapsis_km). The pitch program is starship_leo's; the booster is caught.
+# periapsis_km). The pitch program is planned at the start (sim::plan_launch); the booster is caught.
 [mission]
 name = "HLS in den Phasenorbit"
 display_name = "Mondlander in den Phasenorbit" # shown in the webcast overlay (no trademarks)
@@ -15,6 +15,3 @@ periapsis_km = 120.0          # insertion; raised to 170 km at apoapsis
 apoapsis_km = 190.0
 inclination_deg = 26.5
 northerly = true
-
-[pitch_program]
-kick_deg = 14.0

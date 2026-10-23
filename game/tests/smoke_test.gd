@@ -156,6 +156,18 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	_check(not f9.landing_zone().get("present", true), "a plain launch has no landing zone")
 	_check(f9.mission_site_id() == "ccsfs_slc40", "plain launch: its site")
 	_check(f9.body_legs(7).is_empty() and f9.body_grid_fins(7).is_empty(), "invalid body index: empty results")
+	# ascent Task 5: a free launch with a target is planned on the pad; a site without a tower refuses Super Heavy
+	var refused := FlightSim.new()
+	refused.setup(config_dir)
+	var target := {"periapsis_km": 200.0, "apoapsis_km": 200.0, "inclination_deg": 26.5, "northerly": true}
+	var refusal_id := refused.launch_from_site("starship_block3", "ccsfs_slc40", 0.0, tdb, 10.0, target)
+	refused.wait_idle(60.0)
+	var refusal: Dictionary = refused.result(refusal_id)
+	_check(refusal.get("done", false) and not refusal.get("ok", true)
+			and str(refusal.get("message", "")) == "Kein Fangturm am Startplatz.",
+			"Starship at SLC-40: the launch is refused with the German reason (%s)" % str(refusal))
+	_check(refused.is_active() and refused.autopilot_status().get("state", "") == "aus"
+			and not refused.autopilot_status().get("planning", true), "refused launch: on the pad, autopilot off, not planning")
 	var ship := FlightSim.new()
 	ship.setup(config_dir)
 	_check(_ok(ship, ship.launch_from_site("starship_block3", "starbase_olp1", 0.0, tdb)), "Starship launches")

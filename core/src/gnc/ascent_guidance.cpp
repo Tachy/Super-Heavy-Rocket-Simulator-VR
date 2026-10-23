@@ -254,7 +254,7 @@ GuidanceCommand AscentGuidance::open_loop(const vehicle::FlightBody& body, const
 void AscentGuidance::update_insertion(const Vec3& r_hat, double r, double vt, double t_go,
                                       const vehicle::FlightEnvironment& env, time::Epoch epoch) {
     const double j2 = env.gravity.central_j2();
-    const bool circular = std::abs(target_.apoapsis_altitude_m - target_.periapsis_altitude_m) < 1.0;
+    const bool circular = circular_target(target_);
     if (j2 == 0.0 || !circular) return;
     const Vec3 pole = env.earth_orientation.fixed_to_gcrf(epoch).rotation * Vec3{0.0, 0.0, 1.0};
     const Vec3 node = math::normalized(cross(pole, plane_normal_));
