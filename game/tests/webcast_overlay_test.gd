@@ -105,6 +105,10 @@ func _test_values() -> void:
 	_check(absf(WebcastOverlay.gauge_value("speed_surface", t, docking) - 360.0) < 1e-9, "surface speed in km/h")
 	_check(absf(WebcastOverlay.gauge_value("speed_inertial", t, docking) - 1800.0) < 1e-9, "inertial speed in km/h")
 	_check(absf(WebcastOverlay.gauge_value("altitude", t, docking) - 12.5) < 1e-9, "altitude in km")
+	# on the pad: the ellipsoidal altitude is negative (pad below WGS84), the gauge shows the height above the ground
+	var pad := {"altitude_m": -21.11 + 40.0, "altitude_terrain_m": 40.0}
+	_check(absf(WebcastOverlay.gauge_value("altitude", pad, docking) - 0.04) < 1e-9,
+			"altitude gauge: above the ground, not above the ellipsoid")
 	_check(WebcastOverlay.gauge_value("vertical_speed", t, docking) == -20.0, "vertical speed in m/s")
 	_check(WebcastOverlay.gauge_value("apoapsis", t, docking) == 210.0, "apoapsis in km")
 	_check(WebcastOverlay.gauge_value("periapsis", t, docking) == 190.0, "periapsis in km")

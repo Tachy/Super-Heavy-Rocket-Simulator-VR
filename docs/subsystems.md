@@ -2685,7 +2685,9 @@ and on the geoid at sea; rendering of the tiles is Plan B (the interim `GroundPa
   ground at each body's `ground_height_m` (the site height), the sites' sea config, the coarse geoid for the sea. Tests
   (not `[data]`) run that way with the derived site heights; the game and the `[data]` tests load the terrain
   (`bindings/src/flight_sim.cpp` loads it when `data/` holds it). Guidance always aims at the baked site height, which
-  the plateau reproduces exactly. Telemetry `altitude_terrain_m` is above the terrain when set.
+  the plateau reproduces exactly. Telemetry `altitude_terrain_m` is above the terrain when set, else above the flat
+  ground (`altitude_m - ground_height_m`): the webcast altitude gauge and the HUD show it (0-ish on the pad; the
+  ellipsoidal `altitude_m` is negative there), the gauge situation thresholds keep `altitude_m`.
 - **Known issue (Task 4, not fixed):** landing legs creep downhill at ~0.054 m/s on slopes >= 2 deg (the regularised
   friction in `contact/landing_legs.cpp`, a `PlaneField` the same) and are never judged landed there. The plateaus are
   flat, so no site landing is affected; an off-plateau touchdown on a slope stays "moving".

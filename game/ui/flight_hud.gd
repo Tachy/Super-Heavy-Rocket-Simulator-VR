@@ -29,7 +29,8 @@ func _process(_delta: float) -> void:
 	var clock_prefix := "Rampe " if t["clamped"] else "T+"
 	lines.append("%s%02d:%02d   %s" % [clock_prefix, int(absf(mission)) / 60, int(absf(mission)) % 60,
 			sim.body_stages(index).map(func(s: Dictionary) -> String: return s["name"])[-1] if sim.body_count() > 0 else ""])
-	lines.append("Höhe            %9.2f km" % (t["altitude_m"] / 1000.0))
+	lines.append("Höhe über Grund %9.2f km" % (t["altitude_terrain_m"] / 1000.0))
+	lines.append("  über WGS84    %9.2f km" % (t["altitude_m"] / 1000.0))
 	lines.append("Geschwindigkeit %9.0f km/h" % (t["speed_relative_mps"] * 3.6))
 	lines.append("  inertial (Bezugskörper) %9.0f m/s" % t["speed_inertial_mps"])
 	lines.append("  inertial Erde %9.0f m/s" % t.get("speed_earth_mps", 0.0))

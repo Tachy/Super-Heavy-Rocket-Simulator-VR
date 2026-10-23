@@ -187,7 +187,9 @@ static func gauge_value(id: String, t: Dictionary, docking: Dictionary) -> float
 			return 100.0 * float(t.get("propellant_kg", 0.0)) / capacity if capacity > 0.0 else 0.0
 		"speed_surface": return float(t.get("speed_relative_mps", 0.0)) * 3.6
 		"speed_inertial": return float(t.get("speed_inertial_mps", 0.0)) * 3.6
-		"altitude": return float(t.get("altitude_m", 0.0)) / 1000.0
+		# above the ground below (the terrain, else the flat pad ground): 0 on the pad like the webcast dial; the
+		# ellipsoidal altitude_m is negative there (pads lie below WGS84 on the US coasts)
+		"altitude": return float(t.get("altitude_terrain_m", t.get("altitude_m", 0.0))) / 1000.0
 		"vertical_speed": return float(t.get("vertical_speed_mps", 0.0))
 		"apoapsis": return float(t.get("apoapsis_altitude_km", 0.0))
 		"periapsis": return float(t.get("periapsis_altitude_km", 0.0))

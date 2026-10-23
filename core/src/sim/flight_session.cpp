@@ -1241,8 +1241,10 @@ vehicle::FlightTelemetry FlightSession::telemetry(size_t index) const {
     t.altitude_terrain_m = t.altitude_m;
     if (t.reference_body == ephemeris::Body::Moon && moon_terrain_) {
         t.altitude_terrain_m -= moon_terrain_->height_m(t.latitude_rad, t.longitude_rad);
-    } else if (t.reference_body == ephemeris::Body::Earth && earth_terrain_) {
-        t.altitude_terrain_m -= earth_terrain_->height_ellipsoid_m(t.latitude_rad, t.longitude_rad);
+    } else if (t.reference_body == ephemeris::Body::Earth) {
+        // Without the Earth terrain the physics' ground is flat at the body's ground height (the pad elevation).
+        t.altitude_terrain_m -= earth_terrain_ ? earth_terrain_->height_ellipsoid_m(t.latitude_rad, t.longitude_rad)
+                                               : bodies_.at(index).body->ground_height_m();
     }
     return t;
 }

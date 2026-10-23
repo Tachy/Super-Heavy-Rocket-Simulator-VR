@@ -315,7 +315,11 @@ TEST_CASE("flat model unchanged without terrain", "[session][earth_terrain]") {
         REQUIRE(s->body(0).resting());
         CHECK(s->body(0).ground_height_m() == lz.height_m);
         CHECK(bottom_geodetic(*s, 0).height_m == Catch::Approx(lz.height_m).margin(1e-6));
-        CHECK(s->telemetry(0).altitude_terrain_m == s->telemetry(0).altitude_m);
+        // above the flat ground (the pad elevation, negative ellipsoidal at LZ-40): the CG height over the pad
+        const auto t = s->telemetry(0);
+        CHECK(t.altitude_terrain_m == Catch::Approx(t.altitude_m - lz.height_m).margin(1e-9));
+        CHECK(t.altitude_terrain_m ==
+              Catch::Approx(s->body(0).vehicle().mass_properties().cg_station_m).margin(0.01));
         CHECK(s->leg_landing().surface().field == nullptr);
         CHECK(s->leg_landing().surface().sea.has_value() == lz.sea.has_value());
     }

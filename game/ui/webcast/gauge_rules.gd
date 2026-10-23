@@ -62,6 +62,8 @@ static func in_transfer(t: Dictionary, state: Dictionary, config: GaugeConfig = 
 
 
 ## Every named condition (CONDITIONS) of the telemetry / body: name -> bool.
+## The altitude thresholds (100 km and up) compare the altitude above the reference body's shape (WGS84 / sphere):
+## orbit and transfer are about the body, not the ground below, and tens of metres of terrain do not matter there.
 static func _conditions(t: Dictionary, body: Dictionary, state: Dictionary, config: GaugeConfig) -> Dictionary:
 	var altitude_m := float(t.get("altitude_m", 0.0))
 	var engines := main_engines(body.get("engines", []))

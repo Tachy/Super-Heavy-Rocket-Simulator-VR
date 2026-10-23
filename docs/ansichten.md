@@ -168,7 +168,9 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   Bahn, je nach Situation: **Annäherung** (Abstand, Annäherungsgeschwindigkeit, Höhe, Geschwindigkeit), **Transfer**
   (Abstand und Geschwindigkeit zu Erde und Mond, Höhe > 5000 km und Apoapsis > 100000 km), **Orbit** (inertiale
   Geschwindigkeit, Höhe, Apo-/Periapsis), sonst (Oberflächengeschwindigkeit, Höhe, Vertikalgeschwindigkeit,
-  inertiale Geschwindigkeit). Höchstens 4 Anzeigen je Seite; sinnlose Werte (Mach/g am Boden) werden ausgeblendet und
+  inertiale Geschwindigkeit). Die Höhe-Anzeige zeigt die Höhe über dem Boden darunter (Gelände, sonst der flache
+  Boden der Physik): 0 auf der Rampe wie im Webcast; die Schwellen der Situationen (Orbit, Transfer) vergleichen die
+  Höhe über dem Ellipsoid. Höchstens 4 Anzeigen je Seite; sinnlose Werte (Mach/g am Boden) werden ausgeblendet und
   neue Anzeigen halten 5 s. Treibstoff ist **eine** Anzeige: Treibstoff (Haupt- und Header-Tanks), also aller
   Treibstoff der Haupttriebwerke des Körpers in Prozent der Füllung. Das Triebwerksbild
   hat dieselbe Größe wie die runden Anzeigen. Die Zuordnung soll später datengetrieben in

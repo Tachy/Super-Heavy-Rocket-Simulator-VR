@@ -64,6 +64,14 @@ func _ok(sim: FlightSim, id: int) -> bool:
 
 
 ## Advances to `tdb_s` and waits until the simulation thread has reached it.
+## The [[site]] entry of config/launch_sites.toml with this id (empty if missing).
+func _site(config_dir: String, id: String) -> Dictionary:
+	for site: Dictionary in TomlLite.load_file(config_dir.path_join("launch_sites.toml")).get("site", []):
+		if site.get("id", "") == id:
+			return site
+	return {}
+
+
 func _advance(sim: FlightSim, tdb_s: float) -> void:
 	sim.advance_to(tdb_s)
 	sim.wait_idle(60.0)
@@ -160,9 +168,11 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	_check(zone.get("has_deck", false) and absf(float(zone.get("deck_length_m", 0.0)) - 91.0) < 1e-9 and sea_ok,
 			"ASDS: the drone ship's deck from the config, on the geoid")
 	if ship_sea.get("present", false):  # the Earth terrain (data/ fetched): the ship's sea is water, OLP-1 its plateau
-		var olp := f9.earth_surface(25.99686, -97.15394)
-		_check(ship_sea.get("water", false) and not olp.get("water", true)
-				and absf(float(olp.get("height_m", 0.0)) - 10.0) < 1e-6, "Earth terrain: sea at the ship, pad plateau at OLP-1")
+		var olp_site := _site(config_dir, "starbase_olp1")  # the plateau height and position come from the config
+		var olp := f9.earth_surface(float(olp_site.get("latitude_deg", 0.0)), float(olp_site.get("longitude_deg", 0.0)))
+		_check(not olp_site.is_empty() and ship_sea.get("water", false) and not olp.get("water", true)
+				and absf(float(olp.get("height_m", INF)) - float(olp_site.get("height_m", NAN))) < 1e-6,
+				"Earth terrain: sea at the ship, pad plateau at OLP-1")
 	else:
 		print("  (Erdgelände fehlt: earth_surface not checked)")
 	var legs: Dictionary = f9.body_legs(0)
