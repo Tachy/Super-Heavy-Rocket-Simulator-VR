@@ -78,6 +78,7 @@ struct CatchRun {
     bool tower_struck = false;
     sim::LandingOutcome outcome = sim::LandingOutcome::Flying;
     sim::ReturnResult result = sim::ReturnResult::Flying;  // ship returns: caught / upright abort / lost
+    gnc::ScvxLandingGuidance::Statistics scvx;  // of the SCvx landing burn, booster or ship (zero without one)
     bool caught_within_tolerance() const {
         return tower_phase == sim::CatchPhase::Caught && contact && offset_m < 1.0 && lateral_mps < 0.5;
     }
@@ -121,6 +122,15 @@ inline CatchRun fly_landing(sim::FlightSession& session, const frames::BodyOrien
         run.tower_struck = tower->tower_struck();
     }
     run.outcome = session.landing_outcome(0);
+    if (const auto* g = session.return_guidance(0); g && g->scvx()) {
+        run.scvx = g->scvx()->statistics();
+    } else if (const auto* s = session.ship_landing(0); s && s->scvx()) {
+        run.scvx = s->scvx()->statistics();
+    }
+    // The LQR's clipping (the descent model's gaps show here): one line per landing burn for the campaign tables.
+    std::printf("  [scvx clip] %d plans (%d failed), gimbal use <= %.2f (clipped %d of %d ticks), last 10 s <= %.2f (%d of %d)\n",
+                run.scvx.plans, run.scvx.failures, run.scvx.peak_gimbal_use, run.scvx.clipped_ticks, run.scvx.lateral_ticks,
+                run.scvx.terminal_peak_gimbal_use, run.scvx.terminal_clipped_ticks, run.scvx.terminal_ticks);
     return run;
 }
 

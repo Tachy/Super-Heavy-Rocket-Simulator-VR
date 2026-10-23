@@ -39,6 +39,13 @@ private:
     std::vector<double> cd_;
 };
 
+// Generic Jorgensen cross-flow of a body without an identified CrossflowCurve [E]: crossflow efficiency eta of a
+// finite cylinder and the cross-flow drag coefficient C_dc of a circular cylinder (NASA TR R-474).
+constexpr double generic_crossflow_efficiency = 0.68;
+constexpr double generic_crossflow_drag_coefficient = 1.2;
+// Centre of pressure of the potential (nose) term behind the tip, fraction of the nose length (ogive, Barrowman).
+constexpr double ogive_cp_fraction = 0.466;
+
 struct SlenderBodyGeometry {
     double length_m = 0.0;
     double diameter_m = 0.0;
@@ -78,6 +85,12 @@ public:
                        bool powered, double mean_free_path_m = 0.0) const;
 
     const SlenderBodyGeometry& geometry() const { return geometry_; }
+    double reference_area_m2() const { return reference_area_m2_; }
+    // Continuum cross-flow coefficient eta * C_dc at a Mach number: the identified curve, else the generic value.
+    double continuum_crossflow_cd(double mach) const;
+    // Station (from the bottom of the body) where the potential (nose) term acts; the cross-flow term acts at
+    // half the length.
+    double potential_station_m() const;
     const AxialDragCurve& drag_curve() const { return drag_; }
     // Table for the given flight direction (tail first falls back to the nose-first table).
     const AxialDragCurve& drag_curve(bool tail_first) const {

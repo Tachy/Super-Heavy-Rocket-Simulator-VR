@@ -87,6 +87,14 @@ void visit_model(F& f, DescentModel& m) {
     f("model.reference_area_m2", m.reference_area_m2);
     f("model.cd_by_mach", m.cd_by_mach);
     f("model.mach_step", m.mach_step);
+    // Hull normal force: a request dumped before it existed has none of these lines and replays without it.
+    f("model.crossflow_cd_by_mach", m.crossflow_cd_by_mach);
+    f("model.planform_area_m2", m.planform_area_m2);
+    f("model.crossflow_station_above_cg_m", m.crossflow_station_above_cg_m);
+    f("model.potential_term", m.potential_term);
+    f("model.potential_station_above_cg_m", m.potential_station_above_cg_m);
+    f("model.crossflow_enabled", m.crossflow_enabled);
+    f("model.normal_force_scale", m.normal_force_scale);
     f("model.density_kg_m3", m.density_kg_m3);
     f("model.speed_of_sound_mps", m.speed_of_sound_mps);
     f("model.height_step_m", m.height_step_m);
@@ -131,6 +139,7 @@ void visit_settings(F& f, ScvxSettings& s) {
     f("settings.usable_primal_residual", s.usable_primal_residual);
     f("settings.trust_region_growth", s.trust_region_growth);
     f("settings.stall_iterations", s.stall_iterations);
+    f("settings.fresh_stall_iterations", s.fresh_stall_iterations);
     f("settings.stall_ratio", s.stall_ratio);
     f("settings.stall_virtual_control", s.stall_virtual_control);
     visit(f, "settings.kinematic_guess_s", s.kinematic_guess_s);

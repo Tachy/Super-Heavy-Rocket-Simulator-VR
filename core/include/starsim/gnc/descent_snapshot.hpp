@@ -68,6 +68,9 @@ struct SnapshotSettings {
     // Pad landing: every final-set node this close to the touchdown point (soft; 0: no limit). A final set that can
     // hardly steer sideways (the HLS's landing thrusters on the RCS) must take over above the point (lunar l4).
     double pad_final_set_radius_m = 0.0;
+    // Measured over tabulated hull aerodynamics for the model's normal force (DescentModel::normal_force_scale): the
+    // booster return's online drag estimate at landing-burn ignition (it is frozen while the engines run); 1 without.
+    double normal_force_scale = 1.0;
 };
 
 // Everything the planner needs, taken on the simulation thread (the worker must not touch SPICE, the environment

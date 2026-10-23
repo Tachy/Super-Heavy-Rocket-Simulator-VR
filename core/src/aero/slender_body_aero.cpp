@@ -9,9 +9,6 @@ namespace starsim::aero {
 
 namespace {
 
-constexpr double crossflow_efficiency = 0.68;      // eta [E]
-constexpr double crossflow_drag_coefficient = 1.2;  // C_dc of a circular cylinder [E]
-constexpr double ogive_cp_fraction = 0.466;          // potential CP behind the tip, fraction of nose length
 constexpr double free_molecular_drag_coefficient = 2.2;  // [E] diffuse reflection, per projected area
 
 double interpolate(const std::vector<double>& x, const std::vector<double>& y, double at) {
@@ -66,6 +63,14 @@ CrossflowCurve::CrossflowCurve(const config::CsvTable& table)
 
 double CrossflowCurve::cd(double mach) const { return empty() ? 0.0 : interpolate(mach_, cd_, mach); }
 
+double SlenderBodyAero::continuum_crossflow_cd(double mach) const {
+    return crossflow_.empty() ? generic_crossflow_efficiency * generic_crossflow_drag_coefficient : crossflow_.cd(mach);
+}
+
+double SlenderBodyAero::potential_station_m() const {
+    return geometry_.length_m - ogive_cp_fraction * geometry_.nose_length_m;
+}
+
 double AxialDragCurve::cd(double mach, bool powered) const {
     if (empty()) return 0.0;
     return interpolate(mach_, powered ? cd_power_on_ : cd_power_off_, mach);
@@ -112,9 +117,7 @@ AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, dou
     const double potential =
         (1.0 - w) * (geometry_.nose_length_m > 0.0 ? std::abs(std::sin(2.0 * alpha) * std::cos(0.5 * alpha)) : 0.0);
     const double planform_ratio = geometry_.length_m * geometry_.diameter_m / reference_area_m2_;
-    const double continuum_crossflow =
-        crossflow_.empty() ? crossflow_efficiency * crossflow_drag_coefficient : crossflow_.cd(result.mach);
-    const double crossflow = (1.0 - w) * continuum_crossflow + w * free_molecular_drag_coefficient;
+    const double crossflow = (1.0 - w) * continuum_crossflow_cd(result.mach) + w * free_molecular_drag_coefficient;
     const double viscous = crossflow * planform_ratio * sin_a * sin_a;
     const double normal_force = (potential + viscous) * q_area;
 
@@ -123,7 +126,7 @@ AeroResult SlenderBodyAero::compute(const math::Vec3& air_velocity_body_mps, dou
         result.force_body_n += cross_velocity * (-normal_force / cross_speed);
     }
     // Centre of pressure of the normal force: weighted potential (nose) and viscous (mid-length) parts.
-    const double nose_station = geometry_.length_m - ogive_cp_fraction * geometry_.nose_length_m;
+    const double nose_station = potential_station_m();
     const double total = potential + viscous;
     if (total > 0.0) {
         result.normal_force_station_m = (potential * nose_station + viscous * 0.5 * geometry_.length_m) / total;

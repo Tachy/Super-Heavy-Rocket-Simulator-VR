@@ -57,9 +57,10 @@ struct EngineSetModel {
 
 // Planning model of the landing burn (documented simplifications): rigid body with constant inertia and CG,
 // thrust at a gimbal point on the axis, mass flow proportional to thrust, tail-first axial drag along the
-// motion through still air, gravity constant over the pad, Coriolis and centrifugal terms of the rotating
-// plan frame; no grid fins, no wind. Air data and drag are tabulated so the model owns all its data (the
-// planner can run on a worker thread).
+// motion through still air, the hull's normal force (the flight model's slender body: Jorgensen cross-flow term
+// at mid-length, potential term at the nose of a body that has one) with its moment, gravity constant over the
+// pad, Coriolis and centrifugal terms of the rotating plan frame; no grid fins, no wind. Air data and drag are
+// tabulated so the model owns all its data (the planner can run on a worker thread).
 struct DescentModel {
     std::array<EngineSetModel, descent_phases> engine_sets;  // per phase: ignition, divert, final set
     double gimbal_lever_m = 0.0;                // CG above the gimbal point
@@ -67,6 +68,18 @@ struct DescentModel {
     double reference_area_m2 = 0.0;
     std::vector<double> cd_by_mach;             // every mach_step from Mach 0
     double mach_step = 0.05;
+    // Hull normal force (aero::SlenderBodyAero, continuum): cross-flow q * planform * cd_x(M) * sin^2(alpha) at
+    // mid-length and, for a body with a nose, the potential term q * A_ref * |sin 2 alpha| cos(alpha / 2) at the
+    // nose's centre of pressure; both perpendicular to the body axis against the air velocity's cross component.
+    std::vector<double> crossflow_cd_by_mach;   // eta * C_dc every mach_step from Mach 0
+    double planform_area_m2 = 0.0;              // length x diameter
+    double crossflow_station_above_cg_m = 0.0;  // mid-length relative to the CG (moment arm, + towards the nose)
+    bool potential_term = false;                // body with a nose (the ship); flat-topped boosters have none
+    double potential_station_above_cg_m = 0.0;  // the nose term's centre of pressure relative to the CG
+    bool crossflow_enabled = true;              // A/B switch for the normal force (both terms)
+    // Measured over tabulated hull aerodynamics (the return guidance's online drag estimate, BoosterReturnGuidance::
+    // drag_scale; 1 without one): scales both normal-force terms.
+    double normal_force_scale = 1.0;
     std::vector<double> density_kg_m3;          // every height_step_m above the pad
     std::vector<double> speed_of_sound_mps;
     double height_step_m = 50.0;
@@ -75,6 +88,13 @@ struct DescentModel {
     math::Vec3 earth_center_m;                  // Earth centre in the plan frame
 
     DescentState derivative(const DescentState& x, const math::Vec3& thrust_body_n, int phase) const;
+    // The hull normal force and its moment about the CG at a state, body axes (zero when disabled, in vacuum or
+    // without air speed); the landing LQR cancels the same moment that the plan contains.
+    struct HullNormalForce {
+        math::Vec3 force_body_n;
+        math::Vec3 moment_body_nm;
+    };
+    HullNormalForce hull_normal_force(const DescentState& x) const;
     // Central differences; a = d derivative / d x, b = d derivative / d thrust.
     void jacobians(const DescentState& x, const math::Vec3& thrust_body_n, int phase, Mat14x14& a, Mat14x3& b) const;
 };

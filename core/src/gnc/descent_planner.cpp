@@ -235,6 +235,7 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
                                  double elapsed) {
     const int n = settings.nodes_per_phase;
     const int max_iterations = warm_start ? settings.max_iterations : settings.fresh_max_iterations;
+    const int stall_iterations = warm_start ? settings.stall_iterations : settings.fresh_stall_iterations;
     DescentPlan plan;
     plan.nodes_per_phase = n;
     plan.start_phase = start_phase;
@@ -324,8 +325,12 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
         const double previous_final_mass = plan.reference.x.back()[descent_index::mass];
         plan.virtual_control = sub.virtual_control(result.x);
         virtual_controls.push_back(plan.virtual_control);
-        if (it >= settings.stall_iterations && plan.virtual_control > settings.stall_virtual_control &&
-            plan.virtual_control > settings.stall_ratio * virtual_controls[static_cast<size_t>(it - settings.stall_iterations)]) {
+        if (std::getenv("STARSIM_DEBUG_SCVX_SOLVER")) {  // diagnostics: the virtual control per SCvx iteration
+            std::printf("  [scvx it] it %d goal %d vc %.3g step %.3g\n", it, static_cast<int>(target.goal),
+                        plan.virtual_control, sub.max_step(result.x));
+        }
+        if (it >= stall_iterations && plan.virtual_control > settings.stall_virtual_control &&
+            plan.virtual_control > settings.stall_ratio * virtual_controls[static_cast<size_t>(it - stall_iterations)]) {
             plan.last_step = sub.max_step(result.x);
             plan.reference = sub.unpack(result.x);
             return plan;  // stalled: not converged

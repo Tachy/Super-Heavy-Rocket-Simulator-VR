@@ -64,7 +64,7 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   level thrust gave ~10 % too little thrust at low throttle). Lateral tracking is an LQR on the
   gimbaled-rocket dynamics (`gnc/tvc_lateral`); plans use <= 30 % of the gimbal limit, the LQR effort is 0.2 x the
   gimbal authority. The coast phase already rolls the pins towards the arms. Planning model: constant CG/inertia,
-  no grid fins, no wind; no re-plans in the last 3 s. The explicit laws remain the fallback.
+  the hull normal force (Task 8, below "Mid-burn clipping"), no grid fins, no wind; no re-plans in the last 3 s. The explicit laws remain the fallback.
   Switch windows [E]: 13 -> 5 at 180-220 m/s sink (5 engines seen at ~200 m/s on flights 13/14), 5 -> 3 calm at
   15-30 m/s (satnews 2025-10-05: V3 ends in a hover on 3 engines).
   Full return: caught, 51.0 t at landing-burn ignition (planned 51 t, flight 14 gauge; the MECO plan budgets 1.7 t [D] of
@@ -138,7 +138,7 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
 - SCvx landing planner (M6, Plan 3a; flown since Plan 3b): `gnc/descent_*` plans the landing burn in
   `descent_phases` = 3 engine phases (13 -> 5 -> 3; 10 nodes per phase, neighbours share a node)
   in the plan frame (origin pad centre on the ground, x up, y east, z north; upright = identity attitude):
-  `descent_model` (14-state rigid body, tabulated air/drag, Coriolis + centrifugal, numeric Jacobians;
+  `descent_model` (14-state rigid body, tabulated air/drag and hull normal force, Coriolis + centrifugal, numeric Jacobians;
   `make_descent_model` builds it from the booster on the simulation thread), `descent_discretization` (FOH +
   RK4 sensitivities), `descent_problem` (convex subproblem in scaled deviations: thrust/gimbal/tilt/rate/glide
   cones, catch or sea-abort goal with tower keep-out; a shared phase node has the next set's bounds, engine
@@ -2150,7 +2150,62 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   at ~10 deg angle of attack, which the planning model lacks (axial drag along the motion only). The velocity error
   grows ~4 m/s^2 within each plan and the 1 s re-plans absorb it (plans lengthen by ~2 s each, then settle below
   ~600 m as q falls). A real authority shortfall against a model gap, not a margin question: no allowance fixes it.
-  Follow-up: cross-flow normal force in `descent_model`.
+  Follow-up: cross-flow normal force in `descent_model` - done (Task 8, next item).
+- **Hull normal force in the planning model (follow-ups Task 8, 2026-10-23).** Shared physics for every vehicle that
+  plans with `descent_model` (Falcon 9, Super Heavy, the ship, the HLS - in vacuum it is zero):
+  - Model: the flight model's slender body (`aero::SlenderBodyAero`): the Jorgensen cross-flow term
+    `q L D cd_x(M) sin^2 a` at mid-length (`crossflow_cd_by_mach` = eta C_dc from the stage's `CrossflowCurve`, else the
+    built-in `aero::generic_crossflow_efficiency` 0.68 x `generic_crossflow_drag_coefficient` 1.2, now named in
+    `slender_body_aero.hpp`, `SlenderBodyAero::continuum_crossflow_cd`) and, for a body with a nose (the ship), the
+    potential term `q A |sin 2a| cos(a/2)` at the ogive's centre of pressure (`potential_station_m`), both against the
+    air velocity's cross component, with their moments about the CG (`DescentModel::hull_normal_force`). Potential
+    term choice: at 10 deg tail first it is ~12 % of the ship's normal force but acts at the nose (the long arm), so the
+    ship's model carries it; the boosters' flat tops have none. Continuum only (no free-molecular blend: landing burns
+    fly below 3 km). Grid fins and flaps stay out of the plan (fins feathered, flaps cancelled by the allocation).
+    Checked against `SlenderBodyAero::compute` to 1e-6 (`[descent]`: Falcon 9 at 1.2 km / 250 m/s / 10 deg: 3.36 m/s^2
+    lateral, the force the planner lacked; ship with the nose term; moment sign and value; Jacobians).
+  - The return guidance's online drag estimate (`BoosterReturnGuidance::drag_scale`, frozen at landing-burn ignition)
+    scales the planned normal force (`DescentModel::normal_force_scale`, via `SnapshotSettings`); the axial drag table
+    of the plan stays unscaled as before (open: scaling it too).
+  - The landing LQR is consistent with the plan: its command and the plan's feed-forward are the net tilt acceleration,
+    which contains the hull moment; `ScvxLandingGuidance::update` cancels the model's moment at the measured state and
+    gives the gimbals the rest (clipping and gimbal use count that part). A booster's torque goes to the gimbals as it
+    is; the ship's allocation cancels its modelled moment (hull + flaps) itself, so it gets the net torque. Before, a
+    booster's gimbals were asked for the plan's whole tilt acceleration and the real hull moment came on top: with the
+    moment in the plan that counted it twice (first measurement: RTLS clipping 0 -> 446 ticks, peak 0.67 -> 4.25).
+  - SCvx stall rule: fresh plans (no warm start) wait `ScvxSettings::fresh_stall_iterations` 4 [E] (re-plans keep 3).
+    Super Heavy's sea abort from ~350 m (test "A commanded abort late in the landing burn ...") passes a transient of
+    its virtual control with the normal force (37.3, 2.72, 6.19, 6.59, 2.27, converged at iteration 17); at 3 it was
+    called stalled, the sea requirement was dropped and the pull-only abort landed the booster 31 m from the tower.
+    Fixture `tests/validation/fixtures/scvx/superheavy_abort_sea_353m.txt`. Abort test (A -> B): 1500 m Wasserung
+    630 m / 25.7 t -> 552 m / 12.4 t; 800 m 1372 m / 0.0 t -> 549 m / 10.0 t; 400 m 539 m / 5.7 t -> 532 m / 6.1 t.
+  - A/B measurement (A = `STARSIM_DEBUG_NO_CROSSFLOW=1`: the planner without the normal force; B = all of the above;
+    clipped LQR ticks summed over a test case's burns, of all lateral ticks; peak = largest gimbal use; no case clips
+    in its last 10 s in A or B):
+
+    | Test case | burns | A clipped | B clipped | A peak | B peak |
+    |---|---|---|---|---|---|
+    | Falcon 9 ASDS MECO states 1/2 | 11 | 11379 / 82038 | 0 / 82456 | 8.21 | 0.98 |
+    | Falcon 9 ASDS MECO states 2/2 | 10 | 9421 / 72696 | 0 / 73036 | 7.89 | 0.95 |
+    | Falcon 9 ASDS at ignition | 21 | 18970 / 151176 | 237 / 151618 | 7.93 | 1.97 |
+    | Falcon 9 RTLS at ignition | 21 | 0 / 110642 | 0 / 110620 | 0.67 | 0.72 |
+    | Super Heavy catch campaign | 21 | 0 / 126073 | 0 / 125972 | 0.71 | 0.74 |
+    | Super Heavy nominal + deterministic | 3 | 0 | 0 | 0.68 | 0.66 |
+    | Ship catch campaign (failed plans) | 21 | 0 / 86877 (6) | 39 / 85609 (1) | 0.80 | 1.09 |
+    | Lunar-return seed-18 gate (ship) | 1 | 0 / 4195 | 20 / 4060 | 0.92 | 1.06 |
+    | Ship flip/catch, abort, Mach 2.6 entry, return campaigns | 1-4 | 0 | 0 | <= 0.92 | <= 0.85 |
+
+    Outcomes (A -> B): every campaign as before - ASDS 11/11, 10/10, 21/21 landed (>= 4983 -> >= 4986 kg), RTLS 21/21
+    (>= 5747 -> >= 5744 kg, sink <= 1.02 -> 1.05 m/s), Super Heavy catch 21/21, ship catch campaign 20 of 21 (the
+    known engine-failure case) - and all 198 cases of the labels descent, scvx, scvx_landing, landing, catch, asds,
+    rtls, falcon9, ship, booster, replanner pass.
+  - Result: the drone-ship mid-burn clipping is gone in the MECO campaigns and down 99 % at ignition (237 ticks, peak
+    1.97, in a few dispersed cases); the ship now clips a little where it did not (39 + 20 ticks, peaks ~1.1, none in the
+    last 10 s). Follow-up: those remaining ticks (the ship's flaps, which the allocation cancels from the flight model
+    while the plan has none; the ASDS ignition dispersions), and the plan's axial drag under the online estimate.
+  - Diagnostics: `STARSIM_DEBUG_NO_CROSSFLOW=1` (plans without the normal force: the A/B baseline),
+    `STARSIM_DEBUG_SCVX_SOLVER=1` now also prints the virtual control per SCvx iteration (`[scvx it]`), every
+    `test::fly_landing` prints a `[scvx clip]` line.
 - **Fix 3 - the abort decision** (the RTLS "cannot reach the landing zone" case, lit 900 m beyond the zone, broke at
   0.45: Aufprall on land 520 m from the zone instead of the water beyond 650 m). Replays: the first pad plan converges,
   but only by tilting the single-engine final phase to ~25 deg against its 10 deg limit (soft limit; fixture

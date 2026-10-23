@@ -245,3 +245,19 @@ TEST_CASE("A plan that reaches its target only beyond the final set's tilt limit
     REQUIRE(replan.converged);
     CHECK(replan.planned_tilt_excess < std::sin(0.5 * ScvxLandingParameters{}.max_planned_tilt_excess_rad));
 }
+
+TEST_CASE("A fresh sea-abort plan passes a transient of its virtual control and reaches the water", "[gnc][descent][scvx][catch]") {
+    // Super Heavy, the catch given up at ~350 m CG height (83 m/s down; test "A commanded abort late in the landing
+    // burn ...", recorded with STARSIM_DUMP_SCVX once the model had the hull normal force). From the straight-line guess
+    // the virtual control runs 37.3, 2.72, 6.19, 6.59, 2.27 before it collapses (iteration 17): a stall rule over 3
+    // iterations gave the sea up at the fifth, and the pull-only abort then landed the booster beside the tower.
+    const auto r = read_plan_request(std::string(STARSIM_FIXTURE_DIR) + "/scvx/superheavy_abort_sea_353m.txt");
+    REQUIRE(r.target.goal == DescentGoal::Abort);
+    REQUIRE(!r.warm_start);
+    DescentPlanner planner;
+    const auto plan = default_plan_function()(planner, r);
+    REQUIRE(plan.converged);
+    const Vec3 end = state_position(plan.reference.x.back());
+    const Vec3 sea = normalized(r.target.sea_target_m);
+    CHECK(dot(end, sea) >= r.target.sea_min_distance_m - 1.0);  // beyond the shoreline
+}

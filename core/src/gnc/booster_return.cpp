@@ -423,6 +423,7 @@ void BoosterReturnGuidance::start_landing(const vehicle::FlightBody& body, const
     // A pad landing ends on one engine whose minimum thrust exceeds the weight: no exponential approach (infeasible at
     // the end, see DescentLimits::approach_time_constant_s).
     if (site_.pad) p.settings.limits.approach_time_constant_s = 0.0;
+    p.snapshot.normal_force_scale = drag_scale_;  // the measured hull aerodynamics also scale the planned normal force
     scvx_ = std::make_unique<ScvxLandingGuidance>(site_, p);
     if (abort_requested_) scvx_->request_abort();
     if (!scvx_->start(body, env, epoch)) {

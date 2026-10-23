@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 #include "starsim/math/constants.hpp"
 
@@ -35,6 +36,36 @@ Vec3 state_velocity(const DescentState& x) { return {x[4], x[5], x[6]}; }
 Quat state_attitude(const DescentState& x) { return {x[7], x[8], x[9], x[10]}; }
 Vec3 state_rate(const DescentState& x) { return {x[11], x[12], x[13]}; }
 
+DescentModel::HullNormalForce DescentModel::hull_normal_force(const DescentState& x) const {
+    HullNormalForce result;
+    const Vec3 v = state_velocity(x);
+    const double speed = norm(v);
+    if (!crossflow_enabled || speed <= 1e-6) return result;
+    const double height = std::max(state_position(x).x, 0.0);
+    const double rho = normal_force_scale * interpolate(density_kg_m3, height_step_m, height);
+    if (rho <= 0.0) return result;
+    const double mach = speed / std::max(interpolate(speed_of_sound_mps, height_step_m, height), 1.0);
+    // Air velocity in body axes (still air); its cross component c sets the angle of attack:
+    // sin a = |c| / V. Written in c so that it stays smooth at a = 0 / pi (the Jacobians difference it).
+    const Vec3 air_body = state_attitude(x).normalized().inverse_rotate(v);
+    const Vec3 c{0.0, air_body.y, air_body.z};
+    const double c_norm = norm(c);
+    // Cross-flow term: q S_p cd_x sin^2 a along -c / |c| = -c (rho / 2) S_p cd_x |c|.
+    const Vec3 crossflow = c * (-0.5 * rho * planform_area_m2 * interpolate(crossflow_cd_by_mach, mach_step, mach) * c_norm);
+    result.force_body_n = crossflow;
+    result.moment_body_nm = cross(Vec3{crossflow_station_above_cg_m, 0.0, 0.0}, crossflow);
+    if (potential_term) {
+        // q A |sin 2a| cos(a/2) along -c / |c| = -c rho A |V_x| cos(a/2); 1 + cos a in its cancellation-free
+        // form tail first (cos a < 0): sin^2 a / (1 - cos a).
+        const double one_plus_cos = air_body.x >= 0.0 ? 1.0 + air_body.x / speed
+                                                       : c_norm * c_norm / (speed * (speed - air_body.x));
+        const Vec3 potential = c * (-rho * reference_area_m2 * std::abs(air_body.x) * std::sqrt(0.5 * one_plus_cos));
+        result.force_body_n += potential;
+        result.moment_body_nm += cross(Vec3{potential_station_above_cg_m, 0.0, 0.0}, potential);
+    }
+    return result;
+}
+
 DescentState DescentModel::derivative(const DescentState& x, const Vec3& u, int phase) const {
     const double m = x[descent_index::mass];
     const Vec3 r = state_position(x);
@@ -49,13 +80,14 @@ DescentState DescentModel::derivative(const DescentState& x, const Vec3& u, int 
         const double mach = speed / std::max(interpolate(speed_of_sound_mps, height_step_m, height), 1.0);
         drag = v * (-0.5 * rho * speed * reference_area_m2 * interpolate(cd_by_mach, mach_step, mach));
     }
+    const HullNormalForce hull = hull_normal_force(x);
     const Vec3& omega = earth_rate_radps;
-    const Vec3 acceleration = q.rotate(u) / m + drag / m + gravity_mps2 - cross(omega, v) * 2.0 -
-                              cross(omega, cross(omega, r - earth_center_m));
+    const Vec3 acceleration = q.rotate(u) / m + drag / m + q.normalized().rotate(hull.force_body_n) / m + gravity_mps2 -
+                              cross(omega, v) * 2.0 - cross(omega, cross(omega, r - earth_center_m));
     const Quat q_dot = math::attitude_rate(q, w);
     const Vec3 lever{-gimbal_lever_m, 0.0, 0.0};  // gimbal point relative to the CG, body axes
     const Vec3 h{inertia_kg_m2.x * w.x, inertia_kg_m2.y * w.y, inertia_kg_m2.z * w.z};
-    const Vec3 torque = cross(lever, u) - cross(w, h);
+    const Vec3 torque = cross(lever, u) + hull.moment_body_nm - cross(w, h);
     const auto& set = engine_sets[static_cast<size_t>(phase)];
     return make_state(-set.mass_flow_per_thrust_s_m * (norm(u) + set.pressure_thrust_loss_n), v, acceleration, q_dot,
                       {torque.x / inertia_kg_m2.x, torque.y / inertia_kg_m2.y, torque.z / inertia_kg_m2.z});
@@ -144,6 +176,18 @@ DescentModel make_descent_model(const DescentModelInputs& in) {
     m.reference_area_m2 = constants::pi * 0.25 * vehicle.diameter_m() * vehicle.diameter_m();
     const auto& drag = vehicle.aero().drag_curve(true);
     for (double mach = 0.0; mach <= table_mach + 1e-9; mach += m.mach_step) m.cd_by_mach.push_back(drag.cd(mach, true));
+    // Hull normal force: the flight model's slender body (its identified cross-flow curve or the generic value).
+    const auto& hull = vehicle.aero();
+    const auto& geometry = hull.geometry();
+    for (double mach = 0.0; mach <= table_mach + 1e-9; mach += m.mach_step) {
+        m.crossflow_cd_by_mach.push_back(hull.continuum_crossflow_cd(mach));
+    }
+    m.planform_area_m2 = geometry.length_m * geometry.diameter_m;
+    m.crossflow_station_above_cg_m = 0.5 * geometry.length_m - mass.cg_station_m;
+    m.potential_term = geometry.nose_length_m > 0.0;
+    m.potential_station_above_cg_m = hull.potential_station_m() - mass.cg_station_m;
+    // Diagnostics: STARSIM_DEBUG_NO_CROSSFLOW plans without the normal force (the A/B baseline of the clipping table).
+    m.crossflow_enabled = std::getenv("STARSIM_DEBUG_NO_CROSSFLOW") == nullptr;
     if (!in.atmosphere) {  // vacuum: one entry each (interpolate returns it)
         m.density_kg_m3 = {0.0};
         m.speed_of_sound_mps = {0.0};

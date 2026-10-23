@@ -363,7 +363,15 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
                                      axis_rate.y - ref_axis_rate.y, ref_axis_accel.y);
         const double uz = tilt_accel(p.z - ref.position_m.z, v.z - ref.velocity_mps.z, axis.z - ref.axis.z,
                                      axis_rate.z - ref_axis_rate.z, ref_axis_accel.z);
-        const double u_norm = std::hypot(uy, uz);
+        // uy, uz are the net tilt acceleration, as the plan's: it contains the hull normal force's moment. The model's
+        // moment at the measured state is cancelled out, the gimbals give the rest (the LQR's w' = u holds with it).
+        const auto hull = model_.hull_normal_force(x);
+        const Vec3 aero_alpha_plan = q.rotate(Vec3{hull.moment_body_nm.x / mass.inertia_kg_m2.x,
+                                                   hull.moment_body_nm.y / mass.inertia_kg_m2.y,
+                                                   hull.moment_body_nm.z / mass.inertia_kg_m2.z});
+        const Vec3 aero_tilt = cross(aero_alpha_plan, q.rotate({1.0, 0.0, 0.0}));
+        const double gy = uy - aero_tilt.y, gz = uz - aero_tilt.z;  // the gimbals' part
+        const double u_norm = std::hypot(gy, gz);
         const double u_scale = u_norm > alpha_max ? alpha_max / u_norm : 1.0;  // within the gimbals' reach
         const double use = alpha_max > 0.0 ? u_norm / alpha_max : 0.0;
         ++stats_.lateral_ticks;
@@ -376,7 +384,12 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
             const double feedback = alpha_max > 0.0 ? std::hypot(uy - ref_axis_accel.y, uz - ref_axis_accel.z) / alpha_max : 0.0;
             stats_.terminal_peak_feedback_use = std::max(stats_.terminal_peak_feedback_use, feedback);
         }
-        Vec3 alpha_body = to_body(Vec3{0.0, -uz * u_scale, uy * u_scale});  // axis'' = alpha x axis, axis ~ +x
+        // axis'' = alpha x axis, axis ~ +x. The allocation of a body with flaps (the ship) cancels its modelled
+        // aerodynamic moment itself and so takes the net torque; a booster's goes to the gimbals as it is.
+        const bool net_torque = body.vehicle().flap_count() > 0;
+        const double ty = gy * u_scale + (net_torque ? aero_tilt.y : 0.0);
+        const double tz = gz * u_scale + (net_torque ? aero_tilt.z : 0.0);
+        Vec3 alpha_body = to_body(Vec3{0.0, -tz, ty});
         // Roll: towards the pin reference (free roll without one), PD in body x.
         const double wr = parameters_.roll_frequency_rad_s;
         const double roll_rate = body.state().angular_velocity_body_radps.x - omega_body.x;
