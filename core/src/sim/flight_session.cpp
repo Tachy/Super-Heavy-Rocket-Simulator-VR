@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "starsim/config/geoid_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
@@ -43,6 +44,7 @@ FlightSession::FlightSession(const ephemeris::Ephemeris& ephemeris, const frames
                              std::filesystem::path config_dir, environment::PointMassGravityConfig gravity_config,
                              const frames::BodyOrientation* moon_orientation, bool interpolated_ephemeris)
     : config_dir_(std::move(config_dir)),
+      geoid_(config::load_coarse_geoid(config_dir_)),
       ephemeris_(ephemeris, interpolated_ephemeris ? ephemeris::InterpolatedEphemeris::default_node_spacing_s : 0.0),
       earth_cache_(earth, interpolated_ephemeris ? frames::InterpolatedOrientation::default_node_spacing_s : 0.0),
       moon_cache_(moon_orientation ? std::optional<frames::InterpolatedOrientation>(std::in_place, *moon_orientation,
@@ -490,9 +492,7 @@ void FlightSession::set_realtime_planning(bool realtime) {
 void FlightSession::set_launch_site(const LaunchSite& site) {
     launch_site_ = site;
     landing_zone_.reset();
-    contact::LandingSurface ground;
-    ground.sea = site.sea;
-    legs_ = std::make_unique<LegLandingSim>(site.latitude_rad, site.longitude_rad, site.height_m, std::move(ground), tick_s);
+    legs_ = earth_leg_site(site, false);
     tower_.reset();
     if (towers_enabled_ && site.tower) {
         tower_ = std::make_unique<CatchTowerSim>(*site.tower, site.latitude_rad, site.longitude_rad, site.height_m);
@@ -1239,8 +1239,46 @@ vehicle::FlightTelemetry FlightSession::telemetry(size_t index) const {
     t.altitude_terrain_m = t.altitude_m;
     if (t.reference_body == ephemeris::Body::Moon && moon_terrain_) {
         t.altitude_terrain_m -= moon_terrain_->height_m(t.latitude_rad, t.longitude_rad);
+    } else if (t.reference_body == ephemeris::Body::Earth && earth_terrain_) {
+        t.altitude_terrain_m -= earth_terrain_->height_ellipsoid_m(t.latitude_rad, t.longitude_rad);
     }
     return t;
+}
+
+void FlightSession::set_earth_terrain(std::shared_ptr<const environment::EarthTerrain> terrain) {
+    // Bodies resting on the Earth stand at the old ground: the order is terrain first, then placement.
+    for (size_t i = 0; i < bodies_.size(); ++i) {
+        if (bodies_[i].body->resting() && reference_body(i) == ephemeris::Body::Earth) {
+            throw std::runtime_error("Erdgelände muss vor dem Aufsetzen gesetzt werden");
+        }
+    }
+    earth_terrain_ = std::move(terrain);
+    env_.earth_terrain = earth_terrain_.get();
+    // An Earth leg site was built on the old ground: rebuild it from the landing zone or the launch site.
+    if (legs_->site().body == ephemeris::Body::Earth) {
+        legs_ = landing_zone_ ? earth_leg_site(*landing_zone_, true) : earth_leg_site(launch_site_, false);
+    }
+}
+
+double FlightSession::sea_height_m(double latitude_rad, double longitude_rad) const {
+    return earth_terrain_ ? earth_terrain_->geoid().undulation_m(latitude_rad, longitude_rad)
+                          : geoid_.undulation_m(latitude_rad, longitude_rad);
+}
+
+std::unique_ptr<LegLandingSim> FlightSession::earth_leg_site(const LaunchSite& site, bool landing_zone) const {
+    contact::LandingSurface ground;
+    if (landing_zone && site.deck) {
+        ground.deck = site.deck;
+    } else if (earth_terrain_) {
+        const LegSite leg_site{ephemeris::Body::Earth, site.latitude_rad, site.longitude_rad, site.height_m};
+        const auto frame = LegLandingSim::site_frame(leg_site, frames::wgs84);
+        ground.field = std::make_shared<contact::TerrainField>(vehicle::reference_body_of(env_, ephemeris::Body::Earth),
+                                                               frame.origin_fixed_m, frame.site_to_fixed, earth_terrain_);
+        return std::make_unique<LegLandingSim>(leg_site, frames::wgs84, std::move(ground), tick_s);
+    } else {
+        ground.sea = site.sea;
+    }
+    return std::make_unique<LegLandingSim>(site.latitude_rad, site.longitude_rad, site.height_m, std::move(ground), tick_s);
 }
 
 void FlightSession::set_landing_surface(double latitude_rad, double longitude_rad, double height_m,

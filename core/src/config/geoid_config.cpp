@@ -21,7 +21,7 @@ constexpr double centimetre = 0.01;
 environment::Geoid load_coarse_geoid(const std::filesystem::path& config_dir) {
     const auto path = config_dir / "geoid" / "egm2008_1deg.csv";
     std::ifstream in(path);
-    if (!in) throw ConfigError("geoid grid not found: " + path.string());
+    if (!in) throw ConfigError("Geoid-Gitter fehlt: " + path.string() + " (erzeugt von tools/data_pipeline/geoid.py)");
     environment::GeographicGrid g;
     const int samples = coarse_columns - 1;
     g.grid = {coarse_lines, samples, centimetre, {}};

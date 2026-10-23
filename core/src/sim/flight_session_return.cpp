@@ -384,13 +384,7 @@ gnc::BoosterReturnParameters FlightSession::return_parameters(const config::Stag
 
 void FlightSession::set_landing_zone(const LaunchSite& zone) {
     landing_zone_ = zone;
-    contact::LandingSurface ground;
-    if (zone.deck) {
-        ground.deck = zone.deck;
-    } else {
-        ground.sea = zone.sea;
-    }
-    legs_ = std::make_unique<LegLandingSim>(zone.latitude_rad, zone.longitude_rad, zone.height_m, std::move(ground), tick_s);
+    legs_ = earth_leg_site(zone, true);
 }
 
 void FlightSession::apply_return_command(const Flying& flying, const gnc::AttitudeController& controller,

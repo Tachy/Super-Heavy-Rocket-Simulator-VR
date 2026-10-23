@@ -57,6 +57,9 @@ struct FlightEnvironment {
     // Fidelity flag (refuelling r2): cryogenic propellant in the hull tanks of stages with [stage.thermal] boils off
     // by the hull heat balance (vehicle/boil_off.hpp) in free flight above FlightBody::boil_off_min_altitude_m.
     bool boil_off = true;
+    // M8: the Earth's surface (reference_body_of sets it on the Earth). nullptr: the flat model - the ground at each
+    // body's ground_height_m (the old model, kept for comparison runs and the guidance planners' predictions).
+    const environment::Terrain* earth_terrain = nullptr;
 };
 
 // Air data at the start of the last tick (what an air-data system would report to the controllers).
@@ -70,7 +73,7 @@ struct FlightTelemetry {
     // Position and relative velocity refer to the reference body (Earth: WGS84 / ITRF; Moon: sphere / MOON_ME).
     ephemeris::Body reference_body = ephemeris::Body::Earth;
     double altitude_m = 0.0;              // above the reference body's shape
-    // Above the ground below (Moon: the terrain if loaded; Earth: = altitude_m until the Earth DEM, M8). Set by
+    // Above the ground below (Moon: the terrain if loaded; Earth: the Earth terrain if set, else = altitude_m). Set by
     // FlightSession::telemetry.
     double altitude_terrain_m = 0.0;
     double latitude_rad = 0.0;
@@ -190,9 +193,15 @@ public:
     // Air velocity (body frame) of a point on the axis at `station_m`: the CG's plus omega x r (last tick's air data).
     math::Vec3 point_air_velocity_body_mps(double station_m) const;
 
-    // Flat ground at this height above WGS84 when the reference body is the Earth (the pad elevation); at the Moon the
-    // ground is the Moon's terrain (lunar l2; the sphere without one).
+    // Flat ground at this height above WGS84 when the reference body is the Earth without terrain (the pad elevation);
+    // with the Earth terrain (FlightEnvironment::earth_terrain) and at the Moon the ground is the body's terrain (the
+    // shape without one; lunar l2, M8).
     double ground_height_m() const { return ground_height_m_; }
+    // Ground below a body-fixed point: the terrain (or the bare shape) of the body; the Earth without terrain: the flat
+    // ground_height_m.
+    double ground_height_at(const environment::ReferenceBody& body, const math::Vec3& fixed_m) const {
+        return body.id() == ephemeris::Body::Earth && !body.terrain() ? ground_height_m_ : body.surface_height_m(fixed_m);
+    }
     void set_ground_height(double height_m) { ground_height_m_ = height_m; }
     // Sink rate (m/s, relative to the rotating Earth) at the first ground / water contact.
     std::optional<double> touchdown_sink_mps() const { return touchdown_sink_mps_; }
@@ -260,10 +269,6 @@ private:
     void follow_pad(const environment::BodyFrame& frame);
     void resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame);
     void update_air_data(const environment::ReferenceBody& body, const environment::BodyFrame& frame);
-    // Ground below a body-fixed point: the flat pad height on the Earth, the terrain (or the sphere) elsewhere.
-    double ground_height_at(const environment::ReferenceBody& body, const math::Vec3& fixed_m) const {
-        return body.id() == ephemeris::Body::Earth ? ground_height_m_ : body.surface_height_m(fixed_m);
-    }
     void judge_parachute_loads();
 
     std::unique_ptr<Vehicle> vehicle_;

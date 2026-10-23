@@ -46,7 +46,16 @@ void FlightSession::set_crew_escape(std::optional<config::CrewEscapeConfig> conf
 
 double FlightSession::crew_height_m(const vehicle::FlightBody& body) const {
     const auto t = earth_.fixed_to_gcrf(epoch_);
-    return frames::fixed_to_geodetic(transpose(t.rotation) * body.state().position_gcrf_m).height_m - body.ground_height_m();
+    const math::Vec3 fixed = transpose(t.rotation) * body.state().position_gcrf_m;
+    return frames::fixed_to_geodetic(fixed).height_m -
+           (earth_terrain_ ? earth_terrain_->height_at_fixed_m(fixed) : body.ground_height_m());
+}
+
+bool FlightSession::crew_over_water(const math::Vec3& fixed_m) const {
+    if (earth_terrain_) return earth_terrain_->water_at_fixed(fixed_m);
+    if (!launch_site_.sea) return false;
+    const auto enu = site_enu_m(launch_site_, fixed_m);
+    return over_water(*launch_site_.sea, enu.x, enu.y);
 }
 
 void FlightSession::crew_arm(const std::string& reason, bool early) {
@@ -96,7 +105,7 @@ void FlightSession::crew_judge(size_t member) {
     if (body.resting() || body.impacted()) {  // touchdown (first tick on the surface)
         if (!m.touchdown_enu_m) {
             m.touchdown_enu_m = site_enu_m(launch_site_, r_itrf);
-            m.touchdown_over_water = launch_site_.sea && over_water(*launch_site_.sea, m.touchdown_enu_m->x, m.touchdown_enu_m->y);
+            m.touchdown_over_water = crew_over_water(r_itrf);
             m.touchdown_sink_mps = c.sink_mps[member];
             char text[96];
             std::snprintf(text, sizeof text, "zu hart aufgesetzt (%.1f m/s)", m.touchdown_sink_mps);
@@ -197,8 +206,7 @@ void FlightSession::run_crew_escape() {
         const double h = crew_height_m(*ship.body);
         const auto telemetry = ship.body->telemetry(env_, epoch_);
         const auto t = earth_.fixed_to_gcrf(epoch_);
-        const auto enu = site_enu_m(launch_site_, transpose(t.rotation) * ship.body->state().position_gcrf_m);
-        const bool water = launch_site_.sea && over_water(*launch_site_.sea, enu.x, enu.y);
+        const bool water = crew_over_water(transpose(t.rotation) * ship.body->state().position_gcrf_m);
         if (gnc::inside_seat_envelope(c.config, h, telemetry.dynamic_pressure_pa) &&
             (!st.early || water || h <= c.config.min_firing_height_m)) {
             c.fire_epoch = epoch_;
@@ -260,8 +268,8 @@ void FlightSession::run_crew_escape() {
                 const auto& sea = *launch_site_.sea;
                 st.ship_impact_shore_distance_m =
                     enu.x * std::sin(sea.direction_rad) + enu.y * std::cos(sea.direction_rad) - sea.shoreline_distance_m;
-                st.ship_impact_over_water = over_water(sea, enu.x, enu.y);
             }
+            st.ship_impact_over_water = crew_over_water(transpose(t.rotation) * s.position_gcrf_m);
         } else {
             c.ship_speed_mps = norm(s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), s.position_gcrf_m));
         }

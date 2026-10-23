@@ -232,6 +232,7 @@ environment::ReferenceBody reference_body_of(const FlightEnvironment& env, ephem
         env.earth_orientation, env.atmosphere,
         env.ephemeris ? env.ephemeris->gm_m3ps2(ephemeris::Body::Earth) : constants::earth_gm_m3ps2);
     earth.set_air_density_factor(env.air_density_factor);
+    earth.set_terrain(env.earth_terrain);  // nullptr: the flat model (FlightBody::ground_height_at)
     return earth;
 }
 
@@ -504,7 +505,8 @@ void FlightBody::step(const FlightEnvironment& env, time::Epoch epoch, double dt
     resolve_ground_contact(body, body.frame(epoch + dt_s));
 }
 
-// Ground = flat at ground_height_m_ (the pad elevation) on the Earth (terrain: M8); the terrain on the Moon (lunar l2).
+// Ground = the reference body's terrain (Earth: M8, Moon: lunar l2; the bare shape without one); the Earth without
+// terrain: flat at ground_height_m_ (the pad elevation).
 // Gentle contact: the ground carries the vehicle (it rests, co-rotating with the Earth, and lifts off as
 // soon as thrust exceeds weight). Hard contact (sink rate or tilt too large): impact.
 void FlightBody::resolve_ground_contact(const environment::ReferenceBody& body, const environment::BodyFrame& frame) {

@@ -29,6 +29,8 @@
 
 #include "starsim/aero/radiative_heating.hpp"
 #include "starsim/environment/atmosphere.hpp"
+#include "starsim/environment/earth_terrain.hpp"
+#include "starsim/environment/geoid.hpp"
 #include "starsim/environment/gravity.hpp"
 #include "starsim/environment/reference_body.hpp"
 #include "starsim/ephemeris/interpolated_ephemeris.hpp"
@@ -685,6 +687,19 @@ public:
     const environment::LunarTerrain* moon_terrain() const { return moon_terrain_.get(); }
     // Shared with other threads (immutable): the game's terrain queries (l6).
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_shared() const { return moon_terrain_; }
+    // Earth terrain (M8 Plan A) for the ground contact of every body at the Earth, the leg sites of the launch site and
+    // landing zone (a TerrainField; a drone ship keeps its deck), the crew escape's water and altitude_terrain_m.
+    // nullptr: the flat model (ground at each body's ground_height_m, the sites' sea config) - kept for comparison runs.
+    // Guidance planners keep the flat site height and the site's sea. Set it before bodies rest on the Earth; it
+    // rebuilds an Earth leg site from the landing zone or the launch site (set a custom landing surface afterwards).
+    void set_earth_terrain(std::shared_ptr<const environment::EarthTerrain> terrain);
+    const environment::EarthTerrain* earth_terrain() const { return earth_terrain_.get(); }
+    // Shared with other threads (immutable): the game's terrain queries.
+    std::shared_ptr<const environment::EarthTerrain> earth_terrain_shared() const { return earth_terrain_; }
+    // The coarse 1-degree EGM2008 geoid (config/geoid), loaded in the constructor.
+    const environment::Geoid& geoid() const { return geoid_; }
+    // Mean sea level above the WGS84 ellipsoid: the terrain's fine geoid when set, else the coarse one.
+    double sea_height_m(double latitude_rad, double longitude_rad) const;
     const LegLandingSim& leg_landing() const { return *legs_; }
     LegTouchdown leg_touchdown(size_t body_index) const { return legs_->touchdown(*bodies_.at(body_index).body); }
     std::vector<double> leg_crushed_m(size_t body_index) const { return legs_->crushed_m(*bodies_.at(body_index).body); }
@@ -1009,7 +1024,12 @@ private:
     void crew_arm(const std::string& reason, bool early);
     void crew_fire_seat(size_t member);
     void crew_judge(size_t member);
-    double crew_height_m(const vehicle::FlightBody& body) const;  // above the flat site ground
+    double crew_height_m(const vehicle::FlightBody& body) const;  // above the ground (terrain, else the flat site ground)
+    // Water below an Earth-fixed point: the Earth terrain when set, else the launch site's sea config (false without).
+    bool crew_over_water(const math::Vec3& fixed_m) const;
+    // The legs' site at a launch site / landing zone: its deck (a landing zone only), else the Earth terrain's field,
+    // else the plane with the site's sea.
+    std::unique_ptr<LegLandingSim> earth_leg_site(const LaunchSite& site, bool landing_zone) const;
 
     vehicle::VehicleCommand command_for(size_t index, double ambient_pressure_pa) const;
     vehicle::VehicleCommand steering_command_for(size_t index, double ambient_pressure_pa) const;
@@ -1040,6 +1060,8 @@ private:
     std::vector<vehicle::FlightBody*> body_pointers() const;
 
     std::filesystem::path config_dir_;
+    environment::Geoid geoid_;  // coarse (config/geoid/egm2008_1deg.csv)
+    std::shared_ptr<const environment::EarthTerrain> earth_terrain_;  // M8; nullptr: the flat model
     // the sources as the session uses them (interpolated or passed through, see the constructor)
     ephemeris::InterpolatedEphemeris ephemeris_;
     frames::InterpolatedOrientation earth_cache_;
