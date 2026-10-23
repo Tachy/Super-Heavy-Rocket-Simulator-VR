@@ -73,6 +73,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         sub.du.push_back(b.add_variables(3, "du"));
     }
     sub.ds = b.add_variables(descent_phases, "ds");
+    sub.final_tilt_slack.assign(static_cast<size_t>(K), -1);
     std::vector<optim::VariableBlock> abs_nu;
     for (int k = 0; k < K - 1; ++k) {
         sub.nu.push_back(b.add_variables(14, "nu"));
@@ -218,6 +219,8 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         // Tilt and rate limits are soft (exact L1 penalty): right after the engine switch the booster may still turn
         // faster than the final set allows, and a re-plan must stay feasible while that dies out.
         const int tilt_slack = penalised(weights.attitude_violation, "tilt_slack");  // quaternion (y, z) norm over
+        // the final set's nodes after the switch node (that one still carries the outgoing set's attitude)
+        if (p == final_phase && k > final_phase * (n - 1)) sub.final_tilt_slack[at(k)] = tilt_slack;
         const int rate_slack = penalised(weights.attitude_violation, "rate_slack");  // rad/s over
         b.add_second_order_cone({AffineExpr{std::sqrt(0.5 * (1.0 - std::cos(tilt)))}.add(tilt_slack, 1.0),
                                  X(k, descent_index::attitude + 2),
@@ -431,6 +434,14 @@ double DescentSubproblem::virtual_control(const std::vector<double>& s) const {
         for (int i = 0; i < 14; ++i) sum += std::abs(s[static_cast<size_t>(block[i])]);
     }
     return sum;
+}
+
+double DescentSubproblem::max_final_tilt_slack(const std::vector<double>& s) const {
+    double largest = 0.0;
+    for (const int v : final_tilt_slack) {
+        if (v >= 0) largest = std::max(largest, s[static_cast<size_t>(v)]);
+    }
+    return largest;
 }
 
 double DescentSubproblem::max_step(const std::vector<double>& s) const {

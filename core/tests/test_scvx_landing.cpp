@@ -8,6 +8,7 @@
 #include "return_scenario.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/gnc/scvx_landing.hpp"
+#include "starsim/gnc/ship_landing.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
 
@@ -189,4 +190,37 @@ TEST_CASE("Re-plans may draw on part of the propellant reserve, the first plan k
     CHECK(soft_reserve_kg[0] == 0.0);
     CHECK(soft_reserve_kg[1] == parameters.replan_reserve_fraction * parameters.snapshot.reserve_kg);
     CHECK(soft_reserve_kg[1] > 0.0);
+}
+
+TEST_CASE("Abort plans may draw on the whole reserve, the ship's header reserve stays hard", "[gnc][scvx_landing]") {
+    Fixture f;
+    std::vector<double> abort_soft_reserve_kg;
+    gnc::PlanFunction no_catch = [&abort_soft_reserve_kg](gnc::DescentPlanner& planner, const gnc::PlanRequest& r) {
+        auto plan = gnc::default_plan_function()(planner, r);
+        if (r.target.goal == gnc::DescentGoal::Catch) plan.converged = false;
+        else abort_soft_reserve_kg.push_back(r.settings.limits.soft_reserve_kg);
+        return plan;
+    };
+    const auto parameters = f.parameters();
+    gnc::ScvxLandingGuidance guidance(f.session->return_site(f.body->vehicle()), parameters, no_catch);
+    REQUIRE(guidance.start(*f.body, f.session->environment(), f.t0));
+    REQUIRE(abort_soft_reserve_kg.size() == 1);
+    CHECK(abort_soft_reserve_kg[0] == parameters.abort_reserve_fraction * parameters.snapshot.reserve_kg);
+    CHECK(parameters.abort_reserve_fraction == 1.0);
+    const auto ship = gnc::ship_landing_parameters().scvx;
+    CHECK(ship.replan_reserve_fraction == 0.0);
+    CHECK(ship.abort_reserve_fraction == 0.0);
+}
+
+TEST_CASE("A first plan that needs the final set beyond its tilt limit starts with the abort", "[gnc][scvx_landing]") {
+    Fixture f;
+    gnc::PlanFunction beyond = [](gnc::DescentPlanner& planner, const gnc::PlanRequest& r) {
+        auto plan = gnc::default_plan_function()(planner, r);
+        if (r.target.goal == gnc::DescentGoal::Catch) plan.planned_tilt_excess = 0.2;  // ~23 deg over the limit
+        return plan;
+    };
+    gnc::ScvxLandingGuidance guidance(f.session->return_site(f.body->vehicle()), f.parameters(), beyond);
+    REQUIRE(guidance.start(*f.body, f.session->environment(), f.t0));
+    CHECK(guidance.aborting());
+    CHECK(guidance.statistics().failures == 1);
 }

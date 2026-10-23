@@ -632,10 +632,10 @@ void report_campaign(const char* name, const std::vector<AsdsDispersion>& cases,
         const auto run = fly(cases[i]);
         CAPTURE(i);
         std::printf("%s case %2zu: %s, contact %.2f m, sink %.2f m/s, lateral %.2f m/s, ended %.2f m off, %.0f kg left "
-                    "(aero x%.2f); %d plans (%d failed), gimbal use <= %.2f (clipped %d of %d ticks), last 10 s <= %.2f (%d of %d)\n", name, i,
+                    "(aero x%.2f); %d plans (%d failed), gimbal use <= %.2f (clipped %d of %d ticks), last 10 s <= %.2f, feedback %.2f (%d of %d)\n", name, i,
                     sim::to_string(run.outcome), run.contact_offset_m, run.contact_sink_mps, run.contact_lateral_mps,
                     run.offset_m, run.propellant_kg, cases[i].aero_factor, run.scvx.plans, run.scvx.failures,
-                    run.scvx.peak_gimbal_use, run.scvx.clipped_ticks, run.scvx.lateral_ticks, run.scvx.terminal_peak_gimbal_use,
+                    run.scvx.peak_gimbal_use, run.scvx.clipped_ticks, run.scvx.lateral_ticks, run.scvx.terminal_peak_gimbal_use, run.scvx.terminal_peak_feedback_use,
                     run.scvx.terminal_clipped_ticks, run.scvx.terminal_ticks);
         std::fflush(stdout);
         CHECK(run.outcome == sim::LandingOutcome::Landed);
@@ -730,8 +730,8 @@ TEST_CASE("Falcon 9 ASDS single MECO case", "[.][asds-single]") {
     }
     const auto* g = session.return_guidance(0);
     const auto stats = g && g->scvx() ? g->scvx()->statistics() : gnc::ScvxLandingGuidance::Statistics{};
-    std::printf("[asds] seed %u: %s; %d plans (%d failed), gimbal use <= %.2f (clipped %d of %d ticks), last 10 s <= %.2f (%d of %d)\n", seed,
+    std::printf("[asds] seed %u: %s; %d plans (%d failed), gimbal use <= %.2f (clipped %d of %d ticks), last 10 s <= %.2f, feedback %.2f (%d of %d)\n", seed,
                 sim::to_string(session.landing_outcome(0)), stats.plans, stats.failures, stats.peak_gimbal_use,
-                stats.clipped_ticks, stats.lateral_ticks, stats.terminal_peak_gimbal_use, stats.terminal_clipped_ticks,
+                stats.clipped_ticks, stats.lateral_ticks, stats.terminal_peak_gimbal_use, stats.terminal_peak_feedback_use, stats.terminal_clipped_ticks,
                 stats.terminal_ticks);
 }

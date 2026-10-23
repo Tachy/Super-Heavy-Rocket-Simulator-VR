@@ -81,14 +81,15 @@ TEST_CASE("Super Heavy has no drone-ship profile", "[gnc][booster]") {
     CHECK(gnc::booster_return_parameters(cfg.stages.front()).boostback);
 }
 
-TEST_CASE("Falcon 9 drone-ship landing plans take their own gimbal allowance, RTLS and Super Heavy keep the default",
+TEST_CASE("Falcon 9 landing plans take their own gimbal allowance, Super Heavy keeps the default",
           "[gnc][falcon9][asds][rtls]") {
     const auto f9 = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
     const auto& stage = f9.stages.front();
-    const double default_fraction = gnc::DescentLimits{}.gimbal_fraction;
-    CHECK(stage.drone_ship_return->landing_gimbal_fraction == 0.45);
+    CHECK(stage.return_profile.landing_gimbal_fraction == 0.45);
+    // one allowance for the one engine: the drone-ship profile inherits it from the RTLS profile
     CHECK(gnc::booster_return_parameters(stage.id, stage.return_profile_for(true)).scvx.settings.limits.gimbal_fraction == 0.45);
-    CHECK(gnc::booster_return_parameters(stage).scvx.settings.limits.gimbal_fraction == default_fraction);
+    CHECK(gnc::booster_return_parameters(stage).scvx.settings.limits.gimbal_fraction == 0.45);
     const auto sh = config::load_vehicle(STARSIM_CONFIG_DIR, "starship_block3");
-    CHECK(gnc::booster_return_parameters(sh.stages.front()).scvx.settings.limits.gimbal_fraction == default_fraction);
+    CHECK(gnc::booster_return_parameters(sh.stages.front()).scvx.settings.limits.gimbal_fraction ==
+          gnc::DescentLimits{}.gimbal_fraction);
 }

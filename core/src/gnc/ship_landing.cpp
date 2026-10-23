@@ -51,6 +51,10 @@ ShipLandingParameters ship_landing_parameters() {
                                std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"},
                                std::vector<std::string>{"ship/sea_level_1", "ship/sea_level_2"}};
     s.snapshot.reserve_kg = 1000.0;  // [E] the ship's landing propellant is small (header tanks)
+    // The header tanks carry the landing and the engines starve when they run dry, while the propellant mass also
+    // counts the main tanks' residue: the reserve stays a hard floor, no plan draws on it.
+    s.replan_reserve_fraction = 0.0;
+    s.abort_reserve_fraction = 0.0;
     // [E] lateral LQR effort: the booster's 0.2 swung the ship's gimbals stop to stop after the flip (20 deg/s slew);
     // 0.1 until the ship catch robustness plan (2026-10-21): the LQR's model has no actuator delay (0.75 s on the
     // ship), and with ~30 m/s across after the flip (lunar-return direct seed 18) the hull out-tilted the plan, braked

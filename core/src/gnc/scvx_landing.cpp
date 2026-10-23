@@ -122,9 +122,12 @@ PlanRequest ScvxLandingGuidance::request(const DescentSnapshot& snapshot, int st
     if (plan_) {  // a re-plan: the engines are running, their thrust changes at the throttle rate
         r.settings.limits.initial_thrust_n = snapshot.thrust_n;
         r.settings.limits.initial_thrust_window_s = parameters_.plan_latency_s;
-        r.settings.limits.soft_reserve_kg = parameters_.replan_reserve_fraction * parameters_.snapshot.reserve_kg;
     }
     if (aborting_) r.settings.limits.min_phase_s = {};  // mid-flight: no forced phase durations
+    const double reserve_fraction = aborting_ ? parameters_.abort_reserve_fraction
+                                    : plan_   ? parameters_.replan_reserve_fraction
+                                              : 0.0;
+    r.settings.limits.soft_reserve_kg = reserve_fraction * parameters_.snapshot.reserve_kg;
     r.snapshot_epoch = snapshot.epoch;
     return r;
 }
@@ -145,14 +148,15 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     stats_.last_solve_ms = outcome.solve_ms;
     stats_.max_solve_ms = std::max(stats_.max_solve_ms, outcome.solve_ms);
     const bool stale = aborting_ && outcome.plan->goal != DescentGoal::Abort;  // requested before the abort
-    if (outcome.plan->converged && !stale) {
+    const bool beyond = beyond_limits(*outcome.plan);
+    if (outcome.plan->converged && !stale && !beyond) {
         plan_ = outcome.plan;
         plan_epoch_ = outcome.snapshot_epoch + outcome.start_offset_s;
         consecutive_failures_ = 0;
         consecutive_unconverged_ = 0;
         return;
     }
-    if (outcome.plan->converged) return;
+    if (outcome.plan->converged && !beyond) return;
     ++stats_.failures;
     if (outcome.plan->goal == DescentGoal::Abort && sea_required_) {
         // The water beyond the shoreline is out of reach from here: the next abort plans only pull towards it.
@@ -168,8 +172,15 @@ void ScvxLandingGuidance::accept(const PlanOutcome& outcome) {
     }
     // Only an unreachable catch counts towards the abort: a re-plan that ran out of iterations while the dynamics
     // nearly hold leaves the previous plan in charge.
-    if (outcome.plan->virtual_control < parameters_.settings.stall_virtual_control) return;
+    if (!beyond && outcome.plan->virtual_control < parameters_.settings.stall_virtual_control) return;
     if (++consecutive_failures_ >= parameters_.failures_before_abort) aborting_ = true;
+}
+
+bool ScvxLandingGuidance::beyond_limits(const DescentPlan& plan) const {
+    // Only converged plans (an unconverged plan's slacks mean nothing) and only where the sea offers an abort: without
+    // one (the Moon) the plan is flown as it is.
+    return site_.sea && plan.converged && plan.goal != DescentGoal::Abort &&
+           plan.planned_tilt_excess > std::sin(0.5 * parameters_.max_planned_tilt_excess_rad);
 }
 
 bool ScvxLandingGuidance::request_abort() {
@@ -184,7 +195,7 @@ bool ScvxLandingGuidance::start(const vehicle::FlightBody& body, const vehicle::
     const auto snapshot = take_descent_snapshot(body, env, epoch, site_, frame_, parameters_.snapshot);
     model_ = snapshot.model;
     auto outcome = replanner_.plan_now(request(snapshot, 0));
-    if (!outcome.plan->converged && site_.sea && !aborting_) {
+    if ((!outcome.plan->converged || beyond_limits(*outcome.plan)) && site_.sea && !aborting_) {
         if (std::getenv("STARSIM_DEBUG_SCVX")) {  // diagnostics: the refused catch plan
             const auto& p = *outcome.plan;
             const auto& x0 = snapshot.initial;
@@ -362,6 +373,8 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
             ++stats_.terminal_ticks;
             if (u_scale < 1.0) ++stats_.terminal_clipped_ticks;
             stats_.terminal_peak_gimbal_use = std::max(stats_.terminal_peak_gimbal_use, use);
+            const double feedback = alpha_max > 0.0 ? std::hypot(uy - ref_axis_accel.y, uz - ref_axis_accel.z) / alpha_max : 0.0;
+            stats_.terminal_peak_feedback_use = std::max(stats_.terminal_peak_feedback_use, feedback);
         }
         Vec3 alpha_body = to_body(Vec3{0.0, -uz * u_scale, uy * u_scale});  // axis'' = alpha x axis, axis ~ +x
         // Roll: towards the pin reference (free roll without one), PD in body x.

@@ -230,3 +230,18 @@ TEST_CASE("A re-plan that reaches its target above the floor leaves the reserve 
     REQUIRE(plan.converged);
     CHECK(plan.reference.x.back()[descent_index::mass] >= r.settings.limits.min_mass_kg - 1.0);
 }
+
+TEST_CASE("A plan that reaches its target only beyond the final set's tilt limit reports the excess",
+          "[gnc][descent][scvx][falcon9]") {
+    // Falcon 9 RTLS lit 900 m beyond its zone (the "cannot reach the landing zone" case), gimbal allowance 0.45: the first
+    // pad plan converges, but its single-engine final phase tilts up to ~25 deg against a 10 deg limit.
+    const auto r = read_plan_request(std::string(STARSIM_FIXTURE_DIR) + "/scvx/falcon9_rtls_900m_beyond_zone.txt");
+    DescentPlanner planner;
+    const auto plan = default_plan_function()(planner, r);
+    REQUIRE(plan.converged);
+    CHECK(plan.planned_tilt_excess > std::sin(0.5 * ScvxLandingParameters{}.max_planned_tilt_excess_rad));
+    // The drone-ship re-plan at 741 m flies its final phase within the limit.
+    const auto replan = default_plan_function()(planner, seed117_replan("falcon9_asds_seed117_741m.txt"));
+    REQUIRE(replan.converged);
+    CHECK(replan.planned_tilt_excess < std::sin(0.5 * ScvxLandingParameters{}.max_planned_tilt_excess_rad));
+}

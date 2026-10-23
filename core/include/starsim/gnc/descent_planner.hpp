@@ -58,6 +58,11 @@ struct DescentPlan {
     double virtual_control = 0.0;
     double last_step = 0.0;
     double nonlinear_defect = 0.0;  // largest scaled defect of the plan propagated through the model
+    // The final engine set's planned tilt beyond its (soft) limit, more than a start state on that set already exceeds
+    // it: sin of the half tilt angle over the limit's. The final set turns the vehicle slowest; its soft limit keeps a
+    // re-plan from a violating state feasible, but a plan that reaches its target only by planning the final set
+    // further over its limit does not reach it within the vehicle's authority.
+    double planned_tilt_excess = 0.0;
     optim::SocpStatus status = optim::SocpStatus::NumericalError;
 
     double duration_s() const;

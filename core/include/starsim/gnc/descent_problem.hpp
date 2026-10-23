@@ -76,7 +76,7 @@ struct DescentLimits {
     double throttle_margin = 0.1;  // [E] planned thrust stays this fraction below the maximum (tracking margin)
     // [E] planned gimbal deflection at most this fraction of the limit: the rest is the lateral controller's margin
     // (Super Heavy catch campaign: 0.4 lost one of 21 cases to saturation, 0.3 none). A return profile may set its own
-    // (`landing_gimbal_fraction`; the Falcon 9 drone ship: 0.45).
+    // (`landing_gimbal_fraction`; Falcon 9: 0.45).
     double gimbal_fraction = 0.3;
     // The same for the final set (0: gimbal_fraction). A set steered by the RCS alone (its equivalent gimbal; the HLS's
     // landing thrusters) leaves no margin: the attitude controller tracks the plan with the whole RCS anyway.
@@ -158,6 +158,9 @@ public:
     DescentReference unpack(const std::vector<double>& solution) const;
     double virtual_control(const std::vector<double>& solution) const;  // L1, scaled
     double max_step(const std::vector<double>& solution) const;         // largest scaled node step
+    // Largest tilt-limit slack of the final set's nodes after the switch node (sin of the half tilt angle above the
+    // limit's; 0 within). The switch node still carries the outgoing set's attitude.
+    double max_final_tilt_slack(const std::vector<double>& solution) const;
 
     // Layout (filled by build_descent_subproblem).
     DescentReference reference;
@@ -165,6 +168,7 @@ public:
     int start_phase = 0;
     std::vector<optim::VariableBlock> dx, du, nu;
     optim::VariableBlock ds;
+    std::vector<int> final_tilt_slack;  // per node: the final set's tilt-limit slack variable (-1: none)
     std::array<double, 14> state_scale{};
     double thrust_scale = 1.0;
 };

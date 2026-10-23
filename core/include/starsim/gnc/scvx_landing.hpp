@@ -22,10 +22,19 @@ struct ScvxLandingParameters {
     int unconverged_before_abort = 4;      // [E] consecutive re-plans that do not converge at all (a marginal first
                                            // plan the vehicle could not follow) before the target is given up
     bool realtime = false;                 // never wait for a re-plan (interactive play)
-    // [E] Re-plans may use this fraction of snapshot.reserve_kg (DescentLimits::soft_reserve_kg; the first plan keeps
-    // the whole reserve): a burn short of propellant plans to the floor, and the re-plans from measured states need a
-    // little more (Falcon 9 ASDS seed 117: ~0.1 t). The reserve is planning margin, not unusable propellant.
+    // Share of snapshot.reserve_kg a plan may end below the floor at a penalty (DescentLimits::soft_reserve_kg). Where
+    // the reserve is planning margin (our tanks burn to empty; Super Heavy, Falcon 9, HLS):
+    // [E] re-plans of the target: a burn short of propellant plans to the floor, and the re-plans from measured states
+    // need a little more (Falcon 9 ASDS seed 117: ~0.1 t). The first plan keeps the whole reserve.
     double replan_reserve_fraction = 0.5;
+    // [D] abort plans (to the sea): the stage is given up, the water beyond the shoreline is what matters - the whole
+    // margin is theirs (Falcon 9 lit 900 m beyond its zone: the abort reaches the water only with ~3.3 t of the 5 t).
+    double abort_reserve_fraction = 1.0;
+    // [E] A plan for the target may tilt the final set at most this far beyond its soft limit (more than the start
+    // state already does); beyond, the target counts as out of reach (abort where there is a sea). The soft limits keep
+    // re-plans from violating states feasible; Falcon 9 lit 900 m beyond its zone once got a converged pad plan that
+    // tilted 15 deg beyond the final set's 10 deg, flew it, and gave the zone up too low to reach the water.
+    double max_planned_tilt_excess_rad = 3.0 * constants::deg_to_rad;
     // Burn profile that times the ignition (BoosterReturnGuidance::predict_landing_burn), V3 baseline: 13 engines,
     // 5 from ~200 m/s, 3 for the last slow metres. Flights 13/14 light the burn at ~2.8-2.9 km falling ~0.35-0.4 km/s
     // [D]: 13 engines near minimum throttle reproduce that (scenario: 2.88 km at 355 m/s).
@@ -109,6 +118,7 @@ public:
         int terminal_ticks = 0;
         int terminal_clipped_ticks = 0;
         double terminal_peak_gimbal_use = 0.0;
+        double terminal_peak_feedback_use = 0.0;  // the feedback alone (the plan's tilt acceleration taken out)
     };
     const Statistics& statistics() const { return stats_; }
 
@@ -117,6 +127,9 @@ private:
     // the active plan's thrust (the engines fly that plan meanwhile).
     PlanRequest request(const DescentSnapshot& snapshot, int start_phase) const;
     void accept(const PlanOutcome& outcome);
+    // A plan for the target that reaches it only by tilting beyond its limits (DescentPlan::planned_tilt_excess): the
+    // target is out of reach, as for a plan that does not converge.
+    bool beyond_limits(const DescentPlan& plan) const;
 
     LandingSite site_;
     ScvxLandingParameters parameters_;

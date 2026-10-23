@@ -149,8 +149,9 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   (first plan, re-plans, abort to the sea after repeated unreachable catches, commands incl. a body torque);
   `sim/landing_outcome` (shoreline `[site.sea]`, "Wasserung"); tower `CatchPhase::Aborted` (arms stay open).
   Diagnostics: `STARSIM_DEBUG_SCVX=1`, `STARSIM_DEBUG_SCVX_SOLVER=1`, `STARSIM_DEBUG_CATCH=1`; `STARSIM_DUMP_SCVX=<dir>`
-  + hidden `[scvx-diag]` replay one plan request. Re-plans may draw on half the propellant reserve at a penalty
-  (Task 2b, "Landing planner: propellant floor and gimbal allowance").
+  + hidden `[scvx-diag]` replay one plan request. Re-plans may draw on half the propellant reserve at a penalty,
+  aborts on all of it (not the ship); a converged plan that tilts the final set > 3 deg beyond its soft limit counts as
+  unreachable where there is a sea (Task 2b, "Landing planner: propellant floor and gimbal allowance").
 - Grid fins (`aero/grid_fin`, `[stage.grid_fins]`): flat-plate style normal force from the local flow at
   each fin (incl. omega x r: aerodynamic damping), slope/limit over Mach from a table (transonic choking).
   Actuators: deflection and rate limits (`Vehicle::update_grid_fins`). The controller allocates torque to
@@ -2028,39 +2029,71 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   bit for bit. Findings at 741 m: floor lowered 0.5 t -> converges, 0.1 t into the reserve; gimbal fraction 0.45 or
   0.6 -> converges on the floor; final-lateral weight 0 or 60 iterations -> no change. Fuel optimum from the ignition
   with the floor removed: ~0.1 t below it (gimbal 0.3 .. 1.0 alike): the burn is propellant-marginal.
-- **Fix 1 - soft part of the reserve for re-plans** (`DescentLimits::soft_reserve_kg`, `DescentWeights::reserve_use`
-  100 per 1e4 kg [E], `ScvxLandingParameters::replan_reserve_fraction` 0.5 [E]): re-plans may end up to half the
-  reserve below the floor at 100x the propellant's own weight (exact L1 penalty: zero when the target is reachable
-  above it; 1 m of final-set offset at one node is worth only 1 kg of reserve, so the lateral penalty does not buy
-  reserve; the virtual control stays 10x dearer). Below that the floor stays hard. The first plan keeps the whole
-  reserve. Rationale: plans of a marginal burn sit on the floor, and a re-plan from a measured state slightly off the
-  previous plan needs a little more; the reserve is planning margin (the vehicle can burn it), meant for exactly that.
-  The 741 m snapshot then converges in 3 iterations, 101 kg into the reserve (fixture test,
+- **What the reserve is** (`SnapshotSettings::reserve_kg`, review fix round 1): our tanks burn to empty - no unusable
+  residual is modelled - so for Super Heavy (5 t [E]), Falcon 9 (5 t, Super Heavy's value) and the HLS (5 t [E]) the
+  reserve is planning margin. The ship is different: its landing is fed by the header tanks (the engines starve when
+  they run dry) while the propellant mass also counts the main tanks' residue, so its 1 t stays a hard floor
+  (`ship_landing_parameters`: both fractions below 0).
+- **Fix 1 - soft part of the reserve** (`DescentLimits::soft_reserve_kg`, `DescentWeights::reserve_use` 100 per 1e4 kg
+  [E]): a plan may end that far below the floor at 100x the propellant's own weight (exact L1 penalty: zero when the
+  target is reachable above it; 1 m of final-set offset at one node is worth only 1 kg of reserve, so the lateral penalty
+  does not buy reserve; the virtual control stays 10x dearer); below it the floor is hard. Shares
+  (`ScvxLandingParameters`): first plans 0; re-plans of the target `replan_reserve_fraction` 0.5 [E] - plans of a
+  marginal burn sit on the floor, and a re-plan from a measured state slightly off the previous plan needs a little
+  more; abort plans `abort_reserve_fraction` 1.0 [D] - the stage is given up, reaching the water is what matters. The
+  741 m snapshot converges in 3 iterations, 101 kg into the reserve (fixture
   `tests/validation/fixtures/scvx/falcon9_asds_seed117_741m.txt`); the 848 m one stays on the floor.
-- **Fix 2 - Falcon 9 drone-ship gimbal allowance** (`[stage.recovery.drone_ship] landing_gimbal_fraction` 0.45 [E];
-  the default `DescentLimits::gimbal_fraction` 0.3 stays for every other profile, Falcon 9 RTLS included): with the soft reserve alone seed 117
-  failed again at 471 m - there the defect is in the attitude at the start (the plan needs a different tilt than the
-  measured one: torque-limited reach, every final node on the 1.5 deg gimbal cone), and with the floor removed it still
-  stalls; at 0.45 it converges. 0.3 is Super Heavy's value from its catch campaign (3 Raptors near minimum throttle, a
-  limit cycle at 0.4); it has no Falcon 9 source. Controller authority (LQR, `ScvxLandingGuidance::Statistics`): in the
-  last 10 s of the burn the lateral command (plan feed-forward + feedback) uses <= 0.28 of the full gimbal reach in the
-  ASDS ignition campaign and <= 0.50 in 20 of 21 MECO cases, never clipped; seed 117 peaks at 1.06 there (clipped 14
-  of 2486 ticks, 0.07 s) and lands 0.04 m off at 1.02 m/s. Clipping elsewhere happens in the high-thrust first
-  seconds after ignition and is about the same at 0.3 (pre-existing: 600-2600 ticks per case either way).
-  Drone ship only: the single Merlin flies the whole slanted divert there, the last phase included (as its 20 deg tilt
-  in every phase); the RTLS diverts on its 3-engine set. Tried for RTLS too: its "pad out of reach" test (lit 900 m
-  beyond the zone) then got a converged first pad plan (a ~29 s near-hover divert), followed it, gave up too late and
-  hit the ground 520 m from the zone instead of the water at 650 m+; at 0.3 it aborts at once and ditches (667 m).
+- **Fix 2 - one Falcon 9 gimbal allowance** (`[stage.recovery] landing_gimbal_fraction` 0.45 [D], the whole landing
+  burn, RTLS and drone ship; the default `DescentLimits::gimbal_fraction` 0.3 is Super Heavy's, from its catch
+  campaign: 3 Raptors near minimum throttle, a limit cycle at 0.4). With the soft reserve alone seed 117 failed again at
+  471 m - there the defect sits in the attitude at the start (the plan needs another tilt than the measured one:
+  torque-limited reach, every final node on the 1.5 deg cone); even with no floor it stalls at 0.3.
+  Derivation (`ScvxLandingGuidance::Statistics`: the LQR's commanded tilt acceleration - plan feed-forward plus
+  feedback - over what the whole gimbal gives at the thrust, peak in the last 10 s of the burn):
+  - Reach (lower bound): seed 117 at 0.30 ditches (12 failed re-plans), at 0.35 lands with 3 failed re-plans, at
+    0.40 / 0.45 with none.
+  - Authority (upper bound): at 0.45 the command peaks at <= 0.50 of the whole gimbal in 62 of 63 Falcon 9 campaign
+    cases (RTLS <= 0.10, ASDS ignition <= 0.28, ASDS MECO <= 0.50), never clipped: half the gimbal stays for
+    disturbances. The feedback alone grows with the allowance (seeds 106 / 116 / 118: 0.16-0.25 at 0.30, 0.43-0.59 at
+    0.45) but largely opposes the feed-forward, so the sum is what counts. Seed 117 peaks at 1.06 (14 of 2486 ticks
+    clipped; 1.35 and 92 ticks at 0.40, 3.8 at 0.35): at ~400 m its slanted descent still meets the cross-flow below.
+  - 0.45: the lowest allowance with a reach margin over 0.40 that keeps the 50 % authority reserve; 0.40 left seed 117
+    more saturated (it diverts later).
+- **Mid-burn clipping (pre-existing, analysed):** on the drone-ship burns the LQR clips for 600-2600 ticks per case,
+  peaks 5-9x the gimbal's reach, the same at 0.3 and 0.45 - not at ignition (no attitude hand-over effect) but at
+  ~1.4-0.8 km, 120-150 m/s down, 20-30 m/s across. The accelerometer shows 3-5 m/s^2 of body-lateral specific force
+  there, while the whole gimbal gives ~2 m/s^2 (845 kN sin 5 deg / 36 t): the slender body's cross-flow normal force
+  at ~10 deg angle of attack, which the planning model lacks (axial drag along the motion only). The velocity error
+  grows ~4 m/s^2 within each plan and the 1 s re-plans absorb it (plans lengthen by ~2 s each, then settle below
+  ~600 m as q falls). A real authority shortfall against a model gap, not a margin question: no allowance fixes it.
+  Follow-up: cross-flow normal force in `descent_model`.
+- **Fix 3 - the abort decision** (the RTLS "cannot reach the landing zone" case, lit 900 m beyond the zone, broke at
+  0.45: Aufprall on land 520 m from the zone instead of the water beyond 650 m). Replays: the first pad plan converges,
+  but only by tilting the single-engine final phase to ~25 deg against its 10 deg limit (soft limit; fixture
+  `falcon9_rtls_900m_beyond_zone.txt`); the stage flew that 30 s near-hover divert, the re-plans ran out of
+  propellant at 626 m (that re-plan needs ~3.6 t of the 5 t reserve, the soft part is 2.5 t; only the full gimbal
+  converges, exactly on the hard floor), the target was given
+  up at 550 m, and the abort plan for the water then needed ~3.3 t of the reserve it was not allowed to touch (pull-only
+  fallback: on land). Two changes: (1) abort plans may use the whole reserve (above); with that alone the abort plan
+  converged but the stage, already 38 deg over, tipped over flying it. (2) A converged plan whose final set tilts
+  more than `max_planned_tilt_excess_rad` 3 deg [E] beyond its soft limit (more than a start state on that set
+  already does; `DescentPlan::planned_tilt_excess` from the subproblem's slacks, nodes after the switch node - that
+  one still carries the outgoing set's attitude: the full CRS-35 RTLS mission's first plan switches at 15 deg against
+  the final 10 and lands) does not reach the target within the
+  vehicle's authority: where there is a sea it counts like an unreachable plan (first plan: abort at once; re-plans:
+  towards `failures_before_abort`). The soft limits stay what they were for: re-plans from violating states. Final set
+  only: seed 107's first drone-ship plan tilts its phase 0 to 37 deg against 20 and is flown fine (high thrust, 19 s).
+  The case ditches again, 800 m from the zone.
 - **Results** (`asds-single` seeds 0, 101-120): before 20 of 21 (seed 117 Aufprall, 9 failed re-plans); soft reserve
-  only 20 of 21 (seed 117 Wasserung after a failed 471 m re-plan); gimbal 0.45 only: seed 117 Aufprall; both 21 of 21
-  with **no failed re-plan** in any case. Every ASDS case lands with ~5.0 t (the floor; seed 107 7.8 t): the plans spend
-  the margin on the final-set lateral penalty, so the soft reserve matters for all of them.
+  only 20 of 21 (seed 117 Wasserung after a failed 471 m re-plan); gimbal 0.45 only: seed 117 Aufprall; with all fixes
+  21 of 21, **no failed re-plan** in any case. Every ASDS case lands with ~5.0 t (the floor; seed 107 7.8 t): the
+  plans spend the margin on the final-set lateral penalty, so the soft reserve matters for all of them.
 - Re-validation (ctest labels asds, rtls, catch, landing, scvx, scvx_landing, descent, lunar_descent_plan,
   lunar_descent_session, lunar_scvx, lunar_descent_flight, lunar_campaign, crew_escape, falcon9, booster, ship,
-  replanner, hls; [slow] included): 255 of 255 passed. Counts against before: Super Heavy SCvx catch campaign 21 of
-  21 (21), ship catch campaign 20 of 21, none lost (20), Falcon 9 RTLS 21 of 21 (21), ASDS ignition 21 of 21 (21),
-  ASDS MECO 11 + 10 of 21 (20; seed 117 now 4.6 t left, 0.4 t of the reserve), lunar landing campaign 21 of 21 (21),
-  ship return campaigns, crew escape, the refuelling tanker flights (booster and ship catches) passed. No failed
-  re-plan in any ASDS case (MECO: 9 before, 8 of them seed 117).
+  replanner, hls, return; [slow] included): 293 of 293 passed. Counts against before: Super Heavy SCvx catch 21 of 21
+  (21), ship catch 20 of 21, none lost (20), Falcon 9 RTLS 21 of 21 (21), ASDS ignition 21 of 21 (21), ASDS MECO 21 of
+  21 (20; seed 117 4.6 t left, 0.4 t of the reserve), lunar landing 21 of 21 (21), lunar return direct 21 of 21 and
+  aerocapture 21 of 21 (21 / 21); the full CRS-35 RTLS mission lands 0.00 m off with 5.0 t; ship return campaigns,
+  crew escape, the refuelling tanker flights passed. No failed re-plan in any ASDS case (MECO: 9 before).
 - `ScvxSettings::fresh_max_iterations` 60 (Task 2) stays: seed 107's first plan is a fresh plan (no soft reserve) and
   still needs 44 iterations at gimbal 0.45 (41 at 0.3).

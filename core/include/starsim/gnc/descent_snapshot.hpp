@@ -49,7 +49,11 @@ DescentState plan_state(const vehicle::FlightBody& body, const environment::Body
 
 struct SnapshotSettings {
     std::array<std::vector<std::string>, descent_phases> phase_groups;  // engine groups per phase
-    double reserve_kg = 5000.0;        // [E] propellant the plan must leave (residuals, unusable)
+    // [E] propellant the plan must leave. Our tanks burn to empty (no unusable residual is modelled), so for Super
+    // Heavy, Falcon 9 and the HLS it is planning margin - re-plans and aborts may draw on part of it
+    // (ScvxLandingParameters::replan_reserve_fraction, abort_reserve_fraction). The ship's header-fed landing keeps its
+    // reserve hard (ship_landing_parameters).
+    double reserve_kg = 5000.0;
     double catch_clearance_m = 1.0;    // pins above the arm tops at the end of the plan (spec)
     double catch_sink_mps = 1.0;       // sink rate at the end of the plan (spec)
     double sea_margin_m = 150.0;       // [E] abort target beyond the shoreline

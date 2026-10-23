@@ -253,6 +253,12 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
     DescentWeights weights = settings.weights;
     const auto scale = descent_state_scales();
     bool candidate = false;  // the last solution met the convergence tests that need no propagation
+    // How far a start state on the final set already exceeds its tilt limit (same units as the subproblem's slack).
+    const double initial_tilt_excess =
+        start_phase == descent_phases - 1
+            ? std::max(0.0, std::hypot(initial[descent_index::attitude + 2], initial[descent_index::attitude + 3]) -
+                                std::sqrt(0.5 * (1.0 - std::cos(limits.tilt_max_rad[descent_phases - 1]))))
+            : 0.0;
     for (int it = 0;; ++it) {
         std::vector<IntervalLinearization> lin;
         const int intervals = descent_node_count(n) - 1;
@@ -326,6 +332,7 @@ DescentPlan DescentPlanner::plan(const DescentModel& model, const DescentState& 
         }
         plan.last_step = sub.max_step(result.x);
         plan.reference = sub.unpack(result.x);
+        plan.planned_tilt_excess = std::max(0.0, sub.max_final_tilt_slack(result.x) - initial_tilt_excess);
         const bool dynamics_hold = plan.virtual_control < settings.virtual_control_tolerance;
         const bool settled = plan.last_step < settings.step_tolerance ||
                              std::abs(plan.reference.x.back()[descent_index::mass] - previous_final_mass) <
