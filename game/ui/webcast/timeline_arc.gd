@@ -96,7 +96,10 @@ func _draw() -> void:
 	draw_polyline_colors(points, halo, WebcastStyle.HALO_PX, true)
 	draw_polyline_colors(points, colors, WebcastStyle.STROKE_PX, true)
 
-	for e: Dictionary in events:
+	# Dots follow the label thinning: of events closer than MIN_LABEL_PX on the arc only the highest-ranked one keeps its
+	# dot (and label) - MECO, stage separation and the upper stage's ignition lie seconds apart and left unlabelled dots.
+	var shown := TimelineWindow.visible_labels(events, now_tdb_s, time_scale, arc_px())
+	for e: Dictionary in shown:
 		var f := fraction_of(float(e["tdb_s"]) - now_tdb_s, time_scale)
 		var a := fade_alpha(f)
 		if a <= 0.0:
@@ -105,7 +108,6 @@ func _draw() -> void:
 			WebcastStyle.draw_arc_stroke(self, point_of(f), DOT_RADIUS_PX, 0.0, TAU, Color(WebcastStyle.WHITE, a))
 		else:
 			WebcastStyle.draw_dot(self, point_of(f), DOT_RADIUS_PX, Color(WebcastStyle.WHITE, a))
-	var shown := TimelineWindow.visible_labels(events, now_tdb_s, time_scale, arc_px())
 	if not shown.is_empty():
 		var sides := label_sides(events.find(shown[0]), shown.size())
 		var font := WebcastStyle.label_font()
