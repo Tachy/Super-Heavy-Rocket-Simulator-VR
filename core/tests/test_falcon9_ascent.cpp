@@ -144,10 +144,12 @@ constexpr double recorded_seco_uncertainty_s = 3.0;
 // throttles earlier and deeper (G 1.4-1.6 at T+50-60 s, gauge flow ~72 %; ours holds the transonic q from Mach 0.9 at
 // >= 0.80).
 constexpr test::SampleGap crs35_sample_gaps[] = {
-    {30.0, 0.098, 0.087},   // -9.8 % speed, -8.7 % altitude (914 kN vacuum Merlin, follow-ups Task 7c)
-    {60.0, 0.020, 0.089},   // +2.0 % fast, -8.9 % low
-    {90.0, 0.031, 0.035},   // +3.1 %, -3.5 %
-    {120.0, 0.026, 0.001},  // +2.6 %, +0.1 %
+    // Task 7c (914 kN vacuum Merlin): the gaps that shrank are tightened to the measured values; the ones that grew
+    // keep their Task 6 constants (the measured gap stays inside constant + allowance_margin).
+    {30.0, 0.095, 0.085},   // measured -9.8 % speed, -8.7 % altitude (constants kept)
+    {60.0, 0.020, 0.082},   // +2.0 % fast (tightened); -8.9 % low (constant kept)
+    {90.0, 0.031, 0.021},   // +3.1 % (tightened); -3.5 % (constant kept)
+    {120.0, 0.026, 0.001},  // +2.6 %, +0.1 % (both tightened)
 };
 // MECO / SECO: T+135.5 against 134.6 s (+0.7 %), 6831 against 6490 km/h (+5.3 %), 59.5 against 57.4 km (+3.7 %); the
 // planned kick (11.8 deg) flies a steeper arc (path 39.1 against 36.6 deg); SECO T+509.0 against ~511.6 s (-0.5 %).
@@ -156,7 +158,8 @@ constexpr double meco_time_allowance = 0.03;
 // is not the cause (7b); with SpaceX's 914 kN vacuum Merlin (7c) the MECO speed gap is 5.26 %: the max-Q bucket (CRS-35
 // throttles earlier and deeper, ~+3 % at T+90 s), MECO 0.9 s later than recorded (the planner's MECO from the return
 // reserve), ~1-2 % of m / F at the dials' resolution over T+90-124 s and the Dragon / trunk mass (>= 13.1 t sourced
-// without the trunk, 12.5 t [E] flown). 5.26 % + 2 % = 7.26 %, rounded up.
+// without the trunk, 12.5 t [E] flown). 5.26 % + 2 % = 7.26 %, rounded up. Bound = 0.073 x the recorded 6490 km/h
+// (474 km/h) + the reading tolerance (29 km/h) = 503 km/h (was 0.097: 659 km/h).
 constexpr double meco_speed_allowance = 0.073;
 constexpr double meco_altitude_allowance = 0.04;
 constexpr double meco_gamma_allowance_deg = 6.0;

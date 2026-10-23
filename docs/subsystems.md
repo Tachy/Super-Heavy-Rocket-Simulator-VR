@@ -2496,8 +2496,9 @@ Diagnosis first (gate: the candidate fix chooses between two contradicting sourc
   311 s. The two pairs contradict each other: 845 kN / 282 s is a flow of 305.6 kg/s, 914 kN / 311 s of 299.7 kg/s.
   Ours keeps the sea-level pair (845 kN, 282 s - the gauge confirms the flow) and the 311 s (nozzle exit 1.045 m), so
   our vacuum thrust is 932 kN, 2.0 % above SpaceX's 914 kN. With 914 kN at the rated flow (Isp_vac 305 s; nozzle exit
-  0.931 m) the flight's m / F over T+90-124 s is x1.008-1.026 ours (mean ~1.018: +5 t or -1.8 %, at the dials'
-  resolution) - the vacuum thrust explains about half of the level, the dials leave the rest unresolved.
+  0.932 m; the sensitivity runs below used 0.931 m, 0.2 kN less) the flight's m / F over T+90-124 s is x1.008-1.026
+  ours (mean ~1.018: +5 t or -1.8 %, at the dials' resolution) - the vacuum thrust explains about half of the level, the
+  dials leave the rest unresolved.
 - **Last seconds (T+~126 s to MECO).** The flight's acceleration levels off: the G dial holds 3.8-3.9 g (display
   T+132.75-135.25 s) and falls to 3.6 g at T+136.25 s with nine engines lit and the gauge at the rated flow; Starlink
   15-25 holds 3.8-3.9 g over its last 7 s before MECO (display T+141.25-147.75 s) while its mass falls ~8 %. Ours rises
@@ -2520,7 +2521,7 @@ Diagnosis first (gate: the candidate fix chooses between two contradicting sourc
   levelling (~15 m/s by the ratio, ~6 m/s by the G dial), and MECO 0.9 s later than recorded (~35 m/s: the planner's
   MECO from the return reserve; the flight keeps up to ~61 t, ours 53 t).
 - **Decision needed (gate):** (A) take SpaceX's 914 kN vacuum thrust at the rated flow (Merlin 1D Isp_vac 311 -> 305 s
-  [D], nozzle exit 1.045 -> 0.931 m) - sourced, but it drops the equally sourced 311 s; it moves every Falcon 9 return
+  [D], nozzle exit 1.045 -> 0.932 m) - sourced, but it drops the equally sourced 311 s; it moves every Falcon 9 return
   (boostback/entry/landing propellant, `boostback_loss_fraction`, ISS window calibration) and reaches ~5 %, not 3 %;
   (B) an ascent acceleration limit ~3.9 g (guidance, unsourced); (C) keep 932 kN and the INTERIM allowance.
 - **Resolution (user 2026-10-23: (A), no g limit).** `config/engines/merlin1d.toml`: vacuum thrust 914 kN [S: SpaceX
@@ -2534,8 +2535,12 @@ Diagnosis first (gate: the candidate fix chooses between two contradicting sourc
   - CRS-35 (`test_falcon9_ascent`): kick 12.27 -> 11.80 deg, MECO T+135.5 s (unchanged) with 53.6 -> 53.0 t, MECO speed
     6985 -> 6831 km/h (+7.6 -> +5.3 %), altitude 59.7 -> 59.5 km (+4.0 -> +3.7 %), path 38.2 -> 39.1 deg (36.6), SECO
     T+507.7 -> 509.0 s with 3.0 -> 2.7 t left. Samples T+30 / 60 / 90 / 120 s: speed -9.5 / +2.2 / +4.8 / +4.8 % ->
-    -9.8 / +2.0 / +3.1 / +2.6 %, altitude -8.5 / -8.5 / -3.3 / +0.4 % -> -8.7 / -8.9 / -3.5 / +0.1 % (`crs35_sample_gaps`
-    set to these). `meco_speed_allowance` 0.097 (INTERIM) -> 0.073 = 5.26 % + 2 %, rounded up; the remaining gap is an
+    -9.8 / +2.0 / +3.1 / +2.6 %, altitude -8.5 / -8.5 / -3.3 / +0.4 % -> -8.7 / -8.9 / -3.5 / +0.1 % (`crs35_sample_gaps`:
+    the gaps that shrank are tightened to these - T+60 / 90 / 120 s speed 0.023 / 0.046 / 0.042 -> 0.020 / 0.031 /
+    0.026, T+120 s altitude 0.026 -> 0.001 -; the ones that grew keep their Task 6 constants, which with the 2 % margin
+    still hold: T+30 s 0.095 / 0.085, T+60 s altitude 0.082, T+90 s altitude 0.021). `meco_speed_allowance` 0.097
+    (INTERIM) -> 0.073 = 5.26 % + 2 %, rounded up (bound = 0.073 x the recorded 6490 km/h + 29 km/h reading tolerance =
+    503 km/h; was 659 km/h); the remaining gap is an
     open discrepancy (budget above: max-Q bucket, MECO 0.9 s late from the planner's return reserve, ~1-2 % m / F at
     the dials' resolution, Dragon / trunk mass >= 13.1 t sourced without the trunk against 12.5 t [E] flown).
   - Falcon 9 RTLS mission (`test_falcon9_rtls`): MECO T+140 s with 52.8 -> 52.1 t; landing burn T+423 s at 2.99 -> 2.97

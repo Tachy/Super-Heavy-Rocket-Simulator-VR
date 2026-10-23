@@ -23,7 +23,8 @@ G0 = 9.80665
 
 
 def recorded(path, speed_base, altitude_base):
-    rows = list(csv.DictReader(line for line in open(path) if not line.startswith("#")))
+    with open(path) as f:
+        rows = list(csv.DictReader(line for line in f if not line.startswith("#")))
     v = [(float(r["t_s"]) - speed_base, float(r["booster_speed_kmh"]) / 3.6) for r in rows if r.get("booster_speed_kmh")]
     h = [(float(r["t_s"]) - altitude_base, float(r["booster_altitude_km"]) * 1e3) for r in rows
          if r.get("booster_altitude_km")]
@@ -33,7 +34,8 @@ def recorded(path, speed_base, altitude_base):
 
 
 def simulated(path):
-    rows = list(csv.DictReader(open(path)))
+    with open(path) as f:
+        rows = list(csv.DictReader(f))
     out = {k: [] for k in ("v", "h", "m", "f", "g")}
     last = None
     for r in rows:
