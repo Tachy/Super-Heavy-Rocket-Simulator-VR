@@ -14,12 +14,13 @@ iss_orbit = "auto"
 [launch_window]
 earliest_utc = "2026-10-16T00:00:00"
 search_days = 3.0                   # [E] i6 correction 1
-insertion_s = 540.0                 # [D] liftoff -> separation of the flown ascent (i6 calibration 2026-10-20: 535 s;
+insertion_s = 542.0                 # [D] liftoff -> separation of the flown ascent (i6 calibration 2026-10-20: 535 s;
                                     # +12 s with the cold staging sequence, ascent staging Task 1; -7 s with the 13.6 s
                                     # booster flip, follow-ups Task 7: the first stage cuts off later and faster, the
-                                    # second stage reaches the orbit sooner)
-insertion_arc_deg = 15.08           # [D] pad at liftoff -> separation point, inertial in-plane angle (same run; was 15.0,
-                                    # 14.78 before follow-ups Task 7)
+                                    # second stage reaches the orbit sooner; +2 s with the 914 kN vacuum Merlin,
+                                    # follow-ups Task 7c)
+insertion_arc_deg = 15.01           # [D] pad at liftoff -> separation point, inertial in-plane angle (same run; was 15.0,
+                                    # 14.78 before follow-ups Task 7, 15.08 before Task 7c; phase error 0.004 deg)
 
 [phasing]
 mission_limit_h = 28.0              # [S] from the launch

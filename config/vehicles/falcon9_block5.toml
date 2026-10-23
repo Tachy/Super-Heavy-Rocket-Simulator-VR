@@ -145,7 +145,7 @@ return_flight_time_s = 260.0                 # [D] Lambert arc; with drag and th
                                              # the boostback start as on CRS-35 (T+~150 s -> T+442 s; 290 s landed 38 s late)
 entry_engine_groups = ["center"]             # [D] CRS-35: the engine icon shows the centre engine alone
 entry_burn_altitude_m = 56600.0              # [D] CRS-35: lit at T+355 s, 56.6 km (out at 35.9 km)
-entry_burn_delta_v_mps = 125.0               # [D] gauge 3.5 -> 3.1 %: 1.7 t on 40.5 t at Isp_vac 311 s (131 m/s; the
+entry_burn_delta_v_mps = 125.0               # [D] gauge 3.5 -> 3.1 %: 1.7 t on 40.5 t at Isp_vac 305 s (128 m/s; the
                                              # gauge's 0.1 % steps are 0.4 t)
 entry_burn_throttle = 0.4                    # [D] 1.7 t in ~17 s burning: at or below minimum throttle
 # Landing burn 1 -> 3 -> 1 [D] CRS-35: one engine from ~3.2 km / ~300 m/s, three from ~2.0 km / ~250 m/s, one again
@@ -169,7 +169,7 @@ entry_engine_groups = ["center", "pair"]     # [D] three engine icons T+367.5-38
 entry_burn_altitude_m = 66000.0              # [D] centre engine lit at 67.4 km, three engines from 64.2 km
 entry_burn_delta_v_mps = 880.0               # [D] 7,926 -> 5,245 km/h over T+361-392 s (745 m/s) plus ~125 m/s of
                                              # gravity along the path; the rocket equation on the gauge (25.9 -> 12.1 t at
-                                             # Isp_vac 311 s) gives 950 m/s
+                                             # Isp_vac 305 s) gives 933 m/s
 entry_burn_throttle = 0.72                   # [D] 880 m/s in ~19 s on three engines (12.8 t at 3 x 0.72 x 306 kg/s)
 landing_engine_phases = [["center"], ["center"], ["center"]]  # [D] one engine icon from ignition to touchdown
 landing_phase_max_tilt_deg = [20.0, 20.0, 20.0]  # [E] the same engine throughout: the same gimbal authority (the slanted

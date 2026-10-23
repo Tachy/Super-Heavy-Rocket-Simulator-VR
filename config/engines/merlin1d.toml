@@ -1,6 +1,7 @@
 # SpaceX Merlin 1D (Full Thrust) - Falcon 9 first stage
 [sources]
 wiki_merlin = "https://en.wikipedia.org/wiki/SpaceX_Merlin (commonly cited values)"
+spacex_f9 = "SpaceX Falcon 9 page (2012, archived 2013) via https://en.wikipedia.org/wiki/Falcon_9_Full_Thrust ref. [3]: first stage, nine Merlin 1D, 7,607 kN at sea level, 8,227 kN in vacuum (845 / 914 kN per engine); Isp 282 / 311 s on the same page"
 
 [engine]
 id = "merlin1d"
@@ -12,9 +13,15 @@ chamber_pressure_pa = 97e5           # [S:wiki_merlin]
 
 [performance]
 reference_pressure_pa = 101325.0
-thrust_ref_n = 845e3                 # [S:wiki_merlin]
-isp_ref_s = 282.0                    # [S:wiki_merlin]
-nozzle_exit_diameter_m = 1.045       # [D] from Isp_vac = 311 s [S:wiki_merlin]
+thrust_ref_n = 845e3                 # [S:wiki_merlin] [S:spacex_f9]
+isp_ref_s = 282.0                    # [S:wiki_merlin] [S:spacex_f9]
+nozzle_exit_diameter_m = 0.932       # [D] from the vacuum thrust 914 kN [S:spacex_f9] (8,227 kN / 9) at the rated flow:
+                                     # exit area (914.1 - 845) kN / 101325 Pa = 0.682 m2 -> Isp_vac 305.1 s [D].
+                                     # The same page gives Isp_vac 311 s, which contradicts its thrusts at one flow
+                                     # (845 kN / 282 s = 305.6 kg/s, 914 kN / 311 s = 299.7 kg/s); the flow is pinned by
+                                     # the burn time and the CRS-35 / Starlink 15-25 propellant gauges (rated flow), and
+                                     # CRS-35's late acceleration agrees with 914 kN (follow-ups Task 7c, user decision
+                                     # 2026-10-23; was 1.045 m = 932 kN from the 311 s)
 max_ambient_pressure_pa = 110000.0
 
 [throttle]

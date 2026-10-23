@@ -144,19 +144,20 @@ constexpr double recorded_seco_uncertainty_s = 3.0;
 // throttles earlier and deeper (G 1.4-1.6 at T+50-60 s, gauge flow ~72 %; ours holds the transonic q from Mach 0.9 at
 // >= 0.80).
 constexpr test::SampleGap crs35_sample_gaps[] = {
-    {30.0, 0.095, 0.085},   // -9.5 % speed, -8.5 % altitude
-    {60.0, 0.023, 0.082},   // +2.3 % fast, -8.2 % low
-    {90.0, 0.046, 0.021},   // +4.6 %, -2.1 %
-    {120.0, 0.042, 0.026},  // +4.2 %, +2.6 %
+    {30.0, 0.098, 0.087},   // -9.8 % speed, -8.7 % altitude (914 kN vacuum Merlin, follow-ups Task 7c)
+    {60.0, 0.020, 0.089},   // +2.0 % fast, -8.9 % low
+    {90.0, 0.031, 0.035},   // +3.1 %, -3.5 %
+    {120.0, 0.026, 0.001},  // +2.6 %, +0.1 %
 };
-// MECO / SECO: T+135.5 against 134.6 s (+0.7 %), 6985 against 6490 km/h (+7.6 %), 59.7 against 57.4 km (+4.0 %); the
-// planned kick (12.3 deg) flies a steeper arc (path 38.2 against 36.6 deg); SECO T+507.7 against ~511.6 s (-0.7 %).
+// MECO / SECO: T+135.5 against 134.6 s (+0.7 %), 6831 against 6490 km/h (+5.3 %), 59.5 against 57.4 km (+3.7 %); the
+// planned kick (11.8 deg) flies a steeper arc (path 39.1 against 36.6 deg); SECO T+509.0 against ~511.6 s (-0.5 %).
 constexpr double meco_time_allowance = 0.03;
-// INTERIM (follow-ups Task 7, user 2026-10-23): the measured 13.6 s flip exposed that our boostback costs too little
-// (53.6 t kept at MECO against ~66 t on the CRS-35 gauge; boostback 43 s against ~55 s): 7.63 % gap + 2 % = 9.63 %,
-// rounded up to 0.097; to be tightened back to 0.03 once Task 7b finds the cause (docs/subsystems.md "Falcon 9 flip
-// time").
-constexpr double meco_speed_allowance = 0.097;
+// Open discrepancy (follow-ups Tasks 7b / 7c, docs/subsystems.md "Falcon 9 late ascent against CRS-35"): the boostback
+// is not the cause (7b); with SpaceX's 914 kN vacuum Merlin (7c) the MECO speed gap is 5.26 %: the max-Q bucket (CRS-35
+// throttles earlier and deeper, ~+3 % at T+90 s), MECO 0.9 s later than recorded (the planner's MECO from the return
+// reserve), ~1-2 % of m / F at the dials' resolution over T+90-124 s and the Dragon / trunk mass (>= 13.1 t sourced
+// without the trunk, 12.5 t [E] flown). 5.26 % + 2 % = 7.26 %, rounded up.
+constexpr double meco_speed_allowance = 0.073;
 constexpr double meco_altitude_allowance = 0.04;
 constexpr double meco_gamma_allowance_deg = 6.0;
 constexpr double seco_time_allowance = 0.02;

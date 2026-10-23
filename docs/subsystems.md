@@ -1947,8 +1947,8 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     `insertion_s` 547 -> 540 s, `insertion_arc_deg` 14.78 -> 15.08 [D] (phase error 0.006 deg). Leg drop "steep ones are
     lost": 25 deg at 2 m/s now lands 6.3 m off (the 6.5 kN thrusters hold the attitude against the blow; 450 N could
     not) - the case runs at 3 m/s (impact, stroke 0.502 m).
-  - **INTERIM open discrepancy - CRS-35 MECO, the boostback costs too little (user 2026-10-23: allowance widened for
-    now, cause to be found in follow-ups Task 7b, then the allowance tightened back to 0.03):** the CRS-35 check
+  - **Open discrepancy - CRS-35 MECO (was INTERIM; resolved as far as sourced data reach by follow-ups Tasks 7b / 7c,
+    allowance now 0.073):** history: the CRS-35 check
     (`test_falcon9_ascent`) MECO speed 6596 -> 6985 km/h against 6490 recorded (+1.6 -> +7.6 %; `meco_speed_allowance`
     0.03 -> 0.097 = the measured 7.63 % + 2 % = 9.63 % rounded up, bound 224 -> 659 km/h);
     MECO T+132.7 -> 135.5 s (134.6 recorded), 58.2 -> 59.7 km (57.4), path angle 41.3 -> 38.2 deg (36.6), kick 11.57 ->
@@ -1962,8 +1962,8 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     delta-v; the MECO speed gap is the ascent's (section "Falcon 9 boostback against CRS-35 (follow-ups Task 7b)").
     Allowance kept at 0.097 until the ascent side is resolved. **Task 7c diagnosis:** most of the late excess is the
     Merlin's vacuum thrust (our 932 kN against SpaceX's 914 kN); the rest is the max-Q bucket, a ~3.9 g levelling in the
-    last seconds and MECO 0.9 s late - section "Falcon 9 late ascent against CRS-35 (follow-ups Task 7c)"; awaiting the
-    user's decision.
+    last seconds and MECO 0.9 s late - section "Falcon 9 late ascent against CRS-35 (follow-ups Task 7c)". User decision
+    (A): 914 kN taken; MECO speed +7.6 -> +5.3 %, allowance 0.097 -> 0.073.
 - **SCvx landing (depot catch):** the depot's booster reaches ignition ~70 m and ~10 m/s across the approach (also at
   HEAD: its coast removes a ~200 m cross miss in the air by aero steering, which leaves the cross velocity), now ~25 m
   further out than before. Its first plan then dropped the 13 -> 5 engines 1.72 s into their 3 s start-up while the
@@ -2383,7 +2383,8 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   lighter liftoff (e.g. the commonly cited 395.7 t load) needs a mass flow ~10 % below the rated flow at the rated
   thrust (Isp ~315 s at sea level, beyond the Merlin's 282 s) to keep the late agreement - not separable, not
   calibrated. Our vacuum Merlin is 932 kN (from Isp 311 s and the 845 kN rating) against SpaceX's 914 kN [S: F9 page
-  8,227 kN for nine] - 2 %, inside the G dial's resolution, kept.
+  8,227 kN for nine] - 2 %, inside the G dial's resolution, kept. **Replaced in follow-ups Task 7c (user 2026-10-23):
+  914 kN at the rated flow (Isp_vac 305 s), section "Falcon 9 late ascent against CRS-35".**
 - **(4) Ascent drag.** Not separable: before max-Q the drag is < 0.3 m/s^2 (Cd 0.5 at q < 10 kPa), and through max-Q
   the thrust is throttled to an unknown level (the gauge's flow over +-4 s: ~+-3 %; the G dial's 0.05 g is Cd +-0.6 at
   30 kPa on Falcon 9). The ascent tables (`config/aero/*_ascent.csv`) stay [E]. No other drag cause is needed: Starship's
@@ -2462,11 +2463,12 @@ only, nothing changed in the model.
   thrust / mass flow against liftoff and upper-stack mass, not separable from the dials alone). New evidence for it: the
   boostback's thrust ceiling bounds the first stage's propellant at MECO to 54-61 t (ours 53.6 t), so a heavier stack
   near MECO must come from the upper stack or the thrust, not from the first stage's propellant. The CRS-35
-  `meco_speed_allowance` stays 0.097 (INTERIM) until then. Diagnosed in Task 7c (next section).
+  `meco_speed_allowance` stays 0.097 (INTERIM) until then. Diagnosed and resolved in Task 7c (next section).
 
 ### Falcon 9 late ascent against CRS-35 (follow-ups Task 7c)
 Question (Task 7b): near MECO our stack accelerates ~6 % harder than CRS-35 - a heavier real stack, or less thrust?
-Diagnosis only; nothing in the model changed (gate: the candidate fix chooses between two contradicting sourced values).
+Diagnosis first (gate: the candidate fix chooses between two contradicting sourced values); the user chose (A) - see
+"Resolution" at the end of this section.
 - **Method.** `tools/telemetry/late_ascent_fit.py`: the sensed acceleration along the path from the dials, a = dv/dt +
   g(h) sin(gamma) (least-squares slopes over +-2 s speed / +-3 s altitude, time bases 3.42 / 5.87 s), at equal true
   time against our flight (`STARSIM_ASCENT_DUMP`), with the same estimator run on our dump (bias against our own F / m:
@@ -2521,3 +2523,36 @@ Diagnosis only; nothing in the model changed (gate: the candidate fix chooses be
   [D], nozzle exit 1.045 -> 0.931 m) - sourced, but it drops the equally sourced 311 s; it moves every Falcon 9 return
   (boostback/entry/landing propellant, `boostback_loss_fraction`, ISS window calibration) and reaches ~5 %, not 3 %;
   (B) an ascent acceleration limit ~3.9 g (guidance, unsourced); (C) keep 932 kN and the INTERIM allowance.
+- **Resolution (user 2026-10-23: (A), no g limit).** `config/engines/merlin1d.toml`: vacuum thrust 914 kN [S: SpaceX
+  Falcon 9 page, 8,227 kN / 9] at the unchanged rated flow (845 kN / 282 s at sea level = 305.6 kg/s, pinned by the burn
+  time and both flights' gauges): `nozzle_exit_diameter_m` 1.045 -> 0.932 [D] (exit area 0.682 m2), Isp_vac 311 ->
+  305.1 s [D]. The 311 s on the same SpaceX page contradicts its thrusts at one flow and is dropped (the Merlin page
+  flags it "needs update", a 2012 value). Only the Merlin 1D changes: the second stage's Merlin Vacuum (981 kN [S:wiki_merlin]; the
+  old SpaceX page lists 934 kN for the second stage - a separate question, not part of this decision) is not covered
+  by the 8,227 kN. Comments derived from 311 s updated (entry burn 1.7 t: 131 -> 128 m/s; drone-ship gauge rocket
+  equation 950 -> 933 m/s).
+  - CRS-35 (`test_falcon9_ascent`): kick 12.27 -> 11.80 deg, MECO T+135.5 s (unchanged) with 53.6 -> 53.0 t, MECO speed
+    6985 -> 6831 km/h (+7.6 -> +5.3 %), altitude 59.7 -> 59.5 km (+4.0 -> +3.7 %), path 38.2 -> 39.1 deg (36.6), SECO
+    T+507.7 -> 509.0 s with 3.0 -> 2.7 t left. Samples T+30 / 60 / 90 / 120 s: speed -9.5 / +2.2 / +4.8 / +4.8 % ->
+    -9.8 / +2.0 / +3.1 / +2.6 %, altitude -8.5 / -8.5 / -3.3 / +0.4 % -> -8.7 / -8.9 / -3.5 / +0.1 % (`crs35_sample_gaps`
+    set to these). `meco_speed_allowance` 0.097 (INTERIM) -> 0.073 = 5.26 % + 2 %, rounded up; the remaining gap is an
+    open discrepancy (budget above: max-Q bucket, MECO 0.9 s late from the planner's return reserve, ~1-2 % m / F at
+    the dials' resolution, Dragon / trunk mass >= 13.1 t sourced without the trunk against 12.5 t [E] flown).
+  - Falcon 9 RTLS mission (`test_falcon9_rtls`): MECO T+140 s with 52.8 -> 52.1 t; landing burn T+423 s at 2.99 -> 2.97
+    km, 287 m/s, 12.1 t (inside its 0.2 t window: `boostback_loss_fraction` 0.13 stays); landed T+456 -> 455 s, 5.8 ->
+    6.0 t left; separation -> boostback 13.6 -> 13.5 s (`flip_duration_s` 13.6 kept, the measured mean is 13.7 s); N2
+    530 -> 527 kg at the separation, 159 -> 164 kg at the touchdown; dispersed campaign 21/21 (>= 5697 -> 5747 kg
+    left). MECO plan from a fixed state: 50.8 / 47.8 -> 51.9 / 48.7 t (with / without entry burn).
+  - Staging (`test_staging_sequence`): flip 13.6 -> 13.5 s, 348.5 -> 344.7 kg N2, pitch inertia 1.01e7 -> 9.98e6 kg m2.
+  - Drone ship (`test_falcon9_asds`): MECO T+151 -> 150 s, 71.3 -> 70.3 km, 8376 -> 8160 km/h, 24.5 -> 24.8 t; ship
+    682 -> 652 km from the pad (placed at the predicted impact); entry burn T+404 -> 397 s, 12.5 -> 12.7 t; landing burn
+    T+496 -> 490 s at 2.95 km, 271 m/s, 11.8 t; landed T+535 -> 529 s, 5.0 t left; second stage 1.0 -> 0.5 t left at
+    the orbit (16.5 t to 200 x 281 km); campaigns 21/21, 11/11, 10/10 unchanged.
+  - Fixed-kick ascent (10 t payload, 12 deg): staging 66.7 -> 65.1 km, 2030 -> 1993 m/s, 4.2 -> 3.9 t left in stage 2.
+    Max-Q limiter: flown max q 32173 -> 31997 Pa, lowest throttle 0.805 -> 0.814, MECO T+137.9 -> 137.7 s.
+  - Falcon 9 MECO prediction at T+30 s (`[timeline]`): +7.13 -> +6.59 s, bound 9 s kept.
+  - ISS window (`falcon9_crew_dragon_iss.toml`): `insertion_s` 540 -> 542 s, `insertion_arc_deg` 15.08 -> 15.01 [D]
+    (flown separation 542.0 s after liftoff; phase error 0.207 deg before, 0.004 deg after).
+  - Tests: `-TestFilter "[falcon9],[rtls],[asds],[ascent],[ascent_planner],[staging],[iss_mission],[timeline],[booster],
+    [legs],[rcs],[dragon],[propulsion],[config]"` (slow included) 301/301 passed before the recalibration and the
+    allowance change; after them with `[iss]` added 452/452.

@@ -72,7 +72,7 @@ TEST_CASE("A Falcon 9 MECO plan keeps the entry burn's propellant", "[gnc][falco
     const double a = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, landing, with_entry, landing_kg);
     const double b = gnc::BoosterReturnGuidance::meco_propellant_kg(stack, state, earth(), t0, landing, without, landing_kg);
     // Entry burn by the rocket equation on the stage (dry 25.6 t + 12.1 t) at the centre engine's vacuum exhaust
-    // velocity (311 s): ~1.6 t (the CRS-35 gauge: 3.5 -> 3.1 % of 425 t = 1.7 t), more after the boostback's leverage.
+    // velocity (305 s): ~1.6 t (the CRS-35 gauge: 3.5 -> 3.1 % of 425 t = 1.7 t), more after the boostback's leverage.
     std::printf("[falcon9] MECO propellant with entry burn %.1f t, without %.1f t\n", a / 1e3, b / 1e3);
     CHECK(a - b > 1500.0);
     CHECK(a - b < 4000.0);  // 3.0 t with the 13.6 s RCS flip and boostback_loss_fraction 0.13 (3.6 t with 50 s / 0.19)
