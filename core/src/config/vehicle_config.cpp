@@ -697,6 +697,10 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
                 }
                 if (p.landing_switch_sink_mps.size() != 2) doc.fail("landing_switch_sink_mps must list 2 switch windows");
             }
+            p.landing_gimbal_fraction = doc.number_or(table, "landing_gimbal_fraction", p.landing_gimbal_fraction);
+            if (p.landing_gimbal_fraction < 0.0 || p.landing_gimbal_fraction > 1.0) {
+                doc.fail("landing_gimbal_fraction must be in (0, 1]");
+            }
             p.return_flight_time_s = doc.number_or(table, "return_flight_time_s", p.return_flight_time_s);
             p.flip_duration_s = doc.number_or(table, "flip_duration_s", p.flip_duration_s);
             p.boostback_loss_fraction = doc.number_or(table, "boostback_loss_fraction", p.boostback_loss_fraction);

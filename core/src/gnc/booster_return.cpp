@@ -90,6 +90,7 @@ BoosterReturnParameters booster_return_parameters(const std::string& stage_id, c
         p.scvx.divert_speed_mps = 0.5 * (switches[0].min_sink_mps + switches[0].max_sink_mps);
         p.scvx.switch_speed_mps = 0.5 * (switches[1].min_sink_mps + switches[1].max_sink_mps);
     }
+    if (profile.landing_gimbal_fraction > 0.0) p.scvx.settings.limits.gimbal_fraction = profile.landing_gimbal_fraction;
     if (profile.return_flight_time_s > 0.0) p.flight_time_s = profile.return_flight_time_s;
     if (profile.flip_duration_s > 0.0) p.flip_duration_s = profile.flip_duration_s;
     if (profile.boostback_loss_fraction >= 0.0) p.boostback_loss_fraction = profile.boostback_loss_fraction;

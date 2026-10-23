@@ -162,6 +162,7 @@ add_executable(starsim_core_tests
     test_landing_outcome.cpp
     test_descent_snapshot.cpp
     test_descent_replanner.cpp
+    test_descent_request_io.cpp
     test_descent_tracking.cpp
     test_scvx_landing.cpp
     test_scvx_catch.cpp

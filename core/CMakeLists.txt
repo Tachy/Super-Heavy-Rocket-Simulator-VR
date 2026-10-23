@@ -54,6 +54,7 @@ add_library(starsim_core STATIC
     src/gnc/landing_site.cpp
     src/gnc/descent_snapshot.cpp
     src/gnc/descent_replanner.cpp
+    src/gnc/descent_request_io.cpp
     src/gnc/descent_tracking.cpp
     src/gnc/scvx_landing.cpp
     src/gnc/ship_landing.cpp

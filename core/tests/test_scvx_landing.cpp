@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <vector>
 
 #include "return_scenario.hpp"
 #include "starsim/config/launch_site_config.hpp"
@@ -170,4 +171,22 @@ TEST_CASE("Slowly converging re-plans keep the catch and the previous plan", "[g
     for (double t = 1.0; t <= 4.0; t += 0.5) guidance.update(*f.body, env, f.t0 + t);
     CHECK_FALSE(guidance.aborting());
     CHECK(guidance.statistics().failures >= 2);
+}
+
+TEST_CASE("Re-plans may draw on part of the propellant reserve, the first plan keeps it", "[gnc][scvx_landing]") {
+    Fixture f;
+    std::vector<double> soft_reserve_kg;
+    gnc::PlanFunction recording = [&soft_reserve_kg](gnc::DescentPlanner& planner, const gnc::PlanRequest& r) {
+        soft_reserve_kg.push_back(r.settings.limits.soft_reserve_kg);
+        return gnc::default_plan_function()(planner, r);
+    };
+    const auto parameters = f.parameters();
+    gnc::ScvxLandingGuidance guidance(f.session->return_site(f.body->vehicle()), parameters, recording);
+    REQUIRE(guidance.start(*f.body, f.session->environment(), f.t0));
+    guidance.update(*f.body, f.session->environment(), f.t0 + 1.0);
+    guidance.update(*f.body, f.session->environment(), f.t0 + 1.5);
+    REQUIRE(soft_reserve_kg.size() == 2);
+    CHECK(soft_reserve_kg[0] == 0.0);
+    CHECK(soft_reserve_kg[1] == parameters.replan_reserve_fraction * parameters.snapshot.reserve_kg);
+    CHECK(soft_reserve_kg[1] > 0.0);
 }

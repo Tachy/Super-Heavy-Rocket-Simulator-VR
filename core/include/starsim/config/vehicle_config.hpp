@@ -276,6 +276,7 @@ struct ReturnProfile {
     std::vector<double> landing_phase_throttles;                  // design throttle per set (ignition timing)
     std::vector<double> landing_phase_max_tilt_rad;               // planned thrust tilt limit per set (gimbal authority)
     std::vector<std::pair<double, double>> landing_switch_sink_mps;  // per engine switch: sink window {min, max}
+    double landing_gimbal_fraction = 0.0;  // planned share of the gimbal deflection (0: DescentLimits default)
     double return_flight_time_s = 0.0;   // boostback start -> touchdown (Lambert arc)
     double flip_duration_s = 0.0;        // MECO planning: separation -> boostback ignition (0: the guidance default)
     double boostback_loss_fraction = -1.0;  // MECO planning: boostback delta-v beyond the Lambert arc (< 0: default)

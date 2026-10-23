@@ -226,7 +226,7 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
         b.add_second_order_cone({AffineExpr{rate_max}.add(rate_slack, 1.0),
                                  X(k, descent_index::rate + 1),
                                  X(k, descent_index::rate + 2)});
-        b.add_nonnegative(X(k, descent_index::mass).add_constant(-limits.min_mass_kg));
+        b.add_nonnegative(X(k, descent_index::mass).add_constant(-(limits.min_mass_kg - limits.soft_reserve_kg)));
         if (target.goal != DescentGoal::Abort) {
             const double tg = std::tan(limits.glide_slope_rad);
             b.add_second_order_cone({X(k, 1).add_constant(-target.position_m.x),
@@ -322,6 +322,13 @@ DescentSubproblem build_descent_subproblem(const DescentModel& model, const Desc
                                     : limits.min_phase_s[static_cast<size_t>(p)];
         b.add_nonnegative(AffineExpr{s}.add_constant(-min_s));
         b.add_nonnegative(AffineExpr{limits.max_phase_s - ref.duration_s[static_cast<size_t>(p)]}.add(sub.ds[p], -duration_scale_s));
+    }
+    // Soft part of the reserve (the mass only falls, so the last node decides): m_end + slack >= min_mass_kg, the
+    // slack (in mass_scale_kg units) penalised; without a soft part the hard floor above is min_mass_kg itself.
+    if (limits.soft_reserve_kg > 0.0) {
+        b.add_nonnegative(X(last, descent_index::mass)
+                              .add_constant(-limits.min_mass_kg)
+                              .add(penalised(weights.reserve_use, "reserve_slack"), mass_scale_kg));
     }
     // Gentle end (see DescentLimits::terminal_thrust_margin): a cone on the last node's thrust.
     {

@@ -22,6 +22,10 @@ struct ScvxLandingParameters {
     int unconverged_before_abort = 4;      // [E] consecutive re-plans that do not converge at all (a marginal first
                                            // plan the vehicle could not follow) before the target is given up
     bool realtime = false;                 // never wait for a re-plan (interactive play)
+    // [E] Re-plans may use this fraction of snapshot.reserve_kg (DescentLimits::soft_reserve_kg; the first plan keeps
+    // the whole reserve): a burn short of propellant plans to the floor, and the re-plans from measured states need a
+    // little more (Falcon 9 ASDS seed 117: ~0.1 t). The reserve is planning margin, not unusable propellant.
+    double replan_reserve_fraction = 0.5;
     // Burn profile that times the ignition (BoosterReturnGuidance::predict_landing_burn), V3 baseline: 13 engines,
     // 5 from ~200 m/s, 3 for the last slow metres. Flights 13/14 light the burn at ~2.8-2.9 km falling ~0.35-0.4 km/s
     // [D]: 13 engines near minimum throttle reproduce that (scenario: 2.88 km at 355 m/s).
@@ -95,6 +99,16 @@ public:
         int failures = 0;    // of these not converged
         double last_solve_ms = 0.0;
         double max_solve_ms = 0.0;
+        // LQR lateral control: commanded tilt acceleration (plan feed-forward + feedback) over what the gimbals give at
+        // the thrust (their whole deflection) - the authority the planned allowance (DescentLimits::gimbal_fraction)
+        // left the controller. Over the whole burn and over its last terminal_window_s (the touchdown approach).
+        static constexpr double terminal_window_s = 10.0;
+        int lateral_ticks = 0;
+        int clipped_ticks = 0;               // the command exceeded the gimbals' reach (clipped)
+        double peak_gimbal_use = 0.0;        // largest ratio before the clip
+        int terminal_ticks = 0;
+        int terminal_clipped_ticks = 0;
+        double terminal_peak_gimbal_use = 0.0;
     };
     const Statistics& statistics() const { return stats_; }
 

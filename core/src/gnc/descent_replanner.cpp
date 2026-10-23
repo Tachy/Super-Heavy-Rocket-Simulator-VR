@@ -1,8 +1,11 @@
 #include "starsim/gnc/descent_replanner.hpp"
 
 #include <chrono>
+#include <cstdio>
 #include <stdexcept>
 #include <utility>
+
+#include "starsim/gnc/descent_request_io.hpp"
 
 namespace starsim::gnc {
 
@@ -11,6 +14,9 @@ namespace {
 constexpr double epoch_tolerance_s = 1e-9;  // tick sums: "at snapshot + latency" must not miss by rounding
 
 PlanOutcome run(DescentPlanner& planner, const PlanFunction& plan, const PlanRequest& request) {
+    if (const auto dumped = dump_plan_request_if_enabled(request); !dumped.empty()) {
+        std::printf("[scvx] request dumped to %s\n", dumped.c_str());  // diagnostics: replay with read_plan_request
+    }
     const auto start = std::chrono::steady_clock::now();
     PlanOutcome outcome;
     outcome.plan = std::make_shared<const DescentPlan>(plan(planner, request));

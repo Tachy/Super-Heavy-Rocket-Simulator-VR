@@ -75,7 +75,8 @@ struct DescentLimits {
     int final_ease_nodes = 3;                // last nodes free to ease down to the gentle end
     double throttle_margin = 0.1;  // [E] planned thrust stays this fraction below the maximum (tracking margin)
     // [E] planned gimbal deflection at most this fraction of the limit: the rest is the lateral controller's margin
-    // (campaign: 0.4 lost one of 21 cases to saturation, 0.3 none).
+    // (Super Heavy catch campaign: 0.4 lost one of 21 cases to saturation, 0.3 none). A return profile may set its own
+    // (`landing_gimbal_fraction`; the Falcon 9 drone ship: 0.45).
     double gimbal_fraction = 0.3;
     // The same for the final set (0: gimbal_fraction). A set steered by the RCS alone (its equivalent gimbal; the HLS's
     // landing thrusters) leaves no margin: the attitude controller tracks the plan with the whole RCS anyway.
@@ -88,6 +89,11 @@ struct DescentLimits {
     // slows down into the arms as the V3 profile ends in a hover (0: no limit). [E]
     double approach_time_constant_s = 3.0;
     double min_mass_kg = 0.0;                                 // dry mass + reserve
+    // The final mass may fall this far below min_mass_kg at a penalty (DescentWeights::reserve_use); below that the
+    // floor is hard (0: min_mass_kg is hard). Re-plans draw on it (ScvxLandingParameters::replan_reserve_fraction):
+    // plans end on the floor when the burn is short of propellant, and a re-plan from a measured state slightly off
+    // the previous plan then needs a little more than the floor leaves.
+    double soft_reserve_kg = 0.0;
     PhaseDurations min_phase_s{1.0, 1.0, 1.0};
     double max_phase_s = 120.0;
     // Start-up of the ignition engines (thrust = spool x throttled thrust, spool rising linearly over startup_s):
@@ -117,6 +123,10 @@ struct DescentWeights {
                                        // higher values degrade the SOCP conditioning
     double corridor_violation = 10.0;  // [E] per metre outside the catch corridor, per node (~100 t of propellant)
     double final_lateral_time_s = 2.0;  // [E] lateral speed counts as the offset it builds up in this time
+    // [E] per 1e4 kg of the soft reserve used (DescentLimits::soft_reserve_kg): 100x the propellant's own weight, so a
+    // plan draws on the reserve only when its target is out of reach above the floor (and not to trade it for lateral
+    // precision: 1 m of final-set offset at one node is worth 1 kg of reserve), 10x below the virtual control's.
+    double reserve_use = 100.0;
 };
 
 // Iterate of SCvx: states and thrust at P (N-1) + 1 nodes (P phases of N nodes, neighbours sharing one), phase

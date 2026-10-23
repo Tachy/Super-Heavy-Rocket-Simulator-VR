@@ -122,6 +122,7 @@ PlanRequest ScvxLandingGuidance::request(const DescentSnapshot& snapshot, int st
     if (plan_) {  // a re-plan: the engines are running, their thrust changes at the throttle rate
         r.settings.limits.initial_thrust_n = snapshot.thrust_n;
         r.settings.limits.initial_thrust_window_s = parameters_.plan_latency_s;
+        r.settings.limits.soft_reserve_kg = parameters_.replan_reserve_fraction * parameters_.snapshot.reserve_kg;
     }
     if (aborting_) r.settings.limits.min_phase_s = {};  // mid-flight: no forced phase durations
     r.snapshot_epoch = snapshot.epoch;
@@ -353,6 +354,15 @@ ScvxLandingCommand ScvxLandingGuidance::update(const vehicle::FlightBody& body, 
                                      axis_rate.z - ref_axis_rate.z, ref_axis_accel.z);
         const double u_norm = std::hypot(uy, uz);
         const double u_scale = u_norm > alpha_max ? alpha_max / u_norm : 1.0;  // within the gimbals' reach
+        const double use = alpha_max > 0.0 ? u_norm / alpha_max : 0.0;
+        ++stats_.lateral_ticks;
+        if (u_scale < 1.0) ++stats_.clipped_ticks;
+        stats_.peak_gimbal_use = std::max(stats_.peak_gimbal_use, use);
+        if (time_to_go < Statistics::terminal_window_s) {
+            ++stats_.terminal_ticks;
+            if (u_scale < 1.0) ++stats_.terminal_clipped_ticks;
+            stats_.terminal_peak_gimbal_use = std::max(stats_.terminal_peak_gimbal_use, use);
+        }
         Vec3 alpha_body = to_body(Vec3{0.0, -uz * u_scale, uy * u_scale});  // axis'' = alpha x axis, axis ~ +x
         // Roll: towards the pin reference (free roll without one), PD in body x.
         const double wr = parameters_.roll_frequency_rad_s;

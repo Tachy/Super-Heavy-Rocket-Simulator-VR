@@ -136,6 +136,7 @@ struct LegRun {
     double propellant_kg = 0.0;    // left at the end
     sim::LegTouchdown touchdown = sim::LegTouchdown::None;
     sim::LandingOutcome outcome = sim::LandingOutcome::Flying;
+    gnc::ScvxLandingGuidance::Statistics scvx;  // of the SCvx landing burn (zero without one)
 };
 
 inline LegRun fly_to_touchdown(sim::FlightSession& session, const frames::BodyOrientation& earth, time::Epoch t0,
@@ -171,6 +172,7 @@ inline LegRun fly_to_touchdown(sim::FlightSession& session, const frames::BodyOr
     run.propellant_kg = stage.vehicle().propellant_kg();
     run.touchdown = session.leg_touchdown(0);
     run.outcome = session.landing_outcome(0);
+    if (const auto* g = session.return_guidance(0); g && g->scvx()) run.scvx = g->scvx()->statistics();
     return run;
 }
 

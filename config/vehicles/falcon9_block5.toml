@@ -166,6 +166,12 @@ landing_phase_max_tilt_deg = [20.0, 20.0, 20.0]  # [E] the same engine throughou
                                                  # drone-ship approach needs its divert in the last phase too)
 landing_phase_throttles = [0.7, 0.7, 0.65]   # [E] design throttles that time the ignition (~3.0 km at ~270 m/s)
 landing_switch_sink_mps = [[120.0, 280.0], [40.0, 120.0]]  # [E] no engine change: wide windows that only split the plan
+landing_gimbal_fraction = 0.45               # [E] planned share of the 5 deg gimbal (default 0.3: Super Heavy's catch
+                                             # campaign on 3 Raptors near minimum throttle). The single Merlin flies the
+                                             # whole slanted divert, the last phase too: at 0.3 its re-plans could not
+                                             # reach dispersed states (ASDS MECO seed 117); the lateral control keeps the
+                                             # rest (docs/subsystems.md, Task 2b). Not RTLS: its 3-engine divert set
+                                             # needs no more, and 0.45 let a first plan accept an out-of-reach pad
 
 [[stage.tank]]
 id = "rcs_n2"
