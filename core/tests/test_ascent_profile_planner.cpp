@@ -38,7 +38,9 @@ sim::FlightSession& like_session() {
 }
 
 // Starship (Block 3) from Starbase to 200 km / 26.5 deg (mission starship_leo), the booster caught at the tower.
-sim::AscentProfileRequest starship_request() {
+// `extra_payload_kg`: a test that asserts trial flights gets a memo key of its own (the memo lives as long as the
+// process: in a single-process run another test may already have planned the plain request).
+sim::AscentProfileRequest starship_request(double extra_payload_kg = 0.0) {
     const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo");
     sim::AscentProfileRequest r;
     r.vehicle_id = m.vehicle_id;
@@ -46,7 +48,7 @@ sim::AscentProfileRequest starship_request() {
     r.heading_rad = m.heading_rad;
     r.liftoff = liftoff();
     r.target = {m.periapsis_height_m, m.apoapsis_height_m, m.inclination_rad, m.northerly};
-    r.payload_kg = m.payload_kg;
+    r.payload_kg = m.payload_kg + extra_payload_kg;
     r.fairing = m.fairing;
     return r;
 }
@@ -64,7 +66,7 @@ sim::AscentProfile timed_plan(const sim::AscentProfileRequest& request) {
 }  // namespace
 
 TEST_CASE("The planner's kick is the optimum of a kick sweep", "[sim][ascent_planner][slow]") {
-    const auto request = starship_request();
+    const auto request = starship_request(100.0);  // own memo key
     struct Point {
         double kick_deg, propellant_kg;
     };
@@ -138,7 +140,7 @@ TEST_CASE("The optimised arc has no kink at staging", "[sim][ascent_planner]") {
 }
 
 TEST_CASE("A repeated request is answered from the memo", "[sim][ascent_planner]") {
-    auto request = starship_request();
+    auto request = starship_request(200.0);  // own memo key
     const auto first = timed_plan(request);
     REQUIRE(first.feasible);
     REQUIRE(first.trial_flights > 0);
