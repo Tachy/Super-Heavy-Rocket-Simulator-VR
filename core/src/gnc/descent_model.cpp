@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 
 #include "starsim/math/constants.hpp"
 
@@ -186,8 +185,6 @@ DescentModel make_descent_model(const DescentModelInputs& in) {
     m.crossflow_station_above_cg_m = 0.5 * geometry.length_m - mass.cg_station_m;
     m.potential_term = geometry.nose_length_m > 0.0;
     m.potential_station_above_cg_m = hull.potential_station_m() - mass.cg_station_m;
-    // Diagnostics: STARSIM_DEBUG_NO_CROSSFLOW plans without the normal force (the A/B baseline of the clipping table).
-    m.crossflow_enabled = std::getenv("STARSIM_DEBUG_NO_CROSSFLOW") == nullptr;
     if (!in.atmosphere) {  // vacuum: one entry each (interpolate returns it)
         m.density_kg_m3 = {0.0};
         m.speed_of_sound_mps = {0.0};

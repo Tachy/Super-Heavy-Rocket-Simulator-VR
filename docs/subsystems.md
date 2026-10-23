@@ -2179,6 +2179,9 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     called stalled, the sea requirement was dropped and the pull-only abort landed the booster 31 m from the tower.
     Fixture `tests/validation/fixtures/scvx/superheavy_abort_sea_353m.txt`. Abort test (A -> B): 1500 m Wasserung
     630 m / 25.7 t -> 552 m / 12.4 t; 800 m 1372 m / 0.0 t -> 549 m / 10.0 t; 400 m 539 m / 5.7 t -> 532 m / 6.1 t.
+    The 1500 m case burns more because it now flies its plan: in A the stage lost control in the divert (tilt ~140 deg,
+    2 rad/s in the debug trace; its plan had no hull moment) and fell into the water at ~90 m/s with
+    25.7 t unburned; in B it flies the planned powered divert and sets down in the water (12.4 t left).
   - A/B measurement (A = `STARSIM_DEBUG_NO_CROSSFLOW=1`: the planner without the normal force; B = all of the above;
     clipped LQR ticks summed over a test case's burns, of all lateral ticks; peak = largest gimbal use; no case clips
     in its last 10 s in A or B):
@@ -2196,16 +2199,18 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     | Ship flip/catch, abort, Mach 2.6 entry, return campaigns | 1-4 | 0 | 0 | <= 0.92 | <= 0.85 |
 
     Outcomes (A -> B): every campaign as before - ASDS 11/11, 10/10, 21/21 landed (>= 4983 -> >= 4986 kg), RTLS 21/21
-    (>= 5747 -> >= 5744 kg, sink <= 1.02 -> 1.05 m/s), Super Heavy catch 21/21, ship catch campaign 20 of 21 (the
+    (>= 5747 -> >= 5744 kg, sink <= 1.02 -> 1.05 m/s: re-baselined - the campaign is deterministic, so this is the
+    model change, not noise; the plans now use the normal force, the touchdown stays inside the sink limit), Super Heavy catch 21/21, ship catch campaign 20 of 21 (the
     known engine-failure case) - and all 198 cases of the labels descent, scvx, scvx_landing, landing, catch, asds,
     rtls, falcon9, ship, booster, replanner pass.
   - Result: the drone-ship mid-burn clipping is gone in the MECO campaigns and down 99 % at ignition (237 ticks, peak
     1.97, in a few dispersed cases); the ship now clips a little where it did not (39 + 20 ticks, peaks ~1.1, none in the
     last 10 s). Follow-up: those remaining ticks (the ship's flaps, which the allocation cancels from the flight model
     while the plan has none; the ASDS ignition dispersions), and the plan's axial drag under the online estimate.
-  - Diagnostics: `STARSIM_DEBUG_NO_CROSSFLOW=1` (plans without the normal force: the A/B baseline),
-    `STARSIM_DEBUG_SCVX_SOLVER=1` now also prints the virtual control per SCvx iteration (`[scvx it]`), every
-    `test::fly_landing` prints a `[scvx clip]` line.
+  - Fidelity flag `SnapshotSettings::hull_normal_force` (default on; off plans with axial drag only).
+  - Diagnostics: `STARSIM_DEBUG_NO_CROSSFLOW=1` (overrides the flag off: the A/B baseline),
+    `STARSIM_DEBUG_SCVX_SOLVER=1` now also prints the virtual control per SCvx iteration (`[scvx it]`), with
+    `STARSIM_VERBOSE=1` every `test::fly_landing` prints a `[scvx clip]` line.
 - **Fix 3 - the abort decision** (the RTLS "cannot reach the landing zone" case, lit 900 m beyond the zone, broke at
   0.45: Aufprall on land 520 m from the zone instead of the water beyond 650 m). Replays: the first pad plan converges,
   but only by tilting the single-engine final phase to ~25 deg against its 10 deg limit (soft limit; fixture

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <stdexcept>
 
 #include "starsim/frames/geodetic.hpp"
@@ -132,6 +133,8 @@ DescentSnapshot take_descent_snapshot(const vehicle::FlightBody& body, const veh
     DescentSnapshot snap;
     snap.model = make_descent_model(in);
     snap.model.normal_force_scale = settings.normal_force_scale;
+    // Fidelity flag; STARSIM_DEBUG_NO_CROSSFLOW overrides it off (diagnostics: the A/B baseline of the clipping table).
+    snap.model.crossflow_enabled = settings.hull_normal_force && std::getenv("STARSIM_DEBUG_NO_CROSSFLOW") == nullptr;
     snap.initial = plan_state(body, body_frame, frame);
     snap.epoch = epoch;
     snap.min_mass_kg = mass.mass_kg - vehicle.propellant_kg() + settings.reserve_kg;

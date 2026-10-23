@@ -71,6 +71,9 @@ struct SnapshotSettings {
     // Measured over tabulated hull aerodynamics for the model's normal force (DescentModel::normal_force_scale): the
     // booster return's online drag estimate at landing-burn ignition (it is frozen while the engines run); 1 without.
     double normal_force_scale = 1.0;
+    // Fidelity flag: the plan carries the hull normal force (DescentModel::crossflow_enabled); false plans with axial
+    // drag only, as before follow-ups Task 8.
+    bool hull_normal_force = true;
 };
 
 // Everything the planner needs, taken on the simulation thread (the worker must not touch SPICE, the environment

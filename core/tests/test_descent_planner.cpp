@@ -268,9 +268,18 @@ TEST_CASE("SCvx stops early when the virtual control stalls", "[gnc][descent][sc
     const auto s = settings(*b);
     // 200 m up at 250 m/s: no thrust can stop this before the catch point.
     const auto x0 = make_state(b->vehicle->mass_properties().mass_kg, {200.0, 0.0, 0.0}, {-250.0, 0.0, 0.0}, Quat{}, {});
-    const auto plan = plan_descent(b->model, x0, 0, catch_target(*b, Quat{}), s, nullptr, 0.0);
+    const auto target = catch_target(*b, Quat{});
+    const auto plan = plan_descent(b->model, x0, 0, target, s, nullptr, 0.0);
     CHECK_FALSE(plan.converged);
-    CHECK(plan.iterations <= s.stall_iterations + 2);
+    CHECK(plan.iterations <= s.fresh_stall_iterations + 2);  // a fresh plan: its own stall window
+    // A re-plan from a warm start (the nominal plan) into the same impossible state stalls on the re-plan window, well
+    // before its iteration limit.
+    const auto nominal = plan_descent(b->model, ignition_state(*b), 0, target, s, nullptr, 0.0);
+    REQUIRE(nominal.converged);
+    const auto replan = plan_descent(b->model, x0, 0, target, s, &nominal, 0.0);
+    CHECK_FALSE(replan.converged);
+    CHECK(replan.iterations <= s.stall_iterations + 2);
+    CHECK(replan.iterations < s.max_iterations);
 }
 
 namespace {
