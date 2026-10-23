@@ -202,8 +202,9 @@ thrust_n = 6500.0                             # [D] rests ONLY on the measured f
                                               # sheets: "nitrogen cold gas thrusters" only). Sized on the existing flip
                                               # controller and the 15 deg boostback gate so that separation -> boostback
                                               # is the measured 13.7 s mean (flown 13.6 s; 450 N [E] before: 53 s).
-                                              # Pitch: one pack's two inward thrusters, 13 kN at ~29 m = 3.7e5 Nm on
-                                              # ~1.1e7 kg m2 (the aero moment helps early in the turn)
+                                              # Pitch at the separation: one pack's two inward thrusters, 13 kN at
+                                              # 28.5 m = 3.71e5 Nm on 1.01e7 kg m2 (~17 s bang-bang alone; the aero
+                                              # moment carries a large share of the 13.6 s turn)
 directions = ["tangential_plus", "tangential_minus", "inward", "inward"]  # [S:ea_rcs] 4 per pack
 
 [[stage]]

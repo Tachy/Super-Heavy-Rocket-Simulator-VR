@@ -153,9 +153,10 @@ constexpr test::SampleGap crs35_sample_gaps[] = {
 // planned kick (12.3 deg) flies a steeper arc (path 38.2 against 36.6 deg); SECO T+507.7 against ~511.6 s (-0.7 %).
 constexpr double meco_time_allowance = 0.03;
 // INTERIM (follow-ups Task 7, user 2026-10-23): the measured 13.6 s flip exposed that our boostback costs too little
-// (53.6 t kept at MECO against ~66 t on the CRS-35 gauge; boostback 43 s against ~55 s): 7.6 % gap + 2 % = 0.096,
-// to be tightened back to 0.03 once Task 7b finds the cause (docs/subsystems.md "Falcon 9 flip time").
-constexpr double meco_speed_allowance = 0.096;
+// (53.6 t kept at MECO against ~66 t on the CRS-35 gauge; boostback 43 s against ~55 s): 7.63 % gap + 2 % = 9.63 %,
+// rounded up to 0.097; to be tightened back to 0.03 once Task 7b finds the cause (docs/subsystems.md "Falcon 9 flip
+// time").
+constexpr double meco_speed_allowance = 0.097;
 constexpr double meco_altitude_allowance = 0.04;
 constexpr double meco_gamma_allowance_deg = 6.0;
 constexpr double seco_time_allowance = 0.02;
