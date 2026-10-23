@@ -141,7 +141,8 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
                     st.calculator->result.tanker_flights, st.calculator->result.duration_s / seconds_per_day,
                     st.hls_required_propellant_kg / kg_per_t);
     }
-    out << "\n     #  launch (d)  arrival (d)  phasing orbit    delivered (t)  depot after (t)  calculator (t)\n";
+    out << "\n     #  launch (d)  arrival (d)  phasing orbit    delivered (t)  depot after (t)  calculator (t)"
+           "  first plan (t)\n";
     for (const auto& r : st.rows) {
         char orbit[32] = "-";
         if (r.phasing_orbit) {
@@ -155,6 +156,8 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
         std::snprintf(row, sizeof row, "  %4s  %10.2f  %11.2f  %-15s  %13.1f  %15.1f", name, day(r.launch),
                       day(r.arrival), orbit, r.delivered_kg / kg_per_t, r.depot_after_kg / kg_per_t);
         out << row;
+        // the calculator's model of the flown window (the comparison), then the first plan's k-th (reported)
+        out << (r.window_model ? line("  %14.1f", r.window_model->depot_after_kg / kg_per_t) : std::string(16, ' '));
         if (r.calculator) out << line("  %14.1f", r.calculator->depot_after_kg / kg_per_t);
         if (r.failed) out << "  FAILED";
         if (!r.note.empty()) out << "  " << r.note;
@@ -166,9 +169,10 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
                     r.rendezvous_kg / kg_per_t);
         out << line("; depot %.1f -> %.1f km, settling %.0f kNs", r.depot_height_planned_m / m_per_km,
                     r.depot_height_after_m / m_per_km, r.settling_impulse_ns / 1000.0);
+        if (r.window_model) out << line("; calculator delivers %.1f t", r.window_model->flight.delivered_kg / kg_per_t);
         if (r.calculator) {
             const auto& f = r.calculator->flight;
-            out << line("; calculator delivers %.1f t", f.delivered_kg / kg_per_t);
+            out << line("; first plan delivers %.1f t", f.delivered_kg / kg_per_t);
             if (f.window) {
                 out << line(", phasing %.1f h, cost %.1f t", (f.window->schedule.waypoint0_epoch - f.window->separation) / 3600.0,
                             f.window->cost.propellant_kg / kg_per_t);
@@ -199,6 +203,12 @@ std::string campaign_flight_text(const CampaignFlightState& st, const std::vecto
         out << line("%.1f days)\n", day(*st.hls_arrival));
     } else {
         out << "not complete)\n";
+    }
+    if (st.calculator) {  // ascent Task 5: the window choice against the first plan
+        out << line("Phasing classes against the first plan: mix difference %.0f (at most %.0f), pairwise flips %.0f\n",
+                    static_cast<double>(phasing_class_mix_difference(st)),
+                    static_cast<double>(max_class_mix_difference(st.tankers_flown)),
+                    static_cast<double>(phasing_class_flips(st)));
     }
     out << (misses.empty() ? "Comparison: passed\n" : "Comparison: FAILED\n");
     for (const auto& m : misses) out << "  " << m << "\n";

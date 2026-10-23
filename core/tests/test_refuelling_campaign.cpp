@@ -23,6 +23,7 @@
 #include "starsim/mission/refuelling_campaign.hpp"
 #include "starsim/mission/refuelling_costs.hpp"
 #include "starsim/sim/lunar_landing_mission.hpp"
+#include "starsim/sim/refuelling_campaign_flight.hpp"
 #include "starsim/sim/refuelling_campaign_setup.hpp"
 #include "starsim/sim/refuelling_campaign_text.hpp"
 #include "starsim/sim/refuelling_mission.hpp"
@@ -814,4 +815,40 @@ TEST_CASE("Flown campaign text: rows, losses, verdict", "[refuelling][campaign][
     const auto failed = sim::campaign_flight_text(st, {"Tankerzahl: geflogen 1, Rechner 2"}, clock);
     CHECK_THAT(failed, Catch::Matchers::ContainsSubstring("Tankerzahl"));
     CHECK_THAT(failed, Catch::Matchers::ContainsSubstring("Comparison: FAILED"));
+}
+
+TEST_CASE("Flown campaign: the phasing-class mix against the first plan is bounded, flips are counted",
+          "[refuelling][campaign][campaign_flown]") {
+    // ascent Task 5 (ruling b): the fill is compared with the calculator's model of the flown window; a flight flown in
+    // the other phasing class than the first plan's k-th counts as a flip (depot at 207 km: 158 x 198 below, 258 x 278
+    // above)
+    const double r0 = constants::wgs84_semi_major_axis_m;
+    const mission::PhasingOrbit below{r0 + 158e3, r0 + 198e3}, above{r0 + 258e3, r0 + 278e3};
+    CHECK_FALSE(sim::phasing_above(below, 207e3));
+    CHECK(sim::phasing_above(above, 207e3));
+    CHECK_FALSE(sim::phasing_above(std::nullopt, 207e3));
+    sim::CampaignFlightState st;
+    const auto row = [&](const mission::PhasingOrbit& flown, const mission::PhasingOrbit& first_plan) {
+        sim::CampaignFlownRow r;
+        r.number = static_cast<int>(st.rows.size()) + 1;
+        r.phasing_orbit = flown;
+        r.depot_height_planned_m = 207e3;
+        mission::CampaignTanker k;
+        k.flight.window = mission::LaunchWindow{};
+        k.flight.window->phasing_orbit = first_plan;
+        r.calculator = k;
+        st.rows.push_back(r);
+    };
+    row(above, above);
+    row(below, above);  // a flip
+    row(below, below);
+    row(above, below);  // a flip
+    st.tankers_flown = 4;
+    CHECK(sim::phasing_class_flips(st) == 2);
+    CHECK(sim::phasing_class_mix_difference(st) == 0);  // two flips both ways: the mix is the same
+    row(above, below);                                  // a third flip, one-sided
+    CHECK(sim::phasing_class_mix_difference(st) == 1);
+    CHECK(sim::max_class_mix_difference(4) == 1);
+    CHECK(sim::max_class_mix_difference(12) == 3);
+    CHECK(sim::max_class_mix_difference(2) == 1);
 }

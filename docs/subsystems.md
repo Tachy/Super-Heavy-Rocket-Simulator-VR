@@ -1684,8 +1684,13 @@ Plan `docs/superpowers/plans/2026-10-21-refuelling-f2-flown-campaign.md`, ledger
   13-21 t); `campaign_offset_below_t` 1.7 / `campaign_offset_above_t` 2.25 [D] by the phasing orbit's periapsis
   against the depot's mean radius. The calculator books the tanker's phasing boil-off with the flown free coast's
   3.5 t/day (the orbit average at a fixed LVLH attitude said 15.9) and the HLS's 0.47 t/day [D].
-- **Comparison** (user 2026-10-22): count equal to the first plan; the fill after the k-th delivering tanker within
-  2 % of the first plan's k-th; each arrival (the HLS's: the duration) within 1 d of the live plan made just before
+- **Comparison** (user 2026-10-22; ascent Task 5 ruling 2026-10-23): count equal to the first plan; the fill after
+  each delivering tanker within 2 % of the calculator's model of the flown window (the live plan made just before its
+  launch, in the phasing class flown: `CampaignFlownRow::window_model` - the delivery model's check; until ascent
+  Task 5 the first plan's k-th, whose class flips at thresholds); the phasing-class mix against the first plan -
+  |tankers above the depot in the first plan's paired flights - tankers flown above| - at most one in four delivering
+  tankers (at least 1, `max_class_mix_difference` [E]: a window-choice bias tilts the mix, the timing cascade does
+  not); the pairwise class flips (by phasing orbit) only reported; each arrival (the HLS's: the duration) within 1 d of the live plan made just before
   its launch; the HLS holds its required propellant; the first return caught or upright abort. The first plan's
   duration is only reported: its windows flip at thresholds - the latest launch to the same arrival (3 h) differs
   under ~100 km of depot phase (tanker 6: plan 20.49 d, flown 19.51 d), the 24 h pad turnaround then moves every
@@ -2201,14 +2206,17 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     both agree on): above 1.6 -> 2.0 t (4 flights -2.6..+2.1 t), below -0.5 -> 1.1 t (1 flight +1.6 t) [D].
   - Calculator (default): 14 tankers / 52.3 d -> **12 tankers / 50.6 d**.
   - Flown campaign, placed (`refuelling_report --fly-placed`): before 2 tankers, 8.6 d (HLS at the depot 8.59 d with
-    1053.0 t, first return caught with 1.27 t); after 2 tankers, 8.6 d, comparison passed (deliveries 73.8 / 75.5 t against 60.5 / 63.3 t, HLS at the
-    depot 8.62 d with 1062.7 t, first return caught with 2.57 t).
+    1053.0 t, first return caught with 1.27 t); after 2 tankers, 8.6 d, comparison passed (deliveries 73.8 / 75.5 t
+    against 60.5 / 63.3 t, HLS at the depot 8.62 d with 1062.7 t, first return caught with 2.57 t).
   - Full flown campaign (ctest `Flown campaign: the depot launched*`): 12 tankers flown, 52.9 d, every tanker docked,
     HLS at the depot 52.94 d with 1079.7 t (needs 1041.4 t), first return caught (2.58 t); first plan 12 tankers /
-    44.7 d. **Open:** the fill comparison misses at tankers 5 and 8 (420.5 vs 410.5 t, +2.4 %; 628.7 vs 616.3 t,
-    +2.0 %; tolerance 2 %): both flew below the depot (158 x 198 km, 23.5 / 11.3 h phasing) where the first plan's k-th
-    flight was above it (43 / 39 h, the costlier raise: -7.4 / -8.4 t delivered). The offsets are converged (agreeing
-    flights now +0.0 t on average); the miss is the first plan's class flips, not the delivery model.
+    44.7 d. Against the first plan's k-th (the comparison until now) the fill missed at tankers 5 and 8 (420.5 vs
+    410.5 t, +2.4 %; 628.7 vs 616.3 t, +2.0 %): the k-th pairs drift apart in time once the first windows cascade
+    (first plan 44.7 d, flown 52.9 d), so 7 of 12 flew the other phasing class than their pair (tankers 5, 6, 8-12).
+    Ruling 2026-10-23: the fill against the calculator's model of each flown window - every tanker within 0.5 %
+    (tanker 5: 420.5 vs 420.6 t, tanker 8: 628.7 vs 629.6 t, largest tanker 12: 907.6 vs 909.0 t); the class mix
+    asserted instead of the pairwise flips: first plan 8 of 12 above the depot, flown 7 of 12 (difference 1, at most 3);
+    7 pairwise flips reported. Comparison passed.
 - **Test time:** every test process plans its own launches (the memo lives per process; no on-disk cache - the spec
   wants planning at launch): 60 cases of the affected labels grew by ~28 s each (+1700 s CPU in all under the 24-way
   parallel load; a Starship plan 4-6 trials, ~4 s each serial, ~20-30 s under load; the Falcon 9 drone-ship request 15

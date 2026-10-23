@@ -171,6 +171,7 @@ void RefuellingCampaignFlight::plan_next(FlightSession& s) {
     if (!report.result.closes) return end(report.result.reason);
     const bool tanker = !report.result.tankers.empty();
     next_ = tanker ? report.result.tankers.front().flight : *report.result.hls;
+    next_model_ = tanker ? std::optional<mission::CampaignTanker>(report.result.tankers.front()) : std::nullopt;
     if (!next_->window) return end("Planung ohne Startfenster");
     next_parameters_ = tanker ? report.tanker_window : report.hls_window;
     state_.tankers_planned = state_.tankers_flown + report.result.tanker_flights;
@@ -218,6 +219,7 @@ void RefuellingCampaignFlight::launch(FlightSession& s) {
     row.launch = s.epoch();
     row.arrival = s.epoch();
     row.phasing_orbit = next_->window->phasing_orbit;
+    if (!row.hls) row.window_model = next_model_;
     row.depot_lead_m = depot_lead_m_;
     row.planned_arrival = next_arrival_;
     row.depot_height_planned_m = depot_height_m_;
@@ -336,6 +338,33 @@ void RefuellingCampaignFlight::end(const std::string& reason) {
     state_.next_launch.reset();
 }
 
+bool phasing_above(const std::optional<mission::PhasingOrbit>& orbit, double depot_mean_height_m) {
+    return orbit && orbit->periapsis_radius_m > constants::wgs84_semi_major_axis_m + depot_mean_height_m;
+}
+
+int phasing_class_flips(const CampaignFlightState& state) {
+    int flips = 0;
+    for (const auto& r : state.rows) {
+        if (r.hls || r.failed || !r.calculator || !r.calculator->flight.window) continue;
+        const double depot_m = r.depot_height_planned_m;
+        if (phasing_above(r.phasing_orbit, depot_m) !=
+            phasing_above(r.calculator->flight.window->phasing_orbit, depot_m)) {
+            ++flips;
+        }
+    }
+    return flips;
+}
+
+int phasing_class_mix_difference(const CampaignFlightState& state) {
+    int above_planned = 0, above_flown = 0;
+    for (const auto& r : state.rows) {
+        if (r.hls || r.failed || !r.calculator || !r.calculator->flight.window) continue;
+        above_planned += phasing_above(r.calculator->flight.window->phasing_orbit, r.depot_height_planned_m) ? 1 : 0;
+        above_flown += phasing_above(r.phasing_orbit, r.depot_height_planned_m) ? 1 : 0;
+    }
+    return std::abs(above_planned - above_flown);
+}
+
 std::vector<std::string> RefuellingCampaignFlight::comparison_misses() const {
     if (!state_.calculator) return {"keine Rechnerplanung"};
     std::vector<std::string> misses;
@@ -359,14 +388,22 @@ std::vector<std::string> RefuellingCampaignFlight::comparison_misses() const {
             misses.emplace_back(line);
         }
     }
+    // ascent Task 5 (ruling b): the fill against the calculator's model of the flown window (the live plan made just
+    // before the launch, in the class flown) - the delivery model's check; the first plan's class flips counted below
     for (const auto& r : state_.rows) {
-        if (r.hls || r.failed || !r.calculator) continue;
-        const double c = r.calculator->depot_after_kg;
+        if (r.hls || r.failed || !r.window_model) continue;
+        const double c = r.window_model->depot_after_kg;
         if (std::abs(r.depot_after_kg - c) > mission_.fill_tolerance * c) {
             std::snprintf(line, sizeof line, "Tanker %d: Depot %.1f t geflogen, %.1f t Rechner", r.number,
                           r.depot_after_kg / 1000.0, c / 1000.0);
             misses.emplace_back(line);
         }
+    }
+    if (const int mix = phasing_class_mix_difference(state_); mix > max_class_mix_difference(state_.tankers_flown)) {
+        std::snprintf(line, sizeof line,
+                      "Phasenklassen: %d Tanker mehr oder weniger über dem Depot als im ersten Plan (erlaubt %d)", mix,
+                      max_class_mix_difference(state_.tankers_flown));
+        misses.emplace_back(line);
     }
     if (state_.hls_arrival && state_.hls_propellant_kg < state_.hls_required_propellant_kg) {
         std::snprintf(line, sizeof line, "HLS: %.1f t Treibstoff, %.1f t gefordert", state_.hls_propellant_kg / 1000.0,

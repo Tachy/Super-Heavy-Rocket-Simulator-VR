@@ -6,6 +6,7 @@
 // depot (FlightSession::start_station_reboost) and books the calculator's [E] attitude gas and transfer vent. The
 // first plan is the calculator's answer the flight is compared with.
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -48,6 +49,9 @@ struct CampaignFlownRow {
     // arrivals and the duration; the first plan's windows flip at thresholds and cascade by a phase cycle)
     std::optional<time::Epoch> planned_arrival;
     std::optional<mission::CampaignTanker> calculator;  // the first plan's k-th tanker for the k-th delivering one
+    // ascent Task 5 (ruling b): the calculator's model of this flown window - the live plan's next tanker, made just
+    // before the launch, in the phasing class flown; the fill comparison reads it (the delivery model's check)
+    std::optional<mission::CampaignTanker> window_model;
 };
 
 struct CampaignFlightLosses {  // flown and booked, from the start to the end
@@ -75,6 +79,20 @@ struct CampaignFlightState {
     std::string first_return_note;  // German: why it did not fly / its status
 };
 
+// A tanker flight's phasing class: its phasing orbit's periapsis above the depot's mean radius (as
+// campaign_delivery_offset_kg classes it); false without a phasing orbit.
+bool phasing_above(const std::optional<mission::PhasingOrbit>& orbit, double depot_mean_height_m);
+// Delivering tankers whose phasing class (above / below the depot) differs from the first plan's k-th (reported only:
+// after the first windows cascade - the 24 h turnaround, threshold flips - the first plan and the flight drift apart
+// in time, 44.7 d vs 52.9 d for the 12-tanker campaign, and the k-th pairs compare different depot phases: 7 of 12).
+int phasing_class_flips(const CampaignFlightState& state);
+// The class mix: |tankers above the depot in the first plan - tankers flown above it| over the paired delivering
+// tankers (the first plan's k-th for the k-th; 12-tanker campaign: |8 - 7| = 1).
+int phasing_class_mix_difference(const CampaignFlightState& state);
+// [E] ascent Task 5: a systematic window-choice bias (the calculator preferring one class the flight does not choose)
+// tilts the mix, while the timing cascade does not: at most one in four delivering tankers (at least 1).
+inline int max_class_mix_difference(int tankers_flown) { return std::max(1, tankers_flown / 4); }
+
 class RefuellingCampaignFlight : public SessionSupervisor {
 public:
     RefuellingCampaignFlight(CampaignSources sources, config::RefuellingCampaignFlownMission mission);
@@ -83,8 +101,10 @@ public:
     const CampaignFlightState& state() const { return state_; }
     // A placed depot (the session's only body, the station) at `epoch`: planning starts at once.
     void start_placed(time::Epoch epoch);
-    // The spec's pass check against the first plan: German lines of every miss (empty: passed) - tanker count,
-    // duration, depot fill per arrival, the HLS's propellant.
+    // The spec's pass check: German lines of every miss (empty: passed) - tanker count against the first plan, the
+    // arrivals against the live plans, the depot fill per arrival against the calculator's model of the flown window
+    // (window_model, ascent Task 5), the phasing-class mix against the first plan (max_class_mix_difference), the
+    // HLS's propellant.
     std::vector<std::string> comparison_misses() const;
 
 private:
@@ -104,6 +124,7 @@ private:
     CampaignFlightState state_;
     std::optional<CampaignHlsDemand> demand_;
     std::optional<mission::CampaignFlight> next_;
+    std::optional<mission::CampaignTanker> next_model_;  // the live plan's next tanker (none: the HLS is next)
     mission::LaunchWindowParameters next_parameters_;
     std::optional<time::Epoch> last_launch_, last_arrival_, last_update_;
     std::optional<time::Epoch> planned_second_launch_;  // the previous plan's next-but-one launch (moved-window note)
