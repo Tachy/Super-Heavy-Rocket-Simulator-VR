@@ -2,12 +2,52 @@
 # (station keeping) and its deck stays level: no sea state yet. Where it waits is set per mission (the nominal impact
 # point of that mission's first stage). Display names are generic.
 #
+# The onboard computer picks the ship whose service area (a latitude / longitude box) contains the first stage's
+# predicted impact; several: the nearest home port. Areas are [E]; home ports are the ships' real ports [S].
+#
 # [sources]
 #   wiki_asds  https://en.wikipedia.org/wiki/Autonomous_spaceport_drone_ship  (deck ~300 x ~170 ft)
+#   wiki_canaveral  https://en.wikipedia.org/wiki/Port_Canaveral  (28.41 N, 80.62 W)
+#   wiki_longbeach  https://en.wikipedia.org/wiki/Port_of_Long_Beach  (33.75 N, 118.22 W)
 
 [[drone_ship]]
 id = "asds_atlantic"
 name = "Drohnenschiff"
+basin = "atlantic"
 deck_length_m = 91.0        # [S:wiki_asds] ~300 ft
 deck_width_m = 52.0         # [S:wiki_asds] ~170 ft (with the wing extensions)
 freeboard_m = 3.0           # [E] deck above the waterline
+home_port_latitude_deg = 28.41   # [S:wiki_canaveral]
+home_port_longitude_deg = -80.62
+area_min_latitude_deg = 20.0     # [E] off the US east coast to mid-Atlantic (covers the Cape launches' downrange)
+area_max_latitude_deg = 45.0
+area_min_longitude_deg = -82.0
+area_max_longitude_deg = -40.0
+
+[[drone_ship]]
+id = "asds_atlantic_2"
+name = "Drohnenschiff"
+basin = "atlantic"
+deck_length_m = 91.0        # [S:wiki_asds] ~300 ft
+deck_width_m = 52.0         # [S:wiki_asds] ~170 ft (with the wing extensions)
+freeboard_m = 3.0           # [E] deck above the waterline
+home_port_latitude_deg = 28.41   # [S:wiki_canaveral]
+home_port_longitude_deg = -80.62
+area_min_latitude_deg = 20.0     # [E] off the US east coast to mid-Atlantic (covers the Cape launches' downrange)
+area_max_latitude_deg = 45.0
+area_min_longitude_deg = -82.0
+area_max_longitude_deg = -40.0
+
+[[drone_ship]]
+id = "asds_pacific"
+name = "Drohnenschiff"
+basin = "pacific"
+deck_length_m = 91.0        # [S:wiki_asds] ~300 ft
+deck_width_m = 52.0         # [S:wiki_asds] ~170 ft (with the wing extensions)
+freeboard_m = 3.0           # [E] deck above the waterline
+home_port_latitude_deg = 33.75   # [S:wiki_longbeach]
+home_port_longitude_deg = -118.22
+area_min_latitude_deg = 0.0     # [E] off the US west coast to the mid-Pacific
+area_max_latitude_deg = 40.0
+area_min_longitude_deg = -150.0
+area_max_longitude_deg = -115.0

@@ -27,8 +27,6 @@ struct RecoveryChoice {
 // [E] The sea surface a drone ship floats on, above WGS84: the geoid off the US Atlantic coast (EGM2008 ~-30 .. -35 m;
 // config/missions/falcon9_asds.toml uses -35 m off the Carolinas).
 inline constexpr double drone_ship_sea_height_m = -35.0;
-// The drone ship the onboard computer sends out (the only one configured: config/drone_ships.toml).
-inline constexpr const char* default_drone_ship_id = "asds_atlantic";
 // [D] The drone ship waits at the first stage's impact predicted this long after its separation (the derivation of
 // config/missions/falcon9_asds.toml: the staging sequence's push is over, the coast's RCS trim moves the point ~0.1 km).
 inline constexpr double drone_ship_prediction_after_separation_s = 10.0;

@@ -51,6 +51,11 @@ const frames::BodyOrientation& earth() {
     return e;
 }
 
+std::string file_text(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
 sim::FlightSession& like_session() {
     static sim::FlightSession session(ephemeris(), earth(), STARSIM_CONFIG_DIR);
     return session;
@@ -265,7 +270,7 @@ TEST_CASE("Falcon 9 with a Starlink-class payload to 53 deg lands on the drone s
     REQUIRE(plan.feasible);
     // SLC-40 has LZ-40, but the RTLS return leaves the upper stage short of this orbit
     CHECK(plan.recovery.kind == sim::RecoveryKind::DroneShip);
-    CHECK(plan.recovery.zone_or_ship_id == sim::default_drone_ship_id);
+    CHECK(plan.recovery.zone_or_ship_id == "asds_atlantic");
     REQUIRE(plan.booster_impact);
     CHECK(plan.recovery.latitude_rad == plan.booster_impact->latitude_rad);
     CHECK(plan.recovery.longitude_rad == plan.booster_impact->longitude_rad);
@@ -280,9 +285,37 @@ TEST_CASE("Falcon 9 from a site without a landing zone uses the drone ship", "[s
     const auto plan = timed_plan(request, true);
     REQUIRE(plan.feasible);
     CHECK(plan.recovery.kind == sim::RecoveryKind::DroneShip);
-    CHECK(plan.recovery.zone_or_ship_id == sim::default_drone_ship_id);
+    CHECK(plan.recovery.zone_or_ship_id == "asds_atlantic");
     REQUIRE(plan.booster_impact);
     CHECK(plan.recovery.latitude_rad == plan.booster_impact->latitude_rad);
+}
+
+namespace {
+const spice::SpiceEphemeris& test_ephemeris();
+}
+
+TEST_CASE("Falcon 9 impact outside every service area is refused", "[sim][ascent_planner][asds]") {
+    // a copy of the config with the pad moved to 35 S / 18 E (no landing zone): the provisional station 600 km
+    // downrange lies in no drone ship's service area, so the plan stops before any trial flight
+    const auto dir = std::filesystem::temp_directory_path() / "starsim_ascent_planner_no_ship_area";
+    std::filesystem::remove_all(dir);
+    std::filesystem::copy(STARSIM_CONFIG_DIR, dir, std::filesystem::copy_options::recursive);
+    auto text = file_text(dir / "launch_sites.toml");
+    const auto at = text.find("id = \"ksc_lc39a\"");
+    REQUIRE(at != std::string::npos);
+    const auto lat = text.find("latitude_deg = 28.60822", at);
+    const auto lon = text.find("longitude_deg = -80.60410", at);
+    REQUIRE((lat != std::string::npos && lon != std::string::npos));
+    text.replace(lon, std::string("longitude_deg = -80.60410").size(), "longitude_deg = 18.0");
+    text.replace(lat, std::string("latitude_deg = 28.60822").size(), "latitude_deg = -35.0");
+    std::ofstream(dir / "launch_sites.toml", std::ios::binary) << text;
+    sim::FlightSession like(test_ephemeris(), earth(), dir);
+    auto request = falcon9_request("falcon9_rtls");
+    request.site_id = "ksc_lc39a";
+    const auto plan = sim::plan_launch(like, request);
+    CHECK_FALSE(plan.feasible);
+    CHECK(plan.reason.find("Kein Drohnenschiff") != std::string::npos);
+    CHECK(plan.trial_flights == 0);
 }
 
 TEST_CASE("Starship at a site without a tower is refused", "[sim][ascent_planner]") {
@@ -323,11 +356,6 @@ namespace {
 
 // The sources of like_session() (the test cases below sit outside this namespace, where `ephemeris` names a namespace).
 const spice::SpiceEphemeris& test_ephemeris() { return ephemeris(); }
-
-std::string file_text(const std::filesystem::path& path) {
-    std::ifstream in(path, std::ios::binary);
-    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-}
 
 // A config dir holding only missions/starship_leo.toml: the configured file with `insert` after its "[mission]" line
 // and `append` at its end (loader tests; a directory per case: ctest runs cases in parallel).

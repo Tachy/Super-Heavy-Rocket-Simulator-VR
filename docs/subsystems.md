@@ -2165,11 +2165,17 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     "Ziel mit Booster-Rückkehr nicht erreichbar (<trial reason>)". Never expendable.
   - `leg_landing` (Falcon 9): the site's `landing_zone` (launch_sites.toml; SLC-40 -> LZ-40 [S]) when the plan with the
     RTLS return (its MECO plan keeps the 12.1 t landing propellant) is feasible - also where the drone ship would leave
-    more (SpaceX practice, spec) - else the drone ship `asds_atlantic` at the stage's impact predicted 10 s after the
+    more (SpaceX practice, spec) - else a drone ship from `config/drone_ships.toml` at the stage's impact predicted 10 s after the
     separation (`BoosterReturnGuidance::predict_impact`, drag and the entry burn, no steering: the falcon9_asds.toml
     derivation), deck along the ground track there; its sea at -35 m [E] (geoid). The kick is searched with the ship at
     a provisional station 600 km [E] downrange (the MECO plan without a boostback does not depend on the ship; near the
     pad its deck would replace the ground). Neither feasible: refused.
+  - Drone ship list (follow-ups Task 6): `asds_atlantic`, `asds_atlantic_2` (home port Port Canaveral [S]) and
+    `asds_pacific` (Long Beach [S]), each with a service area [E] (a lat/lon box). `config::drone_ship_for` picks the
+    ship whose area holds the point (several: nearest home port, file order on a tie); `plan_launch` asks it for the
+    provisional station (none: refused "Kein Drohnenschiff für dieses Seegebiet.", before any trial) and again at the
+    predicted impact (the recovery's ship id; the memo key carries the provisional one). Cape launches still get
+    `asds_atlantic`. The old fixed `default_drone_ship_id` is gone.
   - Limits (final review): the drone ship's station is not checked to lie at sea - there is no land mask until the
     M8 terrain (an impact predicted over land would place the deck there). Without a feasible trial the search probes
     the middle of the widest kick gap left and gives up once every gap is below 2.5 deg (`initial_step_rad`): a launch

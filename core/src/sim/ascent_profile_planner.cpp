@@ -502,11 +502,22 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
                                  std::cos(site.latitude_rad) * std::sin(arc) * std::cos(azimuth));
     const double lon = site.longitude_rad + std::atan2(std::sin(azimuth) * std::sin(arc) * std::cos(site.latitude_rad),
                                                        std::cos(arc) - std::sin(site.latitude_rad) * std::sin(lat));
-    auto profile = planned({RecoveryKind::DroneShip, default_drone_ship_id, lat, lon, azimuth});
+    // The ship comes from config/drone_ships.toml by where the stage comes down (service areas, nearest home port).
+    const char* no_ship = "Kein Drohnenschiff für dieses Seegebiet";
+    const auto ships = config::load_drone_ships(dir);
+    const auto provisional_ship = config::drone_ship_for(ships, lat, lon);
+    if (!provisional_ship) {
+        AscentProfile none;
+        none.target = request.target;
+        return refused(none, no_ship);
+    }
+    auto profile = planned({RecoveryKind::DroneShip, provisional_ship->id, lat, lon, azimuth});
     if (!profile.feasible) return refused(profile, unreachable);
     if (!profile.booster_impact) return refused(profile, "Der Aufschlagpunkt der ersten Stufe ist nicht vorhersagbar");
     const auto& impact = *profile.booster_impact;
-    profile.recovery = {RecoveryKind::DroneShip, default_drone_ship_id, impact.latitude_rad, impact.longitude_rad,
+    const auto ship = config::drone_ship_for(ships, impact.latitude_rad, impact.longitude_rad);
+    if (!ship) return refused(profile, no_ship);
+    profile.recovery = {RecoveryKind::DroneShip, ship->id, impact.latitude_rad, impact.longitude_rad,
                         impact.heading_rad};
     return profile;
 }
