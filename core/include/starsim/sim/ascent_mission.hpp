@@ -8,6 +8,11 @@
 
 namespace starsim::sim {
 
+// The launch stack of an ascent: `vehicle` with `payload_kg` on its top stage (its fairing dropped when `fairing` is
+// false) and, with a `payload`, that payload vehicle stacked on top (config::stack_payload).
+config::VehicleConfig ascent_stack(config::VehicleConfig vehicle, const std::filesystem::path& config_dir,
+                                   double payload_kg, bool fairing, const std::optional<config::MissionPayload>& payload);
+
 // Sets up `session` for an ascent mission at `epoch`: the vehicle with the mission's payload (and fairing) on the pad,
 // the landing zone or drone ship of a returning first stage, booster return on, a payload vehicle stacked on top and
 // released after cutoff ([payload]), and the ascent autopilot engaged with the mission's target and pitch program.

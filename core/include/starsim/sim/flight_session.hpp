@@ -439,6 +439,11 @@ public:
     // Return of the booster to the launch pad after staging (flip, boostback, landing burn). Takes effect
     // at the next staging; the booster is then guided independently of the controlled body.
     void set_booster_return(bool enabled, gnc::BoosterReturnParameters parameters = {});
+    // Ends the return of body `index` (a separated first stage): its return guidance is dropped and its engines stop,
+    // it coasts unguided from now on. For studies that end before the return does (the pre-launch ascent planner's
+    // trial flights end at the upper stage's cutoff). No effect on a body without return guidance; throws
+    // std::out_of_range for a bad index.
+    void end_booster_return(size_t index);
     // Scenarios: a returning booster placed with a free state, guided by its return guidance from `start_phase`
     // (it becomes the controlled body; pilot input is ignored while it has return guidance).
     void place_returning_booster(const config::VehicleConfig& config, const vehicle::RigidBodyState& state,
@@ -591,6 +596,7 @@ public:
     const environment::PointMassGravity& gravity() const { return gravity_; }
     const ephemeris::Ephemeris& ephemeris() const { return *env_.ephemeris; }
     const frames::BodyOrientation& earth_orientation() const { return earth_; }
+    const std::filesystem::path& config_dir() const { return config_dir_; }
     const frames::BodyOrientation* moon_orientation() const { return moon_orientation_; }  // nullptr: Earth only
 
     // Manoeuvre execution on the controlled body (RCS orientation, timed ignition, closed-loop cutoff).

@@ -27,6 +27,14 @@ void FlightSession::set_booster_return(bool enabled, gnc::BoosterReturnParameter
     }
 }
 
+void FlightSession::end_booster_return(size_t index) {
+    auto& flying = bodies_.at(index);
+    if (!flying.return_guidance) return;
+    flying.return_guidance.reset();
+    flying.return_command = {};
+    for (auto& [group, run] : flying.running_groups) run = false;
+}
+
 const gnc::ReturnCommand* FlightSession::return_status(size_t index) const {
     const auto& flying = bodies_.at(index);
     return flying.return_guidance ? &flying.return_command : nullptr;

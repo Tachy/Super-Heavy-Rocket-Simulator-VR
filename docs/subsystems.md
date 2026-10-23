@@ -2097,3 +2097,30 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   crew escape, the refuelling tanker flights passed. No failed re-plan in any ASDS case (MECO: 9 before).
 - `ScvxSettings::fresh_max_iterations` 60 (Task 2) stays: seed 107's first plan is a fresh plan (no soft reserve) and
   still needs 44 iterations at gimbal 0.45 (41 at 0.3).
+
+### Pre-launch ascent planner (Task 3)
+- `sim::plan_ascent_profile(like, request)` (`ascent_profile_planner.cpp`) chooses the first-stage kick by trial
+  ascents (`sim::fly_ascent_trial`): each a fresh `FlightSession` on `like`'s ephemeris, Earth orientation, gravity
+  model and config dir (its interpolated sources read directly, no second interpolation layer), the request's stack on
+  its pad, booster return on, the ascent autopilot with the candidate kick, at the flight's 5 ms tick (no coarser trial
+  tick). Objective: the upper stage's propellant (oxidizer + fuel) once SECO's engine tail-off has ended (PEG counts
+  on the tail-off impulse, ~9 m/s on Starship: read at the cutoff command the periapsis was 30 km short).
+- Booster recovery as the hard constraint: the MECO plan (`BoosterReturnGuidance::meco_propellant_kg`) decides MECO
+  in every trial, as in the flight; a non-finite plan is infeasible. The return itself is not flown: at the separation
+  the trial ends the booster's guidance (`FlightSession::end_booster_return`) - it changes nothing for the upper stage
+  (identical propellant at SECO to the gram) and saved ~45 % of a trial (11.5 -> 6.4 s serial).
+- Feasible: the guidance cut off before the stage ran dry and the radius flown over the next revolution
+  (`predict_trajectory`) lies within 5 km [E] of the target's periapsis and apoapsis. Not the osculating apsides at
+  cutoff (199.7 x 212 km for a 200 km target, by design of the J2-aware insertion) nor `orbit::j2_mean_orbit`'s mean
+  apsides (207 x 208 km: the averaged osculating a sits ~7 km above the flown radius).
+- Search: kick in [4, 25] deg [E]; start 10.5 / 13 / 15.5 deg [E]; then the vertex of the parabola through the best
+  trial and its two neighbours (a Newton step on d(propellant)/d(kick), slope and curvature from the three trials),
+  also when the best is the outermost (clamped to 1.618 x the spacing beyond it); golden section where the fit is
+  convex or leaves the bracket and towards an infeasible neighbour; stop when the next step is < 0.1 deg [E]. Memoised
+  per process by the request without its liftoff epoch (the optimum does not depend on the hour).
+- Measured: Starship to 200 km / 26.5 deg (starship_leo's request) 14.85 deg, 88.5 t at SECO, 4 trials, 15-26 s wall
+  (parallel test load / serial); the 1-deg sweep 6..22 deg peaks at 15 deg (88.5 t; 6 and 22 deg do not reach the
+  orbit), refined at 0.2 deg at 14.8 deg (88.493 t) - smooth, no visible trial noise. MECO flight-path angle 31.2 deg;
+  the ship never pitches below its flight-path angle in the first 60 s after the separation (no kink). Falcon 9 RTLS
+  (falcon9_rtls's request, probe): 11.57 deg, 2.2 t, 4 trials, 10.8 s. Longer than the free launch's 10 s countdown:
+  it must hold for the plan (spec).

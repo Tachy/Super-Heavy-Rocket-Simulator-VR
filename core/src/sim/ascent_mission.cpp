@@ -6,18 +6,25 @@
 
 namespace starsim::sim {
 
+config::VehicleConfig ascent_stack(config::VehicleConfig vehicle, const std::filesystem::path& config_dir,
+                                   double payload_kg, bool fairing, const std::optional<config::MissionPayload>& payload) {
+    vehicle.stages.back().payload_mass_kg = payload_kg;
+    if (!fairing) vehicle.stages.back().fairing_mass_kg = 0.0;
+    if (payload) {
+        vehicle = config::stack_payload(std::move(vehicle), config::load_vehicle(config_dir, payload->vehicle_id));
+    }
+    return vehicle;
+}
+
 void start_ascent_mission(FlightSession& session, const config::AscentMission& mission,
                           const std::filesystem::path& config_dir, time::Epoch epoch,
                           const config::VehicleConfig* configured, bool keep_station) {
-    auto vehicle = configured ? *configured : config::load_vehicle(config_dir, mission.vehicle_id);
-    vehicle.stages.back().payload_mass_kg = mission.payload_kg;
-    if (!mission.fairing) vehicle.stages.back().fairing_mass_kg = 0.0;
+    const auto vehicle = ascent_stack(configured ? *configured : config::load_vehicle(config_dir, mission.vehicle_id),
+                                      config_dir, mission.payload_kg, mission.fairing, mission.payload);
     std::optional<PayloadSeparation> separation;
     if (const auto& p = mission.payload) {
-        const auto payload = config::load_vehicle(config_dir, p->vehicle_id);
-        separation = PayloadSeparation{payload.stages.front().id, p->separation_delay_s, p->separation_dv_mps,
-                                       p->nose_cone_open_s};
-        vehicle = config::stack_payload(std::move(vehicle), payload);
+        separation = PayloadSeparation{config::load_vehicle(config_dir, p->vehicle_id).stages.front().id,
+                                       p->separation_delay_s, p->separation_dv_mps, p->nose_cone_open_s};
     }
     session.launch_from_pad(vehicle, launch_site_from_config(config::load_launch_site(config_dir, mission.site_id)),
                             mission.heading_rad, epoch, keep_station);
