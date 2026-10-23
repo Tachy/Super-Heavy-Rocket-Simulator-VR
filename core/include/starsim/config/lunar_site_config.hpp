@@ -53,6 +53,13 @@ struct TerrainGridFile {
     double step_longitude_deg = 0.0;
     bool global_longitude = false;
     std::string height_reference;  // "egm2008_undulation" or "wgs84_ellipsoid"
+    // Earth DEM tiles (tools/data_pipeline/earth_terrain.py; empty / 0 where the header has none): the area of
+    // config/earth_terrain.toml the tile was cut for, its level ("global", "regional", "local"), centre and half size.
+    std::string area;
+    std::string level;
+    double area_latitude_deg = 0.0;
+    double area_longitude_deg = 0.0;
+    double half_size_m = 0.0;
     std::vector<TerrainCheck> checks;
 };
 

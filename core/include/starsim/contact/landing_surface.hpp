@@ -17,7 +17,7 @@ struct SurfaceSupport {
     math::Vec3 normal{0.0, 0.0, 1.0};  // outward unit normal of the surface there, site frame
 };
 
-// Ground other than a flat plane (sloped planes in tests, lunar terrain): height and normal in a site frame.
+// Ground other than a flat plane (sloped planes in tests, lunar and Earth terrain): height and normal in a site frame.
 class SurfaceField {
 public:
     virtual ~SurfaceField() = default;
@@ -37,18 +37,19 @@ private:
 };
 
 // A reference body's surface (shape + terrain) seen from a site frame: origin `origin_fixed_m` on the surface, columns of
-// `site_to_fixed` east, north, up (body-fixed axes). The height is that of the surface point on the radial through the
-// site-plane point (east, north, 0) - it includes the drop of the curved surface below the plane; that point lies
-// |(east, north)| x height / R off the vertical (< 1 mm within 100 m of the site).
+// `site_to_fixed` east, north, up (body-fixed axes). The height is that of the surface point on the shape's normal
+// through the site-plane point (east, north, 0) (a sphere: its radial) - it includes the drop of the curved surface
+// below the plane; that point lies |(east, north)| x height / R off the vertical (< 1 mm within 100 m of the site).
+// Water where the terrain says so (Earth: the sea at the geoid).
 class TerrainField final : public SurfaceField {
 public:
     // `terrain` (optional): the body's terrain, shared so the field keeps it alive (the ReferenceBody only points to it).
     TerrainField(const environment::ReferenceBody& body, const math::Vec3& origin_fixed_m, const math::Mat3& site_to_fixed,
-                 std::shared_ptr<const environment::LunarTerrain> terrain = nullptr);
+                 std::shared_ptr<const environment::Terrain> terrain = nullptr);
     SurfaceSupport below(double east_m, double north_m) const override;
 
 private:
-    std::shared_ptr<const environment::LunarTerrain> terrain_;
+    std::shared_ptr<const environment::Terrain> terrain_;
     environment::ReferenceBody body_;
     math::Vec3 origin_fixed_m_;
     math::Mat3 site_to_fixed_;

@@ -46,6 +46,32 @@ SeaConfig load_sea(const Document& doc, const toml::table& t) {
     return c;
 }
 
+LaunchSiteConfig load_site(const Document& doc, const toml::table& t) {
+    LaunchSiteConfig s;
+    s.id = doc.text(t, "id");
+    s.name = doc.text(t, "name");
+    s.latitude_rad = doc.number(t, "latitude_deg") * constants::deg_to_rad;
+    s.longitude_rad = doc.number(t, "longitude_deg") * constants::deg_to_rad;
+    s.height_m = doc.number(t, "height_m");
+    s.kind = doc.text_or(t, "kind", "launch_pad");
+    if (s.kind != "launch_pad" && s.kind != "landing_zone") {
+        doc.fail("site '" + s.id + "': kind must be \"launch_pad\" or \"landing_zone\"");
+    }
+    if (s.kind == "landing_zone") s.pad_radius_m = doc.positive(t, "pad_radius_m");
+    s.landing_zone_id = doc.text_or(t, "landing_zone");
+    if (!s.landing_zone_id.empty() && s.kind != "launch_pad") {
+        doc.fail("site '" + s.id + "': only a launch pad has a landing_zone");
+    }
+    s.plateau_radius_m = doc.positive(t, "plateau_radius_m");
+    s.plateau_apron_m = doc.positive(t, "plateau_apron_m");
+    if (s.kind == "landing_zone" && s.plateau_radius_m < s.pad_radius_m) {
+        doc.fail("site '" + s.id + "': plateau_radius_m must cover pad_radius_m");
+    }
+    if (auto tower = t["tower"].as_table()) s.tower = load_tower(doc, *tower);
+    if (auto sea = t["sea"].as_table()) s.sea = load_sea(doc, *sea);
+    return s;
+}
+
 }  // namespace
 
 LaunchSiteConfig load_launch_site(const std::filesystem::path& config_dir, std::string_view site_id) {
@@ -53,28 +79,19 @@ LaunchSiteConfig load_launch_site(const std::filesystem::path& config_dir, std::
     if (auto list = doc.root["site"].as_array()) {
         for (const auto& node : *list) {
             const auto& t = *node.as_table();
-            if (doc.text(t, "id") != site_id) continue;
-            LaunchSiteConfig s;
-            s.id = std::string(site_id);
-            s.name = doc.text(t, "name");
-            s.latitude_rad = doc.number(t, "latitude_deg") * constants::deg_to_rad;
-            s.longitude_rad = doc.number(t, "longitude_deg") * constants::deg_to_rad;
-            s.height_m = doc.number(t, "height_m");
-            s.kind = doc.text_or(t, "kind", "launch_pad");
-            if (s.kind != "launch_pad" && s.kind != "landing_zone") {
-                doc.fail("site '" + s.id + "': kind must be \"launch_pad\" or \"landing_zone\"");
-            }
-            if (s.kind == "landing_zone") s.pad_radius_m = doc.positive(t, "pad_radius_m");
-            s.landing_zone_id = doc.text_or(t, "landing_zone");
-            if (!s.landing_zone_id.empty() && s.kind != "launch_pad") {
-                doc.fail("site '" + s.id + "': only a launch pad has a landing_zone");
-            }
-            if (auto tower = t["tower"].as_table()) s.tower = load_tower(doc, *tower);
-            if (auto sea = t["sea"].as_table()) s.sea = load_sea(doc, *sea);
-            return s;
+            if (doc.text(t, "id") == site_id) return load_site(doc, t);
         }
     }
     doc.fail("launch site '" + std::string(site_id) + "' not defined");
+}
+
+std::vector<LaunchSiteConfig> load_launch_sites(const std::filesystem::path& config_dir) {
+    const Document doc(config_dir / "launch_sites.toml");
+    std::vector<LaunchSiteConfig> sites;
+    if (auto list = doc.root["site"].as_array()) {
+        for (const auto& node : *list) sites.push_back(load_site(doc, *node.as_table()));
+    }
+    return sites;
 }
 
 }  // namespace starsim::config

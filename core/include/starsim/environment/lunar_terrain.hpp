@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "starsim/environment/height_grid.hpp"
+#include "starsim/environment/terrain.hpp"
 #include "starsim/math/vec3.hpp"
 
 namespace starsim::environment {
@@ -39,7 +40,7 @@ struct CylindricalGrid {
 
 // Terrain of the Moon (lunar l2): the global grid everywhere, the site tiles where present, blended over blend_m at a
 // tile's edge (no step where the tile ends). Heights above the sphere; positions in body-fixed (MOON_ME) coordinates.
-class LunarTerrain {
+class LunarTerrain final : public Terrain {
 public:
     static constexpr double blend_m = 1000.0;      // [E] tile -> global grid
     static constexpr double normal_step_m = 10.0;  // central differences for the normal (half a 20 m pixel)
@@ -47,8 +48,8 @@ public:
     LunarTerrain(CylindricalGrid global, std::vector<PolarStereographicTile> tiles, double sphere_radius_m);
 
     double height_m(double latitude_rad, double longitude_rad) const;
-    double height_at_fixed_m(const math::Vec3& fixed_m) const;  // below the point's direction
-    math::Vec3 normal_fixed(const math::Vec3& fixed_m) const;   // outward unit normal of the surface there
+    double height_at_fixed_m(const math::Vec3& fixed_m) const override;  // below the point's direction
+    math::Vec3 normal_fixed(const math::Vec3& fixed_m) const override;  // outward unit normal of the surface there
     bool in_tile(double latitude_rad, double longitude_rad) const;
     double sphere_radius_m() const { return sphere_radius_m_; }
 

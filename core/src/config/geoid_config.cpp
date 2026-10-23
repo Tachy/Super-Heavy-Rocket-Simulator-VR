@@ -4,6 +4,7 @@
 #include <fstream>
 #include <limits>
 #include <string>
+#include <utility>
 
 #include "starsim/config/vehicle_config.hpp"
 
@@ -59,9 +60,14 @@ environment::Geoid load_coarse_geoid(const std::filesystem::path& config_dir) {
 }
 
 environment::GeographicGrid geographic_grid(const TerrainGridFile& file) {
+    TerrainGridFile copy = file;
+    return geographic_grid(std::move(copy));
+}
+
+environment::GeographicGrid geographic_grid(TerrainGridFile&& file) {
     if (file.projection != "geographic") throw ConfigError("terrain grid '" + file.product + "' is not geographic");
     environment::GeographicGrid g;
-    g.grid = {file.lines, file.samples, file.dn_scale_m, file.dn};
+    g.grid = {file.lines, file.samples, file.dn_scale_m, std::move(file.dn)};
     g.north_latitude_deg = file.north_latitude_deg;
     g.west_longitude_deg = file.west_longitude_deg;
     g.step_latitude_deg = file.step_latitude_deg;

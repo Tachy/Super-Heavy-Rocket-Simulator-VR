@@ -21,7 +21,7 @@ LunarSiteConfig parse_site(const detail::Document& doc, const toml::table& t) {
 }
 
 [[noreturn]] void missing(const std::filesystem::path& path) {
-    throw ConfigError("Mondgelände fehlt: " + path.string() + " - bitte python tools/data_pipeline/fetch.py ausführen");
+    throw ConfigError("Geländedaten fehlen: " + path.string() + " - bitte python tools/data_pipeline/fetch.py ausführen");
 }
 
 }  // namespace
@@ -73,6 +73,11 @@ TerrainGridFile load_terrain_grid_file(const std::filesystem::path& toml_path) {
         if (f.height_reference != "egm2008_undulation" && f.height_reference != "wgs84_ellipsoid") {
             doc.fail("unknown height_reference '" + f.height_reference + "'");
         }
+        f.area = doc.text_or(g, "area");
+        f.level = doc.text_or(g, "level");
+        f.area_latitude_deg = doc.number_or(g, "area_latitude_deg", 0.0);
+        f.area_longitude_deg = doc.number_or(g, "area_longitude_deg", 0.0);
+        f.half_size_m = doc.number_or(g, "half_size_m", 0.0);
     } else {
         doc.fail("unknown projection '" + f.projection + "'");
     }

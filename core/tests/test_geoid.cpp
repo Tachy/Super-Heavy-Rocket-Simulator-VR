@@ -124,6 +124,31 @@ TEST_CASE("geographic grid covers a region and measures the edge distance", "[en
     CHECK(global.edge_distance_m(0.0, 123.0 * deg, R) == Catch::Approx(90.0 * deg * R).epsilon(1e-9));
 }
 
+TEST_CASE("a regional grid clamps a point outside to the nearer edge", "[environment][geoid]") {
+    GeographicGrid g;  // 3 x 5 nodes of 1 deg, 10 N .. 8 N, 20 E .. 24 E; value = 1 + sample
+    g.grid = {3, 5, 1.0, std::vector<std::int16_t>(15)};
+    for (int l = 0; l < 3; ++l) {
+        for (int s = 0; s < 5; ++s) g.grid.dn[static_cast<size_t>(l * 5 + s)] = static_cast<std::int16_t>(1 + s);
+    }
+    g.north_latitude_deg = 10.0;
+    g.west_longitude_deg = 20.0;
+    g.step_latitude_deg = 1.0;
+    g.step_longitude_deg = 1.0;
+    CHECK(g.value(9.0 * deg, 19.99 * deg) == Catch::Approx(1.0));  // just west: the west edge, not the east one
+    CHECK(g.value(9.0 * deg, 19.0 * deg) == Catch::Approx(1.0));
+    CHECK(g.value(9.0 * deg, 24.01 * deg) == Catch::Approx(5.0));  // just east: the east edge
+    CHECK(g.value(9.0 * deg, 120.0 * deg) == Catch::Approx(5.0));  // 96 deg east of it, 260 deg west: east edge
+}
+
+TEST_CASE("a global grid covers the poles exactly", "[environment][geoid]") {
+    const auto g = synthetic_global();
+    CHECK(g.covers(0.5 * constants::pi, 0.0));
+    CHECK(g.covers(-0.5 * constants::pi, 0.0));
+    CHECK(g.covers(90.0 * deg, 33.0 * deg));
+    CHECK(g.covers(-90.0 * deg, -33.0 * deg));
+    CHECK_FALSE(g.covers(0.5 * constants::pi + 1e-6, 0.0));
+}
+
 TEST_CASE("the coarse geoid file is refused when missing", "[environment][geoid][config]") {
     CHECK_THROWS_AS(config::load_coarse_geoid(std::filesystem::temp_directory_path() / "starsim_no_geoid_dir"),
                     config::ConfigError);

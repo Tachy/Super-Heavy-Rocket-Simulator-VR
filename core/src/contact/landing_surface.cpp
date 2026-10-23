@@ -2,6 +2,8 @@
 
 #include <cmath>
 
+#include "starsim/frames/geodetic.hpp"
+
 namespace starsim::contact {
 
 using math::Vec3;
@@ -17,16 +19,24 @@ SurfaceSupport PlaneField::below(double east_m, double north_m) const {
 }
 
 TerrainField::TerrainField(const environment::ReferenceBody& body, const Vec3& origin_fixed_m, const math::Mat3& site_to_fixed,
-                           std::shared_ptr<const environment::LunarTerrain> terrain)
+                           std::shared_ptr<const environment::Terrain> terrain)
     : terrain_(std::move(terrain)), body_(body), origin_fixed_m_(origin_fixed_m), site_to_fixed_(site_to_fixed) {
     if (terrain_) body_.set_terrain(terrain_.get());
 }
 
 SurfaceSupport TerrainField::below(double east_m, double north_m) const {
     const Vec3 q = origin_fixed_m_ + site_to_fixed_ * Vec3{east_m, north_m, 0.0};
-    const Vec3 surface = math::normalized(q) * (body_.shape().semi_major_axis_m + body_.surface_height_m(q));
+    const auto& shape = body_.shape();
+    Vec3 surface;
+    if (shape.flattening == 0.0) {  // a sphere: on the radial (kept bit-identical for the Moon)
+        surface = math::normalized(q) * (shape.semi_major_axis_m + body_.surface_height_m(q));
+    } else {
+        const auto g = frames::fixed_to_geodetic(q, shape);
+        surface = frames::geodetic_to_fixed({g.latitude_rad, g.longitude_rad, body_.surface_height_m(q)}, shape);
+    }
     const Vec3 up = site_to_fixed_ * Vec3{0.0, 0.0, 1.0};
-    return {dot(surface - origin_fixed_m_, up), false, transpose(site_to_fixed_) * body_.surface_normal_fixed(surface)};
+    return {dot(surface - origin_fixed_m_, up), body_.surface_water(q),
+            transpose(site_to_fixed_) * body_.surface_normal_fixed(surface)};
 }
 
 LandingSurface::Support LandingSurface::below(double east_m, double north_m) const {

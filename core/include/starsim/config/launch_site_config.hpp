@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "starsim/config/vehicle_config.hpp"
 
@@ -50,11 +51,17 @@ struct LaunchSiteConfig {
     std::string kind = "launch_pad";  // "launch_pad" or "landing_zone" (a pad where first stages land on legs)
     double pad_radius_m = 0.0;        // landing zone: radius of the concrete landing pad (0 otherwise)
     std::string landing_zone_id;      // launch pad: the site's landing zone for first stages on legs (empty: none)
+    // Earth terrain (M8): the site's plateau - flat at height_m within plateau_radius_m (mount, tower, hardstand or
+    // landing pad), blended linearly into the terrain over plateau_apron_m beyond it. Required for every site.
+    double plateau_radius_m = 0.0;
+    double plateau_apron_m = 0.0;
     std::optional<TowerConfig> tower;
     std::optional<SeaConfig> sea;
 };
 
 // Reads site `site_id` from config/launch_sites.toml.
 LaunchSiteConfig load_launch_site(const std::filesystem::path& config_dir, std::string_view site_id);
+// Every site of config/launch_sites.toml, in file order.
+std::vector<LaunchSiteConfig> load_launch_sites(const std::filesystem::path& config_dir);
 
 }  // namespace starsim::config

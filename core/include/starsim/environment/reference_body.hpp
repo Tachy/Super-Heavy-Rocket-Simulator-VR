@@ -1,7 +1,7 @@
 #pragma once
 
 #include "starsim/environment/atmosphere.hpp"
-#include "starsim/environment/lunar_terrain.hpp"
+#include "starsim/environment/terrain.hpp"
 #include "starsim/ephemeris/ephemeris.hpp"
 #include "starsim/frames/body_orientation.hpp"
 #include "starsim/frames/geodetic.hpp"
@@ -65,13 +65,15 @@ public:
     math::Vec3 centre_acceleration_gcrf(time::Epoch epoch) const;
     BodyFrame frame(time::Epoch epoch) const;
 
-    // Terrain over the shape (lunar l2; the owner keeps it alive). nullptr: the bare shape.
-    void set_terrain(const LunarTerrain* terrain) { terrain_ = terrain; }
-    const LunarTerrain* terrain() const { return terrain_; }
+    // Terrain over the shape (lunar l2, Earth M8; the owner keeps it alive). nullptr: the bare shape.
+    void set_terrain(const Terrain* terrain) { terrain_ = terrain; }
+    const Terrain* terrain() const { return terrain_; }
     // Surface height above the shape below a body-fixed point (0 without terrain), and its outward unit normal
     // (without terrain: the shape's vertical).
     double surface_height_m(const math::Vec3& fixed_m) const;
     math::Vec3 surface_normal_fixed(const math::Vec3& fixed_m) const;
+    // Whether the surface below a body-fixed point is water (false without terrain).
+    bool surface_water(const math::Vec3& fixed_m) const { return terrain_ && terrain_->water_at_fixed(fixed_m); }
 
 private:
     ReferenceBody(ephemeris::Body id, double gm_m3ps2, frames::Ellipsoid shape, const frames::BodyOrientation& orientation,
@@ -86,7 +88,7 @@ private:
     const Atmosphere* atmosphere_;           // nullptr: vacuum
     const ephemeris::Ephemeris* ephemeris_;  // nullptr: centred at the GCRF origin (the Earth)
     double air_density_factor_ = 1.0;
-    const LunarTerrain* terrain_ = nullptr;
+    const Terrain* terrain_ = nullptr;
 };
 
 }  // namespace starsim::environment

@@ -13,5 +13,6 @@ environment::Geoid load_coarse_geoid(const std::filesystem::path& config_dir);
 
 // A geographic grid file (TerrainGridFile with projection "geographic") as a grid; throws ConfigError otherwise.
 environment::GeographicGrid geographic_grid(const TerrainGridFile& file);
+environment::GeographicGrid geographic_grid(TerrainGridFile&& file);  // moves the heights (large Earth tiles)
 
 }  // namespace starsim::config
