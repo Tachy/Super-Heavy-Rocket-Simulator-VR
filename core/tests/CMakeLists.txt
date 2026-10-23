@@ -97,6 +97,7 @@ add_executable(starsim_core_tests
     test_engine_placement.cpp
     test_hls_vehicle.cpp
     test_lunar_terrain.cpp
+    test_geoid.cpp
     test_terrain_contact.cpp
     test_hls_landing.cpp
     test_lunar_scvx.cpp
@@ -192,6 +193,7 @@ target_compile_definitions(starsim_core_tests PRIVATE
     STARSIM_OUTPUT_DIR="${CMAKE_BINARY_DIR}"
     STARSIM_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
     STARSIM_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/fixtures"
+    STARSIM_GEOID_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/geoid"
     STARSIM_SOCP_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/socp"
     STARSIM_TELEMETRY_DIR="${CMAKE_SOURCE_DIR}/tests/validation/telemetry"
 )

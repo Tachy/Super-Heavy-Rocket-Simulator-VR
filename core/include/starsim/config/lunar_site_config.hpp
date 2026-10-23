@@ -30,7 +30,7 @@ struct TerrainCheck {
 };
 struct TerrainGridFile {
     std::string product;
-    std::string projection;  // "polar_stereographic_south" or "simple_cylindrical"
+    std::string projection;  // "polar_stereographic_south", "simple_cylindrical" or "geographic"
     double sphere_radius_m = 0.0;
     double dn_scale_m = 0.0;
     int lines = 0;
@@ -46,6 +46,13 @@ struct TerrainGridFile {
     double pixels_per_degree = 0.0;
     double zero_line = 0.0;
     double zero_sample = 0.0;
+    // geographic (Earth: EGM2008, DEM tiles; sphere_radius_m is the WGS84 semi-major axis there)
+    double north_latitude_deg = 0.0;
+    double west_longitude_deg = 0.0;
+    double step_latitude_deg = 0.0;
+    double step_longitude_deg = 0.0;
+    bool global_longitude = false;
+    std::string height_reference;  // "egm2008_undulation" or "wgs84_ellipsoid"
     std::vector<TerrainCheck> checks;
 };
 

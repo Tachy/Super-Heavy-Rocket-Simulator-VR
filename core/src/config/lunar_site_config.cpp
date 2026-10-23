@@ -63,6 +63,16 @@ TerrainGridFile load_terrain_grid_file(const std::filesystem::path& toml_path) {
         f.pixels_per_degree = doc.positive(g, "pixels_per_degree");
         f.zero_line = doc.number(g, "zero_line");
         f.zero_sample = doc.number(g, "zero_sample");
+    } else if (f.projection == "geographic") {
+        f.north_latitude_deg = doc.number(g, "north_latitude_deg");
+        f.west_longitude_deg = doc.number(g, "west_longitude_deg");
+        f.step_latitude_deg = doc.positive(g, "step_latitude_deg");
+        f.step_longitude_deg = doc.positive(g, "step_longitude_deg");
+        f.global_longitude = doc.boolean(g, "global_longitude");
+        f.height_reference = doc.text(g, "height_reference");
+        if (f.height_reference != "egm2008_undulation" && f.height_reference != "wgs84_ellipsoid") {
+            doc.fail("unknown height_reference '" + f.height_reference + "'");
+        }
     } else {
         doc.fail("unknown projection '" + f.projection + "'");
     }

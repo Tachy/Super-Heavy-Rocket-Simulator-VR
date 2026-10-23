@@ -202,6 +202,15 @@ kind = "lunar_tiles"
 license = "NASA PDS data: public domain (NASA data and images are not copyrighted)"
 credit = "LRO LOLA team (NASA GSFC, D. E. Smith et al.); NASA Planetary Data System Geosciences Node"
 
+[[source]]
+id = "geoid_egm2008"
+name = "EGM2008 geoid undulation, 2.5 arc-minute grid (NGA) via the PROJ CDN - sea level, site heights and the 1-degree config grid"
+url = "https://cdn.proj.org/us_nga_egm08_25.tif"
+target = "data/geoid/egm2008_25.toml"
+kind = "geoid"
+license = "NGA EGM2008: public domain (derived from work by NGA)"
+credit = "NGA (National Geospatial-Intelligence Agency), EGM2008; grid distributed by the PROJ data CDN (cdn.proj.org)"
+
 # ------------------------------------------------------------------ published reference tables (committed)
 
 [[source]]

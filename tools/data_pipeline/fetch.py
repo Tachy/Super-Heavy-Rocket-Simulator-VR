@@ -14,6 +14,7 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+import geoid
 import iss_oem
 import lunar_tile
 
@@ -64,6 +65,9 @@ def main() -> int:
             continue
         if source.get("kind") == "iss_oem":  # ISS OEM: always fetched, every version archived (iss_oem.py)
             iss_oem.fetch(source, REPO_ROOT, download)
+            continue
+        if source.get("kind") == "geoid":  # EGM2008: PROJ CDN GeoTIFF -> int16 grid (geoid.py)
+            geoid.fetch(source, REPO_ROOT, download, args.force)
             continue
         if target.exists() and not args.force:
             print("  already present")

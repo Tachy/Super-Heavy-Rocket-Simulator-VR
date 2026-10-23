@@ -1,26 +1,12 @@
 #pragma once
 
-#include <cstdint>
 #include <utility>
 #include <vector>
 
+#include "starsim/environment/height_grid.hpp"
 #include "starsim/math/vec3.hpp"
 
 namespace starsim::environment {
-
-// Heights above a reference sphere on a regular grid, stored as the LOLA products store them (int16 x scale).
-struct HeightGrid {
-    int lines = 0;
-    int samples = 0;
-    double dn_scale_m = 0.0;
-    std::vector<std::int16_t> dn;  // row-major, lines x samples
-
-    double at(int line, int sample) const {
-        return dn_scale_m * dn[static_cast<size_t>(line) * static_cast<size_t>(samples) + static_cast<size_t>(sample)];
-    }
-    // Bilinear inside [0, lines-1] x [0, samples-1] (nodes exactly).
-    double bilinear(double line, double sample) const;
-};
 
 // A crop of a south polar stereographic product (LOLA LDEM_80S_*; dsmap_polar.cat [S]): rho = 2 R tan(pi/4 + lat/2),
 // X = rho sin(lon), Y = -rho cos(lon), line = pole_line + Y / scale, sample = pole_sample + X / scale (0-based, full
