@@ -35,6 +35,7 @@ if (-not $NoTests) {
     if ($TestFilter -and $TestFilter -match $tagListRe) {
         $tags = [regex]::Matches($TestFilter, '\[([A-Za-z0-9_.-]+)\]') | ForEach-Object { [regex]::Escape($_.Groups[1].Value) }
         $filterLog = Join-Path $buildDir "ctest_filter.log"
+        if (Test-Path $filterLog) { Remove-Item $filterLog -Force }  # no stale summary when the build fails
         $ctest = "ctest --test-dir `"$buildDir`" --output-on-failure -j $Jobs -L `"^($($tags -join '|'))$`""
         if ($Fast) { $ctest += " -LE slow" }
         $steps += "$ctest > `"$filterLog`" 2>&1"

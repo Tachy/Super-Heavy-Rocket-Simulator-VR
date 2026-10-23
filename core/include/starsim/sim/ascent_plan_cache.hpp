@@ -11,10 +11,12 @@ namespace starsim::sim {
 
 // A persistent, write-once cache of ascent plans shared by the test processes of one build (ctest runs every test case
 // as its own process; many of them plan the same launch). Only active when the environment variable
-// STARSIM_PLAN_CACHE_DIR names a directory (the test CMake sets it; the game never does). A plan is stored under the
+// STARSIM_PLAN_CACHE_DIR names a directory (the test CMake sets it; nothing in the game sets it). A plan is stored under the
 // hash of its memo key and the contents of the config directory, so a changed config never reuses a plan; the test
 // build wipes the directory on every relink, so changed code never does either. Every filesystem error is swallowed:
 // the cache is an optimisation only.
+// Not part of the key: the SPICE kernel set, and physics-changing STARSIM_DEBUG_* environment variables (e.g.
+// STARSIM_DEBUG_NO_CROSSFLOW). Harmless today: the planner's trials never fly SCvx, so those variables do not change a plan.
 
 // The cache directory from STARSIM_PLAN_CACHE_DIR; nullopt when unset, empty, or disabled.
 std::optional<std::filesystem::path> plan_cache_dir();
@@ -35,7 +37,7 @@ std::optional<AscentProfile> decode_profile(std::string_view text);  // nullopt 
 // the epoch a cache hit is bit-identical to the plan the process would have made itself, whichever process ran first.
 std::string plan_cache_key(const std::string& memo_key, time::Epoch liftoff);
 
-// `key` is the disk key (plan_cache_key; it holds the config directory path, its contents enter through the hash). (it holds the config directory path; its contents enter through the hash).
+// `key` is the disk key (plan_cache_key; it holds the config directory path, its contents enter through the hash).
 std::optional<AscentProfile> load_cached_plan(const std::string& key, const std::filesystem::path& config_dir);
 void store_cached_plan(const std::string& key, const std::filesystem::path& config_dir, const AscentProfile& profile);
 

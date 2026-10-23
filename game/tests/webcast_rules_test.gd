@@ -120,7 +120,7 @@ full_scale = 1.0
 decimals = 0
 condition = "nonsense"
 """)
-	_check(cfg.errors.size() == 2, "bad condition, unknown left id, unknown situation id: 2 errors (%s)" % [cfg.errors])
+	_check(cfg.errors.size() == 2, "bad condition, unknown left id: 2 errors (%s)" % [cfg.errors])
 	var sel := GaugeRules.select(_telemetry(), _body(), {}, 0.0, cfg)
 	_check(sel["left"] == ["engines"] and sel["right"].is_empty(), "bad entries dropped, engines still shown (%s)" % [sel])
 	var missing := GaugeConfig.load_file("res://does_not_exist.toml")

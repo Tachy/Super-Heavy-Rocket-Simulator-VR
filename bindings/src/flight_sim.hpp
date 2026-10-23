@@ -289,7 +289,7 @@ private:
     // Commands that need an active flight: refused with a German message otherwise.
     std::uint64_t post_active(const char* name, std::function<Outcome(sim::FlightSession&)> command);
     void observe(const sim::FlightSession& session, time::Epoch epoch);  // worker: builds and publishes the snapshot
-    // worker: the ascent autopilot engaged as the onboard computer does (FlightSession::engage_ascent_autopilot(target));
+    // worker: the ascent autopilot engaged as the onboard computer does (sim::engage_pad_ascent(session, target));
     // on a clamped stack the planning flag is published first (the snapshot on the pad while the plan runs)
     Outcome engage_planned(sim::FlightSession& session, const gnc::AscentTarget& target);
     void emit_finished();                                                // main thread: command_finished signals

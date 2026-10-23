@@ -220,7 +220,17 @@ flow separation (vacuum engines).
 
 ## Drone ships (`drone_ships.toml`)
 - `[[drone_ship]]`: `id`, `name` (generic display name), `deck_length_m`, `deck_width_m`, `freeboard_m` (deck above the
-  sea). Where it waits is set by the mission.
+  sea), `basin` (`"atlantic"` / `"pacific"`), `home_port_latitude_deg` / `home_port_longitude_deg`, and the service area
+  `area_min_latitude_deg`, `area_max_latitude_deg`, `area_min_longitude_deg`, `area_max_longitude_deg` (a lat / lon box;
+  min < max, so an area cannot cross the antimeridian). Where it waits is set by the mission.
+- Selection (`config::` drone-ship choice): the ship whose area contains the predicted impact; several: the one with the
+  nearest home port; on a tie the first in file order. `asds_atlantic_2` is identical to `asds_atlantic`, so it is never
+  chosen.
+
+## Webcast gauges (`ui/webcast_gauges.toml`)
+- Which round gauges the webcast overlay shows, their order, labels, units, full scales and look, plus `[rules]`
+  (`hide_delay_s`, `max_per_side`) and `[thresholds]` for the named conditions. Situations are chosen in code
+  (`game/ui/webcast/gauge_rules.gd`); read by `gauge_config.gd`. Errors in the file are collected, bad entries dropped.
 
 ## Missions (`missions/`)
 - `[mission] kind = "ascent" | "ship_return" | "capsule_return" | "lunar_landing" | "lunar_return" | "iss_rendezvous" |

@@ -699,7 +699,7 @@ TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cu
     // measured 2026-10-22: +7.35 s (the return's cutoff propellant grows; +9.8 s at most, +9 s in the bucket); +8.44 s
     // with the staging sequence (the 54.5 s MECO -> boostback of the RCS flip and boostback_loss_fraction 0.19); +7.88 s
     // with the max-Q limit (ascent Task 2); +7.13 s with the 13.6 s RCS flip and boostback_loss_fraction 0.13
-    // (follow-ups Task 7)
+    // (follow-ups Task 7); +6.59 s re-measured in Task 7c
     CHECK(std::abs(*meco_at_30 - meco->epoch) <= 9.0);
     const uint32_t booster = meco->body_serial;
     size_t mecos = 0;

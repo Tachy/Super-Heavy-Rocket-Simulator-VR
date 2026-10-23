@@ -2201,7 +2201,7 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     Outcomes (A -> B): every campaign as before - ASDS 11/11, 10/10, 21/21 landed (>= 4983 -> >= 4986 kg), RTLS 21/21
     (>= 5747 -> >= 5744 kg, sink <= 1.02 -> 1.05 m/s: re-baselined - the campaign is deterministic, so this is the
     model change, not noise; the plans now use the normal force, the touchdown stays inside the sink limit), Super Heavy catch 21/21, ship catch campaign 20 of 21 (the
-    known engine-failure case) - and all 198 cases of the labels descent, scvx, scvx_landing, landing, catch, asds,
+    known engine-failure case), full Falcon 9 RTLS mission (`test_falcon9_rtls`) 6.0 -> 6.4 t left at the touchdown - and all 198 cases of the labels descent, scvx, scvx_landing, landing, catch, asds,
     rtls, falcon9, ship, booster, replanner pass.
   - Result: the drone-ship mid-burn clipping is gone in the MECO campaigns and down 99 % at ignition (237 ticks, peak
     1.97, in a few dispersed cases); the ship now clips a little where it did not (39 + 20 ticks, peaks ~1.1, none in the
@@ -2605,7 +2605,7 @@ Diagnosis first (gate: the candidate fix chooses between two contradicting sourc
     the dials' resolution, Dragon / trunk mass >= 13.1 t sourced without the trunk against 12.5 t [E] flown).
   - Falcon 9 RTLS mission (`test_falcon9_rtls`): MECO T+140 s with 52.8 -> 52.1 t; landing burn T+423 s at 2.99 -> 2.97
     km, 287 m/s, 12.1 t (inside its 0.2 t window: `boostback_loss_fraction` 0.13 stays); landed T+456 -> 455 s, 5.8 ->
-    6.0 t left; separation -> boostback 13.6 -> 13.5 s (`flip_duration_s` 13.6 kept, the measured mean is 13.7 s); N2
+    6.0 t left (later 6.4 t with the hull normal force in the landing planner, Task 8); separation -> boostback 13.6 -> 13.5 s (`flip_duration_s` 13.6 kept, the measured mean is 13.7 s); N2
     530 -> 527 kg at the separation, 159 -> 164 kg at the touchdown; dispersed campaign 21/21 (>= 5697 -> 5747 kg
     left). MECO plan from a fixed state: 50.8 / 47.8 -> 51.9 / 48.7 t (with / without entry burn).
   - Staging (`test_staging_sequence`): flip 13.6 -> 13.5 s, 348.5 -> 344.7 kg N2, pitch inertia 1.01e7 -> 9.98e6 kg m2.
