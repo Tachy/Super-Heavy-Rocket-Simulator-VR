@@ -177,8 +177,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   lands on legs; physics first - webcast propellant gauges that the engines cannot explain are not followed
   (2026-10-14); Starship throttle schedules are guidance choices, not vehicle data.
 - Earth is a 256x128 ellipsoid mesh whose facets sit up to ~0.6 km below the true surface; below 500 km a
-  2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites (until the
-  M8 Plan B tile renderer). Physics ground (M8 Plan A): with `FlightSession::set_earth_terrain` (the game, `[data]`
+  2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera (until the M8 Plan B tile renderer): with the Earth
+  terrain loaded it follows `FlightSim.earth_surface` (relief, site plateaus, sea at the geoid), without data/ the flat
+  rule (the pad height near launch sites). Physics ground (M8 Plan A): with `FlightSession::set_earth_terrain` (the game, `[data]`
   tests) the real Earth terrain - flat plateaus at the derived site heights under every pad / landing zone, 3DEP /
   GLO-30 / ETOPO beyond, water at the EGM2008 geoid; without it (all non-`[data]` tests, the comparison mode) flat at
   the site height (FlightBody::ground_height_m) with the coarse committed geoid as the sea. Site heights in

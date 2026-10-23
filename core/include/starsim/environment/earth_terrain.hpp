@@ -28,7 +28,14 @@ struct Plateau {
 class EarthTerrain final : public Terrain {
 public:
     static constexpr double blend_m = 500.0;           // [E] local -> regional and regional -> global, at the edge
-    static constexpr double water_threshold_m = 0.05;  // [E] orthometric <= this: water (GLO-30 sets the sea to 0)
+    // [E] orthometric <= this: water. GLO-30 sets the sea to 0 m orthometric; the regional grids store it as the
+    // ellipsoidal N(EGM2008) rounded to their 0.1 m DN quantum, so a sea node reads within +-0.05 m (half the quantum)
+    // orthometric. Measured 2026-10-23 on the real tiles (200k random nodes each, the same EGM2008 grid as the core):
+    // 97 % / 99 % of the near-sea nodes of starbase / cape regional lie within +-0.05 m, with no pile-up just above it
+    // (the 0.05-0.055 m bin holds ~0.03 % - low land, as dense as its neighbours). Bilinear interpolation between sea
+    // nodes stays inside that band (the geoid is near-linear over a 1" cell). Raising it would only turn land a few
+    // centimetres above mean sea level into water.
+    static constexpr double water_threshold_m = 0.05;
     static constexpr double normal_step_m = 0.5;       // [E] central differences for the normal: half the 1 m spacing
 
     EarthTerrain(Geoid geoid, GeographicGrid global_relief, std::vector<GeographicGrid> regional,
