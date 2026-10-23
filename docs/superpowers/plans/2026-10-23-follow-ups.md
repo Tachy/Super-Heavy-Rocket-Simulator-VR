@@ -404,6 +404,34 @@ Falcon 9 `[stage.recovery]` config, `docs/subsystems.md`, the CRS-35 ascent test
 
 ---
 
+### Task 7c: Falcon 9 late-ascent thrust against stack mass (added 2026-10-23, user decision)
+
+Task 7b's diagnosis (docs/subsystems.md "Falcon 9 boostback against CRS-35", commit 847b3e1): the boostback is not
+the cause. The CRS-35 MECO speed gap (+7.6 %) comes from the ascent: near MECO our stack accelerates ~6 % harder
+(37.8 vs 35.7 m/s2) - the flight's stack is ~13 t heavier or has ~6 % less thrust; our MECO is 0.9 s late (+1.7 %).
+The first stage's propellant at MECO is bounded to 54-61 t by the boostback fit, so extra mass would be in the upper
+stack (payload 12.5 t [E], second-stage masses [D]) - or the first stage's late thrust is lower.
+
+**Files:** to be found - `config/vehicles/falcon9_block5.toml`, the CRS-35 mission config (payload), Merlin engine
+config, `tools/telemetry/*` (webcast tables, `boostback_fit.py`), `core/tests/test_falcon9_ascent.cpp`,
+`docs/subsystems.md`.
+
+- [ ] **Step 1: Diagnose** (no change yet): compare our CRS-35 ascent with the webcast from T+100 s to MECO
+  (acceleration, speed, altitude at the same true time - mind the dial lags from the ascent milestone), and identify
+  which of (a) upper-stack mass (CRS-35 Cargo Dragon launch mass + trunk, second-stage dry/propellant), (b) first-stage
+  thrust / throttle near MECO (Merlin 1D sea-level/vacuum thrust, a throttle-down before MECO on the flight),
+  (c) first-stage mass explains it. Look for sources for (a) and (b). Record the analysis in `docs/subsystems.md`.
+- [ ] **Step 2: Gate.** A sourced data correction may proceed. Anything else (a guidance throttle-down, a model
+  change, an unsourced [E] change to fit the webcast) - write the proposal into the report, commit the diagnosis,
+  and STOP for the user's decision.
+- [ ] **Step 3: Fix** after approval or when sourced data: re-identify what moves (MECO timing, ascent planner),
+  tighten the CRS-35 `meco_speed_allowance` from 0.097 to measured gap + 2 % (aim ~0.03), re-baseline moved numbers
+  (`[falcon9]`, `[rtls]`, `[asds]`, `[ascent]`, `[ascent_planner]`, `[staging]`, `[iss_mission]`, `[timeline]` incl.
+  `[slow]`).
+- [ ] **Step 4: Commit and push.**
+
+---
+
 ### Task 8: Cross-flow normal force in the landing planner model (F4)
 
 **Files:**
