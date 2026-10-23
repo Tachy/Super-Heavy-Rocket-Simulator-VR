@@ -2210,7 +2210,7 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   [E], sea -35 m [E]; landing_zone = ccsfs_lz40 on falcon9_rtls and falcon9_crew_dragon (now SLC-40's own landing zone).
 - **Free launch:** the game's `launch_from_site` carries the target (`leo_ascent.toml`) unless manual control is on;
   the command places the stack, schedules T-0, publishes a snapshot with `autopilot_status()["planning"] = true` and
-  plans (`FlightSession::engage_ascent_autopilot(target)` on a clamped stack: the request from the placed stack - the
+  plans (`sim::engage_pad_ascent(session, target)` on a clamped stack: the request from the placed stack - the
   vehicle file by id with its own payload, fairing kept, so it is memoised - or the loaded configuration as `stack`).
   While the command runs the session does not advance: the world clock holds at the pad snapshot's epoch, the T- clock
   stands ("Startvorbereitung: Bahn wird berechnet" as last_event and in the webcast's name line); the liftoff follows

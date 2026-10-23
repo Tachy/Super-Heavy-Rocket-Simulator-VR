@@ -15,6 +15,7 @@
 #include "starsim/math/constants.hpp"
 #include "starsim/math/mat3.hpp"
 #include "starsim/orbit/kepler.hpp"
+#include "starsim/sim/ascent_profile_planner.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/refuelling_campaign_setup.hpp"
 
@@ -158,7 +159,7 @@ FlightSim::Outcome FlightSim::engage_planned(sim::FlightSession& session, const 
         planning.emplace(context_.planning);
         observe(session, session.epoch());  // "Startvorbereitung": the pad and the planning flag while the plan runs
     }
-    const auto reason = session.engage_ascent_autopilot(target);
+    const auto reason = sim::engage_pad_ascent(session, target);
     return Outcome{reason.empty(), godot::String::utf8(reason.c_str())};
 }
 

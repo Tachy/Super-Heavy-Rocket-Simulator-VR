@@ -121,4 +121,13 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
 // kick. Refused: the autopilot is left as it is (off on a fresh pad), a scheduled liftoff called off. Returns the plan.
 AscentProfile engage_planned_ascent(FlightSession& session, const AscentProfileRequest& request);
 
+// The ascent autopilot as the onboard computer engages it. On a stack clamped on a configured launch site
+// (FlightSession::launch_from_pad with a LaunchSite::id) the launch is planned first (engage_planned_ascent on the pad
+// stack: the recovery, the reachable target and the kick, on trial flights on this thread - the countdown holds
+// meanwhile) and flown with the booster's return; a refused plan leaves the autopilot off, calls off a scheduled liftoff
+// and returns the German reason. Not clamped (in flight): engaged at once with the default `PitchProgram`, not planned
+// (the guidance takes over from the state now; a staging sequence under way keeps the state Staging). Returns ""
+// when engaged.
+std::string engage_pad_ascent(FlightSession& session, const gnc::AscentTarget& target);
+
 }  // namespace starsim::sim

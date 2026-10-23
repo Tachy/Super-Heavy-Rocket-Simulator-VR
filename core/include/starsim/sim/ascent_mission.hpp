@@ -1,7 +1,9 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <optional>
+#include <string>
 
 #include "starsim/config/mission_config.hpp"
 #include "starsim/sim/ascent_profile_planner.hpp"
@@ -9,10 +11,19 @@
 
 namespace starsim::sim {
 
-// The launch stack of an ascent: `vehicle` with `payload_kg` on its top stage (its fairing dropped when `fairing` is
-// false) and, with a `payload`, that payload vehicle stacked on top (config::stack_payload).
-config::VehicleConfig ascent_stack(config::VehicleConfig vehicle, const std::filesystem::path& config_dir,
-                                   double payload_kg, bool fairing, const std::optional<config::MissionPayload>& payload);
+// What goes into a launch stack besides the vehicle file.
+struct AscentStackSpec {
+    double payload_kg = 0.0;  // on the top stage
+    bool fairing = true;      // false: the top stage's fairing dropped
+    std::optional<config::MissionPayload> payload;     // a payload vehicle stacked on top (config::stack_payload)
+    std::map<std::string, double> propellant_load_kg;  // stage id -> propellant (the others stay full)
+};
+
+// The launch stack of an ascent, the one place that builds it: `vehicle` with the spec's payload mass on its top stage,
+// the fairing dropped, the named stages' tanks filled (std::invalid_argument for an unknown stage or a load above its
+// capacity) and the payload vehicle stacked on top.
+config::VehicleConfig build_ascent_stack(config::VehicleConfig vehicle, const std::filesystem::path& config_dir,
+                                         const AscentStackSpec& spec);
 
 // Sets up `session` for an ascent mission at `epoch`: the vehicle with the mission's payload (and fairing) on the pad, a
 // payload vehicle stacked on top and released after cutoff ([payload]), and the launch planned and engaged by the onboard

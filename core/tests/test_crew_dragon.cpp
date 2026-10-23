@@ -420,7 +420,7 @@ TEST_CASE("A mission without a payload vehicle ends in orbit as before", "[drago
     const double gm = session.gm_earth_m3ps2();
     const orbit::KeplerianElements start{6378137.0 + 195e3, 0.0005, 51.6 * constants::deg_to_rad, 0.0, 0.0, 0.5};
     session.place_in_orbit("falcon9_block5", orbit::state_from_elements(start, gm), t_deep, 1);
-    session.engage_ascent_autopilot({200e3, 200e3, 51.6 * constants::deg_to_rad, true});
+    sim::engage_pad_ascent(session, {200e3, 200e3, 51.6 * constants::deg_to_rad, true});
     session.ignite();
     bool separation_state = false;
     for (double t = 1.0; t < 600.0 && session.autopilot().state != sim::AutopilotState::Orbit; t += 1.0) {
@@ -538,7 +538,7 @@ TEST_CASE("Re-engaging the ascent autopilot after staging keeps a stacked payloa
     REQUIRE(session.autopilot().state == sim::AutopilotState::UpperStage);
     session.advance_to(session.epoch() + 10.0, 10000);
     session.disengage_autopilot();
-    session.engage_ascent_autopilot({m.periapsis_height_m, m.apoapsis_height_m, m.inclination_rad, m.northerly});
+    sim::engage_pad_ascent(session, {m.periapsis_height_m, m.apoapsis_height_m, m.inclination_rad, m.northerly});
     CHECK(session.autopilot().state == sim::AutopilotState::UpperStage);
 }
 

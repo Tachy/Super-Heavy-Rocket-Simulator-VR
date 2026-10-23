@@ -10,20 +10,20 @@
 namespace starsim::sim {
 namespace {
 
-// The mission's [propellant] loads into the named stages (the others stay full).
-void load_propellant(config::VehicleConfig& vehicle, const config::AscentMission& mission) {
-    for (const auto& [stage_id, kg] : mission.propellant_load_kg) {
+// The [propellant] loads into the named stages (the others stay full).
+void load_propellant(config::VehicleConfig& vehicle, const std::map<std::string, double>& propellant_load_kg) {
+    for (const auto& [stage_id, kg] : propellant_load_kg) {
         auto stage = std::find_if(vehicle.stages.begin(), vehicle.stages.end(),
                                   [&](const config::StageConfig& s) { return s.id == stage_id; });
         if (stage == vehicle.stages.end()) {
-            throw std::invalid_argument("mission " + mission.id + ": [propellant] names no stage '" + stage_id + "'");
+            throw std::invalid_argument("[propellant] names no stage '" + stage_id + "'");
         }
         double capacity_kg = 0.0;
         for (const auto& t : stage->tanks) {
             if (t.contents != config::TankContents::Rcs) capacity_kg += t.capacity_kg;
         }
         if (kg > capacity_kg) {
-            throw std::invalid_argument("mission " + mission.id + ": [propellant] " + stage_id + " above its capacity");
+            throw std::invalid_argument("[propellant] " + stage_id + " above its capacity");
         }
         config::fill_tanks(*stage, kg);
     }
@@ -31,12 +31,13 @@ void load_propellant(config::VehicleConfig& vehicle, const config::AscentMission
 
 }  // namespace
 
-config::VehicleConfig ascent_stack(config::VehicleConfig vehicle, const std::filesystem::path& config_dir,
-                                   double payload_kg, bool fairing, const std::optional<config::MissionPayload>& payload) {
-    vehicle.stages.back().payload_mass_kg = payload_kg;
-    if (!fairing) vehicle.stages.back().fairing_mass_kg = 0.0;
-    if (payload) {
-        vehicle = config::stack_payload(std::move(vehicle), config::load_vehicle(config_dir, payload->vehicle_id));
+config::VehicleConfig build_ascent_stack(config::VehicleConfig vehicle, const std::filesystem::path& config_dir,
+                                         const AscentStackSpec& spec) {
+    vehicle.stages.back().payload_mass_kg = spec.payload_kg;
+    if (!spec.fairing) vehicle.stages.back().fairing_mass_kg = 0.0;
+    load_propellant(vehicle, spec.propellant_load_kg);
+    if (spec.payload) {
+        vehicle = config::stack_payload(std::move(vehicle), config::load_vehicle(config_dir, spec.payload->vehicle_id));
     }
     return vehicle;
 }
@@ -45,10 +46,9 @@ AscentProfile start_ascent_mission(FlightSession& session, const config::AscentM
                                    const std::filesystem::path& config_dir, time::Epoch epoch,
                                    const config::VehicleConfig* configured, bool keep_station) {
     std::optional<PayloadSeparation> separation;
-    std::optional<config::VehicleConfig> payload_vehicle;
     if (const auto& p = mission.payload) {
-        payload_vehicle = config::load_vehicle(config_dir, p->vehicle_id);
-        separation = PayloadSeparation{payload_vehicle->stages.front().id, p->separation_delay_s, p->separation_dv_mps,
+        const auto payload_vehicle = config::load_vehicle(config_dir, p->vehicle_id);
+        separation = PayloadSeparation{payload_vehicle.stages.front().id, p->separation_delay_s, p->separation_dv_mps,
                                        p->nose_cone_open_s};
     }
     AscentProfileRequest request;
@@ -60,11 +60,15 @@ AscentProfile start_ascent_mission(FlightSession& session, const config::AscentM
     request.payload_kg = mission.payload_kg;
     request.fairing = mission.fairing;
     request.payload = mission.payload;
-    auto vehicle = configured ? *configured : config::load_vehicle(config_dir, mission.vehicle_id);
-    vehicle.stages.back().payload_mass_kg = mission.payload_kg;
-    if (!mission.fairing) vehicle.stages.back().fairing_mass_kg = 0.0;
-    load_propellant(vehicle, mission);
-    if (payload_vehicle) vehicle = config::stack_payload(std::move(vehicle), *payload_vehicle);
+    AscentStackSpec spec{mission.payload_kg, mission.fairing, mission.payload,
+                         {mission.propellant_load_kg.begin(), mission.propellant_load_kg.end()}};
+    config::VehicleConfig vehicle;
+    try {
+        vehicle = build_ascent_stack(configured ? *configured : config::load_vehicle(config_dir, mission.vehicle_id),
+                                     config_dir, spec);
+    } catch (const std::invalid_argument& e) {
+        throw std::invalid_argument("mission " + mission.id + ": " + e.what());
+    }
     // a changed vehicle or a recorded propellant load: planned as it stands
     if (configured || !mission.propellant_load_kg.empty()) request.stack = vehicle;
     session.launch_from_pad(vehicle, launch_site_from_config(config::load_launch_site(config_dir, mission.site_id)),

@@ -91,8 +91,8 @@ double stage_propellant_kg(const vehicle::Stage& stage) {
 
 config::VehicleConfig request_stack(const std::filesystem::path& dir, const AscentProfileRequest& request) {
     if (request.stack) return *request.stack;
-    return ascent_stack(config::load_vehicle(dir, request.vehicle_id), dir, request.payload_kg, request.fairing,
-                        request.payload);
+    return build_ascent_stack(config::load_vehicle(dir, request.vehicle_id), dir,
+                              {request.payload_kg, request.fairing, request.payload, {}});
 }
 
 Trial fly_trial(const FlightSession& like, const AscentProfileRequest& request, double kick_angle_rad) {
@@ -511,6 +511,34 @@ AscentProfile engage_planned_ascent(FlightSession& session, const AscentProfileR
     program.kick_angle_rad = profile.kick_angle_rad;
     session.engage_ascent_autopilot(profile.target, program);
     return profile;
+}
+
+std::string engage_pad_ascent(FlightSession& session, const gnc::AscentTarget& target) {
+    if (!session.active() || !session.body(session.controlled_index()).clamped()) {
+        session.engage_ascent_autopilot(target, gnc::PitchProgram{});
+        return {};
+    }
+    const auto& pad_stack = session.pad_stack();
+    if (session.launch_site().id.empty() || !pad_stack) {
+        session.schedule_liftoff(std::nullopt);
+        return "Startplanung nicht möglich: kein konfigurierter Startplatz.";
+    }
+    AscentProfileRequest request;
+    request.site_id = session.launch_site().id;
+    request.heading_rad = session.pad_heading_rad();
+    request.liftoff = session.epoch();
+    request.target = target;
+    if (!session.pad_vehicle_id().empty()) {
+        // the vehicle file as configured: build_ascent_stack with its own payload and the fairing kept is the same stack
+        request.vehicle_id = session.pad_vehicle_id();
+        request.payload_kg = pad_stack->stages.back().payload_mass_kg;
+        request.fairing = true;
+    } else {
+        request.vehicle_id = pad_stack->id;
+        request.stack = pad_stack;
+    }
+    const auto profile = engage_planned_ascent(session, request);
+    return profile.feasible ? std::string() : profile.reason;
 }
 
 }  // namespace starsim::sim

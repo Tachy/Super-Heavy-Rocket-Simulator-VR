@@ -400,14 +400,10 @@ public:
     // while engaged. This overload flies `program` as given (trial flights, studies, a re-engage in flight); during a
     // staging sequence of the controlled body (joined, or separated before the upper ignition) it engages in Staging.
     void engage_ascent_autopilot(const gnc::AscentTarget& target, const gnc::PitchProgram& program);
-    // The same as the onboard computer engages it (ascent trajectory and staging, Task 5): on a stack clamped on a
-    // configured launch site (launch_from_pad with a LaunchSite::id) the launch is planned first (sim::plan_launch: the
-    // recovery, the reachable target and the kick, on trial flights on this thread - the countdown holds meanwhile) and
-    // flown with the booster's return; a refused plan leaves the autopilot off, calls off a scheduled liftoff and
-    // returns the German reason. Not clamped (in flight): engaged at once with the default `PitchProgram`, not planned
-    // (the guidance takes over from the state now; a staging sequence under way keeps the state Staging). Returns ""
-    // when engaged.
-    std::string engage_ascent_autopilot(const gnc::AscentTarget& target);
+    // What the pad ascent (sim::engage_pad_ascent) plans: the stack and vehicle file launch_from_pad placed, its heading.
+    const std::string& pad_vehicle_id() const { return pad_vehicle_id_; }
+    const std::optional<config::VehicleConfig>& pad_stack() const { return pad_stack_; }
+    double pad_heading_rad() const { return pad_heading_rad_; }
     // Scheduled liftoff (T-0) of the vehicle on the pad; nullopt: lift off as soon as the engines run. With a schedule
     // the ascent autopilot (PreLaunch) holds on the pad, ignites liftoff_ignition_lead_s() before T-0 and releases the
     // clamps at the first tick with all engines running at or after T-0; the hold coasts until burn_preparation_s
@@ -1138,7 +1134,7 @@ private:
     MissionEventObserver observer_;
     std::optional<time::Epoch> scheduled_liftoff_;  // schedule_liftoff
     // launch_from_pad: the stack as placed, its vehicle file when placed by id (empty: a loaded, possibly changed
-    // configuration) and its heading - what engage_ascent_autopilot(target) plans
+    // configuration) and its heading - what sim::engage_pad_ascent plans
     std::optional<config::VehicleConfig> pad_stack_;
     std::string pad_vehicle_id_;
     double pad_heading_rad_ = 0.0;

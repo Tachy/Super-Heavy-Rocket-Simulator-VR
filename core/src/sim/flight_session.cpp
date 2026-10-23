@@ -10,7 +10,6 @@
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/ballistic_propagator.hpp"
-#include "starsim/sim/ascent_profile_planner.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/vehicle/docking_port.hpp"
 #include "starsim/vehicle/port_mating.hpp"
@@ -117,33 +116,6 @@ void FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target, con
             }
         }
     }
-}
-
-std::string FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target) {
-    if (bodies_.empty() || !bodies_[controlled_].body->clamped()) {
-        engage_ascent_autopilot(target, gnc::PitchProgram{});
-        return {};
-    }
-    if (launch_site_.id.empty() || !pad_stack_) {
-        schedule_liftoff(std::nullopt);
-        return "Startplanung nicht möglich: kein konfigurierter Startplatz.";
-    }
-    AscentProfileRequest request;
-    request.site_id = launch_site_.id;
-    request.heading_rad = pad_heading_rad_;
-    request.liftoff = epoch_;
-    request.target = target;
-    if (!pad_vehicle_id_.empty()) {
-        // the vehicle file as configured: ascent_stack with its own payload and the fairing kept is the same stack
-        request.vehicle_id = pad_vehicle_id_;
-        request.payload_kg = pad_stack_->stages.back().payload_mass_kg;
-        request.fairing = true;
-    } else {
-        request.vehicle_id = pad_stack_->id;
-        request.stack = pad_stack_;
-    }
-    const auto profile = engage_planned_ascent(*this, request);
-    return profile.feasible ? std::string() : profile.reason;
 }
 
 bool FlightSession::engage_orbit_autopilot() {

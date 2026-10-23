@@ -110,8 +110,8 @@ bool starts_with(const std::string& text, const std::string& prefix) { return te
 // the entry burn, no steering. Returns the horizontal distance to the ship (m).
 double impact_miss_of_ship_m(const sim::AscentProfileRequest& request, const sim::AscentProfile& plan) {
     sim::FlightSession session(ephemeris(), earth(), STARSIM_CONFIG_DIR);
-    const auto stack = sim::ascent_stack(config::load_vehicle(STARSIM_CONFIG_DIR, request.vehicle_id), STARSIM_CONFIG_DIR,
-                                         request.payload_kg, request.fairing, request.payload);
+    const auto stack = sim::build_ascent_stack(config::load_vehicle(STARSIM_CONFIG_DIR, request.vehicle_id), STARSIM_CONFIG_DIR,
+                                               {request.payload_kg, request.fairing, request.payload, {}});
     session.launch_from_pad(stack, sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, request.site_id)),
                             request.heading_rad, request.liftoff);
     const auto ship = sim::recovery_landing_site(STARSIM_CONFIG_DIR, plan.recovery);
@@ -431,7 +431,7 @@ TEST_CASE("A free launch holds on the pad until the plan is in", "[sim][ascent_p
     CHECK_FALSE(session.body(0).vehicle().any_engine_producing_thrust());
 
     const auto planned_at = session.epoch();
-    const auto reason = session.engage_ascent_autopilot(request.target);  // plans on the clamped stack
+    const auto reason = sim::engage_pad_ascent(session, request.target);  // plans on the clamped stack
     REQUIRE(reason.empty());
     CHECK(session.epoch() == planned_at);  // the countdown held while the computer planned
     // the free launch flies the vehicle file as configured: its own payload, fairing kept
@@ -459,7 +459,47 @@ TEST_CASE("A free launch holds on the pad until the plan is in", "[sim][ascent_p
                             sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "ccsfs_slc40")),
                             request.heading_rad, t0);
     refused.schedule_liftoff(t0 + 10.0);
-    CHECK(refused.engage_ascent_autopilot(request.target) == "Kein Fangturm am Startplatz.");
+    CHECK(sim::engage_pad_ascent(refused, request.target) == "Kein Fangturm am Startplatz.");
     CHECK(refused.autopilot().state == sim::AutopilotState::Off);
     CHECK_FALSE(refused.scheduled_liftoff());
+}
+
+TEST_CASE("build_ascent_stack: the one builder", "[sim][ascent]") {
+    const auto vehicle = config::load_vehicle(STARSIM_CONFIG_DIR, "falcon9_block5");
+    double capacity_kg = 0.0;
+    for (const auto& t : vehicle.stages.front().tanks) {
+        if (t.contents != config::TankContents::Rcs) capacity_kg += t.capacity_kg;
+    }
+    REQUIRE(vehicle.stages.back().fairing_mass_kg > 0.0);
+
+    sim::AscentStackSpec spec;
+    spec.payload_kg = 5000.0;
+    spec.fairing = false;
+    spec.payload = config::MissionPayload{"crew_dragon"};
+    spec.propellant_load_kg = {{"first_stage", 0.5 * capacity_kg}};
+    const auto stack = sim::build_ascent_stack(vehicle, STARSIM_CONFIG_DIR, spec);
+
+    const auto dragon = config::load_vehicle(STARSIM_CONFIG_DIR, "crew_dragon");
+    REQUIRE(stack.stages.size() == vehicle.stages.size() + dragon.stages.size());
+    const auto& upper = stack.stages[vehicle.stages.size() - 1];
+    CHECK(upper.payload_mass_kg == 0.0);  // config::stack_payload: the payload vehicle replaces the mass
+    CHECK(upper.fairing_mass_kg == 0.0);
+    double loaded_kg = 0.0;
+    for (const auto& t : stack.stages.front().tanks) {
+        if (t.contents != config::TankContents::Rcs) loaded_kg += t.mass_kg;
+    }
+    CHECK(std::abs(loaded_kg - 0.5 * capacity_kg) < 1e-6);
+    CHECK(stack.stages.back().id == dragon.stages.back().id);
+
+    auto plain = spec;  // without a payload vehicle the top stage carries the payload mass
+    plain.payload.reset();
+    const auto plain_stack = sim::build_ascent_stack(vehicle, STARSIM_CONFIG_DIR, plain);
+    CHECK(plain_stack.stages.size() == vehicle.stages.size());
+    CHECK(plain_stack.stages.back().payload_mass_kg == 5000.0);
+    CHECK(plain_stack.stages.back().fairing_mass_kg == 0.0);
+
+    spec.propellant_load_kg = {{"first_stage", 1.01 * capacity_kg}};
+    CHECK_THROWS_AS(sim::build_ascent_stack(vehicle, STARSIM_CONFIG_DIR, spec), std::invalid_argument);
+    spec.propellant_load_kg = {{"no_such_stage", 1.0}};
+    CHECK_THROWS_AS(sim::build_ascent_stack(vehicle, STARSIM_CONFIG_DIR, spec), std::invalid_argument);
 }
