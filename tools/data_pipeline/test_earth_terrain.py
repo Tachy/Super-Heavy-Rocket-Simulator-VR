@@ -30,13 +30,12 @@ def test_orthometric_to_ellipsoidal_adds_geoid():
             assert h_ell[i, j] == pytest.approx(h_ortho[i, j] + n_m, abs=1e-9)
 
 
-def test_navd88_converted_with_geoid18(tmp_path):
+def write_linear_geoid18(path: Path) -> None:
+    """Synthetic GEOID18-like grid (pixel-centred, EPSG:4326): N = -26 + 0.5 * (lat - 26) + 2 * (lon + 97) [m]; linear, so
+    the bilinear grid shift reproduces it exactly."""
     import rasterio
     from rasterio.transform import from_origin
 
-    # synthetic GEOID18-like grid (pixel-centred, EPSG:4326): N = -26 + 0.5 * (lat - 26) + 2 * (lon + 97) [m]; linear, so
-    # the bilinear grid shift reproduces it exactly
-    path = tmp_path / "us_noaa_g2018u0.tif"
     step = 1.0 / 60.0
     lons = -98.0 + step * (np.arange(180) + 0.5)
     lats = 27.0 - step * (np.arange(120) + 0.5)
@@ -44,12 +43,57 @@ def test_navd88_converted_with_geoid18(tmp_path):
     with rasterio.open(path, "w", driver="GTiff", height=120, width=180, count=1, dtype="float32", crs="EPSG:4326",
                        transform=from_origin(-98.0, 27.0, step, step)) as ds:
         ds.write(n_grid, 1)
+
+
+def nad83_to_itrf(lat, lon, h):
+    from pyproj import Transformer
+
+    return Transformer.from_crs("EPSG:6319", "EPSG:7912", always_xy=True).transform(lon, lat, h)[2]
+
+
+def test_navd88_converted_with_geoid18(tmp_path):
+    path = tmp_path / "us_noaa_g2018u0.tif"
+    write_linear_geoid18(path)
     lat = np.array([25.9972, 26.4, 25.5])
     lon = np.array([-97.1561, -96.7, -97.9])
     h_navd = np.array([2.0, 10.5, -3.0])
     h_ell = et.navd88_to_ellipsoidal(h_navd, lat, lon, path)
-    expected = h_navd + (-26.0 + 0.5 * (lat - 26.0) + 2.0 * (lon + 97.0))
-    assert np.max(np.abs(h_ell - expected)) < 1e-3  # within 1 mm of the grid shift (N is added to the orthometric height)
+    n = -26.0 + 0.5 * (lat - 26.0) + 2.0 * (lon + 97.0)
+    expected = nad83_to_itrf(lat, lon, h_navd + n)  # H + N (NAD83(2011) ellipsoidal), then the Helmert step to ITRF2014
+    assert np.max(np.abs(h_ell - expected)) < 1e-3
+    # the datum step is real: about -1.4 m at the Rio Grande
+    assert -1.6 < float(nad83_to_itrf(26.0, -97.15, 0.0)) < -1.2
+
+
+REAL_GEOID18 = Path(__file__).resolve().parents[2] / "data" / "raw" / "earth" / "us_noaa_g2018u0.tif"
+
+
+@pytest.mark.skipif(not REAL_GEOID18.exists(), reason="data/raw/earth/us_noaa_g2018u0.tif not fetched")
+def test_navd88_matches_pyproj_crs_transform_on_real_geoid18():
+    import pyproj
+    from pyproj import CRS, Transformer
+
+    pyproj.datadir.append_data_dir(str(REAL_GEOID18.parent))
+    reference = Transformer.from_crs(CRS.from_user_input("EPSG:6318+5703"), "EPSG:7912", always_xy=True)
+    for lat, lon, h in [(25.99686, -97.15394, 3.7), (28.585, -80.590, 1.2), (28.608, -80.604, 2.9)]:
+        expected = reference.transform(lon, lat, h)[2]
+        got = float(et.navd88_to_ellipsoidal(np.array([h]), np.array([lat]), np.array([lon]), REAL_GEOID18)[0])
+        assert got == pytest.approx(expected, abs=1e-3)
+
+
+def test_navd88_grid_matches_pointwise_conversion(tmp_path):
+    # a tile larger than the 64-node lattice (150 x 131 nodes), including its last row and column
+    path = tmp_path / "us_noaa_g2018u0.tif"
+    write_linear_geoid18(path)
+    geo = et.Geo(north=26.05, west=-97.2, step_lat=0.0002, step_lon=0.00021, lines=150, samples=131)
+    h = (np.arange(150)[:, None] * 0.01 + np.arange(131)[None, :] * 0.02).astype(np.float32)
+    out = et.navd88_grid_to_ellipsoidal(h, geo, path)
+    lat_m, lon_m = np.meshgrid(geo.lats(), geo.lons(), indexing="ij")
+    expected = et.navd88_to_ellipsoidal(h.astype(np.float64).ravel(), lat_m.ravel(), lon_m.ravel(), path).reshape(h.shape)
+    assert out.shape == h.shape
+    assert np.max(np.abs(out - expected)) < 1e-3
+    assert abs(out[-1, -1] - expected[-1, -1]) < 1e-3 and abs(out[-1, 0] - expected[-1, 0]) < 1e-3
+    assert abs(out[0, -1] - expected[0, -1]) < 1e-3
 
 
 def test_area_bounds():

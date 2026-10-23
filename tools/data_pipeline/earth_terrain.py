@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import json
 import math
+import time
 import tomllib
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -40,6 +42,7 @@ LOCAL_STEP_LAT_DEG = 1.0 / (30.0 * 3600.0)  # 1/30 arcsec = 1.03 m
 DN_GLOBAL_M, DN_REGIONAL_M, DN_LOCAL_M = 1.0, 0.1, 0.01
 ETOPO_PIXELS_PER_NODE = 2  # 60" pixels -> 2' nodes
 GLO30_URL = "https://copernicus-dem-30m.s3.amazonaws.com/{name}/{name}.tif"
+NAD83_2011_3D, ITRF2014_3D = "EPSG:6319", "EPSG:7912"
 TNM_API = "https://tnmaccess.nationalmap.gov/api/v1/products"
 TNM_DATASET = "Digital Elevation Model (DEM) 1 meter"
 MIN_3DEP_COVERAGE = 0.01  # below this fraction of valid local nodes the area falls back to GLO-30
@@ -152,13 +155,24 @@ def _navd88_transformer(geoid18_path: Path):
     return Transformer.from_pipeline(pipeline)
 
 
+def _nad83_to_itrf_transformer():
+    from pyproj import Transformer
+
+    # GEOID18 heights are NAD83(2011) ellipsoidal; the simulator's WGS84 is aligned with ITRF2014 (WGS 84 G2139). The
+    # Helmert step moves the ellipsoidal height by -1.4 to -1.6 m in the southern CONUS (the NAD83 origin offset).
+    return Transformer.from_crs(NAD83_2011_3D, ITRF2014_3D, always_xy=True)
+
+
 def navd88_to_ellipsoidal(h_navd88_m, lat_deg, lon_deg, geoid18_path: Path) -> np.ndarray:
-    """NAVD88 orthometric height -> ellipsoidal height with the NOAA GEOID18 grid, through PROJ (pyproj)."""
-    t = _navd88_transformer(geoid18_path)
+    """NAVD88 orthometric height -> WGS84 (ITRF2014) ellipsoidal height: GEOID18 through PROJ gives the NAD83(2011)
+    ellipsoidal height h = H + N, then the NAD83(2011) -> ITRF2014 Helmert transformation (EPSG 7912) is applied."""
+    lon = np.asarray(lon_deg, dtype=np.float64)
+    lat = np.asarray(lat_deg, dtype=np.float64)
     h = np.asarray(h_navd88_m, dtype=np.float64)
     # the PROJ vgridshift step with +multiplier=1 run forward adds the grid value: h = H + N
-    _, _, h_out = t.transform(np.asarray(lon_deg, dtype=np.float64), np.asarray(lat_deg, dtype=np.float64), h)
-    return np.asarray(h_out)
+    lon_r, lat_r, h_nad83 = _navd88_transformer(geoid18_path).transform(lon, lat, h)
+    _, _, h_itrf = _nad83_to_itrf_transformer().transform(lon_r, lat_r, h_nad83)
+    return np.asarray(h_itrf)
 
 
 def navd88_grid_to_ellipsoidal(h_navd88_m: np.ndarray, geo: Geo, geoid18_path: Path, lattice_nodes: int = 64) -> np.ndarray:
@@ -314,7 +328,7 @@ def glo30_tile_name(lat_floor: int, lon_floor: int) -> str:
     return f"Copernicus_DSM_COG_10_{ns}{abs(lat_floor):02d}_00_{ew}{abs(lon_floor):03d}_00_DEM"
 
 
-def read_glo30_mosaic(geo: Geo, raw_dir: Path, download, force: bool) -> tuple[np.ndarray, Geo, list[str]]:
+def read_glo30_mosaic(geo: Geo, raw_dir: Path, download, force: bool) -> tuple[np.ndarray, Geo, list[str], list[str]]:
     """GLO-30 tiles covering `geo` (+ a pixel margin) as one orthometric mosaic (pixel centres = its nodes). Tiles the
     bucket does not hold (open ocean) are 0 m, i.e. the geoid."""
     import rasterio
@@ -345,8 +359,9 @@ def read_glo30_mosaic(geo: Geo, raw_dir: Path, download, force: bool) -> tuple[n
             mosaic[i * px:(i + 1) * px, j * px:(j + 1) * px] = np.nan_to_num(data, nan=0.0)
             names.append(name)
     if missing:
-        print(f"  {len(missing)} GLO-30 tile(s) absent from the bucket (open sea, taken as 0 m geoid): {', '.join(missing)}")
-    return mosaic, mosaic_geo, names
+        print(f"  WARNING: {len(missing)} of {len(names) + len(missing)} GLO-30 tile(s) are absent from the bucket and are "
+              f"taken as open sea (0 m orthometric = the geoid): {', '.join(missing)} - check that they really are sea")
+    return mosaic, mosaic_geo, names, missing
 
 
 def tnm_1m_items(geo: Geo) -> list[dict]:
@@ -357,8 +372,16 @@ def tnm_1m_items(geo: Geo) -> list[dict]:
         query = urllib.parse.urlencode({"datasets": TNM_DATASET, "bbox": bbox, "max": 100, "offset": offset,
                                         "outputFormat": "JSON"})
         request = urllib.request.Request(f"{TNM_API}?{query}", headers={"User-Agent": "starsim-data-pipeline"})
-        with urllib.request.urlopen(request, timeout=120) as response:
-            page = json.load(response)
+        for attempt in range(5):  # the TNM API answers 5xx now and then
+            try:
+                with urllib.request.urlopen(request, timeout=120) as response:
+                    page = json.load(response)
+                break
+            except urllib.error.HTTPError as err:
+                if err.code < 500 or attempt == 4:
+                    raise
+                print(f"  TNM API HTTP {err.code}, retrying")
+                time.sleep(5 * (attempt + 1))
         total = page.get("total", 0)
         items += page.get("items", [])
         offset += 100
@@ -430,7 +453,7 @@ def fetch(source: dict, repo_root: Path, download, force: bool = False) -> None:
             continue
         # regional: GLO-30 surface
         rgeo = grid_for_box(lat, lon, area["regional_half_size_m"], GLO30_STEP_DEG, GLO30_STEP_DEG)
-        mosaic, mgeo, names = read_glo30_mosaic(rgeo, raw_dir, download, force)
+        mosaic, mgeo, names, missing_tiles = read_glo30_mosaic(rgeo, raw_dir, download, force)
         regional = resample_grid(mosaic, mgeo, rgeo.lats(), rgeo.lons(), dtype=np.float32)
         del mosaic
         regional = orthometric_to_ellipsoidal(regional, rgeo.lats(), rgeo.lons(), geoid_cm)
@@ -440,7 +463,8 @@ def fetch(source: dict, repo_root: Path, download, force: bool = False) -> None:
                                                  "half_size_m": area["regional_half_size_m"],
                                                  "source": "Copernicus DEM GLO-30 + EGM2008",
                                                  "note": "surface model: vegetation and buildings included",
-                                                 "tiles": ",".join(names)})
+                                                 "tiles": ",".join(names),
+                                                 "missing_tiles_taken_as_sea": ",".join(missing_tiles)})
         print(f"  {regional_name}: {sizes[regional_name] / 1e6:.1f} MB, {rgeo.lines} x {rgeo.samples}")
         # local: 3DEP bare earth, GLO-30 where 3DEP has no data or no coverage
         lgeo = grid_for_box(lat, lon, area["local_half_size_m"], LOCAL_STEP_LAT_DEG,
