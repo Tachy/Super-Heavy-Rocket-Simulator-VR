@@ -120,7 +120,8 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   `FlightBody::hold_fixed_to_earth`), impact (tower/mount hit, pin load > `max_load_n`, carriage hard stop
   > 1 m/s, an arm > 0.2 m deep in the hull) or missed. With a tower the booster's landing burn aims at the
   catch point, rolls its pins towards the arms and cuts off on pin contact. Fidelity flag
-  `FlightSession::set_towers`; `FlightSession::place_body` places a vehicle freely (scenarios).
+  `FlightSession::set_towers`; `FlightSession::place_body` places a vehicle freely (scenarios). The catch on the
+  derived Starbase height (-21.11 m) and on the real terrain: section "Earth terrain and geoid" (M8 Plan A Task 7).
   Game: `game/world/tower_view.gd` draws the tower from `FlightSim.site_tower`, arms from `tower_state`
   (render_check `--tower_arms_deg=`); a new `class_name` needs one `godot --headless --import`.
 - Booster return (M6, `gnc/booster_return`): `FlightSession::set_booster_return(true)` gives the separated
@@ -201,7 +202,8 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
 - Ship entry guidance (b2, `gnc/entry_guidance`, `gnc/entry_predictor`, `gnc/entry_aero_table`): the onboard computer
   predicts the rest of the entry as a 3-DOF point mass (Earth-fixed, J2, US76, the ship's trimmed C_D A / C_L A over
   Mach and alpha with flaps in pitch trim, online drag / lift scale factors from the accelerometer
-  `FlightBody::aero_acceleration_body_mps2()`; pure, no SPICE) every 2 s and solves the bank magnitude for zero range
+  `FlightBody::aero_acceleration_body_mps2()`; in the terminal phase not learnt in an attitude transient over 2 deg,
+  M8 Plan A Task 7; pure, no SPICE) every 2 s and solves the bank magnitude for zero range
   error (Illinois); heat-rate, load and dynamic-pressure peaks over 90 % of a limit cut the bank back. Bank reversals are
   timed by the predictor (hold vs reverse-now end on opposite sides). Bank rate 1 deg/s above Mach 10, 3 deg/s below
   Mach 5 [E]. From Mach 5 (latest Mach 3, once a reversal has settled) the terminal phase ("Endanflug") steers the
@@ -349,9 +351,10 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   leg judgement. Validation: from ignition (3.3 km, 300 m/s, 12.1 t) lands 0.01 m off at 0.88 m/s; campaign
   `[falcon9][rtls][validation]` (+-10 m, +-3 m/s, +-5 % propellant, +-3 deg, truth hull aero +-10 % via
   `FlightSession::set_aero_dispersion`) 21 of 21 within 0.01 m, <= 0.99 m/s, >= 5.7 t left; full mission: MECO T+141 s,
-  entry burn T+356 s, landing burn T+423 s at 3.0 km / 287 m/s / 11.7 t, touchdown T+459 s, 0.00 m off (CRS-35: 137 /
-  355 / 420 at ~3.2 km, ~300 m/s / 442 s; on the derived LZ-40 height, M8 Plan A: touchdown T+452 s, 6.4 t, and on
-  the real terrain the same - section "Earth terrain and geoid"). `return_flight_time_s` 260 s and `boostback_loss_fraction` 0.12 [D] were
+  entry burn T+356 s, landing burn T+423 s at 3.0 km / 287 m/s / 11.7 t, touchdown T+459 s, 0.00 m off at the time
+  (CRS-35: 137 / 355 / 420 at ~3.2 km, ~300 m/s / 442 s). Current values (follow-ups Task 7c, then the derived LZ-40
+  height of M8 Plan A): MECO T+140 s, landing burn T+423 s at 2.97 km / 287 m/s / 12.1 t, touchdown T+455 -> 452 s,
+  6.4 t left, the same on the real terrain - section "Earth terrain and geoid". `return_flight_time_s` 260 s and `boostback_loss_fraction` 0.12 [D] were
   identified on that mission with the 395.7 t stage (kept). CRS-35's gauge shows ~66 t at MECO against our 55 t (not
   followed: the Falcon 9 gauge drops without burns, see the drone ship).
 - SCvx landing aborts (all vehicles; the pilot's `abort_landing` too): a first plan that finds the target unreachable aborts at once; `failures_before_abort`
@@ -2467,11 +2470,15 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     T+60 / 90 / 120 s, altitude -8.2 / -2.1 / +2.6 %. MECO T+132.7 vs 134.6 s, 6596 vs 6490 km/h (+1.6 %), 58.2 vs
     57.4 km, path 41.3 vs 36.6 deg (the planned 11.6 deg kick flies steeper than CRS-35); SECO T+508.0 vs ~511.6 s
     (CRS-35's SECO lies in a reading gap: the rocket-equation fit of T+430-496 s reaches the final 27,012 km/h at
-    T+515 +- 3 s display). LZ-40 chosen (CRS-35 landed there).
+    T+515 +- 3 s display). LZ-40 chosen (CRS-35 landed there). These CRS-35 numbers are Task 6's; superseded by the
+    follow-ups Task 7c (section "Falcon 9 late ascent against CRS-35") and M8 Plan A Task 7: now T+30 / 60 / 90 /
+    120 s speed -9.8 / +1.9 / +3.1 / +2.6 %, altitude -7.2 / -8.7 / -3.4 / +0.1 %; MECO T+135.5 vs 134.6 s, 6830 vs
+    6490 km/h (+5.2 %), 59.5 vs 57.4 km, path 39.1 vs 36.6 deg; SECO T+509.0 s.
 - **M8 Plan A Task 7:** the samples' altitude is above the pad (was the ellipsoidal height; the derived site heights
   would have put it 21-23 m low) - numbers in "Earth terrain and geoid".
-- **No re-baselines:** no physics changed (the time base is the comparison's, the propellant load a mission input);
-  the reference missions (starship_leo, the Falcon 9 missions, ISS, refuelling) fly as before, their numbers stand.
+- **No re-baselines in Task 6:** no physics changed (the time base is the comparison's, the propellant load a mission
+  input); the reference missions (starship_leo, the Falcon 9 missions, ISS, refuelling) flew as before. Later
+  re-baselines: follow-ups Tasks 7b / 7c and M8 Plan A Task 7 (sections below and "Earth terrain and geoid").
 - **Removed:** the old telemetry tests (starship_leo with the recorded 500 t MECO and the planned kick; CRS-35 on a
   fixed 12 deg kick, T+60 / 120 s within 15 % only) and the kick sweeps "[.tuning]" (kicks are planned).
 
@@ -2687,20 +2694,24 @@ and on the geoid at sea; rendering of the tiles is Plan B (the interim `GroundPa
   [deorbit]` (425 cases) and `[refuelling],[campaign],[lunar]` (268 cases): every catch, landing, planner and campaign
   passed on the new heights; one failure, the tanker's reference measurement (below). A wider sweep over the tags the
   site heights reach (`[config],[sim],[session],[legs],[staging],[timeline],[dragon],[iss],[earth_terrain],[gnc],
-  [contact],[capsule],[parachute]`, 708 cases) found three more, all re-baselined: the Starbase height in "Launch sites
-  load with their catch tower" (10.0 -> -21.11 m; missed by Task 6), the launch window's recorded Waypoint 0 epoch
-  (SLC-40's pad 3.29 m lower: 845519535.204464555 -> .204483509 s, +19 us; the liftoff unchanged) and the ship
-  flip-and-catch timeline's gate prediction (below).
-  - **Gate prediction of the ship's landing burn** (`test_mission_timeline.cpp` "A ship's flip and catch records one
-    landing burn", a ship placed 28 km west / 26 km above the site): whole-track error 0.83 -> 2.92 s, bound 1.0 ->
-    3.5 s, plus a new bound 0.5 s within the last 60 s (0.27 s). A/B with only the Starbase height reverted to 10 m
-    reproduces 0.83 s: the cause is the site shift. Mechanism: `EntryGuidance::gate_epoch` runs the terminal
-    prediction with the online drag scale (updated every 2 s from the accelerometer against the model table at the
-    flown alpha); at Mach ~0.55 the pitch-up to the belly-flop alpha (78 -> 84-89 deg) holds alpha near 83-84 deg for
-    ~30 s on the new height, where the flown aero exceeds the table (drag scale 1.00 -> 1.09; the old run crossed it
-    faster, 1.01), so the prediction 80-60 s ahead ran +2.9 s late (old +0.66 s), then converged. The catch itself is
-    unchanged (caught, catch prediction -1.93 s 17 s ahead). Open: the table's mismatch near alpha 83-84 deg subsonic
-    (not changed here).
+  [contact],[capsule],[parachute]`, 708 cases) found three more: the Starbase height in "Launch sites load with their
+  catch tower" (10.0 -> -21.11 m; missed by Task 6) and the launch window's recorded Waypoint 0 epoch (SLC-40's pad
+  3.29 m lower: 845519535.204464555 -> .204483509 s, +19 us; the liftoff unchanged), both re-baselined, and the ship
+  flip-and-catch timeline's gate prediction - a defect, fixed (below).
+  - **Gate prediction of the ship's landing burn: the online scales learnt attitude transients** (`test_mission_timeline.cpp`
+    "A ship's flip and catch records one landing burn", a ship placed 28 km west / 26 km above the site): the
+    whole-track error grew 0.83 -> 2.92 s (bound 1.0 s). A/B with only the Starbase height reverted to 10 m gives
+    0.83 s again. Cause: `EntryGuidance::gate_epoch` predicts with the online drag / lift scales (updated every 2 s,
+    the accelerometer against the trimmed table at the flown alpha). At Mach ~0.59 the terminal command steps from
+    alpha 78 to 86 deg; the attitude overshoots and oscillates for ~12 s (5-9 deg off the command, roll / pitch rates
+    up to 5 deg/s) and the flaps' control deflections raise the measured drag to 1.08-1.12 x the table (steady flight
+    before and after: 1.004 / 0.996). The scales learnt it (drag 1.00 -> 1.09, lift 1.11) and the prediction ran +2.9 s
+    late until the filter unlearnt it; on the old height the oscillation was better damped (1.01). The 31 m only moved
+    the phase of the oscillation. Fix: in the terminal phase the scales are kept when the attitude error (flown vs
+    commanded, the largest over the 2 s cycle - an oscillation passes through small errors with its flaps deflected)
+    exceeds `EntryGuidanceParameters::scale_max_attitude_error_rad` 2 deg [E] (steady terminal flight <= 0.3 deg).
+    Now: -0.82 s 179 s ahead, 0.30 s within 120 s, 0.09 s within 60 s, 0.04 s within 30 s (bound 1.0 s kept, new
+    bounds 0.5 s within the last 60 s and the drag scale <= 1.03); catch prediction -1.81 s 18 s ahead.
   - **Altitude reference of the webcast comparisons** (category a): the dials read 0 on the pad, our samples were the
     ellipsoidal height (`core/tests/ascent_validation.cpp`), which the old estimates kept near the pad (+10 m / -20 m)
     and the derived heights would put 21-23 m low. The samples are now above the pad (flight 14 at OLP-1, CRS-35 at

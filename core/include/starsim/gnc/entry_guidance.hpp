@@ -83,6 +83,12 @@ struct EntryGuidanceParameters {
     double lateral_margin_end_speed_mps = 0.0;
     double scale_filter_gain = 0.3;   // per cycle, measured / modelled aerodynamic acceleration
     double scale_min_acceleration_mps2 = 1.0;
+    // Terminal phase: no scale update when the flown attitude was this far off the commanded one at any tick of the
+    // cycle (an attitude transient: the flaps' control deflections add aero the trimmed table does not hold - M8a
+    // Task 7: the subsonic pitch-up to the belly-flop alpha, 5-9 deg off, measured drag 1.08-1.12 x the table and
+    // taught a scale of 1.09 that the steady flight after it (0.996) did not confirm). [E] steady terminal flight stays
+    // within ~0.3 deg.
+    double scale_max_attitude_error_rad = 2.0 * constants::deg_to_rad;
     bool predictor_j2 = true;         // false: central gravity (test scenarios without J2)
     bool terminal_phase = true;       // false: no terminal steering (a capsule: bank to the gate)
     // > 0: below this speed the bank is held (no more corrector cycles). A capsule falling steeply at subsonic speed has
@@ -275,6 +281,7 @@ private:
     time::Epoch last_update_;
     time::Epoch last_cycle_;
     time::Epoch last_scale_update_;
+    double scale_window_attitude_error_rad_ = 0.0;  // terminal phase: largest attitude error since the last scale update
     double bank_rad_ = 0.0;          // setpoint now (rate limited)
     int roll_direction_ = 0;         // profiled entry: the direction of a roll under way (bank_step_held)
     double flown_bank_rad_ = 0.0;    // diagnostics: the bank the vehicle flies (STARSIM_DEBUG_ENTRY)

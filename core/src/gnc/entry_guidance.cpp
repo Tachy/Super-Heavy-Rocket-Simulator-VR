@@ -632,6 +632,16 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
 
     // Online scale factors: the accelerometer's drag and lift against the model at this Mach number.
     const Vec3 a_aero = s.attitude.rotate(body.aero_acceleration_body_mps2());
+    // Terminal phase: the largest attitude error (flown vs commanded) since the last scale update. An oscillating
+    // attitude passes through small errors with its flaps still deflected: one sample does not show it.
+    if (phase_ == EntryPhase::Terminal) {
+        double attitude_error_rad = constants::pi;  // before the terminal steering's first command: not settled
+        if (terminal_started_) {
+            const math::Quat d = (terminal_attitude_gcrf_ * s.attitude.conjugate()).normalized();
+            attitude_error_rad = 2.0 * std::acos(std::clamp(std::abs(d.w), 0.0, 1.0));
+        }
+        scale_window_attitude_error_rad_ = std::max(scale_window_attitude_error_rad_, attitude_error_rad);
+    }
     if (phase_ != EntryPhase::Gate && epoch - last_scale_update_ >= parameters_.cycle_s &&
         norm(a_aero) > parameters_.scale_min_acceleration_mps2 && air.density_kg_m3 > 0.0) {
         last_scale_update_ = epoch;
@@ -643,6 +653,11 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         // (terminal phase; the entry phase flies the schedule: the exact-alpha table)
         const bool terminal_phase = phase_ == EntryPhase::Terminal;
         const double alpha_flown = std::acos(std::clamp(dot(axis_gcrf, u), -1.0, 1.0));
+        // In an attitude transient of the terminal phase (the flown attitude off the commanded one) the flaps' control
+        // deflections add aero the trimmed table does not hold: no model error, the scales are kept.
+        const bool settled =
+            !terminal_phase || scale_window_attitude_error_rad_ <= parameters_.scale_max_attitude_error_rad;
+        scale_window_attitude_error_rad_ = 0.0;
         const double drag_model = q_over_m * (terminal_phase ? model_.aero.cd_area_m2(mach, alpha_flown)
                                                              : model_.aero.cd_area_m2(mach));
         const double lift_model = q_over_m * (terminal_phase ? model_.aero.cl_area_m2(mach, alpha_flown)
@@ -650,8 +665,8 @@ EntryCommand EntryGuidance::update(const vehicle::FlightBody& body, const vehicl
         const auto filter = [&](double& k, double measured) {
             k += parameters_.scale_filter_gain * (std::clamp(measured, 0.5, 2.0) - k);
         };
-        if (drag_model > 0.0) filter(model_.drag_scale, drag / drag_model);
-        if (lift_model > 0.0) filter(model_.lift_scale, lift / lift_model);
+        if (settled && drag_model > 0.0) filter(model_.drag_scale, drag / drag_model);
+        if (settled && lift_model > 0.0) filter(model_.lift_scale, lift / lift_model);
     }
 
     if (aerocapture()) {  // no gate: the pass ends when the ship climbs out of the atmosphere again

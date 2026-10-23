@@ -607,10 +607,14 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
     const auto& t = session.timeline();
     PredictionTrack landing_burn_prediction, catch_prediction;  // onboard predictions (Task 4b)
     int after_contact = 0, without_catch = 0;
+    double max_drag_scale = 0.0;  // the entry guidance's online drag scale
     while (session.epoch() - t0 < 600.0 && session.landing_outcome(0) == sim::LandingOutcome::Flying) {
         session.advance_to(session.epoch() + 1.0, 1000);
         landing_burn_prediction.sample(predicted_of(t, MissionEventKind::LandingBurn), session.epoch());
         catch_prediction.sample(predicted_of(t, MissionEventKind::Caught), session.epoch());
+        if (const auto* entry = session.entry_guidance(0)) {
+            max_drag_scale = std::max(max_drag_scale, entry->model().drag_scale);
+        }
         if (session.catch_contact_epoch(0)) {  // from the pins' first touch a catch dot is shown
             ++after_contact;
             if (!caught_shown(t, session.body_serial(0))) ++without_catch;
@@ -635,14 +639,12 @@ TEST_CASE("A ship's flip and catch records one landing burn", "[timeline]") {
     CHECK(*landing_burn_prediction.first_seen - t0 <= 1.0);  // from the entry guidance's first cycle
     // Measured 2026-10-22: the gate -0.83 s 179 s before, 0.07 s within the last 30 s; the catch (the plan's end vs the
     // pins' first touch on the arms): -2.9 s 18 s before, -1.3 s at the end.
-    // Re-baselined M8a Task 7 (Starbase 10.00 -> -21.11 m, the ship placed relative to the site): the whole-track
-    // bound 1.0 -> 3.5 s. The gate prediction follows the online drag scale; at Mach ~0.55 the pitch-up to the
-    // belly-flop alpha (78 -> 84-89 deg) leaves the flown aero above the model table at alpha 83-84 deg for ~30 s
-    // (drag scale 1.00 -> 1.09; the old height crossed that alpha faster: 1.01), so the prediction 80-60 s before
-    // the burn ran +2.92 s late (was +0.66 s there). Measured now: -1.55 s 180 s before, 2.92 s within 120 s,
-    // 0.27 s within 60 s, 0.05 s within 30 s; catch -1.93 s 17 s before. The last minute stays gated tightly.
-    CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 3.5);
+    // M8a Task 7: on the derived Starbase height (-21.11 m) the subsonic pitch-up to the belly-flop alpha (78 -> 86 deg
+    // commanded, 83-89 deg flown) taught the online drag scale 1.09 from the transient and the gate ran 2.92 s late;
+    // the scales now hold while alpha is off its command (EntryGuidanceParameters::scale_max_alpha_error_rad).
+    CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 1e9) <= 1.0);
     CHECK(landing_burn_prediction.max_error_within_s(landing_burn->epoch, 60.0) <= 0.5);
+    CHECK(max_drag_scale <= 1.03);  // no transient learnt as a model error
     CHECK(catch_prediction.max_error_within_s(caught->epoch, 1e9) <= 4.0);
     CHECK(t.predicted().empty());
 }
