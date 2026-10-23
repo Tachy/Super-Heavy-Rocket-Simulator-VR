@@ -8,13 +8,12 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
 
 - Only the current configuration (Block 3 / V3, Raptor 3) is modelled (decision 2026-10-13); its data come from
   the flights that flew it (12-14, `tests/validation/telemetry/flights.toml`). Earlier blocks were removed.
-- Starship throttle schedules are not public; they are a guidance choice, not vehicle data. The ascent mission
-  `config/missions/starship_leo.toml` (`sim::start_ascent_mission`, `FlightSim.start_mission`) carries the booster
-  schedule [D] of flights 13/14 (gauge shape, level fitted to the recorded speed: ~0.85, max-Q bucket ~0.76, ~0.83, ~0.76
-  towards MECO) and kick 14 deg: test "Starship ascent follows the webcast telemetry of flights 13 and 14" (flown with the
-  recorded MECO of ~500 t: speed within 3-6 %, altitude within ~1 km at T+60-120 s, MECO T+135 s / 48 km / 5840 km/h vs
-  ~T+140 s / ~53 km / ~5950 km/h). The game's key P and the older ascent tests still fly full thrust with the default
-  pitch program. Staging mass vs the gauge (decision 2026-10-14: physics first, the gauge after staging is not
+- The booster's ascent throttle is vehicle data since ascent Task 2 (user 2026-10-23): `[stage] max_ascent_throttle`
+  0.88 [D] (the flights 13/14 propellant gauge's flow before max-Q against the rated flow) and the max-Q limit
+  `max_dynamic_pressure_pa` 38909 Pa [D] (flight 14's peak q); the speed-fitted time schedule of the missions is gone
+  (section "Ascent trajectory and staging"). `config/missions/starship_leo.toml` keeps kick 14 deg: test "Starship
+  ascent follows the webcast telemetry of flights 13 and 14" (flown with the recorded MECO of ~500 t) is now 8-12 %
+  fast, MECO T+126 s / 52.9 km / 5869 km/h vs ~T+140 s / ~53 km / ~5950 km/h - an open discrepancy. Staging mass vs the gauge (decision 2026-10-14: physics first, the gauge after staging is not
   followed): on this ascent our return plans MECO with ~310 t (301 t at the boostback start, ~2.2 km/s on 13 engines),
   flight 14's gauge shows 11.8 % (431 t) there. The gauge is not consistent with the engines after staging: it falls
   ~15 t/s on 13 engines (full mass flow ~10.5 t/s) and 3.5 -> 1.4 % (77 t) in the last ~12 s on 3 engines (~30 t);
@@ -309,11 +308,11 @@ diagnostics. Keep it up to date when a subsystem changes; `CLAUDE.md` keeps only
   table `aero/falcon9_descent.csv` (unguided replay from after the entry burn: 0.9 / 1.5 % rms, test "Falcon 9 descent
   drag reproduces ..."). Burns seen: CRS-35 entry burn on the centre engine only, landing burn 1 -> 3 -> 1; Starlink 15-25
   entry burn on 3, landing burn on 1 (~40 % throttle by the gauge). The drone-ship descent stays ~2 km higher than a
-  zero-lift fall (grid-fin lift). Ascent: `PitchProgram::booster_throttle` (first-stage throttle over mission time,
-  empty = full) carries the Falcon 9 schedule [D] from the CRS-35 G-force dial against the simulated stack: full thrust,
-  a ~72 % max-Q bucket T+50-61 s, then ~95 % (`STARSIM_DEBUG_ASCENT_G=1` prints the simulated G); pitch kick 12 deg [E];
-  CRS-35 T+60 / 120 s 1219 / 4807 km/h (recorded 1188 / 4672: the real stack starts ~2.5 s slower), MECO T+137 s /
-  56.4 km / 6372 km/h vs recorded 137 / 56.6 / 6441. The upper stage's plane steering nulls out-of-plane speed and offset together
+  zero-lift fall (grid-fin lift). Ascent (since ascent Task 2): full thrust (no `max_ascent_throttle`: the 425 t
+  tanks' gauge flow is the rated flow) under the max-Q limit `max_dynamic_pressure_pa` 31559 Pa [D] (CRS-35's peak q);
+  the CRS-35 schedule (bucket ~72 % T+50-61 s, then ~95 %) is gone (`STARSIM_DEBUG_ASCENT_G=1` prints the simulated G);
+  pitch kick 12 deg [E]; CRS-35 T+60 / 120 s 1359 / 5291 km/h (recorded 1188 / 4672; with the schedule 1219 / 4807),
+  MECO T+132 s / 59.0 km / 6402 km/h vs recorded 137 / 56.6 / 6441. The upper stage's plane steering nulls out-of-plane speed and offset together
   (ZEM/ZEV) and the terminal v_go removes the rest; inclinations of steep planes are judged against the true equator of
   date (GCRF elements carry ~0.15 deg of precession by 2026). `FlightSession::launch_from_pad` also takes a loaded
   `VehicleConfig` (mission payload; Dragon flies without a fairing); every launch starts with the autopilot off (no ascent
@@ -1692,7 +1691,8 @@ Plan `docs/superpowers/plans/2026-10-21-refuelling-f2-flown-campaign.md`, ledger
   14 tankers / 53.2 d; arrivals within 0.07 d of their live plans; fills within 2 % (largest: tanker 13, 864.4 vs
   850.9 t, +1.6 %); deliveries 58.6-72.5 t; losses boil-off (remainder) 31.6 t, attitude gas 1.2 t, vent 27.3 t,
   station keeping 0. Placed variant (`--fly-placed`, ~5 min): 2 tankers + HLS, passes.
-- **Calculator answer** (default, depot placed at 200 km): **13 tanker flights, 52.5 days** (f3/f4: 13 / 49.7;
+- **Calculator answer** (default, depot placed at 200 km): **14 tanker flights, 52.3 days** since ascent Task 2 (63.6 t
+  per reference tanker; before 13 / 52.5, f3/f4: 13 / 49.7;
   with the per-class calibration and the depot's orbit followed). `--reference-phasing`: 14 / 224.7 d (the single
   phasing orbit against a drifting depot).
 - **Known limits:** flights strictly sequential; the side return blocks the session; the calculator's keeping floor
@@ -1805,12 +1805,14 @@ Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure dat
   burn, parachutes, catch / landing / splashdown) is no longer predicted once recorded for that body:
   - MECO and stage separation (AutopilotState::Booster, from liftoff): the booster's propellant above the cutoff
     propellant the autopilot set on its last tick (`booster_cutoff_propellant_kg`: the return's need or the reserve) at
-    the stage's actual flow now scaled along the open loop's throttle schedule (`AscentGuidance::booster_throttle`,
-    incl. the max-Q bucket; ruling 2026-10-22: part of the onboard computer's own plan), integrated in 1 s steps [E];
+    the stage's actual flow now scaled with the throttle the open loop will command - since ascent Task 2 the
+    operational cap and the max-Q limiter run forward on a point mass (`booster_burn_time_s` in `predicted_events.cpp`:
+    the open loop's vertical rise, kick and gravity turn, the vehicle's drag table, US76, central gravity, 0.5 s steps
+    [E]; free launches: within 0.6 s (Starship) / 2.0 s (Falcon 9) of the flown MECO over the whole booster phase);
     the separation and the upper stage's ignition follow the staging sequence's timing (`separation_after_meco_s`,
-    `upper_ignition_after_meco_s`; in the state Staging from the sequence's own epochs). Measured: starship_leo
-    +7.0 s at T+30 s, +6.1..+8.3 s over the booster
-    phase (+8.2 s in the bucket), +1.5 s 6 s before; Falcon 9 RTLS +7.4 s at T+30 s, +6..+9.8 s (+9 s in the bucket).
+    `upper_ignition_after_meco_s`; in the state Staging from the sequence's own epochs). Measured (ascent Task 2):
+    starship_leo +5.0 s at T+30 s, at most 7.2 s within 120 s, 2.2 s within 10 s; Falcon 9 RTLS +7.9 s at T+30 s
+    (with the schedule: +7.0 / +7.4 s at T+30 s).
     The prediction is late by the return's cutoff propellant, which grows with the downrange speed (the value of the
     moment is used). At the flow now alone it was +0.9 s at T+30 s by cancellation but 12 s (Starship) / 37 s
     (Falcon 9) off in the bucket. Not on the pad: the return's cutoff propellant is only planned in flight.
@@ -1928,3 +1930,60 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
   calculated): `campaign_offset_above_t` / `below_t` 2.25 / 1.7 -> 1.6 / -0.5 t [D], the mean flown - modelled delivery
   of the flights whose phasing class flown and calculator agree on (7 above, 3 below).
 
+### Max-Q limit and operational ascent throttle (Task 2)
+- **Before:** the missions carried first-stage throttle schedules over mission time (`booster_throttle`), fitted to
+  one flight each (Starship: 0.85 from liftoff, 0.76-0.85 later, 0.76 before MECO, level fitted to the flight 13/14
+  speed; Falcon 9: the CRS-35 bucket 0.72 at T+50-61 s, then 0.95). Removed with the key.
+- **Now** (`gnc::AscentGuidance::booster_throttle`): the booster flies its operational throttle `[stage]
+  max_ascent_throttle` and is throttled below it to hold the dynamic pressure at `max_dynamic_pressure_pa`
+  (`FlightSession::engage_ascent_autopilot` copies both from the lowest stage into `PitchProgram`).
+  - Limiter law (`gnc::max_q_thrust_acceleration_mps2`): feedback linearisation of q = rho v^2/2 along the path,
+    dq/dt = rho v dv/dt + v^2/2 drho/dt = (limit - q) / tau with tau = `max_q_time_constant_s` 1 s [E] (short against
+    q's own build-up near max-Q, ~20-30 s: full thrust holds to ~95 % of the limit; long enough that the commanded
+    throttle moves by ~0.1-0.2 /s, inside the engines' 0.5 /s rate - no lag-driven overshoot). dv/dt besides thrust from
+    the accelerometer (last tick) less the engines' thrust now, gravity and the centrifugal term; drho/dt from US76's
+    gradient (scaled as the truth air) times the climb rate. Thrust to throttle: `gnc::booster_throttle_for_thrust`
+    (the producing engines' common range, linear thrust).
+  - Values: Starship `max_dynamic_pressure_pa` 38909 Pa [D] = flight 14's peak q (its q holds 38-39 kPa from T+58 to
+    T+71 s, a max-Q hold), Falcon 9 31559 Pa [D] = CRS-35's peak q (T+70 s, after its bucket at ~29.5 kPa); new tool
+    `tools/telemetry/peak_dynamic_pressure.py` (speed + altitude + US76, the core's model). Super Heavy
+    `max_ascent_throttle` 0.88 [D] (user 2026-10-23: the flown throttle is vehicle data, 280 tf stays the engines'
+    capability): the propellant gauge's mean flow T+20-56 s against the rated 28.00 t/s, 0.873 (flight 14) / 0.894
+    (flight 13), `tools/telemetry/mass_estimate.py` (new summary line "mean flow"). After max-Q (T+70-125 s) the flow
+    stays at 0.871 / 0.856 and the last ~10 s fall with the acceleration: no late-boost limit. Falcon 9: none (the
+    425 t tanks' gauge flow is the rated flow; the "92-94 %" note of `falcon9_block5.toml` belongs to the rejected
+    395.7 t load).
+  - Measured (`[ascent]` "The ascent holds dynamic pressure at the vehicle limit", free launches): Falcon 9 max q
+    31568 Pa (1.000 of the limit), lowest throttle 0.842, full thrust below 90 %; the free Starship (kick 10 deg, 0.88)
+    peaks at 33.8 kPa (0.87 of the limit, never limited).
+  - MECO forecast: the limiter and the cap run forward on a point mass (section "Mission timeline"); free launches
+    within 0.6 s (Starship) / 2.0 s (Falcon 9) over the booster phase ("MECO forecast follows the limiter").
+- **Open discrepancy - Starship vs flight 14:** at the gauge's own flow the stack is faster than the flights (test
+  "Starship ascent follows the webcast telemetry ...", flown with the recorded 500 t MECO): T+30 / 60 / 90 / 120 s
+  2.3 / 10.2 / 24.9 / 47.4 km, 579 / 1516 / 3029 / 5313 km/h against 1.6 / 8.4 / 20.5 / 38.2 km, 515 / 1406 / 2772 /
+  4848 km/h (+12.4 / +7.8 / +9.3 / +9.6 %); MECO T+126 s / 52.9 km / 5869 km/h against ~T+140 s / ~53 km / ~5950
+  km/h. Not tuned (bounds 0.12 -> 0.13 and 12 -> 15 s; Task 6 rewrites the check). The mass_estimate fit gives a
+  liftoff mass of 5542-5603 t (ours 5715 t) - the excess is in thrust per flow or drag, not mass.
+- **SCvx fresh plans** 30 -> 60 iterations [E] (`ScvxSettings::fresh_max_iterations`): the Falcon 9 ASDS MECO campaign
+  case seed 107 (aero x0.91, ignition 3.8 km high, 1.3 km short, 14.8 t) had its first deck plan refused at 30 and
+  splashed down 172 m beside the deck; it converges in 42 and lands. Re-plans keep their 10.
+
+### Re-baselined reference numbers (Task 2)
+- Falcon 9 drone ship (`falcon9_asds.toml`): deck 32.8819 / -76.1490 -> 33.2139 / -75.7839 deg [D] (the hidden
+  "nominal impact point" probe: separation T+150.7 s at 75.1 km, 8245 km/h, 30.6 deg path; ~42 km further). Mission
+  landed 0.00 m off; entry burn T+429 s, landing burn T+514 s at 3.03 km / 274 m/s / 12.0 t (Starlink 15-25: T+364 /
+  476 s; bounds 25 -> 75 / 50 s: the 13 deg kick and the higher arc - Task 3 optimises the kick).
+- CRS-35 check (`test_falcon9_ascent`): MECO T+132 s / 59.0 km / 6402 km/h (recorded 137 / 56.6 / 6441, within the
+  10 % bounds); T+60 / 120 s 1359 / 5291 km/h (recorded 1188 / 4672).
+- Super Heavy return on starship_leo ("Block 3 plans MECO ..."): boostback T+148-169 s from 273 t, apogee 103.1 km at
+  T+221 s, landing-burn ignition T+383 s with 52.4 t (51.0 t planned): apogee and ignition bounds 15 -> 25 s (flight 14
+  T+240 / ~398 s; MECO earlier with the faster stack).
+- MECO predictions: starship_leo +5.0 s at T+30 s (was +7.0), Falcon 9 RTLS +7.9 s (was +8.4); bounds unchanged.
+- Refuelling windows: tanker `insertion_s` 445.5 -> 436.1 s, `insertion_arc_deg` 12.20 -> 11.93; HLS 428.3 -> 421.4 s,
+  11.68 -> 11.37 (`tanker_flight(_orbit).toml`, `hls_refuel(_orbit).toml`, the flown ascents).
+- Refuelling reference flights (`reference_flights.toml`, r5 flights): depot initial fill 55.5 -> 69.6 t, tanker
+  residue 97.3 -> 93.0 t, rendezvous 15.64 -> 15.49 t, delivered LOX / CH4 54.1 / 13.6 -> 50.9 / 12.7 t, settling gas
+  0.94 -> 0.90 t, main at catch 1.19 -> 1.08 t, HLS main at docking 193.6 -> 182.4 t; `inputs_digest` c924f219bd0caf00.
+  The calculator: 14 tankers / 52.3 d (was 13 / 52.5). The full flown campaign: 14 tankers, 60.8 days, comparison
+  passed (fills per flight against the calculator's model: above-depot class -0.4..+1.2 t, below -0.3..+2.3 t; the
+  campaign offsets kept); placed campaign passed.

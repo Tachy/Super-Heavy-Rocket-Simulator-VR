@@ -32,7 +32,6 @@ void start_ascent_mission(FlightSession& session, const config::AscentMission& m
     session.set_booster_return(true);
     gnc::PitchProgram program;
     program.kick_angle_rad = mission.kick_angle_rad;
-    program.booster_throttle = mission.booster_throttle;
     session.set_payload_separation(separation);  // after launch_from_pad (a new launch resets it)
     session.engage_ascent_autopilot(
         {mission.periapsis_height_m, mission.apoapsis_height_m, mission.inclination_rad, mission.northerly}, program);

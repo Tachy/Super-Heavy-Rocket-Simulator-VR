@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/environment/gravity.hpp"
@@ -16,6 +17,10 @@ namespace {
 
 // [E] re-solve the J2-aware insertion when the predicted cutoff point moves by more than this.
 constexpr double j2_resolve_angle_rad = 2.0 * constants::deg_to_rad;
+// [E] max-Q limiter: below this air speed q is negligible (~10 Pa at sea level) and the law divides by the speed
+constexpr double min_limited_air_speed_mps = 5.0;
+// [E] max-Q limiter: half step of the central difference of the air density with height (US76 layers are smooth on it)
+constexpr double density_gradient_step_m = 50.0;
 
 constexpr double earth_rotation_rate_radps = 7.2921150e-5;
 constexpr double equatorial_radius_m = 6378137.0;
@@ -115,22 +120,91 @@ GuidanceCommand AscentGuidance::update(const vehicle::FlightBody& body, const ve
                                        time::Epoch epoch, bool closed_loop) {
     if (closed_loop) return peg(body, env, epoch);
     GuidanceCommand cmd = open_loop(body, env, epoch);
-    cmd.throttle = booster_throttle(epoch - liftoff_);
+    cmd.throttle = booster_throttle(body, env, epoch);
     return cmd;
 }
 
-double AscentGuidance::booster_throttle(double t_s) const {
-    const auto& schedule = program_.booster_throttle;
-    if (schedule.empty()) return 1.0;
-    if (t_s <= schedule.front().first) return schedule.front().second;
-    if (t_s >= schedule.back().first) return schedule.back().second;
-    for (size_t i = 1; i < schedule.size(); ++i) {
-        if (t_s > schedule[i].first) continue;
-        const auto& [t0, f0] = schedule[i - 1];
-        const auto& [t1, f1] = schedule[i];
-        return f0 + (f1 - f0) * (t_s - t0) / (t1 - t0);
+double max_q_thrust_acceleration_mps2(double limit_pa, double density_kg_m3, double density_rate_kgpm3ps,
+                                      double air_speed_mps, double other_acceleration_mps2) {
+    constexpr double infinity = std::numeric_limits<double>::infinity();
+    if (!(limit_pa > 0.0) || !(density_kg_m3 > 0.0) || !(air_speed_mps > min_limited_air_speed_mps)) return infinity;
+    const double v = air_speed_mps;
+    const double q = 0.5 * density_kg_m3 * v * v;
+    const double q_rate_wanted = (limit_pa - q) / max_q_time_constant_s;
+    const double speed_rate_wanted = (q_rate_wanted - 0.5 * v * v * density_rate_kgpm3ps) / (density_kg_m3 * v);
+    return speed_rate_wanted - other_acceleration_mps2;
+}
+
+double booster_throttle_for_thrust(const vehicle::Vehicle& vehicle, double thrust_n, double ambient_pressure_pa) {
+    double low = 0.0, high = 1.0;
+    bool any = false;
+    for (const auto& e : vehicle.stages().front().engines) {
+        if (!e.producing_thrust()) continue;
+        const auto& cfg = e.performance->config();
+        low = any ? std::max(low, cfg.throttle_min) : cfg.throttle_min;
+        high = any ? std::min(high, cfg.throttle_max) : cfg.throttle_max;
+        any = true;
     }
-    return schedule.back().second;
+    if (!any || !(high > low)) return high;
+    // thrust is linear in the throttle (EnginePerformance::thrust_n): interpolate between the range's ends
+    double thrust_low_n = 0.0, thrust_high_n = 0.0;
+    for (const auto& e : vehicle.stages().front().engines) {
+        if (!e.producing_thrust()) continue;
+        thrust_low_n += e.spool * e.performance->thrust_n(low, ambient_pressure_pa);
+        thrust_high_n += e.spool * e.performance->thrust_n(high, ambient_pressure_pa);
+    }
+    if (!(thrust_high_n > thrust_low_n)) return high;
+    return std::clamp(low + (high - low) * (thrust_n - thrust_low_n) / (thrust_high_n - thrust_low_n), low, high);
+}
+
+double ascent_throttle_cap(const PitchProgram& program) {
+    return program.max_ascent_throttle > 0.0 ? std::min(program.max_ascent_throttle, 1.0) : 1.0;
+}
+
+double AscentGuidance::booster_throttle(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                        time::Epoch epoch) const {
+    return std::min(ascent_throttle_cap(program_), max_q_throttle(body, env, epoch));
+}
+
+double AscentGuidance::max_q_throttle(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                                      time::Epoch epoch) const {
+    const double limit_pa = program_.max_dynamic_pressure_pa;
+    if (!(limit_pa > 0.0)) return 1.0;
+    const auto& v = body.vehicle();
+    const auto& s = body.state();
+    const auto& air = body.air_data();
+    const Vec3& air_velocity_body = air.air_velocity_body_mps;
+    const double speed = norm(air_velocity_body);
+    const double density = air.air.density_kg_m3;
+    if (!(speed > min_limited_air_speed_mps) || !(density > 0.0)) return 1.0;
+    const Vec3 along_gcrf = s.attitude.rotate(air_velocity_body / speed);
+    // the air's density change along the path: d rho / dh (US76, scaled as the truth air) times the climb rate
+    const auto frame = local_frame(s.position_gcrf_m, env.earth_orientation, epoch);
+    const double height_m =
+        frames::fixed_to_geodetic(transpose(env.earth_orientation.fixed_to_gcrf(epoch).rotation) * s.position_gcrf_m).height_m;
+    const double density_gradient = env.air_density_factor *
+                                    (env.atmosphere.at(height_m + density_gradient_step_m).density_kg_m3 -
+                                     env.atmosphere.at(height_m - density_gradient_step_m).density_kg_m3) /
+                                    (2.0 * density_gradient_step_m);
+    const double density_rate = density_gradient * speed * dot(along_gcrf, frame.up);
+    // along the path besides the thrust: the accelerometer (last tick) less the engines' thrust now, gravity, and the
+    // centrifugal term of the Earth-fixed air (the Coriolis term is normal to the air velocity)
+    const double ambient_pa = env.atmosphere.at(height_m).pressure_pa;
+    double thrust_n = 0.0;
+    for (const auto& e : v.stages().front().engines) {
+        if (e.producing_thrust()) thrust_n += e.spool * e.performance->thrust_n(e.throttle, ambient_pa);
+    }
+    const double mass_kg = v.mass_properties().mass_kg;
+    const double thrust_along = air_velocity_body.x / speed;  // the thrust axis (body x) against the air velocity
+    const Vec3 omega = vehicle::earth_rotation_vector(env.earth_orientation.fixed_to_gcrf(epoch));
+    const double other_mps2 = dot(body.specific_force_body_mps2(), air_velocity_body / speed) -
+                              thrust_n * thrust_along / mass_kg +
+                              dot(env.gravity.acceleration_mps2(s.position_gcrf_m, epoch), along_gcrf) -
+                              dot(cross(omega, cross(omega, s.position_gcrf_m)), along_gcrf);
+    const double acceleration =
+        max_q_thrust_acceleration_mps2(limit_pa, density, density_rate, speed, other_mps2);
+    if (!std::isfinite(acceleration) || !(thrust_along > 0.0)) return 1.0;
+    return booster_throttle_for_thrust(v, mass_kg * acceleration / thrust_along, ambient_pa);
 }
 
 GuidanceCommand AscentGuidance::open_loop(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,

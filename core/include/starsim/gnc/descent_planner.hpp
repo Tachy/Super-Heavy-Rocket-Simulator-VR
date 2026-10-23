@@ -14,7 +14,9 @@ namespace starsim::gnc {
 struct ScvxSettings {
     int nodes_per_phase = 10;  // 28 nodes over the three phases (re-plans within the 1 s cycle)
     int max_iterations = 10;         // re-plan from a warm start (time budget)
-    int fresh_max_iterations = 30;   // fresh plan from the straight-line guess (the simulation waits for it)
+    // Fresh plan from the straight-line guess (the simulation waits for it). [E] 60 (was 30): a Falcon 9 drone-ship
+    // ignition 1.3 km short at 3.8 km (ASDS MECO campaign seed 107) converges in 42; at 30 the deck was refused.
+    int fresh_max_iterations = 60;
     int substeps = 4;                         // RK4 steps per interval in the discretisation
     double step_tolerance = 1e-2;             // largest scaled node step for convergence
     double virtual_control_tolerance = 1e-4;  // L1, scaled

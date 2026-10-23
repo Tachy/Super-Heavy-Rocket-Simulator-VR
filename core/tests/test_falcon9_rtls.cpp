@@ -263,7 +263,6 @@ TEST_CASE("The Falcon 9 RTLS mission loads", "[config][falcon9]") {
     CHECK(m.landing_zone_id == "ccsfs_lz40");
     CHECK(m.payload_kg == 12500.0);
     CHECK_FALSE(m.fairing);
-    CHECK(m.booster_throttle.size() == 4);
     CHECK(std::abs(m.kick_angle_rad / constants::deg_to_rad - 12.0) < 1e-12);
 }
 

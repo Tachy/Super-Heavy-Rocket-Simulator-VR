@@ -20,6 +20,12 @@ diameter_m = 3.66                        # [S:wiki_f9]
 dry_mass_kg = 25400.0                    # [S:wiki_f9] 25.6 t incl. the 0.2 t of RCS nitrogen below [E]
 dry_cg_station_m = 12.0                  # [E]
 jettison_after_separation_kg = 0.0
+# [D] the ascent guidance throttles the stack to hold q at or below this: the peak dynamic pressure of CRS-35 (the
+# webcast's speed and altitude with US76 air; q flattens at ~29.5 kPa in the throttle bucket, T+52-61 s, and peaks
+# after it):
+#   python tools/telemetry/peak_dynamic_pressure.py tests/validation/telemetry/f9_crs35_2026-10-13.csv
+#   -> peak q 31559 Pa at T+70.0 s (h 11.16 km, v 421.0 m/s, Mach 1.43)
+max_dynamic_pressure_pa = 31559.0
 
 # Cold staging (FlightSession::stage, ascent trajectory and staging Task 1). Event times from our webcast telemetry
 # (tests/validation/telemetry, 0.5 s samples): MECO = the engine icon going dark, separation = the speed dials splitting

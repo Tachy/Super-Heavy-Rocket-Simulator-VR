@@ -18,4 +18,3 @@ northerly = true
 
 [pitch_program]
 kick_deg = 14.0
-booster_throttle = [[60.0, 0.85], [64.0, 0.76], [76.0, 0.76], [82.0, 0.83], [112.0, 0.83], [126.0, 0.76]]

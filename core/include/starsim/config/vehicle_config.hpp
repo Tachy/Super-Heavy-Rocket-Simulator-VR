@@ -334,6 +334,12 @@ struct StageConfig {
     double payload_mass_kg = 0.0;
     double fairing_mass_kg = 0.0;
     double jettison_after_separation_kg = 0.0;
+    // A first stage's structural dynamic-pressure limit: the ascent guidance throttles the stack to hold q at or below
+    // it (gnc::PitchProgram::max_dynamic_pressure_pa). 0: no limit.
+    double max_dynamic_pressure_pa = 0.0;
+    // A first stage's operational ascent throttle (gnc::PitchProgram::max_ascent_throttle): the ascent never commands
+    // more; the engines' rating stays their capability for every other burn. 1: full thrust.
+    double max_ascent_throttle = 1.0;
     double reserve_propellant_kg = 0.0;  // MECO without return guidance
     // Returning booster: propellant to have left at landing-burn ignition; the ascent autopilot plans MECO from it
     // and the return's needs (0: MECO at reserve_propellant_kg).

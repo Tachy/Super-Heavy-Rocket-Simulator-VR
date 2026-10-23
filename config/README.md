@@ -118,6 +118,11 @@ flow separation (vacuum engines).
   divert, final set), `landing_phase_throttles` (3 design throttles that time the ignition),
   `landing_switch_sink_mps` (2 `[min, max]` sink windows of the engine switches) and `flip_engine_groups` (the flip
   after separation at minimum throttle; left out: the final landing set; `[]`: engines off, the RCS turns the stage).
+- `[[stage]] max_dynamic_pressure_pa` (a first stage; default 0 = no limit): the ascent guidance throttles the stack to
+  hold the dynamic pressure at or below it (max-Q limit; [D] from the flights' peak q,
+  `tools/telemetry/peak_dynamic_pressure.py`). `max_ascent_throttle` (a first stage, (0, 1], default 1): the operational
+  throttle the ascent never exceeds ([D] from the propellant gauge's flow, `tools/telemetry/mass_estimate.py`); the
+  engines' rating stays their capability for every other burn. The q limit acts below it.
 - `[stage.staging]` (a lower stage; left out: `stage()` separates at once): the staging sequence to the stage above.
   `kind = "cold"`: MECO cuts every engine (the tail-off acts on the joined stack), `separation_delay_s` later the
   separation with `separation_dv_mps` (pushers: relative speed of the parts), `upper_ignition_delay_s` after it the
@@ -229,7 +234,7 @@ flow separation (vacuum engines).
   inclination, RAAN, argument of latitude, `rcs_propellant_kg`; `[deorbit]` as the ship's.
 - `falcon9_rtls.toml` (`config::load_ascent_mission`): `[mission]` vehicle, launch `site`, optional `landing_zone` (a
   site of kind `landing_zone`: the first stage returns to it), `heading_deg`, `payload_t`, `fairing`; `[target]` orbit;
-  `[pitch_program]` `kick_deg` and `booster_throttle` (`[t_s, fraction]` pairs, increasing times).
+  `[pitch_program]` `kick_deg` (the first stage's throttle comes from its `max_ascent_throttle` and `max_dynamic_pressure_pa`).
 - `falcon9_crew_dragon.toml`: the same keys with a `[payload]` table instead of `payload_t` (exclusive): `vehicle` (a
   vehicle of `vehicles/`, stacked on the launcher by `config::stack_payload`), `separation_delay_s` (after the upper
   stage's cutoff), `separation_dv_mps` (spring push), `nose_cone_open_s` (after the separation; < 0: stays closed).

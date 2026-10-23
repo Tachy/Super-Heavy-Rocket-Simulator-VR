@@ -24,8 +24,8 @@ mode = "pad"                      # "pad" | "phasing_orbit"
 [launch_window]
 earliest_utc = "2026-10-20T00:00:00"
 search_days = 12.0                # [E] r3: the crossings close the phasing on few days
-insertion_s = 445.5               # [D] r5: liftoff -> orbit insertion of the flown tanker ascent
-insertion_arc_deg = 12.20         # [D] r5: inertial in-plane arc pad -> insertion point, flown
+insertion_s = 436.1               # [D] ascent Task 2 (r5: 445.5): liftoff -> orbit insertion of the flown tanker ascent
+insertion_arc_deg = 11.93         # [D] ascent Task 2 (r5: 12.20): inertial in-plane arc pad -> insertion point, flown
 
 [phasing]
 mission_limit_h = 48.0            # [E] uncrewed (the crew's 28 h opened the first window after 177 h, r3)

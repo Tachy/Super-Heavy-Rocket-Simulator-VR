@@ -64,14 +64,14 @@ TEST_CASE("lunar_mission_legs: the LLO mission's legs in flight order", "[refuel
 TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelling][campaign][config]") {
     const auto r = config::load_refuelling_reference(config_dir);
     CHECK(r.depot.mission == "depot_launch");
-    CHECK(r.depot.initial_propellant_kg == Catch::Approx(55.5e3));
+    CHECK(r.depot.initial_propellant_kg == Catch::Approx(69.6e3));  // max-Q re-measured
     CHECK(r.tanker.mission == "tanker_flight");
-    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(67.7e3));  // staging re-measured
+    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(63.6e3));  // max-Q re-measured
     CHECK(r.tanker.dry_mass_sensitivity == Catch::Approx(0.99));
     CHECK(r.tanker.campaign_offset_below_kg == Catch::Approx(-0.5e3));  // flown campaign (staging re-calibration)
     CHECK(r.tanker.campaign_offset_above_kg == Catch::Approx(1.6e3));
     CHECK(r.hls.mission == "hls_refuel");
-    CHECK(r.hls.main_at_docking_kg == Catch::Approx(193.6e3));  // f2 re-measured
+    CHECK(r.hls.main_at_docking_kg == Catch::Approx(182.4e3));  // max-Q re-measured
     // the reference tanker is the configured one
     const auto tanker = config::top_stage_config(config::load_vehicle(config_dir, "starship_tanker"));
     CHECK(tanker.stages.back().dry_mass_kg == Catch::Approx(r.tanker.dry_mass_kg));
@@ -560,9 +560,10 @@ TEST_CASE("Reference campaign: the flown windows, a plausible tanker count", "[r
     // the answer (f2: 14 tankers / 51.7 d after the re-measured delivery, 66.3 t - the raise reaches its mean orbit;
     // 13 / 49.7 d with the flown campaign's per-class calibration, +1.7 t below / +2.25 t above the depot; 14 / 54.7 d
     // with the depot's orbit followed: drag decay and the transfers' pushes move its phase and so the windows; 13 /
-    // 52.5 d with the flown decay factor 1.076)
-    CHECK(r.result.tanker_flights == 13);
-    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(52.5).margin(0.05));
+    // 52.5 d with the flown decay factor 1.076; 14 / 52.3 d after the ascent Task 2 re-measure: 63.6 t per tanker
+    // instead of 67.7 t, the depot's own 69.6 t instead of 55.5 t)
+    CHECK(r.result.tanker_flights == 14);
+    CHECK(r.result.duration_s / 86400.0 == Catch::Approx(52.34).margin(0.05));
 }
 
 TEST_CASE("Campaign live start: the flown depot's orbit, fill and last flight", "[refuelling][campaign]") {

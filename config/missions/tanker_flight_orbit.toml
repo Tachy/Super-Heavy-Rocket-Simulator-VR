@@ -24,8 +24,8 @@ propellant_t = 99.2               # [D] r5: main tanks after the flown tanker as
 [launch_window]
 earliest_utc = "2026-10-20T00:00:00"   # the start epoch of the phasing-orbit start
 search_days = 12.0
-insertion_s = 445.5               # [D] r5: the flown tanker ascent
-insertion_arc_deg = 12.20         # [D] r5
+insertion_s = 436.1               # [D] ascent Task 2 (r5: 445.5): the flown tanker ascent
+insertion_arc_deg = 11.93         # [D] ascent Task 2 (r5: 12.20)
 
 [phasing]
 mission_limit_h = 48.0            # [E] uncrewed

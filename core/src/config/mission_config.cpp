@@ -354,18 +354,6 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
     m.inclination_rad = doc.number(*target, "inclination_deg") * deg;
     m.northerly = (*target)["northerly"].value_or(true);
     m.kick_angle_rad = doc.positive(*program, "kick_deg") * deg;
-    if (const auto* points = (*program)["booster_throttle"].as_array()) {
-        for (const auto& node : *points) {
-            const auto* pair = node.as_array();
-            const auto t = pair && pair->size() == 2 ? (*pair)[0].value<double>() : std::nullopt;
-            const auto f = pair && pair->size() == 2 ? (*pair)[1].value<double>() : std::nullopt;
-            if (!t || !f || *f <= 0.0 || *f > 1.0) doc.fail("booster_throttle entries must be [t_s, fraction in (0, 1]]");
-            if (!m.booster_throttle.empty() && *t <= m.booster_throttle.back().first) {
-                doc.fail("booster_throttle times must increase");
-            }
-            m.booster_throttle.emplace_back(*t, *f);
-        }
-    }
     return m;
 }
 

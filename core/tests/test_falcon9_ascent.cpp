@@ -130,13 +130,11 @@ Ascent fly(const gnc::PitchProgram& program, double payload = payload_kg, double
     return a;
 }
 
-// Falcon 9 ascent profile. Throttle [D] as config/missions/falcon9_rtls.toml (CRS-35 G-force dial against the simulated
-// stack: full thrust, a ~72 % max-Q bucket T+50-61 s, then ~95 %; STARSIM_DEBUG_ASCENT_G=1 prints the simulated G).
-// Pitch kick [E] (sweep "[.tuning]").
+// Falcon 9 ascent profile: the throttle from the first stage's max-Q limit ([stage] max_dynamic_pressure_pa;
+// STARSIM_DEBUG_ASCENT_G=1 prints the simulated G against the CRS-35 G-force dial). Pitch kick [E] (sweep "[.tuning]").
 gnc::PitchProgram falcon9_program() {
     gnc::PitchProgram program;
     program.kick_angle_rad = 12.0 * deg;
-    program.booster_throttle = {{49.0, 1.0}, {51.0, 0.72}, {60.0, 0.72}, {62.0, 0.95}};
     return program;
 }
 

@@ -141,6 +141,16 @@ def main():
         share = per * a.isp_sl / isp / a.engine_rating_tf if a.engine_rating_tf and lit else float("nan")
         print(f"{t:5.0f} {h / 1e3:6.1f} {v:7.1f}  {100 * p:6.1f}  {m / 1e3:8.0f}  {thrust_flow / 1e6:9.1f}"
               f"  {lit if lit else '-':>7}  {per:14.0f}  {share:11.2f}  {100 * (thrust_motion / thrust_flow - 1):6.1f}")
+    # Mean flow over the whole window: one least-squares line through the gauge (the per-sample slopes are noisy).
+    half = 0.5 * (a.t_to - a.t_from)
+    dp_mean, _ = slope(pt, pv, a.t_from + half, half)
+    lit_all = sorted(n for tt, n in eng if a.t_from <= tt <= a.t_to)
+    if dp_mean is not None and lit_all and a.engine_rating_tf:
+        flow = -C * dp_mean
+        engines = lit_all[len(lit_all) // 2]
+        rated_flow = engines * a.engine_rating_tf * 9806.65 / (a.isp_sl * G0)  # sea-level rating / sea-level Isp
+        print(f"mean flow T+{a.t_from:.0f}..{a.t_to:.0f} s: {flow / 1e3:.2f} t/s on {engines:.0f} engines = "
+              f"{flow / rated_flow:.3f} of the rated flow ({rated_flow / 1e3:.2f} t/s)")
     p0 = next((v for tt, v in prop if tt >= 0.0), None)
     if p0 is not None:
         print(f"liftoff: gauge {100 * p0:.1f} % -> propellant {C * p0 / 1e3:.0f} t, total mass {(M + C * p0) / 1e3:.0f} t")

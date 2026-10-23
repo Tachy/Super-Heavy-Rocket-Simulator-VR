@@ -16,11 +16,12 @@ fairing = true
 
 [drone_ship]
 id = "asds_atlantic"
-latitude_deg = 32.8819          # [D] nominal impact point of this mission's first stage, predicted 10 s after the separation
-                                # (MECO T+152 s, separation T+156.6 s) with drag and the finite entry burn, no steering
-                                # (test "... nominal impact point ..."); before the staging sequence 32.9272 / -76.0990:
-                                # the tail-off no longer pushes the separated stage alone (~7 km shorter)
-longitude_deg = -76.1490
+latitude_deg = 33.2139          # [D] nominal impact point of this mission's first stage, predicted 10 s after the separation
+                                # (separation T+150.7 s, 75.1 km, 8245 km/h, 30.6 deg) with drag and the finite entry burn,
+                                # no steering (test "... nominal impact point ..."). History: 32.9272 / -76.0990 before the
+                                # staging sequence, 32.8819 / -76.1490 with it (separation T+156.6 s); now the max-Q limit
+                                # replaces the CRS-35 throttle schedule (its ~95 % after the bucket): ~42 km further
+longitude_deg = -75.7839
 heading_deg = 45.0              # [E] long axis along the ground track
 sea_height_m = -35.0            # [E] geoid off the Carolinas (EGM2008 ~-35 m)
 
@@ -33,5 +34,3 @@ northerly = true
 [pitch_program]
 kick_deg = 13.0                 # [D] MECO flight path 24.7 deg (T+152 s, 64.7 km, 8373 km/h; Starlink 15-25: T+149 s,
                                 # 60 km, ~8000 km/h, ~25 deg from the altitude rate)
-# [D] the max-Q bucket of both webcasts (see falcon9_rtls.toml): the same schedule.
-booster_throttle = [[49.0, 1.0], [51.0, 0.72], [60.0, 0.72], [62.0, 0.95]]

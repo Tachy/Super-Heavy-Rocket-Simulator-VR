@@ -319,7 +319,8 @@ TEST_CASE("A Starship ascent records liftoff, Max Q, MECO, separation and SECO",
     // Measured 2026-10-22 (flow along the throttle schedule, the cutoff propellant of the moment): +6.97 s at T+30 s,
     // +6.1..+8.3 s over the booster phase (+8.2 s in the max-Q bucket) - late by the return's cutoff propellant, which
     // grows with the downrange speed; converging: +1.46 s 5.7 s before. (At the flow now alone: +0.87 s at T+30 s by
-    // cancellation, up to 12 s off in the bucket.)
+    // cancellation, up to 12 s off in the bucket.) Ascent Task 2 (operational throttle, max-Q limiter run forward):
+    // +4.99 s at T+30 s, at most 7.2 s within 120 s.
     CHECK(std::abs(*meco_at_30 - meco->epoch) <= 8.0);
     CHECK(std::abs(*separation_at_30 - separation->epoch) <= 8.0);  // hot staging: the ship's start-up after the MECO
     CHECK(meco_prediction.max_error_within_s(meco->epoch, 1e9) <= 9.0);
@@ -681,7 +682,8 @@ TEST_CASE("Falcon 9 records MECO at the command, once, without the tail-off's cu
     }
     REQUIRE(meco_at_30);
     // measured 2026-10-22: +7.35 s (the return's cutoff propellant grows; +9.8 s at most, +9 s in the bucket); +8.44 s
-    // with the staging sequence (the 54.5 s MECO -> boostback of the RCS flip and boostback_loss_fraction 0.19)
+    // with the staging sequence (the 54.5 s MECO -> boostback of the RCS flip and boostback_loss_fraction 0.19); +7.88 s
+    // with the max-Q limit (ascent Task 2)
     CHECK(std::abs(*meco_at_30 - meco->epoch) <= 9.0);
     const uint32_t booster = meco->body_serial;
     size_t mecos = 0;

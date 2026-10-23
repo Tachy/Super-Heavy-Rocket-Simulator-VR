@@ -267,9 +267,11 @@ TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned pr
                 boostback_start_s, boostback_end_s, boostback_start_kg / 1e3, apogee_km, apogee_s, ignition_s,
                 ignition_propellant_kg / 1e3, planned_kg / 1e3);
     CHECK(std::abs(boostback_start_s - 152.0) < 5.0);
-    CHECK(std::abs(apogee_s - 240.0) < 15.0);
+    // ascent Task 2 (operational throttle 0.88 + q limit instead of the speed-fitted schedule; the stack is faster than
+    // flight 14, MECO earlier): apogee T+221 s, ignition T+383 s (bounds 15 -> 25 s)
+    CHECK(std::abs(apogee_s - 240.0) < 25.0);
     CHECK(std::abs(apogee_km - 98.9) < 10.0);
-    CHECK(std::abs(ignition_s - 398.0) < 15.0);
+    CHECK(std::abs(ignition_s - 398.0) < 25.0);
     REQUIRE(ignition_propellant_kg >= 0.0);
     CHECK(ignition_propellant_kg <= faa_landing_propellant_kg);
     REQUIRE(planned_kg > 0.0);

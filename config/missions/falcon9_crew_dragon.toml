@@ -25,4 +25,3 @@ northerly = true
 
 [pitch_program]
 kick_deg = 12.0                         # [E] as falcon9_rtls (the same 12.5 t on top)
-booster_throttle = [[49.0, 1.0], [51.0, 0.72], [60.0, 0.72], [62.0, 0.95]]  # [D] CRS-35 bucket (see falcon9_rtls)

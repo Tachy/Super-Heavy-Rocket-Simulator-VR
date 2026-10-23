@@ -318,6 +318,10 @@ StageConfig load_stage(const Document& doc, const toml::table& t) {
     s.payload_mass_kg = doc.number_or(t, "payload_mass_kg", 0.0);
     s.fairing_mass_kg = doc.number_or(t, "fairing_mass_kg", 0.0);
     s.jettison_after_separation_kg = doc.number_or(t, "jettison_after_separation_kg", 0.0);
+    s.max_dynamic_pressure_pa = doc.number_or(t, "max_dynamic_pressure_pa", 0.0);
+    if (s.max_dynamic_pressure_pa < 0.0) doc.fail("max_dynamic_pressure_pa must be >= 0 (0: no limit)");
+    s.max_ascent_throttle = doc.number_or(t, "max_ascent_throttle", 1.0);
+    if (!(s.max_ascent_throttle > 0.0) || s.max_ascent_throttle > 1.0) doc.fail("max_ascent_throttle must be in (0, 1]");
     s.radiation_pressure_coefficient = doc.number_or(t, "radiation_pressure_coefficient", 1.3);
     s.nose_cone = t["nose_cone"].value_or(false);
 

@@ -5,6 +5,9 @@
 #include <optional>
 #include <vector>
 
+#include "starsim/frames/geodetic.hpp"
+#include "starsim/gnc/ascent_guidance.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/sim/flight_session.hpp"
 #include "starsim/sim/landing_outcome.hpp"
 #include "starsim/sim/mission_event_observer.hpp"
@@ -83,15 +86,26 @@ private:
     std::vector<MissionEvent> events_;
 };
 
-// [E] MECO forecast: the booster's flow integrated along the throttle schedule in steps of this, at most this far ahead
-constexpr double meco_forecast_step_s = 1.0;
+// [E] MECO forecast: the booster's ascent run forward in steps of this (the max-Q limiter's law settles within its 1 s
+// time constant: 0.5 s keeps the explicit steps stable), at most this far ahead
+constexpr double meco_forecast_step_s = 0.5;
 constexpr double meco_forecast_horizon_s = 1000.0;
+// [E] the forecast's air speed at least this (the gravity-turn rate divides by it; on the pad the stack is at rest)
+constexpr double meco_forecast_min_speed_mps = 10.0;
+// [E] half step of the forecast's central difference of the air density with height
+constexpr double meco_forecast_density_step_m = 50.0;
 
-// Seconds until the booster has burned `above_kg`: its actual flow now, scaled along the open loop's throttle schedule
-// (the engines running now at the scheduled throttle, within their throttle range). None without flow.
-std::optional<double> booster_burn_time_s(const FlightSession& s, const vehicle::Vehicle& vehicle, double above_kg) {
+// Seconds until the booster has burned `above_kg`: its ascent run forward under the max-Q limiter
+// (gnc::max_q_thrust_acceleration_mps2, the same law as the guidance) on a point mass in the plane of its air velocity
+// - height, air speed, flight-path angle and mass from the state now; the open loop's thrust direction (vertical rise,
+// the pitch kick's linear tilt, then the gravity turn along the air velocity); the vehicle's own drag table (power on,
+// zero angle of attack), US76 air, central gravity. The limiter's throttle below the operational cap, within the
+// engines' range; the flow is the actual flow now (throttle, spool, dispersion) scaled with the engines' flow at that
+// throttle. Left out: the Earth rotation's terms (centrifugal ~0.03 m/s^2), lift. None without flow.
+std::optional<double> booster_burn_time_s(const FlightSession& s, const vehicle::FlightBody& body, double above_kg) {
     const auto* guidance = s.ascent_guidance();
     if (!guidance) return std::nullopt;
+    const auto& vehicle = body.vehicle();
     double flow_now_kgps = 0.0;
     const auto flows_kgps = vehicle.tank_mass_flows_kgps();  // the engines' actual flow (throttle, spool, dispersion)
     for (const double f : flows_kgps.front()) flow_now_kgps += f;
@@ -108,20 +122,77 @@ std::optional<double> booster_burn_time_s(const FlightSession& s, const vehicle:
     };
     const double reference_kgps = engine_flow_kgps(std::nullopt);
     if (!(flow_now_kgps > 0.0) || !(reference_kgps > 0.0)) return std::nullopt;
-    const double since_liftoff_s = s.epoch() - guidance->liftoff_epoch();
-    double left_kg = std::max(above_kg, 0.0), t_s = 0.0;
-    std::optional<double> last_throttle;  // the schedule holds its value over long spans: one engine sum per value
-    double flow_kgps = 0.0;
-    while (t_s < meco_forecast_horizon_s) {
-        const double throttle = guidance->booster_throttle(since_liftoff_s + t_s + 0.5 * meco_forecast_step_s);
-        if (!last_throttle || throttle != *last_throttle) {
-            last_throttle = throttle;
-            flow_kgps = flow_now_kgps * engine_flow_kgps(throttle) / reference_kgps;
+    const auto thrust_n = [&](double throttle, double ambient_pa) {  // the engines producing thrust now, spool included
+        double sum = 0.0;
+        for (const auto& e : engines) {
+            if (e.producing_thrust()) sum += e.spool * e.performance->thrust_n(throttle, ambient_pa);
         }
+        return sum;
+    };
+
+    // the point mass from the state now: height, air speed, its flight-path angle, mass, radius
+    const auto& env = s.environment();
+    const auto& st = body.state();
+    const auto earth = env.earth_orientation.fixed_to_gcrf(s.epoch());
+    const math::Vec3 relative = st.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(earth), st.position_gcrf_m);
+    const auto geodetic = frames::fixed_to_geodetic(transpose(earth.rotation) * st.position_gcrf_m);
+    const math::Vec3 up = earth.rotation * math::Vec3{std::cos(geodetic.latitude_rad) * std::cos(geodetic.longitude_rad),
+                                                      std::cos(geodetic.latitude_rad) * std::sin(geodetic.longitude_rad),
+                                                      std::sin(geodetic.latitude_rad)};
+    const auto& program = guidance->program();
+    double h = geodetic.height_m, r = norm(st.position_gcrf_m), m = vehicle.mass_properties().mass_kg;
+    const double speed_now = norm(relative);
+    double v = std::max(speed_now, meco_forecast_min_speed_mps);
+    // rising off the pad: vertical (the direction of a slow air velocity means little)
+    double gamma = speed_now < meco_forecast_min_speed_mps ? 0.5 * constants::pi
+                                                           : std::asin(std::clamp(dot(relative, up) / speed_now, -1.0, 1.0));
+    // the open loop's pitch kick (forecast time; none: still rising vertically)
+    std::optional<double> kick_start_s;
+    if (const auto kick = guidance->kick_start_epoch()) kick_start_s = *kick - s.epoch();
+
+    const double dt = meco_forecast_step_s;
+    double left_kg = std::max(above_kg, 0.0), t_s = 0.0;
+    while (t_s < meco_forecast_horizon_s) {
+        // thrust elevation above the local horizontal: vertical, tilting through the kick, then along the air velocity
+        if (!kick_start_s && v * std::sin(gamma) >= program.vertical_rise_speed_mps) kick_start_s = t_s;
+        const double kick_progress = kick_start_s ? (t_s - *kick_start_s) / program.kick_duration_s : 0.0;
+        const double thrust_elevation =
+            kick_progress < 1.0 ? 0.5 * constants::pi - program.kick_angle_rad * std::max(kick_progress, 0.0) : gamma;
+        const double thrust_along = std::cos(thrust_elevation - gamma);
+        const double thrust_across = std::sin(thrust_elevation - gamma);
+        const auto air = env.atmosphere.at(h);
+        const double density = air.density_kg_m3 * env.air_density_factor;
+        const double drag_n = density > 0.0 ? -vehicle.aero()
+                                                   .compute({v, 0.0, 0.0}, density, air.speed_of_sound_mps, true,
+                                                            air.mean_free_path_m)
+                                                   .force_body_n.x
+                                            : 0.0;
+        const double g = s.gm_earth_m3ps2() / (r * r);
+        const double density_rate = env.air_density_factor *
+                                    (env.atmosphere.at(h + meco_forecast_density_step_m).density_kg_m3 -
+                                     env.atmosphere.at(h - meco_forecast_density_step_m).density_kg_m3) /
+                                    (2.0 * meco_forecast_density_step_m) * v * std::sin(gamma);
+        const double other_mps2 = -drag_n / m - g * std::sin(gamma);
+        const double acceleration = gnc::max_q_thrust_acceleration_mps2(program.max_dynamic_pressure_pa, density,
+                                                                        density_rate, v, other_mps2);
+        const double throttle = std::min(gnc::ascent_throttle_cap(program),
+                                         std::isfinite(acceleration) && thrust_along > 0.0
+                                             ? gnc::booster_throttle_for_thrust(vehicle, m * acceleration / thrust_along,
+                                                                                air.pressure_pa)
+                                             : 1.0);
+        const double flow_kgps = flow_now_kgps * engine_flow_kgps(throttle) / reference_kgps;
         if (!(flow_kgps > 0.0)) return std::nullopt;
-        if (flow_kgps * meco_forecast_step_s >= left_kg) return t_s + left_kg / flow_kgps;
-        left_kg -= flow_kgps * meco_forecast_step_s;
-        t_s += meco_forecast_step_s;
+        if (flow_kgps * dt >= left_kg) return t_s + left_kg / flow_kgps;
+        const double thrust_mps2 = thrust_n(throttle, air.pressure_pa) / m;
+        const double speed_rate = thrust_mps2 * thrust_along + other_mps2;
+        const double gamma_rate = (thrust_mps2 * thrust_across - g * std::cos(gamma)) / v + v / r * std::cos(gamma);
+        h += v * std::sin(gamma) * dt;
+        r += v * std::sin(gamma) * dt;
+        v = std::max(v + speed_rate * dt, meco_forecast_min_speed_mps);
+        gamma += gamma_rate * dt;
+        m -= flow_kgps * dt;
+        left_kg -= flow_kgps * dt;
+        t_s += dt;
     }
     return std::nullopt;
 }
@@ -143,7 +214,7 @@ void add_upper_ignition(const FlightSession& s, Collector& c, size_t index, time
 }
 
 // Ascent: the booster's cutoff by the autopilot's own criterion run forward (the propellant above the cutoff
-// propellant, burned along the throttle schedule), the staging sequence's separation and upper-stage ignition from it
+// propellant, burned under the max-Q limiter), the staging sequence's separation and upper-stage ignition from it
 // (StagingSequence), the upper stage's cutoff by the closed loop.
 void add_ascent(const FlightSession& s, Collector& c) {
     const size_t i = s.controlled_index();
@@ -155,7 +226,7 @@ void add_ascent(const FlightSession& s, Collector& c) {
         const auto& booster = vehicle.stages().front();
         const double propellant_kg =
             booster.propellant_kg(config::TankContents::Oxidizer) + booster.propellant_kg(config::TankContents::Fuel);
-        const auto burn_s = booster_burn_time_s(s, vehicle, propellant_kg - *cutoff_kg);
+        const auto burn_s = booster_burn_time_s(s, s.body(i), propellant_kg - *cutoff_kg);
         if (!burn_s) return;
         const auto meco = s.epoch() + *burn_s;
         c.add_for(i, MissionEventKind::Meco, meco);

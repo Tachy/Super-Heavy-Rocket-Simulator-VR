@@ -27,10 +27,35 @@ struct PitchProgram {
     // over the first 90 s (tuning test "[.tuning]"); later the faster V3 turns over more slowly.
     double kick_angle_rad = 10.0 * 3.14159265358979 / 180.0;
     double kick_duration_s = 12.0;
-    // First-stage throttle over mission time {t_s, fraction}, linearly interpolated, held beyond the ends (empty: full
-    // thrust). A guidance choice, not vehicle data - e.g. a max-Q bucket; the upper stage always flies full (PEG).
-    std::vector<std::pair<double, double>> booster_throttle;
+    // The first stage's dynamic-pressure limit ([stage] max_dynamic_pressure_pa of the vehicle's lowest stage, filled in
+    // by FlightSession::engage_ascent_autopilot when 0): the booster throttles to hold q at or below it (0: no limit,
+    // full thrust). The upper stage always flies full (PEG).
+    double max_dynamic_pressure_pa = 0.0;
+    // The booster's operational ascent throttle ([stage] max_ascent_throttle of the lowest stage, filled in like the
+    // q limit when 0): the open loop never commands more; the q limit acts below it. 0 or 1: full thrust.
+    double max_ascent_throttle = 0.0;
 };
+
+// The booster's ascent throttle cap of a program (max_ascent_throttle; 1 when unset).
+double ascent_throttle_cap(const PitchProgram& program);
+
+// [E] Time constant of the max-Q limiter: q is brought to the limit as dq/dt = (limit - q) / tau. 1 s: short against
+// q's own build-up near max-Q (q / (dq/dt) ~ 20-30 s), so the full thrust holds until ~95 % of the limit; long enough
+// that the commanded throttle changes by ~0.1-0.2 /s there, well inside the engines' throttle rate (Raptor 3 and
+// Merlin 1D: 0.5 /s [E]) - the rate-limited engines follow the command without the lag that would let q overshoot.
+inline constexpr double max_q_time_constant_s = 1.0;
+
+// Max-Q limiter law (feedback linearisation of q = rho v^2 / 2 along the path): the thrust acceleration along the air
+// velocity that makes dq/dt = rho v dv/dt + v^2/2 drho/dt equal (limit - q) / max_q_time_constant_s, with
+// dv/dt = thrust acceleration + `other_acceleration_mps2` (drag, gravity and the frame's terms along the path).
+// +infinity where q cannot be limited by thrust (no limit, no air, no speed).
+double max_q_thrust_acceleration_mps2(double limit_pa, double density_kg_m3, double density_rate_kgpm3ps,
+                                      double air_speed_mps, double other_acceleration_mps2);
+
+// The throttle at which the lowest stage's engines producing thrust (spool included) deliver `thrust_n` at
+// `ambient_pressure_pa`, within their common throttle range (the highest minimum, the lowest maximum). Their maximum
+// for no engine.
+double booster_throttle_for_thrust(const vehicle::Vehicle& vehicle, double thrust_n, double ambient_pressure_pa);
 
 enum class AscentPhase { Vertical, PitchKick, GravityTurn, ClosedLoop, Cutoff };
 
@@ -41,7 +66,7 @@ struct GuidanceCommand {
     AscentPhase phase = AscentPhase::Vertical;
     double time_to_go_s = 0.0;         // closed loop only
     bool cutoff = false;
-    double throttle = 1.0;             // open loop: PitchProgram::booster_throttle; closed loop: full
+    double throttle = 1.0;             // open loop: the max-Q limiter (booster_throttle); closed loop: full
 };
 
 // Inertial launch azimuth (clockwise from north) for a target inclination from a given latitude,
@@ -75,12 +100,19 @@ public:
     // The upper stage's cutoff as the closed loop predicts it (onboard prediction for the mission timeline): the epoch
     // of its last update plus PEG's time to go; none before the closed loop has run with thrust.
     const std::optional<time::Epoch>& cutoff_epoch() const { return cutoff_epoch_; }
-    // The booster's throttle the open loop commands `t_s` after liftoff (PitchProgram::booster_throttle; full without
-    // a schedule), and the liftoff it counts from (start()).
-    double booster_throttle(double t_s) const;
-    time::Epoch liftoff_epoch() const { return liftoff_; }
+    // The booster's throttle now: the operational cap (ascent_throttle_cap) while the dynamic pressure is below
+    // PitchProgram::max_dynamic_pressure_pa, throttled to hold it at the limit (max_q_thrust_acceleration_mps2 on the air
+    // data and accelerometer of the last tick; the engines' minimum respected).
+    double booster_throttle(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env,
+                            time::Epoch epoch) const;
+    const PitchProgram& program() const { return program_; }
+    // The open loop's pitch kick began here (none: still rising vertically, or not started).
+    std::optional<time::Epoch> kick_start_epoch() const {
+        return kick_start_s_ < 0.0 ? std::nullopt : std::optional<time::Epoch>(liftoff_ + kick_start_s_);
+    }
 
 private:
+    double max_q_throttle(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch) const;
     GuidanceCommand open_loop(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
     GuidanceCommand peg(const vehicle::FlightBody& body, const vehicle::FlightEnvironment& env, time::Epoch epoch);
 

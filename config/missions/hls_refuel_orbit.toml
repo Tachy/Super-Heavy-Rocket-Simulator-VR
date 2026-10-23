@@ -22,8 +22,8 @@ propellant_t = 208.3              # [D] r5: main tanks after the flown HLS ascen
 [launch_window]
 earliest_utc = "2026-10-31T00:00:00"   # the start epoch: 2 days before the lunar epoch
 search_days = 5.0
-insertion_s = 428.3               # [D] r5: the flown HLS ascent
-insertion_arc_deg = 11.68         # [D] r5
+insertion_s = 421.4               # [D] ascent Task 2 (r5: 428.3): the flown HLS ascent
+insertion_arc_deg = 11.37         # [D] ascent Task 2 (r5: 11.68)
 
 [phasing]
 mission_limit_h = 48.0            # [E] uncrewed

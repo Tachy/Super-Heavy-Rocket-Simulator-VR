@@ -85,7 +85,13 @@ const char* to_string(AutopilotState state) {
 }
 
 void FlightSession::engage_ascent_autopilot(const gnc::AscentTarget& target, const gnc::PitchProgram& program) {
-    guidance_ = std::make_unique<gnc::AscentGuidance>(target, program, gm_earth_);
+    auto limited = program;  // the first stage's max-Q limit and ascent throttle unless the program brings its own
+    if (!bodies_.empty()) {
+        const auto& first = bodies_[controlled_].body->vehicle().stages().front().config;
+        if (!(limited.max_dynamic_pressure_pa > 0.0)) limited.max_dynamic_pressure_pa = first.max_dynamic_pressure_pa;
+        if (!(limited.max_ascent_throttle > 0.0)) limited.max_ascent_throttle = first.max_ascent_throttle;
+    }
+    guidance_ = std::make_unique<gnc::AscentGuidance>(target, limited, gm_earth_);
     autopilot_ = {AutopilotState::PreLaunch, {}};
     if (!bodies_.empty() && !bodies_[controlled_].body->clamped()) {
         guidance_->start(*bodies_[controlled_].body, earth_, epoch_);

@@ -1,10 +1,16 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/flight_session.hpp"
@@ -123,7 +129,125 @@ OrbitResult fly_to_orbit(const gnc::AscentTarget& target, bool booster_engine_ou
     return r;
 }
 
+// A free ascent's booster phase (no return guidance: MECO at the configured reserve) under the max-Q limiter: the
+// stack's dynamic pressure and the guidance's throttle sampled every 0.1 s, the onboard MECO prediction sampled with
+// them, the flown MECO.
+struct LimitedBoosterPhase {
+    double limit_pa = 0.0;
+    double cap = 1.0;  // the first stage's operational ascent throttle
+    double max_q_pa = 0.0;
+    double min_throttle = 1.0;               // over the booster phase
+    double max_throttle = 0.0;
+    double min_throttle_below_90_pct = 1.0;  // while q < 0.9 * limit
+    std::vector<std::pair<time::Epoch, time::Epoch>> meco_predictions;  // {sampled at, predicted MECO}
+    std::optional<time::Epoch> liftoff, meco;
+    // The largest |predicted - flown| MECO of the samples taken at most `lead_s` before the MECO.
+    double max_meco_error_s(double lead_s) const {
+        double worst = 0.0;
+        for (const auto& [now, predicted] : meco_predictions) {
+            if (*meco - now <= lead_s) worst = std::max(worst, std::abs(predicted - *meco));
+        }
+        return worst;
+    }
+    // The prediction of the first sample at least `t_s` after liftoff.
+    double meco_error_at_s(double t_s) const {
+        for (const auto& [now, predicted] : meco_predictions) {
+            if (now - *liftoff >= t_s) return predicted - *meco;
+        }
+        return 1e9;
+    }
+};
+
+LimitedBoosterPhase fly_limited_booster_phase(const std::string& vehicle_id, const sim::LaunchSite& site,
+                                              double heading_rad, const gnc::AscentTarget& target) {
+    test::spice_session();
+    static const spice::SpiceEphemeris ephemeris;
+    static const auto earth = spice::SpiceOrientation::earth();
+    const spice::SpiceTimeConverter time;
+    sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
+    const auto t0 = time.from_utc({2026, 10, 12, 12, 0, 0.0});
+    const auto cfg = config::load_vehicle(STARSIM_CONFIG_DIR, vehicle_id);
+    session.launch_from_pad(cfg, site, heading_rad, t0);
+    session.engage_ascent_autopilot(target);
+    LimitedBoosterPhase a;
+    a.limit_pa = cfg.stages.front().max_dynamic_pressure_pa;
+    a.cap = cfg.stages.front().max_ascent_throttle;
+    for (double t = 0.1; t < 400.0; t += 0.1) {
+        const bool booster = session.autopilot().state == sim::AutopilotState::Booster;
+        session.advance_to(t0 + t, 100);
+        REQUIRE_FALSE(session.body(session.controlled_index()).impacted());
+        if (!a.liftoff && session.autopilot().state == sim::AutopilotState::Booster) a.liftoff = session.epoch();
+        if (booster && session.autopilot().state != sim::AutopilotState::Booster) {
+            a.meco = session.epoch();
+            break;
+        }
+        if (session.autopilot().state != sim::AutopilotState::Booster) continue;
+        const auto tm = session.telemetry(session.controlled_index());
+        const double throttle = session.autopilot().guidance.throttle;
+        a.max_q_pa = std::max(a.max_q_pa, tm.dynamic_pressure_pa);
+        a.min_throttle = std::min(a.min_throttle, throttle);
+        a.max_throttle = std::max(a.max_throttle, throttle);
+        if (tm.dynamic_pressure_pa < 0.9 * a.limit_pa) a.min_throttle_below_90_pct = std::min(a.min_throttle_below_90_pct, throttle);
+        for (const auto& e : session.timeline().predicted()) {
+            if (e.kind == sim::MissionEventKind::Meco) a.meco_predictions.emplace_back(session.epoch(), e.epoch);
+        }
+        if (std::getenv("STARSIM_VERBOSE") && std::fmod(t + 1e-9, 2.0) < 0.1) {
+            const double meco_s = a.meco_predictions.empty() || a.meco_predictions.back().first != session.epoch()
+                                      ? -1.0
+                                      : a.meco_predictions.back().second - *a.liftoff;
+            std::printf("  [max-q] %s T+%5.1f  q %6.0f Pa  throttle %.3f  alt %5.1f km  MECO predicted T+%.1f s\n",
+                        vehicle_id.c_str(), session.epoch() - *a.liftoff, tm.dynamic_pressure_pa, throttle,
+                        tm.altitude_m / 1e3, meco_s);
+        }
+    }
+    REQUIRE(a.liftoff);
+    REQUIRE(a.meco);
+    std::printf("[validation] %s max-Q limiter: limit %.0f Pa, flown max q %.0f Pa (%.3f of the limit), lowest throttle "
+                "%.3f (below 90 %% of the limit %.3f); MECO T+%.1f s, prediction error at T+30 s %+.2f s, at most %.2f s\n",
+                vehicle_id.c_str(), a.limit_pa, a.max_q_pa, a.max_q_pa / a.limit_pa, a.min_throttle,
+                a.min_throttle_below_90_pct, *a.meco - *a.liftoff, a.meco_error_at_s(30.0), a.max_meco_error_s(1e9));
+    return a;
+}
+
+LimitedBoosterPhase starship_booster_phase() {
+    return fly_limited_booster_phase("starship_block3", {25.99686 * deg, -97.15394 * deg, 10.0}, 90.0 * deg,
+                                     {200e3, 200e3, 26.5 * deg, true});
+}
+
+LimitedBoosterPhase falcon9_booster_phase() {
+    return fly_limited_booster_phase(
+        "falcon9_block5", sim::launch_site_from_config(config::load_launch_site(STARSIM_CONFIG_DIR, "ccsfs_slc40")),
+        45.0 * deg, {200e3, 200e3, 51.6 * deg, true});
+}
+
 }  // namespace
+
+TEST_CASE("The ascent holds dynamic pressure at the vehicle limit", "[gnc][ascent]") {
+    // Falcon 9 at full thrust reaches its limit; the free Starship at its operational throttle (0.88) and the default
+    // 10 deg kick peaks at ~0.87 of it (the limit binds on steeper-loaded profiles: flight 14 held it)
+    int limited = 0;
+    for (const auto& a : {starship_booster_phase(), falcon9_booster_phase()}) {
+        REQUIRE(a.limit_pa > 0.0);  // [stage] max_dynamic_pressure_pa of the first stage
+        CHECK(a.max_q_pa <= 1.03 * a.limit_pa);
+        CHECK(a.max_throttle == a.cap);               // never above the operational ascent throttle
+        CHECK(a.min_throttle_below_90_pct == a.cap);  // the operational throttle until the limit comes close
+        if (a.max_q_pa >= 0.97 * a.limit_pa) {
+            ++limited;
+            CHECK(a.min_throttle < a.cap);  // the limit is reached: the engines throttle below the cap
+        }
+    }
+    CHECK(limited >= 1);
+}
+
+TEST_CASE("MECO forecast follows the limiter", "[gnc][ascent][timeline]") {
+    // the tolerances of the mission timeline's MECO prediction ("A Starship ascent records liftoff, Max Q, ...")
+    for (const auto& a : {starship_booster_phase(), falcon9_booster_phase()}) {
+        REQUIRE_FALSE(a.meco_predictions.empty());
+        CHECK(std::abs(a.meco_error_at_s(30.0)) <= 8.0);
+        CHECK(a.max_meco_error_s(1e9) <= 9.0);
+        CHECK(a.max_meco_error_s(3.0) <= 1.0);
+    }
+}
 
 TEST_CASE("Launch azimuth", "[gnc]") {
     // Inclination equal to the latitude: due east.
