@@ -34,7 +34,10 @@ FlownAscent::Sample sample_of(const sim::FlightSession& session) {
     const auto tel = session.telemetry(session.controlled_index());
     FlownAscent::Sample s;
     s.t_s = session.mission_time_s();
-    s.altitude_km = tel.altitude_m / 1e3;
+    // Above the pad, like the webcast dials (they read 0 on the pad). M8 Plan A Task 7: was the ellipsoidal height, which
+    // the old estimated site heights (+10 m Starbase, -20 m SLC-40) kept close to the pad; the derived heights
+    // (-21.11 m / -23.29 m) would put the whole profile 21-23 m low.
+    s.altitude_km = (tel.altitude_m - session.launch_site().height_m) / 1e3;
     s.speed_kmh = tel.speed_relative_mps * 3.6;
     s.gamma_deg = tel.flight_path_angle_rad / constants::deg_to_rad;
     s.mass_t = tel.mass_kg / 1e3;

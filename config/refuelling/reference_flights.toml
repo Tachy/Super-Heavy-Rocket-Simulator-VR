@@ -6,15 +6,16 @@
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
-inputs_digest = "9015feb5c2b3ffbc"  # M8a Task 6: site heights from the terrain data (Task 7 re-measures); ascent Task 5: the planned kick and recovery (mission files without
-                                    # [pitch_program]), re-measured; Task 2: max-Q limit + operational ascent throttle;
-                                    # M8a Task 3: launch_sites.toml plateau keys only (read by the Earth terrain, which
-                                    # the reference flights do not load) - no re-measure
+inputs_digest = "9015feb5c2b3ffbc"  # M8a Task 6: site heights derived from the terrain data (Starbase 10.00 -> -21.11 m),
+                                    # re-measured in M8a Task 7; M8a Task 3: launch_sites.toml plateau keys (read only by
+                                    # the Earth terrain, which the reference flights do not load); ascent Task 5: the
+                                    # planned kick and recovery (mission files without [pitch_program]), re-measured;
+                                    # Task 2: max-Q limit + operational ascent throttle
 
 [depot]
 mission = "depot_launch"
 initial_propellant_t = 70.7        # [D] planned kick 2026-10-23 (max-Q: 69.6, before: 55.5): main tanks after the ascent
-                                   # (199.7 x 211.4 km)
+                                   # (199.7 x 211.4 km); M8a derived site heights: 70.7 (199.7 x 211.3 km)
 # [D] f2 2026-10-22: the flown depot's mean-orbit decay against the calculator's rho(US76 at a - R) Cd 2.2 x end-on
 # area x sqrt(mu a) / m: a free depot (571.5 t, 198 km, 6 days) 0.3294 vs 0.3062 km/day; the 14 flown transfers'
 # heights fit 1.08 (the flown aero, the J2-swinging radius in an exponential atmosphere, the co-rotating air)
@@ -26,16 +27,17 @@ dry_mass_t = 209.0                 # [D] the configured tanker (starship_tanker)
 residue_after_ascent_t = 105.6     # [D] planned kick 18.1 deg 2026-10-23 (max-Q: 93.0, staging: 97.3, f2: 97.2): main
                                    # tanks at the Rendezvous mark
                                    # (after the raise to the window's orbit)
-rendezvous_t = 17.37               # [D] planned kick 2026-10-23 (max-Q: 15.49, staging: 15.64, f2: 17.0; it varies 13-21 t):
-                                   # Rendezvous -> Docked: burns,
+rendezvous_t = 17.93               # [D] M8a derived site heights 2026-10-23 (planned kick: 17.37, max-Q: 15.49, staging:
+                                   # 15.64, f2: 17.0; it varies 13-21 t): Rendezvous -> Docked: burns,
                                    # RCS gas (+ settling pushes), boil-off
-delivered_oxidizer_t = 59.4        # [D] planned kick 2026-10-23 (max-Q: 50.9, staging: 54.1, f2: 53.1): into the depot
-delivered_fuel_t = 14.85           # [D] planned kick 2026-10-23 (max-Q: 12.7, staging: 13.6, f2: 13.2)
+delivered_oxidizer_t = 58.9        # [D] M8a site heights (planned kick: 59.4, max-Q: 50.9, staging: 54.1, f2: 53.1): into
+                                   # the depot
+delivered_fuel_t = 14.7            # [D] M8a site heights (planned kick: 14.85, max-Q: 12.7, staging: 13.6, f2: 13.2)
 chilldown_t = 0.42                 # [D] vented
 settling_gas_t = 0.98              # [D] planned kick 2026-10-23 (max-Q: 0.90, staging: 0.94, f2: 0.92): the transfer's
                                    # settling push (r4)
 main_at_undock_t = 12.6            # [D] the reserve kept for the return
-main_at_catch_t = 1.21             # [D] planned kick 2026-10-23 (max-Q: 1.08, staging: 1.19, f2: 1.88): what the reserve
+main_at_catch_t = 1.38             # [D] M8a site heights (planned kick: 1.21, max-Q: 1.08, staging: 1.19, f2: 1.88): what the reserve
                                    # left over
 dry_mass_sensitivity = 0.99        # [D] r5 probes: ship dry -10 / -20 t -> residue +9.9 / +19.8 t
 # [D] f2 2026-10-21: the tanker with 99.7 t main in a 24 h free coast (the phasing flight between its burns), the flown
@@ -61,6 +63,6 @@ transfer_push_dv_mps = 0.55
 
 [hls]
 mission = "hls_refuel"
-main_at_docking_t = 202.8          # [D] planned kick 2026-10-23 (max-Q: 182.4, f2 2026-10-21: 193.6): HLS main tanks at
+main_at_docking_t = 203.5          # [D] M8a site heights (planned kick: 202.8, max-Q: 182.4, f2: 193.6): HLS main tanks at
                                    # the Docked mark
 phasing_boil_off_t_per_day = 0.47  # [D] f2 2026-10-21: 200 t main, 24 h free coast: 0.70 (150 km) / 0.23 (220 km)

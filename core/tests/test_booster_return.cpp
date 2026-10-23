@@ -250,8 +250,10 @@ TEST_CASE("Block 3 plans MECO to reach landing-burn ignition with the planned pr
         if (status->phase > gnc::ReturnPhase::Boostback && boostback_start_s > 0.0 && boostback_end_s < 0.0) {
             boostback_end_s = t_mission;
         }
-        if (tm.altitude_m / 1e3 > apogee_km) {
-            apogee_km = tm.altitude_m / 1e3;
+        // Above the pad like the webcast dial (M8 Plan A Task 7: was the ellipsoidal height, 21 m lower at Starbase).
+        const double altitude_km = (tm.altitude_m - session.launch_site().height_m) / 1e3;
+        if (altitude_km > apogee_km) {
+            apogee_km = altitude_km;
             apogee_s = t_mission;
         }
         if (status->phase >= gnc::ReturnPhase::LandingBurn) {

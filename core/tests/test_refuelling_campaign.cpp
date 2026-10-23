@@ -67,12 +67,12 @@ TEST_CASE("The measured-numbers file loads and matches its vehicles", "[refuelli
     CHECK(r.depot.mission == "depot_launch");
     CHECK(r.depot.initial_propellant_kg == Catch::Approx(70.7e3));  // planned-kick re-measure (ascent Task 5)
     CHECK(r.tanker.mission == "tanker_flight");
-    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(74.25e3));  // planned kick
+    CHECK(r.tanker.delivered_oxidizer_kg + r.tanker.delivered_fuel_kg == Catch::Approx(73.6e3));  // M8a re-measure (was 74.25)
     CHECK(r.tanker.dry_mass_sensitivity == Catch::Approx(0.99));
     CHECK(r.tanker.campaign_offset_below_kg == Catch::Approx(1.1e3));  // flown campaign (ascent Task 5 re-calibration)
     CHECK(r.tanker.campaign_offset_above_kg == Catch::Approx(2.0e3));
     CHECK(r.hls.mission == "hls_refuel");
-    CHECK(r.hls.main_at_docking_kg == Catch::Approx(202.8e3));  // planned-kick re-measure
+    CHECK(r.hls.main_at_docking_kg == Catch::Approx(203.5e3));  // M8a re-measure (planned kick: 202.8 t)
     // the reference tanker is the configured one
     const auto tanker = config::top_stage_config(config::load_vehicle(config_dir, "starship_tanker"));
     CHECK(tanker.stages.back().dry_mass_kg == Catch::Approx(r.tanker.dry_mass_kg));

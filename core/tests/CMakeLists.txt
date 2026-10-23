@@ -100,6 +100,7 @@ add_executable(starsim_core_tests
     test_geoid.cpp
     test_earth_terrain.cpp
     test_earth_terrain_session.cpp
+    test_earth_terrain_flight.cpp
     test_terrain_contact.cpp
     test_hls_landing.cpp
     test_lunar_scvx.cpp

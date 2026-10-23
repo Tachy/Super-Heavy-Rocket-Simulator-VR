@@ -15,7 +15,7 @@ TEST_CASE("Launch sites load with their catch tower", "[config]") {
     const auto site = config::load_launch_site(STARSIM_CONFIG_DIR, "starbase_olp1");
     CHECK(site.name == "Starbase OLP-1");
     CHECK_THAT(site.latitude_rad, WithinAbs(25.99686 * constants::deg_to_rad, 1e-12));
-    CHECK(site.height_m == 10.0);
+    CHECK(site.height_m == -21.11);  // [D] M8a Task 6 (was the 10.0 m estimate)
     REQUIRE(site.tower.has_value());
     const auto& t = *site.tower;
     CHECK(t.catch_height_m > t.mount_height_m);

@@ -214,7 +214,9 @@ TEST_CASE("Launch window: empty candidates keep the separation orbit (ISS unchan
     CHECK_FALSE(w.phasing_orbit);
     // recorded before f1 (empty candidates must not move it)
     CHECK(w.liftoff.tdb_seconds_past_j2000() == Catch::Approx(845499835.167408943).epsilon(0.0).margin(1e-6));
-    CHECK(w.schedule.waypoint0_epoch.tdb_seconds_past_j2000() == Catch::Approx(845519535.204464555).epsilon(0.0).margin(1e-6));
+    // M8a Task 7: SLC-40's derived height (-20.00 -> -23.29 m) moves the pad position: 845519535.204464555 ->
+    // 845519535.204483509 (+19 us; the liftoff stays)
+    CHECK(w.schedule.waypoint0_epoch.tdb_seconds_past_j2000() == Catch::Approx(845519535.204483509).epsilon(0.0).margin(1e-6));
 }
 
 TEST_CASE("Launch window: a raise that eats the mission limit is infeasible", "[iss][launch_window]") {
