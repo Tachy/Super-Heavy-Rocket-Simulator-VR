@@ -24,6 +24,7 @@ var throttle := 1.0
 var rate_mode := true
 var views: Array[VehicleView] = []
 var trajectory := TrajectoryView.new()
+var trail := FlightTrailView.new()  ## the flown paths (white)
 var navball: NavBall
 var overlay: FlightOverlay
 var ascent_target := {}
@@ -109,6 +110,9 @@ func place_views(parent: Node3D, camera_gcrf_m: Vector3) -> void:
 	if trajectory.get_parent() == null:
 		parent.add_child(trajectory)
 	trajectory.update_view(sim, camera_gcrf_m, get_process_delta_time())
+	if trail.get_parent() == null:
+		parent.add_child(trail)
+	trail.update_view(sim, camera_gcrf_m, (parent as World).earth.fixed_to_gcrf)
 	_update_instruments()
 	if not sim.is_active():
 		return

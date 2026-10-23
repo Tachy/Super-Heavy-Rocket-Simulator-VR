@@ -37,47 +37,4 @@ func update_view(sim: FlightSim, camera_gcrf_m: Vector3, delta: float) -> void:
 		_age = 0.0
 		_planned = sim.target_orbit_points(SAMPLES)
 	_material.set_shader_parameter("earth_center_world", Frames.to_render(-camera_gcrf_m))  # GCRF is Earth-centred
-	_draw_ribbon(_planned, camera_gcrf_m)
-
-
-## Two triangles per segment; each vertex carries a point further along its segment (CUSTOM0), its true distance and its
-## side (UV) for the shader. The orbit is closed with a last segment back to the first sample.
-func _draw_ribbon(points: PackedVector3Array, camera_gcrf_m: Vector3) -> void:
-	if points.size() < 2:
-		return
-	var placed := PackedVector3Array()
-	var distances := PackedFloat32Array()
-	for p in points:
-		var offset := Frames.to_render(p - camera_gcrf_m)
-		var distance := offset.length()
-		distances.append(distance)
-		if distance > CelestialBody.SCALED_SPACE_DISTANCE_M:
-			offset *= CelestialBody.SCALED_SPACE_DISTANCE_M / distance
-		placed.append(offset)
-	var vertices := PackedVector3Array()
-	var ahead := PackedFloat32Array()
-	var uvs := PackedVector2Array()
-	var count := placed.size()
-	for i in count:
-		var j := (i + 1) % count
-		var segment := placed[j] - placed[i]
-		# corners: start left, start right, end left, end right; "ahead" always points along the segment
-		for corner in [[i, -1.0], [i, 1.0], [j, -1.0], [j, 1.0]]:
-			var k: int = corner[0]
-			vertices.append(placed[k])
-			var along := placed[k] + segment
-			ahead.append_array([along.x, along.y, along.z, 0.0])
-			uvs.append(Vector2(distances[k], corner[1]))
-	var indices := PackedInt32Array()
-	for s in count:
-		var b := 4 * s
-		indices.append_array([b, b + 1, b + 2, b + 1, b + 3, b + 2])
-	var arrays := []
-	arrays.resize(Mesh.ARRAY_MAX)
-	arrays[Mesh.ARRAY_VERTEX] = vertices
-	arrays[Mesh.ARRAY_TEX_UV] = uvs
-	arrays[Mesh.ARRAY_CUSTOM0] = ahead
-	arrays[Mesh.ARRAY_INDEX] = indices
-	_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {},
-			Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
-	_mesh.surface_set_material(0, _material)
+	RibbonMesh.add(_mesh, _planned, camera_gcrf_m, true, _material)

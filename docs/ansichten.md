@@ -181,7 +181,14 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   ein neuer Flug beginnt). **F1** alter HUD. **F12** zentriert in VR neu (außerdem automatisch 2 s nach dem
   Start).
 - **VR:** das Overlay liegt auf einer gekrümmten Fläche (Radius 2 m, 64° horizontal) an der Grundpose des Kopfes
-  (nach F12 neu gesetzt), nicht am Kopf festgeklebt. Die manuelle VR-Sitzung mit dem Headset steht noch aus.
+  (nach F12 neu gesetzt), nicht am Kopf festgeklebt; das Zeit-Panel liegt oben links auf derselben Fläche und wird mit
+  einem Mauszeiger bedient (die Maus ist gefangen; Tab, F1 und F12 gehen an das Spiel, nicht an das Panel). Die
+  VR-Sitzung mit dem Headset ist bestanden (2026-10-23).
+- **Bahnlinien** [Entschieden 2026-10-23]: grün die Soll-Bahn des Bordrechners (Zielorbit), weiß die geflogene Bahn
+  jedes Objekts (Booster, Ship, Kapsel ...), erdfest mitgeschrieben (Aufstieg und Rückflug bleiben über der Rampe; im
+  Orbit wandert sie gegen die grüne Bahn) und erst ab 1 km hinter dem Objekt langsam eingeblendet. Beide als weiches
+  Band gleicher Pixelbreite, von Erde und Fahrzeugen verdeckt, hinter dem Erdrand abgeschnitten und dort, wo die
+  Sichtlinie die Atmosphäre streift, ausgeblendet. Die orange Freiflug-Vorhersage entfällt (sie sprang ständig).
 - **Autopilot** [Entschieden 2026-10-22]: In den Außenansichten fliegt immer der Autopilot. Beim Wechsel in die
   Außenansicht übernimmt er das gesteuerte Fahrzeug, falls er aus ist: auf der Rampe der Aufstiegs-Autopilot (wie
   Taste P), im Orbit ohne Plan der Orbit-Zustand des Autopiloten. Handsteuerung (Nicken/Gieren/Rollen, Schub, HOTAS)
