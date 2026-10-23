@@ -3,7 +3,8 @@
 Per `[[site]]` of config/launch_sites.toml: the median ellipsoidal height of the 1 m local grid inside the site's
 `plateau_radius_m`, its spread (max - min inside the radius), the orthometric height (ellipsoidal - EGM2008
 undulation) and the old config value. `--write` replaces only the site-level `height_m = ...` line of each block
-(the tower's `height_m` is untouched), keeping every other line and comment.
+(the tower's `height_m` is untouched), keeping every other line and comment. It refuses (exit 1, nothing written)
+when a site fails the plausibility gate (orthometric range, plateau spread) without a GATE_WAIVERS entry.
 
 Run: python tools/data_pipeline/site_heights.py [--write]
 """
@@ -29,8 +30,15 @@ TERRAIN_DIR = REPO_ROOT / "data" / "terrain" / "earth"
 GEOID_DIR = REPO_ROOT / "data" / "geoid"
 LOCAL_GRIDS = ("starbase_local", "cape_local")
 EARTH_RADIUS_M = 6378137.0  # sphere_radius_m of the grid headers: metres per radian of the disc test
-ORTHOMETRIC_RANGE_M = (-2.0, 25.0)  # plausibility gate for coastal pads
-MAX_SPREAD_M = 5.0
+# Plausibility gate of a derived height (`--write` refuses a site that fails it unless GATE_WAIVERS lists the check):
+ORTHOMETRIC_RANGE_M = (-2.0, 25.0)  # coastal pads stand a few metres above mean sea level
+MAX_SPREAD_M = 5.0  # a pad plateau is flat: max - min of the grid inside plateau_radius_m
+# site id -> {check ("orthometric" / "spread") -> reason}: deliberate exceptions, each with its ruling.
+GATE_WAIVERS: dict[str, dict[str, str]] = {
+    "ksc_lc39a": {"spread": "Ruling 6 (M8a, 2026-10-23): the spread is the flame trench and ramps inside the pad "
+                            "mound; the median (+13.84 m orthometric) matches the ~48 ft pad deck and is stable "
+                            "for r = 30-80 m"},
+}
 
 
 class LocalGrid:
@@ -125,6 +133,27 @@ def evaluate(sites_file: Path, terrain_dir: Path, geoid_dir: Path) -> list[dict]
     return rows
 
 
+def gate(rows: list[dict], waivers: dict[str, dict[str, str]] = GATE_WAIVERS) -> tuple[list[str], list[str]]:
+    """Checks each row against ORTHOMETRIC_RANGE_M and MAX_SPREAD_M. Returns (failures, waived): one message per
+    failed check, a waived check (listed in `waivers` for that site) goes to `waived` with its reason."""
+    failures: list[str] = []
+    waived: list[str] = []
+    for r in rows:
+        checks = []
+        lo, hi = ORTHOMETRIC_RANGE_M
+        if not lo <= r["orthometric_m"] <= hi:
+            checks.append(("orthometric", f"orthometric {r['orthometric_m']:.2f} m outside [{lo:g}, {hi:g}] m"))
+        if r["spread_m"] > MAX_SPREAD_M:
+            checks.append(("spread", f"spread {r['spread_m']:.2f} m > {MAX_SPREAD_M:g} m"))
+        for check, message in checks:
+            reason = waivers.get(r["id"], {}).get(check)
+            if reason:
+                waived.append(f"{r['id']}: {message} - waived: {reason}")
+            else:
+                failures.append(f"{r['id']}: {message}")
+    return failures, waived
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--write", action="store_true", help="write the heights into config/launch_sites.toml")
@@ -134,6 +163,15 @@ def main() -> int:
     for r in rows:
         print(f"{r['id']:14} {r['grid']:14} {r['radius_m']:6.0f} {r['old_m']:8.2f} {r['ellipsoidal_m']:8.2f} "
               f"{r['spread_m']:7.2f} {r['undulation_m']:7.2f} {r['orthometric_m']:7.2f}")
+    failures, waived = gate(rows)
+    for message in waived:
+        print(f"gate: {message}")
+    for message in failures:
+        print(f"gate FAILED: {message}")
+    if args.write and failures:
+        print("not written: a site fails the plausibility gate (fix the site or add a GATE_WAIVERS entry with its "
+              "ruling)")
+        return 1
     if args.write:
         day = date.today().isoformat()
         values = {r["id"]: (r["ellipsoidal_m"], "3DEP 1 m + GLO-30", r["radius_m"]) for r in rows}
