@@ -376,6 +376,34 @@ double build, headless test scripts), PowerShell 5.1 build script, TOML config.
 
 ---
 
+### Task 7b: Why the Falcon 9 boostback costs too little (added 2026-10-23, user decision)
+
+Task 7's real 13.6 s flip exposed it: the planner keeps 53.6 t at MECO for the RTLS return (CRS-35 webcast ~66 t), so
+MECO comes late and fast (+7.6 % MECO speed vs the webcast; the CRS-35 test's allowance was raised to ~9.6 % as a
+documented interim). Our boostback burns ~43 s, CRS-35's ~55 s, ending in a similar state.
+
+**Files:** to be found - `core/src/gnc/booster_return*.cpp`, `booster_return_prediction.cpp` (the MECO plan's return
+cost: run-down, flip, boostback by the rocket equation on the Lambert arc x (1 + boostback_loss_fraction)), the
+Falcon 9 `[stage.recovery]` config, `docs/subsystems.md`, the CRS-35 ascent test.
+
+- [ ] **Step 1: Diagnose** (no code change yet): compare our RTLS return against CRS-35 phase by phase - MECO state
+  (speed, altitude, flight-path angle, downrange), flip end state, boostback engine count / throttle / duration /
+  delta-v / end state, entry burn, landing burn - using the webcast tables already in the repo (tools/telemetry,
+  the CRS-35 fixtures) and `STARSIM_VERBOSE` / `STARSIM_DEBUG_*` output. Name the phase(s) where our propellant use
+  falls short of the flight and the physical cause (e.g. boostback engine count/throttle, gravity loss modelling,
+  the Lambert arc's target, aero during the boostback, MECO state). Record the comparison table in
+  `docs/subsystems.md`.
+- [ ] **Step 2: Gate.** If the cause needs a guidance/model change, write the proposed change (what, why, expected
+  effect on the MECO propellant) into the report and STOP for the user's decision. A pure data correction with a
+  source (e.g. the boostback engine count) may proceed.
+- [ ] **Step 3: Fix** (after approval or when data-only), re-identify `boostback_loss_fraction` again, tighten the
+  CRS-35 `meco_speed_allowance` back towards 3 % (measured gap + 2 %), re-baseline the moved Falcon 9 numbers
+  (`[falcon9]`, `[rtls]`, `[asds]`, `[booster]`, `[staging]`, `[iss_mission]` incl. `[slow]`).
+- [ ] **Step 4: Commit and push** `fix(gnc): Falcon 9 boostback cost matches the flights` (or `docs:` if only the
+  diagnosis lands).
+
+---
+
 ### Task 8: Cross-flow normal force in the landing planner model (F4)
 
 **Files:**
