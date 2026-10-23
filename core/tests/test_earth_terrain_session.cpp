@@ -38,7 +38,7 @@ namespace {
 
 constexpr double deg = constants::deg_to_rad;
 constexpr double a = constants::wgs84_semi_major_axis_m;
-constexpr double geoid_n = -25.0;  // synthetic undulation everywhere
+constexpr double geoid_n = -32.0;  // synthetic undulation everywhere (below all site heights, which are derived from the data: LZ-40 -26 m)
 constexpr double landing_propellant_kg = 1000.0;
 
 struct Env {

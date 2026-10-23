@@ -1,15 +1,18 @@
 # Launch and landing sites. Geodetic coordinates on WGS84, height above the ellipsoid.
 # Without Earth terrain the ground near a site is flat at this height (physics and rendering); with it (M8) the site
 # is a plateau at this height (plateau_radius_m, then a linear apron of plateau_apron_m into the terrain).
-# Note: the geoid lies ~25-28 m below the ellipsoid on the US Gulf/Atlantic coasts, so pads a few metres
-# above sea level have negative ellipsoidal heights. [E] values below are not yet geoid-corrected.
+# height_m is [D]: the median ellipsoidal height of the 1 m local terrain grid (USGS 3DEP + GLO-30 gaps, NAVD88 ->
+# GEOID18 -> NAD83(2011) -> ITRF2014, see tools/data_pipeline/earth_terrain.py) within plateau_radius_m, written by
+# `python tools/data_pipeline/site_heights.py --write`. The geoid (EGM2008) lies ~22-30 m below the ellipsoid on the
+# US Gulf/Atlantic coasts, so pads a few metres above sea level have negative ellipsoidal heights. The orthometric
+# heights (height - undulation) are +1.4 m (OLP-1), +13.8 m (LC-39A mound), +6.4 m (SLC-40), +3.7 m (LZ-40).
 
 [[site]]
 id = "starbase_olp1"
 name = "Starbase OLP-1"
 latitude_deg = 25.99686     # [E] from public satellite imagery
 longitude_deg = -97.15394
-height_m = 10.0
+height_m = -21.11  # [D] median of 3DEP 1 m + GLO-30 within 150 m, 2026-10-23
 plateau_radius_m = 150.0      # [E] from imagery: mount + tower + hardstand, flat at height_m (Earth terrain, M8)
 plateau_apron_m = 50.0        # [E] linear blend into the terrain beyond the plateau
 
@@ -44,8 +47,9 @@ id = "ksc_lc39a"
 name = "KSC LC-39A"
 latitude_deg = 28.60822     # [E] from public satellite imagery
 longitude_deg = -80.60410
-height_m = 15.0
-plateau_radius_m = 150.0      # [E] from imagery: mount + tower + hardstand
+height_m = -15.85  # [D] median of 3DEP 1 m + GLO-30 within 60 m, 2026-10-23
+plateau_radius_m = 60.0       # [D] was 150 m [E]: the 3DEP relief inside 150 m spans 13.6 m (flame trench, ramps); the median
+                              # is stable within 0.2 m for 30-80 m, so the plateau keeps the mound top only
 plateau_apron_m = 50.0        # [E]
 
 [site.tower]                  # catch tower ("chopsticks"); all values [E] from public imagery and reporting
@@ -79,8 +83,8 @@ id = "ccsfs_slc40"
 name = "CCSFS SLC-40"
 latitude_deg = 28.56194     # [S] Wikipedia "Cape Canaveral Space Launch Complex 40": 28°33'43"N 80°34'38"W
 longitude_deg = -80.57722
-height_m = -20.0            # [E] ~5 m above sea level, geoid ~-25 m (no tower: a stack stands on the ground)
-plateau_radius_m = 100.0    # [E] from imagery: pad + hardstand
+height_m = -23.29  # [D] median of 3DEP 1 m + GLO-30 within 30 m, 2026-10-23
+plateau_radius_m = 30.0     # [D] was 100 m [E]: the 3DEP relief inside 100 m spans 7.5 m (slopes); 30 m spans 3.3 m
 plateau_apron_m = 50.0      # [E]
 landing_zone = "ccsfs_lz40" # [S] Wikipedia "Cape Canaveral Space Launch Complex 40" / CRS-35: first stages return to
                             # LZ-40 inside the complex (the onboard computer's RTLS choice)
@@ -95,7 +99,7 @@ name = "Landezone LZ-40"
 kind = "landing_zone"       # Falcon first stages land here (first landing Crew-12, 2026-02-13)
 latitude_deg = 28.56194     # [E] east of the SLC-40 pad inside the complex (FAA EA 2025: "a single LZ east of SLC-40");
 longitude_deg = -80.57370   # [E] ~340 m east of the pad (verify against imagery)
-height_m = -20.0            # [E]
+height_m = -26.03  # [D] median of 3DEP 1 m + GLO-30 within 61 m, 2026-10-23
 pad_radius_m = 42.7         # [S] FAA EA 2025: 280 ft concrete pad (400 ft with the gravel apron)
 plateau_radius_m = 61.0     # [S] FAA EA 2025: half the 400 ft gravel apron
 plateau_apron_m = 30.0      # [E]
