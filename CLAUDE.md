@@ -34,7 +34,9 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
 - `core` is split into small modules with clear interfaces: `math`, `time`, `frames`, `ephemeris`,
   `environment`, `integrators`, `optim`, `orbit`, `vehicle`, `propulsion`, `aero`, `contact`, `gnc`, `mission`, `sim`.
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
-  Moon: body-fixed frame, shape, atmosphere or vacuum; thermal radiation environment: Sun, Earth and Moon albedo and infrared),
+  Moon: body-fixed frame, shape, atmosphere or vacuum; thermal radiation environment: Sun, Earth and Moon albedo and infrared;
+  terrain: the lunar site tile + LDEM_16, the Earth terrain (3DEP 1 m / GLO-30 / ETOPO 2022 + site plateaus) and the
+  EGM2008 geoid as the sea level),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates, energy- and J2-mean semi-major axis),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
@@ -175,9 +177,15 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   lands on legs; physics first - webcast propellant gauges that the engines cannot explain are not followed
   (2026-10-14); Starship throttle schedules are guidance choices, not vehicle data.
 - Earth is a 256x128 ellipsoid mesh whose facets sit up to ~0.6 km below the true surface; below 500 km a
-  2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites.
-  Physics ground = flat at the pad height (FlightBody::ground_height_m): gentle contact (<= 3 m/s, <= 10 deg)
-  rests, harder contact is an impact. Sky is black (no atmosphere rendering). Terrain/atmosphere: M8 (incl. Earth DEM tiles for physics, e.g. Copernicus GLO-30 - user 2026-10-15; the lunar l2 terrain path is the template).
+  2x2 deg `GroundPatch` (6 cm accuracy) is drawn under the camera, at the pad height near launch sites (until the
+  M8 Plan B tile renderer). Physics ground (M8 Plan A): with `FlightSession::set_earth_terrain` (the game, `[data]`
+  tests) the real Earth terrain - flat plateaus at the derived site heights under every pad / landing zone, 3DEP /
+  GLO-30 / ETOPO beyond, water at the EGM2008 geoid; without it (all non-`[data]` tests, the comparison mode) flat at
+  the site height (FlightBody::ground_height_m) with the coarse committed geoid as the sea. Site heights in
+  `launch_sites.toml` are ellipsoidal [D] (`tools/data_pipeline/site_heights.py`; Starbase -21.11 m). Gentle contact
+  (<= 3 m/s, <= 10 deg) rests, harder contact is an impact. Landing legs creep downhill (~0.05 m/s) on slopes >= 2 deg
+  and are never judged landed there (off-plateau only; not fixed). Sky is black (no atmosphere rendering).
+  Atmosphere: M8. Details: `docs/subsystems.md` "Earth terrain and geoid".
 - C++ sources are UTF-8 (/utf-8); UI strings in the core are German.
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.

@@ -202,7 +202,10 @@ flow separation (vacuum engines).
   `ldem_16`); `sim::load_lunar_terrain` reads them.
 
 ## Launch sites (`launch_sites.toml`)
-- `[[site]]`: `id`, `name`, `latitude_deg`, `longitude_deg`, `height_m` (ground above WGS84), `kind`
+- `[[site]]`: `id`, `name`, `latitude_deg`, `longitude_deg`, `height_m` (ground above the WGS84 ellipsoid, [D]:
+  the median of the 1 m local terrain grid within `plateau_radius_m`, written by
+  `python tools/data_pipeline/site_heights.py --write`; rerun it after a terrain or radius change and re-measure the
+  reference flights - `refuelling/reference_flights.toml` digests this file), `kind`
   (`"launch_pad"` default, `"landing_zone"`: a pad first stages land on, with `pad_radius_m`), and (required) the
   site's plateau in the Earth terrain: flat at `height_m` within `plateau_radius_m`, a linear apron of
   `plateau_apron_m` into the terrain beyond it, never water (`sim::load_earth_terrain`).
