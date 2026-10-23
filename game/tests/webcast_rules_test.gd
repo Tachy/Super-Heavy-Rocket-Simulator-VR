@@ -7,6 +7,8 @@ var _failures := 0
 
 func _initialize() -> void:
 	_test_gauges()
+	_test_config_matches_defaults()
+	_test_config_errors()
 	_test_window()
 	_test_labels()
 	print("WEBCAST RULES TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
@@ -72,7 +74,7 @@ func _test_gauges() -> void:
 	var docking := {"present": true, "range_m": 50.0, "docked": false}
 	sel = GaugeRules.select(_telemetry({"heat_rate_w_m2": 5e4, "altitude_m": 200.0e3}), _body({"docking": docking}),
 			{}, 0.0)
-	_check(sel["left"].size() <= GaugeRules.MAX_PER_SIDE and sel["right"].size() <= GaugeRules.MAX_PER_SIDE,
+	_check(sel["left"].size() <= GaugeConfig.shared().max_per_side and sel["right"].size() <= GaugeConfig.shared().max_per_side,
 			"never more than 4 per side")
 	_check(sel["left"] == ["engines", "propellant", "heat_flux", "heat_load"], "left side by priority")
 	_check(sel["right"] == ["range", "closing_rate", "altitude", "speed_inertial"], "docking: range and closing rate shown")
@@ -88,6 +90,43 @@ func _test_gauges() -> void:
 	_check(GaugeRules.docking_active(docking) and not GaugeRules.docking_active({"present": true, "range_m": 1.0,
 			"docked": true}) and not GaugeRules.docking_active({}), "docking active only when approaching")
 	_test_transfer()
+
+
+func _test_config_matches_defaults() -> void:
+	var cfg := GaugeConfig.shared()
+	_check(cfg.errors.is_empty(), "shipped config loads without errors (%s)" % [cfg.errors])
+	_check(cfg.max_per_side == 4 and cfg.hide_delay_s == 5.0, "rules from the file")
+	_check(cfg.situations["orbit"] == ["speed_inertial", "altitude", "apoapsis", "periapsis"], "orbit situation list")
+	_check(cfg.gauges["altitude"]["log_min"] == 0.1, "altitude log_min")
+
+
+func _test_config_errors() -> void:
+	var cfg := GaugeConfig.parse("""
+[rules]
+hide_delay_s = 5.0
+max_per_side = 4
+[left]
+gauges = ["engines", "bar"]
+[gauge.engines]
+label = "E"
+unit = ""
+full_scale = 1.0
+decimals = 0
+condition = "has_engines"
+[gauge.foo]
+label = "F"
+unit = ""
+full_scale = 1.0
+decimals = 0
+condition = "nonsense"
+""")
+	_check(cfg.errors.size() == 2, "bad condition, unknown left id, unknown situation id: 2 errors (%s)" % [cfg.errors])
+	var sel := GaugeRules.select(_telemetry(), _body(), {}, 0.0, cfg)
+	_check(sel["left"] == ["engines"] and sel["right"].is_empty(), "bad entries dropped, engines still shown (%s)" % [sel])
+	var missing := GaugeConfig.load_file("res://does_not_exist.toml")
+	_check(missing.errors.size() == 1, "missing file: one error")
+	sel = GaugeRules.select(_telemetry(), _body(), {}, 0.0, missing)
+	_check(sel["left"].is_empty() and sel["right"].is_empty(), "missing file: empty selection")
 
 
 ## Task 4c: the Earth-Moon transfer situation (AROW-like gauges).
@@ -124,10 +163,10 @@ func _test_transfer() -> void:
 	var state := {}
 	GaugeRules.select(tli, _body(), state, 0.0)
 	var edge := tli.duplicate()
-	edge["altitude_m"] = 0.9 * GaugeRules.TRANSFER_MIN_ALTITUDE_M
+	edge["altitude_m"] = 0.9 * GaugeConfig.shared().threshold("transfer_min_altitude_m")
 	_check(GaugeRules.select(edge, _body(), state, 1.0)["right"] == transfer_ids, "transfer holds inside the band")
 	_check(GaugeRules.select(edge, _body(), {}, 1.0)["right"] != transfer_ids, "the band is not entered from outside")
-	edge["altitude_m"] = 0.7 * GaugeRules.TRANSFER_MIN_ALTITUDE_M
+	edge["altitude_m"] = 0.7 * GaugeConfig.shared().threshold("transfer_min_altitude_m")
 	_check(GaugeRules.select(edge, _body(), state, 2.0)["right"][0] == "speed_inertial", "transfer ends below the band")
 	# Without a Moon in the session: no Moon gauges.
 	var earth_only := tli.duplicate()

@@ -1,6 +1,6 @@
 class_name TomlLite
 ## Minimal reader for the TOML subset used in config/: comments, [table], [[array-of-tables]],
-## key = string | number | boolean. Enough for flat data files; the C++ core uses a full parser.
+## key = string | number | boolean | single-line array of those. Enough for flat data files; the C++ core uses a full parser.
 
 
 static func load_file(path: String) -> Dictionary:
@@ -47,6 +47,23 @@ static func _strip_comment(line: String) -> String:
 
 
 static func _value(text: String) -> Variant:
+	if text.begins_with("["):  # single-line array of scalars, no nesting
+		var items: Array = []
+		var inner := text.trim_prefix("[").trim_suffix("]").strip_edges()
+		if inner.is_empty():
+			return items
+		var start := 0
+		var in_string := false
+		for i in inner.length():
+			if inner[i] == '"':
+				in_string = not in_string
+			elif inner[i] == "," and not in_string:
+				items.append(_value(inner.substr(start, i - start).strip_edges()))
+				start = i + 1
+		var last := inner.substr(start).strip_edges()
+		if not last.is_empty():  # a trailing comma leaves nothing after it
+			items.append(_value(last))
+		return items
 	if text.begins_with('"'):
 		return text.substr(1, text.length() - 2)
 	if text == "true" or text == "false":

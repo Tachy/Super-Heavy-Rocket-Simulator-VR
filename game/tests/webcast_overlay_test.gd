@@ -123,9 +123,9 @@ func _test_values() -> void:
 	_check(absf(WebcastOverlay.gauge_value("speed_moon", tr, docking) - 3240.0) < 1e-9, "speed about the Moon in km/h")
 	for id in GaugeRules.select({"altitude_m": 1.0e8, "apoapsis_altitude_km": INF, "distance_moon_m": 1.0}, {}, {},
 			0.0)["right"]:
-		_check(WebcastOverlay.GAUGES.has(id), "transfer gauge %s has a spec" % id)
-	for id in WebcastOverlay.GAUGES:
-		var spec: Dictionary = WebcastOverlay.GAUGES[id]
+		_check(GaugeConfig.shared().gauges.has(id), "transfer gauge %s has a spec" % id)
+	for id in GaugeConfig.shared().gauges:
+		var spec: Dictionary = GaugeConfig.shared().gauges[id]
 		_check(spec.has("label") and spec.has("unit") and float(spec["full_scale"]) > 0.0, "gauge spec %s" % id)
 	var p := {"propellant_kg": 250.0, "propellant_capacity_kg": 1000.0}
 	_check(absf(WebcastOverlay.gauge_value("propellant", p, docking) - 25.0) < 1e-12, "propellant in % of the full load")

@@ -1857,7 +1857,7 @@ Plan: `docs/superpowers/plans/2026-10-22-external-view.md` (Tasks 1-4). Pure dat
   not the Earth's centre: the ruling is that the lunar orbit's speed is shown about the Moon), `distance_earth_m` /
   `distance_moon_m` (from the centres) and `speed_earth_mps` (|v_gcrf|) / `speed_moon_mps` (|v_gcrf - v_moon|). They are
   in the telemetry CSV and the legacy HUD and drive the webcast's transfer situation (`gauge_rules.gd`: altitude
-  > 5000 km and apoapsis > 100000 km [E], with hysteresis `TRANSFER_EXIT_FACTOR` 0.8).
+  > 5000 km and apoapsis > 100000 km [E], with hysteresis `transfer_exit_factor` 0.8; all gauge lists, thresholds and looks live in `config/ui/webcast_gauges.toml`, read by `GaugeConfig`).
 - **Tests:** `[timeline]` (`test_mission_timeline.cpp`): T-0 rules; the recorded ascent, booster return, flip and
   catch, cold staging, lunar-return loft, undocking; scheduled liftoff with pad hold (one 4000-tick call coasts 5.96 h,
   altitude within 0.1 m of the pad); waiting ISS launch; countdown of a waiting ascent; predicted deorbit events before

@@ -1,71 +1,45 @@
 class_name GaugeRules
 extends RefCounted
-## Which gauges of the webcast overlay are shown for a body. Pure rules, no nodes.
-## `state` is the caller-owned hysteresis memory: gauge id -> last time (s) its condition was true.
+## Which gauges of the webcast overlay are shown for a body. Pure rules, no nodes. The gauge lists, thresholds and
+## each gauge's condition name come from GaugeConfig (config/ui/webcast_gauges.toml); the conditions themselves are
+## computed here. `state` is the caller-owned hysteresis memory: gauge id -> last time (s) its condition was true.
 
-## A gauge hides only after its condition has been false for this long (s). [E] readability
-const HIDE_DELAY_S := 5.0
-const MAX_PER_SIDE := 4
-## Dynamic pressure above which the gauge is useful (Pa). [E]
-const DYNAMIC_PRESSURE_MIN_PA := 100.0
-## Free-molecular edge: Mach is meaningless above this Knudsen number (same rule as flight_hud.gd). [D]
-const KNUDSEN_CONTINUUM_MAX := 0.1
-## Aerodynamic heating worth showing (W/m^2). [E]
-const HEAT_RATE_MIN_W_M2 := 1.0e3
-## Vertical speed is shown in the atmosphere / near the ground only (m). [E]
-const VERTICAL_SPEED_MAX_ALTITUDE_M := 150.0e3
-## Orbit apsides are shown above this altitude (m). [E]
-const ORBIT_MIN_ALTITUDE_M := 100.0e3
-## Transfer between Earth and Moon (AROW-like gauges): above this altitude over the reference body (m) [E] - well clear
-## of LEO and of an entry / a lunar orbit insertion, which keep their own gauges; reached ~15 min after a TLI.
-const TRANSFER_MIN_ALTITUDE_M := 5.0e6
-## ... on an open orbit about the reference body or one whose apoapsis lies above this (km) [E]. LEO, GEO (35,786 km)
-## and LLO stay "orbit"; so does the NRHO: its apolune (~68,000 km above the Moon) is a closed lunar orbit below
-## this, and the Moon stays its reference body up to FlightBody::moon_release_distance_m (100,000 km). A TLI or TEI
-## coast has an apoapsis near the Moon's distance (~380,000 km) or is open about the Moon.
-const TRANSFER_MIN_APOAPSIS_KM := 100.0e3
-## Hysteresis of the transfer situation: once in it, both limits shrink by this factor before it ends [E] (no flicker
-## at the boundaries; the gauges' own HIDE_DELAY_S does not stop the situation's list from switching).
-const TRANSFER_EXIT_FACTOR := 0.8
+## The condition names the TOML may use (see `_conditions`).
+const CONDITIONS: Array[String] = ["always", "has_engines", "has_propellant", "heating", "powered_or_aero",
+		"continuum_aero", "aero", "has_moon", "low_altitude", "in_orbit", "docking"]
 ## Key of the transfer situation in the hysteresis `state` (not a gauge id).
 const TRANSFER_STATE_KEY := "situation:transfer"
 
 
 ## Returns {"left": Array[String], "right": Array[String]}.
-## Left (vehicle) priority: engines, propellant, heat_flux, heat_load, g_load, mach, dynamic_pressure.
-## Right (trajectory) priority depends on the situation: docking [range, closing_rate, altitude, speed_inertial];
-## transfer [distance_earth, distance_moon, speed_earth, speed_moon]; orbit [speed_inertial, altitude, apoapsis,
-## periapsis]; otherwise [speed_surface, altitude, vertical_speed, speed_inertial]. Each gauge also needs its own
-## condition; at most MAX_PER_SIDE per side.
+## Left (vehicle) priority comes from the config's `left` list. The right (trajectory) list depends on the situation:
+## docking, else transfer, else orbit, else default. Each gauge also needs its own condition; at most
+## `max_per_side` per side. `config` null = GaugeConfig.shared().
 ## `body` = {"engines": Array, "stages": Array, "docking": Dictionary}; "docking" is the docking state of this body
 ## (empty when the session's docking state belongs to another body).
-static func select(telemetry: Dictionary, body: Dictionary, state: Dictionary, now_s: float) -> Dictionary:
-	var left: Array[String] = _pick(_left_conditions(telemetry, body), state, now_s)
-	var right: Array[String] = _pick(_right_conditions(telemetry, body, state), state, now_s)
-	return {"left": left, "right": right}
+static func select(telemetry: Dictionary, body: Dictionary, state: Dictionary, now_s: float,
+		config: GaugeConfig = null) -> Dictionary:
+	if config == null:
+		config = GaugeConfig.shared()
+	var conditions := _conditions(telemetry, body, state, config)  # also keeps the transfer hysteresis current
+	var situation := "default"
+	if conditions["docking"]:
+		situation = "docking"
+	elif state.get(TRANSFER_STATE_KEY, false):
+		situation = "transfer"
+	elif conditions["in_orbit"]:
+		situation = "orbit"
+	var right_ids: Array = config.situations.get(situation, [])
+	return {
+		"left": _pick(config.left, conditions, config, state, now_s),
+		"right": _pick(right_ids, conditions, config, state, now_s),
+	}
 
 
 ## Docking state counts as active for the body when it is present, reports a range to the port and the
 ## vehicles are not yet docked (after docking there is no closing rate).
 static func docking_active(docking: Dictionary) -> bool:
 	return docking.get("present", false) and docking.has("range_m") and not docking.get("docked", false)
-
-
-static func _left_conditions(t: Dictionary, body: Dictionary) -> Array:
-	var heat: bool = float(t.get("heat_rate_w_m2", 0.0)) > HEAT_RATE_MIN_W_M2
-	var engines := main_engines(body.get("engines", []))
-	var firing: bool = engines.any(func(e: Dictionary) -> bool: return e.get("firing", false))
-	var free: bool = not t.get("clamped", false)
-	var aero: bool = float(t.get("dynamic_pressure_pa", 0.0)) > DYNAMIC_PRESSURE_MIN_PA
-	return [
-		["engines", not engines.is_empty()],
-		["propellant", float(t.get("propellant_capacity_kg", 0.0)) > 0.0],
-		["heat_flux", heat],  # heating before g / q / Mach: it must not be cut during entry by the side limit
-		["heat_load", heat],
-		["g_load", free and (firing or aero)],  # no constant 0 g on the pad or in free fall
-		["mach", free and aero and float(t.get("knudsen", INF)) < KNUDSEN_CONTINUUM_MAX],
-		["dynamic_pressure", aero],  # after Mach: with engines and propellant an ascent shows g and Mach (fix 1)
-	]
 
 
 ## The engines of main propulsion: launch escape (Crew Dragon SuperDracos, `abort_only`) and landing thrusters
@@ -75,60 +49,49 @@ static func main_engines(engines: Array) -> Array:
 
 
 ## Coasting between Earth and Moon: high above the reference body on an open orbit or one reaching far out (see the
-## TRANSFER_* constants). Remembers the result in `state` for its hysteresis.
-static func in_transfer(t: Dictionary, state: Dictionary) -> bool:
-	var factor := TRANSFER_EXIT_FACTOR if state.get(TRANSFER_STATE_KEY, false) else 1.0
+## `transfer_*` thresholds). Remembers the result in `state` for its hysteresis.
+static func in_transfer(t: Dictionary, state: Dictionary, config: GaugeConfig = null) -> bool:
+	if config == null:
+		config = GaugeConfig.shared()
+	var factor := config.threshold("transfer_exit_factor") if state.get(TRANSFER_STATE_KEY, false) else 1.0
 	var apoapsis_km := float(t.get("apoapsis_altitude_km", INF))
-	var transfer := float(t.get("altitude_m", 0.0)) > TRANSFER_MIN_ALTITUDE_M * factor \
-			and (not is_finite(apoapsis_km) or apoapsis_km > TRANSFER_MIN_APOAPSIS_KM * factor)
+	var transfer := float(t.get("altitude_m", 0.0)) > config.threshold("transfer_min_altitude_m") * factor \
+			and (not is_finite(apoapsis_km) or apoapsis_km > config.threshold("transfer_min_apoapsis_km") * factor)
 	state[TRANSFER_STATE_KEY] = transfer
 	return transfer
 
 
-## The right side depends on the flight situation: docking approach, Earth-Moon transfer, orbit, or ascent / entry /
-## landing / pad.
-static func _right_conditions(t: Dictionary, body: Dictionary, state: Dictionary) -> Array:
+## Every named condition (CONDITIONS) of the telemetry / body: name -> bool.
+static func _conditions(t: Dictionary, body: Dictionary, state: Dictionary, config: GaugeConfig) -> Dictionary:
 	var altitude_m := float(t.get("altitude_m", 0.0))
-	var docking := docking_active(body.get("docking", {}))
-	var transfer := in_transfer(t, state)  # evaluated every frame: keeps its hysteresis state current
-	var in_orbit := altitude_m > ORBIT_MIN_ALTITUDE_M and is_finite(float(t.get("apoapsis_altitude_km", INF)))
-	var has_moon := t.has("distance_moon_m")  # only sessions with the Moon report it
-	var conditions := {
-		"distance_earth": true,
-		"distance_moon": has_moon,
-		"speed_earth": true,
-		"speed_moon": has_moon,
-		"speed_surface": true,
-		"speed_inertial": true,
-		"altitude": true,
-		"vertical_speed": altitude_m < VERTICAL_SPEED_MAX_ALTITUDE_M,
-		"apoapsis": in_orbit,
-		"periapsis": in_orbit,
-		"range": docking,
-		"closing_rate": docking,
+	var engines := main_engines(body.get("engines", []))
+	var firing: bool = engines.any(func(e: Dictionary) -> bool: return e.get("firing", false))
+	var free: bool = not t.get("clamped", false)
+	var aero: bool = float(t.get("dynamic_pressure_pa", 0.0)) > config.threshold("dynamic_pressure_min_pa")
+	in_transfer(t, state, config)  # evaluated every frame: keeps its hysteresis state current
+	return {
+		"always": true,
+		"has_engines": not engines.is_empty(),
+		"has_propellant": float(t.get("propellant_capacity_kg", 0.0)) > 0.0,
+		"heating": float(t.get("heat_rate_w_m2", 0.0)) > config.threshold("heat_rate_min_w_m2"),
+		"powered_or_aero": free and (firing or aero),  # no constant 0 g on the pad or in free fall
+		"continuum_aero": free and aero and float(t.get("knudsen", INF)) < config.threshold("knudsen_continuum_max"),
+		"aero": aero,
+		"has_moon": t.has("distance_moon_m"),  # only sessions with the Moon report it
+		"low_altitude": altitude_m < config.threshold("vertical_speed_max_altitude_m"),
+		"in_orbit": altitude_m > config.threshold("orbit_min_altitude_m") \
+				and is_finite(float(t.get("apoapsis_altitude_km", INF))),
+		"docking": docking_active(body.get("docking", {})),
 	}
-	var ids: Array[String]
-	if docking:
-		ids = ["range", "closing_rate", "altitude", "speed_inertial"]
-	elif transfer:
-		ids = ["distance_earth", "distance_moon", "speed_earth", "speed_moon"]
-	elif in_orbit:
-		ids = ["speed_inertial", "altitude", "apoapsis", "periapsis"]
-	else:
-		ids = ["speed_surface", "altitude", "vertical_speed", "speed_inertial"]
-	var result: Array = []
-	for id in ids:
-		result.append([id, conditions[id]])
-	return result
 
 
-## Applies the hysteresis and the per-side limit; `conditions` is in priority order.
-static func _pick(conditions: Array, state: Dictionary, now_s: float) -> Array[String]:
+## Applies the hysteresis and the per-side limit; `ids` is in priority order.
+static func _pick(ids: Array, conditions: Dictionary, config: GaugeConfig, state: Dictionary, now_s: float) \
+		-> Array[String]:
 	var shown: Array[String] = []
-	for entry in conditions:
-		var id: String = entry[0]
-		if entry[1]:
+	for id: String in ids:
+		if conditions[config.gauges[id]["condition"]]:
 			state[id] = now_s
-		if state.has(id) and now_s - float(state[id]) < HIDE_DELAY_S and shown.size() < MAX_PER_SIDE:
+		if state.has(id) and now_s - float(state[id]) < config.hide_delay_s and shown.size() < config.max_per_side:
 			shown.append(id)
 	return shown

@@ -1,0 +1,198 @@
+# Webcast overlay gauges: which round gauges are shown, in which order, and how they look.
+#
+# This file is edited by a later settings wizard. Situations (docking > transfer > orbit > default) are chosen in code
+# (game/ui/webcast/gauge_rules.gd); the `condition` of a gauge is a named rule defined there as well:
+#   always, has_engines, has_propellant, heating, powered_or_aero, continuum_aero, aero, has_moon, low_altitude,
+#   in_orbit, docking
+# Provenance tags: [E] estimate, [D] derived.
+
+[rules]
+# A gauge hides only after its condition has been false for this long (s). [E] readability
+hide_delay_s = 5.0
+max_per_side = 4
+
+[thresholds]
+# Dynamic pressure above which the gauge is useful (Pa). [E]
+dynamic_pressure_min_pa = 100.0
+# Free-molecular edge: Mach is meaningless above this Knudsen number (same rule as flight_hud.gd). [D]
+knudsen_continuum_max = 0.1
+# Aerodynamic heating worth showing (W/m^2). [E]
+heat_rate_min_w_m2 = 1.0e3
+# Vertical speed is shown in the atmosphere / near the ground only (m). [E]
+vertical_speed_max_altitude_m = 150.0e3
+# Orbit apsides are shown above this altitude (m). [E]
+orbit_min_altitude_m = 100.0e3
+# Transfer between Earth and Moon (AROW-like gauges): above this altitude over the reference body (m) [E] - well clear
+# of LEO and of an entry / a lunar orbit insertion, which keep their own gauges; reached ~15 min after a TLI.
+transfer_min_altitude_m = 5.0e6
+# ... on an open orbit about the reference body or one whose apoapsis lies above this (km) [E]. LEO, GEO (35,786 km)
+# and LLO stay "orbit"; so does the NRHO: its apolune (~68,000 km above the Moon) is a closed lunar orbit below
+# this, and the Moon stays its reference body up to FlightBody::moon_release_distance_m (100,000 km). A TLI or TEI
+# coast has an apoapsis near the Moon's distance (~380,000 km) or is open about the Moon.
+transfer_min_apoapsis_km = 100.0e3
+# Hysteresis of the transfer situation: once in it, both limits shrink by this factor before it ends [E] (no flicker
+# at the boundaries; the gauges' own hide delay does not stop the situation's list from switching).
+transfer_exit_factor = 0.8
+
+[left]
+# Vehicle gauges by priority. Heating comes before g / q / Mach: it must not be cut during entry by the side limit.
+# Dynamic pressure comes after Mach: with engines and propellant an ascent shows g and Mach.
+gauges = ["engines", "propellant", "heat_flux", "heat_load", "g_load", "mach", "dynamic_pressure"]
+
+# Trajectory gauges (right side) by priority, per situation.
+[situation.docking]
+gauges = ["range", "closing_rate", "altitude", "speed_inertial"]
+
+[situation.transfer]
+gauges = ["distance_earth", "distance_moon", "speed_earth", "speed_moon"]
+
+[situation.orbit]
+gauges = ["speed_inertial", "altitude", "apoapsis", "periapsis"]
+
+[situation.default]
+gauges = ["speed_surface", "altitude", "vertical_speed", "speed_inertial"]
+
+# Gauge specs: label (German), unit, full scale of the arc, log_min > 0 = logarithmic arc from log_min to full scale,
+# maximum decimals (fewer for large values), signed = the arc fills left/right from the top.
+[gauge.engines]
+# The engine gauge draws itself: label, unit and scale are unused.
+label = "Triebwerke"
+unit = ""
+full_scale = 1.0
+decimals = 0
+condition = "has_engines"
+
+[gauge.propellant]
+# All main-engine propellant of the body, main + header tanks.
+label = "Treibstoff"
+unit = "%"
+full_scale = 100.0
+decimals = 0
+condition = "has_propellant"
+
+[gauge.speed_surface]
+label = "Geschwindigkeit"
+unit = "km/h"
+full_scale = 30000.0
+decimals = 0
+condition = "always"
+
+[gauge.speed_inertial]
+label = "Inertial"
+unit = "km/h"
+full_scale = 40000.0
+decimals = 0
+condition = "always"
+
+[gauge.altitude]
+label = "Höhe"
+unit = "km"
+full_scale = 400000.0
+log_min = 0.1
+decimals = 1
+condition = "always"
+
+[gauge.vertical_speed]
+label = "Vertikal"
+unit = "m/s"
+full_scale = 2000.0
+decimals = 1
+signed = true
+condition = "low_altitude"
+
+[gauge.apoapsis]
+label = "Apoapsis"
+unit = "km"
+full_scale = 400000.0
+log_min = 10.0
+decimals = 0
+condition = "in_orbit"
+
+[gauge.periapsis]
+label = "Periapsis"
+unit = "km"
+full_scale = 400000.0
+log_min = 10.0
+decimals = 0
+condition = "in_orbit"
+
+[gauge.distance_earth]
+label = "Erdabstand"
+unit = "km"
+full_scale = 500000.0
+log_min = 1000.0
+decimals = 0
+condition = "always"
+
+[gauge.distance_moon]
+label = "Mondabstand"
+unit = "km"
+full_scale = 500000.0
+log_min = 1000.0
+decimals = 0
+condition = "has_moon"
+
+[gauge.speed_earth]
+label = "v Erde"
+unit = "km/h"
+full_scale = 40000.0
+decimals = 0
+condition = "always"
+
+[gauge.speed_moon]
+label = "v Mond"
+unit = "km/h"
+full_scale = 40000.0
+decimals = 0
+condition = "has_moon"
+
+[gauge.range]
+label = "Abstand"
+unit = "m"
+full_scale = 1.0e6
+log_min = 0.1
+decimals = 1
+condition = "docking"
+
+[gauge.closing_rate]
+label = "Annäherung"
+unit = "m/s"
+full_scale = 1.0
+decimals = 2
+signed = true
+condition = "docking"
+
+[gauge.g_load]
+label = "Beschleunigung"
+unit = "g"
+full_scale = 6.0
+decimals = 2
+condition = "powered_or_aero"
+
+[gauge.dynamic_pressure]
+label = "Staudruck"
+unit = "kPa"
+full_scale = 40.0
+decimals = 1
+condition = "aero"
+
+[gauge.mach]
+label = "Mach"
+unit = ""
+full_scale = 30.0
+decimals = 2
+condition = "continuum_aero"
+
+[gauge.heat_flux]
+label = "Wärmestrom"
+unit = "kW/m²"
+full_scale = 2000.0
+decimals = 0
+condition = "heating"
+
+[gauge.heat_load]
+label = "Wärmelast"
+unit = "MJ/m²"
+full_scale = 1000.0
+decimals = 1
+condition = "heating"

@@ -14,30 +14,6 @@ const GROUP_NAME_BASELINE_PX := 888.0
 const GROUP_NAME_SIZE := 15
 const GROUP_NAME_ALPHA := 0.9
 
-## Gauge specs: label (German), unit, full scale of the arc, log_min > 0 = logarithmic arc from log_min to full scale,
-## maximum decimals (fewer for large values), signed = the arc fills left/right from the top.
-const GAUGES := {
-	# Treibstoff (Haupt- und Header-Tanks): all main-engine propellant of the body, main + header tanks
-	"propellant":{"label": "Treibstoff", "unit": "%", "full_scale": 100.0, "decimals": 0},
-	"speed_surface": {"label": "Geschwindigkeit", "unit": "km/h", "full_scale": 30000.0, "decimals": 0},
-	"speed_inertial": {"label": "Inertial", "unit": "km/h", "full_scale": 40000.0, "decimals": 0},
-	"altitude": {"label": "Höhe", "unit": "km", "full_scale": 400000.0, "log_min": 0.1, "decimals": 1},
-	"vertical_speed": {"label": "Vertikal", "unit": "m/s", "full_scale": 2000.0, "decimals": 1, "signed": true},
-	"apoapsis": {"label": "Apoapsis", "unit": "km", "full_scale": 400000.0, "log_min": 10.0, "decimals": 0},
-	"periapsis": {"label": "Periapsis", "unit": "km", "full_scale": 400000.0, "log_min": 10.0, "decimals": 0},
-	"distance_earth": {"label": "Erdabstand", "unit": "km", "full_scale": 500000.0, "log_min": 1000.0, "decimals": 0},
-	"distance_moon": {"label": "Mondabstand", "unit": "km", "full_scale": 500000.0, "log_min": 1000.0, "decimals": 0},
-	"speed_earth": {"label": "v Erde", "unit": "km/h", "full_scale": 40000.0, "decimals": 0},
-	"speed_moon": {"label": "v Mond", "unit": "km/h", "full_scale": 40000.0, "decimals": 0},
-	"range": {"label": "Abstand", "unit": "m", "full_scale": 1.0e6, "log_min": 0.1, "decimals": 1},
-	"closing_rate": {"label": "Annäherung", "unit": "m/s", "full_scale": 1.0, "decimals": 2, "signed": true},
-	"g_load": {"label": "Beschleunigung", "unit": "g", "full_scale": 6.0, "decimals": 2},
-	"dynamic_pressure": {"label": "Staudruck", "unit": "kPa", "full_scale": 40.0, "decimals": 1},
-	"mach": {"label": "Mach", "unit": "", "full_scale": 30.0, "decimals": 2},
-	"heat_flux": {"label": "Wärmestrom", "unit": "kW/m²", "full_scale": 2000.0, "decimals": 0},
-	"heat_load": {"label": "Wärmelast", "unit": "MJ/m²", "full_scale": 1000.0, "decimals": 1},
-}
-
 var world: World
 
 var top_bar := TopBar.new()
@@ -67,11 +43,14 @@ func _init() -> void:
 	mission_clock.position = timeline_arc.position
 	add_child(mission_clock)
 	add_child(engine_gauge)
-	for id: String in GAUGES:
+	var specs := GaugeConfig.shared().gauges  ## gauge specs: see config/ui/webcast_gauges.toml
+	for id: String in specs:
+		if id == "engines":  # drawn by the engine gauge
+			continue
 		var gauge := RoundGauge.new()
-		gauge.label = GAUGES[id]["label"]
-		gauge.unit = GAUGES[id]["unit"]
-		gauge.signed = GAUGES[id].get("signed", false)
+		gauge.label = specs[id]["label"]
+		gauge.unit = specs[id]["unit"]
+		gauge.signed = specs[id].get("signed", false)
 		add_child(gauge)
 		gauges[id] = gauge
 	_hide_body_gauges()
@@ -191,7 +170,7 @@ func _place(id: String, x: float, telemetry: Dictionary, docking: Dictionary) ->
 	var value := gauge_value(id, telemetry, docking)
 	gauge.visible = true
 	gauge.position = Vector2(x, GAUGE_Y_PX)
-	gauge.show_value(RoundGauge.format_number(value, _decimals(GAUGES[id], value)), gauge_fraction(id, value))
+	gauge.show_value(RoundGauge.format_number(value, _decimals(GaugeConfig.shared().gauges[id], value)), gauge_fraction(id, value))
 
 
 func _hide_body_gauges() -> void:
@@ -228,7 +207,7 @@ static func gauge_value(id: String, t: Dictionary, docking: Dictionary) -> float
 
 ## Arc fill of the gauge: 0..1, signed gauges -1..1.
 static func gauge_fraction(id: String, value: float) -> float:
-	var spec: Dictionary = GAUGES[id]
+	var spec: Dictionary = GaugeConfig.shared().gauges[id]
 	var full := float(spec["full_scale"])
 	if spec.get("signed", false):
 		return clampf(value / full, -1.0, 1.0)
