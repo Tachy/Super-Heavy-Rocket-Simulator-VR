@@ -51,6 +51,10 @@ func _process(_delta: float) -> bool:
 			_fly_vehicle(world)
 		if _args.has("webcast"):
 			_fly_mission(world)
+			cam = world.camera  # the mission's focus switch resets the camera: the requested view again
+			if _args.has("yaw"): cam.yaw = float(_args["yaw"])
+			if _args.has("pitch"): cam.pitch = float(_args["pitch"])
+			if _args.has("distance"): cam.distance_m = float(_args["distance"])
 		if _args.has("tower_arms_deg"):
 			for view in world.towers:
 				view.preview_opening_rad = deg_to_rad(float(_args["tower_arms_deg"]))
