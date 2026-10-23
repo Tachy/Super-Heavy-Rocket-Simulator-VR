@@ -18,6 +18,10 @@ explain (standing decision 2026-10-14).
   `config/vehicles/falcon9_block5.toml` (`separation_delay_s` 4.5 s [D], `upper_ignition_delay_s` 6.0 s [D], from the
   CRS-35 / Starlink webcast tables, `docs/subsystems.md` "Staging sequence"). The memory note was stale. No work.
 
+- Grid fins as a control of the landing-burn planner (SCvx): possible later follow-up (user 2026-10-23), with the
+  question whether they save measurable propellant at landing-burn speeds. They already steer the coast/entry and
+  support the attitude control in flight.
+
 ## Parts
 
 ### F1 Parallel filtered tests (`tools/build.ps1`)
