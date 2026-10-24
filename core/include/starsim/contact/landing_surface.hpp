@@ -60,7 +60,7 @@ private:
 // centre), x east, y north, z up. Flat unless a field is given.
 struct LandingSurface {
     // A drone ship's deck: a rectangle at z = 0 over the sea at z = -freeboard_m. Held on station, level here; with a
-    // sea state the leg landing evaluates it in the moving deck frame (LegLandingSim::set_deck_motion).
+    // sea state the leg landing evaluates it in the moving deck frame with the sea at the mean level (DeckSeaField).
     struct Deck {
         double half_length_m = 0.0;  // along the long axis
         double half_width_m = 0.0;
@@ -75,6 +75,23 @@ struct LandingSurface {
 
     using Support = SurfaceSupport;
     Support below(double east_m, double north_m) const;
+};
+
+// A moving drone-ship deck seen from its deck-attached frame (the site frame carried along by the deck's heave, roll
+// and pitch: `carrier_to_site`, origin `carrier_origin_site_m` = the deck centre): inside the deck rectangle the deck
+// at z = 0 (as LandingSurface::Deck), beside it the sea at the MEAN sea level - the site-frame plane z = -freeboard,
+// which does not move with the deck (spec goal 3). That plane, expressed in the carrier frame, is the height returned
+// over water: (-freeboard - o_z - M_20 x - M_21 y) / M_22, normal M^T e_z (a point is below it exactly when its site z
+// is below -freeboard).
+class DeckSeaField final : public SurfaceField {
+public:
+    DeckSeaField(const LandingSurface::Deck& deck, const math::Mat3& carrier_to_site, const math::Vec3& carrier_origin_site_m);
+    SurfaceSupport below(double east_m, double north_m) const override;
+
+private:
+    LandingSurface::Deck deck_;
+    math::Mat3 carrier_to_site_;
+    math::Vec3 carrier_origin_site_m_;
 };
 
 }  // namespace starsim::contact

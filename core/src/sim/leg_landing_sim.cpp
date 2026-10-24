@@ -77,6 +77,32 @@ void LegLandingSim::set_deck_motion(std::shared_ptr<const contact::DeckMotion> m
     sea_origin_ = sea_origin;
 }
 
+void LegLandingSim::change_deck_motion(std::shared_ptr<const contact::DeckMotion> motion, time::Epoch sea_origin,
+                                       const std::vector<vehicle::FlightBody*>& bodies,
+                                       const vehicle::FlightEnvironment& env, time::Epoch epoch) {
+    const auto frame = vehicle::reference_body_of(env, site_.body).frame(epoch);
+    std::vector<vehicle::FlightBody*> landed;
+    for (auto* body : bodies) {
+        const auto it = tracks_.find(body);
+        if (it == tracks_.end() || it->second.touchdown != LegTouchdown::Landed || !body->resting()) continue;
+        landed.push_back(body);
+        if (it->second.held_bottom_m) {  // riding the old motion: fixed where it is now (its velocity: the Earth's)
+            body->hold_landed(frame, site_.body);
+            it->second.held_bottom_m.reset();
+        }
+    }
+    set_deck_motion(std::move(motion), sea_origin);
+    if (!deck_motion_ || landed.empty()) return;
+    const auto c = carrier(epoch);
+    for (auto* body : landed) {  // the new motion takes them along from their pose relative to the deck now
+        auto& tr = tracks_.at(body);
+        const auto pose = relative_pose(site_pose(*body, frame), c);
+        tr.held_body_to_deck = pose.body_to_site;
+        tr.held_bottom_m = pose.cg_m - pose.body_to_site * Vec3{pose.cg_station_m, 0.0, 0.0};
+    }
+    follow_deck(landed, env, epoch);
+}
+
 std::optional<contact::DeckPose> LegLandingSim::deck_pose(time::Epoch epoch) const {
     if (!deck_motion_) return std::nullopt;
     return deck_motion_->pose(epoch - sea_origin_);
@@ -142,6 +168,10 @@ void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
     // A moving deck: contact in the deck-attached frame, the wrench rotated back to the site frame.
     const std::optional<Carrier> deck = deck_motion_ ? std::optional<Carrier>(carrier(epoch)) : std::nullopt;
     const math::Mat3 contact_to_gcrf = deck ? site_to_gcrf * deck->to_site : site_to_gcrf;
+    // The deck supports in the carrier frame; the water beside it stays at the mean sea level (DeckSeaField).
+    contact::LandingSurface moving;
+    if (deck) moving.field = std::make_shared<contact::DeckSeaField>(*surface_.deck, deck->to_site, deck->origin_site_m);
+    const contact::LandingSurface& contact_surface = deck ? moving : surface_;
     for (auto* body : bodies) {
         const auto& v = body->vehicle();
         if (!v.has_landing_legs()) continue;
@@ -167,12 +197,12 @@ void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
         if (v.leg_deployment() < 1.0) {  // legs still moving: no support, only the base can touch
             auto base_only = tr.geometry;
             base_only.feet.clear();
-            tr.contact = contact::leg_contact(base_only, tr.crushed_m, contact_pose, surface_);
+            tr.contact = contact::leg_contact(base_only, tr.crushed_m, contact_pose, contact_surface);
             continue;
         }
         const auto mass = v.mass_properties();
         const contact::FrictionLimit limit{mass.mass_kg, mass.inertia_kg_m2, tick_s_};
-        tr.contact = contact::leg_contact(tr.geometry, tr.crushed_m, contact_pose, surface_, &limit);
+        tr.contact = contact::leg_contact(tr.geometry, tr.crushed_m, contact_pose, contact_surface, &limit);
         if (tr.contact.feet_in_contact > 0) {
             body->apply_external_wrench(contact_to_gcrf * tr.contact.force_n,
                                         body->state().attitude.inverse_rotate(contact_to_gcrf * tr.contact.torque_nm));

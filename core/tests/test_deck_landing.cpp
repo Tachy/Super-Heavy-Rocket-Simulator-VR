@@ -7,6 +7,9 @@
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <memory>
+#include <optional>
+#include <vector>
 
 #include "return_scenario.hpp"
 #include "starsim/config/drone_ship_config.hpp"
@@ -168,8 +171,11 @@ TEST_CASE("A fixed deck gives exactly today's contact", "[legs][deck_motion][asd
     CHECK(same_state(flag_off.state, today.state));
 }
 
-TEST_CASE("A stage set down on a heaving deck lands and rides it", "[legs][deck_motion][asds]") {
-    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+namespace {
+
+// Hs 2 m / Tp 8 s, waves 45 deg off the bow; the stage dropped 1 m above the deck centre at 1 m/s relative sink,
+// engines off, until it has landed.
+void land_on_heaving_deck(sim::FlightSession& session) {
     const auto t0 = start();
     session.advance_to(t0);  // no bodies: the clock jumps (the sea's time origin is taken from it)
     session.set_launch_site(ship());
@@ -195,6 +201,13 @@ TEST_CASE("A stage set down on a heaving deck lands and rides it", "[legs][deck_
     std::printf("[deck] landed after %.2f s, crush strokes", session.epoch() - t0);
     for (double c : crushed) std::printf(" %.3f", c);
     std::printf(" m\n");
+}
+
+}  // namespace
+
+TEST_CASE("A stage set down on a heaving deck lands and rides it", "[legs][deck_motion][asds]") {
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    land_on_heaving_deck(session);
 
     RideError worst;
     double heave_min = 1e9, heave_max = -1e9;
@@ -294,4 +307,95 @@ TEST_CASE("A pad landing ignores the sea state", "[legs][deck_motion]") {
     CHECK(today.touchdown == sim::LegTouchdown::Landed);
     CHECK(rough.touchdown == today.touchdown);
     CHECK(same_state(rough.state, today.state));
+}
+
+TEST_CASE("The sea beside a moving deck stays at the mean sea level", "[legs][deck_motion]") {
+    // Deck heading north, heaved 0.5 m and rolled 3 deg starboard (east) down: 50 m west of the centre line the
+    // deck-attached frame stands ~2.6 m higher than the site frame, 50 m east ~2.6 m lower.
+    const auto deck = *ship().deck;
+    contact::DeckPose pose;
+    pose.heave_m = 0.5;
+    pose.roll_rad = 3.0 * deg;
+    const auto f = contact::deck_frame(pose, deck.heading_rad);
+    const auto level = contact::deck_frame(contact::DeckPose{}, deck.heading_rad).deck_to_site;
+    const math::Mat3 carrier_to_site = f.deck_to_site * transpose(level);
+    contact::LandingSurface moving;
+    moving.field = std::make_shared<contact::DeckSeaField>(deck, carrier_to_site, f.origin_site_m);
+    contact::LandingSurface fixed;  // the deck's own water, at -freeboard in whatever frame it is evaluated
+    fixed.deck = deck;
+    // water at a point given in site coordinates: a base-ring point there (leg_contact's water flag)
+    auto water = [&](const contact::LandingSurface& surface, const Vec3& site_m) {
+        contact::LegGeometry g;
+        g.base_ring = {Vec3{}};
+        contact::SitePose p;
+        p.cg_m = transpose(carrier_to_site) * (site_m - f.origin_site_m);  // carrier frame
+        std::vector<double> crushed;
+        return contact::leg_contact(g, crushed, p, surface).water;
+    };
+    const double sea = -deck.freeboard_m;
+    {  // west: 0.1 m above the mean sea, but below -freeboard in the carrier frame
+        const Vec3 site{-50.0, 0.0, sea + 0.1};
+        REQUIRE((transpose(carrier_to_site) * (site - f.origin_site_m)).z < sea);
+        CHECK_FALSE(water(moving, site));
+        CHECK(water(fixed, site));  // the sea moving with the deck would have caught it
+    }
+    {  // east: 0.1 m below the mean sea, but above -freeboard in the carrier frame
+        const Vec3 site{50.0, 0.0, sea - 0.1};
+        REQUIRE((transpose(carrier_to_site) * (site - f.origin_site_m)).z > sea);
+        CHECK(water(moving, site));
+        CHECK_FALSE(water(fixed, site));
+    }
+    // on the deck the support is the deck itself (z = 0 of the carrier frame)
+    const auto on_deck = moving.below(10.0, 20.0);
+    CHECK_FALSE(on_deck.water);
+    CHECK(on_deck.height_m == 0.0);
+}
+
+TEST_CASE("Changing the sea under a landed stage moves it without a jump", "[legs][deck_motion][asds]") {
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    land_on_heaving_deck(session);
+    session.advance_to(session.epoch() + 10.0);
+    auto cg_site = [&] { return site_state(session, session.body(0)).cg_m; };
+    auto ride_velocity_error = [&] {
+        double worst = 0.0;
+        for (int i = 0; i < 20; ++i) {
+            session.advance_to(session.epoch() + 0.5);
+            worst = std::max(worst, ride_error(session).velocity_mps);
+        }
+        return worst;
+    };
+    // the flag off: held fixed where it is, at rest relative to the Earth (tolerances: the test sees the Earth through
+    // SPICE, the session through its interpolated orientation, sub-mm)
+    Vec3 before = cg_site();
+    session.set_deck_motion(false);
+    CHECK_FALSE(session.deck_pose());
+    CHECK(norm(cg_site() - before) < 1e-6);
+    CHECK(norm(site_state(session, session.body(0)).velocity_mps) < 1e-5);
+    before = cg_site();
+    session.advance_to(session.epoch() + 10.0);
+    CHECK(norm(cg_site() - before) < 1e-3);
+    // on again: no jump, then it rides the deck from its pose relative to the deck now
+    before = cg_site();
+    session.set_deck_motion(true);
+    REQUIRE(session.deck_pose());
+    CHECK(norm(cg_site() - before) < 1e-6);
+    double error = ride_velocity_error();
+    std::printf("[deck] after the flag on: velocity error %.6f m/s\n", error);
+    CHECK(error < 0.01);
+    // a new sea (another time origin and spectrum): no jump, rides the new deck motion
+    before = cg_site();
+    session.set_sea_state(environment::SeaStateConfig{1.5, 7.0, 90.0 * deg, 2});
+    CHECK(norm(cg_site() - before) < 1e-6);
+    error = ride_velocity_error();
+    std::printf("[deck] after the new sea: velocity error %.6f m/s\n", error);
+    CHECK(error < 0.01);
+    // no sea: held fixed where it is
+    before = cg_site();
+    session.set_sea_state(std::nullopt);
+    CHECK(norm(cg_site() - before) < 1e-6);
+    CHECK(norm(site_state(session, session.body(0)).velocity_mps) < 1e-5);
+    before = cg_site();
+    session.advance_to(session.epoch() + 30.0);  // a coast
+    CHECK(norm(cg_site() - before) < 1e-3);
+    CHECK(session.body(0).resting());
 }

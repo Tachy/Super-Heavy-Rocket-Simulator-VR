@@ -1300,10 +1300,11 @@ std::shared_ptr<const contact::DeckMotion> FlightSession::deck_motion_for(const 
     return std::make_shared<const contact::DeckMotion>(*sea_state_, site.deck->hull, site.deck->heading_rad);
 }
 
-// Only the landing zone's deck moves (a launch site's leg site is a pad or terrain, never a deck).
+// Only the landing zone's deck moves (a launch site's leg site is a pad or terrain, never a deck). Stages already
+// landed on it change over without a jump (LegLandingSim::change_deck_motion).
 void FlightSession::refresh_deck_motion() {
     if (!landing_zone_ || !landing_zone_->deck || !legs_->surface().deck) return;
-    legs_->set_deck_motion(deck_motion_for(*landing_zone_), sea_origin_);
+    legs_->change_deck_motion(deck_motion_for(*landing_zone_), sea_origin_, body_pointers(), env_, epoch_);
 }
 
 void FlightSession::set_sea_state(std::optional<environment::SeaStateConfig> sea) {

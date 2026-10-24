@@ -54,4 +54,19 @@ LandingSurface::Support LandingSurface::below(double east_m, double north_m) con
     return {0.0, false};
 }
 
+DeckSeaField::DeckSeaField(const LandingSurface::Deck& deck, const math::Mat3& carrier_to_site,
+                           const Vec3& carrier_origin_site_m)
+    : deck_(deck), carrier_to_site_(carrier_to_site), carrier_origin_site_m_(carrier_origin_site_m) {}
+
+SurfaceSupport DeckSeaField::below(double east_m, double north_m) const {
+    LandingSurface level;
+    level.deck = deck_;
+    const auto on_deck = level.below(east_m, north_m);
+    if (!on_deck.water) return on_deck;
+    // site z of the carrier point (x, y, z): o_z + M_20 x + M_21 y + M_22 z; the sea where it is -freeboard
+    const auto& m = carrier_to_site_.m;
+    const double height = (-deck_.freeboard_m - carrier_origin_site_m_.z - m[2][0] * east_m - m[2][1] * north_m) / m[2][2];
+    return {height, true, Vec3{m[2][0], m[2][1], m[2][2]}};
+}
+
 }  // namespace starsim::contact

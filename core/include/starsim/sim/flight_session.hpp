@@ -705,7 +705,9 @@ public:
     // heaves, rolls and pitches with it (contact::DeckMotion) while the fidelity flag deck_motion is on (default) and
     // the sea is not calm; nullopt / calm / flag off: the fixed level deck, exactly as before. The sea's time origin is
     // the session epoch at this call rounded down to a whole TDB hour [call] (deterministic per mission). Set it after
-    // the landing zone and before a stage lands; it sets the current leg site's deck motion (pads ignore it).
+    // the landing zone; it sets the current leg site's deck motion (pads ignore it). A stage already landed on the
+    // deck (this call or set_deck_motion) changes over without a jump: held fixed where it is, then taken along by a
+    // new motion from its pose relative to the deck now.
     void set_sea_state(std::optional<environment::SeaStateConfig> sea);
     const std::optional<environment::SeaState>& sea_state() const { return sea_state_; }
     void set_deck_motion(bool on);  // fidelity flag

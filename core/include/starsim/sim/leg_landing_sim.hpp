@@ -73,11 +73,17 @@ public:
     contact::SitePose site_pose(const vehicle::FlightBody& body, const environment::BodyFrame& frame) const;
 
     // The deck of a drone-ship site moves with the sea (sea state, Task 3): contact and judgement are evaluated in the
-    // moving deck frame against the unchanged LandingSurface::Deck, and a landed stage rides the deck
-    // (FlightBody::move_landed_hold). `sea_origin`: the sea's time origin (DeckMotion time = epoch - sea_origin).
-    // nullptr: the fixed deck (exactly as without). Needs a deck surface; set it before a stage lands (a landed
-    // stage's deck-relative pose is taken at its landing).
+    // moving deck frame (the deck rectangle of LandingSurface::Deck; the water beside it at the mean sea level,
+    // contact::DeckSeaField), and a landed stage rides the deck (FlightBody::move_landed_hold). `sea_origin`: the
+    // sea's time origin (DeckMotion time = epoch - sea_origin). nullptr: the fixed deck (exactly as without). Needs a
+    // deck surface. For a site without landed stages; change_deck_motion with stages landed.
     void set_deck_motion(std::shared_ptr<const contact::DeckMotion> motion, time::Epoch sea_origin);
+    // Changes the motion under stages already landed on the deck, without a jump: each is first held fixed where it is
+    // at `epoch` (its state then), then a new motion takes it along from its pose relative to the deck at `epoch`
+    // (nullptr: it stays fixed to the Earth there).
+    void change_deck_motion(std::shared_ptr<const contact::DeckMotion> motion, time::Epoch sea_origin,
+                            const std::vector<vehicle::FlightBody*>& bodies, const vehicle::FlightEnvironment& env,
+                            time::Epoch epoch);
     const contact::DeckMotion* deck_motion() const { return deck_motion_.get(); }
     std::optional<contact::DeckPose> deck_pose(time::Epoch epoch) const;  // nullopt: no deck motion
     // Moves every stage landed on the moving deck to the deck's pose at `epoch` (after_tick does it each tick; the
