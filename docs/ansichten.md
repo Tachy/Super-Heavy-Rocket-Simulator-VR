@@ -214,6 +214,24 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   die Anzeige ebenso, schon bevor das Fahrzeug zu sehen ist: Platzierung und Planung laufen in einem Befehl, das
   Fahrzeug erscheint erst mit dem fertigen Plan.
 
+### Boden und Gelände [Entschieden, umgesetzt 2026-10-24, M8 Plan B]
+
+- Unterhalb des Skalenraums (näher als 15 000 km) zeichnet ein gestreamtes Gelände Erde und Mond: genau die Oberfläche,
+  auf der die Physik steht (Relief, ebene Plateaus unter Rampen und Landezonen, Meer auf dem Geoid). Die Auflösung
+  folgt dem Abstand zur Kamera; nahe den Startplätzen bis 1 m Gitterweite (3DEP), sonst GLO-30 / ETOPO bzw. LDEM_16
+  und die 20-m-Kacheln der Mondlandeplätze.
+- Luftbilder: NAIP (0,6 m) an Starbase und Cape, darunter ein eigenes Sentinel-2-Komposit (10 m), außerhalb die
+  globale Tagestextur; Übergänge ohne Farbsprung und ohne sichtbare Kante (aus der Ferne weich, kleine Bildflecken
+  blenden aus großer Entfernung ganz aus).
+- Meer: ruhige See mit Fresnel-Spiegelung, Sonnenglitzern und sanften Wellen (Normalen, keine Geometrie). Seegang
+  und Deckbewegung des Drohnenschiffs folgen später; der Himmel ist schwarz bis zum Atmosphären-Teil (der helle
+  Glitzerstreifen am Horizont wirkt bis dahin wie ein Leuchten).
+- Kein Aufpoppen: Detailstufen gehen gleitend ineinander über (Geomorphing); spät geladene Kacheln gleiten in einer
+  halben Sekunde aus der gröberen Fläche heraus. Ein Sprung zu einem anderen Ort (Tab) lädt in rund 8 s nach,
+  grob zuerst.
+- Mond: keine Schlagschatten (Kraterränder, Polschatten) - ein späterer Teil; am Pol bei tiefer Sonne ist der
+  Boden daher sehr dunkel.
+
 ### Weitere Außenansichten
 
 [Vorschlag] Umschaltbar per Taste / Bildschirm:

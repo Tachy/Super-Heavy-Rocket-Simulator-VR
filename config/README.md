@@ -366,3 +366,6 @@ NAIP -> the fitted Sentinel-2 composite of its area, per channel at 10 m. A gain
 Parallelism: tile writing and the Sentinel-2 composite blocks run on a process pool; the worker count is `--workers N`, else
 the CPUs usable by the process (`os.process_cpu_count()` / `os.cpu_count()`), capped by 80 % of the free memory
 (per-worker estimates in `imagery.py`); the chosen count is logged at start. The output does not depend on the count.
+The renderer (`game/world/terrain/imagery_source.gd`) reads `index.toml`: per terrain node the finest source covering it at
+about 256 texels across the node (levels between `min_level` and `max_level`) plus the next coarser source as base, blended
+over the coverage edge with a width of max(`fade_m`, camera distance x 0.05 rad) (`docs/subsystems.md` "Terrain rendering").

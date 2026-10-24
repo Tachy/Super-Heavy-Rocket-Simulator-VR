@@ -36,7 +36,9 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   Implemented so far: math, time, frames, ephemeris, spice (adapter), environment (gravity, reference bodies Earth and
   Moon: body-fixed frame, shape, atmosphere or vacuum; thermal radiation environment: Sun, Earth and Moon albedo and infrared;
   terrain: the lunar site tile + LDEM_16, the Earth terrain (3DEP 1 m / GLO-30 / ETOPO 2022 + site plateaus) and the
-  EGM2008 geoid as the sea level),
+  EGM2008 geoid as the sea level; one shared immutable instance per data set, `sim::shared_earth_terrain` /
+  `shared_lunar_terrain`, also read by the renderer through `StarsimCore.surface_samples`; on the Earth terrain a site's
+  leg landing tracks bodies within 5 km of the site),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates, energy- and J2-mean semi-major axis),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
@@ -185,7 +187,9 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   the site height (FlightBody::ground_height_m) with the coarse committed geoid as the sea. Site heights in
   `launch_sites.toml` are ellipsoidal [D] (`tools/data_pipeline/site_heights.py`; Starbase -21.11 m). Gentle contact
   (<= 3 m/s, <= 10 deg) rests, harder contact is an impact. Landing legs creep downhill (~0.05 m/s) on slopes >= 2 deg
-  and are never judged landed there (off-plateau only; not fixed). Sky is black (no atmosphere rendering).
+  and are never judged landed there (off-plateau only; not fixed). Sky is black (no atmosphere rendering); the sea's
+  Fresnel sky term is a placeholder colour and its grazing glint reads as a horizon glow until the atmosphere part.
+  Unverified: NAIP suggests the real OLP-1 mount stands some tens of metres WSW of our [E] site coordinates.
   Atmosphere: M8. Details: `docs/subsystems.md` "Earth terrain and geoid".
 - C++ sources are UTF-8 (/utf-8); UI strings in the core are German.
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
@@ -197,6 +201,13 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   bodies beyond 1.5e7 m are drawn closer and smaller with exact angular size), `orbit_camera.gd`
   (camera always at the render origin, true position in float64 GCRF), `frames.gd` (GCRF -> render axes:
   (x,y,z) -> (y,z,x), north = +Y), `star_field.gd`, `orbit_line.gd`, `sim_clock.gd`.
+- `game/world/terrain/` (M8 Plan B): streamed terrain of the Earth and the Moon - `terrain_quadtree.gd` (cube-sphere
+  quadtree: LOD, worker builds, upload / release budgets, morph ranges), `terrain_node_builder.gd` (node mesh data,
+  worker-safe), `cube_sphere.gd`, `height_source.gd` (core surface or flat rule), `imagery_source.gd` (NAIP / Sentinel-2
+  tile crops), `water_waves.gd`; shaders `terrain_earth/moon.gdshader`, `terrain_morph.gdshaderinc`,
+  `water.gdshaderinc`. Performance run (GPU): `res://tests/terrain_perf.gd`. Details: `docs/subsystems.md` "Terrain
+  rendering". A fresh checkout needs one `godot --headless --path game --import` before `--script` runs resolve new
+  `class_name` scripts.
 - `game/shaders/`: Earth/Moon lighting in body-local metres; `eclipse.gdshaderinc` mirrors
   `core/src/environment/eclipse.cpp` - change both together.
 - Rendering uses APPARENT positions (light time + aberration) for Sun and Moon; geometric positions
