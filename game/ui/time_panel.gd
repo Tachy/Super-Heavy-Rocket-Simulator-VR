@@ -93,7 +93,22 @@ func _process(_delta: float) -> void:
 		var fraction: float = world.core.solar_eclipse_fraction(site["latitude_deg"], site["longitude_deg"], site["height_m"], t)
 		if fraction > 0.0:
 			lines.append("Sonnenbedeckung %s: %.1f %%" % [site["name"], fraction * 100.0])
+	if world.flight.sim.is_active():
+		var sea := sea_state_line(world.flight.sim.landing_zone())
+		if sea != "":
+			lines.append(sea)
 	_info_label.text = "\n".join(lines)
+
+
+## The sea state and deck motion while a drone ship is the landing zone (FlightSim.landing_zone), else "".
+static func sea_state_line(zone: Dictionary) -> String:
+	if not zone.get("has_deck", false):
+		return ""
+	var sea: Dictionary = zone.get("sea_state", {})
+	if sea.is_empty():
+		return "Seegang ruhig - Deck in Ruhe"
+	return "Seegang Hs %.1f m, Tp %.0f s - Deck: Hub %+.2f m, Rollen %+.1f°, Stampfen %+.1f°" % [sea["hs_m"], sea["tp_s"],
+			zone.get("deck_heave_m", 0.0), zone.get("deck_roll_deg", 0.0), zone.get("deck_pitch_deg", 0.0)]
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

@@ -6,6 +6,8 @@
 #          surface there, --eye_height=2 above it) with --azimuth / --elevation / --fov
 # Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
 # Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed).
+# Drone ship: a mission with a deck (--mission=falcon9_asds_sea --at_event=landed,20 --view=1) prints the viewed CG above
+#          the drawn deck against its height above the feet.
 # Webcast overlay: --webcast [--mission=starship_leo] (start the mission at --utc) [--t_plus=75] (advance to T+75 s)
 #          or [--at_event=entry_interface,<offset s>[,<n>]] (to the n-th event of that kind in the mission timeline,
 #          recorded first, else predicted; flies until it appears)
@@ -83,6 +85,8 @@ func _process(_delta: float) -> bool:
 			print("render_check: timeline scale ", arc.time_scale, " now ", arc.now_tdb_s, " events ", arc.events.size())
 		if world.flight.sim.is_active() and bool(world.flight.sim.lunar_site().get("present", false)):
 			_print_lunar_placement(world)
+		if world.drone_ship != null:
+			_print_deck_placement(world)
 		var out: String = _args.get("out", "user://render_check.png")
 		var error := root.get_viewport().get_texture().get_image().save_png(out)
 		print("render_check: saved %s (error %d)" % [out, error])
@@ -250,6 +254,21 @@ func _advance(sim: FlightSim, target: float) -> void:
 # Lunar missions: the viewed body's CG taken into the drawn Moon's frame (the game's moon.fixed_to_gcrf, the frame of
 # the terrain mesh) against the landing site and the core's surface there; agreeing with the session's own
 # altitude_terrain_m shows that the render places the site where the simulation has it.
+func _print_deck_placement(world: World) -> void:
+	var sim := world.flight.sim
+	var index := world.view_target.resolve(sim)
+	if index < 0:
+		return
+	# the viewed body's CG in the drawn deck's frame (x bow, y port, z deck normal; origin the deck centre on its top)
+	var cg_render := Frames.to_render(sim.body_position_gcrf_m(index) - world.camera.position_gcrf_m)
+	var cg_deck := Frames.from_render(world.drone_ship.deck_transform().affine_inverse() * cg_render)
+	var legs: Dictionary = sim.body_legs(index)
+	var expected := sim.body_cg_station_m(index) - float(legs.get("foot_station_m", NAN))
+	print("render_check: drone ship - CG %.3f m above the drawn deck (CG above the feet %.3f m), %.2f m from its centre; "
+			% [cg_deck.z, expected, Vector2(cg_deck.x, cg_deck.y).length()]
+			+ "%s" % TimePanel.sea_state_line(sim.landing_zone()))
+
+
 func _print_lunar_placement(world: World) -> void:
 	var sim := world.flight.sim
 	var index := world.view_target.resolve(sim)

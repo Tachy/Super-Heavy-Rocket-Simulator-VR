@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 
+#include "starsim/contact/deck_motion.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/mat3.hpp"
@@ -313,6 +314,30 @@ godot::Dictionary landing_zone(const sim::FlightSession& session) {
         d["freeboard_m"] = zone.deck->freeboard_m;
         d["heading_deg"] = zone.deck->heading_rad * constants::rad_to_deg;
         d["sea_height_m"] = zone.height_m - zone.deck->freeboard_m;
+        d["hull_length_m"] = zone.deck->hull.length_m;
+        d["hull_beam_m"] = zone.deck->hull.beam_m;
+        d["hull_draft_m"] = zone.deck->hull.draft_m;
+        // the deck's pose now (level without a moving sea) and its axes from the core's deck frame: the drawn ship is
+        // posed by the same transform the leg contact uses
+        const contact::DeckPose pose = session.deck_pose().value_or(contact::DeckPose{});
+        const contact::DeckFrame frame = contact::deck_frame(pose, zone.deck->heading_rad);
+        d["deck_moving"] = session.deck_pose().has_value();
+        d["deck_heave_m"] = pose.heave_m;
+        d["deck_roll_deg"] = pose.roll_rad * constants::rad_to_deg;
+        d["deck_pitch_deg"] = pose.pitch_rad * constants::rad_to_deg;
+        d["deck_heave_rate_mps"] = pose.heave_rate_mps;
+        d["deck_roll_rate_degps"] = pose.roll_rate_radps * constants::rad_to_deg;
+        d["deck_pitch_rate_degps"] = pose.pitch_rate_radps * constants::rad_to_deg;
+        d["deck_bow"] = to_godot(math::column(frame.deck_to_site, 0));
+        d["deck_port"] = to_godot(math::column(frame.deck_to_site, 1));
+        d["deck_normal"] = to_godot(math::column(frame.deck_to_site, 2));
+    }
+    if (const auto& sea = session.sea_state(); sea && !sea->calm()) {
+        godot::Dictionary state;
+        state["hs_m"] = sea->config().significant_wave_height_m;
+        state["tp_s"] = sea->config().peak_period_s;
+        state["heading_deg"] = sea->config().heading_rad * constants::rad_to_deg;
+        d["sea_state"] = state;
     }
     return d;
 }

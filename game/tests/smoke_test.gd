@@ -231,6 +231,38 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 				"Earth terrain: sea at the ship, pad plateau at OLP-1")
 	else:
 		print("  (Erdgelände fehlt: earth_surface not checked)")
+	# Sea state and deck motion (Task 6): falcon9_asds is calm (no sea state, level deck); the hull from drone_ships.toml
+	_check(not zone.has("sea_state") and float(zone.get("deck_heave_m", NAN)) == 0.0
+			and float(zone.get("deck_roll_deg", NAN)) == 0.0 and float(zone.get("deck_pitch_deg", NAN)) == 0.0
+			and absf(float(zone.get("hull_length_m", 0.0)) - 91.4) < 1e-9
+			and absf(float(zone.get("hull_beam_m", 0.0)) - 30.5) < 1e-9
+			and absf(float(zone.get("hull_draft_m", 0.0)) - 3.0) < 1e-9,
+			"ASDS calm: no sea state, a level deck, the hull from drone_ships.toml")
+	_check(_ok(f9, f9.start_mission("falcon9_asds_sea", tdb)), "Falcon 9 drone-ship mission in a sea starts")
+	var sea_zone: Dictionary = f9.landing_zone()
+	var sea: Dictionary = sea_zone.get("sea_state", {})
+	_check(absf(float(sea.get("hs_m", 0.0)) - 2.5) < 1e-9 and absf(float(sea.get("tp_s", 0.0)) - 8.0) < 1e-9
+			and absf(float(sea.get("heading_deg", 0.0)) - 60.0) < 1e-9, "ASDS sea: the mission's sea state Hs 2.5 m, Tp 8 s, 60 deg")
+	_check(absf(float(sea_zone.get("heading_deg", 0.0)) - 60.0) < 1e-6, "ASDS sea: the deck turned along the waves (60 deg)")
+	var readout := TimePanel.sea_state_line(sea_zone)
+	_check(readout.begins_with("Seegang Hs 2.5 m, Tp 8 s - Deck: Hub ")
+			and TimePanel.sea_state_line(zone) == "Seegang ruhig - Deck in Ruhe" and TimePanel.sea_state_line({}) == "",
+			"time panel readout: '%s'" % readout)
+	var pose_seen := false  # the deck moves: some pose within 10 s differs from the level deck, all within the limits
+	var pose_sane := true
+	for k in range(5):
+		_advance(f9, tdb + 2.0 * (k + 1))
+		var z: Dictionary = f9.landing_zone()
+		var heave := float(z.get("deck_heave_m", NAN))
+		var roll := float(z.get("deck_roll_deg", NAN))
+		var pitch := float(z.get("deck_pitch_deg", NAN))
+		pose_sane = pose_sane and absf(heave) < 3.0 and absf(roll) < 10.0 and absf(pitch) < 10.0
+		pose_seen = pose_seen or absf(heave) > 1e-3 or absf(pitch) > 1e-3
+		var bow: Vector3 = z.get("deck_bow", Vector3.ZERO)
+		var normal: Vector3 = z.get("deck_normal", Vector3.ZERO)
+		pose_sane = pose_sane and absf(bow.length() - 1.0) < 1e-9 and absf(bow.dot(normal)) < 1e-9 \
+				and absf(rad_to_deg(asin(clampf(bow.z, -1.0, 1.0))) - pitch) < 1e-6
+	_check(pose_seen and pose_sane, "ASDS sea: the deck heaves and pitches (pose finite, axes orthonormal, bow up = pitch)")
 	var legs: Dictionary = f9.body_legs(0)
 	_check(legs.get("present", false) and (legs.get("azimuths_deg", []) as Array).size() == 4
 			and float(legs.get("deployment", 1.0)) == 0.0 and legs.get("touchdown", "x") == "", "Falcon 9 stack: four stowed legs")

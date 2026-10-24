@@ -223,9 +223,16 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
 - Luftbilder: NAIP (0,6 m) an Starbase und Cape, darunter ein eigenes Sentinel-2-Komposit (10 m), außerhalb die
   globale Tagestextur; Übergänge ohne Farbsprung und ohne sichtbare Kante (aus der Ferne weich, kleine Bildflecken
   blenden aus großer Entfernung ganz aus).
-- Meer: ruhige See mit Fresnel-Spiegelung, Sonnenglitzern und sanften Wellen (Normalen, keine Geometrie). Seegang
-  und Deckbewegung des Drohnenschiffs folgen später; der Himmel ist schwarz bis zum Atmosphären-Teil (der helle
+- Meer: See mit Fresnel-Spiegelung, Sonnenglitzern und Wellen (Normalen, keine Geometrie). Ohne Seegang sanfte
+  Wellen; hat die Mission Seegang, folgen die Wellen ihm (Wellenlänge aus Tp, Laufrichtung, Steilheit aus Hs; nur
+  Schattierung, nicht phasengleich mit der Deckbewegung). Der Himmel ist schwarz bis zum Atmosphären-Teil (der helle
   Glitzerstreifen am Horizont wirkt bis dahin wie ein Leuchten).
+- Drohnenschiff [umgesetzt 2026-10-24]: ist ein Drohnenschiff die Landezone, steht es dort als schlichter grauer Körper
+  (Rumpf mit Tiefgang und Freibord, Deck 91 x 52 m mit Flügeln, niedrige Wände an den Längsseiten, keine Logos) und hebt,
+  rollt und stampft mit der Deckbewegung der Physik; die gelandete Stufe steht auf dem gezeichneten Deck.
+- Seegang-Anzeige im Zeit-Panel, solange ein Drohnenschiff die Landezone ist: "Seegang Hs 2.5 m, Tp 8 s - Deck: Hub
+  +0.26 m, Rollen +0.0°, Stampfen -0.8°" (Hub über der Ruhelage, Rollen Steuerbord nach unten positiv, Stampfen Bug
+  hoch positiv); bei ruhiger See "Seegang ruhig - Deck in Ruhe".
 - Kein Aufpoppen: Detailstufen gehen gleitend ineinander über (Geomorphing); spät geladene Kacheln gleiten in einer
   halben Sekunde aus der gröberen Fläche heraus. Ein Sprung zu einem anderen Ort (Tab) lädt in rund 8 s nach,
   grob zuerst.

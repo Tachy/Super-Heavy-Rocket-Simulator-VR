@@ -67,7 +67,12 @@ public:
     godot::String mission_display_name() const;
     // Landing zone of a returning first stage: {present}; present: {origin_itrf_m (its surface: the deck top for a drone
     // ship), east, north, up (ITRF unit vectors), latitude_deg, longitude_deg, pad_radius_m, has_deck}; with a deck also
-    // {deck_length_m, deck_width_m, freeboard_m, heading_deg (long axis, clockwise from north), sea_height_m}.
+    // {deck_length_m, deck_width_m, freeboard_m, heading_deg (long axis, clockwise from north), sea_height_m,
+    // hull_length_m, hull_beam_m, hull_draft_m, deck_moving, deck_heave_m, deck_roll_deg (starboard down +),
+    // deck_pitch_deg (bow up +), their rates deck_heave_rate_mps / deck_roll_rate_degps / deck_pitch_rate_degps,
+    // deck_bow, deck_port, deck_normal (the tilted deck axes in the site frame east, north, up: contact::deck_frame;
+    // the deck rotates about its centre at height deck_heave_m)}: level and zero without a moving sea. A moving sea
+    // (not calm) adds sea_state {hs_m, tp_s, heading_deg (the waves travel towards, clockwise from north)}.
     godot::Dictionary landing_zone() const;
     // Catch tower geometry of a site (no flight needed, synchronous): {present, origin_itrf_m, east, north, up (ITRF
     // units), tower_direction, across, tower_center_m, tower_size_m, hinge_plus_m, hinge_minus_m (site frame), mount_*,

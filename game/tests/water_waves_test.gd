@@ -89,10 +89,33 @@ func _initialize() -> void:
 	# Resolved slope variance: sum (k A)^2 / 2, and below the Cox-Munk total at the glint wind (5 m/s) so the glint
 	# keeps a positive unresolved part.
 	var cox_munk_sigma2 := COX_MUNK_SIGMA2_0 + COX_MUNK_SIGMA2_PER_MPS * GLINT_WIND_MPS
-	var resolved := WaterWaves.resolved_slope_variance()
+	var resolved := waves.resolved_slope_variance()
 	_check(absf(resolved - 4.0 * 0.5 * 0.04 * 0.04) < 1e-15 and resolved < cox_munk_sigma2,
 			"resolved slope variance %.4f below Cox-Munk sigma^2 %.4f (unresolved %.4f)"
 			% [resolved, cox_munk_sigma2, cox_munk_sigma2 - resolved])
+
+	# A mission's sea state (Hs 2.5 m, Tp 8 s, towards 120 deg): the first octave at g Tp^2 / (2 pi), the others at the
+	# calm ratios, the octaves towards the heading, slope k_p Hs / 4 (resolved variance (k_p Hs / 2)^2 / 2); an empty
+	# sea state restores the calm set; a steep sea is capped.
+	waves.set_sea_state({"hs_m": 2.5, "tp_s": 8.0, "heading_deg": 120.0})
+	var peak := WaterWaves.STANDARD_GRAVITY_MPS2 * 64.0 / TAU
+	var k_p := TAU / peak
+	var east := Frames.to_render(Vector3(0, 0, 1).cross(waves._anchor_up).normalized())
+	var north := Frames.to_render(waves._anchor_up).cross(east)  # the anchored frame (WaterWaves._anchor)
+	var sea_ok := absf(waves.resolved_slope_variance() - 0.5 * pow(k_p * 2.5 / 2.0, 2.0)) < 1e-15
+	for i in WaterWaves.WAVELENGTHS_M.size():
+		var k := waves.wave_vector(i)
+		var heading := rad_to_deg(atan2(k.dot(east), k.dot(north)))
+		sea_ok = sea_ok and absf(k.length() - k_p * WaterWaves.WAVELENGTHS_M[0] / WaterWaves.WAVELENGTHS_M[i]) < 1e-12 \
+				and absf(fposmod(heading - 120.0 - WaterWaves.DIRECTION_OFFSETS_DEG[i] + 180.0, 360.0) - 180.0) < 1e-6 \
+				and absf(waves.vectors[i].w - k_p * 2.5 / 4.0) < 1e-15
+	_check(sea_ok, "sea state: peak wavelength %.1f m, octaves towards the heading, slope %.4f" % [peak, k_p * 2.5 / 4.0])
+	waves.set_sea_state({"hs_m": 8.0, "tp_s": 6.0, "heading_deg": 0.0})
+	_check(waves.slope == WaterWaves.MAX_SEA_SLOPE and waves.resolved_slope_variance() < cox_munk_sigma2,
+			"a steep sea is capped at slope %.2f (resolved variance below Cox-Munk)" % WaterWaves.MAX_SEA_SLOPE)
+	waves.set_sea_state({})
+	_check(waves.slope == WaterWaves.SLOPE and absf(waves.wave_vector(0).length() - TAU / WaterWaves.WAVELENGTHS_M[0]) < 1e-12,
+			"no sea state: the calm set again")
 
 	print("WATER WAVES TEST ","PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)

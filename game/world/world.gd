@@ -30,6 +30,7 @@ var earth := CelestialBody.new()
 var earth_terrain := TerrainQuadtree.new()  ## streamed Earth surface (relief + imagery) while not in scaled space
 var water_waves := WaterWaves.new()  ## the sea's wave set (water.gdshaderinc), phases at the camera
 var towers: Array[TowerView] = []  ## catch towers of the launch sites
+var drone_ship: DroneShipView = null  ## the drone ship of the flight's landing zone (while it has a deck)
 var moon := CelestialBody.new()
 var moon_terrain := TerrainQuadtree.new()  ## streamed lunar surface (LDEM_16 + site tiles) while not in scaled space
 var sun_disk := MeshInstance3D.new()
@@ -106,6 +107,9 @@ func update_world() -> void:
 	for view in towers:
 		var at_site: bool = flight.sim.is_active() and view.site_id == flight.launch_site_id
 		view.update_state(flight.sim.tower_state() if at_site else {})
+	var zone: Dictionary = flight.sim.landing_zone() if flight.sim.is_active() else {}
+	_update_drone_ship(zone)
+	water_waves.set_sea_state(zone.get("sea_state", {}))  # the calm set without a sea state
 	earth.fixed_to_gcrf = core.earth_fixed_to_gcrf(t)
 	moon.fixed_to_gcrf = core.moon_fixed_to_gcrf(t)
 	moon_gcrf_m = core.body_position_gcrf_m("moon", t)
@@ -344,6 +348,25 @@ func _setup_moon_terrain() -> void:
 
 
 ## Concrete pad disc at a launch site (Earth-fixed, top surface at the site height).
+## Creates, re-poses or removes the drone ship for the flight's landing zone (FlightSim.landing_zone; {}: no flight).
+func _update_drone_ship(zone: Dictionary) -> void:
+	if not zone.get("has_deck", false):
+		if drone_ship != null:
+			drone_ship.queue_free()
+			drone_ship = null
+		return
+	if drone_ship != null and not drone_ship.matches(zone):  # another mission's ship (or a re-placed one)
+		drone_ship.queue_free()
+		drone_ship = null
+	if drone_ship == null:
+		drone_ship = DroneShipView.new()
+		drone_ship.name = "DroneShip"
+		earth.add_child(drone_ship)
+		drone_ship.build(zone)
+	else:
+		drone_ship.update_pose(zone)
+
+
 func _make_pad(site: Dictionary) -> MeshInstance3D:
 	var disc := CylinderMesh.new()
 	disc.top_radius = 35.0

@@ -1,6 +1,6 @@
 class_name WaterWaves
 extends RefCounted
-## The calm sea's wave set (shading only: water.gdshaderinc perturbs the normal, the geometry stays at the geoid).
+## The sea's wave set (shading only: water.gdshaderinc perturbs the normal, the geometry stays at the geoid).
 ## Four directional Gerstner octaves with plane wave vectors in a tangent frame anchored near the camera. Their phases
 ## at the camera are computed here in double (k . x reaches 1e7 rad on the Earth, omega t 1e9 rad: float32 would lose
 ## both); the shader adds k . (fragment - camera), which is small and exact near the camera. The pattern is therefore
@@ -8,15 +8,22 @@ extends RefCounted
 ## re-anchored (vectors horizontal again; the pattern jumps) when the camera has moved REANCHOR_ANGLE_RAD away while it is
 ## higher than WAVE_FADE_END_M above the ellipsoid (no wave visible, the jump unseen); lower down only beyond
 ## LOW_REANCHOR_ANGLE_RAD, where the tilt of the anchored frame would start to show.
+## A mission's sea state (set_sea_state) rescales the set: the first octave at the dominant deep-water wavelength
+## g Tp^2 / (2 pi), the others at the calm set's ratios, all towards the waves' heading, slopes from Hs. Shading only:
+## the pattern matches the sea's scale and direction, not the phases of the core's deck motion (spec non-goal).
 
-## [E] Wavelengths of the four octaves (m): swell to ripples.
+## [E] Wavelengths of the four octaves of the calm set (m): swell to ripples.
 const WAVELENGTHS_M: Array[float] = [60.0, 23.0, 9.0, 3.5]
-## [E] Travel directions relative to WIND_HEADING_DEG (deg): spread so that no octave pair aligns.
+## [E] Travel directions relative to the travel heading (WIND_HEADING_DEG or the sea state's, deg): spread so that
+## no octave pair aligns.
 const DIRECTION_OFFSETS_DEG: Array[float] = [0.0, 31.0, -37.0, 67.0]
 ## [E] Compass heading the waves travel towards (deg, from north through east).
 const WIND_HEADING_DEG := 60.0
-## [E] Slope k A of every octave: gentle (Cox-Munk adds the unresolved slopes in the glint).
+## [E] Slope k A of every octave of the calm set: gentle (Cox-Munk adds the unresolved slopes in the glint).
 const SLOPE := 0.04
+## [E] Upper bound of the slope k A of every octave in a sea state: the resolved variance 4 x 0.08^2 / 2 = 0.0128 stays
+## below the glint's Cox-Munk variance at its 5 m/s wind (0.0286), so the glint keeps an unresolved part.
+const MAX_SEA_SLOPE := 0.08
 ## [E] Gerstner steepness Q_i of every octave (lift Q_i k_i A_i); <= 1, the deep-water trochoid limit
 ## [S: GPU Gems 1, ch. 1 (Finch 2004): Q_i = 1 gives the sharpest crests, beyond it loops] (shader global
 ## water_wave_steepness).
@@ -35,7 +42,39 @@ const WAVE_FADE_END_M := 20000.0
 var vectors := Projection()
 ## Phase of each wave at the camera (rad, [0, 2 pi)) at the update's instant (shader global water_wave_phases).
 var phases := Vector4.ZERO
+## Wavelengths (m), slope k A of every octave and travel heading (deg, clockwise from north) in use: the calm set or
+## the sea state's.
+var wavelengths_m: Array[float] = WAVELENGTHS_M.duplicate()
+var slope := SLOPE
+var heading_deg := WIND_HEADING_DEG
 var _anchor_up := Vector3.ZERO  # Earth-fixed unit vector of the frame's anchor; zero: not anchored yet
+var _sea := {}  # the sea state in use (set_sea_state); empty: the calm set
+
+
+## Follows a sea state (FlightSim.landing_zone sea_state: hs_m, tp_s, heading_deg), or the calm set when it is empty.
+## The first octave takes the dominant (peak) deep-water wavelength g Tp^2 / (2 pi), the others the calm set's ratios;
+## every octave's slope is k_p Hs / 4, so that the resolved slope variance sum (k A)^2 / 2 = 4 (k_p Hs / 4)^2 / 2 equals
+## (k_p a_s)^2 / 2 of the significant wave (amplitude a_s = Hs / 2): it follows Hs (and k_p), capped at MAX_SEA_SLOPE.
+## (Hs 2.5 m, Tp 8 s: wavelength 99.9 m, slope 0.039 - close to the calm set's 0.04.) Re-anchors (the pattern jumps)
+## only when the values change.
+func set_sea_state(sea: Dictionary) -> void:
+	if sea == _sea:
+		return
+	_sea = sea.duplicate()
+	var hs := float(sea.get("hs_m", 0.0))
+	var tp := float(sea.get("tp_s", 0.0))
+	if hs <= 0.0 or tp <= 0.0:
+		wavelengths_m = WAVELENGTHS_M.duplicate()
+		slope = SLOPE
+		heading_deg = WIND_HEADING_DEG
+	else:
+		var peak_wavelength := STANDARD_GRAVITY_MPS2 * tp * tp / TAU
+		for i in WAVELENGTHS_M.size():
+			wavelengths_m[i] = peak_wavelength * WAVELENGTHS_M[i] / WAVELENGTHS_M[0]
+		slope = minf(TAU / peak_wavelength * hs / 4.0, MAX_SEA_SLOPE)
+		heading_deg = float(sea.get("heading_deg", WIND_HEADING_DEG))
+	if _anchor_up != Vector3.ZERO:
+		_anchor(_anchor_up)
 
 
 ## Recomputes the wave vectors (on re-anchoring) and the phases for a camera at camera_fixed_m (Earth-fixed metres)
@@ -57,8 +96,8 @@ func wave_vector(i: int) -> Vector3:
 
 ## Slope variance the octaves resolve at full strength (sum (k A)^2 / 2 of sinusoids); the shader takes it (faded with
 ## the octaves) out of the glint's Cox-Munk variance.
-static func resolved_slope_variance() -> float:
-	return WAVELENGTHS_M.size() * 0.5 * SLOPE * SLOPE
+func resolved_slope_variance() -> float:
+	return wavelengths_m.size() * 0.5 * slope * slope
 
 
 ## Angle the camera may move from the anchor before the frame re-anchors (rad): small while no wave is visible (the
@@ -72,8 +111,8 @@ static func reanchor_angle_rad(camera_fixed_m: Vector3) -> float:
 
 
 ## Angular frequency of octave i (rad/s), deep-water dispersion.
-static func angular_frequency(i: int) -> float:
-	return sqrt(STANDARD_GRAVITY_MPS2 * TAU / WAVELENGTHS_M[i])
+func angular_frequency(i: int) -> float:
+	return sqrt(STANDARD_GRAVITY_MPS2 * TAU / wavelengths_m[i])
 
 
 func _anchor(up: Vector3) -> void:
@@ -82,6 +121,6 @@ func _anchor(up: Vector3) -> void:
 	var east := axis.cross(up).normalized()
 	var north := up.cross(east)
 	for i in WAVELENGTHS_M.size():
-		var heading := deg_to_rad(WIND_HEADING_DEG + DIRECTION_OFFSETS_DEG[i])
-		var k := Frames.to_render((north * cos(heading) + east * sin(heading)) * (TAU / WAVELENGTHS_M[i]))
-		vectors[i] = Vector4(k.x, k.y, k.z, SLOPE)
+		var heading := deg_to_rad(heading_deg + DIRECTION_OFFSETS_DEG[i])
+		var k := Frames.to_render((north * cos(heading) + east * sin(heading)) * (TAU / wavelengths_m[i]))
+		vectors[i] = Vector4(k.x, k.y, k.z, slope)

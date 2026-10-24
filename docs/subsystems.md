@@ -2824,9 +2824,9 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
   `water_wave_phases`: no float32 time in the shader), faded out between 10 and 20 km distance and per octave where it
   aliases; the resolved slope variance is taken out of the Cox-Munk sigma^2. The wave frame re-anchors (a pattern jump)
   after 1 deg only while the camera is above the 20 km fade distance; lower down only after 10 deg [E]. Bodies without
-  water (the Moon) build no water mask. Geometry stays on the geoid (sea state and
-  deck motion are a later part). Placeholders: `sky_radiance`; against the black sky the bright grazing glint reads as
-  a glow on the horizon until the atmosphere part.
+  water (the Moon) build no water mask. Geometry stays on the geoid (a mission's sea state rescales the wave set:
+  "Sea state and deck motion", Task 6). Placeholders: `sky_radiance`; against the black sky the bright grazing glint
+  reads as a glow on the horizon until the atmosphere part.
 - **Moon** (Task 8): the same quadtree on the lunar terrain (LDEM_16 everywhere, the 20 m site tiles), albedo from the
   global colour map, `terrain_moon.gdshader` (Lommel-Seeliger + Earth shadow + earthshine). Leaf level 12, 10.4 m
   spacing at the IM-2 site and at a tile edge (mesh vs core 0.004 / 0.005 m); the far side refines to the curvature limit
@@ -2938,4 +2938,18 @@ everything is exactly as before (the fixed level deck; `"A fixed deck gives exac
   touchdown was gentle, so no guidance change (spec goal 4's terminal descent referenced to the measured deck height was
   not needed): the landing burn aims at the mean deck height, and the deck's heave stays within its 0.27 m significant
   value here.
-- **Not yet:** the renderer draws neither the waves nor the deck motion (the sea stays the calm geoid surface).
+- **Game** (Task 6): `FlightSim.landing_zone` adds the hull (`hull_length_m`, `hull_beam_m`, `hull_draft_m`), the deck
+  pose (`deck_moving`, `deck_heave_m`, `deck_roll_deg`, `deck_pitch_deg` and rates; zero / level without a moving
+  sea) with the tilted deck axes `deck_bow` / `deck_port` / `deck_normal` from `contact::deck_frame` (the leg contact's
+  transform), and `sea_state` {`hs_m`, `tp_s`, `heading_deg`} for a moving sea. `game/world/drone_ship_view.gd` draws the
+  ship (hull 91.4 x 30.5 m from 6 m below the deck top to the 1 m deck slab [E], deck 91 x 52 m, 2 m walls along the
+  long sides [E: drawn only, not in the physics], matte grey) as a child of the Earth at the zone origin, posed every
+  frame from the snapshot (drawn at the snapshot instant like the vehicles). Render check `falcon9_asds_sea` 20 s after
+  landing: the stage's CG **13.359 m above the drawn deck against 13.371 m above its feet** (12 mm leg compression),
+  0.08 m from the deck centre (the legs themselves are not drawn by `vehicle_view.gd`). The sea shading's wave set
+  (`WaterWaves.set_sea_state`) follows a sea state: first octave at the peak wavelength g Tp^2 / (2 pi) (Tp 8 s:
+  99.9 m), the others at the calm ratios (23 / 60, 9 / 60, 3.5 / 60), all towards the sea's heading, every octave's
+  slope k_p Hs / 4 (resolved slope variance (k_p Hs / 2)^2 / 2 of the significant wave; Hs 2.5 m / Tp 8 s: 0.039, the
+  calm set's 0.04), capped at 0.08 [E] (resolved variance below the glint's Cox-Munk); applied globally while the
+  flight's landing zone has a sea state. Readout in the time panel ("Seegang Hs ... - Deck: Hub ..., Rollen ...,
+  Stampfen ...", `docs/ansichten.md`).
