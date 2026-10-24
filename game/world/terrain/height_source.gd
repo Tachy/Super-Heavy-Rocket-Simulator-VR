@@ -52,6 +52,12 @@ func sample(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array) -> Dicti
 	return {"height_m": heights, "water": water}
 
 
+## Whether the body can have water at all (the Earth's sea on the geoid; the Moon has none): bodies without skip the
+## per-node water mask.
+func has_water() -> bool:
+	return body == "earth"
+
+
 ## The finest horizontal resolution of the surface data (m) over the given points (a node's lattice: a site tile
 ## covering part of it counts); INF without terrain data.
 func finest_resolution_m(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array) -> float:

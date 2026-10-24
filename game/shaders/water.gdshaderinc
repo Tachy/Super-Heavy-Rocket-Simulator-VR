@@ -22,7 +22,8 @@ const float WATER_REFRACTIVE_INDEX = 1.333;  // [S] sea water, visible
 // [S: Cox & Munk 1954, J. Opt. Soc. Am. 44] mean square slope sigma^2 = 0.003 + 0.00512 U (clean surface).
 const float COX_MUNK_SIGMA2_0 = 0.003;
 const float COX_MUNK_SIGMA2_PER_MPS = 0.00512;
-// [E] The wave normals fade to the flat normal between these camera distances (no aliasing far away).
+// [E] The wave normals fade to the flat normal between these camera distances (no aliasing far away). The end is
+// mirrored in water_waves.gd (WAVE_FADE_END_M: re-anchoring only above it): change both together.
 const float WAVE_FADE_START_M = 10000.0;
 const float WAVE_FADE_END_M = 20000.0;
 // [E] An octave also fades out where its phase changes by a quarter to half a cycle per pixel.

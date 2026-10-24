@@ -231,6 +231,16 @@ func drawn_keys() -> Array[Vector4i]:
 	return keys
 
 
+## Keys of the nodes whose MeshInstance3D is visible (uploaded and released ones; tests: equals drawn_keys() after an
+## update).
+func visible_keys() -> Array[Vector4i]:
+	var keys: Array[Vector4i] = []
+	for node: _Node in _nodes.values() + _releasing:
+		if node.instance != null and node.instance.visible:
+			keys.append(node.key)
+	return keys
+
+
 ## {center_fixed, radius_m, size_m, split, morph_range_m, morph_floor} of an uploaded node, {} otherwise (tests,
 ## diagnostics).
 func node_info(key: Vector4i) -> Dictionary:
@@ -494,7 +504,8 @@ func _upload(result: Dictionary) -> void:
 		material.set_shader_parameter(crop_name + "_coverage_deg", Vector4(coverage.position.x, coverage.position.y,
 				coverage.end.x, coverage.end.y))
 		material.set_shader_parameter(crop_name + "_fade_m", float(crop["fade_m"]))
-	material.set_shader_parameter("water_mask", ImageTexture.create_from_image(result["water_mask"]))
+	if result["water_mask"] != null:  # bodies without water (the Moon) build none
+		material.set_shader_parameter("water_mask", ImageTexture.create_from_image(result["water_mask"]))
 
 	var node := _Node.new()
 	node.key = key

@@ -53,11 +53,32 @@ func _initialize() -> void:
 	var time_error := _max_phase_error(phases_b, phases_c, shifts)
 	_check(time_error < 1e-6, "waves travel with the simulation time (phase error %s rad)" % String.num_scientific(time_error))
 
-	# Far from the anchor the frame re-anchors: the vectors are horizontal again at the new camera.
-	var far := HeightSource.geodetic_to_fixed(35.0, -58.0, 10.0)
-	waves.update(far, t0)
-	var far_up := Frames.to_render(far.normalized())
-	_check(absf(waves.wave_vector(0).normalized().dot(far_up)) < 1e-9, "the wave frame re-anchors under a distant camera")
+	# Low over the sea (waves visible) the frame does not re-anchor 2 deg away: the pattern does not jump.
+	var anchored_k := waves.wave_vector(0)
+	var low_far := HeightSource.geodetic_to_fixed(34.5, -61.0, 500.0)
+	var phases_d := _phases_at(waves, point, Frames.to_render(moved))
+	waves.update(low_far, t0 + dt)
+	var phases_e := _phases_at(waves, point, Frames.to_render(low_far))
+	var low_error := _max_phase_error(phases_d, phases_e, [0.0, 0.0, 0.0, 0.0])
+	_check(waves.wave_vector(0) == anchored_k and low_error < 1e-6,
+			"no re-anchoring 2 deg away below the wave fade distance (pattern jump %s rad)" % String.num_scientific(low_error))
+
+	# Above the fade distance (no wave visible) the frame re-anchors after 1 deg: vectors horizontal at the new camera.
+	var high_far := HeightSource.geodetic_to_fixed(34.5, -61.0, WaterWaves.WAVE_FADE_END_M + 1000.0)
+	waves.update(high_far, t0)
+	var high_up := Frames.to_render(high_far.normalized())
+	_check(absf(waves.wave_vector(0).normalized().dot(high_up)) < 1e-9,
+			"the wave frame re-anchors under a distant camera above the fade distance")
+
+	# Low but beyond the large angle the frame re-anchors as well (the tilt would show).
+	var very_far := HeightSource.geodetic_to_fixed(46.0, -61.0, 10.0)
+	waves.update(very_far, t0)
+	var very_far_up := Frames.to_render(very_far.normalized())
+	_check(absf(waves.wave_vector(0).normalized().dot(very_far_up)) < 1e-9,
+			"the wave frame re-anchors low over the sea beyond %.0f deg" % rad_to_deg(WaterWaves.LOW_REANCHOR_ANGLE_RAD))
+	_check(WaterWaves.reanchor_angle_rad(HeightSource.geodetic_to_fixed(80.0, 10.0, 19000.0)) == WaterWaves.LOW_REANCHOR_ANGLE_RAD
+			and WaterWaves.reanchor_angle_rad(HeightSource.geodetic_to_fixed(80.0, 10.0, 21000.0)) == WaterWaves.REANCHOR_ANGLE_RAD,
+			"re-anchoring angle switches at the wave fade distance (ellipsoid height, also near the pole)")
 
 	# Gerstner steepness within the deep-water trochoid limit: Q_i <= 1, so each octave's lift Q_i k A <= k A.
 	_check(WaterWaves.STEEPNESS > 0.0 and WaterWaves.STEEPNESS <= 1.0

@@ -203,7 +203,7 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 		"custom3": custom3,
 		"imagery_fine": fine,
 		"imagery_base": base,
-		"water_mask": _water_mask(heights, box),
+		"water_mask": _water_mask(heights, box) if heights.has_water() else null,  # null: a body without water
 		"lat_lon_box": box,
 		# The finest data anywhere on the lattice: the quadtree stops splitting where even this is coarser than the mesh;
 		# a site tile covering only part of the node still counts (a lattice cell or more of it).

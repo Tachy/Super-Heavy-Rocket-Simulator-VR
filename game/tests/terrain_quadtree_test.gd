@@ -50,6 +50,8 @@ func _initialize() -> void:
 	_check_morph_fade_in()
 	_check_camera_precision()
 	_check_jump()
+	_check_fresh_checkout()
+	_check_moon_without_water()
 	if _terrain:
 		_check_data()
 	else:
@@ -338,6 +340,32 @@ static func _morphed(data: Dictionary, range_m: Vector2, camera_fixed: Vector3) 
 	return result
 
 
+# A fresh checkout (no data/): load_terrain on a directory without terrain reports nothing loaded and does not crash;
+# surface samples then report no data (the renderer falls back to the flat rule). Exercised on every machine.
+func _check_fresh_checkout() -> void:
+	var core := StarsimCore.new()
+	var missing := _config_dir.path_join("../nonexistent_%d/config" % Time.get_ticks_usec()).simplify_path()
+	var loaded := core.load_terrain(missing)
+	var samples: Dictionary = core.surface_samples("earth", PackedFloat64Array([25.99]), PackedFloat64Array([-97.15]))
+	_check(loaded.get("earth", true) == false and loaded.get("moon", true) == false and not bool(samples["present"]),
+			"fresh checkout: load_terrain(%s) -> %s, surface samples absent" % [missing, loaded])
+
+
+# A body without water (the Moon) builds no water mask per node and its tree uploads without one.
+func _check_moon_without_water() -> void:
+	var moon := _moon_heights()
+	var key := CubeSphere.key_at(CubeSphere.geodetic_direction(-84.0, 0.0), 8)
+	var built := TerrainNodeBuilder.build(key, moon, null, MOON_RADIUS_M)
+	var earth := TerrainNodeBuilder.build(key, HeightSource.new(), null, EARTH_RADIUS_M)
+	var tree := _make_tree(false, moon)
+	var converged := _converge(tree, moon.position_fixed(-84.0, 0.0, 2000.0))
+	var earth_has_mask: bool = earth["water_mask"] is Image
+	_check(moon.has_water() == false and built["water_mask"] == null and earth_has_mask
+			and converged and absf(_coverage(tree) - 4.0 * PI) < 1e-9,
+			"moon: no water mask built (earth node has one: %s), tree uploads and covers without one" % earth_has_mask)
+	tree.queue_free()
+
+
 # Camera jumps (pad -> 1000 km up -> the far side of the Earth) with one upload per frame: coverage on every frame.
 func _check_jump() -> void:
 	var tree := _make_tree(false)
@@ -347,6 +375,7 @@ func _check_jump() -> void:
 	_converge(tree, _above(lat, lon, site["height_m"] + EYE_HEIGHT_M))
 	tree.uploads_per_frame = 1
 	var covered := true
+	var drawn_is_visible := true
 	var frames := 0
 	var max_uploads := 0
 	for camera: Vector3 in [_above(lat, lon, 1.0e6), _above(-lat, lon + 180.0, EYE_HEIGHT_M)]:
@@ -354,11 +383,18 @@ func _check_jump() -> void:
 			tree.update_for_camera(camera)
 			frames += 1
 			covered = covered and absf(_coverage(tree) - 4.0 * PI) < 1e-9
+			# what is drawn is exactly what is visible: no stale instance shows, no drawn leaf is hidden
+			var drawn := tree.drawn_keys()
+			var shown := tree.visible_keys()
+			drawn.sort()
+			shown.sort()
+			drawn_is_visible = drawn_is_visible and drawn == shown
 			max_uploads = maxi(max_uploads, tree.stats["uploads_last_frame"])
 			if tree.stats["nodes_loading"] == 0 and tree.stats["uploads_last_frame"] == 0:
 				break
-	_check(covered and max_uploads == 1, "jump keeps coverage (4 pi on each of %d frames, max %d upload per frame)"
-			% [frames, max_uploads])
+	_check(covered and drawn_is_visible and max_uploads == 1,
+			"jump keeps coverage (4 pi on each of %d frames, drawn set = visible instances %s, max %d upload per frame)"
+			% [frames, drawn_is_visible, max_uploads])
 	tree.queue_free()
 
 
