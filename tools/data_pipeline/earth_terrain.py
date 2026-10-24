@@ -16,6 +16,7 @@ Usage: python tools/data_pipeline/fetch.py [--force] earth_terrain   (after the 
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import time
@@ -161,6 +162,31 @@ def _nad83_to_itrf_transformer():
     # GEOID18 heights are NAD83(2011) ellipsoidal; the simulator's WGS84 is aligned with ITRF2014 (WGS 84 G2139). The
     # Helmert step moves the ellipsoidal height by -1.4 to -1.6 m in the southern CONUS (the NAD83 origin offset).
     return Transformer.from_crs(NAD83_2011_3D, ITRF2014_3D, always_xy=True)
+
+
+def nad83_horizontal_shift_deg(latitude_deg: float, longitude_deg: float) -> tuple[float, float]:
+    """(dlat, dlon) in degrees of ITRF2014 minus NAD83(2011) for the same physical point (EPSG 6319 -> 7912 at h = 0).
+    Rasters whose grid is NAD83(2011) become ITRF-labelled by adding this to their node coordinates."""
+    lon_i, lat_i, _ = _nad83_to_itrf_transformer().transform(longitude_deg, latitude_deg, 0.0)
+    return float(lat_i) - latitude_deg, float(lon_i) - longitude_deg
+
+
+def horizontal_shift_m(latitude_deg: float, longitude_deg: float) -> tuple[float, float]:
+    """The same shift as (east, north) metres on the WGS84 ellipsoid."""
+    dlat, dlon = nad83_horizontal_shift_deg(latitude_deg, longitude_deg)
+    lat = math.radians(latitude_deg)
+    w2 = 1.0 - WGS84_E2 * math.sin(lat) ** 2
+    meridian = WGS84_A_M * (1.0 - WGS84_E2) / w2**1.5
+    prime_vertical = WGS84_A_M / math.sqrt(w2)
+    return math.radians(dlon) * prime_vertical * math.cos(lat), math.radians(dlat) * meridian
+
+
+def geo_nad83_to_itrf(geo: "Geo") -> tuple["Geo", tuple[float, float]]:
+    """Relabel a NAD83(2011) grid in ITRF: the origin moves by the shift at the grid centre (it varies by < 1 cm over
+    10 km). Returns the shifted grid and the shift as (east, north) metres."""
+    c_lat, c_lon = (geo.north + geo.south) / 2.0, (geo.west + geo.east) / 2.0
+    dlat, dlon = nad83_horizontal_shift_deg(c_lat, c_lon)
+    return dataclasses.replace(geo, north=geo.north + dlat, west=geo.west + dlon), horizontal_shift_m(c_lat, c_lon)
 
 
 def navd88_to_ellipsoidal(h_navd88_m, lat_deg, lon_deg, geoid18_path: Path) -> np.ndarray:
@@ -489,6 +515,9 @@ def fetch(source: dict, repo_root: Path, download, force: bool = False) -> None:
         else:
             valid_mask = ~np.isnan(local)
             local = navd88_grid_to_ellipsoidal(local, lgeo, geoid18)
+            # the 3DEP grid is NAD83(2011): relabel it in ITRF (the regional GLO-30 grid is already WGS84 / ITRF)
+            lgeo, shift_m = geo_nad83_to_itrf(lgeo)
+            print(f"  {aid}: NAD83 -> ITRF horizontal shift {shift_m[0]:+.3f} m east, {shift_m[1]:+.3f} m north")
             reg_at_local = resample_grid(regional, rgeo, lgeo.lats(), lgeo.lons(), dtype=np.float32)
             diff = (local - reg_at_local)[valid_mask]
             seam = (float(diff.mean()), float(np.sqrt(np.mean(diff**2))), float(np.median(diff)))
@@ -497,6 +526,7 @@ def fetch(source: dict, repo_root: Path, download, force: bool = False) -> None:
                   f"the 3DEP nodes: mean {seam[0]:+.3f} m, median {seam[2]:+.3f} m, rms {seam[1]:.3f} m")
             extra.update(product="USGS_3DEP_1m", source="USGS 3DEP 1 m DEM (NAVD88, GEOID18) + GLO-30 for gaps",
                          note="bare earth; gaps filled from the regional GLO-30 surface",
+                         horizontal_shift_m=[round(shift_m[0], 4), round(shift_m[1], 4)],
                          coverage_fraction=round(float(valid_mask.mean()), 6), seam_mean_m=round(seam[0], 4),
                          seam_median_m=round(seam[2], 4), seam_rms_m=round(seam[1], 4), tiles=",".join(
                              Path(urllib.parse.urlparse(it["downloadURL"]).path).name for it in items))

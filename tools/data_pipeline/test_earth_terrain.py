@@ -96,6 +96,29 @@ def test_navd88_grid_matches_pointwise_conversion(tmp_path):
     assert abs(out[0, -1] - expected[0, -1]) < 1e-3
 
 
+def test_nad83_shift_matches_pyproj():
+    from pyproj import Transformer
+
+    lat, lon = 25.99686, -97.15394  # Starbase
+    dlat, dlon = et.nad83_horizontal_shift_deg(lat, lon)
+    lon_i, lat_i, _ = Transformer.from_crs("EPSG:6319", "EPSG:7912", always_xy=True).transform(lon, lat, 0.0)
+    m_per_deg_lat = math.radians(1.0) * 6378137.0 * (1 - 0.00669437999014) / (1 - 0.00669437999014 * math.sin(math.radians(lat)) ** 2) ** 1.5
+    assert abs(dlat - (lat_i - lat)) * m_per_deg_lat < 1e-3
+    assert abs(dlon - (lon_i - lon)) * m_per_deg_lat < 1e-3  # same bound in metres (the degree values are identical)
+    east_m, north_m = et.horizontal_shift_m(lat, lon)
+    assert 0.9 < math.hypot(east_m, north_m) < 1.6
+
+
+def test_local_grid_origin_shifted():
+    geo = et.Geo(north=26.05, west=-97.2, step_lat=0.0002, step_lon=0.00021, lines=150, samples=131)
+    shifted, (east_m, north_m) = et.geo_nad83_to_itrf(geo)
+    c_lat, c_lon = (geo.north + geo.south) / 2, (geo.west + geo.east) / 2
+    dlat, dlon = et.nad83_horizontal_shift_deg(c_lat, c_lon)
+    assert shifted.north == geo.north + dlat and shifted.west == geo.west + dlon
+    assert (shifted.step_lat, shifted.step_lon, shifted.lines, shifted.samples) == (geo.step_lat, geo.step_lon, 150, 131)
+    assert 0.9 < math.hypot(east_m, north_m) < 1.6
+
+
 def test_area_bounds():
     south, north, west, east = et.area_bounds(25.99686, -97.15394, 5000.0)
     lat_c = math.radians(25.99686)
