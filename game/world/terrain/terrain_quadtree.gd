@@ -10,9 +10,9 @@ extends Node3D
 ## nodes hold their mesh until their subtree is merged; ancestors of drawn leaves keep theirs (hidden) for an instant
 ## merge.
 ## Each node is a MeshInstance3D at its centre (body-fixed float64, relative position in render axes), vertices float32
-## relative to it; the shader (terrain_*.gdshader) gets vertex_offset, camera_local and node_size_m per instance.
+## relative to it; the shader (terrain_*.gdshader) gets vertex_offset, camera_local and the morph range per instance.
 
-const LOD_FACTOR := 3.0  ## [E] split distance / node size (tuned in Task 9; the morph shader uses the same K)
+const LOD_FACTOR := 3.0  ## [E] split distance / node size (tuned in Task 9; the morph range follows from it)
 const MERGE_FACTOR := 1.15  ## [E] merge hysteresis
 const MAX_LEVEL := 21  ## [E] safety cap: ~7 cm cells at the Earth
 const ROOT_LEVEL := 1  ## the 6 x 4 level-1 nodes are built at setup and never freed
@@ -21,6 +21,11 @@ const MAX_BUILDS_IN_FLIGHT := 8  ## [E] worker tasks at once (~20-40 ms each); l
 ## [E] Largest chord sagitta of a mesh cell on the body's curvature (m): without finer data a node still splits until its
 ## cells sag at most this far below the surface (flat rule: vehicles stand on the drawn ground within 1 cm).
 const MAX_SAGITTA_M := 0.01
+## [E] A child's morph ends this fraction inside its parent's split distance: the child's vertices lie on the parent's
+## surface, inside the parent's bounding sphere up to finer relief, so they are fully morphed when the child appears.
+const MORPH_END_MARGIN := 0.97
+## [E] Pooled MeshInstance3Ds kept for reuse (more are freed).
+const POOL_MAX := 256
 
 ## False while the body is in scaled space (centre beyond CelestialBody.SCALED_SPACE_DISTANCE_M): then nothing is drawn
 ## and the body's ellipsoid mesh stands in.
@@ -37,10 +42,10 @@ var radius_m := 1.0
 var curvature_spacing_m := INF
 
 var _template: ShaderMaterial
-var _parameters := {}  ## shader parameters set through set_shader_parameter (applied to every node material)
 var _nodes := {}  ## Vector4i -> _Node (uploaded)
 var _roots: Array[Vector4i] = []
 var _drawn: Array[Vector4i] = []
+var _shown := {}  ## keys whose instance is visible (the previous frame's drawn set)
 var _reached := {}  ## nodes kept this frame
 var _wanted := {}  ## requested children this frame
 var _pending := {}  ## Vector4i -> true: requested, not yet started
@@ -57,6 +62,7 @@ class _Node:
 	var center_fixed: Vector3
 	var radius_m := 0.0  ## bounding sphere around center_fixed (grid and skirts)
 	var size_m := 0.0
+	var morph_range_m := Vector2.ZERO  ## (start, end): morph 0 closer than start, 1 beyond end
 	var max_resolution_m := INF
 	var split := false
 	var instance: MeshInstance3D
@@ -72,7 +78,7 @@ func setup(heights: HeightSource, imagery_source: ImagerySource, body_radius_m: 
 	radius_m = body_radius_m
 	curvature_spacing_m = sqrt(8.0 * radius_m * MAX_SAGITTA_M)
 	_template = material_template
-	_template.set_shader_parameter("lod_factor", LOD_FACTOR)
+	_template.set_shader_parameter("metres_per_deg", radius_m * PI / 180.0)
 	# Static initialisers run on first access: here on the main thread, never racing in two worker tasks.
 	assert(TerrainNodeBuilder.INDICES.size() > 0 and TerrainNodeBuilder.SKIRT_EDGE.size() > 0)
 	for face in 6:
@@ -84,14 +90,24 @@ func setup(heights: HeightSource, imagery_source: ImagerySource, body_radius_m: 
 	_drawn = _roots.duplicate()
 	for key in _roots:
 		_nodes[key].instance.visible = true
+		_shown[key] = true
 
 
-## Shader parameter for every node material (now and later uploads), e.g. the Sun position.
-func set_shader_parameter(parameter: StringName, value: Variant) -> void:
-	_parameters[parameter] = value
-	_template.set_shader_parameter(parameter, value)
-	for node: _Node in _nodes.values():
-		node.material.set_shader_parameter(parameter, value)
+## Morph range (start, end; m from the camera) of a node of size size_m, bounding radius node_radius_m, whose parent has
+## size parent_size_m. Start: the node is unmorphed out to its merge distance plus its sphere's diameter, so it shows
+## its own surface whenever its children appear (LOD_FACTOR * size) or vanish (MERGE_FACTOR * LOD_FACTOR * size). End:
+## fully morphed (its parent's surface) wherever it can be when its parent splits (LOD_FACTOR * parent size from the
+## parent's sphere). End must exceed start; if a node's sphere is too large for that (never for real nodes, see the
+## quadtree test) start is pulled back below end.
+static func morph_range_m(size_m: float, node_radius_m: float, parent_size_m: float) -> Vector2:
+	var end := MORPH_END_MARGIN * LOD_FACTOR * parent_size_m
+	var start := MERGE_FACTOR * LOD_FACTOR * size_m + 2.0 * node_radius_m
+	return Vector2(minf(start, 0.99 * end), end)
+
+
+## Morph factor of a vertex distance_m from the camera (the shader's terrain_morph_factor).
+static func morph_factor(distance_m: float, range_m: Vector2) -> float:
+	return clampf((distance_m - range_m.x) / (range_m.y - range_m.x), 0.0, 1.0)
 
 
 ## Per frame: camera position in body-fixed metres. Uploads finished nodes, selects the drawn leaves, requests children.
@@ -116,13 +132,18 @@ func update_for_camera(camera_fixed_m: Vector3) -> void:
 		_visit(_nodes[key])
 	_free_unreached()
 	_dispatch()
-	for key: Vector4i in _nodes:
-		var node: _Node = _nodes[key]
-		node.instance.visible = false
+	var shown := {}
+	for key in _drawn:
+		shown[key] = true
+	for key: Vector4i in _shown:
+		if not shown.has(key) and _nodes.has(key):
+			_nodes[key].instance.visible = false
 	for key in _drawn:
 		var node: _Node = _nodes[key]
-		node.instance.visible = true
+		if not _shown.has(key):
+			node.instance.visible = true
 		node.instance.set_instance_shader_parameter("camera_local", Frames.to_render(camera_fixed_m - node.center_fixed))
+	_shown = shown
 	stats["nodes_drawn"] = _drawn.size()
 	stats["nodes_loading"] = _pending.size() + _in_flight.size() + _finished.size()
 
@@ -137,7 +158,8 @@ func node_info(key: Vector4i) -> Dictionary:
 	if not _nodes.has(key):
 		return {}
 	var node: _Node = _nodes[key]
-	return {"center_fixed": node.center_fixed, "radius_m": node.radius_m, "size_m": node.size_m, "split": node.split}
+	return {"center_fixed": node.center_fixed, "radius_m": node.radius_m, "size_m": node.size_m, "split": node.split,
+			"morph_range_m": node.morph_range_m}
 
 
 func _exit_tree() -> void:
@@ -178,16 +200,22 @@ func _request(key: Vector4i) -> void:
 		_pending[key] = true
 
 
-## Nodes no longer reached (subtrees of merged nodes) return their MeshInstance3D to the pool.
+## Nodes no longer reached (subtrees of merged nodes) release mesh, material and textures; their MeshInstance3D returns
+## to the pool (up to POOL_MAX).
 func _free_unreached() -> void:
 	for key: Vector4i in _nodes.keys():
 		if _reached.has(key):
 			continue
 		var node: _Node = _nodes[key]
 		node.instance.mesh = null
+		node.instance.material_override = null
 		node.instance.visible = false
-		_pool.append(node.instance)
+		if _pool.size() < POOL_MAX:
+			_pool.append(node.instance)
+		else:
+			node.instance.queue_free()
 		_nodes.erase(key)
+		_shown.erase(key)
 
 
 ## Drops requests no longer wanted, then starts builds, coarsest and nearest first.
@@ -288,12 +316,15 @@ func _upload(result: Dictionary) -> void:
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, format)
 
 	var material: ShaderMaterial = _template.duplicate()
-	for parameter: StringName in _parameters:
-		material.set_shader_parameter(parameter, _parameters[parameter])
-	for crop_key: String in ["imagery_fine", "imagery_base"]:
-		var crop: Dictionary = result[crop_key]
-		if not crop.is_empty():
-			material.set_shader_parameter(crop_key, ImageTexture.create_from_image(crop["image"]))
+	for crop_name: String in ["fine", "base"]:
+		var crop: Dictionary = result["imagery_" + crop_name]
+		if crop.is_empty():
+			continue
+		var coverage: Rect2 = crop["coverage_deg"]  # in the node's longitude frame (the frame of CUSTOM1.u)
+		material.set_shader_parameter("imagery_" + crop_name, ImageTexture.create_from_image(crop["image"]))
+		material.set_shader_parameter(crop_name + "_coverage_deg", Vector4(coverage.position.x, coverage.position.y,
+				coverage.end.x, coverage.end.y))
+		material.set_shader_parameter(crop_name + "_fade_m", float(crop["fade_m"]))
 	material.set_shader_parameter("water_mask", ImageTexture.create_from_image(result["water_mask"]))
 
 	var node := _Node.new()
@@ -301,6 +332,8 @@ func _upload(result: Dictionary) -> void:
 	node.center_fixed = result["center_fixed"]
 	node.radius_m = result["radius_m"]
 	node.size_m = CubeSphere.node_size_m(key, radius_m)
+	node.morph_range_m = morph_range_m(node.size_m, node.radius_m, CubeSphere.node_size_m(CubeSphere.parent(key),
+			radius_m))
 	node.max_resolution_m = result["max_resolution_m"]
 	node.material = material
 	node.instance = _pool.pop_back() if not _pool.is_empty() else _new_instance()
@@ -310,9 +343,11 @@ func _upload(result: Dictionary) -> void:
 	# Morph offsets move vertices up to about a cell; the skirt depth (2 cells) bounds them.
 	node.instance.extra_cull_margin = node.size_m / TerrainNodeBuilder.CELLS * TerrainNodeBuilder.SKIRT_DEPTH_CELLS
 	node.instance.set_instance_shader_parameter("vertex_offset", node.instance.position)
-	node.instance.set_instance_shader_parameter("node_size_m", node.size_m)
+	node.instance.set_instance_shader_parameter("morph_start_m", node.morph_range_m.x)
+	node.instance.set_instance_shader_parameter("morph_end_m", node.morph_range_m.y)
 	node.instance.visible = false
 	_nodes[key] = node
+	_shown.erase(key)
 
 
 func _new_instance() -> MeshInstance3D:

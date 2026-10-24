@@ -11,6 +11,21 @@ const ROW := TerrainNodeBuilder.ROW
 
 var _failures := 0
 var _sites: Array = []
+
+
+## Rolling relief (+-300 m, ~20 km wavelength): parent and child meshes differ by tens of metres between their vertices.
+class WaveSource extends HeightSource:
+	const AMPLITUDE_M := 300.0
+	const WAVES_PER_DEG := 5.0
+
+	func sample(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array) -> Dictionary:
+		var heights := PackedFloat64Array()
+		heights.resize(lats_deg.size())
+		var water := PackedByteArray()
+		water.resize(lats_deg.size())
+		for k in lats_deg.size():
+			heights[k] = AMPLITUDE_M * sin(TAU * WAVES_PER_DEG * lats_deg[k]) * cos(TAU * WAVES_PER_DEG * lons_deg[k])
+		return {"height_m": heights, "water": water}
 var _core: StarsimCore = null
 var _terrain := false
 
@@ -22,6 +37,7 @@ func _initialize() -> void:
 	_terrain = bool(_core.load_terrain(config_dir).get("earth", false))
 	_check_flat_rule()
 	_check_hysteresis()
+	_check_morph_continuity()
 	_check_jump()
 	if _terrain:
 		_check_data()
@@ -33,8 +49,7 @@ func _initialize() -> void:
 
 
 ## A quadtree on a height source (core null: the flat rule), synchronous loading, no imagery.
-func _make_tree(with_core: bool) -> TerrainQuadtree:
-	var heights := HeightSource.new()
+func _make_tree(with_core: bool, heights := HeightSource.new()) -> TerrainQuadtree:
 	heights.sites = _sites
 	heights.core = _core if with_core else null
 	var material := ShaderMaterial.new()
@@ -138,6 +153,104 @@ func _check_hysteresis() -> void:
 	tree.update_for_camera(center + up * (float(info["radius_m"]) + 1.2 * split_distance_m))
 	_check(not tree.node_info(key)["split"], "merges beyond 1.15 x split distance")
 	tree.queue_free()
+
+
+# Split and merge frames of a level-6 node on rolling relief, camera above it and off to the side of a corner: the
+# children's morphed surface equals the parent's morphed surface at every child vertex (no pop at the swap).
+func _check_morph_continuity() -> void:
+	var tree := _make_tree(false, WaveSource.new())
+	var key := CubeSphere.key_at(CubeSphere.geodetic_direction(10.0, 20.0), 6)
+	var tries := 0
+	while tree.node_info(key).is_empty() and tries < 10:
+		_converge(tree, CubeSphere.node_center(key) * EARTH_RADIUS_M * 1.0001)
+		tries += 1
+	var info := tree.node_info(key)
+	if info.is_empty():
+		_check(false, "morph continuity: node %s never built" % key)
+		return
+	var center: Vector3 = info["center_fixed"]
+	var radius: float = info["radius_m"]
+	var size: float = info["size_m"]
+	var up := center.normalized()
+	var corner := CubeSphere.node_corners(key)[0] * EARTH_RADIUS_M
+	var side := (up * 0.3 + (center - corner).normalized()).normalized()  # corner 0 is the far corner
+	var parent_data := TerrainNodeBuilder.build(key, tree.height_source, null, EARTH_RADIUS_M)
+	var children_data := []
+	for child in CubeSphere.children(key):
+		children_data.append(TerrainNodeBuilder.build(child, tree.height_source, null, EARTH_RADIUS_M))
+	for direction: Vector3 in [up, side]:
+		var label := "above" if direction == up else "beside the far corner"
+		var split_camera := center + direction * (radius + TerrainQuadtree.LOD_FACTOR * size * 0.9999)
+		_converge(tree, split_camera)
+		var result := _swap_error(tree, key, parent_data, children_data, split_camera)
+		_check(tree.node_info(key)["split"] and result.x < 1e-3, "morph continuity at the split, camera %s: error %s m "
+				% [label, String.num_scientific(result.x)] + "(parent morph max %.4f, child morph min %.4f)"
+				% [result.y, result.z])
+		var merge_camera := center + direction * (radius + TerrainQuadtree.MERGE_FACTOR * TerrainQuadtree.LOD_FACTOR
+				* size * 0.9999)
+		tree.update_for_camera(merge_camera)
+		result = _swap_error(tree, key, parent_data, children_data, merge_camera)
+		_check(tree.node_info(key)["split"] and result.x < 1e-3, "morph continuity at the merge, camera %s: error %s m "
+				% [label, String.num_scientific(result.x)] + "(parent morph max %.4f, child morph min %.4f)"
+				% [result.y, result.z])
+	tree.queue_free()
+
+
+## (max distance between each child's morphed grid vertex and the parent's morphed surface there, the parent's largest
+## morph factor, the children's smallest) for a camera at camera_fixed (the shader's morph formula).
+func _swap_error(tree: TerrainQuadtree, key: Vector4i, parent_data: Dictionary, children_data: Array,
+		camera_fixed: Vector3) -> Vector3:
+	var p_range: Vector2 = tree.node_info(key)["morph_range_m"]
+	var p_center: Vector3 = parent_data["center_fixed"]
+	var p_morphed := _morphed(parent_data, p_range, camera_fixed)
+	var max_error := 0.0
+	var parent_max := 0.0
+	for v: Vector3 in parent_data["vertices"]:
+		parent_max = maxf(parent_max, TerrainQuadtree.morph_factor(v.distance_to(Frames.to_render(camera_fixed - p_center)),
+				p_range))
+	var child_min := 1.0
+	for c in 4:
+		var child: Dictionary = children_data[c]
+		var child_key: Vector4i = child["key"]
+		var c_range: Vector2 = tree.node_info(child_key)["morph_range_m"]
+		var c_center: Vector3 = child["center_fixed"]
+		var c_morphed := _morphed(child, c_range, camera_fixed)
+		for v: Vector3 in child["vertices"]:
+			child_min = minf(child_min, TerrainQuadtree.morph_factor(v.distance_to(Frames.to_render(camera_fixed
+					- c_center)), c_range))
+		for b in ROW:
+			for a in ROW:
+				var target := c_center + Frames.from_render(c_morphed[b * ROW + a])
+				var px := ((child_key.z & 1) * CELLS + a) / 2.0
+				var py := ((child_key.w & 1) * CELLS + b) / 2.0
+				var cx := mini(int(px), CELLS - 1)
+				var cy := mini(int(py), CELLS - 1)
+				var fx := px - cx
+				var fy := py - cy
+				var v00 := p_morphed[cy * ROW + cx]
+				var v10 := p_morphed[cy * ROW + cx + 1]
+				var v01 := p_morphed[(cy + 1) * ROW + cx]
+				var v11 := p_morphed[(cy + 1) * ROW + cx + 1]
+				var on_parent: Vector3
+				if fx + fy <= 1.0:
+					on_parent = v00 + (v10 - v00) * fx + (v01 - v00) * fy
+				else:
+					on_parent = v11 + (v01 - v11) * (1.0 - fx) + (v10 - v11) * (1.0 - fy)
+				max_error = maxf(max_error, target.distance_to(p_center + Frames.from_render(on_parent)))
+	return Vector3(max_error, parent_max, child_min)
+
+
+## Node vertices (render axes, relative to the centre) moved by the shader's morph for a camera at camera_fixed.
+static func _morphed(data: Dictionary, range_m: Vector2, camera_fixed: Vector3) -> PackedVector3Array:
+	var vertices: PackedVector3Array = data["vertices"]
+	var morph: PackedFloat32Array = data["morph"]
+	var camera_local := Frames.to_render(camera_fixed - data["center_fixed"])
+	var result := PackedVector3Array()
+	result.resize(vertices.size())
+	for k in vertices.size():
+		var f := TerrainQuadtree.morph_factor(vertices[k].distance_to(camera_local), range_m)
+		result[k] = vertices[k] + Vector3(morph[4 * k], morph[4 * k + 1], morph[4 * k + 2]) * f
+	return result
 
 
 # Camera jumps (pad -> 1000 km up -> the far side of the Earth) with one upload per frame: coverage on every frame.

@@ -21,6 +21,17 @@ renderer/rendering_method="forward_plus"
 rendering_device/driver.windows="d3d12"
 anti_aliasing/quality/msaa_3d=2
 
+[shader_globals]
+
+earth_sun_position_local={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+earth_moon_position_local={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+
 [xr]
 
 openxr/enabled=false

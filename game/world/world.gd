@@ -123,8 +123,9 @@ func update_world() -> void:
 	var moon_local := earth.to_local_frame(moon_apparent_from_earth_m)
 	_earth_material.set_shader_parameter("sun_position_local", sun_local)
 	_earth_material.set_shader_parameter("moon_position_local", moon_local)
-	earth_terrain.set_shader_parameter("sun_position_local", sun_local)
-	earth_terrain.set_shader_parameter("moon_position_local", moon_local)
+	# Global shader uniforms (project.godot [shader_globals]): one write for every terrain node material.
+	RenderingServer.global_shader_parameter_set("earth_sun_position_local", sun_local)
+	RenderingServer.global_shader_parameter_set("earth_moon_position_local", moon_local)
 	_moon_material.set_shader_parameter("sun_position_local", moon.to_local_frame(sun_apparent_from_earth_m - moon_gcrf_m))
 	_moon_material.set_shader_parameter("earth_position_local", moon.to_local_frame(-moon_gcrf_m))
 	_moon_material.set_shader_parameter("camera_position_local", moon.to_local_frame(cam - moon_gcrf_m))

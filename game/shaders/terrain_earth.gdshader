@@ -13,10 +13,20 @@ uniform sampler2D night_texture : source_color, filter_linear_mipmap_anisotropic
 // Per-node imagery crops: vertices outside a crop have UVs outside [0, 1] and fade 0, hence clamp.
 uniform sampler2D imagery_fine : source_color, filter_linear_mipmap_anisotropic, repeat_disable, hint_default_black;
 uniform sampler2D imagery_base : source_color, filter_linear_mipmap_anisotropic, repeat_disable, hint_default_black;
+// Coverage boxes of the crops' sources (west, south, east, north; deg, in the node's longitude frame, the frame of
+// CUSTOM1.u) and their fade widths (m); the default box is empty (fade 0).
+uniform vec4 fine_coverage_deg = vec4(0.0, 0.0, -1.0, -1.0);
+uniform vec4 base_coverage_deg = vec4(0.0, 0.0, -1.0, -1.0);
+uniform float fine_fade_m = 1.0;
+uniform float base_fade_m = 1.0;
+uniform float metres_per_deg = 111319.49;  // body radius * pi / 180, set by the quadtree
+// [E] The imagery fade is at least this angle (rad) seen from the camera, so a source's coverage edge never reads as a
+// line from far away (400 km: 20 km wide); near the ground the source's own fade_m rules.
+uniform float imagery_fade_angle = 0.05;
 // Per-node water mask (255 = water) over the node's lat/lon box; shaded by the sea model (Task 7).
 uniform sampler2D water_mask : filter_linear, repeat_disable, hint_default_black;
-uniform vec3 sun_position_local;   // apparent, from the Earth's centre
-uniform vec3 moon_position_local;  // apparent, from the Earth's centre
+global uniform vec3 earth_sun_position_local;   // apparent, from the Earth's centre (World)
+global uniform vec3 earth_moon_position_local;  // apparent, from the Earth's centre (World)
 uniform float sun_radius_m = 695700000.0;
 uniform float moon_radius_m = 1737400.0;
 uniform float night_lights_intensity = 1.2;
@@ -26,7 +36,8 @@ instance uniform vec3 vertex_offset = vec3(0.0);
 
 varying vec3 local_position;
 varying vec3 local_normal;
-varying vec4 blend;      // global u, v, fade_fine, fade_base
+varying vec2 global_uv;  // equirectangular u (continuous in the node), v
+varying float camera_distance;
 varying vec2 water_uv;
 
 void vertex() {
@@ -35,27 +46,41 @@ void vertex() {
 	NORMAL = normalize(mix(NORMAL, CUSTOM3.xyz, morph));
 	local_position = VERTEX + vertex_offset;
 	local_normal = NORMAL;
-	blend = CUSTOM1;
+	global_uv = CUSTOM1.xy;
+	camera_distance = length(VERTEX - camera_local);
 	water_uv = clamp(CUSTOM2.xy, 0.0, 1.0);
+}
+
+// 1 inside a coverage box, falling linearly to 0 over width_m towards its edge (per fragment: sharp at any node size).
+float coverage_fade(vec4 box_deg, float lat, float lon, float cos_lat, float width_m) {
+	float inside_deg = min(min(lat - box_deg.y, box_deg.w - lat), min(lon - box_deg.x, box_deg.z - lon) * cos_lat);
+	return clamp(inside_deg * metres_per_deg / width_m, 0.0, 1.0);
 }
 
 void fragment() {
 	vec3 n = normalize(local_normal);
-	vec3 to_sun = sun_position_local - local_position;
+	vec3 to_sun = earth_sun_position_local - local_position;
 	float cos_sun = dot(n, normalize(to_sun));
-	float sunlit = 1.0 - occulted_fraction(to_sun, sun_radius_m, moon_position_local - local_position, moon_radius_m);
+	float sunlit = 1.0 - occulted_fraction(to_sun, sun_radius_m, earth_moon_position_local - local_position,
+			moon_radius_m);
 
 	// v stays half a texel inside the map (repeat would bleed the opposite pole into the polar rows).
 	float half_texel_v = 0.5 / float(textureSize(day_texture, 0).y);
-	vec2 global_uv = vec2(blend.x, clamp(blend.y, half_texel_v, 1.0 - half_texel_v));
-	vec3 albedo = texture(day_texture, global_uv).rgb;
-	albedo = mix(albedo, texture(imagery_base, UV2).rgb, blend.w);
-	albedo = mix(albedo, texture(imagery_fine, UV).rgb, blend.z);
+	vec2 map_uv = vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v));
+	float lon = global_uv.x * 360.0 - 180.0;
+	float lat = 90.0 - global_uv.y * 180.0;
+	float cos_lat = cos(radians(lat));
+	float min_width_m = camera_distance * imagery_fade_angle;
+	vec3 albedo = texture(day_texture, map_uv).rgb;
+	albedo = mix(albedo, texture(imagery_base, UV2).rgb,
+			coverage_fade(base_coverage_deg, lat, lon, cos_lat, max(base_fade_m, min_width_m)));
+	albedo = mix(albedo, texture(imagery_fine, UV).rgb,
+			coverage_fade(fine_coverage_deg, lat, lon, cos_lat, max(fine_fade_m, min_width_m)));
 
 	vec3 day = albedo * max(cos_sun, 0.0) * sunlit * day_exposure;
 	// City lights fade in through civil twilight (sun 0..6 deg below the horizon).
 	float night_factor = smoothstep(0.0, -0.1, cos_sun);
-	vec3 night = texture(night_texture, global_uv).rgb;
+	vec3 night = texture(night_texture, map_uv).rgb;
 	night = night * night * night_lights_intensity * night_factor;  // suppress dark-sky noise
 	ALBEDO = day + night;
 }
