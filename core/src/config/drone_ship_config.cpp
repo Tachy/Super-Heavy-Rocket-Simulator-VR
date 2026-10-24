@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 #include "starsim/math/constants.hpp"
 #include "toml_document.hpp"
@@ -30,6 +31,33 @@ DroneShipConfig read_ship(const detail::Document& doc, const toml::table& t) {
     if (s.area_min_latitude_rad >= s.area_max_latitude_rad || s.area_min_longitude_rad >= s.area_max_longitude_rad) {
         doc.fail("drone ship '" + s.id + "': the service area is empty");
     }
+
+    auto& h = s.hull;
+    h.length_m = doc.positive(t, "hull_length_m");
+    h.beam_m = doc.positive(t, "hull_beam_m");
+    if (h.beam_m > h.length_m) doc.fail("drone ship '" + s.id + "': hull_beam_m > hull_length_m");
+    h.draft_m = doc.positive(t, "hull_depth_m") - s.freeboard_m;
+    if (!(h.draft_m > 0.0)) doc.fail("drone ship '" + s.id + "': hull_depth_m must exceed freeboard_m (draft <= 0)");
+    h.roll_gyration_m = doc.positive(t, "hull_roll_gyration_m");
+    h.pitch_gyration_m = doc.positive(t, "hull_pitch_gyration_m");
+    const auto non_negative = [&](std::string_view key) {
+        const double v = doc.number(t, key);
+        if (v < 0.0) doc.fail("drone ship '" + s.id + "': '" + std::string(key) + "' must not be negative");
+        return v;
+    };
+    h.heave_added_mass_factor = non_negative("hull_heave_added_mass_factor");
+    h.roll_added_inertia_factor = non_negative("hull_roll_added_inertia_factor");
+    h.pitch_added_inertia_factor = non_negative("hull_pitch_added_inertia_factor");
+    const auto damping = [&](std::string_view key) {
+        const double v = doc.positive(t, key);
+        if (v >= 1.0) doc.fail("drone ship '" + s.id + "': '" + std::string(key) + "' must be below 1");
+        return v;
+    };
+    h.heave_damping_ratio = damping("hull_heave_damping_ratio");
+    h.roll_damping_ratio = damping("hull_roll_damping_ratio");
+    h.pitch_damping_ratio = damping("hull_pitch_damping_ratio");
+    s.max_deck_tilt_rad = doc.positive(t, "max_deck_tilt_deg") * deg;
+    s.max_heave_rate_mps = doc.positive(t, "max_heave_rate_mps");
     return s;
 }
 

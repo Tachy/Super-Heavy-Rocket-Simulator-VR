@@ -139,6 +139,7 @@ add_executable(starsim_core_tests
     test_booster_return_config.cpp
     test_falcon9_asds.cpp
     test_drone_ship_config.cpp
+    test_deck_motion.cpp
     test_falcon9_rtls.cpp
     test_falcon9_boostback_dump.cpp
     test_staging_sequence.cpp

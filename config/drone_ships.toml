@@ -1,12 +1,34 @@
 # Drone ships (autonomous landing barges) for first-stage landings at sea (milestone c4). The ship holds its position
-# (station keeping) and its deck stays level: no sea state yet. Where it waits is set per mission (the nominal impact
-# point of that mission's first stage). Display names are generic.
+# (station keeping); its deck heaves, rolls and pitches with the sea state of the mission (contact::DeckMotion; calm
+# sea: level deck). Where it waits is set per mission (the nominal impact point of that mission's first stage).
+# Display names are generic.
 #
 # The onboard computer picks the ship whose service area (a latitude / longitude box) contains the first stage's
 # predicted impact; several: the nearest home port. Areas are [E]; home ports are the ships' real ports [S].
 #
+# Hull (deck motion): the Marmac 300 class deck barge as a box, 300 x 100 ft waterplane (the 52 m deck includes the
+# wing extensions, which stand clear of the water), hull depth 19.8 ft; the loader derives draft = depth - freeboard
+# = 3.0 m [D]. Radii of gyration of a box barge: roll 0.35 x beam, pitch 0.25 x length [E] (uniform box: 0.29 B /
+# 0.29 L about the centre; deck structures and ballast at the sides / ends push them out).
+# Added mass / inertia [E], 2D strip theory of a shallow rectangle (B/T = 10.2) with a 3D end correction:
+#   heave: section added mass a33 = C rho pi B^2 / 8 (half-immersed flat plate, Lewis / Vugts 1968 C ~ 0.8 near the
+#          heave resonance omega^2 B / 2g ~ 1.4), per displaced mass rho B T: C pi B / (8 T) = 3.2; 3D correction for
+#          L/B = 3 (Lewis J ~ 0.8) -> 2.5 (several displaced masses, as for every wide shallow barge).
+#   pitch: the same strips about the midship, a55 = a33 L^3 / 12 against m r_pitch^2 = m L^2 / 16: 2.5 x 4/3 -> 3.3.
+#   roll:  flat plate rotating about the waterline, a44 = C rho pi B^4 / 256 per m r_roll^2: C pi B^3 / (256 T r^2)
+#          = 1.0 C, C ~ 0.5 at the roll resonance (omega^2 B / 2g ~ 2.2) -> 0.5.
+# Damping ratios [E]: heave radiation damping b33 = rho g^2 Abar^2 / omega^3 with the wave amplitude ratio Abar ~ 1
+# (Vugts, B/T = 10 near resonance) against the critical 2 omega_n (m + a33): ~0.18, reduced for 3D -> 0.15; pitch
+# likewise 0.15; roll of a flat barge mostly radiation + bilge-edge eddies, ~0.10. Natural periods with KG at the
+# waterline: heave 6.50 s, roll 5.32 s, pitch 6.26 s (printed by test_deck_motion "Natural periods ...").
+# Landing limits [E] (significant = 2 sigma; Task 4 / docs/subsystems.md give the Hs they correspond to): deck tilt
+# 3 deg, heave rate 1 m/s - against the legs' gentle contact (<= 3 m/s, <= 10 deg) with the touchdown speed on top.
+#
 # [sources]
-#   wiki_asds  https://en.wikipedia.org/wiki/Autonomous_spaceport_drone_ship  (deck ~300 x ~170 ft)
+#   wiki_asds  https://en.wikipedia.org/wiki/Autonomous_spaceport_drone_ship  (deck ~300 x ~170 ft; infobox: length
+#              300 ft, beam 170 ft with the wings, depth 19.8 ft; Marmac 302 / 303 / 304 hulls)
+#   marinelink_marmac  https://marinelink.com/news/oceangoing-mcdonough355047  (Marmac 300 class: 300 x 100 x 20 ft
+#              ocean-classed deck barge)
 #   wiki_canaveral  https://en.wikipedia.org/wiki/Port_Canaveral  (28.41 N, 80.62 W)
 #   wiki_longbeach  https://en.wikipedia.org/wiki/Port_of_Long_Beach  (33.75 N, 118.22 W)
 
@@ -17,6 +39,19 @@ basin = "atlantic"
 deck_length_m = 91.0        # [S:wiki_asds] ~300 ft
 deck_width_m = 52.0         # [S:wiki_asds] ~170 ft (with the wing extensions)
 freeboard_m = 3.0           # [E] deck above the waterline
+hull_length_m = 91.4        # [S:wiki_asds] 300 ft
+hull_beam_m = 30.5          # [S:marinelink_marmac] 100 ft (without the wings)
+hull_depth_m = 6.0          # [S:wiki_asds] 19.8 ft (draft = depth - freeboard [D])
+hull_roll_gyration_m = 10.675    # [E] 0.35 x beam
+hull_pitch_gyration_m = 22.85    # [E] 0.25 x length
+hull_heave_added_mass_factor = 2.5     # [E] strip theory, see the header
+hull_roll_added_inertia_factor = 0.5   # [E]
+hull_pitch_added_inertia_factor = 3.3  # [E]
+hull_heave_damping_ratio = 0.15        # [E]
+hull_roll_damping_ratio = 0.10         # [E]
+hull_pitch_damping_ratio = 0.15        # [E]
+max_deck_tilt_deg = 3.0     # [E] significant deck tilt allowed for a landing
+max_heave_rate_mps = 1.0    # [E] significant heave rate allowed for a landing
 home_port_latitude_deg = 28.41   # [S:wiki_canaveral]
 home_port_longitude_deg = -80.62
 area_min_latitude_deg = 20.0     # [E] off the US east coast to mid-Atlantic (covers the Cape launches' downrange)
@@ -31,6 +66,19 @@ basin = "atlantic"
 deck_length_m = 91.0        # [S:wiki_asds] ~300 ft
 deck_width_m = 52.0         # [S:wiki_asds] ~170 ft (with the wing extensions)
 freeboard_m = 3.0           # [E] deck above the waterline
+hull_length_m = 91.4        # [S:wiki_asds] 300 ft
+hull_beam_m = 30.5          # [S:marinelink_marmac] 100 ft (without the wings)
+hull_depth_m = 6.0          # [S:wiki_asds] 19.8 ft (draft = depth - freeboard [D])
+hull_roll_gyration_m = 10.675    # [E] 0.35 x beam
+hull_pitch_gyration_m = 22.85    # [E] 0.25 x length
+hull_heave_added_mass_factor = 2.5     # [E] strip theory, see the header
+hull_roll_added_inertia_factor = 0.5   # [E]
+hull_pitch_added_inertia_factor = 3.3  # [E]
+hull_heave_damping_ratio = 0.15        # [E]
+hull_roll_damping_ratio = 0.10         # [E]
+hull_pitch_damping_ratio = 0.15        # [E]
+max_deck_tilt_deg = 3.0     # [E] significant deck tilt allowed for a landing
+max_heave_rate_mps = 1.0    # [E] significant heave rate allowed for a landing
 home_port_latitude_deg = 28.41   # [S:wiki_canaveral]
 home_port_longitude_deg = -80.62
 area_min_latitude_deg = 20.0     # [E] off the US east coast to mid-Atlantic (covers the Cape launches' downrange)
@@ -45,6 +93,19 @@ basin = "pacific"
 deck_length_m = 91.0        # [S:wiki_asds] ~300 ft
 deck_width_m = 52.0         # [S:wiki_asds] ~170 ft (with the wing extensions)
 freeboard_m = 3.0           # [E] deck above the waterline
+hull_length_m = 91.4        # [S:wiki_asds] 300 ft
+hull_beam_m = 30.5          # [S:marinelink_marmac] 100 ft (without the wings)
+hull_depth_m = 6.0          # [S:wiki_asds] 19.8 ft (draft = depth - freeboard [D])
+hull_roll_gyration_m = 10.675    # [E] 0.35 x beam
+hull_pitch_gyration_m = 22.85    # [E] 0.25 x length
+hull_heave_added_mass_factor = 2.5     # [E] strip theory, see the header
+hull_roll_added_inertia_factor = 0.5   # [E]
+hull_pitch_added_inertia_factor = 3.3  # [E]
+hull_heave_damping_ratio = 0.15        # [E]
+hull_roll_damping_ratio = 0.10         # [E]
+hull_pitch_damping_ratio = 0.15        # [E]
+max_deck_tilt_deg = 3.0     # [E] significant deck tilt allowed for a landing
+max_heave_rate_mps = 1.0    # [E] significant heave rate allowed for a landing
 home_port_latitude_deg = 33.75   # [S:wiki_longbeach]
 home_port_longitude_deg = -118.22
 area_min_latitude_deg = 0.0     # [E] off the US west coast to the mid-Pacific
