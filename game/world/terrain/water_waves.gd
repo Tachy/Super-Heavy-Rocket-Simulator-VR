@@ -15,6 +15,10 @@ const DIRECTION_OFFSETS_DEG: Array[float] = [0.0, 31.0, -37.0, 67.0]
 const WIND_HEADING_DEG := 60.0
 ## [E] Slope k A of every octave: gentle (Cox-Munk adds the unresolved slopes in the glint).
 const SLOPE := 0.04
+## [E] Gerstner steepness Q_i of every octave (lift Q_i k_i A_i); <= 1, the deep-water trochoid limit
+## [S: GPU Gems 1, ch. 1 (Finch 2004): Q_i = 1 gives the sharpest crests, beyond it loops] (shader global
+## water_wave_steepness).
+const STEEPNESS := 0.5
 ## [S] Standard gravity (BIPM), deep-water dispersion omega^2 = g k.
 const STANDARD_GRAVITY_MPS2 := 9.80665
 ## [E] Re-anchoring distance of the tangent frame (1 deg ~ 111 km; the waves fade out beyond 20 km).
@@ -45,6 +49,12 @@ func wave_vector(i: int) -> Vector3:
 
 
 ## Angular frequency of octave i (rad/s), deep-water dispersion.
+## Slope variance the octaves resolve at full strength (sum (k A)^2 / 2 of sinusoids); the shader takes it (faded with
+## the octaves) out of the glint's Cox-Munk variance.
+static func resolved_slope_variance() -> float:
+	return WAVELENGTHS_M.size() * 0.5 * SLOPE * SLOPE
+
+
 static func angular_frequency(i: int) -> float:
 	return sqrt(STANDARD_GRAVITY_MPS2 * TAU / WAVELENGTHS_M[i])
 

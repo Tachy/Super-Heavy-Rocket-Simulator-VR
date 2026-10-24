@@ -12,6 +12,7 @@ render_mode unshaded, cull_back;
 // Global maps: CUSTOM1.u runs past 1 on nodes across the antimeridian (continuous inside the node), hence repeat.
 uniform sampler2D day_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D night_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
+uniform bool day_texture_bound = false;  // set with day_texture (World); false: the sea body falls back to deep_water
 // Per-node imagery crops: vertices outside a crop have UVs outside [0, 1] and fade 0, hence clamp.
 uniform sampler2D imagery_fine : source_color, filter_linear_mipmap_anisotropic, repeat_disable, hint_default_black;
 uniform sampler2D imagery_base : source_color, filter_linear_mipmap_anisotropic, repeat_disable, hint_default_black;
@@ -82,12 +83,16 @@ void fragment() {
 	vec3 albedo = mix(mix(texture(day_texture, map_uv).rgb, base, base_fade), fine, fine_fade);
 
 	vec3 day = albedo * max(cos_sun, 0.0) * sunlit * day_exposure;
-	// Sea: the imagery where it covers (lagoons, shoals), else the deep-water colour, under the calm sea model.
+	// Sea: the imagery where it covers (lagoons, shoals), else the day texture (shallow banks from orbit; deep_water
+	// without one), under the calm sea model.
 	float water = water_coverage(texture(water_mask, water_uv).r);
-	vec3 water_body = mix(mix(deep_water, base, base_fade), fine, fine_fade);
+	vec3 sea_background = day_texture_bound ? texture(day_texture, map_uv).rgb : deep_water;
+	vec3 water_body = mix(mix(sea_background, base, base_fade), fine, fine_fade);
 	vec3 to_camera = normalize(-camera_offset);
-	vec3 wave_n = water_wave_normal(n, camera_offset, length(camera_offset));
-	day = mix(day, water_radiance(water_body, n, wave_n, normalize(to_sun), to_camera, sunlit, day_exposure), water);
+	float resolved_variance;
+	vec3 wave_n = water_wave_normal(n, camera_offset, length(camera_offset), resolved_variance);
+	day = mix(day, water_radiance(water_body, n, wave_n, resolved_variance, normalize(to_sun), to_camera, sunlit,
+			day_exposure), water);
 	// City lights fade in through civil twilight (sun 0..6 deg below the horizon).
 	float night_factor = smoothstep(0.0, -0.1, cos_sun);
 	vec3 night = texture(night_texture, map_uv).rgb;

@@ -3,6 +3,11 @@
 # Run: godot --headless --path game --script res://tests/water_waves_test.gd
 extends SceneTree
 
+## Mirrors of water.gdshaderinc (Cox & Munk 1954 clean-surface fit, glint_wind_mps default).
+const COX_MUNK_SIGMA2_0 := 0.003
+const COX_MUNK_SIGMA2_PER_MPS := 0.00512
+const GLINT_WIND_MPS := 5.0
+
 var _failures := 0
 
 
@@ -54,7 +59,21 @@ func _initialize() -> void:
 	var far_up := Frames.to_render(far.normalized())
 	_check(absf(waves.wave_vector(0).normalized().dot(far_up)) < 1e-9, "the wave frame re-anchors under a distant camera")
 
-	print("WATER WAVES TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
+	# Gerstner steepness within the deep-water trochoid limit: Q_i <= 1, so each octave's lift Q_i k A <= k A.
+	_check(WaterWaves.STEEPNESS > 0.0 and WaterWaves.STEEPNESS <= 1.0
+			and WaterWaves.STEEPNESS * WaterWaves.SLOPE <= WaterWaves.SLOPE,
+			"Gerstner steepness Q_i = %.2f <= 1 (lift per octave %.3f <= k A %.3f)"
+			% [WaterWaves.STEEPNESS, WaterWaves.STEEPNESS * WaterWaves.SLOPE, WaterWaves.SLOPE])
+
+	# Resolved slope variance: sum (k A)^2 / 2, and below the Cox-Munk total at the glint wind (5 m/s) so the glint
+	# keeps a positive unresolved part.
+	var cox_munk_sigma2 := COX_MUNK_SIGMA2_0 + COX_MUNK_SIGMA2_PER_MPS * GLINT_WIND_MPS
+	var resolved := WaterWaves.resolved_slope_variance()
+	_check(absf(resolved - 4.0 * 0.5 * 0.04 * 0.04) < 1e-15 and resolved < cox_munk_sigma2,
+			"resolved slope variance %.4f below Cox-Munk sigma^2 %.4f (unresolved %.4f)"
+			% [resolved, cox_munk_sigma2, cox_munk_sigma2 - resolved])
+
+	print("WATER WAVES TEST ","PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 
 

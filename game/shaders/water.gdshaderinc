@@ -7,8 +7,11 @@
 // Columns: wave vector (rad/m, body-local render axes) in xyz, slope k A in w. Phases: each wave's phase at the camera.
 global uniform mat4 water_wave_vectors;
 global uniform vec4 water_wave_phases;
+// Gerstner steepness Q_i of every octave (WaterWaves.STEEPNESS, <= 1: the deep-water trochoid limit).
+global uniform float water_wave_steepness;
 
-// [E] Open-ocean body colour; open-ocean albedo ~0.06 [S: Payne 1972, J. Atmos. Sci. 29].
+// [E] Open-ocean body colour, the fallback when no day texture is bound (terrain_earth: the body colour is the
+// imagery, else the day texture); open-ocean albedo ~0.06 [S: Payne 1972, J. Atmos. Sci. 29].
 uniform vec3 deep_water = vec3(0.02, 0.05, 0.08);
 // [E] Placeholder sky radiance reflected by the sea until the atmosphere part of M8 replaces it (clear-sky blue).
 uniform vec3 sky_radiance = vec3(0.25, 0.35, 0.5);
@@ -25,9 +28,9 @@ const float WAVE_FADE_END_M = 20000.0;
 // [E] An octave also fades out where its phase changes by a quarter to half a cycle per pixel.
 const float WAVE_ALIAS_START_RAD = 1.5707963;
 const float WAVE_ALIAS_END_RAD = 3.1415927;
-// [E] Gerstner steepness Q (GPU Gems 1, ch. 1), shared by the octaves: Q_i k_i A_i = Q / octaves.
-const float GERSTNER_STEEPNESS = 0.5;
 const int WAVE_OCTAVES = 4;
+// [E] Floor of the unresolved (Cox-Munk minus resolved) slope variance: the glint never becomes a mirror.
+const float GLINT_MIN_SIGMA2 = 0.001;
 // [E] Mask threshold and half width of the coast transition (mask units: one texel across with linear filtering).
 const float WATER_MASK_THRESHOLD = 0.5;
 const float WATER_MASK_HALF_WIDTH = 0.5;
@@ -37,6 +40,9 @@ const float GLINT_MIN_COS = 1.0e-3;
 // [E] Sun elevation (sine) over which glint and sky fade in at sunrise.
 const float GLINT_SUN_FADE = 0.02;
 const float SKY_SUN_FADE = 0.1;
+// [E] Smith visibility step: the glint fades in over this cosine of the camera / Sun from the wave normal (facets
+// turned away from either get none).
+const float GLINT_FACING_FADE = 0.02;
 
 // Water fraction of a fragment from the linearly filtered per-node mask (255 = water).
 float water_coverage(float mask) {
@@ -50,18 +56,24 @@ float water_fresnel(float cos_theta) {
 }
 
 // Gerstner normal of the wave octaves at a fragment offset from the camera (body-local render metres), around the flat
-// sea normal n. The phase field is k . x: its gradient along the surface is k's horizontal part.
-vec3 water_wave_normal(vec3 n, vec3 offset_from_camera, float camera_distance) {
+// sea normal n. The phase field is k . x: its gradient along the surface is k's horizontal part. Gerstner normal
+// (GPU Gems 1, ch. 1, eq. 12): n (1 - sum Q_i k_i A_i sin) - sum D_i k_i A_i cos, Q_i <= 1 (trochoid limit).
+// resolved_variance: the slope variance the visible octaves carry (sum fade_i^2 (k_i A_i)^2 / 2), taken out of the
+// glint's Cox-Munk variance so that it is not counted twice.
+vec3 water_wave_normal(vec3 n, vec3 offset_from_camera, float camera_distance, out float resolved_variance) {
 	float distance_fade = 1.0 - smoothstep(WAVE_FADE_START_M, WAVE_FADE_END_M, camera_distance);
 	vec3 tilt = vec3(0.0);
 	float lift = 0.0;
+	resolved_variance = 0.0;
 	for (int i = 0; i < WAVE_OCTAVES; i++) {
 		vec4 wave = water_wave_vectors[i];
 		float phase = water_wave_phases[i] + dot(wave.xyz, offset_from_camera);
 		float fade = distance_fade * (1.0 - smoothstep(WAVE_ALIAS_START_RAD, WAVE_ALIAS_END_RAD, fwidth(phase)));
+		float slope = wave.w * fade;
 		vec3 horizontal = wave.xyz - dot(wave.xyz, n) * n;
-		tilt += horizontal / length(wave.xyz) * (wave.w * cos(phase) * fade);
-		lift += GERSTNER_STEEPNESS / float(WAVE_OCTAVES) * sin(phase) * fade;
+		tilt += horizontal / length(wave.xyz) * (slope * cos(phase));
+		lift += water_wave_steepness * slope * sin(phase);
+		resolved_variance += 0.5 * slope * slope;
 	}
 	return normalize(n * (1.0 - lift) - tilt);
 }
@@ -78,16 +90,20 @@ float cox_munk_smith_lambda(float cos_theta, float sigma2) {
 }
 
 // Radiance of the sea. body: body colour; n: flat sea normal; wave_n: water_wave_normal; to_sun, to_camera: unit
-// vectors; sunlit: unocculted fraction of the Sun (eclipse); exposure: the land's day_exposure.
-vec3 water_radiance(vec3 body, vec3 n, vec3 wave_n, vec3 to_sun, vec3 to_camera, float sunlit, float exposure) {
+// vectors; resolved_variance: from water_wave_normal; sunlit: unocculted fraction of the Sun (eclipse); exposure: the
+// land's day_exposure.
+vec3 water_radiance(vec3 body, vec3 n, vec3 wave_n, float resolved_variance, vec3 to_sun, vec3 to_camera, float sunlit,
+		float exposure) {
 	float sun_up = dot(n, to_sun);
 	float fresnel_view = water_fresnel(dot(wave_n, to_camera));
 	vec3 diffuse = body * max(sun_up, 0.0) * sunlit * exposure * (1.0 - fresnel_view);
 	vec3 sky = sky_radiance * fresnel_view * smoothstep(-SKY_SUN_FADE, SKY_SUN_FADE, sun_up) * sunlit;
 
 	// Cox-Munk glint: BRDF F p(tan beta) G / (4 cos_s cos_v cos^4 beta), p = exp(-tan^2 beta / s2) / (pi s2), G the
-	// Smith masking-shadowing; radiance = BRDF * pi * exposure * cos_s.
-	float sigma2 = COX_MUNK_SIGMA2_0 + COX_MUNK_SIGMA2_PER_MPS * glint_wind_mps;
+	// Smith masking-shadowing; radiance = BRDF * pi * exposure * cos_s. The distribution holds only the slopes the
+	// drawn octaves do not resolve: Cox-Munk total minus the resolved variance, floored.
+	float sigma2 = max(COX_MUNK_SIGMA2_0 + COX_MUNK_SIGMA2_PER_MPS * glint_wind_mps - resolved_variance,
+			GLINT_MIN_SIGMA2);
 	vec3 half_vector = normalize(to_sun + to_camera);
 	float cos_beta = max(dot(half_vector, wave_n), GLINT_MIN_COS);
 	float cos2_beta = cos_beta * cos_beta;
@@ -98,6 +114,8 @@ vec3 water_radiance(vec3 body, vec3 n, vec3 wave_n, vec3 to_sun, vec3 to_camera,
 	float smith = 1.0 / (1.0 + cox_munk_smith_lambda(cos_view, sigma2) + cox_munk_smith_lambda(cos_sun, sigma2));
 	float glint = PI * exposure * water_fresnel(dot(to_camera, half_vector)) * slope_pdf * smith
 			/ (4.0 * max(cos_view, GLINT_MIN_COS) * cos2_beta * cos2_beta);
+	// Visibility step: none on facets turned away from the camera or the Sun.
+	glint *= smoothstep(0.0, GLINT_FACING_FADE, cos_view) * smoothstep(0.0, GLINT_FACING_FADE, cos_sun);
 	glint *= smoothstep(0.0, GLINT_SUN_FADE, sun_up) * sunlit;  // none at night or in the Moon's shadow
 	return diffuse + sky + vec3(glint);
 }

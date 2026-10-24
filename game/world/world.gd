@@ -297,8 +297,10 @@ func _setup_earth_terrain(data_dir: String) -> void:
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/terrain_earth.gdshader")
 	material.set_shader_parameter("day_texture", _earth_material.get_shader_parameter("day_texture"))
+	material.set_shader_parameter("day_texture_bound", _earth_material.get_shader_parameter("day_texture") != null)
 	material.set_shader_parameter("night_texture", _earth_material.get_shader_parameter("night_texture"))
 	material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)
+	RenderingServer.global_shader_parameter_set("water_wave_steepness", WaterWaves.STEEPNESS)  # constant: set once
 	earth_terrain.name = "EarthTerrain"
 	earth.add_child(earth_terrain)
 	earth_terrain.setup(heights, ImagerySource.new(data_dir.path_join("imagery/earth/index.toml")),
