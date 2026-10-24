@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "starsim/contact/deck_motion.hpp"
@@ -123,6 +124,9 @@ private:
     double tick_s_ = 0.0;
     std::shared_ptr<const contact::DeckMotion> deck_motion_;
     time::Epoch sea_origin_;
+    // The carrier of the last epoch asked for: after_tick(t), follow_deck(t) and before_tick(t) of the next tick share it.
+    // Cleared whenever the motion changes. The sim runs on one thread (the session's).
+    mutable std::optional<std::pair<double, Carrier>> carrier_cache_;
 };
 
 }  // namespace starsim::sim

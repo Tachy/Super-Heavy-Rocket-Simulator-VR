@@ -704,11 +704,14 @@ public:
     // Sea state at the drone ship's station (sea state and deck motion, Task 3): a drone-ship landing zone's deck
     // heaves, rolls and pitches with it (contact::DeckMotion) while the fidelity flag deck_motion is on (default) and
     // the sea is not calm; nullopt / calm / flag off: the fixed level deck, exactly as before. The sea's time origin is
-    // the session epoch at this call rounded down to a whole TDB hour [call] (deterministic per mission). Set it after
-    // the landing zone; it sets the current leg site's deck motion (pads ignore it). A stage already landed on the
-    // deck (this call or set_deck_motion) changes over without a jump: held fixed where it is, then taken along by a
-    // new motion from its pose relative to the deck now.
+    // the given origin epoch rounded down to a whole TDB hour [call]; start_mission passes the mission's requested epoch,
+    // so the same mission at the same epoch gets the same sea whatever ran before. The one-argument form takes the
+    // session epoch at the call (deterministic only for a caller that fixes the epoch first). Before or after the
+    // landing zone: the landing zone's leg site picks the motion up; it sets the current leg site's deck motion (pads
+    // ignore it). A stage already landed on the deck (this call or set_deck_motion) changes over without a jump: held
+    // fixed where it is, then taken along by a new motion from its pose relative to the deck now.
     void set_sea_state(std::optional<environment::SeaStateConfig> sea);
+    void set_sea_state(std::optional<environment::SeaStateConfig> sea, time::Epoch origin);
     const std::optional<environment::SeaState>& sea_state() const { return sea_state_; }
     void set_deck_motion(bool on);  // fidelity flag
     bool deck_motion() const { return deck_motion_; }

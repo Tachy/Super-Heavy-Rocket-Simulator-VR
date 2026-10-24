@@ -347,7 +347,6 @@ func _setup_moon_terrain() -> void:
 	moon_terrain.setup(heights, null, MOON_RADIUS_M, material)
 
 
-## Concrete pad disc at a launch site (Earth-fixed, top surface at the site height).
 ## Creates, re-poses or removes the drone ship for the flight's landing zone (FlightSim.landing_zone; {}: no flight).
 func _update_drone_ship(zone: Dictionary) -> void:
 	if not zone.get("has_deck", false):
@@ -367,6 +366,7 @@ func _update_drone_ship(zone: Dictionary) -> void:
 		drone_ship.update_pose(zone)
 
 
+## Concrete pad disc at a launch site (Earth-fixed, top surface at the site height).
 func _make_pad(site: Dictionary) -> MeshInstance3D:
 	var disc := CylinderMesh.new()
 	disc.top_radius = 35.0

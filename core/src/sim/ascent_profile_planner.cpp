@@ -559,12 +559,12 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
         return refused(none, no_ship);
     }
     // Too rough a sea for the ship however it heads: refused before any drone-ship trial (spectral, no time simulation).
-    if (const auto rough =
-            sea_state_refusal(like, *provisional_ship, least_deck_motion_heading_rad(like, *provisional_ship, azimuth))) {
+    const double provisional_heading_rad = least_deck_motion_heading_rad(like, *provisional_ship, azimuth);
+    if (const auto rough = sea_state_refusal(like, *provisional_ship, provisional_heading_rad)) {
         AscentProfile none;
         none.target = request.target;
         none.trial_flights = trial_flights;
-        none.recovery = {RecoveryKind::DroneShip, provisional_ship->id, lat, lon, azimuth};
+        none.recovery = {RecoveryKind::DroneShip, provisional_ship->id, lat, lon, provisional_heading_rad};
         return refused(none, *rough);
     }
     auto profile = planned({RecoveryKind::DroneShip, provisional_ship->id, lat, lon, azimuth});

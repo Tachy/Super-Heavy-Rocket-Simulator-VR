@@ -75,6 +75,7 @@ void LegLandingSim::set_deck_motion(std::shared_ptr<const contact::DeckMotion> m
     if (motion && !surface_.deck) throw std::logic_error("set_deck_motion: the site has no deck");
     deck_motion_ = std::move(motion);
     sea_origin_ = sea_origin;
+    carrier_cache_.reset();
 }
 
 void LegLandingSim::change_deck_motion(std::shared_ptr<const contact::DeckMotion> motion, time::Epoch sea_origin,
@@ -109,10 +110,14 @@ std::optional<contact::DeckPose> LegLandingSim::deck_pose(time::Epoch epoch) con
 }
 
 LegLandingSim::Carrier LegLandingSim::carrier(time::Epoch epoch) const {
+    const double key = epoch.tdb_seconds_past_j2000();
+    if (carrier_cache_ && carrier_cache_->first == key) return carrier_cache_->second;
     const auto f = deck_motion_->frame(epoch - sea_origin_);
     // the level deck axes (bow, port, up) of the zero pose: deck_to_site x level^T rotates site axes with the deck
     const auto level = contact::deck_frame(contact::DeckPose{}, surface_.deck->heading_rad).deck_to_site;
-    return {f.deck_to_site * transpose(level), f.origin_site_m, f.velocity_site_mps, f.angular_velocity_site_radps};
+    const Carrier c{f.deck_to_site * transpose(level), f.origin_site_m, f.velocity_site_mps, f.angular_velocity_site_radps};
+    carrier_cache_.emplace(key, c);
+    return c;
 }
 
 // cg' = M^T (cg - o); v' = M^T (v - v_o - w_d x (cg - o)); w' = M^T (w - w_d); body_to_deck = M^T body_to_site.

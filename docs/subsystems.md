@@ -2870,8 +2870,9 @@ everything is exactly as before (the fixed level deck; `"A fixed deck gives exac
   sec. 3.5.5 normalisation, gamma 3.3) discretised into 48 linear (Airy) components, deep-water dispersion
   omega^2 = g k, equal-width bins over 0.5..3 omega_p (truncation < 1 %), amplitudes rescaled so the discrete variance is
   exactly Hs^2 / 16, phases from `std::mt19937_64(seed)` mapped by hand (portable). All waves travel towards the
-  heading. The sea's time origin is the session epoch at `FlightSession::set_sea_state` rounded down to a whole TDB
-  hour: deterministic per mission.
+  heading. The sea's time origin is the origin epoch given to `FlightSession::set_sea_state` rounded down to a whole TDB
+  hour; `start_mission` passes the mission's requested epoch, so the same mission at the same epoch gets the same sea
+  whatever the session ran before (the one-argument form takes the session epoch at the call).
 - **Mission table** (Task 4): `[sea_state]` `significant_wave_height_m`, `peak_period_s`, `heading_deg` (towards, from
   north), `seed` (`config::mission_sea_state`, `AscentMission::sea_state`); every `sim::start_mission` sets it on the
   session before the launch plans the recovery (none: calm, a previous mission's sea removed). Bad values are load
@@ -2936,8 +2937,8 @@ everything is exactly as before (the fixed level deck; `"A fixed deck gives exac
   pitched); deck pose at contact **heave -0.00 m rising at 0.22 m/s, roll 0.00 deg, pitch -0.36 deg** (rates 0.00 /
   0.00 deg/s: at a pitch extreme). Riding the deck for 60 s: velocity error and CG height change below 1e-4 m/s / m. The
   touchdown was gentle, so no guidance change (spec goal 4's terminal descent referenced to the measured deck height was
-  not needed): the landing burn aims at the mean deck height, and the deck's heave stays within its 0.27 m significant
-  value here.
+  not needed): the landing burn aims at the mean deck height; the measured deck heave at contact is -0.00 m, rising
+  at 0.22 m/s.
 - **Game** (Task 6): `FlightSim.landing_zone` adds the hull (`hull_length_m`, `hull_beam_m`, `hull_draft_m`), the deck
   pose (`deck_moving`, `deck_heave_m`, `deck_roll_deg`, `deck_pitch_deg` and rates; zero / level without a moving
   sea) with the tilted deck axes `deck_bow` / `deck_port` / `deck_normal` from `contact::deck_frame` (the leg contact's

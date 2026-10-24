@@ -171,6 +171,30 @@ TEST_CASE("A fixed deck gives exactly today's contact", "[legs][deck_motion][asd
     CHECK(same_state(flag_off.state, today.state));
 }
 
+TEST_CASE("The sea's time origin comes from the mission epoch, not the session's", "[deck_motion][asds]") {
+    // start_mission sets the sea before the mission is placed: sessions that held different epochs before get the same
+    // sea for the same requested epoch.
+    const auto t0 = start();
+    const environment::SeaStateConfig sea{2.0, 8.0, 45.0 * deg, 1};
+    auto pose_at_t0 = [&](double prior_offset_s) {
+        sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+        session.advance_to(t0 + prior_offset_s);  // whatever ran before
+        session.set_launch_site(ship());
+        session.set_landing_zone(ship());
+        session.set_sea_state(sea, t0);
+        session.advance_to(t0);
+        return session.deck_pose();
+    };
+    const auto a = pose_at_t0(-5000.0);
+    const auto b = pose_at_t0(-1.0e5);
+    REQUIRE(a);
+    REQUIRE(b);
+    CHECK(a->heave_m == b->heave_m);
+    CHECK(a->roll_rad == b->roll_rad);
+    CHECK(a->pitch_rad == b->pitch_rad);
+    CHECK(std::abs(a->heave_m) + std::abs(a->roll_rad) + std::abs(a->pitch_rad) > 0.0);
+}
+
 namespace {
 
 // Hs 2 m / Tp 8 s, waves 45 deg off the bow; the stage dropped 1 m above the deck centre at 1 m/s relative sink,

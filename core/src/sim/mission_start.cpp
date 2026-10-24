@@ -19,7 +19,8 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
     s.kind = config::mission_kind(config_dir, mission_id);
     session.set_boil_off(true);  // a mission without its own setting: boil-off on (a lunar return sets its own)
     // the mission's sea (none: calm, a previous mission's sea removed), before the start plans the drone-ship recovery
-    session.set_sea_state(config::mission_sea_state(config_dir, mission_id));
+    // (its time origin is the requested epoch: the sea does not depend on what the session ran before)
+    session.set_sea_state(config::mission_sea_state(config_dir, mission_id), requested);
     const std::optional<time::Epoch> wait_from =
         options.wait_on_pad ? std::optional<time::Epoch>(requested) : std::nullopt;
     switch (s.kind) {

@@ -1308,13 +1308,17 @@ void FlightSession::refresh_deck_motion() {
 }
 
 void FlightSession::set_sea_state(std::optional<environment::SeaStateConfig> sea) {
+    set_sea_state(std::move(sea), epoch_);
+}
+
+void FlightSession::set_sea_state(std::optional<environment::SeaStateConfig> sea, time::Epoch origin) {
     if (sea) {
         sea_state_.emplace(*sea);
     } else {
         sea_state_.reset();
     }
     constexpr double hour_s = constants::seconds_per_day / 24.0;
-    sea_origin_ = time::Epoch::from_tdb_seconds_past_j2000(std::floor(epoch_.tdb_seconds_past_j2000() / hour_s) * hour_s);
+    sea_origin_ = time::Epoch::from_tdb_seconds_past_j2000(std::floor(origin.tdb_seconds_past_j2000() / hour_s) * hour_s);
     refresh_deck_motion();
 }
 

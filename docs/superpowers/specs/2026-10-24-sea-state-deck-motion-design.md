@@ -98,3 +98,15 @@ Module placement of the deck motion, the component count and discretisation sche
 location (LegLandingSim or LandingSurface), how a held body follows a moving carrier (extend the landed hold or reuse
 the docked-hold pattern), the [E] values of draft / damping / limits within plausible ranges, the exact snapshot keys,
 and how the game's wave set maps Hs / Tp onto its four octaves.
+
+## Amendments during implementation (2026-10-24)
+
+Controller rulings that supersede the text above where they differ:
+
+- Excitation: the heave / roll / pitch response uses strip-theory relative-motion excitation (Korvin-Kroukovsky with the
+  Smith factor) instead of pure quasi-static excitation times the oscillator, so the forcing is consistent with the
+  added-mass and damping basis; the long-wave limit is unchanged. The 1/(2 zeta) resonance check is replaced accordingly.
+- Deck heading: with a non-calm sea the drone ship turns its deck to the heading of least predicted tilt (5 deg grid over
+  0..180 deg, symmetric under a half turn at zero speed); in a calm sea it keeps the ground-track heading.
+- Tip-over judgement test: 32 deg instead of 20 deg (20 deg lies inside the 30 deg tip-over angle and could not test one).
+- The sea's time origin is the mission's requested epoch (floored to a whole TDB hour), passed by `start_mission`.

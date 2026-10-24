@@ -591,8 +591,7 @@ TEST_CASE("The drone-ship mission lands on a moving deck", "[slow][falcon9][asds
     REQUIRE(m.sea_state);
     const auto t0 = start();
     sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
-    session.advance_to(t0);  // no bodies: the clock jumps (the sea's time origin is taken from it)
-    session.set_sea_state(m.sea_state);
+    session.set_sea_state(m.sea_state, t0);  // the mission's requested epoch is the sea's time origin
     const auto plan = sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
     REQUIRE(plan.feasible);
     REQUIRE(session.landing_zone());
