@@ -111,6 +111,8 @@ func _process(_delta: float) -> void:
 		var sea := sea_state_line(world.flight.sim.landing_zone())
 		if sea != "":
 			lines.append(sea)
+	if world.atmosphere.status_text != "":
+		lines.append(world.atmosphere.status_text)
 	_info_label.text = "\n".join(lines)
 
 

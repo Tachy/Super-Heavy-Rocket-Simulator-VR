@@ -5,6 +5,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3i.hpp>
+#include <godot_cpp/variant/vector4i.hpp>
 
 #include <array>
 #include <cstring>
@@ -272,11 +273,12 @@ godot::Dictionary StarsimCore::load_atmosphere(const godot::String& config_dir, 
         result["scattering"] = to_packed(tables->scattering);
         result["single_mie"] = to_packed(tables->single_mie);
         result["scattering_size"] = godot::Vector3i(s.scattering_width(), s.scattering_height(), s.scattering_depth());
+        result["scattering_cells"] = godot::Vector4i(s.scattering_nu, s.scattering_mu_s, s.scattering_mu, s.scattering_r);
         result["irradiance"] = to_packed(tables->irradiance);
         result["irradiance_size"] = godot::Vector2i(s.irradiance_mu_s, s.irradiance_r);
         result["parameters"] = atmosphere_parameters_dictionary(tables->parameters);
     } catch (const std::exception& e) {
-        const godot::String message = godot::String::utf8("Atmosphäre konnte nicht geladen werden: ") + e.what();
+        const godot::String message = godot::String::utf8("Atmosphäre konnte nicht geladen werden: ") + godot::String::utf8(e.what());
         godot::UtilityFunctions::push_error(message);
         result["ok"] = false;
         result["error"] = message;

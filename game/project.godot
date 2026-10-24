@@ -68,6 +68,86 @@ moon_terrain_camera_lo={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+atmosphere_transmittance={
+"type": "sampler2D",
+"value": ""
+}
+atmosphere_scattering={
+"type": "sampler3D",
+"value": ""
+}
+atmosphere_single_mie={
+"type": "sampler3D",
+"value": ""
+}
+atmosphere_irradiance={
+"type": "sampler2D",
+"value": ""
+}
+atmosphere_camera_hi={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+atmosphere_camera_lo={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+atmosphere_camera_altitude_m={
+"type": "float",
+"value": 0.0
+}
+atmosphere_world_to_earth={
+"type": "mat3",
+"value": Basis(1, 0, 0, 0, 1, 0, 0, 0, 1)
+}
+atmosphere_sun_direction={
+"type": "vec3",
+"value": Vector3(0, 1, 0)
+}
+atmosphere_luminance_scale={
+"type": "float",
+"value": 0.0
+}
+atmosphere_enabled={
+"type": "bool",
+"value": false
+}
+atmosphere_bottom_radius_m={
+"type": "float",
+"value": 6377987.0
+}
+atmosphere_top_radius_m={
+"type": "float",
+"value": 6478137.0
+}
+atmosphere_mu_s_min={
+"type": "float",
+"value": -0.5
+}
+atmosphere_mie_phase_g={
+"type": "float",
+"value": 0.8
+}
+atmosphere_sun_angular_radius_rad={
+"type": "float",
+"value": 0.00465
+}
+atmosphere_sky_radiance_to_luminance={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+atmosphere_sun_illuminance_lux={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+atmosphere_scattering_size={
+"type": "vec4",
+"value": Vector4(8, 32, 128, 64)
+}
+atmosphere_table_sizes={
+"type": "vec4",
+"value": Vector4(1024, 1024, 64, 16)
+}
 
 [xr]
 

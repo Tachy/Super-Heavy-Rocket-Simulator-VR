@@ -76,7 +76,7 @@ func _process(_delta: float) -> bool:
 	_frames += 1
 	# The streamed terrain loads over many frames: wait until nothing is loading (or give up after TERRAIN_MAX_FRAMES).
 	var loading: int = world.earth_terrain.stats["nodes_loading"] + world.moon_terrain.stats["nodes_loading"]
-	_terrain_idle = _terrain_idle + 1 if loading == 0 else 0
+	_terrain_idle = _terrain_idle + 1 if loading == 0 and not world.atmosphere.loading else 0  # also the sky's tables
 	if _frames >= FRAMES_TO_SETTLE and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES):
 		print("render_check: terrain after %d frames: Earth %s, Moon %s" % [_frames, world.earth_terrain.stats,
 				world.moon_terrain.stats])

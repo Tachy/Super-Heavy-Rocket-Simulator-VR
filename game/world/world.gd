@@ -46,6 +46,7 @@ var focus := FOCUS_EARTH
 var ground_site: Dictionary = {}
 var spice_ok := false  ## SPICE kernels opened in _ready
 var terrain_loaded: Dictionary = {}  ## core.load_terrain's result: {earth, moon}
+var atmosphere := Atmosphere.new()  ## the precomputed atmosphere's tables and global shader uniforms (sky, ambient)
 
 ## Per-frame state, readable by UI and tests.
 var moon_gcrf_m := Vector3.ZERO
@@ -54,6 +55,7 @@ var moon_apparent_from_earth_m := Vector3.ZERO
 
 var _earth_material := ShaderMaterial.new()
 var _moon_material := ShaderMaterial.new()
+var _sky_material := ShaderMaterial.new()
 
 
 func _ready() -> void:
@@ -70,6 +72,7 @@ func _ready() -> void:
 	add_child(clock)
 	add_child(camera)
 	_setup_environment()
+	atmosphere.start_loading(core, Paths.config_dir(), data_dir.path_join("atmosphere"))
 	_setup_bodies(data_dir)
 	stars.load_catalogue(data_dir.path_join("stars/stars.csv"))
 	add_child(stars)
@@ -134,6 +137,7 @@ func update_world() -> void:
 	sun_apparent_from_earth_m = core.apparent_body_position_gcrf_m("sun", t, Vector3.ZERO, Vector3.ZERO)
 	moon_apparent_from_earth_m = core.apparent_body_position_gcrf_m("moon", t, Vector3.ZERO, Vector3.ZERO)
 	var sun_from_camera := core.apparent_body_position_gcrf_m("sun", t, cam, Vector3.ZERO)
+	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m)
 
 	earth.place(cam)
 	var camera_fixed := earth.fixed_to_gcrf.transposed() * cam
@@ -301,6 +305,8 @@ func _setup_bodies(data_dir: String) -> void:
 	_earth_material.set_shader_parameter("day_texture", _load_texture(data_dir.path_join("textures/earth_day.jpg")))
 	_earth_material.set_shader_parameter("night_texture", _load_texture(data_dir.path_join("textures/earth_night.jpg")))
 	_earth_material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)
+	_sky_material.set_shader_parameter("day_texture", _earth_material.get_shader_parameter("day_texture"))
+	_sky_material.set_shader_parameter("day_texture_bound", _earth_material.get_shader_parameter("day_texture") != null)
 	earth.name = "Earth"
 	earth.setup(EARTH_SEMI_MAJOR_AXIS_M, EARTH_FLATTENING, _earth_material)
 	add_child(earth)
@@ -433,14 +439,22 @@ func _setup_label(label: Label3D, text: String) -> void:
 	add_child(label)
 
 
+## The sky shader (shaders/sky.gdshader) draws the background from the precomputed atmosphere; its radiance cubemap
+## (sky plus the lit ground below the horizon) is the ambient light and the reflections of the standard materials: sky
+## light, ground bounce and earthshine from the same model. Black until the tables are loaded (atmosphere_enabled).
 func _setup_environment() -> void:
+	_sky_material.shader = load("res://shaders/sky.gdshader")
+	var sky := Sky.new()
+	sky.sky_material = _sky_material
+	sky.process_mode = Sky.PROCESS_MODE_REALTIME  # the camera moves through the atmosphere: no stale cubemap
+	sky.radiance_size = Sky.RADIANCE_SIZE_256
 	var environment := Environment.new()
-	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color.BLACK
-	# [E] Faint ambient light (sky / earthshine stand-in) until the atmosphere model exists (M8).
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color(0.55, 0.65, 0.8)
-	environment.ambient_light_energy = 0.25
+	environment.background_mode = Environment.BG_SKY
+	environment.sky = sky
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	environment.ambient_light_sky_contribution = 1.0
+	environment.ambient_light_energy = 1.0
+	environment.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	environment.tonemap_mode = Environment.TONE_MAPPER_AGX
 	environment.glow_enabled = true
 	environment.glow_hdr_threshold = 4.0
