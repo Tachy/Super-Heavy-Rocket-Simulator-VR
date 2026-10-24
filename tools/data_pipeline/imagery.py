@@ -50,10 +50,13 @@ S2_MAX_CLOUD_PERCENT = 20  # [E]
 S2_SCENES_PER_TILE = 8  # [E]
 S2_YEAR = 2025
 S2_PIXEL_M = 10.0  # [S] Sentinel-2 visual (TCI) band spacing
+S2_READ_THREADS = 8  # scene reads per block worker
 S2_BLOCK_PX = 1024  # composite block (read + median + write unit); multiple of the GTiff block of 512
-LATTICE_M = 1000.0  # [E] colour-fit lattice spacing
+LATTICE_M = 1000.0  # [E] colour-fit lattice spacing against the day texture
 MIN_REF_STD = 3.0  # 8-bit counts: below this the reference carries no gain information (12 km day texture over a small box)
-GAIN_LIMITS = (0.5, 2.0)  # [E] sanity bounds of the fitted gain
+GAIN_LIMITS = (0.2, 5.0)  # [E] sanity bounds of the fitted gain (outside: an error, not a fallback)
+LUMA_WEIGHTS = (0.2126, 0.7152, 0.0722)  # [S] ITU-R BT.709 luma
+NAIP_FIT_CELL_M = 10.0  # NAIP is fitted against the Sentinel-2 composite at its own resolution
 NAIP_STAC = "https://planetarycomputer.microsoft.com/api/stac/v1"
 NAIP_TOKEN_URL = "https://planetarycomputer.microsoft.com/api/sas/v1/token/naip"
 S2_STAC = "https://earth-search.aws.element84.com/v1"
@@ -107,20 +110,31 @@ def clear_median(rgb: np.ndarray, scl: np.ndarray) -> np.ndarray:
     return np.rint(np.nan_to_num(median)).astype(np.uint8)
 
 
-def fit_gain_offset(src: np.ndarray, ref: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Per-channel least squares ref ~ gain * src + offset on (N, 3) samples. A reference without variation
-    (std < MIN_REF_STD) or a gain outside GAIN_LIMITS falls back to a mean match (gain 1)."""
-    gain, offset = np.ones(3), np.zeros(3)
-    for c in range(3):
-        s, r = src[:, c].astype(np.float64), ref[:, c].astype(np.float64)
-        g = 1.0
-        if r.std() >= MIN_REF_STD and s.std() > 1e-9:
-            a = np.stack([s, np.ones_like(s)], axis=1)
-            g = float(np.linalg.lstsq(a, r, rcond=None)[0][0])
-            if not GAIN_LIMITS[0] <= g <= GAIN_LIMITS[1]:
-                g = 1.0  # the texture does not resolve this box: a mean match is safer than a clamped extreme
-        gain[c] = g
-        offset[c] = float(r.mean() - g * s.mean())
+def fit_gain_offset(src: np.ndarray, ref: np.ndarray, *, luminance: bool = False,
+                    name: str = "?") -> tuple[np.ndarray, np.ndarray]:
+    """Least squares ref ~ gain * src + offset on (N, 3) samples -> (gain (3), offset (3)).
+    per channel (default), or with `luminance` ONE gain and ONE offset fitted on the Rec. 709 luma and applied equally to
+    R, G and B (keeps the source's own colour balance). A reference without variation (std < MIN_REF_STD in any fitted
+    channel) falls back to a mean match with gain 1 in ALL channels. A fitted gain outside GAIN_LIMITS is an error
+    (no silent substitution)."""
+    src, ref = np.asarray(src, dtype=np.float64), np.asarray(ref, dtype=np.float64)
+    if luminance:
+        w = np.array(LUMA_WEIGHTS)
+        s_set, r_set = (src @ w)[:, None], (ref @ w)[:, None]
+    else:
+        s_set, r_set = src, ref
+    n = s_set.shape[1]
+    gain, offset = np.ones(n), np.zeros(n)
+    if all(r_set[:, c].std() >= MIN_REF_STD and s_set[:, c].std() > 1e-9 for c in range(n)):
+        for c in range(n):
+            a = np.stack([s_set[:, c], np.ones(len(s_set))], axis=1)
+            gain[c] = float(np.linalg.lstsq(a, r_set[:, c], rcond=None)[0][0])
+        if not all(GAIN_LIMITS[0] <= g <= GAIN_LIMITS[1] for g in gain):
+            raise ValueError(f"{name}: Farbabgleich unplausibel (gain {np.round(gain, 3).tolist()} ausserhalb "
+                             f"{GAIN_LIMITS}); gain outside the plausible range, check the source / reference")
+    offset = r_set.mean(axis=0) - gain * s_set.mean(axis=0)
+    if luminance:
+        return np.full(3, gain[0]), np.full(3, offset[0])
     return gain, offset
 
 
@@ -225,16 +239,19 @@ def sample_day_texture(texture: np.ndarray, lats: np.ndarray, lons: np.ndarray) 
     return (1 - wy) * top + wy * bottom
 
 
-def fit_to_reference(datasets, box: Box, shift_deg, texture: np.ndarray, reference=None) -> tuple[np.ndarray, np.ndarray]:
-    """gain/offset of the imagery (averaged on a 1 km lattice over the box) against the day texture; or, where the 12 km
-    texture cannot resolve the box (NAIP), against `reference` = (datasets, gain, offset) of an already fitted source
-    (the Sentinel-2 composite of the same area, which itself is matched to the texture)."""
+def fit_to_reference(datasets, box: Box, shift_deg, texture: np.ndarray, reference=None,
+                     name: str = "?") -> tuple[np.ndarray, np.ndarray]:
+    """Colour fit. Without `reference`: ONE luminance gain + offset (equal in R, G, B) of the imagery averaged on a 1 km
+    lattice against the day texture (a ~7 km texel cannot support per-channel fits). With `reference` = (datasets, gain,
+    offset) of an already fitted source (NAIP: the Sentinel-2 composite of its area): per-channel least squares on a
+    10 m lattice."""
     from rasterio.warp import Resampling
 
     south, north, west, east = box
     lat_c = (south + north) / 2.0
-    ny = max(2, round((north - south) * M_PER_DEG_LAT / LATTICE_M))
-    nx = max(2, round((east - west) * M_PER_DEG_LAT * math.cos(math.radians(lat_c)) / LATTICE_M))
+    cell_m = LATTICE_M if reference is None else NAIP_FIT_CELL_M
+    ny = max(2, round((north - south) * M_PER_DEG_LAT / cell_m))
+    nx = max(2, round((east - west) * M_PER_DEG_LAT * math.cos(math.radians(lat_c)) / cell_m))
     rgb, valid = render_box(datasets, box, shift_deg, nx, ny, Resampling.average)
     if reference is None:
         lats = north - (np.arange(ny) + 0.5) * (north - south) / ny
@@ -249,38 +266,124 @@ def fit_to_reference(datasets, box: Box, shift_deg, texture: np.ndarray, referen
     src = rgb[valid].astype(np.float64)
     if len(src) < 4:
         raise RuntimeError("Keine gueltigen Bildpunkte fuer den Farbabgleich")
-    return fit_gain_offset(src, ref)
+    return fit_gain_offset(src, ref, luminance=reference is None, name=name)
 
 
 # ----------------------------------------------------------------------------------------------- pyramid
 
-def write_pyramid(datasets, box: Box, shift_deg, gain, offset, min_level: int, max_level: int, root: Path,
-                  log=print) -> dict[int, int]:
-    """Finest level rendered from the datasets (colour fit applied), lower levels as box means of the decoded children.
-    Returns {level: tile count}."""
+# ----------------------------------------------------------------------------------------------- parallel execution
+
+TILE_WORKER_BYTES = 400_000_000  # [E] peak memory of one tile worker (open datasets, GDAL cache, a chunk of tiles)
+S2_WORKER_BYTES = 1_200_000_000  # [E] peak of one composite block worker (up to ~16 scenes x 1024^2 x 3 + float32 sort stack)
+TILE_CHUNK = 64  # tiles per task
+
+
+def available_memory_bytes() -> int | None:
+    try:
+        import psutil
+
+        return int(psutil.virtual_memory().available)
+    except ImportError:
+        pass
+    if os.name == "nt":
+        import ctypes
+
+        class Status(ctypes.Structure):
+            _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total_phys", ctypes.c_ulonglong),
+                        ("avail_phys", ctypes.c_ulonglong), ("total_page", ctypes.c_ulonglong),
+                        ("avail_page", ctypes.c_ulonglong), ("total_virt", ctypes.c_ulonglong),
+                        ("avail_virt", ctypes.c_ulonglong), ("avail_ext", ctypes.c_ulonglong)]
+
+        st = Status()
+        st.length = ctypes.sizeof(Status)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(st)):
+            return int(st.avail_phys)
+        return None
+    try:
+        return os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    except (ValueError, OSError, AttributeError):
+        return None
+
+
+def resolve_workers(requested: int | None, worker_bytes: int, log=print, what: str = "") -> int:
+    """Worker count: `requested` (--workers), else the CPUs usable by this process (os.process_cpu_count on Python 3.13+,
+    else os.cpu_count, else 1); capped so that workers x `worker_bytes` fits 80 % of the available memory."""
+    cpu_count = getattr(os, "process_cpu_count", os.cpu_count)
+    workers = max(1, requested if requested else (cpu_count() or 1))
+    mem = available_memory_bytes()
+    if mem is not None and workers * worker_bytes > 0.8 * mem:
+        capped = max(1, int(0.8 * mem // worker_bytes))
+        log(f"  {what}: workers {workers} -> {capped} (memory cap: {worker_bytes / 1e6:.0f} MB per worker, "
+            f"{mem / 1e9:.1f} GB available)")
+        workers = capped
+    return workers
+
+
+def iter_tasks(fn, tasks: list, workers: int):
+    """Results of fn(task) as they complete: in-process and in order for workers == 1, else on a process pool."""
+    if workers <= 1 or len(tasks) <= 1:
+        for t in tasks:
+            yield fn(t)
+        return
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    with ProcessPoolExecutor(min(workers, len(tasks))) as pool:
+        futures = [pool.submit(fn, t) for t in tasks]
+        for f in as_completed(futures):
+            yield f.result()
+
+
+def _chunks(items: list, size: int) -> list[list]:
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _render_chunk(task) -> int:
+    """Worker: render + colour-fit + write the finest-level tiles of one chunk; returns the written count."""
+    import rasterio
+
+    paths, root, z, tiles, shift_deg, gain, offset = task
+    datasets = [rasterio.open(p) for p in paths]
+    try:
+        n = 0
+        for x, y in tiles:
+            rgb, valid = render_tile(datasets, tile_bounds(z, x, y), shift_deg)
+            if valid.any():
+                write_tile(Path(root), z, x, y, apply_gain_offset(rgb, gain, offset))
+                n += 1
+        return n
+    finally:
+        for ds in datasets:
+            ds.close()
+
+
+def _downsample_chunk(task) -> int:
+    """Worker: parent tiles of one chunk from the decoded children on disk; returns the written count."""
+    root, z, tiles = task
+    root, n = Path(root), 0
+    for x, y in tiles:
+        kids = [decode_jpeg(tile_path(root, z + 1, 2 * x + dx, 2 * y + dy)) for dy in (0, 1) for dx in (0, 1)]
+        if all(k is None for k in kids):
+            continue
+        write_tile(root, z, x, y, downsample_children(*kids))
+        n += 1
+    return n
+
+
+def write_pyramid(paths: list[Path], box: Box, shift_deg, gain, offset, min_level: int, max_level: int, root: Path,
+                  log=print, workers: int = 1) -> dict[int, int]:
+    """Finest level rendered from the raster files (colour fit applied), lower levels as box means of the decoded
+    children, tiles in parallel (`workers` processes; the files do not depend on the count). Returns {level: count}."""
     counts: dict[int, int] = {}
     south, north, west, east = box
+    paths = [str(p) for p in paths]
     tiles = tiles_for_box(max_level, south, north, west, east)
-    n = 0
-    for i, (x, y) in enumerate(tiles):
-        rgb, valid = render_tile(datasets, tile_bounds(max_level, x, y), shift_deg)
-        if not valid.any():
-            continue
-        write_tile(root, max_level, x, y, apply_gain_offset(rgb, gain, offset))
-        n += 1
-        if i % 500 == 0:
-            log(f"    z{max_level}: {i}/{len(tiles)}")
-    counts[max_level] = n
+    tasks = [(paths, str(root), max_level, c, shift_deg, gain, offset) for c in _chunks(tiles, TILE_CHUNK)]
+    counts[max_level] = sum(iter_tasks(_render_chunk, tasks, workers))
+    log(f"    z{max_level}: {counts[max_level]} tiles")
     for z in range(max_level - 1, min_level - 1, -1):
-        n = 0
-        for x, y in tiles_for_box(z, south, north, west, east):
-            kids = [decode_jpeg(tile_path(root, z + 1, 2 * x + dx, 2 * y + dy)) for dy in (0, 1) for dx in (0, 1)]
-            if all(k is None for k in kids):
-                continue
-            write_tile(root, z, x, y, downsample_children(*kids))
-            n += 1
-        counts[z] = n
-        log(f"    z{z}: {n} tiles")
+        tasks = [(str(root), z, c) for c in _chunks(tiles_for_box(z, south, north, west, east), TILE_CHUNK)]
+        counts[z] = sum(iter_tasks(_downsample_chunk, tasks, workers))
+        log(f"    z{z}: {counts[z]} tiles")
     return counts
 
 
@@ -426,7 +529,46 @@ def s2_items(box: Box, raw_dir: Path, force: bool, log=print) -> list[dict]:
     return chosen
 
 
-def build_s2_composite(items: list[dict], box: Box, raw_dir: Path, force: bool, log=print) -> Path:
+def _s2_block(task):
+    """Worker: the median of one composite block -> (r0, c0, (h, w, 3) uint8 or None when no scene covers it).
+    Reads the intersecting scenes on a few threads (network latency)."""
+    import rasterio
+    from rasterio.enums import Resampling
+    from rasterio.windows import Window
+
+    _gdal_http_env()
+    scenes, r0, c0, h, w = task
+
+    def read_item(scene):
+        ra, ca = max(r0 + scene["row_off"], 0), max(c0 + scene["col_off"], 0)
+        rb, cb = min(r0 + scene["row_off"] + h, scene["height"]), min(c0 + scene["col_off"] + w, scene["width"])
+        if rb <= ra or cb <= ca:
+            return None
+        win = Window(ca, ra, cb - ca, rb - ra)
+        scl_win = Window(ca / 2.0, ra / 2.0, (cb - ca) / 2.0, (rb - ra) / 2.0)
+
+        def go():
+            with rasterio.open(scene["visual"]) as v, rasterio.open(scene["scl"]) as s:
+                return (v.read([1, 2, 3], window=win),
+                        s.read(1, window=scl_win, out_shape=(rb - ra, cb - ca), resampling=Resampling.nearest))
+
+        rgb, scl = _retry(go, scene["id"], lambda *_: None)
+        return ra - scene["row_off"] - r0, ca - scene["col_off"] - c0, rgb, scl
+
+    with ThreadPoolExecutor(S2_READ_THREADS) as pool:
+        parts = [p for p in pool.map(read_item, scenes) if p is not None]
+    if not parts:
+        return r0, c0, None
+    rgb = np.zeros((len(parts), h, w, 3), dtype=np.uint8)
+    scl = np.zeros((len(parts), h, w), dtype=np.uint8)
+    for n, (dr, dc, v, sc) in enumerate(parts):
+        rgb[n, dr:dr + v.shape[1], dc:dc + v.shape[2]] = np.moveaxis(v, 0, -1)
+        scl[n, dr:dr + sc.shape[0], dc:dc + sc.shape[1]] = sc
+    return r0, c0, clear_median(rgb, scl)
+
+
+def build_s2_composite(items: list[dict], box: Box, raw_dir: Path, force: bool, log=print,
+                       workers: int | None = None) -> Path:
     """The median composite over the box as a tiled deflate GeoTIFF in the dominant UTM zone (resumable by block)."""
     import rasterio
     from rasterio.transform import from_origin
@@ -475,42 +617,22 @@ def build_s2_composite(items: list[dict], box: Box, raw_dir: Path, force: bool, 
                            compress="deflate", predictor=2, BIGTIFF="YES"):
             pass
 
-    def read_item(k, r0, c0, h, w):
-        item = infos[k][0]
-        row_off, col_off, iw, ih = offsets[k]
-        ra, ca = max(r0 + row_off, 0), max(c0 + col_off, 0)
-        rb, cb = min(r0 + row_off + h, ih), min(c0 + col_off + w, iw)
-        if rb <= ra or cb <= ca:
-            return None
-        win = Window(ca, ra, cb - ca, rb - ra)
-        scl_win = Window(ca / 2.0, ra / 2.0, (cb - ca) / 2.0, (rb - ra) / 2.0)
-        from rasterio.enums import Resampling
-
-        def go():
-            with rasterio.open(item["visual"]) as v, rasterio.open(item["scl"]) as s:
-                return (v.read([1, 2, 3], window=win),
-                        s.read(1, window=scl_win, out_shape=(rb - ra, cb - ca), resampling=Resampling.nearest))
-
-        rgb, scl = _retry(go, item["id"], log)
-        return ra - row_off - r0, ca - col_off - c0, rgb, scl
-
+    scenes = [{"id": infos[k][0]["id"], "visual": infos[k][0]["visual"], "scl": infos[k][0]["scl"],
+               "row_off": offsets[k][0], "col_off": offsets[k][1], "width": offsets[k][2], "height": offsets[k][3]}
+              for k in range(len(infos))]
     blocks = [(r, c) for r in range(0, height, S2_BLOCK_PX) for c in range(0, width, S2_BLOCK_PX)]
+    todo = [(scenes, r0, c0, min(S2_BLOCK_PX, height - r0), min(S2_BLOCK_PX, width - c0))
+            for r0, c0 in blocks if f"{r0},{c0}" not in done]
     t0 = time.time()
-    with rasterio.open(partial, "r+") as dst, ThreadPoolExecutor(8) as pool:
-        for b, (r0, c0) in enumerate(blocks):
-            key = f"{r0},{c0}"
-            if key in done:
-                continue
-            h, w = min(S2_BLOCK_PX, height - r0), min(S2_BLOCK_PX, width - c0)
-            parts = [p for p in pool.map(lambda k: read_item(k, r0, c0, h, w), range(len(infos))) if p is not None]
-            if parts:
-                rgb = np.zeros((len(parts), h, w, 3), dtype=np.uint8)
-                scl = np.zeros((len(parts), h, w), dtype=np.uint8)
-                for n, (dr, dc, v, s) in enumerate(parts):
-                    rgb[n, dr:dr + v.shape[1], dc:dc + v.shape[2]] = np.moveaxis(v, 0, -1)
-                    scl[n, dr:dr + s.shape[0], dc:dc + s.shape[1]] = s
-                dst.write(np.moveaxis(clear_median(rgb, scl), -1, 0), window=Window(c0, r0, w, h))
-            done.add(key)
+    workers = resolve_workers(workers, S2_WORKER_BYTES, log, "composite")
+    log(f"    composite: {len(todo)} of {len(blocks)} blocks to compute, {workers} workers")
+    with rasterio.open(partial, "r+") as dst:
+        # the parent writes the blocks and the progress file (resumable); workers only compute
+        for r0, c0, out in iter_tasks(_s2_block, todo, workers):
+            if out is not None:
+                h, w = out.shape[:2]
+                dst.write(np.moveaxis(out, -1, 0), window=Window(c0, r0, w, h))
+            done.add(f"{r0},{c0}")
             progress_file.write_text(json.dumps(sorted(done)))
             log(f"    composite block {len(done)}/{len(blocks)} ({time.time() - t0:.0f} s)")
     partial.replace(final)
@@ -576,7 +698,8 @@ def s2_reference(sid: str, src: dict, areas: dict, repo_root: Path):
     return None
 
 
-def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np.ndarray, force: bool, log=print) -> dict:
+def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np.ndarray, force: bool, log=print,
+                 workers: int | None = None) -> dict:
     import rasterio
 
     sid, product = src["id"], src["product"]
@@ -590,7 +713,7 @@ def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np
         shift, scenes = naip_shift_deg(box), len(paths)
     elif product == "sentinel2_median":
         items = s2_items(box, raw_dir, force, log)
-        paths, year, covered, shift, scenes = [build_s2_composite(items, box, raw_dir, force, log)], S2_YEAR, box, (0.0, 0.0), len(items)
+        paths, year, covered, shift, scenes = [build_s2_composite(items, box, raw_dir, force, log, workers)], S2_YEAR, box, (0.0, 0.0), len(items)
     else:
         raise ValueError(f"unbekanntes Produkt {product}")
     datasets = [rasterio.open(p) for p in paths]
@@ -598,9 +721,10 @@ def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np
         reference = None
         if product == "naip":  # the day texture is ~12 km per pixel: far too coarse for an 11 km box
             reference = s2_reference(sid, src, areas, repo_root)
-        gain, offset = fit_to_reference(datasets, covered, shift, texture, reference)
+        gain, offset = fit_to_reference(datasets, covered, shift, texture, reference, name=sid)
         log(f"  {sid}: gain {np.round(gain, 3).tolist()}, offset {np.round(offset, 2).tolist()}")
-        counts = write_pyramid(datasets, covered, shift, gain, offset, src["min_level"], src["max_level"], root, log)
+        counts = write_pyramid(paths, covered, shift, gain, offset, src["min_level"], src["max_level"], root, log,
+                               resolve_workers(workers, TILE_WORKER_BYTES, log, "tiles"))
     finally:
         for ds in datasets:
             ds.close()
@@ -613,19 +737,42 @@ def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np
     return meta
 
 
-def fetch(source: dict, repo_root: Path, download, force: bool = False) -> None:
+def fetch(source: dict, repo_root: Path, download, force: bool = False, retile: bool = False,
+          workers: int | None = None) -> None:
+    """`retile`: rebuild the fit and all tiles from the cached clips / composites (no network), keeping the raw caches."""
     cfg = load_config(repo_root / "config" / "imagery.toml")
     areas = {a["id"]: a for a in et.load_config(repo_root / "config" / "earth_terrain.toml")["area"]}
     texture = load_day_texture(repo_root / "data" / "textures" / "earth_day.jpg")
     out_dir = repo_root / "data" / "imagery" / "earth"
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings.filterwarnings("ignore", category=RuntimeWarning)
+    print(f"  workers: {resolve_workers(workers, TILE_WORKER_BYTES, print, 'tiles')} (CPUs usable: "
+          f"{getattr(os, 'process_cpu_count', os.cpu_count)() or 1}{', --workers ' + str(workers) if workers else ''})", flush=True)
     # Sentinel-2 first: the NAIP colour fit uses the fitted composite of its area as the reference
+    rebuilt_areas: set[str] = set()  # a re-fitted Sentinel-2 composite invalidates the NAIP fitted against it
     for src in sorted(cfg["source"], key=lambda s: s["product"] == "naip"):
-        if (out_dir / src["id"] / "meta.toml").exists() and not force:
+        if (out_dir / src["id"] / "meta.toml").exists() and not force and not retile                 and not (src["product"] == "naip" and src["area"] in rebuilt_areas):
             print(f"  {src['id']}: already present")
             continue
         print(f"  {src['id']}: {src['product']} over {src['area']} ({src['box']} box)", flush=True)
-        build_source(src, areas, repo_root, texture, force, log=lambda s: print(s, flush=True))
+        build_source(src, areas, repo_root, texture, force, log=lambda s: print(s, flush=True), workers=workers)
+        if src["product"] == "sentinel2_median":
+            rebuilt_areas.add(src["area"])
         write_index(out_dir, [s["id"] for s in cfg["source"]])
     write_index(out_dir, [s["id"] for s in cfg["source"]])
+
+
+def main() -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--force", action="store_true", help="rebuild clips / composites and tiles")
+    parser.add_argument("--retile", action="store_true", help="redo fit and tiles from the cached clips / composites")
+    parser.add_argument("--workers", type=int, default=None, help="worker processes (default: CPUs usable by the process)")
+    args = parser.parse_args()
+    fetch({}, REPO_ROOT, None, args.force, args.retile, args.workers)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

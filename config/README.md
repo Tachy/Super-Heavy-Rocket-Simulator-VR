@@ -358,4 +358,11 @@ edge; terrain at or below 0.05 m orthometric is water at the geoid.
 (`local` = local half size + 500 m margin, `regional` = regional half size), `min_level` / `max_level` (EPSG:4326 TMS
 levels: z17 = 0.59 m/px, z13 = 9.5 m/px). `fetch.py imagery` writes `data/imagery/earth/<id>/<z>/<x>/<y>.jpg` (256 px,
 quality 88) and `data/imagery/earth/index.toml` (per source: levels, exact coverage, `fade_m`, per-channel colour fit
-`gain_rgb` / `offset_rgb` against the day texture, already applied to the tiles). NAIP is shifted from NAD83 to ITRF.
+`gain_rgb` / `offset_rgb`, already applied to the tiles). NAIP is shifted from NAD83 to ITRF.
+Colour fit: Sentinel-2 -> day texture with ONE luminance gain and offset (equal in R, G, B; the texture is ~7 km per texel);
+NAIP -> the fitted Sentinel-2 composite of its area, per channel at 10 m. A gain outside [0.2, 5] aborts with an error.
+`python tools/data_pipeline/fetch.py --retile imagery` redoes the fit and all tiles from the cached clips / composites in
+`data/raw/imagery/` without network; rebuilding Sentinel-2 (also `--retile`) always re-fits the NAIP of its area.
+Parallelism: tile writing and the Sentinel-2 composite blocks run on a process pool; the worker count is `--workers N`, else
+the CPUs usable by the process (`os.process_cpu_count()` / `os.cpu_count()`), capped by 80 % of the free memory
+(per-worker estimates in `imagery.py`); the chosen count is logged at start. The output does not depend on the count.

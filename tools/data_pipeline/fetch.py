@@ -46,6 +46,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("ids", nargs="*", help="only fetch these source ids")
     parser.add_argument("--force", action="store_true", help="re-download existing files")
+    parser.add_argument("--retile", action="store_true",
+                        help="imagery: redo the colour fit and all tiles from the cached clips / composites (no network)")
+    parser.add_argument("--workers", type=int, default=None,
+                        help="imagery: worker processes (default: CPUs usable by the process, memory-capped)")
     args = parser.parse_args()
 
     sources = load_sources()
@@ -78,7 +82,7 @@ def main() -> int:
         if source.get("kind") == "imagery":  # NAIP + Sentinel-2 median composite -> EPSG:4326 tile pyramid (imagery.py)
             import imagery  # lazy: needs numpy, rasterio, pyproj, Pillow and pystac-client
 
-            imagery.fetch(source, REPO_ROOT, download, args.force)
+            imagery.fetch(source, REPO_ROOT, download, args.force, args.retile, args.workers)
             continue
         if target.exists() and not args.force:
             print("  already present")

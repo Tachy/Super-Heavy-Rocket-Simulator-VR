@@ -60,6 +60,7 @@ def test_median_ignores_clouds():
 
 
 def test_colour_match_recovers_gain():
+    """NAIP-style per-channel fit recovers a synthetic per-channel gain / offset."""
     rng = np.random.default_rng(3)
     src = rng.uniform(20.0, 200.0, size=(500, 3))
     gain_true = np.array([1.3, 1.1, 0.9])
@@ -68,10 +69,29 @@ def test_colour_match_recovers_gain():
     gain, offset = im.fit_gain_offset(src, ref)
     assert gain == pytest.approx(gain_true, rel=0.01)
     assert offset == pytest.approx(offset_true, abs=1.0)
-    # a reference without variation (the 12 km day texture over a small box): mean match, gain 1
-    g, o = im.fit_gain_offset(src, np.full_like(src, 90.0))
-    assert g == pytest.approx([1.0, 1.0, 1.0])
-    assert o == pytest.approx(90.0 - src.mean(axis=0))
+
+
+def test_luminance_fit_gains_equal_across_channels():
+    rng = np.random.default_rng(4)
+    src = rng.uniform(20.0, 200.0, size=(500, 3))
+    ref = np.clip(src[:, [0]] * 0 + (src @ np.array(im.LUMA_WEIGHTS))[:, None] * 0.8 - 12.0, 0, 255) + np.array([0.0, 0.0, 0.0])
+    gain, offset = im.fit_gain_offset(src, ref, luminance=True)
+    assert gain[0] == gain[1] == gain[2] and offset[0] == offset[1] == offset[2]
+    assert gain[0] == pytest.approx(0.8, rel=0.01) and offset[0] == pytest.approx(-12.0, abs=1.0)
+
+
+def test_fit_fallback_is_all_or_nothing():
+    rng = np.random.default_rng(6)
+    src = rng.uniform(20.0, 200.0, size=(300, 3))
+    ref = src * 1.2 + 5.0
+    ref[:, 2] = 90.0  # no variation in ONE channel: every channel falls back to a mean match with gain 1
+    gain, offset = im.fit_gain_offset(src, ref)
+    assert gain == pytest.approx([1.0, 1.0, 1.0])
+    assert offset == pytest.approx(ref.mean(axis=0) - src.mean(axis=0))
+    # a single channel with an implausible gain is an error naming the source, not a silent substitute
+    ref = src * np.array([1.0, 1.0, 8.0])
+    with pytest.raises(ValueError, match="s2_test"):
+        im.fit_gain_offset(src, ref, name="s2_test")
 
 
 def test_apply_gain_offset_keeps_nodata():
@@ -145,3 +165,62 @@ def test_choose_naip_year_prefers_newest_covering():
     part = lambda y: {"year": y, "bbox": (20.0, 10.0, 20.4, 11.0)}  # noqa: E731
     assert im.choose_naip_year([full(2020), full(2022), part(2024)], box) == 2022
     assert im.choose_naip_year([part(2020), part(2024)], box) == 2024  # nothing covers: the newest of the best
+
+
+def test_pyramid_identical_for_any_worker_count(tmp_path):
+    import rasterio
+    from rasterio.transform import from_bounds
+
+    size = 0.03  # deg: ~ 5 x 5 tiles at z15 (0.0055 deg)
+    west, south = -97.2, 26.0
+    rng = np.random.default_rng(11)
+    data = rng.integers(1, 256, size=(3, 600, 600), dtype=np.uint8)
+    tif = tmp_path / "src.tif"
+    with rasterio.open(tif, "w", driver="GTiff", width=600, height=600, count=3, dtype="uint8", crs="EPSG:4326",
+                       transform=from_bounds(west, south, west + size, south + size, 600, 600)) as dst:
+        dst.write(data)
+    box = (south + 0.002, south + size - 0.002, west + 0.002, west + size - 0.002)
+    gain, offset = np.array([0.8, 0.9, 1.0]), np.array([-5.0, 0.0, 3.0])
+    counts = {}
+    for workers in (1, 4):
+        counts[workers] = im.write_pyramid([tif], box, (1e-5, 2e-5), gain, offset, 13, 15, tmp_path / f"w{workers}",
+                                           log=lambda *_: None, workers=workers)
+    assert counts[1] == counts[4] and counts[1][15] > 4
+    files1 = sorted(p.relative_to(tmp_path / "w1") for p in (tmp_path / "w1").rglob("*.jpg"))
+    files4 = sorted(p.relative_to(tmp_path / "w4") for p in (tmp_path / "w4").rglob("*.jpg"))
+    assert files1 == files4 and len(files1) == sum(counts[1].values())
+    for f in files1:
+        assert (tmp_path / "w1" / f).read_bytes() == (tmp_path / "w4" / f).read_bytes()
+
+
+def test_resolve_workers_override_and_memory_cap():
+    msgs = []
+    assert im.resolve_workers(3, 1, msgs.append) == 3
+    mem = im.available_memory_bytes()
+    if mem:
+        capped = im.resolve_workers(10_000, mem // 4, msgs.append, "t")
+        assert capped <= 3 and any("memory cap" in m for m in msgs)
+    assert im.resolve_workers(None, 1, msgs.append) >= 1
+
+
+def test_s2_block_worker_median_from_local_scenes(tmp_path):
+    """The composite block worker (scene windows, SCL at half resolution, median) on synthetic local rasters."""
+    import rasterio
+    from rasterio.transform import from_origin
+
+    def scene(name, value, scl_value, row_off):
+        vis, scl = tmp_path / f"{name}_vis.tif", tmp_path / f"{name}_scl.tif"
+        with rasterio.open(vis, "w", driver="GTiff", width=64, height=64, count=3, dtype="uint8", crs="EPSG:32614",
+                           transform=from_origin(500000, 2900000, 10, 10)) as d:
+            d.write(np.full((3, 64, 64), value, dtype=np.uint8))
+        with rasterio.open(scl, "w", driver="GTiff", width=32, height=32, count=1, dtype="uint8", crs="EPSG:32614",
+                           transform=from_origin(500000, 2900000, 20, 20)) as d:
+            d.write(np.full((1, 32, 32), scl_value, dtype=np.uint8))
+        return {"id": name, "visual": str(vis), "scl": str(scl), "row_off": row_off, "col_off": 0, "width": 64, "height": 64}
+
+    scenes = [scene("a", 100, 4, 0), scene("b", 120, 4, 0), scene("c", 250, 9, 0)]  # c is cloud
+    r0, c0, out = im._s2_block((scenes, 0, 0, 64, 64))
+    assert (r0, c0) == (0, 0) and out.shape == (64, 64, 3)
+    assert (out == 110).all()
+    # a block entirely outside every scene
+    assert im._s2_block((scenes, 640, 0, 64, 64))[2] is None
