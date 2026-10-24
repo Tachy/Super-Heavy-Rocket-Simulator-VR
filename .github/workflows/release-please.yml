@@ -1,5 +1,6 @@
-# release-please: keeps a release PR (version + CHANGELOG.md) up to date from the Conventional Commits on
-# main. Nothing is published until that PR is merged; merging it creates the tag and the GitHub release.
+# release-please: keeps a release PR (version in game/util/game_version.gd + CHANGELOG.md) up to date from the
+# Conventional Commits on main. It does not publish: /build (.claude/commands/build.md) builds the game and its data
+# parts, merges the PR and creates the tag and the release with all files at once.
 name: release-please
 
 on:
@@ -18,3 +19,4 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-release: true

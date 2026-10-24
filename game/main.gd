@@ -7,6 +7,10 @@ const WEBCAST_LAYER := 1
 const PANEL_LAYER := 2
 const LEGACY_HUD_LAYER := 3
 
+## User argument (after `--`): report whether the world found its data, then quit (tools/package.ps1 runs it on the
+## exported build).
+const SELF_CHECK_ARG := "--self-check"
+
 var world := World.new()
 var overlay_host := OverlayHost.new()
 var legacy_hud := CanvasLayer.new()  ## FlightOverlay, NavBall, FlightHud (F1)
@@ -15,6 +19,10 @@ var legacy_hud := CanvasLayer.new()  ## FlightOverlay, NavBall, FlightHud (F1)
 func _ready() -> void:
 	world.name = "World"
 	add_child(world)
+	get_window().title = "%s %s" % [ProjectSettings.get_setting("application/config/name"), GameVersion.VERSION]
+	if OS.get_cmdline_user_args().has(SELF_CHECK_ARG):
+		_self_check()
+		return
 	overlay_host.overlay.world = world
 	add_child(overlay_host)
 	var xr := get_node_or_null("/root/XrManager")
@@ -60,6 +68,24 @@ func _ready() -> void:
 	var hud := FlightHud.new()
 	hud.world = world
 	legacy_hud.add_child(hud)
+
+
+## One line `SELF-CHECK OK ...` (exit code 0) or `SELF-CHECK FAIL <reason>` (exit code 1).
+func _self_check() -> void:
+	var reason := ""
+	if not world.spice_ok:
+		reason = "no SPICE kernels in " + Paths.data_dir().path_join("spice")
+	elif world.sites.is_empty():
+		reason = "no launch sites in " + Paths.config_dir().path_join("launch_sites.toml")
+	if not reason.is_empty():
+		print("SELF-CHECK FAIL ", reason)
+		get_tree().quit(1)
+		return
+	var yes_no := func(flag: bool) -> String: return "yes" if flag else "no"
+	print("SELF-CHECK OK version=%s spice=ok sites=%d earth_terrain=%s imagery=%s" % [GameVersion.VERSION,
+			world.sites.size(), yes_no.call(world.terrain_loaded.get("earth", false)),
+			yes_no.call(FileAccess.file_exists(Paths.data_dir().path_join("imagery/earth/index.toml")))])
+	get_tree().quit(0)
 
 
 ## F1 shows / hides the old flight HUD.

@@ -1,8 +1,11 @@
 class_name Paths
-## Locations of repository folders outside the Godot project (data/ and config/ are siblings of game/).
+## Locations of repository folders outside the Godot project (data/ and config/ are siblings of game/). An exported
+## build has them next to its executable (tools/package.ps1 lays the release out that way).
 
 
 static func repo_dir() -> String:
+	if OS.has_feature("template"):
+		return OS.get_executable_path().get_base_dir()
 	return ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
 
 

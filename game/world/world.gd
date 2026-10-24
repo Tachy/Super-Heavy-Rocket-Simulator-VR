@@ -43,6 +43,8 @@ var moon_label := Label3D.new()
 var sites: Array = []  ## launch sites from config/launch_sites.toml
 var focus := FOCUS_EARTH
 var ground_site: Dictionary = {}
+var spice_ok := false  ## SPICE kernels opened in _ready
+var terrain_loaded: Dictionary = {}  ## core.load_terrain's result: {earth, moon}
 
 ## Per-frame state, readable by UI and tests.
 var moon_gcrf_m := Vector3.ZERO
@@ -58,6 +60,7 @@ func _ready() -> void:
 	if not core.open(data_dir.path_join("spice")):
 		push_error("World: SPICE kernels missing - run tools/data_pipeline/fetch.py")
 		return
+	spice_ok = true
 	sites = TomlLite.load_file(Paths.config_dir().path_join("launch_sites.toml")).get("site", [])
 	flight.setup(Paths.config_dir())
 	add_child(flight)
@@ -303,7 +306,7 @@ func _setup_bodies(data_dir: String) -> void:
 ## The Earth's terrain quadtree: heights from the core's Earth terrain (the physics' surface; without data/ the flat
 ## rule), imagery from data/imagery, drawn with terrain_earth.gdshader.
 func _setup_earth_terrain(data_dir: String) -> void:
-	core.load_terrain(Paths.config_dir())  # once, on the main thread, before any worker build
+	terrain_loaded = core.load_terrain(Paths.config_dir())  # once, on the main thread, before any worker build
 	var heights := HeightSource.new()
 	heights.body = "earth"
 	heights.core = core
