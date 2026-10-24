@@ -2288,7 +2288,7 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     RTLS return (its MECO plan keeps the 12.1 t landing propellant) is feasible - also where the drone ship would leave
     more (SpaceX practice, spec) - else a drone ship from `config/drone_ships.toml` at the stage's impact predicted 10 s after the
     separation (`BoosterReturnGuidance::predict_impact`, drag and the entry burn, no steering: the falcon9_asds.toml
-    derivation), deck along the ground track there; its sea the EGM2008 geoid at the station (`FlightSession::sea_height_m`, coarse grid -43.2 m at 32 N 76 W; M8 Plan A Task 5, was -35 m [E]). The kick is searched with the ship at
+    derivation), deck along the ground track there (in a moving sea: the heading of least deck tilt, below); its sea the EGM2008 geoid at the station (`FlightSession::sea_height_m`, coarse grid -43.2 m at 32 N 76 W; M8 Plan A Task 5, was -35 m [E]). The kick is searched with the ship at
     a provisional station 600 km [E] downrange (the MECO plan without a boostback does not depend on the ship; near the
     pad its deck would replace the ground). Neither feasible: refused.
   - Drone ship list (follow-ups Task 6): `asds_atlantic`, `asds_atlantic_2` (home port Port Canaveral [S]) and
@@ -2307,17 +2307,24 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     deck's spectral 2-sigma tilt and heave rate (`contact::DeckMotion::statistics`) against the ship's
     `max_deck_tilt_deg` 3 deg / `max_heave_rate_mps` 1 m/s [E]; above -> "Seegang im Landegebiet zu hoch: Decksneigung
     4.2° über der Grenze 3.0° (signifikante Werte bei Hs 6.0 m, Tp 10 s)." `plan_launch` checks the provisional ship
-    before the drone-ship trials with the deck heading that moves least (0..180 deg in 5 deg steps: the ship can
-    head anywhere), so a sea too rough for every heading is refused with no drone-ship trial; after the impact
-    prediction the chosen ship is checked again with its real heading (along the ground track). RTLS and tower catches
-    ignore the sea; a calm sea, none, or the fidelity flag `deck_motion` off: no check (the old behaviour).
-    The limits in Hs (linear model, statistics scale with Hs; the tilt limit binds first everywhere):
-    | Tp | waves along the deck | waves across the deck |
+    before the drone-ship trials, so a sea too rough for every heading is refused with no drone-ship trial; after the
+    impact prediction the chosen ship is checked again with the recovery's deck heading. The ship holds station
+    heading into the sea (Task 4 fix round 1, controller ruling): in a moving sea with `deck_motion` on its deck
+    heading is `sim::least_deck_motion_heading_rad` - the least significant tilt on a 5 deg grid over 0..180 deg, a
+    tie (1e-9 rad) keeping the ground track; calm sea, none or the flag off: along the ground track exactly as before.
+    The Starlink-class station with Hs 2 m / Tp 8 s across the track (44.6 deg): beam-on 5.51 deg (refused before the
+    ruling), turned to 135 deg 1.17 deg. Landing guidance aims at the deck centre and does not use the heading; the
+    sea beside the deck (`drone_ship_site`: `SeaConfig` direction heading + 90 deg) turns with it. RTLS and tower
+    catches ignore the sea; a calm sea, none, or the fidelity flag `deck_motion` off: no check (the old behaviour).
+    The limits in Hs (linear model, statistics scale with Hs; the tilt limit binds first everywhere). With the ship
+    turned to its least-tilt heading - waves along the deck - the first column is the limit:
+    | Tp | waves along the deck (least tilt) | waves across the deck |
     |---|---|---|
-    | 8 s | 5.2 m (heave rate: 12.7 m) | 1.1 m (heave rate: 3.0 m) |
-    | 10 s | 4.2 m (heave rate: 6.9 m) | 1.45 m (heave rate: 3.2 m) |
-    So the deck heading decides: along the waves a landing is allowed up to Hs ~4-5 m, abeam only to ~1.1-1.5 m (the
-    barge's roll resonance at 5.3 s). Beyond ~6 deg of roll the linear model is an upper bound (safe for the refusal).
+    | 8 s | 5.15 m (heave rate: 12.7 m) | 1.09 m (heave rate: 3.0 m) |
+    | 10 s | 4.24 m (heave rate: 6.9 m) | 1.45 m (heave rate: 3.2 m) |
+    So a drone-ship landing is refused above Hs ~5.2 m at Tp 8 s and ~4.2 m at Tp 10 s (a deck held beam-on would
+    already reach the limit at ~1.1-1.5 m: the barge's roll resonance at 5.3 s). Beyond ~6 deg of roll the linear
+    model is an upper bound (safe for the refusal).
     Printed by the hidden test `"Sea-state limits of the drone ship in Hs"` (`[sea_state_limits]`).
 - Recovery feasibility is checked for real in every trial (Task 3 review note): the session must return the stage
   (`returns_after_staging`), the MECO plan be finite, and with a boostback its Lambert arc be found from the stack's

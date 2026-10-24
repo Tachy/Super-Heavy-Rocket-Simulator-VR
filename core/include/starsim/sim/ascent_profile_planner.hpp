@@ -22,7 +22,8 @@ struct RecoveryChoice {
     std::string zone_or_ship_id;  // TowerCatch: the launch site; LandingZone: its site id; DroneShip: drone_ships.toml
     double latitude_rad = 0.0;    // where the stage comes down (the tower's pad, the zone, the ship's station)
     double longitude_rad = 0.0;
-    double heading_rad = 0.0;     // DroneShip: the deck's long axis, clockwise from north (along the ground track)
+    double heading_rad = 0.0;     // DroneShip: the deck's long axis, clockwise from north (least_deck_motion_heading_rad:
+                                  // along the ground track unless a moving sea makes another heading tilt less)
 };
 
 // [D] The drone ship waits at the first stage's impact predicted this long after its separation (the derivation of
@@ -32,6 +33,8 @@ inline constexpr double drone_ship_prediction_after_separation_s = 10.0;
 // [E] Deck headings tried by plan_launch's sea-state check before the drone-ship trials (0..180 deg: the deck motion
 // statistics are symmetric under a half turn). The tilt varies smoothly with the heading (cos / sin of the wave angle).
 inline constexpr double sea_check_heading_step_rad = 5.0 * constants::deg_to_rad;
+// A grid heading replaces the ground track only when its significant tilt is smaller by more than this.
+inline constexpr double sea_check_tilt_tie_rad = 1e-9;
 
 // The landing zone or drone ship of `recovery` as the session's landing site (none for a tower catch), read from
 // `session`'s config directory. A drone ship floats on `session`'s sea at its station (FlightSession::sea_height_m:
@@ -45,6 +48,13 @@ std::optional<LaunchSite> recovery_landing_site(const FlightSession& session, co
 // within the limits, a calm sea or none, or the fidelity flag deck_motion off.
 std::optional<std::string> sea_state_refusal(const FlightSession& like, const config::DroneShipConfig& ship,
                                              double heading_rad);
+
+// The heading a drone ship holding station turns its deck to (sea state and deck motion, Task 4 fix round 1): in a
+// moving sea (`like`'s, fidelity flag deck_motion on) the heading of least significant deck tilt on the grid 0..180 deg
+// in sea_check_heading_step_rad (a ship heads into the sea); a tie (within sea_check_tilt_tie_rad) keeps
+// `ground_track_heading_rad`. A calm sea, none, or the flag off: `ground_track_heading_rad` unchanged.
+double least_deck_motion_heading_rad(const FlightSession& like, const config::DroneShipConfig& ship,
+                                     double ground_track_heading_rad);
 
 // A launch from a pad the onboard computer plans before liftoff (ascent trajectory and staging, Task 3).
 // Threads: the planner reads `like`'s interpolated ephemeris and orientation, whose caches fill lazily and are not
@@ -116,10 +126,10 @@ AscentProfile plan_ascent_profile(const FlightSession& like, const AscentProfile
 //  - a stage caught by a tower ("tower_catch", Super Heavy): the site's tower; none, or no plan with the catch: refused;
 //  - a stage on legs ("leg_landing", Falcon 9): the site's landing zone (RTLS) when the plan with the RTLS return is
 //    feasible, else the drone ship at the stage's predicted no-boostback impact (booster_impact), heading along the
-//    ground track; neither: refused. The drone ship is checked against the sea (sea_state_refusal) before its trials,
-//    with the deck heading that moves least (the ship can head anywhere: 0..180 deg in sea_check_heading_step_rad,
-//    the largest of value / limit smallest), and again at the chosen station with its heading along the ground track;
-//    a refusal there refuses the launch.
+//    ground track (least_deck_motion_heading_rad: in a moving sea the heading of least deck tilt); neither: refused.
+//    The drone ship is checked against the sea (sea_state_refusal) before its trials, with the least-tilt heading at
+//    the provisional station, and again at the chosen station with the deck heading of the recovery; a refusal
+//    refuses the launch.
 // A plan is feasible only when every trial checked the return at MECO for real: a finite propellant plan and, with a
 // boostback, its Lambert arc found (BoosterReturnGuidance::boostback_delta_v_mps) - a failed arc counts no boostback.
 // What the RTLS / catch reserve holds is the MECO plan's: the stage's landing_propellant_kg plus run-down, flip and the

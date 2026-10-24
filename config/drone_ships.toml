@@ -32,8 +32,10 @@
 # 1.05 m / 0.84 m/s / 6.9 deg abeam.
 # Landing limits [E] (significant = 2 sigma): deck tilt 3 deg, heave rate 1 m/s - against the legs' gentle contact
 # (<= 3 m/s, <= 10 deg) with the touchdown speed on top. The onboard computer refuses a drone-ship landing above them
-# (sim::sea_state_refusal). In Hs the tilt limit binds first: waves along the deck 5.2 m (Tp 8 s) / 4.2 m (Tp 10 s),
-# across the deck 1.1 m / 1.45 m (heave rate alone: along 12.7 / 6.9 m, across 3.0 / 3.2 m; docs/subsystems.md).
+# (sim::sea_state_refusal). In a moving sea the ship holds station heading where its deck tilts least (waves along
+# the deck; calm: along the stage's ground track). In Hs the tilt limit binds first: with that heading 5.15 m (Tp 8 s)
+# / 4.24 m (Tp 10 s); a deck held beam-on would reach it at 1.09 m / 1.45 m (heave rate alone: along 12.7 / 6.9 m,
+# across 3.0 / 3.2 m; docs/subsystems.md).
 #
 # [sources]
 #   wiki_asds  https://en.wikipedia.org/wiki/Autonomous_spaceport_drone_ship  (deck ~300 x ~170 ft; infobox: length

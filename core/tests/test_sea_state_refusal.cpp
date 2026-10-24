@@ -189,7 +189,59 @@ TEST_CASE("An RTLS launch ignores the sea state", "[sim][asds][sea_state]") {
     CHECK(plan.recovery.zone_or_ship_id == "ccsfs_lz40");
 }
 
-TEST_CASE("A mission start sets its sea state; the next start without one resets it", "[sim][asds][sea_state]") {
+TEST_CASE("The drone ship heads where its deck tilts least", "[sim][asds][sea_state][slow]") {
+    // The Starlink-class request (drone ship): one kick search, the later plans answered from the memo.
+    const auto request = falcon9_request("falcon9_asds");
+    const auto ship = config::load_drone_ship(STARSIM_CONFIG_DIR, "asds_atlantic");
+    sim::FlightSession like(de440(), earth(), STARSIM_CONFIG_DIR);
+
+    // (b) calm sea: the deck along the ground track, as before
+    const auto calm = sim::plan_launch(like, request);
+    REQUIRE(calm.feasible);
+    REQUIRE(calm.recovery.kind == sim::RecoveryKind::DroneShip);
+    REQUIRE(calm.booster_impact);
+    const double track_rad = calm.booster_impact->heading_rad;
+    CHECK(calm.recovery.heading_rad == track_rad);
+
+    // (a) Hs 2 m / Tp 8 s across the ground track: beam-on the deck would tilt beyond the 3 deg limit (limit Hs ~1.1 m);
+    // the ship turns to the grid heading of least tilt and the launch flies
+    like.set_sea_state(sea(2.0, 8.0, track_rad + 0.5 * constants::pi));
+    const double beam_tilt_rad = contact::DeckMotion(*like.sea_state(), ship.hull, track_rad).statistics().significant_tilt_rad;
+    CHECK(beam_tilt_rad > ship.max_deck_tilt_rad);
+    double expected_rad = track_rad, least_tilt_rad = beam_tilt_rad;
+    for (int i = 0; i <= 36; ++i) {
+        const double h = i * 5.0 * deg;
+        const double tilt = contact::DeckMotion(*like.sea_state(), ship.hull, h).statistics().significant_tilt_rad;
+        if (tilt < least_tilt_rad - 1e-9) {
+            least_tilt_rad = tilt;
+            expected_rad = h;
+        }
+    }
+    const auto rough = sim::plan_launch(like, request);
+    std::printf("[sea_state] ground track %.1f deg (tilt %.2f deg), deck heading %.1f deg (tilt %.2f deg)%s%s\n",
+                track_rad / deg, beam_tilt_rad / deg, rough.recovery.heading_rad / deg, least_tilt_rad / deg,
+                rough.feasible ? "" : " - ", rough.reason.c_str());
+    REQUIRE(rough.feasible);
+    CHECK(rough.recovery.kind == sim::RecoveryKind::DroneShip);
+    CHECK(rough.recovery.heading_rad == expected_rad);
+    CHECK(std::abs(rough.recovery.heading_rad - track_rad) > 45.0 * deg);
+    CHECK(least_tilt_rad < ship.max_deck_tilt_rad);
+    CHECK(rough.recovery.latitude_rad == calm.recovery.latitude_rad);  // the station itself does not move
+    const auto deck = sim::recovery_landing_site(like, rough.recovery);
+    REQUIRE(deck);
+    REQUIRE(deck->deck);
+    CHECK(deck->deck->heading_rad == expected_rad);
+
+    // (c) Hs 6 m with the fidelity flag deck_motion off: no sea-state refusal, the drone ship along the ground track
+    like.set_sea_state(sea(6.0, 10.0, track_rad + 0.5 * constants::pi));
+    like.set_deck_motion(false);
+    const auto flag_off = sim::plan_launch(like, request);
+    REQUIRE(flag_off.feasible);
+    CHECK(flag_off.recovery.kind == sim::RecoveryKind::DroneShip);
+    CHECK(flag_off.recovery.heading_rad == track_rad);
+}
+
+TEST_CASE("A mission start sets its sea state; the next start without one resets it", "[sim][asds][sea_state][slow]") {
     // The mission file lives in a copy of the config (unique directory); the session keeps the repository config, so
     // its plans come from the planner's memo / disk cache (keyed by the session's config directory).
     const auto dir = std::filesystem::temp_directory_path() / "starsim_sea_state_mission_start";
@@ -228,5 +280,14 @@ TEST_CASE("Sea-state limits of the drone ship in Hs", "[.][sea_state_limits]") {
                         "(heave rate)\n",
                         tp, angle_deg, hs_tilt, hs_rate);
         }
+        // the ship turned to its least-tilt heading (sim::least_deck_motion_heading_rad on its 5 deg grid)
+        sim::FlightSession like(de440(), earth(), STARSIM_CONFIG_DIR);
+        like.set_sea_state(sea(1.0, tp, 0.0));
+        const double h = sim::least_deck_motion_heading_rad(like, ship, 0.5 * constants::pi);
+        const auto s = contact::DeckMotion(*like.sea_state(), ship.hull, h).statistics();
+        std::printf("[sea_state] Tp %.0f s, least-tilt heading %.0f deg off the waves: Hs limit %.2f m (tilt) / %.2f m "
+                    "(heave rate)\n",
+                    tp, h / deg, ship.max_deck_tilt_rad / s.significant_tilt_rad,
+                    ship.max_heave_rate_mps / s.significant_heave_rate_mps);
     }
 }

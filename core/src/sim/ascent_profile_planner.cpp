@@ -403,28 +403,28 @@ private:
     std::string last_reason_ = "kein Versuchsflug.";
 };
 
-// The deck heading (0..180 deg in sea_check_heading_step_rad) whose motion in `like`'s sea is furthest inside the
-// ship's limits: the largest of tilt / limit and heave rate / limit smallest. 0 without a moving sea.
-double least_deck_motion_heading_rad(const FlightSession& like, const config::DroneShipConfig& ship) {
+}  // namespace
+
+double least_deck_motion_heading_rad(const FlightSession& like, const config::DroneShipConfig& ship,
+                                     double ground_track_heading_rad) {
     const auto& sea = like.sea_state();
-    if (!like.deck_motion() || !sea || sea->calm()) return 0.0;
-    double best_heading_rad = 0.0;
-    double best_ratio = std::numeric_limits<double>::infinity();
+    if (!like.deck_motion() || !sea || sea->calm()) return ground_track_heading_rad;
+    auto tilt_rad = [&](double heading_rad) {
+        return contact::DeckMotion(*sea, ship.hull, heading_rad).statistics().significant_tilt_rad;
+    };
+    double best_heading_rad = ground_track_heading_rad;
+    double best_tilt_rad = tilt_rad(ground_track_heading_rad);
     const int steps = static_cast<int>(std::lround(constants::pi / sea_check_heading_step_rad));
-    for (int i = 0; i < steps; ++i) {
+    for (int i = 0; i <= steps; ++i) {
         const double heading_rad = i * sea_check_heading_step_rad;
-        const auto s = contact::DeckMotion(*sea, ship.hull, heading_rad).statistics();
-        const double ratio = std::max(s.significant_tilt_rad / ship.max_deck_tilt_rad,
-                                      s.significant_heave_rate_mps / ship.max_heave_rate_mps);
-        if (ratio < best_ratio) {
-            best_ratio = ratio;
+        const double tilt = tilt_rad(heading_rad);
+        if (tilt < best_tilt_rad - sea_check_tilt_tie_rad) {
+            best_tilt_rad = tilt;
             best_heading_rad = heading_rad;
         }
     }
     return best_heading_rad;
 }
-
-}  // namespace
 
 std::optional<LaunchSite> recovery_landing_site(const FlightSession& session, const RecoveryChoice& recovery) {
     const auto& config_dir = session.config_dir();
@@ -559,7 +559,8 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
         return refused(none, no_ship);
     }
     // Too rough a sea for the ship however it heads: refused before any drone-ship trial (spectral, no time simulation).
-    if (const auto rough = sea_state_refusal(like, *provisional_ship, least_deck_motion_heading_rad(like, *provisional_ship))) {
+    if (const auto rough =
+            sea_state_refusal(like, *provisional_ship, least_deck_motion_heading_rad(like, *provisional_ship, azimuth))) {
         AscentProfile none;
         none.target = request.target;
         none.trial_flights = trial_flights;
@@ -572,10 +573,10 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
     const auto& impact = *profile.booster_impact;
     const auto ship = config::drone_ship_for(ships, impact.latitude_rad, impact.longitude_rad);
     if (!ship) return refused(profile, no_ship);
-    // the deck along the ground track at the chosen station (the ship's real heading)
-    if (const auto rough = sea_state_refusal(like, *ship, impact.heading_rad)) return refused(profile, *rough);
-    profile.recovery = {RecoveryKind::DroneShip, ship->id, impact.latitude_rad, impact.longitude_rad,
-                        impact.heading_rad};
+    // the ship at the chosen station heads where its deck tilts least (along the ground track in a calm sea)
+    const double deck_heading_rad = least_deck_motion_heading_rad(like, *ship, impact.heading_rad);
+    if (const auto rough = sea_state_refusal(like, *ship, deck_heading_rad)) return refused(profile, *rough);
+    profile.recovery = {RecoveryKind::DroneShip, ship->id, impact.latitude_rad, impact.longitude_rad, deck_heading_rad};
     return profile;
 }
 
