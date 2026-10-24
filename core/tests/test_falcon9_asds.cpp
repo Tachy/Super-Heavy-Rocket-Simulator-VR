@@ -18,6 +18,7 @@
 #include "starsim/config/drone_ship_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
+#include "starsim/contact/deck_motion.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/ascent_mission.hpp"
@@ -549,6 +550,120 @@ TEST_CASE("Falcon 9 drone-ship mission: liftoff to orbit and the first stage lan
     // T+514 s (bounds 25 -> 75 / 50 s). Since Task 5 the kick is planned before the launch (13.93 deg).
     CHECK(std::abs(entry_s - 364.0) < 75.0);
     CHECK(std::abs(landing_s - 476.0) < 50.0);
+}
+
+namespace {
+
+// A body seen from the moving deck (sea state and deck motion): its CG velocity relative to the deck point under the
+// CG, the sink along the deck normal, the tilt of its axis to the deck normal and the CG height above the deck plane.
+struct DeckRelative {
+    Vec3 velocity_mps;
+    double sink_mps = 0.0;
+    double tilt_rad = 0.0;
+    double cg_height_m = 0.0;
+};
+
+DeckRelative deck_relative(const sim::FlightSession& session, const vehicle::FlightBody& body) {
+    const auto t = earth().fixed_to_gcrf(session.epoch());
+    const auto& legs = session.leg_landing();
+    const auto& s = body.state();
+    const math::Mat3 gcrf_to_site = transpose(legs.site_to_fixed()) * transpose(t.rotation);
+    const Vec3 cg = legs.to_site(transpose(t.rotation) * s.position_gcrf_m);
+    const Vec3 v = gcrf_to_site * (s.velocity_gcrf_mps - cross(vehicle::earth_rotation_vector(t), s.position_gcrf_m));
+    const auto deck = contact::deck_frame(session.deck_pose().value_or(contact::DeckPose{}),
+                                          session.landing_zone()->deck->heading_rad);
+    const Vec3 normal = column(deck.deck_to_site, 2);
+    DeckRelative r;
+    r.velocity_mps = v - (deck.velocity_site_mps + cross(deck.angular_velocity_site_radps, cg - deck.origin_site_m));
+    r.sink_mps = -dot(r.velocity_mps, normal);
+    const Vec3 axis = gcrf_to_site * s.attitude.rotate(Vec3{1.0, 0.0, 0.0});
+    r.tilt_rad = std::acos(std::clamp(dot(axis, normal), -1.0, 1.0));
+    r.cg_height_m = dot(normal, cg - deck.origin_site_m);
+    return r;
+}
+
+}  // namespace
+
+TEST_CASE("The drone-ship mission lands on a moving deck", "[slow][falcon9][asds][sea_state]") {
+    // falcon9_asds_sea: the drone-ship mission in Hs 2.5 m / Tp 8 s, started as sim::start_mission does (the sea first,
+    // then the launch plans the recovery and turns the deck to its least-tilt heading).
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "falcon9_asds_sea");
+    REQUIRE(m.sea_state);
+    const auto t0 = start();
+    sim::FlightSession session(de440(), earth(), STARSIM_CONFIG_DIR);
+    session.advance_to(t0);  // no bodies: the clock jumps (the sea's time origin is taken from it)
+    session.set_sea_state(m.sea_state);
+    const auto plan = sim::start_ascent_mission(session, m, STARSIM_CONFIG_DIR, t0);
+    REQUIRE(plan.feasible);
+    REQUIRE(session.landing_zone());
+    REQUIRE(session.landing_zone()->deck);
+    REQUIRE(session.deck_pose());  // the deck moves
+    const double deck_heading_rad = session.landing_zone()->deck->heading_rad;
+    const double deck_height_m = session.landing_zone()->height_m;
+    auto height = [&](const vehicle::FlightBody& b) {
+        const auto tr = earth().fixed_to_gcrf(session.epoch());
+        return frames::fixed_to_geodetic(transpose(tr.rotation) * b.state().position_gcrf_m).height_m - deck_height_m;
+    };
+    // the last tick before the first foot touches and the first tick in contact
+    DeckRelative before, at;
+    contact::DeckPose pose_at;
+    double contact_s = -1.0;
+    double t = 0.0;
+    while (t < 900.0) {
+        const bool near = session.body_count() >= 2 && height(session.body(0)) < 40.0;
+        t += near ? sim::FlightSession::tick_s : 0.05;
+        session.advance_to(t0 + t, 100);
+        if (session.body_count() < 2) continue;
+        const auto& stage = session.body(0);
+        if (!session.return_status(0)) break;
+        if (contact_s < 0.0) {
+            const auto r = deck_relative(session, stage);
+            if (session.leg_landing().in_contact(stage)) {
+                at = r;
+                pose_at = session.deck_pose().value_or(contact::DeckPose{});
+                contact_s = session.mission_time_s();
+            } else {
+                before = r;
+            }
+        }
+        if (session.leg_touchdown(0) != sim::LegTouchdown::None || stage.impacted()) break;
+    }
+    const auto outcome = session.landing_outcome(0);
+    const auto& stage = session.body(0);
+    const Vec3 p = sim::site_enu_m(*session.landing_zone(),
+                                   transpose(earth().fixed_to_gcrf(session.epoch()).rotation) * stage.state().position_gcrf_m);
+    std::printf("[sea_state] Falcon 9 ASDS in Hs %.1f m / Tp %.0f s towards %.0f deg: deck heading %.1f deg; first contact "
+                "T+%.2f s, %s; before it: relative sink %.2f m/s, relative speed %.2f m/s, tilt to the deck %.2f deg; deck "
+                "heave %.2f m at %.2f m/s, roll %.2f deg, pitch %.2f deg (rates %.2f / %.2f deg/s); %.2f m from the deck "
+                "centre, %.1f t left\n",
+                m.sea_state->significant_wave_height_m, m.sea_state->peak_period_s, m.sea_state->heading_rad / deg,
+                deck_heading_rad / deg, contact_s, sim::to_string(outcome), before.sink_mps, norm(before.velocity_mps),
+                before.tilt_rad / deg, pose_at.heave_m, pose_at.heave_rate_mps, pose_at.roll_rad / deg,
+                pose_at.pitch_rad / deg, pose_at.roll_rate_radps / deg, pose_at.pitch_rate_radps / deg, std::hypot(p.x, p.y),
+                stage.vehicle().propellant_kg() / 1e3);
+    REQUIRE(contact_s > 0.0);
+    CHECK(outcome == sim::LandingOutcome::Landed);
+    CHECK(session.leg_touchdown(0) == sim::LegTouchdown::Landed);
+    CHECK(norm(before.velocity_mps) <= 3.0);  // gentle contact relative to the deck (legs: <= 3 m/s, <= 10 deg)
+    CHECK(before.tilt_rad <= 10.0 * deg);
+    CHECK(std::hypot(p.x, p.y) < 10.0);
+    // 60 s after landing the stage still rides the deck (Task 3): at rest relative to it, at its height above it.
+    const double landed_height_m = deck_relative(session, stage).cg_height_m;
+    double worst_velocity = 0.0, worst_height = 0.0;
+    const auto landed = session.epoch();
+    while (session.epoch() - landed < 60.0) {
+        session.advance_to(session.epoch() + 0.5, 400);
+        const auto r = deck_relative(session, session.body(0));
+        worst_velocity = std::max(worst_velocity, norm(r.velocity_mps));
+        worst_height = std::max(worst_height, std::abs(r.cg_height_m - landed_height_m));
+    }
+    std::printf("[sea_state] riding the deck for 60 s: velocity error %.4f m/s, CG height change %.4f m\n", worst_velocity,
+                worst_height);
+    CHECK(session.leg_touchdown(0) == sim::LegTouchdown::Landed);
+    CHECK(session.landing_outcome(0) == sim::LandingOutcome::Landed);
+    CHECK(session.body(0).resting());
+    CHECK(worst_velocity < 0.01);
+    CHECK(worst_height < 0.05);
 }
 
 namespace {

@@ -38,7 +38,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   terrain: the lunar site tile + LDEM_16, the Earth terrain (3DEP 1 m / GLO-30 / ETOPO 2022 + site plateaus) and the
   EGM2008 geoid as the sea level; one shared immutable instance per data set, `sim::shared_earth_terrain` /
   `shared_lunar_terrain`, also read by the renderer through `StarsimCore.surface_samples`; on the Earth terrain a site's
-  leg landing tracks bodies within 5 km of the site),
+  leg landing tracks bodies within 5 km of the site; the sea state at a drone ship's station: long-crested JONSWAP sea,
+  deterministic by seed),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates, energy- and J2-mean semi-major axis),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
@@ -52,7 +53,9 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   eclipse geometry (disk occultation), optim (sparse SOCP interior-point solver),
   contact (catch tower: geometry, arms + carriage, pin/hull penalty contact, collisions; landing legs and surfaces;
   IDSS docking interface and mechanism: soft capture, joint, retraction, hooks, separation; probe/drogue interface
-  (four probes into four drogues) on the same mechanism; hull and landing legs vs station primitives),
+  (four probes into four drogues) on the same mechanism; hull and landing legs vs station primitives;
+  drone-ship deck motion: box-barge heave / roll / pitch from the wave plane fit with strip-theory excitation, its
+  significant values; the mean sea beside the moving deck),
   aero (slender body + cross-flow table, grid fins, ship flaps, Sutton-Graves entry heating plus radiative heating
   from the NASA TM-102652 equilibrium tables, blunt capsule from a
   modified-Newtonian table with offset-CG trim, reefed parachutes, fixed-area drag of a station),
@@ -61,7 +64,9 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   ideal LVLH attitude of a station, docking-port kinematics, docked hold, attached mass, compound mass, run-time tank
   masses, probe/drogue port mating of the refuelling ships, propellant boil-off by a hull heat balance in flight and
   orbit-averaged, ship-to-ship transfer physics: line flow, outlet coverage, settling time; per-stage settling progress
-  before an ignition, PMD tanks, gas ingestion of an unsettled in-orbit ignition, the settling push and its gas bound), sim (flight session incl. the staging sequence (cold: MECO -> separation -> upper ignition; hot: the ship lights while joined) and the pre-launch ascent planner (`sim::plan_launch`: the first-stage kick by trial ascents for the least propellant, the recovery - tower, landing zone or drone ship - as a hard constraint, refusals; every launch from a pad, validated against flight 14 and CRS-35), the ISS as a station body from
+  before an ignition, PMD tanks, gas ingestion of an unsettled in-orbit ignition, the settling push and its gas bound), sim (flight session incl. the staging sequence (cold: MECO -> separation -> upper ignition; hot: the ship lights while joined) and the pre-launch ascent planner (`sim::plan_launch`: the first-stage kick by trial ascents for the least propellant, the recovery - tower, landing zone or drone ship - as a hard constraint, refusals; every launch from a pad, validated against flight 14 and CRS-35; a mission's sea state: the onboard refusal of a
+  drone-ship landing in a rough sea, the deck turned to its least-tilt heading, legs landing on the moving deck and the
+  landed stage riding it), the ISS as a station body from
   OEM or synthetic orbit, rendezvous target with relative port state and port-frame RCS translation, rendezvous phasing flight to
   Waypoint 0 with drag tracking and re-plan, proximity flight to a station port, docking into a compound, undocking
   and departure, ISS missions chained by a mission sequence: from the separation orbit, from the pad with a launch

@@ -228,6 +228,13 @@ flow separation (vacuum engines).
   sea), `basin` (`"atlantic"` / `"pacific"`), `home_port_latitude_deg` / `home_port_longitude_deg`, and the service area
   `area_min_latitude_deg`, `area_max_latitude_deg`, `area_min_longitude_deg`, `area_max_longitude_deg` (a lat / lon box;
   min < max, so an area cannot cross the antimeridian). Where it waits is set by the mission.
+- Hull and landing limits (deck motion, `contact::DeckMotion`; the box barge under the deck): `hull_length_m`,
+  `hull_beam_m` (waterplane, without the wing extensions), `hull_depth_m` (draft = depth - freeboard [D]),
+  `hull_roll_gyration_m`, `hull_pitch_gyration_m`, `hull_heave_added_mass_factor`, `hull_roll_added_inertia_factor`,
+  `hull_pitch_added_inertia_factor` (per displaced mass / inertia), `hull_heave_damping_ratio`, `hull_roll_damping_ratio`,
+  `hull_pitch_damping_ratio` (of critical), `max_deck_tilt_deg`, `max_heave_rate_mps` (significant values allowed for a
+  landing; above them the onboard computer refuses the drone ship, `sim::sea_state_refusal`). Derivations in the file
+  header and `docs/subsystems.md` "Sea state and deck motion".
 - Selection (`config::` drone-ship choice): the ship whose area contains the predicted impact; several: the one with the
   nearest home port; on a tie the first in file order. `asds_atlantic_2` is identical to `asds_atlantic`, so it is never
   chosen.
@@ -259,6 +266,10 @@ flow separation (vacuum engines).
   stage's cutoff), `separation_dv_mps` (spring push), `nose_cone_open_s` (after the separation; < 0: stays closed).
 - `falcon9_asds.toml`: the same keys; the Starlink-class payload leaves the RTLS return short of the orbit, so the
   computer sends the drone ship (`drone_ships.toml`) to the stage's predicted impact and the stage lands on its deck.
+- `[sea_state]` (optional, any mission; `config::mission_sea_state`, read by every `sim::start_mission`): the sea at the
+  drone ship's station - `significant_wave_height_m` (Hs, 0: calm), `peak_period_s` (Tp, JONSWAP gamma 3.3),
+  `heading_deg` (direction the waves travel towards, clockwise from north), `seed` (wave phases; deterministic). None:
+  calm (the level fixed deck). `falcon9_asds_sea.toml`: `falcon9_asds.toml` in Hs 2.5 m / Tp 8 s.
 - `hls_lunar_llo.toml`, `hls_lunar_nrho.toml` (`kind = "lunar_landing"`, `config::load_lunar_landing_mission`,
   `sim::place_lunar_landing_mission`): `[mission]` `vehicle`, `site`
   (`lunar_sites.toml`, must exist); `[orbit]` scenario start (`epoch_utc`, `height_km`, `inclination_deg`,

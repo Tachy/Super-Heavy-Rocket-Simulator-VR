@@ -1,0 +1,27 @@
+# Falcon 9 drone-ship mission (falcon9_asds.toml) in a moderate sea (sea state and deck motion): the same launch from
+# SLC-40 with a Starlink-class payload; the drone ship waits at the stage's predicted impact in a JONSWAP sea of
+# Hs 2.5 m / Tp 8 s, holds station heading where its deck tilts least (waves along the deck,
+# sim::least_deck_motion_heading_rad), and the first stage lands on the heaving, rolling and pitching deck. The sea
+# lies within the landing limits of drone_ships.toml (deck tilt 3 deg, heave rate 1 m/s significant), so the onboard
+# computer accepts the landing.
+
+[mission]
+name = "Falcon 9 mit Landung auf dem Drohnenschiff bei Seegang"
+display_name = "Medium Launcher: Drohnenschiff bei Seegang" # shown in the webcast overlay (no trademarks)
+vehicle = "falcon9_block5"
+site = "ccsfs_slc40"
+heading_deg = 45.0              # body +y on the pad (launch azimuth ~43 deg for 53 deg)
+payload_t = 16.5                # [E] as falcon9_asds.toml
+fairing = true
+
+[target]
+periapsis_km = 200.0            # [E] Starlink insertion (the satellites raise their own orbit)
+apoapsis_km = 280.0
+inclination_deg = 53.0          # Starlink shell (Florida launches north-east)
+northerly = true
+
+[sea_state]
+significant_wave_height_m = 2.5 # [E] moderate sea (Douglas sea state 4: 1.25-2.5 m), the upper end
+peak_period_s = 8.0             # [E] typical wind sea of that height in the western Atlantic
+heading_deg = 60.0              # [E] waves travel towards 60 deg (from the south-west)
+seed = 1                        # wave phases (deterministic)
