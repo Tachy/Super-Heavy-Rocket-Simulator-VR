@@ -211,11 +211,13 @@ int64_t FlightSim::launch_from_site(const godot::String& vehicle_id, const godot
     }));
 }
 
-int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, bool wait_on_pad) {
+int64_t FlightSim::start_mission(const godot::String& mission_id, double tdb_s, bool wait_on_pad, double countdown_s) {
     const std::string id = mission_id.utf8().get_data();
-    return static_cast<int64_t>(post("start_mission", [this, id, tdb_s, wait_on_pad](sim::FlightSession& session) {
+    return static_cast<int64_t>(post("start_mission", [this, id, tdb_s, wait_on_pad,
+                                                       countdown_s](sim::FlightSession& session) {
         sim::StartOptions options;
         options.wait_on_pad = wait_on_pad;
+        options.countdown_s = countdown_s;
         // a launch from the pad plans its ascent inside sim::start_mission (seconds to ~45 s): the planning flag is
         // published first ("Startvorbereitung" on the session as it stands - the call places the vehicle)
         std::optional<PlanningFlag> planning;
@@ -706,8 +708,8 @@ void FlightSim::_bind_methods() {
     ClassDB::bind_method(D_METHOD("launch_from_site", "vehicle_id", "site_id", "heading_deg", "tdb_s", "countdown_s",
                                   "ascent_target"),
                          &FlightSim::launch_from_site, DEFVAL(0.0), DEFVAL(godot::Dictionary()));
-    ClassDB::bind_method(D_METHOD("start_mission", "mission_id", "tdb_s", "wait_on_pad"), &FlightSim::start_mission,
-                         DEFVAL(false));
+    ClassDB::bind_method(D_METHOD("start_mission", "mission_id", "tdb_s", "wait_on_pad", "countdown_s"),
+                         &FlightSim::start_mission, DEFVAL(false), DEFVAL(0.0));
     ClassDB::bind_method(D_METHOD("mission_site_id"), &FlightSim::mission_site_id);
     ClassDB::bind_method(D_METHOD("mission_display_name"), &FlightSim::mission_display_name);
     ClassDB::bind_method(D_METHOD("mission_start_tdb_s"), &FlightSim::mission_start_tdb_s);

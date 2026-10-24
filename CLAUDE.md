@@ -237,6 +237,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   `moon_terrain`), ISS missions too (`iss_state`, `rendezvous_plan`, `docking_state`, `station_geometry`,
   `iss_mission`, commands `proximity_*`, `undock`). `vehicle_view.gd` draws stages and plumes; `ui/flight_hud.gd` shows telemetry.
   The world clock waits for the flight sim at high time warp.
+- Mission selection: the time panel's Ort / Fahrzeug / Mission boxes come from `game/ui/mission_catalogue.gd` (pads of
+  `launch_sites.toml` + `config/start_places.toml`, missions by `[mission] start_place` / `start_vehicle`).
 - HOTAS: Thrustmaster T.16000M + TWCS, found by device name (`config/input_hotas.toml`). Raw axes (twist,
   throttle lever) only exist when `config/sdl_gamecontrollerdb.txt` is loaded BEFORE engine start via
   `SDL_GAMECONTROLLERCONFIG_FILE` (done by `Start-Desktop.cmd`); Godot's built-in mappings drop them and

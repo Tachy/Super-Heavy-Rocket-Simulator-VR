@@ -57,8 +57,10 @@ public:
     // ship, booster return, ascent autopilot); a capsule return at its own epoch (mission_start_tdb_s()) with the deorbit
     // planned; a lunar landing (from LEO) or lunar return (from lunar orbit) at its own epoch with all legs planned; not ok
     // for an unknown, invalid or ship-return mission, or a lunar mission the planner refuses (message: its reason).
-    // wait_on_pad: launch missions stand on the pad and lift off at their scheduled T-0 (sim::StartOptions).
-    int64_t start_mission(const godot::String& mission_id, double tdb_s, bool wait_on_pad = false);
+    // wait_on_pad: launch missions stand on the pad and lift off at their scheduled T-0 (sim::StartOptions); countdown_s:
+    // their countdown from `tdb_s` when the mission sets no [mission] countdown_s (StartOptions::countdown_s).
+    int64_t start_mission(const godot::String& mission_id, double tdb_s, bool wait_on_pad = false,
+                          double countdown_s = 0.0);
     // Epoch (TDB s) the current flight began at: the launch, or a return mission's own epoch (the world clock jumps there).
     double mission_start_tdb_s() const;
     // Launch site id of the current flight (launch_from_site or the mission), "" before the first.

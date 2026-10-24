@@ -17,6 +17,13 @@ const MANUAL_KEYS: Array[Key] = [KEY_I, KEY_L, KEY_K, KEY_G, KEY_M, KEY_X]
 const AUTOPILOT_OFF := "aus"
 ## last_event while the onboard computer plans a launch on the pad (the countdown holds meanwhile).
 const PLANNING_EVENT := "Startvorbereitung: Bahn wird berechnet"
+## Simulation target while a mission start runs (TDB s: J2000, before every mission epoch): the runner never steps
+## backwards, so the session holds where it stands instead of racing towards the world clock - a return mission starts
+## at its own epoch, days before it, and the clock only jumps there on mission_started.
+const MISSION_HOLD_TDB_S := 0.0
+
+## Outcome of start_mission (from the simulation thread): ok, and the refusal reason or the start warnings.
+signal mission_started(ok: bool, message: String)
 
 var sim := FlightSim.new()
 var launch_site_id := ""  ## site of the current flight (its tower shows the flight's arm state)
@@ -33,6 +40,8 @@ var last_event := ""
 var manual_control := false
 ## Launch posted to the simulation thread and not yet finished: {id, site_id, text}.
 var _pending_launch := {}
+## Mission start posted to the simulation thread and not yet finished: {id, mission_id}.
+var _pending_mission := {}
 
 var _stick := {}     ## [stick] table of config/input_hotas.toml
 var _throttle := {}  ## [throttle] table
@@ -53,10 +62,7 @@ func setup(config_dir: String) -> void:
 
 
 func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 90.0, countdown_s := LAUNCH_COUNTDOWN_S) -> bool:
-	for view in views:
-		view.queue_free()
-	views.clear()
-	throttle = 1.0
+	_clear_views()
 	# External view: the onboard computer plans the launch to the configured target and engages the ascent autopilot in
 	# the same command (the countdown holds until the plan is in); manual control only places the vehicle.
 	var target := {} if manual_control else ascent_target
@@ -68,6 +74,25 @@ func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 9
 	else:
 		last_event = "Start wird vorbereitet" if target.is_empty() else PLANNING_EVENT
 	return id > 0
+
+
+## Starts a mission of config/missions (FlightSim.start_mission): pad missions stand on the pad with the free launch's
+## countdown (a mission's own [mission] countdown_s wins in the core) and wait there for a launch window; other missions
+## start at their own epoch. Outcome: signal mission_started.
+func start_mission(mission_id: String, tdb_s: float) -> bool:
+	_clear_views()
+	var id := sim.start_mission(mission_id, tdb_s, true, LAUNCH_COUNTDOWN_S)
+	launch_site_id = ""
+	_pending_mission = {"id": id, "mission_id": mission_id}
+	last_event = PLANNING_EVENT if id > 0 else "Start fehlgeschlagen"
+	return id > 0
+
+
+func _clear_views() -> void:
+	for view in views:
+		view.queue_free()
+	views.clear()
+	throttle = 1.0
 
 
 ## Outcome of a command on the simulation thread (emitted from FlightSim.advance_to / wait_idle).
@@ -83,6 +108,18 @@ func _on_command_finished(id: int, command: String, ok: bool, message: String) -
 			else:
 				last_event = "Start abgelehnt: %s" % message if message != "" else "Start fehlgeschlagen"
 			_pending_launch = {}
+		"start_mission":
+			if id != _pending_mission.get("id", 0):
+				return
+			var mission_id: String = _pending_mission["mission_id"]
+			_pending_mission = {}
+			launch_site_id = sim.mission_site_id() if sim.is_active() else ""
+			if ok:
+				var name := sim.mission_display_name()
+				last_event = "Mission: %s" % (name if name != "" else mission_id)
+			else:
+				last_event = "Start abgelehnt: %s" % message if message != "" else "Start fehlgeschlagen"
+			mission_started.emit(ok, message)
 		"engage_ascent_autopilot":
 			last_event = "Aufstiegs-Autopilot aktiv" if ok else "Start abgelehnt: %s" % message
 		"engage_orbit_autopilot":
@@ -98,9 +135,20 @@ func _on_command_finished(id: int, command: String, ok: bool, message: String) -
 				last_event = "Keine Rückkehr: %s" % sim.autopilot_status().get("return", {}).get("reason", "kein Schiff im Orbit")
 
 
-## Advances the simulation to `tdb_s`; returns the time actually reached (the sim may lag at high warp).
+## A launch or mission start posted and not yet finished (its outcome comes from advance()).
+func start_pending() -> bool:
+	return not _pending_launch.is_empty() or not _pending_mission.is_empty()
+
+
+## Advances the simulation to `tdb_s`; returns the time actually reached (the sim may lag at high warp). While a start
+## is pending it only collects command outcomes (also without an active flight: a refused first start).
 func advance(tdb_s: float, delta: float) -> float:
+	if not _pending_mission.is_empty():
+		sim.advance_to(MISSION_HOLD_TDB_S)  # emits command_finished
+		return tdb_s
 	if not sim.is_active():
+		if start_pending():
+			sim.advance_to(tdb_s)
 		return tdb_s
 	_read_input(delta)
 	return sim.advance_to(tdb_s)
@@ -127,9 +175,10 @@ func place_views(parent: Node3D, camera_gcrf_m: Vector3) -> void:
 
 ## External view: the controlled vehicle flies on the autopilot. With the autopilot off, a vehicle clamped on the pad
 ## gets the ascent autopilot (as key P), one in orbit (periapsis above the surface) the orbit state; an engaged
-## autopilot, a landed or a sub-orbital vehicle is left as it is. A launch still being set up engages on completion.
+## autopilot, a landed or a sub-orbital vehicle is left as it is. A launch still being set up engages on completion; a
+## mission being started engages its own autopilots.
 func engage_autopilot() -> void:
-	if manual_control or not sim.is_active() or not _pending_launch.is_empty():
+	if manual_control or not sim.is_active() or start_pending():
 		return
 	if str(sim.autopilot_status().get("state", "")) != AUTOPILOT_OFF:
 		return

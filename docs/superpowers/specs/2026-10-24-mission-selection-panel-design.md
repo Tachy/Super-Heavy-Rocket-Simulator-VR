@@ -129,3 +129,11 @@ the file id as today.
 - How the clock and focus are set after a non-pad mission start (follow what the existing tests of each mission kind
   do).
 - Docs: `docs/ansichten.md` (panel), CLAUDE.md game section one line, `config/README.md` for the new keys.
+
+## Amendments
+
+- 2026-10-24 (Task 4): the flown refuelling campaign's core start takes no `wait_from`: started from the panel it
+  begins at its own epoch, not at the clock's instant. Accepted; the core is not changed.
+- 2026-10-24 (Task 4): `FlightSim.start_mission` takes an optional `countdown_s` (`sim::StartOptions::countdown_s`); the
+  panel passes `FlightController.LAUNCH_COUNTDOWN_S` with `wait_on_pad = true`, so pad missions count down like a free
+  flight (a mission's own `[mission] countdown_s` wins) and wait on the pad for a launch window.

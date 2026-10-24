@@ -9,6 +9,7 @@ const FOCUS_OPTIONS := [
 	["Erde-Mond-System", World.FOCUS_EARTH_MOON],
 	["Fahrzeug", World.FOCUS_VEHICLE],
 ]
+const VEHICLE_FOCUS_INDEX := 3  ## FOCUS_OPTIONS entry "Fahrzeug"
 const PRESETS := [
 	["Jetzt", ""],
 	["Totale Sonnenfinsternis 08.04.2024 (Dallas)", "2024-04-08T18:42:00"],
@@ -23,9 +24,15 @@ var _info_label := Label.new()
 var _utc_input := LineEdit.new()
 var _focus := OptionButton.new()
 var _presets := OptionButton.new()
+var _catalogue: MissionCatalogue
+var _places := OptionButton.new()
 var _vehicles := OptionButton.new()
-var _launch_site := OptionButton.new()
-var _vehicle_ids: PackedStringArray = []
+var _missions := OptionButton.new()
+var _place_list: Array[Dictionary] = []
+var _vehicle_list: Array[Dictionary] = []
+var _mission_list: Array[Dictionary] = []
+var _start_button: Button
+var _start_status := Label.new()
 var _warp_before_pause := 1.0
 
 
@@ -69,15 +76,22 @@ func _ready() -> void:
 	var launch_label := Label.new()
 	launch_label.text = "Start vorbereiten"
 	box.add_child(launch_label)
-	for file in DirAccess.get_files_at(Paths.config_dir().path_join("vehicles")):
-		if file.ends_with(".toml"):
-			_vehicle_ids.append(file.get_basename())
-			_vehicles.add_item(file.get_basename())
-	box.add_child(_vehicles)
-	for site in world.sites:
-		_launch_site.add_item(site["name"])
-	box.add_child(_launch_site)
-	box.add_child(_button("Auf die Rampe stellen", _on_launch_pressed))
+	_catalogue = MissionCatalogue.load_from(Paths.config_dir())
+	_place_list = _catalogue.places()
+	for place in _place_list:
+		_places.add_item(place["name"])
+	_places.item_selected.connect(func(_index: int) -> void: _refill_vehicles())
+	_vehicles.item_selected.connect(func(_index: int) -> void: _refill_missions())
+	for option: OptionButton in [_places, _vehicles, _missions]:
+		box.add_child(option)
+	_start_button = _button("Starten", _on_start_pressed)
+	box.add_child(_start_button)
+	_start_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_start_status.custom_minimum_size.x = 300
+	box.add_child(_start_status)
+	world.flight.mission_started.connect(_on_start_finished)
+	world.flight.sim.command_finished.connect(_on_command_finished)
+	_refill_vehicles()
 
 
 func _process(_delta: float) -> void:
@@ -153,11 +167,67 @@ func _on_preset_selected(index: int) -> void:
 	world.clock.set_time(world.core.utc_to_tdb_s(utc))
 
 
-func _on_launch_pressed() -> void:
-	if _vehicle_ids.is_empty() or world.sites.is_empty():
+## Refills the vehicle box for the selected place (keeping the selected vehicle when it is offered there), then the
+## mission box.
+func _refill_vehicles() -> void:
+	var previous := _selected_id(_vehicle_list, _vehicles)
+	_vehicle_list = _catalogue.vehicles_at(_selected_id(_place_list, _places))
+	_fill(_vehicles, _vehicle_list, previous)
+	_refill_missions()
+
+
+func _refill_missions() -> void:
+	var previous := _selected_id(_mission_list, _missions)
+	_mission_list = _catalogue.missions_for(_selected_id(_place_list, _places), _selected_id(_vehicle_list, _vehicles))
+	_fill(_missions, _mission_list, previous)
+
+
+static func _fill(option: OptionButton, list: Array[Dictionary], keep_id: String) -> void:
+	option.clear()
+	for entry in list:
+		option.add_item(entry["name"])
+	if not list.is_empty():
+		option.select(maxi(MissionCatalogue.index_of(list, keep_id), 0))
+
+
+static func _selected_id(list: Array[Dictionary], option: OptionButton) -> String:
+	var index := option.selected
+	return list[index]["id"] if index >= 0 and index < list.size() else ""
+
+
+## Free flight: the vehicle on the selected pad (FlightController.launch); else the selected mission. The button stays
+## disabled until the start's outcome (a mission or a planned launch takes up to ~45 s).
+func _on_start_pressed() -> void:
+	if _mission_list.is_empty() or _missions.selected < 0:
 		return
-	if world.launch_vehicle(_vehicle_ids[_vehicles.selected], world.sites[_launch_site.selected]):
-		_focus.select(FOCUS_OPTIONS.size() - 1)
+	var mission_id := _selected_id(_mission_list, _missions)
+	var started := false
+	if mission_id == MissionCatalogue.FREE_FLIGHT:
+		var site: Dictionary = _place_list[_places.selected]["site"]
+		started = world.launch_vehicle(_selected_id(_vehicle_list, _vehicles), site)
+	else:
+		started = world.start_mission(mission_id)
+	if not started:
+		_start_status.text = "Start abgelehnt: Befehl nicht angenommen"
+		return
+	if mission_id == MissionCatalogue.FREE_FLIGHT:
+		_focus.select(VEHICLE_FOCUS_INDEX)  # world.launch_vehicle follows the vehicle at once
+	_start_button.disabled = true
+	_start_status.text = "Start wird geplant ..."
+
+
+func _on_command_finished(_id: int, command: String, ok: bool, message: String) -> void:
+	if command == "launch_from_site" and _start_button.disabled:
+		_on_start_finished(ok, message)
+
+
+func _on_start_finished(ok: bool, message: String) -> void:
+	_start_button.disabled = false
+	if ok:
+		_start_status.text = ""
+		_focus.select(VEHICLE_FOCUS_INDEX)  # World follows the started vehicle
+	else:
+		_start_status.text = "Start abgelehnt: %s" % (message if message != "" else "unbekannter Grund")
 
 
 func _button(text: String, action: Callable) -> Button:

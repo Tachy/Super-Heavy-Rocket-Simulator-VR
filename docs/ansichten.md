@@ -198,11 +198,25 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   X (Autopilot aus) sind hier ohne Wirkung; es bleiben die Befehle an den Bordrechner: P (Aufstieg), O (Zirkularisieren),
   R (Rückkehr zum Turm) und die Annäherungsbefehle. Handsteuerung gibt es später nur im Cockpit und nur für das gerade
   gewählte Fahrzeug.
-- **Missionsstart:** Das Spiel startet frei aus dem Zeit-Panel: das Fahrzeug steht auf der Rampe, der Countdown läuft
-  60 s als T- (`FlightController.LAUNCH_COUNTDOWN_S`), und der Aufstiegs-Autopilot hebt zum T-0 ab. Ohne Abheben bleibt
-  die Uhr bei T-0 stehen (wie ein Startabbruch auf der Rampe), statt auf der Rampe T+ zu zählen. Missionen, die auf der
-  Rampe auf ihr T-0 warten (`start_mission` mit `wait_on_pad`, Fensterstart bei ISS-Missionen), gibt es im Kern und in
-  den Bindings und in `render_check` (`--mission= --wait_on_pad`); eine Missionsauswahl im Spiel folgt.
+- **Missionsstart** [umgesetzt 2026-10-24]: Unter "Start vorbereiten" im Zeit-Panel stehen drei Auswahlfelder und
+  der Knopf **"Starten"**: **Ort** (erst die Startrampen von `config/launch_sites.toml`, dann die Startorte im Flug aus
+  `config/start_places.toml`: "Erdorbit", "An der ISS angedockt", ...; nur Orte, an denen etwas startet), **Fahrzeug**
+  (die Fahrzeuge der Rampe, `vehicles` in launch_sites.toml, und die Fahrzeuge der Missionen dieses Orts) und
+  **Mission** (an einer Rampe zuerst "Freier Flug", dann die Missionen mit diesem `[mission] start_place` und
+  `start_vehicle`, nach Namen). Ort füllt Fahrzeug neu, Fahrzeug füllt Mission neu; die bisherige Wahl bleibt, wenn
+  sie dort noch angeboten wird. Die Auswahl liest `game/ui/mission_catalogue.gd` nur aus `config/`.
+  - "Freier Flug": das Fahrzeug steht auf der Rampe, der Countdown läuft 60 s als T-
+    (`FlightController.LAUNCH_COUNTDOWN_S`), und der Aufstiegs-Autopilot hebt zum T-0 ab. Ohne Abheben bleibt die Uhr
+    bei T-0 stehen (wie ein Startabbruch auf der Rampe), statt auf der Rampe T+ zu zählen.
+  - Eine Mission startet über `start_mission` mit `wait_on_pad`: von der Rampe mit demselben Countdown (ein eigenes
+    `[mission] countdown_s` der Mission gilt vor), mit Startfenster (ISS) wartet das Fahrzeug auf der Rampe bis zum
+    Fenster; Missionen mit `liftoff_utc` stehen zu ihrem historischen Start. Missionen im Flug (Rückkehr der
+    Crew-Kapsel, Mondmissionen, ...) beginnen zu ihrer eigenen Epoche. Danach springt die Weltuhr auf den Beginn der
+    Mission (`mission_start_tdb_s`, auch rückwärts), der Zeitraffer auf 1x, und die Kamera folgt dem Fahrzeug.
+  - Solange der Start geplant wird (bis knapp eine Minute), ist "Starten" gesperrt und darunter steht
+    **"Start wird geplant ..."**; eine Ablehnung steht dort als **"Start abgelehnt: <Grund>"**, und der Knopf ist
+    wieder frei.
+  `render_check` startet Missionen ebenso (`--mission= --wait_on_pad`).
 - **Startvorbereitung** [Entschieden 2026-10-22, umgesetzt]: Vor jedem Start von der Rampe (freier Start, Taste P auf
   der Rampe, jede Mission) berechnet der Bordrechner die Aufstiegsbahn zum Ziel (Kippwinkel, Bergung der ersten Stufe:
   Fangturm, Landezone oder Drohnenschiff). Solange er rechnet (Sekunden bis knapp eine Minute), steht das Fahrzeug auf

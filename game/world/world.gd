@@ -95,7 +95,9 @@ func _process(delta: float) -> void:
 func update_world() -> void:
 	# The flight simulation may lag behind the clock at high time warp; the clock then waits for it.
 	var t := clock.tdb_s
-	if flight.sim.is_active():
+	if flight.start_pending() and not flight.sim.is_active():
+		flight.advance(clock.tdb_s, _delta)  # only collects the start's outcome
+	elif flight.sim.is_active():
 		flight.sim.set_realtime_planning(clock.warp <= 1.0)  # landing re-plans never stall real-time play
 		var reached := flight.advance(clock.tdb_s, _delta)
 		if clock.tdb_s - reached > 0.05:  # sim at its per-frame tick limit: hold the clock back
@@ -164,6 +166,23 @@ func launch_vehicle(vehicle_id: String, site: Dictionary, countdown_s := FlightC
 	clock.warp = 1.0
 	set_focus(FOCUS_VEHICLE)
 	return true
+
+
+## Starts a mission of config/missions at the current instant (FlightController.start_mission). On success the clock
+## goes to the mission's start epoch (a return mission starts at its own, possibly earlier one) at warp 1 and the camera
+## follows the vehicle. Outcome: flight.mission_started.
+func start_mission(mission_id: String) -> bool:
+	if not flight.mission_started.is_connected(_on_mission_started):
+		flight.mission_started.connect(_on_mission_started)
+	return flight.start_mission(mission_id, clock.tdb_s)
+
+
+func _on_mission_started(ok: bool, _message: String) -> void:
+	if not ok:
+		return
+	clock.set_time(flight.sim.mission_start_tdb_s())
+	clock.warp = 1.0
+	set_focus(FOCUS_VEHICLE)
 
 
 ## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml; optional eye_height_m
