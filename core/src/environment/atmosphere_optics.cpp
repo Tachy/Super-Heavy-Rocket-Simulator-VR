@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <utility>
+#include <vector>
 
 #include "starsim/environment/atmosphere.hpp"
 #include "starsim/environment/atmosphere_spectra.hpp"
@@ -26,14 +27,16 @@ double bin_value(const double (&table)[spectra::bin_count], double wavelength_m)
     return table[i] * (1.0 - u) + table[i + 1] * u;
 }
 
-// Depolarisation ratio of air in percent [S: Bucholtz 1995, Table 1 (values of Penndorf 1957 / Young 1980,
-// 0.2 - 1.0 um)]: {wavelength um, rho %}; linear between rows, constant beyond.
-constexpr std::array<std::pair<double, double>, 29> depolarisation_percent = {{
+// Depolarisation ratio of air in percent [S: Bucholtz 1995, Appl. Opt. 34, 2765, Table 1, column rho_n; read from the
+// published table at https://opg.optica.org/abstract.cfm?URI=ao-34-15-2765]: {wavelength um, rho in percent}; linear between
+// rows, constant beyond. The King factor is computed from rho (Table 1 lists it rounded to 4 digits).
+constexpr std::array<std::pair<double, double>, 36> depolarisation_percent = {{
     {0.200, 4.545}, {0.205, 4.384}, {0.210, 4.221}, {0.215, 4.113}, {0.220, 4.004}, {0.225, 3.895},
     {0.230, 3.785}, {0.240, 3.675}, {0.250, 3.565}, {0.260, 3.455}, {0.270, 3.400}, {0.280, 3.289},
     {0.290, 3.233}, {0.300, 3.178}, {0.310, 3.178}, {0.320, 3.122}, {0.330, 3.066}, {0.340, 3.066},
-    {0.350, 3.010}, {0.370, 3.010}, {0.400, 2.955}, {0.450, 2.899}, {0.500, 2.843}, {0.550, 2.843},
-    {0.600, 2.843}, {0.750, 2.787}, {0.800, 2.787}, {1.000, 2.730}, {1.500, 2.730},
+    {0.350, 3.010}, {0.360, 3.010}, {0.370, 3.010}, {0.380, 2.955}, {0.390, 2.955}, {0.400, 2.955},
+    {0.450, 2.899}, {0.500, 2.842}, {0.550, 2.842}, {0.600, 2.786}, {0.650, 2.786}, {0.700, 2.786},
+    {0.750, 2.786}, {0.800, 2.730}, {0.850, 2.730}, {0.900, 2.730}, {0.950, 2.730}, {1.000, 2.730},
 }};
 
 double king_factor(double wavelength_um) {
@@ -52,14 +55,39 @@ double king_factor(double wavelength_um) {
     return (6.0 + 3.0 * rho) / (6.0 - 7.0 * rho);
 }
 
-// Ozone number density shape [E: mid-latitude profile after the US Standard Atmosphere 1976 / Krueger & Minzner
-// 1976 ozone model, rounded]: {altitude km, relative density}; normalised to the column by the caller.
-constexpr std::array<std::pair<double, double>, 28> ozone_profile = {{
-    {0, 0.40},  {2, 0.45},  {4, 0.50},  {6, 0.60},   {8, 0.75},   {10, 1.00}, {12, 1.50}, {14, 2.20},
-    {16, 3.20}, {18, 4.30}, {20, 5.00}, {22, 5.20},  {24, 5.00},  {26, 4.40}, {28, 3.40}, {30, 2.50},
-    {32, 1.75}, {34, 1.20}, {36, 0.80}, {38, 0.55},  {40, 0.38},  {45, 0.17}, {50, 0.08}, {60, 0.03},
-    {70, 0.012}, {80, 0.005}, {90, 0.003}, {100, 0.0},
-}};
+// US Standard Atmosphere ozone profile [S: Anderson, Clough, Kneizys, Chetwynd & Shettle 1986, "AFGL Atmospheric
+// Constituent Profiles (0-120 km)", AFGL-TR-86-0110, Table 1f (U.S. Standard, derived from the 1976 US Standard
+// Atmosphere), https://archive.org/details/DTIC_ADA175173; the numbers were read from the machine-readable copy
+// table_1f.csv of the joseki package, https://github.com/rayference/joseki]. Rows: {altitude km, air number density
+// cm^-3, ozone volume mixing ratio ppmv}. The ozone number density is the product, normalised to the column by the
+// caller (the table's own column is about 345 DU).
+struct OzoneRow {
+    double altitude_km;
+    double air_per_cm3;
+    double ozone_ppmv;
+};
+constexpr OzoneRow afgl_us_standard_ozone[] = {
+    {0, 2.548e19, 2.66e-2}, {1, 2.313e19, 2.93e-2}, {2, 2.094e19, 3.24e-2}, {3, 1.891e19, 3.32e-2},
+    {4, 1.704e19, 3.39e-2}, {5, 1.532e19, 3.77e-2}, {6, 1.373e19, 4.11e-2}, {7, 1.228e19, 5.01e-2},
+    {8, 1.094e19, 5.97e-2}, {9, 9.719e18, 9.17e-2}, {10, 8.602e18, 1.31e-1}, {11, 7.589e18, 2.15e-1},
+    {12, 6.489e18, 3.10e-1}, {13, 5.546e18, 3.85e-1}, {14, 4.739e18, 5.03e-1}, {15, 4.050e18, 6.51e-1},
+    {16, 3.462e18, 8.70e-1}, {17, 2.960e18, 1.19}, {18, 2.530e18, 1.59}, {19, 2.163e18, 2.03},
+    {20, 1.849e18, 2.58}, {21, 1.575e18, 3.03}, {22, 1.342e18, 3.65}, {23, 1.144e18, 4.17},
+    {24, 9.765e17, 4.63}, {25, 8.337e17, 5.12}, {27.5, 5.640e17, 5.80}, {30, 3.830e17, 6.55},
+    {32.5, 2.524e17, 7.37}, {35, 1.761e17, 7.84}, {37.5, 1.238e17, 7.80}, {40, 8.310e16, 7.30},
+    {42.5, 5.803e16, 6.20}, {45, 4.090e16, 5.25}, {47.5, 2.920e16, 4.10}, {50, 2.136e16, 3.10},
+    {55, 1.181e16, 1.80}, {60, 6.426e15, 1.10}, {65, 3.386e15, 0.70}, {70, 1.723e15, 0.30},
+    {75, 8.347e14, 0.25}, {80, 3.832e14, 0.30}, {85, 1.711e14, 0.50}, {90, 7.136e13, 0.70},
+    {95, 2.924e13, 0.70}, {100, 1.189e13, 0.40}, {105, 5.033e12, 0.20}, {110, 2.144e12, 0.05},
+    {115, 9.688e11, 5.0e-3}, {120, 5.114e11, 5.0e-4},
+};
+
+// {altitude km, relative ozone number density (air x mixing ratio)}.
+const std::vector<std::pair<double, double>> ozone_profile = [] {
+    std::vector<std::pair<double, double>> profile;
+    for (const OzoneRow& r : afgl_us_standard_ozone) profile.emplace_back(r.altitude_km, r.air_per_cm3 * r.ozone_ppmv);
+    return profile;
+}();
 
 double ozone_shape_integral_m() {
     static const double integral = [] {

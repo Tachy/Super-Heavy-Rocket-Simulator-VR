@@ -18,8 +18,9 @@ double rayleigh_cross_section_m2(double wavelength_m);
 // Molecule number density of air p / (k T) of the US76 atmosphere; 0 above 1000 km (and below -5 km clamped like US76).
 double air_number_density_per_m3(double altitude_m);
 
-// Ozone number density: a tabulated mid-latitude profile (US76 shape [E]), 0 above 100 km, normalised to the
-// column in Dobson units.
+// Ozone number density: the AFGL US Standard profile [S: Anderson et al. 1986, AFGL-TR-86-0110, Table 1f], linear
+// between its rows, 0 above 120 km, scaled to the column in Dobson units. The column is normalised from 0 m: rays from
+// the model ground below the ellipsoid (-150 m) see a negligible extra amount (150 m of surface-level ozone, far below 0.1 % of the column).
 double ozone_number_density_per_m3(double altitude_m, double column_du);
 
 // Ozone absorption cross section [S: Serdyuchenko 2014 via Bruneton 2017], 10 nm bins, linear.
@@ -27,9 +28,12 @@ double ozone_cross_section_m2(double wavelength_m);
 
 // Aerosol extinction coefficient: exponential profile of the configured scale height, normalised so that the
 // vertical column from 0 m to the model top has the configured optical depth at 550 nm; Angstrom spectral law.
+// The normalisation starts at 0 m (ruling, kept): the profile continues below, so the column from the model ground
+// at -150 m carries about 13 % more optical depth (exp(150 / 1200) - 1) than the configured value.
 double aerosol_extinction_per_m(double wavelength_m, double altitude_m, const config::AtmosphereOpticsConfig& optics);
 
-// Extraterrestrial solar spectral irradiance at 1 AU [S: ASTM E-490 AM0], per metre of wavelength (W m^-2 m^-1).
+// Extraterrestrial solar spectral irradiance at 1 AU [S: ASTM G-173-03 ETR via Bruneton, 10 nm bins], per metre of
+// wavelength (W m^-2 m^-1).
 double solar_irradiance_w_m2_per_m(double wavelength_m);
 
 // CIE 1931 2-degree colour matching functions xbar, ybar, zbar (linear interpolation of the 5 nm table).

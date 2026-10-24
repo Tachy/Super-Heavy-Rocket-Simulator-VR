@@ -23,9 +23,10 @@ inline constexpr double bin_first_wavelength_nm = 360.0;
 inline constexpr double bin_width_nm = 10.0;
 inline constexpr int bin_count = 48;
 
-// Extraterrestrial solar spectral irradiance at 1 AU in W m^-2 nm^-1 [S: ASTM G-173 ETR column, which is the
-// ASTM E-490 AM0 spectrum; http://rredc.nrel.gov/solar/spectra/am1.5/ASTMG173/ASTMG173.html], averaged per bin by
-// Bruneton.
+// Extraterrestrial solar spectral irradiance at 1 AU in W m^-2 nm^-1 [S: ASTM G-173-03 "extraterrestrial" (ETR)
+// column, a SMARTS 2.9.2 spectrum (total 1347.9 W/m^2 over 280-4000 nm);
+// http://rredc.nrel.gov/solar/spectra/am1.5/ASTMG173/ASTMG173.html], averaged per bin by Bruneton. This is not the
+// ASTM E-490 table itself.
 inline constexpr double solar_irradiance_w_m2_nm[bin_count] = {
     1.11776, 1.14259, 1.01249, 1.14716, 1.72765, 1.73054,
     1.6887, 1.61253, 1.91198, 2.03474, 2.02042, 2.02212,
