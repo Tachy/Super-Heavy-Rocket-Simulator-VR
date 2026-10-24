@@ -83,9 +83,13 @@ func start_mission(mission_id: String, tdb_s: float) -> bool:
 	_clear_views()
 	var id := sim.start_mission(mission_id, tdb_s, true, LAUNCH_COUNTDOWN_S)
 	launch_site_id = ""
+	if id <= 0:
+		last_event = "Start fehlgeschlagen"
+		return false
 	_pending_mission = {"id": id, "mission_id": mission_id}
-	last_event = PLANNING_EVENT if id > 0 else "Start fehlgeschlagen"
-	return id > 0
+	last_event = PLANNING_EVENT
+	sim.advance_to(MISSION_HOLD_TDB_S)  # at once: the old target (the clock) must not outlive the post
+	return true
 
 
 func _clear_views() -> void:
@@ -133,6 +137,11 @@ func _on_command_finished(id: int, command: String, ok: bool, message: String) -
 				last_event = "Rückkehr geplant: Deorbit-Brennvorgang, Eintritt, Fang am Turm"
 			else:
 				last_event = "Keine Rückkehr: %s" % sim.autopilot_status().get("return", {}).get("reason", "kein Schiff im Orbit")
+
+
+## A mission start posted and not yet finished (the world clock holds meanwhile).
+func mission_pending() -> bool:
+	return not _pending_mission.is_empty()
 
 
 ## A launch or mission start posted and not yet finished (its outcome comes from advance()).

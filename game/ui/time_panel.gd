@@ -201,19 +201,19 @@ func _on_start_pressed() -> void:
 	if _mission_list.is_empty() or _missions.selected < 0:
 		return
 	var mission_id := _selected_id(_mission_list, _missions)
+	# disabled before posting: a fast outcome may already arrive inside the call (_on_start_finished)
+	_start_button.disabled = true
+	_start_status.text = "Start wird geplant ..."
 	var started := false
 	if mission_id == MissionCatalogue.FREE_FLIGHT:
 		var site: Dictionary = _place_list[_places.selected]["site"]
 		started = world.launch_vehicle(_selected_id(_vehicle_list, _vehicles), site)
+		if started:
+			_focus.select(VEHICLE_FOCUS_INDEX)  # world.launch_vehicle follows the vehicle at once
 	else:
 		started = world.start_mission(mission_id)
 	if not started:
-		_start_status.text = "Start abgelehnt: Befehl nicht angenommen"
-		return
-	if mission_id == MissionCatalogue.FREE_FLIGHT:
-		_focus.select(VEHICLE_FOCUS_INDEX)  # world.launch_vehicle follows the vehicle at once
-	_start_button.disabled = true
-	_start_status.text = "Start wird geplant ..."
+		_on_start_finished(false, "Befehl nicht angenommen")
 
 
 func _on_command_finished(_id: int, command: String, ok: bool, message: String) -> void:

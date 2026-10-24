@@ -81,6 +81,7 @@ func _ready() -> void:
 
 
 var _delta := 0.0
+var _mission_press_tdb_s := 0.0  ## clock instant of the pending mission start (the clock holds there meanwhile)
 var _camera_serial := 0  ## serial the camera distance was last fitted to
 
 
@@ -95,7 +96,13 @@ func _process(delta: float) -> void:
 func update_world() -> void:
 	# The flight simulation may lag behind the clock at high time warp; the clock then waits for it.
 	var t := clock.tdb_s
-	if flight.start_pending() and not flight.sim.is_active():
+	if flight.mission_pending():
+		# "Startvorbereitung": the world clock stands at the press instant while the mission start runs; its outcome
+		# (mission_started, inside this advance) sets the clock to the mission's epoch - no hold-back in this frame.
+		clock.tdb_s = _mission_press_tdb_s
+		flight.advance(clock.tdb_s, _delta)
+		t = clock.tdb_s
+	elif flight.start_pending() and not flight.sim.is_active():
 		flight.advance(clock.tdb_s, _delta)  # only collects the start's outcome
 	elif flight.sim.is_active():
 		flight.sim.set_realtime_planning(clock.warp <= 1.0)  # landing re-plans never stall real-time play
@@ -174,6 +181,7 @@ func launch_vehicle(vehicle_id: String, site: Dictionary, countdown_s := FlightC
 func start_mission(mission_id: String) -> bool:
 	if not flight.mission_started.is_connected(_on_mission_started):
 		flight.mission_started.connect(_on_mission_started)
+	_mission_press_tdb_s = clock.tdb_s
 	return flight.start_mission(mission_id, clock.tdb_s)
 
 
