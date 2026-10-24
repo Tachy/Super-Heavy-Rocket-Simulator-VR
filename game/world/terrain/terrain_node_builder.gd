@@ -1,0 +1,301 @@
+class_name TerrainNodeBuilder
+## Builds the mesh data of one cube-sphere terrain node (pure data: Packed arrays and Images, no GPU resources), safe on
+## worker threads. The main thread turns the result into an ArrayMesh / textures (TerrainQuadtree, Task 6).
+##
+## Vertex layout: 65 x 65 grid vertices (index b * ROW + a, a along the face's s axis, b along t), then the skirt ring
+## (SKIRT_EDGE[k] is the grid vertex above skirt vertex k). Positions are relative to `center_fixed` in render axes.
+## Per-vertex channels: CUSTOM0 = `morph` (xyz: offset to the parent-level surface, w: 1 on skirt vertices),
+## CUSTOM1 = `custom1` (global equirect u, v, fade_fine, fade_base), CUSTOM2 = `custom2` (water mask uv).
+
+const CELLS := 64
+const ROW := CELLS + 1
+## Lattice with one ring outside the node (seamless normals by central differences).
+const LATTICE := CELLS + 3
+const GRID_VERTICES := ROW * ROW
+## [E] Skirt depth in grid cells of the node edge: hides cracks between neighbours one level apart.
+const SKIRT_DEPTH_CELLS := 2.0
+const WATER_MASK_PX := 128
+## [E] Imagery texels wanted across a node (4 per grid cell); ImagerySource picks the level from it.
+const IMAGERY_TEXELS := 256.0
+const METRES_PER_DEG_FACTOR := PI / 180.0
+const INV_360 := 1.0 / 360.0
+const INV_180 := 1.0 / 180.0
+
+static var SKIRT_EDGE: PackedInt32Array = _make_skirt_edge()
+static var INDICES: PackedInt32Array = _make_indices()
+
+
+## Mesh data of node `key` (CubeSphere key) on a body of mean radius radius_m. imagery may be null (no imagery).
+static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, radius_m: float) -> Dictionary:
+	var face := key.x
+	var level := key.y
+	var box := CubeSphere.lat_lon_box(key)
+	var box_center_lon := box.get_center().x
+	var center_lon := CubeSphere.lat_lon_deg(CubeSphere.node_center(key)).y
+
+	# Lattice directions (geodetic normals), geodetic coordinates and heights (one sample call).
+	var warp_s := PackedFloat64Array()
+	var warp_t := PackedFloat64Array()
+	for n in LATTICE:
+		warp_s.append(CubeSphere.warp(CubeSphere.lattice_coordinate(key.z, level, n - 1, CELLS)))
+		warp_t.append(CubeSphere.warp(CubeSphere.lattice_coordinate(key.w, level, n - 1, CELLS)))
+	var count := LATTICE * LATTICE
+	var dirs := PackedVector3Array()
+	var lats := PackedFloat64Array()
+	var lons := PackedFloat64Array()  # raw atan2 longitudes (sampling); a pole takes the node centre's
+	dirs.resize(count)
+	lats.resize(count)
+	lons.resize(count)
+	var k := 0
+	for lb in LATTICE:
+		var b_warp := warp_t[lb]
+		for la in LATTICE:
+			var d := CubeSphere.direction_warped(face, warp_s[la], b_warp)
+			var horizontal := sqrt(d.x * d.x + d.y * d.y)
+			dirs[k] = d
+			lats[k] = rad_to_deg(atan2(d.z, horizontal))
+			lons[k] = rad_to_deg(atan2(d.y, d.x)) if horizontal > CubeSphere.POLE_EPSILON else center_lon
+			k += 1
+	var height_m: PackedFloat64Array = heights.sample(lats, lons)["height_m"]
+	var fixed := heights.positions_fixed(dirs, height_m)
+	var center_fixed := fixed[(CELLS / 2 + 1) * LATTICE + CELLS / 2 + 1]
+	# Lattice relative to the centre in render axes (Frames.to_render inlined: (x, y, z) -> (y, z, x)); a rotation, so
+	# differences, cross products and means below can work in render axes directly.
+	var rel := PackedVector3Array()
+	rel.resize(count)
+	for i in count:
+		var q := fixed[i] - center_fixed
+		rel[i] = Vector3(q.y, q.z, q.x)
+
+	# Imagery crops: the fine one and the base (next coarser source) under it.
+	var texel_deg := box.size.y / IMAGERY_TEXELS
+	var fine := {}
+	var base := {}
+	if imagery != null:
+		fine = imagery.crop(box, texel_deg)
+		if not fine.is_empty():
+			base = imagery.crop(box, texel_deg, fine["max_level"])
+	var metres_per_deg := radius_m * METRES_PER_DEG_FACTOR
+	var fine_map := _crop_map(fine, metres_per_deg)
+	var base_map := _crop_map(base, metres_per_deg)
+	var mask_u_scale := 1.0 / box.size.x
+	var mask_v_scale := 1.0 / box.size.y
+
+	var total := GRID_VERTICES + SKIRT_EDGE.size()
+	var vertices := PackedVector3Array()
+	var normals := PackedVector3Array()
+	var uv := PackedVector2Array()
+	var uv2 := PackedVector2Array()
+	var morph := PackedFloat32Array()
+	var custom1 := PackedFloat32Array()
+	var custom2 := PackedFloat32Array()
+	vertices.resize(total)
+	normals.resize(total)
+	uv.resize(total)
+	uv2.resize(total)
+	morph.resize(4 * total)
+	custom1.resize(4 * total)
+	custom2.resize(2 * total)
+	morph.fill(0.0)
+	# Hot loop: crop constants in locals (Packed array / Rect2 lookups per vertex cost more than the arithmetic).
+	var f_su := fine_map[0]
+	var f_ou := fine_map[1]
+	var f_sv := fine_map[2]
+	var f_ov := fine_map[3]
+	var f_west := fine_map[4]
+	var f_south := fine_map[5]
+	var f_east := fine_map[6]
+	var f_north := fine_map[7]
+	var f_scale := fine_map[8]
+	var b_su := base_map[0]
+	var b_ou := base_map[1]
+	var b_sv := base_map[2]
+	var b_ov := base_map[3]
+	var b_west := base_map[4]
+	var b_south := base_map[5]
+	var b_east := base_map[6]
+	var b_north := base_map[7]
+	var b_scale := base_map[8]
+	var mask_west := box.position.x
+	var mask_north := box.end.y
+	# Raw longitudes are already continuous unless the node touches the antimeridian.
+	var unwrap := box.position.x <= -180.0 or box.end.x >= 180.0
+	var v := 0
+	for b in ROW:
+		var odd_b := b & 1
+		for a in ROW:
+			k = (b + 1) * LATTICE + a + 1
+			var p := rel[k]
+			vertices[v] = p
+			normals[v] = (rel[k + 1] - rel[k - 1]).cross(rel[k + LATTICE] - rel[k - LATTICE]).normalized()
+			# Morph target: the parent level's surface, zero (resize fill) on even vertices: the mean of the two even
+			# neighbours along an edge, inside a parent cell the mean of the parent triangles' shared diagonal
+			# ((a + 1, b - 1) - (a - 1, b + 1), the split INDICES uses), which is where the parent's mesh passes.
+			var i4 := 4 * v
+			if a & 1 or odd_b:
+				var m: Vector3
+				if a & 1 and odd_b:
+					m = (rel[k + 1 - LATTICE] + rel[k - 1 + LATTICE]) * 0.5 - p
+				elif odd_b:
+					m = (rel[k - LATTICE] + rel[k + LATTICE]) * 0.5 - p
+				else:
+					m = (rel[k - 1] + rel[k + 1]) * 0.5 - p
+				morph[i4] = m.x
+				morph[i4 + 1] = m.y
+				morph[i4 + 2] = m.z
+			var lat := lats[k]
+			var lon := lons[k]
+			if unwrap:
+				lon = box_center_lon + wrapf(lon - box_center_lon, -180.0, 180.0)  # continuous in the node
+			var d := dirs[k]
+			var cos_lat := sqrt(d.x * d.x + d.y * d.y)
+			uv[v] = Vector2(lon * f_su + f_ou, lat * f_sv + f_ov)
+			uv2[v] = Vector2(lon * b_su + b_ou, lat * b_sv + b_ov)
+			custom1[i4] = (lon + 180.0) * INV_360
+			custom1[i4 + 1] = (90.0 - lat) * INV_180
+			# Fades: distance inside the coverage box (deg -> m) over fade_m, clamped to [0, 1].
+			custom1[i4 + 2] = clampf(minf(minf(lat - f_south, f_north - lat),
+					minf(lon - f_west, f_east - lon) * cos_lat) * f_scale, 0.0, 1.0)
+			custom1[i4 + 3] = clampf(minf(minf(lat - b_south, b_north - lat),
+					minf(lon - b_west, b_east - lon) * cos_lat) * b_scale, 0.0, 1.0)
+			custom2[2 * v] = (lon - mask_west) * mask_u_scale
+			custom2[2 * v + 1] = (mask_north - lat) * mask_v_scale
+			v += 1
+
+	# Skirts: the edge vertices lowered along the geodetic normal; same channels, CUSTOM0.w = 1.
+	var depth_m := CubeSphere.node_size_m(key, radius_m) / CELLS * SKIRT_DEPTH_CELLS
+	var skirt_dirs := PackedVector3Array()
+	var skirt_heights := PackedFloat64Array()
+	for e in SKIRT_EDGE:
+		k = (e / ROW + 1) * LATTICE + e % ROW + 1
+		skirt_dirs.append(dirs[k])
+		skirt_heights.append(height_m[k] - depth_m)
+	var skirt_fixed := heights.positions_fixed(skirt_dirs, skirt_heights)
+	for s in SKIRT_EDGE.size():
+		v = GRID_VERTICES + s
+		var e := SKIRT_EDGE[s]
+		vertices[v] = Frames.to_render(skirt_fixed[s] - center_fixed)
+		normals[v] = normals[e]
+		uv[v] = uv[e]
+		uv2[v] = uv2[e]
+		morph[4 * v] = morph[4 * e]
+		morph[4 * v + 1] = morph[4 * e + 1]
+		morph[4 * v + 2] = morph[4 * e + 2]
+		morph[4 * v + 3] = 1.0
+		for c in 4:
+			custom1[4 * v + c] = custom1[4 * e + c]
+		custom2[2 * v] = custom2[2 * e]
+		custom2[2 * v + 1] = custom2[2 * e + 1]
+
+
+	return {
+		"key": key,
+		"center_fixed": center_fixed,
+		"vertices": vertices,
+		"normals": normals,
+		"indices": INDICES,
+		"morph": morph,
+		"uv": uv,
+		"uv2": uv2,
+		"custom1": custom1,
+		"custom2": custom2,
+		"imagery_fine": fine,
+		"imagery_base": base,
+		"water_mask": _water_mask(heights, box),
+		"lat_lon_box": box,
+		"max_resolution_m": _max_resolution_m(key, heights),
+	}
+
+
+## Per-crop constants for the vertex loop: [u scale, u offset, v scale, v offset (uv = lon * su + ou, lat * sv + ov),
+## coverage west, south, east, north (deg, the crop's frame), metres_per_deg / fade_m]. No crop: all zero (uv 0,
+## fade 0).
+## The fade is 1 inside the source coverage, falling linearly to 0 over fade_m towards its edge (tiles are black
+## outside the coverage).
+static func _crop_map(crop: Dictionary, metres_per_deg: float) -> PackedFloat64Array:
+	var map := PackedFloat64Array()
+	map.resize(9)
+	map.fill(0.0)
+	if crop.is_empty():
+		return map
+	var box: Rect2 = crop["box_deg"]
+	var coverage: Rect2 = crop["coverage_deg"]
+	map[0] = 1.0 / box.size.x
+	map[1] = -box.position.x / box.size.x
+	map[2] = -1.0 / box.size.y
+	map[3] = box.end.y / box.size.y
+	map[4] = coverage.position.x
+	map[5] = coverage.position.y
+	map[6] = coverage.end.x
+	map[7] = coverage.end.y
+	map[8] = metres_per_deg / float(crop["fade_m"])
+	return map
+
+
+## L8 water mask (255 = water) over the node's lat/lon box, pixel centres, one sample call.
+static func _water_mask(heights: HeightSource, box: Rect2) -> Image:
+	var count := WATER_MASK_PX * WATER_MASK_PX
+	var row_lons := PackedFloat64Array()
+	for c in WATER_MASK_PX:
+		row_lons.append(wrapf(box.position.x + (c + 0.5) / WATER_MASK_PX * box.size.x, -180.0, 180.0))
+	var row_lat := PackedFloat64Array()
+	row_lat.resize(WATER_MASK_PX)
+	var lats := PackedFloat64Array()
+	var lons := PackedFloat64Array()
+	for r in WATER_MASK_PX:
+		row_lat.fill(box.end.y - (r + 0.5) / WATER_MASK_PX * box.size.y)
+		lats.append_array(row_lat)
+		lons.append_array(row_lons)
+	var water: PackedByteArray = heights.sample(lats, lons)["water"]
+	var pixels := PackedByteArray()
+	pixels.resize(count)
+	pixels.fill(0)
+	if water.count(0) != count:  # some water: flag pixels (dry nodes skip the loop)
+		for k in count:
+			if water[k] != 0:
+				pixels[k] = 255
+	return Image.create_from_data(WATER_MASK_PX, WATER_MASK_PX, false, Image.FORMAT_L8, pixels)
+
+
+## The finest data resolution (m) at the node centre and its corners: the quadtree stops splitting where even this is
+## coarser than the mesh.
+static func _max_resolution_m(key: Vector4i, heights: HeightSource) -> float:
+	var points := CubeSphere.node_corners(key)
+	points.append(CubeSphere.node_center(key))
+	var result := INF
+	for d in points:
+		var ll := CubeSphere.lat_lon_deg(d)
+		result = minf(result, heights.resolution_m(ll.x, ll.y))
+	return result
+
+
+## Grid vertex above each skirt vertex: the node border once around (b = 0, a = 64, b = 64, a = 0).
+static func _make_skirt_edge() -> PackedInt32Array:
+	var edge := PackedInt32Array()
+	for a in CELLS:
+		edge.append(a)
+	for b in CELLS:
+		edge.append(b * ROW + CELLS)
+	for a in range(CELLS, 0, -1):
+		edge.append(CELLS * ROW + a)
+	for b in range(CELLS, 0, -1):
+		edge.append(b * ROW)
+	return edge
+
+
+## Grid triangles (clockwise seen from outside = Godot front faces; each cell split along (a + 1, b) - (a, b + 1)) and
+## double-sided skirt quads between the border and the skirt ring.
+static func _make_indices() -> PackedInt32Array:
+	var indices := PackedInt32Array()
+	for b in CELLS:
+		for a in CELLS:
+			var k := b * ROW + a
+			indices.append_array([k, k + ROW, k + 1, k + 1, k + ROW, k + ROW + 1])
+	var ring := _make_skirt_edge()
+	for s in ring.size():
+		var e0 := ring[s]
+		var e1 := ring[(s + 1) % ring.size()]
+		var s0 := GRID_VERTICES + s
+		var s1 := GRID_VERTICES + (s + 1) % ring.size()
+		indices.append_array([e0, s0, e1, e1, s0, s1, e0, e1, s0, e1, s1, s0])
+	return indices

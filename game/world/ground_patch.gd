@@ -13,7 +13,6 @@ const CELLS := 160
 const RECENTER_DEG := 0.4
 const MAX_ALTITUDE_M := 500000.0
 const A := 6378137.0
-const F := 1.0 / 298.257223563
 const METRES_PER_DEG := A * PI / 180.0
 ## [E] Grid lines across a site with terrain: every SITE_STEP_M out to its plateau + apron + SITE_MARGIN_M.
 const SITE_STEP_M := 20.0
@@ -136,10 +135,6 @@ func _build() -> void:
 	set_instance_shader_parameter("vertex_offset", position)
 
 
+## Forwards to HeightSource (the terrain renderer's home of the conversion) until the patch is retired.
 static func geodetic_to_fixed(lat_deg: float, lon_deg: float, height_m := 0.0) -> Vector3:
-	var e2 := F * (2.0 - F)
-	var la := deg_to_rad(lat_deg)
-	var lo := deg_to_rad(lon_deg)
-	var n := A / sqrt(1.0 - e2 * sin(la) * sin(la))
-	return Vector3((n + height_m) * cos(la) * cos(lo), (n + height_m) * cos(la) * sin(lo),
-			(n * (1.0 - e2) + height_m) * sin(la))
+	return HeightSource.geodetic_to_fixed(lat_deg, lon_deg, height_m)
