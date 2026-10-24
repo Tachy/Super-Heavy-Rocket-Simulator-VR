@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "ascent_validation.hpp"
+#include "starsim/config/mission_config.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/spice/spice_adapters.hpp"
 #include "test_support.hpp"
@@ -68,7 +69,10 @@ const test::FlownAscent& flight14() {
     static const test::FlownAscent flown = [] {
         test::spice_session();
         const spice::SpiceTimeConverter time;
-        return test::fly_validation_ascent("flight14_ascent", time.from_utc({2026, 9, 28, 12, 48, 59.0}));  // [S:flights.toml]
+        // at the mission's recorded liftoff ([mission] liftoff_utc, [S:flights.toml])
+        const auto liftoff = config::load_ascent_mission(STARSIM_CONFIG_DIR, "flight14_ascent").liftoff_utc;
+        REQUIRE(liftoff);
+        return test::fly_validation_ascent("flight14_ascent", time.from_utc(*liftoff));
     }();
     return flown;
 }

@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/config/launch_site_config.hpp"
+#include "starsim/config/mission_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
@@ -169,7 +170,10 @@ const test::FlownAscent& crs35() {
     static const test::FlownAscent flown = [] {
         test::spice_session();
         const spice::SpiceTimeConverter time;
-        return test::fly_validation_ascent("crs35_ascent", time.from_utc({2026, 10, 13, 10, 33, 0.0}));  // [S:flights.toml]
+        // at the mission's recorded liftoff ([mission] liftoff_utc, [S:flights.toml])
+        const auto liftoff = config::load_ascent_mission(STARSIM_CONFIG_DIR, "crs35_ascent").liftoff_utc;
+        REQUIRE(liftoff);
+        return test::fly_validation_ascent("crs35_ascent", time.from_utc(*liftoff));
     }();
     return flown;
 }

@@ -107,7 +107,9 @@ func update_world() -> void:
 	elif flight.sim.is_active():
 		flight.sim.set_realtime_planning(clock.warp <= 1.0)  # landing re-plans never stall real-time play
 		var reached := flight.advance(clock.tdb_s, _delta)
-		if clock.tdb_s - reached > 0.05:  # sim at its per-frame tick limit: hold the clock back
+		if flight.take_clock_resync():  # a refused mission start left its vehicle at its own epoch
+			clock.set_time(reached)
+		elif clock.tdb_s - reached > 0.05:  # sim at its per-frame tick limit: hold the clock back
 			clock.tdb_s = reached
 		# The scene is drawn at the instant of the simulation snapshot (the sim thread trails the clock by about a
 		# frame, unevenly): Earth, pad and tower at the clock time but vehicles at the snapshot made the vehicles jump
@@ -166,9 +168,10 @@ func update_world() -> void:
 
 
 ## Puts a vehicle on a launch site at the current instant and focuses the camera on it; the ascent autopilot counts
-## down `countdown_s` and lifts off at T-0.
-func launch_vehicle(vehicle_id: String, site: Dictionary, countdown_s := FlightController.LAUNCH_COUNTDOWN_S) -> bool:
-	if not flight.launch(vehicle_id, site, clock.tdb_s, 90.0, countdown_s):
+## down `countdown_s` and lifts off at T-0. `vehicle_name`: display name for the messages ("" shows the file id).
+func launch_vehicle(vehicle_id: String, site: Dictionary, countdown_s := FlightController.LAUNCH_COUNTDOWN_S,
+		vehicle_name := "") -> bool:
+	if not flight.launch(vehicle_id, site, clock.tdb_s, 90.0, countdown_s, vehicle_name):
 		return false
 	clock.warp = 1.0
 	set_focus(FOCUS_VEHICLE)
@@ -177,12 +180,13 @@ func launch_vehicle(vehicle_id: String, site: Dictionary, countdown_s := FlightC
 
 ## Starts a mission of config/missions at the current instant (FlightController.start_mission). On success the clock
 ## goes to the mission's start epoch (a return mission starts at its own, possibly earlier one) at warp 1 and the camera
-## follows the vehicle. Outcome: flight.mission_started.
-func start_mission(mission_id: String) -> bool:
+## follows the vehicle; a refused start that placed a vehicle anyway puts the clock at that vehicle's epoch
+## (take_clock_resync). `on_pad`: the mission starts from a pad. Outcome: flight.mission_started.
+func start_mission(mission_id: String, on_pad := false) -> bool:
 	if not flight.mission_started.is_connected(_on_mission_started):
 		flight.mission_started.connect(_on_mission_started)
 	_mission_press_tdb_s = clock.tdb_s
-	return flight.start_mission(mission_id, clock.tdb_s)
+	return flight.start_mission(mission_id, clock.tdb_s, on_pad)
 
 
 func _on_mission_started(ok: bool, _message: String) -> void:

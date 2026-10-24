@@ -13,9 +13,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <toml++/toml.hpp>
 
-#include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/refuelling_mission_config.hpp"
+#include "starsim/config/refuelling_reference.hpp"
 
 using namespace starsim;
 
@@ -54,10 +54,16 @@ std::vector<Declared> declared_starts() {
     return out;
 }
 
+// config/README.md (and the game's mission catalogue): a pad is a site of launch_sites.toml without `kind`
+bool is_pad(const toml::table& site) { return !site.contains("kind"); }
+
 std::set<std::string> pad_ids() {
     std::set<std::string> ids;
-    for (const auto& s : config::load_launch_sites(STARSIM_CONFIG_DIR))
-        if (s.kind != "landing_zone") ids.insert(s.id);
+    const auto t = parse(config_dir() / "launch_sites.toml");
+    const auto* sites = t["site"].as_array();
+    REQUIRE(sites != nullptr);
+    for (const auto& n : *sites)
+        if (is_pad(*n.as_table())) ids.insert(*n.as_table()->at("id").value<std::string>());
     return ids;
 }
 
@@ -133,12 +139,17 @@ TEST_CASE("The declared start matches what start_mission starts", "[mission][con
                 break;
             }
             case MissionKind::RefuellingCampaignFlown: {
+                // as sim::start_refuelling_campaign_flown: the reference flights' depot (placed: the tanker
+                // flight's depot vehicle in orbit; flown: the reference depot launch from its pad)
                 const auto m = config::load_refuelling_campaign_flown_mission(STARSIM_CONFIG_DIR, d.id);
+                const auto reference = config::load_refuelling_reference(STARSIM_CONFIG_DIR);
                 if (m.depot_placed) {
                     place = "earth_orbit";
-                    vehicle = "starship_depot";
-                } else {  // the depot of the campaign is the reference flight's depot_launch
-                    const auto launch = config::load_depot_launch_mission(STARSIM_CONFIG_DIR, "depot_launch");
+                    vehicle =
+                        config::load_refuelling_flight_mission(STARSIM_CONFIG_DIR, reference.tanker.mission)
+                            .depot.vehicle_id;
+                } else {
+                    const auto launch = config::load_depot_launch_mission(STARSIM_CONFIG_DIR, reference.depot.mission);
                     std::tie(place, vehicle) = ascent_start(launch.ascent_id);
                 }
                 break;
@@ -180,7 +191,7 @@ TEST_CASE("Every pad lists vehicles that exist and may stand there", "[mission][
         const auto& site = *n.as_table();
         INFO(*site["id"].value<std::string>());
         const auto* list = site["vehicles"].as_array();
-        if (site["kind"].is_string()) {  // a landing zone: no vehicles start there
+        if (!is_pad(site)) {  // a landing zone: no vehicles start there
             CHECK(list == nullptr);
             continue;
         }

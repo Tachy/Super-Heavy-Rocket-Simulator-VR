@@ -207,11 +207,12 @@ func _on_start_pressed() -> void:
 	var started := false
 	if mission_id == MissionCatalogue.FREE_FLIGHT:
 		var site: Dictionary = _place_list[_places.selected]["site"]
-		started = world.launch_vehicle(_selected_id(_vehicle_list, _vehicles), site)
+		var vehicle: Dictionary = _vehicle_list[_vehicles.selected]
+		started = world.launch_vehicle(vehicle["id"], site, FlightController.LAUNCH_COUNTDOWN_S, vehicle["name"])
 		if started:
 			_focus.select(VEHICLE_FOCUS_INDEX)  # world.launch_vehicle follows the vehicle at once
 	else:
-		started = world.start_mission(mission_id)
+		started = world.start_mission(mission_id, not (_place_list[_places.selected]["site"] as Dictionary).is_empty())
 	if not started:
 		_on_start_finished(false, "Befehl nicht angenommen")
 

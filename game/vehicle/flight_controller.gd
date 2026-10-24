@@ -17,6 +17,8 @@ const MANUAL_KEYS: Array[Key] = [KEY_I, KEY_L, KEY_K, KEY_G, KEY_M, KEY_X]
 const AUTOPILOT_OFF := "aus"
 ## last_event while the onboard computer plans a launch on the pad (the countdown holds meanwhile).
 const PLANNING_EVENT := "Startvorbereitung: Bahn wird berechnet"
+## last_event while a mission that begins in flight (no ascent plan on the pad) is being started.
+const MISSION_START_EVENT := "Mission wird gestartet"
 ## Simulation target while a mission start runs (TDB s: J2000, before every mission epoch): the runner never steps
 ## backwards, so the session holds where it stands instead of racing towards the world clock - a return mission starts
 ## at its own epoch, days before it, and the clock only jumps there on mission_started.
@@ -42,6 +44,8 @@ var manual_control := false
 var _pending_launch := {}
 ## Mission start posted to the simulation thread and not yet finished: {id, mission_id}.
 var _pending_mission := {}
+## A refused mission start finished: the next advance() reports the session's epoch for the world clock.
+var _clock_resync := false
 
 var _stick := {}     ## [stick] table of config/input_hotas.toml
 var _throttle := {}  ## [throttle] table
@@ -61,14 +65,17 @@ func setup(config_dir: String) -> void:
 	_throttle = mapping.get("throttle", {})
 
 
-func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 90.0, countdown_s := LAUNCH_COUNTDOWN_S) -> bool:
+## `vehicle_name`: the vehicle's display name for the messages (the mission catalogue's; "" shows the file id).
+func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 90.0, countdown_s := LAUNCH_COUNTDOWN_S,
+		vehicle_name := "") -> bool:
 	_clear_views()
 	# External view: the onboard computer plans the launch to the configured target and engages the ascent autopilot in
 	# the same command (the countdown holds until the plan is in); manual control only places the vehicle.
 	var target := {} if manual_control else ascent_target
 	var id := sim.launch_from_site(vehicle_id, site["id"], heading_deg, tdb_s, countdown_s, target)
 	launch_site_id = ""
-	_pending_launch = {"id": id, "site_id": site["id"], "text": "%s auf %s" % [vehicle_id, site["name"]]}
+	_pending_launch = {"id": id, "site_id": site["id"], "text": "%s auf %s" % [
+			vehicle_name if vehicle_name != "" else vehicle_id, site["name"]]}
 	if id <= 0:
 		last_event = "Start fehlgeschlagen"
 	else:
@@ -78,8 +85,9 @@ func launch(vehicle_id: String, site: Dictionary, tdb_s: float, heading_deg := 9
 
 ## Starts a mission of config/missions (FlightSim.start_mission): pad missions stand on the pad with the free launch's
 ## countdown (a mission's own [mission] countdown_s wins in the core) and wait there for a launch window; other missions
-## start at their own epoch. Outcome: signal mission_started.
-func start_mission(mission_id: String, tdb_s: float) -> bool:
+## start at their own epoch. `on_pad`: the mission starts from a pad (the onboard computer plans its ascent first).
+## Outcome: signal mission_started.
+func start_mission(mission_id: String, tdb_s: float, on_pad := false) -> bool:
 	_clear_views()
 	var id := sim.start_mission(mission_id, tdb_s, true, LAUNCH_COUNTDOWN_S)
 	launch_site_id = ""
@@ -87,7 +95,7 @@ func start_mission(mission_id: String, tdb_s: float) -> bool:
 		last_event = "Start fehlgeschlagen"
 		return false
 	_pending_mission = {"id": id, "mission_id": mission_id}
-	last_event = PLANNING_EVENT
+	last_event = PLANNING_EVENT if on_pad else MISSION_START_EVENT
 	sim.advance_to(MISSION_HOLD_TDB_S)  # at once: the old target (the clock) must not outlive the post
 	return true
 
@@ -123,6 +131,7 @@ func _on_command_finished(id: int, command: String, ok: bool, message: String) -
 				last_event = "Mission: %s" % (name if name != "" else mission_id)
 			else:
 				last_event = "Start abgelehnt: %s" % message if message != "" else "Start fehlgeschlagen"
+				_clock_resync = true  # the refused start may have placed a vehicle at its own epoch
 			mission_started.emit(ok, message)
 		"engage_ascent_autopilot":
 			last_event = "Aufstiegs-Autopilot aktiv" if ok else "Start abgelehnt: %s" % message
@@ -144,6 +153,16 @@ func mission_pending() -> bool:
 	return not _pending_mission.is_empty()
 
 
+## True once after a refused mission start that left a flight active (e.g. a lunar landing placed at its epoch, then
+## refused; a pad plan refused on the pad): the world clock goes to that flight's epoch, what advance() returned in the
+## same frame (a fresh snapshot: the outcome came in an earlier frame). Not mission_start_tdb_s(): stale when the start
+## failed before placing.
+func take_clock_resync() -> bool:
+	var resync := _clock_resync
+	_clock_resync = false
+	return resync
+
+
 ## A launch or mission start posted and not yet finished (its outcome comes from advance()).
 func start_pending() -> bool:
 	return not _pending_launch.is_empty() or not _pending_mission.is_empty()
@@ -156,6 +175,7 @@ func advance(tdb_s: float, delta: float) -> float:
 		sim.advance_to(MISSION_HOLD_TDB_S)  # emits command_finished
 		return tdb_s
 	if not sim.is_active():
+		_clock_resync = false  # nothing placed: the clock stays
 		if start_pending():
 			sim.advance_to(tdb_s)
 		return tdb_s

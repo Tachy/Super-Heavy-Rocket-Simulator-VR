@@ -31,11 +31,12 @@ TEST_CASE("Falcon 9 CRS-35 first stage profile dump", "[.][f9-boostback-dump]") 
     static const spice::SpiceEphemeris ephemeris;
     static const auto earth = spice::SpiceOrientation::earth();
     const spice::SpiceTimeConverter time;
-    const auto t0 = time.from_utc({2026, 10, 13, 10, 33, 0.0});
     const char* mission_id =
         std::getenv("STARSIM_BOOSTBACK_MISSION") ? std::getenv("STARSIM_BOOSTBACK_MISSION") : "crs35_ascent";
     sim::FlightSession session(ephemeris, earth, STARSIM_CONFIG_DIR);
     const auto mission = config::load_ascent_mission(STARSIM_CONFIG_DIR, mission_id);
+    // the mission's recorded liftoff; a mission without one at CRS-35's date [S:flights.toml]
+    const auto t0 = time.from_utc(mission.liftoff_utc.value_or(time::UtcDateTime{2026, 10, 13, 10, 33, 0.0}));
     const auto plan = sim::start_ascent_mission(session, mission, STARSIM_CONFIG_DIR, t0);
     REQUIRE(plan.feasible);
     std::ofstream out(out_path);

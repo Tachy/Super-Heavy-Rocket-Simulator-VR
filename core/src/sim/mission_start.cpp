@@ -18,8 +18,9 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
     MissionStart s;
     s.kind = config::mission_kind(config_dir, mission_id);
     session.set_boil_off(true);  // a mission without its own setting: boil-off on (a lunar return sets its own)
-    // the mission's sea (none: calm, a previous mission's sea removed), before the start plans the drone-ship recovery
-    // (its time origin is the epoch the mission is placed at: the sea does not depend on what the session ran before)
+    // the mission's sea (none: calm, a previous mission's sea removed), before the start plans the drone-ship recovery;
+    // its time origin is `placed` below - the requested epoch, or for an ascent with a historical liftoff_utc its
+    // placement before that liftoff - so the sea never depends on what the session ran before
     // An ascent with a historical liftoff_utc is placed its countdown before that liftoff, whatever was requested.
     std::optional<config::AscentMission> ascent;
     if (s.kind == config::MissionKind::Ascent) ascent = config::load_ascent_mission(config_dir, mission_id);

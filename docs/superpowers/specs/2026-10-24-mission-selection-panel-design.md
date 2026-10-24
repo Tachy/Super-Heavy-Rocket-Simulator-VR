@@ -1,6 +1,6 @@
 # Mission selection in the panel - design
 
-Date: 2026-10-24. Status: draft for the user's review.
+Date: 2026-10-24. Status: approved 2026-10-24, implemented.
 
 ## Intent
 
