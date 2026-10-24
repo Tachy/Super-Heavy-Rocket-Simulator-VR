@@ -133,7 +133,7 @@ func _check_antimeridian() -> void:
 		for b in ROW:
 			for a in ROW - 1:
 				var k := b * ROW + a
-				max_step = maxf(max_step, absf(custom1[4 * (k + 1)] - custom1[4 * k]))
+				max_step = maxf(max_step, absf(custom1[2 * (k + 1)] - custom1[2 * k]))
 		for value in custom1:
 			finite = finite and is_finite(value)
 		for v: Vector3 in node["vertices"]:
@@ -319,9 +319,15 @@ fade_m = 100.0
 	var box := Rect2(lon - size17 * 0.1, lat - size17 * 0.1, size17 * 0.2, size17 * 0.2)
 	var crop := imagery.crop(box, size17 / 256.0)
 	var image: Image = crop.get("image")
-	_check(not crop.is_empty() and int(crop["level"]) == 16 and absf(crop["box_deg"].size.x - size16) < 1e-12
-			and image.get_width() == 256 and image.has_mipmaps() and image.get_format() == Image.FORMAT_RGB8,
-			"missing tile falls back to level 16 (%s)" % [crop.get("box_deg")])
+	_check(not crop.is_empty() and int(crop["level"]) == 16, "missing tile falls back to level 16 (%s)"
+			% [crop.get("box_deg")])
+	# The mosaic is cut down to the box plus the margin: 0.1 of a level-16 tile = 25.6 px -> 27 px + 2 x 2 px.
+	var px_per_deg := ImagerySource.TILE_PX / size16
+	_check(image.get_format() == Image.FORMAT_RGBA8 and image.has_mipmaps() and image.get_width() < 40
+			and absf(crop["box_deg"].size.x * px_per_deg - image.get_width()) < 1e-6
+			and absf(crop["box_deg"].size.y * px_per_deg - image.get_height()) < 1e-6,
+			"crop cut to the box: RGBA8 with mipmaps, %d x %d px matching its box" % [image.get_width(),
+			image.get_height()])
 	_check(box.intersects(crop["box_deg"]) and crop["box_deg"].encloses(box) and crop["fade_m"] == 100.0,
 			"crop box encloses the request, fade_m from the index")
 	var full := imagery.crop(Rect2(lon - size17 * 0.1, lat + size17 * 0.9, size17 * 0.2, size17 * 0.2), size17 / 256.0)
@@ -384,7 +390,7 @@ func _check_water_mask() -> void:
 	var texel_deg := box.size.x / px
 	var uv_ok := true
 	for v in TerrainNodeBuilder.GRID_VERTICES:
-		var lon := custom1[4 * v] * 360.0 - 180.0
+		var lon := custom1[2 * v] * 360.0 - 180.0
 		if absf(lon - source.coast_lon_deg) < 1.5 * texel_deg:
 			continue  # the texel under a vertex next to the coast may lie on the other side
 		var c := clampi(int(custom2[2 * v] * px), 0, px - 1)

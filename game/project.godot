@@ -20,6 +20,7 @@ window/size/viewport_height=900
 renderer/rendering_method="forward_plus"
 rendering_device/driver.windows="d3d12"
 anti_aliasing/quality/msaa_3d=2
+limits/spatial_indexer/threaded_cull_minimum_instances=1000000
 
 [shader_globals]
 
@@ -50,6 +51,22 @@ water_wave_phases={
 water_wave_steepness={
 "type": "float",
 "value": 0.0
+}
+earth_terrain_camera_hi={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+earth_terrain_camera_lo={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+moon_terrain_camera_hi={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+moon_terrain_camera_lo={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
 }
 
 [xr]

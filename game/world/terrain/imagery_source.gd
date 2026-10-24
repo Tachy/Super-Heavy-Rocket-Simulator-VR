@@ -8,6 +8,8 @@ extends RefCounted
 const TILE_PX := 256
 ## Mosaics are at most MAX_TILES x MAX_TILES tiles; a larger request takes a coarser level.
 const MAX_TILES := 3
+## Pixels kept around the requested box when the mosaic is cut down to it (bilinear and mipmap footprint at the edge).
+const CROP_MARGIN_PX := 2
 
 ## Sources, finest first: {id, min_level, max_level, coverage: Rect2 (deg), fade_m, dir}.
 var _sources: Array[Dictionary] = []
@@ -40,9 +42,10 @@ func is_empty() -> bool:
 ## Imagery for a lat/lon box (deg, east may exceed 180) at a wanted texel size (deg): the finest source (with
 ## max_level < coarser_than_level) whose coverage intersects the box; level = the finest <= max_level whose tile size is
 ## >= texel_deg * 256, coarser while the mosaic over box-and-coverage needs more than 3 x 3 tiles; a missing tile tries
-## the next coarser level of the source, then the next source. Returns {image: Image (RGB8, mipmaps), box_deg: Rect2
-## (the mosaic extent, in the request's longitude frame), fade_m, coverage_deg: Rect2 (same frame), source_id, level,
-## max_level} or {}.
+## the next coarser level of the source, then the next source. The mosaic is cut down to the box (plus CROP_MARGIN_PX)
+## and converted to RGBA8 with mipmaps here, on the worker: the GPU format, so the main thread's upload only copies.
+## Returns {image: Image (RGBA8, mipmaps), box_deg: Rect2 (the image's extent, in the request's longitude frame), fade_m,
+## coverage_deg: Rect2 (same frame), source_id, level, max_level} or {}.
 func crop(box_deg: Rect2, texel_deg: float, coarser_than_level := 1 << 30) -> Dictionary:
 	var wanted := int(floor(log(180.0 / (texel_deg * TILE_PX)) / log(2.0)))
 	for source: Dictionary in _sources:
@@ -62,10 +65,12 @@ func crop(box_deg: Rect2, texel_deg: float, coarser_than_level := 1 << 30) -> Di
 					if image != null:
 						var size := 180.0 / (1 << z)
 						var back := Vector2(-shift, 0.0)
+						var mosaic_box := Rect2(tiles.position.x * size - 180.0, 90.0 - tiles.end.y * size,
+								tiles.size.x * size, tiles.size.y * size)
+						var cut := _cut(image, mosaic_box, shifted)
 						return {
-							"image": image,
-							"box_deg": Rect2(tiles.position.x * size - 180.0 + back.x,
-									90.0 - tiles.end.y * size, tiles.size.x * size, tiles.size.y * size),
+							"image": cut[0],
+							"box_deg": Rect2(cut[1].position + back, cut[1].size),
 							"fade_m": source["fade_m"],
 							"coverage_deg": Rect2(coverage.position + back, coverage.size),
 							"source_id": source["id"],
@@ -87,7 +92,25 @@ static func _tile_range(box: Rect2, z: int) -> Rect2i:
 	return Rect2i(x0, y0, x1 - x0 + 1, y1 - y0 + 1)
 
 
-## The tiles blitted into one RGB8 image with mipmaps; null if a tile is missing.
+## [image, box_deg]: the mosaic (extent mosaic_box, deg) cut down to the pixels under box (same frame) plus
+## CROP_MARGIN_PX, as RGBA8 with mipmaps, and the cut's extent.
+static func _cut(mosaic: Image, mosaic_box: Rect2, box: Rect2) -> Array:
+	var px_per_deg := Vector2(mosaic.get_width() / mosaic_box.size.x, mosaic.get_height() / mosaic_box.size.y)
+	var x0 := maxi(int(floor((box.position.x - mosaic_box.position.x) * px_per_deg.x)) - CROP_MARGIN_PX, 0)
+	var x1 := mini(int(ceil((box.end.x - mosaic_box.position.x) * px_per_deg.x)) + CROP_MARGIN_PX, mosaic.get_width())
+	var y0 := maxi(int(floor((mosaic_box.end.y - box.end.y) * px_per_deg.y)) - CROP_MARGIN_PX, 0)
+	var y1 := mini(int(ceil((mosaic_box.end.y - box.position.y) * px_per_deg.y)) + CROP_MARGIN_PX, mosaic.get_height())
+	x1 = maxi(x1, x0 + 1)
+	y1 = maxi(y1, y0 + 1)
+	var image := mosaic.get_region(Rect2i(x0, y0, x1 - x0, y1 - y0))
+	image.convert(Image.FORMAT_RGBA8)
+	image.generate_mipmaps()
+	var cut_box := Rect2(mosaic_box.position.x + x0 / px_per_deg.x, mosaic_box.end.y - y1 / px_per_deg.y,
+			(x1 - x0) / px_per_deg.x, (y1 - y0) / px_per_deg.y)
+	return [image, cut_box]
+
+
+## The tiles blitted into one RGB8 image (no mipmaps: _cut makes them); null if a tile is missing.
 static func _mosaic(source: Dictionary, z: int, tiles: Rect2i) -> Image:
 	var columns := 2 << z
 	var image := Image.create_empty(tiles.size.x * TILE_PX, tiles.size.y * TILE_PX, false, Image.FORMAT_RGB8)
@@ -103,5 +126,4 @@ static func _mosaic(source: Dictionary, z: int, tiles: Rect2i) -> Image:
 			if tile.get_format() != Image.FORMAT_RGB8:
 				tile.convert(Image.FORMAT_RGB8)
 			image.blit_rect(tile, Rect2i(0, 0, TILE_PX, TILE_PX), Vector2i(dx * TILE_PX, dy * TILE_PX))
-	image.generate_mipmaps()
 	return image

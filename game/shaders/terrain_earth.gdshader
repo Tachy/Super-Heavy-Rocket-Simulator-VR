@@ -30,12 +30,13 @@ uniform float imagery_fade_angle = 0.05;
 uniform sampler2D water_mask : filter_linear, repeat_disable, hint_default_black;
 global uniform vec3 earth_sun_position_local;   // apparent, from the Earth's centre (World)
 global uniform vec3 earth_moon_position_local;  // apparent, from the Earth's centre (World)
+// The camera's Earth-local render position, float32 hi + lo parts (TerrainQuadtree.camera_global, once per frame).
+global uniform vec3 earth_terrain_camera_hi;
+global uniform vec3 earth_terrain_camera_lo;
 uniform float sun_radius_m = 695700000.0;
 uniform float moon_radius_m = 1737400.0;
 uniform float night_lights_intensity = 1.2;
 uniform float day_exposure = 1.5;
-// The node centre in body-local render metres (vertices are stored relative to it).
-instance uniform vec3 vertex_offset = vec3(0.0);
 
 varying vec3 local_position;
 varying vec3 local_normal;
@@ -45,7 +46,8 @@ varying vec3 camera_offset;  // fragment - camera (node-local render axes, metre
 varying vec2 water_uv;
 
 void vertex() {
-	float morph = terrain_morph_factor(VERTEX);
+	vec3 camera_local = terrain_camera_local(earth_terrain_camera_hi, earth_terrain_camera_lo);
+	float morph = terrain_morph_factor(VERTEX, camera_local);
 	VERTEX += CUSTOM0.xyz * morph;
 	NORMAL = normalize(mix(NORMAL, CUSTOM3.xyz, morph));
 	local_position = VERTEX + vertex_offset;

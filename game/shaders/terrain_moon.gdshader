@@ -14,14 +14,15 @@ render_mode unshaded, cull_back;
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 global uniform vec3 moon_sun_position_local;    // apparent, from the Moon's centre (World)
 global uniform vec3 moon_earth_position_local;  // from the Moon's centre (World)
+// The camera's Moon-local render position, float32 hi + lo parts (TerrainQuadtree.camera_global, once per frame).
+global uniform vec3 moon_terrain_camera_hi;
+global uniform vec3 moon_terrain_camera_lo;
 uniform float sun_radius_m = 695700000.0;
 uniform float earth_radius_m = 6371000.0;
 // The constants of moon.gdshader (same look as the body mesh from scaled space).
 uniform float earthshine = 0.004;
 uniform float exposure = 1.6;
 uniform vec3 umbra_glow = vec3(0.020, 0.005, 0.0015);
-// The node centre in body-local render metres (vertices are stored relative to it).
-instance uniform vec3 vertex_offset = vec3(0.0);
 
 varying vec3 local_position;
 varying vec3 local_normal;
@@ -29,7 +30,8 @@ varying vec2 global_uv;  // equirectangular u (continuous in the node), v
 varying vec3 camera_offset;  // fragment - camera (node-local render axes, metres; exact near the camera)
 
 void vertex() {
-	float morph = terrain_morph_factor(VERTEX);
+	vec3 camera_local = terrain_camera_local(moon_terrain_camera_hi, moon_terrain_camera_lo);
+	float morph = terrain_morph_factor(VERTEX, camera_local);
 	VERTEX += CUSTOM0.xyz * morph;
 	NORMAL = normalize(mix(NORMAL, CUSTOM3.xyz, morph));
 	local_position = VERTEX + vertex_offset;

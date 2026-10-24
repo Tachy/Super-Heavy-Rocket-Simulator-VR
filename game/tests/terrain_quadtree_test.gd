@@ -47,6 +47,8 @@ func _initialize() -> void:
 	_check_flat_rule()
 	_check_hysteresis()
 	_check_morph_continuity()
+	_check_morph_fade_in()
+	_check_camera_precision()
 	_check_jump()
 	if _terrain:
 		_check_data()
@@ -216,6 +218,67 @@ func _check_morph_continuity() -> void:
 				% [label, String.num_scientific(result.x)] + "(parent morph max %.4f, child morph min %.4f)"
 				% [result.y, result.z])
 	tree.queue_free()
+
+
+# A node drawn for the first time starts fully morphed (morph floor 1: its parent's surface, even when its upload came
+# late and the camera is already inside its morph range) and fades to its own surface within MORPH_IN_S; a parent shown
+# again after a merge gets no floor (it is unmorphed there by its morph range).
+func _check_morph_fade_in() -> void:
+	var tree := _make_tree(false)
+	var key := CubeSphere.key_at(CubeSphere.geodetic_direction(10.0, 20.0), 4)
+	var tries := 0
+	while tree.node_info(key).is_empty() and tries < 8:
+		_converge(tree, CubeSphere.node_center(key) * EARTH_RADIUS_M * 1.0001)
+		tries += 1
+	var info := tree.node_info(key)
+	if info.is_empty():
+		_check(false, "morph fade-in: node %s never built" % key)
+		return
+	var center: Vector3 = info["center_fixed"]
+	var up := center.normalized()
+	var split_distance_m := TerrainQuadtree.LOD_FACTOR * float(info["size_m"])
+	var near_camera := center + up * (float(info["radius_m"]) + 0.5 * split_distance_m)
+	var far_camera := center + up * (float(info["radius_m"]) + 1.2 * split_distance_m)
+	_converge(tree, near_camera)
+	var child := CubeSphere.children(key)[0]
+	var first := float(tree.node_info(child)["morph_floor"])
+	tree.update_for_camera(near_camera, 0.5 * TerrainQuadtree.MORPH_IN_S)
+	var half := float(tree.node_info(child)["morph_floor"])
+	tree.update_for_camera(near_camera, TerrainQuadtree.MORPH_IN_S)
+	var done := float(tree.node_info(child)["morph_floor"])
+	_check(first == 1.0 and absf(half - 0.5) < 1e-9 and done == 0.0,
+			"a new node starts fully morphed and fades in (floor %.2f -> %.2f -> %.2f)" % [first, half, done])
+	tree.update_for_camera(far_camera, 0.0)
+	var parent_floor := float(tree.node_info(key)["morph_floor"])
+	_check(not tree.node_info(key)["split"] and parent_floor == 0.0,
+			"a parent shown again after a merge gets no morph floor (%.2f)" % parent_floor)
+	tree.queue_free()
+
+
+# The camera reaches the shader as float32 hi + lo parts of the body-local position (one global per frame) and each
+# node's centre likewise (per instance, once): the shader's camera_local = (hi_c - hi_n) + (lo_c - lo_n) in float32
+# holds about float32 precision of the camera-node distance, also 6400 km from the body's centre.
+func _check_camera_precision() -> void:
+	var camera := Frames.to_render(_above(25.99686, -97.15394, 2.0))
+	var worst := 0.0
+	for offset: Vector3 in [Vector3(30.123456, -2.718282, 41.421356),
+			Vector3(-5000.314159, 300.577216, 1200.693147), Vector3(2.0e6 + 0.1234, -1.0e6 - 0.5678, 3.0e5 + 0.9012)]:
+		var node := camera + offset
+		var c := TerrainQuadtree.split_float32(camera)
+		var n := TerrainQuadtree.split_float32(node)
+		var local := _f32(_f32(c[0] - n[0]) + _f32(c[1] - n[1]))
+		var exact := camera - node
+		worst = maxf(worst, (local - exact).length() / exact.length())
+	var hi_lo := TerrainQuadtree.split_float32(camera)
+	_check(worst < 3.0e-7 and hi_lo[0] == _f32(hi_lo[0]) and (hi_lo[0] + hi_lo[1] - camera).length() < 1e-6,
+			"camera hi/lo split: camera-node vector to float32 precision (worst relative error %s)"
+			% String.num_scientific(worst))
+
+
+## v rounded to float32 per component.
+static func _f32(v: Vector3) -> Vector3:
+	var a := PackedFloat32Array([v.x, v.y, v.z])
+	return Vector3(a[0], a[1], a[2])
 
 
 ## (max distance between each child's morphed grid vertex and the parent's morphed surface there, the parent's largest

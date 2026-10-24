@@ -119,11 +119,11 @@ func update_world() -> void:
 
 	earth.place(cam)
 	var camera_fixed := earth.fixed_to_gcrf.transposed() * cam
-	earth_terrain.update_for_camera(camera_fixed)
+	earth_terrain.update_for_camera(camera_fixed, _delta)
 	water_waves.update(camera_fixed, t)
 	earth.body_mesh_visible = not earth_terrain.active
 	moon.place(cam)
-	moon_terrain.update_for_camera(moon.fixed_to_gcrf.transposed() * (cam - moon_gcrf_m))
+	moon_terrain.update_for_camera(moon.fixed_to_gcrf.transposed() * (cam - moon_gcrf_m), _delta)
 	moon.body_mesh_visible = not moon_terrain.active
 	var sun_local := earth.to_local_frame(sun_apparent_from_earth_m)
 	var moon_local := earth.to_local_frame(moon_apparent_from_earth_m)
@@ -316,6 +316,7 @@ func _setup_earth_terrain(data_dir: String) -> void:
 	material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)
 	RenderingServer.global_shader_parameter_set("water_wave_steepness", WaterWaves.STEEPNESS)  # constant: set once
 	earth_terrain.name = "EarthTerrain"
+	earth_terrain.camera_global = "earth_terrain_camera"  # project.godot [shader_globals], read by terrain_earth.gdshader
 	earth.add_child(earth_terrain)
 	earth_terrain.setup(heights, ImagerySource.new(data_dir.path_join("imagery/earth/index.toml")),
 			EARTH_SEMI_MAJOR_AXIS_M, material)
@@ -334,6 +335,7 @@ func _setup_moon_terrain() -> void:
 	material.set_shader_parameter("albedo_texture", _moon_material.get_shader_parameter("albedo_texture"))
 	material.set_shader_parameter("earth_radius_m", EARTH_MEAN_RADIUS_M)
 	moon_terrain.name = "MoonTerrain"
+	moon_terrain.camera_global = "moon_terrain_camera"  # project.godot [shader_globals], read by terrain_moon.gdshader
 	moon.add_child(moon_terrain)
 	moon_terrain.setup(heights, null, MOON_RADIUS_M, material)
 

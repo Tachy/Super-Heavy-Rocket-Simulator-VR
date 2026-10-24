@@ -5,7 +5,7 @@ class_name TerrainNodeBuilder
 ## Vertex layout: 65 x 65 grid vertices (index b * ROW + a, a along the face's s axis, b along t), then the skirt ring
 ## (SKIRT_EDGE[k] is the grid vertex above skirt vertex k). Positions are relative to `center_fixed` in render axes.
 ## Per-vertex channels: CUSTOM0 = `morph` (xyz: offset to the parent-level surface, w: 1 on skirt vertices),
-## CUSTOM1 = `custom1` (global equirect u, v, fade_fine, fade_base), CUSTOM2 = `custom2` (water mask uv),
+## CUSTOM1 = `custom1` (2/vertex: global equirect u, v), CUSTOM2 = `custom2` (water mask uv),
 ## CUSTOM3 = `custom3` (3/vertex: the parent-level normal the shader blends towards with the morph factor).
 
 const CELLS := 64
@@ -18,7 +18,6 @@ const SKIRT_DEPTH_CELLS := 2.0
 const WATER_MASK_PX := 128
 ## [E] Imagery texels wanted across a node (4 per grid cell); ImagerySource picks the level from it.
 const IMAGERY_TEXELS := 256.0
-const METRES_PER_DEG_FACTOR := PI / 180.0
 const INV_360 := 1.0 / 360.0
 const INV_180 := 1.0 / 180.0
 
@@ -76,9 +75,8 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 		fine = imagery.crop(box, texel_deg)
 		if not fine.is_empty():
 			base = imagery.crop(box, texel_deg, fine["max_level"])
-	var metres_per_deg := radius_m * METRES_PER_DEG_FACTOR
-	var fine_map := _crop_map(fine, metres_per_deg)
-	var base_map := _crop_map(base, metres_per_deg)
+	var fine_map := _crop_map(fine)
+	var base_map := _crop_map(base)
 	var mask_u_scale := 1.0 / box.size.x
 	var mask_v_scale := 1.0 / box.size.y
 
@@ -95,7 +93,7 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 	uv.resize(total)
 	uv2.resize(total)
 	morph.resize(4 * total)
-	custom1.resize(4 * total)
+	custom1.resize(2 * total)
 	custom2.resize(2 * total)
 	morph.fill(0.0)
 	# Hot loop: crop constants in locals (Packed array / Rect2 lookups per vertex cost more than the arithmetic).
@@ -103,20 +101,10 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 	var f_ou := fine_map[1]
 	var f_sv := fine_map[2]
 	var f_ov := fine_map[3]
-	var f_west := fine_map[4]
-	var f_south := fine_map[5]
-	var f_east := fine_map[6]
-	var f_north := fine_map[7]
-	var f_scale := fine_map[8]
 	var b_su := base_map[0]
 	var b_ou := base_map[1]
 	var b_sv := base_map[2]
 	var b_ov := base_map[3]
-	var b_west := base_map[4]
-	var b_south := base_map[5]
-	var b_east := base_map[6]
-	var b_north := base_map[7]
-	var b_scale := base_map[8]
 	var mask_west := box.position.x
 	var mask_north := box.end.y
 	# Raw longitudes are already continuous unless the node touches the antimeridian.
@@ -148,17 +136,10 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 			var lon := lons[k]
 			if unwrap:
 				lon = box_center_lon + wrapf(lon - box_center_lon, -180.0, 180.0)  # continuous in the node
-			var d := dirs[k]
-			var cos_lat := sqrt(d.x * d.x + d.y * d.y)
 			uv[v] = Vector2(lon * f_su + f_ou, lat * f_sv + f_ov)
 			uv2[v] = Vector2(lon * b_su + b_ou, lat * b_sv + b_ov)
-			custom1[i4] = (lon + 180.0) * INV_360
-			custom1[i4 + 1] = (90.0 - lat) * INV_180
-			# Fades: distance inside the coverage box (deg -> m) over fade_m, clamped to [0, 1].
-			custom1[i4 + 2] = clampf(minf(minf(lat - f_south, f_north - lat),
-					minf(lon - f_west, f_east - lon) * cos_lat) * f_scale, 0.0, 1.0)
-			custom1[i4 + 3] = clampf(minf(minf(lat - b_south, b_north - lat),
-					minf(lon - b_west, b_east - lon) * cos_lat) * b_scale, 0.0, 1.0)
+			custom1[2 * v] = (lon + 180.0) * INV_360
+			custom1[2 * v + 1] = (90.0 - lat) * INV_180
 			custom2[2 * v] = (lon - mask_west) * mask_u_scale
 			custom2[2 * v + 1] = (mask_north - lat) * mask_v_scale
 			v += 1
@@ -201,8 +182,8 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 		morph[4 * v + 1] = morph[4 * e + 1]
 		morph[4 * v + 2] = morph[4 * e + 2]
 		morph[4 * v + 3] = 1.0
-		for c in 4:
-			custom1[4 * v + c] = custom1[4 * e + c]
+		custom1[2 * v] = custom1[2 * e]
+		custom1[2 * v + 1] = custom1[2 * e + 1]
 		custom2[2 * v] = custom2[2 * e]
 		custom2[2 * v + 1] = custom2[2 * e + 1]
 		for c in 3:
@@ -230,28 +211,19 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 	}
 
 
-## Per-crop constants for the vertex loop: [u scale, u offset, v scale, v offset (uv = lon * su + ou, lat * sv + ov),
-## coverage west, south, east, north (deg, the crop's frame), metres_per_deg / fade_m]. No crop: all zero (uv 0,
-## fade 0).
-## The fade is 1 inside the source coverage, falling linearly to 0 over fade_m towards its edge (tiles are black
-## outside the coverage).
-static func _crop_map(crop: Dictionary, metres_per_deg: float) -> PackedFloat64Array:
+## Per-crop constants for the vertex loop: [u scale, u offset, v scale, v offset] (uv = lon * su + ou, lat * sv + ov).
+## No crop: all zero (uv 0; the shader's coverage fade is 0 there).
+static func _crop_map(crop: Dictionary) -> PackedFloat64Array:
 	var map := PackedFloat64Array()
-	map.resize(9)
+	map.resize(4)
 	map.fill(0.0)
 	if crop.is_empty():
 		return map
 	var box: Rect2 = crop["box_deg"]
-	var coverage: Rect2 = crop["coverage_deg"]
 	map[0] = 1.0 / box.size.x
 	map[1] = -box.position.x / box.size.x
 	map[2] = -1.0 / box.size.y
 	map[3] = box.end.y / box.size.y
-	map[4] = coverage.position.x
-	map[5] = coverage.position.y
-	map[6] = coverage.end.x
-	map[7] = coverage.end.y
-	map[8] = metres_per_deg / float(crop["fade_m"])
 	return map
 
 
