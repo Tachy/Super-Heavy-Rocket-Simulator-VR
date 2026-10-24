@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "starsim/config/atmosphere_optics_config.hpp"
 #include "starsim/math/vec3.hpp"
 
@@ -38,5 +40,9 @@ double solar_irradiance_w_m2_per_m(double wavelength_m);
 
 // CIE 1931 2-degree colour matching functions xbar, ybar, zbar (linear interpolation of the 5 nm table).
 math::Vec3 cie_1931_cmf(double wavelength_m);
+
+// FNV-1a 64 over this module's tabulated data as stored (the depolarisation table and the AFGL ozone profile): part
+// of the atmosphere cache key. Raw table bytes only, never function outputs (libm results differ between machines).
+std::uint64_t atmosphere_optics_data_checksum();
 
 }  // namespace starsim::environment

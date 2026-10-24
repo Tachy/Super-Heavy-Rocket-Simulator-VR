@@ -30,6 +30,7 @@ AtmosphereOpticsConfig load_atmosphere_optics(const std::filesystem::path& toml_
         doc.fail("'scattering_orders' must be an integer in [1, 16]");
     }
     c.scattering_orders = static_cast<int>(orders);
+    c.multiple_scattering_tail = doc.boolean(t, "multiple_scattering_tail");
     return c;
 }
 

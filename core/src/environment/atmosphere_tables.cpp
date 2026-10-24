@@ -107,9 +107,11 @@ AtmosphereParameters atmosphere_parameters(const config::AtmosphereOpticsConfig&
     return p;
 }
 
-std::uint64_t atmosphere_spectral_data_checksum(const config::AtmosphereOpticsConfig& optics) {
+std::uint64_t atmosphere_spectral_data_checksum() {
     std::uint64_t h = 14695981039346656037ull;  // FNV-1a 64 offset basis
-    // The tabulated spectra as compiled.
+    // The tabulated data as compiled - raw inputs only. Function outputs (std::exp / std::pow of the optics, the US76
+    // profile) are not hashed: they come from the OS runtime (ucrtbase) and may differ in the last bit between
+    // machines, which would reject a shipped cache. Code changes are covered by atmosphere_tables_code_version.
     hash_bytes(h, spectra::solar_irradiance_w_m2_nm, sizeof(spectra::solar_irradiance_w_m2_nm));
     hash_bytes(h, spectra::ozone_cross_section_m2, sizeof(spectra::ozone_cross_section_m2));
     hash_bytes(h, spectra::cie_1931_2deg_cmf, sizeof(spectra::cie_1931_2deg_cmf));
@@ -118,32 +120,14 @@ std::uint64_t atmosphere_spectral_data_checksum(const config::AtmosphereOpticsCo
                            spectra::lambda_g_nm, spectra::lambda_b_nm, spectra::lambda_min_nm, spectra::lambda_max_nm}) {
         hash_value(h, v);
     }
-    // The optics functions as the precomputation samples them: the spectra at 1 nm (covers the depolarisation table,
-    // the refractivity and the Angstrom law of Task 1) and the altitude profile rows (US76, AFGL ozone, aerosol).
-    for (int lambda = static_cast<int>(spectra::lambda_min_nm); lambda <= static_cast<int>(spectra::lambda_max_nm);
-         ++lambda) {
-        const double l = lambda * nm;
-        const math::Vec3 cmf = cie_1931_cmf(l);
-        for (const double v : {rayleigh_cross_section_m2(l), ozone_cross_section_m2(l), solar_irradiance_w_m2_per_m(l),
-                               aerosol_extinction_per_m(l, 0.0, optics), cmf.x, cmf.y, cmf.z}) {
-            hash_value(h, v);
-        }
-    }
-    const detail::DensityProfileTable profile = detail::make_density_profile_table(optics);
-    hash_value(h, profile.altitude_min_m);
-    hash_value(h, profile.step_m);
-    for (const auto& row : profile.rows) {
-        hash_value(h, row.air_per_m3);
-        hash_value(h, row.ozone_per_m3);
-        hash_value(h, row.aerosol_550nm_per_m);
-    }
+    hash_value(h, atmosphere_optics_data_checksum());  // depolarisation table, AFGL ozone profile
     return h;
 }
 
 std::uint64_t atmosphere_input_hash(const config::AtmosphereOpticsConfig& optics, const AtmosphereTableSizes& sizes) {
     std::uint64_t h = 14695981039346656037ull;  // FNV-1a 64 offset basis
     hash_value(h, atmosphere_tables_code_version);
-    hash_value(h, atmosphere_spectral_data_checksum(optics));
+    hash_value(h, atmosphere_spectral_data_checksum());
     for (const double v : {optics.top_altitude_m, optics.ground_altitude_m, optics.aerosol_optical_depth_550nm,
                            optics.aerosol_angstrom_exponent, optics.aerosol_single_scattering_albedo,
                            optics.aerosol_scale_height_m, optics.mie_phase_g, optics.ozone_column_du,
@@ -151,6 +135,7 @@ std::uint64_t atmosphere_input_hash(const config::AtmosphereOpticsConfig& optics
         hash_value(h, v);
     }
     hash_value(h, optics.scattering_orders);
+    hash_value(h, optics.multiple_scattering_tail);
     for (const int v : {sizes.transmittance_mu, sizes.transmittance_r, sizes.scattering_r, sizes.scattering_mu,
                         sizes.scattering_mu_s, sizes.scattering_nu, sizes.irradiance_mu_s, sizes.irradiance_r}) {
         hash_value(h, v);

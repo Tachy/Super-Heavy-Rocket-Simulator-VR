@@ -35,6 +35,12 @@ math::Vec3 ellipsoid_direction_to_atmosphere_space(const math::Vec3& direction_i
 // Surface normals map by M^-T = diag(1, 1, b/a) and are renormalised: the geodetic up becomes the model's radial.
 math::Vec3 ellipsoid_normal_to_atmosphere_space(const math::Vec3& normal_itrf);
 
+// Convention for the shader port: the Sun direction maps by M like every ray, normals by M^-T, so in model space the
+// Sun's elevation differs from the true one by up to ~0.19 deg at mid-latitudes (zero at the horizon and the poles /
+// equator); the lookups (transmittance, scattering, sky irradiance) use the mapped geometry, the direct-sun cosine of
+// sun_and_sky_illuminance the true ITRF one. The model ground (-150 m) lies below every drawn surface, so the model
+// horizon (where the sky radiance jumps physically, up to ~6 % at 2 m) is always hidden behind terrain or sea.
+//
 // Runtime lookups into the precomputed tables. Inputs are Earth-fixed (ITRF): positions in metres, directions unit
 // vectors. The tables are for the Sun at 1 AU: callers scale the results by 1 / d_AU^2. Thread-safe (const).
 class AtmosphereScattering {

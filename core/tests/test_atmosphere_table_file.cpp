@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <random>
 #include <string>
 #include <vector>
@@ -147,4 +148,24 @@ TEST_CASE("Table files round-trip and damaged files are recomputed", "[atmospher
     CHECK(recomputed->input_hash == environment::atmosphere_input_hash(optics, other_sizes));
     CHECK(recomputed->sizes.irradiance_r == 6);
     CHECK(environment::read_atmosphere_tables(cache_file, recomputed->input_hash).has_value());
+
+    // An unwritable cache (the cache "directory" is a regular file): the computed tables are still returned.
+    const fs::path not_a_directory = dir.path / "plain_file";
+    write_bytes(not_a_directory, {'x'});
+    std::shared_ptr<const environment::AtmosphereTables> uncached;
+    REQUIRE_NOTHROW(uncached = environment::load_or_compute_atmosphere(config_dir, not_a_directory, sizes));
+    REQUIRE(uncached);
+    CHECK(same_tables(*uncached, tables));
+
+    // Temp files of a killed writer: one older than 10 minutes is removed on the next write, a fresh one is kept.
+    TempDir stale;
+    const fs::path old_temp = stale.path / (std::string(environment::atmosphere_cache_file_name) + ".tmp.old");
+    const fs::path new_temp = stale.path / (std::string(environment::atmosphere_cache_file_name) + ".tmp.new");
+    write_bytes(old_temp, {'x'});
+    write_bytes(new_temp, {'x'});
+    fs::last_write_time(old_temp, fs::file_time_type::clock::now() - std::chrono::hours(1));
+    environment::load_or_compute_atmosphere(config_dir, stale.path, sizes);
+    CHECK_FALSE(fs::exists(old_temp));
+    CHECK(fs::exists(new_temp));
+    CHECK(fs::exists(stale.path / environment::atmosphere_cache_file_name));
 }

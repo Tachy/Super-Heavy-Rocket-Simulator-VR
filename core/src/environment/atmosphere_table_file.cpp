@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <random>
@@ -127,6 +128,23 @@ std::filesystem::path unique_temp_path(const std::filesystem::path& file) {
                                  std::to_string(counter++));
 }
 
+constexpr int rename_attempts = 5;  // [call] back-off 50, 100, 150, 200 ms
+
+// Temp files of writers killed between write and rename (84 MB each): siblings "<name>.tmp.*" older than 10 minutes
+// (a live writer needs well under a second between creating and renaming its file).
+void remove_stale_temp_files(const std::filesystem::path& file) {
+    const std::string prefix = file.filename().string() + ".tmp.";
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(file.parent_path(), ec)) {
+        const std::string name = entry.path().filename().string();
+        if (name.rfind(prefix, 0) != 0) continue;
+        std::error_code entry_error;
+        const auto written = entry.last_write_time(entry_error);
+        if (!entry_error && now - written > std::chrono::minutes(10)) std::filesystem::remove(entry.path(), entry_error);
+    }
+}
+
 }  // namespace
 
 void write_atmosphere_tables(const std::filesystem::path& file, const AtmosphereTables& tables) {
@@ -165,20 +183,27 @@ void write_atmosphere_tables(const std::filesystem::path& file, const Atmosphere
             throw std::runtime_error("cannot write " + temp.string());
         }
     }
+    // Retried with a short back-off: on Windows the rename fails transiently while a virus scanner holds the fresh
+    // temp file or another process has the target open without delete sharing.
     std::error_code ec;
-    std::filesystem::rename(temp, file, ec);
-    if (ec) {
-        std::error_code ignored;
-        std::filesystem::remove(temp, ignored);
-        throw std::runtime_error("cannot rename " + temp.string() + " to " + file.string() + ": " + ec.message());
+    for (int attempt = 0; attempt < rename_attempts; ++attempt) {
+        if (attempt > 0) std::this_thread::sleep_for(std::chrono::milliseconds(50 * attempt));
+        std::filesystem::rename(temp, file, ec);
+        if (!ec) return;
     }
+    std::error_code ignored;
+    std::filesystem::remove(temp, ignored);
+    throw std::runtime_error("cannot rename " + temp.string() + " to " + file.string() + ": " + ec.message());
 }
 
 std::optional<AtmosphereTables> read_atmosphere_tables(const std::filesystem::path& file, std::uint64_t expected_hash) {
+    std::error_code size_error;
+    const auto file_size = std::filesystem::file_size(file, size_error);
+    if (size_error || file_size < sizeof(magic) + sizeof(std::uint64_t)) return std::nullopt;
     std::ifstream in(file, std::ios::binary);
     if (!in) return std::nullopt;
-    const std::vector<char> bytes{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-    if (bytes.size() < sizeof(magic) + sizeof(std::uint64_t)) return std::nullopt;
+    std::vector<char> bytes(static_cast<std::size_t>(file_size));
+    if (!in.read(bytes.data(), static_cast<std::streamsize>(bytes.size())) || in.peek() != EOF) return std::nullopt;
 
     // The checksum first: nothing of a damaged file is interpreted.
     const std::size_t payload = bytes.size() - sizeof(std::uint64_t);
@@ -228,8 +253,15 @@ std::shared_ptr<const AtmosphereTables> load_or_compute_atmosphere(const std::fi
         return std::make_shared<const AtmosphereTables>(std::move(*cached));
     }
     auto tables = std::make_shared<const AtmosphereTables>(precompute_atmosphere(optics, sizes));
-    std::filesystem::create_directories(cache_dir);
-    write_atmosphere_tables(file, *tables);
+    // The cache is only an optimisation: a failed write (read-only or invalid directory, disk full, a rename blocked by
+    // another process) is reported and the freshly computed tables are returned (as sim/ascent_plan_cache.cpp).
+    try {
+        std::filesystem::create_directories(cache_dir);
+        remove_stale_temp_files(file);
+        write_atmosphere_tables(file, *tables);
+    } catch (const std::exception& e) {
+        std::fprintf(stderr, "atmosphere: cache not written (%s)\n", e.what());
+    }
     return tables;
 }
 

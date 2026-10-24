@@ -197,6 +197,7 @@ TEST_CASE("Input hash changes with every input", "[atmosphere]") {
         [](auto& c) { c.ozone_column_du += 1.0; },
         [](auto& c) { c.ground_albedo += 0.01; },
         [](auto& c) { c.scattering_orders += 1; },
+        [](auto& c) { c.multiple_scattering_tail = !c.multiple_scattering_tail; },
     };
     std::vector<std::function<void(environment::AtmosphereTableSizes&)>> size_changes{
         [](auto& s) { s.transmittance_mu *= 2; }, [](auto& s) { s.transmittance_r *= 2; },
@@ -219,15 +220,15 @@ TEST_CASE("Input hash changes with every input", "[atmosphere]") {
 }
 
 TEST_CASE("Input hash covers the spectral data", "[atmosphere]") {
-    // The checksum of the tabulated spectra and of the optics functions as the precomputation samples them (solar
-    // spectrum, CMFs, XYZ->sRGB, ozone and Rayleigh cross sections, the air / ozone / aerosol profiles). Pinned: a
-    // change of any of them changes this value and with it every cache's input hash - update the pin together with the
-    // data change.
-    const std::uint64_t checksum = environment::atmosphere_spectral_data_checksum(optics());
-    std::printf("atmosphere spectral data checksum: 0x%016llx\n", static_cast<unsigned long long>(checksum));
-    CHECK(checksum == 0x8546b28318f6415eull);
-    // The checksum depends on the configuration where the sampled functions do (ozone column, aerosol).
-    auto c = optics();
-    c.ozone_column_du += 1.0;
-    CHECK(environment::atmosphere_spectral_data_checksum(c) != checksum);
+    // The checksum of the tabulated data as stored (solar spectrum, ozone cross sections, CMFs, XYZ->sRGB, wavelengths,
+    // depolarisation table, AFGL ozone profile) and the input hash of the configuration with the default sizes.
+    // Pinned: a change of the data, the config, the sizes or the code version changes them - update the pins together
+    // with such a change. Raw inputs only (no libm outputs), so the pins hold on every machine and a shipped cache is
+    // accepted everywhere.
+    const std::uint64_t checksum = environment::atmosphere_spectral_data_checksum();
+    const std::uint64_t hash = environment::atmosphere_input_hash(optics(), {});
+    std::printf("atmosphere spectral data checksum: 0x%016llx, input hash 0x%016llx\n",
+                static_cast<unsigned long long>(checksum), static_cast<unsigned long long>(hash));
+    CHECK(checksum == 0xe510c3f8544c5064ull);
+    CHECK(hash == 0x4d86e11bf588bf63ull);
 }

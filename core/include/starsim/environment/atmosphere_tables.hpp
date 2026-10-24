@@ -86,8 +86,8 @@ struct AtmosphereTables {
 };
 
 // Version of the precomputation code; part of the input hash. Bump on every code change that alters table contents
-// (the spectral data and the optics functions are covered by atmosphere_spectral_data_checksum).
-inline constexpr std::uint64_t atmosphere_tables_code_version = 2;
+// (the tabulated data is covered by atmosphere_spectral_data_checksum; code behind the optics functions is not).
+inline constexpr std::uint64_t atmosphere_tables_code_version = 3;
 
 // The parameters of a configuration (radii, mu_s_min, luminance factors, solar irradiance).
 AtmosphereParameters atmosphere_parameters(const config::AtmosphereOpticsConfig& optics);
@@ -99,10 +99,10 @@ AtmosphereParameters atmosphere_parameters(const config::AtmosphereOpticsConfig&
 AtmosphereTables precompute_atmosphere(const config::AtmosphereOpticsConfig& optics,
                                        const AtmosphereTableSizes& sizes = {});
 
-// FNV-1a 64 over the tabulated spectra (atmosphere_spectra.hpp) and the optics functions as the precomputation samples
-// them (cross sections and solar irradiance at 1 nm over 360-830 nm, the CMFs, the air / ozone / aerosol profile
-// rows): a data change invalidates caches without a manual version bump.
-std::uint64_t atmosphere_spectral_data_checksum(const config::AtmosphereOpticsConfig& optics);
+// FNV-1a 64 over the tabulated data as stored (atmosphere_spectra.hpp: solar spectrum, ozone cross sections, CMFs,
+// XYZ->sRGB, wavelengths; atmosphere_optics.cpp: depolarisation table, AFGL ozone profile): a data change invalidates
+// caches without a manual version bump. Raw bytes only, so the key is the same on every machine (no libm outputs).
+std::uint64_t atmosphere_spectral_data_checksum();
 
 // FNV-1a 64 over the code version, every config field, every table size and the spectral data checksum.
 std::uint64_t atmosphere_input_hash(const config::AtmosphereOpticsConfig& optics, const AtmosphereTableSizes& sizes);

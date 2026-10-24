@@ -846,11 +846,11 @@ std::vector<double> geometric_tail(const std::vector<double>& previous, const st
 // One pass of Model::Precompute at three wavelengths: transmittance, direct irradiance and single scattering into
 // the pass tables, single scattering folded into the luminance tables; then the orders 2 .. scattering_orders
 // (scattering density, indirect irradiance of the previous order, multiple scattering), each folded into
-// tables.irradiance and tables.scattering through the same matrix m; for scattering_orders >= 3 the geometric tail of
+// tables.irradiance and tables.scattering through the same matrix m; with `tail` and scattering_orders >= 3 the geometric tail of
 // the higher orders of both.
 // The optical lengths are the same for every wavelength: computed once, not per pass as on Bruneton's GPU.
 void run_spectral_pass(const PassModel& model, const std::vector<OpticalLengths>& optical_lengths,
-                       const std::vector<double>& texel_nu, int scattering_orders, const Mat3& m,
+                       const std::vector<double>& texel_nu, int scattering_orders, bool tail, const Mat3& m,
                        AtmosphereTables& tables) {
     SpectralPassTables pass;
     pass.transmittance = compute_transmittance_table(model, optical_lengths);
@@ -867,7 +867,7 @@ void run_spectral_pass(const PassModel& model, const std::vector<OpticalLengths>
         pass.delta_multiple = compute_multiple_scattering_table(model, pass.transmittance, pass.scattering_density);
         accumulate_multiple_scattering(pass.delta_multiple, texel_nu, m, tables);
     }
-    if (scattering_orders >= 3) {
+    if (tail && scattering_orders >= 3) {
         // previous_multiple / delta_multiple: orders N - 1 and N; previous_irradiance / delta_irradiance: the sky
         // irradiance of orders N - 2 and N - 1 (the irradiance table holds orders 1 .. N - 1).
         accumulate_multiple_scattering(geometric_tail(previous_multiple, pass.delta_multiple), texel_nu, m, tables);
@@ -916,7 +916,7 @@ AtmosphereTables precompute_atmosphere(const config::AtmosphereOpticsConfig& opt
         for (int k = 0; k < 3; ++k) lambdas[k] = (spectra::lambda_min_nm + (3 * i + k + 0.5) * dlambda_nm) * nm;
         const SpectralCoefficients coefficients = spectral_coefficients(optics, lambdas);
         const PassModel model{tables.parameters, sizes, profile, coefficients};
-        run_spectral_pass(model, optical_lengths, texel_nu, optics.scattering_orders,
+        run_spectral_pass(model, optical_lengths, texel_nu, optics.scattering_orders, optics.multiple_scattering_tail,
                           luminance_from_radiance(lambdas, dlambda_nm * nm), tables);
     }
 

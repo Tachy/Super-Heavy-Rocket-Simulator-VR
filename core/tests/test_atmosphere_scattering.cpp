@@ -110,11 +110,11 @@ TEST_CASE("Multiple scattering converges", "[atmosphere][slow]") {
     // geometric tail of the higher orders (atmosphere_precompute.cpp). Measured (Task 3 report): truncated at 4 vs 6
     // orders 6.8 % (blue, 2 deg up); with the tail 4 vs 6 still 1.7 % (the ratio of orders 4 / 3 overestimates the
     // asymptotic one), 5 vs 7 within 1 %.
-    auto c6 = optics();
-    REQUIRE(c6.scattering_orders == 5);
-    c6.scattering_orders += 2;
-    const environment::AtmosphereScattering six(precompute_timed(c6));
-    const auto& four = atmosphere();
+    auto c_more = optics();
+    REQUIRE(c_more.scattering_orders == 5);
+    c_more.scattering_orders += 2;
+    const environment::AtmosphereScattering more(precompute_timed(c_more));
+    const auto& configured = atmosphere();
 
     const Site ground = site(0.0, 0.0, 0.0);
     const Site high = site(0.0, 0.0, 10e3);
@@ -130,24 +130,26 @@ TEST_CASE("Multiple scattering converges", "[atmosphere][slow]") {
                                       {&orbit, -45.0, 90.0}};
     double max_error = 0.0;
     for (const auto& s : samples) {
-        Vec3 t4, t6;
+        Vec3 t_cfg, t_more;
         const Vec3 view = s.s->direction(s.elevation_deg, s.azimuth_deg);
-        const Vec3 l4 = four.sky_luminance(s.s->position_itrf_m, view, sun, &t4);
-        const Vec3 l6 = six.sky_luminance(s.s->position_itrf_m, view, sun, &t6);
-        for (const auto& [a, b] : {std::pair{l4.x, l6.x}, std::pair{l4.y, l6.y}, std::pair{l4.z, l6.z}}) {
-            INFO("elevation " << s.elevation_deg << " azimuth " << s.azimuth_deg << " order 4 " << a << " order 6 " << b);
+        const Vec3 l_cfg = configured.sky_luminance(s.s->position_itrf_m, view, sun, &t_cfg);
+        const Vec3 l_more = more.sky_luminance(s.s->position_itrf_m, view, sun, &t_more);
+        for (const auto& [a, b] :
+             {std::pair{l_cfg.x, l_more.x}, std::pair{l_cfg.y, l_more.y}, std::pair{l_cfg.z, l_more.z}}) {
+            INFO("elevation " << s.elevation_deg << " azimuth " << s.azimuth_deg << " configured orders " << a
+                              << " two more " << b);
             REQUIRE(b > 0.0);
             const double e = rel_error(a, b);
             max_error = std::max(max_error, e);
             CHECK(e < 0.01);
         }
     }
-    const auto e4 = four.sun_and_sky_illuminance(ground.position_itrf_m, ground.up, sun);
-    const auto e6 = six.sun_and_sky_illuminance(ground.position_itrf_m, ground.up, sun);
-    CHECK(rel_error(luminance_y(e4.sky_lux), luminance_y(e6.sky_lux)) < 0.01);
+    const auto e_cfg = configured.sun_and_sky_illuminance(ground.position_itrf_m, ground.up, sun);
+    const auto e_more = more.sun_and_sky_illuminance(ground.position_itrf_m, ground.up, sun);
+    CHECK(rel_error(luminance_y(e_cfg.sky_lux), luminance_y(e_more.sky_lux)) < 0.01);
     std::printf("multiple scattering orders %d vs %d: max relative difference %.3e (sky illuminance %.3e)\n",
-                c6.scattering_orders - 2, c6.scattering_orders, max_error,
-                rel_error(luminance_y(e4.sky_lux), luminance_y(e6.sky_lux)));
+                c_more.scattering_orders - 2, c_more.scattering_orders, max_error,
+                rel_error(luminance_y(e_cfg.sky_lux), luminance_y(e_more.sky_lux)));
 }
 
 TEST_CASE("Direct sunlight matches ASTM G173 at air mass 1.5", "[atmosphere]") {
@@ -225,6 +227,45 @@ TEST_CASE("The sky model at full resolution", "[atmosphere][slow]") {
         CHECK(below.z == 0.0);
     }
 
+    SECTION("The runtime direct beam matches the raymarch at air mass 1.5") {
+        // The table path of the direct Sun (sun_transmittance, sun_and_sky_illuminance().sun_lux) at sea level, Sun at
+        // 48.19 deg zenith, vs the raymarch: transmittance at 680 / 550 / 440 nm within the table's 0.5 %, and the
+        // direct horizontal illuminance (Y of the RGB solar factors) vs 683 lm/W x the integral of ybar x ETR x T
+        // (5 nm, 360-830 nm) x cos within 3 % (the three-wavelength RGB representation of the spectrum).
+        const auto& atm = atmosphere();
+        const ref::Model model{optics()};
+        const Site ground = site(0.0, 0.0, 0.0);
+        const Vec3 sun = ground.direction(90.0 - 48.19, 90.0);
+        const double mu = std::cos(48.19 * constants::deg_to_rad);
+        const double r = constants::wgs84_semi_major_axis_m;
+        const Vec3 t = atm.sun_transmittance(ground.position_itrf_m, sun);
+        const auto expected = ref::transmittance_to_top(
+            model, {environment::spectra::lambda_r_nm * ref::nm, environment::spectra::lambda_g_nm * ref::nm,
+                    environment::spectra::lambda_b_nm * ref::nm}, r, mu, 20000);
+        CHECK(rel_error(t.x, expected[0]) < 0.005);
+        CHECK(rel_error(t.y, expected[1]) < 0.005);
+        CHECK(rel_error(t.z, expected[2]) < 0.005);
+
+        std::vector<double> lambdas;
+        for (int l = 360; l <= 830; l += 5) lambdas.push_back(l * ref::nm);
+        const auto tl = ref::transmittance_to_top(model, lambdas, r, mu, 20000);
+        double integral = 0.0;
+        for (std::size_t i = 0; i + 1 < lambdas.size(); ++i) {
+            const auto f = [&](std::size_t k) {
+                return environment::cie_1931_cmf(lambdas[k]).y * environment::solar_irradiance_w_m2_per_m(lambdas[k]) *
+                       tl[k];
+            };
+            integral += 0.5 * (f(i) + f(i + 1)) * (lambdas[i + 1] - lambdas[i]);
+        }
+        const double reference_lux = constants::max_luminous_efficacy_lm_per_w * integral * mu;
+        const double sun_lux = luminance_y(atm.sun_and_sky_illuminance(ground.position_itrf_m, ground.up, sun).sun_lux);
+        std::printf("direct beam at AM 1.5: T %.4f %.4f %.4f (raymarch %.4f %.4f %.4f), horizontal %.0f lx "
+                    "(raymarch %.0f lx, %+.2f %%)\n",
+                    t.x, t.y, t.z, expected[0], expected[1], expected[2], sun_lux, reference_lux,
+                    100.0 * (sun_lux / reference_lux - 1.0));
+        CHECK(rel_error(sun_lux, reference_lux) < 0.03);
+    }
+
     SECTION("Sky darkens with altitude") {
         const auto& atm = atmosphere();
         const auto zenith = [&](double height_m) {
@@ -298,6 +339,9 @@ TEST_CASE("The sky model at full resolution", "[atmosphere][slow]") {
                 std::printf("horizon seam at %.0f m: relative jump %.3e (single-scattering raymarch %.3e)\n", height_m,
                             jump, physical);
                 CHECK(jump < physical + 0.02);
+                CHECK(below.x < above.x);  // the physical sign: the ground hides the far part of the ray
+                // Harmless in the game: every drawn surface (sea at the geoid >= -106 m, pads >= -26 m) lies above
+                // the model ground (-150 m), so the model horizon is always behind terrain or sea.
             }
         }
     }

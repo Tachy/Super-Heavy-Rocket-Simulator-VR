@@ -165,4 +165,18 @@ math::Vec3 cie_1931_cmf(double wavelength_m) {
     return {lerp(1), lerp(2), lerp(3)};
 }
 
+std::uint64_t atmosphere_optics_data_checksum() {
+    std::uint64_t h = 14695981039346656037ull;  // FNV-1a 64 offset basis
+    const auto add = [&h](const void* data, std::size_t size) {
+        const auto* p = static_cast<const unsigned char*>(data);
+        for (std::size_t i = 0; i < size; ++i) {
+            h ^= p[i];
+            h *= 1099511628211ull;  // FNV-1a 64 prime
+        }
+    };
+    add(depolarisation_percent.data(), sizeof(depolarisation_percent));
+    add(afgl_us_standard_ozone, sizeof(afgl_us_standard_ozone));
+    return h;
+}
+
 }  // namespace starsim::environment

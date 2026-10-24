@@ -16,6 +16,8 @@ struct AtmosphereOpticsConfig {
     double ozone_column_du = 0.0;
     double ground_albedo = 0.0;                     // in [0, 1]
     int scattering_orders = 0;                      // >= 1
+    // Fidelity flag: the orders above scattering_orders as a geometric series (on) or truncated (Bruneton, off).
+    bool multiple_scattering_tail = true;
 };
 
 // Throws ConfigError on a missing or invalid key.

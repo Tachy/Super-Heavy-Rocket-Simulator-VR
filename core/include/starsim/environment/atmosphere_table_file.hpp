@@ -32,7 +32,8 @@ void write_atmosphere_tables(const std::filesystem::path& file, const Atmosphere
 std::optional<AtmosphereTables> read_atmosphere_tables(const std::filesystem::path& file, std::uint64_t expected_hash);
 
 // Loads <cache_dir>/earth_atmosphere.bin if its hash matches the configuration (<config_dir>/atmosphere/
-// earth_optics.toml) and the sizes, else precomputes the tables and writes the file (creating cache_dir).
+// earth_optics.toml) and the sizes, else precomputes the tables and writes the file (creating cache_dir). A failed
+// write is reported on stderr and the computed tables are still returned; stale temp files are removed.
 std::shared_ptr<const AtmosphereTables> load_or_compute_atmosphere(const std::filesystem::path& config_dir,
                                                                    const std::filesystem::path& cache_dir,
                                                                    const AtmosphereTableSizes& sizes = {});
