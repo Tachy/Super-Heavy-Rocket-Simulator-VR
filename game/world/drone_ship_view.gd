@@ -18,8 +18,8 @@ const WALL_THICKNESS_M := 0.5
 
 var _key := []  # the zone this ship was built for: origin, heading, deck size
 var _deck := Node3D.new()  # the moving part: deck frame in the site frame
-var _hull_material := StandardMaterial3D.new()
-var _deck_material := StandardMaterial3D.new()
+var _hull_material := LitAerial.material(Color(0.30, 0.31, 0.32), 0.9, 0.0)
+var _deck_material := LitAerial.material(Color(0.42, 0.42, 0.41), 0.95, 0.0)
 
 
 ## True when `zone` (FlightSim.landing_zone) is the drone ship this view was built for.
@@ -29,10 +29,6 @@ func matches(zone: Dictionary) -> bool:
 
 func build(zone: Dictionary) -> void:
 	_key = _zone_key(zone)
-	_hull_material.albedo_color = Color(0.30, 0.31, 0.32)
-	_hull_material.roughness = 0.9
-	_deck_material.albedo_color = Color(0.42, 0.42, 0.41)
-	_deck_material.roughness = 0.95
 	position = Frames.to_render(zone["origin_itrf_m"])
 	basis = Frames.basis_to_render(Basis(zone["east"], zone["north"], zone["up"]))
 	add_child(_deck)

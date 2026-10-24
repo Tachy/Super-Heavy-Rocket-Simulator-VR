@@ -459,3 +459,26 @@ vec3 atm_sun_and_sky(vec3 point_local, vec3 normal_local, out vec3 sky) {
 	float cosine = max(dot(normalize(normal_local), normalize(atmosphere_sun_direction)), 0.0);
 	return atm_sun_at(point_local) * cosine;
 }
+
+// ---- Aerial perspective for Godot's lit materials (vehicles, tower, pads, drone ship: lit_aerial.gdshader,
+// lattice.gdshader). Godot blends the FOG output after the lighting with a scalar weight: final = lit x (1 - FOG.a) +
+// FOG.rgb x FOG.a. The per-channel transmittance T is split into the scalar t = max(T), carried by FOG.a = 1 - t, and
+// the colour factor T / t, which the caller applies to ALBEDO and EMISSION before the lighting: diffuse light, metallic
+// reflections and emission then end at lit x T + in-scatter exactly; only the colourless dielectric specular (F0 ~ 0.04)
+// is attenuated by t instead of T (a little whiter in the haze than it should be).
+// offset_world: fragment - the atmosphere's camera, render world axes, metres. The camera is the render origin (the
+// floating origin: world.gd places everything relative to it), so a fragment's world position is its offset.
+void atm_fog(vec3 offset_world, out vec4 fog, out vec3 colour_factor) {
+	fog = vec4(0.0);
+	colour_factor = vec3(1.0);
+	if (!atmosphere_enabled) {
+		return;
+	}
+	vec3 transmittance;
+	vec3 in_scatter = atm_to_point_offset(atmosphere_world_to_earth * offset_world, transmittance);
+	float t = max(transmittance.r, max(transmittance.g, transmittance.b));
+	colour_factor = t > 0.0 ? transmittance / t : vec3(0.0);
+	float a = 1.0 - t;
+	// a = 0 (no air between): the in-scatter is 0 as well; FOG.rgb is weighted by a, so it is S / a.
+	fog = a > 1.0e-6 ? vec4(in_scatter / a, a) : vec4(0.0);
+}

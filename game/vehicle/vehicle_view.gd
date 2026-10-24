@@ -11,24 +11,18 @@ const HIDE_BEYOND_M := 2.0e6  # vehicles are sub-pixel beyond this distance
 var body_index := 0
 var _stage_root := Node3D.new()
 var _plumes: Array[MeshInstance3D] = []
-var _steel := StandardMaterial3D.new()
-var _plume_material := StandardMaterial3D.new()
+## Stainless steel (no reflection probes yet), in the atmosphere's light and haze.
+var _steel := LitAerial.material(Color(0.74, 0.75, 0.77), 0.38, 0.65)
+## Additive glow, seen through the atmosphere's transmittance (shaders/plume.gdshader; its former unshaded
+## StandardMaterial3D drew the albedo only - the emission settings it carried had no effect).
+var _plume_material := ShaderMaterial.new()
 var _built_signature := ""
 
 
 func _ready() -> void:
 	add_child(_stage_root)
-	_steel.albedo_color = Color(0.74, 0.75, 0.77)
-	_steel.metallic = 0.65   # stainless steel; no reflection probes yet
-	_steel.roughness = 0.38
-	_plume_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_plume_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_plume_material.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	_plume_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_plume_material.albedo_color = Color(1.0, 0.55, 0.25, 0.55)
-	_plume_material.emission_enabled = true
-	_plume_material.emission = Color(1.0, 0.6, 0.3)
-	_plume_material.emission_energy_multiplier = 6.0
+	_plume_material.shader = preload("res://shaders/plume.gdshader")
+	_plume_material.set_shader_parameter("color", Color(1.0, 0.55, 0.25, 0.55))
 
 
 ## Rebuilds geometry when the stage list changed (e.g. after separation), then places the body.

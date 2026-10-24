@@ -165,6 +165,7 @@ func update_world() -> void:
 	_moon_material.set_shader_parameter("camera_position_local", moon.to_local_frame(cam - moon_gcrf_m))
 
 	_place_sun(sun_from_camera)
+	_update_sun_light(t, cam)
 	flight.place_views(self, cam)
 	moon_orbit.update_line(core, t, cam)
 	earth_label.position = earth.position
@@ -300,6 +301,22 @@ func _place_sun(sun_from_camera_m: Vector3) -> void:
 	sun_light.basis = Basis.looking_at(-direction, Vector3.UP if absf(direction.y) < 0.99 else Vector3.RIGHT)
 
 
+## The DirectionalLight's colour and energy: the Sun transmitted through the atmosphere to the followed body (the
+## camera when no vehicle is followed), with the part of the solar disc the Moon leaves (Atmosphere.sun_light_at).
+func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
+	var lit_gcrf := camera_gcrf_m
+	if focus == FOCUS_VEHICLE and flight.sim.is_active():
+		var index := view_target.resolve(flight.sim)
+		if index >= 0:
+			lit_gcrf = flight.sim.body_position_gcrf_m(index)
+	var gcrf_to_fixed := earth.fixed_to_gcrf.transposed()
+	var visible := 1.0 - core.solar_eclipse_fraction_gcrf(lit_gcrf, t)
+	var light := atmosphere.sun_light_at(gcrf_to_fixed * lit_gcrf, (gcrf_to_fixed * sun_apparent_from_earth_m).normalized(),
+			visible)
+	sun_light.light_color = light[0]
+	sun_light.light_energy = light[1]
+
+
 func _setup_bodies(data_dir: String) -> void:
 	_earth_material.shader = load("res://shaders/earth.gdshader")
 	_earth_material.set_shader_parameter("day_texture", _load_texture(data_dir.path_join("textures/earth_day.jpg")))
@@ -411,9 +428,7 @@ func _make_pad(site: Dictionary) -> MeshInstance3D:
 	disc.top_radius = 35.0
 	disc.bottom_radius = 37.0
 	disc.height = 2.0
-	var concrete := StandardMaterial3D.new()
-	concrete.albedo_color = Color(0.62, 0.61, 0.58)
-	concrete.roughness = 0.9
+	var concrete := LitAerial.material(Color(0.62, 0.61, 0.58), 0.9, 0.0)
 	var pad := MeshInstance3D.new()
 	pad.name = "Pad_" + str(site["id"])
 	pad.mesh = disc

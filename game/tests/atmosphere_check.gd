@@ -5,7 +5,8 @@
 # Task 6 adds the Earth's surfaces (terrain_earth.gdshader, earth.gdshader incl. scaled space: lit by the transmitted
 # Sun and the sky light, seen through the atmosphere; 3 %). STARSIM_VERBOSE=1 prints the surface samples' parts.
 # Task 7 adds the stars (hidden at noon, unchanged above the atmosphere, visible in twilight), the Sun disc's reddening
-# and the daytime Moon (Moon x T + sky, 3 %).
+# and the daytime Moon (Moon x T + sky, 3 %); Task 8 a star near the threshold (Sun -6 deg), vehicles and structures
+# (a white lit_aerial cube at the pad and 40 km away, 5 %) and the Sun light's colour at a low Sun.
 # Needs a GPU (no --headless): godot --path game --script res://tests/atmosphere_check.gd
 extends SceneTree
 
@@ -43,6 +44,7 @@ var _terrain_parent := Node3D.new()  ## Earth-fixed frame of the terrain quad (u
 var _terrain_quad := MeshInstance3D.new()  ## one camera-facing quad with terrain_earth.gdshader
 var _terrain_material := ShaderMaterial.new()
 var _earth_to_gcrf := Basis.IDENTITY
+var _environment := Environment.new()  ## the check viewport's environment (ambient switched on for the cube samples)
 var _failures := 0
 var _samples := 0
 
@@ -138,6 +140,21 @@ func _run() -> void:
 	await _sun_sample("pad, Sun disc at 1 deg", pad, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, 1.0))
 	await _moon_sample("pad noon, Moon el 20 deg", pad, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 0.0, 20.0),
 			_local_direction(PAD_LAT_DEG, PAD_LON_DEG, 180.0, 50.0))
+	# Near the threshold (Task 6+7 review, Minor 2): Sun -6 deg, the zenith's limiting magnitude ~3.6 - a magnitude-2
+	# star must show, a magnitude-5 star must not (the pixel is the sky).
+	var sun_m6 := _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, -6.0)
+	var zenith := _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 0.0, 90.0)
+	await _star_sample("pad, Sun -6 deg, magnitude-2 star", pad, zenith, sun_m6, 2.0, StarCase.VISIBLE)
+	await _star_sample("pad, Sun -6 deg, magnitude-5 star", pad, zenith, sun_m6, 5.0, StarCase.HIDDEN)
+
+	# 9. Vehicles and structures (Task 8): a white cube with lit_aerial.gdshader under the Sun light of
+	# Atmosphere.sun_light_at and the sky's ambient. At the pad (top face, Sun 60 deg) it renders the CPU light on that
+	# face: (sun + sky lux) / pi x luminance scale, 5 %. 40 km east of the pad, seen from it, the same cube's face is
+	# the near render of that face x T + the in-scatter between (CPU), 5 %. The Sun light's colour at 2 deg: red / blue > 3.
+	await _cube_near_sample("pad noon, white cube top face", sun_60)
+	await _cube_far_sample("pad, white cube 40 km east", _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, 30.0))
+	_sun_light_colour_sample("pad, Sun light colour at 2 deg", pad, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0,
+			2.0))
 
 	print("atmosphere_check: %d samples, %d failures" % [_samples, _failures])
 	print("atmosphere_check: %s" % ("PASS" if _failures == 0 else "FAIL"))
@@ -155,7 +172,7 @@ func _setup_scene() -> void:
 	var sky := Sky.new()
 	sky.sky_material = sky_material
 	sky.process_mode = Sky.PROCESS_MODE_REALTIME
-	var environment := Environment.new()
+	var environment := _environment
 	environment.background_mode = Environment.BG_SKY
 	environment.sky = sky
 	environment.tonemap_mode = Environment.TONE_MAPPER_LINEAR
@@ -364,6 +381,104 @@ func _moon_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun
 	var expected: Vector3 = vacuum * transmittance + cpu["luminance"] * _atmosphere.luminance_scale
 	print("atmosphere_check:   Moon without the atmosphere %s, transmittance %s" % [_vec(vacuum), _vec(transmittance)])
 	_compare(label + " = Moon x T + sky", expected, got, MOON_TOLERANCE)
+
+
+const CUBE_TOLERANCE := 0.05
+const SUN_LIGHT_MIN_RED_OVER_BLUE := 3.0
+const CUBE_FAR_DISTANCE_M := 40000.0
+const CUBE_FAR_HEIGHT_M := 600.0  ## above the ellipsoid: the cube stands clear of the pad's horizon (drop ~125 m)
+const CUBE_FAR_SIZE_M := 600.0  ## ~6 px at the check's 10 deg / 65 px
+const CUBE_NEAR_DISTANCE_M := 20.0
+
+
+## A white cube (lit_aerial.gdshader: albedo 1, roughness 1, no specular) of edge size_m centred at center_itrf_m, its
+## local +Y along up_itrf and +Z along toward_itrf (horizontal), lit by the Sun light of Atmosphere.sun_light_at at
+## light_point_itrf_m and the sky's ambient (radiance cubemap of the sky shader); rendered from camera_itrf_m along
+## view_itrf (centre pixel).
+func _render_cube(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, center_itrf_m: Vector3,
+		up_itrf: Vector3, toward_itrf: Vector3, size_m: float, light_point_itrf_m: Vector3) -> Vector3:
+	var cube := MeshInstance3D.new()
+	var box := BoxMesh.new()
+	box.size = Vector3.ONE * size_m
+	cube.mesh = box
+	var material := LitAerial.material(Color.WHITE, 1.0, 0.0)
+	material.set_shader_parameter("specular", 0.0)
+	cube.material_override = material
+	var y := Frames.to_render(_earth_to_gcrf * up_itrf).normalized()
+	var z := Frames.to_render(_earth_to_gcrf * toward_itrf)
+	z = (z - y * z.dot(y)).normalized()
+	cube.transform = Transform3D(Basis(y.cross(z), y, z), Frames.to_render(_earth_to_gcrf * (center_itrf_m - camera_itrf_m)))
+	_viewport.add_child(cube)
+	var light := DirectionalLight3D.new()
+	var lit: Array = _atmosphere.sun_light_at(light_point_itrf_m, sun_itrf, 1.0)
+	light.light_color = lit[0]
+	light.light_energy = lit[1]
+	var sun_render := Frames.to_render(_earth_to_gcrf * sun_itrf).normalized()
+	light.basis = Basis.looking_at(-sun_render, Vector3.UP if absf(sun_render.y) < 0.99 else Vector3.RIGHT)
+	_viewport.add_child(light)
+	_environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	_environment.ambient_light_source = Environment.AMBIENT_SOURCE_DISABLED
+	cube.queue_free()
+	light.queue_free()
+	return got
+
+
+## The cube at the pad seen from 12 m above it, straight down onto its top face; Sun 60 deg.
+func _cube_near_sample(label: String, sun_itrf: Vector3) -> void:
+	var up := _geodetic_up(_geodetic(PAD_LAT_DEG, PAD_LON_DEG, 0.0))
+	var camera := _geodetic(PAD_LAT_DEG, PAD_LON_DEG, 14.0)
+	var center := _geodetic(PAD_LAT_DEG, PAD_LON_DEG, 1.0)
+	var top := _geodetic(PAD_LAT_DEG, PAD_LON_DEG, 2.0)
+	var got := await _render_cube(camera, -up, sun_itrf, center, up, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 0.0, 0.0),
+			2.0, top)
+	var lux: Dictionary = _core.atmosphere_illuminance(top, up, sun_itrf)
+	var to_point: Dictionary = _core.atmosphere_sky_luminance_to_point(camera, top, sun_itrf)
+	var light: Vector3 = (lux["sun_lux"] + lux["sky_lux"]) / PI
+	var expected: Vector3 = (light * to_point["transmittance"] + to_point["luminance"]) * _atmosphere.luminance_scale
+	print("atmosphere_check:   cube light: sun %s + sky %s (scene)" % [_vec(lux["sun_lux"] / PI * _atmosphere.luminance_scale),
+			_vec(lux["sky_lux"] / PI * _atmosphere.luminance_scale)])
+	_compare(label, expected, got, CUBE_TOLERANCE)
+
+
+## The cube 40 km east of the pad, 600 m up, one face toward the pad camera (2 m); the Sun behind the camera
+## (sun_itrf). Reference: the same face of the same cube 20 m in front of the camera, lit by the same light (at the far
+## cube) and ambient; expected = (near - S_near) / T_near x T_far + S_far with the CPU's T and in-scatter.
+func _cube_far_sample(label: String, sun_itrf: Vector3) -> void:
+	var camera := _geodetic(PAD_LAT_DEG, PAD_LON_DEG, 2.0)
+	var lon_far := PAD_LON_DEG + rad_to_deg(CUBE_FAR_DISTANCE_M / (WGS84_A_M * cos(deg_to_rad(PAD_LAT_DEG))))
+	var center := _geodetic(PAD_LAT_DEG, lon_far, CUBE_FAR_HEIGHT_M)
+	var up := _geodetic_up(center)
+	var toward := camera - center
+	toward = (toward - up * toward.dot(up)).normalized()  # horizontal at the cube, toward the camera
+	var face := center + toward * (CUBE_FAR_SIZE_M * 0.5)
+	var view := (face - camera).normalized()
+	var far := await _render_cube(camera, view, sun_itrf, center, up, toward, CUBE_FAR_SIZE_M, face)
+	var near_face := camera + view * CUBE_NEAR_DISTANCE_M
+	var near := await _render_cube(camera, view, sun_itrf, near_face - toward * 0.5, up, toward, 1.0, face)
+	var to_near: Dictionary = _core.atmosphere_sky_luminance_to_point(camera, near_face, sun_itrf)
+	var to_far: Dictionary = _core.atmosphere_sky_luminance_to_point(camera, face, sun_itrf)
+	var t_near: Vector3 = to_near["transmittance"]
+	var t_far: Vector3 = to_far["transmittance"]
+	var lit: Vector3 = (near - to_near["luminance"] * _atmosphere.luminance_scale) / t_near
+	var expected: Vector3 = lit * t_far + to_far["luminance"] * _atmosphere.luminance_scale
+	print("atmosphere_check:   cube face lit %s, T %s, in-scatter %s" % [_vec(lit), _vec(t_far),
+			_vec(to_far["luminance"] * _atmosphere.luminance_scale)])
+	_compare(label, expected, far, CUBE_TOLERANCE)
+
+
+## The Sun light's linear colour (Atmosphere.sun_light_at) at a low Sun: reddened by the transmittance.
+func _sun_light_colour_sample(label: String, point_itrf_m: Vector3, sun_itrf: Vector3) -> void:
+	var lit: Array = _atmosphere.sun_light_at(point_itrf_m, sun_itrf, 1.0)
+	var linear: Color = (lit[0] as Color).srgb_to_linear()
+	var red_over_blue := linear.r / linear.b if linear.b > 0.0 else INF
+	var ok := red_over_blue > SUN_LIGHT_MIN_RED_OVER_BLUE
+	_samples += 1
+	if not ok:
+		_failures += 1
+	print("atmosphere_check: %-38s linear (%.4f, %.4f, %.4f) energy %s red / blue %s (needs > %.0f) %s" % [label,
+			linear.r, linear.g, linear.b, _num(lit[1]), _num(red_over_blue), SUN_LIGHT_MIN_RED_OVER_BLUE,
+			"ok" if ok else "FAIL"])
 
 
 ## A square of half size `half_m` perpendicular to `view` (centred on the origin), every vertex with the normal `normal`.

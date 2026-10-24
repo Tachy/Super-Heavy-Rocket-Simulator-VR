@@ -107,6 +107,30 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	RenderingServer.global_shader_parameter_set(&"atmosphere_luminance_scale", luminance_scale)
 
 
+## The Sun light of Godot's lit materials (vehicles, structures: world.gd's DirectionalLight3D) at an Earth-fixed point:
+## [colour, energy]. Per channel it is the scene value atm_sun_at gives the Earth's surfaces (one exposure): the TOA
+## solar illuminance of the tables (its own colour in the RGB luminance space) x the transmittance to the Sun
+## (StarsimCore.atmosphere_sun_transmittance: red and dim at sunset, zero below the horizon or in the Earth's shadow) x
+## luminance_scale / pi x visible_fraction (the unocculted part of the solar disc, Moon) - a white Lambertian at normal
+## incidence renders it; in luminance that is DAY_EXPOSURE / d_AU^2 x T under the TOA Sun. Godot multiplies a
+## directional light's energy by pi and its Lambert BRDF divides by pi, so energy = the brightest channel's value and
+## colour = the channels over it, sRGB-encoded (Godot linearises light colours). Before the tables are loaded: the
+## vacuum Sun (white, DAY_EXPOSURE).
+func sun_light_at(position_itrf_m: Vector3, sun_direction_itrf: Vector3, visible_fraction: float) -> Array:
+	var scene := Vector3.ONE * DAY_EXPOSURE
+	if ready:
+		var transmittance := _core.atmosphere_sun_transmittance(position_itrf_m, sun_direction_itrf)
+		var solar: Vector3 = parameters["solar_illuminance_rgb"]
+		var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
+		scene = solar * sun_factor * transmittance * (luminance_scale / PI)
+	scene *= visible_fraction
+	var peak := maxf(scene.x, maxf(scene.y, scene.z))
+	var color := Color.WHITE
+	if peak > 0.0:
+		color = Color(scene.x / peak, scene.y / peak, scene.z / peak).linear_to_srgb()
+	return [color, peak]
+
+
 func _load_task(config_dir: String, cache_dir: String) -> void:
 	var result: Dictionary = _core.load_atmosphere(config_dir, cache_dir)
 	if result.get("ok", false):

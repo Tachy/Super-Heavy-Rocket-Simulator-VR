@@ -53,6 +53,9 @@ public:
 
     // Fraction of the solar disk hidden by the Moon for a ground observer (0 = none, 1 = total).
     double solar_eclipse_fraction(double latitude_deg, double longitude_deg, double height_m, double tdb_s) const;
+    // The same for an observer anywhere (GCRF metres, at rest in GCRF: the aberration of its own motion is ignored,
+    // < 0.01 % of the disc): the sunlight on a vehicle or on the camera (game: Sun light, eye adaptation).
+    double solar_eclipse_fraction_gcrf(const godot::Vector3& position_gcrf_m, double tdb_s) const;
 
     // Loads the Earth and Moon terrain through the process-wide cache (config_dir/../data). Returns
     // {earth: bool, moon: bool}; prints one German line per missing or unloadable terrain. Call before the

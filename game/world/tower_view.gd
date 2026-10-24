@@ -12,18 +12,13 @@ var site_id := ""
 var preview_opening_rad := NAN
 var _geometry: Dictionary = {}
 var _arms: Array[Node3D] = []  ## pivots at the hinges: [+across, -across]
-var _steel := StandardMaterial3D.new()
-var _concrete := StandardMaterial3D.new()
+var _steel := LitAerial.material(Color(0.55, 0.56, 0.58), 0.45, 0.6)
+var _concrete := LitAerial.material(Color(0.62, 0.61, 0.58), 0.9, 0.0)
 var _lattice := ShaderMaterial.new()
 
 
 func build(geometry: Dictionary) -> void:
 	_geometry = geometry
-	_steel.albedo_color = Color(0.55, 0.56, 0.58)
-	_steel.metallic = 0.6
-	_steel.roughness = 0.45
-	_concrete.albedo_color = Color(0.62, 0.61, 0.58)
-	_concrete.roughness = 0.9
 	_lattice.shader = load("res://shaders/lattice.gdshader")
 	position = Frames.to_render(geometry["origin_itrf_m"])
 	basis = Frames.basis_to_render(Basis(geometry["east"], geometry["north"], geometry["up"]))

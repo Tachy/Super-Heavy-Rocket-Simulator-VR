@@ -2,6 +2,7 @@
 # godot --path game --script res://tests/render_check.gd -- --utc=2024-04-08T18:42:00 --focus=earth
 # Vehicle: --vehicle=starship_block3 --site=starbase_olp1 [--fly=40] (ignite, liftoff at 3 s, fly N s)
 #          [--autopilot] (ascent autopilot instead of manual) [--circularize] (plan node afterwards)
+#          [--watch_from_site[=2000]] (afterwards: seen from the ground 2000 m east of the site, aimed at the vehicle)
 # Ground view: --lat= --lon= [--height=0] [--body=moon] (selenographic, MOON_ME; --height defaults to the lunar
 #          surface there, --eye_height=2 above it) with --azimuth / --elevation / --fov
 # Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
@@ -87,6 +88,12 @@ func _process(_delta: float) -> bool:
 			_print_lunar_placement(world)
 		if world.drone_ship != null:
 			_print_deck_placement(world)
+		# The Sun's elevation at the eye (geodetic up on a ground view, else the geocentric vertical), for labels.
+		var eye := world.camera.position_gcrf_m
+		var up := world.camera.site_up_gcrf if world.camera.mode == OrbitCamera.Mode.GROUND else eye.normalized()
+		var to_sun := (world.sun_apparent_from_earth_m - eye).normalized()
+		print("render_check: Sun elevation at the eye %.2f deg (UTC %s)" % [
+				rad_to_deg(asin(clampf(to_sun.dot(up), -1.0, 1.0))), world.core.tdb_s_to_utc(world.clock.tdb_s)])
 		var out: String = _args.get("out", "user://render_check.png")
 		var error := root.get_viewport().get_texture().get_image().save_png(out)
 		print("render_check: saved %s (error %d)" % [out, error])
@@ -140,6 +147,29 @@ func _fly_vehicle(world: World) -> void:
 	if _args.has("pitch"): cam.pitch = float(_args["pitch"])
 	if _args.has("distance"): cam.distance_m = float(_args["distance"])
 	print("render_check: telemetry ", sim.telemetry(sim.controlled_index()))
+	if _args.has("watch_from_site"):
+		_watch_from_site(world, site)
+
+
+# --watch_from_site[=<east m>]: after the flight, a ground view from the launch site (the eye 2 m above it, moved
+# <east m> east, default 2000 m) aimed at the controlled vehicle, --fov (default 50) - the rocket seen from the ground.
+func _watch_from_site(world: World, site: Dictionary) -> void:
+	var east_m := float(_args["watch_from_site"]) if _args["watch_from_site"] != "" else 2000.0
+	var lat: float = site["latitude_deg"]
+	var lon: float = site["longitude_deg"] + rad_to_deg(east_m / (World.EARTH_SEMI_MAJOR_AXIS_M * cos(deg_to_rad(lat))))
+	world.set_ground_site({"id": "watch", "name": "watch", "latitude_deg": lat, "longitude_deg": lon,
+			"height_m": site["height_m"]})
+	world.update_world()
+	var sim := world.flight.sim
+	var cam := world.camera
+	var d := (sim.body_position_gcrf_m(sim.controlled_index()) - cam.position_gcrf_m)
+	var distance := d.length()
+	d /= distance
+	cam.elevation = asin(clampf(d.dot(cam.site_up_gcrf), -1.0, 1.0))
+	cam.azimuth = atan2(d.dot(cam.site_east_gcrf), d.dot(cam.site_north_gcrf))
+	cam.fov = float(_args.get("fov", "50"))
+	print("render_check: watching from %.4f, %.4f: vehicle %.1f km away at elevation %.2f deg" % [lat, lon,
+			distance / 1000.0, rad_to_deg(cam.elevation)])
 
 
 # Starts a mission at the clock's instant and flies it to the requested mission time or timeline event.

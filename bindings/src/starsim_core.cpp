@@ -154,6 +154,16 @@ double StarsimCore::solar_eclipse_fraction(double latitude_deg, double longitude
     }, 0.0);
 }
 
+double StarsimCore::solar_eclipse_fraction_gcrf(const godot::Vector3& position_gcrf_m, double tdb_s) const {
+    return guarded(*this, [&] {
+        const auto t = epoch(tdb_s);
+        const math::StateVector observer{to_core(position_gcrf_m), {}};
+        return environment::occulted_fraction(
+            ephemeris_.apparent_position_gcrf(ephemeris::Body::Sun, t, observer), constants::sun_radius_m,
+            ephemeris_.apparent_position_gcrf(ephemeris::Body::Moon, t, observer), constants::moon_mean_radius_m);
+    }, 0.0);
+}
+
 godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
     const std::filesystem::path config(config_dir.utf8().get_data());
     const auto data_dir = config.parent_path() / "data";
@@ -353,6 +363,8 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::geodetic_to_gcrf_m);
     ClassDB::bind_method(D_METHOD("solar_eclipse_fraction", "latitude_deg", "longitude_deg", "height_m", "tdb_s"),
                          &StarsimCore::solar_eclipse_fraction);
+    ClassDB::bind_method(D_METHOD("solar_eclipse_fraction_gcrf", "position_gcrf_m", "tdb_s"),
+                         &StarsimCore::solar_eclipse_fraction_gcrf);
     ClassDB::bind_method(D_METHOD("load_terrain", "config_dir"), &StarsimCore::load_terrain);
     ClassDB::bind_method(D_METHOD("surface_samples", "body", "latitudes_deg", "longitudes_deg"),
                          &StarsimCore::surface_samples);
