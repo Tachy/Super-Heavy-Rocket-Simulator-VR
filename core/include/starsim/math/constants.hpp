@@ -81,4 +81,10 @@ inline constexpr double moon_night_temperature_k = 95.0;
 // Mean radius [S: IUGG 6371.0 km]: the spherical Earth of shadows and thermal radiation.
 inline constexpr double earth_mean_radius_m = 6371000.0;
 
+// JONSWAP spectrum shape [S: gamma 3.3 peak enhancement, sigma 0.07 below / 0.09 above the peak; Hasselmann et al. 1973,
+// DNV-RP-C205 sec. 3.5.5] (sea state of the drone ship).
+inline constexpr double jonswap_gamma = 3.3;
+inline constexpr double jonswap_sigma_low = 0.07;
+inline constexpr double jonswap_sigma_high = 0.09;
+
 }  // namespace starsim::constants
