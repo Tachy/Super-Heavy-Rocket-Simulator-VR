@@ -9,8 +9,9 @@ extends RefCounted
 ## pi / E_v,TOA x 1 / d_AU^2 - a white Lambertian surface under the top-of-atmosphere Sun at 1 AU renders as
 ## DAY_EXPOSURE, as the Earth shaders' day lighting does.
 
-## Scene value of a white Lambertian surface under the full TOA Sun: the `day_exposure` uniform default of
-## shaders/earth.gdshader and terrain_earth.gdshader [call: M8 atmosphere spec, "stays 1.5"]; keep them equal.
+## Scene value of a white Lambertian surface under the full TOA Sun, the one exposure of the game [call: M8 atmosphere
+## spec, "stays 1.5"]. The `day_exposure` uniforms of shaders/earth.gdshader and terrain_earth.gdshader are set from
+## it (world.gd); they have no default of their own.
 const DAY_EXPOSURE := 1.5
 ## Astronomical unit (m) [S: IAU 2012 Resolution B2]; the tables are for the Sun at 1 AU.
 const ASTRONOMICAL_UNIT_M := 149597870700.0
@@ -26,7 +27,12 @@ var loading := false
 var status_text := ""
 ## AtmosphereParameters of the loaded tables (StarsimCore.load_atmosphere "parameters").
 var parameters := {}
-## Per-frame values (readable by tests): cd/m^2 -> scene value, camera height above the model ground (stretched
+## GPU format of the tables, chosen before start_loading. Half float [call, Task 5 fix round 1]: half the VRAM (42 vs 85
+## MB) and fetch bandwidth; relative rounding ~5e-4, the GPU check stays within its 2 % (numbers in the Task 5
+## report); RGBAF for comparisons (atmosphere_check.gd --f32).
+var table_format := Image.FORMAT_RGBAH
+## Per-frame values (readable by tests): table luminance (cd/m^2 for the Sun at 1 AU) -> scene value (includes the
+## 1 / d_AU^2 of the true Sun distance: do not apply it to a true luminance), camera height above the model ground (stretched
 ## space), the Sun's Earth-local direction and the camera's Earth-local position.
 var luminance_scale := 0.0
 var camera_altitude_m := 0.0
@@ -114,18 +120,24 @@ func _load_task(config_dir: String, cache_dir: String) -> void:
 	_result = result
 
 
-static func _image_2d(data: PackedFloat32Array, size: Vector2i) -> Image:
-	return Image.create_from_data(size.x, size.y, false, Image.FORMAT_RGBAF, data.to_byte_array())
+func _image_2d(data: PackedFloat32Array, size: Vector2i) -> Image:
+	var image := Image.create_from_data(size.x, size.y, false, Image.FORMAT_RGBAF, data.to_byte_array())
+	if table_format != Image.FORMAT_RGBAF:
+		image.convert(table_format)
+	return image
 
 
 ## One image per depth slice (z = r), x fastest within a slice (the core's layout).
-static func _images_3d(data: PackedFloat32Array, size: Vector3i) -> Array[Image]:
+func _images_3d(data: PackedFloat32Array, size: Vector3i) -> Array[Image]:
 	var bytes := data.to_byte_array()
 	var slice_bytes := size.x * size.y * 4 * 4
 	var images: Array[Image] = []
 	for z in range(size.z):
-		images.append(Image.create_from_data(size.x, size.y, false, Image.FORMAT_RGBAF,
-				bytes.slice(z * slice_bytes, (z + 1) * slice_bytes)))
+		var image := Image.create_from_data(size.x, size.y, false, Image.FORMAT_RGBAF,
+				bytes.slice(z * slice_bytes, (z + 1) * slice_bytes))
+		if table_format != Image.FORMAT_RGBAF:
+			image.convert(table_format)
+		images.append(image)
 	return images
 
 
@@ -139,9 +151,9 @@ func _upload(result: Dictionary) -> void:
 	var transmittance := ImageTexture.create_from_image(result["transmittance_image"])
 	var irradiance := ImageTexture.create_from_image(result["irradiance_image"])
 	var scattering := ImageTexture3D.new()
-	scattering.create(Image.FORMAT_RGBAF, s_size.x, s_size.y, s_size.z, false, result["scattering_images"])
+	scattering.create(table_format, s_size.x, s_size.y, s_size.z, false, result["scattering_images"])
 	var single_mie := ImageTexture3D.new()
-	single_mie.create(Image.FORMAT_RGBAF, s_size.x, s_size.y, s_size.z, false, result["single_mie_images"])
+	single_mie.create(table_format, s_size.x, s_size.y, s_size.z, false, result["single_mie_images"])
 	_textures = [transmittance, irradiance, scattering, single_mie]
 	var t_size: Vector2i = result["transmittance_size"]
 	var i_size: Vector2i = result["irradiance_size"]

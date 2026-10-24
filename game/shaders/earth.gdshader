@@ -13,7 +13,7 @@ uniform vec3 moon_position_local;  // apparent, from the Earth's centre
 uniform float sun_radius_m = 695700000.0;
 uniform float moon_radius_m = 1737400.0;
 uniform float night_lights_intensity = 1.2;
-uniform float day_exposure = 1.5;
+uniform float day_exposure;  // set from Atmosphere.DAY_EXPOSURE (world.gd): the one exposure of every surface
 // Ground patches store vertices relative to their centre; this restores body-local metres.
 instance uniform vec3 vertex_offset = vec3(0.0);
 

@@ -36,6 +36,9 @@ func _run() -> void:
 		_fail_and_quit("SPICE kernels missing")
 		return
 	_earth_to_gcrf = _core.earth_fixed_to_gcrf(_core.utc_to_tdb_s(EPOCH_UTC))  # a real, non-trivial rotation
+	if OS.get_cmdline_user_args().has("--f32"):
+		_atmosphere.table_format = Image.FORMAT_RGBAF  # compare with the full-float tables
+	print("atmosphere_check: table format %s" % ("RGBAF" if _atmosphere.table_format == Image.FORMAT_RGBAF else "RGBAH"))
 	_atmosphere.start_loading(_core, Paths.config_dir(), Paths.data_dir().path_join("atmosphere"))
 	if not _atmosphere.wait_until_loaded():
 		_fail_and_quit("atmosphere tables not loaded: " + _atmosphere.status_text)
@@ -83,6 +86,13 @@ func _run() -> void:
 	print("atmosphere_check: camera altitude above the model ground at -21 m: %.3f m" % _atmosphere.camera_altitude_m)
 	await _altitude_control(low, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 90.0, 0.3), sun_30)
 
+	# 6. Ground rays (sky.gdshader ground_radiance: atm_to_point + atm_sun_and_sky, the stretched-normal tilt): from the
+	# pad a few km out, from 400 km (atm_to_point entering from space) and from the Moon distance.
+	await _ground_sample("pad, ground 2 deg down (~4 km)", pad, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 90.0, -2.0),
+			sun_60)
+	await _ground_sample("400 km, ground 40 deg down", orbit, _local_direction(10.0, -60.0, 0.0, -40.0), sun_orbit)
+	await _ground_sample("Moon distance, Earth's disc", far, (-far_dir + side * 0.01).normalized(), sun_far)
+
 	print("atmosphere_check: %d samples, %d failures" % [_samples, _failures])
 	print("atmosphere_check: %s" % ("PASS" if _failures == 0 else "FAIL"))
 	quit(1 if _failures > 0 else 0)
@@ -120,6 +130,11 @@ func _sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf
 	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
 	var cpu: Dictionary = _core.atmosphere_sky_luminance(camera_itrf_m, view_itrf, sun_itrf)
 	var expected: Vector3 = cpu["luminance"] * _atmosphere.luminance_scale
+	_compare(label, expected, got)
+
+
+## Counts and prints one sample: every channel within TOLERANCE (relative; absolute below the floor).
+func _compare(label: String, expected: Vector3, got: Vector3) -> void:
 	_samples += 1
 	var peak := maxf(expected.x, maxf(expected.y, expected.z))
 	var ok := peak > 0.0
@@ -138,6 +153,29 @@ func _sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf
 		_failures += 1
 	print("atmosphere_check: %-38s expected %s got %s ratio (%s) %s" % [label, _vec(expected), _vec(got),
 			", ".join(ratios), "ok" if ok else "FAIL"])
+
+
+## A ground ray: the sky shader shows the model ground (albedo GROUND_ALBEDO without a day texture) lit by the Sun and
+## the sky, seen through the atmosphere. CPU: the model-ground hit in the stretched space (float64), then
+## albedo x (sun + sky lux) / pi x T + in-scattered luminance, all x luminance_scale.
+const GROUND_ALBEDO := 0.1  ## sky.gdshader's ground_albedo default
+func _ground_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3) -> void:
+	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	var stretch := Atmosphere.POLAR_STRETCH
+	var p := Vector3(camera_itrf_m.x, camera_itrf_m.y, camera_itrf_m.z * stretch)
+	var v := Vector3(view_itrf.x, view_itrf.y, view_itrf.z * stretch).normalized()
+	var radius := float(_atmosphere.parameters["bottom_radius_m"])
+	var along := p.dot(v)
+	var t := -along - sqrt(along * along - (p.length_squared() - radius * radius))
+	var hit := p + v * t
+	var point_itrf := Vector3(hit.x, hit.y, hit.z / stretch)
+	var normal_itrf := Vector3(hit.x, hit.y, hit.z * stretch).normalized()
+	var to_point: Dictionary = _core.atmosphere_sky_luminance_to_point(camera_itrf_m, point_itrf, sun_itrf)
+	var lux: Dictionary = _core.atmosphere_illuminance(point_itrf, normal_itrf, sun_itrf)
+	var transmittance: Vector3 = to_point["transmittance"]
+	var light: Vector3 = (lux["sun_lux"] + lux["sky_lux"]) * (GROUND_ALBEDO / PI)
+	var expected: Vector3 = (light * transmittance + to_point["luminance"]) * _atmosphere.luminance_scale
+	_compare(label + " [ground, %.0f km]" % (t / 1000.0), expected, got)
 
 
 ## Review Focus 1 control: the grazing sample with the camera altitude uniform overridden to 0 (the model ground),

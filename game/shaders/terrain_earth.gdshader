@@ -36,7 +36,7 @@ global uniform vec3 earth_terrain_camera_lo;
 uniform float sun_radius_m = 695700000.0;
 uniform float moon_radius_m = 1737400.0;
 uniform float night_lights_intensity = 1.2;
-uniform float day_exposure = 1.5;
+uniform float day_exposure;  // set from Atmosphere.DAY_EXPOSURE (world.gd): the one exposure of every surface
 
 varying vec3 local_position;
 varying vec3 local_normal;

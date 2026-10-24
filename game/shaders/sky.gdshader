@@ -41,7 +41,7 @@ vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
 		// x = local z, ITRF y = local x, the geodetic latitude from the normal.
 		float lon = atan(point_local.x, point_local.z);
 		float lat = asin(clamp(normal_local.y, -1.0, 1.0));
-		albedo = texture(day_texture, vec2(lon / (2.0 * ATM_PI) + 0.5, 0.5 - lat / ATM_PI)).rgb;
+		albedo = textureLod(day_texture, vec2(lon / (2.0 * ATM_PI) + 0.5, 0.5 - lat / ATM_PI), 0.0).rgb;  // no mip jump at the lon seam
 	}
 	vec3 sky_light;
 	vec3 sun_light = atm_sun_and_sky(point_local, normal_local, sky_light);

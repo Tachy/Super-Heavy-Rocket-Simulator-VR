@@ -305,6 +305,7 @@ func _setup_bodies(data_dir: String) -> void:
 	_earth_material.set_shader_parameter("day_texture", _load_texture(data_dir.path_join("textures/earth_day.jpg")))
 	_earth_material.set_shader_parameter("night_texture", _load_texture(data_dir.path_join("textures/earth_night.jpg")))
 	_earth_material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)
+	_earth_material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
 	_sky_material.set_shader_parameter("day_texture", _earth_material.get_shader_parameter("day_texture"))
 	_sky_material.set_shader_parameter("day_texture_bound", _earth_material.get_shader_parameter("day_texture") != null)
 	earth.name = "Earth"
@@ -358,6 +359,7 @@ func _setup_earth_terrain(data_dir: String) -> void:
 	material.set_shader_parameter("day_texture_bound", _earth_material.get_shader_parameter("day_texture") != null)
 	material.set_shader_parameter("night_texture", _earth_material.get_shader_parameter("night_texture"))
 	material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)
+	material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
 	RenderingServer.global_shader_parameter_set("water_wave_steepness", WaterWaves.STEEPNESS)  # constant: set once
 	earth_terrain.name = "EarthTerrain"
 	earth_terrain.camera_global = "earth_terrain_camera"  # project.godot [shader_globals], read by terrain_earth.gdshader
@@ -446,8 +448,11 @@ func _setup_environment() -> void:
 	_sky_material.shader = load("res://shaders/sky.gdshader")
 	var sky := Sky.new()
 	sky.sky_material = _sky_material
-	sky.process_mode = Sky.PROCESS_MODE_REALTIME  # the camera moves through the atmosphere: no stale cubemap
-	sky.radiance_size = Sky.RADIANCE_SIZE_256
+	# [call, Task 5 fix round 1: performance] The radiance cubemap (ambient + reflections) is refreshed over a few
+	# frames at 128 px: the sky changes slowly at flight rates, a few frames of lag in the ambient are invisible, and
+	# REALTIME would force 256 px every frame. The background pass is unaffected (drawn per pixel each frame).
+	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
+	sky.radiance_size = Sky.RADIANCE_SIZE_128
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_SKY
 	environment.sky = sky
