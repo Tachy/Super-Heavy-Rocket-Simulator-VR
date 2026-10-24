@@ -6,15 +6,24 @@
 //   1. quasi-static excitation: the least-squares plane fit of the wave over the waterplane rectangle (the
 //      Froude-Krylov pressure of a wall-sided box): mean elevation (heave), slope to port (roll) and slope towards the
 //      bow (pitch). Separable over the rectangle, so it is analytic: sinc-type factors of k L / 2 and k B / 2.
-//   2. dynamics: one damped oscillator per mode, H = 1 / (1 - r^2 - 2 i zeta r), r = omega / omega_n. The time factor
-//      is exp(-i omega t) (as SeaState: cos(k s - omega t + phase)), so the minus sign makes the response lag.
+//   2. dynamics: one damped mode each, driven by the strip-theory relative-motion excitation (Korvin-Kroukovsky): the
+//      hydrostatic, added-mass and damping forces act on the motion relative to the wave, the wave reduced by the
+//      Smith factor exp(-k d) (pressure decay to the keel):
+//        H = exp(-k d) (1 - r^2 ca / (1 + ca) - 2 i zeta r) / (1 - r^2 - 2 i zeta r),  r = omega / omega_n.
+//      The plain hydrostatic forcing (numerator 1) would overstate the resonant response 2-3x: the added-mass and
+//      damping terms of the wave force (diffraction / Haskind) largely cancel the resonance of a wide shallow barge.
+//      exp(-k d) is the usual reduction for heave; for roll / pitch it is a crude approximation [call]. The time factor
+//      is exp(-i omega t) (as SeaState: cos(k s - omega t + phase)), so the minus signs make the response lag.
 //      omega_n from the box hydrostatics: heave g / ((1 + ca) d); roll / pitch g GM / ((1 + ca) r^2) with
 //      GM = KB + BM - KG = d/2 + w^2 / (12 d) - d (w = beam or length). [call] KG at the waterline (a box barge's
 //      steel and ballast sit around mid-depth of a 6 m hull loaded to 3 m).
 //   Long waves: the deck rides the surface (heave -> elevation, roll / pitch -> wave slopes); short waves average out.
 // Non-goals (spec): surge, sway, yaw; coupling between the modes; hydrodynamic memory beyond the constant factors.
 //
-// Angles are small (< ~10 deg): the deck frame composes roll then pitch about the level deck axes.
+// Validity: linear up to ~6 deg of roll. The wing extensions (3 m freeboard at ~26 m half-width) reach the water at
+// ~6.6 deg, the hull's deck edge at ~11 deg; beyond, restoring and damping turn nonlinear (both grow), so larger
+// predicted motions are an upper bound - safe for the sea-state refusal, not a prediction.
+// The deck frame composes roll then pitch about the level deck axes (small angles).
 
 #include <complex>
 #include <vector>

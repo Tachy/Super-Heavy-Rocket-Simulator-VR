@@ -82,3 +82,10 @@ TEST_CASE("A hull that does not reach below the waterline is refused", "[config]
     CHECK_THROWS(config::load_drone_ships(dir));
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("A hull without positive metacentric height is refused", "[config][drone_ship]") {
+    // draft 17 m: beam 30.5 m < sqrt(6) x draft, GM = B^2 / (12 d) - d / 2 < 0 (no real roll period)
+    const auto dir = patched("gm", "hull_depth_m = 6.0", "hull_depth_m = 20.0");
+    CHECK_THROWS(config::load_drone_ships(dir));
+    std::filesystem::remove_all(dir);
+}

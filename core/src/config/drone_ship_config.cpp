@@ -38,6 +38,10 @@ DroneShipConfig read_ship(const detail::Document& doc, const toml::table& t) {
     if (h.beam_m > h.length_m) doc.fail("drone ship '" + s.id + "': hull_beam_m > hull_length_m");
     h.draft_m = doc.positive(t, "hull_depth_m") - s.freeboard_m;
     if (!(h.draft_m > 0.0)) doc.fail("drone ship '" + s.id + "': hull_depth_m must exceed freeboard_m (draft <= 0)");
+    // box barge with KG at the waterline (contact::DeckMotion): GM = B^2 / (12 d) - d / 2 must be positive
+    if (!(h.beam_m * h.beam_m / (12.0 * h.draft_m) - 0.5 * h.draft_m > 0.0)) {
+        doc.fail("drone ship '" + s.id + "': hull_beam_m <= sqrt(6) x draft (no positive metacentric height)");
+    }
     h.roll_gyration_m = doc.positive(t, "hull_roll_gyration_m");
     h.pitch_gyration_m = doc.positive(t, "hull_pitch_gyration_m");
     const auto non_negative = [&](std::string_view key) {

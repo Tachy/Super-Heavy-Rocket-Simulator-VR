@@ -128,19 +128,25 @@ TEST_CASE("Natural periods follow the hydrostatics", "[deck_motion]") {
     CHECK(n.roll_s == Approx(roll).epsilon(1e-9));
     CHECK(n.pitch_s == Approx(pitch).epsilon(1e-9));
 
-    // at resonance the response is the quasi-static one amplified by 1 / (2 zeta)
+    // At resonance the relative-motion excitation (Korvin-Kroukovsky strip theory) gives the quasi-static plane fit
+    // times the Smith factor exp(-k d) times |1 - ca / (1 + ca) - 2 i zeta| / (2 zeta).
     const auto amplification = [&](double period_s, double angle, auto part) {
         const double w = constants::two_pi / period_s;
         return std::abs(part(contact::deck_response(h, w, angle))) /
                std::abs(part(contact::deck_plane_fit(h, w * w / g, angle)));
     };
+    const auto expected = [&](double period_s, double ca, double zeta) {
+        const double k = std::pow(constants::two_pi / period_s, 2) / g;
+        return std::exp(-k * d) * std::abs(std::complex<double>(1.0 - ca / (1.0 + ca), -2.0 * zeta)) / (2.0 * zeta);
+    };
     const double oblique = 0.6;
-    CHECK(amplification(n.heave_s, oblique, [](const auto& r) { return r.heave_m; }) ==
-          Approx(1.0 / (2.0 * h.heave_damping_ratio)).epsilon(1e-6));
-    CHECK(amplification(n.roll_s, oblique, [](const auto& r) { return r.roll_rad; }) ==
-          Approx(1.0 / (2.0 * h.roll_damping_ratio)).epsilon(1e-6));
-    CHECK(amplification(n.pitch_s, oblique, [](const auto& r) { return r.pitch_rad; }) ==
-          Approx(1.0 / (2.0 * h.pitch_damping_ratio)).epsilon(1e-6));
+    const double a_heave = amplification(n.heave_s, oblique, [](const auto& r) { return r.heave_m; });
+    const double a_roll = amplification(n.roll_s, oblique, [](const auto& r) { return r.roll_rad; });
+    const double a_pitch = amplification(n.pitch_s, oblique, [](const auto& r) { return r.pitch_rad; });
+    std::printf("deck resonance amplification: heave %.3f, roll %.3f, pitch %.3f\n", a_heave, a_roll, a_pitch);
+    CHECK(a_heave == Approx(expected(n.heave_s, h.heave_added_mass_factor, h.heave_damping_ratio)).epsilon(1e-6));
+    CHECK(a_roll == Approx(expected(n.roll_s, h.roll_added_inertia_factor, h.roll_damping_ratio)).epsilon(1e-6));
+    CHECK(a_pitch == Approx(expected(n.pitch_s, h.pitch_added_inertia_factor, h.pitch_damping_ratio)).epsilon(1e-6));
 }
 
 TEST_CASE("The deck follows the sea surface in very long waves", "[deck_motion]") {

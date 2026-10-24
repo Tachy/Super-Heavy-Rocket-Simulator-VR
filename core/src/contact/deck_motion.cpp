@@ -28,10 +28,14 @@ double sinc_derivative(double u) {
 // and <s e> = -i d/dkappa sinc(kappa w / 2) = -i (w / 2) sinc'(u).
 cplx slope_factor(double u, double width_m) { return cplx(0.0, -6.0 / width_m) * sinc_derivative(u); }
 
-// Damped oscillator under exp(-i omega t) forcing, normalised to 1 at omega -> 0.
-cplx oscillator(double omega, double omega_n, double zeta) {
+// One mode under the strip-theory relative-motion excitation (Korvin-Kroukovsky): the hydrostatic, added-mass and
+// damping forces act on the motion relative to the (Smith-reduced) wave, so with time factor exp(-i omega t)
+//   (c - (m + a) omega^2 - i omega b) x = (c - a omega^2 - i omega b) exp(-k d) eta_fit
+// and per unit plane fit: exp(-k d) (1 - r^2 ca / (1 + ca) - 2 i zeta r) / (1 - r^2 - 2 i zeta r); 1 at omega -> 0.
+cplx mode_transfer(double omega, double omega_n, double added_factor, double zeta, double smith) {
     const double r = omega / omega_n;
-    return 1.0 / cplx(1.0 - r * r, -2.0 * zeta * r);
+    const cplx excitation(1.0 - r * r * added_factor / (1.0 + added_factor), -2.0 * zeta * r);
+    return smith * excitation / cplx(1.0 - r * r, -2.0 * zeta * r);
 }
 
 // Box barge, KG at the waterline: GM = KB + BM - KG = d/2 + w^2 / (12 d) - d.
@@ -67,10 +71,17 @@ DeckResponse deck_plane_fit(const config::DroneShipHull& hull, double wavenumber
 }
 
 DeckResponse deck_response(const config::DroneShipHull& hull, double omega_radps, double wave_angle_rad) {
-    const auto fit = deck_plane_fit(hull, omega_radps * omega_radps / g, wave_angle_rad);
-    return {fit.heave_m * oscillator(omega_radps, heave_omega(hull), hull.heave_damping_ratio),
-            fit.roll_rad * oscillator(omega_radps, roll_omega(hull), hull.roll_damping_ratio),
-            fit.pitch_rad * oscillator(omega_radps, pitch_omega(hull), hull.pitch_damping_ratio)};
+    const double k = omega_radps * omega_radps / g;
+    const auto fit = deck_plane_fit(hull, k, wave_angle_rad);
+    // Smith effect: the wave pressure at the keel decays as exp(-k d) (the usual strip-theory reduction for the heave of
+    // a flat-bottomed section, applied to all its excitation terms); for roll and pitch a crude approximation (the moment also has side-wall pressure terms nearer the surface) [call].
+    const double smith = std::exp(-k * hull.draft_m);
+    return {fit.heave_m * mode_transfer(omega_radps, heave_omega(hull), hull.heave_added_mass_factor,
+                                        hull.heave_damping_ratio, smith),
+            fit.roll_rad * mode_transfer(omega_radps, roll_omega(hull), hull.roll_added_inertia_factor,
+                                         hull.roll_damping_ratio, smith),
+            fit.pitch_rad * mode_transfer(omega_radps, pitch_omega(hull), hull.pitch_added_inertia_factor,
+                                          hull.pitch_damping_ratio, smith)};
 }
 
 DeckMotion::DeckMotion(const environment::SeaState& sea, const config::DroneShipHull& hull, double deck_heading_rad)

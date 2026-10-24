@@ -19,8 +19,17 @@
 #          = 1.0 C, C ~ 0.5 at the roll resonance (omega^2 B / 2g ~ 2.2) -> 0.5.
 # Damping ratios [E]: heave radiation damping b33 = rho g^2 Abar^2 / omega^3 with the wave amplitude ratio Abar ~ 1
 # (Vugts, B/T = 10 near resonance) against the critical 2 omega_n (m + a33): ~0.18, reduced for 3D -> 0.15; pitch
-# likewise 0.15; roll of a flat barge mostly radiation + bilge-edge eddies, ~0.10. Natural periods with KG at the
-# waterline: heave 6.50 s, roll 5.32 s, pitch 6.26 s (printed by test_deck_motion "Natural periods ...").
+# likewise 0.15. Roll 0.10: deliberately the low end - a sharp-bilged barge's radiation plus bilge-eddy damping
+# (Ikeda) is commonly 0.10-0.20 of critical at its roll resonance; the low value overstates the roll, i.e. it is
+# conservative for the landing refusal. Natural periods with KG at the waterline: heave 6.50 s, roll 5.32 s,
+# pitch 6.26 s (printed by test_deck_motion "Natural periods ...").
+# Excitation: strip-theory relative motion (Korvin-Kroukovsky) - hydrostatic, added-mass and damping forces act on
+# the motion relative to the wave plane fit, reduced by the Smith factor exp(-k draft) (for roll / pitch a crude
+# approximation). Resonant amplification then: heave 1.04, roll 2.27, pitch 0.93 (not 1 / (2 zeta)).
+# Validity: linear up to ~6 deg of roll - the wings (3 m freeboard at ~26 m half-width) touch the water at ~6.6 deg,
+# the hull's deck edge at ~11 deg; beyond that the predicted motion is an upper bound (safe for the refusal).
+# Hs 2.5 m / Tp 8 s gives 2 sigma heave / heave rate / tilt of 0.27 m / 0.20 m/s / 1.5 deg in head seas and
+# 1.05 m / 0.84 m/s / 6.9 deg abeam.
 # Landing limits [E] (significant = 2 sigma; Task 4 / docs/subsystems.md give the Hs they correspond to): deck tilt
 # 3 deg, heave rate 1 m/s - against the legs' gentle contact (<= 3 m/s, <= 10 deg) with the touchdown speed on top.
 #
