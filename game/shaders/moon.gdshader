@@ -1,9 +1,12 @@
 shader_type spatial;
 // Moon: Lommel-Seeliger reflectance (dust-covered regolith: flat-looking full Moon, correct phase
-// brightness), Earth shadow (lunar eclipses) and faint earthshine.
+// brightness), Earth shadow (lunar eclipses) and faint earthshine; seen through the Earth's atmosphere (opaque: color x
+// T + the sky in front of it - the pale daytime Moon), nothing added when the camera is outside the atmosphere and the
+// Moon lies before the ray's entry.
 render_mode unshaded, cull_back;
 
 #include "res://shaders/eclipse.gdshaderinc"
+#include "res://shaders/atmosphere.gdshaderinc"
 
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform vec3 sun_position_local;    // from the Moon's centre
@@ -36,5 +39,15 @@ void fragment() {
 	float earth_light = earthshine * max(dot(n, normalize(to_earth)), 0.0);
 	vec3 albedo = texture(albedo_texture, UV).rgb;
 	vec3 eclipse_light = umbra_glow * (1.0 - sunlit) * lommel_seeliger;
-	ALBEDO = albedo * (lommel_seeliger * sunlit * exposure * 0.5 + earth_light + eclipse_light);
+	vec3 color = albedo * (lommel_seeliger * sunlit * exposure * 0.5 + earth_light + eclipse_light);
+	if (atmosphere_enabled) {
+		// The view ray from the camera (scaled space draws the Moon closer; its true distance comes from the Moon-local
+		// camera, in true metres).
+		vec3 direction_world = normalize((INV_VIEW_MATRIX * vec4(VERTEX, 0.0)).xyz);
+		vec3 transmittance;
+		vec3 sky = atm_sky_to_far_object(atm_camera_local(), atmosphere_world_to_earth * direction_world,
+				length(local_position - camera_position_local), transmittance);
+		color = color * transmittance + sky;
+	}
+	ALBEDO = color;
 }

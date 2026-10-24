@@ -108,6 +108,10 @@ atmosphere_luminance_scale={
 "type": "float",
 "value": 0.0
 }
+atmosphere_scene_per_cd_m2={
+"type": "float",
+"value": 0.0
+}
 atmosphere_enabled={
 "type": "bool",
 "value": false

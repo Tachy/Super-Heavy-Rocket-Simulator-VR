@@ -5,9 +5,11 @@ shader_type spatial;
 // Cast shadows (crater rims and mountains shadowing the ground, the long polar shadows) are not modelled: they belong to
 // a later part; a slope facing away from the Sun is dark by its own normal only.
 // Positions are in the Moon's local render frame (metres, unscaled): vertex_offset restores them from the node centre.
+// Seen through the Earth's atmosphere like moon.gdshader (a lunar ground view never crosses it).
 render_mode unshaded, cull_back;
 
 #include "res://shaders/eclipse.gdshaderinc"
+#include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/terrain_morph.gdshaderinc"
 
 // CUSTOM1.u runs past 1 on nodes across the antimeridian (continuous inside the node), hence repeat.
@@ -53,5 +55,15 @@ void fragment() {
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
 	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;
 	vec3 eclipse_light = umbra_glow * (1.0 - sunlit) * lommel_seeliger;
-	ALBEDO = albedo * (lommel_seeliger * sunlit * exposure * 0.5 + earth_light + eclipse_light);
+	vec3 color = albedo * (lommel_seeliger * sunlit * exposure * 0.5 + earth_light + eclipse_light);
+	if (atmosphere_enabled) {
+		// Through the Earth's atmosphere only if the view ray crosses it before the ground (a camera near the Moon:
+		// never; atm_sky_to_far_object).
+		vec3 direction_world = normalize((INV_VIEW_MATRIX * vec4(VERTEX, 0.0)).xyz);
+		vec3 transmittance;
+		vec3 sky = atm_sky_to_far_object(atm_camera_local(), atmosphere_world_to_earth * direction_world,
+				length(camera_offset), transmittance);
+		color = color * transmittance + sky;
+	}
+	ALBEDO = color;
 }

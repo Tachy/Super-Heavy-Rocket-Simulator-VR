@@ -175,6 +175,10 @@ func _upload(result: Dictionary) -> void:
 	var solar: Vector3 = parameters["solar_illuminance_rgb"]
 	var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
 	rs.global_shader_parameter_set(&"atmosphere_sun_illuminance_lux", solar * sun_factor)
+	# A true luminance (cd/m^2, at the Sun's actual distance) -> scene value: luminance_scale without the 1 / d_AU^2
+	# (that factor converts the tables' 1 AU values); the star threshold reads the sky's true luminance back with it.
+	rs.global_shader_parameter_set(&"atmosphere_scene_per_cd_m2",
+			DAY_EXPOSURE * PI / float(parameters["toa_solar_illuminance_lux"]))
 	rs.global_shader_parameter_set(&"atmosphere_scattering_size", Vector4(cells.x, cells.y, cells.z, cells.w))
 	rs.global_shader_parameter_set(&"atmosphere_table_sizes", Vector4(t_size.x, t_size.y, i_size.x, i_size.y))
 	rs.global_shader_parameter_set(&"atmosphere_enabled", true)

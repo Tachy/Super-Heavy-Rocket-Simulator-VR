@@ -53,6 +53,7 @@ global uniform float atmosphere_camera_altitude_m;  // above the model ground in
 global uniform mat3 atmosphere_world_to_earth;      // render world axes -> Earth-local axes
 global uniform vec3 atmosphere_sun_direction;       // Earth-local unit vector to the apparent Sun (unstretched)
 global uniform float atmosphere_luminance_scale;    // table luminance (cd/m^2, Sun at 1 AU) -> scene; incl. 1/d_AU^2
+global uniform float atmosphere_scene_per_cd_m2;    // a true luminance (cd/m^2) -> scene value (no 1/d_AU^2)
 global uniform bool atmosphere_enabled;             // false until the tables are uploaded
 
 // ---- Model parameters (AtmosphereParameters of the loaded tables, set once on upload).

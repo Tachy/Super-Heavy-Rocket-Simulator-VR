@@ -4,6 +4,8 @@
 # channel. Linear tone mapper, exposure 1, glow off: the read value is the scene value. Exit code 1 on failure.
 # Task 6 adds the Earth's surfaces (terrain_earth.gdshader, earth.gdshader incl. scaled space: lit by the transmitted
 # Sun and the sky light, seen through the atmosphere; 3 %). STARSIM_VERBOSE=1 prints the surface samples' parts.
+# Task 7 adds the stars (hidden at noon, unchanged above the atmosphere, visible in twilight), the Sun disc's reddening
+# and the daytime Moon (Moon x T + sky, 3 %).
 # Needs a GPU (no --headless): godot --path game --script res://tests/atmosphere_check.gd
 extends SceneTree
 
@@ -123,6 +125,19 @@ func _run() -> void:
 	await _surface_sample("400 km, Earth mesh 40 deg down", orbit, disc_400, _geodetic_up(disc_400), sun_orbit, false)
 	var disc_far := _ellipsoid_hit(far, (-far_dir + side * 0.01).normalized())
 	await _surface_sample("Moon distance, Earth mesh (scaled)", far, disc_far, _geodetic_up(disc_far), sun_far, false)
+
+	# 8. Moon, Sun disc and stars through the atmosphere (Task 7).
+	var star_view := _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 0.0, 60.0)
+	await _star_sample("pad noon, magnitude-0 star", pad, star_view, sun_60, 0.0, StarCase.HIDDEN)
+	var high := _geodetic(PAD_LAT_DEG, PAD_LON_DEG, 120000.0)
+	await _star_sample("120 km noon, magnitude-0 star", high, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 0.0, 90.0),
+			sun_60, 0.0, StarCase.UNCHANGED)
+	var sun_night := _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, -18.0)
+	await _star_sample("pad, Sun -18 deg, magnitude-1 star", pad, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 90.0, 45.0),
+			sun_night, 1.0, StarCase.VISIBLE)
+	await _sun_sample("pad, Sun disc at 1 deg", pad, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, 1.0))
+	await _moon_sample("pad noon, Moon el 20 deg", pad, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 0.0, 20.0),
+			_local_direction(PAD_LAT_DEG, PAD_LON_DEG, 180.0, 50.0))
 
 	print("atmosphere_check: %d samples, %d failures" % [_samples, _failures])
 	print("atmosphere_check: %s" % ("PASS" if _failures == 0 else "FAIL"))
@@ -246,6 +261,109 @@ func _surface_sample(label: String, camera_itrf_m: Vector3, point_itrf_m: Vector
 				* t_low + to_low["luminance"]) * _atmosphere.luminance_scale))
 	_compare(label + " [%.0f km]" % ((point_itrf_m - camera_itrf_m).length() / 1000.0), expected, got,
 			SURFACE_TOLERANCE)
+
+
+## Task 7 star cases: HIDDEN (noon: the pixel is the sky, 2 %), UNCHANGED (above the atmosphere: the look before the
+## atmosphere plus the sky, 5 %), VISIBLE (twilight: the pixel's luminance > STAR_VISIBLE_FACTOR x the sky's).
+enum StarCase { HIDDEN, UNCHANGED, VISIBLE }
+const STAR_UNCHANGED_TOLERANCE := 0.05
+const STAR_VISIBLE_FACTOR := 2.0
+const STAR_COLOR_INDEX := 0.6  ## B-V of the test star (near white)
+const SUN_RADIUS_M := 695700000.0
+const SUN_RENDER_DISTANCE_M := 2.0e7  ## World.SUN_RENDER_DISTANCE_M
+const SUN_MIN_RED_OVER_BLUE := 3.0
+const MOON_TOLERANCE := 0.03
+## [S: ITU-R BT.709] luminance weights (as star_visibility.gdshaderinc).
+const LUMINANCE_WEIGHTS := Vector3(0.2126, 0.7152, 0.0722)
+
+
+## One star of `magnitude` on the camera axis (StarField.build, shaders/stars.gdshader), the sky behind it compared per
+## StarCase. The look before the atmosphere: the vertex colour (stored as RGBA8, truncated) x clamp(E / E_ref, 0.04, 1).
+func _star_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, magnitude: float,
+		star_case: StarCase) -> void:
+	var stars := StarField.new()
+	stars.build(PackedVector3Array([_earth_to_gcrf * view_itrf]), PackedFloat32Array([magnitude]),
+			PackedFloat32Array([STAR_COLOR_INDEX]))
+	_viewport.add_child(stars)
+	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	stars.queue_free()
+	var cpu: Dictionary = _core.atmosphere_sky_luminance(camera_itrf_m, view_itrf, sun_itrf)
+	var sky: Vector3 = cpu["luminance"] * _atmosphere.luminance_scale
+	match star_case:
+		StarCase.HIDDEN:
+			_compare(label + " = sky", sky, got)
+		StarCase.UNCHANGED:
+			var c := StarField._color_from_bv(STAR_COLOR_INDEX)
+			var color8 := Vector3(floorf(c.r * 255.0), floorf(c.g * 255.0), floorf(c.b * 255.0)) / 255.0
+			var relative := minf(StarField.illuminance_lux(magnitude)
+					/ StarField.illuminance_lux(StarField.REFERENCE_MAGNITUDE), 1.0)
+			_compare(label + " = before + sky", color8 * clampf(relative, 0.04, 1.0) + sky, got, STAR_UNCHANGED_TOLERANCE)
+		StarCase.VISIBLE:
+			var ratio := got.dot(LUMINANCE_WEIGHTS) / sky.dot(LUMINANCE_WEIGHTS)
+			_samples += 1
+			var ok := ratio > STAR_VISIBLE_FACTOR
+			if not ok:
+				_failures += 1
+			print("atmosphere_check: %-38s sky %s got %s luminance ratio %s (needs > %.0f) %s" % [label, _vec(sky),
+					_vec(got), _num(ratio), STAR_VISIBLE_FACTOR, "ok" if ok else "FAIL"])
+
+
+## The Sun disc (shaders/sun.gdshader, placed as World._place_sun) on the camera axis with the Sun along sun_itrf:
+## reddened near the horizon by the transmittance alone, red / blue > SUN_MIN_RED_OVER_BLUE.
+func _sun_sample(label: String, camera_itrf_m: Vector3, sun_itrf: Vector3) -> void:
+	var disc := MeshInstance3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = 1.0
+	sphere.height = 2.0
+	disc.mesh = sphere
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/sun.gdshader")
+	disc.material_override = material
+	disc.position = Frames.to_render(_earth_to_gcrf * sun_itrf) * SUN_RENDER_DISTANCE_M
+	disc.scale = Vector3.ONE * SUN_RADIUS_M * SUN_RENDER_DISTANCE_M / AU_M
+	_viewport.add_child(disc)
+	var got := await _render(camera_itrf_m, sun_itrf, sun_itrf)
+	disc.queue_free()
+	var cpu: Dictionary = _core.atmosphere_sky_luminance(camera_itrf_m, sun_itrf, sun_itrf)
+	var red_over_blue := got.x / got.z if got.z > 0.0 else INF
+	var ok := red_over_blue > SUN_MIN_RED_OVER_BLUE
+	_samples += 1
+	if not ok:
+		_failures += 1
+	print("atmosphere_check: %-38s got %s (CPU transmittance %s) red / blue %s (needs > %.0f) %s" % [label, _vec(got),
+			_vec(cpu["transmittance"]), _num(red_over_blue), SUN_MIN_RED_OVER_BLUE, "ok" if ok else "FAIL"])
+
+
+## The Moon (CelestialBody with shaders/moon.gdshader, scaled space) on the camera axis: rendered once without the
+## atmosphere (atmosphere_enabled false: the Moon as before) and once with it; the second must be the first x the
+## view ray's transmittance + the sky luminance in front of it (CPU), MOON_TOLERANCE.
+func _moon_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3) -> void:
+	var camera_gcrf := _earth_to_gcrf * camera_itrf_m
+	var moon_gcrf := camera_gcrf + _earth_to_gcrf * view_itrf * MOON_DISTANCE_M
+	var sun_gcrf := _earth_to_gcrf * sun_itrf * AU_M
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/moon.gdshader")
+	material.set_shader_parameter("albedo_texture", _constant_texture(SURFACE_ALBEDO_8))
+	material.set_shader_parameter("earth_radius_m", 6371000.0)
+	material.set_shader_parameter("sun_position_local", Frames.to_render(sun_gcrf - moon_gcrf))
+	material.set_shader_parameter("earth_position_local", Frames.to_render(-moon_gcrf))
+	material.set_shader_parameter("camera_position_local", Frames.to_render(camera_gcrf - moon_gcrf))
+	var moon := CelestialBody.new()
+	moon.setup(1737400.0, 0.0, material)
+	moon.fixed_to_gcrf = Basis.IDENTITY  # Moon-local = GCRF in render axes (the uniforms above)
+	moon.center_gcrf_m = moon_gcrf
+	moon.place(camera_gcrf)
+	_viewport.add_child(moon)
+	RenderingServer.global_shader_parameter_set(&"atmosphere_enabled", false)
+	var vacuum := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	RenderingServer.global_shader_parameter_set(&"atmosphere_enabled", true)
+	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	moon.queue_free()
+	var cpu: Dictionary = _core.atmosphere_sky_luminance(camera_itrf_m, view_itrf, sun_itrf)
+	var transmittance: Vector3 = cpu["transmittance"]
+	var expected: Vector3 = vacuum * transmittance + cpu["luminance"] * _atmosphere.luminance_scale
+	print("atmosphere_check:   Moon without the atmosphere %s, transmittance %s" % [_vec(vacuum), _vec(transmittance)])
+	_compare(label + " = Moon x T + sky", expected, got, MOON_TOLERANCE)
 
 
 ## A square of half size `half_m` perpendicular to `view` (centred on the origin), every vertex with the normal `normal`.
