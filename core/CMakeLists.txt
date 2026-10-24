@@ -152,6 +152,8 @@ add_library(starsim_core STATIC
     src/environment/geographic_grid.cpp
     src/environment/geoid.cpp
     src/environment/atmosphere_optics.cpp
+    src/environment/atmosphere_tables.cpp
+    src/environment/atmosphere_precompute.cpp
     src/environment/sea_state.cpp
     src/environment/earth_terrain.cpp
     src/environment/surface_samples.cpp

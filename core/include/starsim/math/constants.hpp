@@ -96,5 +96,8 @@ inline constexpr double dobson_unit_per_m2 = 2.6867e20;
 // Molecule number density of standard air (288.15 K, 101325 Pa) used by the Rayleigh formula
 // [S: Bucholtz 1995, Appl. Opt. 34, 2765, N_s = 2.54743e19 cm^-3].
 inline constexpr double standard_air_number_density_per_m3 = 2.54743e25;
+// Luminous efficacy of monochromatic 540 THz radiation, the photopic maximum K_m [S: SI 2019 definition of the
+// candela, K_cd = 683 lm/W; Bruneton 2017 MAX_LUMINOUS_EFFICACY].
+inline constexpr double max_luminous_efficacy_lm_per_w = 683.0;
 
 }  // namespace starsim::constants
