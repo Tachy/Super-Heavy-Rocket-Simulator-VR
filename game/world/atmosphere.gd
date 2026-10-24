@@ -29,7 +29,10 @@ var status_text := ""
 var parameters := {}
 ## GPU format of the tables, chosen before start_loading. Half float [call, Task 5 fix round 1]: half the VRAM (42 vs 85
 ## MB) and fetch bandwidth; relative rounding ~5e-4, the GPU check stays within its 2 % (numbers in the Task 5
-## report); RGBAF for comparisons (atmosphere_check.gd --f32).
+## report); RGBAF for comparisons (atmosphere_check.gd --f32). The transmittance table is always RGBAF [call, Task 6]:
+## its grazing values from the ground (T to the top ~1e-5 and below) fall into the half-float subnormal range, and the
+## aerial perspective divides two of them (a terrain pixel 20 km from the Cape camera was 4 % off in blue with RGBAH,
+## 0.05 % with RGBAF); +8 MB.
 var table_format := Image.FORMAT_RGBAH
 ## Per-frame values (readable by tests): table luminance (cd/m^2 for the Sun at 1 AU) -> scene value (includes the
 ## 1 / d_AU^2 of the true Sun distance: do not apply it to a true luminance), camera height above the model ground (stretched
@@ -111,7 +114,7 @@ func _load_task(config_dir: String, cache_dir: String) -> void:
 		var t_size: Vector2i = result["transmittance_size"]
 		var s_size: Vector3i = result["scattering_size"]
 		var i_size: Vector2i = result["irradiance_size"]
-		result["transmittance_image"] = _image_2d(result["transmittance"], t_size)
+		result["transmittance_image"] = _image_2d(result["transmittance"], t_size, Image.FORMAT_RGBAF)
 		result["irradiance_image"] = _image_2d(result["irradiance"], i_size)
 		result["scattering_images"] = _images_3d(result["scattering"], s_size)
 		result["single_mie_images"] = _images_3d(result["single_mie"], s_size)
@@ -120,10 +123,10 @@ func _load_task(config_dir: String, cache_dir: String) -> void:
 	_result = result
 
 
-func _image_2d(data: PackedFloat32Array, size: Vector2i) -> Image:
+func _image_2d(data: PackedFloat32Array, size: Vector2i, format := table_format) -> Image:
 	var image := Image.create_from_data(size.x, size.y, false, Image.FORMAT_RGBAF, data.to_byte_array())
-	if table_format != Image.FORMAT_RGBAF:
-		image.convert(table_format)
+	if format != Image.FORMAT_RGBAF:
+		image.convert(format)
 	return image
 
 

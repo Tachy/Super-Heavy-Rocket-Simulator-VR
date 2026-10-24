@@ -1,10 +1,14 @@
 shader_type spatial;
-// Earth: day texture lit by the Sun, city lights on the night side, Moon shadow (solar eclipses).
-// All positions are in the body's local render frame (metres, unscaled), so floating origin and
-// scaled-space rendering do not affect the lighting.
+// Earth: day texture lit by the Sun transmitted through the atmosphere plus the sky light, city lights on the night
+// side, Moon shadow (solar eclipses); seen through the atmosphere (aerial perspective: color x T + in-scattering,
+// atmosphere.gdshaderinc). All positions are in the body's local render frame (metres, unscaled), so floating origin
+// and scaled-space rendering do not affect the lighting; the camera is the true Earth-local camera of the atmosphere
+// globals (not the scaled mesh's position), so the hand-over to the terrain quadtree shows the same atmosphere.
+// Until the atmosphere tables are loaded (atmosphere_enabled false): the vacuum lighting albedo x cos x day_exposure.
 render_mode unshaded, cull_back;
 
 #include "res://shaders/eclipse.gdshaderinc"
+#include "res://shaders/atmosphere.gdshaderinc"
 
 uniform sampler2D day_texture : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D night_texture : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
@@ -30,11 +34,25 @@ void fragment() {
 	vec3 to_sun = sun_position_local - local_position;
 	float cos_sun = dot(n, normalize(to_sun));
 	float sunlit = 1.0 - occulted_fraction(to_sun, sun_radius_m, moon_position_local - local_position, moon_radius_m);
-
-	vec3 day = texture(day_texture, UV).rgb * max(cos_sun, 0.0) * sunlit * day_exposure;
+	vec3 albedo = texture(day_texture, UV).rgb;
 	// City lights fade in through civil twilight (sun 0..6 deg below the horizon).
 	float night_factor = smoothstep(0.0, -0.1, cos_sun);
 	vec3 night = texture(night_texture, UV).rgb;
 	night = night * night * night_lights_intensity * night_factor;  // suppress dark-sky noise
-	ALBEDO = day + night;
+
+	if (atmosphere_enabled) {
+		// The sky light is scaled by the local sunlit fraction too (an approximation inside the Moon's shadow until the
+		// eclipse sky: the light scattered onto the point comes mostly from the shadowed air around it).
+		vec3 sky_light;
+		vec3 sun_light = atm_sun_and_sky(local_position, n, sky_light);
+		vec3 day = albedo * (sun_light + sky_light) * sunlit;
+		// Camera-relative offset: the mesh is far from the camera whenever it is drawn (the terrain takes over near
+		// the ground), so the difference of the absolute float32 positions is accurate enough here.
+		vec3 offset = (local_position - atmosphere_camera_hi) - atmosphere_camera_lo;
+		vec3 transmittance;
+		vec3 in_scatter = atm_to_point_offset(offset, transmittance);
+		ALBEDO = (day + night) * transmittance + in_scatter;
+	} else {
+		ALBEDO = albedo * max(cos_sun, 0.0) * sunlit * day_exposure + night;
+	}
 }

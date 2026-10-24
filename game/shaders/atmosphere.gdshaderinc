@@ -123,10 +123,20 @@ float atm_rho_of(float r) {
 	return atm_safe_sqrt((r - R) * (r + R));
 }
 
+// Height above the model ground of the point at distance d along the ray (r, mu) from a point at height
+// rho^2 / (r + R): r_d^2 - r^2 = d (d + 2 r mu) is taken over (r_d + r), never r_d - R of two large float32 radii, so
+// points near the ground keep their height to float32 precision of the height itself (aerial perspective near the pad).
+float atm_height_along(float r, float rho, float mu, float d) {
+	float q = d * (d + 2.0 * r * mu);
+	float r_d = sqrt(max(r * r + q, 0.0));
+	return rho * rho / (r + atmosphere_bottom_radius_m) + q / (r_d + r);
+}
+
 // GetTransmittance: between the point at (r, mu) and the point at distance d along the ray.
 vec3 atm_transmittance(float r, float rho, float mu, float d, bool ground) {
-	float r_d = clamp(sqrt(d * d + 2.0 * r * mu * d + r * r), atmosphere_bottom_radius_m, atmosphere_top_radius_m);
-	float rho_d = atm_rho_of(r_d);
+	float h_d = clamp(atm_height_along(r, rho, mu, d), 0.0, atmosphere_top_radius_m - atmosphere_bottom_radius_m);
+	float r_d = atmosphere_bottom_radius_m + h_d;
+	float rho_d = atm_rho_from_height(h_d);
 	float mu_d = atm_clamp_cosine((r * mu + d) / r_d);
 	vec3 num;
 	vec3 den;
@@ -236,8 +246,9 @@ void atm_camera_model(vec3 camera_local, out vec3 direction, out float r, out fl
 }
 
 // A camera above the top boundary looking along v: enters at the top boundary if the ray meets the atmosphere.
-// Returns false for a ray that misses it; else the entry point's direction and mu.
-bool atm_enter_from_space(vec3 camera_model, vec3 v, out vec3 entry_direction, out float mu) {
+// Returns false for a ray that misses it (or leaves it behind); else the entry point's direction, mu and its
+// distance from the camera along v.
+bool atm_enter_from_space(vec3 camera_model, vec3 v, out vec3 entry_direction, out float mu, out float entry_distance) {
 	float T = atmosphere_top_radius_m;
 	float along = dot(camera_model, v);
 	float b = length(cross(camera_model, v));  // closest approach of the ray to the centre
@@ -248,23 +259,19 @@ bool atm_enter_from_space(vec3 camera_model, vec3 v, out vec3 entry_direction, o
 	vec3 entry = (camera_model - v * along) - v * s;
 	entry_direction = entry / T;
 	mu = -s / T;
+	entry_distance = -along - s;
 	return true;
 }
 
-// ---- Sky radiance seen from the camera along a view direction (GetSkyRadiance, shadow_length 0), scene units; the
-// transmittance of the view ray to the atmosphere's edge (0 for a ray into the ground). camera_local is the camera
-// (atm_camera_local()); its height is atmosphere_camera_altitude_m.
-vec3 atm_sky(vec3 camera_local, vec3 view_dir_local, out vec3 transmittance) {
-	vec3 v = normalize(view_dir_local * ATM_STRETCH);
+// ---- Sky radiance along the model-space unit ray v from a point with up direction `up`, radius r and rho (inside or
+// above the atmosphere), scene units; the transmittance of the ray to the atmosphere's edge (0 into the ground).
+vec3 atm_sky_from(vec3 up, float r, float rho, vec3 v, out vec3 transmittance) {
 	vec3 sun = normalize(atmosphere_sun_direction * ATM_STRETCH);
-	vec3 up;
-	float r;
-	float rho;
-	atm_camera_model(camera_local, up, r, rho);
 	float mu = atm_clamp_cosine(dot(up, v));
 	if (r > atmosphere_top_radius_m) {
 		vec3 entry_up;
-		if (!atm_enter_from_space(camera_local * ATM_STRETCH, v, entry_up, mu)) {
+		float entry_distance;
+		if (!atm_enter_from_space(up * r, v, entry_up, mu, entry_distance)) {
 			transmittance = vec3(1.0);
 			return vec3(0.0);
 		}
@@ -283,48 +290,107 @@ vec3 atm_sky(vec3 camera_local, vec3 view_dir_local, out vec3 transmittance) {
 	return atm_to_scene(radiance);
 }
 
+// ---- Sky radiance seen from the camera along a view direction (GetSkyRadiance, shadow_length 0), scene units; the
+// transmittance of the view ray to the atmosphere's edge (0 for a ray into the ground). camera_local is the camera
+// (atm_camera_local()); its height is atmosphere_camera_altitude_m.
+vec3 atm_sky(vec3 camera_local, vec3 view_dir_local, out vec3 transmittance) {
+	vec3 up;
+	float r;
+	float rho;
+	atm_camera_model(camera_local, up, r, rho);
+	return atm_sky_from(up, r, rho, normalize(view_dir_local * ATM_STRETCH), transmittance);
+}
+
+// The point at camera + offset (offset_local: Earth-local render axes, metres, camera-relative) in model space: its up
+// direction, radius and rho, the height from the camera's altitude plus the offset (atm_height_along), so a point
+// near the camera keeps its height to float32 precision of the offset.
+void atm_point_model(vec3 offset_local, out vec3 up_p, out float r_p, out float rho_p) {
+	vec3 up;
+	float r;
+	float rho;
+	atm_camera_model(atm_camera_local(), up, r, rho);
+	vec3 o = offset_local * ATM_STRETCH;
+	float d = length(o);
+	float h = d > 0.0 ? atm_height_along(r, rho, atm_clamp_cosine(dot(up, o / d)), d)
+			: rho * rho / (r + atmosphere_bottom_radius_m);
+	h = max(h, 0.0);
+	up_p = normalize(up * r + o);
+	r_p = atmosphere_bottom_radius_m + h;
+	rho_p = atm_rho_from_height(h);
+}
+
+// Sky radiance along view_dir_local seen from the point at camera + offset_local (camera-relative, Earth-local render
+// metres), scene units; the transmittance of that ray (the sea's reflected sky).
+vec3 atm_sky_at_offset(vec3 offset_local, vec3 view_dir_local, out vec3 transmittance) {
+	vec3 up_p;
+	float r_p;
+	float rho_p;
+	atm_point_model(offset_local, up_p, r_p, rho_p);
+	return atm_sky_from(up_p, r_p, rho_p, normalize(view_dir_local * ATM_STRETCH), transmittance);
+}
+
+// An object far along view_dir_local (the Moon, its terrain, the Sun, the stars) seen from the camera: the sky in front
+// of it and the transmittance (atm_sky), unless the camera is outside the atmosphere and the object lies before the
+// ray's entry (a camera at the Moon looking at the lunar ground with the Earth behind it): then nothing (T = 1).
+// distance_m: the object's true distance from the camera.
+vec3 atm_sky_to_far_object(vec3 camera_local, vec3 view_dir_local, float distance_m, out vec3 transmittance) {
+	vec3 up;
+	float r;
+	float rho;
+	atm_camera_model(camera_local, up, r, rho);
+	vec3 v = normalize(view_dir_local * ATM_STRETCH);
+	if (r > atmosphere_top_radius_m) {
+		vec3 entry_up;
+		float mu;
+		float entry_distance;
+		if (!atm_enter_from_space(up * r, v, entry_up, mu, entry_distance) || entry_distance >= distance_m) {
+			transmittance = vec3(1.0);
+			return vec3(0.0);
+		}
+	}
+	return atm_sky_from(up, r, rho, v, transmittance);
+}
+
 // ---- In-scattered light between the camera and a point (aerial perspective, GetSkyRadianceToPoint, shadow_length
-// 0), scene units; the transmittance between them. camera_local as in atm_sky; point_local is clamped onto the model
-// ground from below.
-vec3 atm_to_point(vec3 camera_local, vec3 point_local, out vec3 transmittance) {
+// 0), scene units; the transmittance between them. offset_model: point - camera in the stretched model space,
+// camera-relative (callers difference near points before they reach the shader: terrain_earth's camera_offset; the
+// stretch is linear, so stretch(p) - stretch(c) = stretch(p - c)). A point below the model ground is moved onto it.
+vec3 atm_to_point_model(vec3 offset_model, out vec3 transmittance) {
 	float R = atmosphere_bottom_radius_m;
 	vec3 sun = normalize(atmosphere_sun_direction * ATM_STRETCH);
 	vec3 up;
 	float r;
 	float rho;
-	atm_camera_model(camera_local, up, r, rho);
+	atm_camera_model(atm_camera_local(), up, r, rho);
 	vec3 camera_model = up * r;
-	vec3 point_model = point_local * ATM_STRETCH;
-	float point_r = length(point_model);
-	if (point_r < R) {
-		point_model *= R / point_r;
-	}
-	vec3 segment = point_model - camera_model;
-	float length_m = length(segment);
-	if (length_m == 0.0) {
+	float d = length(offset_model);
+	if (d == 0.0) {
 		transmittance = vec3(1.0);
 		return vec3(0.0);
 	}
-	vec3 v = segment / length_m;
+	vec3 v = offset_model / d;
+	if (atm_height_along(r, rho, atm_clamp_cosine(dot(up, v)), d) < 0.0) {  // below the model ground (rare): onto it
+		vec3 point_model = normalize(camera_model + offset_model) * R;
+		offset_model = point_model - camera_model;
+		d = length(offset_model);
+		v = offset_model / d;
+	}
 	float mu = atm_clamp_cosine(dot(up, v));
 	if (r > atmosphere_top_radius_m) {
 		vec3 entry_up;
-		if (!atm_enter_from_space(camera_model, v, entry_up, mu)) {
+		float entry_distance;
+		// No entry, or the point lies before it: the segment is outside the atmosphere.
+		if (!atm_enter_from_space(camera_model, v, entry_up, mu, entry_distance) || d <= entry_distance) {
 			transmittance = vec3(1.0);
 			return vec3(0.0);
 		}
 		up = entry_up;
 		r = atmosphere_top_radius_m;
 		rho = atm_horizon_h();
-		camera_model = up * r;
-		if (dot(point_model - camera_model, v) <= 0.0) {  // the point lies before the entry: outside the atmosphere
-			transmittance = vec3(1.0);
-			return vec3(0.0);
-		}
+		d -= entry_distance;
 	}
 	float mu_s = atm_clamp_cosine(dot(up, sun));
 	float nu = atm_clamp_cosine(dot(v, sun));
-	float d = length(point_model - camera_model);
 	bool ground = atm_ray_intersects_ground(r, rho, mu);
 	vec3 tr = atm_transmittance(r, rho, mu, d, ground);
 	transmittance = tr;
@@ -332,8 +398,9 @@ vec3 atm_to_point(vec3 camera_local, vec3 point_local, out vec3 transmittance) {
 	vec3 m;
 	atm_combined_scattering(r, rho, mu, mu_s, nu, ground, s, m);
 
-	float r_p = clamp(sqrt(d * d + 2.0 * r * mu * d + r * r), R, atmosphere_top_radius_m);
-	float rho_p = atm_rho_of(r_p);
+	float h_p = clamp(atm_height_along(r, rho, mu, d), 0.0, atmosphere_top_radius_m - R);
+	float r_p = R + h_p;
+	float rho_p = atm_rho_from_height(h_p);
 	float mu_p = atm_clamp_cosine((r * mu + d) / r_p);
 	float mu_s_p = atm_clamp_cosine((r * mu_s + d * nu) / r_p);
 	vec3 s_p;
@@ -348,22 +415,46 @@ vec3 atm_to_point(vec3 camera_local, vec3 point_local, out vec3 transmittance) {
 	return atm_to_scene(radiance);
 }
 
+// Aerial perspective to a point given camera-relative (offset_local = point - camera, Earth-local render metres): the
+// form for surfaces near the camera (terrain, sea, vehicles), whose offset is exact in float32.
+vec3 atm_to_point_offset(vec3 offset_local, out vec3 transmittance) {
+	return atm_to_point_model(offset_local * ATM_STRETCH, transmittance);
+}
+
+// Aerial perspective to an absolute Earth-local point: only for points far from the camera (the difference of two
+// absolute float32 positions carries metre-level error); near points use atm_to_point_offset. camera_local is
+// atm_camera_local().
+vec3 atm_to_point(vec3 camera_local, vec3 point_local, out vec3 transmittance) {
+	return atm_to_point_model((point_local - atmosphere_camera_hi - atmosphere_camera_lo) * ATM_STRETCH, transmittance);
+}
+
 // ---- Light on a surface element (GetSunAndSkyIrradiance), as the scene value of a white Lambertian surface
-// (illuminance x atmosphere_luminance_scale / pi): multiply by the albedo. Returns the transmitted direct Sun (with
-// the cosine of the true, unstretched geometry), the sky term (horizontal sky irradiance tilted by (1 + n.up) / 2)
-// in `sky`. Points above the top boundary take the top's values.
-vec3 atm_sun_and_sky(vec3 point_local, vec3 normal_local, out vec3 sky) {
-	float R = atmosphere_bottom_radius_m;
-	float T = atmosphere_top_radius_m;
+// (illuminance x atmosphere_luminance_scale / pi): multiply by the albedo. Points above the top boundary take the
+// top's values.
+// The direct Sun transmitted to the point, at normal incidence (no cosine): the sea's glint needs it uncosined.
+vec3 atm_sun_at(vec3 point_local) {
 	vec3 p = point_local * ATM_STRETCH;
-	float r = clamp(length(p), R, T);
+	float r = clamp(length(p), atmosphere_bottom_radius_m, atmosphere_top_radius_m);
+	float mu_s = atm_clamp_cosine(dot(normalize(p), normalize(atmosphere_sun_direction * ATM_STRETCH)));
+	return atmosphere_sun_illuminance_lux * atm_transmittance_to_sun(r, atm_rho_of(r), mu_s)
+			* (atmosphere_luminance_scale / ATM_PI);
+}
+
+// The sky light on a surface with the (geodetic-frame) normal_local: the horizontal sky irradiance tilted by
+// (1 + n.up) / 2 in the model space.
+vec3 atm_sky_light(vec3 point_local, vec3 normal_local) {
+	vec3 p = point_local * ATM_STRETCH;
+	float r = clamp(length(p), atmosphere_bottom_radius_m, atmosphere_top_radius_m);
 	vec3 up = normalize(p);
-	vec3 sun = normalize(atmosphere_sun_direction * ATM_STRETCH);
 	vec3 normal = normalize(normal_local / ATM_STRETCH);
-	float mu_s = atm_clamp_cosine(dot(up, sun));
-	float h = r - R;
-	float lambert = atmosphere_luminance_scale / ATM_PI;
-	sky = atm_irradiance(h, mu_s) * (1.0 + dot(normal, up)) * 0.5 * atmosphere_sky_radiance_to_luminance * lambert;
+	float mu_s = atm_clamp_cosine(dot(up, normalize(atmosphere_sun_direction * ATM_STRETCH)));
+	return atm_irradiance(r - atmosphere_bottom_radius_m, mu_s) * (1.0 + dot(normal, up)) * 0.5
+			* atmosphere_sky_radiance_to_luminance * (atmosphere_luminance_scale / ATM_PI);
+}
+
+// Both: returns the transmitted direct Sun with the cosine of the true, unstretched geometry; the sky term in `sky`.
+vec3 atm_sun_and_sky(vec3 point_local, vec3 normal_local, out vec3 sky) {
+	sky = atm_sky_light(point_local, normal_local);
 	float cosine = max(dot(normalize(normal_local), normalize(atmosphere_sun_direction)), 0.0);
-	return atmosphere_sun_illuminance_lux * atm_transmittance_to_sun(r, atm_rho_of(r), mu_s) * cosine * lambert;
+	return atm_sun_at(point_local) * cosine;
 }

@@ -2,6 +2,8 @@
 # else in the scene) into an HDR SubViewport for sample views, reads the float pixel on the view direction and compares
 # it with the core's CPU evaluation (StarsimCore.atmosphere_sky_luminance x Atmosphere.luminance_scale) within 2 % per
 # channel. Linear tone mapper, exposure 1, glow off: the read value is the scene value. Exit code 1 on failure.
+# Task 6 adds the Earth's surfaces (terrain_earth.gdshader, earth.gdshader incl. scaled space: lit by the transmitted
+# Sun and the sky light, seen through the atmosphere; 3 %). STARSIM_VERBOSE=1 prints the surface samples' parts.
 # Needs a GPU (no --headless): godot --path game --script res://tests/atmosphere_check.gd
 extends SceneTree
 
@@ -17,11 +19,27 @@ const PAD_HEIGHT_M := -21.11
 const MOON_DISTANCE_M := 3.844e8
 const AU_M := 149597870700.0
 const EPOCH_UTC := "2024-04-08T18:42:00"
+## Surface samples (Task 6): a point near Cape Canaveral, the terrain pixel this far west of the camera.
+const CAPE_LAT_DEG := 28.45
+const CAPE_LON_DEG := -80.6
+const CAPE_POINT_DISTANCE_M := 20000.0
+const SURFACE_TOLERANCE := 0.03
+## The surfaces' albedo: every texel of the bound day texture is this sRGB-8 colour, so the texel the shader reads is
+## known exactly (decoded sRGB -> linear on the GPU as Color.srgb_to_linear on the CPU). The real day texture would
+## make "the same texel" depend on mip level and anisotropic filtering at the grazing terrain view.
+const SURFACE_ALBEDO_8 := Color8(150, 120, 90)
+const WGS84_A_M := 6378137.0
+const WGS84_FLATTENING := 1.0 / 298.257223563
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
 var _viewport := SubViewport.new()
 var _camera := Camera3D.new()
+var _earth_body := CelestialBody.new()  ## the Earth's ellipsoid mesh with earth.gdshader (scaled space far out)
+var _earth_material := ShaderMaterial.new()
+var _terrain_parent := Node3D.new()  ## Earth-fixed frame of the terrain quad (unscaled)
+var _terrain_quad := MeshInstance3D.new()  ## one camera-facing quad with terrain_earth.gdshader
+var _terrain_material := ShaderMaterial.new()
 var _earth_to_gcrf := Basis.IDENTITY
 var _failures := 0
 var _samples := 0
@@ -93,6 +111,19 @@ func _run() -> void:
 	await _ground_sample("400 km, ground 40 deg down", orbit, _local_direction(10.0, -60.0, 0.0, -40.0), sun_orbit)
 	await _ground_sample("Moon distance, Earth's disc", far, (-far_dir + side * 0.01).normalized(), sun_far)
 
+	# 7. Earth surfaces (Task 6): a terrain pixel (terrain_earth.gdshader) 20 km from a camera 2 m above the ground at
+	# the Cape, and Earth-disc pixels of the ellipsoid mesh (earth.gdshader) from 400 km and from the Moon distance (the
+	# scaled-space mesh): albedo x (sun + sky lux) / pi x T + to-point luminance, 3 %.
+	var cape := _geodetic(CAPE_LAT_DEG, CAPE_LON_DEG, 2.0)
+	var cape_point := _geodetic(CAPE_LAT_DEG, CAPE_LON_DEG - CAPE_POINT_DISTANCE_M / (111319.49 * cos(deg_to_rad(
+			CAPE_LAT_DEG))), 0.0)
+	var sun_cape := _local_direction(CAPE_LAT_DEG, CAPE_LON_DEG, 120.0, 40.0)
+	await _surface_sample("Cape, terrain 20 km", cape, cape_point, _geodetic_up(cape_point), sun_cape, true)
+	var disc_400 := _ellipsoid_hit(orbit, _local_direction(10.0, -60.0, 0.0, -40.0))
+	await _surface_sample("400 km, Earth mesh 40 deg down", orbit, disc_400, _geodetic_up(disc_400), sun_orbit, false)
+	var disc_far := _ellipsoid_hit(far, (-far_dir + side * 0.01).normalized())
+	await _surface_sample("Moon distance, Earth mesh (scaled)", far, disc_far, _geodetic_up(disc_far), sun_far, false)
+
 	print("atmosphere_check: %d samples, %d failures" % [_samples, _failures])
 	print("atmosphere_check: %s" % ("PASS" if _failures == 0 else "FAIL"))
 	quit(1 if _failures > 0 else 0)
@@ -121,8 +152,137 @@ func _setup_scene() -> void:
 	world_environment.environment = environment
 	_viewport.add_child(world_environment)
 	_camera.fov = 10.0
+	_camera.near = 0.5
+	_camera.far = 4.0e7  # the scaled-space Earth sits at CelestialBody.SCALED_SPACE_DISTANCE_M
 	_camera.current = true
 	_viewport.add_child(_camera)
+	_setup_surfaces()
+
+
+## The Earth's surfaces of Task 6, hidden until a surface sample shows one: the ellipsoid mesh (CelestialBody with
+## earth.gdshader) and a terrain quad (terrain_earth.gdshader), both with the constant albedo texture and black night
+## lights, materials set up as world.gd does.
+func _setup_surfaces() -> void:
+	var albedo_texture := _constant_texture(SURFACE_ALBEDO_8)
+	var black := _constant_texture(Color(0, 0, 0))
+	_earth_material.shader = load("res://shaders/earth.gdshader")
+	_earth_material.set_shader_parameter("day_texture", albedo_texture)
+	_earth_material.set_shader_parameter("night_texture", black)
+	_earth_material.set_shader_parameter("moon_radius_m", 1737400.0)
+	_earth_material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
+	_earth_body.setup(WGS84_A_M, WGS84_FLATTENING, _earth_material)
+	_earth_body.visible = false
+	_viewport.add_child(_earth_body)
+	_terrain_material.shader = load("res://shaders/terrain_earth.gdshader")
+	_terrain_material.set_shader_parameter("day_texture", albedo_texture)
+	_terrain_material.set_shader_parameter("day_texture_bound", true)
+	_terrain_material.set_shader_parameter("night_texture", black)
+	_terrain_material.set_shader_parameter("moon_radius_m", 1737400.0)
+	_terrain_material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
+	_terrain_quad.material_override = _terrain_material
+	_terrain_parent.add_child(_terrain_quad)
+	_terrain_parent.visible = false
+	_viewport.add_child(_terrain_parent)
+
+
+static func _constant_texture(color: Color) -> ImageTexture:
+	var image := Image.create(4, 4, true, Image.FORMAT_RGBA8)
+	image.fill(color)
+	image.generate_mipmaps()
+	return ImageTexture.create_from_image(image)
+
+
+## A surface pixel: the terrain quad (terrain = true) centred on point_itrf_m and facing the camera, its NORMAL the
+## surface normal normal_itrf (the lighting's normal; the quad's geometry only puts a fragment on the camera axis), or
+## the ellipsoid mesh (the point is the ray's WGS84 hit). Sun far, the Moon behind the Earth (no eclipse).
+## CPU: albedo x (sun + sky lux on the normal) / pi x T + to-point luminance, all x luminance_scale.
+func _surface_sample(label: String, camera_itrf_m: Vector3, point_itrf_m: Vector3, normal_itrf: Vector3,
+		sun_itrf: Vector3, terrain: bool) -> void:
+	var view_itrf := (point_itrf_m - camera_itrf_m).normalized()
+	var camera_gcrf := _earth_to_gcrf * camera_itrf_m
+	var sun_local := Frames.to_render(sun_itrf * AU_M)
+	var moon_local := -Frames.to_render(sun_itrf) * MOON_DISTANCE_M
+	RenderingServer.global_shader_parameter_set(&"earth_sun_position_local", sun_local)
+	RenderingServer.global_shader_parameter_set(&"earth_moon_position_local", moon_local)
+	_earth_material.set_shader_parameter("sun_position_local", sun_local)
+	_earth_material.set_shader_parameter("moon_position_local", moon_local)
+	_earth_body.visible = not terrain
+	_terrain_parent.visible = terrain
+	if terrain:
+		var center := Frames.to_render(point_itrf_m)
+		var distance := (point_itrf_m - camera_itrf_m).length()
+		_terrain_parent.transform = Transform3D(Frames.basis_to_render(_earth_to_gcrf), Frames.to_render(-camera_gcrf))
+		_terrain_quad.mesh = _facing_quad(Frames.to_render(view_itrf), Frames.to_render(normal_itrf), distance * 0.01)
+		_terrain_quad.position = center
+		var split := TerrainQuadtree.split_float32(center)
+		_terrain_quad.set_instance_shader_parameter(&"vertex_offset", split[0])
+		_terrain_quad.set_instance_shader_parameter(&"vertex_offset_lo", split[1])
+		var camera_split := TerrainQuadtree.split_float32(Frames.to_render(camera_itrf_m))
+		RenderingServer.global_shader_parameter_set(&"earth_terrain_camera_hi", camera_split[0])
+		RenderingServer.global_shader_parameter_set(&"earth_terrain_camera_lo", camera_split[1])
+	else:
+		_earth_body.fixed_to_gcrf = _earth_to_gcrf
+		_earth_body.center_gcrf_m = Vector3.ZERO
+		_earth_body.place(camera_gcrf)
+	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	_earth_body.visible = false
+	_terrain_parent.visible = false
+	var to_point: Dictionary = _core.atmosphere_sky_luminance_to_point(camera_itrf_m, point_itrf_m, sun_itrf)
+	var lux: Dictionary = _core.atmosphere_illuminance(point_itrf_m, normal_itrf, sun_itrf)
+	var linear := SURFACE_ALBEDO_8.srgb_to_linear()
+	var albedo := Vector3(linear.r, linear.g, linear.b)
+	var transmittance: Vector3 = to_point["transmittance"]
+	var light: Vector3 = (lux["sun_lux"] + lux["sky_lux"]) / PI
+	var expected: Vector3 = (albedo * light * transmittance + to_point["luminance"]) * _atmosphere.luminance_scale
+	if OS.get_environment("STARSIM_VERBOSE") == "1":
+		print("atmosphere_check:   surface %s x T %s + in-scatter %s" % [_vec(albedo * light * _atmosphere.luminance_scale),
+				_vec(transmittance), _vec(to_point["luminance"] * _atmosphere.luminance_scale)])
+		# Sensitivity to the drawn surface's height: the ellipsoid mesh's facets lie up to ~0.5 km below the ellipsoid.
+		var lower := point_itrf_m - normal_itrf * 300.0
+		var lux_low: Dictionary = _core.atmosphere_illuminance(lower, normal_itrf, sun_itrf)
+		var to_low: Dictionary = _core.atmosphere_sky_luminance_to_point(camera_itrf_m, lower, sun_itrf)
+		var t_low: Vector3 = to_low["transmittance"]
+		print("atmosphere_check:   the same 300 m lower: %s" % _vec((albedo * (lux_low["sun_lux"] + lux_low["sky_lux"]) / PI
+				* t_low + to_low["luminance"]) * _atmosphere.luminance_scale))
+	_compare(label + " [%.0f km]" % ((point_itrf_m - camera_itrf_m).length() / 1000.0), expected, got,
+			SURFACE_TOLERANCE)
+
+
+## A square of half size `half_m` perpendicular to `view` (centred on the origin), every vertex with the normal `normal`.
+static func _facing_quad(view: Vector3, normal: Vector3, half_m: float) -> ArrayMesh:
+	var u := view.cross(Vector3.UP if absf(view.y) < 0.9 else Vector3.RIGHT).normalized() * half_m
+	var w := view.cross(u).normalized() * half_m
+	var vertices := PackedVector3Array([-u - w, u - w, u + w, -u - w, u + w, -u + w])
+	var normals := PackedVector3Array()
+	for i in range(vertices.size()):
+		normals.append(normal)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+## The ray's first hit on the WGS84 ellipsoid (float64, in the polar-stretched space where it is a sphere of radius a).
+static func _ellipsoid_hit(camera_itrf_m: Vector3, view_itrf: Vector3) -> Vector3:
+	var stretch := Atmosphere.POLAR_STRETCH
+	var p := Vector3(camera_itrf_m.x, camera_itrf_m.y, camera_itrf_m.z * stretch)
+	var v := Vector3(view_itrf.x, view_itrf.y, view_itrf.z * stretch)
+	var v_length := v.length()
+	v /= v_length
+	var along := p.dot(v)
+	var b2 := p.length_squared() - along * along
+	var t := -along - sqrt(WGS84_A_M * WGS84_A_M - b2)
+	var hit := p + v * t
+	return Vector3(hit.x, hit.y, hit.z / stretch)
+
+
+## Geodetic up of a point on (or near) the WGS84 ellipsoid: the gradient (x / a^2, y / a^2, z / b^2).
+static func _geodetic_up(point_itrf_m: Vector3) -> Vector3:
+	var stretch := Atmosphere.POLAR_STRETCH
+	return Vector3(point_itrf_m.x, point_itrf_m.y, point_itrf_m.z * stretch * stretch).normalized()
 
 
 ## Renders the sky for the camera (ITRF m) along view_itrf with the Sun along sun_itrf and compares the centre pixel.
@@ -134,7 +294,7 @@ func _sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf
 
 
 ## Counts and prints one sample: every channel within TOLERANCE (relative; absolute below the floor).
-func _compare(label: String, expected: Vector3, got: Vector3) -> void:
+func _compare(label: String, expected: Vector3, got: Vector3, tolerance := TOLERANCE) -> void:
 	_samples += 1
 	var peak := maxf(expected.x, maxf(expected.y, expected.z))
 	var ok := peak > 0.0
@@ -146,9 +306,9 @@ func _compare(label: String, expected: Vector3, got: Vector3) -> void:
 		ratios.append("%.4f" % ratio)
 		var floor_value := peak * RELATIVE_FLOOR
 		if e >= floor_value:
-			ok = ok and absf(ratio - 1.0) <= TOLERANCE
+			ok = ok and absf(ratio - 1.0) <= tolerance
 		else:
-			ok = ok and absf(g - e) <= TOLERANCE * floor_value
+			ok = ok and absf(g - e) <= tolerance * floor_value
 	if not ok:
 		_failures += 1
 	print("atmosphere_check: %-38s expected %s got %s ratio (%s) %s" % [label, _vec(expected), _vec(got),

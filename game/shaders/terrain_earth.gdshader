@@ -1,11 +1,15 @@
 shader_type spatial;
-// Earth terrain node (TerrainQuadtree): the lighting of earth.gdshader (day texture lit by the Sun, city lights on the
-// night side, Moon shadow) on the relief normal, with geomorphing and the imagery crops blended over the day texture.
-// Where the node's water mask says sea, the calm sea model (water.gdshaderinc) shades it instead.
-// Positions are in the body's local render frame (metres, unscaled): vertex_offset restores them from the node centre.
+// Earth terrain node (TerrainQuadtree): the lighting of earth.gdshader (day texture lit by the Sun transmitted through
+// the atmosphere and the sky light, city lights on the night side, Moon shadow, aerial perspective) on the relief
+// normal, with geomorphing and the imagery crops blended over the day texture. Where the node's water mask says sea,
+// the calm sea model (water.gdshaderinc) shades it instead, reflecting the atmosphere's sky.
+// Positions are in the body's local render frame (metres, unscaled): vertex_offset restores them from the node centre;
+// the atmosphere takes the fragment's camera-relative offset (camera_offset, exact near the camera), never the
+// difference of two absolute float32 positions.
 render_mode unshaded, cull_back;
 
 #include "res://shaders/eclipse.gdshaderinc"
+#include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/terrain_morph.gdshaderinc"
 #include "res://shaders/water.gdshaderinc"
 
@@ -84,7 +88,16 @@ void fragment() {
 	vec3 fine = texture(imagery_fine, UV).rgb;
 	vec3 albedo = mix(mix(texture(day_texture, map_uv).rgb, base, base_fade), fine, fine_fade);
 
-	vec3 day = albedo * max(cos_sun, 0.0) * sunlit * day_exposure;
+	// Light: the Sun transmitted to the point and the sky light (atmosphere.gdshaderinc), both scaled by the local
+	// sunlit fraction (the sky light's an approximation inside the Moon's shadow until the eclipse sky); before the
+	// tables are loaded the vacuum Sun at day_exposure and no sky.
+	vec3 sun_normal = vec3(day_exposure);
+	vec3 sky_light = vec3(0.0);
+	if (atmosphere_enabled) {
+		sun_normal = atm_sun_at(local_position);
+		sky_light = atm_sky_light(local_position, n);
+	}
+	vec3 day = albedo * (sun_normal * max(dot(n, normalize(earth_sun_position_local)), 0.0) + sky_light) * sunlit;
 	// Sea: the imagery where it covers (lagoons, shoals), else the day texture (shallow banks from orbit; deep_water
 	// without one), under the calm sea model.
 	float water = water_coverage(texture(water_mask, water_uv).r);
@@ -92,12 +105,26 @@ void fragment() {
 	vec3 water_body = mix(mix(sea_background, base, base_fade), fine, fine_fade);
 	vec3 to_camera = normalize(-camera_offset);
 	float resolved_variance;
+	// Outside any branch: the wave octaves' alias fade takes screen-space derivatives.
 	vec3 wave_n = water_wave_normal(n, camera_offset, length(camera_offset), resolved_variance);
+	vec3 sky_reflected = vec3(0.0);
+	if (atmosphere_enabled && water > 0.0) {  // the reflected sky only where there is sea (no derivatives inside)
+		vec3 reflected_transmittance;
+		sky_reflected = atm_sky_at_offset(camera_offset, water_reflected_direction(n, wave_n, to_camera),
+				reflected_transmittance);
+	}
 	day = mix(day, water_radiance(water_body, n, wave_n, resolved_variance, normalize(to_sun), to_camera, sunlit,
-			day_exposure), water);
+			sun_normal, sky_light, sky_reflected), water);
 	// City lights fade in through civil twilight (sun 0..6 deg below the horizon).
 	float night_factor = smoothstep(0.0, -0.1, cos_sun);
 	vec3 night = texture(night_texture, map_uv).rgb;
 	night = night * night * night_lights_intensity * night_factor;  // suppress dark-sky noise
-	ALBEDO = day + night;
+	vec3 color = day + night;
+	if (atmosphere_enabled) {
+		// Aerial perspective along the camera-relative offset (exact in float32 near the camera).
+		vec3 transmittance;
+		vec3 in_scatter = atm_to_point_offset(camera_offset, transmittance);
+		color = color * transmittance + in_scatter;
+	}
+	ALBEDO = color;
 }

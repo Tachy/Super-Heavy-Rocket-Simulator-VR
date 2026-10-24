@@ -46,7 +46,7 @@ vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
 	vec3 sky_light;
 	vec3 sun_light = atm_sun_and_sky(point_local, normal_local, sky_light);
 	vec3 transmittance;
-	vec3 in_scatter = atm_to_point(camera_local, point_local, transmittance);
+	vec3 in_scatter = atm_to_point_model(v * t, transmittance);  // camera-relative: the hit's offset along the ray
 	return albedo * (sun_light + sky_light) * transmittance + in_scatter;
 }
 
