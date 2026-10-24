@@ -2,3 +2,5 @@ numpy
 rasterio
 pyproj
 pytest
+pystac-client
+Pillow

@@ -1,0 +1,37 @@
+# Earth imagery tile pyramids (tools/data_pipeline/imagery.py): one entry per source. The box comes from the area in
+# earth_terrain.toml: "local" = local_half_size_m + 500 m margin (NAIP), "regional" = regional_half_size_m (Sentinel-2).
+# Levels are EPSG:4326 TMS levels: z17 = 0.59 m/px at 26 deg latitude, z13 = 9.5 m/px.
+# product: "naip" (USDA NAIP via Planetary Computer, newest year covering the box) | "sentinel2_median" (own 2025
+# L2A clear-pixel median composite, Element84 Earth Search).
+
+[[source]]
+id = "naip_starbase"
+product = "naip"
+area = "starbase"
+box = "local"
+min_level = 14
+max_level = 17
+
+[[source]]
+id = "naip_cape"
+product = "naip"
+area = "cape"
+box = "local"
+min_level = 14
+max_level = 17
+
+[[source]]
+id = "s2_starbase"
+product = "sentinel2_median"
+area = "starbase"
+box = "regional"
+min_level = 8
+max_level = 13
+
+[[source]]
+id = "s2_cape"
+product = "sentinel2_median"
+area = "cape"
+box = "regional"
+min_level = 8
+max_level = 13

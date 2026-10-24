@@ -224,6 +224,18 @@ geoid18_url = "https://cdn.proj.org/us_noaa_g2018u0.tif"
 license = "ETOPO 2022 and USGS 3DEP: public domain (US Government works); NOAA GEOID18: public domain; Copernicus DEM GLO-30: free and open licence (ESA/EU, redistribution allowed with attribution)"
 credit = "NOAA NCEI ETOPO 2022 (doi:10.25921/fd45-gt74); USGS 3D Elevation Program; NOAA NGS GEOID18 (via cdn.proj.org); Contains modified Copernicus DEM GLO-30 data (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA, all rights reserved"
 
+[[source]]
+id = "imagery"
+name = "Earth imagery tile pyramids: USDA NAIP 0.6 m (Microsoft Planetary Computer) around the pads and an own 2025 Sentinel-2 L2A clear-pixel median composite at 10 m (Element84 Earth Search) over 200 x 200 km - terrain rendering"
+url = "https://planetarycomputer.microsoft.com/api/stac/v1"
+target = "data/imagery/earth/index.toml"
+kind = "imagery"
+# other endpoints used by tools/data_pipeline/imagery.py (documented here, not downloaded by the generic fetch):
+#   NAIP SAS token  https://planetarycomputer.microsoft.com/api/sas/v1/token/naip
+#   Sentinel-2 L2A  https://earth-search.aws.element84.com/v1  (collection sentinel-2-l2a, COGs on the public sentinel-cogs bucket)
+license = "USDA NAIP: public domain (US Government work, FSA); Copernicus Sentinel-2 data: free, full and open (EU Regulation 1159/2013 and Copernicus legal notice), redistribution of derived products allowed with attribution"
+credit = "Contains modified Copernicus Sentinel data 2025 (processed by the starsim data pipeline: clear-pixel median composite); USDA Farm Service Agency National Agriculture Imagery Program (NAIP) via the Microsoft Planetary Computer; Sentinel-2 L2A COGs via Element 84 Earth Search / AWS Open Data"
+
 # ------------------------------------------------------------------ published reference tables (committed)
 
 [[source]]

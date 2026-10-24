@@ -351,3 +351,11 @@ the fine grid in `data/geoid/` serves where metres matter.
 `launch_sites.toml`, and refuses a tile whose area, level, centre or half size (one cell of slack) no longer matches.
 Precedence: plateau > local > regional > global relief, each finer grid blended into the next over 500 m from its
 edge; terrain at or below 0.05 m orthometric is water at the geoid.
+
+## Earth imagery (`imagery.toml`)
+`[[source]]`: `id`, `product` (`naip` = USDA NAIP 0.6 m via Planetary Computer, newest year covering the box;
+`sentinel2_median` = own 2025 L2A clear-pixel median composite, 10 m), `area` (id in `earth_terrain.toml`), `box`
+(`local` = local half size + 500 m margin, `regional` = regional half size), `min_level` / `max_level` (EPSG:4326 TMS
+levels: z17 = 0.59 m/px, z13 = 9.5 m/px). `fetch.py imagery` writes `data/imagery/earth/<id>/<z>/<x>/<y>.jpg` (256 px,
+quality 88) and `data/imagery/earth/index.toml` (per source: levels, exact coverage, `fade_m`, per-channel colour fit
+`gain_rgb` / `offset_rgb` against the day texture, already applied to the tiles). NAIP is shifted from NAD83 to ITRF.

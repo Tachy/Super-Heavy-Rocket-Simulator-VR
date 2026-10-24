@@ -75,6 +75,11 @@ def main() -> int:
 
             earth_terrain.fetch(source, REPO_ROOT, download, args.force)
             continue
+        if source.get("kind") == "imagery":  # NAIP + Sentinel-2 median composite -> EPSG:4326 tile pyramid (imagery.py)
+            import imagery  # lazy: needs numpy, rasterio, pyproj, Pillow and pystac-client
+
+            imagery.fetch(source, REPO_ROOT, download, args.force)
+            continue
         if target.exists() and not args.force:
             print("  already present")
         else:
