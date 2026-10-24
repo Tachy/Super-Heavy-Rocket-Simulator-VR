@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/basis.hpp>
@@ -10,6 +11,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include "starsim/environment/atmosphere_scattering.hpp"
 #include "starsim/environment/earth_terrain.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
 
@@ -69,14 +71,36 @@ public:
     double surface_finest_resolution_m(const godot::String& body, const godot::PackedFloat64Array& latitudes_deg,
                                        const godot::PackedFloat64Array& longitudes_deg) const;
 
+    // Atmosphere (M8): loads <cache_dir>/earth_atmosphere.bin or precomputes it (config_dir/atmosphere/earth_optics.toml)
+    // and keeps the lookups for the calls below. {ok, error, transmittance / scattering / single_mie / irradiance:
+    // PackedFloat32Array RGBA, *_size, parameters: Dictionary of the AtmosphereParameters fields}. Callable from a
+    // worker thread.
+    godot::Dictionary load_atmosphere(const godot::String& config_dir, const godot::String& cache_dir);
+    // The lookups take ITRF metres and unit directions; before a successful load they return zeros.
+    godot::Vector3 atmosphere_sun_transmittance(const godot::Vector3& position_itrf_m,
+                                                const godot::Vector3& sun_direction_itrf) const;
+    // {luminance: Vector3 cd/m^2, transmittance: Vector3}
+    godot::Dictionary atmosphere_sky_luminance(const godot::Vector3& camera_itrf_m,
+                                               const godot::Vector3& view_direction_itrf,
+                                               const godot::Vector3& sun_direction_itrf) const;
+    godot::Dictionary atmosphere_sky_luminance_to_point(const godot::Vector3& camera_itrf_m,
+                                                        const godot::Vector3& point_itrf_m,
+                                                        const godot::Vector3& sun_direction_itrf) const;
+    // {sun_lux: Vector3, sky_lux: Vector3}
+    godot::Dictionary atmosphere_illuminance(const godot::Vector3& point_itrf_m, const godot::Vector3& normal_itrf,
+                                             const godot::Vector3& sun_direction_itrf) const;
+
 protected:
     static void _bind_methods();
 
 private:
     const environment::Terrain* terrain_of(const godot::String& body) const;
+    std::shared_ptr<const environment::AtmosphereScattering> atmosphere() const;
 
     std::shared_ptr<const environment::EarthTerrain> earth_terrain_;  // load_terrain(); nullptr when absent
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_;
+    mutable std::mutex atmosphere_mutex_;  // guards atmosphere_ (swapped by load_atmosphere on any thread)
+    std::shared_ptr<const environment::AtmosphereScattering> atmosphere_;
     std::unique_ptr<spice::SpiceSession> session_;
     spice::SpiceTimeConverter time_;
     spice::SpiceEphemeris ephemeris_;

@@ -245,3 +245,53 @@ url = "https://ntrs.nasa.gov/api/citations/19900014359/downloads/19900014359.pdf
 target = "config/aero/radiative_heating_earth.csv"
 license = "public domain (US Government work)"
 credit = "K. Sutton, L. C. Hartung, NASA Langley Research Center; transcription: this project"
+
+# ------------------------------------------------------------------ atmosphere model (M8; committed in the core sources)
+
+[[source]]
+id = "atmosphere_bruneton"
+name = "Precomputed Atmospheric Scattering: a New Implementation (Eric Bruneton, 2017) - algorithms ported to C++ and GLSL, spectral inputs transcribed from his demo"
+url = "https://github.com/ebruneton/precomputed_atmospheric_scattering"
+target = "core/include/starsim/environment/atmosphere_tables.hpp"
+license = "BSD 3-clause (copyright notice kept in every ported file)"
+credit = "Eric Bruneton, Precomputed Atmospheric Scattering: a New Implementation, Eurographics Symposium on Rendering 2008 / 2017 reference implementation; the file's notice is kept in the ported sources"
+
+[[source]]
+id = "atmosphere_solar_spectrum"
+name = "ASTM G-173-03 extraterrestrial solar spectral irradiance at 1 AU (as averaged per bin in Bruneton's demo)"
+url = "https://www.nrel.gov/grid/solar-resource/spectra-am1-5.html"
+target = "core/include/starsim/environment/atmosphere_spectra.hpp"
+license = "NREL Renewable Resource Data Center: free to use; the table is a published reference spectrum (ASTM G-173-03)"
+credit = "ASTM G-173-03 reference spectra, derived from SMARTS v2.9.2 (C. Gueymard), NREL"
+
+[[source]]
+id = "atmosphere_ozone_cross_section"
+name = "Ozone absorption cross sections (Serdyuchenko et al. 2014, IUP Bremen), as averaged per bin in Bruneton's demo"
+url = "https://www.iup.uni-bremen.de/gruppen/molspec/databases/referencespectra/o3spectra2011/index.html"
+target = "core/include/starsim/environment/atmosphere_spectra.hpp"
+license = "published laboratory data of the IUP Bremen molspec database, free for use with citation"
+credit = "A. Serdyuchenko, V. Gorshelev, M. Weber, W. Chehade, J. P. Burrows, Atmos. Meas. Tech. 7, 625-636 (2014)"
+
+[[source]]
+id = "atmosphere_ozone_profile"
+name = "AFGL atmospheric constituent profiles, U.S. Standard (ozone number density and mixing ratio) with the 1976 US Standard Atmosphere"
+url = "https://apps.dtic.mil/sti/citations/ADA175173"
+target = "core/src/environment/atmosphere_optics.cpp"
+license = "public domain (US Government reports: AFGL-TR-86-0110; US Standard Atmosphere 1976, NOAA / NASA / USAF)"
+credit = "G. P. Anderson, S. A. Clough, F. X. Kneizys, J. H. Chetwynd, E. P. Shettle, AFGL Atmospheric Constituent Profiles (0-120 km), AFGL-TR-86-0110 (1986); U.S. Standard Atmosphere, 1976"
+
+[[source]]
+id = "atmosphere_cie_cmf"
+name = "CIE 1931 2-degree colour matching functions and the CIE XYZ to linear sRGB matrix (IEC 61966-2-1)"
+url = "http://www.cvrl.org/cmfs.htm"
+target = "core/include/starsim/environment/atmosphere_spectra.hpp"
+license = "published standard tables (CIE 1931; CVRL database, free for research use)"
+credit = "CIE 1931 standard colorimetric observer, tabulated by the Colour & Vision Research Laboratory (UCL, cvrl.org); IEC 61966-2-1 sRGB"
+
+[[source]]
+id = "atmosphere_rayleigh_formulas"
+name = "Rayleigh scattering formulas: refractivity of standard air (Peck and Reeder 1972) and depolarisation of air (Bucholtz 1995, Table 1)"
+url = "https://doi.org/10.1364/AO.34.002765"
+target = "core/src/environment/atmosphere_optics.cpp"
+license = "published formulas and measured values (not copyrightable); cited as sources"
+credit = "E. R. Peck, K. Reeder, J. Opt. Soc. Am. 62, 958 (1972); A. Bucholtz, Rayleigh-scattering calculations for the terrestrial atmosphere, Appl. Opt. 34, 2765 (1995)"

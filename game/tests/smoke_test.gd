@@ -63,6 +63,7 @@ func _initialize() -> void:
 	_check(absf(float(tower.get("mount_height_m", 0.0)) - 20.0) < 1e-9, "tower geometry from the core config")
 	_check(_check_terrain_streaming(core, starbase, bool(terrain_present.get("earth", false))) == true,
 			"terrain streaming checks ran to the end")
+	_check(_check_atmosphere(core) == true, "atmosphere checks ran to the end")
 
 	# A script error aborts a check function (it then returns null) without failing a check: count it as a failure.
 	_check(_check_falcon9(config_dir, tdb) == true, "Falcon 9 checks ran to the end")
@@ -130,6 +131,38 @@ func _check_terrain_streaming(core: StarsimCore, starbase: Dictionary, with_data
 			"terrain streamed on worker threads: leaf level %d at OLP-1, %d leaves, %d frames, %d ms"
 			% [level, tree.drawn_keys().size(), frames, Time.get_ticks_msec() - t0])
 	tree.free()
+	return true
+
+
+# Atmosphere (M8): the precomputed tables and the CPU lookups. Uses the game's cache folder (data/atmosphere); run
+# build/core/atmosphere_tables.exe once beforehand (a cache miss would precompute for ~1 min).
+func _check_atmosphere(core: StarsimCore) -> bool:
+	var empty_sky: Dictionary = core.atmosphere_sky_luminance(Vector3(6378147.0, 0, 0), Vector3(1, 0, 0), Vector3(0.5, 0.866, 0))
+	_check(empty_sky["luminance"] == Vector3.ZERO and core.atmosphere_sun_transmittance(Vector3(6378147.0, 0, 0),
+			Vector3(1, 0, 0)) == Vector3.ZERO, "atmosphere lookups before load return zeros")
+	var t0 := Time.get_ticks_msec()
+	var loaded: Dictionary = core.load_atmosphere(Paths.config_dir(), Paths.data_dir().path_join("atmosphere"))
+	_check(loaded.get("ok", false), "load_atmosphere ok (%d ms) %s" % [Time.get_ticks_msec() - t0, loaded.get("error", "")])
+	if not loaded.get("ok", false):
+		return true
+	var size: Vector3i = loaded["scattering_size"]
+	var tsize: Vector2i = loaded["transmittance_size"]
+	_check((loaded["scattering"] as PackedFloat32Array).size() == 4 * size.x * size.y * size.z
+			and (loaded["single_mie"] as PackedFloat32Array).size() == 4 * size.x * size.y * size.z
+			and (loaded["transmittance"] as PackedFloat32Array).size() == 4 * tsize.x * tsize.y,
+			"atmosphere table sizes %s, transmittance %s" % [size, tsize])
+	var params: Dictionary = loaded["parameters"]
+	_check(absf(float(params["bottom_radius_m"]) - (6378137.0 - 150.0)) < 1.0, "atmosphere parameters: bottom radius")
+	# Pad on the equator (ITRF x axis), looking at the zenith with the Sun 60 deg high.
+	var pad := Vector3(6378137.0 + 10.0, 0, 0)
+	var sun := Vector3(sin(deg_to_rad(60.0)), cos(deg_to_rad(60.0)), 0)
+	var sky: Dictionary = core.atmosphere_sky_luminance(pad, Vector3(1, 0, 0), sun)
+	var green: float = (sky["luminance"] as Vector3).y
+	_check(green > 2000.0 and green < 10000.0, "zenith sky luminance, Sun 60 deg up: %.0f cd/m^2 (green)" % green)
+	var lux: Dictionary = core.atmosphere_illuminance(pad, Vector3(1, 0, 0), sun)
+	_check((lux["sun_lux"] as Vector3).y > 1e4 and (lux["sky_lux"] as Vector3).y > 1e3,
+			"illuminance: sun %s, sky %s" % [lux["sun_lux"], lux["sky_lux"]])
+	_check((core.atmosphere_sun_transmittance(pad, sun) as Vector3).y > 0.3, "sun transmittance at 60 deg elevation")
 	return true
 
 

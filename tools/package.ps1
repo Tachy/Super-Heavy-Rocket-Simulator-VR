@@ -127,6 +127,11 @@ Copy-Item $agility (Join-Path $GodotBin "D3D12Core.x86_64.dll") -Force
 Step "Core + GDExtension"
 & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "build.ps1") -NoTests
 if ($LASTEXITCODE -ne 0) { throw "Core build failed." }
+# The atmosphere tables (M8, ~84 MB, ~1 min): precomputed into data/atmosphere, which the smoke test uses and the base
+# data mirror below ships. The game finds the file by its input hash (a stale file would be recomputed at runtime).
+Step "Atmosphere tables"
+$null = Run (Join-Path $Build "core\atmosphere_tables.exe") @("--config", (Join-Path $Root "config"), "--out", (Join-Path $Data "atmosphere"))
+if ($LASTEXITCODE -ne 0) { throw "atmosphere_tables failed." }
 $null = Run $Godot @("--headless", "--xr-mode", "off", "--path", $Game, "--import")
 if (-not $SkipTests) {
     Step "Smoke test"
@@ -170,6 +175,7 @@ Mirror (Join-Path $Root "config") (Join-Path $package "config") @()
 # base data: everything the game reads except the two large parts; never the raw downloads, webcasts or validation
 Mirror $Data (Join-Path $package "data") @("/XD", (Join-Path $Data "raw"), (Join-Path $Data "webcasts"),
     (Join-Path $Data "validation"), (Join-Path $Data "imagery"), (Join-Path $Data "terrain\earth"), "/XF", "README.md")
+if (-not (Test-Path (Join-Path $package "data\atmosphere\earth_atmosphere.bin"))) { throw "The package lacks data/atmosphere/earth_atmosphere.bin" }
 Mirror (Join-Path $Data "terrain\earth") (Join-Path $terrainPart "data\terrain\earth") @()
 Mirror (Join-Path $Data "imagery") (Join-Path $imageryPart "data\imagery") @()
 
