@@ -12,6 +12,7 @@
 #include "starsim/mission/nrho_reference.hpp"
 #include "starsim/orbit/kepler.hpp"
 #include "starsim/sim/lunar_site.hpp"
+#include "starsim/sim/terrain_cache.hpp"
 
 namespace starsim::sim {
 
@@ -26,7 +27,7 @@ struct PlacedSite {
 PlacedSite load_site(const config::LunarLandingMission& m, const std::filesystem::path& config_dir) {
     const auto site = config::load_lunar_site(config_dir, m.site_id);
     PlacedSite placed;
-    placed.terrain = load_lunar_terrain(config_dir, config_dir.parent_path() / "data");
+    placed.terrain = shared_lunar_terrain(config_dir, config_dir.parent_path() / "data");
     placed.site = lunar_site(site, *placed.terrain);
     return placed;
 }

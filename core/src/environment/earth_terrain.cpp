@@ -84,6 +84,19 @@ bool EarthTerrain::water(double latitude_rad, double longitude_rad) const {
     return ground(latitude_rad, longitude_rad).water;
 }
 
+double EarthTerrain::resolution_m(double latitude_rad, double longitude_rad) const {
+    const GeographicGrid* finest = &global_;
+    for (const auto* level : {&local_, &regional_}) {
+        const auto it = std::find_if(level->begin(), level->end(),
+                                     [&](const GeographicGrid& g) { return g.covers(latitude_rad, longitude_rad); });
+        if (it != level->end()) {
+            finest = &*it;
+            break;
+        }
+    }
+    return finest->step_latitude_deg * constants::deg_to_rad * frames::wgs84.semi_major_axis_m;
+}
+
 double EarthTerrain::height_at_fixed_m(const Vec3& fixed_m) const {
     const auto g = frames::fixed_to_geodetic(fixed_m);
     return height_ellipsoid_m(g.latitude_rad, g.longitude_rad);

@@ -20,6 +20,7 @@
 #include "starsim/sim/earth_terrain_loader.hpp"
 #include "starsim/sim/mission_start.hpp"
 #include "starsim/sim/refuelling_campaign_setup.hpp"
+#include "starsim/sim/terrain_cache.hpp"
 
 namespace starsim::bindings {
 
@@ -65,7 +66,7 @@ void FlightSim::setup(const godot::String& config_dir) {
     const auto data_dir = config_dir_.parent_path() / "data";
     if (sim::earth_terrain_available(data_dir)) {
         try {
-            session->set_earth_terrain(sim::load_earth_terrain(config_dir_, data_dir));
+            session->set_earth_terrain(sim::shared_earth_terrain(config_dir_, data_dir));
             earth_terrain_ = session->earth_terrain_shared();
             godot::UtilityFunctions::print(godot::String::utf8("Erdgelände geladen"));
         } catch (const std::exception& e) {

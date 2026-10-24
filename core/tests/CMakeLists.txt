@@ -99,6 +99,8 @@ add_executable(starsim_core_tests
     test_lunar_terrain.cpp
     test_geoid.cpp
     test_earth_terrain.cpp
+    test_surface_samples.cpp
+    test_terrain_cache.cpp
     test_earth_terrain_session.cpp
     test_earth_terrain_flight.cpp
     test_terrain_contact.cpp

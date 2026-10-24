@@ -63,6 +63,14 @@ double LunarTerrain::height_m(double latitude_rad, double longitude_rad) const {
     return global_.height_m(latitude_rad, longitude_rad);
 }
 
+double LunarTerrain::resolution_m(double latitude_rad, double longitude_rad) const {
+    for (const auto& tile : tiles_) {
+        const auto [line, sample] = tile.position(latitude_rad, longitude_rad);
+        if (tile.inside(line, sample)) return tile.scale_m;
+    }
+    return sphere_radius_m_ * constants::deg_to_rad / global_.pixels_per_degree;
+}
+
 bool LunarTerrain::in_tile(double latitude_rad, double longitude_rad) const {
     for (const auto& tile : tiles_) {
         const auto [line, sample] = tile.position(latitude_rad, longitude_rad);

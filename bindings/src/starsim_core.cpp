@@ -3,9 +3,17 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <filesystem>
+#include <limits>
+#include <string>
+#include <vector>
+
 #include "starsim/environment/eclipse.hpp"
+#include "starsim/environment/surface_samples.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
+#include "starsim/sim/earth_terrain_loader.hpp"
+#include "starsim/sim/terrain_cache.hpp"
 
 namespace starsim::bindings {
 
@@ -116,6 +124,80 @@ double StarsimCore::solar_eclipse_fraction(double latitude_deg, double longitude
     }, 0.0);
 }
 
+godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
+    const std::filesystem::path config(config_dir.utf8().get_data());
+    const auto data_dir = config.parent_path() / "data";
+    const auto say = [](const std::string& message) { godot::UtilityFunctions::print(godot::String::utf8(message.c_str())); };
+    earth_terrain_.reset();
+    moon_terrain_.reset();
+    if (!sim::earth_terrain_available(data_dir)) {
+        say("Erdgelände fehlt - flacher Boden (python tools/data_pipeline/fetch.py)");
+    } else {
+        try {
+            earth_terrain_ = sim::shared_earth_terrain(config, data_dir);
+        } catch (const std::exception& e) {
+            say(std::string("Erdgelände nicht ladbar - flacher Boden: ") + e.what());
+        }
+    }
+    if (!std::filesystem::exists(data_dir / "terrain" / "ldem_16.toml")) {
+        say("Mondgelände fehlt - glatte Kugel (python tools/data_pipeline/fetch.py)");
+    } else {
+        try {
+            moon_terrain_ = sim::shared_lunar_terrain(config, data_dir);
+        } catch (const std::exception& e) {
+            say(std::string("Mondgelände nicht ladbar - glatte Kugel: ") + e.what());
+        }
+    }
+    godot::Dictionary result;
+    result["earth"] = earth_terrain_ != nullptr;
+    result["moon"] = moon_terrain_ != nullptr;
+    return result;
+}
+
+const environment::Terrain* StarsimCore::terrain_of(const godot::String& body) const {
+    const auto lower = body.to_lower();
+    if (lower == "earth") return earth_terrain_.get();
+    if (lower == "moon") return moon_terrain_.get();
+    return nullptr;
+}
+
+godot::Dictionary StarsimCore::surface_samples(const godot::String& body, const godot::PackedFloat64Array& latitudes_deg,
+                                               const godot::PackedFloat64Array& longitudes_deg) const {
+    godot::Dictionary result;
+    const environment::Terrain* terrain = terrain_of(body);
+    godot::PackedFloat64Array heights;
+    godot::PackedByteArray water;
+    const bool present = terrain != nullptr && latitudes_deg.size() == longitudes_deg.size();
+    if (terrain != nullptr && !present) {
+        godot::UtilityFunctions::push_error("StarsimCore.surface_samples: Breiten und Längen müssen gleich viele sein");
+    }
+    if (present) {
+        const auto n = static_cast<size_t>(latitudes_deg.size());
+        std::vector<double> lat(n), lon(n);
+        for (size_t i = 0; i < n; ++i) {
+            lat[i] = latitudes_deg[static_cast<int64_t>(i)] * constants::deg_to_rad;
+            lon[i] = longitudes_deg[static_cast<int64_t>(i)] * constants::deg_to_rad;
+        }
+        const auto samples = environment::sample_surface(*terrain, lat, lon);
+        heights.resize(static_cast<int64_t>(n));
+        water.resize(static_cast<int64_t>(n));
+        for (size_t i = 0; i < n; ++i) {
+            heights[static_cast<int64_t>(i)] = samples.height_m[i];
+            water[static_cast<int64_t>(i)] = samples.water[i];
+        }
+    }
+    result["present"] = present;
+    result["height_m"] = heights;
+    result["water"] = water;
+    return result;
+}
+
+double StarsimCore::surface_resolution_m(const godot::String& body, double latitude_deg, double longitude_deg) const {
+    const environment::Terrain* terrain = terrain_of(body);
+    if (terrain == nullptr) return std::numeric_limits<double>::infinity();
+    return terrain->resolution_m(latitude_deg * constants::deg_to_rad, longitude_deg * constants::deg_to_rad);
+}
+
 void StarsimCore::_bind_methods() {
     using godot::ClassDB;
     using godot::D_METHOD;
@@ -133,6 +215,11 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::geodetic_to_gcrf_m);
     ClassDB::bind_method(D_METHOD("solar_eclipse_fraction", "latitude_deg", "longitude_deg", "height_m", "tdb_s"),
                          &StarsimCore::solar_eclipse_fraction);
+    ClassDB::bind_method(D_METHOD("load_terrain", "config_dir"), &StarsimCore::load_terrain);
+    ClassDB::bind_method(D_METHOD("surface_samples", "body", "latitudes_deg", "longitudes_deg"),
+                         &StarsimCore::surface_samples);
+    ClassDB::bind_method(D_METHOD("surface_resolution_m", "body", "latitude_deg", "longitude_deg"),
+                         &StarsimCore::surface_resolution_m);
 }
 
 }  // namespace starsim::bindings

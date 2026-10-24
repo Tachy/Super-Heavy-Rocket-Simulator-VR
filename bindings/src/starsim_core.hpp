@@ -4,8 +4,14 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/basis.hpp>
+#include <godot_cpp/variant/dictionary.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_float64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
+
+#include "starsim/environment/earth_terrain.hpp"
+#include "starsim/environment/lunar_terrain.hpp"
 
 #include "starsim/spice/spice_adapters.hpp"
 #include "starsim/spice/spice_session.hpp"
@@ -46,10 +52,27 @@ public:
     // Fraction of the solar disk hidden by the Moon for a ground observer (0 = none, 1 = total).
     double solar_eclipse_fraction(double latitude_deg, double longitude_deg, double height_m, double tdb_s) const;
 
+    // Loads the Earth and Moon terrain through the process-wide cache (config_dir/../data). Returns
+    // {earth: bool, moon: bool}; prints one German line per missing or unloadable terrain. Call before the
+    // surface queries below, from one thread.
+    godot::Dictionary load_terrain(const godot::String& config_dir);
+
+    // Terrain heights and water flags at latitude / longitude points (degrees; body "earth" or "moon"):
+    // {present, height_m: PackedFloat64Array above the WGS84 ellipsoid / lunar sphere, water: PackedByteArray}.
+    // Thread-safe (immutable terrains, no SPICE): callable from WorkerThreadPool threads after load_terrain.
+    godot::Dictionary surface_samples(const godot::String& body, const godot::PackedFloat64Array& latitudes_deg,
+                                      const godot::PackedFloat64Array& longitudes_deg) const;
+    // Spacing in metres of the finest terrain grid at a point; INF without the terrain.
+    double surface_resolution_m(const godot::String& body, double latitude_deg, double longitude_deg) const;
+
 protected:
     static void _bind_methods();
 
 private:
+    const environment::Terrain* terrain_of(const godot::String& body) const;
+
+    std::shared_ptr<const environment::EarthTerrain> earth_terrain_;  // load_terrain(); nullptr when absent
+    std::shared_ptr<const environment::LunarTerrain> moon_terrain_;
     std::unique_ptr<spice::SpiceSession> session_;
     spice::SpiceTimeConverter time_;
     spice::SpiceEphemeris ephemeris_;

@@ -38,6 +38,28 @@ func _initialize() -> void:
 	tower_sim.setup(config_dir)
 	var tower: Dictionary = tower_sim.site_tower("starbase_olp1")
 	_check(tower.get("present", false), "Starbase has a catch tower")
+
+	# Terrain through the shared cache (M8 Plan B): StarsimCore samples what FlightSim's physics uses.
+	var terrain_present: Dictionary = core.load_terrain(config_dir)
+	_check(terrain_present.has("earth") and terrain_present.has("moon"), "load_terrain returns {earth, moon}")
+	var starbase := _site(config_dir, "starbase_olp1")
+	var lat_arr := PackedFloat64Array([float(starbase.get("latitude_deg", 0.0))])
+	var lon_arr := PackedFloat64Array([float(starbase.get("longitude_deg", 0.0))])
+	var earth_samples: Dictionary = core.surface_samples("earth", lat_arr, lon_arr)
+	if terrain_present.get("earth", false):
+		var phys: Dictionary = tower_sim.earth_surface(lat_arr[0], lon_arr[0])
+		_check(earth_samples.get("present", false) and (earth_samples["height_m"] as PackedFloat64Array).size() == 1
+				and absf((earth_samples["height_m"] as PackedFloat64Array)[0] - float(phys.get("height_m", INF))) < 1e-9
+				and (earth_samples["water"] as PackedByteArray)[0] == (1 if phys.get("water", false) else 0),
+				"surface_samples at the Starbase pad equals FlightSim.earth_surface")
+		_check(is_finite(core.surface_resolution_m("earth", lat_arr[0], lon_arr[0]))
+				and core.surface_resolution_m("earth", lat_arr[0], lon_arr[0]) <= 1.5,
+				"surface_resolution_m: the 1 m local grid at the pad")
+	else:
+		_check(not earth_samples.get("present", true) and (earth_samples["height_m"] as PackedFloat64Array).is_empty()
+				and is_inf(core.surface_resolution_m("earth", 0.0, 0.0)), "no Earth terrain: surface_samples not present")
+	if not terrain_present.get("moon", false):
+		_check(not core.surface_samples("moon", lat_arr, lon_arr).get("present", true), "no Moon terrain: not present")
 	_check(absf(float(tower.get("mount_height_m", 0.0)) - 20.0) < 1e-9, "tower geometry from the core config")
 
 	# A script error aborts a check function (it then returns null) without failing a check: count it as a failure.

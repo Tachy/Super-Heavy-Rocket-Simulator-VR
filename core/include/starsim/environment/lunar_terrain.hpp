@@ -47,7 +47,9 @@ public:
 
     LunarTerrain(CylindricalGrid global, std::vector<PolarStereographicTile> tiles, double sphere_radius_m);
 
-    double height_m(double latitude_rad, double longitude_rad) const;
+    double height_m(double latitude_rad, double longitude_rad) const override;
+    // A site tile's pixel scale inside a tile, the global grid's spacing elsewhere.
+    double resolution_m(double latitude_rad, double longitude_rad) const override;
     double height_at_fixed_m(const math::Vec3& fixed_m) const override;  // below the point's direction
     math::Vec3 normal_fixed(const math::Vec3& fixed_m) const override;  // outward unit normal of the surface there
     bool in_tile(double latitude_rad, double longitude_rad) const;

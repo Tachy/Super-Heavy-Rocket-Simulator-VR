@@ -43,7 +43,10 @@ public:
 
     // The surface (sea: the geoid) above the WGS84 ellipsoid at a geodetic latitude / longitude.
     double height_ellipsoid_m(double latitude_rad, double longitude_rad) const;
-    bool water(double latitude_rad, double longitude_rad) const;
+    double height_m(double latitude_rad, double longitude_rad) const override { return height_ellipsoid_m(latitude_rad, longitude_rad); }
+    bool water(double latitude_rad, double longitude_rad) const override;
+    // Latitude step of the finest grid covering the point (local, regional, global relief) in metres.
+    double resolution_m(double latitude_rad, double longitude_rad) const override;
     const Geoid& geoid() const { return geoid_; }
     const std::vector<Plateau>& plateaus() const { return plateaus_; }
 
