@@ -159,6 +159,13 @@ public:
     // Fixes a stage standing on its legs to the Earth where it is (landed): resting() from now on.
     void hold_landed(const frames::BodyOrientation& earth, time::Epoch epoch);
     void hold_landed(const environment::BodyFrame& frame, ephemeris::Body body);  // on any reference body
+    // A landed body riding a carrier (a drone ship's moving deck): its held pose is set anew - bottom point and
+    // attitude in the body-fixed frame of `frame`, and the motion relative to that frame (the CG's velocity, the
+    // angular velocity, both body-fixed axes) - and the state follows at once. Every later hold (follow_pad: step,
+    // coast) keeps this pose and motion until the next call; the carrier's simulation sets it again after each of them.
+    void move_landed_hold(const environment::BodyFrame& frame, const math::Vec3& pad_fixed_m,
+                          const math::Quat& attitude_fixed, const math::Vec3& cg_velocity_fixed_mps,
+                          const math::Vec3& angular_velocity_fixed_radps);
     // Lets a landed body go (liftoff): it is integrated again from its held pose (moving with its body), not resting.
     void release_landed();
     // Leg landing simulations set this every tick for bodies with legs: true while one owns the body's ground contact
@@ -297,6 +304,10 @@ private:
     bool caught_ = false;
     bool docked_ = false;
     bool landed_ = false;  // standing on its legs, held to its body (hold_landed)
+    // Riding a carrier (move_landed_hold): the held pose moves relative to held_on_ with these (body-fixed axes).
+    bool carried_ = false;
+    math::Vec3 carried_cg_velocity_fixed_mps_;
+    math::Vec3 carried_angular_velocity_fixed_radps_;
     bool legs_on_site_ = false;  // set every tick by the leg site for bodies on it
     double heat_rate_w_m2_ = 0.0;
     double radiative_heat_rate_w_m2_ = 0.0;

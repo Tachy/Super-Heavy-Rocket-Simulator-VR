@@ -2,8 +2,11 @@
 
 #include <limits>
 #include <map>
+#include <memory>
+#include <optional>
 #include <vector>
 
+#include "starsim/contact/deck_motion.hpp"
 #include "starsim/contact/landing_legs.hpp"
 #include "starsim/contact/landing_surface.hpp"
 #include "starsim/vehicle/flight_body.hpp"
@@ -69,6 +72,19 @@ public:
     math::Vec3 to_site(const math::Vec3& fixed_m) const;
     contact::SitePose site_pose(const vehicle::FlightBody& body, const environment::BodyFrame& frame) const;
 
+    // The deck of a drone-ship site moves with the sea (sea state, Task 3): contact and judgement are evaluated in the
+    // moving deck frame against the unchanged LandingSurface::Deck, and a landed stage rides the deck
+    // (FlightBody::move_landed_hold). `sea_origin`: the sea's time origin (DeckMotion time = epoch - sea_origin).
+    // nullptr: the fixed deck (exactly as without). Needs a deck surface; set it before a stage lands (a landed
+    // stage's deck-relative pose is taken at its landing).
+    void set_deck_motion(std::shared_ptr<const contact::DeckMotion> motion, time::Epoch sea_origin);
+    const contact::DeckMotion* deck_motion() const { return deck_motion_.get(); }
+    std::optional<contact::DeckPose> deck_pose(time::Epoch epoch) const;  // nullopt: no deck motion
+    // Moves every stage landed on the moving deck to the deck's pose at `epoch` (after_tick does it each tick; the
+    // session calls it after a coast). Nothing without deck motion.
+    void follow_deck(const std::vector<vehicle::FlightBody*>& bodies, const vehicle::FlightEnvironment& env,
+                     time::Epoch epoch);
+
 private:
     struct Track {
         contact::LegGeometry geometry;
@@ -77,14 +93,30 @@ private:
         double at_rest_s = 0.0;
         LegTouchdown touchdown = LegTouchdown::None;
         bool on_site = true;
+        // Landed on the moving deck: bottom point and attitude in the deck-attached site frame (Carrier), fixed.
+        std::optional<math::Vec3> held_bottom_m;
+        math::Mat3 held_body_to_deck = math::Mat3::identity();
     };
     Track& track(const vehicle::FlightBody& body);
+
+    // The deck-attached site frame at an epoch: the site frame carried along by the deck's heave, roll and pitch
+    // (identity and zero on a level deck at rest, so the deck stays the rectangle at z = 0 with its heading).
+    struct Carrier {
+        math::Mat3 to_site = math::Mat3::identity();  // carrier axes -> site axes
+        math::Vec3 origin_site_m;
+        math::Vec3 velocity_site_mps;
+        math::Vec3 angular_velocity_site_radps;
+    };
+    Carrier carrier(time::Epoch epoch) const;
+    static contact::SitePose relative_pose(const contact::SitePose& site_pose, const Carrier& carrier);
 
     LegSite site_;
     SiteFrame frame_;
     contact::LandingSurface surface_;
     std::map<const vehicle::FlightBody*, Track> tracks_;
     double tick_s_ = 0.0;
+    std::shared_ptr<const contact::DeckMotion> deck_motion_;
+    time::Epoch sea_origin_;
 };
 
 }  // namespace starsim::sim

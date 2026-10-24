@@ -110,11 +110,10 @@ DeckPose DeckMotion::pose(double t_s) const {
     return p;
 }
 
-DeckFrame DeckMotion::frame(double t_s) const {
-    const DeckPose p = pose(t_s);
+DeckFrame deck_frame(const DeckPose& p, double deck_heading_rad) {
     // level deck axes in the site frame: bow along the heading (clockwise from north), port to its left, up
-    const math::Vec3 bow{std::sin(deck_heading_rad_), std::cos(deck_heading_rad_), 0.0};
-    const math::Vec3 port{-std::cos(deck_heading_rad_), std::sin(deck_heading_rad_), 0.0};
+    const math::Vec3 bow{std::sin(deck_heading_rad), std::cos(deck_heading_rad), 0.0};
+    const math::Vec3 port{-std::cos(deck_heading_rad), std::sin(deck_heading_rad), 0.0};
     const math::Mat3 level = math::Mat3::from_columns(bow, port, {0.0, 0.0, 1.0});
     // roll phi about the bow axis (port up), then pitch about the level port axis: a right-handed rotation by
     // alpha = -pitch raises the bow
@@ -136,6 +135,8 @@ DeckFrame DeckMotion::frame(double t_s) const {
     f.angular_velocity_site_radps = level * w_level;
     return f;
 }
+
+DeckFrame DeckMotion::frame(double t_s) const { return deck_frame(pose(t_s), deck_heading_rad_); }
 
 DeckMotionStatistics DeckMotion::statistics() const {
     double heave = 0.0, rate = 0.0, tilt = 0.0;

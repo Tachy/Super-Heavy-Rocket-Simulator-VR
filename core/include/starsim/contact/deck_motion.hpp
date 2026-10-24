@@ -53,6 +53,10 @@ struct DeckFrame {
     math::Vec3 angular_velocity_site_radps;
 };
 
+// The deck frame of a pose (DeckMotion::frame); deck_heading_rad: the bow's direction, clockwise from north. A
+// zero pose gives the level deck axes.
+DeckFrame deck_frame(const DeckPose& pose, double deck_heading_rad);
+
 // Significant values (2 sigma) from the spectrum; the tilt is the combined roll / pitch angle,
 // 2 sqrt(var(roll) + var(pitch)).
 struct DeckMotionStatistics {

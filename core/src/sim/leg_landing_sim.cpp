@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <stdexcept>
 
 #include "starsim/contact/primitives.hpp"
 #include "starsim/frames/geodetic.hpp"
@@ -70,6 +71,59 @@ contact::SitePose LegLandingSim::site_pose(const vehicle::FlightBody& body, cons
     return p;
 }
 
+void LegLandingSim::set_deck_motion(std::shared_ptr<const contact::DeckMotion> motion, time::Epoch sea_origin) {
+    if (motion && !surface_.deck) throw std::logic_error("set_deck_motion: the site has no deck");
+    deck_motion_ = std::move(motion);
+    sea_origin_ = sea_origin;
+}
+
+std::optional<contact::DeckPose> LegLandingSim::deck_pose(time::Epoch epoch) const {
+    if (!deck_motion_) return std::nullopt;
+    return deck_motion_->pose(epoch - sea_origin_);
+}
+
+LegLandingSim::Carrier LegLandingSim::carrier(time::Epoch epoch) const {
+    const auto f = deck_motion_->frame(epoch - sea_origin_);
+    // the level deck axes (bow, port, up) of the zero pose: deck_to_site x level^T rotates site axes with the deck
+    const auto level = contact::deck_frame(contact::DeckPose{}, surface_.deck->heading_rad).deck_to_site;
+    return {f.deck_to_site * transpose(level), f.origin_site_m, f.velocity_site_mps, f.angular_velocity_site_radps};
+}
+
+// cg' = M^T (cg - o); v' = M^T (v - v_o - w_d x (cg - o)); w' = M^T (w - w_d); body_to_deck = M^T body_to_site.
+contact::SitePose LegLandingSim::relative_pose(const contact::SitePose& p, const Carrier& c) {
+    const math::Mat3 to_carrier = transpose(c.to_site);
+    const Vec3 r = p.cg_m - c.origin_site_m;
+    contact::SitePose q = p;
+    q.cg_m = to_carrier * r;
+    q.velocity_mps = to_carrier * (p.velocity_mps - c.velocity_site_mps - cross(c.angular_velocity_site_radps, r));
+    q.angular_velocity_radps = to_carrier * (p.angular_velocity_radps - c.angular_velocity_site_radps);
+    q.body_to_site = to_carrier * p.body_to_site;
+    return q;
+}
+
+void LegLandingSim::follow_deck(const std::vector<vehicle::FlightBody*>& bodies, const vehicle::FlightEnvironment& env,
+                                time::Epoch epoch) {
+    if (!deck_motion_) return;
+    const auto frame = vehicle::reference_body_of(env, site_.body).frame(epoch);
+    const auto c = carrier(epoch);
+    for (auto* body : bodies) {
+        const auto it = tracks_.find(body);
+        if (it == tracks_.end() || it->second.touchdown != LegTouchdown::Landed || !it->second.held_bottom_m ||
+            !body->resting()) {
+            continue;
+        }
+        const auto& tr = it->second;
+        const Vec3 bottom = c.origin_site_m + c.to_site * *tr.held_bottom_m;
+        const math::Mat3 body_to_site = c.to_site * tr.held_body_to_deck;
+        const double cg_station = body->vehicle().mass_properties().cg_station_m;
+        const Vec3 cg = bottom + body_to_site * Vec3{cg_station, 0.0, 0.0};
+        const Vec3 velocity = c.velocity_site_mps + cross(c.angular_velocity_site_radps, cg - c.origin_site_m);
+        const math::Mat3& s = frame_.site_to_fixed;
+        body->move_landed_hold(frame, frame_.origin_fixed_m + s * bottom, math::Quat::from_matrix(s * body_to_site),
+                               s * velocity, s * c.angular_velocity_site_radps);
+    }
+}
+
 LegLandingSim::Track& LegLandingSim::track(const vehicle::FlightBody& body) {
     auto it = tracks_.find(&body);
     if (it == tracks_.end()) {
@@ -85,6 +139,9 @@ void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
                                 time::Epoch epoch) {
     const auto frame = vehicle::reference_body_of(env, site_.body).frame(epoch);
     const math::Mat3 site_to_gcrf = frame.transform.rotation * frame_.site_to_fixed;
+    // A moving deck: contact in the deck-attached frame, the wrench rotated back to the site frame.
+    const std::optional<Carrier> deck = deck_motion_ ? std::optional<Carrier>(carrier(epoch)) : std::nullopt;
+    const math::Mat3 contact_to_gcrf = deck ? site_to_gcrf * deck->to_site : site_to_gcrf;
     for (auto* body : bodies) {
         const auto& v = body->vehicle();
         if (!v.has_landing_legs()) continue;
@@ -106,18 +163,19 @@ void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
             continue;
         }
         auto& tr = track(*body);
+        const auto contact_pose = deck ? relative_pose(pose, *deck) : pose;
         if (v.leg_deployment() < 1.0) {  // legs still moving: no support, only the base can touch
             auto base_only = tr.geometry;
             base_only.feet.clear();
-            tr.contact = contact::leg_contact(base_only, tr.crushed_m, pose, surface_);
+            tr.contact = contact::leg_contact(base_only, tr.crushed_m, contact_pose, surface_);
             continue;
         }
         const auto mass = v.mass_properties();
         const contact::FrictionLimit limit{mass.mass_kg, mass.inertia_kg_m2, tick_s_};
-        tr.contact = contact::leg_contact(tr.geometry, tr.crushed_m, pose, surface_, &limit);
+        tr.contact = contact::leg_contact(tr.geometry, tr.crushed_m, contact_pose, surface_, &limit);
         if (tr.contact.feet_in_contact > 0) {
-            body->apply_external_wrench(site_to_gcrf * tr.contact.force_n,
-                                        body->state().attitude.inverse_rotate(site_to_gcrf * tr.contact.torque_nm));
+            body->apply_external_wrench(contact_to_gcrf * tr.contact.force_n,
+                                        body->state().attitude.inverse_rotate(contact_to_gcrf * tr.contact.torque_nm));
         }
     }
 }
@@ -125,12 +183,14 @@ void LegLandingSim::before_tick(const std::vector<vehicle::FlightBody*>& bodies,
 void LegLandingSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, const vehicle::FlightEnvironment& env,
                                time::Epoch epoch_end, double dt_s) {
     const auto frame = vehicle::reference_body_of(env, site_.body).frame(epoch_end);
+    const std::optional<Carrier> deck = deck_motion_ ? std::optional<Carrier>(carrier(epoch_end)) : std::nullopt;
     for (auto* body : bodies) {
         auto it = tracks_.find(body);
         if (it == tracks_.end() || it->second.touchdown != LegTouchdown::None || !it->second.on_site) continue;
         auto& tr = it->second;
         const auto& c = tr.contact;
-        const auto pose = site_pose(*body, frame);
+        // judged relative to the deck when it moves (tilt to the deck normal, motion relative to the deck)
+        const auto pose = deck ? relative_pose(site_pose(*body, frame), *deck) : site_pose(*body, frame);
         const Vec3 axis = pose.body_to_site * Vec3{1.0, 0.0, 0.0};
         const double tilt = std::acos(std::clamp(axis.z, -1.0, 1.0));
         if (std::getenv("STARSIM_DEBUG_LEGS")) {  // diagnostics
@@ -146,8 +206,15 @@ void LegLandingSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, 
         }
         auto end = [&](LegTouchdown result) {
             tr.touchdown = result;
-            if (result == LegTouchdown::Landed) body->hold_landed(frame, site_.body);
-            else body->mark_impacted();
+            if (result == LegTouchdown::Landed) {
+                body->hold_landed(frame, site_.body);
+                if (deck) {  // rides the deck from here: its pose relative to the deck, kept
+                    tr.held_body_to_deck = pose.body_to_site;
+                    tr.held_bottom_m = pose.cg_m - pose.body_to_site * Vec3{pose.cg_station_m, 0.0, 0.0};
+                }
+            } else {
+                body->mark_impacted();
+            }
         };
         if (c.stroke_exhausted || c.base_contact) {
             end(LegTouchdown::Impact);
@@ -163,6 +230,7 @@ void LegLandingSim::after_tick(const std::vector<vehicle::FlightBody*>& bodies, 
             tr.at_rest_s = 0.0;
         }
     }
+    follow_deck(bodies, env, epoch_end);  // the landed stages ride the deck (and the ones just landed join it)
 }
 
 void LegLandingSim::release(const vehicle::FlightBody& body) {
@@ -170,6 +238,7 @@ void LegLandingSim::release(const vehicle::FlightBody& body) {
     if (it == tracks_.end()) return;
     it->second.touchdown = LegTouchdown::None;
     it->second.at_rest_s = 0.0;
+    it->second.held_bottom_m.reset();
 }
 
 LegTouchdown LegLandingSim::touchdown(const vehicle::FlightBody& body) const {

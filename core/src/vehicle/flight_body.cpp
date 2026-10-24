@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <limits>
+#include <stdexcept>
 
 #include "starsim/aero/entry_heating.hpp"
 #include "starsim/aero/parachute.hpp"
@@ -288,8 +289,14 @@ void FlightBody::follow_pad(const environment::BodyFrame& frame) {
     const double cg = vehicle_->mass_properties().cg_station_m;
     const Vec3 cg_fixed = pad_fixed_m_ + attitude_fixed_.rotate(Vec3{cg, 0.0, 0.0});
     state_.position_gcrf_m = frame.position_gcrf(cg_fixed);
-    state_.velocity_gcrf_mps = frame.velocity_gcrf(cg_fixed, {});
     state_.attitude = (Quat::from_matrix(frame.transform.rotation) * attitude_fixed_).normalized();
+    if (carried_) {  // riding a moving deck (move_landed_hold)
+        state_.velocity_gcrf_mps = frame.velocity_gcrf(cg_fixed, carried_cg_velocity_fixed_mps_);
+        state_.angular_velocity_body_radps = state_.attitude.inverse_rotate(
+            frame.rotation_gcrf_radps + frame.transform.rotation * carried_angular_velocity_fixed_radps_);
+        return;
+    }
+    state_.velocity_gcrf_mps = frame.velocity_gcrf(cg_fixed, {});
     state_.angular_velocity_body_radps = state_.attitude.inverse_rotate(frame.rotation_gcrf_radps);
 }
 
@@ -322,6 +329,7 @@ void FlightBody::hold_fixed(const environment::BodyFrame& frame, ephemeris::Body
     reference_ = body;
     caught_ = true;
     resting_ = false;
+    carried_ = false;
     forget_boil_off();
     follow_pad(frame);
 }
@@ -336,9 +344,23 @@ void FlightBody::hold_landed(const environment::BodyFrame& frame, ephemeris::Bod
     landed_ = true;
 }
 
-// The held pose (follow_pad) already moves with the body: the integration starts from it without a jump.
+void FlightBody::move_landed_hold(const environment::BodyFrame& frame, const Vec3& pad_fixed_m,
+                                  const Quat& attitude_fixed, const Vec3& cg_velocity_fixed_mps,
+                                  const Vec3& angular_velocity_fixed_radps) {
+    if (!landed_) throw std::logic_error("move_landed_hold: body is not landed");
+    pad_fixed_m_ = pad_fixed_m;
+    attitude_fixed_ = attitude_fixed;
+    carried_cg_velocity_fixed_mps_ = cg_velocity_fixed_mps;
+    carried_angular_velocity_fixed_radps_ = angular_velocity_fixed_radps;
+    carried_ = true;
+    follow_pad(frame);
+}
+
+// The held pose (follow_pad) already moves with the body (and its carrier): the integration starts from it without a
+// jump.
 void FlightBody::release_landed() {
     landed_ = false;
+    carried_ = false;
     resting_ = false;
     forget_boil_off();
 }

@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 
+#include "starsim/config/drone_ship_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/environment/reference_body.hpp"
 #include "starsim/math/mat3.hpp"
@@ -58,12 +59,14 @@ private:
 // What carries a landing stage, in its site frame: origin on the support surface at the site (pad centre or deck
 // centre), x east, y north, z up. Flat unless a field is given.
 struct LandingSurface {
-    // A drone ship's deck: a rectangle at z = 0 over the sea at z = -freeboard_m. Held on station, level (no sea state).
+    // A drone ship's deck: a rectangle at z = 0 over the sea at z = -freeboard_m. Held on station, level here; with a
+    // sea state the leg landing evaluates it in the moving deck frame (LegLandingSim::set_deck_motion).
     struct Deck {
         double half_length_m = 0.0;  // along the long axis
         double half_width_m = 0.0;
         double heading_rad = 0.0;    // long axis, clockwise from north
         double freeboard_m = 0.0;    // deck above the sea
+        config::DroneShipHull hull;  // its hull's motion data (contact::DeckMotion)
     };
     std::optional<Deck> deck;              // none: a ground plane at z = 0
     std::optional<config::SeaConfig> sea;  // ground plane only: water beyond the shoreline (still at z = 0)

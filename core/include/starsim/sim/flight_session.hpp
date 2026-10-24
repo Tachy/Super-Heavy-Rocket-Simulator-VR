@@ -33,6 +33,7 @@
 #include "starsim/environment/geoid.hpp"
 #include "starsim/environment/gravity.hpp"
 #include "starsim/environment/reference_body.hpp"
+#include "starsim/environment/sea_state.hpp"
 #include "starsim/ephemeris/interpolated_ephemeris.hpp"
 #include "starsim/frames/interpolated_orientation.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
@@ -700,6 +701,17 @@ public:
     const environment::Geoid& geoid() const { return geoid_; }
     // Mean sea level above the WGS84 ellipsoid: the terrain's fine geoid when set, else the coarse one.
     double sea_height_m(double latitude_rad, double longitude_rad) const;
+    // Sea state at the drone ship's station (sea state and deck motion, Task 3): a drone-ship landing zone's deck
+    // heaves, rolls and pitches with it (contact::DeckMotion) while the fidelity flag deck_motion is on (default) and
+    // the sea is not calm; nullopt / calm / flag off: the fixed level deck, exactly as before. The sea's time origin is
+    // the session epoch at this call rounded down to a whole TDB hour [call] (deterministic per mission). Set it after
+    // the landing zone and before a stage lands; it sets the current leg site's deck motion (pads ignore it).
+    void set_sea_state(std::optional<environment::SeaStateConfig> sea);
+    const std::optional<environment::SeaState>& sea_state() const { return sea_state_; }
+    void set_deck_motion(bool on);  // fidelity flag
+    bool deck_motion() const { return deck_motion_; }
+    // The landing zone's deck now (nullopt: no deck or no deck motion).
+    std::optional<contact::DeckPose> deck_pose() const { return legs_->deck_pose(epoch_); }
     const LegLandingSim& leg_landing() const { return *legs_; }
     LegTouchdown leg_touchdown(size_t body_index) const { return legs_->touchdown(*bodies_.at(body_index).body); }
     std::vector<double> leg_crushed_m(size_t body_index) const { return legs_->crushed_m(*bodies_.at(body_index).body); }
@@ -1179,6 +1191,12 @@ private:
     bool realtime_planning_ = false;
     std::unique_ptr<CatchTowerSim> tower_;
     std::unique_ptr<LegLandingSim> legs_;  // always present (site ground plane by default)
+    std::optional<environment::SeaState> sea_state_;  // set_sea_state
+    time::Epoch sea_origin_;
+    bool deck_motion_ = true;  // fidelity flag
+    // The deck motion of a landing-zone site's deck (nullptr: fixed deck) and setting it on the current leg site.
+    std::shared_ptr<const contact::DeckMotion> deck_motion_for(const LaunchSite& site) const;
+    void refresh_deck_motion();
     void reset_leg_landing();              // new bodies: no stale tracks
     void reset_mission_state();            // new flight: autopilot off, no ascent guidance, burn or ship return
     std::optional<gnc::BoosterReturnParameters> booster_return_;

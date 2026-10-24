@@ -470,7 +470,7 @@ LaunchSite drone_ship_site(const config::DroneShipConfig& ship, double latitude_
     site.height_m = sea_height_m + ship.freeboard_m;
     site.pad_radius_m = 0.5 * ship.deck_width_m;
     site.deck = contact::LandingSurface::Deck{0.5 * ship.deck_length_m, 0.5 * ship.deck_width_m, heading_rad,
-                                              ship.freeboard_m};
+                                              ship.freeboard_m, ship.hull};
     site.sea = config::SeaConfig{heading_rad + 0.5 * constants::pi, 0.5 * ship.deck_width_m};
     return site;
 }
@@ -938,6 +938,7 @@ time::Epoch FlightSession::advance_to(time::Epoch target, int max_ticks) {
         if (coast > 1.0) {
             for (auto& flying : bodies_) flying.body->coast(env_, epoch_, coast);
             epoch_ += coast;
+            if (legs_->deck_motion()) legs_->follow_deck(body_pointers(), env_, epoch_);  // landed stages ride the deck
             sync_docked();
             docked_update(coast, true);
             if (autopilot_.state == AutopilotState::Burn) {
@@ -1277,6 +1278,10 @@ std::unique_ptr<LegLandingSim> FlightSession::earth_leg_site(const LaunchSite& s
     contact::LandingSurface ground;
     if (landing_zone && site.deck) {
         ground.deck = site.deck;
+        auto legs = std::make_unique<LegLandingSim>(site.latitude_rad, site.longitude_rad, site.height_m,
+                                                    std::move(ground), tick_s);
+        if (auto motion = deck_motion_for(site)) legs->set_deck_motion(std::move(motion), sea_origin_);
+        return legs;
     } else if (earth_terrain_) {
         const LegSite leg_site{ephemeris::Body::Earth, site.latitude_rad, site.longitude_rad, site.height_m,
                                earth_leg_site_tracking_radius_m};
@@ -1288,6 +1293,33 @@ std::unique_ptr<LegLandingSim> FlightSession::earth_leg_site(const LaunchSite& s
         ground.sea = site.sea;
     }
     return std::make_unique<LegLandingSim>(site.latitude_rad, site.longitude_rad, site.height_m, std::move(ground), tick_s);
+}
+
+std::shared_ptr<const contact::DeckMotion> FlightSession::deck_motion_for(const LaunchSite& site) const {
+    if (!deck_motion_ || !sea_state_ || sea_state_->calm() || !site.deck) return nullptr;
+    return std::make_shared<const contact::DeckMotion>(*sea_state_, site.deck->hull, site.deck->heading_rad);
+}
+
+// Only the landing zone's deck moves (a launch site's leg site is a pad or terrain, never a deck).
+void FlightSession::refresh_deck_motion() {
+    if (!landing_zone_ || !landing_zone_->deck || !legs_->surface().deck) return;
+    legs_->set_deck_motion(deck_motion_for(*landing_zone_), sea_origin_);
+}
+
+void FlightSession::set_sea_state(std::optional<environment::SeaStateConfig> sea) {
+    if (sea) {
+        sea_state_.emplace(*sea);
+    } else {
+        sea_state_.reset();
+    }
+    constexpr double hour_s = constants::seconds_per_day / 24.0;
+    sea_origin_ = time::Epoch::from_tdb_seconds_past_j2000(std::floor(epoch_.tdb_seconds_past_j2000() / hour_s) * hour_s);
+    refresh_deck_motion();
+}
+
+void FlightSession::set_deck_motion(bool on) {
+    deck_motion_ = on;
+    refresh_deck_motion();
 }
 
 void FlightSession::set_landing_surface(double latitude_rad, double longitude_rad, double height_m,
