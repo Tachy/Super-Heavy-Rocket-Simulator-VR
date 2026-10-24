@@ -26,6 +26,11 @@ const MAX_SAGITTA_M := 0.01
 const MORPH_END_MARGIN := 0.97
 ## [E] Pooled MeshInstance3Ds kept for reuse (more are freed).
 const POOL_MAX := 256
+## Morph start is pulled back to at most this fraction of the end (a safety net: real nodes stay below it, see the
+## quadtree test).
+const MORPH_START_CLAMP := 0.99
+## Morph range of the level-1 roots: they have no parent mesh, so they never morph (the shader's default: factor 0).
+const NO_MORPH := Vector2(1.0e30, 2.0e30)
 
 ## False while the body is in scaled space (centre beyond CelestialBody.SCALED_SPACE_DISTANCE_M): then nothing is drawn
 ## and the body's ellipsoid mesh stands in.
@@ -97,12 +102,21 @@ func setup(heights: HeightSource, imagery_source: ImagerySource, body_radius_m: 
 ## size parent_size_m. Start: the node is unmorphed out to its merge distance plus its sphere's diameter, so it shows
 ## its own surface whenever its children appear (LOD_FACTOR * size) or vanish (MERGE_FACTOR * LOD_FACTOR * size). End:
 ## fully morphed (its parent's surface) wherever it can be when its parent splits (LOD_FACTOR * parent size from the
-## parent's sphere). End must exceed start; if a node's sphere is too large for that (never for real nodes, see the
-## quadtree test) start is pulled back below end.
+## parent's sphere). End must exceed start; if a node's sphere is too large for that (never for nodes below the roots,
+## see the quadtree test) start is pulled back to MORPH_START_CLAMP * end.
 static func morph_range_m(size_m: float, node_radius_m: float, parent_size_m: float) -> Vector2:
 	var end := MORPH_END_MARGIN * LOD_FACTOR * parent_size_m
 	var start := MERGE_FACTOR * LOD_FACTOR * size_m + 2.0 * node_radius_m
-	return Vector2(minf(start, 0.99 * end), end)
+	return Vector2(minf(start, MORPH_START_CLAMP * end), end)
+
+
+## Morph range of node `key` with bounding radius node_radius_m on a body of mean radius body_radius_m: NO_MORPH for
+## the roots (no parent mesh), morph_range_m below them.
+static func node_morph_range_m(key: Vector4i, node_radius_m: float, body_radius_m: float) -> Vector2:
+	if key.y <= ROOT_LEVEL:
+		return NO_MORPH
+	return morph_range_m(CubeSphere.node_size_m(key, body_radius_m), node_radius_m,
+			CubeSphere.node_size_m(CubeSphere.parent(key), body_radius_m))
 
 
 ## Morph factor of a vertex distance_m from the camera (the shader's terrain_morph_factor).
@@ -332,8 +346,7 @@ func _upload(result: Dictionary) -> void:
 	node.center_fixed = result["center_fixed"]
 	node.radius_m = result["radius_m"]
 	node.size_m = CubeSphere.node_size_m(key, radius_m)
-	node.morph_range_m = morph_range_m(node.size_m, node.radius_m, CubeSphere.node_size_m(CubeSphere.parent(key),
-			radius_m))
+	node.morph_range_m = node_morph_range_m(key, node.radius_m, radius_m)
 	node.max_resolution_m = result["max_resolution_m"]
 	node.material = material
 	node.instance = _pool.pop_back() if not _pool.is_empty() else _new_instance()

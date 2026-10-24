@@ -64,6 +64,10 @@ public:
                                       const godot::PackedFloat64Array& longitudes_deg) const;
     // Spacing in metres of the finest terrain grid at a point; INF without the terrain.
     double surface_resolution_m(const godot::String& body, double latitude_deg, double longitude_deg) const;
+    // The finest of those spacings over latitude / longitude points (degrees; a renderer node's lattice); INF without
+    // the terrain or points. Thread-safe like surface_samples.
+    double surface_finest_resolution_m(const godot::String& body, const godot::PackedFloat64Array& latitudes_deg,
+                                       const godot::PackedFloat64Array& longitudes_deg) const;
 
 protected:
     static void _bind_methods();

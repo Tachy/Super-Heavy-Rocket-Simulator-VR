@@ -2,10 +2,13 @@
 # godot --path game --script res://tests/render_check.gd -- --utc=2024-04-08T18:42:00 --focus=earth
 # Vehicle: --vehicle=starship_block3 --site=starbase_olp1 [--fly=40] (ignite, liftoff at 3 s, fly N s)
 #          [--autopilot] (ascent autopilot instead of manual) [--circularize] (plan node afterwards)
+# Ground view: --lat= --lon= [--height=0] [--body=moon] (selenographic, MOON_ME; --height defaults to the lunar
+#          surface there, --eye_height=2 above it) with --azimuth / --elevation / --fov
 # Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
 # Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed).
 # Webcast overlay: --webcast [--mission=starship_leo] (start the mission at --utc) [--t_plus=75] (advance to T+75 s)
-#          or [--at_event=entry_interface,<offset s>] (to an event of the mission timeline, recorded or predicted)
+#          or [--at_event=entry_interface,<offset s>[,<n>]] (to the n-th event of that kind in the mission timeline,
+#          recorded first, else predicted; flies until it appears)
 #          [--wait_on_pad] (a launch window's wait on the pad: T-) [--view=1] (Tab presses: switch the viewed object)
 #          [--legacy_hud] (F1: the old HUD too)
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
@@ -16,11 +19,15 @@ const FRAMES_TO_SETTLE := 6
 const TERRAIN_MAX_FRAMES := 6000
 ## The flight session's fixed tick (200 Hz, sim::FlightSession): --t_plus aims a tick late (the grid need not hit T-0).
 const SIM_TICK_S := 0.005
+## --at_event: flight chunk and limit while the event is not yet in the mission timeline (s).
+const EVENT_SEARCH_STEP_S := 3600.0
+const EVENT_SEARCH_MAX_S := 20.0 * 86400.0
 
 var _args := {}
 var _main: Node
 var _frames := 0
 var _terrain_idle := 0  ## consecutive frames without terrain loading
+var _found_event_tdb_s := NAN  ## --at_event: the event's instant found by flying (_fly_until_event)
 
 
 func _initialize() -> void:
@@ -38,8 +45,7 @@ func _process(_delta: float) -> bool:
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
 		world.set_focus(_args.get("focus", World.FOCUS_EARTH))
 		if _args.has("lat"):
-			world.set_ground_site({"id": "custom", "name": "custom", "latitude_deg": float(_args["lat"]),
-					"longitude_deg": float(_args["lon"]), "height_m": float(_args.get("height", "0"))})
+			_view_from_ground(world)
 		if _args.has("sea_lat"):
 			_view_at_sea(world)
 		var cam := world.camera
@@ -67,13 +73,16 @@ func _process(_delta: float) -> bool:
 				view.update_state({})
 	_frames += 1
 	# The streamed terrain loads over many frames: wait until nothing is loading (or give up after TERRAIN_MAX_FRAMES).
-	var terrain := world.earth_terrain
-	_terrain_idle = _terrain_idle + 1 if terrain.stats["nodes_loading"] == 0 else 0
+	var loading: int = world.earth_terrain.stats["nodes_loading"] + world.moon_terrain.stats["nodes_loading"]
+	_terrain_idle = _terrain_idle + 1 if loading == 0 else 0
 	if _frames >= FRAMES_TO_SETTLE and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES):
-		print("render_check: terrain after %d frames: %s" % [_frames, terrain.stats])
+		print("render_check: terrain after %d frames: Earth %s, Moon %s" % [_frames, world.earth_terrain.stats,
+				world.moon_terrain.stats])
 		if _args.has("webcast"):
 			var arc := (_main.get("overlay_host") as OverlayHost).overlay.timeline_arc
 			print("render_check: timeline scale ", arc.time_scale, " now ", arc.now_tdb_s, " events ", arc.events.size())
+		if world.flight.sim.is_active() and bool(world.flight.sim.lunar_site().get("present", false)):
+			_print_lunar_placement(world)
 		var out: String = _args.get("out", "user://render_check.png")
 		var error := root.get_viewport().get_texture().get_image().save_png(out)
 		print("render_check: saved %s (error %d)" % [out, error])
@@ -138,6 +147,16 @@ func _fly_mission(world: World) -> void:
 	world.flight.launch_site_id = sim.mission_site_id()
 	world.set_focus(World.FOCUS_VEHICLE)
 	world.clock.warp = 0.0
+	if _args.has("at_event") and _fly_until_event(sim):
+		# The search flew past the event (the sim cannot go back): the same mission again, flown to shortly before it.
+		var target_late := _mission_target(sim)
+		if sim.advance_to(target_late) > target_late - 600.0:
+			id = sim.start_mission(_args.get("mission", "starship_leo"), world.clock.tdb_s, _args.has("wait_on_pad"))
+			sim.wait_idle(600.0)
+			print("render_check: mission restarted ", sim.result(id))
+			world.set_focus(World.FOCUS_VEHICLE)
+			world.clock.warp = 0.0
+			_advance(sim, target_late - 600.0)
 	var target := _mission_target(sim)
 	if _args.has("at_event"):  # predicted events move while flying: approach, then aim again
 		_advance(sim, target - 600.0)
@@ -152,18 +171,67 @@ func _fly_mission(world: World) -> void:
 		(_main.get("legacy_hud") as CanvasLayer).visible = true
 	(_main.get("overlay_host") as OverlayHost).overlay.snap_timeline()
 	var index := world.view_target.resolve(sim)
+	var now := sim.advance_to(target)
+	print("render_check: events (s from now) ", sim.mission_timeline().get("events", []).map(
+			func(e): return "%s %.0f%s" % [e["kind"], float(e["tdb_s"]) - now, "?" if e["predicted"] else ""]))
 	print("render_check: mission clock ", sim.mission_timeline().get("clock_s"), "  viewed ", index, "  telemetry ",
 			sim.telemetry(index))
 
 
-## TDB of --t_plus after T-0 (default 75 s), or of --at_event=<kind>[,<offset s>] (its first occurrence).
+## Events of later mission phases (a lunar landing after the outbound coast) are neither recorded nor predicted at the
+## start: fly in EVENT_SEARCH_STEP_S chunks until the --at_event kind appears in the timeline (or EVENT_SEARCH_MAX_S).
+## Its instant is kept for _mission_target (a restarted mission has not reached it yet). True if it had to be searched.
+func _fly_until_event(sim: FlightSim) -> bool:
+	var spec := _event_spec()
+	var kind: String = spec[0]
+	var start := sim.mission_start_tdb_s()
+	var t := start
+	var wall0 := Time.get_ticks_msec()
+	while t - start < EVENT_SEARCH_MAX_S and sim.is_active():
+		var e := _find_event(sim.mission_timeline(), kind, spec[2])
+		if not e.is_empty():
+			print("render_check: event %s found after %.0f s of flight (%d ms, %s)" % [kind, t - start,
+					Time.get_ticks_msec() - wall0, "predicted" if e["predicted"] else "recorded"])
+			if not e["predicted"]:  # a predicted one moves (a resting lander's touchdown is always 'now')
+				_found_event_tdb_s = float(e["tdb_s"])
+			return t > start
+		t += EVENT_SEARCH_STEP_S
+		_advance(sim, t)
+	return false
+
+
+## The n-th (1-based) recorded event of a kind, else the n-th among recorded and predicted ones ({} if none).
+static func _find_event(timeline: Dictionary, kind: String, occurrence := 1) -> Dictionary:
+	var recorded: Array[Dictionary] = []
+	var all: Array[Dictionary] = []
+	for e: Dictionary in timeline.get("events", []):
+		if e["kind"] == kind:
+			all.append(e)
+			if not e["predicted"]:
+				recorded.append(e)
+	if recorded.size() >= occurrence:
+		return recorded[occurrence - 1]
+	return all[occurrence - 1] if all.size() >= occurrence else {}
+
+
+## (kind, offset s, occurrence) of --at_event=<kind>[,<offset s>[,<occurrence>]].
+func _event_spec() -> Array:
+	var spec := (_args["at_event"] as String).split(",")
+	return [spec[0], float(spec[1]) if spec.size() > 1 else 0.0, int(spec[2]) if spec.size() > 2 else 1]
+
+
+## TDB of --t_plus after T-0 (default 75 s), or of --at_event=<kind>[,<offset s>[,<n>]] (its n-th recorded occurrence,
+## else the n-th among all; an event recorded by _fly_until_event in an earlier run of the same mission first).
 func _mission_target(sim: FlightSim) -> float:
 	var timeline: Dictionary = sim.mission_timeline()
 	if _args.has("at_event"):
-		var spec := (_args["at_event"] as String).split(",")
-		for e: Dictionary in timeline.get("events", []):
-			if e["kind"] == spec[0]:
-				return float(e["tdb_s"]) + (float(spec[1]) if spec.size() > 1 else 0.0)
+		var spec := _event_spec()
+		var offset: float = spec[1]
+		if not is_nan(_found_event_tdb_s):
+			return _found_event_tdb_s + offset
+		var e := _find_event(timeline, spec[0], spec[2])
+		if not e.is_empty():
+			return float(e["tdb_s"]) + offset
 		print("render_check: no event %s in %s" % [spec[0], timeline.get("events", []).map(func(e): return e["kind"])])
 	var t0 = timeline.get("t0_tdb_s")
 	var zero := float(t0) if t0 != null else sim.mission_start_tdb_s()
@@ -177,6 +245,44 @@ func _advance(sim: FlightSim, target: float) -> void:
 		sim.wait_idle(5.0)
 		if sim.advance_to(target) >= target - 0.01 or not sim.is_active():
 			return
+
+
+# Lunar missions: the viewed body's CG taken into the drawn Moon's frame (the game's moon.fixed_to_gcrf, the frame of
+# the terrain mesh) against the landing site and the core's surface there; agreeing with the session's own
+# altitude_terrain_m shows that the render places the site where the simulation has it.
+func _print_lunar_placement(world: World) -> void:
+	var sim := world.flight.sim
+	var index := world.view_target.resolve(sim)
+	if index < 0:
+		return
+	var cg_fixed := world.moon.fixed_to_gcrf.transposed() * (world.view_target.cg_gcrf_m(sim, index) - world.moon_gcrf_m)
+	var ll := CubeSphere.lat_lon_deg(cg_fixed.normalized())
+	var surface: Dictionary = world.core.surface_samples("moon", PackedFloat64Array([ll.x]), PackedFloat64Array([ll.y]))
+	var surface_m: float = surface["height_m"][0] if bool(surface["present"]) else 0.0
+	var site: Dictionary = sim.lunar_site()
+	var site_fixed: Vector3 = site["position_moon_me_m"]
+	var horizontal_m := site_fixed.normalized().cross(cg_fixed.normalized()).length() * site_fixed.length()
+	print("render_check: lunar CG at %.5f, %.5f: %.2f m above the drawn surface (session altitude_terrain_m %.2f), "
+			% [ll.x, ll.y, cg_fixed.length() - World.MOON_RADIUS_M - surface_m, sim.telemetry(index)["altitude_terrain_m"]]
+			+ "%.1f m from the site %s" % [horizontal_m, site["name"]])
+
+
+# Ground view at --lat / --lon on the Earth or (--body=moon) the Moon; on the Moon --height defaults to the core's
+# surface there (the mean sphere without the lunar terrain).
+func _view_from_ground(world: World) -> void:
+	var lat := float(_args["lat"])
+	var lon := float(_args["lon"])
+	var body: String = _args.get("body", "earth")
+	var height := float(_args.get("height", "0"))
+	if body == "moon" and not _args.has("height"):
+		var samples: Dictionary = world.core.surface_samples("moon", PackedFloat64Array([lat]), PackedFloat64Array([lon]))
+		height = samples["height_m"][0] if bool(samples["present"]) else 0.0
+		print("render_check: lunar ground view at %.4f, %.4f: surface %.2f m" % [lat, lon, height])
+	var site := {"id": "custom", "name": "custom", "body": body, "latitude_deg": lat, "longitude_deg": lon,
+			"height_m": height}
+	if _args.has("eye_height"):
+		site["eye_height_m"] = float(_args["eye_height"])
+	world.set_ground_site(site)
 
 
 # Ground view at sea: the eye --eye_height (default 10 m) above the physics' surface at --sea_lat / --sea_lon (the

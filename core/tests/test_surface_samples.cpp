@@ -100,6 +100,51 @@ TEST_CASE("resolution follows the finest grid", "[environment][surface_samples]"
     CHECK(at(10.0, 20.0) == Catch::Approx(metres(90.0)).epsilon(1e-9));  // global relief
 }
 
+namespace {
+
+constexpr double moon_radius_m = 1737400.0;
+constexpr double tile_lat_deg = -84.79, tile_lon_deg = 29.2;
+
+// LDEM_16-like global grid (flat) and a 201 x 201 tile at 20 m (4 km square) centred on (tile_lat, tile_lon).
+environment::LunarTerrain flat_moon_with_tile() {
+    environment::CylindricalGrid global;
+    global.grid = {2880, 5760, 0.5, std::vector<std::int16_t>(2880 * 5760, 0)};
+    global.pixels_per_degree = 16.0;
+    global.zero_line = 1439.5;
+    global.zero_sample = -0.5;
+    environment::PolarStereographicTile tile;
+    tile.sphere_radius_m = moon_radius_m;
+    tile.scale_m = 20.0;
+    tile.pole_line = tile.pole_sample = 15199.5;
+    const auto [line, sample] = tile.position(tile_lat_deg * deg, tile_lon_deg * deg);
+    tile.first_line = static_cast<int>(std::lround(line)) - 100;
+    tile.first_sample = static_cast<int>(std::lround(sample)) - 100;
+    tile.grid = {201, 201, 0.5, std::vector<std::int16_t>(201 * 201, 0)};
+    return environment::LunarTerrain(std::move(global), {tile}, moon_radius_m);
+}
+
+}  // namespace
+
+TEST_CASE("finest resolution over points finds a tile covering one of them", "[environment][surface_samples]") {
+    const auto moon = flat_moon_with_tile();
+    const double ldem_m = moon_radius_m * deg / 16.0;
+    // A row of points 1 km apart along the meridian (~0.033 deg): only the middle one lies in the 4 km tile.
+    const double step_deg = 1000.0 / (moon_radius_m * deg);
+    std::vector<double> lat, lon;
+    for (int k = -5; k <= 5; ++k) {
+        if (k == 0) continue;
+        lat.push_back((tile_lat_deg + 3.0 * step_deg * k) * deg);
+        lon.push_back(tile_lon_deg * deg);
+    }
+    CHECK(environment::finest_resolution_m(moon, lat, lon) == Catch::Approx(ldem_m).epsilon(1e-9));
+    lat.push_back(tile_lat_deg * deg);
+    lon.push_back(tile_lon_deg * deg);
+    CHECK(environment::finest_resolution_m(moon, lat, lon) == Catch::Approx(20.0).epsilon(1e-9));
+    CHECK(std::isinf(environment::finest_resolution_m(moon, {}, {})));
+    const std::vector<double> one{0.1};
+    CHECK_THROWS_AS(environment::finest_resolution_m(moon, one, {}), std::invalid_argument);
+}
+
 TEST_CASE("lunar resolution in and outside the tile", "[environment][surface_samples]") {
     constexpr double R = 1737400.0;
     environment::CylindricalGrid global;

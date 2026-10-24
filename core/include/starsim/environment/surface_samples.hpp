@@ -19,4 +19,10 @@ struct SurfaceSamples {
 SurfaceSamples sample_surface(const Terrain& terrain, std::span<const double> latitude_rad,
                               std::span<const double> longitude_rad);
 
+// The finest Terrain::resolution_m at the given points (m): a terrain renderer node sampling its whole lattice finds a
+// site tile that covers only part of it. Infinity without points. The spans must have equal sizes
+// (std::invalid_argument otherwise). Thread-safe like sample_surface.
+double finest_resolution_m(const Terrain& terrain, std::span<const double> latitude_rad,
+                           std::span<const double> longitude_rad);
+
 }  // namespace starsim::environment

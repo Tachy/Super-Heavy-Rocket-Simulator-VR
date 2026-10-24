@@ -1,10 +1,14 @@
-# Headless test of the terrain quadtree (TerrainQuadtree): coverage, refinement, throttled loading, merge hysteresis and
-# (with data/) the finest mesh against the core's surface. Nodes are built synchronously (no worker threads).
+# Headless test of the terrain quadtree (TerrainQuadtree): coverage, refinement, throttled loading, merge hysteresis,
+# morph ranges (Earth and Moon) and (with data/) the finest mesh against the core's surface on the Earth and the Moon.
+# Nodes are built synchronously (no worker threads).
 # Run: godot --headless --path game --script res://tests/terrain_quadtree_test.gd
 extends SceneTree
 
 const EARTH_RADIUS_M := 6378137.0
+const MOON_RADIUS_M := HeightSource.MOON_RADIUS_M
 const EYE_HEIGHT_M := 2.0
+const MOON_EYE_HEIGHT_M := 10.0  ## the brief's camera height above the lunar surface
+const MOON_EDGE_INSET_M := 500.0  ## the tile-edge point lies this far inside the tile (in its 1 km blend band)
 const MAX_FRAMES := 4000
 const CELLS := TerrainNodeBuilder.CELLS
 const ROW := TerrainNodeBuilder.ROW
@@ -28,13 +32,18 @@ class WaveSource extends HeightSource:
 		return {"height_m": heights, "water": water}
 var _core: StarsimCore = null
 var _terrain := false
+var _moon_terrain := false
+var _config_dir := ""
 
 
 func _initialize() -> void:
-	var config_dir := ProjectSettings.globalize_path("res://").path_join("../config").simplify_path()
-	_sites = TomlLite.load_file(config_dir.path_join("launch_sites.toml")).get("site", [])
+	_config_dir = ProjectSettings.globalize_path("res://").path_join("../config").simplify_path()
+	_sites = TomlLite.load_file(_config_dir.path_join("launch_sites.toml")).get("site", [])
 	_core = StarsimCore.new()
-	_terrain = bool(_core.load_terrain(config_dir).get("earth", false))
+	var loaded := _core.load_terrain(_config_dir)
+	_terrain = bool(loaded.get("earth", false))
+	_moon_terrain = bool(loaded.get("moon", false))
+	_check_morph_ranges()
 	_check_flat_rule()
 	_check_hysteresis()
 	_check_morph_continuity()
@@ -44,21 +53,34 @@ func _initialize() -> void:
 	else:
 		print("  note  data/ Earth terrain absent: 'refines towards the camera' (data) and 'finest mesh matches the "
 				+ "core' skipped")
+	if _moon_terrain:
+		_check_moon_data()
+	else:
+		print("  note  data/ Moon terrain absent: 'moon refines to the 20 m tile' and 'moon finest mesh matches the "
+				+ "core' skipped")
 	print("TERRAIN QUADTREE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 
 
-## A quadtree on a height source (core null: the flat rule), synchronous loading, no imagery.
+## A quadtree on a height source (core null: the flat rule), synchronous loading, no imagery. The Moon (heights.body
+## "moon") gets its radius and shader.
 func _make_tree(with_core: bool, heights := HeightSource.new()) -> TerrainQuadtree:
 	heights.sites = _sites
 	heights.core = _core if with_core else null
+	var moon := heights.body == "moon"
 	var material := ShaderMaterial.new()
-	material.shader = load("res://shaders/terrain_earth.gdshader")
+	material.shader = load("res://shaders/terrain_moon.gdshader" if moon else "res://shaders/terrain_earth.gdshader")
 	var tree := TerrainQuadtree.new()
 	tree.synchronous = true
 	root.add_child(tree)
-	tree.setup(heights, null, EARTH_RADIUS_M, material)
+	tree.setup(heights, null, MOON_RADIUS_M if moon else EARTH_RADIUS_M, material)
 	return tree
+
+
+func _moon_heights() -> HeightSource:
+	var heights := HeightSource.new()
+	heights.body = "moon"
+	return heights
 
 
 func _site(id: String) -> Dictionary:
@@ -305,15 +327,110 @@ func _check_data() -> void:
 	tree.queue_free()
 
 
-## |drawn surface height - expected| at a geodetic point: the node rebuilt (same data as drawn), the point's geodetic
-## normal intersected with the node's triangles (morph 0).
+# Morph ranges: the level-1 roots have no parent mesh and never morph; every deeper node's range is open (start below
+# end, morph_range_m's safety clamp not reached) at a face centre and a face corner on the Earth and on the Moon (flat
+# surfaces; the data checks repeat it on the relief).
+func _check_morph_ranges() -> void:
+	for moon: bool in [false, true]:
+		var heights := _moon_heights() if moon else HeightSource.new()
+		var radius := MOON_RADIUS_M if moon else EARTH_RADIUS_M
+		var worst := INF  # smallest (end - start) / end
+		var worst_level := -1
+		for level in range(TerrainQuadtree.ROOT_LEVEL + 1, TerrainQuadtree.MAX_LEVEL + 1):
+			var middle := (1 << level) / 2
+			for key: Vector4i in [Vector4i(0, level, middle, middle), Vector4i(0, level, 0, 0)]:
+				var node := TerrainNodeBuilder.build(key, heights, null, radius)
+				var range_m := TerrainQuadtree.node_morph_range_m(key, _bounding_radius_m(node), radius)
+				var margin := (range_m.y - range_m.x) / range_m.y
+				if margin < worst:
+					worst = margin
+					worst_level = level
+		_check(worst > 1.0 - TerrainQuadtree.MORPH_START_CLAMP, "morph start < end for every level >= 2 (%s: smallest "
+				% ("Moon" if moon else "Earth") + "margin %.3f of the end, level %d)" % [worst, worst_level])
+	var tree := _make_tree(false, _moon_heights())
+	var roots_unmorphed := tree.drawn_keys().size() == 24
+	for key in tree.drawn_keys():
+		roots_unmorphed = roots_unmorphed and tree.node_info(key)["morph_range_m"] == TerrainQuadtree.NO_MORPH
+	_check(roots_unmorphed, "level-1 roots never morph (no parent mesh)")
+	tree.queue_free()
+
+
+## Largest vertex distance from the node centre (TerrainQuadtree's bounding radius).
+static func _bounding_radius_m(node: Dictionary) -> float:
+	var radius_sq := 0.0
+	for v: Vector3 in node["vertices"]:
+		radius_sq = maxf(radius_sq, v.length_squared())
+	return sqrt(radius_sq)
+
+
+# With the Moon terrain: 10 m above the IM-2 site and above a point inside the tile's edge the leaf spacing is at most
+# the tile's 20 m and the finest mesh equals core.surface_samples there; above a far-side point the tree stops at the
+# coarse limit (the LDEM_16 spacing or the curvature limit, whichever is finer), far above 20 m. Morph ranges of every
+# drawn node stay open on the relief.
+func _check_moon_data() -> void:
+	var tree := _make_tree(true, _moon_heights())
+	var site: Dictionary = TomlLite.load_file(_config_dir.path_join("lunar_sites.toml"))["site"][0]
+	var tile: Dictionary = TomlLite.load_file(_config_dir.path_join("../data/terrain").simplify_path()
+			.path_join(str(site["id"]) + ".toml"))["grid"]
+	var tile_m := float(tile["scale_m"])
+	var edge := _tile_point(tile, 0.5 * (int(tile["lines"]) - 1), int(tile["samples"]) - 1 - MOON_EDGE_INSET_M / tile_m)
+	var points := [["IM-2 site", float(site["latitude_deg"]), float(site["longitude_deg"])],
+			["%.0f m inside the tile edge" % MOON_EDGE_INSET_M, edge.x, edge.y]]
+	var ranges_open := true
+	for point: Array in points:
+		var lat: float = point[1]
+		var lon: float = point[2]
+		var samples: Dictionary = _core.surface_samples("moon", PackedFloat64Array([lat]), PackedFloat64Array([lon]))
+		var height: float = (samples["height_m"] as PackedFloat64Array)[0]
+		var t0 := Time.get_ticks_msec()
+		_converge(tree, tree.height_source.position_fixed(lat, lon, height + MOON_EYE_HEIGHT_M))
+		var key := _leaf_at(tree, lat, lon)
+		var spacing := CubeSphere.node_size_m(key, MOON_RADIUS_M) / CELLS
+		_check(spacing <= tile_m, "moon refines to the 20 m tile: %s, leaf level %d, spacing %.1f m (%d leaves, %d ms)"
+				% [point[0], key.y, spacing, tree.drawn_keys().size(), Time.get_ticks_msec() - t0])
+		var error := _surface_error_m(tree, key, lat, lon, height)
+		_check(error < 0.05, "moon finest mesh matches the core: %s, %.3f m (error %s m)"
+				% [point[0], height, String.num_scientific(error)])
+		for drawn in tree.drawn_keys():
+			var range_m: Vector2 = tree.node_info(drawn)["morph_range_m"]
+			ranges_open = ranges_open and range_m.x < TerrainQuadtree.MORPH_START_CLAMP * range_m.y
+	_check(ranges_open, "moon morph ranges open on the relief (every drawn node)")
+	var far_lat := 0.0
+	var far_lon := 180.0
+	var far_height: float = (_core.surface_samples("moon", PackedFloat64Array([far_lat]),
+			PackedFloat64Array([far_lon]))["height_m"] as PackedFloat64Array)[0]
+	_converge(tree, tree.height_source.position_fixed(far_lat, far_lon, far_height + MOON_EYE_HEIGHT_M))
+	var far_key := _leaf_at(tree, far_lat, far_lon)
+	var ldem_m := _core.surface_resolution_m("moon", far_lat, far_lon)
+	var limit := minf(ldem_m, tree.curvature_spacing_m)
+	var far_spacing := CubeSphere.node_size_m(far_key, MOON_RADIUS_M) / CELLS
+	var parent_spacing := CubeSphere.node_size_m(CubeSphere.parent(far_key), MOON_RADIUS_M) / CELLS
+	_check(far_spacing <= limit and parent_spacing > limit, "moon far side stops at the coarse limit: leaf level %d, "
+			% far_key.y + "spacing %.0f m (LDEM_16 %.0f m, curvature limit %.0f m)" % [far_spacing, ldem_m,
+			tree.curvature_spacing_m])
+	tree.queue_free()
+
+
+## Selenographic (lat, lon) in deg of a polar stereographic tile pixel (line, sample): the inverse of the core's
+## PolarStereographicTile::position (south pole: rho = 2 R tan(pi/4 + lat/2), x = rho sin lon, y = -rho cos lon).
+static func _tile_point(tile: Dictionary, line: float, sample: float) -> Vector2:
+	var scale := float(tile["scale_m"])
+	var x := (sample + float(tile["first_sample"]) - float(tile["pole_sample"])) * scale
+	var y := (line + float(tile["first_line"]) - float(tile["pole_line"])) * scale
+	var rho := sqrt(x * x + y * y)
+	var lat := 2.0 * atan(rho / (2.0 * float(tile["sphere_radius_m"]))) - PI / 2.0
+	return Vector2(rad_to_deg(lat), rad_to_deg(atan2(x, -y)))
+
+
+## |drawn surface height - expected| at a geodetic point (Earth: WGS84, Moon: sphere): the node rebuilt (same data as
+## drawn), the point's geodetic normal intersected with the node's triangles (morph 0).
 func _surface_error_m(tree: TerrainQuadtree, key: Vector4i, lat: float, lon: float, expected_m: float) -> float:
 	if key.x < 0:
 		return INF
-	var node := TerrainNodeBuilder.build(key, tree.height_source, null, EARTH_RADIUS_M)
+	var node := TerrainNodeBuilder.build(key, tree.height_source, null, tree.radius_m)
 	var vertices: PackedVector3Array = node["vertices"]
 	var center: Vector3 = node["center_fixed"]
-	var origin := HeightSource.geodetic_to_fixed(lat, lon, 0.0)
+	var origin := tree.height_source.position_fixed(lat, lon, 0.0)
 	var up := CubeSphere.geodetic_direction(lat, lon)
 	var face := key.x
 	var major := up.dot(CubeSphere.FACE_NORMAL[face])

@@ -224,7 +224,9 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 		"imagery_base": base,
 		"water_mask": _water_mask(heights, box),
 		"lat_lon_box": box,
-		"max_resolution_m": _max_resolution_m(key, heights),
+		# The finest data anywhere on the lattice: the quadtree stops splitting where even this is coarser than the mesh;
+		# a site tile covering only part of the node still counts (a lattice cell or more of it).
+		"max_resolution_m": heights.finest_resolution_m(lats, lons),
 	}
 
 
@@ -276,18 +278,6 @@ static func _water_mask(heights: HeightSource, box: Rect2) -> Image:
 			if water[k] != 0:
 				pixels[k] = 255
 	return Image.create_from_data(WATER_MASK_PX, WATER_MASK_PX, false, Image.FORMAT_L8, pixels)
-
-
-## The finest data resolution (m) at the node centre and its corners: the quadtree stops splitting where even this is
-## coarser than the mesh.
-static func _max_resolution_m(key: Vector4i, heights: HeightSource) -> float:
-	var points := CubeSphere.node_corners(key)
-	points.append(CubeSphere.node_center(key))
-	var result := INF
-	for d in points:
-		var ll := CubeSphere.lat_lon_deg(d)
-		result = minf(result, heights.resolution_m(ll.x, ll.y))
-	return result
 
 
 ## Grid vertex above each skirt vertex: the node border once around (b = 0, a = 64, b = 64, a = 0).

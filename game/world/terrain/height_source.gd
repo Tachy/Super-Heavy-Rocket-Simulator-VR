@@ -52,11 +52,12 @@ func sample(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array) -> Dicti
 	return {"height_m": heights, "water": water}
 
 
-## Horizontal resolution of the surface data at a point (m); INF without terrain data.
-func resolution_m(lat_deg: float, lon_deg: float) -> float:
+## The finest horizontal resolution of the surface data (m) over the given points (a node's lattice: a site tile
+## covering part of it counts); INF without terrain data.
+func finest_resolution_m(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array) -> float:
 	if core == null:
 		return INF
-	return core.surface_resolution_m(body, lat_deg, lon_deg)
+	return core.surface_finest_resolution_m(body, lats_deg, lons_deg)
 
 
 ## Body-fixed position (m) of a point at height_m above the reference surface (Earth: WGS84, Moon: sphere).

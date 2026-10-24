@@ -31,6 +31,7 @@ var earth_terrain := TerrainQuadtree.new()  ## streamed Earth surface (relief + 
 var water_waves := WaterWaves.new()  ## the sea's wave set (water.gdshaderinc), phases at the camera
 var towers: Array[TowerView] = []  ## catch towers of the launch sites
 var moon := CelestialBody.new()
+var moon_terrain := TerrainQuadtree.new()  ## streamed lunar surface (LDEM_16 + site tiles) while not in scaled space
 var sun_disk := MeshInstance3D.new()
 var sun_light := DirectionalLight3D.new()
 var stars := StarField.new()
@@ -122,6 +123,8 @@ func update_world() -> void:
 	water_waves.update(camera_fixed, t)
 	earth.body_mesh_visible = not earth_terrain.active
 	moon.place(cam)
+	moon_terrain.update_for_camera(moon.fixed_to_gcrf.transposed() * (cam - moon_gcrf_m))
+	moon.body_mesh_visible = not moon_terrain.active
 	var sun_local := earth.to_local_frame(sun_apparent_from_earth_m)
 	var moon_local := earth.to_local_frame(moon_apparent_from_earth_m)
 	_earth_material.set_shader_parameter("sun_position_local", sun_local)
@@ -131,8 +134,12 @@ func update_world() -> void:
 	RenderingServer.global_shader_parameter_set("earth_moon_position_local", moon_local)
 	RenderingServer.global_shader_parameter_set("water_wave_vectors", water_waves.vectors)
 	RenderingServer.global_shader_parameter_set("water_wave_phases", water_waves.phases)
-	_moon_material.set_shader_parameter("sun_position_local", moon.to_local_frame(sun_apparent_from_earth_m - moon_gcrf_m))
-	_moon_material.set_shader_parameter("earth_position_local", moon.to_local_frame(-moon_gcrf_m))
+	var moon_sun_local := moon.to_local_frame(sun_apparent_from_earth_m - moon_gcrf_m)
+	var moon_earth_local := moon.to_local_frame(-moon_gcrf_m)
+	_moon_material.set_shader_parameter("sun_position_local", moon_sun_local)
+	_moon_material.set_shader_parameter("earth_position_local", moon_earth_local)
+	RenderingServer.global_shader_parameter_set("moon_sun_position_local", moon_sun_local)
+	RenderingServer.global_shader_parameter_set("moon_earth_position_local", moon_earth_local)
 	_moon_material.set_shader_parameter("camera_position_local", moon.to_local_frame(cam - moon_gcrf_m))
 
 	_place_sun(sun_from_camera)
@@ -153,7 +160,8 @@ func launch_vehicle(vehicle_id: String, site: Dictionary, countdown_s := FlightC
 
 
 ## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml; optional eye_height_m
-## above height_m, default GROUND_EYE_HEIGHT_M).
+## above height_m, default GROUND_EYE_HEIGHT_M; optional body "moon": selenographic coordinates, height_m above the
+## mean sphere).
 func set_ground_site(site: Dictionary) -> void:
 	focus = site.get("id", "custom")
 	ground_site = site
@@ -196,9 +204,14 @@ func _update_camera(t: float) -> void:
 	if camera.mode == OrbitCamera.Mode.GROUND:
 		var lat := deg_to_rad(ground_site["latitude_deg"])
 		var lon := deg_to_rad(ground_site["longitude_deg"])
-		var rotation := earth.fixed_to_gcrf
-		camera.site_gcrf_m = core.geodetic_to_gcrf_m(ground_site["latitude_deg"], ground_site["longitude_deg"],
-				ground_site["height_m"] + float(ground_site.get("eye_height_m", GROUND_EYE_HEIGHT_M)), t)
+		var eye_m: float = ground_site["height_m"] + float(ground_site.get("eye_height_m", GROUND_EYE_HEIGHT_M))
+		var on_moon: bool = ground_site.get("body", "earth") == "moon"
+		var rotation := moon.fixed_to_gcrf if on_moon else earth.fixed_to_gcrf
+		if on_moon:  # selenographic (MOON_ME) on the mean sphere
+			camera.site_gcrf_m = moon_gcrf_m + rotation * (Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
+					* (MOON_RADIUS_M + eye_m))
+		else:
+			camera.site_gcrf_m = core.geodetic_to_gcrf_m(ground_site["latitude_deg"], ground_site["longitude_deg"], eye_m, t)
 		camera.site_up_gcrf = rotation * Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
 		camera.site_east_gcrf = rotation * Vector3(-sin(lon), cos(lon), 0.0)
 		camera.site_north_gcrf = rotation * Vector3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat))
@@ -271,6 +284,7 @@ func _setup_bodies(data_dir: String) -> void:
 	moon.name = "Moon"
 	moon.setup(MOON_RADIUS_M, 0.0, _moon_material)
 	add_child(moon)
+	_setup_moon_terrain()
 
 	var sphere := SphereMesh.new()
 	sphere.radius = 1.0
@@ -305,6 +319,23 @@ func _setup_earth_terrain(data_dir: String) -> void:
 	earth.add_child(earth_terrain)
 	earth_terrain.setup(heights, ImagerySource.new(data_dir.path_join("imagery/earth/index.toml")),
 			EARTH_SEMI_MAJOR_AXIS_M, material)
+
+
+## The Moon's terrain quadtree: heights from the core's lunar terrain (LDEM_16 everywhere, the 20 m site tiles; the
+## cached instance the lunar missions fly on; without data/ the mean sphere) in MOON_ME, the frame of LOLA and of
+## moon.fixed_to_gcrf; no imagery: terrain_moon.gdshader takes the albedo from moon_color through the global UV.
+## After _setup_earth_terrain (which loads the core's terrain).
+func _setup_moon_terrain() -> void:
+	var heights := HeightSource.new()
+	heights.body = "moon"
+	heights.core = core
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/terrain_moon.gdshader")
+	material.set_shader_parameter("albedo_texture", _moon_material.get_shader_parameter("albedo_texture"))
+	material.set_shader_parameter("earth_radius_m", EARTH_MEAN_RADIUS_M)
+	moon_terrain.name = "MoonTerrain"
+	moon.add_child(moon_terrain)
+	moon_terrain.setup(heights, null, MOON_RADIUS_M, material)
 
 
 ## Concrete pad disc at a launch site (Earth-fixed, top surface at the site height).

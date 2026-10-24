@@ -198,6 +198,27 @@ double StarsimCore::surface_resolution_m(const godot::String& body, double latit
     return terrain->resolution_m(latitude_deg * constants::deg_to_rad, longitude_deg * constants::deg_to_rad);
 }
 
+double StarsimCore::surface_finest_resolution_m(const godot::String& body,
+                                                const godot::PackedFloat64Array& latitudes_deg,
+                                                const godot::PackedFloat64Array& longitudes_deg) const {
+    const environment::Terrain* terrain = terrain_of(body);
+    if (terrain == nullptr) return std::numeric_limits<double>::infinity();
+    if (latitudes_deg.size() != longitudes_deg.size()) {
+        godot::UtilityFunctions::push_error(
+            "StarsimCore.surface_finest_resolution_m: Breiten und Längen müssen gleich viele sein");
+        return std::numeric_limits<double>::infinity();
+    }
+    const auto n = static_cast<size_t>(latitudes_deg.size());
+    std::vector<double> lat(n), lon(n);
+    const double* lat_deg = latitudes_deg.ptr();
+    const double* lon_deg = longitudes_deg.ptr();
+    for (size_t i = 0; i < n; ++i) {
+        lat[i] = lat_deg[i] * constants::deg_to_rad;
+        lon[i] = lon_deg[i] * constants::deg_to_rad;
+    }
+    return environment::finest_resolution_m(*terrain, lat, lon);
+}
+
 void StarsimCore::_bind_methods() {
     using godot::ClassDB;
     using godot::D_METHOD;
@@ -220,6 +241,8 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::surface_samples);
     ClassDB::bind_method(D_METHOD("surface_resolution_m", "body", "latitude_deg", "longitude_deg"),
                          &StarsimCore::surface_resolution_m);
+    ClassDB::bind_method(D_METHOD("surface_finest_resolution_m", "body", "latitudes_deg", "longitudes_deg"),
+                         &StarsimCore::surface_finest_resolution_m);
 }
 
 }  // namespace starsim::bindings
