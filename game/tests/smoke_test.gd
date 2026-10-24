@@ -61,6 +61,8 @@ func _initialize() -> void:
 	if not terrain_present.get("moon", false):
 		_check(not core.surface_samples("moon", lat_arr, lon_arr).get("present", true), "no Moon terrain: not present")
 	_check(absf(float(tower.get("mount_height_m", 0.0)) - 20.0) < 1e-9, "tower geometry from the core config")
+	_check(_check_terrain_streaming(core, starbase, bool(terrain_present.get("earth", false))) == true,
+			"terrain streaming checks ran to the end")
 
 	# A script error aborts a check function (it then returns null) without failing a check: count it as a failure.
 	_check(_check_falcon9(config_dir, tdb) == true, "Falcon 9 checks ran to the end")
@@ -97,6 +99,38 @@ func _site(config_dir: String, id: String) -> Dictionary:
 func _advance(sim: FlightSim, tdb_s: float) -> void:
 	sim.advance_to(tdb_s)
 	sim.wait_idle(60.0)
+
+
+# Terrain renderer (M8 Plan B): the quadtree builds nodes on WorkerThreadPool threads through the core's surface
+# samples (after load_terrain) and refines under a camera 2 m above OLP-1.
+func _check_terrain_streaming(core: StarsimCore, starbase: Dictionary, with_data: bool) -> bool:
+	var heights := HeightSource.new()
+	heights.core = core
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/terrain_earth.gdshader")
+	var tree := TerrainQuadtree.new()
+	root.add_child(tree)
+	tree.setup(heights, null, 6378137.0, material)
+	var camera := HeightSource.geodetic_to_fixed(starbase["latitude_deg"], starbase["longitude_deg"],
+			float(starbase["height_m"]) + 2.0)
+	var t0 := Time.get_ticks_msec()
+	var frames := 0
+	var level := 0
+	while frames < 20000 and Time.get_ticks_msec() - t0 < 120000:
+		tree.update_for_camera(camera)
+		frames += 1
+		if tree.stats["nodes_loading"] == 0 and tree.stats["uploads_last_frame"] == 0:
+			break
+		OS.delay_msec(1)
+	for key: Vector4i in tree.drawn_keys():
+		if key == CubeSphere.key_at(CubeSphere.geodetic_direction(starbase["latitude_deg"], starbase["longitude_deg"]),
+				key.y):
+			level = key.y
+	_check(tree.stats["nodes_loading"] == 0 and level >= (17 if with_data else 8),
+			"terrain streamed on worker threads: leaf level %d at OLP-1, %d leaves, %d frames, %d ms"
+			% [level, tree.drawn_keys().size(), frames, Time.get_ticks_msec() - t0])
+	tree.free()
+	return true
 
 
 # Simulation thread (l6): commands by id, results, idle wait, re-setup while busy.

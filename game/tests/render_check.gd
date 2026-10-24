@@ -11,12 +11,15 @@
 extends SceneTree
 
 const FRAMES_TO_SETTLE := 6
+## Upper bound on the wait for the streamed terrain (frames).
+const TERRAIN_MAX_FRAMES := 6000
 ## The flight session's fixed tick (200 Hz, sim::FlightSession): --t_plus aims a tick late (the grid need not hit T-0).
 const SIM_TICK_S := 0.005
 
 var _args := {}
 var _main: Node
 var _frames := 0
+var _terrain_idle := 0  ## consecutive frames without terrain loading
 
 
 func _initialize() -> void:
@@ -60,7 +63,11 @@ func _process(_delta: float) -> bool:
 				view.preview_opening_rad = deg_to_rad(float(_args["tower_arms_deg"]))
 				view.update_state({})
 	_frames += 1
-	if _frames == FRAMES_TO_SETTLE:
+	# The streamed terrain loads over many frames: wait until nothing is loading (or give up after TERRAIN_MAX_FRAMES).
+	var terrain := world.earth_terrain
+	_terrain_idle = _terrain_idle + 1 if terrain.stats["nodes_loading"] == 0 else 0
+	if _frames >= FRAMES_TO_SETTLE and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES):
+		print("render_check: terrain after %d frames: %s" % [_frames, terrain.stats])
 		if _args.has("webcast"):
 			var arc := (_main.get("overlay_host") as OverlayHost).overlay.timeline_arc
 			print("render_check: timeline scale ", arc.time_scale, " now ", arc.now_tdb_s, " events ", arc.events.size())

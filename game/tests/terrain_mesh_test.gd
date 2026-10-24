@@ -181,6 +181,37 @@ func _check_morph() -> void:
 			max_error = maxf(max_error, target.distance_to(p["center_fixed"] + Frames.from_render(on_parent)))
 	_check(even_zero and max_morph > 1e-3, "morph zero on even vertices, non-zero on odd ones (max %.4f m)" % max_morph)
 	_check(max_error < 1e-3, "morph target equals the parent surface (max error %s m)" % String.num_scientific(max_error))
+	_check_parent_normals(c)
+
+
+# CUSTOM3 (parent-level normal): an even vertex's own normal; an odd vertex the normalised mean of the normals of the
+# neighbours its morph target interpolates (edge: the two along the edge; cell centre: the parent diagonal).
+func _check_parent_normals(node: Dictionary) -> void:
+	var normals: PackedVector3Array = node["normals"]
+	var custom3: PackedFloat32Array = node["custom3"]
+	var ok := custom3.size() == 3 * normals.size()
+	var max_error := 0.0
+	var max_tilt := 0.0
+	for b in ROW:
+		for a in ROW:
+			var k := b * ROW + a
+			var expected := normals[k]
+			if a % 2 == 1 and b % 2 == 1:
+				expected = (normals[k + 1 - ROW] + normals[k - 1 + ROW]).normalized()
+			elif b % 2 == 1:
+				expected = (normals[k - ROW] + normals[k + ROW]).normalized()
+			elif a % 2 == 1:
+				expected = (normals[k - 1] + normals[k + 1]).normalized()
+			var got := Vector3(custom3[3 * k], custom3[3 * k + 1], custom3[3 * k + 2])
+			max_error = maxf(max_error, got.distance_to(expected))
+			max_tilt = maxf(max_tilt, got.distance_to(normals[k]))
+	for s in TerrainNodeBuilder.SKIRT_EDGE.size():
+		var e := TerrainNodeBuilder.SKIRT_EDGE[s]
+		var v := ROW * ROW + s
+		ok = ok and custom3[3 * v] == custom3[3 * e] and custom3[3 * v + 2] == custom3[3 * e + 2]
+	_check(ok and max_error < 1e-6 and max_tilt > 0.0,
+			"CUSTOM3 parent normals: even = own normal, odd = mean of the parent neighbours (error %s, max tilt %s)"
+			% [String.num_scientific(max_error), String.num_scientific(max_tilt)])
 
 
 func _check_skirts() -> void:

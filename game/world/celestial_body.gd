@@ -11,10 +11,19 @@ const SCALED_SPACE_DISTANCE_M := 1.5e7
 var center_gcrf_m := Vector3.ZERO      ## body centre relative to the Earth's centre (GCRF)
 var fixed_to_gcrf := Basis.IDENTITY    ## body orientation (rows = rotation matrix rows)
 var render_basis := Basis.IDENTITY     ## same orientation in render axes
+## Draws the ellipsoid mesh; false while a TerrainQuadtree child draws the surface (children stay visible).
+var body_mesh_visible := true:
+	set(value):
+		if value != body_mesh_visible:
+			body_mesh_visible = value
+			mesh = _body_mesh if value else null
+
+var _body_mesh: Mesh
 
 
 func setup(semi_major_axis_m: float, flattening: float, shader_material: ShaderMaterial) -> void:
-	mesh = EllipsoidMesh.build(semi_major_axis_m, flattening)
+	_body_mesh = EllipsoidMesh.build(semi_major_axis_m, flattening)
+	mesh = _body_mesh if body_mesh_visible else null
 	material_override = shader_material
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 

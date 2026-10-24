@@ -9,7 +9,7 @@ const WGS84_A_M := 6378137.0  # [S] WGS84 semi-major axis
 const WGS84_F := 1.0 / 298.257223563  # [S] WGS84 flattening
 const MOON_RADIUS_M := 1737400.0  # [S] IAU mean lunar radius (CLAUDE.md: Moon sphere R = 1737.4 km)
 ## [E] Flat rule: a sample within this many degrees (latitude and longitude) of a site gets the site's height
-## (GroundPatch.SPAN_DEG, so the renderer and the old patch agree).
+## (the span of the former ground patch).
 const FLAT_RULE_SPAN_DEG := 2.0
 
 ## "earth" or "moon".
@@ -33,9 +33,16 @@ func sample(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array) -> Dicti
 	var water := PackedByteArray()
 	water.resize(lats_deg.size())
 	water.fill(0)
-	if body == "earth":
+	if body == "earth" and not lats_deg.is_empty():
+		var lat_min := lats_deg[0]
+		var lat_max := lats_deg[0]
+		for lat in lats_deg:
+			lat_min = minf(lat_min, lat)
+			lat_max = maxf(lat_max, lat)
 		for site: Dictionary in sites:
 			var site_lat: float = site["latitude_deg"]
+			if site_lat <= lat_min - FLAT_RULE_SPAN_DEG or site_lat >= lat_max + FLAT_RULE_SPAN_DEG:
+				continue  # no point near this site (most nodes: skips the per-point loop)
 			var site_lon: float = site["longitude_deg"]
 			var site_height: float = site["height_m"]
 			for k in lats_deg.size():

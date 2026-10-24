@@ -11,6 +11,9 @@ const EARTH_MEAN_RADIUS_M := 6371000.0
 const MOON_RADIUS_M := 1737400.0
 const SUN_RADIUS_M := 695700000.0
 const GROUND_EYE_HEIGHT_M := 2.0
+## [E] The pad disc's top sits this far above the site height: the terrain's plateau lies exactly at the site height,
+## and coplanar surfaces z-fight. Far below anything a vehicle's contact could show.
+const PAD_TOP_LIFT_M := 0.03
 ## The solar disk is drawn behind all scaled-space bodies (1.5e7 m) but in front of the stars (2.5e7 m).
 const SUN_RENDER_DISTANCE_M := 2.0e7
 
@@ -24,7 +27,7 @@ var core := StarsimCore.new()
 var clock := SimClock.new()
 var camera := OrbitCamera.new()
 var earth := CelestialBody.new()
-var ground_patch := GroundPatch.new()
+var earth_terrain := TerrainQuadtree.new()  ## streamed Earth surface (relief + imagery) while not in scaled space
 var towers: Array[TowerView] = []  ## catch towers of the launch sites
 var moon := CelestialBody.new()
 var sun_disk := MeshInstance3D.new()
@@ -113,10 +116,15 @@ func update_world() -> void:
 	var sun_from_camera := core.apparent_body_position_gcrf_m("sun", t, cam, Vector3.ZERO)
 
 	earth.place(cam)
-	ground_patch.update_for_camera(earth.fixed_to_gcrf.transposed() * cam)
+	earth_terrain.update_for_camera(earth.fixed_to_gcrf.transposed() * cam)
+	earth.body_mesh_visible = not earth_terrain.active
 	moon.place(cam)
-	_earth_material.set_shader_parameter("sun_position_local", earth.to_local_frame(sun_apparent_from_earth_m))
-	_earth_material.set_shader_parameter("moon_position_local", earth.to_local_frame(moon_apparent_from_earth_m))
+	var sun_local := earth.to_local_frame(sun_apparent_from_earth_m)
+	var moon_local := earth.to_local_frame(moon_apparent_from_earth_m)
+	_earth_material.set_shader_parameter("sun_position_local", sun_local)
+	_earth_material.set_shader_parameter("moon_position_local", moon_local)
+	earth_terrain.set_shader_parameter("sun_position_local", sun_local)
+	earth_terrain.set_shader_parameter("moon_position_local", moon_local)
 	_moon_material.set_shader_parameter("sun_position_local", moon.to_local_frame(sun_apparent_from_earth_m - moon_gcrf_m))
 	_moon_material.set_shader_parameter("earth_position_local", moon.to_local_frame(-moon_gcrf_m))
 	_moon_material.set_shader_parameter("camera_position_local", moon.to_local_frame(cam - moon_gcrf_m))
@@ -238,10 +246,7 @@ func _setup_bodies(data_dir: String) -> void:
 	earth.name = "Earth"
 	earth.setup(EARTH_SEMI_MAJOR_AXIS_M, EARTH_FLATTENING, _earth_material)
 	add_child(earth)
-	ground_patch.setup(_earth_material)
-	ground_patch.sites = sites
-	ground_patch.flight_sim = flight.sim  # its Earth terrain (absent: the flat rule)
-	earth.add_child(ground_patch)
+	_setup_earth_terrain(data_dir)
 	for site: Dictionary in sites:
 		earth.add_child(_make_pad(site))
 	for site: Dictionary in sites:
@@ -274,6 +279,25 @@ func _setup_bodies(data_dir: String) -> void:
 	add_child(sun_light)
 
 
+## The Earth's terrain quadtree: heights from the core's Earth terrain (the physics' surface; without data/ the flat
+## rule), imagery from data/imagery, drawn with terrain_earth.gdshader.
+func _setup_earth_terrain(data_dir: String) -> void:
+	core.load_terrain(Paths.config_dir())  # once, on the main thread, before any worker build
+	var heights := HeightSource.new()
+	heights.body = "earth"
+	heights.core = core
+	heights.sites = sites
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/terrain_earth.gdshader")
+	material.set_shader_parameter("day_texture", _earth_material.get_shader_parameter("day_texture"))
+	material.set_shader_parameter("night_texture", _earth_material.get_shader_parameter("night_texture"))
+	material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)
+	earth_terrain.name = "EarthTerrain"
+	earth.add_child(earth_terrain)
+	earth_terrain.setup(heights, ImagerySource.new(data_dir.path_join("imagery/earth/index.toml")),
+			EARTH_SEMI_MAJOR_AXIS_M, material)
+
+
 ## Concrete pad disc at a launch site (Earth-fixed, top surface at the site height).
 func _make_pad(site: Dictionary) -> MeshInstance3D:
 	var disc := CylinderMesh.new()
@@ -291,7 +315,8 @@ func _make_pad(site: Dictionary) -> MeshInstance3D:
 	var lon := deg_to_rad(site["longitude_deg"])
 	var up := Frames.to_render(Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat)))
 	var east := Frames.to_render(Vector3(-sin(lon), cos(lon), 0.0))
-	var center := GroundPatch.geodetic_to_fixed(site["latitude_deg"], site["longitude_deg"], site["height_m"] - 1.0)
+	var center := HeightSource.geodetic_to_fixed(site["latitude_deg"], site["longitude_deg"],
+			site["height_m"] - 1.0 + PAD_TOP_LIFT_M)
 	pad.transform = Transform3D(Basis(east, up, east.cross(up)), Frames.to_render(center))
 	return pad
 

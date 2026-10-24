@@ -5,7 +5,8 @@ class_name TerrainNodeBuilder
 ## Vertex layout: 65 x 65 grid vertices (index b * ROW + a, a along the face's s axis, b along t), then the skirt ring
 ## (SKIRT_EDGE[k] is the grid vertex above skirt vertex k). Positions are relative to `center_fixed` in render axes.
 ## Per-vertex channels: CUSTOM0 = `morph` (xyz: offset to the parent-level surface, w: 1 on skirt vertices),
-## CUSTOM1 = `custom1` (global equirect u, v, fade_fine, fade_base), CUSTOM2 = `custom2` (water mask uv).
+## CUSTOM1 = `custom1` (global equirect u, v, fade_fine, fade_base), CUSTOM2 = `custom2` (water mask uv),
+## CUSTOM3 = `custom3` (3/vertex: the parent-level normal the shader blends towards with the morph factor).
 
 const CELLS := 64
 const ROW := CELLS + 1
@@ -162,6 +163,24 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 			custom2[2 * v + 1] = (mask_north - lat) * mask_v_scale
 			v += 1
 
+	# Parent-level normals: even vertices keep their own; odd ones the normalised mean of the neighbours their morph target
+	# interpolates (odd vertices never lie on the border, so every neighbour is a grid vertex).
+	var custom3 := PackedFloat32Array()
+	custom3.resize(3 * total)
+	for b in ROW:
+		for a in ROW:
+			v = b * ROW + a
+			var n := normals[v]
+			if a & 1 and b & 1:
+				n = (normals[v + 1 - ROW] + normals[v - 1 + ROW]).normalized()
+			elif b & 1:
+				n = (normals[v - ROW] + normals[v + ROW]).normalized()
+			elif a & 1:
+				n = (normals[v - 1] + normals[v + 1]).normalized()
+			custom3[3 * v] = n.x
+			custom3[3 * v + 1] = n.y
+			custom3[3 * v + 2] = n.z
+
 	# Skirts: the edge vertices lowered along the geodetic normal; same channels, CUSTOM0.w = 1.
 	var depth_m := CubeSphere.node_size_m(key, radius_m) / CELLS * SKIRT_DEPTH_CELLS
 	var skirt_dirs := PackedVector3Array()
@@ -186,7 +205,8 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 			custom1[4 * v + c] = custom1[4 * e + c]
 		custom2[2 * v] = custom2[2 * e]
 		custom2[2 * v + 1] = custom2[2 * e + 1]
-
+		for c in 3:
+			custom3[3 * v + c] = custom3[3 * e + c]
 
 	return {
 		"key": key,
@@ -199,6 +219,7 @@ static func build(key: Vector4i, heights: HeightSource, imagery: ImagerySource, 
 		"uv2": uv2,
 		"custom1": custom1,
 		"custom2": custom2,
+		"custom3": custom3,
 		"imagery_fine": fine,
 		"imagery_base": base,
 		"water_mask": _water_mask(heights, box),
