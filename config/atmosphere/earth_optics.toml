@@ -1,0 +1,14 @@
+# Optical inputs of the Earth atmosphere (M8 atmosphere, precomputed scattering). Provenance tags: [S] sourced,
+# [E] estimate, [D] derived, [call] a design decision. Spectral data (solar irradiance, ozone and air cross sections,
+# CIE colour matching) live in core/include/starsim/environment/atmosphere_spectra.hpp.
+
+top_altitude_m = 100000.0            # [call] model top (Karman line); the density above is negligible for scattering
+ground_altitude_m = -150.0           # [E] model ground below the geoid minimum (-106 m) and every pad / landing zone
+aerosol_optical_depth_550nm = 0.1    # [E] clean continental / maritime background, vertical column at 550 nm
+aerosol_angstrom_exponent = 1.3      # [E] typical continental value (Angstrom 1964; Seinfeld & Pandis, ch. 15)
+aerosol_single_scattering_albedo = 0.9   # [E] background aerosol, visible
+aerosol_scale_height_m = 1200.0      # [E] Bruneton 2017 demo value (boundary layer aerosol)
+mie_phase_g = 0.8                    # [E] Cornette-Shanks / Henyey-Greenstein asymmetry, Bruneton 2017 demo value
+ozone_column_du = 300.0              # [S] global mean total ozone ~300 DU (WMO assessments)
+ground_albedo = 0.1                  # [E] mean land / ocean surface albedo in the visible
+scattering_orders = 4                # [call] multiple-scattering orders of the precomputation (Bruneton 2017)

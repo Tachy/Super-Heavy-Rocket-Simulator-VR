@@ -98,6 +98,7 @@ add_executable(starsim_core_tests
     test_hls_vehicle.cpp
     test_lunar_terrain.cpp
     test_geoid.cpp
+    test_atmosphere_optics.cpp
     test_sea_state.cpp
     test_earth_terrain.cpp
     test_surface_samples.cpp

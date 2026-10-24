@@ -151,11 +151,13 @@ add_library(starsim_core STATIC
     src/environment/lunar_terrain.cpp
     src/environment/geographic_grid.cpp
     src/environment/geoid.cpp
+    src/environment/atmosphere_optics.cpp
     src/environment/sea_state.cpp
     src/environment/earth_terrain.cpp
     src/environment/surface_samples.cpp
     src/config/lunar_site_config.cpp
     src/config/geoid_config.cpp
+    src/config/atmosphere_optics_config.cpp
     src/config/earth_terrain_config.cpp
     src/sim/lunar_site.cpp
     src/sim/earth_terrain_loader.cpp

@@ -355,6 +355,13 @@ flow separation (vacuum engines).
 3. `python tools/vehicle_report.py <vehicle-id>` prints masses, burn times, T/W and the
    Tsiolkovsky delta-v budget as a sanity check.
 
+## Atmosphere optics (`atmosphere/earth_optics.toml`)
+Scalar optical inputs of the Earth atmosphere for the precomputed scattering (M8 atmosphere): model top and ground,
+aerosol (optical depth at 550 nm, Angstrom exponent, single-scattering albedo, scale height, Mie asymmetry), ozone
+column in Dobson units, ground albedo, scattering orders. Every key is tagged ([S] / [E] / [call]) in the file;
+loaded by `config::load_atmosphere_optics` (missing keys throw). The spectra (solar irradiance, ozone cross sections,
+CIE colour matching; Bruneton, BSD-3) are compiled in `core/include/starsim/environment/atmosphere_spectra.hpp`.
+
 ## Geoid (`geoid/egm2008_1deg.csv`)
 EGM2008 undulation N (geoid above the WGS84 ellipsoid) on a 1 degree grid: a header of `#` comment lines (source,
 generation command, licence), then 181 rows (90 N .. 90 S) x 361 integer values in cm (180 W .. 180 E inclusive,

@@ -87,4 +87,14 @@ inline constexpr double jonswap_gamma = 3.3;
 inline constexpr double jonswap_sigma_low = 0.07;
 inline constexpr double jonswap_sigma_high = 0.09;
 
+// Atmospheric optics (M8 atmosphere).
+// [S: SI 2019 definition]
+inline constexpr double boltzmann_j_per_k = 1.380649e-23;
+// One Dobson unit as a column of molecules [S: 2.6867e20 m^-2, 0.01 mm of gas at 273.15 K and 101325 Pa;
+// Loschmidt constant 2.6867811e25 m^-3 x 1e-5 m].
+inline constexpr double dobson_unit_per_m2 = 2.6867e20;
+// Molecule number density of standard air (288.15 K, 101325 Pa) used by the Rayleigh formula
+// [S: Bucholtz 1995, Appl. Opt. 34, 2765, N_s = 2.54743e19 cm^-3].
+inline constexpr double standard_air_number_density_per_m3 = 2.54743e25;
+
 }  // namespace starsim::constants
