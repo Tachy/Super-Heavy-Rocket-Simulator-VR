@@ -112,6 +112,9 @@ One-time setup:
 ```powershell
 # Runtime data (SPICE kernels, textures, star catalogue) and CSPICE sources; the geoid and Earth terrain sources need
 # pip install -r tools/data_pipeline/requirements.txt (numpy, rasterio, pyproj); Earth terrain: several GB of raw downloads
+# The imagery step inside fetch.py (NAIP + own Sentinel-2 composite -> data/imagery/earth tile pyramids) also needs
+# pystac-client (in requirements.txt), ~2.5 GB raw under data/raw/imagery and network time (S2 composite ~35 min per
+# area); `fetch.py --retile imagery` redoes fit + tiles offline from those caches; `--workers N` sets the process count
 python tools/data_pipeline/fetch.py
 python tools/data_pipeline/prepare.py      # converts data/raw -> data/textures, data/stars (needs Pillow)
 
