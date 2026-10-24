@@ -128,8 +128,9 @@ Core (`[atmosphere]` tag [call], unit tests + references):
   within the table's interpolation error (documented, ~0.5 %).
 - Direct normal solar irradiance at sea level for an air mass of 1.5 vs ASTM G173 (direct, 400-700 nm band) within a
   tolerance that reflects the different aerosol / water-vapour assumptions (~5-10 %, stated with the reason).
-- Port check: CPU table lookups vs Bruneton's own reference values for his demo atmosphere, run with his parameters
-  (luminance at a few view / sun directions), within 1 %.
+- Port check: the tables vs an independent brute-force integrator in the tests (transmittance within 0.5 %, single
+  scattering within 1 %), multiple scattering converged (orders 4 vs 6 within 1 %). (Plan amendment: Bruneton's
+  repository has no tabulated reference values to compare against.)
 - Physical plausibility: zenith sky luminance for a high Sun in the range of measured clear skies (a few thousand
   cd/m^2), the horizontal illuminance for a Sun at zenith ~100 klx, the sky at 50 / 100 km at least 2 / 4 orders of
   magnitude darker than at the ground, the twilight sky at the zenith bluer than at noon (ozone).
