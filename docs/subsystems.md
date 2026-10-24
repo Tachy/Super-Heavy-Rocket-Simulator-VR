@@ -2798,6 +2798,13 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
   sources and the global day texture): Sentinel-2 -> day texture with one luminance gain + offset (Starbase 0.796 /
   -26.3, Cape 0.659 / -0.75; a ~7 km texel cannot support per-channel fits), NAIP -> its area's Sentinel-2 composite per
   channel at 10 m (Starbase gains [0.566, 0.400, 0.347], Cape [0.600, 0.628, 0.582]; z14 aggregate means within 1.6 DN).
+  No data inside a box (the Atlantic beyond the Cape DOQQs, Sentinel-2 composite gaps such as the Cape NE corner) is
+  filled before writing, in final colours: NAIP from its area's fitted Sentinel-2 composite, Sentinel-2 from the day
+  texture; every tile of a box is written (Cape NAIP 11306 tiles, Starbase NAIP 6379, S2 10543 / 10276), lower levels
+  average valid pixels only; the run logs the no-data pixels left inside each box (0 for all four). Remaining dark sea
+  inside the S2 boxes is data, not holes: the day texture's open ocean is near-black (~(0-2, 0-5, 7-20) DN), the fit
+  pulls the S2 sea onto it, and darker scenes clip to ~1 DN; rectangular scene / MGRS brightness steps over open water
+  remain (no water mask in the pipeline).
   `fetch.py --retile imagery` refits and retiles from the cached clips without network; the pipeline runs on all cores
   (`--workers N`, bit-identical to serial): retile 110 s with 24 workers vs 539 s serial. In the renderer each node gets
   a fine crop and the next coarser source as base (`ImagerySource.crop`, <= 3 x 3 tiles, cut to the node box + 2 px and
@@ -2812,7 +2819,9 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
   0.00512 U [S], `glint_wind_mps` 5 [E]) with Smith masking-shadowing [S]; four Gerstner normal octaves (60 / 23 / 9 /
   3.5 m [E], slope 0.04, Q = 0.5), phases computed in double at the camera (`WaterWaves`, global
   `water_wave_phases`: no float32 time in the shader), faded out between 10 and 20 km distance and per octave where it
-  aliases; the resolved slope variance is taken out of the Cox-Munk sigma^2. Geometry stays on the geoid (sea state and
+  aliases; the resolved slope variance is taken out of the Cox-Munk sigma^2. The wave frame re-anchors (a pattern jump)
+  after 1 deg only while the camera is above the 20 km fade distance; lower down only after 10 deg [E]. Bodies without
+  water (the Moon) build no water mask. Geometry stays on the geoid (sea state and
   deck motion are a later part). Placeholders: `sky_radiance`; against the black sky the bright grazing glint reads as
   a glow on the horizon until the atmosphere part.
 - **Moon** (Task 8): the same quadtree on the lunar terrain (LDEM_16 everywhere, the 20 m site tiles), albedo from the
@@ -2840,8 +2849,8 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
   K 2.0 measured p99 5.3 ms but narrows the morph band to ~0.16 node sizes (start 1.15 K s + 2 r against end 1.94 K s):
   morphing becomes almost a pop; K 2.5 keeps ~0.55 node sizes (smallest margin of start below end over all levels
   and both bodies 0.05 of the end, at K 3 0.11; quadtree test). GPU time stays below ~2 ms: the frame is CPU-bound.
-  Single sporadic process spikes of 60-120 ms outside the terrain code appeared once in two runs and not
-  again (not reproducible; not terrain).
+  Single sporadic process spikes of 60-120 ms appeared in some runs (one of three K 2.5 runs failed the max gate
+  with a 124 ms spike); unattributed.
 - **Fresh checkout:** the terrain scripts are `class_name` classes; one `godot --headless --path game --import` is
   needed before `--script` runs (tests) can resolve them.
 - **Known issue (open for the user, unverified):** NAIP suggests the real OLP-1 mount stands some tens of metres WSW of
