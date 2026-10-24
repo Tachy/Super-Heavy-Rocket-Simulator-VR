@@ -22,8 +22,8 @@ struct LegSite {
     double latitude_rad = 0.0;
     double longitude_rad = 0.0;
     double height_m = 0.0;
-    // Bodies farther from the site (horizontally) keep their own ground contact (FlightBody); an Earth site's plane
-    // reaches everywhere, as before l2.
+    // Bodies farther from the site (horizontally) keep their own ground contact (FlightBody). A lunar site and an Earth
+    // site on terrain set it; an Earth site's flat plane or deck reaches everywhere, as before l2.
     double tracking_radius_m = std::numeric_limits<double>::infinity();
 };
 

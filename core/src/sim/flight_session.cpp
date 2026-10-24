@@ -22,6 +22,10 @@ namespace {
 // A freely falling body this close to its ground is ticked: a coast segment ends with one ground-contact check, so
 // a long one would fall through the ground and judge the touchdown at the speed it has reached far below it.
 constexpr double ground_tick_height_m = 5000.0;
+// [E] an Earth leg site on terrain tracks bodies within this horizontal distance: a landing missing its zone by more than
+// 5 km is no leg landing; the local 1 m tile reaches 5-6 km; beyond it the body's own ground contact (FlightBody on the
+// terrain) judges.
+constexpr double earth_leg_site_tracking_radius_m = 5000.0;
 // [E] the entry controller integrates its pointing error only above this dynamic pressure (the flaps have authority)
 constexpr double integral_min_dynamic_pressure_pa = 200.0;
 // [E] ... above this Mach number only (the hypersonic alpha schedule; lower down its ramps and the terminal phase's
@@ -1274,7 +1278,8 @@ std::unique_ptr<LegLandingSim> FlightSession::earth_leg_site(const LaunchSite& s
     if (landing_zone && site.deck) {
         ground.deck = site.deck;
     } else if (earth_terrain_) {
-        const LegSite leg_site{ephemeris::Body::Earth, site.latitude_rad, site.longitude_rad, site.height_m};
+        const LegSite leg_site{ephemeris::Body::Earth, site.latitude_rad, site.longitude_rad, site.height_m,
+                               earth_leg_site_tracking_radius_m};
         const auto frame = LegLandingSim::site_frame(leg_site, frames::wgs84);
         ground.field = std::make_shared<contact::TerrainField>(vehicle::reference_body_of(env_, ephemeris::Body::Earth),
                                                                frame.origin_fixed_m, frame.site_to_fixed, earth_terrain_);

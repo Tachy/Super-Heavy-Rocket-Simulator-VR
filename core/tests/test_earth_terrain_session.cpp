@@ -296,6 +296,54 @@ TEST_CASE("leg landing on a sloped terrain field", "[session][earth_terrain][leg
     CHECK(terrain_tilt_deg == Catch::Approx(plane_tilt_deg).margin(0.02));
 }
 
+namespace {
+
+// A legged Falcon 9 stage dropped (feet 0.3 m above flat terrain at the pad height) `east_m` east of the landing zone.
+struct LegDrop {
+    sim::LegTouchdown touchdown = sim::LegTouchdown::None;
+    bool resting = false;
+    bool impacted = false;
+    double bottom_height_m = 0.0;
+};
+
+LegDrop drop_on_flat_terrain(const sim::LaunchSite& lz, double east_m) {
+    auto terrain = std::make_shared<const EarthTerrain>(constant_geoid(geoid_n), constant_global(lz.height_m, 0.01),
+                                                        std::vector<GeographicGrid>{}, std::vector<GeographicGrid>{},
+                                                        std::vector<Plateau>{});
+    sim::FlightSession session(env().ephemeris, env().earth, STARSIM_CONFIG_DIR);
+    session.set_earth_terrain(terrain);
+    session.set_launch_site(lz);
+    // the Earth curves away from the site plane: lower the drop by the sagitta so the feet sit 0.3 m over the ground
+    const double sagitta_m = east_m * east_m / (2.0 * a);
+    drop_falcon(session, 0.3 - sagitta_m, 1.0, east_m, true);
+    session.set_leg_deployment(0, 1.0);
+    const auto start = session.epoch();
+    while (session.leg_touchdown(0) == sim::LegTouchdown::None && !session.body(0).resting() &&
+           !session.body(0).impacted() && session.epoch() - start < 20.0) {
+        session.advance_to(session.epoch() + 0.1);
+    }
+    return {session.leg_touchdown(0), session.body(0).resting(), session.body(0).impacted(),
+            bottom_geodetic(session, 0).height_m};
+}
+
+}  // namespace
+
+TEST_CASE("leg site tracks a body inside the radius", "[session][earth_terrain][legs]") {
+    const auto lz = site("ccsfs_lz40");
+    const auto r = drop_on_flat_terrain(lz, 1000.0);
+    CHECK(r.touchdown == sim::LegTouchdown::Landed);
+    CHECK(r.resting);
+}
+
+TEST_CASE("body beyond the radius keeps its own ground contact", "[session][earth_terrain][legs]") {
+    const auto lz = site("ccsfs_lz40");
+    const auto r = drop_on_flat_terrain(lz, 6000.0);
+    CAPTURE(r.bottom_height_m);
+    CHECK(r.touchdown == sim::LegTouchdown::None);  // not judged by the leg site
+    CHECK((r.resting || r.impacted));
+    CHECK(r.bottom_height_m == Catch::Approx(lz.height_m).margin(1.0));  // on the terrain height there (FlightBody)
+}
+
 TEST_CASE("flat model unchanged without terrain", "[session][earth_terrain]") {
     const auto lz = site("ccsfs_lz40");
     auto terrain = std::make_shared<const EarthTerrain>(constant_geoid(geoid_n), constant_global(30.0, 1.0),
