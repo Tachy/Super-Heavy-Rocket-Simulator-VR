@@ -261,6 +261,10 @@ flow separation (vacuum engines).
   the stage's predicted impact; the first stage's throttle comes from its `max_ascent_throttle` and
   `max_dynamic_pressure_pa`). The loader refuses `[pitch_program]`, `kick_deg`, `booster_throttle`, `landing_zone` and
   `[drone_ship]`.
+- `[mission] liftoff_utc` (optional, ascent; ISO UTC like `epoch_utc`): a historical liftoff (the validation flights
+  `flight14_ascent`, `crs35_ascent`, dates from `tests/validation/telemetry/flights.toml`). The mission lifts off at that
+  date whatever epoch is requested, and with `wait_on_pad` it is placed `countdown_s` before it (`MissionStart::epoch`).
+  None: lifts off at the requested time (+ countdown).
 - `falcon9_crew_dragon.toml`: the same keys with a `[payload]` table instead of `payload_t` (exclusive): `vehicle` (a
   vehicle of `vehicles/`, stacked on the launcher by `config::stack_payload`), `separation_delay_s` (after the upper
   stage's cutoff), `separation_dv_mps` (spring push), `nose_cone_open_s` (after the separation; < 0: stays closed).

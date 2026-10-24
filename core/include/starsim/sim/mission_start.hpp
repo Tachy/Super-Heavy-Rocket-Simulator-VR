@@ -16,7 +16,9 @@ namespace starsim::sim {
 struct MissionStart {
     config::MissionKind kind = config::MissionKind::Ascent;
     std::string site_id;          // launch site of an ascent; empty for a return from orbit
-    time::Epoch epoch;            // where the flight begins: `requested` for an ascent, the mission's own for a return
+    // where the flight begins: `requested` for an ascent (with [mission] liftoff_utc: its countdown before that
+    // liftoff, whatever was requested), the mission's own for a return
+    time::Epoch epoch;
     // capsule return: the deorbit plan was feasible (else ship_return_plan()->reason); lunar landing: the mission was
     // planned (outbound flight, budget) and its legs chained
     bool return_planned = false;

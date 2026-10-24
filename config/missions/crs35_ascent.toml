@@ -9,6 +9,7 @@ name = "Validierung: CRS-35"
 display_name = "Frachtflug zur Raumstation (Nachflug)"  # shown in the webcast overlay (no trademarks)
 vehicle = "falcon9_block5"
 site = "ccsfs_slc40"            # [S:flights.toml] SLC-40, return to LZ-40
+liftoff_utc = "2026-10-13T10:33:00"  # [S:flights.toml] CRS-35 (landed at LZ-40, RTLS): lifts off at this date
 heading_deg = 45.0              # body +y on the pad (towards the ISS plane, north-east)
 payload_t = 12.5                # [E] cargo Dragon with its trunk load (flights.toml: ~12-13 t)
 fairing = false                 # Dragon flies without a fairing

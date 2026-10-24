@@ -56,6 +56,45 @@ TEST_CASE("An ascent mission starts at the requested epoch with its site", "[mis
     CHECK(session.autopilot().state == sim::AutopilotState::PreLaunch);
 }
 
+TEST_CASE("liftoff_utc is loaded", "[mission][config]") {
+    const auto crs35 = config::load_ascent_mission(STARSIM_CONFIG_DIR, "crs35_ascent");
+    REQUIRE(crs35.liftoff_utc);
+    CHECK(*crs35.liftoff_utc == time::UtcDateTime{2026, 10, 13, 10, 33, 0.0});  // flights.toml CRS-35
+    const auto flight14 = config::load_ascent_mission(STARSIM_CONFIG_DIR, "flight14_ascent");
+    REQUIRE(flight14.liftoff_utc);
+    CHECK(*flight14.liftoff_utc == time::UtcDateTime{2026, 9, 28, 12, 48, 59.0});  // flights.toml flight 14
+    CHECK_FALSE(config::load_ascent_mission(STARSIM_CONFIG_DIR, "starship_leo").liftoff_utc.has_value());
+}
+
+TEST_CASE("An ascent mission with liftoff_utc lifts off at it, whatever the requested epoch", "[mission][sim]") {
+    test::spice_session();
+    const spice::SpiceTimeConverter time;
+    const auto m = config::load_ascent_mission(STARSIM_CONFIG_DIR, "flight14_ascent");
+    REQUIRE(m.liftoff_utc);
+    const auto liftoff = time.from_utc(*m.liftoff_utc);
+    const auto requested = liftoff + 3.0 * 86400.0;
+    sim::StartOptions waiting;
+    waiting.wait_on_pad = true;
+    waiting.countdown_s = 600.0;  // longer than the ignition lead
+    const double countdown_s = m.countdown_s.value_or(waiting.countdown_s);
+    {
+        sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+        const auto s = sim::start_mission(session, STARSIM_CONFIG_DIR, "flight14_ascent", requested, time, waiting);
+        REQUIRE(s.refusal.empty());
+        REQUIRE(session.timeline().t0());
+        CHECK(std::abs(*session.timeline().t0() - liftoff) < 1e-6);
+        CHECK(std::abs((liftoff - s.epoch) - countdown_s) < 1e-6);
+        CHECK(session.epoch() == s.epoch);
+    }
+    {
+        sim::FlightSession session(spice_ephemeris(), spice_earth(), STARSIM_CONFIG_DIR);
+        const auto s = sim::start_mission(session, STARSIM_CONFIG_DIR, "flight14_ascent", requested, time);
+        REQUIRE(s.refusal.empty());
+        CHECK(std::abs(s.epoch - liftoff) < 1e-6);
+        CHECK(std::abs(session.epoch() - liftoff) < 1e-6);
+    }
+}
+
 // r2 review: a lunar return mission turns boil-off off; the next mission in the same session must have it again.
 TEST_CASE("Every mission start sets the boil-off flag of its mission", "[mission][sim][boil_off]") {
     test::spice_session();

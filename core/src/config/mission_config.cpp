@@ -370,6 +370,7 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
         m.countdown_s = doc.number(*mission, "countdown_s");
         if (*m.countdown_s < 0.0) doc.fail("countdown_s must be >= 0");
     }
+    if (mission->contains("liftoff_utc")) m.liftoff_utc = utc(doc, *mission, "liftoff_utc");
     m.payload_kg = doc.number_or(*mission, "payload_t", 0.0) * 1000.0;
     m.fairing = (*mission)["fairing"].value_or(true);
     if (const auto* payload = doc.root["payload"].as_table()) {

@@ -186,6 +186,9 @@ struct AscentMission {
     // [mission] countdown_s: requested epoch -> T-0 when the mission waits on the pad (sim::StartOptions); none: the
     // start option's default
     std::optional<double> countdown_s;
+    // [mission] liftoff_utc: a historical liftoff (a validation flight's recorded date). The mission lifts off at it
+    // whatever epoch is requested, placed countdown_s before it; none: lifts off at the requested time + countdown.
+    std::optional<time::UtcDateTime> liftoff_utc;
     // [propellant] <stage id> = t: the propellant (oxidizer + fuel) loaded in that stage before the engines start
     // (config::fill_tanks; sim::start_ascent_mission refuses an unknown stage or more than its tanks hold); stages not
     // named are full. A recorded flight's load (the validation flights).

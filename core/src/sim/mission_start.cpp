@@ -19,19 +19,28 @@ MissionStart start_mission(FlightSession& session, const std::filesystem::path& 
     s.kind = config::mission_kind(config_dir, mission_id);
     session.set_boil_off(true);  // a mission without its own setting: boil-off on (a lunar return sets its own)
     // the mission's sea (none: calm, a previous mission's sea removed), before the start plans the drone-ship recovery
-    // (its time origin is the requested epoch: the sea does not depend on what the session ran before)
-    session.set_sea_state(config::mission_sea_state(config_dir, mission_id), requested);
+    // (its time origin is the epoch the mission is placed at: the sea does not depend on what the session ran before)
+    // An ascent with a historical liftoff_utc is placed its countdown before that liftoff, whatever was requested.
+    std::optional<config::AscentMission> ascent;
+    if (s.kind == config::MissionKind::Ascent) ascent = config::load_ascent_mission(config_dir, mission_id);
+    const double countdown_s =
+        !ascent || !options.wait_on_pad ? 0.0 : ascent->countdown_s.value_or(options.countdown_s);
+    std::optional<time::Epoch> historical_liftoff;
+    if (ascent && ascent->liftoff_utc) historical_liftoff = time.from_utc(*ascent->liftoff_utc);
+    const time::Epoch placed = historical_liftoff ? *historical_liftoff - countdown_s : requested;
+    session.set_sea_state(config::mission_sea_state(config_dir, mission_id), placed);
     const std::optional<time::Epoch> wait_from =
-        options.wait_on_pad ? std::optional<time::Epoch>(requested) : std::nullopt;
+        options.wait_on_pad ? std::optional<time::Epoch>(placed) : std::nullopt;
     switch (s.kind) {
         case config::MissionKind::Ascent: {
-            const auto m = config::load_ascent_mission(config_dir, mission_id);
-            const double countdown_s = options.wait_on_pad ? m.countdown_s.value_or(options.countdown_s) : 0.0;
-            const auto launch =
-                start_ascent_mission_for_liftoff(session, m, config_dir, requested + countdown_s, wait_from, false);
+            // a historical liftoff is fixed (the placement moves earlier when the countdown is shorter than the
+            // ignition lead); a countdown T-0 moves later instead
+            const auto launch = start_ascent_mission_for_liftoff(
+                session, *ascent, config_dir, historical_liftoff.value_or(requested + countdown_s), wait_from,
+                historical_liftoff.has_value());
             if (!launch.profile.feasible) s.refusal = launch.profile.reason;
-            s.site_id = m.site_id;
-            s.epoch = requested;
+            s.site_id = ascent->site_id;
+            s.epoch = historical_liftoff && options.wait_on_pad ? launch.placed : placed;
             break;
         }
         case config::MissionKind::CapsuleReturn: {

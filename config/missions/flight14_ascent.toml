@@ -10,6 +10,7 @@ name = "Validierung: Testflug 14"
 display_name = "Testflug 14 (Nachflug)"  # shown in the webcast overlay (no trademarks)
 vehicle = "starship_block3"
 site = "starbase_olp1"          # [S:flights.toml] Starbase; OLP-1 [E] (flight 14's pad not recorded)
+liftoff_utc = "2026-09-28T12:48:59"  # [S:flights.toml] flight 14: lifts off at this date
 heading_deg = 90.0              # body +y on the pad (as starship_leo)
 # [E] 26 Starlink V3 (press reports, retrieved 2026-10-23, e.g. https://innovation-village.com/spacex-successfully-
 # launches-starship-into-orbit-for-the-first-time/; one pre-launch report: ~20) at ~2 t each [E] (the figure of the
