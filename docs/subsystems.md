@@ -2302,6 +2302,23 @@ Plan: `docs/superpowers/plans/2026-10-22-ascent-trajectory-staging.md`, spec
     the middle of the widest kick gap left and gives up once every gap is below 2.5 deg (`initial_step_rad`): a launch
     whose feasible kick band is narrower than that and falls between the samples can be refused - conservative (never
     a launch that cannot fly).
+  - Sea state (sea-state plan 2026-10-24, Task 4): a mission's `[sea_state]` (`config::mission_sea_state`; every
+    `sim::start_mission` sets it on the session, none resets it to calm) is checked by `sim::sea_state_refusal`: the
+    deck's spectral 2-sigma tilt and heave rate (`contact::DeckMotion::statistics`) against the ship's
+    `max_deck_tilt_deg` 3 deg / `max_heave_rate_mps` 1 m/s [E]; above -> "Seegang im Landegebiet zu hoch: Decksneigung
+    4.2° über der Grenze 3.0° (signifikante Werte bei Hs 6.0 m, Tp 10 s)." `plan_launch` checks the provisional ship
+    before the drone-ship trials with the deck heading that moves least (0..180 deg in 5 deg steps: the ship can
+    head anywhere), so a sea too rough for every heading is refused with no drone-ship trial; after the impact
+    prediction the chosen ship is checked again with its real heading (along the ground track). RTLS and tower catches
+    ignore the sea; a calm sea, none, or the fidelity flag `deck_motion` off: no check (the old behaviour).
+    The limits in Hs (linear model, statistics scale with Hs; the tilt limit binds first everywhere):
+    | Tp | waves along the deck | waves across the deck |
+    |---|---|---|
+    | 8 s | 5.2 m (heave rate: 12.7 m) | 1.1 m (heave rate: 3.0 m) |
+    | 10 s | 4.2 m (heave rate: 6.9 m) | 1.45 m (heave rate: 3.2 m) |
+    So the deck heading decides: along the waves a landing is allowed up to Hs ~4-5 m, abeam only to ~1.1-1.5 m (the
+    barge's roll resonance at 5.3 s). Beyond ~6 deg of roll the linear model is an upper bound (safe for the refusal).
+    Printed by the hidden test `"Sea-state limits of the drone ship in Hs"` (`[sea_state_limits]`).
 - Recovery feasibility is checked for real in every trial (Task 3 review note): the session must return the stage
   (`returns_after_staging`), the MECO plan be finite, and with a boostback its Lambert arc be found from the stack's
   state at the last Booster tick (the trial single-ticks within two checks' propellant of the cutoff):

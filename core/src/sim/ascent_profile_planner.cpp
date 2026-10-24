@@ -14,6 +14,7 @@
 #include "starsim/config/drone_ship_config.hpp"
 #include "starsim/config/launch_site_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
+#include "starsim/contact/deck_motion.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
 #include "starsim/orbit/kepler.hpp"
@@ -402,6 +403,27 @@ private:
     std::string last_reason_ = "kein Versuchsflug.";
 };
 
+// The deck heading (0..180 deg in sea_check_heading_step_rad) whose motion in `like`'s sea is furthest inside the
+// ship's limits: the largest of tilt / limit and heave rate / limit smallest. 0 without a moving sea.
+double least_deck_motion_heading_rad(const FlightSession& like, const config::DroneShipConfig& ship) {
+    const auto& sea = like.sea_state();
+    if (!like.deck_motion() || !sea || sea->calm()) return 0.0;
+    double best_heading_rad = 0.0;
+    double best_ratio = std::numeric_limits<double>::infinity();
+    const int steps = static_cast<int>(std::lround(constants::pi / sea_check_heading_step_rad));
+    for (int i = 0; i < steps; ++i) {
+        const double heading_rad = i * sea_check_heading_step_rad;
+        const auto s = contact::DeckMotion(*sea, ship.hull, heading_rad).statistics();
+        const double ratio = std::max(s.significant_tilt_rad / ship.max_deck_tilt_rad,
+                                      s.significant_heave_rate_mps / ship.max_heave_rate_mps);
+        if (ratio < best_ratio) {
+            best_ratio = ratio;
+            best_heading_rad = heading_rad;
+        }
+    }
+    return best_heading_rad;
+}
+
 }  // namespace
 
 std::optional<LaunchSite> recovery_landing_site(const FlightSession& session, const RecoveryChoice& recovery) {
@@ -418,6 +440,29 @@ std::optional<LaunchSite> recovery_landing_site(const FlightSession& session, co
     return std::nullopt;
 }
 
+
+std::optional<std::string> sea_state_refusal(const FlightSession& like, const config::DroneShipConfig& ship,
+                                             double heading_rad) {
+    const auto& sea = like.sea_state();
+    if (!like.deck_motion() || !sea || sea->calm()) return std::nullopt;
+    const auto s = contact::DeckMotion(*sea, ship.hull, heading_rad).statistics();
+    std::string excess;
+    char text[160];
+    if (s.significant_tilt_rad > ship.max_deck_tilt_rad) {
+        std::snprintf(text, sizeof text, "Decksneigung %.1f° über der Grenze %.1f°", s.significant_tilt_rad / deg,
+                      ship.max_deck_tilt_rad / deg);
+        excess = text;
+    }
+    if (s.significant_heave_rate_mps > ship.max_heave_rate_mps) {
+        std::snprintf(text, sizeof text, "Hubgeschwindigkeit des Decks %.2f m/s über der Grenze %.2f m/s",
+                      s.significant_heave_rate_mps, ship.max_heave_rate_mps);
+        excess += (excess.empty() ? "" : ", ") + std::string(text);
+    }
+    if (excess.empty()) return std::nullopt;
+    std::snprintf(text, sizeof text, " (signifikante Werte bei Hs %.1f m, Tp %.0f s)",
+                  sea->config().significant_wave_height_m, sea->config().peak_period_s);
+    return "Seegang im Landegebiet zu hoch: " + excess + text;
+}
 
 double fly_ascent_trial(const FlightSession& like, const AscentProfileRequest& request, double kick_angle_rad) {
     return fly_trial(like, request, kick_angle_rad).propellant_kg;
@@ -513,12 +558,22 @@ AscentProfile plan_launch(const FlightSession& like, AscentProfileRequest reques
         none.target = request.target;
         return refused(none, no_ship);
     }
+    // Too rough a sea for the ship however it heads: refused before any drone-ship trial (spectral, no time simulation).
+    if (const auto rough = sea_state_refusal(like, *provisional_ship, least_deck_motion_heading_rad(like, *provisional_ship))) {
+        AscentProfile none;
+        none.target = request.target;
+        none.trial_flights = trial_flights;
+        none.recovery = {RecoveryKind::DroneShip, provisional_ship->id, lat, lon, azimuth};
+        return refused(none, *rough);
+    }
     auto profile = planned({RecoveryKind::DroneShip, provisional_ship->id, lat, lon, azimuth});
     if (!profile.feasible) return refused(profile, unreachable);
     if (!profile.booster_impact) return refused(profile, "Der Aufschlagpunkt der ersten Stufe ist nicht vorhersagbar");
     const auto& impact = *profile.booster_impact;
     const auto ship = config::drone_ship_for(ships, impact.latitude_rad, impact.longitude_rad);
     if (!ship) return refused(profile, no_ship);
+    // the deck along the ground track at the chosen station (the ship's real heading)
+    if (const auto rough = sea_state_refusal(like, *ship, impact.heading_rad)) return refused(profile, *rough);
     profile.recovery = {RecoveryKind::DroneShip, ship->id, impact.latitude_rad, impact.longitude_rad,
                         impact.heading_rad};
     return profile;

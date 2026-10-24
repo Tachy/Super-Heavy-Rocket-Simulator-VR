@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "starsim/environment/sea_state.hpp"
 #include "starsim/math/constants.hpp"
 #include "starsim/math/vec3.hpp"
 #include "starsim/time/utc_date_time.hpp"
@@ -25,6 +26,12 @@ MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_vi
 bool mission_plans_on_pad(const std::filesystem::path& config_dir, std::string_view mission_id);
 // [mission] display_name (German, no trademarks: the webcast overlay); empty when the file has none.
 std::string mission_display_name(const std::filesystem::path& config_dir, std::string_view mission_id);
+// [sea_state] of any mission (sea state and deck motion, Task 4): the sea at its drone ship's station; none: calm.
+// Keys: significant_wave_height_m (>= 0) and peak_period_s (> 0), both required; heading_deg (the direction the waves
+// travel towards, clockwise from north; default 0) and seed (>= 0; default 1). Every mission start sets it on the
+// session (sim::start_mission; none resets it).
+std::optional<environment::SeaStateConfig> mission_sea_state(const std::filesystem::path& config_dir,
+                                                             std::string_view mission_id);
 
 // [deorbit] of a ship return from orbit (b4): the deorbit planning settings (gnc::DeorbitParameters).
 struct ShipReturnDeorbit {
@@ -183,6 +190,7 @@ struct AscentMission {
     // (config::fill_tanks; sim::start_ascent_mission refuses an unknown stage or more than its tanks hold); stages not
     // named are full. A recorded flight's load (the validation flights).
     std::vector<std::pair<std::string, double>> propellant_load_kg;
+    std::optional<environment::SeaStateConfig> sea_state;  // [sea_state] (mission_sea_state); none: calm
 };
 
 AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::string_view mission_id);

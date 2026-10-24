@@ -4,6 +4,7 @@
 #include <optional>
 #include <string>
 
+#include "starsim/config/drone_ship_config.hpp"
 #include "starsim/config/mission_config.hpp"
 #include "starsim/config/vehicle_config.hpp"
 #include "starsim/gnc/ascent_guidance.hpp"
@@ -28,10 +29,22 @@ struct RecoveryChoice {
 // config/missions/falcon9_asds.toml: the staging sequence's push is over, the coast's RCS trim moves the point ~0.1 km).
 inline constexpr double drone_ship_prediction_after_separation_s = 10.0;
 
+// [E] Deck headings tried by plan_launch's sea-state check before the drone-ship trials (0..180 deg: the deck motion
+// statistics are symmetric under a half turn). The tilt varies smoothly with the heading (cos / sin of the wave angle).
+inline constexpr double sea_check_heading_step_rad = 5.0 * constants::deg_to_rad;
+
 // The landing zone or drone ship of `recovery` as the session's landing site (none for a tower catch), read from
 // `session`'s config directory. A drone ship floats on `session`'s sea at its station (FlightSession::sea_height_m:
 // the terrain's fine EGM2008 geoid when set, else the coarse one).
 std::optional<LaunchSite> recovery_landing_site(const FlightSession& session, const RecoveryChoice& recovery);
+
+// The onboard computer's sea-state check of a drone-ship landing (sea state and deck motion, Task 4): the deck motion
+// statistics (contact::DeckMotion::statistics, 2 sigma, spectral) of `ship` with its long axis along `heading_rad`
+// (clockwise from north) in `like`'s sea, against the ship's limits (max_deck_tilt_rad, max_heave_rate_mps). Returns
+// the German reason ("Seegang im Landegebiet zu hoch: ..." with each value above its limit and the limit) or nullopt:
+// within the limits, a calm sea or none, or the fidelity flag deck_motion off.
+std::optional<std::string> sea_state_refusal(const FlightSession& like, const config::DroneShipConfig& ship,
+                                             double heading_rad);
 
 // A launch from a pad the onboard computer plans before liftoff (ascent trajectory and staging, Task 3).
 // Threads: the planner reads `like`'s interpolated ephemeris and orientation, whose caches fill lazily and are not
@@ -103,7 +116,10 @@ AscentProfile plan_ascent_profile(const FlightSession& like, const AscentProfile
 //  - a stage caught by a tower ("tower_catch", Super Heavy): the site's tower; none, or no plan with the catch: refused;
 //  - a stage on legs ("leg_landing", Falcon 9): the site's landing zone (RTLS) when the plan with the RTLS return is
 //    feasible, else the drone ship at the stage's predicted no-boostback impact (booster_impact), heading along the
-//    ground track; neither: refused.
+//    ground track; neither: refused. The drone ship is checked against the sea (sea_state_refusal) before its trials,
+//    with the deck heading that moves least (the ship can head anywhere: 0..180 deg in sea_check_heading_step_rad,
+//    the largest of value / limit smallest), and again at the chosen station with its heading along the ground track;
+//    a refusal there refuses the launch.
 // A plan is feasible only when every trial checked the return at MECO for real: a finite propellant plan and, with a
 // boostback, its Lambert arc found (BoosterReturnGuidance::boostback_delta_v_mps) - a failed arc counts no boostback.
 // What the RTLS / catch reserve holds is the MECO plan's: the stage's landing_propellant_kg plus run-down, flip and the

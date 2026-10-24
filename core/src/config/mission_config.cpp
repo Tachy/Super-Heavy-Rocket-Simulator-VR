@@ -111,6 +111,23 @@ std::vector<double> increasing_days(const detail::Document& doc, const toml::tab
     return seconds;
 }
 
+// [sea_state] (mission_sea_state); none: calm.
+std::optional<environment::SeaStateConfig> sea_state_of(const detail::Document& doc) {
+    const auto* table = doc.root["sea_state"].as_table();
+    if (!table) return std::nullopt;
+    environment::SeaStateConfig s;
+    s.significant_wave_height_m = doc.number(*table, "significant_wave_height_m");
+    if (s.significant_wave_height_m < 0.0) doc.fail("sea_state: significant_wave_height_m must be >= 0");
+    s.peak_period_s = doc.positive(*table, "peak_period_s");
+    s.heading_rad = doc.number_or(*table, "heading_deg", 0.0) * constants::deg_to_rad;
+    if (table->contains("seed")) {
+        const auto seed = (*table)["seed"].value<std::int64_t>();
+        if (!seed || *seed < 0) doc.fail("sea_state: seed must be an integer >= 0");
+        s.seed = static_cast<std::uint64_t>(*seed);
+    }
+    return s;
+}
+
 }  // namespace
 
 MissionKind mission_kind(const std::filesystem::path& config_dir, std::string_view mission_id) {
@@ -135,6 +152,11 @@ std::string mission_display_name(const std::filesystem::path& config_dir, std::s
     const detail::Document doc(config_dir / "missions" / (std::string(mission_id) + ".toml"));
     const auto* mission = doc.root["mission"].as_table();
     return mission ? doc.text_or(*mission, "display_name") : std::string();
+}
+
+std::optional<environment::SeaStateConfig> mission_sea_state(const std::filesystem::path& config_dir,
+                                                             std::string_view mission_id) {
+    return sea_state_of(detail::Document(config_dir / "missions" / (std::string(mission_id) + ".toml")));
 }
 
 ShipReturnMission load_ship_return_mission(const std::filesystem::path& config_dir, std::string_view mission_id) {
@@ -370,6 +392,7 @@ AscentMission load_ascent_mission(const std::filesystem::path& config_dir, std::
             m.propellant_load_kg.emplace_back(std::string(stage.str()), doc.positive(*load, stage.str()) * 1000.0);
         }
     }
+    m.sea_state = sea_state_of(doc);
     return m;
 }
 
