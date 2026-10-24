@@ -1,6 +1,10 @@
 # Refuelling r5: the depot's ascent from Starbase into the depot orbit (spec r5 "depot_launch"). The pitch program is
 # planned at the start (sim::plan_launch); the booster is caught.
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "starbase_olp1"
+start_vehicle = "starship_depot"
 name = "Depot in den Erdorbit"
 display_name = "Depot in den Erdorbit"  # shown in the webcast overlay (no trademarks)
 vehicle = "starship_depot"

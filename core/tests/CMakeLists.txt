@@ -163,6 +163,7 @@ add_executable(starsim_core_tests
     test_optim_solver.cpp
     test_optim_validation.cpp
     test_launch_site_config.cpp
+    test_mission_start_places.cpp
     test_contact_primitives.cpp
     test_tower_geometry.cpp
     test_catch_arms.cpp
@@ -195,7 +196,7 @@ add_executable(starsim_core_tests
     test_proximity_transfer.cpp
     test_translation_loop.cpp
 )
-target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain)
+target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain tomlplusplus::tomlplusplus)
 target_compile_definitions(starsim_core_tests PRIVATE
     STARSIM_KERNEL_DIR="${STARSIM_DATA_DIR}/spice"
     STARSIM_DATA_DIR="${STARSIM_DATA_DIR}"

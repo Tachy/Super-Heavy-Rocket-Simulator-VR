@@ -1,0 +1,17 @@
+# Start places of the mission selection panel that are not launch pads: where a mission starts when it begins in
+# flight. A mission's `[mission] start_place` is either a pad id of launch_sites.toml (sites without `kind`) or one of
+# the ids below; `[mission] start_vehicle` is a file id of config/vehicles/. `name` is the German label of the place box.
+# Read by the game's mission catalogue (game/ui/mission_catalogue.gd); the core only checks the declarations against
+# what sim::start_mission really starts (core/tests/test_mission_start_places.cpp).
+
+[[place]]
+id = "earth_orbit"
+name = "Erdorbit"
+
+[[place]]
+id = "iss_docked"
+name = "ISS (angedockt)"
+
+[[place]]
+id = "lunar_orbit"
+name = "Mondumlaufbahn"

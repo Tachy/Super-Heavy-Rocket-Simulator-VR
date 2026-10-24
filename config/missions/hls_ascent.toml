@@ -2,6 +2,10 @@
 # (tanker_ascent.toml): insertion at a 120 km perigee, raised to 170 km at the first apoapsis (hls_refuel [phasing]
 # periapsis_km). The pitch program is planned at the start (sim::plan_launch); the booster is caught.
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "starbase_olp1"
+start_vehicle = "starship_hls_launch"
 name = "HLS in den Phasenorbit"
 display_name = "Mondlander in den Phasenorbit" # shown in the webcast overlay (no trademarks)
 vehicle = "starship_hls_launch"

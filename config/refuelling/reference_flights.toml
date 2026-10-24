@@ -6,12 +6,13 @@
 
 # f4: FNV-1a 64 of the configs the flights read (core/tests/test_refuelling_campaign.cpp lists them, LF line ends);
 # a config change without a re-measure fails the fast check "The measured numbers belong to the current configs".
-inputs_digest = "9015feb5c2b3ffbc"  # M8a Task 6: site heights derived from the terrain data (Starbase 10.00 ->
+inputs_digest = "dc79a1d32e03277c"  # M8a Task 6: site heights derived from the terrain data (Starbase 10.00 ->
                                     # -21.11 m), re-measured in M8a Task 7; M8a Task 3: launch_sites.toml plateau keys
                                     # (read only by the Earth terrain, which the reference flights do not load); ascent
                                     # Task 5: the planned kick and recovery (mission files without [pitch_program]),
                                     # re-measured;
                                     # Task 2: max-Q limit + operational ascent throttle
+                                    # mission panel Task 2: start_place / start_vehicle / vehicles keys (data only, no re-measure)
 
 [depot]
 mission = "depot_launch"

@@ -4,6 +4,10 @@
 # parachutes, splashdown).
 
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "iss_docked"
+start_vehicle = "crew_dragon"
 name = "Crew Dragon: Abkoppeln und Rückkehr"
 display_name = "Abkoppeln von der Raumstation und Rückkehr" # shown in the webcast overlay (no trademarks)
 kind = "iss_departure"

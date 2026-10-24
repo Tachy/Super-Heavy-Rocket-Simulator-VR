@@ -3,6 +3,10 @@
 # epoch_utc (i6 correction 4); phase_deg instead starts in the ISS plane that far behind the station.
 
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "earth_orbit"
+start_vehicle = "crew_dragon"
 name = "Crew Dragon zur ISS"
 display_name = "Crew-Kapsel zur Raumstation" # shown in the webcast overlay (no trademarks)
 kind = "iss_rendezvous"             # FlightSim.start_mission dispatches on it

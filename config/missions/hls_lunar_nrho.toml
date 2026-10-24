@@ -6,6 +6,10 @@
 # the flown legs ([budget]) leave ~2 t short of the NRHO before the 10 t reserve.
 
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "earth_orbit"
+start_vehicle = "starship_hls"
 name = "HLS-Mondlandung (NRHO)"
 display_name = "Mondlandung (NRHO)"     # shown in the webcast overlay (no trademarks)
 kind = "lunar_landing"           # FlightSim.start_mission dispatches on it (absent: "ascent")

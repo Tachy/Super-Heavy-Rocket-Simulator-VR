@@ -5,6 +5,10 @@
 # input to the profile. Nine engines lit through the whole first-stage burn (engine icon): no engine-out.
 
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "ccsfs_slc40"
+start_vehicle = "falcon9_block5"
 name = "Validierung: CRS-35"
 display_name = "Frachtflug zur Raumstation (Nachflug)"  # shown in the webcast overlay (no trademarks)
 vehicle = "falcon9_block5"

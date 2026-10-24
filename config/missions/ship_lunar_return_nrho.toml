@@ -4,6 +4,10 @@
 # The start computes the propellant (fixed point over the planned burns and the landing propellant).
 
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "lunar_orbit"
+start_vehicle = "starship_block3"
 name = "Rückkehr vom Mond (NRHO, direkt)"
 display_name = "Rückkehr vom Mond (NRHO)" # shown in the webcast overlay (no trademarks)
 kind = "lunar_return"            # FlightSim.start_mission dispatches on it

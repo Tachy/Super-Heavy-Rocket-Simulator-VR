@@ -4,6 +4,10 @@
 # its entry burn and lands on its legs; the second stage flies on to orbit. Modelled on CRS-35 (2026-10-13).
 
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "ccsfs_slc40"
+start_vehicle = "falcon9_block5"
 name = "Falcon 9 mit Landung auf LZ-40"
 display_name = "Medium Launcher: Landung am Startgelände" # shown in the webcast overlay (no trademarks)
 vehicle = "falcon9_block5"

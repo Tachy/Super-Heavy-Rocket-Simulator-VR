@@ -1,6 +1,10 @@
 # Refuelling f2: the flown campaign (spec f2) with the depot placed instead of launched - the short check: two
 # tankers and the HLS, compared with the campaign calculator.
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "earth_orbit"
+start_vehicle = "starship_depot"
 name = "Betankungskampagne (geflogen, Depot platziert)"
 display_name = "Betankungskampagne (Depot platziert)" # shown in the webcast overlay (no trademarks)
 kind = "refuelling_campaign_flown"

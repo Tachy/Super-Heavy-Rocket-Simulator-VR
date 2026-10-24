@@ -1,6 +1,10 @@
 # Refuelling r5: tanker_flight from the phasing orbit (fast tests): the tanker 8 deg behind the depot in the ascent's
 # 170 x 190 km orbit, then the same chain as tanker_flight (phasing -> ... -> catch).
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "earth_orbit"
+start_vehicle = "starship_tanker"
 name = "Tankerflug ab Phasenorbit"
 display_name = "Tankerflug ab Phasenorbit" # shown in the webcast overlay (no trademarks)
 kind = "tanker_flight"

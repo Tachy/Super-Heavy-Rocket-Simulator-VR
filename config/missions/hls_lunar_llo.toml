@@ -3,6 +3,10 @@
 # TLI on the vacuum Raptors, two mid-course corrections, LOI into a 100 km polar LLO. [orbit] is the scenario start.
 
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "earth_orbit"
+start_vehicle = "starship_hls"
 name = "HLS-Mondlandung (LLO)"
 display_name = "Mondlandung (LLO)"      # shown in the webcast overlay (no trademarks)
 kind = "lunar_landing"           # FlightSim.start_mission dispatches on it (absent: "ascent")

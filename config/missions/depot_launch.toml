@@ -1,6 +1,10 @@
 # Refuelling r5: the depot launches first; the ship becomes the station in its orbit, the residue after the ascent is
 # its initial fill (measured, for the r6 campaign).
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "starbase_olp1"
+start_vehicle = "starship_depot"
 name = "Depotstart"
 display_name = "Depotstart"             # shown in the webcast overlay (no trademarks)
 kind = "depot_launch"

@@ -3,6 +3,10 @@
 # apoapsis (tanker_flight [phasing] periapsis_km); at 80 km the coast's drag (~60 m/s) brought it back down. The pitch
 # program is planned at the start (sim::plan_launch); the booster is caught.
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "starbase_olp1"
+start_vehicle = "starship_tanker"
 name = "Tanker in den Phasenorbit"
 display_name = "Tanker in den Phasenorbit" # shown in the webcast overlay (no trademarks)
 vehicle = "starship_tanker"

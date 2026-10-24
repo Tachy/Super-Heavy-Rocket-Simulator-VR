@@ -6,6 +6,10 @@
 # ship's RVac out from T+438 s; flight 14's booster splashed down in the gulf (ours returns to the tower).
 
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "starbase_olp1"
+start_vehicle = "starship_block3"
 name = "Validierung: Testflug 14"
 display_name = "Testflug 14 (Nachflug)"  # shown in the webcast overlay (no trademarks)
 vehicle = "starship_block3"

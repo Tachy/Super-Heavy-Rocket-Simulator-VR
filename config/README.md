@@ -26,6 +26,11 @@ crew_escape/<id>.toml   ejection seats of a crewed ship return (referenced by mi
   stage that flies as a separate body (booster, ship, capsule, trunk). A part split off at staging is shown by its
   lowest stage with main engines, else its topmost named stage (`vehicle::Vehicle::shown_name`).
   `[mission] display_name` (optional) names the mission under the overlay's mission clock.
+  Start declarations (mission selection panel): `[mission] start_place` (a pad id of `launch_sites.toml` or an id of
+  `start_places.toml`: `earth_orbit`, `iss_docked`, `lunar_orbit`) and `start_vehicle` (a `vehicles/` file id) on every
+  selectable mission; missions flown only as a follow-on (ship returns, `leo_ascent`) have neither. `[[site]] vehicles =
+  [...]` (one line) lists what may start on a pad (sites without `kind`; landing zones have none).
+  `core/tests/test_mission_start_places.cpp` checks them against the start dispatch.
 
 ## Engine thrust model
 Each engine is defined at one reference ambient pressure (sea level or vacuum):

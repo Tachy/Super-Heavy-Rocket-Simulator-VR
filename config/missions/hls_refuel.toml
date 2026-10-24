@@ -1,6 +1,10 @@
 # Refuelling r5: the HLS launches into the depot plane, docks, is filled and undocks; at the lunar mission's epoch the
 # lunar landing continues from the HLS's real state and tank load (spec r5 "hls_refuel").
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "starbase_olp1"
+start_vehicle = "starship_hls_launch"
 name = "HLS: Betankung am Depot und Mondmission"
 display_name = "Mondlander: Betankung am Depot und Mondmission" # shown in the webcast overlay (no trademarks)
 kind = "hls_refuel"

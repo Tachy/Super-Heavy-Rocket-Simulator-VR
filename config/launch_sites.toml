@@ -10,6 +10,7 @@
 [[site]]
 id = "starbase_olp1"
 name = "Starbase OLP-1"
+vehicles = ["starship_block3", "starship_depot", "starship_tanker", "starship_hls_launch"]  # start choices of the mission panel
 latitude_deg = 25.99686     # [E] from public satellite imagery
 longitude_deg = -97.15394
 height_m = -21.11  # [D] median of 3DEP 1 m + GLO-30 within 150 m, 2026-10-23
@@ -46,6 +47,7 @@ shoreline_distance_m = 500.0  # [E] pad centre -> shoreline along that direction
 [[site]]
 id = "ksc_lc39a"
 name = "KSC LC-39A"
+vehicles = ["starship_block3", "starship_depot", "starship_tanker", "starship_hls_launch", "falcon9_block5"]  # Falcon 9: the planner flies it with the drone ship (no landing zone here)
 latitude_deg = 28.60822     # [E] from public satellite imagery
 longitude_deg = -80.60410
 height_m = -15.85  # [D] median of 3DEP 1 m + GLO-30 within 60 m, 2026-10-23
@@ -83,6 +85,7 @@ shoreline_distance_m = 1300.0 # [E] pad centre -> shoreline along that direction
 [[site]]
 id = "ccsfs_slc40"
 name = "CCSFS SLC-40"
+vehicles = ["falcon9_block5"]  # no catch tower: no Starship stack
 latitude_deg = 28.56194     # [S] Wikipedia "Cape Canaveral Space Launch Complex 40": 28°33'43"N 80°34'38"W
 longitude_deg = -80.57722
 height_m = -23.29  # [D] median of 3DEP 1 m + GLO-30 within 30 m, 2026-10-23

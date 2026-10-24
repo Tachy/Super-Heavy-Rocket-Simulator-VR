@@ -1,6 +1,10 @@
 # Refuelling r5: hls_refuel from the phasing orbit (fast tests): the HLS 8 deg behind the depot in its 170 x 190 km
 # phasing orbit two days before the lunar epoch, then the same chain (phasing -> docking -> fill -> departure -> lunar).
 [mission]
+# where the mission starts and with which vehicle (mission selection panel; checked against the start dispatch
+# by test_mission_start_places)
+start_place = "earth_orbit"
+start_vehicle = "starship_hls_launch"
 name = "HLS: Betankung ab Phasenorbit und Mondmission"
 display_name = "Mondlander: Betankung ab Phasenorbit und Mondmission" # shown in the webcast overlay (no trademarks)
 kind = "hls_refuel"
