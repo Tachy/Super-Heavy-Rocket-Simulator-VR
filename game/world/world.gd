@@ -28,6 +28,7 @@ var clock := SimClock.new()
 var camera := OrbitCamera.new()
 var earth := CelestialBody.new()
 var earth_terrain := TerrainQuadtree.new()  ## streamed Earth surface (relief + imagery) while not in scaled space
+var water_waves := WaterWaves.new()  ## the sea's wave set (water.gdshaderinc), phases at the camera
 var towers: Array[TowerView] = []  ## catch towers of the launch sites
 var moon := CelestialBody.new()
 var sun_disk := MeshInstance3D.new()
@@ -116,7 +117,9 @@ func update_world() -> void:
 	var sun_from_camera := core.apparent_body_position_gcrf_m("sun", t, cam, Vector3.ZERO)
 
 	earth.place(cam)
-	earth_terrain.update_for_camera(earth.fixed_to_gcrf.transposed() * cam)
+	var camera_fixed := earth.fixed_to_gcrf.transposed() * cam
+	earth_terrain.update_for_camera(camera_fixed)
+	water_waves.update(camera_fixed, t)
 	earth.body_mesh_visible = not earth_terrain.active
 	moon.place(cam)
 	var sun_local := earth.to_local_frame(sun_apparent_from_earth_m)
@@ -126,6 +129,8 @@ func update_world() -> void:
 	# Global shader uniforms (project.godot [shader_globals]): one write for every terrain node material.
 	RenderingServer.global_shader_parameter_set("earth_sun_position_local", sun_local)
 	RenderingServer.global_shader_parameter_set("earth_moon_position_local", moon_local)
+	RenderingServer.global_shader_parameter_set("water_wave_vectors", water_waves.vectors)
+	RenderingServer.global_shader_parameter_set("water_wave_phases", water_waves.phases)
 	_moon_material.set_shader_parameter("sun_position_local", moon.to_local_frame(sun_apparent_from_earth_m - moon_gcrf_m))
 	_moon_material.set_shader_parameter("earth_position_local", moon.to_local_frame(-moon_gcrf_m))
 	_moon_material.set_shader_parameter("camera_position_local", moon.to_local_frame(cam - moon_gcrf_m))
@@ -147,7 +152,8 @@ func launch_vehicle(vehicle_id: String, site: Dictionary, countdown_s := FlightC
 	return true
 
 
-## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml).
+## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml; optional eye_height_m
+## above height_m, default GROUND_EYE_HEIGHT_M).
 func set_ground_site(site: Dictionary) -> void:
 	focus = site.get("id", "custom")
 	ground_site = site
@@ -192,7 +198,7 @@ func _update_camera(t: float) -> void:
 		var lon := deg_to_rad(ground_site["longitude_deg"])
 		var rotation := earth.fixed_to_gcrf
 		camera.site_gcrf_m = core.geodetic_to_gcrf_m(ground_site["latitude_deg"], ground_site["longitude_deg"],
-				ground_site["height_m"] + GROUND_EYE_HEIGHT_M, t)
+				ground_site["height_m"] + float(ground_site.get("eye_height_m", GROUND_EYE_HEIGHT_M)), t)
 		camera.site_up_gcrf = rotation * Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
 		camera.site_east_gcrf = rotation * Vector3(-sin(lon), cos(lon), 0.0)
 		camera.site_north_gcrf = rotation * Vector3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat))

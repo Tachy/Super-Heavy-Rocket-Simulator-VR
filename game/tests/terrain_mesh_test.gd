@@ -46,6 +46,24 @@ class PlaneSource extends HeightSource:
 		return {"height_m": heights, "water": water}
 
 
+## Height source of a straight coast along a meridian: water west of coast_lon_deg (sea level 0 m), land east of it.
+class CoastSource extends HeightSource:
+	var coast_lon_deg := 0.0
+
+	func is_water(lon_deg: float) -> bool:
+		return lon_deg < coast_lon_deg
+
+	func sample(lats_deg: PackedFloat64Array, lons_deg: PackedFloat64Array) -> Dictionary:
+		var heights := PackedFloat64Array()
+		heights.resize(lats_deg.size())
+		var water := PackedByteArray()
+		water.resize(lats_deg.size())
+		for k in lats_deg.size():
+			heights[k] = 0.0 if is_water(lons_deg[k]) else 5.0
+			water[k] = 1 if is_water(lons_deg[k]) else 0
+		return {"height_m": heights, "water": water}
+
+
 func _initialize() -> void:
 	_check_cover()
 	_check_children()
@@ -56,6 +74,7 @@ func _initialize() -> void:
 	_check_plane_normals()
 	_check_missing_tile()
 	_check_flat_rule()
+	_check_water_mask()
 	print("TERRAIN MESH TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 
@@ -335,6 +354,43 @@ func _check_flat_rule() -> void:
 				"flat rule without terrain: %s vertex at %.2f m (error %s m), no water"
 				% [place[3], place[2], String.num_scientific(error)])
 		_check(node["max_resolution_m"] == INF, "without terrain the data resolution is infinite")
+
+
+# Water mask follows the core: a straight coast through a node; every texel equals the source's water flag at the
+# texel centre (255 water, 0 land), and each grid vertex's CUSTOM2 uv lands on a texel of its own side.
+func _check_water_mask() -> void:
+	var key := CubeSphere.key_at(CubeSphere.geodetic_direction(30.0, -40.0), 10)
+	var box := CubeSphere.lat_lon_box(key)
+	var source := CoastSource.new()
+	source.coast_lon_deg = box.position.x + 0.37 * box.size.x  # not on a texel boundary
+	var node := TerrainNodeBuilder.build(key, source, null, EARTH_RADIUS_M)
+	var mask: Image = node["water_mask"]
+	var px := TerrainNodeBuilder.WATER_MASK_PX
+	var texels_ok := mask.get_width() == px and mask.get_height() == px and mask.get_format() == Image.FORMAT_L8
+	var water_texels := 0
+	var data := mask.get_data()
+	for r in px:
+		for c in px:
+			var lon := box.position.x + (c + 0.5) / px * box.size.x
+			var value := data[r * px + c]
+			var expected := 255 if source.is_water(lon) else 0
+			texels_ok = texels_ok and value == expected
+			water_texels += 1 if value == 255 else 0
+	_check(texels_ok and water_texels > 0 and water_texels < px * px,
+			"water mask follows the core: texels match the coast at their centres (%d of %d water)"
+			% [water_texels, px * px])
+	var custom1: PackedFloat32Array = node["custom1"]
+	var custom2: PackedFloat32Array = node["custom2"]
+	var texel_deg := box.size.x / px
+	var uv_ok := true
+	for v in TerrainNodeBuilder.GRID_VERTICES:
+		var lon := custom1[4 * v] * 360.0 - 180.0
+		if absf(lon - source.coast_lon_deg) < 1.5 * texel_deg:
+			continue  # the texel under a vertex next to the coast may lie on the other side
+		var c := clampi(int(custom2[2 * v] * px), 0, px - 1)
+		var r := clampi(int(custom2[2 * v + 1] * px), 0, px - 1)
+		uv_ok = uv_ok and (data[r * px + c] == 255) == source.is_water(lon)
+	_check(uv_ok, "CUSTOM2 uv of each grid vertex lands on a mask texel of its own side of the coast")
 
 
 static func _solid_angle(key: Vector4i) -> float:

@@ -2,6 +2,7 @@
 # godot --path game --script res://tests/render_check.gd -- --utc=2024-04-08T18:42:00 --focus=earth
 # Vehicle: --vehicle=starship_block3 --site=starbase_olp1 [--fly=40] (ignite, liftoff at 3 s, fly N s)
 #          [--autopilot] (ascent autopilot instead of manual) [--circularize] (plan node afterwards)
+# Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
 # Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed).
 # Webcast overlay: --webcast [--mission=starship_leo] (start the mission at --utc) [--t_plus=75] (advance to T+75 s)
 #          or [--at_event=entry_interface,<offset s>] (to an event of the mission timeline, recorded or predicted)
@@ -39,6 +40,8 @@ func _process(_delta: float) -> bool:
 		if _args.has("lat"):
 			world.set_ground_site({"id": "custom", "name": "custom", "latitude_deg": float(_args["lat"]),
 					"longitude_deg": float(_args["lon"]), "height_m": float(_args.get("height", "0"))})
+		if _args.has("sea_lat"):
+			_view_at_sea(world)
 		var cam := world.camera
 		if _args.has("yaw"): cam.yaw = float(_args["yaw"])
 		if _args.has("pitch"): cam.pitch = float(_args["pitch"])
@@ -174,6 +177,19 @@ func _advance(sim: FlightSim, target: float) -> void:
 		sim.wait_idle(5.0)
 		if sim.advance_to(target) >= target - 0.01 or not sim.is_active():
 			return
+
+
+# Ground view at sea: the eye --eye_height (default 10 m) above the physics' surface at --sea_lat / --sea_lon (the
+# geoid at sea; the ellipsoid without the Earth terrain).
+func _view_at_sea(world: World) -> void:
+	var lat := float(_args["sea_lat"])
+	var lon := float(_args["sea_lon"])
+	var samples: Dictionary = world.core.surface_samples("earth", PackedFloat64Array([lat]), PackedFloat64Array([lon]))
+	var surface_m: float = samples["height_m"][0] if bool(samples["present"]) else 0.0
+	var water: bool = bool(samples["present"]) and samples["water"][0] != 0
+	print("render_check: sea view at %.4f, %.4f: surface %.2f m, water %s" % [lat, lon, surface_m, water])
+	world.set_ground_site({"id": "sea", "name": "sea", "latitude_deg": lat, "longitude_deg": lon, "height_m": surface_m,
+			"eye_height_m": float(_args.get("eye_height", "10"))})
 
 
 # Ground camera: point at the Moon.

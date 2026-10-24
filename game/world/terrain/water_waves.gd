@@ -1,0 +1,60 @@
+class_name WaterWaves
+extends RefCounted
+## The calm sea's wave set (shading only: water.gdshaderinc perturbs the normal, the geometry stays at the geoid).
+## Four directional Gerstner octaves with plane wave vectors in a tangent frame anchored near the camera. Their phases
+## at the camera are computed here in double (k . x reaches 1e7 rad on the Earth, omega t 1e9 rad: float32 would lose
+## both); the shader adds k . (fragment - camera), which is small and exact near the camera. The pattern is therefore
+## fixed on the Earth while the camera moves and travels with the simulation time (time warp speeds it). The frame is
+## re-anchored when the camera has moved REANCHOR_ANGLE_RAD away (vectors stay horizontal; the pattern jumps then).
+
+## [E] Wavelengths of the four octaves (m): swell to ripples.
+const WAVELENGTHS_M: Array[float] = [60.0, 23.0, 9.0, 3.5]
+## [E] Travel directions relative to WIND_HEADING_DEG (deg): spread so that no octave pair aligns.
+const DIRECTION_OFFSETS_DEG: Array[float] = [0.0, 31.0, -37.0, 67.0]
+## [E] Compass heading the waves travel towards (deg, from north through east).
+const WIND_HEADING_DEG := 60.0
+## [E] Slope k A of every octave: gentle (Cox-Munk adds the unresolved slopes in the glint).
+const SLOPE := 0.04
+## [S] Standard gravity (BIPM), deep-water dispersion omega^2 = g k.
+const STANDARD_GRAVITY_MPS2 := 9.80665
+## [E] Re-anchoring distance of the tangent frame (1 deg ~ 111 km; the waves fade out beyond 20 km).
+const REANCHOR_ANGLE_RAD := PI / 180.0
+
+## Columns: wave vector (rad/m, body-local render axes) in xyz, slope k A in w (shader global water_wave_vectors).
+var vectors := Projection()
+## Phase of each wave at the camera (rad, [0, 2 pi)) at the update's instant (shader global water_wave_phases).
+var phases := Vector4.ZERO
+var _anchor_up := Vector3.ZERO  # Earth-fixed unit vector of the frame's anchor; zero: not anchored yet
+
+
+## Recomputes the wave vectors (on re-anchoring) and the phases for a camera at camera_fixed_m (Earth-fixed metres)
+## at simulation time t_s (TDB seconds).
+func update(camera_fixed_m: Vector3, t_s: float) -> void:
+	var up := camera_fixed_m.normalized()
+	if _anchor_up == Vector3.ZERO or _anchor_up.angle_to(up) > REANCHOR_ANGLE_RAD:
+		_anchor(up)
+	var camera := Frames.to_render(camera_fixed_m)
+	for i in WAVELENGTHS_M.size():
+		phases[i] = fposmod(wave_vector(i).dot(camera) - angular_frequency(i) * t_s, TAU)
+
+
+## Wave vector of octave i (rad/m, body-local render axes).
+func wave_vector(i: int) -> Vector3:
+	var column: Vector4 = vectors[i]
+	return Vector3(column.x, column.y, column.z)
+
+
+## Angular frequency of octave i (rad/s), deep-water dispersion.
+static func angular_frequency(i: int) -> float:
+	return sqrt(STANDARD_GRAVITY_MPS2 * TAU / WAVELENGTHS_M[i])
+
+
+func _anchor(up: Vector3) -> void:
+	_anchor_up = up
+	var axis := Vector3(0, 0, 1) if absf(up.z) < 0.99 else Vector3(1, 0, 0)  # the pole: any other axis
+	var east := axis.cross(up).normalized()
+	var north := up.cross(east)
+	for i in WAVELENGTHS_M.size():
+		var heading := deg_to_rad(WIND_HEADING_DEG + DIRECTION_OFFSETS_DEG[i])
+		var k := Frames.to_render((north * cos(heading) + east * sin(heading)) * (TAU / WAVELENGTHS_M[i]))
+		vectors[i] = Vector4(k.x, k.y, k.z, SLOPE)
