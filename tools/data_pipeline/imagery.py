@@ -15,7 +15,10 @@ y counts south from 90 N, pixel centres at (i + 0.5) / 256 of the tile):
   data/imagery/earth/<source id>/<z>/<x>/<y>.jpg     (JPEG quality 88 [E])
   data/imagery/earth/<source id>/meta.toml           per source, compiled into
   data/imagery/earth/index.toml                      id, product, year, min/max level, exact coverage, fade_m, gain/offset
-Lower levels are 2 x 2 box means of the 4 decoded children. Tiles entirely outside the box are not written.
+No data (sea beyond the NAIP scenes, Sentinel-2 composite gaps) is filled before a tile is written, in final colours:
+NAIP from its area's fitted Sentinel-2 composite, then (and Sentinel-2 directly) from the day texture. Every tile of the
+box is written; tiles entirely outside the box are not. Lower levels are 2 x 2 means of the valid pixels of the 4 decoded
+children (no data never enters a mean).
 
 Usage: python tools/data_pipeline/fetch.py [--force] imagery
 """
@@ -146,11 +149,15 @@ def apply_gain_offset(rgb: np.ndarray, gain: np.ndarray, offset: np.ndarray) -> 
 
 
 def downsample_children(tl, tr, bl, br) -> np.ndarray:
-    """The parent tile: 2 x 2 box mean of the four (256, 256, 3) children; a missing child (None) is no data (zeros)."""
+    """The parent tile: 2 x 2 mean of the VALID pixels (not all channels 0) of the four (256, 256, 3) children; no data never
+    enters a mean. A parent pixel without any valid child pixel (a missing child (None) is no data) stays 0."""
     zero = np.zeros((TILE_PX, TILE_PX, 3), dtype=np.uint8)
     rows = [np.concatenate([c if c is not None else zero for c in row], axis=1) for row in ((tl, tr), (bl, br))]
-    big = np.concatenate(rows, axis=0).astype(np.float64)
-    mean = big.reshape(TILE_PX, 2, TILE_PX, 2, 3).mean(axis=(1, 3))
+    big = np.concatenate(rows, axis=0)
+    valid = big.any(axis=-1).reshape(TILE_PX, 2, TILE_PX, 2, 1)
+    total = (big.astype(np.float64).reshape(TILE_PX, 2, TILE_PX, 2, 3) * valid).sum(axis=(1, 3))
+    count = valid.sum(axis=(1, 3))
+    mean = np.divide(total, count, out=np.zeros_like(total), where=count > 0)
     return np.rint(mean).astype(np.uint8)
 
 
@@ -228,15 +235,49 @@ def load_day_texture(path: Path) -> np.ndarray:
 def sample_day_texture(texture: np.ndarray, lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
     """Bilinear samples (N, 3) of the equirectangular day texture (u = (lon + 180) / 360, v = (90 - lat) / 180)."""
     h, w, _ = texture.shape
-    fx = ((np.asarray(lons) + 180.0) / 360.0 * w - 0.5) % w
-    fy = np.clip((90.0 - np.asarray(lats)) / 180.0 * h - 0.5, 0.0, h - 1.0)
-    x0 = np.floor(fx).astype(int)
-    y0 = np.minimum(np.floor(fy).astype(int), h - 2)
-    wx, wy = (fx - x0)[:, None], (fy - y0)[:, None]
-    x1 = (x0 + 1) % w
-    top = (1 - wx) * texture[y0, x0] + wx * texture[y0, x1]
-    bottom = (1 - wx) * texture[y0 + 1, x0] + wx * texture[y0 + 1, x1]
+    return _sample_texture(texture, 0, 0, h, w, lats, lons)
+
+
+def _sample_texture(rgb: np.ndarray, row0: int, col0: int, full_h: int, full_w: int, lats, lons) -> np.ndarray:
+    """Bilinear samples of a texture window `rgb` whose pixel (0, 0) is pixel (row0, col0) of the full full_h x full_w
+    equirectangular texture (a full texture wraps in longitude; a window is clamped to its edge)."""
+    fx = (np.asarray(lons, dtype=np.float64) + 180.0) / 360.0 * full_w - 0.5
+    fy = np.clip((90.0 - np.asarray(lats, dtype=np.float64)) / 180.0 * full_h - 0.5, 0.0, full_h - 1.0)
+    h, w, _ = rgb.shape
+    wraps = w == full_w
+    if wraps:
+        fx = fx % full_w
+        x0 = np.floor(fx).astype(int)
+        x1 = (x0 + 1) % w
+    else:
+        fx = np.clip(fx - col0, 0.0, w - 1.0)
+        x0 = np.minimum(np.floor(fx).astype(int), max(w - 2, 0))
+        x1 = np.minimum(x0 + 1, w - 1)
+    fy = np.clip(fy - row0, 0.0, h - 1.0)
+    y0 = np.minimum(np.floor(fy).astype(int), max(h - 2, 0))
+    y1 = np.minimum(y0 + 1, h - 1)
+    wx, wy = (fx - x0)[..., None], (fy - y0)[..., None]
+    top = (1 - wx) * rgb[y0, x0] + wx * rgb[y0, x1]
+    bottom = (1 - wx) * rgb[y1, x0] + wx * rgb[y1, x1]
     return (1 - wy) * top + wy * bottom
+
+
+TEXTURE_WINDOW_MARGIN_PX = 3  # beyond the box: covers the finest tiles overhanging the box edge (< 1 texel at z >= 8)
+
+
+def texture_window(texture: np.ndarray, box: Box, margin_px: int = TEXTURE_WINDOW_MARGIN_PX) -> dict:
+    """The part of the day texture around the box (small enough to hand to every tile worker) for `sample_texture_window`."""
+    south, north, west, east = box
+    h, w, _ = texture.shape
+    r0 = max(int(math.floor((90.0 - north) / 180.0 * h)) - margin_px, 0)
+    r1 = min(int(math.ceil((90.0 - south) / 180.0 * h)) + margin_px, h)
+    c0 = max(int(math.floor((west + 180.0) / 360.0 * w)) - margin_px, 0)
+    c1 = min(int(math.ceil((east + 180.0) / 360.0 * w)) + margin_px, w)
+    return {"rgb": np.ascontiguousarray(texture[r0:r1, c0:c1]), "row0": r0, "col0": c0, "full_h": h, "full_w": w}
+
+
+def sample_texture_window(win: dict, lats, lons) -> np.ndarray:
+    return _sample_texture(win["rgb"], win["row0"], win["col0"], win["full_h"], win["full_w"], lats, lons)
 
 
 def fit_to_reference(datasets, box: Box, shift_deg, texture: np.ndarray, reference=None,
@@ -337,22 +378,67 @@ def _chunks(items: list, size: int) -> list[list]:
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
-def _render_chunk(task) -> int:
-    """Worker: render + colour-fit + write the finest-level tiles of one chunk; returns the written count."""
+def pixel_centres(bounds: Box, n: int = TILE_PX) -> tuple[np.ndarray, np.ndarray]:
+    """(lat, lon) grids (n, n) of the pixel centres of a tile (row 0 at the north edge)."""
+    south, north, west, east = bounds
+    c = (np.arange(n) + 0.5) / n
+    lon_g, lat_g = np.meshgrid(west + c * (east - west), north - c * (north - south))
+    return lat_g, lon_g
+
+
+def fill_nodata(rgb: np.ndarray, valid: np.ndarray, bounds: Box, reference=None, texture=None) -> np.ndarray:
+    """Fill the no-data pixels of a colour-fitted tile in its FINAL colours: first from `reference` = (datasets, gain,
+    offset), the fitted Sentinel-2 composite of the area (for NAIP; rendered without datum shift, its fit applied), then
+    from `texture` (a `texture_window` of the day texture, the Sentinel-2 fit target, used as is). Returns the tile;
+    pixels neither layer covers stay 0."""
+    out = rgb.copy()
+    hole = ~valid
+    if hole.any() and reference is not None:
+        ref_datasets, ref_gain, ref_offset = reference
+        ref_rgb, ref_valid = render_box(ref_datasets, bounds, (0.0, 0.0), rgb.shape[1], rgb.shape[0])
+        take = hole & ref_valid
+        out[take] = apply_gain_offset(ref_rgb, ref_gain, ref_offset)[take]
+        hole &= ~ref_valid
+    if hole.any() and texture is not None:
+        lat_g, lon_g = pixel_centres(bounds, rgb.shape[0])
+        out[hole] = np.clip(np.rint(sample_texture_window(texture, lat_g[hole], lon_g[hole])), 1, 255).astype(np.uint8)
+    return out
+
+
+def _nodata_inside(tile: np.ndarray, bounds: Box, box: Box) -> int:
+    """Count of no-data pixels (all channels 0) of a tile whose centres lie inside the box."""
+    south, north, west, east = box
+    lat_g, lon_g = pixel_centres(bounds, tile.shape[0])
+    inside = (lat_g > south) & (lat_g < north) & (lon_g > west) & (lon_g < east)
+    return int((inside & ~tile.any(axis=-1)).sum())
+
+
+def _render_chunk(task) -> tuple[int, int]:
+    """Worker: render + colour-fit (+ no-data fill) + write the finest-level tiles of one chunk -> (written count, no-data
+    pixels left inside the box). Without a fill, tiles without any valid pixel are skipped."""
     import rasterio
 
-    paths, root, z, tiles, shift_deg, gain, offset = task
+    paths, root, z, tiles, shift_deg, gain, offset, fill, box = task
     datasets = [rasterio.open(p) for p in paths]
+    ref_datasets = [rasterio.open(p) for p in fill["reference"][0]] if fill and fill.get("reference") else []
     try:
-        n = 0
+        reference = (ref_datasets, fill["reference"][1], fill["reference"][2]) if ref_datasets else None
+        texture = fill.get("texture") if fill else None
+        n = left = 0
         for x, y in tiles:
-            rgb, valid = render_tile(datasets, tile_bounds(z, x, y), shift_deg)
-            if valid.any():
-                write_tile(Path(root), z, x, y, apply_gain_offset(rgb, gain, offset))
-                n += 1
-        return n
+            bounds = tile_bounds(z, x, y)
+            rgb, valid = render_tile(datasets, bounds, shift_deg)
+            if not fill and not valid.any():
+                continue
+            tile = apply_gain_offset(rgb, gain, offset)
+            if fill:
+                tile = fill_nodata(tile, valid, bounds, reference, texture)
+            left += _nodata_inside(tile, bounds, box)
+            write_tile(Path(root), z, x, y, tile)
+            n += 1
+        return n, left
     finally:
-        for ds in datasets:
+        for ds in datasets + ref_datasets:
             ds.close()
 
 
@@ -370,16 +456,22 @@ def _downsample_chunk(task) -> int:
 
 
 def write_pyramid(paths: list[Path], box: Box, shift_deg, gain, offset, min_level: int, max_level: int, root: Path,
-                  log=print, workers: int = 1) -> dict[int, int]:
+                  log=print, workers: int = 1, fill: dict | None = None) -> dict[int, int]:
     """Finest level rendered from the raster files (colour fit applied), lower levels as box means of the decoded
-    children, tiles in parallel (`workers` processes; the files do not depend on the count). Returns {level: count}."""
+    children, tiles in parallel (`workers` processes; the files do not depend on the count). `fill` = {"reference":
+    (paths, gain, offset) (optional), "texture": texture_window}: no data is filled before writing (`fill_nodata`) and
+    every tile of the box is written. Returns {level: count}."""
     counts: dict[int, int] = {}
     south, north, west, east = box
     paths = [str(p) for p in paths]
+    if fill and fill.get("reference"):
+        ref_paths, ref_gain, ref_offset = fill["reference"]
+        fill = dict(fill, reference=([str(p) for p in ref_paths], ref_gain, ref_offset))
     tiles = tiles_for_box(max_level, south, north, west, east)
-    tasks = [(paths, str(root), max_level, c, shift_deg, gain, offset) for c in _chunks(tiles, TILE_CHUNK)]
-    counts[max_level] = sum(iter_tasks(_render_chunk, tasks, workers))
-    log(f"    z{max_level}: {counts[max_level]} tiles")
+    tasks = [(paths, str(root), max_level, c, shift_deg, gain, offset, fill, box) for c in _chunks(tiles, TILE_CHUNK)]
+    results = list(iter_tasks(_render_chunk, tasks, workers))
+    counts[max_level] = sum(r[0] for r in results)
+    log(f"    z{max_level}: {counts[max_level]} tiles, no-data pixels left inside the box: {sum(r[1] for r in results)}")
     for z in range(max_level - 1, min_level - 1, -1):
         tasks = [(str(root), z, c) for c in _chunks(tiles_for_box(z, south, north, west, east), TILE_CHUNK)]
         counts[z] = sum(iter_tasks(_downsample_chunk, tasks, workers))
@@ -683,9 +775,7 @@ def _dir_size(path: Path) -> int:
 
 
 def s2_reference(sid: str, src: dict, areas: dict, repo_root: Path):
-    """(composite dataset list, gain, offset) of the fitted Sentinel-2 source of the same area, None when not built yet."""
-    import rasterio
-
+    """(composite path list, gain, offset) of the fitted Sentinel-2 source of the same area, None when not built yet."""
     cfg = load_config(repo_root / "config" / "imagery.toml")
     for other in cfg["source"]:
         if other["product"] == "sentinel2_median" and other["area"] == src["area"]:
@@ -693,7 +783,7 @@ def s2_reference(sid: str, src: dict, areas: dict, repo_root: Path):
             composite = repo_root / "data" / "raw" / "imagery" / other["id"] / "composite.tif"
             if meta.exists() and composite.exists():
                 m = tomllib.loads(meta.read_text(encoding="utf-8"))["source"][0]
-                return [rasterio.open(composite)], np.array(m["gain_rgb"]), np.array(m["offset_rgb"])
+                return [composite], np.array(m["gain_rgb"]), np.array(m["offset_rgb"])
     print(f"  {sid}: kein Sentinel-2-Abgleich verfuegbar, Farbabgleich gegen die Tagestextur")
     return None
 
@@ -716,17 +806,21 @@ def build_source(src: dict, areas: dict[str, dict], repo_root: Path, texture: np
         paths, year, covered, shift, scenes = [build_s2_composite(items, box, raw_dir, force, log, workers)], S2_YEAR, box, (0.0, 0.0), len(items)
     else:
         raise ValueError(f"unbekanntes Produkt {product}")
+    reference = None
+    if product == "naip":  # the day texture is ~7 km per pixel: far too coarse for an 11 km box
+        reference = s2_reference(sid, src, areas, repo_root)
     datasets = [rasterio.open(p) for p in paths]
+    ref_datasets = [rasterio.open(p) for p in reference[0]] if reference else []
     try:
-        reference = None
-        if product == "naip":  # the day texture is ~12 km per pixel: far too coarse for an 11 km box
-            reference = s2_reference(sid, src, areas, repo_root)
-        gain, offset = fit_to_reference(datasets, covered, shift, texture, reference, name=sid)
+        fit_reference = (ref_datasets, reference[1], reference[2]) if reference else None
+        gain, offset = fit_to_reference(datasets, covered, shift, texture, fit_reference, name=sid)
         log(f"  {sid}: gain {np.round(gain, 3).tolist()}, offset {np.round(offset, 2).tolist()}")
+        # no data inside the box (sea beyond the scenes, composite gaps) is filled in final colours before writing
+        fill = {"reference": reference, "texture": texture_window(texture, covered)}
         counts = write_pyramid(paths, covered, shift, gain, offset, src["min_level"], src["max_level"], root, log,
-                               resolve_workers(workers, TILE_WORKER_BYTES, log, "tiles"))
+                               resolve_workers(workers, TILE_WORKER_BYTES, log, "tiles"), fill)
     finally:
-        for ds in datasets:
+        for ds in datasets + ref_datasets:
             ds.close()
     south, north, west, east = covered
     meta = {"id": sid, "product": product, "year": year, "scenes": scenes, "min_level": src["min_level"],
@@ -742,7 +836,10 @@ def fetch(source: dict, repo_root: Path, download, force: bool = False, retile: 
     """`retile`: rebuild the fit and all tiles from the cached clips / composites (no network), keeping the raw caches."""
     cfg = load_config(repo_root / "config" / "imagery.toml")
     areas = {a["id"]: a for a in et.load_config(repo_root / "config" / "earth_terrain.toml")["area"]}
-    texture = load_day_texture(repo_root / "data" / "textures" / "earth_day.jpg")
+    day = repo_root / "data" / "textures" / "earth_day.jpg"
+    if not day.exists():  # fresh checkout: fetch.py runs before prepare.py, which copies this very file
+        day = repo_root / "data" / "raw" / "earth_day_5400.jpg"
+    texture = load_day_texture(day)
     out_dir = repo_root / "data" / "imagery" / "earth"
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings.filterwarnings("ignore", category=RuntimeWarning)

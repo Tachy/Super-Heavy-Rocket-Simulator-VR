@@ -224,3 +224,70 @@ def test_s2_block_worker_median_from_local_scenes(tmp_path):
     assert (out == 110).all()
     # a block entirely outside every scene
     assert im._s2_block((scenes, 640, 0, 64, 64))[2] is None
+
+
+def test_downsample_never_averages_nodata():
+    child = np.full((256, 256, 3), 100, dtype=np.uint8)
+    child[0, 0] = 0  # one no-data pixel of the 2 x 2 block of parent pixel (0, 0)
+    child[2:4, 2:4] = 0  # a whole 2 x 2 block of no data -> parent pixel (1, 1) stays no data
+    parent = im.downsample_children(child, child, child, child)
+    assert parent[0, 0].tolist() == [100, 100, 100]
+    assert parent[1, 1].tolist() == [0, 0, 0]
+
+
+def _write_raster(path: Path, data: np.ndarray, bounds) -> Path:
+    import rasterio
+    from rasterio.transform import from_bounds
+
+    west, south, east, north = bounds
+    with rasterio.open(path, "w", driver="GTiff", width=data.shape[2], height=data.shape[1], count=3, dtype="uint8",
+                       crs="EPSG:4326", transform=from_bounds(west, south, east, north, data.shape[2], data.shape[1])) as d:
+        d.write(data)
+    return path
+
+
+def _tile_pixels_inside(root: Path, z: int, box):
+    """{(x, y): (decoded rgb or None when missing, inside-box mask)} of the tiles of the box at level z."""
+    south, north, west, east = box
+    out = {}
+    for x, y in im.tiles_for_box(z, south, north, west, east):
+        rgb = im.decode_jpeg(im.tile_path(root, z, x, y))
+        ts, tn, tw, te = im.tile_bounds(z, x, y)
+        c = (np.arange(im.TILE_PX) + 0.5) / im.TILE_PX
+        lon_g, lat_g = np.meshgrid(tw + c * (te - tw), tn - c * (tn - ts))
+        out[(x, y)] = (rgb, (lon_g > west) & (lon_g < east) & (lat_g > south) & (lat_g < north))
+    return out
+
+
+@pytest.mark.parametrize("with_reference", [True, False])
+def test_pyramid_fill_leaves_no_nodata_inside_coverage(tmp_path, with_reference):
+    """No data inside the coverage box is filled before writing (NAIP: from the fitted Sentinel-2 reference, Sentinel-2:
+    from the day texture), every tile of the box is written and no level holds an all-zero pixel inside the box."""
+    size = 0.03
+    west, south = -97.2, 26.0
+    data = np.full((3, 600, 600), 120, dtype=np.uint8)
+    data[:, :300, 300:] = 0  # the north-east quarter is no data (sea beyond the scenes)
+    src = _write_raster(tmp_path / "src.tif", data, (west, south, west + size, south + size))
+    box = (south + 0.002, south + size - 0.002, west + 0.002, west + size - 0.002)
+    texture = np.zeros((180, 360, 3))
+    texture[...] = (30.0, 60.0, 90.0)
+    fill = {"texture": im.texture_window(texture, box)}
+    if with_reference:
+        ref = _write_raster(tmp_path / "ref.tif", np.full((3, 100, 100), 100, dtype=np.uint8),
+                            (west - 0.01, south - 0.01, west + size + 0.01, south + size + 0.01))
+        fill["reference"] = ([ref], np.array([0.5, 0.5, 0.5]), np.array([10.0, 20.0, 30.0]))
+    expected_fill = (60.0, 70.0, 80.0) if with_reference else (30.0, 60.0, 90.0)
+    messages = []
+    counts = im.write_pyramid([src], box, (0.0, 0.0), np.ones(3), np.zeros(3), 13, 15, tmp_path / "out",
+                              log=messages.append, workers=1, fill=fill)
+    assert any("no-data pixels left inside the box: 0" in m for m in messages)  # counted before the JPEG encoding
+    for z in (13, 14, 15):
+        tiles = _tile_pixels_inside(tmp_path / "out", z, box)
+        assert counts[z] == len(tiles)
+        for (x, y), (rgb, inside) in tiles.items():
+            assert rgb is not None, f"z{z} tile {x}/{y} missing"
+            assert not (rgb[inside].astype(int).sum(axis=-1) <= 6).any(), f"no data inside the box in z{z} {x}/{y}"
+    # the filled quarter carries the fill colour (the source itself is 120 grey)
+    probe = (south + size - 0.006, south + size - 0.003, west + size - 0.006, west + size - 0.003)
+    for rgb, inside in _tile_pixels_inside(tmp_path / "out", 15, probe).values():
+        assert rgb[inside].mean(axis=0) == pytest.approx(expected_fill, abs=3.0)

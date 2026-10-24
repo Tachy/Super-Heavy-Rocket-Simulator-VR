@@ -361,6 +361,9 @@ quality 88) and `data/imagery/earth/index.toml` (per source: levels, exact cover
 `gain_rgb` / `offset_rgb`, already applied to the tiles). NAIP is shifted from NAD83 to ITRF.
 Colour fit: Sentinel-2 -> day texture with ONE luminance gain and offset (equal in R, G, B; the texture is ~7 km per texel);
 NAIP -> the fitted Sentinel-2 composite of its area, per channel at 10 m. A gain outside [0.2, 5] aborts with an error.
+No data inside a box (sea beyond the NAIP scenes, Sentinel-2 composite gaps) is filled before writing, in final colours:
+NAIP from the fitted Sentinel-2 composite, Sentinel-2 from the day texture; every tile of a box is written, and the lower
+levels average only valid pixels.
 `python tools/data_pipeline/fetch.py --retile imagery` redoes the fit and all tiles from the cached clips / composites in
 `data/raw/imagery/` without network; rebuilding Sentinel-2 (also `--retile`) always re-fits the NAIP of its area.
 Parallelism: tile writing and the Sentinel-2 composite blocks run on a process pool; the worker count is `--workers N`, else
