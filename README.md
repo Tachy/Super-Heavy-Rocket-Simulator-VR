@@ -110,6 +110,15 @@ tools/     data pipeline, validation fixtures, telemetry transcription, reports
 tests/     validation fixtures (JPL Horizons, webcast telemetry, reference solvers)
 ```
 
+## Installation (Windows)
+
+Each GitHub release carries:
+- `SuperHeavyRocketSimulatorVR-<version>-setup.exe` - the installer with everything (per user, no admin rights). The
+  Earth terrain and the aerial imagery of the launch sites are optional components; without them the ground near the
+  pads is flat and untextured. Start menu: the simulator (VR, OpenXR runtime running) and its desktop mode.
+- `...-windows.zip` - the same game without installer, playable with the base data (`Start-VR.cmd`,
+  `Start-Desktop.cmd`); `...-data-terrain.zip` and `...-data-imagery.zip` unpack into the same folder.
+
 ## Building (Windows)
 
 Requirements: MSVC 2022 Build Tools, CMake, Ninja, SCons, Python 3. The one-time setup (runtime data, CSPICE,
@@ -121,6 +130,7 @@ python tools/data_pipeline/prepare.py
 powershell -ExecutionPolicy Bypass -File tools/build.ps1         # core + GDExtension + all tests
 powershell -ExecutionPolicy Bypass -File tools/build.ps1 -Fast   # without the long dispersion campaigns
 Start-Desktop.cmd                                                  # run the game
+powershell -ExecutionPolicy Bypass -File tools/package.ps1        # release build: exe, ZIPs, installer in build/
 ```
 
 ## Credits

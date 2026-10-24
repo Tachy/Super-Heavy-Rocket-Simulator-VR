@@ -141,6 +141,14 @@ powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -TestFilter
 # Godot smoke test (extension loads, float64 end to end)
 external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --path game --script res://tests/smoke_test.gd
 ```
+- Release build (sibling pattern): `tools/package.ps1 [-Version x.y.z] [-SkipTests] [-NoInstaller]` builds the
+  double-precision release template once (`python -m SCons platform=windows target=template_release precision=double
+  production=yes` in external/godot, ~5 min), core + extension, smoke test, exports `game/export_presets.cfg`, lays out
+  `build/package` (exe next to `config/` + base `data/`; `Paths` uses the executable's folder in exported builds),
+  self-checks the exported exe (`-- --self-check`, with and without the data parts) and writes the ZIPs (game, data
+  parts terrain / imagery, each < 2 GB) and the Inno Setup installer (`tools/installer.iss`, all data inside: the repo
+  is private). `/build` publishes the release-please version, `/build-local` a local test installer. Version:
+  `game/util/game_version.gd` (release-please `extra-files`; the action has `skip-github-release`).
 - Test workflow (user 2026-10-19, replaces 2026-10-15): always run only what the change affects - the tags of the
   touched modules and of the subsystems whose code paths changed (`-TestFilter`, `[slow]` cases of those tags
   included), also before a push and before a plan's final review; no blanket `-Fast` or full-suite runs. A change to
