@@ -154,6 +154,8 @@ add_library(starsim_core STATIC
     src/environment/atmosphere_optics.cpp
     src/environment/atmosphere_tables.cpp
     src/environment/atmosphere_precompute.cpp
+    src/environment/atmosphere_scattering.cpp
+    src/environment/atmosphere_table_file.cpp
     src/environment/sea_state.cpp
     src/environment/earth_terrain.cpp
     src/environment/surface_samples.cpp
@@ -213,6 +215,14 @@ if(MSVC)
 else()
     target_compile_options(starsim_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+# atmosphere_tables (M8 atmosphere): precomputes the Earth atmosphere tables into the cache file (tools/package.ps1).
+add_executable(atmosphere_tables apps/atmosphere_tables.cpp)
+target_link_libraries(atmosphere_tables PRIVATE starsim::core)
+target_compile_definitions(atmosphere_tables PRIVATE
+    STARSIM_DATA_DIR="${STARSIM_DATA_DIR}"
+    STARSIM_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
+)
 
 # refuelling_report (refuelling r6): how many tanker flights the lunar mission needs, from the command line.
 add_executable(refuelling_report apps/refuelling_report.cpp)

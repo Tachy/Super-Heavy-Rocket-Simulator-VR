@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 
 #include "atmosphere_precompute.hpp"
 #include "starsim/environment/atmosphere_optics.hpp"
@@ -31,9 +30,10 @@ namespace {
 
 constexpr double nm = 1e-9;
 
-// Largest precomputed Sun zenith angle [call: Bruneton 2017 demo.cc, 102 deg (his half-precision / luminance setup)]:
-// the Sun up to 12 deg below the ground horizon, enough for twilight and for the horizon dip from the 100 km top.
-constexpr double max_sun_zenith_angle_rad = 102.0 * constants::deg_to_rad;
+// Largest precomputed Sun zenith angle [S: Bruneton 2017 demo.cc, 120 deg for float textures; controller ruling]: the
+// Sun up to 30 deg below the horizon, so the whole twilight down to -18 deg (astronomical, star visibility) and the
+// horizon dip seen from the 100 km top (10 deg) lie inside the tables.
+constexpr double max_sun_zenith_angle_rad = 120.0 * constants::deg_to_rad;
 
 double clamp_cosine(double mu) { return std::clamp(mu, -1.0, 1.0); }
 double clamp_distance(double d) { return std::max(d, 0.0); }
@@ -107,9 +107,43 @@ AtmosphereParameters atmosphere_parameters(const config::AtmosphereOpticsConfig&
     return p;
 }
 
+std::uint64_t atmosphere_spectral_data_checksum(const config::AtmosphereOpticsConfig& optics) {
+    std::uint64_t h = 14695981039346656037ull;  // FNV-1a 64 offset basis
+    // The tabulated spectra as compiled.
+    hash_bytes(h, spectra::solar_irradiance_w_m2_nm, sizeof(spectra::solar_irradiance_w_m2_nm));
+    hash_bytes(h, spectra::ozone_cross_section_m2, sizeof(spectra::ozone_cross_section_m2));
+    hash_bytes(h, spectra::cie_1931_2deg_cmf, sizeof(spectra::cie_1931_2deg_cmf));
+    hash_bytes(h, spectra::xyz_to_linear_srgb, sizeof(spectra::xyz_to_linear_srgb));
+    for (const double v : {spectra::bin_first_wavelength_nm, spectra::bin_width_nm, spectra::lambda_r_nm,
+                           spectra::lambda_g_nm, spectra::lambda_b_nm, spectra::lambda_min_nm, spectra::lambda_max_nm}) {
+        hash_value(h, v);
+    }
+    // The optics functions as the precomputation samples them: the spectra at 1 nm (covers the depolarisation table,
+    // the refractivity and the Angstrom law of Task 1) and the altitude profile rows (US76, AFGL ozone, aerosol).
+    for (int lambda = static_cast<int>(spectra::lambda_min_nm); lambda <= static_cast<int>(spectra::lambda_max_nm);
+         ++lambda) {
+        const double l = lambda * nm;
+        const math::Vec3 cmf = cie_1931_cmf(l);
+        for (const double v : {rayleigh_cross_section_m2(l), ozone_cross_section_m2(l), solar_irradiance_w_m2_per_m(l),
+                               aerosol_extinction_per_m(l, 0.0, optics), cmf.x, cmf.y, cmf.z}) {
+            hash_value(h, v);
+        }
+    }
+    const detail::DensityProfileTable profile = detail::make_density_profile_table(optics);
+    hash_value(h, profile.altitude_min_m);
+    hash_value(h, profile.step_m);
+    for (const auto& row : profile.rows) {
+        hash_value(h, row.air_per_m3);
+        hash_value(h, row.ozone_per_m3);
+        hash_value(h, row.aerosol_550nm_per_m);
+    }
+    return h;
+}
+
 std::uint64_t atmosphere_input_hash(const config::AtmosphereOpticsConfig& optics, const AtmosphereTableSizes& sizes) {
     std::uint64_t h = 14695981039346656037ull;  // FNV-1a 64 offset basis
     hash_value(h, atmosphere_tables_code_version);
+    hash_value(h, atmosphere_spectral_data_checksum(optics));
     for (const double v : {optics.top_altitude_m, optics.ground_altitude_m, optics.aerosol_optical_depth_550nm,
                            optics.aerosol_angstrom_exponent, optics.aerosol_single_scattering_albedo,
                            optics.aerosol_scale_height_m, optics.mie_phase_g, optics.ozone_column_du,
@@ -122,6 +156,19 @@ std::uint64_t atmosphere_input_hash(const config::AtmosphereOpticsConfig& optics
         hash_value(h, v);
     }
     return h;
+}
+
+// ---- Phase functions.
+
+double rayleigh_phase_function(double nu) {
+    const double k = 3.0 / (16.0 * constants::pi);
+    return k * (1.0 + nu * nu);
+}
+
+double mie_phase_function(double g, double nu) {
+    const double k = 3.0 / (8.0 * constants::pi) * (1.0 - g * g) / (2.0 + g * g);
+    const double x = 1.0 + g * g - 2.0 * g * nu;
+    return k * (1.0 + nu * nu) / (x * std::sqrt(x));  // x^1.5
 }
 
 // ---- Ray geometry.
@@ -210,16 +257,21 @@ ScatteringUvwz scattering_uvwz_from_cell(const AtmosphereParameters& atmosphere,
         uvwz.u_mu = 0.5 + 0.5 * texture_coord_from_unit_range((d - d_min) / (d_max - d_min), half_mu);
     }
 
-    const double d = distance_to_top_atmosphere_boundary_m(atmosphere, bottom, cell.mu_s);
+    uvwz.u_mu_s = scattering_u_mu_s(atmosphere, sizes, cell.mu_s);
+    uvwz.u_nu = (cell.nu + 1.0) / 2.0;
+    return uvwz;
+}
+
+double scattering_u_mu_s(const AtmosphereParameters& atmosphere, const AtmosphereTableSizes& sizes, double mu_s) {
+    const double bottom = atmosphere.bottom_radius_m;
+    const double d = distance_to_top_atmosphere_boundary_m(atmosphere, bottom, mu_s);
     const double d_min = atmosphere.top_radius_m - bottom;
-    const double d_max = H;
+    const double d_max = horizontal_distance_to_top_m(atmosphere);
     const double a = (d - d_min) / (d_max - d_min);
     const double D = distance_to_top_atmosphere_boundary_m(atmosphere, bottom, atmosphere.mu_s_min);
     const double A = (D - d_min) / (d_max - d_min);
     // Bruneton's ad-hoc mapping: 0 at mu_s_min, 1 at mu_s = 1, steep around mu_s = 0.
-    uvwz.u_mu_s = texture_coord_from_unit_range(std::max(1.0 - a / A, 0.0) / (1.0 + a), sizes.scattering_mu_s);
-    uvwz.u_nu = (cell.nu + 1.0) / 2.0;
-    return uvwz;
+    return texture_coord_from_unit_range(std::max(1.0 - a / A, 0.0) / (1.0 + a), sizes.scattering_mu_s);
 }
 
 ScatteringCell scattering_cell_from_uvwz(const AtmosphereParameters& atmosphere, const AtmosphereTableSizes& sizes,

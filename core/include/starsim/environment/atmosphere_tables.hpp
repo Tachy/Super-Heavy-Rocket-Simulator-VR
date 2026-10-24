@@ -30,9 +30,14 @@ namespace starsim::environment {
 // horizon ray: 82 % error in blue at 256 x 64, 0.3 % at 1024 x 1024; 512 rows still 1.1 %); the single scattering
 // reads T through it and inherits the error (up to 20 % at 256 x 64, 0.12 % at 1024 x 1024; Task 2 report).
 // 16 MB as float RGBA.
+// The scattering table has 64 r rows instead of 32: real observers (sites at -26..+146 m) sit between the rows near
+// the model ground (-150 m), and the near-horizon sky changes fast with altitude there (5 % from 0 to 50 m at 1 deg
+// up). Single scattering looked up off-texel at 0 / 50 m, 1-2 deg up, Sun 30 deg, vs the raymarch: Rayleigh 2.8 % at
+// 32 rows, 0.71 % at 64, 0.17 % at 128 (Mie 0.63 / 0.17 / 0.09 %); the mu, mu_s and nu resolution changed it by
+// < 0.02 % (Task 3 report). 32 MB per scattering table as float RGBA; the precompute time doubles with the rows.
 struct AtmosphereTableSizes {
     int transmittance_mu = 1024, transmittance_r = 1024;
-    int scattering_r = 32, scattering_mu = 128, scattering_mu_s = 32, scattering_nu = 8;
+    int scattering_r = 64, scattering_mu = 128, scattering_mu_s = 32, scattering_nu = 8;
     int irradiance_mu_s = 64, irradiance_r = 16;
 
     int scattering_width() const { return scattering_nu * scattering_mu_s; }
@@ -45,7 +50,7 @@ struct AtmosphereTableSizes {
 struct AtmosphereParameters {
     double bottom_radius_m = 0.0;         // a + ground_altitude_m
     double top_radius_m = 0.0;            // a + top_altitude_m
-    double mu_s_min = 0.0;                // cosine of the largest precomputed Sun zenith angle (Bruneton's demo: 102 deg)
+    double mu_s_min = 0.0;                // cosine of the largest precomputed Sun zenith angle (120 deg)
     double mie_phase_g = 0.0;             // Cornette-Shanks asymmetry
     double sun_angular_radius_rad = 0.0;  // at 1 AU
     // Bruneton's solar_irradiance: TOA spectral irradiance at 1 AU at kLambdaR / G / B (680 / 550 / 440 nm), in
@@ -62,14 +67,14 @@ struct AtmosphereParameters {
 //  transmittance: transmittance_mu x transmittance_r; RGB = transmittance to the top boundary at kLambdaR / G / B,
 //    A = 0 (unused).
 //  scattering: width = scattering_nu x scattering_mu_s ((nu, mu_s) packed in x, mu_s fastest within each nu slice),
-//    height = scattering_mu, depth = scattering_r. RGB = Rayleigh (and, from Task 3, multiple) scattering without the
-//    phase function, A = the red channel of the single Mie scattering (Bruneton's combined layout). Luminance units:
+//    height = scattering_mu, depth = scattering_r. RGB = single Rayleigh scattering without the phase function plus the
+//    multiple scattering (orders 2..N plus the geometric tail of the higher orders) divided by the Rayleigh phase
+//    function, A = the red channel of the single Mie scattering (Bruneton's combined layout). Luminance units:
 //    radiance folded over the spectrum (W m^-2 sr^-1 per unit of the sRGB CMFs); x sky_radiance_to_luminance -> cd/m^2.
 //  single_mie: same layout, RGB = single Mie scattering without the phase function, A = 0.
-//  irradiance: irradiance_mu_s x irradiance_r. Bruneton's irradiance texture holds only the sky (indirect) irradiance,
-//    which starts at scattering order 2: after this task's single-scattering precomputation (orders = 1) it is sized
-//    but zero; Task 3 accumulates the indirect irradiance into it. The direct irradiance is a pass-internal delta table
-//    (see atmosphere_precompute.hpp), never stored here - as in Bruneton.
+//  irradiance: irradiance_mu_s x irradiance_r, RGB = the sky (indirect) irradiance of a horizontal surface, orders
+//    1..N-1 of the scattered light plus the geometric tail (Bruneton's irradiance texture; zero for orders = 1),
+//    A = 0. The direct irradiance is a pass-internal delta table (see atmosphere_precompute.hpp), never stored here.
 struct AtmosphereTables {
     AtmosphereTableSizes sizes;
     AtmosphereParameters parameters;
@@ -80,21 +85,32 @@ struct AtmosphereTables {
     std::vector<float> irradiance;
 };
 
-// Version of the precomputation code and its tabulated spectra; part of the input hash. Bump on every change that
-// alters table contents (code, spectra in atmosphere_spectra.hpp, Task 1 optics).
-inline constexpr std::uint64_t atmosphere_tables_code_version = 1;
+// Version of the precomputation code; part of the input hash. Bump on every code change that alters table contents
+// (the spectral data and the optics functions are covered by atmosphere_spectral_data_checksum).
+inline constexpr std::uint64_t atmosphere_tables_code_version = 2;
 
 // The parameters of a configuration (radii, mu_s_min, luminance factors, solar irradiance).
 AtmosphereParameters atmosphere_parameters(const config::AtmosphereOpticsConfig& optics);
 
-// Precomputes the tables. This task fills transmittance and single scattering (orders = 1); the multiple scattering
-// orders and the irradiance of config::AtmosphereOpticsConfig::scattering_orders follow in Task 3. Throws
-// std::invalid_argument on invalid sizes (any < 2, odd scattering_mu).
+// Precomputes the tables: transmittance, single scattering and the scattering orders 2 .. scattering_orders (plus a
+// geometric tail of the higher orders, atmosphere_precompute.cpp) with the
+// sky irradiance (Bruneton's Model::Precompute in precomputed-luminance mode). Throws std::invalid_argument on invalid
+// sizes (any < 2, odd scattering_mu).
 AtmosphereTables precompute_atmosphere(const config::AtmosphereOpticsConfig& optics,
                                        const AtmosphereTableSizes& sizes = {});
 
-// FNV-1a 64 over the code version, every config field and every table size.
+// FNV-1a 64 over the tabulated spectra (atmosphere_spectra.hpp) and the optics functions as the precomputation samples
+// them (cross sections and solar irradiance at 1 nm over 360-830 nm, the CMFs, the air / ozone / aerosol profile
+// rows): a data change invalidates caches without a manual version bump.
+std::uint64_t atmosphere_spectral_data_checksum(const config::AtmosphereOpticsConfig& optics);
+
+// FNV-1a 64 over the code version, every config field, every table size and the spectral data checksum.
 std::uint64_t atmosphere_input_hash(const config::AtmosphereOpticsConfig& optics, const AtmosphereTableSizes& sizes);
+
+// Phase functions (Bruneton functions.glsl): Rayleigh 3 / (16 pi) (1 + nu^2) and Cornette-Shanks with asymmetry g,
+// per steradian.
+double rayleigh_phase_function(double nu);
+double mie_phase_function(double g, double nu);
 
 // ---- Ray geometry (Bruneton functions.glsl). r: distance from the centre (m); mu: cosine of the view zenith angle.
 double distance_to_top_atmosphere_boundary_m(const AtmosphereParameters& atmosphere, double r_m, double mu);
@@ -126,6 +142,8 @@ struct ScatteringCell {
 };
 ScatteringUvwz scattering_uvwz_from_cell(const AtmosphereParameters& atmosphere, const AtmosphereTableSizes& sizes,
                                          const ScatteringCell& cell);
+// The u_mu_s part of scattering_uvwz_from_cell (it depends on mu_s only).
+double scattering_u_mu_s(const AtmosphereParameters& atmosphere, const AtmosphereTableSizes& sizes, double mu_s);
 ScatteringCell scattering_cell_from_uvwz(const AtmosphereParameters& atmosphere, const AtmosphereTableSizes& sizes,
                                          const ScatteringUvwz& uvwz);
 // The cell at the centre of texel (x, y, z) of the scattering table, nu clamped to its range given mu and mu_s

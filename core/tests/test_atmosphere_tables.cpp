@@ -29,8 +29,11 @@ const std::filesystem::path optics_toml = std::filesystem::path(STARSIM_CONFIG_D
 
 config::AtmosphereOpticsConfig optics() { return config::load_atmosphere_optics(optics_toml); }
 
-environment::AtmosphereTables precompute_timed(const config::AtmosphereOpticsConfig& c,
+// Transmittance and single scattering only (orders = 1): the scattering table then holds the single Rayleigh
+// scattering the port check compares.
+environment::AtmosphereTables precompute_timed(config::AtmosphereOpticsConfig c,
                                                const environment::AtmosphereTableSizes& sizes = {}) {
+    c.scattering_orders = 1;
     const auto t0 = std::chrono::steady_clock::now();
     auto tables = environment::precompute_atmosphere(c, sizes);
     const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
@@ -138,7 +141,8 @@ TEST_CASE("The ground radius lies below every relevant surface", "[atmosphere]")
 
 TEST_CASE("Atmosphere parameters follow Bruneton's luminance mode", "[atmosphere]") {
     const auto p = environment::atmosphere_parameters(optics());
-    CHECK(p.mu_s_min == Approx(std::cos(102.0 * constants::deg_to_rad)));
+    // Bruneton's float-precision value (demo.cc): the Sun to 30 deg below the horizon, twilight to -18 deg inside.
+    CHECK(p.mu_s_min == Approx(std::cos(120.0 * constants::deg_to_rad)));
     CHECK(p.sun_angular_radius_rad == Approx(std::asin(constants::sun_radius_m / constants::astronomical_unit_m)));
     for (int c = 0; c < 3; ++c) CHECK(p.sky_radiance_to_luminance[c] == constants::max_luminous_efficacy_lm_per_w);
     // Solar luminous constant 133.8 klx [S: Darula, Kittler & Gueymard 2005, Solar Energy 79, 559] for 1361 W/m^2;
@@ -212,4 +216,18 @@ TEST_CASE("Input hash changes with every input", "[atmosphere]") {
         hashes.insert(environment::atmosphere_input_hash(base, s));
     }
     CHECK(hashes.size() == 1 + config_changes.size() + size_changes.size());
+}
+
+TEST_CASE("Input hash covers the spectral data", "[atmosphere]") {
+    // The checksum of the tabulated spectra and of the optics functions as the precomputation samples them (solar
+    // spectrum, CMFs, XYZ->sRGB, ozone and Rayleigh cross sections, the air / ozone / aerosol profiles). Pinned: a
+    // change of any of them changes this value and with it every cache's input hash - update the pin together with the
+    // data change.
+    const std::uint64_t checksum = environment::atmosphere_spectral_data_checksum(optics());
+    std::printf("atmosphere spectral data checksum: 0x%016llx\n", static_cast<unsigned long long>(checksum));
+    CHECK(checksum == 0x8546b28318f6415eull);
+    // The checksum depends on the configuration where the sampled functions do (ozone column, aerosol).
+    auto c = optics();
+    c.ozone_column_du += 1.0;
+    CHECK(environment::atmosphere_spectral_data_checksum(c) != checksum);
 }

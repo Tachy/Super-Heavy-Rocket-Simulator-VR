@@ -100,6 +100,8 @@ add_executable(starsim_core_tests
     test_geoid.cpp
     test_atmosphere_optics.cpp
     test_atmosphere_tables.cpp
+    test_atmosphere_scattering.cpp
+    test_atmosphere_table_file.cpp
     test_sea_state.cpp
     test_earth_terrain.cpp
     test_surface_samples.cpp

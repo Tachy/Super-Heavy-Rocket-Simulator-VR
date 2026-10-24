@@ -11,4 +11,4 @@ aerosol_scale_height_m = 1200.0      # [E] Bruneton 2017 demo value (boundary la
 mie_phase_g = 0.8                    # [E] Cornette-Shanks / Henyey-Greenstein asymmetry, Bruneton 2017 demo value
 ozone_column_du = 300.0              # [S] global mean total ozone ~300 DU (WMO assessments)
 ground_albedo = 0.1                  # [E] mean land / ocean surface albedo in the visible
-scattering_orders = 4                # [call] multiple-scattering orders of the precomputation (Bruneton 2017)
+scattering_orders = 5                # [call] orders computed explicitly (Bruneton 2017: 4), the rest as a geometric tail (Task 3)

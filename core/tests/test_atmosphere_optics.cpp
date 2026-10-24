@@ -103,7 +103,7 @@ TEST_CASE("Optics config loads and refuses missing keys", "[atmosphere]") {
     const auto optics = config::load_atmosphere_optics(optics_toml);
     CHECK(optics.top_altitude_m == 100e3);
     CHECK(optics.ground_altitude_m == -150.0);
-    CHECK(optics.scattering_orders == 4);
+    CHECK(optics.scattering_orders == 5);
 
     std::ifstream in(optics_toml);
     std::string line;
