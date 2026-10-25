@@ -38,11 +38,6 @@ constexpr std::array<Era5Variable, 7> era5_variables{{
 }};
 
 constexpr std::array<const char*, 5> gfs_variables{"TCDC", "CLMR", "ICMR", "HGT", "TMP"};
-// Pressure levels (mb) of the 0.25 deg pgrb2 files from 1000 to 50 mb that all five variables share (CLMR / ICMR / TCDC
-// have no 70 mb level, which the cloud layers up to 20 km do not need).
-constexpr std::array<int, 22> gfs_levels_mb{1000, 975, 950, 925, 900, 850, 800, 750, 700, 650, 600,
-                                            550,  500, 450, 400, 350, 300, 250, 200, 150, 100, 50};
-
 // Howard Hinnant's days_from_civil / civil_from_days (proleptic Gregorian), days since 1970-01-01.
 std::int64_t days_from_civil(std::int64_t y, int m, int d) {
     y -= m <= 2;

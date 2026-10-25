@@ -22,7 +22,8 @@ namespace starsim::environment {
 inline constexpr std::uint32_t weather_snapshot_file_version = 1;
 inline constexpr const char* weather_snapshot_file_extension = ".wthr";
 
-// Writes to a unique temp file next to `file` and renames it into place. Throws std::runtime_error on an I/O error.
+// Writes to a unique temp file next to `file` and renames it into place; first removes the stale temp files of killed
+// writers in that directory ("*.wthr.tmp.*" older than 10 minutes). Throws std::runtime_error on an I/O error.
 void write_weather_snapshot(const std::filesystem::path& file, const WeatherSnapshot& snapshot);
 
 // The snapshot of the file, or nullopt if it is missing, damaged or of another format version.

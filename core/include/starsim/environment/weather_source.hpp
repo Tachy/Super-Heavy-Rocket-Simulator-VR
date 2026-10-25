@@ -12,6 +12,7 @@
 // exist (analysis / short leads of the covering cycle for the gap, forecast leads beyond) up to +384 h; beyond that, or
 // when nothing is known (offline) -> analog (the same calendar day and hour in a reference year).
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -57,6 +58,17 @@ struct WeatherBracket {
 // First ERA5 hour (1940-01-01 00:00), GFS horizon, hourly / 3-hourly limits.
 constexpr int gfs_hourly_limit_h = 120;
 constexpr int gfs_max_lead_h = 384;
+
+// The ARCO-ERA5 store's 37 pressure levels (hPa) in the store's order, ascending pressure: index k of a 4D chunk's
+// level axis is era5_levels_hpa[k] (the store's `level` array; pinned against it by the weather snapshot test via
+// tests/validation/weather/era5_columns.toml).
+inline constexpr std::array<int, 37> era5_levels_hpa{1,   2,   3,   5,   7,   10,  20,  30,  50,  70,  100, 125, 150,
+                                                     175, 200, 225, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700,
+                                                     750, 775, 800, 825, 850, 875, 900, 925, 950, 975, 1000};
+// Pressure levels (mb) of the GFS 0.25 deg pgrb2 files from 1000 to 50 mb that all five variables share (CLMR / ICMR /
+// TCDC have no 70 mb level, which the cloud layers up to 20 km do not need), in request order.
+inline constexpr std::array<int, 22> gfs_levels_mb{1000, 975, 950, 925, 900, 850, 800, 750, 700, 650, 600,
+                                                   550,  500, 450, 400, 350, 300, 250, 200, 150, 100, 50};
 
 // The two snapshots bracketing utc_hour_f (fractional hours since 1900) for the warp step (1, 3, 6 h), the blend factor
 // between them, and the source each one comes from. latest_gfs is the newest cycle known to exist (nullopt: offline /

@@ -22,7 +22,10 @@
 // - GFS: the HGT field directly; the ground from the surface HGT record.
 // - Geopotential height -> geometric height with the WGS84 normal gravity and the matching effective radius
 //   (geometric_height_m), + the geoid undulation -> height above the ellipsoid.
-// - kg/kg -> kg/m^3 with the dry-air density rho = p / (R_d T).
+// - kg/kg -> kg/m^3 with the air density: ERA5's specific contents are per kg of moist air, so rho = p / (R_d T_v)
+//   with the virtual temperature of the vapour profile above; GFS has no humidity input and stays dry,
+//   rho = p / (R_d T) (moist air is less dense: the dry form overestimates by 0.61 q, <= ~1.5 % near a tropical
+//   surface, less aloft).
 // - Levels at or below the surface are ignored; the lowest level above the ground is held down to the ground, the
 //   highest one held upward; layer parts below the ground do not count, at() is zero below the ground.
 //
@@ -69,13 +72,19 @@ std::vector<double> hypsometric_level_heights_gpm(std::span<const double> levels
                                                   double total_column_water_vapour_kg_m2, double surface_pressure_pa,
                                                   double surface_geopotential_m2_s2);
 
+// The virtual temperatures of the same integration (NaN at or below the surface): the ERA5 build's density input.
+std::vector<double> level_virtual_temperatures_k(std::span<const double> levels_pa,
+                                                 std::span<const double> temperature_k,
+                                                 double total_column_water_vapour_kg_m2, double surface_pressure_pa);
+
 // Geometric height above the geoid of a geopotential height: Z g0 = gamma(phi) R(phi) h / (R(phi) + h) solved for h,
 // with gamma(phi) the WGS84 normal gravity (Somigliana, NIMA TR8350.2 eq. 4-1) and R(phi) = a / (1 + f + m - 2 f sin^2
 // phi) the radius whose inverse-square decay has the WGS84 free-air gradient (TR8350.2 eq. 4-3; the "effective Earth
 // radius" of List 1968, Smithsonian Meteorological Tables; Mahoney 2001, "A discussion of various measures of altitude").
 double geometric_height_m(double geopotential_height_m, double latitude_rad);
 
-// Cloud water content (kg/m^3) of a specific content (kg/kg): q p / (R_d T).
+// Cloud water content (kg/m^3) of a specific content (kg/kg): q p / (R_d T); pass the virtual temperature for moist
+// air (ERA5), the temperature for dry air (GFS).
 double cloud_water_density_kg_m3(double specific_kg_kg, double pressure_pa, double temperature_k);
 
 struct WeatherCell {

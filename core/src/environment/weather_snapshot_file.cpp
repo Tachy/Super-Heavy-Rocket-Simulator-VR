@@ -3,6 +3,7 @@
 #include "starsim/environment/weather_snapshot_file.hpp"
 
 #include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -41,6 +42,9 @@ void write_weather_snapshot(const std::filesystem::path& file, const WeatherSnap
     const auto* t = reinterpret_cast<const char*>(texels.data());
     bytes.insert(bytes.end(), t, t + texels.size());
     detail::append_bytes(bytes, detail::fnv1a64(bytes.data(), bytes.size()));
+    // Temp files of killed writers of any snapshot in this directory (137 MB each at 0.25 deg).
+    detail::remove_stale_temp_files(file.has_parent_path() ? file.parent_path() : std::filesystem::path("."),
+                                    std::string(weather_snapshot_file_extension) + ".tmp.");
     detail::write_file_atomically(file, bytes);
 }
 

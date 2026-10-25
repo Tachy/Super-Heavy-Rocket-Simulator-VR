@@ -34,13 +34,8 @@ using environment::WeatherSourceKind;
 using weather_decode::FloatGrid;
 
 constexpr int grid_rows = 721, grid_columns = 1440;  // 0.25 deg, 90 N .. 90 S, 0 .. 359.75 E
-// The ARCO-ERA5 store's 37 pressure levels in its order (`level` array, gen_weather_fixtures.py era5_columns.toml).
-const std::vector<int> era5_levels_hpa{1,   2,   3,   5,   7,   10,  20,  30,  50,  70,  100, 125, 150,
-                                       175, 200, 225, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700,
-                                       750, 775, 800, 825, 850, 875, 900, 925, 950, 975, 1000};
-// GFS 0.25 deg pressure levels shared by the five variables (weather_source.cpp gfs_levels_mb).
-const std::vector<int> gfs_levels_mb{1000, 975, 950, 925, 900, 850, 800, 750, 700, 650, 600,
-                                     550,  500, 450, 400, 350, 300, 250, 200, 150, 100, 50};
+using environment::era5_levels_hpa;
+using environment::gfs_levels_mb;
 
 std::vector<std::byte> read_file(const std::filesystem::path& p) {
     std::ifstream in(p, std::ios::binary);

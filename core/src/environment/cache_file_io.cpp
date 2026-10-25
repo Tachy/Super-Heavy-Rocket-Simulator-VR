@@ -62,6 +62,19 @@ void write_file_atomically(const std::filesystem::path& file, const std::vector<
     throw std::runtime_error("cannot rename " + temp.string() + " to " + file.string() + ": " + ec.message());
 }
 
+void remove_stale_temp_files(const std::filesystem::path& directory, std::string_view name_marker) {
+    const auto now = std::filesystem::file_time_type::clock::now();
+    std::error_code ec;
+    std::filesystem::directory_iterator it(directory, ec), end;
+    for (; !ec && it != end; it.increment(ec)) {
+        const std::string name = it->path().filename().string();
+        if (name.find(name_marker) == std::string::npos) continue;
+        std::error_code entry_error;
+        const auto written = it->last_write_time(entry_error);
+        if (!entry_error && now - written > stale_temp_file_age) std::filesystem::remove(it->path(), entry_error);
+    }
+}
+
 std::optional<std::vector<char>> read_whole_file(const std::filesystem::path& file) {
     std::error_code size_error;
     const auto file_size = std::filesystem::file_size(file, size_error);

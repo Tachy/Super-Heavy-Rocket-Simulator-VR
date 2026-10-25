@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
@@ -57,31 +58,48 @@ void require_grid(int rows, int columns) {
 double row_latitude_rad(int row, int rows) { return c::pi / 2.0 - row * c::pi / (rows - 1); }
 double column_longitude_rad(int column, int columns) { return column * c::two_pi / columns; }
 
-// Runs fn(row) for every row on the hardware threads.
+// Cores left to the rest of the process while a snapshot builds (the game builds snapshots in-game: the 200 Hz flight
+// simulation thread and the render thread must not starve).
+constexpr int cores_left_free = 2;
+constexpr int max_build_threads = 32;
+
+// Runs fn(row) for every row on hardware_concurrency() - cores_left_free threads (at least 1, at most 32). An
+// exception in a worker stops that worker; the first one is rethrown on the calling thread after all have joined.
 template <class Fn>
 void for_each_row(int rows, Fn fn) {
-    const int threads = std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, std::min(rows, 32));
+    const int hardware = static_cast<int>(std::thread::hardware_concurrency());
+    const int threads = std::clamp(hardware - cores_left_free, 1, std::min(rows, max_build_threads));
     if (threads == 1) {
         for (int r = 0; r < rows; ++r) fn(r);
         return;
     }
+    std::vector<std::exception_ptr> errors(static_cast<std::size_t>(threads));
     std::vector<std::thread> pool;
     pool.reserve(static_cast<std::size_t>(threads));
     for (int t = 0; t < threads; ++t) {
         pool.emplace_back([&, t] {
-            for (int r = t; r < rows; r += threads) fn(r);
+            try {
+                for (int r = t; r < rows; r += threads) fn(r);
+            } catch (...) {
+                errors[static_cast<std::size_t>(t)] = std::current_exception();
+            }
         });
     }
     for (auto& th : pool) th.join();
+    for (const auto& e : errors) {
+        if (e) std::rethrow_exception(e);
+    }
 }
 
-// Heights (gpm) of the levels visited in `order` (descending pressure), NaN at or below the surface. The humidity of
-// the virtual temperature is the column water vapour spread with the exponential profile (weather_snapshot.hpp).
+// Heights (gpm) and virtual temperatures of the levels visited in `order` (descending pressure), NaN at or below the
+// surface. The humidity of the virtual temperature is the column water vapour spread with the exponential profile
+// (weather_snapshot.hpp).
 template <class Temperature>
 void integrate_heights(const std::vector<int>& order, std::span<const double> levels_pa, Temperature temperature_k,
                        double total_column_water_vapour_kg_m2, double surface_pressure_pa,
-                       double surface_geopotential_m2_s2, std::span<double> out_gpm) {
+                       double surface_geopotential_m2_s2, std::span<double> out_gpm, std::span<double> out_tv_k) {
     std::fill(out_gpm.begin(), out_gpm.end(), nan);
+    std::fill(out_tv_k.begin(), out_tv_k.end(), nan);
     if (!std::isfinite(surface_pressure_pa) || !std::isfinite(surface_geopotential_m2_s2)) return;
     const double rd_g = c::dry_air_gas_constant_j_kgk / c::standard_gravity_mps2;
     const double vapour_factor = c::water_vapour_gas_constant_j_kgk / c::dry_air_gas_constant_j_kgk - 1.0;
@@ -113,6 +131,7 @@ void integrate_heights(const std::vector<int>& order, std::span<const double> le
             z = previous_z + rd_g * 0.5 * (tv + previous_tv) * std::log(previous_p / p);  // T linear in ln p
         }
         out_gpm[static_cast<std::size_t>(k)] = z;
+        out_tv_k[static_cast<std::size_t>(k)] = tv;
         previous_p = p;
         previous_tv = tv;
         previous_z = z;
@@ -233,9 +252,21 @@ std::vector<double> hypsometric_level_heights_gpm(std::span<const double> levels
     if (temperature_k.size() != levels_pa.size()) {
         throw std::invalid_argument("hypsometric_level_heights_gpm: spans differ in length");
     }
-    std::vector<double> out(levels_pa.size());
+    std::vector<double> out(levels_pa.size()), tv(levels_pa.size());
     integrate_heights(descending_pressure_order(levels_pa), levels_pa, [&](int k) { return temperature_k[k]; },
-                      total_column_water_vapour_kg_m2, surface_pressure_pa, surface_geopotential_m2_s2, out);
+                      total_column_water_vapour_kg_m2, surface_pressure_pa, surface_geopotential_m2_s2, out, tv);
+    return out;
+}
+
+std::vector<double> level_virtual_temperatures_k(std::span<const double> levels_pa,
+                                                 std::span<const double> temperature_k,
+                                                 double total_column_water_vapour_kg_m2, double surface_pressure_pa) {
+    if (temperature_k.size() != levels_pa.size()) {
+        throw std::invalid_argument("level_virtual_temperatures_k: spans differ in length");
+    }
+    std::vector<double> z(levels_pa.size()), out(levels_pa.size());
+    integrate_heights(descending_pressure_order(levels_pa), levels_pa, [&](int k) { return temperature_k[k]; },
+                      total_column_water_vapour_kg_m2, surface_pressure_pa, 0.0, z, out);
     return out;
 }
 
@@ -278,7 +309,7 @@ WeatherSnapshot WeatherSnapshot::from_era5(const WeatherSnapshotId& id, const Er
     const std::size_t layer_stride = static_cast<std::size_t>(rows) * columns * channels;
     for_each_row(rows, [&](int r) {
         const double lat = row_latitude_rad(r, rows);
-        std::vector<double> z(static_cast<std::size_t>(levels));
+        std::vector<double> z(static_cast<std::size_t>(levels)), tv(static_cast<std::size_t>(levels));
         std::vector<LevelSample> samples;
         samples.reserve(static_cast<std::size_t>(levels));
         ColumnLayers layers;
@@ -287,12 +318,12 @@ WeatherSnapshot WeatherSnapshot::from_era5(const WeatherSnapshotId& id, const Er
             const double ps = cell(f.surface_pressure_pa, 0, r, col);
             const double phis = cell(f.surface_geopotential_m2_s2, 0, r, col);
             integrate_heights(order, f.levels_pa, [&](int k) { return cell(f.temperature_k, k, r, col); },
-                              cell(f.total_column_water_vapour_kg_m2, 0, r, col), ps, phis, z);
+                              cell(f.total_column_water_vapour_kg_m2, 0, r, col), ps, phis, z, tv);
             samples.clear();
             for (int k = 0; k < levels; ++k) {
                 if (std::isnan(z[static_cast<std::size_t>(k)])) continue;
                 const double p = f.levels_pa[static_cast<std::size_t>(k)];
-                const double t = cell(f.temperature_k, k, r, col);
+                const double t = tv[static_cast<std::size_t>(k)];  // ERA5 contents are per kg of moist air
                 samples.push_back(
                     {geometric_height_m(z[static_cast<std::size_t>(k)], lat) + n,
                      {std::clamp(finite_or_zero(cell(f.cloud_fraction, k, r, col)), 0.0, 1.0),

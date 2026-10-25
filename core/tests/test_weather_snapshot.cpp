@@ -158,6 +158,13 @@ void write_bytes(const std::filesystem::path& p, const std::vector<char>& bytes)
 
 }  // namespace
 
+TEST_CASE("ERA5 level order is the store's", "[weather]") {
+    // era5_levels_hpa indexes the 4D chunks' level axis: it must be the store's `level` array, in its order.
+    const auto& set_ = era5_columns();
+    REQUIRE(set_.levels_pa.size() == era5_levels_hpa.size());
+    for (std::size_t k = 0; k < era5_levels_hpa.size(); ++k) CHECK(set_.levels_pa[k] == era5_levels_hpa[k] * 100.0);
+}
+
 TEST_CASE("Hypsometric heights match ERA5 geopotential", "[weather]") {
     const auto& set_ = era5_columns();
     REQUIRE(set_.columns.size() == 6);
@@ -221,6 +228,25 @@ TEST_CASE("Geopotential height converts to ellipsoidal height", "[weather]") {
 
 TEST_CASE("Water content in kg per cubic metre", "[weather]") {
     CHECK(cloud_water_density_kg_m3(1e-4, 85000.0, 280.0) == Catch::Approx(1e-4 * 85000.0 / (287.05 * 280.0)));
+
+    // ERA5's contents are per kg of moist air: the build divides by R_d T_v. The vapour profile puts q_s = W g0 a / p_s
+    // at the surface (a = R_d T_1 / (g0 H_v)): T_v / T - 1 = (R_v / R_d - 1) q at every level, largest at the bottom.
+    const auto& set_ = era5_columns();
+    const auto& c = set_.by_name("tropics");
+    const auto tv = level_virtual_temperatures_k(set_.levels_pa, c.temperature_k, c.total_column_water_vapour_kg_m2,
+                                                 c.surface_pressure_pa);
+    const auto dry = level_virtual_temperatures_k(set_.levels_pa, c.temperature_k, 0.0, c.surface_pressure_pa);
+    const std::size_t bottom = set_.levels_pa.size() - 1;  // 1000 hPa, above the 1008.8 hPa surface
+    REQUIRE(set_.levels_pa[bottom] == 100000.0);
+    const double a = 287.05 * c.temperature_k[bottom] / (9.80665 * 2000.0);
+    const double q_s = c.total_column_water_vapour_kg_m2 * 9.80665 * a / c.surface_pressure_pa;
+    const double q_bottom = q_s * std::pow(100000.0 / c.surface_pressure_pa, a - 1.0);
+    CHECK(tv[bottom] == Catch::Approx(c.temperature_k[bottom] * (1.0 + (461.51 / 287.05 - 1.0) * q_bottom)));
+    CHECK(tv[bottom] / c.temperature_k[bottom] - 1.0 > 0.01);
+    CHECK(dry[bottom] == Catch::Approx(c.temperature_k[bottom]));
+    for (std::size_t k = 0; k + 1 < set_.levels_pa.size(); ++k) {
+        CHECK(tv[k] / c.temperature_k[k] <= tv[k + 1] / c.temperature_k[k + 1] + 1e-15);  // drier upward
+    }
 }
 
 TEST_CASE("No cloud under the ground", "[weather]") {
@@ -269,13 +295,15 @@ TEST_CASE("Cloud water path is kept on the layers", "[weather]") {
     const double lat = node_latitude(1, rows), lon = node_longitude(1, columns);
     const auto z = hypsometric_level_heights_gpm(set_.levels_pa, c.temperature_k, c.total_column_water_vapour_kg_m2,
                                                  c.surface_pressure_pa, c.surface_geopotential_m2_s2);
+    const auto tv = level_virtual_temperatures_k(set_.levels_pa, c.temperature_k, c.total_column_water_vapour_kg_m2,
+                                                 c.surface_pressure_pa);
     const double n = coarse_geoid().undulation_m(lat, lon);
     struct Node { double h, water; };
     std::vector<Node> nodes;
     for (std::size_t k = 0; k < z.size(); ++k) {
         if (std::isnan(z[k])) continue;
         nodes.push_back({geometric_height_m(z[k], lat) + n,
-                         cloud_water_density_kg_m3(c.liquid[k] + c.ice[k], set_.levels_pa[k], c.temperature_k[k])});
+                         cloud_water_density_kg_m3(c.liquid[k] + c.ice[k], set_.levels_pa[k], tv[k])});
     }
     std::sort(nodes.begin(), nodes.end(), [](const Node& x, const Node& y) { return x.h < y.h; });
     const double ground = snapshot.ground_height_m(lat, lon);
@@ -476,4 +504,22 @@ TEST_CASE("Snapshot files round-trip; damaged ones are refused", "[weather]") {
     CHECK_FALSE(read_weather_snapshot(unique_temp("weather_missing")).has_value());
     std::filesystem::remove(file);
     std::filesystem::remove(damaged);
+}
+
+TEST_CASE("Writing a snapshot removes stale temp files of killed writers", "[weather]") {
+    const auto dir = unique_temp("weather_stale_dir").replace_extension();
+    std::filesystem::create_directories(dir);
+    const auto stale = dir / "era5_1.wthr.tmp.123.456";
+    const auto fresh = dir / "era5_2.wthr.tmp.789.012";
+    const auto other = dir / "notes.txt";
+    for (const auto& p : {stale, fresh, other}) write_bytes(p, {'x'});
+    const auto old = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
+    std::filesystem::last_write_time(stale, old);
+    std::filesystem::last_write_time(other, old);
+    write_weather_snapshot(dir / "era5_3.wthr", WeatherSnapshot::uniform_slab(3, 4, 0.0, 1000.0, 1e-4, 0.5));
+    CHECK_FALSE(std::filesystem::exists(stale));  // older than 10 minutes: a killed writer's
+    CHECK(std::filesystem::exists(fresh));        // may belong to a live writer
+    CHECK(std::filesystem::exists(other));        // not a snapshot temp file
+    CHECK(read_weather_snapshot(dir / "era5_3.wthr").has_value());
+    std::filesystem::remove_all(dir);
 }

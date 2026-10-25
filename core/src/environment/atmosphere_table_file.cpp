@@ -3,7 +3,6 @@
 #include "starsim/environment/atmosphere_table_file.hpp"
 
 #include <array>
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
@@ -79,21 +78,6 @@ std::array<std::uint64_t, 4> expected_counts(const AtmosphereTableSizes& s) {
                                      s.scattering_depth() * 4;
     return {static_cast<std::uint64_t>(s.transmittance_mu) * s.transmittance_r * 4, scattering, scattering,
             static_cast<std::uint64_t>(s.irradiance_mu_s) * s.irradiance_r * 4};
-}
-
-// Temp files of writers killed between write and rename (84 MB each): siblings "<name>.tmp.*" older than 10 minutes
-// (a live writer needs well under a second between creating and renaming its file).
-void remove_stale_temp_files(const std::filesystem::path& file) {
-    const std::string prefix = file.filename().string() + ".tmp.";
-    const auto now = std::filesystem::file_time_type::clock::now();
-    std::error_code ec;
-    for (const auto& entry : std::filesystem::directory_iterator(file.parent_path(), ec)) {
-        const std::string name = entry.path().filename().string();
-        if (name.rfind(prefix, 0) != 0) continue;
-        std::error_code entry_error;
-        const auto written = entry.last_write_time(entry_error);
-        if (!entry_error && now - written > std::chrono::minutes(10)) std::filesystem::remove(entry.path(), entry_error);
-    }
 }
 
 }  // namespace
@@ -182,7 +166,8 @@ std::shared_ptr<const AtmosphereTables> load_or_compute_atmosphere(const std::fi
     // another process) is reported and the freshly computed tables are returned (as sim/ascent_plan_cache.cpp).
     try {
         std::filesystem::create_directories(cache_dir);
-        remove_stale_temp_files(file);
+        // Temp files of killed writers (84 MB each): siblings "<name>.tmp.*".
+        detail::remove_stale_temp_files(cache_dir, file.filename().string() + ".tmp.");
         write_atmosphere_tables(file, *tables);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "atmosphere: cache not written (%s)\n", e.what());

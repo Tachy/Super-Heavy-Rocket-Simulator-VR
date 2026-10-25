@@ -3,11 +3,13 @@
 // Shared helpers of the binary cache files (atmosphere tables, weather snapshots): the FNV-1a 64 checksum, the atomic
 // write (unique temp file + rename) and a whole-file read. Internal to core/src/environment.
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace starsim::environment::detail {
@@ -20,6 +22,12 @@ std::filesystem::path unique_temp_path(const std::filesystem::path& file);
 // Writes the bytes to a unique temp file next to `file` and renames it into place (retried with a short back-off: on
 // Windows the rename fails transiently while a virus scanner holds the fresh file). Throws std::runtime_error.
 void write_file_atomically(const std::filesystem::path& file, const std::vector<char>& bytes);
+
+// Removes the files of `directory` whose name contains name_marker and that are older than stale_temp_file_age: the
+// temp files of writers killed between write and rename (a live writer needs well under a second between creating
+// and renaming its file). Errors are ignored.
+inline constexpr std::chrono::minutes stale_temp_file_age{10};
+void remove_stale_temp_files(const std::filesystem::path& directory, std::string_view name_marker);
 
 // The whole file, or nullopt if it cannot be read.
 std::optional<std::vector<char>> read_whole_file(const std::filesystem::path& file);
