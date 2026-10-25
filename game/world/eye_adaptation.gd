@@ -12,7 +12,9 @@ extends RefCounted
 ##
 ## Adaptation luminance L_a (Atmosphere.adaptation_luminance, the core's CPU evaluation): the larger of a white
 ## Lambertian at the eye under the direct Sun at normal incidence and the sky, (E_sun,n + E_sky) / pi, and the Earth in
-## view (the same plate equivalent of the visible ground and limb, x the cap's view factor). The reference L_ref is the
+## view (the same plate equivalent of the visible ground and limb, x the cap's view factor); above the atmosphere also
+## the Moon in view (the regolith as the Moon shaders draw it, sunlit and earthshine-lit, x its cap's view factor) and
+## the Earth's disc in front of the Sun (Moon-eye fix 2026-10-25). The reference L_ref is the
 ## plate under the top-of-atmosphere Sun - the state DAY_EXPOSURE is defined for. Gain: Weber adaptation, L_ref / L_a,
 ## clamped to [1, GAIN_MAX]. Above ~80 cd/m^2 the cone threshold grows in proportion to the adaptation luminance
 ## (Weber's law; Ferwerda et al. 1996, "A model of visual adaptation for realistic image synthesis", SIGGRAPH 96, the

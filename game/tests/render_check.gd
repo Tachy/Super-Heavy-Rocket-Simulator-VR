@@ -76,6 +76,11 @@ func _process(_delta: float) -> bool:
 			for view in world.towers:
 				view.preview_opening_rad = deg_to_rad(float(_args["tower_arms_deg"]))
 				view.update_state({})
+		# The view is placed: the eye is adapted to it. _view_from and _aim_at_moon run update_world while placing the
+		# camera, which used up set_focus's snap at the pre-aim pose (--view_from=moon: 22 000 km on the night side, gain
+		# 25, then ~0.24 s of light adaptation over the settle frames: ~7.5 on a sunlit view). The world's own update this
+		# frame (after this script's _process) takes the snap at the final pose.
+		world.atmosphere.snap_adaptation()
 	_frames += 1
 	# The streamed terrain loads over many frames: wait until nothing is loading (or give up after TERRAIN_MAX_FRAMES).
 	var loading: int = world.earth_terrain.stats["nodes_loading"] + world.moon_terrain.stats["nodes_loading"]
@@ -97,6 +102,10 @@ func _process(_delta: float) -> bool:
 		print("render_check: Sun elevation at the eye %.2f deg (UTC %s), exposure gain %.3f" % [
 				rad_to_deg(asin(clampf(to_sun.dot(up), -1.0, 1.0))), world.core.tdb_s_to_utc(world.clock.tdb_s),
 				world.atmosphere.exposure_gain])
+		var a := world.atmosphere
+		print("render_check: eye adapted to %s cd/m^2: Sun on a plate %s (visible %.3f), Earth in view %s, Moon in view %s, earthshine %s lux" % [
+				a.adaptation_cd_m2, a.last_adaptation_down_cd_m2, a.last_adaptation_visible_fraction,
+				a.last_adaptation_up_cd_m2, a.last_adaptation_moon_cd_m2, a.last_earthshine_lux])
 		var out: String = _args.get("out", "user://render_check.png")
 		var error := root.get_viewport().get_texture().get_image().save_png(out)
 		print("render_check: saved %s (error %d)" % [out, error])

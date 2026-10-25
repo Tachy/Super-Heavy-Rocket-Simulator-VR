@@ -40,6 +40,23 @@ const UMBRA_BAND_EDGES_DEG := [50.0, 15.0, 8.0, 4.5, 2.0, 0.0]
 const UMBRA_SEGMENTS := 8
 ## [call] The eye adaptation's limb samples graze the Earth this high (m) above the model ground.
 const LIMB_SAMPLE_HEIGHT_M := 10000.0
+## The eye adaptation away from the Earth (adaptation_luminance, _moon_in_view_luminance):
+## [S: World.EARTH_MEAN_RADIUS_M, the Moon shaders' earth_radius_m] the Earth's mean radius of the Earth's shadow.
+const EARTH_MEAN_RADIUS_M := 6371000.0
+## [D] Mean albedo-texture value of the lunar surface: data/textures/moon_color.png (CGI Moon Kit, LROC WAC colour
+## mosaic, tools/data_pipeline/sources.toml "moon_color") sRGB-decoded, BT.709 luminance, area-weighted over the sphere
+## (0.2997; the near side 0.255) - the albedo the Moon shaders multiply.
+const MOON_MEAN_TEXTURE_ALBEDO := 0.30
+## The Moon shaders' sunlit scale (moon.gdshader, terrain_moon.gdshader: exposure 1.6 x 0.5): scene value = albedo x
+## Lommel-Seeliger x this. Keep in sync with them.
+const MOON_SHADER_SUN_SCALE := 0.8
+## [S: NASA Earth Fact Sheet, Bond albedo 0.306] the Earth's light on the Moon from its plate equivalent (earthshine).
+const EARTH_BOND_ALBEDO := 0.306
+## [call] An eye on the Moon stands at least this high above its ground sphere (render ground views: 2 m).
+const MOON_EYE_MIN_HEIGHT_M := 2.0
+## [call] The lunar cap's quadrature: rings uniform in sin^2 of the nadir angle (cosine weights), directions per ring.
+const MOON_VIEW_RINGS := 4
+const MOON_VIEW_AZIMUTHS := 8
 
 ## True once the textures are uploaded and atmosphere_enabled is set.
 var ready := false
@@ -79,6 +96,11 @@ var _eye := EyeAdaptation.new()
 ## The eye adaptation's two parts at the last update (cd/m^2; adaptation_luminance), for tests and the report.
 var last_adaptation_down_cd_m2 := 0.0
 var last_adaptation_up_cd_m2 := 0.0
+## Away from the Earth: the Moon in view (cd/m^2), the earthshine on a plate at the Moon facing the Earth (lux) and the
+## Sun's visible fraction the down part used (0 .. 1).
+var last_adaptation_moon_cd_m2 := 0.0
+var last_earthshine_lux := 0.0
+var last_adaptation_visible_fraction := 1.0
 ## The umbra's light (_update_umbra_light) at the last evaluation: the eclipsed sky's fluence (scalar irradiance, cd/m^2 x
 ## sr per channel at 1 AU) at UMBRA_HEIGHTS_M (tests).
 var umbra_fluence: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
@@ -149,10 +171,11 @@ func shutdown() -> void:
 ## the Moon leaves at the camera.
 ## moon_apparent_gcrf_m: the Moon's apparent position (GCRF, as seen from the Earth's centre) for the eclipse sky;
 ## Vector3.ZERO: no eclipse. tdb_s: the instant (the Moon's shadow on points other than the camera: the eye adaptation's
-## view of the Earth, the umbra's light); NAN: no shadow there.
+## view of the Earth, the umbra's light); NAN: no shadow there. moon_gcrf_m: the Moon's geometric centre (GCRF) for the eye
+## adaptation away from the Earth (the lunar ground in view); Vector3.ZERO: none.
 func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to_gcrf: Basis,
 		sun_apparent_gcrf_m: Vector3, adaptation_dt_s := 0.0, sun_visible_fraction := 1.0,
-		moon_apparent_gcrf_m := Vector3.ZERO, tdb_s := NAN) -> void:
+		moon_apparent_gcrf_m := Vector3.ZERO, tdb_s := NAN, moon_gcrf_m := Vector3.ZERO) -> void:
 	if not poll():
 		return
 	_fixed_to_gcrf = earth_fixed_to_gcrf
@@ -177,7 +200,8 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	exposure_gain = 1.0
 	adaptation_cd_m2 = 0.0
 	if eye_adaptation_enabled:
-		var luminance := adaptation_luminance(camera_fixed, sun_fixed, sun_visible_fraction, d_au)
+		var moon_fixed := gcrf_to_fixed * (moon_gcrf_m - earth_center_gcrf_m) if moon_gcrf_m != Vector3.ZERO else Vector3.ZERO
+		var luminance := adaptation_luminance(camera_fixed, sun_fixed, sun_visible_fraction, d_au, moon_fixed)
 		exposure_gain = _eye.advance(EyeAdaptation.target_gain(luminance, reference_luminance(d_au)), adaptation_dt_s)
 		adaptation_cd_m2 = _eye.advance_luminance(luminance, adaptation_dt_s)
 	RenderingServer.global_shader_parameter_set(&"atmosphere_adaptation_cd_m2", adaptation_cd_m2)
@@ -230,17 +254,129 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 ##   down part. On the ground this stays below the down part (the light on the ground and the horizon sky do not exceed
 ##   the Sun + sky at the eye); in orbit an eye in the Moon's umbra or just past orbital sunset adapts to the sunlit
 ##   Earth or limb it looks at.
-## BT.709 luminance of the RGB luminance channels; the tables' 1 AU values / d_AU^2.
-func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visible_fraction: float, d_au: float) -> float:
+## Away from the Earth (the eye above the top of the atmosphere; inside it nothing changes) [Moon-eye fix 2026-10-25]:
+## - down: the transmittance is 1 there (or the grazing ray's), the sky irradiance the top boundary's (~0); the visible
+##   fraction also takes the Earth's disc in front of the Sun (an eye in the Earth's shadow far out: the transmittance
+##   alone is the Sun's centre ray, a sharp edge) [call: where both act, within the Sun's radius of the limb, the
+##   penumbra is counted twice - a little too dark there]. For an eye within MOON_EYE_MIN_HEIGHT_M of the lunar mean
+##   sphere or below it, the Moon's part is recomputed on its ground sphere (_moon_ground_radius: an eye below the mean
+##   sphere stands on the terrain; the passed fraction uses the mean sphere, which would hide the Sun from it).
+## - up: the Earth in view x the part of its disc the Moon leaves (a lunar eye with the Earth below its horizon);
+## - Moon in view (_moon_in_view_luminance, with moon_itrf_m): the sunlit and earthshine-lit regolith x its view factor.
+## The result is the largest of the three (as down / up: plates facing the Sun, the Earth, the Moon).
+## BT.709 luminance of the RGB luminance channels; the tables' 1 AU values / d_AU^2. moon_itrf_m: the Moon's geometric
+## centre, Earth-fixed (Vector3.ZERO: none).
+func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visible_fraction: float, d_au: float,
+		moon_itrf_m := Vector3.ZERO) -> float:
 	var solar: Vector3 = parameters["solar_illuminance_rgb"]
 	var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
 	var transmittance := _core.atmosphere_sun_transmittance(eye_itrf_m, sun_direction_itrf)
 	var up := _geodetic_up(eye_itrf_m)
 	var sky: Vector3 = _core.atmosphere_illuminance(eye_itrf_m, up, sun_direction_itrf)["sky_lux"]
-	var down := ((solar * sun_factor * transmittance + sky) * visible_fraction).dot(LUMINANCE_WEIGHTS) / PI
+	var outside := _stretch(eye_itrf_m).length() > float(parameters["top_radius_m"])
+	var lunar := outside and moon_itrf_m != Vector3.ZERO
+	var sun_itrf_m := sun_direction_itrf * (d_au * ASTRONOMICAL_UNIT_M)
+	var visible := visible_fraction
+	var moon_ground_m := 0.0
+	if lunar:
+		moon_ground_m = _moon_ground_radius((moon_itrf_m - eye_itrf_m).length())
+		if moon_ground_m < MOON_RADIUS_M:  # the eye below the mean sphere + MOON_EYE_MIN_HEIGHT_M: on its own ground
+			visible = 1.0 - occulted_fraction(sun_itrf_m - eye_itrf_m, SUN_RADIUS_M, moon_itrf_m - eye_itrf_m,
+					moon_ground_m)
+	if outside:
+		visible *= 1.0 - occulted_fraction(sun_itrf_m - eye_itrf_m, SUN_RADIUS_M, -eye_itrf_m, EARTH_MEAN_RADIUS_M)
+	last_adaptation_visible_fraction = visible
+	var down := ((solar * sun_factor * transmittance + sky) * visible).dot(LUMINANCE_WEIGHTS) / PI
 	last_adaptation_down_cd_m2 = down / (d_au * d_au)
-	last_adaptation_up_cd_m2 = _earth_in_view_luminance(eye_itrf_m, sun_direction_itrf) / (d_au * d_au)
-	return maxf(last_adaptation_down_cd_m2, last_adaptation_up_cd_m2)
+	var earth_in_view := _earth_in_view_luminance(eye_itrf_m, sun_direction_itrf) / (d_au * d_au)
+	last_adaptation_up_cd_m2 = earth_in_view
+	last_adaptation_moon_cd_m2 = 0.0
+	last_earthshine_lux = 0.0
+	if lunar:
+		last_adaptation_up_cd_m2 *= 1.0 - occulted_fraction(-eye_itrf_m, EARTH_MEAN_RADIUS_M, moon_itrf_m - eye_itrf_m,
+				moon_ground_m)
+		# Earthshine on a plate at the Moon facing the Earth [call]: the Earth in view is the plate equivalent of an
+		# albedo-1 ground (plus the in-scatter); x the Earth's Bond albedo for its true light, and the view factor taken
+		# from the eye to the Moon's distance.
+		var scale := eye_itrf_m.length() / moon_itrf_m.length()
+		last_earthshine_lux = PI * EARTH_BOND_ALBEDO * earth_in_view * scale * scale
+		last_adaptation_moon_cd_m2 = _moon_in_view_luminance(eye_itrf_m, moon_itrf_m, sun_itrf_m, moon_ground_m,
+				last_earthshine_lux, d_au) * (1.0 - occulted_fraction(moon_itrf_m - eye_itrf_m, moon_ground_m,
+				-eye_itrf_m, EARTH_MEAN_RADIUS_M))
+	return maxf(last_adaptation_down_cd_m2, maxf(last_adaptation_up_cd_m2, last_adaptation_moon_cd_m2))
+
+
+## [call] The lunar ground sphere of the eye adaptation (m about the Moon's centre) for an eye this far from it: the
+## mean sphere, or MOON_EYE_MIN_HEIGHT_M below the eye when the eye stands below it (terrain under the mean radius).
+static func _moon_ground_radius(eye_distance_m: float) -> float:
+	return minf(MOON_RADIUS_M, eye_distance_m - MOON_EYE_MIN_HEIGHT_M)
+
+
+## The Moon in view (cd/m^2 at the true Sun distance): the regolith's luminance as the Moon shaders draw it, averaged
+## cosine-weighted over the lunar cap below the eye (MOON_VIEW_RINGS rings uniform in sin^2 of the nadir angle, each
+## MOON_VIEW_AZIMUTHS directions), times the cap's view factor (R / r)^2 - the analogue of _earth_in_view_luminance:
+## - sunlit: albedo x Lommel-Seeliger 2 mu0 / (mu0 + mu) x MOON_SHADER_SUN_SCALE / DAY_EXPOSURE x the reference luminance
+##   (moon.gdshader, terrain_moon.gdshader: scene value albedo x LS x 0.8), x the solar disc the Earth leaves at the
+##   ground point (a lunar eclipse; the reddened umbra glow of the shaders is left out);
+## - earthshine: albedo x earthshine_lux x cos(Earth's zenith angle) / pi (Lambert) [call: physical earthshine from the
+##   Earth in view, not the shaders' constant earthshine term];
+## albedo: MOON_MEAN_TEXTURE_ALBEDO [call: the map's mean, not the texel under the eye]. Cast shadows: none (as the
+## shaders). Vectors Earth-fixed, m.
+func _moon_in_view_luminance(eye_itrf_m: Vector3, moon_itrf_m: Vector3, sun_itrf_m: Vector3, radius: float,
+		earthshine_lux: float, d_au: float) -> float:
+	var eye := eye_itrf_m - moon_itrf_m  # from the Moon's centre
+	var r := eye.length()
+	var nadir := -eye / r
+	var east := nadir.cross(Vector3(0, 0, 1) if absf(nadir.z) < 0.9 else Vector3(1, 0, 0)).normalized()
+	var north := nadir.cross(east)
+	var sin_cap := radius / r
+	var sun_scale := MOON_MEAN_TEXTURE_ALBEDO * MOON_SHADER_SUN_SCALE / DAY_EXPOSURE * reference_luminance(d_au)
+	var earth_scale := MOON_MEAN_TEXTURE_ALBEDO * earthshine_lux / PI
+	var total := 0.0
+	for ring in range(MOON_VIEW_RINGS):
+		var sin_theta := sin_cap * sqrt((ring + 0.5) / MOON_VIEW_RINGS)
+		var cos_theta := sqrt(maxf(1.0 - sin_theta * sin_theta, 0.0))
+		for k in range(MOON_VIEW_AZIMUTHS):
+			var azimuth := TAU * (k + 0.5 * (ring % 2)) / MOON_VIEW_AZIMUTHS
+			var v := nadir * cos_theta + (east * cos(azimuth) + north * sin(azimuth)) * sin_theta
+			var along := eye.dot(v)
+			var hit := eye + v * (-along - sqrt(maxf(along * along - (r * r - radius * radius), 0.0)))
+			var n := hit.normalized()
+			var ground_itrf := moon_itrf_m + hit
+			var mu0 := n.dot((sun_itrf_m - ground_itrf).normalized())
+			var luminance := 0.0
+			if mu0 > 0.0:
+				var mu := maxf(-n.dot(v), 1.0e-3)
+				luminance += sun_scale * 2.0 * mu0 / (mu0 + mu) * (1.0 - occulted_fraction(sun_itrf_m - ground_itrf,
+						SUN_RADIUS_M, -ground_itrf, EARTH_MEAN_RADIUS_M))
+			luminance += earth_scale * maxf(n.dot(-ground_itrf.normalized()), 0.0)
+			total += luminance
+	return total / (MOON_VIEW_RINGS * MOON_VIEW_AZIMUTHS) * sin_cap * sin_cap
+
+
+## Fraction of a light source's disc hidden by an occluding sphere, seen from the observer (vectors from it, m). Mirror
+## of core/src/environment/eclipse.cpp (Montenbruck & Gill 3.85-3.90) and shaders/eclipse.gdshaderinc: keep in sync.
+static func occulted_fraction(to_source: Vector3, source_radius: float, to_occluder: Vector3,
+		occluder_radius: float) -> float:
+	var source_distance := to_source.length()
+	var occluder_distance := to_occluder.length()
+	if occluder_distance <= occluder_radius:
+		return 1.0
+	if occluder_distance > source_distance:
+		return 0.0
+	var a := asin(minf(1.0, source_radius / source_distance))
+	var b := asin(occluder_radius / occluder_distance)
+	var c := atan2(to_source.cross(to_occluder).length(), to_source.dot(to_occluder))
+	if c >= a + b:
+		return 0.0
+	if c <= b - a:
+		return 1.0
+	if c <= a - b:
+		return (b * b) / (a * a)
+	var x := (c * c + a * a - b * b) / (2.0 * c)
+	var y := sqrt(maxf(0.0, a * a - x * x))
+	var area := a * a * acos(clampf(x / a, -1.0, 1.0)) + b * b * acos(clampf((c - x) / b, -1.0, 1.0)) - c * y
+	return clampf(area / (PI * a * a), 0.0, 1.0)
 
 
 ## The "up" part of adaptation_luminance (cd/m^2 at 1 AU).

@@ -2979,6 +2979,36 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   outer, less eclipsed Earth renders several times its day brightness (AgX rolls it toward white). Cameras on the ISS
   show it at a day exposure; an adapted eye does not. Kept physical [call]; a display-side highlight treatment would
   be a separate decision.
+  **Away from the Earth** (Moon-eye fix 2026-10-25; only for an eye above the top of the atmosphere, nothing changes
+  inside it). Down: the transmittance is 1 there (or the grazing ray's; no clamp issue beyond the tables, the sky
+  irradiance is the top boundary's ~0), and the visible fraction also takes the Earth's disc in front of the Sun (the
+  transmittance alone is the Sun's centre ray: a sharp shadow edge far out; where both act, within the Sun's radius
+  of the limb, the penumbra is counted twice [call]). Up: the Earth in view x the part of its disc the Moon leaves (a
+  lunar eye with the Earth below its horizon). New third term, the **Moon in view**
+  (`Atmosphere._moon_in_view_luminance`, needs the Moon's geometric centre: `update(..., moon_gcrf_m)`): the regolith
+  luminance as the Moon shaders draw it - mean texture albedo 0.30 [D: `moon_color.png` area-weighted, sRGB-decoded,
+  BT.709; near side 0.255] x Lommel-Seeliger 2 mu0 / (mu0 + mu) x 0.8 / 1.5 x L_ref (the shaders' scene value albedo x
+  LS x 0.8), x the solar disc the Earth leaves at the ground point (lunar eclipse; the umbra glow left out), plus the
+  earthshine albedo x E_es cos z / pi - averaged cosine-weighted over the lunar cap (4 rings uniform in sin^2 x 8
+  azimuths) x its view factor (R / r)^2. Earthshine [call, physical, not the shaders' constant]: E_es = pi x 0.306
+  (the Earth's Bond albedo) x the Earth in view, its view factor carried to the Moon's distance. L_a = the largest of
+  down, Earth, Moon. The lunar ground sphere is the mean sphere, or 2 m below an eye standing below it (terrain under
+  the mean radius); there the Sun's visibility is recomputed on that sphere (the core's mean-sphere fraction would
+  hide the Sun from it; e.g. 0 N 45 E lies 1551 m below the mean radius). Values: lunar day 1.000 (the Moon term
+  ~7800 cd/m^2, the Sun plate 42 400); deep space halfway to the Moon 1.000; lunar night under a nearly full Earth
+  (phase 10 deg, check): Earth in view 6.17 cd/m^2 (0.80 x the Lambert disc 7.74: the 10 km limb ring carries 25 %
+  of the weight with only the limb's sky), Moon in view 0.56, earthshine 5.9 lux, Weber gain 6900 -> the cap 25; the
+  full Earth then renders 25 x its day look (blown toward white by AgX) [call: the view-independent plate model has
+  no foveal term - an eye fixating the Earth would adapt partly to it]. Away from the Earth at partial phases the
+  13-direction cap underestimates the Earth by up to ~2x (half Earth: the nadir sample on the terminator, the outer
+  annulus represented by the limb's sky); it only matters where the cap 25 holds anyway.
+  **Why render_check's `--view_from=moon` showed gain ~7.5:** not a lunar eye - `--focus=earth --view_from=moon` is the
+  orbit camera 22 000 km from the Earth's centre on the Moon side. `_view_from` ran `update_world` to read the Moon's
+  direction before aiming, which used up set_focus's snap at the default pose (night side: down 0, Earth in view
+  ~0.02 cd/m^2, gain 25); after aiming, light adaptation (tau 0.5 s) over the ~0.24 s of settle frames left
+  25 -> 11.1 -> 7.9 -> 7.5. Fix: render_check snaps after the view is placed (frame 0, before the world's own update).
+  In the game every view change (`set_focus`, `set_ground_site`, Tab, mission start) snaps before the next
+  `update_world`, which places the camera before the atmosphere update.
 - **Solar eclipses.** While the Moon's penumbra touches the atmosphere (`Atmosphere.penumbra_touches`), the
   in-scattering along a ray is split into segments at d (i/n)^2 (8 for the sky, Moon, Sun, stars and the sea's
   reflected sky; ceil(d / 12.5 km) clamped to 1..8 for the aerial perspective [call, performance]), each
@@ -3000,9 +3030,9 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   3819 cd/m^2 (B/R 1.97), horizontal illuminance at Sun zenith 125.4 klx, sky at 50 km 7.1e-4 x the ground, twilight
   zenith bluer than noon (B/R 3.12 at -4 deg); ellipsoid mapping < 1 mm; cache round trip / damage / stale hash /
   failed write. GPU `game/tests/atmosphere_check.gd` (HDR viewport, float readback, 2 % per channel unless stated;
-  RGBAH and `--f32`): 52 samples - sky, sunset, limb from 400 km and from the Moon distance, the pad camera's float64
+  RGBAH and `--f32`): 56 samples - sky, sunset, limb from 400 km and from the Moon distance, the pad camera's float64
   altitude path, ground and terrain samples (3 %), stars / Sun / Moon, lit cubes (5 %), Sun colour, eye adaptation,
-  eclipse; worst sky deviation 0.52 % (the 50 km limb from the Moon distance, float32 rounding at 3.8e8 m), the Earth
+  eclipse, eye adaptation away from the Earth (lunar day, lunar night, the Earth term at lunar distance, deep space); worst sky deviation 0.52 % (the 50 km limb from the Moon distance, float32 rounding at 3.8e8 m), the Earth
   mesh samples -2.1 / -1.7 % (its facets lie up to ~0.5 km below the ellipsoid; 0.15 % against the point 300 m lower).
 - **Performance** (`terrain_perf.gd`, RTX 4090, 2560 x 1440, gate p99 <= 8 / max <= 16 ms; Task 10). Sky cubemap
   incremental at 128 (realtime 256 cost VRAM, not time: the frame is CPU-bound), half-float scattering tables.

@@ -277,7 +277,10 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
 - Augenanpassung: die Belichtung folgt dem Licht am Betrachter wie ein Auge (heller werden in etwa einer halben
   Sekunde, dunkler werden über etwa zwei Minuten; Zeitraffer läuft entsprechend schneller, ein Sprung in Zeit oder Ort
   ist sofort angepasst). Bürgerliche Dämmerung ist gedämpft sichtbar, nautische Dämmerung dunkel, die Nacht bleibt
-  Nacht (Verstärkung höchstens 25-fach). Nur die Helligkeit wird angepasst, nicht die Farben; im VR genauso.
+  Nacht (Verstärkung höchstens 25-fach). Nur die Helligkeit wird angepasst, nicht die Farben; im VR genauso. Fern der
+  Erde zählt das Sonnenlicht am Betrachter (auch im Erdschatten), auf oder nahe dem Mond zusätzlich der Mondboden in
+  Sicht: am Mondtag Tagesbelichtung, in der Mondnacht passt sich das Auge an Erde und erdbeschienenen Boden an (die
+  Erde erscheint dann heller als am Tag).
 - Sonnenfinsternis: im Kernschatten wird der Himmel dunkel, ringsum am Horizont leuchtet die Dämmerung (360 Grad),
   nur helle Sterne und Planeten erscheinen; der Mondschatten ist aus dem Orbit als dunkler Fleck mit weichem Rand zu
   sehen.

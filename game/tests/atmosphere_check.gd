@@ -8,7 +8,8 @@
 # and the daytime Moon (Moon x T + sky, 3 %); Task 8 a star near the threshold (Sun -6 deg), vehicles and structures
 # (a white lit_aerial cube at the pad and 40 km away, 5 %) and the Sun light's colour at a low Sun; the eye adaptation
 # (section 10, otherwise off); Task 9 the eclipse sky over Dallas at totality (section 11); the final review (I1)
-# stars beside the sunlit Earth from 400 km by day, hidden for the adapted eye, and the adapted totality star.
+# stars beside the sunlit Earth from 400 km by day, hidden for the adapted eye, and the adapted totality star; section
+# 12 the eye adaptation away from the Earth (lunar day / night, deep space).
 # Needs a GPU (no --headless): godot --path game --script res://tests/atmosphere_check.gd
 extends SceneTree
 
@@ -210,6 +211,12 @@ func _run() -> void:
 	# magnitude-1 star visible and a magnitude-4 star hidden; the adapted eye 400 km up in the umbra; two hours later
 	# (Dallas out of the eclipse, the penumbra still on the Earth) segments on and off agree within 1 %.
 	await _eclipse_samples()
+
+	# 12. Eye adaptation away from the Earth (Moon-eye fix 2026-10-25): an eye on the Moon at lunar day (gain 1: the
+	# full Sun at the eye), at lunar night with the Earth nearly full (adapted to the Earth in view and the earthshine-lit
+	# ground: gain > 1, at most GAIN_MAX; the Earth term against the Lambert disc at lunar distance), and in deep space
+	# halfway to the Moon, sunlit (gain 1).
+	await _away_from_earth_samples()
 
 	print("atmosphere_check: %d samples, %d failures" % [_samples, _failures])
 	print("atmosphere_check: %s" % ("PASS" if _failures == 0 else "FAIL"))
@@ -590,6 +597,68 @@ func _set_true_sun_and_moon(t: float) -> Vector3:
 	return (_earth_to_gcrf.transposed() * _sun_gcrf).normalized()
 
 
+## Section 12: the Moon's geometric centre (GCRF) for the eye adaptation away from the Earth; ZERO: none.
+var _moon_center_gcrf := Vector3.ZERO
+## A gain "1" away from the Earth: within this.
+const AWAY_GAIN_TOLERANCE := 0.05
+## The Earth in view at lunar distance against the Lambert disc (its cap quadrature, the atmosphere): within this.
+const AWAY_EARTH_TOLERANCE := 0.25
+
+
+## Section 12 (see _run). Synthetic geometry in the Earth-fixed frame: the Moon at MOON_DISTANCE_M, the eye 2 m above
+## its mean sphere at the sub-Earth point; the Sun at 1 AU.
+func _away_from_earth_samples() -> void:
+	var moon_dir := Vector3(cos(0.3), sin(0.3), 0.0)
+	var side := Vector3(-sin(0.3), cos(0.3), 0.0)
+	var moon := moon_dir * MOON_DISTANCE_M
+	var eye := moon - moon_dir * (Atmosphere.MOON_RADIUS_M + 2.0)
+	_moon_center_gcrf = _earth_to_gcrf * moon
+	_atmosphere.eye_adaptation_enabled = true
+	# Lunar day: the Sun 60 deg up at the eye (30 deg from the Earth-Moon line on the Earth's side: no eclipse).
+	var sun_day := (-moon_dir * cos(deg_to_rad(30.0)) + side * sin(deg_to_rad(30.0))).normalized()
+	_atmosphere.snap_adaptation()
+	await _render(eye, -moon_dir, sun_day)
+	_check("adapted, lunar day (Sun 60 deg)", absf(_atmosphere.exposure_gain - 1.0) <= AWAY_GAIN_TOLERANCE,
+			"gain %.4f (needs 1 +- %.2f); %s" % [_atmosphere.exposure_gain, AWAY_GAIN_TOLERANCE, _adaptation_parts()])
+	# Lunar night, the Earth nearly full: the Sun 80 deg below the eye's horizon (10 deg from the Moon's direction seen
+	# from the Earth: no solar eclipse on the Earth, no lunar eclipse).
+	var phase := deg_to_rad(10.0)
+	var sun_night := (moon_dir * cos(phase) + side * sin(phase)).normalized()
+	_atmosphere.snap_adaptation()
+	await _render(eye, -moon_dir, sun_night)
+	var gain := _atmosphere.exposure_gain
+	var reference := _atmosphere.reference_luminance(1.0)
+	_check("adapted, lunar night (Earth nearly full)", gain > 1.0 and gain <= EyeAdaptation.GAIN_MAX
+			and _atmosphere.last_adaptation_moon_cd_m2 > 0.0,
+			"gain %.2f (needs > 1, <= %.0f; unclamped Weber gain %s), Moon in view > 0; %s" % [gain,
+			EyeAdaptation.GAIN_MAX, _num(reference / _atmosphere.adaptation_cd_m2), _adaptation_parts()])
+	# The Earth term at lunar distance: a Lambert sphere's disc-mean plate equivalent at phase angle a is
+	# (2/3) x (sin a + (pi - a) cos a) / pi of the full-Sun plate, x the view factor (R / r)^2.
+	var radius := float(_atmosphere.parameters["bottom_radius_m"])
+	var r := Atmosphere._stretch(eye).length()
+	var lambert := 2.0 / 3.0 * (sin(phase) + (PI - phase) * cos(phase)) / PI * reference * (radius / r) * (radius / r)
+	var ratio := _atmosphere.last_adaptation_up_cd_m2 / lambert
+	_check("adapted, lunar night: Earth in view", absf(ratio - 1.0) <= AWAY_EARTH_TOLERANCE,
+			"%s cd/m^2, Lambert disc %s, ratio %.3f (needs 1 +- %.2f); view factor %s" % [
+			_num(_atmosphere.last_adaptation_up_cd_m2), _num(lambert), ratio, AWAY_EARTH_TOLERANCE,
+			_num((radius / r) * (radius / r))])
+	# Deep space halfway to the Moon, the Sun perpendicular to the Earth-Moon line.
+	_atmosphere.snap_adaptation()
+	await _render(moon * 0.5, -moon_dir, side)
+	_check("adapted, deep space halfway to the Moon", absf(_atmosphere.exposure_gain - 1.0) <= AWAY_GAIN_TOLERANCE,
+			"gain %.4f (needs 1 +- %.2f); %s" % [_atmosphere.exposure_gain, AWAY_GAIN_TOLERANCE, _adaptation_parts()])
+	_atmosphere.eye_adaptation_enabled = false
+	_moon_center_gcrf = Vector3.ZERO
+
+
+## The eye adaptation's parts at the last update, for the section-12 lines.
+func _adaptation_parts() -> String:
+	return "adapted to %s cd/m^2: Sun on a plate %s (visible %.3f), Earth in view %s, Moon in view %s, earthshine %s lux" % [
+			_num(_atmosphere.adaptation_cd_m2), _num(_atmosphere.last_adaptation_down_cd_m2),
+			_atmosphere.last_adaptation_visible_fraction, _num(_atmosphere.last_adaptation_up_cd_m2),
+			_num(_atmosphere.last_adaptation_moon_cd_m2), _num(_atmosphere.last_earthshine_lux)]
+
+
 ## Eye adaptation: the adapted zenith at Sun -3 deg must exceed this scene luminance - ~7 % of the noon zenith at the
 ## day exposure (0.13), well above black through the AgX tone mapper - and the adapted night zenith (Sun -12 deg) stay
 ## below the second, ~1 % of the twilight minimum.
@@ -841,7 +910,11 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, alti
 	if _moon_gcrf != Vector3.ZERO:
 		sun_gcrf = _sun_gcrf  # the eclipse samples: the true Sun (its direction is sun_itrf) and the Moon
 	var visible := 1.0 if is_nan(_tdb) else 1.0 - _core.solar_eclipse_fraction_gcrf(camera_gcrf, _tdb)
-	_atmosphere.update(camera_gcrf, Vector3.ZERO, _earth_to_gcrf, sun_gcrf, 0.0, visible, _moon_gcrf, _tdb)
+	if _moon_center_gcrf != Vector3.ZERO:  # section 12: the Moon's disc in front of the Sun (world.gd: the core's)
+		visible = 1.0 - Atmosphere.occulted_fraction(sun_gcrf - camera_gcrf, Atmosphere.SUN_RADIUS_M,
+				_moon_center_gcrf - camera_gcrf, Atmosphere.MOON_RADIUS_M)
+	_atmosphere.update(camera_gcrf, Vector3.ZERO, _earth_to_gcrf, sun_gcrf, 0.0, visible, _moon_gcrf, _tdb,
+			_moon_center_gcrf)
 	if _force_segments >= 0:
 		RenderingServer.global_shader_parameter_set(&"atmosphere_eclipse_segments", _force_segments)
 	if not is_nan(altitude_override):
