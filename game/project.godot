@@ -120,6 +120,10 @@ atmosphere_exposure_gain={
 "type": "float",
 "value": 1.0
 }
+atmosphere_adaptation_cd_m2={
+"type": "float",
+"value": 0.0
+}
 atmosphere_eclipse_segments={
 "type": "int",
 "value": 0
@@ -175,6 +179,10 @@ atmosphere_sky_radiance_to_luminance={
 atmosphere_sun_illuminance_lux={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
+}
+atmosphere_ground_albedo={
+"type": "float",
+"value": 0.1
 }
 atmosphere_scattering_size={
 "type": "vec4",

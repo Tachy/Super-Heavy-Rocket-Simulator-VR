@@ -11,8 +11,8 @@ shader_type sky;
 
 uniform sampler2D day_texture : source_color, filter_linear_mipmap, repeat_enable;
 uniform bool day_texture_bound = false;
-// Albedo without the day texture: Bruneton's ground albedo of the precomputation [E] (config/atmosphere).
-uniform float ground_albedo = 0.1;
+// Albedo without the day texture: the precomputation's ground albedo, atmosphere_ground_albedo (the tables' parameters,
+// config/atmosphere/earth_optics.toml).
 
 // The model ground seen along v from the camera, lit and attenuated (scene units).
 vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
@@ -35,7 +35,7 @@ vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
 	vec3 point_model = camera_model + v * t;
 	vec3 point_local = point_model / ATM_STRETCH;
 	vec3 normal_local = normalize(point_model * ATM_STRETCH);  // geodetic up = M^T x model radial
-	vec3 albedo = vec3(ground_albedo);
+	vec3 albedo = vec3(atmosphere_ground_albedo);
 	if (day_texture_bound) {
 		// Equirectangular texture (EllipsoidMesh): u = (lon + 180 deg) / 360 deg, v = (90 deg - lat) / 180 deg; ITRF
 		// x = local z, ITRF y = local x, the geodetic latitude from the normal.

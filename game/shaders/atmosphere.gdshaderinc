@@ -59,6 +59,9 @@ global uniform float atmosphere_scene_per_cd_m2;    // a true luminance (cd/m^2)
 // Eye adaptation's exposure gain (game/world/eye_adaptation.gd; 1 = the day exposure), already contained in the two
 // scales above; for what is not lit through the tables (Moon, Sun disc, plumes).
 global uniform float atmosphere_exposure_gain;
+// The luminance the eye is adapted to (cd/m^2 at the Sun's actual distance; EyeAdaptation.adaptation_cd_m2, paced,
+// unclamped); 0 with the eye adaptation off. The star threshold's background floor (stars.gdshader).
+global uniform float atmosphere_adaptation_cd_m2;
 global uniform bool atmosphere_enabled;             // false until the tables are uploaded
 // Solar eclipse in the sky (Atmosphere.update): the number of in-scattering segments while the Moon's penumbra touches
 // the Earth's atmosphere (0: off, the plain lookups), the Moon's apparent position and the Sun's distance from the
@@ -75,6 +78,7 @@ global uniform float atmosphere_mie_phase_g;
 global uniform float atmosphere_sun_angular_radius_rad;
 global uniform vec3 atmosphere_sky_radiance_to_luminance;  // table units -> cd/m^2
 global uniform vec3 atmosphere_sun_illuminance_lux;  // TOA solar illuminance at 1 AU per channel (solar x sun factor)
+global uniform float atmosphere_ground_albedo;      // the tables' Lambertian ground (earth_optics.toml ground_albedo)
 global uniform vec4 atmosphere_scattering_size;     // (nu, mu_s, mu, r) cells of the scattering tables
 global uniform vec4 atmosphere_table_sizes;         // (transmittance mu, transmittance r, irradiance mu_s, irradiance r)
 
@@ -589,7 +593,7 @@ vec3 atm_sky_light(vec3 point_local, vec3 normal_local) {
 // [call] Segments per direction of the sky light's eclipse factor (the sky dome uses atmosphere_eclipse_segments).
 const int ATM_ECLIPSE_LIGHT_SEGMENTS = 4;
 // Weights of the zenith and of each of the four directions at 30 and at 6 deg elevation (cosine bands 50-90, 15-50,
-// 0-15 deg: 0.413, 0.520 / 4, 0.067 / 4); Atmosphere.ECLIPSE_LIGHT_WEIGHTS mirrors them.
+// 0-15 deg: 0.413, 0.520 / 4, 0.067 / 4).
 const vec3 ATM_ECLIPSE_LIGHT_WEIGHTS = vec3(0.4132, 0.1300, 0.0167);
 
 // The eclipse's factor on the sky light at a point (per channel; 1 without an eclipse or where the Sun is fully

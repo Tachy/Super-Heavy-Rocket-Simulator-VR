@@ -33,7 +33,7 @@ const PAD_SITE := "starbase_olp1"
 const CAPE_SITE := "ksc_lc39a"
 ## --spikes: the viewport's measured CPU / GPU render times of this many frames after a spike (they arrive late).
 const SPIKE_FOLLOWUP_FRAMES := 4
-const PHASES :=["descent", "pan_low", "pan_high", "cape"]
+const PHASES := ["descent", "pan_low", "pan_high", "cape"]
 const METRES_PER_DEG := 111319.49
 
 var _args := {}

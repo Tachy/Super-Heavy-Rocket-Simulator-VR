@@ -7,7 +7,8 @@
 # Task 7 adds the stars (hidden at noon, unchanged above the atmosphere, visible in twilight), the Sun disc's reddening
 # and the daytime Moon (Moon x T + sky, 3 %); Task 8 a star near the threshold (Sun -6 deg), vehicles and structures
 # (a white lit_aerial cube at the pad and 40 km away, 5 %) and the Sun light's colour at a low Sun; the eye adaptation
-# (section 10, otherwise off); Task 9 the eclipse sky over Dallas at totality (section 11).
+# (section 10, otherwise off); Task 9 the eclipse sky over Dallas at totality (section 11); the final review (I1)
+# stars beside the sunlit Earth from 400 km by day, hidden for the adapted eye, and the adapted totality star.
 # Needs a GPU (no --headless): godot --path game --script res://tests/atmosphere_check.gd
 extends SceneTree
 
@@ -183,6 +184,13 @@ func _run() -> void:
 	await _adapted_sample("adapted, 400 km by day, limb at 10 km", orbit, _limb_direction(orbit, Vector3(0, 0, 1),
 			10000.0), sun_orbit)
 	_check("adapted 400 km by day: the day exposure", is_equal_approx(_last_gain, 1.0), "gain %.4f" % _last_gain)
+	# Stars beside the sunlit Earth from 400 km by day (final review I1): toward deep space just above the limb (the ray
+	# passes 200 km above the ground, outside the atmosphere: no sky behind the star), the eye adapted to the Sun and
+	# the day-side Earth hides faint stars; with the fixed exposure (no adaptation) the same star shows (control).
+	var space_view := _limb_direction(orbit, Vector3(0, 0, 1), 200000.0)
+	await _space_star_sample("adapted 400 km day, magnitude-4 star", orbit, space_view, sun_orbit, 4.0, true, false)
+	await _space_star_sample("adapted 400 km day, magnitude-0 star", orbit, space_view, sun_orbit, 0.0, true, false)
+	await _space_star_sample("fixed 400 km day, magnitude-4 star", orbit, space_view, sun_orbit, 4.0, false, true)
 	# ~60 s after orbital sunset at 400 km (the Sun 24 deg below the camera's horizontal, the shadow entry at ~20 deg):
 	# the lit limb toward the Sun in view (review I1).
 	_atmosphere.eye_adaptation_enabled = true
@@ -325,6 +333,32 @@ func _surface_sample(label: String, camera_itrf_m: Vector3, point_itrf_m: Vector
 				* t_low + to_low["luminance"]) * _atmosphere.luminance_scale))
 	_compare(label + " [%.0f km]" % ((point_itrf_m - camera_itrf_m).length() / 1000.0), expected, got,
 			SURFACE_TOLERANCE)
+
+
+## A star where the sky behind it is (near) black: the render with the star against the same render without it, with
+## the eye adaptation on (adapted, snapped to the view) or off. Visible: the star adds more than SPACE_STAR_MIN_ADDED
+## (its undimmed look is >= 0.04 x its colour); hidden: it adds less than SPACE_STAR_MAX_ADDED (absolute, scene
+## units - the 2 % relative comparison has no scale on a black sky).
+const SPACE_STAR_MIN_ADDED := 0.01
+const SPACE_STAR_MAX_ADDED := 1.0e-4
+func _space_star_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3,
+		magnitude: float, adapted: bool, visible: bool) -> void:
+	_atmosphere.eye_adaptation_enabled = adapted
+	_atmosphere.snap_adaptation()
+	var sky := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	var stars := StarField.new()
+	stars.build(PackedVector3Array([_earth_to_gcrf * view_itrf]), PackedFloat32Array([magnitude]),
+			PackedFloat32Array([STAR_COLOR_INDEX]))
+	_viewport.add_child(stars)
+	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	stars.queue_free()
+	var adaptation := _atmosphere.adaptation_cd_m2
+	_atmosphere.eye_adaptation_enabled = false
+	var added := (got - sky).dot(LUMINANCE_WEIGHTS)
+	var ok := added > SPACE_STAR_MIN_ADDED if visible else absf(added) < SPACE_STAR_MAX_ADDED
+	_check(label + (" visible" if visible else " hidden"), ok, "sky %s got %s added %s (needs %s %s), adapted to %s cd/m^2"
+			% [_vec(sky), _vec(got), _num(added), ">" if visible else "|.| <",
+			_num(SPACE_STAR_MIN_ADDED if visible else SPACE_STAR_MAX_ADDED), _num(adaptation)])
 
 
 ## Task 7 star cases: HIDDEN (noon: the pixel is the sky, 2 %), UNCHANGED (above the atmosphere: the look before the
@@ -472,6 +506,16 @@ func _eclipse_samples() -> void:
 			ECLIPSE_HORIZON_MIN_RATIO])
 	await _eclipse_star_sample("totality, magnitude-1 star", camera, zenith, sun_itrf, 1.0, true)
 	await _eclipse_star_sample("totality, magnitude-4 star", camera, zenith, sun_itrf, 4.0, false)
+	# The same with the eye adapted to the totality (final review I1: the adaptation floor must not hide them).
+	_atmosphere.eye_adaptation_enabled = true
+	_atmosphere.snap_adaptation()
+	await _eclipse_star_sample("adapted totality, magnitude-1 star", camera, zenith, sun_itrf, 1.0, true)
+	var started_us := Time.get_ticks_usec()
+	_atmosphere.adaptation_luminance(camera, sun_itrf, 0.0, 1.0)
+	print("atmosphere_check:   adapted totality: gain %.2f, adaptation luminance %s cd/m^2 (down %s, Earth in view %s; one evaluation in the eclipse %.2f ms)" % [
+			_atmosphere.exposure_gain, _num(_atmosphere.adaptation_cd_m2), _num(_atmosphere.last_adaptation_down_cd_m2),
+			_num(_atmosphere.last_adaptation_up_cd_m2), (Time.get_ticks_usec() - started_us) / 1000.0])
+	_atmosphere.eye_adaptation_enabled = false
 	# The eye adaptation 400 km up in the umbra (on the shadow axis), the sunlit Earth around the umbra in view: it
 	# adapts to that Earth (review I1), not to the eye's own shadow.
 	var umbra_400 := _umbra_axis_point(t, WGS84_A_M + 400000.0)
@@ -746,10 +790,9 @@ func _compare(label: String, expected: Vector3, got: Vector3, tolerance := TOLER
 			", ".join(ratios), "ok" if ok else "FAIL"])
 
 
-## A ground ray: the sky shader shows the model ground (albedo GROUND_ALBEDO without a day texture) lit by the Sun and
+## A ground ray: the sky shader shows the model ground (the tables' ground_albedo without a day texture) lit by the Sun and
 ## the sky, seen through the atmosphere. CPU: the model-ground hit in the stretched space (float64), then
 ## albedo x (sun + sky lux) / pi x T + in-scattered luminance, all x luminance_scale.
-const GROUND_ALBEDO := 0.1  ## sky.gdshader's ground_albedo default
 func _ground_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3) -> void:
 	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
 	var stretch := Atmosphere.POLAR_STRETCH
@@ -764,7 +807,7 @@ func _ground_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, s
 	var to_point: Dictionary = _core.atmosphere_sky_luminance_to_point(camera_itrf_m, point_itrf, sun_itrf)
 	var lux: Dictionary = _core.atmosphere_illuminance(point_itrf, normal_itrf, sun_itrf)
 	var transmittance: Vector3 = to_point["transmittance"]
-	var light: Vector3 = (lux["sun_lux"] + lux["sky_lux"]) * (GROUND_ALBEDO / PI)
+	var light: Vector3 = (lux["sun_lux"] + lux["sky_lux"]) * (float(_atmosphere.parameters["ground_albedo"]) / PI)
 	var expected: Vector3 = (light * transmittance + to_point["luminance"]) * _atmosphere.luminance_scale
 	_compare(label + " [ground, %.0f km]" % (t / 1000.0), expected, got)
 

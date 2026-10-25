@@ -9,8 +9,10 @@
 // smaller of the two thresholds is taken here [E] (the branches cross near 1700 nL, 7 % apart at 1500 nL: continuous,
 // no visible step). Checks: B = 0 gives a limiting magnitude 7.9, a dark sky (54 nL, 22 mag/arcsec^2) 6.6, the noon sky
 // (~5000 cd/m^2) about -4 (Venus is a daytime object, magnitude-0 stars are not).
-// Not modelled (an average observer): age, experience, seeing, the eye's adaptation time, the Moon's or light
-// pollution's sky (the sky luminance here is the atmosphere model's sunlit sky only).
+// Not modelled (an average observer): age, experience, seeing, the Moon's or light pollution's sky. The background
+// passed in (stars.gdshader) is the larger of the atmosphere model's sunlit sky behind the star and the luminance the
+// eye is adapted to (EyeAdaptation, paced with its adaptation times): the eye adapted to a sunlit Earth or the Sun in
+// view does not see faint stars against black space.
 
 const float SCHAEFER_NIGHT_C1_FC = 1.5849e-10;   // 10^-9.80 foot-candles
 const float SCHAEFER_NIGHT_C2_PER_NL = 1.2589e-2;  // 10^-1.90 per nanolambert

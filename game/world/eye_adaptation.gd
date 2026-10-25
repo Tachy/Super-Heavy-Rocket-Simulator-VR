@@ -5,7 +5,8 @@ extends RefCounted
 ## physical luminance of the scene (the atmosphere's luminance scale, the Sun light, Moon, Sun disc) - no white
 ## balance, no colour or contrast change. One rule for emitters without a physical luminance (the plumes, the city
 ## lights, the stars' own brightness): display-referred, not multiplied by the gain (review M2/M3) - their on-screen
-## brightness is a display call; the stars' visibility still reads the true sky luminance. Fidelity flag:
+## brightness is a display call; the stars' visibility reads the true sky luminance behind the star and, as its floor,
+## the luminance the eye is adapted to (adaptation_cd_m2, global atmosphere_adaptation_cd_m2). Fidelity flag:
 ## Atmosphere.eye_adaptation_enabled (on in the game; off in atmosphere_check.gd, whose samples keep the fixed day
 ## exposure).
 ##
@@ -35,6 +36,29 @@ const DARK_TIME_CONSTANT_S := 110.0
 ## The current gain (1 = the fixed day exposure).
 var gain := 1.0
 var _snap_pending := true
+## [call] Floor of the paced adaptation luminance (cd/m^2), for its log-space pacing only: far below a dark night sky
+## (22 mag/arcsec^2 ~ 1.7e-4 cd/m^2), so the star threshold there is the sky's (Schaefer: +0.06 mag at the floor).
+const LUMINANCE_FLOOR_CD_M2 := 1.0e-6
+## The luminance the eye is adapted to (cd/m^2), paced like the gain but unclamped (final review I1): the star
+## threshold's background floor. The gain's clamp to [1, GAIN_MAX] must not feed back here (L_ref / 25 ~ 1600 cd/m^2
+## would hide every star at night).
+var adaptation_cd_m2 := LUMINANCE_FLOOR_CD_M2
+var _luminance_snap_pending := true
+
+
+## The next step of adaptation_cd_m2 toward the target luminance over dt_s: exponential in log luminance, the light
+## time constant when the scene got brighter, the dark one when it got darker (the same rule as advance); a pending
+## snap jumps to the target.
+func advance_luminance(target_cd_m2: float, dt_s: float) -> float:
+	var target := maxf(target_cd_m2, LUMINANCE_FLOOR_CD_M2)
+	if _luminance_snap_pending:
+		adaptation_cd_m2 = target
+		_luminance_snap_pending = false
+		return adaptation_cd_m2
+	var tau := LIGHT_TIME_CONSTANT_S if target > adaptation_cd_m2 else DARK_TIME_CONSTANT_S
+	var weight := 1.0 - exp(-maxf(dt_s, 0.0) / tau)
+	adaptation_cd_m2 = exp(lerpf(log(adaptation_cd_m2), log(target), weight))
+	return adaptation_cd_m2
 
 
 ## The fully adapted gain for the adaptation luminance and the reference (both cd/m^2).
@@ -60,3 +84,4 @@ func advance(target: float, dt_s: float) -> float:
 ## The next advance jumps to its target (a new view: the viewer is taken as adapted to it).
 func snap() -> void:
 	_snap_pending = true
+	_luminance_snap_pending = true

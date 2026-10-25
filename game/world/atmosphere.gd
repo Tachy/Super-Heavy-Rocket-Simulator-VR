@@ -38,8 +38,6 @@ const UMBRA_ELEVATIONS_DEG := [90.0, 30.0, 11.0, 6.0, 3.0, 1.0]
 const UMBRA_BAND_EDGES_DEG := [50.0, 15.0, 8.0, 4.5, 2.0, 0.0]
 ## [call] Segments per direction (converged: 8 vs 16 within 9 %).
 const UMBRA_SEGMENTS := 8
-## [E] The ground's albedo seen from the umbra air: config/atmosphere/earth_optics.toml ground_albedo (the tables').
-const UMBRA_GROUND_ALBEDO := 0.1
 ## [call] The eye adaptation's limb samples graze the Earth this high (m) above the model ground.
 const LIMB_SAMPLE_HEIGHT_M := 10000.0
 
@@ -72,6 +70,9 @@ var eye_adaptation_enabled := true
 var exposure_gain := 1.0
 ## A true luminance (cd/m^2, at the Sun's actual distance) -> scene value, incl. the exposure gain.
 var scene_per_cd_m2 := 0.0
+## The luminance the eye is adapted to this frame (cd/m^2, EyeAdaptation.adaptation_cd_m2; 0 with the adaptation off):
+## the global atmosphere_adaptation_cd_m2, the star threshold's background floor.
+var adaptation_cd_m2 := 0.0
 ## Eclipse sky segments this frame (0: no penumbra on the Earth).
 var eclipse_segments := 0
 var _eye := EyeAdaptation.new()
@@ -129,6 +130,18 @@ func wait_until_loaded() -> bool:
 	return ready
 
 
+## Waits for the worker tasks still running (the table load, the umbra light) before the owner goes away (review M2:
+## they write into this object and use the core). Quitting during a first-run precomputation blocks until it ends.
+func shutdown() -> void:
+	if loading:
+		WorkerThreadPool.wait_for_task_completion(_task_id)
+		loading = false
+		_result = {}
+	if _umbra_task_id >= 0:
+		WorkerThreadPool.wait_for_task_completion(_umbra_task_id)
+		_umbra_task_id = -1
+
+
 ## Per frame: the camera, the Earth's centre and orientation (fixed -> GCRF) and the apparent Sun position (GCRF, as
 ## seen from the Earth's centre), all float64. The camera is differenced against the Earth's centre here, in float64.
 ## Eye adaptation (eye_adaptation_enabled): adaptation_dt_s is the time the viewer had to adapt since the last frame
@@ -142,7 +155,6 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 		moon_apparent_gcrf_m := Vector3.ZERO, tdb_s := NAN) -> void:
 	if not poll():
 		return
-	_tdb_s = tdb_s
 	_fixed_to_gcrf = earth_fixed_to_gcrf
 	_earth_center_gcrf_m = earth_center_gcrf_m
 	var gcrf_to_fixed := earth_fixed_to_gcrf.transposed()
@@ -155,11 +167,20 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	var d_au := sun_from_earth.length() / ASTRONOMICAL_UNIT_M
 	sun_direction_local = Frames.to_render(gcrf_to_fixed * sun_from_earth).normalized()
 	var sun_fixed := (gcrf_to_fixed * sun_from_earth).normalized()
+	# The Moon's shadow on other points than the camera only while its penumbra touches the atmosphere (review M1:
+	# otherwise every _visible_at is 1 and its CSPICE calls are skipped).
+	var penumbra := false
+	if moon_apparent_gcrf_m != Vector3.ZERO:
+		penumbra = penumbra_touches(sun_from_earth, moon_apparent_gcrf_m - earth_center_gcrf_m,
+				float(parameters["top_radius_m"]))
+	_tdb_s = tdb_s if penumbra else NAN
 	exposure_gain = 1.0
+	adaptation_cd_m2 = 0.0
 	if eye_adaptation_enabled:
-		var target := EyeAdaptation.target_gain(adaptation_luminance(camera_fixed, sun_fixed, sun_visible_fraction, d_au),
-				reference_luminance(d_au))
-		exposure_gain = _eye.advance(target, adaptation_dt_s)
+		var luminance := adaptation_luminance(camera_fixed, sun_fixed, sun_visible_fraction, d_au)
+		exposure_gain = _eye.advance(EyeAdaptation.target_gain(luminance, reference_luminance(d_au)), adaptation_dt_s)
+		adaptation_cd_m2 = _eye.advance_luminance(luminance, adaptation_dt_s)
+	RenderingServer.global_shader_parameter_set(&"atmosphere_adaptation_cd_m2", adaptation_cd_m2)
 	var base := DAY_EXPOSURE * PI / float(parameters["toa_solar_illuminance_lux"])
 	luminance_scale = base * exposure_gain / (d_au * d_au)
 	scene_per_cd_m2 = base * exposure_gain
@@ -168,13 +189,17 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	eclipse_segments = 0
 	if moon_apparent_gcrf_m != Vector3.ZERO:
 		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m
-		if penumbra_touches(sun_from_earth, moon_from_earth, float(parameters["top_radius_m"])):
+		if penumbra:
 			eclipse_segments = ECLIPSE_SEGMENTS
 			_update_umbra_light(gcrf_to_fixed * sun_from_earth, gcrf_to_fixed * moon_from_earth, sun_fixed)
 		RenderingServer.global_shader_parameter_set(&"atmosphere_moon_position",
 				Frames.to_render(gcrf_to_fixed * moon_from_earth))
 	RenderingServer.global_shader_parameter_set(&"atmosphere_sun_distance_m", sun_from_earth.length())
 	RenderingServer.global_shader_parameter_set(&"atmosphere_eclipse_segments", eclipse_segments)
+	if eclipse_segments == 0 and _umbra_task_id >= 0:
+		# The eclipse ended with a task in flight: its fluence belongs to another epoch, never uploaded (review M5).
+		WorkerThreadPool.wait_for_task_completion(_umbra_task_id)
+		_umbra_task_id = -1
 	if eclipse_segments == 0 and _umbra_tdb_s != -INF:
 		_umbra_tdb_s = -INF
 		for k in range(3):
@@ -253,8 +278,47 @@ func _view_luminance(eye_itrf_m: Vector3, eye: Vector3, v: Vector3, radius: floa
 		var seen: Vector3 = lit / PI * t + to_point["luminance"]
 		return seen.dot(LUMINANCE_WEIGHTS) * _visible_at(hit)
 	var view := _unstretch(v).normalized()
+	if not is_nan(_tdb_s):
+		# The Moon's penumbra on the atmosphere: the sky along the ray segmented and weighted by the Sun's visible
+		# fraction (as _eclipsed_sky_fluence). One factor at the ray's closest approach - behind a ground eye looking
+		# up - let the uneclipsed horizon sky beyond the umbra set the eye in totality at ~56 cd/m^2 (the real
+		# totality sky: ~1-16), which hid the magnitude-1 stars once the stars read the adaptation (final review I1).
+		var exit := _top_exit_distance(eye_itrf_m, view)
+		if exit > 0.0:
+			return _eclipsed_in_scatter(eye_itrf_m, view, exit, false, sun_itrf, []).dot(LUMINANCE_WEIGHTS)
 	var sky: Vector3 = _core.atmosphere_sky_luminance(eye_itrf_m, view, sun_itrf)["luminance"]
 	return sky.dot(LUMINANCE_WEIGHTS) * _visible_at(_unstretch(eye - v * along))  # the ray's closest approach
+
+
+## Distance (m) along the Earth-fixed unit ray from the point to where it leaves the top of the atmosphere (the
+## sphere of _eclipsed_sky_fluence: the model's top height above the WGS84 semi-major axis); 0 if it never crosses it.
+func _top_exit_distance(point_itrf_m: Vector3, v: Vector3) -> float:
+	var top := float(parameters["top_radius_m"]) - float(parameters["bottom_radius_m"]) + WGS84_A_M
+	var along := point_itrf_m.dot(v)
+	var discriminant := along * along - (point_itrf_m.length_squared() - top * top)
+	return maxf(-along + sqrt(discriminant), 0.0) if discriminant >= 0.0 else 0.0
+
+
+## The in-scattered sky along the ray from the point (Earth-fixed unit v) up to d_end (cd/m^2 per channel at 1 AU) with
+## the Moon's shadow: UMBRA_SEGMENTS segments at d_end (i/n)^2, each segment's in-scatter (differences of
+## StarsimCore.atmosphere_sky_luminance_to_point; the last one to the sky's end unless the ray ends on the ground)
+## weighted by the Sun's visible fraction at its midpoint. instant: see _visible_at.
+func _eclipsed_in_scatter(point_itrf_m: Vector3, v: Vector3, d_end: float, ends_on_ground: bool, sun_itrf: Vector3,
+		instant: Array) -> Vector3:
+	var previous := Vector3.ZERO
+	var eclipsed := Vector3.ZERO
+	for i in range(1, UMBRA_SEGMENTS + 1):
+		var f := float(i) / UMBRA_SEGMENTS
+		var cumulative: Vector3
+		if i < UMBRA_SEGMENTS or ends_on_ground:
+			cumulative = _core.atmosphere_sky_luminance_to_point(point_itrf_m, point_itrf_m + v * (d_end * f * f),
+					sun_itrf)["luminance"]
+		else:
+			cumulative = _core.atmosphere_sky_luminance(point_itrf_m, v, sun_itrf)["luminance"]
+		var f_mid := (float(i) - 0.5) / UMBRA_SEGMENTS
+		eclipsed += (cumulative - previous) * _visible_at(point_itrf_m + v * (d_end * f_mid * f_mid), instant)
+		previous = cumulative
+	return eclipsed
 
 
 ## The Sun's unocculted fraction (Moon) at an Earth-fixed point at this update's instant (1 without one); instant:
@@ -328,8 +392,8 @@ func _upload_umbra_light() -> void:
 
 ## The eclipsed sky's fluence at an Earth-fixed point (cd/m^2 x sr per channel at 1 AU; see _update_umbra_light);
 ## ground_radius_m: the Earth's radius under the point. Points above the ground also take the lower hemisphere (the
-## mirrored rings): the air down to the ground and the ground itself (UMBRA_GROUND_ALBEDO, lit by the Sun and the sky,
-## x its visible fraction).
+## mirrored rings): the air down to the ground and the ground itself (the tables' ground_albedo, lit by the Sun and the
+## sky, x its visible fraction).
 func _eclipsed_sky_fluence(point_itrf_m: Vector3, up: Vector3, sun_itrf: Vector3, ground_radius_m: float,
 		instant: Array) -> Vector3:
 	var east := up.cross(Vector3(0, 0, 1) if absf(up.z) < 0.9 else Vector3(1, 0, 0)).normalized()
@@ -356,25 +420,13 @@ func _eclipsed_sky_fluence(point_itrf_m: Vector3, up: Vector3, sun_itrf: Vector3
 			var hits_ground := along < 0.0 and ground_discriminant >= 0.0
 			if hits_ground:
 				d_end = -along - sqrt(ground_discriminant)
-			var previous := Vector3.ZERO
-			var eclipsed := Vector3.ZERO
-			for i in range(1, UMBRA_SEGMENTS + 1):
-				var f := float(i) / UMBRA_SEGMENTS
-				var cumulative: Vector3
-				if i < UMBRA_SEGMENTS or hits_ground:
-					cumulative = _core.atmosphere_sky_luminance_to_point(point_itrf_m, point_itrf_m + v * (d_end * f * f),
-							sun_itrf)["luminance"]
-				else:
-					cumulative = _core.atmosphere_sky_luminance(point_itrf_m, v, sun_itrf)["luminance"]
-				var f_mid := (float(i) - 0.5) / UMBRA_SEGMENTS
-				eclipsed += (cumulative - previous) * _visible_at(point_itrf_m + v * (d_end * f_mid * f_mid), instant)
-				previous = cumulative
+			var eclipsed := _eclipsed_in_scatter(point_itrf_m, v, d_end, hits_ground, sun_itrf, instant)
 			if hits_ground:
 				var hit := point_itrf_m + v * d_end
 				var lux: Dictionary = _core.atmosphere_illuminance(hit, _geodetic_up(hit), sun_itrf)
 				var t: Vector3 = _core.atmosphere_sky_luminance_to_point(point_itrf_m, hit, sun_itrf)["transmittance"]
 				var lit: Vector3 = lux["sun_lux"] + lux["sky_lux"]
-				eclipsed += lit * (UMBRA_GROUND_ALBEDO / PI) * t * _visible_at(hit, instant)
+				eclipsed += lit * (float(parameters["ground_albedo"]) / PI) * t * _visible_at(hit, instant)
 			fluence += eclipsed * solid_angle
 	return fluence
 
@@ -514,6 +566,7 @@ func _upload(result: Dictionary) -> void:
 	var solar: Vector3 = parameters["solar_illuminance_rgb"]
 	var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
 	rs.global_shader_parameter_set(&"atmosphere_sun_illuminance_lux", solar * sun_factor)
+	rs.global_shader_parameter_set(&"atmosphere_ground_albedo", float(parameters["ground_albedo"]))
 	# A true luminance (cd/m^2, at the Sun's actual distance) -> scene value: luminance_scale without the 1 / d_AU^2
 	# (that factor converts the tables' 1 AU values); the star threshold reads the sky's true luminance back with it.
 	# Without the exposure gain until the first update sets both.

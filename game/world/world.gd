@@ -89,6 +89,11 @@ var _camera_serial := 0  ## serial the camera distance was last fitted to
 var _last_world_tdb_s := NAN  ## the instant of the previous update_world (eye adaptation's time step)
 
 
+## The atmosphere's worker tasks write into it and use the core: finished before both go away (review M2).
+func _exit_tree() -> void:
+	atmosphere.shutdown()
+
+
 func _process(delta: float) -> void:
 	if not core.is_open():
 		return
