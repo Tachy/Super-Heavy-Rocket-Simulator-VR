@@ -7,9 +7,14 @@ extends Node3D
 ## their ice shares with the blend, the noise textures and tables, the optics numbers, the camera's float64-derived
 ## height and noise coordinates, and the quality preset. The world adds `effect` to its Compositor.
 ##
-## Field textures: the GPU form of a snapshot (StarsimCore.weather_load_snapshot -> cloud_texels RGBA8 and
-## cloud_ice_texels R8, columns x rows x 32 layers, no mipmaps; CloudFieldTexture uploads them in chunks of layers over
-## frames). Only two snapshots are resident (a 0.25-deg one is 133 + 33 MB).
+## Field textures: the GPU form of a snapshot (StarsimCore.weather_load_snapshot -> cloud_texels RGBA8,
+## cloud_ice_texels R8 and cloud_column_texels RG8 (the grid-mean column and its cover above each layer centre: the
+## light under the clouds, Task 9), columns x rows x 32 layers, no mipmaps; CloudFieldTexture uploads them in chunks of
+## layers over frames). Only two snapshots are resident (a 0.25-deg one is 133 + 33 + 66 MB).
+## Light on the ground (Task 9): the cloud shadow maps (shadow_effect, CloudShadowEffect before the opaque pass) and
+## their frame (`cloud_shadow_*` globals, set here every frame: anchors near the ground under the camera, re-anchored
+## only when the camera moved SHADOW_*_REANCHOR_M away - the maps are Earth-fixed in between, no swimming), the slab
+## transmittance table of the Sun's diffuse light (`cloud_slab_transmittance`).
 ## No pop on a pair or source change (anti-goal; controller ruling 2026-10-25): the visible state is
 ## mix(slot 0, slot 1, w1). When WeatherService announces a pair the slots do not hold, the weight first moves (FADE_S per
 ## unit weight) onto one slot - the wanted one if a slot holds a wanted snapshot - then the missing target snapshot is
@@ -36,6 +41,16 @@ const POLAR_STRETCH := 1.0 / (1.0 - 1.0 / 298.257223563)
 const LAYERS := 32
 ## The Monte Carlo transfer table of the multiply scattered light (core cloud_transfer_table.hpp), in config/.
 const TRANSFER_TABLE := "clouds/cloud_transfer_table.bin"
+## [E] Cloud shadow maps (shaders/cloud_light.gdshaderinc): half extents (the near map 512 texels of 62.5 m: the
+## shapes' edges 25-200 m), re-anchoring distances (the camera stays well inside each map) and the distance rule's fades
+## (horizontal distance of the receiver from the camera): near -> far, far -> the column.
+const SHADOW_MAP_SIZE := 512
+const SHADOW_NEAR_HALF_M := 16000.0
+const SHADOW_FAR_HALF_M := 200000.0
+const SHADOW_NEAR_REANCHOR_M := 4000.0
+const SHADOW_FAR_REANCHOR_M := 50000.0
+const SHADOW_NEAR_FADE_M := Vector2(9000.0, 11000.0)
+const SHADOW_FAR_FADE_M := Vector2(120000.0, 140000.0)
 
 enum Quality { DESKTOP, VR }
 ## The multiple-scattering model (fidelity flag, shader global cloud_scattering_model): the Monte Carlo transfer table
@@ -69,6 +84,7 @@ var last_upload_ms := 0.0  ## the longest frame step of the last field upload (m
 var field_texture_bytes := 0  ## both resident snapshots (field + ice share texels)
 var pinned := false  ## show_now was used: set_target is ignored
 var effect := CloudEffect.new()  ## the cloud pass (the world's Compositor)
+var shadow_effect := CloudShadowEffect.new(SHADOW_MAP_SIZE)  ## the cloud shadow maps (the world's Compositor)
 
 var _core: StarsimCore
 var _quad := MeshInstance3D.new()
@@ -87,6 +103,10 @@ var _target_blend := 0.0
 var _upload := {}  ## the running upload: {slot, id, size, field, ice}
 var _empty_field: ImageTexture3D
 var _empty_ice: ImageTexture3D
+var _slab_transmittance: ImageTexture
+## Earth-fixed anchors of the shadow maps (render axes, float64; NAN: none yet).
+var _near_anchor := Vector3(NAN, NAN, NAN)
+var _far_anchor := Vector3(NAN, NAN, NAN)
 
 
 func _init() -> void:
@@ -119,7 +139,13 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_extinction_step_per_m", float(optics["extinction_step_per_m"]))
 	ShaderGlobals.set_value(&"cloud_depth_code", Vector2(optics["depth_code_min"], optics["depth_code_max"]))
 	ShaderGlobals.set_value(&"cloud_enabled", false)
+	ShaderGlobals.set_value(&"cloud_shadow_valid", false)
 	ShaderGlobals.set_value(&"cloud_debug_output", 0)
+	ShaderGlobals.set_value(&"cloud_shadow_near", shadow_effect.near_texture)
+	ShaderGlobals.set_value(&"cloud_shadow_far", shadow_effect.far_texture)
+	ShaderGlobals.set_value(&"cloud_shadow_extent", Vector4(SHADOW_NEAR_HALF_M, SHADOW_FAR_HALF_M,
+			SHADOW_NEAR_FADE_M.x, SHADOW_NEAR_FADE_M.y))
+	ShaderGlobals.set_value(&"cloud_shadow_far_fade", SHADOW_FAR_FADE_M)
 	_apply_quality()
 	_apply_scattering_model()
 	var table_file := Paths.config_dir().path_join(TRANSFER_TABLE)
@@ -158,6 +184,7 @@ func _cancel_upload() -> void:
 	var data: Dictionary = _upload["data"]
 	data["field"].release()
 	data["ice"].release()
+	data["column"].release()
 	_upload = {}
 
 
@@ -181,6 +208,7 @@ func show_now(before: Dictionary, after: Dictionary, blend: float) -> void:
 		if _slots[i]["field"] != null:
 			_slots[i]["field"].step(true)
 			_slots[i]["ice"].step(true)
+			_slots[i]["column"].step(true)
 	for old: Dictionary in olds:
 		_release_slot(old)
 	_w1 = clampf(blend, 0.0, 1.0)
@@ -216,14 +244,41 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	ShaderGlobals.set_value(&"cloud_ice_origin", _shape_origin(camera_render, height, ICE_TILE_V_M))
 	ShaderGlobals.set_value(&"cloud_detail_origin", _wrap(camera_render / DETAIL_TILE_M))
 	var visible_weight := (1.0 - _w1) * float(_slots[0]["id"] != "") + _w1 * float(_slots[1]["id"] != "")
-	ShaderGlobals.set_value(&"cloud_enabled", noise_ready and visible_weight > 0.0
-			and camera_fixed_m.length() < RAYMARCH_MAX_DISTANCE_M)
+	var enabled := noise_ready and visible_weight > 0.0 and camera_fixed_m.length() < RAYMARCH_MAX_DISTANCE_M
+	ShaderGlobals.set_value(&"cloud_enabled", enabled)
+	_update_shadow_frame(camera_render, height)
+	ShaderGlobals.set_value(&"cloud_shadow_valid", enabled and shadow_effect.bind_textures() and shadow_effect.ran)
 
 
 ## The ids of the resident slots and the weight of slot 1 (tests).
 func state() -> Dictionary:
 	return {"slots": [_slots[0]["id"], _slots[1]["id"]], "w1": _w1, "tracking": _tracking,
 			"uploading": not _upload.is_empty()}
+
+
+## The shadow maps' frame (cloud_light.gdshaderinc): axes perpendicular to the Sun, anchors on the ground under the
+## camera, kept while the camera stays within the re-anchoring distance (the maps stay Earth-fixed: no swimming).
+func _update_shadow_frame(camera_render: Vector3, height: float) -> void:
+	var value: Variant = ShaderGlobals.value(&"atmosphere_sun_direction")
+	if not value is Vector3 or (value as Vector3).length_squared() < 0.5:
+		return
+	var sun := (value as Vector3).normalized()
+	var up := Vector3(camera_render.x, camera_render.y * POLAR_STRETCH * POLAR_STRETCH, camera_render.z).normalized()
+	var ground := camera_render - up * height
+	if is_nan(_near_anchor.x) or _horizontal(ground - _near_anchor, up) > SHADOW_NEAR_REANCHOR_M:
+		_near_anchor = ground
+	if is_nan(_far_anchor.x) or _horizontal(ground - _far_anchor, up) > SHADOW_FAR_REANCHOR_M:
+		_far_anchor = ground
+	var e1 := sun.cross(Vector3.UP if absf(sun.y) < 0.9 else Vector3.RIGHT).normalized()
+	ShaderGlobals.set_value(&"cloud_shadow_sun", sun)
+	ShaderGlobals.set_value(&"cloud_shadow_e1", e1)
+	ShaderGlobals.set_value(&"cloud_shadow_e2", sun.cross(e1).normalized())
+	ShaderGlobals.set_value(&"cloud_shadow_near_anchor", _near_anchor - camera_render)
+	ShaderGlobals.set_value(&"cloud_shadow_far_anchor", _far_anchor - camera_render)
+
+
+static func _horizontal(v: Vector3, up: Vector3) -> float:
+	return (v - up * v.dot(up)).length()
 
 
 ## Shape coordinates of the camera for the vertical tile tile_v_m (clouds.gdshaderinc cloud_shape_coordinates_for).
@@ -313,7 +368,7 @@ static func _snapshot_id(snapshot: Dictionary) -> String:
 
 
 func _empty_slot() -> Dictionary:
-	return {"id": "", "size": Vector3(2, 2, LAYERS), "field": null, "ice": null}
+	return {"id": "", "size": Vector3(2, 2, LAYERS), "field": null, "ice": null, "column": null}
 
 
 ## A slot for the snapshot with its volumes created (not yet uploaded); the empty slot for none.
@@ -327,9 +382,14 @@ func _new_slot(snapshot: Dictionary) -> Dictionary:
 	if ice.size() != columns * rows * LAYERS:
 		ice = PackedByteArray()
 		ice.resize(columns * rows * LAYERS)  # no ice share given: liquid shapes
+	var column: PackedByteArray = snapshot.get("cloud_column_texels", PackedByteArray())
+	if column.size() != columns * rows * LAYERS * 2:
+		column = PackedByteArray()
+		column.resize(columns * rows * LAYERS * 2)  # none given: no light taken under the clouds
 	return {"id": id, "size": Vector3(columns, rows, LAYERS),
 		"field": CloudFieldTexture.create(snapshot["cloud_texels"], columns, rows, 4),
-		"ice": CloudFieldTexture.create(ice, columns, rows, 1)}
+		"ice": CloudFieldTexture.create(ice, columns, rows, 1),
+		"column": CloudFieldTexture.create(column, columns, rows, 2)}
 
 
 ## Frees a slot's volumes unless a resident slot still shows them (show_now shares one upload for a snapshot twice).
@@ -338,6 +398,7 @@ func _release_slot(slot: Dictionary) -> void:
 	if field != null and field != _slots[0]["field"] and field != _slots[1]["field"]:
 		slot["field"].release()
 		slot["ice"].release()
+		slot["column"].release()
 
 
 func _start_upload(slot: int, snapshot: Dictionary) -> void:
@@ -358,13 +419,16 @@ func _poll_upload() -> void:
 	var data: Dictionary = _upload["data"]
 	var field: CloudFieldTexture = data["field"]
 	var ice: CloudFieldTexture = data["ice"]
+	var column: CloudFieldTexture = data["column"]
 	if not field.done:
 		field.step()
 	elif not ice.done:
 		ice.step()
-	if not (field.done and ice.done):
+	elif not column.done:
+		column.step()
+	if not (field.done and ice.done and column.done):
 		return
-	last_upload_ms = maxf(field.max_step_ms, ice.max_step_ms)
+	last_upload_ms = maxf(field.max_step_ms, maxf(ice.max_step_ms, column.max_step_ms))
 	var slot: int = _upload["slot"]
 	if (_w1 if slot == 1 else 1.0 - _w1) > 0.0:
 		_cancel_upload()  # the slot gained weight meanwhile: replacing it would pop (the state machine starts anew)
@@ -388,8 +452,8 @@ static func _zero_texture(format: Image.Format, texel_bytes: int) -> ImageTextur
 
 
 func _bind_slots() -> void:
-	var names := [[&"cloud_field_before", &"cloud_ice_before", &"cloud_field_before_size"],
-		[&"cloud_field_after", &"cloud_ice_after", &"cloud_field_after_size"]]
+	var names := [[&"cloud_field_before", &"cloud_ice_before", &"cloud_field_before_size", &"cloud_column_before"],
+		[&"cloud_field_after", &"cloud_ice_after", &"cloud_field_after_size", &"cloud_column_after"]]
 	field_texture_bytes = 0
 	for s in range(2):
 		var slot: Dictionary = _slots[s]
@@ -397,8 +461,9 @@ func _bind_slots() -> void:
 		ShaderGlobals.set_value(names[s][0], slot["field"].texture if has else _empty_field)
 		ShaderGlobals.set_value(names[s][1], slot["ice"].texture if has else _empty_ice)
 		ShaderGlobals.set_value(names[s][2], slot["size"])
+		ShaderGlobals.set_value(names[s][3], slot["column"].texture if has else _empty_ice)
 		if has and not (s == 1 and slot["field"] == _slots[0]["field"]):
-			field_texture_bytes += slot["field"].bytes + slot["ice"].bytes
+			field_texture_bytes += slot["field"].bytes + slot["ice"].bytes + slot["column"].bytes
 
 
 func _upload_noise() -> void:
@@ -449,6 +514,13 @@ func _upload_transfer() -> void:
 	ShaderGlobals.set_value(&"cloud_transfer_nodes", Vector4(nodes.x, nodes.y, nodes.z, nodes.w))
 	ShaderGlobals.set_value(&"cloud_transfer_depth_map", table["depth_map"])
 	ShaderGlobals.set_value(&"cloud_transfer_theta_map", table["theta_map"])
+	# The slab's total transmittance (the Sun's diffuse light under the clouds).
+	var lut_size: Vector2i = table["transmittance_lut_size"]
+	var lut: PackedFloat32Array = table["transmittance_lut"]
+	_slab_transmittance = ImageTexture.create_from_image(Image.create_from_data(lut_size.x, lut_size.y, false,
+			Image.FORMAT_RF, lut.to_byte_array()))
+	ShaderGlobals.set_value(&"cloud_slab_transmittance", _slab_transmittance)
+	ShaderGlobals.set_value(&"cloud_slab_transmittance_map", table["transmittance_lut_map"])
 	transfer_ready = true
 	_apply_scattering_model()
 

@@ -70,7 +70,11 @@ vehicles still fly through `Us76Atmosphere`).
   vehicle (vehicle focus), else the camera (`Atmosphere.sun_light_at`, `world.gd::_update_sun_light`). Near the Moon
   the visible fraction comes from `Atmosphere.moon_visible_fraction` (shared with the eye adaptation): within 2 m of
   the lunar mean sphere or below it the Moon's occultation is taken on the point's own ground sphere (GPU check:
-  1551 m below the mean radius, Sun 60 deg up: light = the open sky's).
+  1551 m below the mean radius, Sun 60 deg up: light = the open sky's). Clouds (Task 9, `weather-clouds.md` "Light"):
+  x the direct beam's cloud transmittance at that point (`Atmosphere.cloud_light_at`, the Moon's light likewise), and
+  `Environment.ambient_light_energy` = the diffuse light under the clouds over the clear sky's there
+  (`Atmosphere.cloud_ambient_factor`; exactly 1 with weather off). Earth surfaces (`terrain_earth.gdshader`): the Sun
+  through the cloud shadow maps, the Sun's light diffused through the column and the sky x its diffuse transmittance.
 - **Exposure.** One exposure: scene value = luminance x `DAY_EXPOSURE` (1.5) x pi / E_v,TOA / d_AU^2 - a white
   Lambertian under the TOA Sun renders 1.5 in every material.
 
@@ -108,7 +112,8 @@ vehicles still fly through `Us76Atmosphere`).
 
 ## Open points and known limits
 
-- No clouds, weather-dependent aerosols, airglow; one aerosol set for the whole Earth; one Sun light (other bodies in
+- Clouds only in the true-space Earth (terrain) and the vehicles' light (`weather-clouds.md`); no weather-dependent
+  aerosols, no airglow; one aerosol set for the whole Earth; one Sun light (other bodies in
   view, e.g. the booster far below the ship or the tower seen from orbit, get the followed point's light); the totality
   approximation; night vision's limits (above); the 256 x 128 Earth mesh in scaled space sits up to ~0.6 km below the
   ellipsoid (-2 % in its aerial perspective).

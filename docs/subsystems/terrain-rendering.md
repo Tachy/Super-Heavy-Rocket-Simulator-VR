@@ -72,6 +72,11 @@ on top; it replaced the interim `GroundPatch`.
   distance; lower down only after 10 deg [E]. Bodies without water (the Moon) build no water mask. Geometry stays on
   the geoid (a mission's sea state rescales the wave set: `docs/subsystems/sea-state.md`). The Sun light on the sea,
   the glint and the reflected sky are the transmitted ones, so the far sea fades into the horizon sky.
+- **Clouds** (Task 9, `weather-clouds.md` "Light"): `terrain_earth.gdshader` includes `clouds.gdshaderinc` and
+  `cloud_light.gdshaderinc` inside `CLOUD_LIGHT_BEGIN` / `_END` blocks (active only while `cloud_enabled`): the Sun
+  through the cloud shadow maps, the Sun's diffuse light and the sky light through the column, the sea's reflected sky
+  under the deck. Its ~15 extra global samplers per node need `rendering_device/d3d12/max_resource_descriptors`
+  262144 in project.godot.
 - **Moon**: the same quadtree on the lunar terrain (LDEM_16 everywhere, the 20 m site tiles), albedo from the global
   colour map, `terrain_moon.gdshader` (Lommel-Seeliger + Earth shadow + earthshine). Leaf level 12, 10.4 m spacing at
   the IM-2 site and at a tile edge (mesh vs core 0.004 / 0.005 m); the far side refines to the curvature limit (373 m,

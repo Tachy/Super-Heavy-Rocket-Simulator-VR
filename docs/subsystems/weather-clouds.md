@@ -2,8 +2,8 @@
 
 Plan `docs/superpowers/plans/2026-10-25-m8-weather-clouds.md`, spec
 `docs/superpowers/specs/2026-10-25-m8-weather-clouds-design.md`. The snapshots come from `weather-service.md`. State
-after Task 8, its amendment (volumetric clouds near the camera) and Task 8b (Monte Carlo transfer table); Tasks 9-11
-(light on the ground, far field, gate and docs) extend it.
+after Task 8, its amendment (volumetric clouds near the camera), Task 8b (Monte Carlo transfer table) and Task 9 (the
+clouds in the light of the ground, vehicles and the eye); Tasks 10-11 (far field, gate and docs) extend it.
 
 ## Model
 
@@ -12,7 +12,7 @@ after Task 8, its amendment (volumetric clouds near the camera) and Task 8b (Mon
   extinction of liquid + ice as a 16-bit linear number (hardware filtering interpolates it like `WeatherSnapshot::at`;
   the log water codes would not), A the log-coded in-cloud optical depth from 20 km down to the layer centre (maximum
   overlap); beside it the ice share of the extinction (`cloud_render_ice_texels`, R8, `cloud_ice_texels`). Two
-  snapshots resident (0.25 deg: 133 + 33 MB each). Uploaded by `CloudFieldTexture` one layer per frame
+  snapshots resident (0.25 deg: 133 + 33 + 66 MB each, with the column texture below). Uploaded by `CloudFieldTexture` one layer per frame
   (staging volume + GPU copy; the longest frame step 5.2 ms, incl. the volume creation) instead of one 49 ms main-thread creation.
 - **Vertical profile rule** (`cloud_render_texels.hpp` `cloud_profile_value`, port in `clouds.gdshaderinc`): the two
   layer centres around a point are fetched apart; where cloud starts above a clear layer the base is flat and sharp
@@ -92,6 +92,50 @@ after Task 8, its amendment (volumetric clouds near the camera) and Task 8b (Mon
   one visible snapshot (weight moves 1 per 2 s), the missing snapshot is uploaded into the slot without weight, then
   the weight tracks `WeatherService.blend()`. Weather off fades to the empty texture. Unused zero-weight slots are freed.
   An upload no longer needed is cancelled, and an upload never replaces a slot that carries weight.
+- **Light on the ground, vehicles and the eye** (Task 9; `cloud_optics.hpp` "CPU light", `clouds.gdshaderinc` "Light
+  under the clouds", `cloud_light.gdshaderinc`, `cloud_shadow.gdshaderinc`). Three factors at a point for a light
+  (Sun, Moon): T_s the direct beam's transmittance, T_sd the light's part diffused through the column per unit of its
+  horizontal irradiance (isotropic from above), T_d the sky's diffuse transmittance. Surfaces: sun x T_s, sky x T_d +
+  the Sun's normal-incidence irradiance x mu0 x T_sd x (1 + n.up) / 2 (the upper sky's view factor); the sea's
+  reflected sky x T_d + that isotropic radiance (the deck's glow). Without the Sun's diffuse part an overcast deck would
+  pass ~4 % of clear sky; with it tau 30 at Sun 45 deg gives 0.277 (Kasten & Czeplak 1980: 0.25, the spec's 10-30 %).
+  - T_total of a conservative slab = 1 - R from the Monte Carlo table (`slab_total_transmittance_mc`, R as the
+    hemisphere integral of `slab_reflected_radiance_mc` on 24 x 24 nodes), tabulated once on load
+    (`CloudSlabTransmittanceLut`: 40 depths 0-1024, s = 0.25 (r^i - 1); 17 cosines 0.02-1; monotone in tau; the
+    diffusion asymptote beyond; ~1 s on all cores in `StarsimCore.cloud_transfer_table`; GPU `cloud_slab_transmittance`
+    RF 40 x 17). Delta-Eddington is up to 26 % off it at low Sun (ruling: table). T_d = the two-stream diffuse
+    transmittance 1 / (1 + 3 (1 - g) tau / 4) (ruled); against the table's white-sky transmittance 2 int T_total mu dmu
+    within 4.6 % for tau 1-100 (+3.5 / +4.6 / +3.5 / +0.5 / -3.4 % at 1 / 3 / 10 / 30 / 100).
+  - Independent columns, maximum overlap: a column's cover C = the largest cloud fraction in it (or along a light's
+    path), its cloudy part carries the grid-mean depth / C: T = 1 - C + C T(tau / C) for all three factors (T_sd =
+    C x (T_total - exp(-tau / (C mu0)))). For C = 1 (decks) this is the plane-parallel column; for broken cloud the
+    plane-parallel column would turn a sunny cumulus field into an overcast (cf 0.15, in-cloud tau 27: exp(-4) direct
+    instead of ~0.85 - seen in the first Task 9 renders, fixed).
+  - Column per pixel: `environment::cloud_render_column_texels` (RG8 per cell and layer: R the grid-mean depth from
+    20 km to the layer centre, the A channel's log code; G the largest cloud fraction above; +33 MB per snapshot) - the
+    centre above (four decoded texels, bilinear: linear in tau as the CPU) + the trapezoid of the grid-mean extinction
+    down to the point; cover = max(its G, the point's fraction). Godot gives a Texture3DRD of R8G8 the luminance-alpha
+    swizzle (R, R, R, G): the shaders read `.ra`.
+  - Direct Sun on the ground: two shadow maps (`CloudShadowEffect`, a compositor effect before the opaque pass; 512^2
+    RGBA32F each) orthographic along the Sun, axes perpendicular to it, anchored on the ground under the camera
+    (Earth-fixed until the camera is 4 / 50 km away: no swimming). Per texel the line toward the Sun through the shell
+    -0.5..20 km: 64 grid-mean samples find the cloudy part (every 312 m of height), 64 samples over it give (t_front,
+    t_back, optical depth, cover); a receiver at t_r gets 1 - C + C exp(-od / C x clamp((t_back - t_r) / (t_back -
+    t_front))) - exact below the clouds, linear inside them; the four texels' transmittances bilinear. The near map
+    (+-16 km, 62.5 m texels) marches the visible clouds' density (the shapes, detail band-limited at the larger of the
+    texel and the step, the shapes' mean for steps > 0.5-2 km; cover 1), the far map (+-200 km) the grid mean with its
+    cover. Distance rule (horizontal distance of the receiver from the camera): near -> far over 9-11 km, far -> the
+    column slanted to the Sun (1 - C + C exp(-tau / (C mu0))) over 120-140 km; smooth, no pop. World space: the same for
+    both VR eyes. The Moon's direct light uses the slanted column.
+  - CPU (`StarsimCore.weather_cloud_light` -> {sun_transmittance, sky_factor, sun_diffuse}; (1, 1, 0) without
+    weather): the vehicles' DirectionalLight x T_s (`Atmosphere.sun_light_at`, the Moon's light likewise),
+    `Environment.ambient_light_energy` = (T_d E_sky + T_sd E_sun,h) / E_sky at the followed body (above 1 under a
+    bright thin deck; reflections keep the clear sky), the eye adaptation's down plate (E_n T_s + E_n mu0 T_sd + E_sky
+    T_d) / pi, also for the Moon. All grid mean along the ray / column (independent columns).
+  - Weather off (cloud_enabled false): every Earth-surface pixel as before - the shader's `CLOUD_LIGHT_BEGIN` / `_END`
+    blocks only change values inside `if (cloud_enabled)`; the CPU factors are exactly (1, 1, 0).
+  - The terrain material now binds the cloud globals (~15 more sampler descriptors per terrain node):
+    `rendering_device/d3d12/max_resource_descriptors` = 262144 (the default 65536 ran out with ~2000 nodes).
 - **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 64 / 128,
   2.5 %, 5 + 2; both 3 detail levels, 1/2 resolution, temporal weight floor 1/32.
 
@@ -121,6 +165,20 @@ after Task 8, its amendment (volumetric clouds near the camera) and Task 8b (Mon
   of the brightest value per step; inside finite and non-black; transmittance to an occluder 2 km ahead inside the
   slab exp(-beta 2 km) within 0.7 % (depth -> distance); a near "mountain" edge through a half-resolution block: the
   occluder column T = 1.000, the sky column the slab's within 1.5 % (upsampling).
+- Core `[weather]` light under the clouds: T_total = 1 - albedo of the Monte Carlo fixture within 3.2 % (10 cases;
+  the LUT likewise), LUT monotone / 1 at tau 0 / continuous at its last node; white-sky vs two-stream within 10 %
+  (4.6 % measured); overcast tau 30 at Sun 45 deg 0.277 in 0.2-0.3 (Kasten & Czeplak 0.25); the Sun's diffuse part under
+  a uniform slab = T_total - exp(-tau / mu0) (table and delta-Eddington), none above it or with the Sun down; a broken
+  layer (cf 0.4) as independent columns (direct, diffuse, sky); column texels = `cloud_column_depths_above` at the
+  centres within the code's 3 % (depth) and 0.003 (cover).
+- GPU `cloud_check.gd` section 6 (terrain_earth.gdshader on a quad 300 m from a camera 2 m up; slabs tau 1 / deck tau
+  3 / broken cf 0.4; Sun 45 / 20 deg; debug output 5 = the three factors): with the near map of the grid mean
+  (`CloudShadowEffect.grid_mean_only`) direct vs the CPU within 1.3 %, diffuse within 0.6 %, sky within 0.3 %, the
+  rendered ground's luminance ratio weather on / off vs (T_s E_dir + T_sd E_sun,h + T_d E_sky) / (E_dir + E_sky) within
+  0.9 % (tolerance 5 %); with the game's map (the shapes) under the cf 1 slabs the ground's total light vs the vehicle's
+  CPU light at the same spot within 5.7 % (tolerance 10 %; under a deck tau 3 0.4 % / 0.1 %; the shapes' direct differs
+  from the grid mean by up to 2.3x at Sun 20 deg through tau 1 - their low octaves vary along a 3 km path); with weather
+  off land and sea bit-identical to the shader without its cloud blocks. atmosphere_check 86/86.
 - `game/tests/cloud_layer_test.gd` (headless): the cross-fade never jumps, never changes a weighted slot.
 
 ## Diagnostics
@@ -132,7 +190,9 @@ after Task 8, its amendment (volumetric clouds near the camera) and Task 8b (Mon
 - `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr [--cloud_scattering=table|closed]` (weather off
   otherwise).
 - `cloud_debug_output` 1 / 2 / 3 / 4: background transmittance (grid mean), Sun radiance (grid mean), coverage at
-  `cloud_debug_height_m`, background transmittance with the shapes.
+  `cloud_debug_height_m`, background transmittance with the shapes; 5: the terrain draws its cloud factors (direct,
+  the Sun's diffuse share, the sky's) as its colour (`render_check.gd --cloud_debug=5 --fixed_exposure`).
+- `CloudShadowEffect.grid_mean_only` (checks): the near shadow map with the grid mean.
 
 ## Open points and known limits
 
@@ -142,6 +202,11 @@ after Task 8, its amendment (volumetric clouds near the camera) and Task 8b (Mon
   20.5) at 8.4 km above the decks. One run had a 48 ms frame in the descent at 19 m (GPU 8.6 ms: a draw / present stall,
   not the clouds' GPU work). The baseline itself misses the Task 11 gate (p99 <= 11 ms). Levers measured: the detail levels ~2 ms in the descent
   (`--cloud_detail_levels`), the step refinement ~0.3 ms, the eclipse probes ~0.3 ms (per sample they cost ~10 ms).
+- Performance after Task 9 (terrain_perf 1440p, same epoch and ERA5 file, VR preset, one session): without clouds p99
+  7.98 / max 13.60 ms (p50 4.83); clouds at the Task 8b state p99 9.45 / max 14.83 (p50 5.43); with Task 9's light
+  (shadow maps, column, terrain factors) p99 10.19 (p50 5.84; descent 10.29 -> 11.27, Cape 9.60 -> 10.11): +0.74 ms p99
+  for Task 9, +2.21 ms for all clouds over the baseline (budget +3 ms); one 39 ms frame at t = 0 of the descent is the
+  terrain's main-thread start (process 37.6 ms). VRAM +76 MB (the column textures). The 11 ms gate is Task 11's.
 - At sharp dark edges (a deck's base seen at 30 km) a staircase of the half-resolution blocks is still visible.
 - The stochastic light march is unbiased in tau_s but exp(-tau_s) per sample is brighter on average (+10 % at the
   worst checked geometry with the preset's samples); more near samples reduce it.
@@ -154,4 +219,10 @@ after Task 8, its amendment (volumetric clouds near the camera) and Task 8b (Mon
 - The ray of each eye starts at the camera, not at the eye offset (the eye offset only moves the reprojection): the
   stereo parallax of near clouds is approximate.
 - Multiview (VR) not yet verified on a headset (the pass handles each view's matrices; per-eye history).
-- No cloud shadows / light under the deck yet (Task 9).
+- Light (Task 9): the vehicles' light and the eye adaptation are the grid mean at one point (a vehicle in a gap
+  between cumuli gets its cell's mean, not the shadow next to it; under a deck the same within 0.4 %); one light point
+  as before (the booster far below the ship gets the followed body's light). Ambient on vehicles = Godot's clear-sky
+  cubemap x one factor (its angular shape and the reflections stay the clear sky's). The shadow maps are plane-parallel
+  inside clouds (a receiver inside one gets a linear share), the Moon's direct light the column's (no shapes). The
+  sky's diffuse transmittance and the Sun's diffuse light are the local column's (no light from neighbouring columns,
+  no cloud-side glow in gaps). No cloud shadows in the far scaled-space Earth (Task 10).

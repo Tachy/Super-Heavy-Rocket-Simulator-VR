@@ -3,6 +3,10 @@ shader_type spatial;
 // the atmosphere and the sky light, city lights on the night side, Moon shadow, aerial perspective) on the relief
 // normal, with geomorphing and the imagery crops blended over the day texture. Where the node's water mask says sea,
 // the calm sea model (water.gdshaderinc) shades it instead, reflecting the atmosphere's sky.
+// Clouds (Task 9, cloud_light.gdshaderinc): the direct Sun through the cloud shadow maps, the Sun's light diffused
+// through the column (isotropic from above) added to the sky light, the sky light x the column's diffuse transmittance;
+// the Moon likewise through its column. Only while cloud_enabled: weather off leaves every pixel as before (the
+// CLOUD_LIGHT_BEGIN / _END blocks; cloud_check.gd strips them and compares bit for bit).
 // Positions are in the body's local render frame (metres, unscaled): vertex_offset restores them from the node centre;
 // the atmosphere takes the fragment's camera-relative offset (camera_offset, exact near the camera), never the
 // difference of two absolute float32 positions.
@@ -12,6 +16,10 @@ render_mode unshaded, cull_back;
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/terrain_morph.gdshaderinc"
 #include "res://shaders/water.gdshaderinc"
+// CLOUD_LIGHT_BEGIN
+#include "res://shaders/clouds.gdshaderinc"
+#include "res://shaders/cloud_light.gdshaderinc"
+// CLOUD_LIGHT_END
 
 // Global maps: CUSTOM1.u runs past 1 on nodes across the antimeridian (continuous inside the node), hence repeat.
 uniform sampler2D day_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -103,6 +111,20 @@ void fragment() {
 		sun_normal = atm_sun_at(local_position);
 		sky_light = atm_sky_light(local_position, n) * sky_eclipse_factor;
 	}
+	// CLOUD_LIGHT_BEGIN
+	// x direct, y the Sun's diffuse share, z the sky's, w mu0 (cloud_ground_light); the Sun's diffuse light under the
+	// clouds as an isotropic downward radiance (scene units: sun_normal is the normal-incidence irradiance / pi).
+	vec4 cloud = vec4(1.0, 0.0, 1.0, 0.0);
+	vec3 cloud_sun_radiance = vec3(0.0);
+	bool clouded = cloud_enabled && atmosphere_enabled;
+	if (clouded) {
+		cloud = cloud_ground_light(camera_offset, atmosphere_sun_direction, true);
+		cloud_sun_radiance = sun_normal * (max(cloud.w, 0.0) * cloud.y * sunlit);
+		float upper = 0.5 * (1.0 + dot(n, cloud_geodetic_up(local_position)));  // the upper sky's view factor
+		sky_light = sky_light * cloud.z + cloud_sun_radiance * upper;
+		sun_normal *= cloud.x;
+	}
+	// CLOUD_LIGHT_END
 	vec3 day = albedo * (sun_normal * max(dot(n, normalize(earth_sun_position_local)), 0.0) * sunlit + sky_light);
 	// Moonlight (night only): the direct Moon and the moonlit sky's light; on the sea a second pass of the sea model.
 	bool moonlit = atmosphere_enabled && atm_moonlit();
@@ -111,6 +133,15 @@ void fragment() {
 	if (moonlit) {
 		moon_normal = atm_moon_at(local_position);
 		moon_sky_light = atm_moon_sky_light(local_position, n);
+		// CLOUD_LIGHT_BEGIN
+		if (clouded) {
+			vec4 moon_cloud = cloud_ground_light(camera_offset, normalize(atmosphere_moon_direction), false);
+			float upper = 0.5 * (1.0 + dot(n, cloud_geodetic_up(local_position)));
+			moon_sky_light = moon_sky_light * moon_cloud.z
+					+ moon_normal * (max(moon_cloud.w, 0.0) * moon_cloud.y * upper);
+			moon_normal *= moon_cloud.x;
+		}
+		// CLOUD_LIGHT_END
 		day += albedo * (moon_normal * max(dot(n, normalize(atmosphere_moon_direction)), 0.0) + moon_sky_light);
 	}
 	// Sea: the imagery where it covers (lagoons, shoals), else the day texture (shallow banks from orbit; deep_water
@@ -128,6 +159,11 @@ void fragment() {
 		sky_reflected = atm_sky_at_offset(camera_offset, water_reflected_direction(n, wave_n, to_camera),
 				reflected_transmittance);
 	}
+	// CLOUD_LIGHT_BEGIN
+	if (clouded) {
+		sky_reflected = sky_reflected * cloud.z + cloud_sun_radiance;  // the sky seen through the deck + its glow
+	}
+	// CLOUD_LIGHT_END
 	vec3 sea = water_radiance(water_body, n, wave_n, resolved_variance, normalize(to_sun), to_camera, sunlit,
 			sun_normal, sky_light, sky_reflected);
 	if (moonlit && water > 0.0) {
@@ -152,4 +188,9 @@ void fragment() {
 		color = (day + city) * transmittance + in_scatter;
 	}
 	ALBEDO = color;
+	// CLOUD_LIGHT_BEGIN
+	if (clouded && cloud_debug_output == 5) {
+		ALBEDO = cloud.xyz;  // checks (cloud_check.gd): the cloud light factors themselves
+	}
+	// CLOUD_LIGHT_END
 }

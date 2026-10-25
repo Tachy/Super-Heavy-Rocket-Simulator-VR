@@ -657,3 +657,145 @@ float cloud_sky_scattering_source(float view_up_cos, float depth_from_top, float
 	float i1 = -3.0 * transmittance / (4.0 * CLOUD_PI);
 	return k * (i0 + de.y * view_up_cos * i1);
 }
+
+// ---- Light under the clouds (Task 9; core cloud_render_column_texels, cloud_optics.hpp cloud_column_depths_above,
+// cloud_sky_factor and cloud_sun_diffuse_transmittance - change them together). The grid-mean column above a point:
+// the column texture's depth at the layer centre above (bilinear on the decoded corners: linear in the depth, as the
+// CPU's linear interpolation of the field) plus the trapezoid of the grid-mean extinction down to the point (the
+// field's vertical profile rule at the point), held from the top centre to 20 km; its cover C the larger of the
+// texture's largest cloud fraction above the centre and the point's fraction (maximum overlap). Independent columns:
+// clear on 1 - C, the depth / C on C (no plane-parallel bias for broken cloud). The sky's diffuse transmittance is
+// 1 - C + C x the two-stream one, the Sun's diffuse light C x (the Monte Carlo slab's total - its direct part).
+global uniform sampler3D cloud_column_before : filter_nearest, repeat_enable;
+global uniform sampler3D cloud_column_after : filter_nearest, repeat_enable;
+// The slab's total beam transmittance (core CloudSlabTransmittanceLut): x = depth node, y = cosine node.
+global uniform sampler2D cloud_slab_transmittance : filter_linear, repeat_disable;
+// (depth scale, ln depth ratio, depth max, cosine min); x <= 0: no table (delta-Eddington's diffuse T stands in).
+global uniform vec4 cloud_slab_transmittance_map;
+
+// Grid-mean depth from 20 km to layer centre `layer` at (lat, lon) and the cover above it: the four texels around,
+// decoded, bilinear.
+vec2 cloud_column_texel(sampler3D column, vec3 size, vec2 lat_lon, float layer) {
+	float x = lat_lon.y / (2.0 * CLOUD_PI) * size.x;  // column c's centre at longitude c x 360 / columns
+	float y = clamp((0.5 * CLOUD_PI - lat_lon.x) / (CLOUD_PI / (size.y - 1.0)), 0.0, size.y - 1.0);
+	float x0 = floor(x);
+	float y0 = min(floor(y), size.y - 2.0);
+	vec2 f = vec2(x - x0, y - y0);
+	int columns = int(size.x);
+	int c0 = int(mod(x0, size.x));
+	int c1 = c0 + 1 < columns ? c0 + 1 : 0;
+	int r0 = int(y0);
+	int z = int(layer);
+	// The RG8 volume reaches Godot shaders as luminance-alpha (Texture3DRD maps R8G8 to LA8: swizzle R, R, R, G), so
+	// the cover is in .a (Godot shaders only; the compute kernels do not read this texture).
+	vec2 t00 = texelFetch(column, ivec3(c0, r0, z), 0).ra;
+	vec2 t10 = texelFetch(column, ivec3(c1, r0, z), 0).ra;
+	vec2 t01 = texelFetch(column, ivec3(c0, r0 + 1, z), 0).ra;
+	vec2 t11 = texelFetch(column, ivec3(c1, r0 + 1, z), 0).ra;
+	vec2 d00 = vec2(cloud_decode_depth(t00.x), t00.y);
+	vec2 d10 = vec2(cloud_decode_depth(t10.x), t10.y);
+	vec2 d01 = vec2(cloud_decode_depth(t01.x), t01.y);
+	vec2 d11 = vec2(cloud_decode_depth(t11.x), t11.y);
+	return mix(mix(d00, d10, f.x), mix(d01, d11, f.x), f.y);
+}
+
+// One snapshot's grid-mean column above (lat, lon, height): x the depth, y the cover.
+vec2 cloud_snapshot_column(sampler3D field, sampler3D column, vec3 size, vec2 lat_lon, float height_m) {
+	float s = cloud_layer_coordinate(height_m) - 0.5;
+	float k = clamp(floor(s), 0.0, CLOUD_LAYERS - 2.0);
+	float x = clamp(s - k, 0.0, 1.0);
+	vec4 below = texture(field, cloud_field_uvw(lat_lon, k, size));
+	vec4 above = texture(field, cloud_field_uvw(lat_lon, k + 1.0, size));
+	float beta_b = cloud_decode_extinction(below);
+	float beta_a = cloud_decode_extinction(above);
+	float gap = cloud_layer_centre_m(k + 1.0) - cloud_layer_centre_m(k);
+	float beta = cloud_profile_value(beta_b, beta_a, below.r, above.r, x, gap);
+	float fraction = cloud_profile_value(below.r, above.r, below.r, above.r, x, gap);
+	if (s >= CLOUD_LAYERS - 1.0) {
+		return vec2(beta_a * max(CLOUD_TOP_M - height_m, 0.0), above.r);  // held from the top centre to 20 km
+	}
+	float centre = clamp(floor(s) + 1.0, 0.0, CLOUD_LAYERS - 1.0);  // the centre above (0 below centre 0)
+	float beta_centre = centre > k ? beta_a : beta_b;
+	vec2 at_centre = cloud_column_texel(column, size, lat_lon, centre);
+	return vec2(at_centre.x + 0.5 * (beta + beta_centre) * max(cloud_layer_centre_m(centre) - height_m, 0.0),
+			max(at_centre.y, fraction));
+}
+
+// The blended column above (lat, lon, height) (core cloud_column_depths_above): x the grid-mean depth, y the cover.
+vec2 cloud_column_mean_depth(vec2 lat_lon, float height_m) {
+	vec2 depth = vec2(0.0);
+	if (height_m > CLOUD_TOP_M) {
+		return depth;
+	}
+	if (cloud_blend < 1.0) {
+		depth += (1.0 - cloud_blend) * cloud_snapshot_column(cloud_field_before, cloud_column_before,
+				cloud_field_before_size, lat_lon, height_m);
+	}
+	if (cloud_blend > 0.0) {
+		depth += cloud_blend * cloud_snapshot_column(cloud_field_after, cloud_column_after,
+				cloud_field_after_size, lat_lon, height_m);
+	}
+	return depth;
+}
+
+// The cover to use (core CloudColumnDepths::cover): 0 without cloud, at least half a fraction code step with it.
+float cloud_column_cover(vec2 column) {
+	return column.x > 0.0 ? clamp(column.y, 0.5 / 255.0, 1.0) : 0.0;
+}
+
+// The sky's diffuse transmittance (core two_stream_diffuse_transmittance; cloud_sky_factor).
+float cloud_two_stream_diffuse(float optical_depth) {
+	return 1.0 / (1.0 + 0.75 * (1.0 - cloud_asymmetry_g) * max(optical_depth, 0.0));
+}
+
+// The slab's total beam transmittance (core cloud_slab_total_transmittance): the table bilinear, the diffusion
+// asymptote beyond its last depth.
+float cloud_slab_total_transmittance(float optical_depth, float mu0) {
+	if (!(optical_depth > 0.0)) {
+		return 1.0;
+	}
+	if (mu0 <= 0.0) {
+		return 0.0;
+	}
+	vec4 m = cloud_slab_transmittance_map;
+	if (m.x <= 0.0) {
+		return cloud_two_stream_diffuse(optical_depth);
+	}
+	vec2 size = vec2(textureSize(cloud_slab_transmittance, 0));
+	float x = clamp(log(min(optical_depth, m.z) / m.x + 1.0) / m.y, 0.0, size.x - 1.0);
+	float y = clamp((mu0 - m.w) / (1.0 - m.w) * (size.y - 1.0), 0.0, size.y - 1.0);
+	float t = texture(cloud_slab_transmittance, (vec2(x, y) + 0.5) / size).r;
+	if (optical_depth > m.z) {
+		float k = 0.75 * (1.0 - cloud_asymmetry_g);
+		t *= (1.0 + k * m.z) / (1.0 + k * optical_depth);
+	}
+	return t;
+}
+
+// The Sun's light diffused through the column (core cloud_sun_diffuse_transmittance) per unit of its horizontal
+// irradiance: the cloudy part's slab total minus its direct transmittance, times the cover.
+float cloud_sun_diffuse(vec2 column, float mu0) {
+	float cover = cloud_column_cover(column);
+	if (mu0 <= 0.0 || cover <= 0.0) {
+		return 0.0;
+	}
+	float tau = column.x / cover;
+	return cover * max(cloud_slab_total_transmittance(tau, mu0) - exp(-tau / mu0), 0.0);
+}
+
+// The sky's diffuse transmittance of the column (core cloud_sky_factor).
+float cloud_sky_factor(vec2 column) {
+	float cover = cloud_column_cover(column);
+	return cover > 0.0 ? 1.0 - cover + cover * cloud_two_stream_diffuse(column.x / cover) : 1.0;
+}
+
+// The direct beam through the column slanted to mu0 (the far tier and the Moon).
+float cloud_column_direct(vec2 column, float mu0) {
+	float cover = cloud_column_cover(column);
+	return cover > 0.0 ? 1.0 - cover + cover * exp(-column.x / (cover * max(mu0, 0.02))) : 1.0;
+}
+
+// The geodetic up (ellipsoid normal) at an Earth-local point (render axes, polar axis +Y).
+vec3 cloud_geodetic_up(vec3 p_local) {
+	return normalize(vec3(p_local.x, p_local.y * CLOUD_AB2, p_local.z));
+}

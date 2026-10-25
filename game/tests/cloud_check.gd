@@ -17,7 +17,15 @@
 #      15 % (the stochastic exp(-tau_s) is brighter on average);
 #   5. the GPU's filtered coverage (debug output 3, full resolution) at the slab's centre height over a wide view = the
 #      cloud fraction (0.1 / 0.5 / 0.9) within 0.02 (Task 4 deferred: the RGBA8 filter weights against the float64
-#      coverage table).
+#      coverage table);
+#   6. light on the ground (Task 9; terrain_earth.gdshader on a quad 300 m from a camera 2 m up, under a thin slab of
+#      tau ~1, a deck of tau ~3 and a broken layer of cf 0.4, Sun 45 / 20 deg up): with the near shadow map of the grid mean, the shader's cloud
+#      factors (debug output 5: direct, the Sun's diffuse share, the sky's) vs weather_cloud_light within 3 %, the
+#      rendered ground's luminance ratio weather on / off = (T_s E_dir + T_sd E_sun,h + T_d E_sky) / (E_dir + E_sky)
+#      of the CPU within 5 % (the broken layer as independent columns, cloud_optics.hpp); with the game's map (the
+#      shapes) under the slabs of cf 1 the ground's total light vs the vehicle's CPU light (grid mean) at the same spot
+#      within 10 % (broken: reported - the spot is in a gap or under a cumulus, the CPU's the cell's mean); with weather off every pixel of land and sea bit-identical to the
+#      shader without its CLOUD_LIGHT blocks.
 # Detail levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_check.gd
 extends SceneTree
@@ -45,12 +53,25 @@ const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 31
+const EXPECTED_SAMPLES := 61
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
 const EDGE_DISTANCE_M := 50.0
 const EDGE_SIZE_M := 100.0
+## Light on the ground (section 6).
+const GROUND_DISTANCE_M := 300.0
+const GROUND_ALBEDO_8 := Color8(150, 120, 90)
+const MOON_DISTANCE_M := 3.844e8
+const DECK_LIQUID_KG_M3 := 3.0e-3 / 150.0
+## A broken layer (independent columns: clear on 1 - cf, the in-cloud depth on cf).
+const BROKEN_FRACTION := 0.4
+const DIRECT_FLOOR := 0.01
+## The vehicle's CPU light is the grid mean, the ground's shadow the visible shapes (cf 1 slabs still vary along a ray
+## by the shape noise's low octaves): their total light on a horizontal plate (measured: within 6 %).
+const VEHICLE_TOLERANCE := 0.10
+const FACTOR_TOLERANCE := 0.03
+const GROUND_RATIO_TOLERANCE := 0.05
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
@@ -61,6 +82,10 @@ var _earth_to_gcrf := Basis.IDENTITY
 var _failures := 0
 var _samples := 0
 var _files: Array[String] = []
+var _terrain_parent := Node3D.new()  ## Earth-fixed frame of the terrain quad (section 6)
+var _terrain_quad := MeshInstance3D.new()
+var _terrain_material := ShaderMaterial.new()
+var _water_material := ShaderMaterial.new()  ## the same with an all-water mask (the sea model)
 
 
 func _initialize() -> void:
@@ -183,6 +208,8 @@ func _run() -> void:
 		_show(file)
 		await _coverage_sample(fraction)
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
+	# 6. Light on the ground under the clouds.
+	await _ground_light_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -214,7 +241,7 @@ func _setup_scene() -> void:
 	var world_environment := WorldEnvironment.new()
 	world_environment.environment = environment
 	var compositor := Compositor.new()
-	compositor.compositor_effects = [_clouds.effect]
+	compositor.compositor_effects = [_clouds.shadow_effect, _clouds.effect]
 	world_environment.compositor = compositor
 	_viewport.add_child(world_environment)
 	_camera.fov = 10.0
@@ -223,6 +250,26 @@ func _setup_scene() -> void:
 	_camera.current = true
 	_viewport.add_child(_camera)
 	_viewport.add_child(_clouds)
+	var albedo := Image.create(4, 4, true, Image.FORMAT_RGBA8)
+	albedo.fill(GROUND_ALBEDO_8)
+	albedo.generate_mipmaps()
+	var black := Image.create(4, 4, true, Image.FORMAT_RGBA8)
+	black.fill(Color(0, 0, 0))
+	black.generate_mipmaps()
+	var white := Image.create(4, 4, false, Image.FORMAT_R8)
+	white.fill(Color(1, 1, 1))
+	for material: ShaderMaterial in [_terrain_material, _water_material]:
+		material.shader = load("res://shaders/terrain_earth.gdshader")
+		material.set_shader_parameter("day_texture", ImageTexture.create_from_image(albedo))
+		material.set_shader_parameter("day_texture_bound", true)
+		material.set_shader_parameter("night_texture", ImageTexture.create_from_image(black))
+		material.set_shader_parameter("moon_radius_m", 1737400.0)
+		material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
+	_water_material.set_shader_parameter("water_mask", ImageTexture.create_from_image(white))
+	_terrain_quad.material_override = _terrain_material
+	_terrain_parent.add_child(_terrain_quad)
+	_terrain_parent.visible = false
+	_viewport.add_child(_terrain_parent)
 
 
 ## Writes a slab snapshot, returns its loaded dictionary (the file is removed at the end).
@@ -378,6 +425,144 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode
 			var c := image.get_pixel(image.get_width() / 2 + dx, image.get_height() / 2 + dy)
 			sum += Vector3(c.r, c.g, c.b)
 	return sum / float((2 * block_radius + 1) * (2 * block_radius + 1))
+
+
+## Section 6: the ground 300 m north of a camera 2 m up, under a thin slab (tau ~1) and a deck (tau ~3), Sun 45 and
+## 20 deg up; then the identity of the weather-off look (land and sea).
+func _ground_light_samples() -> void:
+	var camera := _point(2.0)
+	var point := HeightSource.geodetic_to_fixed(LAT_DEG + rad_to_deg(GROUND_DISTANCE_M / 6.371e6), LON_DEG, 0.0)
+	var up := _local_direction(90.0, 0.0)
+	var thin := _slab("ground_thin", SLAB_BOTTOM_M, SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0)
+	var deck := _slab("ground_deck", SLAB_BOTTOM_M, SLAB_TOP_M, DECK_LIQUID_KG_M3, 1.0)
+	var broken := _slab("ground_broken", SLAB_BOTTOM_M, SLAB_TOP_M, DECK_LIQUID_KG_M3, BROKEN_FRACTION)
+	for slab: Dictionary in [thin, deck, broken]:
+		for elevation in [45.0, 20.0]:
+			var sun := _local_direction(elevation, 135.0)
+			var label := "%s, Sun %.0f deg" % ["tau 1" if slab == thin else ("deck tau 3" if slab == deck
+					else "broken cf %.1f" % BROKEN_FRACTION), elevation]
+			_clouds.show_now({}, {}, 0.0)
+			_core.weather_set_active("", "", 0.0)
+			var off := await _render_ground(camera, point, up, sun, 0, _terrain_material)
+			_show(slab)
+			var light: Dictionary = _core.weather_cloud_light(point, sun)
+			var t_s := float(light["sun_transmittance"])
+			var t_sd := float(light["sun_diffuse"])
+			var t_d := float(light["sky_factor"])
+			var lux: Dictionary = _core.atmosphere_illuminance(point, up, sun)
+			var e_sun: Vector3 = lux["sun_lux"]
+			var e_sky: Vector3 = lux["sky_lux"]
+			var sun_share := _luminance(e_sun) / _luminance(e_sun + e_sky)
+			# a. The maps' machinery: the near map of the grid mean against the CPU's Beer-Lambert, the column terms, and
+			# the shading's composition (the ratio on / off of the surface part: the in-scattered light taken out).
+			_clouds.shadow_effect.grid_mean_only = true
+			var on := await _render_ground(camera, point, up, sun, 0, _terrain_material)
+			var factors := await _render_ground(camera, point, up, sun, 5, _terrain_material)
+			_check("ground (grid-mean map): direct Sun " + label,
+					absf(factors.x - t_s) <= maxf(FACTOR_TOLERANCE * t_s, DIRECT_FLOOR * 0.1),
+					"GPU %.4f CPU %.4f" % [factors.x, t_s])
+			_check("ground: the Sun's diffuse share " + label, absf(factors.y - t_sd) <= FACTOR_TOLERANCE * t_sd,
+					"GPU %.4f CPU %.4f" % [factors.y, t_sd])
+			_check("ground: the sky's diffuse transmittance " + label, absf(factors.z - t_d) <= FACTOR_TOLERANCE * t_d,
+					"GPU %.4f CPU %.4f" % [factors.z, t_d])
+			var to_point: Dictionary = _core.atmosphere_sky_luminance_to_point(camera, point, sun)
+			var in_scatter: Vector3 = to_point["luminance"] * _atmosphere.luminance_scale
+			var expected := _luminance(e_sun * (t_s + t_sd) + e_sky * t_d) / _luminance(e_sun + e_sky)
+			var got := _luminance(on - in_scatter) / _luminance(off - in_scatter)
+			_check("ground luminance ratio weather on / off " + label,
+					absf(got - expected) <= GROUND_RATIO_TOLERANCE * expected,
+					"rendered %.4f CPU %.4f (T_s %.4f T_sd %.4f T_d %.4f, Sun share %.3f)" % [got, expected, t_s, t_sd,
+					t_d, sun_share])
+			# b. The game's near map (the visible clouds' shapes) against the vehicle's CPU light (the grid mean) at the
+			# same spot: their total light on a horizontal plate (direct + the Sun's diffuse + sky).
+			_clouds.shadow_effect.grid_mean_only = false
+			var shaped := await _render_ground(camera, point, up, sun, 5, _terrain_material)
+			var ground_total := (shaped.x + shaped.y) * sun_share + shaped.z * (1.0 - sun_share)
+			var vehicle_total := (t_s + t_sd) * sun_share + t_d * (1.0 - sun_share)
+			var detail := "vehicle %.4f ground %.4f (direct CPU %.4f, shapes %.4f)" % [vehicle_total, ground_total, t_s,
+					shaped.x]
+			if slab == broken:  # the spot lies in a gap or under a cumulus; the CPU's is the cell's mean (reported)
+				print("  info  vehicle light vs the ground's (shapes) %s: %s" % [label, detail])
+			else:
+				_check("vehicle light (CPU, grid mean) vs the ground's (shapes) " + label,
+						absf(vehicle_total - ground_total) <= VEHICLE_TOLERANCE * ground_total, detail)
+	# Weather off: the shader with and without its CLOUD_LIGHT blocks, every pixel bit-identical (land and sea).
+	_clouds.show_now({}, {}, 0.0)
+	_core.weather_set_active("", "", 0.0)
+	var sun := _local_direction(30.0, 135.0)
+	var stripped := Shader.new()
+	stripped.code = _strip_cloud_light((load("res://shaders/terrain_earth.gdshader") as Shader).code)
+	for material: ShaderMaterial in [_terrain_material, _water_material]:
+		await _render_ground(camera, point, up, sun, 0, material)
+		var with_blocks := _viewport.get_texture().get_image().get_data()
+		var without := material.duplicate() as ShaderMaterial
+		without.shader = stripped
+		await _render_ground(camera, point, up, sun, 0, without)
+		var reference := _viewport.get_texture().get_image().get_data()
+		var differing := 0
+		for i in range(reference.size()):
+			differing += 1 if reference[i] != with_blocks[i] else 0
+		_check("weather off: %s bit-identical to the shader without its cloud blocks" % ["land" if material
+				== _terrain_material else "sea"], differing == 0 and reference.size() > 0,
+				"%d of %d bytes differ" % [differing, reference.size()])
+
+
+## The shader source without its CLOUD_LIGHT_BEGIN / _END blocks (what it was before Task 9).
+static func _strip_cloud_light(code: String) -> String:
+	var out := PackedStringArray()
+	var inside := false
+	for line in code.split("\n"):
+		if line.strip_edges() == "// CLOUD_LIGHT_BEGIN":
+			inside = true
+		elif line.strip_edges() == "// CLOUD_LIGHT_END":
+			inside = false
+		elif not inside:
+			out.append(line)
+	return "\n".join(out)
+
+
+## The terrain quad at point (normal = the lighting's normal), seen from camera (the quad fills the view); mode: the
+## cloud debug output. Returns the centre 5 x 5 mean.
+func _render_ground(camera_itrf_m: Vector3, point_itrf_m: Vector3, normal_itrf: Vector3, sun_itrf: Vector3, mode: int,
+		material: ShaderMaterial) -> Vector3:
+	var sun_local := Frames.to_render(sun_itrf * AU_M)
+	ShaderGlobals.set_value(&"earth_sun_position_local", sun_local)
+	ShaderGlobals.set_value(&"earth_moon_position_local", -Frames.to_render(sun_itrf) * MOON_DISTANCE_M)
+	var view_itrf := (point_itrf_m - camera_itrf_m).normalized()
+	var camera_gcrf := _earth_to_gcrf * camera_itrf_m
+	var center := Frames.to_render(point_itrf_m)
+	var distance := (point_itrf_m - camera_itrf_m).length()
+	_terrain_quad.material_override = material
+	_terrain_parent.transform = Transform3D(Frames.basis_to_render(_earth_to_gcrf), Frames.to_render(-camera_gcrf))
+	_terrain_quad.mesh = _facing_quad(Frames.to_render(view_itrf), Frames.to_render(normal_itrf), distance * 0.2)
+	_terrain_quad.position = center
+	var split := TerrainQuadtree.split_float32(center)
+	_terrain_quad.set_instance_shader_parameter(&"vertex_offset", split[0])
+	_terrain_quad.set_instance_shader_parameter(&"vertex_offset_lo", split[1])
+	var camera_split := TerrainQuadtree.split_float32(Frames.to_render(camera_itrf_m))
+	ShaderGlobals.set_value(&"earth_terrain_camera_hi", camera_split[0])
+	ShaderGlobals.set_value(&"earth_terrain_camera_lo", camera_split[1])
+	_terrain_parent.visible = true
+	var got := await _render(camera_itrf_m, view_itrf, sun_itrf, mode, BLOCK_RADIUS)
+	_terrain_parent.visible = false
+	return got
+
+
+## A quad facing the view (atmosphere_check.gd), its normals the lighting's normal.
+static func _facing_quad(view: Vector3, normal: Vector3, half_m: float) -> ArrayMesh:
+	var u := view.cross(Vector3.UP if absf(view.y) < 0.9 else Vector3.RIGHT).normalized() * half_m
+	var w := view.cross(u).normalized() * half_m
+	var vertices := PackedVector3Array([-u - w, u - w, u + w, -u - w, u + w, -u + w])
+	var normals := PackedVector3Array()
+	for i in range(vertices.size()):
+		normals.append(normal)
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
 
 
 func _point(height_m: float) -> Vector3:

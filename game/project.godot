@@ -19,6 +19,7 @@ window/size/viewport_height=900
 
 renderer/rendering_method="forward_plus"
 rendering_device/driver.windows="d3d12"
+rendering_device/d3d12/max_resource_descriptors=262144
 anti_aliasing/quality/msaa_3d=2
 limits/spatial_indexer/threaded_cull_minimum_instances=1000000
 
@@ -307,6 +308,62 @@ cloud_coverage_threshold={
 cloud_enabled={
 "type": "bool",
 "value": false
+}
+cloud_column_before={
+"type": "sampler3D",
+"value": ""
+}
+cloud_column_after={
+"type": "sampler3D",
+"value": ""
+}
+cloud_slab_transmittance={
+"type": "sampler2D",
+"value": ""
+}
+cloud_slab_transmittance_map={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+cloud_shadow_near={
+"type": "sampler2D",
+"value": ""
+}
+cloud_shadow_far={
+"type": "sampler2D",
+"value": ""
+}
+cloud_shadow_valid={
+"type": "bool",
+"value": false
+}
+cloud_shadow_near_anchor={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+cloud_shadow_far_anchor={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+cloud_shadow_e1={
+"type": "vec3",
+"value": Vector3(1, 0, 0)
+}
+cloud_shadow_e2={
+"type": "vec3",
+"value": Vector3(0, 0, 1)
+}
+cloud_shadow_sun={
+"type": "vec3",
+"value": Vector3(0, 1, 0)
+}
+cloud_shadow_extent={
+"type": "vec4",
+"value": Vector4(16000, 200000, 9000, 11000)
+}
+cloud_shadow_far_fade={
+"type": "vec2",
+"value": Vector2(120000, 140000)
 }
 cloud_camera_height_m={
 "type": "float",

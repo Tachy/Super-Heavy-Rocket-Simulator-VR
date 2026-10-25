@@ -1,6 +1,7 @@
 class_name CloudFieldTexture
 extends RefCounted
-## One volume of a weather snapshot on the GPU (M8 weather and clouds, Task 8): the field (RGBA8) or the ice share (R8),
+## One volume of a weather snapshot on the GPU (M8 weather and clouds, Task 8): the field (RGBA8), the ice share (R8)
+## or the column (RG8, Task 9),
 ## columns x rows x 32 layers, no mipmaps. Uploaded in chunks of LAYERS_PER_STEP layers, one chunk per step() (per
 ## frame), so a 133 MB 0.25-deg field never blocks a frame (one ImageTexture3D creation took 49 ms on the main thread):
 ## the chunk goes into a small staging volume (texture_update) and is copied into its slices of the target on the GPU.
@@ -27,7 +28,7 @@ var _staging := RID()
 var _format := 0
 
 
-## texels: layer-major, texel_bytes per texel (4: RGBA8, 1: R8).
+## texels: layer-major, texel_bytes per texel (4: RGBA8, 2: RG8, 1: R8).
 static func create(texels: PackedByteArray, columns: int, rows: int, texel_bytes: int) -> CloudFieldTexture:
 	var t := CloudFieldTexture.new()
 	t._columns = columns
@@ -52,7 +53,8 @@ func _step_on_render_thread(all: bool) -> void:
 	if done:
 		return
 	var start := Time.get_ticks_usec()
-	_format = RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM if _texel_bytes == 4 else RenderingDevice.DATA_FORMAT_R8_UNORM
+	_format = {4: RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM, 2: RenderingDevice.DATA_FORMAT_R8G8_UNORM}.get(_texel_bytes,
+			RenderingDevice.DATA_FORMAT_R8_UNORM)
 	if not _target.is_valid():
 		var tf := RDTextureFormat.new()
 		tf.texture_type = RenderingDevice.TEXTURE_TYPE_3D
@@ -90,7 +92,8 @@ func _step_on_render_thread(all: bool) -> void:
 
 func _create_at_once() -> void:
 	var start := Time.get_ticks_usec()
-	var format := Image.FORMAT_RGBA8 if _texel_bytes == 4 else Image.FORMAT_R8
+	# Two bytes as luminance-alpha: what a Texture3DRD of R8G8 becomes in Godot's shaders (R in .rgb, G in .a).
+	var format: Image.Format = {4: Image.FORMAT_RGBA8, 2: Image.FORMAT_LA8}.get(_texel_bytes, Image.FORMAT_R8)
 	var layer_bytes := _columns * _rows * _texel_bytes
 	var images: Array[Image] = []
 	for layer in range(LAYERS):

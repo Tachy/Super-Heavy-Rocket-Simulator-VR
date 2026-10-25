@@ -185,6 +185,7 @@ var last_target_scotopic_cd_m2 := 0.0
 ## Night vision's rod step on the HDR scene (attached to the WorldEnvironment's Compositor: world.gd, the GPU check).
 var vision_effect := VisionEffect.new()
 var _moon_direction_fixed := Vector3.ZERO
+var _cloud_cache := {}  ## cloud_light_at per frame: [position, direction, frame] -> Vector3
 ## The umbra's light (_update_umbra_light) at the last evaluation: the eclipsed sky's fluence (scalar irradiance, cd/m^2 x
 ## sr per channel at 1 AU) at UMBRA_HEIGHTS_M (tests).
 var umbra_fluence: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
@@ -416,7 +417,13 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	if outside:
 		visible *= 1.0 - occulted_fraction(sun_itrf_m - eye_itrf_m, SUN_RADIUS_M, -eye_itrf_m, EARTH_MEAN_RADIUS_M)
 	last_adaptation_visible_fraction = visible
-	var down_rgb := (solar * sun_factor * transmittance + sky) * visible / (PI * d_au * d_au)
+	# Clouds (Task 9): the plate's direct Sun through them, the Sun's light diffused through the column (isotropic from
+	# above: mu0 x its normal-incidence irradiance on the horizontal) and the sky's diffuse transmittance
+	# (StarsimCore.weather_cloud_light: 1, 0, 1 with weather off - the same numbers as before).
+	var clouds := cloud_light_at(eye_itrf_m, sun_direction_itrf)
+	var sun_plate: Vector3 = solar * sun_factor * transmittance
+	var down_rgb := (sun_plate * (clouds.x + clouds.y * maxf(sun_direction_itrf.dot(up), 0.0)) + sky * clouds.z) \
+			* visible / (PI * d_au * d_au)
 	var earth_rgb := _earth_in_view_luminance(eye_itrf_m, sun_direction_itrf) / (d_au * d_au)
 	var moon_rgb := Vector3.ZERO
 	if lunar:
@@ -442,7 +449,10 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 		else:
 			var moon_t := _core.atmosphere_sun_transmittance(eye_itrf_m, _moon_direction_fixed)
 			var moon_sky: Vector3 = _core.atmosphere_illuminance(eye_itrf_m, up, _moon_direction_fixed)["sky_lux"]
-			down_rgb += (solar * sun_factor * moon_t + moon_sky) * (moon_scale / PI)
+			var moon_clouds := cloud_light_at(eye_itrf_m, _moon_direction_fixed)
+			var moon_plate: Vector3 = solar * sun_factor * moon_t
+			down_rgb += (moon_plate * (moon_clouds.x + moon_clouds.y * maxf(_moon_direction_fixed.dot(up), 0.0))
+					+ moon_sky * moon_clouds.z) * (moon_scale / PI)
 	# The glow (night vision), GLOW_ADAPTATION_SHARE of the brightest sky: inside the atmosphere with the Sun below the
 	# eye's horizon (twilight) or the eye in a solar eclipse (the ring around the umbra; review I2: the eye's own
 	# eclipse, not the global penumbra flag - a twilight eye far from the shadow keeps its glow); above it with the Sun
@@ -972,12 +982,48 @@ func sun_light_at(position_itrf_m: Vector3, sun_direction_itrf: Vector3, visible
 		var solar: Vector3 = parameters["solar_illuminance_rgb"]
 		var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
 		scene = solar * sun_factor * transmittance * (luminance_scale / PI)
+		# The direct beam through the clouds (grid mean along the ray; 1 with weather off). Task 9.
+		scene *= cloud_light_at(position_itrf_m, sun_direction_itrf).x
 	scene *= visible_fraction
 	var peak := maxf(scene.x, maxf(scene.y, scene.z))
 	var color := Color.WHITE
 	if peak > 0.0:
 		color = Color(scene.x / peak, scene.y / peak, scene.z / peak).linear_to_srgb()
 	return [color, peak]
+
+
+## The clouds' light at an Earth-fixed point for the light from light_direction_itrf (StarsimCore.weather_cloud_light,
+## the active weather pair's grid mean, Task 9): x the direct beam's transmittance, y the light's diffuse part through
+## the column per unit of its horizontal irradiance, z the sky's diffuse transmittance; (1, 0, 1) without weather.
+## Cached per frame (the same point and direction several times: Sun light, ambient, adaptation).
+func cloud_light_at(position_itrf_m: Vector3, light_direction_itrf: Vector3) -> Vector3:
+	var key := [position_itrf_m, light_direction_itrf, Engine.get_process_frames()]
+	if _cloud_cache.has(key):
+		return _cloud_cache[key]
+	if _cloud_cache.size() > 8:
+		_cloud_cache.clear()
+	var light: Dictionary = _core.weather_cloud_light(position_itrf_m, light_direction_itrf) if _core != null else {}
+	var result := Vector3(float(light.get("sun_transmittance", 1.0)), float(light.get("sun_diffuse", 0.0)),
+			float(light.get("sky_factor", 1.0)))
+	_cloud_cache[key] = result
+	return result
+
+
+## The factor on Godot's sky ambient (Environment.ambient_light_energy) at an Earth-fixed point under the clouds: the
+## diffuse light there over the clear sky's, (T_d E_sky + T_sd E_sun,h) / E_sky - above 1 under a thin bright deck,
+## exactly 1 with weather off (T_d = 1, T_sd = 0). Reflections keep the clear sky (a documented limit). Task 9.
+func cloud_ambient_factor(position_itrf_m: Vector3, sun_direction_itrf: Vector3) -> float:
+	var clouds := cloud_light_at(position_itrf_m, sun_direction_itrf)
+	if clouds.y <= 0.0 or not ready:
+		return clouds.z
+	var up := _geodetic_up(position_itrf_m)
+	var mu0 := sun_direction_itrf.dot(up)
+	var lux: Dictionary = _core.atmosphere_illuminance(position_itrf_m, up, sun_direction_itrf)
+	var sky := (lux["sky_lux"] as Vector3).dot(LUMINANCE_WEIGHTS)
+	if mu0 <= 0.0 or sky <= 0.0:
+		return clouds.z
+	var sun_horizontal := (lux["sun_lux"] as Vector3).dot(LUMINANCE_WEIGHTS)
+	return clouds.z + clouds.y * sun_horizontal / sky
 
 
 func _load_task(config_dir: String, cache_dir: String) -> void:

@@ -105,6 +105,7 @@ var _delta := 0.0
 var _mission_press_tdb_s := 0.0  ## clock instant of the pending mission start (the clock holds there meanwhile)
 var _camera_serial := 0  ## serial the camera distance was last fitted to
 var _last_world_tdb_s := NAN  ## the instant of the previous update_world (eye adaptation's time step)
+var _environment: Environment  ## the WorldEnvironment's (ambient energy under the clouds, Task 9)
 
 
 ## The atmosphere's worker tasks write into it and use the core: finished before both go away (review M2).
@@ -394,6 +395,11 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 			visible)
 	sun_light.light_color = light[0]
 	sun_light.light_energy = light[1]
+	# The sky's ambient under the clouds (Task 9): the diffuse light at the lit body over the clear sky's (1 without
+	# weather).
+	if _environment != null:
+		_environment.ambient_light_energy = atmosphere.cloud_ambient_factor(gcrf_to_fixed * lit_gcrf,
+				(gcrf_to_fixed * sun_apparent_from_earth_m).normalized())
 	var moon_lit: Array = atmosphere.moon_light_at(gcrf_to_fixed * lit_gcrf)
 	moon_light.visible = moon_lit[1] > 0.0
 	if moon_light.visible:
@@ -552,6 +558,7 @@ func _setup_environment() -> void:
 	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL
 	sky.radiance_size = Sky.RADIANCE_SIZE_128
 	var environment := Environment.new()
+	_environment = environment
 	environment.background_mode = Environment.BG_SKY
 	environment.sky = sky
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
@@ -567,7 +574,7 @@ func _setup_environment() -> void:
 	# The cloud pass (CloudEffect, before the transparent pass) and night vision's rod step (EyeAdaptation,
 	# VisionEffect: after the transparent pass, before glow and AgX).
 	var compositor := Compositor.new()
-	compositor.compositor_effects = [clouds.effect, atmosphere.vision_effect]
+	compositor.compositor_effects = [clouds.shadow_effect, clouds.effect, atmosphere.vision_effect]
 	world_environment.compositor = compositor
 	add_child(world_environment)
 

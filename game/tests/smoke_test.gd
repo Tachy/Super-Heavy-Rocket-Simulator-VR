@@ -183,8 +183,9 @@ func _check_weather(core: StarsimCore) -> bool:
 	_check(core.weather_gfs_cycle_candidates(hour + 24.0 * 365 * 5, 3).size() == 3, "weather_gfs_cycle_candidates")
 	_check(core.weather_gfs_cycle_candidates(hour, -1).is_empty(), "weather_gfs_cycle_candidates: negative count returns empty")
 	_check(core.weather_snapshot_step(1.0, 10.0) == 1 and core.weather_snapshot_step(1e6, 100.0) == 0, "weather_snapshot_step")
-	_check(core.weather_cloud_light(Vector3(6378137.0, 0, 0), Vector3(1, 0, 0)) == {"sun_transmittance": 1.0, "sky_factor": 1.0},
-			"weather_cloud_light without weather: 1, 1")
+	_check(core.weather_cloud_light(Vector3(6378137.0, 0, 0), Vector3(1, 0, 0)) == {"sun_transmittance": 1.0, "sky_factor": 1.0,
+			"sun_diffuse": 0.0},
+			"weather_cloud_light without weather: 1, 1, 0")
 	var bad: Dictionary = core.weather_load_snapshot("no_such_dir/none.wthr")
 	_check(not bad.get("ok", true) and not String(bad.get("error", "")).is_empty(), "weather_load_snapshot of a missing file fails")
 	var file := OS.get_temp_dir().path_join("starsim_smoke_slab_%d.wthr" % OS.get_process_id())
