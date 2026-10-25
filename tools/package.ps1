@@ -97,7 +97,8 @@ $fileVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).0"
 Write-Host "Version $Version (file version $fileVersion)"
 
 if (-not (Test-Path (Join-Path $Data "spice"))) { throw "data/ is missing: run python tools/data_pipeline/fetch.py first" }
-foreach ($part in @("terrain\earth", "imagery\earth\index.toml")) {
+# data/timezones (~2 MB, the local time under the webcast UTC clock) rides in the base data mirror below
+foreach ($part in @("terrain\earth", "imagery\earth\index.toml", "timezones\zone_grid.bin", "timezones\zones.json")) {
     if (-not (Test-Path (Join-Path $Data $part))) { throw "data/$part is missing: run python tools/data_pipeline/fetch.py first" }
 }
 

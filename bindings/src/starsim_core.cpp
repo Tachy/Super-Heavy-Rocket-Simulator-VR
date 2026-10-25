@@ -141,6 +141,15 @@ godot::Vector3 StarsimCore::geodetic_to_gcrf_m(double latitude_deg, double longi
     }, godot::Vector3());
 }
 
+godot::Vector3 StarsimCore::gcrf_to_geodetic(const godot::Vector3& position_gcrf_m, double tdb_s) const {
+    return guarded(*this, [&] {
+        const math::Vec3 fixed = transpose(earth_.fixed_to_gcrf(epoch(tdb_s)).rotation) * to_core(position_gcrf_m);
+        const frames::GeodeticPosition site = frames::fixed_to_geodetic(fixed);
+        return godot::Vector3(site.latitude_rad * constants::rad_to_deg, site.longitude_rad * constants::rad_to_deg,
+                              site.height_m);
+    }, godot::Vector3());
+}
+
 double StarsimCore::solar_eclipse_fraction(double latitude_deg, double longitude_deg, double height_m,
                                            double tdb_s) const {
     return guarded(*this, [&] {
@@ -362,6 +371,7 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("moon_fixed_to_gcrf", "tdb_s"), &StarsimCore::moon_fixed_to_gcrf);
     ClassDB::bind_method(D_METHOD("geodetic_to_gcrf_m", "latitude_deg", "longitude_deg", "height_m", "tdb_s"),
                          &StarsimCore::geodetic_to_gcrf_m);
+    ClassDB::bind_method(D_METHOD("gcrf_to_geodetic", "position_gcrf_m", "tdb_s"), &StarsimCore::gcrf_to_geodetic);
     ClassDB::bind_method(D_METHOD("solar_eclipse_fraction", "latitude_deg", "longitude_deg", "height_m", "tdb_s"),
                          &StarsimCore::solar_eclipse_fraction);
     ClassDB::bind_method(D_METHOD("solar_eclipse_fraction_gcrf", "position_gcrf_m", "tdb_s"),

@@ -50,6 +50,9 @@ public:
 
     // WGS84 geodetic position (degrees, metres) -> GCRF metres.
     godot::Vector3 geodetic_to_gcrf_m(double latitude_deg, double longitude_deg, double height_m, double tdb_s) const;
+    // GCRF metres (Earth-centred) -> WGS84 geodetic Vector3(latitude_deg, longitude_deg, height_m above the
+    // ellipsoid), e.g. the camera's local time zone.
+    godot::Vector3 gcrf_to_geodetic(const godot::Vector3& position_gcrf_m, double tdb_s) const;
 
     // Fraction of the solar disk hidden by the Moon for a ground observer (0 = none, 1 = total).
     double solar_eclipse_fraction(double latitude_deg, double longitude_deg, double height_m, double tdb_s) const;

@@ -84,6 +84,13 @@ def main() -> int:
 
             imagery.fetch(source, REPO_ROOT, download, args.force, args.retile, args.workers)
             continue
+        if source.get("kind") == "timezones":  # zone boundaries -> zone grid + tzdata transitions (timezones.py)
+            import timezones  # lazy: needs numpy, rasterio and tzdata
+
+            timezones.fetch(source, REPO_ROOT, download, args.force)
+            continue
+        if source.get("kind") == "timezones_rules":  # read from the tzdata package by the "timezones" step
+            continue
         if target.exists() and not args.force:
             print("  already present")
         else:

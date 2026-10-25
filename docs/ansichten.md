@@ -153,7 +153,13 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 
 Die Außenansicht trägt ein Overlay im Stil der Starship-Webcasts (Spec `docs/superpowers/specs/2026-10-22-external-view-design.md`).
 Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis es das Cockpit gibt.
-- **Oben:** UTC der Simulation (der Zeitraffer steht im Zeit-Panel, nicht im Overlay).
+- **Oben:** UTC der Simulation (der Zeitraffer steht im Zeit-Panel, nicht im Overlay). Darunter, kleiner, die
+  Ortszeit am Ort der **Kamera** (nicht des betrachteten Objekts), z. B. "Ortszeit 13:42:05 CDT (UTC−5)"; hat die
+  Zone in tzdata keine Abkürzung, nur der Versatz ("Ortszeit 17:30:00 (UTC+5:30)"). Sichtbar, solange die Kamera
+  höchstens 100 km (Kármán-Linie) über dem WGS84-Ellipsoid steht; darüber, im All und am Mond ausgeblendet, ebenso
+  ohne die Zeitzonendaten. Zonen: timezone-boundary-builder (mit Ozeanen, Raster 0,02°, an Grenzen bis ~1 km
+  Unschärfe), Regeln: IANA tzdata, Umstellungen 1990-2060 sekundengenau (`game/util/local_time.gd`).
+  [Entschieden 2026-10-25] Nur unter der UTC des Overlays, nicht im Zeit-Panel.
 - **Zeitbogen:** flacher Bogen oben in der Mitte, "jetzt" am Scheitel. Ereignisse laufen rechts herein und links hinaus,
   die Enden blenden aus. Die Zeitskala ist gestaucht (grob nach relativer Zeit, kein strenger Maßstab) und um "jetzt"
   symmetrisch; sie richtet sich nach den nächsten zwei bis drei Ereignissen und gleitet ohne Sprünge. Beschriftungen

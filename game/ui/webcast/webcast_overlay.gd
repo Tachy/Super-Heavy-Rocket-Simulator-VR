@@ -3,7 +3,8 @@ extends Control
 ## SpaceX-webcast-style overlay at the 1600x900 reference layout (rendered by OverlayHost into a transparent
 ## SubViewport): round gauges of the viewed object bottom left (vehicle) and bottom right (trajectory), chosen by
 ## GaugeRules, with the object's display name under them; the mission timeline arc bottom centre (whole mission, all
-## bodies) with the mission clock and mission name under its apex; the UTC on top. Reads world state only.
+## bodies) with the mission clock and mission name under its apex; the UTC on top, the camera's local time under it
+## (LocalTime, only within 100 km of the Earth's surface). Reads world state only.
 
 const SIZE := Vector2(1600.0, 900.0)
 const GAUGE_Y_PX := 800.0
@@ -71,6 +72,7 @@ func _process(delta: float) -> void:
 	var active := sim.is_active()
 	var timeline: Dictionary = sim.mission_timeline() if active else {}
 	top_bar.show_utc(TopBar.format_utc(world.core.tdb_s_to_utc(now)))
+	top_bar.show_local_time(LocalTime.shared().camera_line(world.core, world.camera.position_gcrf_m, now))
 	var index := world.view_target.resolve(sim) if active and world.focus == World.FOCUS_VEHICLE else -1
 	var mission := sim.mission_display_name() if active else ""
 	if mission == "" and active:  # no mission name configured: the viewed (else the controlled) vehicle's

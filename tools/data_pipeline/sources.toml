@@ -236,6 +236,25 @@ kind = "imagery"
 license = "USDA NAIP: public domain (US Government work, FSA); Copernicus Sentinel-2 data: free, full and open (EU Regulation 1159/2013 and Copernicus legal notice), redistribution of derived products allowed with attribution"
 credit = "Contains modified Copernicus Sentinel data 2025 (processed by the starsim data pipeline: clear-pixel median composite); USDA Farm Service Agency National Agriculture Imagery Program (NAIP) via the Microsoft Planetary Computer; Sentinel-2 L2A COGs via Element 84 Earth Search / AWS Open Data"
 
+[[source]]
+id = "timezones"
+name = "Time zone boundaries with oceans (timezone-boundary-builder release 2026e, GeoJSON) - the camera's local time under the webcast UTC clock"
+url = "https://github.com/evansiroky/timezone-boundary-builder/releases/download/2026e/timezones-with-oceans.geojson.zip"
+target = "data/timezones/zone_grid.bin"
+kind = "timezones"
+license = "Open Database License (ODbL) 1.0 (https://opendatacommons.org/licenses/odbl/1-0/); the derived zone grid data/timezones/zone_grid.bin is a Derivative Database under the same licence"
+credit = "Time zone boundaries: timezone-boundary-builder by Evan Siroky (github.com/evansiroky/timezone-boundary-builder), data (c) OpenStreetMap contributors, available under the Open Database License"
+
+[[source]]
+id = "tzdata"
+name = "IANA Time Zone Database (tzdata 2026e, via the Python tzdata package) - UTC offsets, daylight saving transitions and abbreviations 1990-2060"
+url = "https://www.iana.org/time-zones"
+target = "data/timezones/zones.json"
+kind = "timezones_rules"
+# not downloaded: tools/data_pipeline/timezones.py reads the rules from the `tzdata` package (requirements.txt)
+license = "public domain"
+credit = "IANA Time Zone Database (tz), maintained by the tz contributors"
+
 # ------------------------------------------------------------------ published reference tables (committed)
 
 [[source]]

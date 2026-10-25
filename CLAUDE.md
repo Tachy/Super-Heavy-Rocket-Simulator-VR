@@ -122,6 +122,8 @@ One-time setup:
 # The imagery step inside fetch.py (NAIP + own Sentinel-2 composite -> data/imagery/earth tile pyramids) also needs
 # pystac-client (in requirements.txt), ~2.5 GB raw under data/raw/imagery and network time (S2 composite ~35 min per
 # area); `fetch.py --retile imagery` redoes fit + tiles offline from those caches; `--workers N` sets the process count
+# The timezones step (timezone-boundary-builder with oceans, ODbL, + tzdata package) writes data/timezones/zone_grid.bin
+# (0.02 deg run-length grid, ~1.6 MB) and zones.json (transitions 1990-2060): the camera's local time in the overlay
 python tools/data_pipeline/fetch.py
 python tools/data_pipeline/prepare.py      # converts data/raw -> data/textures, data/stars (needs Pillow)
 
