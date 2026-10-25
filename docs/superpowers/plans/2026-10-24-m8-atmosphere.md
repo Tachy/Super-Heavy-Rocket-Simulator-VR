@@ -418,7 +418,8 @@ D3D12), Godot shading language, PowerShell build scripts.
 - Consumes: Task 5, `eclipse.gdshaderinc`'s `occulted_fraction`.
 - Produces: global `atmosphere_eclipse_segments` (int, 0 = off; [call] 8 when active), `atmosphere_moon_position`
   (vec3, Earth-local, apparent). Inside `atm_sky` / `atm_to_point`: in-scatter = sum over segments of
-  sunlit(midpoint) x [S(p_i) - T(p_i, p_i+1) S(p_i+1)].
+  sunlit(midpoint) x T(x, p_i) [S(p_i) - T(p_i, p_i+1) S(p_i+1)] = sunlit x [T(x, p_i) S(p_i) - T(x, p_i+1) S(p_i+1)] (x: the
+  ray start; corrected in the Task 8+9 review: without T(x, p_i) the unweighted sum does not telescope to S(x) - T(x, y) S(y)).
 
 - [ ] **Step 1: Extend the check** for 2024-04-08 18:42 UTC: from a ground point in totality (Dallas, lat 32.78 lon
   -96.80) the zenith sky is < 1 % of the same sky with segments off, the horizon away from the umbra > 10x the zenith;

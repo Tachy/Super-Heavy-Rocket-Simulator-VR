@@ -128,6 +128,22 @@ atmosphere_moon_position={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+atmosphere_umbra_fluence_0={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+atmosphere_umbra_fluence_1={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+atmosphere_umbra_fluence_2={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+atmosphere_umbra_heights_m={
+"type": "vec3",
+"value": Vector3(150, 4150, 12150)
+}
 atmosphere_sun_distance_m={
 "type": "float",
 "value": 1.495978707e+11

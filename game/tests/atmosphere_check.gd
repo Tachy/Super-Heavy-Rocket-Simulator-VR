@@ -62,6 +62,7 @@ func _run() -> void:
 	if OS.get_cmdline_user_args().has("--f32"):
 		_atmosphere.table_format = Image.FORMAT_RGBAF  # compare with the full-float tables
 	_atmosphere.eye_adaptation_enabled = false  # the fixed day exposure, except in section 10
+	_atmosphere.umbra_light_synchronous = true  # the eclipse samples render one frame after the update
 	print("atmosphere_check: table format %s" % ("RGBAF" if _atmosphere.table_format == Image.FORMAT_RGBAF else "RGBAH"))
 	_atmosphere.start_loading(_core, Paths.config_dir(), Paths.data_dir().path_join("atmosphere"))
 	if not _atmosphere.wait_until_loaded():
@@ -182,10 +183,24 @@ func _run() -> void:
 	await _adapted_sample("adapted, 400 km by day, limb at 10 km", orbit, _limb_direction(orbit, Vector3(0, 0, 1),
 			10000.0), sun_orbit)
 	_check("adapted 400 km by day: the day exposure", is_equal_approx(_last_gain, 1.0), "gain %.4f" % _last_gain)
+	# ~60 s after orbital sunset at 400 km (the Sun 24 deg below the camera's horizontal, the shadow entry at ~20 deg):
+	# the lit limb toward the Sun in view (review I1).
+	_atmosphere.eye_adaptation_enabled = true
+	_atmosphere.snap_adaptation()
+	var sun_after_sunset := _local_direction(10.0, -60.0, 90.0, -24.0)
+	var limb_east := _limb_direction(orbit, _local_direction(10.0, -60.0, 90.0, 0.0), 10000.0)
+	var limb_pixel := await _render(orbit, limb_east, sun_after_sunset)
+	var limb_peak := maxf(limb_pixel.x, maxf(limb_pixel.y, limb_pixel.z))
+	_check("adapted 400 km, 60 s after sunset", limb_peak < ADAPTED_LIMB_MAX,
+			"sunward limb at 10 km %s (peak needs < %.1f, the glow threshold); gain %.2f, down %s, Earth in view %s cd/m^2" % [
+			_vec(limb_pixel), ADAPTED_LIMB_MAX, _atmosphere.exposure_gain, _num(_atmosphere.last_adaptation_down_cd_m2),
+			_num(_atmosphere.last_adaptation_up_cd_m2)])
+	_atmosphere.eye_adaptation_enabled = false
 
-	# 11. Solar eclipse in the sky (Task 9): 2024-04-08 18:42 UTC from Dallas (totality) - the zenith with the segments
-	# < 1 % of the same sky without them, the horizon away from the umbra > 10 x the zenith; two hours later (Dallas out
-	# of the eclipse, the penumbra still on the Earth) segments on and off agree within 1 %.
+	# 11. Solar eclipse in the sky (Task 9, fix round 1): 2024-04-08 18:42 UTC from Dallas (totality) - the zenith within
+	# 0.3 .. 10 cd/m^2 (with the umbra's second-order light), the horizon away from the umbra > 3 x the zenith, a
+	# magnitude-1 star visible and a magnitude-4 star hidden; the adapted eye 400 km up in the umbra; two hours later
+	# (Dallas out of the eclipse, the penumbra still on the Earth) segments on and off agree within 1 %.
 	await _eclipse_samples()
 
 	print("atmosphere_check: %d samples, %d failures" % [_samples, _failures])
@@ -417,8 +432,15 @@ func _moon_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun
 
 const DALLAS_LAT_DEG := 32.78
 const DALLAS_LON_DEG := -96.80
-const ECLIPSE_ZENITH_MAX_FRACTION := 0.01
-const ECLIPSE_HORIZON_MIN_RATIO := 10.0
+## Totality zenith: measured ~1-2 cd/m^2 (sky brightness ~11-12 mag/arcsec^2; Task 8+9 review); the band allows the
+## second-order model's spread.
+const ECLIPSE_ZENITH_MIN_CD_M2 := 0.3
+const ECLIPSE_ZENITH_MAX_CD_M2 := 10.0
+## Eye adaptation just past orbital sunset: the sunward limb stays below Godot's glow threshold (world.gd: 4.0) - not
+## blown out.
+const ADAPTED_LIMB_MAX := 4.0
+var _tdb := NAN  ## the instant for the Moon's shadow on other points (eclipse samples); NAN: none
+const ECLIPSE_HORIZON_MIN_RATIO := 3.0
 const ECLIPSE_OFF_TOLERANCE := 0.01
 var _moon_gcrf := Vector3.ZERO  ## eclipse samples: the Moon's apparent position (GCRF, from the Earth's centre)
 var _sun_gcrf := Vector3.ZERO  ## and the Sun's
@@ -432,26 +454,44 @@ func _eclipse_samples() -> void:
 	var horizon := _local_direction(DALLAS_LAT_DEG, DALLAS_LON_DEG, 315.0, 3.0)  # NW: across the umbra's path
 	var saved_rotation := _earth_to_gcrf
 	var t := _core.utc_to_tdb_s(EPOCH_UTC)
+	_tdb = t
 	var sun_itrf := _set_true_sun_and_moon(t)
 	print("atmosphere_check:   Dallas %s: eclipse fraction %.4f" % [EPOCH_UTC,
 			_core.solar_eclipse_fraction(DALLAS_LAT_DEG, DALLAS_LON_DEG, 2.0, t)])
-	_force_segments = 0
-	var zenith_off := await _render(camera, zenith, sun_itrf)
-	_force_segments = -1
 	var zenith_on := await _render(camera, zenith, sun_itrf)
 	_check("eclipse flag on at totality", _atmosphere.eclipse_segments > 0, "segments %d" % _atmosphere.eclipse_segments)
+	print("atmosphere_check:   umbra fluence (cd/m^2 sr at 1 AU) at 0 / 4 / 12 km: %s %s %s" % [
+			_vec(_atmosphere.umbra_fluence[0]), _vec(_atmosphere.umbra_fluence[1]), _vec(_atmosphere.umbra_fluence[2])])
 	var horizon_on := await _render(camera, horizon, sun_itrf)
-	var y_off := zenith_off.dot(LUMINANCE_WEIGHTS)
-	var y_on := zenith_on.dot(LUMINANCE_WEIGHTS)
-	var y_horizon := horizon_on.dot(LUMINANCE_WEIGHTS)
-	_check("totality, Dallas zenith", y_on < ECLIPSE_ZENITH_MAX_FRACTION * y_off,
-			"segments %s, off %s, fraction %s (needs < %s)" % [_vec(zenith_on), _vec(zenith_off), _num(y_on / y_off),
-			_num(ECLIPSE_ZENITH_MAX_FRACTION)])
-	_check("totality, Dallas horizon NW el 3", y_horizon > ECLIPSE_HORIZON_MIN_RATIO * y_on,
-			"horizon %s, %s x the zenith (needs > %.0f)" % [_vec(horizon_on), _num(y_horizon / y_on),
+	var zenith_cd := zenith_on.dot(LUMINANCE_WEIGHTS) / _atmosphere.scene_per_cd_m2
+	var horizon_cd := horizon_on.dot(LUMINANCE_WEIGHTS) / _atmosphere.scene_per_cd_m2
+	_check("totality, Dallas zenith luminance", zenith_cd >= ECLIPSE_ZENITH_MIN_CD_M2 and zenith_cd <= ECLIPSE_ZENITH_MAX_CD_M2,
+			"%s cd/m^2 (needs %s .. %s)" % [_num(zenith_cd), _num(ECLIPSE_ZENITH_MIN_CD_M2), _num(ECLIPSE_ZENITH_MAX_CD_M2)])
+	_check("totality, Dallas horizon NW el 3", horizon_cd > ECLIPSE_HORIZON_MIN_RATIO * zenith_cd,
+			"%s cd/m^2, %s x the zenith (needs > %.0f)" % [_num(horizon_cd), _num(horizon_cd / zenith_cd),
 			ECLIPSE_HORIZON_MIN_RATIO])
+	await _eclipse_star_sample("totality, magnitude-1 star", camera, zenith, sun_itrf, 1.0, true)
+	await _eclipse_star_sample("totality, magnitude-4 star", camera, zenith, sun_itrf, 4.0, false)
+	# The eye adaptation 400 km up in the umbra (on the shadow axis), the sunlit Earth around the umbra in view: it
+	# adapts to that Earth (review I1), not to the eye's own shadow.
+	var umbra_400 := _umbra_axis_point(t, WGS84_A_M + 400000.0)
+	var umbra_ground := _umbra_axis_point(t, WGS84_A_M)
+	var east := Vector3(-umbra_ground.y, umbra_ground.x, 0.0).normalized()
+	for km in [200.0, 400.0, 1000.0, 2000.0]:
+		var p: Vector3 = (umbra_ground + east * km * 1000.0).normalized() * WGS84_A_M
+		print("atmosphere_check:   eclipse fraction %.0f km east of the umbra centre: %.3f" % [km,
+				_core.solar_eclipse_fraction_gcrf(_earth_to_gcrf * p, t)])
+	_atmosphere.eye_adaptation_enabled = true
+	_atmosphere.snap_adaptation()
+	await _render(umbra_400, -umbra_400.normalized(), sun_itrf)
+	_check("adapted 400 km in the umbra", _atmosphere.exposure_gain < EyeAdaptation.GAIN_MAX,
+			"gain %.2f (needs < %.0f: adapted to the Earth in view, not the eye's shadow; down %s, Earth in view %s cd/m^2, eclipse fraction %.3f)" % [
+			_atmosphere.exposure_gain, EyeAdaptation.GAIN_MAX, _num(_atmosphere.last_adaptation_down_cd_m2),
+			_num(_atmosphere.last_adaptation_up_cd_m2), _core.solar_eclipse_fraction_gcrf(_earth_to_gcrf * umbra_400, t)])
+	_atmosphere.eye_adaptation_enabled = false
 	# Two hours later: Dallas outside the eclipse.
 	var later := t + 7200.0
+	_tdb = later
 	_earth_to_gcrf = _core.earth_fixed_to_gcrf(later)
 	sun_itrf = _set_true_sun_and_moon(later)
 	print("atmosphere_check:   Dallas +2 h: eclipse fraction %.4f" % _core.solar_eclipse_fraction(DALLAS_LAT_DEG,
@@ -465,7 +505,38 @@ func _eclipse_samples() -> void:
 				ECLIPSE_OFF_TOLERANCE)
 	_force_segments = -1
 	_moon_gcrf = Vector3.ZERO
+	_tdb = NAN
 	_earth_to_gcrf = saved_rotation
+
+
+## A star of `magnitude` on the camera axis during the eclipse: compared with the same render without it (the CPU sky
+## knows no eclipse). Visible: luminance ratio > STAR_VISIBLE_FACTOR; hidden: the pixel is the sky (2 %).
+func _eclipse_star_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3,
+		magnitude: float, visible: bool) -> void:
+	var sky := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	var stars := StarField.new()
+	stars.build(PackedVector3Array([_earth_to_gcrf * view_itrf]), PackedFloat32Array([magnitude]),
+			PackedFloat32Array([STAR_COLOR_INDEX]))
+	_viewport.add_child(stars)
+	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	stars.queue_free()
+	if visible:
+		var ratio := got.dot(LUMINANCE_WEIGHTS) / sky.dot(LUMINANCE_WEIGHTS)
+		_check(label + " visible", ratio > STAR_VISIBLE_FACTOR, "luminance ratio %s (needs > %.0f)" % [_num(ratio),
+				STAR_VISIBLE_FACTOR])
+	else:
+		_compare(label + " hidden = sky", sky, got)
+
+
+## The point on the Moon's shadow axis (from the Sun through the Moon) at distance radius_m from the Earth's centre,
+## ITRF at t (the umbra's centre at that height).
+func _umbra_axis_point(t: float, radius_m: float) -> Vector3:
+	var rotation := _core.earth_fixed_to_gcrf(t).transposed()
+	var sun := rotation * _core.apparent_body_position_gcrf_m("sun", t, Vector3.ZERO, Vector3.ZERO)
+	var moon := rotation * _core.apparent_body_position_gcrf_m("moon", t, Vector3.ZERO, Vector3.ZERO)
+	var axis := (moon - sun).normalized()
+	var b := moon.dot(axis)
+	return moon + axis * (-b - sqrt(b * b - (moon.length_squared() - radius_m * radius_m)))
 
 
 ## The true apparent Sun and Moon at t (from the Earth's centre) for _render; returns the Sun's ITRF direction.
@@ -726,7 +797,8 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, alti
 	var sun_gcrf: Vector3 = _earth_to_gcrf * sun_itrf * AU_M
 	if _moon_gcrf != Vector3.ZERO:
 		sun_gcrf = _sun_gcrf  # the eclipse samples: the true Sun (its direction is sun_itrf) and the Moon
-	_atmosphere.update(camera_gcrf, Vector3.ZERO, _earth_to_gcrf, sun_gcrf, 0.0, 1.0, _moon_gcrf)
+	var visible := 1.0 if is_nan(_tdb) else 1.0 - _core.solar_eclipse_fraction_gcrf(camera_gcrf, _tdb)
+	_atmosphere.update(camera_gcrf, Vector3.ZERO, _earth_to_gcrf, sun_gcrf, 0.0, visible, _moon_gcrf, _tdb)
 	if _force_segments >= 0:
 		RenderingServer.global_shader_parameter_set(&"atmosphere_eclipse_segments", _force_segments)
 	if not is_nan(altitude_override):

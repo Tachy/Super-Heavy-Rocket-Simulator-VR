@@ -45,9 +45,13 @@ void fragment() {
 	if (atmosphere_enabled) {
 		// The direct Sun x the local sunlit fraction; the sky light with the eclipse sky's factor (the dark sky inside
 		// the Moon's shadow, the lit air around it: atm_sky_eclipse_factor).
+		// The mesh's vertices are ~156 km apart, the 2024 umbra ~200 km wide: inside the Moon's shadow (penumbra and
+		// umbra) the factor per fragment, elsewhere the vertex value (review M4; the mesh is drawn from > 1.5e7 m only,
+		// the extra cost only during an eclipse).
+		vec3 eclipse_factor = sunlit < 1.0 ? atm_sky_eclipse_factor(local_position) : sky_eclipse_factor;
 		vec3 sky_light;
 		vec3 sun_light = atm_sun_and_sky(local_position, n, sky_light);
-		vec3 day = albedo * (sun_light * sunlit + sky_light * sky_eclipse_factor);
+		vec3 day = albedo * (sun_light * sunlit + sky_light * eclipse_factor);
 		// Camera-relative offset: the mesh is far from the camera whenever it is drawn (the terrain takes over near
 		// the ground), so the difference of the absolute float32 positions is accurate enough here.
 		vec3 offset = (local_position - atmosphere_camera_hi) - atmosphere_camera_lo;

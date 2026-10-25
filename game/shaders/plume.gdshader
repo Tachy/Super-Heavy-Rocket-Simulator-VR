@@ -19,6 +19,8 @@ void fragment() {
 	if (atmosphere_enabled) {
 		atm_to_point_offset(atmosphere_world_to_earth * world_offset, transmittance);
 	}
-	ALBEDO = color.rgb * transmittance * atmosphere_exposure_gain;  // the same exposure as the vehicles (eye adaptation)
+	// Display-referred (one rule for emitters without a physical luminance - plumes, city lights, the stars' own
+	// brightness: game/world/eye_adaptation.gd): not multiplied by the eye adaptation's gain.
+	ALBEDO = color.rgb * transmittance;
 	ALPHA = color.a;
 }

@@ -26,6 +26,22 @@ const ECLIPSE_SEGMENTS := 8
 ## [S: IAU 2015 Resolution B3] nominal solar radius; [S: core constants.hpp moon_mean_radius_m] the Moon's mean radius.
 const SUN_RADIUS_M := 695700000.0
 const MOON_RADIUS_M := 1737400.0
+## [S: NIMA TR8350.2] WGS84 semi-major axis.
+const WGS84_A_M := 6378137.0
+## [call] Heights (m, above the ellipsoid) of the umbra's light (_update_umbra_light) and its update interval (s).
+const UMBRA_HEIGHTS_M := [0.0, 4000.0, 12000.0]
+const UMBRA_UPDATE_S := 1.0
+## [call] _eclipsed_sky_fluence's elevation samples (deg: the zenith, then rings of four azimuths) and the edges of the
+## bands they stand for; dense near the horizon, where the totality sky brightens steeply (a 0-15 deg band sampled at
+## 6 deg alone gave 3x less fluence than at 4 deg). Solid angle of a band: 2 pi (sin e2 - sin e1), split over its ring.
+const UMBRA_ELEVATIONS_DEG := [90.0, 30.0, 11.0, 6.0, 3.0, 1.0]
+const UMBRA_BAND_EDGES_DEG := [50.0, 15.0, 8.0, 4.5, 2.0, 0.0]
+## [call] Segments per direction (converged: 8 vs 16 within 9 %).
+const UMBRA_SEGMENTS := 8
+## [E] The ground's albedo seen from the umbra air: config/atmosphere/earth_optics.toml ground_albedo (the tables').
+const UMBRA_GROUND_ALBEDO := 0.1
+## [call] The eye adaptation's limb samples graze the Earth this high (m) above the model ground.
+const LIMB_SAMPLE_HEIGHT_M := 10000.0
 
 ## True once the textures are uploaded and atmosphere_enabled is set.
 var ready := false
@@ -52,13 +68,27 @@ var camera_local_m := Vector3.ZERO
 ## Fidelity flag: eye adaptation (EyeAdaptation) - on in the game; off: the fixed day exposure (atmosphere_check.gd).
 var eye_adaptation_enabled := true
 ## The exposure gain of the eye adaptation this frame (1 without it), already in luminance_scale and scene_per_cd_m2;
-## the shaders read it as atmosphere_exposure_gain for what is not lit through the tables (Moon, Sun disc, plumes).
+## the shaders read it as atmosphere_exposure_gain for what is not lit through the tables (Moon, Sun disc).
 var exposure_gain := 1.0
 ## A true luminance (cd/m^2, at the Sun's actual distance) -> scene value, incl. the exposure gain.
 var scene_per_cd_m2 := 0.0
 ## Eclipse sky segments this frame (0: no penumbra on the Earth).
 var eclipse_segments := 0
 var _eye := EyeAdaptation.new()
+## The eye adaptation's two parts at the last update (cd/m^2; adaptation_luminance), for tests and the report.
+var last_adaptation_down_cd_m2 := 0.0
+var last_adaptation_up_cd_m2 := 0.0
+## The umbra's light (_update_umbra_light) at the last evaluation: the eclipsed sky's fluence (scalar irradiance, cd/m^2 x
+## sr per channel at 1 AU) at UMBRA_HEIGHTS_M (tests).
+var umbra_fluence: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO, Vector3.ZERO]
+var _umbra_tdb_s := -INF
+## Tests: compute the umbra's light on the calling thread (one render later it is in place).
+var umbra_light_synchronous := false
+var _umbra_task_id := -1
+var _umbra_result: Array[Vector3] = []
+var _tdb_s := NAN
+var _fixed_to_gcrf := Basis.IDENTITY
+var _earth_center_gcrf_m := Vector3.ZERO
 
 var _core: StarsimCore
 var _task_id := -1
@@ -105,12 +135,16 @@ func wait_until_loaded() -> bool:
 ## (world.gd: the longer of the frame time and the simulated time step), sun_visible_fraction the part of the solar disc
 ## the Moon leaves at the camera.
 ## moon_apparent_gcrf_m: the Moon's apparent position (GCRF, as seen from the Earth's centre) for the eclipse sky;
-## Vector3.ZERO: no eclipse.
+## Vector3.ZERO: no eclipse. tdb_s: the instant (the Moon's shadow on points other than the camera: the eye adaptation's
+## view of the Earth, the umbra's light); NAN: no shadow there.
 func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to_gcrf: Basis,
 		sun_apparent_gcrf_m: Vector3, adaptation_dt_s := 0.0, sun_visible_fraction := 1.0,
-		moon_apparent_gcrf_m := Vector3.ZERO) -> void:
+		moon_apparent_gcrf_m := Vector3.ZERO, tdb_s := NAN) -> void:
 	if not poll():
 		return
+	_tdb_s = tdb_s
+	_fixed_to_gcrf = earth_fixed_to_gcrf
+	_earth_center_gcrf_m = earth_center_gcrf_m
 	var gcrf_to_fixed := earth_fixed_to_gcrf.transposed()
 	var camera_fixed := gcrf_to_fixed * (camera_gcrf_m - earth_center_gcrf_m)
 	camera_local_m = Frames.to_render(camera_fixed)
@@ -136,10 +170,16 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m
 		if penumbra_touches(sun_from_earth, moon_from_earth, float(parameters["top_radius_m"])):
 			eclipse_segments = ECLIPSE_SEGMENTS
+			_update_umbra_light(gcrf_to_fixed * sun_from_earth, gcrf_to_fixed * moon_from_earth, sun_fixed)
 		RenderingServer.global_shader_parameter_set(&"atmosphere_moon_position",
 				Frames.to_render(gcrf_to_fixed * moon_from_earth))
 	RenderingServer.global_shader_parameter_set(&"atmosphere_sun_distance_m", sun_from_earth.length())
 	RenderingServer.global_shader_parameter_set(&"atmosphere_eclipse_segments", eclipse_segments)
+	if eclipse_segments == 0 and _umbra_tdb_s != -INF:
+		_umbra_tdb_s = -INF
+		for k in range(3):
+			umbra_fluence[k] = Vector3.ZERO
+			RenderingServer.global_shader_parameter_set(StringName("atmosphere_umbra_fluence_%d" % k), Vector3.ZERO)
 	# Render world axes are GCRF in render axes; Earth-local = P R^T P^T (the transpose of the body's render basis).
 	var world_to_earth := Frames.basis_to_render(earth_fixed_to_gcrf).transposed()
 	RenderingServer.global_shader_parameter_set(&"atmosphere_camera_hi", split[0])
@@ -150,20 +190,205 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	RenderingServer.global_shader_parameter_set(&"atmosphere_luminance_scale", luminance_scale)
 
 
-## Eye adaptation's luminance at an Earth-fixed eye (cd/m^2): a white Lambertian surface lit by the direct Sun at normal
-## incidence (TOA illuminance x the transmittance to the Sun x visible_fraction) and the sky's horizontal irradiance,
-## (E_sun,n + E_sky) / pi x visible_fraction, BT.709 luminance of the RGB luminance channels; the tables' 1 AU values
-## / d_AU^2.
+## Eye adaptation's luminance at an Earth-fixed eye (cd/m^2), the larger of two white-plate equivalents (both view-
+## direction independent, so identical for both VR eyes and steady under head motion):
+## - down: a white Lambertian at the eye lit by the direct Sun at normal incidence (TOA x the transmittance to the Sun)
+##   and the sky's horizontal irradiance, (E_sun,n + E_sky) / pi x visible_fraction (the sky's part as well: the CPU
+##   irradiance knows no eclipse, inside the Moon's shadow the sky overhead is shadowed with the eye);
+## - up [Task 8+9 review I1]: the Earth in view. The visible ground along 13 directions below the eye (the nadir,
+##   weight 0.25; six at 0.6 x the Earth disc's angular radius, 0.5; six grazing the limb LIMB_SAMPLE_HEIGHT_M up, or
+##   2 deg above the horizontal on the ground, 0.25 - a cosine-weighted cap), each the plate equivalent of what it
+##   shows: the ground's illuminance / pi x the view's transmittance plus the in-scattered light on the way
+##   (StarsimCore.atmosphere_sky_luminance_to_point), both x the visible fraction at the ground point, or the limb's sky
+##   luminance (x the visible fraction at the ray's closest approach); times the view factor of the Earth's cap
+##   (R / r)^2. The ground's albedo is not applied: the plate equivalent of a lit ground is the light on it, as for the
+##   down part. On the ground this stays below the down part (the light on the ground and the horizon sky do not exceed
+##   the Sun + sky at the eye); in orbit an eye in the Moon's umbra or just past orbital sunset adapts to the sunlit
+##   Earth or limb it looks at.
+## BT.709 luminance of the RGB luminance channels; the tables' 1 AU values / d_AU^2.
 func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visible_fraction: float, d_au: float) -> float:
 	var solar: Vector3 = parameters["solar_illuminance_rgb"]
 	var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
 	var transmittance := _core.atmosphere_sun_transmittance(eye_itrf_m, sun_direction_itrf)
-	var up := Vector3(eye_itrf_m.x, eye_itrf_m.y, eye_itrf_m.z * POLAR_STRETCH * POLAR_STRETCH).normalized()  # geodetic
+	var up := _geodetic_up(eye_itrf_m)
 	var sky: Vector3 = _core.atmosphere_illuminance(eye_itrf_m, up, sun_direction_itrf)["sky_lux"]
-	# The sky's part also x visible_fraction: inside the Moon's shadow the sky overhead is shadowed with the eye (the
-	# CPU irradiance knows no eclipse; an approximation of the eclipse sky's irradiance for the adaptation only).
-	var lux := (solar * sun_factor * transmittance + sky) * visible_fraction
-	return lux.dot(LUMINANCE_WEIGHTS) / (PI * d_au * d_au)
+	var down := ((solar * sun_factor * transmittance + sky) * visible_fraction).dot(LUMINANCE_WEIGHTS) / PI
+	last_adaptation_down_cd_m2 = down / (d_au * d_au)
+	last_adaptation_up_cd_m2 = _earth_in_view_luminance(eye_itrf_m, sun_direction_itrf) / (d_au * d_au)
+	return maxf(last_adaptation_down_cd_m2, last_adaptation_up_cd_m2)
+
+
+## The "up" part of adaptation_luminance (cd/m^2 at 1 AU).
+func _earth_in_view_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3) -> float:
+	var radius := float(parameters["bottom_radius_m"])
+	var eye := _stretch(eye_itrf_m)  # the model space: the ground a sphere of radius `radius`
+	var r := eye.length()
+	var nadir := -eye / r
+	var east := nadir.cross(Vector3(0, 0, 1) if absf(nadir.z) < 0.9 else Vector3(1, 0, 0)).normalized()
+	var north := nadir.cross(east)
+	var disc := asin(clampf(radius / r, 0.0, 1.0))  # the Earth disc's angular radius about the nadir
+	var limb_radius := radius + LIMB_SAMPLE_HEIGHT_M
+	var limb := asin(limb_radius / r) if r > limb_radius else PI * 0.5 + deg_to_rad(2.0)
+	var total := _view_luminance(eye_itrf_m, eye, nadir, radius, sun_direction_itrf) * 0.25
+	for k in range(6):
+		var azimuth := TAU * k / 6.0
+		var side := east * cos(azimuth) + north * sin(azimuth)
+		for ring: Array in [[0.6 * disc, 0.5 / 6.0], [limb, 0.25 / 6.0]]:
+			var angle: float = ring[0]
+			var v := (nadir * cos(angle) + side * sin(angle)).normalized()
+			total += _view_luminance(eye_itrf_m, eye, v, radius, sun_direction_itrf) * float(ring[1])
+	return total * (radius / r) * (radius / r)
+
+
+## One view direction of _earth_in_view_luminance (model-space unit vector v from the model-space eye).
+func _view_luminance(eye_itrf_m: Vector3, eye: Vector3, v: Vector3, radius: float, sun_itrf: Vector3) -> float:
+	var along := eye.dot(v)
+	var discriminant := along * along - (eye.length_squared() - radius * radius)
+	if along < 0.0 and discriminant >= 0.0:
+		var hit := _unstretch(eye + v * (-along - sqrt(discriminant)))
+		var lux: Dictionary = _core.atmosphere_illuminance(hit, _geodetic_up(hit), sun_itrf)
+		var to_point: Dictionary = _core.atmosphere_sky_luminance_to_point(eye_itrf_m, hit, sun_itrf)
+		var t: Vector3 = to_point["transmittance"]
+		var lit: Vector3 = lux["sun_lux"] + lux["sky_lux"]
+		var seen: Vector3 = lit / PI * t + to_point["luminance"]
+		return seen.dot(LUMINANCE_WEIGHTS) * _visible_at(hit)
+	var view := _unstretch(v).normalized()
+	var sky: Vector3 = _core.atmosphere_sky_luminance(eye_itrf_m, view, sun_itrf)["luminance"]
+	return sky.dot(LUMINANCE_WEIGHTS) * _visible_at(_unstretch(eye - v * along))  # the ray's closest approach
+
+
+## The Sun's unocculted fraction (Moon) at an Earth-fixed point at this update's instant (1 without one); instant:
+## [tdb_s, fixed_to_gcrf, earth_center_gcrf_m] captured for a worker, [] = this update's.
+func _visible_at(point_itrf_m: Vector3, instant := []) -> float:
+	var t: float = _tdb_s if instant.is_empty() else instant[0]
+	if is_nan(t):
+		return 1.0
+	var rotation: Basis = _fixed_to_gcrf if instant.is_empty() else instant[1]
+	var center: Vector3 = _earth_center_gcrf_m if instant.is_empty() else instant[2]
+	return 1.0 - _core.solar_eclipse_fraction_gcrf(rotation * point_itrf_m + center, t)
+
+
+## The light in the umbra air (atmosphere_umbra_fluence_*, the second-order source of the eclipse sky,
+## atmosphere.gdshaderinc): at the ground point of the umbra axis (or the surface point nearest to it) and
+## UMBRA_HEIGHTS_M above, the fluence (scalar irradiance) of the eclipsed sky - its luminance along the zenith and four
+## azimuths on each ring of UMBRA_ELEVATIONS_DEG (UMBRA_SEGMENTS segments at d (i/n)^2, each weighted by the visible fraction at its midpoint; the
+## segments' in-scatter as differences of StarsimCore.atmosphere_sky_luminance_to_point), times the solid angles of the
+## elevation bands (UMBRA_BAND_EDGES_DEG); above the ground also the lower hemisphere (the air below and the lit ground
+## beyond the umbra). The low ring dominates: in totality the light reaches the umbra
+## nearly horizontally from the sunlit air ~100 km away. Once per simulated UMBRA_UPDATE_S (the umbra moves ~1 km/s).
+func _update_umbra_light(sun_fixed_m: Vector3, moon_fixed_m: Vector3, sun_direction_itrf: Vector3) -> void:
+	if _umbra_task_id >= 0:
+		if not WorkerThreadPool.is_task_completed(_umbra_task_id):
+			return
+		WorkerThreadPool.wait_for_task_completion(_umbra_task_id)
+		_umbra_task_id = -1
+		_upload_umbra_light()
+	if is_nan(_tdb_s) or absf(_tdb_s - _umbra_tdb_s) < UMBRA_UPDATE_S:
+		return
+	_umbra_tdb_s = _tdb_s
+	var axis := (moon_fixed_m - sun_fixed_m).normalized()
+	var b := moon_fixed_m.dot(axis)
+	var c := moon_fixed_m.length_squared() - WGS84_A_M * WGS84_A_M
+	var ground: Vector3
+	if b * b - c >= 0.0:
+		ground = moon_fixed_m + axis * (-b - sqrt(b * b - c))
+	else:  # the umbra misses the Earth: the surface point nearest to the axis
+		ground = (moon_fixed_m - axis * b).normalized() * WGS84_A_M
+	# ~10 ms of core calls: on a worker (the core's lookups are const, CSPICE is serialised by the core), uploaded on a
+	# later frame; synchronous for tests that render one frame later (umbra_light_synchronous).
+	var instant := [_tdb_s, _fixed_to_gcrf, _earth_center_gcrf_m]
+	var job := _compute_umbra_light.bind(ground, sun_direction_itrf, instant)
+	if umbra_light_synchronous:
+		job.call()
+		_upload_umbra_light()
+	else:
+		_umbra_task_id = WorkerThreadPool.add_task(job, false, "umbra light")
+
+
+## Worker part of _update_umbra_light: the fluences at UMBRA_HEIGHTS_M into _umbra_result.
+func _compute_umbra_light(ground: Vector3, sun_direction_itrf: Vector3, instant: Array) -> void:
+	var up := _geodetic_up(ground)
+	var result: Array[Vector3] = []
+	for k in range(3):
+		var height: float = UMBRA_HEIGHTS_M[k]
+		result.append(_eclipsed_sky_fluence(ground + up * height, up, sun_direction_itrf, ground.length(), instant))
+	_umbra_result = result
+
+
+## Main thread: the computed fluences into the shader globals.
+func _upload_umbra_light() -> void:
+	var heights := Vector3.ZERO
+	var model_offset := WGS84_A_M - float(parameters["bottom_radius_m"])  # ellipsoid above the model ground
+	for k in range(3):
+		umbra_fluence[k] = _umbra_result[k]
+		heights[k] = float(UMBRA_HEIGHTS_M[k]) + model_offset
+		RenderingServer.global_shader_parameter_set(StringName("atmosphere_umbra_fluence_%d" % k), _umbra_result[k])
+	RenderingServer.global_shader_parameter_set(&"atmosphere_umbra_heights_m", heights)
+
+
+## The eclipsed sky's fluence at an Earth-fixed point (cd/m^2 x sr per channel at 1 AU; see _update_umbra_light);
+## ground_radius_m: the Earth's radius under the point. Points above the ground also take the lower hemisphere (the
+## mirrored rings): the air down to the ground and the ground itself (UMBRA_GROUND_ALBEDO, lit by the Sun and the sky,
+## x its visible fraction).
+func _eclipsed_sky_fluence(point_itrf_m: Vector3, up: Vector3, sun_itrf: Vector3, ground_radius_m: float,
+		instant: Array) -> Vector3:
+	var east := up.cross(Vector3(0, 0, 1) if absf(up.z) < 0.9 else Vector3(1, 0, 0)).normalized()
+	var north := up.cross(east)
+	var top := float(parameters["top_radius_m"]) - float(parameters["bottom_radius_m"]) + WGS84_A_M
+	var fluence := Vector3.ZERO
+	var signs := [1.0, -1.0] if point_itrf_m.length() - ground_radius_m > 10.0 else [1.0]
+	for hemisphere: float in signs:
+		for k in range(1 + 4 * (UMBRA_ELEVATIONS_DEG.size() - 1)):
+			var ring := 0 if k == 0 else 1 + (k - 1) / 4
+			var elevation: float = UMBRA_ELEVATIONS_DEG[ring] * hemisphere
+			var upper: float = 90.0 if ring == 0 else UMBRA_BAND_EDGES_DEG[ring - 1]
+			var solid_angle := TAU * (sin(deg_to_rad(upper)) - sin(deg_to_rad(UMBRA_BAND_EDGES_DEG[ring])))
+			if ring > 0:
+				solid_angle /= 4.0
+			var azimuth := (k % 4) * PI * 0.5
+			var v := up * hemisphere
+			if k > 0:
+				v = (up * sin(deg_to_rad(elevation)) + (north * cos(azimuth) + east * sin(azimuth))
+						* cos(deg_to_rad(elevation))).normalized()
+			var along := point_itrf_m.dot(v)
+			var d_end := -along + sqrt(along * along - (point_itrf_m.length_squared() - top * top))
+			var ground_discriminant := along * along - (point_itrf_m.length_squared() - ground_radius_m * ground_radius_m)
+			var hits_ground := along < 0.0 and ground_discriminant >= 0.0
+			if hits_ground:
+				d_end = -along - sqrt(ground_discriminant)
+			var previous := Vector3.ZERO
+			var eclipsed := Vector3.ZERO
+			for i in range(1, UMBRA_SEGMENTS + 1):
+				var f := float(i) / UMBRA_SEGMENTS
+				var cumulative: Vector3
+				if i < UMBRA_SEGMENTS or hits_ground:
+					cumulative = _core.atmosphere_sky_luminance_to_point(point_itrf_m, point_itrf_m + v * (d_end * f * f),
+							sun_itrf)["luminance"]
+				else:
+					cumulative = _core.atmosphere_sky_luminance(point_itrf_m, v, sun_itrf)["luminance"]
+				var f_mid := (float(i) - 0.5) / UMBRA_SEGMENTS
+				eclipsed += (cumulative - previous) * _visible_at(point_itrf_m + v * (d_end * f_mid * f_mid), instant)
+				previous = cumulative
+			if hits_ground:
+				var hit := point_itrf_m + v * d_end
+				var lux: Dictionary = _core.atmosphere_illuminance(hit, _geodetic_up(hit), sun_itrf)
+				var t: Vector3 = _core.atmosphere_sky_luminance_to_point(point_itrf_m, hit, sun_itrf)["transmittance"]
+				var lit: Vector3 = lux["sun_lux"] + lux["sky_lux"]
+				eclipsed += lit * (UMBRA_GROUND_ALBEDO / PI) * t * _visible_at(hit, instant)
+			fluence += eclipsed * solid_angle
+	return fluence
+
+
+static func _geodetic_up(point_itrf_m: Vector3) -> Vector3:
+	return Vector3(point_itrf_m.x, point_itrf_m.y, point_itrf_m.z * POLAR_STRETCH * POLAR_STRETCH).normalized()
+
+
+static func _stretch(v: Vector3) -> Vector3:
+	return Vector3(v.x, v.y, v.z * POLAR_STRETCH)
+
+
+static func _unstretch(v: Vector3) -> Vector3:
+	return Vector3(v.x, v.y, v.z / POLAR_STRETCH)
 
 
 ## Eye adaptation's reference luminance (cd/m^2): the white Lambertian under the top-of-atmosphere Sun at d_AU, the state
