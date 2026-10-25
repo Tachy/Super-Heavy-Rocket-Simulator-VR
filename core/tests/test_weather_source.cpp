@@ -188,26 +188,36 @@ TEST_CASE("Warp steps align to hours since 1900", "[weather]") {
     CHECK(b.blend == Catch::Approx(1.0 / 3.0));
 }
 
-TEST_CASE("ERA5 requests list the six files of a snapshot", "[weather]") {
+TEST_CASE("ERA5 requests list the seven files of a snapshot", "[weather]") {
     WeatherSnapshotId id;
     id.kind = WeatherSourceKind::era5;
     id.valid_hour = 1088136;
     const auto reqs = era5_requests(id);
-    REQUIRE(reqs.size() == 6);
+    REQUIRE(reqs.size() == 7);
     const std::string base = "https://storage.googleapis.com/gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3/";
     CHECK(reqs[0].url == base + "fraction_of_cloud_cover/1088136.0.0.0");
     CHECK(reqs[1].url == base + "specific_cloud_liquid_water_content/1088136.0.0.0");
     CHECK(reqs[2].url == base + "specific_cloud_ice_water_content/1088136.0.0.0");
     CHECK(reqs[3].url == base + "temperature/1088136.0.0.0");
     CHECK(reqs[4].url == base + "surface_pressure/1088136.0.0");
-    CHECK(reqs[5].url == base + "geopotential_at_surface/1088136.0.0");
+    CHECK(reqs[5].url == base + "total_column_water_vapour/1088136.0.0");
+    CHECK(reqs[6].url == base + "geopotential_at_surface/1088136.0.0");
+    // File names as the weather_snapshot CLI reads them; the static orography's name has no hour (one cached copy).
+    CHECK(reqs[0].file_name == "era5_1088136_fraction_of_cloud_cover.blosc");
+    CHECK(reqs[5].file_name == "era5_1088136_total_column_water_vapour.blosc");
+    CHECK(reqs[6].file_name == era5_static_orography_file_name);
+    CHECK(std::string(era5_static_orography_file_name) == "era5_geopotential_at_surface.blosc");
     std::set<std::string> names;
     for (const auto& r : reqs) {
         CHECK(r.first_byte == -1);
         CHECK(r.last_byte == -1);
         names.insert(r.file_name);
     }
-    CHECK(names.size() == 6);
+    CHECK(names.size() == 7);
+    WeatherSnapshotId other = id;
+    other.valid_hour += 1;
+    CHECK(era5_requests(other)[6].file_name == reqs[6].file_name);
+    CHECK(era5_requests(other)[6].url == base + "geopotential_at_surface/1088137.0.0");
 
     // An analog requests its reference-year hour.
     WeatherSnapshotId analog;
@@ -231,7 +241,13 @@ TEST_CASE("GFS byte ranges come from the index", "[weather]") {
           "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20260920/00/atmos/gfs.t00z.pgrb2.0p25.f006.idx");
 
     const auto reqs = gfs_requests(id, idx);
-    CHECK(reqs.size() == 5 * 22);
+    REQUIRE(reqs.size() == 5 * 22 + 1);
+    // File names as the weather_snapshot CLI reads them; the ground (HGT surface) comes last.
+    CHECK(reqs[0].file_name == "gfs_1110792_f006_TCDC_1000mb.grb2");
+    CHECK(reqs[21].file_name == "gfs_1110792_f006_TCDC_0050mb.grb2");
+    CHECK(reqs.back().file_name == "gfs_1110792_f006_HGT_surface.grb2");
+    CHECK(reqs.back().first_byte == 412883802);  // line 562 HGT:surface
+    CHECK(reqs.back().last_byte == 413376245 - 1);        // line 563 starts at 413376245
     const std::string grib_url = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20260920/00/atmos/gfs.t00z.pgrb2.0p25.f006";
     for (const auto& r : reqs) {
         CHECK(r.url == grib_url);
@@ -291,17 +307,20 @@ TEST_CASE("GFS analysis leads use anl in the index", "[weather]") {
             offset += 1000;
         }
     }
+    idx += std::to_string(n++) + ":" + std::to_string(offset) + ":d=2026092000:HGT:surface:anl:\n";
     WeatherSnapshotId id;
     id.kind = WeatherSourceKind::gfs;
     id.cycle_hour = hour_of(2026, 9, 20, 0);
     id.lead_h = 0;
     id.valid_hour = id.cycle_hour;
     const auto reqs = gfs_requests(id, idx);
-    REQUIRE(reqs.size() == 110);
+    REQUIRE(reqs.size() == 111);
     CHECK(reqs[0].first_byte == 0);
     CHECK(reqs[0].last_byte == 999);
     CHECK(reqs.back().last_byte == -1);  // the file's last record: open end
     CHECK(reqs[0].url.find(".f000") != std::string::npos);
+    // Without the HGT surface record (the ground) the snapshot cannot be built: throws.
+    CHECK_THROWS_AS(gfs_requests(id, idx.substr(0, idx.rfind(std::to_string(n - 1) + ":"))), std::runtime_error);
     id.lead_h = 6;  // there are no "6 hour fcst" lines in this index
     CHECK_THROWS_AS(gfs_requests(id, idx), std::runtime_error);
 }

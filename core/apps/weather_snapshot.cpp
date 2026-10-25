@@ -1,10 +1,10 @@
 // weather_snapshot (M8 weather and clouds): builds one weather snapshot cache file (.wthr) from the raw downloads.
 // Usage:
 //   weather_snapshot --era5|--gfs <raw dir> --id <cache key> [--config <config dir>] --out <file> [--downsample N]
-// Raw files (weather_source.hpp request planning):
+// Raw files, named by weather_source.hpp (era5_file_name, gfs_level_file_name, ...) as the request planning saves them:
 //   ERA5: <raw dir>/<key>_<variable>.blosc for fraction_of_cloud_cover, specific_cloud_liquid_water_content,
-//         specific_cloud_ice_water_content, temperature, specific_humidity (37 x 721 x 1440), surface_pressure,
-//         geopotential_at_surface (721 x 1440); key "era5_<hour>".
+//         specific_cloud_ice_water_content, temperature (37 x 721 x 1440), surface_pressure,
+//         total_column_water_vapour (721 x 1440) and the static era5_geopotential_at_surface.blosc; key "era5_<hour>".
 //   GFS:  <raw dir>/<key>_<VAR>_<llll>mb.grb2 for TCDC, CLMR, ICMR, HGT, TMP on 1000..50 mb and <key>_HGT_surface.grb2;
 //         key "gfs_<cycle hour>_f<lead>".
 // Exit code 0 on success, 1 on an error.
@@ -69,9 +69,12 @@ WeatherSnapshotId parse_key(const std::string& key) {
     throw std::runtime_error("unknown cache key " + key);
 }
 
+FloatGrid era5_file(const std::filesystem::path& file, int levels) {
+    return weather_decode::decode_zarr_blosc_chunk(read_file(file), levels, grid_rows, grid_columns);
+}
+
 FloatGrid era5_grid(const std::filesystem::path& dir, const std::string& key, const char* variable, int levels) {
-    return weather_decode::decode_zarr_blosc_chunk(read_file(dir / (key + "_" + variable + ".blosc")), levels, grid_rows,
-                                                   grid_columns);
+    return era5_file(dir / environment::era5_file_name(key, variable), levels);
 }
 
 FloatGrid gfs_record(const std::filesystem::path& file) {
@@ -90,9 +93,7 @@ FloatGrid gfs_levels(const std::filesystem::path& dir, const std::string& key, c
     out.columns = grid_columns;
     out.values.reserve(static_cast<std::size_t>(out.levels) * grid_rows * grid_columns);
     for (int mb : gfs_levels_mb) {
-        char level[8];
-        std::snprintf(level, sizeof level, "%04d", mb);
-        const FloatGrid g = gfs_record(dir / (key + "_" + variable + "_" + level + "mb.grb2"));
+        const FloatGrid g = gfs_record(dir / environment::gfs_level_file_name(key, variable, mb));
         out.values.insert(out.values.end(), g.values.begin(), g.values.end());
     }
     return out;
@@ -141,9 +142,9 @@ int main(int argc, char** argv) {
             f.liquid_kg_kg = era5_grid(raw_dir, key, "specific_cloud_liquid_water_content", levels);
             f.ice_kg_kg = era5_grid(raw_dir, key, "specific_cloud_ice_water_content", levels);
             f.temperature_k = era5_grid(raw_dir, key, "temperature", levels);
-            f.specific_humidity_kg_kg = era5_grid(raw_dir, key, "specific_humidity", levels);
             f.surface_pressure_pa = era5_grid(raw_dir, key, "surface_pressure", 1);
-            f.surface_geopotential_m2_s2 = era5_grid(raw_dir, key, "geopotential_at_surface", 1);
+            f.total_column_water_vapour_kg_m2 = era5_grid(raw_dir, key, "total_column_water_vapour", 1);
+            f.surface_geopotential_m2_s2 = era5_file(raw_dir / environment::era5_static_orography_file_name, 1);
             snapshot = environment::WeatherSnapshot::from_era5(id, f, geoid);
         } else {
             if (id.kind != WeatherSourceKind::gfs) throw std::runtime_error("--gfs needs a gfs_<cycle>_f<lead> key");
@@ -154,7 +155,7 @@ int main(int argc, char** argv) {
             f.ice_kg_kg = gfs_levels(raw_dir, key, "ICMR");
             f.temperature_k = gfs_levels(raw_dir, key, "TMP");
             f.geopotential_height_m = gfs_levels(raw_dir, key, "HGT");
-            f.surface_geopotential_height_m = gfs_record(raw_dir / (key + "_HGT_surface.grb2"));
+            f.surface_geopotential_height_m = gfs_record(raw_dir / environment::gfs_surface_height_file_name(key));
             snapshot = environment::WeatherSnapshot::from_gfs(id, f, geoid);
         }
         if (downsample > 1) snapshot = snapshot->downsampled(downsample);

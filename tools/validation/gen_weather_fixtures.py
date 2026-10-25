@@ -13,14 +13,14 @@ Writes tests/validation/weather/:
   gfs_<var>_<level>_reference.toml  grid metadata, the packing (template, E, D) and the values at 20 grid points,
                                 decoded by cfgrib (ecCodes)
   era5_columns.toml             six ERA5 columns at one hour (the weather snapshot tests): all 37 levels of
-                                temperature, specific humidity, the three cloud fields and the store's geopotential,
-                                plus surface pressure and surface geopotential
+                                temperature, the three cloud fields and the store's geopotential, plus surface
+                                pressure, surface geopotential and total column water vapour
   gfs_column.toml               one GFS column (HGT / TMP on the 22 levels 1000..50 mb + HGT surface), cfgrib-decoded
 
 Offline tool only, not part of the build (references are TOML: the tests read them with toml++):
     python -m pip install numpy numcodecs xarray cfgrib eccodes
     python -I tools/validation/gen_weather_fixtures.py
-Downloads (seven whole ERA5 chunks, ~0.6 GB; ~25 MB GFS records) are cached in data/raw/weather_fixtures/.
+Downloads (six whole ERA5 chunks, ~0.5 GB; ~25 MB GFS records) are cached in data/raw/weather_fixtures/.
 """
 import datetime
 import pathlib
@@ -64,7 +64,6 @@ ERA5_PROFILE_COLUMNS = [
 ]
 ERA5_COLUMN_VARIABLES = [  # (store variable, TOML key)
     ("temperature", "temperature_k"),
-    ("specific_humidity", "specific_humidity_kg_kg"),
     ("fraction_of_cloud_cover", "cloud_fraction"),
     ("specific_cloud_liquid_water_content", "liquid_kg_kg"),
     ("specific_cloud_ice_water_content", "ice_kg_kg"),
@@ -257,7 +256,8 @@ def write_era5_columns():
             c[key] = field[:, c["row"], c["column"]]
         del field
     for variable, key in (("surface_pressure", "surface_pressure_pa"),
-                          ("geopotential_at_surface", "surface_geopotential_m2_s2")):
+                          ("geopotential_at_surface", "surface_geopotential_m2_s2"),
+                          ("total_column_water_vapour", "total_column_water_vapour_kg_m2")):
         field = era5_chunk(variable, False)
         for c in columns:
             c[key] = field[c["row"], c["column"]]
@@ -266,6 +266,7 @@ def write_era5_columns():
                   f"latitude_deg = {90.0 - 0.25 * c['row']}", f"longitude_deg = {0.25 * c['column']}",
                   f"surface_pressure_pa = {toml_float(c['surface_pressure_pa'])}",
                   f"surface_geopotential_m2_s2 = {toml_float(c['surface_geopotential_m2_s2'])}"]
+        lines.append(f"total_column_water_vapour_kg_m2 = {toml_float(c['total_column_water_vapour_kg_m2'])}")
         lines += [f"{key} = {toml_list(c[key])}" for _, key in ERA5_COLUMN_VARIABLES]
         lines.append("")
         print(f"  column {c['name']}: p_s {float(c['surface_pressure_pa']):.0f} Pa, "

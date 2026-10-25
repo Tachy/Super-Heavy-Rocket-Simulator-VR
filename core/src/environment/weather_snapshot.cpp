@@ -75,23 +75,33 @@ void for_each_row(int rows, Fn fn) {
     for (auto& th : pool) th.join();
 }
 
-// Heights (gpm) of the levels visited in `order` (descending pressure), NaN at or below the surface.
-template <class Temperature, class Humidity>
+// Heights (gpm) of the levels visited in `order` (descending pressure), NaN at or below the surface. The humidity of
+// the virtual temperature is the column water vapour spread with the exponential profile (weather_snapshot.hpp).
+template <class Temperature>
 void integrate_heights(const std::vector<int>& order, std::span<const double> levels_pa, Temperature temperature_k,
-                       Humidity specific_humidity, double surface_pressure_pa, double surface_geopotential_m2_s2,
-                       std::span<double> out_gpm) {
+                       double total_column_water_vapour_kg_m2, double surface_pressure_pa,
+                       double surface_geopotential_m2_s2, std::span<double> out_gpm) {
     std::fill(out_gpm.begin(), out_gpm.end(), nan);
     if (!std::isfinite(surface_pressure_pa) || !std::isfinite(surface_geopotential_m2_s2)) return;
     const double rd_g = c::dry_air_gas_constant_j_kgk / c::standard_gravity_mps2;
     const double vapour_factor = c::water_vapour_gas_constant_j_kgk / c::dry_air_gas_constant_j_kgk - 1.0;
+    const double column_vapour = std::max(0.0, finite_or_zero(total_column_water_vapour_kg_m2));
     double previous_p = surface_pressure_pa, previous_tv = 0.0, previous_z = 0.0;
+    double surface_q = 0.0, profile_exponent = 0.0;  // q = surface_q (p / p_s)^profile_exponent
     bool started = false;
     for (int k : order) {
         const double p = levels_pa[k];
         if (!(p < surface_pressure_pa) || !(p > 0.0)) continue;
         const double t = temperature_k(k);
         if (!std::isfinite(t) || t <= 0.0) continue;
-        const double tv = t * (1.0 + vapour_factor * std::max(0.0, finite_or_zero(specific_humidity(k))));
+        if (!started) {
+            // a = H_p / H_v from the first level's temperature; q_s = W g0 a / p_s.
+            const double a = std::max(1.0, rd_g * t / c::water_vapour_scale_height_m);
+            surface_q = column_vapour * c::standard_gravity_mps2 * a / surface_pressure_pa;
+            profile_exponent = a - 1.0;
+        }
+        const double q = surface_q * std::pow(p / surface_pressure_pa, profile_exponent);
+        const double tv = t * (1.0 + vapour_factor * q);
         double z;
         if (!started) {
             // From the surface to the first level above it: the standard lapse rate below that level's temperature.
@@ -218,17 +228,14 @@ double decode_weather_cloud_fraction(std::uint8_t code) { return code / 255.0; }
 
 std::vector<double> hypsometric_level_heights_gpm(std::span<const double> levels_pa,
                                                   std::span<const double> temperature_k,
-                                                  std::span<const double> specific_humidity_kg_kg,
-                                                  double surface_pressure_pa, double surface_geopotential_m2_s2) {
-    if (temperature_k.size() != levels_pa.size() ||
-        (!specific_humidity_kg_kg.empty() && specific_humidity_kg_kg.size() != levels_pa.size())) {
+                                                  double total_column_water_vapour_kg_m2, double surface_pressure_pa,
+                                                  double surface_geopotential_m2_s2) {
+    if (temperature_k.size() != levels_pa.size()) {
         throw std::invalid_argument("hypsometric_level_heights_gpm: spans differ in length");
     }
     std::vector<double> out(levels_pa.size());
-    integrate_heights(
-        descending_pressure_order(levels_pa), levels_pa, [&](int k) { return temperature_k[k]; },
-        [&](int k) { return specific_humidity_kg_kg.empty() ? 0.0 : specific_humidity_kg_kg[k]; },
-        surface_pressure_pa, surface_geopotential_m2_s2, out);
+    integrate_heights(descending_pressure_order(levels_pa), levels_pa, [&](int k) { return temperature_k[k]; },
+                      total_column_water_vapour_kg_m2, surface_pressure_pa, surface_geopotential_m2_s2, out);
     return out;
 }
 
@@ -262,9 +269,9 @@ WeatherSnapshot WeatherSnapshot::from_era5(const WeatherSnapshotId& id, const Er
     require_shape(f.liquid_kg_kg, levels, rows, columns, "liquid_kg_kg");
     require_shape(f.ice_kg_kg, levels, rows, columns, "ice_kg_kg");
     require_shape(f.temperature_k, levels, rows, columns, "temperature_k");
-    require_shape(f.specific_humidity_kg_kg, levels, rows, columns, "specific_humidity_kg_kg");
     require_shape(f.surface_pressure_pa, 1, rows, columns, "surface_pressure_pa");
     require_shape(f.surface_geopotential_m2_s2, 1, rows, columns, "surface_geopotential_m2_s2");
+    require_shape(f.total_column_water_vapour_kg_m2, 1, rows, columns, "total_column_water_vapour_kg_m2");
 
     WeatherSnapshot s(id, rows, columns);
     const std::vector<int> order = descending_pressure_order(f.levels_pa);
@@ -279,9 +286,8 @@ WeatherSnapshot WeatherSnapshot::from_era5(const WeatherSnapshotId& id, const Er
             const double n = geoid.undulation_m(lat, column_longitude_rad(col, columns));
             const double ps = cell(f.surface_pressure_pa, 0, r, col);
             const double phis = cell(f.surface_geopotential_m2_s2, 0, r, col);
-            integrate_heights(
-                order, f.levels_pa, [&](int k) { return cell(f.temperature_k, k, r, col); },
-                [&](int k) { return cell(f.specific_humidity_kg_kg, k, r, col); }, ps, phis, z);
+            integrate_heights(order, f.levels_pa, [&](int k) { return cell(f.temperature_k, k, r, col); },
+                              cell(f.total_column_water_vapour_kg_m2, 0, r, col), ps, phis, z);
             samples.clear();
             for (int k = 0; k < levels; ++k) {
                 if (std::isnan(z[static_cast<std::size_t>(k)])) continue;

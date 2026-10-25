@@ -65,14 +65,23 @@ constexpr int gfs_max_lead_h = 384;
 WeatherBracket weather_bracket(double utc_hour_f, int step_h, const std::optional<Era5Availability>& era5,
                                const std::optional<GfsCycle>& latest_gfs, int analog_reference_year);
 
-// Requests for one snapshot: ERA5 gives the six files (fraction_of_cloud_cover, specific_cloud_liquid_water_content,
-// specific_cloud_ice_water_content, temperature, surface_pressure, geopotential_at_surface); an analog snapshot
-// requests its reference-year hour. The static geopotential is requested with the same t; the caller skips it if cached.
+// Raw file names, shared by the request planning and the weather_snapshot CLI that reads them:
+// ERA5 "<key>_<variable>.blosc"; the static orography (geopotential_at_surface) has one name for every hour, so a cache
+// keyed by file name downloads it once; GFS "<key>_<VAR>_<llll>mb.grb2" and the ground "<key>_HGT_surface.grb2".
+inline constexpr const char* era5_static_orography_file_name = "era5_geopotential_at_surface.blosc";
+std::string era5_file_name(const std::string& cache_key, std::string_view variable);
+std::string gfs_level_file_name(const std::string& cache_key, std::string_view variable, int level_mb);
+std::string gfs_surface_height_file_name(const std::string& cache_key);
+
+// Requests for one snapshot: ERA5 gives seven files - six timed (fraction_of_cloud_cover,
+// specific_cloud_liquid_water_content, specific_cloud_ice_water_content, temperature, surface_pressure,
+// total_column_water_vapour) and the static geopotential_at_surface (URL with the same t, file name without it; the
+// caller skips it if cached); an analog snapshot requests its reference-year hour.
 std::vector<WeatherRequest> era5_requests(const WeatherSnapshotId&);
 
 std::string gfs_index_url(const WeatherSnapshotId&);
-// One byte range per wanted record (TCDC, CLMR, ICMR, HGT, TMP on 1000..50 mb), the last byte of a record is the byte
-// before the next record's offset. Throws std::runtime_error when a wanted record is missing.
+// One byte range per wanted record (TCDC, CLMR, ICMR, HGT, TMP on 1000..50 mb, then HGT surface), the last byte of a
+// record is the byte before the next record's offset. Throws std::runtime_error when a wanted record is missing.
 std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId&, std::string_view idx_text);
 
 // Candidate cycles for probing which one is on the server, newest first, starting at the cycle at or before the wall clock.

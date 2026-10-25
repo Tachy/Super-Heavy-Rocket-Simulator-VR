@@ -113,6 +113,10 @@ inline constexpr double water_vapour_gas_constant_j_kgk = 461.51;
 // Tropospheric lapse rate of the standard atmosphere [S: 6.5 K/km, US Standard Atmosphere 1976, NOAA-S/T 76-1562]:
 // the temperature from the surface to the first pressure level above it.
 inline constexpr double standard_lapse_rate_k_per_m = 0.0065;
+// Scale height of the water-vapour density [E: ~2 km, the usual tropospheric value, e.g. Weaver & Ramanathan 1995,
+// JGR 100(D6), 11585]: spreads ERA5's total column water vapour over the pressure levels (virtual temperature);
+// 1.5 / 2 / 2.5 km give 8.5 / 9.5 / 11.3 m max height error over the six fixture columns.
+inline constexpr double water_vapour_scale_height_m = 2000.0;
 // WGS84 normal gravity (NIMA TR8350.2, 3rd edition, sec. 4.2): equatorial gravity, Somigliana constant k, first
 // eccentricity squared, and m = omega^2 a^2 b / GM of the free-air gradient (eq. 4-3).
 inline constexpr double wgs84_equatorial_gravity_mps2 = 9.7803253359;

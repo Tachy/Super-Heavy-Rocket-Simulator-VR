@@ -41,8 +41,9 @@ std::vector<double> doubles(const toml::node_view<const toml::node>& node) {
 
 struct Era5Column {
     std::string name;
-    double latitude_deg = 0, longitude_deg = 0, surface_pressure_pa = 0, surface_geopotential_m2_s2 = 0;
-    std::vector<double> temperature_k, specific_humidity, cloud_fraction, liquid, ice, geopotential_m2_s2;
+    double latitude_deg = 0, longitude_deg = 0, surface_pressure_pa = 0, surface_geopotential_m2_s2 = 0,
+           total_column_water_vapour_kg_m2 = 0;
+    std::vector<double> temperature_k, cloud_fraction, liquid, ice, geopotential_m2_s2;
 };
 
 struct Era5ColumnSet {
@@ -71,7 +72,7 @@ const Era5ColumnSet& era5_columns() {
             col.surface_pressure_pa = c["surface_pressure_pa"].value<double>().value();
             col.surface_geopotential_m2_s2 = c["surface_geopotential_m2_s2"].value<double>().value();
             col.temperature_k = doubles(c["temperature_k"]);
-            col.specific_humidity = doubles(c["specific_humidity_kg_kg"]);
+            col.total_column_water_vapour_kg_m2 = c["total_column_water_vapour_kg_m2"].value<double>().value();
             col.cloud_fraction = doubles(c["cloud_fraction"]);
             col.liquid = doubles(c["liquid_kg_kg"]);
             col.ice = doubles(c["ice_kg_kg"]);
@@ -108,9 +109,8 @@ Era5Fields era5_fields(int rows, int columns, Pick pick) {
     const int levels = static_cast<int>(set_.levels_pa.size());
     Era5Fields f;
     f.levels_pa = set_.levels_pa;
-    f.cloud_fraction = f.liquid_kg_kg = f.ice_kg_kg = f.temperature_k = f.specific_humidity_kg_kg =
-        grid(levels, rows, columns);
-    f.surface_pressure_pa = f.surface_geopotential_m2_s2 = grid(1, rows, columns);
+    f.cloud_fraction = f.liquid_kg_kg = f.ice_kg_kg = f.temperature_k = grid(levels, rows, columns);
+    f.surface_pressure_pa = f.surface_geopotential_m2_s2 = f.total_column_water_vapour_kg_m2 = grid(1, rows, columns);
     for (int r = 0; r < rows; ++r) {
         for (int c = 0; c < columns; ++c) {
             const Era5Column& col = pick(r, c);
@@ -119,10 +119,10 @@ Era5Fields era5_fields(int rows, int columns, Pick pick) {
                 set(f.liquid_kg_kg, k, r, c, col.liquid[k]);
                 set(f.ice_kg_kg, k, r, c, col.ice[k]);
                 set(f.temperature_k, k, r, c, col.temperature_k[k]);
-                set(f.specific_humidity_kg_kg, k, r, c, col.specific_humidity[k]);
             }
             set(f.surface_pressure_pa, 0, r, c, col.surface_pressure_pa);
             set(f.surface_geopotential_m2_s2, 0, r, c, col.surface_geopotential_m2_s2);
+            set(f.total_column_water_vapour_kg_m2, 0, r, c, col.total_column_water_vapour_kg_m2);
         }
     }
     return f;
@@ -162,9 +162,9 @@ TEST_CASE("Hypsometric heights match ERA5 geopotential", "[weather]") {
     const auto& set_ = era5_columns();
     REQUIRE(set_.columns.size() == 6);
     for (const auto& c : set_.columns) {
-        const auto moist = hypsometric_level_heights_gpm(set_.levels_pa, c.temperature_k, c.specific_humidity,
+        const auto moist = hypsometric_level_heights_gpm(set_.levels_pa, c.temperature_k, c.total_column_water_vapour_kg_m2,
                                                          c.surface_pressure_pa, c.surface_geopotential_m2_s2);
-        const auto dry = hypsometric_level_heights_gpm(set_.levels_pa, c.temperature_k, {}, c.surface_pressure_pa,
+        const auto dry = hypsometric_level_heights_gpm(set_.levels_pa, c.temperature_k, 0.0, c.surface_pressure_pa,
                                                        c.surface_geopotential_m2_s2);
         double max_moist = 0.0, max_dry = 0.0;
         int checked = 0;
@@ -267,7 +267,7 @@ TEST_CASE("Cloud water path is kept on the layers", "[weather]") {
     const auto snapshot = WeatherSnapshot::from_era5(
         era5_id(), era5_fields(rows, columns, [&](int, int) -> const Era5Column& { return c; }), coarse_geoid());
     const double lat = node_latitude(1, rows), lon = node_longitude(1, columns);
-    const auto z = hypsometric_level_heights_gpm(set_.levels_pa, c.temperature_k, c.specific_humidity,
+    const auto z = hypsometric_level_heights_gpm(set_.levels_pa, c.temperature_k, c.total_column_water_vapour_kg_m2,
                                                  c.surface_pressure_pa, c.surface_geopotential_m2_s2);
     const double n = coarse_geoid().undulation_m(lat, lon);
     struct Node { double h, water; };

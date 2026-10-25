@@ -12,9 +12,13 @@
 //
 // Physics of the build (per column):
 // - ERA5: pressure-level heights by integrating the hypsometric equation upward from the surface (surface pressure +
-//   surface geopotential) with the virtual temperature (dry air misses ERA5's geopotential by up to 40 m in the tropics,
-//   the moist integration stays within 11 m; test "Hypsometric heights match ERA5 geopotential"). Between levels the
-//   temperature is linear in ln p; from the surface to the first level above it the standard lapse rate.
+//   surface geopotential) with the virtual temperature Tv = T (1 + (R_v / R_d - 1) q). Dry air misses ERA5's
+//   geopotential by up to 40 m in the tropics; the per-level humidity is not downloaded (103 MB per hour) but
+//   distributed from the single-level total column water vapour W with an exponential vapour-density profile of scale
+//   height H_v (water_vapour_scale_height_m): q = q_s (p / p_s)^(a - 1), a = H_p / H_v, H_p = R_d T_1 / g0 with T_1 the
+//   temperature of the first level above the surface, q_s = W g0 a / p_s (so that W = int q dp / g0). Max error 9.5 m
+//   over the six fixture columns (test "Hypsometric heights match ERA5 geopotential"). Between levels the temperature
+//   is linear in ln p; from the surface to the first level above it the standard lapse rate.
 // - GFS: the HGT field directly; the ground from the surface HGT record.
 // - Geopotential height -> geometric height with the WGS84 normal gravity and the matching effective radius
 //   (geometric_height_m), + the geoid undulation -> height above the ellipsoid.
@@ -58,12 +62,12 @@ std::uint8_t encode_weather_cloud_fraction(double fraction);
 double decode_weather_cloud_fraction(std::uint8_t code);
 
 // Geopotential heights (gpm) of pressure levels above the surface, integrated upward from the surface. levels_pa in any
-// order, the other spans parallel to it; specific_humidity_kg_kg empty = dry air. Levels at or below the surface
-// pressure (or with a non-finite temperature) are NaN.
+// order, temperature_k parallel to it; total_column_water_vapour_kg_m2 0 = dry air (profile above). Levels at or below
+// the surface pressure (or with a non-finite temperature) are NaN.
 std::vector<double> hypsometric_level_heights_gpm(std::span<const double> levels_pa,
                                                   std::span<const double> temperature_k,
-                                                  std::span<const double> specific_humidity_kg_kg,
-                                                  double surface_pressure_pa, double surface_geopotential_m2_s2);
+                                                  double total_column_water_vapour_kg_m2, double surface_pressure_pa,
+                                                  double surface_geopotential_m2_s2);
 
 // Geometric height above the geoid of a geopotential height: Z g0 = gamma(phi) R(phi) h / (R(phi) + h) solved for h,
 // with gamma(phi) the WGS84 normal gravity (Somigliana, NIMA TR8350.2 eq. 4-1) and R(phi) = a / (1 + f + m - 2 f sin^2
@@ -80,8 +84,8 @@ struct WeatherCell {
 
 // ERA5 fields of one hour: the 4D grids have levels_pa.size() levels (any level order), the surface grids one level.
 struct Era5Fields {
-    weather_decode::FloatGrid cloud_fraction, liquid_kg_kg, ice_kg_kg, temperature_k, specific_humidity_kg_kg,
-        surface_pressure_pa, surface_geopotential_m2_s2;
+    weather_decode::FloatGrid cloud_fraction, liquid_kg_kg, ice_kg_kg, temperature_k, surface_pressure_pa,
+        surface_geopotential_m2_s2, total_column_water_vapour_kg_m2;
     std::vector<double> levels_pa;
 };
 

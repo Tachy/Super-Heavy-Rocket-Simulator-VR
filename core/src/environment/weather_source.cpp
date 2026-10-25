@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 
@@ -20,17 +21,20 @@ constexpr const char* gfs_base_url = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/
 constexpr int era5_first_year = 1940;
 
 // ERA5 files per snapshot hour: key suffix is the chunk index of the array's dimensionality (4D: t.0.0.0, 3D: t.0.0).
+// The static orography is the same at every t: its file name has no hour (era5_static_orography_file_name).
 struct Era5Variable {
     const char* name;
     bool four_dimensional;
+    bool time_independent;
 };
-constexpr std::array<Era5Variable, 6> era5_variables{{
-    {"fraction_of_cloud_cover", true},
-    {"specific_cloud_liquid_water_content", true},
-    {"specific_cloud_ice_water_content", true},
-    {"temperature", true},
-    {"surface_pressure", false},
-    {"geopotential_at_surface", false},
+constexpr std::array<Era5Variable, 7> era5_variables{{
+    {"fraction_of_cloud_cover", true, false},
+    {"specific_cloud_liquid_water_content", true, false},
+    {"specific_cloud_ice_water_content", true, false},
+    {"temperature", true, false},
+    {"surface_pressure", false, false},
+    {"total_column_water_vapour", false, false},
+    {"geopotential_at_surface", false, true},
 }};
 
 constexpr std::array<const char*, 5> gfs_variables{"TCDC", "CLMR", "ICMR", "HGT", "TMP"};
@@ -272,11 +276,23 @@ std::vector<WeatherRequest> era5_requests(const WeatherSnapshotId& id) {
     for (const auto& v : era5_variables) {
         WeatherRequest r;
         r.url = std::string(era5_base_url) + v.name + "/" + std::to_string(t) + (v.four_dimensional ? ".0.0.0" : ".0.0");
-        r.file_name = stem + "_" + v.name + ".blosc";
+        r.file_name = v.time_independent ? std::string(era5_static_orography_file_name) : era5_file_name(stem, v.name);
         out.push_back(std::move(r));
     }
     return out;
 }
+
+std::string era5_file_name(const std::string& cache_key, std::string_view variable) {
+    return cache_key + "_" + std::string(variable) + ".blosc";
+}
+
+std::string gfs_level_file_name(const std::string& cache_key, std::string_view variable, int level_mb) {
+    char lvl[8];
+    std::snprintf(lvl, sizeof lvl, "%04d", level_mb);
+    return cache_key + "_" + std::string(variable) + "_" + lvl + "mb.grb2";
+}
+
+std::string gfs_surface_height_file_name(const std::string& cache_key) { return cache_key + "_HGT_surface.grb2"; }
 
 std::string gfs_index_url(const WeatherSnapshotId& id) { return gfs_file_url(id) + ".idx"; }
 
@@ -287,9 +303,11 @@ std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId& id, std::strin
     const std::string url = gfs_file_url(id);
 
     std::map<std::pair<std::string, int>, std::size_t> wanted;  // (variable, level) -> record position
+    std::optional<std::size_t> surface_height;                  // HGT surface: the ground
     for (std::size_t i = 0; i < records.size(); ++i) {
         const IndexRecord& r = records[i];
         if (r.stamp != stamp || r.forecast != forecast) continue;
+        if (r.variable == "HGT" && r.level == "surface" && !surface_height) surface_height = i;
         if (std::find(gfs_variables.begin(), gfs_variables.end(), r.variable) == gfs_variables.end()) continue;
         // Pressure levels read "<N> mb"; "surface", "1 hybrid level" and the like are not wanted.
         const auto space = r.level.find(' ');
@@ -304,6 +322,16 @@ std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId& id, std::strin
     }
 
     std::vector<WeatherRequest> out;
+    const auto add = [&](std::size_t i, std::string file_name) {
+        WeatherRequest r;
+        r.url = url;
+        r.first_byte = records[i].offset;
+        r.last_byte = i + 1 < records.size() ? records[i + 1].offset - 1 : -1;  // the file's last record: open end
+        if (r.last_byte != -1 && r.last_byte < r.first_byte) throw std::runtime_error("GFS index: offsets not increasing");
+        r.file_name = std::move(file_name);
+        out.push_back(std::move(r));
+    };
+    const std::string key = id.cache_key();
     for (const char* variable : gfs_variables) {
         for (int level : gfs_levels_mb) {
             const auto it = wanted.find({variable, level});
@@ -311,18 +339,11 @@ std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId& id, std::strin
                 throw std::runtime_error(std::string("GFS index: record ") + variable + " " + std::to_string(level) +
                                          " mb missing for " + url);
             }
-            const std::size_t i = it->second;
-            WeatherRequest r;
-            r.url = url;
-            r.first_byte = records[i].offset;
-            r.last_byte = i + 1 < records.size() ? records[i + 1].offset - 1 : -1;  // the file's last record: open end
-            if (r.last_byte != -1 && r.last_byte < r.first_byte) throw std::runtime_error("GFS index: offsets not increasing");
-            char lvl[8];
-            std::snprintf(lvl, sizeof lvl, "%04d", level);
-            r.file_name = id.cache_key() + "_" + variable + "_" + lvl + "mb.grb2";
-            out.push_back(std::move(r));
+            add(it->second, gfs_level_file_name(key, variable, level));
         }
     }
+    if (!surface_height) throw std::runtime_error("GFS index: record HGT surface missing for " + url);
+    add(*surface_height, gfs_surface_height_file_name(key));
     return out;
 }
 
