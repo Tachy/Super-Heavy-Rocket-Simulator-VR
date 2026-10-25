@@ -39,7 +39,9 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   EGM2008 geoid as the sea level; one shared immutable instance per data set, `sim::shared_earth_terrain` /
   `shared_lunar_terrain`, also read by the renderer through `StarsimCore.surface_samples`; on the Earth terrain a site's
   leg landing tracks bodies within 5 km of the site; the sea state at a drone ship's station: long-crested JONSWAP sea,
-  deterministic by seed),
+  deterministic by seed; the Earth's atmosphere optics and precomputed scattering: a float64 port of Bruneton 2017 -
+  transmittance / scattering / irradiance tables in luminance with 5 orders + geometric tail, the WGS84 stretch, CPU
+  evaluation of sun transmittance, sky luminance and illuminance - and their cache `data/atmosphere/`, input-hashed),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates, energy- and J2-mean semi-major axis),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,
@@ -203,10 +205,11 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   the site height (FlightBody::ground_height_m) with the coarse committed geoid as the sea. Site heights in
   `launch_sites.toml` are ellipsoidal [D] (`tools/data_pipeline/site_heights.py`; Starbase -21.11 m). Gentle contact
   (<= 3 m/s, <= 10 deg) rests, harder contact is an impact. Landing legs creep downhill (~0.05 m/s) on slopes >= 2 deg
-  and are never judged landed there (off-plateau only; not fixed). Sky is black (no atmosphere rendering); the sea's
-  Fresnel sky term is a placeholder colour and its grazing glint reads as a horizon glow until the atmosphere part.
-  Unverified: NAIP suggests the real OLP-1 mount stands some tens of metres WSW of our [E] site coordinates.
-  Atmosphere: M8. Details: `docs/subsystems.md` "Earth terrain and geoid".
+  and are never judged landed there (off-plateau only; not fixed). Sky, haze and limb come from the precomputed
+  atmosphere (M8, `docs/subsystems.md` "Atmosphere rendering"): every Earth surface, the sea's reflected sky, Moon, Sun,
+  stars and vehicles are seen through it, with eye adaptation (gain <= 25) and the eclipse sky; no clouds yet; one Sun
+  light, evaluated at the followed body. Unverified: NAIP suggests the real OLP-1 mount stands some tens of metres WSW
+  of our [E] site coordinates. Details: `docs/subsystems.md` "Earth terrain and geoid".
 - C++ sources are UTF-8 (/utf-8); UI strings in the core are German.
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
@@ -226,6 +229,13 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   `class_name` scripts.
 - `game/shaders/`: Earth/Moon lighting in body-local metres; `eclipse.gdshaderinc` mirrors
   `core/src/environment/eclipse.cpp` - change both together.
+- Atmosphere (M8): `game/world/atmosphere.gd` (`Atmosphere`: loads the core's tables on a worker, uploads them,
+  per-frame globals `atmosphere_*`, eye adaptation luminance, Sun light, eclipse segments and umbra light),
+  `world/eye_adaptation.gd`, `world/lit_aerial.gd` (vehicle / tower / ship materials); shaders `atmosphere.gdshaderinc`
+  (the GPU port of `core/src/environment/atmosphere_scattering.cpp` - change both together), `sky.gdshader`,
+  `lit_aerial.gdshader`, `plume.gdshader`, `star_visibility.gdshaderinc`. GPU check (needs a GPU):
+  `res://tests/atmosphere_check.gd [-- --f32]`; the table cache is built by `build/core/atmosphere_tables.exe`
+  (~62 s) or on the first game start.
 - Rendering uses APPARENT positions (light time + aberration) for Sun and Moon; geometric positions
   would misplace the Moon's shadow on Earth by ~40 km.
 - UI text is German, code English.

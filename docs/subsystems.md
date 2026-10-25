@@ -2817,16 +2817,17 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
   from far away (the base / day texture shows instead).
 - **Sea** (Task 7, `water.gdshaderinc`): where the node's 128 x 128 water mask (the core's water flag) says sea, the
   geoid surface is shaded by a calm-sea model: body colour from the imagery where it covers, else the day texture
-  (shallow banks visible from orbit), lit diffusely x (1 - F); Fresnel (Schlick, n = 1.333 [S]) times `sky_radiance` =
-  (0.25, 0.35, 0.5) [E] - a placeholder until the atmosphere part; sun glint by the Cox-Munk slope pdf (sigma^2 = 0.003 +
+  (shallow banks visible from orbit), lit diffusely x (1 - F); Fresnel (Schlick, n = 1.333 [S]) times the reflected sky
+  (since M8 atmosphere: the model's sky along the reflected ray, "Atmosphere rendering"; the former placeholder
+  `sky_radiance` is gone); sun glint by the Cox-Munk slope pdf (sigma^2 = 0.003 +
   0.00512 U [S], `glint_wind_mps` 5 [E]) with Smith masking-shadowing [S]; four Gerstner normal octaves (60 / 23 / 9 /
   3.5 m [E], slope 0.04, Q = 0.5), phases computed in double at the camera (`WaterWaves`, global
   `water_wave_phases`: no float32 time in the shader), faded out between 10 and 20 km distance and per octave where it
   aliases; the resolved slope variance is taken out of the Cox-Munk sigma^2. The wave frame re-anchors (a pattern jump)
   after 1 deg only while the camera is above the 20 km fade distance; lower down only after 10 deg [E]. Bodies without
   water (the Moon) build no water mask. Geometry stays on the geoid (a mission's sea state rescales the wave set:
-  "Sea state and deck motion", Task 6). Placeholders: `sky_radiance`; against the black sky the bright grazing glint
-  reads as a glow on the horizon until the atmosphere part.
+  "Sea state and deck motion", Task 6). The Sun light on the sea, the glint and the reflected sky are the transmitted
+  ones, so the far sea fades into the horizon sky (the old grazing "horizon glow" against the black sky is gone).
 - **Moon** (Task 8): the same quadtree on the lunar terrain (LDEM_16 everywhere, the 20 m site tiles), albedo from the
   global colour map, `terrain_moon.gdshader` (Lommel-Seeliger + Earth shadow + earthshine). Leaf level 12, 10.4 m
   spacing at the IM-2 site and at a tile edge (mesh vs core 0.004 / 0.005 m); the far side refines to the curvature limit
@@ -2853,11 +2854,155 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
   morphing becomes almost a pop; K 2.5 keeps ~0.55 node sizes (smallest margin of start below end over all levels
   and both bodies 0.05 of the end, at K 3 0.11; quadtree test). GPU time stays below ~2 ms: the frame is CPU-bound.
   Single sporadic process spikes of 60-120 ms appeared in some runs (one of three K 2.5 runs failed the max gate
-  with a 124 ms spike); unattributed.
+  with a 124 ms spike); traced in M8 atmosphere Task 10 ("Atmosphere rendering", Performance): the run's own
+  per-second console output stalled the main thread in its "process" part (measured up to ~22 ms per print burst;
+  the lines are now printed at the end of the run) - the likely cause of these spikes as well.
 - **Fresh checkout:** the terrain scripts are `class_name` classes; one `godot --headless --path game --import` is
   needed before `--script` runs (tests) can resolve them.
 - **Known issue (open for the user, unverified):** NAIP suggests the real OLP-1 mount stands some tens of metres WSW of
   our [E] site coordinates (`launch_sites.toml`); it affects the physics' site position, not the renderer.
+
+## Atmosphere rendering (M8)
+
+Plan `docs/superpowers/plans/2026-10-24-m8-atmosphere.md`, spec `docs/superpowers/specs/2026-10-24-m8-atmosphere-design.md`.
+One physical model of the Earth's atmosphere for every viewpoint - pad, ascent, orbit, the Moon - so the sky, the limb
+and the haze change continuously with the camera's position, direction and the Sun; colours come out of the spectral
+physics, nothing is tuned. Flight physics is untouched (the vehicles still fly through `Us76Atmosphere`).
+
+- **Model** (core, `environment`): a float64 port of Bruneton's "Precomputed Atmospheric Scattering: a New
+  Implementation" (2017, BSD-3; ported files carry his notice) in precomputed-luminance mode: 15 wavelengths 360-830 nm
+  in five passes of three, folded with the CIE 1931 2-degree functions into XYZ and linear sRGB (D65), no white
+  balance (the TOA Sun is slightly warm-white). Inputs `config/atmosphere/earth_optics.toml` + spectra in
+  `atmosphere_spectra.hpp`: Rayleigh from the refractive index of air (Peck & Reeder 1972) with the King factor
+  (Bucholtz 1995), the US76 number density as profile; ozone cross sections (Serdyuchenko 2014 via Bruneton) on the
+  AFGL US standard profile, 300 DU [S]; aerosol AOD 0.1 at 550 nm, Angstrom 1.3, single-scattering albedo 0.9, scale
+  height 1.2 km, Cornette-Shanks g 0.8 [E]; solar spectrum ASTM G-173 ETR (via Bruneton; scaled by 1 / d_AU^2 at run
+  time); ground albedo 0.1 [E]; top 100 km [call], model ground `ground_altitude_m` -150 m [E] (below the geoid minimum
+  -106 m and every pad; cameras and points below are clamped onto it). Code: `atmosphere_optics.*` (coefficients),
+  `atmosphere_tables.*` (parameterisation, input hash), `atmosphere_precompute.*` (the precomputation, parallel over
+  table rows), `atmosphere_scattering.*` (CPU evaluation: sun transmittance, sky luminance, sky luminance to a point,
+  sun + sky illuminance), `atmosphere_table_file.*` (cache).
+- **WGS84.** Bruneton's model is spherical; it is evaluated in a space where the ellipsoid becomes the sphere of
+  radius a (polar axis x a/b = 1.00336): the ground matches the ellipsoid everywhere (test: < 1 mm at 0/30/60/90 deg),
+  optical paths are off by at most 0.34 %. Rays and the Sun map by that stretch, normals by its inverse transpose; the
+  direct-sun cosine is taken in true ITRF geometry. CPU and shaders use the same mapping.
+- **Multiple scattering.** Five orders computed (Bruneton: 4) plus a **geometric tail** of the higher orders
+  (Hillaire 2020, Eq. 9): the series is geometric from order 3-4 on (per-order ratio q 0.39-0.44); tail = last order x
+  q / (1 - q), q = last / previous per texel and wavelength, capped at 0.75. Plain truncation after 4 orders was 7.2 %
+  short of 14 orders 2 deg above the horizon (2.9 % at the zenith). Fidelity flag `multiple_scattering_tail` in
+  `earth_optics.toml` (true; false truncates like Bruneton; part of the input hash; test: on in the shipped config and
+  it changes the tables). 5 vs 7 orders with the tail: within 0.20 % (sky illuminance 0.03 %).
+- **Tables and cache.** Transmittance 1024 x 1024 (Bruneton's 256 x 64 erred 82 % on grazing rays), scattering
+  (Rayleigh + all multiple orders) and single Mie 8 nu x 32 mu_s x 128 mu x 64 r (64 r rows: off-texel error 2.8 % ->
+  0.71 %), irradiance 64 x 16; mu_s_min = cos 120 deg (twilight to -18 deg for the star threshold). Precompute 61-62 s
+  on 24 threads (once per input hash), file `data/atmosphere/earth_atmosphere.bin` (83.9 MB: header with magic,
+  version, input hash, sizes and parameters, four float32 arrays, FNV-1a 64 checksum verified before parsing; written
+  to a temp name and renamed; a damaged, stale or missing file is recomputed, a failed write still returns the tables).
+  The input hash covers the config, the table sizes, the stored spectral / optics data (machine-independent: no libm
+  outputs) and `atmosphere_tables_code_version`. CLI `build/core/atmosphere_tables.exe [--config] [--out]`;
+  `tools/package.ps1` runs it, so installed games ship the cache. The game loads the cache on a worker
+  (`StarsimCore.load_atmosphere`; on a first run it computes and shows "Atmosphäre wird berechnet (einmalig, etwa eine
+  Minute) ..." in the time panel). GPU formats: transmittance RGBAF (its grazing values ~1e-5 are half-float
+  subnormals; RGBAH put a 20 km Cape pixel 4 % off in blue), scattering / Mie / irradiance RGBAH (half the VRAM; GPU
+  check worst 0.52 % vs 0.47 % with RGBAF); ~50 MB VRAM.
+- **Shader include** `game/shaders/atmosphere.gdshaderinc` (port of the CPU code, globals in project.godot
+  `[shader_globals]` `atmosphere_*`): `atm_sky` (sky radiance + transmittance along a view ray), `atm_to_point*`
+  (aerial perspective between the camera and a point; camera-relative offsets for near points), `atm_sun_at` /
+  `atm_sky_light` / `atm_sun_and_sky` (light on a surface), `atm_sky_to_far_object` (Moon, Sun), `atm_fog` (vehicles).
+  Numerics for the floating origin: the camera's Earth-local position arrives as float32 hi + lo
+  (`atmosphere_camera_hi/lo`), its altitude above the model ground differenced in float64 on the CPU
+  (`atmosphere_camera_altitude_m`); rho = sqrt(h (2R + h)), discriminants as (r mu)^2 - rho^2 and (T - r)(T + r), a
+  point's height along a ray as h + d(d + 2 r mu) / (r_d + r) - never r^2 - R^2 of large float32 values. Cameras above
+  the top enter through the ray's closest approach (the limb is right from the Moon).
+- **Where it is used.** Sky: `sky.gdshader` (Environment BG_SKY, every pixel from the camera's true position; the
+  radiance cubemap also draws the model ground lit by the model, so Godot's ambient and reflections carry sky light,
+  ground bounce and earthshine; PROCESS_MODE_INCREMENTAL, radiance 128). Earth: `earth.gdshader` (also scaled space),
+  `terrain_earth.gdshader`, `water.gdshaderinc` (the sea's reflected sky is the model's sky along the reflected ray
+  from the water point; `sky_radiance` is gone; a ray reflected below the horizontal takes its upward mirror [E]): the
+  Sun transmitted to the point x cos + the sky irradiance on the normal, then transmittance + in-scattering to the
+  camera; city lights x T. Moon, Sun disc: x T + the in-scattered sky (the daytime Moon is pale; the Sun reddens at the
+  horizon). Stars (`star_visibility.gdshaderinc`): x T and hidden below the eye's detection threshold over the sky
+  background, I_th = c1 (1 + sqrt(c2 B))^2 (Schaefer 1990, PASP 102, 212: night / day constants, smooth step +-0.5 mag
+  [E]); limiting magnitude 7.9 at B = 0, about -4 at the noon sky - stars fade in twilight and appear above the
+  atmosphere without a switch. Vehicles, tower, pad, drone ship: `lit_aerial.gdshader` (`LitAerial.material`): Godot's
+  PBR lighting plus aerial perspective through FOG (Godot blends FOG with one scalar, so the per-channel T is split:
+  t = max(T), FOG.a = 1 - t, FOG.rgb = S / (1 - t), and T / t on albedo and emission - diffuse, metal and emission end at
+  lit x T + S exactly; only the dielectric specular takes the scalar); the tower lattice through `atm_fog`. Plumes
+  (`plume.gdshader`, additive): x T only [call]. The flight trail, orbit lines and labels are UI markers, not attenuated.
+- **Sun light.** One DirectionalLight: colour and energy per channel = TOA solar RGB x the core's
+  `atmosphere_sun_transmittance` x luminance scale / pi x the Moon's visible fraction, at **one point: the followed
+  vehicle** (vehicle focus), else the camera (`Atmosphere.sun_light_at`, `world.gd::_update_sun_light`). Known limit:
+  other bodies in view (the booster after separation far below the ship, the tower seen from orbit) get the light of
+  that point - a body at sunset next to one in daylight is lit like the followed one. Per-object lights would cost a
+  light per body; not done.
+- **Exposure.** One exposure for everything: scene value = luminance x `DAY_EXPOSURE` (1.5) x pi / E_v,TOA / d_AU^2 - a
+  white Lambertian under the TOA Sun renders 1.5 in every material. **Eye adaptation** [call 2026-10-25,
+  `eye_adaptation.gd`, fidelity flag `Atmosphere.eye_adaptation_enabled`, on in the game, off in the GPU check's
+  comparisons]: one gain on every physical luminance (tables, Sun light, Moon, Sun disc; plumes, city lights and the
+  stars' own brightness are display-referred). Adaptation luminance L_a = max(down, up): down = a white plate at the
+  eye under the transmitted Sun at normal incidence and the sky, (E_sun,n + E_sky) / pi x the visible fraction; up =
+  the Earth in view (`Atmosphere.adaptation_luminance`, see below). Gain = clamp(L_ref / L_a, 1, 25), L_ref = the
+  plate under the TOA Sun: Weber adaptation (Ferwerda et al. 1996: photopic threshold proportional to L_a above ~80
+  cd/m^2). The cap 25 is a display call, not physiology (Weber would allow ~500; no mesopic / scotopic model): the
+  noon / sunset zenith ratio 3834 / 142 = 27, so twilight never renders brighter than day; civil twilight is dim (Sun
+  -3 deg: zenith 0.10 x noon), nautical dark. Pacing [E]: light adaptation tau 0.5 s, dark adaptation 110 s
+  (Pattanaik et al. 2000), exponential in log gain; time step = max(frame time, simulated step) (paused: real time,
+  time warp: a time-lapse, a clock jump or a view change: adapted at once). Exposure only, no white balance. Shader
+  uniforms, no post-process: identical in VR. Values: pad noon gain 1.10, 400 km by day 1.000, Sun -3 deg 25.
+  The up part: 13 directions below the eye in model space (nadir, a ring at 0.6 x the Earth disc's angular radius, a
+  ring grazing the limb 10 km up), each the plate equivalent of what it shows (ground illuminance / pi x T + in-scatter,
+  or the limb's sky, x the Sun's visible fraction there), times the view factor (R / r)^2; view-independent (VR-stable).
+  At 400 km on the 2024-04-08 umbra axis (Task 10 check): down 0, up 2428 cd/m^2 (the same Earth uneclipsed: 20871),
+  gain 17.4. Not a quadrature or weighting artefact: a dense cap integral (48 rings x 24 azimuths) gives gain 15.1
+  cosine-weighted (the plate) and 17.0 weighted by solid angle; the ring means rise from 494 cd/m^2 at the nadir to
+  6344 at the limb - the visible Earth lies in deep penumbra (visible fraction 0.03 / 0.10 / 0.33 / 0.65 at 200 / 400
+  / 1000 / 2000 km from the umbra's centre). The eye has no Sun in it there and adapts to that dim Earth, so the
+  outer, less eclipsed Earth renders several times its day brightness (AgX rolls it toward white). Cameras on the ISS
+  show it at a day exposure; an adapted eye does not. Kept physical [call]; a display-side highlight treatment would
+  be a separate decision.
+- **Solar eclipses.** While the Moon's penumbra touches the atmosphere (`Atmosphere.penumbra_touches`), the
+  in-scattering along a ray is split into segments at d (i/n)^2 (8 for the sky, Moon, Sun, stars and the sea's
+  reflected sky; ceil(d / 12.5 km) clamped to 1..8 for the aerial perspective [call, performance]), each
+  T(x,p_i) S(p_i) - T(x,p_i+1) S(p_i+1) weighted by the Sun's visible fraction at its midpoint (`eclipse.gdshaderinc`).
+  **Approximation (documented):** this weights multiple scattering into the umbra like single scattering, which alone
+  leaves the umbra sky exactly black; a **second-order umbra source** adds the light scattered once more inside the
+  umbra: J = F / (4 pi) per segment, F the eclipsed sky's fluence on the umbra axis at 0 / 4 / 12 km
+  (`Atmosphere._eclipsed_sky_fluence`: zenith + rings at 30 / 11 / 6 / 3 / 1 deg, the lower hemisphere above the
+  ground; once per simulated second on a worker; 25.5 / 59.0 / 150.6 cd/m^2 sr at 2024-04-08 18:42). Totality at
+  Dallas: zenith 0.993 cd/m^2 (real totality skies ~1-2), the horizon 16 x the zenith (the 360-degree twilight glow),
+  magnitude-1 stars visible, magnitude 4 hidden. The ground's sky light gets the same eclipse factor (zenith 0.413,
+  four azimuths at 30 deg 0.130, four at 6 deg 0.0167; per vertex). Limits: one shadow-axis fluence for the whole
+  umbra; no refraction; the eye in the umbra adapts to the penumbral Earth it sees.
+- **Validation.** Core `[atmosphere]` (20 ctest cases): Rayleigh coefficient and vertical optical depth vs Bucholtz
+  1995 (1 % / 2 %); transmittance vs a direct optical-depth integral (3.24e-3) and single scattering vs a brute-force
+  raymarch (1.07e-3); off-texel lookups 7.1e-3, horizon seam 9.2e-3; multiple scattering 5 vs 7 orders 1.96e-3; direct
+  sun at air mass 1.5 vs ASTM G-173 (400-700 nm) -2.1 %, runtime direct beam vs raymarch < 0.05 %; zenith at Sun 60 deg
+  3819 cd/m^2 (B/R 1.97), horizontal illuminance at Sun zenith 125.4 klx, sky at 50 km 7.1e-4 x the ground, twilight
+  zenith bluer than noon (B/R 3.12 at -4 deg); ellipsoid mapping < 1 mm; cache round trip / damage / stale hash /
+  failed write. GPU `game/tests/atmosphere_check.gd` (HDR viewport, float readback, 2 % per channel unless stated;
+  RGBAH and `--f32`): 48 samples - sky, sunset, limb from 400 km and from the Moon distance, the pad camera's float64
+  altitude path, ground and terrain samples (3 %), stars / Sun / Moon, lit cubes (5 %), Sun colour, eye adaptation,
+  eclipse; worst sky deviation 0.52 % (the 50 km limb from the Moon distance, float32 rounding at 3.8e8 m), the Earth
+  mesh samples -2.1 / -1.7 % (its facets lie up to ~0.5 km below the ellipsoid; 0.15 % against the point 300 m lower).
+- **Performance** (`terrain_perf.gd`, RTX 4090, 2560 x 1440, gate p99 <= 8 / max <= 16 ms; Task 10). Sky cubemap
+  incremental at 128 (realtime 256 cost VRAM, not time: the frame is CPU-bound), half-float scattering tables.
+  Default epoch (no eclipse): p99 7.75 / 7.90 / 7.90, max 10.7 / 12.5 / 11.7 ms in three consecutive runs (GPU <= ~3 ms;
+  Cape p99 ~9.1 while ~240 nodes load). The max-gate failures of Tasks 6-9 (single 15-50 ms "process" frames) were
+  the run's own per-second console prints (fixed in terrain_perf.gd). A rarer stall remains: ~1 run in 3 shows one
+  frame of 11-17 ms (once 17.4 ms, failing the gate) at a fixed instant of the descent (t = 3.06 s or 10.89 s), inside
+  the RenderingServer draw but outside the viewport render (measured viewport CPU 0.3 ms, GPU 1.4-1.9 ms), no
+  draw-time pipeline compilation, while a batch of 4 terrain builds runs on the worker pool. It depends on the pool:
+  `threading/worker_pool/max_threads = 8` removed it in 9 of 9 runs but limits the terrain to 2 concurrent builds
+  (the Cape loads in > 20 s instead of ~8 s); 10 threads with 7 low-priority slots kept it (3 of 8), 24 threads with 2
+  slots made it worse (6 of 8, 23-31 ms). Not fixed (engine-internal; open). Eclipse epoch (2024-04-08 18:42, the
+  segments active, Starbase 80 % partial): p99 8.7 ms, max 12-13 ms - GPU-bound (7-10 ms in the descent); the
+  per-vertex sky-light eclipse factor costs ~3.5 ms of it (9 directions x 4 segments on ~8 M terrain vertices;
+  measured by switching it off). Adaptive segment counts (by the spread of the Sun's visible fraction along a ray)
+  were tried and gave no measurable gain (the rays at Starbase cross enough penumbra gradient), so they were not
+  kept. Eclipse-only; a shadow-plane texture of the factor, updated per simulated second, would remove it (open).
+- **Known limits.** No clouds, weather-dependent aerosols, refraction, airglow; one aerosol set for the whole Earth;
+  one Sun light (above); the totality approximation (above); no mesopic / scotopic vision; the 256 x 128 Earth mesh
+  in scaled space sits up to ~0.6 km below the ellipsoid (-2 % in its aerial perspective).
 
 ## Sea state and deck motion
 

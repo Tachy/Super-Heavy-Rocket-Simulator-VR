@@ -246,8 +246,8 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   blenden aus großer Entfernung ganz aus).
 - Meer: See mit Fresnel-Spiegelung, Sonnenglitzern und Wellen (Normalen, keine Geometrie). Ohne Seegang sanfte
   Wellen; hat die Mission Seegang, folgen die Wellen ihm (Wellenlänge aus Tp, Laufrichtung, Steilheit aus Hs; nur
-  Schattierung, nicht phasengleich mit der Deckbewegung). Der Himmel ist schwarz bis zum Atmosphären-Teil (der helle
-  Glitzerstreifen am Horizont wirkt bis dahin wie ein Leuchten).
+  Schattierung, nicht phasengleich mit der Deckbewegung). Das Meer spiegelt den berechneten Himmel und geht in der
+  Ferne nahtlos in den Dunst am Horizont über (siehe "Himmel, Dunst und Dämmerung").
 - Drohnenschiff [umgesetzt 2026-10-24]: ist ein Drohnenschiff die Landezone, steht es dort als schlichter grauer Körper
   (Rumpf mit Tiefgang und Freibord, Deck 91 x 52 m mit Flügeln, niedrige Wände an den Längsseiten, keine Logos) und hebt,
   rollt und stampft mit der Deckbewegung der Physik; die gelandete Stufe steht auf dem gezeichneten Deck.
@@ -259,6 +259,29 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   grob zuerst.
 - Mond: keine Schlagschatten (Kraterränder, Polschatten) - ein späterer Teil; am Pol bei tiefer Sonne ist der
   Boden daher sehr dunkel.
+
+### Himmel, Dunst und Dämmerung [Entschieden, umgesetzt 2026-10-25, M8 Atmosphäre]
+
+- Ein physikalisches Atmosphärenmodell für jeden Standort (Rampe, Aufstieg, Orbit, Mond): der Himmel, der blaue
+  Erdrand und der Dunst hängen nur davon ab, wo die Kamera ist, wohin sie schaut und wo die Sonne steht - kein
+  Umschalten, kein Überblenden zwischen Techniken. Die Farben entstehen aus der Streuung (kein Farbabgleich, keine
+  gewählten Farbverläufe).
+- Am Boden: blauer Taghimmel, zum Horizont heller und weißlicher, weißer Schein um die Sonne; ferne Landschaft, Meer,
+  Turm und Raketen verblassen mit der Entfernung im Dunst (eine aufsteigende Rakete wird aus der Rampensicht immer
+  blasser). Bei Sonnenuntergang wird die Sonnenscheibe rot und schwächer, das Licht auf Fahrzeugen rötlich.
+- Aufstieg: der Himmel wird mit der Höhe dunkler, ab etwa 50 km fast schwarz; aus dem Orbit eine dünne blaue
+  Atmosphäre am Erdrand, auch vom Mond aus.
+- Mond, Sonne und Sterne werden durch die Atmosphäre gesehen: der Mond am Taghimmel ist blass, Sterne verschwinden am
+  Taghimmel und tauchen in der Dämmerung nach Helligkeit nacheinander auf (Sichtbarkeitsschwelle des Auges über der
+  Himmelshelligkeit); über der Atmosphäre ist der ganze Sternhimmel da.
+- Augenanpassung: die Belichtung folgt dem Licht am Betrachter wie ein Auge (heller werden in etwa einer halben
+  Sekunde, dunkler werden über etwa zwei Minuten; Zeitraffer läuft entsprechend schneller, ein Sprung in Zeit oder Ort
+  ist sofort angepasst). Bürgerliche Dämmerung ist gedämpft sichtbar, nautische Dämmerung dunkel, die Nacht bleibt
+  Nacht (Verstärkung höchstens 25-fach). Nur die Helligkeit wird angepasst, nicht die Farben; im VR genauso.
+- Sonnenfinsternis: im Kernschatten wird der Himmel dunkel, ringsum am Horizont leuchtet die Dämmerung (360 Grad),
+  nur helle Sterne und Planeten erscheinen; der Mondschatten ist aus dem Orbit als dunkler Fleck mit weichem Rand zu
+  sehen.
+- Noch nicht: Wolken (nächster M8-Teil), Wetter, Lichtbrechung am Horizont, Luftleuchten.
 
 ### Weitere Außenansichten
 
