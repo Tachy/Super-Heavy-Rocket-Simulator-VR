@@ -54,6 +54,7 @@ var atmosphere := Atmosphere.new()  ## the precomputed atmosphere's tables and g
 var refraction := Refraction.new()  ## astronomical refraction of Sun, Moon and stars for the camera
 var weather := WeatherService.new()  ## ERA5 / GFS / analog snapshots for the clouds (M8 weather, Task 7)
 var weather_fetcher := WeatherFetcher.new()  ## the service's HTTP requests (a node: HTTPRequest children)
+var clouds := CloudLayer.new()  ## the volumetric clouds near the camera from the weather snapshots (M8 weather, Task 8)
 
 ## Per-frame state, readable by UI and tests.
 var moon_gcrf_m := Vector3.ZERO
@@ -84,6 +85,11 @@ func _ready() -> void:
 	weather.enabled = WeatherService.load_enabled_setting()
 	weather.setup(core, Paths.config_dir(), data_dir.path_join("weather/cache"), data_dir.path_join("weather/analog"),
 			weather_fetcher)
+	add_child(clouds)
+	clouds.setup(core)
+	var xr := get_node_or_null("/root/XrManager")
+	clouds.quality = CloudLayer.Quality.VR if xr != null and xr.vr_requested() else CloudLayer.Quality.DESKTOP
+	weather.snapshots_changed.connect(clouds.set_target)
 	_setup_bodies(data_dir)
 	stars.load_catalogue(data_dir.path_join("stars/stars.csv"))
 	add_child(stars)
@@ -104,6 +110,7 @@ var _last_world_tdb_s := NAN  ## the instant of the previous update_world (eye a
 func _exit_tree() -> void:
 	atmosphere.shutdown()
 	weather.shutdown()
+	clouds.shutdown()
 
 
 func _process(delta: float) -> void:
@@ -165,6 +172,7 @@ func update_world() -> void:
 
 	earth.place(cam)
 	var camera_fixed := earth.fixed_to_gcrf.transposed() * cam
+	clouds.update(camera_fixed, weather.blend(), _delta)
 	refraction.update(core, camera_fixed, earth.fixed_to_gcrf)
 	earth_terrain.update_for_camera(camera_fixed, _delta)
 	water_waves.update(camera_fixed, t)

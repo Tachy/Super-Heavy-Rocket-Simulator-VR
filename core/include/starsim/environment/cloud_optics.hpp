@@ -62,6 +62,15 @@
 // (unscaled) optical depth along the Sun ray, u_z the cosine of the view-ray propagation direction (toward the camera)
 // to the local up. cos_theta is the cosine between the Sun's propagation direction and the view-ray propagation
 // direction: 1 = looking into the Sun. Sun below the horizon (mu0 <= 0): no source.
+// Sky light (task 8): the clear sky's irradiance on the column top taken as isotropic diffuse incidence on the same
+// scaled slab (black surface below). Conservative two-stream (gamma2 = gamma1): the net flux is constant, D = -T, and
+// both fluxes fall linearly, F_down(t') = 1 - gamma1 T t', F_up(t') = R - gamma1 T t' (T = 1 / (1 + gamma1 tau*'),
+// R = 1 - T), so per unit horizontal sky irradiance and unit unscaled optical depth
+//   J_sky = (1 - f) [I0 + g' u_z I1],  I0 = (1 + R - 2 gamma1 T t') / (2 pi),  I1 = -3 T / (4 pi),
+// attenuated along the view ray like the Sun's source. The sky behind the cloud is seen through exp(-tau_v) (the
+// shader's background transmittance); the sky light kept in the forward peak (exp(-(1 - f) tau_v) - exp(-tau_v)) / pi
+// is not added (small beside the Sun's TMS term). Integrated over the hemisphere it gives R + T = 1, R within 1 % of
+// the two-stream diffuse R for tau >= 10 and 26 % above it at tau 1 (test "The sky scattering source ...").
 // slab_reflected_radiance() is the closed-form integral of J along an upward view ray out of the top of a slab
 // (t-integrals of exp(-t'/mu) times 1, t', exp(-t'/mu0)); slab_reflectance() its hemisphere integral (Gauss-Legendre
 // 64 x 64), the model's plane-parallel albedo.
@@ -111,6 +120,9 @@ double two_stream_beam_reflectance(double optical_depth, double asymmetry_g, dou
 double cloud_transport_scale();  // 1 - f, the scale of every optical depth in the source and along the view ray
 double cloud_scattering_source(double cos_theta, double view_up_cos, double sun_cos_zenith, double sun_optical_depth,
                                double depth_from_top, double column_optical_depth);
+// The sky's scattering source (header, "Sky light"): J per unit horizontal sky irradiance on the column top and unit
+// (unscaled) optical depth along the view ray, attenuated like the Sun's (cloud_transport_scale()).
+double cloud_sky_scattering_source(double view_up_cos, double depth_from_top, double column_optical_depth);
 // Reflected radiance [1/sr per unit Sun irradiance] out of the top of a plane-parallel slab (black surface): the source
 // integrated in closed form. relative_azimuth_rad is the angle between the horizontal propagation directions of the
 // sunlight and the reflected light (0 = forward side, camera opposite the Sun). 0 for the Sun below the horizon.

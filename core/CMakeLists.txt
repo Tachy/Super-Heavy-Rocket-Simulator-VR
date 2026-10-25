@@ -165,6 +165,7 @@ add_library(starsim_core STATIC
     src/environment/weather_snapshot_build.cpp
     src/environment/cloud_optics.cpp
     src/environment/cloud_noise.cpp
+    src/environment/cloud_render_texels.cpp
     src/environment/cache_file_io.cpp
     src/config/lunar_site_config.cpp
     src/config/geoid_config.cpp

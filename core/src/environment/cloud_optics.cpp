@@ -181,6 +181,17 @@ double cloud_scattering_source(double cos_theta, double view_up_cos, double sun_
            cloud_phase_function(cos_theta) * std::exp(-k * std::max(0.0, sun_optical_depth));
 }
 
+double cloud_sky_scattering_source(double view_up_cos, double depth_from_top, double column_optical_depth) {
+    const DeltaEddington& de = cloud_delta_eddington();
+    const double k = 1.0 - de.f;
+    const double column = k * std::max(0.0, column_optical_depth);
+    const double t = std::clamp(k * depth_from_top, 0.0, column);
+    const double transmittance = 1.0 / (1.0 + de.gamma1 * column);
+    const double sigma = 2.0 - transmittance - 2.0 * de.gamma1 * transmittance * t;  // 1 + R - 2 gamma1 T t'
+    const double i0 = sigma / c::two_pi, i1 = 3.0 * -transmittance / four_pi;
+    return k * (i0 + de.g_scaled * view_up_cos * i1);
+}
+
 double slab_reflected_radiance(double optical_depth, double sun_cos_zenith, double view_cos_zenith,
                                double relative_azimuth_rad) {
     if (sun_cos_zenith <= 0.0 || view_cos_zenith <= 0.0 || optical_depth <= 0.0) return 0.0;

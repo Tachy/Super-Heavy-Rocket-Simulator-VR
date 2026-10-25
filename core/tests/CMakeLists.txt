@@ -204,6 +204,7 @@ add_executable(starsim_core_tests
     test_weather_source.cpp
     test_weather_snapshot.cpp
     test_cloud_optics.cpp
+    test_cloud_render_texels.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain tomlplusplus::tomlplusplus)
 target_compile_definitions(starsim_core_tests PRIVATE

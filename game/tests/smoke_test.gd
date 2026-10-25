@@ -190,10 +190,10 @@ func _check_weather(core: StarsimCore) -> bool:
 	var file := OS.get_temp_dir().path_join("starsim_smoke_slab_%d.wthr" % OS.get_process_id())
 	_check(core.weather_write_slab_snapshot(file, 2000.0, 3000.0, 3e-4, 1.0), "weather_write_slab_snapshot")
 	var loaded: Dictionary = core.weather_load_snapshot(file)
-	_check(loaded.get("ok", false) and (loaded["texels"] as PackedByteArray).size()
+	_check(loaded.get("ok", false) and (loaded["cloud_texels"] as PackedByteArray).size()
 			== int(loaded["rows"]) * int(loaded["columns"]) * int(loaded["layers"]) * 4
 			and (loaded["layer_bottoms_m"] as PackedFloat64Array).size() == int(loaded["layers"]) + 1,
-			"weather_load_snapshot: texels %d x %d x %d" % [loaded.get("rows", 0), loaded.get("columns", 0), loaded.get("layers", 0)])
+			"weather_load_snapshot: cloud_texels %d x %d x %d" % [loaded.get("rows", 0), loaded.get("columns", 0), loaded.get("layers", 0)])
 	_check(core.weather_set_active(file, file, 0.5).get("ok", false), "weather_set_active")
 	var pos := Vector3(6378137.0, 0, 0)
 	var under: Dictionary = core.weather_cloud_light(pos, Vector3(1, 0, 0))
@@ -209,6 +209,11 @@ func _check_weather(core: StarsimCore) -> bool:
 	_check(n == 128 and (noise["shape"] as PackedByteArray).size() == 4 * n * n * n
 			and (noise["detail"] as PackedByteArray).size() == 4 * int(noise["detail_size"]) ** 3
 			and (noise["coverage_threshold"] as PackedFloat32Array).size() == 256, "cloud_noise sizes")
+	var optics: Dictionary = core.cloud_optics_parameters()
+	_check(absf(float(optics.get("asymmetry_g", 0.0)) - 0.8793) < 1e-3 and float(optics["extinction_step_per_m"]) > 0.0,
+			"cloud_optics_parameters (g %.4f)" % float(optics.get("asymmetry_g", 0.0)))
+	_check(core.cloud_slab_radiance(10.0, 1.0, 1.0, 0.0) > 0.0 and core.cloud_slab_radiance(10.0, -0.1, 1.0, 0.0) == 0.0,
+			"cloud_slab_radiance")
 	return true
 
 

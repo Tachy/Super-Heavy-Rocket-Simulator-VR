@@ -131,10 +131,11 @@ public:
     // Decodes the raw files of `snapshot` in raw_dir into the cache file out_file (the geoid from config_dir).
     godot::Dictionary weather_build_snapshot(const godot::Dictionary& snapshot, const godot::String& raw_dir,
                                              const godot::String& out_file, const godot::String& config_dir) const;
-    // Reads a cache file: {ok, error, rows, columns, layers, texels: PackedByteArray (layer-major RGBA8, as
-    // WeatherSnapshot::texels()), layer_bottoms_m: PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour,
-    // lead_h, analog_hour, cache_key}. The game builds the label from the id fields. The snapshot stays in a small
-    // cache (the last three files) for weather_set_active.
+    // Reads a cache file: {ok, error, rows, columns, layers, cloud_texels: PackedByteArray (layer-major RGBA8, the GPU
+    // form environment::cloud_render_texels: cloud fraction, 16-bit linear extinction, in-cloud depth code),
+    // layer_bottoms_m: PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour, lead_h, analog_hour, cache_key}.
+    // The game builds the label from the id fields. The snapshot stays in a small cache (the last three files) for
+    // weather_set_active. Call it on a worker: the GPU form of a 0.25-deg snapshot is 133 MB.
     godot::Dictionary weather_load_snapshot(const godot::String& file);
     // The pair the CPU light queries blend: cache files ("" = none), blend 0..1. WARNING: a file that is not in the
     // 3-entry load cache is read SYNCHRONOUSLY (133 MB + checksum) on the calling thread - callers must first
@@ -146,6 +147,12 @@ public:
     // The tileable cloud noise: {shape: PackedByteArray RGBA8, shape_size, detail, detail_size, coverage_threshold:
     // PackedFloat32Array (256)}.
     godot::Dictionary cloud_noise() const;
+    // The cloud optics the shader needs as numbers (cloud_optics.hpp, cloud_render_texels.hpp): {hg_g, draine_g,
+    // draine_alpha, draine_weight, asymmetry_g, transport_scale, extinction_step_per_m, depth_code_min, depth_code_max}.
+    godot::Dictionary cloud_optics_parameters() const;
+    // Checks only: environment::slab_reflected_radiance (1/sr per unit Sun irradiance).
+    double cloud_slab_radiance(double optical_depth, double sun_cos_zenith, double view_cos_zenith,
+                               double relative_azimuth_rad) const;
     // Checks only: writes WeatherSnapshot::uniform_slab(181, 360, ...) to `file`.
     bool weather_write_slab_snapshot(const godot::String& file, double bottom_m, double top_m,
                                      double liquid_water_kg_m3, double cloud_fraction) const;

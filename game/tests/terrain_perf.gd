@@ -1,6 +1,6 @@
 # Terrain renderer performance run (needs a GPU and a desktop window, no --headless):
 # godot --path game --script res://tests/terrain_perf.gd [-- --utc=2024-04-10T18:00:00 --warp=1 --descent_s=60
-#       --pan_s=20 --cape_s=20 --shots=<dir> --spikes]
+#       --pan_s=20 --cape_s=20 --shots=<dir> --spikes --weather=<abs path .wthr> --cloud_quality=desktop|vr]
 # Phases: "descent" - a ground camera above OLP-1 descends from 400 km to 2 m in descent_s (eye height logarithmic in
 # time, looking 20 deg down); "pan_low" - 360 deg pan at 2 m eye height on the plateau PAN_LOW_OFFSET_M from the mount
 # (free view, not blocked by the mount); "pan_high" - 360 deg pan PAN_HIGH_EYE_M above the pad, looking 10 deg down (the
@@ -128,6 +128,18 @@ func _setup() -> void:
 	_world = _main.get_node("World")
 	_world.clock.warp = float(_args.get("warp", "1"))
 	_world.clock.set_time(_world.core.utc_to_tdb_s(_args.get("utc", "2024-04-10T18:00:00")))
+	# Weather: off (no downloads in a performance run) unless --weather=<file.wthr> pins that snapshot for the clouds;
+	# --cloud_quality=desktop|vr picks the clouds' preset (the gate: vr).
+	_world.weather.enabled = false
+	if _args.has("cloud_quality"):
+		_world.clouds.quality = CloudLayer.Quality.VR if _args["cloud_quality"] == "vr" else CloudLayer.Quality.DESKTOP
+	if String(_args.get("weather", "")).ends_with(".wthr"):
+		var snapshot: Dictionary = _world.core.weather_load_snapshot(_args["weather"])
+		if snapshot.get("ok", false):
+			_world.clouds.wait_until_ready()
+			_world.clouds.show_now(snapshot, snapshot, 0.0)
+		else:
+			push_error("terrain_perf: " + str(snapshot.get("error", "")))
 	for site: Dictionary in _world.sites:
 		if site["id"] == PAD_SITE:
 			_pad = site.duplicate()

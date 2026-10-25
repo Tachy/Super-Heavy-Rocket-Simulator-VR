@@ -29,5 +29,5 @@ only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only wi
   `user://settings.cfg`, section `weather`, key `enabled`, default on). `STARSIM_DEBUG_WEATHER=1` prints size and time of
   every built snapshot. `render_check.gd` keeps weather off unless `--weather[=max seconds]`.
 - **Measured** (2026-10-25, 24-core desktop, fast line): one ERA5 hour 148-150 MB downloaded, 130.7 MB built, 5.6-5.9 s.
-- Known: switching source (analog -> ERA5) swaps the pair without a cross-fade (`weather_set_active` has one pair);
-  Task 8 may blend it in the shader. Test: `game/tests/weather_service_test.gd`.
+- The clouds cross-fade every pair or source change themselves (`CloudLayer`, `weather-clouds.md`); `weather_set_active`
+  (the CPU light) swaps its pair at once. Test: `game/tests/weather_service_test.gd`.

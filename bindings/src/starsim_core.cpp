@@ -21,6 +21,7 @@
 #include "starsim/environment/atmosphere_table_file.hpp"
 #include "starsim/environment/cloud_noise.hpp"
 #include "starsim/environment/cloud_optics.hpp"
+#include "starsim/environment/cloud_render_texels.hpp"
 #include "starsim/environment/eclipse.hpp"
 #include "starsim/environment/weather_snapshot_build.hpp"
 #include "starsim/environment/weather_snapshot_file.hpp"
@@ -572,7 +573,7 @@ godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) 
         if (!snapshot) {
             throw std::runtime_error("Datei fehlt, ist beschädigt oder hat ein anderes Format: " + utf8_of(file));
         }
-        const auto& texels = snapshot->texels();
+        const std::vector<std::uint8_t> texels = environment::cloud_render_texels(*snapshot);
         godot::Dictionary result;
         result["ok"] = true;
         result["error"] = godot::String();
@@ -582,7 +583,7 @@ godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) 
         godot::PackedByteArray bytes;
         bytes.resize(static_cast<int64_t>(texels.size()));
         if (!texels.empty()) std::memcpy(bytes.ptrw(), texels.data(), texels.size());
-        result["texels"] = bytes;
+        result["cloud_texels"] = bytes;
         godot::PackedFloat64Array bottoms;
         for (int i = 0; i <= environment::weather_layer_count; ++i) bottoms.push_back(environment::weather_layer_bottom_m(i));
         result["layer_bottoms_m"] = bottoms;
@@ -681,6 +682,27 @@ godot::Dictionary StarsimCore::cloud_noise() const {
     }
 }
 
+godot::Dictionary StarsimCore::cloud_optics_parameters() const {
+    const environment::CloudPhaseParameters phase =
+        environment::cloud_phase_parameters(2.0 * constants::cloud_droplet_effective_radius_m);
+    godot::Dictionary result;
+    result["hg_g"] = phase.hg_g;
+    result["draine_g"] = phase.draine_g;
+    result["draine_alpha"] = phase.draine_alpha;
+    result["draine_weight"] = phase.draine_weight;
+    result["asymmetry_g"] = environment::cloud_asymmetry_g();
+    result["transport_scale"] = environment::cloud_transport_scale();
+    result["extinction_step_per_m"] = environment::cloud_texel_extinction_step_per_m();
+    result["depth_code_min"] = environment::cloud_depth_code_min;
+    result["depth_code_max"] = environment::cloud_depth_code_max;
+    return result;
+}
+
+double StarsimCore::cloud_slab_radiance(double optical_depth, double sun_cos_zenith, double view_cos_zenith,
+                                        double relative_azimuth_rad) const {
+    return environment::slab_reflected_radiance(optical_depth, sun_cos_zenith, view_cos_zenith, relative_azimuth_rad);
+}
+
 bool StarsimCore::weather_write_slab_snapshot(const godot::String& file, double bottom_m, double top_m,
                                               double liquid_water_kg_m3, double cloud_fraction) const {
     try {
@@ -751,6 +773,9 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("weather_cloud_light", "position_itrf_m", "sun_direction_itrf"),
                          &StarsimCore::weather_cloud_light);
     ClassDB::bind_method(D_METHOD("cloud_noise"), &StarsimCore::cloud_noise);
+    ClassDB::bind_method(D_METHOD("cloud_optics_parameters"), &StarsimCore::cloud_optics_parameters);
+    ClassDB::bind_method(D_METHOD("cloud_slab_radiance", "optical_depth", "sun_cos_zenith", "view_cos_zenith",
+                                  "relative_azimuth_rad"), &StarsimCore::cloud_slab_radiance);
     ClassDB::bind_method(D_METHOD("weather_write_slab_snapshot", "file", "bottom_m", "top_m", "liquid_water_kg_m3",
                                   "cloud_fraction"), &StarsimCore::weather_write_slab_snapshot);
 }

@@ -240,6 +240,110 @@ atmosphere_table_sizes={
 "type": "vec4",
 "value": Vector4(1024, 1024, 64, 16)
 }
+cloud_field_before={
+"type": "sampler3D",
+"value": ""
+}
+cloud_field_after={
+"type": "sampler3D",
+"value": ""
+}
+cloud_field_before_size={
+"type": "vec3",
+"value": Vector3(2, 2, 32)
+}
+cloud_field_after_size={
+"type": "vec3",
+"value": Vector3(2, 2, 32)
+}
+cloud_blend={
+"type": "float",
+"value": 0.0
+}
+cloud_noise_shape={
+"type": "sampler3D",
+"value": ""
+}
+cloud_noise_detail={
+"type": "sampler3D",
+"value": ""
+}
+cloud_coverage_threshold={
+"type": "sampler2D",
+"value": ""
+}
+cloud_enabled={
+"type": "bool",
+"value": false
+}
+cloud_camera_height_m={
+"type": "float",
+"value": 0.0
+}
+cloud_noise_origin={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+cloud_detail_origin={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+cloud_detail_mean={
+"type": "float",
+"value": 0.5
+}
+cloud_detail_amplitude={
+"type": "float",
+"value": 0.0
+}
+cloud_detail_distance_m={
+"type": "float",
+"value": 1.0
+}
+cloud_phase={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+cloud_asymmetry_g={
+"type": "float",
+"value": 0.0
+}
+cloud_extinction_step_per_m={
+"type": "float",
+"value": 0.0
+}
+cloud_depth_code={
+"type": "vec2",
+"value": Vector2(0.01, 10000)
+}
+cloud_steps={
+"type": "int",
+"value": 64
+}
+cloud_max_steps={
+"type": "int",
+"value": 128
+}
+cloud_fine_step_fraction={
+"type": "float",
+"value": 0.025
+}
+cloud_light_steps={
+"type": "int",
+"value": 4
+}
+cloud_frame={
+"type": "int",
+"value": 0
+}
+cloud_debug_output={
+"type": "int",
+"value": 0
+}
+cloud_debug_height_m={
+"type": "float",
+"value": 0.0
+}
 
 [xr]
 

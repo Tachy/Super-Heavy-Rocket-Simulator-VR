@@ -14,10 +14,12 @@
 #          recorded first, else predicted; flies until it appears)
 #          [--wait_on_pad] (a launch window's wait on the pad: T-) [--view=1] (Tab presses: switch the viewed object)
 #          [--legacy_hud] (F1: the old HUD too)
-# Weather: off in a render check unless --weather[=900] (waits for the downloads, at most that many seconds).
+# Weather: off in a render check unless --weather[=900] (online: waits for the downloads, at most that many seconds),
+#          --weather=<file.wthr> (a cached snapshot) or --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>;
+#          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
-#          --look_at_sun aims a ground view at the (true) Sun.
+#          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -51,8 +53,11 @@ func _process(_delta: float) -> bool:
 	var world: World = _main.get_node("World")
 	world.clock.warp = 0.0
 	# Weather downloads only on request (--weather): a render check must not fetch gigabytes of cloud data.
-	world.weather.enabled = _args.has("weather")
+	world.weather.enabled = _weather_online()
 	if _frames == 0:
+		if _args.has("cloud_quality"):
+			world.clouds.quality = CloudLayer.Quality.VR if _args["cloud_quality"] == "vr" else CloudLayer.Quality.DESKTOP
+		_show_weather_file(world)
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
 		world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
 		world.refraction.enabled = not _args.has("no_refraction")
@@ -96,11 +101,17 @@ func _process(_delta: float) -> bool:
 	var loading: int = world.earth_terrain.stats["nodes_loading"] + world.moon_terrain.stats["nodes_loading"]
 	_terrain_idle = _terrain_idle + 1 if loading == 0 and not world.atmosphere.loading else 0  # also the sky's tables
 	# --weather[=max seconds]: also wait for the weather service (downloads, builds), at most that long (default 900 s).
-	var weather_waiting: bool = _args.has("weather") and not world.weather.settled() \
+	var weather_waiting: bool = _weather_online() and not world.weather.settled() \
 			and Time.get_ticks_msec() / 1000.0 - _start_s < float(_args["weather"] if _args["weather"] != "" else 900.0)
-	if _frames >= FRAMES_TO_SETTLE and not weather_waiting \
+	# The clouds' noise (generated on a worker) and a running field upload / cross-fade (online weather: 2 s per unit).
+	var clouds_waiting: bool = (_args.has("weather") and _args["weather"] != "off") \
+			and (not world.clouds.noise_ready or world.clouds.state()["uploading"] or not world.clouds.state()["tracking"]) \
+			and _frames < TERRAIN_MAX_FRAMES
+	if _frames >= FRAMES_TO_SETTLE and not weather_waiting and not clouds_waiting \
 			and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES):
 		print("render_check: ", world.weather.status_text())
+		print("render_check: clouds %s, field textures %.1f MB, last upload %.1f ms" % [world.clouds.state(),
+				world.clouds.field_texture_bytes / 1.0e6, world.clouds.last_upload_ms])
 		print("render_check: terrain after %d frames: Earth %s, Moon %s" % [_frames, world.earth_terrain.stats,
 				world.moon_terrain.stats])
 		if _args.has("webcast"):
@@ -129,6 +140,41 @@ func _process(_delta: float) -> bool:
 		print("render_check: saved %s (error %d)" % [out, error])
 		return true  # quit
 	return false
+
+
+## --weather or --weather=<max seconds>: the weather service online (downloads); off / a file / a slab: not.
+func _weather_online() -> bool:
+	if not _args.has("weather"):
+		return false
+	var value: String = _args["weather"]
+	return value == "" or value.is_valid_float()
+
+
+## --weather=<file.wthr> shows that snapshot; --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<cloud fraction> a
+## synthetic uniform slab (StarsimCore.weather_write_slab_snapshot) - both pinned, without the service.
+func _show_weather_file(world: World) -> void:
+	if not _args.has("weather"):
+		return
+	var value: String = _args["weather"]
+	var file := ""
+	if value.begins_with("slab:"):
+		var p := value.trim_prefix("slab:").split(",")
+		file = OS.get_temp_dir().path_join("starsim_render_check_slab_%d.wthr" % OS.get_process_id())
+		if not world.core.weather_write_slab_snapshot(file, float(p[0]), float(p[1]), float(p[2]), float(p[3])):
+			push_error("render_check: slab snapshot not written")
+			return
+	elif value.ends_with(".wthr"):
+		file = value
+	else:
+		return
+	var snapshot: Dictionary = world.core.weather_load_snapshot(file)
+	if not snapshot.get("ok", false):
+		push_error("render_check: " + str(snapshot.get("error", "")))
+		return
+	world.clouds.wait_until_ready()
+	world.clouds.show_now(snapshot, snapshot, 0.0)
+	world.core.weather_set_active(file, file, 0.0)
+	print("render_check: weather from %s (%s %s)" % [file, snapshot["kind"], snapshot["cache_key"]])
 
 
 # Orbit camera: look at the focus from the direction of the Sun or the Moon.
@@ -386,6 +432,8 @@ func _aim_at_sun(world: World) -> void:
 	var d := (world.sun_apparent_from_earth_m - cam.position_gcrf_m).normalized()
 	cam.elevation = asin(clampf(d.dot(cam.site_up_gcrf), -1.0, 1.0))
 	cam.azimuth = atan2(d.dot(cam.site_east_gcrf), d.dot(cam.site_north_gcrf))
+	if _args.has("away_from_sun"):  # the Sun behind the camera, the view at the same elevation
+		cam.azimuth += PI
 
 
 # Ground camera: point at the Moon.

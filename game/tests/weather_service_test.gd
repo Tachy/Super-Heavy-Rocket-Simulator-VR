@@ -212,7 +212,10 @@ func _test_fallbacks() -> void:
 	var service2 := _make(truncated)
 	_run_until(service2, truncated, ARCHIVE_UTC, 1.0, func() -> bool: return _count_state(service2, "failed") >= 1,
 			"truncated")
-	_check(service2.status_text().begins_with("Wetter: typisch"), "truncated: analog line: " + service2.status_text())
+	# The analog's load runs on a worker and may still be running when the job fails (Task 8: the load also builds the
+	# GPU form): wait for its line instead of reading it in the same frame.
+	_run_until(service2, truncated, ARCHIVE_UTC, 1.0,
+			func() -> bool: return service2.status_text().begins_with("Wetter: typisch"), "truncated: analog line", 10.0)
 	for key: String in service2._jobs:
 		_check(not FileAccess.file_exists(service2._cache_dir.path_join(key + ".wthr")), "no cache file of a damaged build")
 	service2.shutdown()

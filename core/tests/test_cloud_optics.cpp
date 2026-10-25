@@ -168,6 +168,46 @@ TEST_CASE("The scattering source integrates to the slab radiance", "[weather]") 
     CHECK(cloud_scattering_source(0.5, 0.5, -0.1, 1.0, 1.0, 10.0) == 0.0);  // Sun below the horizon
 }
 
+TEST_CASE("The sky scattering source reproduces the diffuse two-stream fluxes", "[weather]") {
+    // cloud_sky_scattering_source (isotropic sky light on the column top, what the shader adds to the Sun's source)
+    // integrated along view rays out of the top (reflected) and out of the bottom (transmitted, plus the unscattered
+    // sky seen through the slab), then over the hemisphere: the fluxes of the delta-Eddington diffuse slab within the
+    // source-function method's error. Measured (task 8): R 0.1044 / 0.4780 / 0.7309 against 0.0830 / 0.4751 / 0.7309,
+    // T 0.8956 / 0.5220 / 0.2691 against 0.9170 / 0.5249 / 0.2691 (tau 1 / 10 / 30); R + T = 1 (conservative). At
+    // tau 1 the radiance field reflects 26 % more than the two-stream flux (whose thin-slab diffuse R is the cruder of
+    // the two), hence the wider tolerance there.
+    const double k = cloud_transport_scale(), g = cloud_asymmetry_g();
+    static const std::array<double, 8> x = {0.0198550717512319, 0.1016667612931866, 0.2372337950418355,
+                                            0.4082826787521751, 0.5917173212478249, 0.7627662049581645,
+                                            0.8983332387068134, 0.9801449282487681};
+    static const std::array<double, 8> w = {0.0506142681451881, 0.1111905172266872, 0.1568533229389437,
+                                            0.1813418916891810, 0.1813418916891810, 0.1568533229389437,
+                                            0.1111905172266872, 0.0506142681451881};
+    for (double tau : {1.0, 10.0, 30.0}) {
+        double up_flux = 0.0, down_flux = 0.0;
+        for (std::size_t i = 0; i < x.size(); ++i) {
+            const double mu = x[i];
+            const int steps = 4000;
+            const double dt = tau / steps;
+            double reflected = 0.0, transmitted = 0.0;
+            for (int s = 0; s < steps; ++s) {
+                const double t = (s + 0.5) * dt;  // vertical depth below the top
+                reflected += cloud_sky_scattering_source(mu, t, tau) * std::exp(-k * t / mu) * dt / mu;
+                transmitted += cloud_sky_scattering_source(-mu, t, tau) * std::exp(-k * (tau - t) / mu) * dt / mu;
+            }
+            // The sky (radiance 1 / pi per unit irradiance) through the slab in the scaled problem: the unscattered part
+            // exp(-tau / mu) plus the light kept in the forward peak (the two-stream T holds both).
+            transmitted += std::exp(-k * tau / mu) / c::pi;
+            up_flux += w[i] * mu * c::two_pi * reflected;
+            down_flux += w[i] * mu * c::two_pi * transmitted;
+        }
+        INFO("tau " << tau << " R " << up_flux << " T " << down_flux);
+        CHECK(up_flux == Approx(two_stream_reflectance(tau, g)).epsilon(tau < 5.0 ? 0.3 : 0.02));
+        CHECK(down_flux == Approx(two_stream_diffuse_transmittance(tau, g)).epsilon(0.03));
+        CHECK(up_flux + down_flux == Approx(1.0).epsilon(1e-3));
+    }
+}
+
 TEST_CASE("Reflected cloud radiance agrees with Monte Carlo", "[weather]") {
     // Fixture: tools/validation/cloud_slab_monte_carlo.py --radiance 1e7 photons, bin-averaged reflected radiance of a
     // slab with the same phase function (tau 1 / 10 / 30, Sun zenith 0 / 60 deg, view zenith 0 / 30 / 60 deg, relative
