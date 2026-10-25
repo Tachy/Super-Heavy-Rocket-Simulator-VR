@@ -159,6 +159,7 @@ add_library(starsim_core STATIC
     src/environment/sea_state.cpp
     src/environment/earth_terrain.cpp
     src/environment/surface_samples.cpp
+    src/environment/weather_source.cpp
     src/config/lunar_site_config.cpp
     src/config/geoid_config.cpp
     src/config/atmosphere_optics_config.cpp
