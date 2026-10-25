@@ -368,6 +368,26 @@ cloud_debug_output={
 "type": "int",
 "value": 0
 }
+cloud_scattering_model={
+"type": "int",
+"value": 0
+}
+cloud_transfer={
+"type": "sampler3D",
+"value": ""
+}
+cloud_transfer_nodes={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+cloud_transfer_depth_map={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+cloud_transfer_theta_map={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
 cloud_debug_height_m={
 "type": "float",
 "value": 0.0

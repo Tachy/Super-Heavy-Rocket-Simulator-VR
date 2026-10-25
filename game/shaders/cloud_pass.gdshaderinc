@@ -102,6 +102,9 @@ global uniform float cloud_fine_step_fraction;  // fine step / distance inside t
 float cloud_light_source(vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, float height_m, float distance_m,
 		vec2 column, float jitter, float pixel_angle) {
 	float tau_light = cloud_light_optical_depth(offset, height_m, distance_m, light_dir, jitter, pixel_angle);
+	if (cloud_scattering_model == 1) {
+		return cloud_scattering_source_mc(light_dir, -dir, normal, tau_light, column.x, column.y);
+	}
 	return cloud_scattering_source_3d(light_dir, -dir, normal, tau_light, column.x, column.y);
 }
 
@@ -158,6 +161,10 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	float coarse_rel = d1 > start ? exp(log(d1 / start) / float(n)) - 1.0 : 1.0;
 	float transmittance_bg = 1.0;   // exp(-tau): the background
 	float transmittance_sc = 1.0;   // exp(-(1 - f) tau): the scattered light
+	// exp(-w_D tau): the lights' scattered light with the transfer table (cloud_scattering_model 1; the table's source
+	// leaves the phase function's HG peak in the view ray, core cloud_transfer_view_extinction)
+	float transmittance_tab = 1.0;
+	float w_tab = cloud_phase.w;
 	vec3 radiance = vec3(0.0);
 	float weighted_distance = 0.0;
 	float light_at_m = -1.0e30;
@@ -223,9 +230,11 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		// The light march's jitter decorrelated from step to step (golden-ratio sequence): the samples of one ray
 		// average its noise instead of sharing one light-march error.
 		float light_jitter = fract(jitter + float(i) * 0.6180339887);
-		vec3 source;
+		vec3 source = vec3(0.0);        // the sky's (scaled problem: attenuated on the scaled depths)
+		vec3 light_source = vec3(0.0);  // the Sun's and the Moon's (cloud_light_source)
 		if (cloud_debug_output == 2) {
-			source = vec3(cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter, pixel_angle));
+			light_source = vec3(cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter,
+					pixel_angle));
 		} else {
 			// The air's light at the cloud (Sun and sky irradiance), refreshed along the ray every
 			// CLOUD_LIGHT_REFRESH_FRACTION of the distance (at least CLOUD_LIGHT_REFRESH_M): it changes over kilometres.
@@ -243,19 +252,29 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 			float sky_source = cloud_sky_scattering_source(-dot(dir, normal), column.x, column.y);
 			source = sky_irradiance * sky_source;
 			if (dot(sun_irradiance, sun_irradiance) > 0.0) {
-				source += sun_irradiance
+				light_source += sun_irradiance
 						* cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter, pixel_angle);
 			}
 			if (moonlit) {
-				source += moon_irradiance
-						* cloud_light_source(moon_dir, normal, dir, offset, height, d, column, light_jitter, pixel_angle)
-						+ moon_sky_irradiance * sky_source;
+				light_source += moon_irradiance
+						* cloud_light_source(moon_dir, normal, dir, offset, height, d, column, light_jitter, pixel_angle);
+				source += moon_sky_irradiance * sky_source;
 			}
 		}
 		float scaled_step = exp(-k * tau);
-		radiance += transmittance_sc * source * (1.0 - scaled_step) / k;
+		float true_step = exp(-tau);
+		if (cloud_scattering_model == 1) {
+			// The lights' source with the table (exact single scattering + the tabulated Draine part of the higher
+			// orders) is attenuated with exp(-w_D tau); the sky's stays in the scaled problem.
+			float tab_step = exp(-w_tab * tau);
+			radiance += transmittance_sc * source * (1.0 - scaled_step) / k
+					+ transmittance_tab * light_source * (1.0 - tab_step) / w_tab;
+			transmittance_tab *= tab_step;
+		} else {
+			radiance += transmittance_sc * (source + light_source) * (1.0 - scaled_step) / k;
+		}
 		transmittance_sc *= scaled_step;
-		float next_bg = transmittance_bg * exp(-tau);
+		float next_bg = transmittance_bg * true_step;
 		weighted_distance += d * (transmittance_bg - next_bg);
 		transmittance_bg = next_bg;
 		if (transmittance_sc < CLOUD_MIN_SCALED_TRANSMITTANCE) {

@@ -10,9 +10,11 @@
 #      "mountain" edge through a half-resolution block: no cloud over the mountain, the sky's slab within 5 %;
 #   3. climbing out of the slab in 50 m steps (looking up, the shapes on, temporal accumulation off) changes the centre
 #      5 x 5 pixels by <= 5 % of the climb's brightest value per step (no pop);
-#   4. the Sun's scattered radiance (debug output 2) of a slab of tau ~10 seen from above vs the core's closed-form
-#      slab_reflected_radiance: with a converged light march (24 samples, mean of 8 frames) 5 % - the port of the 3D
-#      source; with the preset's march at the worst geometry 15 % (the stochastic exp(-tau_s) is brighter on average);
+#   4. the Sun's scattered radiance (debug output 2) of a slab of tau ~10 seen from above vs the core's CPU reference,
+#      for both multiple-scattering models: the closed form vs slab_reflected_radiance with a converged light march (24
+#      samples, mean of 8 frames) 5 % - the port of the 3D source; the Monte Carlo table (Task 8b) vs
+#      slab_reflected_radiance_mc 3 %, including a low-Sun forward view; with the preset's march at the worst geometry
+#      15 % (the stochastic exp(-tau_s) is brighter on average);
 #   5. the GPU's filtered coverage (debug output 3, full resolution) at the slab's centre height over a wide view = the
 #      cloud fraction (0.1 / 0.5 / 0.9) within 0.02 (Task 4 deferred: the RGBA8 filter weights against the float64
 #      coverage table).
@@ -35,6 +37,7 @@ const THICK_LIQUID_KG_M3 := 1.0e-2 / 150.0
 const TRANSMITTANCE_TOLERANCE := 0.03
 const TRANSMITTANCE_FLOOR := 0.02
 const RADIANCE_TOLERANCE := 0.05
+const TABLE_RADIANCE_TOLERANCE := 0.03
 const PRESET_RADIANCE_TOLERANCE := 0.15
 const CONVERGED_LIGHT_SAMPLES := 24
 const RADIANCE_FRAMES := 8
@@ -42,7 +45,7 @@ const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 23
+const EXPECTED_SAMPLES := 31
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -81,6 +84,7 @@ func _run() -> void:
 		return
 	_clouds.quality = CloudLayer.Quality.DESKTOP
 	_detail_off()
+	_check("transfer table loaded", _clouds.transfer_ready, "config/" + CloudLayer.TRANSFER_TABLE)
 
 	var thin := _slab("thin", SLAB_BOTTOM_M, SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0)
 	_show(thin)
@@ -159,12 +163,19 @@ func _run() -> void:
 	_show(thick)
 	var tau := -log(float(_core.weather_cloud_light(_point(10.0), up)["sun_transmittance"]))
 	print("cloud_check: thick slab vertical tau %.4f" % tau)
+	_clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM
 	for c in [[0.0, 0.0, 0.0], [30.0, 0.0, 0.0], [0.0, 60.0, 180.0], [45.0, 60.0, 0.0], [45.0, 60.0, 180.0],
 			[30.0, 30.0, 90.0]]:
 		await _radiance_sample(c[0], c[1], c[2], tau, true)
 	# The preset's own light march at the worst geometry: its stochastic estimate exp(-tau_s) is brighter on average
 	# than exp(-E[tau_s]) (Jensen; the march is unbiased in tau_s), wider tolerance.
 	await _radiance_sample(45.0, 60.0, 0.0, tau, false)
+	# The Monte Carlo table, incl. a low Sun (10 deg up) seen on the forward side (the backlit glow).
+	_clouds.scattering_model = CloudLayer.ScatteringModel.TABLE
+	for c in [[0.0, 0.0, 0.0], [45.0, 60.0, 0.0], [45.0, 60.0, 180.0], [30.0, 30.0, 90.0], [75.0, 80.0, 0.0],
+			[60.0, 80.0, 180.0]]:
+		await _radiance_sample(c[0], c[1], c[2], tau, true)
+	await _radiance_sample(75.0, 80.0, 0.0, tau, false)
 	# 5. Coverage of the GPU's filtered shape noise.
 	_viewport.size = Vector2i(COVERAGE_VIEW_SIZE, COVERAGE_VIEW_SIZE)
 	for fraction in [0.1, 0.5, 0.9]:
@@ -260,12 +271,14 @@ func _radiance_sample(view_zenith_deg: float, sun_zenith_deg: float, azimuth_deg
 		got += (await _render(_point(5000.0), view, sun, 2, BLOCK_RADIUS)).x / RADIANCE_FRAMES
 	_clouds.quality = CloudLayer.Quality.DESKTOP  # the preset's march again
 	_detail_off()
-	var expected := float(_core.cloud_slab_radiance(tau, cos(deg_to_rad(sun_zenith_deg)),
-			cos(deg_to_rad(view_zenith_deg)), deg_to_rad(azimuth_deg)))
+	var table := _clouds.scattering_model == CloudLayer.ScatteringModel.TABLE
+	var args := [tau, cos(deg_to_rad(sun_zenith_deg)), cos(deg_to_rad(view_zenith_deg)), deg_to_rad(azimuth_deg)]
+	var expected := float(_core.callv(&"cloud_slab_radiance_mc" if table else &"cloud_slab_radiance", args))
 	var error := absf(got - expected) / maxf(expected, 1e-6)
-	var tolerance := RADIANCE_TOLERANCE if converged else PRESET_RADIANCE_TOLERANCE
-	_check("Sun radiance view %.0f / Sun %.0f / azimuth %.0f deg (%s march)" % [view_zenith_deg, sun_zenith_deg,
-			azimuth_deg, "converged" if converged else "preset"],
+	var tolerance := (TABLE_RADIANCE_TOLERANCE if table else RADIANCE_TOLERANCE) if converged \
+			else PRESET_RADIANCE_TOLERANCE
+	_check("Sun radiance (%s) view %.0f / Sun %.0f / azimuth %.0f deg (%s march)" % ["table" if table else "closed form",
+			view_zenith_deg, sun_zenith_deg, azimuth_deg, "converged" if converged else "preset"],
 			error <= tolerance, "GPU %.5f CPU %.5f /sr (%.2f %%)" % [got, expected, error * 100.0])
 
 

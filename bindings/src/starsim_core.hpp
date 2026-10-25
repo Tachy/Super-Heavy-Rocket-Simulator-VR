@@ -20,6 +20,7 @@
 #include "starsim/environment/atmosphere_scattering.hpp"
 #include "starsim/environment/earth_terrain.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
+#include "starsim/environment/cloud_transfer_table.hpp"
 #include "starsim/environment/weather_snapshot.hpp"
 
 #include "starsim/spice/spice_adapters.hpp"
@@ -156,6 +157,14 @@ public:
     // Checks only: environment::slab_reflected_radiance (1/sr per unit Sun irradiance).
     double cloud_slab_radiance(double optical_depth, double sun_cos_zenith, double view_cos_zenith,
                                double relative_azimuth_rad) const;
+    // Loads the Monte Carlo transfer table (environment::load_cloud_transfer_table) and keeps it for
+    // cloud_slab_radiance_mc: {ok, error, texels: PackedByteArray (RGBA half floats, cloud_transfer_gpu_texels), size:
+    // Vector3i, nodes: Vector4i (depth, mu0, theta, psi), depth_map: Vector3 (scale, ln ratio, K), theta_map: Vector3
+    // (theta0, log, linear)}. Call it on a worker (reads ~4.5 MB).
+    godot::Dictionary cloud_transfer_table(const godot::String& file);
+    // Checks only: environment::slab_reflected_radiance_mc with the loaded table (-1 without one).
+    double cloud_slab_radiance_mc(double optical_depth, double sun_cos_zenith, double view_cos_zenith,
+                                  double relative_azimuth_rad) const;
     // Checks only: writes WeatherSnapshot::uniform_slab(181, 360, ...) to `file`.
     bool weather_write_slab_snapshot(const godot::String& file, double bottom_m, double top_m,
                                      double liquid_water_kg_m3, double cloud_fraction) const;
@@ -177,6 +186,8 @@ private:
     mutable std::vector<std::pair<std::string, SnapshotPtr>> weather_cache_;  // last loaded files, newest last
     SnapshotPtr weather_before_, weather_after_;
     double weather_blend_ = 0.0;
+    mutable std::mutex transfer_mutex_;  // guards transfer_table_ (loaded on a worker, read by the checks)
+    std::shared_ptr<const environment::CloudTransferTable> transfer_table_;
     environment::RefractionProfile refraction_{environment::Us76Atmosphere{}};
     std::unique_ptr<spice::SpiceSession> session_;
     spice::SpiceTimeConverter time_;

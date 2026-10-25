@@ -3,3 +3,5 @@ tools/godot_patches/*.patch -text
 # Weather decoder fixtures are raw binary (blosc frames, float32 values, GRIB2 messages)
 tests/validation/weather/*.bin binary
 tests/validation/weather/*.grb2 binary
+# The cloud transfer table (Monte Carlo, half floats)
+config/clouds/*.bin binary

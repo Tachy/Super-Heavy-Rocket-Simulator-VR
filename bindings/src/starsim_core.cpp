@@ -22,6 +22,7 @@
 #include "starsim/environment/cloud_noise.hpp"
 #include "starsim/environment/cloud_optics.hpp"
 #include "starsim/environment/cloud_render_texels.hpp"
+#include "starsim/environment/cloud_transfer_table.hpp"
 #include "starsim/environment/eclipse.hpp"
 #include "starsim/environment/weather_snapshot_build.hpp"
 #include "starsim/environment/weather_snapshot_file.hpp"
@@ -727,6 +728,41 @@ double StarsimCore::cloud_slab_radiance(double optical_depth, double sun_cos_zen
     return environment::slab_reflected_radiance(optical_depth, sun_cos_zenith, view_cos_zenith, relative_azimuth_rad);
 }
 
+godot::Dictionary StarsimCore::cloud_transfer_table(const godot::String& file) {
+    try {
+        auto table = std::make_shared<const environment::CloudTransferTable>(
+            environment::load_cloud_transfer_table(std::filesystem::path(utf8_of(file))));
+        const environment::CloudTransferTexels gpu = environment::cloud_transfer_gpu_texels(*table);
+        godot::PackedByteArray texels;
+        texels.resize(static_cast<int64_t>(gpu.rgba_half.size() * sizeof(std::uint16_t)));
+        std::memcpy(texels.ptrw(), gpu.rgba_half.data(), gpu.rgba_half.size() * sizeof(std::uint16_t));
+        godot::Dictionary result;
+        result["ok"] = true;
+        result["texels"] = texels;
+        result["size"] = godot::Vector3i(gpu.width, gpu.height, gpu.depth);
+        result["nodes"] = godot::Vector4i(table->depth_nodes, table->mu_nodes, table->theta_nodes, table->psi_nodes);
+        result["depth_map"] = godot::Vector3(table->depth_scale, std::log(table->depth_ratio), table->diffusion_k);
+        result["theta_map"] = godot::Vector3(table->theta0, table->theta_log, table->theta_linear);
+        std::lock_guard<std::mutex> lock(transfer_mutex_);
+        transfer_table_ = std::move(table);
+        return result;
+    } catch (const std::exception& e) {
+        return weather_failure("Wolken-Transfertabelle konnte nicht gelesen werden: ", e);
+    }
+}
+
+double StarsimCore::cloud_slab_radiance_mc(double optical_depth, double sun_cos_zenith, double view_cos_zenith,
+                                           double relative_azimuth_rad) const {
+    std::shared_ptr<const environment::CloudTransferTable> table;
+    {
+        std::lock_guard<std::mutex> lock(transfer_mutex_);
+        table = transfer_table_;
+    }
+    if (!table) return -1.0;
+    return environment::slab_reflected_radiance_mc(*table, optical_depth, sun_cos_zenith, view_cos_zenith,
+                                                   relative_azimuth_rad);
+}
+
 bool StarsimCore::weather_write_slab_snapshot(const godot::String& file, double bottom_m, double top_m,
                                               double liquid_water_kg_m3, double cloud_fraction) const {
     try {
@@ -800,6 +836,9 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("cloud_optics_parameters"), &StarsimCore::cloud_optics_parameters);
     ClassDB::bind_method(D_METHOD("cloud_slab_radiance", "optical_depth", "sun_cos_zenith", "view_cos_zenith",
                                   "relative_azimuth_rad"), &StarsimCore::cloud_slab_radiance);
+    ClassDB::bind_method(D_METHOD("cloud_transfer_table", "file"), &StarsimCore::cloud_transfer_table);
+    ClassDB::bind_method(D_METHOD("cloud_slab_radiance_mc", "optical_depth", "sun_cos_zenith", "view_cos_zenith",
+                                  "relative_azimuth_rad"), &StarsimCore::cloud_slab_radiance_mc);
     ClassDB::bind_method(D_METHOD("weather_write_slab_snapshot", "file", "bottom_m", "top_m", "liquid_water_kg_m3",
                                   "cloud_fraction"), &StarsimCore::weather_write_slab_snapshot);
 }

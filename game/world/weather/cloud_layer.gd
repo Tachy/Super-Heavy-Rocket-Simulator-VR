@@ -34,8 +34,13 @@ const WGS84_A_M := 6378137.0
 ## a / b of WGS84 (the model space's polar stretch, as Atmosphere.POLAR_STRETCH).
 const POLAR_STRETCH := 1.0 / (1.0 - 1.0 / 298.257223563)
 const LAYERS := 32
+## The Monte Carlo transfer table of the multiply scattered light (core cloud_transfer_table.hpp), in config/.
+const TRANSFER_TABLE := "clouds/cloud_transfer_table.bin"
 
 enum Quality { DESKTOP, VR }
+## The multiple-scattering model (fidelity flag, shader global cloud_scattering_model): the Monte Carlo transfer table
+## (the reference) or the closed form (TMS on the delta-Eddington source function) for comparison.
+enum ScatteringModel { CLOSED_FORM, TABLE }
 ## [E] Quality presets: coarse steps spanning the segment, the cap on all steps, the fine step (fraction of the
 ## distance) inside the field's cloudy region; the light march toward the Sun / Moon (near samples over near_m through
 ## the shapes, geometric from first_m; far samples to the cloud top through the grid mean); the detail levels used
@@ -54,7 +59,12 @@ var quality: Quality = Quality.DESKTOP:
 	set(value):
 		quality = value
 		_apply_quality()
+var scattering_model: ScatteringModel = ScatteringModel.TABLE:
+	set(value):
+		scattering_model = value
+		_apply_scattering_model()
 var noise_ready := false  ## noise and optics uploaded
+var transfer_ready := false  ## the transfer table is uploaded (else the closed form is used)
 var last_upload_ms := 0.0  ## the longest frame step of the last field upload (main / render thread)
 var field_texture_bytes := 0  ## both resident snapshots (field + ice share texels)
 var pinned := false  ## show_now was used: set_target is ignored
@@ -66,6 +76,8 @@ var _material := ShaderMaterial.new()
 var _noise_task := -1
 var _noise_result := {}
 var _noise_textures: Array = []
+var _transfer_result := {}
+var _transfer_texture: ImageTexture3D
 ## Slots: {id, size: Vector3 (columns, rows, layers), field / ice: CloudFieldTexture or null (empty)}.
 var _slots: Array = [{}, {}]
 var _w1 := 0.0  ## weight of slot 1 (cloud_blend)
@@ -109,7 +121,12 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_enabled", false)
 	ShaderGlobals.set_value(&"cloud_debug_output", 0)
 	_apply_quality()
-	_noise_task = WorkerThreadPool.add_task(func() -> void: _noise_result = core.cloud_noise(), false, "cloud noise")
+	_apply_scattering_model()
+	var table_file := Paths.config_dir().path_join(TRANSFER_TABLE)
+	var load_tables := func() -> void:
+		_noise_result = core.cloud_noise()
+		_transfer_result = core.cloud_transfer_table(table_file)
+	_noise_task = WorkerThreadPool.add_task(load_tables, false, "cloud noise")
 
 
 ## Blocks until the noise is uploaded (checks).
@@ -408,6 +425,37 @@ func _upload_noise() -> void:
 	ShaderGlobals.set_value(&"cloud_level_amplitude", Vector3(amplitude[0], amplitude[1], amplitude[2]))
 	_noise_result = {}
 	noise_ready = true
+	_upload_transfer()
+
+
+## The transfer table's GPU form (RGBA half floats; StarsimCore.cloud_transfer_table) and its node maps.
+func _upload_transfer() -> void:
+	var table := _transfer_result
+	_transfer_result = {}
+	if not table.get("ok", false):
+		push_warning("Wolken: Transfertabelle fehlt, geschlossene Form: " + str(table.get("error", "")))
+		return
+	var size: Vector3i = table["size"]
+	var texels: PackedByteArray = table["texels"]
+	var slice := size.x * size.y * 8
+	var images: Array[Image] = []
+	for z in range(size.z):
+		images.append(Image.create_from_data(size.x, size.y, false, Image.FORMAT_RGBAH,
+				texels.slice(z * slice, (z + 1) * slice)))
+	_transfer_texture = ImageTexture3D.new()
+	_transfer_texture.create(Image.FORMAT_RGBAH, size.x, size.y, size.z, false, images)
+	var nodes: Vector4i = table["nodes"]
+	ShaderGlobals.set_value(&"cloud_transfer", _transfer_texture)
+	ShaderGlobals.set_value(&"cloud_transfer_nodes", Vector4(nodes.x, nodes.y, nodes.z, nodes.w))
+	ShaderGlobals.set_value(&"cloud_transfer_depth_map", table["depth_map"])
+	ShaderGlobals.set_value(&"cloud_transfer_theta_map", table["theta_map"])
+	transfer_ready = true
+	_apply_scattering_model()
+
+
+func _apply_scattering_model() -> void:
+	var table := scattering_model == ScatteringModel.TABLE and transfer_ready
+	ShaderGlobals.set_value(&"cloud_scattering_model", 1 if table else 0)
 
 
 ## A table of rows of 256 (one per detail state): a 256 x rows R32F texture, filtered linearly in both directions.

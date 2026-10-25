@@ -18,7 +18,8 @@
 #          that many), --weather=analog (the shipped analog of --utc), --weather=<file.wthr> (a cached snapshot) or
 #          --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>; any other value exits with an error;
 #          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's), --cloud_debug=1..4 (the cloud
-#          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels).
+#          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels),
+#          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
@@ -62,6 +63,9 @@ func _process(_delta: float) -> bool:
 		_show_weather_file(world)
 		if _args.has("cloud_detail_levels"):  # the detail levels used (the preset's otherwise)
 			ShaderGlobals.set_value(&"cloud_detail_levels", int(_args["cloud_detail_levels"]))
+		if _args.has("cloud_scattering"):  # the fidelity flag (CloudLayer.ScatteringModel)
+			world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
+					if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE
 		if _args.has("cloud_debug"):  # the cloud pass's debug output (clouds.gdshaderinc cloud_debug_output)
 			ShaderGlobals.set_value(&"cloud_debug_output", int(_args["cloud_debug"]))
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))

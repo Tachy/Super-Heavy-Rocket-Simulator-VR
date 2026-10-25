@@ -69,6 +69,17 @@ global uniform vec2 cloud_depth_code;        // (min, max) of the A channel's lo
 // (near samples, far samples).
 global uniform vec4 cloud_light_march;
 global uniform ivec2 cloud_light_samples;
+// The multiple-scattering model (fidelity flag): 1 = the Monte Carlo transfer table (cloud_transfer_table.hpp, the
+// reference; the lights' source attenuated with exp(-w_D tau)), 0 = the closed form (TMS on the delta-Eddington
+// source function, scaled depths) for comparison.
+global uniform int cloud_scattering_model;
+// The transfer table's GPU form (cloud_transfer_gpu_texels): x = mu0 cell x theta, y = b cell x psi, z = a; RGBA the
+// cell's (mu0, b), (mu0 + 1, b), (mu0, b + 1), (mu0 + 1, b + 1) entries. Node counts (depth, mu0, theta, psi), the depth
+// map (scale, ln ratio, K) and the theta map (theta0, log, linear) as in the core.
+global uniform sampler3D cloud_transfer : filter_linear, repeat_disable;
+global uniform vec4 cloud_transfer_nodes;
+global uniform vec3 cloud_transfer_depth_map;
+global uniform vec3 cloud_transfer_theta_map;
 // Checks only (cloud_check.gd; 0 in the game): 1 = the background transmittance T_bg, 2 = the Sun's scattered radiance
 // per unit Sun irradiance without the air and the sky (both opaque, both of the GRID-MEAN field without the sub-grid
 // shapes: the core's CPU references have no shapes); 3 = the coverage (1 cloud, 0 clear) where the ray crosses the height
@@ -549,10 +560,8 @@ float cloud_entry_cosine(float sun_cos_zenith, float sun_optical_depth, float ve
 
 // The Sun's source with the 3D Sun depth (core cloud_scattering_source_3d): light_dir toward the light, view_prop the
 // propagation toward the camera, up the local (geodetic) up, all unit; depths unscaled.
-float cloud_scattering_source_3d(vec3 light_dir, vec3 view_prop, vec3 up, float sun_optical_depth,
-		float vertical_depth_from_top, float column_optical_depth) {
-	float mu0 = clamp(dot(light_dir, up), -1.0, 1.0);
-	float mu_e = cloud_entry_cosine(mu0, sun_optical_depth, vertical_depth_from_top);
+// The entry surface's normal: up turned toward the light by acos(mu0) - acos(mu_e) (core entry_normal).
+vec3 cloud_entry_normal(vec3 light_dir, vec3 up, float mu0, float mu_e) {
 	vec3 normal = up;
 	vec3 across = light_dir - up * mu0;
 	float across_norm = length(across);
@@ -560,12 +569,80 @@ float cloud_scattering_source_3d(vec3 light_dir, vec3 view_prop, vec3 up, float 
 		float turn = acos(mu0) - acos(mu_e);
 		normal = up * cos(turn) + across * (sin(turn) / across_norm);
 	}
+	return normal;
+}
+
+float cloud_scattering_source_3d(vec3 light_dir, vec3 view_prop, vec3 up, float sun_optical_depth,
+		float vertical_depth_from_top, float column_optical_depth) {
+	float mu0 = clamp(dot(light_dir, up), -1.0, 1.0);
+	float mu_e = cloud_entry_cosine(mu0, sun_optical_depth, vertical_depth_from_top);
+	vec3 normal = cloud_entry_normal(light_dir, up, mu0, mu_e);
 	float tau_s = max(0.0, sun_optical_depth);
 	float depth = mu_e * tau_s;
 	vec3 diff = light_dir + view_prop;  // |s + v|^2 / 2 = 1 + s.v = 1 - cos(theta), theta between the propagations
 	float one_minus_cos = 0.5 * dot(diff, diff);
 	return cloud_scattering_source(1.0 - one_minus_cos, one_minus_cos, dot(view_prop, normal), mu_e, tau_s, depth,
 			max(column_optical_depth, depth));
+}
+
+// Node coordinate of a depth on the transfer table's a / b axis (core cloud_transfer_depth_coordinate).
+float cloud_transfer_depth_coordinate(float depth) {
+	vec3 m = cloud_transfer_depth_map;
+	float last = cloud_transfer_nodes.x - 2.0;
+	float a = max(depth, 0.0);
+	float a_last = m.x * (exp(last * m.y) - 1.0);
+	if (a <= a_last) {
+		return log(1.0 + a / m.x) / m.y;
+	}
+	// Linear in x = 1 / (1 + K a) from the last finite node to infinity.
+	return last + 1.0 - (1.0 + m.z * a_last) / (1.0 + m.z * a);
+}
+
+// The tabulated source of the orders >= 2 (core cloud_transfer_lookup): one trilinear fetch (theta, psi, a) returns
+// the four (mu0, b) corners of the cell, mixed here.
+float cloud_transfer_lookup(float depth_from_top, float depth_from_bottom, float mu0, float theta, float psi) {
+	vec4 n = cloud_transfer_nodes;
+	vec3 tm = cloud_transfer_theta_map;
+	float ua = clamp(cloud_transfer_depth_coordinate(depth_from_top), 0.0, n.x - 1.0);
+	float ub = clamp(cloud_transfer_depth_coordinate(depth_from_bottom), 0.0, n.x - 1.0);
+	float um = clamp(sqrt(clamp(mu0, 0.0, 1.0)) * n.y - 1.0, 0.0, n.y - 1.0);  // node i: ((i + 1) / n)^2
+	float ut = clamp(tm.y * log(1.0 + theta / tm.x) + tm.z * theta, 0.0, n.z - 1.0);
+	float up = clamp(psi / CLOUD_PI * (n.w - 1.0), 0.0, n.w - 1.0);
+	float ib = min(floor(ub), n.x - 2.0);
+	float im = min(floor(um), n.y - 2.0);
+	vec3 size = vec3((n.y - 1.0) * n.z, (n.x - 1.0) * n.w, n.x);
+	vec4 c = texture(cloud_transfer, (vec3(im * n.z + ut, ib * n.w + up, ua) + 0.5) / size);
+	float fm = um - im;
+	return clamp(mu0, 0.0, 1.0) * mix(mix(c.r, c.g, fm), mix(c.b, c.a, fm), ub - ib);  // the table holds J / mu0
+}
+
+// The light's source with the Monte Carlo table (core cloud_scattering_source_mc): exact single scattering plus the
+// tabulated orders >= 2, per unit irradiance and unit optical depth; the view ray attenuates it with exp(-w_D tau_v)
+// (w_D = cloud_phase.w; core cloud_transfer_view_extinction).
+float cloud_scattering_source_mc(vec3 light_dir, vec3 view_prop, vec3 up, float sun_optical_depth,
+		float vertical_depth_from_top, float column_optical_depth) {
+	float mu0 = clamp(dot(light_dir, up), -1.0, 1.0);
+	float mu_e = cloud_entry_cosine(mu0, sun_optical_depth, vertical_depth_from_top);
+	vec3 normal = cloud_entry_normal(light_dir, up, mu0, mu_e);
+	float tau_s = max(0.0, sun_optical_depth);
+	float depth = mu_e * tau_s;
+	float column = max(column_optical_depth, depth);
+	vec3 chord = view_prop + light_dir;  // view propagation - Sun propagation: |chord| = 2 sin(theta / 2)
+	float one_minus_cos = 0.5 * dot(chord, chord);
+	float theta = 2.0 * asin(min(1.0, 0.5 * length(chord)));
+	// psi: the view propagation's azimuth about the Sun's propagation s, from the normal's part across s.
+	vec3 s = -light_dir;
+	vec3 e1 = normal - s * dot(normal, s);
+	float psi = 0.0;
+	float e1_norm = length(e1);
+	if (e1_norm > 1.0e-6) {
+		e1 /= e1_norm;
+		vec3 across = view_prop - s * dot(view_prop, s);
+		float c1 = dot(across, e1);
+		psi = atan(length(across - e1 * c1), c1);
+	}
+	return cloud_phase_function(1.0 - one_minus_cos, one_minus_cos) * exp(-tau_s)
+			+ cloud_transfer_lookup(depth, column - depth, mu_e, theta, psi);
 }
 
 // The sky's source (cloud_sky_scattering_source) per unit horizontal sky irradiance on the column top.
