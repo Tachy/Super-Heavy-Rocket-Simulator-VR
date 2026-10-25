@@ -3,7 +3,7 @@
 # dry_mass_kg always INCLUDES the installed engines.
 
 [sources]
-lunar_spec = "docs/superpowers/specs/2026-10-14-lunar-missions-design.md (HLS dry mass, propulsion concept)"
+lunar_spec = "docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md (HLS dry mass, propulsion concept)"
 oig_2026 = "NASA OIG IG-26-004, March 2026 (LEO depot, >10 tankers, HLS fills up in LEO)"
 wiki_starship = "https://en.wikipedia.org/wiki/SpaceX_Starship (retrieved 2026-10-12)"
 

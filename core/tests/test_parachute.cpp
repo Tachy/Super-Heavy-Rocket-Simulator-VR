@@ -1,4 +1,4 @@
-// Parachutes (d4 of docs/superpowers/specs/2026-10-14-rcs-crew-dragon-design.md): configuration, drag area over the
+// Parachutes (d4 of docs/superpowers/archive/specs/2026-10-14-rcs-crew-dragon-design.md): configuration, drag area over the
 // reefing stages, riser-point force; vehicle state, body physics, opening loads; the deployment sequencer.
 
 #include <catch2/catch_approx.hpp>

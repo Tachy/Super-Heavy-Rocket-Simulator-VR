@@ -1,4 +1,4 @@
-// Mission kinds and the core mission start (d5 of docs/superpowers/specs/2026-10-14-rcs-crew-dragon-design.md).
+// Mission kinds and the core mission start (d5 of docs/superpowers/archive/specs/2026-10-14-rcs-crew-dragon-design.md).
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>

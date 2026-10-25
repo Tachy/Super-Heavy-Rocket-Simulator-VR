@@ -20,7 +20,7 @@ struct SeatPosition {
     math::Vec3 position_stage_m;
 };
 
-// Crew escape of a crewed ship return (config/crew_escape/<id>.toml; docs/superpowers/specs/2026-10-22-crew-escape-
+// Crew escape of a crewed ship return (config/crew_escape/<id>.toml; docs/superpowers/archive/specs/2026-10-22-crew-escape-
 // design.md): the seats, their rails, envelope, deployment timing, give-up rules and the judging limits. The ship's own
 // data stay untouched (user 2026-10-22).
 struct CrewEscapeConfig {

@@ -1,4 +1,4 @@
-# Ejection seat with its occupant (crew escape, docs/superpowers/specs/2026-10-22-crew-escape-design.md): one body from
+# Ejection seat with its occupant (crew escape, docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md): one body from
 # the firing until the seat-man separation. An ACES II-class zero-zero seat. The catapult / rocket thrust and the
 # deployment timing are not vehicle data: they live in config/crew_escape/*.toml (gnc::SeatSequencer times the
 # drogue; the deploy_height_m below is required by the loader and unused here - no ParachuteSequencer on crew bodies).

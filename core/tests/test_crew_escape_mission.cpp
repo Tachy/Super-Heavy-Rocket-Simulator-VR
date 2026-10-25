@@ -1,4 +1,4 @@
-// Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md), Task 6: the crewed ship return missions - from
+// Crew escape (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md), Task 6: the crewed ship return missions - from
 // orbit and the lunar direct return - and a crew lost with a ship that breaks up above the seat envelope.
 
 #include <catch2/catch_test_macros.hpp>

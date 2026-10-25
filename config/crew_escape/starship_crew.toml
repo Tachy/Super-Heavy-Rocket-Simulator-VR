@@ -1,4 +1,4 @@
-# Crew escape of a crewed Starship return (docs/superpowers/specs/2026-10-22-crew-escape-design.md): ejection seats
+# Crew escape of a crewed Starship return (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md): ejection seats
 # that fire when the onboard computer gives the ship up. Referenced by crewed missions ([mission] crew_escape). The
 # ship's own data stay untouched (user 2026-10-22): the seats are placed in its stage frame here, the ship keeps its
 # mass and CG when they leave.

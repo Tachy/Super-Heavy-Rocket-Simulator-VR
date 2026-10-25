@@ -1,4 +1,4 @@
-// Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md), Task 5: the session gives a crewed ship up,
+// Crew escape (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md), Task 5: the session gives a crewed ship up,
 // fires the seats, flies every crew member to the touchdown and the empty ship to its impact.
 
 #include <catch2/catch_approx.hpp>

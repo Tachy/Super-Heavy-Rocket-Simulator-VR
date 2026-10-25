@@ -1,4 +1,4 @@
-// Crew Dragon (d2 of docs/superpowers/specs/2026-10-14-rcs-crew-dragon-design.md): vehicle data, payload stacking,
+// Crew Dragon (d2 of docs/superpowers/archive/specs/2026-10-14-rcs-crew-dragon-design.md): vehicle data, payload stacking,
 // thruster availability, orbital attitude modes, Draco translation burns.
 
 #include <catch2/catch_approx.hpp>

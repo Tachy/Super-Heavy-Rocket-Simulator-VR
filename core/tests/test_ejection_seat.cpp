@@ -1,4 +1,4 @@
-// Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md), Task 2: the seat envelope and the seat
+// Crew escape (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md), Task 2: the seat envelope and the seat
 // sequencer (ACES II-class modes).
 
 #include <algorithm>

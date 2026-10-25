@@ -1,4 +1,4 @@
-// Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md), Task 1: the crew-escape config and the seat /
+// Crew escape (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md), Task 1: the crew-escape config and the seat /
 // parachutist bodies.
 
 #include <catch2/catch_approx.hpp>

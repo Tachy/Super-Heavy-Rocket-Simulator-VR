@@ -13,7 +13,7 @@
 
 namespace starsim::gnc {
 
-// Flip and landing of the ship at the tower (b3 of docs/superpowers/specs/2026-10-13-ship-return-design.md).
+// Flip and landing of the ship at the tower (b3 of docs/superpowers/archive/specs/2026-10-13-ship-return-design.md).
 struct ShipLandingParameters {
     std::vector<std::string> flip_groups{"ship/sea_level_1", "ship/sea_level_2", "ship/sea_level_3"};
     double flip_throttle = 0.8;                                  // [E]

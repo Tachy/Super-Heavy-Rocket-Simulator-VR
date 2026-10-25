@@ -1,4 +1,4 @@
-// Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md), Task 3: can a crewed ship still try the catch?
+// Crew escape (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md), Task 3: can a crewed ship still try the catch?
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>

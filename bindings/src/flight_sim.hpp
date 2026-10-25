@@ -255,7 +255,7 @@ public:
     // hls_required_propellant_kg, first_return (German), misses (German, once complete; empty: the comparison
     // passed)}.
     godot::Dictionary campaign_flight_state() const;
-    // Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md): {present} (false for an uncrewed flight);
+    // Crew escape (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md): {present} (false for an uncrewed flight);
     // present: {armed, fired, early, reason (German), give_up_time_s (mission time), members: [{phase, mode (German),
     // fire_time_s, load_g, peak_load_g, min_clearance_m, outcome, reason (German), body_index (-1: not fired / gone),
     // position_gcrf_m, velocity_gcrf_mps, attitude_gcrf, latitude_rad, longitude_rad, height_m (while it has a body),

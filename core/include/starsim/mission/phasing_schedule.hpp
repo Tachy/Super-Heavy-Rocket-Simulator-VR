@@ -7,7 +7,7 @@
 
 namespace starsim::mission {
 
-// Coelliptic rendezvous after the Crew Dragon pattern (spec i3; plan docs/superpowers/plans/2026-10-19-iss-i3-phasing.md
+// Coelliptic rendezvous after the Crew Dragon pattern (spec i3; plan docs/superpowers/archive/plans/2026-10-19-iss-i3-phasing.md
 // lists the Crew-2 timeline the values are taken from).
 struct PhasingParameters {
     double coelliptic_height_m = 2900.0;  // [D] Crew-2: 4.9 m/s closing between 30 and 10 km = 1.5 n dh

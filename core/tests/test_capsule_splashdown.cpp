@@ -1,4 +1,4 @@
-// Crew Dragon under its parachutes in the flight session (d4 of docs/superpowers/specs/2026-10-14-rcs-crew-dragon-design.md):
+// Crew Dragon under its parachutes in the flight session (d4 of docs/superpowers/archive/specs/2026-10-14-rcs-crew-dragon-design.md):
 // from the drogue gate to the water; review-focus cases; the return mission from orbit with the published timeline.
 
 #include <catch2/catch_approx.hpp>

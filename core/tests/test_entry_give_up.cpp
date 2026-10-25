@@ -1,4 +1,4 @@
-// Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md), Task 4: the entry guidance gives a ship up -
+// Crew escape (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md), Task 4: the entry guidance gives a ship up -
 // it aims beyond the coastline and flies the belly flop down to the impact (no gate, no flip).
 
 #include <catch2/catch_test_macros.hpp>

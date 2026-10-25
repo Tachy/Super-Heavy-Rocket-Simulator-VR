@@ -1,4 +1,4 @@
-// Blunt capsule aerodynamics (d3 of docs/superpowers/specs/2026-10-14-rcs-crew-dragon-design.md): the table from
+// Blunt capsule aerodynamics (d3 of docs/superpowers/archive/specs/2026-10-14-rcs-crew-dragon-design.md): the table from
 // tools/aero/gen_capsule_aero.py (modified Newtonian), force and moment conventions, offset-CG trim.
 
 #include <catch2/catch_approx.hpp>

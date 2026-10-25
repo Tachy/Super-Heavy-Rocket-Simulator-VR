@@ -1,4 +1,4 @@
-// FlightSession: crew escape of a crewed ship return (docs/superpowers/specs/2026-10-22-crew-escape-design.md) - the
+// FlightSession: crew escape of a crewed ship return (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md) - the
 // give-up, the seat firing, the seat and parachutist bodies, their judging and the given-up ship's impact report.
 
 #include <algorithm>

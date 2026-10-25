@@ -6,7 +6,7 @@
 # braking drops from one sea-level Raptor (minimum 0.3 x 2.91 MN vacuum = 874 kN) onto these, so their
 # maximum must exceed that minimum / 0.9; and at minimum they must hover the lightest landing (260 t - 5 %).
 [sources]
-lunar_spec = "docs/superpowers/specs/2026-10-14-lunar-missions-design.md (l2)"
+lunar_spec = "docs/superpowers/archive/specs/2026-10-14-lunar-missions-design.md (l2)"
 
 [engine]
 id = "hls_landing_thruster"

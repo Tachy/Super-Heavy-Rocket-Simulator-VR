@@ -977,7 +977,7 @@ public:
     // How the ship's return ended (sim::return_result): Flying until contact; without a ship landing guidance the
     // landing outcome alone (tilt and sink 0).
     ReturnResult ship_return_result(size_t index) const;
-    // Crew escape (docs/superpowers/specs/2026-10-22-crew-escape-design.md): a crewed ship return carries ejection seats.
+    // Crew escape (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md): a crewed ship return carries ejection seats.
     // With a config the onboard computer checks the controlled ship's catch feasibility through the entry (failed flip
     // engine, too little propellant: the ship is given up to the sea) and arms the seats on every abort after the flip;
     // the seats fire inside their envelope (an early give-up over water or at the minimum firing height), each crew

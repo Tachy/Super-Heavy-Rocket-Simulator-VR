@@ -1,4 +1,4 @@
-// ISS i2 (docs/superpowers/specs/2026-10-19-iss-docking-design.md): Crew Dragon translation on its 16 Dracos -
+// ISS i2 (docs/superpowers/archive/specs/2026-10-19-iss-docking-design.md): Crew Dragon translation on its 16 Dracos -
 // authority per axis at zero torque, coupling, propellant per m/s, and the Dragon docking port.
 
 #include <catch2/catch_approx.hpp>

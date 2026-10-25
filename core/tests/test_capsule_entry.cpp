@@ -1,4 +1,4 @@
-// Crew Dragon capsule entry (d3 of docs/superpowers/specs/2026-10-14-rcs-crew-dragon-design.md): the capsule flies its
+// Crew Dragon capsule entry (d3 of docs/superpowers/archive/specs/2026-10-14-rcs-crew-dragon-design.md): the capsule flies its
 // blunt-body aerodynamics with an offset CG, its Dracos fly the bank, the entry guidance takes it to the drogue gate.
 
 #include <catch2/catch_approx.hpp>

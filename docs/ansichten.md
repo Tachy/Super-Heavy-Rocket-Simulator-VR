@@ -151,7 +151,7 @@ Kopfbewegung (6DOF), am Desktop mit Umschauen per Maus. F12 setzt die Sitzpositi
 
 ### Webcast-Overlay [Entschieden, umgesetzt 2026-10-22]
 
-Die Außenansicht trägt ein Overlay im Stil der Starship-Webcasts (Spec `docs/superpowers/specs/2026-10-22-external-view-design.md`).
+Die Außenansicht trägt ein Overlay im Stil der Starship-Webcasts (Spec `docs/superpowers/archive/specs/2026-10-22-external-view-design.md`).
 Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis es das Cockpit gibt.
 - **Oben:** UTC der Simulation (der Zeitraffer steht im Zeit-Panel, nicht im Overlay). Darunter, kleiner, die
   Ortszeit am Ort der **Kamera** (nicht des betrachteten Objekts), z. B. "Ortszeit 13:42:05 CDT (UTC−5)"; hat die

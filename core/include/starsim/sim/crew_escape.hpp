@@ -10,7 +10,7 @@
 
 namespace starsim::sim {
 
-// Crew escape of a crewed ship return (docs/superpowers/specs/2026-10-22-crew-escape-design.md): what the session
+// Crew escape of a crewed ship return (docs/superpowers/archive/specs/2026-10-22-crew-escape-design.md): what the session
 // reports per crew member and for the given-up ship. German reasons and UI texts.
 enum class CrewOutcome { Flying, Rescued, Lost };
 const char* to_string(CrewOutcome outcome);

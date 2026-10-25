@@ -1,4 +1,4 @@
-# International Space Station - the docking target of milestone i (spec docs/superpowers/specs/2026-10-19-iss-docking-design.md).
+# International Space Station - the docking target of milestone i (spec docs/superpowers/archive/specs/2026-10-19-iss-docking-design.md).
 # Flown in ideal LVLH attitude (+XVV, body x forward, y starboard, z nadir); stations along body x from the aft end of
 # the Russian segment. Mass, drag area and C_D are replaced by the OEM header when the mission uses an OEM.
 
