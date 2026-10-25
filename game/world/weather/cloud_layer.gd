@@ -25,8 +25,10 @@ extends Node3D
 
 ## [call] Seconds per unit weight of a cross-fade (pair / source change, weather on / off).
 const FADE_S := 2.0
-## Clouds are raymarched while the Earth is drawn in true space (CelestialBody.SCALED_SPACE_DISTANCE_M); beyond it the
-## scaled-space Earth (Task 10) shows them.
+## Clouds are raymarched while the Earth is drawn in true space (CelestialBody.SCALED_SPACE_DISTANCE_M, the same
+## camera distance from the Earth's centre that switches the terrain quadtree to the scaled-space mesh); beyond it the
+## scaled-space Earth draws them (World switches it to earth_clouds.gdshader while far_enabled; cloud_far.gdshaderinc,
+## Task 10). One limit, so exactly one of the two is drawn.
 const RAYMARCH_MAX_DISTANCE_M := CelestialBody.SCALED_SPACE_DISTANCE_M
 ## The shape, ice-sheet and level-0 detail tiles (m): the same numbers as CLOUD_SHAPE_TILE_H_M / _V_M,
 ## CLOUD_ICE_TILE_V_M and CLOUD_DETAIL_TILE_M in shaders/clouds.gdshaderinc (the camera's noise coordinates are formed
@@ -83,6 +85,8 @@ var transfer_ready := false  ## the transfer table is uploaded (else the closed 
 var last_upload_ms := 0.0  ## the longest frame step of the last field upload (main / render thread)
 var field_texture_bytes := 0  ## both resident snapshots (field + ice share texels)
 var pinned := false  ## show_now was used: set_target is ignored
+## The scaled-space Earth draws the clouds (weather shown, the camera beyond RAYMARCH_MAX_DISTANCE_M; Task 10).
+var far_enabled := false
 var effect := CloudEffect.new()  ## the cloud pass (the world's Compositor)
 const SHADOW_RUN_WINDOW_MSEC := 250  ## how long after its last run the shadow effect still counts as running
 var shadow_effect := CloudShadowEffect.new(SHADOW_MAP_SIZE)  ## the cloud shadow maps (the world's Compositor)
@@ -245,8 +249,11 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	ShaderGlobals.set_value(&"cloud_ice_origin", _shape_origin(camera_render, height, ICE_TILE_V_M))
 	ShaderGlobals.set_value(&"cloud_detail_origin", _wrap(camera_render / DETAIL_TILE_M))
 	var visible_weight := (1.0 - _w1) * float(_slots[0]["id"] != "") + _w1 * float(_slots[1]["id"] != "")
-	var enabled := noise_ready and visible_weight > 0.0 and camera_fixed_m.length() < RAYMARCH_MAX_DISTANCE_M
+	var near := camera_fixed_m.length() < RAYMARCH_MAX_DISTANCE_M
+	var enabled := noise_ready and visible_weight > 0.0 and near
 	ShaderGlobals.set_value(&"cloud_enabled", enabled)
+	# The far field needs only the field and column textures (no noise, no shadow maps).
+	far_enabled = visible_weight > 0.0 and not near
 	_update_shadow_frame(camera_render, height)
 	# The maps count as valid only while the effect keeps running (its render callback stamps ran_msec; the render
 	# thread may trail the main thread by a frame or two, hence the window rather than a per-frame flag): a stopped

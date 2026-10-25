@@ -62,6 +62,8 @@ var sun_apparent_from_earth_m := Vector3.ZERO
 var moon_apparent_from_earth_m := Vector3.ZERO
 
 var _earth_material := ShaderMaterial.new()
+var _earth_shader: Shader = load("res://shaders/earth.gdshader")
+var _earth_clouds_shader: Shader = load("res://shaders/earth_clouds.gdshader")  ## with the far-field clouds (Task 10)
 var _moon_material := ShaderMaterial.new()
 var _sky_material := ShaderMaterial.new()
 
@@ -175,6 +177,11 @@ func update_world() -> void:
 	earth.place(cam)
 	var camera_fixed := earth.fixed_to_gcrf.transposed() * cam
 	clouds.update(camera_fixed, weather.blend(), _delta)
+	# The scaled-space Earth with the far-field clouds exactly while the cloud pass is off and weather is shown (two
+	# shaders: weather off keeps the earth.gdshader of before bit for bit, Task 10).
+	var earth_shader := _earth_clouds_shader if clouds.far_enabled else _earth_shader
+	if _earth_material.shader != earth_shader:
+		_earth_material.shader = earth_shader
 	refraction.update(core, camera_fixed, earth.fixed_to_gcrf)
 	earth_terrain.update_for_camera(camera_fixed, _delta)
 	water_waves.update(camera_fixed, t)
@@ -410,7 +417,7 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 
 
 func _setup_bodies(data_dir: String) -> void:
-	_earth_material.shader = load("res://shaders/earth.gdshader")
+	_earth_material.shader = _earth_shader
 	_earth_material.set_shader_parameter("day_texture", _load_texture(data_dir.path_join("textures/earth_day.jpg")))
 	_earth_material.set_shader_parameter("night_texture", _load_texture(data_dir.path_join("textures/earth_night.jpg")))
 	_earth_material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)

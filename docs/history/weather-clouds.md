@@ -57,3 +57,15 @@ needed.
   Draine part with the view ray attenuated by exp(-w_D tau) (median 0.5 %).
 - **Performance after Task 8 fix round 1** (closed form, same setup): without clouds p99 13.20 / 13.06 ms, with clouds
   15.54 ms; descent 12.1 -> 16.7 ms p99, worst GPU second 18.9 ms at 8.4 km.
+
+## The cloud pass at long range before Task 10 (fixed 2026-10-26)
+
+- **Step retry on the float32 distance**: a step heavier than `CLOUD_MAX_STEP_WEIGHT` was retried while
+  `b - a_this > 1.001 x refined`; far from the camera the float32 difference carries the distance's ulp (1 m at
+  8 600 km, 0.25 m at 2 300 km), above the 0.1 % margin of a ~60 m step, so the same step was retried until the
+  256-step budget ran out: from the scaled-space limit single rays never reached a deck (speckle; counted per
+  pixel: 40-170 of the 256 steps were retries). Now the intended step length is compared.
+- **The half-resolution checkerboard's nearest depth on smooth ground**: the nearest of a 2 x 2 block cut the block's
+  centre ray short by the block's depth extent (several km for slanted ground seen from 8 600 km): every other
+  half-resolution ray lost the clouds within that distance of the ground - a deck at 1-2 km drew with T_bg 0.375 /
+  0.625 instead of 0 outside the sub-camera region. Now a block within 5 % in distance takes its mean.

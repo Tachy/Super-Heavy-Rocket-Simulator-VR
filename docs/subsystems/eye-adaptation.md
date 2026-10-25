@@ -137,4 +137,8 @@ shaders:
 
 - Earth in view for a Moon eye at partial phases underestimates up to ~2x; the eclipse-time Earth renders several
   times its day brightness (AgX rolls it toward white) - kept physical.
+- Earth in view and the earthshine ignore the clouds the Earth is drawn with (Task 10: the scaled-space Earth shows
+  them): the eye adapts to the cloud-free model ground (the Sun's plate dominates wherever the eye is sunlit; on the
+  lunar night side the cloudy Earth is brighter than adapted to); the earthshine's Bond albedo 0.306 holds the clouds
+  on average. Follow-up: the 13 directions through the cloud column.
 - Eclipsed-Moon corona not modelled; no per-pixel / foveal adaptation.

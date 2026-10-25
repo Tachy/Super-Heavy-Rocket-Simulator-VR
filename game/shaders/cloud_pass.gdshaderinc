@@ -6,7 +6,9 @@
 // Per view (each VR eye apart, the same kernels):
 // 1. CLOUD_MARCH at reduced resolution (the quality preset's scale, 1/2): one ray per low-resolution pixel through the
 //    centre of its block of full-resolution pixels; the scene depth of the block in a checkerboard: the nearest of the
-//    block on even pixels, the farthest on odd ones (both depths are represented for the upsampling). The raymarch
+//    block on even pixels, the farthest on odd ones (both depths are represented for the upsampling) - unless the
+//    block's distances lie within CLOUD_ONE_SURFACE_SPREAD of each other (one surface: the ground seen from far, a
+//    slope): then the mean, the centre ray's own distance (Task 10). The raymarch
 //    (steps, light, compositing) as described in cloud_layer.gdshader's header. The start jitter is a blue-noise value
 //    per low-resolution pixel (cloud_noise.hpp, 64 x 64 tiled) offset per frame by the golden ratio (a low-discrepancy
 //    sequence in time): a function of the pixel and the frame alone - the same for both eyes. Out: premultiplied
@@ -79,6 +81,13 @@ const float CLOUD_MIN_STEP_M = 10.0;
 // Lower end of the shell: below every ground (the Dead Sea shore -430 m); the field holds layer 0 below 0 m.
 const float CLOUD_BOTTOM_M = -500.0;
 const float CLOUD_MIN_SCALED_TRANSMITTANCE = 0.01;
+// [E] A block whose nearest and farthest scene distances differ by less than this (ln of their ratio) shows one
+// surface: its centre ray is marched to the block's mean distance. The checkerboard's nearest depth cut that ray short
+// by up to the block's depth extent - from 8 600 km a slanted 2 x 2 block of ground spans several km, so every other
+// pixel lost the low clouds in front of the ground (Task 10). An occluder's edge (a mountain against the sky or the
+// far terrain) spans far more and keeps the checkerboard. 0.05: the upsampling's depth weight
+// exp(-CLOUD_DEPTH_SHARPNESS x 0.05) = 0.82 cannot tell such depths apart either.
+const float CLOUD_ONE_SURFACE_SPREAD = 0.05;
 // [E] Largest weight of one step in the pixel's scattered light, T_sc (1 - exp(-(1 - f) tau_step)): a heavier step is
 // marched again with steps of this weight (one point sample - its light march included - would decide the pixel over
 // the whole step: grain at cloud surfaces and at bases seen at a grazing angle; with steps of tau ~1 instead the pass
@@ -219,10 +228,14 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 			dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
 			continue;
 		}
-		// A step weighing more than CLOUD_MAX_STEP_WEIGHT in the pixel is done again with steps of that weight.
+		// A step weighing more than CLOUD_MAX_STEP_WEIGHT in the pixel is done again with steps of that weight. The
+		// step's intended length is compared, not b - a_this: far from the camera (a float32 distance of 8.6e6 m has a
+		// 1 m ulp) the rounded difference exceeded the 0.1 % margin again and again - the same step was retried until
+		// the step budget ran out and the ray never reached the cloud (Task 10: low decks seen from the scaled-space
+		// limit, the horizon from orbit).
 		float allowed = CLOUD_MAX_STEP_WEIGHT / transmittance_sc;
 		float refined = allowed < 1.0 ? max(-log(1.0 - allowed) / (k * beta), CLOUD_MIN_STEP_M) : 1.0e30;
-		if (b - a_this > 1.001 * refined) {
+		if (min(step_m, d1 - a_this) > 1.001 * refined) {
 			dense_step_m = refined;
 			a = a_this;
 			continue;
@@ -342,12 +355,22 @@ void main() {
 	ivec2 last = min(ivec2(vec2(pixel + 1) * scale) - 1, full - 1);
 	vec2 centre = (vec2(pixel) + 0.5) * scale;
 	bool nearest = ((pixel.x + pixel.y) & 1) == 0;
-	float scene_m = nearest ? 1.0e30 : 0.0;
+	float near_m = 1.0e30;
+	float far_m = 0.0;
+	float sum_m = 0.0;
+	float count = 0.0;
 	for (int y = first.y; y <= last.y; y++) {
 		for (int x = first.x; x <= last.x; x++) {
 			float dist = cloud_scene_distance(vec2(x, y) + 0.5, texelFetch(scene_depth, ivec2(x, y), 0).r);
-			scene_m = nearest ? min(scene_m, dist) : max(scene_m, dist);
+			near_m = min(near_m, dist);
+			far_m = max(far_m, dist);
+			sum_m += dist;
+			count += 1.0;
 		}
+	}
+	float scene_m = nearest ? near_m : far_m;
+	if (far_m < 1.0e29 && far_m <= near_m * exp(CLOUD_ONE_SURFACE_SPREAD)) {
+		scene_m = sum_m / count;  // one surface: the centre ray's distance
 	}
 	vec3 color = vec3(0.0);
 	float alpha = 0.0;

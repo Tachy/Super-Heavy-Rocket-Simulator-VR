@@ -83,7 +83,8 @@ global uniform vec3 cloud_transfer_theta_map;
 // Checks only (cloud_check.gd; 0 in the game): 1 = the background transmittance T_bg, 2 = the Sun's scattered radiance
 // per unit Sun irradiance without the air and the sky (both opaque, both of the GRID-MEAN field without the sub-grid
 // shapes: the core's CPU references have no shapes); 3 = the coverage (1 cloud, 0 clear) where the ray crosses the height
-// cloud_debug_height_m (the GPU's filtered coverage against the core's table); 4 = T_bg with the shapes.
+// cloud_debug_height_m (the GPU's filtered coverage against the core's table); 4 = T_bg with the shapes; 6 = the full
+// image (light, sky, air, composite) on the grid-mean field without the shapes (Task 10: the far field's physics).
 global uniform int cloud_debug_output;
 global uniform float cloud_debug_height_m;
 
@@ -387,7 +388,7 @@ float cloud_detail_perturbation(vec3 offset_local, float state) {
 float cloud_extinction_in_cell(CloudCell cell, vec3 offset_local, float height_m, float footprint_m,
 		out float in_cloud) {
 	in_cloud = 0.0;
-	if (cloud_debug_output == 1 || cloud_debug_output == 2) {  // checks: the grid-mean field
+	if (cloud_debug_output == 1 || cloud_debug_output == 2 || cloud_debug_output == 6) {  // checks: the grid mean
 		in_cloud = cell.extinction;
 		return cell.extinction;
 	}

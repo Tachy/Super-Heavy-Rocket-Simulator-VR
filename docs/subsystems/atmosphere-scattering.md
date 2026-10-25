@@ -54,12 +54,13 @@ vehicles still fly through `Us76Atmosphere`).
   approach (the limb is right from the Moon).
 - **Where it is used.** Sky: `sky.gdshader` (Environment BG_SKY, every pixel from the camera's true position; the
   radiance cubemap also draws the model ground, so Godot's ambient and reflections carry sky light, ground bounce and
-  earthshine; PROCESS_MODE_INCREMENTAL, radiance 128). Earth: `earth.gdshader` (also scaled space),
-  `terrain_earth.gdshader`, `water.gdshaderinc` (the sea's reflected sky is the model's sky along the reflected ray; a
-  ray reflected below the horizontal takes its upward mirror [E]): Sun transmitted to the point x cos + the sky
-  irradiance on the normal, then transmittance + in-scattering to the camera; city lights x T. Moon, Sun disc: x T +
-  the in-scattered sky. The Sun disc's colour is the model's TOA solar spectrum (`atmosphere_sun_illuminance_lux`),
-  normalised to unit luminance. Vehicles, tower, pad, drone ship: `lit_aerial.gdshader` (`LitAerial.material`): Godot's
+  earthshine; PROCESS_MODE_INCREMENTAL, radiance 128). Earth: `earth.gdshader` (scaled space; with the far-field
+  clouds `earth_clouds.gdshader`), `terrain_earth.gdshader`, `water.gdshaderinc` (the sea's reflected sky is the
+  model's sky along the reflected ray; a ray reflected below the horizontal takes its upward mirror [E]): Sun
+  transmitted to the point x cos + the sky irradiance on the normal, then transmittance + in-scattering to the camera;
+  city lights x T. Moon, Sun disc: x T + the in-scattered sky. The Sun disc's colour is the model's TOA solar
+  spectrum (`atmosphere_sun_illuminance_lux`), normalised to unit luminance. Vehicles, tower, pad, drone ship:
+  `lit_aerial.gdshader` (`LitAerial.material`): Godot's
   PBR plus aerial perspective through FOG (per-channel T split: t = max(T), FOG.a = 1 - t, FOG.rgb = S / (1 - t), and
   T / t on albedo and emission; only the dielectric specular takes the scalar); the tower lattice through `atm_fog`.
   Plumes (`plume.gdshader`, additive): x T only [call]. Flight trail, orbit lines and labels are UI markers, not
@@ -86,7 +87,8 @@ vehicles still fly through `Us76Atmosphere`).
   `atmospheric_refraction`, `eclipse.cpp`.
 - Game: `game/world/atmosphere.gd` (`Atmosphere`), `world/eye_adaptation.gd`, `world/vision_effect.gd`,
   `world/refraction.gd`, `world/lit_aerial.gd`, `world.gd`; shaders `atmosphere.gdshaderinc`, `sky.gdshader`,
-  `earth.gdshader`, `terrain_earth.gdshader`, `terrain_moon.gdshader`, `moon.gdshader`, `moon_regolith.gdshaderinc`,
+  `earth.gdshader` / `earth_clouds.gdshader` (both `earth_surface.gdshaderinc`), `terrain_earth.gdshader`,
+  `terrain_moon.gdshader`, `moon.gdshader`, `moon_regolith.gdshaderinc`,
   `lit_aerial.gdshader`, `plume.gdshader`, `star_visibility.gdshaderinc`, `vision.gdshaderinc`,
   `eclipse.gdshaderinc` (mirrors `core/src/environment/eclipse.cpp` - change both together),
   `refraction.gdshaderinc`, `display_colour.gdshader`. `atmosphere.gdshaderinc` mirrors
@@ -112,7 +114,8 @@ vehicles still fly through `Us76Atmosphere`).
 
 ## Open points and known limits
 
-- Clouds only in the true-space Earth (terrain) and the vehicles' light (`weather-clouds.md`); no weather-dependent
+- Clouds on the true-space Earth (terrain, cloud pass), the scaled-space Earth (`earth_clouds.gdshader`, the far
+  field) and the vehicles' light (`weather-clouds.md`); no weather-dependent
   aerosols, no airglow; one aerosol set for the whole Earth; one Sun light (other bodies in
   view, e.g. the booster far below the ship or the tower seen from orbit, get the followed point's light); the totality
   approximation; night vision's limits (above); the 256 x 128 Earth mesh in scaled space sits up to ~0.6 km below the

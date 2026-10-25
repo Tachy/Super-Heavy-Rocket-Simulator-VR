@@ -2,8 +2,9 @@
 
 Plan `docs/superpowers/plans/2026-10-25-m8-weather-clouds.md`, spec
 `docs/superpowers/specs/2026-10-25-m8-weather-clouds-design.md`. The snapshots come from `weather-service.md`. State
-after Task 8, its amendment (volumetric clouds near the camera), Task 8b (Monte Carlo transfer table) and Task 9 (the
-clouds in the light of the ground, vehicles and the eye); Tasks 10-11 (far field, gate and docs) extend it.
+after Task 8, its amendment (volumetric clouds near the camera), Task 8b (Monte Carlo transfer table), Task 9 (the
+clouds in the light of the ground, vehicles and the eye) and Task 10 (the far field on the scaled-space Earth); Task 11
+(gate and docs) extends it.
 
 ## Model
 
@@ -71,12 +72,16 @@ clouds in the light of the ground, vehicles and the eye); Tasks 10-11 (far field
   `ShaderGlobals` - every script sets globals through `ShaderGlobals.set_value`, since
   `global_shader_parameter_get` is editor-only):
   1. raymarch at 1/2 resolution per view (the shell -0.5..20 km to the scene depth; the block's depth in a checkerboard
-     of nearest / farthest; coarse steps outside the field's cloudy region, fine steps inside; blue-noise start jitter,
+     of nearest / farthest, or the block's mean when its four distances lie within 5 % (`CLOUD_ONE_SURFACE_SPREAD`
+     [E]: one surface - the ground seen from far, where the nearest depth cut every other ray short of the low clouds
+     by the block's depth extent, several km from 8 600 km; Task 10); coarse steps outside the field's cloudy region,
+     fine steps inside; blue-noise start jitter,
      64 x 64 void-and-cluster mask offset per frame by the golden ratio - the same for both eyes); background through
      exp(-tau), scattered light through exp(-(1 - f) tau); colour = T_c L + (1 - T_bg) S_c with the air at the
      transmittance-weighted cloud distance; a step whose weight in the scattered light T_sc (1 - exp(-(1 - f) tau))
      exceeds 0.15 [E] is marched again with steps of that weight (one sample deciding a whole deep step was the grain
-     at cloud surfaces and at bases seen at a grazing angle);
+     at cloud surfaces and at bases seen at a grazing angle; the step's intended length is compared, not the float32
+     difference of the distances, whose 1 m ulp at 8 600 km retried the same step until the budget ran out - Task 10);
   2. temporal accumulation per eye: reprojection of the cloud distance (sky: rotation only) with the camera's float64
      motion into the previous frame's clip space of the same eye, history clamped to the 3 x 3 neighbourhood; a running
      mean of weight 1 / n (n the frames the history holds, kept per pixel) down to 1/32 (an exponential mean of 0.1
@@ -84,8 +89,8 @@ clouds in the light of the ground, vehicles and the eye); Tasks 10-11 (far field
      clock jumps (`_view_jumped`, `SimClock.time_jumped`);
   3. depth-aware upsampling (bilinear x exp(-4 |ln(D / D_i)|)) into a full-resolution array (layer = view).
   The composite quad (`cloud_layer.gdshader`, first in the transparent pass, premultiplied) blends it over the scene;
-  plumes draw over it, MSAA resolves stay intact. Off beyond 1.5e7 m (scaled space; Task 10). A new size (resize,
-  divisor) creates new images; the main thread shows the new result before the next frame (`CloudEffect.swap_output`:
+  plumes draw over it, MSAA resolves stay intact. Off beyond 1.5e7 m (scaled space: the far field below). A new size
+  (resize, divisor) creates new images; the main thread shows the new result before the next frame (`CloudEffect.swap_output`:
   replacing it inside the render callback broke the composite's material for a frame), the old images are freed three
   render callbacks later (no renderer error, no frame without clouds). `CloudLayer.shutdown` frees the resident volumes.
 - **Cross-fade** (`CloudLayer`, ruling 2026-10-25): two slots and the weight of slot 1; a new pair is reached through
@@ -159,6 +164,32 @@ clouds in the light of the ground, vehicles and the eye); Tasks 10-11 (far field
     `rendering_device/d3d12/max_resource_descriptors` = 262144 (the default 65536 ran out with ~2000 nodes, i.e. ~32
     per node; 262144 holds ~8000 nodes against 1875 drawn at most in `terrain_perf`: 4x headroom). Follow-up: a slim
     terrain include that declares only the ~7 samplers the terrain uses (the others are bound per node regardless).
+- **Far field** (Task 10; `cloud_far.gdshaderinc`, `earth_clouds.gdshader` = `earth_surface.gdshaderinc` with
+  `EARTH_CLOUDS`): beyond 1.5e7 m from the Earth's centre (`CelestialBody.SCALED_SPACE_DISTANCE_M`, the same distance
+  that hands the terrain over to the ellipsoid mesh) the cloud pass is off (`cloud_enabled`) and `CloudLayer.far_enabled`
+  makes `World` draw the scaled-space Earth with `earth_clouds.gdshader` (weather off: `earth.gdshader`, the shader of
+  before - one shader with a run-time flag changed the code generation, ~1400 pixels by up to 4 half-float ulps). A pixel
+  there covers >= 7 km; the column replaces the march, with the same field and light transport in its plane-parallel
+  limit:
+  - the column above the ground point G from the column texels (grid-mean depth tau, largest fraction f); the view's
+    cover C_v = the beam cover of f at the view's cosine mu (`cloud_beam_cover_of`: the rule fitted to the shapes'
+    shadows, for any line through the layer); independent columns: clear on 1 - C_v, the in-cloud depth tau / C_v;
+  - the cloud's place: the view ray's crossing of the height where the column's depth from its top reaches the
+    transmittance-weighted mean depth of the seen light (bisection over the column texels' layer centres; the cloud
+    pass's weighted distance for a slab); the column is taken again there (parallax of high cloud near the limb);
+  - the cloudy part's radiance: a conservative slab of that depth lit by the Sun (at night the Moon) transmitted to the
+    cloud point, through the transfer table - the cloud pass's source for a slab (mu_e = mu0 exactly) integrated along
+    the ray with exp(-w_D tau_v) (single scattering in closed form, the table by 8-point Gauss-Legendre in
+    u = 1 - exp(-w_D tau_v / mu); the core's `slab_reflected_radiance_mc` integrates the same between the depth nodes);
+    the closed form likewise under the fidelity flag; plus the sky's source (closed form, linear in depth: integrated
+    exactly) x the sky irradiance there;
+  - composite as the cloud pass: alpha = C_v (1 - exp(-tau / (C_v mu))), colour = T_air C_v L + alpha S_air over
+    (1 - alpha) x the ground; the ground lit through the column (`cloud_ground_light`'s column tier, the terrain's
+    beyond 140 km: direct, the Sun's diffuse part, the sky's; the Moon likewise).
+  Approximations: no light between columns (no lit cloud sides, no shadows on neighbouring columns), the light taken
+  at one point, a Sun below the cloud's local horizon at the entry floor 0.02, view cosine floor 0.02
+  (`CLOUD_FAR_MU_MIN` [E]). The CPU light factors stay (1, 0, 1) beyond the limit (`cloud_enabled` false; a camera
+  there is far above any cloud). The earthshine on the Moon keeps the Bond albedo 0.306 (clouds included on average).
 - **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 64 / 128,
   2.5 %, 5 + 2; both 3 detail levels, 1/2 resolution, temporal weight floor 1/32.
 
@@ -216,6 +247,17 @@ clouds in the light of the ground, vehicles and the eye); Tasks 10-11 (far field
   beam-cover fit the same checks failed: the near mean was 10 % below the far / CPU at 45 deg and 40 % at 8 deg.
   `STARSIM_SLANT_TABLE=1` prints the fit table. Render: `tmp/weather_t9f_sunset_handover.png` (cf 0.4 layer, Sun 9 deg,
   looking away from the Sun and 4 deg down from 700 m: the ground at ~10 km): no ring.
+- GPU `game/tests/cloud_far_check.gd` (Task 10; the game's scene, HDR, linear tone map, fixed exposure): the far
+  field's slab radiance vs the core's `slab_reflected_radiance_mc` at 72 geometries (tau 0.5-30, Sun 0-80 deg, views
+  0-75 deg forward / side / back) within 0.34 % (tolerance 3 %; `tests/cloud_far_probe.gdshader`); weather off: the
+  scaled-space Earth drawn with `earth.gdshader`, bit-identical to the pre-Task-10 shader as one file (0 of 8.6e6
+  bytes); the hand-over just inside / outside 1.5e7 m (2024-04-08 14:00 UTC, camera over 0 N 45 W, seven Earth points
+  0-45 deg away, Sun 20-75 deg up): decks of tau 10 / 2 (cf 1, 1-2 km) with the volume on the grid mean (cloud debug
+  output 6: the far field's physics without the shapes) within 2.2 % / 4.2 % (tolerance 5 %); the volume pass only
+  inside, `earth_clouds.gdshader` only outside, the CPU light factors (1, 0, 1) outside; from 384 400 km with the ERA5
+  hour of 2024-04-08 18:00 five cloudy cells (vertical transmittance < 0.05) 5.3-8.2x brighter with the weather on,
+  five clear cells (no cloud within 1 deg) unchanged (ratio 1.0000). Reported, not asserted: the game's volume (the
+  shapes) against the far field - see "Open points".
 - `game/tests/cloud_layer_test.gd` (headless): the cross-fade never jumps, never changes a weighted slot.
 
 ## Diagnostics
@@ -228,7 +270,8 @@ clouds in the light of the ground, vehicles and the eye); Tasks 10-11 (far field
   otherwise).
 - `cloud_debug_output` 1 / 2 / 3 / 4: background transmittance (grid mean), Sun radiance (grid mean), coverage at
   `cloud_debug_height_m`, background transmittance with the shapes; 5: the terrain draws its cloud factors (direct,
-  the Sun's diffuse share, the sky's) as its colour (`render_check.gd --cloud_debug=5 --fixed_exposure`).
+  the Sun's diffuse share, the sky's) as its colour (`render_check.gd --cloud_debug=5 --fixed_exposure`); 6: the
+  full image on the grid-mean field without the shapes (the far field's physics; `cloud_far_check.gd`).
 - `CloudShadowEffect.grid_mean_only` (checks): the near shadow map with the grid mean. `CloudShadowEffect.ran_msec`: the
   render callback's last run; `CloudLayer` takes the maps as valid (`cloud_shadow_valid`) only within 250 ms of it.
 - `cloud_check.gd` with `STARSIM_SLANT_TABLE=1`: only the beam-cover fit table (shapes' direct Sun, near disc, eight
@@ -253,6 +296,11 @@ clouds in the light of the ground, vehicles and the eye); Tasks 10-11 (far field
   nor the column textures (created by `show_now` before it). Sporadic draw / present stalls of 16-46 ms occur with and
   without clouds (one 45.8 ms frame in a run without clouds: "rest 42.9, draw 42.6", GPU 2.6 ms), i.e. they are the
   platform's, not the clouds'. The 11 ms gate is Task 11's.
+- Performance after Task 10 (same terrain_perf setup; the machine ran a VR runtime in the background, so the baseline
+  is higher than Task 9's): without clouds p99 12.65 / 12.64 ms, with clouds 16.10 / 16.33 / 16.13 / 16.08 ms (p50
+  8.4 -> 9.7); the Task 9 cloud pass in the same state 15.90 / 16.09 ms: the two cloud-pass fixes cost nothing
+  measurable. Scaled space (2560 x 1440, 2025-10-25 15:00 UTC ERA5): the far field adds 0.26 ms GPU from the Moon's
+  direction at 330 000 km (0.51 -> 0.77 ms) and 0.30 ms just outside 1.5e7 m (0.43 -> 0.73 ms); frame p99 ~1.5 ms.
 - At sharp dark edges (a deck's base seen at 30 km) a staircase of the half-resolution blocks is still visible.
 - The stochastic light march is unbiased in tau_s but exp(-tau_s) per sample is brighter on average (+10 % at the
   worst checked geometry with the preset's samples); more near samples reduce it.
@@ -271,4 +319,18 @@ clouds in the light of the ground, vehicles and the eye); Tasks 10-11 (far field
   cubemap x one factor (its angular shape and the reflections stay the clear sky's). The shadow maps are plane-parallel
   inside clouds (a receiver inside one gets a linear share), the Moon's direct light the column's (no shapes). The
   sky's diffuse transmittance and the Sun's diffuse light are the local column's (no light from neighbouring columns,
-  no cloud-side glow in gaps). No cloud shadows in the far scaled-space Earth (Task 10).
+  no cloud-side glow in gaps). The scaled-space Earth takes the column (the far field: no shapes, no shadow maps).
+- Far field against the volume at the hand-over (Task 10, `cloud_far_check.gd`, reported): with the game's volume (the
+  shapes) a deck of tau 10 differs by up to 8.2 % (the volume brighter 25-45 deg from the sub-camera point, Sun ~35 deg
+  up, view ~68 deg off the vertical; within 3.3 % nearer the centre), tau 2 by up to 6.8 % (the volume darker); with the
+  volume on the grid mean the same blocks agree within 2.2 % / 4.2 %: the step is the shapes' sub-grid structure (the
+  3D entry cosine under a varying Sun depth only brightens: mu_e is clamped at mu0 from below), not the far field. A
+  broken layer (cf 0.4): 21 x 21 block means differ by up to 32 % (the centre: volume 0.154, far field 0.202) - from
+  8 600 km a pixel is ~7 km and the volume point-samples the shape noise (32 km tile, its Perlin octaves finer than the
+  pixel are not band-limited, only the detail levels are): moire and speckle around the sub-camera point, its local
+  cover off the cell's (the background transmittance at the centre 0.85 against the column's 0.49). Visible as a
+  change of texture (speckle -> smooth) at the limit for broken cloud; a band limit of the shape noise itself at large
+  footprints would be a new shape rule (open for a ruling).
+- Far field: plane-parallel independent columns (no 3D radiative effects: no lit cloud sides at a low Sun, no shadows
+  cast on neighbouring columns or the ground beside them); the field's 0.25 deg grid shows as soft cells near the
+  hand-over (~4 pixels per cell at 1.5e7 m).
