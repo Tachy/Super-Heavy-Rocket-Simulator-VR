@@ -116,12 +116,12 @@ direction_deg = 90.0        # [E] towards the Atlantic (verify against imagery)
 shoreline_distance_m = 1000.0  # [E] pad -> shoreline (verify against imagery)
 
 [site.viewpoint]            # ground view of the time panel ("(Aussicht)"); values may be refined by hand later
-name = "Exploration Tower"
-latitude_deg = 28.40654     # [E] Exploration Tower, Port Canaveral (670 Dave Nisbet Dr): OpenStreetMap node 8972372017
-longitude_deg = -80.61791   # (28.4065411, -80.6179052), not checked against imagery (outside the NAIP tiles). ~17.7 km
-                            # SSW of the pad. (OSM also has "SpaceX Launch and Landing Control Center" at 28.4172 N
-                            # 80.6049 W on the Cape: not public, not used.)
-eye_height_m = 36.1         # [E] seventh-floor observation deck 113 ft = 34.4 m [S] (ClickOrlando 2013-11-04) + 1.7 m eye
+name = "Banana Creek (LC-39 Gantry)"
+latitude_deg = 28.59552     # [E] LC-39 Observation Gantry on Banana Creek (KSC launch viewing): OpenStreetMap
+longitude_deg = -80.61789   # (28.5955175, -80.6178890); ~5.5 km NW of the pad, matches KSC's "3.4 miles from SLC-40" [S]
+                            # (kennedyspacecenter.com "Launch Viewing Locations"). User choice 2026-10-25 over the
+                            # Exploration Tower (17.7 km) and the SpaceX Launch and Landing Control Center (16.3 km).
+eye_height_m = 18.0         # [E] upper viewing deck of the gantry, ~16 m, not sourced - refine by hand
 
 [[site]]
 id = "ccsfs_lz40"
@@ -138,8 +138,8 @@ plateau_apron_m = 30.0      # [E]
 direction_deg = 90.0        # [E]
 shoreline_distance_m = 650.0  # [E] (verify against imagery)
 
-[site.viewpoint]            # the same Exploration Tower viewpoint as SLC-40 (see there), looking at LZ-40
-name = "Exploration Tower"
-latitude_deg = 28.40654     # [E] OpenStreetMap node 8972372017; ~17.8 km SSW of the landing zone
-longitude_deg = -80.61791
-eye_height_m = 36.1         # [E] deck 34.4 m [S] + 1.7 m eye
+[site.viewpoint]            # the same Banana Creek viewpoint as SLC-40 (see there), looking at LZ-40
+name = "Banana Creek (LC-39 Gantry)"
+latitude_deg = 28.59552     # [E] OpenStreetMap; ~5.7 km NW of the landing zone
+longitude_deg = -80.61789
+eye_height_m = 18.0         # [E] see SLC-40
