@@ -156,5 +156,18 @@ inline constexpr double cloud_perimeter_fractal_dimension = 1.35;
 // condensation level of the rising air, flat and sharp over the cloud (Wallace & Hobbs 2006, Atmospheric Science, 2nd
 // ed., Academic Press, sect. 3.5)] (cloud_render_texels.hpp: the vertical profile rule).
 inline constexpr double cloud_base_transition_m = 50.0;
+// A cloud fraction below this counts as none: half a step of the 8-bit cloud-fraction code (the same constant as
+// CLOUD_MIN_FRACTION in shaders/clouds.gdshaderinc; the shadow lookup and the column cover use it too).
+inline constexpr double cloud_min_cover = 0.5 / 255.0;
+// Cover of the direct Sun's beam through a broken layer of cloud fraction f: 1 - (1 - f)^n, n = 1 + a (1 - f) + b max(cot
+// e - k, 0) for the Sun at elevation e (cloud_optics.hpp: cloud_beam_cover). The shipped shapes' 3D noise does not
+// overlap maximally: the clouds of the layers' heights are displaced against each other (a: the vertical part, the
+// shadow's cover above f at the zenith), and a slanted beam crosses further, independent cells (b, k: its horizontal
+// run through the layer, ~cot e times the layer's depth, beyond the cells' correlation length). [E] Fitted to the
+// shapes' shadows (cloud_check.gd section 7, area means over eight independent sites, f 0.15-0.6, e 5-75 deg, a layer
+// of 1 km): within 0.02 of the transmittance. The cloud-fraction 1 (decks) is untouched.
+inline constexpr double cloud_overlap_vertical = 0.66;
+inline constexpr double cloud_overlap_slant = 0.21;
+inline constexpr double cloud_overlap_slant_onset_cot = 1.8;
 
 }  // namespace starsim::constants

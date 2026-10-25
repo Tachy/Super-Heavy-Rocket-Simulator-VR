@@ -136,8 +136,8 @@ public:
     // Reads a cache file: {ok, error, rows, columns, layers, cloud_texels: PackedByteArray (layer-major RGBA8, the GPU
     // form environment::cloud_render_texels: cloud fraction, 16-bit linear extinction, in-cloud depth code),
     // cloud_ice_texels: PackedByteArray (layer-major R8, environment::cloud_render_ice_texels: the ice share of the
-    // extinction), cloud_column_texels: PackedByteArray (layer-major R8, environment::cloud_render_column_texels: the
-    // grid-mean column depth above each layer centre), layer_bottoms_m:PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour, lead_h, analog_hour, cache_key}.
+    // extinction), cloud_column_texels: PackedByteArray (layer-major RG8, environment::cloud_render_column_texels: the
+    // grid-mean column depth above each layer centre (R, log code) and the largest cloud fraction above it (G)), layer_bottoms_m:PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour, lead_h, analog_hour, cache_key}.
     // The game builds the label from the id fields. The snapshot stays in a small cache (the last three files) for
     // weather_set_active. Call it on a worker: the GPU form of a 0.25-deg snapshot is 133 MB.
     godot::Dictionary weather_load_snapshot(const godot::String& file);

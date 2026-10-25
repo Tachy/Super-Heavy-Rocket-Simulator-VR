@@ -729,8 +729,9 @@ TEST_CASE("The Sun's light diffused through a uniform slab", "[weather]") {
 }
 
 TEST_CASE("Broken cloud lights the ground as independent columns", "[weather]") {
-    // A cumulus layer of cloud fraction 0.4 (in-cloud tau ~7.5 over 1 km): the clear 60 % pass the Sun, the cloudy 40 %
-    // pass exp(-tau_in / mu0) - not exp(-grid-mean tau / mu0) (the plane-parallel bias); sky and diffuse Sun likewise.
+    // A cumulus layer of cloud fraction 0.4 (in-cloud tau ~7.5 over 1 km): the clear part of the beam passes the Sun, the
+    // beam's cover C_b (cloud_beam_cover) passes exp(-tau_grid / (C_b mu0)) - not exp(-grid-mean tau / mu0) (the
+    // plane-parallel bias); the Sun's diffuse light and the sky likewise (the sky with the column's maximum-overlap cover).
     const WeatherSnapshot slab = WeatherSnapshot::uniform_slab(19, 36, 1000.0, 2000.0, 2e-5, 0.4);
     const double latitude = 30.0 * c::deg_to_rad, longitude = 45.0 * c::deg_to_rad;
     const LocalFrame ground = local_frame(latitude, longitude, 0.0);
@@ -743,11 +744,73 @@ TEST_CASE("Broken cloud lights the ground as independent columns", "[weather]") 
     for (double zenith_deg : {0.0, 60.0}) {
         const double mu0 = std::cos(zenith_deg * c::deg_to_rad);
         const math::Vec3 sun = sun_at_zenith_angle(ground, zenith_deg * c::deg_to_rad);
+        const double beam = cloud_beam_cover(column, mu0);
+        CHECK(beam > cover);  // the shapes' shadows cover more than the cloud fraction
+        const double tau_beam = column.mean / beam;
         CHECK(cloud_sun_transmittance(slab, ground.position, sun) ==
-              Approx(1.0 - cover + cover * std::exp(-tau_in / mu0)).epsilon(0.01));
+              Approx(1.0 - beam + beam * std::exp(-tau_beam / mu0)).epsilon(0.01));
         CHECK(cloud_sun_diffuse_transmittance(slab, nullptr, ground.position, sun) ==
-              Approx(cover * (two_stream_beam_transmittance(tau_in, g, mu0) - std::exp(-tau_in / mu0))).epsilon(1e-3));
+              Approx(beam * (two_stream_beam_transmittance(tau_beam, g, mu0) - std::exp(-tau_beam / mu0)))
+                  .epsilon(1e-3));
     }
     CHECK(cloud_sky_factor(slab, ground.position) ==
           Approx(1.0 - cover + cover * two_stream_diffuse_transmittance(tau_in, g)).epsilon(1e-3));
+}
+
+TEST_CASE("The beam's cover follows the fitted overlap of the shapes' shadows", "[weather]") {
+    // cloud_beam_cover = 1 - (1 - f)^n with n = 1 + 0.66 (1 - f) + 0.21 max(cot e - 1.8, 0): more than f even at the
+    // zenith, growing as the Sun sinks, 1 for a deck, 0 without cloud, bounded below the horizon by mu0 >= 0.02.
+    CHECK(cloud_beam_cover(1.0, 0.5) == 1.0);
+    CHECK(cloud_beam_cover(CloudColumnDepths{}, 0.5) == 0.0);
+    const double f = 0.3;
+    CHECK(cloud_beam_cover(f, 1.0) == Approx(1.0 - std::pow(1.0 - f, 1.0 + 0.66 * (1.0 - f))).epsilon(1e-12));
+    double previous = f;
+    for (double elevation_deg : {90.0, 60.0, 30.0, 15.0, 8.0, 3.0, 0.5}) {
+        const double cover = cloud_beam_cover(f, std::sin(elevation_deg * c::deg_to_rad));
+        CHECK(cover >= previous - 1e-12);
+        CHECK(cover <= 1.0);
+        previous = cover;
+    }
+    // Shape fit (the shipped shapes' shadows, cloud_check.gd section 7): cf 0.3 at 8 deg: the shadows of the shapes
+    // leave 0.404 of the Sun (tau_in 3: no light through the cloud), the model 1 - C within 0.02.
+    CHECK(1.0 - cloud_beam_cover(0.3, std::sin(8.0 * c::deg_to_rad)) == Approx(0.404).margin(0.03));
+    CHECK(1.0 - cloud_beam_cover(0.4, std::sin(45.0 * c::deg_to_rad)) == Approx(0.517).margin(0.03));
+}
+
+TEST_CASE("Mid-blend light follows the renderer's order (blend the column, then the transmittance)", "[weather]") {
+    // A clear snapshot blended with a cf 0.4 one at w = 0.5: the renderer's column is half the depth and half the
+    // cover, and the transmittances come from that column - not the mean of the two snapshots' transmittances.
+    const WeatherSnapshot broken = WeatherSnapshot::uniform_slab(19, 36, 1000.0, 2000.0, 2e-5, 0.4);
+    const WeatherSnapshot clear = WeatherSnapshot::uniform_slab(19, 36, 1000.0, 2000.0, 0.0, 0.0);
+    const double latitude = 30.0 * c::deg_to_rad, longitude = 45.0 * c::deg_to_rad;
+    const LocalFrame ground = local_frame(latitude, longitude, 0.0);
+    const math::Vec3 sun = sun_at_zenith_angle(ground, 60.0 * c::deg_to_rad);
+    const double mu0 = 0.5;
+    const CloudColumnDepths b = cloud_sun_ray_depths(broken, ground.position, sun);
+    const CloudColumnDepths k = cloud_sun_ray_depths(clear, ground.position, sun);
+    const CloudColumnDepths half = blend_cloud_column_depths(k, b, 0.5);
+    CHECK(half.mean == Approx(0.5 * b.mean));
+    CHECK(half.max_fraction == Approx(0.5 * b.max_fraction));
+    const double beam = cloud_beam_cover(half, mu0);
+    CHECK(cloud_sun_transmittance(half, mu0) ==
+          Approx(1.0 - beam + beam * std::exp(-half.mean / beam)).epsilon(1e-9));
+    CHECK(std::abs(cloud_sun_transmittance(half, mu0) -
+                   0.5 * (cloud_sun_transmittance(b, mu0) + cloud_sun_transmittance(k, mu0))) > 0.005);
+    const double cover = half.cover();
+    CHECK(cover == Approx(0.2).epsilon(0.02));
+    CHECK(cloud_sky_factor(half) ==
+          Approx(1.0 - cover + cover * two_stream_diffuse_transmittance(half.in_cloud_depth(), cloud_asymmetry_g()))
+              .epsilon(1e-9));
+    CHECK(cloud_sun_diffuse_transmittance(half, nullptr, mu0) ==
+          Approx(beam * (two_stream_beam_transmittance(half.mean / beam, cloud_asymmetry_g(), mu0) -
+                         std::exp(-half.mean / (beam * mu0))))
+              .epsilon(1e-9));
+    // Broken cloud blended into a thin deck: depth mixes linearly, the cover as the linear mix of the fractions.
+    const WeatherSnapshot deck = WeatherSnapshot::uniform_slab(19, 36, 1000.0, 2000.0, 2e-6, 1.0);
+    const CloudColumnDepths d = cloud_sun_ray_depths(deck, ground.position, sun);
+    const CloudColumnDepths mix = blend_cloud_column_depths(b, d, 0.25);
+    CHECK(mix.mean == Approx(0.75 * b.mean + 0.25 * d.mean));
+    CHECK(mix.max_fraction == Approx(0.75 * b.max_fraction + 0.25 * d.max_fraction));
+    const double mean_t = 0.75 * cloud_sun_transmittance(b, mu0) + 0.25 * cloud_sun_transmittance(d, mu0);
+    CHECK(std::abs(cloud_sun_transmittance(mix, mu0) - mean_t) > 0.01);
 }

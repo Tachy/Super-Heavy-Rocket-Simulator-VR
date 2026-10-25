@@ -492,7 +492,7 @@ double slab_reflectance(double optical_depth, double sun_cos_zenith) {
 
 double CloudColumnDepths::cover() const {
     if (!(mean > 0.0)) return 0.0;
-    return std::clamp(max_fraction, cloud_min_cover, 1.0);
+    return std::clamp(max_fraction, c::cloud_min_cover, 1.0);
 }
 
 double CloudColumnDepths::in_cloud_depth() const { return mean > 0.0 ? mean / cover() : 0.0; }
@@ -530,8 +530,19 @@ double cloud_column_optical_depth_above(const WeatherSnapshot& snapshot, double 
     return cloud_column_depths_above(snapshot, latitude_rad, longitude_rad, height_ellipsoid_m).mean;
 }
 
-double cloud_sun_transmittance(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m,
-                               const math::Vec3& sun_direction_itrf) {
+CloudColumnDepths blend_cloud_column_depths(const CloudColumnDepths& before, const CloudColumnDepths& after,
+                                            double weight_after) {
+    // The renderer's order (clouds.gdshaderinc cloud_column_mean_depth): the depth and the cover are blended, then the
+    // transmittances computed from the blend.
+    const double w = std::clamp(weight_after, 0.0, 1.0);
+    CloudColumnDepths out;
+    out.mean = (1.0 - w) * before.mean + w * after.mean;
+    out.max_fraction = (1.0 - w) * before.max_fraction + w * after.max_fraction;
+    return out;
+}
+
+CloudColumnDepths cloud_sun_ray_depths(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m,
+                                       const math::Vec3& sun_direction_itrf) {
     const math::Vec3 dir = math::normalized(sun_direction_itrf);
     math::Vec3 p = position_itrf_m;
     CloudColumnDepths tau;
@@ -550,32 +561,72 @@ double cloud_sun_transmittance(const WeatherSnapshot& snapshot, const math::Vec3
         tau.max_fraction = std::max(tau.max_fraction, beta.max_fraction);
         p += dir * length;
     }
-    // Independent columns, maximum overlap: the clear part passes everything, the cloudy part exp(-in-cloud depth).
-    return cloud_cover_transmittance(tau.cover(), std::exp(-tau.in_cloud_depth()));
+    return tau;
+}
+
+double cloud_beam_cover(double cloud_fraction, double sun_cos_zenith) {
+    const double f = std::clamp(cloud_fraction, c::cloud_min_cover, 1.0);
+    if (f >= 1.0) return 1.0;
+    const double mu0 = std::clamp(sun_cos_zenith, 0.02, 1.0);
+    const double cot = std::sqrt(1.0 - mu0 * mu0) / mu0;
+    const double n = 1.0 + c::cloud_overlap_vertical * (1.0 - f) +
+                     c::cloud_overlap_slant * std::max(cot - c::cloud_overlap_slant_onset_cot, 0.0);
+    return 1.0 - std::pow(1.0 - f, n);
+}
+
+double cloud_beam_cover(const CloudColumnDepths& column, double sun_cos_zenith) {
+    if (!(column.mean > 0.0)) return 0.0;
+    return cloud_beam_cover(column.max_fraction, sun_cos_zenith);
+}
+
+double cloud_sun_transmittance(const CloudColumnDepths& ray, double sun_cos_zenith) {
+    // Independent columns: the clear part of the beam passes everything, the cloudy part (the beam's cover) exp(-the
+    // grid-mean depth spread over it).
+    const double cover = cloud_beam_cover(ray, sun_cos_zenith);
+    return cover > 0.0 ? cloud_cover_transmittance(cover, std::exp(-ray.mean / cover)) : 1.0;
+}
+
+double cloud_sun_transmittance(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m,
+                               const math::Vec3& sun_direction_itrf) {
+    return cloud_sun_transmittance(cloud_sun_ray_depths(snapshot, position_itrf_m, sun_direction_itrf),
+                                   cloud_sun_cosine_to_vertical(position_itrf_m, sun_direction_itrf));
+}
+
+CloudColumnDepths cloud_column_depths_at(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m) {
+    const frames::GeodeticPosition here = frames::fixed_to_geodetic(position_itrf_m);
+    return cloud_column_depths_above(snapshot, here.latitude_rad, here.longitude_rad, here.height_m);
+}
+
+double cloud_sky_factor(const CloudColumnDepths& column) {
+    return cloud_cover_transmittance(column.cover(),
+                                     two_stream_diffuse_transmittance(column.in_cloud_depth(), cloud_asymmetry_g()));
 }
 
 double cloud_sky_factor(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m) {
+    return cloud_sky_factor(cloud_column_depths_at(snapshot, position_itrf_m));
+}
+
+double cloud_sun_cosine_to_vertical(const math::Vec3& position_itrf_m, const math::Vec3& sun_direction_itrf) {
     const frames::GeodeticPosition here = frames::fixed_to_geodetic(position_itrf_m);
-    const CloudColumnDepths tau =
-        cloud_column_depths_above(snapshot, here.latitude_rad, here.longitude_rad, here.height_m);
-    return cloud_cover_transmittance(tau.cover(),
-                                     two_stream_diffuse_transmittance(tau.in_cloud_depth(), cloud_asymmetry_g()));
+    return math::dot(math::normalized(sun_direction_itrf), geodetic_up(here.latitude_rad, here.longitude_rad));
+}
+
+double cloud_sun_diffuse_transmittance(const CloudColumnDepths& column, const CloudSlabTransmittanceLut* lut,
+                                       double mu0) {
+    if (mu0 <= 0.0) return 0.0;
+    const double c = cloud_beam_cover(column, mu0);  // the area the beam's shadow covers: the diffuse part is its own
+    if (!(c > 0.0)) return 0.0;
+    const double tau = column.mean / c;
+    if (!(tau > 0.0)) return 0.0;
+    const double total = lut != nullptr ? cloud_slab_total_transmittance(*lut, tau, mu0)
+                                        : two_stream_beam_transmittance(tau, cloud_asymmetry_g(), mu0);
+    return c * std::max(total - std::exp(-tau / mu0), 0.0);
 }
 
 double cloud_sun_diffuse_transmittance(const WeatherSnapshot& snapshot, const CloudSlabTransmittanceLut* lut,
                                        const math::Vec3& position_itrf_m, const math::Vec3& sun_direction_itrf) {
-    const frames::GeodeticPosition here = frames::fixed_to_geodetic(position_itrf_m);
-    const double mu0 =
-        math::dot(math::normalized(sun_direction_itrf), geodetic_up(here.latitude_rad, here.longitude_rad));
-    if (mu0 <= 0.0) return 0.0;
-    const CloudColumnDepths column =
-        cloud_column_depths_above(snapshot, here.latitude_rad, here.longitude_rad, here.height_m);
-    const double c = column.cover();
-    const double tau = column.in_cloud_depth();
-    if (!(tau > 0.0) || !(c > 0.0)) return 0.0;
-    const double total = lut != nullptr ? cloud_slab_total_transmittance(*lut, tau, mu0)
-                                        : two_stream_beam_transmittance(tau, cloud_asymmetry_g(), mu0);
-    return c * std::max(total - std::exp(-tau / mu0), 0.0);
+    return cloud_sun_diffuse_transmittance(cloud_column_depths_at(snapshot, position_itrf_m), lut,
+                                           cloud_sun_cosine_to_vertical(position_itrf_m, sun_direction_itrf));
 }
 
 }  // namespace starsim::environment

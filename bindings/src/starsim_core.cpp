@@ -649,25 +649,21 @@ godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& positio
     }
     if (before || after) {
         const math::Vec3 p = to_core(position_itrf_m), s = to_core(sun_direction_itrf);
-        struct Light {
-            double sun, sky, diffuse;
-        };
-        const auto sample = [&](const SnapshotPtr& snap) {
-            return Light{environment::cloud_sun_transmittance(*snap, p, s), environment::cloud_sky_factor(*snap, p),
-                         environment::cloud_sun_diffuse_transmittance(*snap, lut.get(), p, s)};
-        };
+        // The renderer's order: blend the column depth and cover of both snapshots, then the transmittances.
+        const double mu0 = environment::cloud_sun_cosine_to_vertical(p, s);
+        const auto column = [&](const SnapshotPtr& snap) { return environment::cloud_column_depths_at(*snap, p); };
+        const auto ray = [&](const SnapshotPtr& snap) { return environment::cloud_sun_ray_depths(*snap, p, s); };
+        environment::CloudColumnDepths ray_depths, column_depths;
         if (before && after) {
-            const Light b = sample(before);
-            const Light a = sample(after);
-            sun = b.sun + (a.sun - b.sun) * blend;
-            sky = b.sky + (a.sky - b.sky) * blend;
-            diffuse = b.diffuse + (a.diffuse - b.diffuse) * blend;
+            ray_depths = environment::blend_cloud_column_depths(ray(before), ray(after), blend);
+            column_depths = environment::blend_cloud_column_depths(column(before), column(after), blend);
         } else {
-            const Light only = sample(before ? before : after);
-            sun = only.sun;
-            sky = only.sky;
-            diffuse = only.diffuse;
+            ray_depths = ray(before ? before : after);
+            column_depths = column(before ? before : after);
         }
+        sun = environment::cloud_sun_transmittance(ray_depths, mu0);
+        sky = environment::cloud_sky_factor(column_depths);
+        diffuse = environment::cloud_sun_diffuse_transmittance(column_depths, lut.get(), mu0);
     }
     } catch (const std::exception& e) {
         weather_failure("Wolkenlicht konnte nicht berechnet werden: ", e);

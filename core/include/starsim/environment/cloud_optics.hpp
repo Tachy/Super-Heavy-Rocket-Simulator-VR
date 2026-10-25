@@ -237,11 +237,11 @@ double cloud_slab_total_transmittance(const CloudSlabTransmittanceLut& lut, doub
                                       double sun_cos_zenith);
 
 // The CPU light (Task 9: independent columns of the cell). A grid cell with cloud fraction cf holds its cloud on cf of
-// its area; under maximum overlap (the shapes' noise is vertically coherent) a path through the cells is clear on
-// 1 - C of the area and cloudy on C, C = the largest cloud fraction along it (the maximum-overlap total cover), the
-// cloudy part carrying the path's grid-mean depth / C. Its mean transmittance is 1 - C + C T(tau / C) - not T(tau),
-// which for broken cloud would turn a sunny cumulus field into an overcast (the plane-parallel bias: cf 0.15, in-cloud
-// tau 27 gives exp(-4) direct instead of ~0.85). For C = 1 both are the same (a deck).
+// its area: a path is clear on 1 - C of the area and cloudy on C, the cloudy part carrying the path's grid-mean depth / C.
+// Its mean transmittance is 1 - C + C T(tau / C) - not T(tau), which for broken cloud would turn a sunny cumulus field
+// into an overcast (the plane-parallel bias: cf 0.15, in-cloud tau 27 gives exp(-4) direct instead of ~0.85). For C = 1
+// both are the same (a deck). The vertical column (the sky) takes C = the largest cloud fraction in it (maximum
+// overlap); the direct beam takes cloud_beam_cover (the shapes' shadows overlap less, more so for a slanted beam).
 // Transmittance of the direct Sun along the ray from position toward the Sun, so averaged over the cell (Beer-Lambert
 // with the unscaled extinction: the Sun disc). No detail noise: a vehicle in a gap between cumuli gets its cell's mean. The ray ends where it leaves the cloud volume (above 20 km and climbing) or where it enters the solid
 // Earth (2 km below the ellipsoid: the Sun is below the horizon there, the Earth's shadow is not a cloud matter).
@@ -261,18 +261,38 @@ double cloud_sun_diffuse_transmittance(const WeatherSnapshot& snapshot, const Cl
 
 // The column above a geodetic position: its grid-mean vertical optical depth (trapezoids over the profile's
 // breakpoints: exact for the piecewise-linear profile) and the largest cloud fraction in it; its cover C (0 without
-// cloud, at least cloud_min_cover with cloud) and its cloudy part's depth mean / C.
-inline constexpr double cloud_min_cover = 0.5 / 255.0;  // half a cloud-fraction code step
+// cloud, at least math::constants::cloud_min_cover with cloud) and its cloudy part's depth mean / C.
 struct CloudColumnDepths {
     double mean = 0.0, max_fraction = 0.0;
     double cover() const;
     double in_cloud_depth() const;
 };
+// The cover of the direct beam (cloud fraction f along it, the Sun's cosine to the vertical mu0): 1 - (1 - f)^n, n from
+// constants.hpp cloud_overlap_* (the shipped shapes' shadows: neither maximum nor random overlap); f = 1 gives 1.
+// mu0 is taken at least 0.02. For a column's beam: 0 without cloud, f at least cloud_min_cover.
+double cloud_beam_cover(double cloud_fraction, double sun_cos_zenith);
+double cloud_beam_cover(const CloudColumnDepths& column, double sun_cos_zenith);
 // 1 - cover + cover x the cloudy part's transmittance.
 double cloud_cover_transmittance(double cover, double in_cloud_transmittance);
 CloudColumnDepths cloud_column_depths_above(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,
                                             double height_ellipsoid_m);
 // Its grid-mean part.
+// Blend order (Task 9 fix 1): the renderer blends the two snapshots' column depth and cover, then computes the
+// transmittances; the CPU light does the same. blend_cloud_column_depths mixes (1 - w) before + w after.
+CloudColumnDepths blend_cloud_column_depths(const CloudColumnDepths& before, const CloudColumnDepths& after,
+                                            double weight_after);
+// The grid-mean depth and largest fraction along the ray from the position toward the Sun / in the column above it.
+CloudColumnDepths cloud_sun_ray_depths(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m,
+                                       const math::Vec3& sun_direction_itrf);
+CloudColumnDepths cloud_column_depths_at(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m);
+// The Sun's cosine to the geodetic vertical at the position.
+double cloud_sun_cosine_to_vertical(const math::Vec3& position_itrf_m, const math::Vec3& sun_direction_itrf);
+// The same light factors from (blended) column depths: the slant ray's, the vertical column's.
+double cloud_sun_transmittance(const CloudColumnDepths& ray, double sun_cos_zenith);
+double cloud_sky_factor(const CloudColumnDepths& column);
+double cloud_sun_diffuse_transmittance(const CloudColumnDepths& column, const CloudSlabTransmittanceLut* lut,
+                                       double mu0);
+
 double cloud_column_optical_depth_above(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,
                                         double height_ellipsoid_m);
 
