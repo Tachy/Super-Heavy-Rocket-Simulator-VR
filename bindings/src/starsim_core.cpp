@@ -673,18 +673,31 @@ godot::Dictionary StarsimCore::cloud_noise() const {
             if (!v.empty()) std::memcpy(out.ptrw(), v.data(), v.size());
             return out;
         };
-        godot::PackedFloat32Array thresholds;
-        for (float t : noise.coverage_threshold) thresholds.push_back(t);
+        const auto rows = [](const auto& table) {
+            godot::PackedFloat32Array out;
+            for (const auto& row : table) {
+                for (float v : row) out.push_back(v);
+            }
+            return out;
+        };
         godot::Dictionary result;
         result["shape"] = bytes(noise.shape_rgba);
         result["shape_size"] = static_cast<int64_t>(noise.shape_size);
         result["detail"] = bytes(noise.detail_rgba);
         result["detail_size"] = static_cast<int64_t>(noise.detail_size);
-        result["coverage_threshold"] = thresholds;
-        godot::PackedFloat32Array edge_mean;
-        for (float m : noise.edge_mean_factor) edge_mean.push_back(m);
-        result["edge_mean_factor"] = edge_mean;
-        result["edge_width_value"] = noise.edge_width_value;
+        result["detail_states"] = static_cast<int64_t>(environment::cloud_detail_states);
+        result["coverage_threshold"] = rows(noise.coverage_threshold);
+        result["edge_mean_factor"] = rows(noise.edge_mean_factor);
+        godot::PackedFloat32Array amplitudes;
+        for (float a : noise.level_amplitude) amplitudes.push_back(a);
+        result["level_amplitude"] = amplitudes;
+        result["detail_mean"] = noise.detail_mean;
+        result["detail_weights"] =
+            godot::Vector3(noise.detail_weights[0], noise.detail_weights[1], noise.detail_weights[2]);
+        result["detail_tile_m"] = environment::cloud_detail_tile_m;
+        result["detail_level_ratio"] = environment::cloud_detail_level_ratio;
+        result["edge_width_min_value"] = noise.edge_width_min_value;
+        result["edge_width_max_value"] = noise.edge_width_max_value;
         result["blue_noise"] = bytes(noise.blue_noise);
         result["blue_noise_size"] = static_cast<int64_t>(noise.blue_noise_size);
         return result;

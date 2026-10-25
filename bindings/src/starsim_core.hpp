@@ -145,9 +145,10 @@ public:
     // {sun_transmittance, sky_factor} of the active pair, blended linearly; {1, 1} without an active snapshot.
     godot::Dictionary weather_cloud_light(const godot::Vector3& position_itrf_m,
                                           const godot::Vector3& sun_direction_itrf) const;
-    // The tileable cloud noise: {shape: PackedByteArray RGBA8, shape_size, detail, detail_size, coverage_threshold:
-    // PackedFloat32Array (256), edge_mean_factor: PackedFloat32Array (256), edge_width_value, blue_noise:
-    // PackedByteArray R8, blue_noise_size} (cloud_noise.hpp).
+    // The tileable cloud noise: {shape: PackedByteArray RGBA8, shape_size, detail, detail_size, detail_states,
+    // coverage_threshold and edge_mean_factor: PackedFloat32Array (256 x detail_states, one row of 256 per state),
+    // level_amplitude: PackedFloat32Array (detail_states - 1), detail_mean, detail_tile_m, detail_level_ratio,
+    // edge_width_min_value, edge_width_max_value, blue_noise: PackedByteArray R8, blue_noise_size} (cloud_noise.hpp).
     godot::Dictionary cloud_noise() const;
     // The cloud optics the shader needs as numbers (cloud_optics.hpp, cloud_render_texels.hpp): {hg_g, draine_g,
     // draine_alpha, draine_weight, asymmetry_g, transport_scale, extinction_step_per_m, depth_code_min, depth_code_max}.

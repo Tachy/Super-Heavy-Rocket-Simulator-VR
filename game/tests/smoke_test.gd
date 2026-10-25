@@ -208,7 +208,10 @@ func _check_weather(core: StarsimCore) -> bool:
 	var n: int = int(noise["shape_size"])
 	_check(n == 128 and (noise["shape"] as PackedByteArray).size() == 4 * n * n * n
 			and (noise["detail"] as PackedByteArray).size() == 4 * int(noise["detail_size"]) ** 3
-			and (noise["coverage_threshold"] as PackedFloat32Array).size() == 256, "cloud_noise sizes")
+			and (noise["coverage_threshold"] as PackedFloat32Array).size() == 256 * int(noise["detail_states"])
+			and (noise["edge_mean_factor"] as PackedFloat32Array).size() == 256 * int(noise["detail_states"])
+			and (noise["level_amplitude"] as PackedFloat32Array).size() == int(noise["detail_states"]) - 1,
+			"cloud_noise sizes")
 	var optics: Dictionary = core.cloud_optics_parameters()
 	_check(absf(float(optics.get("asymmetry_g", 0.0)) - 0.8793) < 1e-3 and float(optics["extinction_step_per_m"]) > 0.0,
 			"cloud_optics_parameters (g %.4f)" % float(optics.get("asymmetry_g", 0.0)))
