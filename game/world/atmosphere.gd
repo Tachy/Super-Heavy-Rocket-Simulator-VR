@@ -208,7 +208,7 @@ func start_loading(core: StarsimCore, config_dir: String, cache_dir: String) -> 
 	if loading or ready:
 		return
 	_core = core
-	RenderingServer.global_shader_parameter_set(&"atmosphere_enabled", false)
+	ShaderGlobals.set_value(&"atmosphere_enabled", false)
 	var cached := FileAccess.file_exists(cache_dir.path_join(CACHE_FILE))
 	status_text = ("Atmosphäre wird geladen ..." if cached
 			else "Atmosphäre wird berechnet (einmalig, etwa eine Minute) ...")
@@ -268,11 +268,11 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 				sun_apparent_gcrf_m - earth_center_gcrf_m)
 	earthshine_scene = DAY_EXPOSURE * earthshine_relative_value
 	var sun_au := (sun_apparent_gcrf_m - earth_center_gcrf_m).length() / ASTRONOMICAL_UNIT_M
-	RenderingServer.global_shader_parameter_set(&"moon_earthshine", earthshine_scene)
-	RenderingServer.global_shader_parameter_set(&"moon_sun_scene", DAY_EXPOSURE / (sun_au * sun_au))
-	RenderingServer.global_shader_parameter_set(&"moon_regolith_scale",
+	ShaderGlobals.set_value(&"moon_earthshine", earthshine_scene)
+	ShaderGlobals.set_value(&"moon_sun_scene", DAY_EXPOSURE / (sun_au * sun_au))
+	ShaderGlobals.set_value(&"moon_regolith_scale",
 			regolith_scale(float(parameters.get("toa_solar_illuminance_lux", NOMINAL_TOA_LUX))))
-	RenderingServer.global_shader_parameter_set(&"earth_city_lights_cd_m2", CITY_LIGHTS_PEAK_CD_M2)
+	ShaderGlobals.set_value(&"earth_city_lights_cd_m2", CITY_LIGHTS_PEAK_CD_M2)
 	if not poll():
 		_set_vision(0.0)  # no rods left from an earlier state (review M4)
 		return
@@ -324,11 +324,11 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 		brightness = _eye.brightness
 		chroma = _eye.chroma
 		moonlight_active = moonlight_relative_value * reference_luminance(d_au) >= MOONLIGHT_MIN_SHARE * adaptation_cd_m2
-	RenderingServer.global_shader_parameter_set(&"atmosphere_adaptation_cd_m2", adaptation_cd_m2)
-	RenderingServer.global_shader_parameter_set(&"atmosphere_moon_light",
+	ShaderGlobals.set_value(&"atmosphere_adaptation_cd_m2", adaptation_cd_m2)
+	ShaderGlobals.set_value(&"atmosphere_moon_light",
 			moonlight_relative_value if moonlight_active else 0.0)
 	if _moon_direction_fixed != Vector3.ZERO:
-		RenderingServer.global_shader_parameter_set(&"atmosphere_moon_direction", Frames.to_render(_moon_direction_fixed))
+		ShaderGlobals.set_value(&"atmosphere_moon_direction", Frames.to_render(_moon_direction_fixed))
 	_set_vision(rod_scale, chroma)
 	# The display's pre-exposure: the cone gain x the brightness factor (Stevens effect; the rods, relative to the
 	# pixel, follow it). The star threshold reads the sky's true luminance back through scene_per_cd_m2: unchanged.
@@ -336,18 +336,18 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	var base := DAY_EXPOSURE * PI / float(parameters["toa_solar_illuminance_lux"])
 	luminance_scale = base * display_gain / (d_au * d_au)
 	scene_per_cd_m2 = base * display_gain
-	RenderingServer.global_shader_parameter_set(&"atmosphere_scene_per_cd_m2", scene_per_cd_m2)
-	RenderingServer.global_shader_parameter_set(&"atmosphere_exposure_gain", display_gain)
+	ShaderGlobals.set_value(&"atmosphere_scene_per_cd_m2", scene_per_cd_m2)
+	ShaderGlobals.set_value(&"atmosphere_exposure_gain", display_gain)
 	eclipse_segments = 0
 	if moon_apparent_gcrf_m != Vector3.ZERO:
 		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m
 		if penumbra:
 			eclipse_segments = ECLIPSE_SEGMENTS
 			_update_umbra_light(gcrf_to_fixed * sun_from_earth, gcrf_to_fixed * moon_from_earth, sun_fixed)
-		RenderingServer.global_shader_parameter_set(&"atmosphere_moon_position",
+		ShaderGlobals.set_value(&"atmosphere_moon_position",
 				Frames.to_render(gcrf_to_fixed * moon_from_earth))
-	RenderingServer.global_shader_parameter_set(&"atmosphere_sun_distance_m", sun_from_earth.length())
-	RenderingServer.global_shader_parameter_set(&"atmosphere_eclipse_segments", eclipse_segments)
+	ShaderGlobals.set_value(&"atmosphere_sun_distance_m", sun_from_earth.length())
+	ShaderGlobals.set_value(&"atmosphere_eclipse_segments", eclipse_segments)
 	if eclipse_segments == 0 and _umbra_task_id >= 0:
 		# The eclipse ended with a task in flight: its fluence belongs to another epoch, never uploaded (review M5).
 		WorkerThreadPool.wait_for_task_completion(_umbra_task_id)
@@ -356,15 +356,15 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 		_umbra_tdb_s = -INF
 		for k in range(3):
 			umbra_fluence[k] = Vector3.ZERO
-			RenderingServer.global_shader_parameter_set(StringName("atmosphere_umbra_fluence_%d" % k), Vector3.ZERO)
+			ShaderGlobals.set_value(StringName("atmosphere_umbra_fluence_%d" % k), Vector3.ZERO)
 	# Render world axes are GCRF in render axes; Earth-local = P R^T P^T (the transpose of the body's render basis).
 	var world_to_earth := Frames.basis_to_render(earth_fixed_to_gcrf).transposed()
-	RenderingServer.global_shader_parameter_set(&"atmosphere_camera_hi", split[0])
-	RenderingServer.global_shader_parameter_set(&"atmosphere_camera_lo", split[1])
-	RenderingServer.global_shader_parameter_set(&"atmosphere_camera_altitude_m", camera_altitude_m)
-	RenderingServer.global_shader_parameter_set(&"atmosphere_world_to_earth", world_to_earth)
-	RenderingServer.global_shader_parameter_set(&"atmosphere_sun_direction", sun_direction_local)
-	RenderingServer.global_shader_parameter_set(&"atmosphere_luminance_scale", luminance_scale)
+	ShaderGlobals.set_value(&"atmosphere_camera_hi", split[0])
+	ShaderGlobals.set_value(&"atmosphere_camera_lo", split[1])
+	ShaderGlobals.set_value(&"atmosphere_camera_altitude_m", camera_altitude_m)
+	ShaderGlobals.set_value(&"atmosphere_world_to_earth", world_to_earth)
+	ShaderGlobals.set_value(&"atmosphere_sun_direction", sun_direction_local)
+	ShaderGlobals.set_value(&"atmosphere_luminance_scale", luminance_scale)
 
 
 ## Eye adaptation's luminance at an Earth-fixed eye (cd/m^2), the larger of two white-plate equivalents (both view-
@@ -620,9 +620,9 @@ func _set_vision(scale: float, chroma_factor := 1.0) -> void:
 	if scale > 0.0:
 		var tint_q := EyeAdaptation.chroma_inverse(tint, chroma_factor)
 		inverse = tint_q * (scale / (1.0 + scale * weights.dot(tint_q)))
-	RenderingServer.global_shader_parameter_set(&"vision_rod_weights", weights)
-	RenderingServer.global_shader_parameter_set(&"vision_inverse_tint", inverse)
-	RenderingServer.global_shader_parameter_set(&"vision_chroma", chroma_factor)
+	ShaderGlobals.set_value(&"vision_rod_weights", weights)
+	ShaderGlobals.set_value(&"vision_inverse_tint", inverse)
+	ShaderGlobals.set_value(&"vision_chroma", chroma_factor)
 	vision_effect.set_rods(scale, chroma_factor)
 
 
@@ -868,8 +868,8 @@ func _upload_umbra_light() -> void:
 	for k in range(3):
 		umbra_fluence[k] = _umbra_result[k]
 		heights[k] = float(UMBRA_HEIGHTS_M[k]) + model_offset
-		RenderingServer.global_shader_parameter_set(StringName("atmosphere_umbra_fluence_%d" % k), _umbra_result[k])
-	RenderingServer.global_shader_parameter_set(&"atmosphere_umbra_heights_m", heights)
+		ShaderGlobals.set_value(StringName("atmosphere_umbra_fluence_%d" % k), _umbra_result[k])
+	ShaderGlobals.set_value(&"atmosphere_umbra_heights_m", heights)
 
 
 ## The eclipsed sky's fluence at an Earth-fixed point (cd/m^2 x sr per channel at 1 AU; see _update_umbra_light);
@@ -1034,28 +1034,27 @@ func _upload(result: Dictionary) -> void:
 	var t_size: Vector2i = result["transmittance_size"]
 	var i_size: Vector2i = result["irradiance_size"]
 	var cells: Vector4i = result["scattering_cells"]  # (nu, mu_s, mu, r)
-	var rs := RenderingServer
-	rs.global_shader_parameter_set(&"atmosphere_transmittance", transmittance)
-	rs.global_shader_parameter_set(&"atmosphere_irradiance", irradiance)
-	rs.global_shader_parameter_set(&"atmosphere_scattering", scattering)
-	rs.global_shader_parameter_set(&"atmosphere_single_mie", single_mie)
-	rs.global_shader_parameter_set(&"atmosphere_bottom_radius_m", float(parameters["bottom_radius_m"]))
-	rs.global_shader_parameter_set(&"atmosphere_top_radius_m", float(parameters["top_radius_m"]))
-	rs.global_shader_parameter_set(&"atmosphere_mu_s_min", float(parameters["mu_s_min"]))
-	rs.global_shader_parameter_set(&"atmosphere_mie_phase_g", float(parameters["mie_phase_g"]))
-	rs.global_shader_parameter_set(&"atmosphere_sun_angular_radius_rad", float(parameters["sun_angular_radius_rad"]))
-	rs.global_shader_parameter_set(&"atmosphere_sky_radiance_to_luminance", parameters["sky_radiance_to_luminance"])
+	ShaderGlobals.set_value(&"atmosphere_transmittance", transmittance)
+	ShaderGlobals.set_value(&"atmosphere_irradiance", irradiance)
+	ShaderGlobals.set_value(&"atmosphere_scattering", scattering)
+	ShaderGlobals.set_value(&"atmosphere_single_mie", single_mie)
+	ShaderGlobals.set_value(&"atmosphere_bottom_radius_m", float(parameters["bottom_radius_m"]))
+	ShaderGlobals.set_value(&"atmosphere_top_radius_m", float(parameters["top_radius_m"]))
+	ShaderGlobals.set_value(&"atmosphere_mu_s_min", float(parameters["mu_s_min"]))
+	ShaderGlobals.set_value(&"atmosphere_mie_phase_g", float(parameters["mie_phase_g"]))
+	ShaderGlobals.set_value(&"atmosphere_sun_angular_radius_rad", float(parameters["sun_angular_radius_rad"]))
+	ShaderGlobals.set_value(&"atmosphere_sky_radiance_to_luminance", parameters["sky_radiance_to_luminance"])
 	var solar: Vector3 = parameters["solar_illuminance_rgb"]
 	var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
-	rs.global_shader_parameter_set(&"atmosphere_sun_illuminance_lux", solar * sun_factor)
-	rs.global_shader_parameter_set(&"atmosphere_ground_albedo", float(parameters["ground_albedo"]))
+	ShaderGlobals.set_value(&"atmosphere_sun_illuminance_lux", solar * sun_factor)
+	ShaderGlobals.set_value(&"atmosphere_ground_albedo", float(parameters["ground_albedo"]))
 	# A true luminance (cd/m^2, at the Sun's actual distance) -> scene value: luminance_scale without the 1 / d_AU^2
 	# (that factor converts the tables' 1 AU values); the star threshold reads the sky's true luminance back with it.
 	# Without the exposure gain until the first update sets both.
 	scene_per_cd_m2 = DAY_EXPOSURE * PI / float(parameters["toa_solar_illuminance_lux"])
-	rs.global_shader_parameter_set(&"atmosphere_scene_per_cd_m2", scene_per_cd_m2)
-	rs.global_shader_parameter_set(&"atmosphere_scattering_size", Vector4(cells.x, cells.y, cells.z, cells.w))
-	rs.global_shader_parameter_set(&"atmosphere_table_sizes", Vector4(t_size.x, t_size.y, i_size.x, i_size.y))
-	rs.global_shader_parameter_set(&"atmosphere_enabled", true)
+	ShaderGlobals.set_value(&"atmosphere_scene_per_cd_m2", scene_per_cd_m2)
+	ShaderGlobals.set_value(&"atmosphere_scattering_size", Vector4(cells.x, cells.y, cells.z, cells.w))
+	ShaderGlobals.set_value(&"atmosphere_table_sizes", Vector4(t_size.x, t_size.y, i_size.x, i_size.y))
+	ShaderGlobals.set_value(&"atmosphere_enabled", true)
 	ready = true
 	status_text = ""

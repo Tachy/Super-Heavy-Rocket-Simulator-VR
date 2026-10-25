@@ -376,8 +376,8 @@ func _render_surface(camera_itrf_m: Vector3, point_itrf_m: Vector3, normal_itrf:
 	var camera_gcrf := _earth_to_gcrf * camera_itrf_m
 	var sun_local := Frames.to_render(sun_itrf * AU_M)
 	var moon_local := -Frames.to_render(sun_itrf) * MOON_DISTANCE_M
-	RenderingServer.global_shader_parameter_set(&"earth_sun_position_local", sun_local)
-	RenderingServer.global_shader_parameter_set(&"earth_moon_position_local", moon_local)
+	ShaderGlobals.set_value(&"earth_sun_position_local", sun_local)
+	ShaderGlobals.set_value(&"earth_moon_position_local", moon_local)
 	_earth_material.set_shader_parameter("sun_position_local", sun_local)
 	_earth_material.set_shader_parameter("moon_position_local", moon_local)
 	_earth_body.visible = not terrain
@@ -392,8 +392,8 @@ func _render_surface(camera_itrf_m: Vector3, point_itrf_m: Vector3, normal_itrf:
 		_terrain_quad.set_instance_shader_parameter(&"vertex_offset", split[0])
 		_terrain_quad.set_instance_shader_parameter(&"vertex_offset_lo", split[1])
 		var camera_split := TerrainQuadtree.split_float32(Frames.to_render(camera_itrf_m))
-		RenderingServer.global_shader_parameter_set(&"earth_terrain_camera_hi", camera_split[0])
-		RenderingServer.global_shader_parameter_set(&"earth_terrain_camera_lo", camera_split[1])
+		ShaderGlobals.set_value(&"earth_terrain_camera_hi", camera_split[0])
+		ShaderGlobals.set_value(&"earth_terrain_camera_lo", camera_split[1])
 	else:
 		_earth_body.fixed_to_gcrf = _earth_to_gcrf
 		_earth_body.center_gcrf_m = Vector3.ZERO
@@ -526,9 +526,9 @@ func _moon_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun
 	moon.center_gcrf_m = moon_gcrf
 	moon.place(camera_gcrf)
 	_viewport.add_child(moon)
-	RenderingServer.global_shader_parameter_set(&"atmosphere_enabled", false)
+	ShaderGlobals.set_value(&"atmosphere_enabled", false)
 	var vacuum := await _render(camera_itrf_m, view_itrf, sun_itrf)
-	RenderingServer.global_shader_parameter_set(&"atmosphere_enabled", true)
+	ShaderGlobals.set_value(&"atmosphere_enabled", true)
 	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
 	moon.queue_free()
 	var cpu: Dictionary = _core.atmosphere_sky_luminance(camera_itrf_m, view_itrf, sun_itrf)
@@ -1151,9 +1151,9 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, alti
 	_atmosphere.update(camera_gcrf, Vector3.ZERO, _earth_to_gcrf, sun_gcrf, 0.0, visible, _moon_gcrf, _tdb,
 			_moon_center_gcrf)
 	if _force_segments >= 0:
-		RenderingServer.global_shader_parameter_set(&"atmosphere_eclipse_segments", _force_segments)
+		ShaderGlobals.set_value(&"atmosphere_eclipse_segments", _force_segments)
 	if not is_nan(altitude_override):
-		RenderingServer.global_shader_parameter_set(&"atmosphere_camera_altitude_m", altitude_override)
+		ShaderGlobals.set_value(&"atmosphere_camera_altitude_m", altitude_override)
 	var view_render := Frames.to_render(_earth_to_gcrf * view_itrf).normalized()
 	var up := Vector3.UP if absf(view_render.y) < 0.9 else Vector3.RIGHT
 	_camera.transform = Transform3D(Basis.looking_at(view_render, up), Vector3.ZERO)

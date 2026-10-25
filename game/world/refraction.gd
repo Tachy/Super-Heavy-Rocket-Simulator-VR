@@ -36,14 +36,14 @@ func update(core: StarsimCore, camera_fixed_m: Vector3, fixed_to_gcrf: Basis) ->
 	grid.w = 1.0 if enabled and _grid.w > 0.0 else 0.0
 	var ratio := EARTH_SEMI_MAJOR_AXIS_M / EARTH_POLAR_RADIUS_M
 	var up_fixed := Vector3(camera_fixed_m.x, camera_fixed_m.y, camera_fixed_m.z * ratio * ratio).normalized()
-	RenderingServer.global_shader_parameter_set(&"refraction_grid", grid)
-	RenderingServer.global_shader_parameter_set(&"refraction_up", Frames.to_render(fixed_to_gcrf * up_fixed))
+	ShaderGlobals.set_value(&"refraction_grid", grid)
+	ShaderGlobals.set_value(&"refraction_up", Frames.to_render(fixed_to_gcrf * up_fixed))
 
 
 func _upload(lift: PackedFloat32Array) -> void:
 	var image := Image.create_from_data(lift.size(), 1, false, Image.FORMAT_RF, lift.to_byte_array())
 	if _texture == null or _texture.get_width() != image.get_width():
 		_texture = ImageTexture.create_from_image(image)
-		RenderingServer.global_shader_parameter_set(&"refraction_lift", _texture)
+		ShaderGlobals.set_value(&"refraction_lift", _texture)
 	else:
 		_texture.update(image)

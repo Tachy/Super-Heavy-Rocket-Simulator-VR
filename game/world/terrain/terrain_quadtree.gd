@@ -193,8 +193,8 @@ func _update(camera_fixed_m: Vector3, delta_s: float) -> void:
 		return
 	if camera_global != "":
 		var camera_render := split_float32(Frames.to_render(camera_fixed_m))
-		RenderingServer.global_shader_parameter_set(_camera_hi_name, camera_render[0])
-		RenderingServer.global_shader_parameter_set(_camera_lo_name, camera_render[1])
+		ShaderGlobals.set_value(_camera_hi_name, camera_render[0])
+		ShaderGlobals.set_value(_camera_lo_name, camera_render[1])
 	_collect_builds()
 	_upload_finished()
 	_frame += 1
