@@ -59,25 +59,28 @@ func _view(view: int, near_m: float) -> Dictionary:
 func _pass_block(v: Dictionary) -> Dictionary:
 	var projection: Projection = v["projection"]
 	var cam: Transform3D = v["cam"]
-	var view_to_world := cam * Transform3D(Basis.IDENTITY, v["eye_offset"])  # cloud_effect.gd:324
+	var view_to_world := cam  # cloud_effect.gd: the head (the projection holds the eye offset)
 	var earth_to_world := Projection(Transform3D(Basis.IDENTITY, cam.origin))
 	return {
 		"inv_projection": projection.inverse(),
 		"view_to_world": view_to_world,
+		"eye_earth": cam.basis * (v["eye_offset"] as Vector3),  # world_to_earth = identity here
 		"clip_from_earth": projection * Projection(view_to_world.affine_inverse()) * earth_to_world,  # :325
 	}
 
 
-## cloud_pass.gdshaderinc cloud_march: the ray's origin relative to the head (camera = atmosphere_camera_hi + _lo, the
-## same for both eyes).
-func _pass_origin(_block: Dictionary) -> Vector3:
-	return Vector3.ZERO
+## cloud_pass.gdshaderinc cloud_march: the ray's origin relative to the head (cloud_view.eye_earth: each eye marches
+## from its own position).
+func _pass_origin(block: Dictionary) -> Vector3:
+	return block["eye_earth"]
 
 
 ## cloud_pass.gdshaderinc cloud_ray_earth: the ray direction.
 func _pass_ray(block: Dictionary, ndc: Vector2) -> Vector3:
-	var p: Vector4 = (block["inv_projection"] as Projection) * Vector4(ndc.x, ndc.y, 0.5, 1.0)
-	var dir_view := (Vector3(p.x, p.y, p.z) / p.w).normalized()
+	var inv: Projection = block["inv_projection"]
+	var a: Vector4 = inv * Vector4(ndc.x, ndc.y, 0.5, 1.0)
+	var b: Vector4 = inv * Vector4(ndc.x, ndc.y, 1.0, 1.0)
+	var dir_view := (Vector3(a.x, a.y, a.z) / a.w - Vector3(b.x, b.y, b.z) / b.w).normalized()
 	return ((block["view_to_world"] as Transform3D).basis * dir_view).normalized()
 
 

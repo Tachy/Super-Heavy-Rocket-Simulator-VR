@@ -16,7 +16,7 @@ const PASS_FILES := ["res://shaders/cloud_pass.gdshaderinc"]
 const GROUP := 8
 ## Golden ratio conjugate: the frame's jitter offset is frame x this, mod 1 (a low-discrepancy sequence in time).
 const GOLDEN := 0.6180339887498949
-const VIEW_BLOCK_SIZE := 4 * 64 + 3 * 16
+const VIEW_BLOCK_SIZE := 4 * 64 + 4 * 16
 ## Render callbacks a replaced image waits before it is freed (frames in flight may still sample it).
 const FREE_DELAY_CALLBACKS := 3
 
@@ -325,8 +325,10 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		var v: Dictionary = _views[view]
 		var low: Vector2i = v["low"]
 		var projection := scene.get_view_projection(view)
-		var view_to_world := scene.get_cam_transform() * Transform3D(Basis.IDENTITY, scene.get_view_eye_offset(view))
+		# The head's transform: the renderer's per-eye projection already contains the eye offset (applied once here).
+		var view_to_world := scene.get_cam_transform()
 		var clip_from_earth := projection * Projection(view_to_world.affine_inverse()) * earth_to_world
+		var eye_earth := world_to_earth * (view_to_world.basis * scene.get_view_eye_offset(view))
 		var block_bytes := PackedFloat32Array()
 		for m in [projection.inverse(), Projection(view_to_world), Projection(Transform3D(world_to_earth, Vector3.ZERO)),
 				v["previous"]]:
@@ -338,6 +340,7 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		# The march pixel's angle (the detail's band limit): 2 tan(fov_y / 2) / low height = 2 / (P[1][1] low height).
 		var pixel_angle := 2.0 / maxf(absf(projection.y.y) * low.y, 1e-6)
 		block_bytes.append_array([jitter, weight, debug, pixel_angle])
+		block_bytes.append_array([eye_earth.x, eye_earth.y, eye_earth.z, 0.0])
 		_rd.buffer_update(v["buffer"], 0, VIEW_BLOCK_SIZE, block_bytes.to_byte_array())
 		v["previous"] = clip_from_earth
 

@@ -37,6 +37,7 @@ layout(set = 1, binding = 0, std140) uniform CloudView {
 	vec4 sizes;                // full width, full height, low width, low height
 	vec4 camera_delta;         // xyz: camera now - camera before (Earth-local, m); w: 1 = history valid
 	vec4 params;               // x: frame jitter [0, 1), y: temporal weight, z: debug output, w: march pixel angle [rad]
+	vec4 eye_earth;            // xyz: the eye's offset from the head (camera), Earth-local axes (m); 0 on the desktop
 } cloud_view;
 
 // Distance [m] from the camera of a full-resolution pixel's depth (reversed Z: 1 near, 0 far = no geometry).
@@ -52,8 +53,11 @@ float cloud_scene_distance(vec2 pixel_centre, float depth) {
 // Earth-local unit direction of the ray through a full-resolution position.
 vec3 cloud_ray_earth(vec2 pixel_centre) {
 	vec2 ndc = pixel_centre / cloud_view.sizes.xy * 2.0 - 1.0;  // the renderer's projection: y down (flipped)
-	vec4 v = cloud_view.inv_projection * vec4(ndc, 0.5, 1.0);  // in front of the camera in both depth conventions
-	vec3 dir_view = normalize(v.xyz / v.w);
+	// The renderer's per-eye projection already contains the eye offset (inverse: clip -> head space), so one unprojected
+	// point is not on the eye's ray. Two depths of the same pixel are: their difference is the eye's ray direction.
+	vec4 a = cloud_view.inv_projection * vec4(ndc, 0.5, 1.0);
+	vec4 b = cloud_view.inv_projection * vec4(ndc, 1.0, 1.0);
+	vec3 dir_view = normalize(a.xyz / a.w - b.xyz / b.w);
 	vec3 dir_world = normalize(mat3(cloud_view.view_to_world) * dir_view);
 	return normalize(mat3(cloud_view.world_to_earth) * dir_world);
 }
@@ -121,8 +125,8 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		if (crossing.x > crossing.y || d_h <= 0.0) {
 			return;
 		}
-		vec3 offset_h = dir * d_h;
-		vec2 lat_lon_h = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset_h);
+		vec3 offset_h = cloud_view.eye_earth.xyz + dir * d_h;
+		vec2 lat_lon_h = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + cloud_view.eye_earth.xyz + offset_h);
 		CloudCell cell = cloud_field(lat_lon_h, cloud_debug_height_m);
 		color = vec3(cloud_coverage(cloud_shape_coordinates(offset_h, cloud_debug_height_m), cell.fraction));
 		alpha = 1.0;
@@ -154,6 +158,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	vec3 moon_dir = normalize(atmosphere_moon_direction);
 	bool moonlit = atm_moonlit();
 	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
+	vec3 eye = cloud_view.eye_earth.xyz;  // each eye marches from its own position (heights: the head's, <= 3 cm apart)
 	float pixel_angle = cloud_view.params.w;  // the detail's band limit: footprint = pixel_angle x distance
 	float start = max(d0, CLOUD_NEAR_START_M);
 	int n = max(cloud_steps, 1);
@@ -183,7 +188,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		// Inside the field's cloudy region the step shrinks to the fine fraction of the distance: the sub-grid shapes
 		// are resolved (a coarse step would hit or miss a cumulus edge per pixel: grain).
 		float d = a + jitter * step_m;
-		vec2 lat_lon = cloud_lat_lon(camera + dir * d);
+		vec2 lat_lon = cloud_lat_lon(camera + eye + dir * d);
 		CloudCell cell = cloud_field(lat_lon, cloud_height_along(ray, d));
 		if (cell.extinction > 0.0) {
 			// Never finer than what still reaches the segment's end within the remaining steps (no far cloud is cut).
@@ -194,7 +199,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 			if (fine < step_m) {
 				step_m = fine;
 				d = a + jitter * step_m;
-				lat_lon = cloud_lat_lon(camera + dir * d);
+				lat_lon = cloud_lat_lon(camera + eye + dir * d);
 				cell = cloud_field(lat_lon, cloud_height_along(ray, d));
 			}
 		}
@@ -206,7 +211,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 			dense_step_m = min(2.0 * dense_step_m, 1.0e30);
 			continue;
 		}
-		vec3 offset = dir * d;
+		vec3 offset = eye + dir * d;  // from the head: the ray starts at the eye
 		float height = cloud_height_along(ray, d);
 		float in_cloud;
 		float beta = cloud_extinction_in_cell(cell, offset, height, pixel_angle * d, in_cloud);
@@ -301,7 +306,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	vec3 air_light = vec3(0.0);
 	if (alpha > 1.0e-6) {
 		cloud_m = weighted_distance / alpha;
-		air_light = atm_to_point_offset(dir * cloud_m, air_transmittance);
+		air_light = atm_to_point_offset(eye + dir * cloud_m, air_transmittance);
 	}
 	color = air_transmittance * radiance + alpha * air_light;
 }
@@ -317,7 +322,7 @@ void main() {
 		if (cloud_enabled && atmosphere_enabled && atmosphere_eclipse_segments > 0) {
 			vec2 group_centre = (vec2(gl_WorkGroupID.xy * gl_WorkGroupSize.xy) + 0.5 * vec2(gl_WorkGroupSize.xy)) * scale;
 			vec3 group_dir = cloud_ray_earth(min(group_centre, cloud_view.sizes.xy - 0.5));
-			vec3 camera_point = atmosphere_camera_hi + atmosphere_camera_lo;
+			vec3 camera_point = atmosphere_camera_hi + atmosphere_camera_lo + cloud_view.eye_earth.xyz;
 			// Probe points above the ground: a ray that meets it is probed short of it.
 			vec2 ground = cloud_sphere_crossing(cloud_ray(group_dir), 0.0);
 			float limit_m = ground.x <= ground.y && ground.x > 0.0 ? ground.x : CLOUD_ECLIPSE_FAR_M;
@@ -408,7 +413,7 @@ void main() {
 	vec3 dir = cloud_ray_earth((vec2(pixel) + 0.5) * scale);
 	float cloud_m = texelFetch(current_depth, pixel, 0).g;
 	float distance_m = cloud_m > 0.0 ? cloud_m : CLOUD_SKY_REPROJECT_M;
-	vec3 previous_offset = dir * distance_m + cloud_view.camera_delta.xyz;
+	vec3 previous_offset = cloud_view.eye_earth.xyz + dir * distance_m + cloud_view.camera_delta.xyz;
 	vec4 clip = cloud_view.prev_clip_from_earth * vec4(previous_offset, 1.0);
 	vec4 result = current;
 	float age = 1.0;
