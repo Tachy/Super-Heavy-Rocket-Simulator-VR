@@ -195,14 +195,18 @@ func _ensure_images(size: Vector2i, view_count: int) -> void:
 	# texture inside this callback would invalidate the composite's material in the middle of the frame (a renderer
 	# error and a frame without clouds). Until then the quad shows the old one (one frame stale); a result never shown
 	# (two re-creations before a swap) is freed.
+	# What to free is decided under the same lock as the hand-over: swap_output may otherwise show old_output between
+	# the two (a double free_rid, once retired and once here).
 	_output_mutex.lock()
 	var unshown := _pending_output
 	_pending_output = _output_rd
+	var free_old := not (unshown.is_valid() and unshown != old_output) and old_output.is_valid() \
+			and old_output != _shown_output
 	_output_mutex.unlock()
 	if unshown.is_valid() and unshown != old_output:
 		var rids: Array[RID] = [unshown]
 		_defer_free(rids)
-	elif old_output.is_valid() and old_output != _shown_output:
+	elif free_old:
 		var rids: Array[RID] = [old_output]
 		_defer_free(rids)
 

@@ -236,9 +236,6 @@ func _on_mission_started(ok: bool, _message: String) -> void:
 	set_focus(FOCUS_VEHICLE)
 
 
-## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml; optional eye_height_m
-## above height_m, default GROUND_EYE_HEIGHT_M; optional body "moon": selenographic coordinates, height_m above the
-## mean sphere).
 ## A new view (ground site, focus, Tab target): the viewer is taken as adapted to it, and the clouds' temporal history
 ## (reprojected from the last frame's camera) is dropped.
 func _view_jumped() -> void:
@@ -246,6 +243,9 @@ func _view_jumped() -> void:
 	clouds.effect.reset_history()
 
 
+## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml; optional eye_height_m
+## above height_m, default GROUND_EYE_HEIGHT_M; optional body "moon": selenographic coordinates, height_m above the
+## mean sphere).
 func set_ground_site(site: Dictionary) -> void:
 	_view_jumped()
 	focus = site.get("id", "custom")
