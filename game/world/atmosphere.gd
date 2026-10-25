@@ -50,8 +50,11 @@ const MOON_MEAN_TEXTURE_ALBEDO := 0.30
 ## The Moon shaders' sunlit scale (moon.gdshader, terrain_moon.gdshader: exposure 1.6 x 0.5): scene value = albedo x
 ## Lommel-Seeliger x this. Keep in sync with them.
 const MOON_SHADER_SUN_SCALE := 0.8
-## [S: NASA Earth Fact Sheet, Bond albedo 0.306] the Earth's light on the Moon from its plate equivalent (earthshine).
+## [S: NASA Earth Fact Sheet, Bond albedo 0.306] the Earth's light on the Moon (earthshine, earthshine_relative).
 const EARTH_BOND_ALBEDO := 0.306
+## [S: Lambert-sphere phase integral q = 3/2, A_Bond = p q; e.g. Seager, Exoplanet Atmospheres (2010) ch. 3] the
+## geometric albedo of a Lambertian sphere over its Bond albedo.
+const LAMBERT_GEOMETRIC_PER_BOND := 2.0 / 3.0
 ## [call] An eye on the Moon stands at least this high above its ground sphere (render ground views: 2 m).
 const MOON_EYE_MIN_HEIGHT_M := 2.0
 ## [call] The lunar cap's quadrature: rings uniform in sin^2 of the nadir angle (cosine weights), directions per ring.
@@ -100,6 +103,10 @@ var last_adaptation_up_cd_m2 := 0.0
 ## Sun's visible fraction the down part used (0 .. 1).
 var last_adaptation_moon_cd_m2 := 0.0
 var last_earthshine_lux := 0.0
+## The earthshine this frame as the Moon shaders' scene value (global moon_earthshine): a white Lambertian at the Moon
+## facing the Earth, DAY_EXPOSURE x earthshine_relative, without the exposure gain (the shaders apply
+## atmosphere_exposure_gain to the whole Moon); 0 without a Moon.
+var earthshine_scene := 0.0
 var last_adaptation_visible_fraction := 1.0
 ## The umbra's light (_update_umbra_light) at the last evaluation: the eclipsed sky's fluence (scalar irradiance, cd/m^2 x
 ## sr per channel at 1 AU) at UMBRA_HEIGHTS_M (tests).
@@ -176,8 +183,16 @@ func shutdown() -> void:
 func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to_gcrf: Basis,
 		sun_apparent_gcrf_m: Vector3, adaptation_dt_s := 0.0, sun_visible_fraction := 1.0,
 		moon_apparent_gcrf_m := Vector3.ZERO, tdb_s := NAN, moon_gcrf_m := Vector3.ZERO) -> void:
+	# The Moon shaders' earthshine needs no tables (before them: the vacuum scene units, gain 1).
+	var earthshine_relative_value := 0.0
+	if moon_gcrf_m != Vector3.ZERO:
+		earthshine_relative_value = earthshine_relative(moon_gcrf_m - earth_center_gcrf_m,
+				sun_apparent_gcrf_m - earth_center_gcrf_m)
+	earthshine_scene = DAY_EXPOSURE * earthshine_relative_value
+	RenderingServer.global_shader_parameter_set(&"moon_earthshine", earthshine_scene)
 	if not poll():
 		return
+	last_earthshine_lux = earthshine_relative_value * float(parameters["toa_solar_illuminance_lux"])
 	_fixed_to_gcrf = earth_fixed_to_gcrf
 	_earth_center_gcrf_m = earth_center_gcrf_m
 	var gcrf_to_fixed := earth_fixed_to_gcrf.transposed()
@@ -280,9 +295,7 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	var moon_ground_m := 0.0
 	if lunar:
 		moon_ground_m = _moon_ground_radius((moon_itrf_m - eye_itrf_m).length())
-		if moon_ground_m < MOON_RADIUS_M:  # the eye below the mean sphere + MOON_EYE_MIN_HEIGHT_M: on its own ground
-			visible = 1.0 - occulted_fraction(sun_itrf_m - eye_itrf_m, SUN_RADIUS_M, moon_itrf_m - eye_itrf_m,
-					moon_ground_m)
+		visible = moon_visible_fraction(eye_itrf_m, sun_itrf_m, moon_itrf_m, visible_fraction)
 	if outside:
 		visible *= 1.0 - occulted_fraction(sun_itrf_m - eye_itrf_m, SUN_RADIUS_M, -eye_itrf_m, EARTH_MEAN_RADIUS_M)
 	last_adaptation_visible_fraction = visible
@@ -291,15 +304,12 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	var earth_in_view := _earth_in_view_luminance(eye_itrf_m, sun_direction_itrf) / (d_au * d_au)
 	last_adaptation_up_cd_m2 = earth_in_view
 	last_adaptation_moon_cd_m2 = 0.0
-	last_earthshine_lux = 0.0
 	if lunar:
 		last_adaptation_up_cd_m2 *= 1.0 - occulted_fraction(-eye_itrf_m, EARTH_MEAN_RADIUS_M, moon_itrf_m - eye_itrf_m,
 				moon_ground_m)
-		# Earthshine on a plate at the Moon facing the Earth [call]: the Earth in view is the plate equivalent of an
-		# albedo-1 ground (plus the in-scatter); x the Earth's Bond albedo for its true light, and the view factor taken
-		# from the eye to the Moon's distance.
-		var scale := eye_itrf_m.length() / moon_itrf_m.length()
-		last_earthshine_lux = PI * EARTH_BOND_ALBEDO * earth_in_view * scale * scale
+		# Earthshine on a plate at the Moon facing the Earth: the Lambert-sphere Earth of earthshine_relative, the same
+		# value the Moon shaders get (moon_earthshine).
+		last_earthshine_lux = earthshine_relative(moon_itrf_m, sun_itrf_m) * float(parameters["toa_solar_illuminance_lux"])
 		last_adaptation_moon_cd_m2 = _moon_in_view_luminance(eye_itrf_m, moon_itrf_m, sun_itrf_m, moon_ground_m,
 				last_earthshine_lux, d_au) * (1.0 - occulted_fraction(moon_itrf_m - eye_itrf_m, moon_ground_m,
 				-eye_itrf_m, EARTH_MEAN_RADIUS_M))
@@ -312,14 +322,41 @@ static func _moon_ground_radius(eye_distance_m: float) -> float:
 	return minf(MOON_RADIUS_M, eye_distance_m - MOON_EYE_MIN_HEIGHT_M)
 
 
+## The Sun's visible fraction past the Moon at a point (vectors in any one frame and origin, m) for the eye adaptation
+## and the vehicles' Sun light (world.gd): mean_sphere_visible is the core's (StarsimCore.solar_eclipse_fraction_gcrf,
+## the Moon's mean sphere); a point within MOON_EYE_MIN_HEIGHT_M of that sphere or below it - on lunar terrain under the
+## mean radius, where the mean sphere would hide the Sun - gets it on its own ground sphere (_moon_ground_radius).
+static func moon_visible_fraction(point_m: Vector3, sun_m: Vector3, moon_m: Vector3, mean_sphere_visible: float) -> float:
+	var ground_m := _moon_ground_radius((moon_m - point_m).length())
+	if ground_m >= MOON_RADIUS_M:
+		return mean_sphere_visible
+	return 1.0 - occulted_fraction(sun_m - point_m, SUN_RADIUS_M, moon_m - point_m, ground_m)
+
+
+## Earthshine at the Moon (its centre; the near side's ground is 0.5 % closer, left out): the illuminance on a plate
+## facing the Earth over the top-of-atmosphere solar illuminance at 1 AU [D]. The Earth a Lambertian sphere of
+## EARTH_BOND_ALBEDO (geometric albedo LAMBERT_GEOMETRIC_PER_BOND x A) at the phase angle a (Sun - Earth - Moon):
+## p (R / d)^2 (sin a + (pi - a) cos a) / pi / d_AU^2 - pi x A x the Lambert disc's plate luminance, the quantity the eye
+## adaptation's Earth in view approximates (its 13-direction cap reads 0.8 x at full and ~0.4 x at half Earth from the
+## Moon, hence the closed form here). Full Earth at 384 400 km and 1 AU: 5.6e-5 (7.2 lux; measured estimates of the full
+## earthshine run ~7-15 lux with the Earth's real, non-Lambertian phase curve). Clouds, oceans' glint, city lights: not
+## modelled. Vectors from the Earth's centre, m, one frame.
+static func earthshine_relative(moon_from_earth_m: Vector3, sun_from_earth_m: Vector3) -> float:
+	var d_au := sun_from_earth_m.length() / ASTRONOMICAL_UNIT_M
+	var a := moon_from_earth_m.angle_to(sun_from_earth_m)
+	var phase := (sin(a) + (PI - a) * cos(a)) / PI
+	var view := EARTH_MEAN_RADIUS_M / moon_from_earth_m.length()
+	return LAMBERT_GEOMETRIC_PER_BOND * EARTH_BOND_ALBEDO * view * view * phase / (d_au * d_au)
+
+
 ## The Moon in view (cd/m^2 at the true Sun distance): the regolith's luminance as the Moon shaders draw it, averaged
 ## cosine-weighted over the lunar cap below the eye (MOON_VIEW_RINGS rings uniform in sin^2 of the nadir angle, each
 ## MOON_VIEW_AZIMUTHS directions), times the cap's view factor (R / r)^2 - the analogue of _earth_in_view_luminance:
 ## - sunlit: albedo x Lommel-Seeliger 2 mu0 / (mu0 + mu) x MOON_SHADER_SUN_SCALE / DAY_EXPOSURE x the reference luminance
 ##   (moon.gdshader, terrain_moon.gdshader: scene value albedo x LS x 0.8), x the solar disc the Earth leaves at the
 ##   ground point (a lunar eclipse; the reddened umbra glow of the shaders is left out);
-## - earthshine: albedo x earthshine_lux x cos(Earth's zenith angle) / pi (Lambert) [call: physical earthshine from the
-##   Earth in view, not the shaders' constant earthshine term];
+## - earthshine: albedo x earthshine_lux x cos(Earth's zenith angle) / pi (Lambert; earthshine_relative, as the
+##   shaders' moon_earthshine);
 ## albedo: MOON_MEAN_TEXTURE_ALBEDO [call: the map's mean, not the texel under the eye]. Cast shadows: none (as the
 ## shaders). Vectors Earth-fixed, m.
 func _moon_in_view_luminance(eye_itrf_m: Vector3, moon_itrf_m: Vector3, sun_itrf_m: Vector3, radius: float,

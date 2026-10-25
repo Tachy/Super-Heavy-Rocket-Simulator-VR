@@ -1,6 +1,6 @@
 shader_type spatial;
 // Moon terrain node (TerrainQuadtree): the model of moon.gdshader (Lommel-Seeliger regolith, Earth shadow with the
-// reddened umbra glow, faint earthshine) on the relief normal, with geomorphing. Albedo: the global colour map
+// reddened umbra glow, physical earthshine) on the relief normal, with geomorphing. Albedo: the global colour map
 // (moon_color, equirectangular) through CUSTOM1's global UV; the Moon has no imagery crops and no water.
 // Cast shadows (crater rims and mountains shadowing the ground, the long polar shadows) are not modelled: they belong to
 // a later part; a slope facing away from the Sun is dark by its own normal only.
@@ -22,7 +22,9 @@ global uniform vec3 moon_terrain_camera_lo;
 uniform float sun_radius_m = 695700000.0;
 uniform float earth_radius_m = 6371000.0;
 // The constants of moon.gdshader (same look as the body mesh from scaled space).
-uniform float earthshine = 0.004;
+// Earthshine: a white Lambertian facing the Earth in scene units without the exposure gain (Atmosphere.earthshine_scene:
+// the Lambert-sphere Earth at its phase, ~8e-5 at full Earth; World sets it once per frame).
+global uniform float moon_earthshine;
 uniform float exposure = 1.6;
 uniform vec3 umbra_glow = vec3(0.020, 0.005, 0.0015);
 
@@ -50,7 +52,7 @@ void fragment() {
 	float mu = max(dot(n, normalize(-camera_offset)), 1e-3);
 	float lommel_seeliger = 2.0 * mu0 / (mu0 + mu);
 	float sunlit = 1.0 - occulted_fraction(to_sun, sun_radius_m, to_earth, earth_radius_m);
-	float earth_light = earthshine * max(dot(n, normalize(to_earth)), 0.0);
+	float earth_light = moon_earthshine * max(dot(n, normalize(to_earth)), 0.0);
 	// v stays half a texel inside the map (repeat would bleed the opposite pole into the polar rows).
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
 	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;

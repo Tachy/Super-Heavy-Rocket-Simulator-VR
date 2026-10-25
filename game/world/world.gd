@@ -316,7 +316,8 @@ func _place_sun(sun_from_camera_m: Vector3) -> void:
 
 
 ## The DirectionalLight's colour and energy: the Sun transmitted through the atmosphere to the followed body (the
-## camera when no vehicle is followed), with the part of the solar disc the Moon leaves (Atmosphere.sun_light_at).
+## camera when no vehicle is followed), with the part of the solar disc the Moon leaves (Atmosphere.sun_light_at; near
+## the Moon on its ground sphere, Atmosphere.moon_visible_fraction).
 func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 	var lit_gcrf := camera_gcrf_m
 	if focus == FOCUS_VEHICLE and flight.sim.is_active():
@@ -324,7 +325,9 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 		if index >= 0:
 			lit_gcrf = flight.sim.body_position_gcrf_m(index)
 	var gcrf_to_fixed := earth.fixed_to_gcrf.transposed()
-	var visible := 1.0 - core.solar_eclipse_fraction_gcrf(lit_gcrf, t)
+	# The core's fraction uses the Moon's mean sphere: on lunar terrain below it the Sun would be hidden at lunar day.
+	var visible := Atmosphere.moon_visible_fraction(lit_gcrf, sun_apparent_from_earth_m, moon_gcrf_m,
+			1.0 - core.solar_eclipse_fraction_gcrf(lit_gcrf, t))
 	var light := atmosphere.sun_light_at(gcrf_to_fixed * lit_gcrf, (gcrf_to_fixed * sun_apparent_from_earth_m).normalized(),
 			visible)
 	sun_light.light_color = light[0]

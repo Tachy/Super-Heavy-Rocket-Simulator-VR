@@ -2944,7 +2944,11 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   (`plume.gdshader`, additive): x T only [call]. The flight trail, orbit lines and labels are UI markers, not attenuated.
 - **Sun light.** One DirectionalLight: colour and energy per channel = TOA solar RGB x the core's
   `atmosphere_sun_transmittance` x luminance scale / pi x the Moon's visible fraction, at **one point: the followed
-  vehicle** (vehicle focus), else the camera (`Atmosphere.sun_light_at`, `world.gd::_update_sun_light`). Known limit:
+  vehicle** (vehicle focus), else the camera (`Atmosphere.sun_light_at`, `world.gd::_update_sun_light`). Near the Moon
+  the visible fraction comes from `Atmosphere.moon_visible_fraction`, shared with the eye adaptation: within 2 m of the
+  lunar mean sphere or below it (terrain under the mean radius, a lander standing there) the Moon's occultation is
+  taken on the point's own ground sphere - the core's mean-sphere fraction hid the Sun from it at lunar day (fix
+  2026-10-25; GPU check: 1551 m below the mean radius, Sun 60 deg up: mean-sphere fraction 0, light = the open sky's). Known limit:
   other bodies in view (the booster after separation far below the ship, the tower seen from orbit) get the light of
   that point - a body at sunset next to one in daylight is lit like the followed one. Per-object lights would cost a
   light per body; not done.
@@ -2990,14 +2994,15 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   BT.709; near side 0.255] x Lommel-Seeliger 2 mu0 / (mu0 + mu) x 0.8 / 1.5 x L_ref (the shaders' scene value albedo x
   LS x 0.8), x the solar disc the Earth leaves at the ground point (lunar eclipse; the umbra glow left out), plus the
   earthshine albedo x E_es cos z / pi - averaged cosine-weighted over the lunar cap (4 rings uniform in sin^2 x 8
-  azimuths) x its view factor (R / r)^2. Earthshine [call, physical, not the shaders' constant]: E_es = pi x 0.306
-  (the Earth's Bond albedo) x the Earth in view, its view factor carried to the Moon's distance. L_a = the largest of
+  azimuths) x its view factor (R / r)^2. Earthshine (`Atmosphere.earthshine_relative`, the same value the Moon shaders
+  draw, see "Earthshine" below). L_a = the largest of
   down, Earth, Moon. The lunar ground sphere is the mean sphere, or 2 m below an eye standing below it (terrain under
   the mean radius); there the Sun's visibility is recomputed on that sphere (the core's mean-sphere fraction would
-  hide the Sun from it; e.g. 0 N 45 E lies 1551 m below the mean radius). Values: lunar day 1.000 (the Moon term
+  hide the Sun from it; e.g. 0 N 45 E lies 1551 m below the mean radius; `Atmosphere.moon_visible_fraction`, also
+  used by the vehicles' Sun light). Values: lunar day 1.000 (the Moon term
   ~7800 cd/m^2, the Sun plate 42 400); deep space halfway to the Moon 1.000; lunar night under a nearly full Earth
   (phase 10 deg, check): Earth in view 6.17 cd/m^2 (0.80 x the Lambert disc 7.74: the 10 km limb ring carries 25 %
-  of the weight with only the limb's sky), Moon in view 0.56, earthshine 5.9 lux, Weber gain 6900 -> the cap 25; the
+  of the weight with only the limb's sky), Moon in view 0.70, earthshine 7.35 lux, Weber gain 6900 -> the cap 25; the
   full Earth then renders 25 x its day look (blown toward white by AgX) [call: the view-independent plate model has
   no foveal term - an eye fixating the Earth would adapt partly to it]. Away from the Earth at partial phases the
   13-direction cap underestimates the Earth by up to ~2x (half Earth: the nadir sample on the terminator, the outer
@@ -3009,6 +3014,28 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   25 -> 11.1 -> 7.9 -> 7.5. Fix: render_check snaps after the view is placed (frame 0, before the world's own update).
   In the game every view change (`set_focus`, `set_ground_site`, Tab, mission start) snaps before the next
   `update_world`, which places the camera before the atmosphere update.
+- **Earthshine** (fix 2026-10-25; replaces the Moon shaders' constant `earthshine = 0.004`, ~360 lux equivalent on an
+  albedo-1 surface and phase-blind). `Atmosphere.earthshine_relative`: the Earth a Lambertian sphere of the Bond
+  albedo 0.306 [S: NASA Earth Fact Sheet] (geometric albedo 2/3 A [S: Lambert-sphere phase integral 3/2]) at its phase
+  angle a (Sun - Earth - Moon), illuminance on a plate at the Moon's centre facing the Earth / the TOA Sun at 1 AU =
+  (2/3) A (R / d)^2 (sin a + (pi - a) cos a) / pi / d_AU^2 - pi x A x the Lambert disc's plate luminance, the quantity
+  the eye adaptation's Earth-in-view cap approximates (closed form here: the cap reads 0.8 x at full, ~0.4 x at half
+  Earth from the Moon). Full Earth at 384 400 km: 5.6e-5 = 7.46 lux (the tables' TOA illuminance); measured estimates of
+  the full earthshine run ~7-15 lux (the real Earth is not Lambertian). Clouds, sun glint, city lights, the near
+  side's 0.5 % shorter distance: not modelled. Once per frame in `Atmosphere.update` (needs no tables), the global
+  shader uniform `moon_earthshine` = DAY_EXPOSURE x that (a white Lambertian facing the Earth, scene units without the
+  exposure gain - the Moon shaders multiply the whole Moon by `atmosphere_exposure_gain`); `moon.gdshader` and
+  `terrain_moon.gdshader` draw albedo x moon_earthshine x cos(Earth zenith angle); the reddened umbra glow is unchanged.
+  The eye adaptation's Moon-in-view term and `last_earthshine_lux` use the same function. GPU check (section 12): full
+  Earth 7.46 lux (band 5-15 lux [call]: catches a unit or phase error, not the albedo choice), the Moon shader's dark
+  side = albedo x moon_earthshine within 3 % at full Earth and at phase 60 deg (ratios 0.99-1.00).
+  **Display consequence (open ruling):** with the gain cap 25 the earthshine-lit regolith (~0.4-0.6 cd/m^2) renders
+  black: the lunar night ground under a nearly full Earth (0 N 45 E, 2026-11-07T14:00, gain 25: scene ~4e-4) and the
+  Da Vinci glow of a 2-day crescent from Starbase at Sun -8 deg (2026-11-12T00:15, adapted to 0.21 cd/m^2, gain 25:
+  disc and sky both sRGB 1-2). Physically both are visible (the earthshine Moon is brighter than that twilight sky);
+  a test render with the cap at 1000 shows them faint but clear (crescent dark side sRGB ~59-70 against the sky's
+  43-66; lunar ground ~10). The old constant made them visible only by being ~40 x too bright. Raising the cap away
+  from the Earth or a mesopic model is a separate decision.
 - **Solar eclipses.** While the Moon's penumbra touches the atmosphere (`Atmosphere.penumbra_touches`), the
   in-scattering along a ray is split into segments at d (i/n)^2 (8 for the sky, Moon, Sun, stars and the sea's
   reflected sky; ceil(d / 12.5 km) clamped to 1..8 for the aerial perspective [call, performance]), each

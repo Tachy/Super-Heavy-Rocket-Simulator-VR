@@ -99,9 +99,9 @@ func _process(_delta: float) -> bool:
 		var eye := world.camera.position_gcrf_m
 		var up := world.camera.site_up_gcrf if world.camera.mode == OrbitCamera.Mode.GROUND else eye.normalized()
 		var to_sun := (world.sun_apparent_from_earth_m - eye).normalized()
-		print("render_check: Sun elevation at the eye %.2f deg (UTC %s), exposure gain %.3f" % [
+		print("render_check: Sun elevation at the eye %.2f deg (UTC %s), exposure gain %.3f, vehicle Sun light %.3f" % [
 				rad_to_deg(asin(clampf(to_sun.dot(up), -1.0, 1.0))), world.core.tdb_s_to_utc(world.clock.tdb_s),
-				world.atmosphere.exposure_gain])
+				world.atmosphere.exposure_gain, world.sun_light.light_energy])
 		var a := world.atmosphere
 		print("render_check: eye adapted to %s cd/m^2: Sun on a plate %s (visible %.3f), Earth in view %s, Moon in view %s, earthshine %s lux" % [
 				a.adaptation_cd_m2, a.last_adaptation_down_cd_m2, a.last_adaptation_visible_fraction,

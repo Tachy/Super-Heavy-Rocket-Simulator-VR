@@ -40,6 +40,10 @@ moon_earth_position_local={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+moon_earthshine={
+"type": "float",
+"value": 0.0
+}
 water_wave_vectors={
 "type": "mat4",
 "value": Projection(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)

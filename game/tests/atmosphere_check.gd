@@ -215,7 +215,8 @@ func _run() -> void:
 	# 12. Eye adaptation away from the Earth (Moon-eye fix 2026-10-25): an eye on the Moon at lunar day (gain 1: the
 	# full Sun at the eye), at lunar night with the Earth nearly full (adapted to the Earth in view and the earthshine-lit
 	# ground: gain > 1, at most GAIN_MAX; the Earth term against the Lambert disc at lunar distance), and in deep space
-	# halfway to the Moon, sunlit (gain 1).
+	# halfway to the Moon, sunlit (gain 1); the earthshine (full Earth in lux, the Moon shader's dark side at two phases)
+	# and the vehicles' Sun light on lunar terrain below the mean sphere at lunar day.
 	await _away_from_earth_samples()
 
 	print("atmosphere_check: %d samples, %d failures" % [_samples, _failures])
@@ -648,7 +649,79 @@ func _away_from_earth_samples() -> void:
 	_check("adapted, deep space halfway to the Moon", absf(_atmosphere.exposure_gain - 1.0) <= AWAY_GAIN_TOLERANCE,
 			"gain %.4f (needs 1 +- %.2f); %s" % [_atmosphere.exposure_gain, AWAY_GAIN_TOLERANCE, _adaptation_parts()])
 	_atmosphere.eye_adaptation_enabled = false
+	# Earthshine (fix 2026-10-25): the full Earth's light at the Moon in lux, and the Moon shader's dark side at two
+	# phases of the Earth against albedo x moon_earthshine.
+	var toa_lux := float(_atmosphere.parameters["toa_solar_illuminance_lux"])
+	var full_lux := Atmosphere.earthshine_relative(moon, moon_dir * AU_M) * toa_lux
+	_check("earthshine at full Earth", full_lux >= EARTHSHINE_FULL_MIN_LUX and full_lux <= EARTHSHINE_FULL_MAX_LUX,
+			"%.2f lux (needs %.0f .. %.0f)" % [full_lux, EARTHSHINE_FULL_MIN_LUX, EARTHSHINE_FULL_MAX_LUX])
+	await _earthshine_sample("earthshine on the Moon, full Earth", moon_dir, side, 0.0)
+	await _earthshine_sample("earthshine on the Moon, Earth phase 60", moon_dir, side, 60.0)
+	# The vehicles' Sun light (world._update_sun_light) on lunar terrain below the mean sphere at lunar day: the core's
+	# mean-sphere fraction hides the Sun there, Atmosphere.moon_visible_fraction must not.
+	var low := moon - moon_dir * (Atmosphere.MOON_RADIUS_M - LOW_SITE_DEPTH_M)
+	var sun_m := sun_day * AU_M
+	var mean_visible := 1.0 - Atmosphere.occulted_fraction(sun_m - low, Atmosphere.SUN_RADIUS_M, moon - low,
+			Atmosphere.MOON_RADIUS_M)
+	var visible := Atmosphere.moon_visible_fraction(low, sun_m, moon, mean_visible)
+	var lit: float = _atmosphere.sun_light_at(low, sun_day, visible)[1]
+	var open_sky: float = _atmosphere.sun_light_at(low, sun_day, 1.0)[1]
+	_check("vehicle Sun light, lunar day, low site", mean_visible < 0.5 and lit > 0.0 and is_equal_approx(lit, open_sky),
+			"energy %s of the unobstructed %s (mean-sphere visible fraction %.3f, %.0f m below the mean radius)" % [
+			_num(lit), _num(open_sky), mean_visible, LOW_SITE_DEPTH_M])
 	_moon_center_gcrf = Vector3.ZERO
+
+
+## Earthshine: the full Earth's light at the Moon (Atmosphere.earthshine_relative x the TOA illuminance) within this
+## band [call]: the Lambert sphere of the Bond albedo gives 7.2 lux at 384 400 km; measured estimates run ~7-15 lux
+## ("about 10 lux"); the band catches a unit or phase error (x pi, x 1/pi, a lost (R/d)^2), not the albedo choice.
+const EARTHSHINE_FULL_MIN_LUX := 5.0
+const EARTHSHINE_FULL_MAX_LUX := 15.0
+## The earthshine-lit pixel against albedo x moon_earthshine (half-float viewport near 1e-5: subnormal steps ~0.3 %).
+const EARTHSHINE_TOLERANCE := 0.03
+## The terrain at 0 N 45 E lies 1551 m below the Moon's mean radius (render_check's lunar ground view).
+const LOW_SITE_DEPTH_M := 1551.0
+
+
+## Section 12: the Moon (moon.gdshader, the SURFACE_ALBEDO_8 texture) seen from 50 000 km on the Earth-Moon line, its
+## sub-Earth point on the camera axis; the Sun phase_deg from the Moon's direction seen from the Earth (the Earth's phase
+## angle at the Moon; 0: full Earth) on the far side, so the pixel is unlit by the Sun. Fixed exposure (gain 1), outside
+## the atmosphere (T 1, no sky): the pixel must be albedo x moon_earthshine (x cos 1).
+func _earthshine_sample(label: String, moon_dir: Vector3, side: Vector3, phase_deg: float) -> void:
+	var phase := deg_to_rad(phase_deg)
+	var sun_itrf := (moon_dir * cos(phase) + side * sin(phase)).normalized()
+	var moon_itrf := moon_dir * MOON_DISTANCE_M
+	var camera_itrf := moon_itrf - moon_dir * EARTHSHINE_VIEW_DISTANCE_M
+	var camera_gcrf := _earth_to_gcrf * camera_itrf
+	var moon_gcrf := _earth_to_gcrf * moon_itrf
+	var sun_gcrf := _earth_to_gcrf * sun_itrf * AU_M
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/moon.gdshader")
+	material.set_shader_parameter("albedo_texture", _constant_texture(SURFACE_ALBEDO_8))
+	material.set_shader_parameter("sun_position_local", Frames.to_render(sun_gcrf - moon_gcrf))
+	material.set_shader_parameter("earth_position_local", Frames.to_render(-moon_gcrf))
+	material.set_shader_parameter("camera_position_local", Frames.to_render(camera_gcrf - moon_gcrf))
+	var body := CelestialBody.new()
+	body.setup(Atmosphere.MOON_RADIUS_M, 0.0, material)
+	body.fixed_to_gcrf = Basis.IDENTITY  # Moon-local = GCRF in render axes (the uniforms above)
+	body.center_gcrf_m = moon_gcrf
+	body.place(camera_gcrf)
+	_viewport.add_child(body)
+	_moon_center_gcrf = moon_gcrf  # _render's update sets moon_earthshine from it
+	var got := await _render(camera_itrf, moon_dir, sun_itrf)
+	body.queue_free()
+	var scene := _atmosphere.earthshine_scene  # what the update wrote into moon_earthshine
+	var albedo := Vector3(SURFACE_ALBEDO_8.srgb_to_linear().r, SURFACE_ALBEDO_8.srgb_to_linear().g,
+			SURFACE_ALBEDO_8.srgb_to_linear().b)
+	var expected_relative := (2.0 / 3.0 * 0.306 * pow(6371000.0 / MOON_DISTANCE_M, 2.0)
+			* (sin(phase) + (PI - phase) * cos(phase)) / PI)
+	_check(label + " (scene value)", absf(scene / (Atmosphere.DAY_EXPOSURE * expected_relative) - 1.0) < 1.0e-6,
+			"moon_earthshine %s, expected %s (%.2f lux)" % [_num(scene), _num(Atmosphere.DAY_EXPOSURE
+			* expected_relative), _atmosphere.last_earthshine_lux])
+	_compare(label, albedo * scene, got, EARTHSHINE_TOLERANCE)
+
+
+const EARTHSHINE_VIEW_DISTANCE_M := 5.0e7
 
 
 ## The eye adaptation's parts at the last update, for the section-12 lines.
