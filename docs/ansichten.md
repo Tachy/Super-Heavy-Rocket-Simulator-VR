@@ -155,7 +155,8 @@ Die Außenansicht trägt ein Overlay im Stil der Starship-Webcasts (Spec `docs/s
 Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis es das Cockpit gibt.
 - **Oben:** UTC der Simulation (der Zeitraffer steht im Zeit-Panel, nicht im Overlay). Darunter, kleiner, die
   Ortszeit am Ort der **Kamera** (nicht des betrachteten Objekts), z. B. "Ortszeit 13:42:05 CDT (UTC−5)"; hat die
-  Zone in tzdata keine Abkürzung, nur der Versatz ("Ortszeit 17:30:00 (UTC+5:30)"). Sichtbar, solange die Kamera
+  Zone in tzdata keine Abkürzung, nur der Versatz ("Ortszeit 17:30:00 (UTC+5:30)"). Weicht das Ortsdatum vom
+  UTC-Datum ab, stehen Tag und Monat davor ("Ortszeit 20.10. 19:28:00 CDT (UTC−5)" unter "2024-10-21 00:28:00 UTC"). Sichtbar, solange die Kamera
   höchstens 100 km (Kármán-Linie) über dem WGS84-Ellipsoid steht; darüber, im All und am Mond ausgeblendet, ebenso
   ohne die Zeitzonendaten. Zonen: timezone-boundary-builder (mit Ozeanen, Raster 0,02°, an Grenzen bis ~1 km
   Unschärfe), Regeln: IANA tzdata, Umstellungen 1990-2060 sekundengenau (`game/util/local_time.gd`).

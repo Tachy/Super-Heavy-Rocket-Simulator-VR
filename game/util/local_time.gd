@@ -94,12 +94,17 @@ static func unix_from_iso(utc_iso: String) -> int:
 	return Time.get_unix_time_from_datetime_string(text) + (1 if leap else 0)
 
 
-## "Ortszeit 07:00:00 CDT (UTC−5)", without an abbreviation "Ortszeit 17:30:00 (UTC+5:30)"; "" for {}.
+## "Ortszeit 07:00:00 CDT (UTC−5)", without an abbreviation "Ortszeit 17:30:00 (UTC+5:30)"; "" for {}. When the local
+## date differs from the UTC date (evenings west of Greenwich, mornings east of it) the local day and month lead the
+## clock: "Ortszeit 20.10. 19:28:00 CDT (UTC−5)" under "2024-10-21 00:28:00 UTC".
 static func format_line(zone: Dictionary, unix_s: int) -> String:
 	if zone.is_empty():
 		return ""
 	var offset_s: int = zone["offset_s"]
 	var clock := Time.get_time_string_from_unix_time(unix_s + offset_s)
+	var local_date := Time.get_date_dict_from_unix_time(unix_s + offset_s)
+	if Time.get_date_string_from_unix_time(unix_s + offset_s) != Time.get_date_string_from_unix_time(unix_s):
+		clock = "%02d.%02d. %s" % [local_date["day"], local_date["month"], clock]
 	var abbreviation: String = zone["abbreviation"]
 	var utc := "(%s)" % format_offset(offset_s)
 	return "Ortszeit %s %s" % [clock, utc if abbreviation == "" else "%s %s" % [abbreviation, utc]]

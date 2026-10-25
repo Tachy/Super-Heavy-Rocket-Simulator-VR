@@ -77,6 +77,14 @@ func _test_zones(lt: LocalTime) -> void:
 	line = LocalTime.format_line(ocean, summer)
 	_check(line == "Ortszeit 02:00:00 (UTC−10)", "mid-Pacific: %s" % line)
 
+	# Local date differs from the UTC date: shown as day and month before the clock
+	var evening := LocalTime.unix_from_iso("2024-10-21T00:28:00")
+	line = LocalTime.format_line(lt.lookup(STARBASE.x, STARBASE.y, evening), evening)
+	_check(line == "Ortszeit 20.10. 19:28:00 CDT (UTC−5)", "Starbase evening, previous local day: %s" % line)
+	var late := LocalTime.unix_from_iso("2024-07-01T20:00:00")
+	line = LocalTime.format_line(lt.lookup(NEW_DELHI.x, NEW_DELHI.y, late), late)
+	_check(line == "Ortszeit 02.07. 01:30:00 IST (UTC+5:30)", "India after local midnight, next local day: %s" % line)
+
 
 func _test_camera(lt: LocalTime) -> void:
 	var core := StarsimCore.new()
