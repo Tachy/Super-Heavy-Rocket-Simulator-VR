@@ -727,3 +727,27 @@ TEST_CASE("The Sun's light diffused through a uniform slab", "[weather]") {
     CHECK(cloud_sun_diffuse_transmittance(slab, nullptr, ground.position, sun_at_zenith_angle(ground, 1.7)) == 0.0);
     CHECK(two_stream_beam_transmittance(0.0, g, 0.5) == Approx(1.0));
 }
+
+TEST_CASE("Broken cloud lights the ground as independent columns", "[weather]") {
+    // A cumulus layer of cloud fraction 0.4 (in-cloud tau ~7.5 over 1 km): the clear 60 % pass the Sun, the cloudy 40 %
+    // pass exp(-tau_in / mu0) - not exp(-grid-mean tau / mu0) (the plane-parallel bias); sky and diffuse Sun likewise.
+    const WeatherSnapshot slab = WeatherSnapshot::uniform_slab(19, 36, 1000.0, 2000.0, 2e-5, 0.4);
+    const double latitude = 30.0 * c::deg_to_rad, longitude = 45.0 * c::deg_to_rad;
+    const LocalFrame ground = local_frame(latitude, longitude, 0.0);
+    const CloudColumnDepths column = cloud_column_depths_above(slab, latitude, longitude, 0.0);
+    REQUIRE(column.cover() == Approx(0.4).epsilon(0.02));
+    const double tau_in = column.in_cloud_depth();
+    REQUIRE(tau_in == Approx(column.mean / 0.4).epsilon(0.02));
+    const double g = cloud_asymmetry_g();
+    const double cover = column.cover();
+    for (double zenith_deg : {0.0, 60.0}) {
+        const double mu0 = std::cos(zenith_deg * c::deg_to_rad);
+        const math::Vec3 sun = sun_at_zenith_angle(ground, zenith_deg * c::deg_to_rad);
+        CHECK(cloud_sun_transmittance(slab, ground.position, sun) ==
+              Approx(1.0 - cover + cover * std::exp(-tau_in / mu0)).epsilon(0.01));
+        CHECK(cloud_sun_diffuse_transmittance(slab, nullptr, ground.position, sun) ==
+              Approx(cover * (two_stream_beam_transmittance(tau_in, g, mu0) - std::exp(-tau_in / mu0))).epsilon(1e-3));
+    }
+    CHECK(cloud_sky_factor(slab, ground.position) ==
+          Approx(1.0 - cover + cover * two_stream_diffuse_transmittance(tau_in, g)).epsilon(1e-3));
+}

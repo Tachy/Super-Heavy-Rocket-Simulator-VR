@@ -58,11 +58,12 @@ double decode_cloud_optical_depth(std::uint8_t code);
 double cloud_texel_extinction_step_per_m();
 double cloud_texel_extinction_per_m(std::uint8_t high, std::uint8_t low);
 
-// Column texture (Task 9, light under the clouds): R8 of the same grid, the GRID-MEAN optical depth from the column top
-// (20 km) down to the layer centre (grid-mean extinction at the centres, trapezoids between them, held from the top
-// centre to 20 km - cloud_column_optical_depth_above at the centre), coded as the A channel (encode_cloud_optical_depth).
-// The shader takes a point's column from the centre above plus the trapezoid of the grid-mean extinction down to it:
-// the sky factor (two-stream diffuse transmittance) and the Sun's diffuse light under a deck (cloud_optics.hpp).
+// Column texture (Task 9, light under the clouds): RG8 of the same grid. R: the GRID-MEAN optical depth from the column
+// top (20 km) down to the layer centre (grid-mean extinction at the centres, trapezoids between them, held from the
+// top centre to 20 km - cloud_column_depths_above at the centre), coded as the A channel (encode_cloud_optical_depth);
+// G: the largest cloud fraction code from the top down to the centre (the column's maximum-overlap cover). The shader
+// takes a point's column from the centre above plus the trapezoid of the grid-mean extinction down to it, its cover the
+// larger of the centre's and the point's fraction: the sky factor and the Sun's diffuse light (cloud_optics.hpp).
 std::vector<std::uint8_t> cloud_render_column_texels(const WeatherSnapshot& snapshot);
 
 // The GPU form of the snapshot's texels (layout above).

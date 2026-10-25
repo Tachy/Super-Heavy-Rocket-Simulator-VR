@@ -103,11 +103,13 @@ std::vector<std::uint8_t> cloud_render_texels(const WeatherSnapshot& snapshot) {
 std::vector<std::uint8_t> cloud_render_column_texels(const WeatherSnapshot& snapshot) {
     const std::vector<std::uint8_t>& source = snapshot.texels();
     const std::size_t cells = static_cast<std::size_t>(snapshot.rows()) * snapshot.columns();
-    std::vector<std::uint8_t> out(source.size() / channels, 0);
+    std::vector<std::uint8_t> out(source.size() / channels * 2, 0);
     std::array<double, 256> water{};
     for (int code = 0; code < 256; ++code) water[code] = decode_weather_water(static_cast<std::uint8_t>(code));
-    // Top-down: the running grid-mean depth and the grid-mean extinction of the centre above, per cell.
+    // Top-down: the running grid-mean depth, the grid-mean extinction of the centre above and the largest cloud fraction
+    // code so far, per cell.
     std::vector<double> depth(cells, 0.0), beta_above(cells, 0.0);
+    std::vector<std::uint8_t> cover(cells, 0);
     for (int layer = weather_layer_count - 1; layer >= 0; --layer) {
         const std::size_t base = static_cast<std::size_t>(layer) * cells;
         const bool top = layer == weather_layer_count - 1;
@@ -118,7 +120,9 @@ std::vector<std::uint8_t> cloud_render_column_texels(const WeatherSnapshot& snap
             const double beta = cloud_extinction_per_m(water[source[i + 1]], water[source[i + 2]]);
             depth[cell] += top ? beta * gap_m : 0.5 * (beta + beta_above[cell]) * gap_m;
             beta_above[cell] = beta;
-            out[base + cell] = encode_cloud_optical_depth(depth[cell]);
+            cover[cell] = std::max(cover[cell], source[i]);
+            out[2 * (base + cell)] = encode_cloud_optical_depth(depth[cell]);
+            out[2 * (base + cell) + 1] = cover[cell];
         }
     }
     return out;

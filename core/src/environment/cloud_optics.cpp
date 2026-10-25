@@ -123,6 +123,13 @@ double extinction_at(const WeatherSnapshot& snapshot, double latitude_rad, doubl
     return cloud_extinction_per_m(cell.liquid_water_kg_m3, cell.ice_water_kg_m3);
 }
 
+// Grid-mean extinction and cloud fraction at a point.
+CloudColumnDepths extinctions_at(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,
+                                 double height_m) {
+    const WeatherCell cell = snapshot.at(latitude_rad, longitude_rad, height_m);
+    return {cloud_extinction_per_m(cell.liquid_water_kg_m3, cell.ice_water_kg_m3), cell.cloud_fraction};
+}
+
 }  // namespace
 
 double cloud_extinction_per_m(double liquid_water_kg_m3, double ice_water_kg_m3) {
@@ -483,31 +490,51 @@ double slab_reflectance(double optical_depth, double sun_cos_zenith) {
     return flux / mu0;
 }
 
-double cloud_column_optical_depth_above(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,
-                                        double height_ellipsoid_m) {
-    // The profile is linear in height between the breakpoints (layer bottoms and centres): trapezoids are exact.
+double CloudColumnDepths::cover() const {
+    if (!(mean > 0.0)) return 0.0;
+    return std::clamp(max_fraction, cloud_min_cover, 1.0);
+}
+
+double CloudColumnDepths::in_cloud_depth() const { return mean > 0.0 ? mean / cover() : 0.0; }
+
+double cloud_cover_transmittance(double cover, double in_cloud_transmittance) {
+    return 1.0 - cover + cover * in_cloud_transmittance;
+}
+
+CloudColumnDepths cloud_column_depths_above(const WeatherSnapshot& snapshot, double latitude_rad,
+                                            double longitude_rad, double height_ellipsoid_m) {
+    // The profile is linear in height between the breakpoints (layer bottoms and centres): trapezoids are exact for the
+    // mean, and the cloud fraction's maximum lies on a breakpoint.
+    CloudColumnDepths depth;
     const double start = std::max(height_ellipsoid_m, snapshot.ground_height_m(latitude_rad, longitude_rad));
-    if (start >= weather_top_m) return 0.0;
-    double tau = 0.0, lower = start;
-    double lower_beta = extinction_at(snapshot, latitude_rad, longitude_rad, lower);
+    if (start >= weather_top_m) return depth;
+    double lower = start;
+    CloudColumnDepths lower_beta = extinctions_at(snapshot, latitude_rad, longitude_rad, lower);
+    depth.max_fraction = lower_beta.max_fraction;
     for (int layer = 0; layer < weather_layer_count; ++layer) {
         const double bottom = weather_layer_bottom_m(layer), top = weather_layer_bottom_m(layer + 1);
         for (double upper : {0.5 * (bottom + top), top}) {
             if (upper <= lower) continue;
-            const double upper_beta = extinction_at(snapshot, latitude_rad, longitude_rad, upper);
-            tau += 0.5 * (lower_beta + upper_beta) * (upper - lower);
+            const CloudColumnDepths upper_beta = extinctions_at(snapshot, latitude_rad, longitude_rad, upper);
+            depth.mean += 0.5 * (lower_beta.mean + upper_beta.mean) * (upper - lower);
+            depth.max_fraction = std::max(depth.max_fraction, upper_beta.max_fraction);
             lower = upper;
             lower_beta = upper_beta;
         }
     }
-    return tau;
+    return depth;
+}
+
+double cloud_column_optical_depth_above(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,
+                                        double height_ellipsoid_m) {
+    return cloud_column_depths_above(snapshot, latitude_rad, longitude_rad, height_ellipsoid_m).mean;
 }
 
 double cloud_sun_transmittance(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m,
                                const math::Vec3& sun_direction_itrf) {
     const math::Vec3 dir = math::normalized(sun_direction_itrf);
     math::Vec3 p = position_itrf_m;
-    double tau = 0.0;
+    CloudColumnDepths tau;
     for (int step = 0; step < ray_max_steps; ++step) {
         const frames::GeodeticPosition here = frames::fixed_to_geodetic(p);
         if (here.height_m < solid_earth_height_m) break;
@@ -518,17 +545,21 @@ double cloud_sun_transmittance(const WeatherSnapshot& snapshot, const math::Vec3
                                    ray_max_step_m);
         if (here.height_m > weather_top_m) length = std::max(length, here.height_m - weather_top_m);
         const frames::GeodeticPosition mid = frames::fixed_to_geodetic(p + dir * (0.5 * length));
-        tau += extinction_at(snapshot, mid.latitude_rad, mid.longitude_rad, mid.height_m) * length;
+        const CloudColumnDepths beta = extinctions_at(snapshot, mid.latitude_rad, mid.longitude_rad, mid.height_m);
+        tau.mean += beta.mean * length;
+        tau.max_fraction = std::max(tau.max_fraction, beta.max_fraction);
         p += dir * length;
     }
-    return std::exp(-tau);
+    // Independent columns, maximum overlap: the clear part passes everything, the cloudy part exp(-in-cloud depth).
+    return cloud_cover_transmittance(tau.cover(), std::exp(-tau.in_cloud_depth()));
 }
 
 double cloud_sky_factor(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m) {
     const frames::GeodeticPosition here = frames::fixed_to_geodetic(position_itrf_m);
-    const double tau =
-        cloud_column_optical_depth_above(snapshot, here.latitude_rad, here.longitude_rad, here.height_m);
-    return two_stream_diffuse_transmittance(tau, cloud_asymmetry_g());
+    const CloudColumnDepths tau =
+        cloud_column_depths_above(snapshot, here.latitude_rad, here.longitude_rad, here.height_m);
+    return cloud_cover_transmittance(tau.cover(),
+                                     two_stream_diffuse_transmittance(tau.in_cloud_depth(), cloud_asymmetry_g()));
 }
 
 double cloud_sun_diffuse_transmittance(const WeatherSnapshot& snapshot, const CloudSlabTransmittanceLut* lut,
@@ -537,12 +568,14 @@ double cloud_sun_diffuse_transmittance(const WeatherSnapshot& snapshot, const Cl
     const double mu0 =
         math::dot(math::normalized(sun_direction_itrf), geodetic_up(here.latitude_rad, here.longitude_rad));
     if (mu0 <= 0.0) return 0.0;
-    const double tau =
-        cloud_column_optical_depth_above(snapshot, here.latitude_rad, here.longitude_rad, here.height_m);
-    if (!(tau > 0.0)) return 0.0;
+    const CloudColumnDepths column =
+        cloud_column_depths_above(snapshot, here.latitude_rad, here.longitude_rad, here.height_m);
+    const double c = column.cover();
+    const double tau = column.in_cloud_depth();
+    if (!(tau > 0.0) || !(c > 0.0)) return 0.0;
     const double total = lut != nullptr ? cloud_slab_total_transmittance(*lut, tau, mu0)
                                         : two_stream_beam_transmittance(tau, cloud_asymmetry_g(), mu0);
-    return std::max(total - std::exp(-tau / mu0), 0.0);
+    return c * std::max(total - std::exp(-tau / mu0), 0.0);
 }
 
 }  // namespace starsim::environment

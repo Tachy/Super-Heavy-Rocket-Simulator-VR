@@ -236,25 +236,43 @@ CloudSlabTransmittanceLut make_cloud_slab_transmittance_lut(const CloudTransferT
 double cloud_slab_total_transmittance(const CloudSlabTransmittanceLut& lut, double optical_depth,
                                       double sun_cos_zenith);
 
-// The CPU light. Transmittance of the direct Sun through the grid-mean clouds along the ray from position toward the
-// Sun (Beer-Lambert with the unscaled extinction: the Sun disc). No detail noise: a vehicle in a gap between cumuli gets
-// its cell's mean. The ray ends where it leaves the cloud volume (above 20 km and climbing) or where it enters the solid
+// The CPU light (Task 9: independent columns of the cell). A grid cell with cloud fraction cf holds its cloud on cf of
+// its area; under maximum overlap (the shapes' noise is vertically coherent) a path through the cells is clear on
+// 1 - C of the area and cloudy on C, C = the largest cloud fraction along it (the maximum-overlap total cover), the
+// cloudy part carrying the path's grid-mean depth / C. Its mean transmittance is 1 - C + C T(tau / C) - not T(tau),
+// which for broken cloud would turn a sunny cumulus field into an overcast (the plane-parallel bias: cf 0.15, in-cloud
+// tau 27 gives exp(-4) direct instead of ~0.85). For C = 1 both are the same (a deck).
+// Transmittance of the direct Sun along the ray from position toward the Sun, so averaged over the cell (Beer-Lambert
+// with the unscaled extinction: the Sun disc). No detail noise: a vehicle in a gap between cumuli gets its cell's mean. The ray ends where it leaves the cloud volume (above 20 km and climbing) or where it enters the solid
 // Earth (2 km below the ellipsoid: the Sun is below the horizon there, the Earth's shadow is not a cloud matter).
 double cloud_sun_transmittance(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m,
                                const math::Vec3& sun_direction_itrf);
-// Diffuse sky factor under the column: the two-stream diffuse transmittance of the column above the position (vertical,
-// from the position to 20 km), 1 above the clouds.
+// Diffuse sky factor under the column: 1 - C + C x the two-stream diffuse transmittance of the column's cloudy part
+// above the position (vertical, from the position to 20 km), 1 above the clouds.
 double cloud_sky_factor(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m);
 // The Sun's light diffused through the column above the position (Task 9), per unit of the clear-sky Sun irradiance
-// on a horizontal plane: T_sd = max(T_total(tau, mu0) - exp(-tau / mu0), 0), tau the grid-mean column above the
-// position (cloud_column_optical_depth_above), mu0 the Sun's cosine to the geodetic vertical, T_total from the Monte
+// on a horizontal plane: T_sd = C max(T_total(tau, mu0) - exp(-tau / mu0), 0), tau the column's cloudy part's depth
+// above the position and C its cover (cloud_column_depths_above), mu0 the Sun's cosine to the geodetic vertical, T_total from the Monte
 // Carlo table (lut; nullptr: the delta-Eddington beam transmittance). Isotropic downward light under the deck (a
 // horizontal plate receives T_sd x E_sun,horizontal); the direct beam is cloud_sun_transmittance's. 0 for the Sun below
 // the horizon or no cloud above.
 double cloud_sun_diffuse_transmittance(const WeatherSnapshot& snapshot, const CloudSlabTransmittanceLut* lut,
                                        const math::Vec3& position_itrf_m, const math::Vec3& sun_direction_itrf);
 
-// Vertical optical depth of the column above a geodetic position (exact for the snapshot's piecewise-linear profile).
+// The column above a geodetic position: its grid-mean vertical optical depth (trapezoids over the profile's
+// breakpoints: exact for the piecewise-linear profile) and the largest cloud fraction in it; its cover C (0 without
+// cloud, at least cloud_min_cover with cloud) and its cloudy part's depth mean / C.
+inline constexpr double cloud_min_cover = 0.5 / 255.0;  // half a cloud-fraction code step
+struct CloudColumnDepths {
+    double mean = 0.0, max_fraction = 0.0;
+    double cover() const;
+    double in_cloud_depth() const;
+};
+// 1 - cover + cover x the cloudy part's transmittance.
+double cloud_cover_transmittance(double cover, double in_cloud_transmittance);
+CloudColumnDepths cloud_column_depths_above(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,
+                                            double height_ellipsoid_m);
+// Its grid-mean part.
 double cloud_column_optical_depth_above(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,
                                         double height_ellipsoid_m);
 

@@ -172,7 +172,7 @@ TEST_CASE("Cloud ice share texels", "[weather]") {
     CHECK(share[texel_offset(0, 0, 0, rows, columns) / 4] == 0);  // clear
 }
 
-TEST_CASE("Cloud column texels carry the grid-mean depth above each layer centre", "[weather]") {
+TEST_CASE("Cloud column texels carry the grid-mean depth and the cover above each layer centre", "[weather]") {
     // Broken cumulus (cloud fraction 0.5) under an overcast deck, the same in every cell (ground at 0): the GPU's
     // grid-mean column above each layer centre (the sky factor's and the Sun's diffuse light's tau, Task 9) against the
     // CPU's cloud_column_optical_depth_above at the centre, within the code's half step (2.8 %).
@@ -193,10 +193,14 @@ TEST_CASE("Cloud column texels carry the grid-mean depth above each layer centre
     const WeatherSnapshot snapshot = WeatherSnapshot::from_parts({}, rows, columns,
                                                                  std::vector<float>(rows * columns, 0.0f), texels);
     const std::vector<std::uint8_t> column = cloud_render_column_texels(snapshot);
-    REQUIRE(column.size() == texels.size() / 4);
+    REQUIRE(column.size() == texels.size() / 2);
     for (int layer = 0; layer < weather_layer_count; ++layer) {
-        const double expected = cloud_column_optical_depth_above(snapshot, 0.3, 0.5, layer_centre_m(layer));
-        const std::uint8_t code = column[texel_offset(layer, 1, 2, rows, columns) / 4];
+        const CloudColumnDepths cpu = cloud_column_depths_above(snapshot, 0.3, 0.5, layer_centre_m(layer));
+        const double expected = cpu.mean;
+        const std::size_t texel = texel_offset(layer, 1, 2, rows, columns) / 4;
+        // G: the largest cloud fraction from the top down to the centre (the column's cover).
+        CHECK(decode_weather_cloud_fraction(column[2 * texel + 1]) == Approx(cpu.max_fraction).margin(0.003));
+        const std::uint8_t code = column[2 * texel];
         if (expected < cloud_depth_code_min) {
             CHECK(code <= 1);
         } else {
