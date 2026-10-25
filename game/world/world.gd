@@ -302,6 +302,7 @@ func _input(event: InputEvent) -> void:
 	if focus != FOCUS_VEHICLE or not flight.sim.is_active():
 		return
 	view_target.cycle(flight.sim, -1 if key.shift_pressed else 1)
+	atmosphere.snap_adaptation()  # another body is another place: the viewer is taken as adapted to it
 	get_viewport().set_input_as_handled()
 
 
