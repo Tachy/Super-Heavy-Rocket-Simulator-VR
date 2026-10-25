@@ -61,6 +61,9 @@ const MOON_OPPOSITION_PER_DEG := 0.05
 const MOON_OPPOSITION_END_DEG := 7.0
 ## [call] The regolith's phase law is held beyond this angle (K&S's quartic turns up past ~150 deg).
 const REGOLITH_PHASE_MAX_DEG := 150.0
+## [call] The regolith's least cosine to the eye (moon_regolith.gdshaderinc): a normal turned further away (the faceted
+## silhouette) is taken back onto the limb before the light's cosine.
+const REGOLITH_MU_MIN := 1.0e-3
 ## [D: pi x the tables' 4.24e4 cd/m^2 white plate] TOA illuminance (lux) for the regolith scale before the tables load.
 const NOMINAL_TOA_LUX := 1.3327e5
 ## City lights (night-vision fix round I6, user ruling 2026-10-25: scene-referred, through the eye model): the night
@@ -138,8 +141,9 @@ var sun_direction_local := Vector3.ZERO
 var camera_local_m := Vector3.ZERO
 ## Fidelity flag: eye adaptation (EyeAdaptation) - on in the game; off: the fixed day exposure (atmosphere_check.gd).
 var eye_adaptation_enabled := true
-## The exposure gain of the eye adaptation this frame (1 without it), already in luminance_scale and scene_per_cd_m2;
-## the shaders read it as atmosphere_exposure_gain for what is not lit through the tables (Moon, Sun disc).
+## The cone gain of the eye adaptation this frame (1 without it). Times `brightness` it is in luminance_scale and
+## scene_per_cd_m2, and the shaders read that product as atmosphere_exposure_gain for what is not lit through the tables
+## (Moon, Sun disc).
 var exposure_gain := 1.0
 ## A true luminance (cd/m^2, at the Sun's actual distance) -> scene value, incl. the exposure gain.
 var scene_per_cd_m2 := 0.0
@@ -168,6 +172,11 @@ var last_adaptation_glow_cd_m2 := 0.0
 ## without a Moon) and whether the moonlight terms were active (MOONLIGHT_MIN_SHARE).
 var scotopic_cd_m2 := 0.0
 var rod_scale := 0.0
+## The suprathreshold factors at the last update (EyeAdaptation.brightness / chroma; 1 by day or with the adaptation
+## off): the brightness is in luminance_scale, scene_per_cd_m2 and atmosphere_exposure_gain (not in exposure_gain), the
+## chroma in the post step.
+var brightness := 1.0
+var chroma := 1.0
 var moonlight_relative_value := 0.0
 var moonlight_active := false
 ## The unpaced targets of the last adaptation_luminance (photopic and scotopic cd/m^2).
@@ -301,6 +310,8 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	adaptation_cd_m2 = 0.0
 	scotopic_cd_m2 = 0.0
 	rod_scale = 0.0
+	brightness = 1.0
+	chroma = 1.0
 	moonlight_active = false
 	if eye_adaptation_enabled:
 		var moon_fixed := gcrf_to_fixed * (moon_gcrf_m - earth_center_gcrf_m) if moon_gcrf_m != Vector3.ZERO else Vector3.ZERO
@@ -310,18 +321,23 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 		adaptation_cd_m2 = _eye.adaptation_cd_m2
 		scotopic_cd_m2 = _eye.scotopic_cd_m2
 		rod_scale = _eye.rod_scale
+		brightness = _eye.brightness
+		chroma = _eye.chroma
 		moonlight_active = moonlight_relative_value * reference_luminance(d_au) >= MOONLIGHT_MIN_SHARE * adaptation_cd_m2
 	RenderingServer.global_shader_parameter_set(&"atmosphere_adaptation_cd_m2", adaptation_cd_m2)
 	RenderingServer.global_shader_parameter_set(&"atmosphere_moon_light",
 			moonlight_relative_value if moonlight_active else 0.0)
 	if _moon_direction_fixed != Vector3.ZERO:
 		RenderingServer.global_shader_parameter_set(&"atmosphere_moon_direction", Frames.to_render(_moon_direction_fixed))
-	_set_vision(rod_scale)
+	_set_vision(rod_scale, chroma)
+	# The display's pre-exposure: the cone gain x the brightness factor (Stevens effect; the rods, relative to the
+	# pixel, follow it). The star threshold reads the sky's true luminance back through scene_per_cd_m2: unchanged.
+	var display_gain := exposure_gain * brightness
 	var base := DAY_EXPOSURE * PI / float(parameters["toa_solar_illuminance_lux"])
-	luminance_scale = base * exposure_gain / (d_au * d_au)
-	scene_per_cd_m2 = base * exposure_gain
+	luminance_scale = base * display_gain / (d_au * d_au)
+	scene_per_cd_m2 = base * display_gain
 	RenderingServer.global_shader_parameter_set(&"atmosphere_scene_per_cd_m2", scene_per_cd_m2)
-	RenderingServer.global_shader_parameter_set(&"atmosphere_exposure_gain", exposure_gain)
+	RenderingServer.global_shader_parameter_set(&"atmosphere_exposure_gain", display_gain)
 	eclipse_segments = 0
 	if moon_apparent_gcrf_m != Vector3.ZERO:
 		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m
@@ -573,11 +589,15 @@ static func regolith_phase_factor(cos_g: float) -> float:
 
 
 ## Lommel-Seeliger x f(g) for unit vectors (the shaders' regolith_reflectance): 0 with the light below the horizon.
+## A normal facing away from the eye is taken onto the limb first (the shader's silhouette fix: REGOLITH_MU_MIN).
 static func regolith_reflectance(n: Vector3, to_light: Vector3, to_eye: Vector3) -> float:
+	var mu := n.dot(to_eye)
+	if mu < REGOLITH_MU_MIN:
+		n = (n + to_eye * (REGOLITH_MU_MIN - mu)).normalized()
+		mu = REGOLITH_MU_MIN
 	var mu0 := n.dot(to_light)
 	if mu0 <= 0.0:
 		return 0.0
-	var mu := maxf(n.dot(to_eye), 1.0e-3)
 	return 2.0 * mu0 / (mu0 + mu) * regolith_phase_factor(to_light.dot(to_eye))
 
 
@@ -590,15 +610,20 @@ func moon_light_at(position_itrf_m: Vector3) -> Array:
 	return sun_light_at(position_itrf_m, _moon_direction_fixed, moonlight_relative_value)
 
 
-## Night vision's state into the shaders and the post step: the rods' scale (VisionEffect) and the inverse for the
-## display-referred emitters (vision.gdshaderinc: vision_inverse_tint = tint x s / (1 + s w . tint)).
-func _set_vision(scale: float) -> void:
+## Night vision's state into the shaders and the post step: the rods' scale and the cones' chroma factor
+## (VisionEffect: c' = C c + s t (w . c), C c = Y + chroma (c - Y)) and the inverse for the display-referred emitters
+## (vision.gdshaderinc, Sherman-Morrison: c = q - u (w . q), q = C^-1 c', u = s C^-1 t / (1 + s w . C^-1 t)).
+func _set_vision(scale: float, chroma_factor := 1.0) -> void:
 	var tint := EyeAdaptation.ROD_TINT
 	var weights := EyeAdaptation.SCOTOPIC_WEIGHTS
-	var inverse := tint * (scale / (1.0 + scale * weights.dot(tint))) if scale > 0.0 else Vector3.ZERO
+	var inverse := Vector3.ZERO
+	if scale > 0.0:
+		var tint_q := EyeAdaptation.chroma_inverse(tint, chroma_factor)
+		inverse = tint_q * (scale / (1.0 + scale * weights.dot(tint_q)))
 	RenderingServer.global_shader_parameter_set(&"vision_rod_weights", weights)
 	RenderingServer.global_shader_parameter_set(&"vision_inverse_tint", inverse)
-	vision_effect.set_rods(scale)
+	RenderingServer.global_shader_parameter_set(&"vision_chroma", chroma_factor)
+	vision_effect.set_rods(scale, chroma_factor)
 
 
 ## [call] The lunar ground sphere of the eye adaptation (m about the Moon's centre) for an eye this far from it: the

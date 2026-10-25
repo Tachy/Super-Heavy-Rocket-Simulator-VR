@@ -294,6 +294,9 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   leuchten mit ihrer physikalischen Leuchtdichte und gehen wie alles andere durch das Augenmodell; Triebwerksflammen,
   Sterne und Anzeigen behalten ihre Farbe (bewusst nicht entsättigt). In der totalen Sonnenfinsternis passt sich das
   Auge wie in der Dämmerung an den hellsten Himmel an (den Ring am Horizont). Gleich in VR (beide Augen).
+  Helligkeit und Farbigkeit [Entschieden 2026-10-25, Nutzer]: auch angepasst wirkt eine dunklere Szene dunkler und
+  weniger farbig (Stevens- und Hunt-Effekt, CIECAM02): die Abenddämmerung ist auf dem Bildschirm dunkler und blasser
+  als der Mittag, immer dunkler, je tiefer die Sonne steht; der Tag (Sonne höher als ~15 Grad) bleibt unverändert.
 - Sonnenfinsternis: im Kernschatten wird der Himmel dunkel, ringsum am Horizont leuchtet die Dämmerung (360 Grad),
   nur helle Sterne und Planeten erscheinen; der Mondschatten ist aus dem Orbit als dunkler Fleck mit weichem Rand zu
   sehen.

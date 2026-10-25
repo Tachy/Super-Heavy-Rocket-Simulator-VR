@@ -3060,25 +3060,33 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   - k = 1 - s, s the rods' saturation of Jensen, Premoze, Shirley, Thompson, Ferwerda & Stark 2000 ("Night rendering",
     UUCS-00-016, sec. 3.1): 0 below 0.01 cd/m^2, 1 above 4 cd/m^2, 3 x^2 - 2 x^3 with x = (log L + 2) / 2.6 between -
     evaluated on the photopic adaptation luminance [call: one k per view, VR-stable].
-  - Scotopic luminance: L_s = w_s . rgb, w_s = (-0.0525, 1.6016, 0.8794) [D: `tools/validation/scotopic_rgb_weights.py`:
+  - Scotopic luminance: L_s = w_s . rgb, w_s = (0, 1.4730, 0.9238) [D: `tools/validation/scotopic_rgb_weights.py`:
     the CIE 1951 V'(lambda) (K'm 1700 lm/W) projected onto the linear sRGB colour matching functions, least squares in
-    S/P over black bodies 2000-25 000 K and their lambda^-4 sky versions; worst 2.2 %; S/P of RGB white 2.43, of
-    illuminant A 1.41 (+1.4 %)]. The scotopic adaptation luminance L_as is the chosen plate's colour through w_s.
+    S/P over black bodies 2000-25 000 K and their lambda^-4 sky versions, every weight >= 0; worst 4.2 % (the 25 000 K
+    sky), illuminant A +1.4 %, 6504 K -1.7 %; S/P of RGB white 2.40]. Non-negative since the brightness term
+    (2026-10-25) [call]: the post step is now linear (no clamp of w_s . rgb), so a scene pixel's scotopic sum must not go
+    negative; the unconstrained fit (-0.0525, 1.6016, 0.8794; worst 2.2 %) would let a pure red pixel subtract rod
+    light. The scotopic adaptation luminance L_as is the chosen plate's colour through w_s.
   - The rods' image is achromatic, drawn with a blue tint at chromaticity (0.25, 0.25) (Jensen et al. 2000: their
     rendering choice beside the mean (0.29, 0.28) of ten night paintings; the night convention also of Thompson,
     Shirley & Ferwerda 2002, JGT 7(1)) [call: the measured mean is purple and gave a lavender twilight sky].
   - Where: the cone gain in the shaders (as before); the rods by one CompositorEffect (`VisionEffect`, attached to the
     WorldEnvironment's Compositor in world.gd and the GPU check) after the transparent pass with the resolved MSAA
-    colour, before glow and AgX: rgb += k g_r / g_c x max(w_s . rgb, 0) x tint, per pixel, on every view layer
-    (multiview: identical for both eyes); nothing dispatched while k g_r / g_c = 0 (daylight, the adaptation off). The
-    gain stays in the shaders as a pre-exposure, so the half-float buffer holds values near display level.
-  - Display-referred emitters write the inverse of that linear step, c - tint s / (1 + s w_s . tint) (w_s . c)
-    (`vision.gdshaderinc`, globals `vision_rod_weights`, `vision_inverse_tint`): plume, the stars' own brightness, the
-    orbit ribbon, the flight trail, the Moon's orbit line, the map labels and the VR panel look as before. GPU check
-    (review I7): an opaque `display_colour` quad at the moonless night (rod scale 138) = its day pixel within 0.1 % of
-    its peak, a half-transparent one over a scene-referred background = alpha x colour + (1 - alpha) x the background
-    with its rods within 1.4 % of the peak - the limit is rgba16f: the inverse writes channels of ~0.5 whose scotopic
-    sum cancels to ~1e-3, and the step multiplies its half-float rounding by s x tint (tolerance 2 % of the peak).
+    colour, before glow and AgX: rgb' = Y + S (rgb - Y) + k g_r / g_c x (w_s . rgb) x tint (S the chroma factor of the
+    brightness term below, Y the BT.709 luminance), per pixel, on every view layer (multiview: identical for both
+    eyes); nothing dispatched while k g_r / g_c = 0 and S = 1 (daylight, the adaptation off). The gain stays in the
+    shaders as a pre-exposure, so the half-float buffer holds values near display level.
+  - Display-referred emitters write the inverse of that linear step (Sherman-Morrison): q = (c - (1 - S) Y) / S, then
+    q - u (w_s . q), u = s C^-1 tint / (1 + s w_s . C^-1 tint) (`vision.gdshaderinc`, globals `vision_rod_weights`,
+    `vision_inverse_tint`, `vision_chroma`): plume, the stars' own brightness, the orbit ribbon, the flight trail, the
+    Moon's orbit line, the map labels and the VR panel look as before (they do not take the brightness factor either:
+    it sits in the scene's pre-exposure). The step is linear, so the inverse holds under alpha and additive blending
+    too (with the former clamp max(w_s . rgb, 0) a desaturation inverse would have oversaturated warm emitters into a
+    negative scotopic sum and dropped the background's rods behind them). GPU check (review I7): an opaque
+    `display_colour` quad at the moonless night (rod scale 138, S 0.52) = its day pixel within 0.5 % of its peak, a
+    half-transparent one over a scene-referred background = alpha x colour + (1 - alpha) x the background through the
+    step within 0.5 % of the peak - the limit is rgba16f: the inverse writes channels whose scotopic sum nearly
+    cancels, and the step multiplies its half-float rounding by s x tint (tolerance 2 % of the peak).
     Plumes stay display-referred [call]. The map labels (`MapLabel`) draw Label3D's black outline as eight black
     copies 2.5 font pixels out, under the text (review M2). The Sun disc clamps its scene value at 6e4 (half-float
     range when the Sun appears in a dark-adapted view; the compute step also clamps and drops NaN).
@@ -3104,15 +3112,46 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
     Orbit: above the atmosphere with the Sun behind the Earth and the eye not near the Moon (its disc smaller than the
     Earth's; review I1 - formerly any passed Moon disabled it, so it never ran in the game), the brightest limb toward
     the Sun (tangent heights 2-40 km). Without the glow the eye adapted to the dim overhead plate and the glow over the
-    western horizon rendered white (Sun -3 deg: gain 914); with half the glow the -3 deg zenith renders 1.9 x the noon
+    western horizon rendered white (Sun -3 deg: gain 914); with half the glow the -3 deg zenith rendered 1.9 x the noon
     zenith on screen (Weber range: the dusk zenith maps against half the bright western sky) - the suprathreshold
-    dimness of dusk is not in a threshold model (review (d)).
+    dimness of dusk is not in a threshold model (review (d)); the brightness term below adds it.
+  - Brightness and colourfulness (user decision 2026-10-25, `EyeAdaptation.brightness_factor` / `chroma_factor`):
+    threshold matching is ratio-preserving in the Weber range (g_c = L_ref / L_a), so every adapted scene there looked as
+    bright and as colourful as noon. A real eye sees a dim scene dimmer (Stevens effect) and less colourful (Hunt
+    effect) even when adapted. Model [call: the simplest view-independent one, chosen over Stevens & Stevens 1963 /
+    Tumblin-Rushmeier, Pattanaik et al. 2000 and Irawan et al. 2005]: CIECAM02's luminance-level factor F_L [S: CIE
+    159:2004; Moroney et al. 2002, "The CIECAM02 color appearance model", IS&T/SID CIC 10], F_L = 0.2 k^4 (5 L_A) +
+    0.1 (1 - k^4)^2 (5 L_A)^(1/3), k = 1 / (5 L_A + 1); at a constant relative stimulus (the eye adapted: J, C fixed)
+    brightness Q ~ (A_w + 4) F_L^0.25 and colourfulness M = C F_L^0.25 (A_w the adapted white's achromatic response,
+    itself growing with F_L^0.42). Brightness factor B = Q_w(L_a) / Q_w(L_day) on the displayed luminance [call: the
+    brightness ratio applied as a luminance ratio - matching it through the display observer's ~1/3-power brightness
+    would ask for B^3, 6e-5 for the full-Moon cone image], chroma factor S = (F_L(L_a) / F_L(L_day))^0.25 on the cones'
+    chroma at constant luminance; L_A = L_a x Y_b / 100, Y_b = 20 (L_a is the scene's white: the sunlit plate, half the
+    brightest sky) [call]; both 1 at and above L_day = 1e4 cd/m^2 [call: a white plate under ~3.1e4 lux, the Sun ~15
+    deg up; noon at the pad, L_a 3.8e4, is identical]. Held so nothing is counted twice: B below the Weber range (79
+    cd/m^2: Ferwerda's flattening cone threshold dims the display from there; the product stays monotonic in L_a), S
+    below the mesopic upper limit (4 cd/m^2: the rods' achromatic share takes over the desaturation, and the inverse's
+    1 / S amplification of display-referred emitters stays bounded in rgba16f). Values (L_a -> B, S): >= 1e4 -> 1, 1;
+    3264 (a regolith-only view) -> 0.79, 0.91; Sun -3 deg (90 cd/m^2) -> 0.378, 0.676; <= 79 -> B 0.368; <= 4 -> S 0.521. Where: B
+    multiplies the cone gain's pre-exposure (`luminance_scale`, `scene_per_cd_m2`, `atmosphere_exposure_gain`; the
+    `exposure_gain` field stays the cone gain), so the whole displayed image dims - the rods, relative to that pixel,
+    follow - while the star threshold, which reads the sky's true luminance back through `scene_per_cd_m2`, is
+    unchanged; S acts in the post step. GPU check (section 10): the -3 deg zenith 0.726 x the noon zenith on screen
+    (was 1.92), its displayed / scene chroma 0.675 against noon's 1.000; the order noon 0.148 > -3 deg 0.108 > -8 deg
+    0.0031 > -12 deg 0.0015 (displayed zenith luminance). The -3 deg zenith's own colour is ~1.6 x as saturated as the
+    noon zenith's (the deep twilight blue): after S it is still 8 % more colourful on screen (0.646 against 0.596), so
+    the check compares the displayed chroma relative to the scene's.
   - Moon disc and regolith (`moon_regolith.gdshaderinc`, mirrored by `Atmosphere.regolith_reflectance`; reviews I3,
     I4, M7): one BRDF for every light on the regolith, albedo x R x E / pi x LS(mu0, mu) x f(g), LS = 2 mu0 / (mu0 +
     mu), g the local phase angle, f(g) = O(g) 10^(-0.4 (0.026 g + 4e-9 g^4)) / Phi_LS(g) with the opposition surge
     O = 1.35 - 0.05 g below 7 deg [S: K&S 1991, as Schaefer's skycalc applies it] and Phi_LS(g) = 1 - sin(g/2)
     tan(g/2) ln cot(g/4) the Lommel-Seeliger sphere's disc-integrated phase function (checked numerically by
-    `tools/validation/moon_disc_calibration.py`); g held at 150 deg beyond [call]. The disc then follows K&S at every
+    `tools/validation/moon_disc_calibration.py`); g held at 150 deg beyond [call]. A normal facing away from the eye
+    (mu < 1e-3: the interpolated vertex normals at the faceted silhouette, MSAA samples beyond a triangle) is taken onto
+    the limb (its eye component raised to 1e-3) before mu0 [call, 2026-10-25]: in the 2024-04-08 totality the Sun just
+    behind the limb lit rim fragments with mu0 > 0 and mu clamped (LS ~ 2, f held at 150 deg) - white pixels ringing the
+    eclipsed Moon, at fov 40 four at the corners of its bounding square. GPU check (section 11, MSAA 2x as the game): no
+    pixel above 2 x the disc centre (16.4 x with the former function). The disc then follows K&S at every
     phase. R = 0.513 [D]: the full-phase disc of the texture's near side (projected-area mean albedo 0.2245 - the maria;
     the sphere's mean is 0.30) gives K&S's 0.313 lux (equivalent geometric albedo 0.115). Finding: the former disc
     (0.8 / 1.5 = 0.533) was only 1.04 x K&S at full phase (the review's 1.4 x used the sphere's mean albedo); its real
@@ -3133,7 +3172,9 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
     luminance (by day and at new Moon it is off: no change, no cost). Left out [call]: the Moon's reddening (B-V 0.92
     against the Sun's 0.65), the in-scattered moonlight between a ground point and the eye (the moonlit haze; the sky
     itself has it), the parallax of the Moon's direction (from the Earth's centre, up to 1 deg).
-  - Values (render_check / GPU check, adapted, snapped; fix round 2026-10-25): pad noon 1.10 (no rods; OLP-1 noon
+  - Values (render_check / GPU check, adapted, snapped; fix round 2026-10-25; the brightness term's B and S on top -
+    renders: OLP-1 Sun -3 deg B 0.377 / S 0.675, -8 and below 0.368 / 0.521, totality 0.368 / 0.553, orbit sunset
+    0.368 / 0.603, full Moon 0.368 / 0.521): pad noon 1.10 (no rods; OLP-1 noon
     view 1.123, the eye now 2 m above the surface); Sun -3 deg at the pad: L_a 90.8 cd/m^2 (half the glow), gain 464,
     no rods; Sun -8 deg: L_a 1.44, gain 5324, rod scale 0.025, zenith (0.0036, 0.0083, 0.025) - deep blue; Sun -12 deg:
     gain 11 235, rod scale 5.5; moonless night: L_a at the 1e-6 floor, gain 12 368 (the cone t.v.i. floor), rod scale
@@ -3148,12 +3189,13 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
     23.3, gain 1325; orbit night under the full Moon, 400 km: L_a 0.168 (the Moon in view), gain 9429.
   - GPU check (section 13, 18 samples): day frames = the fixed exposure x the gain (0.02 %) and the gain = the former
     Weber gain L_ref / L_a within 1e-9 (noon, 400 km), no rods, no moonlight; display-referred quads (above); the Sun
-    -8 deg zenith blue; a moonless night's ground: a scene-referred quad at a starlit ground's luminance (0.002 lux
+    -8 deg zenith blue (blue > 0.004, was 0.01 before the brightness term: 0.0065 now); a moonless night's ground: a scene-referred quad at a starlit ground's luminance (0.002 lux
     [S: Schlyter, moonless clear night sky incl. airglow] x albedo 0.2 / pi = 1.27e-4 cd/m^2 - no airglow or starlight
     is modelled, so the sky itself is 0) renders as the model's cone + rod image (0.2 %) and below the display
     threshold 1.5 x 10^-1.255 (its scotopic luminance is below the rods' absolute threshold: dark), pixel luminance
-    0.019; the full-Moon ground: its cone image (the post step undone) = the CPU's moonlit surface within 0.35 %
-    (albedo x the Moon's direct and sky light x its relative illuminance x T), rods 78 % of its luminance; stars
+    0.019 (0.0068 with B 0.368); the full-Moon ground: its cone image (the post step undone) = the CPU's moonlit
+    surface within 1 % (albedo x the Moon's direct and sky light x its relative illuminance x T), rods 78 % of its
+    luminance (0.0072 on screen with B); stars
     (magnitude 6 moonless, 2 / 5 under the full Moon); the earthshine on the 2026-11-12 crescent 16 % above the sky
     beside it. Section 10: the limb glow on the game's path (the Moon passed: chosen, > 0); section 11: the adapted
     totality takes the glow (chosen, > 1.5 x the zenith), a twilight eye off the shadow on the eclipse day keeps its
@@ -3162,7 +3204,8 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
     full Earth from the lunar night, the full Moon's disc, city lights take the rods' tint); no loss of acuity, no glare model; the rods'
     slower dark adaptation (~30 min) is paced like the cones' (110 s); no airglow, zodiacal light or integrated
     starlight (a moonless sky is black, not ~2e-4 cd/m^2); Jensen's k on the adaptation luminance rather than per
-    pixel.
+    pixel; the brightness term's B and S are one value per view (CIECAM02 is photopic: held below 79 / 4 cd/m^2), no
+    Bezold-Bruecke hue shift (the lunar day keeps B = S = 1: its eye adapts to the sunlit plate, 4.2e4 cd/m^2).
 - **Solar eclipses.** While the Moon's penumbra touches the atmosphere (`Atmosphere.penumbra_touches`), the
   in-scattering along a ray is split into segments at d (i/n)^2 (8 for the sky, Moon, Sun, stars and the sea's
   reflected sky; ceil(d / 12.5 km) clamped to 1..8 for the aerial perspective [call, performance]), each
@@ -3174,8 +3217,13 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   ground; once per simulated second on a worker; 25.5 / 59.0 / 150.6 cd/m^2 sr at 2024-04-08 18:42). Totality at
   Dallas: zenith 0.993 cd/m^2 (real totality skies ~1-2), the horizon 16 x the zenith (the 360-degree twilight glow),
   magnitude-1 stars visible, magnitude 4 hidden. The ground's sky light gets the same eclipse factor (zenith 0.413,
-  four azimuths at 30 deg 0.130, four at 6 deg 0.0167; per vertex). Limits: one shadow-axis fluence for the whole
-  umbra; no refraction; the eye in the umbra adapts to the penumbral Earth it sees.
+  four azimuths at 30 deg 0.130, four at 6 deg 0.0167; per vertex). The eclipsed Moon (GPU check, 2026-10-25): the
+  full Earth's earthshine 8.49 lux lights the near side (regolith ~0.43 cd/m^2 at the mean albedo, x T); with the
+  sky in front the disc centre is 1.51 cd/m^2 against 1.08 beside it (+40 %, readily visible as a slightly brighter
+  disc). Physically consistent for a Moon seen through the sky without a corona; the real totality Moon looks dark
+  because the inner corona (~1e-6 of the solar disc's luminance near the limb) surrounds it - the corona is
+  not modelled (open). Limits: one shadow-axis fluence for the whole umbra; no refraction; the eye in the umbra
+  adapts to the penumbral Earth it sees.
 - **Validation.** Core `[atmosphere]` (21 ctest cases, incl. the aerial perspective to a point before the entry):
   Rayleigh coefficient and vertical optical depth vs Bucholtz 1995 (1 % / 2 %); transmittance vs a direct optical-depth
   integral (3.24e-3) and single scattering vs a brute-force
@@ -3184,7 +3232,7 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   3819 cd/m^2 (B/R 1.97), horizontal illuminance at Sun zenith 125.4 klx, sky at 50 km 7.1e-4 x the ground, twilight
   zenith bluer than noon (B/R 3.12 at -4 deg); ellipsoid mapping < 1 mm; cache round trip / damage / stale hash /
   failed write. GPU `game/tests/atmosphere_check.gd` (HDR viewport, float readback, 2 % per channel unless stated;
-  RGBAH and `--f32`): 82 samples - sky, sunset, limb from 400 km and from the Moon distance, the pad camera's float64
+  RGBAH and `--f32`): 86 samples - sky, sunset, limb from 400 km and from the Moon distance, the pad camera's float64
   altitude path, ground and terrain samples (3 %), stars / Sun / Moon, lit cubes (5 %), Sun colour, eye adaptation,
   eclipse, eye adaptation away from the Earth (lunar day, lunar night, the Earth term at lunar distance, deep space),
   earthshine, night vision (section 13); the run asserts its sample count (`EXPECTED_SAMPLES`: a GDScript error in an
@@ -3211,6 +3259,11 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   p99 7.83 / max 24.5 ms (the known stall at t = 3 s, inside the draw: "rest" 23 ms) and on the rerun p99 7.67 / max
   13.3 ms (PASS). At a full-Moon night (--utc=2024-10-17T05:00:00: the rods' compute pass, the moonlit sky, ground
   and sea terms active): p99 7.88 / max 14.3 ms (PASS; GPU-side cost hidden by the CPU-bound frame).
+  Brightness term (2026-10-25): by day B = S = 1 and the post step is not dispatched (no new cost on the default
+  epoch). Its run (default epoch) gave p99 47.1 / max 56.3 ms (FAIL) with the VR game running beside it on the
+  same GPU (99 % load; p50 13 ms against 4.6 before): not a measurement of the change, to be rerun on an idle GPU.
+  The step now also runs for the chroma alone whenever L_a < 1e4 cd/m^2 (low Sun, dusk, night): one full-screen
+  compute pass on frames that had none before.
 - **Known limits.** No clouds, weather-dependent aerosols, refraction, airglow; one aerosol set for the whole Earth;
   one Sun light (above); the totality approximation (above); night vision's limits (above); the 256 x 128 Earth mesh
   in scaled space sits up to ~0.6 km below the ellipsoid (-2 % in its aerial perspective).

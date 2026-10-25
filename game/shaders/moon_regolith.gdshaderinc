@@ -35,12 +35,25 @@ float regolith_phase_factor(float cos_g) {
 	return opposition * ks / max(phi, 1.0e-6);
 }
 
+// The least cosine to the eye; a normal turned further away is taken back onto it.
+const float REGOLITH_MU_MIN = 1.0e-3;
+
 // LS x f for unit normal n, unit directions to the light and to the eye (0 where the light is below the horizon).
+// A normal facing away from the eye (mu < REGOLITH_MU_MIN) occurs only at the silhouette - the interpolated vertex
+// normals of the faceted sphere, an MSAA sample beyond its triangle: it is replaced by the limb's normal (the
+// component toward the eye raised to REGOLITH_MU_MIN) before the light's cosine is taken. Otherwise a light just
+// behind the limb lit the rim: in a total solar eclipse (the Sun behind the Moon, phase ~180 deg, f held at 150 deg)
+// rim fragments with mu0 > 0 and mu clamped got the full sunlit Lommel-Seeliger value - white pixels around the
+// eclipsed Moon (brightness-term task 2, 2026-10-25).
 float regolith_reflectance(vec3 n, vec3 to_light, vec3 to_eye) {
+	float mu = dot(n, to_eye);
+	if (mu < REGOLITH_MU_MIN) {
+		n = normalize(n + to_eye * (REGOLITH_MU_MIN - mu));
+		mu = REGOLITH_MU_MIN;
+	}
 	float mu0 = dot(n, to_light);
 	if (mu0 <= 0.0) {
 		return 0.0;
 	}
-	float mu = max(dot(n, to_eye), 1.0e-3);
 	return 2.0 * mu0 / (mu0 + mu) * regolith_phase_factor(dot(to_light, to_eye));
 }

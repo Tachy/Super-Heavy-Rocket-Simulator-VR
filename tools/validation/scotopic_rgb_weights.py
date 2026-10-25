@@ -5,8 +5,9 @@ matching functions = XYZ_TO_SRGB x (x, y, z)bar, CIE 1931 2-degree, the table an
 core/include/starsim/environment/atmosphere_spectra.hpp): the weights w minimise the relative error of the
 scotopic-to-photopic ratio S/P = w . rgb / Y over a set of natural spectra (FIT_TEMPERATURES_K), with the photopic
 channels in cd/m^2 (Y = 0.2126 R + 0.7152 G + 0.0722 B) and the scotopic luminance in scotopic cd/m^2,
-L_s = 1700 int(L V') / (683 int(L ybar)) x Y [S: K'm = 1700 lm/W, Km = 683 lm/W, CIE 1951 / CIE 18.2]. Prints the
-weights and the S/P error per spectrum (worst 2.2 %).
+L_s = 1700 int(L V') / (683 int(L ybar)) x Y [S: K'm = 1700 lm/W, Km = 683 lm/W, CIE 1951 / CIE 18.2], every weight
+>= 0 (non_negative_fit; the unconstrained fit -0.0525, 1.6016, 0.8794 erred 2.2 %). Prints both fits and the S/P error
+per spectrum of the non-negative one (worst 4.2 %, the 25 000 K sky; illuminant A +1.4 %, 6504 K -1.7 %).
 
 Offline tool, prints the weights; the game's constants are copied from its output. No arguments.
 """
@@ -57,6 +58,25 @@ def planck(wavelength_nm, temperature_k):
 FIT_TEMPERATURES_K = [2000, 2500, 2856, 3500, 4100, 5000, 5800, 6504, 8000, 10000, 15000, 25000]
 
 
+def non_negative_fit(design, target):
+    """Least squares with every weight >= 0 (exhaustive active sets: three unknowns). The game's rod step is linear in
+    the pixel (night vision's display-referred inverse must survive blending), so a scene pixel's scotopic sum must not
+    go negative for any non-negative rgb: the unconstrained fit's small negative red weight would make a pure red pixel
+    subtract rod light (brightness/colourfulness term, 2026-10-25)."""
+    best, best_error = None, math.inf
+    for mask in range(1, 8):
+        columns = [i for i in range(3) if mask >> i & 1]
+        solution, *_ = np.linalg.lstsq(design[:, columns], target, rcond=None)
+        if np.any(solution < 0.0):
+            continue
+        weights = np.zeros(3)
+        weights[columns] = solution
+        error = float(np.sum((design @ weights - target) ** 2))
+        if error < best_error:
+            best, best_error = weights, error
+    return best
+
+
 def main():
     cmf, matrix = read_header()
     wavelengths = list(range(380, 785, 5))
@@ -73,7 +93,11 @@ def main():
             targets.append(SCOTOPIC_KM * spectrum @ v_prime / photopic)  # S/P
             names.append(name)
     rows, targets = np.array(rows), np.array(targets)
-    weights, *_ = np.linalg.lstsq(rows / targets[:, None], np.ones(len(targets)), rcond=None)
+    design = rows / targets[:, None]
+    free, *_ = np.linalg.lstsq(design, np.ones(len(targets)), rcond=None)
+    print("unconstrained weights: %.4f %.4f %.4f (worst %.1f %%)" % (*free, 100.0 * np.max(np.abs(
+        rows @ free / targets - 1.0))))
+    weights = non_negative_fit(design, np.ones(len(targets)))
     print("scotopic weights (scotopic cd/m^2 per photopic-cd/m^2 channel unit): %.4f %.4f %.4f" % tuple(weights))
     errors = rows @ weights / targets - 1.0
     for name, target, error in zip(names, targets, errors):

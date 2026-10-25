@@ -156,6 +156,10 @@ vision_inverse_tint={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+vision_chroma={
+"type": "float",
+"value": 1.0
+}
 atmosphere_eclipse_segments={
 "type": "int",
 "value": 0

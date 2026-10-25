@@ -21,11 +21,14 @@ extends RefCounted
 ##   under the TOA Sun, the state DAY_EXPOSURE is defined for, so in the Weber range g_c = L_ref / L_a (the display
 ##   observer's adaptation is the day look's) [call]; at least 1 (the fixed day exposure in sunlit space, as before);
 ## - the rods: a full-screen post step (VisionEffect, a CompositorEffect after the transparent pass, before glow and the
-##   tone mapper; the same for both VR eyes) adds rod_scale x max(w_s . rgb, 0) x ROD_TINT to every pixel, rod_scale =
+##   tone mapper; the same for both VR eyes) takes the cones' chroma to `chroma` (below) and adds
+##   rod_scale x (w_s . rgb) x ROD_TINT to every pixel (linear: w_s >= 0), rod_scale =
 ##   k g_r / g_c with the rod gain g_r = L_ref / (10^1.255 t_s(L_as)) (Ferwerda's m_r: the display observer is
 ##   photopic) and the scotopic luminance from the pixel's linear RGB (SCOTOPIC_WEIGHTS);
 ## - display-referred emitters (plume, the stars' own brightness, UI markers, the VR panel) take the
-##   inverse of that step in their shaders (shaders/vision.gdshaderinc), so they look as before.
+##   inverse of that step in their shaders (shaders/vision.gdshaderinc), so they look as before;
+## - the suprathreshold brightness and chroma factors (Stevens and Hunt effects, CIECAM02; see APPEARANCE_*): the
+##   brightness on the pre-exposure (display-referred emitters do not take it), the chroma in the post step.
 ## Inputs: the photopic and scotopic adaptation luminances L_a, L_as (Atmosphere.adaptation_luminance, view-independent),
 ## paced in log space: light adaptation tau 0.5 s, dark adaptation 110 s (Pattanaik et al. 2000, "Time-dependent visual
 ## adaptation for fast realistic image display", SIGGRAPH 2000; Ferwerda et al. 1996).
@@ -50,9 +53,44 @@ const MESOPIC_LOG_LOW := -2.0
 const MESOPIC_LOG_SPAN := 2.6
 ## [D: tools/validation/scotopic_rgb_weights.py] scotopic luminance (scotopic cd/m^2) of linear sRGB channels in
 ## photopic cd/m^2: the CIE 1951 V'(lambda) (K'm = 1700 lm/W) projected onto the sRGB colour matching functions,
-## least squares in S/P over black bodies 2000-25 000 K and their lambda^-4 (sky) versions: worst 2.2 % in S/P
-## (illuminant A 1.413 -> +1.4 %, 6504 K 2.446 -> -0.6 %); S/P of RGB white 2.43.
-const SCOTOPIC_WEIGHTS := Vector3(-0.0525, 1.6016, 0.8794)
+## least squares in S/P over black bodies 2000-25 000 K and their lambda^-4 (sky) versions, every weight >= 0: worst
+## 4.2 % in S/P (the 25 000 K sky; illuminant A 1.413 -> +1.4 %, 6504 K 2.446 -> -1.7 %); S/P of RGB white 2.40.
+## Non-negative [call, 2026-10-25 brightness term]: the rod step is linear (no clamp), so the display-referred inverse
+## stays exact under blending; a negative red weight (the unconstrained fit: -0.0525, 1.6016, 0.8794, worst 2.2 %)
+## would make a pure red scene pixel subtract rod light.
+const SCOTOPIC_WEIGHTS := Vector3(0.0, 1.4730, 0.9238)
+## [S: ITU-R BT.709] luminance weights of linear sRGB (the axis the chroma factor desaturates toward).
+const LUMINANCE_WEIGHTS := Vector3(0.2126, 0.7152, 0.0722)
+## Suprathreshold appearance (user decision 2026-10-25, "brightness/colourfulness term"): Ferwerda's threshold matching
+## is ratio-preserving in the Weber range (g_c = L_ref / L_a), so every adapted scene there looked as bright and as
+## colourful as noon - a civil dusk rendered brighter than noon. A real eye sees a dim scene dimmer and less colourful
+## even when adapted: the Stevens effect (brightness grows with the luminance level) and the Hunt effect
+## (colourfulness grows with it). Model [call: chosen among Stevens & Stevens 1963 / Tumblin-Rushmeier, Pattanaik et al.
+## 2000 and Irawan et al. 2005 - the simplest view-independent one]: CIECAM02's luminance-level adaptation factor F_L
+## [S: CIE 159:2004, "A colour appearance model for colour management systems: CIECAM02"; Moroney, Fairchild, Hunt,
+## Li, Luo & Newman 2002, "The CIECAM02 color appearance model", IS&T/SID CIC 10]:
+##     F_L = 0.2 k^4 (5 L_A) + 0.1 (1 - k^4)^2 (5 L_A)^(1/3),  k = 1 / (5 L_A + 1),
+## at a constant relative stimulus (J, C: the eye adapted) brightness Q = (4 / c) (J / 100)^0.5 (A_w + 4) F_L^0.25 and
+## colourfulness M = C F_L^0.25, with the white's achromatic response A_w = (2 R'_a + G'_a + B'_a / 20 - 0.305) N_bb
+## (R'_a = G'_a = B'_a = 400 F_L^0.42 / (27.13 + F_L^0.42) + 0.1 for the adapted white; N_bb = 0.725 (Y_w / Y_b)^0.2).
+## The display factors: brightness B = Q_w(L_a) / Q_w(L_day) on the displayed luminance [call: the brightness ratio
+## applied as a luminance ratio - matching it through the display observer's ~1/3-power brightness would ask for B^3,
+## 6e-5 for a full-Moon cone image], chroma S = (F_L(L_a) / F_L(L_day))^0.25 on the cones' chroma at constant
+## luminance; both 1 at and above L_day (the day look, noon identical). L_A = L_a x Y_b / 100: L_a is the scene's white
+## (the sunlit plate, half the brightest sky) [call]. Held below their ranges, so nothing is counted twice:
+## - B below the Weber range (L_a < 10^CONE_LOG_WEBER = 79 cd/m^2), where Ferwerda's flattening cone threshold dims the
+##   display already (the product stays monotonic in L_a);
+## - S below the mesopic upper limit (10^(MESOPIC_LOG_LOW + MESOPIC_LOG_SPAN) = 4 cd/m^2), where the rods' achromatic
+##   share (Eq. 6) takes over the desaturation (and the display-referred inverse's 1 / S amplification stays bounded
+##   in the rgba16f buffer).
+## Values (L_a cd/m^2 -> B, S): 1e4 and above 1, 1; 3264 0.79, 0.91; Sun -3 deg 181 0.44, 0.72; 79 and below
+## 0.368; 4 and below S 0.52.
+## B multiplies the whole displayed image (the cone gain's pre-exposure in the shaders x B: the rods, relative to that
+## pixel, follow); S acts in the post step (VisionEffect) on the cones' image before the rods are added.
+const APPEARANCE_BACKGROUND_PERCENT := 20.0  ## [S: CIE 159:2004] Y_b of an average scene (grey world)
+## [call] The day look's luminance level: a white plate under ~3.1e4 lux (the Sun ~15 deg up in a clear sky); every
+## daylight adaptation above it keeps B = S = 1 (noon at the pad: L_a 3.8e4).
+const APPEARANCE_DAY_CD_M2 := 1.0e4
 ## Rod vision's colour, linear sRGB at unit luminance: chromaticity (x, y) = (0.25, 0.25) [S: Jensen, Premoze,
 ## Shirley, Thompson, Ferwerda & Stark 2000, "Night rendering", sec. 3.1: their rendering choice, south-west of the
 ## mean (0.29, 0.28) they measured in the "dark" parts of ten realist night paintings]. Rods are achromatic (Ferwerda
@@ -81,6 +119,9 @@ const LUMINANCE_FLOOR_CD_M2 := 1.0e-6
 var gain := 1.0
 ## The rods' share on screen this frame: rod_scale (see above); 0 in daylight.
 var rod_scale := 0.0
+## The suprathreshold display factors this frame (brightness_factor, chroma_factor of the paced adaptation): 1 by day.
+var brightness := 1.0
+var chroma := 1.0
 ## The paced photopic adaptation luminance (cd/m^2): the cone gain, the mesopic share and the star threshold's
 ## background floor (global atmosphere_adaptation_cd_m2).
 var adaptation_cd_m2 := LUMINANCE_FLOOR_CD_M2
@@ -107,6 +148,55 @@ func advance(target_cd_m2: float, target_scotopic_cd_m2: float, reference_cd_m2:
 		scotopic_cd_m2 = _paced(scotopic_cd_m2, target_scotopic, dt_s)
 	gain = cone_gain(adaptation_cd_m2, reference_cd_m2)
 	rod_scale = rod_share(adaptation_cd_m2) * rod_gain(scotopic_cd_m2, reference_cd_m2) / gain
+	brightness = brightness_factor(adaptation_cd_m2)
+	chroma = chroma_factor(adaptation_cd_m2)
+
+
+## The post step's chroma map C c = Y + chroma (c - Y) (Y = LUMINANCE_WEIGHTS . c, on every channel) ...
+static func chroma_apply(c: Vector3, chroma_factor: float) -> Vector3:
+	var y := LUMINANCE_WEIGHTS.dot(c)
+	return Vector3.ONE * y + (c - Vector3.ONE * y) * chroma_factor
+
+
+## ... and its inverse: (c - (1 - chroma) Y) / chroma (vision.gdshaderinc).
+static func chroma_inverse(c: Vector3, chroma_factor: float) -> Vector3:
+	return (c - Vector3.ONE * ((1.0 - chroma_factor) * LUMINANCE_WEIGHTS.dot(c))) / chroma_factor
+
+
+## The whole post step on a scene pixel (VisionEffect): the cones' chroma, then the rods.
+static func post_step(c: Vector3, scale: float, chroma_factor: float) -> Vector3:
+	return chroma_apply(c, chroma_factor) + ROD_TINT * (scale * SCOTOPIC_WEIGHTS.dot(c))
+
+
+## CIECAM02's luminance-level adaptation factor F_L for a scene white of this luminance (cd/m^2; L_A = white x Y_b / 100).
+static func luminance_level_factor(white_cd_m2: float) -> float:
+	var five_la := 5.0 * maxf(white_cd_m2, LUMINANCE_FLOOR_CD_M2) * APPEARANCE_BACKGROUND_PERCENT / 100.0
+	var k4 := pow(1.0 / (five_la + 1.0), 4.0)
+	return 0.2 * k4 * five_la + 0.1 * (1.0 - k4) * (1.0 - k4) * pow(five_la, 1.0 / 3.0)
+
+
+## CIECAM02 brightness of the adapted white (J = 100) without the surround's constant 4 / c: (A_w + 4) F_L^0.25.
+static func white_brightness(white_cd_m2: float) -> float:
+	var f_l := luminance_level_factor(white_cd_m2)
+	var x := pow(f_l, 0.42)
+	var response := 400.0 * x / (27.13 + x) + 0.1  # R'_a = G'_a = B'_a of the adapted white
+	var n_bb := 0.725 * pow(100.0 / APPEARANCE_BACKGROUND_PERCENT, 0.2)
+	var a_w := (2.0 * response + response + response / 20.0 - 0.305) * n_bb
+	return (a_w + 4.0) * pow(f_l, 0.25)
+
+
+## The display's brightness factor B (Stevens effect): Q_w(L_a) / Q_w(L_day), L_a held at the Weber range's lower end
+## below it; 1 at and above APPEARANCE_DAY_CD_M2.
+static func brightness_factor(adaptation_cd_m2: float) -> float:
+	var level := clampf(adaptation_cd_m2, pow(10.0, CONE_LOG_WEBER), APPEARANCE_DAY_CD_M2)
+	return white_brightness(level) / white_brightness(APPEARANCE_DAY_CD_M2)
+
+
+## The cones' chroma factor S (Hunt effect): (F_L(L_a) / F_L(L_day))^0.25, L_a held at the mesopic upper limit below
+## it; 1 at and above APPEARANCE_DAY_CD_M2.
+static func chroma_factor(adaptation_cd_m2: float) -> float:
+	var level := clampf(adaptation_cd_m2, pow(10.0, MESOPIC_LOG_LOW + MESOPIC_LOG_SPAN), APPEARANCE_DAY_CD_M2)
+	return pow(luminance_level_factor(level) / luminance_level_factor(APPEARANCE_DAY_CD_M2), 0.25)
 
 
 static func _paced(current: float, target: float, dt_s: float) -> float:

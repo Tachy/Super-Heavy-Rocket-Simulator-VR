@@ -53,7 +53,7 @@ var _environment := Environment.new()  ## the check viewport's environment (ambi
 var _failures := 0
 var _samples := 0
 ## Every sample of a complete run (_check / _compare calls and the inline checks): a run with fewer ended a sample early.
-const EXPECTED_SAMPLES := 82
+const EXPECTED_SAMPLES := 86
 var _last_image: Image  ## the last _render's frame
 
 
@@ -167,28 +167,46 @@ func _run() -> void:
 			2.0))
 
 	# 10. Eye adaptation (controller ruling 2026-10-25; every other sample runs with it off: the fixed day exposure).
-	# Adapted to each view: the noon zenith (reference), the zenith at Sun -3 deg (visible: > ADAPTED_TWILIGHT_MIN and
-	# darker than the glow it adapted to), at Sun -12 deg (dark: < ADAPTED_NIGHT_MAX, a magnitude-1 star visible); 400 km by
-	# day: gain 1 (the day look in orbit).
+	# Adapted to each view: the noon zenith (reference), the zenith at Sun -3 deg (visible: > ADAPTED_TWILIGHT_MIN,
+	# darker and less colourful than noon on screen: the brightness/colourfulness term), at Sun -8 deg, at Sun -12 deg
+	# (dark: < ADAPTED_NIGHT_MAX, a magnitude-1 star visible) and the order noon > -3 > -8 > -12 of the displayed zenith;
+	# 400 km by day: gain 1 (the day look in orbit).
 	var noon_zenith := await _adapted_sample("adapted, pad noon zenith", pad, zenith, sun_60)
+	var noon_scene := _last_scene
 	var twilight := await _adapted_sample("adapted, pad zenith, Sun -3 deg", pad, zenith,
 			_local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, -3.0))
+	var twilight_scene := _last_scene
 	var twilight_y := twilight.dot(LUMINANCE_WEIGHTS)
 	var noon_y := noon_zenith.dot(LUMINANCE_WEIGHTS)
-	# Darker than the brightest sky it adapted to (the glow over the western horizon, 1 / GLOW_ADAPTATION_SHARE of the
-	# adaptation luminance). Not "darker than the noon zenith" any more: with Ferwerda's half of the brightest sky
-	# (night-vision fix round M5) the Weber-range gain maps the dusk zenith ~1.9 x brighter than the noon zenith.
-	var brightest_scene := _atmosphere.last_adaptation_glow_cd_m2 / Atmosphere.GLOW_ADAPTATION_SHARE \
-			* _atmosphere.scene_per_cd_m2
-	_check("adapted Sun -3 deg zenith visible, below the glow", twilight_y > ADAPTED_TWILIGHT_MIN
-			and twilight_y < brightest_scene, "luminance %s (needs > %s and < the brightest sky %s), noon %s, ratio %s" % [
-			_num(twilight_y), _num(ADAPTED_TWILIGHT_MIN), _num(brightest_scene), _num(noon_y), _num(twilight_y / noon_y)])
+	var twilight_factors := "brightness %.4f, chroma %.4f" % [_atmosphere.brightness, _atmosphere.chroma]
+	# The suprathreshold term (user decision 2026-10-25, Stevens and Hunt effects): the dusk zenith darker and less
+	# colourful than the noon zenith on screen. (Before it, Ferwerda's Weber-range gain with half the brightest sky mapped
+	# the -3 deg zenith 1.92 x brighter than noon; this check then only asked "below the brightest sky".)
+	_check("adapted Sun -3 deg zenith visible, below noon", twilight_y > ADAPTED_TWILIGHT_MIN and twilight_y < noon_y,
+			"luminance %s (needs > %s and < the noon zenith %s), ratio %s; %s" % [_num(twilight_y),
+			_num(ADAPTED_TWILIGHT_MIN), _num(noon_y), _num(twilight_y / noon_y), twilight_factors])
+	# Less colourful: the displayed chroma relative to the scene's (the sky's own colour, from the CPU) below noon's
+	# (1: the day look). Not the absolute chroma: the -3 deg zenith's own colour is ~1.6 x more saturated than the
+	# noon zenith's (the deep twilight blue), more than the Hunt factor takes away (printed).
+	var twilight_relative := _chroma_of(twilight) / _chroma_of(twilight_scene)
+	var noon_relative := _chroma_of(noon_zenith) / _chroma_of(noon_scene)
+	_check("adapted Sun -3 deg zenith less colourful than noon", twilight_relative < noon_relative
+			and noon_relative > 0.99, "displayed / scene chroma %s (needs < noon %s, ~1); chroma |c - Y| / Y on screen %s, scene %s, noon on screen %s; %s" % [
+			_num(twilight_relative), _num(noon_relative), _num(_chroma_of(twilight)), _num(_chroma_of(twilight_scene)),
+			_num(_chroma_of(noon_zenith)), twilight_factors])
+	var dusk := await _adapted_sample("adapted, pad zenith, Sun -8 deg", pad, zenith,
+			_local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, -8.0))
+	var dusk_y := dusk.dot(LUMINANCE_WEIGHTS)
 	var sun_m12 := _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, -12.0)
 	var night := await _adapted_sample("adapted, pad zenith, Sun -12 deg", pad, zenith, sun_m12, false)
 	var night_rods := _atmosphere.rod_scale
-	_check("adapted Sun -12 deg zenith dim, rod vision", night.dot(LUMINANCE_WEIGHTS) < ADAPTED_NIGHT_MAX * twilight_y
+	var night_y := night.dot(LUMINANCE_WEIGHTS)
+	_check("adapted Sun -12 deg zenith dim, rod vision", night_y < ADAPTED_NIGHT_MAX * twilight_y
 			and night_rods > 1.0, "luminance %s (needs < %s x the Sun -3 deg zenith), rod scale %s (needs > 1)" % [
-			_num(night.dot(LUMINANCE_WEIGHTS)), _num(ADAPTED_NIGHT_MAX), _num(night_rods)])
+			_num(night_y), _num(ADAPTED_NIGHT_MAX), _num(night_rods)])
+	_check("adapted zenith order noon > -3 > -8 > -12", noon_y > twilight_y and twilight_y > dusk_y
+			and dusk_y > night_y, "on screen %s > %s > %s > %s" % [_num(noon_y), _num(twilight_y), _num(dusk_y),
+			_num(night_y)])
 	_atmosphere.eye_adaptation_enabled = true
 	_atmosphere.snap_adaptation()
 	await _star_sample("adapted, Sun -12 deg, magnitude-1 star", pad, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 90.0,
@@ -581,6 +599,7 @@ func _eclipse_samples() -> void:
 			_atmosphere.exposure_gain, _num(_atmosphere.adaptation_cd_m2), _num(ring_glow),
 			Atmosphere.GLOW_ADAPTATION_SHARE * ECLIPSE_HORIZON_MIN_RATIO, _num(zenith_cd),
 			_num(_atmosphere.last_adaptation_down_cd_m2), _num(_atmosphere.last_adaptation_up_cd_m2), evaluation_ms])
+	await _eclipsed_moon_sample(camera, t, sun_itrf)
 	_atmosphere.eye_adaptation_enabled = false
 	# The eye adaptation 400 km up in the umbra (on the shadow axis), the sunlit Earth around the umbra in view: it
 	# adapts to that Earth (review I1), not to the eye's own shadow.
@@ -635,6 +654,58 @@ func _eclipse_samples() -> void:
 	_moon_gcrf = Vector3.ZERO
 	_tdb = NAN
 	_earth_to_gcrf = saved_rotation
+
+
+## The eclipsed Moon at totality (brightness-term task 2, 2026-10-25): the eye adapted, MSAA 2x as the game, the Moon a
+## moon.gdshader body (grey MOON_MEAN_TEXTURE_ALBEDO) at its true apparent place filling about half the view, the true
+## Sun behind it. No pixel may exceed ECLIPSE_RIM_MAX x the brighter of the disc centre and the sky corner: the Sun
+## lit the rim through normals facing away from the eye (white pixels around the disc). The disc centre (earthshine)
+## and the sky are printed in cd/m^2.
+const ECLIPSE_RIM_MAX := 2.0
+const ECLIPSE_MOON_FOV_DEG := 1.0
+func _eclipsed_moon_sample(camera_itrf_m: Vector3, t: float, sun_itrf: Vector3) -> void:
+	var camera_gcrf := _earth_to_gcrf * camera_itrf_m
+	var moon_gcrf := _moon_gcrf  # apparent from the Earth's centre, as World draws it
+	var albedo := Color(Atmosphere.MOON_MEAN_TEXTURE_ALBEDO, Atmosphere.MOON_MEAN_TEXTURE_ALBEDO,
+			Atmosphere.MOON_MEAN_TEXTURE_ALBEDO).linear_to_srgb()
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/moon.gdshader")
+	material.set_shader_parameter("albedo_texture", _constant_texture(albedo))
+	material.set_shader_parameter("earth_radius_m", 6371000.0)
+	material.set_shader_parameter("sun_position_local", Frames.to_render(_sun_gcrf - moon_gcrf))
+	material.set_shader_parameter("earth_position_local", Frames.to_render(-moon_gcrf))
+	material.set_shader_parameter("camera_position_local", Frames.to_render(camera_gcrf - moon_gcrf))
+	var moon := CelestialBody.new()
+	moon.setup(Atmosphere.MOON_RADIUS_M, 0.0, material)
+	moon.fixed_to_gcrf = Basis.IDENTITY
+	moon.center_gcrf_m = moon_gcrf
+	moon.place(camera_gcrf)
+	_viewport.add_child(moon)
+	_moon_center_gcrf = _core.body_position_gcrf_m("moon", t)  # the earthshine (moon_earthshine)
+	var view := (_earth_to_gcrf.transposed() * (moon_gcrf - camera_gcrf)).normalized()
+	_camera.fov = ECLIPSE_MOON_FOV_DEG
+	_viewport.msaa_3d = Viewport.MSAA_2X
+	_atmosphere.snap_adaptation()
+	var centre := await _render(camera_itrf_m, view, sun_itrf)
+	var image := _last_image
+	_viewport.msaa_3d = Viewport.MSAA_DISABLED
+	_camera.fov = 10.0
+	moon.queue_free()
+	_moon_center_gcrf = Vector3.ZERO
+	var corner_c := image.get_pixel(0, 0)
+	var corner := Vector3(corner_c.r, corner_c.g, corner_c.b)
+	var peak := 0.0
+	for y in range(VIEW_SIZE):
+		for x in range(VIEW_SIZE):
+			var p := image.get_pixel(x, y)
+			peak = maxf(peak, Vector3(p.r, p.g, p.b).dot(LUMINANCE_WEIGHTS))
+	var reference := maxf(centre.dot(LUMINANCE_WEIGHTS), corner.dot(LUMINANCE_WEIGHTS))
+	var per_cd := _atmosphere.scene_per_cd_m2
+	_check("adapted totality: eclipsed Moon, no lit rim", peak <= ECLIPSE_RIM_MAX * reference,
+			"brightest pixel %s (needs <= %.1f x %s); disc centre %s = %s cd/m^2 on screen, sky beside it %s cd/m^2, contrast %.3f; earthshine %s lux; %s" % [
+			_num(peak), ECLIPSE_RIM_MAX, _num(reference), _vec(centre), _num(centre.dot(LUMINANCE_WEIGHTS) / per_cd),
+			_num(corner.dot(LUMINANCE_WEIGHTS) / per_cd), centre.dot(LUMINANCE_WEIGHTS) / maxf(corner.dot(
+			LUMINANCE_WEIGHTS), 1.0e-30) - 1.0, _num(_atmosphere.last_earthshine_lux), _vision_parts()])
 
 
 ## A star of `magnitude` on the camera axis during the eclipse: compared with the same render without it (the CPU sky
@@ -822,6 +893,7 @@ func _adaptation_parts() -> String:
 const ADAPTED_TWILIGHT_MIN := 0.01
 const ADAPTED_NIGHT_MAX := 0.5
 var _last_gain := 1.0
+var _last_scene := Vector3.ZERO  ## the last adapted sample's CPU sky as a scene value, before the post step
 
 
 ## A sky sample with the eye adaptation on, adapted to the view (snap): the CPU sky x the adapted luminance scale (2 %;
@@ -834,11 +906,15 @@ func _adapted_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, 
 	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
 	_last_gain = _atmosphere.exposure_gain
 	var cpu: Dictionary = _core.atmosphere_sky_luminance(camera_itrf_m, view_itrf, sun_itrf)
+	# The CPU sky through the display: the luminance scale (cone gain x brightness) and the post step (chroma, rods).
+	_last_scene = cpu["luminance"] * _atmosphere.luminance_scale
+	var expected := _post(_last_scene)
 	if compare:
-		_compare(label + " [gain %.2f]" % _last_gain, cpu["luminance"] * _atmosphere.luminance_scale, got)
+		_compare(label + " [gain %.2f, B %.3f, S %.3f]" % [_last_gain, _atmosphere.brightness, _atmosphere.chroma],
+				expected, got)
 	else:
-		print("atmosphere_check: %-38s CPU %s got %s (gain %.2f)" % [label, _vec(cpu["luminance"]
-				* _atmosphere.luminance_scale), _vec(got), _last_gain])
+		print("atmosphere_check: %-38s CPU %s got %s (gain %.2f, B %.3f, S %.3f)" % [label, _vec(expected), _vec(got),
+				_last_gain, _atmosphere.brightness, _atmosphere.chroma])
 	_atmosphere.eye_adaptation_enabled = false
 	return got
 
@@ -1135,9 +1211,10 @@ static func _vec(v: Vector3) -> String:
 
 ## Section 13 (night vision, user decision 2026-10-25; see _run). Bounds [call], scene units (the HDR viewport before
 ## the tone mapper):
-## - twilight at Sun -8 deg: the adapted zenith's blue channel above NV_TWILIGHT_MIN (AgX: ~sRGB 30 in blue; the
-##   zenith is a deep blue: the eye adapts to the brighter glow over the western horizon) and bluish (blue > NV_BLUISH
-##   x red);
+## - twilight at Sun -8 deg: the adapted zenith's blue channel above NV_TWILIGHT_MIN (~sRGB 17 in blue through a
+##   linear tone mapper; the zenith is a deep blue: the eye adapts to the brighter glow over the western horizon) and
+##   bluish (blue > NV_BLUISH x red). Was 0.01 before the brightness term (2026-10-25: B = 0.368 below the Weber range;
+##   the zenith's blue went from 0.018 to 0.0065);
 ## - a moonless night (Sun -30 deg, no Moon): a starlit ground (_moonless_ground_sample) as the model renders it and
 ##   below the display threshold;
 ## - the full-Moon ground: above NV_MOONLIT_MIN (AgX: ~sRGB 8; the Cape's 2 km view renders ~sRGB 20-60), its cone
@@ -1148,7 +1225,7 @@ static func _vec(v: Vector3) -> String:
 ##   Weber fraction 10^-1.255 = 5.6 % (Ferwerda et al. 1996 Eq. 4: visible);
 ## - day frames: the adapted noon equals the fixed exposure x the gain (NV_DAY_TOLERANCE: half-float rounding), no rods,
 ##   no moonlight.
-const NV_TWILIGHT_MIN := 0.01
+const NV_TWILIGHT_MIN := 0.004
 const NV_BLUISH := 1.2
 const NV_MOONLIT_MIN := 0.003
 const NV_ROD_SHARE := 0.5
@@ -1176,9 +1253,10 @@ func _night_vision_samples() -> void:
 		var adapted := await _render(day[1], day[2], day[3])
 		var gain := _atmosphere.exposure_gain
 		_compare("night vision: day %s = fixed x gain %.3f" % [day[0], gain], fixed * gain, adapted, NV_DAY_TOLERANCE)
-		_check("night vision: day %s, no rods, no moonlight" % day[0], _atmosphere.rod_scale == 0.0
-				and not _atmosphere.moonlight_active, "rod scale %s, moonlight %s" % [_num(_atmosphere.rod_scale),
-				_atmosphere.moonlight_active])
+		_check("night vision: day %s, no rods, no moonlight, B = S = 1" % day[0], _atmosphere.rod_scale == 0.0
+				and _atmosphere.brightness == 1.0 and _atmosphere.chroma == 1.0 and not _atmosphere.moonlight_active,
+				"rod scale %s, moonlight %s, brightness %s, chroma %s" % [_num(_atmosphere.rod_scale),
+				_atmosphere.moonlight_active, _num(_atmosphere.brightness), _num(_atmosphere.chroma)])
 		# The day look unchanged (night-vision review I7): the gain is the former Weber gain L_ref / L_a (at least 1)
 		# of the unpaced target.
 		var weber := maxf(_atmosphere.reference_luminance(1.0) / _atmosphere.last_target_cd_m2, 1.0)
@@ -1213,9 +1291,7 @@ func _night_vision_samples() -> void:
 	var point := _geodetic(CAPE_LAT_DEG, CAPE_LON_DEG - 5000.0 / (111319.49 * cos(deg_to_rad(CAPE_LAT_DEG))), 0.0)
 	_atmosphere.snap_adaptation()
 	var ground := await _render_surface(cape, point, _geodetic_up(point), sun_full, true)
-	var inverse := EyeAdaptation.ROD_TINT * (_atmosphere.rod_scale / (1.0 + _atmosphere.rod_scale
-			* EyeAdaptation.SCOTOPIC_WEIGHTS.dot(EyeAdaptation.ROD_TINT)))
-	var cones := ground - inverse * EyeAdaptation.SCOTOPIC_WEIGHTS.dot(ground)  # the post step undone
+	var cones := _undo_post(ground)  # the post step undone: the cones' image (its chroma before the Hunt factor)
 	var linear := SURFACE_ALBEDO_8.srgb_to_linear()
 	var albedo := Vector3(linear.r, linear.g, linear.b)
 	var normal := _geodetic_up(point)
@@ -1293,9 +1369,21 @@ func _luminance_quad(view_itrf: Vector3, distance_m: float, luminance_cd_m2: flo
 	return _view_quad(view_itrf, distance_m, material)
 
 
-## The pixel night vision's post step makes of a scene value (VisionEffect: c + s x max(w . c, 0) x tint).
-func _with_rods(scene: Vector3) -> Vector3:
-	return scene + EyeAdaptation.ROD_TINT * (_atmosphere.rod_scale * maxf(EyeAdaptation.SCOTOPIC_WEIGHTS.dot(scene), 0.0))
+## The pixel the eye model's post step makes of a scene value (VisionEffect: the cones' chroma, then the rods).
+func _post(scene: Vector3) -> Vector3:
+	return EyeAdaptation.post_step(scene, _atmosphere.rod_scale, _atmosphere.chroma)
+
+
+## The scene value the post step turned into this pixel (its linear map inverted).
+func _undo_post(pixel: Vector3) -> Vector3:
+	var map := Basis(_post(Vector3(1, 0, 0)), _post(Vector3(0, 1, 0)), _post(Vector3(0, 0, 1)))
+	return map.inverse() * pixel
+
+
+## A pixel's chroma: its distance from the grey of its luminance, relative to that luminance.
+static func _chroma_of(c: Vector3) -> float:
+	var y := c.dot(LUMINANCE_WEIGHTS)
+	return (c - Vector3.ONE * y).length() / maxf(y, 1.0e-30)
 
 
 ## Section 13: the moonless night's ground (see NV_STARLIT_LUX); the eye adaptation on and snapped by the caller.
@@ -1304,7 +1392,7 @@ func _moonless_ground_sample(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itr
 	var quad := _luminance_quad(view_itrf, 10.0, luminance)
 	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
 	quad.queue_free()
-	var expected := _with_rods(Vector3.ONE * luminance * _atmosphere.scene_per_cd_m2)
+	var expected := _post(Vector3.ONE * luminance * _atmosphere.scene_per_cd_m2)
 	_compare("night vision: moonless ground = model", expected, got, SURFACE_TOLERANCE)
 	var scotopic := luminance * EyeAdaptation.SCOTOPIC_WEIGHTS.dot(Vector3.ONE)
 	var rod_threshold := pow(10.0, EyeAdaptation.rod_log_threshold(_atmosphere.scotopic_cd_m2))
@@ -1343,7 +1431,7 @@ func _display_referred_samples(pad: Vector3, view_itrf: Vector3, sun_day: Vector
 	var got := await _render(pad, view_itrf, sun_night)
 	quad.queue_free()
 	background.queue_free()
-	var behind := _with_rods(Vector3.ONE * NV_DISPLAY_BACKGROUND_CD_M2 * _atmosphere.scene_per_cd_m2)
+	var behind := _post(Vector3.ONE * NV_DISPLAY_BACKGROUND_CD_M2 * _atmosphere.scene_per_cd_m2)
 	var expected := _linear(NV_DISPLAY_COLOUR) * NV_DISPLAY_ALPHA + behind * (1.0 - NV_DISPLAY_ALPHA)
 	_compare("night vision: display colour blended over rods", expected, got, NV_DISPLAY_TOLERANCE, 1.0)
 
