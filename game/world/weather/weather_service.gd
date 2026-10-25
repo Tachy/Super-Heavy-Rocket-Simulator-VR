@@ -49,8 +49,10 @@ var enabled := true:
 			return
 		enabled = value
 		_enabled_changed = true
-## Directory of the built snapshots; the cache size cap (tests lower it).
+## The size cap of the snapshot cache (tests lower it).
 var cache_cap_bytes: int = CACHE_CAP_BYTES
+## Seconds until a failed snapshot or probe is tried again (tests shorten it).
+var retry_after_s: float = RETRY_AFTER_S
 
 var _core: StarsimCore
 var _config_dir := ""
@@ -59,6 +61,8 @@ var _analog_dir := ""
 var _fetcher: Object
 ## Builder(snapshot, raw_dir, out_file) -> {ok, error}; the core's decoder unless a test injects one.
 var _builder: Callable
+## Loader(file) -> {ok, ...}; the core's snapshot loader unless a test injects one (runs on a worker thread).
+var _loader: Callable
 var _wall_hour_fn: Callable  ## () -> float, hours since 1900 of the wall clock (tests fix it)
 
 var _debug := OS.get_environment(DEBUG_ENV) != ""
@@ -66,12 +70,16 @@ var _enabled_changed := false
 var _analog_index: Array = []
 var _seconds_per_download := INITIAL_SECONDS_PER_DOWNLOAD
 
-# Source probes.
-var _probes_started := false
+# Source probes (retried every retry_after_s while unanswered: a session started offline gets ERA5 / GFS once online).
 var _era5_zattrs := ""
+var _era5_probing := false
+var _era5_probe_at_s := -INF  ## when the last ERA5 probe ended
+var _era5_tried := false  ## the first ERA5 probe has ended (answered or failed)
 var _gfs_cycle_hour := -1
+var _gfs_probing := false
+var _gfs_probe_at_s := -INF
+var _gfs_tried := false
 var _gfs_candidates: PackedInt64Array = PackedInt64Array()
-var _probes_open := 0  ## probe answers still outstanding
 
 # Requests in flight: fetcher id -> Callable(ok, code, body).
 var _pending := {}
@@ -85,7 +93,7 @@ var _current := {}  ## the running job's state (see _start_job)
 var _loaded := {}  ## file -> loaded dictionary (texels included)
 var _loading := {}  ## file -> {task, result}
 var _mirror: Array = []  ## files in the core's load cache order (oldest first)
-var _bad_files := {}  ## file -> true: failed to load, not tried again
+var _bad_files := {}  ## file -> true: failed to load, not tried again (cleared when the file is deleted for a rebuild)
 
 var _active := {}  ## {files: [before, after], metas: [snapshot dict, snapshot dict], kind: String}
 var _target := {}  ## the pair that should become active once loaded (same layout)
@@ -98,18 +106,18 @@ var _wanted_keys: Array = []
 
 
 ## The persisted "Wetter" switch (user://settings.cfg [weather] enabled, default on).
-static func load_enabled_setting() -> bool:
+static func load_enabled_setting(path := SETTINGS_FILE) -> bool:
 	var config := ConfigFile.new()
-	if config.load(SETTINGS_FILE) != OK:
+	if config.load(path) != OK:
 		return true
 	return bool(config.get_value("weather", "enabled", true))
 
 
-static func save_enabled_setting(value: bool) -> void:
+static func save_enabled_setting(value: bool, path := SETTINGS_FILE) -> void:
 	var config := ConfigFile.new()
-	config.load(SETTINGS_FILE)  # keeps other settings; a missing file starts empty
+	config.load(path)  # keeps other settings; a missing file starts empty
 	config.set_value("weather", "enabled", value)
-	config.save(SETTINGS_FILE)
+	config.save(path)
 
 
 ## fetcher: a WeatherFetcher (added to the tree by the owner) or a test double with `request(url, first, last, dest)`
@@ -122,6 +130,7 @@ func setup(core: StarsimCore, config_dir: String, cache_dir: String, analog_dir:
 	_analog_dir = analog_dir
 	_fetcher = fetcher
 	_builder = builder if builder.is_valid() else Callable(self, "_core_build")
+	_loader = Callable(_core, "weather_load_snapshot")
 	_wall_hour_fn = func() -> float: return Time.get_unix_time_from_system() / 3600.0 + HOURS_1900_TO_1970
 	_fetcher.finished.connect(_on_fetch_finished)
 	DirAccess.make_dir_recursive_absolute(_raw_dir())
@@ -137,7 +146,7 @@ func status_text() -> String:
 	if not enabled:
 		return "Wetter: aus"
 	if _active.is_empty():
-		return "Wetter: wird geladen ..."
+		return "Wetter: aus (keine Daten)" if _no_data() else "Wetter: wird geladen ..."
 	if _held:
 		var meta: Dictionary = _active["metas"][0]
 		return "Wetter: Stand %02d:00 UTC" % posmod(int(meta["valid_hour"]), 24)
@@ -154,6 +163,19 @@ func status_text() -> String:
 			return "Wetter: typisch (Analogtag %s)" % _date_text(int(before.get("analog_hour", before["valid_hour"])), true)
 
 
+## Nothing is active and nothing can come: no usable analog file and no wanted snapshot still downloading or building.
+func _no_data() -> bool:
+	if not _active.is_empty() or not _target.is_empty() or not _loading.is_empty() or _last_bracket_hour < 0.0:
+		return false
+	var entry := _analog_entry(_last_bracket_hour)
+	if not entry.is_empty() and not _bad_files.has(_analog_dir.path_join(String(entry["file"]))):
+		return false
+	for key: String in _wanted_keys:
+		if _jobs.get(key, {}).get("state", "") in ["queued", "running"]:
+			return false
+	return true
+
+
 ## True while a download, build or load is running (tests, UI).
 func busy() -> bool:
 	return not _current.is_empty() or not _queue.is_empty() or not _loading.is_empty() or not _pending.is_empty()
@@ -164,7 +186,7 @@ func busy() -> bool:
 func settled() -> bool:
 	if not enabled:
 		return true
-	if not _probes_started or _probes_open > 0 or not _loading.is_empty() or not _target.is_empty() or _active.is_empty():
+	if not (_era5_tried and _gfs_tried) or not _loading.is_empty() or not _target.is_empty() or _active.is_empty():
 		return false
 	for key: String in _wanted_keys:
 		if _jobs.get(key, {}).get("state", "") in ["queued", "running"]:
@@ -182,8 +204,7 @@ func update(epoch_tdb_s: float, warp_factor: float) -> void:
 		_apply_enabled()
 	if not enabled:
 		return
-	if not _probes_started:
-		_start_probes()
+	_update_probes()
 	_poll_build()
 	_retry_failed()
 	_evaluate(_core.weather_utc_hour(epoch_tdb_s), warp_factor)
@@ -209,20 +230,31 @@ func shutdown() -> void:
 # ---------------------------------------------------------------------------------------------------------------------
 # Probes: the ERA5 era ends (.zattrs) and the newest GFS cycle on the server.
 
-func _start_probes() -> void:
-	_probes_started = true
-	_probes_open = 2  # the .zattrs and the GFS cycle search
-	_send(ERA5_STORE_URL + "/.zattrs", -1, -1, "", func(ok: bool, _code: int, body: PackedByteArray) -> void:
-		_probes_open -= 1
-		if ok:
-			_era5_zattrs = body.get_string_from_utf8())
-	_gfs_candidates = _core.weather_gfs_cycle_candidates(float(_wall_hour_fn.call()), GFS_PROBE_COUNT)
-	_probe_gfs(0)
+func _update_probes() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if _era5_zattrs == "" and not _era5_probing and now - _era5_probe_at_s >= retry_after_s:
+		_era5_probing = true
+		_send(ERA5_STORE_URL + "/.zattrs", -1, -1, "", func(ok: bool, _code: int, body: PackedByteArray) -> void:
+			_era5_probing = false
+			_era5_tried = true
+			_era5_probe_at_s = Time.get_ticks_msec() / 1000.0
+			if ok:
+				_era5_zattrs = body.get_string_from_utf8())
+	if _gfs_cycle_hour < 0 and not _gfs_probing and now - _gfs_probe_at_s >= retry_after_s:
+		_gfs_probing = true
+		_gfs_candidates = _core.weather_gfs_cycle_candidates(float(_wall_hour_fn.call()), GFS_PROBE_COUNT)
+		_probe_gfs(0)
+
+
+func _end_gfs_probe() -> void:
+	_gfs_probing = false
+	_gfs_tried = true
+	_gfs_probe_at_s = Time.get_ticks_msec() / 1000.0
 
 
 func _probe_gfs(index: int) -> void:
 	if index >= _gfs_candidates.size() or not enabled:
-		_probes_open = maxi(_probes_open - 1, 0)  # no cycle found: GFS unknown
+		_end_gfs_probe()  # no cycle found (or the weather was switched off): tried again later
 		return
 	var cycle: int = _gfs_candidates[index]
 	var url := _core.weather_gfs_index_url({"kind": "gfs", "valid_hour": cycle, "cycle_hour": cycle, "lead_h": 0,
@@ -233,7 +265,7 @@ func _probe_gfs(index: int) -> void:
 	_send(url, -1, -1, "", func(ok: bool, _code: int, _body: PackedByteArray) -> void:
 		if ok:
 			_gfs_cycle_hour = cycle
-			_probes_open -= 1
+			_end_gfs_probe()
 		else:
 			_probe_gfs(index + 1))
 
@@ -365,7 +397,7 @@ func _retry_failed() -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	for key: String in _jobs:
 		var job: Dictionary = _jobs[key]
-		if job["state"] == "failed" and now - float(job["failed_at_s"]) >= RETRY_AFTER_S:
+		if job["state"] == "failed" and now - float(job["failed_at_s"]) >= retry_after_s:
 			_jobs.erase(key)
 			return
 
@@ -596,6 +628,9 @@ func _on_bad_target() -> void:
 			var key := String(_target["metas"][i]["cache_key"])
 			if file.begins_with(_cache_dir):
 				DirAccess.remove_absolute(file)
+				_bad_files.erase(file)  # the rebuilt file under this name gets a fresh try
+				_loaded.erase(file)
+				_mirror.erase(file)
 				_mark_failed(key)
 	_target = {}
 	_ensure_baseline(_last_bracket_hour)
@@ -606,7 +641,7 @@ func _start_load(file: String) -> void:
 		return
 	var slot := {"result": {}}
 	var task := WorkerThreadPool.add_task(func() -> void:
-		slot["result"] = _core.weather_load_snapshot(file), false, "weather load")
+		slot["result"] = _loader.call(file), false, "weather load")
 	_loading[file] = {"task": task, "slot": slot}
 
 

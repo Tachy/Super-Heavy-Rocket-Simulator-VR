@@ -12,6 +12,7 @@ const MAX_FRAME_S := 0.25  ## update() must return within this (it never waits f
 var _failures := 0
 var _core := StarsimCore.new()
 var _serial := 0
+var _dirs: Array = []  ## the test directories, removed at the end
 
 
 ## The fetcher double: records requests, answers them on pump() (after request() returned, as the real one does).
@@ -20,6 +21,7 @@ class FakeFetcher:
 	signal finished(id: int, ok: bool, http_code: int, body: PackedByteArray)
 	var requests: Array = []
 	var fail_files := false  ## every file download answers 404
+	var offline := false  ## every request, probes included, fails
 	var truncate_files := false  ## every file download "succeeds" with one byte
 	var _next := 1
 	var _queue: Array = []
@@ -29,7 +31,10 @@ class FakeFetcher:
 		_next += 1
 		requests.append({"url": url, "first": first_byte, "last": last_byte, "dest": dest})
 		var answer := {"id": id, "ok": true, "code": 200, "body": PackedByteArray()}
-		if url.ends_with("/.zattrs"):
+		if offline:
+			answer["ok"] = false
+			answer["code"] = 0
+		elif url.ends_with("/.zattrs"):
 			answer["body"] = ZATTRS.to_utf8_buffer()
 		elif url.contains("noaa-gfs"):
 			answer["ok"] = false
@@ -63,21 +68,42 @@ func _initialize() -> void:
 	_test_fallbacks()
 	_test_disabled()
 	_test_cache_cap()
+	_test_bad_load_recovers()
+	_test_no_data()
+	_test_probe_retry()
+	for dir: String in _dirs:
+		_remove_dir(dir)
+	DirAccess.remove_absolute(_settings_path())
 	print("WEATHER SERVICE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 
 
+## The settings file of this test: never the user's real user://settings.cfg.
+func _settings_path() -> String:
+	return OS.get_user_data_dir().path_join("weather_test_%d_settings.cfg" % OS.get_process_id())
+
+
 func _test_settings() -> void:
-	WeatherService.save_enabled_setting(false)
-	_check(not WeatherService.load_enabled_setting(), "setting persists: off")
-	WeatherService.save_enabled_setting(true)
-	_check(WeatherService.load_enabled_setting(), "setting persists: on")
+	var path := _settings_path()
+	WeatherService.save_enabled_setting(false, path)
+	_check(not WeatherService.load_enabled_setting(path), "setting persists: off")
+	WeatherService.save_enabled_setting(true, path)
+	_check(WeatherService.load_enabled_setting(path), "setting persists: on")
 
 
-func _make(fetcher: FakeFetcher) -> WeatherService:
+func _remove_dir(dir: String) -> void:
+	for name: String in DirAccess.get_files_at(dir):
+		DirAccess.remove_absolute(dir.path_join(name))
+	for name: String in DirAccess.get_directories_at(dir):
+		_remove_dir(dir.path_join(name))
+	DirAccess.remove_absolute(dir)
+
+
+func _make(fetcher: FakeFetcher, loader := Callable(), analog_dir := "") -> WeatherService:
 	_serial += 1
 	var dir := OS.get_user_data_dir().path_join("weather_test_%d_%d" % [OS.get_process_id(), _serial])
 	DirAccess.make_dir_recursive_absolute(dir)
+	_dirs.append(dir)
 	var service := WeatherService.new()
 	var builder := func(snapshot: Dictionary, raw_dir: String, out_file: String) -> Dictionary:
 		var names := PackedStringArray()
@@ -89,8 +115,10 @@ func _make(fetcher: FakeFetcher) -> WeatherService:
 				return {"ok": false, "error": "raw file missing or truncated: " + n}
 		var ok := _core.weather_write_slab_snapshot(out_file, 1000.0, 3000.0, 1.0e-4, 0.8)
 		return {"ok": ok, "error": ""}
-	service.setup(_core, Paths.config_dir(), dir.path_join("cache"), Paths.data_dir().path_join("weather/analog"),
-			fetcher, builder)
+	service.setup(_core, Paths.config_dir(), dir.path_join("cache"),
+			analog_dir if analog_dir != "" else Paths.data_dir().path_join("weather/analog"), fetcher, builder)
+	if loader.is_valid():
+		service._loader = loader
 	return service
 
 
@@ -236,6 +264,77 @@ func _test_cache_cap() -> void:
 	_check(FileAccess.file_exists(service._cache_dir.path_join("b.wthr"))
 			and FileAccess.file_exists(service._cache_dir.path_join("c.wthr")), "LRU: the newer files stay")
 	service.shutdown()
+
+
+## A snapshot file that fails to load once is deleted and rebuilt after the retry, and the rebuilt file is kept.
+func _test_bad_load_recovers() -> void:
+	var fetcher := FakeFetcher.new()
+	var seen := {}
+	var failures := [0]
+	var loader := func(file: String) -> Dictionary:
+		if file.contains("weather_test_") and not seen.has(file):
+			seen[file] = true
+			failures[0] += 1
+			return {"ok": false}
+		return _core.weather_load_snapshot(file)
+	var service := _make(fetcher, loader)
+	service.retry_after_s = 0.3
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with("Wetter: ERA5"),
+			"bad load: recovered to ERA5")
+	_check(failures[0] >= 1, "bad load: a load was made to fail (%d)" % failures[0])
+	for i in range(60):  # the old bug deleted the rebuilt good file again and again
+		service.update(_core.utc_to_tdb_s(ARCHIVE_UTC), 1.0)
+		fetcher.pump()
+		OS.delay_msec(10)
+	_check(service.status_text().begins_with("Wetter: ERA5"), "bad load: stays on ERA5: " + service.status_text())
+	_check(service._bad_files.is_empty(), "bad load: no stale bad-file entry")
+	var kept := 0
+	for name: String in DirAccess.get_files_at(service._cache_dir):
+		if name.ends_with(".wthr"):
+			kept += 1
+	_check(kept >= 2, "bad load: the rebuilt cache files are kept (%d)" % kept)
+	service.shutdown()
+
+
+## Nothing shipped and nothing fetchable: the line ends in "aus (keine Daten)".
+func _test_no_data() -> void:
+	var fetcher := FakeFetcher.new()
+	fetcher.fail_files = true
+	var empty := OS.get_user_data_dir().path_join("weather_test_%d_empty_analog" % OS.get_process_id())
+	DirAccess.make_dir_recursive_absolute(empty)
+	_dirs.append(empty)
+	var service := _make(fetcher, Callable(), empty)
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0,
+			func() -> bool: return service.status_text() == "Wetter: aus (keine Daten)", "no data")
+	service.shutdown()
+
+
+## A session started offline gets ERA5 once the line is back (the probes are repeated).
+func _test_probe_retry() -> void:
+	var fetcher := FakeFetcher.new()
+	fetcher.offline = true
+	var service := _make(fetcher)
+	service.retry_after_s = 0.3
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.settled(), "offline settled")
+	_check(service.status_text().begins_with("Wetter: typisch"), "offline: analog line: " + service.status_text())
+	fetcher.offline = false
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with("Wetter: ERA5"),
+			"back online: ERA5")
+	# Switched off during a probe, back on later: probing resumes.
+	var service2 := _make(fetcher)
+	service2.retry_after_s = 0.3
+	fetcher.offline = true
+	service2.update(_core.utc_to_tdb_s(ARCHIVE_UTC), 1.0)
+	service2.enabled = false
+	for i in range(5):
+		service2.update(_core.utc_to_tdb_s(ARCHIVE_UTC), 1.0)
+		fetcher.pump()
+	fetcher.offline = false
+	service2.enabled = true
+	_run_until(service2, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service2.status_text().begins_with("Wetter: ERA5"),
+			"off during a probe, then on: ERA5")
+	service.shutdown()
+	service2.shutdown()
 
 
 func _check(condition: bool, message: String) -> void:
