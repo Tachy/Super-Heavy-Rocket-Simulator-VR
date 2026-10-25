@@ -12,7 +12,8 @@ One-time setup:
 # area); `fetch.py --retile imagery` redoes fit + tiles offline from those caches; `--workers N` sets the process count
 # The timezones step (timezone-boundary-builder with oceans, ODbL, + tzdata package) writes data/timezones/zone_grid.bin
 # (0.02 deg run-length grid, ~1.6 MB) and zones.json (transitions 1990-2060): the camera's local time in the overlay
-# The weather_analog step (needs build/core/weather_snapshot.exe, i.e. a built core) downloads 48 ERA5 hours (the 15th of each
+# The weather_analog step is opt-in (a bare fetch.py skips it): after building the core run
+# `python tools/data_pipeline/fetch.py weather_analog` (needs build/core/weather_snapshot.exe); it downloads 48 ERA5 hours (the 15th of each
 # month at 00/06/12/18 UTC of 2025, ~65 MB raw each, deleted after use) and writes data/weather/analog (48 x 8.6 MB, ~400 MB)
 python tools/data_pipeline/fetch.py
 python tools/data_pipeline/prepare.py      # converts data/raw -> data/textures, data/stars (needs Pillow)

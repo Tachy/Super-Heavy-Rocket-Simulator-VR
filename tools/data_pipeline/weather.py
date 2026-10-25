@@ -15,9 +15,11 @@ Raw downloads: data/raw/weather/. Usage: python tools/data_pipeline/fetch.py wea
 from __future__ import annotations
 
 import datetime as dt
+import http.client
 import json
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -109,8 +111,9 @@ def download_resumable(url: str, target: Path, retries: int = 5) -> None:
             if error.code in (403, 404):
                 raise
             print(f"  retry {attempt + 1}: {error}")
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as error:
             print(f"  retry {attempt + 1}: {error}")
+            time.sleep(min(2 ** attempt, 30))  # short backoff; the .part file is continued by a Range request
     raise RuntimeError(f"download failed: {url}")
 
 

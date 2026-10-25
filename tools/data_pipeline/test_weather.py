@@ -46,3 +46,21 @@ def test_analog_index_lists_48_unique_files():
     assert {e["hour_utc"] for e in entries} == {0, 6, 12, 18}
     first = entries[0]
     assert first["key"] == "era5_" + str(weather.hours_since_1900(dt.datetime(2025, 1, 15, tzinfo=dt.timezone.utc)))
+
+
+def test_bare_fetch_skips_weather_analog_without_network(monkeypatch, capsys):
+    import fetch
+
+    source = {"id": "weather_analog", "name": "x", "kind": "weather_analog", "target": "data/weather/analog/index.json"}
+    monkeypatch.setattr(fetch, "load_sources", lambda: [source])
+    calls = []
+    monkeypatch.setattr(weather, "fetch", lambda *args, **kwargs: calls.append(args))
+    monkeypatch.setattr(fetch, "download", lambda *args, **kwargs: calls.append("network"))
+
+    monkeypatch.setattr(sys, "argv", ["fetch.py"])
+    assert fetch.main() == 0
+    assert calls == [] and "opt-in" in capsys.readouterr().out
+
+    monkeypatch.setattr(sys, "argv", ["fetch.py", "weather_analog"])
+    assert fetch.main() == 0
+    assert len(calls) == 1

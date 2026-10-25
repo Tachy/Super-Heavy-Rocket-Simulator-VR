@@ -419,7 +419,7 @@ url = "https://storage.googleapis.com/gcp-public-data-arco-era5/ar/full_37-1h-0p
 target = "data/weather/analog/index.json"
 kind = "weather_analog"
 reference_year = 2025
-license = "Creative Commons Attribution 4.0 (CC-BY-4.0, https://creativecommons.org/licenses/by/4.0/) under the Licence to use Copernicus Products (https://apps.ecmwf.int/datasets/licences/copernicus/); the cache files data/weather/*.wthr are modified (re-gridded, derived) data. Also used online: the ERA5 hours the game downloads at run time"
+license = "Creative Commons Attribution 4.0 (CC-BY-4.0, https://creativecommons.org/licenses/by/4.0/) under the Licence to use Copernicus Products (https://apps.ecmwf.int/datasets/licences/copernicus/); the cache files data/weather/analog/*.wthr are modified (re-gridded, derived) data. Also used online: the ERA5 hours the game downloads at run time"
 credit = "Generated using Copernicus Climate Change Service information 2025; contains modified Copernicus Climate Change Service information. Hersbach, H. et al., ERA5 hourly data on pressure levels from 1940 to present, Copernicus Climate Change Service (C3S) Climate Data Store (CDS), DOI 10.24381/cds.bd0915c6. Neither the European Commission nor ECMWF is responsible for any use that may be made of the Copernicus information or data it contains. ARCO-ERA5: Google Public Datasets (Carver & Merose 2023)"
 
 [[source]]

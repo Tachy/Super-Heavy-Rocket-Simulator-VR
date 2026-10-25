@@ -90,6 +90,9 @@ def main() -> int:
             timezones.fetch(source, REPO_ROOT, download, args.force)
             continue
         if source.get("kind") == "weather_analog":  # ERA5 reference-year hours -> downsampled .wthr files (weather.py)
+            if "weather_analog" not in args.ids:  # opt-in: gigabytes of downloads and a built core are needed
+                print("  skipped (opt-in): build the core, then run `python tools/data_pipeline/fetch.py weather_analog`")
+                continue
             import weather  # needs build/core/weather_snapshot.exe
 
             weather.fetch(source, REPO_ROOT, args.force)
