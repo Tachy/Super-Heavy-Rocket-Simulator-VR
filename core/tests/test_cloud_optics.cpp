@@ -11,6 +11,7 @@
 #include <random>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <catch2/catch_approx.hpp>
@@ -29,6 +30,12 @@ using Catch::Approx;
 namespace {
 
 namespace c = constants;
+
+// Measured numbers for the reports, printed with STARSIM_VERBOSE set only.
+template <class... Args>
+void report(const char* format, Args... args) {
+    if (std::getenv("STARSIM_VERBOSE")) std::printf(format, args...);
+}
 
 // Integral of f(cos theta) over the sphere, composite Gauss-Legendre in theta with pieces refined toward the forward
 // peak (the Henyey-Greenstein lobe of g ~0.995 is ~0.1 deg wide).
@@ -76,26 +83,31 @@ math::Vec3 sun_at_zenith_angle(const LocalFrame& f, double zenith_rad) {
 // Trilinear (GPU-style, wrapping) sample of the shape texture's R channel at texel coordinates (texel centres at
 // integer + 0.5), in [0, 1].
 float filtered_shape_value(const CloudNoise& noise, double x, double y, double z) {
-    const int n = noise.shape_size;
-    const double gx = x - 0.5, gy = y - 0.5, gz = z - 0.5;
-    const double fx = std::floor(gx), fy = std::floor(gy), fz = std::floor(gz);
-    const int ix = static_cast<int>(fx), iy = static_cast<int>(fy), iz = static_cast<int>(fz);
-    const double wx = gx - fx, wy = gy - fy, wz = gz - fz;
-    auto at = [&](int i, int j, int k) {
-        i = (i % n + n) % n;
-        j = (j % n + n) % n;
-        k = (k % n + n) % n;
-        return noise.shape_rgba[4 * ((static_cast<std::size_t>(k) * n + j) * n + i)] / 255.0;
-    };
-    double v = 0.0;
-    for (int dz = 0; dz <= 1; ++dz) {
-        for (int dy = 0; dy <= 1; ++dy) {
-            for (int dx = 0; dx <= 1; ++dx) {
-                v += (dx ? wx : 1.0 - wx) * (dy ? wy : 1.0 - wy) * (dz ? wz : 1.0 - wz) * at(ix + dx, iy + dy, iz + dz);
-            }
-        }
+    return static_cast<float>(sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 0, {x, y, z}));
+}
+
+// The fractal shape value (cloud_noise.hpp) and the width noise at uniform random positions in the shape tile (as the
+// shader samples: any scale and offset), for a detail state.
+struct ShapeSample {
+    double value, width_noise;
+};
+
+std::vector<ShapeSample> shape_samples(const CloudNoise& noise, double detail_state, std::size_t count,
+                                       std::uint64_t seed) {
+    std::mt19937_64 rng(seed);
+    std::uniform_real_distribution<double> unit(0.0, 1.0);
+    const double n = noise.shape_size;
+    std::vector<ShapeSample> samples(count);
+    for (ShapeSample& s : samples) {
+        const math::Vec3 p{unit(rng) * cloud_shape_tile_horizontal_m, unit(rng) * cloud_shape_tile_horizontal_m,
+                           unit(rng) * cloud_shape_tile_vertical_m};
+        const math::Vec3 texel{p.x * n / cloud_shape_tile_horizontal_m, p.y * n / cloud_shape_tile_horizontal_m,
+                               p.z * n / cloud_shape_tile_vertical_m};
+        s.value = cloud_shape_value(noise, sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 0, texel), p,
+                                    detail_state);
+        s.width_noise = sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 3, texel);
     }
-    return static_cast<float>(v);
+    return samples;
 }
 
 }  // namespace
@@ -138,7 +150,7 @@ TEST_CASE("Slab reflectance agrees with two-stream", "[weather]") {
             const double model = slab_reflectance(tau, mu0);
             const double reference = two_stream_beam_reflectance(tau, g, mu0);
             if (verbose) {
-                std::printf("zenith %4.0f tau %4.0f model %.4f two-stream %.4f (%+.1f %%)\n", zenith_deg, tau, model,
+                report("zenith %4.0f tau %4.0f model %.4f two-stream %.4f (%+.1f %%)\n", zenith_deg, tau, model,
                             reference, 100.0 * (model / reference - 1.0));
             }
             const double tolerance = zenith_deg == 0.0 ? 0.06 : tau >= 10.0 ? 0.19 : 0.27;
@@ -256,7 +268,7 @@ TEST_CASE("Reflected cloud radiance agrees with Monte Carlo", "[weather]") {
         }
         const double model = sum / weight, error = model / mc - 1.0;
         if (verbose) {
-            std::printf("sun %2.0f tau %2.0f view %2.0f az %3.0f MC %.5f model %.5f (%+.1f %%)\n", sun_zenith, tau,
+            report("sun %2.0f tau %2.0f view %2.0f az %3.0f MC %.5f model %.5f (%+.1f %%)\n", sun_zenith, tau,
                         view_zenith, azimuth, mc, model, 100.0 * error);
         }
         double tolerance = 0.10;
@@ -269,7 +281,7 @@ TEST_CASE("Reflected cloud radiance agrees with Monte Carlo", "[weather]") {
         ++rows;
     }
     CHECK(rows == 42);
-    std::printf("cloud radiance vs Monte Carlo: %d bins, model at most %+.1f %% above\n", rows, 100.0 * max_over);
+    report("cloud radiance vs Monte Carlo: %d bins, model at most %+.1f %% above\n", rows, 100.0 * max_over);
 }
 
 TEST_CASE("An overcast deck dims the ground physically", "[weather]") {
@@ -295,7 +307,7 @@ TEST_CASE("Noise coverage is preserved", "[weather]") {
     const auto start = std::chrono::steady_clock::now();
     const CloudNoise noise = generate_cloud_noise();
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-    std::printf("cloud noise generated in %.2f s\n", seconds);
+    report("cloud noise generated in %.2f s\n", seconds);
 
     const int n = noise.shape_size;
     REQUIRE(noise.shape_rgba.size() == static_cast<std::size_t>(n) * n * n * 4);
@@ -312,18 +324,54 @@ TEST_CASE("Noise coverage is preserved", "[weather]") {
     for (float& v : filtered) v = filtered_shape_value(noise, unit(rng) * n, unit(rng) * n, unit(rng) * n);
     for (double cf : {0.1, 0.5, 0.9}) {
         const long index = std::lround(cf * 255.0);
-        const float t = noise.coverage_threshold[static_cast<std::size_t>(index)];
+        const float t = noise.coverage_threshold[0][static_cast<std::size_t>(index)];
         std::size_t above = 0, texels_above = 0;
         for (float v : filtered) above += v > t ? 1 : 0;
         for (std::size_t i = 0; i < texels; ++i) texels_above += noise.shape_rgba[4 * i] / 255.0f > t ? 1 : 0;
         const double fraction = static_cast<double>(above) / filtered.size();
-        std::printf("cf %.1f: filtered fraction %.4f, texel fraction %.4f\n", cf, fraction,
-                    static_cast<double>(texels_above) / texels);
+        report("cf %.1f: filtered fraction %.4f, texel fraction %.4f\n", cf, fraction,
+               static_cast<double>(texels_above) / texels);
         CHECK(fraction == Approx(index / 255.0).margin(0.002));
     }
-    CHECK(noise.coverage_threshold[0] >= 1.0f);
-    CHECK(noise.coverage_threshold[255] < 0.0f);
-    for (int i = 1; i < 256; ++i) CHECK(noise.coverage_threshold[i] <= noise.coverage_threshold[i - 1]);
+    // The fractal value of every detail state (and a fractional one, the rows interpolated as the shader's filter does):
+    // the covered fraction stays cf (5e5 random positions each: sampling error <= 7e-4, so 0.003; 0.006 between rows).
+    for (double state : {1.0, 1.5, 2.0, 3.0}) {
+        const std::vector<ShapeSample> samples = shape_samples(noise, state, 500000, 44);
+        for (double cf : {0.1, 0.5, 0.9}) {
+            const int index = static_cast<int>(std::lround(cf * 255.0));
+            const double t = cloud_coverage_threshold(noise, state, index);
+            std::size_t above = 0;
+            for (const ShapeSample& s : samples) above += s.value > t ? 1 : 0;
+            const double fraction = static_cast<double>(above) / samples.size();
+            report("state %.1f cf %.1f: covered fraction %.4f\n", state, cf, fraction);
+            CHECK(fraction == Approx(index / 255.0).margin(state == std::floor(state) ? 0.003 : 0.006));
+        }
+    }
+    for (const auto& table : noise.coverage_threshold) {
+        CHECK(table[0] > table[1]);
+        CHECK(table[255] < table[254]);
+        for (int i = 1; i < 256; ++i) CHECK(table[static_cast<std::size_t>(i)] <= table[static_cast<std::size_t>(i - 1)]);
+    }
+    CHECK(noise.coverage_threshold[0][0] >= 1.0f);
+    CHECK(noise.coverage_threshold[0][255] < 0.0f);
+    // The detail levels continue the shape's spectrum as fBm: a_k / a_(k-1) = 4^-H.
+    REQUIRE(noise.level_amplitude[0] > 0.0f);
+    for (int k = 1; k < cloud_detail_levels; ++k) {
+        CHECK(noise.level_amplitude[static_cast<std::size_t>(k)] / noise.level_amplitude[static_cast<std::size_t>(k - 1)] ==
+              Approx(std::pow(4.0, -cloud_shape_hurst_exponent())).epsilon(1e-5));
+    }
+    report("detail amplitude %.4f, detail mean %.4f\n", noise.level_amplitude[0], noise.detail_mean);
+    // The level weights: full at a footprint of 1/4 of the level's middle cell, none at 1/2, finest first.
+    CHECK(cloud_detail_level_weight(0, 250.0 / 4.0) == Approx(1.0));
+    CHECK(cloud_detail_level_weight(0, 250.0 / 2.0) == Approx(0.0).margin(1e-12));
+    CHECK(cloud_detail_state(0.0) == Approx(cloud_detail_levels));
+    CHECK(cloud_detail_state(1.0e6) == Approx(0.0).margin(1e-12));
+    for (double f : {1.0, 3.0, 10.0, 30.0, 100.0}) {
+        const double state = cloud_detail_state(f);
+        for (int k = 0; k < cloud_detail_levels; ++k) {
+            CHECK(cloud_detail_level_weight(k, f) == Approx(std::clamp(state - k, 0.0, 1.0)).margin(1e-12));
+        }
+    }
 
     // The primitives repeat with their period (opposite faces equal after the wrap).
     for (const math::Vec3 p : {math::Vec3{0.3, 1.7, 2.2}, math::Vec3{3.9, 0.1, 0.05}, math::Vec3{0.0, 2.5, 3.99}}) {
@@ -365,45 +413,119 @@ TEST_CASE("Noise coverage is preserved", "[weather]") {
     CHECK(again.detail_rgba == noise.detail_rgba);
 }
 
-TEST_CASE("Soft cloud edges keep the grid-mean water", "[weather]") {
-    // The edge ramp (cloud_noise.hpp, soft edges): density = mean / m(cf) x ramp((s - t(cf)) / w). Over the filtered
-    // shape value at uniform random positions (2e6, as the coverage test) the covered fraction stays cf and the mean of
-    // ramp / m is 1 (the grid-mean water is kept) within 2 %.
+TEST_CASE("Soft cloud edges of varying width keep the grid-mean water at every detail state", "[weather]") {
+    // density = mean / m(cf) x ramp((v - t(cf)) / w(n)) (cloud_noise.hpp, soft edges) with the fractal value v of the
+    // detail state and the edge width w(n) of the width noise: over uniform random positions (5e5 per state) the mean of
+    // ramp / m is 1 (the grid-mean water is kept) within 1.5 % at the table states and 2.5 % between them.
     const CloudNoise noise = generate_cloud_noise();
-    const double w = noise.edge_width_value;
-    std::printf("edge width %.4f in shape value = %.0f m at the median gradient\n", w, c::cloud_edge_width_m);
-    CHECK(w > 0.005);
-    CHECK(w < 0.3);
-    CHECK(noise.edge_mean_factor[0] == 0.0f);
-    for (int i = 1; i < 256; ++i) {
-        CHECK(noise.edge_mean_factor[static_cast<std::size_t>(i)] >= noise.edge_mean_factor[static_cast<std::size_t>(i - 1)]);
-        CHECK(noise.edge_mean_factor[static_cast<std::size_t>(i)] <= i / 255.0 + 1e-6);
-    }
-    const int n = noise.shape_size;
-    std::mt19937_64 rng(43);
-    std::uniform_real_distribution<double> unit(0.0, 1.0);
-    std::vector<float> filtered(2000000);
-    for (float& v : filtered) v = filtered_shape_value(noise, unit(rng) * n, unit(rng) * n, unit(rng) * n);
-    for (double cf : {0.05, 0.1, 0.3, 0.5, 0.9, 1.0}) {
-        const auto index = static_cast<std::size_t>(std::lround(cf * 255.0));
-        const double t = noise.coverage_threshold[index], m = noise.edge_mean_factor[index];
-        double water = 0.0;
-        std::size_t covered = 0;
-        for (float v : filtered) {
-            const double ramp = cloud_edge_ramp((v - t) / w);
-            water += ramp / m;
-            covered += v > t ? 1 : 0;
+    report("edge width %.4f .. %.4f in shape value (%.0f .. %.0f m)\n", noise.edge_width_min_value,
+           noise.edge_width_max_value, c::cloud_edge_width_min_m, c::cloud_edge_width_max_m);
+    CHECK(noise.edge_width_min_value > 0.002f);
+    CHECK(noise.edge_width_max_value > noise.edge_width_min_value);
+    CHECK(noise.edge_width_max_value < 0.3f);
+    CHECK(cloud_edge_width_value(noise, 0.0) == Approx(noise.edge_width_min_value));
+    CHECK(cloud_edge_width_value(noise, 1.0) == Approx(noise.edge_width_max_value));
+    for (const auto& m : noise.edge_mean_factor) {
+        CHECK(m[0] == 0.0f);
+        for (int i = 1; i < 256; ++i) {
+            CHECK(m[static_cast<std::size_t>(i)] >= m[static_cast<std::size_t>(i - 1)]);
+            CHECK(m[static_cast<std::size_t>(i)] <= i / 255.0 + 1e-6);
         }
-        water /= filtered.size();
-        std::printf("cf %.2f: m %.4f, mean water / grid mean %.4f, covered %.4f\n", cf, m, water,
-                    static_cast<double>(covered) / filtered.size());
-        CHECK(water == Approx(1.0).epsilon(0.02));
-        CHECK(static_cast<double>(covered) / filtered.size() == Approx(index / 255.0).margin(0.002));
-        CHECK(m < index / 255.0);  // the edge zone holds less water than the interior
+    }
+    for (double state : {0.0, 1.0, 1.5, 3.0}) {
+        const std::vector<ShapeSample> samples = shape_samples(noise, state, 500000, 45);
+        for (double cf : {0.05, 0.3, 0.5, 0.9, 1.0}) {
+            const int index = static_cast<int>(std::lround(cf * 255.0));
+            const double t = cloud_coverage_threshold(noise, state, index), m = cloud_edge_mean_factor(noise, state, index);
+            double water = 0.0;
+            for (const ShapeSample& s : samples) water += cloud_edge_ramp((s.value - t) / cloud_edge_width_value(noise, s.width_noise)) / m;
+            water /= samples.size();
+            report("state %.1f cf %.2f: m %.4f, mean water / grid mean %.4f\n", state, cf, m, water);
+            CHECK(water == Approx(1.0).epsilon(state == std::floor(state) ? 0.015 : 0.025));
+            CHECK(m <= index / 255.0 + 1e-6);  // the edge zone holds less water than the interior
+            if (index < 255) CHECK(m < index / 255.0);
+        }
     }
     CHECK(cloud_edge_ramp(-0.5) == 0.0);
     CHECK(cloud_edge_ramp(0.5) == Approx(0.5));
     CHECK(cloud_edge_ramp(2.0) == 1.0);
+}
+
+TEST_CASE("Cloud perimeters have the observed fractal dimension", "[weather]") {
+    // Lovejoy 1982 (Science 216, 185): cloud and rain areas have the area-perimeter dimension D = 1.35 +- 0.05 from
+    // 1 to 1.2e6 km^2 (constants.hpp). The sub-grid shapes continue it: the cloud mask (v > t(cf), all detail levels)
+    // of a horizontal 16 km x 16 km plane at 4 m, cf 0.5; box counting of the boundary pixels with boxes of 8 m to
+    // 1024 m (2.1 decades, 8 sizes): N(b) ~ b^-D, D the least-squares slope; 1.25 <= D <= 1.45. The shape alone
+    // (detail state 0) is printed for comparison (smooth below its 500 m octave: D near 1 at these scales).
+    const CloudNoise noise = generate_cloud_noise();
+    const int size = 4096;
+    const double pixel_m = 4.0, height_m = 1234.0;
+    auto dimension = [&](double state) {
+        const double t = cloud_coverage_threshold(noise, state, 128);
+        std::vector<std::uint8_t> mask(static_cast<std::size_t>(size) * size);
+        const int threads = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+        std::vector<std::thread> pool;
+        for (int w = 0; w < threads; ++w) {
+            pool.emplace_back([&, w] {
+                const double n = noise.shape_size;
+                for (int y = w; y < size; y += threads) {
+                    for (int x = 0; x < size; ++x) {
+                        const math::Vec3 p{(x + 0.5) * pixel_m, (y + 0.5) * pixel_m, height_m};
+                        const math::Vec3 texel{p.x * n / cloud_shape_tile_horizontal_m, p.y * n / cloud_shape_tile_horizontal_m,
+                                               p.z * n / cloud_shape_tile_vertical_m};
+                        const double v = cloud_shape_value(
+                            noise, sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 0, texel), p, state);
+                        mask[static_cast<std::size_t>(y) * size + x] = v > t ? 1 : 0;
+                    }
+                }
+            });
+        }
+        for (auto& th : pool) th.join();
+        std::vector<std::uint8_t> boundary(mask.size(), 0);
+        std::size_t covered = 0;
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                const std::uint8_t m = mask[static_cast<std::size_t>(y) * size + x];
+                covered += m;
+                const bool edge = (x + 1 < size && mask[static_cast<std::size_t>(y) * size + x + 1] != m) ||
+                                  (y + 1 < size && mask[static_cast<std::size_t>(y + 1) * size + x] != m);
+                boundary[static_cast<std::size_t>(y) * size + x] = edge ? 1 : 0;
+            }
+        }
+        double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+        int points = 0;
+        for (int box = 2; box <= 256; box *= 2) {
+            std::size_t count = 0;
+            for (int by = 0; by < size; by += box) {
+                for (int bx = 0; bx < size; bx += box) {
+                    bool hit = false;
+                    for (int y = by; y < by + box && !hit; ++y) {
+                        for (int x = bx; x < bx + box; ++x) {
+                            if (boundary[static_cast<std::size_t>(y) * size + x]) {
+                                hit = true;
+                                break;
+                            }
+                        }
+                    }
+                    count += hit ? 1 : 0;
+                }
+            }
+            const double lx = std::log(box * pixel_m), ly = std::log(static_cast<double>(count));
+            report("state %.0f box %5.0f m: %zu boxes\n", state, box * pixel_m, count);
+            sx += lx;
+            sy += ly;
+            sxx += lx * lx;
+            sxy += lx * ly;
+            ++points;
+        }
+        report("state %.0f covered fraction %.3f\n", state, static_cast<double>(covered) / mask.size());
+        return -(points * sxy - sx * sy) / (points * sxx - sx * sx);
+    };
+    const double d_shape = dimension(0.0);
+    const double d = dimension(cloud_detail_levels);
+    report("perimeter fractal dimension: shape alone %.3f, with the detail levels %.3f (Lovejoy 1982: 1.35)\n", d_shape, d);
+    CHECK(d >= 1.25);
+    CHECK(d <= 1.45);
 }
 
 TEST_CASE("Blue noise mask is uniform and blue", "[weather]") {
@@ -429,7 +551,7 @@ TEST_CASE("Blue noise mask is uniform and blue", "[weather]") {
         }
     }
     const double variance = sum_sq / blocks, white = 1.0 / 12.0 / 16.0;
-    std::printf("blue noise 4x4 block-mean variance %.6f (white %.6f)\n", variance, white);
+    report("blue noise 4x4 block-mean variance %.6f (white %.6f)\n", variance, white);
     CHECK(variance < 0.25 * white);  // measured 0.18
     CHECK(generate_blue_noise(size) == mask);  // deterministic
 }
@@ -438,7 +560,7 @@ TEST_CASE("3D Sun light on an isolated cumulus", "[weather]") {
     // A cumulus-shaped blob: a sphere of radius 600 m with the soft edge ramp over the outer 100 m, in-cloud extinction
     // 0.004 /m (tau 4.4 across). The Sun 30 deg above the horizon from +x. Points 50 m inside the sunlit and the shadowed
     // flank at the sphere's middle height; the camera looks at each from the Sun's side (backscatter, 150 deg).
-    const double radius = 600.0, beta = 0.004, edge = c::cloud_edge_width_m;
+    const double radius = 600.0, beta = 0.004, edge = 100.0;  // within cloud_edge_width_min_m .. _max_m
     const math::Vec3 sun = {std::cos(30.0 * c::deg_to_rad), 0.0, std::sin(30.0 * c::deg_to_rad)};
     auto extinction_at = [&](const math::Vec3& p) {
         return beta * cloud_edge_ramp((radius - math::norm(p)) / edge);
@@ -477,7 +599,7 @@ TEST_CASE("3D Sun light on an isolated cumulus", "[weather]") {
         mean /= 4096.0;
         mean_t /= 4096.0;
         const double exact = exact_tau(p);
-        std::printf("Sun depth exact %.4f, 6-sample march mean %.4f (%.3f .. %.3f), T %.4f, mean T %.4f\n", exact,
+        report("Sun depth exact %.4f, 6-sample march mean %.4f (%.3f .. %.3f), T %.4f, mean T %.4f\n", exact,
                     mean, lo, hi, std::exp(-exact), mean_t);
         CHECK(mean == Approx(exact).epsilon(0.01));
         CHECK(std::exp(-mean) == Approx(std::exp(-exact)).epsilon(0.02));
@@ -513,7 +635,7 @@ TEST_CASE("3D Sun light on an isolated cumulus", "[weather]") {
         const double flat = cloud_scattering_source(-math::dot(to_sun, view), 0.0, std::sin(e),
                                                     integrate(lit_point, up) / std::max(std::sin(e), 1e-3),
                                                     integrate(lit_point, up), column);
-        std::printf("Sun %+.0f deg: source sunlit flank %.5f, shadowed %.5f, column model %.5f per sr\n",
+        report("Sun %+.0f deg: source sunlit flank %.5f, shadowed %.5f, column model %.5f per sr\n",
                     elevation_deg, lit, dark, flat);
         CHECK(lit > 3.0 * dark);
         CHECK(lit > 2.0 * flat);  // the flank's true incidence, not mu0 E (and lit below the local horizon)
