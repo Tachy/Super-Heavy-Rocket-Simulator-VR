@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include "starsim/environment/atmospheric_refraction.hpp"
 #include "starsim/environment/atmosphere_scattering.hpp"
 #include "starsim/environment/earth_terrain.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
@@ -59,6 +60,11 @@ public:
     // The same for an observer anywhere (GCRF metres, at rest in GCRF: the aberration of its own motion is ignored,
     // < 0.01 % of the disc): the sunlight on a vehicle or on the camera (game: Sun light, eye adaptation).
     double solar_eclipse_fraction_gcrf(const godot::Vector3& position_gcrf_m, double tdb_s) const;
+    // Astronomical refraction for a camera at an Earth-fixed position (ITRF metres): {min_rad, span_rad, lift_rad:
+    // PackedFloat32Array; empty lift: none}, the lift (apparent - true elevation) over the true elevation
+    // on the grid min + span (i/(n-1))^2 (environment::refraction_lift_table, US76 density, the sphere of the local
+    // ellipsoid radius). Renderer: Sun, Moon and stars drawn at their refracted directions.
+    godot::Dictionary atmospheric_refraction(const godot::Vector3& camera_fixed_m) const;
 
     // Loads the Earth and Moon terrain through the process-wide cache (config_dir/../data). Returns
     // {earth: bool, moon: bool}; prints one German line per missing or unloadable terrain. Call before the
@@ -110,6 +116,7 @@ private:
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_;
     mutable std::mutex atmosphere_mutex_;  // guards atmosphere_ (swapped by load_atmosphere on any thread)
     std::shared_ptr<const environment::AtmosphereScattering> atmosphere_;
+    environment::RefractionProfile refraction_{environment::Us76Atmosphere{}};
     std::unique_ptr<spice::SpiceSession> session_;
     spice::SpiceTimeConverter time_;
     spice::SpiceEphemeris ephemeris_;

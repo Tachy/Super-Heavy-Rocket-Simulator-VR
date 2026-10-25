@@ -84,6 +84,18 @@ moon_terrain_camera_lo={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+refraction_lift={
+"type": "sampler2D",
+"value": ""
+}
+refraction_grid={
+"type": "vec4",
+"value": Vector4(0, 0, 0, 0)
+}
+refraction_up={
+"type": "vec3",
+"value": Vector3(0, 1, 0)
+}
 atmosphere_transmittance={
 "type": "sampler2D",
 "value": ""

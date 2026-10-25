@@ -11,6 +11,7 @@ render_mode unshaded, cull_disabled, depth_draw_never, blend_add;
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/star_visibility.gdshaderinc"
 #include "res://shaders/vision.gdshaderinc"
+#include "res://shaders/refraction.gdshaderinc"
 
 uniform float point_scale = 2.4;
 // Illuminance rendered at full brightness (StarField.REFERENCE_MAGNITUDE).
@@ -19,6 +20,9 @@ uniform float reference_illuminance_lux = 1.0;
 varying vec3 star_light;
 
 void vertex() {
+	// The star at its refracted direction; the transmittance below follows the apparent ray.
+	vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	VERTEX = (inverse(MODEL_MATRIX) * vec4(refracted_world_point(world, CAMERA_POSITION_WORLD), 1.0)).xyz;
 	float illuminance = CUSTOM0.x;
 	float relative = min(illuminance / reference_illuminance_lux, 1.0);
 	vec3 attenuation = vec3(1.0);

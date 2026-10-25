@@ -9,6 +9,7 @@ render_mode unshaded, cull_back;
 #include "res://shaders/eclipse.gdshaderinc"
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/moon_regolith.gdshaderinc"
+#include "res://shaders/refraction.gdshaderinc"
 
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform vec3 sun_position_local;    // from the Moon's centre
@@ -26,6 +27,9 @@ varying vec3 local_normal;
 void vertex() {
 	local_position = VERTEX;
 	local_normal = NORMAL;
+	// Drawn at its refracted direction (the lighting above stays on the true surface point).
+	vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	VERTEX = (inverse(MODEL_MATRIX) * vec4(refracted_world_point(world, CAMERA_POSITION_WORLD), 1.0)).xyz;
 }
 
 void fragment() {

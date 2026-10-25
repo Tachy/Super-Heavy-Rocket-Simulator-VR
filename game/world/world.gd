@@ -51,6 +51,7 @@ var ground_site: Dictionary = {}
 var spice_ok := false  ## SPICE kernels opened in _ready
 var terrain_loaded: Dictionary = {}  ## core.load_terrain's result: {earth, moon}
 var atmosphere := Atmosphere.new()  ## the precomputed atmosphere's tables and global shader uniforms (sky, ambient)
+var refraction := Refraction.new()  ## astronomical refraction of Sun, Moon and stars for the camera
 
 ## Per-frame state, readable by UI and tests.
 var moon_gcrf_m := Vector3.ZERO
@@ -156,6 +157,7 @@ func update_world() -> void:
 
 	earth.place(cam)
 	var camera_fixed := earth.fixed_to_gcrf.transposed() * cam
+	refraction.update(core, camera_fixed, earth.fixed_to_gcrf)
 	earth_terrain.update_for_camera(camera_fixed, _delta)
 	water_waves.update(camera_fixed, t)
 	earth.body_mesh_visible = not earth_terrain.active

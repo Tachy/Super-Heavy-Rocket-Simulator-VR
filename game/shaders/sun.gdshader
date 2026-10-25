@@ -7,6 +7,7 @@ shader_type spatial;
 render_mode unshaded, cull_back;
 
 #include "res://shaders/atmosphere.gdshaderinc"
+#include "res://shaders/refraction.gdshaderinc"
 
 uniform float intensity = 30.0;
 
@@ -14,6 +15,9 @@ varying vec3 local_normal;
 
 void vertex() {
 	local_normal = NORMAL;
+	// Drawn at its refracted direction: lifted and, near the horizon, flattened.
+	vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	VERTEX = (inverse(MODEL_MATRIX) * vec4(refracted_world_point(world, CAMERA_POSITION_WORLD), 1.0)).xyz;
 }
 
 void fragment() {

@@ -3264,7 +3264,23 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   same GPU (99 % load; p50 13 ms against 4.6 before): not a measurement of the change, to be rerun on an idle GPU.
   The step now also runs for the chroma alone whenever L_a < 1e4 cd/m^2 (low Sun, dusk, night): one full-screen
   compute pass on frames that had none before.
-- **Known limits.** No clouds, weather-dependent aerosols, refraction, airglow; one aerosol set for the whole Earth;
+- **Astronomical refraction (2026-10-25).** `core/environment/atmospheric_refraction`: n - 1 = K rho (Gladstone-Dale,
+  Edlén 1966 standard air at 550 nm, 2.778e-4) from the US76 density on a 25 m grid to 120 km; a ray's bending by the
+  Bouguer invariant and the zenith-angle integral (Auer & Standish 2000), also through a tangent point below the
+  observer (orbit, limb). Validation: Laplace's theorem at 45 deg (57.16", 0.6 %: US76's lapse-rate breaks make the
+  integrand jump, Simpson with 128 intervals then converges as O(step)), the horizon from sea level 33.0' (Bennett
+  1982 scaled to 15 deg C / 1013 hPa: 34.0', 5 %; it depends on the lapse rate). `refraction_lift_table` inverts it to
+  the lift over the TRUE elevation (64 samples, quadratic grid from the grazing ray; an orbit's folded image below
+  ~12 km tangent height keeps the upper branch; empty beyond ~330 000 km where limb rays pass the nadir), ~1.15 ms.
+  Game: `world/refraction.gd` rebuilds it when the camera's distance from the Earth's centre changes by > 0.5 % of its
+  height (>= 5 m; ground views never, orbit rarely, ascent a few times per second), uploads an R32F texture + globals
+  `refraction_*`; `shaders/refraction.gdshaderinc` turns each vertex of the Sun disc, the Moon and the stars up in its
+  vertical plane (the geodetic vertical, every frame) - the disc rises ~0.57 deg at the horizon, flattens to ~0.85 and
+  stays visible ~2-3 min after its geometric set; the fragments' sky / transmittance follow the apparent ray (an
+  approximation of the curved path). Not refracted: the Sun light and the sky tables (they use the geometric Sun: the
+  ground's direct light ends at the geometric set), terrestrial refraction (the horizon dip), dispersion (green
+  flash). `render_check --no_refraction` / `--look_at_sun` compare.
+- **Known limits.** No clouds, weather-dependent aerosols, airglow; one aerosol set for the whole Earth;
   one Sun light (above); the totality approximation (above); night vision's limits (above); the 256 x 128 Earth mesh
   in scaled space sits up to ~0.6 km below the ellipsoid (-2 % in its aerial perspective).
 

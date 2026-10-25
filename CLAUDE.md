@@ -41,7 +41,8 @@ tests/       Validation fixtures (reference values from JPL Horizons etc.).
   leg landing tracks bodies within 5 km of the site; the sea state at a drone ship's station: long-crested JONSWAP sea,
   deterministic by seed; the Earth's atmosphere optics and precomputed scattering: a float64 port of Bruneton 2017 -
   transmittance / scattering / irradiance tables in luminance with 5 orders + geometric tail, the WGS84 stretch, CPU
-  evaluation of sun transmittance, sky luminance and illuminance - and their cache `data/atmosphere/`, input-hashed),
+  evaluation of sun transmittance, sky luminance and illuminance - and their cache `data/atmosphere/`, input-hashed;
+  astronomical refraction from the US76 density: the lift table of Sun, Moon and stars for the camera),
   integrators (RK4, DOP853 + dense output, terminal events), orbit (Kepler, coast propagation, CR3BP, Clohessy-Wiltshire relative motion,
   CCSDS OEM parser + archive with segment-wise Lagrange interpolation, synthetic station orbit by J2 rates, energy- and J2-mean semi-major axis),
   mission (position targeting, 9:2 NRHO reference, lunar outbound and lunar orbit transfers, lunar descent planning,

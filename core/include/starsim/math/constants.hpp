@@ -93,6 +93,10 @@ inline constexpr double boltzmann_j_per_k = 1.380649e-23;
 // One Dobson unit as a column of molecules [S: 2.6867e20 m^-2, 0.01 mm of gas at 273.15 K and 101325 Pa;
 // Loschmidt constant 2.6867811e25 m^-3 x 1e-5 m].
 inline constexpr double dobson_unit_per_m2 = 2.6867e20;
+// Refractivity n - 1 of dry standard air (288.15 K, 101325 Pa, density 1.2250 kg/m^3) at 550 nm, the centre of the
+// visual band [S: Edlén 1966, Metrologia 2, 71, eq. 1: (n - 1) 1e8 = 8342.13 + 2406030 / (130 - s^2)
+// + 15997 / (38.9 - s^2), s = 1/0.55 um^-1]. Refraction scales it with the density (Gladstone-Dale).
+inline constexpr double standard_air_refractivity_550nm = 2.778244e-4;
 // Molecule number density of standard air (288.15 K, 101325 Pa) used by the Rayleigh formula
 // [S: Bucholtz 1995, Appl. Opt. 34, 2765, N_s = 2.54743e19 cm^-3].
 inline constexpr double standard_air_number_density_per_m3 = 2.54743e25;

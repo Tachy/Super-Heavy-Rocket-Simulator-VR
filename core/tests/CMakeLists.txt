@@ -25,6 +25,7 @@ add_executable(starsim_core_tests
     test_synthetic_station_orbit.cpp
     test_artemis_validation.cpp
     test_eclipse.cpp
+    test_atmospheric_refraction.cpp
     test_vehicle_models.cpp
     test_liquid_settling.cpp
     test_vehicle_settling.cpp

@@ -190,6 +190,7 @@ add_library(starsim_core STATIC
     src/ephemeris/interpolated_ephemeris.cpp
     src/environment/point_mass_gravity.cpp
     src/environment/eclipse.cpp
+    src/environment/atmospheric_refraction.cpp
     src/environment/thermal_radiation.cpp
     src/environment/reference_body.cpp
     src/orbit/kepler.cpp

@@ -174,6 +174,24 @@ double StarsimCore::solar_eclipse_fraction_gcrf(const godot::Vector3& position_g
     }, 0.0);
 }
 
+godot::Dictionary StarsimCore::atmospheric_refraction(const godot::Vector3& camera_fixed_m) const {
+    return guarded(*this, [&] {
+        const math::Vec3 fixed = to_core(camera_fixed_m);
+        const double altitude_m = frames::fixed_to_geodetic(fixed).height_m;
+        const auto table = environment::refraction_lift_table(refraction_, norm(fixed) - altitude_m, altitude_m);
+        godot::PackedFloat32Array lift;
+        lift.resize(static_cast<int64_t>(table.lift_rad.size()));
+        for (std::size_t i = 0; i < table.lift_rad.size(); ++i) {
+            lift.set(static_cast<int64_t>(i), static_cast<float>(table.lift_rad[i]));
+        }
+        godot::Dictionary result;
+        result["min_rad"] = table.true_elevation_min_rad;
+        result["span_rad"] = table.true_elevation_span_rad;
+        result["lift_rad"] = lift;
+        return result;
+    }, godot::Dictionary());
+}
+
 godot::Dictionary StarsimCore::load_terrain(const godot::String& config_dir) {
     const std::filesystem::path config(config_dir.utf8().get_data());
     const auto data_dir = config.parent_path() / "data";
@@ -376,6 +394,7 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::solar_eclipse_fraction);
     ClassDB::bind_method(D_METHOD("solar_eclipse_fraction_gcrf", "position_gcrf_m", "tdb_s"),
                          &StarsimCore::solar_eclipse_fraction_gcrf);
+    ClassDB::bind_method(D_METHOD("atmospheric_refraction", "camera_fixed_m"), &StarsimCore::atmospheric_refraction);
     ClassDB::bind_method(D_METHOD("load_terrain", "config_dir"), &StarsimCore::load_terrain);
     ClassDB::bind_method(D_METHOD("surface_samples", "body", "latitudes_deg", "longitudes_deg"),
                          &StarsimCore::surface_samples);

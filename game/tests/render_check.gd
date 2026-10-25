@@ -15,6 +15,8 @@
 #          [--wait_on_pad] (a launch window's wait on the pad: T-) [--view=1] (Tab presses: switch the viewed object)
 #          [--legacy_hud] (F1: the old HUD too)
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
+# Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
+#          --look_at_sun aims a ground view at the (true) Sun.
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -48,6 +50,7 @@ func _process(_delta: float) -> bool:
 	if _frames == 0:
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
 		world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
+		world.refraction.enabled = not _args.has("no_refraction")
 		world.set_focus(_args.get("focus", World.FOCUS_EARTH))
 		if _args.has("lat"):
 			_view_from_ground(world)
@@ -60,6 +63,8 @@ func _process(_delta: float) -> bool:
 		if _args.has("azimuth"): cam.azimuth = deg_to_rad(float(_args["azimuth"]))
 		if _args.has("elevation"): cam.elevation = deg_to_rad(float(_args["elevation"]))
 		if _args.has("fov"): cam.fov = float(_args["fov"])
+		if _args.has("look_at_sun"):
+			_aim_at_sun(world)
 		if _args.has("look_at_moon"):
 			_aim_at_moon(world)
 		if _args.has("view_from"):
@@ -362,6 +367,15 @@ func _view_at_sea(world: World) -> void:
 	print("render_check: sea view at %.4f, %.4f: surface %.2f m, water %s" % [lat, lon, surface_m, water])
 	world.set_ground_site({"id": "sea", "name": "sea", "latitude_deg": lat, "longitude_deg": lon, "height_m": surface_m,
 			"eye_height_m": float(_args.get("eye_height", "10"))})
+
+
+## Aims a ground view at the true (unrefracted) Sun.
+func _aim_at_sun(world: World) -> void:
+	world.update_world()
+	var cam := world.camera
+	var d := (world.sun_apparent_from_earth_m - cam.position_gcrf_m).normalized()
+	cam.elevation = asin(clampf(d.dot(cam.site_up_gcrf), -1.0, 1.0))
+	cam.azimuth = atan2(d.dot(cam.site_east_gcrf), d.dot(cam.site_north_gcrf))
 
 
 # Ground camera: point at the Moon.
