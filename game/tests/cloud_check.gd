@@ -26,6 +26,14 @@
 #      shapes) under the slabs of cf 1 the ground's total light vs the vehicle's CPU light (grid mean) at the same spot
 #      within 10 % (broken: reported - the spot is in a gap or under a cumulus, the CPU's the cell's mean); with weather off every pixel of land and sea bit-identical to the
 #      shader without its CLOUD_LIGHT blocks.
+#   7. (fix round 1) through cloud_light_probe.gdshader (the surfaces' cloud-light functions at receivers on annuli
+#      around the camera, no terrain geometry), the means over eight independent sites (shape-noise realisations):
+#      the hand-overs near map -> far map (9-11 km: annuli at 8 / 10 / 12 km) and far map -> the slanted column
+#      (120-140 km: 110 / 130 / 150 km), a cf 0.3 layer and a deck, Sun 45 / 8 deg: steps <= 0.05 + 3 standard errors
+#      (0.03 for the smooth far tiers); over the disc inside the near tier the shapes' area mean of the direct Sun
+#      vs the CPU's cell (cf 0.15 / 0.3 / 0.4, Sun 45 / 8 deg; the beam-cover overlap model, constants.hpp
+#      cloud_overlap_*, is fitted to these shadows: STARSIM_SLANT_TABLE=1 prints the fit table), the near map vs the
+#      far map over the same receivers, the column terms vs the CPU, the vehicle's total light vs the ground's mean.
 # Detail levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_check.gd
 extends SceneTree
@@ -53,7 +61,7 @@ const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 61
+const EXPECTED_SAMPLES := 93
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -72,6 +80,21 @@ const DIRECT_FLOOR := 0.01
 const VEHICLE_TOLERANCE := 0.10
 const FACTOR_TOLERANCE := 0.03
 const GROUND_RATIO_TOLERANCE := 0.05
+## Section 7 (hand-overs and the shapes' area means, receivers on annuli through cloud_light_probe.gdshader).
+const PROBE_WIDTH := 256
+## Sites ~55 km apart (degrees north, east of the check site): independent realisations of the shape noise.
+const SITES := [Vector2(0.0, 0.0), Vector2(0.0, 0.55), Vector2(0.0, -0.55), Vector2(0.5, 0.0), Vector2(-0.5, 0.0),
+		Vector2(0.5, 0.55), Vector2(-0.5, -0.55), Vector2(0.5, -0.55)]
+const DISC_RADIUS_M := 8000.0  ## inside the near tier (it is the only one below 9 km)
+## The near map holds one realisation of the shape noise: an area mean over N independent cloud cells carries
+## sigma ~ sqrt(cf (1 - cf) / N) in the covered fraction (the coverage-preserving noise fixes the mean over a tile, not
+## over a disc), and the shapes' internal density variation (Jensen: mean of exp(-tau) above exp(-mean tau)) moves the
+## cloudy part's transmittance up. Tolerances are set from the measured values with that margin.
+const DISC_TOLERANCE := 0.08
+## A step across the hand-over: this much (the tiers' systematic agreement: the fitted overlap is good to 0.02) plus
+## three standard errors of the two annuli's means over the sites (the shape noise's sampling error).
+const HANDOVER_TOLERANCE := 0.05
+const FAR_HANDOVER_TOLERANCE := 0.03  ## the far map and the slanted column are both smooth (the grid mean)
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
@@ -85,6 +108,8 @@ var _files: Array[String] = []
 var _terrain_parent := Node3D.new()  ## Earth-fixed frame of the terrain quad (section 6)
 var _terrain_quad := MeshInstance3D.new()
 var _terrain_material := ShaderMaterial.new()
+var _probe_viewport := SubViewport.new()  ## section 7: the receivers' probe
+var _probe_material := ShaderMaterial.new()
 var _water_material := ShaderMaterial.new()  ## the same with an all-water mask (the sea model)
 
 
@@ -103,6 +128,7 @@ func _run() -> void:
 		_fail_and_quit("atmosphere tables not loaded")
 		return
 	_setup_scene()
+	_setup_probe()
 	_clouds.setup(_core)
 	if not _clouds.wait_until_ready():
 		_fail_and_quit("cloud noise not ready")
@@ -111,6 +137,10 @@ func _run() -> void:
 	_detail_off()
 	_check("transfer table loaded", _clouds.transfer_ready, "config/" + CloudLayer.TRANSFER_TABLE)
 
+	if OS.get_environment("STARSIM_SLANT_TABLE") != "":
+		await _slant_table()
+		quit(0)
+		return
 	var thin := _slab("thin", SLAB_BOTTOM_M, SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0)
 	_show(thin)
 	var sun := _local_direction(45.0, 135.0)
@@ -210,6 +240,8 @@ func _run() -> void:
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
 	# 6. Light on the ground under the clouds.
 	await _ground_light_samples()
+	# 7. The shadow maps' hand-overs and the shapes on broken cloud.
+	await _handover_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -565,14 +597,206 @@ static func _facing_quad(view: Vector3, normal: Vector3, half_m: float) -> Array
 	return mesh
 
 
+## Section 7 (Task 9 fix round 1): the shadow maps' hand-overs and the shipped shapes on broken cloud, through
+## cloud_light_probe.gdshader (the surfaces' own cloud-light functions at receivers around a camera 2 m up). Receivers
+## on annuli around the camera (area-uniform), the Sun at azimuth 135 deg. One site holds one realisation of the shape
+## noise (its cells are kilometres to tens of km across: a disc of 8 km sees a few of them), so every number is the mean
+## over SITES (~55 km apart: independent realisations), which brings the sampling error down by sqrt(8).
+func _handover_samples() -> void:
+	_clouds.shadow_effect.grid_mean_only = false
+	# a. Hand-overs: the direct Sun's mean over 1 km annuli at 8 / 10 / 12 km (near map -> far map, 9-11 km) and over
+	# 4 km annuli at 110 / 130 / 150 km (far map -> the slanted column, 120-140 km), a broken layer and a deck.
+	for case: Array in [["cf 0.3 broken", 0.3, 2.0 * DECK_LIQUID_KG_M3], ["deck cf 1", 1.0, DECK_LIQUID_KG_M3]]:
+		_show(_slab("handover_%d" % int(case[1] * 10.0), SLAB_BOTTOM_M, SLAB_TOP_M, case[2], case[1]))
+		for elevation in [45.0, 8.0]:
+			var label := "%s, Sun %.0f deg" % [case[0], elevation]
+			var near_bands: Array = await _sites_mean(elevation, [[7000.0, 9000.0, 32, 720], [9000.0, 11000.0, 32, 720],
+					[11000.0, 13000.0, 32, 720]], SITES.size())
+			var far_bands: Array = await _sites_mean(elevation, [[108000.0, 112000.0, 12, 360],
+					[128000.0, 132000.0, 12, 360], [148000.0, 152000.0, 12, 360]], 1)
+			var step_a: float = absf(near_bands[1].direct - near_bands[0].direct)
+			var step_b: float = absf(near_bands[2].direct - near_bands[1].direct)
+			var allowed_a: float = HANDOVER_TOLERANCE + 3.0 * sqrt(pow(near_bands[0].direct_se, 2.0) + pow(near_bands[1].direct_se, 2.0))
+			var allowed_b: float = HANDOVER_TOLERANCE + 3.0 * sqrt(pow(near_bands[1].direct_se, 2.0) + pow(near_bands[2].direct_se, 2.0))
+			_check("hand-over 9-11 km, no ring, " + label, step_a <= allowed_a and step_b <= allowed_b,
+					"direct at 8 / 10 / 12 km %.4f %.4f %.4f (steps %.4f %.4f, allowed %.4f %.4f; near map %.4f %.4f %.4f, far map %.4f %.4f %.4f)" % [
+					near_bands[0].direct, near_bands[1].direct, near_bands[2].direct, step_a, step_b, allowed_a, allowed_b,
+					near_bands[0].near, near_bands[1].near, near_bands[2].near, near_bands[0].far,
+					near_bands[1].far, near_bands[2].far])
+			var far_a: float = absf(far_bands[1].direct - far_bands[0].direct)
+			var far_b: float = absf(far_bands[2].direct - far_bands[1].direct)
+			var column_gap: float = absf(far_bands[0].far - far_bands[0].column)
+			_check("hand-over 120-140 km, no ring, " + label,
+					maxf(maxf(far_a, far_b), column_gap) <= FAR_HANDOVER_TOLERANCE,
+					"direct at 110 / 130 / 150 km %.4f %.4f %.4f (steps %.4f %.4f); far map %.4f vs the slanted column %.4f at 110 km" % [
+					far_bands[0].direct, far_bands[1].direct, far_bands[2].direct, far_a, far_b, far_bands[0].far,
+					far_bands[0].column])
+	# b. The shipped near map (the shapes) on broken cloud over the disc inside the near tier (r < 8 km): the area mean
+	# of the ground factors against the CPU's cell factors, the vehicle's light against the ground's.
+	for fraction in [0.15, 0.3, BROKEN_FRACTION]:
+		_show(_slab("disc_%d" % int(fraction * 100.0), SLAB_BOTTOM_M, SLAB_TOP_M, DECK_LIQUID_KG_M3, fraction))
+		for elevation in [45.0, 8.0]:
+			var label := "cf %.2f, Sun %.0f deg" % [fraction, elevation]
+			var disc: Dictionary = (await _sites_mean(elevation, [[200.0, DISC_RADIUS_M, 40, 720]], SITES.size()))[0]
+			var camera := _point(2.0)
+			var sun := _local_direction(elevation, 135.0)
+			var cpu: Dictionary = _core.weather_cloud_light(camera, sun)
+			var t_s := float(cpu["sun_transmittance"])
+			var t_sd := float(cpu["sun_diffuse"])
+			var t_d := float(cpu["sky_factor"])
+			_check("shapes: area mean of the direct Sun vs the CPU's cell " + label,
+					absf(disc.direct - t_s) <= DISC_TOLERANCE * maxf(t_s, 0.1) and disc.direct <= 1.0,
+					"ground %.4f (near map %.4f, far map %.4f) CPU %.4f" % [disc.direct, disc.near, disc.far, t_s])
+			_check("shapes: the near map's mean vs the far map's over the same receivers " + label,
+					absf(disc.near - disc.far) <= DISC_TOLERANCE * maxf(disc.far, 0.1),
+					"near %.4f far %.4f" % [disc.near, disc.far])
+			_check("ground: the column terms vs the CPU " + label,
+					absf(disc.diffuse - t_sd) <= FACTOR_TOLERANCE * maxf(t_sd, 0.01)
+					and absf(disc.sky - t_d) <= FACTOR_TOLERANCE * t_d,
+					"Sun's diffuse %.4f (CPU %.4f) sky %.4f (CPU %.4f)" % [disc.diffuse, t_sd, disc.sky, t_d])
+			var lux: Dictionary = _core.atmosphere_illuminance(camera, _local_direction(90.0, 0.0), sun)
+			var e_sun: Vector3 = lux["sun_lux"]
+			var e_sky: Vector3 = lux["sky_lux"]
+			var sun_share := _luminance(e_sun) / _luminance(e_sun + e_sky)
+			var ground_total: float = (disc.direct + disc.diffuse) * sun_share + disc.sky * (1.0 - sun_share)
+			var vehicle_total := (t_s + t_sd) * sun_share + t_d * (1.0 - sun_share)
+			_check("vehicle light (CPU) vs the ground's mean (shapes) " + label,
+					absf(vehicle_total - ground_total) <= VEHICLE_TOLERANCE * ground_total,
+					"vehicle %.4f ground %.4f (Sun share %.3f)" % [vehicle_total, ground_total, sun_share])
+
+
+## The annulus means (see _annulus_means) averaged over the first site_count SITES; ranges: [[r0 m, r1 m, rings,
+## azimuths], ...]. Returns one Dictionary per range.
+func _sites_mean(elevation_deg: float, ranges: Array, site_count: int) -> Array:
+	var sums: Array = []
+	var squares: Array[float] = []
+	for r in ranges:
+		sums.append({})
+		squares.append(0.0)
+	for s in range(site_count):
+		var lat: float = LAT_DEG + SITES[s].x
+		var lon: float = LON_DEG + SITES[s].y
+		var camera := HeightSource.geodetic_to_fixed(lat, lon, 2.0)
+		var sun := _local_direction(elevation_deg, 135.0, lat, lon)
+		await _render(camera, sun, sun, 0)
+		for i in range(ranges.size()):
+			var m: Dictionary = await _annulus_means(camera, lat, lon, ranges[i][0], ranges[i][1], ranges[i][2],
+					ranges[i][3])
+			for key in m:
+				sums[i][key] = float(sums[i].get(key, 0.0)) + float(m[key]) / float(site_count)
+			squares[i] += float(m["direct"]) * float(m["direct"]) / float(site_count)
+	for i in range(ranges.size()):
+		# The standard error of the mean over the sites (the sites' spread is the shape noise's sampling error).
+		var variance := maxf(squares[i] - float(sums[i]["direct"]) * float(sums[i]["direct"]), 0.0)
+		sums[i]["direct_se"] = sqrt(variance / maxf(float(site_count - 1), 1.0)) if site_count > 1 else 0.0
+	return sums
+
+
+func _slant_table() -> void:
+	_clouds.shadow_effect.grid_mean_only = false
+	for fraction in [0.15, 0.3, 0.4, 0.6]:
+		_show(_slab("table_%d" % int(fraction * 100.0), SLAB_BOTTOM_M, SLAB_TOP_M, DECK_LIQUID_KG_M3, fraction))
+		for elevation in [75.0, 60.0, 45.0, 30.0, 20.0, 12.0, 8.0, 5.0]:
+			var disc: Dictionary = (await _sites_mean(elevation, [[200.0, DISC_RADIUS_M, 40, 720]], SITES.size()))[0]
+			print("slant table: cf %.2f elevation %4.1f  T %.4f  C_eff %.4f  n %.3f" % [fraction, elevation, disc.direct,
+					1.0 - disc.direct, log(1.0 - (1.0 - disc.direct)) / log(1.0 - fraction)])
+
+
+func _setup_probe() -> void:
+	_probe_viewport.use_hdr_2d = true
+	_probe_viewport.own_world_3d = true
+	_probe_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	root.add_child(_probe_viewport)
+	var camera := Camera3D.new()
+	camera.current = true
+	_probe_viewport.add_child(camera)
+	var shader := load("res://tests/cloud_light_probe.gdshader") as Shader
+	_probe_material.shader = shader
+	var quad := MeshInstance3D.new()
+	var mesh := QuadMesh.new()
+	mesh.size = Vector2(2.0, 2.0)
+	quad.mesh = mesh
+	quad.material_override = _probe_material
+	quad.position = Vector3(0.0, 0.0, -1.0)
+	quad.extra_cull_margin = 16384.0
+	_probe_viewport.add_child(quad)
+
+
+## The Earth-fixed point at arc distance s (m) from the camera's site toward the azimuth (from north, east positive),
+## height 0 (spherical destination on the mean radius: the distance is nominal, to 0.3 %).
+static func _destination(site_lat_deg: float, site_lon_deg: float, distance_m: float, azimuth_rad: float) -> Vector3:
+	var lat := deg_to_rad(site_lat_deg)
+	var delta := distance_m / 6.371e6
+	var lat2 := asin(sin(lat) * cos(delta) + cos(lat) * sin(delta) * cos(azimuth_rad))
+	var lon2 := deg_to_rad(site_lon_deg) + atan2(sin(azimuth_rad) * sin(delta) * cos(lat),
+			cos(delta) - sin(lat) * sin(lat2))
+	return HeightSource.geodetic_to_fixed(rad_to_deg(lat2), rad_to_deg(lon2), 0.0)
+
+
+## The area mean of the surfaces' cloud light over the annulus r0..r1 around the camera (rings x azimuths, weight r):
+## {direct (the distance rule), near, far (the maps alone), column (slanted to the Sun), diffuse, sky}.
+func _annulus_means(camera_itrf: Vector3, site_lat_deg: float, site_lon_deg: float, r0: float, r1: float, rings: int,
+		azimuths: int) -> Dictionary:
+	var offsets := PackedVector3Array()
+	var weights := PackedFloat64Array()
+	for i in range(rings):
+		var r := r0 + (float(i) + 0.5) / float(rings) * (r1 - r0)
+		for k in range(azimuths):
+			var azimuth := TAU * (float(k) + 0.5 + 0.37 * float(i)) / float(azimuths)  # staggered rings
+			offsets.append(Frames.to_render(_destination(site_lat_deg, site_lon_deg, r, azimuth) - camera_itrf))
+			weights.append(r)
+	var first := await _probe(offsets, 0)
+	var second := await _probe(offsets, 1)
+	var sum := PackedFloat64Array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+	var total := 0.0
+	for i in range(offsets.size()):
+		var w := weights[i]
+		total += w
+		sum[0] += w * first[i].x
+		sum[1] += w * first[i].y
+		sum[2] += w * first[i].z
+		sum[3] += w * second[i].x
+		sum[4] += w * second[i].y
+		sum[5] += w * second[i].z
+	return {"direct": sum[0] / total, "near": sum[1] / total, "far": sum[2] / total, "column": sum[3] / total,
+			"diffuse": sum[4] / total, "sky": sum[5] / total}
+
+
+## Renders the probe shader over the receivers (camera-relative offsets, Earth-local render axes): one pixel each.
+func _probe(offsets: PackedVector3Array, channel: int) -> PackedVector3Array:
+	var width := PROBE_WIDTH
+	var height := (offsets.size() - 1) / width + 1
+	var floats := PackedFloat32Array()
+	floats.resize(width * height * 4)
+	for i in range(offsets.size()):
+		floats[4 * i] = offsets[i].x
+		floats[4 * i + 1] = offsets[i].y
+		floats[4 * i + 2] = offsets[i].z
+		floats[4 * i + 3] = 1.0
+	var image := Image.create_from_data(width, height, false, Image.FORMAT_RGBAF, floats.to_byte_array())
+	_probe_material.set_shader_parameter(&"receivers", ImageTexture.create_from_image(image))
+	_probe_material.set_shader_parameter(&"channel", channel)
+	_probe_viewport.size = Vector2i(width, height)
+	_probe_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+	await RenderingServer.frame_post_draw
+	await RenderingServer.frame_post_draw
+	var result := _probe_viewport.get_texture().get_image()
+	var out := PackedVector3Array()
+	for i in range(offsets.size()):
+		var c := result.get_pixel(i % width, i / width)
+		out.append(Vector3(c.r, c.g, c.b))
+	return out
+
+
 func _point(height_m: float) -> Vector3:
 	return HeightSource.geodetic_to_fixed(LAT_DEG, LON_DEG, height_m)
 
 
 ## ITRF unit vector at elevation above the geodetic horizon and azimuth (from north, east positive) at the site.
-static func _local_direction(elevation_deg: float, azimuth_deg: float) -> Vector3:
-	var lat := deg_to_rad(LAT_DEG)
-	var lon := deg_to_rad(LON_DEG)
+static func _local_direction(elevation_deg: float, azimuth_deg: float, lat_deg := LAT_DEG,
+		lon_deg := LON_DEG) -> Vector3:
+	var lat := deg_to_rad(lat_deg)
+	var lon := deg_to_rad(lon_deg)
 	var up := Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
 	var east := Vector3(-sin(lon), cos(lon), 0.0)
 	var north := Vector3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat))
