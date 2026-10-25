@@ -21,30 +21,14 @@
 #include <string>
 #include <vector>
 
-#include "starsim/config/geoid_config.hpp"
-#include "starsim/environment/weather_snapshot.hpp"
+#include "starsim/environment/weather_snapshot_build.hpp"
 #include "starsim/environment/weather_snapshot_file.hpp"
-#include "starsim/weather_decode/weather_decode.hpp"
 
 namespace {
 
 using namespace starsim;
 using environment::WeatherSnapshotId;
 using environment::WeatherSourceKind;
-using weather_decode::FloatGrid;
-
-constexpr int grid_rows = 721, grid_columns = 1440;  // 0.25 deg, 90 N .. 90 S, 0 .. 359.75 E
-using environment::era5_levels_hpa;
-using environment::gfs_levels_mb;
-
-std::vector<std::byte> read_file(const std::filesystem::path& p) {
-    std::ifstream in(p, std::ios::binary);
-    if (!in) throw std::runtime_error("cannot read " + p.string());
-    std::vector<char> chars{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-    std::vector<std::byte> bytes(chars.size());
-    for (std::size_t i = 0; i < chars.size(); ++i) bytes[i] = static_cast<std::byte>(chars[i]);
-    return bytes;
-}
 
 WeatherSnapshotId parse_key(const std::string& key) {
     WeatherSnapshotId id;
@@ -62,36 +46,6 @@ WeatherSnapshotId parse_key(const std::string& key) {
         return id;
     }
     throw std::runtime_error("unknown cache key " + key);
-}
-
-FloatGrid era5_file(const std::filesystem::path& file, int levels) {
-    return weather_decode::decode_zarr_blosc_chunk(read_file(file), levels, grid_rows, grid_columns);
-}
-
-FloatGrid era5_grid(const std::filesystem::path& dir, const std::string& key, const char* variable, int levels) {
-    return era5_file(dir / environment::era5_file_name(key, variable), levels);
-}
-
-FloatGrid gfs_record(const std::filesystem::path& file) {
-    const auto field = weather_decode::decode_grib2_message(read_file(file));
-    if (field.grid.rows != grid_rows || field.grid.columns != grid_columns || field.first_latitude_deg != 90.0 ||
-        field.first_longitude_deg != 0.0) {
-        throw std::runtime_error("unexpected GFS grid in " + file.string());
-    }
-    return field.grid;
-}
-
-FloatGrid gfs_levels(const std::filesystem::path& dir, const std::string& key, const char* variable) {
-    FloatGrid out;
-    out.levels = static_cast<int>(gfs_levels_mb.size());
-    out.rows = grid_rows;
-    out.columns = grid_columns;
-    out.values.reserve(static_cast<std::size_t>(out.levels) * grid_rows * grid_columns);
-    for (int mb : gfs_levels_mb) {
-        const FloatGrid g = gfs_record(dir / environment::gfs_level_file_name(key, variable, mb));
-        out.values.insert(out.values.end(), g.values.begin(), g.values.end());
-    }
-    return out;
 }
 
 }  // namespace
@@ -126,39 +80,14 @@ int main(int argc, char** argv) {
     try {
         const auto t0 = std::chrono::steady_clock::now();
         const WeatherSnapshotId id = parse_key(key);
-        const auto geoid = config::load_coarse_geoid(config_dir);
-        std::optional<environment::WeatherSnapshot> snapshot;
-        if (source == "era5") {
-            if (id.kind != WeatherSourceKind::era5) throw std::runtime_error("--era5 needs an era5_<hour> key");
-            environment::Era5Fields f;
-            const int levels = static_cast<int>(era5_levels_hpa.size());
-            for (int hpa : era5_levels_hpa) f.levels_pa.push_back(hpa * 100.0);
-            f.cloud_fraction = era5_grid(raw_dir, key, "fraction_of_cloud_cover", levels);
-            f.liquid_kg_kg = era5_grid(raw_dir, key, "specific_cloud_liquid_water_content", levels);
-            f.ice_kg_kg = era5_grid(raw_dir, key, "specific_cloud_ice_water_content", levels);
-            f.temperature_k = era5_grid(raw_dir, key, "temperature", levels);
-            f.surface_pressure_pa = era5_grid(raw_dir, key, "surface_pressure", 1);
-            f.total_column_water_vapour_kg_m2 = era5_grid(raw_dir, key, "total_column_water_vapour", 1);
-            f.surface_geopotential_m2_s2 = era5_file(raw_dir / environment::era5_static_orography_file_name, 1);
-            snapshot = environment::WeatherSnapshot::from_era5(id, f, geoid);
-        } else {
-            if (id.kind != WeatherSourceKind::gfs) throw std::runtime_error("--gfs needs a gfs_<cycle>_f<lead> key");
-            environment::GfsFields f;
-            for (int mb : gfs_levels_mb) f.levels_pa.push_back(mb * 100.0);
-            f.cloud_percent = gfs_levels(raw_dir, key, "TCDC");
-            f.liquid_kg_kg = gfs_levels(raw_dir, key, "CLMR");
-            f.ice_kg_kg = gfs_levels(raw_dir, key, "ICMR");
-            f.temperature_k = gfs_levels(raw_dir, key, "TMP");
-            f.geopotential_height_m = gfs_levels(raw_dir, key, "HGT");
-            f.surface_geopotential_height_m = gfs_record(raw_dir / environment::gfs_surface_height_file_name(key));
-            snapshot = environment::WeatherSnapshot::from_gfs(id, f, geoid);
-        }
-        if (downsample > 1) snapshot = snapshot->downsampled(downsample);
+        if (source == "era5" && id.kind != WeatherSourceKind::era5) throw std::runtime_error("--era5 needs an era5_<hour> key");
+        if (source == "gfs" && id.kind != WeatherSourceKind::gfs) throw std::runtime_error("--gfs needs a gfs_<cycle>_f<lead> key");
+        const auto snapshot = environment::build_weather_snapshot_from_raw(id, raw_dir, config_dir, downsample);
         const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         if (out_file.has_parent_path()) std::filesystem::create_directories(out_file.parent_path());
-        environment::write_weather_snapshot(out_file, *snapshot);
+        environment::write_weather_snapshot(out_file, snapshot);
         std::printf("weather snapshot %s: %d x %d, built in %.1f s\nwrote %s (%.1f MB)\n", key.c_str(),
-                    snapshot->rows(), snapshot->columns(), seconds, out_file.string().c_str(),
+                    snapshot.rows(), snapshot.columns(), seconds, out_file.string().c_str(),
                     std::filesystem::file_size(out_file) / 1e6);
         return 0;
     } catch (const std::exception& e) {

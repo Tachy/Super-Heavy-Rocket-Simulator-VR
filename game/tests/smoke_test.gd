@@ -64,6 +64,7 @@ func _initialize() -> void:
 	_check(_check_terrain_streaming(core, starbase, bool(terrain_present.get("earth", false))) == true,
 			"terrain streaming checks ran to the end")
 	_check(_check_atmosphere(core) == true, "atmosphere checks ran to the end")
+	_check(_check_weather(core) == true, "weather checks ran to the end")
 
 	# A script error aborts a check function (it then returns null) without failing a check: count it as a failure.
 	_check(_check_falcon9(config_dir, tdb) == true, "Falcon 9 checks ran to the end")
@@ -163,6 +164,50 @@ func _check_atmosphere(core: StarsimCore) -> bool:
 	_check((lux["sun_lux"] as Vector3).y > 1e4 and (lux["sky_lux"] as Vector3).y > 1e3,
 			"illuminance: sun %s, sky %s" % [lux["sun_lux"], lux["sky_lux"]])
 	_check((core.atmosphere_sun_transmittance(pad, sun) as Vector3).y > 0.3, "sun transmittance at 60 deg elevation")
+	return true
+
+
+# Weather (M8): source selection, snapshot files, the CPU cloud light and the noise textures.
+func _check_weather(core: StarsimCore) -> bool:
+	var zattrs := '{"valid_time_stop": "2025-12-31", "valid_time_stop_era5t": "2026-10-20"}'
+	var hour: float = core.weather_utc_hour(core.utc_to_tdb_s("2024-04-08T18:30:00"))
+	var bracket: Dictionary = core.weather_bracket(hour, 1, zattrs, -1, 2025)
+	_check(bracket.get("ok", false) and bracket["before"]["kind"] == "era5" and bracket["after"]["kind"] == "era5"
+			and absf(float(bracket["blend"]) - 0.5) < 1e-6, "weather_bracket 2024-04-08 18:30: era5, blend 0.5")
+	_check(int(bracket["after"]["valid_hour"]) - int(bracket["before"]["valid_hour"]) == 1
+			and String(bracket["before"]["cache_key"]).begins_with("era5_"), "weather_bracket: hourly ids with cache keys")
+	var offline: Dictionary = core.weather_bracket(hour + 24.0 * 365 * 5, 1, "", -1, 2025)
+	_check(offline.get("ok", false) and offline["before"]["kind"] == "analog", "weather_bracket offline: analog")
+	var requests: Array = core.weather_requests(bracket["before"], "")
+	_check(requests.size() == 7 and String(requests[0]["url"]).begins_with("https://"), "weather_requests: seven ERA5 files")
+	_check(core.weather_gfs_cycle_candidates(hour + 24.0 * 365 * 5, 3).size() == 3, "weather_gfs_cycle_candidates")
+	_check(core.weather_snapshot_step(1.0, 10.0) == 1 and core.weather_snapshot_step(1e6, 100.0) == 0, "weather_snapshot_step")
+	_check(core.weather_cloud_light(Vector3(6378137.0, 0, 0), Vector3(1, 0, 0)) == {"sun_transmittance": 1.0, "sky_factor": 1.0},
+			"weather_cloud_light without weather: 1, 1")
+	var bad: Dictionary = core.weather_load_snapshot("no_such_dir/none.wthr")
+	_check(not bad.get("ok", true) and not String(bad.get("error", "")).is_empty(), "weather_load_snapshot of a missing file fails")
+	var file := OS.get_temp_dir().path_join("starsim_smoke_slab_%d.wthr" % OS.get_process_id())
+	_check(core.weather_write_slab_snapshot(file, 2000.0, 3000.0, 3e-4, 1.0), "weather_write_slab_snapshot")
+	var loaded: Dictionary = core.weather_load_snapshot(file)
+	_check(loaded.get("ok", false) and (loaded["texels"] as PackedByteArray).size()
+			== int(loaded["rows"]) * int(loaded["columns"]) * int(loaded["layers"]) * 4
+			and (loaded["layer_bottoms_m"] as PackedFloat64Array).size() == int(loaded["layers"]) + 1,
+			"weather_load_snapshot: texels %d x %d x %d" % [loaded.get("rows", 0), loaded.get("columns", 0), loaded.get("layers", 0)])
+	_check(core.weather_set_active(file, file, 0.5).get("ok", false), "weather_set_active")
+	var pos := Vector3(6378137.0, 0, 0)
+	var under: Dictionary = core.weather_cloud_light(pos, Vector3(1, 0, 0))
+	_check(float(under["sun_transmittance"]) < 0.5 and float(under["sky_factor"]) < 1.0,
+			"weather_cloud_light under a slab: sun %.3f, sky %.3f" % [under["sun_transmittance"], under["sky_factor"]])
+	var above: Dictionary = core.weather_cloud_light(Vector3(6378137.0 + 5000.0, 0, 0), Vector3(1, 0, 0))
+	_check(absf(float(above["sun_transmittance"]) - 1.0) < 1e-9 and absf(float(above["sky_factor"]) - 1.0) < 1e-9,
+			"weather_cloud_light above the slab: 1, 1")
+	core.weather_set_active("", "", 0.0)
+	DirAccess.remove_absolute(file)
+	var noise: Dictionary = core.cloud_noise()
+	var n: int = int(noise["shape_size"])
+	_check(n == 128 and (noise["shape"] as PackedByteArray).size() == 4 * n * n * n
+			and (noise["detail"] as PackedByteArray).size() == 4 * int(noise["detail_size"]) ** 3
+			and (noise["coverage_threshold"] as PackedFloat32Array).size() == 256, "cloud_noise sizes")
 	return true
 
 

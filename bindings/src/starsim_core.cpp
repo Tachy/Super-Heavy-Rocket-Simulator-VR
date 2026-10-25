@@ -2,6 +2,7 @@
 
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3i.hpp>
@@ -10,12 +11,20 @@
 #include <array>
 #include <cstring>
 #include <filesystem>
+#include <algorithm>
 #include <limits>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "starsim/environment/atmosphere_table_file.hpp"
+#include "starsim/environment/cloud_noise.hpp"
+#include "starsim/environment/cloud_optics.hpp"
 #include "starsim/environment/eclipse.hpp"
+#include "starsim/environment/weather_snapshot_build.hpp"
+#include "starsim/environment/weather_snapshot_file.hpp"
+#include "starsim/environment/weather_source.hpp"
 #include "starsim/environment/surface_samples.hpp"
 #include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
@@ -81,6 +90,63 @@ godot::Dictionary atmosphere_parameters_dictionary(const environment::Atmosphere
     d["ground_albedo"] = p.ground_albedo;
     return d;
 }
+
+std::string utf8_of(const godot::String& s) { return s.utf8().get_data(); }
+
+const char* weather_kind_name(environment::WeatherSourceKind kind) {
+    switch (kind) {
+        case environment::WeatherSourceKind::era5: return "era5";
+        case environment::WeatherSourceKind::gfs: return "gfs";
+        case environment::WeatherSourceKind::analog: return "analog";
+        case environment::WeatherSourceKind::off: break;
+    }
+    return "off";
+}
+
+environment::WeatherSourceKind weather_kind_from_name(const godot::String& name) {
+    if (name == "era5") return environment::WeatherSourceKind::era5;
+    if (name == "gfs") return environment::WeatherSourceKind::gfs;
+    if (name == "analog") return environment::WeatherSourceKind::analog;
+    if (name == "off") return environment::WeatherSourceKind::off;
+    throw std::invalid_argument("unknown weather source kind '" + utf8_of(name) + "'");
+}
+
+void put_weather_id(godot::Dictionary& d, const environment::WeatherSnapshotId& id) {
+    d["kind"] = godot::String(weather_kind_name(id.kind));
+    d["valid_hour"] = static_cast<int64_t>(id.valid_hour);
+    d["cycle_hour"] = static_cast<int64_t>(id.cycle_hour);
+    d["lead_h"] = static_cast<int64_t>(id.lead_h);
+    d["analog_hour"] = static_cast<int64_t>(id.analog_hour);
+    d["cache_key"] = id.kind == environment::WeatherSourceKind::off ? godot::String()
+                                                                    : godot::String::utf8(id.cache_key().c_str());
+}
+
+godot::Dictionary weather_id_dictionary(const environment::WeatherSnapshotId& id) {
+    godot::Dictionary d;
+    put_weather_id(d, id);
+    return d;
+}
+
+environment::WeatherSnapshotId weather_id_from(const godot::Dictionary& d) {
+    environment::WeatherSnapshotId id;
+    id.kind = weather_kind_from_name(d.get("kind", godot::String("off")));
+    id.valid_hour = static_cast<int64_t>(d.get("valid_hour", 0));
+    id.cycle_hour = static_cast<int64_t>(d.get("cycle_hour", 0));
+    id.lead_h = static_cast<int>(static_cast<int64_t>(d.get("lead_h", 0)));
+    id.analog_hour = static_cast<int64_t>(d.get("analog_hour", 0));
+    return id;
+}
+
+godot::Dictionary weather_failure(const char* german_prefix, const std::exception& e) {
+    const godot::String message = godot::String::utf8(german_prefix) + godot::String::utf8(e.what());
+    godot::UtilityFunctions::push_error(message);
+    godot::Dictionary result;
+    result["ok"] = false;
+    result["error"] = message;
+    return result;
+}
+
+constexpr std::size_t weather_cache_size = 3;  // before, after and the one being prepared
 
 }  // namespace
 
@@ -374,6 +440,237 @@ godot::Dictionary StarsimCore::atmosphere_illuminance(const godot::Vector3& poin
     return d;
 }
 
+godot::Dictionary StarsimCore::weather_bracket(double utc_hour_f, int64_t step_h, const godot::String& era5_zattrs,
+                                               int64_t latest_gfs_cycle_hour, int64_t analog_year) const {
+    try {
+        std::optional<environment::Era5Availability> era5;
+        if (!era5_zattrs.is_empty()) era5 = environment::parse_era5_zattrs(utf8_of(era5_zattrs));
+        std::optional<environment::GfsCycle> gfs;
+        if (latest_gfs_cycle_hour >= 0) gfs = environment::GfsCycle{latest_gfs_cycle_hour};
+        const auto bracket = environment::weather_bracket(utc_hour_f, static_cast<int>(step_h), era5, gfs,
+                                                          static_cast<int>(analog_year));
+        godot::Dictionary result;
+        result["ok"] = true;
+        result["error"] = godot::String();
+        result["before"] = weather_id_dictionary(bracket.before);
+        result["after"] = weather_id_dictionary(bracket.after);
+        result["blend"] = bracket.blend;
+        return result;
+    } catch (const std::exception& e) {
+        return weather_failure("Wetterquelle konnte nicht gewählt werden: ", e);
+    }
+}
+
+godot::Array StarsimCore::weather_requests(const godot::Dictionary& snapshot, const godot::String& idx_text) const {
+    godot::Array out;
+    try {
+        const auto id = weather_id_from(snapshot);
+        std::vector<environment::WeatherRequest> requests;
+        if (id.kind == environment::WeatherSourceKind::gfs) {
+            requests = environment::gfs_requests(id, utf8_of(idx_text));
+        } else if (id.kind != environment::WeatherSourceKind::off) {
+            requests = environment::era5_requests(id);
+        }
+        for (const auto& r : requests) {
+            godot::Dictionary d;
+            d["url"] = godot::String::utf8(r.url.c_str());
+            d["first_byte"] = static_cast<int64_t>(r.first_byte);
+            d["last_byte"] = static_cast<int64_t>(r.last_byte);
+            d["file_name"] = godot::String::utf8(r.file_name.c_str());
+            out.push_back(d);
+        }
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String::utf8("Wetter-Downloads konnten nicht geplant werden: ") +
+                                            godot::String::utf8(e.what()));
+        out.clear();
+    }
+    return out;
+}
+
+godot::String StarsimCore::weather_gfs_index_url(const godot::Dictionary& snapshot) const {
+    try {
+        return godot::String::utf8(environment::gfs_index_url(weather_id_from(snapshot)).c_str());
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String::utf8("GFS-Index-Adresse ungültig: ") +
+                                            godot::String::utf8(e.what()));
+        return {};
+    }
+}
+
+godot::PackedInt64Array StarsimCore::weather_gfs_cycle_candidates(double wall_utc_hour_f, int64_t count) const {
+    godot::PackedInt64Array out;
+    for (const auto& c : environment::gfs_cycle_candidates(wall_utc_hour_f, static_cast<int>(count))) {
+        out.push_back(c.cycle_hour);
+    }
+    return out;
+}
+
+int64_t StarsimCore::weather_snapshot_step(double warp, double seconds_per_download) const {
+    return environment::weather_snapshot_step(warp, seconds_per_download);
+}
+
+double StarsimCore::weather_utc_hour(double epoch_tdb_s) const {
+    return guarded(*this, [&] {
+        const time::UtcDateTime utc = time_.to_utc(epoch(epoch_tdb_s));
+        return static_cast<double>(environment::hours_since_1900(utc)) + utc.minute / 60.0 + utc.second / 3600.0;
+    }, 0.0);
+}
+
+godot::Dictionary StarsimCore::weather_build_snapshot(const godot::Dictionary& snapshot, const godot::String& raw_dir,
+                                                      const godot::String& out_file,
+                                                      const godot::String& config_dir) const {
+    try {
+        const auto built = environment::build_weather_snapshot_from_raw(
+            weather_id_from(snapshot), std::filesystem::path(utf8_of(raw_dir)), std::filesystem::path(utf8_of(config_dir)));
+        const std::filesystem::path out(utf8_of(out_file));
+        if (out.has_parent_path()) std::filesystem::create_directories(out.parent_path());
+        environment::write_weather_snapshot(out, built);
+        godot::Dictionary result;
+        result["ok"] = true;
+        result["error"] = godot::String();
+        return result;
+    } catch (const std::exception& e) {
+        return weather_failure("Wetter-Momentaufnahme konnte nicht berechnet werden: ", e);
+    }
+}
+
+StarsimCore::SnapshotPtr StarsimCore::weather_snapshot_of(const std::string& file) {
+    {
+        const std::lock_guard<std::mutex> lock(weather_mutex_);
+        for (const auto& [name, ptr] : weather_cache_) {
+            if (name == file) return ptr;
+        }
+    }
+    // The slow part (reading 133 MB and its checksum) runs off-lock.
+    auto read = environment::read_weather_snapshot(std::filesystem::path(file));
+    if (!read) return nullptr;
+    auto ptr = std::make_shared<const environment::WeatherSnapshot>(std::move(*read));
+    const std::lock_guard<std::mutex> lock(weather_mutex_);
+    std::erase_if(weather_cache_, [&](const auto& entry) { return entry.first == file; });
+    weather_cache_.emplace_back(file, ptr);
+    while (weather_cache_.size() > weather_cache_size) weather_cache_.erase(weather_cache_.begin());
+    return ptr;
+}
+
+godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) {
+    try {
+        const auto snapshot = weather_snapshot_of(utf8_of(file));
+        if (!snapshot) {
+            throw std::runtime_error("Datei fehlt, ist beschädigt oder hat ein anderes Format: " + utf8_of(file));
+        }
+        const auto& texels = snapshot->texels();
+        godot::Dictionary result;
+        result["ok"] = true;
+        result["error"] = godot::String();
+        result["rows"] = static_cast<int64_t>(snapshot->rows());
+        result["columns"] = static_cast<int64_t>(snapshot->columns());
+        result["layers"] = static_cast<int64_t>(environment::weather_layer_count);
+        godot::PackedByteArray bytes;
+        bytes.resize(static_cast<int64_t>(texels.size()));
+        if (!texels.empty()) std::memcpy(bytes.ptrw(), texels.data(), texels.size());
+        result["texels"] = bytes;
+        godot::PackedFloat64Array bottoms;
+        for (int i = 0; i <= environment::weather_layer_count; ++i) bottoms.push_back(environment::weather_layer_bottom_m(i));
+        result["layer_bottoms_m"] = bottoms;
+        put_weather_id(result, snapshot->id());
+        return result;
+    } catch (const std::exception& e) {
+        return weather_failure("Wetter-Momentaufnahme konnte nicht geladen werden: ", e);
+    }
+}
+
+godot::Dictionary StarsimCore::weather_set_active(const godot::String& before_file, const godot::String& after_file,
+                                                  double blend) {
+    try {
+        SnapshotPtr before, after;
+        if (!before_file.is_empty() && !(before = weather_snapshot_of(utf8_of(before_file)))) {
+            throw std::runtime_error("Datei nicht lesbar: " + utf8_of(before_file));
+        }
+        if (!after_file.is_empty() && !(after = weather_snapshot_of(utf8_of(after_file)))) {
+            throw std::runtime_error("Datei nicht lesbar: " + utf8_of(after_file));
+        }
+        {
+            const std::lock_guard<std::mutex> lock(weather_mutex_);
+            weather_before_ = std::move(before);
+            weather_after_ = std::move(after);
+            weather_blend_ = std::clamp(blend, 0.0, 1.0);
+        }
+        godot::Dictionary result;
+        result["ok"] = true;
+        result["error"] = godot::String();
+        return result;
+    } catch (const std::exception& e) {
+        return weather_failure("Aktives Wetter konnte nicht gesetzt werden: ", e);
+    }
+}
+
+godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& position_itrf_m,
+                                                   const godot::Vector3& sun_direction_itrf) const {
+    SnapshotPtr before, after;
+    double blend = 0.0;
+    {
+        const std::lock_guard<std::mutex> lock(weather_mutex_);
+        before = weather_before_;
+        after = weather_after_;
+        blend = weather_blend_;
+    }
+    double sun = 1.0, sky = 1.0;
+    if (before || after) {
+        const math::Vec3 p = to_core(position_itrf_m), s = to_core(sun_direction_itrf);
+        const auto sample = [&](const SnapshotPtr& snap) {
+            return std::pair<double, double>{environment::cloud_sun_transmittance(*snap, p, s),
+                                             environment::cloud_sky_factor(*snap, p)};
+        };
+        if (before && after) {
+            const auto b = sample(before);
+            const auto a = sample(after);
+            sun = b.first + (a.first - b.first) * blend;
+            sky = b.second + (a.second - b.second) * blend;
+        } else {
+            const auto only = sample(before ? before : after);
+            sun = only.first;
+            sky = only.second;
+        }
+    }
+    godot::Dictionary result;
+    result["sun_transmittance"] = sun;
+    result["sky_factor"] = sky;
+    return result;
+}
+
+godot::Dictionary StarsimCore::cloud_noise() const {
+    const environment::CloudNoise noise = environment::generate_cloud_noise();
+    const auto bytes = [](const std::vector<std::uint8_t>& v) {
+        godot::PackedByteArray out;
+        out.resize(static_cast<int64_t>(v.size()));
+        if (!v.empty()) std::memcpy(out.ptrw(), v.data(), v.size());
+        return out;
+    };
+    godot::PackedFloat32Array thresholds;
+    for (float t : noise.coverage_threshold) thresholds.push_back(t);
+    godot::Dictionary result;
+    result["shape"] = bytes(noise.shape_rgba);
+    result["shape_size"] = static_cast<int64_t>(noise.shape_size);
+    result["detail"] = bytes(noise.detail_rgba);
+    result["detail_size"] = static_cast<int64_t>(noise.detail_size);
+    result["coverage_threshold"] = thresholds;
+    return result;
+}
+
+bool StarsimCore::weather_write_slab_snapshot(const godot::String& file, double bottom_m, double top_m,
+                                              double liquid_water_kg_m3, double cloud_fraction) const {
+    try {
+        environment::write_weather_snapshot(
+            std::filesystem::path(utf8_of(file)),
+            environment::WeatherSnapshot::uniform_slab(181, 360, bottom_m, top_m, liquid_water_kg_m3, cloud_fraction));
+        return true;
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String::utf8("Wolkenplatte konnte nicht geschrieben werden: ") +
+                                            godot::String::utf8(e.what()));
+        return false;
+    }
+}
+
 void StarsimCore::_bind_methods() {
     using godot::ClassDB;
     using godot::D_METHOD;
@@ -413,6 +710,25 @@ void StarsimCore::_bind_methods() {
                          &StarsimCore::atmosphere_sky_luminance_to_point);
     ClassDB::bind_method(D_METHOD("atmosphere_illuminance", "point_itrf_m", "normal_itrf", "sun_direction_itrf"),
                          &StarsimCore::atmosphere_illuminance);
+    ClassDB::bind_method(D_METHOD("weather_bracket", "utc_hour_f", "step_h", "era5_zattrs", "latest_gfs_cycle_hour",
+                                  "analog_year"), &StarsimCore::weather_bracket);
+    ClassDB::bind_method(D_METHOD("weather_requests", "snapshot", "idx_text"), &StarsimCore::weather_requests);
+    ClassDB::bind_method(D_METHOD("weather_gfs_index_url", "snapshot"), &StarsimCore::weather_gfs_index_url);
+    ClassDB::bind_method(D_METHOD("weather_gfs_cycle_candidates", "wall_utc_hour_f", "count"),
+                         &StarsimCore::weather_gfs_cycle_candidates);
+    ClassDB::bind_method(D_METHOD("weather_snapshot_step", "warp", "seconds_per_download"),
+                         &StarsimCore::weather_snapshot_step);
+    ClassDB::bind_method(D_METHOD("weather_utc_hour", "epoch_tdb_s"), &StarsimCore::weather_utc_hour);
+    ClassDB::bind_method(D_METHOD("weather_build_snapshot", "snapshot", "raw_dir", "out_file", "config_dir"),
+                         &StarsimCore::weather_build_snapshot);
+    ClassDB::bind_method(D_METHOD("weather_load_snapshot", "file"), &StarsimCore::weather_load_snapshot);
+    ClassDB::bind_method(D_METHOD("weather_set_active", "before_file", "after_file", "blend"),
+                         &StarsimCore::weather_set_active);
+    ClassDB::bind_method(D_METHOD("weather_cloud_light", "position_itrf_m", "sun_direction_itrf"),
+                         &StarsimCore::weather_cloud_light);
+    ClassDB::bind_method(D_METHOD("cloud_noise"), &StarsimCore::cloud_noise);
+    ClassDB::bind_method(D_METHOD("weather_write_slab_snapshot", "file", "bottom_m", "top_m", "liquid_water_kg_m3",
+                                  "cloud_fraction"), &StarsimCore::weather_write_slab_snapshot);
 }
 
 }  // namespace starsim::bindings

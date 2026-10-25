@@ -162,6 +162,7 @@ add_library(starsim_core STATIC
     src/environment/weather_source.cpp
     src/environment/weather_snapshot.cpp
     src/environment/weather_snapshot_file.cpp
+    src/environment/weather_snapshot_build.cpp
     src/environment/cloud_optics.cpp
     src/environment/cloud_noise.cpp
     src/environment/cache_file_io.cpp

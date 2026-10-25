@@ -2,12 +2,17 @@
 
 #include <memory>
 #include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/packed_float64_array.hpp>
+#include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -15,6 +20,7 @@
 #include "starsim/environment/atmosphere_scattering.hpp"
 #include "starsim/environment/earth_terrain.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
+#include "starsim/environment/weather_snapshot.hpp"
 
 #include "starsim/spice/spice_adapters.hpp"
 #include "starsim/spice/spice_session.hpp"
@@ -105,6 +111,43 @@ public:
     godot::Dictionary atmosphere_illuminance(const godot::Vector3& point_itrf_m, const godot::Vector3& normal_itrf,
                                              const godot::Vector3& sun_direction_itrf) const;
 
+    // Weather (M8 weather and clouds). Snapshot dictionaries: {kind: "era5" | "gfs" | "analog" | "off", valid_hour,
+    // cycle_hour, lead_h, analog_hour: int, cache_key: String}; valid hours are hours since 1900-01-01 00:00 UTC. All of
+    // these are callable from a worker thread; errors are German push_error lines and `ok = false` (or an empty result).
+    // The two snapshots bracketing utc_hour_f for the warp step (1, 3, 6 h) and the blend between them:
+    // {ok, error, before, after, blend}. Empty era5_zattrs and latest_gfs_cycle_hour < 0 mean unknown (offline).
+    godot::Dictionary weather_bracket(double utc_hour_f, int64_t step_h, const godot::String& era5_zattrs,
+                                      int64_t latest_gfs_cycle_hour, int64_t analog_year) const;
+    // The downloads of a snapshot: [{url, first_byte, last_byte (-1: whole object / open end), file_name}]; idx_text
+    // is the GFS index file's text (ignored for ERA5 / analog). Empty with an error when a record is missing.
+    godot::Array weather_requests(const godot::Dictionary& snapshot, const godot::String& idx_text) const;
+    godot::String weather_gfs_index_url(const godot::Dictionary& snapshot) const;
+    // Cycle hours (hours since 1900) to probe, newest first, from the cycle at or before the wall clock.
+    godot::PackedInt64Array weather_gfs_cycle_candidates(double wall_utc_hour_f, int64_t count) const;
+    // 1, 3 or 6 (hours between snapshots) or 0 = hold, for the warp factor and the wall seconds per snapshot download.
+    int64_t weather_snapshot_step(double warp, double seconds_per_download) const;
+    // Fractional hours since 1900-01-01 00:00 UTC of a TDB epoch (leap seconds via the time converter).
+    double weather_utc_hour(double epoch_tdb_s) const;
+    // Decodes the raw files of `snapshot` in raw_dir into the cache file out_file (the geoid from config_dir).
+    godot::Dictionary weather_build_snapshot(const godot::Dictionary& snapshot, const godot::String& raw_dir,
+                                             const godot::String& out_file, const godot::String& config_dir) const;
+    // Reads a cache file: {ok, error, rows, columns, layers, texels: PackedByteArray (layer-major RGBA8, as
+    // WeatherSnapshot::texels()), layer_bottoms_m: PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour,
+    // lead_h, analog_hour, cache_key}. The game builds the label from the id fields. The snapshot stays in a small
+    // cache (the last three files) for weather_set_active.
+    godot::Dictionary weather_load_snapshot(const godot::String& file);
+    // The pair the CPU light queries blend: cache files ("" = none; a file not in the load cache is read), blend 0..1.
+    godot::Dictionary weather_set_active(const godot::String& before_file, const godot::String& after_file, double blend);
+    // {sun_transmittance, sky_factor} of the active pair, blended linearly; {1, 1} without an active snapshot.
+    godot::Dictionary weather_cloud_light(const godot::Vector3& position_itrf_m,
+                                          const godot::Vector3& sun_direction_itrf) const;
+    // The tileable cloud noise: {shape: PackedByteArray RGBA8, shape_size, detail, detail_size, coverage_threshold:
+    // PackedFloat32Array (256)}.
+    godot::Dictionary cloud_noise() const;
+    // Checks only: writes WeatherSnapshot::uniform_slab(181, 360, ...) to `file`.
+    bool weather_write_slab_snapshot(const godot::String& file, double bottom_m, double top_m,
+                                     double liquid_water_kg_m3, double cloud_fraction) const;
+
 protected:
     static void _bind_methods();
 
@@ -116,6 +159,12 @@ private:
     std::shared_ptr<const environment::LunarTerrain> moon_terrain_;
     mutable std::mutex atmosphere_mutex_;  // guards atmosphere_ (swapped by load_atmosphere on any thread)
     std::shared_ptr<const environment::AtmosphereScattering> atmosphere_;
+    using SnapshotPtr = std::shared_ptr<const environment::WeatherSnapshot>;
+    SnapshotPtr weather_snapshot_of(const std::string& file);  // load cache, else reads off-lock; nullptr if unreadable
+    mutable std::mutex weather_mutex_;  // guards the three below (the game calls from the main thread, loads on a worker)
+    std::vector<std::pair<std::string, SnapshotPtr>> weather_cache_;  // last loaded files, newest last
+    SnapshotPtr weather_before_, weather_after_;
+    double weather_blend_ = 0.0;
     environment::RefractionProfile refraction_{environment::Us76Atmosphere{}};
     std::unique_ptr<spice::SpiceSession> session_;
     spice::SpiceTimeConverter time_;
