@@ -130,8 +130,8 @@ if ($LASTEXITCODE -ne 0) { throw "Core build failed." }
 # The atmosphere tables (M8, ~84 MB, ~1 min): precomputed into data/atmosphere, which the smoke test uses and the base
 # data mirror below ships. The game finds the file by its input hash (a stale file would be recomputed at runtime).
 Step "Atmosphere tables"
-$null = Run (Join-Path $Build "core\atmosphere_tables.exe") @("--config", (Join-Path $Root "config"), "--out", (Join-Path $Data "atmosphere"))
-if ($LASTEXITCODE -ne 0) { throw "atmosphere_tables failed." }
+$out = Run (Join-Path $Build "core\atmosphere_tables.exe") @("--config", (Join-Path $Root "config"), "--out", (Join-Path $Data "atmosphere"))
+if ($LASTEXITCODE -ne 0) { $out | Select-Object -Last 20 | ForEach-Object { Write-Host $_ }; throw "atmosphere_tables failed." }
 $null = Run $Godot @("--headless", "--xr-mode", "off", "--path", $Game, "--import")
 if (-not $SkipTests) {
     Step "Smoke test"
@@ -170,6 +170,10 @@ $imageryPart = Join-Path $Build "part_imagery"
 foreach ($dir in @($package, $terrainPart, $imageryPart)) { if (Test-Path $dir) { Remove-Item $dir -Recurse -Force } }
 Mirror $export $package @()
 Copy-Item (Join-Path $PSScriptRoot "release\*.cmd") $package
+# CREDITS.md carries the full licence texts the binaries must reproduce (BSD-3 clause 2: Bruneton's atmosphere code).
+if (-not (Select-String -Path (Join-Path $Root "CREDITS.md") -SimpleMatch "Copyright (c) 2017 Eric Bruneton" -Quiet)) {
+    throw "CREDITS.md lacks the third-party licence texts (run python tools/data_pipeline/credits.py)"
+}
 Copy-Item (Join-Path $Root "CREDITS.md"), (Join-Path $Root "README.md"), (Join-Path $Root "README.de.md") $package
 Mirror (Join-Path $Root "config") (Join-Path $package "config") @()
 # base data: everything the game reads except the two large parts; never the raw downloads, webcasts or validation

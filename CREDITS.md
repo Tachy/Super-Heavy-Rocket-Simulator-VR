@@ -31,12 +31,74 @@ Generated from `tools/data_pipeline/sources.toml` by `tools/data_pipeline/credit
 | [Earth height tiles: NOAA ETOPO 2022 60 arc-second surface (global relief), Copernicus DEM GLO-30 (regional) and USGS 3DEP 1 m bare earth (local), with NOAA GEOID18 for NAVD88 - terrain physics around the launch areas](https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif) | NOAA NCEI ETOPO 2022 (doi:10.25921/fd45-gt74); USGS 3D Elevation Program; NOAA NGS GEOID18 (via cdn.proj.org); Contains modified Copernicus DEM GLO-30 data (c) DLR e.V. 2010-2014 and (c) Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA, all rights reserved | ETOPO 2022 and USGS 3DEP: public domain (US Government works); NOAA GEOID18: public domain; Copernicus DEM GLO-30: free and open licence (ESA/EU, redistribution allowed with attribution) |
 | [Earth imagery tile pyramids: USDA NAIP 0.6 m (Microsoft Planetary Computer) around the pads and an own 2025 Sentinel-2 L2A clear-pixel median composite at 10 m (Element84 Earth Search) over 200 x 200 km - terrain rendering](https://planetarycomputer.microsoft.com/api/stac/v1) | Contains modified Copernicus Sentinel data 2025 (processed by the starsim data pipeline: clear-pixel median composite); USDA Farm Service Agency National Agriculture Imagery Program (NAIP) via the Microsoft Planetary Computer; Sentinel-2 L2A COGs via Element 84 Earth Search / AWS Open Data | USDA NAIP: public domain (US Government work, FSA); Copernicus Sentinel-2 data: free, full and open (EU Regulation 1159/2013 and Copernicus legal notice), redistribution of derived products allowed with attribution |
 | [Equilibrium radiative heating tables for Earth entry (NASA TM-102652, Sutton & Hartung 1990), tables 1-10 transcribed](https://ntrs.nasa.gov/api/citations/19900014359/downloads/19900014359.pdf) | K. Sutton, L. C. Hartung, NASA Langley Research Center; transcription: this project | public domain (US Government work) |
-| [Precomputed Atmospheric Scattering: a New Implementation (Eric Bruneton, 2017) - algorithms ported to C++ and GLSL, spectral inputs transcribed from his demo](https://github.com/ebruneton/precomputed_atmospheric_scattering) | Eric Bruneton, Precomputed Atmospheric Scattering: a New Implementation, Eurographics Symposium on Rendering 2008 / 2017 reference implementation; the file's notice is kept in the ported sources | BSD 3-clause (copyright notice kept in every ported file) |
-| [ASTM G-173-03 extraterrestrial solar spectral irradiance at 1 AU (as averaged per bin in Bruneton's demo)](https://www.nrel.gov/grid/solar-resource/spectra-am1-5.html) | ASTM G-173-03 reference spectra, derived from SMARTS v2.9.2 (C. Gueymard), NREL | NREL Renewable Resource Data Center: free to use; the table is a published reference spectrum (ASTM G-173-03) |
+| [Precomputed Atmospheric Scattering: a New Implementation (Eric Bruneton, 2017) - algorithms ported to C++ and GLSL, spectral inputs transcribed from his demo](https://github.com/ebruneton/precomputed_atmospheric_scattering) | Eric Bruneton, Precomputed Atmospheric Scattering: a New Implementation, Eurographics Symposium on Rendering 2008 / 2017 reference implementation; the file's notice is kept in the ported sources | BSD 3-clause (copyright notice kept in every ported file; the full notice under Third-party licences below) |
+| [ASTM G-173-03 extraterrestrial solar spectral irradiance at 1 AU (as averaged per bin in Bruneton's demo)](https://www.nrel.gov/grid/solar-resource/spectra-am1-5.html) | ASTM G-173-03 reference spectra, derived from SMARTS v2.9.2 (C. Gueymard), NREL | public reference spectrum (ASTM G-173-03), NREL distribution: free to use with citation |
 | [Ozone absorption cross sections (Serdyuchenko et al. 2014, IUP Bremen), as averaged per bin in Bruneton's demo](https://www.iup.uni-bremen.de/gruppen/molspec/databases/referencespectra/o3spectra2011/index.html) | A. Serdyuchenko, V. Gorshelev, M. Weber, W. Chehade, J. P. Burrows, Atmos. Meas. Tech. 7, 625-636 (2014) | published laboratory data of the IUP Bremen molspec database, free for use with citation |
 | [AFGL atmospheric constituent profiles, U.S. Standard (ozone number density and mixing ratio) with the 1976 US Standard Atmosphere](https://apps.dtic.mil/sti/citations/ADA175173) | G. P. Anderson, S. A. Clough, F. X. Kneizys, J. H. Chetwynd, E. P. Shettle, AFGL Atmospheric Constituent Profiles (0-120 km), AFGL-TR-86-0110 (1986); U.S. Standard Atmosphere, 1976 | public domain (US Government reports: AFGL-TR-86-0110; US Standard Atmosphere 1976, NOAA / NASA / USAF) |
-| [CIE 1931 2-degree colour matching functions and the CIE XYZ to linear sRGB matrix (IEC 61966-2-1)](http://www.cvrl.org/cmfs.htm) | CIE 1931 standard colorimetric observer, tabulated by the Colour & Vision Research Laboratory (UCL, cvrl.org); IEC 61966-2-1 sRGB | published standard tables (CIE 1931; CVRL database, free for research use) |
+| [CIE 1931 2-degree colour matching functions and the CIE XYZ to linear sRGB matrix (IEC 61966-2-1)](http://www.cvrl.org/cmfs.htm) | CIE 1931 standard colorimetric observer, tabulated by the Colour & Vision Research Laboratory (UCL, cvrl.org); IEC 61966-2-1 sRGB | CIE 1931 standard observer tables as standard data (as tabulated by the CVRL database); IEC 61966-2-1 matrix: published standard |
 | [Rayleigh scattering formulas: refractivity of standard air (Peck and Reeder 1972) and depolarisation of air (Bucholtz 1995, Table 1)](https://doi.org/10.1364/AO.34.002765) | E. R. Peck, K. Reeder, J. Opt. Soc. Am. 62, 958 (1972); A. Bucholtz, Rayleigh-scattering calculations for the terrestrial atmosphere, Appl. Opt. 34, 2765 (1995) | published formulas and measured values (not copyrightable); cited as sources |
 
 Code dependencies: Godot Engine (MIT), godot-cpp (MIT), Catch2 (BSL-1.0),
 DOP853 coefficients from SciPy (BSD-3-Clause).
+
+## Third-party licences
+
+### Precomputed Atmospheric Scattering: a New Implementation (Eric Bruneton, 2017) - algorithms ported to C++ and GLSL, spectral inputs transcribed from his demo
+
+```
+Copyright (c) 2017 Eric Bruneton
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+this list of conditions and the following disclaimer in the documentation
+and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+may be used to endorse or promote products derived from this software without
+specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Precomputed Atmospheric Scattering
+Copyright (c) 2008 INRIA
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+3. Neither the name of the copyright holders nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
+THE POSSIBILITY OF SUCH DAMAGE.
+```

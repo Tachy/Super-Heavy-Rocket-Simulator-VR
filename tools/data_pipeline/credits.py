@@ -31,6 +31,12 @@ def main() -> int:
         "DOP853 coefficients from SciPy (BSD-3-Clause).",
         "",
     ]
+    # Licences whose terms require their full text with the binaries (e.g. BSD-3 clause 2), verbatim.
+    with_text = [s for s in sources if s.get("license_text")]
+    if with_text:
+        lines += ["## Third-party licences", ""]
+        for source in with_text:
+            lines += [f"### {source['name']}", "", "```", source["license_text"].strip("\n"), "```", ""]
     (REPO_ROOT / "CREDITS.md").write_text("\n".join(lines), encoding="utf-8")
     print(f"wrote {REPO_ROOT / 'CREDITS.md'} ({len(sources)} sources)")
     return 0
