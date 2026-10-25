@@ -136,7 +136,9 @@ public:
     // lead_h, analog_hour, cache_key}. The game builds the label from the id fields. The snapshot stays in a small
     // cache (the last three files) for weather_set_active.
     godot::Dictionary weather_load_snapshot(const godot::String& file);
-    // The pair the CPU light queries blend: cache files ("" = none; a file not in the load cache is read), blend 0..1.
+    // The pair the CPU light queries blend: cache files ("" = none), blend 0..1. WARNING: a file that is not in the
+    // 3-entry load cache is read SYNCHRONOUSLY (133 MB + checksum) on the calling thread - callers must first
+    // weather_load_snapshot() each file on a worker thread so this call only hits the cache.
     godot::Dictionary weather_set_active(const godot::String& before_file, const godot::String& after_file, double blend);
     // {sun_transmittance, sky_factor} of the active pair, blended linearly; {1, 1} without an active snapshot.
     godot::Dictionary weather_cloud_light(const godot::Vector3& position_itrf_m,
@@ -162,7 +164,7 @@ private:
     using SnapshotPtr = std::shared_ptr<const environment::WeatherSnapshot>;
     SnapshotPtr weather_snapshot_of(const std::string& file);  // load cache, else reads off-lock; nullptr if unreadable
     mutable std::mutex weather_mutex_;  // guards the three below (the game calls from the main thread, loads on a worker)
-    std::vector<std::pair<std::string, SnapshotPtr>> weather_cache_;  // last loaded files, newest last
+    mutable std::vector<std::pair<std::string, SnapshotPtr>> weather_cache_;  // last loaded files, newest last
     SnapshotPtr weather_before_, weather_after_;
     double weather_blend_ = 0.0;
     environment::RefractionProfile refraction_{environment::Us76Atmosphere{}};

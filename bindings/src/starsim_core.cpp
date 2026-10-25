@@ -499,14 +499,24 @@ godot::String StarsimCore::weather_gfs_index_url(const godot::Dictionary& snapsh
 
 godot::PackedInt64Array StarsimCore::weather_gfs_cycle_candidates(double wall_utc_hour_f, int64_t count) const {
     godot::PackedInt64Array out;
-    for (const auto& c : environment::gfs_cycle_candidates(wall_utc_hour_f, static_cast<int>(count))) {
-        out.push_back(c.cycle_hour);
+    try {
+        for (const auto& c : environment::gfs_cycle_candidates(wall_utc_hour_f, static_cast<int>(count))) {
+            out.push_back(c.cycle_hour);
+        }
+    } catch (const std::exception& e) {
+        weather_failure("GFS-Zyklen konnten nicht bestimmt werden: ", e);
+        out.clear();
     }
     return out;
 }
 
 int64_t StarsimCore::weather_snapshot_step(double warp, double seconds_per_download) const {
-    return environment::weather_snapshot_step(warp, seconds_per_download);
+    try {
+        return environment::weather_snapshot_step(warp, seconds_per_download);
+    } catch (const std::exception& e) {
+        weather_failure("Schrittweite der Wetter-Momentaufnahmen ungültig: ", e);
+        return 0;  // hold
+    }
 }
 
 double StarsimCore::weather_utc_hour(double epoch_tdb_s) const {
@@ -525,6 +535,10 @@ godot::Dictionary StarsimCore::weather_build_snapshot(const godot::Dictionary& s
         const std::filesystem::path out(utf8_of(out_file));
         if (out.has_parent_path()) std::filesystem::create_directories(out.parent_path());
         environment::write_weather_snapshot(out, built);
+        {  // a rebuilt file must not be served from the load cache
+            const std::lock_guard<std::mutex> lock(weather_mutex_);
+            std::erase_if(weather_cache_, [&](const auto& entry) { return entry.first == utf8_of(out_file); });
+        }
         godot::Dictionary result;
         result["ok"] = true;
         result["error"] = godot::String();
@@ -606,6 +620,8 @@ godot::Dictionary StarsimCore::weather_set_active(const godot::String& before_fi
 
 godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& position_itrf_m,
                                                    const godot::Vector3& sun_direction_itrf) const {
+    double sun = 1.0, sky = 1.0;
+    try {
     SnapshotPtr before, after;
     double blend = 0.0;
     {
@@ -614,7 +630,6 @@ godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& positio
         after = weather_after_;
         blend = weather_blend_;
     }
-    double sun = 1.0, sky = 1.0;
     if (before || after) {
         const math::Vec3 p = to_core(position_itrf_m), s = to_core(sun_direction_itrf);
         const auto sample = [&](const SnapshotPtr& snap) {
@@ -632,6 +647,11 @@ godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& positio
             sky = only.second;
         }
     }
+    } catch (const std::exception& e) {
+        weather_failure("Wolkenlicht konnte nicht berechnet werden: ", e);
+        sun = 1.0;
+        sky = 1.0;
+    }
     godot::Dictionary result;
     result["sun_transmittance"] = sun;
     result["sky_factor"] = sky;
@@ -639,22 +659,26 @@ godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& positio
 }
 
 godot::Dictionary StarsimCore::cloud_noise() const {
-    const environment::CloudNoise noise = environment::generate_cloud_noise();
-    const auto bytes = [](const std::vector<std::uint8_t>& v) {
-        godot::PackedByteArray out;
-        out.resize(static_cast<int64_t>(v.size()));
-        if (!v.empty()) std::memcpy(out.ptrw(), v.data(), v.size());
-        return out;
-    };
-    godot::PackedFloat32Array thresholds;
-    for (float t : noise.coverage_threshold) thresholds.push_back(t);
-    godot::Dictionary result;
-    result["shape"] = bytes(noise.shape_rgba);
-    result["shape_size"] = static_cast<int64_t>(noise.shape_size);
-    result["detail"] = bytes(noise.detail_rgba);
-    result["detail_size"] = static_cast<int64_t>(noise.detail_size);
-    result["coverage_threshold"] = thresholds;
-    return result;
+    try {
+        const environment::CloudNoise noise = environment::generate_cloud_noise();
+        const auto bytes = [](const std::vector<std::uint8_t>& v) {
+            godot::PackedByteArray out;
+            out.resize(static_cast<int64_t>(v.size()));
+            if (!v.empty()) std::memcpy(out.ptrw(), v.data(), v.size());
+            return out;
+        };
+        godot::PackedFloat32Array thresholds;
+        for (float t : noise.coverage_threshold) thresholds.push_back(t);
+        godot::Dictionary result;
+        result["shape"] = bytes(noise.shape_rgba);
+        result["shape_size"] = static_cast<int64_t>(noise.shape_size);
+        result["detail"] = bytes(noise.detail_rgba);
+        result["detail_size"] = static_cast<int64_t>(noise.detail_size);
+        result["coverage_threshold"] = thresholds;
+        return result;
+    } catch (const std::exception& e) {
+        return weather_failure("Wolkenrauschen konnte nicht erzeugt werden: ", e);
+    }
 }
 
 bool StarsimCore::weather_write_slab_snapshot(const godot::String& file, double bottom_m, double top_m,
