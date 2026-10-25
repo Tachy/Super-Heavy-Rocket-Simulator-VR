@@ -128,6 +128,22 @@ atmosphere_adaptation_cd_m2={
 "type": "float",
 "value": 0.0
 }
+atmosphere_moon_direction={
+"type": "vec3",
+"value": Vector3(0, 1, 0)
+}
+atmosphere_moon_light={
+"type": "float",
+"value": 0.0
+}
+vision_rod_weights={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+vision_inverse_tint={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
 atmosphere_eclipse_segments={
 "type": "int",
 "value": 0

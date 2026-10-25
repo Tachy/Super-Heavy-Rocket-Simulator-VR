@@ -2936,12 +2936,15 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   cislunar space with the Sun on the eye - as astronauts report and cameras show; stars appear on the night
   side or in the Earth's shadow after dark adaptation (tau 110 s, minutes from day to the faint stars), in twilight and
   in totality (L_a there is below the sky behind the star). The Moon and the Sun disc need no threshold (physical
-  luminances x the gain, spec Goal 6); city lights stay display-referred (spec Goal 7); planets are not drawn.
+  luminances x the gain, spec Goal 6); city lights stay display-referred (spec Goal 7; and past night vision's rod
+  step unchanged, see "Night vision"); planets are not drawn. At night the moonlit sky behind a star counts too.
   Vehicles, tower, pad, drone ship: `lit_aerial.gdshader` (`LitAerial.material`): Godot's
   PBR lighting plus aerial perspective through FOG (Godot blends FOG with one scalar, so the per-channel T is split:
   t = max(T), FOG.a = 1 - t, FOG.rgb = S / (1 - t), and T / t on albedo and emission - diffuse, metal and emission end at
   lit x T + S exactly; only the dielectric specular takes the scalar); the tower lattice through `atm_fog`. Plumes
-  (`plume.gdshader`, additive): x T only [call]. The flight trail, orbit lines and labels are UI markers, not attenuated.
+  (`plume.gdshader`, additive): x T only [call]. The flight trail, orbit lines and labels are UI markers, not attenuated
+  (and past night vision's rod step unchanged: `vision.gdshaderinc`; the map labels are `MapLabel` TextMeshes, the Moon's
+  orbit line `display_colour.gdshader` - Label3D / StandardMaterial3D cannot take that inverse).
 - **Sun light.** One DirectionalLight: colour and energy per channel = TOA solar RGB x the core's
   `atmosphere_sun_transmittance` x luminance scale / pi x the Moon's visible fraction, at **one point: the followed
   vehicle** (vehicle focus), else the camera (`Atmosphere.sun_light_at`, `world.gd::_update_sun_light`). Near the Moon
@@ -2955,17 +2958,18 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
 - **Exposure.** One exposure for everything: scene value = luminance x `DAY_EXPOSURE` (1.5) x pi / E_v,TOA / d_AU^2 - a
   white Lambertian under the TOA Sun renders 1.5 in every material. **Eye adaptation** [call 2026-10-25,
   `eye_adaptation.gd`, fidelity flag `Atmosphere.eye_adaptation_enabled`, on in the game, off in the GPU check's
-  comparisons]: one gain on every physical luminance (tables, Sun light, Moon, Sun disc; plumes, city lights and the
-  stars' own brightness are display-referred). Adaptation luminance L_a = max(down, up): down = a white plate at the
-  eye under the transmitted Sun at normal incidence and the sky, (E_sun,n + E_sky) / pi x the visible fraction; up =
-  the Earth in view (`Atmosphere.adaptation_luminance`, see below). Gain = clamp(L_ref / L_a, 1, 25), L_ref = the
-  plate under the TOA Sun: Weber adaptation (Ferwerda et al. 1996: photopic threshold proportional to L_a above ~80
-  cd/m^2). The cap 25 is a display call, not physiology (Weber would allow ~500; no mesopic / scotopic model): the
-  noon / sunset zenith ratio 3834 / 142 = 27, so twilight never renders brighter than day; civil twilight is dim (Sun
-  -3 deg: zenith 0.10 x noon), nautical dark. Pacing [E]: light adaptation tau 0.5 s, dark adaptation 110 s
-  (Pattanaik et al. 2000), exponential in log gain; time step = max(frame time, simulated step) (paused: real time,
-  time warp: a time-lapse, a clock jump or a view change: adapted at once). Exposure only, no white balance. Shader
-  uniforms, no post-process: identical in VR. Values: pad noon gain 1.10, 400 km by day 1.000, Sun -3 deg 25.
+  comparisons; night vision by the user decision of 2026-10-25, see "Night vision" below]: the cone gain on every
+  physical luminance (tables, Sun light, Moon, Sun disc; plumes, city lights and the stars' own brightness are
+  display-referred). Adaptation luminance L_a = the largest of: down = a white plate at the eye under the transmitted
+  Sun at normal incidence and the sky, (E_sun,n + E_sky) / pi x the visible fraction (+ the Moon's plate at night);
+  up = the Earth in view (`Atmosphere.adaptation_luminance`, see below); the twilight glow (night vision). Cone gain =
+  L_ref / (10^1.255 t_p(L_a)) in [1, 1e5], L_ref = the plate under the TOA Sun, t_p Ferwerda's cone t.v.i.: above ~80
+  cd/m^2 exactly the Weber gain L_ref / L_a of before (the day look unchanged), below it the cone threshold flattens.
+  The former cap 25 (a display call) is gone; 1e5 is a numeric bound only (the t.v.i. floor bounds the gain at
+  ~1.24e4). Pacing [E]: light adaptation tau 0.5 s, dark adaptation 110 s (Pattanaik et al. 2000), exponential in log
+  luminance (the photopic and the scotopic adaptation luminance); time step = max(frame time, simulated step)
+  (paused: real time, time warp: a time-lapse, a clock jump or a view change: adapted at once). Values: pad noon gain
+  1.10, 400 km by day 1.000 (both as before), Sun -3 deg 232 (adapted to the glow, 181 cd/m^2).
   The up part: 13 directions below the eye in model space (nadir, a ring at 0.6 x the Earth disc's angular radius, a
   ring grazing the limb 10 km up), each the plate equivalent of what it shows (ground illuminance / pi x T + in-scatter,
   or the limb's sky, x the Sun's visible fraction there), times the view factor (R / r)^2; view-independent (VR-stable).
@@ -3002,9 +3006,9 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   used by the vehicles' Sun light). Values: lunar day 1.000 (the Moon term
   ~7800 cd/m^2, the Sun plate 42 400); deep space halfway to the Moon 1.000; lunar night under a nearly full Earth
   (phase 10 deg, check): Earth in view 6.17 cd/m^2 (0.80 x the Lambert disc 7.74: the 10 km limb ring carries 25 %
-  of the weight with only the limb's sky), Moon in view 0.70, earthshine 7.35 lux, Weber gain 6900 -> the cap 25; the
-  full Earth then renders 25 x its day look (blown toward white by AgX) [call: the view-independent plate model has
-  no foveal term - an eye fixating the Earth would adapt partly to it]. Away from the Earth at partial phases the
+  of the weight with only the limb's sky), Moon in view 0.70, earthshine 7.35 lux, cone gain 2845 (Weber 6872; the
+  former cap 25); the earthshine-lit ground shows dark grey, the full Earth is blown to white (expected) [call: the
+  view-independent plate model has no foveal term - an eye fixating the Earth would adapt partly to it]. Away from the Earth at partial phases the
   13-direction cap underestimates the Earth by up to ~2x (half Earth: the nadir sample on the terminator, the outer
   annulus represented by the limb's sky); it only matters where the cap 25 holds anyway.
   **Why render_check's `--view_from=moon` showed gain ~7.5:** not a lunar eye - `--focus=earth --view_from=moon` is the
@@ -3029,13 +3033,85 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   The eye adaptation's Moon-in-view term and `last_earthshine_lux` use the same function. GPU check (section 12): full
   Earth 7.46 lux (band 5-15 lux [call]: catches a unit or phase error, not the albedo choice), the Moon shader's dark
   side = albedo x moon_earthshine within 3 % at full Earth and at phase 60 deg (ratios 0.99-1.00).
-  **Display consequence (open ruling):** with the gain cap 25 the earthshine-lit regolith (~0.4-0.6 cd/m^2) renders
-  black: the lunar night ground under a nearly full Earth (0 N 45 E, 2026-11-07T14:00, gain 25: scene ~4e-4) and the
-  Da Vinci glow of a 2-day crescent from Starbase at Sun -8 deg (2026-11-12T00:15, adapted to 0.21 cd/m^2, gain 25:
-  disc and sky both sRGB 1-2). Physically both are visible (the earthshine Moon is brighter than that twilight sky);
-  a test render with the cap at 1000 shows them faint but clear (crescent dark side sRGB ~59-70 against the sky's
-  43-66; lunar ground ~10). The old constant made them visible only by being ~40 x too bright. Raising the cap away
-  from the Earth or a mesopic model is a separate decision.
+  **Display (resolved by night vision, 2026-10-25):** with the former cap 25 the earthshine-lit regolith (~0.4-0.6
+  cd/m^2) rendered black. Now the lunar night ground under a nearly full Earth (0 N 45 E, 2026-11-07T14:00, cone gain
+  3012) is dark grey, and the Da Vinci glow of a 2-day crescent from Starbase at Sun -8 deg (2026-11-12T00:15, adapted
+  to the glow 2.6 cd/m^2, gain 4306) lies 20 % above the twilight sky beside the Moon (GPU check, needs > the cones'
+  Weber fraction 5.6 %).
+- **Night vision** (user decision 2026-10-25, "like the eye"; `eye_adaptation.gd`, `vision_effect.gd`,
+  `vision.gdshaderinc`). Night views look as a human perceives them: dim, desaturated and bluish at low luminance, a
+  moonless night dark. Model [call: chosen over Pattanaik et al. 2000 and Kirk & O'Brien 2011]: Ferwerda, Pattanaik,
+  Shirley & Greenberg 1996, "A model of visual adaptation for realistic image synthesis" (SIGGRAPH 96) - Ward's
+  threshold matching (a luminance at the world observer's threshold maps to the display observer's) with separate
+  t.v.i. functions for cones (Eq. 4: log t_p = -0.72 below log L_a -2.6, log L_a - 1.255 above 1.9, (0.249 log L_a +
+  0.65)^2.7 - 0.72 between) and rods (Eq. 5: -2.86 below -3.94, log L_as - 0.395 above -1.44, (0.405 log L_as +
+  1.6)^2.18 - 2.86 between), combined (Eq. 6) display = m_c L + k m_r L_s. Here m_c = the cone gain (above) and m_r =
+  L_ref / (10^1.255 t_s(L_as)) (the display observer photopic, as Ferwerda's m_r = t_p(L_da) / t_s(L_wa); the display
+  adaptation is the day look's) [call]. Weber's law holds for the cones above ~80 cd/m^2 (unchanged day) and fails at
+  scotopic levels (the thresholds flatten): a scene without light stays black however dark-adapted the eye.
+  - k = 1 - s, s the rods' saturation of Jensen, Premoze, Shirley, Thompson, Ferwerda & Stark 2000 ("Night rendering",
+    UUCS-00-016, sec. 3.1): 0 below 0.01 cd/m^2, 1 above 4 cd/m^2, 3 x^2 - 2 x^3 with x = (log L + 2) / 2.6 between -
+    evaluated on the photopic adaptation luminance [call: one k per view, VR-stable].
+  - Scotopic luminance: L_s = w_s . rgb, w_s = (-0.0525, 1.6016, 0.8794) [D: `tools/validation/scotopic_rgb_weights.py`:
+    the CIE 1951 V'(lambda) (K'm 1700 lm/W) projected onto the linear sRGB colour matching functions, least squares in
+    S/P over black bodies 2000-25 000 K and their lambda^-4 sky versions; worst 2.2 %; S/P of RGB white 2.43, of
+    illuminant A 1.41 (+1.4 %)]. The scotopic adaptation luminance L_as is the chosen plate's colour through w_s.
+  - The rods' image is achromatic, drawn with a blue tint at chromaticity (0.25, 0.25) (Jensen et al. 2000: their
+    rendering choice beside the mean (0.29, 0.28) of ten night paintings; the night convention also of Thompson,
+    Shirley & Ferwerda 2002, JGT 7(1)) [call: the measured mean is purple and gave a lavender twilight sky].
+  - Where: the cone gain in the shaders (as before); the rods by one CompositorEffect (`VisionEffect`, attached to the
+    WorldEnvironment's Compositor in world.gd and the GPU check) after the transparent pass with the resolved MSAA
+    colour, before glow and AgX: rgb += k g_r / g_c x max(w_s . rgb, 0) x tint, per pixel, on every view layer
+    (multiview: identical for both eyes); nothing dispatched while k g_r / g_c = 0 (daylight, the adaptation off). The
+    gain stays in the shaders as a pre-exposure, so the half-float buffer holds values near display level.
+  - Display-referred emitters write the inverse of that linear step, c - tint s / (1 + s w_s . tint) (w_s . c)
+    (`vision.gdshaderinc`, globals `vision_rod_weights`, `vision_inverse_tint`): plume, city lights, the stars' own
+    brightness, the orbit ribbon, the flight trail, the Moon's orbit line, the map labels and the VR panel look exactly
+    as before. Ruling [call]: city lights and plumes stay display-referred - bright sources that the fovea (cones only)
+    sees in colour; a global mapping without local adaptation would turn them grey-blue, and the night-light texture
+    has no radiometric calibration to give them a physical luminance. The Sun disc clamps its scene value at 6e4
+    (half-float range when the Sun appears in a dark-adapted view; the compute step also clamps and drops NaN).
+  - Twilight glow (`Atmosphere._twilight_glow_luminance`) [call]: with the Sun below the eye's horizon (no eclipse), the
+    brightest sky along the Sun's azimuth (elevations 1-40 deg, at least 8 deg from the Sun, outside its aureole) joins
+    L_a; above the atmosphere with the Sun behind the Earth the brightest limb toward it (tangent heights 2-40 km).
+    Ferwerda takes half the highest visible luminance as the world adaptation; here the brightest sky itself, wherever
+    the head points (view-independent). Without it the eye adapted to the dim overhead plate and the glow over the
+    western horizon rendered white (Sun -3 deg: gain 914, the scene washed out; the crescent's dark side lost in a
+    white sky); with it the zenith at Sun -8 deg is a deep blue below a coloured horizon.
+  - Moonlight: the Moon's illuminance outside the atmosphere by Krisciunas & Schaefer 1991 (PASP 103, 1033: Eq. 9
+    m = -12.73 + 0.026 |a| + 4e-9 a^4, Eq. 8 I = 10^(-0.4 (m + 16.57)) fc; full Moon 0.313 lux at 384 400 km), x the
+    distance squared, x the Earth's shadow at the Moon (lunar eclipse; no red glow) (`Atmosphere.moonlight_relative`;
+    relative to the TOA Sun: full Moon 2.4e-6). A second light of the solar spectrum through the same tables
+    (`atm_moon_sky`, `atm_moon_at`, `atm_moon_sky_light`, `atm_moon_light`): the moonlit sky (sky.gdshader, the
+    stars' background), the moonlit ground (terrain, Earth mesh, the model ground) and sea (a second pass of the sea
+    model: the Moon's glitter path, the moonlit sky reflected), vehicles (world.gd `moon_light`, a second
+    DirectionalLight without shadows, `Atmosphere.moon_light_at`), and the adaptation (the Moon's plate at the eye;
+    in orbit the moonlit Earth in view). Active only while the Moon's plate is at least 0.1 % of the adaptation
+    luminance (by day and at new Moon it is off: no change, no cost). Left out [call]: the Moon's reddening (B-V 0.92
+    against the Sun's 0.65), the in-scattered moonlight between a ground point and the eye (the moonlit haze; the sky
+    itself has it), the parallax of the Moon's direction (from the Earth's centre, up to 1 deg). The K&S full Moon
+    (~4800 cd/m^2 mean disc luminance) is ~1.4 x darker than the Moon shader's disc (albedo 0.30 x 0.8 / 1.5 x L_ref ~
+    6800 cd/m^2) [open].
+  - Values (render_check / GPU check, adapted, snapped): pad noon 1.10 (no rods); Sun -3 deg at OLP-1: L_a 181 cd/m^2
+    (glow), gain 236, no rods (the zenith 0.96 x the noon zenith on screen); Sun -8 deg: L_a 2.87 (glow), gain 4060,
+    rod scale 0.002, zenith (0.0023, 0.0058, 0.018) - deep blue; Sun -12 deg: L_a 0.084, gain 10 400, rod scale 2.5;
+    Sun -18 deg: L_a 1.8e-4, gain 12 480, rod scale 124; moonless night: L_a at the 1e-6 floor, gain 12 370 (the
+    cone t.v.i. floor), rod scale 138, frame black, magnitude-6 star visible; full Moon at the Cape: L_a 0.10 (the
+    Moon's plate), gain 10 200, rod scale 1.6, the ground (albedo 0.3/0.19/0.10) 0.019 in scene units with 78 % of it
+    from the rods, magnitude 2 visible, 5 hidden; lunar night 2845-3012; totality at Dallas: L_a 1.57, gain 5150, rod
+    scale 0.03; 400 km in the umbra 17.7 (as before); 400 km 60 s after orbital sunset: the limb glow, gain 195
+    (sunward limb peak 1.37).
+  - GPU check (section 13, 12 samples): day frames = the fixed exposure x the gain (0.02 %), no rods, no moonlight;
+    the Sun -8 deg zenith blue (blue 0.018 > 0.01, blue / red 7.9); a moonless night (Sun -30, no Moon): frame mean
+    < 1e-3 (it is 0); the full-Moon ground: its cone image (the post step undone) = the CPU's moonlit surface within
+    0.35 % (albedo x the Moon's direct and sky light x its relative illuminance x T), rods 78 % of its luminance; stars
+    (magnitude 6 moonless, 2 / 5 under the full Moon); the earthshine on the 2026-11-12 crescent 19.9 % above the sky
+    beside it.
+  - Limits: one adaptation per view (no local / foveal adaptation: bright parts in a dim view still saturate - the
+    full Earth from the lunar night, city lights are exempt by the ruling); no loss of acuity, no glare model; the rods'
+    slower dark adaptation (~30 min) is paced like the cones' (110 s); no airglow, zodiacal light or integrated
+    starlight (a moonless sky is black, not ~2e-4 cd/m^2); Jensen's k on the adaptation luminance rather than per
+    pixel.
 - **Solar eclipses.** While the Moon's penumbra touches the atmosphere (`Atmosphere.penumbra_touches`), the
   in-scattering along a ray is split into segments at d (i/n)^2 (8 for the sky, Moon, Sun, stars and the sea's
   reflected sky; ceil(d / 12.5 km) clamped to 1..8 for the aerial perspective [call, performance]), each
@@ -3057,9 +3133,11 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   3819 cd/m^2 (B/R 1.97), horizontal illuminance at Sun zenith 125.4 klx, sky at 50 km 7.1e-4 x the ground, twilight
   zenith bluer than noon (B/R 3.12 at -4 deg); ellipsoid mapping < 1 mm; cache round trip / damage / stale hash /
   failed write. GPU `game/tests/atmosphere_check.gd` (HDR viewport, float readback, 2 % per channel unless stated;
-  RGBAH and `--f32`): 56 samples - sky, sunset, limb from 400 km and from the Moon distance, the pad camera's float64
+  RGBAH and `--f32`): 74 samples - sky, sunset, limb from 400 km and from the Moon distance, the pad camera's float64
   altitude path, ground and terrain samples (3 %), stars / Sun / Moon, lit cubes (5 %), Sun colour, eye adaptation,
-  eclipse, eye adaptation away from the Earth (lunar day, lunar night, the Earth term at lunar distance, deep space); worst sky deviation 0.52 % (the 50 km limb from the Moon distance, float32 rounding at 3.8e8 m), the Earth
+  eclipse, eye adaptation away from the Earth (lunar day, lunar night, the Earth term at lunar distance, deep space),
+  earthshine, night vision (section 13); the run asserts its sample count (`EXPECTED_SAMPLES`: a GDScript error in an
+  awaited sample ends it silently); worst sky deviation 0.52 % (the 50 km limb from the Moon distance, float32 rounding at 3.8e8 m), the Earth
   mesh samples -2.1 / -1.7 % (its facets lie up to ~0.5 km below the ellipsoid; 0.15 % against the point 300 m lower).
 - **Performance** (`terrain_perf.gd`, RTX 4090, 2560 x 1440, gate p99 <= 8 / max <= 16 ms; Task 10). Sky cubemap
   incremental at 128 (realtime 256 cost VRAM, not time: the frame is CPU-bound), half-float scattering tables.
@@ -3078,8 +3156,12 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   measured by switching it off). Adaptive segment counts (by the spread of the Sun's visible fraction along a ray)
   were tried and gave no measurable gain (the rays at Starbase cross enough penumbra gradient), so they were not
   kept. Eclipse-only; a shadow-plane texture of the factor, updated per simulated second, would remove it (open).
+  Night vision (2026-10-25): by day nothing is dispatched and no moonlight is evaluated; the default-epoch run gave
+  p99 7.83 / max 24.5 ms (the known stall at t = 3 s, inside the draw: "rest" 23 ms) and on the rerun p99 7.67 / max
+  13.3 ms (PASS). At a full-Moon night (--utc=2024-10-17T05:00:00: the rods' compute pass, the moonlit sky, ground
+  and sea terms active): p99 7.88 / max 14.3 ms (PASS; GPU-side cost hidden by the CPU-bound frame).
 - **Known limits.** No clouds, weather-dependent aerosols, refraction, airglow; one aerosol set for the whole Earth;
-  one Sun light (above); the totality approximation (above); no mesopic / scotopic vision; the 256 x 128 Earth mesh
+  one Sun light (above); the totality approximation (above); night vision's limits (above); the 256 x 128 Earth mesh
   in scaled space sits up to ~0.6 km below the ellipsoid (-2 % in its aerial perspective).
 
 ## Sea state and deck motion

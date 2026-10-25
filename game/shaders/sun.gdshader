@@ -27,6 +27,8 @@ void fragment() {
 		vec3 transmittance;
 		vec3 sky = atm_sky(atm_camera_local(), atmosphere_world_to_earth * direction_world, transmittance);
 		color = color * atmosphere_exposure_gain * transmittance + sky;  // the eye adaptation's exposure gain
+		// [call] Inside half-float range (the Sun appearing in a dark-adapted view: cone gain up to ~1.2e4).
+		color = min(color, vec3(6.0e4));
 	}
 	ALBEDO = color;
 }

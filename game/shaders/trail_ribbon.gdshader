@@ -8,6 +8,7 @@ shader_type spatial;
 render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
 
 #include "res://shaders/ribbon.gdshaderinc"
+#include "res://shaders/vision.gdshaderinc"
 
 uniform vec4 line_color : source_color = vec4(1.0, 1.0, 1.0, 0.85);
 uniform float width_px = 2.0;
@@ -49,6 +50,6 @@ void fragment() {
 		discard;
 	}
 	float fade_in = smoothstep(fade_in_start_m, fade_in_start_m + fade_in_length_m, path_m);
-	ALBEDO = line_color.rgb;
+	ALBEDO = vision_display_referred(line_color.rgb);  // a UI marker: past night vision unchanged
 	ALPHA = line_color.a * ribbon_edge(side) * visibility * fade_in;
 }

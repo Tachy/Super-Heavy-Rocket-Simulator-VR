@@ -10,6 +10,7 @@ render_mode unshaded, cull_disabled, depth_draw_never, blend_add;
 
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/star_visibility.gdshaderinc"
+#include "res://shaders/vision.gdshaderinc"
 
 uniform float point_scale = 2.4;
 // Illuminance rendered at full brightness (StarField.REFERENCE_MAGNITUDE).
@@ -24,7 +25,11 @@ void vertex() {
 	if (atmosphere_enabled) {
 		vec3 direction_world = normalize((MODEL_MATRIX * vec4(VERTEX, 0.0)).xyz);
 		vec3 transmittance;
-		vec3 sky = atm_sky(atm_camera_local(), atmosphere_world_to_earth * direction_world, transmittance);
+		vec3 view_local = atmosphere_world_to_earth * direction_world;
+		vec3 sky = atm_sky(atm_camera_local(), view_local, transmittance);
+		if (atm_moonlit()) {
+			sky += atm_moon_sky(atm_camera_local(), view_local);  // the moonlit sky behind the star
+		}
 		// Schaefer's B is the luminance the eye is adapted to; in a non-uniform field the adaptation luminance dominates
 		// over a dark patch of sky (Ferwerda et al. 1996, threshold-versus-intensity of the adapted eye).
 		float background_cd_m2 = max(dot(sky, LUMINANCE_WEIGHTS) / atmosphere_scene_per_cd_m2,
@@ -38,5 +43,6 @@ void vertex() {
 }
 
 void fragment() {
-	ALBEDO = star_light;
+	// Display-referred brightness: bypasses night vision's rod step (vision.gdshaderinc).
+	ALBEDO = vision_display_referred(star_light);
 }

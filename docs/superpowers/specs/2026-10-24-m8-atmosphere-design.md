@@ -95,6 +95,29 @@ Sun is. Colours come out of the physics (spectral scattering converted to displa
    change). Exposure only: no white balance, no colour change. Fidelity flag `Atmosphere.eye_adaptation_enabled`
    (on in the game, off in the GPU check's comparisons). Works in VR as on the desktop (shader uniforms, no
    post-process).
+   **Night vision - user decision 2026-10-25 ("like the eye"; amends the paragraph above).** The cap 25 was a display
+   call: it rendered the twilight sky at Sun -8 deg and the earthshine on the Moon (~0.5 cd/m^2, physically brighter
+   than that sky) black. Replaced by a perceptual mapping, Ferwerda et al. 1996 [call: chosen over Pattanaik et al. 2000
+   and Kirk & O'Brien 2011] - threshold matching with separate threshold-versus-intensity functions for cones
+   (photopic, their Eq. 4) and rods (scotopic, Eq. 5), combined over the mesopic range (Eq. 6, display = cones + k x
+   rods, k from 1 to 0 over 0.01-4 cd/m^2 with the smooth step of Jensen et al. 2000, "Night rendering"). Above ~80
+   cd/m^2 the cone threshold is Weber's law, so the day look is unchanged (the cone gain equals the former Weber gain
+   L_ref / L_a); below it the cone threshold flattens and the rods take over - Weber's law fails at scotopic levels, so
+   a moonless night stays dark. The cone gain multiplies every physical luminance in the shaders (as the former gain);
+   the rods' achromatic image is added by one full-screen post step (a CompositorEffect after the transparent pass,
+   before glow and the tone mapper; per pixel, the same for both VR eyes): rgb + k g_r / g_c x max(w_s . rgb, 0) x
+   tint, the scotopic luminance from the CIE 1951 V'(lambda) projected onto linear sRGB, the rod image tinted
+   blue at (x, y) = (0.25, 0.25) (Jensen et al. 2000; the common night-rendering convention). Display-referred emitters
+   (plumes, city lights, the stars' own brightness, UI markers, the VR panel) take the inverse of that step in their
+   shaders and look as before [ruling: city lights and plumes stay display-referred - bright sources the fovea sees in
+   colour; the global mapping without local adaptation would grey them out, and the night-light texture has no
+   radiometric calibration]. The adaptation luminance gains a scotopic twin (the same view-independent plates, their
+   colour through w_s) and a twilight term: with the Sun below the horizon (or behind the Earth, in orbit) the
+   brightest sky (the glow toward the Sun) - Ferwerda's "highest visible luminance" made view-independent. The
+   Moon becomes a light (Krisciunas & Schaefer 1991 phase law): the moonlit sky, the moonlit ground and sea, a second
+   light on vehicles, and the Moon's plate in the adaptation - only while it can show (its plate >= 0.1 % of the
+   adaptation). The cap remains only as a numeric bound (1e5; the t.v.i. floor bounds the cone gain at ~1.2e4); the
+   full Earth from the lunar night still saturates (expected). Time constants, snaps and the star threshold unchanged.
 8. **Solar eclipses in the sky [call].** Inside the Moon's shadow the sky must darken (the default render check is the
    2024-04-08 eclipse). When the penumbra touches the Earth (CPU check), the in-scattering along a view ray is split
    into a few segments (Bruneton's difference form S(x) - T(x, y) S(y)), each weighted by the Sun's visible fraction
@@ -113,7 +136,9 @@ Sun is. Colours come out of the physics (spectral scattering converted to displa
 - Weather-dependent aerosols, humidity, water-vapour absorption, airglow, aurora, noctilucent clouds.
 - Atmospheric refraction (flattened Sun at the horizon, astronomical refraction of the stars), scintillation.
 - ~~Automatic exposure / eye adaptation~~ - now in scope [call, 2026-10-25], see Goal 7: civil twilight rendered black
-  at the fixed exposure. Still out: mesopic / scotopic vision (rod desaturation, Purkinje shift), glare and bloom models.
+  at the fixed exposure. ~~Mesopic / scotopic vision~~ - in scope by the user decision of 2026-10-25 (Goal 7, night
+  vision). Still out: glare and bloom models, the loss of acuity at night, local (foveal) adaptation, the rods' slower
+  dark adaptation, airglow / starlight / zodiacal light as night-sky sources.
 - Light shafts / volumetric shadows of mountains, vehicles or the tower in the air.
 - Any change to flight physics: the US76 atmosphere stays the only atmosphere the simulation flies through; this part
   only reads it.

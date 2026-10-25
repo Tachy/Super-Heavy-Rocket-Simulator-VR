@@ -5,6 +5,7 @@ shader_type spatial;
 render_mode unshaded, blend_add, cull_disabled, shadows_disabled;
 
 #include "res://shaders/atmosphere.gdshaderinc"
+#include "res://shaders/vision.gdshaderinc"
 
 uniform vec4 color : source_color = vec4(1.0, 0.55, 0.25, 0.55);
 
@@ -20,7 +21,8 @@ void fragment() {
 		atm_to_point_offset(atmosphere_world_to_earth * world_offset, transmittance);
 	}
 	// Display-referred (one rule for emitters without a physical luminance - plumes, city lights, the stars' own
-	// brightness: game/world/eye_adaptation.gd): not multiplied by the eye adaptation's gain.
-	ALBEDO = color.rgb * transmittance;
+	// brightness: game/world/eye_adaptation.gd): not multiplied by the eye adaptation's gain, and past night vision's
+	// rod step unchanged [call 2026-10-25: a bright source, seen by the cones in colour].
+	ALBEDO = vision_display_referred(color.rgb * transmittance);
 	ALPHA = color.a;
 }

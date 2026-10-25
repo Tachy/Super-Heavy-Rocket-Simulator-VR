@@ -15,10 +15,10 @@ var _immediate := ImmediateMesh.new()
 
 func _ready() -> void:
 	mesh = _immediate
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.albedo_color = Color(0.45, 0.6, 0.9, 0.7)
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	# A display-referred UI colour, past night vision's rod step unchanged (shaders/display_colour.gdshader).
+	var material := ShaderMaterial.new()
+	material.shader = preload("res://shaders/display_colour.gdshader")
+	material.set_shader_parameter("colour", Color(0.45, 0.6, 0.9, 0.7))
 	material_override = material
 	cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 

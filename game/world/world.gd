@@ -35,12 +35,14 @@ var moon := CelestialBody.new()
 var moon_terrain := TerrainQuadtree.new()  ## streamed lunar surface (LDEM_16 + site tiles) while not in scaled space
 var sun_disk := MeshInstance3D.new()
 var sun_light := DirectionalLight3D.new()
+## The Moon's light on Godot's lit materials at night (Atmosphere.moon_light_at; energy 0 by day; no shadows).
+var moon_light := DirectionalLight3D.new()
 var stars := StarField.new()
 var moon_orbit := OrbitLine.new()
 var flight := FlightController.new()
 var view_target := ViewTarget.new()  ## the simulated body the external view shows (Tab / Shift+Tab)
-var earth_label := Label3D.new()
-var moon_label := Label3D.new()
+var earth_label := MapLabel.new()
+var moon_label := MapLabel.new()
 var sites: Array = []  ## launch sites from config/launch_sites.toml
 var focus := FOCUS_EARTH
 var ground_site: Dictionary = {}
@@ -332,6 +334,13 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 			visible)
 	sun_light.light_color = light[0]
 	sun_light.light_energy = light[1]
+	var moon_lit: Array = atmosphere.moon_light_at(gcrf_to_fixed * lit_gcrf)
+	moon_light.visible = moon_lit[1] > 0.0
+	if moon_light.visible:
+		var to_moon := Frames.to_render((moon_gcrf_m - lit_gcrf).normalized())
+		moon_light.basis = Basis.looking_at(-to_moon, Vector3.UP if absf(to_moon.y) < 0.99 else Vector3.RIGHT)
+		moon_light.light_color = moon_lit[0]
+		moon_light.light_energy = moon_lit[1]
 
 
 func _setup_bodies(data_dir: String) -> void:
@@ -377,6 +386,9 @@ func _setup_bodies(data_dir: String) -> void:
 	add_child(sun_disk)
 	sun_light.light_energy = 1.0
 	add_child(sun_light)
+	moon_light.shadow_enabled = false
+	moon_light.visible = false
+	add_child(moon_light)
 
 
 ## The Earth's terrain quadtree: heights from the core's Earth terrain (the physics' surface; without data/ the flat
@@ -460,15 +472,9 @@ func _make_pad(site: Dictionary) -> MeshInstance3D:
 	return pad
 
 
-## Screen-space label for the map view, where bodies are only a few pixels large.
-func _setup_label(label: Label3D, text: String) -> void:
-	label.text = text
-	label.fixed_size = true
-	label.pixel_size = 0.0012
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.no_depth_test = true
-	label.offset = Vector2(0, 22)
-	label.modulate = Color(0.75, 0.85, 1.0)
+## Screen-space label for the map view, where bodies are only a few pixels large (MapLabel).
+func _setup_label(label: MapLabel, text: String) -> void:
+	label.setup(text, Color(0.75, 0.85, 1.0))
 	label.visible = false
 	add_child(label)
 
@@ -498,6 +504,10 @@ func _setup_environment() -> void:
 	environment.glow_intensity = 0.6
 	var world_environment := WorldEnvironment.new()
 	world_environment.environment = environment
+	# Night vision's rod step (EyeAdaptation, VisionEffect): after the transparent pass, before glow and AgX.
+	var compositor := Compositor.new()
+	compositor.compositor_effects = [atmosphere.vision_effect]
+	world_environment.compositor = compositor
 	add_child(world_environment)
 
 

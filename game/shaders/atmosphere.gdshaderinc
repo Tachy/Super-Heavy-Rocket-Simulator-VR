@@ -62,6 +62,11 @@ global uniform float atmosphere_exposure_gain;
 // The luminance the eye is adapted to (cd/m^2 at the Sun's actual distance; EyeAdaptation.adaptation_cd_m2, paced,
 // unclamped); 0 with the eye adaptation off. The star threshold's background floor (stars.gdshader).
 global uniform float atmosphere_adaptation_cd_m2;
+// Moonlight (night vision, 2026-10-25): the Moon's Earth-local unit direction (apparent, from the Earth's centre) and its
+// illuminance relative to the TOA Sun's at the true Sun distance (Atmosphere.moonlight_relative: Krisciunas & Schaefer
+// 1991); 0 while it cannot show (the eye adapted to daylight): every moonlight term is skipped.
+global uniform vec3 atmosphere_moon_direction;
+global uniform float atmosphere_moon_light;
 global uniform bool atmosphere_enabled;             // false until the tables are uploaded
 // Solar eclipse in the sky (Atmosphere.update): the number of in-scattering segments while the Moon's penumbra touches
 // the Earth's atmosphere (0: off, the plain lookups), the Moon's apparent position and the Sun's distance from the
@@ -380,8 +385,9 @@ bool atm_enter_from_space(vec3 camera_model, vec3 v, out vec3 entry_direction, o
 
 // ---- Sky radiance along the model-space unit ray v from a point with up direction `up`, radius r and rho (inside or
 // above the atmosphere), scene units; the transmittance of the ray to the atmosphere's edge (0 into the ground).
-vec3 atm_sky_from(vec3 up, float r, float rho, vec3 v, out vec3 transmittance) {
-	vec3 sun = normalize(atmosphere_sun_direction * ATM_STRETCH);
+vec3 atm_sky_from_light(vec3 up, float r, float rho, vec3 v, vec3 light_direction_local, bool eclipse,
+		out vec3 transmittance) {
+	vec3 sun = normalize(light_direction_local * ATM_STRETCH);
 	float mu = atm_clamp_cosine(dot(up, v));
 	if (r > atmosphere_top_radius_m) {
 		vec3 entry_up;
@@ -401,7 +407,7 @@ vec3 atm_sky_from(vec3 up, float r, float rho, vec3 v, out vec3 transmittance) {
 	vec3 scattering;
 	vec3 single_mie;
 	vec3 umbra = vec3(0.0);
-	if (atmosphere_eclipse_segments > 0) {
+	if (eclipse && atmosphere_eclipse_segments > 0) {
 		float d_end = ground ? atm_distance_to_bottom(r, rho, mu) : atm_distance_to_top(r, mu);
 		vec3 full_scattering;
 		vec3 full_mie;
@@ -412,6 +418,11 @@ vec3 atm_sky_from(vec3 up, float r, float rho, vec3 v, out vec3 transmittance) {
 	}
 	vec3 radiance = scattering * atm_rayleigh_phase(nu) + single_mie * atm_mie_phase(atmosphere_mie_phase_g, nu);
 	return atm_to_scene(radiance) + umbra;
+}
+
+// The sky lit by the Sun (with the solar eclipse's segments while the Moon's penumbra touches the atmosphere).
+vec3 atm_sky_from(vec3 up, float r, float rho, vec3 v, out vec3 transmittance) {
+	return atm_sky_from_light(up, r, rho, v, atmosphere_sun_direction, true, transmittance);
 }
 
 // ---- Sky radiance seen from the camera along a view direction (GetSkyRadiance, shadow_length 0), scene units; the
@@ -655,6 +666,61 @@ vec3 atm_sun_and_sky(vec3 point_local, vec3 normal_local, out vec3 sky) {
 	sky = atm_sky_light(point_local, normal_local);
 	float cosine = max(dot(normalize(normal_local), normalize(atmosphere_sun_direction)), 0.0);
 	return atm_sun_at(point_local) * cosine;
+}
+
+// ---- Moonlight (Atmosphere.moonlight_relative; 0 by day). The Moon is a second, much weaker light of the solar
+// spectrum [call: its slight reddening, B-V 0.92 against the Sun's 0.65, left out - rod vision dominates there]
+// through the same tables: the sky it lights, the direct light at a point and the sky light on a surface, x its
+// illuminance relative to the Sun's. No eclipse segments (the Moon is not eclipsed by itself).
+bool atm_moonlit() { return atmosphere_moon_light > 0.0; }
+
+// The moonlit sky along a view direction from the camera (scene units; atm_sky's geometry).
+vec3 atm_moon_sky(vec3 camera_local, vec3 view_dir_local) {
+	vec3 up;
+	float r;
+	float rho;
+	atm_camera_model(camera_local, up, r, rho);
+	vec3 transmittance_unused;
+	return atm_sky_from_light(up, r, rho, normalize(view_dir_local * ATM_STRETCH), atmosphere_moon_direction, false,
+			transmittance_unused) * atmosphere_moon_light;
+}
+
+// The moonlit sky seen from the point at camera + offset_local (the sea's reflected sky).
+vec3 atm_moon_sky_at_offset(vec3 offset_local, vec3 view_dir_local) {
+	vec3 up_p;
+	float r_p;
+	float rho_p;
+	atm_point_model(offset_local, up_p, r_p, rho_p);
+	vec3 transmittance_unused;
+	return atm_sky_from_light(up_p, r_p, rho_p, normalize(view_dir_local * ATM_STRETCH), atmosphere_moon_direction,
+			false, transmittance_unused) * atmosphere_moon_light;
+}
+
+// The direct Moon transmitted to the point at normal incidence (no cosine; atm_sun_at with the Moon).
+vec3 atm_moon_at(vec3 point_local) {
+	vec3 p = point_local * ATM_STRETCH;
+	float r = clamp(length(p), atmosphere_bottom_radius_m, atmosphere_top_radius_m);
+	float mu_m = atm_clamp_cosine(dot(normalize(p), normalize(atmosphere_moon_direction * ATM_STRETCH)));
+	return atmosphere_sun_illuminance_lux * atm_transmittance_to_sun(r, atm_rho_of(r), mu_m)
+			* (atmosphere_luminance_scale / ATM_PI * atmosphere_moon_light);
+}
+
+// The moonlit sky's light on a surface (atm_sky_light with the Moon).
+vec3 atm_moon_sky_light(vec3 point_local, vec3 normal_local) {
+	vec3 p = point_local * ATM_STRETCH;
+	float r = clamp(length(p), atmosphere_bottom_radius_m, atmosphere_top_radius_m);
+	vec3 up = normalize(p);
+	vec3 normal = normalize(normal_local / ATM_STRETCH);
+	float mu_m = atm_clamp_cosine(dot(up, normalize(atmosphere_moon_direction * ATM_STRETCH)));
+	return atm_irradiance(r - atmosphere_bottom_radius_m, mu_m) * (1.0 + dot(normal, up)) * 0.5
+			* atmosphere_sky_radiance_to_luminance * (atmosphere_luminance_scale / ATM_PI * atmosphere_moon_light);
+}
+
+// The moonlight on a surface: the direct Moon x the true cosine plus the moonlit sky's light (scene units of a white
+// Lambertian; atm_sun_and_sky's rules).
+vec3 atm_moon_light(vec3 point_local, vec3 normal_local) {
+	float cosine = max(dot(normalize(normal_local), normalize(atmosphere_moon_direction)), 0.0);
+	return atm_moon_at(point_local) * cosine + atm_moon_sky_light(point_local, normal_local);
 }
 
 // ---- Aerial perspective for Godot's lit materials (vehicles, tower, pads, drone ship: lit_aerial.gdshader,

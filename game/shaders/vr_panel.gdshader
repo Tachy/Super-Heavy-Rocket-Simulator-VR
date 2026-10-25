@@ -7,6 +7,8 @@ shader_type spatial;
 // The overlay texture holds premultiplied alpha (2D drawing onto a cleared transparent target).
 render_mode unshaded, blend_premul_alpha, depth_test_disabled, depth_draw_never, cull_back, shadows_disabled, fog_disabled;
 
+#include "res://shaders/vision.gdshaderinc"
+
 uniform sampler2D overlay : source_color, filter_linear, repeat_disable;
 // The mouse pointer (VR only), composited over the overlay so it stays above embedded popups; tip at pointer_px.
 uniform sampler2D pointer : source_color, filter_linear, repeat_disable;
@@ -26,6 +28,6 @@ void fragment() {
 		vec4 arrow = texture(pointer, local);  // premultiplied, as the overlay
 		texel = arrow + texel * (1.0 - arrow.a);
 	}
-	ALBEDO = texel.rgb;
+	ALBEDO = vision_display_referred(texel.rgb);  // UI: past night vision's rod step unchanged
 	ALPHA = texel.a;
 }

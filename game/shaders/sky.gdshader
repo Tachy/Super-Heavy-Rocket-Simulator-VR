@@ -5,6 +5,7 @@ shader_type sky;
 // every drawn surface): the day texture lit by the transmitted Sun and the sky light, seen through the atmosphere. In
 // the radiance-cubemap pass this ground gives Godot's ambient and reflections the ground bounce and the earthshine;
 // in the background pass the terrain and the Earth mesh normally cover it.
+// At night (atmosphere_moon_light > 0) the Moon lights the sky and the model ground as a second, weak source.
 // Until the tables are uploaded (atmosphere_enabled false) the sky is black, as before the atmosphere existed.
 
 #include "res://shaders/atmosphere.gdshaderinc"
@@ -46,9 +47,10 @@ vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
 	vec3 sky_light;
 	vec3 sun_light = atm_sun_and_sky(point_local, normal_local, sky_light) * atm_sunlit(point_local);  // Moon shadow
 	sky_light *= atm_sky_eclipse_factor(point_local);
+	vec3 moon_light = atm_moonlit() ? atm_moon_light(point_local, normal_local) : vec3(0.0);
 	vec3 transmittance;
 	vec3 in_scatter = atm_to_point_model(v * t, transmittance);  // camera-relative: the hit's offset along the ray
-	return albedo * (sun_light + sky_light) * transmittance + in_scatter;
+	return albedo * (sun_light + sky_light + moon_light) * transmittance + in_scatter;
 }
 
 void sky() {
@@ -76,6 +78,9 @@ void sky() {
 		} else {
 			vec3 transmittance;
 			COLOR = atm_sky(camera_local, view_local, transmittance);
+			if (atm_moonlit()) {
+				COLOR += atm_moon_sky(camera_local, view_local);  // the moonlit sky (night only)
+			}
 		}
 	}
 }

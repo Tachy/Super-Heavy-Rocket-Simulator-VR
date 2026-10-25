@@ -106,6 +106,9 @@ func _process(_delta: float) -> bool:
 		print("render_check: eye adapted to %s cd/m^2: Sun on a plate %s (visible %.3f), Earth in view %s, Moon in view %s, earthshine %s lux" % [
 				a.adaptation_cd_m2, a.last_adaptation_down_cd_m2, a.last_adaptation_visible_fraction,
 				a.last_adaptation_up_cd_m2, a.last_adaptation_moon_cd_m2, a.last_earthshine_lux])
+		print("render_check: night vision: twilight glow %s cd/m^2, scotopic %s cd/m^2, rod scale %s, moonlight %s of the Sun (%s), vehicle Moon light %s" % [
+				a.last_adaptation_glow_cd_m2, a.scotopic_cd_m2, a.rod_scale, a.moonlight_relative_value, "on" if a.moonlight_active else "off",
+				world.moon_light.light_energy if world.moon_light.visible else 0.0])
 		var out: String = _args.get("out", "user://render_check.png")
 		var error := root.get_viewport().get_texture().get_image().save_png(out)
 		print("render_check: saved %s (error %d)" % [out, error])

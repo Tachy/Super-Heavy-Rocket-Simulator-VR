@@ -9,6 +9,7 @@ render_mode unshaded, cull_back;
 
 #include "res://shaders/eclipse.gdshaderinc"
 #include "res://shaders/atmosphere.gdshaderinc"
+#include "res://shaders/vision.gdshaderinc"
 
 uniform sampler2D day_texture : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D night_texture : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
@@ -51,13 +52,15 @@ void fragment() {
 		vec3 eclipse_factor = sunlit < 1.0 ? atm_sky_eclipse_factor(local_position) : sky_eclipse_factor;
 		vec3 sky_light;
 		vec3 sun_light = atm_sun_and_sky(local_position, n, sky_light);
-		vec3 day = albedo * (sun_light * sunlit + sky_light * eclipse_factor);
+		vec3 moon_light = atm_moonlit() ? atm_moon_light(local_position, n) : vec3(0.0);
+		vec3 day = albedo * (sun_light * sunlit + sky_light * eclipse_factor + moon_light);
 		// Camera-relative offset: the mesh is far from the camera whenever it is drawn (the terrain takes over near
 		// the ground), so the difference of the absolute float32 positions is accurate enough here.
 		vec3 offset = (local_position - atmosphere_camera_hi) - atmosphere_camera_lo;
 		vec3 transmittance;
 		vec3 in_scatter = atm_to_point_offset(offset, transmittance);
-		ALBEDO = (day + night) * transmittance + in_scatter;
+		// City lights: display-referred [call 2026-10-25], so they bypass night vision's rod step (vision.gdshaderinc).
+		ALBEDO = day * transmittance + in_scatter + vision_display_referred(night * transmittance);
 	} else {
 		ALBEDO = albedo * max(cos_sun, 0.0) * sunlit * day_exposure + night;
 	}

@@ -12,6 +12,7 @@ render_mode unshaded, cull_back;
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/terrain_morph.gdshaderinc"
 #include "res://shaders/water.gdshaderinc"
+#include "res://shaders/vision.gdshaderinc"
 
 // Global maps: CUSTOM1.u runs past 1 on nodes across the antimeridian (continuous inside the node), hence repeat.
 uniform sampler2D day_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -102,6 +103,15 @@ void fragment() {
 		sky_light = atm_sky_light(local_position, n) * sky_eclipse_factor;
 	}
 	vec3 day = albedo * (sun_normal * max(dot(n, normalize(earth_sun_position_local)), 0.0) * sunlit + sky_light);
+	// Moonlight (night only): the direct Moon and the moonlit sky's light; on the sea a second pass of the sea model.
+	bool moonlit = atmosphere_enabled && atm_moonlit();
+	vec3 moon_normal = vec3(0.0);
+	vec3 moon_sky_light = vec3(0.0);
+	if (moonlit) {
+		moon_normal = atm_moon_at(local_position);
+		moon_sky_light = atm_moon_sky_light(local_position, n);
+		day += albedo * (moon_normal * max(dot(n, normalize(atmosphere_moon_direction)), 0.0) + moon_sky_light);
+	}
 	// Sea: the imagery where it covers (lagoons, shoals), else the day texture (shallow banks from orbit; deep_water
 	// without one), under the calm sea model.
 	float water = water_coverage(texture(water_mask, water_uv).r);
@@ -117,18 +127,26 @@ void fragment() {
 		sky_reflected = atm_sky_at_offset(camera_offset, water_reflected_direction(n, wave_n, to_camera),
 				reflected_transmittance);
 	}
-	day = mix(day, water_radiance(water_body, n, wave_n, resolved_variance, normalize(to_sun), to_camera, sunlit,
-			sun_normal, sky_light, sky_reflected), water);
+	vec3 sea = water_radiance(water_body, n, wave_n, resolved_variance, normalize(to_sun), to_camera, sunlit,
+			sun_normal, sky_light, sky_reflected);
+	if (moonlit && water > 0.0) {
+		// The same sea under the Moon: its diffuse light, the moonlit sky reflected and the Moon's glitter path.
+		vec3 moon_reflected = atm_moon_sky_at_offset(camera_offset, water_reflected_direction(n, wave_n, to_camera));
+		sea += water_radiance(water_body, n, wave_n, resolved_variance, normalize(atmosphere_moon_direction),
+				to_camera, 1.0, moon_normal, moon_sky_light, moon_reflected);
+	}
+	day = mix(day, sea, water);
 	// City lights fade in through civil twilight (sun 0..6 deg below the horizon).
 	float night_factor = smoothstep(0.0, -0.1, cos_sun);
 	vec3 night = texture(night_texture, map_uv).rgb;
 	night = night * night * night_lights_intensity * night_factor;  // suppress dark-sky noise
 	vec3 color = day + night;
 	if (atmosphere_enabled) {
-		// Aerial perspective along the camera-relative offset (exact in float32 near the camera).
+		// Aerial perspective along the camera-relative offset (exact in float32 near the camera). City lights:
+		// display-referred [call 2026-10-25], so they bypass night vision's rod step (vision.gdshaderinc).
 		vec3 transmittance;
 		vec3 in_scatter = atm_to_point_offset(camera_offset, transmittance);
-		color = color * transmittance + in_scatter;
+		color = day * transmittance + in_scatter + vision_display_referred(night * transmittance);
 	}
 	ALBEDO = color;
 }

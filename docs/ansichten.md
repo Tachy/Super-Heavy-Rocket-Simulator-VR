@@ -276,11 +276,16 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   Himmelshelligkeit); über der Atmosphäre ist der ganze Sternhimmel da.
 - Augenanpassung: die Belichtung folgt dem Licht am Betrachter wie ein Auge (heller werden in etwa einer halben
   Sekunde, dunkler werden über etwa zwei Minuten; Zeitraffer läuft entsprechend schneller, ein Sprung in Zeit oder Ort
-  ist sofort angepasst). Bürgerliche Dämmerung ist gedämpft sichtbar, nautische Dämmerung dunkel, die Nacht bleibt
-  Nacht (Verstärkung höchstens 25-fach). Nur die Helligkeit wird angepasst, nicht die Farben; im VR genauso. Fern der
-  Erde zählt das Sonnenlicht am Betrachter (auch im Erdschatten), auf oder nahe dem Mond zusätzlich der Mondboden in
-  Sicht: am Mondtag Tagesbelichtung, in der Mondnacht passt sich das Auge an Erde und erdbeschienenen Boden an (die
-  Erde erscheint dann heller als am Tag).
+  ist sofort angepasst). Fern der Erde zählt das Sonnenlicht am Betrachter (auch im Erdschatten), auf oder nahe dem
+  Mond zusätzlich der Mondboden in Sicht: am Mondtag Tagesbelichtung, in der Mondnacht passt sich das Auge an Erde und
+  erdbeschienenen Boden an (die Erde erscheint dann überstrahlt).
+- Nachtsehen [Entschieden 2026-10-25, Nutzer: "wie das Auge"]: bei Tag unverändert; in der Dämmerung passt sich das
+  Auge an den hellsten Himmel an (das Glühen über dem Horizont zur Sonne), der Zenit wird tiefblau, der Horizont
+  bleibt farbig; tiefer in der Nacht übernehmen die Stäbchen: das Bild wird dunkel, entsättigt und bläulich
+  (Purkinje-Effekt). Vollmond: Landschaft grau und gedämpft erkennbar, der Himmel dunkelblau-grau, nur hellere Sterne;
+  der Mond beleuchtet Boden, Meer (Glitzerpfad), Himmel und Fahrzeuge. Mondlose Nacht: dunkel, Sterne bis etwa
+  6. Größe. Aschgraues Mondlicht (Erdschein) auf der Mondsichel ist in der Dämmerung schwach sichtbar. Stadtlichter,
+  Triebwerksflammen, Sterne und Anzeigen behalten ihre Farbe (bewusst nicht entsättigt). Gleich in VR (beide Augen).
 - Sonnenfinsternis: im Kernschatten wird der Himmel dunkel, ringsum am Horizont leuchtet die Dämmerung (360 Grad),
   nur helle Sterne und Planeten erscheinen; der Mondschatten ist aus dem Orbit als dunkler Fleck mit weichem Rand zu
   sehen.
