@@ -41,3 +41,19 @@ needed.
   (a step of t_v at the layer centres); now mean / cf in both.
 - **Resize**: the result texture was replaced inside the render callback (one renderer error, one frame without
   clouds); now shown by the main thread and freed later.
+
+## Closed-form Sun source as the game's default (Task 8, replaced in Task 8b, 2026-10-25)
+
+- **TMS on the delta-Eddington source function** (`cloud_scattering_source_3d`, still available as the fidelity flag
+  `CloudLayer.ScatteringModel.CLOSED_FORM` / `cloud_scattering_model 0`): against the Monte Carlo fixtures forward-
+  scattered radiance at a low Sun up to -56 % (Sun 60 deg, view 60 deg forward, tau 10: -44.5 %), the albedo at Sun
+  60 deg up to -32 % (tau 1-3), the semi-infinite albedo 0.90 at mu0 0.5 and 1.16 at mu0 0.1; the TMS aureole through
+  thick cloud too bright (no IMS). User feedback vs MSFS 2024: no backlit glow, weak silver linings, no inner glow of
+  cumuli. Replaced as the default by the Monte Carlo transfer table (Bouthors et al. 2008).
+- **First table form** (Task 8b, uncommitted): the table held the whole multiple-scattering source incl. the phase
+  function's HG part (g 0.995, a ~0.3 deg peak) with the view ray attenuated by exp(-tau). Tallying the HG part needs
+  the radiance within 0.3 deg of every view direction: relative 1-sigma median 1.9 %, p99 55 %, 25-50 % at small
+  scattering angles deep in thick slabs (rings around the Sun under a deck) and zeros at tau* 256. Replaced by the
+  Draine part with the view ray attenuated by exp(-w_D tau) (median 0.5 %).
+- **Performance after Task 8 fix round 1** (closed form, same setup): without clouds p99 13.20 / 13.06 ms, with clouds
+  15.54 ms; descent 12.1 -> 16.7 ms p99, worst GPU second 18.9 ms at 8.4 km.

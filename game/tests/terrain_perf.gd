@@ -1,6 +1,7 @@
 # Terrain renderer performance run (needs a GPU and a desktop window, no --headless):
 # godot --path game --script res://tests/terrain_perf.gd [-- --utc=2024-04-10T18:00:00 --warp=1 --descent_s=60
-#       --pan_s=20 --cape_s=20 --shots=<dir> --spikes --weather=<abs path .wthr> --cloud_quality=desktop|vr]
+#       --pan_s=20 --cape_s=20 --shots=<dir> --spikes --weather=<abs path .wthr> --cloud_quality=desktop|vr
+#       --cloud_scattering=table|closed]
 # Phases: "descent" - a ground camera above OLP-1 descends from 400 km to 2 m in descent_s (eye height logarithmic in
 # time, looking 20 deg down); "pan_low" - 360 deg pan at 2 m eye height on the plateau PAN_LOW_OFFSET_M from the mount
 # (free view, not blocked by the mount); "pan_high" - 360 deg pan PAN_HIGH_EYE_M above the pad, looking 10 deg down (the
@@ -129,10 +130,14 @@ func _setup() -> void:
 	_world.clock.warp = float(_args.get("warp", "1"))
 	_world.clock.set_time(_world.core.utc_to_tdb_s(_args.get("utc", "2024-04-10T18:00:00")))
 	# Weather: off (no downloads in a performance run) unless --weather=<file.wthr> pins that snapshot for the clouds;
-	# --cloud_quality=desktop|vr picks the clouds' preset (the gate: vr).
+	# --cloud_quality=desktop|vr picks the clouds' preset (the gate: vr); --cloud_scattering=table|closed the
+	# multiple-scattering model (CloudLayer.ScatteringModel; default the table).
 	_world.weather.enabled = false
 	if _args.has("cloud_quality"):
 		_world.clouds.quality = CloudLayer.Quality.VR if _args["cloud_quality"] == "vr" else CloudLayer.Quality.DESKTOP
+	if _args.has("cloud_scattering"):
+		_world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
+				if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE
 	if String(_args.get("weather", "")).ends_with(".wthr"):
 		var snapshot: Dictionary = _world.core.weather_load_snapshot(_args["weather"])
 		if snapshot.get("ok", false):

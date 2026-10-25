@@ -2,8 +2,8 @@
 
 Plan `docs/superpowers/plans/2026-10-25-m8-weather-clouds.md`, spec
 `docs/superpowers/specs/2026-10-25-m8-weather-clouds-design.md`. The snapshots come from `weather-service.md`. State
-after Task 8 and its amendment (volumetric clouds near the camera); Tasks 8b-11 (transfer table, light on the ground,
-far field, gate and docs) extend it.
+after Task 8, its amendment (volumetric clouds near the camera) and Task 8b (Monte Carlo transfer table); Tasks 9-11
+(light on the ground, far field, gate and docs) extend it.
 
 ## Model
 
@@ -37,10 +37,25 @@ far field, gate and docs) extend it.
   mixes in the ramp of thin-sheet coordinates (vertical tile 2 km instead of 16 km [E]; no fibre direction: no wind in
   the snapshot), the same detail. Shape tile 32 km across / 16 km high [E]; Earth-fixed, the camera's part in float64
   on the CPU (level k's origin fract(4^k x level 0's)).
+- **Multiple scattering: Monte Carlo transfer table** (Task 8b, after Bouthors et al. 2008; `cloud_transfer_table.hpp`,
+  `config/clouds/cloud_transfer_table.bin`, 9.7 MB): the source of the multiply scattered light of a plane-parallel
+  conservative slab, made offline by `tools/validation/cloud_slab_monte_carlo.py --table-runs / --table-build` with
+  the project's phase function (16 mu0 x 27 slabs tau* 0.1-1024, 3.42e8 photons, fixed seeds; 1-sigma per entry from 8
+  batches in `tests/validation/weather/cloud_transfer_table_sigma.bin`: median 0.48 %, p99 8.6 % over entries > 1e-3).
+  Axes: depth below the top a and above the bottom b (22 nodes each, s (sqrt2^i - 1) up to 255.75 plus infinity), mu0
+  (16 nodes ((i + 1) / 16)^2), scattering angle theta (48, log-linear) and the folded azimuth psi about the Sun's
+  propagation (13); half floats. It holds the Draine part w_D (p_D * L) of the source: the phase function's HG part (g
+  0.995, a ~0.3 deg peak) stays in the view ray, which therefore attenuates the lights' source with exp(-w_D tau) (exact
+  up to the peak's width; tallying the HG part too left 25-50 % noise near the Sun's direction deep in thick slabs).
+  `cloud_scattering_source_mc` = exact single scattering p exp(-tau_s) + the table at (a = mu_e tau_s, b, mu_e, theta,
+  psi) on the same tilted column as the 3D source. GPU: one RGBA16F 3D texture (720 x 273 x 22; RGBA = the (mu0, b)
+  corners of a cell), one trilinear fetch per light sample. Fidelity flag `CloudLayer.scattering_model` (shader
+  `cloud_scattering_model`): TABLE (default once the table is loaded) or CLOSED_FORM (below, for comparison). The sky
+  light keeps the closed-form sky source on the scaled depths.
 - **Light**: the Sun's (and at night the Moon's) optical depth is marched toward the light through the 3D density
   (`cloud_light_optical_depth`: near samples over 6 km in geometric intervals from 20 m through the shapes, then far
-  samples to the cloud top through the grid mean; stratified, unbiased over the jitter). The source is the core's
-  `cloud_scattering_source_3d`: TMS on the delta-Eddington source function of the surface the light entered through
+  samples to the cloud top through the grid mean; stratified, unbiased over the jitter). The closed-form source (the
+  fidelity flag's CLOSED_FORM) is the core's `cloud_scattering_source_3d`: TMS on the delta-Eddington source function of the surface the light entered through
   (entry cosine mu_e = clamp((t_v + mu0) / (tau_s + 1), max(mu0, 0.02), 1); a slab gives mu_e = mu0 exactly, a sunlit
   flank or a base under a Sun below the local horizon gets its true incidence; tilted independent column, Varnai &
   Davies 1999). The light march band-limits the detail at the larger of the pixel footprint and its interval. Plus the
@@ -90,10 +105,18 @@ far field, gate and docs) extend it.
   noise); 3D Sun light (light march unbiased within 1 %, shadow-side transmittance exp(-mean tau) within 2 % of
   Beer-Lambert; sunlit flank 6.9x / 52x the shadowed one and 3.9x the column model at +10 / -3 deg Sun; a slab gives
   the column source exactly); sky source R + T = 1.
+- Core `[weather]` transfer table (`test_cloud_transfer_table.cpp`): the 42 bins of `cloud_slab_radiance_mc.csv` (Sun
+  0 / 60 deg, tau 1-30) within 4.5 % (bound 5 % or 3 sigma; the closed form up to -56 % in the forward bins); slab albedo
+  vs `cloud_slab_albedo_mc.csv` (2e6 photons) within 1.1 % for tau 1-50, mu0 1 and 0.5 (closed form up to -32 %);
+  semi-infinite R = 1.003 / 0.995 / 0.998 / 0.995 at mu0 1 / 0.5 / 0.2 / 0.1 (bound 1 %); the uniform-slab limit
+  (source = single + table at (t, tau* - t, mu0); its ray integral = `slab_reflected_radiance_mc` within 0.2 %); the
+  table's Draine weight = the core's phase function's; loader refuses foreign / truncated files; GPU packing.
 - GPU `game/tests/cloud_check.gd` (the cloud pass; grid-mean field in debug outputs 1 / 2): background transmittance
   below / inside / above a tau-1 slab vs the CPU Beer-Lambert within 1.5 %; Sun radiance from above a tau-10 slab vs
   `slab_reflected_radiance` within 1.4 % with a converged light march (24 samples, 8 frames), the preset's 6-sample
-  march +10 % at Sun 60 deg (Jensen bias of exp(-tau_s), tolerance 15 %); filtered coverage 0.1036 / 0.5057 / 0.9021 at
+  march +10 % at Sun 60 deg (Jensen bias of exp(-tau_s), tolerance 15 %); with the table vs
+  `slab_reflected_radiance_mc` within 1.9 % (tolerance 3 %) at six geometries incl. a Sun 10 deg up seen forward (view
+  75 deg: 0.368 /sr), the preset's march +5.7 % there; filtered coverage 0.1036 / 0.5057 / 0.9021 at
   full resolution (state 0, detail levels off for all numbers); climbing out in 50 m steps (temporal weight 1) <= 4.81 %
   of the brightest value per step; inside finite and non-black; transmittance to an occluder 2 km ahead inside the
   slab exp(-beta 2 km) within 0.7 % (depth -> distance); a near "mountain" edge through a half-resolution block: the
@@ -105,23 +128,26 @@ far field, gate and docs) extend it.
 - `render_check.gd --weather=<abs path .wthr>` or `--weather=slab:<bottom>,<top>,<liquid kg/m^3>,<fraction>` (pinned,
   no service; the overlay shows the pinned snapshot), `--weather=analog` (the shipped analog of `--utc`, pinned),
   `--weather[=s]` / `--weather=online` online; any other value exits with an error. `--cloud_quality=desktop|vr`,
-  `--cloud_detail_levels=0..3`, `--look_at_sun [--away_from_sun]`.
-- `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr` (weather off otherwise).
+  `--cloud_detail_levels=0..3`, `--cloud_scattering=table|closed`, `--look_at_sun [--away_from_sun]`.
+- `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr [--cloud_scattering=table|closed]` (weather off
+  otherwise).
 - `cloud_debug_output` 1 / 2 / 3 / 4: background transmittance (grid mean), Sun radiance (grid mean), coverage at
   `cloud_debug_height_m`, background transmittance with the shapes.
 
 ## Open points and known limits
 
-- Performance (terrain_perf 1440p, 2024-04-08 18:42 eclipse epoch, ERA5 18:00 pinned, VR preset, one session, after
-  fix round 1): without clouds p99 13.20 / 13.06 ms (two runs), with clouds 15.54 ms (p50 8.99 -> 9.87); pans +0.3 to
-  +0.6 ms p99, cape +0.6 ms; the descent 12.1 -> 16.7 ms p99, worst GPU second 18.9 ms at 8.4 km above the decks. The
-  baseline itself misses the Task 11 gate (p99 <= 11 ms). Levers measured: the detail levels ~2 ms in the descent
+- Performance (terrain_perf 1440p, 2024-04-08 18:42 eclipse epoch, ERA5 18:00 pinned, VR preset, one session, Task
+  8b): without clouds p99 13.15 ms, with clouds 15.50 ms with the table / 15.13 ms with the closed form (p50 8.92 ->
+  9.65 / 9.60); the table costs +0.4 ms p99, the descent 11.97 -> 16.69 ms p99, worst GPU second 21.3 ms (closed form
+  20.5) at 8.4 km above the decks. One run had a 48 ms frame in the descent at 19 m (GPU 8.6 ms: a draw / present stall,
+  not the clouds' GPU work). The baseline itself misses the Task 11 gate (p99 <= 11 ms). Levers measured: the detail levels ~2 ms in the descent
   (`--cloud_detail_levels`), the step refinement ~0.3 ms, the eclipse probes ~0.3 ms (per sample they cost ~10 ms).
 - At sharp dark edges (a deck's base seen at 30 km) a staircase of the half-resolution blocks is still visible.
 - The stochastic light march is unbiased in tau_s but exp(-tau_s) per sample is brighter on average (+10 % at the
   worst checked geometry with the preset's samples); more near samples reduce it.
-- Forward radiance at low Sun up to -56 % vs Monte Carlo, TMS aureole too bright through thick cloud
-  (cloud_optics.hpp) - Task 8b (Bouthors 2008 transfer table). The tilted column does not move light between columns.
+- The transfer table is a plane-parallel slab result on a tilted independent column: light is not moved between
+  columns (no light leaking around a cumulus' shadowed side beyond the entry-surface tilt); the HG peak is treated as
+  forward (its ~0.3 deg width is not resolved in the multiply scattered light). Ice uses the droplet table.
 - Ice uses the droplet phase function and thin sheets without a fibre direction; no ground-reflected light into the
   cloud bases; the sky light kept in the forward peak is left out.
 - A resize shows the clouds of the old size for one frame (scaled), then the new ones.
