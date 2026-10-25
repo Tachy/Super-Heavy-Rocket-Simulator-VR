@@ -11,11 +11,14 @@
 //    per low-resolution pixel (cloud_noise.hpp, 64 x 64 tiled) offset per frame by the golden ratio (a low-discrepancy
 //    sequence in time): a function of the pixel and the frame alone - the same for both eyes. Out: premultiplied
 //    colour + alpha, and (march distance used, transmittance-weighted cloud distance).
-// 2. CLOUD_TEMPORAL: exponential accumulation with reprojection, per eye: the pixel's point at its cloud distance
-//    (the far sky's 1e7 m where there is no cloud: rotation only) moved by the camera's motion (Earth-fixed, float64 on
-//    the CPU) into the previous frame's clip space of the same eye; the history there (bilinear) is clamped to the
-//    current 3 x 3 neighbourhood's min / max (no ghosting) and blended with the new value by the preset's weight; no
-//    history (first frame, outside the previous view, after a reset): the new value alone.
+// 2. CLOUD_TEMPORAL: accumulation with reprojection, per eye: the pixel's point at its cloud distance (the far sky's
+//    1e7 m where there is no cloud: rotation only) moved by the camera's motion (Earth-fixed, float64 on the CPU) into
+//    the previous frame's clip space of the same eye; the history there (bilinear) is clamped to the current 3 x 3
+//    neighbourhood's min / max (no ghosting) and blended with the new value by the weight 1 / n, n the frames the
+//    history holds (+1, its age, kept per pixel beside it) down to the preset's floor weight: a running mean that
+//    converges (an exponential mean of weight w keeps a noise floor of sqrt(w / (2 - w)) of one frame's noise: 23 % at
+//    0.1), with the floor's memory at most. A history the clamp moved (the content changed) keeps at most
+//    CLOUD_CLAMPED_AGE frames; no history (first frame, outside the previous view, after a reset): the new value alone.
 // 3. CLOUD_UPSAMPLE to full resolution: the four nearest low-resolution pixels, bilinear weights x a depth weight
 //    exp(-CLOUD_DEPTH_SHARPNESS |ln(D / D_i)|) (D the full-resolution scene distance, D_i the sample's march distance):
 //    a cloud in front of a mountain does not bleed over it and the sky between peaks keeps its cloud. Out: the
@@ -33,7 +36,7 @@ layout(set = 1, binding = 0, std140) uniform CloudView {
 	mat4 prev_clip_from_earth; // previous frame: Earth-local offset from the previous camera -> this eye's clip
 	vec4 sizes;                // full width, full height, low width, low height
 	vec4 camera_delta;         // xyz: camera now - camera before (Earth-local, m); w: 1 = history valid
-	vec4 params;               // x: frame jitter offset [0, 1), y: temporal weight, z: debug output, w: unused
+	vec4 params;               // x: frame jitter [0, 1), y: temporal weight, z: debug output, w: march pixel angle [rad]
 } cloud_view;
 
 // Distance [m] from the camera of a full-resolution pixel's depth (reversed Z: 1 near, 0 far = no geometry).
@@ -72,10 +75,23 @@ const float CLOUD_MIN_STEP_M = 10.0;
 // Lower end of the shell: below every ground (the Dead Sea shore -430 m); the field holds layer 0 below 0 m.
 const float CLOUD_BOTTOM_M = -500.0;
 const float CLOUD_MIN_SCALED_TRANSMITTANCE = 0.01;
+// [E] Largest weight of one step in the pixel's scattered light, T_sc (1 - exp(-(1 - f) tau_step)): a heavier step is
+// marched again with steps of this weight (one point sample - its light march included - would decide the pixel over
+// the whole step: grain at cloud surfaces and at bases seen at a grazing angle; with steps of tau ~1 instead the pass
+// cost 6 ms more at the descent's worst second). Behind T_sc < this weight any step is fine.
+const float CLOUD_MAX_STEP_WEIGHT = 0.15;
 // [E] The air's light at the cloud is re-evaluated along a ray after 500 m or 5 % of the distance (the transmitted
 // Sun changes by < 1 % over that at a 10-deg Sun; the eclipse's shadow edge is ~50 km wide).
 const float CLOUD_LIGHT_REFRESH_M = 500.0;
 const float CLOUD_LIGHT_REFRESH_FRACTION = 0.05;
+// [E] The eclipse's factor on the sky light (atm_sky_eclipse_factor: costly - evaluated at every light refresh it took
+// the descent's p99 from 14.5 to 25 ms): once per 8 x 8 work group at two points of the group's centre ray, 5 km and
+// 150 km away, linear in the distance between them (held beyond). The penumbra spans ~3500 km from first contact to
+// totality (~3 % of obscuration per 100 km), the umbra ~200 km: neighbouring pixels share the factor.
+const float CLOUD_ECLIPSE_NEAR_M = 5000.0;
+const float CLOUD_ECLIPSE_FAR_M = 150000.0;
+shared vec3 cloud_group_eclipse_near;
+shared vec3 cloud_group_eclipse_far;
 
 global uniform sampler2D cloud_blue_noise : filter_nearest, repeat_enable;  // 64 x 64 R8 (cloud_noise.hpp)
 global uniform int cloud_steps;        // coarse steps spanning the segment (quality preset)
@@ -84,13 +100,14 @@ global uniform float cloud_fine_step_fraction;  // fine step / distance inside t
 
 // Scattering source of one light (Sun or Moon) at a sample: J per unit irradiance normal to the light.
 float cloud_light_source(vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, float height_m, float distance_m,
-		vec2 column, float jitter) {
-	float tau_light = cloud_light_optical_depth(offset, height_m, distance_m, light_dir, jitter, true);
+		vec2 column, float jitter, float pixel_angle) {
+	float tau_light = cloud_light_optical_depth(offset, height_m, distance_m, light_dir, jitter, pixel_angle);
 	return cloud_scattering_source_3d(light_dir, -dir, normal, tau_light, column.x, column.y);
 }
 
 // The raymarch of one ray (dir: Earth-local unit) up to scene_m; out: premultiplied colour, alpha, weighted distance.
-void cloud_march(vec3 dir, float scene_m, float jitter, out vec3 color, out float alpha, out float cloud_m) {
+void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 eclipse_far, out vec3 color,
+		out float alpha, out float cloud_m) {
 	color = vec3(0.0);
 	alpha = 0.0;
 	cloud_m = 0.0;
@@ -134,6 +151,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, out vec3 color, out floa
 	vec3 moon_dir = normalize(atmosphere_moon_direction);
 	bool moonlit = atm_moonlit();
 	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
+	float pixel_angle = cloud_view.params.w;  // the detail's band limit: footprint = pixel_angle x distance
 	float start = max(d0, CLOUD_NEAR_START_M);
 	int n = max(cloud_steps, 1);
 	// Coarse step: the fraction of the distance that spans [start, d1] in n steps; at most one height layer.
@@ -147,6 +165,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, out vec3 color, out floa
 	vec3 sky_irradiance = vec3(0.0);
 	vec3 moon_irradiance = vec3(0.0);
 	vec3 moon_sky_irradiance = vec3(0.0);
+	float dense_step_m = 1.0e30;  // the step limit after a dense sample (CLOUD_MAX_STEP_WEIGHT)
 	float a = d0;
 	for (int i = 0; i < cloud_max_steps && a < d1; i++) {
 		float h_a = cloud_height_along(ray, a);
@@ -163,7 +182,8 @@ void cloud_march(vec3 dir, float scene_m, float jitter, out vec3 color, out floa
 			// Never finer than what still reaches the segment's end within the remaining steps (no far cloud is cut).
 			float remaining = float(max(cloud_max_steps - i, 1));
 			float reach = max(a, start) * (exp(log(max(d1, start) / max(a, start)) / remaining) - 1.0);
-			float fine = max(max(max(a, start) * cloud_fine_step_fraction, reach), CLOUD_MIN_STEP_M);
+			// The dense-cloud limit overrides the reach (behind an opaque surface little of the segment is seen).
+			float fine = min(max(max(max(a, start) * cloud_fine_step_fraction, reach), CLOUD_MIN_STEP_M), dense_step_m);
 			if (fine < step_m) {
 				step_m = fine;
 				d = a + jitter * step_m;
@@ -176,16 +196,26 @@ void cloud_march(vec3 dir, float scene_m, float jitter, out vec3 color, out floa
 		float a_this = a;
 		a = b;
 		if (cell.extinction <= 0.0) {
+			dense_step_m = min(2.0 * dense_step_m, 1.0e30);
 			continue;
 		}
 		vec3 offset = dir * d;
 		float height = cloud_height_along(ray, d);
 		float in_cloud;
-		float beta = cloud_extinction_in_cell(cell, offset, height, d, cloud_debug_output == 0 || cloud_debug_output == 4,
-				in_cloud);
+		float beta = cloud_extinction_in_cell(cell, offset, height, pixel_angle * d, in_cloud);
 		if (beta <= 0.0) {
+			dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
 			continue;
 		}
+		// A step weighing more than CLOUD_MAX_STEP_WEIGHT in the pixel is done again with steps of that weight.
+		float allowed = CLOUD_MAX_STEP_WEIGHT / transmittance_sc;
+		float refined = allowed < 1.0 ? max(-log(1.0 - allowed) / (k * beta), CLOUD_MIN_STEP_M) : 1.0e30;
+		if (b - a_this > 1.001 * refined) {
+			dense_step_m = refined;
+			a = a_this;
+			continue;
+		}
+		dense_step_m = max(refined, CLOUD_MIN_STEP_M);  // the limit at this density (grows as the pixel turns opaque)
 		float tau = beta * (b - a_this);
 		vec3 p = camera + offset;
 		vec3 normal = normalize(p * ATM_STRETCH * ATM_STRETCH);  // the ellipsoid's normal (geodetic up)
@@ -195,14 +225,16 @@ void cloud_march(vec3 dir, float scene_m, float jitter, out vec3 color, out floa
 		float light_jitter = fract(jitter + float(i) * 0.6180339887);
 		vec3 source;
 		if (cloud_debug_output == 2) {
-			source = vec3(cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter));
+			source = vec3(cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter, pixel_angle));
 		} else {
 			// The air's light at the cloud (Sun and sky irradiance), refreshed along the ray every
 			// CLOUD_LIGHT_REFRESH_FRACTION of the distance (at least CLOUD_LIGHT_REFRESH_M): it changes over kilometres.
 			if (abs(d - light_at_m) > max(CLOUD_LIGHT_REFRESH_M, CLOUD_LIGHT_REFRESH_FRACTION * d)) {
 				light_at_m = d;
 				sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
-				sky_irradiance = ATM_PI * atm_sky_light(p, normal);
+				float eclipse_x = clamp((d - CLOUD_ECLIPSE_NEAR_M) / (CLOUD_ECLIPSE_FAR_M - CLOUD_ECLIPSE_NEAR_M), 0.0,
+						1.0);
+				sky_irradiance = ATM_PI * atm_sky_light(p, normal) * mix(eclipse_near, eclipse_far, eclipse_x);
 				if (moonlit) {
 					moon_irradiance = ATM_PI * atm_moon_at(p);
 					moon_sky_irradiance = ATM_PI * atm_moon_sky_light(p, normal);
@@ -211,10 +243,12 @@ void cloud_march(vec3 dir, float scene_m, float jitter, out vec3 color, out floa
 			float sky_source = cloud_sky_scattering_source(-dot(dir, normal), column.x, column.y);
 			source = sky_irradiance * sky_source;
 			if (dot(sun_irradiance, sun_irradiance) > 0.0) {
-				source += sun_irradiance * cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter);
+				source += sun_irradiance
+						* cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter, pixel_angle);
 			}
 			if (moonlit) {
-				source += moon_irradiance * cloud_light_source(moon_dir, normal, dir, offset, height, d, column, light_jitter)
+				source += moon_irradiance
+						* cloud_light_source(moon_dir, normal, dir, offset, height, d, column, light_jitter, pixel_angle)
 						+ moon_sky_irradiance * sky_source;
 			}
 		}
@@ -256,12 +290,30 @@ void cloud_march(vec3 dir, float scene_m, float jitter, out vec3 color, out floa
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	ivec2 low = ivec2(cloud_view.sizes.zw);
+	vec2 scale = cloud_view.sizes.xy / cloud_view.sizes.zw;
+	// The work group's eclipse factors on the sky light (CLOUD_ECLIPSE_NEAR_M / _FAR_M), before any invocation leaves.
+	if (gl_LocalInvocationIndex == 0u) {
+		vec3 near_factor = vec3(1.0);
+		vec3 far_factor = vec3(1.0);
+		if (cloud_enabled && atmosphere_enabled && atmosphere_eclipse_segments > 0) {
+			vec2 group_centre = (vec2(gl_WorkGroupID.xy * gl_WorkGroupSize.xy) + 0.5 * vec2(gl_WorkGroupSize.xy)) * scale;
+			vec3 group_dir = cloud_ray_earth(min(group_centre, cloud_view.sizes.xy - 0.5));
+			vec3 camera_point = atmosphere_camera_hi + atmosphere_camera_lo;
+			// Probe points above the ground: a ray that meets it is probed short of it.
+			vec2 ground = cloud_sphere_crossing(cloud_ray(group_dir), 0.0);
+			float limit_m = ground.x <= ground.y && ground.x > 0.0 ? ground.x : CLOUD_ECLIPSE_FAR_M;
+			near_factor = atm_sky_eclipse_factor(camera_point + group_dir * min(CLOUD_ECLIPSE_NEAR_M, limit_m));
+			far_factor = atm_sky_eclipse_factor(camera_point + group_dir * min(CLOUD_ECLIPSE_FAR_M, limit_m));
+		}
+		cloud_group_eclipse_near = near_factor;
+		cloud_group_eclipse_far = far_factor;
+	}
+	barrier();
 	if (pixel.x >= low.x || pixel.y >= low.y) {
 		return;
 	}
 	ivec2 full = ivec2(cloud_view.sizes.xy);
 	// The block of full-resolution pixels this pixel covers, and its centre.
-	vec2 scale = cloud_view.sizes.xy / cloud_view.sizes.zw;
 	ivec2 first = ivec2(vec2(pixel) * scale);
 	ivec2 last = min(ivec2(vec2(pixel + 1) * scale) - 1, full - 1);
 	vec2 centre = (vec2(pixel) + 0.5) * scale;
@@ -279,7 +331,8 @@ void main() {
 	if (cloud_enabled && atmosphere_enabled) {
 		float noise = texelFetch(cloud_blue_noise, pixel % 64, 0).r;
 		float jitter = fract(noise + cloud_view.params.x);
-		cloud_march(cloud_ray_earth(centre), scene_m, jitter, color, alpha, cloud_m);
+		cloud_march(cloud_ray_earth(centre), scene_m, jitter, cloud_group_eclipse_near, cloud_group_eclipse_far, color,
+				alpha, cloud_m);
 	}
 	// Half-float range (a lit cloud seen through a dark-adapted eye) and no NaN into the history.
 	color = clamp(color, vec3(0.0), vec3(65000.0));
@@ -300,9 +353,13 @@ layout(set = 1, binding = 1) uniform sampler2D current_color;  // nearest
 layout(set = 1, binding = 2) uniform sampler2D current_depth;  // nearest
 layout(set = 1, binding = 3) uniform sampler2D history_color;  // linear, clamp
 layout(rgba16f, set = 1, binding = 4) uniform writeonly image2D out_history;
+layout(set = 1, binding = 5) uniform sampler2D history_age;    // nearest, clamp: frames the history holds
+layout(r16f, set = 1, binding = 6) uniform writeonly image2D out_age;
 
 // Distance where a pixel without cloud is reprojected (the far sky: rotation only).
 const float CLOUD_SKY_REPROJECT_M = 1.0e7;
+// [E] Frames a history keeps when the neighbourhood clamp moved it (changed content: a short memory, no ghost).
+const float CLOUD_CLAMPED_AGE = 4.0;
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -311,9 +368,10 @@ void main() {
 		return;
 	}
 	vec4 current = texelFetch(current_color, pixel, 0);
-	float weight = cloud_view.params.y;
-	if (cloud_view.camera_delta.w < 0.5 || weight >= 1.0) {
+	float weight_floor = cloud_view.params.y;
+	if (cloud_view.camera_delta.w < 0.5 || weight_floor >= 1.0) {
 		imageStore(out_history, pixel, current);
+		imageStore(out_age, pixel, vec4(1.0));
 		return;
 	}
 	// The neighbourhood's range.
@@ -334,15 +392,23 @@ void main() {
 	vec3 previous_offset = dir * distance_m + cloud_view.camera_delta.xyz;
 	vec4 clip = cloud_view.prev_clip_from_earth * vec4(previous_offset, 1.0);
 	vec4 result = current;
+	float age = 1.0;
 	if (clip.w > 0.0) {
 		vec2 ndc = clip.xy / clip.w;
 		vec2 uv = ndc * 0.5 + 0.5;
 		if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))) {
-			vec4 history = clamp(texture(history_color, uv), lo, hi);
-			result = mix(history, current, weight);
+			vec4 history = texture(history_color, uv);
+			vec4 clamped = clamp(history, lo, hi);
+			float held = texture(history_age, uv).r;
+			if (any(notEqual(clamped, history))) {
+				held = min(held, CLOUD_CLAMPED_AGE);
+			}
+			age = min(held + 1.0, 1.0 / weight_floor);
+			result = mix(clamped, current, 1.0 / age);
 		}
 	}
 	imageStore(out_history, pixel, result);
+	imageStore(out_age, pixel, vec4(age));
 }
 
 #endif

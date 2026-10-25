@@ -11,9 +11,10 @@ extends RefCounted
 const SAMPLER_TYPES := ["sampler2D", "sampler3D", "sampler2DArray", "samplerCube"]
 
 var source := ""  ## the GLSL compute source
-var members: Array[Dictionary] = []  ## {name, type, offset} of the uniform block, std140
-var samplers: Array[Dictionary] = []  ## {name, type, binding, linear, repeat}
+var members: Array[Dictionary] = []  ## {name, id (StringName), type, offset} of the uniform block, std140
+var samplers: Array[Dictionary] = []  ## {name, id (StringName), type, binding, linear, repeat}
 var block_size := 0  ## bytes of the uniform block (a multiple of 16)
+var _defaults := {}  ## project.godot defaults of the members never set, looked up once (pack: the render thread)
 
 
 ## defines: preprocessor names (e.g. "CLOUD_MARCH"); files: res:// include paths in order. with_globals: false for
@@ -35,10 +36,10 @@ static func build(defines: PackedStringArray, files: PackedStringArray, with_glo
 		declared[name] = true
 		if type in SAMPLER_TYPES:
 			var hints := m.get_string(3)
-			port.samplers.append({"name": name, "type": type, "binding": port.samplers.size() + 1,
+			port.samplers.append({"name": name, "id": StringName(name), "type": type, "binding": port.samplers.size() + 1,
 					"linear": not hints.contains("filter_nearest"), "repeat": hints.contains("repeat_enable")})
 		else:
-			port.members.append({"name": name, "type": type})
+			port.members.append({"name": name, "id": StringName(name), "type": type})
 	body = regex.sub(body, "", true)
 	var header := "#version 450\n"
 	for d in defines:
@@ -109,7 +110,14 @@ func pack() -> PackedByteArray:
 	var bytes := PackedByteArray()
 	bytes.resize(block_size)
 	for m in members:
-		var value: Variant = ShaderGlobals.value(StringName(m["name"]))
+		var id: StringName = m["id"]
+		var value: Variant
+		if ShaderGlobals.has_value(id):
+			value = ShaderGlobals.value(id)
+		else:
+			if not _defaults.has(id):
+				_defaults[id] = ShaderGlobals.default_value(id)
+			value = _defaults[id]
 		var at: int = m["offset"]
 		match String(m["type"]):
 			"float":
@@ -161,7 +169,7 @@ static func _put_vec(bytes: PackedByteArray, at: int, v: Vector4, count: int) ->
 func sampler_textures() -> Array[RID]:
 	var result: Array[RID] = []
 	for s in samplers:
-		var value: Variant = ShaderGlobals.value(StringName(s["name"]))
+		var value: Variant = ShaderGlobals.value(s["id"])
 		var rd_texture := RID()
 		if value is Texture:
 			rd_texture = RenderingServer.texture_get_rd_texture((value as Texture).get_rid())

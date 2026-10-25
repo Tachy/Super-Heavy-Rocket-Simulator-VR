@@ -23,12 +23,13 @@ const FADE_S := 2.0
 ## Clouds are raymarched while the Earth is drawn in true space (CelestialBody.SCALED_SPACE_DISTANCE_M); beyond it the
 ## scaled-space Earth (Task 10) shows them.
 const RAYMARCH_MAX_DISTANCE_M := CelestialBody.SCALED_SPACE_DISTANCE_M
-## The shape, ice-sheet and detail tiles (m): the same numbers as CLOUD_SHAPE_TILE_H_M / _V_M, CLOUD_ICE_TILE_V_M and
-## CLOUD_DETAIL_TILE_M in shaders/clouds.gdshaderinc (the camera's noise coordinates are formed here in float64).
+## The shape, ice-sheet and level-0 detail tiles (m): the same numbers as CLOUD_SHAPE_TILE_H_M / _V_M,
+## CLOUD_ICE_TILE_V_M and CLOUD_DETAIL_TILE_M in shaders/clouds.gdshaderinc (the camera's noise coordinates are formed
+## here in float64).
 const SHAPE_TILE_H_M := 32000.0
 const SHAPE_TILE_V_M := 16000.0
 const ICE_TILE_V_M := 2000.0
-const DETAIL_TILE_M := 2000.0
+const DETAIL_TILE_M := 1000.0
 const WGS84_A_M := 6378137.0
 ## a / b of WGS84 (the model space's polar stretch, as Atmosphere.POLAR_STRETCH).
 const POLAR_STRETCH := 1.0 / (1.0 - 1.0 / 298.257223563)
@@ -37,16 +38,16 @@ const LAYERS := 32
 enum Quality { DESKTOP, VR }
 ## [E] Quality presets: coarse steps spanning the segment, the cap on all steps, the fine step (fraction of the
 ## distance) inside the field's cloudy region; the light march toward the Sun / Moon (near samples over near_m through
-## the shapes, geometric from first_m; far samples to the cloud top through the grid mean); the detail noise's
-## amplitude at the camera and the distance where it has faded to 0; the cloud pass's resolution divisor and the
-## temporal weight of a new frame (cloud_check.gd and terrain_perf.gd measure them).
+## the shapes, geometric from first_m; far samples to the cloud top through the grid mean); the detail levels used
+## (each band-limited at the pixel footprint, cloud_noise.hpp); the cloud pass's resolution divisor and the floor of the
+## temporal weight of a new frame (a running mean of up to 32 frames; cloud_check.gd, terrain_perf.gd measure them).
 const PRESETS := {
 	Quality.DESKTOP: {"steps": 128, "max_steps": 256, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
-			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_amplitude": 1.0, "detail_distance_m": 30000.0,
-			"divisor": 2, "temporal_weight": 0.1},
+			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
+			"temporal_weight": 1.0 / 32.0},
 	Quality.VR: {"steps": 64, "max_steps": 128, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
-			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_amplitude": 1.0, "detail_distance_m": 15000.0,
-			"divisor": 2, "temporal_weight": 0.1},
+			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
+			"temporal_weight": 1.0 / 32.0},
 }
 
 var quality: Quality = Quality.DESKTOP:
@@ -74,7 +75,6 @@ var _target_blend := 0.0
 var _upload := {}  ## the running upload: {slot, id, size, field, ice}
 var _empty_field: ImageTexture3D
 var _empty_ice: ImageTexture3D
-var _output_generation := -1
 
 
 func _init() -> void:
@@ -125,10 +125,23 @@ func shutdown() -> void:
 	if _noise_task >= 0:
 		WorkerThreadPool.wait_for_task_completion(_noise_task)
 		_noise_task = -1
-	if not _upload.is_empty():
-		_upload["field"].release()
-		_upload["ice"].release()
-		_upload = {}
+	_cancel_upload()
+	# The resident volumes (a Texture3DRD does not own its RID): unbound first, then freed.
+	var olds: Array = [_slots[0], _slots[1]]
+	_slots = [_empty_slot(), _empty_slot()]
+	_bind_slots()
+	for old: Dictionary in olds:
+		_release_slot(old)
+
+
+## Drops the running upload (its volumes are freed; no slot shows them).
+func _cancel_upload() -> void:
+	if _upload.is_empty():
+		return
+	var data: Dictionary = _upload["data"]
+	data["field"].release()
+	data["ice"].release()
+	_upload = {}
 
 
 ## WeatherService.snapshots_changed: the pair to show (dictionaries of weather_load_snapshot; {} = none).
@@ -172,8 +185,10 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 		_target_blend = clampf(blend, 0.0, 1.0)
 	_poll_upload()
 	_advance(maxf(delta_s, 0.0))
-	if effect.output_generation != _output_generation:  # the pass re-created its result (a new size)
-		_output_generation = effect.output_generation
+	if effect.swap_output():  # the pass re-created its result (a new size): shown from the next frame on
+		# Unset first: the same resource again would leave the material's uniform set on the old RD texture, which the
+		# pass frees a few frames later (CloudEffect.FREE_DELAY_CALLBACKS).
+		_material.set_shader_parameter(&"cloud_image", null)
 		_material.set_shader_parameter(&"cloud_image", effect.output)
 	ShaderGlobals.set_value(&"cloud_blend", _w1)
 	var camera_render := Frames.to_render(camera_fixed_m)
@@ -207,6 +222,9 @@ func _advance(delta_s: float) -> void:
 	var step := delta_s / FADE_S
 	var goal := _goal_weight()
 	if not is_nan(goal):
+		# The slots show the target: an upload still running is not needed (and must never replace a slot that now
+		# carries weight).
+		_cancel_upload()
 		if _tracking:
 			_w1 = goal
 		else:
@@ -331,6 +349,9 @@ func _poll_upload() -> void:
 		return
 	last_upload_ms = maxf(field.max_step_ms, ice.max_step_ms)
 	var slot: int = _upload["slot"]
+	if (_w1 if slot == 1 else 1.0 - _w1) > 0.0:
+		_cancel_upload()  # the slot gained weight meanwhile: replacing it would pop (the state machine starts anew)
+		return
 	var old: Dictionary = _slots[slot]
 	_slots[slot] = data
 	_upload = {}
@@ -369,9 +390,10 @@ func _upload_noise() -> void:
 		push_error("Wolken: Rauschtexturen fehlen: " + str(noise.get("error", "")))
 		return
 	var blue_size := int(noise["blue_noise_size"])
+	var states := int(noise["detail_states"])
 	_noise_textures = [_noise_texture(noise["shape"], int(noise["shape_size"])),
-			_noise_texture(noise["detail"], int(noise["detail_size"])), _table(noise["coverage_threshold"]),
-			_table(noise["edge_mean_factor"]),
+			_noise_texture(noise["detail"], int(noise["detail_size"])), _table(noise["coverage_threshold"], states),
+			_table(noise["edge_mean_factor"], states),
 			ImageTexture.create_from_image(Image.create_from_data(blue_size, blue_size, false, Image.FORMAT_R8,
 					noise["blue_noise"]))]
 	ShaderGlobals.set_value(&"cloud_noise_shape", _noise_textures[0])
@@ -379,14 +401,18 @@ func _upload_noise() -> void:
 	ShaderGlobals.set_value(&"cloud_coverage_threshold", _noise_textures[2])
 	ShaderGlobals.set_value(&"cloud_edge_mean", _noise_textures[3])
 	ShaderGlobals.set_value(&"cloud_blue_noise", _noise_textures[4])
-	ShaderGlobals.set_value(&"cloud_edge_width", float(noise["edge_width_value"]))
-	ShaderGlobals.set_value(&"cloud_detail_mean", _detail_mean(noise["detail"]))
+	ShaderGlobals.set_value(&"cloud_edge_width", Vector2(noise["edge_width_min_value"], noise["edge_width_max_value"]))
+	ShaderGlobals.set_value(&"cloud_detail_mean", float(noise["detail_mean"]))
+	ShaderGlobals.set_value(&"cloud_detail_weights", noise["detail_weights"])
+	var amplitude: PackedFloat32Array = noise["level_amplitude"]
+	ShaderGlobals.set_value(&"cloud_level_amplitude", Vector3(amplitude[0], amplitude[1], amplitude[2]))
 	_noise_result = {}
 	noise_ready = true
 
 
-static func _table(values: PackedFloat32Array) -> ImageTexture:
-	return ImageTexture.create_from_image(Image.create_from_data(values.size(), 1, false, Image.FORMAT_RF,
+## A table of rows of 256 (one per detail state): a 256 x rows R32F texture, filtered linearly in both directions.
+static func _table(values: PackedFloat32Array, rows: int) -> ImageTexture:
+	return ImageTexture.create_from_image(Image.create_from_data(values.size() / rows, rows, false, Image.FORMAT_RF,
 			values.to_byte_array()))
 
 
@@ -401,14 +427,6 @@ static func _noise_texture(texels: PackedByteArray, size: int) -> ImageTexture3D
 	return texture
 
 
-## Mean of the detail value 0.625 R + 0.25 G + 0.125 B (clouds.gdshaderinc) over the texels: the filtered mean over
-## uniform random positions equals the texel mean (trilinear weights sum to one over the wrapping texture).
-static func _detail_mean(texels: PackedByteArray) -> float:
-	var sum := Vector3.ZERO
-	var count := texels.size() / 4
-	for i in range(count):
-		sum += Vector3(texels[4 * i], texels[4 * i + 1], texels[4 * i + 2])
-	return (0.625 * sum.x + 0.25 * sum.y + 0.125 * sum.z) / (255.0 * count)
 
 
 func _apply_quality() -> void:
@@ -422,8 +440,7 @@ func _apply_quality() -> void:
 	ShaderGlobals.set_value(&"cloud_light_march", Vector4(first_m, light_march_ratio(first_m, near_m, near),
 			near_m, 0.0))
 	ShaderGlobals.set_value(&"cloud_light_samples", Vector2i(near, int(preset["light_far"])))
-	ShaderGlobals.set_value(&"cloud_detail_amplitude", float(preset["detail_amplitude"]))
-	ShaderGlobals.set_value(&"cloud_detail_distance_m", float(preset["detail_distance_m"]))
+	ShaderGlobals.set_value(&"cloud_detail_levels", int(preset["detail_levels"]))
 	effect.set_quality(int(preset["divisor"]), float(preset["temporal_weight"]))
 
 

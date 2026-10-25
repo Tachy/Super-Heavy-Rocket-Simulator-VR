@@ -273,8 +273,8 @@ cloud_blue_noise={
 "value": ""
 }
 cloud_edge_width={
-"type": "float",
-"value": 0.02
+"type": "vec2",
+"value": Vector2(0.02, 0.06)
 }
 cloud_ice_origin={
 "type": "vec3",
@@ -324,13 +324,17 @@ cloud_detail_mean={
 "type": "float",
 "value": 0.5
 }
-cloud_detail_amplitude={
-"type": "float",
-"value": 0.0
+cloud_detail_weights={
+"type": "vec3",
+"value": Vector3(0.5, 0.3, 0.2)
 }
-cloud_detail_distance_m={
-"type": "float",
-"value": 1.0
+cloud_level_amplitude={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+cloud_detail_levels={
+"type": "int",
+"value": 0
 }
 cloud_phase={
 "type": "vec4",

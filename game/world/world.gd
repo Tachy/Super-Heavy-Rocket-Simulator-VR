@@ -90,6 +90,7 @@ func _ready() -> void:
 	var xr := get_node_or_null("/root/XrManager")
 	clouds.quality = CloudLayer.Quality.VR if xr != null and xr.vr_requested() else CloudLayer.Quality.DESKTOP
 	weather.snapshots_changed.connect(clouds.set_target)
+	clock.time_jumped.connect(func(_tdb_s: float) -> void: clouds.effect.reset_history())  # a clock jump: no history
 	_setup_bodies(data_dir)
 	stars.load_catalogue(data_dir.path_join("stars/stars.csv"))
 	add_child(stars)
@@ -238,8 +239,15 @@ func _on_mission_started(ok: bool, _message: String) -> void:
 ## Ground view from an arbitrary site (dictionary like the entries of config/launch_sites.toml; optional eye_height_m
 ## above height_m, default GROUND_EYE_HEIGHT_M; optional body "moon": selenographic coordinates, height_m above the
 ## mean sphere).
+## A new view (ground site, focus, Tab target): the viewer is taken as adapted to it, and the clouds' temporal history
+## (reprojected from the last frame's camera) is dropped.
+func _view_jumped() -> void:
+	atmosphere.snap_adaptation()
+	clouds.effect.reset_history()
+
+
 func set_ground_site(site: Dictionary) -> void:
-	atmosphere.snap_adaptation()  # a new view: the viewer is taken as adapted to it
+	_view_jumped()
 	focus = site.get("id", "custom")
 	ground_site = site
 	camera.mode = OrbitCamera.Mode.GROUND
@@ -249,7 +257,7 @@ func set_ground_site(site: Dictionary) -> void:
 
 
 func set_focus(new_focus: String) -> void:
-	atmosphere.snap_adaptation()  # a new view: the viewer is taken as adapted to it
+	_view_jumped()
 	focus = new_focus
 	ground_site = {}
 	camera.mode = OrbitCamera.Mode.ORBIT
@@ -356,7 +364,7 @@ func _input(event: InputEvent) -> void:
 	if focus != FOCUS_VEHICLE or not flight.sim.is_active():
 		return
 	view_target.cycle(flight.sim, -1 if key.shift_pressed else 1)
-	atmosphere.snap_adaptation()  # another body is another place: the viewer is taken as adapted to it
+	_view_jumped()  # another body is another place
 	get_viewport().set_input_as_handled()
 
 

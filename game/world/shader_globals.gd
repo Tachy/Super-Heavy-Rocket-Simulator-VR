@@ -16,6 +16,16 @@ static func set_value(name: StringName, value: Variant) -> void:
 static func value(name: StringName) -> Variant:
 	if _values.has(name):
 		return _values[name]
+	return default_value(name)
+
+
+## Whether the global was set (else it holds its project.godot default).
+static func has_value(name: StringName) -> bool:
+	return _values.has(name)
+
+
+## The project.godot default of a global (null for a sampler or an unknown name).
+static func default_value(name: StringName) -> Variant:
 	var setting: Variant = ProjectSettings.get_setting("shader_globals/" + String(name))
 	if setting is Dictionary and (setting as Dictionary).has("value"):
 		var v: Variant = setting["value"]
