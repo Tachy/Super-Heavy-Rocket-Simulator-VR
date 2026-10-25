@@ -10,7 +10,10 @@
 # present), the terrain's update time, GPU time, terrain nodes drawn / loading, uploads, video memory; then per phase
 # and overall summaries with the desktop proxy gate [E]: p99 <= 8 ms and max <= 16 ms outside the jump frame.
 # --shots=<dir>: a PNG at the start and half-way through each pan (those frames are left out of the statistics).
-# --spikes: every frame above GATE_MAX_MS listed at the end (process / rest split, terrain profile).
+# --spikes[=ms]: every frame above ms (default GATE_MAX_MS) listed at the end (process / rest split, the
+# RenderingServer draw inside the rest, terrain profile, draw-time pipeline compilations).
+# All lines are printed at the end of the run: console output during it stalls the main thread for up to ~20 ms (the
+# output pipe of the console wrapper), which was the cause of the "process" spikes this run used to report.
 extends SceneTree
 
 const WINDOW_SIZE := Vector2i(2560, 1440)
@@ -28,7 +31,9 @@ const GATE_P99_MS := 8.0
 const GATE_MAX_MS := 16.0
 const PAD_SITE := "starbase_olp1"
 const CAPE_SITE := "ksc_lc39a"
-const PHASES := ["descent", "pan_low", "pan_high", "cape"]
+## --spikes: the viewport's measured CPU / GPU render times of this many frames after a spike (they arrive late).
+const SPIKE_FOLLOWUP_FRAMES := 4
+const PHASES :=["descent", "pan_low", "pan_high", "cape"]
 const METRES_PER_DEG := 111319.49
 
 var _args := {}
@@ -49,6 +54,12 @@ var _phase_max := {}  ## phase -> {drawn, loading, vram_mb}
 var _second := {}
 var _second_index := 0
 var _spikes: PackedStringArray = []
+var _pipelines_seen := -1  ## pipeline compilations at draw time (ubershader, the main thread waits) so far
+var _log_lines: PackedStringArray = []  ## per-second lines, printed at the end (see the header)
+var _spike_ms := 0.0  ## --spikes threshold (ms); 0: off
+var _pre_draw_us := 0  ## RenderingServer.frame_pre_draw / frame_post_draw of the last frame
+var _post_draw_us := 0
+var _spike_followup := 0  ## frames still to report after the last spike
 var _pad: Dictionary
 var _cape: Dictionary
 var _shots_dir := ""
@@ -70,6 +81,8 @@ func _initialize() -> void:
 	_durations = {"descent": float(_args.get("descent_s", "60")), "pan_low": float(_args.get("pan_s", "20")),
 			"pan_high": float(_args.get("pan_s", "20")), "cape": float(_args.get("cape_s", "20"))}
 	_shots_dir = _args.get("shots", "")
+	if _args.has("spikes"):
+		_spike_ms = float(_args["spikes"]) if not String(_args["spikes"]).is_empty() else GATE_MAX_MS
 	for phase: String in PHASES:
 		_phase_ms[phase] = []
 		_phase_max[phase] = {"drawn": 0, "loading": 0, "vram_mb": 0.0}
@@ -83,6 +96,8 @@ func _initialize() -> void:
 	_probe = _Probe.new()
 	_probe.process_priority = 1 << 30
 	root.add_child(_probe)
+	RenderingServer.frame_pre_draw.connect(func() -> void: _pre_draw_us = Time.get_ticks_usec())
+	RenderingServer.frame_post_draw.connect(func() -> void: _post_draw_us = Time.get_ticks_usec())
 
 
 func _process(_delta: float) -> bool:
@@ -211,14 +226,26 @@ func _record(frame_ms: float, process_ms: float, rest_ms: float) -> void:
 	if frame_ms > _second["worst_ms"]:
 		_second["worst_ms"] = frame_ms
 		_second["worst_split"] = Vector2(process_ms, rest_ms)
-	if _args.has("spikes") and frame_ms > GATE_MAX_MS:
-		_spikes.append("terrain_perf: spike %s %.2f ms: process %.2f rest %.2f, terrain %.2f ms, uploads %d"
-				% [_phase, frame_ms, process_ms, rest_ms, stats.get("update_ms", 0.0), stats["uploads_last_frame"]])
+	var pipelines := int(Performance.get_monitor(Performance.PIPELINE_COMPILATIONS_DRAW))
+	var new_pipelines := pipelines - _pipelines_seen if _pipelines_seen >= 0 else 0
+	_pipelines_seen = pipelines
+	_second["pipelines"] += new_pipelines
+	if _spike_followup > 0:  # the measured viewport times arrive a few frames late
+		_spikes[_spikes.size() - 1] += "; viewport cpu %.2f gpu %.2f" % [
+				RenderingServer.viewport_get_measured_render_time_cpu(vp),
+				RenderingServer.viewport_get_measured_render_time_gpu(vp)]
+		_spike_followup -= 1
+	if _spike_ms > 0.0 and frame_ms > _spike_ms:
+		_spikes.append(("terrain_perf: spike %s t=%.3f s %.2f ms: process %.2f rest %.2f (draw %.2f), terrain %.2f ms, "
+				+ "uploads %d, nodes loading %d, draw-time pipeline compilations %d; next frames:") % [_phase,
+				(_last_us - _t0_us) * 1.0e-6, frame_ms, process_ms, rest_ms, (_post_draw_us - _pre_draw_us) * 1.0e-3,
+				stats.get("update_ms", 0.0), stats["uploads_last_frame"], stats.get("nodes_loading", 0), new_pipelines])
+		_spike_followup = SPIKE_FOLLOWUP_FRAMES
 
 
 func _reset_second() -> void:
 	_second = {"ms": [], "uploads": 0, "terrain_ms": 0.0, "gpu_ms": 0.0, "worst_ms": 0.0,
-			"worst_split": Vector2.ZERO}
+			"worst_split": Vector2.ZERO, "pipelines": 0}
 
 
 func _log_second() -> void:
@@ -234,16 +261,20 @@ func _log_second() -> void:
 	var q := _quantiles(ms)
 	var split: Vector2 = _second["worst_split"]
 	var eye_m := float(_world.ground_site.get("eye_height_m", 0.0))
-	print("terrain_perf: t=%3d s %-8s eye %9.1f m  frame p50 %5.2f p99 %5.2f max %6.2f ms (process %5.2f rest %5.2f)  "
-			% [_second_index, _phase, eye_m, q[0], q[1], q[2], split.x, split.y]
-			+ "terrain max %5.2f ms  gpu max %5.2f ms  drawn %4d loading %4d uploads %3d  vram %5.0f MB  frames %d"
+	_log_lines.append("terrain_perf: t=%3d s %-8s eye %9.1f m  frame p50 %5.2f p99 %5.2f max %6.2f ms "
+			% [_second_index, _phase, eye_m, q[0], q[1], q[2]]
+			+ "(process %5.2f rest %5.2f)  " % [split.x, split.y]
+			+ ("terrain max %5.2f ms  gpu max %5.2f ms  drawn %4d loading %4d uploads %3d  vram %5.0f MB  frames %d  "
+			+ "pipelines %d")
 			% [_second["terrain_ms"], _second["gpu_ms"], stats["nodes_drawn"], stats["nodes_loading"],
-			_second["uploads"], vram_mb, ms.size()])
+			_second["uploads"], vram_mb, ms.size(), _second["pipelines"]])
 	_second_index += 1
 	_reset_second()
 
 
 func _summary() -> void:
+	for line in _log_lines:
+		print(line)
 	for line in _spikes:
 		print(line)
 	var all := []
