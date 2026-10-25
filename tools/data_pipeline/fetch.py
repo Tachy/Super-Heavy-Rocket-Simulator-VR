@@ -89,6 +89,13 @@ def main() -> int:
 
             timezones.fetch(source, REPO_ROOT, download, args.force)
             continue
+        if source.get("kind") == "weather_analog":  # ERA5 reference-year hours -> downsampled .wthr files (weather.py)
+            import weather  # needs build/core/weather_snapshot.exe
+
+            weather.fetch(source, REPO_ROOT, args.force)
+            continue
+        if source.get("kind") == "weather_licence":  # licence-only entries (GFS, GRIB2 library): nothing to download
+            continue
         if source.get("kind") == "timezones_rules":  # read from the tzdata package by the "timezones" step
             continue
         if target.exists() and not args.force:

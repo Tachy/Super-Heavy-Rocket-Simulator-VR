@@ -409,3 +409,33 @@ url = "https://doi.org/10.1364/AO.34.002765"
 target = "core/src/environment/atmosphere_optics.cpp"
 license = "published formulas and measured values (not copyrightable); cited as sources"
 credit = "E. R. Peck, K. Reeder, J. Opt. Soc. Am. 62, 958 (1972); A. Bucholtz, Rayleigh-scattering calculations for the terrestrial atmosphere, Appl. Opt. 34, 2765 (1995)"
+
+# ------------------------------------------------------------------ weather and clouds (M8)
+
+[[source]]
+id = "weather_analog"
+name = "ERA5 hourly reanalysis on pressure levels (ECMWF / Copernicus Climate Change Service, DOI 10.24381/cds.bd0915c6), via Google's ARCO-ERA5 Zarr copy - the typical-weather analog set: the 15th of each month 00/06/12/18 UTC of 2025, cloud fraction, cloud liquid / ice water, temperature, surface pressure, column water vapour, orography; downsampled to 1 deg"
+url = "https://storage.googleapis.com/gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3/"
+target = "data/weather/analog/index.json"
+kind = "weather_analog"
+reference_year = 2025
+license = "Creative Commons Attribution 4.0 (CC-BY-4.0, https://creativecommons.org/licenses/by/4.0/) under the Licence to use Copernicus Products (https://apps.ecmwf.int/datasets/licences/copernicus/); the cache files data/weather/*.wthr are modified (re-gridded, derived) data. Also used online: the ERA5 hours the game downloads at run time"
+credit = "Generated using Copernicus Climate Change Service information 2025; contains modified Copernicus Climate Change Service information. Hersbach, H. et al., ERA5 hourly data on pressure levels from 1940 to present, Copernicus Climate Change Service (C3S) Climate Data Store (CDS), DOI 10.24381/cds.bd0915c6. Neither the European Commission nor ECMWF is responsible for any use that may be made of the Copernicus information or data it contains. ARCO-ERA5: Google Public Datasets (Carver & Merose 2023)"
+
+[[source]]
+id = "weather_gfs"
+name = "NOAA Global Forecast System (GFS) 0.25 deg GRIB2 forecasts (NOAA Open Data Dissemination on AWS, noaa-gfs-bdp-pds) - cloud cover, cloud water / ice mixing ratio, geopotential height and temperature, fetched at run time by HTTP range requests"
+url = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/"
+target = "data/weather"
+kind = "weather_licence"
+license = "public domain (NOAA / US Government work; NOAA Open Data Dissemination, no restrictions on use)"
+credit = "NOAA National Centers for Environmental Prediction (NCEP), Global Forecast System"
+
+[[source]]
+id = "weather_grib2_decoder"
+name = "GRIB2 decoding (WMO Manual on Codes FM 92 GRIB edition 2, templates 3.0 / 5.0 / 5.2 / 5.3; complex packing after NCEPLIBS-g2c) - own implementation core/src/weather_decode/grib2.cpp, no external library"
+url = "https://library.wmo.int/idurl/4/35625"
+target = "core/src/weather_decode/grib2.cpp"
+kind = "weather_licence"
+license = "WMO code tables used as a published specification; algorithm written by this project, no third-party code"
+credit = "WMO Manual on Codes (WMO-No. 306), Volume I.2, FM 92 GRIB"

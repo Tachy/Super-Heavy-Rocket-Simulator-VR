@@ -2,7 +2,7 @@
 #   1. the double-precision release export template (built once from external/godot if missing)
 #   2. core + GDExtension (tools/build.ps1 -NoTests) and the Godot smoke test
 #   3. the exe (PCK embedded) with the version stamped in, plus the GDExtension and D3D12 DLLs
-#   4. the package folder: exe, launchers, config/, the base data, CREDITS.md, READMEs; the data parts terrain
+#   4. the package folder: exe, launchers, config/, the base data (with data/weather/analog), CREDITS.md, READMEs; the parts terrain
 #      (data/terrain/earth) and imagery (data/imagery); a self-check of the exported exe with and without the parts
 #   5. ZIPs: build/SuperHeavyRocketSimulatorVR-<version>-windows.zip (playable, base data),
 #      ...-data-terrain.zip, ...-data-imagery.zip (each unpacks into the game folder); none may reach 2 GB
@@ -182,7 +182,13 @@ Copy-Item (Join-Path $Root "CREDITS.md"), (Join-Path $Root "README.md"), (Join-P
 Mirror (Join-Path $Root "config") (Join-Path $package "config") @()
 # base data: everything the game reads except the two large parts; never the raw downloads, webcasts or validation
 Mirror $Data (Join-Path $package "data") @("/XD", (Join-Path $Data "raw"), (Join-Path $Data "webcasts"),
-    (Join-Path $Data "validation"), (Join-Path $Data "imagery"), (Join-Path $Data "terrain\earth"), "/XF", "README.md")
+    (Join-Path $Data "validation"), (Join-Path $Data "imagery"), (Join-Path $Data "terrain\earth"),
+    (Join-Path $Data "weather"), "/XF", "README.md")
+# the offline weather analog set (M8: 48 ERA5 hours downsampled to 1 deg, a few hundred MB) rides in the base data so the
+# typical-weather fallback works on a first start without internet; downloaded weather caches (data/weather/cache) do not
+$analog = Join-Path $Data "weather\analog"
+if (Test-Path (Join-Path $analog "index.json")) { Mirror $analog (Join-Path $package "data\weather\analog") @() }
+else { Write-Warning "data/weather/analog is missing (python tools/data_pipeline/fetch.py weather_analog): the package has no offline weather" }
 if (-not (Test-Path (Join-Path $package "data\atmosphere\earth_atmosphere.bin"))) { throw "The package lacks data/atmosphere/earth_atmosphere.bin" }
 Mirror (Join-Path $Data "terrain\earth") (Join-Path $terrainPart "data\terrain\earth") @()
 Mirror (Join-Path $Data "imagery") (Join-Path $imageryPart "data\imagery") @()
