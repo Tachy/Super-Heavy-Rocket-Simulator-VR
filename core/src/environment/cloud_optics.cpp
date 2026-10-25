@@ -166,9 +166,8 @@ double two_stream_beam_reflectance(double optical_depth, double asymmetry_g, dou
 
 double cloud_transport_scale() { return 1.0 - cloud_delta_eddington().f; }
 
-double cloud_multiple_scattering_source(double cos_theta, double view_up_cos, double sun_cos_zenith,
-                                        double sun_optical_depth, double depth_from_top,
-                                        double column_optical_depth) {
+double cloud_scattering_source(double cos_theta, double view_up_cos, double sun_cos_zenith, double sun_optical_depth,
+                               double depth_from_top, double column_optical_depth) {
     if (sun_cos_zenith <= 0.0) return 0.0;
     const DeltaEddington& de = cloud_delta_eddington();
     const double k = 1.0 - de.f, mu0 = std::min(1.0, sun_cos_zenith);
@@ -178,39 +177,39 @@ double cloud_multiple_scattering_source(double cos_theta, double view_up_cos, do
     const double e = std::exp(-t / mu0);
     const double sigma = f.a0 + f.a1 * t + f.a2 * e, net = f.b0 + f.b1 * e;
     const double i0 = sigma / c::two_pi, i1 = 3.0 * net / four_pi;
-    const double forward_kept = std::exp(-k * sun_optical_depth) - std::exp(-sun_optical_depth);
-    const double eddington_phase = (1.0 + 3.0 * de.g_scaled * cos_theta) / four_pi;
-    return k * (i0 + de.g_scaled * view_up_cos * i1 + eddington_phase * forward_kept);
+    return k * (i0 + de.g_scaled * view_up_cos * i1) +
+           cloud_phase_function(cos_theta) * std::exp(-k * std::max(0.0, sun_optical_depth));
+}
+
+double slab_reflected_radiance(double optical_depth, double sun_cos_zenith, double view_cos_zenith,
+                               double relative_azimuth_rad) {
+    if (sun_cos_zenith <= 0.0 || view_cos_zenith <= 0.0 || optical_depth <= 0.0) return 0.0;
+    const DeltaEddington& de = cloud_delta_eddington();
+    const double k = 1.0 - de.f, mu0 = std::min(1.0, sun_cos_zenith), mu = std::min(1.0, view_cos_zenith);
+    const double big_t = k * optical_depth;  // scaled column
+    const DiffuseFieldCoefficients f = diffuse_field(de, big_t, mu0);
+    // Integrals over the scaled depth [0, big_t] of exp(-t/mu) dt / mu times 1, t and exp(-t/mu0).
+    const double view_t = std::exp(-big_t / mu);
+    const double k0 = 1.0 - view_t, k1 = mu * (1.0 - view_t) - big_t * view_t;
+    const double ke = mu0 / (mu0 + mu) * (1.0 - std::exp(-big_t * (1.0 / mu0 + 1.0 / mu)));
+    const double cos_theta =
+        std::sqrt(1.0 - mu0 * mu0) * std::sqrt(1.0 - mu * mu) * std::cos(relative_azimuth_rad) - mu0 * mu;
+    const double diffuse =
+        (f.a0 * k0 + f.a1 * k1 + f.a2 * ke) / c::two_pi + 3.0 * de.g_scaled * mu / four_pi * (f.b0 * k0 + f.b1 * ke);
+    return diffuse + cloud_phase_function(cos_theta) / k * ke;
 }
 
 double slab_reflectance(double optical_depth, double sun_cos_zenith) {
     if (sun_cos_zenith <= 0.0 || optical_depth <= 0.0) return 0.0;
     static const Quadrature mu_q = gauss_legendre_unit(slab_mu_nodes), phi_q = gauss_legendre_unit(slab_phi_nodes);
-    const DeltaEddington& de = cloud_delta_eddington();
-    const double k = 1.0 - de.f, mu0 = std::min(1.0, sun_cos_zenith), sin0 = std::sqrt(1.0 - mu0 * mu0);
-    const double tau = optical_depth, big_t = k * tau;  // unscaled and scaled column
-    const DiffuseFieldCoefficients f = diffuse_field(de, big_t, mu0);
-    // Depth integrals over [0, big_t] of exp(-t/mu) dt / mu times 1, t, exp(-t/a).
-    auto k0 = [&](double mu) { return 1.0 - std::exp(-big_t / mu); };
-    auto k1 = [&](double mu) { return mu * (1.0 - std::exp(-big_t / mu)) - big_t * std::exp(-big_t / mu); };
-    auto ke = [&](double a, double mu) { return a / (a + mu) * (1.0 - std::exp(-big_t * (1.0 / a + 1.0 / mu))); };
+    const double mu0 = std::min(1.0, sun_cos_zenith);
     double flux = 0.0;
     for (std::size_t i = 0; i < mu_q.x.size(); ++i) {
-        const double mu = mu_q.x[i], sin_mu = std::sqrt(1.0 - mu * mu);
-        // Azimuth-independent part of the multiple-scattering radiance.
-        const double kexp = ke(mu0, mu);
-        const double diffuse = (f.a0 * k0(mu) + f.a1 * k1(mu) + f.a2 * kexp) / c::two_pi +
-                               3.0 * de.g_scaled * mu / four_pi * (f.b0 * k0(mu) + f.b1 * kexp);
-        const double forward_kept = kexp - ke(k * mu0, mu);
-        const double single_depth = mu0 * (1.0 - std::exp(-tau * (1.0 / mu0 + 1.0 / mu))) / (mu + mu0);
         double ring = 0.0;  // integral over the azimuth, 0..pi doubled (symmetric about the Sun's plane)
         for (std::size_t j = 0; j < phi_q.x.size(); ++j) {
-            const double cos_theta = sin0 * sin_mu * std::cos(c::pi * phi_q.x[j]) - mu0 * mu;
-            const double radiance = cloud_phase_function(cos_theta) * single_depth + diffuse +
-                                    (1.0 + 3.0 * de.g_scaled * cos_theta) / four_pi * forward_kept;
-            ring += phi_q.w[j] * radiance;
+            ring += phi_q.w[j] * slab_reflected_radiance(optical_depth, mu0, mu_q.x[i], c::pi * phi_q.x[j]);
         }
-        flux += mu_q.w[i] * mu * c::two_pi * ring;
+        flux += mu_q.w[i] * mu_q.x[i] * c::two_pi * ring;
     }
     return flux / mu0;
 }

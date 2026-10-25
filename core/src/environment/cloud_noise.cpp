@@ -28,6 +28,14 @@ constexpr double worley_weights[3] = {0.625, 0.25, 0.125};
 // Bins of the rank equalisation of the Perlin-Worley channel.
 constexpr int equalisation_bins = 1 << 16;
 
+// Coverage table from the trilinearly filtered shape (cloud_noise.hpp): samples per texel cell (8 x 128^3 = 1.7e7),
+// histogram bins per byte code (the codes k / 255 are bin edges; quantile resolution 1 / 4080), seed of the jittered
+// sample positions, and the offset of a threshold from a code's point mass (above float rounding of the filter).
+constexpr int filtered_samples_per_cell = 8;
+constexpr std::size_t filtered_bins_per_code = 16;
+constexpr std::uint32_t filtered_sample_seed = 0x4u;
+constexpr double point_mass_offset = 1e-5;
+
 // Integer hash (Wellons' lowbias32): platform-independent, so the textures are the same everywhere.
 std::uint32_t hash32(std::uint32_t x) {
     x ^= x >> 16;
@@ -120,21 +128,92 @@ std::vector<std::uint8_t> rank_equalise(const std::vector<float>& values) {
     return codes;
 }
 
-// coverage_threshold[i]: t = (k + 0.5) / 255 with the code k whose count of texels above it is nearest to i / 255.
-std::array<float, 256> coverage_thresholds(const std::vector<std::uint8_t>& rgba) {
-    std::array<std::size_t, 256> counts{};
-    for (std::size_t i = 0; i < rgba.size(); i += channels) ++counts[rgba[i]];
-    std::array<std::size_t, 257> above{};  // above[k + 1] = texels with a code > k, k = -1..255
-    for (int k = 254; k >= -1; --k) above[k + 1] = above[k + 2] + counts[k + 1];  // above[256] = 0
-    const double n = static_cast<double>(rgba.size() / channels);
-    std::array<float, 256> t{};
-    for (int i = 0; i < 256; ++i) {
-        const double target = i / 255.0;
-        int best = 255;
-        for (int k = 255; k >= -1; --k) {
-            if (std::abs(above[k + 1] / n - target) < std::abs(above[best + 1] / n - target)) best = k;
+// coverage_threshold[i]: the quantile of the trilinearly filtered R channel with fraction i / 255 above it (header).
+// Distribution: filtered_samples_per_cell jittered positions in every cell between texel centres (uniform over the
+// torus). A cell whose 8 corners share one code filters to exactly that code: a point mass at k / 255, counted apart.
+// The other samples go into fine bins on [0, 1] and are taken as uniform inside a bin.
+std::array<float, 256> coverage_thresholds(const std::vector<std::uint8_t>& rgba, int size) {
+    const std::size_t bins = 255 * filtered_bins_per_code;
+    // Per z row: bins continuous counts, then 256 point masses.
+    std::vector<std::vector<std::uint32_t>> row_counts(static_cast<std::size_t>(size));
+    detail::for_each_row(size, [&](int z) {
+        std::vector<std::uint32_t>& counts = row_counts[static_cast<std::size_t>(z)];
+        counts.assign(bins + 256, 0);
+        auto at = [&](int x, int y, int zz) {
+            const std::size_t i =
+                (static_cast<std::size_t>(wrap(zz, size)) * size + wrap(y, size)) * size + wrap(x, size);
+            return rgba[channels * i] / 255.0;
+        };
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                double corner[8];
+                bool uniform = true;
+                for (int c = 0; c < 8; ++c) {
+                    corner[c] = at(x + (c & 1), y + ((c >> 1) & 1), z + (c >> 2));
+                    uniform = uniform && corner[c] == corner[0];
+                }
+                if (uniform) {
+                    counts[bins + static_cast<std::size_t>(std::lround(corner[0] * 255.0))] +=
+                        filtered_samples_per_cell;
+                    continue;
+                }
+                std::uint32_t h = hash_cell(x, y, z, filtered_sample_seed);
+                for (int s = 0; s < filtered_samples_per_cell; ++s) {
+                    h = hash32(h);
+                    const double wx = unit_from_hash(h);
+                    h = hash32(h);
+                    const double wy = unit_from_hash(h);
+                    h = hash32(h);
+                    const double wz = unit_from_hash(h);
+                    const double x00 = lerp(corner[0], corner[1], wx), x10 = lerp(corner[2], corner[3], wx);
+                    const double x01 = lerp(corner[4], corner[5], wx), x11 = lerp(corner[6], corner[7], wx);
+                    const double v = lerp(lerp(x00, x10, wy), lerp(x01, x11, wy), wz);
+                    ++counts[std::min(bins - 1, static_cast<std::size_t>(v * bins))];
+                }
+            }
         }
-        t[static_cast<std::size_t>(i)] = static_cast<float>((best + 0.5) / 255.0);
+    });
+    std::vector<double> counts(bins + 256, 0.0);
+    for (const auto& row : row_counts) {
+        for (std::size_t b = 0; b < row.size(); ++b) counts[b] += row[b];
+    }
+    const double total = static_cast<double>(size) * size * size * filtered_samples_per_cell;
+    std::array<float, 256> t{};
+    t[0] = static_cast<float>(255.5 / 255.0);   // nothing above (filtered values are <= 1)
+    t[255] = static_cast<float>(-0.5 / 255.0);  // everything above
+    // Walk down from the top: above = samples > the current position. At a bin edge that is a code, its point mass
+    // is passed first (a threshold just below the code includes it), then the bin below.
+    std::size_t b = bins;
+    bool edge_mass_passed = false;
+    double above = 0.0;
+    for (int i = 1; i < 255; ++i) {
+        const double target = i / 255.0 * total;
+        float threshold = 0.0f;
+        while (true) {
+            const double edge = static_cast<double>(b) / bins;
+            if (b % filtered_bins_per_code == 0 && !edge_mass_passed) {
+                const double mass = counts[bins + b / filtered_bins_per_code];
+                if (above + mass >= target && mass > 0.0) {
+                    // The target is inside the jump: exclude (just above the code) or include (just below), nearest.
+                    threshold = static_cast<float>(target - above < above + mass - target ? edge + point_mass_offset
+                                                                                         : edge - point_mass_offset);
+                    break;
+                }
+                above += mass;
+                edge_mass_passed = true;
+            }
+            if (b == 0) break;  // threshold 0: everything above but the zero mass
+            const double in_bin = counts[b - 1];
+            if (above + in_bin >= target && in_bin > 0.0) {
+                threshold = static_cast<float>(edge - (target - above) / in_bin / bins);
+                break;
+            }
+            above += in_bin;
+            --b;
+            edge_mass_passed = false;
+        }
+        // Monotone (a jump threshold sits point_mass_offset above its code, a bin quantile may sit closer).
+        t[static_cast<std::size_t>(i)] = std::min(threshold, t[static_cast<std::size_t>(i - 1)]);
     }
     return t;
 }
@@ -198,7 +277,7 @@ CloudNoise generate_cloud_noise() {
     });
     const std::vector<std::uint8_t> shape = rank_equalise(perlin_worley);
     for (std::size_t i = 0; i < shape_texels; ++i) noise.shape_rgba[channels * i] = shape[i];
-    noise.coverage_threshold = coverage_thresholds(noise.shape_rgba);
+    noise.coverage_threshold = coverage_thresholds(noise.shape_rgba, n);
 
     noise.detail_rgba.assign(static_cast<std::size_t>(d) * d * d * channels, 0);
     detail::for_each_row(d, [&](int z) {
