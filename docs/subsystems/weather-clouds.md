@@ -19,22 +19,37 @@ far field, gate and docs) extend it.
   (50 m transition, `cloud_base_transition_m` [E]) in the middle of the gap, partly so where cloud only thickens upward;
   thinning upward keeps the linear taper (the covered area shrinks: rounded tops). The term integrates to zero over the
   gap: water path and cloud amount are the field's.
-- **Shapes with soft edges** (`cloud_noise.hpp`): cloud where the shape noise's R (trilinear, no mipmaps) exceeds
-  `coverage_threshold(cf)` (covered area = cf); density = mean / m(cf) x smoothstep((s - t) / w): the liquid water rises
-  over the edge zone (`cloud_edge_width_m` 100 m [E], Katzwinkel et al. 2014 / Heus & Jonker 2008) instead of jumping;
-  w = 100 m at the noise's median gradient (0.0225 in shape value), m = the edge mean factor table (the cell mean stays
-  the field's within 0.13 %). Ice-dominated cloud (the ice share) mixes in the ramp of thin-sheet coordinates (vertical
-  tile 2 km instead of 16 km [E]; no fibre direction: no wind in the snapshot). Detail noise x (1 + a (d - mean)) with
-  a fading to 0 at the preset's distance (no pop). Shape tile 32 km across / 16 km high [E], detail tile 2 km [E];
-  Earth-fixed, the camera's part in float64 on the CPU.
+- **Fractal shapes** (`cloud_noise.hpp`, fix round 1): cloud perimeters are fractal with the area-perimeter dimension
+  D = 1.35 (Lovejoy 1982, `cloud_perimeter_fractal_dimension`). The thresholded value is v = s + sum_k w_k a_k (d_k -
+  mean): the shape noise's R (trilinear, no mipmaps; its Perlin octaves with the fBm gain 2^-H, H = 2 - D) plus three
+  detail levels (isotropic tiles 1000 / 250 / 62.5 m, cells 500 m down to 8 m; single Worley octaves with gain 2^-H,
+  a_k = A 4^(-H k)). A continues the shape's increment spectrum at 62.5 m, times a factor calibrated on the observable
+  (`cloud_detail_amplitude_calibration` 2.5: the Worley octaves are not Gaussian, D = 2 - H alone gave D = 1.22; with
+  it the box-counted D is 1.350). Each level is band-limited by the pixel footprint f (w_k = clamp(log2(l_k / f) - 1,
+  0, 1), l_k the level's middle cell; the march pixel's angle comes per view): an octave below the pixel enters with
+  its mean, so silhouettes stay irregular down to the pixel at every distance. Tables per detail state L = sum w_k
+  (256 x 4, linear between rows): thresholds t[L](cf) (covered area = cf at every state) and edge mean factors m[L].
+- **Soft edges of varying width**: density = mean / m[L](cf) x smoothstep((v - t) / w(n)); the edge zone width varies
+  log-uniformly between 25 and 200 m (`cloud_edge_width_min_m` / `_max_m` [E]: Katzwinkel et al. 2014 inner shells,
+  Wang, Geerts & French 2009 transition zone ~200 m) by the width noise n in the shape's A channel; w_min / w_max =
+  the median increment of v over those widths (0.024 / 0.072). m is taken over the joint (v, n) distribution: the cell
+  mean stays the field's (0.996-1.000 at the table states, also between them). Ice-dominated cloud (the ice share)
+  mixes in the ramp of thin-sheet coordinates (vertical tile 2 km instead of 16 km [E]; no fibre direction: no wind in
+  the snapshot), the same detail. Shape tile 32 km across / 16 km high [E]; Earth-fixed, the camera's part in float64
+  on the CPU (level k's origin fract(4^k x level 0's)).
 - **Light**: the Sun's (and at night the Moon's) optical depth is marched toward the light through the 3D density
   (`cloud_light_optical_depth`: near samples over 6 km in geometric intervals from 20 m through the shapes, then far
   samples to the cloud top through the grid mean; stratified, unbiased over the jitter). The source is the core's
   `cloud_scattering_source_3d`: TMS on the delta-Eddington source function of the surface the light entered through
-  (entry cosine mu_e = clamp((t_v + mu0) / (tau_s + 1), mu0, 1); a slab gives mu_e = mu0 exactly, a sunlit flank or a
-  base under a Sun below the local horizon gets its true incidence; tilted independent column, Varnai & Davies 1999).
-  Plus the sky source (`cloud_sky_scattering_source`, vertical column). The air's Sun / sky irradiance at the cloud from
-  `atmosphere.gdshaderinc` (incl. the eclipse), re-evaluated every 500 m / 5 % along a ray.
+  (entry cosine mu_e = clamp((t_v + mu0) / (tau_s + 1), max(mu0, 0.02), 1); a slab gives mu_e = mu0 exactly, a sunlit
+  flank or a base under a Sun below the local horizon gets its true incidence; tilted independent column, Varnai &
+  Davies 1999). The light march band-limits the detail at the larger of the pixel footprint and its interval. Plus the
+  sky source (`cloud_sky_scattering_source`, vertical column). Column depths use one convention in core and shader:
+  the covered area's in-cloud mean mean / cf (the A channel's), continuous through the layer centres. The air's Sun /
+  sky irradiance at the cloud from `atmosphere.gdshaderinc`, re-evaluated every 500 m / 5 % along a ray; the eclipse
+  acts on both: the Sun through `atm_sunlit`, the sky light through `atm_sky_eclipse_factor`, evaluated per 8 x 8 work
+  group at 5 km and 150 km along its centre ray and interpolated in distance (per sample it cost 10 ms at the eclipse
+  epoch; the penumbra changes by ~3 % per 100 km).
 - **Cloud pass** (`CloudEffect`, a compositor effect before the transparent pass; kernels in
   `shaders/cloud_pass.gdshaderinc` with `atmosphere.gdshaderinc` + `clouds.gdshaderinc` compiled as GLSL compute by
   `CloudShaderPort`, which turns their `global uniform`s into one uniform block + sampler bindings filled from
@@ -44,24 +59,34 @@ far field, gate and docs) extend it.
      of nearest / farthest; coarse steps outside the field's cloudy region, fine steps inside; blue-noise start jitter,
      64 x 64 void-and-cluster mask offset per frame by the golden ratio - the same for both eyes); background through
      exp(-tau), scattered light through exp(-(1 - f) tau); colour = T_c L + (1 - T_bg) S_c with the air at the
-     transmittance-weighted cloud distance;
+     transmittance-weighted cloud distance; a step whose weight in the scattered light T_sc (1 - exp(-(1 - f) tau))
+     exceeds 0.15 [E] is marched again with steps of that weight (one sample deciding a whole deep step was the grain
+     at cloud surfaces and at bases seen at a grazing angle);
   2. temporal accumulation per eye: reprojection of the cloud distance (sky: rotation only) with the camera's float64
-     motion into the previous frame's clip space of the same eye, history clamped to the 3 x 3 neighbourhood, weight
-     0.1 of the new frame;
+     motion into the previous frame's clip space of the same eye, history clamped to the 3 x 3 neighbourhood; a running
+     mean of weight 1 / n (n the frames the history holds, kept per pixel) down to 1/32 (an exponential mean of 0.1
+     kept 23 % of one frame's noise); a clamped history keeps at most 4 frames. `World` resets the history on view and
+     clock jumps (`_view_jumped`, `SimClock.time_jumped`);
   3. depth-aware upsampling (bilinear x exp(-4 |ln(D / D_i)|)) into a full-resolution array (layer = view).
   The composite quad (`cloud_layer.gdshader`, first in the transparent pass, premultiplied) blends it over the scene;
-  plumes draw over it, MSAA resolves stay intact. Off beyond 1.5e7 m (scaled space; Task 10).
+  plumes draw over it, MSAA resolves stay intact. Off beyond 1.5e7 m (scaled space; Task 10). A new size (resize,
+  divisor) creates new images; the main thread shows the new result before the next frame (`CloudEffect.swap_output`:
+  replacing it inside the render callback broke the composite's material for a frame), the old images are freed three
+  render callbacks later (no renderer error, no frame without clouds). `CloudLayer.shutdown` frees the resident volumes.
 - **Cross-fade** (`CloudLayer`, ruling 2026-10-25): two slots and the weight of slot 1; a new pair is reached through
   one visible snapshot (weight moves 1 per 2 s), the missing snapshot is uploaded into the slot without weight, then
   the weight tracks `WeatherService.blend()`. Weather off fades to the empty texture. Unused zero-weight slots are freed.
-- **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples, detail to
-  30 km; VR 64 / 128, 2.5 %, 5 + 2, 15 km; both 1/2 resolution, temporal weight 0.1.
+  An upload no longer needed is cancelled, and an upload never replaces a slot that carries weight.
+- **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 64 / 128,
+  2.5 %, 5 + 2; both 3 detail levels, 1/2 resolution, temporal weight floor 1/32.
 
 ## Validation
 
 - Core `[weather]`: render texels (linear extinction, in-cloud depth vs trapezoids, code round trip, ice share);
-  vertical profile (flat base, water path kept exactly); soft edges (mean water / grid mean 0.9987-1.0006 for cf
-  0.05-1, covered fraction unchanged); blue noise (each value equally often, 4 x 4 block-mean variance 0.18 of white
+  vertical profile (flat base, water path kept exactly); covered fraction = cf within 0.003 at every detail state
+  (0.006 between rows); soft edges of varying width (mean water / grid mean 0.996-1.000 for cf 0.05-1 at states 0, 1,
+  1.5, 3); perimeter fractal dimension by box counting of the cloud mask (16 km plane at 4 m, cf 0.5, boxes 8 m to
+  1024 m: D = 1.350, test 1.25-1.45, Lovejoy 1982; the shape alone 1.01); blue noise (each value equally often, 4 x 4 block-mean variance 0.18 of white
   noise); 3D Sun light (light march unbiased within 1 %, shadow-side transmittance exp(-mean tau) within 2 % of
   Beer-Lambert; sunlit flank 6.9x / 52x the shadowed one and 3.9x the column model at +10 / -3 deg Sun; a slab gives
   the column source exactly); sky source R + T = 1.
@@ -69,28 +94,38 @@ far field, gate and docs) extend it.
   below / inside / above a tau-1 slab vs the CPU Beer-Lambert within 1.5 %; Sun radiance from above a tau-10 slab vs
   `slab_reflected_radiance` within 1.4 % with a converged light march (24 samples, 8 frames), the preset's 6-sample
   march +10 % at Sun 60 deg (Jensen bias of exp(-tau_s), tolerance 15 %); filtered coverage 0.1036 / 0.5057 / 0.9021 at
-  full resolution; climbing out in 50 m steps <= 4.9 % of the brightest value per step; inside finite and non-black.
+  full resolution (state 0, detail levels off for all numbers); climbing out in 50 m steps (temporal weight 1) <= 4.81 %
+  of the brightest value per step; inside finite and non-black; transmittance to an occluder 2 km ahead inside the
+  slab exp(-beta 2 km) within 0.7 % (depth -> distance); a near "mountain" edge through a half-resolution block: the
+  occluder column T = 1.000, the sky column the slab's within 1.5 % (upsampling).
 - `game/tests/cloud_layer_test.gd` (headless): the cross-fade never jumps, never changes a weighted slot.
 
 ## Diagnostics
 
 - `render_check.gd --weather=<abs path .wthr>` or `--weather=slab:<bottom>,<top>,<liquid kg/m^3>,<fraction>` (pinned,
-  no service; the overlay shows the pinned snapshot), `--weather[=s]` online, `--cloud_quality=desktop|vr`,
-  `--look_at_sun [--away_from_sun]`.
+  no service; the overlay shows the pinned snapshot), `--weather=analog` (the shipped analog of `--utc`, pinned),
+  `--weather[=s]` / `--weather=online` online; any other value exits with an error. `--cloud_quality=desktop|vr`,
+  `--cloud_detail_levels=0..3`, `--look_at_sun [--away_from_sun]`.
 - `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr` (weather off otherwise).
 - `cloud_debug_output` 1 / 2 / 3 / 4: background transmittance (grid mean), Sun radiance (grid mean), coverage at
   `cloud_debug_height_m`, background transmittance with the shapes.
 
 ## Open points and known limits
 
-- Performance: see the Task 8 amendment report (`.superpowers/sdd/.../task-8b-amendment-report.md`) for the VR preset
-  numbers; the Task 11 gate is p99 <= 11 ms.
+- Performance (terrain_perf 1440p, 2024-04-08 18:42 eclipse epoch, ERA5 18:00 pinned, VR preset, one session, after
+  fix round 1): without clouds p99 13.20 / 13.06 ms (two runs), with clouds 15.54 ms (p50 8.99 -> 9.87); pans +0.3 to
+  +0.6 ms p99, cape +0.6 ms; the descent 12.1 -> 16.7 ms p99, worst GPU second 18.9 ms at 8.4 km above the decks. The
+  baseline itself misses the Task 11 gate (p99 <= 11 ms). Levers measured: the detail levels ~2 ms in the descent
+  (`--cloud_detail_levels`), the step refinement ~0.3 ms, the eclipse probes ~0.3 ms (per sample they cost ~10 ms).
+- At sharp dark edges (a deck's base seen at 30 km) a staircase of the half-resolution blocks is still visible.
 - The stochastic light march is unbiased in tau_s but exp(-tau_s) per sample is brighter on average (+10 % at the
   worst checked geometry with the preset's samples); more near samples reduce it.
 - Forward radiance at low Sun up to -56 % vs Monte Carlo, TMS aureole too bright through thick cloud
   (cloud_optics.hpp) - Task 8b (Bouthors 2008 transfer table). The tilted column does not move light between columns.
 - Ice uses the droplet phase function and thin sheets without a fibre direction; no ground-reflected light into the
   cloud bases; the sky light kept in the forward peak is left out.
-- A window resize re-creates the pass's images: one frame without clouds (and one renderer error line).
+- A resize shows the clouds of the old size for one frame (scaled), then the new ones.
+- The ray of each eye starts at the camera, not at the eye offset (the eye offset only moves the reprojection): the
+  stereo parallax of near clouds is approximate.
 - Multiview (VR) not yet verified on a headset (the pass handles each view's matrices; per-eye history).
 - No cloud shadows / light under the deck yet (Task 9).
