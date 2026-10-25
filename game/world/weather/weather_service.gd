@@ -359,6 +359,13 @@ func _ensure_baseline(utc_hour: float) -> void:
 	_target_blend = 0.0
 
 
+## The shipped analog file for the UTC hour (hours since 1900), "" if there is none (checks: render_check
+## --weather=analog).
+func analog_file(utc_hour: float) -> String:
+	var entry := _analog_entry(utc_hour)
+	return "" if entry.is_empty() else _analog_dir.path_join(String(entry["file"]))
+
+
 ## The shipped snapshot of the month and nearest 6-hour slot of the UTC hour.
 func _analog_entry(utc_hour: float) -> Dictionary:
 	var unix := int((utc_hour - HOURS_1900_TO_1970) * 3600.0)

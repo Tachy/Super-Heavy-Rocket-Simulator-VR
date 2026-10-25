@@ -5,8 +5,10 @@
 #      tau ~1 vs the core's Beer-Lambert along the same ray (weather_cloud_light's sun_transmittance with the ray as
 #      "Sun"), 3 %; orientation: a wide view toward the horizon below the slab shows it in the top row at that row's
 #      elevation (3 %) and not in the bottom row (the pass's rays match the screen);
-#   2. a camera inside the slab renders a finite, non-black image (Review Focus 5);
-#   3. climbing out of the slab in 50 m steps (looking up, the shapes on, temporal accumulation on) changes the centre
+#   2. a camera inside the slab renders a finite, non-black image (Review Focus 5); the transmittance to an occluder
+#      2 km ahead inside the slab is exp(-beta 2 km) within 3 % (the scene depth -> distance convention); a near
+#      "mountain" edge through a half-resolution block: no cloud over the mountain, the sky's slab within 5 %;
+#   3. climbing out of the slab in 50 m steps (looking up, the shapes on, temporal accumulation off) changes the centre
 #      5 x 5 pixels by <= 5 % of the climb's brightest value per step (no pop);
 #   4. the Sun's scattered radiance (debug output 2) of a slab of tau ~10 seen from above vs the core's closed-form
 #      slab_reflected_radiance: with a converged light march (24 samples, mean of 8 frames) 5 % - the port of the 3D
@@ -14,7 +16,7 @@
 #   5. the GPU's filtered coverage (debug output 3, full resolution) at the slab's centre height over a wide view = the
 #      cloud fraction (0.1 / 0.5 / 0.9) within 0.02 (Task 4 deferred: the RGBA8 filter weights against the float64
 #      coverage table).
-# Detail noise off for the numbers (its amplitude 0); the desktop quality preset. Exit code 1 on failure.
+# Detail levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_check.gd
 extends SceneTree
 
@@ -40,7 +42,12 @@ const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 21
+const EXPECTED_SAMPLES := 23
+## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
+const OCCLUDER_DISTANCE_M := 2000.0
+const OCCLUDER_SIZE_M := 1000.0
+const EDGE_DISTANCE_M := 50.0
+const EDGE_SIZE_M := 100.0
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
@@ -73,7 +80,7 @@ func _run() -> void:
 		_fail_and_quit("cloud noise not ready")
 		return
 	_clouds.quality = CloudLayer.Quality.DESKTOP
-	ShaderGlobals.set_value(&"cloud_detail_amplitude", 0.0)
+	_detail_off()
 
 	var thin := _slab("thin", SLAB_BOTTOM_M, SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0)
 	_show(thin)
@@ -105,7 +112,22 @@ func _run() -> void:
 		var c := await _render(_point(1500.0), view, sun, 0)
 		var lum := _luminance(c)
 		_check("inside the slab: finite, non-black", is_finite(lum) and lum > 1e-4, "luminance %.5f" % lum)
+	# 2b. Depth -> distance: an occluder 2 km ahead of a camera inside the slab; the transmittance to it is the slab's
+	# in-cloud extinction over 2 km (beta from the CPU's vertical depth of the 1 km slab), 3 %.
+	var slab_tau := -log(float(_core.weather_cloud_light(_point(10.0), up)["sun_transmittance"]))
+	var beta := slab_tau / (SLAB_TOP_M - SLAB_BOTTOM_M)
+	var occluder := _occluder(Vector3(0.0, 0.0, -OCCLUDER_DISTANCE_M), Vector2(OCCLUDER_SIZE_M, OCCLUDER_SIZE_M))
+	var t_occluded := (await _render(_point(1500.0), _local_direction(0.0, 70.0), sun, 1, BLOCK_RADIUS)).x
+	occluder.queue_free()
+	var t_expected := exp(-beta * OCCLUDER_DISTANCE_M)
+	_check("transmittance to an occluder at %.0f m inside the slab" % OCCLUDER_DISTANCE_M,
+			absf(t_occluded - t_expected) <= TRANSMITTANCE_TOLERANCE * t_expected,
+			"GPU %.5f expected %.5f (beta %.6f /m)" % [t_occluded, t_expected, beta])
+	await _mountain_edge_sample(sun)
 	# 3. Climbing out of the slab in 50 m steps, looking up (a slanted view would cross 50 m / sin(e) more cloud per step).
+	# The temporal accumulation off (weight 1): the check is on the field, not on the history's lag (with it the steps
+	# measured up to 4.9 % at the 5 % limit).
+	_clouds.effect.set_quality(int(CloudLayer.PRESETS[CloudLayer.Quality.DESKTOP]["divisor"]), 1.0)
 	var view_climb := up
 	# A step is measured against the climb's brightest value (the lit cloud around the camera): near the top the pixel
 	# falls toward the much darker clear zenith sky, where a step relative to the pixel itself grows without a pop
@@ -130,6 +152,8 @@ func _run() -> void:
 			worst_at = 700.0 + 50.0 * i
 	_check("climbing out in 50 m steps", worst <= CLIMB_STEP_LIMIT,
 			"largest step %.2f %% of the brightest (at %.0f m)" % [worst * 100.0, worst_at])
+	_clouds.quality = CloudLayer.Quality.DESKTOP  # the preset's temporal weight again
+	_detail_off()
 	# 4. Scattered Sun radiance from above a thick slab vs the closed form.
 	var thick := _slab("thick", SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, 1.0)
 	_show(thick)
@@ -235,6 +259,7 @@ func _radiance_sample(view_zenith_deg: float, sun_zenith_deg: float, azimuth_deg
 	for i in range(RADIANCE_FRAMES):
 		got += (await _render(_point(5000.0), view, sun, 2, BLOCK_RADIUS)).x / RADIANCE_FRAMES
 	_clouds.quality = CloudLayer.Quality.DESKTOP  # the preset's march again
+	_detail_off()
 	var expected := float(_core.cloud_slab_radiance(tau, cos(deg_to_rad(sun_zenith_deg)),
 			cos(deg_to_rad(view_zenith_deg)), deg_to_rad(azimuth_deg)))
 	var error := absf(got - expected) / maxf(expected, 1e-6)
@@ -242,6 +267,59 @@ func _radiance_sample(view_zenith_deg: float, sun_zenith_deg: float, azimuth_deg
 	_check("Sun radiance view %.0f / Sun %.0f / azimuth %.0f deg (%s march)" % [view_zenith_deg, sun_zenith_deg,
 			azimuth_deg, "converged" if converged else "preset"],
 			error <= tolerance, "GPU %.5f CPU %.5f /sr (%.2f %%)" % [got, expected, error * 100.0])
+
+
+## Detail levels off: the CPU references have the shapes of state 0 at most (cloud_noise.hpp).
+func _detail_off() -> void:
+	ShaderGlobals.set_value(&"cloud_detail_levels", 0)
+
+
+## An unshaded box in front of the camera: centre in the camera's frame (x right, y up, -z ahead), size across x / y.
+func _occluder(centre_camera: Vector3, size: Vector2) -> MeshInstance3D:
+	var mesh := BoxMesh.new()
+	mesh.size = Vector3(size.x, size.y, 1.0)
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.albedo_color = Color(0.2, 0.2, 0.2)
+	var box := MeshInstance3D.new()
+	box.mesh = mesh
+	box.material_override = material
+	box.position = centre_camera  # a child of the camera
+	_camera.add_child(box)
+	return box
+
+
+## A mountain edge at the half-resolution pass: below the slab, looking 30 deg up, a near occluder (50 m) covers the
+## columns left of the edge, which runs through the middle of a 2 x 2 block (between columns 16 and 17 of 33); the
+## sky right of it sees the slab. The full-resolution columns next to the edge: the occluder's keep T = 1 (no cloud
+## bleeds over the mountain), the sky's the slab's T of their rays (the CPU's) within 5 %.
+func _mountain_edge_sample(sun: Vector3) -> void:
+	var view := _local_direction(30.0, 200.0)
+	var pixel_m := 2.0 * EDGE_DISTANCE_M * tan(deg_to_rad(_camera.fov * 0.5)) / VIEW_SIZE
+	var edge_x := 0.5 * pixel_m  # between the centre column 16 and column 17
+	var occluder := _occluder(Vector3(edge_x - 0.5 * EDGE_SIZE_M, 0.0, -EDGE_DISTANCE_M),
+			Vector2(EDGE_SIZE_M, EDGE_SIZE_M))
+	await _render(_point(10.0), view, sun, 1)
+	occluder.queue_free()
+	var image := _viewport.get_texture().get_image()
+	var mountain := 0.0
+	var sky := 0.0
+	var rows := 0
+	for y in range(VIEW_SIZE / 2 - BLOCK_RADIUS, VIEW_SIZE / 2 + BLOCK_RADIUS + 1):
+		mountain += image.get_pixel(16, y).r
+		sky += image.get_pixel(17, y).r
+		rows += 1
+	mountain /= rows
+	sky /= rows
+	# Column 17's ray: 1 pixel right of the axis (the camera's x toward the screen's right).
+	var basis := _camera.transform.basis
+	var tan_x := (17.5 - VIEW_SIZE * 0.5) / (VIEW_SIZE * 0.5) * tan(deg_to_rad(_camera.fov * 0.5))
+	var ray_render := (basis * Vector3(tan_x, 0.0, -1.0)).normalized()
+	var ray_itrf: Vector3 = _earth_to_gcrf.inverse() * Frames.from_render(ray_render)
+	var expected := float(_core.weather_cloud_light(_point(10.0), ray_itrf.normalized())["sun_transmittance"])
+	var sky_error := absf(sky - expected) / maxf(expected, TRANSMITTANCE_FLOOR)
+	_check("mountain edge upsampling (occluder side clear, sky side the slab)", mountain >= 0.97 and sky_error <= 0.05,
+			"occluder column %.4f, sky column %.4f (CPU %.4f, %.2f %%)" % [mountain, sky, expected, sky_error * 100.0])
 
 
 func _coverage_sample(fraction: float) -> void:
@@ -254,6 +332,7 @@ func _coverage_sample(fraction: float) -> void:
 	_camera.fov = 10.0
 	var image := _viewport.get_texture().get_image()
 	_clouds.quality = _clouds.quality  # the preset's resolution again
+	_detail_off()
 	var covered := 0
 	for y in range(image.get_height()):
 		for x in range(image.get_width()):
@@ -276,6 +355,7 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode
 	_camera.transform = Transform3D(Basis.looking_at(view_render, up), Vector3.ZERO)
 	for i in range(SETTLE_FRAMES):
 		await RenderingServer.frame_post_draw
+		_clouds.update(camera_itrf_m, 0.0, 0.0)  # as the world does every frame (a re-created result is shown)
 	var image := _viewport.get_texture().get_image()
 	# The mean over a (2 r + 1)^2 block around the centre: the jitter differs per pixel, so the block mean is the
 	# estimator's expectation (rays within +-0.6 deg of the axis at r = 2).

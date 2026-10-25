@@ -14,10 +14,11 @@
 #          recorded first, else predicted; flies until it appears)
 #          [--wait_on_pad] (a launch window's wait on the pad: T-) [--view=1] (Tab presses: switch the viewed object)
 #          [--legacy_hud] (F1: the old HUD too)
-# Weather: off in a render check unless --weather[=900] (online: waits for the downloads, at most that many seconds),
-#          --weather=<file.wthr> (a cached snapshot) or --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>;
+# Weather: off in a render check unless --weather[=900 / =online] (online: waits for the downloads, at most 900 s or
+#          that many), --weather=analog (the shipped analog of --utc), --weather=<file.wthr> (a cached snapshot) or
+#          --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>; any other value exits with an error;
 #          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's), --cloud_debug=1..4 (the cloud
-#          pass's debug output, clouds.gdshaderinc cloud_debug_output).
+#          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
@@ -59,6 +60,8 @@ func _process(_delta: float) -> bool:
 		if _args.has("cloud_quality"):
 			world.clouds.quality = CloudLayer.Quality.VR if _args["cloud_quality"] == "vr" else CloudLayer.Quality.DESKTOP
 		_show_weather_file(world)
+		if _args.has("cloud_detail_levels"):  # the detail levels used (the preset's otherwise)
+			ShaderGlobals.set_value(&"cloud_detail_levels", int(_args["cloud_detail_levels"]))
 		if _args.has("cloud_debug"):  # the cloud pass's debug output (clouds.gdshaderinc cloud_debug_output)
 			ShaderGlobals.set_value(&"cloud_debug_output", int(_args["cloud_debug"]))
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
@@ -105,7 +108,7 @@ func _process(_delta: float) -> bool:
 	_terrain_idle = _terrain_idle + 1 if loading == 0 and not world.atmosphere.loading else 0  # also the sky's tables
 	# --weather[=max seconds]: also wait for the weather service (downloads, builds), at most that long (default 900 s).
 	var weather_waiting: bool = _weather_online() and not world.weather.settled() \
-			and Time.get_ticks_msec() / 1000.0 - _start_s < float(_args["weather"] if _args["weather"] != "" else 900.0)
+			and Time.get_ticks_msec() / 1000.0 - _start_s < _weather_wait_s()
 	# The clouds' noise (generated on a worker) and a running field upload / cross-fade (online weather: 2 s per unit).
 	var clouds_waiting: bool = (_args.has("weather") and _args["weather"] != "off") \
 			and (not world.clouds.noise_ready or world.clouds.state()["uploading"] or not world.clouds.state()["tracking"]) \
@@ -145,22 +148,36 @@ func _process(_delta: float) -> bool:
 	return false
 
 
-## --weather or --weather=<max seconds>: the weather service online (downloads); off / a file / a slab: not.
+## --weather, --weather=online or --weather=<max seconds>: the weather service online (downloads); off / analog / a
+## file / a slab: not.
 func _weather_online() -> bool:
 	if not _args.has("weather"):
 		return false
 	var value: String = _args["weather"]
-	return value == "" or value.is_valid_float()
+	return value == "" or value == "online" or value.is_valid_float()
 
 
-## --weather=<file.wthr> shows that snapshot; --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<cloud fraction> a
-## synthetic uniform slab (StarsimCore.weather_write_slab_snapshot) - both pinned, without the service.
+## The online wait limit [s] of --weather (900 unless --weather=<seconds>).
+func _weather_wait_s() -> float:
+	var value: String = _args["weather"]
+	return float(value) if value.is_valid_float() else 900.0
+
+
+## --weather=<file.wthr> shows that snapshot; --weather=analog the shipped analog snapshot of --utc;
+## --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<cloud fraction> a synthetic uniform slab
+## (StarsimCore.weather_write_slab_snapshot) - all pinned, without the service. Any other value is refused (exit 1).
 func _show_weather_file(world: World) -> void:
-	if not _args.has("weather"):
+	if not _args.has("weather") or _weather_online() or _args["weather"] == "off":
 		return
 	var value: String = _args["weather"]
 	var file := ""
-	if value.begins_with("slab:"):
+	if value == "analog":
+		var unix := Time.get_unix_time_from_datetime_string(_args.get("utc", "2024-04-08T18:42:00"))
+		file = world.weather.analog_file(unix / 3600.0 + WeatherService.HOURS_1900_TO_1970)
+		if file == "":
+			_refuse("render_check: no analog snapshot for --utc")
+			return
+	elif value.begins_with("slab:"):
 		var p := value.trim_prefix("slab:").split(",")
 		file = OS.get_temp_dir().path_join("starsim_render_check_slab_%d.wthr" % OS.get_process_id())
 		if not world.core.weather_write_slab_snapshot(file, float(p[0]), float(p[1]), float(p[2]), float(p[3])):
@@ -169,16 +186,24 @@ func _show_weather_file(world: World) -> void:
 	elif value.ends_with(".wthr"):
 		file = value
 	else:
+		_refuse("render_check: unknown --weather=%s (online, <seconds>, off, analog, <file.wthr>, slab:...)" % value)
 		return
 	var snapshot: Dictionary = world.core.weather_load_snapshot(file)
 	if not snapshot.get("ok", false):
-		push_error("render_check: " + str(snapshot.get("error", "")))
+		_refuse("render_check: " + str(snapshot.get("error", "")))
 		return
 	world.clouds.wait_until_ready()
 	world.clouds.show_now(snapshot, snapshot, 0.0)
 	world.core.weather_set_active(file, file, 0.0)
 	world.weather.pinned_label = WeatherService.snapshot_label(snapshot)
 	print("render_check: weather from %s (%s %s)" % [file, snapshot["kind"], snapshot["cache_key"]])
+
+
+## A bad option: the error, exit code 1 (no silent render without the asked-for weather).
+func _refuse(message: String) -> void:
+	push_error(message)
+	print(message)
+	quit(1)
 
 
 # Orbit camera: look at the focus from the direction of the Sun or the Moon.
