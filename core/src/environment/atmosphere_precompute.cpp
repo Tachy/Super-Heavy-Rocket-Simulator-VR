@@ -846,8 +846,8 @@ std::vector<double> geometric_tail(const std::vector<double>& previous, const st
 // One pass of Model::Precompute at three wavelengths: transmittance, direct irradiance and single scattering into
 // the pass tables, single scattering folded into the luminance tables; then the orders 2 .. scattering_orders
 // (scattering density, indirect irradiance of the previous order, multiple scattering), each folded into
-// tables.irradiance and tables.scattering through the same matrix m; with `tail` and scattering_orders >= 3 the geometric tail of
-// the higher orders of both.
+// tables.irradiance and tables.scattering through the same matrix m; with `tail` and scattering_orders >= 3 the
+// geometric tail of the higher orders of both.
 // The optical lengths are the same for every wavelength: computed once, not per pass as on Bruneton's GPU.
 void run_spectral_pass(const PassModel& model, const std::vector<OpticalLengths>& optical_lengths,
                        const std::vector<double>& texel_nu, int scattering_orders, bool tail, const Mat3& m,

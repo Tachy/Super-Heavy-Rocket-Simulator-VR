@@ -219,6 +219,48 @@ TEST_CASE("Input hash changes with every input", "[atmosphere]") {
     CHECK(hashes.size() == 1 + config_changes.size() + size_changes.size());
 }
 
+TEST_CASE("The multiple-scattering tail is on in the shipped config and changes the tables", "[atmosphere]") {
+    const auto shipped = optics();
+    CHECK(shipped.multiple_scattering_tail);  // fidelity flag (earth_optics.toml), on by default
+    REQUIRE(shipped.scattering_orders >= 3);  // the tail needs two computed multiple-scattering orders
+    // Small tables: only the difference between the flag's two settings is asserted here.
+    environment::AtmosphereTableSizes sizes;
+    sizes.transmittance_mu = 32;
+    sizes.transmittance_r = 16;
+    sizes.scattering_r = 4;
+    sizes.scattering_mu = 8;
+    sizes.scattering_mu_s = 4;
+    sizes.scattering_nu = 2;
+    sizes.irradiance_mu_s = 8;
+    sizes.irradiance_r = 4;
+    auto without = shipped;
+    without.multiple_scattering_tail = false;
+    const auto on = environment::precompute_atmosphere(shipped, sizes);
+    const auto off = environment::precompute_atmosphere(without, sizes);
+    CHECK(on.transmittance == off.transmittance);
+    CHECK(on.single_mie == off.single_mie);
+    REQUIRE(on.scattering.size() == off.scattering.size());
+    REQUIRE(on.irradiance.size() == off.irradiance.size());
+    // The tail adds the higher orders' light (spectrally non-negative; per sRGB channel the fold through the colour
+    // matrix may move either way): the scattering and irradiance tables differ, and their totals grow.
+    double scattering_sum_on = 0.0;
+    double scattering_sum_off = 0.0;
+    for (std::size_t i = 0; i < on.scattering.size(); ++i) {
+        scattering_sum_on += on.scattering[i];
+        scattering_sum_off += off.scattering[i];
+    }
+    double irradiance_sum_on = 0.0;
+    double irradiance_sum_off = 0.0;
+    for (std::size_t i = 0; i < on.irradiance.size(); ++i) {
+        irradiance_sum_on += on.irradiance[i];
+        irradiance_sum_off += off.irradiance[i];
+    }
+    CHECK(on.scattering != off.scattering);
+    CHECK(on.irradiance != off.irradiance);
+    CHECK(scattering_sum_on > scattering_sum_off);
+    CHECK(irradiance_sum_on > irradiance_sum_off);
+}
+
 TEST_CASE("Input hash covers the spectral data", "[atmosphere]") {
     // The checksum of the tabulated data as stored (solar spectrum, ozone cross sections, CMFs, XYZ->sRGB, wavelengths,
     // depolarisation table, AFGL ozone profile) and the input hash of the configuration with the default sizes.
