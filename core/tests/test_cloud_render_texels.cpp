@@ -1,6 +1,7 @@
 // The GPU form of a weather snapshot (M8 weather and clouds, Task 8): linear extinction in two 8-bit channels and the
 // in-cloud optical depth above each layer centre.
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -120,4 +121,53 @@ TEST_CASE("Cloud render texels carry the in-cloud depth above each layer centre"
     // layers integrates to n layer thicknesses (half ramps on both sides); the top layer: ramp + 500 m held.
     const double column = decode_cloud_optical_depth(gpu[texel_offset(0, 1, 1, rows, columns) + 3]);
     CHECK(column == Approx(1000.0 * beta[5] + 2000.0 * beta[18] + 1000.0 * beta[31]).epsilon(0.03));
+}
+
+TEST_CASE("Cloud vertical profile: flat bases, the water path kept", "[weather]") {
+    // A cloud above a clear layer (fraction 0 below, 0.4 above): zero below the middle of the gap minus half the base
+    // transition, the upper value above it plus half of it; the integral over the gap equals the linear interpolation's.
+    for (double gap : {250.0, 625.0, 1000.0}) {
+        const double hw = 0.5 * constants::cloud_base_transition_m / gap;
+        CHECK(cloud_profile_value(0.0, 2e-3, 0.0, 0.4, 0.5 - hw - 1e-3, gap) == 0.0);
+        CHECK(cloud_profile_value(0.0, 2e-3, 0.0, 0.4, 0.5 + hw + 1e-3, gap) == Approx(2e-3));
+        auto integral = [&](double vb, double va, double fb, double fa) {
+            double sum = 0.0;
+            const int n = 100000;
+            for (int i = 0; i < n; ++i) sum += cloud_profile_value(vb, va, fb, fa, (i + 0.5) / n, gap) / n;
+            return sum;
+        };
+        for (const auto& c : {std::array<double, 4>{0.0, 2e-3, 0.0, 0.4}, std::array<double, 4>{1e-3, 2e-3, 0.2, 0.4},
+                              std::array<double, 4>{2e-3, 0.0, 0.4, 0.0}, std::array<double, 4>{1e-3, 1e-3, 0.4, 0.4}}) {
+            CHECK(integral(c[0], c[1], c[2], c[3]) == Approx(0.5 * (c[0] + c[1])).epsilon(1e-4));
+        }
+    }
+    // Tops (thinning upward) and uniform decks: the linear interpolation.
+    CHECK(cloud_profile_value(2e-3, 0.0, 0.4, 0.0, 0.3, 250.0) == Approx(0.7 * 2e-3));
+    CHECK(cloud_profile_value(1e-3, 1e-3, 1.0, 1.0, 0.3, 250.0) == Approx(1e-3));
+    // Never negative.
+    for (double x = 0.0; x <= 1.0; x += 0.01) CHECK(cloud_profile_value(1e-3, 3e-3, 0.1, 0.5, x, 250.0) >= 0.0);
+}
+
+TEST_CASE("Cloud ice share texels", "[weather]") {
+    const int rows = 2, columns = 3;
+    std::vector<std::uint8_t> texels(static_cast<std::size_t>(weather_layer_count) * rows * columns * 4, 0);
+    const std::size_t liquid = texel_offset(5, 0, 0, rows, columns), ice = texel_offset(30, 1, 2, rows, columns),
+                      mixed = texel_offset(12, 1, 1, rows, columns);
+    texels[liquid] = texels[ice] = texels[mixed] = encode_weather_cloud_fraction(1.0);
+    texels[liquid + 1] = encode_weather_water(3e-4);
+    texels[ice + 2] = encode_weather_water(2e-5);
+    texels[mixed + 1] = encode_weather_water(1e-4);
+    texels[mixed + 2] = encode_weather_water(1e-4);
+    const WeatherSnapshot snapshot = WeatherSnapshot::from_parts({}, rows, columns,
+                                                                 std::vector<float>(rows * columns, 0.0f), texels);
+    const std::vector<std::uint8_t> share = cloud_render_ice_texels(snapshot);
+    REQUIRE(share.size() == texels.size() / 4);
+    CHECK(share[liquid / 4] == 0);
+    CHECK(share[ice / 4] == 255);
+    // Equal water: ice extinction is rho_w r_l / (rho_ice r_i) of the liquid's.
+    const double ratio = cloud_extinction_per_m(0.0, decode_weather_water(texels[mixed + 2])) /
+                         (cloud_extinction_per_m(decode_weather_water(texels[mixed + 1]), 0.0) +
+                          cloud_extinction_per_m(0.0, decode_weather_water(texels[mixed + 2])));
+    CHECK(share[mixed / 4] == static_cast<int>(std::lround(255.0 * ratio)));
+    CHECK(share[texel_offset(0, 0, 0, rows, columns) / 4] == 0);  // clear
 }

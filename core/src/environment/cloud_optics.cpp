@@ -16,6 +16,10 @@ namespace {
 namespace c = constants;
 
 constexpr double four_pi = 4.0 * c::pi;
+// The entry-surface cosine (cloud_optics.hpp, "3D Sun light"): regulariser of the ratio at the cloud surface [E: one
+// unscaled optical depth = one mean free path] and the smallest cosine (no division by ~0 in the slab solution).
+constexpr double entry_regulariser = 1.0;
+constexpr double entry_cosine_min = 0.02;
 
 // Fit of Jendersie & d'Eon 2023 (cloud_optics.hpp), droplet diameter in um, valid 5-50 um.
 constexpr double fit_min_diameter_um = 5.0, fit_max_diameter_um = 50.0;
@@ -190,6 +194,69 @@ double cloud_sky_scattering_source(double view_up_cos, double depth_from_top, do
     const double sigma = 2.0 - transmittance - 2.0 * de.gamma1 * transmittance * t;  // 1 + R - 2 gamma1 T t'
     const double i0 = sigma / c::two_pi, i1 = 3.0 * -transmittance / four_pi;
     return k * (i0 + de.g_scaled * view_up_cos * i1);
+}
+
+double cloud_entry_cosine(double sun_cos_zenith, double sun_optical_depth, double vertical_depth_from_top) {
+    const double mu0 = std::clamp(sun_cos_zenith, -1.0, 1.0);
+    const double ratio = (std::max(0.0, vertical_depth_from_top) + entry_regulariser * mu0) /
+                         (std::max(0.0, sun_optical_depth) + entry_regulariser);
+    return std::clamp(ratio, std::max(mu0, entry_cosine_min), 1.0);
+}
+
+double cloud_scattering_source_3d(const math::Vec3& sun_direction, const math::Vec3& view_propagation,
+                                  const math::Vec3& up, double sun_optical_depth, double vertical_depth_from_top,
+                                  double column_optical_depth) {
+    const double mu0 = std::clamp(math::dot(sun_direction, up), -1.0, 1.0);
+    const double mu_e = cloud_entry_cosine(mu0, sun_optical_depth, vertical_depth_from_top);
+    // The entry surface's normal: up turned toward the Sun by acos(mu0) - acos(mu_e) in the plane of up and the Sun.
+    math::Vec3 normal = up;
+    const math::Vec3 across = sun_direction - up * mu0;
+    const double across_norm = math::norm(across);
+    if (across_norm > 1e-9) {
+        const double turn = std::acos(mu0) - std::acos(mu_e);
+        normal = up * std::cos(turn) + across * (std::sin(turn) / across_norm);
+    }
+    const double tau_s = std::max(0.0, sun_optical_depth);
+    const double depth = mu_e * tau_s;
+    return cloud_scattering_source(-math::dot(sun_direction, view_propagation), math::dot(view_propagation, normal),
+                                   mu_e, tau_s, depth, std::max(column_optical_depth, depth));
+}
+
+double cloud_light_march_ratio(const CloudLightMarch& march) {
+    const int n = std::max(march.near_samples, 1);
+    const double target = march.near_length_m / std::max(march.first_m, 1e-9);  // (r^n - 1) / (r - 1)
+    if (target <= n) return 1.0;
+    double lo = 1.0, hi = 2.0;
+    auto sum = [n](double r) { return (std::pow(r, n) - 1.0) / (r - 1.0); };
+    while (sum(hi) < target) hi *= 2.0;
+    for (int i = 0; i < 100; ++i) {
+        const double mid = 0.5 * (lo + hi);
+        (sum(mid) < target ? lo : hi) = mid;  // mid > 1: lo starts at 1, hi >= 2
+    }
+    return 0.5 * (lo + hi);
+}
+
+double cloud_light_optical_depth(const std::function<double(double)>& near_extinction,
+                                 const std::function<double(double)>& far_extinction, const CloudLightMarch& march,
+                                 double jitter) {
+    const double ratio = cloud_light_march_ratio(march);
+    const int n = std::max(march.near_samples, 1);
+    // First interval so that the n geometric intervals end exactly at near_length.
+    const double first = ratio == 1.0 ? march.near_length_m / n
+                                      : march.near_length_m * (ratio - 1.0) / (std::pow(ratio, n) - 1.0);
+    double tau = 0.0, start = 0.0, length = first;
+    for (int i = 0; i < n; ++i) {
+        tau += near_extinction(start + jitter * length) * length;
+        start += length;
+        length *= ratio;
+    }
+    if (march.far_samples > 0 && march.far_length_m > march.near_length_m) {
+        const double step = (march.far_length_m - march.near_length_m) / march.far_samples;
+        for (int i = 0; i < march.far_samples; ++i) {
+            tau += far_extinction(march.near_length_m + (i + jitter) * step) * step;
+        }
+    }
+    return tau;
 }
 
 double slab_reflected_radiance(double optical_depth, double sun_cos_zenith, double view_cos_zenith,

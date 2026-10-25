@@ -138,5 +138,15 @@ inline constexpr double cloud_droplet_effective_radius_m = 10e-6;
 // contents of 1e-6..1e-5 kg/m^3), Stephens, Tsay, Stackhouse & Flatau 1990, J. Atmos. Sci. 47, 1742; Fu 1996,
 // J. Climate 9, 2058 for the 3 IWC / (2 rho_ice r_eff) form of the visible extinction].
 inline constexpr double cloud_ice_effective_radius_m = 30e-6;
+// Width of the edge zone of a cumulus, over which the liquid water falls from the cloud's interior value to zero by
+// entrainment of dry air [E: 100 m, the upper end of the tens of metres to ~100 m of the edge / transition zone that
+// aircraft cross at shallow-cumulus edges, Katzwinkel, Siebert, Heus & Shaw 2014, J. Atmos. Sci. 71, 2810; the
+// subsiding shell around such clouds, Heus & Jonker 2008, J. Atmos. Sci. 65, 1003]. The order of magnitude is
+// measured, the single value is an estimate (cloud_noise.hpp: the soft edge ramp).
+inline constexpr double cloud_edge_width_m = 100.0;
+// Thickness of the transition at a cloud base [E: 50 m, an estimate; the base of a convective cloud is the lifting
+// condensation level of the rising air, flat and sharp over the cloud (Wallace & Hobbs 2006, Atmospheric Science, 2nd
+// ed., Academic Press, sect. 3.5)] (cloud_render_texels.hpp: the vertical profile rule).
+inline constexpr double cloud_base_transition_m = 50.0;
 
 }  // namespace starsim::constants

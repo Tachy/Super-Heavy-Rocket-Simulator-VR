@@ -71,6 +71,26 @@
 // shader's background transmittance); the sky light kept in the forward peak (exp(-(1 - f) tau_v) - exp(-tau_v)) / pi
 // is not added (small beside the Sun's TMS term). Integrated over the hemisphere it gives R + T = 1, R within 1 % of
 // the two-stream diffuse R for tau >= 10 and 26 % above it at tau 1 (test "The sky scattering source ...").
+// 3D Sun light (task 8 amendment): the shader does not take the Sun's optical depth tau_s from the local column
+// (t / mu0, plane-parallel) but marches it toward the Sun through the actual 3D density (the shapes, the soft edges,
+// the detail near the camera; cloud_light_optical_depth below), and solves the plane-parallel problem of the surface the
+// Sun's light entered through rather than of the horizontal column top (cloud_scattering_source_3d):
+//   mu_e = clamp((t_v + eps mu0) / (tau_s + eps), mu_min, 1),   t = mu_e tau_s,
+// t_v the vertical in-cloud depth below the column top (the A channel), eps = 1 [E] a regulariser of the ratio at the
+// cloud surface, mu_min = 0.02. In a horizontally uniform slab tau_s = t_v / mu0, so mu_e = mu0 and t = t_v exactly:
+// the column model. Where the light came in through a flank (tau_s << t_v / mu0: a cumulus side facing the Sun, a
+// base lit by a Sun below the local horizon) mu_e grows toward 1: the entry surface faces the Sun, the diffuse field
+// is that of a slab under (nearly) normal incidence - the side gets its true incidence instead of mu0 E. The diffuse
+// field's axis (the u_z of the I1 term) turns from up toward the Sun by the same angle (acos mu0 - acos mu_e, in the
+// plane of up and the Sun); the column depth stays the vertical one (at least t). Points shadowed by other cloud keep
+// their large tau_s: deep in the solution, dark. This is a tilted independent column approximation (columns along the
+// light's entry; cf. Varnai & Davies 1999, J. Atmos. Sci. 56, 4206): per column the plane-parallel solution conserves
+// energy, the 3D field does not exactly (no horizontal transport between columns: light leaking out of a small
+// cloud's sides is not removed from its interior nor added to its neighbours). The sky term keeps the vertical column.
+// The light march: from the sample toward the Sun, n_near intervals over near_length growing geometrically from
+// first_m (ratio r: first_m (r^n - 1) / (r - 1) = near_length), then n_far equal intervals to far_length (the shader:
+// the cloud top, the grid-mean field without shapes), one sample per interval at the same fraction (jitter) of every
+// interval, weighted by its length: stratified, unbiased over the jitter, exact for a uniform medium.
 // slab_reflected_radiance() is the closed-form integral of J along an upward view ray out of the top of a slab
 // (t-integrals of exp(-t'/mu) times 1, t', exp(-t'/mu0)); slab_reflectance() its hemisphere integral (Gauss-Legendre
 // 64 x 64), the model's plane-parallel albedo.
@@ -89,6 +109,8 @@
 //     attenuated on the scaled depths, so the aureole around the Sun seen through a thick cloud is too bright
 //     (Nakajima & Tanaka's IMS correction is not modelled). At thin cloud edges (tau << 1) the TMS term is the exact
 //     single scattering (silver lining).
+
+#include <functional>
 
 #include "starsim/environment/weather_snapshot.hpp"
 #include "starsim/math/vec3.hpp"
@@ -123,6 +145,29 @@ double cloud_scattering_source(double cos_theta, double view_up_cos, double sun_
 // The sky's scattering source (header, "Sky light"): J per unit horizontal sky irradiance on the column top and unit
 // (unscaled) optical depth along the view ray, attenuated like the Sun's (cloud_transport_scale()).
 double cloud_sky_scattering_source(double view_up_cos, double depth_from_top, double column_optical_depth);
+// The Sun's source with the 3D Sun depth (header, "3D Sun light"). sun_direction: toward the Sun (unit),
+// view_propagation: the view ray's propagation direction toward the camera (unit), up: the local up; depths unscaled:
+// sun_optical_depth marched, vertical_depth_from_top / column_optical_depth of the column (as cloud_scattering_source).
+double cloud_scattering_source_3d(const math::Vec3& sun_direction, const math::Vec3& view_propagation,
+                                  const math::Vec3& up, double sun_optical_depth, double vertical_depth_from_top,
+                                  double column_optical_depth);
+// The entry-surface cosine mu_e of the header (exposed for the shader port's check).
+double cloud_entry_cosine(double sun_cos_zenith, double sun_optical_depth, double vertical_depth_from_top);
+
+// The light march (header): geometric intervals, then equal ones.
+struct CloudLightMarch {
+    double first_m = 20.0;       // first near interval
+    double near_length_m = 6000.0;
+    int near_samples = 6;
+    double far_length_m = 0.0;   // <= near_length_m: no far part
+    int far_samples = 0;
+};
+// Ratio r of the geometric near intervals (bisection; 1 for equal intervals).
+double cloud_light_march_ratio(const CloudLightMarch& march);
+// Optical depth along the light ray: near_extinction / far_extinction [1/m] at a distance [m] from the sample.
+double cloud_light_optical_depth(const std::function<double(double)>& near_extinction,
+                                 const std::function<double(double)>& far_extinction, const CloudLightMarch& march,
+                                 double jitter);
 // Reflected radiance [1/sr per unit Sun irradiance] out of the top of a plane-parallel slab (black surface): the source
 // integrated in closed form. relative_azimuth_rad is the angle between the horizontal propagation directions of the
 // sunlight and the reflected light (0 = forward side, camera opposite the Sun). 0 for the Sun below the horizon.

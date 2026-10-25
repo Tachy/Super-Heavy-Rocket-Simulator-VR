@@ -365,6 +365,173 @@ TEST_CASE("Noise coverage is preserved", "[weather]") {
     CHECK(again.detail_rgba == noise.detail_rgba);
 }
 
+TEST_CASE("Soft cloud edges keep the grid-mean water", "[weather]") {
+    // The edge ramp (cloud_noise.hpp, soft edges): density = mean / m(cf) x ramp((s - t(cf)) / w). Over the filtered
+    // shape value at uniform random positions (2e6, as the coverage test) the covered fraction stays cf and the mean of
+    // ramp / m is 1 (the grid-mean water is kept) within 2 %.
+    const CloudNoise noise = generate_cloud_noise();
+    const double w = noise.edge_width_value;
+    std::printf("edge width %.4f in shape value = %.0f m at the median gradient\n", w, c::cloud_edge_width_m);
+    CHECK(w > 0.005);
+    CHECK(w < 0.3);
+    CHECK(noise.edge_mean_factor[0] == 0.0f);
+    for (int i = 1; i < 256; ++i) {
+        CHECK(noise.edge_mean_factor[static_cast<std::size_t>(i)] >= noise.edge_mean_factor[static_cast<std::size_t>(i - 1)]);
+        CHECK(noise.edge_mean_factor[static_cast<std::size_t>(i)] <= i / 255.0 + 1e-6);
+    }
+    const int n = noise.shape_size;
+    std::mt19937_64 rng(43);
+    std::uniform_real_distribution<double> unit(0.0, 1.0);
+    std::vector<float> filtered(2000000);
+    for (float& v : filtered) v = filtered_shape_value(noise, unit(rng) * n, unit(rng) * n, unit(rng) * n);
+    for (double cf : {0.05, 0.1, 0.3, 0.5, 0.9, 1.0}) {
+        const auto index = static_cast<std::size_t>(std::lround(cf * 255.0));
+        const double t = noise.coverage_threshold[index], m = noise.edge_mean_factor[index];
+        double water = 0.0;
+        std::size_t covered = 0;
+        for (float v : filtered) {
+            const double ramp = cloud_edge_ramp((v - t) / w);
+            water += ramp / m;
+            covered += v > t ? 1 : 0;
+        }
+        water /= filtered.size();
+        std::printf("cf %.2f: m %.4f, mean water / grid mean %.4f, covered %.4f\n", cf, m, water,
+                    static_cast<double>(covered) / filtered.size());
+        CHECK(water == Approx(1.0).epsilon(0.02));
+        CHECK(static_cast<double>(covered) / filtered.size() == Approx(index / 255.0).margin(0.002));
+        CHECK(m < index / 255.0);  // the edge zone holds less water than the interior
+    }
+    CHECK(cloud_edge_ramp(-0.5) == 0.0);
+    CHECK(cloud_edge_ramp(0.5) == Approx(0.5));
+    CHECK(cloud_edge_ramp(2.0) == 1.0);
+}
+
+TEST_CASE("Blue noise mask is uniform and blue", "[weather]") {
+    const int size = 64;
+    const std::vector<std::uint8_t> mask = generate_blue_noise(size);
+    REQUIRE(mask.size() == static_cast<std::size_t>(size) * size);
+    std::array<int, 256> histogram{};
+    for (std::uint8_t v : mask) ++histogram[v];
+    for (int count : histogram) CHECK(count == size * size / 256);  // every value equally often
+    // Blue: the means of 4 x 4 blocks (wrapping) vary far less than white noise's ((1/12) / 16 for uniform values):
+    // the error has no low frequencies.
+    double sum_sq = 0.0;
+    int blocks = 0;
+    for (int y = 0; y < size; ++y) {
+        for (int x = 0; x < size; ++x) {
+            double mean = 0.0;
+            for (int dy = 0; dy < 4; ++dy) {
+                for (int dx = 0; dx < 4; ++dx) mean += mask[static_cast<std::size_t>((y + dy) % size) * size + (x + dx) % size];
+            }
+            mean = mean / 16.0 / 255.0 - 0.5;
+            sum_sq += mean * mean;
+            ++blocks;
+        }
+    }
+    const double variance = sum_sq / blocks, white = 1.0 / 12.0 / 16.0;
+    std::printf("blue noise 4x4 block-mean variance %.6f (white %.6f)\n", variance, white);
+    CHECK(variance < 0.25 * white);  // measured 0.18
+    CHECK(generate_blue_noise(size) == mask);  // deterministic
+}
+
+TEST_CASE("3D Sun light on an isolated cumulus", "[weather]") {
+    // A cumulus-shaped blob: a sphere of radius 600 m with the soft edge ramp over the outer 100 m, in-cloud extinction
+    // 0.004 /m (tau 4.4 across). The Sun 30 deg above the horizon from +x. Points 50 m inside the sunlit and the shadowed
+    // flank at the sphere's middle height; the camera looks at each from the Sun's side (backscatter, 150 deg).
+    const double radius = 600.0, beta = 0.004, edge = c::cloud_edge_width_m;
+    const math::Vec3 sun = {std::cos(30.0 * c::deg_to_rad), 0.0, std::sin(30.0 * c::deg_to_rad)};
+    auto extinction_at = [&](const math::Vec3& p) {
+        return beta * cloud_edge_ramp((radius - math::norm(p)) / edge);
+    };
+    // Optical depth along the Sun ray by fine quadrature (the reference).
+    auto exact_tau = [&](const math::Vec3& from) {
+        double tau = 0.0;
+        const double ds = 0.05;
+        for (double s = 0.5 * ds; s < 2.0 * radius; s += ds) tau += extinction_at(from + sun * s) * ds;
+        return tau;
+    };
+    const math::Vec3 sunlit = sun * (radius - 50.0), shadowed = sun * -(radius - 50.0);
+    CloudLightMarch march;
+    march.first_m = 20.0;
+    march.near_length_m = 6000.0;
+    march.near_samples = 6;
+    auto marched = [&](const math::Vec3& from, double jitter, const CloudLightMarch& m) {
+        auto along = [&](double s) { return extinction_at(from + sun * s); };
+        return cloud_light_optical_depth(along, along, m, jitter);
+    };
+    // Unbiased over the jitter (what the per-pixel jitter averages): the mean optical depth over 4096 stratified
+    // jitters equals the integral within 1 %, so the shadow side's transmittance exp(-mean tau) is Beer-Lambert along
+    // the Sun ray within 2 %. Printed: the per-jitter spread and the mean transmittance E[exp(-tau)] (Jensen: brighter).
+    const double tau_shadow = exact_tau(shadowed);
+    INFO("shadowed tau " << tau_shadow);
+    REQUIRE(tau_shadow > 3.0);
+    for (const math::Vec3& p : {sunlit, shadowed}) {
+        double mean = 0.0, mean_t = 0.0, lo = 1e9, hi = 0.0;
+        for (int j = 0; j < 4096; ++j) {
+            const double tau = marched(p, (j + 0.5) / 4096.0, march);
+            mean += tau;
+            mean_t += std::exp(-tau);
+            lo = std::min(lo, tau);
+            hi = std::max(hi, tau);
+        }
+        mean /= 4096.0;
+        mean_t /= 4096.0;
+        const double exact = exact_tau(p);
+        std::printf("Sun depth exact %.4f, 6-sample march mean %.4f (%.3f .. %.3f), T %.4f, mean T %.4f\n", exact,
+                    mean, lo, hi, std::exp(-exact), mean_t);
+        CHECK(mean == Approx(exact).epsilon(0.01));
+        CHECK(std::exp(-mean) == Approx(std::exp(-exact)).epsilon(0.02));
+    }
+    // The geometric near intervals end at near_length.
+    const double r = cloud_light_march_ratio(march);
+    CHECK(march.first_m * (std::pow(r, 6) - 1.0) / (r - 1.0) == Approx(6000.0).epsilon(1e-9));
+
+    // The source on a thick cumulus (in-cloud extinction 0.03 /m, tau 36 across) under a low Sun (10 deg) and a Sun
+    // 3 deg below the local horizon (sunset), the camera on the Sun's side looking at the flank (view propagation
+    // toward the camera = the horizontal direction to the Sun). Points 30 m inside the flank at the middle height.
+    const math::Vec3 up = {0.0, 0.0, 1.0};
+    const double thick = 0.03;
+    auto thick_at = [&](const math::Vec3& p) { return thick * cloud_edge_ramp((radius - math::norm(p)) / edge); };
+    auto integrate = [&](const math::Vec3& from, const math::Vec3& dir) {
+        double tau = 0.0;
+        const double ds = 0.05;
+        for (double s = 0.5 * ds; s < 2.0 * radius; s += ds) tau += thick_at(from + dir * s) * ds;
+        return tau;
+    };
+    for (double elevation_deg : {10.0, -3.0}) {
+        const double e = elevation_deg * c::deg_to_rad;
+        const math::Vec3 to_sun = {std::cos(e), 0.0, std::sin(e)};
+        const math::Vec3 lit_point = math::Vec3{1.0, 0.0, 0.0} * (radius - 30.0);
+        const math::Vec3 dark_point = math::Vec3{-1.0, 0.0, 0.0} * (radius - 30.0);
+        const math::Vec3 view = {1.0, 0.0, 0.0};
+        const double column = integrate(math::Vec3{0.0, 0.0, -radius}, up);
+        auto source = [&](const math::Vec3& p) {
+            return cloud_scattering_source_3d(to_sun, view, up, integrate(p, to_sun), integrate(p, up), column);
+        };
+        const double lit = source(lit_point), dark = source(dark_point);
+        // The column model (the plane-parallel top incidence mu0, the Sun's depth from the vertical one).
+        const double flat = cloud_scattering_source(-math::dot(to_sun, view), 0.0, std::sin(e),
+                                                    integrate(lit_point, up) / std::max(std::sin(e), 1e-3),
+                                                    integrate(lit_point, up), column);
+        std::printf("Sun %+.0f deg: source sunlit flank %.5f, shadowed %.5f, column model %.5f per sr\n",
+                    elevation_deg, lit, dark, flat);
+        CHECK(lit > 3.0 * dark);
+        CHECK(lit > 2.0 * flat);  // the flank's true incidence, not mu0 E (and lit below the local horizon)
+        CHECK(cloud_entry_cosine(std::sin(e), integrate(lit_point, to_sun), integrate(lit_point, up)) >
+              std::max(std::sin(e), 0.0) + 0.4);  // measured 0.78 / 0.57
+    }
+    // A horizontally uniform slab: the 3D source is the column source (tau_s = t / mu0 gives mu_e = mu0).
+    for (double t : {0.5, 2.0, 8.0}) {
+        const double mu0 = 0.6;
+        const math::Vec3 to_sun = {std::sqrt(1.0 - mu0 * mu0), 0.0, mu0};
+        const math::Vec3 view = math::normalized(math::Vec3{-0.3, 0.2, 0.8});
+        CHECK(cloud_entry_cosine(mu0, t / mu0, t) == Approx(mu0).epsilon(1e-12));
+        CHECK(cloud_scattering_source_3d(to_sun, view, up, t / mu0, t, 10.0) ==
+              Approx(cloud_scattering_source(-math::dot(to_sun, view), math::dot(view, up), mu0, t / mu0, t, 10.0))
+                  .epsilon(1e-9));
+    }
+}
+
 TEST_CASE("Sun transmittance through a uniform slab", "[weather]") {
     // One 1-km layer (1-2 km: four whole 250 m layers) of liquid water, everywhere. The snapshot's profile is linear
     // between layer centres, so its vertical integral is the slab's (equal layer thickness around it).

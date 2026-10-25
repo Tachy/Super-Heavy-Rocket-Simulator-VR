@@ -7,6 +7,7 @@
 #include <cstddef>
 
 #include "parallel_rows.hpp"
+#include "starsim/math/constants.hpp"
 
 namespace starsim::environment {
 
@@ -128,12 +129,14 @@ std::vector<std::uint8_t> rank_equalise(const std::vector<float>& values) {
     return codes;
 }
 
-// coverage_threshold[i]: the quantile of the trilinearly filtered R channel with fraction i / 255 above it (header).
-// Distribution: filtered_samples_per_cell jittered positions in every cell between texel centres (uniform over the
-// torus). A cell whose 8 corners share one code filters to exactly that code: a point mass at k / 255, counted apart.
-// The other samples go into fine bins on [0, 1] and are taken as uniform inside a bin.
-std::array<float, 256> coverage_thresholds(const std::vector<std::uint8_t>& rgba, int size) {
-    const std::size_t bins = 255 * filtered_bins_per_code;
+// The distribution of the trilinearly filtered R channel: filtered_samples_per_cell jittered positions in every cell
+// between texel centres (uniform over the torus). A cell whose 8 corners share one code filters to exactly that code:
+// a point mass at k / 255, counted apart (counts[bins + k]). The other samples go into fine bins on [0, 1]
+// (counts[0 .. bins)) and are taken as uniform inside a bin.
+constexpr std::size_t filtered_bins = 255 * filtered_bins_per_code;
+
+std::vector<double> filtered_shape_histogram(const std::vector<std::uint8_t>& rgba, int size) {
+    const std::size_t bins = filtered_bins;
     // Per z row: bins continuous counts, then 256 point masses.
     std::vector<std::vector<std::uint32_t>> row_counts(static_cast<std::size_t>(size));
     detail::for_each_row(size, [&](int z) {
@@ -177,7 +180,14 @@ std::array<float, 256> coverage_thresholds(const std::vector<std::uint8_t>& rgba
     for (const auto& row : row_counts) {
         for (std::size_t b = 0; b < row.size(); ++b) counts[b] += row[b];
     }
-    const double total = static_cast<double>(size) * size * size * filtered_samples_per_cell;
+    return counts;
+}
+
+// coverage_threshold[i]: the quantile of the filtered R channel with fraction i / 255 above it (header).
+std::array<float, 256> coverage_thresholds(const std::vector<double>& counts) {
+    const std::size_t bins = filtered_bins;
+    double total = 0.0;
+    for (double c : counts) total += c;
     std::array<float, 256> t{};
     t[0] = static_cast<float>(255.5 / 255.0);   // nothing above (filtered values are <= 1)
     t[255] = static_cast<float>(-0.5 / 255.0);  // everything above
@@ -218,7 +228,148 @@ std::array<float, 256> coverage_thresholds(const std::vector<std::uint8_t>& rgba
     return t;
 }
 
+// Median horizontal gradient of the R channel [value per texel]: central differences in x and y over every texel.
+double median_horizontal_gradient(const std::vector<std::uint8_t>& rgba, int size) {
+    std::vector<float> gradients(static_cast<std::size_t>(size) * size * size);
+    auto at = [&](int x, int y, int z) {
+        return rgba[channels * ((static_cast<std::size_t>(z) * size + wrap(y, size)) * size + wrap(x, size))] / 255.0;
+    };
+    detail::for_each_row(size, [&](int z) {
+        for (int y = 0; y < size; ++y) {
+            for (int x = 0; x < size; ++x) {
+                const double gx = 0.5 * (at(x + 1, y, z) - at(x - 1, y, z));
+                const double gy = 0.5 * (at(x, y + 1, z) - at(x, y - 1, z));
+                gradients[(static_cast<std::size_t>(z) * size + y) * size + x] =
+                    static_cast<float>(std::sqrt(gx * gx + gy * gy));
+            }
+        }
+    });
+    const auto middle = gradients.begin() + static_cast<std::ptrdiff_t>(gradients.size() / 2);
+    std::nth_element(gradients.begin(), middle, gradients.end());
+    return *middle;
+}
+
+// edge_mean_factor[i] = E[ramp((s - t_i) / w)] over the filtered distribution (header, soft edges): bins at their
+// centres (a bin is 1/4080 wide, w ~ 0.05: ~200 bins across the ramp), point masses at their codes.
+std::array<float, 256> edge_mean_factors(const std::vector<double>& counts, const std::array<float, 256>& thresholds,
+                                         double width) {
+    double total = 0.0;
+    for (double c : counts) total += c;
+    std::array<float, 256> m{};
+    for (int i = 0; i < 256; ++i) {
+        const double t = thresholds[static_cast<std::size_t>(i)];
+        double sum = 0.0;
+        for (std::size_t b = 0; b < filtered_bins; ++b) {
+            if (counts[b] > 0.0) sum += counts[b] * cloud_edge_ramp(((b + 0.5) / filtered_bins - t) / width);
+        }
+        for (int k = 0; k < 256; ++k) {
+            const double mass = counts[filtered_bins + static_cast<std::size_t>(k)];
+            if (mass > 0.0) sum += mass * cloud_edge_ramp((k / 255.0 - t) / width);
+        }
+        m[static_cast<std::size_t>(i)] = static_cast<float>(sum / total);
+    }
+    return m;
+}
+
+// Gaussian energy of a binary pattern on the torus (void-and-cluster): energy[p] = sum over set q of g(p - q).
+class BlueNoiseEnergy {
+public:
+    explicit BlueNoiseEnergy(int size) : size_(size), kernel_(static_cast<std::size_t>(size) * size),
+                                         energy_(static_cast<std::size_t>(size) * size, 0.0) {
+        constexpr double sigma = 1.5;
+        for (int dy = 0; dy < size; ++dy) {
+            for (int dx = 0; dx < size; ++dx) {
+                const int wx = std::min(dx, size - dx), wy = std::min(dy, size - dy);
+                kernel_[static_cast<std::size_t>(dy) * size + dx] =
+                    std::exp(-(wx * wx + wy * wy) / (2.0 * sigma * sigma));
+            }
+        }
+    }
+    void toggle(int p, double sign) {
+        const int px = p % size_, py = p / size_;
+        for (int y = 0; y < size_; ++y) {
+            for (int x = 0; x < size_; ++x) {
+                const int dx = wrap(x - px, size_), dy = wrap(y - py, size_);
+                energy_[static_cast<std::size_t>(y) * size_ + x] += sign * kernel_[static_cast<std::size_t>(dy) * size_ + dx];
+            }
+        }
+    }
+    // The set pixel of the highest energy (tightest cluster) or the unset one of the lowest (largest void).
+    int extreme(const std::vector<std::uint8_t>& set, bool tightest_cluster) const {
+        int best = -1;
+        for (int p = 0; p < size_ * size_; ++p) {
+            if ((set[static_cast<std::size_t>(p)] != 0) != tightest_cluster) continue;
+            const double e = energy_[static_cast<std::size_t>(p)];
+            if (best < 0 || (tightest_cluster ? e > energy_[static_cast<std::size_t>(best)]
+                                              : e < energy_[static_cast<std::size_t>(best)])) {
+                best = p;
+            }
+        }
+        return best;
+    }
+
+private:
+    int size_;
+    std::vector<double> kernel_, energy_;
+};
+
 }  // namespace
+
+double cloud_edge_ramp(double x) {
+    const double t = std::clamp(x, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+
+std::vector<std::uint8_t> generate_blue_noise(int size) {
+    const int count = size * size;
+    // Initial pattern: 10 % of the pixels from the hash, then relaxed (move the tightest cluster to the largest void
+    // until that is the same pixel).
+    std::vector<std::uint8_t> set(static_cast<std::size_t>(count), 0);
+    BlueNoiseEnergy energy(size);
+    const int initial = count / 10;
+    std::uint32_t h = 0x5u;
+    for (int placed = 0; placed < initial;) {
+        h = hash32(h);
+        const int p = static_cast<int>(h % static_cast<std::uint32_t>(count));
+        if (set[static_cast<std::size_t>(p)]) continue;
+        set[static_cast<std::size_t>(p)] = 1;
+        energy.toggle(p, 1.0);
+        ++placed;
+    }
+    for (int iteration = 0; iteration < count; ++iteration) {
+        const int cluster = energy.extreme(set, true);
+        set[static_cast<std::size_t>(cluster)] = 0;
+        energy.toggle(cluster, -1.0);
+        const int void_pixel = energy.extreme(set, false);
+        set[static_cast<std::size_t>(void_pixel)] = 1;
+        energy.toggle(void_pixel, 1.0);
+        if (void_pixel == cluster) break;
+    }
+    std::vector<int> rank(static_cast<std::size_t>(count), 0);
+    // Phase 1: the initial pattern's pixels ranked by removing the tightest cluster (rank initial - 1 down to 0).
+    {
+        std::vector<std::uint8_t> pattern = set;
+        BlueNoiseEnergy e = energy;
+        for (int r = initial - 1; r >= 0; --r) {
+            const int cluster = e.extreme(pattern, true);
+            pattern[static_cast<std::size_t>(cluster)] = 0;
+            e.toggle(cluster, -1.0);
+            rank[static_cast<std::size_t>(cluster)] = r;
+        }
+    }
+    // Phases 2 and 3: fill the largest void, ranks initial .. count - 1.
+    for (int r = initial; r < count; ++r) {
+        const int void_pixel = energy.extreme(set, false);
+        set[static_cast<std::size_t>(void_pixel)] = 1;
+        energy.toggle(void_pixel, 1.0);
+        rank[static_cast<std::size_t>(void_pixel)] = r;
+    }
+    std::vector<std::uint8_t> mask(static_cast<std::size_t>(count));
+    for (int p = 0; p < count; ++p) {
+        mask[static_cast<std::size_t>(p)] = static_cast<std::uint8_t>(static_cast<long>(rank[static_cast<std::size_t>(p)]) * 256 / count);
+    }
+    return mask;
+}
 
 double tileable_perlin(const math::Vec3& p, int period) {
     const double fx = std::floor(p.x), fy = std::floor(p.y), fz = std::floor(p.z);
@@ -277,7 +428,13 @@ CloudNoise generate_cloud_noise() {
     });
     const std::vector<std::uint8_t> shape = rank_equalise(perlin_worley);
     for (std::size_t i = 0; i < shape_texels; ++i) noise.shape_rgba[channels * i] = shape[i];
-    noise.coverage_threshold = coverage_thresholds(noise.shape_rgba, n);
+    const std::vector<double> histogram = filtered_shape_histogram(noise.shape_rgba, n);
+    noise.coverage_threshold = coverage_thresholds(histogram);
+    const double texel_m = cloud_shape_tile_horizontal_m / n;
+    noise.edge_width_value =
+        static_cast<float>(constants::cloud_edge_width_m / texel_m * median_horizontal_gradient(noise.shape_rgba, n));
+    noise.edge_mean_factor = edge_mean_factors(histogram, noise.coverage_threshold, noise.edge_width_value);
+    noise.blue_noise = generate_blue_noise(noise.blue_noise_size);
 
     noise.detail_rgba.assign(static_cast<std::size_t>(d) * d * d * channels, 0);
     detail::for_each_row(d, [&](int z) {
