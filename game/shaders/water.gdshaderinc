@@ -53,6 +53,17 @@ float water_fresnel(float cos_theta) {
 	return r0 + (1.0 - r0) * pow(1.0 - clamp(cos_theta, 0.0, 1.0), 5.0);
 }
 
+// Fresnel reflectance averaged over the unresolved slopes (per-axis slope deviation sigma_v along the view) [S: Bruneton,
+// Neyret & Holzschuch 2010, Comput. Graph. Forum 29(2), the fitted mean Fresnel pow(1 - cos, 5 exp(-2.69 s)) /
+// (1 + 22.7 s^1.5)], with Schlick's r0 kept so that sigma_v = 0 gives water_fresnel. At grazing view a rough sea
+// reflects ~1/2, not all, of the sky: the far sea is darker than the sky above the horizon (a visible sea horizon).
+float water_mean_fresnel(float cos_theta, float sigma_v) {
+	float r0 = (WATER_REFRACTIVE_INDEX - 1.0) / (WATER_REFRACTIVE_INDEX + 1.0);
+	r0 *= r0;
+	float mean = pow(1.0 - clamp(cos_theta, 0.0, 1.0), 5.0 * exp(-2.69 * sigma_v)) / (1.0 + 22.7 * pow(sigma_v, 1.5));
+	return r0 + (1.0 - r0) * mean;
+}
+
 // Gerstner normal of the wave octaves at a fragment offset from the camera (body-local render metres), around the flat
 // sea normal n. The phase field is k . x: its gradient along the surface is k's horizontal part. Gerstner normal
 // (GPU Gems 1, ch. 1, eq. 12): n (1 - sum Q_i k_i A_i sin) - sum D_i k_i A_i cos, Q_i <= 1 (trochoid limit).
@@ -106,17 +117,18 @@ vec3 water_reflected_direction(vec3 n, vec3 wave_n, vec3 to_camera) {
 vec3 water_radiance(vec3 body, vec3 n, vec3 wave_n, float resolved_variance, vec3 to_sun, vec3 to_camera, float sunlit,
 		vec3 sun_normal, vec3 sky_light, vec3 sky_reflected) {
 	float sun_up = dot(n, to_sun);
-	float fresnel_view = water_fresnel(dot(wave_n, to_camera));
+	// The slopes the drawn octaves do not resolve: Cox-Munk total minus the resolved variance, floored. They set the
+	// mean Fresnel of the sky reflection (isotropic: half the variance per axis) and the glint below.
+	float sigma2 = max(COX_MUNK_SIGMA2_0 + COX_MUNK_SIGMA2_PER_MPS * glint_wind_mps - resolved_variance,
+			GLINT_MIN_SIGMA2);
+	float fresnel_view = water_mean_fresnel(dot(wave_n, to_camera), sqrt(0.5 * sigma2));
 	vec3 diffuse = body * (sun_normal * max(sun_up, 0.0) * sunlit + sky_light) * (1.0 - fresnel_view);
 	vec3 sky = sky_reflected * fresnel_view;
 
 	// Cox-Munk glint: BRDF F p(tan beta) G / (4 cos_s cos_v cos^4 beta), p = exp(-tan^2 beta / s2) / (pi s2), G the
 	// Smith masking-shadowing; radiance = BRDF * E_n * cos_s with E_n = pi * sun_normal (the scene's normal-incidence
-	// Sun). The distribution holds only the slopes the drawn octaves do not resolve: Cox-Munk total minus the
-	// resolved variance, floored. The Sun's setting is in sun_normal (the transmittance to the Sun and the part of its
-	// disc above the horizon).
-	float sigma2 = max(COX_MUNK_SIGMA2_0 + COX_MUNK_SIGMA2_PER_MPS * glint_wind_mps - resolved_variance,
-			GLINT_MIN_SIGMA2);
+	// Sun), with the unresolved sigma2 above. The Sun's setting is in sun_normal (the transmittance to the Sun and the
+	// part of its disc above the horizon).
 	vec3 half_vector = normalize(to_sun + to_camera);
 	float cos_beta = max(dot(half_vector, wave_n), GLINT_MIN_COS);
 	float cos2_beta = cos_beta * cos_beta;

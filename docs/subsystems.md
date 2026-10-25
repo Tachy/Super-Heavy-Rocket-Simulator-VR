@@ -2823,7 +2823,12 @@ surface (`StarsimCore.surface_samples` on the shared terrain cache) with imagery
   0.00512 U [S], `glint_wind_mps` 5 [E]) with Smith masking-shadowing [S]; four Gerstner normal octaves (60 / 23 / 9 /
   3.5 m [E], slope 0.04, Q = 0.5), phases computed in double at the camera (`WaterWaves`, global
   `water_wave_phases`: no float32 time in the shader), faded out between 10 and 20 km distance and per octave where it
-  aliases; the resolved slope variance is taken out of the Cox-Munk sigma^2. The wave frame re-anchors (a pattern jump)
+  aliases; the resolved slope variance is taken out of the Cox-Munk sigma^2. Since 2026-10-25 the F of the sky
+  reflection and the diffuse part is the mean Fresnel over those unresolved slopes (Bruneton, Neyret & Holzschuch 2010
+  fit, sigma_v = sqrt(sigma^2 / 2), Schlick's r0 kept; = Schlick at sigma 0): before, the faded octaves left a flat
+  mirror with F -> 1 at grazing view, the sea beyond ~2.5 km (10 m eye) had the luminance of the sky above the horizon
+  and the visible horizon sat ~0.17 deg below the geometric dip (a hazy band); now ~1/2 at grazing and a sharp sea
+  horizon at the dip. The wave frame re-anchors (a pattern jump)
   after 1 deg only while the camera is above the 20 km fade distance; lower down only after 10 deg [E]. Bodies without
   water (the Moon) build no water mask. Geometry stays on the geoid (a mission's sea state rescales the wave set:
   "Sea state and deck motion", Task 6). The Sun light on the sea, the glint and the reflected sky are the transmitted
