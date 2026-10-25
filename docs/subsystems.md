@@ -2870,9 +2870,9 @@ and the haze change continuously with the camera's position, direction and the S
 physics, nothing is tuned. Flight physics is untouched (the vehicles still fly through `Us76Atmosphere`).
 
 - **Model** (core, `environment`): a float64 port of Bruneton's "Precomputed Atmospheric Scattering: a New
-  Implementation" (2017, BSD-3; ported files carry his notice) in precomputed-luminance mode: 15 wavelengths 360-830 nm
-  in five passes of three, folded with the CIE 1931 2-degree functions into XYZ and linear sRGB (D65), no white
-  balance (the TOA Sun is slightly warm-white). Inputs `config/atmosphere/earth_optics.toml` + spectra in
+  Implementation" (2017, BSD-3; ported files carry his notice, CREDITS.md ships it in full) in precomputed-luminance
+  mode: 15 wavelengths 360-830 nm in five passes of three, folded with the CIE 1931 2-degree functions into XYZ and
+  linear sRGB (D65), no white balance (the TOA Sun is slightly warm-white). Inputs `config/atmosphere/earth_optics.toml` + spectra in
   `atmosphere_spectra.hpp`: Rayleigh from the refractive index of air (Peck & Reeder 1972) with the King factor
   (Bucholtz 1995), the US76 number density as profile; ozone cross sections (Serdyuchenko 2014 via Bruneton) on the
   AFGL US standard profile, 300 DU [S]; aerosol AOD 0.1 at 550 nm, Angstrom 1.3, single-scattering albedo 0.9, scale
@@ -2921,10 +2921,23 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   from the water point; `sky_radiance` is gone; a ray reflected below the horizontal takes its upward mirror [E]): the
   Sun transmitted to the point x cos + the sky irradiance on the normal, then transmittance + in-scattering to the
   camera; city lights x T. Moon, Sun disc: x T + the in-scattered sky (the daytime Moon is pale; the Sun reddens at the
-  horizon). Stars (`star_visibility.gdshaderinc`): x T and hidden below the eye's detection threshold over the sky
-  background, I_th = c1 (1 + sqrt(c2 B))^2 (Schaefer 1990, PASP 102, 212: night / day constants, smooth step +-0.5 mag
-  [E]); limiting magnitude 7.9 at B = 0, about -4 at the noon sky - stars fade in twilight and appear above the
-  atmosphere without a switch. Vehicles, tower, pad, drone ship: `lit_aerial.gdshader` (`LitAerial.material`): Godot's
+  horizon). The Sun disc's colour is the model's TOA solar spectrum in the luminance mode
+  (`atmosphere_sun_illuminance_lux`, the colour of the Sun light and the ground lighting), normalised to unit luminance
+  so the disc's display brightness (`intensity`) is unchanged (final review M6; was a hand-picked warm white). Stars
+  (`star_visibility.gdshaderinc`): x T and hidden below the eye's detection threshold over the background,
+  I_th = c1 (1 + sqrt(c2 B))^2 (Schaefer 1990, PASP 102, 212: night / day constants, smooth step +-0.5 mag [E]);
+  limiting magnitude 7.9 at B = 0, about -4 at the noon sky. B = max(the sky behind the star, the luminance the eye is
+  adapted to) (final review I1; Schaefer's B is the adapting luminance, and in a non-uniform field the adaptation
+  dominates over a dark patch: Ferwerda et al. 1996). The adaptation luminance is `EyeAdaptation.adaptation_cd_m2`,
+  paced like the gain (light 0.5 s, dark 110 s, log space) but unclamped (floor 1e-6 cd/m^2 [call], far below a dark
+  night sky), global `atmosphere_adaptation_cd_m2` (0 with the adaptation off). Consequence: sunlit space views are
+  starless - the day-side orbit (the eye adapted to the Sun and the day-side Earth, L_a 4.2e4 cd/m^2 at 400 km:
+  limiting magnitude about -6; GPU check: magnitude 0 and 4 hidden beside the limb, visible with the fixed exposure),
+  cislunar space with the Sun on the eye - as astronauts report and cameras show; stars appear on the night
+  side or in the Earth's shadow after dark adaptation (tau 110 s, minutes from day to the faint stars), in twilight and
+  in totality (L_a there is below the sky behind the star). The Moon and the Sun disc need no threshold (physical
+  luminances x the gain, spec Goal 6); city lights stay display-referred (spec Goal 7); planets are not drawn.
+  Vehicles, tower, pad, drone ship: `lit_aerial.gdshader` (`LitAerial.material`): Godot's
   PBR lighting plus aerial perspective through FOG (Godot blends FOG with one scalar, so the per-channel T is split:
   t = max(T), FOG.a = 1 - t, FOG.rgb = S / (1 - t), and T / t on albedo and emission - diffuse, metal and emission end at
   lit x T + S exactly; only the dielectric specular takes the scalar); the tower lattice through `atm_fog`. Plumes
@@ -2952,8 +2965,14 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   The up part: 13 directions below the eye in model space (nadir, a ring at 0.6 x the Earth disc's angular radius, a
   ring grazing the limb 10 km up), each the plate equivalent of what it shows (ground illuminance / pi x T + in-scatter,
   or the limb's sky, x the Sun's visible fraction there), times the view factor (R / r)^2; view-independent (VR-stable).
-  At 400 km on the 2024-04-08 umbra axis (Task 10 check): down 0, up 2428 cd/m^2 (the same Earth uneclipsed: 20871),
-  gain 17.4. Not a quadrature or weighting artefact: a dense cap integral (48 rings x 24 azimuths) gives gain 15.1
+  While the Moon's penumbra touches the atmosphere the sky samples are segmented like the umbra fluence (8 segments,
+  each x the visible fraction at its midpoint; ~0.7 ms per evaluation, eclipse only; final fix wave): one factor at the
+  ray's closest approach - behind a ground eye looking up - had put the totality eye at 56 cd/m^2 (the uneclipsed
+  horizon sky beyond the umbra), now 1.57 cd/m^2 at Dallas, as real totality skies (~1-2 at the zenith). Outside an
+  eclipse no shadow test runs at all (`penumbra_touches` first: no CSPICE calls in the adaptation; final review M1).
+  At 400 km on the 2024-04-08 umbra axis: down 0, up 2390 cd/m^2 (Task 10: 2428 with the closest-approach factor; the
+  same Earth uneclipsed: 20871), gain 17.7. Not a quadrature or weighting artefact: a dense cap integral (48 rings x 24
+  azimuths; Task 10) gives gain 15.1
   cosine-weighted (the plate) and 17.0 weighted by solid angle; the ring means rise from 494 cd/m^2 at the nadir to
   6344 at the limb - the visible Earth lies in deep penumbra (visible fraction 0.03 / 0.10 / 0.33 / 0.65 at 200 / 400
   / 1000 / 2000 km from the umbra's centre). The eye has no Sun in it there and adapts to that dim Earth, so the
@@ -2973,14 +2992,15 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   magnitude-1 stars visible, magnitude 4 hidden. The ground's sky light gets the same eclipse factor (zenith 0.413,
   four azimuths at 30 deg 0.130, four at 6 deg 0.0167; per vertex). Limits: one shadow-axis fluence for the whole
   umbra; no refraction; the eye in the umbra adapts to the penumbral Earth it sees.
-- **Validation.** Core `[atmosphere]` (20 ctest cases): Rayleigh coefficient and vertical optical depth vs Bucholtz
-  1995 (1 % / 2 %); transmittance vs a direct optical-depth integral (3.24e-3) and single scattering vs a brute-force
+- **Validation.** Core `[atmosphere]` (21 ctest cases, incl. the aerial perspective to a point before the entry):
+  Rayleigh coefficient and vertical optical depth vs Bucholtz 1995 (1 % / 2 %); transmittance vs a direct optical-depth
+  integral (3.24e-3) and single scattering vs a brute-force
   raymarch (1.07e-3); off-texel lookups 7.1e-3, horizon seam 9.2e-3; multiple scattering 5 vs 7 orders 1.96e-3; direct
   sun at air mass 1.5 vs ASTM G-173 (400-700 nm) -2.1 %, runtime direct beam vs raymarch < 0.05 %; zenith at Sun 60 deg
   3819 cd/m^2 (B/R 1.97), horizontal illuminance at Sun zenith 125.4 klx, sky at 50 km 7.1e-4 x the ground, twilight
   zenith bluer than noon (B/R 3.12 at -4 deg); ellipsoid mapping < 1 mm; cache round trip / damage / stale hash /
   failed write. GPU `game/tests/atmosphere_check.gd` (HDR viewport, float readback, 2 % per channel unless stated;
-  RGBAH and `--f32`): 48 samples - sky, sunset, limb from 400 km and from the Moon distance, the pad camera's float64
+  RGBAH and `--f32`): 52 samples - sky, sunset, limb from 400 km and from the Moon distance, the pad camera's float64
   altitude path, ground and terrain samples (3 %), stars / Sun / Moon, lit cubes (5 %), Sun colour, eye adaptation,
   eclipse; worst sky deviation 0.52 % (the 50 km limb from the Moon distance, float32 rounding at 3.8e8 m), the Earth
   mesh samples -2.1 / -1.7 % (its facets lie up to ~0.5 km below the ellipsoid; 0.15 % against the point 300 m lower).
@@ -2989,7 +3009,8 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   Default epoch (no eclipse): p99 7.75 / 7.90 / 7.90, max 10.7 / 12.5 / 11.7 ms in three consecutive runs (GPU <= ~3 ms;
   Cape p99 ~9.1 while ~240 nodes load). The max-gate failures of Tasks 6-9 (single 15-50 ms "process" frames) were
   the run's own per-second console prints (fixed in terrain_perf.gd). A rarer stall remains: ~1 run in 3 shows one
-  frame of 11-17 ms (once 17.4 ms, failing the gate) at a fixed instant of the descent (t = 3.06 s or 10.89 s), inside
+  frame of 11-17 ms (once 17.4 ms, failing the gate; in the final fix wave once 33.7 ms at t = 2.98 s, the same
+  signature, the next run PASS: p99 7.75, max 13.2) at a fixed instant of the descent (t = 3.06 s or 10.89 s), inside
   the RenderingServer draw but outside the viewport render (measured viewport CPU 0.3 ms, GPU 1.4-1.9 ms), no
   draw-time pipeline compilation, while a batch of 4 terrain builds runs on the worker pool. It depends on the pool:
   `threading/worker_pool/max_threads = 8` removed it in 9 of 9 runs but limits the terrain to 2 concurrent builds

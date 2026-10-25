@@ -210,6 +210,12 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   stars and vehicles are seen through it, with eye adaptation (gain <= 25) and the eclipse sky; no clouds yet; one Sun
   light, evaluated at the followed body. Unverified: NAIP suggests the real OLP-1 mount stands some tens of metres WSW
   of our [E] site coordinates. Details: `docs/subsystems.md` "Earth terrain and geoid".
+- Terrain-load draw stall (open, for M7 where the VR frame budget is real): ~1 `terrain_perf.gd` run in 3 shows one
+  11-17 ms frame (once 33.7 ms) inside the RenderingServer draw (outside the viewport render) while a batch of terrain
+  builds runs on the worker pool. Engine-internal, pool-size dependent: `threading/worker_pool/max_threads = 8`
+  removed it (9 of 9 runs) but the Cape then loads in > 20 s instead of ~8 s - a trade-off, not changed. Also open:
+  the eclipse epoch's p99 ~8.7 ms (GPU, the per-vertex sky eclipse factor). Details: `docs/subsystems.md`
+  "Atmosphere rendering", Performance.
 - C++ sources are UTF-8 (/utf-8); UI strings in the core are German.
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
