@@ -44,6 +44,18 @@ moon_earthshine={
 "type": "float",
 "value": 0.0
 }
+moon_regolith_scale={
+"type": "float",
+"value": 0.5
+}
+moon_sun_scene={
+"type": "float",
+"value": 1.5
+}
+earth_city_lights_cd_m2={
+"type": "float",
+"value": 0.0
+}
 water_wave_vectors={
 "type": "mat4",
 "value": Projection(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)

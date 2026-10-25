@@ -12,7 +12,6 @@ render_mode unshaded, cull_back;
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/terrain_morph.gdshaderinc"
 #include "res://shaders/water.gdshaderinc"
-#include "res://shaders/vision.gdshaderinc"
 
 // Global maps: CUSTOM1.u runs past 1 on nodes across the antimeridian (continuous inside the node), hence repeat.
 uniform sampler2D day_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -40,7 +39,9 @@ global uniform vec3 earth_terrain_camera_hi;
 global uniform vec3 earth_terrain_camera_lo;
 uniform float sun_radius_m = 695700000.0;
 uniform float moon_radius_m = 1737400.0;
+// City lights before the atmosphere tables are loaded (display value of a white texel); with them: scene-referred.
 uniform float night_lights_intensity = 1.2;
+global uniform float earth_city_lights_cd_m2;
 uniform float day_exposure;  // set from Atmosphere.DAY_EXPOSURE (world.gd): the one exposure of every surface
 
 varying vec3 local_position;
@@ -136,17 +137,19 @@ void fragment() {
 				to_camera, 1.0, moon_normal, moon_sky_light, moon_reflected);
 	}
 	day = mix(day, sea, water);
-	// City lights fade in through civil twilight (sun 0..6 deg below the horizon).
+	// City lights switch on through civil twilight (sun 0..6 deg below the horizon).
 	float night_factor = smoothstep(0.0, -0.1, cos_sun);
 	vec3 night = texture(night_texture, map_uv).rgb;
-	night = night * night * night_lights_intensity * night_factor;  // suppress dark-sky noise
-	vec3 color = day + night;
+	night = night * night * night_factor;  // the squared texel suppresses the dark-sky noise
+	vec3 color = day + night * night_lights_intensity;
 	if (atmosphere_enabled) {
 		// Aerial perspective along the camera-relative offset (exact in float32 near the camera). City lights:
-		// display-referred [call 2026-10-25], so they bypass night vision's rod step (vision.gdshaderinc).
+		// scene-referred (user ruling 2026-10-25, review I6), a luminance through the eye model like every other: the
+		// texel x earth_city_lights_cd_m2 (Atmosphere.CITY_LIGHTS_PEAK_CD_M2) x the scene value per cd/m^2.
 		vec3 transmittance;
 		vec3 in_scatter = atm_to_point_offset(camera_offset, transmittance);
-		color = day * transmittance + in_scatter + vision_display_referred(night * transmittance);
+		vec3 city = night * (earth_city_lights_cd_m2 * atmosphere_scene_per_cd_m2);
+		color = (day + city) * transmittance + in_scatter;
 	}
 	ALBEDO = color;
 }

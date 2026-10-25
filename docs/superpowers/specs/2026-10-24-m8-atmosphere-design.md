@@ -111,7 +111,8 @@ Sun is. Colours come out of the physics (spectral scattering converted to displa
    (plumes, city lights, the stars' own brightness, UI markers, the VR panel) take the inverse of that step in their
    shaders and look as before [ruling: city lights and plumes stay display-referred - bright sources the fovea sees in
    colour; the global mapping without local adaptation would grey them out, and the night-light texture has no
-   radiometric calibration]. The adaptation luminance gains a scotopic twin (the same view-independent plates, their
+   radiometric calibration; amended by the user ruling in the fix round of 2026-10-25: city lights are scene-referred
+   with an [E] luminance scale and go through the eye model]. The adaptation luminance gains a scotopic twin (the same view-independent plates, their
    colour through w_s) and a twilight term: with the Sun below the horizon (or behind the Earth, in orbit) the
    brightest sky (the glow toward the Sun) - Ferwerda's "highest visible luminance" made view-independent. The
    Moon becomes a light (Krisciunas & Schaefer 1991 phase law): the moonlit sky, the moonlit ground and sea, a second

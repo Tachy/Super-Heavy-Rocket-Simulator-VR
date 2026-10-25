@@ -48,9 +48,30 @@ const EARTH_MEAN_RADIUS_M := 6371000.0
 ## mosaic, tools/data_pipeline/sources.toml "moon_color") sRGB-decoded, BT.709 luminance, area-weighted over the sphere
 ## (0.2997; the near side 0.255) - the albedo the Moon shaders multiply.
 const MOON_MEAN_TEXTURE_ALBEDO := 0.30
-## The Moon shaders' sunlit scale (moon.gdshader, terrain_moon.gdshader: exposure 1.6 x 0.5): scene value = albedo x
-## Lommel-Seeliger x this. Keep in sync with them.
-const MOON_SHADER_SUN_SCALE := 0.8
+## The regolith's reflectance (shaders/moon_regolith.gdshaderinc, regolith_reflectance here; night-vision fix round I3,
+## I4): albedo x regolith_scale x E/pi x Lommel-Seeliger x the K&S phase factor, for the Sun and the earthshine alike.
+## [D: tools/validation/moon_disc_calibration.py] the albedo texture's near-side mean weighted by projected area
+## (cos^2 lat cos lon, sRGB-decoded, BT.709): the full-phase disc seen from the Earth (the maria pull it below the
+## sphere's 0.30).
+const MOON_NEAR_SIDE_DISC_ALBEDO := 0.2245
+## [S: K&S 1991 sec. 2, as Schaefer's skycalc applies it] the opposition surge: the Moon's illuminance x (1.35 - 0.05 a)
+## for phase angles a < 7 deg (1 at 7 deg). The shaders' REGOLITH_* constants: keep in sync.
+const MOON_OPPOSITION_PEAK := 1.35
+const MOON_OPPOSITION_PER_DEG := 0.05
+const MOON_OPPOSITION_END_DEG := 7.0
+## [call] The regolith's phase law is held beyond this angle (K&S's quartic turns up past ~150 deg).
+const REGOLITH_PHASE_MAX_DEG := 150.0
+## [D: pi x the tables' 4.24e4 cd/m^2 white plate] TOA illuminance (lux) for the regolith scale before the tables load.
+const NOMINAL_TOA_LUX := 1.3327e5
+## City lights (night-vision fix round I6, user ruling 2026-10-25: scene-referred, through the eye model): the night
+## texture (Black Marble 2016, an 8-bit visualisation without radiometric units: tools/data_pipeline/sources.toml
+## "earth_night") as luminance = this x the sRGB-decoded texel squared (the former shaping, which suppresses the
+## dark-sky noise), so a saturated white texel - a bright urban core averaged over the 4.9 km texel - has this upward
+## luminance (cd/m^2) [E]. Anchors: lit roads have 0.75-1.5 cd/m^2 (EN 13201-2 classes M3-M2 [S]) and cover a fraction
+## of a city's area; VIIRS DNB radiances of bright urban cores, ~100-300 nW/(cm^2 sr) [S: e.g. Elvidge et al. 2017,
+## Int. J. Remote Sens. 38, 5860], are ~0.1-0.4 cd/m^2 with ~260 nW/(cm^2 sr) per lm/m^2 of emitted flux and a
+## Lambertian emitter [S: arXiv 2510.02977, their bridge calibration; site-specific] - 0.3 cd/m^2 lies in both.
+const CITY_LIGHTS_PEAK_CD_M2 := 0.3
 ## [S: NASA Earth Fact Sheet, Bond albedo 0.306] the Earth's light on the Moon (earthshine, earthshine_relative).
 const EARTH_BOND_ALBEDO := 0.306
 ## [S: Lambert-sphere phase integral q = 3/2, A_Bond = p q; e.g. Seager, Exoplanet Atmospheres (2010) ch. 3] the
@@ -78,6 +99,13 @@ const MOONLIGHT_MIN_SHARE := 1.0e-3
 ## from below the white plate at sunset instead of jumping.
 const TWILIGHT_GLOW_ELEVATIONS_DEG := [1.0, 3.0, 6.0, 10.0, 20.0, 40.0]
 const TWILIGHT_GLOW_MIN_SUN_DEG := 8.0
+## [call] In a solar eclipse at the eye (night-vision fix round I2) the brightest sky is the ring around the umbra: the
+## glow then samples these azimuths (evenly from the Sun's) at these elevations, the eclipsed sky (_eclipsed_in_scatter).
+const ECLIPSE_GLOW_AZIMUTHS := 8
+const ECLIPSE_GLOW_ELEVATIONS_DEG := [1.0, 3.0, 6.0, 12.0]
+## [S: Ferwerda et al. 1996 sec. 4.4] the world adaptation luminance is half the highest visible luminance: the glow
+## terms (twilight, totality, the orbital limb) enter at this share of the brightest sky (review M5).
+const GLOW_ADAPTATION_SHARE := 0.5
 ## [call] The orbital-night limb glow (_limb_glow_luminance): tangent heights sampled toward the Sun (m).
 const LIMB_GLOW_HEIGHTS_M := [2000.0, 5000.0, 10000.0, 20000.0, 40000.0]
 ## [call] An eye on the Moon stands at least this high above its ground sphere (render ground views: 2 m).
@@ -209,6 +237,7 @@ func shutdown() -> void:
 	if _umbra_task_id >= 0:
 		WorkerThreadPool.wait_for_task_completion(_umbra_task_id)
 		_umbra_task_id = -1
+	_set_vision(0.0)  # review M4
 
 
 ## Per frame: the camera, the Earth's centre and orientation (fixed -> GCRF) and the apparent Sun position (GCRF, as
@@ -223,14 +252,20 @@ func shutdown() -> void:
 func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to_gcrf: Basis,
 		sun_apparent_gcrf_m: Vector3, adaptation_dt_s := 0.0, sun_visible_fraction := 1.0,
 		moon_apparent_gcrf_m := Vector3.ZERO, tdb_s := NAN, moon_gcrf_m := Vector3.ZERO) -> void:
-	# The Moon shaders' earthshine needs no tables (before them: the vacuum scene units, gain 1).
+	# The Moon shaders' lights need no tables (before them: the vacuum scene units, gain 1).
 	var earthshine_relative_value := 0.0
 	if moon_gcrf_m != Vector3.ZERO:
 		earthshine_relative_value = earthshine_relative(moon_gcrf_m - earth_center_gcrf_m,
 				sun_apparent_gcrf_m - earth_center_gcrf_m)
 	earthshine_scene = DAY_EXPOSURE * earthshine_relative_value
+	var sun_au := (sun_apparent_gcrf_m - earth_center_gcrf_m).length() / ASTRONOMICAL_UNIT_M
 	RenderingServer.global_shader_parameter_set(&"moon_earthshine", earthshine_scene)
+	RenderingServer.global_shader_parameter_set(&"moon_sun_scene", DAY_EXPOSURE / (sun_au * sun_au))
+	RenderingServer.global_shader_parameter_set(&"moon_regolith_scale",
+			regolith_scale(float(parameters.get("toa_solar_illuminance_lux", NOMINAL_TOA_LUX))))
+	RenderingServer.global_shader_parameter_set(&"earth_city_lights_cd_m2", CITY_LIGHTS_PEAK_CD_M2)
 	if not poll():
+		_set_vision(0.0)  # no rods left from an earlier state (review M4)
 		return
 	last_earthshine_lux = earthshine_relative_value * float(parameters["toa_solar_illuminance_lux"])
 	_fixed_to_gcrf = earth_fixed_to_gcrf
@@ -351,7 +386,11 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	var up := _geodetic_up(eye_itrf_m)
 	var sky: Vector3 = _core.atmosphere_illuminance(eye_itrf_m, up, sun_direction_itrf)["sky_lux"]
 	var outside := _stretch(eye_itrf_m).length() > float(parameters["top_radius_m"])
+	# The Moon's parts above the atmosphere (its occultations, the Moon in view): physical anywhere, negligible far out.
 	var lunar := outside and moon_itrf_m != Vector3.ZERO
+	# Near the Moon: its disc larger than the Earth's (review I1: an eye in LEO is not near it and keeps the limb glow).
+	var near_moon := lunar and MOON_RADIUS_M * eye_itrf_m.length() > EARTH_MEAN_RADIUS_M * (moon_itrf_m
+			- eye_itrf_m).length()
 	var sun_itrf_m := sun_direction_itrf * (d_au * ASTRONOMICAL_UNIT_M)
 	var visible := visible_fraction
 	var moon_ground_m := 0.0
@@ -388,14 +427,17 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 			var moon_t := _core.atmosphere_sun_transmittance(eye_itrf_m, _moon_direction_fixed)
 			var moon_sky: Vector3 = _core.atmosphere_illuminance(eye_itrf_m, up, _moon_direction_fixed)["sky_lux"]
 			down_rgb += (solar * sun_factor * moon_t + moon_sky) * (moon_scale / PI)
-	# The twilight glow (night vision): with the Sun below the eye's horizon, the brightest sky.
-	# Above the atmosphere: with the Sun behind the Earth (orbital night), the brightest limb toward it.
+	# The glow (night vision), GLOW_ADAPTATION_SHARE of the brightest sky: inside the atmosphere with the Sun below the
+	# eye's horizon (twilight) or the eye in a solar eclipse (the ring around the umbra; review I2: the eye's own
+	# eclipse, not the global penumbra flag - a twilight eye far from the shadow keeps its glow); above it with the Sun
+	# behind the Earth (orbital night) and the eye not near the Moon, the brightest limb toward the Sun.
 	var glow_rgb := Vector3.ZERO
-	if is_nan(_tdb_s) and not lunar:
-		if not outside and sun_direction_itrf.dot(up) < 0.0:
-			glow_rgb = _twilight_glow_luminance(eye_itrf_m, up, sun_direction_itrf) / (d_au * d_au)
-		elif outside and transmittance == Vector3.ZERO:
-			glow_rgb = _limb_glow_luminance(eye_itrf_m, sun_direction_itrf) / (d_au * d_au)
+	var eclipsed := visible < 1.0 and not is_nan(_tdb_s)
+	if not outside and (sun_direction_itrf.dot(up) < 0.0 or eclipsed):
+		glow_rgb = _twilight_glow_luminance(eye_itrf_m, up, sun_direction_itrf, eclipsed) * (GLOW_ADAPTATION_SHARE
+				/ (d_au * d_au))
+	elif outside and transmittance == Vector3.ZERO and not near_moon:
+		glow_rgb = _limb_glow_luminance(eye_itrf_m, sun_direction_itrf) * (GLOW_ADAPTATION_SHARE / (d_au * d_au))
 	last_adaptation_down_cd_m2 = down_rgb.dot(LUMINANCE_WEIGHTS)
 	last_adaptation_up_cd_m2 = earth_rgb.dot(LUMINANCE_WEIGHTS)
 	last_adaptation_moon_cd_m2 = moon_rgb.dot(LUMINANCE_WEIGHTS)
@@ -413,25 +455,46 @@ func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visi
 	return last_target_cd_m2
 
 
-## The twilight glow of the eye adaptation (RGB luminance, cd/m^2 at 1 AU): the brightest sky luminance along the
-## Sun's azimuth at TWILIGHT_GLOW_ELEVATIONS_DEG, leaving out directions within TWILIGHT_GLOW_MIN_SUN_DEG of the Sun.
-## Ferwerda et al. 1996 (sec. 4.4) take half the highest visible luminance as the world adaptation; here the brightest
-## part of the whole sky, wherever the head points (view-independent, VR-stable) [call: the brightest sky itself, so it
-## maps to the adapted white like the white plate]. Only inside the atmosphere, with the Sun below the eye's horizon and
-## no solar eclipse (the CPU sky knows no Moon shadow); by day the white plate is the larger anyway (the day look
-## unchanged).
-func _twilight_glow_luminance(eye_itrf_m: Vector3, up: Vector3, sun_direction_itrf: Vector3) -> Vector3:
+## The glow of the eye adaptation (RGB luminance, cd/m^2 at 1 AU): the brightest sky luminance, leaving out directions
+## within TWILIGHT_GLOW_MIN_SUN_DEG of the Sun, wherever the head points (view-independent, VR-stable); the caller takes
+## GLOW_ADAPTATION_SHARE of it (Ferwerda et al. 1996 sec. 4.4: half the highest visible luminance). By day the white
+## plate is the larger anyway (the day look unchanged).
+## - Twilight: along the Sun's azimuth at TWILIGHT_GLOW_ELEVATIONS_DEG (the glow over the Sun's horizon is the
+##   brightest sky). Accepted limit (review M6): azimuth-only, a brighter sky elsewhere (the Moon's aureole) is not
+##   looked for.
+## - eclipsed (the eye in a solar eclipse, review I2): the ring around the umbra surrounds the observer, so
+##   ECLIPSE_GLOW_AZIMUTHS azimuths at ECLIPSE_GLOW_ELEVATIONS_DEG, each the eclipsed sky (_eclipsed_in_scatter, as the
+##   Earth in view) - the same "brightest sky" rule as in twilight.
+func _twilight_glow_luminance(eye_itrf_m: Vector3, up: Vector3, sun_direction_itrf: Vector3,
+		eclipsed := false) -> Vector3:
 	var horizontal := sun_direction_itrf - up * sun_direction_itrf.dot(up)
 	if horizontal.length_squared() < 1.0e-12:
-		return Vector3.ZERO
+		if not eclipsed:
+			return Vector3.ZERO
+		horizontal = up.cross(Vector3(0, 0, 1) if absf(up.z) < 0.9 else Vector3(1, 0, 0))
 	horizontal = horizontal.normalized()
+	var side := up.cross(horizontal)
+	var directions: Array[Vector3] = []
+	if eclipsed:
+		for k in range(ECLIPSE_GLOW_AZIMUTHS):
+			var azimuth := TAU * k / ECLIPSE_GLOW_AZIMUTHS
+			var h := horizontal * cos(azimuth) + side * sin(azimuth)
+			for elevation_deg: float in ECLIPSE_GLOW_ELEVATIONS_DEG:
+				var e := deg_to_rad(elevation_deg)
+				directions.append((h * cos(e) + up * sin(e)).normalized())
+	else:
+		for elevation_deg: float in TWILIGHT_GLOW_ELEVATIONS_DEG:
+			var e := deg_to_rad(elevation_deg)
+			directions.append((horizontal * cos(e) + up * sin(e)).normalized())
 	var brightest := Vector3.ZERO
-	for elevation_deg: float in TWILIGHT_GLOW_ELEVATIONS_DEG:
-		var e := deg_to_rad(elevation_deg)
-		var v := (horizontal * cos(e) + up * sin(e)).normalized()
+	for v in directions:
 		if rad_to_deg(v.angle_to(sun_direction_itrf)) < TWILIGHT_GLOW_MIN_SUN_DEG:
 			continue
-		var sky: Vector3 = _core.atmosphere_sky_luminance(eye_itrf_m, v, sun_direction_itrf)["luminance"]
+		var sky: Vector3
+		if eclipsed:
+			sky = _eclipsed_in_scatter(eye_itrf_m, v, _top_exit_distance(eye_itrf_m, v), false, sun_direction_itrf, [])
+		else:
+			sky = _core.atmosphere_sky_luminance(eye_itrf_m, v, sun_direction_itrf)["luminance"]
 		if sky.dot(LUMINANCE_WEIGHTS) > brightest.dot(LUMINANCE_WEIGHTS):
 			brightest = sky
 	return brightest
@@ -461,20 +524,61 @@ func _limb_glow_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3) -> V
 	return brightest
 
 
-## The Moon's illuminance outside the atmosphere over the TOA Sun's at its true distance [D]: Krisciunas & Schaefer
-## 1991 (Eq. 8, 9) at the phase angle a (Sun - Moon - Earth's centre), x (MOON_MEAN_DISTANCE_M / d)^2, x d_AU^2 / the
-## tables' TOA illuminance at 1 AU (their law holds at the mean Sun distance; the Sun's distance cancels to first
-## order), x the solar disc the Earth leaves at the Moon's centre (a lunar eclipse; the umbra's red glow left out).
-## Full Moon at the mean distance: 0.313 lux, ~2.4e-6 of the Sun. Vectors from the Earth's centre, m, one frame.
+## The Moon's illuminance outside the atmosphere over the TOA Sun's at 1 AU [D]: Krisciunas & Schaefer 1991 (Eq. 8, 9)
+## at the phase angle a (Sun - Moon - Earth's centre) with the opposition surge (moon_illuminance_lux), x
+## (MOON_MEAN_DISTANCE_M / d)^2, / the tables' TOA illuminance at 1 AU, x the solar disc the Earth leaves at the Moon's
+## centre (a lunar eclipse; the umbra's red glow left out). Its users (shaders, the adaptation) multiply it by the 1 AU
+## tables / d_AU^2, so the Moon follows the Sun's distance like the real one (review M1). Full Moon at the mean
+## distance: 0.313 lux (x 1.35 at a = 0), ~2.4e-6 of the Sun. Vectors from the Earth's centre, m, one frame.
 static func moonlight_relative(moon_from_earth_m: Vector3, sun_from_earth_m: Vector3, toa_lux_1au: float) -> float:
 	var to_sun := sun_from_earth_m - moon_from_earth_m
 	var phase_deg := rad_to_deg(to_sun.angle_to(-moon_from_earth_m))
-	var magnitude := MOON_MAGNITUDE_FULL + MOON_MAGNITUDE_PER_DEG * phase_deg + MOON_MAGNITUDE_PER_DEG4 * pow(phase_deg, 4.0)
-	var lux := pow(10.0, -0.4 * (magnitude + MOON_FOOT_CANDLE_OFFSET)) * LUX_PER_FOOT_CANDLE
 	var distance := MOON_MEAN_DISTANCE_M / moon_from_earth_m.length()
-	var d_au := sun_from_earth_m.length() / ASTRONOMICAL_UNIT_M
 	var lit := 1.0 - occulted_fraction(to_sun, SUN_RADIUS_M, -moon_from_earth_m, EARTH_MEAN_RADIUS_M)
-	return lux * distance * distance * d_au * d_au / toa_lux_1au * lit
+	return moon_illuminance_lux(phase_deg) * distance * distance / toa_lux_1au * lit
+
+
+## K&S 1991 Eq. 8, 9 with the opposition surge: the Moon's illuminance (lux) at the mean distance, phase angle in deg.
+static func moon_illuminance_lux(phase_deg: float) -> float:
+	var magnitude := MOON_MAGNITUDE_FULL + MOON_MAGNITUDE_PER_DEG * phase_deg + MOON_MAGNITUDE_PER_DEG4 * pow(phase_deg, 4.0)
+	return pow(10.0, -0.4 * (magnitude + MOON_FOOT_CANDLE_OFFSET)) * LUX_PER_FOOT_CANDLE * moon_opposition(phase_deg)
+
+
+## The opposition surge factor at the phase angle (deg): MOON_OPPOSITION_PEAK - MOON_OPPOSITION_PER_DEG a below
+## MOON_OPPOSITION_END_DEG, else 1.
+static func moon_opposition(phase_deg: float) -> float:
+	if phase_deg < MOON_OPPOSITION_END_DEG:
+		return MOON_OPPOSITION_PEAK - MOON_OPPOSITION_PER_DEG * phase_deg
+	return 1.0
+
+
+## The regolith scale R (the shaders' moon_regolith_scale) [D]: the full-phase disc of the albedo texture's near side
+## (MOON_NEAR_SIDE_DISC_ALBEDO; Lommel-Seeliger 1 at mu0 = mu, the phase factor without the surge 1) gives K&S's
+## illuminance at the mean distance: R = E_KS(0) / (E_toa / pi x the disc's solid angle x the albedo) - ~0.513, the
+## former shaders' 0.8 / 1.5 = 0.533 within 4 %: their excess was the missing phase law (quarter Moon x 4), not the scale.
+static func regolith_scale(toa_lux_1au: float) -> float:
+	var disc_sr := PI * pow(MOON_RADIUS_M / MOON_MEAN_DISTANCE_M, 2.0)
+	var full_lux := moon_illuminance_lux(0.0) / moon_opposition(0.0)
+	return full_lux / (toa_lux_1au / PI * disc_sr * MOON_NEAR_SIDE_DISC_ALBEDO)
+
+
+## The regolith's phase factor f(g) (shaders/moon_regolith.gdshaderinc: keep in sync) from the local phase angle's
+## cosine: the opposition surge x K&S's relative phase law / the Lommel-Seeliger sphere's disc-integrated phase function.
+static func regolith_phase_factor(cos_g: float) -> float:
+	var g_deg := minf(rad_to_deg(acos(clampf(cos_g, -1.0, 1.0))), REGOLITH_PHASE_MAX_DEG)
+	var g := deg_to_rad(g_deg)
+	var phi := 1.0 if g_deg < 0.01 else 1.0 - sin(0.5 * g) * tan(0.5 * g) * log(1.0 / tan(0.25 * g))
+	var relative := pow(10.0, -0.4 * (MOON_MAGNITUDE_PER_DEG * g_deg + MOON_MAGNITUDE_PER_DEG4 * pow(g_deg, 4.0)))
+	return moon_opposition(g_deg) * relative / maxf(phi, 1.0e-6)
+
+
+## Lommel-Seeliger x f(g) for unit vectors (the shaders' regolith_reflectance): 0 with the light below the horizon.
+static func regolith_reflectance(n: Vector3, to_light: Vector3, to_eye: Vector3) -> float:
+	var mu0 := n.dot(to_light)
+	if mu0 <= 0.0:
+		return 0.0
+	var mu := maxf(n.dot(to_eye), 1.0e-3)
+	return 2.0 * mu0 / (mu0 + mu) * regolith_phase_factor(to_light.dot(to_eye))
 
 
 ## The Moon's light for Godot's lit materials (world.gd's second DirectionalLight3D) at an Earth-fixed point:
@@ -532,12 +636,10 @@ static func earthshine_relative(moon_from_earth_m: Vector3, sun_from_earth_m: Ve
 
 ## The Moon in view (cd/m^2 at the true Sun distance): the regolith's luminance as the Moon shaders draw it, averaged
 ## cosine-weighted over the lunar cap below the eye (MOON_VIEW_RINGS rings uniform in sin^2 of the nadir angle, each
-## MOON_VIEW_AZIMUTHS directions), times the cap's view factor (R / r)^2 - the analogue of _earth_in_view_luminance:
-## - sunlit: albedo x Lommel-Seeliger 2 mu0 / (mu0 + mu) x MOON_SHADER_SUN_SCALE / DAY_EXPOSURE x the reference luminance
-##   (moon.gdshader, terrain_moon.gdshader: scene value albedo x LS x 0.8), x the solar disc the Earth leaves at the
-##   ground point (a lunar eclipse; the reddened umbra glow of the shaders is left out);
-## - earthshine: albedo x earthshine_lux x cos(Earth's zenith angle) / pi (Lambert; earthshine_relative, as the
-##   shaders' moon_earthshine);
+## MOON_VIEW_AZIMUTHS directions), times the cap's view factor (R / r)^2 - the analogue of _earth_in_view_luminance.
+## Both lights through the one regolith reflectance (regolith_reflectance, moon_regolith.gdshaderinc; review I3):
+## albedo x regolith_scale x E / pi x LS x f(g), E the Sun's (x the solar disc the Earth leaves at the ground point: a
+## lunar eclipse; the reddened umbra glow of the shaders is left out) and the earthshine's (earthshine_relative).
 ## albedo: MOON_MEAN_TEXTURE_ALBEDO [call: the map's mean, not the texel under the eye]. Cast shadows: none (as the
 ## shaders). Vectors Earth-fixed, m.
 func _moon_in_view_luminance(eye_itrf_m: Vector3, moon_itrf_m: Vector3, sun_itrf_m: Vector3, radius: float,
@@ -548,8 +650,9 @@ func _moon_in_view_luminance(eye_itrf_m: Vector3, moon_itrf_m: Vector3, sun_itrf
 	var east := nadir.cross(Vector3(0, 0, 1) if absf(nadir.z) < 0.9 else Vector3(1, 0, 0)).normalized()
 	var north := nadir.cross(east)
 	var sin_cap := radius / r
-	var sun_scale := MOON_MEAN_TEXTURE_ALBEDO * MOON_SHADER_SUN_SCALE / DAY_EXPOSURE * reference_luminance(d_au)
-	var earth_scale := MOON_MEAN_TEXTURE_ALBEDO * earthshine_lux / PI
+	var regolith := MOON_MEAN_TEXTURE_ALBEDO * regolith_scale(float(parameters["toa_solar_illuminance_lux"]))
+	var sun_scale := regolith * reference_luminance(d_au)
+	var earth_scale := regolith * earthshine_lux / PI
 	var total := 0.0
 	for ring in range(MOON_VIEW_RINGS):
 		var sin_theta := sin_cap * sqrt((ring + 0.5) / MOON_VIEW_RINGS)
@@ -561,13 +664,12 @@ func _moon_in_view_luminance(eye_itrf_m: Vector3, moon_itrf_m: Vector3, sun_itrf
 			var hit := eye + v * (-along - sqrt(maxf(along * along - (r * r - radius * radius), 0.0)))
 			var n := hit.normalized()
 			var ground_itrf := moon_itrf_m + hit
-			var mu0 := n.dot((sun_itrf_m - ground_itrf).normalized())
+			var sunlit := regolith_reflectance(n, (sun_itrf_m - ground_itrf).normalized(), -v)
 			var luminance := 0.0
-			if mu0 > 0.0:
-				var mu := maxf(-n.dot(v), 1.0e-3)
-				luminance += sun_scale * 2.0 * mu0 / (mu0 + mu) * (1.0 - occulted_fraction(sun_itrf_m - ground_itrf,
-						SUN_RADIUS_M, -ground_itrf, EARTH_MEAN_RADIUS_M))
-			luminance += earth_scale * maxf(n.dot(-ground_itrf.normalized()), 0.0)
+			if sunlit > 0.0:
+				luminance += sun_scale * sunlit * (1.0 - occulted_fraction(sun_itrf_m - ground_itrf, SUN_RADIUS_M,
+						-ground_itrf, EARTH_MEAN_RADIUS_M))
+			luminance += earth_scale * regolith_reflectance(n, -ground_itrf.normalized(), -v)
 			total += luminance
 	return total / (MOON_VIEW_RINGS * MOON_VIEW_AZIMUTHS) * sin_cap * sin_cap
 

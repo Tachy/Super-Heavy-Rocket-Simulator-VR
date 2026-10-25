@@ -284,8 +284,10 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   bleibt farbig; tiefer in der Nacht übernehmen die Stäbchen: das Bild wird dunkel, entsättigt und bläulich
   (Purkinje-Effekt). Vollmond: Landschaft grau und gedämpft erkennbar, der Himmel dunkelblau-grau, nur hellere Sterne;
   der Mond beleuchtet Boden, Meer (Glitzerpfad), Himmel und Fahrzeuge. Mondlose Nacht: dunkel, Sterne bis etwa
-  6. Größe. Aschgraues Mondlicht (Erdschein) auf der Mondsichel ist in der Dämmerung schwach sichtbar. Stadtlichter,
-  Triebwerksflammen, Sterne und Anzeigen behalten ihre Farbe (bewusst nicht entsättigt). Gleich in VR (beide Augen).
+  6. Größe. Aschgraues Mondlicht (Erdschein) auf der Mondsichel ist in der Dämmerung schwach sichtbar. Stadtlichter
+  leuchten mit ihrer physikalischen Leuchtdichte und gehen wie alles andere durch das Augenmodell; Triebwerksflammen,
+  Sterne und Anzeigen behalten ihre Farbe (bewusst nicht entsättigt). In der totalen Sonnenfinsternis passt sich das
+  Auge wie in der Dämmerung an den hellsten Himmel an (den Ring am Horizont). Gleich in VR (beide Augen).
 - Sonnenfinsternis: im Kernschatten wird der Himmel dunkel, ringsum am Horizont leuchtet die Dämmerung (360 Grad),
   nur helle Sterne und Planeten erscheinen; der Mondschatten ist aus dem Orbit als dunkler Fleck mit weichem Rand zu
   sehen.

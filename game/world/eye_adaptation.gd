@@ -24,7 +24,7 @@ extends RefCounted
 ##   tone mapper; the same for both VR eyes) adds rod_scale x max(w_s . rgb, 0) x ROD_TINT to every pixel, rod_scale =
 ##   k g_r / g_c with the rod gain g_r = L_ref / (10^1.255 t_s(L_as)) (Ferwerda's m_r: the display observer is
 ##   photopic) and the scotopic luminance from the pixel's linear RGB (SCOTOPIC_WEIGHTS);
-## - display-referred emitters (plume, city lights, the stars' own brightness, UI markers, the VR panel) take the
+## - display-referred emitters (plume, the stars' own brightness, UI markers, the VR panel) take the
 ##   inverse of that step in their shaders (shaders/vision.gdshaderinc), so they look as before.
 ## Inputs: the photopic and scotopic adaptation luminances L_a, L_as (Atmosphere.adaptation_luminance, view-independent),
 ## paced in log space: light adaptation tau 0.5 s, dark adaptation 110 s (Pattanaik et al. 2000, "Time-dependent visual
@@ -91,9 +91,12 @@ var _snap_pending := true
 
 ## The next step toward the target adaptation luminances (photopic cd/m^2, scotopic cd/m^2) over dt_s: exponential in
 ## log luminance, the light time constant when the scene got brighter, the dark one when it got darker; a pending snap
-## jumps to the targets. Then the gains for the reference luminance (cd/m^2, the white plate under the TOA Sun).
+## jumps to the targets. Then the gains for the reference luminance (cd/m^2, the white plate under the TOA Sun). The
+## photopic target is capped at the reference: above it the gain is 1 anyway, and an eye paced from above it would wait
+## (dark constant) until it fell below the reference before the gain moved - the former code paced the clamped gain
+## (night-vision review M3).
 func advance(target_cd_m2: float, target_scotopic_cd_m2: float, reference_cd_m2: float, dt_s: float) -> void:
-	var target := maxf(target_cd_m2, LUMINANCE_FLOOR_CD_M2)
+	var target := clampf(target_cd_m2, LUMINANCE_FLOOR_CD_M2, maxf(reference_cd_m2, LUMINANCE_FLOOR_CD_M2))
 	var target_scotopic := maxf(target_scotopic_cd_m2, LUMINANCE_FLOOR_CD_M2)
 	if _snap_pending:
 		adaptation_cd_m2 = target

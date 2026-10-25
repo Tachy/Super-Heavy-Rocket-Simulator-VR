@@ -9,7 +9,6 @@ render_mode unshaded, cull_back;
 
 #include "res://shaders/eclipse.gdshaderinc"
 #include "res://shaders/atmosphere.gdshaderinc"
-#include "res://shaders/vision.gdshaderinc"
 
 uniform sampler2D day_texture : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
 uniform sampler2D night_texture : source_color, filter_linear_mipmap_anisotropic, repeat_disable;
@@ -17,7 +16,9 @@ uniform vec3 sun_position_local;   // apparent, from the Earth's centre
 uniform vec3 moon_position_local;  // apparent, from the Earth's centre
 uniform float sun_radius_m = 695700000.0;
 uniform float moon_radius_m = 1737400.0;
+// City lights before the atmosphere tables are loaded (display value of a white texel); with them: scene-referred.
 uniform float night_lights_intensity = 1.2;
+global uniform float earth_city_lights_cd_m2;
 uniform float day_exposure;  // set from Atmosphere.DAY_EXPOSURE (world.gd): the one exposure of every surface
 // Ground patches store vertices relative to their centre; this restores body-local metres.
 instance uniform vec3 vertex_offset = vec3(0.0);
@@ -38,10 +39,10 @@ void fragment() {
 	float cos_sun = dot(n, normalize(to_sun));
 	float sunlit = 1.0 - occulted_fraction(to_sun, sun_radius_m, moon_position_local - local_position, moon_radius_m);
 	vec3 albedo = texture(day_texture, UV).rgb;
-	// City lights fade in through civil twilight (sun 0..6 deg below the horizon).
+	// City lights switch on through civil twilight (sun 0..6 deg below the horizon).
 	float night_factor = smoothstep(0.0, -0.1, cos_sun);
 	vec3 night = texture(night_texture, UV).rgb;
-	night = night * night * night_lights_intensity * night_factor;  // suppress dark-sky noise
+	night = night * night * night_factor;  // the squared texel suppresses the dark-sky noise
 
 	if (atmosphere_enabled) {
 		// The direct Sun x the local sunlit fraction; the sky light with the eclipse sky's factor (the dark sky inside
@@ -59,9 +60,11 @@ void fragment() {
 		vec3 offset = (local_position - atmosphere_camera_hi) - atmosphere_camera_lo;
 		vec3 transmittance;
 		vec3 in_scatter = atm_to_point_offset(offset, transmittance);
-		// City lights: display-referred [call 2026-10-25], so they bypass night vision's rod step (vision.gdshaderinc).
-		ALBEDO = day * transmittance + in_scatter + vision_display_referred(night * transmittance);
+		// City lights: scene-referred (user ruling 2026-10-25, review I6), a luminance through the eye model like every
+		// other: the texel x earth_city_lights_cd_m2 (Atmosphere.CITY_LIGHTS_PEAK_CD_M2) x the scene value per cd/m^2.
+		vec3 city = night * (earth_city_lights_cd_m2 * atmosphere_scene_per_cd_m2);
+		ALBEDO = (day + city) * transmittance + in_scatter;
 	} else {
-		ALBEDO = albedo * max(cos_sun, 0.0) * sunlit * day_exposure + night;
+		ALBEDO = albedo * max(cos_sun, 0.0) * sunlit * day_exposure + night * night_lights_intensity;
 	}
 }

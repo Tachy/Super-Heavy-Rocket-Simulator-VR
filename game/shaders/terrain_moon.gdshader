@@ -1,5 +1,5 @@
 shader_type spatial;
-// Moon terrain node (TerrainQuadtree): the model of moon.gdshader (Lommel-Seeliger regolith, Earth shadow with the
+// Moon terrain node (TerrainQuadtree): the model of moon.gdshader (the regolith reflectance of moon_regolith.gdshaderinc, Earth shadow with the
 // reddened umbra glow, physical earthshine) on the relief normal, with geomorphing. Albedo: the global colour map
 // (moon_color, equirectangular) through CUSTOM1's global UV; the Moon has no imagery crops and no water.
 // Cast shadows (crater rims and mountains shadowing the ground, the long polar shadows) are not modelled: they belong to
@@ -11,6 +11,7 @@ render_mode unshaded, cull_back;
 #include "res://shaders/eclipse.gdshaderinc"
 #include "res://shaders/atmosphere.gdshaderinc"
 #include "res://shaders/terrain_morph.gdshaderinc"
+#include "res://shaders/moon_regolith.gdshaderinc"
 
 // CUSTOM1.u runs past 1 on nodes across the antimeridian (continuous inside the node), hence repeat.
 uniform sampler2D albedo_texture : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -22,10 +23,6 @@ global uniform vec3 moon_terrain_camera_lo;
 uniform float sun_radius_m = 695700000.0;
 uniform float earth_radius_m = 6371000.0;
 // The constants of moon.gdshader (same look as the body mesh from scaled space).
-// Earthshine: a white Lambertian facing the Earth in scene units without the exposure gain (Atmosphere.earthshine_scene:
-// the Lambert-sphere Earth at its phase, ~8e-5 at full Earth; World sets it once per frame).
-global uniform float moon_earthshine;
-uniform float exposure = 1.6;
 uniform vec3 umbra_glow = vec3(0.020, 0.005, 0.0015);
 
 varying vec3 local_position;
@@ -48,16 +45,19 @@ void fragment() {
 	vec3 n = normalize(local_normal);
 	vec3 to_sun = moon_sun_position_local - local_position;
 	vec3 to_earth = moon_earth_position_local - local_position;
+	vec3 to_eye = normalize(-camera_offset);
 	float mu0 = max(dot(n, normalize(to_sun)), 0.0);
-	float mu = max(dot(n, normalize(-camera_offset)), 1e-3);
+	float mu = max(dot(n, to_eye), 1e-3);
 	float lommel_seeliger = 2.0 * mu0 / (mu0 + mu);
 	float sunlit = 1.0 - occulted_fraction(to_sun, sun_radius_m, to_earth, earth_radius_m);
-	float earth_light = moon_earthshine * max(dot(n, normalize(to_earth)), 0.0);
+	// The Sun and the earthshine through the one regolith reflectance (night-vision fix round I3).
+	float light = moon_regolith_scale * (regolith_reflectance(n, normalize(to_sun), to_eye) * sunlit * moon_sun_scene
+			+ regolith_reflectance(n, normalize(to_earth), to_eye) * moon_earthshine);
 	// v stays half a texel inside the map (repeat would bleed the opposite pole into the polar rows).
 	float half_texel_v = 0.5 / float(textureSize(albedo_texture, 0).y);
 	vec3 albedo = texture(albedo_texture, vec2(global_uv.x, clamp(global_uv.y, half_texel_v, 1.0 - half_texel_v))).rgb;
 	vec3 eclipse_light = umbra_glow * (1.0 - sunlit) * lommel_seeliger;
-	vec3 color = albedo * (lommel_seeliger * sunlit * exposure * 0.5 + earth_light + eclipse_light);
+	vec3 color = albedo * (light + eclipse_light);
 	if (atmosphere_enabled) {
 		// Through the Earth's atmosphere only if the view ray crosses it before the ground (a camera near the Moon:
 		// never; atm_sky_to_far_object).

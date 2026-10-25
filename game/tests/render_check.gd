@@ -3,8 +3,8 @@
 # Vehicle: --vehicle=starship_block3 --site=starbase_olp1 [--fly=40] (ignite, liftoff at 3 s, fly N s)
 #          [--autopilot] (ascent autopilot instead of manual) [--circularize] (plan node afterwards)
 #          [--watch_from_site[=2000]] (afterwards: seen from the ground 2000 m east of the site, aimed at the vehicle)
-# Ground view: --lat= --lon= [--height=0] [--body=moon] (selenographic, MOON_ME; --height defaults to the lunar
-#          surface there, --eye_height=2 above it) with --azimuth / --elevation / --fov
+# Ground view: --lat= --lon= [--height=] [--body=moon] (selenographic, MOON_ME; --height defaults to the core's
+#          surface there, the Earth's or the Moon's, --eye_height=2 above it) with --azimuth / --elevation / --fov
 # Sea: --sea_lat=32.5 --sea_lon=-61 [--eye_height=10] ground view at sea, the eye above the geoid (with --azimuth etc.)
 # Catch tower: [--tower_arms_deg=0] draws the arms at a fixed opening (0 = closed).
 # Drone ship: a mission with a deck (--mission=falcon9_asds_sea --at_event=landed,20 --view=1) prints the viewed CG above
@@ -331,17 +331,19 @@ func _print_lunar_placement(world: World) -> void:
 			+ "%.1f m from the site %s" % [horizontal_m, site["name"]])
 
 
-# Ground view at --lat / --lon on the Earth or (--body=moon) the Moon; on the Moon --height defaults to the core's
-# surface there (the mean sphere without the lunar terrain).
+# Ground view at --lat / --lon on the Earth or (--body=moon) the Moon; --height defaults to the core's surface there
+# (StarsimCore.surface_samples: the terrain, else the ellipsoid / the mean sphere), the eye --eye_height above it.
 func _view_from_ground(world: World) -> void:
 	var lat := float(_args["lat"])
 	var lon := float(_args["lon"])
 	var body: String = _args.get("body", "earth")
 	var height := float(_args.get("height", "0"))
-	if body == "moon" and not _args.has("height"):
-		var samples: Dictionary = world.core.surface_samples("moon", PackedFloat64Array([lat]), PackedFloat64Array([lon]))
+	if not _args.has("height"):
+		# The core's surface (the Earth terrain or the ellipsoid, the lunar terrain or the mean sphere): an eye at 0 m on
+		# the ellipsoid stood ~150 m inside the terrain at Dallas (night-vision review I5).
+		var samples: Dictionary = world.core.surface_samples(body, PackedFloat64Array([lat]), PackedFloat64Array([lon]))
 		height = samples["height_m"][0] if bool(samples["present"]) else 0.0
-		print("render_check: lunar ground view at %.4f, %.4f: surface %.2f m" % [lat, lon, height])
+		print("render_check: %s ground view at %.4f, %.4f: surface %.2f m" % [body, lat, lon, height])
 	var site := {"id": "custom", "name": "custom", "body": body, "latitude_deg": lat, "longitude_deg": lon,
 			"height_m": height}
 	if _args.has("eye_height"):
