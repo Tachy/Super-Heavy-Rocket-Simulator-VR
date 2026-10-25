@@ -30,6 +30,10 @@ constexpr int spatial_differencing_template = 3;
 constexpr int no_bitmap = 255;
 constexpr double micro_degrees_per_degree = 1e6;  // template 3.0 angle unit when the basic angle is 0 / missing
 constexpr std::uint32_t missing_u32 = 0xFFFFFFFFu;
+// Damaged-header guards (downloaded input): no grid beyond 2^24 points (GFS 0.25 deg: 1.04e6; 0.1 deg global: 6.5e6)
+// is allocated, and no packed field is wider than 32 bits.
+constexpr std::uint64_t max_grid_points = std::uint64_t{1} << 24;
+constexpr int max_field_bits = 32;
 
 [[noreturn]] void refuse(const std::string& why) { throw DecodeError("GRIB2 message: " + why); }
 
@@ -106,6 +110,14 @@ std::vector<std::int64_t> unpack_complex(const Section& s5, std::span<const std:
     const int extra_bits = differenced ? 8 * static_cast<int>(s5.unsigned_at(49, 1)) : 0;
     if (order < 0 || order > 2) refuse("spatial differencing of order " + std::to_string(order));
     if (groups == 0 || groups > count) refuse("invalid group count");
+    if (width_bits > max_field_bits || length_bits > max_field_bits || extra_bits > max_field_bits) {
+        refuse("group descriptor wider than 32 bits");
+    }
+    // Every group has a reference, a width and a length in the data section: check before sizing the group tables.
+    if (static_cast<std::uint64_t>(groups) * static_cast<std::uint64_t>(bits + width_bits + length_bits) >
+        8 * static_cast<std::uint64_t>(data.size())) {
+        refuse("group descriptors exceed the data section");
+    }
 
     BitReader reader(data);
     std::int64_t first[2] = {0, 0};
@@ -131,20 +143,26 @@ std::vector<std::int64_t> unpack_complex(const Section& s5, std::span<const std:
         if (group_length[g] < 0 || x.size() + static_cast<std::size_t>(group_length[g]) > count) {
             refuse("group lengths exceed the number of values");
         }
+        if (group_width[g] > max_field_bits) refuse("group width above 32 bits");
         for (std::int64_t i = 0; i < group_length[g]; ++i) {
             x.push_back(group_reference[g] + static_cast<std::int64_t>(reader.read(static_cast<int>(group_width[g]))));
         }
     }
     if (x.size() != count) refuse("group lengths do not add up to the number of values");
 
+    // Undone in modular uint64 arithmetic: a damaged field may wrap but never overflows a signed integer (UB); valid
+    // fields stay far inside the range.
+    const auto u = [](std::int64_t v) { return static_cast<std::uint64_t>(v); };
     if (order == 1) {
         x[0] = first[0];
-        for (std::size_t i = 1; i < count; ++i) x[i] += minimum + x[i - 1];
+        for (std::size_t i = 1; i < count; ++i) x[i] = static_cast<std::int64_t>(u(x[i]) + u(minimum) + u(x[i - 1]));
     } else if (order == 2) {
         if (count < 2) refuse("second-order differencing of fewer than two values");
         x[0] = first[0];
         x[1] = first[1];
-        for (std::size_t i = 2; i < count; ++i) x[i] += minimum + 2 * x[i - 1] - x[i - 2];
+        for (std::size_t i = 2; i < count; ++i) {
+            x[i] = static_cast<std::int64_t>(u(x[i]) + u(minimum) + 2 * u(x[i - 1]) - u(x[i - 2]));
+        }
     }
     return x;
 }
@@ -196,6 +214,9 @@ Grib2Field decode_grib2_message(std::span<const std::byte> message) {
     const std::uint64_t di = s3->unsigned_at(64, 4);
     const std::uint64_t dj = s3->unsigned_at(68, 4);
     if (di != dj) refuse("longitude and latitude steps differ");
+    if (count > max_grid_points || rows > max_grid_points || columns > max_grid_points) {
+        refuse("grid larger than 2^24 points");  // also keeps rows and columns inside int
+    }
     if (rows == 0 || columns == 0 || rows * columns != count) refuse("grid size does not match the number of points");
 
     // Section 6: no bitmap.
@@ -209,9 +230,14 @@ Grib2Field decode_grib2_message(std::span<const std::byte> message) {
     packing.binary_scale = std::ldexp(1.0, static_cast<int>(s5->signed_at(16, 2)));
     packing.decimal_scale = std::pow(10.0, -static_cast<double>(s5->signed_at(18, 2)));
     packing.bits = static_cast<int>(s5->unsigned_at(20, 1));
-    if (packing.bits > 32) refuse("more than 32 bits per value");
+    if (packing.bits > max_field_bits) refuse("more than 32 bits per value");
 
     const std::span<const std::byte> data = s7->bytes.subspan(5);
+    if (packing.template_number == simple_packing_template &&
+        static_cast<std::uint64_t>(count) * static_cast<std::uint64_t>(packing.bits) >
+            8 * static_cast<std::uint64_t>(data.size())) {
+        refuse("data section shorter than its packed values");
+    }
     std::vector<std::int64_t> x;
     switch (packing.template_number) {
         case simple_packing_template: {

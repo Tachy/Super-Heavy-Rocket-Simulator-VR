@@ -171,9 +171,12 @@ $imageryPart = Join-Path $Build "part_imagery"
 foreach ($dir in @($package, $terrainPart, $imageryPart)) { if (Test-Path $dir) { Remove-Item $dir -Recurse -Force } }
 Mirror $export $package @()
 Copy-Item (Join-Path $PSScriptRoot "release\*.cmd") $package
-# CREDITS.md carries the full licence texts the binaries must reproduce (BSD-3 clause 2: Bruneton's atmosphere code).
-if (-not (Select-String -Path (Join-Path $Root "CREDITS.md") -SimpleMatch "Copyright (c) 2017 Eric Bruneton" -Quiet)) {
-    throw "CREDITS.md lacks the third-party licence texts (run python tools/data_pipeline/credits.py)"
+# CREDITS.md carries the full licence texts the binaries must reproduce (BSD-3 clause 2: Bruneton's atmosphere code;
+# BSD-2 clause 2: lz4 in the weather decoders).
+foreach ($notice in @("Copyright (c) 2017 Eric Bruneton", "Copyright (c) 2011-2020, Yann Collet")) {
+    if (-not (Select-String -Path (Join-Path $Root "CREDITS.md") -SimpleMatch $notice -Quiet)) {
+        throw "CREDITS.md lacks the third-party licence text '$notice' (run python tools/data_pipeline/credits.py)"
+    }
 }
 Copy-Item (Join-Path $Root "CREDITS.md"), (Join-Path $Root "README.md"), (Join-Path $Root "README.de.md") $package
 Mirror (Join-Path $Root "config") (Join-Path $package "config") @()

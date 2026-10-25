@@ -113,7 +113,10 @@ FloatGrid decode_zarr_blosc_chunk(std::span<const std::byte> chunk, int levels, 
         std::memcpy(out, chunk.data() + header_size, nbytes);
         return grid;
     }
-    if (blocksize == 0 || blocksize % typesize != 0) refuse("invalid block size " + std::to_string(blocksize));
+    // c-blosc clamps the block size to nbytes: a larger one is a damaged header (and would size the scratch block).
+    if (blocksize == 0 || blocksize % typesize != 0 || blocksize > nbytes) {
+        refuse("invalid block size " + std::to_string(blocksize));
+    }
     const std::size_t nblocks = (nbytes + blocksize - 1) / blocksize;
     if (header_size + 4 * nblocks > chunk.size()) refuse("block table runs past the end of the frame");
 

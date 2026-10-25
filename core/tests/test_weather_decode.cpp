@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <toml++/toml.hpp>
 
 #include "starsim/weather_decode/weather_decode.hpp"
@@ -41,6 +43,31 @@ std::vector<float> read_floats(const fs::path& file) {
 
 bool same_bits(const std::vector<float>& a, const std::vector<float>& b) {
     return a.size() == b.size() && std::memcmp(a.data(), b.data(), a.size() * sizeof(float)) == 0;
+}
+
+// Byte offset of GRIB2 section `number` in a single-field message (walks the section lengths after section 0).
+std::size_t section_offset(const std::vector<std::byte>& message, int number) {
+    std::size_t pos = 16;
+    while (pos + 5 <= message.size()) {
+        std::uint32_t length = 0;
+        for (int i = 0; i < 4; ++i) length = (length << 8) | std::to_integer<std::uint32_t>(message[pos + i]);
+        if (std::to_integer<int>(message[pos + 4]) == number) return pos;
+        pos += length;
+    }
+    FAIL("section " << number << " not found");
+    return 0;
+}
+
+// Writes `value` big-endian into `width` octets starting at the manual's 1-based octet of the section at `section`.
+void put_octets(std::vector<std::byte>& message, std::size_t section, std::size_t octet, std::size_t width,
+                std::uint64_t value) {
+    for (std::size_t i = 0; i < width; ++i) {
+        message[section + octet - 1 + i] = static_cast<std::byte>((value >> (8 * (width - 1 - i))) & 0xFF);
+    }
+}
+
+void put_u32_le(std::vector<std::byte>& frame, std::size_t offset, std::uint32_t value) {
+    for (std::size_t i = 0; i < 4; ++i) frame[offset + i] = static_cast<std::byte>((value >> (8 * i)) & 0xFF);
 }
 
 }  // namespace
@@ -111,6 +138,12 @@ TEST_CASE("Damaged blosc chunks are refused", "[weather]") {
         for (std::size_t i = 40; i < 140; ++i) bad[i] = std::byte{0xFF};
         CHECK_THROWS_AS(weather_decode::decode_zarr_blosc_chunk(bad, levels, rows, columns), DecodeError);
     }
+    SECTION("block size larger than the data") {
+        std::vector<std::byte> bad = good;
+        put_u32_le(bad, 8, 4u * levels * rows * columns + 4u);  // nbytes + one float
+        CHECK_THROWS_WITH(weather_decode::decode_zarr_blosc_chunk(bad, levels, rows, columns),
+                          Catch::Matchers::ContainsSubstring("invalid block size"));
+    }
     SECTION("shape does not match the frame") {
         CHECK_THROWS_AS(weather_decode::decode_zarr_blosc_chunk(good, levels, rows, columns + 1), DecodeError);
         CHECK_THROWS_AS(weather_decode::decode_zarr_blosc_chunk(good, 0, rows, columns), DecodeError);
@@ -171,4 +204,51 @@ TEST_CASE("Damaged GRIB2 messages are refused", "[weather]") {
     bad = good;
     bad[bad.size() - 1] = std::byte{'0'};  // no end section "7777"
     CHECK_THROWS_AS(weather_decode::decode_grib2_message(bad), DecodeError);
+}
+
+TEST_CASE("Damaged GRIB2 headers are refused before any allocation", "[weather]") {
+    // Section lengths stay intact, so the outer message checks pass and each header guard is reached.
+    using Catch::Matchers::ContainsSubstring;
+    const std::vector<std::byte> complex = read_bytes(fixture_dir / "gfs_tcdc_300mb.grb2");
+    const std::vector<std::byte> simple = read_bytes(fixture_dir / "gfs_clmr_50mb.grb2");
+
+    SECTION("grid above 2^24 points (rows * columns = count = 2^32 - 1)") {
+        std::vector<std::byte> bad = complex;
+        const std::size_t s3 = section_offset(bad, 3), s5 = section_offset(bad, 5);
+        put_octets(bad, s3, 7, 4, 0xFFFFFFFFu);
+        put_octets(bad, s3, 31, 4, 65537);
+        put_octets(bad, s3, 35, 4, 65535);
+        put_octets(bad, s5, 6, 4, 0xFFFFFFFFu);
+        CHECK_THROWS_WITH(weather_decode::decode_grib2_message(bad), ContainsSubstring("larger than 2^24"));
+    }
+    SECTION("rows beyond int (2^31 x 1)") {
+        std::vector<std::byte> bad = complex;
+        const std::size_t s3 = section_offset(bad, 3), s5 = section_offset(bad, 5);
+        put_octets(bad, s3, 7, 4, 0x80000000u);
+        put_octets(bad, s3, 31, 4, 1);
+        put_octets(bad, s3, 35, 4, 0x80000000u);
+        put_octets(bad, s5, 6, 4, 0x80000000u);
+        CHECK_THROWS_WITH(weather_decode::decode_grib2_message(bad), ContainsSubstring("larger than 2^24"));
+    }
+    SECTION("simple packing: more packed bits than the data section holds") {
+        std::vector<std::byte> bad = simple;
+        put_octets(bad, section_offset(bad, 5), 20, 1, 8);  // 8 bits per value, no data octets
+        CHECK_THROWS_WITH(weather_decode::decode_grib2_message(bad), ContainsSubstring("shorter than its packed values"));
+    }
+    SECTION("complex packing: more group descriptors than the data section holds") {
+        std::vector<std::byte> bad = complex;
+        put_octets(bad, section_offset(bad, 5), 32, 4, 721u * 1440u);  // NG = one group per point
+        CHECK_THROWS_WITH(weather_decode::decode_grib2_message(bad), ContainsSubstring("exceed the data section"));
+    }
+    SECTION("complex packing: group width / length fields wider than 32 bits") {
+        std::vector<std::byte> bad = complex;
+        put_octets(bad, section_offset(bad, 5), 37, 1, 40);  // bits of the group widths
+        CHECK_THROWS_WITH(weather_decode::decode_grib2_message(bad), ContainsSubstring("wider than 32 bits"));
+        bad = complex;
+        put_octets(bad, section_offset(bad, 5), 47, 1, 63);  // bits of the group lengths
+        CHECK_THROWS_WITH(weather_decode::decode_grib2_message(bad), ContainsSubstring("wider than 32 bits"));
+        bad = complex;
+        put_octets(bad, section_offset(bad, 5), 36, 1, 200);  // reference of the group widths
+        CHECK_THROWS_WITH(weather_decode::decode_grib2_message(bad), ContainsSubstring("group width above 32 bits"));
+    }
 }

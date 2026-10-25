@@ -99,7 +99,7 @@ def write_era5():
            numcodecs.Blosc(cname="lz4", clevel=5, shuffle=numcodecs.Blosc.NOSHUFFLE), cut)
     (OUT / "era5_cc_cutout_values.bin").write_bytes(cut.tobytes())
     # c-blosc keeps small buffers in one block (forced block sizes below 64 kB are raised): a larger cut-out gives the
-    # block table, two split blocks and an unsplit leftover block as in the store's 512 kB-block chunks.
+    # block table, a split block and an unsplit leftover block as in the store's 512 kB-block chunks.
     big = cut_out(ERA5_BLOCKS_ROWS, ERA5_BLOCKS_COLUMNS)
     blocksize = encode("era5_cc_blocks.bin", numcodecs.Blosc(cname="lz4", clevel=5, shuffle=numcodecs.Blosc.SHUFFLE,
                                                              blocksize=16384), big)

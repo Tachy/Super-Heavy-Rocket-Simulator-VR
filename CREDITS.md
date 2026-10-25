@@ -5,7 +5,7 @@ Generated from `tools/data_pipeline/sources.toml` by `tools/data_pipeline/credit
 | Data / software | Credit | Licence |
 |---|---|---|
 | [NAIF SPICE Toolkit (CSPICE N0067, Windows/MSVC 64-bit package; sources compiled by us)](https://naif.jpl.nasa.gov/pub/naif/toolkit/C/PC_Windows_VisualC_64bit/packages/cspice.zip) | SPICE Toolkit, NASA/JPL Navigation and Ancillary Information Facility (NAIF) | NAIF rules: free of charge, may be redistributed; no warranty (https://naif.jpl.nasa.gov/naif/rules.html) |
-| [LZ4 1.10.0 (lib/lz4.c, compiled by us: the lz4 blocks of the ERA5 Zarr blosc chunks, core/src/weather_decode)](https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.zip) | LZ4 Library, Copyright (c) 2011-2020 Yann Collet | BSD-2-Clause (lib/LICENSE) |
+| [LZ4 1.10.0 (lib/lz4.c, compiled by us: the lz4 blocks of the ERA5 Zarr blosc chunks, core/src/weather_decode)](https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.zip) | LZ4 Library, Copyright (c) 2011-2020 Yann Collet | BSD-2-Clause (lib/LICENSE; the full notice under Third-party licences below) |
 | [Leap seconds kernel](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls) | NASA/JPL NAIF generic kernels | NAIF generic kernels: public, free to use |
 | [JPL planetary and lunar ephemeris DE440 (short, 1849-2150)](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp) | Park et al. (2021), The JPL Planetary and Lunar Ephemerides DE440 and DE441, AJ 161:105 | NAIF generic kernels: public, free to use |
 | [GM values consistent with DE440](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc) | NASA/JPL NAIF generic kernels | NAIF generic kernels: public, free to use |
@@ -45,6 +45,35 @@ Code dependencies: Godot Engine (MIT), godot-cpp (MIT), Catch2 (BSL-1.0),
 DOP853 coefficients from SciPy (BSD-3-Clause).
 
 ## Third-party licences
+
+### LZ4 1.10.0 (lib/lz4.c, compiled by us: the lz4 blocks of the ERA5 Zarr blosc chunks, core/src/weather_decode)
+
+```
+LZ4 Library
+Copyright (c) 2011-2020, Yann Collet
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice, this
+  list of conditions and the following disclaimer in the documentation and/or
+  other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
 ### Precomputed Atmospheric Scattering: a New Implementation (Eric Bruneton, 2017) - algorithms ported to C++ and GLSL, spectral inputs transcribed from his demo
 
