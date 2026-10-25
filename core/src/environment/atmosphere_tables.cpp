@@ -104,6 +104,7 @@ AtmosphereParameters atmosphere_parameters(const config::AtmosphereOpticsConfig&
     p.sky_radiance_to_luminance.fill(constants::max_luminous_efficacy_lm_per_w);
     p.sun_radiance_to_luminance = sun_radiance_to_luminance_factors();
     p.toa_solar_illuminance_lux = toa_solar_illuminance_lux();
+    p.ground_albedo = optics.ground_albedo;
     return p;
 }
 

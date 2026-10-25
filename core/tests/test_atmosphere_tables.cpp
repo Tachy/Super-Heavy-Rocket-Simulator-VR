@@ -154,6 +154,8 @@ TEST_CASE("Atmosphere parameters follow Bruneton's luminance mode", "[atmosphere
     const double weights[3] = {0.2126, 0.7152, 0.0722};
     for (int c = 0; c < 3; ++c) y += weights[c] * p.solar_illuminance_rgb[c] * p.sun_radiance_to_luminance[c];
     CHECK(y == Approx(p.toa_solar_illuminance_lux).epsilon(0.02));
+    // The game reads the tables' ground albedo from the parameters (sky ground, umbra light; final review M3).
+    CHECK(p.ground_albedo == optics().ground_albedo);
 }
 
 TEST_CASE("Table parameterisation round-trips", "[atmosphere]") {

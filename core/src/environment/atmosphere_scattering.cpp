@@ -198,6 +198,11 @@ Vec3 AtmosphereScattering::sky_luminance_to_point(const Vec3& camera_itrf_m, con
     const double discriminant = rmu * rmu - r * r + a.top_radius_m * a.top_radius_m;
     const double distance_to_top = discriminant >= 0.0 ? -rmu - std::sqrt(discriminant) : -1.0;
     if (distance_to_top > 0.0) {
+        if (distance_to_top >= length_m) {
+            // The point lies before the entry (atmosphere.gdshaderinc atm_to_point_model): outside the atmosphere.
+            if (transmittance_out) *transmittance_out = {1.0, 1.0, 1.0};
+            return {};
+        }
         camera = camera + view_ray * distance_to_top;
         r = a.top_radius_m;
         rmu += distance_to_top;

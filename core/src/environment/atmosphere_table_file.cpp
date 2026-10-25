@@ -22,7 +22,7 @@ namespace starsim::environment {
 namespace {
 
 constexpr char magic[8] = {'S', 'T', 'A', 'R', 'A', 'T', 'M', 'O'};
-constexpr int parameter_count = 15;
+constexpr int parameter_count = 16;
 
 std::uint64_t fnv1a(const char* data, std::size_t size) {
     std::uint64_t h = 14695981039346656037ull;  // FNV-1a 64 offset basis
@@ -66,7 +66,8 @@ std::array<double, parameter_count> parameter_fields(const AtmosphereParameters&
             p.sun_radiance_to_luminance[0],
             p.sun_radiance_to_luminance[1],
             p.sun_radiance_to_luminance[2],
-            p.toa_solar_illuminance_lux};
+            p.toa_solar_illuminance_lux,
+            p.ground_albedo};
 }
 
 AtmosphereParameters parameters_from_fields(const std::array<double, parameter_count>& f) {
@@ -80,6 +81,7 @@ AtmosphereParameters parameters_from_fields(const std::array<double, parameter_c
     p.sky_radiance_to_luminance = {f[8], f[9], f[10]};
     p.sun_radiance_to_luminance = {f[11], f[12], f[13]};
     p.toa_solar_illuminance_lux = f[14];
+    p.ground_albedo = f[15];
     return p;
 }
 

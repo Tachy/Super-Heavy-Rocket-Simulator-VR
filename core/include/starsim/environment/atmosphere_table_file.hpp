@@ -5,7 +5,7 @@
 //   uint32   format version (atmosphere_table_file_version), uint32 0
 //   uint64   input hash (atmosphere_input_hash)
 //   int32[8] table sizes (AtmosphereTableSizes in declaration order)
-//   double[15] parameters (AtmosphereParameters in declaration order)
+//   double[16] parameters (AtmosphereParameters in declaration order)
 //   uint64[4] float counts of transmittance, scattering, single_mie, irradiance
 //   float32[] the four tables in that order
 //   uint64   FNV-1a 64 checksum of every byte before it
@@ -20,7 +20,7 @@
 
 namespace starsim::environment {
 
-inline constexpr std::uint32_t atmosphere_table_file_version = 1;
+inline constexpr std::uint32_t atmosphere_table_file_version = 2;  // 2: ground_albedo among the parameters
 inline constexpr const char* atmosphere_cache_file_name = "earth_atmosphere.bin";
 
 // Writes the tables to a unique temp file next to `file` and renames it into place (parallel writers never expose a

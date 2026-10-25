@@ -78,6 +78,7 @@ godot::Dictionary atmosphere_parameters_dictionary(const environment::Atmosphere
     d["sky_radiance_to_luminance"] = to_godot(p.sky_radiance_to_luminance);
     d["sun_radiance_to_luminance"] = to_godot(p.sun_radiance_to_luminance);
     d["toa_solar_illuminance_lux"] = p.toa_solar_illuminance_lux;
+    d["ground_albedo"] = p.ground_albedo;
     return d;
 }
 

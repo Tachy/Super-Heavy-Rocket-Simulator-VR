@@ -398,6 +398,46 @@ TEST_CASE("The ellipsoid maps onto the ground sphere", "[atmosphere]") {
     CHECK(math::dot(n, radial) == Approx(1.0).epsilon(1e-14));
 }
 
+TEST_CASE("Aerial perspective to a point before the atmosphere's entry is empty", "[atmosphere]") {
+    // A camera above the top looking down at a point between it and the atmosphere: the segment never enters, so no
+    // in-scatter and T = 1 (atmosphere.gdshaderinc atm_to_point_model's guard; final review M7). The point on the ground
+    // along the same ray is the control: light in-scattered, T < 1. Small tables: only the geometry is asserted.
+    environment::AtmosphereTableSizes sizes;
+    sizes.transmittance_mu = 32;
+    sizes.transmittance_r = 16;
+    sizes.scattering_r = 4;
+    sizes.scattering_mu = 8;
+    sizes.scattering_mu_s = 4;
+    sizes.scattering_nu = 2;
+    sizes.irradiance_mu_s = 8;
+    sizes.irradiance_r = 4;
+    auto c = optics();
+    c.scattering_orders = 1;
+    const environment::AtmosphereScattering model(
+        std::make_shared<const environment::AtmosphereTables>(environment::precompute_atmosphere(c, sizes)));
+    const double top_m = model.tables().parameters.top_radius_m;
+    const Vec3 camera{constants::wgs84_semi_major_axis_m + 1000e3, 0.0, 0.0};
+    const Vec3 down = math::normalized(Vec3{-1.0, 0.1, 0.0});
+    const Vec3 sun = math::normalized(Vec3{1.0, 0.2, 0.3});
+    const double rmu = math::dot(camera, down);
+    const double entry_m = -rmu - std::sqrt(rmu * rmu - math::dot(camera, camera) + top_m * top_m);
+    REQUIRE(entry_m > 0.0);
+    Vec3 t_before;
+    const Vec3 before = model.sky_luminance_to_point(camera, camera + down * (0.5 * entry_m), sun, &t_before);
+    CHECK(before.x == 0.0);
+    CHECK(before.y == 0.0);
+    CHECK(before.z == 0.0);
+    CHECK(t_before.x == 1.0);
+    CHECK(t_before.y == 1.0);
+    CHECK(t_before.z == 1.0);
+    const double ground_m = -rmu - std::sqrt(rmu * rmu - math::dot(camera, camera) +
+                                             std::pow(constants::wgs84_semi_major_axis_m, 2));
+    Vec3 t_ground;
+    const Vec3 ground = model.sky_luminance_to_point(camera, camera + down * ground_m, sun, &t_ground);
+    CHECK(luminance_y(ground) > 0.0);
+    CHECK(t_ground.y < 1.0);
+}
+
 TEST_CASE("Single-scattering lookups between table rows and across the horizon match the raymarch", "[atmosphere]") {
     // Off-texel CPU lookups near the ground (the real observers sit between the scattering table's r rows): observers
     // at 0 m and 50 m looking 1-2 deg up, Sun 30 deg high, single scattering (orders = 1) vs the brute-force raymarch,

@@ -61,6 +61,7 @@ struct AtmosphereParameters {
     // solar radiance at kLambdaR / G / B, ComputeSpectralRadianceToLuminanceFactors with lambda_power 0).
     std::array<double, 3> sky_radiance_to_luminance{}, sun_radiance_to_luminance{};
     double toa_solar_illuminance_lux = 0.0;  // E_v at the top of the atmosphere at 1 AU (683 lm/W x int ybar E dlambda)
+    double ground_albedo = 0.0;              // the Lambertian ground of the tables (earth_optics.toml ground_albedo)
 };
 
 // The precomputed tables, float32 RGBA texels (row-major, x fastest).
