@@ -16,8 +16,9 @@ const BLOCK_SIZE := 4 * 16
 ## The maps (Texture2DRD; their RD textures are made on the render thread, bound by bind_textures on the main thread).
 var near_texture := Texture2DRD.new()
 var far_texture := Texture2DRD.new()
-## True once a frame was rendered with the maps (render thread writes, main thread reads).
-var ran := false
+## Time.get_ticks_msec() of the last frame rendered with the maps (render thread writes, main thread reads); the
+## layer takes the maps as valid only shortly after it.
+var ran_msec := -1000000
 ## Checks only (cloud_check.gd): the near map with the grid mean too (the maps' machinery against the CPU's
 ## Beer-Lambert, without the shapes' local departures from the cell mean).
 var grid_mean_only := false
@@ -177,5 +178,5 @@ func _render_callback(_callback_type: int, _render_data: RenderData) -> void:
 		_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shader, 1, set1), 1)
 		_rd.compute_list_dispatch(list, groups, groups, 1)
 	_rd.compute_list_end()
-	ran = true
+	ran_msec = Time.get_ticks_msec()
 	stats = {"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}

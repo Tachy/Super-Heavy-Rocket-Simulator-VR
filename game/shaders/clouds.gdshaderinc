@@ -108,7 +108,12 @@ const float CLOUD_DETAIL_STATES = 4.0;      // core cloud_detail_states (the tab
 // often a few hundred metres thick; no fibre direction: the snapshot has no wind, user decision 2026-10-25).
 const float CLOUD_ICE_TILE_V_M = 2000.0;
 // A cloud fraction below half a code step counts as none (no division by ~0).
-const float CLOUD_MIN_FRACTION = 0.5 / 255.0;
+const float CLOUD_MIN_FRACTION = 0.5 / 255.0;  // core constants.hpp cloud_min_cover
+// The direct beam's cover 1 - (1 - f)^n of a broken layer (core cloud_beam_cover; constants.hpp cloud_overlap_*): n = 1 +
+// a (1 - f) + b max(cot e - k, 0), fitted to the shapes' shadows (cloud_check.gd section 7).
+const float CLOUD_OVERLAP_VERTICAL = 0.66;
+const float CLOUD_OVERLAP_SLANT = 0.21;
+const float CLOUD_OVERLAP_ONSET_COT = 1.8;
 // Base transition of the vertical profile rule (core constants.hpp cloud_base_transition_m).
 const float CLOUD_BASE_TRANSITION_M = 50.0;
 // The entry-surface cosine (core cloud_optics.cpp): regulariser and smallest cosine.
@@ -740,7 +745,28 @@ vec2 cloud_column_mean_depth(vec2 lat_lon, float height_m) {
 
 // The cover to use (core CloudColumnDepths::cover): 0 without cloud, at least half a fraction code step with it.
 float cloud_column_cover(vec2 column) {
-	return column.x > 0.0 ? clamp(column.y, 0.5 / 255.0, 1.0) : 0.0;
+	return column.x > 0.0 ? clamp(column.y, CLOUD_MIN_FRACTION, 1.0) : 0.0;
+}
+
+// The cover of the direct beam of cloud fraction f for the Sun's cosine mu0 to the vertical (core cloud_beam_cover; f is
+// the fraction as stored: 0 without cloud).
+float cloud_beam_cover_of(float fraction, float mu0) {
+	if (fraction <= 0.0) {
+		return 0.0;
+	}
+	float f = clamp(fraction, CLOUD_MIN_FRACTION, 1.0);
+	if (f >= 1.0) {
+		return 1.0;
+	}
+	float m = clamp(mu0, 0.02, 1.0);
+	float cot = sqrt(max(1.0 - m * m, 0.0)) / m;
+	float n = 1.0 + CLOUD_OVERLAP_VERTICAL * (1.0 - f) + CLOUD_OVERLAP_SLANT * max(cot - CLOUD_OVERLAP_ONSET_COT, 0.0);
+	return 1.0 - pow(1.0 - f, n);
+}
+
+// The beam's cover of a column (x the grid-mean depth, y the largest fraction): 0 without cloud.
+float cloud_column_beam_cover(vec2 column, float mu0) {
+	return column.x > 0.0 ? cloud_beam_cover_of(column.y, mu0) : 0.0;
 }
 
 // The sky's diffuse transmittance (core two_stream_diffuse_transmittance; cloud_sky_factor).
@@ -775,7 +801,7 @@ float cloud_slab_total_transmittance(float optical_depth, float mu0) {
 // The Sun's light diffused through the column (core cloud_sun_diffuse_transmittance) per unit of its horizontal
 // irradiance: the cloudy part's slab total minus its direct transmittance, times the cover.
 float cloud_sun_diffuse(vec2 column, float mu0) {
-	float cover = cloud_column_cover(column);
+	float cover = cloud_column_beam_cover(column, mu0);
 	if (mu0 <= 0.0 || cover <= 0.0) {
 		return 0.0;
 	}
@@ -791,7 +817,7 @@ float cloud_sky_factor(vec2 column) {
 
 // The direct beam through the column slanted to mu0 (the far tier and the Moon).
 float cloud_column_direct(vec2 column, float mu0) {
-	float cover = cloud_column_cover(column);
+	float cover = cloud_column_beam_cover(column, mu0);
 	return cover > 0.0 ? 1.0 - cover + cover * exp(-column.x / (cover * max(mu0, 0.02))) : 1.0;
 }
 

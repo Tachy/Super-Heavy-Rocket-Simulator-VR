@@ -84,6 +84,7 @@ var last_upload_ms := 0.0  ## the longest frame step of the last field upload (m
 var field_texture_bytes := 0  ## both resident snapshots (field + ice share texels)
 var pinned := false  ## show_now was used: set_target is ignored
 var effect := CloudEffect.new()  ## the cloud pass (the world's Compositor)
+const SHADOW_RUN_WINDOW_MSEC := 250  ## how long after its last run the shadow effect still counts as running
 var shadow_effect := CloudShadowEffect.new(SHADOW_MAP_SIZE)  ## the cloud shadow maps (the world's Compositor)
 
 var _core: StarsimCore
@@ -247,7 +248,11 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	var enabled := noise_ready and visible_weight > 0.0 and camera_fixed_m.length() < RAYMARCH_MAX_DISTANCE_M
 	ShaderGlobals.set_value(&"cloud_enabled", enabled)
 	_update_shadow_frame(camera_render, height)
-	ShaderGlobals.set_value(&"cloud_shadow_valid", enabled and shadow_effect.bind_textures() and shadow_effect.ran)
+	# The maps count as valid only while the effect keeps running (its render callback stamps ran_msec; the render
+	# thread may trail the main thread by a frame or two, hence the window rather than a per-frame flag): a stopped
+	# effect (compositor detached, device lost) turns the shadows back to the column the next moments.
+	var shadow_ran := Time.get_ticks_msec() - shadow_effect.ran_msec <= SHADOW_RUN_WINDOW_MSEC
+	ShaderGlobals.set_value(&"cloud_shadow_valid", enabled and shadow_effect.bind_textures() and shadow_ran)
 
 
 ## The ids of the resident slots and the weight of slot 1 (tests).

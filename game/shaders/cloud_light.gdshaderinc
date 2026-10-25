@@ -6,7 +6,7 @@
 // Shadow maps (CloudShadowEffect, before the opaque pass; shaders/cloud_shadow.gdshaderinc): orthographic along the
 // Sun, a plane perpendicular to it through an anchor near the ground under the camera (Earth-fixed between re-anchors:
 // no swimming), axes e1, e2. A texel holds, along its line toward the Sun (parameter t from the plane, t = (p - A) . s),
-// the first and last t with cloud, the optical depth between and the cover C (the largest cloud fraction on the line;
+// the first and last t with cloud, the optical depth between and the cover C (the beam cover of the largest cloud fraction on the line;
 // 1 for the shapes): a receiver at t_r gets 1 - C + C exp(-od / C x clamp((t_back - t_r) / (t_back - t_front))) -
 // exact below the clouds (the ground), linear inside them. The near map (+-16 km, 62.5 m texels) holds the visible
 // clouds' density (the shapes), the far map (+-200 km) the grid mean as independent columns (cloud_optics.hpp: no
@@ -41,7 +41,7 @@ float cloud_shadow_map_transmittance(sampler2D map, vec3 anchor, float half_exte
 	for (int k = 0; k < 4; k++) {
 		vec4 texel = texelFetch(map, ivec2(i0) + ivec2(k & 1, k >> 1), 0);
 		float fraction = clamp((texel.g - t_r) / max(texel.g - texel.r, 1.0e-3), 0.0, 1.0);
-		float cover = max(texel.a, 0.5 / 255.0);
+		float cover = max(texel.a, CLOUD_MIN_FRACTION);
 		t[k] = 1.0 - cover + cover * exp(-texel.b * fraction / cover);
 	}
 	return mix(mix(t[0], t[1], f.x), mix(t[2], t[3], f.x), f.y);

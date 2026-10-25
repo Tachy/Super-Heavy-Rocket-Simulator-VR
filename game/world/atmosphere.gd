@@ -1002,7 +1002,10 @@ func cloud_light_at(position_itrf_m: Vector3, light_direction_itrf: Vector3) -> 
 		return _cloud_cache[key]
 	if _cloud_cache.size() > 8:
 		_cloud_cache.clear()
-	var light: Dictionary = _core.weather_cloud_light(position_itrf_m, light_direction_itrf) if _core != null else {}
+	# Only while the clouds are drawn (cloud_enabled: noise ready, weather shown, within the scaled-space limit): the
+	# vehicles and the eye are dimmed exactly when the GPU's clouds are there (Task 9 fix 1; one frame behind at most).
+	var shown: bool = ShaderGlobals.value(&"cloud_enabled")
+	var light: Dictionary = _core.weather_cloud_light(position_itrf_m, light_direction_itrf) 			if _core != null and shown else {}
 	var result := Vector3(float(light.get("sun_transmittance", 1.0)), float(light.get("sun_diffuse", 0.0)),
 			float(light.get("sky_factor", 1.0)))
 	_cloud_cache[key] = result

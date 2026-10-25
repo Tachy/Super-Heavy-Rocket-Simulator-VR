@@ -10,7 +10,7 @@
 // around a cloudy 250 m centre), then CLOUD_SHADOW_FINE samples over it (one coarse step added on both sides) with the
 // map's density: the shapes of the visible clouds (near map; detail band-limited at the larger of the texel and the
 // step, the shapes' mean for steps beyond CLOUD_SHADOW_SHAPE_STEP_M; cover 1) or the grid mean (far map; cover = the
-// largest cloud fraction on the line, cloud_light.gdshaderinc). Midpoint rule.
+// beam's cover of the largest cloud fraction on the line, cloud_beam_cover_of). Midpoint rule.
 // Out: (t of the first cloudy sample's start, t of the last one's end, optical depth, cover); a clear line (t_hi,
 // t_hi, 0, 1).
 
@@ -49,8 +49,10 @@ vec2 cloud_shadow_crossing(vec3 p_model, float p_height_m, vec3 s_model, float h
 	return vec2(-b - q, -b + q) / a2;
 }
 
-// x the extinction (shapes or grid mean), y the cloud fraction there.
-vec2 cloud_shadow_density(vec3 offset, float step_m, float texel_m, bool shapes) {
+// x the extinction (shapes or grid mean), y the cover there: 1 for the shapes, else the beam's cover of the cell's
+// fraction (cloud_beam_cover_of: the cell mean's shadow as the shapes cast it); the shapes' mean part (steps beyond
+// CLOUD_SHADOW_SHAPE_STEP_M) mixes toward it. sun: the Sun direction (unit).
+vec2 cloud_shadow_density(vec3 offset, vec3 sun, float step_m, float texel_m, bool shapes) {
 	vec3 p = atmosphere_camera_hi + atmosphere_camera_lo + offset;
 	float h = cloud_height_of(p);
 	if (h > CLOUD_TOP_M) {
@@ -58,16 +60,17 @@ vec2 cloud_shadow_density(vec3 offset, float step_m, float texel_m, bool shapes)
 	}
 	CloudCell cell = cloud_field(cloud_lat_lon(p), h);
 	float mean = cell.extinction;
+	float beam = cloud_beam_cover_of(cell.fraction, dot(cloud_geodetic_up(p), sun));
 	if (!shapes || mean <= 0.0) {
-		return vec2(mean, cell.fraction);
+		return vec2(mean, beam);
 	}
 	float w = smoothstep(CLOUD_SHADOW_SHAPE_STEP_M, 4.0 * CLOUD_SHADOW_SHAPE_STEP_M, step_m);
 	if (w >= 1.0) {
-		return vec2(mean, 1.0);
+		return vec2(mean, beam);  // the grid mean's own independent column (as the far map), not an overcast
 	}
 	float in_cloud;
 	float shaped = cloud_extinction_in_cell(cell, offset, h, max(texel_m, step_m), in_cloud);
-	return vec2(mix(shaped, mean, w), 1.0);
+	return vec2(mix(shaped, mean, w), mix(1.0, beam, w));
 }
 
 void main() {
@@ -105,7 +108,7 @@ void main() {
 	int last = -1;
 	for (int i = 0; i < CLOUD_SHADOW_COARSE; i++) {
 		float t = t_lo + (float(i) + 0.5) * dt;
-		if (cloud_shadow_density(origin + s * t, dt, texel_m, false).x > 0.0) {
+		if (cloud_shadow_density(origin + s * t, s, dt, texel_m, false).x > 0.0) {
 			if (first < 0) {
 				first = i;
 			}
@@ -121,12 +124,12 @@ void main() {
 	float b = t_lo + float(min(last + 2, CLOUD_SHADOW_COARSE)) * dt;
 	float step_m = (b - a) / float(CLOUD_SHADOW_FINE);
 	float depth = 0.0;
-	float cover = shapes ? 1.0 : 0.0;
+	float cover = 0.0;  // the largest cover seen (the shapes: 1; the shapes' mean part: the cell fraction)
 	float front = b;
 	float back = a;
 	for (int i = 0; i < CLOUD_SHADOW_FINE; i++) {
 		float t = a + (float(i) + 0.5) * step_m;
-		vec2 beta = cloud_shadow_density(origin + s * t, step_m, texel_m, shapes);
+		vec2 beta = cloud_shadow_density(origin + s * t, s, step_m, texel_m, shapes);
 		if (beta.x > 0.0) {
 			depth += beta.x * step_m;
 			cover = max(cover, beta.y);
