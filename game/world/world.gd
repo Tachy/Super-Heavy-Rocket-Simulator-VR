@@ -86,6 +86,7 @@ func _ready() -> void:
 var _delta := 0.0
 var _mission_press_tdb_s := 0.0  ## clock instant of the pending mission start (the clock holds there meanwhile)
 var _camera_serial := 0  ## serial the camera distance was last fitted to
+var _last_world_tdb_s := NAN  ## the instant of the previous update_world (eye adaptation's time step)
 
 
 func _process(delta: float) -> void:
@@ -137,7 +138,12 @@ func update_world() -> void:
 	sun_apparent_from_earth_m = core.apparent_body_position_gcrf_m("sun", t, Vector3.ZERO, Vector3.ZERO)
 	moon_apparent_from_earth_m = core.apparent_body_position_gcrf_m("moon", t, Vector3.ZERO, Vector3.ZERO)
 	var sun_from_camera := core.apparent_body_position_gcrf_m("sun", t, cam, Vector3.ZERO)
-	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m)
+	# Eye adaptation: the viewer adapts over the longer of the frame time and the simulated step (paused: real time;
+	# time warp: a time-lapse whose exposure follows the scene; a clock jump: adapted at once).
+	var adaptation_dt := maxf(_delta, absf(t - _last_world_tdb_s)) if not is_nan(_last_world_tdb_s) else 0.0
+	_last_world_tdb_s = t
+	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
+			1.0 - core.solar_eclipse_fraction_gcrf(cam, t))
 
 	earth.place(cam)
 	var camera_fixed := earth.fixed_to_gcrf.transposed() * cam
@@ -206,6 +212,7 @@ func _on_mission_started(ok: bool, _message: String) -> void:
 ## above height_m, default GROUND_EYE_HEIGHT_M; optional body "moon": selenographic coordinates, height_m above the
 ## mean sphere).
 func set_ground_site(site: Dictionary) -> void:
+	atmosphere.snap_adaptation()  # a new view: the viewer is taken as adapted to it
 	focus = site.get("id", "custom")
 	ground_site = site
 	camera.mode = OrbitCamera.Mode.GROUND
@@ -215,6 +222,7 @@ func set_ground_site(site: Dictionary) -> void:
 
 
 func set_focus(new_focus: String) -> void:
+	atmosphere.snap_adaptation()  # a new view: the viewer is taken as adapted to it
 	focus = new_focus
 	ground_site = {}
 	camera.mode = OrbitCamera.Mode.ORBIT

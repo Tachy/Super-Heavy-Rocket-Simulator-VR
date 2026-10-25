@@ -60,6 +60,7 @@ func _run() -> void:
 	_earth_to_gcrf = _core.earth_fixed_to_gcrf(_core.utc_to_tdb_s(EPOCH_UTC))  # a real, non-trivial rotation
 	if OS.get_cmdline_user_args().has("--f32"):
 		_atmosphere.table_format = Image.FORMAT_RGBAF  # compare with the full-float tables
+	_atmosphere.eye_adaptation_enabled = false  # the fixed day exposure, except in section 10
 	print("atmosphere_check: table format %s" % ("RGBAF" if _atmosphere.table_format == Image.FORMAT_RGBAF else "RGBAH"))
 	_atmosphere.start_loading(_core, Paths.config_dir(), Paths.data_dir().path_join("atmosphere"))
 	if not _atmosphere.wait_until_loaded():
@@ -155,6 +156,31 @@ func _run() -> void:
 	await _cube_far_sample("pad, white cube 40 km east", _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, 30.0))
 	_sun_light_colour_sample("pad, Sun light colour at 2 deg", pad, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0,
 			2.0))
+
+	# 10. Eye adaptation (controller ruling 2026-10-25; every other sample runs with it off: the fixed day exposure).
+	# Adapted to each view: the noon zenith (reference), the zenith at Sun -3 deg (visible: > ADAPTED_TWILIGHT_MIN and
+	# darker than the noon zenith), at Sun -12 deg (dark: < ADAPTED_NIGHT_MAX, a magnitude-1 star visible); 400 km by
+	# day: gain 1 (the day look in orbit).
+	var noon_zenith := await _adapted_sample("adapted, pad noon zenith", pad, zenith, sun_60)
+	var twilight := await _adapted_sample("adapted, pad zenith, Sun -3 deg", pad, zenith,
+			_local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, -3.0))
+	var twilight_y := twilight.dot(LUMINANCE_WEIGHTS)
+	var noon_y := noon_zenith.dot(LUMINANCE_WEIGHTS)
+	_check("adapted Sun -3 deg zenith visible, darker than noon", twilight_y > ADAPTED_TWILIGHT_MIN and twilight_y < noon_y,
+			"luminance %s (needs > %s), noon %s, ratio %s" % [_num(twilight_y), _num(ADAPTED_TWILIGHT_MIN), _num(noon_y),
+			_num(twilight_y / noon_y)])
+	var sun_m12 := _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 270.0, -12.0)
+	var night := await _adapted_sample("adapted, pad zenith, Sun -12 deg", pad, zenith, sun_m12, false)
+	_check("adapted Sun -12 deg zenith dark", night.dot(LUMINANCE_WEIGHTS) < ADAPTED_NIGHT_MAX,
+			"luminance %s (needs < %s)" % [_num(night.dot(LUMINANCE_WEIGHTS)), _num(ADAPTED_NIGHT_MAX)])
+	_atmosphere.eye_adaptation_enabled = true
+	_atmosphere.snap_adaptation()
+	await _star_sample("adapted, Sun -12 deg, magnitude-1 star", pad, _local_direction(PAD_LAT_DEG, PAD_LON_DEG, 90.0,
+			45.0), sun_m12, 1.0, StarCase.VISIBLE)
+	_atmosphere.eye_adaptation_enabled = false
+	await _adapted_sample("adapted, 400 km by day, limb at 10 km", orbit, _limb_direction(orbit, Vector3(0, 0, 1),
+			10000.0), sun_orbit)
+	_check("adapted 400 km by day: the day exposure", is_equal_approx(_last_gain, 1.0), "gain %.4f" % _last_gain)
 
 	print("atmosphere_check: %d samples, %d failures" % [_samples, _failures])
 	print("atmosphere_check: %s" % ("PASS" if _failures == 0 else "FAIL"))
@@ -381,6 +407,41 @@ func _moon_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun
 	var expected: Vector3 = vacuum * transmittance + cpu["luminance"] * _atmosphere.luminance_scale
 	print("atmosphere_check:   Moon without the atmosphere %s, transmittance %s" % [_vec(vacuum), _vec(transmittance)])
 	_compare(label + " = Moon x T + sky", expected, got, MOON_TOLERANCE)
+
+
+## Eye adaptation: the adapted zenith at Sun -3 deg must exceed this scene luminance - ~7 % of the noon zenith at the
+## day exposure (0.13), well above black through the AgX tone mapper - and the adapted night zenith (Sun -12 deg) stay
+## below the second, ~1 % of the twilight minimum.
+const ADAPTED_TWILIGHT_MIN := 0.01
+const ADAPTED_NIGHT_MAX := 1.0e-4
+var _last_gain := 1.0
+
+
+## A sky sample with the eye adaptation on, adapted to the view (snap): the CPU sky x the adapted luminance scale (2 %;
+## compare false: not compared - a night sky of ~1e-7 lies below the half-float HDR viewport's resolution); returns the
+## rendered pixel.
+func _adapted_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3,
+		compare := true) -> Vector3:
+	_atmosphere.eye_adaptation_enabled = true
+	_atmosphere.snap_adaptation()
+	var got := await _render(camera_itrf_m, view_itrf, sun_itrf)
+	_last_gain = _atmosphere.exposure_gain
+	var cpu: Dictionary = _core.atmosphere_sky_luminance(camera_itrf_m, view_itrf, sun_itrf)
+	if compare:
+		_compare(label + " [gain %.2f]" % _last_gain, cpu["luminance"] * _atmosphere.luminance_scale, got)
+	else:
+		print("atmosphere_check: %-38s CPU %s got %s (gain %.2f)" % [label, _vec(cpu["luminance"]
+				* _atmosphere.luminance_scale), _vec(got), _last_gain])
+	_atmosphere.eye_adaptation_enabled = false
+	return got
+
+
+## Counts and prints one pass / fail condition.
+func _check(label: String, ok: bool, detail: String) -> void:
+	_samples += 1
+	if not ok:
+		_failures += 1
+	print("atmosphere_check: %-38s %s %s" % [label, detail, "ok" if ok else "FAIL"])
 
 
 const CUBE_TOLERANCE := 0.05

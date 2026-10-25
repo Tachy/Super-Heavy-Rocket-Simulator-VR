@@ -83,8 +83,18 @@ Sun is. Colours come out of the physics (spectral scattering converted to displa
 7. **One exposure for everything [call].** Today a white diffuse surface under the full TOA Sun renders as
    `day_exposure` (1.5). The luminance tables are scaled by the same factor (scene value = luminance x
    `day_exposure` x pi / E_v,TOA), so sky, ground, sea and vehicles share one camera exposure; vehicles' light energy is
-   brought onto the same scale (a white Lambertian under the TOA Sun gives `day_exposure` in every material). No
-   automatic exposure in this part (see non-goals).
+   brought onto the same scale (a white Lambertian under the TOA Sun gives `day_exposure` in every material).
+   **Eye adaptation [call, 2026-10-25]** (now in scope, reversing the earlier "no automatic exposure"): the fixed day
+   exposure renders civil twilight black (CPU zenith luminance 17 cd/m^2 at Sun -3 deg, 0.48 at -6 deg against
+   ~1600-8000 by day), which contradicts the seamless, physically coloured transition. One exposure gain multiplies
+   every physical luminance of the scene (the tables' luminance scale, the Sun light, Moon, Sun disc, plumes; stars
+   and city lights stay display-referred): Weber adaptation (Ferwerda et al. 1996) to the luminance of a white
+   Lambertian at the eye under the transmitted Sun and the sky (CPU), relative to the TOA Sun - gain 1 in orbit by
+   day -, bounded to 25 (the noon / sunset zenith ratio: twilight never brighter than day, nautical twilight dark),
+   paced like the eye (light adaptation 0.5 s, dark adaptation 110 s after Pattanaik et al. 2000; snapped on a view
+   change). Exposure only: no white balance, no colour change. Fidelity flag `Atmosphere.eye_adaptation_enabled`
+   (on in the game, off in the GPU check's comparisons). Works in VR as on the desktop (shader uniforms, no
+   post-process).
 8. **Solar eclipses in the sky [call].** Inside the Moon's shadow the sky must darken (the default render check is the
    2024-04-08 eclipse). When the penumbra touches the Earth (CPU check), the in-scattering along a view ray is split
    into a few segments (Bruneton's difference form S(x) - T(x, y) S(y)), each weighted by the Sun's visible fraction
@@ -102,7 +112,8 @@ Sun is. Colours come out of the physics (spectral scattering converted to displa
   out so clouds can later add their own shadowing and light.
 - Weather-dependent aerosols, humidity, water-vapour absorption, airglow, aurora, noctilucent clouds.
 - Atmospheric refraction (flattened Sun at the horizon, astronomical refraction of the stars), scintillation.
-- Automatic exposure / eye adaptation (night side, inside the Earth's shadow): a later follow-up if wanted.
+- ~~Automatic exposure / eye adaptation~~ - now in scope [call, 2026-10-25], see Goal 7: civil twilight rendered black
+  at the fixed exposure. Still out: mesopic / scotopic vision (rod desaturation, Purkinje shift), glare and bloom models.
 - Light shafts / volumetric shadows of mountains, vehicles or the tower in the air.
 - Any change to flight physics: the US76 atmosphere stays the only atmosphere the simulation flies through; this part
   only reads it.

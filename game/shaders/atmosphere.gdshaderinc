@@ -9,7 +9,7 @@
 // the model's sphere of radius a by stretching the polar axis by a / b (positions and rays by M = diag(1, a/b, 1) in
 // render axes, normals by M^-T), as in the core.
 // Units: results are scene values = luminance (cd/m^2) x atmosphere_luminance_scale (one exposure for sky, ground and
-// vehicles: day_exposure x pi / E_v,TOA x 1 / d_AU^2, game/world/atmosphere.gd).
+// vehicles: day_exposure x pi / E_v,TOA x 1 / d_AU^2 x the eye adaptation's exposure gain, game/world/atmosphere.gd).
 // Numerics (float32 on the GPU, floating origin): the camera's height comes from atmosphere_camera_altitude_m
 // (differenced in float64 on the CPU); the near-ground terms rho = sqrt(r^2 - R^2) and the ray discriminants are formed
 // from heights and (r + R), never from differences of large squares, so the pad's horizon neither jitters nor bands.
@@ -54,6 +54,9 @@ global uniform mat3 atmosphere_world_to_earth;      // render world axes -> Eart
 global uniform vec3 atmosphere_sun_direction;       // Earth-local unit vector to the apparent Sun (unstretched)
 global uniform float atmosphere_luminance_scale;    // table luminance (cd/m^2, Sun at 1 AU) -> scene; incl. 1/d_AU^2
 global uniform float atmosphere_scene_per_cd_m2;    // a true luminance (cd/m^2) -> scene value (no 1/d_AU^2)
+// Eye adaptation's exposure gain (game/world/eye_adaptation.gd; 1 = the day exposure), already contained in the two
+// scales above; for what is not lit through the tables (Moon, Sun disc, plumes).
+global uniform float atmosphere_exposure_gain;
 global uniform bool atmosphere_enabled;             // false until the tables are uploaded
 
 // ---- Model parameters (AtmosphereParameters of the loaded tables, set once on upload).

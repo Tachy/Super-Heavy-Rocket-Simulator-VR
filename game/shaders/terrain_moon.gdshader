@@ -63,7 +63,7 @@ void fragment() {
 		vec3 transmittance;
 		vec3 sky = atm_sky_to_far_object(atm_camera_local(), atmosphere_world_to_earth * direction_world,
 				length(camera_offset), transmittance);
-		color = color * transmittance + sky;
+		color = color * atmosphere_exposure_gain * transmittance + sky;  // the eye adaptation's exposure gain on the lit Moon
 	}
 	ALBEDO = color;
 }

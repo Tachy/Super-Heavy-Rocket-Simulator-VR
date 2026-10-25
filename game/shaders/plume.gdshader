@@ -19,6 +19,6 @@ void fragment() {
 	if (atmosphere_enabled) {
 		atm_to_point_offset(atmosphere_world_to_earth * world_offset, transmittance);
 	}
-	ALBEDO = color.rgb * transmittance;
+	ALBEDO = color.rgb * transmittance * atmosphere_exposure_gain;  // the same exposure as the vehicles (eye adaptation)
 	ALPHA = color.a;
 }

@@ -14,6 +14,7 @@
 #          recorded first, else predicted; flies until it appears)
 #          [--wait_on_pad] (a launch window's wait on the pad: T-) [--view=1] (Tab presses: switch the viewed object)
 #          [--legacy_hud] (F1: the old HUD too)
+# Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -46,6 +47,7 @@ func _process(_delta: float) -> bool:
 	world.clock.warp = 0.0
 	if _frames == 0:
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
+		world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
 		world.set_focus(_args.get("focus", World.FOCUS_EARTH))
 		if _args.has("lat"):
 			_view_from_ground(world)
@@ -92,8 +94,9 @@ func _process(_delta: float) -> bool:
 		var eye := world.camera.position_gcrf_m
 		var up := world.camera.site_up_gcrf if world.camera.mode == OrbitCamera.Mode.GROUND else eye.normalized()
 		var to_sun := (world.sun_apparent_from_earth_m - eye).normalized()
-		print("render_check: Sun elevation at the eye %.2f deg (UTC %s)" % [
-				rad_to_deg(asin(clampf(to_sun.dot(up), -1.0, 1.0))), world.core.tdb_s_to_utc(world.clock.tdb_s)])
+		print("render_check: Sun elevation at the eye %.2f deg (UTC %s), exposure gain %.3f" % [
+				rad_to_deg(asin(clampf(to_sun.dot(up), -1.0, 1.0))), world.core.tdb_s_to_utc(world.clock.tdb_s),
+				world.atmosphere.exposure_gain])
 		var out: String = _args.get("out", "user://render_check.png")
 		var error := root.get_viewport().get_texture().get_image().save_png(out)
 		print("render_check: saved %s (error %d)" % [out, error])

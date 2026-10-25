@@ -7,7 +7,8 @@ extends RefCounted
 ##
 ## Scene units (one exposure, spec "One exposure for everything"): scene value = luminance (cd/m^2) x DAY_EXPOSURE x
 ## pi / E_v,TOA x 1 / d_AU^2 - a white Lambertian surface under the top-of-atmosphere Sun at 1 AU renders as
-## DAY_EXPOSURE, as the Earth shaders' day lighting does.
+## DAY_EXPOSURE, as the Earth shaders' day lighting does. The eye adaptation (EyeAdaptation, fidelity flag
+## eye_adaptation_enabled) multiplies all of it by one exposure gain (1 by day, up to EyeAdaptation.GAIN_MAX in twilight).
 
 ## Scene value of a white Lambertian surface under the full TOA Sun, the one exposure of the game [call: M8 atmosphere
 ## spec, "stays 1.5"]. The `day_exposure` uniforms of shaders/earth.gdshader and terrain_earth.gdshader are set from
@@ -18,6 +19,8 @@ const ASTRONOMICAL_UNIT_M := 149597870700.0
 ## a / b of WGS84 (1 / (1 - f), f = 1 / 298.257223563) [S: NIMA TR8350.2]: the model space's polar stretch, as the core.
 const POLAR_STRETCH := 1.0 / (1.0 - 1.0 / 298.257223563)
 const CACHE_FILE := "earth_atmosphere.bin"
+## [S: ITU-R BT.709] luminance weights of the linear RGB channels (as star_visibility.gdshaderinc).
+const LUMINANCE_WEIGHTS := Vector3(0.2126, 0.7152, 0.0722)
 
 ## True once the textures are uploaded and atmosphere_enabled is set.
 var ready := false
@@ -41,6 +44,14 @@ var luminance_scale := 0.0
 var camera_altitude_m := 0.0
 var sun_direction_local := Vector3.ZERO
 var camera_local_m := Vector3.ZERO
+## Fidelity flag: eye adaptation (EyeAdaptation) - on in the game; off: the fixed day exposure (atmosphere_check.gd).
+var eye_adaptation_enabled := true
+## The exposure gain of the eye adaptation this frame (1 without it), already in luminance_scale and scene_per_cd_m2;
+## the shaders read it as atmosphere_exposure_gain for what is not lit through the tables (Moon, Sun disc, plumes).
+var exposure_gain := 1.0
+## A true luminance (cd/m^2, at the Sun's actual distance) -> scene value, incl. the exposure gain.
+var scene_per_cd_m2 := 0.0
+var _eye := EyeAdaptation.new()
 
 var _core: StarsimCore
 var _task_id := -1
@@ -83,8 +94,11 @@ func wait_until_loaded() -> bool:
 
 ## Per frame: the camera, the Earth's centre and orientation (fixed -> GCRF) and the apparent Sun position (GCRF, as
 ## seen from the Earth's centre), all float64. The camera is differenced against the Earth's centre here, in float64.
+## Eye adaptation (eye_adaptation_enabled): adaptation_dt_s is the time the viewer had to adapt since the last frame
+## (world.gd: the longer of the frame time and the simulated time step), sun_visible_fraction the part of the solar disc
+## the Moon leaves at the camera.
 func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to_gcrf: Basis,
-		sun_apparent_gcrf_m: Vector3) -> void:
+		sun_apparent_gcrf_m: Vector3, adaptation_dt_s := 0.0, sun_visible_fraction := 1.0) -> void:
 	if not poll():
 		return
 	var gcrf_to_fixed := earth_fixed_to_gcrf.transposed()
@@ -96,7 +110,17 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	var sun_from_earth := sun_apparent_gcrf_m - earth_center_gcrf_m
 	var d_au := sun_from_earth.length() / ASTRONOMICAL_UNIT_M
 	sun_direction_local = Frames.to_render(gcrf_to_fixed * sun_from_earth).normalized()
-	luminance_scale = DAY_EXPOSURE * PI / float(parameters["toa_solar_illuminance_lux"]) / (d_au * d_au)
+	var sun_fixed := (gcrf_to_fixed * sun_from_earth).normalized()
+	exposure_gain = 1.0
+	if eye_adaptation_enabled:
+		var target := EyeAdaptation.target_gain(adaptation_luminance(camera_fixed, sun_fixed, sun_visible_fraction, d_au),
+				reference_luminance(d_au))
+		exposure_gain = _eye.advance(target, adaptation_dt_s)
+	var base := DAY_EXPOSURE * PI / float(parameters["toa_solar_illuminance_lux"])
+	luminance_scale = base * exposure_gain / (d_au * d_au)
+	scene_per_cd_m2 = base * exposure_gain
+	RenderingServer.global_shader_parameter_set(&"atmosphere_scene_per_cd_m2", scene_per_cd_m2)
+	RenderingServer.global_shader_parameter_set(&"atmosphere_exposure_gain", exposure_gain)
 	# Render world axes are GCRF in render axes; Earth-local = P R^T P^T (the transpose of the body's render basis).
 	var world_to_earth := Frames.basis_to_render(earth_fixed_to_gcrf).transposed()
 	RenderingServer.global_shader_parameter_set(&"atmosphere_camera_hi", split[0])
@@ -105,6 +129,32 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	RenderingServer.global_shader_parameter_set(&"atmosphere_world_to_earth", world_to_earth)
 	RenderingServer.global_shader_parameter_set(&"atmosphere_sun_direction", sun_direction_local)
 	RenderingServer.global_shader_parameter_set(&"atmosphere_luminance_scale", luminance_scale)
+
+
+## Eye adaptation's luminance at an Earth-fixed eye (cd/m^2): a white Lambertian surface lit by the direct Sun at normal
+## incidence (TOA illuminance x the transmittance to the Sun x visible_fraction) and the sky's horizontal irradiance,
+## (E_sun,n + E_sky) / pi, BT.709 luminance of the RGB luminance channels; the tables' 1 AU values / d_AU^2.
+func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visible_fraction: float, d_au: float) -> float:
+	var solar: Vector3 = parameters["solar_illuminance_rgb"]
+	var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
+	var transmittance := _core.atmosphere_sun_transmittance(eye_itrf_m, sun_direction_itrf)
+	var up := Vector3(eye_itrf_m.x, eye_itrf_m.y, eye_itrf_m.z * POLAR_STRETCH * POLAR_STRETCH).normalized()  # geodetic
+	var sky: Vector3 = _core.atmosphere_illuminance(eye_itrf_m, up, sun_direction_itrf)["sky_lux"]
+	var lux := solar * sun_factor * transmittance * visible_fraction + sky
+	return lux.dot(LUMINANCE_WEIGHTS) / (PI * d_au * d_au)
+
+
+## Eye adaptation's reference luminance (cd/m^2): the white Lambertian under the top-of-atmosphere Sun at d_AU, the state
+## DAY_EXPOSURE is defined for (same channels and weights as adaptation_luminance).
+func reference_luminance(d_au: float) -> float:
+	var solar: Vector3 = parameters["solar_illuminance_rgb"]
+	var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
+	return (solar * sun_factor).dot(LUMINANCE_WEIGHTS) / (PI * d_au * d_au)
+
+
+## The next update takes the eye as adapted to its view (a new view, a test's fixed instant).
+func snap_adaptation() -> void:
+	_eye.snap()
 
 
 ## The Sun light of Godot's lit materials (vehicles, structures: world.gd's DirectionalLight3D) at an Earth-fixed point:
@@ -201,8 +251,9 @@ func _upload(result: Dictionary) -> void:
 	rs.global_shader_parameter_set(&"atmosphere_sun_illuminance_lux", solar * sun_factor)
 	# A true luminance (cd/m^2, at the Sun's actual distance) -> scene value: luminance_scale without the 1 / d_AU^2
 	# (that factor converts the tables' 1 AU values); the star threshold reads the sky's true luminance back with it.
-	rs.global_shader_parameter_set(&"atmosphere_scene_per_cd_m2",
-			DAY_EXPOSURE * PI / float(parameters["toa_solar_illuminance_lux"]))
+	# Without the exposure gain until the first update sets both.
+	scene_per_cd_m2 = DAY_EXPOSURE * PI / float(parameters["toa_solar_illuminance_lux"])
+	rs.global_shader_parameter_set(&"atmosphere_scene_per_cd_m2", scene_per_cd_m2)
 	rs.global_shader_parameter_set(&"atmosphere_scattering_size", Vector4(cells.x, cells.y, cells.z, cells.w))
 	rs.global_shader_parameter_set(&"atmosphere_table_sizes", Vector4(t_size.x, t_size.y, i_size.x, i_size.y))
 	rs.global_shader_parameter_set(&"atmosphere_enabled", true)

@@ -116,6 +116,10 @@ atmosphere_enabled={
 "type": "bool",
 "value": false
 }
+atmosphere_exposure_gain={
+"type": "float",
+"value": 1.0
+}
 atmosphere_bottom_radius_m={
 "type": "float",
 "value": 6377987.0

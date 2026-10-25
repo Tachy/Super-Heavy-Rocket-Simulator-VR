@@ -21,7 +21,7 @@ void fragment() {
 		vec3 direction_world = normalize((INV_VIEW_MATRIX * vec4(VERTEX, 0.0)).xyz);
 		vec3 transmittance;
 		vec3 sky = atm_sky(atm_camera_local(), atmosphere_world_to_earth * direction_world, transmittance);
-		color = color * transmittance + sky;
+		color = color * atmosphere_exposure_gain * transmittance + sky;  // the eye adaptation's exposure gain
 	}
 	ALBEDO = color;
 }
