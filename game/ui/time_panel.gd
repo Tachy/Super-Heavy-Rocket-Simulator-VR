@@ -73,6 +73,14 @@ func _ready() -> void:
 	_presets.item_selected.connect(_on_preset_selected)
 	box.add_child(_presets)
 
+	var weather_box := CheckBox.new()
+	weather_box.text = "Wetter"
+	weather_box.button_pressed = world.weather.enabled
+	weather_box.toggled.connect(func(on: bool) -> void:
+		world.weather.enabled = on
+		WeatherService.save_enabled_setting(on))
+	box.add_child(weather_box)
+
 	box.add_child(HSeparator.new())
 	var launch_label := Label.new()
 	launch_label.text = "Start vorbereiten"
@@ -114,6 +122,7 @@ func _process(_delta: float) -> void:
 			lines.append(sea)
 	if world.atmosphere.status_text != "":
 		lines.append(world.atmosphere.status_text)
+	lines.append(world.weather.status_text())
 	_info_label.text = "\n".join(lines)
 
 

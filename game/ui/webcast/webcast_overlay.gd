@@ -73,6 +73,7 @@ func _process(delta: float) -> void:
 	var timeline: Dictionary = sim.mission_timeline() if active else {}
 	top_bar.show_utc(TopBar.format_utc(world.core.tdb_s_to_utc(now)))
 	top_bar.show_local_time(LocalTime.shared().camera_line(world.core, world.camera.position_gcrf_m, now))
+	top_bar.show_weather(world.weather.status_text())
 	var index := world.view_target.resolve(sim) if active and world.focus == World.FOCUS_VEHICLE else -1
 	var mission := sim.mission_display_name() if active else ""
 	if mission == "" and active:  # no mission name configured: the viewed (else the controlled) vehicle's

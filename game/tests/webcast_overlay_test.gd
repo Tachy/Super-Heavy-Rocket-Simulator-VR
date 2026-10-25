@@ -173,6 +173,8 @@ func _test_overlay() -> void:
 	_check(overlay.mission_clock.clock == "" and overlay.mission_clock.mission_name == "Testflug", "no T-0: no clock")
 	overlay.show_clock({"t0_tdb_s": 25.0, "events": []}, 100.0, "Testflug")
 	_check(overlay.mission_clock.clock == "T+ 00:01:15", "T+ from the timeline's T-0")
+	overlay.top_bar.show_weather("Wetter: aus")
+	_check(overlay.top_bar.weather == "Wetter: aus", "the weather line is kept by the top bar")
 	overlay.free()
 
 

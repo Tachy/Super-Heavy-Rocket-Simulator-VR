@@ -52,6 +52,8 @@ var spice_ok := false  ## SPICE kernels opened in _ready
 var terrain_loaded: Dictionary = {}  ## core.load_terrain's result: {earth, moon}
 var atmosphere := Atmosphere.new()  ## the precomputed atmosphere's tables and global shader uniforms (sky, ambient)
 var refraction := Refraction.new()  ## astronomical refraction of Sun, Moon and stars for the camera
+var weather := WeatherService.new()  ## ERA5 / GFS / analog snapshots for the clouds (M8 weather, Task 7)
+var weather_fetcher := WeatherFetcher.new()  ## the service's HTTP requests (a node: HTTPRequest children)
 
 ## Per-frame state, readable by UI and tests.
 var moon_gcrf_m := Vector3.ZERO
@@ -78,6 +80,10 @@ func _ready() -> void:
 	add_child(camera)
 	_setup_environment()
 	atmosphere.start_loading(core, Paths.config_dir(), data_dir.path_join("atmosphere"))
+	add_child(weather_fetcher)
+	weather.enabled = WeatherService.load_enabled_setting()
+	weather.setup(core, Paths.config_dir(), data_dir.path_join("weather/cache"), data_dir.path_join("weather/analog"),
+			weather_fetcher)
 	_setup_bodies(data_dir)
 	stars.load_catalogue(data_dir.path_join("stars/stars.csv"))
 	add_child(stars)
@@ -97,6 +103,7 @@ var _last_world_tdb_s := NAN  ## the instant of the previous update_world (eye a
 ## The atmosphere's worker tasks write into it and use the core: finished before both go away (review M2).
 func _exit_tree() -> void:
 	atmosphere.shutdown()
+	weather.shutdown()
 
 
 func _process(delta: float) -> void:
@@ -129,6 +136,7 @@ func update_world() -> void:
 		# frame, unevenly): Earth, pad and tower at the clock time but vehicles at the snapshot made the vehicles jump
 		# by up to several metres against the pad every frame (Earth rotation ~420 m/s).
 		t = reached
+	weather.update(t, clock.warp)  # non-blocking: downloads, builds and loads run in the background
 	for view in towers:
 		var at_site: bool = flight.sim.is_active() and view.site_id == flight.launch_site_id
 		view.update_state(flight.sim.tower_state() if at_site else {})

@@ -14,6 +14,7 @@
 #          recorded first, else predicted; flies until it appears)
 #          [--wait_on_pad] (a launch window's wait on the pad: T-) [--view=1] (Tab presses: switch the viewed object)
 #          [--legacy_hud] (F1: the old HUD too)
+# Weather: off in a render check unless --weather[=900] (waits for the downloads, at most that many seconds).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun.
@@ -32,6 +33,7 @@ const EVENT_SEARCH_MAX_S := 20.0 * 86400.0
 var _args := {}
 var _main: Node
 var _frames := 0
+var _start_s := 0.0
 var _terrain_idle := 0  ## consecutive frames without terrain loading
 var _found_event_tdb_s := NAN  ## --at_event: the event's instant found by flying (_fly_until_event)
 
@@ -42,11 +44,14 @@ func _initialize() -> void:
 		_args[parts[0]] = parts[1] if parts.size() > 1 else ""
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
+	_start_s = Time.get_ticks_msec() / 1000.0
 
 
 func _process(_delta: float) -> bool:
 	var world: World = _main.get_node("World")
 	world.clock.warp = 0.0
+	# Weather downloads only on request (--weather): a render check must not fetch gigabytes of cloud data.
+	world.weather.enabled = _args.has("weather")
 	if _frames == 0:
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
 		world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
@@ -90,7 +95,12 @@ func _process(_delta: float) -> bool:
 	# The streamed terrain loads over many frames: wait until nothing is loading (or give up after TERRAIN_MAX_FRAMES).
 	var loading: int = world.earth_terrain.stats["nodes_loading"] + world.moon_terrain.stats["nodes_loading"]
 	_terrain_idle = _terrain_idle + 1 if loading == 0 and not world.atmosphere.loading else 0  # also the sky's tables
-	if _frames >= FRAMES_TO_SETTLE and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES):
+	# --weather[=max seconds]: also wait for the weather service (downloads, builds), at most that long (default 900 s).
+	var weather_waiting: bool = _args.has("weather") and not world.weather.settled() \
+			and Time.get_ticks_msec() / 1000.0 - _start_s < float(_args["weather"] if _args["weather"] != "" else 900.0)
+	if _frames >= FRAMES_TO_SETTLE and not weather_waiting \
+			and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES):
+		print("render_check: ", world.weather.status_text())
 		print("render_check: terrain after %d frames: Earth %s, Moon %s" % [_frames, world.earth_terrain.stats,
 				world.moon_terrain.stats])
 		if _args.has("webcast"):
