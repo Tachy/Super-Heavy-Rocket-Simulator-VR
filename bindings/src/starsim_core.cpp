@@ -584,6 +584,11 @@ godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) 
         bytes.resize(static_cast<int64_t>(texels.size()));
         if (!texels.empty()) std::memcpy(bytes.ptrw(), texels.data(), texels.size());
         result["cloud_texels"] = bytes;
+        const std::vector<std::uint8_t> ice = environment::cloud_render_ice_texels(*snapshot);
+        godot::PackedByteArray ice_bytes;
+        ice_bytes.resize(static_cast<int64_t>(ice.size()));
+        if (!ice.empty()) std::memcpy(ice_bytes.ptrw(), ice.data(), ice.size());
+        result["cloud_ice_texels"] = ice_bytes;
         godot::PackedFloat64Array bottoms;
         for (int i = 0; i <= environment::weather_layer_count; ++i) bottoms.push_back(environment::weather_layer_bottom_m(i));
         result["layer_bottoms_m"] = bottoms;
@@ -676,6 +681,12 @@ godot::Dictionary StarsimCore::cloud_noise() const {
         result["detail"] = bytes(noise.detail_rgba);
         result["detail_size"] = static_cast<int64_t>(noise.detail_size);
         result["coverage_threshold"] = thresholds;
+        godot::PackedFloat32Array edge_mean;
+        for (float m : noise.edge_mean_factor) edge_mean.push_back(m);
+        result["edge_mean_factor"] = edge_mean;
+        result["edge_width_value"] = noise.edge_width_value;
+        result["blue_noise"] = bytes(noise.blue_noise);
+        result["blue_noise_size"] = static_cast<int64_t>(noise.blue_noise_size);
         return result;
     } catch (const std::exception& e) {
         return weather_failure("Wolkenrauschen konnte nicht erzeugt werden: ", e);
