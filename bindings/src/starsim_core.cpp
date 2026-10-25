@@ -590,6 +590,11 @@ godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) 
         ice_bytes.resize(static_cast<int64_t>(ice.size()));
         if (!ice.empty()) std::memcpy(ice_bytes.ptrw(), ice.data(), ice.size());
         result["cloud_ice_texels"] = ice_bytes;
+        const std::vector<std::uint8_t> column = environment::cloud_render_column_texels(*snapshot);
+        godot::PackedByteArray column_bytes;
+        column_bytes.resize(static_cast<int64_t>(column.size()));
+        if (!column.empty()) std::memcpy(column_bytes.ptrw(), column.data(), column.size());
+        result["cloud_column_texels"] = column_bytes;
         godot::PackedFloat64Array bottoms;
         for (int i = 0; i <= environment::weather_layer_count; ++i) bottoms.push_back(environment::weather_layer_bottom_m(i));
         result["layer_bottoms_m"] = bottoms;
@@ -627,7 +632,7 @@ godot::Dictionary StarsimCore::weather_set_active(const godot::String& before_fi
 
 godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& position_itrf_m,
                                                    const godot::Vector3& sun_direction_itrf) const {
-    double sun = 1.0, sky = 1.0;
+    double sun = 1.0, sky = 1.0, diffuse = 0.0;
     try {
     SnapshotPtr before, after;
     double blend = 0.0;
@@ -637,31 +642,43 @@ godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& positio
         after = weather_after_;
         blend = weather_blend_;
     }
+    std::shared_ptr<const environment::CloudSlabTransmittanceLut> lut;
+    {
+        const std::lock_guard<std::mutex> lock(transfer_mutex_);
+        lut = transmittance_lut_;
+    }
     if (before || after) {
         const math::Vec3 p = to_core(position_itrf_m), s = to_core(sun_direction_itrf);
+        struct Light {
+            double sun, sky, diffuse;
+        };
         const auto sample = [&](const SnapshotPtr& snap) {
-            return std::pair<double, double>{environment::cloud_sun_transmittance(*snap, p, s),
-                                             environment::cloud_sky_factor(*snap, p)};
+            return Light{environment::cloud_sun_transmittance(*snap, p, s), environment::cloud_sky_factor(*snap, p),
+                         environment::cloud_sun_diffuse_transmittance(*snap, lut.get(), p, s)};
         };
         if (before && after) {
-            const auto b = sample(before);
-            const auto a = sample(after);
-            sun = b.first + (a.first - b.first) * blend;
-            sky = b.second + (a.second - b.second) * blend;
+            const Light b = sample(before);
+            const Light a = sample(after);
+            sun = b.sun + (a.sun - b.sun) * blend;
+            sky = b.sky + (a.sky - b.sky) * blend;
+            diffuse = b.diffuse + (a.diffuse - b.diffuse) * blend;
         } else {
-            const auto only = sample(before ? before : after);
-            sun = only.first;
-            sky = only.second;
+            const Light only = sample(before ? before : after);
+            sun = only.sun;
+            sky = only.sky;
+            diffuse = only.diffuse;
         }
     }
     } catch (const std::exception& e) {
         weather_failure("Wolkenlicht konnte nicht berechnet werden: ", e);
         sun = 1.0;
         sky = 1.0;
+        diffuse = 0.0;
     }
     godot::Dictionary result;
     result["sun_transmittance"] = sun;
     result["sky_factor"] = sky;
+    result["sun_diffuse"] = diffuse;
     return result;
 }
 
@@ -743,8 +760,19 @@ godot::Dictionary StarsimCore::cloud_transfer_table(const godot::String& file) {
         result["nodes"] = godot::Vector4i(table->depth_nodes, table->mu_nodes, table->theta_nodes, table->psi_nodes);
         result["depth_map"] = godot::Vector3(table->depth_scale, std::log(table->depth_ratio), table->diffusion_k);
         result["theta_map"] = godot::Vector3(table->theta0, table->theta_log, table->theta_linear);
+        // The slab's total transmittance (light under the clouds, Task 9): ~1 s on all cores.
+        auto lut = std::make_shared<const environment::CloudSlabTransmittanceLut>(
+            environment::make_cloud_slab_transmittance_lut(*table));
+        using L = environment::CloudSlabTransmittanceLut;
+        godot::PackedFloat32Array lut_values;
+        for (double v : lut->total) lut_values.push_back(static_cast<float>(v));
+        result["transmittance_lut"] = lut_values;
+        result["transmittance_lut_size"] = godot::Vector2i(L::depth_nodes, L::cosine_nodes);
+        result["transmittance_lut_map"] =
+            godot::Vector4(L::depth_scale, std::log(lut->depth_ratio), L::depth_max, L::cosine_min);
         std::lock_guard<std::mutex> lock(transfer_mutex_);
         transfer_table_ = std::move(table);
+        transmittance_lut_ = std::move(lut);
         return result;
     } catch (const std::exception& e) {
         return weather_failure("Wolken-Transfertabelle konnte nicht gelesen werden: ", e);

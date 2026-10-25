@@ -125,6 +125,7 @@
 // fixture cloud_slab_albedo_mc.csv (numbers in docs/subsystems/weather-clouds.md and test_cloud_optics.cpp).
 
 #include <functional>
+#include <vector>
 
 #include "starsim/environment/cloud_transfer_table.hpp"
 #include "starsim/environment/weather_snapshot.hpp"
@@ -210,6 +211,31 @@ double slab_reflected_radiance_mc(const CloudTransferTable& table, double optica
                                   double view_cos_zenith, double relative_azimuth_rad);
 double slab_reflectance_mc(const CloudTransferTable& table, double optical_depth, double sun_cos_zenith);
 
+// Light under a deck (Task 9). The conservative slab's total beam transmittance (direct + diffuse) for the Sun at
+// sun_cos_zenith, black surface below: 1 - R (energy conservation, single-scattering albedo 1); _mc with the Monte Carlo
+// source (R from slab_reflectance_mc's hemisphere integral, n_mu x n_phi Gauss-Legendre nodes), two_stream_ with the
+// delta-Eddington beam reflectance (comparison).
+double slab_total_transmittance_mc(const CloudTransferTable& table, double optical_depth, double sun_cos_zenith,
+                                   int mu_nodes = 24, int phi_nodes = 24);
+double two_stream_beam_transmittance(double optical_depth, double asymmetry_g, double sun_cos_zenith);
+// The Monte Carlo total transmittance tabulated once (what the ground light and the shader use): depth nodes
+// tau_i = depth_scale (depth_ratio^i - 1), i = 0..depth_nodes - 1 (0 .. 1024), cosine nodes mu_j = cosine_min + (1 -
+// cosine_min) j / (cosine_nodes - 1); values [j * depth_nodes + i]. Bilinear in (i, j) of the continuous node indices;
+// beyond the last depth the diffusion asymptote T(tau) = T(tau_n) (1 + k tau_n) / (1 + k tau), k = 3 (1 - g) / 4;
+// mu0 below cosine_min is taken at cosine_min. 1 at tau = 0.
+struct CloudSlabTransmittanceLut {
+    static constexpr int depth_nodes = 40;
+    static constexpr int cosine_nodes = 17;
+    static constexpr double depth_scale = 0.25;
+    static constexpr double depth_max = 1024.0;
+    static constexpr double cosine_min = 0.02;
+    double depth_ratio = 1.0;
+    std::vector<double> total;
+};
+CloudSlabTransmittanceLut make_cloud_slab_transmittance_lut(const CloudTransferTable& table);
+double cloud_slab_total_transmittance(const CloudSlabTransmittanceLut& lut, double optical_depth,
+                                      double sun_cos_zenith);
+
 // The CPU light. Transmittance of the direct Sun through the grid-mean clouds along the ray from position toward the
 // Sun (Beer-Lambert with the unscaled extinction: the Sun disc). No detail noise: a vehicle in a gap between cumuli gets
 // its cell's mean. The ray ends where it leaves the cloud volume (above 20 km and climbing) or where it enters the solid
@@ -219,6 +245,14 @@ double cloud_sun_transmittance(const WeatherSnapshot& snapshot, const math::Vec3
 // Diffuse sky factor under the column: the two-stream diffuse transmittance of the column above the position (vertical,
 // from the position to 20 km), 1 above the clouds.
 double cloud_sky_factor(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m);
+// The Sun's light diffused through the column above the position (Task 9), per unit of the clear-sky Sun irradiance
+// on a horizontal plane: T_sd = max(T_total(tau, mu0) - exp(-tau / mu0), 0), tau the grid-mean column above the
+// position (cloud_column_optical_depth_above), mu0 the Sun's cosine to the geodetic vertical, T_total from the Monte
+// Carlo table (lut; nullptr: the delta-Eddington beam transmittance). Isotropic downward light under the deck (a
+// horizontal plate receives T_sd x E_sun,horizontal); the direct beam is cloud_sun_transmittance's. 0 for the Sun below
+// the horizon or no cloud above.
+double cloud_sun_diffuse_transmittance(const WeatherSnapshot& snapshot, const CloudSlabTransmittanceLut* lut,
+                                       const math::Vec3& position_itrf_m, const math::Vec3& sun_direction_itrf);
 
 // Vertical optical depth of the column above a geodetic position (exact for the snapshot's piecewise-linear profile).
 double cloud_column_optical_depth_above(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,

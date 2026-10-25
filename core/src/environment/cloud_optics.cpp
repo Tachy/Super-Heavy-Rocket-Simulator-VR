@@ -3,7 +3,9 @@
 #include "starsim/environment/cloud_optics.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <thread>
 #include <vector>
 
 #include "starsim/frames/geodetic.hpp"
@@ -326,6 +328,91 @@ double slab_reflectance_mc(const CloudTransferTable& table, double optical_depth
     return flux / mu0;
 }
 
+double slab_total_transmittance_mc(const CloudTransferTable& table, double optical_depth, double sun_cos_zenith,
+                                   int mu_nodes, int phi_nodes) {
+    if (!(optical_depth > 0.0)) return 1.0;
+    if (sun_cos_zenith <= 0.0) return 0.0;
+    const Quadrature mu_q = gauss_legendre_unit(mu_nodes), phi_q = gauss_legendre_unit(phi_nodes);
+    const double mu0 = std::min(1.0, sun_cos_zenith);
+    double flux = 0.0;
+    for (std::size_t i = 0; i < mu_q.x.size(); ++i) {
+        double ring = 0.0;
+        for (std::size_t j = 0; j < phi_q.x.size(); ++j) {
+            ring += phi_q.w[j] * slab_reflected_radiance_mc(table, optical_depth, mu0, mu_q.x[i], c::pi * phi_q.x[j]);
+        }
+        flux += mu_q.w[i] * mu_q.x[i] * c::two_pi * ring;
+    }
+    return std::clamp(1.0 - flux / mu0, 0.0, 1.0);
+}
+
+double two_stream_beam_transmittance(double optical_depth, double asymmetry_g, double sun_cos_zenith) {
+    if (!(optical_depth > 0.0)) return 1.0;
+    if (sun_cos_zenith <= 0.0) return 0.0;
+    return std::clamp(1.0 - two_stream_beam_reflectance(optical_depth, asymmetry_g, sun_cos_zenith), 0.0, 1.0);
+}
+
+namespace {
+
+double lut_depth(const CloudSlabTransmittanceLut& lut, int i) {
+    return CloudSlabTransmittanceLut::depth_scale * (std::pow(lut.depth_ratio, i) - 1.0);
+}
+
+double lut_cosine(int j) {
+    using L = CloudSlabTransmittanceLut;
+    return L::cosine_min + (1.0 - L::cosine_min) * j / (L::cosine_nodes - 1);
+}
+
+// The diffusion asymptote's coefficient k = 3 (1 - g) / 4 (two_stream_diffuse_transmittance).
+double diffusion_coefficient() { return 0.75 * (1.0 - cloud_asymmetry_g()); }
+
+}  // namespace
+
+CloudSlabTransmittanceLut make_cloud_slab_transmittance_lut(const CloudTransferTable& table) {
+    using L = CloudSlabTransmittanceLut;
+    CloudSlabTransmittanceLut lut;
+    lut.depth_ratio = std::pow(L::depth_max / L::depth_scale + 1.0, 1.0 / (L::depth_nodes - 1));
+    lut.total.assign(static_cast<std::size_t>(L::depth_nodes) * L::cosine_nodes, 1.0);
+    // One cosine row per task (~0.35 s each), rows independent.
+    std::atomic<int> next{0};
+    auto work = [&]() {
+        for (int j = next++; j < L::cosine_nodes; j = next++) {
+            double previous = 1.0;
+            for (int i = 1; i < L::depth_nodes; ++i) {
+                // Monotone in tau (the table's Monte Carlo noise must not let a thicker slab pass more light).
+                previous = std::min(previous, slab_total_transmittance_mc(table, lut_depth(lut, i), lut_cosine(j)));
+                lut.total[static_cast<std::size_t>(j) * L::depth_nodes + i] = previous;
+            }
+        }
+    };
+    const int threads = std::clamp(static_cast<int>(std::thread::hardware_concurrency()), 1, L::cosine_nodes);
+    std::vector<std::thread> pool;
+    for (int t = 1; t < threads; ++t) pool.emplace_back(work);
+    work();
+    for (std::thread& t : pool) t.join();
+    return lut;
+}
+
+double cloud_slab_total_transmittance(const CloudSlabTransmittanceLut& lut, double optical_depth,
+                                      double sun_cos_zenith) {
+    using L = CloudSlabTransmittanceLut;
+    if (!(optical_depth > 0.0)) return 1.0;
+    if (sun_cos_zenith <= 0.0 || lut.total.empty()) return 0.0;
+    const double tau = std::min(optical_depth, L::depth_max);
+    const double x = std::clamp(std::log(tau / L::depth_scale + 1.0) / std::log(lut.depth_ratio), 0.0,
+                                L::depth_nodes - 1.0);
+    const double y = std::clamp((sun_cos_zenith - L::cosine_min) / (1.0 - L::cosine_min) * (L::cosine_nodes - 1), 0.0,
+                                L::cosine_nodes - 1.0);
+    const int i = std::min(static_cast<int>(x), L::depth_nodes - 2);
+    const int j = std::min(static_cast<int>(y), L::cosine_nodes - 2);
+    const double fx = x - i, fy = y - j;
+    auto at = [&](int jj, int ii) { return lut.total[static_cast<std::size_t>(jj) * L::depth_nodes + ii]; };
+    const double t = (1.0 - fy) * ((1.0 - fx) * at(j, i) + fx * at(j, i + 1)) +
+                     fy * ((1.0 - fx) * at(j + 1, i) + fx * at(j + 1, i + 1));
+    if (optical_depth <= L::depth_max) return t;
+    const double k = diffusion_coefficient();
+    return t * (1.0 + k * L::depth_max) / (1.0 + k * optical_depth);
+}
+
 double cloud_light_march_ratio(const CloudLightMarch& march) {
     const int n = std::max(march.near_samples, 1);
     const double target = march.near_length_m / std::max(march.first_m, 1e-9);  // (r^n - 1) / (r - 1)
@@ -442,6 +529,20 @@ double cloud_sky_factor(const WeatherSnapshot& snapshot, const math::Vec3& posit
     const double tau =
         cloud_column_optical_depth_above(snapshot, here.latitude_rad, here.longitude_rad, here.height_m);
     return two_stream_diffuse_transmittance(tau, cloud_asymmetry_g());
+}
+
+double cloud_sun_diffuse_transmittance(const WeatherSnapshot& snapshot, const CloudSlabTransmittanceLut* lut,
+                                       const math::Vec3& position_itrf_m, const math::Vec3& sun_direction_itrf) {
+    const frames::GeodeticPosition here = frames::fixed_to_geodetic(position_itrf_m);
+    const double mu0 =
+        math::dot(math::normalized(sun_direction_itrf), geodetic_up(here.latitude_rad, here.longitude_rad));
+    if (mu0 <= 0.0) return 0.0;
+    const double tau =
+        cloud_column_optical_depth_above(snapshot, here.latitude_rad, here.longitude_rad, here.height_m);
+    if (!(tau > 0.0)) return 0.0;
+    const double total = lut != nullptr ? cloud_slab_total_transmittance(*lut, tau, mu0)
+                                        : two_stream_beam_transmittance(tau, cloud_asymmetry_g(), mu0);
+    return std::max(total - std::exp(-tau / mu0), 0.0);
 }
 
 }  // namespace starsim::environment

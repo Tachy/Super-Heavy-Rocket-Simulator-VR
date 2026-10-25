@@ -171,3 +171,36 @@ TEST_CASE("Cloud ice share texels", "[weather]") {
     CHECK(share[mixed / 4] == static_cast<int>(std::lround(255.0 * ratio)));
     CHECK(share[texel_offset(0, 0, 0, rows, columns) / 4] == 0);  // clear
 }
+
+TEST_CASE("Cloud column texels carry the grid-mean depth above each layer centre", "[weather]") {
+    // Broken cumulus (cloud fraction 0.5) under an overcast deck, the same in every cell (ground at 0): the GPU's
+    // grid-mean column above each layer centre (the sky factor's and the Sun's diffuse light's tau, Task 9) against the
+    // CPU's cloud_column_optical_depth_above at the centre, within the code's half step (2.8 %).
+    const int rows = 3, columns = 4;
+    std::vector<std::uint8_t> texels(static_cast<std::size_t>(weather_layer_count) * rows * columns * 4, 0);
+    auto put = [&](int layer, double fraction, double liquid) {
+        for (int r = 0; r < rows; ++r) {
+            for (int col = 0; col < columns; ++col) {
+                const std::size_t i = texel_offset(layer, r, col, rows, columns);
+                texels[i] = encode_weather_cloud_fraction(fraction);
+                texels[i + 1] = encode_weather_water(liquid);
+            }
+        }
+    };
+    for (int layer = 4; layer <= 7; ++layer) put(layer, 0.5, 1e-4);
+    for (int layer = 18; layer <= 19; ++layer) put(layer, 1.0, 2e-5);
+    put(31, 1.0, 1e-6);
+    const WeatherSnapshot snapshot = WeatherSnapshot::from_parts({}, rows, columns,
+                                                                 std::vector<float>(rows * columns, 0.0f), texels);
+    const std::vector<std::uint8_t> column = cloud_render_column_texels(snapshot);
+    REQUIRE(column.size() == texels.size() / 4);
+    for (int layer = 0; layer < weather_layer_count; ++layer) {
+        const double expected = cloud_column_optical_depth_above(snapshot, 0.3, 0.5, layer_centre_m(layer));
+        const std::uint8_t code = column[texel_offset(layer, 1, 2, rows, columns) / 4];
+        if (expected < cloud_depth_code_min) {
+            CHECK(code <= 1);
+        } else {
+            CHECK(decode_cloud_optical_depth(code) == Approx(expected).epsilon(0.03));
+        }
+    }
+}

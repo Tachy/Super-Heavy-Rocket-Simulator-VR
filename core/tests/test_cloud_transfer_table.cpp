@@ -12,14 +12,17 @@
 #include <string>
 #include <vector>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "starsim/environment/cloud_optics.hpp"
 #include "starsim/environment/cloud_transfer_table.hpp"
+#include "starsim/frames/geodetic.hpp"
 #include "starsim/math/constants.hpp"
 
 using namespace starsim;
 using namespace starsim::environment;
+using Catch::Approx;
 
 namespace {
 
@@ -254,5 +257,99 @@ TEST_CASE("The Monte Carlo source of a uniform slab is the column problem", "[we
         const double closed = slab_reflected_radiance_mc(table(), tau_star, mu0, mu, phi);
         report("uniform slab mu0 %.1f: ray integral %.6f, slab_reflected_radiance_mc %.6f\n", mu0, radiance, closed);
         CHECK(std::abs(radiance / closed - 1.0) < 0.002);
+    }
+}
+
+TEST_CASE("The Monte Carlo slab transmittance lights the ground under a deck", "[weather]") {
+    // Total beam transmittance (direct + diffuse) = 1 - albedo of the Monte Carlo fixture (2e6 photons, conservative),
+    // within 3 % of T or 0.005.
+    std::ifstream in(std::filesystem::path(STARSIM_WEATHER_FIXTURE_DIR) / "cloud_slab_albedo_mc.csv");
+    REQUIRE(in.good());
+    std::string line;
+    int rows = 0;
+    const CloudSlabTransmittanceLut lut = make_cloud_slab_transmittance_lut(table());
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] < '0' || line[0] > '9') continue;
+        std::istringstream s(line);
+        double mu0 = 0, tau = 0, albedo = 0;
+        char comma = 0;
+        s >> mu0 >> comma >> tau >> comma >> albedo;
+        REQUIRE(s);
+        const double expected = 1.0 - albedo;
+        const double direct = slab_total_transmittance_mc(table(), tau, mu0);
+        const double tabulated = cloud_slab_total_transmittance(lut, tau, mu0);
+        const double closed = two_stream_beam_transmittance(tau, cloud_asymmetry_g(), mu0);
+        report("T_total mu0 %.1f tau %2.0f MC %.4f model %.4f LUT %.4f (%+.1f %%) delta-Eddington %.4f (%+.1f %%)\n", mu0,
+               tau, expected, direct, tabulated, 100.0 * (tabulated / expected - 1.0), closed,
+               100.0 * (closed / expected - 1.0));
+        CHECK(std::abs(direct - expected) <= std::max(0.03 * expected, 0.005));
+        CHECK(std::abs(tabulated - expected) <= std::max(0.03 * expected, 0.005));
+        ++rows;
+    }
+    CHECK(rows == 10);
+    // The LUT: 1 without cloud, monotone in tau, the asymptote continuous at its last node.
+    for (double mu0 : {0.02, 0.1, 0.5, 1.0}) {
+        CHECK(cloud_slab_total_transmittance(lut, 0.0, mu0) == Approx(1.0).margin(1e-9));
+        double previous = 1.0;
+        for (double tau = 0.05; tau < 3000.0; tau *= 1.1) {
+            const double t = cloud_slab_total_transmittance(lut, tau, mu0);
+            CHECK(t <= previous + 1e-9);
+            CHECK(t >= 0.0);
+            previous = t;
+        }
+        const double at = cloud_slab_total_transmittance(lut, CloudSlabTransmittanceLut::depth_max, mu0);
+        CHECK(cloud_slab_total_transmittance(lut, CloudSlabTransmittanceLut::depth_max * 1.0001, mu0) ==
+              Approx(at).epsilon(1e-3));
+    }
+    // Delta-Eddington against the table over the used range (tau 0.5-100, Sun 5-90 deg up): reported (the shaders
+    // and the CPU take the table).
+    double worst = 0.0;
+    for (double mu0 : {0.087, 0.25, 0.5, 0.75, 1.0}) {
+        for (double tau : {0.5, 1.0, 3.0, 10.0, 30.0, 100.0}) {
+            const double mc = cloud_slab_total_transmittance(lut, tau, mu0);
+            worst = std::max(worst, std::abs(two_stream_beam_transmittance(tau, cloud_asymmetry_g(), mu0) / mc - 1.0));
+        }
+    }
+    report("delta-Eddington beam transmittance vs the Monte Carlo table: worst %.1f %%\n", 100.0 * worst);
+    // The sky's diffuse transmittance (two-stream, cloud_sky_factor) against the table's white-sky transmittance
+    // 2 int T_total(tau, mu) mu dmu (an isotropic sky): reported and bounded.
+    double sky_worst = 0.0;
+    for (double tau : {1.0, 3.0, 10.0, 30.0, 100.0}) {
+        double white = 0.0;
+        for (int i = 0; i < 12; ++i) {
+            const double mu = 0.5 * (gl_x[i] + 1.0);
+            white += gl_w[i] * mu * cloud_slab_total_transmittance(lut, tau, mu);  // 2 x (1/2 sum w mu T)
+        }
+        const double two_stream = two_stream_diffuse_transmittance(tau, cloud_asymmetry_g());
+        report("white-sky T tau %3.0f: Monte Carlo %.4f two-stream %.4f (%+.1f %%)\n", tau, white, two_stream,
+               100.0 * (two_stream / white - 1.0));
+        sky_worst = std::max(sky_worst, std::abs(two_stream / white - 1.0));
+    }
+    CHECK(sky_worst < 0.10);
+    // Kasten & Czeplak 1980 (Solar Energy 24, 177): overcast global irradiance / clear-sky 0.25 (Hamburg, all Sun
+    // elevations). Overcast deck tau 30 (cloud_optics test), clear-sky diffuse share 0.15 [E] of the global at Sun 45 deg:
+    // the Sun's total transmittance + the sky's diffuse one in the 0.1-0.3 range of overcast skies.
+    const double mu45 = std::cos(45.0 * c::deg_to_rad);
+    const double ratio = 0.85 * cloud_slab_total_transmittance(lut, 30.0, mu45) +
+                         0.15 * two_stream_diffuse_transmittance(30.0, cloud_asymmetry_g());
+    report("overcast tau 30, Sun 45 deg: ground / clear sky %.3f (Kasten & Czeplak 0.25)\n", ratio);
+    CHECK(ratio > 0.2);
+    CHECK(ratio < 0.3);
+}
+
+TEST_CASE("The Sun's diffuse light under a slab takes the Monte Carlo table", "[weather]") {
+    const CloudSlabTransmittanceLut lut = make_cloud_slab_transmittance_lut(table());
+    const WeatherSnapshot slab = WeatherSnapshot::uniform_slab(19, 36, 1000.0, 2000.0, 2e-4, 1.0);
+    const double latitude = 30.0 * c::deg_to_rad, longitude = 45.0 * c::deg_to_rad;
+    const math::Vec3 position = frames::geodetic_to_fixed({latitude, longitude, 0.0});
+    const math::Vec3 up{std::cos(latitude) * std::cos(longitude), std::cos(latitude) * std::sin(longitude),
+                        std::sin(latitude)};
+    const math::Vec3 east{-std::sin(longitude), std::cos(longitude), 0.0};
+    const double tau = cloud_column_optical_depth_above(slab, latitude, longitude, 0.0);
+    for (double zenith_deg : {0.0, 45.0, 80.0}) {
+        const double z = zenith_deg * c::deg_to_rad, mu0 = std::cos(z);
+        const double got = cloud_sun_diffuse_transmittance(slab, &lut, position, up * mu0 + east * std::sin(z));
+        report("slab tau %.1f, Sun %.0f deg from the zenith: diffuse %.4f\n", tau, zenith_deg, got);
+        CHECK(got == Approx(cloud_slab_total_transmittance(lut, tau, mu0) - std::exp(-tau / mu0)).epsilon(1e-6));
     }
 }

@@ -703,3 +703,27 @@ TEST_CASE("Sun transmittance through a uniform slab", "[weather]") {
         CHECK(std::isfinite(cloud_sky_factor(slab, east.position)));
     }
 }
+
+TEST_CASE("The Sun's light diffused through a uniform slab", "[weather]") {
+    // tau ~3 slab at 1-2 km: under it the Sun's diffuse part is the slab's total minus its direct transmittance
+    // (delta-Eddington without the table), half the column inside, nothing above or with the Sun below the horizon.
+    const WeatherSnapshot slab = WeatherSnapshot::uniform_slab(19, 36, 1000.0, 2000.0, 2e-5, 1.0);
+    const double latitude = 30.0 * c::deg_to_rad, longitude = 45.0 * c::deg_to_rad;
+    const LocalFrame ground = local_frame(latitude, longitude, 0.0);
+    const double tau = cloud_column_optical_depth_above(slab, latitude, longitude, 0.0);
+    REQUIRE(tau > 2.5);
+    const double g = cloud_asymmetry_g();
+    for (double zenith_deg : {0.0, 60.0}) {
+        const double mu0 = std::cos(zenith_deg * c::deg_to_rad);
+        const math::Vec3 sun = sun_at_zenith_angle(ground, zenith_deg * c::deg_to_rad);
+        CHECK(cloud_sun_diffuse_transmittance(slab, nullptr, ground.position, sun) ==
+              Approx(two_stream_beam_transmittance(tau, g, mu0) - std::exp(-tau / mu0)).epsilon(1e-3));
+        const LocalFrame inside = local_frame(latitude, longitude, 1500.0);
+        CHECK(cloud_sun_diffuse_transmittance(slab, nullptr, inside.position, sun) ==
+              Approx(two_stream_beam_transmittance(0.5 * tau, g, mu0) - std::exp(-0.5 * tau / mu0)).epsilon(1e-2));
+        CHECK(cloud_sun_diffuse_transmittance(slab, nullptr, local_frame(latitude, longitude, 2500.0).position, sun) ==
+              0.0);
+    }
+    CHECK(cloud_sun_diffuse_transmittance(slab, nullptr, ground.position, sun_at_zenith_angle(ground, 1.7)) == 0.0);
+    CHECK(two_stream_beam_transmittance(0.0, g, 0.5) == Approx(1.0));
+}

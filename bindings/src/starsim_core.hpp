@@ -20,6 +20,7 @@
 #include "starsim/environment/atmosphere_scattering.hpp"
 #include "starsim/environment/earth_terrain.hpp"
 #include "starsim/environment/lunar_terrain.hpp"
+#include "starsim/environment/cloud_optics.hpp"
 #include "starsim/environment/cloud_transfer_table.hpp"
 #include "starsim/environment/weather_snapshot.hpp"
 
@@ -135,7 +136,8 @@ public:
     // Reads a cache file: {ok, error, rows, columns, layers, cloud_texels: PackedByteArray (layer-major RGBA8, the GPU
     // form environment::cloud_render_texels: cloud fraction, 16-bit linear extinction, in-cloud depth code),
     // cloud_ice_texels: PackedByteArray (layer-major R8, environment::cloud_render_ice_texels: the ice share of the
-    // extinction), layer_bottoms_m: PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour, lead_h, analog_hour, cache_key}.
+    // extinction), cloud_column_texels: PackedByteArray (layer-major R8, environment::cloud_render_column_texels: the
+    // grid-mean column depth above each layer centre), layer_bottoms_m:PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour, lead_h, analog_hour, cache_key}.
     // The game builds the label from the id fields. The snapshot stays in a small cache (the last three files) for
     // weather_set_active. Call it on a worker: the GPU form of a 0.25-deg snapshot is 133 MB.
     godot::Dictionary weather_load_snapshot(const godot::String& file);
@@ -143,7 +145,10 @@ public:
     // 3-entry load cache is read SYNCHRONOUSLY (133 MB + checksum) on the calling thread - callers must first
     // weather_load_snapshot() each file on a worker thread so this call only hits the cache.
     godot::Dictionary weather_set_active(const godot::String& before_file, const godot::String& after_file, double blend);
-    // {sun_transmittance, sky_factor} of the active pair, blended linearly; {1, 1} without an active snapshot.
+    // {sun_transmittance, sky_factor, sun_diffuse} of the active pair, blended linearly (cloud_optics.hpp: the direct
+    // Sun, the sky's diffuse transmittance, the Sun's light diffused through the column per unit of its horizontal
+    // irradiance - with the Monte Carlo table once cloud_transfer_table() ran, else delta-Eddington); {1, 1, 0}
+    // without an active snapshot.
     godot::Dictionary weather_cloud_light(const godot::Vector3& position_itrf_m,
                                           const godot::Vector3& sun_direction_itrf) const;
     // The tileable cloud noise: {shape: PackedByteArray RGBA8, shape_size, detail, detail_size, detail_states,
@@ -160,7 +165,10 @@ public:
     // Loads the Monte Carlo transfer table (environment::load_cloud_transfer_table) and keeps it for
     // cloud_slab_radiance_mc: {ok, error, texels: PackedByteArray (RGBA half floats, cloud_transfer_gpu_texels), size:
     // Vector3i, nodes: Vector4i (depth, mu0, theta, psi), depth_map: Vector3 (scale, ln ratio, K), theta_map: Vector3
-    // (theta0, log, linear)}. Call it on a worker (reads ~4.5 MB).
+    // (theta0, log, linear), transmittance_lut: PackedFloat32Array (the slab's total beam transmittance,
+    // CloudSlabTransmittanceLut: cosine rows of depth nodes), transmittance_lut_size: Vector2i (depth, cosine nodes),
+    // transmittance_lut_map: Vector4 (depth scale, ln depth ratio, depth max, cosine min)}. Call it on a worker (reads
+    // ~4.5 MB, builds the transmittance table on all cores in ~1 s).
     godot::Dictionary cloud_transfer_table(const godot::String& file);
     // Checks only: environment::slab_reflected_radiance_mc with the loaded table (-1 without one).
     double cloud_slab_radiance_mc(double optical_depth, double sun_cos_zenith, double view_cos_zenith,
@@ -188,6 +196,7 @@ private:
     double weather_blend_ = 0.0;
     mutable std::mutex transfer_mutex_;  // guards transfer_table_ (loaded on a worker, read by the checks)
     std::shared_ptr<const environment::CloudTransferTable> transfer_table_;
+    std::shared_ptr<const environment::CloudSlabTransmittanceLut> transmittance_lut_;  // guarded by transfer_mutex_
     environment::RefractionProfile refraction_{environment::Us76Atmosphere{}};
     std::unique_ptr<spice::SpiceSession> session_;
     spice::SpiceTimeConverter time_;
