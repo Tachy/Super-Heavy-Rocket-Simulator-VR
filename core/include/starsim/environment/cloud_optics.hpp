@@ -110,8 +110,23 @@
 //     (Nakajima & Tanaka's IMS correction is not modelled). At thin cloud edges (tau << 1) the TMS term is the exact
 //     single scattering (silver lining).
 
+// Monte Carlo source (Task 8b, the reference; the closed form above stays for comparison, the shader's
+// cloud_scattering_model 0): the Sun's source is single scattering exactly plus the tabulated orders >= 2
+// (cloud_transfer_table.hpp):
+//   J_mc = p(cos_theta) exp(-tau_s) + J_table(a = mu_e tau_s, b = max(tau*, a) - a, mu_e, theta, psi),
+// both per unit Sun irradiance and unit unscaled optical depth, attenuated along the view ray by exp(-w_D tau_v)
+// (cloud_transfer_view_extinction: the table holds the Draine part of the multiple-scattering source; the HG part, a
+// ~0.3 deg forward peak, keeps the light in the view ray, cloud_transfer_table.hpp "HG peak"). mu_e, the tilted axis and
+// the column are those of cloud_scattering_source_3d (a slab gives the column problem exactly); psi is the view
+// propagation's azimuth about the Sun's propagation from the tilted axis.
+// slab_reflected_radiance_mc integrates it along an upward ray out of a slab (single scattering in closed form, the
+// table by composite Gauss-Legendre between the depth nodes), slab_reflectance_mc over the hemisphere (64 x 64).
+// Against tools/validation/cloud_slab_monte_carlo.py: the radiance bins of cloud_slab_radiance_mc.csv and the albedo
+// fixture cloud_slab_albedo_mc.csv (numbers in docs/subsystems/weather-clouds.md and test_cloud_optics.cpp).
+
 #include <functional>
 
+#include "starsim/environment/cloud_transfer_table.hpp"
 #include "starsim/environment/weather_snapshot.hpp"
 #include "starsim/math/vec3.hpp"
 
@@ -175,6 +190,25 @@ double slab_reflected_radiance(double optical_depth, double sun_cos_zenith, doub
                                double relative_azimuth_rad);
 // The model's plane-parallel slab reflectance (albedo) for the Sun at sun_cos_zenith; 0 for the Sun below the horizon.
 double slab_reflectance(double optical_depth, double sun_cos_zenith);
+
+// The view ray's extinction factor with the Monte Carlo source: w_D of the table's phase function (per unit optical
+// depth; the shader's cloud_phase.w).
+double cloud_transfer_view_extinction(const CloudTransferTable& table);
+// The Monte Carlo source (header, "Monte Carlo source"): arguments as cloud_scattering_source_3d; attenuate along the
+// view ray with exp(-cloud_transfer_view_extinction(table) tau_v).
+double cloud_scattering_source_mc(const CloudTransferTable& table, const math::Vec3& sun_direction,
+                                  const math::Vec3& view_propagation, const math::Vec3& up, double sun_optical_depth,
+                                  double vertical_depth_from_top, double column_optical_depth);
+// Scattering angle theta and folded azimuth psi (0 = toward axis) of a view propagation about the Sun's propagation.
+struct CloudSunFrameAngles {
+    double theta_rad = 0.0, psi_rad = 0.0;
+};
+CloudSunFrameAngles cloud_sun_frame_angles(const math::Vec3& sun_propagation, const math::Vec3& view_propagation,
+                                           const math::Vec3& axis);
+// slab_reflected_radiance / slab_reflectance with the Monte Carlo source (optical_depth may be infinite).
+double slab_reflected_radiance_mc(const CloudTransferTable& table, double optical_depth, double sun_cos_zenith,
+                                  double view_cos_zenith, double relative_azimuth_rad);
+double slab_reflectance_mc(const CloudTransferTable& table, double optical_depth, double sun_cos_zenith);
 
 // The CPU light. Transmittance of the direct Sun through the grid-mean clouds along the ray from position toward the
 // Sun (Beer-Lambert with the unscaled extinction: the Sun disc). No detail noise: a vehicle in a gap between cumuli gets

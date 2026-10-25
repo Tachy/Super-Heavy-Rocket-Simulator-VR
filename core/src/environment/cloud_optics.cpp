@@ -203,23 +203,127 @@ double cloud_entry_cosine(double sun_cos_zenith, double sun_optical_depth, doubl
     return std::clamp(ratio, std::max(mu0, entry_cosine_min), 1.0);
 }
 
+namespace {
+
+// The entry surface's normal (cloud_optics.hpp "3D Sun light"): up turned toward the Sun by acos(mu0) - acos(mu_e)
+// in the plane of up and the Sun.
+math::Vec3 entry_normal(const math::Vec3& sun_direction, const math::Vec3& up, double mu0, double mu_e) {
+    const math::Vec3 across = sun_direction - up * mu0;
+    const double across_norm = math::norm(across);
+    if (across_norm <= 1e-9) return up;
+    const double turn = std::acos(mu0) - std::acos(mu_e);
+    return up * std::cos(turn) + across * (std::sin(turn) / across_norm);
+}
+
+}  // namespace
+
 double cloud_scattering_source_3d(const math::Vec3& sun_direction, const math::Vec3& view_propagation,
                                   const math::Vec3& up, double sun_optical_depth, double vertical_depth_from_top,
                                   double column_optical_depth) {
     const double mu0 = std::clamp(math::dot(sun_direction, up), -1.0, 1.0);
     const double mu_e = cloud_entry_cosine(mu0, sun_optical_depth, vertical_depth_from_top);
-    // The entry surface's normal: up turned toward the Sun by acos(mu0) - acos(mu_e) in the plane of up and the Sun.
-    math::Vec3 normal = up;
-    const math::Vec3 across = sun_direction - up * mu0;
-    const double across_norm = math::norm(across);
-    if (across_norm > 1e-9) {
-        const double turn = std::acos(mu0) - std::acos(mu_e);
-        normal = up * std::cos(turn) + across * (std::sin(turn) / across_norm);
-    }
+    const math::Vec3 normal = entry_normal(sun_direction, up, mu0, mu_e);
     const double tau_s = std::max(0.0, sun_optical_depth);
     const double depth = mu_e * tau_s;
     return cloud_scattering_source(-math::dot(sun_direction, view_propagation), math::dot(view_propagation, normal),
                                    mu_e, tau_s, depth, std::max(column_optical_depth, depth));
+}
+
+CloudSunFrameAngles cloud_sun_frame_angles(const math::Vec3& sun_propagation, const math::Vec3& view_propagation,
+                                           const math::Vec3& axis) {
+    CloudSunFrameAngles out;
+    const math::Vec3 chord = view_propagation - sun_propagation;  // |chord| = 2 sin(theta / 2): exact near 0
+    out.theta_rad = 2.0 * std::asin(std::min(1.0, 0.5 * math::norm(chord)));
+    const math::Vec3 e1_raw = axis - sun_propagation * math::dot(axis, sun_propagation);
+    const double e1_norm = math::norm(e1_raw);
+    if (e1_norm <= 1e-12) return out;  // the Sun along the axis: psi has no meaning (the field is symmetric)
+    const math::Vec3 e1 = e1_raw * (1.0 / e1_norm);
+    const math::Vec3 normal_part = view_propagation - sun_propagation * math::dot(view_propagation, sun_propagation);
+    const double c1 = math::dot(normal_part, e1);
+    out.psi_rad = std::atan2(math::norm(normal_part - e1 * c1), c1);
+    return out;
+}
+
+double cloud_transfer_view_extinction(const CloudTransferTable& table) { return table.draine_weight; }
+
+double cloud_scattering_source_mc(const CloudTransferTable& table, const math::Vec3& sun_direction,
+                                  const math::Vec3& view_propagation, const math::Vec3& up, double sun_optical_depth,
+                                  double vertical_depth_from_top, double column_optical_depth) {
+    const double mu0 = std::clamp(math::dot(sun_direction, up), -1.0, 1.0);
+    const double mu_e = cloud_entry_cosine(mu0, sun_optical_depth, vertical_depth_from_top);
+    const math::Vec3 normal = entry_normal(sun_direction, up, mu0, mu_e);
+    const double tau_s = std::max(0.0, sun_optical_depth);
+    const double depth = mu_e * tau_s;
+    const double column = std::max(column_optical_depth, depth);
+    const math::Vec3 sun_propagation = sun_direction * -1.0;
+    const CloudSunFrameAngles angles = cloud_sun_frame_angles(sun_propagation, view_propagation, normal);
+    const math::Vec3 chord = view_propagation - sun_propagation;
+    const double one_minus_cos = 0.5 * math::dot(chord, chord);
+    return cloud_phase_function(1.0 - one_minus_cos) * std::exp(-tau_s) +
+           cloud_transfer_lookup(table, depth, column - depth, mu_e, angles.theta_rad, angles.psi_rad);
+}
+
+double slab_reflected_radiance_mc(const CloudTransferTable& table, double optical_depth, double sun_cos_zenith,
+                                  double view_cos_zenith, double relative_azimuth_rad) {
+    if (sun_cos_zenith <= 0.0 || view_cos_zenith <= 0.0 || optical_depth <= 0.0) return 0.0;
+    const double mu0 = std::min(1.0, sun_cos_zenith), mu = std::min(1.0, view_cos_zenith);
+    const double s0 = std::sqrt(1.0 - mu0 * mu0), sv = std::sqrt(1.0 - mu * mu);
+    const math::Vec3 up{0.0, 0.0, 1.0}, sun_propagation{s0, 0.0, -mu0};
+    const math::Vec3 view{sv * std::cos(relative_azimuth_rad), sv * std::sin(relative_azimuth_rad), mu};
+    const CloudSunFrameAngles angles = cloud_sun_frame_angles(sun_propagation, view, up);
+    const math::Vec3 chord = view - sun_propagation;
+    const double one_minus_cos = 0.5 * math::dot(chord, chord);
+    // The ray's attenuation exp(-w t / mu) (cloud_transfer_view_extinction).
+    const double w = cloud_transfer_view_extinction(table);
+    const double ray_scale = w / mu;
+    // Single scattering: p exp(-t / mu0) along the ray, closed form.
+    const double single = cloud_phase_function(1.0 - one_minus_cos) / (mu * (1.0 / mu0 + ray_scale)) *
+                          (1.0 - (std::isinf(optical_depth) ? 0.0 : std::exp(-optical_depth * (1.0 / mu0 + ray_scale))));
+    // Orders >= 2: panels between the table's depth nodes (from the top and from the bottom), at most 2 mu / w long,
+    // 4-point Gauss-Legendre each; beyond 40 mu / w the ray's weight exp(-w t / mu) is < 1e-17.
+    static constexpr double gx[4] = {0.0694318442029737, 0.3300094782075719, 0.6699905217924281, 0.9305681557970263};
+    static constexpr double gw[4] = {0.1739274225687269, 0.3260725774312731, 0.3260725774312731, 0.1739274225687269};
+    const double end = std::min(optical_depth, 40.0 / ray_scale);
+    std::vector<double> breaks{0.0, end};
+    for (int i = 1; i < table.depth_nodes - 1; ++i) {
+        const double node = table.depth_scale * (std::pow(table.depth_ratio, i) - 1.0);
+        if (node < end) breaks.push_back(node);
+        if (!std::isinf(optical_depth) && optical_depth - node > 0.0 && optical_depth - node < end) {
+            breaks.push_back(optical_depth - node);
+        }
+    }
+    std::sort(breaks.begin(), breaks.end());
+    double multiple = 0.0;
+    for (std::size_t k = 0; k + 1 < breaks.size(); ++k) {
+        const double lo = breaks[k], length = breaks[k + 1] - lo;
+        if (length <= 0.0) continue;
+        const int pieces = std::max(1, static_cast<int>(std::ceil(length * ray_scale / 2.0)));
+        const double h = length / pieces;
+        for (int piece = 0; piece < pieces; ++piece) {
+            for (int q = 0; q < 4; ++q) {
+                const double t = lo + (piece + gx[q]) * h;
+                multiple += gw[q] * h / mu * std::exp(-t * ray_scale) *
+                            cloud_transfer_lookup(table, t, optical_depth - t, mu0, angles.theta_rad, angles.psi_rad);
+            }
+        }
+    }
+    return single + multiple;
+}
+
+double slab_reflectance_mc(const CloudTransferTable& table, double optical_depth, double sun_cos_zenith) {
+    if (sun_cos_zenith <= 0.0 || optical_depth <= 0.0) return 0.0;
+    static const Quadrature mu_q = gauss_legendre_unit(slab_mu_nodes), phi_q = gauss_legendre_unit(slab_phi_nodes);
+    const double mu0 = std::min(1.0, sun_cos_zenith);
+    double flux = 0.0;
+    for (std::size_t i = 0; i < mu_q.x.size(); ++i) {
+        double ring = 0.0;
+        for (std::size_t j = 0; j < phi_q.x.size(); ++j) {
+            ring += phi_q.w[j] *
+                    slab_reflected_radiance_mc(table, optical_depth, mu0, mu_q.x[i], c::pi * phi_q.x[j]);
+        }
+        flux += mu_q.w[i] * mu_q.x[i] * c::two_pi * ring;
+    }
+    return flux / mu0;
 }
 
 double cloud_light_march_ratio(const CloudLightMarch& march) {

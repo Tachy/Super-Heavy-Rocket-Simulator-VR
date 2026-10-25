@@ -1,0 +1,12 @@
+# Albedo of a conservative cloud slab (black surface), Monte Carlo, tools/validation/cloud_slab_monte_carlo.py --albedo 2000000
+sun_cos_zenith,optical_depth,albedo,sigma
+1.0,1,0.034029,0.000128
+1.0,3,0.111020,0.000222
+1.0,10,0.357550,0.000339
+1.0,30,0.662899,0.000334
+1.0,50,0.771964,0.000297
+0.5,1,0.137534,0.000244
+0.5,3,0.316744,0.000329
+0.5,10,0.561111,0.000351
+0.5,30,0.771732,0.000297
+0.5,50,0.845728,0.000255
