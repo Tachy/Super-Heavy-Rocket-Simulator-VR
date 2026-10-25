@@ -44,6 +44,16 @@ carriage_stroke_m = 4.0       # [E] travel to the hard stop
 direction_deg = 90.0          # [E] towards the sea (Gulf of Mexico), clockwise from north (verify against imagery)
 shoreline_distance_m = 500.0  # [E] pad centre -> shoreline along that direction (verify against imagery)
 
+[site.viewpoint]              # ground view of the time panel ("(Aussicht)"); all values may be refined by hand later
+name = "Kontrollzentrum Starbase"
+latitude_deg = 25.98530       # [E] low confidence: the former launch control in the STARGATE building on the
+longitude_deg = -97.18725     # production site (Wikipedia "STARGATE" 25.9854 N 97.1872 W; Everyday Astronaut "How to
+                              # visit Starbase": "acts as their launch control"), its roof centre taken from the NAIP 2022
+                              # tiles. STARGATE was demolished in 2025 (GigaBay); a ~2023 guide (starbasebrewery.com map)
+                              # puts today's mission control in an enclave across SH 4 from Massey's, ~7 km further west,
+                              # not located well enough to use. ~3.6 km WSW of the pad.
+eye_height_m = 11.7           # [E] two-storey office roof ~10 m (no published height) + 1.7 m eye
+
 [[site]]
 id = "ksc_lc39a"
 name = "KSC LC-39A"
@@ -82,6 +92,13 @@ carriage_stroke_m = 4.0       # [E] travel to the hard stop
 direction_deg = 90.0          # [E] towards the Atlantic, clockwise from north (verify against imagery)
 shoreline_distance_m = 1300.0 # [E] pad centre -> shoreline along that direction (verify against imagery)
 
+[site.viewpoint]              # ground view of the time panel ("(Aussicht)"); values may be refined by hand later
+name = "LCC-Dach (KSC)"
+latitude_deg = 28.58550       # [E] roof of the Launch Control Center (SE of the VAB) from the NAIP 2021 tiles, the
+longitude_deg = -80.64920     # east half facing the pads; Wikipedia gives 28.58528 N 80.64972 W (its west edge). ~5.1 km
+                              # WSW of the pad
+eye_height_m = 25.2           # [E] roof 23.5 m [S] (NASA KSC "Launch Control Center (LCC)": 23.5 m / 77 ft high) + 1.7 m eye
+
 [[site]]
 id = "ccsfs_slc40"
 name = "CCSFS SLC-40"
@@ -98,6 +115,14 @@ landing_zone = "ccsfs_lz40" # [S] Wikipedia "Cape Canaveral Space Launch Complex
 direction_deg = 90.0        # [E] towards the Atlantic (verify against imagery)
 shoreline_distance_m = 1000.0  # [E] pad -> shoreline (verify against imagery)
 
+[site.viewpoint]            # ground view of the time panel ("(Aussicht)"); values may be refined by hand later
+name = "Exploration Tower"
+latitude_deg = 28.40654     # [E] Exploration Tower, Port Canaveral (670 Dave Nisbet Dr): OpenStreetMap node 8972372017
+longitude_deg = -80.61791   # (28.4065411, -80.6179052), not checked against imagery (outside the NAIP tiles). ~17.7 km
+                            # SSW of the pad. (OSM also has "SpaceX Launch and Landing Control Center" at 28.4172 N
+                            # 80.6049 W on the Cape: not public, not used.)
+eye_height_m = 36.1         # [E] seventh-floor observation deck 113 ft = 34.4 m [S] (ClickOrlando 2013-11-04) + 1.7 m eye
+
 [[site]]
 id = "ccsfs_lz40"
 name = "Landezone LZ-40"
@@ -112,3 +137,9 @@ plateau_apron_m = 30.0      # [E]
 [site.sea]
 direction_deg = 90.0        # [E]
 shoreline_distance_m = 650.0  # [E] (verify against imagery)
+
+[site.viewpoint]            # the same Exploration Tower viewpoint as SLC-40 (see there), looking at LZ-40
+name = "Exploration Tower"
+latitude_deg = 28.40654     # [E] OpenStreetMap node 8972372017; ~17.8 km SSW of the landing zone
+longitude_deg = -80.61791
+eye_height_m = 36.1         # [E] deck 34.4 m [S] + 1.7 m eye

@@ -63,7 +63,8 @@ func _ready() -> void:
 	for option in FOCUS_OPTIONS:
 		_focus.add_item(option[0])
 	for site in world.sites:
-		_focus.add_item("%s (Boden)" % site["name"])
+		# A site with a [site.viewpoint] is seen from there (World._viewpoint_site), else from its pad.
+		_focus.add_item("%s (%s)" % [site["name"], "Aussicht" if site.has("viewpoint") else "Boden"])
 	_focus.item_selected.connect(_on_focus_selected)
 	box.add_child(_focus)
 

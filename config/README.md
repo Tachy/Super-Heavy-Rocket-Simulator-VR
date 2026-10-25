@@ -214,6 +214,10 @@ flow separation (vacuum engines).
   (`"launch_pad"` default, `"landing_zone"`: a pad first stages land on, with `pad_radius_m`), and (required) the
   site's plateau in the Earth terrain: flat at `height_m` within `plateau_radius_m`, a linear apron of
   `plateau_apron_m` into the terrain beyond it, never water (`sim::load_earth_terrain`).
+- `[site.viewpoint]` (optional, game only): the time panel's ground view "<site> (Aussicht)" stands here instead of
+  on the pad: `name` (German display name), `latitude_deg`, `longitude_deg`, `eye_height_m` (above the terrain at the
+  viewpoint: roof or deck height + ~1.7 m eye); the view starts aimed at the pad (`World._aim_ground_camera_at`).
+  Launches and physics keep the pad coordinates; the core ignores this table.
 - `[site.sea]` (optional): straight shoreline perpendicular to `direction_deg`, `shoreline_distance_m` from the pad
   centre; beyond it the ground is water (aborted landings, leg landings: "Wasserung").
 - `[site.tower]` (optional catch tower; site frame: origin at the pad centre on the ground, east/north/up):

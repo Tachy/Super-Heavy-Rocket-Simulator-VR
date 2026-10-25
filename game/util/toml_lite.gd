@@ -1,5 +1,5 @@
 class_name TomlLite
-## Minimal reader for the TOML subset used in config/: comments, [table], [[array-of-tables]],
+## Minimal reader for the TOML subset used in config/: comments, [table], [[array-of-tables]] with [array.sub] tables,
 ## key = string | number | boolean | single-line array of those. Enough for flat data files; the C++ core uses a full parser.
 
 
@@ -27,7 +27,14 @@ static func parse(text: String) -> Dictionary:
 		elif line.begins_with("["):
 			var key := line.trim_prefix("[").trim_suffix("]").strip_edges()
 			current = {}
-			root[key] = current
+			# [site.viewpoint] after [[site]]: a sub-table of the array's last entry (entry["viewpoint"]); any other
+			# dotted name stays a flat root key ("gauge.engines", read that way by GaugeConfig).
+			var dot := key.find(".")
+			var parent: Variant = root.get(key.substr(0, dot)) if dot > 0 else null
+			if parent is Array and not (parent as Array).is_empty():
+				(parent as Array).back()[key.substr(dot + 1)] = current
+			else:
+				root[key] = current
 		else:
 			var separator := line.find("=")
 			if separator < 0:

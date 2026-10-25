@@ -14,6 +14,8 @@ const GROUND_EYE_HEIGHT_M := 2.0
 ## [E] The pad disc's top sits this far above the site height: the terrain's plateau lies exactly at the site height,
 ## and coplanar surfaces z-fight. Far below anything a vehicle's contact could show.
 const PAD_TOP_LIFT_M := 0.03
+## [E] A site's viewpoint looks this far above its pad: the pad sits a little below the centre, the tower above it.
+const VIEWPOINT_AIM_RAISE_DEG := 3.0
 ## The solar disk is drawn behind all scaled-space bodies (1.5e7 m) but in front of the stars (2.5e7 m).
 const SUN_RENDER_DISTANCE_M := 2.0e7
 
@@ -256,6 +258,38 @@ func set_focus(new_focus: String) -> void:
 				if site["id"] == focus:
 					ground_site = site
 					camera.mode = OrbitCamera.Mode.GROUND
+					if site.has("viewpoint"):
+						ground_site = _viewpoint_site(site)
+						_aim_ground_camera_at(site)
+
+
+## The ground view of a site with a [site.viewpoint]: the eye eye_height_m above the core's surface at the viewpoint
+## (the Earth terrain; without it the site's flat height). Keeps the site's id: the focus stays that site.
+func _viewpoint_site(site: Dictionary) -> Dictionary:
+	var viewpoint: Dictionary = site["viewpoint"]
+	var lat: float = viewpoint["latitude_deg"]
+	var lon: float = viewpoint["longitude_deg"]
+	var samples: Dictionary = core.surface_samples("earth", PackedFloat64Array([lat]), PackedFloat64Array([lon]))
+	var surface_m: float = samples["height_m"][0] if bool(samples["present"]) else float(site["height_m"])
+	return {"id": site["id"], "name": viewpoint["name"], "latitude_deg": lat, "longitude_deg": lon, "height_m": surface_m,
+			"eye_height_m": float(viewpoint["eye_height_m"])}
+
+
+## Turns the ground camera from ground_site towards the site's pad at its height, raised by VIEWPOINT_AIM_RAISE_DEG.
+func _aim_ground_camera_at(site: Dictionary) -> void:
+	var t := clock.tdb_s
+	var eye_m: float = ground_site["height_m"] + float(ground_site["eye_height_m"])
+	var eye := core.geodetic_to_gcrf_m(ground_site["latitude_deg"], ground_site["longitude_deg"], eye_m, t)
+	var pad := core.geodetic_to_gcrf_m(site["latitude_deg"], site["longitude_deg"], site["height_m"], t)
+	var lat := deg_to_rad(ground_site["latitude_deg"])
+	var lon := deg_to_rad(ground_site["longitude_deg"])
+	var rotation := core.earth_fixed_to_gcrf(t)
+	var up := rotation * Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
+	var east := rotation * Vector3(-sin(lon), cos(lon), 0.0)
+	var north := rotation * Vector3(-sin(lat) * cos(lon), -sin(lat) * sin(lon), cos(lat))
+	var d := (pad - eye).normalized()
+	camera.azimuth = fposmod(atan2(d.dot(east), d.dot(north)), TAU)
+	camera.elevation = asin(clampf(d.dot(up), -1.0, 1.0)) + deg_to_rad(VIEWPOINT_AIM_RAISE_DEG)
 
 
 func _update_camera(t: float) -> void:
