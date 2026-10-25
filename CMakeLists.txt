@@ -16,6 +16,7 @@ set(STARSIM_EXTERNAL_DIR "${CMAKE_SOURCE_DIR}/external")
 set(STARSIM_DATA_DIR "${CMAKE_SOURCE_DIR}/data")
 
 include(cmake/cspice.cmake)
+include(cmake/weather_decoders.cmake)
 
 add_subdirectory(core)
 

@@ -204,12 +204,15 @@ add_library(starsim_core STATIC
     src/spice/spice_time_converter.cpp
     src/spice/spice_ephemeris.cpp
     src/spice/spice_orientation.cpp
+    src/weather_decode/float_grid.cpp
+    src/weather_decode/zarr_blosc.cpp
+    src/weather_decode/grib2.cpp
 )
 add_library(starsim::core ALIAS starsim_core)
 
 target_include_directories(starsim_core PUBLIC include)
-# CSPICE is an implementation detail of the spice adapter: never exposed in public headers.
-target_link_libraries(starsim_core PRIVATE cspice tomlplusplus::tomlplusplus)
+# CSPICE is an implementation detail of the spice adapter, lz4 of weather_decode: never exposed in public headers.
+target_link_libraries(starsim_core PRIVATE cspice starsim_lz4 tomlplusplus::tomlplusplus)
 
 if(MSVC)
     target_compile_options(starsim_core PRIVATE /W4 /permissive- /fp:precise /utf-8)

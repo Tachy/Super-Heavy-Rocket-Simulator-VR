@@ -200,6 +200,7 @@ add_executable(starsim_core_tests
     test_proximity_session.cpp
     test_proximity_transfer.cpp
     test_translation_loop.cpp
+    test_weather_decode.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain tomlplusplus::tomlplusplus)
 target_compile_definitions(starsim_core_tests PRIVATE
@@ -211,6 +212,7 @@ target_compile_definitions(starsim_core_tests PRIVATE
     STARSIM_GEOID_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/geoid"
     STARSIM_SOCP_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/socp"
     STARSIM_TELEMETRY_DIR="${CMAKE_SOURCE_DIR}/tests/validation/telemetry"
+    STARSIM_WEATHER_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/validation/weather"
 )
 
 include(Catch)

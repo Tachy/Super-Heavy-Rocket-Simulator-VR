@@ -1,0 +1,114 @@
+# GFS TCDC 300 mb (gen_weather_fixtures.py), values decoded by cfgrib float32
+source = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20260920/00/atmos/gfs.t00z.pgrb2.0p25.f006"
+byte_range = [225815059, 226282544]
+variable = "TCDC"
+level = "300 mb"
+rows = 721
+columns = 1440
+first_latitude_deg = 90.0
+first_longitude_deg = 0.0
+step_deg = 0.25
+packing_template = 3
+binary_scale = 0
+decimal_scale = 1
+bits_per_value = 12
+
+[[point]]
+row = 183
+column = 377
+value = 0.30000001192092896
+
+[[point]]
+row = 331
+column = 251
+value = 0.0
+
+[[point]]
+row = 180
+column = 233
+value = 50.900001525878906
+
+[[point]]
+row = 432
+column = 1275
+value = 0.0
+
+[[point]]
+row = 672
+column = 556
+value = 88.9000015258789
+
+[[point]]
+row = 109
+column = 358
+value = 0.5
+
+[[point]]
+row = 146
+column = 380
+value = 100.0
+
+[[point]]
+row = 140
+column = 1179
+value = 0.0
+
+[[point]]
+row = 163
+column = 464
+value = 0.0
+
+[[point]]
+row = 320
+column = 206
+value = 0.0
+
+[[point]]
+row = 710
+column = 638
+value = 100.0
+
+[[point]]
+row = 709
+column = 632
+value = 100.0
+
+[[point]]
+row = 709
+column = 631
+value = 100.0
+
+[[point]]
+row = 708
+column = 633
+value = 100.0
+
+[[point]]
+row = 708
+column = 632
+value = 100.0
+
+[[point]]
+row = 708
+column = 631
+value = 100.0
+
+[[point]]
+row = 708
+column = 630
+value = 100.0
+
+[[point]]
+row = 708
+column = 629
+value = 100.0
+
+[[point]]
+row = 708
+column = 628
+value = 100.0
+
+[[point]]
+row = 708
+column = 627
+value = 100.0

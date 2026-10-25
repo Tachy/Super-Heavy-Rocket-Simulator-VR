@@ -5,6 +5,7 @@ Generated from `tools/data_pipeline/sources.toml` by `tools/data_pipeline/credit
 | Data / software | Credit | Licence |
 |---|---|---|
 | [NAIF SPICE Toolkit (CSPICE N0067, Windows/MSVC 64-bit package; sources compiled by us)](https://naif.jpl.nasa.gov/pub/naif/toolkit/C/PC_Windows_VisualC_64bit/packages/cspice.zip) | SPICE Toolkit, NASA/JPL Navigation and Ancillary Information Facility (NAIF) | NAIF rules: free of charge, may be redistributed; no warranty (https://naif.jpl.nasa.gov/naif/rules.html) |
+| [LZ4 1.10.0 (lib/lz4.c, compiled by us: the lz4 blocks of the ERA5 Zarr blosc chunks, core/src/weather_decode)](https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.zip) | LZ4 Library, Copyright (c) 2011-2020 Yann Collet | BSD-2-Clause (lib/LICENSE) |
 | [Leap seconds kernel](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls) | NASA/JPL NAIF generic kernels | NAIF generic kernels: public, free to use |
 | [JPL planetary and lunar ephemeris DE440 (short, 1849-2150)](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp) | Park et al. (2021), The JPL Planetary and Lunar Ephemerides DE440 and DE441, AJ 161:105 | NAIF generic kernels: public, free to use |
 | [GM values consistent with DE440](https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/gm_de440.tpc) | NASA/JPL NAIF generic kernels | NAIF generic kernels: public, free to use |

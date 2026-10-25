@@ -1,0 +1,114 @@
+# GFS CLMR 300 mb (gen_weather_fixtures.py), values decoded by cfgrib float32
+source = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20260920/00/atmos/gfs.t00z.pgrb2.0p25.f006"
+byte_range = [231773608, 231775193]
+variable = "CLMR"
+level = "300 mb"
+rows = 721
+columns = 1440
+first_latitude_deg = 90.0
+first_longitude_deg = 0.0
+step_deg = 0.25
+packing_template = 3
+binary_scale = 4
+decimal_scale = 9
+bits_per_value = 16
+
+[[point]]
+row = 482
+column = 1006
+value = 0.0
+
+[[point]]
+row = 225
+column = 395
+value = 0.0
+
+[[point]]
+row = 102
+column = 966
+value = 0.0
+
+[[point]]
+row = 220
+column = 499
+value = 0.0
+
+[[point]]
+row = 460
+column = 95
+value = 0.0
+
+[[point]]
+row = 115
+column = 714
+value = 0.0
+
+[[point]]
+row = 457
+column = 415
+value = 0.0
+
+[[point]]
+row = 128
+column = 325
+value = 0.0
+
+[[point]]
+row = 449
+column = 429
+value = 0.0
+
+[[point]]
+row = 58
+column = 1430
+value = 0.0
+
+[[point]]
+row = 236
+column = 548
+value = 0.000552784011233598
+
+[[point]]
+row = 201
+column = 1094
+value = 0.00026542399427853525
+
+[[point]]
+row = 195
+column = 1070
+value = 0.00020614400273188949
+
+[[point]]
+row = 191
+column = 1080
+value = 0.00019083199731539935
+
+[[point]]
+row = 201
+column = 1095
+value = 0.00018771199393086135
+
+[[point]]
+row = 234
+column = 549
+value = 0.00014939199900254607
+
+[[point]]
+row = 364
+column = 1121
+value = 0.00014760000340174884
+
+[[point]]
+row = 322
+column = 940
+value = 0.00010807999933604151
+
+[[point]]
+row = 364
+column = 1122
+value = 0.00010710400238167495
+
+[[point]]
+row = 196
+column = 1280
+value = 8.771199645707384e-05

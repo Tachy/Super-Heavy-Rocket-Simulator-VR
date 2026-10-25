@@ -1,2 +1,5 @@
 # Engine patches must keep the engine sources' LF line endings for git apply
 tools/godot_patches/*.patch -text
+# Weather decoder fixtures are raw binary (blosc frames, float32 values, GRIB2 messages)
+tests/validation/weather/*.bin binary
+tests/validation/weather/*.grb2 binary

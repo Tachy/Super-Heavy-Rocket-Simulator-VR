@@ -13,6 +13,16 @@ license = "NAIF rules: free of charge, may be redistributed; no warranty (https:
 credit = "SPICE Toolkit, NASA/JPL Navigation and Ancillary Information Facility (NAIF)"
 
 [[source]]
+id = "lz4"
+name = "LZ4 1.10.0 (lib/lz4.c, compiled by us: the lz4 blocks of the ERA5 Zarr blosc chunks, core/src/weather_decode)"
+url = "https://github.com/lz4/lz4/archive/refs/tags/v1.10.0.zip"
+target = "external/lz4-1.10.0.zip"
+extract = true
+extract_to = "external"
+license = "BSD-2-Clause (lib/LICENSE)"
+credit = "LZ4 Library, Copyright (c) 2011-2020 Yann Collet"
+
+[[source]]
 id = "lsk"
 name = "Leap seconds kernel"
 url = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls"

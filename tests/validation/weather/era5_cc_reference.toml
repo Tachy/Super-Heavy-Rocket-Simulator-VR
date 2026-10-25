@@ -1,0 +1,19 @@
+# ERA5 fraction_of_cloud_cover cut-outs (gen_weather_fixtures.py); raw values in era5_cc_*_values.bin
+store = "https://storage.googleapis.com/gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
+chunk = "fraction_of_cloud_cover/1100000.0.0.0"
+time_utc = "2025-06-27T08:00:00Z"
+levels_hpa = [300, 500, 700, 850]
+first_row = 256
+first_column = 1044
+levels = 4
+
+[cutout]  # era5_cc_cutout.bin, era5_cc_cutout_noshuffle.bin
+rows = 8
+columns = 16
+value_min = 0.0
+value_max = 0.1484442949295044
+
+[blocks]  # era5_cc_blocks.bin
+rows = 64
+columns = 96
+blocksize_bytes = 65536
