@@ -1,0 +1,266 @@
+// Cloud optics and the CPU cloud light (M8 weather and clouds); formulas and citations in cloud_optics.hpp.
+
+#include "starsim/environment/cloud_optics.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
+#include "starsim/frames/geodetic.hpp"
+#include "starsim/math/constants.hpp"
+
+namespace starsim::environment {
+
+namespace {
+
+namespace c = constants;
+
+constexpr double four_pi = 4.0 * c::pi;
+
+// Fit of Jendersie & d'Eon 2023 (cloud_optics.hpp), droplet diameter in um, valid 5-50 um.
+constexpr double fit_min_diameter_um = 5.0, fit_max_diameter_um = 50.0;
+
+double henyey_greenstein(double mu, double g) {
+    const double denom = 1.0 + g * g - 2.0 * g * mu;
+    return (1.0 - g * g) / (four_pi * denom * std::sqrt(denom));
+}
+
+double draine(double mu, double g, double alpha) {
+    return henyey_greenstein(mu, g) * (1.0 + alpha * mu * mu) / (1.0 + alpha * (1.0 + 2.0 * g * g) / 3.0);
+}
+
+const CloudPhaseParameters& droplet_phase() {
+    static const CloudPhaseParameters p = cloud_phase_parameters(2.0 * c::cloud_droplet_effective_radius_m);
+    return p;
+}
+
+// Delta-Eddington constants of the cloud phase function (conservative scattering).
+struct DeltaEddington {
+    double f, g_scaled, gamma1;
+    explicit DeltaEddington(double g) : f(g * g), g_scaled(g / (1.0 + g)), gamma1(0.75 * (1.0 - g / (1.0 + g))) {}
+    double gamma3(double mu0) const { return (2.0 - 3.0 * g_scaled * mu0) / 4.0; }
+    // Beam reflectance of a slab of scaled optical depth tau_scaled (Meador & Weaver 1980, omega = 1).
+    double beam_reflectance_scaled(double tau_scaled, double mu0) const {
+        return (gamma1 * tau_scaled + (gamma3(mu0) - gamma1 * mu0) * (1.0 - std::exp(-tau_scaled / mu0))) /
+               (1.0 + gamma1 * tau_scaled);
+    }
+};
+
+const DeltaEddington& cloud_delta_eddington() {
+    static const DeltaEddington d(cloud_asymmetry_g());
+    return d;
+}
+
+// Diffuse field of the local column per unit Sun irradiance: Sigma = A0 + A1 t' + A2 exp(-t'/mu0) (F_up + F_down),
+// D = B0 + B1 exp(-t'/mu0) (F_up - F_down), t' the scaled depth below the top.
+struct DiffuseFieldCoefficients {
+    double a0 = 0.0, a1 = 0.0, a2 = 0.0, b0 = 0.0, b1 = 0.0;
+};
+
+DiffuseFieldCoefficients diffuse_field(const DeltaEddington& de, double column_scaled, double mu0) {
+    const double r = de.beam_reflectance_scaled(column_scaled, mu0);
+    const double g1 = de.gamma1, g3 = de.gamma3(mu0);
+    DiffuseFieldCoefficients k;
+    k.a0 = mu0 * (r + 2.0 * g1 * mu0 + 1.0 - 2.0 * g3);
+    k.a1 = 2.0 * g1 * mu0 * (r - 1.0);
+    k.a2 = -mu0 * (2.0 * g1 * mu0 + 1.0 - 2.0 * g3);
+    k.b0 = mu0 * (r - 1.0);
+    k.b1 = mu0;
+    return k;
+}
+
+// Gauss-Legendre nodes / weights on [0, 1].
+struct Quadrature {
+    std::vector<double> x, w;
+};
+
+Quadrature gauss_legendre_unit(int n) {
+    Quadrature q;
+    q.x.resize(static_cast<std::size_t>(n));
+    q.w.resize(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i) {
+        double z = std::cos(c::pi * (i + 0.75) / (n + 0.5)), dp = 0.0;
+        for (int it = 0; it < 100; ++it) {
+            double p0 = 1.0, p1 = 0.0;
+            for (int j = 1; j <= n; ++j) {
+                const double p2 = p1;
+                p1 = p0;
+                p0 = ((2.0 * j - 1.0) * z * p1 - (j - 1.0) * p2) / j;
+            }
+            dp = n * (z * p0 - p1) / (z * z - 1.0);
+            const double dz = p0 / dp;
+            z -= dz;
+            if (std::abs(dz) < 1e-15) break;
+        }
+        q.x[static_cast<std::size_t>(i)] = 0.5 * (1.0 - z);
+        q.w[static_cast<std::size_t>(i)] = 1.0 / ((1.0 - z * z) * dp * dp);  // 2 / ((1 - z^2) P'^2) on [-1, 1], halved
+    }
+    return q;
+}
+
+constexpr int slab_mu_nodes = 64, slab_phi_nodes = 64;
+
+// Integration from the ray start toward the Sun: steps of <= 25 m height change and <= 1 km length, midpoint rule
+// (the snapshot is linear between layer centres; the vertical rule keeps several samples per 250 m layer).
+constexpr double ray_vertical_step_m = 25.0;
+constexpr double ray_max_step_m = 1000.0;
+constexpr double solid_earth_height_m = -2000.0;
+constexpr int ray_max_steps = 200000;
+
+math::Vec3 geodetic_up(double latitude_rad, double longitude_rad) {
+    return {std::cos(latitude_rad) * std::cos(longitude_rad), std::cos(latitude_rad) * std::sin(longitude_rad),
+            std::sin(latitude_rad)};
+}
+
+double extinction_at(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad, double height_m) {
+    const WeatherCell cell = snapshot.at(latitude_rad, longitude_rad, height_m);
+    return cloud_extinction_per_m(cell.liquid_water_kg_m3, cell.ice_water_kg_m3);
+}
+
+}  // namespace
+
+double cloud_extinction_per_m(double liquid_water_kg_m3, double ice_water_kg_m3) {
+    return 3.0 * liquid_water_kg_m3 / (2.0 * c::liquid_water_density_kg_m3 * c::cloud_droplet_effective_radius_m) +
+           3.0 * ice_water_kg_m3 / (2.0 * c::ice_density_kg_m3 * c::cloud_ice_effective_radius_m);
+}
+
+CloudPhaseParameters cloud_phase_parameters(double droplet_diameter_m) {
+    const double d = std::clamp(droplet_diameter_m * 1e6, fit_min_diameter_um, fit_max_diameter_um);
+    CloudPhaseParameters p;
+    p.hg_g = std::exp(-0.0990567 / (d - 1.67154));
+    p.draine_g = std::exp(-2.20679 / (d + 3.91029) - 0.428934);
+    p.draine_alpha = std::exp(3.62489 - 8.29288 / (d + 5.52825));
+    p.draine_weight = std::exp(-0.599085 / (d - 0.641583) - 0.665888);
+    return p;
+}
+
+double cloud_phase_function(double cos_theta) {
+    const CloudPhaseParameters& p = droplet_phase();
+    const double mu = std::clamp(cos_theta, -1.0, 1.0);
+    return (1.0 - p.draine_weight) * henyey_greenstein(mu, p.hg_g) +
+           p.draine_weight * draine(mu, p.draine_g, p.draine_alpha);
+}
+
+double cloud_asymmetry_g() {
+    const CloudPhaseParameters& p = droplet_phase();
+    const double g2 = p.draine_g * p.draine_g;
+    const double draine_mean = p.draine_g * (1.0 + p.draine_alpha * (3.0 + 2.0 * g2) / 5.0) /
+                               (1.0 + p.draine_alpha * (1.0 + 2.0 * g2) / 3.0);
+    return (1.0 - p.draine_weight) * p.hg_g + p.draine_weight * draine_mean;
+}
+
+double two_stream_reflectance(double optical_depth, double asymmetry_g) {
+    const double x = 0.75 * (1.0 - asymmetry_g) * std::max(0.0, optical_depth);  // gamma1 tau'
+    return x / (1.0 + x);
+}
+
+double two_stream_diffuse_transmittance(double optical_depth, double asymmetry_g) {
+    return 1.0 / (1.0 + 0.75 * (1.0 - asymmetry_g) * std::max(0.0, optical_depth));
+}
+
+double two_stream_beam_reflectance(double optical_depth, double asymmetry_g, double sun_cos_zenith) {
+    if (sun_cos_zenith <= 0.0) return 0.0;
+    const DeltaEddington de(asymmetry_g);
+    return de.beam_reflectance_scaled((1.0 - de.f) * std::max(0.0, optical_depth), std::min(1.0, sun_cos_zenith));
+}
+
+double cloud_transport_scale() { return 1.0 - cloud_delta_eddington().f; }
+
+double cloud_multiple_scattering_source(double cos_theta, double view_up_cos, double sun_cos_zenith,
+                                        double sun_optical_depth, double depth_from_top,
+                                        double column_optical_depth) {
+    if (sun_cos_zenith <= 0.0) return 0.0;
+    const DeltaEddington& de = cloud_delta_eddington();
+    const double k = 1.0 - de.f, mu0 = std::min(1.0, sun_cos_zenith);
+    const double column = k * std::max(0.0, column_optical_depth);
+    const double t = std::clamp(k * depth_from_top, 0.0, column);
+    const DiffuseFieldCoefficients f = diffuse_field(de, column, mu0);
+    const double e = std::exp(-t / mu0);
+    const double sigma = f.a0 + f.a1 * t + f.a2 * e, net = f.b0 + f.b1 * e;
+    const double i0 = sigma / c::two_pi, i1 = 3.0 * net / four_pi;
+    const double forward_kept = std::exp(-k * sun_optical_depth) - std::exp(-sun_optical_depth);
+    const double eddington_phase = (1.0 + 3.0 * de.g_scaled * cos_theta) / four_pi;
+    return k * (i0 + de.g_scaled * view_up_cos * i1 + eddington_phase * forward_kept);
+}
+
+double slab_reflectance(double optical_depth, double sun_cos_zenith) {
+    if (sun_cos_zenith <= 0.0 || optical_depth <= 0.0) return 0.0;
+    static const Quadrature mu_q = gauss_legendre_unit(slab_mu_nodes), phi_q = gauss_legendre_unit(slab_phi_nodes);
+    const DeltaEddington& de = cloud_delta_eddington();
+    const double k = 1.0 - de.f, mu0 = std::min(1.0, sun_cos_zenith), sin0 = std::sqrt(1.0 - mu0 * mu0);
+    const double tau = optical_depth, big_t = k * tau;  // unscaled and scaled column
+    const DiffuseFieldCoefficients f = diffuse_field(de, big_t, mu0);
+    // Depth integrals over [0, big_t] of exp(-t/mu) dt / mu times 1, t, exp(-t/a).
+    auto k0 = [&](double mu) { return 1.0 - std::exp(-big_t / mu); };
+    auto k1 = [&](double mu) { return mu * (1.0 - std::exp(-big_t / mu)) - big_t * std::exp(-big_t / mu); };
+    auto ke = [&](double a, double mu) { return a / (a + mu) * (1.0 - std::exp(-big_t * (1.0 / a + 1.0 / mu))); };
+    double flux = 0.0;
+    for (std::size_t i = 0; i < mu_q.x.size(); ++i) {
+        const double mu = mu_q.x[i], sin_mu = std::sqrt(1.0 - mu * mu);
+        // Azimuth-independent part of the multiple-scattering radiance.
+        const double kexp = ke(mu0, mu);
+        const double diffuse = (f.a0 * k0(mu) + f.a1 * k1(mu) + f.a2 * kexp) / c::two_pi +
+                               3.0 * de.g_scaled * mu / four_pi * (f.b0 * k0(mu) + f.b1 * kexp);
+        const double forward_kept = kexp - ke(k * mu0, mu);
+        const double single_depth = mu0 * (1.0 - std::exp(-tau * (1.0 / mu0 + 1.0 / mu))) / (mu + mu0);
+        double ring = 0.0;  // integral over the azimuth, 0..pi doubled (symmetric about the Sun's plane)
+        for (std::size_t j = 0; j < phi_q.x.size(); ++j) {
+            const double cos_theta = sin0 * sin_mu * std::cos(c::pi * phi_q.x[j]) - mu0 * mu;
+            const double radiance = cloud_phase_function(cos_theta) * single_depth + diffuse +
+                                    (1.0 + 3.0 * de.g_scaled * cos_theta) / four_pi * forward_kept;
+            ring += phi_q.w[j] * radiance;
+        }
+        flux += mu_q.w[i] * mu * c::two_pi * ring;
+    }
+    return flux / mu0;
+}
+
+double cloud_column_optical_depth_above(const WeatherSnapshot& snapshot, double latitude_rad, double longitude_rad,
+                                        double height_ellipsoid_m) {
+    // The profile is linear in height between the breakpoints (layer bottoms and centres): trapezoids are exact.
+    const double start = std::max(height_ellipsoid_m, snapshot.ground_height_m(latitude_rad, longitude_rad));
+    if (start >= weather_top_m) return 0.0;
+    double tau = 0.0, lower = start;
+    double lower_beta = extinction_at(snapshot, latitude_rad, longitude_rad, lower);
+    for (int layer = 0; layer < weather_layer_count; ++layer) {
+        const double bottom = weather_layer_bottom_m(layer), top = weather_layer_bottom_m(layer + 1);
+        for (double upper : {0.5 * (bottom + top), top}) {
+            if (upper <= lower) continue;
+            const double upper_beta = extinction_at(snapshot, latitude_rad, longitude_rad, upper);
+            tau += 0.5 * (lower_beta + upper_beta) * (upper - lower);
+            lower = upper;
+            lower_beta = upper_beta;
+        }
+    }
+    return tau;
+}
+
+double cloud_sun_transmittance(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m,
+                               const math::Vec3& sun_direction_itrf) {
+    const math::Vec3 dir = math::normalized(sun_direction_itrf);
+    math::Vec3 p = position_itrf_m;
+    double tau = 0.0;
+    for (int step = 0; step < ray_max_steps; ++step) {
+        const frames::GeodeticPosition here = frames::fixed_to_geodetic(p);
+        if (here.height_m < solid_earth_height_m) break;
+        const double climb = math::dot(dir, geodetic_up(here.latitude_rad, here.longitude_rad));
+        // The height along a straight line is convex (distance to a convex surface): climbing above the top, it stays.
+        if (here.height_m >= weather_top_m && climb >= 0.0) break;
+        double length = std::clamp(ray_vertical_step_m / std::max(std::abs(climb), 1e-9), ray_vertical_step_m,
+                                   ray_max_step_m);
+        if (here.height_m > weather_top_m) length = std::max(length, here.height_m - weather_top_m);
+        const frames::GeodeticPosition mid = frames::fixed_to_geodetic(p + dir * (0.5 * length));
+        tau += extinction_at(snapshot, mid.latitude_rad, mid.longitude_rad, mid.height_m) * length;
+        p += dir * length;
+    }
+    return std::exp(-tau);
+}
+
+double cloud_sky_factor(const WeatherSnapshot& snapshot, const math::Vec3& position_itrf_m) {
+    const frames::GeodeticPosition here = frames::fixed_to_geodetic(position_itrf_m);
+    const double tau =
+        cloud_column_optical_depth_above(snapshot, here.latitude_rad, here.longitude_rad, here.height_m);
+    return two_stream_diffuse_transmittance(tau, cloud_asymmetry_g());
+}
+
+}  // namespace starsim::environment

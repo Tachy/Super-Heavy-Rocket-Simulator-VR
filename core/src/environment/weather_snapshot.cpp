@@ -5,15 +5,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <exception>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <utility>
 
 #include "starsim/math/constants.hpp"
+#include "parallel_rows.hpp"
 
 namespace starsim::environment {
 
@@ -58,38 +57,7 @@ void require_grid(int rows, int columns) {
 double row_latitude_rad(int row, int rows) { return c::pi / 2.0 - row * c::pi / (rows - 1); }
 double column_longitude_rad(int column, int columns) { return column * c::two_pi / columns; }
 
-// Cores left to the rest of the process while a snapshot builds (the game builds snapshots in-game: the 200 Hz flight
-// simulation thread and the render thread must not starve).
-constexpr int cores_left_free = 2;
-constexpr int max_build_threads = 32;
-
-// Runs fn(row) for every row on hardware_concurrency() - cores_left_free threads (at least 1, at most 32). An
-// exception in a worker stops that worker; the first one is rethrown on the calling thread after all have joined.
-template <class Fn>
-void for_each_row(int rows, Fn fn) {
-    const int hardware = static_cast<int>(std::thread::hardware_concurrency());
-    const int threads = std::clamp(hardware - cores_left_free, 1, std::min(rows, max_build_threads));
-    if (threads == 1) {
-        for (int r = 0; r < rows; ++r) fn(r);
-        return;
-    }
-    std::vector<std::exception_ptr> errors(static_cast<std::size_t>(threads));
-    std::vector<std::thread> pool;
-    pool.reserve(static_cast<std::size_t>(threads));
-    for (int t = 0; t < threads; ++t) {
-        pool.emplace_back([&, t] {
-            try {
-                for (int r = t; r < rows; r += threads) fn(r);
-            } catch (...) {
-                errors[static_cast<std::size_t>(t)] = std::current_exception();
-            }
-        });
-    }
-    for (auto& th : pool) th.join();
-    for (const auto& e : errors) {
-        if (e) std::rethrow_exception(e);
-    }
-}
+using detail::for_each_row;
 
 // Heights (gpm) and virtual temperatures of the levels visited in `order` (descending pressure), NaN at or below the
 // surface. The humidity of the virtual temperature is the column water vapour spread with the exponential profile

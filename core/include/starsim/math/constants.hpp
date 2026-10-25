@@ -124,4 +124,19 @@ inline constexpr double wgs84_somigliana_k = 0.00193185265241;
 inline constexpr double wgs84_first_eccentricity_squared = 0.00669437999013;
 inline constexpr double wgs84_gravity_ratio_m = 0.00344978600308;
 
+// Cloud optics (M8 weather and clouds).
+// Density of liquid water [S: 1000 kg/m^3 (999.84 at 0 deg C, 999.97 at 4 deg C), CRC Handbook of Chemistry and
+// Physics]: the droplet material density of the extinction 3 LWC / (2 rho r_eff).
+inline constexpr double liquid_water_density_kg_m3 = 1000.0;
+// Density of ice Ih at 0 deg C [S: 917 kg/m^3, Petrenko & Whitworth 1999, Physics of Ice, Oxford, table 11.1].
+inline constexpr double ice_density_kg_m3 = 917.0;
+// Effective radius of cloud droplets [E: 10 um; low-level stratiform clouds measure ~5-13 um, marine ~9-10 um, Miles,
+// Verlinde & Clothiaux 2000, J. Atmos. Sci. 57, 295; the usual single value of radiation schemes, Stephens 1978,
+// J. Atmos. Sci. 35, 2123]. It also sets the droplet diameter (20 um) of the phase function fit.
+inline constexpr double cloud_droplet_effective_radius_m = 10e-6;
+// Effective radius of cloud ice particles [E: 30 um, a typical mid-latitude cirrus value (~25-30 um at ice water
+// contents of 1e-6..1e-5 kg/m^3), Stephens, Tsay, Stackhouse & Flatau 1990, J. Atmos. Sci. 47, 1742; Fu 1996,
+// J. Climate 9, 2058 for the 3 IWC / (2 rho_ice r_eff) form of the visible extinction].
+inline constexpr double cloud_ice_effective_radius_m = 30e-6;
+
 }  // namespace starsim::constants
