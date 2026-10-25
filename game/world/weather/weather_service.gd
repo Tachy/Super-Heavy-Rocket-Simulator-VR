@@ -137,12 +137,18 @@ func setup(core: StarsimCore, config_dir: String, cache_dir: String, analog_dir:
 	_analog_index = _read_analog_index()
 
 
+## Checks only: a fixed overlay line while a pinned snapshot is shown (CloudLayer.show_now); "" = the service's line.
+var pinned_label := ""
+
+
 func blend() -> float:
 	return _blend
 
 
 ## The German source line of the overlay.
 func status_text() -> String:
+	if pinned_label != "":
+		return pinned_label
 	if not enabled:
 		return "Wetter: aus"
 	if _active.is_empty():
@@ -161,6 +167,22 @@ func status_text() -> String:
 			return "Wetter: GFS-Vorhersage vom %s %02d UTC, +%d h" % [day, posmod(cycle, 24), int(before["lead_h"])]
 		_:
 			return "Wetter: typisch (Analogtag %s)" % _date_text(int(before.get("analog_hour", before["valid_hour"])), true)
+
+
+## The overlay line of one loaded snapshot (StarsimCore.weather_load_snapshot): checks that pin a file (render_check).
+static func snapshot_label(snapshot: Dictionary) -> String:
+	match String(snapshot.get("kind", "")):
+		"era5":
+			var hour := int(snapshot["valid_hour"])
+			return "Wetter: ERA5, %s %02d:00 UTC" % [_date_text(hour, true), posmod(hour, 24)]
+		"gfs":
+			var cycle := int(snapshot["cycle_hour"])
+			return "Wetter: GFS-Vorhersage vom %s %02d UTC, +%d h" % [_date_text(cycle, false), posmod(cycle, 24),
+					int(snapshot["lead_h"])]
+		"analog":
+			return "Wetter: typisch (Analogtag %s)" % _date_text(int(snapshot.get("analog_hour",
+					snapshot["valid_hour"])), true)
+	return "Wetter: Testschicht"
 
 
 ## Nothing is active and nothing can come: no usable analog file and no wanted snapshot still downloading or building.

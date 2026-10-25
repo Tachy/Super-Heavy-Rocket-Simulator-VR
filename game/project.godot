@@ -256,6 +256,38 @@ cloud_field_after_size={
 "type": "vec3",
 "value": Vector3(2, 2, 32)
 }
+cloud_ice_before={
+"type": "sampler3D",
+"value": ""
+}
+cloud_ice_after={
+"type": "sampler3D",
+"value": ""
+}
+cloud_edge_mean={
+"type": "sampler2D",
+"value": ""
+}
+cloud_blue_noise={
+"type": "sampler2D",
+"value": ""
+}
+cloud_edge_width={
+"type": "float",
+"value": 0.02
+}
+cloud_ice_origin={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+cloud_light_march={
+"type": "vec4",
+"value": Vector4(20, 2, 6000, 0)
+}
+cloud_light_samples={
+"type": "ivec2",
+"value": Vector2i(5, 2)
+}
 cloud_blend={
 "type": "float",
 "value": 0.0
@@ -327,14 +359,6 @@ cloud_max_steps={
 cloud_fine_step_fraction={
 "type": "float",
 "value": 0.025
-}
-cloud_light_steps={
-"type": "int",
-"value": 4
-}
-cloud_frame={
-"type": "int",
-"value": 0
 }
 cloud_debug_output={
 "type": "int",

@@ -83,6 +83,13 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   `lit_aerial.gdshader`, `plume.gdshader`, `star_visibility.gdshaderinc`. GPU check (needs a GPU):
   `res://tests/atmosphere_check.gd [-- --f32]`; the table cache is built by `build/core/atmosphere_tables.exe`
   (~62 s) or on the first game start.
+- Clouds (M8): `game/world/weather/cloud_layer.gd` (`CloudLayer`: field textures, cross-fade, presets),
+  `cloud_effect.gd` (`CloudEffect`: the compute cloud pass in the world's Compositor), `cloud_field_texture.gd`,
+  `cloud_shader_port.gd`; shaders `clouds.gdshaderinc` (port of the core's cloud optics / noise / texels - change both
+  together), `cloud_pass.gdshaderinc` (compute kernels), `cloud_layer.gdshader` (composite). Details:
+  `docs/subsystems/weather-clouds.md`.
+- Global shader parameters are set only through `ShaderGlobals.set_value` (`world/shader_globals.gd`), which keeps a
+  script-side copy: compute passes read the same values (RenderingServer's getter is editor-only).
 - Rendering uses APPARENT positions (light time + aberration) for Sun and Moon; geometric positions
   would misplace the Moon's shadow on Earth by ~40 km.
 - UI text is German, code English.

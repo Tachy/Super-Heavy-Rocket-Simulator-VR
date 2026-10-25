@@ -1,22 +1,26 @@
-# GPU check of the volumetric clouds (M8 weather and clouds, Task 8): renders the cloud layer (shaders/cloud_layer.gdshader
-# through CloudLayer) over the sky into an HDR SubViewport and compares the centre pixel with the core's CPU reference.
+# GPU check of the volumetric clouds (M8 weather and clouds, Task 8): renders the cloud pass (CloudEffect, composited by
+# CloudLayer's quad) over the sky into an HDR SubViewport and compares pixels with the core's CPU reference.
 # Synthetic snapshots from StarsimCore.weather_write_slab_snapshot (uniform slabs, 1 deg grid, ground at 0 m):
-#   1. background transmittance (debug output 1, grid-mean field) seen from below, inside and above a slab of vertical tau ~1 vs the
-#      core's Beer-Lambert along the same ray (weather_cloud_light's sun_transmittance with the ray as "Sun"), 3 %;
+#   1. background transmittance (debug output 1, grid-mean field) seen from below, inside and above a slab of vertical
+#      tau ~1 vs the core's Beer-Lambert along the same ray (weather_cloud_light's sun_transmittance with the ray as
+#      "Sun"), 3 %; orientation: a wide view toward the horizon below the slab shows it in the top row at that row's
+#      elevation (3 %) and not in the bottom row (the pass's rays match the screen);
 #   2. a camera inside the slab renders a finite, non-black image (Review Focus 5);
-#   3. climbing out of the slab in 50 m steps (looking up, the shapes on) changes the centre 5 x 5 pixels by <= 5 % of
-#      the climb's brightest value per step (no pop);
+#   3. climbing out of the slab in 50 m steps (looking up, the shapes on, temporal accumulation on) changes the centre
+#      5 x 5 pixels by <= 5 % of the climb's brightest value per step (no pop);
 #   4. the Sun's scattered radiance (debug output 2) of a slab of tau ~10 seen from above vs the core's closed-form
-#      slab_reflected_radiance (the shader's TMS source integrated by the raymarch), 5 %;
-#   5. the GPU's filtered coverage (debug output 3) at the slab's centre height over a wide view = the cloud fraction
-#      (0.1 / 0.5 / 0.9) within 0.02 (Task 4 deferred: the RGBA8 filter weights against the float64 coverage table).
+#      slab_reflected_radiance: with a converged light march (24 samples, mean of 8 frames) 5 % - the port of the 3D
+#      source; with the preset's march at the worst geometry 15 % (the stochastic exp(-tau_s) is brighter on average);
+#   5. the GPU's filtered coverage (debug output 3, full resolution) at the slab's centre height over a wide view = the
+#      cloud fraction (0.1 / 0.5 / 0.9) within 0.02 (Task 4 deferred: the RGBA8 filter weights against the float64
+#      coverage table).
 # Detail noise off for the numbers (its amplitude 0); the desktop quality preset. Exit code 1 on failure.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_check.gd
 extends SceneTree
 
 const VIEW_SIZE := 33  ## odd: the centre pixel's ray is the camera axis
 const COVERAGE_VIEW_SIZE := 161
-const SETTLE_FRAMES := 3
+const SETTLE_FRAMES := 4
 const EPOCH_UTC := "2024-04-08T18:42:00"
 const AU_M := 149597870700.0
 const LAT_DEG := 30.0
@@ -29,11 +33,14 @@ const THICK_LIQUID_KG_M3 := 1.0e-2 / 150.0
 const TRANSMITTANCE_TOLERANCE := 0.03
 const TRANSMITTANCE_FLOOR := 0.02
 const RADIANCE_TOLERANCE := 0.05
+const PRESET_RADIANCE_TOLERANCE := 0.15
+const CONVERGED_LIGHT_SAMPLES := 24
+const RADIANCE_FRAMES := 8
 const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 19
+const EXPECTED_SAMPLES := 21
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
@@ -66,7 +73,7 @@ func _run() -> void:
 		_fail_and_quit("cloud noise not ready")
 		return
 	_clouds.quality = CloudLayer.Quality.DESKTOP
-	RenderingServer.global_shader_parameter_set(&"cloud_detail_amplitude", 0.0)
+	ShaderGlobals.set_value(&"cloud_detail_amplitude", 0.0)
 
 	var thin := _slab("thin", SLAB_BOTTOM_M, SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0)
 	_show(thin)
@@ -79,6 +86,20 @@ func _run() -> void:
 	await _transmittance_sample("inside, horizontal", 1500.0, _local_direction(0.0, 70.0), sun, thin)
 	await _transmittance_sample("above, nadir", 3000.0, _local_direction(-90.0, 0.0), sun, thin)
 	await _transmittance_sample("above, elevation -20 deg", 3000.0, _local_direction(-20.0, 10.0), sun, thin)
+	# Orientation: below the slab looking at the horizon, the top rows see it (30 deg up), the bottom rows do not.
+	_camera.fov = 60.0
+	await _render(_point(10.0), _local_direction(0.0, 70.0), sun, 1)
+	_camera.fov = 10.0
+	var frame := _viewport.get_texture().get_image()
+	var top_row := frame.get_pixel(VIEW_SIZE / 2, 0).r
+	var bottom_row := frame.get_pixel(VIEW_SIZE / 2, VIEW_SIZE - 1).r
+	# The top row shows the ray of the first half-resolution row (its centre 1 px below the edge).
+	var top_elevation := rad_to_deg(atan((1.0 - 2.0 / VIEW_SIZE) * tan(deg_to_rad(30.0))))
+	var top_expected := float(_core.weather_cloud_light(_point(10.0),
+			_local_direction(top_elevation, 70.0))["sun_transmittance"])
+	_check("orientation (the slab in the top rows at their elevation, not in the bottom rows)",
+			absf(top_row - top_expected) <= TRANSMITTANCE_TOLERANCE * top_expected and bottom_row > 0.99,
+			"top %.4f (CPU %.4f at %.1f deg) bottom %.3f" % [top_row, top_expected, top_elevation, bottom_row])
 	# 2. Inside the slab: finite, not black.
 	for view in [up, _local_direction(0.0, 70.0), _local_direction(-60.0, 300.0)]:
 		var c := await _render(_point(1500.0), view, sun, 0)
@@ -116,7 +137,10 @@ func _run() -> void:
 	print("cloud_check: thick slab vertical tau %.4f" % tau)
 	for c in [[0.0, 0.0, 0.0], [30.0, 0.0, 0.0], [0.0, 60.0, 180.0], [45.0, 60.0, 0.0], [45.0, 60.0, 180.0],
 			[30.0, 30.0, 90.0]]:
-		await _radiance_sample(c[0], c[1], c[2], tau)
+		await _radiance_sample(c[0], c[1], c[2], tau, true)
+	# The preset's own light march at the worst geometry: its stochastic estimate exp(-tau_s) is brighter on average
+	# than exp(-E[tau_s]) (Jensen; the march is unbiased in tau_s), wider tolerance.
+	await _radiance_sample(45.0, 60.0, 0.0, tau, false)
 	# 5. Coverage of the GPU's filtered shape noise.
 	_viewport.size = Vector2i(COVERAGE_VIEW_SIZE, COVERAGE_VIEW_SIZE)
 	for fraction in [0.1, 0.5, 0.9]:
@@ -154,6 +178,9 @@ func _setup_scene() -> void:
 	environment.reflected_light_source = Environment.REFLECTION_SOURCE_DISABLED
 	var world_environment := WorldEnvironment.new()
 	world_environment.environment = environment
+	var compositor := Compositor.new()
+	compositor.compositor_effects = [_clouds.effect]
+	world_environment.compositor = compositor
 	_viewport.add_child(world_environment)
 	_camera.fov = 10.0
 	_camera.near = 0.5
@@ -191,23 +218,42 @@ func _transmittance_sample(label: String, height_m: float, view_itrf: Vector3, s
 
 
 ## View zenith angle, Sun zenith angle, relative azimuth (0: the camera looks toward the Sun's side - the forward side).
-func _radiance_sample(view_zenith_deg: float, sun_zenith_deg: float, azimuth_deg: float, tau: float) -> void:
+## converged: the light march with CONVERGED_LIGHT_SAMPLES near samples (the port against the closed form); else the
+## quality preset's (tolerance PRESET_RADIANCE_TOLERANCE). The mean of RADIANCE_FRAMES frames (each its own jitter).
+func _radiance_sample(view_zenith_deg: float, sun_zenith_deg: float, azimuth_deg: float, tau: float,
+		converged: bool) -> void:
 	var view := _local_direction(view_zenith_deg - 90.0, 0.0)  # looking down, toward north
 	var sun := _local_direction(90.0 - sun_zenith_deg, azimuth_deg)  # azimuth 0: Sun in the north, ahead
-	var got := (await _render(_point(5000.0), view, sun, 2, BLOCK_RADIUS)).x
+	if converged:
+		var preset: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.DESKTOP]
+		var first: float = preset["light_first_m"]
+		var near: float = preset["light_near_m"]
+		ShaderGlobals.set_value(&"cloud_light_march", Vector4(first,
+				CloudLayer.light_march_ratio(first, near, CONVERGED_LIGHT_SAMPLES), near, 0.0))
+		ShaderGlobals.set_value(&"cloud_light_samples", Vector2i(CONVERGED_LIGHT_SAMPLES, int(preset["light_far"])))
+	var got := 0.0
+	for i in range(RADIANCE_FRAMES):
+		got += (await _render(_point(5000.0), view, sun, 2, BLOCK_RADIUS)).x / RADIANCE_FRAMES
+	_clouds.quality = CloudLayer.Quality.DESKTOP  # the preset's march again
 	var expected := float(_core.cloud_slab_radiance(tau, cos(deg_to_rad(sun_zenith_deg)),
 			cos(deg_to_rad(view_zenith_deg)), deg_to_rad(azimuth_deg)))
 	var error := absf(got - expected) / maxf(expected, 1e-6)
-	_check("Sun radiance view %.0f / Sun %.0f / azimuth %.0f deg" % [view_zenith_deg, sun_zenith_deg, azimuth_deg],
-			error <= RADIANCE_TOLERANCE, "GPU %.5f CPU %.5f /sr (%.2f %%)" % [got, expected, error * 100.0])
+	var tolerance := RADIANCE_TOLERANCE if converged else PRESET_RADIANCE_TOLERANCE
+	_check("Sun radiance view %.0f / Sun %.0f / azimuth %.0f deg (%s march)" % [view_zenith_deg, sun_zenith_deg,
+			azimuth_deg, "converged" if converged else "preset"],
+			error <= tolerance, "GPU %.5f CPU %.5f /sr (%.2f %%)" % [got, expected, error * 100.0])
 
 
 func _coverage_sample(fraction: float) -> void:
-	RenderingServer.global_shader_parameter_set(&"cloud_debug_height_m", 0.5 * (SLAB_BOTTOM_M + SLAB_TOP_M))
+	ShaderGlobals.set_value(&"cloud_debug_height_m", 0.5 * (SLAB_BOTTOM_M + SLAB_TOP_M))
 	_camera.fov = 60.0
+	# Full resolution: the check is on the field's filtered coverage, not on the pass's upsampling (half-resolution
+	# samples lose holes narrower than two pixels at 0.9).
+	_clouds.effect.set_quality(1, 1.0)
 	await _render(_point(300000.0), _local_direction(-90.0, 0.0), _local_direction(45.0, 0.0), 3)
 	_camera.fov = 10.0
 	var image := _viewport.get_texture().get_image()
+	_clouds.quality = _clouds.quality  # the preset's resolution again
 	var covered := 0
 	for y in range(image.get_height()):
 		for x in range(image.get_width()):
@@ -221,9 +267,12 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode
 	var sun_gcrf: Vector3 = _earth_to_gcrf * sun_itrf * AU_M
 	_atmosphere.update(camera_gcrf, Vector3.ZERO, _earth_to_gcrf, sun_gcrf, 0.0, 1.0)
 	_clouds.update(camera_itrf_m, 0.0, 0.0)
-	RenderingServer.global_shader_parameter_set(&"cloud_debug_output", mode)
+	ShaderGlobals.set_value(&"cloud_debug_output", mode)
 	var view_render := Frames.to_render(_earth_to_gcrf * view_itrf).normalized()
-	var up := Vector3.UP if absf(view_render.y) < 0.9 else Vector3.RIGHT
+	# The screen's up toward the local vertical (rows = elevations), any other for a zenith or nadir view.
+	var up := Frames.to_render(_earth_to_gcrf * camera_itrf_m.normalized()).normalized()
+	if absf(view_render.dot(up)) > 0.9:
+		up = Vector3.UP if absf(view_render.y) < 0.9 else Vector3.RIGHT
 	_camera.transform = Transform3D(Basis.looking_at(view_render, up), Vector3.ZERO)
 	for i in range(SETTLE_FRAMES):
 		await RenderingServer.frame_post_draw

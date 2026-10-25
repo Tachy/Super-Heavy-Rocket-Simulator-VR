@@ -185,16 +185,16 @@ func update_world() -> void:
 	_earth_material.set_shader_parameter("sun_position_local", sun_local)
 	_earth_material.set_shader_parameter("moon_position_local", moon_local)
 	# Global shader uniforms (project.godot [shader_globals]): one write for every terrain node material.
-	RenderingServer.global_shader_parameter_set("earth_sun_position_local", sun_local)
-	RenderingServer.global_shader_parameter_set("earth_moon_position_local", moon_local)
-	RenderingServer.global_shader_parameter_set("water_wave_vectors", water_waves.vectors)
-	RenderingServer.global_shader_parameter_set("water_wave_phases", water_waves.phases)
+	ShaderGlobals.set_value("earth_sun_position_local", sun_local)
+	ShaderGlobals.set_value("earth_moon_position_local", moon_local)
+	ShaderGlobals.set_value("water_wave_vectors", water_waves.vectors)
+	ShaderGlobals.set_value("water_wave_phases", water_waves.phases)
 	var moon_sun_local := moon.to_local_frame(sun_apparent_from_earth_m - moon_gcrf_m)
 	var moon_earth_local := moon.to_local_frame(-moon_gcrf_m)
 	_moon_material.set_shader_parameter("sun_position_local", moon_sun_local)
 	_moon_material.set_shader_parameter("earth_position_local", moon_earth_local)
-	RenderingServer.global_shader_parameter_set("moon_sun_position_local", moon_sun_local)
-	RenderingServer.global_shader_parameter_set("moon_earth_position_local", moon_earth_local)
+	ShaderGlobals.set_value("moon_sun_position_local", moon_sun_local)
+	ShaderGlobals.set_value("moon_earth_position_local", moon_earth_local)
 	_moon_material.set_shader_parameter("camera_position_local", moon.to_local_frame(cam - moon_gcrf_m))
 
 	_place_sun(sun_from_camera)
@@ -458,7 +458,7 @@ func _setup_earth_terrain(data_dir: String) -> void:
 	material.set_shader_parameter("night_texture", _earth_material.get_shader_parameter("night_texture"))
 	material.set_shader_parameter("moon_radius_m", MOON_RADIUS_M)
 	material.set_shader_parameter("day_exposure", Atmosphere.DAY_EXPOSURE)
-	RenderingServer.global_shader_parameter_set("water_wave_steepness", WaterWaves.STEEPNESS)  # constant: set once
+	ShaderGlobals.set_value("water_wave_steepness", WaterWaves.STEEPNESS)  # constant: set once
 	earth_terrain.name = "EarthTerrain"
 	earth_terrain.camera_global = "earth_terrain_camera"  # project.godot [shader_globals], read by terrain_earth.gdshader
 	earth.add_child(earth_terrain)
@@ -556,9 +556,10 @@ func _setup_environment() -> void:
 	environment.glow_intensity = 0.6
 	var world_environment := WorldEnvironment.new()
 	world_environment.environment = environment
-	# Night vision's rod step (EyeAdaptation, VisionEffect): after the transparent pass, before glow and AgX.
+	# The cloud pass (CloudEffect, before the transparent pass) and night vision's rod step (EyeAdaptation,
+	# VisionEffect: after the transparent pass, before glow and AgX).
 	var compositor := Compositor.new()
-	compositor.compositor_effects = [atmosphere.vision_effect]
+	compositor.compositor_effects = [clouds.effect, atmosphere.vision_effect]
 	world_environment.compositor = compositor
 	add_child(world_environment)
 

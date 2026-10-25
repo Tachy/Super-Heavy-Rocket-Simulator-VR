@@ -16,7 +16,8 @@
 #          [--legacy_hud] (F1: the old HUD too)
 # Weather: off in a render check unless --weather[=900] (online: waits for the downloads, at most that many seconds),
 #          --weather=<file.wthr> (a cached snapshot) or --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>;
-#          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's).
+#          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's), --cloud_debug=1..4 (the cloud
+#          pass's debug output, clouds.gdshaderinc cloud_debug_output).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
@@ -58,6 +59,8 @@ func _process(_delta: float) -> bool:
 		if _args.has("cloud_quality"):
 			world.clouds.quality = CloudLayer.Quality.VR if _args["cloud_quality"] == "vr" else CloudLayer.Quality.DESKTOP
 		_show_weather_file(world)
+		if _args.has("cloud_debug"):  # the cloud pass's debug output (clouds.gdshaderinc cloud_debug_output)
+			ShaderGlobals.set_value(&"cloud_debug_output", int(_args["cloud_debug"]))
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
 		world.atmosphere.eye_adaptation_enabled = not _args.has("fixed_exposure")
 		world.refraction.enabled = not _args.has("no_refraction")
@@ -174,6 +177,7 @@ func _show_weather_file(world: World) -> void:
 	world.clouds.wait_until_ready()
 	world.clouds.show_now(snapshot, snapshot, 0.0)
 	world.core.weather_set_active(file, file, 0.0)
+	world.weather.pinned_label = WeatherService.snapshot_label(snapshot)
 	print("render_check: weather from %s (%s %s)" % [file, snapshot["kind"], snapshot["cache_key"]])
 
 
