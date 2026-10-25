@@ -6,9 +6,9 @@ extends RefCounted
 ## the chunk goes into a small staging volume (texture_update) and is copied into its slices of the target on the GPU.
 ## Without a RenderingDevice (headless tests) the whole volume is created at once as an ImageTexture3D.
 
-## [E] Layers per frame: 2 x 4.2 MB of a 0.25-deg RGBA8 field (16 frames per snapshot, ~1 ms each measured in
-## render_check's "upload" line).
-const LAYERS_PER_STEP := 2
+## [E] Layers per frame: one 4.2 MB layer of a 0.25-deg RGBA8 field (32 + 32 frames per snapshot with its ice share;
+## render_check's "upload" line: the longest step 5.2 ms with one layer, 6.6 ms with two).
+const LAYERS_PER_STEP := 1
 const LAYERS := 32
 
 var texture: Texture3D  ## valid once done

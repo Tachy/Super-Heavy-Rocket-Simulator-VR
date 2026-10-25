@@ -12,8 +12,8 @@ far field, gate and docs) extend it.
   extinction of liquid + ice as a 16-bit linear number (hardware filtering interpolates it like `WeatherSnapshot::at`;
   the log water codes would not), A the log-coded in-cloud optical depth from 20 km down to the layer centre (maximum
   overlap); beside it the ice share of the extinction (`cloud_render_ice_texels`, R8, `cloud_ice_texels`). Two
-  snapshots resident (0.25 deg: 133 + 33 MB each). Uploaded by `CloudFieldTexture` in chunks of 2 layers per frame
-  (staging volume + GPU copy) instead of one 49 ms main-thread creation.
+  snapshots resident (0.25 deg: 133 + 33 MB each). Uploaded by `CloudFieldTexture` one layer per frame
+  (staging volume + GPU copy; the longest frame step 5.2 ms, incl. the volume creation) instead of one 49 ms main-thread creation.
 - **Vertical profile rule** (`cloud_render_texels.hpp` `cloud_profile_value`, port in `clouds.gdshaderinc`): the two
   layer centres around a point are fetched apart; where cloud starts above a clear layer the base is flat and sharp
   (50 m transition, `cloud_base_transition_m` [E]) in the middle of the gap, partly so where cloud only thickens upward;
