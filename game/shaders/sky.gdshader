@@ -44,7 +44,8 @@ vec3 ground_radiance(vec3 camera_local, vec3 view_local) {
 		albedo = textureLod(day_texture, vec2(lon / (2.0 * ATM_PI) + 0.5, 0.5 - lat / ATM_PI), 0.0).rgb;  // no mip jump at the lon seam
 	}
 	vec3 sky_light;
-	vec3 sun_light = atm_sun_and_sky(point_local, normal_local, sky_light);
+	vec3 sun_light = atm_sun_and_sky(point_local, normal_local, sky_light) * atm_sunlit(point_local);  // Moon shadow
+	sky_light *= atm_sky_eclipse_factor(point_local);
 	vec3 transmittance;
 	vec3 in_scatter = atm_to_point_model(v * t, transmittance);  // camera-relative: the hit's offset along the ray
 	return albedo * (sun_light + sky_light) * transmittance + in_scatter;

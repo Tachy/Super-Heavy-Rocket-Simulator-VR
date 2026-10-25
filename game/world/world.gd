@@ -143,7 +143,7 @@ func update_world() -> void:
 	var adaptation_dt := maxf(_delta, absf(t - _last_world_tdb_s)) if not is_nan(_last_world_tdb_s) else 0.0
 	_last_world_tdb_s = t
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
-			1.0 - core.solar_eclipse_fraction_gcrf(cam, t))
+			1.0 - core.solar_eclipse_fraction_gcrf(cam, t), moon_apparent_from_earth_m)
 
 	earth.place(cam)
 	var camera_fixed := earth.fixed_to_gcrf.transposed() * cam

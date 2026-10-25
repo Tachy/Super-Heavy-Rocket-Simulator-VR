@@ -101,13 +101,14 @@ vec3 water_reflected_direction(vec3 n, vec3 wave_n, vec3 to_camera) {
 // sun_normal: the Sun transmitted to the sea at normal incidence as the scene value of a white Lambertian surface
 // (atm_sun_at; vacuum: day_exposure); sky_light: the sky light on the flat sea, same units (atm_sky_light; vacuum 0);
 // sky_reflected: the sky radiance along water_reflected_direction from the water point (atm_sky_at_offset; vacuum 0).
-// The sky terms are scaled by sunlit as the land's (the eclipse sky is not modelled here).
+// sunlit applies to the direct Sun only (diffuse and glint); the sky terms carry the eclipse sky themselves
+// (atm_sky_light_eclipsed, the segmented atm_sky_at_offset).
 vec3 water_radiance(vec3 body, vec3 n, vec3 wave_n, float resolved_variance, vec3 to_sun, vec3 to_camera, float sunlit,
 		vec3 sun_normal, vec3 sky_light, vec3 sky_reflected) {
 	float sun_up = dot(n, to_sun);
 	float fresnel_view = water_fresnel(dot(wave_n, to_camera));
-	vec3 diffuse = body * (sun_normal * max(sun_up, 0.0) + sky_light) * sunlit * (1.0 - fresnel_view);
-	vec3 sky = sky_reflected * fresnel_view * sunlit;
+	vec3 diffuse = body * (sun_normal * max(sun_up, 0.0) * sunlit + sky_light) * (1.0 - fresnel_view);
+	vec3 sky = sky_reflected * fresnel_view;
 
 	// Cox-Munk glint: BRDF F p(tan beta) G / (4 cos_s cos_v cos^4 beta), p = exp(-tan^2 beta / s2) / (pi s2), G the
 	// Smith masking-shadowing; radiance = BRDF * E_n * cos_s with E_n = pi * sun_normal (the scene's normal-incidence

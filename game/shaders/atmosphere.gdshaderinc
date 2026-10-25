@@ -40,6 +40,8 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+#include "res://shaders/eclipse.gdshaderinc"
+
 // ---- Tables (RGBA float, linear filtering, clamp to edge as the CPU's GPU-style sampling).
 global uniform sampler2D atmosphere_transmittance : filter_linear, repeat_disable;
 global uniform sampler3D atmosphere_scattering : filter_linear, repeat_disable;
@@ -58,6 +60,12 @@ global uniform float atmosphere_scene_per_cd_m2;    // a true luminance (cd/m^2)
 // scales above; for what is not lit through the tables (Moon, Sun disc, plumes).
 global uniform float atmosphere_exposure_gain;
 global uniform bool atmosphere_enabled;             // false until the tables are uploaded
+// Solar eclipse in the sky (Atmosphere.update): the number of in-scattering segments while the Moon's penumbra touches
+// the Earth's atmosphere (0: off, the plain lookups), the Moon's apparent position and the Sun's distance from the
+// Earth's centre (Earth-local render frame, m; the Sun along atmosphere_sun_direction).
+global uniform int atmosphere_eclipse_segments;
+global uniform vec3 atmosphere_moon_position;
+global uniform float atmosphere_sun_distance_m;
 
 // ---- Model parameters (AtmosphereParameters of the loaded tables, set once on upload).
 global uniform float atmosphere_bottom_radius_m;    // model ground (a + ground_altitude_m)
@@ -75,6 +83,9 @@ global uniform vec4 atmosphere_table_sizes;         // (transmittance mu, transm
 const float ATM_POLAR_STRETCH = 1.0033640898209764;
 const vec3 ATM_STRETCH = vec3(1.0, ATM_POLAR_STRETCH, 1.0);
 const float ATM_PI = 3.14159265358979;
+// [S] The occulting and the occulted disc (core constants.hpp: moon_mean_radius_m, sun_radius_m).
+const float ATM_MOON_RADIUS_M = 1737400.0;
+const float ATM_SUN_RADIUS_M = 695700000.0;
 
 float atm_clamp_cosine(float mu) { return clamp(mu, -1.0, 1.0); }
 float atm_safe_sqrt(float a) { return sqrt(max(a, 0.0)); }
@@ -240,6 +251,70 @@ vec3 atm_to_scene(vec3 radiance) {
 	return radiance * atmosphere_sky_radiance_to_luminance * atmosphere_luminance_scale;
 }
 
+// ---- Solar eclipse (M8 atmosphere spec goal 8): the in-scattering along a ray split into segments, each weighted by
+// the fraction of the solar disc the Moon leaves at its midpoint (eclipse.gdshaderinc's occulted_fraction, the mirror
+// of the core's eclipse.cpp). Bruneton's difference form per segment: seen from the ray's start x, the light
+// scattered between p_i and p_i+1 is T(x, p_i) S(p_i) - T(x, p_i+1) S(p_i+1) (S: the table's scattering looking along
+// the ray, T: the transmittance from x); unweighted the sum telescopes to S(x) - T(x, end) S(end), the plain lookup.
+// Documented approximation [call]: the tables' S contains the multiple scattering, so light scattered several times
+// into the umbra is weighted like single scattering - by the Sun's visibility at the segment, not where it was first
+// scattered: the umbra sky goes dark while the air outside the shadow still sends its light (the 360-degree twilight
+// horizon of totality), but the multiply scattered glow inside the umbra is underestimated. Segment boundaries at
+// d (i / n)^2 [call]: denser near the start, where the air is densest for low rays.
+
+// Path length per segment of the aerial perspective (atm_to_point_model) during an eclipse [call].
+const float ATM_ECLIPSE_SEGMENT_M = 12500.0;
+
+// The Sun's unocculted fraction at an Earth-local point (unstretched, m); 1 while no eclipse is flagged.
+float atm_sunlit(vec3 point_local) {
+	if (atmosphere_eclipse_segments <= 0) {
+		return 1.0;
+	}
+	vec3 sun = atmosphere_sun_direction * atmosphere_sun_distance_m;
+	return 1.0 - occulted_fraction(sun - point_local, ATM_SUN_RADIUS_M, atmosphere_moon_position - point_local,
+			ATM_MOON_RADIUS_M);
+}
+
+// Scattering (unphased Rayleigh + multiple, single Mie) along the model-space ray from start_model = up * r (with rho,
+// mu, mu_s, nu, ground as for the lookups) over [0, d_end] in n segments: eclipsed (weighted) and full (unweighted).
+void atm_segmented_scattering(vec3 start_model, vec3 v, float r, float rho, float mu, float mu_s, float nu, bool ground,
+		float d_end, int n, out vec3 scattering, out vec3 single_mie, out vec3 full_scattering, out vec3 full_mie) {
+	float R = atmosphere_bottom_radius_m;
+	vec3 s_prev;
+	vec3 m_prev;
+	atm_combined_scattering(r, rho, mu, mu_s, nu, ground, s_prev, m_prev);
+	vec3 t_prev = vec3(1.0);
+	scattering = vec3(0.0);
+	single_mie = vec3(0.0);
+	full_scattering = vec3(0.0);
+	full_mie = vec3(0.0);
+	float inv_n = 1.0 / float(n);
+	for (int i = 1; i <= n; i++) {
+		float f = float(i) * inv_n;
+		float d = d_end * f * f;
+		float h = clamp(atm_height_along(r, rho, mu, d), 0.0, atmosphere_top_radius_m - R);
+		float r_d = R + h;
+		float rho_d = atm_rho_from_height(h);
+		float mu_d = atm_clamp_cosine((r * mu + d) / r_d);
+		float mu_s_d = atm_clamp_cosine((r * mu_s + d * nu) / r_d);
+		vec3 t_d = atm_transmittance(r, rho, mu, d, ground);
+		vec3 s_d;
+		vec3 m_d;
+		atm_combined_scattering(r_d, rho_d, mu_d, mu_s_d, nu, ground, s_d, m_d);
+		float f_mid = (float(i) - 0.5) * inv_n;
+		float weight = atm_sunlit((start_model + v * (d_end * f_mid * f_mid)) / ATM_STRETCH);
+		vec3 ds = t_prev * s_prev - t_d * s_d;
+		vec3 dm = t_prev * m_prev - t_d * m_d;
+		scattering += weight * ds;
+		single_mie += weight * dm;
+		full_scattering += ds;
+		full_mie += dm;
+		s_prev = s_d;
+		m_prev = m_d;
+		t_prev = t_d;
+	}
+}
+
 // The camera in model space: its direction (unit) and its distance r from the centre with rho, from the altitude
 // uniform (clamped onto the model ground from below, as the core's clamp_to_ground).
 void atm_camera_model(vec3 camera_local, out vec3 direction, out float r, out float rho) {
@@ -289,7 +364,15 @@ vec3 atm_sky_from(vec3 up, float r, float rho, vec3 v, out vec3 transmittance) {
 	transmittance = ground ? vec3(0.0) : atm_transmittance_to_top(r, rho, mu);
 	vec3 scattering;
 	vec3 single_mie;
-	atm_combined_scattering(r, rho, mu, mu_s, nu, ground, scattering, single_mie);
+	if (atmosphere_eclipse_segments > 0) {
+		float d_end = ground ? atm_distance_to_bottom(r, rho, mu) : atm_distance_to_top(r, mu);
+		vec3 full_scattering;
+		vec3 full_mie;
+		atm_segmented_scattering(up * r, v, r, rho, mu, mu_s, nu, ground, d_end, atmosphere_eclipse_segments, scattering,
+				single_mie, full_scattering, full_mie);
+	} else {
+		atm_combined_scattering(r, rho, mu, mu_s, nu, ground, scattering, single_mie);
+	}
 	vec3 radiance = scattering * atm_rayleigh_phase(nu) + single_mie * atm_mie_phase(atmosphere_mie_phase_g, nu);
 	return atm_to_scene(radiance);
 }
@@ -398,23 +481,36 @@ vec3 atm_to_point_model(vec3 offset_model, out vec3 transmittance) {
 	bool ground = atm_ray_intersects_ground(r, rho, mu);
 	vec3 tr = atm_transmittance(r, rho, mu, d, ground);
 	transmittance = tr;
-	vec3 s;
-	vec3 m;
-	atm_combined_scattering(r, rho, mu, mu_s, nu, ground, s, m);
-
-	float h_p = clamp(atm_height_along(r, rho, mu, d), 0.0, atmosphere_top_radius_m - R);
-	float r_p = R + h_p;
-	float rho_p = atm_rho_from_height(h_p);
-	float mu_p = atm_clamp_cosine((r * mu + d) / r_p);
-	float mu_s_p = atm_clamp_cosine((r * mu_s + d * nu) / r_p);
-	vec3 s_p;
-	vec3 m_p;
-	atm_combined_scattering(r_p, rho_p, mu_p, mu_s_p, nu, ground, s_p, m_p);
+	vec3 scattering;
+	vec3 single_mie;
+	if (atmosphere_eclipse_segments > 0) {
+		// [call] One segment per ATM_ECLIPSE_SEGMENT_M of the path, at most atmosphere_eclipse_segments: a near surface
+		// point (most terrain fragments) takes one; the Sun's visibility changes by < 1 % over that length outside
+		// the umbra's edge (penumbra ~3000 km wide), so the steps in n are not visible.
+		int n = clamp(int(ceil(d / ATM_ECLIPSE_SEGMENT_M)), 1, atmosphere_eclipse_segments);
+		vec3 full_scattering;
+		vec3 full_mie;
+		atm_segmented_scattering(up * r, v, r, rho, mu, mu_s, nu, ground, d, n, scattering, single_mie,
+				full_scattering, full_mie);
+	} else {
+		vec3 s;
+		vec3 m;
+		atm_combined_scattering(r, rho, mu, mu_s, nu, ground, s, m);
+		float h_p = clamp(atm_height_along(r, rho, mu, d), 0.0, atmosphere_top_radius_m - R);
+		float r_p = R + h_p;
+		float rho_p = atm_rho_from_height(h_p);
+		float mu_p = atm_clamp_cosine((r * mu + d) / r_p);
+		float mu_s_p = atm_clamp_cosine((r * mu_s + d * nu) / r_p);
+		vec3 s_p;
+		vec3 m_p;
+		atm_combined_scattering(r_p, rho_p, mu_p, mu_s_p, nu, ground, s_p, m_p);
+		scattering = s - tr * s_p;
+		single_mie = m - tr * m_p;
+	}
 
 	// Bruneton's hack against artefacts with the Sun below the horizon: fade the single Mie term out.
 	float mie_fade = smoothstep(0.0, 0.01, mu_s);
-	vec3 scattering = s - tr * s_p;
-	vec3 single_mie = (m - tr * m_p) * mie_fade;
+	single_mie *= mie_fade;
 	vec3 radiance = scattering * atm_rayleigh_phase(nu) + single_mie * atm_mie_phase(atmosphere_mie_phase_g, nu);
 	return atm_to_scene(radiance);
 }
@@ -454,6 +550,58 @@ vec3 atm_sky_light(vec3 point_local, vec3 normal_local) {
 	float mu_s = atm_clamp_cosine(dot(up, normalize(atmosphere_sun_direction * ATM_STRETCH)));
 	return atm_irradiance(r - atmosphere_bottom_radius_m, mu_s) * (1.0 + dot(normal, up)) * 0.5
 			* atmosphere_sky_radiance_to_luminance * (atmosphere_luminance_scale / ATM_PI);
+}
+
+// [call] Segments per direction of the sky light's eclipse factor (the sky dome uses atmosphere_eclipse_segments).
+const int ATM_ECLIPSE_LIGHT_SEGMENTS = 4;
+
+// The eclipse's factor on the sky light at a point (per channel; 1 without an eclipse or where the Sun is fully
+// visible): the sky radiance seen from the point, segmented with and without the eclipse weights, over the zenith
+// (weight 0.4) and four azimuths at 25 deg elevation (0.6 together) - the cosine-weighted sky in two rings - and the
+// ratio of the weighted sums. Replaces the sunlit-fraction scaling of Tasks 6/7 (review M4): inside the umbra the
+// overhead sky is dark while the low sky toward the sunlit air around the shadow still lights the ground.
+vec3 atm_sky_eclipse_factor(vec3 point_local) {
+	if (atmosphere_eclipse_segments <= 0 || atm_sunlit(point_local) >= 1.0) {
+		return vec3(1.0);
+	}
+	vec3 p = point_local * ATM_STRETCH;
+	float r = clamp(length(p), atmosphere_bottom_radius_m, atmosphere_top_radius_m);
+	float rho = atm_rho_of(r);
+	vec3 up = normalize(p);
+	vec3 sun = normalize(atmosphere_sun_direction * ATM_STRETCH);
+	vec3 east = normalize(cross(abs(up.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0), up));
+	vec3 north = cross(up, east);
+	float mu_s = atm_clamp_cosine(dot(up, sun));
+	vec3 eclipsed = vec3(0.0);
+	vec3 full = vec3(0.0);
+	for (int k = 0; k < 5; k++) {
+		float weight = k == 0 ? 0.4 : 0.15;
+		float azimuth = float(k) * 0.5 * ATM_PI;
+		vec3 v = k == 0 ? up : normalize(up * sin(radians(25.0)) + (north * cos(azimuth) + east * sin(azimuth))
+				* cos(radians(25.0)));
+		float mu = dot(up, v);
+		float nu = atm_clamp_cosine(dot(v, sun));
+		vec3 s;
+		vec3 m;
+		vec3 s_full;
+		vec3 m_full;
+		atm_segmented_scattering(up * r, v, r, rho, mu, mu_s, nu, false, atm_distance_to_top(r, mu),
+				ATM_ECLIPSE_LIGHT_SEGMENTS, s, m, s_full, m_full);
+		float phase_r = atm_rayleigh_phase(nu);
+		float phase_m = atm_mie_phase(atmosphere_mie_phase_g, nu);
+		eclipsed += weight * (s * phase_r + m * phase_m);
+		full += weight * (s_full * phase_r + m_full * phase_m);
+	}
+	vec3 factor;
+	for (int c = 0; c < 3; c++) {
+		factor[c] = full[c] > 0.0 ? clamp(eclipsed[c] / full[c], 0.0, 1.0) : 1.0;
+	}
+	return factor;
+}
+
+// The sky light on a surface including the eclipse (atm_sky_light x atm_sky_eclipse_factor).
+vec3 atm_sky_light_eclipsed(vec3 point_local, vec3 normal_local) {
+	return atm_sky_light(point_local, normal_local) * atm_sky_eclipse_factor(point_local);
 }
 
 // Both: returns the transmitted direct Sun with the cosine of the true, unstretched geometry; the sky term in `sky`.

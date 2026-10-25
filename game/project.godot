@@ -120,6 +120,18 @@ atmosphere_exposure_gain={
 "type": "float",
 "value": 1.0
 }
+atmosphere_eclipse_segments={
+"type": "int",
+"value": 0
+}
+atmosphere_moon_position={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+atmosphere_sun_distance_m={
+"type": "float",
+"value": 1.495978707e+11
+}
 atmosphere_bottom_radius_m={
 "type": "float",
 "value": 6377987.0

@@ -48,6 +48,9 @@ varying vec2 global_uv;  // equirectangular u (continuous in the node), v
 varying float camera_distance;
 varying vec3 camera_offset;  // fragment - camera (node-local render axes, metres; exact near the camera)
 varying vec2 water_uv;
+// The eclipse sky's factor on the sky light (atm_sky_eclipse_factor), per vertex: it varies over tens of km, and per
+// fragment it would cost ~20 table lookups during an eclipse.
+varying vec3 sky_eclipse_factor;
 
 void vertex() {
 	vec3 camera_local = terrain_camera_local(earth_terrain_camera_hi, earth_terrain_camera_lo);
@@ -56,6 +59,7 @@ void vertex() {
 	NORMAL = normalize(mix(NORMAL, CUSTOM3.xyz, morph));
 	local_position = VERTEX + vertex_offset;
 	local_normal = NORMAL;
+	sky_eclipse_factor = atmosphere_enabled ? atm_sky_eclipse_factor(local_position) : vec3(1.0);
 	global_uv = CUSTOM1.xy;
 	camera_offset = VERTEX - camera_local;
 	camera_distance = length(camera_offset);
@@ -88,16 +92,16 @@ void fragment() {
 	vec3 fine = texture(imagery_fine, UV).rgb;
 	vec3 albedo = mix(mix(texture(day_texture, map_uv).rgb, base, base_fade), fine, fine_fade);
 
-	// Light: the Sun transmitted to the point and the sky light (atmosphere.gdshaderinc), both scaled by the local
-	// sunlit fraction (the sky light's an approximation inside the Moon's shadow until the eclipse sky); before the
-	// tables are loaded the vacuum Sun at day_exposure and no sky.
+	// Light: the Sun transmitted to the point x the local sunlit fraction, and the sky light with the eclipse sky's
+	// factor (atmosphere.gdshaderinc: atm_sky_eclipse_factor, per vertex); before the tables are loaded the vacuum Sun at
+	// day_exposure and no sky.
 	vec3 sun_normal = vec3(day_exposure);
 	vec3 sky_light = vec3(0.0);
 	if (atmosphere_enabled) {
 		sun_normal = atm_sun_at(local_position);
-		sky_light = atm_sky_light(local_position, n);
+		sky_light = atm_sky_light(local_position, n) * sky_eclipse_factor;
 	}
-	vec3 day = albedo * (sun_normal * max(dot(n, normalize(earth_sun_position_local)), 0.0) + sky_light) * sunlit;
+	vec3 day = albedo * (sun_normal * max(dot(n, normalize(earth_sun_position_local)), 0.0) * sunlit + sky_light);
 	// Sea: the imagery where it covers (lagoons, shoals), else the day texture (shallow banks from orbit; deep_water
 	// without one), under the calm sea model.
 	float water = water_coverage(texture(water_mask, water_uv).r);

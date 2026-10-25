@@ -21,6 +21,11 @@ const POLAR_STRETCH := 1.0 / (1.0 - 1.0 / 298.257223563)
 const CACHE_FILE := "earth_atmosphere.bin"
 ## [S: ITU-R BT.709] luminance weights of the linear RGB channels (as star_visibility.gdshaderinc).
 const LUMINANCE_WEIGHTS := Vector3(0.2126, 0.7152, 0.0722)
+## [call] In-scattering segments of the eclipse sky while the Moon's penumbra touches the atmosphere (spec goal 8).
+const ECLIPSE_SEGMENTS := 8
+## [S: IAU 2015 Resolution B3] nominal solar radius; [S: core constants.hpp moon_mean_radius_m] the Moon's mean radius.
+const SUN_RADIUS_M := 695700000.0
+const MOON_RADIUS_M := 1737400.0
 
 ## True once the textures are uploaded and atmosphere_enabled is set.
 var ready := false
@@ -51,6 +56,8 @@ var eye_adaptation_enabled := true
 var exposure_gain := 1.0
 ## A true luminance (cd/m^2, at the Sun's actual distance) -> scene value, incl. the exposure gain.
 var scene_per_cd_m2 := 0.0
+## Eclipse sky segments this frame (0: no penumbra on the Earth).
+var eclipse_segments := 0
 var _eye := EyeAdaptation.new()
 
 var _core: StarsimCore
@@ -97,8 +104,11 @@ func wait_until_loaded() -> bool:
 ## Eye adaptation (eye_adaptation_enabled): adaptation_dt_s is the time the viewer had to adapt since the last frame
 ## (world.gd: the longer of the frame time and the simulated time step), sun_visible_fraction the part of the solar disc
 ## the Moon leaves at the camera.
+## moon_apparent_gcrf_m: the Moon's apparent position (GCRF, as seen from the Earth's centre) for the eclipse sky;
+## Vector3.ZERO: no eclipse.
 func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to_gcrf: Basis,
-		sun_apparent_gcrf_m: Vector3, adaptation_dt_s := 0.0, sun_visible_fraction := 1.0) -> void:
+		sun_apparent_gcrf_m: Vector3, adaptation_dt_s := 0.0, sun_visible_fraction := 1.0,
+		moon_apparent_gcrf_m := Vector3.ZERO) -> void:
 	if not poll():
 		return
 	var gcrf_to_fixed := earth_fixed_to_gcrf.transposed()
@@ -121,6 +131,15 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 	scene_per_cd_m2 = base * exposure_gain
 	RenderingServer.global_shader_parameter_set(&"atmosphere_scene_per_cd_m2", scene_per_cd_m2)
 	RenderingServer.global_shader_parameter_set(&"atmosphere_exposure_gain", exposure_gain)
+	eclipse_segments = 0
+	if moon_apparent_gcrf_m != Vector3.ZERO:
+		var moon_from_earth := moon_apparent_gcrf_m - earth_center_gcrf_m
+		if penumbra_touches(sun_from_earth, moon_from_earth, float(parameters["top_radius_m"])):
+			eclipse_segments = ECLIPSE_SEGMENTS
+		RenderingServer.global_shader_parameter_set(&"atmosphere_moon_position",
+				Frames.to_render(gcrf_to_fixed * moon_from_earth))
+	RenderingServer.global_shader_parameter_set(&"atmosphere_sun_distance_m", sun_from_earth.length())
+	RenderingServer.global_shader_parameter_set(&"atmosphere_eclipse_segments", eclipse_segments)
 	# Render world axes are GCRF in render axes; Earth-local = P R^T P^T (the transpose of the body's render basis).
 	var world_to_earth := Frames.basis_to_render(earth_fixed_to_gcrf).transposed()
 	RenderingServer.global_shader_parameter_set(&"atmosphere_camera_hi", split[0])
@@ -133,14 +152,17 @@ func update(camera_gcrf_m: Vector3, earth_center_gcrf_m: Vector3, earth_fixed_to
 
 ## Eye adaptation's luminance at an Earth-fixed eye (cd/m^2): a white Lambertian surface lit by the direct Sun at normal
 ## incidence (TOA illuminance x the transmittance to the Sun x visible_fraction) and the sky's horizontal irradiance,
-## (E_sun,n + E_sky) / pi, BT.709 luminance of the RGB luminance channels; the tables' 1 AU values / d_AU^2.
+## (E_sun,n + E_sky) / pi x visible_fraction, BT.709 luminance of the RGB luminance channels; the tables' 1 AU values
+## / d_AU^2.
 func adaptation_luminance(eye_itrf_m: Vector3, sun_direction_itrf: Vector3, visible_fraction: float, d_au: float) -> float:
 	var solar: Vector3 = parameters["solar_illuminance_rgb"]
 	var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
 	var transmittance := _core.atmosphere_sun_transmittance(eye_itrf_m, sun_direction_itrf)
 	var up := Vector3(eye_itrf_m.x, eye_itrf_m.y, eye_itrf_m.z * POLAR_STRETCH * POLAR_STRETCH).normalized()  # geodetic
 	var sky: Vector3 = _core.atmosphere_illuminance(eye_itrf_m, up, sun_direction_itrf)["sky_lux"]
-	var lux := solar * sun_factor * transmittance * visible_fraction + sky
+	# The sky's part also x visible_fraction: inside the Moon's shadow the sky overhead is shadowed with the eye (the
+	# CPU irradiance knows no eclipse; an approximation of the eclipse sky's irradiance for the adaptation only).
+	var lux := (solar * sun_factor * transmittance + sky) * visible_fraction
 	return lux.dot(LUMINANCE_WEIGHTS) / (PI * d_au * d_au)
 
 
@@ -150,6 +172,24 @@ func reference_luminance(d_au: float) -> float:
 	var solar: Vector3 = parameters["solar_illuminance_rgb"]
 	var sun_factor: Vector3 = parameters["sun_radiance_to_luminance"]
 	return (solar * sun_factor).dot(LUMINANCE_WEIGHTS) / (PI * d_au * d_au)
+
+
+## True when the Moon's penumbral cone reaches the sphere of radius_m about the Earth's centre (vectors from it, m): the
+## cone's half angle asin((R_sun + R_moon) / |Sun - Moon|), its apex on the Sun's side of the Moon.
+static func penumbra_touches(sun_m: Vector3, moon_m: Vector3, radius_m: float) -> bool:
+	var axis := moon_m - sun_m
+	var sun_moon_m := axis.length()
+	axis /= sun_moon_m
+	var along := -moon_m.dot(axis)  # the Earth's centre beyond the Moon along the shadow axis
+	if along <= 0.0:
+		return false
+	var off_axis := (-moon_m - axis * along).length()
+	var sin_half := (SUN_RADIUS_M + MOON_RADIUS_M) / sun_moon_m
+	var apex_m := MOON_RADIUS_M / sin_half  # apex distance on the Sun's side of the Moon
+	var cone_radius := (apex_m + along) * tan(asin(sin_half))
+	# The Earth's sphere touches the cone where its distance from the axis, measured across the cone wall, is below
+	# its radius: off_axis - cone_radius < radius / cos(half angle).
+	return off_axis - cone_radius < radius_m / cos(asin(sin_half))
 
 
 ## The next update takes the eye as adapted to its view (a new view, a test's fixed instant).

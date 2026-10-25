@@ -6,7 +6,8 @@
 # Sun and the sky light, seen through the atmosphere; 3 %). STARSIM_VERBOSE=1 prints the surface samples' parts.
 # Task 7 adds the stars (hidden at noon, unchanged above the atmosphere, visible in twilight), the Sun disc's reddening
 # and the daytime Moon (Moon x T + sky, 3 %); Task 8 a star near the threshold (Sun -6 deg), vehicles and structures
-# (a white lit_aerial cube at the pad and 40 km away, 5 %) and the Sun light's colour at a low Sun.
+# (a white lit_aerial cube at the pad and 40 km away, 5 %) and the Sun light's colour at a low Sun; the eye adaptation
+# (section 10, otherwise off); Task 9 the eclipse sky over Dallas at totality (section 11).
 # Needs a GPU (no --headless): godot --path game --script res://tests/atmosphere_check.gd
 extends SceneTree
 
@@ -181,6 +182,11 @@ func _run() -> void:
 	await _adapted_sample("adapted, 400 km by day, limb at 10 km", orbit, _limb_direction(orbit, Vector3(0, 0, 1),
 			10000.0), sun_orbit)
 	_check("adapted 400 km by day: the day exposure", is_equal_approx(_last_gain, 1.0), "gain %.4f" % _last_gain)
+
+	# 11. Solar eclipse in the sky (Task 9): 2024-04-08 18:42 UTC from Dallas (totality) - the zenith with the segments
+	# < 1 % of the same sky without them, the horizon away from the umbra > 10 x the zenith; two hours later (Dallas out
+	# of the eclipse, the penumbra still on the Earth) segments on and off agree within 1 %.
+	await _eclipse_samples()
 
 	print("atmosphere_check: %d samples, %d failures" % [_samples, _failures])
 	print("atmosphere_check: %s" % ("PASS" if _failures == 0 else "FAIL"))
@@ -407,6 +413,66 @@ func _moon_sample(label: String, camera_itrf_m: Vector3, view_itrf: Vector3, sun
 	var expected: Vector3 = vacuum * transmittance + cpu["luminance"] * _atmosphere.luminance_scale
 	print("atmosphere_check:   Moon without the atmosphere %s, transmittance %s" % [_vec(vacuum), _vec(transmittance)])
 	_compare(label + " = Moon x T + sky", expected, got, MOON_TOLERANCE)
+
+
+const DALLAS_LAT_DEG := 32.78
+const DALLAS_LON_DEG := -96.80
+const ECLIPSE_ZENITH_MAX_FRACTION := 0.01
+const ECLIPSE_HORIZON_MIN_RATIO := 10.0
+const ECLIPSE_OFF_TOLERANCE := 0.01
+var _moon_gcrf := Vector3.ZERO  ## eclipse samples: the Moon's apparent position (GCRF, from the Earth's centre)
+var _sun_gcrf := Vector3.ZERO  ## and the Sun's
+var _force_segments := -1  ## >= 0: atmosphere_eclipse_segments forced after the update
+
+
+## Section 11: the eclipse sky over Dallas (see _run).
+func _eclipse_samples() -> void:
+	var camera := _geodetic(DALLAS_LAT_DEG, DALLAS_LON_DEG, 2.0)
+	var zenith := _local_direction(DALLAS_LAT_DEG, DALLAS_LON_DEG, 0.0, 90.0)
+	var horizon := _local_direction(DALLAS_LAT_DEG, DALLAS_LON_DEG, 315.0, 3.0)  # NW: across the umbra's path
+	var saved_rotation := _earth_to_gcrf
+	var t := _core.utc_to_tdb_s(EPOCH_UTC)
+	var sun_itrf := _set_true_sun_and_moon(t)
+	print("atmosphere_check:   Dallas %s: eclipse fraction %.4f" % [EPOCH_UTC,
+			_core.solar_eclipse_fraction(DALLAS_LAT_DEG, DALLAS_LON_DEG, 2.0, t)])
+	_force_segments = 0
+	var zenith_off := await _render(camera, zenith, sun_itrf)
+	_force_segments = -1
+	var zenith_on := await _render(camera, zenith, sun_itrf)
+	_check("eclipse flag on at totality", _atmosphere.eclipse_segments > 0, "segments %d" % _atmosphere.eclipse_segments)
+	var horizon_on := await _render(camera, horizon, sun_itrf)
+	var y_off := zenith_off.dot(LUMINANCE_WEIGHTS)
+	var y_on := zenith_on.dot(LUMINANCE_WEIGHTS)
+	var y_horizon := horizon_on.dot(LUMINANCE_WEIGHTS)
+	_check("totality, Dallas zenith", y_on < ECLIPSE_ZENITH_MAX_FRACTION * y_off,
+			"segments %s, off %s, fraction %s (needs < %s)" % [_vec(zenith_on), _vec(zenith_off), _num(y_on / y_off),
+			_num(ECLIPSE_ZENITH_MAX_FRACTION)])
+	_check("totality, Dallas horizon NW el 3", y_horizon > ECLIPSE_HORIZON_MIN_RATIO * y_on,
+			"horizon %s, %s x the zenith (needs > %.0f)" % [_vec(horizon_on), _num(y_horizon / y_on),
+			ECLIPSE_HORIZON_MIN_RATIO])
+	# Two hours later: Dallas outside the eclipse.
+	var later := t + 7200.0
+	_earth_to_gcrf = _core.earth_fixed_to_gcrf(later)
+	sun_itrf = _set_true_sun_and_moon(later)
+	print("atmosphere_check:   Dallas +2 h: eclipse fraction %.4f" % _core.solar_eclipse_fraction(DALLAS_LAT_DEG,
+			DALLAS_LON_DEG, 2.0, later))
+	for view in [["zenith", zenith], ["horizon NW el 3", horizon]]:
+		_force_segments = 0
+		var off := await _render(camera, view[1], sun_itrf)
+		_force_segments = Atmosphere.ECLIPSE_SEGMENTS
+		var on := await _render(camera, view[1], sun_itrf)
+		_compare("+2 h, Dallas %s, segments on = off (flag %d)" % [view[0], _atmosphere.eclipse_segments], off, on,
+				ECLIPSE_OFF_TOLERANCE)
+	_force_segments = -1
+	_moon_gcrf = Vector3.ZERO
+	_earth_to_gcrf = saved_rotation
+
+
+## The true apparent Sun and Moon at t (from the Earth's centre) for _render; returns the Sun's ITRF direction.
+func _set_true_sun_and_moon(t: float) -> Vector3:
+	_sun_gcrf = _core.apparent_body_position_gcrf_m("sun", t, Vector3.ZERO, Vector3.ZERO)
+	_moon_gcrf = _core.apparent_body_position_gcrf_m("moon", t, Vector3.ZERO, Vector3.ZERO)
+	return (_earth_to_gcrf.transposed() * _sun_gcrf).normalized()
 
 
 ## Eye adaptation: the adapted zenith at Sun -3 deg must exceed this scene luminance - ~7 % of the noon zenith at the
@@ -657,7 +723,12 @@ func _altitude_control(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vec
 
 func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, altitude_override := NAN) -> Vector3:
 	var camera_gcrf := _earth_to_gcrf * camera_itrf_m
-	_atmosphere.update(camera_gcrf, Vector3.ZERO, _earth_to_gcrf, _earth_to_gcrf * sun_itrf * AU_M)
+	var sun_gcrf: Vector3 = _earth_to_gcrf * sun_itrf * AU_M
+	if _moon_gcrf != Vector3.ZERO:
+		sun_gcrf = _sun_gcrf  # the eclipse samples: the true Sun (its direction is sun_itrf) and the Moon
+	_atmosphere.update(camera_gcrf, Vector3.ZERO, _earth_to_gcrf, sun_gcrf, 0.0, 1.0, _moon_gcrf)
+	if _force_segments >= 0:
+		RenderingServer.global_shader_parameter_set(&"atmosphere_eclipse_segments", _force_segments)
 	if not is_nan(altitude_override):
 		RenderingServer.global_shader_parameter_set(&"atmosphere_camera_altitude_m", altitude_override)
 	var view_render := Frames.to_render(_earth_to_gcrf * view_itrf).normalized()

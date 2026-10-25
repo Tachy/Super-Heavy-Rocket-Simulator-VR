@@ -1,6 +1,8 @@
 // Fraction of a light source's disk hidden by an occluding sphere, seen from the fragment.
 // Mirror of core/src/environment/eclipse.cpp (Montenbruck & Gill 3.85-3.90); keep both in sync.
-// Inputs are vectors FROM the observer in metres.
+// Inputs are vectors FROM the observer in metres. Included by atmosphere.gdshaderinc too (the eclipse sky): guarded.
+#ifndef ECLIPSE_GDSHADERINC
+#define ECLIPSE_GDSHADERINC
 float occulted_fraction(vec3 to_source, float source_radius, vec3 to_occluder, float occluder_radius) {
 	float source_distance = length(to_source);
 	float occluder_distance = length(to_occluder);
@@ -29,3 +31,4 @@ float occulted_fraction(vec3 to_source, float source_radius, vec3 to_occluder, f
 	float area = a * a * acos(clamp(x / a, -1.0, 1.0)) + b * b * acos(clamp((c - x) / b, -1.0, 1.0)) - c * y;
 	return clamp(area / (PI * a * a), 0.0, 1.0);
 }
+#endif

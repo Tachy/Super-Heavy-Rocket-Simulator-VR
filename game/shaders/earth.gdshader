@@ -23,10 +23,12 @@ instance uniform vec3 vertex_offset = vec3(0.0);
 
 varying vec3 local_position;
 varying vec3 local_normal;
+varying vec3 sky_eclipse_factor;  // atm_sky_eclipse_factor per vertex (it varies over tens of km)
 
 void vertex() {
 	local_position = VERTEX + vertex_offset;
 	local_normal = NORMAL;
+	sky_eclipse_factor = atmosphere_enabled ? atm_sky_eclipse_factor(local_position) : vec3(1.0);
 }
 
 void fragment() {
@@ -41,11 +43,11 @@ void fragment() {
 	night = night * night * night_lights_intensity * night_factor;  // suppress dark-sky noise
 
 	if (atmosphere_enabled) {
-		// The sky light is scaled by the local sunlit fraction too (an approximation inside the Moon's shadow until the
-		// eclipse sky: the light scattered onto the point comes mostly from the shadowed air around it).
+		// The direct Sun x the local sunlit fraction; the sky light with the eclipse sky's factor (the dark sky inside
+		// the Moon's shadow, the lit air around it: atm_sky_eclipse_factor).
 		vec3 sky_light;
 		vec3 sun_light = atm_sun_and_sky(local_position, n, sky_light);
-		vec3 day = albedo * (sun_light + sky_light) * sunlit;
+		vec3 day = albedo * (sun_light * sunlit + sky_light * sky_eclipse_factor);
 		// Camera-relative offset: the mesh is far from the camera whenever it is drawn (the terrain takes over near
 		// the ground), so the difference of the absolute float32 positions is accurate enough here.
 		vec3 offset = (local_position - atmosphere_camera_hi) - atmosphere_camera_lo;
