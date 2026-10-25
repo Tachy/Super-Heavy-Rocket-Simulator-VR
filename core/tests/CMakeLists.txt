@@ -202,6 +202,7 @@ add_executable(starsim_core_tests
     test_translation_loop.cpp
     test_weather_decode.cpp
     test_weather_source.cpp
+    test_weather_snapshot.cpp
 )
 target_link_libraries(starsim_core_tests PRIVATE starsim::core Catch2::Catch2WithMain tomlplusplus::tomlplusplus)
 target_compile_definitions(starsim_core_tests PRIVATE

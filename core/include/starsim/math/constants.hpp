@@ -104,4 +104,20 @@ inline constexpr double standard_air_number_density_per_m3 = 2.54743e25;
 // candela, K_cd = 683 lm/W; Bruneton 2017 MAX_LUMINOUS_EFFICACY].
 inline constexpr double max_luminous_efficacy_lm_per_w = 683.0;
 
+// Weather snapshots (M8 weather and clouds).
+// Specific gas constant of dry air [S: 287.05 J/(kg K), WMO / ECMWF IFS documentation Part IV (R_dry = 287.0597)].
+inline constexpr double dry_air_gas_constant_j_kgk = 287.05;
+// Specific gas constant of water vapour [S: 461.51 J/(kg K), Wallace & Hobbs 2006, Atmospheric Science, 2nd ed.,
+// sec. 3.1]; the virtual temperature is T (1 + (R_v / R_d - 1) q).
+inline constexpr double water_vapour_gas_constant_j_kgk = 461.51;
+// Tropospheric lapse rate of the standard atmosphere [S: 6.5 K/km, US Standard Atmosphere 1976, NOAA-S/T 76-1562]:
+// the temperature from the surface to the first pressure level above it.
+inline constexpr double standard_lapse_rate_k_per_m = 0.0065;
+// WGS84 normal gravity (NIMA TR8350.2, 3rd edition, sec. 4.2): equatorial gravity, Somigliana constant k, first
+// eccentricity squared, and m = omega^2 a^2 b / GM of the free-air gradient (eq. 4-3).
+inline constexpr double wgs84_equatorial_gravity_mps2 = 9.7803253359;
+inline constexpr double wgs84_somigliana_k = 0.00193185265241;
+inline constexpr double wgs84_first_eccentricity_squared = 0.00669437999013;
+inline constexpr double wgs84_gravity_ratio_m = 0.00344978600308;
+
 }  // namespace starsim::constants

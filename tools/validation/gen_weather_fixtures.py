@@ -12,11 +12,15 @@ Writes tests/validation/weather/:
   gfs_<var>_<level>.grb2        single real GFS 0.25 deg GRIB2 messages (byte range from the .idx)
   gfs_<var>_<level>_reference.toml  grid metadata, the packing (template, E, D) and the values at 20 grid points,
                                 decoded by cfgrib (ecCodes)
+  era5_columns.toml             six ERA5 columns at one hour (the weather snapshot tests): all 37 levels of
+                                temperature, specific humidity, the three cloud fields and the store's geopotential,
+                                plus surface pressure and surface geopotential
+  gfs_column.toml               one GFS column (HGT / TMP on the 22 levels 1000..50 mb + HGT surface), cfgrib-decoded
 
 Offline tool only, not part of the build (references are TOML: the tests read them with toml++):
     python -m pip install numpy numcodecs xarray cfgrib eccodes
     python -I tools/validation/gen_weather_fixtures.py
-Downloads (~28 MB ERA5 chunk, ~0.9 MB GFS) are cached in data/raw/weather_fixtures/.
+Downloads (seven whole ERA5 chunks, ~0.6 GB; ~25 MB GFS records) are cached in data/raw/weather_fixtures/.
 """
 import datetime
 import pathlib
@@ -48,6 +52,27 @@ GFS_RECORDS = [
     ("TCDC", "300 mb", "gfs_tcdc_300mb"),
 ]
 POINTS_PER_RECORD = 20
+
+# Weather snapshot columns (name, row, column on the 0.25 deg grid: lat = 90 - row / 4, lon = column / 4).
+ERA5_PROFILE_COLUMNS = [
+    ("tropics", 340, 600),            # 5.0 N, 150.0 E (western Pacific warm pool)
+    ("midlatitude_ocean", 180, 1320),  # 45.0 N, 330.0 E (North Atlantic)
+    ("starbase", 256, 1051),          # 26.0 N, 262.75 E
+    ("cape", 246, 1118),              # 28.5 N, 279.5 E
+    ("himalaya", 240, 340),           # 30.0 N, 85.0 E
+    ("antarctic_plateau", 660, 493),  # 75.0 S, 123.25 E (Dome C)
+]
+ERA5_COLUMN_VARIABLES = [  # (store variable, TOML key)
+    ("temperature", "temperature_k"),
+    ("specific_humidity", "specific_humidity_kg_kg"),
+    ("fraction_of_cloud_cover", "cloud_fraction"),
+    ("specific_cloud_liquid_water_content", "liquid_kg_kg"),
+    ("specific_cloud_ice_water_content", "ice_kg_kg"),
+    ("geopotential", "geopotential_m2_s2"),
+]
+GFS_COLUMN_ROW, GFS_COLUMN_COLUMN = 201, 1020  # 39.75 N, 255.0 E (Denver: the 850 mb level is below the ground)
+GFS_LEVELS_MB = [1000, 975, 950, 925, 900, 850, 800, 750, 700, 650, 600,
+                 550, 500, 450, 400, 350, 300, 250, 200, 150, 100, 50]
 
 
 def fetch(url, name, byte_range=None):
@@ -201,10 +226,89 @@ def write_gfs():
         dataset.close()
 
 
+def toml_list(values):
+    return "[" + ", ".join(toml_float(v) for v in values) + "]"
+
+
+def era5_chunk(variable, four_dimensional):
+    key = f"{ERA5_TIME_INDEX}.0.0.0" if four_dimensional else f"{ERA5_TIME_INDEX}.0.0"
+    name = "era5_cc_chunk.bin" if variable == "fraction_of_cloud_cover" else f"era5_{variable}_chunk.bin"
+    shape = (37, 721, 1440) if four_dimensional else (721, 1440)
+    data = fetch(f"{ERA5_STORE}/{variable}/{key}", name)
+    return np.frombuffer(numcodecs.Blosc().decode(data), "<f4").reshape(shape)
+
+
+def write_era5_columns():
+    levels_hpa = np.frombuffer(numcodecs.Blosc().decode(fetch(f"{ERA5_STORE}/level/0", "era5_level_chunk.bin")), "<i8")
+    hour = datetime.datetime(1900, 1, 1) + datetime.timedelta(hours=ERA5_TIME_INDEX)
+    lines = [
+        "# Six ERA5 columns at one hour (gen_weather_fixtures.py): the weather snapshot tests. Level arrays follow",
+        "# levels_hpa (the store's order, 1 .. 1000 hPa); values are the store's float32 as float64.",
+        f'store = "{ERA5_STORE}"',
+        f"time_index = {ERA5_TIME_INDEX}",
+        f'time_utc = "{hour.isoformat()}Z"',
+        f"levels_hpa = [{', '.join(str(int(v)) for v in levels_hpa)}]",
+        "",
+    ]
+    columns = [{"name": name, "row": row, "column": column} for name, row, column in ERA5_PROFILE_COLUMNS]
+    for variable, key in ERA5_COLUMN_VARIABLES:
+        field = era5_chunk(variable, True)
+        for c in columns:
+            c[key] = field[:, c["row"], c["column"]]
+        del field
+    for variable, key in (("surface_pressure", "surface_pressure_pa"),
+                          ("geopotential_at_surface", "surface_geopotential_m2_s2")):
+        field = era5_chunk(variable, False)
+        for c in columns:
+            c[key] = field[c["row"], c["column"]]
+    for c in columns:
+        lines += ["[[column]]", f'name = "{c["name"]}"', f"row = {c['row']}", f"column = {c['column']}",
+                  f"latitude_deg = {90.0 - 0.25 * c['row']}", f"longitude_deg = {0.25 * c['column']}",
+                  f"surface_pressure_pa = {toml_float(c['surface_pressure_pa'])}",
+                  f"surface_geopotential_m2_s2 = {toml_float(c['surface_geopotential_m2_s2'])}"]
+        lines += [f"{key} = {toml_list(c[key])}" for _, key in ERA5_COLUMN_VARIABLES]
+        lines.append("")
+        print(f"  column {c['name']}: p_s {float(c['surface_pressure_pa']):.0f} Pa, "
+              f"z_s {float(c['surface_geopotential_m2_s2']) / 9.80665:.0f} gpm")
+    (OUT / "era5_columns.toml").write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_gfs_column():
+    index = fetch(GFS_FILE + ".idx", "gfs_f006.idx").decode("ascii").splitlines()
+    entries = [line.split(":") for line in index]
+
+    def value(variable, level):
+        i = next(k for k, e in enumerate(entries) if e[3] == variable and e[4] == level)
+        start, end = int(entries[i][1]), int(entries[i + 1][1]) - 1
+        name = f"gfs_{variable.lower()}_{level.replace(' ', '')}.grb2"
+        fetch(GFS_FILE, name, (start, end))
+        dataset = xr.open_dataset(CACHE / name, engine="cfgrib", backend_kwargs={"indexpath": ""})
+        v = float(next(iter(dataset.data_vars.values())).values[GFS_COLUMN_ROW, GFS_COLUMN_COLUMN])
+        dataset.close()
+        return v
+
+    lines = [
+        f"# One GFS column (gen_weather_fixtures.py), values decoded by cfgrib at grid row {GFS_COLUMN_ROW}, column "
+        f"{GFS_COLUMN_COLUMN}",
+        f'source = "{GFS_FILE}"',
+        f"row = {GFS_COLUMN_ROW}",
+        f"column = {GFS_COLUMN_COLUMN}",
+        f"latitude_deg = {90.0 - 0.25 * GFS_COLUMN_ROW}",
+        f"longitude_deg = {0.25 * GFS_COLUMN_COLUMN}",
+        f"levels_mb = [{', '.join(str(v) for v in GFS_LEVELS_MB)}]",
+        f"surface_height_m = {toml_float(value('HGT', 'surface'))}",
+        f"geopotential_height_m = {toml_list(value('HGT', f'{lvl} mb') for lvl in GFS_LEVELS_MB)}",
+        f"temperature_k = {toml_list(value('TMP', f'{lvl} mb') for lvl in GFS_LEVELS_MB)}",
+    ]
+    (OUT / "gfs_column.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     write_era5()
     write_gfs()
+    write_era5_columns()
+    write_gfs_column()
 
 
 if __name__ == "__main__":

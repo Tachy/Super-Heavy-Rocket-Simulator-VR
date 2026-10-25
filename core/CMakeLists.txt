@@ -160,6 +160,9 @@ add_library(starsim_core STATIC
     src/environment/earth_terrain.cpp
     src/environment/surface_samples.cpp
     src/environment/weather_source.cpp
+    src/environment/weather_snapshot.cpp
+    src/environment/weather_snapshot_file.cpp
+    src/environment/cache_file_io.cpp
     src/config/lunar_site_config.cpp
     src/config/geoid_config.cpp
     src/config/atmosphere_optics_config.cpp
@@ -228,6 +231,11 @@ target_compile_definitions(atmosphere_tables PRIVATE
     STARSIM_DATA_DIR="${STARSIM_DATA_DIR}"
     STARSIM_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
 )
+
+# weather_snapshot (M8 weather and clouds): raw ERA5 / GFS downloads -> one weather snapshot cache file (.wthr).
+add_executable(weather_snapshot apps/weather_snapshot.cpp)
+target_link_libraries(weather_snapshot PRIVATE starsim::core)
+target_compile_definitions(weather_snapshot PRIVATE STARSIM_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config")
 
 # refuelling_report (refuelling r6): how many tanker flights the lunar mission needs, from the command line.
 add_executable(refuelling_report apps/refuelling_report.cpp)
