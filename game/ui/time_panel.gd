@@ -129,7 +129,18 @@ func _process_unprofiled(_delta: float) -> void:
 	if world.atmosphere.status_text != "":
 		lines.append(world.atmosphere.status_text)
 	lines.append(world.weather.status_text())
+	var frame_rate := frame_rate_line(Engine.get_frames_per_second())
+	if frame_rate != "":
+		lines.append(frame_rate)
 	_info_label.text = "\n".join(lines)
+
+
+## The frame rate (Engine.get_frames_per_second: the frames of the last second) and its frame time, else "" (first
+## second). In VR a rate pinned at half the headset's (45 at 90 Hz) means the runtime is reprojecting.
+static func frame_rate_line(fps: float) -> String:
+	if fps <= 0.0:
+		return ""
+	return "Bildrate: %d fps (%.1f ms)" % [roundi(fps), 1000.0 / fps]
 
 
 ## The sea state and deck motion while a drone ship is the landing zone (FlightSim.landing_zone), else "".

@@ -390,6 +390,8 @@ func _check_falcon9(config_dir: String, tdb: float) -> bool:
 	_check(readout.begins_with("Seegang Hs 2.5 m, Tp 8 s - Deck: Hub ")
 			and TimePanel.sea_state_line(zone) == "Seegang ruhig - Deck in Ruhe" and TimePanel.sea_state_line({}) == "",
 			"time panel readout: '%s'" % readout)
+	_check(TimePanel.frame_rate_line(45.0) == "Bildrate: 45 fps (22.2 ms)" and TimePanel.frame_rate_line(0.0) == "",
+			"time panel frame rate line: '%s'" % TimePanel.frame_rate_line(45.0))
 	var pose_seen := false  # the deck moves: some pose within 10 s differs from the level deck, all within the limits
 	var pose_sane := true
 	for k in range(5):

@@ -174,6 +174,9 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   als Standard): aus = keine Wolken, die Szene wie vor dem Wetter (Pixel für Pixel), und kein Download. Die Wolken
   sind echte Volumen, überall auf der Erde sichtbar: von unten am Startplatz, beim Aufstieg hindurch (innen ein
   helles Grau, oben ein Wolkenmeer), aus dem Orbit als Decke mit Schatten und aus der Mondrichtung als Erde mit Wolken.
+- **Bildrate** [umgesetzt 2026-10-26]: letzte Zeile im Zeit-Panel (auch im VR-Panel), z. B. "Bildrate: 45 fps
+  (22.2 ms)" - die Bilder der letzten Sekunde. In VR heißt die halbe Headset-Rate (45 bei 90 Hz), dass die Runtime
+  Zwischenbilder rechnet.
 - **Zeitbogen:** flacher Bogen oben in der Mitte, "jetzt" am Scheitel. Ereignisse laufen rechts herein und links hinaus,
   die Enden blenden aus. Die Zeitskala ist gestaucht (grob nach relativer Zeit, kein strenger Maßstab) und um "jetzt"
   symmetrisch; sie richtet sich nach den nächsten zwei bis drei Ereignissen und gleitet ohne Sprünge. Beschriftungen
