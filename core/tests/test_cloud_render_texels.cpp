@@ -1,6 +1,7 @@
 // The GPU form of a weather snapshot (M8 weather and clouds, Task 8): linear extinction in two 8-bit channels and the
 // in-cloud optical depth above each layer centre.
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -193,14 +194,14 @@ TEST_CASE("Cloud column texels carry the grid-mean depth and the cover above eac
     const WeatherSnapshot snapshot = WeatherSnapshot::from_parts({}, rows, columns,
                                                                  std::vector<float>(rows * columns, 0.0f), texels);
     const std::vector<std::uint8_t> column = cloud_render_column_texels(snapshot);
-    REQUIRE(column.size() == texels.size());
+    REQUIRE(column.size() == texels.size() / 2);
     for (int layer = 0; layer < weather_layer_count; ++layer) {
         const CloudColumnDepths cpu = cloud_column_depths_above(snapshot, 0.3, 0.5, layer_centre_m(layer));
         const double expected = cpu.mean;
         const std::size_t texel = texel_offset(layer, 1, 2, rows, columns) / 4;
         // G: the largest cloud fraction from the top down to the centre (the column's cover).
-        CHECK(decode_weather_cloud_fraction(column[4 * texel + 1]) == Approx(cpu.max_fraction).margin(0.003));
-        const std::uint8_t code = column[4 * texel];
+        CHECK(decode_weather_cloud_fraction(column[2 * texel + 1]) == Approx(cpu.max_fraction).margin(0.003));
+        const std::uint8_t code = column[2 * texel];
         if (expected < cloud_depth_code_min) {
             CHECK(code <= 1);
         } else {
@@ -209,41 +210,99 @@ TEST_CASE("Cloud column texels carry the grid-mean depth and the cover above eac
     }
 }
 
-TEST_CASE("Column texels carry the cloud base of each cell in layer 0", "[weather]") {
-    // Ground heights 0, 1500 m (ellipsoid) with LCLs of 800 m, 600 m; saturated (0), unknown (-1) and a level above
-    // the boundary layer (3500 m): only the first two get a base, the others stay 0 (not cut).
-    const int rows = 2, columns = 3;
+TEST_CASE("Base texels carry the flat cloud base and its layer's extinction scale", "[weather]") {
+    // Ground heights 0, 1500 m (ellipsoid) with LCLs of 800 m, 600 m; saturated (0), unknown (-1), a level above the
+    // boundary layer (3500 m), 250 m over -40 m ground, and the weather top (20 km, a capped level): only cells 0, 1
+    // and 5 get a base, the others stay 0 (not cut).
+    const int rows = 2, columns = 4;
     std::vector<std::uint8_t> texels(static_cast<std::size_t>(weather_layer_count) * rows * columns * 4, 0);
-    const std::vector<float> ground = {0.0f, 1500.0f, 20.0f, 20.0f, 20.0f, -40.0f};
-    const std::vector<float> lcl = {800.0f, 600.0f, 0.0f, weather_lcl_unknown_m, 3500.0f, 250.0f};
-    const WeatherSnapshot snapshot = WeatherSnapshot::from_parts({}, rows, columns, ground, texels, lcl);
-    const std::vector<std::uint8_t> column = cloud_render_column_texels(snapshot);
-    const auto base_code = [&](int cell, int layer) {
-        const std::size_t i = (static_cast<std::size_t>(layer) * rows * columns + cell) * 4;
-        return static_cast<std::uint16_t>(256 * column[i + 2] + column[i + 3]);
-    };
-    CHECK(decode_cloud_lcl_base(base_code(0, 0)) == Approx(800.0).margin(0.35));
-    CHECK(decode_cloud_lcl_base(base_code(1, 0)) == Approx(2100.0).margin(0.35));  // from the ground, not the ellipsoid
-    CHECK(decode_cloud_lcl_base(base_code(5, 0)) == Approx(210.0).margin(0.35));
-    for (int cell : {2, 3, 4}) CHECK(base_code(cell, 0) == 0);
-    for (int layer = 1; layer < weather_layer_count; ++layer) CHECK(base_code(0, layer) == 0);
-    // The code: 0 = none, monotone, within 0.32 m, covers -500 .. 20.5 km.
-    CHECK(encode_cloud_lcl_base(std::nan("")) == 0);
-    CHECK(std::isnan(decode_cloud_lcl_base(0)));
-    CHECK(encode_cloud_lcl_base(-500.0) == 1);
-    CHECK(encode_cloud_lcl_base(20500.0) == 65535);
-    CHECK(encode_cloud_lcl_base(1e9) == 65535);
-    for (double h : {-300.0, 0.0, 123.456, 2999.9, 9000.0, 20000.0}) {
-        CHECK(decode_cloud_lcl_base(encode_cloud_lcl_base(h)) == Approx(h).margin(0.17));
+    const std::vector<float> ground = {0.0f, 1500.0f, 20.0f, 20.0f, 20.0f, -40.0f, 0.0f, 0.0f};
+    const std::vector<float> lcl = {800.0f, 600.0f, 0.0f, weather_lcl_unknown_m, 3500.0f, 250.0f, 20000.0f, 800.0f};
+    // Cell 7: ice in layer 1 (250 .. 500 m), wholly under its level's layer: no base (the cut would erase that ice).
+    texels[texel_offset(1, 1, 3, rows, columns) + 2] = encode_weather_water(1e-5);
+    // Cell 0: liquid in the base's own layer (750 .. 1000 m) and above does not stop the base (the layer keeps it above
+    // the level); its scale puts the profile's part under the base back above it.
+    for (int layer = 3; layer < 8; ++layer) {
+        texels[texel_offset(layer, 0, 0, rows, columns)] = encode_weather_cloud_fraction(0.6);
+        texels[texel_offset(layer, 0, 0, rows, columns) + 1] = encode_weather_water(1e-4);
     }
+    const WeatherSnapshot snapshot = WeatherSnapshot::from_parts({}, rows, columns, ground, texels, lcl);
+    const std::vector<float> base = cloud_render_base_texels(snapshot);
+    REQUIRE(base.size() == static_cast<std::size_t>(rows) * columns * 2);
+    CHECK(base[0] == Approx(800.0));
+    CHECK(base[2] == Approx(2100.0));  // from the ground, not the ellipsoid
+    CHECK(base[10] == Approx(210.0));
+    CHECK(base[1] > 1.0f);
+    CHECK(base[1] == Approx(cloud_lcl_extinction_scale(snapshot, 0, 0, 800.0)));
+    CHECK(base[3] == 1.0f);   // no cloud in the base's layer: nothing to put back
+    CHECK(base[11] == 1.0f);
+    for (int cell : {2, 3, 4, 6, 7}) CHECK(base[static_cast<std::size_t>(2 * cell + 1)] == 0.0f);
+    // A trace of liquid (the smallest code) under the level's layer also keeps the cell uncut.
+    texels[texel_offset(0, 0, 0, rows, columns) + 1] = 1;
+    const std::vector<float> traced =
+        cloud_render_base_texels(WeatherSnapshot::from_parts({}, rows, columns, ground, texels, lcl));
+    CHECK(traced[1] == 0.0f);
 }
 
-TEST_CASE("The base cut ramps the cloud in over cloud_lcl_ramp_m above the level", "[weather]") {
-    const double base = 1200.0, ramp = constants::cloud_lcl_ramp_m;
+TEST_CASE("The base cut ramps the cloud in over cloud_lcl_ramp_m above the level, inside its layer", "[weather]") {
+    const double base = 1200.0, ramp = constants::cloud_lcl_ramp_m;  // layer 4: 1000 .. 1250 m
     CHECK(cloud_lcl_cut_factor(base - 500.0, base) == 0.0);
     CHECK(cloud_lcl_cut_factor(base, base) == 0.0);
     CHECK(cloud_lcl_cut_factor(base + 0.5 * ramp, base) == Approx(0.5));
     CHECK(cloud_lcl_cut_factor(base + ramp, base) == 1.0);
     CHECK(cloud_lcl_cut_factor(base + 4.0 * ramp, base) == 1.0);
     CHECK(cloud_lcl_cut_factor(10.0, std::nan("")) == 1.0);  // no base: not cut
+    // A base 10 m under its layer's top: the ramp ends at the top (1250 m), the layer above is not cut.
+    CHECK(cloud_lcl_cut_factor(1249.0, 1240.0) == Approx(9.0 / ramp));
+    CHECK(cloud_lcl_cut_factor(1250.0, 1240.0) == 1.0);
+    CHECK(cloud_lcl_extinction_factor(1249.0, 1240.0, 3.0) == Approx(3.0 * 9.0 / ramp));
+    CHECK(cloud_lcl_extinction_factor(1250.0, 1240.0, 3.0) == 1.0);
+    CHECK(cloud_lcl_extinction_factor(1100.0, 1240.0, 3.0) == 0.0);
+    CHECK(cloud_lcl_extinction_factor(1100.0, 1240.0, 0.0) == 1.0);  // scale 0: no base
+    CHECK(cloud_lcl_extinction_factor(5000.0, std::nan(""), 3.0) == 1.0);
+}
+
+TEST_CASE("The base cut keeps the rendered column: the scaled profile integrates to the uncut one", "[weather]") {
+    // A cloud on layers 3 .. 7 with a denser layer 4 (the profile rises through the base's layer), ice in layer 6;
+    // bases low / mid / near the top of layer 3 (750 .. 1000 m), within the ramp of its top, on its bottom; a ground inside
+    // the base's layer.
+    const int rows = 1 + 2, columns = 2;
+    std::vector<std::uint8_t> texels(static_cast<std::size_t>(weather_layer_count) * rows * columns * 4, 0);
+    const std::array<double, 5> liquid = {1e-4, 4e-4, 3e-4, 3e-4, 2e-4};
+    for (int layer = 3; layer < 8; ++layer) {
+        const std::size_t i = texel_offset(layer, 1, 0, rows, columns);
+        texels[i] = encode_weather_cloud_fraction(layer == 3 ? 0.4 : 0.7);
+        texels[i + 1] = encode_weather_water(liquid[static_cast<std::size_t>(layer - 3)]);
+        if (layer == 6) texels[i + 2] = encode_weather_water(2e-5);
+    }
+    for (const auto& [base, ground] : std::array<std::array<double, 2>, 6>{
+             {{760.0, 0.0}, {880.0, 0.0}, {965.0, 0.0}, {985.0, 0.0}, {750.0, 0.0}, {900.0, 820.0}}}) {
+        std::vector<float> heights(static_cast<std::size_t>(rows) * columns, static_cast<float>(ground));
+        const WeatherSnapshot snapshot = WeatherSnapshot::from_parts({}, rows, columns, heights, texels);
+        const double scale = cloud_lcl_extinction_scale(snapshot, 1, 0, base);
+        // The renderer's profile at the column (CPU twin of the shader: the profile rule between the centres)
+        // integrated over the base's layer with and without the cut: 1 cm steps.
+        const auto beta = [&](int layer) {
+            const std::size_t i = texel_offset(layer, 1, 0, rows, columns);
+            return cloud_extinction_per_m(decode_weather_water(texels[i + 1]), decode_weather_water(texels[i + 2]));
+        };
+        const auto fraction = [&](int layer) {
+            return decode_weather_cloud_fraction(texels[texel_offset(layer, 1, 0, rows, columns)]);
+        };
+        const auto profile = [&](double h) {
+            const double s = weather_layer_coordinate(h) - 0.5;
+            const int k = std::clamp(static_cast<int>(std::floor(s)), 0, weather_layer_count - 2);
+            return cloud_profile_value(beta(k), beta(k + 1), fraction(k), fraction(k + 1), std::clamp(s - k, 0.0, 1.0),
+                                       layer_centre_m(k + 1) - layer_centre_m(k));
+        };
+        constexpr double step_m = 0.01;
+        double uncut = 0.0, cut = 0.0;
+        for (double h = std::max(750.0, ground) + 0.5 * step_m; h < 1000.0; h += step_m) {
+            uncut += profile(h);
+            cut += profile(h) * cloud_lcl_extinction_factor(h, base, scale);
+        }
+        INFO("base " << base << " ground " << ground << " scale " << scale);
+        CHECK(scale >= 1.0);
+        CHECK(cut == Approx(uncut).epsilon(1e-5));
+    }
 }

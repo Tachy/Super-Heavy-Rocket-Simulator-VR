@@ -23,6 +23,7 @@
 
 #include "starsim/config/geoid_config.hpp"
 #include "starsim/environment/cloud_optics.hpp"
+#include "starsim/environment/cloud_render_texels.hpp"
 #include "starsim/environment/weather_snapshot.hpp"
 #include "starsim/environment/weather_snapshot_file.hpp"
 #include "starsim/math/constants.hpp"
@@ -585,9 +586,8 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     write_weather_snapshot(file, snapshot);
     REQUIRE(read_weather_snapshot(file).has_value());
     auto bytes = read_bytes(file);
-    {  // a complete file of the current layout stamped version 2 is refused as well
+    for (const std::uint32_t old_version : {2u, 3u}) {  // a complete file of the current layout stamped 2 or 3: refused
         auto v2 = bytes;
-        const std::uint32_t old_version = 2;
         std::memcpy(v2.data() + 8, &old_version, sizeof(old_version));
         v2.resize(v2.size() - sizeof(std::uint64_t));
         std::uint64_t h = 14695981039346656037ull;
@@ -613,7 +613,8 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     CHECK_FALSE(read_weather_snapshot(old).has_value());
     // The same bytes with the right version number (and the missing block) are not a valid version 2 file either.
     const std::uint32_t two = 2;
-    CHECK(weather_snapshot_file_version == 3);  // version 2 stored unknown levels as 0 and had no base redistribution
+    // Version 2 stored unknown levels as 0 and had no base redistribution; version 3 moved only the lowest liquid run.
+    CHECK(weather_snapshot_file_version == 4);
     std::memcpy(bytes.data() + 8, &two, sizeof(two));
     bytes.resize(bytes.size() - sizeof(std::uint64_t));
     hash = 14695981039346656037ull;
@@ -970,7 +971,7 @@ TEST_CASE("An unknown level is skipped by the averages and leaves the cloud alon
     // Poles: the mean of the known columns only.
     CHECK(snapshot.lcl_m(0, 0) == snapshot.lcl_m(0, 7));
     CHECK(snapshot.lcl_m(0, 0) > 0.0f);
-    // A box over known and unknown columns: the known ones' mean, not diluted by the unknown.
+    // A box over known and unknown columns: the known ones' lowest base, not diluted by the unknown.
     const auto coarse = snapshot.downsampled(4);
     CHECK(coarse.lcl_m(1, 0) == Catch::Approx(snapshot.lcl_m(4, 1)).epsilon(0.05));
     // A box over unknown columns only stays unknown.
@@ -1004,4 +1005,122 @@ TEST_CASE("GFS takes the standard pressure at the column's ground height for the
     const double expected = lifting_condensation_level_m(290.0, 280.0, standard_pressure_at_height_pa(1500.0));
     CHECK(snapshot.lcl_m(1, 1) == Catch::Approx(expected).epsilon(1e-5));
     CHECK(expected != Catch::Approx(lifting_condensation_level_m(290.0, 280.0, 101325.0)).margin(0.5));
+}
+
+TEST_CASE("All liquid under the level is moved, every run, into the cloud above it", "[weather]") {
+    LayerColumn column;
+    column.cloud(0, 0, 0.3, 1e-4);  // 0 .. 250 m: a first run
+    column.cloud(2, 7, 0.6, 3e-4);  // 500 .. 2000 m
+    const double path = column.liquid_path(0.0);
+    column.raise(0.0, 800.0);
+    for (int k = 0; k < 3; ++k) {
+        CHECK(column.liquid[static_cast<std::size_t>(k)] == 0.0);
+        CHECK(column.fraction[static_cast<std::size_t>(k)] == 0.0);
+    }
+    CHECK(column.liquid_path(0.0) == Catch::Approx(path).epsilon(1e-6));
+    CHECK(column.liquid[3] / column.liquid[4] == Catch::Approx(0.8).epsilon(1e-12));  // 200 of 250 m kept
+    CHECK(column.liquid[5] / column.liquid[4] == Catch::Approx(1.0).epsilon(1e-12));
+    for (int k = 3; k < 8; ++k) CHECK(column.fraction[static_cast<std::size_t>(k)] >= 0.6);
+}
+
+TEST_CASE("A trace under the cloud is no cloud base but is moved up with the rest", "[weather]") {
+    // A trace below the smallest water code on 0 .. 500 m, the cloud from 1000 m (base above the level 800 m).
+    LayerColumn column;
+    column.cloud(0, 1, 0.5, 1e-10);
+    column.cloud(4, 7, 0.6, 3e-4);
+    const double path = column.liquid_path(0.0);
+    column.raise(0.0, 800.0);
+    CHECK(column.liquid[0] == 0.0);
+    CHECK(column.liquid[1] == 0.0);
+    CHECK(column.fraction[0] == 0.0);
+    CHECK(column.liquid_path(0.0) == Catch::Approx(path).epsilon(1e-6));
+    CHECK(column.liquid[4] == Catch::Approx(3e-4).epsilon(1e-6));  // the cloud itself barely changes
+    CHECK(column.liquid[5] / column.liquid[4] == Catch::Approx(1.0).epsilon(1e-12));
+    CHECK(column.fraction[4] == 0.6);
+    // Water but a cloud fraction under cloud_min_cover on 0 .. 250 m: the cloud from 500 m is the boundary-layer one.
+    LayerColumn thin;
+    thin.cloud(0, 0, 0.001, 1e-4);
+    thin.cloud(2, 7, 0.6, 3e-4);
+    const double thin_path = thin.liquid_path(0.0);
+    thin.raise(0.0, 800.0);
+    for (int k = 0; k < 3; ++k) CHECK(thin.liquid[static_cast<std::size_t>(k)] == 0.0);
+    CHECK(thin.liquid_path(0.0) == Catch::Approx(thin_path).epsilon(1e-6));
+    // Only traces in the column: no significant cloud, nothing moves.
+    LayerColumn trace;
+    trace.cloud(0, 3, 0.5, 1e-10);
+    const LayerColumn trace_before = trace;
+    trace.raise(0.0, 800.0);
+    CHECK(trace.liquid == trace_before.liquid);
+}
+
+TEST_CASE("A level at or above the weather top leaves the column alone and draws no base", "[weather]") {
+    LayerColumn column;
+    column.cloud(0, 7, 0.6, 3e-4);
+    const LayerColumn before = column;
+    for (double lcl : {weather_top_m, 25000.0}) {
+        column.raise(0.0, lcl);
+        CHECK(column.liquid == before.liquid);
+        CHECK(column.fraction == before.fraction);
+    }
+    // A built column with very dry 2 m air: its level is capped at the weather top, its cloud not cut.
+    REQUIRE(lifting_condensation_level_m(340.0, 120.0) > weather_top_m);
+    const auto dry = WeatherSnapshot::gfs_test_column(5, 8, 2000.0, 3e-4, 70.0, 340.0, 120.0);
+    CHECK(dry.lcl_m(2, 3) == static_cast<float>(weather_top_m));
+    CHECK(cloud_render_base_texels(dry)[2 * (2 * 8 + 3) + 1] == 0.0f);
+}
+
+TEST_CASE("A coarse cell takes the lowest known base of its box", "[weather]") {
+    const int rows = 9, columns = 8;
+    std::vector<std::uint8_t> texels(static_cast<std::size_t>(weather_layer_count) * rows * columns * 4, 0);
+    std::vector<float> ground(static_cast<std::size_t>(rows) * columns, 100.0f);
+    std::vector<float> lcl(static_cast<std::size_t>(rows) * columns, 1500.0f);
+    const auto at = [&](int r, int c) -> float& { return lcl[static_cast<std::size_t>(r) * columns + c]; };
+    // Box of coarse cell (1, 0): rows 2..6, columns 6, 7, 0, 1, 2. One column at 500 m, one NaN (skipped).
+    at(4, 1) = 500.0f;
+    at(5, 0) = std::nanf("");
+    // Box of coarse cell (1, 1): columns 2..6. A saturated column (fog): the box is saturated (no cut).
+    at(3, 4) = 0.0f;
+    // Rows 0 and 8 belong to the pole boxes only; a higher ground beside the low base: the lowest base height counts.
+    const auto snapshot = WeatherSnapshot::from_parts({}, rows, columns, ground, texels, lcl);
+    const auto coarse = snapshot.downsampled(4);
+    CHECK(coarse.lcl_m(1, 0) == Catch::Approx(500.0).margin(1e-3));
+    CHECK(coarse.lcl_m(1, 1) == 0.0f);
+    // The lowest base height above the box's mean ground: a 400 m higher ground under a 1500 m level elsewhere.
+    std::vector<float> hilly = ground;
+    for (int r = 2; r <= 6; ++r) hilly[static_cast<std::size_t>(r) * columns + 6] = 500.0f;  // column 6 of box (1, 0)
+    std::vector<float> plain_lcl(lcl.size(), 1500.0f);
+    const auto hill = WeatherSnapshot::from_parts({}, rows, columns, hilly, texels, plain_lcl).downsampled(4);
+    const double box_ground = hill.ground_heights_m()[static_cast<std::size_t>(1) * hill.columns()];
+    CHECK(box_ground > 100.0);
+    CHECK(hill.lcl_m(1, 0) == Catch::Approx(100.0 + 1500.0 - box_ground).margin(1e-3));
+}
+
+TEST_CASE("A snapshot built from fields gets the flat base and keeps the column's optical depth", "[weather]") {
+    // 2 m spread 7 K (LCL ~ 870 m) against a saturated surface (0.5 K: fog, the column as the data has it).
+    const auto raised = WeatherSnapshot::gfs_test_column(5, 8, 2000.0, 3e-4, 70.0, 295.0, 288.0);
+    const auto fog = WeatherSnapshot::gfs_test_column(5, 8, 2000.0, 3e-4, 70.0, 295.0, 294.5);
+    const int r = 2, c = 3;
+    const std::size_t cell = static_cast<std::size_t>(r) * 8 + c;
+    const double lcl = raised.lcl_m(r, c), ground = raised.ground_heights_m()[cell];
+    REQUIRE(lcl > 700.0);
+    REQUIRE(lcl < 1100.0);
+    CHECK(fog.lcl_m(r, c) == 0.0f);
+    const std::size_t cells = static_cast<std::size_t>(5) * 8;
+    for (int k = 0; k < weather_layer_count; ++k) {
+        const std::size_t i = (static_cast<std::size_t>(k) * cells + cell) * 4;
+        if (weather_layer_bottom_m(k + 1) <= ground + lcl) {
+            CHECK(raised.texels()[i + 1] == 0);
+            CHECK(raised.texels()[i] == 0);
+        }
+    }
+    CHECK(fog.texels()[cell * 4 + 1] > 0);  // the fog column has liquid at the ground
+    // The column's optical depth is kept (the 8-bit water codes: <= 1.97 % per layer).
+    const double tau = cloud_render_column_optical_depth(raised, r, c);
+    CHECK(tau > 1.0);
+    CHECK(tau == Catch::Approx(cloud_render_column_optical_depth(fog, r, c)).epsilon(0.03));
+    // The base texel: the level above the ground; the fog column has none.
+    const auto base = cloud_render_base_texels(raised);
+    CHECK(base[2 * cell] == Catch::Approx(ground + lcl));
+    CHECK(base[2 * cell + 1] > 1.0f);
+    CHECK(cloud_render_base_texels(fog)[2 * cell + 1] == 0.0f);
 }

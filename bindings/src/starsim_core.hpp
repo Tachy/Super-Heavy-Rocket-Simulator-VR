@@ -136,8 +136,8 @@ public:
     // Reads a cache file: {ok, error, rows, columns, layers, cloud_texels: PackedByteArray (layer-major RGBA8, the GPU
     // form environment::cloud_render_texels: cloud fraction, 16-bit linear extinction, in-cloud depth code),
     // cloud_ice_texels: PackedByteArray (layer-major R8, environment::cloud_render_ice_texels: the ice share of the
-    // extinction), cloud_column_texels: PackedByteArray (layer-major RGBA8, environment::cloud_render_column_texels: the
-    // grid-mean column depth above each layer centre (R, log code) and the largest cloud fraction above it (G); layer 0: the 16-bit cloud base in B, A)), layer_bottoms_m:PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour, lead_h, analog_hour, cache_key, file (the path as given)}.
+    // extinction), cloud_column_texels: PackedByteArray (layer-major RG8, environment::cloud_render_column_texels: the
+    // grid-mean column depth above each layer centre (R, log code) and the largest cloud fraction above it (G)), cloud_base_texels: PackedByteArray (rows x columns RG32F as bytes, environment::cloud_render_base_texels: the flat cloud base and its layer's extinction scale, 0 = none), layer_bottoms_m:PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour, lead_h, analog_hour, cache_key, file (the path as given)}.
     // The game builds the label from the id fields. The snapshot stays in a small cache (the last three files) for
     // weather_set_active. Call it on a worker: the GPU form of a 0.25-deg snapshot is 133 MB.
     godot::Dictionary weather_load_snapshot(const godot::String& file);
@@ -180,9 +180,15 @@ public:
     // Checks only: environment::slab_reflected_radiance_mc with the loaded table (-1 without one).
     double cloud_slab_radiance_mc(double optical_depth, double sun_cos_zenith, double view_cos_zenith,
                                   double relative_azimuth_rad) const;
-    // Checks only: writes WeatherSnapshot::uniform_slab(181, 360, ...) to `file` (lcl_m < 0: no level known).
+    // Checks only: writes WeatherSnapshot::uniform_slab(181, 360, ...) to `file`.
     bool weather_write_slab_snapshot(const godot::String& file, double bottom_m, double top_m,
-                                     double liquid_water_kg_m3, double cloud_fraction, double lcl_m = -1.0) const;
+                                     double liquid_water_kg_m3, double cloud_fraction) const;
+    // Checks only: writes WeatherSnapshot::gfs_test_column(181, 360, ...) (a snapshot built from fields, the LCL raise
+    // included) to `file`; {ok, optical_depth (environment::cloud_render_column_optical_depth), ground_m, lcl_m} of the
+    // cell nearest to (latitude_deg, longitude_deg).
+    godot::Dictionary weather_write_column_snapshot(const godot::String& file, double latitude_deg,
+                                                    double longitude_deg, double cloud_top_m, double liquid_kg_kg, double cloud_percent,
+                                                    double t2m_k, double td2m_k) const;
 
 protected:
     static void _bind_methods();

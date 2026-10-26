@@ -13,29 +13,43 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   extinction of liquid + ice as a 16-bit linear number (hardware filtering interpolates it like `WeatherSnapshot::at`;
   the log water codes would not), A the log-coded in-cloud optical depth from 20 km down to the layer centre (maximum
   overlap); beside it the ice share of the extinction (`cloud_render_ice_texels`, R8, `cloud_ice_texels`). Two
-  snapshots resident (0.25 deg: 133 + 33 + 133 MB each, with the column texture below). Uploaded by `CloudFieldTexture` one layer per frame
+  snapshots resident (0.25 deg: 133 + 33 + 66 + 8 MB each, with the column and base textures below). Uploaded by `CloudFieldTexture` one layer per frame
   (staging volume + GPU copy; the longest frame step 5.2 ms, incl. the volume creation) instead of one 49 ms main-thread creation.
-- **Cloud bases at the lifting condensation level** (static clouds Task 7; spec decisions 1-2; `weather_snapshot.hpp`,
-  file format 3): `WeatherSnapshot::lcl_m(row, column)` is the condensation height (m above the GROUND) of the 2 m
-  parcel, Romps 2017 exact (`weather-service.md`): 0 = saturated surface air (T - Td < `cloud_fog_spread_k` 1 K [E]),
-  `weather_lcl_unknown_m` (-1) = unknown (no 2 m fields, invalid input); the downsampled set and the pole rows average the
-  known values like the ground height (a box of only unknown columns stays unknown). The build (`ColumnLayers::build` ->
-  `raise_liquid_cloud_to_lcl`, on the 32 layer means of the column) treats the lowest liquid cloud whose base is less than
-  `cloud_boundary_layer_top_m` 3 km [E] above the ground as a boundary-layer cloud whose base is the LCL: condensate
-  below it is moved up. Where cloud remains above the LCL, the cut part's liquid is spread over that part in proportion
-  to its liquid (profile kept; cloud fraction at least the cut part's mass-weighted fraction, so the covered area does not
-  shrink); a cloud wholly under the LCL is lifted to start there with the same depth and mean density. Untouched: a base
-  at or above the LCL, an LCL of 0 (fog / low stratus keep the ground), unknown, an LCL >= 3 km, ice (a layer's cloud
-  fraction stays where it holds ice). The column's liquid water path is conserved (1e-6 relative on the layer means; the
-  8-bit codes then cost <= 1.97 % per layer). Limit: a very dense result clamps at the water code's 4e-3 kg/m^3 maximum
-  (not reached by the ERA5 / GFS data tested).
-  GPU: the column texture's layer 0 carries each cell's cloud base as a height above the ellipsoid (ground + LCL, B / A =
-  the 16-bit `encode_cloud_lcl_base`, 0.32 m steps, 0 = none: fog, unknown, LCL >= 3 km); `cloud_lcl_cut` (shader, core
-  `cloud_lcl_cut_factor`) reads the four nearest columns by `texelFetch` and multiplies the cloud fraction and the
-  extinction by a ramp from 0 at the base to 1 over `cloud_lcl_ramp_m` 30 m [E], mixed bilinearly with the columns
-  without a base counting 1: flat sharp bases, nothing hangs below them, silhouettes above base + 30 m are untouched
-  (heights above the ellipsoid; nothing is fetched above 9.5 km). The cut loses the water between the base and the first
-  30 m (at most ~15 m of cloud per column).
+- **Cloud bases at the lifting condensation level** (static clouds Task 7 and its fix round 1; spec decisions 1-2;
+  `weather_snapshot.hpp`, file format 4): `WeatherSnapshot::lcl_m(row, column)` is the condensation height (m above the
+  GROUND) of the 2 m parcel, Romps 2017 exact (`weather-service.md`): 0 = saturated surface air (T - Td <
+  `cloud_fog_spread_k` 1 K [E]), `weather_lcl_unknown_m` (-1) = unknown (no 2 m fields, invalid input), capped at the
+  20 km weather top. The downsampled set and the pole rows take the LOWEST known base of the box (min of ground + LCL,
+  less the box's mean ground, at least 0; a saturated column makes the box 0, unknown and NaN levels are skipped, a box
+  of only unknown columns stays unknown), so the flat base never cuts a lower-based column's cloud.
+  The build (`ColumnLayers::build` -> `raise_liquid_cloud_to_lcl`, on the 32 layer means of the column): a layer is
+  significant liquid with at least the smallest non-zero water code (2e-7 kg/m^3) and a cloud fraction of at least
+  `cloud_min_cover`. When the lowest significant liquid cloud has its base less than `cloud_boundary_layer_top_m` 3 km
+  [E] above the ground, ALL liquid below the LCL (every run, traces included) is moved into the lowest significant run
+  with a part above the LCL (its base, at least the LCL, in the boundary layer), spread over that part in proportion to
+  its liquid (profile kept; cloud fraction at least the moved water's mass-weighted fraction, so the covered area does
+  not shrink); without such a run the lowest run (wholly under the LCL) is lifted to start at the LCL with its depth,
+  carrying all the moved water. The layer containing the LCL keeps its part above the level as a mean over the whole
+  layer. Untouched: an LCL of 0 (fog / low stratus keep the ground), unknown, an LCL >= 3 km (incl. the 20 km cap), no
+  liquid below the LCL, a lowest significant base above the boundary layer, and all ice (a layer's cloud fraction stays
+  where it holds ice). The column's liquid water path is conserved (1e-6 relative on the layer means; the 8-bit codes
+  then cost <= 1.97 % per layer). Limit: a very dense result clamps at the water code's 4e-3 kg/m^3 maximum (not reached
+  by the ERA5 / GFS data tested).
+  GPU: the base texture (`environment::cloud_render_base_texels`, `cloud_base_texels`, RG32F columns x rows, 8 MB at
+  0.25 deg, globals `cloud_base_before` / `_after`): R the cell's base as a height above the ellipsoid (ground + LCL),
+  G its layer's extinction scale, 0 = no base - fog, unknown, LCL >= 3 km, or condensate left in a layer wholly under
+  the base's layer (e.g. ice under the LCL: the column stays uncut, the ice is shown). `cloud_lcl_cut` (shader; core
+  `cloud_lcl_cut_factor`, `cloud_lcl_extinction_factor`) reads the four nearest columns by `texelFetch`: the cloud
+  fraction is multiplied by a ramp from 0 at the base to 1 over `cloud_lcl_ramp_m` 30 m [E] (ended at the top of the
+  base's layer, so the cut stays in one layer), the extinction by that ramp times the scale; mixed bilinearly with the
+  columns without a base counting 1. The scale (`cloud_lcl_extinction_scale`, >= 1) is the integral of the renderer's
+  profile (the vertical profile rule, as `cloud_snapshot_cell` at the column) over the base layer's above-ground part
+  divided by that of the profile times the ramp (Simpson on the pieces between the kinks: exact up to rounding), so
+  what the cut removes under the base is put back above it and the rendered column keeps its water path (cloud_check
+  section 12 on a built snapshot: 0.9993 of the core's optical depth; the uncut layers 0.9992). The far tier, the CPU
+  light and the shadow maps read the layer means without the cut: their column water path is the same. Flat sharp
+  bases, nothing hangs below them, silhouettes above the base's layer untouched; nothing is fetched above 12 km
+  (Everest 8.85 km + the 3 km boundary layer, rounded up).
 - **Vertical profile rule** (`cloud_render_texels.hpp` `cloud_profile_value`, port in `clouds.gdshaderinc`): the two
   layer centres around a point are fetched apart; where cloud starts above a clear layer the base is flat and sharp
   (50 m transition, `cloud_base_transition_m` [E]) in the middle of the gap, partly so where cloud only thickens upward;
@@ -301,11 +315,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     hand-over at sunset, seen by the first tests of fix round 1). Limits: the layer depth (1 km) and the in-cloud tau
     are those of the fit; the sky factor keeps the maximum-overlap cover (its hemisphere average would see ~4 % more
     cover at cf 0.3).
-  - Column per pixel: `environment::cloud_render_column_texels` (RGBA8 per cell and layer: R the grid-mean depth from
-    20 km to the layer centre, the A channel's log code; G the largest cloud fraction above; B, A in layer 0 only: the cloud base (Task 7); +133 MB per snapshot, four bytes per texel) - the
-    centre above (four decoded texels, bilinear: linear in tau as the CPU) + the trapezoid of the grid-mean extinction
-    down to the point; cover = max(its G, the point's fraction). The format is RGBA8 so Godot's shaders and the compute
-    kernels read the same channels (`.rg`; the RG8 form needed the luminance-alpha swizzle `.ra` in Godot shaders only).
+  - Column per pixel: `environment::cloud_render_column_texels` (RG8 per cell and layer: R the grid-mean depth from
+    20 km to the layer centre, the A channel's log code; G the largest cloud fraction above; +66 MB per snapshot, two
+    bytes per texel) - the centre above (four decoded texels, bilinear: linear in tau as the CPU) + the trapezoid of the
+    grid-mean extinction down to the point; cover = max(its G, the point's fraction). Godot gives a Texture3DRD of R8G8
+    the luminance-alpha swizzle (R, R, R, G): the shaders read `.ra`.
   - Direct Sun on the ground: two shadow maps (`CloudShadowEffect`, a compositor effect before the opaque pass; 512^2
     RGBA32F each) orthographic along the Sun, axes perpendicular to it, anchored on the ground under the camera
     (Earth-fixed until the camera is 4 / 50 km away: no swimming). Per texel the line toward the Sun through the shell
@@ -330,7 +344,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     snapshot: the core blends toward zero depths); a file out of the core's cache is retried every frame and
     `core_cache_missed` asks the service for a worker load. `cloud_check.gd` compares the GPU factors with the CPU
     light at five weights of a deck -> empty fade (within 3 %) and checks the plate light is monotonic. The empty
-    slot's column texture is a zero RGBA8 volume (cover 0, no base).
+    slot's column texture is a zero LA8 volume (an R8 one reads cover 1 through `.ra`), its base texture a zero RGF
+    2 x 2 (no base).
   - The CPU factors follow the GPU's clouds: `Atmosphere.cloud_light_at` returns (1, 0, 1) while `cloud_enabled` is false
     (noise not ready, nothing to show, beyond the scaled-space limit), so vehicles and the eye are not dimmed by clouds
     that are not drawn. Both snapshots' column depth and cover are blended first, then the transmittances computed
@@ -573,7 +588,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 - `CloudShadowEffect.grid_mean_only` (checks): the near shadow map with the grid mean. `CloudShadowEffect.ran_msec`: the
   render callback's last run; `CloudLayer` takes the maps as valid (`cloud_shadow_valid`) only within 250 ms of it.
 - `cloud_check.gd` with `STARSIM_OUTLINE_ONLY=1`: section 11 alone (`STARSIM_VERBOSE=1` prints the worst row's alpha).
-- `cloud_check.gd` with `STARSIM_LCL_ONLY=1`: section 12 alone (the flat cloud base at the lifting condensation level: a slab from the ground with level 800 m, optical depth straight up 0.593 of the uncut slab's vs 0.5925 expected, no cloud below the level, none lost above it).
+- `cloud_check.gd` with `STARSIM_LCL_ONLY=1`: section 12 alone (the flat cloud base on a snapshot built from fields,
+  `StarsimCore.weather_write_column_snapshot`: optical depth straight up 0.9993 of the core's column (1 % allowed), no
+  cloud 100 m below the base (the fog column has it), above the base's layer as without the base texture).
 - `cloud_check.gd` with `STARSIM_SLANT_TABLE=1`: only the beam-cover fit table (shapes' direct Sun, near disc, eight
   sites, f 0.15-0.6 x e 5-75 deg).
 

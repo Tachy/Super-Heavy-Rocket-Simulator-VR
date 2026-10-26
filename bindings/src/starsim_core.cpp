@@ -13,6 +13,7 @@
 #include <cstring>
 #include <filesystem>
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -602,6 +603,11 @@ godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) 
         column_bytes.resize(static_cast<int64_t>(column.size()));
         if (!column.empty()) std::memcpy(column_bytes.ptrw(), column.data(), column.size());
         result["cloud_column_texels"] = column_bytes;
+        const std::vector<float> base = environment::cloud_render_base_texels(*snapshot);
+        godot::PackedByteArray base_bytes;  // RG32F texels as bytes (Image.create_from_data takes bytes)
+        base_bytes.resize(static_cast<int64_t>(base.size() * sizeof(float)));
+        if (!base.empty()) std::memcpy(base_bytes.ptrw(), base.data(), base.size() * sizeof(float));
+        result["cloud_base_texels"] = base_bytes;
         godot::PackedFloat64Array bottoms;
         for (int i = 0; i <= environment::weather_layer_count; ++i) bottoms.push_back(environment::weather_layer_bottom_m(i));
         result["layer_bottoms_m"] = bottoms;
@@ -828,18 +834,44 @@ double StarsimCore::cloud_slab_radiance_mc(double optical_depth, double sun_cos_
 }
 
 bool StarsimCore::weather_write_slab_snapshot(const godot::String& file, double bottom_m, double top_m,
-                                              double liquid_water_kg_m3, double cloud_fraction, double lcl_m) const {
+                                              double liquid_water_kg_m3, double cloud_fraction) const {
     try {
         environment::write_weather_snapshot(
             std::filesystem::path(utf8_of(file)),
-            environment::WeatherSnapshot::uniform_slab(181, 360, bottom_m, top_m, liquid_water_kg_m3, cloud_fraction,
-                                                      static_cast<float>(lcl_m)));
+            environment::WeatherSnapshot::uniform_slab(181, 360, bottom_m, top_m, liquid_water_kg_m3, cloud_fraction));
         return true;
     } catch (const std::exception& e) {
         godot::UtilityFunctions::push_error(godot::String::utf8("Wolkenplatte konnte nicht geschrieben werden: ") +
                                             godot::String::utf8(e.what()));
         return false;
     }
+}
+
+godot::Dictionary StarsimCore::weather_write_column_snapshot(const godot::String& file, double latitude_deg,
+                                                         double longitude_deg, double cloud_top_m, double liquid_kg_kg,
+                                                         double cloud_percent, double t2m_k, double td2m_k) const {
+    godot::Dictionary result;
+    result["ok"] = false;
+    try {
+        constexpr int rows = 181, columns = 360;
+        const auto snapshot =
+            environment::WeatherSnapshot::gfs_test_column(rows, columns, cloud_top_m, liquid_kg_kg, cloud_percent,
+                                                          t2m_k, td2m_k);
+        environment::write_weather_snapshot(std::filesystem::path(utf8_of(file)), snapshot);
+        // The 1-deg grid's cell nearest to the point (row 0 at the north pole, column 0 at 0 deg east).
+        const int row = std::clamp(static_cast<int>(std::lround(90.0 - latitude_deg)), 0, rows - 1);
+        const int column = static_cast<int>(std::lround(std::fmod(std::fmod(longitude_deg, 360.0) + 360.0, 360.0))) %
+                           columns;
+        const std::size_t cell = static_cast<std::size_t>(row) * columns + column;
+        result["ok"] = true;
+        result["optical_depth"] = environment::cloud_render_column_optical_depth(snapshot, row, column);
+        result["ground_m"] = snapshot.ground_heights_m()[cell];
+        result["lcl_m"] = snapshot.lcl_heights_m()[cell];
+    } catch (const std::exception& e) {
+        godot::UtilityFunctions::push_error(godot::String::utf8("Wolkensäule konnte nicht geschrieben werden: ") +
+                                            godot::String::utf8(e.what()));
+    }
+    return result;
 }
 
 void StarsimCore::_bind_methods() {
@@ -906,8 +938,10 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("cloud_slab_radiance_mc", "optical_depth", "sun_cos_zenith", "view_cos_zenith",
                                   "relative_azimuth_rad"), &StarsimCore::cloud_slab_radiance_mc);
     ClassDB::bind_method(D_METHOD("weather_write_slab_snapshot", "file", "bottom_m", "top_m", "liquid_water_kg_m3",
-                                  "cloud_fraction", "lcl_m"), &StarsimCore::weather_write_slab_snapshot,
-                         DEFVAL(-1.0));
+                                  "cloud_fraction"), &StarsimCore::weather_write_slab_snapshot);
+    ClassDB::bind_method(D_METHOD("weather_write_column_snapshot", "file", "latitude_deg", "longitude_deg",
+                                  "cloud_top_m", "liquid_kg_kg", "cloud_percent", "t2m_k", "td2m_k"),
+                         &StarsimCore::weather_write_column_snapshot);
 }
 
 }  // namespace starsim::bindings

@@ -29,8 +29,9 @@
 // - Lifting condensation level per column from the 2 m temperature and dew point (Romps 2017, exact; ERA5 with its
 //   surface pressure, GFS with the standard atmosphere's at the column's ground height), m above the ground, 0 where the
 //   surface air is saturated (T - Td < cloud_fog_spread_k), weather_lcl_unknown_m where unknown, capped at 20 km; the
-//   downsampled set and the pole rows average the known values like the ground height. The column's boundary-layer
-//   liquid below it is moved up (raise_liquid_cloud_to_lcl).
+//   downsampled set and the pole rows take the LOWEST known base of the box (ground + level, less the box's ground;
+//   a saturated column makes the box 0), so the renderer's flat base never cuts a lower-based column's cloud. The
+//   column's boundary-layer liquid below it is moved up (raise_liquid_cloud_to_lcl).
 // - Levels at or below the surface are ignored; the lowest level above the ground is held down to the ground, the
 //   highest one held upward; layer parts below the ground do not count, at() is zero below the ground.
 //
@@ -108,14 +109,18 @@ double standard_pressure_at_height_pa(double height_m);
 inline constexpr float weather_lcl_unknown_m = -1.0f;
 
 // Cloud bases at the lifting condensation level (static clouds, spec decisions 1-2), on the means of the 32 layers of one
-// column (each over the layer's above-ground part): the lowest liquid cloud whose base lies less than
-// cloud_boundary_layer_top_m above the ground is a boundary-layer cloud whose base is the LCL; condensate below it is moved
-// up. The liquid water of the cut part is spread over the part of that cloud above the LCL in proportion to its liquid
-// (the column's liquid water path is kept; the cloud fraction there is at least the mass-weighted fraction of the cut
-// part, so the covered area does not shrink); a cloud that lies wholly under the LCL is lifted to start there, keeping
-// depth and mean density. A base above the LCL, an LCL <= 0 (saturated surface: fog) or >= the boundary-layer top, and
-// ice are untouched. Cloud fraction of a cut layer with ice stays. cloud_fraction, liquid_kg_m3 and ice_kg_m3 have one
-// entry per layer.
+// column (each over the layer's above-ground part). A layer is significant liquid with at least the smallest non-zero
+// water code (weather_water_code_min_kg_m3) and a cloud fraction of at least cloud_min_cover; when the lowest
+// significant liquid cloud has its base less than cloud_boundary_layer_top_m above the ground, it is a boundary-layer
+// cloud whose base is the LCL and ALL liquid below the LCL (every run, traces included) is moved up: into the lowest
+// significant run with a part above the LCL (its base, at least the LCL, in the boundary layer), spread over that part
+// in proportion to its liquid (the column's liquid water path is kept; the cloud fraction there is at least the
+// mass-weighted fraction of the moved water, so the covered area does not shrink); without such a run the lowest run is
+// lifted to start at the LCL with its depth, carrying all the moved water. The layer containing the LCL keeps its part
+// above the level as its mean over the whole layer (the renderer's base cut compensates: cloud_render_texels.hpp
+// cloud_lcl_extinction_factor). Untouched: an LCL <= 0 (saturated surface: fog) or >= the boundary-layer top, no
+// liquid below the LCL, a lowest significant base above the boundary layer, and all ice (a cut layer with ice keeps its
+// cloud fraction). cloud_fraction, liquid_kg_m3 and ice_kg_m3 have one entry per layer.
 void raise_liquid_cloud_to_lcl(std::span<double> cloud_fraction, std::span<double> liquid_kg_m3,
                                std::span<const double> ice_kg_m3, double ground_m, double lcl_m);
 
@@ -147,10 +152,14 @@ public:
     static WeatherSnapshot from_era5(const WeatherSnapshotId& id, const Era5Fields& fields, const Geoid& geoid);
     static WeatherSnapshot from_gfs(const WeatherSnapshotId& id, const GfsFields& fields, const Geoid& geoid);
     // Synthetic test field: one uniform cloud slab everywhere (layer means of the slab's overlap), ground at 0 m;
-    // the id is the default one (kind off). lcl_m: the lifting condensation level stored for every column (the texels are
-    // the slab as given, not redistributed: a check of the renderer's flat base).
+    // the id is the default one (kind off).
     static WeatherSnapshot uniform_slab(int rows, int columns, double bottom_m, double top_m, double liquid_water_kg_m3,
-                                        double cloud_fraction, float lcl_m = weather_lcl_unknown_m);
+                                        double cloud_fraction);
+    // Checks of the flat cloud base: a snapshot BUILT by from_gfs (layer mapping, the 2 m level, the LCL raise) from
+    // one column everywhere - the standard atmosphere on levels every 100 m to 4 km and every 500 m above, ground and geoid
+    // 0, cloud of liquid_kg_kg (specific) and cloud_percent on the levels below cloud_top_m, 2 m air t2m_k / td2m_k.
+    static WeatherSnapshot gfs_test_column(int rows, int columns, double cloud_top_m, double liquid_kg_kg,
+                                           double cloud_percent, double t2m_k, double td2m_k);
     // From the cache form (weather_snapshot_file): ground rows x columns, texels as render_texels(). Throws
     // std::invalid_argument on a size mismatch.
     // lcl_m empty = all unknown.

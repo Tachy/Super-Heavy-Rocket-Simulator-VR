@@ -333,6 +333,14 @@ cloud_column_after={
 "type": "sampler3D",
 "value": ""
 }
+cloud_base_before={
+"type": "sampler2D",
+"value": ""
+}
+cloud_base_after={
+"type": "sampler2D",
+"value": ""
+}
 cloud_slab_transmittance={
 "type": "sampler2D",
 "value": ""

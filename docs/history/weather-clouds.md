@@ -394,3 +394,43 @@ between rows); steep edges of varying width, 10-90 % rise median 8 m (< 10 m), 9
   stored texels are the redistributed ones; version-2 files are refused and rebuilt. GFS pressure for the LCL: the
   standard atmosphere at the column's ground height instead of a flat 101325 Pa (1500 m ground: 84.6 kPa, LCL ~3 m
   different at a 10 K spread).
+
+## Cloud bases at the LCL, fix round 1 (2026-10-26): base in the RGBA8 column texture, lowest run only, mean box LCL
+- Superseded text (weather-clouds.md):
+  > - **Cloud bases at the lifting condensation level** (static clouds Task 7; spec decisions 1-2; `weather_snapshot.hpp`,
+  >   file format 3): `WeatherSnapshot::lcl_m(row, column)` is the condensation height (m above the GROUND) of the 2 m
+  >   parcel, Romps 2017 exact (`weather-service.md`): 0 = saturated surface air (T - Td < `cloud_fog_spread_k` 1 K [E]),
+  >   `weather_lcl_unknown_m` (-1) = unknown (no 2 m fields, invalid input); the downsampled set and the pole rows average the
+  >   known values like the ground height (a box of only unknown columns stays unknown). The build (`ColumnLayers::build` ->
+  >   `raise_liquid_cloud_to_lcl`, on the 32 layer means of the column) treats the lowest liquid cloud whose base is less than
+  >   `cloud_boundary_layer_top_m` 3 km [E] above the ground as a boundary-layer cloud whose base is the LCL: condensate
+  >   below it is moved up. Where cloud remains above the LCL, the cut part's liquid is spread over that part in proportion
+  >   to its liquid (profile kept; cloud fraction at least the cut part's mass-weighted fraction, so the covered area does not
+  >   shrink); a cloud wholly under the LCL is lifted to start there with the same depth and mean density. Untouched: a base
+  >   at or above the LCL, an LCL of 0 (fog / low stratus keep the ground), unknown, an LCL >= 3 km, ice (a layer's cloud
+  >   fraction stays where it holds ice). The column's liquid water path is conserved (1e-6 relative on the layer means; the
+  >   8-bit codes then cost <= 1.97 % per layer). Limit: a very dense result clamps at the water code's 4e-3 kg/m^3 maximum
+  >   (not reached by the ERA5 / GFS data tested).
+  >   GPU: the column texture's layer 0 carries each cell's cloud base as a height above the ellipsoid (ground + LCL, B / A =
+  >   the 16-bit `encode_cloud_lcl_base`, 0.32 m steps, 0 = none: fog, unknown, LCL >= 3 km); `cloud_lcl_cut` (shader, core
+  >   `cloud_lcl_cut_factor`) reads the four nearest columns by `texelFetch` and multiplies the cloud fraction and the
+  >   extinction by a ramp from 0 at the base to 1 over `cloud_lcl_ramp_m` 30 m [E], mixed bilinearly with the columns
+  >   without a base counting 1: flat sharp bases, nothing hangs below them, silhouettes above base + 30 m are untouched
+  >   (heights above the ellipsoid; nothing is fetched above 9.5 km). The cut loses the water between the base and the first
+  >   30 m (at most ~15 m of cloud per column).
+  >   - Column per pixel: `environment::cloud_render_column_texels` (RGBA8 per cell and layer: R the grid-mean depth from
+  >     20 km to the layer centre, the A channel's log code; G the largest cloud fraction above; B, A in layer 0 only: the cloud base (Task 7); +133 MB per snapshot, four bytes per texel) - the
+  >     centre above (four decoded texels, bilinear: linear in tau as the CPU) + the trapezoid of the grid-mean extinction
+  >     down to the point; cover = max(its G, the point's fraction). The format is RGBA8 so Godot's shaders and the compute
+  >     kernels read the same channels (`.rg`; the RG8 form needed the luminance-alpha swizzle `.ra` in Godot shaders only).
+  > slot's column texture is a zero RGBA8 volume (cover 0, no base).
+  > - `cloud_check.gd` with `STARSIM_LCL_ONLY=1`: section 12 alone (the flat cloud base at the lifting condensation level: a slab from the ground with level 800 m, optical depth straight up 0.593 of the uncut slab's vs 0.5925 expected, no cloud below the level, none lost above it).
+- Why replaced (review of 9369f5f): the shader cut condensate the core never moved (only the lowest contiguous liquid
+  run was moved, with no significance threshold, but a base was written for every column with 0 < LCL < 3 km: ice
+  below the LCL, a second liquid run below it and real cloud above a 1e-10 trace run were erased on screen); the cut
+  lost up to layer/4 + ramp/2 (~77 m) of cloud per base, not 15 m, because the LCL layer's kept mass is a mean over the
+  whole layer (cloud_check on a built column: +2.75 % with a first fixed-profile compensation, 0.07 % with the
+  profile-integral scale); the RGBA8 column texture wasted 31 of 32 layers (+66 MB per snapshot, two resident +133 MB)
+  for a 2-D quantity; averaged LCLs (downsampled / poles) cut the cloud of the box's lower-LCL columns; 9.5 km fetch
+  limit had too little margin. Now: all liquid below the LCL is moved, a base only where nothing is left below, a
+  separate RG32F base texture with the layer's extinction scale, the box's lowest base, 12 km; file format 4.

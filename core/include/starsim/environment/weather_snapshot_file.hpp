@@ -10,8 +10,9 @@
 //   float32[rows x columns]            lifting condensation level above the ground (m; 0 = saturated, -1 = unknown)
 //   uint8[layers x rows x columns x 4] render texels (weather_snapshot.hpp encoding)
 //   uint64   FNV-1a 64 checksum of every byte before it
-// Version 1 (no LCL block) and 2 (unknown LCL stored as 0, texels without the LCL redistribution) are refused like any
-// other version: the caller rebuilds / re-downloads it.
+// Version 1 (no LCL block), 2 (unknown LCL stored as 0, texels without the LCL redistribution) and 3 (only the lowest
+// liquid run redistributed, a trace counted as cloud; downsampled levels averaged instead of the box's lowest base) are
+// refused like any other version: the caller rebuilds / re-downloads it.
 // A file that is short, long, damaged (checksum) or of another version is never read.
 
 #include <cstdint>
@@ -22,7 +23,7 @@
 
 namespace starsim::environment {
 
-inline constexpr std::uint32_t weather_snapshot_file_version = 3;
+inline constexpr std::uint32_t weather_snapshot_file_version = 4;
 inline constexpr const char* weather_snapshot_file_extension = ".wthr";
 
 // Writes to a unique temp file next to `file` and renames it into place; first removes the stale temp files of killed

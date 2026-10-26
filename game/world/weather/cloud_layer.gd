@@ -8,9 +8,11 @@ extends Node3D
 ## height and noise coordinates, and the quality preset. The world adds `effect` to its Compositor.
 ##
 ## Field textures: the GPU form of a snapshot (StarsimCore.weather_load_snapshot -> cloud_texels RGBA8,
-## cloud_ice_texels R8 and cloud_column_texels RGBA8 (the grid-mean column and its cover above each layer centre: the
-## light under the clouds, Task 9; in layer 0 the cloud base of the cell at its lifting condensation level, Task 7), columns x rows x 32 layers, no mipmaps; CloudFieldTexture uploads them in chunks of
-## layers over frames). Only two snapshots are resident (a 0.25-deg one is 133 + 33 + 133 MB).
+## cloud_ice_texels R8 and cloud_column_texels RG8 (the grid-mean column and its cover above each layer centre: the
+## light under the clouds, Task 9), columns x rows x 32 layers, no mipmaps; CloudFieldTexture uploads them in chunks of
+## layers over frames), and cloud_base_texels (static clouds Task 7: each cell's flat cloud base at its lifting
+## condensation level and its layer's extinction scale, RG32F columns x rows, one 2-D texture created at once - 8 MB at
+## 0.25 deg). Only two snapshots are resident (a 0.25-deg one is 133 + 33 + 66 + 8 MB).
 ## Light on the ground (Task 9): the cloud shadow maps (shadow_effect, CloudShadowEffect before the opaque pass) and
 ## their frame (`cloud_shadow_*` globals, set here every frame: anchors near the ground under the camera, re-anchored
 ## only when the camera moved SHADOW_*_REANCHOR_M away - the maps are Earth-fixed in between, no swimming), the slab
@@ -50,6 +52,7 @@ const WGS84_A_M := 6378137.0
 ## a / b of WGS84 (the model space's polar stretch, as Atmosphere.POLAR_STRETCH).
 const POLAR_STRETCH := 1.0 / (1.0 - 1.0 / 298.257223563)
 const LAYERS := 32
+const BASE_TEXEL_BYTES := 8  ## the base texture: RG32F (the base height, its layer's extinction scale)
 ## The Monte Carlo transfer table of the multiply scattered light (core cloud_transfer_table.hpp), in config/.
 const TRANSFER_TABLE := "clouds/cloud_transfer_table.bin"
 ## [E] Cloud shadow maps (shaders/cloud_light.gdshaderinc): half extents (the near map 512 texels of 62.5 m: the
@@ -149,7 +152,8 @@ var _target_blend := 0.0
 var _upload := {}  ## the running upload: {slot, id, size, field, ice}
 var _empty_field: ImageTexture3D
 var _empty_ice: ImageTexture3D
-var _empty_column: ImageTexture3D  ## zero (cover 0, depth 0, no base) RGBA8
+var _empty_column: ImageTexture3D  ## zero (cover 0, depth 0) LA8: an R8 texture would read as cover 1 through .ra
+var _empty_base: ImageTexture  ## zero (no cloud base: nothing cut) RGF, 2 x 2
 var _pushed_light := {"files": ["", ""], "w1": 0.0, "ok": true}  ## the core's pair as last accepted
 var _slab_transmittance: ImageTexture
 ## Earth-fixed anchors of the shadow maps (render axes, float64; NAN: none yet).
@@ -183,7 +187,10 @@ func setup(core: StarsimCore) -> void:
 	add_child(_quad)
 	_empty_field = _zero_texture(Image.FORMAT_RGBA8, 4)
 	_empty_ice = _zero_texture(Image.FORMAT_R8, 1)
-	_empty_column = _zero_texture(Image.FORMAT_RGBA8, 4)
+	_empty_column = _zero_texture(Image.FORMAT_LA8, 2)
+	var zero_base := PackedByteArray()
+	zero_base.resize(2 * 2 * BASE_TEXEL_BYTES)
+	_empty_base = ImageTexture.create_from_image(Image.create_from_data(2, 2, false, Image.FORMAT_RGF, zero_base))
 	for i in range(2):
 		_slots[i] = _empty_slot()
 	_bind_slots()
@@ -333,7 +340,7 @@ func state() -> Dictionary:
 ## Drops the big texel arrays of a loaded snapshot once its volumes are uploaded (they were the only copy besides the
 ## GPU's; the dictionary is shared with the service, which reloads from the core's cache if it needs them again).
 static func _strip_texels(snapshot: Dictionary) -> void:
-	for key: String in ["cloud_texels", "cloud_ice_texels", "cloud_column_texels"]:
+	for key: String in ["cloud_texels", "cloud_ice_texels", "cloud_column_texels", "cloud_base_texels"]:
 		snapshot.erase(key)
 
 
@@ -504,7 +511,8 @@ static func _snapshot_id(snapshot: Dictionary) -> String:
 
 
 func _empty_slot() -> Dictionary:
-	return {"id": "", "file": "", "size": Vector3(2, 2, LAYERS), "field": null, "ice": null, "column": null}
+	return {"id": "", "file": "", "size": Vector3(2, 2, LAYERS), "field": null, "ice": null, "column": null,
+		"base": null}
 
 
 ## A slot for the snapshot with its volumes created (not yet uploaded); the empty slot for none.
@@ -522,13 +530,18 @@ func _new_slot(snapshot: Dictionary) -> Dictionary:
 		ice = PackedByteArray()
 		ice.resize(columns * rows * LAYERS)  # no ice share given: liquid shapes
 	var column: PackedByteArray = snapshot.get("cloud_column_texels", PackedByteArray())
-	if column.size() != columns * rows * LAYERS * 4:
+	if column.size() != columns * rows * LAYERS * 2:
 		column = PackedByteArray()
-		column.resize(columns * rows * LAYERS * 4)  # none given: no light taken under the clouds
+		column.resize(columns * rows * LAYERS * 2)  # none given: no light taken under the clouds
+	var base: PackedByteArray = snapshot.get("cloud_base_texels", PackedByteArray())
+	if base.size() != columns * rows * BASE_TEXEL_BYTES:
+		base = PackedByteArray()
+		base.resize(columns * rows * BASE_TEXEL_BYTES)  # none given: no cloud base, nothing cut
 	return {"id": id, "file": String(snapshot.get("file", "")), "size": Vector3(columns, rows, LAYERS),
 		"field": CloudFieldTexture.create(snapshot["cloud_texels"], columns, rows, 4),
 		"ice": CloudFieldTexture.create(ice, columns, rows, 1),
-		"column": CloudFieldTexture.create(column, columns, rows, 4)}
+		"column": CloudFieldTexture.create(column, columns, rows, 2),
+		"base": ImageTexture.create_from_image(Image.create_from_data(columns, rows, false, Image.FORMAT_RGF, base))}
 
 
 ## Frees a slot's volumes unless a resident slot still shows them (show_now shares one upload for a snapshot twice).
@@ -594,8 +607,10 @@ static func _zero_texture(format: Image.Format, texel_bytes: int) -> ImageTextur
 
 
 func _bind_slots() -> void:
-	var names := [[&"cloud_field_before", &"cloud_ice_before", &"cloud_field_before_size", &"cloud_column_before"],
-		[&"cloud_field_after", &"cloud_ice_after", &"cloud_field_after_size", &"cloud_column_after"]]
+	var names := [[&"cloud_field_before", &"cloud_ice_before", &"cloud_field_before_size", &"cloud_column_before",
+			&"cloud_base_before"],
+		[&"cloud_field_after", &"cloud_ice_after", &"cloud_field_after_size", &"cloud_column_after",
+			&"cloud_base_after"]]
 	field_texture_bytes = 0
 	for s in range(2):
 		var slot: Dictionary = _slots[s]
@@ -604,8 +619,11 @@ func _bind_slots() -> void:
 		ShaderGlobals.set_value(names[s][1], slot["ice"].texture if has else _empty_ice)
 		ShaderGlobals.set_value(names[s][2], slot["size"])
 		ShaderGlobals.set_value(names[s][3], slot["column"].texture if has else _empty_column)
+		ShaderGlobals.set_value(names[s][4], slot["base"] if has else _empty_base)
 		if has and not (s == 1 and slot["field"] == _slots[0]["field"]):
+			var size: Vector3 = slot["size"]
 			field_texture_bytes += slot["field"].bytes + slot["ice"].bytes + slot["column"].bytes
+			field_texture_bytes += int(size.x * size.y) * BASE_TEXEL_BYTES
 
 
 func _upload_noise() -> void:
