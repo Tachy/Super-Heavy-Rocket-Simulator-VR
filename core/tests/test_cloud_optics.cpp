@@ -888,8 +888,8 @@ TEST_CASE("Coverage and water are kept for every cloud type", "[weather]") {
     // fraction cf and the grid-mean water at the table states (5e5 uniform random positions over the stratiform tile,
     // in which every type's tile repeats; the tolerances of "Noise coverage is preserved" and "Cloud edges of varying
     // width keep the grid-mean water"), and so does a mix of the types' ramps inside a band (the shader's: the weights
-    // times each type's ramp at the same point). The covered area of a mix is reported: it grows where two patterns
-    // overlap.
+    // times each type's ramp at the same point). The covered area of a mix grows where the patterns overlap (measured:
+    // cf 0.3 -> 0.48-0.51 for two types, 0.63-0.64 for three); it is bounded by their union + 0.05.
     const CloudNoise noise = generate_cloud_noise();
     const std::array<CloudType, 3> types{CloudType::Cumulus, CloudType::Stratiform, CloudType::Cirrus};
     const std::array<std::array<double, 3>, 3> mixes{{{0.5, 0.5, 0.0}, {0.5, 0.0, 0.5}, {0.2, 0.4, 0.4}}};
@@ -940,9 +940,16 @@ TEST_CASE("Coverage and water are kept for every cloud type", "[weather]") {
                     above += cloud ? 1 : 0;
                 }
                 water /= samples.size();
+                const double covered = static_cast<double>(above) / samples.size();
                 report("mix %.1f / %.1f / %.1f state %.0f cf %.1f: covered %.4f, water / grid mean %.4f\n", w[0],
-                       w[1], w[2], state, cf, static_cast<double>(above) / samples.size(), water);
+                       w[1], w[2], state, cf, covered, water);
                 CHECK(water == Approx(1.0).epsilon(0.015));
+                // Bounded transition artifact (ruling 2026-10-26): at most the union of the n mixed, decorrelated
+                // patterns, 1 - (1 - cf)^n (n = 2 in a single band; 3 where the cirrus and stratiform bands overlap).
+                const double mixed = static_cast<double>(std::count_if(w.begin(), w.end(), [](double x) {
+                    return x > 0.0;
+                }));
+                CHECK(covered <= 1.0 - std::pow(1.0 - index / 255.0, mixed) + 0.05);
             }
         }
     }

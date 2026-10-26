@@ -330,3 +330,11 @@ between rows); steep edges of varying width, 10-90 % rise median 8 m (< 10 m), 9
   crossed the rule (review I1); the types are smooth weights now. A first weight version interpolated the centres'
   stratiform weights linearly, which made the interval under a deck's base centre half cumulus (cloud_far_check deck
   tau 10 with the shapes 11.1 % vs the 10 % bound); the fraction-weighted mean restored 9.1 %.
+
+
+## Static clouds Task 5: covered area in a type band reported only (replaced in Task 5b, 2026-10-26)
+
+- Superseded text (weather-clouds.md, types):
+  "while the covered area grows inside a band where two patterns overlap: cf 0.3 -> 0.48-0.63)."
+- Why replaced: ruling 2026-10-26 accepts the growth as a bounded transition artifact; the test now checks it against
+  the union of the mixed patterns (the 0.63 was a three-type mix, not two).

@@ -139,7 +139,9 @@ inline constexpr double cloud_detail_erosion(int level, double p) {
 // same for every type (test "Coverage and water are kept for every cloud type").
 // The types are weights, not a switch (fix round 1: no seam, no pop - spec anti-goals): each rule passes through a
 // smoothstep band, and the shader mixes the types' edge ramps by the weights (each ramp has the table mean m, so the
-// mix keeps the water; the covered area grows inside a band, where two patterns overlap). The stratiform weight
+// mix keeps the water; the covered area grows inside a band, where the patterns overlap: up to their union
+// 1 - (1 - cf)^n for n mixed types, cf 0.3 -> 0.51 for two, 0.64 for three - a bounded transition artifact, ruling
+// 2026-10-26; test "Coverage and water are kept for every cloud type"). The stratiform weight
 // belongs to a layer centre (its fraction and that of the centre above); between the centres around a point it is
 // their mean weighted by (1 - x) and x times each centre's fraction - the type of the cloud that is there: under a
 // deck's base centre the empty centre below has no say (a plain linear mix made that interval half cumulus and moved

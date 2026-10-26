@@ -63,7 +63,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   float64 origin per tile on the CPU: `cloud_noise_origin`, `cloud_ice_origin`, `cloud_stratiform_origin`); the same
   detail and tables for every type (affine maps keep the value statistics: covered fraction and water kept per type,
   test "Coverage and water are kept for every cloud type"; each ramp has the mean m, so a mix keeps the water too,
-  while the covered area grows inside a band where two patterns overlap: cf 0.3 -> 0.48-0.63). smoke_test.gd checks
+  while the covered area grows inside a band where the patterns overlap - a bounded transition artifact (ruling
+  2026-10-26), checked <= their union 1 - (1 - cf)^n + 0.05 for n mixed types: cf 0.3 -> 0.48-0.51 for two types,
+  0.63-0.64 for three, where the cirrus and stratiform bands overlap). smoke_test.gd checks
   the shader's type constants against the core's (`StarsimCore.cloud_noise()["type_constants"]`). Shape tile 32 km
   across / 16 km high [E];
   Earth-fixed, the camera's part in float64 on the CPU (level k's origin fract(4^k x level 0's)).
