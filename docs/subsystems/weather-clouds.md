@@ -174,8 +174,12 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      clock jumps (`_view_jumped`, `SimClock.time_jumped`). With the deterministic march the weight is 1: the kernel
      copies the frame (nothing to average);
   3. depth-aware upsampling (bilinear x exp(-4 |ln(D / D_i)|)) into a full-resolution array (layer = view); a VR eye's
-     tent gather has the largest radius 1 (bilinear) with the deterministic march, 2 with the jittered one
-     (`CloudEffect.TENT_RADIUS_*`, the centre block's params.z).
+     tent gather has the largest radius 2 with the jittered march (`CloudEffect.TENT_RADIUS_*`, the centre block's
+     params.z). With the deterministic march the final gather (eyes and desktop) is a 4 x 4 Catmull-Rom filter (the
+     centre block's params.w; depth weights as above, alpha clamped to [0, 1], colour >= 0): bilinear left 1-march-pixel
+     stair steps on the binary cumulus outlines, Catmull-Rom rounds their corners at no march cost (Task 3 fix round 1).
+     Debug outputs stay bilinear (the checks' quantities: the filter's overshoot raised section 8's worst pixels at
+     dark silhouettes from 12 to 38 %).
   The composite quad (`cloud_layer.gdshader`, first in the transparent pass, premultiplied) blends it over the scene;
   plumes draw over it, MSAA resolves stay intact. Off beyond 1.5e7 m (scaled space: the far field below). A new size
   (resize, divisor) creates new images; the main thread shows the new result before the next frame (`CloudEffect.swap_output`:
@@ -296,9 +300,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   (`CLOUD_FAR_MU_MIN` [E]). The CPU light factors stay (1, 0, 1) beyond the limit (`cloud_enabled` false; a camera
   there is far above any cloud). The earthshine on the Moon keeps the Bond albedo 0.306 (clouds included on average).
 - **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 96 / 192,
-  1.2 %, 5 + 2 (static clouds Task 3: the deterministic march lost cumulus bases with 48 coarse steps and kept only the
-  large lobes with a 2.5 % fine step - its detail is band-limited at the step; the cost is Task 10's); both 3 detail
-  levels; resolution 1/2 desktop, 1/3 of the VR centre view (VR performance plan part 2); temporal weight floor 1/32 /
+  2.5 %, 5 + 2 (static clouds Task 3: the deterministic march lost cumulus bases with 48 coarse steps; case 9 passes
+  with the 2.5 % fine step; cost in `vr-performance.md`, the budget is Task 10's); both 3 detail levels; resolution 1/2 desktop, 1/3 of the VR centre view (VR performance plan part 2); temporal weight floor 1/32 /
   1/96 (jittered march only).
 
 ## Validation
@@ -338,22 +341,28 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   of the brightest value per step; inside finite and non-black; transmittance to an occluder 2 km ahead inside the
   slab exp(-beta 2 km) within 0.7 % (depth -> distance); a near "mountain" edge through a half-resolution block: the
   occluder column T = 1.000, the sky column the slab's within 1.5 % (upsampling). (These sections run with the light
-  cache on and the deterministic march; sections 8 and 10 with the jittered one - they compare the light over pinned
-  frames' means and against independent jitter's noise.) Section 9 (static clouds Task 3): a cf 0.3 layer of the thick
+  cache on and the deterministic march; section 10 with the jittered one - it compares against independent jitter's
+  noise.) Section 9 (static clouds Task 3): a cf 0.3 layer of the thick
   slab seen from 5 km above its top, straight down, 96 x 96 px at 30 deg; the deterministic march's 50 % background
   transmittance contour (debug 4) vs the converged reference (jittered, fine 0.2 %, 512 coarse / 1024 max steps, 16
   frames): farthest mismatched pixel 2 px desktop / 3 px VR from the reference's contour (limit one march pixel: 2 /
   3 px; reference contour 342 / 333 px); without the entry bisection 3 / 5 px (RED). `render_check.gd
   --repeat_identical=2` (VR preset, analog weather, Starbase 2024-06-15 21 UTC): two consecutive frames of the ground,
-  9 km and 20 km views bit-identical (0 of 1 440 000 pixels differ; the jittered march: 410 808). Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, jittered,
-  8 frames, the view's jitter pinned alike) at every pixel of a 64 x 64 view per cascade at its scale (camera 5 / 9.9
+  9 km and 20 km views bit-identical (0 of 1 440 000 pixels differ; the jittered march: 410 808). Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, stratified
+  midpoints), on the game's deterministic march (one frame each, the same view samples; Task 3 fix round 1), at every
+  pixel of a 64 x 64 view per cascade at its scale (camera 5 / 9.9
   / 18.8 / 36.5 / 72 km up, 80-81 deg down; the farthest cloud samples asserted inside that cascade's full weight;
   error relative to max(pixel, 5 % of the view mean)), the fill at 1/16 of the voxels per frame (complete after 16
-  frames): a tau-10 slab (debug 2) worst 0.43-1.12 % in every cascade (tolerance 5 %); a cf 0.4 broken layer (debug
-  7, the shapes), worst pixel at Sun 45 / 20 deg (tolerance 10 %): cascade 0 2.71 / 4.60 %, 1 3.38 / 9.58 %, 2 7.10 /
-  9.37 %, 3 5.40 / 8.99 %, 4 6.36 / 7.58 % (mean errors 0.15-0.81 %; `info` lines: the worst pixel's cascade shares
-  along its ray and the worst pixel by the cascade holding each pixel's slab middle - the 1-km near march left
-  cascade 2 32 %, 3 39.6 %, 4 15.1 % there, the higher views seeing the finer hybrid cascades too); a view beyond
+  frames): a tau-10 slab (debug 2) worst 0.07-0.71 % in every cascade (tolerance 5 %); a cf 0.4 broken layer (debug
+  7, the shapes): interior pixels worst <= 10 % and the 99th percentile <= 10 %, silhouette pixels (alpha < 0.3 within
+  one march pixel, debug 4) worst <= 20 %. Worst pixel at Sun 45 / 20 deg: cascade 0 2.78 / 6.71 %, 1 4.81 / 16.00 %
+  (FAIL: interior, 9 interior pixels over 10 %; p99 6.81 %), 2 6.00 / 11.45 %, 3 8.13 / 9.52 %, 4 9.95 / 12.08 %
+  (p99 1.6-6.8 %, mean errors 0.16-0.95 %). The cascade-1 view's failing pixels are interior pixels held by cascade 0
+  (read at the sample, 62.5 m voxels) at the low Sun: the voxel interpolation of a cumulus' self-shadowing at a fixed
+  sample - the jittered march's 8-frame mean had brought it to 9.58 %; without the entry bisection it stays 12.7 %
+  (not the bisection). Open: a user decision (finer cascade 0 / a near march for it, or a tolerance). `info` lines:
+  the worst pixel's cascade shares along its ray and the worst pixel by the cascade holding each pixel's slab middle;
+  Task 2's runs (jittered): the 1-km near march left cascade 2 32 %, 3 39.6 %, 4 15.1 % there; a view beyond
   every cascade (complete fill) and the frames right after a clock
   jump bit-identical to the march; the fill at the game's budget (98 304 voxels) with the 95th percentile <= 0.5 ms over the
   427 frames of a full refresh from nothing (fix round 3: median, p95 and the worst frame printed; the worst frame is
@@ -572,11 +581,15 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   fine temporal grain on broken cloud beyond f_s until the temporal mean converges (still camera: frames; a moving
   one: the floor weight's ~23 % of one frame's noise) - with the jittered march only; the deterministic one reads the
   footprint's centre.
-- **Deterministic march (Task 3)**: a cloud edge is binary per march pixel, so at the VR divisor 3 cumulus outlines
-  show 3-px stair steps (bilinear upsample; the jittered march's mean had soft partial-alpha edges); far cumulus
-  fields at 20-40 km show faint horizontal bands (the steps' iso-distance shells). Left to the headset check and
-  Task 10 (tent radius / divisor / steps); the VR preset's doubled steps (96 / 192, fine 1.2 %) are not yet
-  measured against the 2.5 ms budget.
+- **Deterministic march (Task 3)**: a cloud edge is binary per march pixel; the Catmull-Rom upsample rounds the
+  stair corners at the VR divisor 3, but outlines still follow the march grid (beads of ~1 march pixel), and some
+  mid-distance cumuli (the 20 km view's frayed ones) keep static per-march-pixel holes - the shape field's own
+  structure at the step / pixel scale sampled at fixed points (not the scene-depth step grid: deriving the grid from
+  the layer segment changed nothing; not the upsample). Tried in fix round 1 and dropped: a sub-pixel coverage at the
+  first entry (2 x 2 taps over the footprint half a footprint deeper, 4 field lookups per ray) changed ~1 000 of
+  1.44 M pixels by > 20/255 with no visible softening. Far cumulus fields at 20-40 km show faint horizontal bands (the
+  steps' iso-distance shells). Left to Task 4 / Task 10 / the headset check (divisor 2, more steps, a shape
+  prefilter); the VR cost is over the 2.5 ms budget (`vr-performance.md`, Task 10).
 - Far field: plane-parallel independent columns (no 3D radiative effects: no lit cloud sides at a low Sun, no shadows
   cast on neighbouring columns or the ground beside them); the field's 0.25 deg grid shows as soft cells near the
   hand-over (~4 pixels per cell at 1.5e7 m).

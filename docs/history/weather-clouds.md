@@ -245,3 +245,23 @@ pinned, VR preset 64 / 128 steps; the machine state differed between these notes
   9 off by 5 px; the 9 km deck view thinned) and static salt-and-pepper holes in near cumuli from detail finer than
   the step sampled at fixed points. Fixes: the cloud-ahead check of a clear coarse step, the detail band-limited at
   half the step, the VR preset at 96 / 192 / 1.2 %.
+
+## Static clouds Task 3, fix round 1 (2026-10-26)
+
+- Superseded (cloud pass, step 3): "a VR eye's
+     tent gather has the largest radius 1 (bilinear) with the deterministic march, 2 with the jittered one
+     (`CloudEffect.TENT_RADIUS_*`, the centre block's params.z)."
+- Superseded preset: "VR 96 / 192,
+  1.2 %, 5 + 2 (static clouds Task 3: the deterministic march lost cumulus bases with 48 coarse steps and kept only the
+  large lobes with a 2.5 % fine step - its detail is band-limited at the step; the cost is Task 10's)"
+- Superseded open point: "a cloud edge is binary per march pixel, so at the VR divisor 3 cumulus outlines
+  show 3-px stair steps (bilinear upsample; the jittered march's mean had soft partial-alpha edges); far cumulus
+  fields at 20-40 km show faint horizontal bands (the steps' iso-distance shells). Left to the headset check and
+  Task 10 (tent radius / divisor / steps); the VR preset's doubled steps (96 / 192, fine 1.2 %) are not yet
+  measured against the 2.5 ms budget."
+- Superseded validation: section 8 ran on the jittered march (8 pinned frames per image) - it then measured the
+  light over the frames' mean, not the game path's per-pixel error. Its numbers then: "a cf 0.4 broken layer (debug
+  7, the shapes), worst pixel at Sun 45 / 20 deg (tolerance 10 %): cascade 0 2.71 / 4.60 %, 1 3.38 / 9.58 %, 2 7.10 /
+  9.37 %, 3 5.40 / 8.99 %, 4 6.36 / 7.58 % (mean errors 0.15-0.81 %"; slab "worst 0.43-1.12 %".
+- Why: review I1-I3. The 1.2 % VR fine step was a look choice at about twice the in-cloud samples (case 9 passes with
+  2.5 %); bilinear showed march-pixel stairs; section 8 on the jittered path hid the game path's per-pixel cache error.

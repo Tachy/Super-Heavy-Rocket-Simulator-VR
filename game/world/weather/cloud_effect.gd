@@ -20,8 +20,9 @@ const CENTRE_IMAGES := ["color", "depth", "history0", "history1", "age0", "age1"
 ## Golden ratio conjugate: the frame's jitter offset is frame x this, mod 1 (a low-discrepancy sequence in time).
 const GOLDEN := 0.6180339887498949
 ## The eyes' upsample tent's largest radius [centre pixels] (cloud_pass.gdshaderinc CLOUD_UPSAMPLE): 1 (bilinear) with
-## the deterministic march (static clouds Task 3: nothing to hide), 2 with the jittered one (its soft edges; the tent's
-## radius then follows CLOUD_EDGE_SOFT_M between 1 and this).
+## the deterministic march (static clouds Task 3: nothing to hide; its final gather is then a Catmull-Rom filter, in
+## the eyes and on the desktop - CloudCentre params.w), 2 with the jittered one (its soft edges; the tent's radius then
+## follows CLOUD_EDGE_SOFT_M between 1 and this).
 const TENT_RADIUS_DETERMINISTIC := 1.0
 const TENT_RADIUS_JITTERED := 2.0
 const VIEW_BLOCK_SIZE := 4 * 64 + 5 * 16
@@ -401,7 +402,10 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var earth_to_world := Projection(Transform3D(world_to_earth.transposed(), scene.get_cam_transform().origin))
 	var debug := int(ShaderGlobals.value(&"cloud_debug_output"))
 	# The deterministic march (CloudLayer.deterministic_march) has nothing to average: the temporal kernel copies the
-	# current frame, and the eyes' upsample is bilinear (the soft-edge tent hid the jitter's noise).
+	# current frame, and the upsample is a Catmull-Rom filter (the soft-edge tent hid the jitter's noise; bilinear left
+	# stair steps of a march pixel at the silhouettes). The debug outputs (the checks' physical quantities) stay
+	# bilinear: in range and without the filter's overshoot, which amplified cloud_check section 8's per-pixel
+	# differences at dark silhouette pixels (up to 38 % against 12 %).
 	var deterministic: bool = ShaderGlobals.value(&"cloud_deterministic_march")
 	var weight := 1.0 if debug != 0 or deterministic else _temporal_weight
 	var tent_max := TENT_RADIUS_DETERMINISTIC if deterministic else TENT_RADIUS_JITTERED
@@ -425,7 +429,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	_centre["previous"] = centre_clip
 	var centre_bytes := _matrix_floats(centre_clip)
 	centre_bytes.append_array([centre_full.x, centre_full.y, low.x, low.y, 1.0 if stereo else 0.0, pixel_angle,
-			tent_max, 0.0])
+			tent_max, 1.0 if deterministic and debug == 0 else 0.0])
 	_rd.buffer_update(_centre_buffer, 0, CENTRE_BLOCK_SIZE, centre_bytes.to_byte_array())
 	var march_set1: Array = [_ubo(_centre["buffer"]), _tex(1, nearest_clamp, buffers.get_depth_layer(0, false)),
 			_image(2, _centre["color"]), _image(3, _centre["depth"])]

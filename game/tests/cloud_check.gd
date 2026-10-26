@@ -36,11 +36,13 @@
 #      far map over the same receivers, the column terms vs the CPU, the vehicle's total light vs the ground's mean.
 #   8. (static clouds Tasks 1-2) the light cache (CloudLightCache: 5 cascades 8 / 16 / 32 / 64 / 128 km over the shell,
 #      filled at 1/16 of the voxels per frame: complete after 16 frames) against the per-sample light march with the
-#      cache's converged sample count (CloudLightCache.SAMPLES: 96 near + 32 far, jittered, mean of 8 frames), the same
-#      view jitter in both (CloudEffect.pinned_frame): the Sun's scattered radiance at every pixel of a 64 x 64 view per
-#      cascade at its scale (the camera 5 / 9.9 / 18.8 / 36.5 / 72 km up, looking 80-81 deg down; the farthest cloud
-#      samples asserted inside that cascade's full weight, beyond the finer ones'): a slab of tau ~10 (debug output 2,
-#      the grid mean) 5 %, a broken layer of cf 0.4 (debug output 7, the shapes) 10 % - Sun 45 / 20 deg up; a view
+#      cache's converged sample count (CloudLightCache.SAMPLES: 96 near + 32 far, stratified midpoints), on the game's
+#      deterministic march (one frame each, the same view samples): the Sun's scattered radiance at every pixel of a
+#      64 x 64 view per cascade at its scale (the camera 5 / 9.9 / 18.8 / 36.5 / 72 km up, looking 80-81 deg down;
+#      the farthest cloud samples asserted inside that cascade's full weight, beyond the finer ones'): a slab of tau
+#      ~10 (debug output 2, the grid mean) 5 %, a broken layer of cf 0.4 (debug output 7, the shapes) 10 % at interior
+#      pixels and the 99th percentile, 20 % at silhouette pixels (alpha < 0.3 within one march pixel) - Sun 45 / 20
+#      deg up; a view
 #      beyond every cascade with a complete fill, and the frames right after a clock jump (nothing held), equal the
 #      march exactly (bit for bit); the fill's GPU time in every frame at the game's budget <= 0.5 ms.
 #   9. (static clouds Task 3) the deterministic march's silhouettes: a broken layer (cf 0.3, opaque cumuli) seen
@@ -51,8 +53,8 @@
 #      the march, the slab): the row-to-row step of (cache - march) / mean stays within the image noise (the largest
 #      difference of two march renders with independent jitter); the same view before / after a re-anchor (the
 #      camera moved 12 km east and back: cascade 3 re-anchored) differs by less than that noise.
-# The other sections run with the light cache on and the deterministic march (the game's path; 8 and 10 with the
-# jittered one: they measure the light over pinned frames' means and against independent jitter's noise). Detail
+# The other sections run with the light cache on and the deterministic march (the game's path; 10 with the jittered
+# one: it measures against independent jitter's noise). Detail
 # levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_check.gd
 extends SceneTree
@@ -118,6 +120,10 @@ const FAR_HANDOVER_TOLERANCE := 0.03  ## the far map and the slanted column are 
 const CACHE_VIEW_SIZE := 64
 const CACHE_SLAB_TOLERANCE := 0.05
 const CACHE_BROKEN_TOLERANCE := 0.10  ## the voxel size (62.5 m across, 40 m up near the camera) against the shapes
+## [E] Broken cloud on the deterministic march: a silhouette pixel (alpha < CACHE_EDGE_ALPHA, or within one march pixel
+## of one) may reach this; interior pixels and the 99th percentile keep CACHE_BROKEN_TOLERANCE.
+const CACHE_BROKEN_EDGE_TOLERANCE := 0.20
+const CACHE_EDGE_ALPHA := 0.3  ## [E] the controller's silhouette bound (fix round 1 of Task 3)
 ## The fill's budget in the checks: 1/16 of all voxels per frame (complete after 16 frames).
 const CACHE_BUDGET_DIVISOR := 16
 const CACHE_MAX_SETTLE_FRAMES := 600  ## > a full refresh at the game budget (427 frames)
@@ -567,10 +573,11 @@ func _light_cache_samples() -> void:
 	var cache := _clouds.light_cache
 	var game_budget := cache.schedule.budget_voxels
 	cache.schedule.budget_voxels = cache.voxel_count() / CACHE_BUDGET_DIVISOR
-	# The view's jittered march (the reference path, CloudLayer.deterministic_march off): sections 8 and 10 compare the
-	# light, not the view's sampling, over the pinned frames' mean and against the image noise of independent jitter.
-	_clouds.deterministic_march = false
-	_viewport.size = Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE)
+	# The game's path (the deterministic march): both sides share the view's fixed samples, one frame each.
+	_clouds.deterministic_march = true
+	var divisor := int(CloudLayer.PRESETS[CloudLayer.Quality.DESKTOP]["divisor"])
+	var size := Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE)
+	_viewport.size = size
 	var slab := _slab("cache_slab", SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, 1.0)
 	var broken := _slab("cache_broken", SLAB_BOTTOM_M, SLAB_TOP_M, DECK_LIQUID_KG_M3, BROKEN_FRACTION)
 	var sun45 := _local_direction(45.0, 135.0)
@@ -613,17 +620,30 @@ func _light_cache_samples() -> void:
 					ShaderGlobals.set_value(&"cloud_light_samples", samples)
 					if cached:
 						await _settle_cache(_point(height), view, sun, c[1])
-					images.append(await _mean_image(_point(height), view, sun, c[1]))
+					images.append(await _mean_image(_point(height), view, sun, c[1], size, 0, 1))
 				_clouds.light_cache_enabled = true
 				_clouds.quality = CloudLayer.Quality.DESKTOP
 				_detail_off()
 				var stats := _cache_error(images[1], images[0])
-				_check("light cache vs light march, cascade %d, %s, Sun %.0f deg" % [k, c[3], sun_elevation],
-						stats["mean"] > 0.0 and stats["worst"] <= c[2],
-						("worst pixel %.2f %% at (%d, %d) (cache %.5f march %.5f), mean error %.2f %%, bias %.2f %% of"
-						+ " the view mean %.5f /sr") % [stats["worst"] * 100.0, stats["at"] % CACHE_VIEW_SIZE,
+				var detail := ("worst pixel %.2f %% at (%d, %d) (cache %.5f march %.5f), mean error %.2f %%, bias %.2f %%"
+						+ " of the view mean %.5f /sr") % [stats["worst"] * 100.0, stats["at"] % CACHE_VIEW_SIZE,
 						stats["at"] / CACHE_VIEW_SIZE, images[1][stats["at"]], images[0][stats["at"]],
-						stats["mean_error"] * 100.0, stats["bias"] * 100.0, stats["mean"]])
+						stats["mean_error"] * 100.0, stats["bias"] * 100.0, stats["mean"]]
+				var ok: bool = stats["mean"] > 0.0 and stats["worst"] <= c[2]
+				if c[0] == broken:
+					# The silhouette pixels (CACHE_EDGE_ALPHA): the deterministic sample at a density edge reads the
+					# cache's voxel-interpolated light where the shape's gradient is steepest - a per-pixel error the
+					# jittered march averaged over its frames. Interior pixels keep the single-pixel limit; all pixels:
+					# p99 within it and the worst within CACHE_BROKEN_EDGE_TOLERANCE.
+					var shape := await _mean_image(_point(height), view, sun, 4, size, 0, 1)
+					var split := _cache_error_split(images[1], images[0], shape, divisor)
+					ok = stats["mean"] > 0.0 and split["interior"] <= c[2] and split["p99"] <= c[2] \
+							and stats["worst"] <= CACHE_BROKEN_EDGE_TOLERANCE
+					detail += ("; interior worst %.2f %% (%d px), silhouette worst %.2f %% (%d px), p99 %.2f %%; "
+							+ "pixels over %.0f %%: %d interior, %d silhouette") % [split["interior"] * 100.0,
+							split["interior_count"], split["edge"] * 100.0, split["edge_count"], split["p99"] * 100.0,
+							c[2] * 100.0, split["interior_over"], split["edge_over"]]
+				_check("light cache vs light march, cascade %d, %s, Sun %.0f deg" % [k, c[3], sun_elevation], ok, detail)
 				if c[0] == broken:
 					var at := Vector2i(stats["at"] % CACHE_VIEW_SIZE, stats["at"] / CACHE_VIEW_SIZE)
 					print("  info  worst pixel %s, cascade shares along its ray: %s; worst pixel by the cascade "
@@ -712,6 +732,9 @@ func _light_cache_samples() -> void:
 			jumped[0] == jumped[1], "identical" if jumped[0] == jumped[1] else "DIFFERENT")
 	cache.schedule.budget_voxels = cache.voxel_count() / CACHE_BUDGET_DIVISOR
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
+	# Section 10 on the jittered march (the reference path, CloudLayer.deterministic_march off): its criterion is the
+	# image noise of independent jitter, which the deterministic march does not have.
+	_clouds.deterministic_march = false
 	await _seam_samples(slab)
 	cache.schedule.budget_voxels = game_budget
 	_clouds.deterministic_march = true
@@ -1018,6 +1041,38 @@ static func _cache_error(cached: PackedFloat32Array, march: PackedFloat32Array) 
 			worst = error
 			worst_at = i
 	return {"worst": worst, "at": worst_at, "mean_error": mean_error, "bias": bias, "mean": mean}
+
+
+## Section 8, broken cloud: the cache error (as _cache_error) split by the view's shapes (`shape`: the background
+## transmittance, debug output 4) into silhouette pixels (alpha < CACHE_EDGE_ALPHA within `radius` pixels: one march
+## pixel) and interior ones: {interior, edge (worst), interior_count, edge_count, interior_over, edge_over (pixels over
+## CACHE_BROKEN_TOLERANCE), p99 (all pixels)}.
+static func _cache_error_split(cached: PackedFloat32Array, march: PackedFloat32Array, shape: PackedFloat32Array,
+		radius: int) -> Dictionary:
+	var mean := 0.0
+	for v in march:
+		mean += v / march.size()
+	var n := CACHE_VIEW_SIZE
+	var r := {"interior": 0.0, "edge": 0.0, "interior_count": 0, "edge_count": 0, "interior_over": 0, "edge_over": 0}
+	var errors := PackedFloat64Array()
+	for y in range(n):
+		for x in range(n):
+			var i := y * n + x
+			var edge := false
+			for dy in range(-radius, radius + 1):
+				for dx in range(-radius, radius + 1):
+					var q := Vector2i(clampi(x + dx, 0, n - 1), clampi(y + dy, 0, n - 1))
+					edge = edge or 1.0 - shape[q.y * n + q.x] < CACHE_EDGE_ALPHA
+			var error := absf(cached[i] - march[i]) / maxf(march[i], CACHE_ERROR_FLOOR * mean)
+			errors.append(error)
+			var key := "edge" if edge else "interior"
+			r[key] = maxf(r[key], error)
+			r[key + "_count"] += 1
+			if error > CACHE_BROKEN_TOLERANCE:
+				r[key + "_over"] += 1
+	errors.sort()
+	r["p99"] = errors[int(errors.size() * 0.99)]
+	return r
 
 
 ## The GPU time of the light cache's fill in the frame whose timestamps the RenderingDevice holds (0: no fill).

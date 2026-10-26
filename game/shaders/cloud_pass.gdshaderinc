@@ -687,7 +687,8 @@ layout(rgba16f, set = 1, binding = 4) uniform writeonly image2D out_image;
 // The centre view the history belongs to (CloudEffect): its transform from Earth-local offsets of the head to its clip
 // space, its sizes (virtual full, low) and params: x the mode (1 = an eye reads the centre (VR), 0 = the view is the
 // centre: the desktop's own pixel grid, the 2 x 2 gather of before), y the centre pixel's angle [rad], z the tent's
-// largest radius [centre pixels] (CloudEffect: 1 - bilinear - with the deterministic march, 2 with the jittered one).
+// largest radius [centre pixels] (CloudEffect: 1 - bilinear - with the deterministic march, 2 with the jittered one),
+// w 1 with the deterministic march (not for debug outputs): the final gather is a Catmull-Rom (bicubic) filter.
 layout(set = 1, binding = 5, std140) uniform CloudCentre {
 	mat4 clip_from_earth;
 	vec4 sizes;
@@ -709,6 +710,14 @@ const float CLOUD_TENT_RADIUS_MIN = 1.0;
 const float CLOUD_TENT_RADIUS_MAX = 2.0;
 // Distance where an eye pixel without scene geometry is reprojected into the centre (the far sky: rotation only).
 const float CLOUD_UPSAMPLE_SKY_M = 1.0e7;
+
+// Catmull-Rom's 1-D weight at distance |x| [low pixels] (Keys 1981, a = -0.5): interpolating (1 at 0, 0 at the other
+// texel centres), C1, support 2 - a march pixel's binary edge becomes a ramp of about one march pixel with smooth
+// corners instead of bilinear's stair steps; its negative lobes are clamped in cloud_tent_gather.
+float cloud_catmull_rom(float x) {
+	x = abs(x);
+	return x < 1.0 ? (1.5 * x - 2.5) * x * x + 1.0 : (x < 2.0 ? ((-0.5 * x + 2.5) * x - 4.0) * x + 2.0 : 0.0);
+}
 
 float cloud_depth_weight(float scene_m, float d) {
 	return exp(-CLOUD_DEPTH_SHARPNESS * abs(log(max(scene_m, 1.0) / max(d, 1.0))));
@@ -746,7 +755,8 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 		for (int i = 0; i <= 3; i++) {
 			ivec2 q = clamp(base + ivec2(i, j), ivec2(0), low - 1);
 			vec2 d = abs(vec2(base + ivec2(i, j)) + 0.5 - position);
-			float tent = max(0.0, 1.0 - d.x / radius) * max(0.0, 1.0 - d.y / radius);
+			float tent = radius > 0.0 ? max(0.0, 1.0 - d.x / radius) * max(0.0, 1.0 - d.y / radius)
+					: cloud_catmull_rom(d.x) * cloud_catmull_rom(d.y);  // radius 0: Catmull-Rom
 			vec4 c = texelFetch(low_color, q, 0);
 			vec2 depths = texelFetch(low_depth, q, 0).rg;
 			float march_m = min(depths.r, 1.0e20);
@@ -754,7 +764,7 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 			float w = tent * exp(-CLOUD_DEPTH_SHARPNESS * error);
 			sum += w * c;
 			weights += w;
-			if (depths.g > 0.0) {
+			if (depths.g > 0.0 && w > 0.0) {
 				cloud_sum += w * c.a * depths.g;
 				cloud_weights += w * c.a;
 			}
@@ -765,7 +775,9 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 		}
 	}
 	cloud = cloud_weights > 1.0e-6 ? cloud_sum / cloud_weights : 0.0;
-	return weights > 1.0e-4 ? sum / weights : best;
+	// The Catmull-Rom lobes can over- / undershoot: premultiplied colour >= 0, alpha in [0, 1].
+	vec4 result = weights > 1.0e-4 ? sum / weights : best;
+	return vec4(max(result.rgb, vec3(0.0)), clamp(result.a, 0.0, 1.0));
 }
 
 void main() {
@@ -785,12 +797,21 @@ void main() {
 				CLOUD_TENT_RADIUS_MAX, cloud_m);
 		float at_m = cloud_m > 0.0 ? min(cloud_m, scene_m) : min(scene_m, CLOUD_UPSAMPLE_SKY_M);
 		float radius = cloud_tent_radius(cloud_m > 0.0 ? cloud_m : 1.0);  // no cloud: the largest radius
+		if (cloud_centre.params.w > 0.5) {
+			radius = 0.0;  // the deterministic march: Catmull-Rom
+		}
 		imageStore(out_image, pixel, cloud_tent_gather(cloud_centre_position(eye + dir * at_m), scene_m, radius,
 				cloud_m));
 		return;
 	}
 	ivec2 low = ivec2(cloud_view.sizes.zw);
 	vec2 position = (vec2(pixel) + 0.5) * cloud_view.sizes.zw / cloud_view.sizes.xy - 0.5;
+	if (cloud_centre.params.w > 0.5) {
+		// The deterministic march: the Catmull-Rom gather on the view's own grid (the centre is the view).
+		float cloud_m;
+		imageStore(out_image, pixel, cloud_tent_gather(position + 0.5, scene_m, 0.0, cloud_m));
+		return;
+	}
 	ivec2 base = ivec2(floor(position));
 	vec2 f = position - vec2(base);
 	vec4 sum = vec4(0.0);

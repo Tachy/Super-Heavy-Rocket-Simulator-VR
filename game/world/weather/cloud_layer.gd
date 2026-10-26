@@ -82,13 +82,13 @@ enum ScatteringModel { CLOSED_FORM, TABLE }
 ## every motion: the flicker); clip_gamma 0 keeps the min / max (the desktop's approved look). The temporal weight and
 ## clip apply only to the jittered march (deterministic_march off). VR steps (static clouds Task 3, deterministic
 ## march): 48 coarse steps (4.3 % of the distance) lost cumulus bases at a fixed sample point - cloud_check case 9 off
-## by 5 px, the deck view at 9 km thinned - and with the detail band-limited at the step a fine fraction of 0.025 left
-## only the large lobes and grain in near cumuli: 96 / 192 / 0.012 (the desktop's fine step; cost measured in Task 10).
+## by 5 px, the deck view at 9 km thinned: 96 / 192 coarse / max steps. The fine fraction stays 0.025 (case 9 passes
+## with it; 0.012 was a look choice at about twice the in-cloud samples, cost in docs/subsystems/vr-performance.md).
 const PRESETS := {
 	Quality.DESKTOP: {"steps": 128, "max_steps": 256, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
 			"temporal_weight": 1.0 / 32.0, "clip_gamma": 0.0},
-	Quality.VR: {"steps": 96, "max_steps": 192, "fine_step_fraction": 0.012, "light_near": 5, "light_far": 2,
+	Quality.VR: {"steps": 96, "max_steps": 192, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 3,
 			"temporal_weight": 1.0 / 96.0, "clip_gamma": 1.5},
 }

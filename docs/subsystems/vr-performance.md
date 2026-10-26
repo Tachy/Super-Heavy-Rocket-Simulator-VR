@@ -146,3 +146,17 @@ clear-air early-out tried and dropped). Same command, back to back; the GPU stat
 The longer near marches cost +35-42 % in the pans (descent unchanged); the early-out (2-4 texture fetches and two
 lat / lon conversions per sample against the samples above a clear column top it skips) cost +1-4 % in both states
 and was removed. Over the 2.5 ms budget in VR: Task 10's binding item (controller ruling 2026-10-26).
+
+Static clouds Task 3 (deterministic march, fix round 1): VR preset 96 coarse / 192 max steps, fine 2.5 % (was 48 /
+96 / 2.5 %), the entry bisection (4 field lookups per silhouette), the cloud-ahead lookup per clear coarse step, the
+Catmull-Rom upsample; same command, one run, fast state (shadow_pass 0.40-0.48 ms). cloud_pass ms, median / p99 of the
+per-second means (n = 60 / 20 / 20 / 20; p99 = the largest at these counts):
+
+| Phase | before Task 3 (fix round 1 "new lengths", fast) median | Task 3 fix round 1 median / p99 |
+|---|---|---|
+| descent | 2.25 | 3.24 / 8.39 |
+| pan low | 5.04 | 5.89 / 7.55 |
+| pan high | 3.60 | 4.50 / 5.93 |
+| cape | - | 0.32 / 0.34 |
+
++44 / +17 / +25 % over the medians before Task 3. Not tuned here: Task 10's binding 2.5 ms item.
