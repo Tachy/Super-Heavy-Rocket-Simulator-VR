@@ -8,7 +8,9 @@
 # Checks, for a cloud point at a known distance: the per-eye pixels the pass shows it at give the physical disparity
 # (IPD / distance), the depth -> distance of the pass returns the true scene distance, and the temporal reprojection
 # of a static point returns to its own pixel. CloudCentreView (VR performance part 2): the centre view covers both
-# eyes (also canted ones), keeps a single view as it is and caps a very wide union.
+# eyes (also canted ones), keeps a single view as it is and caps a very wide union; the centre march's depth from an
+# eye's buffer is within IPD/2 of the centre ray's own; each eye's upsample reads a cloud point's centre sample at the
+# eye's true pixel of the point (mirrors of cloud_pass.gdshaderinc CLOUD_CENTRE and the VR CLOUD_UPSAMPLE).
 # The mirrors (_pass_*) must stay in step with cloud_pass.gdshaderinc (cloud_ray_earth, cloud_scene_distance, the
 # temporal kernel) and cloud_effect.gd (_render_callback's per-view matrices).
 # Run: godot --headless --path game --script res://tests/cloud_vr_stereo_test.gd
@@ -24,6 +26,8 @@ const DISTANCES_M := [2000.0, 20000.0]
 const DISPARITY_TOLERANCE_RAD := 1.0e-6
 const DISTANCE_TOLERANCE_REL := 1.0e-6
 const REPROJECTION_TOLERANCE_NDC := 1.0e-7
+## cloud_pass.gdshaderinc CLOUD_CENTRE_PROBE_M: where a centre ray is projected into an eye to find its depth texel.
+const CENTRE_PROBE_M := 1.0e6
 
 var _failures := 0
 
@@ -34,6 +38,11 @@ func _initialize() -> void:
 			for azimuth in [0.0, 0.3]:  # straight ahead and 17 deg to the right
 				_check_point(near_m, distance_m, azimuth)
 	_test_centre_view()
+	for wall_m in [50.0, 2000.0, 20000.0]:
+		_test_centre_gather(wall_m)
+	for distance_m in [100.0, 2000.0, 20000.0]:
+		for azimuth in [0.0, 0.3, -0.6]:
+			_test_centre_upsample(distance_m, azimuth)
 	print("cloud_vr_stereo_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -208,6 +217,65 @@ func _test_centre_view() -> void:
 	_check(half_angle <= CloudCentreView.MAX_HALF_ANGLE_RAD + 1.0e-9,
 			"centre view of a very wide canted pair: capped at %.1f deg (%.3f deg)"
 			% [rad_to_deg(CloudCentreView.MAX_HALF_ANGLE_RAD), rad_to_deg(half_angle)])
+
+
+## cloud_pass.gdshaderinc CLOUD_CENTRE gather (mirror): a centre ray's scene distance read from the eye whose ndc holds
+## the ray (left first) at the texel where the ray's far point (CLOUD_CENTRE_PROBE_M) projects; the distance the eye's
+## depth gives (from the head, as cloud_scene_distance returns it) differs from the centre ray's own by at most the eye
+## offset IPD/2 (the parallax of the geometry). Scene: a wall at `wall_m` in front of the head.
+func _test_centre_gather(wall_m: float) -> void:
+	var eyes := _eye_projections(1.0, 0.0)
+	var centre: Projection = CloudCentreView.build(eyes, Vector2i(3530, 2834), 3)["projection"]
+	var worst := 0.0
+	var picked_left := 0
+	for ndc in [Vector2(-0.8, 0.3), Vector2(-0.2, -0.4), Vector2(0.0, 0.0), Vector2(0.3, 0.6), Vector2(0.85, -0.2)]:
+		var dir := _head_ray(centre, ndc)
+		var true_m := wall_m / -dir.z  # along the centre ray from the head to the wall
+		var eye := 0
+		var probe := _clip(eyes[0], dir * CENTRE_PROBE_M)
+		var eye_ndc := Vector2(probe.x, probe.y) / probe.w
+		if absf(eye_ndc.x) > 1.0 or absf(eye_ndc.y) > 1.0:
+			eye = 1
+			probe = _clip(eyes[1], dir * CENTRE_PROBE_M)
+			eye_ndc = Vector2(probe.x, probe.y) / probe.w
+		else:
+			picked_left += 1
+		# The eye's pixel ray (from the eye) meets the wall: the depth the renderer writes there.
+		var eye_pos := Vector3((-1.0 if eye == 0 else 1.0) * IPD_M / 2.0, 0.0, 0.0)
+		var eye_dir := _head_ray(eyes[eye], eye_ndc)
+		var hit := eye_pos + eye_dir * ((-wall_m - eye_pos.z) / eye_dir.z)
+		var c := _clip(eyes[eye], hit)
+		var p: Vector4 = eyes[eye].inverse() * Vector4(eye_ndc.x, eye_ndc.y, c.z / c.w, 1.0)
+		var read_m := (Vector3(p.x, p.y, p.z) / p.w).length()
+		worst = maxf(worst, absf(read_m - true_m))
+	_check(worst <= IPD_M / 2.0 + 1.0e-6 * wall_m, "centre gather, wall at %.0f m: distance within IPD/2 (worst %s m)"
+			% [wall_m, String.num_scientific(worst)])
+	_check(picked_left >= 3, "centre gather: the left eye for rays inside its ndc (%d of 5)" % picked_left)
+
+
+## cloud_pass.gdshaderinc CLOUD_UPSAMPLE, VR (mirror): an eye pixel reads the centre image where its own ray, at the
+## cloud distance the centre measured from the head, projects. For a cloud point both eyes' pixels showing it (their
+## true pixels: the physical disparity) must read the centre sample of that point - the same for both eyes (shared
+## noise and blur) and at its true place (no disparity error).
+func _test_centre_upsample(distance_m: float, azimuth: float) -> void:
+	var eyes := _eye_projections(1.0, 0.0)
+	var centre_view := CloudCentreView.build(eyes, Vector2i(3530, 2834), 3)
+	var centre: Projection = centre_view["projection"]
+	var low: Vector2i = centre_view["low"]
+	var target := Vector3(sin(azimuth), 0.05, -cos(azimuth)) * distance_m  # from the head
+	var c_true := _clip(centre, target)
+	var want := Vector2(c_true.x, c_true.y) / c_true.w
+	var worst_px := 0.0
+	for view in [0, 1]:
+		var c_eye := _clip(eyes[view], target)
+		var eye_ndc := Vector2(c_eye.x, c_eye.y) / c_eye.w  # the eye's pixel that shows the point
+		var eye_pos := Vector3((-1.0 if view == 0 else 1.0) * IPD_M / 2.0, 0.0, 0.0)
+		var read := eye_pos + _head_ray(eyes[view], eye_ndc) * target.length()  # the centre's cloud distance
+		var c_read := _clip(centre, read)
+		var got := Vector2(c_read.x, c_read.y) / c_read.w
+		worst_px = maxf(worst_px, ((got - want) * 0.5 * Vector2(low)).length())
+	_check(worst_px < 0.01, "centre upsample, cloud at %.0f m, azimuth %.1f: both eyes read its centre sample "
+			% [distance_m, azimuth] + "(worst %s centre px)" % String.num_scientific(worst_px))
 
 
 func _check(ok: bool, message: String) -> void:

@@ -3,8 +3,10 @@
 // CLOUD_TEMPORAL, CLOUD_UPSAMPLE is defined per kernel; CLOUD_MARCH also gets atmosphere.gdshaderinc and
 // clouds.gdshaderinc (translated: their `global uniform`s in set 0).
 //
-// Per view (each VR eye apart, the same kernels):
-// 1. CLOUD_MARCH at reduced resolution (the quality preset's scale, 1/2): one ray per low-resolution pixel through the
+// The march and the temporal accumulation run once per frame in the centre view (VR: the head, a frustum covering both
+// eyes, CloudCentreView; the desktop: the view itself), the upsample once per eye (VR performance part 2: two marches
+// with their own jitter and history showed different noise and blur per eye):
+// 1. CLOUD_MARCH at reduced resolution (the quality preset's divisor): one ray per low-resolution pixel through the
 //    centre of its block of full-resolution pixels; the scene depth of the block in a checkerboard: the nearest of the
 //    block on even pixels, the farthest on odd ones (both depths are represented for the upsampling) - unless the
 //    block's distances lie within CLOUD_ONE_SURFACE_SPREAD of each other (one surface: the ground seen from far, a
@@ -21,10 +23,13 @@
 //    converges (an exponential mean of weight w keeps a noise floor of sqrt(w / (2 - w)) of one frame's noise: 23 % at
 //    0.1), with the floor's memory at most. A history the clamp moved (the content changed) keeps at most
 //    CLOUD_CLAMPED_AGE frames; no history (first frame, outside the previous view, after a reset): the new value alone.
-// 3. CLOUD_UPSAMPLE to full resolution: the four nearest low-resolution pixels, bilinear weights x a depth weight
-//    exp(-CLOUD_DEPTH_SHARPNESS |ln(D / D_i)|) (D the full-resolution scene distance, D_i the sample's march distance):
-//    a cloud in front of a mountain does not bleed over it and the sky between peaks keeps its cloud. Out: the
-//    full-resolution image the composite quad (cloud_layer.gdshader) blends over the scene.
+// 3. CLOUD_UPSAMPLE to full resolution, per eye: the desktop's view (its own centre) takes the four nearest
+//    low-resolution pixels, bilinear weights x a depth weight exp(-CLOUD_DEPTH_SHARPNESS |ln(D / D_i)|) (D the
+//    full-resolution scene distance, D_i the sample's march distance): a cloud in front of a mountain does not bleed
+//    over it and the sky between peaks keeps its cloud. A VR eye reprojects its ray into the centre image - at its
+//    scene point, then at the taps' cloud distance (the disparity of the cloud) - and gathers a 4 x 4 tent (soft
+//    alpha edges from the march's noise, the same in both eyes) with the same depth weight. Out: the full-resolution
+//    image the composite quad (cloud_layer.gdshader) blends over the scene.
 
 #if defined(CLOUD_MARCH) || defined(CLOUD_TEMPORAL) || defined(CLOUD_UPSAMPLE)
 
@@ -43,25 +48,35 @@ layout(set = 1, binding = 0, std140) uniform CloudView {
 	                           // w: the frame index mod 4096 (the sub-pixel shape offsets' sequence)
 } cloud_view;
 
-// Distance [m] from the camera of a full-resolution pixel's depth (reversed Z: 1 near, 0 far = no geometry).
-float cloud_scene_distance(vec2 pixel_centre, float depth) {
+// Distance [m] from the camera (the head) of a pixel's depth (reversed Z: 1 near, 0 far = no geometry) through a
+// projection's inverse and its image size.
+float cloud_scene_distance_in(mat4 inv_projection, vec2 size, vec2 pixel_centre, float depth) {
 	if (depth <= 0.0) {
 		return 1.0e30;
 	}
-	vec2 ndc = pixel_centre / cloud_view.sizes.xy * 2.0 - 1.0;  // the renderer's projection: y down (flipped)
-	vec4 v = cloud_view.inv_projection * vec4(ndc, depth, 1.0);
+	vec2 ndc = pixel_centre / size * 2.0 - 1.0;  // the renderer's projection: y down (flipped)
+	vec4 v = inv_projection * vec4(ndc, depth, 1.0);
 	return length(v.xyz / v.w);
 }
 
-// Earth-local unit direction of the ray through a full-resolution position.
-vec3 cloud_ray_earth(vec2 pixel_centre) {
+// Distance [m] from the camera of a full-resolution pixel's depth of this view.
+float cloud_scene_distance(vec2 pixel_centre, float depth) {
+	return cloud_scene_distance_in(cloud_view.inv_projection, cloud_view.sizes.xy, pixel_centre, depth);
+}
+
+// Head-space (view) unit direction of the ray through a full-resolution position.
+vec3 cloud_ray_view(vec2 pixel_centre) {
 	vec2 ndc = pixel_centre / cloud_view.sizes.xy * 2.0 - 1.0;  // the renderer's projection: y down (flipped)
 	// The renderer's per-eye projection already contains the eye offset (inverse: clip -> head space), so one unprojected
 	// point is not on the eye's ray. Two depths of the same pixel are: their difference is the eye's ray direction.
 	vec4 a = cloud_view.inv_projection * vec4(ndc, 0.5, 1.0);
 	vec4 b = cloud_view.inv_projection * vec4(ndc, 1.0, 1.0);
-	vec3 dir_view = normalize(a.xyz / a.w - b.xyz / b.w);
-	vec3 dir_world = normalize(mat3(cloud_view.view_to_world) * dir_view);
+	return normalize(a.xyz / a.w - b.xyz / b.w);
+}
+
+// Earth-local unit direction of the ray through a full-resolution position.
+vec3 cloud_ray_earth(vec2 pixel_centre) {
+	vec3 dir_world = normalize(mat3(cloud_view.view_to_world) * cloud_ray_view(pixel_centre));
 	return normalize(mat3(cloud_view.world_to_earth) * dir_world);
 }
 
@@ -326,6 +341,82 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	color = air_transmittance * radiance + alpha * air_light;
 }
 
+#ifdef CLOUD_CENTRE
+// The centre view has no depth buffer of its own: its rays take the scene distance from an eye's (VR performance
+// part 2).
+layout(set = 1, binding = 4) uniform sampler2D scene_depth_right;  // `scene_depth` is the left eye's
+layout(set = 1, binding = 5, std140) uniform CloudEyes {
+	mat4 clip_from_head[2];  // the eyes' projections (the renderer's: eye offset and rotation inside)
+	mat4 inv_projection[2];
+	vec4 eye_sizes;          // xy: the eyes' full-resolution size
+} cloud_eyes;
+
+// [E] Where a centre ray is projected into an eye to find its depth texels: far, so the texel is the eye's look along
+// the same direction; nearer geometry is then read with a parallax of at most IPD/2 / D (the distance from the head
+// differs by at most IPD/2: cloud_vr_stereo_test), which the eyes' own upsample (their depth) absorbs at full
+// resolution.
+const float CLOUD_CENTRE_PROBE_M = 1.0e6;
+// [E] Samples per axis of an eye's depth texels under one centre pixel (strided beyond).
+const int CLOUD_CENTRE_GATHER_MAX = 6;
+
+// The ndc of a head-space direction's far point in an eye; w <= 0 (behind the eye): far outside.
+vec2 cloud_eye_ndc(int eye, vec3 dir_view) {
+	vec4 c = cloud_eyes.clip_from_head[eye] * vec4(dir_view * CLOUD_CENTRE_PROBE_M, 1.0);
+	return c.w > 0.0 ? c.xy / c.w : vec2(1.0e9);
+}
+
+// Nearest, farthest, sum and count of the scene distances under a low-resolution centre pixel: read in the eye whose
+// ndc holds the pixel's centre ray (the left one first), over the eye texels its corners project to.
+void cloud_block_distances(ivec2 pixel, vec2 scale, inout float near_m, inout float far_m, inout float sum_m,
+		inout float count) {
+	vec3 dir = cloud_ray_view(min((vec2(pixel) + 0.5) * scale, cloud_view.sizes.xy));
+	int eye = all(lessThanEqual(abs(cloud_eye_ndc(0, dir)), vec2(1.0))) ? 0 : 1;
+	vec2 size = cloud_eyes.eye_sizes.xy;
+	vec2 lo = vec2(1.0e30);
+	vec2 hi = vec2(-1.0e30);
+	for (int j = 0; j <= 1; j++) {
+		for (int i = 0; i <= 1; i++) {
+			vec2 corner = min(vec2(pixel + ivec2(i, j)) * scale, cloud_view.sizes.xy);
+			vec2 px = (clamp(cloud_eye_ndc(eye, cloud_ray_view(corner)), vec2(-1.0), vec2(1.0)) * 0.5 + 0.5) * size;
+			lo = min(lo, px);
+			hi = max(hi, px);
+		}
+	}
+	ivec2 full = ivec2(size);
+	ivec2 first = clamp(ivec2(floor(lo)), ivec2(0), full - 1);
+	ivec2 last = clamp(ivec2(ceil(hi)) - 1, first, full - 1);
+	ivec2 stride = max((last - first + CLOUD_CENTRE_GATHER_MAX) / CLOUD_CENTRE_GATHER_MAX, ivec2(1));
+	for (int y = first.y; y <= last.y; y += stride.y) {
+		for (int x = first.x; x <= last.x; x += stride.x) {
+			float depth = eye == 0 ? texelFetch(scene_depth, ivec2(x, y), 0).r
+					: texelFetch(scene_depth_right, ivec2(x, y), 0).r;
+			float dist = cloud_scene_distance_in(cloud_eyes.inv_projection[eye], size, vec2(x, y) + 0.5, depth);
+			near_m = min(near_m, dist);
+			far_m = max(far_m, dist);
+			sum_m += dist;
+			count += 1.0;
+		}
+	}
+}
+#else
+// Nearest, farthest, sum and count of the scene distances of the block of full-resolution pixels this pixel covers.
+void cloud_block_distances(ivec2 pixel, vec2 scale, inout float near_m, inout float far_m, inout float sum_m,
+		inout float count) {
+	ivec2 full = ivec2(cloud_view.sizes.xy);
+	ivec2 first = ivec2(vec2(pixel) * scale);
+	ivec2 last = min(ivec2(vec2(pixel + 1) * scale) - 1, full - 1);
+	for (int y = first.y; y <= last.y; y++) {
+		for (int x = first.x; x <= last.x; x++) {
+			float dist = cloud_scene_distance(vec2(x, y) + 0.5, texelFetch(scene_depth, ivec2(x, y), 0).r);
+			near_m = min(near_m, dist);
+			far_m = max(far_m, dist);
+			sum_m += dist;
+			count += 1.0;
+		}
+	}
+}
+#endif
+
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	ivec2 low = ivec2(cloud_view.sizes.zw);
@@ -351,25 +442,13 @@ void main() {
 	if (pixel.x >= low.x || pixel.y >= low.y) {
 		return;
 	}
-	ivec2 full = ivec2(cloud_view.sizes.xy);
-	// The block of full-resolution pixels this pixel covers, and its centre.
-	ivec2 first = ivec2(vec2(pixel) * scale);
-	ivec2 last = min(ivec2(vec2(pixel + 1) * scale) - 1, full - 1);
 	vec2 centre = (vec2(pixel) + 0.5) * scale;
 	bool nearest = ((pixel.x + pixel.y) & 1) == 0;
 	float near_m = 1.0e30;
 	float far_m = 0.0;
 	float sum_m = 0.0;
 	float count = 0.0;
-	for (int y = first.y; y <= last.y; y++) {
-		for (int x = first.x; x <= last.x; x++) {
-			float dist = cloud_scene_distance(vec2(x, y) + 0.5, texelFetch(scene_depth, ivec2(x, y), 0).r);
-			near_m = min(near_m, dist);
-			far_m = max(far_m, dist);
-			sum_m += dist;
-			count += 1.0;
-		}
-	}
+	cloud_block_distances(pixel, scale, near_m, far_m, sum_m, count);
 	float scene_m = nearest ? near_m : far_m;
 	if (far_m < 1.0e29 && far_m <= near_m * exp(CLOUD_ONE_SURFACE_SPREAD)) {
 		scene_m = sum_m / count;  // one surface: the centre ray's distance
@@ -476,13 +555,77 @@ void main() {
 #ifdef CLOUD_UPSAMPLE
 
 layout(set = 1, binding = 1) uniform sampler2D scene_depth;    // full resolution, nearest
-layout(set = 1, binding = 2) uniform sampler2D low_color;      // the accumulated history, nearest
-layout(set = 1, binding = 3) uniform sampler2D low_depth;      // the march distances, nearest
+layout(set = 1, binding = 2) uniform sampler2D low_color;      // the accumulated history (of the centre view), nearest
+layout(set = 1, binding = 3) uniform sampler2D low_depth;      // the march distances (of the centre view), nearest
 layout(rgba16f, set = 1, binding = 4) uniform writeonly image2D out_image;
+// The centre view the history belongs to (CloudEffect): its transform from Earth-local offsets of the head to its clip
+// space, its sizes (virtual full, low) and the mode: params.x 1 = an eye reads the centre (VR), 0 = the view is the
+// centre (the desktop: its own pixel grid, the 2 x 2 gather of before).
+layout(set = 1, binding = 5, std140) uniform CloudCentre {
+	mat4 clip_from_earth;
+	vec4 sizes;
+	vec4 params;
+} cloud_centre;
 
 // [E] Sharpness of the depth weight: a factor e^-1 per 1/4 of a e-fold distance ratio (|ln(D / D_i)| = 0.25: a
 // sample 28 % nearer or farther weighs 37 %); equal distances (the sky, a far cloud deck over the sea) weigh 1.
 const float CLOUD_DEPTH_SHARPNESS = 4.0;
+// [E] Radius of the eyes' tent gather in centre pixels (user 2026-10-26: the march's noise may stay but must end in
+// soft alpha edges, not grain): weights max(0, 1 - |d| / R) per axis over the 4 x 4 nearest centre pixels. Display
+// only: the history stays unfiltered (a filter fed back would blur more every frame).
+const float CLOUD_TENT_RADIUS = 2.0;
+// Distance where an eye pixel without scene geometry is reprojected into the centre (the far sky: rotation only).
+const float CLOUD_UPSAMPLE_SKY_M = 1.0e7;
+
+float cloud_depth_weight(float scene_m, float d) {
+	return exp(-CLOUD_DEPTH_SHARPNESS * abs(log(max(scene_m, 1.0) / max(d, 1.0))));
+}
+
+// The centre's low-resolution position (texel units, texel centres at +0.5) of an Earth-local offset from the head,
+// clamped to the image (an eye's edge pixel outside the centre reads its edge).
+vec2 cloud_centre_position(vec3 offset) {
+	vec4 clip = cloud_centre.clip_from_earth * vec4(offset, 1.0);
+	vec2 ndc = clip.w > 0.0 ? clip.xy / clip.w : vec2(0.0);
+	vec2 low = cloud_centre.sizes.zw;
+	return clamp((ndc * 0.5 + 0.5) * low, vec2(0.5), low - 0.5);
+}
+
+// The tent gather at a centre position: premultiplied colour + alpha weighted by the tent and the depth weight; `cloud`
+// gets the alpha-weighted cloud distance of the taps (0 without cloud).
+vec4 cloud_tent_gather(vec2 position, float scene_m, out float cloud) {
+	ivec2 low = ivec2(cloud_centre.sizes.zw);
+	ivec2 base = ivec2(floor(position - 0.5)) - 1;
+	vec4 sum = vec4(0.0);
+	float weights = 0.0;
+	float cloud_sum = 0.0;
+	float cloud_weights = 0.0;
+	vec4 best = vec4(0.0);
+	float best_error = 1.0e30;
+	for (int j = 0; j <= 3; j++) {
+		for (int i = 0; i <= 3; i++) {
+			ivec2 q = clamp(base + ivec2(i, j), ivec2(0), low - 1);
+			vec2 d = abs(vec2(base + ivec2(i, j)) + 0.5 - position);
+			float tent = max(0.0, 1.0 - d.x / CLOUD_TENT_RADIUS) * max(0.0, 1.0 - d.y / CLOUD_TENT_RADIUS);
+			vec4 c = texelFetch(low_color, q, 0);
+			vec2 depths = texelFetch(low_depth, q, 0).rg;
+			float march_m = min(depths.r, 1.0e20);
+			float error = abs(log(max(scene_m, 1.0) / max(march_m, 1.0)));
+			float w = tent * exp(-CLOUD_DEPTH_SHARPNESS * error);
+			sum += w * c;
+			weights += w;
+			if (depths.g > 0.0) {
+				cloud_sum += w * c.a * depths.g;
+				cloud_weights += w * c.a;
+			}
+			if (tent > 0.0 && error < best_error) {
+				best_error = error;
+				best = c;
+			}
+		}
+	}
+	cloud = cloud_weights > 1.0e-6 ? cloud_sum / cloud_weights : 0.0;
+	return weights > 1.0e-4 ? sum / weights : best;
+}
 
 void main() {
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -490,8 +633,19 @@ void main() {
 	if (pixel.x >= full.x || pixel.y >= full.y) {
 		return;
 	}
-	ivec2 low = ivec2(cloud_view.sizes.zw);
 	float scene_m = min(cloud_scene_distance(vec2(pixel) + 0.5, texelFetch(scene_depth, pixel, 0).r), 1.0e20);
+	if (cloud_centre.params.x > 0.5) {
+		// An eye reads the shared centre image at its own ray: first at its scene point, then again at the taps' cloud
+		// distance (the cloud's own disparity; cloud_vr_stereo_test).
+		vec3 dir = cloud_ray_earth(vec2(pixel) + 0.5);
+		vec3 eye = cloud_view.eye_earth.xyz;
+		float cloud_m;
+		cloud_tent_gather(cloud_centre_position(eye + dir * min(scene_m, CLOUD_UPSAMPLE_SKY_M)), scene_m, cloud_m);
+		float at_m = cloud_m > 0.0 ? min(cloud_m, scene_m) : min(scene_m, CLOUD_UPSAMPLE_SKY_M);
+		imageStore(out_image, pixel, cloud_tent_gather(cloud_centre_position(eye + dir * at_m), scene_m, cloud_m));
+		return;
+	}
+	ivec2 low = ivec2(cloud_view.sizes.zw);
 	vec2 position = (vec2(pixel) + 0.5) * cloud_view.sizes.zw / cloud_view.sizes.xy - 0.5;
 	ivec2 base = ivec2(floor(position));
 	vec2 f = position - vec2(base);
