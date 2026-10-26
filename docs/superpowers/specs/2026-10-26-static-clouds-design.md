@@ -83,7 +83,9 @@ crisp outlines, the far field) it is a physical consequence or an implementation
   compute up to its documented resolution.
 - The cloud shapes stay Earth-fixed and come from the existing noise / field; the shape change asked here (crisp
   outline, lobed silhouette) supersedes the M8 "soft fractal edges, frozen shapes" ruling (user 2026-10-26).
-- Desktop: may take the same path; its look must not get worse (render_check A/B with the user).
+- Desktop and VR take ONE path (user 2026-10-26): the desktop gets the same static clouds - no jitter, the light cache,
+  crisp outlines, cloud types; only resolution / budget presets differ. The desktop checks (`cloud_check`,
+  `cloud_far_check`, render_check views) are re-baselined against the new model with the user's look check.
 - Stereo exactness and the centre view (`CloudCentreView`, `cloud_vr_stereo_test`) stay.
 - Data: only free sources; 2 m temperature and 2 m dew point from ERA5 / GFS are free single-level fields
   (`tools/data_pipeline/sources.toml` gets them if not covered by the existing entries).
