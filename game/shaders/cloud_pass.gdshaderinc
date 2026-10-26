@@ -137,7 +137,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 			return;
 		}
 		vec3 offset_h = cloud_view.eye_earth.xyz + dir * d_h;
-		vec2 lat_lon_h = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + cloud_view.eye_earth.xyz + offset_h);
+		vec2 lat_lon_h = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset_h);
 		CloudCell cell = cloud_field(lat_lon_h, cloud_debug_height_m);
 		color = vec3(cloud_coverage(cloud_shape_coordinates(offset_h, cloud_debug_height_m), cell.fraction));
 		alpha = 1.0;
