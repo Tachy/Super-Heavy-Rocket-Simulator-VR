@@ -44,6 +44,12 @@ func show_weather(line: String) -> void:
 
 
 func _draw() -> void:
+	FrameProfiler.begin(&"ui_webcast_draw")
+	_draw_unprofiled()
+	FrameProfiler.end(&"ui_webcast_draw")
+
+
+func _draw_unprofiled() -> void:
 	WebcastStyle.draw_text(self, Vector2(0.0, UTC_BASELINE_PX), utc, WebcastStyle.label_font(), UTC_SIZE,
 			Color(1, 1, 1, UTC_ALPHA))
 	if local_time != "":

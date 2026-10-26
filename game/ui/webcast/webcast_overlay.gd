@@ -143,6 +143,12 @@ func show_gauges(selection: Dictionary, telemetry: Dictionary, engines: Array, s
 
 
 func _draw() -> void:
+	FrameProfiler.begin(&"ui_webcast_draw")
+	_draw_unprofiled()
+	FrameProfiler.end(&"ui_webcast_draw")
+
+
+func _draw_unprofiled() -> void:
 	if group_name != "":
 		WebcastStyle.draw_text(self, Vector2(group_name_x, GROUP_NAME_BASELINE_PX), group_name.to_upper(),
 				WebcastStyle.value_font(), GROUP_NAME_SIZE, Color(1, 1, 1, GROUP_NAME_ALPHA))

@@ -186,11 +186,17 @@ func advance(tdb_s: float, delta: float) -> float:
 func place_views(parent: Node3D, camera_gcrf_m: Vector3) -> void:
 	if trajectory.get_parent() == null:
 		parent.add_child(trajectory)
+	FrameProfiler.begin(&"fv_trajectory")
 	trajectory.update_view(sim, camera_gcrf_m, get_process_delta_time())
+	FrameProfiler.end(&"fv_trajectory")
 	if trail.get_parent() == null:
 		parent.add_child(trail)
+	FrameProfiler.begin(&"fv_trail")
 	trail.update_view(sim, camera_gcrf_m, (parent as World).earth.fixed_to_gcrf)
+	FrameProfiler.end(&"fv_trail")
+	FrameProfiler.begin(&"fv_instruments")
 	_update_instruments()
+	FrameProfiler.end(&"fv_instruments")
 	if not sim.is_active():
 		return
 	while views.size() < sim.body_count():
@@ -198,8 +204,10 @@ func place_views(parent: Node3D, camera_gcrf_m: Vector3) -> void:
 		view.body_index = views.size()
 		parent.add_child(view)
 		views.append(view)
+	FrameProfiler.begin(&"fv_vehicles")
 	for view in views:
 		view.update_view(sim, camera_gcrf_m)
+	FrameProfiler.end(&"fv_vehicles")
 
 
 ## External view: the controlled vehicle flies on the autopilot. With the autopilot off, a vehicle clamped on the pad

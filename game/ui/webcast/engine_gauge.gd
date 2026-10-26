@@ -55,6 +55,12 @@ static func layout(engines: Array, stage: int, radius_m: float) -> Array:
 
 
 func _draw() -> void:
+	FrameProfiler.begin(&"ui_webcast_draw")
+	_draw_unprofiled()
+	FrameProfiler.end(&"ui_webcast_draw")
+
+
+func _draw_unprofiled() -> void:
 	WebcastStyle.draw_ring(self, Vector2.ZERO, STAGE_RADIUS_PX, WebcastStyle.DIM)
 	var dot_px := _dot_radius_px()
 	for dot: Dictionary in dots:

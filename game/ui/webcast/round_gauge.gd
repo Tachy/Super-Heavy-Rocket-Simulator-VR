@@ -36,6 +36,12 @@ func show_value(new_text: String, new_fraction: float) -> void:
 
 
 func _draw() -> void:
+	FrameProfiler.begin(&"ui_webcast_draw")
+	_draw_unprofiled()
+	FrameProfiler.end(&"ui_webcast_draw")
+
+
+func _draw_unprofiled() -> void:
 	var c := Vector2.ZERO
 	if signed:
 		WebcastStyle.draw_arc_stroke(self, c, RADIUS_PX, -0.5 * PI - SIGNED_SPAN_RAD, -0.5 * PI + SIGNED_SPAN_RAD,

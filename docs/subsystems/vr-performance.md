@@ -1,0 +1,68 @@
+# VR performance
+
+Current state of the frame budget in VR: what is measured, how, and where the time goes. Plan:
+`docs/superpowers/plans/2026-10-26-vr-performance.md` (ledger `.superpowers/sdd/2026-10-26-vr-performance/`).
+Cloud-pass numbers: `weather-clouds.md` (Performance).
+
+## Rig and budget
+
+User's rig: Pimax Dream Air, RTX 4090, Pimax OpenXR runtime, 90 Hz, Pimax Play GPU Upscaling FSR 1.5 (user setting,
+kept): OpenXR render target 3530 x 2834 per eye, 20 MP per frame (5294 x 4250 without upscaling). Budget 11.1 ms per
+frame; a missed frame makes the runtime lock to 45 Hz (22.2 ms). Targets: main thread <= 5 ms per frame in flight,
+GPU <= 9 ms with clouds at the VR pixel count. The 1440p desktop proxy of M8 Task 11 underestimated VR ~10x and does
+not count for VR.
+
+## Measuring
+
+- `Start-VR.cmd --perf-log` (any start: `-- --perf-log`): `PerfLog` (`game/util/perf_log.gd`) writes
+  `data/perf/perf_<date>_<time>.csv`, one row per second plus a "spike" row per frame over 22 ms; the Godot log
+  names the XR render target size. Columns: frame interval p50 / p99 / max, root viewport GPU / CPU render time,
+  `script_max_ms` (process_frame to the last node's _process), `main_max_ms` (process_frame to
+  `RenderingServer.frame_pre_draw`: also deferred calls and the UI's `_draw`), then one column per
+  `FrameProfiler.SECTIONS` entry (`game/util/frame_profiler.gd`: begin / end around a block, off without the flag).
+- Desktop launch with the same columns: `godot --xr-mode off --path game --script res://tests/flight_check.gd --
+  --no-xr --perf-log --weather=on|off --countdown=10 --seconds=150`. The main-thread work is the same as in VR
+  (the desktop runs reproduce the VR script times), so main-thread work is measured on the desktop.
+- `nvidia-smi --query-gpu=timestamp,utilization.gpu,clocks.gr,memory.used,power.draw,temperature.gpu,clocks_throttle_reasons.active --format=csv -l 1`
+  alongside a VR run: GPU-bound runs sit at 100 % and the 450 W cap (reason 0x4).
+- Time panel: "Bildrate: N fps (x ms)" (`TimePanel.frame_rate_line`).
+
+## VR measurements 2026-10-26 (FSR 1.5)
+
+| Phase | GPU, weather on | GPU, weather off | Main-thread script, weather off | Frame, weather off |
+|---|---|---|---|---|
+| Pad before launch | 26-34 ms | 7 ms | 9.5 ms | 16-22 ms |
+| Pad from ignition | 26-34 ms | 7.5 ms | 15-17 ms | 22-30 ms |
+| Climb 1-10 km (decks 7-12 km) | 38-66 ms | 7 ms | 12.5-14.5 ms | 23-26 ms |
+| 10-24 km | 18-30 ms | 6.7 ms | 12-13 ms | 22-23 ms |
+| Space (start view) | 2.6 ms | 2.5 ms | 1.2 ms | 11.1 ms |
+
+## Main-thread sections of a launch (desktop, weather off, 2026-10-26)
+
+Per-second maxima of the per-frame totals, mean over the phase (ms). `main` = script + the UI's `_draw`.
+
+| Section | Pad | 0-10 km | 10-60 km |
+|---|---|---|---|
+| main (all) | 28.9 | 24.6 | 21.2 |
+| script (`_process`) | 20.2 | 14.6 | 12.8 |
+| `ui_webcast_draw` (webcast gauges' `_draw`) | 8.0 | 9.7 | 8.2 |
+| - of it `EngineGauge` | 5.2 | 6.4 | |
+| - of it `RoundGauge`s | 2.0 | 2.9 | |
+| - of it `TimelineArc` | 0.7 | 0.9 | |
+| `flight_views` | 7.9 | 8.7 | 8.1 |
+| - of it `fv_trajectory` (target-orbit ribbon) | 4.9 | 4.6 | 4.5 |
+| - of it `fv_vehicles` (VehicleView.update_view) | 2.5 | 4.2 | 3.7 |
+| `earth_terrain` (quadtree update) | 6.2 | 4.4 | 3.1 |
+| `atmosphere` | 2.5 | 0.3 | 0.3 |
+| `clouds` (weather on: 4.0 on the pad) | 2.1 | 0.1 | 0.1 |
+| `ui_webcast` (`_process`) | 2.1 | 0.5 | 0.5 |
+| `refraction` | 0.2 | 1.1 | 1.2 |
+| everything else | < 0.7 each | | |
+
+With weather on: `weather` 2.4 ms on the pad, 0.2-0.7 in flight; `sun` 0.6; the rest as above.
+
+Candidate cuts (Task 3): `EngineGauge` recomputes the O(n^2) dot radius (33 engines: 528 pairs) and redraws every
+frame - compute on a layout change, redraw on a firing change; `RoundGauge` / `TimelineArc` redraw every frame -
+redraw when the shown value changes by a displayed step; `TrajectoryView` rebuilds its ribbon mesh every frame from
+points refreshed only every `REFRESH_S` - rebuild with the points, move it with the camera by its transform;
+`VehicleView` and the terrain quadtree - profile inside before choosing.

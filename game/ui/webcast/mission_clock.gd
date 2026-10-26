@@ -27,6 +27,12 @@ func show_values(new_clock: String, new_name: String) -> void:
 
 
 func _draw() -> void:
+	FrameProfiler.begin(&"ui_webcast_draw")
+	_draw_unprofiled()
+	FrameProfiler.end(&"ui_webcast_draw")
+
+
+func _draw_unprofiled() -> void:
 	if clock != "":
 		WebcastStyle.draw_text(self, Vector2(0.0, CLOCK_BASELINE_PX), clock, WebcastStyle.value_font(), CLOCK_SIZE)
 	if mission_name != "":

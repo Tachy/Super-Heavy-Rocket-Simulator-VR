@@ -3,10 +3,12 @@ class_name FrameProfiler
 ## wall time to this frame's total of that section; PerfLog takes the frame's totals once per frame. Off (the default)
 ## both calls return at once, so the instrumented code costs nothing measurable in play.
 
-## The columns of the perf log, in update order (World.update_world, then the UI's and the XR manager's _process).
+## The columns of the perf log, in update order (World.update_world with flight_views split into its fv_* parts,
+## then the UI's and the XR manager's _process; ui_overlay, ui_navball, ui_webcast_draw are _draw, after _process).
 const SECTIONS: Array[StringName] = [&"flight_advance", &"weather", &"towers_zone", &"ephemeris", &"camera",
 		&"atmosphere", &"clouds", &"refraction", &"earth_terrain", &"water", &"moon", &"shader_globals", &"sun",
-		&"flight_views", &"moon_orbit", &"ui_hud", &"ui_overlay", &"ui_navball", &"ui_time_panel", &"ui_webcast", &"xr"]
+		&"flight_views", &"fv_trajectory", &"fv_trail", &"fv_instruments", &"fv_vehicles", &"moon_orbit", &"ui_hud",
+		&"ui_overlay", &"ui_navball", &"ui_time_panel", &"ui_webcast", &"ui_webcast_draw", &"xr"]
 
 static var enabled := false
 static var _starts := {}  ## section -> usec at begin

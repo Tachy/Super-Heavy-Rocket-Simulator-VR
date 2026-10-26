@@ -81,6 +81,12 @@ static func label_sides(first_event_index: int, count: int) -> Array:
 
 
 func _draw() -> void:
+	FrameProfiler.begin(&"ui_webcast_draw")
+	_draw_unprofiled()
+	FrameProfiler.end(&"ui_webcast_draw")
+
+
+func _draw_unprofiled() -> void:
 	if time_scale.y <= 0.0:
 		return
 	var now_f := 0.5

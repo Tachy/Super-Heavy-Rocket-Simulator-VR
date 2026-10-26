@@ -4,6 +4,7 @@
 # ascent autopilot, and the pilot keys are inactive. The manual-flight check (I ignition, L release clamps) returns with
 # the cockpit, where manual control will live.
 # godot --path game --script res://tests/flight_check.gd [-- --vehicle=starship_block3 --countdown=10 --seconds=30]
+#       [--weather=on|off] (overrides the saved "Wetter" switch for this run only) [--perf-log] (PerfLog; needs a window)
 extends SceneTree
 
 var _main: Node
@@ -35,6 +36,8 @@ func _process(delta: float) -> bool:
 	var world: World = _main.get_node("World")
 	_elapsed += delta
 	if _step == 0 and _elapsed > 0.5:
+		if _args.has("weather"):
+			world.weather.enabled = _args["weather"] != "off"
 		world.launch_vehicle(_args.get("vehicle", "starship_block3"), world.sites[0], float(_args.get("countdown", "10")))
 		world.flight.sim.wait_idle(60.0)  # the launch runs on the simulation thread; its completion engages the autopilot
 		print("[flight_check] launched; joypads: ", Input.get_connected_joypads().map(func(d): return Input.get_joy_name(d)))
