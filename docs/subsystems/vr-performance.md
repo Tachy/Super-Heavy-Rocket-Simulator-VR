@@ -175,3 +175,16 @@ fast state (shadow_pass 0.41-0.42 ms in both runs). cloud_pass, median / max of 
 
 That is +195-255 % in the cloud phases, far over the budget (open, Task 10). The edge threshold hardly matters: the cost
 comes from the outline pixels of broken cumulus fields and from each one marching four rays in series in its lane.
+
+Fix round 1 (the same run, `t5c_perf_step*.log`), each step on top of the previous one:
+
+| Phase | before (19bcac9) | 1: coverage rays | 2: + early end, neighbour colour | 3: + centre ray | 4: + list |
+|---|---|---|---|---|---|
+| descent | 3.20 / 9.05 | 8.02 / 16.75 | 6.51 / 14.11 | 5.71 / 13.00 | 4.66 / 11.02 |
+| pan low | 6.54 / 7.37 | 11.86 / 14.23 | 10.06 / 11.76 | 9.16 / 10.65 | 8.25 / 9.18 |
+| pan high | 5.04 / 5.67 | 10.18 / 11.07 | 8.36 / 9.11 | 7.47 / 8.16 | 6.74 / 7.22 |
+| cape | 0.31 / 0.34 | 0.32 / 0.46 | 0.32 / 0.44 | 0.32 / 0.43 | 0.33 / 0.37 |
+
+Now +46 / +26 / +34 % over the medians before Task 5b: still over the 15 % mark (open, Task 10 / the controller:
+approach 2, an edge-directed full-resolution alpha smoothing, costs nothing in the march). The remaining cost is the
+coverage rays' own steps through broken cumulus (field and shape lookups), not their light.

@@ -354,3 +354,22 @@ between rows); steep edges of varying width, 10-90 % rise median 8 m (< 10 m), 9
 - Why replaced: the user found the outlines pixelated and stair-stepped in the t3-t5 images; the outline pass
   (Task 5b) marches outline pixels again with four rotated-grid sub-rays. Measured on cloud_check section 11 (a deck's
   limb rolled 7 deg, VR preset): the largest along-edge alpha step 0.407 before, 0.102 after.
+
+## Static clouds Task 5b: four full sub-ray marches per outline pixel (replaced in fix round 1, 2026-10-26)
+
+- Superseded text (weather-clouds.md, cloud pass 1b):
+  > 1b. **outline pass** (static clouds Task 5b; the deterministic march only, not the debug outputs): the same march
+  > kernel again with `CLOUD_EDGE_REFINE` (`CloudEffect`: its `_refine` variants, the march's image read at binding 6,
+  > the result in the centre's `refined` image the temporal kernel takes instead). A pixel whose alpha differs from
+  > one of its 8 neighbours' by more than `CLOUD_EDGE_ALPHA_STEP` 0.25 [E] (one sub-ray's share) is marched again with
+  > 4 rays at the fixed rotated-grid offsets (+-1/8, +-3/8 march pixel) and averaged (colour and alpha; the cloud
+  > distance alpha-weighted, the scene distance the block's as before); every other pixel is copied. The binary edge
+  > of one centre ray per march pixel made outlines follow the march grid (stairs and beads of a march pixel that the
+  > Catmull-Rom upsample only rounded); now an outline pixel holds its covered fraction in quarters - smooth along the
+  > edge, still one march pixel wide across it (crisp), the same in every frame (no jitter, no noise pattern).
+  > Cost: the VR proxy's cloud pass about 3x (`vr-performance.md`, open - Task 10);
+- Why replaced: the VR proxy's cloud pass cost ~3x (descent 3.20 -> 11.37, pan low 6.54 -> 17.25, pan high 5.04 ->
+  14.87 ms medians). Fix round 1, measured step by step (same VR-proxy run): coverage-only sub-rays with the centre's
+  colour (8.02 / 11.86 / 10.18), + the coverage rays' early end and the neighbour's colour in place of a sub-ray's
+  full march (6.51 / 10.06 / 8.36), + the centre as one of the four rays (5.71 / 9.16 / 7.47), + the compacted list
+  (4.66 / 8.25 / 6.74). Section 11 stays at 0.103 (was 0.102).

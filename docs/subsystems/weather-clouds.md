@@ -198,16 +198,27 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      exceeds 0.15 [E] is marched again with steps of that weight (one sample deciding a whole deep step was the grain
      at cloud surfaces and at bases seen at a grazing angle; the step's intended length is compared, not the float32
      difference of the distances, whose 1 m ulp at 8 600 km retried the same step until the budget ran out - Task 10);
-  1b. **outline pass** (static clouds Task 5b; the deterministic march only, not the debug outputs): the same march
-     kernel again with `CLOUD_EDGE_REFINE` (`CloudEffect`: its `_refine` variants, the march's image read at binding 6,
-     the result in the centre's `refined` image the temporal kernel takes instead). A pixel whose alpha differs from
-     one of its 8 neighbours' by more than `CLOUD_EDGE_ALPHA_STEP` 0.25 [E] (one sub-ray's share) is marched again with
-     4 rays at the fixed rotated-grid offsets (+-1/8, +-3/8 march pixel) and averaged (colour and alpha; the cloud
-     distance alpha-weighted, the scene distance the block's as before); every other pixel is copied. The binary edge
-     of one centre ray per march pixel made outlines follow the march grid (stairs and beads of a march pixel that the
-     Catmull-Rom upsample only rounded); now an outline pixel holds its covered fraction in quarters - smooth along the
-     edge, still one march pixel wide across it (crisp), the same in every frame (no jitter, no noise pattern).
-     Cost: the VR proxy's cloud pass about 3x (`vr-performance.md`, open - Task 10);
+  1b. **outline pass** (static clouds Task 5b, fix round 1; the deterministic march only, not the debug outputs), two
+     kernels. `CLOUD_OUTLINE` (one invocation per march pixel) copies the march's image (binding 6) into the centre's
+     `refined` image (the temporal kernel takes it instead) and appends every pixel whose alpha differs from one of
+     its 8 neighbours' by more than `CLOUD_EDGE_ALPHA_STEP` 0.25 [E] to the outline list (a storage buffer: count +
+     packed pixels, the count reset by the CPU each frame). The march kernel with `CLOUD_EDGE_REFINE` (`CloudEffect`:
+     its `_refine` variants) then runs one invocation per list entry (a direct dispatch for a full list; groups past
+     the count end at once - the indirect dispatch over a GPU-written group count read the reset value on D3D12): full
+     waves of outline pixels, which spread over the screen's work groups had kept whole groups waiting. Each entry
+     gets 3 coverage-only rays (`cloud_march(..., coverage_only)`: the same steps and transmittance without light
+     samples and air light, ended at `CLOUD_COVERAGE_MIN_TRANSMITTANCE` 0.01 [E]: alpha within 0.01 of the full
+     march's) at fixed rotated-grid offsets that, with the centre ray, take every row and column of a quarter-pixel
+     grid once (centre 0, (1/4, 1/2), (1/2, -1/4), (-1/4, 1/4) march pixel). Alpha: the mean of the centre's and the
+     three; the cloud distance alpha-weighted (the centre's from the march's depth image); the scene distance the
+     block's as before. Colour: the centre ray's colour per alpha scaled to that alpha, or - where the centre's alpha
+     is below `CLOUD_EDGE_COLOUR_ALPHA_RATIO` 0.5 [E] of the pixel's (a rim it barely touches) - the most opaque 3 x 3
+     neighbour's (alpha > 0.25 on any outline). The binary edge of one centre ray per march pixel made outlines follow
+     the march grid (stairs and beads of a march pixel that the Catmull-Rom upsample only rounded); now an outline
+     pixel holds its covered fraction in quarters - smooth along the edge, still one march pixel wide across it
+     (crisp), the same in every frame (no jitter, no noise pattern; the list's order varies, each entry's result does
+     not). Cost: the VR proxy's cloud pass +26-46 % over the medians before Task 5b (`vr-performance.md`; was ~3x
+     with four full marches per outline pixel in place; open - Task 10);
   2. temporal accumulation per eye: reprojection of the cloud distance (sky: rotation only) with the camera's float64
      motion into the previous frame's clip space of the same eye, history clamped to the 3 x 3 neighbourhood; a running
      mean of weight 1 / n (n the frames the history holds, kept per pixel) down to 1/32 (an exponential mean of 0.1
@@ -400,8 +411,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   clouds Task 5b): the thick slab at cf 1 seen at its top's limb from 2 km above it, the camera rolled 7 deg (the limb
   a straight edge crossing the march grid at a shallow angle), VR preset (divisor 3), 192 x 96 px at 20 deg, the
   pass's result's alpha read back: over the 20 rows the edge crosses, the largest alpha step between neighbouring
-  pixels 0.102 (limit 0.35 [E]; without the outline pass 0.407 - RED), against the row's trend 0.018 (limit 0.03
-  [E]); a second render bit-identical. Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, stratified
+  pixels 0.103 over 18 rows (limit 0.35 [E]; without the outline pass 0.407 - RED; four full sub-ray marches gave
+  0.102), against the row's trend 0.019 (limit 0.03 [E]); a second render bit-identical. Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, stratified
   midpoints), on the game's deterministic march (one frame each, the same view samples; Task 3 fix round 1), at every
   pixel of a 64 x 64 view per cascade at its scale (camera 5 / 9.9
   / 18.8 / 36.5 / 72 km up, 80-81 deg down; the farthest cloud samples asserted inside that cascade's full weight;
@@ -636,7 +647,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   one: the floor weight's ~23 % of one frame's noise) - with the jittered march only; the deterministic one reads the
   footprint's centre.
 - **Deterministic march (Task 3, outline pass Task 5b)**: a cloud edge is binary per ray; the outline pass (cloud
-  pass 1b) averages four fixed sub-rays on outline pixels, so outlines no longer follow the march grid (no stairs,
+  pass 1b) averages the centre and three fixed coverage-only sub-rays on outline pixels, so outlines no longer follow the march grid (no stairs,
   `t5b_*` vs `t5f_*` images), but they stay one march pixel wide across the edge (crisp; at divisor 3 ~3 screen
   pixels), and a pixel's cover is resolved in quarters only. Some mid-distance cumuli (the 20 km view's frayed ones)
   keep static per-march-pixel holes inside - the shape field's own structure at the step / pixel scale sampled at

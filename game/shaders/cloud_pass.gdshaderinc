@@ -18,7 +18,8 @@
 //    sequence in time): a function of the pixel and the frame alone - the same for both eyes. Out: premultiplied
 //    colour + alpha, and (march distance used, transmittance-weighted cloud distance). With CLOUD_EDGE_REFINE (the
 //    deterministic march's outline pass, static clouds Task 5b) the same kernel runs a second time: pixels on an
-//    outline are marched again with four fixed sub-rays and averaged, all others copied.
+//    outline get four fixed coverage-only sub-rays (alpha: their and the centre's mean, colour: the centre's per
+//    alpha), all others are copied.
 // 2. CLOUD_TEMPORAL: accumulation with reprojection, per eye: the pixel's point at its cloud distance (the far sky's
 //    1e7 m where there is no cloud: rotation only) moved by the camera's motion (Earth-fixed, float64 on the CPU) into
 //    the previous frame's clip space of the same eye; the history there (bilinear) is clamped to the current 3 x 3
@@ -37,7 +38,7 @@
 //    with the same depth weight. Out: the full-resolution
 //    image the composite quad (cloud_layer.gdshader) blends over the scene.
 
-#if defined(CLOUD_MARCH) || defined(CLOUD_TEMPORAL) || defined(CLOUD_UPSAMPLE)
+#if defined(CLOUD_MARCH) || defined(CLOUD_TEMPORAL) || defined(CLOUD_UPSAMPLE) || defined(CLOUD_OUTLINE)
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -91,26 +92,82 @@ vec3 cloud_ray_earth(vec2 pixel_centre) {
 #endif
 
 // =====================================================================================================================
+#if defined(CLOUD_OUTLINE) || defined(CLOUD_EDGE_REFINE)
+// The outline pass (static clouds Task 5b; CloudEffect runs it after the deterministic march): the deterministic
+// march's binary edge decides each march pixel by its one centre ray, so outlines followed the march grid - stairs and
+// beads of one march pixel that the upsample only rounded. CLOUD_OUTLINE copies the march's colour and appends the
+// outline pixels to a list; CLOUD_EDGE_REFINE (a march variant, one invocation per list entry: full waves of outline
+// pixels - spread over the screen's work groups they had kept whole groups waiting) gives each
+// CLOUD_EDGE_SUBRAYS coverage-only rays at fixed rotated-grid offsets: the pixel's alpha is the mean of the centre's
+// and theirs (covered fraction in quarters), the colour per alpha the centre's - the same in every frame (no jitter,
+// no noise pattern), at the extra cost of the outline pixels alone.
+layout(set = 1, binding = 6) uniform sampler2D coarse_color;  // the first march's colour + alpha, nearest
+// The outline list: the entries' count (reset to 0 by the CPU every frame), the pixels (x | y << 16).
+layout(set = 1, binding = 7, std430) buffer CloudOutlineList {
+	uint count;
+	uint pixels[];
+} cloud_outline;
+const uint CLOUD_OUTLINE_GROUP_PIXELS = 64u;  // the work group's invocations (8 x 8): one entry each
+// [E] Largest alpha difference to a neighbour that keeps a pixel's single ray: one sub-ray's share of the mean (a
+// smaller step is not resolved further by four rays).
+const float CLOUD_EDGE_ALPHA_STEP = 0.25;
+
+// The largest alpha difference between the march pixel and its 8 neighbours; opaque: the most opaque of the 3 x 3.
+float cloud_outline_spread(ivec2 pixel, ivec2 low, vec4 coarse, out vec4 opaque) {
+	float spread = 0.0;
+	opaque = coarse;
+	for (int j = -1; j <= 1; j++) {
+		for (int i = -1; i <= 1; i++) {
+			vec4 c = texelFetch(coarse_color, clamp(pixel + ivec2(i, j), ivec2(0), low - 1), 0);
+			spread = max(spread, abs(c.a - coarse.a));
+			if (c.a > opaque.a) {
+				opaque = c;
+			}
+		}
+	}
+	return spread;
+}
+#endif
+
+#ifdef CLOUD_OUTLINE
+layout(rgba16f, set = 1, binding = 2) uniform writeonly image2D out_color;  // the refined image
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 low = ivec2(cloud_view.sizes.zw);
+	if (pixel.x >= low.x || pixel.y >= low.y) {
+		return;
+	}
+	vec4 coarse = texelFetch(coarse_color, pixel, 0);
+	imageStore(out_color, pixel, coarse);  // the outline pixels' are overwritten by CLOUD_EDGE_REFINE
+	vec4 opaque;
+	if (cloud_outline_spread(pixel, low, coarse, opaque) > CLOUD_EDGE_ALPHA_STEP) {
+		uint entry = atomicAdd(cloud_outline.count, 1u);
+		cloud_outline.pixels[entry] = uint(pixel.x) | (uint(pixel.y) << 16);
+	}
+}
+#endif
+
+// =====================================================================================================================
 #ifdef CLOUD_MARCH
 
 layout(set = 1, binding = 1) uniform sampler2D scene_depth;  // full resolution, nearest
 layout(rgba16f, set = 1, binding = 2) uniform writeonly image2D out_color;
-layout(rg32f, set = 1, binding = 3) uniform writeonly image2D out_depth;
 #ifdef CLOUD_EDGE_REFINE
-// The outline pass (static clouds Task 5b; CloudEffect runs it after the deterministic march): the deterministic
-// march's binary edge decides each march pixel by its one centre ray, so outlines followed the march grid - stairs and
-// beads of one march pixel that the upsample only rounded. Pixels on an outline are marched again with
-// CLOUD_EDGE_SUBRAYS rays at fixed rotated-grid offsets and averaged: the pixel's covered fraction in quarters, the same
-// in every frame (no jitter, no noise pattern), at the extra cost of the outline pixels alone.
-layout(set = 1, binding = 6) uniform sampler2D coarse_color;  // the first march's colour + alpha, nearest
-// [E] Largest alpha difference to a neighbour that keeps a pixel's single ray: one sub-ray's share of the mean (a
-// smaller step is not resolved further by four rays).
-const float CLOUD_EDGE_ALPHA_STEP = 0.25;
-// The rotated grid (RGSS: four rays, every row and column of a 4 x 4 grid once - four distinct positions along any
-// near-horizontal or near-vertical edge), offsets in march pixels from the centre.
-const int CLOUD_EDGE_SUBRAYS = 4;
-const vec2 CLOUD_EDGE_OFFSETS[4] = vec2[4](vec2(0.125, 0.375), vec2(0.375, -0.125), vec2(-0.125, -0.375),
-		vec2(-0.375, 0.125));
+layout(rg32f, set = 1, binding = 3) uniform image2D out_depth;  // read too: the first march's cloud distance
+#else
+layout(rg32f, set = 1, binding = 3) uniform writeonly image2D out_depth;
+#endif
+#ifdef CLOUD_EDGE_REFINE
+// [E] The centre ray's colour per alpha serves an outline pixel while its alpha is at least half the pixel's mean
+// alpha; a fainter centre (a rim it barely touches) takes the most opaque 3 x 3 neighbour's (alpha > 0.25 on any
+// outline: CLOUD_EDGE_ALPHA_STEP) - the cloud's colour per alpha beside it.
+const float CLOUD_EDGE_COLOUR_ALPHA_RATIO = 0.5;
+// The rotated grid with the centre ray as one of its four rays (every row and column of a 4 x 4 grid of quarter-pixel
+// spacing once, the centre's 0 among them, -1/4 .. 1/2: four distinct positions along any near-horizontal or
+// near-vertical edge, evenly spaced across neighbouring pixels too), the other three's offsets in march pixels.
+const int CLOUD_EDGE_SUBRAYS = 3;
+const vec2 CLOUD_EDGE_OFFSETS[3] = vec2[3](vec2(0.25, 0.5), vec2(0.5, -0.25), vec2(-0.25, 0.25));
 #endif
 
 // [E] Path toward the light from an in-cloud sample in the near (shape) part (cloud_light_march.z: the preset).
@@ -121,6 +178,9 @@ const float CLOUD_MIN_STEP_M = 10.0;
 // Lower end of the shell: below every ground (the Dead Sea shore -430 m); the field holds layer 0 below 0 m.
 const float CLOUD_BOTTOM_M = -500.0;
 const float CLOUD_MIN_SCALED_TRANSMITTANCE = 0.01;
+// [E] A coverage-only ray (cloud_march) ends where its background transmittance falls below this: its alpha is then
+// known to 0.01 (the scaled transmittance, which ends the full march, decays more slowly by the transport scale).
+const float CLOUD_COVERAGE_MIN_TRANSMITTANCE = 0.01;
 // [E] A block whose nearest and farthest scene distances differ by less than this (ln of their ratio) shows one
 // surface: its centre ray is marched to the block's mean distance. The checkerboard's nearest depth cut that ray short
 // by up to the block's depth extent - from 8 600 km a slanted 2 x 2 block of ground spans several km, so every other
@@ -200,8 +260,11 @@ float cloud_light_source(vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, flo
 // (the outline found, not sampled: a whole step's depth at a cloud's rim made the silhouette a step's width too big);
 // a clear sample whose step ends in the field's cloudy region ends the step there (fine steps follow), and the detail
 // is band-limited at the step too (CLOUD_DETAIL_STEP_FRACTION).
-void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 eclipse_far, out vec3 color,
-		out float alpha, out float cloud_m) {
+// coverage_only (the outline pass's sub-rays, Task 5b fix round 1): the same steps and transmittance without the light
+// samples and the air light, ended at CLOUD_COVERAGE_MIN_TRANSMITTANCE (alpha within 0.01 of the full march's, the
+// cloud distance nearly its); the colour stays 0.
+void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 eclipse_far, bool coverage_only,
+		out vec3 color, out float alpha, out float cloud_m) {
 	color = vec3(0.0);
 	alpha = 0.0;
 	cloud_m = 0.0;
@@ -381,63 +444,66 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		}
 		dense_step_m = max(refined, CLOUD_MIN_STEP_M);  // the limit at this density (grows as the pixel turns opaque)
 		float tau = beta * (b - a_this);
-		vec3 p = camera + offset;
-		vec3 normal = normalize(p * ATM_STRETCH * ATM_STRETCH);  // the ellipsoid's normal (geodetic up)
-		vec2 column = cloud_column_depths(cell, lat_lon, height, in_cloud);
-		// The light march's jitter decorrelated from step to step (golden-ratio sequence): the samples of one ray
-		// average its noise instead of sharing one light-march error.
-		// The deterministic march: the light march's midpoints too (the Moon's; the Sun's where no cache holds it).
-		float light_jitter = phase_m >= 0.0 ? 0.5 : fract(jitter + float(i) * 0.6180339887);
-		vec3 source = vec3(0.0);        // the sky's (scaled problem: attenuated on the scaled depths)
-		vec3 light_source = vec3(0.0);  // the Sun's and the Moon's (cloud_light_source)
-		if (cloud_debug_output == 2 || cloud_debug_output == 7) {
-			light_source = vec3(cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter,
-					pixel_angle, true));
-		} else {
-			// The air's light at the cloud (Sun and sky irradiance), refreshed along the ray every
-			// CLOUD_LIGHT_REFRESH_FRACTION of the distance (at least CLOUD_LIGHT_REFRESH_M): it changes over kilometres.
-			if (abs(d - light_at_m) > max(CLOUD_LIGHT_REFRESH_M, CLOUD_LIGHT_REFRESH_FRACTION * d)) {
-				light_at_m = d;
-				sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
-				float eclipse_x = clamp((d - CLOUD_ECLIPSE_NEAR_M) / (CLOUD_ECLIPSE_FAR_M - CLOUD_ECLIPSE_NEAR_M), 0.0,
-						1.0);
-				sky_irradiance = ATM_PI * atm_sky_light(p, normal) * mix(eclipse_near, eclipse_far, eclipse_x);
-				if (moonlit) {
-					moon_irradiance = ATM_PI * atm_moon_at(p);
-					moon_sky_irradiance = ATM_PI * atm_moon_sky_light(p, normal);
-				}
-			}
-			float sky_source = cloud_sky_scattering_source(-dot(dir, normal), column.x, column.y);
-			source = sky_irradiance * sky_source;
-			if (dot(sun_irradiance, sun_irradiance) > 0.0) {
-				light_source += sun_irradiance
-						* cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter,
-						pixel_angle, true);
-			}
-			if (moonlit) {
-				light_source += moon_irradiance
-						* cloud_light_source(moon_dir, normal, dir, offset, height, d, column, light_jitter,
-						pixel_angle, false);
-				source += moon_sky_irradiance * sky_source;
-			}
-		}
 		float scaled_step = exp(-k * tau);
 		float true_step = exp(-tau);
-		if (cloud_scattering_model == 1) {
-			// The lights' source with the table (exact single scattering + the tabulated Draine part of the higher
-			// orders) is attenuated with exp(-w_D tau); the sky's stays in the scaled problem.
-			float tab_step = exp(-w_tab * tau);
-			radiance += transmittance_sc * source * (1.0 - scaled_step) / k
-					+ transmittance_tab * light_source * (1.0 - tab_step) / w_tab;
-			transmittance_tab *= tab_step;
-		} else {
-			radiance += transmittance_sc * (source + light_source) * (1.0 - scaled_step) / k;
+		if (!coverage_only) {
+			vec3 p = camera + offset;
+			vec3 normal = normalize(p * ATM_STRETCH * ATM_STRETCH);  // the ellipsoid's normal (geodetic up)
+			vec2 column = cloud_column_depths(cell, lat_lon, height, in_cloud);
+			// The light march's jitter decorrelated from step to step (golden-ratio sequence): the samples of one ray
+			// average its noise instead of sharing one light-march error.
+			// The deterministic march: the light march's midpoints too (the Moon's; the Sun's where no cache holds it).
+			float light_jitter = phase_m >= 0.0 ? 0.5 : fract(jitter + float(i) * 0.6180339887);
+			vec3 source = vec3(0.0);        // the sky's (scaled problem: attenuated on the scaled depths)
+			vec3 light_source = vec3(0.0);  // the Sun's and the Moon's (cloud_light_source)
+			if (cloud_debug_output == 2 || cloud_debug_output == 7) {
+				light_source = vec3(cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter,
+						pixel_angle, true));
+			} else {
+				// The air's light at the cloud (Sun and sky irradiance), refreshed along the ray every
+				// CLOUD_LIGHT_REFRESH_FRACTION of the distance (at least CLOUD_LIGHT_REFRESH_M): it changes over kilometres.
+				if (abs(d - light_at_m) > max(CLOUD_LIGHT_REFRESH_M, CLOUD_LIGHT_REFRESH_FRACTION * d)) {
+					light_at_m = d;
+					sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
+					float eclipse_x = clamp((d - CLOUD_ECLIPSE_NEAR_M) / (CLOUD_ECLIPSE_FAR_M - CLOUD_ECLIPSE_NEAR_M), 0.0,
+							1.0);
+					sky_irradiance = ATM_PI * atm_sky_light(p, normal) * mix(eclipse_near, eclipse_far, eclipse_x);
+					if (moonlit) {
+						moon_irradiance = ATM_PI * atm_moon_at(p);
+						moon_sky_irradiance = ATM_PI * atm_moon_sky_light(p, normal);
+					}
+				}
+				float sky_source = cloud_sky_scattering_source(-dot(dir, normal), column.x, column.y);
+				source = sky_irradiance * sky_source;
+				if (dot(sun_irradiance, sun_irradiance) > 0.0) {
+					light_source += sun_irradiance
+							* cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter,
+							pixel_angle, true);
+				}
+				if (moonlit) {
+					light_source += moon_irradiance
+							* cloud_light_source(moon_dir, normal, dir, offset, height, d, column, light_jitter,
+							pixel_angle, false);
+					source += moon_sky_irradiance * sky_source;
+				}
+			}
+			if (cloud_scattering_model == 1) {
+				// The lights' source with the table (exact single scattering + the tabulated Draine part of the higher
+				// orders) is attenuated with exp(-w_D tau); the sky's stays in the scaled problem.
+				float tab_step = exp(-w_tab * tau);
+				radiance += transmittance_sc * source * (1.0 - scaled_step) / k
+						+ transmittance_tab * light_source * (1.0 - tab_step) / w_tab;
+				transmittance_tab *= tab_step;
+			} else {
+				radiance += transmittance_sc * (source + light_source) * (1.0 - scaled_step) / k;
+			}
 		}
 		transmittance_sc *= scaled_step;
 		float next_bg = transmittance_bg * true_step;
 		weighted_distance += d * (transmittance_bg - next_bg);
 		transmittance_bg = next_bg;
-		if (transmittance_sc < CLOUD_MIN_SCALED_TRANSMITTANCE) {
+		if (transmittance_sc < CLOUD_MIN_SCALED_TRANSMITTANCE
+				|| (coverage_only && transmittance_bg < CLOUD_COVERAGE_MIN_TRANSMITTANCE)) {
 			break;
 		}
 	}
@@ -453,6 +519,10 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		return;
 	}
 	alpha = 1.0 - transmittance_bg;
+	if (coverage_only) {
+		cloud_m = alpha > 1.0e-6 ? weighted_distance / alpha : 0.0;
+		return;
+	}
 	if (alpha <= 1.0e-6 && dot(radiance, radiance) <= 0.0) {
 		alpha = 0.0;
 		return;
@@ -543,9 +613,20 @@ void cloud_block_distances(ivec2 pixel, vec2 scale, inout float near_m, inout fl
 #endif
 
 void main() {
-	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	ivec2 low = ivec2(cloud_view.sizes.zw);
 	vec2 scale = cloud_view.sizes.xy / cloud_view.sizes.zw;
+#ifdef CLOUD_EDGE_REFINE
+	// One outline pixel per invocation (the list's entry); the coverage-only rays need no eclipse factors (no light).
+	uint entry = gl_WorkGroupID.x * CLOUD_OUTLINE_GROUP_PIXELS + gl_LocalInvocationIndex;
+	if (entry >= cloud_outline.count) {
+		return;
+	}
+	ivec2 pixel = ivec2(cloud_outline.pixels[entry] & 0xffffu, cloud_outline.pixels[entry] >> 16);
+	vec4 coarse = texelFetch(coarse_color, pixel, 0);
+	vec4 opaque_neighbour;
+	cloud_outline_spread(pixel, low, coarse, opaque_neighbour);
+#else
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
 	// The work group's eclipse factors on the sky light (CLOUD_ECLIPSE_NEAR_M / _FAR_M), before any invocation leaves.
 	if (gl_LocalInvocationIndex == 0u) {
 		vec3 near_factor = vec3(1.0);
@@ -565,21 +646,6 @@ void main() {
 	}
 	barrier();
 	if (pixel.x >= low.x || pixel.y >= low.y) {
-		return;
-	}
-#ifdef CLOUD_EDGE_REFINE
-	// Outline pixels only: a pixel whose alpha differs from one of its 8 neighbours' by more than CLOUD_EDGE_ALPHA_STEP
-	// is marched again; every other keeps the first march's result (its depth image is left as it is).
-	vec4 coarse = texelFetch(coarse_color, pixel, 0);
-	float spread = 0.0;
-	for (int j = -1; j <= 1; j++) {
-		for (int i = -1; i <= 1; i++) {
-			ivec2 q = clamp(pixel + ivec2(i, j), ivec2(0), low - 1);
-			spread = max(spread, abs(texelFetch(coarse_color, q, 0).a - coarse.a));
-		}
-	}
-	if (spread <= CLOUD_EDGE_ALPHA_STEP) {
-		imageStore(out_color, pixel, coarse);
 		return;
 	}
 #endif
@@ -618,30 +684,30 @@ void main() {
 		}
 #endif
 #ifdef CLOUD_EDGE_REFINE
-		// The mean of CLOUD_EDGE_SUBRAYS rays at the rotated grid's fixed offsets in the pixel (the same in every frame:
-		// static); the cloud distance weighted by each ray's alpha (the march's own convention).
-		float weighted_m = 0.0;
+		// The coverage: the mean alpha of the centre ray (the first march's) and CLOUD_EDGE_SUBRAYS coverage-only rays at
+		// the rotated grid's fixed offsets (the same in every frame: static); the cloud distance weighted by each ray's
+		// alpha (the march's own convention). The colour per alpha: CLOUD_EDGE_COLOUR_ALPHA_RATIO's. Full marches per
+		// sub-ray (their light samples) had made the pass ~3x as costly (fix round 1).
+		vec4 centre_depth = imageLoad(out_depth, pixel);  // the first march's, this pixel's own texel
+		float coverage = coarse.a;
+		float weighted_m = coarse.a * centre_depth.y;
 		for (int k = 0; k < CLOUD_EDGE_SUBRAYS; k++) {
 			vec3 sub_color;
 			float sub_alpha;
 			float sub_m;
 			cloud_march(cloud_ray_earth(centre + CLOUD_EDGE_OFFSETS[k] * scale), scene_m, jitter,
-					cloud_group_eclipse_near, cloud_group_eclipse_far, sub_color, sub_alpha, sub_m);
-			// Each ray's own range first (the plain march's below): no NaN or half-float overflow into the mean.
-			sub_color = clamp(sub_color, vec3(0.0), vec3(65000.0));
-			if (any(isnan(sub_color)) || isnan(sub_alpha)) {
-				sub_color = vec3(0.0);
-				sub_alpha = 0.0;
-			}
-			sub_alpha = clamp(sub_alpha, 0.0, 1.0);
-			color += sub_color / float(CLOUD_EDGE_SUBRAYS);
-			alpha += sub_alpha / float(CLOUD_EDGE_SUBRAYS);
+					vec3(1.0), vec3(1.0), true, sub_color, sub_alpha, sub_m);
+			sub_alpha = isnan(sub_alpha) ? 0.0 : clamp(sub_alpha, 0.0, 1.0);
+			coverage += sub_alpha;
 			weighted_m += sub_alpha * sub_m;
 		}
-		cloud_m = alpha > 1.0e-6 ? weighted_m / (alpha * float(CLOUD_EDGE_SUBRAYS)) : 0.0;
+		alpha = coverage / float(CLOUD_EDGE_SUBRAYS + 1);
+		cloud_m = coverage > 1.0e-6 ? weighted_m / coverage : 0.0;
+		vec4 source = coarse.a >= CLOUD_EDGE_COLOUR_ALPHA_RATIO * alpha ? coarse : opaque_neighbour;
+		color = source.a > 1.0e-6 ? source.rgb * (alpha / source.a) : vec3(0.0);
 #else
-		cloud_march(cloud_ray_earth(centre), scene_m, jitter, cloud_group_eclipse_near, cloud_group_eclipse_far, color,
-				alpha, cloud_m);
+		cloud_march(cloud_ray_earth(centre), scene_m, jitter, cloud_group_eclipse_near, cloud_group_eclipse_far, false,
+				color, alpha, cloud_m);
 #endif
 	}
 	// Half-float range (a lit cloud seen through a dark-adapted eye) and no NaN into the history.
