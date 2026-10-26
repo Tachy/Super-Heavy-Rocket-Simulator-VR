@@ -396,10 +396,15 @@ void raise_liquid_cloud_to_lcl(std::span<double> cloud_fraction, std::span<doubl
     if (!(mass_below > 0.0)) return;
     const double fraction_below = fraction_mass / mass_below;
     // The cloud it goes to: the lowest significant run with a part above the LCL, its base (the LCL at the lowest) in
-    // the boundary layer; none: the lowest run is lifted.
+    // the boundary layer and at most the depth of the lowest run above the LCL (it is then the continuation of the
+    // same cloud; a deck further up is another cloud and keeps its water); none: the lowest run is lifted.
+    const double lowest_depth_m = top_of(first_end - 1) - bottom_of(first);
     int target = 0;
     while (target < n && !(significant(target) && top_of(target) > lcl_height_m)) ++target;
-    if (target < n && std::max(bottom_of(target), lcl_height_m) - ground_m >= c::cloud_boundary_layer_top_m) target = n;
+    if (target < n && (std::max(bottom_of(target), lcl_height_m) - ground_m >= c::cloud_boundary_layer_top_m ||
+                       bottom_of(target) > lcl_height_m + lowest_depth_m)) {
+        target = n;
+    }
     int target_end = target;
     while (target_end < n && significant(target_end)) ++target_end;
     // The layers under the LCL keep their part above it (a layer mean over the whole layer); a wholly cut layer loses
@@ -424,7 +429,7 @@ void raise_liquid_cloud_to_lcl(std::span<double> cloud_fraction, std::span<doubl
     }
     // No significant cloud above the LCL in the boundary layer: the lowest run (wholly under the LCL) is lifted to
     // start there, keeping its depth; it carries all the liquid that was under the level (its mean density for one run).
-    const double depth_m = top_of(first_end - 1) - bottom_of(first), density = mass_below / depth_m;
+    const double depth_m = lowest_depth_m, density = mass_below / depth_m;
     for (int k = 0; k < n; ++k) {
         const double bottom = weather_layer_bottom_m(k), top = top_of(k);
         const double overlap = std::min(top, lcl_height_m + depth_m) - std::max(bottom, lcl_height_m);

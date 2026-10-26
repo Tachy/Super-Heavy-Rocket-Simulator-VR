@@ -586,7 +586,7 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     write_weather_snapshot(file, snapshot);
     REQUIRE(read_weather_snapshot(file).has_value());
     auto bytes = read_bytes(file);
-    for (const std::uint32_t old_version : {2u, 3u}) {  // a complete file of the current layout stamped 2 or 3: refused
+    for (const std::uint32_t old_version : {2u, 3u, 4u}) {  // a complete file of the current layout stamped 2 .. 4: refused
         auto v2 = bytes;
         std::memcpy(v2.data() + 8, &old_version, sizeof(old_version));
         v2.resize(v2.size() - sizeof(std::uint64_t));
@@ -613,8 +613,8 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     CHECK_FALSE(read_weather_snapshot(old).has_value());
     // The same bytes with the right version number (and the missing block) are not a valid version 2 file either.
     const std::uint32_t two = 2;
-    // Version 2 stored unknown levels as 0 and had no base redistribution; version 3 moved only the lowest liquid run.
-    CHECK(weather_snapshot_file_version == 4);
+    // Version 2 stored unknown levels as 0 and had no base redistribution; version 3 moved only the lowest liquid run; version 4 merged a deck far above the lifted cloud.
+    CHECK(weather_snapshot_file_version == 5);
     std::memcpy(bytes.data() + 8, &two, sizeof(two));
     bytes.resize(bytes.size() - sizeof(std::uint64_t));
     hash = 14695981039346656037ull;
@@ -855,6 +855,34 @@ TEST_CASE("A cloud wholly under the lifting condensation level is lifted keeping
     CHECK(column.liquid[5] == Catch::Approx(4e-4).epsilon(1e-12));  // 1250 .. 1500 m
     CHECK(column.liquid[6] == 0.0);
     CHECK(column.fraction[4] == Catch::Approx(0.8));
+}
+
+TEST_CASE("Boundary-layer cloud under the level: a deck far above keeps its water, a continuation takes it",
+          "[weather]") {
+    // Low cloud 0 .. 500 m, LCL 800 m (depth 500 m: the cloud lifts to 800 .. 1300 m).
+    LayerColumn apart;
+    apart.cloud(0, 1, 0.8, 4e-4);
+    apart.cloud(8, 9, 0.5, 2e-4);  // a deck 2.0 .. 2.5 km: another cloud
+    const double path = apart.liquid_path(0.0);
+    apart.raise(0.0, 800.0);
+    CHECK(apart.liquid_path(0.0) == Catch::Approx(path).epsilon(1e-6));
+    CHECK(apart.liquid[8] == 2e-4);  // unchanged
+    CHECK(apart.liquid[9] == 2e-4);
+    CHECK(apart.fraction[8] == 0.5);
+    for (int k : {0, 1, 2}) CHECK(apart.liquid[static_cast<std::size_t>(k)] == 0.0);
+    CHECK(apart.liquid[3] > 0.0);  // 800 .. 1000 m
+    CHECK(apart.liquid[4] > 0.0);  // 1000 .. 1250 m
+    CHECK(apart.liquid[5] > 0.0);  // 1250 .. 1300 m
+    for (int k = 6; k < 8; ++k) CHECK(apart.liquid[static_cast<std::size_t>(k)] == 0.0);
+    // A run starting at 1000 m (within LCL + depth = 1300 m) is the same cloud: it takes the water.
+    LayerColumn joined;
+    joined.cloud(0, 1, 0.8, 4e-4);
+    joined.cloud(4, 5, 0.5, 2e-4);
+    const double joined_path = joined.liquid_path(0.0);
+    joined.raise(0.0, 800.0);
+    CHECK(joined.liquid_path(0.0) == Catch::Approx(joined_path).epsilon(1e-6));
+    CHECK(joined.liquid[4] > 2e-4);
+    CHECK(joined.liquid[3] == 0.0);
 }
 
 TEST_CASE("Clouds the lifting condensation level does not govern stay as they are", "[weather]") {

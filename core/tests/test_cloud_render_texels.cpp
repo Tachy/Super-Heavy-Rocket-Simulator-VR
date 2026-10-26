@@ -244,6 +244,30 @@ TEST_CASE("Base texels carry the flat cloud base and its layer's extinction scal
     CHECK(traced[1] == 0.0f);
 }
 
+TEST_CASE("A base just under its layer's top snaps to the top: no cut, no unbounded scale", "[weather]") {
+    // Layer 3 is 750 .. 1000 m: bases 5 m and 19 m under its top (less than cloud_base_snap_m) are dropped, 25 m stays.
+    const int rows = 2, columns = 3;
+    std::vector<std::uint8_t> texels(static_cast<std::size_t>(weather_layer_count) * rows * columns * 4, 0);
+    for (int layer = 3; layer < 8; ++layer) {
+        for (int col = 0; col < columns; ++col) {
+            const std::size_t i = texel_offset(layer, 0, col, rows, columns);
+            texels[i] = encode_weather_cloud_fraction(0.6);
+            texels[i + 1] = encode_weather_water(1e-4);
+        }
+    }
+    const std::vector<float> ground(rows * columns, 0.0f),
+        lcl = {995.0f, 981.0f, 975.0f, 0.0f, 0.0f, 0.0f};
+    const std::vector<float> base =
+        cloud_render_base_texels(WeatherSnapshot::from_parts({}, rows, columns, ground, texels, lcl));
+    CHECK(base[0] == 0.0f);
+    CHECK(base[1] == 0.0f);
+    CHECK(base[2] == 0.0f);
+    CHECK(base[3] == 0.0f);
+    CHECK(base[4] == Approx(975.0));
+    CHECK(base[5] > 1.0f);
+    CHECK(base[5] < 50.0f);  // measured 23.4 at 25 m under the top: the largest scale a base can now get
+}
+
 TEST_CASE("The base cut ramps the cloud in over cloud_lcl_ramp_m above the level, inside its layer", "[weather]") {
     const double base = 1200.0, ramp = constants::cloud_lcl_ramp_m;  // layer 4: 1000 .. 1250 m
     CHECK(cloud_lcl_cut_factor(base - 500.0, base) == 0.0);

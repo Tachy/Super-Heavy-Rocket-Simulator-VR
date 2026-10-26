@@ -741,6 +741,9 @@ godot::Dictionary StarsimCore::cloud_noise() const {
         types["CLOUD_STRATIFORM_THICKENING_BAND"] = environment::cloud_stratiform_thickening_band;
         types["CLOUD_STRATIFORM_STRETCH"] = environment::cloud_stratiform_stretch;
         types["CLOUD_ICE_TILE_V_M"] = environment::cloud_ice_tile_vertical_m;
+        godot::Dictionary pass_constants;  // mirrors in cloud_pass.gdshaderinc
+        pass_constants["CLOUD_MIN_STEP_M"] = constants::cloud_march_min_step_m;
+        result["pass_constants"] = pass_constants;
         result["type_constants"] = types;
         result["detail_mean"] = noise.detail_mean;
         result["detail_weights"] =

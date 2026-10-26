@@ -220,6 +220,9 @@ std::vector<float> cloud_render_base_texels(const WeatherSnapshot& snapshot) {
             const float lcl = snapshot.lcl_heights_m()[cell];
             if (!(lcl > 0.0f) || !(lcl < constants::cloud_boundary_layer_top_m)) continue;
             const double base = snapshot.ground_heights_m()[cell] + static_cast<double>(lcl);
+            // A base closer to its layer's top than twice the march's smallest step is the top: no cut (scale 1), the
+            // sheet of at most that thickness is not resolved and its scale would diverge.
+            if (weather_layer_bottom_m(layer_containing(base) + 1) - base < constants::cloud_base_snap_m) continue;
             // No base where condensate remains in a layer wholly under the base's layer (the cut would erase it).
             bool clear_below = true;
             for (int layer = 0; layer < layer_containing(base) && clear_below; ++layer) {

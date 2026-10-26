@@ -53,7 +53,7 @@ only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only wi
   Romps 2017 exact Lambert-W form, ERA5 with its surface pressure, GFS with the standard atmosphere's at the column's
   ground height `standard_pressure_at_height_pa`; 0 where T - Td < `cloud_fog_spread_k` (fog), -1
   (`weather_lcl_unknown_m`) where unknown) and moves the column's boundary-layer liquid above it
-  (`raise_liquid_cloud_to_lcl`, `weather-clouds.md`). Stored in the `.wthr` file: format version 4 = ground block, then a
+  (`raise_liquid_cloud_to_lcl`, `weather-clouds.md`). Stored in the `.wthr` file: format version 5 = ground block, then a
   float32 LCL block (+4 MB at 0.25 deg), then the texels (version 2 had the unknown level as 0 and no redistribution,
   version 3 moved only the lowest liquid run and averaged the downsampled levels).
 - **Old files heal**: `read_weather_snapshot` refuses version-1, -2 and -3 files (and anything else of another version). A

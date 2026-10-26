@@ -23,7 +23,7 @@
 
 namespace starsim::environment {
 
-inline constexpr std::uint32_t weather_snapshot_file_version = 4;
+inline constexpr std::uint32_t weather_snapshot_file_version = 5;
 inline constexpr const char* weather_snapshot_file_extension = ".wthr";
 
 // Writes to a unique temp file next to `file` and renames it into place; first removes the stale temp files of killed

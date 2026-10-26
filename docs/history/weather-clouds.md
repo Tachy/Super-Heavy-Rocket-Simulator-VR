@@ -434,3 +434,7 @@ between rows); steep edges of varying width, 10-90 % rise median 8 m (< 10 m), 9
   for a 2-D quantity; averaged LCLs (downsampled / poles) cut the cloud of the box's lower-LCL columns; 9.5 km fetch
   limit had too little margin. Now: all liquid below the LCL is moved, a base only where nothing is left below, a
   separate RG32F base texture with the layer's extinction scale, the box's lowest base, 12 km; file format 4.
+- Task 7 fix round 2 (2026-10-27): a boundary-layer cloud wholly under the LCL gave its water to ANY lowest significant
+  run above it within the boundary layer (a deck at 2 km turned dense, the low cloud vanished); the cut scale of a base
+  a few metres under its layer's top was unbounded. Now: merge only into a run starting within LCL + the lowest run's
+  depth, otherwise lift the lowest run to the LCL; bases closer than 20 m under the layer top are dropped; file format 5.

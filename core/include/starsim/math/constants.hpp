@@ -181,6 +181,11 @@ inline constexpr double cloud_base_transition_m = 50.0;
 inline constexpr double cloud_boundary_layer_top_m = 3000.0;
 inline constexpr double cloud_fog_spread_k = 1.0;
 inline constexpr double cloud_lcl_ramp_m = 30.0;
+// The march's smallest step (CLOUD_MIN_STEP_M in shaders/cloud_pass.gdshaderinc, smoke_test.gd compares them) [E: 10 m]
+// and the distance under a layer's top within which an LCL base snaps to that top: twice the step (a thinner sheet
+// is not resolved by the march, and the cut's scale would grow without bound).
+inline constexpr double cloud_march_min_step_m = 10.0;
+inline constexpr double cloud_base_snap_m = 2.0 * cloud_march_min_step_m;
 // A cloud fraction below this counts as none: half a step of the 8-bit cloud-fraction code (the same constant as
 // CLOUD_MIN_FRACTION in shaders/clouds.gdshaderinc; the shadow lookup and the column cover use it too).
 inline constexpr double cloud_min_cover = 0.5 / 255.0;

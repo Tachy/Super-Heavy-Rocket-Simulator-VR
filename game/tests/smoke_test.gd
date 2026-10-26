@@ -275,6 +275,12 @@ func _check_weather(core: StarsimCore) -> bool:
 	_check(types_ok and float(types["CLOUD_ICE_TILE_V_M"]) == CloudLayer.ICE_TILE_V_M
 			and float(types["CLOUD_STRATIFORM_STRETCH"]) == CloudLayer.STRATIFORM_STRETCH,
 			"clouds.gdshaderinc / CloudLayer cloud type constants equal the core's")
+	var pass_text := FileAccess.get_file_as_string("res://shaders/cloud_pass.gdshaderinc")
+	var step_found := RegEx.create_from_string(
+			"const float CLOUD_MIN_STEP_M\\s*=\\s*([-0-9.eE+]+)\\s*;").search(pass_text)
+	var pass_constants: Dictionary = noise["pass_constants"]
+	_check(step_found != null and float(step_found.get_string(1)) == float(pass_constants["CLOUD_MIN_STEP_M"]),
+			"cloud_pass.gdshaderinc CLOUD_MIN_STEP_M equals the core's")
 	var optics: Dictionary = core.cloud_optics_parameters()
 	_check(absf(float(optics.get("asymmetry_g", 0.0)) - 0.8793) < 1e-3 and float(optics["extinction_step_per_m"]) > 0.0,
 			"cloud_optics_parameters (g %.4f)" % float(optics.get("asymmetry_g", 0.0)))

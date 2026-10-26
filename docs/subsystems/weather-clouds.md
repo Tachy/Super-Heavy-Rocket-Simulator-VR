@@ -16,7 +16,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   snapshots resident (0.25 deg: 133 + 33 + 66 + 8 MB each, with the column and base textures below). Uploaded by `CloudFieldTexture` one layer per frame
   (staging volume + GPU copy; the longest frame step 5.2 ms, incl. the volume creation) instead of one 49 ms main-thread creation.
 - **Cloud bases at the lifting condensation level** (static clouds Task 7 and its fix round 1; spec decisions 1-2;
-  `weather_snapshot.hpp`, file format 4): `WeatherSnapshot::lcl_m(row, column)` is the condensation height (m above the
+  `weather_snapshot.hpp`, file format 5): `WeatherSnapshot::lcl_m(row, column)` is the condensation height (m above the
   GROUND) of the 2 m parcel, Romps 2017 exact (`weather-service.md`): 0 = saturated surface air (T - Td <
   `cloud_fog_spread_k` 1 K [E]), `weather_lcl_unknown_m` (-1) = unknown (no 2 m fields, invalid input), capped at the
   20 km weather top. The downsampled set and the pole rows take the LOWEST known base of the box (min of ground + LCL,
@@ -26,10 +26,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   significant liquid with at least the smallest non-zero water code (2e-7 kg/m^3) and a cloud fraction of at least
   `cloud_min_cover`. When the lowest significant liquid cloud has its base less than `cloud_boundary_layer_top_m` 3 km
   [E] above the ground, ALL liquid below the LCL (every run, traces included) is moved into the lowest significant run
-  with a part above the LCL (its base, at least the LCL, in the boundary layer), spread over that part in proportion to
-  its liquid (profile kept; cloud fraction at least the moved water's mass-weighted fraction, so the covered area does
-  not shrink); without such a run the lowest run (wholly under the LCL) is lifted to start at the LCL with its depth,
-  carrying all the moved water. The layer containing the LCL keeps its part above the level as a mean over the whole
+  with a part above the LCL, its base (at least the LCL) in the boundary layer and at most the depth of the lowest run
+  above the LCL (it is then the continuation of the same cloud; a deck further up is another cloud and keeps its
+  water), spread over that part in proportion to its liquid (profile kept; cloud fraction at least the moved water's
+  mass-weighted fraction, so the covered area does not shrink); without such a run the lowest run (wholly under the LCL)
+  is lifted to start at the LCL with its depth, carrying all the moved water. The layer containing the LCL keeps its part above the level as a mean over the whole
   layer. Untouched: an LCL of 0 (fog / low stratus keep the ground), unknown, an LCL >= 3 km (incl. the 20 km cap), no
   liquid below the LCL, a lowest significant base above the boundary layer, and all ice (a layer's cloud fraction stays
   where it holds ice). The column's liquid water path is conserved (1e-6 relative on the layer means; the 8-bit codes
@@ -38,7 +39,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   GPU: the base texture (`environment::cloud_render_base_texels`, `cloud_base_texels`, RG32F columns x rows, 8 MB at
   0.25 deg, globals `cloud_base_before` / `_after`): R the cell's base as a height above the ellipsoid (ground + LCL),
   G its layer's extinction scale, 0 = no base - fog, unknown, LCL >= 3 km, or condensate left in a layer wholly under
-  the base's layer (e.g. ice under the LCL: the column stays uncut, the ice is shown). `cloud_lcl_cut` (shader; core
+  the base's layer (e.g. ice under the LCL: the column stays uncut, the ice is shown), or a base closer than
+  `cloud_base_snap_m` 20 m [E] (twice `CLOUD_MIN_STEP_M`, mirrored in the core, smoke_test compares) under its layer's
+  top (it snaps to the top: scale 1, no sheet - a thinner sheet is not resolved by the march and its scale would
+  diverge; the scale of a base 25 m under the top is 23). Limit: the rule works per layer, so ice in the base's own
+  layer is pushed above the base by the scale (its water path kept, its part below the LCL not shown). `cloud_lcl_cut` (shader; core
   `cloud_lcl_cut_factor`, `cloud_lcl_extinction_factor`) reads the four nearest columns by `texelFetch`: the cloud
   fraction is multiplied by a ramp from 0 at the base to 1 over `cloud_lcl_ramp_m` 30 m [E] (ended at the top of the
   base's layer, so the cut stays in one layer), the extinction by that ramp times the scale; mixed bilinearly with the
