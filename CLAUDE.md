@@ -86,6 +86,9 @@ powershell -ExecutionPolicy Bypass -File tools/build.ps1 -NoBindings -TestFilter
 powershell -ExecutionPolicy Bypass -File tools/build.ps1 -TestFilter "[tag]"                       # + GDExtension
 external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --path game --script res://tests/smoke_test.gd
 ```
+- Weather data (opt-in, needs the built core): `python tools/data_pipeline/fetch.py weather_analog` writes the shipped
+  typical-weather files `data/weather/analog`; live ERA5 / GFS snapshots are downloaded at run time into
+  `data/weather/cache` (`docs/subsystems/weather-service.md`). Weather and cloud limits: `docs/subsystems/weather-clouds.md`.
 - Test workflow (user 2026-10-19): run only what the change affects - the tags of the touched modules and of the
   subsystems whose code paths changed (`[slow]` cases of those tags included), also before a push and before a plan's
   final review; no blanket `-Fast` or full-suite runs. Tag a new case `[slow]` when it takes more than ~40 s.

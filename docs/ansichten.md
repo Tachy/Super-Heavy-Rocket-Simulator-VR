@@ -161,6 +161,19 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
   ohne die Zeitzonendaten. Zonen: timezone-boundary-builder (mit Ozeanen, Raster 0,02°, an Grenzen bis ~1 km
   Unschärfe), Regeln: IANA tzdata, Umstellungen 1990-2060 sekundengenau (`game/util/local_time.gd`).
   [Entschieden 2026-10-25] Nur unter der UTC des Overlays, nicht im Zeit-Panel.
+  Darunter die **Wetterzeile** (auch im Zeit-Panel): woher
+  das Wetter der Wolken kommt, z. B. "Wetter: ERA5, 08.04.2024 18:00 UTC" (Wiederanalyse, bis wenige Tage vor heute),
+  "Wetter: GFS-Vorhersage vom 25.10. 00 UTC, +54 h" (bis 16 Tage voraus), "Wetter: typisch (Analogtag 08.04.2025)"
+  (weiter weg in der Zeit, oder solange nichts geladen ist / ohne Netz: das mitgelieferte typische Wetter des Monats
+  und der 6-Stunden-Zeit), im hohen Zeitraffer "Wetter: Stand 18:00 UTC" (das letzte Wetter wird gehalten),
+  "Wetter: wird geladen ..." und "Wetter: aus" (Schalter aus; "aus (keine Daten)", wenn nicht einmal das typische
+  Wetter da ist). Das Netz wird nie abgewartet: ohne Verbindung oder bei einem Fehler fliegt die Szene mit dem letzten
+  Stand oder dem typischen Wetter weiter und sagt es hier; Wechsel zwischen Quellen und Stunden werden übergeblendet
+  (kein Springen der Wolken).
+- **Schalter "Wetter"** im Zeit-Panel (Kontrollkästchen unter den Voreinstellungen, gemerkt in den Einstellungen, an
+  als Standard): aus = keine Wolken, die Szene wie vor dem Wetter (Pixel für Pixel), und kein Download. Die Wolken
+  sind echte Volumen, überall auf der Erde sichtbar: von unten am Startplatz, beim Aufstieg hindurch (innen ein
+  helles Grau, oben ein Wolkenmeer), aus dem Orbit als Decke mit Schatten und aus der Mondrichtung als Erde mit Wolken.
 - **Zeitbogen:** flacher Bogen oben in der Mitte, "jetzt" am Scheitel. Ereignisse laufen rechts herein und links hinaus,
   die Enden blenden aus. Die Zeitskala ist gestaucht (grob nach relativer Zeit, kein strenger Maßstab) und um "jetzt"
   symmetrisch; sie richtet sich nach den nächsten zwei bis drei Ereignissen und gleitet ohne Sprünge. Beschriftungen
@@ -301,7 +314,7 @@ Der alte Text-HUD mit NavBall bleibt hinter **F1** (aus im Normalzustand), bis e
 - Sonnenfinsternis: im Kernschatten wird der Himmel dunkel, ringsum am Horizont leuchtet die Dämmerung (360 Grad),
   nur helle Sterne und Planeten erscheinen; der Mondschatten ist aus dem Orbit als dunkler Fleck mit weichem Rand zu
   sehen.
-- Noch nicht: Wolken (nächster M8-Teil), Wetter, Lichtbrechung am Horizont, Luftleuchten.
+- Wolken und Wetter: siehe die Wetterzeile und den Schalter "Wetter" im Overlay-Abschnitt. Noch nicht: Regen, Nebel, Gewitter, Dunst, Wind (kommt nach dem Sehen), Luftleuchten.
 
 ### Weitere Außenansichten
 

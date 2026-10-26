@@ -60,6 +60,11 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   sim also holds the mission timeline (`sim::MissionTimeline`: recorded events, onboard-computer predictions, T-0, scheduled
   liftoff with pad hold via `FlightSession::schedule_liftoff` / `StartOptions::wait_on_pad`); vehicle telemetry has the
   inertial speed about the reference body and Earth / Moon distances and speeds.
+  Weather and clouds (M8): `weather_decode` (ARCO-ERA5 Zarr + blosc, GFS GRIB2; the only code that includes lz4 and the
+  GRIB2 decoder), `environment/weather_*` (snapshot, builder, file, source choice and time bracket; no networking in the
+  core) and `environment/cloud_*` (optics, fractal noise, GPU texel forms, Monte Carlo transfer table, light on the
+  ground); `build/core/weather_snapshot.exe` builds the shipped analog (`tools/data_pipeline/fetch.py weather_analog`).
+  Details: `docs/subsystems/weather-clouds.md`, `weather-service.md`.
   Modules depend downwards only (e.g. `ephemeris` may use `time` and `math`, never `gnc`).
 
 ## Game (Godot) structure
@@ -85,9 +90,13 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   (~62 s) or on the first game start.
 - Clouds (M8): `game/world/weather/cloud_layer.gd` (`CloudLayer`: field textures, cross-fade, presets),
   `cloud_effect.gd` (`CloudEffect`: the compute cloud pass in the world's Compositor), `cloud_field_texture.gd`,
-  `cloud_shader_port.gd`; shaders `clouds.gdshaderinc` (port of the core's cloud optics / noise / texels - change both
-  together), `cloud_pass.gdshaderinc` (compute kernels), `cloud_layer.gdshader` (composite). Details:
-  `docs/subsystems/weather-clouds.md`.
+  `cloud_shader_port.gd`, `cloud_shadow_effect.gd` (the Sun's shadow maps on the ground); shaders `clouds.gdshaderinc`
+  (port of the core's cloud optics / noise / texels - change both together), `cloud_pass.gdshaderinc` (compute
+  kernels), `cloud_layer.gdshader` (composite), `cloud_light.gdshaderinc` / `cloud_shadow.gdshaderinc` (light under the
+  clouds in the terrain and sea shaders), `cloud_far.gdshaderinc` + `earth_clouds.gdshader` (far field on the
+  scaled-space Earth). Weather service: `game/world/weather/weather_service.gd` (choice, downloads, cache, cross-fade
+  feed) and `weather_fetcher.gd` (HTTP, injectable); UI line in the overlay (`top_bar`) and the "Wetter" switch in the
+  time panel. Details: `docs/subsystems/weather-clouds.md`, `weather-service.md`.
 - Global shader parameters are set only through `ShaderGlobals.set_value` (`world/shader_globals.gd`), which keeps a
   script-side copy: compute passes read the same values (RenderingServer's getter is editor-only).
 - Rendering uses APPARENT positions (light time + aberration) for Sun and Moon; geometric positions

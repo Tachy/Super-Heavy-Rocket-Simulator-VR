@@ -34,7 +34,7 @@ Part of the atmosphere docs; index `docs/subsystems/atmosphere-rendering.md`.
   Dallas (2 m above the terrain at 107 m): L_a 8.24 cd/m^2, gain 2438, rods 0 (GPU check eye on the ellipsoid: 7.17,
   gain 2624); 400 km in the umbra 17.7; 400 km 60 s after orbital sunset: limb glow 109 cd/m^2, gain 389, sunward limb
   peak 2.73; Cape Sun -26.6 deg: glow 23.3, gain 1325; orbit night under the full Moon, 400 km: L_a 0.168, gain 9429.
-- Performance (`game/tests/terrain_perf.gd`, RTX 4090, 2560 x 1440, gate p99 <= 8 / max <= 16 ms): default epoch p99
+- Performance (`game/tests/terrain_perf.gd`, RTX 4090, 2560 x 1440, gate p99 <= 8 / max <= 16 ms without clouds, 11 / 16 with them - `weather-clouds.md` "Performance gate"): default epoch p99
   7.75 / 7.90 / 7.90, max 10.7 / 12.5 / 11.7 ms (GPU <= ~3 ms; Cape p99 ~9.1 while ~240 nodes load); full-Moon night
   (--utc=2024-10-17T05:00:00) p99 7.88 / max 14.3 ms PASS; eclipse epoch (2024-04-08 18:42, Starbase 80 % partial)
   p99 8.7 ms, max 12-13 ms, GPU-bound. Sky cubemap incremental at 128, half-float scattering tables.

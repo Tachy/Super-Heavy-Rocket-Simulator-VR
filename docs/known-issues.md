@@ -40,4 +40,6 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - The TWCS lever reads 0 until first moved; FlightController only takes it over after a movement.
 - Interactive regression check (keys injected, logs clock/altitude/throttle): `res://tests/flight_check.gd`.
 - Horizons serves DE441; our DE440 Moon differs by up to 3.3 m (1990-2040). Tolerances reflect this.
-
+- Weather and clouds (M8): the limits (light between columns, shadow darkness under broken cloud, plumes always draw
+  over clouds, earthshine at the constant Bond albedo, half-resolution staircase at sharp dark edges, no rain / fog /
+  wind) are listed under "Open points and known limits" in `docs/subsystems/weather-clouds.md`.

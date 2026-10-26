@@ -1,5 +1,7 @@
 # M8 weather and clouds - design
 
+Status: part 1 (weather field, clouds, light, far field, performance gate) implemented by the plan `docs/superpowers/plans/2026-10-25-m8-weather-clouds.md`, Tasks 1-11 (2026-10-26); the user's headset check and the absolute performance gate on a quiet machine are open (`docs/subsystems/weather-clouds.md`). Current state: `docs/subsystems/weather-clouds.md`, `weather-service.md`.
+
 Date: 2026-10-25. Milestone order: the next M8 part after the atmosphere (VR check passed 2026-10-25). The user's
 words: "Echtes Wetter zum Startzeitpunkt, Wolken beim Aufstieg durchfliegen"; the weather should act on the flight too,
 "zuerstmal nur sehen... Physik später"; for future dates "Vorhersage, sonst typisches Wetter"; volumetric clouds

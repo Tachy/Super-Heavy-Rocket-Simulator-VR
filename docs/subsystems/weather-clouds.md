@@ -1,10 +1,10 @@
 # Weather clouds (M8 weather and clouds)
 
 Plan `docs/superpowers/plans/2026-10-25-m8-weather-clouds.md`, spec
-`docs/superpowers/specs/2026-10-25-m8-weather-clouds-design.md`. The snapshots come from `weather-service.md`. State
-after Task 8, its amendment (volumetric clouds near the camera), Task 8b (Monte Carlo transfer table), Task 9 (the
-clouds in the light of the ground, vehicles and the eye) and Task 10 (the far field on the scaled-space Earth); Task 11
-(gate and docs) extends it.
+`docs/superpowers/specs/2026-10-25-m8-weather-clouds-design.md`. The snapshots come from `weather-service.md`. This file
+is the current state after Tasks 1-11: the field and its optics, the cloud pass, the light on the ground, vehicles and
+the eye, the far field on the scaled-space Earth, the performance gate. Superseded numbers and earlier approaches:
+`docs/history/weather-clouds.md`.
 
 ## Model
 
@@ -113,6 +113,14 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
   (resize, divisor) creates new images; the main thread shows the new result before the next frame (`CloudEffect.swap_output`:
   replacing it inside the render callback broke the composite's material for a frame), the old images are freed three
   render callbacks later (no renderer error, no frame without clouds). `CloudLayer.shutdown` frees the resident volumes.
+- **Per-eye geometry (VR)** (fix 73b6465, `game/tests/cloud_vr_stereo_test.gd`): Godot's `get_view_projection(v)`
+  already contains the eye offset, so its inverse maps clip space to the HEAD's space. The pass therefore takes each
+  eye's ray direction from two unprojected depths (`cloud_ray_earth`; the eye's own ray, not a point 2 near in front
+  of the eye seen from the head - that crossed the disparity and fused the clouds at ~0.4 m), builds `clip_from_earth`
+  with the head transform (the offset once), and marches from each eye's position (`eye_earth` per view). The test
+  reproduces the renderer's matrices and checks the rays of both eyes meet at the cloud to 1e-16 rad; it mirrors the
+  GDScript, not the shader (a typo in the shader's copy is not detectable by it). The user's headset check of the fix is
+  pending.
 - **Cross-fade** (`CloudLayer`, ruling 2026-10-25): two slots and the weight of slot 1; a new pair is reached through
   one visible snapshot (weight moves 1 per 2 s), the missing snapshot is uploaded into the slot without weight, then
   the weight tracks `WeatherService.blend()`. Weather off fades to the empty texture. Unused zero-weight slots are freed.
@@ -164,8 +172,10 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
     the beam's cover of the largest cloud fraction on the line. Distance rule (horizontal distance of the receiver from the camera): near -> far over 9-11 km, far -> the
     column slanted to the Sun (1 - C + C exp(-tau / (C mu0))) over 120-140 km; smooth, no pop. World space: the same for
     both VR eyes. The Moon's direct light uses the slanted column.
-  - CPU (`StarsimCore.weather_cloud_light` -> {sun_transmittance, sky_factor, sun_diffuse}; (1, 1, 0) without
-    weather): the vehicles' DirectionalLight x T_s (`Atmosphere.sun_light_at`, the Moon's light likewise),
+  - CPU (`StarsimCore.weather_cloud_light` -> {sun_transmittance, sky_factor, sun_diffuse}, i.e. (direct, sky, Sun's
+    diffuse) in the dictionary; (1, 1, 0) without weather. `Atmosphere.cloud_light_at` and the Vector3s of the
+    GPU-side checks use the order (direct, Sun's diffuse, sky): (1, 0, 1) without weather): the vehicles'
+    DirectionalLight x T_s (`Atmosphere.sun_light_at`, the Moon's light likewise),
     `Environment.ambient_light_energy` = (T_d E_sky + T_sd E_sun,h) / E_sky at the followed body (above 1 under a
     bright thin deck; reflections keep the clear sky), the eye adaptation's down plate (E_n T_s + E_n mu0 T_sd + E_sky
     T_d) / pi, also for the Moon. All grid mean along the ray / column (independent columns).
@@ -210,8 +220,8 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
   at one point, a Sun below the cloud's local horizon at the entry floor 0.02, view cosine floor 0.02
   (`CLOUD_FAR_MU_MIN` [E]). The CPU light factors stay (1, 0, 1) beyond the limit (`cloud_enabled` false; a camera
   there is far above any cloud). The earthshine on the Moon keeps the Bond albedo 0.306 (clouds included on average).
-- **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 64 / 128,
-  2.5 %, 5 + 2; both 3 detail levels, 1/2 resolution, temporal weight floor 1/32.
+- **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 48 / 96,
+  2.5 %, 5 + 2 (Task 11: 64 / 128 before; see Performance); both 3 detail levels, 1/2 resolution, temporal weight floor 1/32.
 
 ## Validation
 
@@ -275,18 +285,45 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
   scaled-space Earth drawn with `earth.gdshader`, bit-identical to the pre-Task-10 shader as one file (0 of 8.6e6
   bytes); the hand-over just inside / outside 1.5e7 m (2024-04-08 14:00 UTC, camera over 0 N 45 W, seven Earth points
   0-45 deg away, Sun 20-75 deg up): decks of tau 10 / 2 (cf 1, 1-2 km) with the volume on the grid mean (cloud debug
-  output 6: the far field's physics without the shapes) within 2.2 % / 4.2 % (tolerance 5 %); the volume pass only
+  output 6: the far field's physics without the shapes) within 2.95 % / 3.89 % (tolerance 5 %); the volume pass only
   inside, `earth_clouds.gdshader` only outside, the CPU light factors (1, 0, 1) outside; from 384 400 km with the ERA5
   hour of 2024-04-08 18:00 five cloudy cells (vertical transmittance < 0.05) 5.3-8.2x brighter with the weather on,
   five clear cells (no cloud within 1 deg) unchanged (ratio 1.0000). The game's volume (the shapes, prefiltered)
   against the far field, tolerance 10 % (ruling 2026-10-26: the shapes' 3D light is outside a column model): deck
-  tau 10 within 7.3 %, tau 2 within 5.2 %, broken cf 0.4 (21 x 21 block means) within 8.5 % (two runs 7.5 / 8.5 %,
-  the temporal mean's noise; before the prefilter 32 %).
+  tau 10 within 6.4 %, tau 2 within 4.3 %, broken cf 0.4 (21 x 21 block means) within 7.3 % (Task 11: every placement
+  resets the cloud history and the frame counter and draws exactly 64 frames, so the temporal mean is the same number of
+  frames in every run; the earlier runs, timing-dependent, gave 7.3 / 5.2 / 7.5-8.5 %; before the prefilter 32 %).
 - Image identity of the shape prefilter (`render_check.gd --fixed_exposure --deterministic=64`: the cloud history
-  and frame counter reset, then exactly 64 frames; ERA5 2024-04-08 18:00): the Starbase ground view and an ascent
+  and frame counter reset, then exactly 64 frames; ERA5 2024-04-08 18:00; identity holds at the check window (1600 x
+  900) and the views' FOV used there - a larger window or a narrower FOV shrinks the pixel angle and keeps the
+  unfiltered kernel up to a higher view; a wider pixel prefilters from lower): the Starbase ground view and an ascent
   view at 25 km toward the horizon are bit-identical to the commit before (a7d52e1); two runs of a7d52e1 itself
   differ in 0 / at most 1 pixel by 1. The low-orbit oblique view (420 km) differs at the limb only, where the
   footprint exceeds f_s.
+- Visual set (Task 11, `render_check.gd --weather=online --cloud_quality=vr`, ERA5 hours downloaded at run time; PNGs
+  `tmp/weather_t11_*.png`, read by eye): overcast vs clear at Starbase (OLP-1, 2 m eye, 2025-08-15 18:00 UTC: a thick
+  anvil deck, the Sun hidden, vertical T_s 0.05 on the 1-degree analog / 2025-03-15 18:00 UTC: clear, deep blue sky);
+  ascent at Starbase on the first date, below (500 m: a high deck over the sea), inside (9 km: white-out, no black frame,
+  no banding) and above (20 km: the deck's top below the dark sky, a blue limb); the Cape from 100 km (2025-07-15 18:00,
+  cumulus fields over the sea, an overcast mass over the coast); ISS orbit (420 km) over the frontal band of 2024-04-08
+  18:00; sunset cloud bases (Starbase 2025-07-15 01:25 UTC = 20:25 CDT, just after sunset: the high clouds lit pink-orange
+  against the pale blue sky, the low cumulus' bases dark grey-blue with lit rims, no rim artefact); cloud shadows at the Cape (2025-07-15 18:00 UTC, 14:00 EDT: from 6 km
+  over the inland Florida land the ground seen between the clouds lies in their shadow - dark blue-grey, only sky
+  light - with a few sunlit patches; from 4.5 km over the sea (`weather_t11_cape_shadows.png`) the cumulus field's
+  shadows are only faintly visible on the dark water, `..._cape_shadows_land.png` carries the contrast); the Earth from the Moon at new Moon (2025-07-24 19:00,
+  376 000 km: continents with the cloud pattern, the limb); Antarctica from 3000 km over the pole (2025-01-15 12:00)
+  and the Pacific date line (lat 5, lon 180, 2025-07-15 00:00): no seam or NaN at the pole or the lon 0 / 180 line.
+  ERA5 against GOES-East of the same hour (`tmp/weather_t11_gulf_vs_goes.png`, left the game, right GOES-16 ABI band 2
+  0.64 um reflectance of 2024-04-08 18:00:20 UTC reprojected to the same pinhole camera: 3000 km above 27 N 90 W, 45
+  deg): the long frontal band from the Mexican Gulf coast over the Mississippi valley to the Great Lakes lies in the same
+  place and with the same orientation (offset by less than ~100 km by eye), the dense cumulus fields over the western
+  Atlantic / Bahamas and the cloud streets over the Pacific coast of Mexico are in the right places, the eclipse's
+  umbra / penumbra darkens the same lower-left corner; the Gulf is clear in both. Differences: ERA5's band is broader
+  and softer (a 0.25 deg reanalysis, no sub-grid structure, the real band's thin cirrus streaks missing), GOES shows
+  more broken cumulus over Texas and the Atlantic coast, and the game's far field has the dot lattice described under
+  the known limits. Source: NOAA GOES-R series ABI Level 2 CMIPF, `s3://noaa-goes16/ABI-L2-CMIPF/2024/099/18/`
+  (`OR_ABI-L2-CMIPF-M6C02_G16_s20240991800204_...`), public domain (NOAA Open Data Dissemination; GOES-16 was the
+  GOES-East satellite on that date); not shipped, not in the repo (the reprojection script lived in `tmp/`).
 - `game/tests/cloud_layer_test.gd` (headless): the cross-fade never jumps, never changes a weighted slot.
 
 ## Diagnostics
@@ -310,30 +347,47 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
 
 ## Open points and known limits
 
-- Performance (terrain_perf 1440p, 2024-04-08 18:42 eclipse epoch, ERA5 18:00 pinned, VR preset, one session, Task
-  8b): without clouds p99 13.15 ms, with clouds 15.50 ms with the table / 15.13 ms with the closed form (p50 8.92 ->
-  9.65 / 9.60); the table costs +0.4 ms p99, the descent 11.97 -> 16.69 ms p99, worst GPU second 21.3 ms (closed form
-  20.5) at 8.4 km above the decks. One run had a 48 ms frame in the descent at 19 m (GPU 8.6 ms: a draw / present stall,
-  not the clouds' GPU work). The baseline itself misses the Task 11 gate (p99 <= 11 ms). Levers measured: the detail levels ~2 ms in the descent
-  (`--cloud_detail_levels`), the step refinement ~0.3 ms, the eclipse probes ~0.3 ms (per sample they cost ~10 ms).
-- Performance after Task 9 (terrain_perf 1440p, same epoch and ERA5 file, VR preset, fix round 1: five runs with
-  clouds, four without): with clouds p50 5.44 / p99 9.87 9.97 9.79 10.03 9.95 / max 14.80 15.89 14.26 14.42 19.33 ms;
-  without p50 4.53-4.56 / p99 7.65 7.58 7.62 7.59 / max 12.90 11.31 10.66 45.81 ms. All clouds cost +0.9 ms p50 and
-  +2.3 ms p99 over the baseline (budget +3 ms; the Task 8b state measured p99 9.45, so the light added ~0.5 ms p99).
-  VRAM +464 MB at the Cape (2884 vs 2448 MB: two snapshots of field, ice and column textures, 232 MB each). The
-  39 ms frame of the first Task 9 run (t = 0 of the descent, main-thread terrain start, process 37.6 ms) did not recur in
-  nine further runs, not even with a never-compiled terrain shader source (cold shader cache) - so it is not the first
-  compile of the larger terrain shader, nor the transfer table's build threads (they finish at setup, before the run),
-  nor the column textures (created by `show_now` before it). Sporadic draw / present stalls of 16-46 ms occur with and
-  without clouds (one 45.8 ms frame in a run without clouds: "rest 42.9, draw 42.6", GPU 2.6 ms), i.e. they are the
-  platform's, not the clouds'. The 11 ms gate is Task 11's.
-- Performance after Task 10 (same terrain_perf setup; the machine ran a VR runtime in the background, so the baseline
-  is higher than Task 9's): without clouds p99 12.65 / 12.64 ms, with clouds 16.10 / 16.33 / 16.13 / 16.08 ms (p50
-  8.4 -> 9.7); the Task 9 cloud pass in the same state 15.90 / 16.09 ms: the two cloud-pass fixes cost nothing
-  measurable. Scaled space (2560 x 1440, 2025-10-25 15:00 UTC ERA5): the far field adds 0.26 ms GPU from the Moon's
-  direction at 330 000 km (0.51 -> 0.77 ms) and 0.30 ms just outside 1.5e7 m (0.43 -> 0.73 ms); frame p99 ~1.5 ms.
-  The shape prefilter kernel (fix round 1, A/B in one session, 2560 x 1440, ERA5 2024-04-08 18:00, inside the limit at
-  1.4985e7 / 1.2e7 m): GPU p50 6.09 -> 6.29 / 6.07 and 8.05 -> 8.03 / 8.08 ms: not measurable.
+- **Performance gate (Task 11)**: `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr` (1440p desktop proxy of
+  the 90 Hz VR frame; the gate it prints: p99 <= 11 ms with clouds / 8 ms without, max <= 16 ms; 2024-04-08 18:42 eclipse
+  epoch, ERA5 18:00 pinned, three runs with and three without in one session, alternating). The machine's baseline moved
+  between the notes: a clean one measured without clouds p50 4.5 / p99 7.6 ms (Task 9), the session of Task 11
+  p50 8.25-8.29 / p99 12.58-12.63 / max 16.3-17.1 ms (three runs; the Task 9 scripts at 21a833c on the same machine and
+  the same day gave p99 12.47, so it is the machine, not the code; no VR headset runtime was running (Pimax client / runtime and DesktopXR bridge stopped), the
+  Virtual Desktop service and its virtual display driver could not be stopped without administrator rights). In that
+  state the absolute gate p99 <= 11 ms cannot be met even without clouds and was not met. What the clouds add, measured
+  against the baseline of the same session, is the budget the gate is derived from (clouds <= +3 ms p99 over the
+  baseline):
+  - preset 64 / 128 steps (before Task 11): p50 +1.4 ms, p99 +3.5-3.7 ms (16.14 / 16.07 / 16.23 vs 12.51 / 12.59 /
+    12.53), max 20.9-22.4 ms - over the budget.
+  - tuning runs (single runs, VR preset, `terrain_perf.gd --cloud_tune=...`): steps 48 / max 96: p99 14.90 (-1.2 ms);
+    light near 5 -> 4: 15.62 (-0.5); fine step 2.5 -> 3.5 %: 15.72 (-0.4); all three: 14.47 (-1.7). Not touched: the
+    detail levels (they are the approved shapes' fine structure), the resolution divisor, the light march's far part.
+  - **preset 48 / 96 (the VR preset now)**: with clouds p50 9.51 / 9.51 / 9.51, p99 14.96 / 15.00 / 14.86, max 18.86 /
+    19.04 / 19.61 ms against 8.29 / 8.25 / 8.27, 12.63 / 12.59 / 12.58, 16.91 / 16.32 / 17.07 ms without: clouds +1.25 ms
+    p50, +2.4 ms p99 (within the +3 ms budget, 3 of 3), +2-3 ms max. By phase (third run): descent p99 15.90 vs 11.91
+    ms (the worst, the decks seen from 8 km: GPU 14-15 ms per frame), pan low 13.45 vs 12.62, pan high 13.27 vs 12.23,
+    Cape 13.99 vs 13.29. VRAM +430 MB (2886 vs 2456 MB at the Cape: two snapshots of field, ice and column textures).
+    Image A/B of 64 / 128 vs 48 / 96 (`render_check --cloud_quality=vr --fixed_exposure --deterministic=64`, 1600 x 900,
+    four views: cumulus layer from 2.5 km, sunset bases, the Cape shadows from 3.5 km, 420 km orbit over a front): mean
+    absolute difference 0.3-0.7 of 255, 1-2.5 % of the pixels differ by more than 8 levels (cloud edges, p99 5-13), none
+    visible by eye. The checks (`cloud_check`, `cloud_far_check`) run the desktop preset and do not cover the VR one.
+  - The absolute gate (p99 <= 11, max <= 16 ms with clouds) therefore needs the machine's clean state (baseline p99
+    ~7.6 ms): expected ~10.0 ms p99 with the +2.4 ms of the clouds. To be re-run by the user on a quiet machine.
+  - Pre-warm (Task 11): `earth_clouds.gdshader` is drawn once on a sub-pixel quad at load, and the shape-prefilter march
+    kernel is dispatched once (one group) in the first cloud frame; the first switch to the scaled-space far field used
+    to cost up to 5.4 ms in one frame. Sporadic draw / present stalls of 16-46 ms happen with and without clouds (one
+    46 ms frame in a baseline run of Task 11), i.e. they are the platform's.
+  - Levers measured earlier (superseded numbers in `docs/history/weather-clouds.md`): the detail levels ~2 ms in the
+    descent, the step refinement ~0.3 ms, the eclipse probes ~0.3 ms (per sample ~10 ms).
+- Scaled space (Task 10; 2560 x 1440, 2025-10-25 15:00 UTC ERA5): the far field adds 0.26 ms GPU from the Moon's direction
+  at 330 000 km (0.51 -> 0.77 ms) and 0.30 ms just outside 1.5e7 m (0.43 -> 0.73 ms); frame p99 ~1.5 ms. The shape
+  prefilter kernel (A/B in one session, inside the limit at 1.4985e7 / 1.2e7 m): GPU p50 6.09 -> 6.29 / 6.07 and 8.05
+  -> 8.03 / 8.08 ms: not measurable.
+- Visible at kilometre footprints (Task 11 review of the visual set, `tmp/weather_t11_gulf_era5.png`, a camera 3000 km
+  above the Gulf, footprint ~5 km, 96 settled frames; also over Antarctica): the shape prefilter leaves a regular
+  lattice of small dots in the cloud interiors and along fronts (period ~40 km), i.e. the shapes' own structure at the
+  prefilter's 1 km texels plus the half-resolution blocks, not temporal noise. The large-scale pattern (fronts, cloud
+  streets, the Moon's shadow) is right (below). Not changed: a different filter would alter the approved shapes' look.
 - At sharp dark edges (a deck's base seen at 30 km) a staircase of the half-resolution blocks is still visible.
 - The stochastic light march is unbiased in tau_s but exp(-tau_s) per sample is brighter on average (+10 % at the
   worst checked geometry with the preset's samples); more near samples reduce it.
@@ -343,9 +397,6 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
 - Ice uses the droplet phase function and thin sheets without a fibre direction; no ground-reflected light into the
   cloud bases; the sky light kept in the forward peak is left out.
 - A resize shows the clouds of the old size for one frame (scaled), then the new ones.
-- The ray of each eye starts at the camera, not at the eye offset (the eye offset only moves the reprojection): the
-  stereo parallax of near clouds is approximate.
-- Multiview (VR) not yet verified on a headset (the pass handles each view's matrices; per-eye history).
 - Light (Task 9): the vehicles' light and the eye adaptation are the grid mean at one point (a vehicle in a gap
   between cumuli gets its cell's mean, not the shadow next to it; under a deck the same within 0.4 %); one light point
   as before (the booster far below the ship gets the followed body's light). Ambient on vehicles = Godot's clear-sky
@@ -354,9 +405,9 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
   sky's diffuse transmittance and the Sun's diffuse light are the local column's (no light from neighbouring columns,
   no cloud-side glow in gaps). The scaled-space Earth takes the column (the far field: no shapes, no shadow maps).
 - Far field against the volume at the hand-over (Task 10, `cloud_far_check.gd`): with the game's volume (the shapes)
-  a deck of tau 10 differs by up to 7.3 % (the volume brighter 25-45 deg from the sub-camera point, Sun ~35 deg up,
-  view ~68 deg off the vertical), tau 2 by up to 5.2 %, a broken layer (cf 0.4) by up to 8.5 % (the volume brighter
-  at the centre by 8-9 %); with the volume on the grid mean the decks agree within 2.6 % / 3.9 %: the step is the shapes' sub-grid structure (the 3D entry cosine
+  a deck of tau 10 differs by up to 6.4 % (the volume brighter 25-45 deg from the sub-camera point, Sun ~35 deg up,
+  view ~68 deg off the vertical), tau 2 by up to 4.3 %, a broken layer (cf 0.4) by up to 7.3 % (the volume brighter
+  at the centre by 5-8 %); with the volume on the grid mean the decks agree within 2.95 % / 3.89 %: the step is the shapes' sub-grid structure (the 3D entry cosine
   under a varying Sun depth only brightens: mu_e is clamped at mu0 from below; the soft edges' thin fringes), which a
   column model cannot carry. Accepted with the tolerance 10 % (ruling 2026-10-26): a faint step when crossing
   1.5e7 m. A thin layer seen from afar cuts many horizontal slices of the 32 km shape tile, whose cover is not exactly

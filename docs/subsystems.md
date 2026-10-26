@@ -18,6 +18,6 @@ Older code comments refer to sections of this file by their former titles; the t
 | Terrain rendering (M8 Plan B) | `subsystems/terrain-rendering.md` | `history/terrain-rendering.md` |
 | Atmosphere rendering (M8) | `subsystems/atmosphere-rendering.md` (index) -> `atmosphere-scattering.md`, `eye-adaptation.md`, `atmosphere-eclipse-refraction.md`, `atmosphere-performance.md` | `history/atmosphere-rendering.md` |
 | Sea state and deck motion | `subsystems/sea-state.md` | `history/sea-state.md` |
-| Weather clouds (M8 weather and clouds) | `subsystems/weather-clouds.md`, `subsystems/weather-service.md` | - |
+| Weather clouds (M8 weather and clouds) | `subsystems/weather-clouds.md` (field, optics, light, far field, performance, known limits), `subsystems/weather-service.md` (sources, downloads, cache, UI line) | `history/weather-clouds.md` |
 
-New subsystems get their own `docs/subsystems/<slug>.md` (the weather and clouds file comes with that plan's docs task).
+New subsystems get their own `docs/subsystems/<slug>.md`.
