@@ -71,6 +71,7 @@ func _initialize() -> void:
 	_test_bad_load_recovers()
 	_test_no_data()
 	_test_probe_retry()
+	_test_core_cache_eviction()
 	for dir: String in _dirs:
 		_remove_dir(dir)
 	DirAccess.remove_absolute(_settings_path())
@@ -155,6 +156,10 @@ func _test_archive_and_warp() -> void:
 			"archive epoch")
 	_check(service.status_text() == "Wetter: ERA5, 08.04.2024 18:00 UTC", "ERA5 line: " + service.status_text())
 	_check(changes.size() >= 2 and not changes.back()[0].is_empty(), "snapshots_changed emitted with loaded snapshots")
+	var kept_texels := 0
+	for file: String in service._loaded:
+		kept_texels += 1 if service._loaded[file].has("cloud_texels") else 0
+	_check(kept_texels == 0, "no layer attached: the texels are dropped after the announcement (%d dictionaries keep them)" % kept_texels)
 	var keys := [String(bracket["before"]["cache_key"]), String(bracket["after"]["cache_key"])]
 	var static_count := 0
 	var timed := 0
@@ -338,6 +343,48 @@ func _test_probe_retry() -> void:
 			"off during a probe, then on: ERA5")
 	service.shutdown()
 	service2.shutdown()
+
+
+## Final review I2: the core's active pair is cache-only. A file that fell out of the core's load cache is not read on the
+## main thread: the push waits (the active pair stays), a worker loads it again, then the push goes through.
+func _test_core_cache_eviction() -> void:
+	var fetcher := FakeFetcher.new()
+	var service := _make(fetcher)
+	_run_until(service, fetcher, ARCHIVE_UTC, 1.0, func() -> bool: return service.status_text().begins_with("Wetter: ERA5"),
+			"eviction: ERA5 active")
+	var files: Array = service._active["files"]
+	var spares: Array = []
+	for i in range(3):  # three other files push the active pair out of the core's 3-entry cache
+		var spare := service._cache_dir.path_join("spare_%d.wthr" % i)
+		_core.weather_write_slab_snapshot(spare, 1000.0, 2000.0, 1e-4, 0.5)
+		_core.weather_load_snapshot(spare)
+		spares.append(spare)
+	var cached: PackedStringArray = _core.weather_cached_files()
+	_check(not (files[0] in cached) and not (files[1] in cached), "eviction: the active pair is out of the core's cache")
+	var refused: Dictionary = _core.weather_set_active(files[0], files[1], 0.5)
+	_check(not refused.get("ok", true), "eviction: weather_set_active refuses instead of reading")
+	var pushed_before: float = service._pushed_blend
+	# 18:55: the blend moves past BLEND_PUSH_STEP; the push must neither read nor stall, and succeeds after the reload.
+	var epoch := _core.utc_to_tdb_s("2024-04-08T18:55:00")
+	service.update(epoch, 1.0)
+	_check(service._pushed_blend == pushed_before, "eviction: the first push after the eviction did not read on the main thread")
+	var start := Time.get_ticks_msec()
+	var slowest := 0.0
+	while service._pushed_blend == pushed_before and Time.get_ticks_msec() - start < 20000:
+		var t0 := Time.get_ticks_usec()
+		service.update(epoch, 1.0)
+		slowest = maxf(slowest, (Time.get_ticks_usec() - t0) / 1.0e6)
+		OS.delay_msec(5)
+	_check(service._pushed_blend != pushed_before and absf(service._pushed_blend - service.blend()) < 1e-9,
+			"eviction: a worker reload brings the push through (blend %.3f)" % service._pushed_blend)
+	_check(slowest < MAX_FRAME_S, "eviction: update() never waited (slowest %.0f ms)" % [slowest * 1000.0])
+	# Weather off: results of loads still running are dropped, nothing refills the loaded dictionaries.
+	service.enabled = false
+	for i in range(30):
+		service.update(epoch, 1.0)
+		OS.delay_msec(5)
+	_check(service._loaded.is_empty(), "off: no loaded snapshot dictionaries kept")
+	service.shutdown()
 
 
 func _check(condition: bool, message: String) -> void:

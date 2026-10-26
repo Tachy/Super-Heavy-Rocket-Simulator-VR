@@ -203,8 +203,44 @@ func _check_weather(core: StarsimCore) -> bool:
 	var above: Dictionary = core.weather_cloud_light(Vector3(6378137.0 + 5000.0, 0, 0), Vector3(1, 0, 0))
 	_check(absf(float(above["sun_transmittance"]) - 1.0) < 1e-9 and absf(float(above["sky_factor"]) - 1.0) < 1e-9,
 			"weather_cloud_light above the slab: 1, 1")
+	_check(loaded.get("file", "") == file, "weather_load_snapshot: names the file")
+	# Final review I1 / I2: the pair is cache-only, a missing side blends toward the empty snapshot, hits become the newest.
+	var clear_file := OS.get_temp_dir().path_join("starsim_smoke_clear_%d.wthr" % OS.get_process_id())
+	_check(core.weather_write_slab_snapshot(clear_file, 2000.0, 3000.0, 0.0, 0.0), "weather_write_slab_snapshot: empty field")
+	_check(core.weather_load_snapshot(clear_file).get("ok", false), "weather_load_snapshot: empty field")
+	core.weather_set_active(file, "", 0.5)
+	var half_a: Dictionary = core.weather_cloud_light(pos, Vector3(1, 0, 0))
+	core.weather_set_active("", file, 0.5)
+	var half_b: Dictionary = core.weather_cloud_light(pos, Vector3(1, 0, 0))
+	core.weather_set_active(clear_file, file, 0.5)
+	var half_c: Dictionary = core.weather_cloud_light(pos, Vector3(1, 0, 0))
+	core.weather_set_active(file, file, 1.0)
+	var full: Dictionary = core.weather_cloud_light(pos, Vector3(1, 0, 0))
+	_check(half_a == half_b and half_a == half_c, "a missing side is the empty snapshot: %s" % half_a)
+	_check(float(half_a["sun_transmittance"]) > float(full["sun_transmittance"])
+			and float(half_a["sun_transmittance"]) < 1.0, "half weight: between clear and the slab (%.3f)" % half_a["sun_transmittance"])
+	core.weather_set_active(file, file, 0.5)
+	var before_miss: Dictionary = core.weather_cloud_light(pos, Vector3(1, 0, 0))
+	var miss: Dictionary = core.weather_set_active(file, "no_such_dir/never_loaded.wthr", 0.1)
+	_check(not miss.get("ok", true) and "nicht geladen" in String(miss.get("error", "")), "weather_set_active of an unloaded file fails without reading")
+	_check(core.weather_cloud_light(pos, Vector3(1, 0, 0)) == before_miss, "a failed weather_set_active keeps the active pair")
+	var spares: Array = []
+	for i in range(3):
+		var spare := OS.get_temp_dir().path_join("starsim_smoke_spare%d_%d.wthr" % [i, OS.get_process_id()])
+		core.weather_write_slab_snapshot(spare, 1000.0, 2000.0, 1e-4, 0.5)
+		spares.append(spare)
+	core.weather_load_snapshot(spares[0])
+	core.weather_load_snapshot(spares[1])  # cache now: [.., spare0, spare1]
+	core.weather_set_active(spares[0], spares[0], 0.0)  # a hit becomes the newest
+	core.weather_load_snapshot(spares[2])
+	var cached: PackedStringArray = core.weather_cached_files()
+	# Loaded: clear, spare0, spare1 (file went first); the hit moved spare0 behind spare1, spare2 evicted clear.
+	_check(Array(cached) == [spares[1], spares[0], spares[2]],
+			"the load cache keeps hits newest and evicts the least recently used file: %s" % [cached])
 	core.weather_set_active("", "", 0.0)
 	DirAccess.remove_absolute(file)
+	for path: String in spares + [clear_file]:
+		DirAccess.remove_absolute(path)
 	var noise: Dictionary = core.cloud_noise()
 	var n: int = int(noise["shape_size"])
 	_check(n == 128 and (noise["shape"] as PackedByteArray).size() == 4 * n * n * n

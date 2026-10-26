@@ -61,7 +61,7 @@ const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 93
+const EXPECTED_SAMPLES := 95
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -518,6 +518,32 @@ func _ground_light_samples() -> void:
 			else:
 				_check("vehicle light (CPU, grid mean) vs the ground's (shapes) " + label,
 						absf(vehicle_total - ground_total) <= VEHICLE_TOLERANCE * ground_total, detail)
+	# Final review I1 / I3: a cross-fade with an empty slot (deck -> no weather). The GPU's light factors (grid-mean map) equal
+	# the CPU light of the pair CloudLayer pushed (I1), and the ground light never dips below the end states (I3: the empty
+	# slot's column texels are zero; an R8 texture would read as cover 1 and darken the middle of the fade).
+	var fade_sun := _local_direction(45.0, 135.0)
+	var fade_up := _local_direction(90.0, 0.0)
+	_clouds.shadow_effect.grid_mean_only = true
+	var fade_lux: Dictionary = _core.atmosphere_illuminance(point, fade_up, fade_sun)
+	var fade_sun_share := _luminance(fade_lux["sun_lux"]) / _luminance(fade_lux["sun_lux"] + fade_lux["sky_lux"])
+	var totals: Array = []
+	var fade_ok := true
+	var fade_detail := ""
+	for w1 in [0.0, 0.25, 0.5, 0.75, 0.95]:  # 1.0 is weather off (no cloud pass: the bit-identity check below)
+		_clouds.show_now(deck, {}, w1)
+		var gpu := await _render_ground(camera, point, fade_up, fade_sun, 5, _terrain_material)
+		var cpu: Dictionary = _core.weather_cloud_light(point, fade_sun)
+		var cpu_factors := Vector3(float(cpu["sun_transmittance"]), float(cpu["sun_diffuse"]), float(cpu["sky_factor"]))
+		for axis in range(3):
+			fade_ok = fade_ok and absf(gpu[axis] - cpu_factors[axis]) <= maxf(FACTOR_TOLERANCE * cpu_factors[axis], DIRECT_FLOOR * 0.1)
+		fade_detail += " w1 %.2f GPU %s CPU %s;" % [w1, gpu, cpu_factors]
+		totals.append((gpu.x + gpu.y) * fade_sun_share + gpu.z * (1.0 - fade_sun_share))  # light on a horizontal plate
+	_clouds.shadow_effect.grid_mean_only = false
+	_check("cross-fade deck -> empty: GPU light factors equal the CPU light of the pushed pair", fade_ok, fade_detail)
+	var monotonic: bool = totals[0] < totals[4]
+	for i in range(1, totals.size()):
+		monotonic = monotonic and totals[i] >= totals[i - 1] - 1e-3
+	_check("ground light is monotonic through a deck -> empty cross-fade", monotonic, "light on a plate at w1 0 .25 .5 .75 .95: %s" % [totals])
 	# Weather off: the shader with and without its CLOUD_LIGHT blocks, every pixel bit-identical (land and sea).
 	_clouds.show_now({}, {}, 0.0)
 	_core.weather_set_active("", "", 0.0)

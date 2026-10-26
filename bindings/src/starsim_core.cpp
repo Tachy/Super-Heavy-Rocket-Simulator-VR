@@ -3,6 +3,7 @@
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3i.hpp>
@@ -550,13 +551,18 @@ godot::Dictionary StarsimCore::weather_build_snapshot(const godot::Dictionary& s
     }
 }
 
-StarsimCore::SnapshotPtr StarsimCore::weather_snapshot_of(const std::string& file) {
-    {
-        const std::lock_guard<std::mutex> lock(weather_mutex_);
-        for (const auto& [name, ptr] : weather_cache_) {
-            if (name == file) return ptr;
-        }
+StarsimCore::SnapshotPtr StarsimCore::weather_snapshot_cached(const std::string& file) {
+    const std::lock_guard<std::mutex> lock(weather_mutex_);
+    for (auto it = weather_cache_.begin(); it != weather_cache_.end(); ++it) {
+        if (it->first != file) continue;
+        if (std::next(it) != weather_cache_.end()) std::rotate(it, std::next(it), weather_cache_.end());  // a hit is the newest
+        return weather_cache_.back().second;
     }
+    return nullptr;
+}
+
+StarsimCore::SnapshotPtr StarsimCore::weather_snapshot_of(const std::string& file) {
+    if (auto hit = weather_snapshot_cached(file)) return hit;
     // The slow part (reading 133 MB and its checksum) runs off-lock.
     auto read = environment::read_weather_snapshot(std::filesystem::path(file));
     if (!read) return nullptr;
@@ -581,6 +587,7 @@ godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) 
         result["rows"] = static_cast<int64_t>(snapshot->rows());
         result["columns"] = static_cast<int64_t>(snapshot->columns());
         result["layers"] = static_cast<int64_t>(environment::weather_layer_count);
+        result["file"] = file;
         godot::PackedByteArray bytes;
         bytes.resize(static_cast<int64_t>(texels.size()));
         if (!texels.empty()) std::memcpy(bytes.ptrw(), texels.data(), texels.size());
@@ -608,12 +615,15 @@ godot::Dictionary StarsimCore::weather_load_snapshot(const godot::String& file) 
 godot::Dictionary StarsimCore::weather_set_active(const godot::String& before_file, const godot::String& after_file,
                                                   double blend) {
     try {
+        // Cache only: never reads a file (133 MB) on the calling (main) thread.
         SnapshotPtr before, after;
-        if (!before_file.is_empty() && !(before = weather_snapshot_of(utf8_of(before_file)))) {
-            throw std::runtime_error("Datei nicht lesbar: " + utf8_of(before_file));
-        }
-        if (!after_file.is_empty() && !(after = weather_snapshot_of(utf8_of(after_file)))) {
-            throw std::runtime_error("Datei nicht lesbar: " + utf8_of(after_file));
+        for (const auto& [file, slot] : {std::pair{&before_file, &before}, std::pair{&after_file, &after}}) {
+            if (file->is_empty() || (*slot = weather_snapshot_cached(utf8_of(*file)))) continue;
+            // Expected while a file is (re)loading and retried by the caller every frame: no push_error.
+            godot::Dictionary miss;
+            miss["ok"] = false;
+            miss["error"] = godot::String::utf8("Wetterdatei nicht geladen: ") + *file;
+            return miss;
         }
         {
             const std::lock_guard<std::mutex> lock(weather_mutex_);
@@ -654,13 +664,15 @@ godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& positio
         const auto column = [&](const SnapshotPtr& snap) { return environment::cloud_column_depths_at(*snap, p); };
         const auto ray = [&](const SnapshotPtr& snap) { return environment::cloud_sun_ray_depths(*snap, p, s); };
         environment::CloudColumnDepths ray_depths, column_depths;
-        if (before && after) {
-            ray_depths = environment::blend_cloud_column_depths(ray(before), ray(after), blend);
-            column_depths = environment::blend_cloud_column_depths(column(before), column(after), blend);
-        } else {
-            ray_depths = ray(before ? before : after);
-            column_depths = column(before ? before : after);
-        }
+        // A missing side is the empty snapshot (zero depths): the cross-fade from / to no weather, as on the GPU.
+        const auto ray_or_none = [&](const SnapshotPtr& snap) {
+            return snap ? ray(snap) : environment::CloudColumnDepths{};
+        };
+        const auto column_or_none = [&](const SnapshotPtr& snap) {
+            return snap ? column(snap) : environment::CloudColumnDepths{};
+        };
+        ray_depths = environment::blend_cloud_column_depths(ray_or_none(before), ray_or_none(after), blend);
+        column_depths = environment::blend_cloud_column_depths(column_or_none(before), column_or_none(after), blend);
         sun = environment::cloud_sun_transmittance(ray_depths, mu0);
         sky = environment::cloud_sky_factor(column_depths);
         diffuse = environment::cloud_sun_diffuse_transmittance(column_depths, lut.get(), mu0);
@@ -676,6 +688,13 @@ godot::Dictionary StarsimCore::weather_cloud_light(const godot::Vector3& positio
     result["sky_factor"] = sky;
     result["sun_diffuse"] = diffuse;
     return result;
+}
+
+godot::PackedStringArray StarsimCore::weather_cached_files() const {
+    godot::PackedStringArray files;
+    const std::lock_guard<std::mutex> lock(weather_mutex_);
+    for (const auto& entry : weather_cache_) files.push_back(godot::String::utf8(entry.first.c_str()));
+    return files;
 }
 
 godot::Dictionary StarsimCore::cloud_noise() const {
@@ -861,6 +880,7 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("weather_build_snapshot", "snapshot", "raw_dir", "out_file", "config_dir"),
                          &StarsimCore::weather_build_snapshot);
     ClassDB::bind_method(D_METHOD("weather_load_snapshot", "file"), &StarsimCore::weather_load_snapshot);
+    ClassDB::bind_method(D_METHOD("weather_cached_files"), &StarsimCore::weather_cached_files);
     ClassDB::bind_method(D_METHOD("weather_set_active", "before_file", "after_file", "blend"),
                          &StarsimCore::weather_set_active);
     ClassDB::bind_method(D_METHOD("weather_cloud_light", "position_itrf_m", "sun_direction_itrf"),

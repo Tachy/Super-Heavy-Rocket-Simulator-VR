@@ -22,9 +22,16 @@ extends Node3D
 ## with the slots goes through its dominant snapshot first (old -> new snapshot, then the real pair). Then w1 tracks
 ## the service's blend every frame. Weather off is the empty snapshot (a 2 x 2 x 32 texture of zeros): clouds fade out
 ## and in the same way.
+## The CPU light (StarsimCore.weather_cloud_light: vehicles, eye, ambient) follows the very same visible state: this node is
+## the only writer of the core's active pair. It pushes (slot 0 file, slot 1 file, w1) whenever a slot's content changes or
+## w1 moved by LIGHT_PUSH_STEP; an empty slot is "" (the core blends toward zero depths, as the GPU's zero column texture).
+## A file that fell out of the core's load cache is not read on the main thread: `core_cache_missed` asks the owner for
+## a worker load and the push is retried every frame.
 
 ## [call] Seconds per unit weight of a cross-fade (pair / source change, weather on / off).
 const FADE_S := 2.0
+## [call] w1 must move this much before the CPU light's pair is pushed again (slot changes are pushed at once).
+const LIGHT_PUSH_STEP := 0.01
 ## Clouds are raymarched while the Earth is drawn in true space (CelestialBody.SCALED_SPACE_DISTANCE_M, the same
 ## camera distance from the Earth's centre that switches the terrain quadtree to the scaled-space mesh); beyond it the
 ## scaled-space Earth draws them (World switches it to earth_clouds.gdshader while far_enabled; cloud_far.gdshaderinc,
@@ -53,6 +60,9 @@ const SHADOW_NEAR_REANCHOR_M := 4000.0
 const SHADOW_FAR_REANCHOR_M := 50000.0
 const SHADOW_NEAR_FADE_M := Vector2(9000.0, 11000.0)
 const SHADOW_FAR_FADE_M := Vector2(120000.0, 140000.0)
+
+## A file of a resident slot is not in the core's load cache (the CPU light cannot use it): load it on a worker.
+signal core_cache_missed(file: String)
 
 enum Quality { DESKTOP, VR }
 ## The multiple-scattering model (fidelity flag, shader global cloud_scattering_model): the Monte Carlo transfer table
@@ -108,6 +118,8 @@ var _target_blend := 0.0
 var _upload := {}  ## the running upload: {slot, id, size, field, ice}
 var _empty_field: ImageTexture3D
 var _empty_ice: ImageTexture3D
+var _empty_column: ImageTexture3D  ## zero (cover 0, depth 0) LA8: an R8 texture would read as cover 1 through .ra
+var _pushed_light := {"files": ["", ""], "w1": 0.0, "ok": true}  ## the core's pair as last accepted
 var _slab_transmittance: ImageTexture
 ## Earth-fixed anchors of the shadow maps (render axes, float64; NAN: none yet).
 var _near_anchor := Vector3(NAN, NAN, NAN)
@@ -134,6 +146,7 @@ func setup(core: StarsimCore) -> void:
 	add_child(_quad)
 	_empty_field = _zero_texture(Image.FORMAT_RGBA8, 4)
 	_empty_ice = _zero_texture(Image.FORMAT_R8, 1)
+	_empty_column = _zero_texture(Image.FORMAT_LA8, 2)
 	for i in range(2):
 		_slots[i] = _empty_slot()
 	_bind_slots()
@@ -197,10 +210,15 @@ func _cancel_upload() -> void:
 func set_target(before: Dictionary, after: Dictionary) -> void:
 	if not pinned:
 		_target = [before, after]
+		for snapshot: Dictionary in _target:  # a snapshot a slot already holds needs no texels
+			var id := _snapshot_id(snapshot)
+			if id != "" and (id == _slots[0]["id"] or id == _slots[1]["id"]):
+				_strip_texels(snapshot)
 
 
 ## Checks and render_check: shows a pair at once (uploads completed now, no cross-fade, the history reset) and pins it
-## (the service's announcements are ignored from then on).
+## (the service's announcements are ignored from then on). The caller's dictionaries keep their texels (checks show the
+## same one again).
 func show_now(before: Dictionary, after: Dictionary, blend: float) -> void:
 	pinned = true
 	_target = [before, after]
@@ -222,6 +240,7 @@ func show_now(before: Dictionary, after: Dictionary, blend: float) -> void:
 	_bind_slots()
 	ShaderGlobals.set_value(&"cloud_blend", _w1)
 	effect.reset_history()
+	_push_light()
 
 
 ## Per frame: the cross-fade, the camera's float64 terms and whether to draw. camera_fixed_m: the camera in the Earth
@@ -235,6 +254,7 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 		_target_blend = clampf(blend, 0.0, 1.0)
 	_poll_upload()
 	_advance(maxf(delta_s, 0.0))
+	_push_light()
 	if effect.swap_output():  # the pass re-created its result (a new size): shown from the next frame on
 		# Unset first: the same resource again would leave the material's uniform set on the old RD texture, which the
 		# pass frees a few frames later (CloudEffect.FREE_DELAY_CALLBACKS).
@@ -266,6 +286,33 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 func state() -> Dictionary:
 	return {"slots": [_slots[0]["id"], _slots[1]["id"]], "w1": _w1, "tracking": _tracking,
 			"uploading": not _upload.is_empty()}
+
+
+## Drops the big texel arrays of a loaded snapshot once its volumes are uploaded (they were the only copy besides the
+## GPU's; the dictionary is shared with the service, which reloads from the core's cache if it needs them again).
+static func _strip_texels(snapshot: Dictionary) -> void:
+	for key: String in ["cloud_texels", "cloud_ice_texels", "cloud_column_texels"]:
+		snapshot.erase(key)
+
+
+## Pushes the visible state to the core's CPU light (class comment). Retried every frame while the core cannot take it.
+func _push_light() -> void:
+	if _core == null:
+		return
+	var files := ["", ""]
+	for i in range(2):
+		files[i] = String(_slots[i].get("file", ""))
+	var pushed_files: Array = _pushed_light["files"]
+	var settled := files == pushed_files and bool(_pushed_light["ok"])
+	if settled and absf(_w1 - float(_pushed_light["w1"])) < LIGHT_PUSH_STEP 			and not (_w1 != float(_pushed_light["w1"]) and (_w1 <= 0.0 or _w1 >= 1.0)):
+		return
+	var result: Dictionary = _core.weather_set_active(files[0], files[1], _w1)
+	var ok := bool(result.get("ok", false))
+	_pushed_light = {"files": files, "w1": _w1, "ok": ok}
+	if not ok:
+		for file: String in files:
+			if file != "" and not (file in _core.weather_cached_files()):
+				core_cache_missed.emit(file)
 
 
 ## The shadow maps' frame (cloud_light.gdshaderinc): axes perpendicular to the Sun, anchors on the ground under the
@@ -380,13 +427,16 @@ static func _snapshot_id(snapshot: Dictionary) -> String:
 
 
 func _empty_slot() -> Dictionary:
-	return {"id": "", "size": Vector3(2, 2, LAYERS), "field": null, "ice": null, "column": null}
+	return {"id": "", "file": "", "size": Vector3(2, 2, LAYERS), "field": null, "ice": null, "column": null}
 
 
 ## A slot for the snapshot with its volumes created (not yet uploaded); the empty slot for none.
 func _new_slot(snapshot: Dictionary) -> Dictionary:
 	var id := _snapshot_id(snapshot)
 	if id == "":
+		return _empty_slot()
+	if not snapshot.has("cloud_texels"):  # stripped after an earlier upload (the service reloads before announcing again)
+		push_warning("Wolken: Texel-Daten von %s fehlen" % id)
 		return _empty_slot()
 	var columns := int(snapshot["columns"])
 	var rows := int(snapshot["rows"])
@@ -398,7 +448,7 @@ func _new_slot(snapshot: Dictionary) -> Dictionary:
 	if column.size() != columns * rows * LAYERS * 2:
 		column = PackedByteArray()
 		column.resize(columns * rows * LAYERS * 2)  # none given: no light taken under the clouds
-	return {"id": id, "size": Vector3(columns, rows, LAYERS),
+	return {"id": id, "file": String(snapshot.get("file", "")), "size": Vector3(columns, rows, LAYERS),
 		"field": CloudFieldTexture.create(snapshot["cloud_texels"], columns, rows, 4),
 		"ice": CloudFieldTexture.create(ice, columns, rows, 1),
 		"column": CloudFieldTexture.create(column, columns, rows, 2)}
@@ -450,6 +500,9 @@ func _poll_upload() -> void:
 	_upload = {}
 	_bind_slots()
 	_release_slot(old)
+	for snapshot: Dictionary in _target:
+		if _snapshot_id(snapshot) == data["id"]:
+			_strip_texels(snapshot)
 
 
 static func _zero_texture(format: Image.Format, texel_bytes: int) -> ImageTexture3D:
@@ -473,7 +526,7 @@ func _bind_slots() -> void:
 		ShaderGlobals.set_value(names[s][0], slot["field"].texture if has else _empty_field)
 		ShaderGlobals.set_value(names[s][1], slot["ice"].texture if has else _empty_ice)
 		ShaderGlobals.set_value(names[s][2], slot["size"])
-		ShaderGlobals.set_value(names[s][3], slot["column"].texture if has else _empty_ice)
+		ShaderGlobals.set_value(names[s][3], slot["column"].texture if has else _empty_column)
 		if has and not (s == 1 and slot["field"] == _slots[0]["field"]):
 			field_texture_bytes += slot["field"].bytes + slot["ice"].bytes + slot["column"].bytes
 

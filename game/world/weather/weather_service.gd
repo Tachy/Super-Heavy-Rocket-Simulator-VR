@@ -36,8 +36,6 @@ const MAX_PARALLEL_REQUESTS := 4
 const GFS_PROBE_COUNT := 4
 ## [call] The blend is pushed to the core's CPU light when it moved this much.
 const BLEND_PUSH_STEP := 0.01
-## The core's snapshot cache keeps this many loaded files (WeatherSnapshot cache in the binding).
-const CORE_LOAD_CACHE := 3
 ## STARSIM_DEBUG_WEATHER=1 prints the size and time of every built snapshot.
 const DEBUG_ENV := "STARSIM_DEBUG_WEATHER"
 const SETTINGS_FILE := "user://settings.cfg"
@@ -49,6 +47,10 @@ var enabled := true:
 			return
 		enabled = value
 		_enabled_changed = true
+## True when a CloudLayer is the only writer of the core's active pair (it follows the visible cross-fade, so the CPU
+## light never leads the GPU clouds): the service then neither sets the pair nor its blend. The world sets it; without a
+## layer (headless tests) the service sets the pair itself at the switch and strips the texels after emitting.
+var light_driven_by_layer := false
 ## The size cap of the snapshot cache (tests lower it).
 var cache_cap_bytes: int = CACHE_CAP_BYTES
 ## Seconds until a failed snapshot or probe is tried again (tests shorten it).
@@ -92,7 +94,6 @@ var _current := {}  ## the running job's state (see _start_job)
 # Loaded / active snapshots.
 var _loaded := {}  ## file -> loaded dictionary (texels included)
 var _loading := {}  ## file -> {task, result}
-var _mirror: Array = []  ## files in the core's load cache order (oldest first)
 var _bad_files := {}  ## file -> true: failed to load, not tried again (cleared when the file is deleted for a rebuild)
 
 var _active := {}  ## {files: [before, after], metas: [snapshot dict, snapshot dict], kind: String}
@@ -196,6 +197,13 @@ func _no_data() -> bool:
 		if _jobs.get(key, {}).get("state", "") in ["queued", "running"]:
 			return false
 	return true
+
+
+## CloudLayer.core_cache_missed: a resident snapshot fell out of the core's load cache; load it again on a worker
+## (the cache-only weather_set_active never reads on the main thread).
+func reload_into_core_cache(file: String) -> void:
+	if enabled:
+		_start_load(file)
 
 
 ## True while a download, build or load is running (tests, UI).
@@ -625,11 +633,13 @@ func _switch_if_ready() -> void:
 		return
 	var files: Array = _target["files"]
 	var ready := true
+	var cached: PackedStringArray = _core.weather_cached_files()
 	for file: String in files:
 		if _bad_files.has(file):
 			_on_bad_target()
 			return
-		if not _loaded.has(file) or not (file in _mirror):
+		# Loaded with its texels (a consumer strips them once uploaded) and still in the core's cache.
+		if not _loaded.get(file, {}).has("cloud_texels") or not (file in cached):
 			ready = false
 			_start_load(file)
 	if not ready:
@@ -644,9 +654,14 @@ func _switch_if_ready() -> void:
 	for file: String in _loaded.keys():
 		if not keep.has(file):
 			_loaded.erase(file)
-	_core.weather_set_active(files[0], files[1], _blend)
-	_pushed_blend = _blend
+	if not light_driven_by_layer:
+		_core.weather_set_active(files[0], files[1], _blend)
+		_pushed_blend = _blend
 	snapshots_changed.emit(_loaded[files[0]], _loaded[files[1]])
+	if not light_driven_by_layer:  # nobody uploads them: do not keep ~230 MB of texels per snapshot
+		for file: String in files:
+			for key: String in ["cloud_texels", "cloud_ice_texels", "cloud_column_texels"]:
+				_loaded[file].erase(key)
 
 
 func _on_bad_target() -> void:
@@ -659,7 +674,6 @@ func _on_bad_target() -> void:
 				DirAccess.remove_absolute(file)
 				_bad_files.erase(file)  # the rebuilt file under this name gets a fresh try
 				_loaded.erase(file)
-				_mirror.erase(file)
 				_mark_failed(key)
 	_target = {}
 	_ensure_baseline(_last_bracket_hour)
@@ -685,20 +699,21 @@ func _poll_loads() -> void:
 		if not result.get("ok", false):
 			_bad_files[file] = true
 			continue
-		_loaded[file] = result
-		_mirror.erase(file)
-		_mirror.append(file)
-		while _mirror.size() > CORE_LOAD_CACHE:
-			_mirror.pop_front()
+		# Only the target's snapshots are kept (their texels go to the layer); a reload into the core's cache, a result
+		# that arrives after the weather was switched off or the target moved on is dropped (the core cache has it).
+		if enabled and file in _target.get("files", []):
+			_loaded[file] = result
 
 
 func _push_blend() -> void:
-	if _active.is_empty() or absf(_blend - _pushed_blend) < BLEND_PUSH_STEP:
+	if light_driven_by_layer or _active.is_empty() or absf(_blend - _pushed_blend) < BLEND_PUSH_STEP:
 		return
 	var files: Array = _active["files"]
-	if files[0] in _mirror and files[1] in _mirror:  # else the core would read synchronously
-		_core.weather_set_active(files[0], files[1], _blend)
+	if _core.weather_set_active(files[0], files[1], _blend).get("ok", false):
 		_pushed_blend = _blend
+	else:  # fell out of the core's cache: load it again on a worker, retry next frame (never read on the main thread)
+		for file: String in files:
+			_start_load(file)
 
 
 func _apply_enabled() -> void:
@@ -708,7 +723,8 @@ func _apply_enabled() -> void:
 	_target = {}
 	_loaded.clear()
 	_pushed_blend = -1.0
-	_core.weather_set_active("", "", 0.0)
+	if not light_driven_by_layer:
+		_core.weather_set_active("", "", 0.0)
 	snapshots_changed.emit({}, {})
 
 

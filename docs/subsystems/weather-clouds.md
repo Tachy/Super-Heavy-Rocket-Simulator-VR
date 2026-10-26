@@ -179,6 +179,13 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     `Environment.ambient_light_energy` = (T_d E_sky + T_sd E_sun,h) / E_sky at the followed body (above 1 under a
     bright thin deck; reflections keep the clear sky), the eye adaptation's down plate (E_n T_s + E_n mu0 T_sd + E_sky
     T_d) / pi, also for the Moon. All grid mean along the ray / column (independent columns).
+  - The CPU light follows the cross-fade (final review I1): `CloudLayer` pushes (slot 0 file, slot 1 file, w1) to
+    `weather_set_active` after every `_advance` when a slot changes or w1 moves by 0.01 (an empty slot is "", the empty
+    snapshot: the core blends toward zero depths); a file out of the core's cache is retried every frame and
+    `core_cache_missed` asks the service for a worker load. `cloud_check.gd` compares the GPU factors with the CPU
+    light at five weights of a deck -> empty fade (within 3 %) and checks the plate light is monotonic. The empty
+    slot's column texture is a zero LA8 volume (an R8 one reads cover 1 through `.ra`: the ground light dipped below
+    both end states).
   - The CPU factors follow the GPU's clouds: `Atmosphere.cloud_light_at` returns (1, 0, 1) while `cloud_enabled` is false
     (noise not ready, nothing to show, beyond the scaled-space limit), so vehicles and the eye are not dimmed by clouds
     that are not drawn. Both snapshots' column depth and cover are blended first, then the transmittances computed
@@ -225,6 +232,15 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 
 ## Validation
 
+- Real-date plausibility (final review I4, `test_weather_snapshot.cpp` "Real-date columns ...", fixture
+  `era5_plausibility.toml` by `tools/validation/gen_weather_fixtures.py`: ERA5 columns of 2024-04-08 18 UTC and
+  2025-08-15 18 UTC at Starbase, the Cape, the North Atlantic, the warm pool and the most overcast cell near Starbase,
+  with the store's own `total_cloud_cover` and `cloud_base_height`). Cloud base (lowest layer with fraction > 1 % and
+  condensate, ERA5's definition) within one layer plus the spacing of the pressure levels around ERA5's cbh. Cover: the
+  snapshot is systematically LOWER than ERA5's tcc, by 0.00-0.36 (mean 0.14) with the same maximum-random overlap (the
+  renderer's maximum overlap is lower still, 0.00-0.37): the 37 pressure levels hold the model levels' fractions
+  interpolated, so clouds that overlap in the model at different horizontal places no longer add up. The test asserts
+  never more than tcc + 0.05, at most 0.40 below, mean deficit < 0.2 (a limit of the data choice, `known-issues.md`).
 - Core `[weather]`: render texels (linear extinction, in-cloud depth vs trapezoids, code round trip, ice share);
   vertical profile (flat base, water path kept exactly); covered fraction = cf within 0.003 at every detail state
   (0.006 between rows); soft edges of varying width (mean water / grid mean 0.996-1.000 for cf 0.05-1 at states 0, 1,
@@ -384,10 +400,12 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   prefilter kernel (A/B in one session, inside the limit at 1.4985e7 / 1.2e7 m): GPU p50 6.09 -> 6.29 / 6.07 and 8.05
   -> 8.03 / 8.08 ms: not measurable.
 - Visible at kilometre footprints (Task 11 review of the visual set, `tmp/weather_t11_gulf_era5.png`, a camera 3000 km
-  above the Gulf, footprint ~5 km, 96 settled frames; also over Antarctica): the shape prefilter leaves a regular
-  lattice of small dots in the cloud interiors and along fronts (period ~40 km), i.e. the shapes' own structure at the
-  prefilter's 1 km texels plus the half-resolution blocks, not temporal noise. The large-scale pattern (fronts, cloud
-  streets, the Moon's shadow) is right (below). Not changed: a different filter would alter the approved shapes' look.
+  above the Gulf, footprint ~5 km, 96 settled frames; also over Antarctica): a regular lattice of small dots in the
+  cloud interiors and along fronts (~40 km period). It is the 32 km shape tile's periodicity seen obliquely
+  (32 km / cos 37-45 deg of the viewing angle at those latitudes), resolvable once the pixel footprint exceeds the
+  prefilter's f_s - not temporal noise and not the half-resolution blocks. The large-scale pattern (fronts, cloud
+  streets, the Moon's shadow) is right (below). Not changed: shapes are frozen. Follow-up (user to judge the look):
+  de-tile the shape lookup by a per-tile hashed offset / rotation, blended across the tile borders.
 - At sharp dark edges (a deck's base seen at 30 km) a staircase of the half-resolution blocks is still visible.
 - The stochastic light march is unbiased in tau_s but exp(-tau_s) per sample is brighter on average (+10 % at the
   worst checked geometry with the preset's samples); more near samples reduce it.

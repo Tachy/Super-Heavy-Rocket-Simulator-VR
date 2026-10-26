@@ -91,7 +91,9 @@ func _ready() -> void:
 	clouds.setup(core)
 	var xr := get_node_or_null("/root/XrManager")
 	clouds.quality = CloudLayer.Quality.VR if xr != null and xr.vr_requested() else CloudLayer.Quality.DESKTOP
+	weather.light_driven_by_layer = true  # the layer pushes the CPU light's pair with its cross-fade
 	weather.snapshots_changed.connect(clouds.set_target)
+	clouds.core_cache_missed.connect(weather.reload_into_core_cache)
 	clock.time_jumped.connect(func(_tdb_s: float) -> void: clouds.effect.reset_history())  # a clock jump: no history
 	_setup_bodies(data_dir)
 	_warm_earth_clouds_shader()

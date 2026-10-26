@@ -8,7 +8,9 @@ tens of MB); a transfer is given up only after `STALL_TIMEOUT_S` (30 s) without 
 only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only with 200.
 
 - **Never blocks**: `update(epoch_tdb_s, warp)` runs per frame; downloads are HTTPRequest nodes, builds and loads run on
-  the `WorkerThreadPool`. `weather_set_active` is only called when both files were loaded on a worker first.
+  the `WorkerThreadPool`. `weather_set_active` is cache-only: it never reads a file, a file outside the core's 3-entry
+  load cache (least recently used out, a hit becomes the newest) answers `ok = false` ("Wetterdatei nicht geladen") and
+  leaves the active pair; the owner loads the file again on a worker (`reload_into_core_cache`, `_push_blend`).
 - **Sources**: on the first update the ERA5 `.zattrs` and the newest GFS cycle (`.idx` of up to 4 candidates) are probed; an
   unanswered probe is repeated every `retry_after_s` (60 s), so a session started offline gets ERA5 / GFS once online.
   `weather_bracket` returns the two snapshots; each missing one is a job (requests -> build -> `data/weather/cache/<key>.wthr`).
@@ -29,5 +31,16 @@ only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only wi
   `user://settings.cfg`, section `weather`, key `enabled`, default on). `STARSIM_DEBUG_WEATHER=1` prints size and time of
   every built snapshot. `render_check.gd` keeps weather off unless `--weather[=max seconds]`.
 - **Measured** (2026-10-25, 24-core desktop, fast line): one ERA5 hour 148-150 MB downloaded, 130.7 MB built, 5.6-5.9 s.
-- The clouds cross-fade every pair or source change themselves (`CloudLayer`, `weather-clouds.md`); `weather_set_active`
-  (the CPU light) swaps its pair at once. Test: `game/tests/weather_service_test.gd`.
+- The clouds cross-fade every pair or source change themselves (`CloudLayer`, `weather-clouds.md`). The CPU light follows
+  that visible state: with `light_driven_by_layer` (set by the world) `CloudLayer` is the only writer of the core's
+  active pair (slot files and weight, pushed on a slot change or a weight move of 0.01; an empty slot is "" = the empty
+  snapshot, blended toward zero depths) and the service sets nothing. Without a layer (headless tests) the service sets
+  the pair itself at the switch and on blend moves. Test: `game/tests/weather_service_test.gd`.
+- **RAM**: a loaded snapshot dictionary holds the three texel arrays (field 133 + ice 33 + column 66 = 232 MB at
+  0.25 deg); the core also caches the `WeatherSnapshot` of the last three files (~130 MB each). Only the target pair's dictionaries are
+  kept (`_loaded`); `CloudLayer` erases the `cloud_*_texels` keys once a slot's upload is complete (a `CloudFieldTexture`
+  drops its copy when done), the service erases them after announcing when no layer listens, and a result that arrives
+  with the weather off or after the target moved on is dropped. A dictionary without texels counts as not loaded: a pair
+  that needs it again reloads it on a worker (the core cache makes that a conversion, no disk read). Steady state:
+  the core cache (3 x ~130 MB) + the pair's metadata (before: two more dictionaries, ~464 MB); during an upload the
+  uploading snapshot's 232 MB on top, freed when its slot is complete.

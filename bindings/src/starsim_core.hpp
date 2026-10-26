@@ -137,14 +137,17 @@ public:
     // form environment::cloud_render_texels: cloud fraction, 16-bit linear extinction, in-cloud depth code),
     // cloud_ice_texels: PackedByteArray (layer-major R8, environment::cloud_render_ice_texels: the ice share of the
     // extinction), cloud_column_texels: PackedByteArray (layer-major RG8, environment::cloud_render_column_texels: the
-    // grid-mean column depth above each layer centre (R, log code) and the largest cloud fraction above it (G)), layer_bottoms_m:PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour, lead_h, analog_hour, cache_key}.
+    // grid-mean column depth above each layer centre (R, log code) and the largest cloud fraction above it (G)), layer_bottoms_m:PackedFloat64Array (layers + 1), kind, valid_hour, cycle_hour, lead_h, analog_hour, cache_key, file (the path as given)}.
     // The game builds the label from the id fields. The snapshot stays in a small cache (the last three files) for
     // weather_set_active. Call it on a worker: the GPU form of a 0.25-deg snapshot is 133 MB.
     godot::Dictionary weather_load_snapshot(const godot::String& file);
-    // The pair the CPU light queries blend: cache files ("" = none), blend 0..1. WARNING: a file that is not in the
-    // 3-entry load cache is read SYNCHRONOUSLY (133 MB + checksum) on the calling thread - callers must first
-    // weather_load_snapshot() each file on a worker thread so this call only hits the cache.
+    // The pair the CPU light queries blend: cache files ("" = none: the empty snapshot, so a fade from / to no weather
+    // blends toward zero depths), blend 0..1. Cache only, never reads: a file that is not in the 3-entry load cache
+    // gives {ok = false, error "Wetterdatei nicht geladen"} and leaves the active pair as it was - load it on a worker
+    // with weather_load_snapshot() and call again. A cache hit becomes the newest entry.
     godot::Dictionary weather_set_active(const godot::String& before_file, const godot::String& after_file, double blend);
+    // The files in the load cache, oldest first (the cache keeps the last three).
+    godot::PackedStringArray weather_cached_files() const;
     // {sun_transmittance, sky_factor, sun_diffuse} of the active pair, blended linearly (cloud_optics.hpp: the direct
     // Sun, the sky's diffuse transmittance, the Sun's light diffused through the column per unit of its horizontal
     // irradiance - with the Monte Carlo table once cloud_transfer_table() ran, else delta-Eddington); {1, 1, 0}
@@ -192,6 +195,7 @@ private:
     mutable std::mutex atmosphere_mutex_;  // guards atmosphere_ (swapped by load_atmosphere on any thread)
     std::shared_ptr<const environment::AtmosphereScattering> atmosphere_;
     using SnapshotPtr = std::shared_ptr<const environment::WeatherSnapshot>;
+    SnapshotPtr weather_snapshot_cached(const std::string& file);  // load cache only (a hit becomes the newest); nullptr if absent
     SnapshotPtr weather_snapshot_of(const std::string& file);  // load cache, else reads off-lock; nullptr if unreadable
     mutable std::mutex weather_mutex_;  // guards the three below (the game calls from the main thread, loads on a worker)
     mutable std::vector<std::pair<std::string, SnapshotPtr>> weather_cache_;  // last loaded files, newest last
