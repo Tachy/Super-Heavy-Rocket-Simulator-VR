@@ -949,7 +949,7 @@ TEST_CASE("Coverage and water are kept for every cloud type", "[weather]") {
                 const double mixed = static_cast<double>(std::count_if(w.begin(), w.end(), [](double x) {
                     return x > 0.0;
                 }));
-                CHECK(covered <= 1.0 - std::pow(1.0 - index / 255.0, mixed) + 0.05);
+                CHECK(covered <= 1.0 - std::pow(1.0 - cf, mixed) + 0.05);
             }
         }
     }

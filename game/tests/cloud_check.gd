@@ -87,7 +87,7 @@ const CLIMB_STEP_LIMIT := 0.055
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 134
+const EXPECTED_SAMPLES := 135
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -170,6 +170,7 @@ const CACHE_ERROR_FLOOR := 0.05
 ## at its limb (the horizon's dip), the camera rolled by OUTLINE_ROLL_DEG: the limb crosses the march grid at a shallow
 ## angle - the stairs' worst case, one step every 1 / tan(roll) march pixels.
 const OUTLINE_VIEW_SIZE := Vector2i(192, 96)
+const OUTLINE_BIG_VIEW_SIZE := Vector2i(2400, 1800)
 const OUTLINE_FOV_DEG := 20.0
 const OUTLINE_HEIGHT_M := 2000.0
 const OUTLINE_ROLL_DEG := 7.0
@@ -1231,6 +1232,27 @@ func _outline_samples() -> void:
 		for x in range(0, w, 4):
 			trace += " %.2f" % a[maxi(worst_row, 0) * w + x]
 		print("cloud_check: outline row %d (every 4th pixel):%s" % [worst_row, trace])
+	# A dispatch beyond D3D12's 65535 groups per dimension (the outline pass dispatches its list 2-D): at divisor 1 the
+	# march grid of 2400 x 1800 is 67 500 groups. The pass must still act: a sharp rim has intermediate alphas (the sub-
+	# rays' quarters) in about every row it crosses (the offsets span half a march pixel only: no stair limit here).
+	_viewport.size = OUTLINE_BIG_VIEW_SIZE
+	_clouds.effect.set_quality(1, 1.0)
+	await _render(camera, view, sun, 0, 0, OUTLINE_ROLL_DEG)
+	var big := _output_alpha()
+	var big_w := OUTLINE_BIG_VIEW_SIZE.x
+	var big_rows := 0
+	var big_partial := 0
+	for y in range(OUTLINE_BIG_VIEW_SIZE.y):
+		var lo := 1.0
+		var hi := 0.0
+		for x in range(big_w):
+			lo = minf(lo, big[y * big_w + x])
+			hi = maxf(hi, big[y * big_w + x])
+			big_partial += 1 if big[y * big_w + x] > OUTLINE_CLEAR and big[y * big_w + x] < OUTLINE_COVERED else 0
+		big_rows += 1 if lo <= OUTLINE_CLEAR and hi >= OUTLINE_COVERED else 0
+	_check("anti-aliased outline: a list beyond 65535 groups (%d x %d, divisor 1)" % [big_w,
+			OUTLINE_BIG_VIEW_SIZE.y], big.size() == big_w * OUTLINE_BIG_VIEW_SIZE.y and big_rows >= OUTLINE_MIN_ROWS
+			and big_partial >= big_rows / 2, "%d rim rows, %d partial-alpha pixels" % [big_rows, big_partial])
 	_clouds.quality = CloudLayer.Quality.DESKTOP
 	_detail_off()
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)

@@ -18,8 +18,8 @@
 //    sequence in time): a function of the pixel and the frame alone - the same for both eyes. Out: premultiplied
 //    colour + alpha, and (march distance used, transmittance-weighted cloud distance). With CLOUD_EDGE_REFINE (the
 //    deterministic march's outline pass, static clouds Task 5b) the same kernel runs a second time: pixels on an
-//    outline get four fixed coverage-only sub-rays (alpha: their and the centre's mean, colour: the centre's per
-//    alpha), all others are copied.
+//    outline get three fixed coverage-only sub-rays besides the centre ray (alpha: the mean of the four, colour: the
+//    centre's per alpha), all others are copied.
 // 2. CLOUD_TEMPORAL: accumulation with reprojection, per eye: the pixel's point at its cloud distance (the far sky's
 //    1e7 m where there is no cloud: rotation only) moved by the camera's motion (Earth-fixed, float64 on the CPU) into
 //    the previous frame's clip space of the same eye; the history there (bilinear) is clamped to the current 3 x 3
@@ -163,11 +163,12 @@ layout(rg32f, set = 1, binding = 3) uniform writeonly image2D out_depth;
 // alpha; a fainter centre (a rim it barely touches) takes the most opaque 3 x 3 neighbour's (alpha > 0.25 on any
 // outline: CLOUD_EDGE_ALPHA_STEP) - the cloud's colour per alpha beside it.
 const float CLOUD_EDGE_COLOUR_ALPHA_RATIO = 0.5;
-// The rotated grid with the centre ray as one of its four rays (every row and column of a 4 x 4 grid of quarter-pixel
-// spacing once, the centre's 0 among them, -1/4 .. 1/2: four distinct positions along any near-horizontal or
-// near-vertical edge, evenly spaced across neighbouring pixels too), the other three's offsets in march pixels.
+// The rotated grid with the centre ray as one of its four rays: x and y each take four distinct eighths of a march
+// pixel ({-3, 0, 1, 2}/8, the centre's 0 among them; four distinct positions along any near-horizontal or
+// near-vertical edge) and the mean of the four rays is the pixel centre (0, 0) in both axes (no shift of the outline).
+// The other three's offsets in march pixels.
 const int CLOUD_EDGE_SUBRAYS = 3;
-const vec2 CLOUD_EDGE_OFFSETS[3] = vec2[3](vec2(0.25, 0.5), vec2(0.5, -0.25), vec2(-0.25, 0.25));
+const vec2 CLOUD_EDGE_OFFSETS[3] = vec2[3](vec2(-0.375, 0.125), vec2(0.125, 0.25), vec2(0.25, -0.375));
 #endif
 
 // [E] Path toward the light from an in-cloud sample in the near (shape) part (cloud_light_march.z: the preset).
@@ -617,7 +618,9 @@ void main() {
 	vec2 scale = cloud_view.sizes.xy / cloud_view.sizes.zw;
 #ifdef CLOUD_EDGE_REFINE
 	// One outline pixel per invocation (the list's entry); the coverage-only rays need no eclipse factors (no light).
-	uint entry = gl_WorkGroupID.x * CLOUD_OUTLINE_GROUP_PIXELS + gl_LocalInvocationIndex;
+	// (the groups are a 2-D grid: one dimension is capped at 65535 groups)
+	uint entry = (gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x) * CLOUD_OUTLINE_GROUP_PIXELS
+			+ gl_LocalInvocationIndex;
 	if (entry >= cloud_outline.count) {
 		return;
 	}

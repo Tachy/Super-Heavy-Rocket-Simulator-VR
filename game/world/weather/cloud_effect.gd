@@ -16,6 +16,7 @@ const MARCH_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clo
 		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc"]
 const PASS_FILES := ["res://shaders/cloud_pass.gdshaderinc"]
 const GROUP := 8
+const MAX_DISPATCH_GROUPS := 65535  # D3D12's limit per dispatch dimension
 const CENTRE_IMAGES := ["color", "refined", "depth", "history0", "history1", "age0", "age1", "buffer", "outline"]
 ## Golden ratio conjugate: the frame's jitter offset is frame x this, mod 1 (a low-discrepancy sequence in time).
 const GOLDEN := 0.6180339887498949
@@ -477,12 +478,15 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 				eye_earth).to_byte_array())
 	# The outline pass's set 1: the march's, its colour read (binding 6), the refined image written instead and the
 	# outline list (binding 7, its count reset here: no buffer updates inside a compute list).
-	var refine_set1 := march_set1.duplicate()
-	refine_set1[2] = _image(2, _centre["refined"])
-	refine_set1.append_array([_tex(6, nearest_clamp, _centre["color"]), _storage(7, _centre["outline"])])
-	_rd.buffer_update(_centre["outline"], 0, 4, PackedInt32Array([0]).to_byte_array())
+	var refine_set1 := []
+	var warm_now := not _prefilter_warm and march == family  # the pre-warm below binds the refine set too
+	if refine or warm_now:
+		refine_set1 = march_set1.duplicate()
+		refine_set1[2] = _image(2, _centre["refined"])
+		refine_set1.append_array([_tex(6, nearest_clamp, _centre["color"]), _storage(7, _centre["outline"])])
+		_rd.buffer_update(_centre["outline"], 0, 4, PackedInt32Array([0]).to_byte_array())
 	var list := _rd.compute_list_begin()
-	if not _prefilter_warm and march == family:
+	if warm_now:
 		# Once: one group of the prefilter kernels so their first real use (the ascent's high limb, the scaled-space
 		# hand-over) does not pay the pipeline's first dispatch (up to 5 ms); the march below overwrites their texels.
 		_prefilter_warm = true
@@ -511,7 +515,10 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		_rd.compute_list_bind_uniform_set(list, _set1(outline, refine_set1), 1)
 		# One group per GROUP x GROUP list entries, for a full list: the groups past the count end at once. (The indirect
 		# dispatch over a GPU-written group count read the count's reset value on D3D12 - no outline pass at all.)
-		_rd.compute_list_dispatch(list, (low.x * low.y - 1) / (GROUP * GROUP) + 1, 1, 1)
+		# (2-D: a dimension is capped at 65535 groups on D3D12.)
+		var list_groups := (low.x * low.y - 1) / (GROUP * GROUP) + 1
+		var list_width := mini(list_groups, MAX_DISPATCH_GROUPS)
+		_rd.compute_list_dispatch(list, list_width, (list_groups - 1) / list_width + 1, 1)
 		_rd.compute_list_add_barrier(list)
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines["temporal"])
 	_rd.compute_list_bind_uniform_set(list, _set1("temporal", [_ubo(_centre["buffer"]),

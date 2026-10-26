@@ -203,13 +203,14 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      `refined` image (the temporal kernel takes it instead) and appends every pixel whose alpha differs from one of
      its 8 neighbours' by more than `CLOUD_EDGE_ALPHA_STEP` 0.25 [E] to the outline list (a storage buffer: count +
      packed pixels, the count reset by the CPU each frame). The march kernel with `CLOUD_EDGE_REFINE` (`CloudEffect`:
-     its `_refine` variants) then runs one invocation per list entry (a direct dispatch for a full list; groups past
+     its `_refine` variants) then runs one invocation per list entry (a direct 2-D dispatch for a full list - width capped at 65535 groups, the D3D12 limit per dimension; groups past
      the count end at once - the indirect dispatch over a GPU-written group count read the reset value on D3D12): full
      waves of outline pixels, which spread over the screen's work groups had kept whole groups waiting. Each entry
      gets 3 coverage-only rays (`cloud_march(..., coverage_only)`: the same steps and transmittance without light
      samples and air light, ended at `CLOUD_COVERAGE_MIN_TRANSMITTANCE` 0.01 [E]: alpha within 0.01 of the full
-     march's) at fixed rotated-grid offsets that, with the centre ray, take every row and column of a quarter-pixel
-     grid once (centre 0, (1/4, 1/2), (1/2, -1/4), (-1/4, 1/4) march pixel). Alpha: the mean of the centre's and the
+     march's) at fixed rotated-grid offsets that, with the centre ray, take four distinct eighths of a march pixel in x
+     and in y ({-3, 0, 1, 2}/8) and average to the pixel centre in both axes (centre 0, (-3, 1), (1, 2), (2, -3) / 8
+     march pixel: no shift of the outline). Alpha: the mean of the centre's and the
      three; the cloud distance alpha-weighted (the centre's from the march's depth image); the scene distance the
      block's as before. Colour: the centre ray's colour per alpha scaled to that alpha, or - where the centre's alpha
      is below `CLOUD_EDGE_COLOUR_ALPHA_RATIO` 0.5 [E] of the pixel's (a rim it barely touches) - the most opaque 3 x 3
@@ -411,8 +412,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   clouds Task 5b): the thick slab at cf 1 seen at its top's limb from 2 km above it, the camera rolled 7 deg (the limb
   a straight edge crossing the march grid at a shallow angle), VR preset (divisor 3), 192 x 96 px at 20 deg, the
   pass's result's alpha read back: over the 20 rows the edge crosses, the largest alpha step between neighbouring
-  pixels 0.103 over 18 rows (limit 0.35 [E]; without the outline pass 0.407 - RED; four full sub-ray marches gave
-  0.102), against the row's trend 0.019 (limit 0.03 [E]); a second render bit-identical. Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, stratified
+  pixels 0.194 over 20 rows (limit 0.35 [E]; without the outline pass 0.407 - RED; four full sub-ray marches gave
+  0.102), against the row's trend 0.019 (limit 0.03 [E]); a second render bit-identical; the same view at divisor 1, 2400 x 1800 (67 500 groups, beyond the 65535 of one dispatch
+  dimension): the pass still acts (partial alphas on the rim rows). Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, stratified
   midpoints), on the game's deterministic march (one frame each, the same view samples; Task 3 fix round 1), at every
   pixel of a 64 x 64 view per cascade at its scale (camera 5 / 9.9
   / 18.8 / 36.5 / 72 km up, 80-81 deg down; the farthest cloud samples asserted inside that cascade's full weight;
@@ -654,7 +656,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   fixed points (not the scene-depth step grid: deriving the grid from the layer segment changed nothing; not the
   upsample); interior pixels whose neighbours differ by more than 0.25 are marched again too, which softens but does
   not remove them. A checkerboard remains where the block's nearest / farthest scene distances alternate under a
-  cloud (the sub-rays take the block's distance). Tried in Task 3 fix round 1 and dropped: a sub-pixel coverage at
+  cloud (the sub-rays take the block's distance). On a rim pixel the neighbour's colour may come from a farther surface
+  (bounded: it is taken only where the centre's alpha is below half the pixel's mean). Tried in Task 3 fix round 1 and dropped: a sub-pixel coverage at
   the first entry (2 x 2 taps over the footprint half a footprint deeper, 4 field lookups per ray) changed ~1 000 of
   1.44 M pixels by > 20/255 with no visible softening. Far cumulus fields at 20-40 km show faint horizontal bands (the
   steps' iso-distance shells). The VR cost is over the 2.5 ms budget (`vr-performance.md`, Task 10).
