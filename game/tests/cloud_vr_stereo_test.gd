@@ -7,7 +7,8 @@
 # correction (reversed Z, y flipped).
 # Checks, for a cloud point at a known distance: the per-eye pixels the pass shows it at give the physical disparity
 # (IPD / distance), the depth -> distance of the pass returns the true scene distance, and the temporal reprojection
-# of a static point returns to its own pixel.
+# of a static point returns to its own pixel. CloudCentreView (VR performance part 2): the centre view covers both
+# eyes (also canted ones), keeps a single view as it is and caps a very wide union.
 # The mirrors (_pass_*) must stay in step with cloud_pass.gdshaderinc (cloud_ray_earth, cloud_scene_distance, the
 # temporal kernel) and cloud_effect.gd (_render_callback's per-view matrices).
 # Run: godot --headless --path game --script res://tests/cloud_vr_stereo_test.gd
@@ -32,6 +33,7 @@ func _initialize() -> void:
 		for distance_m: float in DISTANCES_M:
 			for azimuth in [0.0, 0.3]:  # straight ahead and 17 deg to the right
 				_check_point(near_m, distance_m, azimuth)
+	_test_centre_view()
 	print("cloud_vr_stereo_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -149,6 +151,63 @@ func _check_point(near_m: float, distance_m: float, azimuth: float) -> void:
 	_check(error < DISPARITY_TOLERANCE_RAD,
 			"%s: disparity %s rad vs IPD/D %s rad (perceived distance %.3f m)"
 			% [label, String.num_scientific(disparity), String.num_scientific(expected), perceived])
+
+
+## A pair of eyes as the renderer hands them over, optionally canted (each eye's frustum rotated outward by `cant_rad`
+## about the head's up axis, as on Pimax headsets) and with the per-side FOV scaled by `widen` (the tangents).
+func _eye_projections(near_m: float, cant_rad: float, widen := 1.0) -> Array[Projection]:
+	var result: Array[Projection] = []
+	for view in [0, 1]:
+		var sign := -1.0 if view == 0 else 1.0
+		var fov_l: float = FOV_LEFT_EYE["left"] if view == 0 else -FOV_LEFT_EYE["right"]
+		var fov_r: float = FOV_LEFT_EYE["right"] if view == 0 else -FOV_LEFT_EYE["left"]
+		var eye_projection := Projection.create_frustum(tan(fov_l) * widen * near_m, tan(fov_r) * widen * near_m,
+				tan(FOV_LEFT_EYE["down"]) * near_m, tan(FOV_LEFT_EYE["up"]) * near_m, near_m, FAR_M)
+		var view_offset := Transform3D(Basis(Vector3.UP, -sign * cant_rad), Vector3(sign * IPD_M / 2.0, 0.0, 0.0))
+		result.append(Projection.create_depth_correction(true) * eye_projection
+				* Projection(view_offset.affine_inverse()))
+	return result
+
+
+## Head-space direction of a clip-space ndc through a projection (the pass's two-depth difference).
+func _head_ray(projection: Projection, ndc: Vector2) -> Vector3:
+	var inv := projection.inverse()
+	var a: Vector4 = inv * Vector4(ndc.x, ndc.y, 0.5, 1.0)
+	var b: Vector4 = inv * Vector4(ndc.x, ndc.y, 1.0, 1.0)
+	return (Vector3(a.x, a.y, a.z) / a.w - Vector3(b.x, b.y, b.z) / b.w).normalized()
+
+
+## CloudCentreView: the centre view covers every eye's frustum (corner rays inside its ndc), keeps a single view as
+## it is, and caps a very wide union at MAX_HALF_ANGLE_RAD.
+func _test_centre_view() -> void:
+	var size := Vector2i(3530, 2834)
+	for cant in [0.0, deg_to_rad(10.0)]:
+		var eyes := _eye_projections(1.0, cant)
+		var centre := CloudCentreView.build(eyes, size, 3)
+		var projection: Projection = centre["projection"]
+		var worst := 0.0
+		for eye in eyes:
+			for corner in [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)]:
+				var c := _clip(projection, _head_ray(eye, corner) * 1.0e6)
+				worst = maxf(worst, maxf(absf(c.x / c.w), absf(c.y / c.w)))
+		_check(worst <= 1.0 + 1.0e-9,
+				"centre view, cant %.0f deg: every eye corner inside the centre (max |ndc| %.12f)"
+				% [rad_to_deg(cant), worst])
+		var low: Vector2i = centre["low"]
+		_check(low.x > ceili(size.x / 3.0) and low.y >= ceili(size.y / 3.0) and low.x < ceili(size.x / 3.0) * 2,
+				"centre view, cant %.0f deg: low size %s (one eye %s / 3)" % [rad_to_deg(cant), str(low), str(size)])
+		var pixel_angle: float = centre["pixel_angle"]
+		_check(is_equal_approx(pixel_angle, 2.0 / (absf(projection.y.y) * low.y)), "centre view: pixel angle")
+	var mono := _eye_projections(0.2, 0.0)
+	var single := CloudCentreView.build([mono[0]], Vector2i(1601, 899), 2)
+	_check(single["projection"] == mono[0] and single["low"] == Vector2i(801, 450),
+			"centre view of one view: that view, low = ceil(size / divisor) (%s)" % str(single["low"]))
+	var wide := CloudCentreView.build(_eye_projections(1.0, deg_to_rad(40.0), 1.6), size, 3)
+	var edge := _head_ray(wide["projection"], Vector2(1.0, 0.0))
+	var half_angle := atan2(edge.x, -edge.z)
+	_check(half_angle <= CloudCentreView.MAX_HALF_ANGLE_RAD + 1.0e-9,
+			"centre view of a very wide canted pair: capped at %.1f deg (%.3f deg)"
+			% [rad_to_deg(CloudCentreView.MAX_HALF_ANGLE_RAD), rad_to_deg(half_angle)])
 
 
 func _check(ok: bool, message: String) -> void:
