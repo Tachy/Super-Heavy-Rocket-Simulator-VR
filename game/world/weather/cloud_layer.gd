@@ -67,7 +67,7 @@ const PRESETS := {
 	Quality.DESKTOP: {"steps": 128, "max_steps": 256, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
 			"temporal_weight": 1.0 / 32.0},
-	Quality.VR: {"steps": 64, "max_steps": 128, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
+	Quality.VR: {"steps": 48, "max_steps": 96, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
 			"temporal_weight": 1.0 / 32.0},
 }

@@ -94,6 +94,7 @@ func _ready() -> void:
 	weather.snapshots_changed.connect(clouds.set_target)
 	clock.time_jumped.connect(func(_tdb_s: float) -> void: clouds.effect.reset_history())  # a clock jump: no history
 	_setup_bodies(data_dir)
+	_warm_earth_clouds_shader()
 	stars.load_catalogue(data_dir.path_join("stars/stars.csv"))
 	add_child(stars)
 	add_child(moon_orbit)
@@ -104,6 +105,8 @@ func _ready() -> void:
 
 
 var _delta := 0.0
+var _warmup_mesh: MeshInstance3D  ## draws earth_clouds.gdshader once at load (first switch: no pipeline compile mid-flight)
+var _warmup_frames := 0
 var _mission_press_tdb_s := 0.0  ## clock instant of the pending mission start (the clock holds there meanwhile)
 var _camera_serial := 0  ## serial the camera distance was last fitted to
 var _last_world_tdb_s := NAN  ## the instant of the previous update_world (eye adaptation's time step)
@@ -122,6 +125,11 @@ func _process(delta: float) -> void:
 		return
 	_delta = delta
 	update_world()
+	if _warmup_mesh != null:
+		_warmup_frames -= 1
+		if _warmup_frames <= 0:
+			_warmup_mesh.queue_free()
+			_warmup_mesh = null
 
 
 ## Recomputes the whole scene for clock.tdb_s. Public so tests can render a fixed instant.
@@ -414,6 +422,21 @@ func _update_sun_light(t: float, camera_gcrf_m: Vector3) -> void:
 		moon_light.basis = Basis.looking_at(-to_moon, Vector3.UP if absf(to_moon.y) < 0.99 else Vector3.RIGHT)
 		moon_light.light_color = moon_lit[0]
 		moon_light.light_energy = moon_lit[1]
+
+
+## Draws earth_clouds.gdshader on a sub-pixel quad in front of the camera for a few frames at load, so the scaled-space
+## Earth's first switch to the far-field clouds does not compile its pipeline in the middle of a frame (up to 5 ms).
+func _warm_earth_clouds_shader() -> void:
+	var material := _earth_material.duplicate() as ShaderMaterial
+	material.shader = _earth_clouds_shader
+	var quad := QuadMesh.new()
+	quad.size = Vector2(1.0e-3, 1.0e-3)
+	_warmup_mesh = MeshInstance3D.new()
+	_warmup_mesh.mesh = quad
+	_warmup_mesh.material_override = material
+	_warmup_mesh.position = Vector3(0.0, 0.0, -2.0)
+	camera.add_child(_warmup_mesh)
+	_warmup_frames = 4
 
 
 func _setup_bodies(data_dir: String) -> void:

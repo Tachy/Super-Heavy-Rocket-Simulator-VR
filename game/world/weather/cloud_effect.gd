@@ -49,6 +49,7 @@ var _pending_output := RID()  ## a re-created result not yet shown
 var _shown_output := RID()  ## the result `output` holds
 var _retired_outputs: Array[RID] = []  ## replaced by swap_output, to be freed by the render thread
 var _frame := 0
+var _prefilter_warm := false  ## the prefilter kernel has been dispatched once (pre-warm)
 var _callbacks := 0  ## render callbacks so far (the deferred free)
 var _garbage: Array[Dictionary] = []  ## {callback, rids}: images to free once that callback is reached
 var _previous_camera := Vector3.ZERO  ## float64 Earth-local camera of the previous frame
@@ -367,6 +368,16 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		var groups_full := Vector2i((size.x - 1) / GROUP + 1, (size.y - 1) / GROUP + 1)
 
 		var list := _rd.compute_list_begin()
+		if not _prefilter_warm and march != "march_prefilter":
+			# Once: one group of the prefilter kernel so its first real use (the ascent's high limb, the scaled-space
+			# hand-over) does not pay the pipeline's first dispatch (up to 5 ms); the march below overwrites its texels.
+			_prefilter_warm = true
+			_rd.compute_list_bind_compute_pipeline(list, _pipelines["march_prefilter"])
+			_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders["march_prefilter"], 0, set0), 0)
+			_rd.compute_list_bind_uniform_set(list, _set1("march_prefilter", [_ubo(v["buffer"]),
+					_tex(1, nearest_clamp, depth), _image(2, v["color"]), _image(3, v["depth"])]), 1)
+			_rd.compute_list_dispatch(list, 1, 1, 1)
+			_rd.compute_list_add_barrier(list)
 		_rd.compute_list_bind_compute_pipeline(list, _pipelines[march])
 		_rd.compute_list_bind_uniform_set(list, march_set0, 0)
 		_rd.compute_list_bind_uniform_set(list, _set1(march, [_ubo(v["buffer"]), _tex(1, nearest_clamp, depth),
