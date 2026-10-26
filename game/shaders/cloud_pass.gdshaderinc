@@ -46,6 +46,8 @@ layout(set = 1, binding = 0, std140) uniform CloudView {
 	vec4 params;               // x: frame jitter [0, 1), y: temporal weight, z: debug output, w: march pixel angle [rad]
 	vec4 eye_earth;            // xyz: the eye's offset from the head (camera), Earth-local axes (m); 0 on the desktop;
 	                           // w: the frame index mod 4096 (the sub-pixel shape offsets' sequence)
+	vec4 temporal;             // x: the history's clip - 0: the neighbourhood's min / max; > 0: its mean +- x standard
+	                           // deviations (VR: noise inside the range keeps the history; CloudLayer.PRESETS)
 } cloud_view;
 
 // Distance [m] from the camera (the head) of a pixel's depth (reversed Z: 1 near, 0 far = no geometry) through a
@@ -512,15 +514,27 @@ void main() {
 		imageStore(out_age, pixel, vec4(1.0));
 		return;
 	}
-	// The neighbourhood's range.
+	// The neighbourhood's range: its min / max, or (clip > 0) its mean +- clip standard deviations (variance clipping,
+	// Salvi 2016: the march's noise stays inside, a real change of the content leaves it).
 	vec4 lo = current;
 	vec4 hi = current;
+	vec4 m1 = vec4(0.0);
+	vec4 m2 = vec4(0.0);
 	for (int dy = -1; dy <= 1; dy++) {
 		for (int dx = -1; dx <= 1; dx++) {
 			vec4 c = texelFetch(current_color, clamp(pixel + ivec2(dx, dy), ivec2(0), low - 1), 0);
 			lo = min(lo, c);
 			hi = max(hi, c);
+			m1 += c;
+			m2 += c * c;
 		}
+	}
+	float clip_gamma = cloud_view.temporal.x;
+	if (clip_gamma > 0.0) {
+		m1 /= 9.0;
+		vec4 sigma = sqrt(max(m2 / 9.0 - m1 * m1, vec4(0.0)));
+		lo = m1 - clip_gamma * sigma;
+		hi = m1 + clip_gamma * sigma;
 	}
 	// Reprojection of the pixel's point into the previous frame of this eye.
 	vec2 scale = cloud_view.sizes.xy / cloud_view.sizes.zw;

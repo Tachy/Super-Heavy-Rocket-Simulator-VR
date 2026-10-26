@@ -75,14 +75,18 @@ enum ScatteringModel { CLOSED_FORM, TABLE }
 ## temporal weight of a new frame (a running mean of up to 32 frames; cloud_check.gd, terrain_perf.gd measure them).
 ## VR divisor 3 of the centre view (VR performance part 2): one march for both eyes over ~1.24 x one eye's width at
 ## 1/9 of its pixels costs about what two eyes at divisor 4 did (1/16 each; divisor 2 per eye cost 11-13 ms of GPU at
-## the headset's 20 MP, docs/subsystems/vr-performance.md), sharper and the same in both eyes.
+## the headset's 20 MP, docs/subsystems/vr-performance.md), sharper and the same in both eyes. VR flicker (user
+## 2026-10-26: the clouds need not look new every frame, only volumetric and in perspective): the history keeps up to 96
+## frames (noise floor sqrt(w / (2 - w)): 7 % of one frame's instead of 13 % at 32) and is clipped to the
+## neighbourhood's mean +- clip_gamma standard deviations instead of its min / max (which threw the history away at
+## every motion: the flicker); clip_gamma 0 keeps the min / max (the desktop's approved look).
 const PRESETS := {
 	Quality.DESKTOP: {"steps": 128, "max_steps": 256, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
-			"temporal_weight": 1.0 / 32.0},
+			"temporal_weight": 1.0 / 32.0, "clip_gamma": 0.0},
 	Quality.VR: {"steps": 48, "max_steps": 96, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 3,
-			"temporal_weight": 1.0 / 32.0},
+			"temporal_weight": 1.0 / 96.0, "clip_gamma": 1.5},
 }
 
 var quality: Quality = Quality.DESKTOP:
@@ -651,7 +655,7 @@ func _apply_quality() -> void:
 			near_m, 0.0))
 	ShaderGlobals.set_value(&"cloud_light_samples", Vector2i(near, int(preset["light_far"])))
 	ShaderGlobals.set_value(&"cloud_detail_levels", int(preset["detail_levels"]))
-	effect.set_quality(int(preset["divisor"]), float(preset["temporal_weight"]))
+	effect.set_quality(int(preset["divisor"]), float(preset["temporal_weight"]), float(preset["clip_gamma"]))
 
 
 ## Ratio r of the light march's geometric intervals: first_m (r^n - 1) / (r - 1) = near_m (core

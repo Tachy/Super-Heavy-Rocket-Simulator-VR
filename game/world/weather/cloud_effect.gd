@@ -19,7 +19,7 @@ const GROUP := 8
 const CENTRE_IMAGES := ["color", "depth", "history0", "history1", "age0", "age1", "buffer"]
 ## Golden ratio conjugate: the frame's jitter offset is frame x this, mod 1 (a low-discrepancy sequence in time).
 const GOLDEN := 0.6180339887498949
-const VIEW_BLOCK_SIZE := 4 * 64 + 4 * 16
+const VIEW_BLOCK_SIZE := 4 * 64 + 5 * 16
 const EYES_BLOCK_SIZE := 4 * 64 + 16  ## CloudEyes: two clip_from_head, two inv_projection, eye sizes
 const CENTRE_BLOCK_SIZE := 64 + 2 * 16  ## CloudCentre: clip_from_earth, sizes, params
 ## Render callbacks a replaced image waits before it is freed (frames in flight may still sample it).
@@ -67,6 +67,7 @@ var _previous_camera := Vector3.ZERO  ## float64 Earth-local camera of the previ
 ## Render-thread copies of the quality (set_quality).
 var _divisor := 2
 var _temporal_weight := 0.1
+var _clip_gamma := 0.0
 
 
 func _init() -> void:
@@ -75,9 +76,10 @@ func _init() -> void:
 	RenderingServer.call_on_render_thread(_create)
 
 
-## Main thread: the quality preset's resolution divisor and temporal weight (applied on the render thread).
-func set_quality(divisor: int, temporal_weight: float) -> void:
-	RenderingServer.call_on_render_thread(_set_quality.bind(divisor, temporal_weight))
+## Main thread: the quality preset's resolution divisor, temporal weight floor and the history's clip (0: the
+## neighbourhood's min / max; > 0: its mean +- that many standard deviations), applied on the render thread.
+func set_quality(divisor: int, temporal_weight: float, clip_gamma := 0.0) -> void:
+	RenderingServer.call_on_render_thread(_set_quality.bind(divisor, temporal_weight, clip_gamma))
 
 
 ## Main thread: forget the history (a jump of the camera, a pinned snapshot shown at once).
@@ -85,11 +87,12 @@ func reset_history() -> void:
 	RenderingServer.call_on_render_thread(_reset_history)
 
 
-func _set_quality(divisor: int, temporal_weight: float) -> void:
+func _set_quality(divisor: int, temporal_weight: float, clip_gamma: float) -> void:
 	if maxi(divisor, 1) != _divisor:
 		_size = Vector2i.ZERO  # another resolution: re-create the images
 	_divisor = maxi(divisor, 1)
 	_temporal_weight = clampf(temporal_weight, 0.0, 1.0)
+	_clip_gamma = maxf(clip_gamma, 0.0)
 
 
 func _reset_history() -> void:
@@ -455,7 +458,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 
 ## The CloudView block (cloud_pass.gdshaderinc): inverse projection, view -> world, world -> Earth axes, the previous
 ## frame's clip transform, sizes (full, low), the camera's motion and history flag, params, the eye's Earth-local offset
-## and the frame index.
+## and the frame index, the history's clip.
 func _view_block(projection: Projection, view_to_world: Transform3D, world_to_earth: Basis, previous: Projection,
 		full: Vector2, low: Vector2i, camera_delta: Vector3, valid: bool, params: Vector4,
 		eye_earth: Vector3) -> PackedFloat32Array:
@@ -467,6 +470,7 @@ func _view_block(projection: Projection, view_to_world: Transform3D, world_to_ea
 	bytes.append_array([camera_delta.x, camera_delta.y, camera_delta.z, 1.0 if valid else 0.0])
 	bytes.append_array([params.x, params.y, params.z, params.w])
 	bytes.append_array([eye_earth.x, eye_earth.y, eye_earth.z, float(_frame % 4096)])
+	bytes.append_array([_clip_gamma, 0.0, 0.0, 0.0])
 	return bytes
 
 

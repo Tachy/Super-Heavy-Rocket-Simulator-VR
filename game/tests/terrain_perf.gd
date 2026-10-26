@@ -181,8 +181,10 @@ func _tune_clouds(spec: String) -> void:
 				ShaderGlobals.set_value(&"cloud_light_march", Vector4(20.0, CloudLayer.light_march_ratio(20.0, 6000.0,
 						light.x), 6000.0, 0.0))
 			"light_far": light.y = int(kv[1])
-			"divisor": _world.clouds.effect.set_quality(int(kv[1]),
-					float(CloudLayer.PRESETS[_world.clouds.quality]["temporal_weight"]))
+			"divisor":
+				var preset: Dictionary = CloudLayer.PRESETS[_world.clouds.quality]
+				_world.clouds.effect.set_quality(int(kv[1]), float(preset["temporal_weight"]),
+						float(preset["clip_gamma"]))
 	ShaderGlobals.set_value(&"cloud_light_samples", light)
 
 

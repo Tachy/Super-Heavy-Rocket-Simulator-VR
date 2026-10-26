@@ -17,6 +17,7 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	_test_presets()
 	var core := StarsimCore.new()
 	_layer = CloudLayer.new()
 	root.add_child(_layer)
@@ -164,6 +165,16 @@ func _state_is_pair(pair: Array, blend: float) -> bool:
 	if s["slots"] == [pair[1], pair[0]]:
 		return is_equal_approx(1.0 - float(s["w1"]), blend) and bool(s["tracking"])
 	return false
+
+
+## VR flicker (user 2026-10-26): the VR history keeps longer than the desktop's and is clipped statistically (variance
+## clip, clip_gamma > 0) instead of to the noisy neighbourhood's min / max; the desktop keeps its min / max (0).
+func _test_presets() -> void:
+	var vr: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.VR]
+	var desktop: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.DESKTOP]
+	_check(float(vr.get("clip_gamma", 0.0)) > 0.0 and float(desktop.get("clip_gamma", -1.0)) == 0.0,
+			"presets: VR variance clip, desktop min / max")
+	_check(float(vr["temporal_weight"]) < float(desktop["temporal_weight"]), "presets: the VR history keeps longer")
 
 
 func _check(ok: bool, label: String) -> void:
