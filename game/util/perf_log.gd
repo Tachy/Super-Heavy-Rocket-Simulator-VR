@@ -49,6 +49,11 @@ func _ready() -> void:
 	_start_msec = Time.get_ticks_msec()
 	_second_start_msec = _start_msec
 	print("[PerfLog] writing ", path)
+	var xr_interface := XRServer.primary_interface
+	if xr_interface != null and xr_interface.is_initialized():
+		# the per-eye size the runtime asks for: the GPU time scales with it (the desktop proxy is 1440p)
+		print("[PerfLog] XR render target per eye: ", xr_interface.get_render_target_size(),
+				", display refresh: ", xr_interface.get("display_refresh_rate"))
 
 
 func _process(delta: float) -> void:
