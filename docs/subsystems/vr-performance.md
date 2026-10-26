@@ -61,7 +61,26 @@ Per-second maxima of the per-frame totals, mean over the phase (ms). `main` = sc
 
 With weather on: `weather` 2.4 ms on the pad, 0.2-0.7 in flight; `sun` 0.6; the rest as above.
 
-Candidate cuts (Task 3): `EngineGauge` recomputes the O(n^2) dot radius (33 engines: 528 pairs) and redraws every
+## After the main-thread cuts (Task 3, desktop launch, weather off)
+
+| Section | Pad | 0-10 km | 10-60 km | > 60 km |
+|---|---|---|---|---|
+| main (all) | 18.8 (28.9) | 12.8 (24.6) | 11.0 (21.2) | 8.5 |
+| `fv_vehicles` (plumes: left for the plume rework, user 2026-10-26) | 3.0 | 5.1 | 4.1 | 1.7 |
+| `earth_terrain` (uploads 3.3 on the pad, traversal 1.5-2.3, free 0.5-1) | 5.8 | 3.9 | 2.8 | 2.2 |
+| `ui_webcast_draw` (round gauges at 15 Hz, timeline arc every frame) | 2.4 | 2.5 | 2.4 | 2.7 |
+| `fv_trajectory` (rebuilds: new target points, camera > 1 km) | 2.0 | 1.3 | 2.4 | 2.5 |
+| `atmosphere` | 2.5 | 0.3 | 0.3 | 0.3 |
+| `refraction` | 0.2 | 1.1 | 1.2 | 1.2 |
+
+(before the cuts in brackets.) The desktop holds 60 Hz in every phase now. Done: the overlay no longer toggles every
+gauge's visibility each frame (each toggle redrew it), engine gauge redraws on a firing / layout change only, round
+gauges on a text change or a half-pixel arc move, texts and round gauges at 15 Hz (`UiRate`, user 2026-10-26), the
+trajectory ribbon is rebuilt with new points or after a 1 km camera move and moved with the camera in between,
+`RibbonMesh` fills preallocated arrays. Open: the plumes regenerate their cone meshes every frame (left for the plume
+rework, user 2026-10-26); the terrain quadtree's GDScript traversal (~1 us per node) and the free pass over all nodes.
+
+Candidate cuts as listed before Task 3: `EngineGauge` recomputes the O(n^2) dot radius (33 engines: 528 pairs) and redraws every
 frame - compute on a layout change, redraw on a firing change; `RoundGauge` / `TimelineArc` redraw every frame -
 redraw when the shown value changes by a displayed step; `TrajectoryView` rebuilds its ribbon mesh every frame from
 points refreshed only every `REFRESH_S` - rebuild with the points, move it with the camera by its transform;
