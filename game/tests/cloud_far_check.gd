@@ -37,6 +37,9 @@ const THIN_LIQUID_KG_M3 := 2.0e-3 / 150.0
 const BROKEN_LIQUID_KG_M3 := 3.0e-3 / 150.0
 const BROKEN_FRACTION := 0.4
 const SETTLE_FRAMES := 8
+## After the settle the cloud history and the pass's frame counter reset and exactly this many frames are drawn (like
+## render_check --deterministic): the temporal mean of every sample is the same number of frames, not a timing-dependent one.
+const DETERMINISTIC_FRAMES := 64
 const MAX_FRAMES := 6000
 const PROBE_TOLERANCE := 0.03
 const PROBE_FLOOR := 1.0e-3  ## /sr: below it the absolute difference counts
@@ -326,6 +329,11 @@ func _place(sub_camera: Vector2, distance_m: float) -> void:
 		idle = idle + 1 if loading == 0 and not uploading else 0
 		if idle >= SETTLE_FRAMES and i >= 2 * SETTLE_FRAMES:
 			break
+	var effect: CloudEffect = _world.clouds.effect
+	effect.reset_history()
+	RenderingServer.call_on_render_thread(func() -> void: effect._frame = 0)
+	for i in range(DETERMINISTIC_FRAMES):
+		await process_frame
 
 
 func _frame() -> Image:

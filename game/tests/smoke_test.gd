@@ -224,6 +224,13 @@ func _check_weather(core: StarsimCore) -> bool:
 			and (noise["prefilter_threshold"] as PackedFloat32Array).size() == 256 * rows
 			and (noise["prefilter_edge_mean"] as PackedFloat32Array).size() == 256 * rows,
 			"cloud_noise shape prefilter sizes and constants")
+	# The shader's mirrored copies of the same constants (text of clouds.gdshaderinc: a typo there is invisible to the
+	# core tests).
+	_check(_shader_constant("CLOUD_SHAPE_PREFILTER_START_M") == float(noise["prefilter_start_m"])
+			and _shader_constant("CLOUD_SHAPE_PREFILTER_LEVELS") == float(noise["prefilter_levels"])
+			and _shader_constant("CLOUD_SHAPE_PREFILTER_ROWS_PER_LEVEL") == float(noise["prefilter_rows_per_level"])
+			and _shader_constant("CLOUD_SHAPE_PREFILTER_ROWS") == float(rows),
+			"clouds.gdshaderinc prefilter constants equal the core's")
 	var optics: Dictionary = core.cloud_optics_parameters()
 	_check(absf(float(optics.get("asymmetry_g", 0.0)) - 0.8793) < 1e-3 and float(optics["extinction_step_per_m"]) > 0.0,
 			"cloud_optics_parameters (g %.4f)" % float(optics.get("asymmetry_g", 0.0)))
@@ -595,3 +602,11 @@ func _check_refuelling(config_dir: String, tdb: float) -> bool:
 	print("  refuelling campaign: %d tankers, %.1f d (%.1f s)" % [data.get("tanker_flights", 0),
 			data.get("duration_d", 0.0), (Time.get_ticks_msec() - started) / 1000.0])
 	return true
+
+
+## The value of `const float <name> = <number>;` in game/shaders/clouds.gdshaderinc (NAN when absent).
+func _shader_constant(constant_name: String) -> float:
+	var text := FileAccess.get_file_as_string("res://shaders/clouds.gdshaderinc")
+	var regex := RegEx.create_from_string("const float " + constant_name + "\\s*=\\s*([-0-9.eE+]+)\\s*;")
+	var found := regex.search(text)
+	return float(found.get_string(1)) if found != null else NAN

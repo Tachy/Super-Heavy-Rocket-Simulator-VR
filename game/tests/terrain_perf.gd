@@ -9,7 +9,8 @@
 # the Earth turns under the floating origin, every node moves each frame, as in play). Vsync off, 2560 x 1440.
 # Logs per second: frame time p50 / p99 / max, the main-thread split of the slowest frame (process / the rest: render,
 # present), the terrain's update time, GPU time, terrain nodes drawn / loading, uploads, video memory; then per phase
-# and overall summaries with the desktop proxy gate [E]: p99 <= 8 ms and max <= 16 ms outside the jump frame.
+# and overall summaries with the desktop proxy gate [E]: p99 <= 8 ms (11 ms with clouds, --weather) and max <= 16 ms
+# outside the jump frame.
 # --shots=<dir>: a PNG at the start and half-way through each pan (those frames are left out of the statistics).
 # --spikes[=ms]: every frame above ms (default GATE_MAX_MS) listed at the end (process / rest split, the
 # RenderingServer draw inside the rest, terrain profile, draw-time pipeline compilations).
@@ -28,7 +29,10 @@ const PAN_HIGH_ELEVATION_DEG := -10.0
 ## Frames before the run starts (window, roots, first loads settle).
 const WARMUP_FRAMES := 30
 ## [E] desktop proxy for 90 Hz VR (11.1 ms per frame for two eyes): a single 1440p view has to stay well inside it.
+## Without clouds p99 <= 8 ms; with clouds on (--weather=<file.wthr>, VR preset) the clouds' budget of +3 ms brings it
+## to p99 <= 11 ms (the 90 Hz frame); max <= 16 ms in both.
 const GATE_P99_MS := 8.0
+const GATE_P99_CLOUDS_MS := 11.0
 const GATE_MAX_MS := 16.0
 const PAD_SITE := "starbase_olp1"
 const CAPE_SITE := "ksc_lc39a"
@@ -125,6 +129,24 @@ func _process(_delta: float) -> bool:
 	return _drive(t)
 
 
+## --cloud_tune=steps=48,max_steps=96,fine=0.03,light_near=4,light_far=2: overrides single preset values of the clouds
+## (the shader globals the preset sets) for a tuning run; the game's preset is CloudLayer.PRESETS.
+func _tune_clouds(spec: String) -> void:
+	var light: Vector2i = ShaderGlobals.value(&"cloud_light_samples")
+	for item in spec.split(","):
+		var kv := item.split("=")
+		match kv[0]:
+			"steps": ShaderGlobals.set_value(&"cloud_steps", int(kv[1]))
+			"max_steps": ShaderGlobals.set_value(&"cloud_max_steps", int(kv[1]))
+			"fine": ShaderGlobals.set_value(&"cloud_fine_step_fraction", float(kv[1]))
+			"light_near":
+				light.x = int(kv[1])
+				ShaderGlobals.set_value(&"cloud_light_march", Vector4(20.0, CloudLayer.light_march_ratio(20.0, 6000.0,
+						light.x), 6000.0, 0.0))
+			"light_far": light.y = int(kv[1])
+	ShaderGlobals.set_value(&"cloud_light_samples", light)
+
+
 func _setup() -> void:
 	_world = _main.get_node("World")
 	_world.clock.warp = float(_args.get("warp", "1"))
@@ -138,6 +160,8 @@ func _setup() -> void:
 	if _args.has("cloud_scattering"):
 		_world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
 				if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE
+	if _args.has("cloud_tune"):  # tuning runs: steps=, max_steps=, fine=, light_near=, light_far= (comma separated)
+		_tune_clouds(String(_args["cloud_tune"]))
 	if String(_args.get("weather", "")).ends_with(".wthr"):
 		var snapshot: Dictionary = _world.core.weather_load_snapshot(_args["weather"])
 		if snapshot.get("ok", false):
@@ -309,10 +333,11 @@ func _summary() -> void:
 		print("terrain_perf: PHASE %-8s frames %5d  p50 %5.2f p99 %5.2f max %6.2f ms  max drawn %4d loading %4d  vram %5.0f MB"
 				% [phase, ms.size(), q[0], q[1], q[2], limits["drawn"], limits["loading"], limits["vram_mb"]])
 	var q := _quantiles(all)
-	var ok := q[1] <= GATE_P99_MS and q[2] <= GATE_MAX_MS
+	var gate_p99 := GATE_P99_CLOUDS_MS if String(_args.get("weather", "")).ends_with(".wthr") else GATE_P99_MS
+	var ok := q[1] <= gate_p99 and q[2] <= GATE_MAX_MS
 	print("terrain_perf: SUMMARY frames %d  p50 %.2f p99 %.2f max %.2f ms (jump frame %.2f ms)  max drawn %d  "
 			% [all.size(), q[0], q[1], q[2], _jump_ms, max_drawn]
-			+ "max vram %.0f MB  gate p99 <= %.0f max <= %.0f ms: %s" % [max_vram, GATE_P99_MS, GATE_MAX_MS,
+			+ "max vram %.0f MB  gate p99 <= %.0f max <= %.0f ms: %s" % [max_vram, gate_p99, GATE_MAX_MS,
 			"PASS" if ok else "FAIL"])
 
 
