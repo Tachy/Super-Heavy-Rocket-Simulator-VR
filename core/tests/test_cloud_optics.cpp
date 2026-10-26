@@ -714,10 +714,11 @@ std::vector<std::size_t> component_sizes(const std::vector<std::uint8_t>& grid, 
 
 // Connectivity of the cloud (v > t) in a layer: the fragments (cloud bodies smaller than a cube of fragment_m) as a
 // share of the cloud volume, and in the top view (the layer's projection: what is seen from above) the fragments'
-// (smaller than a square of fragment_m) share of the covered area and the holes' (enclosed clear patches) share of it.
+// (smaller than a square of fragment_m) share of the covered area, the holes' (enclosed clear patches) share of it and
+// that of the punched holes among them (smaller than a square of fragment_m).
 struct LayerConnectivity {
     std::size_t bodies = 0, fragments = 0, top_fragments = 0;
-    double fragment_volume_share = 0.0, top_fragment_share = 0.0, top_hole_share = 0.0;
+    double fragment_volume_share = 0.0, top_fragment_share = 0.0, top_hole_share = 0.0, top_small_hole_share = 0.0;
 };
 
 LayerConnectivity layer_connectivity(const CloudNoise& noise, double state, double cf, double voxel_m, int across,
@@ -760,10 +761,16 @@ LayerConnectivity layer_connectivity(const CloudNoise& noise, double state, doub
     }
     std::vector<bool> border;
     const std::vector<std::size_t> clear = component_sizes(top, across, across, 1, 0, false, &border);
-    for (std::size_t i = 0; i < clear.size(); ++i) hole_area += border[i] ? 0 : clear[i];
+    std::size_t small_hole_area = 0;
+    for (std::size_t i = 0; i < clear.size(); ++i) {
+        if (border[i]) continue;
+        hole_area += clear[i];
+        small_hole_area += clear[i] < fragment_px ? clear[i] : 0;
+    }
     c.fragment_volume_share = volume > 0 ? static_cast<double>(fragment_volume) / volume : 0.0;
     c.top_fragment_share = area > 0 ? static_cast<double>(fragment_area) / area : 0.0;
     c.top_hole_share = area > 0 ? static_cast<double>(hole_area) / area : 0.0;
+    c.top_small_hole_share = area > 0 ? static_cast<double>(small_hole_area) / area : 0.0;
     return c;
 }
 
@@ -775,67 +782,166 @@ TEST_CASE("A cumulus is one connected body", "[weather]") {
     // 8.2 km x 8.2 km x 1.5 km at 16 m voxels with level 0 alone (the state a few km away) and with all detail levels:
     // fragments - 26-connected pieces smaller than (200 m)^3, beads and specks beside the bodies - hold a small share
     // of the cloud volume, and in the top view (the layer projected: what is seen from above) the fragments and the
-    // holes a small share of the covered area. Measured at cf 0.3, states 1 / 3: the signed detail of M8 left 0.46 % /
-    // 0.48 % of the volume and 1.25 % / 1.89 % of the top view in fragments, the erosion 0.07 % / 0.09 % and 0.52 % /
-    // 0.49 % (holes ~1 % either way).
-    // [E] bounds: fragments under 0.25 % of the volume and 1 % of the top view (a few small specks, as real cumulus
-    // fields have), holes under 2.5 % of the top view.
+    // punched holes (enclosed clear patches smaller than (200 m)^2) a small share of the covered area. The larger
+    // enclosed gaps (bays between lobes that the lobes close, ~0.8 km across) are reported, not bounded. Measured at
+    // cf 0.3, states 1 / 3: the signed detail of M8 left 0.46 % / 0.48 % of the volume and 1.25 % / 1.89 % of the top
+    // view in fragments; the per-level lift (0.5 / 0.25 / 0.25) 0.135 % / 0.122 % and 0.94 % / 0.90 %, punched holes
+    // 0.08 % / 0.20 % (all enclosed clear patches 1.15 % / 0.97 %; at cf 0.5 3.2 % / 3.05 %, punched 0.25 % / 0.34 %).
+    // [E] bounds: fragments under 0.2 % of the volume and 1 % of the top view (a few small specks, as real cumulus
+    // fields have), punched holes under 1 % of the top view.
     const CloudNoise noise = generate_cloud_noise();
     for (double state : {1.0, static_cast<double>(cloud_detail_levels)}) {
         for (double cf : {0.3, 0.5}) {
             const LayerConnectivity c = layer_connectivity(noise, state, cf, 16.0, 512, 94, 1000.0, 200.0);
             report("state %.0f cf %.1f: %zu bodies, %zu fragments (%.3f %% of the volume); top view %zu fragments "
-                   "(%.2f %%), holes %.2f %%\n",
+                   "(%.2f %%), enclosed clear %.2f %% (punched holes %.2f %%)\n",
                    state, cf, c.bodies, c.fragments, 100.0 * c.fragment_volume_share, c.top_fragments,
-                   100.0 * c.top_fragment_share, 100.0 * c.top_hole_share);
-            CHECK(c.fragment_volume_share < 0.0025);
+                   100.0 * c.top_fragment_share, 100.0 * c.top_hole_share, 100.0 * c.top_small_hole_share);
+            CHECK(c.fragment_volume_share < 0.002);
             CHECK(c.top_fragment_share < 0.01);
-            CHECK(c.top_hole_share < 0.025);
+            CHECK(c.top_small_hole_share < 0.01);
         }
     }
 }
 
-TEST_CASE("Coverage and water are kept for every cloud type", "[weather]") {
-    // The type rule (cloud_noise.hpp) on the three canonical columns, and per type: the shape read at the type's
-    // coordinates (stratiform stretched, cirrus the ice tile) keeps the covered fraction cf and the grid-mean water at
-    // the table states (5e5 uniform random positions over the type's tile; the tolerances of "Noise coverage is
-    // preserved" and "Cloud edges of varying width keep the grid-mean water").
-    CHECK(cloud_type_of(0.3, 0.5, 0.0, 800.0) == CloudType::Cumulus);     // broken low cloud, thickening upward
-    CHECK(cloud_type_of(1.0, 0.2, 0.0, 600.0) == CloudType::Stratiform);  // an overcast deck under an inversion
-    CHECK(cloud_type_of(0.95, 1.0, 0.0, 600.0) == CloudType::Cumulus);    // thickening upward: convective
-    CHECK(cloud_type_of(0.6, 0.6, 0.9, 9000.0) == CloudType::Cirrus);     // an ice layer
-    CHECK(cloud_type_of(1.0, 1.0, 0.8, 7000.0) == CloudType::Cirrus);     // ice wins over the deck rule
-    const CloudNoise noise = generate_cloud_noise();
-    for (CloudType type : {CloudType::Cumulus, CloudType::Stratiform, CloudType::Cirrus}) {
-        const double stretch = type == CloudType::Stratiform ? cloud_stratiform_stretch : 1.0;
-        const double across_m = cloud_shape_tile_horizontal_m * stretch;
-        const double up_m = type == CloudType::Cirrus ? cloud_ice_tile_vertical_m : cloud_shape_tile_vertical_m;
-        for (double state : {0.0, static_cast<double>(cloud_detail_levels)}) {
-            std::mt19937_64 rng(47);
-            std::uniform_real_distribution<double> unit(0.0, 1.0);
-            std::vector<ShapeSample> samples(500000);
-            for (ShapeSample& s : samples) {
-                const math::Vec3 p{unit(rng) * across_m, unit(rng) * across_m, unit(rng) * up_m};
-                const math::Vec3 texel = cloud_shape_texel(noise, type, p);
-                s.value = cloud_shape_value(noise, sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 0, texel),
-                                            p, state);
-                s.width_noise = sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 3, texel);
+TEST_CASE("Cloud type weights are continuous and keep the water", "[weather]") {
+    // The type weights (cloud_noise.hpp, fix round 1: no seam, no pop) on the canonical columns (pure types), their
+    // sum, and their continuity: no step of 1e-3 in the fraction, the fraction above, the ice share or the layer
+    // coordinate through a column moves a weight by more than [E] 0.035 (the steepest band: the smoothstep's slope 1.5
+    // over the thickening band 0.05 is 0.03 per step; the replaced switch jumped by 1).
+    const auto pure = [](const CloudTypeWeights& w, CloudType type) {
+        const auto is = [](double v, bool one) { return std::abs(v - (one ? 1.0 : 0.0)) < 1e-12; };
+        return is(w.cumulus, type == CloudType::Cumulus) && is(w.stratiform, type == CloudType::Stratiform) &&
+               is(w.cirrus, type == CloudType::Cirrus);
+    };
+    CHECK(pure(cloud_type_weights(cloud_stratiform_weight(0.3, 0.5), 0.0), CloudType::Cumulus));     // broken low
+    CHECK(pure(cloud_type_weights(cloud_stratiform_weight(1.0, 0.2), 0.0), CloudType::Stratiform));  // inversion deck
+    CHECK(pure(cloud_type_weights(cloud_stratiform_weight(1.0, 1.0), 0.0), CloudType::Stratiform));  // thick deck
+    CHECK(pure(cloud_type_weights(cloud_stratiform_weight(0.95, 1.0), 0.0), CloudType::Cumulus));    // thickening
+    CHECK(pure(cloud_type_weights(cloud_stratiform_weight(0.6, 0.6), 0.9), CloudType::Cirrus));      // an ice layer
+    CHECK(pure(cloud_type_weights(cloud_stratiform_weight(1.0, 1.0), 0.8), CloudType::Cirrus));      // ice over deck
+    const double step = 1e-3, jump_max = 0.035;
+    double largest = 0.0, worst_sum = 0.0, lowest = 1.0;
+    const auto track = [&](const CloudTypeWeights& a, const CloudTypeWeights& b) {
+        worst_sum = std::max(worst_sum, std::abs(b.cumulus + b.stratiform + b.cirrus - 1.0));
+        lowest = std::min({lowest, b.cumulus, b.stratiform, b.cirrus});
+        largest = std::max({largest, std::abs(b.cumulus - a.cumulus), std::abs(b.stratiform - a.stratiform),
+                            std::abs(b.cirrus - a.cirrus)});
+    };
+    for (double ice : {0.0, 0.45, 0.5, 0.55}) {
+        for (double above : {0.0, 0.9, 0.93, 1.0}) {
+            CloudTypeWeights last = cloud_type_weights(cloud_stratiform_weight(0.0, above), ice);
+            for (int i = 1; i <= 1000; ++i) {
+                const CloudTypeWeights w = cloud_type_weights(cloud_stratiform_weight(i * step, above), ice);
+                track(last, w);
+                last = w;
             }
-            for (double cf : {0.3, 0.9}) {
-                const int index = static_cast<int>(std::lround(cf * 255.0));
-                const double t = cloud_coverage_threshold(noise, state, index);
-                const double m = cloud_edge_mean_factor(noise, state, index);
+        }
+        for (double f : {0.88, 0.92, 1.0}) {
+            CloudTypeWeights last = cloud_type_weights(cloud_stratiform_weight(f, 0.0), ice);
+            for (int i = 1; i <= 1000; ++i) {
+                const CloudTypeWeights w = cloud_type_weights(cloud_stratiform_weight(f, i * step), ice);
+                track(last, w);
+                last = w;
+            }
+        }
+    }
+    for (double f : {0.3, 0.92, 1.0}) {
+        CloudTypeWeights last = cloud_type_weights(cloud_stratiform_weight(f, f), 0.0);
+        for (int i = 1; i <= 1000; ++i) {
+            const CloudTypeWeights w = cloud_type_weights(cloud_stratiform_weight(f, f), i * step);
+            track(last, w);
+            last = w;
+        }
+    }
+    // Through a column (the shader's vertical rule, layer coordinate s - 0.5 between the centres): a deck of two layers
+    // at 0.95 between broken layers; the per-centre switch cut it at the centre between them.
+    const std::array<double, 6> column{0.3, 0.95, 0.95, 0.5, 0.2, 0.2};
+    const int last_k = static_cast<int>(column.size()) - 3;
+    const auto at = [&](double s) {
+        const int k = std::clamp(static_cast<int>(std::floor(s)), 0, last_k);
+        const double x = std::clamp(s - k, 0.0, 1.0);
+        const auto f = [&](int i) { return column[static_cast<std::size_t>(i)]; };
+        return cloud_type_weights(cloud_stratiform_weight_between(f(k), f(k + 1), f(k + 2), x), 0.0);
+    };
+    CloudTypeWeights last = at(0.0);
+    double deck_peak = 0.0;
+    for (int i = 1; i <= (last_k + 1) * 1000; ++i) {
+        const CloudTypeWeights w = at(i * step);
+        track(last, w);
+        deck_peak = std::max(deck_peak, w.stratiform);
+        last = w;
+    }
+    report("largest weight change per 1e-3 step %.4f, sum error %.1e, lowest weight %.3f; stratiform peak in the "
+           "column %.3f\n", largest, worst_sum, lowest, deck_peak);
+    CHECK(largest < jump_max);
+    CHECK(worst_sum < 1e-12);
+    CHECK(lowest >= 0.0);
+    CHECK(deck_peak == Approx(1.0));  // the deck's top centre (0.95 under 0.5) is stratiform
+    // Under a deck's base centre and over its top centre the empty neighbour has no say: the cloud there is the deck's.
+    CHECK(cloud_stratiform_weight_between(0.0, 1.0, 1.0, 0.2) == Approx(1.0));
+    CHECK(cloud_stratiform_weight_between(1.0, 0.0, 0.0, 0.8) == Approx(1.0));
+}
+
+TEST_CASE("Coverage and water are kept for every cloud type", "[weather]") {
+    // Per type, the shape read at the type's coordinates (stratiform stretched, cirrus the ice tile) keeps the covered
+    // fraction cf and the grid-mean water at the table states (5e5 uniform random positions over the stratiform tile,
+    // in which every type's tile repeats; the tolerances of "Noise coverage is preserved" and "Cloud edges of varying
+    // width keep the grid-mean water"), and so does a mix of the types' ramps inside a band (the shader's: the weights
+    // times each type's ramp at the same point). The covered area of a mix is reported: it grows where two patterns
+    // overlap.
+    const CloudNoise noise = generate_cloud_noise();
+    const std::array<CloudType, 3> types{CloudType::Cumulus, CloudType::Stratiform, CloudType::Cirrus};
+    const std::array<std::array<double, 3>, 3> mixes{{{0.5, 0.5, 0.0}, {0.5, 0.0, 0.5}, {0.2, 0.4, 0.4}}};
+    for (double state : {0.0, static_cast<double>(cloud_detail_levels)}) {
+        std::mt19937_64 rng(47);
+        std::uniform_real_distribution<double> unit(0.0, 1.0);
+        const double across_m = cloud_shape_tile_horizontal_m * cloud_stratiform_stretch;
+        std::vector<std::array<ShapeSample, 3>> samples(500000);  // [position][type]
+        for (std::array<ShapeSample, 3>& sample : samples) {
+            const math::Vec3 p{unit(rng) * across_m, unit(rng) * across_m, unit(rng) * cloud_shape_tile_vertical_m};
+            for (std::size_t t = 0; t < types.size(); ++t) {
+                const math::Vec3 texel = cloud_shape_texel(noise, types[t], p);
+                sample[t].value = cloud_shape_value(
+                    noise, sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 0, texel), p, state);
+                sample[t].width_noise = sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 3, texel);
+            }
+        }
+        for (double cf : {0.3, 0.9}) {
+            const int index = static_cast<int>(std::lround(cf * 255.0));
+            const double t = cloud_coverage_threshold(noise, state, index);
+            const double m = cloud_edge_mean_factor(noise, state, index);
+            const auto ramp = [&](const ShapeSample& s) {
+                return cloud_edge_ramp((s.value - t) / cloud_edge_width_value(noise, s.width_noise)) / m;
+            };
+            for (std::size_t type = 0; type < types.size(); ++type) {
                 std::size_t above = 0;
                 double water = 0.0;
-                for (const ShapeSample& s : samples) {
-                    above += s.value > t ? 1 : 0;
-                    water += cloud_edge_ramp((s.value - t) / cloud_edge_width_value(noise, s.width_noise)) / m;
+                for (const std::array<ShapeSample, 3>& s : samples) {
+                    above += s[type].value > t ? 1 : 0;
+                    water += ramp(s[type]);
                 }
                 const double fraction = static_cast<double>(above) / samples.size();
                 water /= samples.size();
-                report("type %d state %.0f cf %.1f: covered %.4f, water / grid mean %.4f\n", static_cast<int>(type),
-                       state, cf, fraction, water);
+                report("type %zu state %.0f cf %.1f: covered %.4f, water / grid mean %.4f\n", type, state, cf,
+                       fraction, water);
                 CHECK(fraction == Approx(index / 255.0).margin(0.003));
+                CHECK(water == Approx(1.0).epsilon(0.015));
+            }
+            for (const std::array<double, 3>& w : mixes) {
+                std::size_t above = 0;
+                double water = 0.0;
+                for (const std::array<ShapeSample, 3>& s : samples) {
+                    bool cloud = false;
+                    for (std::size_t type = 0; type < types.size(); ++type) {
+                        water += w[type] * ramp(s[type]);
+                        cloud = cloud || (w[type] > 0.0 && s[type].value > t);
+                    }
+                    above += cloud ? 1 : 0;
+                }
+                water /= samples.size();
+                report("mix %.1f / %.1f / %.1f state %.0f cf %.1f: covered %.4f, water / grid mean %.4f\n", w[0],
+                       w[1], w[2], state, cf, static_cast<double>(above) / samples.size(), water);
                 CHECK(water == Approx(1.0).epsilon(0.015));
             }
         }

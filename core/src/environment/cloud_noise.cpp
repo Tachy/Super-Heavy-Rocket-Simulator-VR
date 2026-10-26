@@ -474,8 +474,8 @@ double detail_structure_function(const CloudNoise& noise, double lag_tiles) {
 }
 
 // The shape value with the signed detail of all levels, s + P (header), at a position [m]: the value change across a
-// rim. The erosion e(P) is flattened wherever P > 0, which would cut the median increment and steepen every edge
-// (the widths in metres are what the header defines; the base contour of cloud_check section 9 failed with them).
+// rim. The eroded terms e_k are flattened where they point up, which would cut the median increment and steepen every
+// edge (the widths in metres are what the header defines; the base contour of cloud_check section 9 failed with them).
 double full_shape_value(const CloudNoise& noise, const math::Vec3& position_m) {
     double v = trilinear4(noise.shape_rgba, noise.shape_size, shape_texel_of(noise, position_m))[0];
     for (int k = 0; k < cloud_detail_levels; ++k) {
@@ -540,13 +540,14 @@ CompositeHistograms composite_histograms(const CloudNoise& noise) {
                             trilinear4(noise.shape_rgba, n, shape_texel_of(noise, position_m));
                         const std::size_t width_bin = std::min<std::size_t>(
                             joint_width_bins - 1, static_cast<std::size_t>(shape[3] * joint_width_bins));
-                        double v = shape[0], p = 0.0;
+                        double v = shape[0];
                         for (int state = 0; state < cloud_detail_states; ++state) {
                             if (state > 0) {
                                 const int k = state - 1;
-                                p += noise.level_amplitude[static_cast<std::size_t>(k)] *
-                                     (cloud_detail_value(noise, position_m / detail_tile_of_level(k)) - noise.detail_mean);
-                                v = shape[0] + cloud_detail_erosion(p);  // erosion only (header)
+                                v += cloud_detail_erosion(  // the per-level lift (header)
+                                    k, noise.level_amplitude[static_cast<std::size_t>(k)] *
+                                           (cloud_detail_value(noise, position_m / detail_tile_of_level(k)) -
+                                            noise.detail_mean));
                             }
                             const double u = v - h.lo;
                             const std::size_t fb = std::min(h.fine_bins - 1, static_cast<std::size_t>(u * composite_bins_per_unit));
@@ -775,16 +776,35 @@ double cloud_shape_value(const CloudNoise& noise, double shape_value, const math
     for (int k = 0; k < cloud_detail_levels; ++k) {
         const double w = std::clamp(detail_state - k, 0.0, 1.0);
         if (w <= 0.0) break;
-        p += w * noise.level_amplitude[static_cast<std::size_t>(k)] *
-             (cloud_detail_value(noise, position_m / detail_tile_of_level(k)) - noise.detail_mean);
+        p += cloud_detail_erosion(k, w * noise.level_amplitude[static_cast<std::size_t>(k)] *
+                                         (cloud_detail_value(noise, position_m / detail_tile_of_level(k)) -
+                                          noise.detail_mean));  // the per-level lift (header)
     }
-    return shape_value + cloud_detail_erosion(p);  // erosion only (header)
+    return shape_value + p;
 }
 
-CloudType cloud_type_of(double fraction, double fraction_above, double ice_share, double /*height_above_ground_m*/) {
-    if (ice_share > cloud_cirrus_ice_share) return CloudType::Cirrus;
-    if (fraction >= cloud_stratiform_fraction && !(fraction_above > fraction)) return CloudType::Stratiform;
-    return CloudType::Cumulus;
+double cloud_stratiform_weight(double fraction, double fraction_above) {
+    const double deck = cloud_edge_ramp((fraction - (cloud_stratiform_fraction - cloud_stratiform_fraction_band)) /
+                                        (2.0 * cloud_stratiform_fraction_band));
+    return deck * (1.0 - cloud_edge_ramp((fraction_above - fraction) / cloud_stratiform_thickening_band));
+}
+
+double cloud_stratiform_weight_between(double fraction_below, double fraction_above, double fraction_above_next,
+                                       double x) {
+    const double below = (1.0 - x) * fraction_below, above = x * fraction_above;  // the cloud each centre gives
+    if (!(below + above > 0.0)) return 0.0;
+    return (below * cloud_stratiform_weight(fraction_below, fraction_above) +
+            above * cloud_stratiform_weight(fraction_above, fraction_above_next)) /
+           (below + above);
+}
+
+CloudTypeWeights cloud_type_weights(double stratiform_weight, double ice_share) {
+    CloudTypeWeights w;
+    w.cirrus = cloud_edge_ramp((ice_share - (cloud_cirrus_ice_share - cloud_cirrus_ice_band)) /
+                               (2.0 * cloud_cirrus_ice_band));
+    w.stratiform = (1.0 - w.cirrus) * std::clamp(stratiform_weight, 0.0, 1.0);
+    w.cumulus = 1.0 - w.cirrus - w.stratiform;
+    return w;
 }
 
 math::Vec3 cloud_shape_texel(const CloudNoise& noise, CloudType type, const math::Vec3& position_m) {

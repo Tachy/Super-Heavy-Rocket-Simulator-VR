@@ -156,7 +156,8 @@ public:
                                           const godot::Vector3& sun_direction_itrf) const;
     // The tileable cloud noise: {shape: PackedByteArray RGBA8, shape_size, detail, detail_size, detail_states,
     // coverage_threshold and edge_mean_factor: PackedFloat32Array (256 x detail_states, one row of 256 per state),
-    // level_amplitude: PackedFloat32Array (detail_states - 1), detail_mean, detail_tile_m, detail_level_ratio,
+    // level_amplitude and level_lift: PackedFloat32Array (detail_states - 1), type_constants: {shader constant name:
+    // value} (cloud_noise.hpp cloud types), detail_mean, detail_tile_m, detail_level_ratio,
     // edge_width_min_value, edge_width_max_value, blue_noise: PackedByteArray R8, blue_noise_size, the shape prefilter:
     // shape_mips: Array of PackedByteArray RGBA8 (levels 1 .. log2(shape_size)), prefilter_threshold and
     // prefilter_edge_mean: PackedFloat32Array (256 x prefilter_rows), prefilter_rows, prefilter_rows_per_level,

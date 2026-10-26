@@ -267,6 +267,14 @@ func _check_weather(core: StarsimCore) -> bool:
 			and _shader_constant("CLOUD_SHAPE_PREFILTER_ROWS_PER_LEVEL") == float(noise["prefilter_rows_per_level"])
 			and _shader_constant("CLOUD_SHAPE_PREFILTER_ROWS") == float(rows),
 			"clouds.gdshaderinc prefilter constants equal the core's")
+	# The cloud types (static clouds Task 5 fix round 1): the shader's band constants and CloudLayer's tiles.
+	var types: Dictionary = noise["type_constants"]
+	var types_ok := types.size() == 7 and (noise["level_lift"] as PackedFloat32Array).size() == 3
+	for constant: String in types:
+		types_ok = types_ok and is_equal_approx(_shader_constant(constant), float(types[constant]))
+	_check(types_ok and float(types["CLOUD_ICE_TILE_V_M"]) == CloudLayer.ICE_TILE_V_M
+			and float(types["CLOUD_STRATIFORM_STRETCH"]) == CloudLayer.STRATIFORM_STRETCH,
+			"clouds.gdshaderinc / CloudLayer cloud type constants equal the core's")
 	var optics: Dictionary = core.cloud_optics_parameters()
 	_check(absf(float(optics.get("asymmetry_g", 0.0)) - 0.8793) < 1e-3 and float(optics["extinction_step_per_m"]) > 0.0,
 			"cloud_optics_parameters (g %.4f)" % float(optics.get("asymmetry_g", 0.0)))

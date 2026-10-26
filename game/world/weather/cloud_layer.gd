@@ -39,7 +39,8 @@ const LIGHT_PUSH_STEP := 0.01
 const RAYMARCH_MAX_DISTANCE_M := CelestialBody.SCALED_SPACE_DISTANCE_M
 ## The shape, ice-sheet and level-0 detail tiles (m) and the stratiform stretch: the same numbers as
 ## CLOUD_SHAPE_TILE_H_M / _V_M, CLOUD_ICE_TILE_V_M, CLOUD_DETAIL_TILE_M and CLOUD_STRATIFORM_STRETCH in
-## shaders/clouds.gdshaderinc (the camera's noise coordinates are formed here in float64).
+## shaders/clouds.gdshaderinc (the camera's noise coordinates are formed here in float64; smoke_test.gd compares the
+## ice tile and the stretch with the core).
 const SHAPE_TILE_H_M := 32000.0
 const SHAPE_TILE_V_M := 16000.0
 const ICE_TILE_V_M := 2000.0
@@ -636,6 +637,8 @@ func _upload_noise() -> void:
 	ShaderGlobals.set_value(&"cloud_detail_weights", noise["detail_weights"])
 	var amplitude: PackedFloat32Array = noise["level_amplitude"]
 	ShaderGlobals.set_value(&"cloud_level_amplitude", Vector3(amplitude[0], amplitude[1], amplitude[2]))
+	var lift: PackedFloat32Array = noise["level_lift"]
+	ShaderGlobals.set_value(&"cloud_level_lift", Vector3(lift[0], lift[1], lift[2]))
 	_noise_result = {}
 	noise_ready = true
 	_upload_transfer()

@@ -724,6 +724,18 @@ godot::Dictionary StarsimCore::cloud_noise() const {
         godot::PackedFloat32Array amplitudes;
         for (float a : noise.level_amplitude) amplitudes.push_back(a);
         result["level_amplitude"] = amplitudes;
+        godot::PackedFloat32Array lifts;
+        for (double lift : environment::cloud_detail_lift) lifts.push_back(static_cast<float>(lift));
+        result["level_lift"] = lifts;
+        godot::Dictionary types;  // the shader's CLOUD_* mirrors of the type constants (smoke_test.gd compares them)
+        types["CLOUD_CIRRUS_ICE_SHARE"] = environment::cloud_cirrus_ice_share;
+        types["CLOUD_CIRRUS_ICE_BAND"] = environment::cloud_cirrus_ice_band;
+        types["CLOUD_STRATIFORM_FRACTION"] = environment::cloud_stratiform_fraction;
+        types["CLOUD_STRATIFORM_FRACTION_BAND"] = environment::cloud_stratiform_fraction_band;
+        types["CLOUD_STRATIFORM_THICKENING_BAND"] = environment::cloud_stratiform_thickening_band;
+        types["CLOUD_STRATIFORM_STRETCH"] = environment::cloud_stratiform_stretch;
+        types["CLOUD_ICE_TILE_V_M"] = environment::cloud_ice_tile_vertical_m;
+        result["type_constants"] = types;
         result["detail_mean"] = noise.detail_mean;
         result["detail_weights"] =
             godot::Vector3(noise.detail_weights[0], noise.detail_weights[1], noise.detail_weights[2]);

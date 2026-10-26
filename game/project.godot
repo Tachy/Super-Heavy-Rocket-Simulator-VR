@@ -405,6 +405,10 @@ cloud_level_amplitude={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+cloud_level_lift={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
 cloud_detail_levels={
 "type": "int",
 "value": 0

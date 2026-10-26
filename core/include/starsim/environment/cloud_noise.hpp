@@ -22,20 +22,22 @@
 // to hundreds of km with the area-perimeter dimension D = 1.35 (constants.hpp cloud_perimeter_fractal_dimension, Lovejoy
 // 1982). The level sets of a fractional Brownian field of Hurst exponent H have dimension 2 - H, so the shape value
 // continues as fBm with H = 2 - D = 0.65 below the shape texture: the value the coverage rule thresholds is
-//   v = s + e(P),  P = sum_k a_k (d_k - detail_mean),  k = 0 .. cloud_detail_levels - 1,
-// e(P) = P for P < 0, cloud_detail_lift x P above (cloud_detail_erosion),
+//   v = s + sum_k e_k(a_k (d_k - detail_mean)),  k = 0 .. cloud_detail_levels - 1,
+// e_k(p) = p for p < 0, cloud_detail_lift[k] x p above (cloud_detail_erosion; P = sum_k a_k (d_k - mean) the signed
+// sum),
 // s the filtered shape R, d_k the detail value at the isotropic tile T_k = cloud_detail_tile_m / 4^k (cells of T_k / 2
 // to T_k / 8: 500 m down to 8 m), a_k = A 4^(-H k) (the fBm gain per factor 4 in scale). A continues the shape's own
 // spectrum: the horizontal increment variance of v at the lag cloud_detail_join_lag_m equals the shape's at its finest
 // Perlin period r0 = 500 m scaled by fBm, Var(r0) (r / r0)^(2H) (increment variances of independent parts add), times
 // cloud_detail_amplitude_calibration (calibration below).
-// Erosion (task 5 of the static-clouds plan, user 2026-10-26: each cumulus is ONE connected body): the detail lowers
-// the value at full strength but lifts it by only a quarter, so it erodes the shape's bodies from their rims inward and
-// lifts few beads beside them. The shape's low octaves decide where a cloud is (its lobes, the cauliflower); the tables
-// below are those of this value, so the covered fraction and the water stay. Measured (test_cloud_optics "A cumulus is
-// one connected body": a 1.5 km cumulus layer at cf 0.3, detail level 0 / all levels): the signed detail P left
-// 0.46 % / 0.48 % of the cloud volume in fragments under (200 m)^3 and 1.25 % / 1.89 % of the top view; e(P) 0.07 % /
-// 0.09 % and 0.52 % / 0.49 %, perimeter dimension D = 1.291.
+// Erosion (task 5 of the static-clouds plan, user 2026-10-26: each cumulus is ONE connected body; fix round 1: with
+// its cauliflower lobes): each level lowers the value at full strength but lifts it only by its share - level 0 (the
+// 100 - 500 m bulges) by half, the finer levels by a quarter - so the detail erodes the shape's bodies from their rims
+// inward, keeps their convex lobes and lifts few beads beside them. The shape's low octaves decide where a cloud is;
+// the tables below are those of this value, so the covered fraction and the water stay. Measured (test_cloud_optics "A
+// cumulus is one connected body": a 1.5 km cumulus layer at cf 0.3, detail level 0 / all levels): the signed detail P
+// left 0.46 % / 0.48 % of the cloud volume in fragments under (200 m)^3 and 1.25 % / 1.89 % of the top view; the
+// per-level lift 0.135 % / 0.122 % and 0.94 % / 0.90 %, perimeter dimension D = 1.278.
 // Band limit: an octave finer than the pixel aliases, so level k has the weight
 //   w_k = clamp(log2(l_k / f) - 1, 0, 1),  l_k = T_k / 4 (its middle cell), f the pixel footprint [m]
 // (full where the middle cell spans >= 4 pixels, none at <= 2); the levels fade finest first and never overlap, so
@@ -105,18 +107,27 @@ inline constexpr double cloud_detail_level_ratio = 4.0;
 inline constexpr double cloud_detail_join_lag_m = 62.5;
 // [calibrated] Factor on the spectral continuation of A (header): D = 2 - H holds for Gaussian fields; the Worley
 // octaves are not Gaussian. With the signed detail the continuation alone gave perimeters of D = 1.22 (x 2.5: 1.350);
-// the erosion (header) removes most of the rims' outward bumps: x 2.5 gives D = 1.291 with cloud_detail_lift 0.25
-// (1.267 with erosion only; box counting of test_cloud_optics "Cloud perimeters have the observed fractal dimension"),
-// inside the test's 1.25 .. 1.45. Larger factors steepen the state-0 edge widths (the signed increments): x 3 broke
-// the base contour of cloud_check section 9 (VR 6 px vs 3) - calibrated on the observables, not on a look.
+// the per-level lift (header) removes part of the rims' outward bumps: x 2.5 gives D = 1.278 with cloud_detail_lift
+// 0.5 / 0.25 / 0.25 (1.291 with a lift of 0.25 on the summed detail, 1.267 with erosion only; box counting of
+// test_cloud_optics "Cloud perimeters have the observed fractal dimension"), inside the test's 1.25 .. 1.45. Larger
+// factors steepen the state-0 edge widths (the signed increments): x 3 broke the base contour of cloud_check section 9
+// (VR 6 px vs 3) - calibrated on the observables, not on a look.
 inline constexpr double cloud_detail_amplitude_calibration = 2.5;
 inline constexpr int cloud_detail_states = cloud_detail_levels + 1;
-// [E] Share of the detail's upward part that is kept (header, erosion): 0 would leave the rims where the detail
-// points up on the shape's own gradient alone (soft, the edge widths in metres not met); a quarter keeps them crisp
-// while lifting few beads.
-inline constexpr double cloud_detail_lift = 0.25;
-// The detail's contribution to the shape value for its signed sum P (header): P below 0, cloud_detail_lift x P above.
-inline constexpr double cloud_detail_erosion(double p) { return p < 0.0 ? p : cloud_detail_lift * p; }
+// [E] Share of each detail level's upward part that is kept (header, erosion; static clouds Task 5 fix round 1).
+// Level 0 (cells 500 .. 125 m: the 100 - 500 m bulges, the cauliflower lobes on rims and tops) keeps half, so a body
+// keeps its convex relief; levels 1 and 2 (the bead scale, ~1 march pixel at a few km) keep a quarter, so they lift
+// few beads beside a body; their downward part erodes it at full strength from the rim inward. Measured (test "A
+// cumulus is one connected body", cf 0.3, states 1 / 3): fragments 0.135 % / 0.122 % of the volume, 0.94 % / 0.90 %
+// of the top view; level 0 at 0.6 / 0.8: 1.10 % of the top view at state 1 (bound 1 %), volume 0.19 % / 0.33 %.
+// 0 everywhere would leave the rims where the detail points up on the shape's own gradient alone (soft: steepness p90
+// 41 m).
+inline constexpr std::array<double, cloud_detail_levels> cloud_detail_lift = {0.5, 0.25, 0.25};
+// Level k's contribution to the shape value for its signed term p_k (header): p_k below 0, cloud_detail_lift[k] x p_k
+// above.
+inline constexpr double cloud_detail_erosion(int level, double p) {
+    return p < 0.0 ? p : cloud_detail_lift[static_cast<std::size_t>(level)] * p;
+}
 
 // Cloud types (spec decision 5; ERA5 / GFS carry none, so the type follows from the layer data at the point): ice-
 // dominated cloud is cirrus (thin sheets: the shape tile cloud_ice_tile_vertical_m high, no fibre direction - the
@@ -126,11 +137,23 @@ inline constexpr double cloud_detail_erosion(double p) { return p < 0.0 ? p : cl
 // shape tile itself, its low octaves' lobes, eroded from the rim by the detail). The stretches are affine maps of the
 // shape coordinates, the detail stays isotropic: the value statistics and so the coverage and water tables are the
 // same for every type (test "Coverage and water are kept for every cloud type").
-// [E] Ice share of the extinction above which the cloud is cirrus: the majority phase.
+// The types are weights, not a switch (fix round 1: no seam, no pop - spec anti-goals): each rule passes through a
+// smoothstep band, and the shader mixes the types' edge ramps by the weights (each ramp has the table mean m, so the
+// mix keeps the water; the covered area grows inside a band, where two patterns overlap). The stratiform weight
+// belongs to a layer centre (its fraction and that of the centre above); between the centres around a point it is
+// their mean weighted by (1 - x) and x times each centre's fraction - the type of the cloud that is there: under a
+// deck's base centre the empty centre below has no say (a plain linear mix made that interval half cumulus and moved
+// cloud_far_check's deck luminance from 9.1 % to 11.1 %). Like every field value it is blended between the snapshots:
+// continuous in position and in time.
+// [E] Ice share of the extinction above which the cloud is cirrus: the majority phase; the band half-width.
 inline constexpr double cloud_cirrus_ice_share = 0.5;
+inline constexpr double cloud_cirrus_ice_band = 0.1;
 // [E] Cloud fraction from which a layer is a deck: stratus / stratocumulus cover their grid cell almost fully (broken
-// cumulus fields stay below; the 0.9 of the spec).
+// cumulus fields stay below; the 0.9 of the spec); the band half-width.
 inline constexpr double cloud_stratiform_fraction = 0.9;
+inline constexpr double cloud_stratiform_fraction_band = 0.05;
+// [E] Thickening upward (fraction above minus fraction) over which a deck turns convective (cumulus): from 0 to this.
+inline constexpr double cloud_stratiform_thickening_band = 0.05;
 // [E] Horizontal stretch of the stratiform shape tile: 4 x 32 km across at the cumulus tile's 16 km height - features
 // 8 x wider than deep (decks are an order of magnitude wider than thick; their gaps are kilometres wide).
 inline constexpr double cloud_stratiform_stretch = 4.0;
@@ -140,10 +163,22 @@ inline constexpr double cloud_ice_tile_vertical_m = 2000.0;
 
 enum class CloudType { Cumulus, Stratiform, Cirrus };
 
-// The type at a point (above): fraction the cloud fraction of the point's layer, fraction_above that of the layer
-// above, ice_share the ice share of the extinction. height_above_ground_m is part of the interface for the base rules
-// (spec decisions 1-2: no cumulus at the ground) and not used by the type rule itself.
-CloudType cloud_type_of(double fraction, double fraction_above, double ice_share, double height_above_ground_m);
+struct CloudTypeWeights {
+    double cumulus = 1.0, stratiform = 0.0, cirrus = 0.0;  // sum 1
+};
+
+// The stratiform weight of a layer centre (above) with the cloud fraction fraction and fraction_above that of the
+// centre above it: smoothstep across cloud_stratiform_fraction +- band times 1 - smoothstep of the thickening.
+double cloud_stratiform_weight(double fraction, double fraction_above);
+// The stratiform weight at x in [0, 1] between the centre below a point (fraction_below) and the one above it
+// (fraction_above), fraction_above_next that of the centre above that one: the two centres' weights, weighted by
+// (1 - x) fraction_below and x fraction_above (above; 0 where both are empty).
+double cloud_stratiform_weight_between(double fraction_below, double fraction_above, double fraction_above_next,
+                                       double x);
+// The type weights at a point (above) of the stratiform weight there (interpolated between the centres) and the ice
+// share of the extinction: cirrus = smoothstep across cloud_cirrus_ice_share +- band, stratiform the rest times the
+// stratiform weight, cumulus what remains.
+CloudTypeWeights cloud_type_weights(double stratiform_weight, double ice_share);
 
 struct CloudNoise;
 

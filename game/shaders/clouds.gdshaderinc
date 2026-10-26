@@ -22,21 +22,23 @@
 // layer 0 and above that of layer 31 the end values hold (the core's at()), zero above 20 km. The two snapshots may
 // differ in size (the 1-deg analog beside a 0.25-deg ERA5 hour).
 //
-// Sub-grid shapes (cloud_noise.hpp): the fractal value v = s + e(sum_k w_k a_k (d_k - mean(d))) - the shape
+// Sub-grid shapes (cloud_noise.hpp): the fractal value v = s + sum_k e_k(w_k a_k (d_k - mean(d))) - the shape
 // noise's R channel s, sampled TRILINEARLY WITHOUT MIPMAPS (what the tables assume), eroded by the detail levels k
-// (e(P) = P below 0, CLOUD_DETAIL_LIFT x P above: the detail erodes a body from its rim and lifts few beads beside
-// it; isotropic tiles
+// (e_k(p) = p below 0, cloud_level_lift[k] x p above: the detail erodes a body from its rim, level 0 keeps its lobes
+// and the finer levels lift few beads beside it; isotropic tiles
 // CLOUD_DETAIL_TILE_M / 4^k, fBm gain: the perimeters have Lovejoy's D = 1.35), each band-limited by the pixel
 // footprint f (w_k = clamp(log2(l_k / f) - 1, 0, 1), l_k = tile / 4: an octave below the pixel enters with its mean 0,
 // so the silhouette stays irregular down to the pixel at every distance) - against the threshold t[L](cf) of the detail
 // state L = sum w_k: density = mean / m[L](cf) x ramp((v - t) / w(n)) (the soft edge ramp, mean-preserving at every
 // state: m = edge mean factor table; the edge width w(n) = w_min (w_max / w_min)^n varies along the perimeter by the
 // width noise n of the shape's A channel - wispy fringes and sharp edges); the covered area fraction stays cf. The
-// tables are 256 x states textures, linear between the state rows. The cloud type (cloud_type_of, core cloud_noise.hpp
-// cloud_type_of: cirrus where ice dominates, stratiform for a deck that does not thicken upward, else cumulus) picks
-// the shape coordinates: cumulus the shape tile, stratiform the tile stretched horizontally by
-// CLOUD_STRATIFORM_STRETCH, cirrus thin sheets (vertical tile CLOUD_ICE_TILE_V_M); the same detail and tables (affine
-// maps keep the value statistics). No detail beyond the footprint: the same optical depth (no pop). Shape coordinates
+// tables are 256 x states textures, linear between the state rows. The cloud types (core cloud_noise.hpp
+// cloud_type_weights: cirrus where ice dominates, stratiform for a deck that does not thicken upward, else cumulus)
+// are smooth weights; each type reads the shape at its coordinates - cumulus the shape tile, stratiform the tile
+// stretched horizontally by CLOUD_STRATIFORM_STRETCH, cirrus thin sheets (vertical tile CLOUD_ICE_TILE_V_M) - with the
+// same detail and tables (affine maps keep the value statistics), and the types' edge ramps are mixed by the weights
+// (each has the mean m: the water is kept; no seam, no pop). No detail beyond the footprint: the same optical depth
+// (no pop). Shape coordinates
 // are anisotropic (S_H across, S_V up: q = p / S_H + up(p) h(p) (1 / S_V - 1 / S_H), up = p / |p|), detail
 // isotropic; all Earth-fixed, so every eye and every
 // frame sees the same shapes. The camera's coordinates arrive wrapped to [0, 1) from the CPU (float64); level k's
@@ -78,6 +80,7 @@ global uniform vec3 cloud_detail_origin;     // level-0 detail coordinates of th
 global uniform float cloud_detail_mean;      // mean of the detail value over the texture (core)
 global uniform vec3 cloud_detail_weights;    // weights of R, G, B in the detail value (core)
 global uniform vec3 cloud_level_amplitude;   // a_k of the detail levels (core)
+global uniform vec3 cloud_level_lift;        // kept upward share of each detail level (core cloud_detail_lift)
 global uniform int cloud_detail_levels;      // levels used (quality preset; 0 = the shape alone)
 global uniform vec4 cloud_phase;             // Jendersie & d'Eon: (hg_g, draine_g, draine_alpha, draine_weight)
 global uniform float cloud_asymmetry_g;      // g of that phase function (closed form)
@@ -124,7 +127,6 @@ const float CLOUD_SHAPE_TILE_V_M = 16000.0;
 const float CLOUD_DETAIL_TILE_M = 1000.0;  // level 0; level k: / 4^k
 const int CLOUD_DETAIL_LEVELS = 3;          // core cloud_detail_levels
 const float CLOUD_DETAIL_STATES = 4.0;      // core cloud_detail_states (the table rows)
-const float CLOUD_DETAIL_LIFT = 0.25;       // core cloud_detail_lift (the detail's kept upward share)
 // Shape prefilter (core cloud_noise.hpp cloud_shape_prefilter_*; texels of the shape texture across the tile).
 const float CLOUD_SHAPE_PREFILTER_START_M = 3500.0;
 const float CLOUD_SHAPE_PREFILTER_LEVELS = 2.0;
@@ -134,13 +136,17 @@ const float CLOUD_SHAPE_TEXELS = 128.0;
 // [E] Ice-dominated cloud: thin sheets - the shape tile 2 km high instead of 16 (cirrus and altostratus are layered,
 // often a few hundred metres thick; no fibre direction: the snapshot has no wind, user decision 2026-10-25).
 const float CLOUD_ICE_TILE_V_M = 2000.0;
-// Cloud types (core cloud_noise.hpp CloudType, cloud_type_of; cloud_cirrus_ice_share, cloud_stratiform_fraction,
-// cloud_stratiform_stretch).
+// Cloud types (core cloud_noise.hpp CloudType, cloud_type_weights; cloud_cirrus_ice_share / _band,
+// cloud_stratiform_fraction / _fraction_band / _thickening_band, cloud_stratiform_stretch; smoke_test.gd compares
+// them with the core).
 const int CLOUD_TYPE_CUMULUS = 0;
 const int CLOUD_TYPE_STRATIFORM = 1;
 const int CLOUD_TYPE_CIRRUS = 2;
 const float CLOUD_CIRRUS_ICE_SHARE = 0.5;
+const float CLOUD_CIRRUS_ICE_BAND = 0.1;
 const float CLOUD_STRATIFORM_FRACTION = 0.9;
+const float CLOUD_STRATIFORM_FRACTION_BAND = 0.05;
+const float CLOUD_STRATIFORM_THICKENING_BAND = 0.05;
 const float CLOUD_STRATIFORM_STRETCH = 4.0;
 // A cloud fraction below half a code step counts as none (no division by ~0).
 const float CLOUD_MIN_FRACTION = 0.5 / 255.0;  // core constants.hpp cloud_min_cover
@@ -225,8 +231,7 @@ struct CloudCell {
 	float fraction;     // cloud fraction
 	float extinction;   // grid-mean extinction [1/m]
 	float ice;          // ice share of the extinction
-	float fraction_layer;  // cloud fraction of the layer centre at or below the point (the type rule)
-	float fraction_above;  // and of the layer centre above it
+	float stratiform;   // stratiform weight (core cloud_stratiform_weight_between; the type weights)
 	float depth_above;  // in-cloud optical depth from 20 km down to the layer centre above the point
 	float in_cloud_above;  // in-cloud extinction (mean / fraction) at that centre
 };
@@ -260,6 +265,14 @@ float cloud_profile_value(float value_below, float value_above, float fraction_b
 	return linear + b * (step_x - x) * (value_above - value_below);
 }
 
+// The stratiform weight of a layer centre (core cloud_stratiform_weight): its fraction across the deck band, times
+// 1 - the thickening upward (the fraction of the centre above minus its own) across its band.
+float cloud_stratiform_weight(float fraction, float fraction_above) {
+	float deck = smoothstep(CLOUD_STRATIFORM_FRACTION - CLOUD_STRATIFORM_FRACTION_BAND,
+			CLOUD_STRATIFORM_FRACTION + CLOUD_STRATIFORM_FRACTION_BAND, fraction);
+	return deck * (1.0 - smoothstep(0.0, CLOUD_STRATIFORM_THICKENING_BAND, fraction_above - fraction));
+}
+
 // One snapshot at a point: the centres k (below) and k + 1 (above) around layer coordinate s = layer - 0.5.
 CloudCell cloud_snapshot_cell(sampler3D field, sampler3D ice_share, vec3 size, vec2 lat_lon, float height_m) {
 	float s = cloud_layer_coordinate(height_m) - 0.5;
@@ -274,8 +287,19 @@ CloudCell cloud_snapshot_cell(sampler3D field, sampler3D ice_share, vec3 size, v
 	c.fraction = cloud_profile_value(below.r, above.r, below.r, above.r, x, gap);
 	c.extinction = cloud_profile_value(beta_b, beta_a, below.r, above.r, x, gap);
 	c.ice = texture(ice_share, cloud_field_uvw(lat_lon, clamp(s, 0.0, CLOUD_LAYERS - 1.0), size)).r;
-	c.fraction_layer = below.r;
-	c.fraction_above = above.r;
+	// The stratiform weight of the centres k and k + 1 weighted by (1 - x) and x times their fractions (core
+	// cloud_stratiform_weight_between; continuous through the centres); centre k + 1's needs the fraction of k + 2 -
+	// fetched only where centre k + 1 can be a deck.
+	float above_next = above.r;
+	if (above.r > CLOUD_STRATIFORM_FRACTION - CLOUD_STRATIFORM_FRACTION_BAND && k + 2.0 < CLOUD_LAYERS) {
+		above_next = texture(field, cloud_field_uvw(lat_lon, k + 2.0, size)).r;
+	}
+	float share_below = (1.0 - x) * below.r;
+	float share_above = x * above.r;
+	c.stratiform = share_below + share_above > 0.0
+			? (share_below * cloud_stratiform_weight(below.r, above.r)
+					+ share_above * cloud_stratiform_weight(above.r, above_next)) / (share_below + share_above)
+			: 0.0;
 	// The centre above the point (above centre 31: that centre itself, held to 20 km).
 	bool top = s >= CLOUD_LAYERS - 1.0;
 	vec4 centre = top ? above : (x <= 0.0 && s < 0.0 ? below : above);
@@ -291,8 +315,7 @@ CloudCell cloud_field(vec2 lat_lon, float height_m) {
 	c.fraction = 0.0;
 	c.extinction = 0.0;
 	c.ice = 0.0;
-	c.fraction_layer = 0.0;
-	c.fraction_above = 0.0;
+	c.stratiform = 0.0;
 	c.depth_above = 0.0;
 	c.in_cloud_above = 0.0;
 	if (height_m > CLOUD_TOP_M) {
@@ -305,8 +328,7 @@ CloudCell cloud_field(vec2 lat_lon, float height_m) {
 		c.fraction += w * b.fraction;
 		c.extinction += w * b.extinction;
 		c.ice += w * b.ice;
-		c.fraction_layer += w * b.fraction_layer;
-		c.fraction_above += w * b.fraction_above;
+		c.stratiform += w * b.stratiform;
 		c.depth_above += w * b.depth_above;
 		c.in_cloud_above += w * b.in_cloud_above;
 	}
@@ -316,8 +338,7 @@ CloudCell cloud_field(vec2 lat_lon, float height_m) {
 		c.fraction += cloud_blend * a.fraction;
 		c.extinction += cloud_blend * a.extinction;
 		c.ice += cloud_blend * a.ice;
-		c.fraction_layer += cloud_blend * a.fraction_layer;
-		c.fraction_above += cloud_blend * a.fraction_above;
+		c.stratiform += cloud_blend * a.stratiform;
 		c.depth_above += cloud_blend * a.depth_above;
 		c.in_cloud_above += cloud_blend * a.in_cloud_above;
 	}
@@ -373,17 +394,13 @@ vec3 cloud_shape_coordinates(vec3 offset_local, float height_m) {
 			CLOUD_SHAPE_TILE_V_M);
 }
 
-// The cloud type at a point (core cloud_type_of): ice share above CLOUD_CIRRUS_ICE_SHARE -> cirrus; the layer's
-// fraction >= CLOUD_STRATIFORM_FRACTION and not thickening upward -> stratiform; else cumulus. height_above_ground_m:
-// part of the core interface, not used by the rule.
-int cloud_type_of(CloudCell cell, float height_above_ground_m) {
-	if (cell.ice > CLOUD_CIRRUS_ICE_SHARE) {
-		return CLOUD_TYPE_CIRRUS;
-	}
-	if (cell.fraction_layer >= CLOUD_STRATIFORM_FRACTION && !(cell.fraction_above > cell.fraction_layer)) {
-		return CLOUD_TYPE_STRATIFORM;
-	}
-	return CLOUD_TYPE_CUMULUS;
+// The type weights at a point (core cloud_type_weights), indexed by CLOUD_TYPE_*: cirrus across the ice band,
+// stratiform the rest times the cell's stratiform weight, cumulus what remains; sum 1.
+vec3 cloud_type_weights(CloudCell cell) {
+	float cirrus = smoothstep(CLOUD_CIRRUS_ICE_SHARE - CLOUD_CIRRUS_ICE_BAND,
+			CLOUD_CIRRUS_ICE_SHARE + CLOUD_CIRRUS_ICE_BAND, cell.ice);
+	float stratiform = (1.0 - cirrus) * clamp(cell.stratiform, 0.0, 1.0);
+	return vec3(1.0 - cirrus - stratiform, stratiform, cirrus);
 }
 
 // The shape coordinates of the type (core cloud_shape_texel) at camera + offset_local.
@@ -459,8 +476,8 @@ float cloud_detail_state(float footprint_m) {
 	return state;
 }
 
-// The detail levels' sum P (core cloud_shape_value: v = s + cloud_detail_erosion(P)) at camera + offset_local for the
-// state.
+// The detail levels' eroded sum (core cloud_shape_value: v = s + sum_k cloud_detail_erosion(k, p_k)) at camera +
+// offset_local for the state.
 float cloud_detail_perturbation(vec3 offset_local, float state) {
 	float p = 0.0;
 	float scale = 1.0;
@@ -471,7 +488,8 @@ float cloud_detail_perturbation(vec3 offset_local, float state) {
 		}
 		vec3 q = fract(cloud_detail_origin * scale) + offset_local * (scale / CLOUD_DETAIL_TILE_M);
 		float d = dot(texture(cloud_noise_detail, q).rgb, cloud_detail_weights);
-		p += w * cloud_level_amplitude[k] * (d - cloud_detail_mean);
+		float term = w * cloud_level_amplitude[k] * (d - cloud_detail_mean);
+		p += term < 0.0 ? term : cloud_level_lift[k] * term;  // erosion (core cloud_detail_erosion)
 		scale *= 4.0;
 	}
 	return p;
@@ -514,9 +532,14 @@ float cloud_extinction_prefiltered(CloudCell cell, vec3 offset_local, float heig
 	vec2 uv = cloud_prefilter_uv(cell.fraction, level);
 	float threshold = texture(cloud_prefilter_threshold, uv).r;
 	vec3 shifted = cloud_subpixel_offset(offset_local, footprint_m);
-	vec4 s = cloud_shape_prefiltered(cloud_type_shape_coordinates(cloud_type_of(cell, height_m), shifted, height_m),
-			level);
-	float ramp = cloud_edge_ramp(s.r, threshold, s.a);
+	vec3 types = cloud_type_weights(cell);
+	float ramp = 0.0;
+	for (int type = 0; type < 3; type++) {  // the types' ramps mixed by their weights (one lookup outside the bands)
+		if (types[type] > 0.0) {
+			vec4 s = cloud_shape_prefiltered(cloud_type_shape_coordinates(type, shifted, height_m), level);
+			ramp += types[type] * cloud_edge_ramp(s.r, threshold, s.a);
+		}
+	}
 	if (ramp <= 0.0) {
 		return 0.0;
 	}
@@ -549,10 +572,14 @@ float cloud_extinction_in_cell(CloudCell cell, vec3 offset_local, float height_m
 	float state = cloud_detail_state(footprint_m);
 	float threshold = cloud_threshold(cell.fraction, state);
 	float detail = state > 0.0 ? cloud_detail_perturbation(offset_local, state) : 0.0;
-	detail = detail < 0.0 ? detail : CLOUD_DETAIL_LIFT * detail;  // erosion (core cloud_detail_erosion)
-	vec4 s = texture(cloud_noise_shape,
-			cloud_type_shape_coordinates(cloud_type_of(cell, height_m), offset_local, height_m));
-	float ramp = cloud_edge_ramp(s.r + detail, threshold, s.a);
+	vec3 types = cloud_type_weights(cell);
+	float ramp = 0.0;
+	for (int type = 0; type < 3; type++) {  // the types' ramps mixed by their weights (one lookup outside the bands)
+		if (types[type] > 0.0) {
+			vec4 s = texture(cloud_noise_shape, cloud_type_shape_coordinates(type, offset_local, height_m));
+			ramp += types[type] * cloud_edge_ramp(s.r + detail, threshold, s.a);
+		}
+	}
 	if (ramp <= 0.0) {
 		return 0.0;
 	}
