@@ -15,6 +15,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   overlap); beside it the ice share of the extinction (`cloud_render_ice_texels`, R8, `cloud_ice_texels`). Two
   snapshots resident (0.25 deg: 133 + 33 + 66 MB each, with the column texture below). Uploaded by `CloudFieldTexture` one layer per frame
   (staging volume + GPU copy; the longest frame step 5.2 ms, incl. the volume creation) instead of one 49 ms main-thread creation.
+- **Lifting condensation level in the snapshot** (`WeatherSnapshot::lcl_m(row, column)`, file format 2): per column the
+  condensation height (m above the ground) of the 2 m parcel, Romps 2017 exact (`weather-service.md`); the downsampled set
+  and the pole rows average it like the ground. Not yet used by the renderer (the flat cumulus base is a later task).
 - **Vertical profile rule** (`cloud_render_texels.hpp` `cloud_profile_value`, port in `clouds.gdshaderinc`): the two
   layer centres around a point are fetched apart; where cloud starts above a clear layer the base is flat and sharp
   (50 m transition, `cloud_base_transition_m` [E]) in the middle of the gap, partly so where cloud only thickens upward;

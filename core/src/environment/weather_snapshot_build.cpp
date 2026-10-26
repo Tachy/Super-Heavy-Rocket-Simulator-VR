@@ -75,6 +75,8 @@ WeatherSnapshot build_weather_snapshot_from_raw(const WeatherSnapshotId& id, con
         f.temperature_k = gfs_levels(raw_dir, key, "TMP");
         f.geopotential_height_m = gfs_levels(raw_dir, key, "HGT");
         f.surface_geopotential_height_m = gfs_record(raw_dir / gfs_surface_height_file_name(key));
+        f.temperature_2m_k = gfs_record(raw_dir / gfs_2m_file_name(key, "TMP"));
+        f.dewpoint_2m_k = gfs_record(raw_dir / gfs_2m_file_name(key, "DPT"));
         snapshot = WeatherSnapshot::from_gfs(id, f, geoid);
     } else {
         Era5Fields f;
@@ -87,6 +89,8 @@ WeatherSnapshot build_weather_snapshot_from_raw(const WeatherSnapshotId& id, con
         f.surface_pressure_pa = era5_grid(raw_dir, key, "surface_pressure", 1);
         f.total_column_water_vapour_kg_m2 = era5_grid(raw_dir, key, "total_column_water_vapour", 1);
         f.surface_geopotential_m2_s2 = era5_file(raw_dir / era5_static_orography_file_name, 1);
+        f.temperature_2m_k = era5_grid(raw_dir, key, "2m_temperature", 1);
+        f.dewpoint_2m_k = era5_grid(raw_dir, key, "2m_dewpoint_temperature", 1);
         snapshot = WeatherSnapshot::from_era5(id, f, geoid);
     }
     if (downsample > 1) return snapshot->downsampled(downsample);

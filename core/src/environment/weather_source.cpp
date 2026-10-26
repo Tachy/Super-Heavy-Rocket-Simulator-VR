@@ -27,7 +27,7 @@ struct Era5Variable {
     bool four_dimensional;
     bool time_independent;
 };
-constexpr std::array<Era5Variable, 7> era5_variables{{
+constexpr std::array<Era5Variable, 9> era5_variables{{
     {"fraction_of_cloud_cover", true, false},
     {"specific_cloud_liquid_water_content", true, false},
     {"specific_cloud_ice_water_content", true, false},
@@ -35,9 +35,12 @@ constexpr std::array<Era5Variable, 7> era5_variables{{
     {"surface_pressure", false, false},
     {"total_column_water_vapour", false, false},
     {"geopotential_at_surface", false, true},
+    {"2m_temperature", false, false},
+    {"2m_dewpoint_temperature", false, false},
 }};
 
 constexpr std::array<const char*, 5> gfs_variables{"TCDC", "CLMR", "ICMR", "HGT", "TMP"};
+constexpr std::array<const char*, 2> gfs_2m_variables{"TMP", "DPT"};  // at "2 m above ground"
 // Howard Hinnant's days_from_civil / civil_from_days (proleptic Gregorian), days since 1970-01-01.
 std::int64_t days_from_civil(std::int64_t y, int m, int d) {
     y -= m <= 2;
@@ -289,6 +292,10 @@ std::string gfs_level_file_name(const std::string& cache_key, std::string_view v
 
 std::string gfs_surface_height_file_name(const std::string& cache_key) { return cache_key + "_HGT_surface.grb2"; }
 
+std::string gfs_2m_file_name(const std::string& cache_key, std::string_view variable) {
+    return cache_key + "_" + std::string(variable) + "_2m.grb2";
+}
+
 std::string gfs_index_url(const WeatherSnapshotId& id) { return gfs_file_url(id) + ".idx"; }
 
 std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId& id, std::string_view idx_text) {
@@ -299,10 +306,15 @@ std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId& id, std::strin
 
     std::map<std::pair<std::string, int>, std::size_t> wanted;  // (variable, level) -> record position
     std::optional<std::size_t> surface_height;                  // HGT surface: the ground
+    std::map<std::string, std::optional<std::size_t>> two_meter;  // TMP / DPT "2 m above ground"
     for (std::size_t i = 0; i < records.size(); ++i) {
         const IndexRecord& r = records[i];
         if (r.stamp != stamp || r.forecast != forecast) continue;
         if (r.variable == "HGT" && r.level == "surface" && !surface_height) surface_height = i;
+        if (r.level == "2 m above ground" && std::find(gfs_2m_variables.begin(), gfs_2m_variables.end(), r.variable) !=
+                                                 gfs_2m_variables.end() && !two_meter[r.variable]) {
+            two_meter[r.variable] = i;
+        }
         if (std::find(gfs_variables.begin(), gfs_variables.end(), r.variable) == gfs_variables.end()) continue;
         // Pressure levels read "<N> mb"; "surface", "1 hybrid level" and the like are not wanted.
         const auto space = r.level.find(' ');
@@ -339,6 +351,12 @@ std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId& id, std::strin
     }
     if (!surface_height) throw std::runtime_error("GFS index: record HGT surface missing for " + url);
     add(*surface_height, gfs_surface_height_file_name(key));
+    for (const char* variable : gfs_2m_variables) {
+        if (!two_meter[variable]) {
+            throw std::runtime_error(std::string("GFS index: record ") + variable + " 2 m above ground missing for " + url);
+        }
+        add(*two_meter[variable], gfs_2m_file_name(key, variable));
+    }
     return out;
 }
 

@@ -14,7 +14,9 @@ only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only wi
 - **Sources**: on the first update the ERA5 `.zattrs` and the newest GFS cycle (`.idx` of up to 4 candidates) are probed; an
   unanswered probe is repeated every `retry_after_s` (60 s), so a session started offline gets ERA5 / GFS once online.
   `weather_bracket` returns the two snapshots; each missing one is a job (requests -> build -> `data/weather/cache/<key>.wthr`).
-  ERA5 hour = 6 timed files + the static `era5_geopotential_at_surface.blosc` (downloaded once, kept in `cache/raw`).
+  ERA5 hour = 8 timed files (the 6 cloud / temperature / pressure / vapour fields + `2m_temperature`,
+  `2m_dewpoint_temperature`) + the static `era5_geopotential_at_surface.blosc` (downloaded once, kept in `cache/raw`).
+  GFS = 111 byte ranges (5 variables x 22 levels, HGT surface, TMP and DPT "2 m above ground").
   Raw files are deleted after a build; a failed or damaged build deletes its output.
 - **Analog**: the shipped `data/weather/analog` 1-degree file of the epoch's month and nearest 6-hour slot is the
   baseline at once (nothing active yet, or the wanted snapshots failed); online the full-resolution ERA5 hour of the same
@@ -44,3 +46,16 @@ only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only wi
   that needs it again reloads it on a worker (the core cache makes that a conversion, no disk read). Steady state:
   the core cache (3 x ~130 MB) + the pair's metadata (before: two more dictionaries, ~464 MB); during an upload the
   uploading snapshot's 232 MB on top, freed when its slot is complete.
+- **2 m fields and the lifting condensation level** (Task 6 of the static-clouds plan): ERA5 `2m_temperature` /
+  `2m_dewpoint_temperature` (2.36 + 2.40 MB, +4.8 MB on ~149 MB = +3.2 % per hour), GFS `TMP` / `DPT` 2 m above ground
+  (0.51 + 0.53 MB, +1.0 MB on ~52 MB of pressure-level records = +2 % per snapshot; measured 2026-10-26 on the ARCO
+  store and the 2026-09-20 00Z f006 index). The build turns them into the per-column LCL (`lifting_condensation_level_m`,
+  Romps 2017 exact Lambert-W form, ERA5 with its surface pressure, GFS with the standard one; 0 where unknown) and
+  stores it in the `.wthr` file: format version 2 = ground block, then a float32 LCL block (+4 MB at 0.25 deg), then the
+  texels. Consumed by the cloud renderer from Task 7 (`weather-clouds.md`).
+- **Old files heal**: `read_weather_snapshot` refuses version-1 files (and anything else of another version). A
+  runtime-cache file is then treated as unloadable: deleted and rebuilt from a fresh download (the existing retry path,
+  "a snapshot file that cannot be loaded is deleted and rebuilt"), the analog baseline is the shipped
+  `data/weather/analog` (regenerated with `python tools/data_pipeline/fetch.py --force weather_analog`; the installer
+  ships the new files). The raw ERA5 files of an earlier download are deleted after every build, so the rebuild
+  downloads the 8 timed files again (the static orography stays cached).

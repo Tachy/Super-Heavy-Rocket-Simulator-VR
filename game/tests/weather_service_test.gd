@@ -170,7 +170,7 @@ func _test_archive_and_warp() -> void:
 		elif name.begins_with(keys[0]) or name.begins_with(keys[1]):
 			timed += 1
 	_check(static_count == 1, "the static geopotential file is fetched once (%d)" % static_count)
-	_check(timed == 12, "6 timed files for each of the two bracketing hours (%d)" % timed)
+	_check(timed == 16, "8 timed files for each of the two bracketing hours (%d)" % timed)
 	_check(service.blend() > 0.6 and service.blend() < 0.8, "blend of 18:42 is 0.7 (%.3f)" % service.blend())
 	for key: String in keys:
 		_check(FileAccess.file_exists(service._cache_dir.path_join(key + ".wthr")), "cache file of " + key)

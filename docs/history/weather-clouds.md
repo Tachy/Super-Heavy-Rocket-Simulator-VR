@@ -373,3 +373,9 @@ between rows); steep edges of varying width, 10-90 % rise median 8 m (< 10 m), 9
   colour (8.02 / 11.86 / 10.18), + the coverage rays' early end and the neighbour's colour in place of a sub-ray's
   full march (6.51 / 10.06 / 8.36), + the centre as one of the four rays (5.71 / 9.16 / 7.47), + the compacted list
   (4.66 / 8.25 / 6.74). Section 11 stays at 0.103 (was 0.102).
+
+## Snapshot file format 1 (superseded 2026-10-26, static-clouds Task 6)
+- `.wthr` version 1: header, ground heights, render texels, checksum (no lifting condensation level); ERA5 hour = 6
+  timed files + the static orography, GFS = 5 x 22 records + HGT surface. Replaced by version 2 (LCL block, 2 m
+  temperature and dew point in the downloads); version-1 files are refused and rebuilt.
+

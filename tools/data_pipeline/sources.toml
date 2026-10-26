@@ -414,7 +414,7 @@ credit = "E. R. Peck, K. Reeder, J. Opt. Soc. Am. 62, 958 (1972); A. Bucholtz, R
 
 [[source]]
 id = "weather_analog"
-name = "ERA5 hourly reanalysis on pressure levels (ECMWF / Copernicus Climate Change Service, DOI 10.24381/cds.bd0915c6), via Google's ARCO-ERA5 Zarr copy - the typical-weather analog set: the 15th of each month 00/06/12/18 UTC of 2025, cloud fraction, cloud liquid / ice water, temperature, surface pressure, column water vapour, orography; downsampled to 1 deg"
+name = "ERA5 hourly reanalysis on pressure levels (ECMWF / Copernicus Climate Change Service, DOI 10.24381/cds.bd0915c6), via Google's ARCO-ERA5 Zarr copy - the typical-weather analog set: the 15th of each month 00/06/12/18 UTC of 2025, cloud fraction, cloud liquid / ice water, temperature, surface pressure, column water vapour, orography, 2 m temperature and 2 m dew point (lifting condensation level); downsampled to 1 deg"
 url = "https://storage.googleapis.com/gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3/"
 target = "data/weather/analog/index.json"
 kind = "weather_analog"
@@ -424,7 +424,7 @@ credit = "Generated using Copernicus Climate Change Service information 2025; co
 
 [[source]]
 id = "weather_gfs"
-name = "NOAA Global Forecast System (GFS) 0.25 deg GRIB2 forecasts (NOAA Open Data Dissemination on AWS, noaa-gfs-bdp-pds) - cloud cover, cloud water / ice mixing ratio, geopotential height and temperature, fetched at run time by HTTP range requests"
+name = "NOAA Global Forecast System (GFS) 0.25 deg GRIB2 forecasts (NOAA Open Data Dissemination on AWS, noaa-gfs-bdp-pds) - cloud cover, cloud water / ice mixing ratio, geopotential height and temperature, 2 m temperature and 2 m dew point (TMP / DPT 2 m above ground), fetched at run time by HTTP range requests"
 url = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/"
 target = "data/weather"
 kind = "weather_licence"

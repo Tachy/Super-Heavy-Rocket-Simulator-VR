@@ -110,6 +110,18 @@ inline constexpr double dry_air_gas_constant_j_kgk = 287.05;
 // Specific gas constant of water vapour [S: 461.51 J/(kg K), Wallace & Hobbs 2006, Atmospheric Science, 2nd ed.,
 // sec. 3.1]; the virtual temperature is T (1 + (R_v / R_d - 1) q).
 inline constexpr double water_vapour_gas_constant_j_kgk = 461.51;
+// Lifting condensation level, exact form (Romps 2017, "Exact expression for the lifting condensation level", J. Atmos.
+// Sci. 74, 3891-3900, doi:10.1175/JAS-D-17-0102.1; constants as in the paper's published code, a constant-heat-capacity
+// ideal-gas model of vapour and liquid whose saturation pressure follows Kirchhoff's law).
+inline constexpr double romps_triple_point_temperature_k = 273.16;      // [S: Romps 2017]
+inline constexpr double romps_triple_point_pressure_pa = 611.65;        // [S: Romps 2017]
+inline constexpr double romps_vapour_internal_energy_at_triple_j_kg = 2.3740e6;  // [S: Romps 2017, E_0v]
+inline constexpr double romps_gravity_mps2 = 9.81;                      // [S: Romps 2017, g]
+inline constexpr double romps_dry_air_gas_constant_j_kgk = 287.04;      // [S: Romps 2017, R_a]
+inline constexpr double romps_vapour_gas_constant_j_kgk = 461.0;        // [S: Romps 2017, R_v]
+inline constexpr double romps_dry_air_cv_j_kgk = 719.0;                 // [S: Romps 2017, c_va]
+inline constexpr double romps_vapour_cv_j_kgk = 1418.0;                 // [S: Romps 2017, c_vv]
+inline constexpr double romps_liquid_c_j_kgk = 4119.0;                  // [S: Romps 2017, c_vl]
 // Tropospheric lapse rate of the standard atmosphere [S: 6.5 K/km, US Standard Atmosphere 1976, NOAA-S/T 76-1562]:
 // the temperature from the surface to the first pressure level above it.
 inline constexpr double standard_lapse_rate_k_per_m = 0.0065;

@@ -26,6 +26,9 @@
 //   with the virtual temperature of the vapour profile above; GFS has no humidity input and stays dry,
 //   rho = p / (R_d T) (moist air is less dense: the dry form overestimates by 0.61 q, <= ~1.5 % near a tropical
 //   surface, less aloft).
+// - Lifting condensation level per column from the 2 m temperature and dew point (Romps 2017, exact; ERA5 with its
+//   surface pressure, GFS with the standard one), m above the ground, 0 where unknown, capped at 20 km; the downsampled
+//   set and the pole rows average it like the ground height.
 // - Levels at or below the surface are ignored; the lowest level above the ground is held down to the ground, the
 //   highest one held upward; layer parts below the ground do not count, at() is zero below the ground.
 //
@@ -42,6 +45,7 @@
 
 #include "starsim/environment/geoid.hpp"
 #include "starsim/environment/weather_source.hpp"
+#include "starsim/math/constants.hpp"
 #include "starsim/weather_decode/weather_decode.hpp"
 
 namespace starsim::environment {
@@ -87,6 +91,13 @@ double geometric_height_m(double geopotential_height_m, double latitude_rad);
 // air (ERA5), the temperature for dry air (GFS).
 double cloud_water_density_kg_m3(double specific_kg_kg, double pressure_pa, double temperature_k);
 
+// Lifting condensation level (m above the 2 m level) of a parcel at the temperature t2m_k and dew point td2m_k lifted
+// dry-adiabatically from the pressure pressure_pa: Romps 2017's exact Lambert-W (branch -1) expression, with the
+// parcel's own moist heat capacity and gas constant (the exact form costs one W evaluation per column, ~100 ns).
+// Td >= T (saturated) gives 0; a non-finite or non-positive input gives NaN. The pressure matters little (84 kPa
+// instead of 101 kPa moves a 10 K spread by 3 m): pass the surface pressure when known, else the default.
+double lifting_condensation_level_m(double t2m_k, double td2m_k, double pressure_pa = constants::standard_pressure_pa);
+
 struct WeatherCell {
     double cloud_fraction = 0.0, liquid_water_kg_m3 = 0.0, ice_water_kg_m3 = 0.0;  // grid means
 };
@@ -95,6 +106,8 @@ struct WeatherCell {
 struct Era5Fields {
     weather_decode::FloatGrid cloud_fraction, liquid_kg_kg, ice_kg_kg, temperature_k, surface_pressure_pa,
         surface_geopotential_m2_s2, total_column_water_vapour_kg_m2;
+    // 2 m temperature and dew point (one level each); both empty = no lifting condensation level (lcl_m 0).
+    weather_decode::FloatGrid temperature_2m_k, dewpoint_2m_k;
     std::vector<double> levels_pa;
 };
 
@@ -102,6 +115,8 @@ struct Era5Fields {
 struct GfsFields {
     weather_decode::FloatGrid cloud_percent, liquid_kg_kg, ice_kg_kg, temperature_k, geopotential_height_m,
         surface_geopotential_height_m;
+    // TMP / DPT 2 m above ground (one level each); both empty = no lifting condensation level (lcl_m 0).
+    weather_decode::FloatGrid temperature_2m_k, dewpoint_2m_k;
     std::vector<double> levels_pa;
 };
 
@@ -116,8 +131,9 @@ public:
                                         double cloud_fraction);
     // From the cache form (weather_snapshot_file): ground rows x columns, texels as render_texels(). Throws
     // std::invalid_argument on a size mismatch.
+    // lcl_m empty = all zero.
     static WeatherSnapshot from_parts(const WeatherSnapshotId& id, int rows, int columns, std::vector<float> ground_m,
-                                      std::vector<std::uint8_t> texels);
+                                      std::vector<std::uint8_t> texels, std::vector<float> lcl_m = {});
 
     const WeatherSnapshotId& id() const { return id_; }
     int rows() const { return rows_; }
@@ -133,6 +149,11 @@ public:
     const std::vector<std::uint8_t>& texels() const { return texels_; }
     const std::vector<float>& ground_heights_m() const { return ground_m_; }
 
+    // Lifting condensation level of a column (m above the ground; 0 = none known), row * columns() + column. The 2 m
+    // parcel's condensation height from the data's 2 m temperature and dew point; the base of convective cloud.
+    float lcl_m(int row, int column) const { return lcl_m_[static_cast<std::size_t>(row) * columns_ + column]; }
+    const std::vector<float>& lcl_heights_m() const { return lcl_m_; }
+
     // Box mean over factor x factor cells (analog set, factor 4: 1 deg); needs (rows - 1) and columns divisible by it.
     WeatherSnapshot downsampled(int factor) const;
 
@@ -144,6 +165,7 @@ private:
     WeatherSnapshotId id_;
     int rows_ = 0, columns_ = 0;
     std::vector<float> ground_m_;        // rows x columns, ellipsoidal
+    std::vector<float> lcl_m_;           // rows x columns, above the ground
     std::vector<std::uint8_t> texels_;   // layers x rows x columns x 4
 };
 

@@ -36,6 +36,38 @@ const std::array<double, 256>& water_decode_table() {
     return table;
 }
 
+// Lambert W, branch -1, for x in [-1/e, 0): the solution w <= -1 of w e^w = x. Start from the branch-point series near
+// -1/e (Corless et al. 1996, eq. 4.22) and the asymptotic form near 0, then Halley's iteration.
+double lambert_w_minus1(double x) {
+    constexpr double inv_e = 0.36787944117144233;
+    if (x <= -inv_e) return -1.0;
+    double w;
+    if (x < -0.25) {
+        const double p = -std::sqrt(2.0 * (std::exp(1.0) * x + 1.0));
+        w = -1.0 + p - p * p / 3.0 + 11.0 / 72.0 * p * p * p;
+    } else {
+        const double l1 = std::log(-x), l2 = std::log(-l1);
+        w = l1 - l2 + l2 / l1;
+    }
+    for (int i = 0; i < 40; ++i) {
+        const double ew = std::exp(w);
+        const double f = w * ew - x;
+        const double step = f / (ew * (w + 1.0) - (w + 2.0) * f / (2.0 * w + 2.0));
+        w -= step;
+        if (std::abs(step) <= 1e-14 * std::abs(w)) break;
+    }
+    return w;
+}
+
+// Romps' saturation vapour pressure over liquid water (Pa), his eq. for constant heat capacities.
+double romps_saturation_pressure_pa(double temperature_k) {
+    const double rv = c::romps_vapour_gas_constant_j_kgk, cvl = c::romps_liquid_c_j_kgk, cvv = c::romps_vapour_cv_j_kgk;
+    const double t0 = c::romps_triple_point_temperature_k;
+    return c::romps_triple_point_pressure_pa * std::pow(temperature_k / t0, (cvv + rv - cvl) / rv) *
+           std::exp((c::romps_vapour_internal_energy_at_triple_j_kg - (cvv - cvl) * t0) / rv *
+                    (1.0 / t0 - 1.0 / temperature_k));
+}
+
 double finite_or_zero(double v) { return std::isfinite(v) ? v : 0.0; }
 
 // Value of a grid cell without the bounds check of FloatGrid::at (shapes are validated once).
@@ -52,6 +84,20 @@ void require_shape(const FloatGrid& g, int levels, int rows, int columns, const 
 
 void require_grid(int rows, int columns) {
     if (rows < 2 || columns < 2) throw std::invalid_argument("weather snapshot: grid needs >= 2 rows and columns");
+}
+
+// The 2 m temperature and dew point are optional but come as a pair; true when present (shape-checked).
+bool require_optional_2m(const FloatGrid& t2m, const FloatGrid& td2m, int rows, int columns) {
+    if (t2m.values.empty() && td2m.values.empty()) return false;
+    require_shape(t2m, 1, rows, columns, "temperature_2m_k");
+    require_shape(td2m, 1, rows, columns, "dewpoint_2m_k");
+    return true;
+}
+
+// Lifting condensation level of one column from the 2 m fields; 0 (none known) where the data is missing.
+float column_lcl_m(const FloatGrid& t2m, const FloatGrid& td2m, int row, int column, double pressure_pa) {
+    const double lcl = lifting_condensation_level_m(cell(t2m, 0, row, column), cell(td2m, 0, row, column), pressure_pa);
+    return std::isfinite(lcl) ? static_cast<float>(std::min(lcl, weather_top_m)) : 0.0f;
 }
 
 double row_latitude_rad(int row, int rows) { return c::pi / 2.0 - row * c::pi / (rows - 1); }
@@ -251,9 +297,33 @@ double cloud_water_density_kg_m3(double specific_kg_kg, double pressure_pa, doub
     return specific_kg_kg * pressure_pa / (c::dry_air_gas_constant_j_kgk * temperature_k);
 }
 
+double lifting_condensation_level_m(double t2m_k, double td2m_k, double pressure_pa) {
+    if (!(t2m_k > 0.0) || !(td2m_k > 0.0) || !(pressure_pa > 0.0) || !std::isfinite(t2m_k) || !std::isfinite(td2m_k) ||
+        !std::isfinite(pressure_pa)) {
+        return nan;
+    }
+    if (td2m_k >= t2m_k) return 0.0;
+    const double ra = c::romps_dry_air_gas_constant_j_kgk, rv = c::romps_vapour_gas_constant_j_kgk;
+    const double cva = c::romps_dry_air_cv_j_kgk, cvv = c::romps_vapour_cv_j_kgk, cvl = c::romps_liquid_c_j_kgk;
+    const double t0 = c::romps_triple_point_temperature_k;
+    // Vapour pressure of the dew point; the parcel's mass fraction of vapour, gas constant and heat capacity.
+    const double pv = romps_saturation_pressure_pa(td2m_k);
+    const double relative_humidity = pv / romps_saturation_pressure_pa(t2m_k);
+    const double qv = ra * pv / (rv * pressure_pa + (ra - rv) * pv);
+    const double rm = (1.0 - qv) * ra + qv * rv;
+    const double cpm = (1.0 - qv) * (cva + ra) + qv * (cvv + rv);
+    // Romps 2017: z = cpm T / g (1 - b / (a W_-1((b / a) c^(1/a)))), with a, b, c from his eqs. 22-24.
+    const double a = -(cvv + rv - cvl) / rv + cpm / rm;
+    const double b = -(c::romps_vapour_internal_energy_at_triple_j_kg - (cvv - cvl) * t0) / (rv * t2m_k);
+    const double cc = relative_humidity * std::exp(b);
+    const double w = lambert_w_minus1(b / a * std::pow(cc, 1.0 / a));
+    return std::max(0.0, cpm * t2m_k / c::romps_gravity_mps2 * (1.0 - b / (a * w)));
+}
+
 WeatherSnapshot::WeatherSnapshot(const WeatherSnapshotId& id, int rows, int columns)
     : id_(id), rows_(rows), columns_(columns),
       ground_m_(static_cast<std::size_t>(rows) * columns, 0.0f),
+      lcl_m_(static_cast<std::size_t>(rows) * columns, 0.0f),
       texels_(static_cast<std::size_t>(weather_layer_count) * rows * columns * channels, 0) {}
 
 std::size_t WeatherSnapshot::texel_index(int layer, int row, int column) const {
@@ -271,6 +341,7 @@ WeatherSnapshot WeatherSnapshot::from_era5(const WeatherSnapshotId& id, const Er
     require_shape(f.surface_pressure_pa, 1, rows, columns, "surface_pressure_pa");
     require_shape(f.surface_geopotential_m2_s2, 1, rows, columns, "surface_geopotential_m2_s2");
     require_shape(f.total_column_water_vapour_kg_m2, 1, rows, columns, "total_column_water_vapour_kg_m2");
+    const bool has_lcl = require_optional_2m(f.temperature_2m_k, f.dewpoint_2m_k, rows, columns);
 
     WeatherSnapshot s(id, rows, columns);
     const std::vector<int> order = descending_pressure_order(f.levels_pa);
@@ -300,6 +371,10 @@ WeatherSnapshot WeatherSnapshot::from_era5(const WeatherSnapshotId& id, const Er
             }
             const double ground = geometric_height_m(finite_or_zero(phis) / c::standard_gravity_mps2, lat) + n;
             s.ground_m_[static_cast<std::size_t>(r) * columns + col] = static_cast<float>(ground);
+            if (has_lcl) {
+                s.lcl_m_[static_cast<std::size_t>(r) * columns + col] =
+                    column_lcl_m(f.temperature_2m_k, f.dewpoint_2m_k, r, col, ps);
+            }
             layers.build(samples, ground, s.texels_.data() + s.texel_index(0, r, col), layer_stride);
         }
     });
@@ -317,6 +392,7 @@ WeatherSnapshot WeatherSnapshot::from_gfs(const WeatherSnapshotId& id, const Gfs
     require_shape(f.temperature_k, levels, rows, columns, "temperature_k");
     require_shape(f.geopotential_height_m, levels, rows, columns, "geopotential_height_m");
     require_shape(f.surface_geopotential_height_m, 1, rows, columns, "surface_geopotential_height_m");
+    const bool has_lcl = require_optional_2m(f.temperature_2m_k, f.dewpoint_2m_k, rows, columns);
 
     WeatherSnapshot s(id, rows, columns);
     const std::size_t layer_stride = static_cast<std::size_t>(rows) * columns * channels;
@@ -345,6 +421,11 @@ WeatherSnapshot WeatherSnapshot::from_gfs(const WeatherSnapshotId& id, const Gfs
             }
             const double ground = geometric_height_m(surface_gpm, lat) + n;
             s.ground_m_[static_cast<std::size_t>(r) * columns + col] = static_cast<float>(ground);
+            // GFS 2 m fields come without a surface pressure: the standard one (the LCL is insensitive to it).
+            if (has_lcl) {
+                s.lcl_m_[static_cast<std::size_t>(r) * columns + col] =
+                    column_lcl_m(f.temperature_2m_k, f.dewpoint_2m_k, r, col, c::standard_pressure_pa);
+            }
             layers.build(samples, ground, s.texels_.data() + s.texel_index(0, r, col), layer_stride);
         }
     });
@@ -373,9 +454,12 @@ WeatherSnapshot WeatherSnapshot::uniform_slab(int rows, int columns, double bott
 }
 
 WeatherSnapshot WeatherSnapshot::from_parts(const WeatherSnapshotId& id, int rows, int columns,
-                                            std::vector<float> ground_m, std::vector<std::uint8_t> texels) {
+                                            std::vector<float> ground_m, std::vector<std::uint8_t> texels,
+                                            std::vector<float> lcl_m) {
     require_grid(rows, columns);
+    if (lcl_m.empty()) lcl_m.assign(static_cast<std::size_t>(rows) * columns, 0.0f);
     if (ground_m.size() != static_cast<std::size_t>(rows) * columns ||
+        lcl_m.size() != static_cast<std::size_t>(rows) * columns ||
         texels.size() != static_cast<std::size_t>(weather_layer_count) * rows * columns * channels) {
         throw std::invalid_argument("weather snapshot: parts do not match the grid");
     }
@@ -383,6 +467,7 @@ WeatherSnapshot WeatherSnapshot::from_parts(const WeatherSnapshotId& id, int row
     s.rows_ = rows;
     s.columns_ = columns;
     s.ground_m_ = std::move(ground_m);
+    s.lcl_m_ = std::move(lcl_m);
     s.texels_ = std::move(texels);
     return s;
 }
@@ -391,10 +476,17 @@ void WeatherSnapshot::make_poles_uniform() {
     // All columns of a pole row are one point: their mean (ground and every layer) so no longitude seam appears there.
     const auto& table = water_decode_table();
     for (int r : {0, rows_ - 1}) {
-        double ground = 0.0;
-        for (int col = 0; col < columns_; ++col) ground += ground_m_[static_cast<std::size_t>(r) * columns_ + col];
+        double ground = 0.0, lcl = 0.0;
+        for (int col = 0; col < columns_; ++col) {
+            ground += ground_m_[static_cast<std::size_t>(r) * columns_ + col];
+            lcl += lcl_m_[static_cast<std::size_t>(r) * columns_ + col];
+        }
         ground /= columns_;
-        for (int col = 0; col < columns_; ++col) ground_m_[static_cast<std::size_t>(r) * columns_ + col] = static_cast<float>(ground);
+        lcl /= columns_;
+        for (int col = 0; col < columns_; ++col) {
+            ground_m_[static_cast<std::size_t>(r) * columns_ + col] = static_cast<float>(ground);
+            lcl_m_[static_cast<std::size_t>(r) * columns_ + col] = static_cast<float>(lcl);
+        }
         for (int layer = 0; layer < weather_layer_count; ++layer) {
             double sum[3] = {0.0, 0.0, 0.0};
             for (int col = 0; col < columns_; ++col) {
@@ -476,7 +568,7 @@ WeatherSnapshot WeatherSnapshot::downsampled(int factor) const {
     const auto& table = water_decode_table();
     for_each_row(rows, [&](int r) {
         for (int col = 0; col < columns; ++col) {
-            double weight_sum = 0.0, ground = 0.0;
+            double weight_sum = 0.0, ground = 0.0, lcl = 0.0;
             std::array<std::array<double, 3>, weather_layer_count> sums{};
             for (int dr = -h; dr <= h; ++dr) {
                 const int sr = r * factor + dr;
@@ -486,6 +578,7 @@ WeatherSnapshot WeatherSnapshot::downsampled(int factor) const {
                     const double w = weight(dr) * weight(dc);
                     weight_sum += w;
                     ground += w * ground_m_[static_cast<std::size_t>(sr) * columns_ + sc];
+                    lcl += w * lcl_m_[static_cast<std::size_t>(sr) * columns_ + sc];
                     for (int layer = 0; layer < weather_layer_count; ++layer) {
                         const std::size_t i = texel_index(layer, sr, sc);
                         sums[layer][0] += w * decode_weather_cloud_fraction(texels_[i]);
@@ -495,6 +588,7 @@ WeatherSnapshot WeatherSnapshot::downsampled(int factor) const {
                 }
             }
             out.ground_m_[static_cast<std::size_t>(r) * columns + col] = static_cast<float>(ground / weight_sum);
+            out.lcl_m_[static_cast<std::size_t>(r) * columns + col] = static_cast<float>(lcl / weight_sum);
             for (int layer = 0; layer < weather_layer_count; ++layer) {
                 const std::size_t i = out.texel_index(layer, r, col);
                 out.texels_[i] = encode_weather_cloud_fraction(sums[layer][0] / weight_sum);

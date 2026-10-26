@@ -179,7 +179,7 @@ func _check_weather(core: StarsimCore) -> bool:
 	var offline: Dictionary = core.weather_bracket(hour + 24.0 * 365 * 5, 1, "", -1, 2025)
 	_check(offline.get("ok", false) and offline["before"]["kind"] == "analog", "weather_bracket offline: analog")
 	var requests: Array = core.weather_requests(bracket["before"], "")
-	_check(requests.size() == 7 and String(requests[0]["url"]).begins_with("https://"), "weather_requests: seven ERA5 files")
+	_check(requests.size() == 9 and String(requests[0]["url"]).begins_with("https://"), "weather_requests: nine ERA5 files")
 	_check(core.weather_gfs_cycle_candidates(hour + 24.0 * 365 * 5, 3).size() == 3, "weather_gfs_cycle_candidates")
 	_check(core.weather_gfs_cycle_candidates(hour, -1).is_empty(), "weather_gfs_cycle_candidates: negative count returns empty")
 	_check(core.weather_snapshot_step(1.0, 10.0) == 1 and core.weather_snapshot_step(1e6, 100.0) == 0, "weather_snapshot_step")

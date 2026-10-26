@@ -45,6 +45,8 @@ VARIABLES = (
     ("surface_pressure", False, False),
     ("total_column_water_vapour", False, False),
     ("geopotential_at_surface", False, True),
+    ("2m_temperature", False, False),
+    ("2m_dewpoint_temperature", False, False),
 )
 
 

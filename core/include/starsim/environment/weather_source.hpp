@@ -84,15 +84,19 @@ inline constexpr const char* era5_static_orography_file_name = "era5_geopotentia
 std::string era5_file_name(const std::string& cache_key, std::string_view variable);
 std::string gfs_level_file_name(const std::string& cache_key, std::string_view variable, int level_mb);
 std::string gfs_surface_height_file_name(const std::string& cache_key);
+// "<key>_TMP_2m.grb2" / "<key>_DPT_2m.grb2": the 2 m above ground temperature and dew point.
+std::string gfs_2m_file_name(const std::string& cache_key, std::string_view variable);
 
-// Requests for one snapshot: ERA5 gives seven files - six timed (fraction_of_cloud_cover,
+// Requests for one snapshot: ERA5 gives nine files - six timed (fraction_of_cloud_cover,
 // specific_cloud_liquid_water_content, specific_cloud_ice_water_content, temperature, surface_pressure,
-// total_column_water_vapour) and the static geopotential_at_surface (URL with the same t, file name without it; the
-// caller skips it if cached); an analog snapshot requests its reference-year hour.
+// total_column_water_vapour), the static geopotential_at_surface (URL with the same t, file name without it; the
+// caller skips it if cached) and the timed 2m_temperature, 2m_dewpoint_temperature (lifting condensation level, 4.8 MB
+// together); an analog snapshot requests its reference-year hour.
 std::vector<WeatherRequest> era5_requests(const WeatherSnapshotId&);
 
 std::string gfs_index_url(const WeatherSnapshotId&);
-// One byte range per wanted record (TCDC, CLMR, ICMR, HGT, TMP on 1000..50 mb, then HGT surface), the last byte of a
+// One byte range per wanted record (TCDC, CLMR, ICMR, HGT, TMP on 1000..50 mb, then HGT surface, then TMP and DPT at
+// 2 m above ground, 1.0 MB together), the last byte of a
 // record is the byte before the next record's offset. Throws std::runtime_error when a wanted record is missing.
 std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId&, std::string_view idx_text);
 

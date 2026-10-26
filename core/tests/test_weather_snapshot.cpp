@@ -6,10 +6,13 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -473,9 +476,15 @@ TEST_CASE("Snapshot files round-trip; damaged ones are refused", "[weather]") {
     id.cycle_hour = 1110000;
     id.lead_h = 54;
     id.analog_hour = 7;
-    const auto snapshot = WeatherSnapshot::from_era5(
-        id, era5_fields(rows, columns, [&](int r, int c) -> const Era5Column& { return cols[(r + c) % 6]; }),
-        coarse_geoid());
+    auto fields = era5_fields(rows, columns, [&](int r, int c) -> const Era5Column& { return cols[(r + c) % 6]; });
+    fields.temperature_2m_k = fields.dewpoint_2m_k = grid(1, rows, columns);
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < columns; ++c) {
+            set(fields.temperature_2m_k, 0, r, c, 285.0 + r);
+            set(fields.dewpoint_2m_k, 0, r, c, 280.0 + 0.5 * c);
+        }
+    }
+    const auto snapshot = WeatherSnapshot::from_era5(id, fields, coarse_geoid());
     const auto file = unique_temp("weather_round_trip");
     write_weather_snapshot(file, snapshot);
     const auto back = read_weather_snapshot(file);
@@ -489,6 +498,7 @@ TEST_CASE("Snapshot files round-trip; damaged ones are refused", "[weather]") {
     CHECK(back->columns() == columns);
     CHECK(back->render_texels() == snapshot.render_texels());
     CHECK(back->ground_heights_m() == snapshot.ground_heights_m());
+    CHECK(back->lcl_heights_m() == snapshot.lcl_heights_m());
 
     const auto bytes = read_bytes(file);
     const auto damaged = unique_temp("weather_damaged");
@@ -505,6 +515,100 @@ TEST_CASE("Snapshot files round-trip; damaged ones are refused", "[weather]") {
     CHECK_FALSE(read_weather_snapshot(unique_temp("weather_missing")).has_value());
     std::filesystem::remove(file);
     std::filesystem::remove(damaged);
+}
+
+TEST_CASE("Lifting condensation level follows Romps' exact expression", "[weather]") {
+    // Reference: an independent Python port of the published code of Romps 2017 (J. Atmos. Sci. 74, 3891, doi:10.1175/
+    // JAS-D-17-0102.1; scipy.special.lambertw, branch -1, his constants), dew point -> vapour pressure with his
+    // saturation pressure: T = 303.15 K, Td = 293.15 K, p = 100 kPa -> 1281.38 m (Espy: 1250 m).
+    CHECK(lifting_condensation_level_m(303.15, 293.15, 100000.0) == Catch::Approx(1281.38).epsilon(0.01));
+    CHECK(lifting_condensation_level_m(303.15, 293.15, 101325.0) == Catch::Approx(1281.15).epsilon(0.01));
+    CHECK(lifting_condensation_level_m(303.15, 293.15) == lifting_condensation_level_m(303.15, 293.15, 101325.0));
+    CHECK(lifting_condensation_level_m(288.15, 283.15, 101325.0) == Catch::Approx(631.71).epsilon(0.01));
+    CHECK(lifting_condensation_level_m(260.0, 255.0, 101325.0) == Catch::Approx(611.11).epsilon(0.01));
+    CHECK(lifting_condensation_level_m(310.0, 280.0, 101325.0) == Catch::Approx(3730.05).epsilon(0.01));
+    // Saturated or supersaturated 2 m air: the base is at the ground.
+    CHECK(lifting_condensation_level_m(290.0, 290.0) == 0.0);
+    CHECK(lifting_condensation_level_m(290.0, 291.0) == 0.0);
+    // Invalid input.
+    CHECK(std::isnan(lifting_condensation_level_m(std::nan(""), 280.0)));
+    CHECK(std::isnan(lifting_condensation_level_m(290.0, 0.0)));
+    // Monotone in the spread, near the 125 m/K rule at a small one.
+    double previous = 0.0;
+    for (double spread = 0.5; spread < 40.0; spread += 0.5) {
+        const double z = lifting_condensation_level_m(295.0, 295.0 - spread);
+        CHECK(z > previous);
+        previous = z;
+    }
+    CHECK(lifting_condensation_level_m(295.0, 294.0) == Catch::Approx(125.0).epsilon(0.1));
+}
+
+TEST_CASE("A built snapshot stores the lifting condensation level per column", "[weather]") {
+    const int rows = 5, columns = 8;
+    const auto& cols = era5_columns().columns;
+    auto fields = era5_fields(rows, columns, [&](int, int) -> const Era5Column& { return cols[0]; });
+    fields.temperature_2m_k = fields.dewpoint_2m_k = grid(1, rows, columns);
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < columns; ++c) {
+            set(fields.temperature_2m_k, 0, r, c, 300.0);
+            set(fields.dewpoint_2m_k, 0, r, c, 300.0 - 2.0 * (c + 1));
+        }
+    }
+    const auto snapshot = WeatherSnapshot::from_era5(era5_id(), fields, coarse_geoid());
+    const double ps = cols[0].surface_pressure_pa;
+    // Interior rows keep their own column's value (pole rows are averaged), with the column's surface pressure.
+    for (int c = 0; c < columns; ++c) {
+        CHECK(snapshot.lcl_m(2, c) ==
+              Catch::Approx(lifting_condensation_level_m(300.0, 300.0 - 2.0 * (c + 1), ps)).epsilon(1e-5));
+    }
+    CHECK(snapshot.lcl_m(2, 7) > snapshot.lcl_m(2, 0));
+    // Pole rows: one value (the mean of the row).
+    for (int c = 1; c < columns; ++c) CHECK(snapshot.lcl_m(0, c) == snapshot.lcl_m(0, 0));
+    // Downsampling averages it like the ground.
+    const auto coarse = snapshot.downsampled(4);
+    CHECK(coarse.lcl_m(1, 0) > 0.0f);
+    // Without the 2 m fields the level is unknown (0).
+    const auto bare = WeatherSnapshot::from_era5(
+        era5_id(), era5_fields(rows, columns, [&](int, int) -> const Era5Column& { return cols[0]; }), coarse_geoid());
+    CHECK(bare.lcl_m(2, 3) == 0.0f);
+    // Only one of the pair, or a wrong shape, is refused.
+    auto half = fields;
+    half.dewpoint_2m_k = FloatGrid{};
+    CHECK_THROWS_AS(WeatherSnapshot::from_era5(era5_id(), half, coarse_geoid()), std::invalid_argument);
+}
+
+TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
+    const int rows = 5, columns = 8;
+    const auto snapshot = WeatherSnapshot::uniform_slab(rows, columns, 1000.0, 2000.0, 5e-4, 0.5);
+    const auto file = unique_temp("weather_v1");
+    write_weather_snapshot(file, snapshot);
+    REQUIRE(read_weather_snapshot(file).has_value());
+    auto bytes = read_bytes(file);
+    // The version 1 layout: no LCL block after the ground heights; header of 64 bytes; checksum recomputed (FNV-1a 64).
+    const std::size_t cells = static_cast<std::size_t>(rows) * columns, header = 64;
+    bytes.erase(bytes.begin() + static_cast<std::ptrdiff_t>(header + cells * sizeof(float)),
+                bytes.begin() + static_cast<std::ptrdiff_t>(header + 2 * cells * sizeof(float)));
+    const std::uint32_t one = 1;
+    std::memcpy(bytes.data() + 8, &one, sizeof(one));
+    bytes.resize(bytes.size() - sizeof(std::uint64_t));
+    std::uint64_t hash = 14695981039346656037ull;
+    for (char b : bytes) hash = (hash ^ static_cast<unsigned char>(b)) * 1099511628211ull;
+    bytes.insert(bytes.end(), reinterpret_cast<const char*>(&hash), reinterpret_cast<const char*>(&hash) + sizeof(hash));
+    const auto old = unique_temp("weather_v1_old");
+    write_bytes(old, bytes);
+    CHECK_FALSE(read_weather_snapshot(old).has_value());
+    // The same bytes with the right version number (and the missing block) are not a valid version 2 file either.
+    const std::uint32_t two = weather_snapshot_file_version;
+    CHECK(two == 2);
+    std::memcpy(bytes.data() + 8, &two, sizeof(two));
+    bytes.resize(bytes.size() - sizeof(std::uint64_t));
+    hash = 14695981039346656037ull;
+    for (char b : bytes) hash = (hash ^ static_cast<unsigned char>(b)) * 1099511628211ull;
+    bytes.insert(bytes.end(), reinterpret_cast<const char*>(&hash), reinterpret_cast<const char*>(&hash) + sizeof(hash));
+    write_bytes(old, bytes);
+    CHECK_FALSE(read_weather_snapshot(old).has_value());
+    std::filesystem::remove(file);
+    std::filesystem::remove(old);
 }
 
 TEST_CASE("Writing a snapshot removes stale temp files of killed writers", "[weather]") {

@@ -21,10 +21,11 @@ constexpr std::int32_t max_grid_size = 1 << 14;  // a sanity bound on rows / col
 
 void write_weather_snapshot(const std::filesystem::path& file, const WeatherSnapshot& snapshot) {
     const auto& ground = snapshot.ground_heights_m();
+    const auto& lcl = snapshot.lcl_heights_m();
     const auto& texels = snapshot.texels();
     const WeatherSnapshotId& id = snapshot.id();
     std::vector<char> bytes;
-    bytes.reserve(96 + ground.size() * sizeof(float) + texels.size());
+    bytes.reserve(96 + 2 * ground.size() * sizeof(float) + texels.size());
     bytes.insert(bytes.end(), magic, magic + sizeof(magic));
     detail::append_bytes(bytes, weather_snapshot_file_version);
     detail::append_bytes(bytes, std::uint32_t{0});
@@ -39,6 +40,8 @@ void write_weather_snapshot(const std::filesystem::path& file, const WeatherSnap
     detail::append_bytes(bytes, texel_channels);
     const auto* g = reinterpret_cast<const char*>(ground.data());
     bytes.insert(bytes.end(), g, g + ground.size() * sizeof(float));
+    const auto* l = reinterpret_cast<const char*>(lcl.data());
+    bytes.insert(bytes.end(), l, l + lcl.size() * sizeof(float));
     const auto* t = reinterpret_cast<const char*>(texels.data());
     bytes.insert(bytes.end(), t, t + texels.size());
     detail::append_bytes(bytes, detail::fnv1a64(bytes.data(), bytes.size()));
@@ -77,9 +80,9 @@ std::optional<WeatherSnapshot> read_weather_snapshot(const std::filesystem::path
         return std::nullopt;
     }
     const std::uint64_t cells = static_cast<std::uint64_t>(rows) * static_cast<std::uint64_t>(columns);
-    std::vector<float> ground;
+    std::vector<float> ground, lcl;
     std::vector<std::uint8_t> texels;
-    if (!r.read_array(ground, cells) || !r.read_array(texels, cells * layers * channels)) return std::nullopt;
+    if (!r.read_array(ground, cells) || !r.read_array(lcl, cells) || !r.read_array(texels, cells * layers * channels)) return std::nullopt;
     if (r.at != payload) return std::nullopt;
 
     WeatherSnapshotId id;
@@ -88,7 +91,8 @@ std::optional<WeatherSnapshot> read_weather_snapshot(const std::filesystem::path
     id.valid_hour = valid_hour;
     id.cycle_hour = cycle_hour;
     id.analog_hour = analog_hour;
-    return WeatherSnapshot::from_parts(id, rows, columns, std::move(ground), std::move(texels));
+    return WeatherSnapshot::from_parts(id, rows, columns, std::move(ground), std::move(texels),
+                                      std::move(lcl));
 }
 
 }  // namespace starsim::environment

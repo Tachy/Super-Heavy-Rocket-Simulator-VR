@@ -25,7 +25,9 @@ def test_temperature_url_for_2025_04_15_12_utc():
     assert urls[f"era5_{t}_temperature.blosc"] == f"{weather.STORE_URL}temperature/{t}.0.0.0"
     assert urls[f"era5_{t}_surface_pressure.blosc"] == f"{weather.STORE_URL}surface_pressure/{t}.0.0"
     assert urls[weather.STATIC_OROGRAPHY_FILE].endswith(f"geopotential_at_surface/{t}.0.0")
-    assert len(urls) == 7
+    assert urls[f"era5_{t}_2m_dewpoint_temperature.blosc"] == f"{weather.STORE_URL}2m_dewpoint_temperature/{t}.0.0"
+    assert urls[f"era5_{t}_2m_temperature.blosc"] == f"{weather.STORE_URL}2m_temperature/{t}.0.0"
+    assert len(urls) == 9
 
 
 def test_rules_match_the_core_source():
