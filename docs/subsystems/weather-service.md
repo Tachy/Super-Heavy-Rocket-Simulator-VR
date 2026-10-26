@@ -16,7 +16,7 @@ only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only wi
   `weather_bracket` returns the two snapshots; each missing one is a job (requests -> build -> `data/weather/cache/<key>.wthr`).
   ERA5 hour = 8 timed files (the 6 cloud / temperature / pressure / vapour fields + `2m_temperature`,
   `2m_dewpoint_temperature`) + the static `era5_geopotential_at_surface.blosc` (downloaded once, kept in `cache/raw`).
-  GFS = 111 byte ranges (5 variables x 22 levels, HGT surface, TMP and DPT "2 m above ground").
+  GFS = 113 byte ranges (5 variables x 22 levels, HGT surface, TMP and DPT "2 m above ground").
   Raw files are deleted after a build; a failed or damaged build deletes its output.
 - **Analog**: the shipped `data/weather/analog` 1-degree file of the epoch's month and nearest 6-hour slot is the
   baseline at once (nothing active yet, or the wanted snapshots failed); online the full-resolution ERA5 hour of the same
