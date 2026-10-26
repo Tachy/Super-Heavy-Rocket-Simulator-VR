@@ -27,6 +27,25 @@ not count for VR.
   alongside a VR run: GPU-bound runs sit at 100 % and the 450 W cap (reason 0x4).
 - Time panel: "Bildrate: N fps (x ms)" (`TimePanel.frame_rate_line`).
 
+## Desktop VR-pixel proxy (Task 4)
+
+`terrain_perf.gd -- --utc=2024-04-08T18:42:00 --render_scale=1.65 [--weather=<abs>/data/weather/cache/era5_1089330.wthr
+--cloud_quality=vr]`: the root viewport renders 4223 x 2344 (bilinear `scaling_3d_scale`), the pixel count of the two
+eyes. Calibration 2026-10-26 (median of the per-second GPU max, ms):
+
+| Phase | without clouds | with clouds (VR preset 48 / 96, divisor 2) | clouds add |
+|---|---|---|---|
+| descent > 100 km | 13.3 | 30.4 | +17 |
+| descent 20-100 km | 17.3 | 34.5 | +17 |
+| descent 5-20 km (decks) | 19.3 | 40.8 | +21 |
+| descent 1-5 km | 20.2 | 36.0 | +16 |
+| descent < 1 km | 17.4 | 25.7 | +8 |
+| pan low / pan high (ground) | 13.3 / 17.4 | 27.3 / 28.1 | +14 / +11 |
+
+VR measured the clouds at +20-27 ms on the pad and +55 ms in the decks: the proxy shows ~40 % of the VR cloud cost
+(one view instead of two with their own march, history and upsample; another day's weather). Correction for the
+cloud task: VR cloud cost ~ 2.6 x the proxy's.
+
 ## VR measurements 2026-10-26 (FSR 1.5)
 
 | Phase | GPU, weather on | GPU, weather off | Main-thread script, weather off | Frame, weather off |

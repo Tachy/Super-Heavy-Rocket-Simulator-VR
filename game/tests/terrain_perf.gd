@@ -1,7 +1,10 @@
 # Terrain renderer performance run (needs a GPU and a desktop window, no --headless):
 # godot --path game --script res://tests/terrain_perf.gd [-- --utc=2024-04-10T18:00:00 --warp=1 --descent_s=60
 #       --pan_s=20 --cape_s=20 --shots=<dir> --spikes --weather=<abs path .wthr> --cloud_quality=desktop|vr
-#       --cloud_scattering=table|closed]
+#       --cloud_scattering=table|closed --render_scale=<f>]
+# --render_scale=<f>: the root viewport renders at f x the window per axis (bilinear, Viewport.scaling_3d_scale): the
+# VR proxy is 1.65 (2560 x 1440 x 1.65^2 = 20 MP, the two 3530 x 2834 eyes of the user's headset at Pimax FSR 1.5;
+# docs/subsystems/vr-performance.md).
 # Phases: "descent" - a ground camera above OLP-1 descends from 400 km to 2 m in descent_s (eye height logarithmic in
 # time, looking 20 deg down); "pan_low" - 360 deg pan at 2 m eye height on the plateau PAN_LOW_OFFSET_M from the mount
 # (free view, not blocked by the mount); "pan_high" - 360 deg pan PAN_HIGH_EYE_M above the pad, looking 10 deg down (the
@@ -95,6 +98,9 @@ func _initialize() -> void:
 	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
 	Engine.max_fps = 0
 	DisplayServer.window_set_size(WINDOW_SIZE)
+	if _args.has("render_scale"):
+		root.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+		root.scaling_3d_scale = float(_args["render_scale"])
 	RenderingServer.viewport_set_measure_render_time(root.get_viewport_rid(), true)
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
@@ -178,7 +184,9 @@ func _setup() -> void:
 	_world.set_ground_site(_pad)
 	_world.camera.elevation = deg_to_rad(DESCENT_ELEVATION_DEG)
 	_world.camera.azimuth = 0.0
-	print("terrain_perf: window %s, renderer %s, GPU %s, warp %s" % [DisplayServer.window_get_size(),
+	print("terrain_perf: window %s, render scale %.2f (internal %s), renderer %s, GPU %s, warp %s" % [
+			DisplayServer.window_get_size(), root.scaling_3d_scale,
+			Vector2i(Vector2(DisplayServer.window_get_size()) * root.scaling_3d_scale),
 			RenderingServer.get_current_rendering_driver_name(), RenderingServer.get_video_adapter_name(),
 			_world.clock.warp])
 
