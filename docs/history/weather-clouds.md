@@ -112,3 +112,13 @@ pinned, VR preset 64 / 128 steps; the machine state differed between these notes
   The shape prefilter kernel (fix round 1, A/B in one session, 2560 x 1440, ERA5 2024-04-08 18:00, inside the limit at
   1.4985e7 / 1.2e7 m): GPU p50 6.09 -> 6.29 / 6.07 and 8.05 -> 8.03 / 8.08 ms: not measurable.
 
+## Light marched per sample (until static clouds Task 1, 2026-10-26)
+
+- **Light** (the superseded sentence of the subsystem file): "the Sun's (and at night the Moon's) optical depth is
+  marched toward the light through the 3D density (`cloud_light_optical_depth`: near samples over 6 km in geometric
+  intervals from 20 m through the shapes, then far samples to the cloud top through the grid mean; stratified,
+  unbiased over the jitter)." Replaced for the Sun near the camera by the light cache (the light depends on the Sun,
+  the field and the point, not on the camera: computed once, looked up); the march stays outside the cache and for
+  the Moon. The brief's start values (128 x 128 x 64 voxels, a 24 + 8 sample fill) failed its own check (broken cloud
+  at a 20-deg Sun: 78 % at a pixel; 24 samples 30 % off the converged integral) and were raised to 512 voxels up and
+  96 + 32 samples.

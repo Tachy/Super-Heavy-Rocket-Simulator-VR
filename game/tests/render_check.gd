@@ -19,7 +19,8 @@
 #          --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>; any other value exits with an error;
 #          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's), --cloud_debug=1..4 (the cloud
 #          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels),
-#          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form).
+#          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form),
+#          --no_light_cache (the light toward the Sun marched per sample: the light cache's reference).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Image identity: --deterministic[=64] once settled resets the cloud history and the cloud pass's frame counter and
 #          saves after exactly that many more frames (with --fixed_exposure, for before / after comparisons).
@@ -66,6 +67,8 @@ func _process(_delta: float) -> bool:
 		_show_weather_file(world)
 		if _args.has("cloud_detail_levels"):  # the detail levels used (the preset's otherwise)
 			ShaderGlobals.set_value(&"cloud_detail_levels", int(_args["cloud_detail_levels"]))
+		if _args.has("no_light_cache"):  # the fidelity flag (CloudLayer.light_cache_enabled)
+			world.clouds.light_cache_enabled = false
 		if _args.has("cloud_scattering"):  # the fidelity flag (CloudLayer.ScatteringModel)
 			world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
 					if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE

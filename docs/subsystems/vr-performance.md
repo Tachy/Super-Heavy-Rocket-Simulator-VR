@@ -104,3 +104,11 @@ frame - compute on a layout change, redraw on a firing change; `RoundGauge` / `T
 redraw when the shown value changes by a displayed step; `TrajectoryView` rebuilds its ribbon mesh every frame from
 points refreshed only every `REFRESH_S` - rebuild with the points, move it with the camera by its transform;
 `VehicleView` and the terrain quadtree - profile inside before choosing.
+
+## Cloud light cache (static clouds Task 1, 2026-10-26)
+
+The light toward the Sun is looked up in a light cache instead of marched per cloud sample (`weather-clouds.md`). Its
+fill is one compute dispatch over the whole cascade (128 x 128 x 512 voxels, 96 + 32 light samples each): 5-8 ms GPU
+on the RTX 4090 with `cloud_check.gd`'s slabs (`terrain_perf.gd --gpu_passes` names it `cloud_light_fill`), paid in
+the frame of a refill (re-anchor after 2 km, Sun 0.25 deg, blend step 0.05) - a spike against the 2.5 ms cloud budget
+until Task 2 spreads it over frames. Not yet measured in VR or in dense real weather.

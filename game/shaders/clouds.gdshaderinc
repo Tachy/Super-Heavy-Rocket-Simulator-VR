@@ -97,7 +97,8 @@ global uniform vec3 cloud_transfer_theta_map;
 // per unit Sun irradiance without the air and the sky (both opaque, both of the GRID-MEAN field without the sub-grid
 // shapes: the core's CPU references have no shapes); 3 = the coverage (1 cloud, 0 clear) where the ray crosses the height
 // cloud_debug_height_m (the GPU's filtered coverage against the core's table); 4 = T_bg with the shapes; 6 = the full
-// image (light, sky, air, composite) on the grid-mean field without the shapes (Task 10: the far field's physics).
+// image (light, sky, air, composite) on the grid-mean field without the shapes (Task 10: the far field's physics);
+// 7 = as 2 with the sub-grid shapes (the light cache against the light march on broken cloud, static clouds Task 1).
 global uniform int cloud_debug_output;
 global uniform float cloud_debug_height_m;
 
@@ -553,34 +554,36 @@ float cloud_density(vec3 p_earth_m, float footprint_m) {
 // the larger of the pixel footprint there (pixel_angle x (camera_distance_m + s)) and the interval (finer octaves
 // average out over it; the tables keep the mean); pixel_angle large: the shape alone. The shape is prefiltered at the
 // pixel footprint of shape_pixel_angle alone (0: never). Heights along the straight line (curvature + s^2 / 2a).
+// cloud_light_optical_depth_with: the intervals (march, as cloud_light_march) and samples (near, far) given, and the
+// detail's footprint never below footprint_floor_m (the light cache: its voxel; cloud_light_cache.gdshaderinc).
 const float CLOUD_SUN_PATH_MAX_M = 300000.0;
-float cloud_light_optical_depth(vec3 offset_local, float height_m, float camera_distance_m, vec3 dir_local,
-		float jitter, float pixel_angle, float shape_pixel_angle) {
+float cloud_light_optical_depth_with(vec3 offset_local, float height_m, float camera_distance_m, vec3 dir_local,
+		float jitter, float pixel_angle, float shape_pixel_angle, vec4 march, ivec2 samples, float footprint_floor_m) {
 	vec3 p = atmosphere_camera_hi + atmosphere_camera_lo + offset_local;
 	vec3 up = normalize(p * ATM_STRETCH);
 	float climb = dot(up, normalize(dir_local * ATM_STRETCH));
 	float to_top = climb > 1.0e-3 ? max(CLOUD_TOP_M - height_m, 0.0) / climb : CLOUD_SUN_PATH_MAX_M;
 	to_top = min(to_top, CLOUD_SUN_PATH_MAX_M);
-	float near_length = min(cloud_light_march.z, to_top);
+	float near_length = min(march.z, to_top);
 	float tau = 0.0;
 	float start = 0.0;
-	float length_i = cloud_light_march.x * near_length / cloud_light_march.z;  // the intervals scale with the length
-	for (int i = 0; i < cloud_light_samples.x; i++) {
+	float length_i = march.x * near_length / march.z;  // the intervals scale with the length
+	for (int i = 0; i < samples.x; i++) {
 		float s = start + jitter * length_i;
 		float h = height_m + s * climb + s * s / (2.0 * CLOUD_A_M);
 		if (h <= CLOUD_TOP_M) {
 			vec2 lat_lon;
 			float in_cloud;
-			float footprint = max(pixel_angle * (camera_distance_m + s), length_i);
+			float footprint = max(max(pixel_angle * (camera_distance_m + s), length_i), footprint_floor_m);
 			tau += cloud_extinction_at(offset_local + dir_local * s, h, footprint,
 					shape_pixel_angle * (camera_distance_m + s), lat_lon, in_cloud) * length_i;
 		}
 		start += length_i;
-		length_i *= cloud_light_march.y;
+		length_i *= march.y;
 	}
-	if (cloud_light_samples.y > 0 && to_top > near_length) {
-		float step_m = (to_top - near_length) / float(cloud_light_samples.y);
-		for (int i = 0; i < cloud_light_samples.y; i++) {
+	if (samples.y > 0 && to_top > near_length) {
+		float step_m = (to_top - near_length) / float(samples.y);
+		for (int i = 0; i < samples.y; i++) {
 			float s = near_length + (float(i) + jitter) * step_m;
 			float h = height_m + s * climb + s * s / (2.0 * CLOUD_A_M);
 			if (h <= CLOUD_TOP_M) {
@@ -589,6 +592,13 @@ float cloud_light_optical_depth(vec3 offset_local, float height_m, float camera_
 		}
 	}
 	return tau;
+}
+
+// The light march of the quality preset (cloud_light_march, cloud_light_samples).
+float cloud_light_optical_depth(vec3 offset_local, float height_m, float camera_distance_m, vec3 dir_local,
+		float jitter, float pixel_angle, float shape_pixel_angle) {
+	return cloud_light_optical_depth_with(offset_local, height_m, camera_distance_m, dir_local, jitter, pixel_angle,
+			shape_pixel_angle, cloud_light_march, cloud_light_samples, 0.0);
 }
 
 // Transmittance of the direct Sun (Beer-Lambert, unscaled extinction, as the core's cloud_sun_transmittance) from the

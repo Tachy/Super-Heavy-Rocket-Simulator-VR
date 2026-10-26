@@ -59,6 +59,19 @@ const SHADOW_FAR_HALF_M := 200000.0
 const SHADOW_NEAR_REANCHOR_M := 4000.0
 const SHADOW_FAR_REANCHOR_M := 50000.0
 const SHADOW_NEAR_FADE_M := Vector2(9000.0, 11000.0)
+## [E] The light cache (cloud_light_cache.gd; static clouds Task 1, measured in cloud_check.gd section 8, tuned again in
+## Task 10): one cascade of 128 x 128 x 512 voxels over 8 km x 8 km x the shell (-0.5 .. 20 km): 62.5 m across (the
+## shadow map's texel; 31 m changed nothing), 40 m up (the vertical spacing decides: the light's kink at a cloud's top
+## and the shapes' 25-200 m edges - 320 m layers missed the Sun's radiance of broken cloud at a 20-deg Sun by up to 78 %
+## at a pixel, 80 m by 23 %, 40 m by < 9 %); 32 MB of R32F. Refilled when the camera's ground point leaves the central
+## part (LIGHT_CACHE_REANCHOR_M from the anchor: the light paths near the camera stay inside), the Sun turned by
+## LIGHT_CACHE_REFRESH_ANGLE_RAD (the light at a cloud edge moves < 1 voxel; spec Task 2's start value), w1 moved by
+## LIGHT_CACHE_REFRESH_BLEND, or the field's slots, the quality, the detail levels or the debug output changed.
+const LIGHT_CACHE_SIZE := Vector3i(128, 128, 512)
+const LIGHT_CACHE_EXTENT_M := Vector3(8000.0, 8000.0, 20500.0)
+const LIGHT_CACHE_REANCHOR_M := 2000.0
+const LIGHT_CACHE_REFRESH_ANGLE_RAD := 0.25 * PI / 180.0
+const LIGHT_CACHE_REFRESH_BLEND := 0.05
 const SHADOW_FAR_FADE_M := Vector2(120000.0, 140000.0)
 
 ## A file of a resident slot is not in the core's load cache (the CPU light cannot use it): load it on a worker.
@@ -107,6 +120,14 @@ var far_enabled := false
 var effect := CloudEffect.new()  ## the cloud pass (the world's Compositor)
 const SHADOW_RUN_WINDOW_MSEC := 250  ## how long after its last run the shadow effect still counts as running
 var shadow_effect := CloudShadowEffect.new(SHADOW_MAP_SIZE)  ## the cloud shadow maps (the world's Compositor)
+## The light cache (the Sun's tau_light looked up, not marched; filled by the effect on the render thread).
+var light_cache := CloudLightCache.new(LIGHT_CACHE_SIZE, LIGHT_CACHE_EXTENT_M)
+## Fidelity flag (shader global cloud_light_cache_enabled): false marches the light per sample everywhere (the
+## reference the cache reproduces, cloud_check.gd section 8).
+var light_cache_enabled := true:
+	set(value):
+		light_cache_enabled = value
+		ShaderGlobals.set_value(&"cloud_light_cache_enabled", value)
 
 var _core: StarsimCore
 var _quad := MeshInstance3D.new()
@@ -131,10 +152,13 @@ var _slab_transmittance: ImageTexture
 ## Earth-fixed anchors of the shadow maps (render axes, float64; NAN: none yet).
 var _near_anchor := Vector3(NAN, NAN, NAN)
 var _far_anchor := Vector3(NAN, NAN, NAN)
+## The light cache's last request: {anchor (ground, render axes, float64), light, w1, key}; {} = none.
+var _cache_request := {}
 
 
 func _init() -> void:
 	name = "CloudLayer"
+	effect.light_cache = light_cache
 
 
 ## Starts the noise generation on a worker and sets the optics; the quad joins the scene.
@@ -166,6 +190,7 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_enabled", false)
 	ShaderGlobals.set_value(&"cloud_shadow_valid", false)
 	ShaderGlobals.set_value(&"cloud_debug_output", 0)
+	ShaderGlobals.set_value(&"cloud_light_cache_enabled", light_cache_enabled)
 	ShaderGlobals.set_value(&"cloud_shadow_near", shadow_effect.near_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_far", shadow_effect.far_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_extent", Vector4(SHADOW_NEAR_HALF_M, SHADOW_FAR_HALF_M,
@@ -282,6 +307,7 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	# The far field needs only the field and column textures (no noise, no shadow maps).
 	far_enabled = visible_weight > 0.0 and not near
 	_update_shadow_frame(camera_render, height)
+	_update_light_cache(camera_render, height)
 	# The maps count as valid only while the effect keeps running (its render callback stamps ran_msec; the render
 	# thread may trail the main thread by a frame or two, hence the window rather than a per-frame flag): a stopped
 	# effect (compositor detached, device lost) turns the shadows back to the column the next moments.
@@ -341,6 +367,28 @@ func _update_shadow_frame(camera_render: Vector3, height: float) -> void:
 	ShaderGlobals.set_value(&"cloud_shadow_e2", sun.cross(e1).normalized())
 	ShaderGlobals.set_value(&"cloud_shadow_near_anchor", _near_anchor - camera_render)
 	ShaderGlobals.set_value(&"cloud_shadow_far_anchor", _far_anchor - camera_render)
+
+
+## Asks the light cache for a fill when its anchor, the Sun or the field moved beyond the thresholds
+## (LIGHT_CACHE_* constants).
+func _update_light_cache(camera_render: Vector3, height: float) -> void:
+	var value: Variant = ShaderGlobals.value(&"atmosphere_sun_direction")
+	if not light_cache_enabled or not value is Vector3 or (value as Vector3).length_squared() < 0.5:
+		return
+	var sun := (value as Vector3).normalized()
+	var up := Vector3(camera_render.x, camera_render.y * POLAR_STRETCH * POLAR_STRETCH, camera_render.z).normalized()
+	var ground := camera_render - up * height
+	var key := [_slots[0]["id"], _slots[1]["id"], noise_ready, quality, ShaderGlobals.value(&"cloud_detail_levels"),
+			ShaderGlobals.value(&"cloud_debug_output")]
+	if not _cache_request.is_empty():
+		var same_field: bool = key == _cache_request["key"] \
+				and absf(_w1 - float(_cache_request["w1"])) <= LIGHT_CACHE_REFRESH_BLEND
+		var same_sun := sun.angle_to(_cache_request["light"]) <= LIGHT_CACHE_REFRESH_ANGLE_RAD
+		var inside := _horizontal(ground - _cache_request["anchor"], up) <= LIGHT_CACHE_REANCHOR_M
+		if same_field and same_sun and inside:
+			return
+	_cache_request = {"anchor": ground, "light": sun, "w1": _w1, "key": key}
+	light_cache.request(ground, sun)
 
 
 static func _horizontal(v: Vector3, up: Vector3) -> float:
@@ -655,6 +703,8 @@ func _apply_quality() -> void:
 			near_m, 0.0))
 	ShaderGlobals.set_value(&"cloud_light_samples", Vector2i(near, int(preset["light_far"])))
 	ShaderGlobals.set_value(&"cloud_detail_levels", int(preset["detail_levels"]))
+	light_cache.march_first_m = first_m
+	light_cache.march_near_m = near_m
 	effect.set_quality(int(preset["divisor"]), float(preset["temporal_weight"]), float(preset["clip_gamma"]))
 
 

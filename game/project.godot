@@ -461,6 +461,38 @@ cloud_debug_height_m={
 "type": "float",
 "value": 0.0
 }
+cloud_light_cache={
+"type": "sampler3D",
+"value": ""
+}
+cloud_light_cache_enabled={
+"type": "bool",
+"value": true
+}
+cloud_light_cache_valid={
+"type": "bool",
+"value": false
+}
+cloud_light_cache_origin={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
+cloud_light_cache_east={
+"type": "vec3",
+"value": Vector3(1, 0, 0)
+}
+cloud_light_cache_north={
+"type": "vec3",
+"value": Vector3(0, 0, 1)
+}
+cloud_light_cache_extent={
+"type": "vec4",
+"value": Vector4(8000, 8000, -500, 20000)
+}
+cloud_light_cache_size={
+"type": "vec3",
+"value": Vector3(128, 128, 512)
+}
 
 [xr]
 

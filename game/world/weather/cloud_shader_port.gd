@@ -119,14 +119,17 @@ static func _std140(type: String) -> Vector2i:
 	return Vector2i(16, 16)
 
 
-## The uniform block's bytes from the current global shader parameters.
-func pack() -> PackedByteArray:
+## The uniform block's bytes from the current global shader parameters; overrides (id -> value) replace globals of the
+## caller's own state (the light cache's frame on the render thread).
+func pack(overrides := {}) -> PackedByteArray:
 	var bytes := PackedByteArray()
 	bytes.resize(block_size)
 	for m in members:
 		var id: StringName = m["id"]
 		var value: Variant
-		if ShaderGlobals.has_value(id):
+		if overrides.has(id):
+			value = overrides[id]
+		elif ShaderGlobals.has_value(id):
 			value = ShaderGlobals.value(id)
 		else:
 			if not _defaults.has(id):

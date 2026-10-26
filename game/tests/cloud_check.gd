@@ -34,7 +34,14 @@
 #      vs the CPU's cell (cf 0.15 / 0.3 / 0.4, Sun 45 / 8 deg; the beam-cover overlap model, constants.hpp
 #      cloud_overlap_*, is fitted to these shadows: STARSIM_SLANT_TABLE=1 prints the fit table), the near map vs the
 #      far map over the same receivers, the column terms vs the CPU, the vehicle's total light vs the ground's mean.
-# Detail levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
+#   8. (static clouds Task 1) the light cache (CloudLightCache, one cascade 8 x 8 km over the shell) against the
+#      per-sample light march with the cache's converged sample count (CloudLightCache.SAMPLES: 96 near + 32 far,
+#      jittered, mean of 8 frames), the same view jitter in both (CloudEffect.pinned_frame): the Sun's scattered
+#      radiance at every pixel of a 64 x 64 view from 5 km - a slab of tau ~10 (debug output 2, the grid mean) 5 %, a
+#      broken layer of cf 0.4 (debug output 7, the shapes) 10 % - Sun 45 / 20 deg up; a view whose samples all lie
+#      outside the cascade equals the march exactly (bit for bit); the fill's GPU time (information).
+# The other sections run with the light cache on (the game's path). Detail levels off for the numbers
+# (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_check.gd
 extends SceneTree
 
@@ -61,7 +68,7 @@ const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 95
+const EXPECTED_SAMPLES := 100
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -95,6 +102,13 @@ const DISC_TOLERANCE := 0.08
 ## three standard errors of the two annuli's means over the sites (the shape noise's sampling error).
 const HANDOVER_TOLERANCE := 0.05
 const FAR_HANDOVER_TOLERANCE := 0.03  ## the far map and the slanted column are both smooth (the grid mean)
+## Section 8 (the light cache against the light march).
+const CACHE_VIEW_SIZE := 64
+const CACHE_SLAB_TOLERANCE := 0.05
+const CACHE_BROKEN_TOLERANCE := 0.10  ## the voxel size (62.5 m across, 320 m up) against the shapes
+## A pixel's error is relative to max(its reference, this fraction of the view's mean reference): a cloud's fringe or a
+## gap's last light carries no relative accuracy of its own.
+const CACHE_ERROR_FLOOR := 0.05
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
@@ -242,6 +256,8 @@ func _run() -> void:
 	await _ground_light_samples()
 	# 7. The shadow maps' hand-overs and the shapes on broken cloud.
 	await _handover_samples()
+	# 8. The light cache against the per-sample light march.
+	await _light_cache_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -457,6 +473,110 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode
 			var c := image.get_pixel(image.get_width() / 2 + dx, image.get_height() / 2 + dy)
 			sum += Vector3(c.r, c.g, c.b)
 	return sum / float((2 * block_radius + 1) * (2 * block_radius + 1))
+
+
+## Section 8: the light cache against the per-sample light march with the cache's own converged sample count (the
+## cache's fill: CloudLightCache.SAMPLES at the stratified midpoints; the march: the same counts, jittered per frame and
+## averaged over RADIANCE_FRAMES frames), the view's jitter pinned to the same frames in both.
+func _light_cache_samples() -> void:
+	var preset: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.DESKTOP]
+	var first: float = preset["light_first_m"]
+	var near: float = preset["light_near_m"]
+	var samples := CloudLightCache.SAMPLES
+	_viewport.size = Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE)
+	_camera.fov = 60.0
+	var slab := _slab("cache_slab", SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, 1.0)
+	var broken := _slab("cache_broken", SLAB_BOTTOM_M, SLAB_TOP_M, DECK_LIQUID_KG_M3, BROKEN_FRACTION)
+	var view := _local_direction(-60.0, 10.0)
+	for c in [[slab, 2, CACHE_SLAB_TOLERANCE, "slab tau ~10"], [broken, 7, CACHE_BROKEN_TOLERANCE, "broken cf 0.4"]]:
+		_show(c[0])
+		for sun_elevation in [45.0, 20.0]:
+			var sun := _local_direction(sun_elevation, 135.0)
+			var images: Array[PackedFloat32Array] = []
+			for cached in [false, true]:
+				_clouds.light_cache_enabled = cached
+				ShaderGlobals.set_value(&"cloud_light_march", Vector4(first,
+						CloudLayer.light_march_ratio(first, near, samples.x), near, 0.0))
+				ShaderGlobals.set_value(&"cloud_light_samples", samples)
+				images.append(await _mean_image(_point(5000.0), view, sun, c[1]))
+			_clouds.light_cache_enabled = true
+			_clouds.quality = CloudLayer.Quality.DESKTOP
+			_detail_off()
+			var mean := 0.0
+			for v in images[0]:
+				mean += v / images[0].size()
+			var worst := 0.0
+			var worst_at := 0
+			var mean_error := 0.0
+			var bias := 0.0
+			for i in range(images[0].size()):
+				var error := absf(images[1][i] - images[0][i]) / maxf(images[0][i], CACHE_ERROR_FLOOR * mean)
+				mean_error += error / images[0].size()
+				bias += (images[1][i] - images[0][i]) / (mean * images[0].size())
+				if error > worst:
+					worst = error
+					worst_at = i
+			_check("light cache vs light march, %s, Sun %.0f deg" % [c[3], sun_elevation],
+					mean > 0.0 and worst <= c[2],
+					("worst pixel %.2f %% at (%d, %d) (cache %.5f march %.5f), mean error %.2f %%, bias %.2f %% of the"
+					+ " view mean %.5f /sr") % [worst * 100.0, worst_at % CACHE_VIEW_SIZE, worst_at / CACHE_VIEW_SIZE,
+					images[1][worst_at], images[0][worst_at], mean_error * 100.0, bias * 100.0, mean])
+	# The fill's GPU time (information; the budget is Task 2's progressive fill): a forced refill with the timestamps.
+	CloudEffect.capture_timestamps = true
+	var camera := _point(5000.0)
+	_atmosphere.update(_earth_to_gcrf * camera, Vector3.ZERO, _earth_to_gcrf,
+			_earth_to_gcrf * _local_direction(30.0, 135.0) * AU_M, 0.0, 1.0)
+	var fill_ms := 0.0
+	for i in range(SETTLE_FRAMES):
+		_clouds.update(camera, 0.0, 0.0)
+		await RenderingServer.frame_post_draw
+		fill_ms = maxf(fill_ms, _light_fill_ms())
+	CloudEffect.capture_timestamps = false
+	print("  info  light cache fill: %.2f ms GPU for %d voxels" % [fill_ms, _clouds.light_cache.voxel_count()])
+	# Outside the cascade: below the slab toward the northern horizon (azimuth 0: the cascade's north axis), every
+	# cloud sample is > 5.6 km north of the anchor (the slab's base at <= 10 deg up); the cache must change no bit.
+	_show(slab)
+	_camera.fov = 10.0
+	var outside: Array[PackedByteArray] = []
+	for cached in [false, true]:
+		_clouds.light_cache_enabled = cached
+		CloudEffect.pinned_frame = 0
+		await _render(_point(10.0), _local_direction(5.0, 0.0), _local_direction(45.0, 135.0), 2)
+		CloudEffect.pinned_frame = -1
+		outside.append(_viewport.get_texture().get_image().get_data())
+	_clouds.light_cache_enabled = true
+	_clouds.quality = CloudLayer.Quality.DESKTOP
+	_detail_off()
+	var lit := _viewport.get_texture().get_image().get_pixel(CACHE_VIEW_SIZE / 2, CACHE_VIEW_SIZE / 2).r
+	_check("light cache: a view outside the cascade equals the march", outside[0] == outside[1] and lit > 0.0,
+			"%s (centre %.5f /sr)" % ["identical" if outside[0] == outside[1] else "DIFFERENT", lit])
+	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
+
+
+## The GPU time of the light cache's fill in the frame whose timestamps the RenderingDevice holds (0: no fill).
+func _light_fill_ms() -> float:
+	var rd := RenderingServer.get_rendering_device()
+	var worst := 0.0
+	for i in range(1, rd.get_captured_timestamps_count()):
+		if rd.get_captured_timestamp_name(i - 1) == "cloud_light_fill":
+			var ns := rd.get_captured_timestamp_gpu_time(i) - rd.get_captured_timestamp_gpu_time(i - 1)
+			worst = maxf(worst, float(ns))
+	return worst * 1.0e-6
+
+
+## The red channel of the view, the mean over RADIANCE_FRAMES frames with the march's jitter pinned to frames 0, 1, ...
+func _mean_image(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode: int) -> PackedFloat32Array:
+	var mean := PackedFloat32Array()
+	mean.resize(CACHE_VIEW_SIZE * CACHE_VIEW_SIZE)
+	for frame in range(RADIANCE_FRAMES):
+		CloudEffect.pinned_frame = frame
+		await _render(camera_itrf_m, view_itrf, sun_itrf, mode)
+		var image := _viewport.get_texture().get_image()
+		for y in range(CACHE_VIEW_SIZE):
+			for x in range(CACHE_VIEW_SIZE):
+				mean[y * CACHE_VIEW_SIZE + x] += image.get_pixel(x, y).r / RADIANCE_FRAMES
+	CloudEffect.pinned_frame = -1
+	return mean
 
 
 ## Section 6: the ground 300 m north of a camera 2 m up, under a thin slab (tau ~1) and a deck (tau ~3), Sun 45 and

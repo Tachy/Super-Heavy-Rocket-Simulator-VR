@@ -13,7 +13,7 @@ extends CompositorEffect
 ## cloud's disparity from its distance). Without a RenderingDevice (headless, Compatibility) it does nothing.
 
 const MARCH_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clouds.gdshaderinc",
-		"res://shaders/cloud_pass.gdshaderinc"]
+		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc"]
 const PASS_FILES := ["res://shaders/cloud_pass.gdshaderinc"]
 const GROUP := 8
 const CENTRE_IMAGES := ["color", "depth", "history0", "history1", "age0", "age1", "buffer"]
@@ -39,6 +39,11 @@ var output_generation := 0
 var stats := {}
 ## Diagnostics (terrain_perf --gpu_passes): GPU timestamps around the cloud passes (RenderingDevice).
 static var capture_timestamps := false
+## Checks only (cloud_check.gd): >= 0 pins the frame index of the march's jitter (the same noise in two renders that
+## differ in one setting); -1 in the game.
+static var pinned_frame := -1
+## The light cache (CloudLayer's; filled on the render thread before the march, cloud_light_cache.gd); null: none.
+var light_cache: CloudLightCache
 
 var _rd: RenderingDevice
 var _march: CloudShaderPort
@@ -296,6 +301,8 @@ func _notification(what: int) -> void:
 			_rd.free_rid(sampler)
 		for texture: RID in _fallback.values():
 			_rd.free_rid(texture)
+		if light_cache != null:
+			light_cache.free_resources(_rd)
 		for buffer: RID in [_globals_buffer, _eyes_buffer, _centre_buffer]:
 			if buffer.is_valid():
 				_rd.free_rid(buffer)
@@ -336,8 +343,25 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	_ensure_images(size, view_count, centre_view["low"])
 	_frame += 1
 
+	# The camera (float64 from the floating-origin globals).
+	var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
+	var lo: Vector3 = ShaderGlobals.value(&"atmosphere_camera_lo")
+	var camera := hi + lo
+	# The light cache: a pending fill first (its own compute list, before the march reads it), then its frame for the
+	# lookup (the march reads only a complete fill, with the frame it was filled for).
+	var cache_globals := {}
+	if light_cache != null:
+		if CloudEffect.capture_timestamps:
+			_rd.capture_timestamp("cloud_light_fill")
+		light_cache.update(_rd, _samplers, _fallback)
+		if CloudEffect.capture_timestamps:
+			_rd.capture_timestamp("cloud_pass")  # the march etc. (the fill's interval has its own name)
+		cache_globals = light_cache.lookup_globals(camera)
+	else:
+		cache_globals = {&"cloud_light_cache_valid": false}
+
 	# Set 0 of the march: the globals' block and samplers.
-	_rd.buffer_update(_globals_buffer, 0, _march.block_size, _march.pack())
+	_rd.buffer_update(_globals_buffer, 0, _march.block_size, _march.pack(cache_globals))
 	var set0: Array[RDUniform] = []
 	var block := RDUniform.new()
 	block.uniform_type = RenderingDevice.UNIFORM_TYPE_UNIFORM_BUFFER
@@ -352,6 +376,8 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		u.binding = s["binding"]
 		u.add_id(_samplers["%s|%s|%s" % [s["linear"], s["repeat"], s["mipmap"]]])
 		var texture: RID = textures[i]
+		if s["id"] == &"cloud_light_cache" and light_cache != null:
+			texture = light_cache.texture
 		u.add_id(texture if texture.is_valid() else _fallback.get(s["type"], _fallback["sampler2D"]))
 		set0.append(u)
 	# The shape prefilter's kernel (clouds.gdshaderinc) only when a footprint can exceed its start: the farthest cloud
@@ -361,10 +387,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var march := family + "_prefilter" if _shape_prefilter_needed(pixel_angle) else family
 	var march_set0 := UniformSetCacheRD.get_cache(_shaders[march], 0, set0)
 
-	# The camera (float64 from the floating-origin globals) and its motion since the last frame.
-	var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
-	var lo: Vector3 = ShaderGlobals.value(&"atmosphere_camera_lo")
-	var camera := hi + lo
+	# The camera's motion since the last frame.
 	var camera_delta := camera - _previous_camera
 	_previous_camera = camera
 	var world_to_earth: Basis = ShaderGlobals.value(&"atmosphere_world_to_earth")
@@ -372,7 +395,8 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var earth_to_world := Projection(Transform3D(world_to_earth.transposed(), scene.get_cam_transform().origin))
 	var debug := int(ShaderGlobals.value(&"cloud_debug_output"))
 	var weight := 1.0 if debug != 0 else _temporal_weight
-	var params := Vector4(fmod(float(_frame) * GOLDEN, 1.0), weight, debug, pixel_angle)
+	var jitter_frame := _frame if CloudEffect.pinned_frame < 0 else CloudEffect.pinned_frame
+	var params := Vector4(fmod(float(jitter_frame) * GOLDEN, 1.0), weight, debug, pixel_angle)
 	var linear_clamp: RID = _samplers["true|false|false"]
 	var nearest_clamp: RID = _samplers["false|false|false"]
 	# The head's transform: the renderer's per-eye projection already contains the eye offset (applied once here).

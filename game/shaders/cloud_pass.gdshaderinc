@@ -129,11 +129,16 @@ global uniform int cloud_steps;        // coarse steps spanning the segment (qua
 global uniform int cloud_max_steps;    // cap on the steps per pixel (coarse + fine)
 global uniform float cloud_fine_step_fraction;  // fine step / distance inside the field's cloudy region
 
-// Scattering source of one light (Sun or Moon) at a sample: J per unit irradiance normal to the light.
+// Scattering source of one light (Sun or Moon) at a sample: J per unit irradiance normal to the light. The Sun's
+// optical depth from the light cache where it holds the sample (cloud_light_cache.gdshaderinc), else - and always for
+// the Moon - the light march (one call site: outside the cache the result is the march's, bit for bit).
 float cloud_light_source(vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, float height_m, float distance_m,
-		vec2 column, float jitter, float pixel_angle) {
-	float tau_light = cloud_light_optical_depth(offset, height_m, distance_m, light_dir, jitter, pixel_angle,
-			pixel_angle);
+		vec2 column, float jitter, float pixel_angle, bool sun) {
+	float tau_light = sun ? cloud_cached_light_depth(offset, height_m) : -1.0;
+	if (tau_light < 0.0) {
+		tau_light = cloud_light_optical_depth(offset, height_m, distance_m, light_dir, jitter, pixel_angle,
+				pixel_angle);
+	}
 	if (cloud_scattering_model == 1) {
 		return cloud_scattering_source_mc(light_dir, -dir, normal, tau_light, column.x, column.y);
 	}
@@ -269,9 +274,9 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		float light_jitter = fract(jitter + float(i) * 0.6180339887);
 		vec3 source = vec3(0.0);        // the sky's (scaled problem: attenuated on the scaled depths)
 		vec3 light_source = vec3(0.0);  // the Sun's and the Moon's (cloud_light_source)
-		if (cloud_debug_output == 2) {
+		if (cloud_debug_output == 2 || cloud_debug_output == 7) {
 			light_source = vec3(cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter,
-					pixel_angle));
+					pixel_angle, true));
 		} else {
 			// The air's light at the cloud (Sun and sky irradiance), refreshed along the ray every
 			// CLOUD_LIGHT_REFRESH_FRACTION of the distance (at least CLOUD_LIGHT_REFRESH_M): it changes over kilometres.
@@ -290,11 +295,13 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 			source = sky_irradiance * sky_source;
 			if (dot(sun_irradiance, sun_irradiance) > 0.0) {
 				light_source += sun_irradiance
-						* cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter, pixel_angle);
+						* cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter,
+						pixel_angle, true);
 			}
 			if (moonlit) {
 				light_source += moon_irradiance
-						* cloud_light_source(moon_dir, normal, dir, offset, height, d, column, light_jitter, pixel_angle);
+						* cloud_light_source(moon_dir, normal, dir, offset, height, d, column, light_jitter,
+						pixel_angle, false);
 				source += moon_sky_irradiance * sky_source;
 			}
 		}
@@ -324,7 +331,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		alpha = 1.0;
 		return;
 	}
-	if (cloud_debug_output == 2) {
+	if (cloud_debug_output == 2 || cloud_debug_output == 7) {
 		color = radiance;
 		alpha = 1.0;
 		return;
