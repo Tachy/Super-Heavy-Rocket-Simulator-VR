@@ -11,6 +11,9 @@ const EARTH_MEAN_RADIUS_M := 6371000.0
 const MOON_RADIUS_M := 1737400.0
 const SUN_RADIUS_M := 695700000.0
 const GROUND_EYE_HEIGHT_M := 2.0
+## [E] Lag of the sim snapshot behind the clock tolerated beyond the frame's own step (the sim thread trails by about
+## one frame, unevenly) before the clock is held back.
+const CLOCK_HOLD_SLACK_S := 0.05
 ## [E] The pad disc's top sits this far above the site height: the terrain's plateau lies exactly at the site height,
 ## and coplanar surfaces z-fight. Far below anything a vehicle's contact could show.
 const PAD_TOP_LIFT_M := 0.03
@@ -153,7 +156,9 @@ func update_world() -> void:
 		var reached := flight.advance(clock.tdb_s, _delta)
 		if flight.take_clock_resync():  # a refused mission start left its vehicle at its own epoch
 			clock.set_time(reached)
-		elif clock.tdb_s - reached > 0.05:  # sim at its per-frame tick limit: hold the clock back
+		elif clock.tdb_s - reached > CLOCK_HOLD_SLACK_S + _delta * absf(clock.warp):
+			# the sim fell behind by more than the one frame step its snapshot trails by: hold the clock back. (A fixed
+			# 0.05 s held it back on every other frame below 20 fps or at time warp: the flight ran at half speed.)
 			clock.tdb_s = reached
 		# The scene is drawn at the instant of the simulation snapshot (the sim thread trails the clock by about a
 		# frame, unevenly): Earth, pad and tower at the clock time but vehicles at the snapshot made the vehicles jump

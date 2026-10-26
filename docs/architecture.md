@@ -109,7 +109,8 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25 (the per-session context is kept s
   commands return ids (`result(id)`, signal `command_finished`); lunar missions included (`lunar_state`, `lunar_site`,
   `moon_terrain`), ISS missions too (`iss_state`, `rendezvous_plan`, `docking_state`, `station_geometry`,
   `iss_mission`, commands `proximity_*`, `undock`). `vehicle_view.gd` draws stages and plumes; `ui/flight_hud.gd` shows telemetry.
-  The world clock waits for the flight sim at high time warp.
+  The world clock waits for the flight sim when its snapshot trails by more than one frame step (`delta * warp`) plus
+  `CLOCK_HOLD_SLACK_S` 0.05 s (`world.gd`; a fixed 0.05 s halved the flight's speed below 20 fps and at time warp).
 - Mission selection: the time panel's Ort / Fahrzeug / Mission boxes come from `game/ui/mission_catalogue.gd` (pads of
   `launch_sites.toml` + `config/start_places.toml`, missions by `[mission] start_place` / `start_vehicle`).
 - HOTAS: Thrustmaster T.16000M + TWCS, found by device name (`config/input_hotas.toml`). Raw axes (twist,
