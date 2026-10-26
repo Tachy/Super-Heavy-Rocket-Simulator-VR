@@ -21,6 +21,12 @@ func _process(_delta: float) -> void:
 
 
 func _draw() -> void:
+	FrameProfiler.begin(&"ui_overlay")
+	_draw_unprofiled()
+	FrameProfiler.end(&"ui_overlay")
+
+
+func _draw_unprofiled() -> void:
 	if not world.flight.sim.is_active():
 		return
 	if prograde_gcrf != Vector3.ZERO:

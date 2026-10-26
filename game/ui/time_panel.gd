@@ -104,6 +104,12 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	FrameProfiler.begin(&"ui_time_panel")
+	_process_unprofiled(_delta)
+	FrameProfiler.end(&"ui_time_panel")
+
+
+func _process_unprofiled(_delta: float) -> void:
 	if not world.core.is_open():
 		_utc_label.text = "SPICE-Daten fehlen: python tools/data_pipeline/fetch.py"
 		return

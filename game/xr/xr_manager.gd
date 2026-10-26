@@ -96,6 +96,12 @@ func recenter_pose() -> Transform3D:
 
 
 func _process(delta: float) -> void:
+	FrameProfiler.begin(&"xr")
+	_process_unprofiled(delta)
+	FrameProfiler.end(&"xr")
+
+
+func _process_unprofiled(delta: float) -> void:
 	if _auto_recenter_timer_s > 0.0:
 		_auto_recenter_timer_s -= delta
 		if _auto_recenter_timer_s <= 0.0:

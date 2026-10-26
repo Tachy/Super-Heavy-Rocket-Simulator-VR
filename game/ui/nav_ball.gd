@@ -27,6 +27,12 @@ func _process(_delta: float) -> void:
 
 
 func _draw() -> void:
+	FrameProfiler.begin(&"ui_navball")
+	_draw_unprofiled()
+	FrameProfiler.end(&"ui_navball")
+
+
+func _draw_unprofiled() -> void:
 	var center := size * 0.5
 	draw_circle(center, RADIUS + 3.0, Color(0.05, 0.05, 0.07))
 	# Sky / ground: shade by elevation, sampled on a polar grid.

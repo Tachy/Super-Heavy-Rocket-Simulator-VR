@@ -5,7 +5,10 @@ extends Node
 ## viewport's measured CPU / GPU render time (in VR the headset's stereo frame), the camera's altitude and the cloud
 ## layer's state, so stalls can be matched to the flight phase (e.g. flying through a cloud deck). Frames whose
 ## interval exceeds SPIKE_MS also get their own row (kind "spike"). script_max_ms: the main thread's _process work
-## (from SceneTree.process_frame to this node, which runs last), the CPU side a GPU-light frame can still miss on.
+## (from SceneTree.process_frame to this node, which runs last), the CPU side a GPU-light frame can still miss on;
+## main_max_ms: process_frame to RenderingServer.frame_pre_draw (also the deferred calls and the UI's _draw); then
+## one column per FrameProfiler section (its per-frame total, max over the second). A spike row carries the previous
+## frame's main / section times: the long interval ends the frame that did that work.
 
 const ARG := "--perf-log"
 const SPIKE_MS := 22.0  ## [E] two 90 Hz frames: a frame the headset certainly had to reproject
@@ -21,6 +24,10 @@ var _gpu_max := 0.0
 var _cpu_max := 0.0
 var _process_max := 0.0
 var _frame_start_usec := 0
+var _main_max := 0.0
+var _last_main_ms := 0.0
+var _section_max := {}  ## section -> max ms this second
+var _last_sections := {}  ## the previous frame's section totals (usec)
 
 
 static func requested() -> bool:
@@ -45,10 +52,13 @@ func _ready() -> void:
 		set_process(false)
 		return
 	_file.store_line("kind,t_s,frames,frame_p50_ms,frame_p99_ms,frame_max_ms,gpu_mean_ms,gpu_max_ms,cpu_render_max_ms,"
-			+ "script_max_ms,altitude_m,cloud_far,cloud_uploading,cloud_last_upload_ms,draw_calls,primitives,vram_mb,xr")
+			+ "script_max_ms,altitude_m,cloud_far,cloud_uploading,cloud_last_upload_ms,draw_calls,primitives,vram_mb,xr,"
+			+ "main_max_ms," + ",".join(FrameProfiler.SECTIONS.map(func(s: StringName) -> String: return "sec_%s_max_ms" % s)))
 	_vp = get_viewport().get_viewport_rid()
 	RenderingServer.viewport_set_measure_render_time(_vp, true)
 	get_tree().process_frame.connect(func() -> void: _frame_start_usec = Time.get_ticks_usec())
+	RenderingServer.frame_pre_draw.connect(_on_frame_pre_draw)
+	FrameProfiler.enabled = true
 	_start_msec = Time.get_ticks_msec()
 	_second_start_msec = _start_msec
 	print("[PerfLog] writing ", path)
@@ -71,25 +81,42 @@ func _process(delta: float) -> void:
 	_process_max = maxf(_process_max, process_ms)
 	var now := Time.get_ticks_msec()
 	if interval_ms > SPIKE_MS:
-		_write_row("spike", now, PackedFloat64Array([interval_ms]), gpu, gpu, cpu, process_ms)
+		var spike_sections := {}
+		for section: StringName in _last_sections:
+			spike_sections[section] = int(_last_sections[section]) / 1000.0
+		_write_row("spike", now, PackedFloat64Array([interval_ms]), gpu, gpu, cpu, process_ms, _last_main_ms, spike_sections)
 	if now - _second_start_msec >= 1000:
-		_write_row("second", now, _intervals, _gpu_sum / _intervals.size(), _gpu_max, _cpu_max, _process_max)
+		_write_row("second", now, _intervals, _gpu_sum / _intervals.size(), _gpu_max, _cpu_max, _process_max, _main_max,
+				_section_max)
 		_intervals = []
 		_gpu_sum = 0.0
 		_gpu_max = 0.0
 		_cpu_max = 0.0
 		_process_max = 0.0
+		_main_max = 0.0
+		_section_max = {}
 		_second_start_msec = now
 		_file.flush()
 
 
+## Main thread, after the frame's process and deferred calls (the UI's _draw included), before the draw.
+func _on_frame_pre_draw() -> void:
+	if _frame_start_usec > 0:
+		_last_main_ms = (Time.get_ticks_usec() - _frame_start_usec) / 1000.0
+		_main_max = maxf(_main_max, _last_main_ms)
+	_last_sections = FrameProfiler.take_frame()
+	for section: StringName in _last_sections:
+		_section_max[section] = maxf(float(_section_max.get(section, 0.0)), int(_last_sections[section]) / 1000.0)
+
+
 func _exit_tree() -> void:
+	FrameProfiler.enabled = false
 	if _file != null:
 		_file.close()
 
 
 func _write_row(kind: String, now_msec: int, intervals: PackedFloat64Array, gpu_mean: float, gpu_max: float,
-		cpu_max: float, process_max: float) -> void:
+		cpu_max: float, process_max: float, main_max: float, sections: Dictionary) -> void:
 	var sorted := intervals.duplicate()
 	sorted.sort()
 	var n := sorted.size()
@@ -103,4 +130,6 @@ func _write_row(kind: String, now_msec: int, intervals: PackedFloat64Array, gpu_
 			Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME),
 			Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME),
 			Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0,
-			int(xr != null and xr.xr_active)])
+			int(xr != null and xr.xr_active)]
+			+ ",%.2f" % main_max
+			+ "".join(FrameProfiler.SECTIONS.map(func(s: StringName) -> String: return ",%.2f" % float(sections.get(s, 0.0)))))

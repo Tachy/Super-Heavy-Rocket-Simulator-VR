@@ -63,6 +63,12 @@ func snap_timeline() -> void:
 
 
 func _process(delta: float) -> void:
+	FrameProfiler.begin(&"ui_webcast")
+	_process_unprofiled(delta)
+	FrameProfiler.end(&"ui_webcast")
+
+
+func _process_unprofiled(delta: float) -> void:
 	if world == null or not world.core.is_open():
 		visible = false
 		return

@@ -18,6 +18,12 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	FrameProfiler.begin(&"ui_hud")
+	_process_unprofiled(_delta)
+	FrameProfiler.end(&"ui_hud")
+
+
+func _process_unprofiled(_delta: float) -> void:
 	var sim := world.flight.sim
 	visible = sim.is_active()
 	if not visible:

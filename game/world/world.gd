@@ -143,6 +143,7 @@ func _process(delta: float) -> void:
 func update_world() -> void:
 	# The flight simulation may lag behind the clock at high time warp; the clock then waits for it.
 	var t := clock.tdb_s
+	FrameProfiler.begin(&"flight_advance")
 	if flight.mission_pending():
 		# "Startvorbereitung": the world clock stands at the press instant while the mission start runs; its outcome
 		# (mission_started, inside this advance) sets the clock to the mission's epoch - no hold-back in this frame.
@@ -164,48 +165,74 @@ func update_world() -> void:
 		# frame, unevenly): Earth, pad and tower at the clock time but vehicles at the snapshot made the vehicles jump
 		# by up to several metres against the pad every frame (Earth rotation ~420 m/s).
 		t = reached
+	FrameProfiler.end(&"flight_advance")
+	FrameProfiler.begin(&"weather")
 	weather.update(t, clock.warp)  # non-blocking: downloads, builds and loads run in the background
+	FrameProfiler.end(&"weather")
+	FrameProfiler.begin(&"towers_zone")
 	for view in towers:
 		var at_site: bool = flight.sim.is_active() and view.site_id == flight.launch_site_id
 		view.update_state(flight.sim.tower_state() if at_site else {})
 	var zone: Dictionary = flight.sim.landing_zone() if flight.sim.is_active() else {}
 	_update_drone_ship(zone)
 	water_waves.set_sea_state(zone.get("sea_state", {}))  # the calm set without a sea state
+	FrameProfiler.end(&"towers_zone")
+	FrameProfiler.begin(&"ephemeris")
 	earth.fixed_to_gcrf = core.earth_fixed_to_gcrf(t)
 	moon.fixed_to_gcrf = core.moon_fixed_to_gcrf(t)
 	moon_gcrf_m = core.body_position_gcrf_m("moon", t)
 	moon.center_gcrf_m = moon_gcrf_m
+	FrameProfiler.end(&"ephemeris")
 
+	FrameProfiler.begin(&"camera")
 	_update_camera(t)
+	FrameProfiler.end(&"camera")
 	var cam := camera.position_gcrf_m
 
 	# Apparent directions: as seen from the Earth's centre for Earth shading, from the camera for
 	# what the camera sees directly (solar disk, light direction).
+	FrameProfiler.begin(&"ephemeris")
 	sun_apparent_from_earth_m = core.apparent_body_position_gcrf_m("sun", t, Vector3.ZERO, Vector3.ZERO)
 	moon_apparent_from_earth_m = core.apparent_body_position_gcrf_m("moon", t, Vector3.ZERO, Vector3.ZERO)
 	var sun_from_camera := core.apparent_body_position_gcrf_m("sun", t, cam, Vector3.ZERO)
+	FrameProfiler.end(&"ephemeris")
 	# Eye adaptation: the viewer adapts over the longer of the frame time and the simulated step (paused: real time;
 	# time warp: a time-lapse whose exposure follows the scene; a clock jump: adapted at once).
+	FrameProfiler.begin(&"atmosphere")
 	var adaptation_dt := maxf(_delta, absf(t - _last_world_tdb_s)) if not is_nan(_last_world_tdb_s) else 0.0
 	_last_world_tdb_s = t
 	atmosphere.update(cam, Vector3.ZERO, earth.fixed_to_gcrf, sun_apparent_from_earth_m, adaptation_dt,
 			1.0 - core.solar_eclipse_fraction_gcrf(cam, t), moon_apparent_from_earth_m, t, moon_gcrf_m)
+	FrameProfiler.end(&"atmosphere")
 
+	FrameProfiler.begin(&"camera")
 	earth.place(cam)
+	FrameProfiler.end(&"camera")
 	var camera_fixed := earth.fixed_to_gcrf.transposed() * cam
+	FrameProfiler.begin(&"clouds")
 	clouds.update(camera_fixed, weather.blend(), _delta)
 	# The scaled-space Earth with the far-field clouds exactly while the cloud pass is off and weather is shown (two
 	# shaders: weather off keeps the earth.gdshader of before bit for bit, Task 10).
 	var earth_shader := _earth_clouds_shader if clouds.far_enabled else _earth_shader
 	if _earth_material.shader != earth_shader:
 		_earth_material.shader = earth_shader
+	FrameProfiler.end(&"clouds")
+	FrameProfiler.begin(&"refraction")
 	refraction.update(core, camera_fixed, earth.fixed_to_gcrf)
+	FrameProfiler.end(&"refraction")
+	FrameProfiler.begin(&"earth_terrain")
 	earth_terrain.update_for_camera(camera_fixed, _delta)
+	FrameProfiler.end(&"earth_terrain")
+	FrameProfiler.begin(&"water")
 	water_waves.update(camera_fixed, t)
+	FrameProfiler.end(&"water")
 	earth.body_mesh_visible = not earth_terrain.active
+	FrameProfiler.begin(&"moon")
 	moon.place(cam)
 	moon_terrain.update_for_camera(moon.fixed_to_gcrf.transposed() * (cam - moon_gcrf_m), _delta)
+	FrameProfiler.end(&"moon")
 	moon.body_mesh_visible = not moon_terrain.active
+	FrameProfiler.begin(&"shader_globals")
 	var sun_local := earth.to_local_frame(sun_apparent_from_earth_m)
 	var moon_local := earth.to_local_frame(moon_apparent_from_earth_m)
 	_earth_material.set_shader_parameter("sun_position_local", sun_local)
@@ -222,13 +249,20 @@ func update_world() -> void:
 	ShaderGlobals.set_value("moon_sun_position_local", moon_sun_local)
 	ShaderGlobals.set_value("moon_earth_position_local", moon_earth_local)
 	_moon_material.set_shader_parameter("camera_position_local", moon.to_local_frame(cam - moon_gcrf_m))
+	FrameProfiler.end(&"shader_globals")
 
+	FrameProfiler.begin(&"sun")
 	_place_sun(sun_from_camera)
 	_update_sun_light(t, cam)
+	FrameProfiler.end(&"sun")
+	FrameProfiler.begin(&"flight_views")
 	flight.place_views(self, cam)
+	FrameProfiler.end(&"flight_views")
+	FrameProfiler.begin(&"moon_orbit")
 	moon_orbit.update_line(core, t, cam)
 	earth_label.position = earth.position
 	moon_label.position = moon.position
+	FrameProfiler.end(&"moon_orbit")
 
 
 ## Puts a vehicle on a launch site at the current instant and focuses the camera on it; the ascent autopilot counts
