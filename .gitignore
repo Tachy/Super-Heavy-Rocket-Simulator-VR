@@ -8,6 +8,9 @@
 # Build output
 /build/
 /out/
+
+# Scratch files of work sessions (logs, before / after images, raw downloads)
+/tmp/
 *.obj
 *.lib
 *.exp
