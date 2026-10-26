@@ -179,3 +179,141 @@ images on a divisor change; the upsample kernel takes the four nearest low-resol
 - [ ] **Step 3: If a phase misses**: name the bound (GPU / script / other), add a follow-up task to this plan's ledger
   with the user's decision.
 - [ ] **Step 4: Commit** `docs: VR performance - acceptance run`
+
+---
+
+## Part 2: one centre-eye cloud march (user 2026-10-26)
+
+**Why:** the acceptance run (Task 6, `data/perf/perf_20261026_082635.csv`) brought the GPU from 26-66 to 13-17 ms, but
+in the headset the clouds look grainy and blurred differently per eye: each eye marches with its own blue-noise jitter
+per pixel and keeps its own temporal history, so the two eyes see different noise and different blur (binocular
+rivalry). User: blur is fine for clouds if both eyes get the same; the noise is fine too if it ends in much softer
+edges (an alpha fade), not grain.
+
+**Design:** march, accumulate and filter the clouds ONCE per frame in a centre view - the head's position, a frustum
+covering both eyes - and let each eye's upsample read that one image at its own rays. Both eyes then show the same
+noise, the same history and the same blur; the disparity of a cloud comes from reprojecting at its distance (exact,
+as the stereo test checks today). One march instead of two pays for a finer divisor. Desktop (one view) is the centre
+view itself.
+
+**Part 2 constraints** (in addition to the Global Constraints):
+- Stereo exactness as today: a cloud point at distance D shows at the physical disparity IPD / D within 1 urad
+  (`cloud_vr_stereo_test.gd`); a static point reprojects to its own pixel.
+- The eye's own depth decides occlusion at full resolution (a cloud never bleeds over the tower / vehicle in one eye
+  only).
+- Canted displays (Pimax): the eyes' frusta may be rotated in the head; every frustum computation goes through
+  `scene.get_view_projection(v)` (which holds the eye offset and rotation), never through assumed parallel eyes.
+- Desktop preset images unchanged, unless Task 9's soft-edge ruling says otherwise (render_check desktop A/B).
+
+**Part 2 review focus:**
+- Eye pixels near the frustum edges whose centre-view position falls outside the centre image: clamp to the edge, no
+  black seam (test in Task 9).
+- A very wide union (canted panels): the centre projection is capped at 75 deg per side; eye rays beyond it clamp
+  (test in Task 7).
+- Near objects (the vehicle at 30-100 m on the pad): the centre march takes the scene depth from an eye's depth buffer
+  with a parallax of at most IPD/2 / D; the per-eye upsample's depth weight must still keep the cloud off the vehicle
+  edge in each eye (image check in Task 10).
+- Resize / divisor change / view count change mid-run: the centre images are re-created like the per-view ones today.
+- History reset (clock jump, pinned snapshot): resets the one centre history.
+
+### Task 7: Centre view geometry
+
+**Files:**
+- Create: `game/world/weather/cloud_centre_view.gd`
+- Modify: `game/tests/cloud_vr_stereo_test.gd` (new checks; its header lists the mirrors)
+
+**Interfaces:**
+- Produces: `class_name CloudCentreView` with
+  `static func build(view_projections: Array[Projection], view_size: Vector2i, divisor: int) -> Dictionary`
+  returning `{"projection": Projection, "low": Vector2i, "pixel_angle": float}`. `projection` maps head-space points to
+  the renderer's clip convention (reversed Z in [0, 1], 1 = near, y down - as the eyes' projections); `low` the centre
+  image size; `pixel_angle` the centre pixel's angle (the march's band limit, as `CloudEffect` computes it today).
+  With one projection it returns that projection unchanged and `low = ceil(view_size / divisor)` (desktop:
+  bit-identical).
+- Constant `MAX_HALF_ANGLE_RAD := deg_to_rad(75.0)` ([E] cap of the union per side).
+
+Algorithm: for each eye projection P_v, the head-space ray of each NDC corner is the difference of the two unprojected
+depths (as `cloud_ray_earth` does: the eye offset is inside P_v); its tangents (x / -z, y / -z) give the eye's tangent
+rectangle; the union rectangle (capped at tan(MAX_HALF_ANGLE_RAD)) becomes an off-axis frustum at the head origin with
+the eyes' near / far; pixel density = the eyes' full-resolution pixels per tangent unit (the larger of the eyes),
+`low = ceil(union_size_in_tangent x density / divisor)`.
+
+- [ ] **Step 1: Tests in `cloud_vr_stereo_test.gd`** (the existing asymmetric Quest-like eyes and a canted pair rotated
+  +-10 deg about the head's up axis): every eye frustum corner ray projects inside the centre NDC [-1, 1] (tolerance
+  1e-9); one projection in -> the same projection out and `low == ceil(size / divisor)`; a pair wider than 75 deg per
+  side is capped (corner rays beyond the cap clamp to the edge).
+- [ ] **Step 2: Run, expect FAIL** (`CloudCentreView` missing).
+- [ ] **Step 3: Implement `CloudCentreView.build`.**
+- [ ] **Step 4: Run `cloud_vr_stereo_test.gd` (PASS).**
+- [ ] **Step 5: Commit** `feat(game): the clouds' centre view covering both eyes`
+
+### Task 8: One centre march and history
+
+**Files:**
+- Modify: `game/world/weather/cloud_effect.gd` (images: one centre set `color, depth, history0/1, age0/1, buffer`
+  plus per eye only `buffer` and `output_slice`; `_render_pass` builds the centre block and dispatches march + temporal
+  once, then the upsample per eye), `game/shaders/cloud_pass.gdshaderinc` (CLOUD_MARCH: the centre's depth gather),
+  `game/tests/cloud_vr_stereo_test.gd` (mirror of the gather)
+
+**Interfaces:**
+- Consumes: `CloudCentreView.build` (Task 7).
+- The centre view block keeps the `CloudView` layout: `inv_projection` = centre inverse, `view_to_world` = the head
+  (`scene.get_cam_transform()`), `eye_earth.xyz` = 0, `prev_clip_from_earth` = the previous frame's centre transform,
+  `sizes` = (centre virtual full size = low x divisor, low). The temporal kernel is unchanged.
+- March, stereo only (`#define CLOUD_CENTRE`, kernels `march_centre` / `march_centre_prefilter`): set 1 gets both eyes'
+  depth layers (`scene_depth_left`, `scene_depth_right`) and a block `CloudEyes { mat4 clip_from_head[2];
+  mat4 inv_projection[2]; vec4 eye_sizes; }`. For a centre low pixel: project its four corner rays into the eye whose
+  NDC contains the centre ray (left first), take that eye's pixel rectangle (at most 6 x 6 samples, strided beyond),
+  and gather near / far / mean exactly as today with that eye's `cloud_scene_distance`. Mono keeps the `march` kernel.
+- `CloudEffect.stats["low_size"]` = the centre's low size; `_shape_prefilter_needed` uses the centre's pixel angle.
+
+- [ ] **Step 1: Test (mirror in `cloud_vr_stereo_test.gd`)**: for scene points at 50 m, 2 km and 20 km seen by both
+  eyes, the centre gather's distance equals the true distance from the head within IPD/2 (relative 1e-3 at 50 m,
+  1e-6 at 2 km); the gather picks the left eye for centre rays inside its NDC.
+- [ ] **Step 2: Run, expect FAIL.**
+- [ ] **Step 3: Implement the centre images, block and `CLOUD_CENTRE` gather; dispatch march + temporal once.**
+- [ ] **Step 4: Run `cloud_vr_stereo_test.gd`, `cloud_layer_test.gd`, `smoke_test.gd` (PASS); desktop render_check
+  A/B of `ground` and `orbit` (the `views.sh` set, `--cloud_quality=desktop`): identical.**
+- [ ] **Step 5: Commit** `feat(game): one cloud march and history for both eyes`
+
+### Task 9: Per-eye upsample from the centre, with soft edges
+
+**Files:** `game/shaders/cloud_pass.gdshaderinc` (CLOUD_UPSAMPLE), `game/world/weather/cloud_effect.gd`
+(upsample bindings), `game/tests/cloud_vr_stereo_test.gd`
+
+**Interfaces:**
+- The upsample's set 1 adds the centre block (binding 5: `CloudCentre { mat4 clip_from_earth; vec4 sizes; }`) and
+  reads the centre history and centre depth.
+- Per eye pixel: `D` from its own depth; `dir` its eye ray; first position `P = eye_earth + dir * min(D, 1e7)`
+  projected into the centre -> `uv`; the taps' alpha-weighted cloud distance `c`; when `c > 0` the final position
+  `P' = eye_earth + dir * min(c, D)` -> `uv'` (the cloud's own disparity); gather at `uv'`.
+- Soft edges (user 2026-10-26: the noise may stay, it must end in soft alpha edges): the gather is a 4 x 4 tent
+  (weights (2 - |dx|)(2 - |dy|) over the 4 x 4 nearest centre pixels, ~1.5 centre pixels radius) times the depth weight
+  `exp(-CLOUD_DEPTH_SHARPNESS |ln(D / D_i)|)`, on premultiplied colour + alpha - display only, the history stays
+  unfiltered. Mono: the same tent if the user approves the desktop look in Task 10's image check, else mono keeps the
+  2 x 2 bilinear (rule it in the ledger).
+- Outside the centre image: clamp `uv'` to its edge pixels.
+
+- [ ] **Step 1: Tests (mirror)**: a cloud point at 2 km and 20 km: each eye's pixel -> centre `uv'` -> the same centre
+  pixel for both eyes (the shared sample), and the eye pixels' disparity equals IPD / D within 1 urad; a static point's
+  temporal reprojection in the centre returns to its own pixel; an eye corner pixel maps inside or clamps to the edge.
+- [ ] **Step 2: Run, expect FAIL.**
+- [ ] **Step 3: Implement the centre upsample with the two-step reprojection and the tent gather.**
+- [ ] **Step 4: Run `cloud_vr_stereo_test.gd`, `cloud_layer_test.gd`, `smoke_test.gd` (PASS).**
+- [ ] **Step 5: Commit** `feat(game): each eye's clouds from the shared centre image, soft edges`
+
+### Task 10: Centre divisor, images, VR check
+
+**Files:** `game/world/weather/cloud_layer.gd` (`PRESETS[Quality.VR]["divisor"]`), `docs/subsystems/weather-clouds.md`
+(Model: centre view; Performance: VR), `docs/subsystems/vr-performance.md`, memory.
+
+- [ ] **Step 1: Pick the centre divisor**: the centre march costs ~ union / one eye (~1.25) / divisor^2 of one eye's
+  pixels against 2 / 16 for two eyes at divisor 4 today: divisor 3 costs about the same, sharper and shared. Measure
+  with `terrain_perf --render_scale=1.65 --gpu_passes` (mono: the centre path is the view) at divisor 3 and 4; take 3
+  if its cloud pass stays <= 4 ms in the descent.
+- [ ] **Step 2: Image check** (`views.sh` set, VR preset, before / after, PNGs to the user): edges soft, no grain
+  speckle at cloud borders, no bleeding over the tower; the desktop preset per the Task 9 ruling.
+- [ ] **Step 3: VR run with the user** (`Start-VR.cmd --perf-log`, weather on, pad -> decks -> > 60 km, `nvidia-smi`
+  alongside): GPU per phase against Task 6 (13-17 ms), and the user's look check (same clouds in both eyes, soft
+  edges).
+- [ ] **Step 4: Docs, ledger, memory; commit** `docs: VR clouds from one centre view`
