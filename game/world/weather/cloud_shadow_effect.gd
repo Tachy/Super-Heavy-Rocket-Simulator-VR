@@ -129,7 +129,16 @@ func _notification(what: int) -> void:
 			_rd.free_rid(_shader)
 
 
-func _render_callback(_callback_type: int, _render_data: RenderData) -> void:
+func _render_callback(callback_type: int, _render_data: RenderData) -> void:
+	# diagnostics (terrain_perf --gpu_passes): GPU timestamps around this pass, named by the interval they start
+	if CloudEffect.capture_timestamps and _rd != null:
+		_rd.capture_timestamp("shadow_pass")
+	_render_pass(callback_type, _render_data)
+	if CloudEffect.capture_timestamps and _rd != null:
+		_rd.capture_timestamp("opaque_and_sky")
+
+
+func _render_pass(_callback_type: int, _render_data: RenderData) -> void:
 	if _rd == null or _maps.size() != 2 or not ShaderGlobals.value(&"cloud_enabled"):
 		return
 	var start_us := Time.get_ticks_usec()

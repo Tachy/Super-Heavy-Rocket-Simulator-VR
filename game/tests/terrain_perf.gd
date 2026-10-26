@@ -63,6 +63,8 @@ var _second := {}
 var _second_index := 0
 var _spikes: PackedStringArray = []
 var _pipelines_seen := -1  ## pipeline compilations at draw time (ubershader, the main thread waits) so far
+var _gpu_pass_us := {}  ## --gpu_passes: timestamp name -> GPU ns this second
+var _gpu_pass_frames := 0
 var _log_lines: PackedStringArray = []  ## per-second lines, printed at the end (see the header)
 var _spike_ms := 0.0  ## --spikes threshold (ms); 0: off
 var _pre_draw_us := 0  ## RenderingServer.frame_pre_draw / frame_post_draw of the last frame
@@ -130,12 +132,41 @@ func _process(_delta: float) -> bool:
 	_last_us = now_us
 	var t := (now_us - _t0_us) * 1.0e-6
 	_record(frame_ms, process_ms, rest_ms)
+	if _args.has("gpu_passes"):
+		_record_gpu_passes()
 	if t >= _second_index + 1.0:
+		if _args.has("gpu_passes"):
+			_log_gpu_passes(t)
 		_log_second()
 	return _drive(t)
 
 
-## --cloud_tune=steps=48,max_steps=96,fine=0.03,light_near=4,light_far=2: overrides single preset values of the clouds
+## --gpu_passes: the GPU time between the RenderingDevice's captured timestamps of the previous frame (ns), summed per
+## timestamp name over each second and logged as the mean ms per frame (the top entries). The engine stamps only the
+## viewport (vp_begin...); CloudEffect.capture_timestamps adds the cloud passes' (an interval is named by its start).
+func _record_gpu_passes() -> void:
+	var rd := RenderingServer.get_rendering_device()
+	var count := rd.get_captured_timestamps_count()
+	for i in range(1, count):
+		var name := rd.get_captured_timestamp_name(i - 1)
+		var us := float(rd.get_captured_timestamp_gpu_time(i) - rd.get_captured_timestamp_gpu_time(i - 1))
+		_gpu_pass_us[name] = float(_gpu_pass_us.get(name, 0.0)) + us
+	_gpu_pass_frames += 1
+
+
+func _log_gpu_passes(t: float) -> void:
+	var names := _gpu_pass_us.keys()
+	names.sort_custom(func(a: String, b: String) -> bool: return _gpu_pass_us[a] > _gpu_pass_us[b])
+	var parts := PackedStringArray()
+	for name: String in names.slice(0, 14):
+		parts.append("%s %.2f" % [name, _gpu_pass_us[name] / 1.0e6 / maxi(_gpu_pass_frames, 1)])
+	_log_lines.append("terrain_perf: gpu passes t=%3d s %s  %s" % [int(t), _phase, ", ".join(parts)])
+	_gpu_pass_us.clear()
+	_gpu_pass_frames = 0
+
+
+## --cloud_tune=steps=48,max_steps=96,fine=0.03,light_near=4,light_far=2,divisor=3: overrides single preset values of
+## the clouds
 ## (the shader globals the preset sets) for a tuning run; the game's preset is CloudLayer.PRESETS.
 func _tune_clouds(spec: String) -> void:
 	var light: Vector2i = ShaderGlobals.value(&"cloud_light_samples")
@@ -150,6 +181,8 @@ func _tune_clouds(spec: String) -> void:
 				ShaderGlobals.set_value(&"cloud_light_march", Vector4(20.0, CloudLayer.light_march_ratio(20.0, 6000.0,
 						light.x), 6000.0, 0.0))
 			"light_far": light.y = int(kv[1])
+			"divisor": _world.clouds.effect.set_quality(int(kv[1]),
+					float(CloudLayer.PRESETS[_world.clouds.quality]["temporal_weight"]))
 	ShaderGlobals.set_value(&"cloud_light_samples", light)
 
 
@@ -166,7 +199,8 @@ func _setup() -> void:
 	if _args.has("cloud_scattering"):
 		_world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
 				if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE
-	if _args.has("cloud_tune"):  # tuning runs: steps=, max_steps=, fine=, light_near=, light_far= (comma separated)
+	CloudEffect.capture_timestamps = _args.has("gpu_passes")
+	if _args.has("cloud_tune"):  # tuning runs: steps=, max_steps=, fine=, light_near=, light_far=, divisor= (comma list)
 		_tune_clouds(String(_args["cloud_tune"]))
 	if String(_args.get("weather", "")).ends_with(".wthr"):
 		var snapshot: Dictionary = _world.core.weather_load_snapshot(_args["weather"])

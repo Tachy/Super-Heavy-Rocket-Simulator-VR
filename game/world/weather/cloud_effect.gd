@@ -32,6 +32,8 @@ var output := Texture2DArrayRD.new()
 var output_generation := 0
 ## Render-thread state of the last frame (tests): {valid, low_size, views, march_ms}.
 var stats := {}
+## Diagnostics (terrain_perf --gpu_passes): GPU timestamps around the cloud passes (RenderingDevice).
+static var capture_timestamps := false
 
 var _rd: RenderingDevice
 var _march: CloudShaderPort
@@ -275,7 +277,16 @@ func _notification(what: int) -> void:
 			_rd.free_rid(_globals_buffer)
 
 
-func _render_callback(_callback_type: int, render_data: RenderData) -> void:
+func _render_callback(callback_type: int, render_data: RenderData) -> void:
+	# diagnostics (terrain_perf --gpu_passes): GPU timestamps around this pass, named by the interval they start
+	if CloudEffect.capture_timestamps and _rd != null:
+		_rd.capture_timestamp("cloud_pass")
+	_render_pass(callback_type, render_data)
+	if CloudEffect.capture_timestamps and _rd != null:
+		_rd.capture_timestamp("transparent_and_post")
+
+
+func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	if _rd != null:
 		_callbacks += 1
 		_retire_outputs()
