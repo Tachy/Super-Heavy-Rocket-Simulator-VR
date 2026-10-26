@@ -347,8 +347,8 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
 	var lo: Vector3 = ShaderGlobals.value(&"atmosphere_camera_lo")
 	var camera := hi + lo
-	# The light cache: a pending fill first (its own compute list, before the march reads it), then its frame for the
-	# lookup (the march reads only a complete fill, with the frame it was filled for).
+	# The light cache: the waiting batch's fill jobs first (their own compute list, before the march reads them), then
+	# the state they lead to for the lookup (the march reads only voxels whose fill ran, with their frame).
 	var cache_globals := {}
 	if light_cache != null:
 		if CloudEffect.capture_timestamps:
@@ -376,8 +376,9 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		u.binding = s["binding"]
 		u.add_id(_samplers["%s|%s|%s" % [s["linear"], s["repeat"], s["mipmap"]]])
 		var texture: RID = textures[i]
-		if s["id"] == &"cloud_light_cache" and light_cache != null:
-			texture = light_cache.texture
+		var name := String(s["id"])
+		if light_cache != null and name.begins_with("cloud_light_cache_"):  # _a<k> / _b<k>: slot 0 / 1 of cascade k
+			texture = light_cache.texture(0 if name[18] == "a" else 1, name.right(1).to_int())
 		u.add_id(texture if texture.is_valid() else _fallback.get(s["type"], _fallback["sampler2D"]))
 		set0.append(u)
 	# The shape prefilter's kernel (clouds.gdshaderinc) only when a footprint can exceed its start: the farthest cloud

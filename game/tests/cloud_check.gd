@@ -34,13 +34,19 @@
 #      vs the CPU's cell (cf 0.15 / 0.3 / 0.4, Sun 45 / 8 deg; the beam-cover overlap model, constants.hpp
 #      cloud_overlap_*, is fitted to these shadows: STARSIM_SLANT_TABLE=1 prints the fit table), the near map vs the
 #      far map over the same receivers, the column terms vs the CPU, the vehicle's total light vs the ground's mean.
-#   8. (static clouds Task 1) the light cache (CloudLightCache, one cascade 8 x 8 km over the shell) against the
-#      per-sample light march with the cache's converged sample count (CloudLightCache.SAMPLES: 96 near + 32 far,
-#      jittered, mean of 8 frames), the same view jitter in both (CloudEffect.pinned_frame): the Sun's scattered
-#      radiance at every pixel of a 64 x 64 view (30 deg fov, 75 deg down, asserted inside the cascade) from 5 km:
-#      a slab of tau ~10 (debug output 2, the grid mean) 5 %, a
-#      broken layer of cf 0.4 (debug output 7, the shapes) 10 % - Sun 45 / 20 deg up; a view whose samples all lie
-#      outside the cascade equals the march exactly (bit for bit); the fill's GPU time (information).
+#   8. (static clouds Tasks 1-2) the light cache (CloudLightCache: 5 cascades 8 / 16 / 32 / 64 / 128 km over the shell,
+#      filled at 1/16 of the voxels per frame: complete after 16 frames) against the per-sample light march with the
+#      cache's converged sample count (CloudLightCache.SAMPLES: 96 near + 32 far, jittered, mean of 8 frames), the same
+#      view jitter in both (CloudEffect.pinned_frame): the Sun's scattered radiance at every pixel of a 64 x 64 view per
+#      cascade at its scale (the camera 5 / 9.9 / 18.8 / 36.5 / 72 km up, looking 80-81 deg down; the farthest cloud
+#      samples asserted inside that cascade's full weight, beyond the finer ones'): a slab of tau ~10 (debug output 2,
+#      the grid mean) 5 %, a broken layer of cf 0.4 (debug output 7, the shapes) 10 % - Sun 45 / 20 deg up; a view
+#      beyond every cascade with a complete fill, and the frames right after a clock jump (nothing held), equal the
+#      march exactly (bit for bit); the fill's GPU time per frame at the game's budget (information).
+#  10. (static clouds Task 2) no seam: a line of pixels crossing each cascade's edge band (cascade 0 -> 1 -> ... -> 4 ->
+#      the march, the slab): the row-to-row step of (cache - march) / mean stays within the image noise (the largest
+#      difference of two march renders with independent jitter); the same view before / after a re-anchor (the
+#      camera moved 12 km east and back: cascade 3 re-anchored) differs by less than that noise.
 # The other sections run with the light cache on (the game's path). Detail levels off for the numbers
 # (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_check.gd
@@ -69,7 +75,7 @@ const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 101
+const EXPECTED_SAMPLES := 129
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -105,11 +111,40 @@ const HANDOVER_TOLERANCE := 0.05
 const FAR_HANDOVER_TOLERANCE := 0.03  ## the far map and the slanted column are both smooth (the grid mean)
 ## Section 8 (the light cache against the light march).
 const CACHE_VIEW_SIZE := 64
-## The compared view's farthest cloud sample may use at most this fraction of the cascade's half extent (margin for the
-## anchor's cell snapping).
-const CACHE_VIEW_MARGIN := 0.9
 const CACHE_SLAB_TOLERANCE := 0.05
-const CACHE_BROKEN_TOLERANCE := 0.10  ## the voxel size (62.5 m across, 320 m up) against the shapes
+const CACHE_BROKEN_TOLERANCE := 0.10  ## the voxel size (62.5 m across, 40 m up near the camera) against the shapes
+## The fill's budget in the checks: 1/16 of all voxels per frame (complete after 16 frames).
+const CACHE_BUDGET_DIVISOR := 16
+const CACHE_MAX_SETTLE_FRAMES := 400
+## Each cascade at its scale: the same view (81 deg down, fov 22; cascade 0: 80 / 24) from a camera about twice as high
+## per cascade (x2 apart as the cascades), its farthest cloud samples just inside that cascade's full weight and
+## beyond the finer cascade's (asserted): the outer part of the view is that cascade's, the inner the finer ones', at
+## the same pixel footprint / voxel ratio as cascade 0.
+const CACHE_VIEWS := [
+	{"cascade": 0, "height_m": 5000.0, "elevation": -80.0, "azimuth": 10.0, "fov": 24.0},
+	{"cascade": 1, "height_m": 9900.0, "elevation": -81.0, "azimuth": 10.0, "fov": 22.0},
+	{"cascade": 2, "height_m": 18800.0, "elevation": -81.0, "azimuth": 10.0, "fov": 22.0},
+	{"cascade": 3, "height_m": 36500.0, "elevation": -81.0, "azimuth": 10.0, "fov": 22.0},
+	{"cascade": 4, "height_m": 72000.0, "elevation": -81.0, "azimuth": 10.0, "fov": 22.0},
+]
+## Beyond every cascade: from 20 km toward the northern horizon (the slab entered > 220 km away).
+const CACHE_OUTSIDE_HEIGHT_M := 20000.0
+const CACHE_OUTSIDE_ELEVATION_DEG := -4.9
+const CACHE_OUTSIDE_FOV_DEG := 1.0
+const CACHE_BORDER_POINTS := 16  ## rays per border edge of a view's cloud range
+## Section 10 (no seam): a line of pixels (16 x 128: the row means) toward north across each cascade's edge band.
+const CACHE_LINE_SIZE := Vector2i(16, 128)
+const CACHE_EDGE_VIEWS := [
+	{"cascade": 0, "height_m": 5000.0, "elevation": -56.0, "fov": 20.0},
+	{"cascade": 1, "height_m": 5000.0, "elevation": -31.5, "fov": 12.0},
+	{"cascade": 2, "height_m": 5000.0, "elevation": -18.0, "fov": 10.0},
+	{"cascade": 3, "height_m": 5000.0, "elevation": -11.5, "fov": 8.0},
+	{"cascade": 4, "height_m": 5000.0, "elevation": -4.3, "fov": 3.0},
+]
+## The re-anchor pair: cascade 3's edge view from this far east, after the camera went twice as far east and back
+## (cascade 3, 500 m voxels: re-anchors beyond 10 km - away, not here).
+const CACHE_REANCHOR_EAST_M := 6000.0
+const CACHE_REANCHOR_CASCADE := 3
 ## A pixel's error is relative to max(its reference, this fraction of the view's mean reference): a cloud's fringe or a
 ## gap's last light carries no relative accuracy of its own.
 const CACHE_ERROR_FLOOR := 0.05
@@ -260,7 +295,7 @@ func _run() -> void:
 	await _ground_light_samples()
 	# 7. The shadow maps' hand-overs and the shapes on broken cloud.
 	await _handover_samples()
-	# 8. The light cache against the per-sample light march.
+	# 8. The light cache against the per-sample light march (and 10: no seam at its edges).
 	await _light_cache_samples()
 
 	for f in _files:
@@ -481,108 +516,351 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode
 
 ## Section 8: the light cache against the per-sample light march with the cache's own converged sample count (the
 ## cache's fill: CloudLightCache.SAMPLES at the stratified midpoints; the march: the same counts, jittered per frame and
-## averaged over RADIANCE_FRAMES frames), the view's jitter pinned to the same frames in both.
+## averaged over RADIANCE_FRAMES frames), the view's jitter pinned to the same frames in both. Each cascade at its scale
+## (CACHE_VIEWS: every cloud sample of the view where that cascade alone has weight). The fill runs at 1/16 of the
+## voxels per frame (complete after 16 frames); then the game's budget's GPU time, a view beyond every cascade with
+## a complete fill, and the frames right after a clock jump (nothing held: the march's bytes).
 func _light_cache_samples() -> void:
 	var preset: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.DESKTOP]
 	var first: float = preset["light_first_m"]
 	var near: float = preset["light_near_m"]
 	var samples := CloudLightCache.SAMPLES
+	var cache := _clouds.light_cache
+	var game_budget := cache.schedule.budget_voxels
+	cache.schedule.budget_voxels = cache.voxel_count() / CACHE_BUDGET_DIVISOR
 	_viewport.size = Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE)
-	# A steep, narrow view: every cloud sample of every pixel must lie inside the cascade (asserted below), else the
-	# pixels outside would be marched in both renders and compare equal.
-	const VIEW_ELEVATION_DEG := -75.0
-	const VIEW_AZIMUTH_DEG := 10.0
-	_camera.fov = 30.0
-	var reach_m := _view_reach_m(VIEW_ELEVATION_DEG, VIEW_AZIMUTH_DEG, _camera.fov, 5000.0 - SLAB_BOTTOM_M)
-	var half_extent_m := CloudLayer.LIGHT_CACHE_EXTENT_M.x * 0.5
-	_check("light cache view: every cloud sample inside the cascade", reach_m <= CACHE_VIEW_MARGIN * half_extent_m,
-			"farthest sample (the slab's base at the corner rays) %.0f m of the camera's vertical, cascade half extent %.0f m"
-			% [reach_m, half_extent_m])
 	var slab := _slab("cache_slab", SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, 1.0)
 	var broken := _slab("cache_broken", SLAB_BOTTOM_M, SLAB_TOP_M, DECK_LIQUID_KG_M3, BROKEN_FRACTION)
-	var view := _local_direction(VIEW_ELEVATION_DEG, VIEW_AZIMUTH_DEG)
-	for c in [[slab, 2, CACHE_SLAB_TOLERANCE, "slab tau ~10"], [broken, 7, CACHE_BROKEN_TOLERANCE, "broken cf 0.4"]]:
-		_show(c[0])
-		for sun_elevation in [45.0, 20.0]:
-			var sun := _local_direction(sun_elevation, 135.0)
-			var images: Array[PackedFloat32Array] = []
-			for cached in [false, true]:
-				_clouds.light_cache_enabled = cached
-				ShaderGlobals.set_value(&"cloud_light_march", Vector4(first,
-						CloudLayer.light_march_ratio(first, near, samples.x), near, 0.0))
-				ShaderGlobals.set_value(&"cloud_light_samples", samples)
-				images.append(await _mean_image(_point(5000.0), view, sun, c[1]))
-			_clouds.light_cache_enabled = true
-			_clouds.quality = CloudLayer.Quality.DESKTOP
-			_detail_off()
-			var mean := 0.0
-			for v in images[0]:
-				mean += v / images[0].size()
-			var worst := 0.0
-			var worst_at := 0
-			var mean_error := 0.0
-			var bias := 0.0
-			for i in range(images[0].size()):
-				var error := absf(images[1][i] - images[0][i]) / maxf(images[0][i], CACHE_ERROR_FLOOR * mean)
-				mean_error += error / images[0].size()
-				bias += (images[1][i] - images[0][i]) / (mean * images[0].size())
-				if error > worst:
-					worst = error
-					worst_at = i
-			_check("light cache vs light march, %s, Sun %.0f deg" % [c[3], sun_elevation],
-					mean > 0.0 and worst <= c[2],
-					("worst pixel %.2f %% at (%d, %d) (cache %.5f march %.5f), mean error %.2f %%, bias %.2f %% of the"
-					+ " view mean %.5f /sr") % [worst * 100.0, worst_at % CACHE_VIEW_SIZE, worst_at / CACHE_VIEW_SIZE,
-					images[1][worst_at], images[0][worst_at], mean_error * 100.0, bias * 100.0, mean])
-	# The fill's GPU time (information; the budget is Task 2's progressive fill): a forced refill with the timestamps.
+	var sun45 := _local_direction(45.0, 135.0)
+	# The progressive fill: all cascades at 1/16 of the voxels per frame.
+	_show(slab)
+	var v0: Dictionary = CACHE_VIEWS[0]
+	_camera.fov = v0["fov"]
+	var view0 := _local_direction(v0["elevation"], v0["azimuth"])
+	await _settle_cache(_point(v0["height_m"]), view0, sun45, 2)
+	cache.reset()
+	var fill_frames := await _settle_cache(_point(v0["height_m"]), view0, sun45, 2)
+	_check("light cache: %d cascades at 1/%d of the voxels per frame complete after %d frames"
+			% [CloudLightCacheSchedule.CASCADES.size(), CACHE_BUDGET_DIVISOR, CACHE_BUDGET_DIVISOR],
+			fill_frames == CACHE_BUDGET_DIVISOR, "%d frames with fill jobs (%d voxels, %.1f MB)"
+			% [fill_frames, cache.voxel_count(), CloudLightCache.texture_bytes() / 1048576.0])
+	for v: Dictionary in CACHE_VIEWS:
+		_camera.fov = v["fov"]
+		var height: float = v["height_m"]
+		var reach := _view_cloud_range_m(height, v["elevation"], v["fov"], 1.0)
+		var k: int = v["cascade"]
+		var inner := 0.0 if k == 0 else _cascade_radius_m(k - 1, false)
+		var outer := _cascade_radius_m(k, true)
+		_check("light cache view, cascade %d: the farthest cloud samples in its full weight" % k,
+				reach.y > inner and reach.y <= outer, "camera %.1f km: cloud samples %.0f .. %.0f m from the camera's "
+				% [height / 1000.0, reach.x, reach.y] + "vertical; finer cascades end at %.0f m, cascade %d full to %.0f m"
+				% [inner, k, outer])
+		var view := _local_direction(v["elevation"], v["azimuth"])
+		for c in [[slab, 2, CACHE_SLAB_TOLERANCE, "slab tau ~10"], [broken, 7, CACHE_BROKEN_TOLERANCE, "broken cf 0.4"]]:
+			_show(c[0])
+			for sun_elevation in [45.0, 20.0]:
+				var sun := _local_direction(sun_elevation, 135.0)
+				var images: Array[PackedFloat32Array] = []
+				for cached in [false, true]:
+					_clouds.light_cache_enabled = cached
+					ShaderGlobals.set_value(&"cloud_light_march", Vector4(first,
+							CloudLayer.light_march_ratio(first, near, samples.x), near, 0.0))
+					ShaderGlobals.set_value(&"cloud_light_samples", samples)
+					if cached:
+						await _settle_cache(_point(height), view, sun, c[1])
+					images.append(await _mean_image(_point(height), view, sun, c[1]))
+				_clouds.light_cache_enabled = true
+				_clouds.quality = CloudLayer.Quality.DESKTOP
+				_detail_off()
+				var stats := _cache_error(images[1], images[0])
+				_check("light cache vs light march, cascade %d, %s, Sun %.0f deg" % [k, c[3], sun_elevation],
+						stats["mean"] > 0.0 and stats["worst"] <= c[2],
+						("worst pixel %.2f %% at (%d, %d) (cache %.5f march %.5f), mean error %.2f %%, bias %.2f %% of"
+						+ " the view mean %.5f /sr") % [stats["worst"] * 100.0, stats["at"] % CACHE_VIEW_SIZE,
+						stats["at"] / CACHE_VIEW_SIZE, images[1][stats["at"]], images[0][stats["at"]],
+						stats["mean_error"] * 100.0, stats["bias"] * 100.0, stats["mean"]])
+	# The fill's GPU time per frame at the game's budget (information; spec decision 6: <= 0.5 ms).
+	cache.schedule.budget_voxels = game_budget
+	_show(slab)
+	_camera.fov = v0["fov"]
+	await _settle_cache(_point(v0["height_m"]), view0, sun45, 2)
+	cache.reset()
 	CloudEffect.capture_timestamps = true
-	var camera := _point(5000.0)
-	_atmosphere.update(_earth_to_gcrf * camera, Vector3.ZERO, _earth_to_gcrf,
-			_earth_to_gcrf * _local_direction(30.0, 135.0) * AU_M, 0.0, 1.0)
-	var fill_ms := 0.0
-	for i in range(SETTLE_FRAMES):
+	var camera := _point(v0["height_m"])
+	var worst_ms := 0.0
+	var frames := 0
+	var game_fill_frames := cache.planned_fill_frames
+	while frames < CACHE_MAX_SETTLE_FRAMES and not (frames > 2 and cache.settled()):
 		_clouds.update(camera, 0.0, 0.0)
 		await RenderingServer.frame_post_draw
-		fill_ms = maxf(fill_ms, _light_fill_ms())
+		worst_ms = maxf(worst_ms, _light_fill_ms())
+		frames += 1
 	CloudEffect.capture_timestamps = false
-	print("  info  light cache fill: %.2f ms GPU for %d voxels" % [fill_ms, _clouds.light_cache.voxel_count()])
-	# Outside the cascade: below the slab toward the northern horizon (azimuth 0: the cascade's north axis), every
-	# cloud sample is > 5.6 km north of the anchor (the slab's base at <= 10 deg up); the cache must change no bit.
-	_show(slab)
-	_camera.fov = 10.0
+	print("  info  light cache fill at the game's budget (%d voxels per frame): worst %.3f ms GPU per frame, %d frames"
+			% [game_budget, worst_ms, cache.planned_fill_frames - game_fill_frames]
+			+ " for all %d voxels (%.1f MB)" % [cache.voxel_count(), CloudLightCache.texture_bytes() / 1048576.0])
+	cache.schedule.budget_voxels = cache.voxel_count() / CACHE_BUDGET_DIVISOR
+	# Beyond every cascade (a complete fill): from 20 km toward the northern horizon every cloud sample lies past the
+	# outermost cascade's weight; the cache must change no bit.
+	_camera.fov = CACHE_OUTSIDE_FOV_DEG
+	var outside_view := _local_direction(CACHE_OUTSIDE_ELEVATION_DEG, 0.0)
+	var outside_reach := _view_cloud_range_m(CACHE_OUTSIDE_HEIGHT_M, CACHE_OUTSIDE_ELEVATION_DEG, CACHE_OUTSIDE_FOV_DEG,
+			1.0)
+	var last := CloudLightCacheSchedule.CASCADES.size() - 1
+	await _settle_cache(_point(CACHE_OUTSIDE_HEIGHT_M), outside_view, sun45, 2)
+	var settled := cache.settled()
 	var outside: Array[PackedByteArray] = []
 	for cached in [false, true]:
 		_clouds.light_cache_enabled = cached
 		CloudEffect.pinned_frame = 0
-		await _render(_point(10.0), _local_direction(5.0, 0.0), _local_direction(45.0, 135.0), 2)
+		await _render(_point(CACHE_OUTSIDE_HEIGHT_M), outside_view, sun45, 2)
 		CloudEffect.pinned_frame = -1
 		outside.append(_viewport.get_texture().get_image().get_data())
 	_clouds.light_cache_enabled = true
-	_clouds.quality = CloudLayer.Quality.DESKTOP
-	_detail_off()
 	var lit := _viewport.get_texture().get_image().get_pixel(CACHE_VIEW_SIZE / 2, CACHE_VIEW_SIZE / 2).r
-	_check("light cache: a view outside the cascade equals the march", outside[0] == outside[1] and lit > 0.0,
-			"%s (centre %.5f /sr)" % ["identical" if outside[0] == outside[1] else "DIFFERENT", lit])
+	_check("light cache: a view beyond every cascade (complete fill) equals the march",
+			outside[0] == outside[1] and lit > 0.0 and settled and outside_reach.x > _cascade_radius_m(last, false),
+			"%s (centre %.5f /sr; cloud samples from %.0f km, cascade %d's weight ends at %.0f km; fill complete %s)"
+			% ["identical" if outside[0] == outside[1] else "DIFFERENT", lit, outside_reach.x / 1000.0, last,
+			_cascade_radius_m(last, false) / 1000.0, settled])
+	# A clock jump: every cascade invalid until filled - the frames right after it are the march's, bit for bit (at the
+	# game's budget: cascade 0 alone takes 26 frames, the render's 4 frames see nothing filled).
+	cache.schedule.budget_voxels = game_budget
+	_camera.fov = v0["fov"]
+	await _settle_cache(_point(v0["height_m"]), view0, sun45, 2)
+	var jumped: Array[PackedByteArray] = []
+	for cached in [true, false]:
+		if cached:
+			_clouds.notify_clock_jump()
+		_clouds.light_cache_enabled = cached
+		CloudEffect.pinned_frame = 0
+		await _render(_point(v0["height_m"]), view0, sun45, 2)
+		CloudEffect.pinned_frame = -1
+		jumped.append(_viewport.get_texture().get_image().get_data())
+	_clouds.light_cache_enabled = true
+	_check("light cache: right after a clock jump the view equals the march (nothing held until filled)",
+			jumped[0] == jumped[1], "identical" if jumped[0] == jumped[1] else "DIFFERENT")
+	cache.schedule.budget_voxels = cache.voxel_count() / CACHE_BUDGET_DIVISOR
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
+	await _seam_samples(slab)
+	cache.schedule.budget_voxels = game_budget
 
 
-## Horizontal distance from the camera's vertical at which the corner rays of a square view (flat local frame, view
-## elevation / azimuth in degrees, full fov in degrees) reach `drop_m` below the camera; INF if a corner ray stays level.
-static func _view_reach_m(elevation_deg: float, azimuth_deg: float, fov_deg: float, drop_m: float) -> float:
+## Section 10: no seam. A line of pixels (CACHE_LINE_SIZE: the row means of a narrow tall view, rows = elevations)
+## crossing each cascade edge and the outermost edge to the march (CACHE_EDGE_VIEWS, a slab of tau ~10, the grid mean):
+## the cache's deviation from the march, d = (cache - march) / mean, steps from row to row by no more than the image
+## noise (the largest difference of two march renders with independent jitter) over the rows whose slab entry lies in
+## the band +- half its width (where a seam would be; elsewhere d's row-to-row change is the cascade's own voxel
+## interpolation, case 8's subject - printed for information); and the same view before and after a re-anchor (the
+## camera moved away and back: cascade CACHE_REANCHOR_CASCADE re-anchored, its data seen by that edge view) differs by
+## less than that noise.
+func _seam_samples(slab: Dictionary) -> void:
+	_show(slab)
+	_viewport.size = CACHE_LINE_SIZE
+	var sun := _local_direction(45.0, 135.0)
+	var reanchor_noise := 0.0
+	for v: Dictionary in CACHE_EDGE_VIEWS:
+		var height: float = v["height_m"]
+		var camera := _point(height)
+		_camera.fov = v["fov"]
+		var view := _local_direction(v["elevation"], 0.0)
+		var k: int = v["cascade"]
+		var band := Vector2(_cascade_radius_m(k, true), _cascade_radius_m(k, false))
+		var aspect := float(CACHE_LINE_SIZE.x) / CACHE_LINE_SIZE.y
+		var reach := _view_cloud_range_m(height, v["elevation"], v["fov"], aspect)
+		await _settle_cache(camera, view, sun, 2)
+		var lines := await _line_triple(camera, view, sun)
+		var half := 0.5 * (band.y - band.x)
+		var rows := Vector2i(CACHE_LINE_SIZE.y, -1)  # the rows whose slab entry lies in the band +- half its width
+		for row in range(CACHE_LINE_SIZE.y):
+			var entry := _row_entry_m(height, v["elevation"], v["fov"], row)
+			if entry >= band.x - half and entry <= band.y + half:
+				rows = Vector2i(mini(rows.x, row), maxi(rows.y, row))
+		var result := _seam(lines[0], lines[1], lines[2], rows)
+		if k == CACHE_REANCHOR_CASCADE:
+			reanchor_noise = result["noise"]
+		var into := "the march" if k == CloudLightCacheSchedule.CASCADES.size() - 1 else "cascade %d" % (k + 1)
+		_check("light cache: no seam from cascade %d into %s" % [k, into],
+				reach.x < band.x and reach.y > band.y and rows.y > rows.x and result["step"] <= result["noise"],
+				("largest row-to-row step of (cache - march) / mean over the band's rows %d .. %d %.3f %% at row %d, "
+				+ "image noise %.3f %% (whole line %.3f %%); cloud samples %.1f .. %.1f km, band %.1f .. %.1f km")
+				% [rows.x, rows.y, result["step"] * 100.0, result["at"], result["noise"] * 100.0,
+				result["step_all"] * 100.0, reach.x / 1000.0, reach.y / 1000.0, band.x / 1000.0, band.y / 1000.0])
+	# Before / after a re-anchor: an edge view from a camera CACHE_REANCHOR_EAST_M east, then the camera twice as far
+	# east (cascade CACHE_REANCHOR_CASCADE re-anchors; the finer ones re-anchor there and back to the same window) and
+	# back.
+	var v1: Dictionary = CACHE_EDGE_VIEWS[CACHE_REANCHOR_CASCADE]
+	_camera.fov = v1["fov"]
+	var view1 := _local_direction(v1["elevation"], 0.0)
+	var here := _point_east(v1["height_m"], CACHE_REANCHOR_EAST_M)
+	var away := _point_east(v1["height_m"], 2.0 * CACHE_REANCHOR_EAST_M)
+	await _settle_cache(here, view1, sun, 2)
+	var windows_before := _cascade_windows()
+	var before := _column_means(await _mean_image(here, view1, sun, 2, CACHE_LINE_SIZE))
+	await _settle_cache(away, view1, sun, 2)
+	await _settle_cache(here, view1, sun, 2)
+	var windows_after := _cascade_windows()
+	var after := _column_means(await _mean_image(here, view1, sun, 2, CACHE_LINE_SIZE))
+	var mean := 0.0
+	for x in before:
+		mean += x / before.size()
+	var worst := 0.0
+	for i in range(before.size()):
+		worst = maxf(worst, absf(after[i] - before[i]) / mean)
+	var k := CACHE_REANCHOR_CASCADE
+	var moved: bool = windows_before[k] != windows_after[k]
+	_check("light cache: the same view before / after a re-anchor", moved and mean > 0.0 and worst <= reanchor_noise,
+			"largest difference %.4f %% of the line mean, image noise %.3f %% (cascade %d window %s -> %s)"
+			% [worst * 100.0, reanchor_noise * 100.0, k, windows_before[k], windows_after[k]])
+
+
+## The line (row means) of the cache, the march (frames 0 .. 7) and the march with other jitter (frames 8 .. 15).
+func _line_triple(camera: Vector3, view: Vector3, sun: Vector3) -> Array[PackedFloat32Array]:
+	var result: Array[PackedFloat32Array] = []
+	for setting in [[true, 0], [false, 0], [false, RADIANCE_FRAMES]]:
+		_clouds.light_cache_enabled = setting[0]
+		result.append(_column_means(await _mean_image(camera, view, sun, 2, CACHE_LINE_SIZE, setting[1])))
+	_clouds.light_cache_enabled = true
+	return result
+
+
+## {step: the largest row-to-row change of (cache - march) / mean within rows (first, last), at: its row, step_all: the
+## same over the whole line, noise: the largest difference of the two march lines / mean}.
+static func _seam(cache: PackedFloat32Array, march: PackedFloat32Array, other: PackedFloat32Array,
+		rows: Vector2i) -> Dictionary:
+	var mean := 0.0
+	for x in march:
+		mean += x / march.size()
+	var noise := 0.0
+	var step := 0.0
+	var step_all := 0.0
+	var at := 0
+	for i in range(march.size()):
+		noise = maxf(noise, absf(march[i] - other[i]) / mean)
+		if i > 0:
+			var s := absf((cache[i] - march[i]) - (cache[i - 1] - march[i - 1])) / mean
+			step_all = maxf(step_all, s)
+			if i - 1 >= rows.x and i <= rows.y and s > step:
+				step = s
+				at = i
+	return {"step": step, "at": at, "step_all": step_all, "noise": noise}
+
+
+## The horizontal distance (m) at which the centre column's ray of row `row` (of CACHE_LINE_SIZE.y, top first) of a
+## view from height_m enters the slab (its top); INF when it misses.
+static func _row_entry_m(height_m: float, elevation_deg: float, fov_deg: float, row: int) -> float:
+	const R := 6371000.0
+	var v := 1.0 - 2.0 * (row + 0.5) / CACHE_LINE_SIZE.y
+	var el := deg_to_rad(elevation_deg) + atan(v * tan(deg_to_rad(fov_deg * 0.5)))
+	var top := _sphere_hits(R + height_m, sin(el), R + SLAB_TOP_M)
+	return INF if top.x > top.y else _ground_distance(R + height_m, sin(el), top.x, R)
+
+
+func _cascade_windows() -> Array:
+	var windows := []
+	for c: Dictionary in _clouds.light_cache.schedule.lookup_state()["cascades"]:
+		windows.append(c["window"])
+	return windows
+
+
+## The horizontal distance from the camera's ground point at which cascade k's weight ends (full: where it starts to
+## fall over the band).
+static func _cascade_radius_m(k: int, full: bool) -> float:
+	var c: Dictionary = CloudLightCacheSchedule.CASCADES[k]
+	var dx: float = c["extent_m"] / float(c["size"].x)
+	var radius := float(c["size"].x / 2 - CloudLightCacheSchedule.REANCHOR_VOXELS - CloudLightCacheSchedule.MARGIN_VOXELS)
+	return (radius - (CloudLightCacheSchedule.BAND_VOXELS if full else 0)) * dx
+
+
+## Renders until the light cache holds every cascade's window for this scene (and one frame more: the render thread
+## adopts the state); returns the number of frames whose plan carried fill jobs.
+func _settle_cache(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode: int) -> int:
+	var cache := _clouds.light_cache
+	var planned := cache.planned_fill_frames
+	await _render(camera_itrf_m, view_itrf, sun_itrf, mode)
+	var frames := SETTLE_FRAMES
+	while not cache.settled() and frames < CACHE_MAX_SETTLE_FRAMES:
+		await RenderingServer.frame_post_draw
+		_clouds.update(camera_itrf_m, 0.0, 0.0)
+		frames += 1
+	await RenderingServer.frame_post_draw
+	_clouds.update(camera_itrf_m, 0.0, 0.0)
+	await RenderingServer.frame_post_draw
+	return cache.planned_fill_frames - planned
+
+
+## The cloud samples' range of a view from height_m (elevation, vertical fov in degrees, aspect = width / height): the
+## nearest and farthest horizontal distance (m, along the ground from the camera's vertical) at which border rays enter
+## the slab (its top) and leave it (its base, else its top again) - a sphere of the mean Earth radius.
+static func _view_cloud_range_m(height_m: float, elevation_deg: float, fov_deg: float, aspect: float) -> Vector2:
+	const R := 6371000.0
 	var el := deg_to_rad(elevation_deg)
-	var az := deg_to_rad(azimuth_deg)
-	var forward := Vector3(cos(el) * sin(az), cos(el) * cos(az), sin(el))  # east, north, up
-	var up := Vector3(-sin(el) * sin(az), -sin(el) * cos(az), cos(el))
-	var right := Vector3(cos(az), -sin(az), 0.0)
+	var forward := Vector2(cos(el), sin(el))  # (horizontal, up) in the vertical plane of the view
 	var t := tan(deg_to_rad(fov_deg * 0.5))
-	var reach := 0.0
-	for sx in [-1.0, 1.0]:
-		for sy in [-1.0, 1.0]:
-			var ray: Vector3 = forward + t * (sy * up + sx * right)
-			if ray.z >= 0.0:
-				return INF
-			reach = maxf(reach, Vector2(ray.x, ray.y).length() / -ray.z * drop_m)
-	return reach
+	var result := Vector2(INF, 0.0)
+	var rc := R + height_m
+	# _render rolls a steep view's screen up off the vertical: then the cone around the axis through the corners.
+	var cone := absf(sin(el)) > 0.9
+	var corner := t * sqrt(1.0 + aspect * aspect)
+	for i in range(CACHE_BORDER_POINTS + 1):
+		var a := -1.0 + 2.0 * i / CACHE_BORDER_POINTS
+		var border := [Vector2(a, -1.0), Vector2(a, 1.0), Vector2(-aspect, a), Vector2(aspect, a)]
+		if cone:
+			var phi := PI * a
+			border = [Vector2(cos(phi), sin(phi)) * corner / t]
+		for p: Vector2 in border:
+			# The ray: forward + t (p.y screen up + p.x screen right); its sine of elevation.
+			var up := Vector2(-sin(el), cos(el)) * t * p.y
+			var d := Vector3(forward.x + up.x, t * p.x, forward.y + up.y)
+			var sin_el := d.z / d.length()
+			var top := _sphere_hits(rc, sin_el, R + SLAB_TOP_M)
+			if top.x > top.y:
+				continue
+			var base := _sphere_hits(rc, sin_el, R + SLAB_BOTTOM_M)
+			var leave := base.x if base.x <= base.y else top.y
+			result.x = minf(result.x, _ground_distance(rc, sin_el, top.x, R))
+			result.y = maxf(result.y, _ground_distance(rc, sin_el, leave, R))
+	return result
+
+
+## Distances along a ray from radius rc (sine of its elevation) where it crosses the sphere of radius rs; x > y: none.
+static func _sphere_hits(rc: float, sin_el: float, rs: float) -> Vector2:
+	var b := rc * sin_el
+	var disc := b * b - (rc * rc - rs * rs)
+	if disc < 0.0:
+		return Vector2(1.0, 0.0)
+	var q := sqrt(disc)
+	return Vector2(-b - q, -b + q)
+
+
+static func _ground_distance(rc: float, sin_el: float, s: float, r: float) -> float:
+	var cos_el := sqrt(maxf(1.0 - sin_el * sin_el, 0.0))
+	return r * atan2(s * cos_el, rc + s * sin_el)
+
+
+## The site's point east_m east (along the parallel) at height_m.
+func _point_east(height_m: float, east_m: float) -> Vector3:
+	var lon := LON_DEG + rad_to_deg(east_m / (6371000.0 * cos(deg_to_rad(LAT_DEG))))
+	return HeightSource.geodetic_to_fixed(LAT_DEG, lon, height_m)
+
+
+## {worst, at, mean_error, bias, mean} of a cached image against its march (CACHE_ERROR_FLOOR).
+static func _cache_error(cached: PackedFloat32Array, march: PackedFloat32Array) -> Dictionary:
+	var mean := 0.0
+	for v in march:
+		mean += v / march.size()
+	var worst := 0.0
+	var worst_at := 0
+	var mean_error := 0.0
+	var bias := 0.0
+	for i in range(march.size()):
+		var error := absf(cached[i] - march[i]) / maxf(march[i], CACHE_ERROR_FLOOR * mean)
+		mean_error += error / march.size()
+		bias += (cached[i] - march[i]) / (mean * march.size())
+		if error > worst:
+			worst = error
+			worst_at = i
+	return {"worst": worst, "at": worst_at, "mean_error": mean_error, "bias": bias, "mean": mean}
 
 
 ## The GPU time of the light cache's fill in the frame whose timestamps the RenderingDevice holds (0: no fill).
@@ -596,19 +874,31 @@ func _light_fill_ms() -> float:
 	return worst * 1.0e-6
 
 
-## The red channel of the view, the mean over RADIANCE_FRAMES frames with the march's jitter pinned to frames 0, 1, ...
-func _mean_image(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode: int) -> PackedFloat32Array:
+## The red channel of the view (size: the viewport's), the mean over RADIANCE_FRAMES frames with the march's jitter
+## pinned to frames first_frame, first_frame + 1, ...
+func _mean_image(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode: int,
+		size := Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE), first_frame := 0) -> PackedFloat32Array:
 	var mean := PackedFloat32Array()
-	mean.resize(CACHE_VIEW_SIZE * CACHE_VIEW_SIZE)
+	mean.resize(size.x * size.y)
 	for frame in range(RADIANCE_FRAMES):
-		CloudEffect.pinned_frame = frame
+		CloudEffect.pinned_frame = first_frame + frame
 		await _render(camera_itrf_m, view_itrf, sun_itrf, mode)
 		var image := _viewport.get_texture().get_image()
-		for y in range(CACHE_VIEW_SIZE):
-			for x in range(CACHE_VIEW_SIZE):
-				mean[y * CACHE_VIEW_SIZE + x] += image.get_pixel(x, y).r / RADIANCE_FRAMES
+		for y in range(size.y):
+			for x in range(size.x):
+				mean[y * size.x + x] += image.get_pixel(x, y).r / RADIANCE_FRAMES
 	CloudEffect.pinned_frame = -1
 	return mean
+
+
+## The mean of each row of a CACHE_LINE_SIZE image (the line of pixels: one value per elevation).
+static func _column_means(image: PackedFloat32Array) -> PackedFloat32Array:
+	var rows := PackedFloat32Array()
+	rows.resize(CACHE_LINE_SIZE.y)
+	for y in range(CACHE_LINE_SIZE.y):
+		for x in range(CACHE_LINE_SIZE.x):
+			rows[y] += image[y * CACHE_LINE_SIZE.x + x] / CACHE_LINE_SIZE.x
+	return rows
 
 
 ## Section 6: the ground 300 m north of a camera 2 m up, under a thin slab (tau ~1) and a deck (tau ~3), Sun 45 and

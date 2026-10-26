@@ -130,14 +130,17 @@ global uniform int cloud_max_steps;    // cap on the steps per pixel (coarse + f
 global uniform float cloud_fine_step_fraction;  // fine step / distance inside the field's cloudy region
 
 // Scattering source of one light (Sun or Moon) at a sample: J per unit irradiance normal to the light. The Sun's
-// optical depth from the light cache where it holds the sample (cloud_light_cache.gdshaderinc), else - and always for
-// the Moon - the light march (one call site: outside the cache the result is the march's, bit for bit).
+// optical depth from the light cache's cascades where they hold the sample (cloud_light_cache.gdshaderinc), blended
+// into the light march over the outermost band; elsewhere - and always for the Moon - the light march (one call site:
+// where the cache holds nothing the result is the march's, bit for bit).
 float cloud_light_source(vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, float height_m, float distance_m,
 		vec2 column, float jitter, float pixel_angle, bool sun) {
-	float tau_light = sun ? cloud_cached_light_depth(offset, height_m) : -1.0;
-	if (tau_light < 0.0) {
-		tau_light = cloud_light_optical_depth(offset, height_m, distance_m, light_dir, jitter, pixel_angle,
+	vec2 cached = sun ? cloud_cached_light_depth(offset, height_m) : vec2(0.0, 1.0);
+	float tau_light = cached.x;
+	if (cached.y > 0.0) {
+		float marched = cloud_light_optical_depth(offset, height_m, distance_m, light_dir, jitter, pixel_angle,
 				pixel_angle);
+		tau_light = cached.y >= 1.0 ? marched : cached.x + cached.y * marched;
 	}
 	if (cloud_scattering_model == 1) {
 		return cloud_scattering_source_mc(light_dir, -dir, normal, tau_light, column.x, column.y);

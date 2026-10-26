@@ -461,7 +461,43 @@ cloud_debug_height_m={
 "type": "float",
 "value": 0.0
 }
-cloud_light_cache={
+cloud_light_cache_a0={
+"type": "sampler3D",
+"value": ""
+}
+cloud_light_cache_a1={
+"type": "sampler3D",
+"value": ""
+}
+cloud_light_cache_a2={
+"type": "sampler3D",
+"value": ""
+}
+cloud_light_cache_a3={
+"type": "sampler3D",
+"value": ""
+}
+cloud_light_cache_a4={
+"type": "sampler3D",
+"value": ""
+}
+cloud_light_cache_b0={
+"type": "sampler3D",
+"value": ""
+}
+cloud_light_cache_b1={
+"type": "sampler3D",
+"value": ""
+}
+cloud_light_cache_b2={
+"type": "sampler3D",
+"value": ""
+}
+cloud_light_cache_b3={
+"type": "sampler3D",
+"value": ""
+}
+cloud_light_cache_b4={
 "type": "sampler3D",
 "value": ""
 }
@@ -485,13 +521,29 @@ cloud_light_cache_north={
 "type": "vec3",
 "value": Vector3(0, 0, 1)
 }
-cloud_light_cache_extent={
+cloud_light_cache_shell={
 "type": "vec4",
-"value": Vector4(8000, 8000, -500, 20000)
+"value": Vector4(-500, 20000, 128, 0)
 }
-cloud_light_cache_size={
-"type": "vec3",
-"value": Vector3(128, 128, 512)
+cloud_light_cache_cascade0={
+"type": "mat4",
+"value": Projection(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+}
+cloud_light_cache_cascade1={
+"type": "mat4",
+"value": Projection(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+}
+cloud_light_cache_cascade2={
+"type": "mat4",
+"value": Projection(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+}
+cloud_light_cache_cascade3={
+"type": "mat4",
+"value": Projection(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+}
+cloud_light_cache_cascade4={
+"type": "mat4",
+"value": Projection(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
 }
 
 [xr]

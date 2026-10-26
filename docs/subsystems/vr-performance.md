@@ -105,10 +105,12 @@ redraw when the shown value changes by a displayed step; `TrajectoryView` rebuil
 points refreshed only every `REFRESH_S` - rebuild with the points, move it with the camera by its transform;
 `VehicleView` and the terrain quadtree - profile inside before choosing.
 
-## Cloud light cache (static clouds Task 1, 2026-10-26)
+## Cloud light cache (static clouds Tasks 1-2, 2026-10-26)
 
-The light toward the Sun is looked up in a light cache instead of marched per cloud sample (`weather-clouds.md`). Its
-fill is one compute dispatch over the whole cascade (128 x 128 x 512 voxels, 96 + 32 light samples each): 5-8 ms GPU
-on the RTX 4090 with `cloud_check.gd`'s slabs (`terrain_perf.gd --gpu_passes` names it `cloud_light_fill`), paid in
-the frame of a refill (re-anchor after 2 km, Sun 0.25 deg, blend step 0.05) - a spike against the 2.5 ms cloud budget
-until Task 2 spreads it over frames. Not yet measured in VR or in dense real weather.
+The light toward the Sun is looked up in a light cache instead of marched per cloud sample (`weather-clouds.md`): 5
+cascades x 128 x 128 x 512 voxels, R16F, 2 generations = 160 MB of VRAM (budget 192 MB [E]). Its fill is spread over
+frames: at most 327 680 voxels per frame (96 + 32 light samples each, ~1.4 ns per voxel on the RTX 4090 with
+`cloud_check.gd`'s slabs), measured worst frame 0.45 ms and 0.80 ms in two runs (`cloud_check.gd` section 8,
+`terrain_perf.gd --gpu_passes` names it `cloud_light_fill`); a full refresh of 42 M voxels takes 128 frames (1.4 s at
+90 Hz). Task 1's whole-cascade refill was 5-8 ms in one frame. Not yet measured in VR or in dense real weather; the
+0.80 ms frame (over the 0.5 ms target) is open.

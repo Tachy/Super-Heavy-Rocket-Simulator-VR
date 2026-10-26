@@ -122,3 +122,40 @@ pinned, VR preset 64 / 128 steps; the machine state differed between these notes
   the Moon. The brief's start values (128 x 128 x 64 voxels, a 24 + 8 sample fill) failed its own check (broken cloud
   at a 20-deg Sun: 78 % at a pixel; 24 samples 30 % off the converged integral) and were raised to 512 voxels up and
   96 + 32 samples.
+
+## Light cache, one cascade refilled whole (static clouds Task 1, replaced in Task 2, 2026-10-26)
+
+- The superseded Light bullet: "the Sun's optical depth toward the light tau_light comes from the **light cache**
+  (static clouds Task 1; `CloudLightCache`, `shaders/cloud_light_cache.gdshaderinc`): one Earth-fixed cascade of 128 x
+  128 x 512 voxels (R32F, 32 MB) over 8 km x 8 km x the shell (-0.5 .. 20 km; 62.5 m across, 40 m up), anchored on the
+  ground below the camera (axes east / north of the anchor's tangent plane, height above the ellipsoid), filled by the
+  `CLOUD_LIGHT_FILL` kernel with `cloud_light_optical_depth_with` at each voxel centre: 96 near + 32 far samples at the
+  stratified midpoints (deterministic), the detail band-limited at least at the voxel's 62.5 m. The march looks it up
+  trilinearly (`cloud_cached_light_depth`); outside the voxel centres' range, while not filled, with the flag off, and
+  for the Moon it marches as before (`cloud_light_optical_depth`: near samples over 6 km in geometric intervals from 20
+  m through the shapes, then far samples to the cloud top through the grid mean; stratified, unbiased over the jitter) -
+  one call site, so outside the cascade the image is the march's bit for bit. `CloudLayer` (main thread) requests a fill
+  when the camera's ground point is more than 2 km from the anchor, the Sun turned by 0.25 deg, w1 moved by 0.05, or the
+  slots, the quality, the detail levels or the debug output changed; `CloudEffect` (render thread) fills the whole
+  cascade before the march of that frame (Task 1: no progressive fill, no generations - Task 2) and hands the lookup its
+  frame (`CloudShaderPort.pack` overrides: `cloud_light_cache_valid / _origin / _east / _north / _extent / _size`), so
+  the march reads only a complete fill with the frame it was filled for. Fidelity flag `CloudLayer.light_cache_enabled`
+  (global `cloud_light_cache_enabled`; off = the per-sample march everywhere, the reference)."
+  Replaced by five cascades with progressive, budgeted, cross-faded refresh: a whole-cascade refill cost 5-8 ms GPU in
+  one frame (against the 2.5 ms budget) and the single 8 km box ended in a hard seam.
+- The superseded validation text: "Section 8, the light cache vs the per-sample march with the cache's own sample count
+  (96 + 32, jittered, 8 frames, the view's jitter pinned alike) at every pixel of a 64 x 64 view from 5 km (error
+  relative to max(pixel, 5 % of the view mean)): a tau-10 slab (debug 2) worst 0.83 / 1.03 % at Sun 45 / 20 deg
+  (tolerance 5 %), a cf 0.4 broken layer (debug 7, the shapes) worst 3.55 / 8.93 %, mean 0.13 / 0.53 % (tolerance 10 %);
+  a view whose samples all lie > 5.6 km north of the anchor bit-identical with the flag off and on; the fill 5-8 ms GPU
+  (RTX 4090, 8.4 M voxels, the check's slabs). Measured on the way (broken, Sun 20 deg): 64 / 256 / 512 voxels up worst
+  78 / 23 / 8 % (vs a midpoint march; 256 across changed nothing); a 24 + 8 fill matched the 24-sample march within 2 %
+  but both were 30 % off the converged integral at a pixel, 48 + 16 left 10.6 %."
+- The superseded limit: "- Light cache (Task 1 state): one 8 km cascade, refilled whole in one frame (5-8 ms GPU on the
+  check's slabs, more in dense weather) when re-anchored, the Sun turned 0.25 deg or w1 moved 0.05 - a spike against the
+  2.5 ms budget and a lag of up to 0.05 in the blend; cascades, the progressive fill and cross-faded generations are
+  Task 2. A view from altitude (9 km, 10 deg down) sees no cloud inside the cascade (the image is the march's)."
+- Task 2's first layout, x8 per cascade (8 / 64 / 512 km, 96 MB): the slab held everywhere, but broken cloud at its
+  scale was 42 / 193 % (64 km) and 129 / 1005 % (512 km) off at a pixel; replaced by the x2 clipmap (controller
+  ruling: 5 levels to 128 km, the march ends at the 30-50 km hand-over, VRAM budget 128 -> 192 MB). Its fill at
+  524 288 voxels per frame cost 0.74 ms (budget lowered to 327 680).

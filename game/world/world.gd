@@ -98,6 +98,7 @@ func _ready() -> void:
 	weather.snapshots_changed.connect(clouds.set_target)
 	clouds.core_cache_missed.connect(weather.reload_into_core_cache)
 	clock.time_jumped.connect(func(_tdb_s: float) -> void: clouds.effect.reset_history())  # a clock jump: no history
+	clock.time_jumped.connect(func(_tdb_s: float) -> void: clouds.notify_clock_jump())  # the light cache refills
 	clock.time_jumped.connect(func(_tdb_s: float) -> void: _sim_target_tdb_s = NAN)  # no lag after a jump
 	_setup_bodies(data_dir)
 	_warm_earth_clouds_shader()
