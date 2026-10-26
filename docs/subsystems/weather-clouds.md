@@ -30,10 +30,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   0, 1), l_k the level's middle cell; the march pixel's angle comes per view): an octave below the pixel enters with
   its mean, so silhouettes stay irregular down to the pixel at every distance. Tables per detail state L = sum w_k
   (256 x 4, linear between rows): thresholds t[L](cf) (covered area = cf at every state) and edge mean factors m[L].
-- **Soft edges of varying width**: density = mean / m[L](cf) x smoothstep((v - t) / w(n)); the edge zone width varies
-  log-uniformly between 25 and 200 m (`cloud_edge_width_min_m` / `_max_m` [E]: Katzwinkel et al. 2014 inner shells,
-  Wang, Geerts & French 2009 transition zone ~200 m) by the width noise n in the shape's A channel; w_min / w_max =
-  the median increment of v over those widths (0.024 / 0.072). m is taken over the joint (v, n) distribution: the cell
+- **Steep edges of varying width** (static clouds Task 4): density = mean / m[L](cf) x smoothstep((v - t) / w(n)); the
+  edge zone width varies log-uniformly between 20 and 40 m (`cloud_edge_width_min_m` / `_max_m` [E]: Katzwinkel et al.
+  2014 inner shells; 10 m broke the base-contour case 9, see Task 4 report) by the width noise n in the shape's A
+  channel; w_min / w_max = the median increment of v over those widths (0.0207 / 0.0316). m is taken over the joint (v, n) distribution: the cell
   mean stays the field's (0.996-1.000 at the table states, also between them). Ice-dominated cloud (the ice share)
   mixes in the ramp of thin-sheet coordinates (vertical tile 2 km instead of 16 km [E]; no fibre direction: no wind in
   the snapshot), the same detail. Shape tile 32 km across / 16 km high [E]; Earth-fixed, the camera's part in float64
@@ -317,7 +317,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   never more than tcc + 0.05, at most 0.40 below, mean deficit < 0.2 (a limit of the data choice, `known-issues.md`).
 - Core `[weather]`: render texels (linear extinction, in-cloud depth vs trapezoids, code round trip, ice share);
   vertical profile (flat base, water path kept exactly); covered fraction = cf within 0.003 at every detail state
-  (0.006 between rows); soft edges of varying width (mean water / grid mean 0.996-1.000 for cf 0.05-1 at states 0, 1,
+  (0.006 between rows); steep edges of varying width, 10-90 % rise inside the width (mean water / grid mean 0.991-1.005 for cf 0.05-1 at states 0, 1,
   1.5, 3); the shape prefilter (level 0 up to f_s and continuous, the mips' box filter, level 0 = the unfiltered
   sample and state-0 tables bit for bit; covered fraction within 0.003 and mean water / grid mean 0.995-1.007 at
   levels 0.125-2 for cf 0.1 / 0.4 / 0.9, 4e5 random positions); perimeter fractal dimension by box counting of the cloud mask (16 km plane at 4 m, cf 0.5, boxes 8 m to

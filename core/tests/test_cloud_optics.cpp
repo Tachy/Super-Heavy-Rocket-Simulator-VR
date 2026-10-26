@@ -413,7 +413,31 @@ TEST_CASE("Noise coverage is preserved", "[weather]") {
     CHECK(again.detail_rgba == noise.detail_rgba);
 }
 
-TEST_CASE("Soft cloud edges of varying width keep the grid-mean water at every detail state", "[weather]") {
+TEST_CASE("A cumulus edge rises from 10 % to 90 % of its interior extinction within the edge width", "[weather]") {
+    // The steepness: the shell of a cumulus is tens of metres, not the hundreds of the M8 soft range. The ramp's 10 %
+    // to 90 % rise spans 0.61 of the width w(n), so in metres it stays inside the edge width, and the widest edge is
+    // at most 40 m.
+    const CloudNoise noise = generate_cloud_noise();
+    CHECK(c::cloud_edge_width_min_m == Approx(20.0));
+    CHECK(c::cloud_edge_width_max_m <= 40.0);
+    auto ramp_at = [](double level) {
+        double lo = 0.0, hi = 1.0;
+        for (int i = 0; i < 60; ++i) (cloud_edge_ramp(0.5 * (lo + hi)) < level ? lo : hi) = 0.5 * (lo + hi);
+        return 0.5 * (lo + hi);
+    };
+    const double rise = ramp_at(0.9) - ramp_at(0.1);  // in widths
+    CHECK(rise < 1.0);
+    for (double n : {0.0, 0.5, 1.0}) {
+        const double width_m = c::cloud_edge_width_min_m * std::pow(c::cloud_edge_width_max_m / c::cloud_edge_width_min_m, n);
+        const double rise_m = rise * width_m;  // the ramp is linear in the value, the value in m by the median increment
+        report("width noise %.1f: edge %.1f m, 10..90 %% rise %.1f m (value width %.4f)\n", n, width_m, rise_m,
+               cloud_edge_width_value(noise, n));
+        CHECK(rise_m <= width_m);
+        CHECK(rise_m <= 40.0);
+    }
+}
+
+TEST_CASE("Cloud edges of varying width keep the grid-mean water at every detail state", "[weather]") {
     // density = mean / m(cf) x ramp((v - t(cf)) / w(n)) (cloud_noise.hpp, soft edges) with the fractal value v of the
     // detail state and the edge width w(n) of the width noise: over uniform random positions (5e5 per state) the mean of
     // ramp / m is 1 (the grid-mean water is kept) within 1.5 % at the table states and 2.5 % between them.

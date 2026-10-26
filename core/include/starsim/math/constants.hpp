@@ -139,14 +139,14 @@ inline constexpr double cloud_droplet_effective_radius_m = 10e-6;
 // J. Climate 9, 2058 for the 3 IWC / (2 rho_ice r_eff) form of the visible extinction].
 inline constexpr double cloud_ice_effective_radius_m = 30e-6;
 // Widths of the edge zone of a cumulus, over which the liquid water falls from the cloud's interior value to zero by
-// entrainment of dry air: the zone varies along a cloud's perimeter (cloud_noise.hpp: the soft edge ramp, its width
-// log-uniform between the two values by a width noise). [E: 25 m and 200 m, the tens of metres of the turbulent inner
+// entrainment of dry air: the zone varies along a cloud's perimeter (cloud_noise.hpp: the steep edge ramp, its width
+// log-uniform between the two values by a width noise). [E: 20 m and 40 m, the tens of metres of the turbulent inner
 // shell that aircraft cross at shallow-cumulus edges, Katzwinkel, Siebert, Heus & Shaw 2014, J. Atmos. Sci. 71, 2810
-// (subsiding shells, Heus & Jonker 2008, J. Atmos. Sci. 65, 1003), up to the ~200 m (~10 % of the cloud diameter)
-// transition zone of the cumulus margin, Wang, Geerts & French 2009, J. Atmos. Sci. 66, 3660. The range is measured,
-// the log-uniform spread between its ends an estimate.]
-inline constexpr double cloud_edge_width_min_m = 25.0;
-inline constexpr double cloud_edge_width_max_m = 200.0;
+// (subsiding shells, Heus & Jonker 2008, J. Atmos. Sci. 65, 1003): a sunlit cumulus has a crisp rim; the ~200 m
+// transition zone of the margin (Wang, Geerts & French 2009, J. Atmos. Sci. 66, 3660) is the cloud-edge humidity
+// gradient, not the optical edge. The log-uniform spread between the ends is an estimate.]
+inline constexpr double cloud_edge_width_min_m = 20.0;
+inline constexpr double cloud_edge_width_max_m = 40.0;
 // Area-perimeter fractal dimension of cloud and rain areas [S: D = 1.35 +- 0.05 over areas of 1 to 1.2e6 km^2 (radar
 // and GOES infrared), Lovejoy 1982, Science 216, 185]. The sub-grid cloud shapes continue it below the grid
 // (cloud_noise.hpp: the fractal shape value; the level sets of a fractional Brownian field of Hurst exponent H have
