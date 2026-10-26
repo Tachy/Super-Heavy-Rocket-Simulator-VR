@@ -352,6 +352,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   once settled, then exactly that many frames).
 - `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr [--cloud_scattering=table|closed]` (weather off
   otherwise).
+- Real sessions (VR or desktop): `Start-VR.cmd --perf-log` (`PerfLog`, `game/util/perf_log.gd`) writes
+  `data/perf/perf_<date>_<time>.csv`: one row per second (frame interval p50 / p99 / max, root viewport GPU / CPU render
+  time, process time, camera altitude, cloud far field / upload state, draw calls, VRAM) plus a "spike" row for every
+  frame over 22 ms.
 - `cloud_debug_output` 1 / 2 / 3 / 4: background transmittance (grid mean), Sun radiance (grid mean), coverage at
   `cloud_debug_height_m`, background transmittance with the shapes; 5: the terrain draws its cloud factors (direct,
   the Sun's diffuse share, the sky's) as its colour (`render_check.gd --cloud_debug=5 --fixed_exposure`); 6: the

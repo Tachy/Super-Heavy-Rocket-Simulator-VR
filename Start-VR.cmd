@@ -1,6 +1,6 @@
 @echo off
 rem VR version of the simulator: headset on, its OpenXR runtime running (desktop: Start-Desktop.cmd).
-rem Without a headset the game shows a message and quits.
+rem Without a headset the game shows a message and quits. Extra arguments go to the game (e.g. --perf-log).
 rem Uses the double-precision Godot build from external\godot (see CLAUDE.md); override with start.cfg:
 rem   GODOT=C:\path\to\godot.windows.editor.double.x86_64.exe
 setlocal
@@ -16,5 +16,5 @@ rem Raw HOTAS axes (twist, throttle lever) need these SDL mappings before the en
 set "SDL_GAMECONTROLLERCONFIG_FILE=%~dp0config\sdl_gamecontrollerdb.txt"
 echo Preparing the project ...
 "%GODOT%" --headless --xr-mode off --path "%~dp0game" --import >nul 2>&1
-start "" "%GODOT%" --xr-mode on --path "%~dp0game" -- --vr
+start "" "%GODOT%" --xr-mode on --path "%~dp0game" -- --vr %*
 exit /b 0

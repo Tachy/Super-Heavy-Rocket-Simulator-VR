@@ -104,6 +104,8 @@ func _ready() -> void:
 	_setup_label(earth_label, "Erde")
 	_setup_label(moon_label, "Mond")
 	clock.set_time(core.utc_to_tdb_s(Time.get_datetime_string_from_system(true)))
+	if PerfLog.requested():
+		add_child(PerfLog.new(self))
 
 
 var _delta := 0.0
