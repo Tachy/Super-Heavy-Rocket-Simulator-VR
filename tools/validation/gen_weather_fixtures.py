@@ -16,6 +16,9 @@ Writes tests/validation/weather/:
                                 temperature, the three cloud fields and the store's geopotential, plus surface
                                 pressure, surface geopotential and total column water vapour
   gfs_column.toml               one GFS column (HGT / TMP on the 22 levels 1000..50 mb + HGT surface), cfgrib-decoded
+  era5_plausibility.toml        ERA5 columns of two hours (2024-04-08 18 UTC, 2025-08-15 18 UTC) with the store's own
+                                single-level total_cloud_cover and cloud_base_height beside them: the real-date
+                                plausibility test of the snapshot's column cover and cloud base
 
 Offline tool only, not part of the build (references are TOML: the tests read them with toml++):
     python -m pip install numpy numcodecs xarray cfgrib eccodes
@@ -229,9 +232,11 @@ def toml_list(values):
     return "[" + ", ".join(toml_float(v) for v in values) + "]"
 
 
-def era5_chunk(variable, four_dimensional):
-    key = f"{ERA5_TIME_INDEX}.0.0.0" if four_dimensional else f"{ERA5_TIME_INDEX}.0.0"
+def era5_chunk(variable, four_dimensional, time_index=ERA5_TIME_INDEX):
+    key = f"{time_index}.0.0.0" if four_dimensional else f"{time_index}.0.0"
     name = "era5_cc_chunk.bin" if variable == "fraction_of_cloud_cover" else f"era5_{variable}_chunk.bin"
+    if time_index != ERA5_TIME_INDEX:
+        name = f"{time_index}_{name}"
     shape = (37, 721, 1440) if four_dimensional else (721, 1440)
     data = fetch(f"{ERA5_STORE}/{variable}/{key}", name)
     return np.frombuffer(numcodecs.Blosc().decode(data), "<f4").reshape(shape)
@@ -274,6 +279,54 @@ def write_era5_columns():
     (OUT / "era5_columns.toml").write_text("\n".join(lines), encoding="utf-8")
 
 
+# Real-date plausibility: (hour since 1900-01-01, label). 2024-04-08 18 UTC is the eclipse hour of the visual set, 2025-08-15
+# 18 UTC the Starbase overcast hour (docs/subsystems/weather-clouds.md "Visual set").
+PLAUSIBILITY_HOURS = [(1089330, "2024-04-08 18 UTC"), (1101186, "2025-08-15 18 UTC")]
+PLAUSIBILITY_CELLS = ["starbase", "cape", "midlatitude_ocean", "tropics"]  # of ERA5_PROFILE_COLUMNS
+OVERCAST_WINDOW = 20  # cells (5 deg) around Starbase: the cell with the largest total_cloud_cover is added
+
+
+def write_era5_plausibility():
+    levels_hpa = np.frombuffer(numcodecs.Blosc().decode(fetch(f"{ERA5_STORE}/level/0", "era5_level_chunk.bin")), "<i8")
+    lines = [
+        "# ERA5 columns of two hours with the store's single-level total_cloud_cover (tcc) and cloud_base_height (cbh, m",
+        "# above the ground, nan without cloud) beside them (gen_weather_fixtures.py): the real-date plausibility test.",
+        f'store = "{ERA5_STORE}"',
+        f"levels_hpa = [{', '.join(str(int(v)) for v in levels_hpa)}]",
+        "",
+    ]
+    ground = era5_chunk("geopotential_at_surface", False)  # constant in time: any hour
+    named = {name: (row, column) for name, row, column in ERA5_PROFILE_COLUMNS}
+    for time_index, label in PLAUSIBILITY_HOURS:
+        hour = datetime.datetime(1900, 1, 1) + datetime.timedelta(hours=time_index)
+        tcc = era5_chunk("total_cloud_cover", False, time_index)
+        cbh = era5_chunk("cloud_base_height", False, time_index)
+        sp = era5_chunk("surface_pressure", False, time_index)
+        tcwv = era5_chunk("total_column_water_vapour", False, time_index)
+        row0, column0 = named["starbase"]
+        window = tcc[row0 - OVERCAST_WINDOW:row0 + OVERCAST_WINDOW, column0 - OVERCAST_WINDOW:column0 + OVERCAST_WINDOW]
+        wr, wc = np.unravel_index(int(np.argmax(window)), window.shape)
+        cells = [(name, *named[name]) for name in PLAUSIBILITY_CELLS]
+        cells.append(("starbase_window_overcast", row0 - OVERCAST_WINDOW + int(wr), column0 - OVERCAST_WINDOW + int(wc)))
+        fields = {key: era5_chunk(variable, True, time_index) for variable, key in ERA5_COLUMN_VARIABLES
+                  if variable != "geopotential"}
+        for name, row, column in cells:
+            lines += ["[[column]]", f'name = "{name}"', f'time_utc = "{hour.isoformat()}Z"', f"time_index = {time_index}",
+                      f"row = {row}", f"column = {column}", f"latitude_deg = {90.0 - 0.25 * row}",
+                      f"longitude_deg = {0.25 * column}",
+                      f"surface_pressure_pa = {toml_float(sp[row, column])}",
+                      f"surface_geopotential_m2_s2 = {toml_float(ground[row, column])}",
+                      f"total_column_water_vapour_kg_m2 = {toml_float(tcwv[row, column])}",
+                      f"total_cloud_cover = {toml_float(tcc[row, column])}",
+                      f"cloud_base_height_m = {toml_float(cbh[row, column])}"]
+            lines += [f"{key} = {toml_list(fields[key][:, row, column])}" for _, key in ERA5_COLUMN_VARIABLES
+                      if key != "geopotential_m2_s2"]
+            lines.append("")
+            print(f"  {label} {name}: tcc {float(tcc[row, column]):.2f}, cbh {float(cbh[row, column]):.0f} m")
+        del fields
+    (OUT / "era5_plausibility.toml").write_text("\n".join(lines), encoding="utf-8")
+
+
 def write_gfs_column():
     index = fetch(GFS_FILE + ".idx", "gfs_f006.idx").decode("ascii").splitlines()
     entries = [line.split(":") for line in index]
@@ -310,6 +363,7 @@ def main():
     write_gfs()
     write_era5_columns()
     write_gfs_column()
+    write_era5_plausibility()
 
 
 if __name__ == "__main__":

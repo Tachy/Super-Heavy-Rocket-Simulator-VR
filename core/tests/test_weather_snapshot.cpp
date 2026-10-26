@@ -18,6 +18,7 @@
 #include <toml++/toml.hpp>
 
 #include "starsim/config/geoid_config.hpp"
+#include "starsim/environment/cloud_optics.hpp"
 #include "starsim/environment/weather_snapshot.hpp"
 #include "starsim/environment/weather_snapshot_file.hpp"
 #include "starsim/math/constants.hpp"
@@ -522,4 +523,128 @@ TEST_CASE("Writing a snapshot removes stale temp files of killed writers", "[wea
     CHECK(std::filesystem::exists(other));        // not a snapshot temp file
     CHECK(read_weather_snapshot(dir / "era5_3.wthr").has_value());
     std::filesystem::remove_all(dir);
+}
+
+// Real-date plausibility (spec Validation): the snapshot built from the 37-level ERA5 columns of two real hours against the
+// store's own single-level total_cloud_cover (tcc) and cloud_base_height (cbh). tests/validation/weather/era5_plausibility.toml.
+namespace {
+
+struct PlausibilityColumn {
+    std::string name, time_utc;
+    double surface_pressure_pa = 0, surface_geopotential_m2_s2 = 0, total_column_water_vapour_kg_m2 = 0, total_cloud_cover = 0,
+           cloud_base_height_m = 0;
+    std::vector<double> temperature_k, cloud_fraction, liquid, ice;
+};
+
+}  // namespace
+
+TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base", "[weather]") {
+    const toml::table t = toml::parse_file(fixture_dir + "/era5_plausibility.toml");
+    std::vector<double> levels_pa;
+    for (double hpa : doubles(t["levels_hpa"])) levels_pa.push_back(hpa * 100.0);
+    std::vector<PlausibilityColumn> cells;
+    for (const auto& node : *t["column"].as_array()) {
+        const auto& c = *node.as_table();
+        PlausibilityColumn col;
+        col.name = c["name"].value<std::string>().value();
+        col.time_utc = c["time_utc"].value<std::string>().value();
+        col.surface_pressure_pa = c["surface_pressure_pa"].value<double>().value();
+        col.surface_geopotential_m2_s2 = c["surface_geopotential_m2_s2"].value<double>().value();
+        col.total_column_water_vapour_kg_m2 = c["total_column_water_vapour_kg_m2"].value<double>().value();
+        col.total_cloud_cover = c["total_cloud_cover"].value<double>().value();
+        col.cloud_base_height_m = c["cloud_base_height_m"].value<double>().value();
+        col.temperature_k = doubles(c["temperature_k"]);
+        col.cloud_fraction = doubles(c["cloud_fraction"]);
+        col.liquid = doubles(c["liquid_kg_kg"]);
+        col.ice = doubles(c["ice_kg_kg"]);
+        cells.push_back(std::move(col));
+    }
+    REQUIRE(cells.size() == 10);
+
+    // One snapshot per hour (5 cells each) on a 3 x 5 grid: row 1 is the equator, the cells sit at the five nodes' longitudes.
+    const int levels = static_cast<int>(levels_pa.size()), rows = 3, columns = 5;
+    double deficit_sum = 0.0;
+    for (int hour = 0; hour < 2; ++hour) {
+        Era5Fields f;
+        f.levels_pa = levels_pa;
+        f.cloud_fraction = f.liquid_kg_kg = f.ice_kg_kg = f.temperature_k = grid(levels, rows, columns);
+        f.surface_pressure_pa = f.surface_geopotential_m2_s2 = f.total_column_water_vapour_kg_m2 = grid(1, rows, columns);
+        for (int r = 0; r < rows; ++r) {
+            for (int c = 0; c < columns; ++c) {
+                const PlausibilityColumn& col = cells[static_cast<std::size_t>(hour * columns + c)];
+                for (int k = 0; k < levels; ++k) {
+                    set(f.cloud_fraction, k, r, c, col.cloud_fraction[k]);
+                    set(f.liquid_kg_kg, k, r, c, col.liquid[k]);
+                    set(f.ice_kg_kg, k, r, c, col.ice[k]);
+                    set(f.temperature_k, k, r, c, col.temperature_k[k]);
+                }
+                set(f.surface_pressure_pa, 0, r, c, col.surface_pressure_pa);
+                set(f.surface_geopotential_m2_s2, 0, r, c, col.surface_geopotential_m2_s2);
+                set(f.total_column_water_vapour_kg_m2, 0, r, c, col.total_column_water_vapour_kg_m2);
+            }
+        }
+        const auto snapshot = WeatherSnapshot::from_era5(era5_id(), f, coarse_geoid());
+        for (int c = 0; c < columns; ++c) {
+            const PlausibilityColumn& col = cells[static_cast<std::size_t>(hour * columns + c)];
+            const double lat = node_latitude(1, rows), lon = node_longitude(c, columns);
+            const double ground = snapshot.ground_height_m(lat, lon);
+            // The renderer's cover: the largest cloud fraction in the column (maximum overlap, the lower bound of any cover).
+            const double cover = cloud_column_depths_above(snapshot, lat, lon, ground).max_fraction;
+            // ERA5's own scheme on the snapshot's layers, top to bottom (Geleyn & Hollingsworth 1979): layers that touch
+            // overlap maximally, separated clouds randomly, 1 - C = prod_k (1 - max(C_k, C_k-1)) / (1 - C_k-1).
+            double clear = 1.0, above = 0.0;
+            // Cloud base as ERA5 defines cbh (ECMWF IFS documentation): the lowest level where the cloud fraction exceeds
+            // 1 % and there is condensate; here the lowest layer whose fraction exceeds 1 % with condensate in it.
+            double base_agl_m = std::nan(""), layer_m = 0.0;
+            for (int layer = weather_layer_count - 1; layer >= 0; --layer) {
+                const double bottom = weather_layer_bottom_m(layer), top = weather_layer_bottom_m(layer + 1);
+                if (top <= ground) break;
+                const WeatherCell cell = snapshot.at(lat, lon, 0.5 * (bottom + top));
+                const double fraction = cell.liquid_water_kg_m3 + cell.ice_water_kg_m3 > 0.0 ? cell.cloud_fraction : 0.0;
+                clear *= above < 1.0 ? (1.0 - std::max(fraction, above)) / (1.0 - above) : 1.0;
+                above = fraction;
+                if (fraction > 0.01) {
+                    base_agl_m = std::max(bottom, ground) - ground;
+                    layer_m = top - bottom;
+                }
+            }
+            const double cover_max_random = 1.0 - clear;
+            INFO(col.time_utc << " " << col.name);
+            std::printf("plausibility %s %-26s tcc %.2f -> max %.2f, max-random %.2f   cbh %7.0f m -> base %7.0f m (layer %4.0f m)\n",
+                        col.time_utc.c_str(), col.name.c_str(), col.total_cloud_cover, cover, cover_max_random, col.cloud_base_height_m,
+                        base_agl_m, layer_m);
+            // ERA5's tcc is maximum-random overlap of the 137 model levels. The snapshot has the 37 pressure levels' fractions
+            // averaged onto 32 layers: where one cloud spans several levels at different horizontal places the levels' fractions
+            // no longer add up, so the snapshot's cover is the LOWER one (measured 0.0 .. 0.36 below tcc, known limit in
+            // docs/known-issues.md). It never exceeds ERA5's, and the renderer's maximum overlap is below the maximum-random one.
+            deficit_sum += col.total_cloud_cover - cover_max_random;
+            CHECK(cover_max_random <= col.total_cloud_cover + 0.05);
+            CHECK(cover_max_random >= col.total_cloud_cover - 0.40);
+            CHECK(cover <= cover_max_random + 1e-9);
+            if (std::isnan(col.cloud_base_height_m)) {
+                CHECK(std::isnan(base_agl_m));
+            } else {
+                REQUIRE_FALSE(std::isnan(base_agl_m));
+                // Within one layer plus the spacing of the pressure levels around ERA5's cbh (the snapshot cannot place a cloud
+                // base finer than the levels it interpolates between: 25 hPa ~ 250 m near the ground, 50 hPa ~ 600 m at 3 km).
+                const auto z = hypsometric_level_heights_gpm(levels_pa, col.temperature_k, col.total_column_water_vapour_kg_m2,
+                                                             col.surface_pressure_pa, col.surface_geopotential_m2_s2);
+                const double ground_gpm = col.surface_geopotential_m2_s2 / constants::standard_gravity_mps2;
+                const double target_gpm = ground_gpm + col.cloud_base_height_m;
+                double spacing_m = 0.0, lower_gpm = ground_gpm;  // below the lowest level: from the ground
+                for (int k = levels - 1; k >= 0; --k) {           // bottom-up over the levels above the ground
+                    if (std::isnan(z[static_cast<std::size_t>(k)])) continue;
+                    const double upper_gpm = z[static_cast<std::size_t>(k)];
+                    if (upper_gpm >= target_gpm || k == 0) {
+                        spacing_m = upper_gpm - lower_gpm;
+                        break;
+                    }
+                    lower_gpm = upper_gpm;
+                }
+                INFO("level spacing " << spacing_m << " m");
+                CHECK(std::abs(base_agl_m - col.cloud_base_height_m) <= layer_m + spacing_m);
+            }
+        }
+    }
+    CHECK(deficit_sum / static_cast<double>(cells.size()) < 0.2);  // measured 0.14: the systematic part of the limit
 }
