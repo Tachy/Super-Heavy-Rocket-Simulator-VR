@@ -230,3 +230,18 @@ pinned, VR preset 64 / 128 steps; the machine state differed between these notes
   1-km point smeared over +-dx by 500-m voxels; seen from the higher cameras, cascade 2's pixels failed too (32 %,
   found with the new per-cascade worst-pixel diagnostics). Longer near marches (3 / 2 / 2 km) with 100-m intervals
   after the geometric 12 bring every cascade under 10 %.
+
+## Static clouds Task 3: deterministic march (2026-10-26)
+
+- Superseded (cloud pass, step 1): "fine steps inside; blue-noise start jitter,
+     64 x 64 void-and-cluster mask offset per frame by the golden ratio - the same for both eyes); background through" - the start jitter is now only the reference
+  path's (`CloudLayer.deterministic_march` off).
+- Superseded preset: "- **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 48 / 96,
+  2.5 %, 5 + 2 (Task 11: 64 / 128 before; see Performance); both 3 detail levels; resolution 1/2 desktop, 1/3 of the VR
+  centre view (VR performance plan part 2); temporal weight floor 1/32."
+- Why: the per-pixel and per-frame jitter averaged by the temporal accumulation made the clouds shimmer in VR (the
+  user's flicker). Fixed sample points give a static image; the first images of the deterministic march (VR preset
+  48 / 96 / 2.5 %) showed what the jitter had averaged away: cumulus bases skipped by coarse steps (cloud_check case
+  9 off by 5 px; the 9 km deck view thinned) and static salt-and-pepper holes in near cumuli from detail finer than
+  the step sampled at fixed points. Fixes: the cloud-ahead check of a clear coarse step, the detail band-limited at
+  half the step, the VR preset at 96 / 192 / 1.2 %.

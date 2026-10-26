@@ -24,6 +24,10 @@
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Image identity: --deterministic[=64] once settled resets the cloud history and the cloud pass's frame counter and
 #          saves after exactly that many more frames (with --fixed_exposure, for before / after comparisons).
+#          --repeat_identical[=2] once settled and the light cache complete compares that many consecutive frames of
+#          the unchanged scene (no history reset): any differing pixel fails (exit code 1; the deterministic march,
+#          static clouds Task 3). --jittered_march: the jittered march with temporal accumulation (the flag
+#          CloudLayer.deterministic_march off).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
@@ -45,6 +49,9 @@ var _start_s := 0.0
 var _terrain_idle := 0  ## consecutive frames without terrain loading
 var _found_event_tdb_s := NAN  ## --at_event: the event's instant found by flying (_fly_until_event)
 var _deterministic_left := -1  ## --deterministic: frames still to draw after the reset (-1: not yet reset)
+var _cache_settled := 0  ## --repeat_identical: consecutive frames with the light cache settled
+var _repeat_images: Array[Image] = []  ## --repeat_identical: the consecutive frames drawn so far
+var _repeat_failed := false  ## --repeat_identical: the frames differ (exit code 1)
 
 
 func _initialize() -> void:
@@ -69,6 +76,8 @@ func _process(_delta: float) -> bool:
 			ShaderGlobals.set_value(&"cloud_detail_levels", int(_args["cloud_detail_levels"]))
 		if _args.has("no_light_cache"):  # the fidelity flag (CloudLayer.light_cache_enabled)
 			world.clouds.light_cache_enabled = false
+		if _args.has("jittered_march"):  # the fidelity flag (CloudLayer.deterministic_march)
+			world.clouds.deterministic_march = false
 		if _args.has("cloud_scattering"):  # the fidelity flag (CloudLayer.ScatteringModel)
 			world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
 					if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE
@@ -134,6 +143,8 @@ func _process(_delta: float) -> bool:
 			if _deterministic_left > 0:
 				_deterministic_left -= 1
 				return false
+		if _args.has("repeat_identical") and not _repeat_frames(world):
+			return false
 		print("render_check: ", world.weather.status_text())
 		print("render_check: clouds %s, field textures %.1f MB, last upload %.1f ms" % [world.clouds.state(),
 				world.clouds.field_texture_bytes / 1.0e6, world.clouds.last_upload_ms])
@@ -163,8 +174,38 @@ func _process(_delta: float) -> bool:
 		var out: String = _args.get("out", "user://render_check.png")
 		var error := root.get_viewport().get_texture().get_image().save_png(out)
 		print("render_check: saved %s (error %d)" % [out, error])
+		if _repeat_failed:
+			quit(1)
 		return true  # quit
 	return false
+
+
+## --repeat_identical[=2]: once the light cache is settled (no fill, no cross-fade), collects that many consecutive
+## frames of the unchanged scene (no history reset) and compares them; true when all are collected (then the last one
+## is saved). Frames that differ fail the check (exit code 1 after the save).
+func _repeat_frames(world: World) -> bool:
+	_cache_settled = _cache_settled + 1 if world.clouds.light_cache.settled() else 0
+	if _cache_settled < FRAMES_TO_SETTLE and _frames < TERRAIN_MAX_FRAMES:
+		return false
+	var wanted: int = maxi(int(_args["repeat_identical"]) if _args["repeat_identical"].is_valid_int() else 2, 2)
+	_repeat_images.append(root.get_viewport().get_texture().get_image())
+	if _repeat_images.size() < wanted:
+		return false
+	var first := _repeat_images[0]
+	var worst := 0
+	for k in range(1, _repeat_images.size()):
+		var other := _repeat_images[k]
+		var differing := 0
+		for y in (0 if first.get_data() == other.get_data() else first.get_height()):
+			for x in first.get_width():
+				if first.get_pixel(x, y) != other.get_pixel(x, y):
+					differing += 1
+		worst = maxi(worst, differing)
+	print("render_check: repeat_identical %d frames: %s (most differing pixels %d of %d)" % [wanted,
+			"identical" if worst == 0 else "DIFFER", worst, first.get_width() * first.get_height()])
+	if worst > 0:
+		_repeat_failed = true
+	return true
 
 
 ## --weather, --weather=online or --weather=<max seconds>: the weather service online (downloads); off / analog / a

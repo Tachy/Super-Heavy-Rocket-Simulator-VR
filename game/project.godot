@@ -505,6 +505,10 @@ cloud_light_cache_enabled={
 "type": "bool",
 "value": true
 }
+cloud_deterministic_march={
+"type": "bool",
+"value": true
+}
 cloud_light_cache_valid={
 "type": "bool",
 "value": false

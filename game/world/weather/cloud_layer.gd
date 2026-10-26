@@ -79,12 +79,16 @@ enum ScatteringModel { CLOSED_FORM, TABLE }
 ## 2026-10-26: the clouds need not look new every frame, only volumetric and in perspective): the history keeps up to 96
 ## frames (noise floor sqrt(w / (2 - w)): 7 % of one frame's instead of 13 % at 32) and is clipped to the
 ## neighbourhood's mean +- clip_gamma standard deviations instead of its min / max (which threw the history away at
-## every motion: the flicker); clip_gamma 0 keeps the min / max (the desktop's approved look).
+## every motion: the flicker); clip_gamma 0 keeps the min / max (the desktop's approved look). The temporal weight and
+## clip apply only to the jittered march (deterministic_march off). VR steps (static clouds Task 3, deterministic
+## march): 48 coarse steps (4.3 % of the distance) lost cumulus bases at a fixed sample point - cloud_check case 9 off
+## by 5 px, the deck view at 9 km thinned - and with the detail band-limited at the step a fine fraction of 0.025 left
+## only the large lobes and grain in near cumuli: 96 / 192 / 0.012 (the desktop's fine step; cost measured in Task 10).
 const PRESETS := {
 	Quality.DESKTOP: {"steps": 128, "max_steps": 256, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
 			"temporal_weight": 1.0 / 32.0, "clip_gamma": 0.0},
-	Quality.VR: {"steps": 48, "max_steps": 96, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
+	Quality.VR: {"steps": 96, "max_steps": 192, "fine_step_fraction": 0.012, "light_near": 5, "light_far": 2,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 3,
 			"temporal_weight": 1.0 / 96.0, "clip_gamma": 1.5},
 }
@@ -116,6 +120,15 @@ var light_cache_enabled := true:
 	set(value):
 		light_cache_enabled = value
 		ShaderGlobals.set_value(&"cloud_light_cache_enabled", value)
+## Fidelity flag (shader global cloud_deterministic_march; static clouds Task 3): true marches every ray at fixed
+## sample points (the step phase on Earth-fixed height shells, the stratified midpoints, the silhouette refined by
+## bisection, the shape prefilter at its footprint's centre) - an unchanged view gives a bit-identical image - and the
+## temporal kernel only copies the current frame; false: the per-pixel and per-frame jitter averaged by the temporal
+## accumulation (the reference of the converged image, cloud_check.gd case 9).
+var deterministic_march := true:
+	set(value):
+		deterministic_march = value
+		ShaderGlobals.set_value(&"cloud_deterministic_march", value)
 
 var _core: StarsimCore
 var _quad := MeshInstance3D.new()
@@ -182,6 +195,7 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_shadow_valid", false)
 	ShaderGlobals.set_value(&"cloud_debug_output", 0)
 	ShaderGlobals.set_value(&"cloud_light_cache_enabled", light_cache_enabled)
+	ShaderGlobals.set_value(&"cloud_deterministic_march", deterministic_march)
 	ShaderGlobals.set_value(&"cloud_shadow_near", shadow_effect.near_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_far", shadow_effect.far_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_extent", Vector4(SHADOW_NEAR_HALF_M, SHADOW_FAR_HALF_M,

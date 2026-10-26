@@ -43,12 +43,17 @@
 #      the grid mean) 5 %, a broken layer of cf 0.4 (debug output 7, the shapes) 10 % - Sun 45 / 20 deg up; a view
 #      beyond every cascade with a complete fill, and the frames right after a clock jump (nothing held), equal the
 #      march exactly (bit for bit); the fill's GPU time in every frame at the game's budget <= 0.5 ms.
+#   9. (static clouds Task 3) the deterministic march's silhouettes: a broken layer (cf 0.3, opaque cumuli) seen
+#      from 5 km above its top, straight down; its 50 % background-transmittance contour (debug output 4) lies within
+#      one march pixel of the converged reference's (the jittered march with ~12 m steps, the mean of 16 frames), for
+#      the desktop and the VR preset (STARSIM_SILHOUETTE_ONLY=1 runs this section alone);
 #  10. (static clouds Task 2) no seam: a line of pixels crossing each cascade's edge band (cascade 0 -> 1 -> ... -> 4 ->
 #      the march, the slab): the row-to-row step of (cache - march) / mean stays within the image noise (the largest
 #      difference of two march renders with independent jitter); the same view before / after a re-anchor (the
 #      camera moved 12 km east and back: cascade 3 re-anchored) differs by less than that noise.
-# The other sections run with the light cache on (the game's path). Detail levels off for the numbers
-# (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
+# The other sections run with the light cache on and the deterministic march (the game's path; 8 and 10 with the
+# jittered one: they measure the light over pinned frames' means and against independent jitter's noise). Detail
+# levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_check.gd
 extends SceneTree
 
@@ -75,7 +80,7 @@ const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 130
+const EXPECTED_SAMPLES := 132
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -150,6 +155,20 @@ const CACHE_REANCHOR_CASCADE := 3
 ## A pixel's error is relative to max(its reference, this fraction of the view's mean reference): a cloud's fringe or a
 ## gap's last light carries no relative accuracy of its own.
 const CACHE_ERROR_FLOOR := 0.05
+## Section 9: a broken layer (cf SILHOUETTE_FRACTION, the thick slab's water: opaque cumuli) seen from
+## SILHOUETTE_DISTANCE_M above its top, straight down. The reference: the jittered march with fine steps of
+## SILHOUETTE_REFERENCE_FINE of the distance (~12 m: the cumulus' rim) and SILHOUETTE_REFERENCE_STEPS coarse ones (the
+## VR preset's 48 lost cloud bases in half the frames, jittered too), averaged over SILHOUETTE_REFERENCE_FRAMES frames.
+const SILHOUETTE_VIEW_SIZE := 96
+const SILHOUETTE_FOV_DEG := 30.0
+const SILHOUETTE_FRACTION := 0.3
+const SILHOUETTE_DISTANCE_M := 5000.0
+const SILHOUETTE_REFERENCE_FINE := 0.002
+const SILHOUETTE_REFERENCE_MAX_STEPS := 1024
+const SILHOUETTE_REFERENCE_STEPS := 512
+const SILHOUETTE_REFERENCE_FRAMES := 16
+const SILHOUETTE_MIN_CONTOUR := 24  ## reference contour pixels in view (cloud edges are seen)
+const SILHOUETTE_SEARCH := 8  ## full-resolution pixels searched for the reference's contour
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
@@ -195,6 +214,14 @@ func _run() -> void:
 	if OS.get_environment("STARSIM_SLANT_TABLE") != "":
 		await _slant_table()
 		quit(0)
+		return
+	if OS.get_environment("STARSIM_SILHOUETTE_ONLY") != "":  # diagnostics: section 9 alone (no sample count)
+		await _silhouette_samples()
+		_clouds.shutdown()
+		for f in _files:
+			DirAccess.remove_absolute(f)
+		print("cloud_check (silhouettes only): %d failures" % _failures)
+		quit(1 if _failures > 0 else 0)
 		return
 	if OS.get_environment("STARSIM_LIGHT_CACHE_ONLY") != "":  # diagnostics: sections 8 and 10 alone (no sample count)
 		await _light_cache_samples()
@@ -307,6 +334,8 @@ func _run() -> void:
 	await _handover_samples()
 	# 8. The light cache against the per-sample light march (and 10: no seam at its edges).
 	await _light_cache_samples()
+	# 9. The deterministic march's silhouettes against the converged jittered march.
+	await _silhouette_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -538,6 +567,9 @@ func _light_cache_samples() -> void:
 	var cache := _clouds.light_cache
 	var game_budget := cache.schedule.budget_voxels
 	cache.schedule.budget_voxels = cache.voxel_count() / CACHE_BUDGET_DIVISOR
+	# The view's jittered march (the reference path, CloudLayer.deterministic_march off): sections 8 and 10 compare the
+	# light, not the view's sampling, over the pinned frames' mean and against the image noise of independent jitter.
+	_clouds.deterministic_march = false
 	_viewport.size = Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE)
 	var slab := _slab("cache_slab", SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, 1.0)
 	var broken := _slab("cache_broken", SLAB_BOTTOM_M, SLAB_TOP_M, DECK_LIQUID_KG_M3, BROKEN_FRACTION)
@@ -682,6 +714,7 @@ func _light_cache_samples() -> void:
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
 	await _seam_samples(slab)
 	cache.schedule.budget_voxels = game_budget
+	_clouds.deterministic_march = true
 
 
 ## Section 10: no seam. A line of pixels (CACHE_LINE_SIZE: the row means of a narrow tall view, rows = elevations)
@@ -1001,18 +1034,87 @@ func _light_fill_ms() -> float:
 ## The red channel of the view (size: the viewport's), the mean over RADIANCE_FRAMES frames with the march's jitter
 ## pinned to frames first_frame, first_frame + 1, ...
 func _mean_image(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode: int,
-		size := Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE), first_frame := 0) -> PackedFloat32Array:
+		size := Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE), first_frame := 0,
+		frames := RADIANCE_FRAMES) -> PackedFloat32Array:
 	var mean := PackedFloat32Array()
 	mean.resize(size.x * size.y)
-	for frame in range(RADIANCE_FRAMES):
+	for frame in range(frames):
 		CloudEffect.pinned_frame = first_frame + frame
 		await _render(camera_itrf_m, view_itrf, sun_itrf, mode)
 		var image := _viewport.get_texture().get_image()
 		for y in range(size.y):
 			for x in range(size.x):
-				mean[y * size.x + x] += image.get_pixel(x, y).r / RADIANCE_FRAMES
+				mean[y * size.x + x] += image.get_pixel(x, y).r / frames
 	CloudEffect.pinned_frame = -1
 	return mean
+
+
+## Section 9 (static clouds Task 3): the deterministic march's silhouettes (its 50 % background transmittance contour,
+## debug output 4: the shapes) of a broken layer seen from SILHOUETTE_DISTANCE_M lie within one march pixel (the
+## preset's divisor in output pixels) of the converged reference's, for both quality presets.
+func _silhouette_samples() -> void:
+	var slab := _slab("silhouette", SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, SILHOUETTE_FRACTION)
+	_show(slab)
+	var size := Vector2i(SILHOUETTE_VIEW_SIZE, SILHOUETTE_VIEW_SIZE)
+	_viewport.size = size
+	_camera.fov = SILHOUETTE_FOV_DEG
+	var camera := _point(SLAB_TOP_M + SILHOUETTE_DISTANCE_M)
+	var view := _local_direction(-90.0, 0.0)
+	var sun := _local_direction(45.0, 135.0)
+	for quality in [CloudLayer.Quality.DESKTOP, CloudLayer.Quality.VR]:
+		_clouds.quality = quality
+		_detail_off()
+		_clouds.deterministic_march = false
+		ShaderGlobals.set_value(&"cloud_fine_step_fraction", SILHOUETTE_REFERENCE_FINE)
+		ShaderGlobals.set_value(&"cloud_max_steps", SILHOUETTE_REFERENCE_MAX_STEPS)
+		ShaderGlobals.set_value(&"cloud_steps", SILHOUETTE_REFERENCE_STEPS)
+		var reference := await _mean_image(camera, view, sun, 4, size, 0, SILHOUETTE_REFERENCE_FRAMES)
+		_clouds.quality = quality  # the preset's steps again
+		_detail_off()
+		_clouds.deterministic_march = true
+		var got := await _mean_image(camera, view, sun, 4, size, 0, 1)
+		var divisor := int(CloudLayer.PRESETS[quality]["divisor"])
+		var result := _contour_distance(got, reference, size)
+		_check("silhouette within one march pixel of the converged one (%s preset)"
+				% ("VR" if quality == CloudLayer.Quality.VR else "desktop"),
+				result.x <= divisor and result.y >= SILHOUETTE_MIN_CONTOUR,
+				"farthest %d px (limit %d), %d mismatched pixels, reference contour %d px" % [result.x, divisor,
+				result.z, result.y])
+	_clouds.quality = CloudLayer.Quality.DESKTOP
+	_detail_off()
+	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
+	_camera.fov = 10.0
+
+
+## Section 9: (x) the largest distance [px, Chebyshev] from a pixel whose side of 50 % transmittance differs from the
+## reference to the nearest reference pixel on its side (SILHOUETTE_SEARCH + 1 when none is that near), (y) the
+## reference's contour pixels (a neighbour on the other side), (z) the mismatched pixels.
+static func _contour_distance(got: PackedFloat32Array, reference: PackedFloat32Array, size: Vector2i) -> Vector3i:
+	var farthest := 0
+	var contour := 0
+	var mismatched := 0
+	for y in range(size.y):
+		for x in range(size.x):
+			var cloud := reference[y * size.x + x] < 0.5
+			for n in [Vector2i(1, 0), Vector2i(0, 1)]:
+				var q: Vector2i = Vector2i(x, y) + n
+				if q.x < size.x and q.y < size.y and (reference[q.y * size.x + q.x] < 0.5) != cloud:
+					contour += 1
+					break
+			var side := got[y * size.x + x] < 0.5
+			if side == cloud:
+				continue
+			mismatched += 1
+			var nearest := SILHOUETTE_SEARCH + 1
+			for dy in range(-SILHOUETTE_SEARCH, SILHOUETTE_SEARCH + 1):
+				for dx in range(-SILHOUETTE_SEARCH, SILHOUETTE_SEARCH + 1):
+					var q := Vector2i(x + dx, y + dy)
+					var r := maxi(absi(dx), absi(dy))
+					var inside := q.x >= 0 and q.y >= 0 and q.x < size.x and q.y < size.y
+					if r < nearest and inside and (reference[q.y * size.x + q.x] < 0.5) == side:
+						nearest = r
+			farthest = maxi(farthest, nearest)
+	return Vector3i(farthest, contour, mismatched)
 
 
 ## The mean of each row of a CACHE_LINE_SIZE image (the line of pixels: one value per elevation).

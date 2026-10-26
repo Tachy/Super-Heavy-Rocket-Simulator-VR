@@ -11,8 +11,10 @@
 //    block on even pixels, the farthest on odd ones (both depths are represented for the upsampling) - unless the
 //    block's distances lie within CLOUD_ONE_SURFACE_SPREAD of each other (one surface: the ground seen from far, a
 //    slope): then the mean, the centre ray's own distance (Task 10). The raymarch
-//    (steps, light, compositing) as described in cloud_layer.gdshader's header. The start jitter is a blue-noise value
-//    per low-resolution pixel (cloud_noise.hpp, 64 x 64 tiled) offset per frame by the golden ratio (a low-discrepancy
+//    (steps, light, compositing) as described in cloud_layer.gdshader's header. The deterministic march (the default,
+//    cloud_deterministic_march; static clouds Task 3): fixed sample points (cloud_march), an unchanged view gives a
+//    bit-identical image. The jittered one (the reference path): the start jitter is a blue-noise value per
+//    low-resolution pixel (cloud_noise.hpp, 64 x 64 tiled) offset per frame by the golden ratio (a low-discrepancy
 //    sequence in time): a function of the pixel and the frame alone - the same for both eyes. Out: premultiplied
 //    colour + alpha, and (march distance used, transmittance-weighted cloud distance).
 // 2. CLOUD_TEMPORAL: accumulation with reprojection, per eye: the pixel's point at its cloud distance (the far sky's
@@ -23,12 +25,14 @@
 //    converges (an exponential mean of weight w keeps a noise floor of sqrt(w / (2 - w)) of one frame's noise: 23 % at
 //    0.1), with the floor's memory at most. A history the clamp moved (the content changed) keeps at most
 //    CLOUD_CLAMPED_AGE frames; no history (first frame, outside the previous view, after a reset): the new value alone.
+//    The deterministic march has nothing to average: the weight is 1 (CloudEffect), the kernel copies the frame.
 // 3. CLOUD_UPSAMPLE to full resolution, per eye: the desktop's view (its own centre) takes the four nearest
 //    low-resolution pixels, bilinear weights x a depth weight exp(-CLOUD_DEPTH_SHARPNESS |ln(D / D_i)|) (D the
 //    full-resolution scene distance, D_i the sample's march distance): a cloud in front of a mountain does not bleed
 //    over it and the sky between peaks keeps its cloud. A VR eye reprojects its ray into the centre image - at its
 //    scene point, then at the taps' cloud distance (the disparity of the cloud) - and gathers a 4 x 4 tent (soft
-//    alpha edges from the march's noise, the same in both eyes) with the same depth weight. Out: the full-resolution
+//    alpha edges from the march's noise, the same in both eyes; radius 1 - bilinear - with the deterministic march)
+//    with the same depth weight. Out: the full-resolution
 //    image the composite quad (cloud_layer.gdshader) blends over the scene.
 
 #if defined(CLOUD_MARCH) || defined(CLOUD_TEMPORAL) || defined(CLOUD_UPSAMPLE)
@@ -121,6 +125,22 @@ const float CLOUD_LIGHT_REFRESH_FRACTION = 0.05;
 // totality (~3 % of obscuration per 100 km), the umbra ~200 km: neighbouring pixels share the factor.
 const float CLOUD_ECLIPSE_NEAR_M = 5000.0;
 const float CLOUD_ECLIPSE_FAR_M = 150000.0;
+// [E] Extinction where a silhouette begins (deterministic march): below it a fine step (<= 1 km) carries tau < 0.1, so
+// the clear stretch skipped in front of the refined entry holds no visible cloud; a cumulus' rim rises to its in-cloud
+// ~0.03-0.1 /m within tens of metres, so the entry sits at the visible outline. Thin cloud below it (cirrus, wisps:
+// ~1e-5-1e-4 /m) is marched as before, translucent by its density.
+const float CLOUD_SILHOUETTE_EXTINCTION_PER_M = 1.0e-4;
+// [E] Bisections of the entry bracket (the step's first half, start to midpoint): 1/32 of the step (the presets' fine
+// step 1.2 % of the distance: 0.4 mrad, below the VR centre's 1.8 mrad pixel).
+const int CLOUD_SILHOUETTE_BISECTIONS = 4;
+// [E] The deterministic march's detail band limit as a fraction of its step: detail level k enters from cells l_k of
+// twice this times the step and is full from four times (cloud_detail_state: l_k >= 2 f / 4 f), i.e. from one / two
+// steps per cell - the midpoint rule's resolution along the ray. Finer detail sampled at fixed points aliased into
+// static salt-and-pepper holes in near cumuli (the jitter's temporal mean had averaged it; Task 3 images).
+const float CLOUD_DETAIL_STEP_FRACTION = 0.5;
+// [E] Smallest |dh/ds| for the step phase's height shells (a horizontal ray: shells 1e-3 of the step apart, the phase
+// a function of the ray alone as for any other ray).
+const float CLOUD_PHASE_MIN_CLIMB = 1.0e-3;
 shared vec3 cloud_group_eclipse_near;
 shared vec3 cloud_group_eclipse_far;
 
@@ -128,6 +148,7 @@ global uniform sampler2D cloud_blue_noise : filter_nearest, repeat_enable;  // 6
 global uniform int cloud_steps;        // coarse steps spanning the segment (quality preset)
 global uniform int cloud_max_steps;    // cap on the steps per pixel (coarse + fine)
 global uniform float cloud_fine_step_fraction;  // fine step / distance inside the field's cloudy region
+global uniform bool cloud_deterministic_march;  // fidelity flag (CloudLayer.deterministic_march; false: jittered)
 
 // Scattering source of one light (Sun or Moon) at a sample: J per unit irradiance normal to the light. The Sun's
 // optical depth from the light cache's cascades where they hold the sample (cloud_light_cache.gdshaderinc; the hybrid
@@ -154,6 +175,13 @@ float cloud_light_source(vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, flo
 }
 
 // The raymarch of one ray (dir: Earth-local unit) up to scene_m; out: premultiplied colour, alpha, weighted distance.
+// The deterministic march (cloud_deterministic_march; static clouds Task 3): the first step ends on an Earth-fixed
+// height shell (CLOUD_PHASE_MIN_CLIMB), every sample - the view's and the light march's - at its step's midpoint
+// (jitter 0.5), and where a sample's extinction crosses CLOUD_SILHOUETTE_EXTINCTION_PER_M from below the entry point
+// is bisected (CLOUD_SILHOUETTE_BISECTIONS) between the step's start and the sample, and the in-cloud steps start there
+// (the outline found, not sampled: a whole step's depth at a cloud's rim made the silhouette a step's width too big);
+// a clear sample whose step ends in the field's cloudy region ends the step there (fine steps follow), and the detail
+// is band-limited at the step too (CLOUD_DETAIL_STEP_FRACTION).
 void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 eclipse_far, out vec3 color,
 		out float alpha, out float cloud_m) {
 	color = vec3(0.0);
@@ -220,18 +248,37 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	vec3 moon_sky_irradiance = vec3(0.0);
 	float dense_step_m = 1.0e30;  // the step limit after a dense sample (CLOUD_MAX_STEP_WEIGHT)
 	float a = d0;
+	// The deterministic step phase: the first step ends where the ray meets the next height shell k s_v above the
+	// ellipsoid (s_v: the first coarse step's height extent), so the samples stay put for a static camera and move with
+	// the shells, not with the screen, for a moving one. phase_m: that end (-1: none, the jittered march).
+	float phase_m = -1.0;
+	bool outside = true;  // the last sample lay below CLOUD_SILHOUETTE_EXTINCTION_PER_M (the next crossing is an entry)
+	bool cloud_ahead = false;  // the last clear step ended in the field's cloudy region: the next steps are fine ones
+	if (cloud_deterministic_march) {
+		float h0 = cloud_height_along(ray, d0);
+		float slope = cloud_height_slope(ray, d0);
+		float layer0_m = h0 < CLOUD_FINE_TOP_M ? CLOUD_FINE_LAYER_M : CLOUD_COARSE_LAYER_M;
+		float step0_m = max(min(start * coarse_rel, layer0_m / max(abs(slope), 1.0e-3)), CLOUD_MIN_STEP_M);
+		float shell_m = step0_m * max(abs(slope), CLOUD_PHASE_MIN_CLIMB);
+		float f = fract(h0 / shell_m);
+		float to_shell = slope >= 0.0 ? 1.0 - f : f;  // of the step, toward the next shell along the ray
+		phase_m = d0 + step0_m * (to_shell > 1.0e-3 ? to_shell : 1.0);
+	}
 	for (int i = 0; i < cloud_max_steps && a < d1; i++) {
 		float h_a = cloud_height_along(ray, a);
 		float climb = abs(cloud_height_slope(ray, a));
 		float layer_m = h_a < CLOUD_FINE_TOP_M ? CLOUD_FINE_LAYER_M : CLOUD_COARSE_LAYER_M;
 		float step_m = min(max(a, start) * coarse_rel, layer_m / max(climb, 1.0e-3));
 		step_m = max(step_m, CLOUD_MIN_STEP_M);
+		if (a < phase_m) {
+			step_m = min(step_m, phase_m - a);
+		}
 		// Inside the field's cloudy region the step shrinks to the fine fraction of the distance: the sub-grid shapes
 		// are resolved (a coarse step would hit or miss a cumulus edge per pixel: grain).
 		float d = a + jitter * step_m;
 		vec2 lat_lon = cloud_lat_lon(camera + eye + dir * d);
 		CloudCell cell = cloud_field(lat_lon, cloud_height_along(ray, d));
-		if (cell.extinction > 0.0) {
+		if (cell.extinction > 0.0 || cloud_ahead) {
 			// Never finer than what still reaches the segment's end within the remaining steps (no far cloud is cut).
 			float remaining = float(max(cloud_max_steps - i, 1));
 			float reach = max(a, start) * (exp(log(max(d1, start) / max(a, start)) / remaining) - 1.0);
@@ -250,15 +297,57 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		a = b;
 		if (cell.extinction <= 0.0) {
 			dense_step_m = min(2.0 * dense_step_m, 1.0e30);
+			outside = true;
+			if (phase_m >= 0.0 && b < d1) {
+				// The deterministic march: a clear sample whose step ends in the field's cloudy region (a deck's top, a
+				// cumulus layer's) ends the step at the sample and marches on with fine steps - a fixed sample point
+				// would skip up to a coarse step of the cloud there in every frame (the jitter only averaged it).
+				cloud_ahead = cloud_field(cloud_lat_lon(camera + eye + dir * b), cloud_height_along(ray, b)).extinction
+						> 0.0;
+				if (cloud_ahead && d > a_this) {
+					a = d;
+				}
+			}
 			continue;
 		}
+		cloud_ahead = false;
 		vec3 offset = eye + dir * d;  // from the head: the ray starts at the eye
 		float height = cloud_height_along(ray, d);
 		float in_cloud;
-		float beta = cloud_extinction_in_cell(cell, offset, height, pixel_angle * d, pixel_angle * d, in_cloud);
+		// The detail's band limit: the pixel footprint; the deterministic march's also its step
+		// (CLOUD_DETAIL_STEP_FRACTION).
+		float detail_m = phase_m >= 0.0 ? max(pixel_angle * d, CLOUD_DETAIL_STEP_FRACTION * step_m) : pixel_angle * d;
+		float beta = cloud_extinction_in_cell(cell, offset, height, detail_m, pixel_angle * d, in_cloud);
 		if (beta <= 0.0) {
 			dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
+			outside = true;
 			continue;
+		}
+		if (phase_m >= 0.0) {
+			bool entry = outside && beta >= CLOUD_SILHOUETTE_EXTINCTION_PER_M;
+			outside = beta < CLOUD_SILHOUETTE_EXTINCTION_PER_M;
+			if (entry && d > a_this) {
+				// The silhouette: bisect [step start, sample] for the threshold, then march on from the entry (the
+				// clear stretch before it holds tau < 0.1: CLOUD_SILHOUETTE_EXTINCTION_PER_M).
+				float lo = a_this;
+				float hi = d;
+				for (int j = 0; j < CLOUD_SILHOUETTE_BISECTIONS; j++) {
+					float mid = 0.5 * (lo + hi);
+					vec2 lat_lon_mid;
+					float in_cloud_mid;
+					float beta_mid = cloud_extinction_at(eye + dir * mid, cloud_height_along(ray, mid),
+							detail_m, pixel_angle * mid, lat_lon_mid, in_cloud_mid);
+					if (beta_mid >= CLOUD_SILHOUETTE_EXTINCTION_PER_M) {
+						hi = mid;
+					} else {
+						lo = mid;
+					}
+				}
+				if (lo > a_this) {
+					a = lo;  // the in-cloud steps start at the entry (the bracket's clear end)
+					continue;
+				}
+			}
 		}
 		// A step weighing more than CLOUD_MAX_STEP_WEIGHT in the pixel is done again with steps of that weight. The
 		// step's intended length is compared, not b - a_this: far from the camera (a float32 distance of 8.6e6 m has a
@@ -279,7 +368,8 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		vec2 column = cloud_column_depths(cell, lat_lon, height, in_cloud);
 		// The light march's jitter decorrelated from step to step (golden-ratio sequence): the samples of one ray
 		// average its noise instead of sharing one light-march error.
-		float light_jitter = fract(jitter + float(i) * 0.6180339887);
+		// The deterministic march: the light march's midpoints too (the Moon's; the Sun's where no cache holds it).
+		float light_jitter = phase_m >= 0.0 ? 0.5 : fract(jitter + float(i) * 0.6180339887);
 		vec3 source = vec3(0.0);        // the sky's (scaled problem: attenuated on the scaled depths)
 		vec3 light_source = vec3(0.0);  // the Sun's and the Moon's (cloud_light_source)
 		if (cloud_debug_output == 2 || cloud_debug_output == 7) {
@@ -474,17 +564,24 @@ void main() {
 	float alpha = 0.0;
 	float cloud_m = 0.0;
 	if (cloud_enabled && atmosphere_enabled) {
-		float noise = texelFetch(cloud_blue_noise, pixel % 64, 0).r;
-		float jitter = fract(noise + cloud_view.params.x);
+		// The deterministic march: the stratified midpoints (cloud_march); else blue noise per pixel moved per frame.
+		float jitter = 0.5;
+		if (!cloud_deterministic_march) {
+			jitter = fract(texelFetch(cloud_blue_noise, pixel % 64, 0).r + cloud_view.params.x);
+		}
 #ifdef CLOUD_SHAPE_PREFILTER
 		// The sub-pixel shape offset (clouds.gdshaderinc cloud_subpixel_offset): blue noise at four shifted texels, moved
-		// per frame along the R4 sequence (Roberts 2018: 1 / phi_4^k) of the frame index.
-		float frame = cloud_view.eye_earth.w;
-		cloud_shape_subpixel = fract(vec4(texelFetch(cloud_blue_noise, (pixel + ivec2(17, 41)) % 64, 0).r,
-				texelFetch(cloud_blue_noise, (pixel + ivec2(43, 29)) % 64, 0).r,
-				texelFetch(cloud_blue_noise, (pixel + ivec2(5, 53)) % 64, 0).r,
-				texelFetch(cloud_blue_noise, (pixel + ivec2(31, 11)) % 64, 0).r)
-				+ frame * vec4(0.8566748839, 0.7338918708, 0.6287067210, 0.5385972572));
+		// per frame along the R4 sequence (Roberts 2018: 1 / phi_4^k) of the frame index. The deterministic march reads
+		// the footprint's centre (0.5: no offset) - the mips' box filter there is the footprint's mean cover (spec
+		// decision 4), the same in every frame.
+		if (!cloud_deterministic_march) {
+			float frame = cloud_view.eye_earth.w;
+			cloud_shape_subpixel = fract(vec4(texelFetch(cloud_blue_noise, (pixel + ivec2(17, 41)) % 64, 0).r,
+					texelFetch(cloud_blue_noise, (pixel + ivec2(43, 29)) % 64, 0).r,
+					texelFetch(cloud_blue_noise, (pixel + ivec2(5, 53)) % 64, 0).r,
+					texelFetch(cloud_blue_noise, (pixel + ivec2(31, 11)) % 64, 0).r)
+					+ frame * vec4(0.8566748839, 0.7338918708, 0.6287067210, 0.5385972572));
+		}
 #endif
 		cloud_march(cloud_ray_earth(centre), scene_m, jitter, cloud_group_eclipse_near, cloud_group_eclipse_far, color,
 				alpha, cloud_m);
@@ -589,7 +686,8 @@ layout(set = 1, binding = 3) uniform sampler2D low_depth;      // the march dist
 layout(rgba16f, set = 1, binding = 4) uniform writeonly image2D out_image;
 // The centre view the history belongs to (CloudEffect): its transform from Earth-local offsets of the head to its clip
 // space, its sizes (virtual full, low) and params: x the mode (1 = an eye reads the centre (VR), 0 = the view is the
-// centre: the desktop's own pixel grid, the 2 x 2 gather of before), y the centre pixel's angle [rad].
+// centre: the desktop's own pixel grid, the 2 x 2 gather of before), y the centre pixel's angle [rad], z the tent's
+// largest radius [centre pixels] (CloudEffect: 1 - bilinear - with the deterministic march, 2 with the jittered one).
 layout(set = 1, binding = 5, std140) uniform CloudCentre {
 	mat4 clip_from_earth;
 	vec4 sizes;
@@ -627,10 +725,12 @@ vec2 cloud_centre_position(vec3 offset) {
 
 // The tent gather at a centre position: premultiplied colour + alpha weighted by the tent and the depth weight; `cloud`
 // gets the alpha-weighted cloud distance of the taps (0 without cloud).
-// The tent radius [centre pixels] for a cloud at `cloud_m` (CLOUD_EDGE_SOFT_M; params.y: the centre pixel's angle).
+// The tent radius [centre pixels] for a cloud at `cloud_m` (CLOUD_EDGE_SOFT_M; params.y: the centre pixel's angle, z:
+// the largest radius, at most CLOUD_TENT_RADIUS_MAX).
 float cloud_tent_radius(float cloud_m) {
+	float largest = clamp(cloud_centre.params.z, CLOUD_TENT_RADIUS_MIN, CLOUD_TENT_RADIUS_MAX);
 	return clamp(CLOUD_EDGE_SOFT_M / (max(cloud_m, 1.0) * max(cloud_centre.params.y, 1.0e-9)), CLOUD_TENT_RADIUS_MIN,
-			CLOUD_TENT_RADIUS_MAX);
+			largest);
 }
 
 vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float cloud) {
@@ -684,7 +784,7 @@ void main() {
 		cloud_tent_gather(cloud_centre_position(eye + dir * min(scene_m, CLOUD_UPSAMPLE_SKY_M)), scene_m,
 				CLOUD_TENT_RADIUS_MAX, cloud_m);
 		float at_m = cloud_m > 0.0 ? min(cloud_m, scene_m) : min(scene_m, CLOUD_UPSAMPLE_SKY_M);
-		float radius = cloud_m > 0.0 ? cloud_tent_radius(cloud_m) : CLOUD_TENT_RADIUS_MAX;
+		float radius = cloud_tent_radius(cloud_m > 0.0 ? cloud_m : 1.0);  // no cloud: the largest radius
 		imageStore(out_image, pixel, cloud_tent_gather(cloud_centre_position(eye + dir * at_m), scene_m, radius,
 				cloud_m));
 		return;

@@ -49,7 +49,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   horizontal offset drawn from the pixel's tent filter (half-width f, faded in from f_s to 2 f_s; blue noise + the R4
   sequence per frame) and the temporal mean averages the pixel's transmittance over its footprint - the
   coverage-preserving mean in transmittance (a mean density would make broken cloud a fog); the cell (fraction,
-  water) stays the true point's. Deeper mips (level 4, 4 km texels) were tried: their few features per horizontal
+  water) stays the true point's. The deterministic march (the default, static clouds Task 3) reads the footprint's
+  centre (no offset, the same in every frame): the mips' box filter there is the footprint's mean cover (spec
+  decision 4); Task 8's hand-over is to end the volume before such footprints matter. Deeper mips (level 4, 4 km texels) were tried: their few features per horizontal
   slice of the tile showed as rings around the sub-camera point (cf 0.4 hand-over 10.7 % instead of 7.5 %). The
   code sits under `CLOUD_SHAPE_PREFILTER`: `CloudEffect` runs that march kernel only when a footprint on the frame's
   clouds can exceed f_s (largest pixel angle x (the horizon distances of the camera and of the 20 km cloud top on the
@@ -147,8 +149,19 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      of nearest / farthest, or the block's mean when its four distances lie within 5 % (`CLOUD_ONE_SURFACE_SPREAD`
      [E]: one surface - the ground seen from far, where the nearest depth cut every other ray short of the low clouds
      by the block's depth extent, several km from 8 600 km; Task 10); coarse steps outside the field's cloudy region,
-     fine steps inside; blue-noise start jitter,
-     64 x 64 void-and-cluster mask offset per frame by the golden ratio - the same for both eyes); background through
+     fine steps inside. **Deterministic march** (fidelity flag `CloudLayer.deterministic_march`, shader global
+     `cloud_deterministic_march`, default on; static clouds Task 3): an unchanged view gives a bit-identical image -
+     the first step ends on an Earth-fixed height shell (spacing: the first coarse step's height extent, |dh/ds| at
+     least `CLOUD_PHASE_MIN_CLIMB` 1e-3 [E]), every sample - the view's, the Moon's light march, the Sun's where no
+     cache holds it - at its step's midpoint; a clear sample whose coarse step ends in the field's cloudy region ends
+     the step there and marches on with fine steps (a fixed point skipped up to a coarse step of a cloud top or base
+     in every frame); where a sample's extinction crosses `CLOUD_SILHOUETTE_EXTINCTION_PER_M` 1e-4 /m [E] from below,
+     the entry is bisected `CLOUD_SILHOUETTE_BISECTIONS` 4 [E] times between the step's start and the sample and the
+     in-cloud steps start there (the clear stretch skipped holds tau < 0.1); the detail is band-limited at the larger
+     of the pixel footprint and `CLOUD_DETAIL_STEP_FRACTION` 0.5 [E] x the step (a level enters from one step per
+     cell: finer detail at fixed points aliased into static salt-and-pepper holes in near cumuli). The jittered march
+     (the reference path, flag off): blue-noise start jitter, 64 x 64 void-and-cluster mask offset per frame by the
+     golden ratio - the same for both eyes, the light march's jitter decorrelated per step; background through
      exp(-tau), scattered light through exp(-(1 - f) tau); colour = T_c L + (1 - T_bg) S_c with the air at the
      transmittance-weighted cloud distance; a step whose weight in the scattered light T_sc (1 - exp(-(1 - f) tau))
      exceeds 0.15 [E] is marched again with steps of that weight (one sample deciding a whole deep step was the grain
@@ -158,8 +171,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      motion into the previous frame's clip space of the same eye, history clamped to the 3 x 3 neighbourhood; a running
      mean of weight 1 / n (n the frames the history holds, kept per pixel) down to 1/32 (an exponential mean of 0.1
      kept 23 % of one frame's noise); a clamped history keeps at most 4 frames. `World` resets the history on view and
-     clock jumps (`_view_jumped`, `SimClock.time_jumped`);
-  3. depth-aware upsampling (bilinear x exp(-4 |ln(D / D_i)|)) into a full-resolution array (layer = view).
+     clock jumps (`_view_jumped`, `SimClock.time_jumped`). With the deterministic march the weight is 1: the kernel
+     copies the frame (nothing to average);
+  3. depth-aware upsampling (bilinear x exp(-4 |ln(D / D_i)|)) into a full-resolution array (layer = view); a VR eye's
+     tent gather has the largest radius 1 (bilinear) with the deterministic march, 2 with the jittered one
+     (`CloudEffect.TENT_RADIUS_*`, the centre block's params.z).
   The composite quad (`cloud_layer.gdshader`, first in the transparent pass, premultiplied) blends it over the scene;
   plumes draw over it, MSAA resolves stay intact. Off beyond 1.5e7 m (scaled space: the far field below). A new size
   (resize, divisor) creates new images; the main thread shows the new result before the next frame (`CloudEffect.swap_output`:
@@ -279,9 +295,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   at one point, a Sun below the cloud's local horizon at the entry floor 0.02, view cosine floor 0.02
   (`CLOUD_FAR_MU_MIN` [E]). The CPU light factors stay (1, 0, 1) beyond the limit (`cloud_enabled` false; a camera
   there is far above any cloud). The earthshine on the Moon keeps the Bond albedo 0.306 (clouds included on average).
-- **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 48 / 96,
-  2.5 %, 5 + 2 (Task 11: 64 / 128 before; see Performance); both 3 detail levels; resolution 1/2 desktop, 1/3 of the VR
-  centre view (VR performance plan part 2); temporal weight floor 1/32.
+- **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 96 / 192,
+  1.2 %, 5 + 2 (static clouds Task 3: the deterministic march lost cumulus bases with 48 coarse steps and kept only the
+  large lobes with a 2.5 % fine step - its detail is band-limited at the step; the cost is Task 10's); both 3 detail
+  levels; resolution 1/2 desktop, 1/3 of the VR centre view (VR performance plan part 2); temporal weight floor 1/32 /
+  1/96 (jittered march only).
 
 ## Validation
 
@@ -320,7 +338,14 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   of the brightest value per step; inside finite and non-black; transmittance to an occluder 2 km ahead inside the
   slab exp(-beta 2 km) within 0.7 % (depth -> distance); a near "mountain" edge through a half-resolution block: the
   occluder column T = 1.000, the sky column the slab's within 1.5 % (upsampling). (These sections run with the light
-  cache on.) Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, jittered,
+  cache on and the deterministic march; sections 8 and 10 with the jittered one - they compare the light over pinned
+  frames' means and against independent jitter's noise.) Section 9 (static clouds Task 3): a cf 0.3 layer of the thick
+  slab seen from 5 km above its top, straight down, 96 x 96 px at 30 deg; the deterministic march's 50 % background
+  transmittance contour (debug 4) vs the converged reference (jittered, fine 0.2 %, 512 coarse / 1024 max steps, 16
+  frames): farthest mismatched pixel 2 px desktop / 3 px VR from the reference's contour (limit one march pixel: 2 /
+  3 px; reference contour 342 / 333 px); without the entry bisection 3 / 5 px (RED). `render_check.gd
+  --repeat_identical=2` (VR preset, analog weather, Starbase 2024-06-15 21 UTC): two consecutive frames of the ground,
+  9 km and 20 km views bit-identical (0 of 1 440 000 pixels differ; the jittered march: 410 808). Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, jittered,
   8 frames, the view's jitter pinned alike) at every pixel of a 64 x 64 view per cascade at its scale (camera 5 / 9.9
   / 18.8 / 36.5 / 72 km up, 80-81 deg down; the farthest cloud samples asserted inside that cascade's full weight;
   error relative to max(pixel, 5 % of the view mean)), the fill at 1/16 of the voxels per frame (complete after 16
@@ -545,7 +570,13 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   1.5e7 m. A thin layer seen from afar cuts many horizontal slices of the 32 km shape tile, whose cover is not exactly
   cf: faint rings around the sub-camera point remain (the shapes' own, not aliasing). The sub-pixel offsets leave a
   fine temporal grain on broken cloud beyond f_s until the temporal mean converges (still camera: frames; a moving
-  one: the floor weight's ~23 % of one frame's noise).
+  one: the floor weight's ~23 % of one frame's noise) - with the jittered march only; the deterministic one reads the
+  footprint's centre.
+- **Deterministic march (Task 3)**: a cloud edge is binary per march pixel, so at the VR divisor 3 cumulus outlines
+  show 3-px stair steps (bilinear upsample; the jittered march's mean had soft partial-alpha edges); far cumulus
+  fields at 20-40 km show faint horizontal bands (the steps' iso-distance shells). Left to the headset check and
+  Task 10 (tent radius / divisor / steps); the VR preset's doubled steps (96 / 192, fine 1.2 %) are not yet
+  measured against the 2.5 ms budget.
 - Far field: plane-parallel independent columns (no 3D radiative effects: no lit cloud sides at a low Sun, no shadows
   cast on neighbouring columns or the ground beside them); the field's 0.25 deg grid shows as soft cells near the
   hand-over (~4 pixels per cell at 1.5e7 m).
