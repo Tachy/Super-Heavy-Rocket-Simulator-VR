@@ -92,11 +92,21 @@ column model. One path for desktop and VR.
   cloud edge moves < 1 voxel), `REFRESH_BLEND_STEP` [E], `CASCADES` (start 3: 8 / 64 / 512 km, [E] in Task 10).
 - Generations: two per cascade; the lookup cross-fades from the old to the new one over `CROSSFADE_S` [E] once the new
   one is complete; a re-anchor fills only the uncovered slab (toroidal addressing).
+- (Task 1 review, ledger ruling) No seam: the lookup blends neighbouring cascades over a band at every cascade edge, and
+  the outermost cascade into the per-sample march over a band at its edge (weight by the distance to the edge); an
+  image-pair check (the same view before / after a re-anchor, and a view across a cascade edge) shows no step above the
+  image noise.
+- (Task 1 measurements) Budget: a full fill of one 128 x 128 x 512 cascade at 96 + 32 samples costs 4.8-7.8 ms GPU -
+  the per-frame voxel budget keeps the fill <= 0.5 ms per frame [E] (inside the 2.5 ms p99, spec decision 6); far
+  cascades may use fewer vertical voxels / samples where their tolerance allows (measure against cloud_check case 8 at
+  their scale); VRAM of all cascades x 2 generations <= 128 MB [E] (R16F if the tolerance holds).
 
 - [ ] **Step 1: Tests** (`cloud_light_cache_test.gd`): a camera moving 1 km inside the central part schedules nothing;
   leaving it schedules exactly the uncovered slab; the Sun turning 0.1 deg schedules nothing, 0.3 deg a full new
   generation; a clock jump re-anchors every cascade and marks them invalid (lookup returns -1 until filled); the jobs
-  of one frame never exceed the budget; a blend step above `REFRESH_BLEND_STEP` schedules a refill.
+  of one frame never exceed the budget; a blend step above `REFRESH_BLEND_STEP` schedules a refill; `cloud_check.gd`
+  case 10: the Sun's scattered light along a line of pixels crossing a cascade edge and the outer edge has no step
+  larger than the case's noise, and the same view before / after a re-anchor differs by less than the image noise.
 - [ ] **Step 2: Run, expect FAIL.**
 - [ ] **Step 3: Implement** the schedule, cascades, slabs, generations and the shader's cascade / generation lookup.
 - [ ] **Step 4: Run** the new test, `cloud_check.gd` (case 8 with 3 cascades and a budget of 1/16 of the voxels per
