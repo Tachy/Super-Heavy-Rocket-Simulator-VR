@@ -281,6 +281,10 @@ cloud_ice_origin={
 "type": "vec3",
 "value": Vector3(0, 0, 0)
 }
+cloud_stratiform_origin={
+"type": "vec3",
+"value": Vector3(0, 0, 0)
+}
 cloud_light_march={
 "type": "vec4",
 "value": Vector4(20, 2, 6000, 0)

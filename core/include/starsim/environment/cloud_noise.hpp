@@ -22,12 +22,20 @@
 // to hundreds of km with the area-perimeter dimension D = 1.35 (constants.hpp cloud_perimeter_fractal_dimension, Lovejoy
 // 1982). The level sets of a fractional Brownian field of Hurst exponent H have dimension 2 - H, so the shape value
 // continues as fBm with H = 2 - D = 0.65 below the shape texture: the value the coverage rule thresholds is
-//   v = s + sum_k a_k (d_k - detail_mean),  k = 0 .. cloud_detail_levels - 1,
+//   v = s + e(P),  P = sum_k a_k (d_k - detail_mean),  k = 0 .. cloud_detail_levels - 1,
+// e(P) = P for P < 0, cloud_detail_lift x P above (cloud_detail_erosion),
 // s the filtered shape R, d_k the detail value at the isotropic tile T_k = cloud_detail_tile_m / 4^k (cells of T_k / 2
 // to T_k / 8: 500 m down to 8 m), a_k = A 4^(-H k) (the fBm gain per factor 4 in scale). A continues the shape's own
 // spectrum: the horizontal increment variance of v at the lag cloud_detail_join_lag_m equals the shape's at its finest
 // Perlin period r0 = 500 m scaled by fBm, Var(r0) (r / r0)^(2H) (increment variances of independent parts add), times
-// cloud_detail_amplitude_calibration (the measured perimeter dimension is D = 1.35 with it).
+// cloud_detail_amplitude_calibration (calibration below).
+// Erosion (task 5 of the static-clouds plan, user 2026-10-26: each cumulus is ONE connected body): the detail lowers
+// the value at full strength but lifts it by only a quarter, so it erodes the shape's bodies from their rims inward and
+// lifts few beads beside them. The shape's low octaves decide where a cloud is (its lobes, the cauliflower); the tables
+// below are those of this value, so the covered fraction and the water stay. Measured (test_cloud_optics "A cumulus is
+// one connected body": a 1.5 km cumulus layer at cf 0.3, detail level 0 / all levels): the signed detail P left
+// 0.46 % / 0.48 % of the cloud volume in fragments under (200 m)^3 and 1.25 % / 1.89 % of the top view; e(P) 0.07 % /
+// 0.09 % and 0.52 % / 0.49 %, perimeter dimension D = 1.291.
 // Band limit: an octave finer than the pixel aliases, so level k has the weight
 //   w_k = clamp(log2(l_k / f) - 1, 0, 1),  l_k = T_k / 4 (its middle cell), f the pixel footprint [m]
 // (full where the middle cell spans >= 4 pixels, none at <= 2); the levels fade finest first and never overlap, so
@@ -49,7 +57,8 @@
 // zero where e <= 0 (the covered area fraction stays cf), full in the cloud's interior. The edge width varies along the
 // perimeter (constants.hpp cloud_edge_width_min_m .. _max_m, log-uniform by the width noise n of the shape's A channel):
 //   w(n) = w_min (w_max / w_min)^n,
-// w_min / w_max the median horizontal increment of v (all levels) over those widths (the value change across the zone).
+// w_min / w_max the median horizontal increment of the signed s + P (all levels) over those widths (the value change
+// across a rim; the eroded v is flat where P is cut, its median would make every edge ~2.7 x steeper).
 // Wide zones are the wispy fringes of thin, gradual transmittance, narrow ones the sharp cauliflower edges.
 // m[L](cf) = E[ramp((v - t[L](cf)) / w(n))] over the joint (v, n) distribution of the state (binned at 1/2048 x 1/16),
 // <= cf: the mean over the cell is the field's grid mean at every state and edge width (the "alpha" at the edge is real
@@ -95,11 +104,52 @@ inline constexpr double cloud_detail_level_ratio = 4.0;
 // Lag where the detail amplitude A joins the shape's spectrum (header): the middle of the detail scales.
 inline constexpr double cloud_detail_join_lag_m = 62.5;
 // [calibrated] Factor on the spectral continuation of A (header): D = 2 - H holds for Gaussian fields; the Worley
-// octaves are not Gaussian, and the continuation alone gives perimeters of D = 1.22 (x 1.5: 1.27, x 2: 1.31, x 2.5:
-// 1.350, x 3: 1.37; box counting of test_cloud_optics "Cloud perimeters have the observed fractal dimension"). The
-// factor makes the measured D Lovejoy's 1.35 - calibrated on the observable, not on a look.
+// octaves are not Gaussian. With the signed detail the continuation alone gave perimeters of D = 1.22 (x 2.5: 1.350);
+// the erosion (header) removes most of the rims' outward bumps: x 2.5 gives D = 1.291 with cloud_detail_lift 0.25
+// (1.267 with erosion only; box counting of test_cloud_optics "Cloud perimeters have the observed fractal dimension"),
+// inside the test's 1.25 .. 1.45. Larger factors steepen the state-0 edge widths (the signed increments): x 3 broke
+// the base contour of cloud_check section 9 (VR 6 px vs 3) - calibrated on the observables, not on a look.
 inline constexpr double cloud_detail_amplitude_calibration = 2.5;
 inline constexpr int cloud_detail_states = cloud_detail_levels + 1;
+// [E] Share of the detail's upward part that is kept (header, erosion): 0 would leave the rims where the detail
+// points up on the shape's own gradient alone (soft, the edge widths in metres not met); a quarter keeps them crisp
+// while lifting few beads.
+inline constexpr double cloud_detail_lift = 0.25;
+// The detail's contribution to the shape value for its signed sum P (header): P below 0, cloud_detail_lift x P above.
+inline constexpr double cloud_detail_erosion(double p) { return p < 0.0 ? p : cloud_detail_lift * p; }
+
+// Cloud types (spec decision 5; ERA5 / GFS carry none, so the type follows from the layer data at the point): ice-
+// dominated cloud is cirrus (thin sheets: the shape tile cloud_ice_tile_vertical_m high, no fibre direction - the
+// snapshot has no wind, user decision 2026-10-25); a deck (cloud fraction >= cloud_stratiform_fraction that does not
+// thicken upward) is stratiform (stratus / stratocumulus: the shape tile stretched horizontally by
+// cloud_stratiform_stretch - a flat sheet with an undulating top and few, wide gaps); everything else is cumulus (the
+// shape tile itself, its low octaves' lobes, eroded from the rim by the detail). The stretches are affine maps of the
+// shape coordinates, the detail stays isotropic: the value statistics and so the coverage and water tables are the
+// same for every type (test "Coverage and water are kept for every cloud type").
+// [E] Ice share of the extinction above which the cloud is cirrus: the majority phase.
+inline constexpr double cloud_cirrus_ice_share = 0.5;
+// [E] Cloud fraction from which a layer is a deck: stratus / stratocumulus cover their grid cell almost fully (broken
+// cumulus fields stay below; the 0.9 of the spec).
+inline constexpr double cloud_stratiform_fraction = 0.9;
+// [E] Horizontal stretch of the stratiform shape tile: 4 x 32 km across at the cumulus tile's 16 km height - features
+// 8 x wider than deep (decks are an order of magnitude wider than thick; their gaps are kilometres wide).
+inline constexpr double cloud_stratiform_stretch = 4.0;
+// [E] Vertical shape tile of cirrus (the shader's CLOUD_ICE_TILE_V_M): 2 km instead of 16 (cirrus and altostratus are
+// layered, often a few hundred metres thick).
+inline constexpr double cloud_ice_tile_vertical_m = 2000.0;
+
+enum class CloudType { Cumulus, Stratiform, Cirrus };
+
+// The type at a point (above): fraction the cloud fraction of the point's layer, fraction_above that of the layer
+// above, ice_share the ice share of the extinction. height_above_ground_m is part of the interface for the base rules
+// (spec decisions 1-2: no cumulus at the ground) and not used by the type rule itself.
+CloudType cloud_type_of(double fraction, double fraction_above, double ice_share, double height_above_ground_m);
+
+struct CloudNoise;
+
+// The shape texel coordinates of the isotropic position [m] for the type's tile (cumulus: the shape tile; stratiform:
+// stretched horizontally; cirrus: the ice tile).
+math::Vec3 cloud_shape_texel(const CloudNoise& noise, CloudType type, const math::Vec3& position_m);
 // [E] Shape prefilter (header): the start footprint f_s - the largest that still filters the Earth seen from the
 // scaled-space limit fully (fully filtered from 2 f_s; there the march pixel is >= 7 km: 8 600 km at 8e-4 rad and
 // more), above the footprints from the ground and an ascent below ~30 km (the farthest cloud sample ~1 100 km away at

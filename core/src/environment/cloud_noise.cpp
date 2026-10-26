@@ -473,13 +473,19 @@ double detail_structure_function(const CloudNoise& noise, double lag_tiles) {
     });
 }
 
-// The fractal shape value of all levels at a position [m].
+// The shape value with the signed detail of all levels, s + P (header), at a position [m]: the value change across a
+// rim. The erosion e(P) is flattened wherever P > 0, which would cut the median increment and steepen every edge
+// (the widths in metres are what the header defines; the base contour of cloud_check section 9 failed with them).
 double full_shape_value(const CloudNoise& noise, const math::Vec3& position_m) {
-    const double s = trilinear4(noise.shape_rgba, noise.shape_size, shape_texel_of(noise, position_m))[0];
-    return cloud_shape_value(noise, s, position_m, cloud_detail_levels);
+    double v = trilinear4(noise.shape_rgba, noise.shape_size, shape_texel_of(noise, position_m))[0];
+    for (int k = 0; k < cloud_detail_levels; ++k) {
+        v += noise.level_amplitude[static_cast<std::size_t>(k)] *
+             (cloud_detail_value(noise, position_m / detail_tile_of_level(k)) - noise.detail_mean);
+    }
+    return v;
 }
 
-// Median |v(p + lag e) - v(p)| of the fractal value of all levels (the edge widths, header).
+// Median |v(p + lag e) - v(p)| of the signed value s + P of all levels (the edge widths, header).
 double median_increment(const CloudNoise& noise, double lag_m) {
     std::vector<float> values(static_cast<std::size_t>(increment_pairs));
     detail::for_each_row(composite_chunks, [&](int chunk) {
@@ -534,12 +540,13 @@ CompositeHistograms composite_histograms(const CloudNoise& noise) {
                             trilinear4(noise.shape_rgba, n, shape_texel_of(noise, position_m));
                         const std::size_t width_bin = std::min<std::size_t>(
                             joint_width_bins - 1, static_cast<std::size_t>(shape[3] * joint_width_bins));
-                        double v = shape[0];
+                        double v = shape[0], p = 0.0;
                         for (int state = 0; state < cloud_detail_states; ++state) {
                             if (state > 0) {
                                 const int k = state - 1;
-                                v += noise.level_amplitude[static_cast<std::size_t>(k)] *
+                                p += noise.level_amplitude[static_cast<std::size_t>(k)] *
                                      (cloud_detail_value(noise, position_m / detail_tile_of_level(k)) - noise.detail_mean);
+                                v = shape[0] + cloud_detail_erosion(p);  // erosion only (header)
                             }
                             const double u = v - h.lo;
                             const std::size_t fb = std::min(h.fine_bins - 1, static_cast<std::size_t>(u * composite_bins_per_unit));
@@ -764,14 +771,28 @@ double cloud_detail_value(const CloudNoise& noise, const math::Vec3& tile) {
 
 double cloud_shape_value(const CloudNoise& noise, double shape_value, const math::Vec3& position_m,
                          double detail_state) {
-    double v = shape_value;
+    double p = 0.0;
     for (int k = 0; k < cloud_detail_levels; ++k) {
         const double w = std::clamp(detail_state - k, 0.0, 1.0);
         if (w <= 0.0) break;
-        v += w * noise.level_amplitude[static_cast<std::size_t>(k)] *
+        p += w * noise.level_amplitude[static_cast<std::size_t>(k)] *
              (cloud_detail_value(noise, position_m / detail_tile_of_level(k)) - noise.detail_mean);
     }
-    return v;
+    return shape_value + cloud_detail_erosion(p);  // erosion only (header)
+}
+
+CloudType cloud_type_of(double fraction, double fraction_above, double ice_share, double /*height_above_ground_m*/) {
+    if (ice_share > cloud_cirrus_ice_share) return CloudType::Cirrus;
+    if (fraction >= cloud_stratiform_fraction && !(fraction_above > fraction)) return CloudType::Stratiform;
+    return CloudType::Cumulus;
+}
+
+math::Vec3 cloud_shape_texel(const CloudNoise& noise, CloudType type, const math::Vec3& position_m) {
+    const double n = noise.shape_size;
+    const double stretch = type == CloudType::Stratiform ? cloud_stratiform_stretch : 1.0;
+    const double across_m = cloud_shape_tile_horizontal_m * stretch;
+    const double up_m = type == CloudType::Cirrus ? cloud_ice_tile_vertical_m : cloud_shape_tile_vertical_m;
+    return {position_m.x * n / across_m, position_m.y * n / across_m, position_m.z * n / up_m};
 }
 
 double cloud_coverage_threshold(const CloudNoise& noise, double detail_state, int code) {

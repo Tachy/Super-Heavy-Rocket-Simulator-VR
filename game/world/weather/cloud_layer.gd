@@ -37,12 +37,13 @@ const LIGHT_PUSH_STEP := 0.01
 ## scaled-space Earth draws them (World switches it to earth_clouds.gdshader while far_enabled; cloud_far.gdshaderinc,
 ## Task 10). One limit, so exactly one of the two is drawn.
 const RAYMARCH_MAX_DISTANCE_M := CelestialBody.SCALED_SPACE_DISTANCE_M
-## The shape, ice-sheet and level-0 detail tiles (m): the same numbers as CLOUD_SHAPE_TILE_H_M / _V_M,
-## CLOUD_ICE_TILE_V_M and CLOUD_DETAIL_TILE_M in shaders/clouds.gdshaderinc (the camera's noise coordinates are formed
-## here in float64).
+## The shape, ice-sheet and level-0 detail tiles (m) and the stratiform stretch: the same numbers as
+## CLOUD_SHAPE_TILE_H_M / _V_M, CLOUD_ICE_TILE_V_M, CLOUD_DETAIL_TILE_M and CLOUD_STRATIFORM_STRETCH in
+## shaders/clouds.gdshaderinc (the camera's noise coordinates are formed here in float64).
 const SHAPE_TILE_H_M := 32000.0
 const SHAPE_TILE_V_M := 16000.0
 const ICE_TILE_V_M := 2000.0
+const STRATIFORM_STRETCH := 4.0
 const DETAIL_TILE_M := 1000.0
 const WGS84_A_M := 6378137.0
 ## a / b of WGS84 (the model space's polar stretch, as Atmosphere.POLAR_STRETCH).
@@ -302,8 +303,10 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	var stretched := Vector3(camera_fixed_m.x, camera_fixed_m.y, camera_fixed_m.z * POLAR_STRETCH)
 	var height := stretched.length() - WGS84_A_M
 	ShaderGlobals.set_value(&"cloud_camera_height_m", height)
-	ShaderGlobals.set_value(&"cloud_noise_origin", _shape_origin(camera_render, height, SHAPE_TILE_V_M))
-	ShaderGlobals.set_value(&"cloud_ice_origin", _shape_origin(camera_render, height, ICE_TILE_V_M))
+	ShaderGlobals.set_value(&"cloud_noise_origin", _shape_origin(camera_render, height, SHAPE_TILE_H_M, SHAPE_TILE_V_M))
+	ShaderGlobals.set_value(&"cloud_ice_origin", _shape_origin(camera_render, height, SHAPE_TILE_H_M, ICE_TILE_V_M))
+	ShaderGlobals.set_value(&"cloud_stratiform_origin",
+			_shape_origin(camera_render, height, SHAPE_TILE_H_M * STRATIFORM_STRETCH, SHAPE_TILE_V_M))
 	ShaderGlobals.set_value(&"cloud_detail_origin", _wrap(camera_render / DETAIL_TILE_M))
 	var visible_weight := (1.0 - _w1) * float(_slots[0]["id"] != "") + _w1 * float(_slots[1]["id"] != "")
 	var near := camera_fixed_m.length() < RAYMARCH_MAX_DISTANCE_M
@@ -412,10 +415,11 @@ static func _horizontal(v: Vector3, up: Vector3) -> float:
 	return (v - up * v.dot(up)).length()
 
 
-## Shape coordinates of the camera for the vertical tile tile_v_m (clouds.gdshaderinc cloud_shape_coordinates_for).
-static func _shape_origin(camera_render: Vector3, height: float, tile_v_m: float) -> Vector3:
-	var k := 1.0 / tile_v_m - 1.0 / SHAPE_TILE_H_M
-	return _wrap(camera_render / SHAPE_TILE_H_M + camera_render.normalized() * (height * k))
+## Shape coordinates of the camera for the tiles tile_h_m across and tile_v_m up (clouds.gdshaderinc
+## cloud_shape_coordinates_for).
+static func _shape_origin(camera_render: Vector3, height: float, tile_h_m: float, tile_v_m: float) -> Vector3:
+	var k := 1.0 / tile_v_m - 1.0 / tile_h_m
+	return _wrap(camera_render / tile_h_m + camera_render.normalized() * (height * k))
 
 
 # ---------------------------------------------------------------------------------------------------------------------

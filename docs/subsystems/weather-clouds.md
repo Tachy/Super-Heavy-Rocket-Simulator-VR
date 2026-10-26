@@ -20,24 +20,41 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   (50 m transition, `cloud_base_transition_m` [E]) in the middle of the gap, partly so where cloud only thickens upward;
   thinning upward keeps the linear taper (the covered area shrinks: rounded tops). The term integrates to zero over the
   gap: water path and cloud amount are the field's.
-- **Fractal shapes** (`cloud_noise.hpp`, fix round 1): cloud perimeters are fractal with the area-perimeter dimension
-  D = 1.35 (Lovejoy 1982, `cloud_perimeter_fractal_dimension`). The thresholded value is v = s + sum_k w_k a_k (d_k -
-  mean): the shape noise's R (trilinear, no mipmaps; its Perlin octaves with the fBm gain 2^-H, H = 2 - D) plus three
-  detail levels (isotropic tiles 1000 / 250 / 62.5 m, cells 500 m down to 8 m; single Worley octaves with gain 2^-H,
-  a_k = A 4^(-H k)). A continues the shape's increment spectrum at 62.5 m, times a factor calibrated on the observable
-  (`cloud_detail_amplitude_calibration` 2.5: the Worley octaves are not Gaussian, D = 2 - H alone gave D = 1.22; with
-  it the box-counted D is 1.350). Each level is band-limited by the pixel footprint f (w_k = clamp(log2(l_k / f) - 1,
-  0, 1), l_k the level's middle cell; the march pixel's angle comes per view): an octave below the pixel enters with
-  its mean, so silhouettes stay irregular down to the pixel at every distance. Tables per detail state L = sum w_k
-  (256 x 4, linear between rows): thresholds t[L](cf) (covered area = cf at every state) and edge mean factors m[L].
+- **Fractal shapes, one body per cumulus** (`cloud_noise.hpp`, M8 fix round 1; erosion: static clouds Task 5): cloud
+  perimeters are fractal with the area-perimeter dimension D = 1.35 (Lovejoy 1982, `cloud_perimeter_fractal_dimension`).
+  The thresholded value is v = s + e(P), P = sum_k w_k a_k (d_k - mean), e(P) = P below 0 and 0.25 P above
+  (`cloud_detail_lift` [E], `cloud_detail_erosion`): the shape noise's R (trilinear, no mipmaps; its Perlin octaves with
+  the fBm gain 2^-H, H = 2 - D) eroded by three detail levels (isotropic tiles 1000 / 250 / 62.5 m, cells 500 m down to
+  8 m; single Worley octaves with gain 2^-H, a_k = A 4^(-H k)). The detail lowers v fully and lifts it by a quarter
+  (user 2026-10-26: each cumulus hangs together as ONE cloud): it erodes a body from its rim inward and lifts few beads
+  beside it; the shape's low octaves decide where a cloud is (lobes, cauliflower). The quarter keeps the rims where the
+  detail points up crisp (erosion only left them on the shape's slope: steepness p90 41 m). A continues the shape's
+  increment spectrum at 62.5 m, times a factor calibrated on the observables (`cloud_detail_amplitude_calibration` 2.5:
+  box-counted D = 1.291, test range 1.25-1.45; x 3 broke the cloud_check base contour). Measured on a 1.5 km cumulus
+  layer at cf 0.3 (16 m voxels, level 0 / all levels): fragments under (200 m)^3 0.07 / 0.09 % of the volume (signed
+  detail of M8: 0.46 / 0.48 %), 0.52 / 0.49 % of the top view (1.25 / 1.89 %), holes ~1 %. Each level is band-limited by
+  the pixel footprint f (w_k = clamp(log2(l_k / f) - 1, 0, 1), l_k the level's middle cell; the march pixel's angle
+  comes per view): an octave below the pixel enters with its mean, so silhouettes stay irregular down to the pixel at
+  every distance. Tables per detail state L = sum w_k (256 x 4, linear between rows): thresholds t[L](cf) (covered area
+  = cf at every state) and edge mean factors m[L].
 - **Steep edges of varying width** (static clouds Task 4): density = mean / m[L](cf) x smoothstep((v - t) / w(n)); the
-  edge zone width varies log-uniformly between 20 and 40 m (`cloud_edge_width_min_m` / `_max_m` [E]: Katzwinkel et
-  al. 2014 inner shells; 10 m: case 9 desktop 3 px vs limit 2) by the width noise n in the shape's A channel;
-  w_min / w_max = the median increment of v over those widths (0.0207 / 0.0316). m is taken over the joint (v, n)
-  distribution: the cell mean stays the field's (0.996-1.000 at the table states, also between them). Ice-dominated cloud (the ice share)
-  mixes in the ramp of thin-sheet coordinates (vertical tile 2 km instead of 16 km [E]; no fibre direction: no wind in
-  the snapshot), the same detail. Shape tile 32 km across / 16 km high [E]; Earth-fixed, the camera's part in float64
-  on the CPU (level k's origin fract(4^k x level 0's)).
+  edge zone width varies log-uniformly between 20 and 40 m (`cloud_edge_width_min_m` / `_max_m` [E]: Katzwinkel et al.
+  2014 inner shells; 10 m: case 9 desktop 3 px vs limit 2) by the width noise n in the shape's A channel; w_min / w_max
+  = the median increment of the signed s + P over those widths (0.0207 / 0.0316; the eroded v's median, 0.0076 / 0.0137,
+  made the edges ~2.7 x steeper and failed the cloud_check base contour). m is taken over the joint (v, n) distribution:
+  the cell mean stays the field's (0.996-1.000 at the table states, also between them).
+- **Shapes by cloud type** (static clouds Task 5; `cloud_type_of` in `cloud_noise.hpp` and `clouds.gdshaderinc`):
+  ERA5 / GFS carry no type, so it follows per point from the layer data: ice share > 0.5 (`cloud_cirrus_ice_share`
+  [E]) -> cirrus: thin sheets (vertical tile `cloud_ice_tile_vertical_m` 2 km instead of 16 km [E]; no fibre
+  direction: no wind in the snapshot); the fraction of the layer centre at or below the point >= 0.9
+  (`cloud_stratiform_fraction` [E]) and not thickening toward the centre above -> stratiform: the shape tile stretched
+  horizontally by 4 (`cloud_stratiform_stretch` [E]: 128 km across at 16 km height, a flat sheet with an undulating
+  top and few, wide gaps); else cumulus (the shape tile). One shape lookup per sample at the type's coordinates (own
+  float64 origin per tile on the CPU: `cloud_noise_origin`, `cloud_ice_origin`, `cloud_stratiform_origin`); the same
+  detail and tables for every type (affine maps keep the value statistics: covered fraction and water kept per type,
+  test "Coverage and water are kept for every cloud type"). The type switches where the bracketing layer fractions
+  cross the rule (no blend; formerly the ice share mixed two ramps). Shape tile 32 km across / 16 km high [E];
+  Earth-fixed, the camera's part in float64 on the CPU (level k's origin fract(4^k x level 0's)).
 - **Shape prefilter at large pixel footprints** (Task 10 fix round 1, anti-aliasing; `cloud_noise.hpp` "Shape
   prefilter", `clouds.gdshaderinc`): the shape texture is point-sampled per ray, right while its octaves (Worley
   8 km, Perlin 4 km to 500 m) span pixels; from the scaled-space limit a march pixel is 7-27 km and the shape aliased
@@ -316,13 +333,18 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   interpolated, so clouds that overlap in the model at different horizontal places no longer add up. The test asserts
   never more than tcc + 0.05, at most 0.40 below, mean deficit < 0.2 (a limit of the data choice, `known-issues.md`).
 - Core `[weather]`: render texels (linear extinction, in-cloud depth vs trapezoids, code round trip, ice share);
-  vertical profile (flat base, water path kept exactly); covered fraction = cf within 0.003 at every detail state
-  (0.006 between rows); steep edges of varying width, 10-90 % rise inside the width (mean water / grid mean 0.991-1.005 for cf 0.05-1 at states 0, 1,
-  1.5, 3); the shape prefilter (level 0 up to f_s and continuous, the mips' box filter, level 0 = the unfiltered
-  sample and state-0 tables bit for bit; covered fraction within 0.003 and mean water / grid mean 0.995-1.007 at
-  levels 0.125-2 for cf 0.1 / 0.4 / 0.9, 4e5 random positions); perimeter fractal dimension by box counting of the cloud mask (16 km plane at 4 m, cf 0.5, boxes 8 m to
-  1024 m: D = 1.350, test 1.25-1.45, Lovejoy 1982; the shape alone 1.01); blue noise (each value equally often, 4 x 4 block-mean variance 0.18 of white
-  noise); 3D Sun light (light march unbiased within 1 %, shadow-side transmittance exp(-mean tau) within 2 % of
+  vertical profile (flat base, water path kept exactly); covered fraction = cf within 0.003 at every detail state (0.006
+  between rows); steep edges of varying width, 10-90 % rise median 8 m (< 10 m), 90th percentile 31 m (<= 40 m, the
+  width maximum) (mean water / grid mean 0.991-1.005 for cf 0.05-1 at states 0, 1, 1.5, 3); the shape prefilter (level 0
+  up to f_s and continuous, the mips' box filter, level 0 = the unfiltered sample and state-0 tables bit for bit;
+  covered fraction within 0.003 and mean water / grid mean 0.995-1.007 at levels 0.125-2 for cf 0.1 / 0.4 / 0.9, 4e5
+  random positions); perimeter fractal dimension by box counting of the cloud mask (16 km plane at 4 m, cf 0.5, boxes 8
+  m to 1024 m: D = 1.291, test 1.25-1.45, Lovejoy 1982; the shape alone 1.01); one connected body per cumulus
+  (26-connected components of a 8.2 x 8.2 x 1.5 km layer at 16 m, cf 0.3 / 0.5, states 1 / 3: fragments under (200 m)^3
+  < 0.25 % of the volume [E], measured 0.04-0.09 %; top view fragments < 1 % (0.14-0.52 %), holes < 2.5 % (0.95-1.27
+  %)); cloud types (the rule on canonical columns; covered fraction within 0.003 and water / grid mean within 1.5 % for
+  cumulus, stratiform and cirrus coordinates at states 0 / 3, cf 0.3 / 0.9); blue noise (each value equally often, 4 x 4
+  block-mean variance 0.18 of white noise); 3D Sun light (light march unbiased within 1 %, shadow-side transmittance exp(-mean tau) within 2 % of
   Beer-Lambert; sunlit flank 6.9x / 52x the shadowed one and 3.9x the column model at +10 / -3 deg Sun; a slab gives
   the column source exactly); sky source R + T = 1.
 - Core `[weather]` transfer table (`test_cloud_transfer_table.cpp`): the 42 bins of `cloud_slab_radiance_mc.csv` (Sun
