@@ -91,7 +91,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   `CloudShaderPort`, which turns their `global uniform`s into one uniform block + sampler bindings filled from
   `ShaderGlobals` - every script sets globals through `ShaderGlobals.set_value`, since
   `global_shader_parameter_get` is editor-only):
-  1. raymarch at 1/2 (desktop) or 1/4 (VR) resolution per view (the shell -0.5..20 km to the scene depth; the block's depth in a checkerboard
+  1. raymarch at 1/2 resolution (desktop) or, in VR, once in a centre view covering both eyes at 1/3 (the shell
+     -0.5..20 km to the scene depth, in VR read from the eyes' depth buffers; the block's depth in a checkerboard
      of nearest / farthest, or the block's mean when its four distances lie within 5 % (`CLOUD_ONE_SURFACE_SPREAD`
      [E]: one surface - the ground seen from far, where the nearest depth cut every other ray short of the low clouds
      by the block's depth extent, several km from 8 600 km; Task 10); coarse steps outside the field's cloudy region,
@@ -228,8 +229,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   (`CLOUD_FAR_MU_MIN` [E]). The CPU light factors stay (1, 0, 1) beyond the limit (`cloud_enabled` false; a camera
   there is far above any cloud). The earthshine on the Moon keeps the Bond albedo 0.306 (clouds included on average).
 - **Quality presets** [E]: desktop 128 coarse / 256 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 48 / 96,
-  2.5 %, 5 + 2 (Task 11: 64 / 128 before; see Performance); both 3 detail levels; resolution 1/2 desktop, 1/4 VR
-  (user 2026-10-26, VR performance plan); temporal weight floor 1/32.
+  2.5 %, 5 + 2 (Task 11: 64 / 128 before; see Performance); both 3 detail levels; resolution 1/2 desktop, 1/3 of the VR
+  centre view (VR performance plan part 2); temporal weight floor 1/32.
 
 ## Validation
 
@@ -374,7 +375,12 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   0.2-1 ms. Ground / deck / 20 km views unchanged at divisor 4, orbit cumulus fields step coarser; their hard cell edges
   exist at divisor 2 too (not the upsample's depth weight: open point). VR run: GPU 26-66 -> 13-17 ms, but in the
   headset the clouds look grainy and blurred differently per eye (user 2026-10-26): each eye marches with its own
-  jitter and history - the fix planned is one shared centre-eye march (plan 2026-10-26-vr-performance, Tasks 7-10).
+  jitter and history. Since 1ba1be7 VR marches and accumulates once in a centre view covering both eyes
+  (`CloudCentreView`, divisor 3), each eye reprojects into it at the cloud's distance (exact disparity,
+  `cloud_vr_stereo_test`) and gathers a 4 x 4 tent (soft alpha edges, the same in both eyes). VR run
+  (`perf_20261026_085348.csv`): GPU 15.2 / 18.1 / 19.5 / 15.6 / 14.4 ms pad / climb / decks / 13-60 / > 60 km, 1-2.3 ms
+  more than two eyes at divisor 4; user: kept. Open: the tent's width is fixed in screen pixels, so far clouds get the
+  same blur as near ones (looks unnatural, user 2026-10-26).
 - **Performance gate (Task 11)**: `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr` (1440p desktop proxy of
   the 90 Hz VR frame; the gate it prints: p99 <= 11 ms with clouds / 8 ms without, max <= 16 ms; 2024-04-08 18:42 eclipse
   epoch, ERA5 18:00 pinned, three runs with and three without in one session, alternating). The machine's baseline moved

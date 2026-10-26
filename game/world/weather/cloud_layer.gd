@@ -73,15 +73,15 @@ enum ScatteringModel { CLOSED_FORM, TABLE }
 ## the shapes, geometric from first_m; far samples to the cloud top through the grid mean); the detail levels used
 ## (each band-limited at the pixel footprint, cloud_noise.hpp); the cloud pass's resolution divisor and the floor of the
 ## temporal weight of a new frame (a running mean of up to 32 frames; cloud_check.gd, terrain_perf.gd measure them).
-## VR divisor 4 (user 2026-10-26): at the headset's 20 MP the march at 1/4 of a view's pixels cost 11-13 ms of GPU
-## (VR-pixel desktop proxy), at 1/16 1.4-3.2 ms; ground and deck views unchanged, cumulus fields seen from orbit step
-## coarser (docs/subsystems/vr-performance.md).
+## VR divisor 3 of the centre view (VR performance part 2): one march for both eyes over ~1.24 x one eye's width at
+## 1/9 of its pixels costs about what two eyes at divisor 4 did (1/16 each; divisor 2 per eye cost 11-13 ms of GPU at
+## the headset's 20 MP, docs/subsystems/vr-performance.md), sharper and the same in both eyes.
 const PRESETS := {
 	Quality.DESKTOP: {"steps": 128, "max_steps": 256, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
 			"temporal_weight": 1.0 / 32.0},
 	Quality.VR: {"steps": 48, "max_steps": 96, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
-			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 4,
+			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 3,
 			"temporal_weight": 1.0 / 32.0},
 }
 
