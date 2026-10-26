@@ -12,6 +12,14 @@ und Spielprüfungen).
 Ein unabhängiges Hobbyprojekt ohne Verbindung zu SpaceX. Fahrzeugnamen dienen nur dazu, die realen Systeme zu
 benennen, denen die Konfigurationen nachempfunden sind.
 
+## Wie er entstanden ist
+
+Dieser Simulator ist vollständig im Dialog mit Claude Code entstanden, im Verfahren des Agentic Engineering: Der Autor
+beschreibt Ziele, trifft die Entscheidungen und prüft die Ergebnisse – im Headset, an Bildern und an Messdaten –,
+während Claude Code plant, schreibt, testet, prüft und dokumentiert. Keine einzige Zeile Code wurde von Hand
+geschrieben oder bearbeitet. Physikkern, Numerik, Darstellung, VR-Anbindung, Tests, Datenpipeline und Release-Pakete
+sind alle aus diesem Gespräch hervorgegangen.
+
 ## Highlights
 
 **Von der Startrampe zum Mond und zurück, geflogen vom Bordrechner**

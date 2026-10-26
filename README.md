@@ -11,6 +11,13 @@ in the simulation core, plus GPU and game checks).
 An independent hobby project. It is not affiliated with, endorsed by or connected to SpaceX; vehicle names are
 used only to identify the real-world systems the configurations approximate.
 
+## How it was built
+
+This simulator was created entirely in dialogue with Claude Code, by agentic engineering: the author describes goals,
+makes the decisions and checks the results - in the headset, on images and against measured data - while Claude Code
+plans, writes, tests, reviews and documents. Not a single line of code was written or edited by hand. Physics core,
+numerics, rendering, VR integration, tests, data pipeline and release packaging all came out of that conversation.
+
 ## Highlights
 
 **From the pad to the Moon and back, flown by the onboard computer**
