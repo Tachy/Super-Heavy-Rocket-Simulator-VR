@@ -20,7 +20,10 @@
 // height). Horizontally the hardware filters bilinearly; vertically the two centres around a point are fetched apart
 // and joined by the vertical profile rule (cloud_profile_value: flat bases, the water path kept); below the centre of
 // layer 0 and above that of layer 31 the end values hold (the core's at()), zero above 20 km. The two snapshots may
-// differ in size (the 1-deg analog beside a 0.25-deg ERA5 hour).
+// differ in size (the 1-deg analog beside a 0.25-deg ERA5 hour). Cloud bases at the lifting condensation level
+// (cloud_lcl_cut; static clouds Task 7): the snapshot build has moved a column's boundary-layer condensate above its
+// level; the fraction and the extinction are also cut with a ramp of CLOUD_LCL_RAMP_M over the level's flat base (the
+// column texture's layer 0), so cumulus bases are flat and sharp and nothing hangs below them.
 //
 // Sub-grid shapes (cloud_noise.hpp): the fractal value v = s + sum_k e_k(w_k a_k (d_k - mean(d))) - the shape
 // noise's R channel s, sampled TRILINEARLY WITHOUT MIPMAPS (what the tables assume), eroded by the detail levels k
@@ -59,6 +62,10 @@ global uniform sampler3D cloud_field_before : filter_linear, repeat_enable;
 global uniform sampler3D cloud_field_after : filter_linear, repeat_enable;
 global uniform sampler3D cloud_ice_before : filter_linear, repeat_enable;
 global uniform sampler3D cloud_ice_after : filter_linear, repeat_enable;
+// The column texture (RGBA8, core cloud_render_column_texels): the light under the clouds (R depth, G cover per layer)
+// and in layer 0 the cloud base at the lifting condensation level (B, A). Read with texelFetch.
+global uniform sampler3D cloud_column_before : filter_nearest, repeat_enable;
+global uniform sampler3D cloud_column_after : filter_nearest, repeat_enable;
 global uniform vec3 cloud_field_before_size;  // (columns, rows, layers)
 global uniform vec3 cloud_field_after_size;
 global uniform float cloud_blend;  // weight of cloud_field_after
@@ -157,6 +164,13 @@ const float CLOUD_OVERLAP_SLANT = 0.21;
 const float CLOUD_OVERLAP_ONSET_COT = 1.8;
 // Base transition of the vertical profile rule (core constants.hpp cloud_base_transition_m).
 const float CLOUD_BASE_TRANSITION_M = 50.0;
+// The flat cloud base at the lifting condensation level (core constants.hpp cloud_lcl_ramp_m, cloud_render_texels.hpp
+// encode_cloud_lcl_base): the ramp from no cloud to the cloud, the 16-bit base code's offset and span, and the height
+// above which no base can lie (highest ground 6 km + cloud_boundary_layer_top_m + the ramp, rounded up: no fetch above).
+const float CLOUD_LCL_RAMP_M = 30.0;
+const float CLOUD_LCL_CODE_OFFSET_M = 500.0;
+const float CLOUD_LCL_CODE_SPAN_M = 21000.0;
+const float CLOUD_LCL_CUT_TOP_M = 9500.0;
 // The entry-surface cosine (core cloud_optics.cpp): regulariser and smallest cosine.
 const float CLOUD_ENTRY_REGULARISER = 1.0;
 const float CLOUD_ENTRY_COSINE_MIN = 0.02;
@@ -273,8 +287,41 @@ float cloud_stratiform_weight(float fraction, float fraction_above) {
 	return deck * (1.0 - smoothstep(0.0, CLOUD_STRATIFORM_THICKENING_BAND, fraction_above - fraction));
 }
 
+// The share of the cloud left at height_m over the flat base of each of the four columns around (lat, lon), mixed
+// bilinearly like the field's own values (core cloud_lcl_cut_factor per column): a column without a base (fog, unknown
+// level, no boundary-layer cloud: code 0) is not cut. The base is read from the column texture's layer 0 (B high byte,
+// A low byte of the 16-bit code), nearest texels.
+float cloud_lcl_cut(sampler3D column, vec3 size, vec2 lat_lon, float height_m) {
+	if (height_m > CLOUD_LCL_CUT_TOP_M) {
+		return 1.0;
+	}
+	float x = lat_lon.y / (2.0 * CLOUD_PI) * size.x;  // column c's centre at longitude c x 360 / columns
+	float y = clamp((0.5 * CLOUD_PI - lat_lon.x) / (CLOUD_PI / (size.y - 1.0)), 0.0, size.y - 1.0);
+	float x0 = floor(x);
+	float y0 = min(floor(y), size.y - 2.0);
+	vec2 f = vec2(x - x0, y - y0);
+	int columns = int(size.x);
+	int c0 = int(mod(x0, size.x));
+	int c1 = c0 + 1 < columns ? c0 + 1 : 0;
+	int r0 = int(y0);
+	vec4 codes = vec4(0.0);
+	vec4 t = texelFetch(column, ivec3(c0, r0, 0), 0);
+	codes.x = floor(t.b * 255.0 + 0.5) * 256.0 + floor(t.a * 255.0 + 0.5);
+	t = texelFetch(column, ivec3(c1, r0, 0), 0);
+	codes.y = floor(t.b * 255.0 + 0.5) * 256.0 + floor(t.a * 255.0 + 0.5);
+	t = texelFetch(column, ivec3(c0, r0 + 1, 0), 0);
+	codes.z = floor(t.b * 255.0 + 0.5) * 256.0 + floor(t.a * 255.0 + 0.5);
+	t = texelFetch(column, ivec3(c1, r0 + 1, 0), 0);
+	codes.w = floor(t.b * 255.0 + 0.5) * 256.0 + floor(t.a * 255.0 + 0.5);
+	vec4 bases = (codes - 1.0) / 65534.0 * CLOUD_LCL_CODE_SPAN_M - CLOUD_LCL_CODE_OFFSET_M;
+	vec4 cut = clamp((vec4(height_m) - bases) / CLOUD_LCL_RAMP_M, 0.0, 1.0);
+	cut = mix(vec4(1.0), cut, step(0.5, codes));  // code 0: no base, no cut
+	return mix(mix(cut.x, cut.y, f.x), mix(cut.z, cut.w, f.x), f.y);
+}
+
 // One snapshot at a point: the centres k (below) and k + 1 (above) around layer coordinate s = layer - 0.5.
-CloudCell cloud_snapshot_cell(sampler3D field, sampler3D ice_share, vec3 size, vec2 lat_lon, float height_m) {
+CloudCell cloud_snapshot_cell(sampler3D field, sampler3D ice_share, sampler3D column, vec3 size, vec2 lat_lon,
+		float height_m) {
 	float s = cloud_layer_coordinate(height_m) - 0.5;
 	float k = clamp(floor(s), 0.0, CLOUD_LAYERS - 2.0);
 	float x = clamp(s - k, 0.0, 1.0);  // below centre 0: x = 0 (the end value); above centre 31: x = 1
@@ -286,6 +333,9 @@ CloudCell cloud_snapshot_cell(sampler3D field, sampler3D ice_share, vec3 size, v
 	CloudCell c;
 	c.fraction = cloud_profile_value(below.r, above.r, below.r, above.r, x, gap);
 	c.extinction = cloud_profile_value(beta_b, beta_a, below.r, above.r, x, gap);
+	float lcl_cut = cloud_lcl_cut(column, size, lat_lon, height_m);  // the flat base at the lifting condensation level
+	c.fraction *= lcl_cut;
+	c.extinction *= lcl_cut;
 	c.ice = texture(ice_share, cloud_field_uvw(lat_lon, clamp(s, 0.0, CLOUD_LAYERS - 1.0), size)).r;
 	// The stratiform weight of the centres k and k + 1 weighted by (1 - x) and x times their fractions (core
 	// cloud_stratiform_weight_between; continuous through the centres); centre k + 1's needs the fraction of k + 2 -
@@ -322,8 +372,8 @@ CloudCell cloud_field(vec2 lat_lon, float height_m) {
 		return c;
 	}
 	if (cloud_blend < 1.0) {
-		CloudCell b = cloud_snapshot_cell(cloud_field_before, cloud_ice_before, cloud_field_before_size, lat_lon,
-				height_m);
+		CloudCell b = cloud_snapshot_cell(cloud_field_before, cloud_ice_before, cloud_column_before,
+				cloud_field_before_size, lat_lon, height_m);
 		float w = 1.0 - cloud_blend;
 		c.fraction += w * b.fraction;
 		c.extinction += w * b.extinction;
@@ -333,8 +383,8 @@ CloudCell cloud_field(vec2 lat_lon, float height_m) {
 		c.in_cloud_above += w * b.in_cloud_above;
 	}
 	if (cloud_blend > 0.0) {
-		CloudCell a = cloud_snapshot_cell(cloud_field_after, cloud_ice_after, cloud_field_after_size, lat_lon,
-				height_m);
+		CloudCell a = cloud_snapshot_cell(cloud_field_after, cloud_ice_after, cloud_column_after,
+				cloud_field_after_size, lat_lon, height_m);
 		c.fraction += cloud_blend * a.fraction;
 		c.extinction += cloud_blend * a.extinction;
 		c.ice += cloud_blend * a.ice;
@@ -856,8 +906,6 @@ float cloud_sky_scattering_source(float view_up_cos, float depth_from_top, float
 // texture's largest cloud fraction above the centre and the point's fraction (maximum overlap). Independent columns:
 // clear on 1 - C, the depth / C on C (no plane-parallel bias for broken cloud). The sky's diffuse transmittance is
 // 1 - C + C x the two-stream one, the Sun's diffuse light C x (the Monte Carlo slab's total - its direct part).
-global uniform sampler3D cloud_column_before : filter_nearest, repeat_enable;
-global uniform sampler3D cloud_column_after : filter_nearest, repeat_enable;
 // The slab's total beam transmittance (core CloudSlabTransmittanceLut): x = depth node, y = cosine node.
 global uniform sampler2D cloud_slab_transmittance : filter_linear, repeat_disable;
 // (depth scale, ln depth ratio, depth max, cosine min); x <= 0: no table (delta-Eddington's diffuse T stands in).
@@ -876,12 +924,11 @@ vec2 cloud_column_texel(sampler3D column, vec3 size, vec2 lat_lon, float layer) 
 	int c1 = c0 + 1 < columns ? c0 + 1 : 0;
 	int r0 = int(y0);
 	int z = int(layer);
-	// The RG8 volume reaches Godot shaders as luminance-alpha (Texture3DRD maps R8G8 to LA8: swizzle R, R, R, G), so
-	// the cover is in .a (Godot shaders only; the compute kernels do not read this texture).
-	vec2 t00 = texelFetch(column, ivec3(c0, r0, z), 0).ra;
-	vec2 t10 = texelFetch(column, ivec3(c1, r0, z), 0).ra;
-	vec2 t01 = texelFetch(column, ivec3(c0, r0 + 1, z), 0).ra;
-	vec2 t11 = texelFetch(column, ivec3(c1, r0 + 1, z), 0).ra;
+	// RGBA8: R the depth code, G the cover (the cloud base in B, A: cloud_lcl_cut).
+	vec2 t00 = texelFetch(column, ivec3(c0, r0, z), 0).rg;
+	vec2 t10 = texelFetch(column, ivec3(c1, r0, z), 0).rg;
+	vec2 t01 = texelFetch(column, ivec3(c0, r0 + 1, z), 0).rg;
+	vec2 t11 = texelFetch(column, ivec3(c1, r0 + 1, z), 0).rg;
 	vec2 d00 = vec2(cloud_decode_depth(t00.x), t00.y);
 	vec2 d10 = vec2(cloud_decode_depth(t10.x), t10.y);
 	vec2 d01 = vec2(cloud_decode_depth(t01.x), t01.y);

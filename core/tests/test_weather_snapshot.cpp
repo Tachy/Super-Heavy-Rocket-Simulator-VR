@@ -3,6 +3,7 @@
 // GFS column, 2026-09-20 00Z f006), written by tools/validation/gen_weather_fixtures.py.
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -567,10 +568,10 @@ TEST_CASE("A built snapshot stores the lifting condensation level per column", "
     // Downsampling averages it like the ground.
     const auto coarse = snapshot.downsampled(4);
     CHECK(coarse.lcl_m(1, 0) > 0.0f);
-    // Without the 2 m fields the level is unknown (0).
+    // Without the 2 m fields the level is unknown, which is not the saturated 0.
     const auto bare = WeatherSnapshot::from_era5(
         era5_id(), era5_fields(rows, columns, [&](int, int) -> const Era5Column& { return cols[0]; }), coarse_geoid());
-    CHECK(bare.lcl_m(2, 3) == 0.0f);
+    CHECK(bare.lcl_m(2, 3) == weather_lcl_unknown_m);
     // Only one of the pair, or a wrong shape, is refused.
     auto half = fields;
     half.dewpoint_2m_k = FloatGrid{};
@@ -584,6 +585,19 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     write_weather_snapshot(file, snapshot);
     REQUIRE(read_weather_snapshot(file).has_value());
     auto bytes = read_bytes(file);
+    {  // a complete file of the current layout stamped version 2 is refused as well
+        auto v2 = bytes;
+        const std::uint32_t old_version = 2;
+        std::memcpy(v2.data() + 8, &old_version, sizeof(old_version));
+        v2.resize(v2.size() - sizeof(std::uint64_t));
+        std::uint64_t h = 14695981039346656037ull;
+        for (char b : v2) h = (h ^ static_cast<unsigned char>(b)) * 1099511628211ull;
+        v2.insert(v2.end(), reinterpret_cast<const char*>(&h), reinterpret_cast<const char*>(&h) + sizeof(h));
+        const auto v2_file = unique_temp("weather_v2_old");
+        write_bytes(v2_file, v2);
+        CHECK_FALSE(read_weather_snapshot(v2_file).has_value());
+        std::filesystem::remove(v2_file);
+    }
     // The version 1 layout: no LCL block after the ground heights; header of 64 bytes; checksum recomputed (FNV-1a 64).
     const std::size_t cells = static_cast<std::size_t>(rows) * columns, header = 64;
     bytes.erase(bytes.begin() + static_cast<std::ptrdiff_t>(header + cells * sizeof(float)),
@@ -598,8 +612,8 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     write_bytes(old, bytes);
     CHECK_FALSE(read_weather_snapshot(old).has_value());
     // The same bytes with the right version number (and the missing block) are not a valid version 2 file either.
-    const std::uint32_t two = weather_snapshot_file_version;
-    CHECK(two == 2);
+    const std::uint32_t two = 2;
+    CHECK(weather_snapshot_file_version == 3);  // version 2 stored unknown levels as 0 and had no base redistribution
     std::memcpy(bytes.data() + 8, &two, sizeof(two));
     bytes.resize(bytes.size() - sizeof(std::uint64_t));
     hash = 14695981039346656037ull;
@@ -636,7 +650,7 @@ namespace {
 struct PlausibilityColumn {
     std::string name, time_utc;
     double surface_pressure_pa = 0, surface_geopotential_m2_s2 = 0, total_column_water_vapour_kg_m2 = 0, total_cloud_cover = 0,
-           cloud_base_height_m = 0;
+           cloud_base_height_m = 0, temperature_2m_k = 0, dewpoint_2m_k = 0;
     std::vector<double> temperature_k, cloud_fraction, liquid, ice;
 };
 
@@ -657,6 +671,8 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
         col.total_column_water_vapour_kg_m2 = c["total_column_water_vapour_kg_m2"].value<double>().value();
         col.total_cloud_cover = c["total_cloud_cover"].value<double>().value();
         col.cloud_base_height_m = c["cloud_base_height_m"].value<double>().value();
+        col.temperature_2m_k = c["temperature_2m_k"].value<double>().value();
+        col.dewpoint_2m_k = c["dewpoint_2m_k"].value<double>().value();
         col.temperature_k = doubles(c["temperature_k"]);
         col.cloud_fraction = doubles(c["cloud_fraction"]);
         col.liquid = doubles(c["liquid_kg_kg"]);
@@ -673,9 +689,12 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
         f.levels_pa = levels_pa;
         f.cloud_fraction = f.liquid_kg_kg = f.ice_kg_kg = f.temperature_k = grid(levels, rows, columns);
         f.surface_pressure_pa = f.surface_geopotential_m2_s2 = f.total_column_water_vapour_kg_m2 = grid(1, rows, columns);
+        f.temperature_2m_k = f.dewpoint_2m_k = grid(1, rows, columns);
         for (int r = 0; r < rows; ++r) {
             for (int c = 0; c < columns; ++c) {
                 const PlausibilityColumn& col = cells[static_cast<std::size_t>(hour * columns + c)];
+                set(f.temperature_2m_k, 0, r, c, col.temperature_2m_k);
+                set(f.dewpoint_2m_k, 0, r, c, col.dewpoint_2m_k);
                 for (int k = 0; k < levels; ++k) {
                     set(f.cloud_fraction, k, r, c, col.cloud_fraction[k]);
                     set(f.liquid_kg_kg, k, r, c, col.liquid[k]);
@@ -714,9 +733,9 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
             }
             const double cover_max_random = 1.0 - clear;
             INFO(col.time_utc << " " << col.name);
-            std::printf("plausibility %s %-26s tcc %.2f -> max %.2f, max-random %.2f   cbh %7.0f m -> base %7.0f m (layer %4.0f m)\n",
+            std::printf("plausibility %s %-26s tcc %.2f -> max %.2f, max-random %.2f   cbh %7.0f m, lcl %6.0f m -> base %7.0f m (layer %4.0f m)\n",
                         col.time_utc.c_str(), col.name.c_str(), col.total_cloud_cover, cover, cover_max_random, col.cloud_base_height_m,
-                        base_agl_m, layer_m);
+                        snapshot.lcl_m(1, c), base_agl_m, layer_m);
             // ERA5's tcc is maximum-random overlap of the 137 model levels. The snapshot has the 37 pressure levels' fractions
             // averaged onto 32 layers: where one cloud spans several levels at different horizontal places the levels' fractions
             // no longer add up, so the snapshot's cover is the LOWER one (measured 0.0 .. 0.36 below tcc, known limit in
@@ -725,6 +744,15 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
             CHECK(cover_max_random <= col.total_cloud_cover + 0.05);
             CHECK(cover_max_random >= col.total_cloud_cover - 0.40);
             CHECK(cover <= cover_max_random + 1e-9);
+            // Re-baselined for the cloud bases at the LCL (static clouds, Task 7): a boundary-layer cloud (base below 3 km)
+            // starts no more than one layer below the LCL of the column's 2 m air (the layer that holds the LCL is the
+            // lowest one with cloud). The tolerance against ERA5's cbh below is unchanged and still holds with the LCL
+            // applied (all ten columns pass it); the data's base stays wherever it lies above the LCL.
+            const double lcl_agl_m = snapshot.lcl_m(1, c);
+            if (lcl_agl_m > 0.0 && lcl_agl_m < constants::cloud_boundary_layer_top_m &&
+                base_agl_m < constants::cloud_boundary_layer_top_m) {
+                CHECK(base_agl_m >= lcl_agl_m - layer_m);
+            }
             if (std::isnan(col.cloud_base_height_m)) {
                 CHECK(std::isnan(base_agl_m));
             } else {
@@ -751,4 +779,229 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
         }
     }
     CHECK(deficit_sum / static_cast<double>(cells.size()) < 0.2);  // measured 0.14: the systematic part of the limit
+}
+
+// ---- Cloud bases at the lifting condensation level (static clouds, Task 7).
+
+namespace {
+
+// A column of layer means: liquid cloud (fraction f, density d) on the layers [first, last].
+struct LayerColumn {
+    std::array<double, weather_layer_count> fraction{}, liquid{}, ice{};
+    void cloud(int first, int last, double f, double d) {
+        for (int k = first; k <= last; ++k) {
+            fraction[static_cast<std::size_t>(k)] = f;
+            liquid[static_cast<std::size_t>(k)] = d;
+        }
+    }
+    double liquid_path(double ground_m) const {
+        double path = 0.0;
+        for (int k = 0; k < weather_layer_count; ++k) {
+            path += liquid[static_cast<std::size_t>(k)] *
+                    std::max(0.0, weather_layer_bottom_m(k + 1) - std::max(weather_layer_bottom_m(k), ground_m));
+        }
+        return path;
+    }
+    void raise(double ground_m, double lcl_m) { raise_liquid_cloud_to_lcl(fraction, liquid, ice, ground_m, lcl_m); }
+};
+
+}  // namespace
+
+TEST_CASE("Liquid cloud from the ground up is lifted to the lifting condensation level", "[weather]") {
+    LayerColumn column;
+    column.cloud(0, 7, 0.6, 3e-4);  // 0 .. 2 km
+    const double path = column.liquid_path(0.0);
+    column.raise(0.0, 800.0);
+    // No condensate under 800 m: layers 0..2 (to 750 m) are empty, layer 3 (750 .. 1000 m) keeps the part above 800 m.
+    for (int k = 0; k < 3; ++k) {
+        CHECK(column.liquid[static_cast<std::size_t>(k)] == 0.0);
+        CHECK(column.fraction[static_cast<std::size_t>(k)] == 0.0);
+    }
+    CHECK(column.liquid[3] > 0.0);
+    CHECK(column.liquid[3] < column.liquid[4]);  // 200 of its 250 m remain, scaled alike
+    CHECK(column.liquid[3] / column.liquid[4] == Catch::Approx(0.8).epsilon(1e-12));
+    // The column's water path is kept, the profile above is scaled alike, the covered area does not shrink.
+    CHECK(column.liquid_path(0.0) == Catch::Approx(path).epsilon(1e-6));
+    CHECK(column.liquid[5] / column.liquid[4] == Catch::Approx(1.0).epsilon(1e-12));
+    for (int k = 3; k < 8; ++k) CHECK(column.fraction[static_cast<std::size_t>(k)] == Catch::Approx(0.6));
+    for (int k = 8; k < weather_layer_count; ++k) CHECK(column.liquid[static_cast<std::size_t>(k)] == 0.0);
+}
+
+TEST_CASE("The lifting condensation level is measured from the ground, not the ellipsoid", "[weather]") {
+    LayerColumn column;
+    column.cloud(8, 15, 0.5, 2e-4);  // 2 .. 4 km, over a ground at 1500 m: the data base is 500 m above the ground
+    const double ground = 1500.0, path = column.liquid_path(ground);
+    column.raise(ground, 1000.0);  // LCL at 2500 m above the ellipsoid
+    CHECK(column.liquid[8] == 0.0);
+    CHECK(column.liquid[9] == 0.0);  // 2250 .. 2500 m
+    CHECK(column.liquid[10] > 0.0);  // 2500 .. 2750 m
+    CHECK(column.liquid_path(ground) == Catch::Approx(path).epsilon(1e-6));
+    // The same LCL taken from the ellipsoid (ground 0): the data base 2000 m is above it, nothing moves.
+    LayerColumn wrong;
+    wrong.cloud(8, 15, 0.5, 2e-4);
+    wrong.raise(0.0, 1000.0);
+    CHECK(wrong.liquid[8] == 2e-4);
+}
+
+TEST_CASE("A cloud wholly under the lifting condensation level is lifted keeping depth and density", "[weather]") {
+    LayerColumn column;
+    column.cloud(0, 1, 0.8, 4e-4);  // 0 .. 500 m
+    const double path = column.liquid_path(0.0);
+    column.raise(0.0, 1000.0);
+    CHECK(column.liquid_path(0.0) == Catch::Approx(path).epsilon(1e-6));
+    for (int k = 0; k < 4; ++k) CHECK(column.liquid[static_cast<std::size_t>(k)] == 0.0);  // 0 .. 1 km
+    CHECK(column.liquid[4] == Catch::Approx(4e-4).epsilon(1e-12));  // 1000 .. 1250 m
+    CHECK(column.liquid[5] == Catch::Approx(4e-4).epsilon(1e-12));  // 1250 .. 1500 m
+    CHECK(column.liquid[6] == 0.0);
+    CHECK(column.fraction[4] == Catch::Approx(0.8));
+}
+
+TEST_CASE("Clouds the lifting condensation level does not govern stay as they are", "[weather]") {
+    const auto unchanged = [](auto setup, double ground, double lcl) {
+        LayerColumn column;
+        setup(column);
+        const LayerColumn before = column;
+        column.raise(ground, lcl);
+        CHECK(column.fraction == before.fraction);
+        CHECK(column.liquid == before.liquid);
+        CHECK(column.ice == before.ice);
+    };
+    // Saturated surface air (LCL 0: fog), unknown level, a level above the boundary layer.
+    unchanged([](LayerColumn& c) { c.cloud(0, 7, 0.6, 3e-4); }, 0.0, 0.0);
+    unchanged([](LayerColumn& c) { c.cloud(0, 7, 0.6, 3e-4); }, 0.0, weather_lcl_unknown_m);
+    unchanged([](LayerColumn& c) { c.cloud(0, 7, 0.6, 3e-4); }, 0.0, std::nan(""));
+    unchanged([](LayerColumn& c) { c.cloud(0, 7, 0.6, 3e-4); }, 0.0, 3500.0);
+    // A base at or above the LCL stays where the data has it.
+    unchanged([](LayerColumn& c) { c.cloud(4, 9, 0.6, 3e-4); }, 0.0, 1000.0);
+    unchanged([](LayerColumn& c) { c.cloud(6, 9, 0.6, 3e-4); }, 0.0, 800.0);
+    // A cloud whose base is above the boundary layer (3 km above the ground).
+    unchanged([](LayerColumn& c) { c.cloud(12, 20, 0.6, 3e-4); }, 0.0, 2900.0);
+    // An ice layer at 8 km (a cirrus deck) and no liquid at all.
+    unchanged([](LayerColumn& c) {
+        for (int k = 20; k < 22; ++k) {
+            c.fraction[static_cast<std::size_t>(k)] = 0.9;
+            c.ice[static_cast<std::size_t>(k)] = 2e-5;
+        }
+    }, 0.0, 800.0);
+    // Ice beside the boundary-layer liquid is kept; its cloud fraction survives where liquid is cut.
+    LayerColumn mixed;
+    mixed.cloud(0, 7, 0.6, 3e-4);
+    mixed.ice[1] = 1e-5;
+    const auto ice_before = mixed.ice;
+    mixed.raise(0.0, 800.0);
+    CHECK(mixed.ice == ice_before);
+    CHECK(mixed.fraction[1] == 0.6);
+    CHECK(mixed.liquid[1] == 0.0);
+}
+
+TEST_CASE("The built snapshot raises boundary-layer cloud to the level and keeps fog", "[weather]") {
+    const int rows = 5, columns = 8;
+    const auto& base_column = era5_columns().by_name("starbase");
+    auto fields = era5_fields(rows, columns, [&](int, int) -> const Era5Column& { return base_column; });
+    // A liquid cloud on the lowest levels of the column: the layers from the ground to ~1.5 km.
+    const int levels = static_cast<int>(fields.levels_pa.size());
+    for (int k = 0; k < levels; ++k) {
+        const double p = fields.levels_pa[static_cast<std::size_t>(k)];
+        const bool low = p >= 85000.0 && p <= base_column.surface_pressure_pa;
+        for (int r = 0; r < rows; ++r) {
+            for (int c = 0; c < columns; ++c) {
+                set(fields.cloud_fraction, k, r, c, low ? 0.7 : 0.0);
+                set(fields.liquid_kg_kg, k, r, c, low ? 3e-4 : 0.0);
+                set(fields.ice_kg_kg, k, r, c, 0.0);
+            }
+        }
+    }
+    const auto plain = WeatherSnapshot::from_era5(era5_id(), fields, coarse_geoid());
+    // Columns 0-3: 2 m spread 7 K (LCL ~ 870 m), columns 4-7: 0.5 K (fog).
+    fields.temperature_2m_k = fields.dewpoint_2m_k = grid(1, rows, columns);
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < columns; ++c) {
+            set(fields.temperature_2m_k, 0, r, c, 295.0);
+            set(fields.dewpoint_2m_k, 0, r, c, c < 4 ? 288.0 : 294.5);
+        }
+    }
+    const auto snapshot = WeatherSnapshot::from_era5(era5_id(), fields, coarse_geoid());
+    const int r = 2;
+    const std::size_t cells = static_cast<std::size_t>(rows) * columns;
+    const auto liquid_at = [&](const WeatherSnapshot& s, int layer, int c) {
+        return decode_weather_water(s.texels()[(static_cast<std::size_t>(layer) * cells + r * columns + c) * 4 + 1]);
+    };
+    const auto path = [&](const WeatherSnapshot& s, int c) {
+        double sum = 0.0;
+        const double ground = s.ground_heights_m()[static_cast<std::size_t>(r * columns + c)];
+        for (int k = 0; k < weather_layer_count; ++k) {
+            sum += liquid_at(s, k, c) *
+                   std::max(0.0, weather_layer_bottom_m(k + 1) - std::max(weather_layer_bottom_m(k), ground));
+        }
+        return sum;
+    };
+    const double lcl = snapshot.lcl_m(r, 1);
+    const double ground = snapshot.ground_heights_m()[static_cast<std::size_t>(r * columns + 1)];
+    REQUIRE(lcl > 700.0);
+    REQUIRE(lcl < 1100.0);
+    CHECK(path(plain, 1) > 0.05);
+    // The data had cloud at the ground; the built snapshot has none in the layers wholly under the LCL.
+    CHECK(liquid_at(plain, 0, 1) > 0.0);
+    for (int k = 0; k < weather_layer_count; ++k) {
+        if (weather_layer_bottom_m(k + 1) <= ground + lcl) CHECK(liquid_at(snapshot, k, 1) == 0.0);
+    }
+    // The liquid path is kept (the 8-bit codes cost <= 1.97 % per layer).
+    CHECK(path(snapshot, 1) == Catch::Approx(path(plain, 1)).epsilon(0.03));
+    // Fog: 2 m spread under cloud_fog_spread_k: the level is stored as 0 and the column is as without the 2 m fields.
+    CHECK(snapshot.lcl_m(r, 6) == 0.0f);
+    for (int k = 0; k < weather_layer_count; ++k) CHECK(liquid_at(snapshot, k, 6) == liquid_at(plain, k, 6));
+}
+
+TEST_CASE("An unknown level is skipped by the averages and leaves the cloud alone", "[weather]") {
+    const int rows = 9, columns = 8;
+    const auto& cols = era5_columns().columns;
+    auto fields = era5_fields(rows, columns, [&](int, int) -> const Era5Column& { return cols[0]; });
+    fields.temperature_2m_k = fields.dewpoint_2m_k = grid(1, rows, columns);
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < columns; ++c) {
+            // All but the first two columns have no valid dew point.
+            set(fields.temperature_2m_k, 0, r, c, 300.0);
+            set(fields.dewpoint_2m_k, 0, r, c, c < 2 ? 290.0 : std::nan(""));
+        }
+    }
+    const auto snapshot = WeatherSnapshot::from_era5(era5_id(), fields, coarse_geoid());
+    CHECK(snapshot.lcl_m(4, 5) == weather_lcl_unknown_m);
+    CHECK(snapshot.lcl_m(4, 1) > 0.0f);
+    // Poles: the mean of the known columns only.
+    CHECK(snapshot.lcl_m(0, 0) == snapshot.lcl_m(0, 7));
+    CHECK(snapshot.lcl_m(0, 0) > 0.0f);
+    // A box over known and unknown columns: the known ones' mean, not diluted by the unknown.
+    const auto coarse = snapshot.downsampled(4);
+    CHECK(coarse.lcl_m(1, 0) == Catch::Approx(snapshot.lcl_m(4, 1)).epsilon(0.05));
+    // A box over unknown columns only stays unknown.
+    CHECK(coarse.lcl_m(1, 1) == weather_lcl_unknown_m);
+}
+
+TEST_CASE("GFS takes the standard pressure at the column's ground height for the level", "[weather]") {
+    // US Standard Atmosphere 1976: 84 559.9 Pa at 1500 m.
+    CHECK(standard_pressure_at_height_pa(0.0) == Catch::Approx(101325.0));
+    CHECK(standard_pressure_at_height_pa(1500.0) == Catch::Approx(84559.9).epsilon(2e-4));
+    const int rows = 3, columns = 4, levels = 2;
+    GfsFields f;
+    f.levels_pa = {70000.0, 50000.0};
+    f.cloud_percent = f.liquid_kg_kg = f.ice_kg_kg = grid(levels, rows, columns);
+    f.temperature_k = f.geopotential_height_m = grid(levels, rows, columns);
+    f.surface_geopotential_height_m = f.temperature_2m_k = f.dewpoint_2m_k = grid(1, rows, columns);
+    for (int r = 0; r < rows; ++r) {
+        for (int c = 0; c < columns; ++c) {
+            set(f.temperature_k, 0, r, c, 275.0);
+            set(f.temperature_k, 1, r, c, 255.0);
+            set(f.geopotential_height_m, 0, r, c, 3100.0);
+            set(f.geopotential_height_m, 1, r, c, 5600.0);
+            set(f.surface_geopotential_height_m, 0, r, c, 1500.0);
+            set(f.temperature_2m_k, 0, r, c, 290.0);
+            set(f.dewpoint_2m_k, 0, r, c, 280.0);
+        }
+    }
+    WeatherSnapshotId id;
+    id.kind = WeatherSourceKind::gfs;
+    const auto snapshot = WeatherSnapshot::from_gfs(id, f, coarse_geoid());
+    const double expected = lifting_condensation_level_m(290.0, 280.0, standard_pressure_at_height_pa(1500.0));
+    CHECK(snapshot.lcl_m(1, 1) == Catch::Approx(expected).epsilon(1e-5));
+    CHECK(expected != Catch::Approx(lifting_condensation_level_m(290.0, 280.0, 101325.0)).margin(0.5));
 }

@@ -53,6 +53,10 @@
 #      the march, the slab): the row-to-row step of (cache - march) / mean stays within the image noise (the largest
 #      difference of two march renders with independent jitter); the same view before / after a re-anchor (the
 #      camera moved 12 km east and back: cascade 3 re-anchored) differs by less than that noise;
+#  12. (static clouds Task 7) the flat cloud base at the lifting condensation level (a slab from the ground to 2 km
+#      with the level 800 m, uniform texels: the cut alone): straight up from the ground the optical depth is
+#      (2000 - 800 - ramp / 2) / 2000 of the uncut slab's (3 %), a view 6 deg downward from 700 m sees no cloud, one
+#      straight up from 1000 m sees the slab as without a level (STARSIM_LCL_ONLY=1 runs this section alone).
 #  11. (static clouds Task 5b) anti-aliased outlines: the limb of a deck's top (a straight edge) seen at the VR
 #      preset's divisor with the camera rolled; along each row the edge crosses, the final image's alpha changes
 #      monotonically by at most 0.35 per pixel (no stairs of a march pixel), and a second render is bit-identical
@@ -70,6 +74,9 @@ const EPOCH_UTC := "2024-04-08T18:42:00"
 const AU_M := 149597870700.0
 const LAT_DEG := 30.0
 const LON_DEG := 45.0
+const LCL_SLAB_TOP_M := 2000.0  # section 12: a slab from the ground
+const LCL_BASE_M := 800.0       # its columns' level
+const LCL_RAMP_M := 30.0        # core constants.hpp cloud_lcl_ramp_m
 const SLAB_BOTTOM_M := 1000.0
 const SLAB_TOP_M := 2000.0
 ## Liquid water of vertical optical depth 1 over 1 km: beta = 3 LWC / (2 rho_w r_l) = 150 LWC [1/m].
@@ -87,7 +94,7 @@ const CLIMB_STEP_LIMIT := 0.055
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 135
+const EXPECTED_SAMPLES := 138
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -260,6 +267,14 @@ func _run() -> void:
 		print("cloud_check (outlines only): %d failures" % _failures)
 		quit(1 if _failures > 0 else 0)
 		return
+	if OS.get_environment("STARSIM_LCL_ONLY") != "":  # diagnostics: section 12 alone (no sample count)
+		await _lcl_base_samples()
+		_clouds.shutdown()
+		for f in _files:
+			DirAccess.remove_absolute(f)
+		print("cloud_check (cloud base only): %d failures" % _failures)
+		quit(1 if _failures > 0 else 0)
+		return
 	if OS.get_environment("STARSIM_LIGHT_CACHE_ONLY") != "":  # diagnostics: sections 8 and 10 alone (no sample count)
 		await _light_cache_samples()
 		_clouds.shutdown()
@@ -375,6 +390,8 @@ func _run() -> void:
 	await _silhouette_samples()
 	# 11. Anti-aliased outlines (the game's output, the VR preset's divisor).
 	await _outline_samples()
+	# 12. The flat cloud base at the lifting condensation level.
+	await _lcl_base_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -438,10 +455,10 @@ func _setup_scene() -> void:
 
 
 ## Writes a slab snapshot, returns its loaded dictionary (the file is removed at the end).
-func _slab(label: String, bottom_m: float, top_m: float, liquid: float, fraction: float) -> Dictionary:
+func _slab(label: String, bottom_m: float, top_m: float, liquid: float, fraction: float, lcl_m := -1.0) -> Dictionary:
 	var file := OS.get_temp_dir().path_join("starsim_cloud_check_%s_%d.wthr" % [label, OS.get_process_id()])
 	_files.append(file)
-	if not _core.weather_write_slab_snapshot(file, bottom_m, top_m, liquid, fraction):
+	if not _core.weather_write_slab_snapshot(file, bottom_m, top_m, liquid, fraction, lcl_m):
 		_fail_and_quit("slab snapshot not written")
 	var loaded: Dictionary = _core.weather_load_snapshot(file)
 	loaded["file"] = file
@@ -1173,6 +1190,35 @@ func _silhouette_samples() -> void:
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
 	_camera.fov = 10.0
 
+
+## Section 12: the flat base. Debug output 1 (the grid-mean background transmittance, the shapes off) of a slab from the
+## ground to LCL_SLAB_TOP_M whose columns have the level LCL_BASE_M, against the same slab without a level.
+func _lcl_base_samples() -> void:
+	var up := _local_direction(90.0, 0.0)
+	var sun := _local_direction(45.0, 135.0)
+	var uncut := _slab("lcl_none", 0.0, LCL_SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0)
+	_show(uncut)
+	var t_uncut := (await _render(_point(2.0), up, sun, 1, BLOCK_RADIUS)).x
+	# 6 deg downward (the ray stays below the base for the 7 km to the ground; a horizontal one rises above the level
+	# with the Earth's curvature) from 100 m below the level; straight up from 200 m above it.
+	var side := _local_direction(-6.0, 70.0)
+	var t_side_uncut_below := (await _render(_point(LCL_BASE_M - 100.0), side, sun, 1, BLOCK_RADIUS)).x
+	var t_up_uncut := (await _render(_point(LCL_BASE_M + 200.0), up, sun, 1, BLOCK_RADIUS)).x
+	var cut := _slab("lcl_cut", 0.0, LCL_SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0, LCL_BASE_M)
+	_show(cut)
+	var t_cut := (await _render(_point(2.0), up, sun, 1, BLOCK_RADIUS)).x
+	var t_below := (await _render(_point(LCL_BASE_M - 100.0), side, sun, 1, BLOCK_RADIUS)).x
+	var t_up := (await _render(_point(LCL_BASE_M + 200.0), up, sun, 1, BLOCK_RADIUS)).x
+	var tau_uncut := -log(t_uncut)
+	var tau_cut := -log(t_cut)
+	var expected_share := (LCL_SLAB_TOP_M - LCL_BASE_M - 0.5 * LCL_RAMP_M) / LCL_SLAB_TOP_M
+	_check("flat base: the optical depth straight up is the share of the slab above the level",
+			tau_uncut > 0.3 and absf(tau_cut / tau_uncut - expected_share) <= 0.03 * expected_share,
+			"cut %.4f uncut %.4f ratio %.4f expected %.4f" % [tau_cut, tau_uncut, tau_cut / tau_uncut, expected_share])
+	_check("flat base: a view 6 deg downward from 100 m below the level sees no cloud",
+			t_below > 0.999 and t_side_uncut_below < 0.9, "cut %.5f uncut %.5f" % [t_below, t_side_uncut_below])
+	_check("flat base: straight up from 200 m above the level the cloud is as without a level",
+			absf(t_up - t_up_uncut) <= 0.01 * t_up_uncut and t_up < 0.9, "cut %.5f uncut %.5f" % [t_up, t_up_uncut])
 
 ## Section 11: the deck top's limb, rolled, at the VR preset (the game's output: debug output 0, the final image's
 ## alpha read from the pass's result).

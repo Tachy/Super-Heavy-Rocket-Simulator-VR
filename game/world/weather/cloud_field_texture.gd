@@ -1,7 +1,7 @@
 class_name CloudFieldTexture
 extends RefCounted
 ## One volume of a weather snapshot on the GPU (M8 weather and clouds, Task 8): the field (RGBA8), the ice share (R8)
-## or the column (RG8, Task 9),
+## or the column (RGBA8, Task 9 and 7),
 ## columns x rows x 32 layers, no mipmaps. Uploaded in chunks of LAYERS_PER_STEP layers, one chunk per step() (per
 ## frame), so a 133 MB 0.25-deg field never blocks a frame (one ImageTexture3D creation took 49 ms on the main thread):
 ## the chunk goes into a small staging volume (texture_update) and is copied into its slices of the target on the GPU.
@@ -28,7 +28,7 @@ var _staging := RID()
 var _format := 0
 
 
-## texels: layer-major, texel_bytes per texel (4: RGBA8, 2: RG8, 1: R8).
+## texels: layer-major, texel_bytes per texel (4: RGBA8, 1: R8; 2: RG8, unused).
 static func create(texels: PackedByteArray, columns: int, rows: int, texel_bytes: int) -> CloudFieldTexture:
 	var t := CloudFieldTexture.new()
 	t._columns = columns

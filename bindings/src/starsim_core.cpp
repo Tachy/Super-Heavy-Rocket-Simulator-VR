@@ -828,11 +828,12 @@ double StarsimCore::cloud_slab_radiance_mc(double optical_depth, double sun_cos_
 }
 
 bool StarsimCore::weather_write_slab_snapshot(const godot::String& file, double bottom_m, double top_m,
-                                              double liquid_water_kg_m3, double cloud_fraction) const {
+                                              double liquid_water_kg_m3, double cloud_fraction, double lcl_m) const {
     try {
         environment::write_weather_snapshot(
             std::filesystem::path(utf8_of(file)),
-            environment::WeatherSnapshot::uniform_slab(181, 360, bottom_m, top_m, liquid_water_kg_m3, cloud_fraction));
+            environment::WeatherSnapshot::uniform_slab(181, 360, bottom_m, top_m, liquid_water_kg_m3, cloud_fraction,
+                                                      static_cast<float>(lcl_m)));
         return true;
     } catch (const std::exception& e) {
         godot::UtilityFunctions::push_error(godot::String::utf8("Wolkenplatte konnte nicht geschrieben werden: ") +
@@ -905,7 +906,8 @@ void StarsimCore::_bind_methods() {
     ClassDB::bind_method(D_METHOD("cloud_slab_radiance_mc", "optical_depth", "sun_cos_zenith", "view_cos_zenith",
                                   "relative_azimuth_rad"), &StarsimCore::cloud_slab_radiance_mc);
     ClassDB::bind_method(D_METHOD("weather_write_slab_snapshot", "file", "bottom_m", "top_m", "liquid_water_kg_m3",
-                                  "cloud_fraction"), &StarsimCore::weather_write_slab_snapshot);
+                                  "cloud_fraction", "lcl_m"), &StarsimCore::weather_write_slab_snapshot,
+                         DEFVAL(-1.0));
 }
 
 }  // namespace starsim::bindings

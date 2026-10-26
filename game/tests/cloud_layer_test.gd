@@ -58,8 +58,8 @@ func _run() -> void:
 	_check(_state_is(["", ""], -1.0), "weather off: nothing resident: %s" % _layer.state())
 
 	_test_light_follows_fade(core, camera)
-	_check(ShaderGlobals.value(&"cloud_column_before") == _layer._empty_column and _layer._empty_column.get_format() == Image.FORMAT_LA8,
-			"an empty slot binds the zero LA8 column texture (cover 0, not an R8 read as 1)")
+	_check(ShaderGlobals.value(&"cloud_column_before") == _layer._empty_column and _layer._empty_column.get_format() == Image.FORMAT_RGBA8,
+			"an empty slot binds the zero RGBA8 column texture (cover 0, no cloud base)")
 
 	_layer.shutdown()
 	print("CLOUD LAYER TEST %s" % ("PASSED" if _failures == 0 else "FAILED (%d)" % _failures))

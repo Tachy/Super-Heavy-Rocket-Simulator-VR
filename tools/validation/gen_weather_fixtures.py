@@ -290,7 +290,8 @@ def write_era5_plausibility():
     levels_hpa = np.frombuffer(numcodecs.Blosc().decode(fetch(f"{ERA5_STORE}/level/0", "era5_level_chunk.bin")), "<i8")
     lines = [
         "# ERA5 columns of two hours with the store's single-level total_cloud_cover (tcc) and cloud_base_height (cbh, m",
-        "# above the ground, nan without cloud) beside them (gen_weather_fixtures.py): the real-date plausibility test.",
+        "# above the ground, nan without cloud) and the 2 m temperature / dew point (the lifting condensation level) beside them",
+        "# (gen_weather_fixtures.py): the real-date plausibility test.",
         f'store = "{ERA5_STORE}"',
         f"levels_hpa = [{', '.join(str(int(v)) for v in levels_hpa)}]",
         "",
@@ -303,6 +304,8 @@ def write_era5_plausibility():
         cbh = era5_chunk("cloud_base_height", False, time_index)
         sp = era5_chunk("surface_pressure", False, time_index)
         tcwv = era5_chunk("total_column_water_vapour", False, time_index)
+        t2m = era5_chunk("2m_temperature", False, time_index)
+        d2m = era5_chunk("2m_dewpoint_temperature", False, time_index)
         row0, column0 = named["starbase"]
         window = tcc[row0 - OVERCAST_WINDOW:row0 + OVERCAST_WINDOW, column0 - OVERCAST_WINDOW:column0 + OVERCAST_WINDOW]
         wr, wc = np.unravel_index(int(np.argmax(window)), window.shape)
@@ -318,7 +321,9 @@ def write_era5_plausibility():
                       f"surface_geopotential_m2_s2 = {toml_float(ground[row, column])}",
                       f"total_column_water_vapour_kg_m2 = {toml_float(tcwv[row, column])}",
                       f"total_cloud_cover = {toml_float(tcc[row, column])}",
-                      f"cloud_base_height_m = {toml_float(cbh[row, column])}"]
+                      f"cloud_base_height_m = {toml_float(cbh[row, column])}",
+                      f"temperature_2m_k = {toml_float(t2m[row, column])}",
+                      f"dewpoint_2m_k = {toml_float(d2m[row, column])}"]
             lines += [f"{key} = {toml_list(fields[key][:, row, column])}" for _, key in ERA5_COLUMN_VARIABLES
                       if key != "geopotential_m2_s2"]
             lines.append("")

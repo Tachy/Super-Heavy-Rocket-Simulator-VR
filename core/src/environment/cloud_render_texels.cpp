@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 #include "starsim/environment/cloud_optics.hpp"
 #include "starsim/math/constants.hpp"
@@ -100,10 +101,26 @@ std::vector<std::uint8_t> cloud_render_texels(const WeatherSnapshot& snapshot) {
     return out;
 }
 
+std::uint16_t encode_cloud_lcl_base(double base_height_m) {
+    if (!std::isfinite(base_height_m)) return 0;
+    const double code = 1.0 + std::round((base_height_m + cloud_lcl_code_offset_m) / cloud_lcl_code_span_m * 65534.0);
+    return static_cast<std::uint16_t>(std::clamp(code, 1.0, 65535.0));
+}
+
+double decode_cloud_lcl_base(std::uint16_t code) {
+    if (code == 0) return std::numeric_limits<double>::quiet_NaN();
+    return (code - 1) / 65534.0 * cloud_lcl_code_span_m - cloud_lcl_code_offset_m;
+}
+
+double cloud_lcl_cut_factor(double height_m, double base_m) {
+    if (!std::isfinite(base_m)) return 1.0;
+    return std::clamp((height_m - base_m) / constants::cloud_lcl_ramp_m, 0.0, 1.0);
+}
+
 std::vector<std::uint8_t> cloud_render_column_texels(const WeatherSnapshot& snapshot) {
     const std::vector<std::uint8_t>& source = snapshot.texels();
     const std::size_t cells = static_cast<std::size_t>(snapshot.rows()) * snapshot.columns();
-    std::vector<std::uint8_t> out(source.size() / channels * 2, 0);
+    std::vector<std::uint8_t> out(source.size(), 0);  // RGBA8: the source has the same cells x layers x 4
     std::array<double, 256> water{};
     for (int code = 0; code < 256; ++code) water[code] = decode_weather_water(static_cast<std::uint8_t>(code));
     // Top-down: the running grid-mean depth, the grid-mean extinction of the centre above and the largest cloud fraction
@@ -121,9 +138,17 @@ std::vector<std::uint8_t> cloud_render_column_texels(const WeatherSnapshot& snap
             depth[cell] += top ? beta * gap_m : 0.5 * (beta + beta_above[cell]) * gap_m;
             beta_above[cell] = beta;
             cover[cell] = std::max(cover[cell], source[i]);
-            out[2 * (base + cell)] = encode_cloud_optical_depth(depth[cell]);
-            out[2 * (base + cell) + 1] = cover[cell];
+            out[i] = encode_cloud_optical_depth(depth[cell]);
+            out[i + 1] = cover[cell];
         }
+    }
+    // The cloud base of each cell in layer 0's B, A.
+    for (std::size_t cell = 0; cell < cells; ++cell) {
+        const float lcl = snapshot.lcl_heights_m()[cell];
+        if (!(lcl > 0.0f) || !(lcl < constants::cloud_boundary_layer_top_m)) continue;
+        const std::uint16_t code = encode_cloud_lcl_base(snapshot.ground_heights_m()[cell] + static_cast<double>(lcl));
+        out[cell * channels + 2] = static_cast<std::uint8_t>(code >> 8);
+        out[cell * channels + 3] = static_cast<std::uint8_t>(code & 0xff);
     }
     return out;
 }

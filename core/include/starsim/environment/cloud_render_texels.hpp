@@ -58,13 +58,31 @@ double decode_cloud_optical_depth(std::uint8_t code);
 double cloud_texel_extinction_step_per_m();
 double cloud_texel_extinction_per_m(std::uint8_t high, std::uint8_t low);
 
-// Column texture (Task 9, light under the clouds): RG8 of the same grid. R: the GRID-MEAN optical depth from the column
-// top (20 km) down to the layer centre (grid-mean extinction at the centres, trapezoids between them, held from the
-// top centre to 20 km - cloud_column_depths_above at the centre), coded as the A channel (encode_cloud_optical_depth);
-// G: the largest cloud fraction code from the top down to the centre (the column's maximum-overlap cover). The shader
-// takes a point's column from the centre above plus the trapezoid of the grid-mean extinction down to it, its cover the
-// larger of the centre's and the point's fraction: the sky factor and the Sun's diffuse light (cloud_optics.hpp).
+// Column texture (Task 9, light under the clouds; Task 7, the cloud base): RGBA8 of the same grid. R: the GRID-MEAN
+// optical depth from the column top (20 km) down to the layer centre (grid-mean extinction at the centres, trapezoids
+// between them, held from the top centre to 20 km - cloud_column_depths_above at the centre), coded as the A channel
+// (encode_cloud_optical_depth); G: the largest cloud fraction code from the top down to the centre (the column's
+// maximum-overlap cover). The shader takes a point's column from the centre above plus the trapezoid of the grid-mean
+// extinction down to it, its cover the larger of the centre's and the point's fraction: the sky factor and the Sun's
+// diffuse light (cloud_optics.hpp). B, A (layer 0 only, zero above): the 16-bit base of the cell's boundary-layer cloud,
+// the lifting condensation level as a height above the ELLIPSOID (ground + lcl_m; the shader knows heights above the
+// ellipsoid), B the high and A the low byte of encode_cloud_lcl_base; 0 = none (fog, unknown level, a level not below
+// cloud_boundary_layer_top_m: the cell's cloud is not cut). Read with nearest texel fetches (a code is not an
+// interpolable number across a "none" neighbour). The shader multiplies the cloud fraction and the extinction by
+// cloud_lcl_cut_factor, the flat base of cumulus (the cloud above the level was lifted there by the snapshot build).
 std::vector<std::uint8_t> cloud_render_column_texels(const WeatherSnapshot& snapshot);
+
+// The 16-bit code of a cloud base height above the ellipsoid: 0 = none, else 1 + round of (height + offset) / span x 65534
+// clamped (offset 500 m, span 21 km: 0.32 m per code, covers the geoid, the highest ground + 3 km and the 20 km top).
+inline constexpr double cloud_lcl_code_offset_m = 500.0;
+inline constexpr double cloud_lcl_code_span_m = 21000.0;
+std::uint16_t encode_cloud_lcl_base(double base_height_m);
+// The base height of a code; NaN for 0.
+double decode_cloud_lcl_base(std::uint16_t code);
+
+// The share of the cloud that remains at height_m over a flat base at base_m: 0 below it, a linear ramp up to 1 over
+// cloud_lcl_ramp_m, 1 above (NaN base: 1).
+double cloud_lcl_cut_factor(double height_m, double base_m);
 
 // The GPU form of the snapshot's texels (layout above).
 std::vector<std::uint8_t> cloud_render_texels(const WeatherSnapshot& snapshot);

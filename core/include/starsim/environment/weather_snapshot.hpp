@@ -27,8 +27,10 @@
 //   rho = p / (R_d T) (moist air is less dense: the dry form overestimates by 0.61 q, <= ~1.5 % near a tropical
 //   surface, less aloft).
 // - Lifting condensation level per column from the 2 m temperature and dew point (Romps 2017, exact; ERA5 with its
-//   surface pressure, GFS with the standard one), m above the ground, 0 where unknown, capped at 20 km; the downsampled
-//   set and the pole rows average it like the ground height.
+//   surface pressure, GFS with the standard atmosphere's at the column's ground height), m above the ground, 0 where the
+//   surface air is saturated (T - Td < cloud_fog_spread_k), weather_lcl_unknown_m where unknown, capped at 20 km; the
+//   downsampled set and the pole rows average the known values like the ground height. The column's boundary-layer
+//   liquid below it is moved up (raise_liquid_cloud_to_lcl).
 // - Levels at or below the surface are ignored; the lowest level above the ground is held down to the ground, the
 //   highest one held upward; layer parts below the ground do not count, at() is zero below the ground.
 //
@@ -98,6 +100,25 @@ double cloud_water_density_kg_m3(double specific_kg_kg, double pressure_pa, doub
 // instead of 101 kPa moves a 10 K spread by 3 m): pass the surface pressure when known, else the default.
 double lifting_condensation_level_m(double t2m_k, double td2m_k, double pressure_pa = constants::standard_pressure_pa);
 
+// Pressure of the standard atmosphere at a height above sea level (troposphere): p0 (1 - L h / T0)^(g / (R L)).
+double standard_pressure_at_height_pa(double height_m);
+
+// Stored for a column whose lifting condensation level is not known (no 2 m fields, invalid input). 0 is a KNOWN level:
+// the surface air is saturated (fog spread, cloud_fog_spread_k) and cloud may reach the ground.
+inline constexpr float weather_lcl_unknown_m = -1.0f;
+
+// Cloud bases at the lifting condensation level (static clouds, spec decisions 1-2), on the means of the 32 layers of one
+// column (each over the layer's above-ground part): the lowest liquid cloud whose base lies less than
+// cloud_boundary_layer_top_m above the ground is a boundary-layer cloud whose base is the LCL; condensate below it is moved
+// up. The liquid water of the cut part is spread over the part of that cloud above the LCL in proportion to its liquid
+// (the column's liquid water path is kept; the cloud fraction there is at least the mass-weighted fraction of the cut
+// part, so the covered area does not shrink); a cloud that lies wholly under the LCL is lifted to start there, keeping
+// depth and mean density. A base above the LCL, an LCL <= 0 (saturated surface: fog) or >= the boundary-layer top, and
+// ice are untouched. Cloud fraction of a cut layer with ice stays. cloud_fraction, liquid_kg_m3 and ice_kg_m3 have one
+// entry per layer.
+void raise_liquid_cloud_to_lcl(std::span<double> cloud_fraction, std::span<double> liquid_kg_m3,
+                               std::span<const double> ice_kg_m3, double ground_m, double lcl_m);
+
 struct WeatherCell {
     double cloud_fraction = 0.0, liquid_water_kg_m3 = 0.0, ice_water_kg_m3 = 0.0;  // grid means
 };
@@ -106,7 +127,7 @@ struct WeatherCell {
 struct Era5Fields {
     weather_decode::FloatGrid cloud_fraction, liquid_kg_kg, ice_kg_kg, temperature_k, surface_pressure_pa,
         surface_geopotential_m2_s2, total_column_water_vapour_kg_m2;
-    // 2 m temperature and dew point (one level each); both empty = no lifting condensation level (lcl_m 0).
+    // 2 m temperature and dew point (one level each); both empty = no lifting condensation level (unknown).
     weather_decode::FloatGrid temperature_2m_k, dewpoint_2m_k;
     std::vector<double> levels_pa;
 };
@@ -115,7 +136,7 @@ struct Era5Fields {
 struct GfsFields {
     weather_decode::FloatGrid cloud_percent, liquid_kg_kg, ice_kg_kg, temperature_k, geopotential_height_m,
         surface_geopotential_height_m;
-    // TMP / DPT 2 m above ground (one level each); both empty = no lifting condensation level (lcl_m 0).
+    // TMP / DPT 2 m above ground (one level each); both empty = no lifting condensation level (unknown).
     weather_decode::FloatGrid temperature_2m_k, dewpoint_2m_k;
     std::vector<double> levels_pa;
 };
@@ -126,12 +147,13 @@ public:
     static WeatherSnapshot from_era5(const WeatherSnapshotId& id, const Era5Fields& fields, const Geoid& geoid);
     static WeatherSnapshot from_gfs(const WeatherSnapshotId& id, const GfsFields& fields, const Geoid& geoid);
     // Synthetic test field: one uniform cloud slab everywhere (layer means of the slab's overlap), ground at 0 m;
-    // the id is the default one (kind off).
+    // the id is the default one (kind off). lcl_m: the lifting condensation level stored for every column (the texels are
+    // the slab as given, not redistributed: a check of the renderer's flat base).
     static WeatherSnapshot uniform_slab(int rows, int columns, double bottom_m, double top_m, double liquid_water_kg_m3,
-                                        double cloud_fraction);
+                                        double cloud_fraction, float lcl_m = weather_lcl_unknown_m);
     // From the cache form (weather_snapshot_file): ground rows x columns, texels as render_texels(). Throws
     // std::invalid_argument on a size mismatch.
-    // lcl_m empty = all zero.
+    // lcl_m empty = all unknown.
     static WeatherSnapshot from_parts(const WeatherSnapshotId& id, int rows, int columns, std::vector<float> ground_m,
                                       std::vector<std::uint8_t> texels, std::vector<float> lcl_m = {});
 
@@ -149,8 +171,9 @@ public:
     const std::vector<std::uint8_t>& texels() const { return texels_; }
     const std::vector<float>& ground_heights_m() const { return ground_m_; }
 
-    // Lifting condensation level of a column (m above the ground; 0 = none known), row * columns() + column. The 2 m
-    // parcel's condensation height from the data's 2 m temperature and dew point; the base of convective cloud.
+    // Lifting condensation level of a column (m above the ground; 0 = saturated surface air, weather_lcl_unknown_m =
+    // unknown), row * columns() + column. The 2 m parcel's condensation height from the data's 2 m temperature and dew
+    // point; the base of convective cloud (the build has already moved the column's boundary-layer condensate above it).
     float lcl_m(int row, int column) const { return lcl_m_[static_cast<std::size_t>(row) * columns_ + column]; }
     const std::vector<float>& lcl_heights_m() const { return lcl_m_; }
 

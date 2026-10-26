@@ -379,3 +379,18 @@ between rows); steep edges of varying width, 10-90 % rise median 8 m (< 10 m), 9
   timed files + the static orography, GFS = 5 x 22 records + HGT surface. Replaced by version 2 (LCL block, 2 m
   temperature and dew point in the downloads); version-1 files are refused and rebuilt.
 
+## Cloud bases at the LCL (static-clouds Task 7, 2026-10-26): the LCL stored but unused, the RG8 column texture, file format 2
+- Superseded text (weather-clouds.md, Model):
+  > - **Lifting condensation level in the snapshot** (`WeatherSnapshot::lcl_m(row, column)`, file format 2): per column the
+  >   condensation height (m above the ground) of the 2 m parcel, Romps 2017 exact (`weather-service.md`); the downsampled set
+  >   and the pole rows average it like the ground. Not yet used by the renderer (the flat cumulus base is a later task).
+  > - Column per pixel: `environment::cloud_render_column_texels` (RG8 per cell and layer: R the grid-mean depth from
+  >   20 km to the layer centre, the A channel's log code; G the largest cloud fraction above; +66 MB per snapshot, two bytes
+  >   per texel) ... Godot gives a Texture3DRD of R8G8 the luminance-alpha swizzle (R, R, R, G): the shaders read `.ra`.
+  >   The empty slot's column texture is a zero LA8 volume (an R8 one reads cover 1 through `.ra`).
+- Why replaced: the LCL now moves the boundary-layer condensate and cuts a flat base in the shader; the base code needs
+  two more bytes per cell, so the column texture became RGBA8 (the same channels in Godot shaders and compute kernels,
+  no swizzle; +66 MB per 0.25-deg snapshot). Format 3: unknown LCL is -1 (0 is the known saturated surface air) and the
+  stored texels are the redistributed ones; version-2 files are refused and rebuilt. GFS pressure for the LCL: the
+  standard atmosphere at the column's ground height instead of a flat 101325 Pa (1500 m ground: 84.6 kPa, LCL ~3 m
+  different at a 10 K spread).

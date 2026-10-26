@@ -125,6 +125,8 @@ inline constexpr double romps_liquid_c_j_kgk = 4119.0;                  // [S: R
 // Tropospheric lapse rate of the standard atmosphere [S: 6.5 K/km, US Standard Atmosphere 1976, NOAA-S/T 76-1562]:
 // the temperature from the surface to the first pressure level above it.
 inline constexpr double standard_lapse_rate_k_per_m = 0.0065;
+// Sea-level temperature of the standard atmosphere [S: 288.15 K, US Standard Atmosphere 1976, NOAA-S/T 76-1562].
+inline constexpr double standard_temperature_k = 288.15;
 // Scale height of the water-vapour density [E: ~2 km, the usual tropospheric value, e.g. Weaver & Ramanathan 1995,
 // JGR 100(D6), 11585]: spreads ERA5's total column water vapour over the pressure levels (virtual temperature);
 // 1.5 / 2 / 2.5 km give 8.5 / 9.5 / 11.3 m max height error over the six fixture columns.
@@ -168,6 +170,17 @@ inline constexpr double cloud_perimeter_fractal_dimension = 1.35;
 // condensation level of the rising air, flat and sharp over the cloud (Wallace & Hobbs 2006, Atmospheric Science, 2nd
 // ed., Academic Press, sect. 3.5)] (cloud_render_texels.hpp: the vertical profile rule).
 inline constexpr double cloud_base_transition_m = 50.0;
+// Cloud bases at the lifting condensation level (weather_snapshot.hpp: raise_liquid_cloud_to_lcl; the shader's flat cut,
+// CLOUD_LCL_RAMP_M in shaders/clouds.gdshaderinc). All three [E]:
+// - the boundary layer below which a liquid cloud base counts as the LCL's: 3 km above the ground (the depth of a
+//   daytime convective boundary layer is 1-3 km, Stull 1988, An Introduction to Boundary Layer Meteorology, ch. 1);
+// - the 2 m dew-point depression below which the surface air counts as saturated, so fog / low stratus may reach the
+//   ground: 1 K (relative humidity ~94 %; the LCL is then ~125 m);
+// - the ramp over which a base cut at the LCL falls from the cloud to nothing: 30 m, tens of metres like the base
+//   transition above (the base of a convective cloud is flat and sharp, Wallace & Hobbs 2006, sect. 3.5).
+inline constexpr double cloud_boundary_layer_top_m = 3000.0;
+inline constexpr double cloud_fog_spread_k = 1.0;
+inline constexpr double cloud_lcl_ramp_m = 30.0;
 // A cloud fraction below this counts as none: half a step of the 8-bit cloud-fraction code (the same constant as
 // CLOUD_MIN_FRACTION in shaders/clouds.gdshaderinc; the shadow lookup and the column cover use it too).
 inline constexpr double cloud_min_cover = 0.5 / 255.0;

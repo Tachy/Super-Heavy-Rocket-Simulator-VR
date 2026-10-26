@@ -50,10 +50,12 @@ only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only wi
   `2m_dewpoint_temperature` (2.36 + 2.40 MB, +4.8 MB on ~149 MB = +3.2 % per hour), GFS `TMP` / `DPT` 2 m above ground
   (0.51 + 0.53 MB, +1.0 MB on ~52 MB of pressure-level records = +2 % per snapshot; measured 2026-10-26 on the ARCO
   store and the 2026-09-20 00Z f006 index). The build turns them into the per-column LCL (`lifting_condensation_level_m`,
-  Romps 2017 exact Lambert-W form, ERA5 with its surface pressure, GFS with the standard one; 0 where unknown) and
-  stores it in the `.wthr` file: format version 2 = ground block, then a float32 LCL block (+4 MB at 0.25 deg), then the
-  texels. Consumed by the cloud renderer from Task 7 (`weather-clouds.md`).
-- **Old files heal**: `read_weather_snapshot` refuses version-1 files (and anything else of another version). A
+  Romps 2017 exact Lambert-W form, ERA5 with its surface pressure, GFS with the standard atmosphere's at the column's
+  ground height `standard_pressure_at_height_pa`; 0 where T - Td < `cloud_fog_spread_k` (fog), -1
+  (`weather_lcl_unknown_m`) where unknown) and moves the column's boundary-layer liquid above it
+  (`raise_liquid_cloud_to_lcl`, `weather-clouds.md`). Stored in the `.wthr` file: format version 3 = ground block, then a
+  float32 LCL block (+4 MB at 0.25 deg), then the texels (version 2 had the unknown level as 0 and no redistribution).
+- **Old files heal**: `read_weather_snapshot` refuses version-1 and -2 files (and anything else of another version). A
   runtime-cache file is then treated as unloadable: deleted and rebuilt from a fresh download (the existing retry path,
   "a snapshot file that cannot be loaded is deleted and rebuilt"), the analog baseline is the shipped
   `data/weather/analog` (regenerated with `python tools/data_pipeline/fetch.py --force weather_analog`; the installer

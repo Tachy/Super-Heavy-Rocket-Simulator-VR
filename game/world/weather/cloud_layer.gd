@@ -8,9 +8,9 @@ extends Node3D
 ## height and noise coordinates, and the quality preset. The world adds `effect` to its Compositor.
 ##
 ## Field textures: the GPU form of a snapshot (StarsimCore.weather_load_snapshot -> cloud_texels RGBA8,
-## cloud_ice_texels R8 and cloud_column_texels RG8 (the grid-mean column and its cover above each layer centre: the
-## light under the clouds, Task 9), columns x rows x 32 layers, no mipmaps; CloudFieldTexture uploads them in chunks of
-## layers over frames). Only two snapshots are resident (a 0.25-deg one is 133 + 33 + 66 MB).
+## cloud_ice_texels R8 and cloud_column_texels RGBA8 (the grid-mean column and its cover above each layer centre: the
+## light under the clouds, Task 9; in layer 0 the cloud base of the cell at its lifting condensation level, Task 7), columns x rows x 32 layers, no mipmaps; CloudFieldTexture uploads them in chunks of
+## layers over frames). Only two snapshots are resident (a 0.25-deg one is 133 + 33 + 133 MB).
 ## Light on the ground (Task 9): the cloud shadow maps (shadow_effect, CloudShadowEffect before the opaque pass) and
 ## their frame (`cloud_shadow_*` globals, set here every frame: anchors near the ground under the camera, re-anchored
 ## only when the camera moved SHADOW_*_REANCHOR_M away - the maps are Earth-fixed in between, no swimming), the slab
@@ -149,7 +149,7 @@ var _target_blend := 0.0
 var _upload := {}  ## the running upload: {slot, id, size, field, ice}
 var _empty_field: ImageTexture3D
 var _empty_ice: ImageTexture3D
-var _empty_column: ImageTexture3D  ## zero (cover 0, depth 0) LA8: an R8 texture would read as cover 1 through .ra
+var _empty_column: ImageTexture3D  ## zero (cover 0, depth 0, no base) RGBA8
 var _pushed_light := {"files": ["", ""], "w1": 0.0, "ok": true}  ## the core's pair as last accepted
 var _slab_transmittance: ImageTexture
 ## Earth-fixed anchors of the shadow maps (render axes, float64; NAN: none yet).
@@ -183,7 +183,7 @@ func setup(core: StarsimCore) -> void:
 	add_child(_quad)
 	_empty_field = _zero_texture(Image.FORMAT_RGBA8, 4)
 	_empty_ice = _zero_texture(Image.FORMAT_R8, 1)
-	_empty_column = _zero_texture(Image.FORMAT_LA8, 2)
+	_empty_column = _zero_texture(Image.FORMAT_RGBA8, 4)
 	for i in range(2):
 		_slots[i] = _empty_slot()
 	_bind_slots()
@@ -522,13 +522,13 @@ func _new_slot(snapshot: Dictionary) -> Dictionary:
 		ice = PackedByteArray()
 		ice.resize(columns * rows * LAYERS)  # no ice share given: liquid shapes
 	var column: PackedByteArray = snapshot.get("cloud_column_texels", PackedByteArray())
-	if column.size() != columns * rows * LAYERS * 2:
+	if column.size() != columns * rows * LAYERS * 4:
 		column = PackedByteArray()
-		column.resize(columns * rows * LAYERS * 2)  # none given: no light taken under the clouds
+		column.resize(columns * rows * LAYERS * 4)  # none given: no light taken under the clouds
 	return {"id": id, "file": String(snapshot.get("file", "")), "size": Vector3(columns, rows, LAYERS),
 		"field": CloudFieldTexture.create(snapshot["cloud_texels"], columns, rows, 4),
 		"ice": CloudFieldTexture.create(ice, columns, rows, 1),
-		"column": CloudFieldTexture.create(column, columns, rows, 2)}
+		"column": CloudFieldTexture.create(column, columns, rows, 4)}
 
 
 ## Frees a slot's volumes unless a resident slot still shows them (show_now shares one upload for a snapshot twice).

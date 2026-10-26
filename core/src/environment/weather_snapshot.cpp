@@ -94,11 +94,26 @@ bool require_optional_2m(const FloatGrid& t2m, const FloatGrid& td2m, int rows, 
     return true;
 }
 
-// Lifting condensation level of one column from the 2 m fields; 0 (none known) where the data is missing.
+// Lifting condensation level of one column from the 2 m fields: weather_lcl_unknown_m where the data is missing, 0 where
+// the surface air is saturated within the fog spread (fog / low stratus may reach the ground).
 float column_lcl_m(const FloatGrid& t2m, const FloatGrid& td2m, int row, int column, double pressure_pa) {
-    const double lcl = lifting_condensation_level_m(cell(t2m, 0, row, column), cell(td2m, 0, row, column), pressure_pa);
-    return std::isfinite(lcl) ? static_cast<float>(std::min(lcl, weather_top_m)) : 0.0f;
+    const double t = cell(t2m, 0, row, column), td = cell(td2m, 0, row, column);
+    const double lcl = lifting_condensation_level_m(t, td, pressure_pa);
+    if (!std::isfinite(lcl)) return weather_lcl_unknown_m;
+    if (t - td < c::cloud_fog_spread_k) return 0.0f;
+    return static_cast<float>(std::min(lcl, weather_top_m));
 }
+
+// Running mean of the known lifting condensation levels (weights of the unknown ones do not count).
+struct LclMean {
+    double sum = 0.0, weight = 0.0;
+    void add(double lcl, double w) {
+        if (lcl < 0.0) return;
+        sum += w * lcl;
+        weight += w;
+    }
+    float value() const { return weight > 0.0 ? static_cast<float>(sum / weight) : weather_lcl_unknown_m; }
+};
 
 double row_latitude_rad(int row, int rows) { return c::pi / 2.0 - row * c::pi / (rows - 1); }
 double column_longitude_rad(int column, int columns) { return column * c::two_pi / columns; }
@@ -169,7 +184,9 @@ struct LevelSample {
 class ColumnLayers {
 public:
     // samples sorted by ascending height; empty = a clear column.
-    void build(std::vector<LevelSample>& samples, double ground_m, std::uint8_t* texels, std::size_t layer_stride) {
+    // lcl_m: the column's lifting condensation level above the ground (raise_liquid_cloud_to_lcl; <= 0 = none).
+    void build(std::vector<LevelSample>& samples, double ground_m, double lcl_m, std::uint8_t* texels,
+               std::size_t layer_stride) {
         std::sort(samples.begin(), samples.end(), [](const LevelSample& a, const LevelSample& b) { return a.h < b.h; });
         samples_ = &samples;
         cumulative_.assign(samples.size(), {0.0, 0.0, 0.0});
@@ -180,17 +197,25 @@ public:
             }
         }
         cursor_ = 0;
+        std::array<double, weather_layer_count> fraction{}, liquid{}, ice{};
         for (int layer = 0; layer < weather_layer_count; ++layer) {
-            std::uint8_t* t = texels + static_cast<std::size_t>(layer) * layer_stride;
-            t[0] = t[1] = t[2] = t[3] = 0;
             const double top = weather_layer_bottom_m(layer + 1);
             const double bottom = std::max(weather_layer_bottom_m(layer), ground_m);
             if (samples.empty() || !(top > bottom)) continue;
             const auto lo = integral_to(bottom), hi = integral_to(top);
             const double thickness = top - bottom;
-            t[0] = encode_weather_cloud_fraction((hi[0] - lo[0]) / thickness);
-            t[1] = encode_weather_water((hi[1] - lo[1]) / thickness);
-            t[2] = encode_weather_water((hi[2] - lo[2]) / thickness);
+            fraction[static_cast<std::size_t>(layer)] = (hi[0] - lo[0]) / thickness;
+            liquid[static_cast<std::size_t>(layer)] = (hi[1] - lo[1]) / thickness;
+            ice[static_cast<std::size_t>(layer)] = (hi[2] - lo[2]) / thickness;
+        }
+        raise_liquid_cloud_to_lcl(fraction, liquid, ice, ground_m, lcl_m);
+        for (int layer = 0; layer < weather_layer_count; ++layer) {
+            std::uint8_t* t = texels + static_cast<std::size_t>(layer) * layer_stride;
+            const auto i = static_cast<std::size_t>(layer);
+            t[0] = encode_weather_cloud_fraction(fraction[i]);
+            t[1] = encode_weather_water(liquid[i]);
+            t[2] = encode_weather_water(ice[i]);
+            t[3] = 0;
         }
     }
 
@@ -320,10 +345,72 @@ double lifting_condensation_level_m(double t2m_k, double td2m_k, double pressure
     return std::max(0.0, cpm * t2m_k / c::romps_gravity_mps2 * (1.0 - b / (a * w)));
 }
 
+double standard_pressure_at_height_pa(double height_m) {
+    const double exponent = c::standard_gravity_mps2 / (c::dry_air_gas_constant_j_kgk * c::standard_lapse_rate_k_per_m);
+    return c::standard_pressure_pa *
+           std::pow(1.0 - c::standard_lapse_rate_k_per_m * height_m / c::standard_temperature_k, exponent);
+}
+
+void raise_liquid_cloud_to_lcl(std::span<double> cloud_fraction, std::span<double> liquid_kg_m3,
+                               std::span<const double> ice_kg_m3, double ground_m, double lcl_m) {
+    const int n = static_cast<int>(liquid_kg_m3.size());
+    if (!(lcl_m > 0.0) || !(lcl_m < c::cloud_boundary_layer_top_m) || cloud_fraction.size() != liquid_kg_m3.size() ||
+        ice_kg_m3.size() != liquid_kg_m3.size()) {
+        return;
+    }
+    const double lcl_height_m = ground_m + lcl_m;
+    const auto at = [](std::span<double> v, int k) -> double& { return v[static_cast<std::size_t>(k)]; };
+    // The lowest liquid layer above the ground and the liquid run that continues up from it.
+    int first = 0;
+    while (first < n && !(at(liquid_kg_m3, first) > 0.0 && weather_layer_bottom_m(first + 1) > ground_m)) ++first;
+    if (first == n) return;
+    const double base_m = std::max(weather_layer_bottom_m(first), ground_m);
+    if (base_m - ground_m >= c::cloud_boundary_layer_top_m || base_m >= lcl_height_m) return;
+    int end = first;
+    while (end < n && at(liquid_kg_m3, end) > 0.0) ++end;
+    // Per layer of the run: the part of its above-ground extent below the LCL (cut) and above it (kept).
+    double mass_below = 0.0, fraction_mass = 0.0, mass_above = 0.0;
+    for (int k = first; k < end; ++k) {
+        const double bottom = std::max(weather_layer_bottom_m(k), ground_m), top = weather_layer_bottom_m(k + 1);
+        const double cut = std::clamp(lcl_height_m, bottom, top) - bottom;
+        mass_below += at(liquid_kg_m3, k) * cut;
+        fraction_mass += at(cloud_fraction, k) * at(liquid_kg_m3, k) * cut;
+        mass_above += at(liquid_kg_m3, k) * (top - bottom - cut);
+    }
+    const double fraction_below = fraction_mass / mass_below;  // mass_below > 0: the first layer's base is under the LCL
+    const double run_top_m = weather_layer_bottom_m(end);
+    for (int k = first; k < end; ++k) {
+        const double bottom = std::max(weather_layer_bottom_m(k), ground_m), top = weather_layer_bottom_m(k + 1);
+        const double above = top - std::clamp(lcl_height_m, bottom, top);
+        if (mass_above > 0.0) {
+            // The water of the cut part is spread over what stays, in proportion to it: the profile above is kept.
+            at(liquid_kg_m3, k) *= (mass_above + mass_below) / mass_above * above / (top - bottom);
+            if (above > 0.0) {
+                at(cloud_fraction, k) = std::max(at(cloud_fraction, k), fraction_below);
+            } else if (!(ice_kg_m3[static_cast<std::size_t>(k)] > 0.0)) {
+                at(cloud_fraction, k) = 0.0;
+            }
+        } else {
+            at(liquid_kg_m3, k) = 0.0;
+            if (!(ice_kg_m3[static_cast<std::size_t>(k)] > 0.0)) at(cloud_fraction, k) = 0.0;
+        }
+    }
+    if (mass_above > 0.0) return;
+    // The whole cloud lies under the LCL: it is lifted to start there, keeping its depth and mean density.
+    const double depth_m = run_top_m - base_m, density = mass_below / depth_m;
+    for (int k = 0; k < n; ++k) {
+        const double bottom = weather_layer_bottom_m(k), top = weather_layer_bottom_m(k + 1);
+        const double overlap = std::min(top, lcl_height_m + depth_m) - std::max(bottom, lcl_height_m);
+        if (!(overlap > 0.0)) continue;
+        at(liquid_kg_m3, k) += density * overlap / (top - bottom);
+        at(cloud_fraction, k) = std::max(at(cloud_fraction, k), fraction_below);
+    }
+}
+
 WeatherSnapshot::WeatherSnapshot(const WeatherSnapshotId& id, int rows, int columns)
     : id_(id), rows_(rows), columns_(columns),
       ground_m_(static_cast<std::size_t>(rows) * columns, 0.0f),
-      lcl_m_(static_cast<std::size_t>(rows) * columns, 0.0f),
+      lcl_m_(static_cast<std::size_t>(rows) * columns, weather_lcl_unknown_m),
       texels_(static_cast<std::size_t>(weather_layer_count) * rows * columns * channels, 0) {}
 
 std::size_t WeatherSnapshot::texel_index(int layer, int row, int column) const {
@@ -371,11 +458,9 @@ WeatherSnapshot WeatherSnapshot::from_era5(const WeatherSnapshotId& id, const Er
             }
             const double ground = geometric_height_m(finite_or_zero(phis) / c::standard_gravity_mps2, lat) + n;
             s.ground_m_[static_cast<std::size_t>(r) * columns + col] = static_cast<float>(ground);
-            if (has_lcl) {
-                s.lcl_m_[static_cast<std::size_t>(r) * columns + col] =
-                    column_lcl_m(f.temperature_2m_k, f.dewpoint_2m_k, r, col, ps);
-            }
-            layers.build(samples, ground, s.texels_.data() + s.texel_index(0, r, col), layer_stride);
+            float& lcl = s.lcl_m_[static_cast<std::size_t>(r) * columns + col];
+            if (has_lcl) lcl = column_lcl_m(f.temperature_2m_k, f.dewpoint_2m_k, r, col, ps);
+            layers.build(samples, ground, lcl, s.texels_.data() + s.texel_index(0, r, col), layer_stride);
         }
     });
     s.make_poles_uniform();
@@ -421,12 +506,12 @@ WeatherSnapshot WeatherSnapshot::from_gfs(const WeatherSnapshotId& id, const Gfs
             }
             const double ground = geometric_height_m(surface_gpm, lat) + n;
             s.ground_m_[static_cast<std::size_t>(r) * columns + col] = static_cast<float>(ground);
-            // GFS 2 m fields come without a surface pressure: the standard one (the LCL is insensitive to it).
+            // GFS 2 m fields come without a surface pressure: the standard atmosphere's at the column's ground height.
+            float& lcl = s.lcl_m_[static_cast<std::size_t>(r) * columns + col];
             if (has_lcl) {
-                s.lcl_m_[static_cast<std::size_t>(r) * columns + col] =
-                    column_lcl_m(f.temperature_2m_k, f.dewpoint_2m_k, r, col, c::standard_pressure_pa);
+                lcl = column_lcl_m(f.temperature_2m_k, f.dewpoint_2m_k, r, col, standard_pressure_at_height_pa(surface_gpm));
             }
-            layers.build(samples, ground, s.texels_.data() + s.texel_index(0, r, col), layer_stride);
+            layers.build(samples, ground, lcl, s.texels_.data() + s.texel_index(0, r, col), layer_stride);
         }
     });
     s.make_poles_uniform();
@@ -434,9 +519,10 @@ WeatherSnapshot WeatherSnapshot::from_gfs(const WeatherSnapshotId& id, const Gfs
 }
 
 WeatherSnapshot WeatherSnapshot::uniform_slab(int rows, int columns, double bottom_m, double top_m,
-                                              double liquid_water_kg_m3, double cloud_fraction) {
+                                              double liquid_water_kg_m3, double cloud_fraction, float lcl_m) {
     require_grid(rows, columns);
     WeatherSnapshot s(WeatherSnapshotId{}, rows, columns);
+    std::fill(s.lcl_m_.begin(), s.lcl_m_.end(), lcl_m);
     for (int layer = 0; layer < weather_layer_count; ++layer) {
         const double b = weather_layer_bottom_m(layer), t = weather_layer_bottom_m(layer + 1);
         const double overlap = std::max(0.0, std::min(t, top_m) - std::max(b, bottom_m)) / (t - b);
@@ -457,7 +543,7 @@ WeatherSnapshot WeatherSnapshot::from_parts(const WeatherSnapshotId& id, int row
                                             std::vector<float> ground_m, std::vector<std::uint8_t> texels,
                                             std::vector<float> lcl_m) {
     require_grid(rows, columns);
-    if (lcl_m.empty()) lcl_m.assign(static_cast<std::size_t>(rows) * columns, 0.0f);
+    if (lcl_m.empty()) lcl_m.assign(static_cast<std::size_t>(rows) * columns, weather_lcl_unknown_m);
     if (ground_m.size() != static_cast<std::size_t>(rows) * columns ||
         lcl_m.size() != static_cast<std::size_t>(rows) * columns ||
         texels.size() != static_cast<std::size_t>(weather_layer_count) * rows * columns * channels) {
@@ -476,16 +562,16 @@ void WeatherSnapshot::make_poles_uniform() {
     // All columns of a pole row are one point: their mean (ground and every layer) so no longitude seam appears there.
     const auto& table = water_decode_table();
     for (int r : {0, rows_ - 1}) {
-        double ground = 0.0, lcl = 0.0;
+        double ground = 0.0;
+        LclMean lcl;
         for (int col = 0; col < columns_; ++col) {
             ground += ground_m_[static_cast<std::size_t>(r) * columns_ + col];
-            lcl += lcl_m_[static_cast<std::size_t>(r) * columns_ + col];
+            lcl.add(lcl_m_[static_cast<std::size_t>(r) * columns_ + col], 1.0);
         }
         ground /= columns_;
-        lcl /= columns_;
         for (int col = 0; col < columns_; ++col) {
             ground_m_[static_cast<std::size_t>(r) * columns_ + col] = static_cast<float>(ground);
-            lcl_m_[static_cast<std::size_t>(r) * columns_ + col] = static_cast<float>(lcl);
+            lcl_m_[static_cast<std::size_t>(r) * columns_ + col] = lcl.value();
         }
         for (int layer = 0; layer < weather_layer_count; ++layer) {
             double sum[3] = {0.0, 0.0, 0.0};
@@ -568,7 +654,8 @@ WeatherSnapshot WeatherSnapshot::downsampled(int factor) const {
     const auto& table = water_decode_table();
     for_each_row(rows, [&](int r) {
         for (int col = 0; col < columns; ++col) {
-            double weight_sum = 0.0, ground = 0.0, lcl = 0.0;
+            double weight_sum = 0.0, ground = 0.0;
+            LclMean lcl;
             std::array<std::array<double, 3>, weather_layer_count> sums{};
             for (int dr = -h; dr <= h; ++dr) {
                 const int sr = r * factor + dr;
@@ -578,7 +665,7 @@ WeatherSnapshot WeatherSnapshot::downsampled(int factor) const {
                     const double w = weight(dr) * weight(dc);
                     weight_sum += w;
                     ground += w * ground_m_[static_cast<std::size_t>(sr) * columns_ + sc];
-                    lcl += w * lcl_m_[static_cast<std::size_t>(sr) * columns_ + sc];
+                    lcl.add(lcl_m_[static_cast<std::size_t>(sr) * columns_ + sc], w);
                     for (int layer = 0; layer < weather_layer_count; ++layer) {
                         const std::size_t i = texel_index(layer, sr, sc);
                         sums[layer][0] += w * decode_weather_cloud_fraction(texels_[i]);
@@ -588,7 +675,7 @@ WeatherSnapshot WeatherSnapshot::downsampled(int factor) const {
                 }
             }
             out.ground_m_[static_cast<std::size_t>(r) * columns + col] = static_cast<float>(ground / weight_sum);
-            out.lcl_m_[static_cast<std::size_t>(r) * columns + col] = static_cast<float>(lcl / weight_sum);
+            out.lcl_m_[static_cast<std::size_t>(r) * columns + col] = lcl.value();
             for (int layer = 0; layer < weather_layer_count; ++layer) {
                 const std::size_t i = out.texel_index(layer, r, col);
                 out.texels_[i] = encode_weather_cloud_fraction(sums[layer][0] / weight_sum);

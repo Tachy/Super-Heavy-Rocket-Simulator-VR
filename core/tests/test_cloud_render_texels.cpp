@@ -193,18 +193,57 @@ TEST_CASE("Cloud column texels carry the grid-mean depth and the cover above eac
     const WeatherSnapshot snapshot = WeatherSnapshot::from_parts({}, rows, columns,
                                                                  std::vector<float>(rows * columns, 0.0f), texels);
     const std::vector<std::uint8_t> column = cloud_render_column_texels(snapshot);
-    REQUIRE(column.size() == texels.size() / 2);
+    REQUIRE(column.size() == texels.size());
     for (int layer = 0; layer < weather_layer_count; ++layer) {
         const CloudColumnDepths cpu = cloud_column_depths_above(snapshot, 0.3, 0.5, layer_centre_m(layer));
         const double expected = cpu.mean;
         const std::size_t texel = texel_offset(layer, 1, 2, rows, columns) / 4;
         // G: the largest cloud fraction from the top down to the centre (the column's cover).
-        CHECK(decode_weather_cloud_fraction(column[2 * texel + 1]) == Approx(cpu.max_fraction).margin(0.003));
-        const std::uint8_t code = column[2 * texel];
+        CHECK(decode_weather_cloud_fraction(column[4 * texel + 1]) == Approx(cpu.max_fraction).margin(0.003));
+        const std::uint8_t code = column[4 * texel];
         if (expected < cloud_depth_code_min) {
             CHECK(code <= 1);
         } else {
             CHECK(decode_cloud_optical_depth(code) == Approx(expected).epsilon(0.03));
         }
     }
+}
+
+TEST_CASE("Column texels carry the cloud base of each cell in layer 0", "[weather]") {
+    // Ground heights 0, 1500 m (ellipsoid) with LCLs of 800 m, 600 m; saturated (0), unknown (-1) and a level above
+    // the boundary layer (3500 m): only the first two get a base, the others stay 0 (not cut).
+    const int rows = 2, columns = 3;
+    std::vector<std::uint8_t> texels(static_cast<std::size_t>(weather_layer_count) * rows * columns * 4, 0);
+    const std::vector<float> ground = {0.0f, 1500.0f, 20.0f, 20.0f, 20.0f, -40.0f};
+    const std::vector<float> lcl = {800.0f, 600.0f, 0.0f, weather_lcl_unknown_m, 3500.0f, 250.0f};
+    const WeatherSnapshot snapshot = WeatherSnapshot::from_parts({}, rows, columns, ground, texels, lcl);
+    const std::vector<std::uint8_t> column = cloud_render_column_texels(snapshot);
+    const auto base_code = [&](int cell, int layer) {
+        const std::size_t i = (static_cast<std::size_t>(layer) * rows * columns + cell) * 4;
+        return static_cast<std::uint16_t>(256 * column[i + 2] + column[i + 3]);
+    };
+    CHECK(decode_cloud_lcl_base(base_code(0, 0)) == Approx(800.0).margin(0.35));
+    CHECK(decode_cloud_lcl_base(base_code(1, 0)) == Approx(2100.0).margin(0.35));  // from the ground, not the ellipsoid
+    CHECK(decode_cloud_lcl_base(base_code(5, 0)) == Approx(210.0).margin(0.35));
+    for (int cell : {2, 3, 4}) CHECK(base_code(cell, 0) == 0);
+    for (int layer = 1; layer < weather_layer_count; ++layer) CHECK(base_code(0, layer) == 0);
+    // The code: 0 = none, monotone, within 0.32 m, covers -500 .. 20.5 km.
+    CHECK(encode_cloud_lcl_base(std::nan("")) == 0);
+    CHECK(std::isnan(decode_cloud_lcl_base(0)));
+    CHECK(encode_cloud_lcl_base(-500.0) == 1);
+    CHECK(encode_cloud_lcl_base(20500.0) == 65535);
+    CHECK(encode_cloud_lcl_base(1e9) == 65535);
+    for (double h : {-300.0, 0.0, 123.456, 2999.9, 9000.0, 20000.0}) {
+        CHECK(decode_cloud_lcl_base(encode_cloud_lcl_base(h)) == Approx(h).margin(0.17));
+    }
+}
+
+TEST_CASE("The base cut ramps the cloud in over cloud_lcl_ramp_m above the level", "[weather]") {
+    const double base = 1200.0, ramp = constants::cloud_lcl_ramp_m;
+    CHECK(cloud_lcl_cut_factor(base - 500.0, base) == 0.0);
+    CHECK(cloud_lcl_cut_factor(base, base) == 0.0);
+    CHECK(cloud_lcl_cut_factor(base + 0.5 * ramp, base) == Approx(0.5));
+    CHECK(cloud_lcl_cut_factor(base + ramp, base) == 1.0);
+    CHECK(cloud_lcl_cut_factor(base + 4.0 * ramp, base) == 1.0);
+    CHECK(cloud_lcl_cut_factor(10.0, std::nan("")) == 1.0);  // no base: not cut
 }
