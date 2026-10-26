@@ -387,7 +387,8 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 			centre_eye).to_byte_array())
 	_centre["previous"] = centre_clip
 	var centre_bytes := _matrix_floats(centre_clip)
-	centre_bytes.append_array([centre_full.x, centre_full.y, low.x, low.y, 1.0 if stereo else 0.0, 0.0, 0.0, 0.0])
+	centre_bytes.append_array([centre_full.x, centre_full.y, low.x, low.y, 1.0 if stereo else 0.0, pixel_angle,
+			0.0, 0.0])
 	_rd.buffer_update(_centre_buffer, 0, CENTRE_BLOCK_SIZE, centre_bytes.to_byte_array())
 	var march_set1: Array = [_ubo(_centre["buffer"]), _tex(1, nearest_clamp, buffers.get_depth_layer(0, false)),
 			_image(2, _centre["color"]), _image(3, _centre["depth"])]

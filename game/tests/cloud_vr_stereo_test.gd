@@ -28,6 +28,10 @@ const DISTANCE_TOLERANCE_REL := 1.0e-6
 const REPROJECTION_TOLERANCE_NDC := 1.0e-7
 ## cloud_pass.gdshaderinc CLOUD_CENTRE_PROBE_M: where a centre ray is projected into an eye to find its depth texel.
 const CENTRE_PROBE_M := 1.0e6
+## cloud_pass.gdshaderinc: the soft edge's width in metres and the tent radius limits (centre pixels).
+const EDGE_SOFT_M := 20.0
+const TENT_RADIUS_MIN := 1.0
+const TENT_RADIUS_MAX := 2.0
 
 var _failures := 0
 
@@ -43,6 +47,7 @@ func _initialize() -> void:
 	for distance_m in [100.0, 2000.0, 20000.0]:
 		for azimuth in [0.0, 0.3, -0.6]:
 			_test_centre_upsample(distance_m, azimuth)
+	_test_edge_radius()
 	print("cloud_vr_stereo_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -276,6 +281,32 @@ func _test_centre_upsample(distance_m: float, azimuth: float) -> void:
 		worst_px = maxf(worst_px, ((got - want) * 0.5 * Vector2(low)).length())
 	_check(worst_px < 0.01, "centre upsample, cloud at %.0f m, azimuth %.1f: both eyes read its centre sample "
 			% [distance_m, azimuth] + "(worst %s centre px)" % String.num_scientific(worst_px))
+
+
+## cloud_pass.gdshaderinc cloud_tent_radius (mirror): the eyes' soft-edge tent spans EDGE_SOFT_M at the cloud's distance
+## (a cloud's frayed edge is about as wide in metres near and far, so it narrows on screen with distance; a fixed screen
+## radius blurred far clouds as much as near ones, user 2026-10-26), between bilinear (1) and the soft maximum (2).
+static func _tent_radius(cloud_m: float, pixel_angle: float) -> float:
+	return clampf(EDGE_SOFT_M / (maxf(cloud_m, 1.0) * maxf(pixel_angle, 1.0e-9)), TENT_RADIUS_MIN, TENT_RADIUS_MAX)
+
+
+func _test_edge_radius() -> void:
+	var centre := CloudCentreView.build(_eye_projections(1.0, 0.0), Vector2i(3530, 2834), 3)
+	var angle: float = centre["pixel_angle"]
+	_check(_tent_radius(500.0, angle) == TENT_RADIUS_MAX, "edge radius: a cloud at 500 m is soft (%.2f px)"
+			% _tent_radius(500.0, angle))
+	_check(_tent_radius(50000.0, angle) == TENT_RADIUS_MIN, "edge radius: a cloud at 50 km is sharp (%.2f px)"
+			% _tent_radius(50000.0, angle))
+	var last := INF
+	var falling := true
+	for d in [1000.0, 3000.0, 6000.0, 8000.0, 12000.0, 20000.0]:
+		var r := _tent_radius(d, angle)
+		falling = falling and r <= last
+		last = r
+	_check(falling, "edge radius: narrows steadily with the distance")
+	var in_metres := _tent_radius(8000.0, angle) * 8000.0 * angle
+	_check(absf(in_metres - EDGE_SOFT_M) < 1.0e-6 or _tent_radius(8000.0, angle) in [TENT_RADIUS_MIN, TENT_RADIUS_MAX],
+			"edge radius: %.1f m wide at 8 km between the limits" % in_metres)
 
 
 func _check(ok: bool, message: String) -> void:

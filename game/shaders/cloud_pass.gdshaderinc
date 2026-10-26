@@ -559,8 +559,8 @@ layout(set = 1, binding = 2) uniform sampler2D low_color;      // the accumulate
 layout(set = 1, binding = 3) uniform sampler2D low_depth;      // the march distances (of the centre view), nearest
 layout(rgba16f, set = 1, binding = 4) uniform writeonly image2D out_image;
 // The centre view the history belongs to (CloudEffect): its transform from Earth-local offsets of the head to its clip
-// space, its sizes (virtual full, low) and the mode: params.x 1 = an eye reads the centre (VR), 0 = the view is the
-// centre (the desktop: its own pixel grid, the 2 x 2 gather of before).
+// space, its sizes (virtual full, low) and params: x the mode (1 = an eye reads the centre (VR), 0 = the view is the
+// centre: the desktop's own pixel grid, the 2 x 2 gather of before), y the centre pixel's angle [rad].
 layout(set = 1, binding = 5, std140) uniform CloudCentre {
 	mat4 clip_from_earth;
 	vec4 sizes;
@@ -570,10 +570,16 @@ layout(set = 1, binding = 5, std140) uniform CloudCentre {
 // [E] Sharpness of the depth weight: a factor e^-1 per 1/4 of a e-fold distance ratio (|ln(D / D_i)| = 0.25: a
 // sample 28 % nearer or farther weighs 37 %); equal distances (the sky, a far cloud deck over the sea) weigh 1.
 const float CLOUD_DEPTH_SHARPNESS = 4.0;
-// [E] Radius of the eyes' tent gather in centre pixels (user 2026-10-26: the march's noise may stay but must end in
-// soft alpha edges, not grain): weights max(0, 1 - |d| / R) per axis over the 4 x 4 nearest centre pixels. Display
-// only: the history stays unfiltered (a filter fed back would blur more every frame).
-const float CLOUD_TENT_RADIUS = 2.0;
+// The eyes' tent gather (user 2026-10-26: the march's noise may stay but must end in soft alpha edges, not grain):
+// weights max(0, 1 - |d| / R) per axis over the 4 x 4 nearest centre pixels. Display only: the history stays
+// unfiltered (a filter fed back would blur more every frame). R spans CLOUD_EDGE_SOFT_M at the cloud's distance - a
+// cloud's frayed edge is about as wide in metres near and far, so it narrows on screen with distance (a fixed screen
+// radius blurred far clouds as much as near ones, user 2026-10-26) - between bilinear (1) and the soft maximum (2):
+// with the VR centre's ~1.8 mrad pixels soft up to ~5.5 km, bilinear beyond ~11 km.
+// [E] Width of a cloud's soft edge [m] (the frayed rim of a cumulus; cloud_vr_stereo_test mirrors these three).
+const float CLOUD_EDGE_SOFT_M = 20.0;
+const float CLOUD_TENT_RADIUS_MIN = 1.0;
+const float CLOUD_TENT_RADIUS_MAX = 2.0;
 // Distance where an eye pixel without scene geometry is reprojected into the centre (the far sky: rotation only).
 const float CLOUD_UPSAMPLE_SKY_M = 1.0e7;
 
@@ -592,7 +598,13 @@ vec2 cloud_centre_position(vec3 offset) {
 
 // The tent gather at a centre position: premultiplied colour + alpha weighted by the tent and the depth weight; `cloud`
 // gets the alpha-weighted cloud distance of the taps (0 without cloud).
-vec4 cloud_tent_gather(vec2 position, float scene_m, out float cloud) {
+// The tent radius [centre pixels] for a cloud at `cloud_m` (CLOUD_EDGE_SOFT_M; params.y: the centre pixel's angle).
+float cloud_tent_radius(float cloud_m) {
+	return clamp(CLOUD_EDGE_SOFT_M / (max(cloud_m, 1.0) * max(cloud_centre.params.y, 1.0e-9)), CLOUD_TENT_RADIUS_MIN,
+			CLOUD_TENT_RADIUS_MAX);
+}
+
+vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float cloud) {
 	ivec2 low = ivec2(cloud_centre.sizes.zw);
 	ivec2 base = ivec2(floor(position - 0.5)) - 1;
 	vec4 sum = vec4(0.0);
@@ -605,7 +617,7 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, out float cloud) {
 		for (int i = 0; i <= 3; i++) {
 			ivec2 q = clamp(base + ivec2(i, j), ivec2(0), low - 1);
 			vec2 d = abs(vec2(base + ivec2(i, j)) + 0.5 - position);
-			float tent = max(0.0, 1.0 - d.x / CLOUD_TENT_RADIUS) * max(0.0, 1.0 - d.y / CLOUD_TENT_RADIUS);
+			float tent = max(0.0, 1.0 - d.x / radius) * max(0.0, 1.0 - d.y / radius);
 			vec4 c = texelFetch(low_color, q, 0);
 			vec2 depths = texelFetch(low_depth, q, 0).rg;
 			float march_m = min(depths.r, 1.0e20);
@@ -640,9 +652,12 @@ void main() {
 		vec3 dir = cloud_ray_earth(vec2(pixel) + 0.5);
 		vec3 eye = cloud_view.eye_earth.xyz;
 		float cloud_m;
-		cloud_tent_gather(cloud_centre_position(eye + dir * min(scene_m, CLOUD_UPSAMPLE_SKY_M)), scene_m, cloud_m);
+		cloud_tent_gather(cloud_centre_position(eye + dir * min(scene_m, CLOUD_UPSAMPLE_SKY_M)), scene_m,
+				CLOUD_TENT_RADIUS_MAX, cloud_m);
 		float at_m = cloud_m > 0.0 ? min(cloud_m, scene_m) : min(scene_m, CLOUD_UPSAMPLE_SKY_M);
-		imageStore(out_image, pixel, cloud_tent_gather(cloud_centre_position(eye + dir * at_m), scene_m, cloud_m));
+		float radius = cloud_m > 0.0 ? cloud_tent_radius(cloud_m) : CLOUD_TENT_RADIUS_MAX;
+		imageStore(out_image, pixel, cloud_tent_gather(cloud_centre_position(eye + dir * at_m), scene_m, radius,
+				cloud_m));
 		return;
 	}
 	ivec2 low = ivec2(cloud_view.sizes.zw);
