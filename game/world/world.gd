@@ -11,8 +11,8 @@ const EARTH_MEAN_RADIUS_M := 6371000.0
 const MOON_RADIUS_M := 1737400.0
 const SUN_RADIUS_M := 695700000.0
 const GROUND_EYE_HEIGHT_M := 2.0
-## [E] Lag of the sim snapshot behind the clock tolerated beyond the frame's own step (the sim thread trails by about
-## one frame, unevenly) before the clock is held back.
+## [E] Lag of the sim snapshot behind the instant it was asked for in the previous frame tolerated before the clock is
+## held back (the sim thread answers last frame's request; a genuinely lagging sim falls further behind).
 const CLOCK_HOLD_SLACK_S := 0.05
 ## [E] The pad disc's top sits this far above the site height: the terrain's plateau lies exactly at the site height,
 ## and coplanar surfaces z-fight. Far below anything a vehicle's contact could show.
@@ -98,6 +98,7 @@ func _ready() -> void:
 	weather.snapshots_changed.connect(clouds.set_target)
 	clouds.core_cache_missed.connect(weather.reload_into_core_cache)
 	clock.time_jumped.connect(func(_tdb_s: float) -> void: clouds.effect.reset_history())  # a clock jump: no history
+	clock.time_jumped.connect(func(_tdb_s: float) -> void: _sim_target_tdb_s = NAN)  # no lag after a jump
 	_setup_bodies(data_dir)
 	_warm_earth_clouds_shader()
 	stars.load_catalogue(data_dir.path_join("stars/stars.csv"))
@@ -117,6 +118,7 @@ var _warmup_frames := 0
 var _mission_press_tdb_s := 0.0  ## clock instant of the pending mission start (the clock holds there meanwhile)
 var _camera_serial := 0  ## serial the camera distance was last fitted to
 var _last_world_tdb_s := NAN  ## the instant of the previous update_world (eye adaptation's time step)
+var _sim_target_tdb_s := NAN  ## the instant the flight sim was asked for last frame (clock_held_back)
 var _environment: Environment  ## the WorldEnvironment's (ambient energy under the clouds, Task 9)
 
 
@@ -139,6 +141,15 @@ func _process(delta: float) -> void:
 			_warmup_mesh = null
 
 
+## Whether the world clock waits for the flight sim: its snapshot (`reached_tdb_s`) is behind the instant the sim was
+## asked for in the previous frame by more than CLOCK_HOLD_SLACK_S. The snapshot always trails the clock by about one
+## frame step (warp x delta); comparing with this frame's delta instead held the clock back whenever a frame was shorter
+## than the one before (jitter, VR reprojection) - the flight ran at 50-75 % speed at high time warp. NAN: no previous
+## request (first frame, after a clock jump) - no hold.
+static func clock_held_back(previous_target_tdb_s: float, reached_tdb_s: float) -> bool:
+	return not is_nan(previous_target_tdb_s) and previous_target_tdb_s - reached_tdb_s > CLOCK_HOLD_SLACK_S
+
+
 ## Recomputes the whole scene for clock.tdb_s. Public so tests can render a fixed instant.
 func update_world() -> void:
 	# The flight simulation may lag behind the clock at high time warp; the clock then waits for it.
@@ -154,13 +165,15 @@ func update_world() -> void:
 		flight.advance(clock.tdb_s, _delta)  # only collects the start's outcome
 	elif flight.sim.is_active():
 		flight.sim.set_realtime_planning(clock.warp <= 1.0)  # landing re-plans never stall real-time play
+		var previous_target := _sim_target_tdb_s
 		var reached := flight.advance(clock.tdb_s, _delta)
+		_sim_target_tdb_s = clock.tdb_s
 		if flight.take_clock_resync():  # a refused mission start left its vehicle at its own epoch
 			clock.set_time(reached)
-		elif clock.tdb_s - reached > CLOCK_HOLD_SLACK_S + _delta * absf(clock.warp):
-			# the sim fell behind by more than the one frame step its snapshot trails by: hold the clock back. (A fixed
-			# 0.05 s held it back on every other frame below 20 fps or at time warp: the flight ran at half speed.)
+			_sim_target_tdb_s = NAN
+		elif clock_held_back(previous_target, reached):
 			clock.tdb_s = reached
+			_sim_target_tdb_s = reached
 		# The scene is drawn at the instant of the simulation snapshot (the sim thread trails the clock by about a
 		# frame, unevenly): Earth, pad and tower at the clock time but vehicles at the snapshot made the vehicles jump
 		# by up to several metres against the pad every frame (Earth rotation ~420 m/s).

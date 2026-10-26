@@ -28,6 +28,20 @@ func _initialize() -> void:
 	_check(not rate.due(frame, t, 100.0), "time warp 100: the next frame is not due")
 	rate.invalidate()
 	_check(rate.due(frame, t, 100.0), "invalidate(): due at once")
+	# A clock held back for the sim (or pinned by a pending mission start) advances less than warp x time: no jump.
+	for i in 3:
+		rate.due(frame, t, 100.0)  # t stands still at warp 100
+	_check(not rate.due(frame, t, 100.0), "a held-back clock is no jump (no redraw every frame)")
+	_check(rate.due(frame, t - 3600.0, 100.0), "a jump backwards is a jump")
+	var back := UiRate.new()
+	var tb := 5000.0
+	back.due(frame, tb, -100.0)
+	var back_due := 0
+	for i in 90:  # one second running backwards at warp -100
+		tb -= frame * 100.0
+		if back.due(frame, tb, -100.0):
+			back_due += 1
+	_check(back_due >= 14 and back_due <= 16, "running backwards (warp -100): still 15 updates per second (%d)" % back_due)
 	print("UI RATE TEST ", "PASSED" if _failures == 0 else "FAILED (%d)" % _failures)
 	quit(0 if _failures == 0 else 1)
 
