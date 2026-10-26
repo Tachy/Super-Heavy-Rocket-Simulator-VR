@@ -96,9 +96,9 @@ numerics, rendering, VR integration, tests, data pipeline and release packaging 
   tags ([S] sourced, [E] estimate, [D] derived); `tools/vehicle_report.py` prints mass and delta-v budgets.
 - Only free data and tools; every source and its licence is recorded and `CREDITS.md` is generated.
 
-## Vehicles
+## Launch vehicles and spacecraft
 
-| Vehicle | What it is |
+| Launch vehicle / spacecraft | What it is |
 |---|---|
 | Starship V3 (Super Heavy Block 3 / Ship Block 3) | the two-stage launch system: 33-engine booster, ship with six Raptors, flaps, heat shield |
 | Starship Tanker | ship variant carrying propellant to the depot |
@@ -106,8 +106,8 @@ numerics, rendering, VR integration, tests, data pipeline and release packaging 
 | Starship HLS (+ its launch stack) | lunar lander: no heat shield or flaps, legs, twelve canted landing thrusters |
 | Falcon 9 Block 5 | with return to the landing zone or a drone-ship landing |
 | Crew Dragon | crew capsule with Draco RCS, SuperDracos, parachutes |
-| ISS | the space station as a docking target |
-| Ejection seat, parachutist | crew escape from a crewed ship return |
+
+Also simulated: the ISS as a docking target, ejection seats and parachutists for crew escape.
 
 ## Missions
 

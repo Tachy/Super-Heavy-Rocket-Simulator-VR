@@ -106,9 +106,9 @@ sind alle aus diesem Gespräch hervorgegangen.
   Delta-v-Budgets aus.
 - Nur freie Daten und Werkzeuge; jede Quelle wird mit ihrer Lizenz erfasst, `CREDITS.md` wird daraus erzeugt.
 
-## Fahrzeuge
+## Trägerraketen und Raumschiffe
 
-| Fahrzeug | Was es ist |
+| Trägerrakete / Raumschiff | Was es ist |
 |---|---|
 | Starship V3 (Super Heavy Block 3 / Ship Block 3) | das zweistufige Startsystem: Booster mit 33 Triebwerken, Ship mit sechs Raptoren, Klappen, Hitzeschild |
 | Starship Tanker | Ship-Variante, die Treibstoff zum Depot bringt |
@@ -116,8 +116,8 @@ sind alle aus diesem Gespräch hervorgegangen.
 | Starship HLS (+ Startkonfiguration) | Mondlandefähre: ohne Hitzeschild und Klappen, mit Beinen und zwölf schräg gestellten Landetriebwerken |
 | Falcon 9 Block 5 | mit Rückkehr zur Landezone oder Landung auf dem Drohnenschiff |
 | Crew Dragon | Besatzungskapsel mit Draco-RCS, SuperDracos, Fallschirmen |
-| ISS | die Raumstation als Andockziel |
-| Schleudersitz, Fallschirmspringer | Besatzungsrettung bei einer bemannten Ship-Rückkehr |
+
+Außerdem simuliert: die ISS als Andockziel, Schleudersitze und Fallschirmspringer für die Besatzungsrettung.
 
 ## Missionen
 
