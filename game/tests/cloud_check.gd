@@ -120,9 +120,9 @@ const FAR_HANDOVER_TOLERANCE := 0.03  ## the far map and the slanted column are 
 const CACHE_VIEW_SIZE := 64
 const CACHE_SLAB_TOLERANCE := 0.05
 const CACHE_BROKEN_TOLERANCE := 0.10  ## the voxel size (62.5 m across, 40 m up near the camera) against the shapes
-## [E] Broken cloud on the deterministic march: a silhouette pixel (alpha < CACHE_EDGE_ALPHA, or within one march pixel
-## of one) may reach this; interior pixels and the 99th percentile keep CACHE_BROKEN_TOLERANCE.
-const CACHE_BROKEN_EDGE_TOLERANCE := 0.20
+## [E] Acceptance of every section 8 case (controller ruling): p99 of the per-pixel relative error and the worst pixel.
+const CACHE_P99_TOLERANCE := 0.10
+const CACHE_WORST_TOLERANCE := 0.20
 const CACHE_EDGE_ALPHA := 0.3  ## [E] the controller's silhouette bound (fix round 1 of Task 3)
 ## The fill's budget in the checks: 1/16 of all voxels per frame (complete after 16 frames).
 const CACHE_BUDGET_DIVISOR := 16
@@ -629,20 +629,18 @@ func _light_cache_samples() -> void:
 						+ " of the view mean %.5f /sr") % [stats["worst"] * 100.0, stats["at"] % CACHE_VIEW_SIZE,
 						stats["at"] / CACHE_VIEW_SIZE, images[1][stats["at"]], images[0][stats["at"]],
 						stats["mean_error"] * 100.0, stats["bias"] * 100.0, stats["mean"]]
-				var ok: bool = stats["mean"] > 0.0 and stats["worst"] <= c[2]
-				if c[0] == broken:
-					# The silhouette pixels (CACHE_EDGE_ALPHA): the deterministic sample at a density edge reads the
-					# cache's voxel-interpolated light where the shape's gradient is steepest - a per-pixel error the
-					# jittered march averaged over its frames. Interior pixels keep the single-pixel limit; all pixels:
-					# p99 within it and the worst within CACHE_BROKEN_EDGE_TOLERANCE.
-					var shape := await _mean_image(_point(height), view, sun, 4, size, 0, 1)
-					var split := _cache_error_split(images[1], images[0], shape, divisor)
-					ok = stats["mean"] > 0.0 and split["interior"] <= c[2] and split["p99"] <= c[2] \
-							and stats["worst"] <= CACHE_BROKEN_EDGE_TOLERANCE
-					detail += ("; interior worst %.2f %% (%d px), silhouette worst %.2f %% (%d px), p99 %.2f %%; "
-							+ "pixels over %.0f %%: %d interior, %d silhouette") % [split["interior"] * 100.0,
-							split["interior_count"], split["edge"] * 100.0, split["edge_count"], split["p99"] * 100.0,
-							c[2] * 100.0, split["interior_over"], split["edge_over"]]
+				# Acceptance for every case and pixel: p99 of the per-pixel relative error within CACHE_P99_TOLERANCE and the
+				# worst pixel within CACHE_WORST_TOLERANCE. The residue is voxel interpolation of cumulus self-shadowing at a
+				# fixed sample in cascade 0 (62.5 m voxels): worst seen 16 % at p99 6.8 %; finer voxels cost GPU on the binding
+				# Task 10 budget. The interior / silhouette split is printed for information only.
+				var shape := await _mean_image(_point(height), view, sun, 4, size, 0, 1)
+				var split := _cache_error_split(images[1], images[0], shape, divisor)
+				var ok: bool = stats["mean"] > 0.0 and split["p99"] <= CACHE_P99_TOLERANCE \
+						and stats["worst"] <= CACHE_WORST_TOLERANCE
+				detail += ("; interior worst %.2f %% (%d px), silhouette worst %.2f %% (%d px), p99 %.2f %%; "
+						+ "pixels over %.0f %%: %d interior, %d silhouette") % [split["interior"] * 100.0,
+						split["interior_count"], split["edge"] * 100.0, split["edge_count"], split["p99"] * 100.0,
+						CACHE_BROKEN_TOLERANCE * 100.0, split["interior_over"], split["edge_over"]]
 				_check("light cache vs light march, cascade %d, %s, Sun %.0f deg" % [k, c[3], sun_elevation], ok, detail)
 				if c[0] == broken:
 					var at := Vector2i(stats["at"] % CACHE_VIEW_SIZE, stats["at"] / CACHE_VIEW_SIZE)
