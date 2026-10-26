@@ -1,7 +1,7 @@
 # VR performance
 
 Current state of the frame budget in VR: what is measured, how, and where the time goes. Plan:
-`docs/superpowers/plans/2026-10-26-vr-performance.md` (ledger `.superpowers/sdd/2026-10-26-vr-performance/`).
+`docs/superpowers/archive/plans/2026-10-26-vr-performance.md`.
 Cloud-pass numbers: `weather-clouds.md` (Performance).
 
 ## Rig and budget

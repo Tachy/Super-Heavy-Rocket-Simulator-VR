@@ -1,7 +1,7 @@
 # Static clouds - design
 
 Date: 2026-10-26. Status: draft for the user's approval. Follows the VR performance plan
-(`docs/superpowers/plans/2026-10-26-vr-performance.md`, parts 1-2) and changes the M8 clouds
+(`docs/superpowers/archive/plans/2026-10-26-vr-performance.md`, parts 1-2) and changes the M8 clouds
 (`docs/subsystems/weather-clouds.md`).
 
 ## Why
