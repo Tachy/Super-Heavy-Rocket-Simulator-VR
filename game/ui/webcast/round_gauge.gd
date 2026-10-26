@@ -8,6 +8,9 @@ const RADIUS_PX := 40.0
 const TRACK_START_RAD := 0.75 * PI  ## bottom left (screen angles: clockwise from +x)
 const TRACK_SPAN_RAD := 1.5 * PI
 const SIGNED_SPAN_RAD := 0.75 * PI  ## each side of the top
+## [E] Smallest fraction change that redraws: half a pixel along the shorter track (signed: one side, 0.75 pi);
+## a continuous value redrew every frame (VR performance). Text changes always redraw.
+const FRACTION_STEP := 0.5 / (RADIUS_PX * SIGNED_SPAN_RAD)
 const VALUE_SIZE := 24
 const UNIT_SIZE := 12
 const LABEL_SIZE := 13
@@ -27,12 +30,14 @@ func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
-func show_value(new_text: String, new_fraction: float) -> void:
-	if new_text == text and is_equal_approx(new_fraction, fraction):
-		return
+## Returns whether it redraws (the text changed or the arc moved by FRACTION_STEP or more).
+func show_value(new_text: String, new_fraction: float) -> bool:
+	if new_text == text and absf(new_fraction - fraction) < FRACTION_STEP:
+		return false
 	text = new_text
 	fraction = new_fraction
 	queue_redraw()
+	return true
 
 
 func _draw() -> void:

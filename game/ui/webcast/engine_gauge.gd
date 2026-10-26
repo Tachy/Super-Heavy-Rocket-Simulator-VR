@@ -20,16 +20,32 @@ const UNLIT_STROKE_PX := 1.5
 const LABEL := "Triebwerke"
 
 var dots: Array = []  ## from layout(): {"position": Vector2 (stage radius = 1), "firing": bool, "vacuum": bool}
+var dot_radius_px := ENGINE_DOT_MAX_PX  ## sea-level dot radius of the current layout (_dot_radius_px)
 
 
 func _init() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
-func show_stage(engines: Array, stages: Array) -> void:
+## Shows the stage; redraws only when the dots changed (an engine lit or out, another layout) and recomputes the dot
+## radius (O(n^2) over the engines) only with the layout: called every frame, this was ~5 ms of a VR frame. Returns
+## whether it redraws.
+func show_stage(engines: Array, stages: Array) -> bool:
 	var stage := lowest_engine_stage(engines)
-	dots = layout(engines, stage, _stage_radius_m(stages, stage, engines))
+	var new_dots := layout(engines, stage, _stage_radius_m(stages, stage, engines))
+	if new_dots == dots:
+		return false
+	var same_layout := new_dots.size() == dots.size()
+	if same_layout:
+		for i in new_dots.size():
+			if new_dots[i]["position"] != dots[i]["position"] or new_dots[i]["vacuum"] != dots[i]["vacuum"]:
+				same_layout = false
+				break
+	dots = new_dots
+	if not same_layout:
+		dot_radius_px = _dot_radius_px()
 	queue_redraw()
+	return true
 
 
 ## Index of the lowest stage with engines (stage 0 is the bottom of the stack), -1 without engines.
@@ -62,7 +78,7 @@ func _draw() -> void:
 
 func _draw_unprofiled() -> void:
 	WebcastStyle.draw_ring(self, Vector2.ZERO, STAGE_RADIUS_PX, WebcastStyle.DIM)
-	var dot_px := _dot_radius_px()
+	var dot_px := dot_radius_px
 	for dot: Dictionary in dots:
 		var p: Vector2 = dot["position"] * ENGINE_AREA_FRACTION * STAGE_RADIUS_PX
 		var r := dot_px * _size_of(dot)

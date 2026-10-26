@@ -32,6 +32,8 @@ var _scale_t0: Variant = null   ## T-0 the scale belongs to
 var _scale_target := TimelineWindow.new()  ## the scale chosen for the current set of next events
 var _last_now := 0.0
 var _snap := true
+var _rate := UiRate.new()  ## texts and gauges at 15 Hz; the timeline arc moves every frame
+var _rate_index := -2
 
 
 func _init() -> void:
@@ -77,17 +79,22 @@ func _process_unprofiled(delta: float) -> void:
 	var now := world.clock.tdb_s
 	var active := sim.is_active()
 	var timeline: Dictionary = sim.mission_timeline() if active else {}
+	_update_timeline(timeline, now, delta)
+	var index := world.view_target.resolve(sim) if active and world.focus == World.FOCUS_VEHICLE else -1
+	if index != _rate_index:  # another viewed object: its readouts at once
+		_rate_index = index
+		_rate.invalidate()
+	if not _rate.due(delta, now, world.clock.warp):
+		return
 	top_bar.show_utc(TopBar.format_utc(world.core.tdb_s_to_utc(now)))
 	top_bar.show_local_time(LocalTime.shared().camera_line(world.core, world.camera.position_gcrf_m, now))
 	top_bar.show_weather(world.weather.status_text())
-	var index := world.view_target.resolve(sim) if active and world.focus == World.FOCUS_VEHICLE else -1
 	var mission := sim.mission_display_name() if active else ""
 	if mission == "" and active:  # no mission name configured: the viewed (else the controlled) vehicle's
 		mission = sim.body_display_name(index if index >= 0 else sim.controlled_index())
 	if sim.autopilot_status().get("planning", false):  # also a mission start planned before its vehicle is placed
 		mission = FlightController.PLANNING_EVENT  # the countdown holds while the onboard computer plans
 	show_clock(timeline, now, mission)
-	_update_timeline(timeline, now, delta)
 	if index < 0:
 		show_gauges({"left": [], "right": []}, {}, [], [], {}, "")
 		return
@@ -114,9 +121,9 @@ func show_clock(timeline: Dictionary, now: float, mission: String) -> void:
 ## Shows exactly the selected gauges ({"left": ids, "right": ids}) of a body, and its name under them.
 func show_gauges(selection: Dictionary, telemetry: Dictionary, engines: Array, stages: Array, docking: Dictionary,
 		body_name: String) -> void:
-	_hide_body_gauges()
 	var left: Array = selection["left"]
 	var right: Array = selection["right"]
+	_hide_body_gauges(left + right)
 	var x := OUTER_MARGIN_PX
 	for id: String in left:
 		if id == "engines":
@@ -188,10 +195,14 @@ func _place(id: String, x: float, telemetry: Dictionary, docking: Dictionary) ->
 	gauge.show_value(RoundGauge.format_number(value, _decimals(GaugeConfig.shared().gauges[id], value)), gauge_fraction(id, value))
 
 
-func _hide_body_gauges() -> void:
-	engine_gauge.visible = false
-	for gauge: RoundGauge in gauges.values():
-		gauge.visible = false
+## Hides the gauges not in `keep` (shown ones stay visible: a visibility toggle redraws a gauge, and toggling all of
+## them every frame redrew every gauge every frame, ~8 ms of a VR frame).
+func _hide_body_gauges(keep: Array = []) -> void:
+	if not keep.has("engines"):
+		engine_gauge.visible = false
+	for id: String in gauges:
+		if not keep.has(id):
+			gauges[id].visible = false
 
 
 ## The gauge's value in its display unit.

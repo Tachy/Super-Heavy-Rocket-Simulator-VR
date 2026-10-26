@@ -12,10 +12,16 @@ const SAMPLES := 720  ## 0.5 deg per segment on a circular orbit: no visible cor
 ## [E] fade band above the surface for lines of sight through the atmosphere: the Karman line (100 km), where the
 ## visible limb haze ends
 const ATMOSPHERE_FADE_HEIGHT_M := 100000.0
+## [E] The ribbon is rebuilt (720 segments in GDScript: ~5 ms) only with new points or after the camera moved this far
+## from the build's anchor; in between the node is moved with the camera. Only the scaled-space pull-in of points
+## beyond CelestialBody.SCALED_SPACE_DISTANCE_M then aims from the anchor: <= 1 km / 1.5e7 m = 0.004 deg, ~0.15 px
+## in the headset (the fragment shader's limb test works in view space and is exact).
+const REBUILD_DISTANCE_M := 1000.0
 const SHADER := preload("res://shaders/orbit_ribbon.gdshader")
 
 var _planned := PackedVector3Array()
 var _age := INF
+var _anchor_gcrf_m := Vector3.INF  ## camera of the last build
 var _mesh := ArrayMesh.new()
 var _material := ShaderMaterial.new()
 
@@ -29,12 +35,29 @@ func _ready() -> void:
 
 
 func update_view(sim: FlightSim, camera_gcrf_m: Vector3, delta: float) -> void:
-	_mesh.clear_surfaces()
 	if not sim.is_active():
+		_mesh.clear_surfaces()
+		_planned = PackedVector3Array()
+		_anchor_gcrf_m = Vector3.INF
 		return
 	_age += delta
+	var refreshed := false
 	if _age >= REFRESH_S:
 		_age = 0.0
-		_planned = sim.target_orbit_points(SAMPLES)
+		var points := sim.target_orbit_points(SAMPLES)
+		refreshed = points != _planned  # a fixed target orbit gives the same points: no rebuild
+		_planned = points
 	_material.set_shader_parameter("earth_center_world", Frames.to_render(-camera_gcrf_m))  # GCRF is Earth-centred
-	RibbonMesh.add(_mesh, _planned, camera_gcrf_m, true, _material)
+	place(_planned, refreshed, camera_gcrf_m)
+
+
+## Builds the ribbon at the camera when the points are new or the camera left REBUILD_DISTANCE_M around the last
+## build, else moves the built ribbon with the camera.
+func place(points_gcrf: PackedVector3Array, points_changed: bool, camera_gcrf_m: Vector3) -> void:
+	if points_changed or camera_gcrf_m.distance_to(_anchor_gcrf_m) > REBUILD_DISTANCE_M:
+		_mesh.clear_surfaces()
+		RibbonMesh.add(_mesh, points_gcrf, camera_gcrf_m, true, _material)
+		_anchor_gcrf_m = camera_gcrf_m
+		position = Vector3.ZERO
+	else:
+		position = Frames.to_render(_anchor_gcrf_m - camera_gcrf_m)

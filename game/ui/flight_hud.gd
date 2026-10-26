@@ -16,6 +16,8 @@ func _ready() -> void:
 	_label.add_theme_font_size_override("font_size", 15)
 	add_child(_label)
 
+var _rate := UiRate.new()  ## the readout at 15 Hz (UiRate)
+
 
 func _process(_delta: float) -> void:
 	FrameProfiler.begin(&"ui_hud")
@@ -27,6 +29,9 @@ func _process_unprofiled(_delta: float) -> void:
 	var sim := world.flight.sim
 	visible = sim.is_active()
 	if not visible:
+		_rate.invalidate()
+		return
+	if not _rate.due(_delta, world.clock.tdb_s, world.clock.warp):
 		return
 	var index := sim.controlled_index()
 	var t: Dictionary = sim.telemetry(index)

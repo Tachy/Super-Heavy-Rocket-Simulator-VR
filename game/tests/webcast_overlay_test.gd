@@ -66,6 +66,14 @@ func _test_numbers() -> void:
 	_check(RoundGauge.format_number(-1234567.0, 1) == "-1.234.567,0", "negative, grouped (%s)"
 			% RoundGauge.format_number(-1234567.0, 1))
 	_check(RoundGauge.format_number(-0.04, 1) == "0,0", "no negative zero (%s)" % RoundGauge.format_number(-0.04, 1))
+	# VR performance: a round gauge redraws when its text changes or its arc moves by half a pixel or more
+	var gauge := RoundGauge.new()
+	_check(gauge.show_value("1,0", 0.5), "round gauge: first value drawn")
+	_check(not gauge.show_value("1,0", 0.5 + 0.5 * RoundGauge.FRACTION_STEP), "sub-pixel arc change: no redraw")
+	_check(gauge.show_value("1,0", 0.5 + 2.0 * RoundGauge.FRACTION_STEP), "arc moves a pixel: redraw")
+	_check(gauge.show_value("1,1", gauge.fraction), "text changes: redraw")
+	_check(gauge.show_value("1,1", 1.0) and gauge.fraction == 1.0, "full track: redraw, exact end value")
+	gauge.free()
 	_check(RoundGauge.format_number(999.96, 1) == "1.000,0", "rounding carries into the grouping")
 
 
@@ -95,6 +103,19 @@ func _test_engines() -> void:
 	_check(dots[1]["position"].is_equal_approx(Vector2(0.0, -1.5) / 4.5) and not dots[1]["firing"]
 			and dots[1]["vacuum"],
 			"body z -> down on the gauge (z = -1.5 m: up)")
+	# VR performance: the gauge redraws only when what it shows changes, the dot radius only with the layout
+	var gauge := EngineGauge.new()
+	var stages := [{"diameter_m": 9.0}, {"diameter_m": 9.0}]
+	_check(gauge.show_stage(engines, stages), "first show: drawn")
+	var radius := gauge.dot_radius_px
+	_check(not gauge.show_stage(engines.duplicate(true), stages), "same engines again: no redraw")
+	var lit := engines.duplicate(true)
+	lit[2]["firing"] = true
+	_check(gauge.show_stage(lit, stages) and gauge.dot_radius_px == radius, "an engine lights: redraw, same dot radius")
+	var moved := lit.duplicate(true)
+	moved[1]["position_m"] = Vector3(0.0, 1.0, 0.0)
+	_check(gauge.show_stage(moved, stages) and gauge.dot_radius_px != radius, "another layout: new dot radius")
+	gauge.free()
 
 
 func _test_values() -> void:
@@ -165,6 +186,13 @@ func _test_overlay() -> void:
 	_check(shown.size() == 2 and "g_load" in shown and "altitude" in shown and overlay.engine_gauge.visible,
 			"exactly the selected gauges shown (%s)" % str(shown))
 	_check(overlay.group_name == "Booster Mk3", "the body's display name under its gauges")
+	# VR performance: showing the same selection again toggles no visibility (each toggle redraws the gauge)
+	var toggles := [0]
+	overlay.engine_gauge.visibility_changed.connect(func() -> void: toggles[0] += 1)
+	overlay.gauges["altitude"].visibility_changed.connect(func() -> void: toggles[0] += 1)
+	overlay.show_gauges({"left": ["engines", "g_load"], "right": ["altitude"]}, t, [engine], [{"diameter_m": 9.0}], {},
+			"Booster Mk3")
+	_check(toggles[0] == 0, "same selection again: no visibility toggles (%d)" % toggles[0])
 	overlay.show_gauges({"left": [], "right": ["altitude"]}, t, [], [], {}, "Booster Mk3")
 	_check(not overlay.engine_gauge.visible and not overlay.gauges["g_load"].visible, "deselected gauges hidden")
 	overlay.show_gauges({"left": [], "right": []}, {}, [], [], {}, "Booster Mk3")

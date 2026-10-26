@@ -34,6 +34,7 @@ var _mission_list: Array[Dictionary] = []
 var _start_button: Button
 var _start_status := Label.new()
 var _warp_before_pause := 1.0
+var _rate := UiRate.new()  ## the readouts at 15 Hz (UiRate)
 
 
 func _ready() -> void:
@@ -114,6 +115,8 @@ func _process_unprofiled(_delta: float) -> void:
 		_utc_label.text = "SPICE-Daten fehlen: python tools/data_pipeline/fetch.py"
 		return
 	var t := world.clock.tdb_s
+	if not _rate.due(_delta, t, world.clock.warp):
+		return
 	_utc_label.text = "%s UTC" % world.core.tdb_s_to_utc(t).substr(0, 19).replace("T", "  ")
 	var lines := PackedStringArray()
 	lines.append("Zeitraffer: %sx" % _format_warp(world.clock.warp))
