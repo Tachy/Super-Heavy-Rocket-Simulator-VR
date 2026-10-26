@@ -9,7 +9,7 @@
 #      2 km ahead inside the slab is exp(-beta 2 km) within 3 % (the scene depth -> distance convention); a near
 #      "mountain" edge through a half-resolution block: no cloud over the mountain, the sky's slab within 5 %;
 #   3. climbing out of the slab in 50 m steps (looking up, the shapes on, temporal accumulation off) changes the centre
-#      5 x 5 pixels by <= 5 % of the climb's brightest value per step (no pop);
+#      5 x 5 pixels by <= 5.5 % of the climb's brightest value per step (no pop);
 #   4. the Sun's scattered radiance (debug output 2) of a slab of tau ~10 seen from above vs the core's CPU reference,
 #      for both multiple-scattering models: the closed form vs slab_reflected_radiance with a converged light march (24
 #      samples, mean of 8 frames) 5 % - the port of the 3D source; the Monte Carlo table (Task 8b) vs
@@ -78,7 +78,8 @@ const TABLE_RADIANCE_TOLERANCE := 0.03
 const PRESET_RADIANCE_TOLERANCE := 0.15
 const CONVERGED_LIGHT_SAMPLES := 24
 const RADIANCE_FRAMES := 8
-const CLIMB_STEP_LIMIT := 0.05
+# 5.5 %: the steeper rims of Task 4 (max edge width 40 m) let a 50 m step cross more of a rim (measured 5.07 %).
+const CLIMB_STEP_LIMIT := 0.055
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2

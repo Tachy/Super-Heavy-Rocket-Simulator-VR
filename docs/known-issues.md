@@ -45,3 +45,7 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   thinner than the reanalysis says; the limits (light between columns, shadow darkness under broken cloud, plumes always draw
   over clouds, earthshine at the constant Bond albedo, half-resolution staircase at sharp dark edges, no rain / fog /
   wind) are listed under "Open points and known limits" in `docs/subsystems/weather-clouds.md`.
+- `cloud_far_check.gd` (open, 2026-10-26): the Moon-view case needs `data/weather/cache/era5_1089330.wthr`, which the
+  cache eviction removed (environmental; refetch it or pick a cached epoch). "broken cf 0.4, volume with the shapes"
+  block luminance inside / outside fails (38 % vs 10 %, worst point 0.14 vs 0.20) since 477a356 (deterministic march,
+  static clouds Task 3; 8 % at 9a47649); the cause is not yet isolated (`docs/subsystems/weather-clouds.md`).

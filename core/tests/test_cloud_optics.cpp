@@ -414,27 +414,51 @@ TEST_CASE("Noise coverage is preserved", "[weather]") {
 }
 
 TEST_CASE("A cumulus edge rises from 10 % to 90 % of its interior extinction within the edge width", "[weather]") {
-    // The steepness: the shell of a cumulus is tens of metres, not the hundreds of the M8 soft range. The ramp's 10 %
-    // to 90 % rise spans 0.61 of the width w(n), so in metres it stays inside the edge width, and the widest edge is
-    // at most 40 m.
+    // The steepness, measured on the real field: along horizontal lines through the shape tile (1 m steps, the shader's
+    // shape value and width noise) the density ramp((v - t) / w(n)) is followed at every rim where it climbs from
+    // below 10 % to above 90 % of its interior value without falling back; the distance of the two crossings is the
+    // rim's rise in metres. The fractal field is rougher than the edge width (its first passage from 10 % to 90 % is
+    // shorter than the width), so the bounds are measured: 20 .. 40 m gives a median of 5 m and a 90th percentile of
+    // 13 m, the M8 soft range of 25 .. 200 m 10 m and 24 m. Bounds: median below 10 m, 90th percentile within 20 m,
+    // i.e. inside the narrow end of the edge width.
     const CloudNoise noise = generate_cloud_noise();
-    CHECK(c::cloud_edge_width_min_m == Approx(20.0));
-    CHECK(c::cloud_edge_width_max_m <= 40.0);
-    auto ramp_at = [](double level) {
-        double lo = 0.0, hi = 1.0;
-        for (int i = 0; i < 60; ++i) (cloud_edge_ramp(0.5 * (lo + hi)) < level ? lo : hi) = 0.5 * (lo + hi);
-        return 0.5 * (lo + hi);
-    };
-    const double rise = ramp_at(0.9) - ramp_at(0.1);  // in widths
-    CHECK(rise < 1.0);
-    for (double n : {0.0, 0.5, 1.0}) {
-        const double width_m = c::cloud_edge_width_min_m * std::pow(c::cloud_edge_width_max_m / c::cloud_edge_width_min_m, n);
-        const double rise_m = rise * width_m;  // the ramp is linear in the value, the value in m by the median increment
-        report("width noise %.1f: edge %.1f m, 10..90 %% rise %.1f m (value width %.4f)\n", n, width_m, rise_m,
-               cloud_edge_width_value(noise, n));
-        CHECK(rise_m <= width_m);
-        CHECK(rise_m <= 40.0);
+    const double state = 3.0;
+    const double threshold = cloud_coverage_threshold(noise, state, 102);  // cloud fraction 0.4
+    const double step_m = 1.0, window_m = 400.0;
+    const double n = noise.shape_size;
+    std::vector<double> rises_m;
+    std::mt19937_64 rng(46);
+    std::uniform_real_distribution<double> unit(0.0, 1.0);
+    for (int line = 0; line < 8; ++line) {
+        const double y = unit(rng) * cloud_shape_tile_horizontal_m, z = unit(rng) * cloud_shape_tile_vertical_m;
+        std::vector<double> density;
+        for (double x = 0.0; x < cloud_shape_tile_horizontal_m; x += step_m) {
+            const math::Vec3 p{x, y, z};
+            const math::Vec3 texel{x * n / cloud_shape_tile_horizontal_m, y * n / cloud_shape_tile_horizontal_m,
+                                   z * n / cloud_shape_tile_vertical_m};
+            const double s_r = sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 0, texel);
+            const double s_a = sample_noise_trilinear(noise.shape_rgba, noise.shape_size, 3, texel);
+            const double v = cloud_shape_value(noise, s_r, p, state);
+            const double w = cloud_edge_width_value(noise, s_a);
+            density.push_back(cloud_edge_ramp((v - threshold) / w));
+        }
+        // Every upward 0.1 crossing that stays above 0.1 until it reaches 0.9 (a rim, not a speck of noise); the walk
+        // is capped at the window, a rim that does not reach 0.9 within it counts with the window length.
+        for (std::size_t i = 1; i < density.size(); ++i) {
+            if (!(density[i - 1] < 0.1 && density[i] >= 0.1)) continue;
+            std::size_t j = i;
+            while (j < density.size() && density[j] < 0.9 && density[j] >= 0.1 && (j - i) * step_m < window_m) ++j;
+            if (j < density.size() && density[j] >= 0.9) rises_m.push_back((j - i) * step_m);
+            else if ((j - i) * step_m >= window_m) rises_m.push_back(window_m);
+        }
     }
+    REQUIRE(rises_m.size() > 100);
+    std::sort(rises_m.begin(), rises_m.end());
+    const double median_m = rises_m[rises_m.size() / 2];
+    const double p90_m = rises_m[rises_m.size() * 9 / 10];
+    report("%zu clean rims: 10..90 %% rise median %.1f m, 90th percentile %.1f m\n", rises_m.size(), median_m, p90_m);
+    CHECK(median_m < 10.0);
+    CHECK(p90_m <= 20.0);
 }
 
 TEST_CASE("Cloud edges of varying width keep the grid-mean water at every detail state", "[weather]") {

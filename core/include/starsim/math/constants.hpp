@@ -143,8 +143,8 @@ inline constexpr double cloud_ice_effective_radius_m = 30e-6;
 // log-uniform between the two values by a width noise). [E: 20 m and 40 m, the tens of metres of the turbulent inner
 // shell that aircraft cross at shallow-cumulus edges, Katzwinkel, Siebert, Heus & Shaw 2014, J. Atmos. Sci. 71, 2810
 // (subsiding shells, Heus & Jonker 2008, J. Atmos. Sci. 65, 1003): a sunlit cumulus has a crisp rim; the ~200 m
-// transition zone of the margin (Wang, Geerts & French 2009, J. Atmos. Sci. 66, 3660) is the cloud-edge humidity
-// gradient, not the optical edge. The log-uniform spread between the ends is an estimate.]
+// transition zone of the margin (Wang, Geerts & French 2009, J. Atmos. Sci. 66, 3660) is, by estimate, the cloud-edge
+// humidity gradient, not the optical edge [E]. The log-uniform spread between the ends is an estimate.]
 inline constexpr double cloud_edge_width_min_m = 20.0;
 inline constexpr double cloud_edge_width_max_m = 40.0;
 // Area-perimeter fractal dimension of cloud and rain areas [S: D = 1.35 +- 0.05 over areas of 1 to 1.2e6 km^2 (radar

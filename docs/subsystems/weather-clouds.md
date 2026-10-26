@@ -31,10 +31,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   its mean, so silhouettes stay irregular down to the pixel at every distance. Tables per detail state L = sum w_k
   (256 x 4, linear between rows): thresholds t[L](cf) (covered area = cf at every state) and edge mean factors m[L].
 - **Steep edges of varying width** (static clouds Task 4): density = mean / m[L](cf) x smoothstep((v - t) / w(n)); the
-  edge zone width varies log-uniformly between 20 and 40 m (`cloud_edge_width_min_m` / `_max_m` [E]: Katzwinkel et al.
-  2014 inner shells; 10 m broke the base-contour case 9, see Task 4 report) by the width noise n in the shape's A
-  channel; w_min / w_max = the median increment of v over those widths (0.0207 / 0.0316). m is taken over the joint (v, n) distribution: the cell
-  mean stays the field's (0.996-1.000 at the table states, also between them). Ice-dominated cloud (the ice share)
+  edge zone width varies log-uniformly between 20 and 40 m (`cloud_edge_width_min_m` / `_max_m` [E]: Katzwinkel et
+  al. 2014 inner shells; 10 m: case 9 desktop 3 px vs limit 2) by the width noise n in the shape's A channel;
+  w_min / w_max = the median increment of v over those widths (0.0207 / 0.0316). m is taken over the joint (v, n)
+  distribution: the cell mean stays the field's (0.996-1.000 at the table states, also between them). Ice-dominated cloud (the ice share)
   mixes in the ramp of thin-sheet coordinates (vertical tile 2 km instead of 16 km [E]; no fibre direction: no wind in
   the snapshot), the same detail. Shape tile 32 km across / 16 km high [E]; Earth-fixed, the camera's part in float64
   on the CPU (level k's origin fract(4^k x level 0's)).
