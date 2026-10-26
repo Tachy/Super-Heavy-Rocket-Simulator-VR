@@ -109,8 +109,8 @@ points refreshed only every `REFRESH_S` - rebuild with the points, move it with 
 
 The light toward the Sun is looked up in a light cache instead of marched per cloud sample (`weather-clouds.md`): 5
 cascades x 128 x 128 x 512 voxels, R16F, 2 generations = 160 MB of VRAM (budget 192 MB [E]). Its fill is spread over
-frames: at most 65 536 voxels per frame (96 + 32 light samples each); `cloud_check.gd` section 8 measures every
-frame of a full refresh (640 frames, 7.1 s at 90 Hz; numbers measured at 98 304 voxels before the budget was lowered): median 0.099, worst 0.454 ms (RTX 4090, the check's slab). The
+frames: at most 98 304 voxels per frame (96 + 32 light samples each); `cloud_check.gd` section 8 measures every
+frame of a full refresh (427 frames, 4.7 s at 90 Hz): median 0.099, worst 0.454 ms (RTX 4090, the check's slab). The
 cost per voxel depends on the GPU's clock state and the weather, not the jobs: on the slab 262 144 voxels took 0.18 ms
 at full clock and 0.37-0.51 ms clocked down (the earlier 0.45-0.80 ms spread at 327 680); in ERA5 weather (below)
 196 608 voxels reached 0.45 ms per second's mean at full speed, 98 304 0.44 ms in the slow state. Task 1's

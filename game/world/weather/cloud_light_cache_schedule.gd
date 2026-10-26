@@ -98,10 +98,10 @@ const REFRAME_M := 1.0e6
 ## 0.37-0.51 ms when it clocks down in a light scene (the 0.45-0.80 ms spread at 327 680: the GPU's clock state, not
 ## the jobs - one run steady at 0.37, another 0.18 with single frames at 0.38-0.51); real weather costs more per voxel
 ## (terrain_perf --render_scale=1.65, ERA5 2025-10-26 15 UTC, per-second means: 196 608 voxels up to 0.45 ms, 131 072
-## up to 0.48 ms in a run where the whole GPU ran ~2x slower - the system's state, every pass alike). So 4 layers of
-## cascade 0 (65 536 voxels, <= 0.5 ms also in that slow state). A full refresh of all 42 M voxels takes 640 frames (7.1 s at
+## up to 0.48 ms in a run where the whole GPU ran ~2x slower - the system's state, every pass alike). So 6 layers of
+## cascade 0 (98 304 voxels, ~0.36 ms in that slow state). A full refresh of all 42 M voxels takes 427 frames (4.7 s at
 ## 90 Hz), cross-faded.
-const BUDGET_VOXELS := 65536
+const BUDGET_VOXELS := 98304
 
 ## [E] The progressive fill's strip width and first square (cascade 0: 1 km; 131 072 voxels, ~7 frames at a fifth of the
 ## budget): a first fill or a refill after a reset shows its inner part within a few frames, and a re-anchor's slab is

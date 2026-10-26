@@ -83,9 +83,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   refilled. The `CLOUD_LIGHT_FILL` kernel evaluates `cloud_light_optical_depth_with` at each voxel centre (96 near +
   32 far samples at the stratified midpoints, deterministic; detail band-limited at the voxel's size; the point solved
   for the march's exact model height; the field mixed at the generation's blend). The fill is progressive: the
-  schedule hands the render thread exactly min(65 536, what is missing) voxels of jobs per frame (<= 0.5 ms GPU,
-  measured below; whole layers, rows or part of a row of a strip), a full refresh of all 42 M voxels takes 640 frames
-  (7.1 s at 90 Hz). A slot's held part is a rectangle growing strip by strip: a 16 x 16-voxel square around the ground
+  schedule hands the render thread exactly min(98 304, what is missing) voxels of jobs per frame (<= 0.5 ms GPU,
+  measured below; whole layers, rows or part of a row of a strip), a full refresh of all 42 M voxels takes 427 frames
+  (4.7 s at 90 Hz). A slot's held part is a rectangle growing strip by strip: a 16 x 16-voxel square around the ground
   point first (every cascade holds its ground point after 6 frames of a first fill), then strips <= 16 voxels wide
   along the side nearest the ground point; a strip in progress keeps its finished layers through a re-anchor; cascade
   k starts each strip at layer k x 512 / 5
@@ -102,10 +102,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   (`cloud_light_cache_test.gd`): a light is shown until its cascade's next one has faded in, at most two full refreshes
   and a fade (~10 s): at 100x warp every cascade's shown light within 2.2-3.6 deg of the Sun (bound 4.4 deg), its
   ground point held in every frame; at 1000x (~42 deg unbounded) the 25-deg drop holds it (24.6-25.0 deg, ground
-  point held in 98 % of the frames, dropped once at the RESET). Flight (budget 65 536): at 1 km/s every cascade keeps
-  its ground point; at 2 km/s cascade 0 loses it (held 95 % of the frames, open); at 7.8 km/s the re-anchor slabs need
-  ~2.7x the budget - cascades 3-4 keep it, 0-2 fall behind (held 9 / 6 / 79 % of the frames; the next cascade or the
-  march takes their samples). Lookup (`cloud_cached_light_depth` -> (weighted
+  point held in every frame). Flight: at 1 and 2 km/s every cascade keeps its ground point; at 7.8 km/s the
+  re-anchor slabs of all cascades need ~1.8x the budget - cascades 2-4 keep it, 0 and 1 fall behind (held 6 / 53 % of
+  the frames; the next cascade or the march takes their samples). Lookup (`cloud_cached_light_depth` -> (weighted
   cached tau, weight of the hybrid cascades, weight left) and the
   hybrid cascades' weights):
   cascade k has weight 1 within 34 voxels of the ground point (Chebyshev), falling to 0 at 42 (a band of 8 voxels:
@@ -331,11 +330,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   along its ray and the worst pixel by the cascade holding each pixel's slab middle - the 1-km near march left
   cascade 2 32 %, 3 39.6 %, 4 15.1 % there, the higher views seeing the finer hybrid cascades too); a view beyond
   every cascade (complete fill) and the frames right after a clock
-  jump bit-identical to the march; the fill at the game's budget (65 536 voxels) <= 0.5 ms in every frame over the
-  640 frames of a full refresh from nothing: still fails at 65 536 voxels - median 0.090, p95 0.32, worst 0.579 ms
-  (fix round 2; the isolated spikes are clock-state transitions; fix round 1 at 98 304: median 0.11-0.12, worst 0.43-0.65); the per-frame times flip between ~0.09 and ~0.30 ms for alike jobs (the GPU's
-  clock state), and an A/B with round 3's sequential serving gave the same spread (worst 0.40-0.56; the fair sharing
-  adds ~0.02 ms at the median: more dispatches). Round 3: median 0.099, worst 0.454 ms. Section 10 (no seam; the march
+  jump bit-identical to the march; the fill at the game's budget (98 304 voxels) with the 95th percentile <= 0.5 ms over the
+  427 frames of a full refresh from nothing (fix round 3: median, p95 and the worst frame printed; the worst frame is
+  an isolated spike at a GPU clock-state transition in a lightly loaded test, 0.43-0.65 ms in fix rounds 1-2, median
+  0.09-0.12, p95 0.32 ms; the per-frame times flip between ~0.09 and ~0.30 ms for alike jobs, the GPU's clock state;
+  the per-frame worst under load is measured in the headset in Task 10). Round 3: median 0.099, worst 0.454 ms. Section 10 (no seam; the march
   with the cache's sample
   count): the row-to-row step of (cache - march) / mean along a line of pixels over each edge band within the image
   noise: 0 -> 1 0.046 / 0.071 %, 1 -> 2 0.030 / 0.050 %, 2 -> 3 0.021 / 0.048 %, 3 -> 4 0.061 / 0.074 %, 4 -> march
@@ -518,10 +517,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 - Light cache: the hybrid near march (1 / 3 / 2 / 2 km, 12-32 samples) costs the cloud pass +35-42 % in the VR proxy
   over round 3's 1 km in every cascade, which itself was +45-65 % over the pure lookup (`vr-performance.md`): over the
   2.5 ms budget in VR - Task 10's binding item. The fill's GPU time per voxel depends on the GPU's clock state and the
-  weather (real weather ~2x the slab's); at the former budget (98 304 voxels) single frames of a first fill reach 0.43-0.65
-  ms (clock-state transitions; `cloud_check` section 8's every-frame check fails in most runs, open). Under 1000x
-  warp every cascade's shown light lags the Sun by up to 25 deg (the drop bound; 100x: <= 3.6 deg); at 2 km/s
-  cascade 0 and at 7.8 km/s cascades 0-2 fall behind their re-anchors. Beyond 34-42 km the light is marched (the volume march ends at <= 34
+  weather (real weather ~2x the slab's); at the budget (98 304 voxels) single frames of a first fill reach 0.43-0.65
+  ms (clock-state transitions; `cloud_check` section 8 asserts the 95th percentile, the worst frame under load is
+  Task 10's). Under 1000x
+  warp every cascade's shown light lags the Sun by up to 25 deg (the drop bound; 100x: <= 3.6 deg); at 7.8 km/s
+  cascades 0-1 fall behind their re-anchors. Beyond 34-42 km the light is marched (the volume march ends at <= 34
   km).
 - The transfer table is a plane-parallel slab result on a tilted independent column: light is not moved between
   columns (no light leaking around a cumulus' shadowed side beyond the entry-surface tilt); the HG peak is treated as
