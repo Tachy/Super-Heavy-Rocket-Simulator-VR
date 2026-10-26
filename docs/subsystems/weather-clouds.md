@@ -198,6 +198,16 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      exceeds 0.15 [E] is marched again with steps of that weight (one sample deciding a whole deep step was the grain
      at cloud surfaces and at bases seen at a grazing angle; the step's intended length is compared, not the float32
      difference of the distances, whose 1 m ulp at 8 600 km retried the same step until the budget ran out - Task 10);
+  1b. **outline pass** (static clouds Task 5b; the deterministic march only, not the debug outputs): the same march
+     kernel again with `CLOUD_EDGE_REFINE` (`CloudEffect`: its `_refine` variants, the march's image read at binding 6,
+     the result in the centre's `refined` image the temporal kernel takes instead). A pixel whose alpha differs from
+     one of its 8 neighbours' by more than `CLOUD_EDGE_ALPHA_STEP` 0.25 [E] (one sub-ray's share) is marched again with
+     4 rays at the fixed rotated-grid offsets (+-1/8, +-3/8 march pixel) and averaged (colour and alpha; the cloud
+     distance alpha-weighted, the scene distance the block's as before); every other pixel is copied. The binary edge
+     of one centre ray per march pixel made outlines follow the march grid (stairs and beads of a march pixel that the
+     Catmull-Rom upsample only rounded); now an outline pixel holds its covered fraction in quarters - smooth along the
+     edge, still one march pixel wide across it (crisp), the same in every frame (no jitter, no noise pattern).
+     Cost: the VR proxy's cloud pass about 3x (`vr-performance.md`, open - Task 10);
   2. temporal accumulation per eye: reprojection of the cloud distance (sky: rotation only) with the camera's float64
      motion into the previous frame's clip space of the same eye, history clamped to the 3 x 3 neighbourhood; a running
      mean of weight 1 / n (n the frames the history holds, kept per pixel) down to 1/32 (an exponential mean of 0.1
@@ -386,7 +396,12 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   frames): farthest mismatched pixel 2 px desktop / 3 px VR from the reference's contour (limit one march pixel: 2 /
   3 px; reference contour 342 / 333 px); without the entry bisection 3 / 5 px (RED). `render_check.gd
   --repeat_identical=2` (VR preset, analog weather, Starbase 2024-06-15 21 UTC): two consecutive frames of the ground,
-  9 km and 20 km views bit-identical (0 of 1 440 000 pixels differ; the jittered march: 410 808). Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, stratified
+  9 km and 20 km views bit-identical (0 of 1 440 000 pixels differ; the jittered march: 410 808). Section 11 (static
+  clouds Task 5b): the thick slab at cf 1 seen at its top's limb from 2 km above it, the camera rolled 7 deg (the limb
+  a straight edge crossing the march grid at a shallow angle), VR preset (divisor 3), 192 x 96 px at 20 deg, the
+  pass's result's alpha read back: over the 20 rows the edge crosses, the largest alpha step between neighbouring
+  pixels 0.102 (limit 0.35 [E]; without the outline pass 0.407 - RED), against the row's trend 0.018 (limit 0.03
+  [E]); a second render bit-identical. Section 8, the light cache vs the per-sample march with the cache's own sample count (96 + 32, stratified
   midpoints), on the game's deterministic march (one frame each, the same view samples; Task 3 fix round 1), at every
   pixel of a 64 x 64 view per cascade at its scale (camera 5 / 9.9
   / 18.8 / 36.5 / 72 km up, 80-81 deg down; the farthest cloud samples asserted inside that cascade's full weight;
@@ -522,6 +537,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   logic: `tests/cloud_light_cache_test.gd` (headless).
 - `CloudShadowEffect.grid_mean_only` (checks): the near shadow map with the grid mean. `CloudShadowEffect.ran_msec`: the
   render callback's last run; `CloudLayer` takes the maps as valid (`cloud_shadow_valid`) only within 250 ms of it.
+- `cloud_check.gd` with `STARSIM_OUTLINE_ONLY=1`: section 11 alone (`STARSIM_VERBOSE=1` prints the worst row's alpha).
 - `cloud_check.gd` with `STARSIM_SLANT_TABLE=1`: only the beam-cover fit table (shapes' direct Sun, near disc, eight
   sites, f 0.15-0.6 x e 5-75 deg).
 
@@ -619,15 +635,18 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   fine temporal grain on broken cloud beyond f_s until the temporal mean converges (still camera: frames; a moving
   one: the floor weight's ~23 % of one frame's noise) - with the jittered march only; the deterministic one reads the
   footprint's centre.
-- **Deterministic march (Task 3)**: a cloud edge is binary per march pixel; the Catmull-Rom upsample rounds the
-  stair corners at the VR divisor 3, but outlines still follow the march grid (beads of ~1 march pixel), and some
-  mid-distance cumuli (the 20 km view's frayed ones) keep static per-march-pixel holes - the shape field's own
-  structure at the step / pixel scale sampled at fixed points (not the scene-depth step grid: deriving the grid from
-  the layer segment changed nothing; not the upsample). Tried in fix round 1 and dropped: a sub-pixel coverage at the
-  first entry (2 x 2 taps over the footprint half a footprint deeper, 4 field lookups per ray) changed ~1 000 of
+- **Deterministic march (Task 3, outline pass Task 5b)**: a cloud edge is binary per ray; the outline pass (cloud
+  pass 1b) averages four fixed sub-rays on outline pixels, so outlines no longer follow the march grid (no stairs,
+  `t5b_*` vs `t5f_*` images), but they stay one march pixel wide across the edge (crisp; at divisor 3 ~3 screen
+  pixels), and a pixel's cover is resolved in quarters only. Some mid-distance cumuli (the 20 km view's frayed ones)
+  keep static per-march-pixel holes inside - the shape field's own structure at the step / pixel scale sampled at
+  fixed points (not the scene-depth step grid: deriving the grid from the layer segment changed nothing; not the
+  upsample); interior pixels whose neighbours differ by more than 0.25 are marched again too, which softens but does
+  not remove them. A checkerboard remains where the block's nearest / farthest scene distances alternate under a
+  cloud (the sub-rays take the block's distance). Tried in Task 3 fix round 1 and dropped: a sub-pixel coverage at
+  the first entry (2 x 2 taps over the footprint half a footprint deeper, 4 field lookups per ray) changed ~1 000 of
   1.44 M pixels by > 20/255 with no visible softening. Far cumulus fields at 20-40 km show faint horizontal bands (the
-  steps' iso-distance shells). Left to Task 4 / Task 10 / the headset check (divisor 2, more steps, a shape
-  prefilter); the VR cost is over the 2.5 ms budget (`vr-performance.md`, Task 10).
+  steps' iso-distance shells). The VR cost is over the 2.5 ms budget (`vr-performance.md`, Task 10).
 - Far field: plane-parallel independent columns (no 3D radiative effects: no lit cloud sides at a low Sun, no shadows
   cast on neighbouring columns or the ground beside them); the field's 0.25 deg grid shows as soft cells near the
   hand-over (~4 pixels per cell at 1.5e7 m).

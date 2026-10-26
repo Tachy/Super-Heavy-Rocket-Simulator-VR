@@ -160,3 +160,18 @@ per-second means (n = 60 / 20 / 20 / 20; p99 = the largest at these counts):
 | cape | - | 0.32 / 0.34 |
 
 +44 / +17 / +25 % over the medians before Task 3. Not tuned here: Task 10's binding 2.5 ms item.
+
+## Cloud outline pass (static clouds Task 5b, 2026-10-26)
+
+VR proxy as above, but with `era5_1102910.wthr` (`era5_1102911` is no longer in the cache), the same file before and after,
+fast state (shadow_pass 0.41-0.42 ms in both runs). cloud_pass, median / max of the per-second means, ms:
+
+| Phase | before (19bcac9) | outline pass (threshold 0.25) | threshold 0.5 (trial) |
+|---|---|---|---|
+| descent | 3.20 / 9.05 | 11.37 / 22.50 | 11.20 / 21.25 |
+| pan low | 6.54 / 7.37 | 17.25 / 21.62 | 16.73 / 21.03 |
+| pan high | 5.04 / 5.67 | 14.87 / 17.18 | 14.62 / 17.44 |
+| cape | 0.31 / 0.34 | 0.32 / 0.55 | 0.32 / 0.43 |
+
+That is +195-255 % in the cloud phases, far over the budget (open, Task 10). The edge threshold hardly matters: the cost
+comes from the outline pixels of broken cumulus fields and from each one marching four rays in series in its lane.

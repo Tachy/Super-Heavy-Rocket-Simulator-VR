@@ -52,7 +52,11 @@
 #  10. (static clouds Task 2) no seam: a line of pixels crossing each cascade's edge band (cascade 0 -> 1 -> ... -> 4 ->
 #      the march, the slab): the row-to-row step of (cache - march) / mean stays within the image noise (the largest
 #      difference of two march renders with independent jitter); the same view before / after a re-anchor (the
-#      camera moved 12 km east and back: cascade 3 re-anchored) differs by less than that noise.
+#      camera moved 12 km east and back: cascade 3 re-anchored) differs by less than that noise;
+#  11. (static clouds Task 5b) anti-aliased outlines: the limb of a deck's top (a straight edge) seen at the VR
+#      preset's divisor with the camera rolled; along each row the edge crosses, the final image's alpha changes
+#      monotonically by at most 0.35 per pixel (no stairs of a march pixel), and a second render is bit-identical
+#      (STARSIM_OUTLINE_ONLY=1 runs this section alone).
 # The other sections run with the light cache on and the deterministic march (the game's path; 10 with the jittered
 # one: it measures against independent jitter's noise). Detail
 # levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
@@ -83,7 +87,7 @@ const CLIMB_STEP_LIMIT := 0.055
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 132
+const EXPECTED_SAMPLES := 134
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -162,6 +166,23 @@ const CACHE_REANCHOR_CASCADE := 3
 ## A pixel's error is relative to max(its reference, this fraction of the view's mean reference): a cloud's fringe or a
 ## gap's last light carries no relative accuracy of its own.
 const CACHE_ERROR_FLOOR := 0.05
+## Section 11 (static clouds Task 5b): the top of the thick slab (cf 1: one deck) seen from OUTLINE_HEIGHT_M above it
+## at its limb (the horizon's dip), the camera rolled by OUTLINE_ROLL_DEG: the limb crosses the march grid at a shallow
+## angle - the stairs' worst case, one step every 1 / tan(roll) march pixels.
+const OUTLINE_VIEW_SIZE := Vector2i(192, 96)
+const OUTLINE_FOV_DEG := 20.0
+const OUTLINE_HEIGHT_M := 2000.0
+const OUTLINE_ROLL_DEG := 7.0
+## [E] Largest alpha change between two neighbouring pixels along a row the edge crosses (the brief's 0.35: a stair of
+## one march pixel at divisor 3 changes alpha by up to ~0.42 per pixel through the Catmull-Rom upsample).
+const OUTLINE_MAX_JUMP := 0.35
+## [E] A change against the row's trend smaller than this is not counted (the deck top's own relief at the limb).
+const OUTLINE_MONOTONE_TOLERANCE := 0.03
+## Rows whose alpha spans from below OUTLINE_CLEAR to above OUTLINE_COVERED cross the edge inside the view.
+const OUTLINE_CLEAR := 0.05
+const OUTLINE_COVERED := 0.95
+const OUTLINE_MIN_ROWS := 8
+
 ## Section 9: a broken layer (cf SILHOUETTE_FRACTION, the thick slab's water: opaque cumuli) seen from
 ## SILHOUETTE_DISTANCE_M above its top, straight down. The reference: the jittered march with fine steps of
 ## SILHOUETTE_REFERENCE_FINE of the distance (~12 m: the cumulus' rim) and SILHOUETTE_REFERENCE_STEPS coarse ones (the
@@ -228,6 +249,14 @@ func _run() -> void:
 		for f in _files:
 			DirAccess.remove_absolute(f)
 		print("cloud_check (silhouettes only): %d failures" % _failures)
+		quit(1 if _failures > 0 else 0)
+		return
+	if OS.get_environment("STARSIM_OUTLINE_ONLY") != "":  # diagnostics: section 11 alone (no sample count)
+		await _outline_samples()
+		_clouds.shutdown()
+		for f in _files:
+			DirAccess.remove_absolute(f)
+		print("cloud_check (outlines only): %d failures" % _failures)
 		quit(1 if _failures > 0 else 0)
 		return
 	if OS.get_environment("STARSIM_LIGHT_CACHE_ONLY") != "":  # diagnostics: sections 8 and 10 alone (no sample count)
@@ -343,6 +372,8 @@ func _run() -> void:
 	await _light_cache_samples()
 	# 9. The deterministic march's silhouettes against the converged jittered march.
 	await _silhouette_samples()
+	# 11. Anti-aliased outlines (the game's output, the VR preset's divisor).
+	await _outline_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -534,7 +565,8 @@ func _coverage_sample(fraction: float) -> void:
 	_check("coverage %.1f" % fraction, absf(got - fraction) <= COVERAGE_TOLERANCE, "covered %.4f" % got)
 
 
-func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode: int, block_radius := 0) -> Vector3:
+func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode: int, block_radius := 0,
+		roll_deg := 0.0) -> Vector3:
 	var camera_gcrf := _earth_to_gcrf * camera_itrf_m
 	var sun_gcrf: Vector3 = _earth_to_gcrf * sun_itrf * AU_M
 	_atmosphere.update(camera_gcrf, Vector3.ZERO, _earth_to_gcrf, sun_gcrf, 0.0, 1.0)
@@ -545,7 +577,8 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode
 	var up := Frames.to_render(_earth_to_gcrf * camera_itrf_m.normalized()).normalized()
 	if absf(view_render.dot(up)) > 0.9:
 		up = Vector3.UP if absf(view_render.y) < 0.9 else Vector3.RIGHT
-	_camera.transform = Transform3D(Basis.looking_at(view_render, up), Vector3.ZERO)
+	_camera.transform = Transform3D(Basis.looking_at(view_render, up) * Basis(Vector3.BACK, deg_to_rad(roll_deg)),
+			Vector3.ZERO)
 	for i in range(SETTLE_FRAMES):
 		await RenderingServer.frame_post_draw
 		_clouds.update(camera_itrf_m, 0.0, 0.0)  # as the world does every frame (a re-created result is shown)
@@ -1138,6 +1171,83 @@ func _silhouette_samples() -> void:
 	_detail_off()
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
 	_camera.fov = 10.0
+
+
+## Section 11: the deck top's limb, rolled, at the VR preset (the game's output: debug output 0, the final image's
+## alpha read from the pass's result).
+func _outline_samples() -> void:
+	var slab := _slab("outline", SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, 1.0)
+	_show(slab)
+	_viewport.size = OUTLINE_VIEW_SIZE
+	_camera.fov = OUTLINE_FOV_DEG
+	_clouds.quality = CloudLayer.Quality.VR
+	_detail_off()
+	var camera := _point(SLAB_TOP_M + OUTLINE_HEIGHT_M)
+	var r := HeightSource.geodetic_to_fixed(LAT_DEG, LON_DEG, 0.0).length()
+	var dip_deg := rad_to_deg(acos((r + SLAB_TOP_M) / (r + SLAB_TOP_M + OUTLINE_HEIGHT_M)))
+	var view := _local_direction(-dip_deg, 70.0)
+	var sun := _local_direction(45.0, 135.0)
+	var alphas: Array[PackedFloat32Array] = []
+	for i in range(2):
+		await _render(camera, view, sun, 0, 0, OUTLINE_ROLL_DEG)
+		alphas.append(_output_alpha())
+	var a := alphas[0]
+	if a.size() != OUTLINE_VIEW_SIZE.x * OUTLINE_VIEW_SIZE.y:
+		_check("anti-aliased outline: the pass's result is read back", false, "%d values" % a.size())
+		return
+	var w := OUTLINE_VIEW_SIZE.x
+	var rows := 0
+	var worst_jump := 0.0
+	var worst_back := 0.0
+	var worst_row := -1
+	for y in range(OUTLINE_VIEW_SIZE.y):
+		var lo := 1.0
+		var hi := 0.0
+		for x in range(w):
+			lo = minf(lo, a[y * w + x])
+			hi = maxf(hi, a[y * w + x])
+		if lo > OUTLINE_CLEAR or hi < OUTLINE_COVERED:
+			continue  # the edge does not cross this row inside the view
+		rows += 1
+		var trend := signf(a[y * w + w - 1] - a[y * w])
+		for x in range(1, w):
+			var step := a[y * w + x] - a[y * w + x - 1]
+			if absf(step) > worst_jump:
+				worst_jump = absf(step)
+				worst_row = y
+			worst_back = maxf(worst_back, -trend * step)
+	_check("anti-aliased outline (deck limb rolled %.0f deg, VR preset): along-edge alpha monotone, no stair"
+			% OUTLINE_ROLL_DEG, rows >= OUTLINE_MIN_ROWS and worst_jump <= OUTLINE_MAX_JUMP
+			and worst_back <= OUTLINE_MONOTONE_TOLERANCE,
+			"%d rows, largest step %.3f (limit %.2f, row %d), largest step against the trend %.3f (limit %.2f)"
+			% [rows, worst_jump, OUTLINE_MAX_JUMP, worst_row, worst_back, OUTLINE_MONOTONE_TOLERANCE])
+	var differing := 0
+	for i in range(a.size()):
+		differing += 1 if alphas[1][i] != a[i] else 0
+	_check("anti-aliased outline: a second render is bit-identical (static)", differing == 0,
+			"%d of %d pixels differ" % [differing, a.size()])
+	if OS.get_environment("STARSIM_VERBOSE") != "":
+		var trace := ""
+		for x in range(0, w, 4):
+			trace += " %.2f" % a[maxi(worst_row, 0) * w + x]
+		print("cloud_check: outline row %d (every 4th pixel):%s" % [worst_row, trace])
+	_clouds.quality = CloudLayer.Quality.DESKTOP
+	_detail_off()
+	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
+	_camera.fov = 10.0
+
+
+## The alpha of the cloud pass's result (layer 0: the view), row-major at the viewport's size.
+func _output_alpha() -> PackedFloat32Array:
+	var image := _clouds.effect.output.get_layer_data(0)
+	var out := PackedFloat32Array()
+	if image == null:
+		return out
+	out.resize(image.get_width() * image.get_height())
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			out[y * image.get_width() + x] = image.get_pixel(x, y).a
+	return out
 
 
 ## Section 9: (x) the largest distance [px, Chebyshev] from a pixel whose side of 50 % transmittance differs from the

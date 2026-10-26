@@ -338,3 +338,19 @@ between rows); steep edges of varying width, 10-90 % rise median 8 m (< 10 m), 9
   "while the covered area grows inside a band where two patterns overlap: cf 0.3 -> 0.48-0.63)."
 - Why replaced: ruling 2026-10-26 accepts the growth as a bounded transition artifact; the test now checks it against
   the union of the mixed patterns (the 0.63 was a three-type mix, not two).
+
+## Static clouds Task 3: outlines on the march grid (replaced in Task 5b, 2026-10-26)
+
+- Superseded text (weather-clouds.md, open points):
+  > - **Deterministic march (Task 3)**: a cloud edge is binary per march pixel; the Catmull-Rom upsample rounds the
+  >   stair corners at the VR divisor 3, but outlines still follow the march grid (beads of ~1 march pixel), and some
+  >   mid-distance cumuli (the 20 km view's frayed ones) keep static per-march-pixel holes - the shape field's own
+  >   structure at the step / pixel scale sampled at fixed points (not the scene-depth step grid: deriving the grid from
+  >   the layer segment changed nothing; not the upsample). Tried in fix round 1 and dropped: a sub-pixel coverage at the
+  >   first entry (2 x 2 taps over the footprint half a footprint deeper, 4 field lookups per ray) changed ~1 000 of
+  >   1.44 M pixels by > 20/255 with no visible softening. Far cumulus fields at 20-40 km show faint horizontal bands (the
+  >   steps' iso-distance shells). Left to Task 4 / Task 10 / the headset check (divisor 2, more steps, a shape
+  >   prefilter); the VR cost is over the 2.5 ms budget (`vr-performance.md`, Task 10).
+- Why replaced: the user found the outlines pixelated and stair-stepped in the t3-t5 images; the outline pass
+  (Task 5b) marches outline pixels again with four rotated-grid sub-rays. Measured on cloud_check section 11 (a deck's
+  limb rolled 7 deg, VR preset): the largest along-edge alpha step 0.407 before, 0.102 after.

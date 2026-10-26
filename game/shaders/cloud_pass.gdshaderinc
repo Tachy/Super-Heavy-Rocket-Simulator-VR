@@ -16,7 +16,9 @@
 //    bit-identical image. The jittered one (the reference path): the start jitter is a blue-noise value per
 //    low-resolution pixel (cloud_noise.hpp, 64 x 64 tiled) offset per frame by the golden ratio (a low-discrepancy
 //    sequence in time): a function of the pixel and the frame alone - the same for both eyes. Out: premultiplied
-//    colour + alpha, and (march distance used, transmittance-weighted cloud distance).
+//    colour + alpha, and (march distance used, transmittance-weighted cloud distance). With CLOUD_EDGE_REFINE (the
+//    deterministic march's outline pass, static clouds Task 5b) the same kernel runs a second time: pixels on an
+//    outline are marched again with four fixed sub-rays and averaged, all others copied.
 // 2. CLOUD_TEMPORAL: accumulation with reprojection, per eye: the pixel's point at its cloud distance (the far sky's
 //    1e7 m where there is no cloud: rotation only) moved by the camera's motion (Earth-fixed, float64 on the CPU) into
 //    the previous frame's clip space of the same eye; the history there (bilinear) is clamped to the current 3 x 3
@@ -94,6 +96,22 @@ vec3 cloud_ray_earth(vec2 pixel_centre) {
 layout(set = 1, binding = 1) uniform sampler2D scene_depth;  // full resolution, nearest
 layout(rgba16f, set = 1, binding = 2) uniform writeonly image2D out_color;
 layout(rg32f, set = 1, binding = 3) uniform writeonly image2D out_depth;
+#ifdef CLOUD_EDGE_REFINE
+// The outline pass (static clouds Task 5b; CloudEffect runs it after the deterministic march): the deterministic
+// march's binary edge decides each march pixel by its one centre ray, so outlines followed the march grid - stairs and
+// beads of one march pixel that the upsample only rounded. Pixels on an outline are marched again with
+// CLOUD_EDGE_SUBRAYS rays at fixed rotated-grid offsets and averaged: the pixel's covered fraction in quarters, the same
+// in every frame (no jitter, no noise pattern), at the extra cost of the outline pixels alone.
+layout(set = 1, binding = 6) uniform sampler2D coarse_color;  // the first march's colour + alpha, nearest
+// [E] Largest alpha difference to a neighbour that keeps a pixel's single ray: one sub-ray's share of the mean (a
+// smaller step is not resolved further by four rays).
+const float CLOUD_EDGE_ALPHA_STEP = 0.25;
+// The rotated grid (RGSS: four rays, every row and column of a 4 x 4 grid once - four distinct positions along any
+// near-horizontal or near-vertical edge), offsets in march pixels from the centre.
+const int CLOUD_EDGE_SUBRAYS = 4;
+const vec2 CLOUD_EDGE_OFFSETS[4] = vec2[4](vec2(0.125, 0.375), vec2(0.375, -0.125), vec2(-0.125, -0.375),
+		vec2(-0.375, 0.125));
+#endif
 
 // [E] Path toward the light from an in-cloud sample in the near (shape) part (cloud_light_march.z: the preset).
 // [E] The coarse and fine steps are fractions of the distance from this distance on (nearer: CLOUD_MIN_STEP_M).
@@ -549,6 +567,22 @@ void main() {
 	if (pixel.x >= low.x || pixel.y >= low.y) {
 		return;
 	}
+#ifdef CLOUD_EDGE_REFINE
+	// Outline pixels only: a pixel whose alpha differs from one of its 8 neighbours' by more than CLOUD_EDGE_ALPHA_STEP
+	// is marched again; every other keeps the first march's result (its depth image is left as it is).
+	vec4 coarse = texelFetch(coarse_color, pixel, 0);
+	float spread = 0.0;
+	for (int j = -1; j <= 1; j++) {
+		for (int i = -1; i <= 1; i++) {
+			ivec2 q = clamp(pixel + ivec2(i, j), ivec2(0), low - 1);
+			spread = max(spread, abs(texelFetch(coarse_color, q, 0).a - coarse.a));
+		}
+	}
+	if (spread <= CLOUD_EDGE_ALPHA_STEP) {
+		imageStore(out_color, pixel, coarse);
+		return;
+	}
+#endif
 	vec2 centre = (vec2(pixel) + 0.5) * scale;
 	bool nearest = ((pixel.x + pixel.y) & 1) == 0;
 	float near_m = 1.0e30;
@@ -583,8 +617,32 @@ void main() {
 					+ frame * vec4(0.8566748839, 0.7338918708, 0.6287067210, 0.5385972572));
 		}
 #endif
+#ifdef CLOUD_EDGE_REFINE
+		// The mean of CLOUD_EDGE_SUBRAYS rays at the rotated grid's fixed offsets in the pixel (the same in every frame:
+		// static); the cloud distance weighted by each ray's alpha (the march's own convention).
+		float weighted_m = 0.0;
+		for (int k = 0; k < CLOUD_EDGE_SUBRAYS; k++) {
+			vec3 sub_color;
+			float sub_alpha;
+			float sub_m;
+			cloud_march(cloud_ray_earth(centre + CLOUD_EDGE_OFFSETS[k] * scale), scene_m, jitter,
+					cloud_group_eclipse_near, cloud_group_eclipse_far, sub_color, sub_alpha, sub_m);
+			// Each ray's own range first (the plain march's below): no NaN or half-float overflow into the mean.
+			sub_color = clamp(sub_color, vec3(0.0), vec3(65000.0));
+			if (any(isnan(sub_color)) || isnan(sub_alpha)) {
+				sub_color = vec3(0.0);
+				sub_alpha = 0.0;
+			}
+			sub_alpha = clamp(sub_alpha, 0.0, 1.0);
+			color += sub_color / float(CLOUD_EDGE_SUBRAYS);
+			alpha += sub_alpha / float(CLOUD_EDGE_SUBRAYS);
+			weighted_m += sub_alpha * sub_m;
+		}
+		cloud_m = alpha > 1.0e-6 ? weighted_m / (alpha * float(CLOUD_EDGE_SUBRAYS)) : 0.0;
+#else
 		cloud_march(cloud_ray_earth(centre), scene_m, jitter, cloud_group_eclipse_near, cloud_group_eclipse_far, color,
 				alpha, cloud_m);
+#endif
 	}
 	// Half-float range (a lit cloud seen through a dark-adapted eye) and no NaN into the history.
 	color = clamp(color, vec3(0.0), vec3(65000.0));

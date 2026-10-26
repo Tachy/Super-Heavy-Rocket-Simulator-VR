@@ -16,7 +16,7 @@ const MARCH_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clo
 		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc"]
 const PASS_FILES := ["res://shaders/cloud_pass.gdshaderinc"]
 const GROUP := 8
-const CENTRE_IMAGES := ["color", "depth", "history0", "history1", "age0", "age1", "buffer"]
+const CENTRE_IMAGES := ["color", "refined", "depth", "history0", "history1", "age0", "age1", "buffer"]
 ## Golden ratio conjugate: the frame's jitter offset is frame x this, mod 1 (a low-discrepancy sequence in time).
 const GOLDEN := 0.6180339887498949
 ## The eyes' upsample tent's largest radius [centre pixels] (cloud_pass.gdshaderinc CLOUD_UPSAMPLE): 1 (bilinear) with
@@ -117,16 +117,21 @@ func _create() -> void:
 		return
 	_march = CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH"]), PackedStringArray(MARCH_FILES))
 	var kernels := {"march": _march.source,
-		"march_prefilter": CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH", "CLOUD_SHAPE_PREFILTER"]),
-				PackedStringArray(MARCH_FILES)).source,
-		"march_centre": CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH", "CLOUD_CENTRE"]),
-				PackedStringArray(MARCH_FILES)).source,
-		"march_centre_prefilter": CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH", "CLOUD_CENTRE",
-				"CLOUD_SHAPE_PREFILTER"]), PackedStringArray(MARCH_FILES)).source,
 		"temporal": CloudShaderPort.build(PackedStringArray(["CLOUD_TEMPORAL"]), PackedStringArray(PASS_FILES),
 				false).source,
 		"upsample": CloudShaderPort.build(PackedStringArray(["CLOUD_UPSAMPLE"]), PackedStringArray(PASS_FILES),
 				false).source}
+	# The march's variants (one set 0): the centre view (VR), the shape prefilter, the outline pass (CLOUD_EDGE_REFINE).
+	var flags := [["CLOUD_CENTRE", "_centre"], ["CLOUD_SHAPE_PREFILTER", "_prefilter"],
+			["CLOUD_EDGE_REFINE", "_refine"]]
+	for variant in range(1, 1 << flags.size()):
+		var defines := PackedStringArray(["CLOUD_MARCH"])
+		var name := "march"
+		for i in range(flags.size()):
+			if variant & (1 << i):
+				defines.append(flags[i][0])
+				name += flags[i][1]
+		kernels[name] = CloudShaderPort.build(defines, PackedStringArray(MARCH_FILES)).source
 	for name: String in kernels:
 		var src := RDShaderSource.new()
 		src.language = RenderingDevice.SHADER_LANGUAGE_GLSL
@@ -174,8 +179,9 @@ func _texture(type: int, size: Vector2i, layers: int, format: int, data := Packe
 	tf.depth = 1
 	tf.array_layers = layers
 	tf.format = format
+	# Copy-from: the checks read the result back (cloud_check section 11: its alpha).
 	tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_STORAGE_BIT \
-			| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
+			| RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT | RenderingDevice.TEXTURE_USAGE_CAN_COPY_FROM_BIT
 	if not data.is_empty():
 		tf.usage_bits = RenderingDevice.TEXTURE_USAGE_SAMPLING_BIT | RenderingDevice.TEXTURE_USAGE_CAN_UPDATE_BIT
 		return _rd.texture_create(tf, RDTextureView.new(), [data])
@@ -225,6 +231,8 @@ func _ensure_images(size: Vector2i, view_count: int, low: Vector2i) -> void:
 			RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT)
 	var c := {"low": low, "valid": false, "slot": 0, "previous": Projection.IDENTITY}
 	c["color"] = _texture(RenderingDevice.TEXTURE_TYPE_2D, low, 1, RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT)
+	# The outline pass's result (CLOUD_EDGE_REFINE: the march's colour with the outline pixels marched again).
+	c["refined"] = _texture(RenderingDevice.TEXTURE_TYPE_2D, low, 1, RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT)
 	c["depth"] = _texture(RenderingDevice.TEXTURE_TYPE_2D, low, 1, RenderingDevice.DATA_FORMAT_R32G32_SFLOAT)
 	c["history0"] = _texture(RenderingDevice.TEXTURE_TYPE_2D, low, 1, RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT)
 	c["history1"] = _texture(RenderingDevice.TEXTURE_TYPE_2D, low, 1, RenderingDevice.DATA_FORMAT_R16G16B16A16_SFLOAT)
@@ -409,6 +417,10 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var deterministic: bool = ShaderGlobals.value(&"cloud_deterministic_march")
 	var weight := 1.0 if debug != 0 or deterministic else _temporal_weight
 	var tent_max := TENT_RADIUS_DETERMINISTIC if deterministic else TENT_RADIUS_JITTERED
+	# The outline pass (static clouds Task 5b) after the deterministic march: its outline pixels marched again with four
+	# fixed sub-rays (cloud_pass.gdshaderinc CLOUD_EDGE_REFINE) - no stairs of a march pixel. Not for the debug outputs
+	# (the checks' per-ray quantities) nor the jittered march (its temporal mean averages the pixel already).
+	var refine := deterministic and debug == 0
 	var jitter_frame := _frame if CloudEffect.pinned_frame < 0 else CloudEffect.pinned_frame
 	var params := Vector4(fmod(float(jitter_frame) * GOLDEN, 1.0), weight, debug, pixel_angle)
 	var linear_clamp: RID = _samplers["true|false|false"]
@@ -458,25 +470,38 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		_rd.buffer_update(_views[view]["buffer"], 0, VIEW_BLOCK_SIZE, _view_block(projections[view], view_to_world,
 				world_to_earth, Projection.IDENTITY, Vector2(size), low, camera_delta, _centre["valid"], params,
 				eye_earth).to_byte_array())
+	# The outline pass's set 1: the march's, its colour read (binding 6) and the refined image written instead.
+	var refine_set1 := march_set1.duplicate()
+	refine_set1[2] = _image(2, _centre["refined"])
+	refine_set1.append(_tex(6, nearest_clamp, _centre["color"]))
 	var list := _rd.compute_list_begin()
 	if not _prefilter_warm and march == family:
-		# Once: one group of the prefilter kernel so its first real use (the ascent's high limb, the scaled-space
-		# hand-over) does not pay the pipeline's first dispatch (up to 5 ms); the march below overwrites its texels.
+		# Once: one group of the prefilter kernels so their first real use (the ascent's high limb, the scaled-space
+		# hand-over) does not pay the pipeline's first dispatch (up to 5 ms); the march below overwrites their texels.
 		_prefilter_warm = true
-		var warm := family + "_prefilter"
-		_rd.compute_list_bind_compute_pipeline(list, _pipelines[warm])
-		_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders[warm], 0, set0), 0)
-		_rd.compute_list_bind_uniform_set(list, _set1(warm, march_set1), 1)
-		_rd.compute_list_dispatch(list, 1, 1, 1)
-		_rd.compute_list_add_barrier(list)
+		for warm: String in [family + "_prefilter", family + "_prefilter_refine"]:
+			_rd.compute_list_bind_compute_pipeline(list, _pipelines[warm])
+			_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders[warm], 0, set0), 0)
+			_rd.compute_list_bind_uniform_set(list, _set1(warm, refine_set1 if warm.ends_with("_refine")
+					else march_set1), 1)
+			_rd.compute_list_dispatch(list, 1, 1, 1)
+			_rd.compute_list_add_barrier(list)
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[march])
 	_rd.compute_list_bind_uniform_set(list, march_set0, 0)
 	_rd.compute_list_bind_uniform_set(list, _set1(march, march_set1), 1)
 	_rd.compute_list_dispatch(list, groups_low.x, groups_low.y, 1)
 	_rd.compute_list_add_barrier(list)
+	if refine:
+		var outline := march + "_refine"
+		_rd.compute_list_bind_compute_pipeline(list, _pipelines[outline])
+		_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders[outline], 0, set0), 0)
+		_rd.compute_list_bind_uniform_set(list, _set1(outline, refine_set1), 1)
+		_rd.compute_list_dispatch(list, groups_low.x, groups_low.y, 1)
+		_rd.compute_list_add_barrier(list)
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines["temporal"])
 	_rd.compute_list_bind_uniform_set(list, _set1("temporal", [_ubo(_centre["buffer"]),
-			_tex(1, nearest_clamp, _centre["color"]), _tex(2, nearest_clamp, _centre["depth"]),
+			_tex(1, nearest_clamp, _centre["refined" if refine else "color"]),
+			_tex(2, nearest_clamp, _centre["depth"]),
 			_tex(3, linear_clamp, history_in), _image(4, history_out), _tex(5, nearest_clamp, age_in),
 			_image(6, age_out)]), 1)
 	_rd.compute_list_dispatch(list, groups_low.x, groups_low.y, 1)
