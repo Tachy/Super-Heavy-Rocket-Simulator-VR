@@ -202,6 +202,25 @@ stairs), static (render_check repeat_identical stays bit-identical - no temporal
 - Measure the cloud pass in the VR proxy once (Task 10 owns the budget) and render t5b_* with the Task 5 view set.
 - Commit `feat(game): anti-aliased cloud outlines`
 
+### Task 5c: No step aliasing along the ray (user 2026-10-26, after Task 7)
+
+User on t7_cape.png: "Warum bekommt man dieses Grieselige nicht weg?". Diagnosis (renders dbg_cape_* in
+`tmp/static_clouds`): the grain scales with the march pixel (divisor 2 finer, same pattern), stays with detail levels
+0, and vanishes with 8x march steps (768 / 1536): the fixed step phase of each ray hits or skips thin / broken cloud
+on long oblique paths - static salt-and-pepper the jittered march's history used to average away.
+
+**Files:** `game/shaders/cloud_pass.gdshaderinc`, `game/shaders/clouds.gdshaderinc`, `game/world/weather/cloud_layer.gd`
+(presets), `game/tests/cloud_check.gd`, docs `weather-clouds.md`.
+
+- Approach (measure each): inside cloud layers bound the step by the cloud structure scale [E] instead of a fixed
+  count over the whole path (empty-space skip outside via the column field); and/or sample the shape at the mip of
+  max(pixel footprint, step length) so a long step reads the averaged density, not a point.
+- Check: the Cape view (`--lat=28.5729 --lon=-80.649 --elevation=20`, VR preset) against the 8x-steps reference -
+  a grain metric (e.g. high-pass energy at march-pixel scale in cloud regions) within [E] of the reference;
+  repeat_identical; cloud_check limits unchanged.
+- Measure the cloud pass in the VR proxy (Task 10 budget); render the Task 5 view set + Cape for the user.
+- Commit `fix(game): cloud march without step aliasing`
+
 ### Task 6: 2 m temperature and dew point in the snapshot
 
 **Files:** `core/include/starsim/environment/weather_source.hpp` + `.cpp` (ERA5 `2m_temperature`,
