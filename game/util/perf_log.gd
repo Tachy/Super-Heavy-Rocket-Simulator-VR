@@ -4,7 +4,8 @@ extends Node
 ## One CSV row per wall-clock second in data/perf/perf_<date>_<time>.csv: frame interval percentiles, the root
 ## viewport's measured CPU / GPU render time (in VR the headset's stereo frame), the camera's altitude and the cloud
 ## layer's state, so stalls can be matched to the flight phase (e.g. flying through a cloud deck). Frames whose
-## interval exceeds SPIKE_MS also get their own row (kind "spike").
+## interval exceeds SPIKE_MS also get their own row (kind "spike"). script_max_ms: the main thread's _process work
+## (from SceneTree.process_frame to this node, which runs last), the CPU side a GPU-light frame can still miss on.
 
 const ARG := "--perf-log"
 const SPIKE_MS := 22.0  ## [E] two 90 Hz frames: a frame the headset certainly had to reproject
@@ -19,6 +20,7 @@ var _gpu_sum := 0.0
 var _gpu_max := 0.0
 var _cpu_max := 0.0
 var _process_max := 0.0
+var _frame_start_usec := 0
 
 
 static func requested() -> bool:
@@ -43,9 +45,10 @@ func _ready() -> void:
 		set_process(false)
 		return
 	_file.store_line("kind,t_s,frames,frame_p50_ms,frame_p99_ms,frame_max_ms,gpu_mean_ms,gpu_max_ms,cpu_render_max_ms,"
-			+ "process_max_ms,altitude_m,cloud_far,cloud_uploading,cloud_last_upload_ms,draw_calls,primitives,vram_mb,xr")
+			+ "script_max_ms,altitude_m,cloud_far,cloud_uploading,cloud_last_upload_ms,draw_calls,primitives,vram_mb,xr")
 	_vp = get_viewport().get_viewport_rid()
 	RenderingServer.viewport_set_measure_render_time(_vp, true)
+	get_tree().process_frame.connect(func() -> void: _frame_start_usec = Time.get_ticks_usec())
 	_start_msec = Time.get_ticks_msec()
 	_second_start_msec = _start_msec
 	print("[PerfLog] writing ", path)
@@ -60,7 +63,7 @@ func _process(delta: float) -> void:
 	var interval_ms := delta * 1000.0
 	var gpu := RenderingServer.viewport_get_measured_render_time_gpu(_vp)
 	var cpu := RenderingServer.viewport_get_measured_render_time_cpu(_vp)
-	var process_ms := Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+	var process_ms := (Time.get_ticks_usec() - _frame_start_usec) / 1000.0 if _frame_start_usec > 0 else 0.0
 	_intervals.append(interval_ms)
 	_gpu_sum += gpu
 	_gpu_max = maxf(_gpu_max, gpu)

@@ -354,7 +354,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   otherwise).
 - Real sessions (VR or desktop): `Start-VR.cmd --perf-log` (`PerfLog`, `game/util/perf_log.gd`) writes
   `data/perf/perf_<date>_<time>.csv`: one row per second (frame interval p50 / p99 / max, root viewport GPU / CPU render
-  time, process time, camera altitude, cloud far field / upload state, draw calls, VRAM) plus a "spike" row for every
+  time, main-thread script time, camera altitude, cloud far field / upload state, draw calls, VRAM) plus a "spike" row for every
   frame over 22 ms.
 - `cloud_debug_output` 1 / 2 / 3 / 4: background transmittance (grid mean), Sun radiance (grid mean), coverage at
   `cloud_debug_height_m`, background transmittance with the shapes; 5: the terrain draws its cloud factors (direct,
