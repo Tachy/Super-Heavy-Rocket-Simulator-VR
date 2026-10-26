@@ -227,6 +227,10 @@ pixel; blend over `cloud_handover_band_m`), `game/shaders/cloud_far.gdshaderinc`
 
 **Interfaces:** globals `cloud_handover_near_m`, `cloud_handover_far_m` [E] (start 30 / 50 km, measured in Task 10);
 the far model's premultiplied result composited behind the march's result with the remaining transmittance.
+Carried from Task 3 (ledger "Task 3 follow-up"): the deterministic march point-samples the prefiltered shape at the
+footprint centre; with ~7 km march pixels (coarsest shape mip 1 km) the volume's cover beats with the 32 km tile and
+`cloud_far_check` "volume block luminance" fails (38 % vs 10 %). The hand-over must end the volume before footprints
+outgrow the shape mips (spec decision 4: < 3.5 km) so this case passes on the deterministic path again.
 
 - [ ] **Step 1: Tests** (`cloud_far_check.gd`): across the band the mean radiance of a broken layer seen at 30-50 km
   differs between near and far by <= 10 % (the M8 ruling) and the blended image has no step > 3 % between neighbouring
