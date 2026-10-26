@@ -37,7 +37,8 @@
 #   8. (static clouds Task 1) the light cache (CloudLightCache, one cascade 8 x 8 km over the shell) against the
 #      per-sample light march with the cache's converged sample count (CloudLightCache.SAMPLES: 96 near + 32 far,
 #      jittered, mean of 8 frames), the same view jitter in both (CloudEffect.pinned_frame): the Sun's scattered
-#      radiance at every pixel of a 64 x 64 view from 5 km - a slab of tau ~10 (debug output 2, the grid mean) 5 %, a
+#      radiance at every pixel of a 64 x 64 view (30 deg fov, 75 deg down, asserted inside the cascade) from 5 km:
+#      a slab of tau ~10 (debug output 2, the grid mean) 5 %, a
 #      broken layer of cf 0.4 (debug output 7, the shapes) 10 % - Sun 45 / 20 deg up; a view whose samples all lie
 #      outside the cascade equals the march exactly (bit for bit); the fill's GPU time (information).
 # The other sections run with the light cache on (the game's path). Detail levels off for the numbers
@@ -68,7 +69,7 @@ const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 100
+const EXPECTED_SAMPLES := 101
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -104,6 +105,9 @@ const HANDOVER_TOLERANCE := 0.05
 const FAR_HANDOVER_TOLERANCE := 0.03  ## the far map and the slanted column are both smooth (the grid mean)
 ## Section 8 (the light cache against the light march).
 const CACHE_VIEW_SIZE := 64
+## The compared view's farthest cloud sample may use at most this fraction of the cascade's half extent (margin for the
+## anchor's cell snapping).
+const CACHE_VIEW_MARGIN := 0.9
 const CACHE_SLAB_TOLERANCE := 0.05
 const CACHE_BROKEN_TOLERANCE := 0.10  ## the voxel size (62.5 m across, 320 m up) against the shapes
 ## A pixel's error is relative to max(its reference, this fraction of the view's mean reference): a cloud's fringe or a
@@ -484,10 +488,19 @@ func _light_cache_samples() -> void:
 	var near: float = preset["light_near_m"]
 	var samples := CloudLightCache.SAMPLES
 	_viewport.size = Vector2i(CACHE_VIEW_SIZE, CACHE_VIEW_SIZE)
-	_camera.fov = 60.0
+	# A steep, narrow view: every cloud sample of every pixel must lie inside the cascade (asserted below), else the
+	# pixels outside would be marched in both renders and compare equal.
+	const VIEW_ELEVATION_DEG := -75.0
+	const VIEW_AZIMUTH_DEG := 10.0
+	_camera.fov = 30.0
+	var reach_m := _view_reach_m(VIEW_ELEVATION_DEG, VIEW_AZIMUTH_DEG, _camera.fov, 5000.0 - SLAB_BOTTOM_M)
+	var half_extent_m := CloudLayer.LIGHT_CACHE_EXTENT_M.x * 0.5
+	_check("light cache view: every cloud sample inside the cascade", reach_m <= CACHE_VIEW_MARGIN * half_extent_m,
+			"farthest sample (the slab's base at the corner rays) %.0f m of the camera's vertical, cascade half extent %.0f m"
+			% [reach_m, half_extent_m])
 	var slab := _slab("cache_slab", SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, 1.0)
 	var broken := _slab("cache_broken", SLAB_BOTTOM_M, SLAB_TOP_M, DECK_LIQUID_KG_M3, BROKEN_FRACTION)
-	var view := _local_direction(-60.0, 10.0)
+	var view := _local_direction(VIEW_ELEVATION_DEG, VIEW_AZIMUTH_DEG)
 	for c in [[slab, 2, CACHE_SLAB_TOLERANCE, "slab tau ~10"], [broken, 7, CACHE_BROKEN_TOLERANCE, "broken cf 0.4"]]:
 		_show(c[0])
 		for sun_elevation in [45.0, 20.0]:
@@ -551,6 +564,25 @@ func _light_cache_samples() -> void:
 	_check("light cache: a view outside the cascade equals the march", outside[0] == outside[1] and lit > 0.0,
 			"%s (centre %.5f /sr)" % ["identical" if outside[0] == outside[1] else "DIFFERENT", lit])
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
+
+
+## Horizontal distance from the camera's vertical at which the corner rays of a square view (flat local frame, view
+## elevation / azimuth in degrees, full fov in degrees) reach `drop_m` below the camera; INF if a corner ray stays level.
+static func _view_reach_m(elevation_deg: float, azimuth_deg: float, fov_deg: float, drop_m: float) -> float:
+	var el := deg_to_rad(elevation_deg)
+	var az := deg_to_rad(azimuth_deg)
+	var forward := Vector3(cos(el) * sin(az), cos(el) * cos(az), sin(el))  # east, north, up
+	var up := Vector3(-sin(el) * sin(az), -sin(el) * cos(az), cos(el))
+	var right := Vector3(cos(az), -sin(az), 0.0)
+	var t := tan(deg_to_rad(fov_deg * 0.5))
+	var reach := 0.0
+	for sx in [-1.0, 1.0]:
+		for sy in [-1.0, 1.0]:
+			var ray: Vector3 = forward + t * (sy * up + sx * right)
+			if ray.z >= 0.0:
+				return INF
+			reach = maxf(reach, Vector2(ray.x, ray.y).length() / -ray.z * drop_m)
+	return reach
 
 
 ## The GPU time of the light cache's fill in the frame whose timestamps the RenderingDevice holds (0: no fill).
