@@ -191,3 +191,42 @@ pinned, VR preset 64 / 128 steps; the machine state differed between these notes
   samples) brings 1-2 under 10 % and 3-4 to one 40 % edge pixel. The 0.45-0.80 ms fill spread was the GPU's clock
   state and the weather (real weather ~2x the slab's cost per voxel); the budget went 327 680 -> 98 304 voxels and
   RESET_ANGLE_RAD 15 -> 25 deg (a 4.7 s refresh under 1000x warp).
+
+## Light cache: atomic first fill, cascade-order serving, 1 km near march everywhere (static clouds Task 2 round 3, replaced in fix round 1, 2026-10-26)
+
+- Superseded fill / refresh text: "The fill is progressive: the
+  schedule hands the render thread at most 98 304 voxels of jobs per frame (<= 0.5 ms GPU, measured below), a full
+  refresh of all 42 M voxels takes 427 frames (4.7 s at 90 Hz). Refresh: the Sun turned by 0.25 deg or the blend
+  moved by 0.05 -> the other slot is filled completely while the old one stays shown alone, then the lookup
+  cross-fades over 0.5 s. A clock
+  jump (`CloudLayer.notify_clock_jump`, `SimClock.time_jumped`), a Sun jump > 25 deg, or a change of quality / detail
+  / debug output / noise / the content of a slot with weight invalidates everything: the march takes over until
+  filled."
+- Superseded hybrid text: "Cascade 0
+  is read at the sample; cascades 1-4 are hybrid (controller ruling 2026-10-26): the sample marches the first 1 km of
+  its light path through the shapes (`cloud_near_light_depth`: 12 geometric intervals from 20 m, the stratified
+  midpoints) and adds the cascade's tau read at that point (the fill's tau starts there, so nothing is counted
+  twice) - a far cascade's voxel cannot hold a cumulus' self-shadowing."
+- Superseded validation text (section 8): "a cf 0.4 broken layer (debug
+  7, the shapes), worst pixel at Sun 45 / 20 deg (tolerance 10 %): cascade 0 2.71 / 4.60 %, 1 3.38 / 9.58 %, 2 7.10 /
+  9.37 %, 3 8.09 / FAIL 39.6 %, 4 5.81 / FAIL 39.8 % (mean errors 0.12-0.81 %; the two failures one pixel at the
+  view's edge at a 20-deg Sun, open);"
+- Superseded limit: "- Light cache: broken cloud in cascades 3-4 (hybrid) misses `cloud_check` section 8's 10 % at one
+  edge pixel of the
+  view at a 20-deg Sun (39.6 / 39.8 %, mean 0.5 / 0.7 %); a longer or finer near march did not change it (1 km / 16
+  samples the same, 2 km / 8 worse). The hybrid near march costs the cloud pass +45-65 % in the VR proxy
+  (`vr-performance.md`): over the 2.5 ms budget in VR, open. The fill's GPU time per voxel depends on the GPU's clock
+  state and the weather (real weather ~2x the slab's); the budget (98 304 voxels) keeps the slow state under 0.5 ms.
+  Beyond 34-42 km the light is marched (the volume march ends at <= 34 km)."
+- Why: the review (headless probe of the schedule) found the far cascades starved under time warp - cascades 0-1
+  started a new generation as soon as the last fade ended and took the whole budget, the reset angle was checked on
+  cascade 0 only: the shown light of cascades 2-4 drifted without bound (100x: 12.5 deg and growing, 1000x: 125 deg).
+  A first fill was all-or-nothing (the whole window as one box, valid only when all 512 layers were done: 85 frames
+  for cascade 0) and restarted on every re-anchor and on a Sun turn > 0.25 deg, so at 100x / 1000x warp and at 2 or
+  7.8 km/s no cascade ever held anything. Now: progressive strips around the ground point, kept through re-anchors and
+  small turns; fair sharing of the budget; one generation at a time, the stalest cascade first; the reset angle per
+  cascade and slot (the generation in progress takes over). The cascades 3-4 "edge pixel" failures were cascade 3's
+  own pixels (not a blend band: their rays lie in cascade 3's full weight), the shadow of the next cumulus beyond the
+  1-km point smeared over +-dx by 500-m voxels; seen from the higher cameras, cascade 2's pixels failed too (32 %,
+  found with the new per-cascade worst-pixel diagnostics). Longer near marches (3 / 2 / 2 km) with 100-m intervals
+  after the geometric 12 bring every cascade under 10 %.

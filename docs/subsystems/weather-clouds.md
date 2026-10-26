@@ -83,20 +83,41 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   refilled. The `CLOUD_LIGHT_FILL` kernel evaluates `cloud_light_optical_depth_with` at each voxel centre (96 near +
   32 far samples at the stratified midpoints, deterministic; detail band-limited at the voxel's size; the point solved
   for the march's exact model height; the field mixed at the generation's blend). The fill is progressive: the
-  schedule hands the render thread at most 98 304 voxels of jobs per frame (<= 0.5 ms GPU, measured below), a full
-  refresh of all 42 M voxels takes 427 frames (4.7 s at 90 Hz). Refresh: the Sun turned by 0.25 deg or the blend
-  moved by 0.05 -> the other slot is filled completely while the old one stays shown alone, then the lookup
-  cross-fades over 0.5 s. A clock
-  jump (`CloudLayer.notify_clock_jump`, `SimClock.time_jumped`), a Sun jump > 25 deg, or a change of quality / detail
-  / debug output / noise / the content of a slot with weight invalidates everything: the march takes over until
-  filled. Lookup (`cloud_cached_light_depth` -> (weighted cached tau, weight of the hybrid cascades, weight left)):
+  schedule hands the render thread exactly min(98 304, what is missing) voxels of jobs per frame (<= 0.5 ms GPU,
+  measured below; whole layers, rows or part of a row of a strip), a full refresh of all 42 M voxels takes 427 frames
+  (4.7 s at 90 Hz). A slot's held part is a rectangle growing strip by strip: a 16 x 16-voxel square around the ground
+  point first (every cascade holds its ground point after 6 frames of a first fill), then strips <= 16 voxels wide
+  along the side nearest the ground point; a strip in progress keeps its finished layers through a re-anchor; cascade
+  k starts each strip at layer k x 512 / 5
+  (wrapping), so the cascades of a first fill do not reach the costly in-cloud layers in the same frames. Each
+  frame's budget goes first to the shown slots' missing parts, shared fairly (a cascade needing less than an equal
+  share gets all of it, the rest split the remainder), then to fading-out slots, then to the one generation being
+  built. Refresh: the Sun turned by 0.25 deg or the blend moved by 0.05 -> one cascade at a time (the stalest first,
+  its shown slot complete) fills its other slot completely while the old one stays shown alone, then the lookup
+  cross-fades over 0.5 s; a front that has not received a voxel takes the new light at once, a partly filled one is
+  finished first. A clock jump (`CloudLayer.notify_clock_jump`, `SimClock.time_jumped`) or a change of quality /
+  detail / debug output / noise / the content of a slot with weight invalidates everything: the march takes over until
+  filled. A cascade whose shown light is more than 25 deg off the Sun drops it (a fading-out slot ends its fade, the
+  front gives way to the generation in progress - shown as far as filled - or to an empty slot). Staleness bound
+  (`cloud_light_cache_test.gd`): a light is shown until its cascade's next one has faded in, at most two full refreshes
+  and a fade (~10 s): at 100x warp every cascade's shown light within 2.2-3.6 deg of the Sun (bound 4.4 deg), its
+  ground point held in every frame; at 1000x (~42 deg unbounded) the 25-deg drop holds it (24.6-25.0 deg, ground
+  point held in every frame). Flight: at 1 and 2 km/s every cascade keeps its ground point; at 7.8 km/s the
+  re-anchor slabs of all cascades need ~1.8x the budget - cascades 2-4 keep it, 0 and 1 fall behind (held 6 / 53 % of
+  the frames; the next cascade or the march takes their samples). Lookup (`cloud_cached_light_depth` -> (weighted
+  cached tau, weight of the hybrid cascades, weight left) and the
+  hybrid cascades' weights):
   cascade k has weight 1 within 34 voxels of the ground point (Chebyshev), falling to 0 at 42 (a band of 8 voxels:
   0.5 .. 8 km), the rest goes to the next cascade and after the last (beyond 34-42 km) to the per-sample march. The
   cache thus covers the volume march's full range (Task 8's near / far hand-over at <= 34 km, ledgered). Cascade 0
-  is read at the sample; cascades 1-4 are hybrid (controller ruling 2026-10-26): the sample marches the first 1 km of
-  its light path through the shapes (`cloud_near_light_depth`: 12 geometric intervals from 20 m, the stratified
-  midpoints) and adds the cascade's tau read at that point (the fill's tau starts there, so nothing is counted
-  twice) - a far cascade's voxel cannot hold a cumulus' self-shadowing. The per-sample march
+  is read at the sample; cascades 1-4 are hybrid (controller ruling 2026-10-26): the sample marches the first 1 / 3 /
+  2 / 2 km (cascades 1 / 2 / 3 / 4) of its light path through the shapes and adds the cascade's tau read where that
+  march ends (the fill's tau starts there, so nothing is counted twice) - a far cascade's voxel can hold neither a
+  cumulus' self-shadowing nor the sharp shadow of its neighbours. `cloud_near_light_depth`: one march per sample for
+  all its hybrid cascades, each weighted with its own partial sum; 12 geometric intervals over the first km from the
+  preset's first interval, then 100 m each (12 / 32 / 22 / 22 samples), the stratified midpoints. A clear-air
+  early-out (stop where the field's column code above the sample is 0 at both ends of the segment) was exact on case 8
+  but cost more than it saved (`vr-performance.md`) and is not used. The per-sample march
   (`cloud_light_optical_depth`: near samples over 6 km in geometric intervals from 20 m through the shapes, then far
   samples to the cloud top through the grid mean; stratified, unbiased over the jitter) - no seam; the weights depend
   only on the ground point, never on a re-anchor. The Moon always marches. Where the cache holds nothing the result is
@@ -305,16 +326,23 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   error relative to max(pixel, 5 % of the view mean)), the fill at 1/16 of the voxels per frame (complete after 16
   frames): a tau-10 slab (debug 2) worst 0.43-1.12 % in every cascade (tolerance 5 %); a cf 0.4 broken layer (debug
   7, the shapes), worst pixel at Sun 45 / 20 deg (tolerance 10 %): cascade 0 2.71 / 4.60 %, 1 3.38 / 9.58 %, 2 7.10 /
-  9.37 %, 3 8.09 / FAIL 39.6 %, 4 5.81 / FAIL 39.8 % (mean errors 0.12-0.81 %; the two failures one pixel at the
-  view's edge at a 20-deg Sun, open); a view beyond every cascade (complete fill) and the frames right after a clock
-  jump bit-identical to the march; the fill at the game's budget (98 304 voxels) <= 0.5 ms in every frame: median
-  0.099, worst 0.454 ms over the 427 frames of a full refresh. Section 10 (no seam; the march with the cache's sample
+  9.37 %, 3 5.40 / 8.99 %, 4 6.36 / 7.58 % (mean errors 0.15-0.81 %; `info` lines: the worst pixel's cascade shares
+  along its ray and the worst pixel by the cascade holding each pixel's slab middle - the 1-km near march left
+  cascade 2 32 %, 3 39.6 %, 4 15.1 % there, the higher views seeing the finer hybrid cascades too); a view beyond
+  every cascade (complete fill) and the frames right after a clock
+  jump bit-identical to the march; the fill at the game's budget (98 304 voxels) <= 0.5 ms in every frame over the
+  427 frames of a full refresh from nothing: fails in most runs of fix round 1 - median 0.11-0.12 (a slow-clock run
+  0.30), worst 0.43-0.65 ms in six runs; the per-frame times flip between ~0.09 and ~0.30 ms for alike jobs (the GPU's
+  clock state), and an A/B with round 3's sequential serving gave the same spread (worst 0.40-0.56; the fair sharing
+  adds ~0.02 ms at the median: more dispatches). Round 3: median 0.099, worst 0.454 ms. Section 10 (no seam; the march
+  with the cache's sample
   count): the row-to-row step of (cache - march) / mean along a line of pixels over each edge band within the image
   noise: 0 -> 1 0.046 / 0.071 %, 1 -> 2 0.030 / 0.050 %, 2 -> 3 0.021 / 0.048 %, 3 -> 4 0.061 / 0.074 %, 4 -> march
   0.051 / 0.502 %; the same view before / after a re-anchor of cascade 3: 0.0000 %. Measured on the way: 64 / 256 / 512
   voxels up worst 78 / 23 / 8 % (Task 1, broken, Sun 20 deg); 24 + 8 fill samples 30 % off the converged integral at a
   pixel, 48 + 16 10.6 %; a x8 layout (8 / 64 / 512 km) broken worst 42 / 193 % (64 km) and 129 / 1005 % (512 km); the x2
-  layout read at the sample 12.7-107.7 %; the hybrid's near length / samples in `CloudLightCacheSchedule.NEAR_M`. The
+  layout read at the sample 12.7-107.7 %; the hybrid's near lengths and their measurements in
+  `CloudLightCacheSchedule` (`NEAR_INTERVAL_M`). The
   earlier 3 -> 4 "seam" (0.29 % against 0.19 %) was the preset march's own pattern (6 + 3 samples) as reference, not a
   seam: against the cache's sample count the step is 0.061 %.
 - Core `[weather]` light under the clouds: T_total = 1 - albedo of the Monte Carlo fixture within 3.2 % (10 cases;
@@ -417,7 +445,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   (`terrain_perf.gd --gpu_passes`) the fill is its own interval `cloud_light_fill`; `CloudLightCache.settled()`,
   `planned_fill_frames`, `last_fill_voxels`, `schedule.lookup_state()` (windows, held rectangles, weights);
   `schedule.budget_voxels` (the checks fill at 1/16 of the voxels per frame); `STARSIM_LIGHT_CACHE_ONLY=1` runs
-  `cloud_check.gd`'s sections 8 and 10 alone (with per-row seam profiles and the fill's per-frame times). Schedule
+  `cloud_check.gd`'s sections 8 and 10 alone (with per-row seam profiles and the fill's per-frame times),
+  `STARSIM_CACHE_VIEWS=3,4` only those cascades' section-8 views. Schedule
   logic: `tests/cloud_light_cache_test.gd` (headless).
 - `CloudShadowEffect.grid_mean_only` (checks): the near shadow map with the grid mean. `CloudShadowEffect.ran_msec`: the
   render callback's last run; `CloudLayer` takes the maps as valid (`cloud_shadow_valid`) only within 250 ms of it.
@@ -485,12 +514,14 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 - The stochastic light march (outside the light cache, and for the Moon) is unbiased in tau_s but exp(-tau_s) per
   sample is brighter on average (+10 % at the worst checked geometry with the preset's samples); more near samples
   reduce it.
-- Light cache: broken cloud in cascades 3-4 (hybrid) misses `cloud_check` section 8's 10 % at one edge pixel of the
-  view at a 20-deg Sun (39.6 / 39.8 %, mean 0.5 / 0.7 %); a longer or finer near march did not change it (1 km / 16
-  samples the same, 2 km / 8 worse). The hybrid near march costs the cloud pass +45-65 % in the VR proxy
-  (`vr-performance.md`): over the 2.5 ms budget in VR, open. The fill's GPU time per voxel depends on the GPU's clock
-  state and the weather (real weather ~2x the slab's); the budget (98 304 voxels) keeps the slow state under 0.5 ms.
-  Beyond 34-42 km the light is marched (the volume march ends at <= 34 km).
+- Light cache: the hybrid near march (1 / 3 / 2 / 2 km, 12-32 samples) costs the cloud pass +35-42 % in the VR proxy
+  over round 3's 1 km in every cascade, which itself was +45-65 % over the pure lookup (`vr-performance.md`): over the
+  2.5 ms budget in VR - Task 10's binding item. The fill's GPU time per voxel depends on the GPU's clock state and the
+  weather (real weather ~2x the slab's); at the budget (98 304 voxels) single frames of a first fill reach 0.43-0.65
+  ms (clock-state transitions; `cloud_check` section 8's every-frame check fails in most runs, open). Under 1000x
+  warp every cascade's shown light lags the Sun by up to 25 deg (the drop bound; 100x: <= 3.6 deg); at 7.8 km/s
+  cascades 0-1 fall behind their re-anchors. Beyond 34-42 km the light is marched (the volume march ends at <= 34
+  km).
 - The transfer table is a plane-parallel slab result on a tilted independent column: light is not moved between
   columns (no light leaking around a cumulus' shadowed side beyond the entry-surface tilt); the HG peak is treated as
   forward (its ~0.3 deg width is not resolved in the multiply scattered light). Ice uses the droplet table.

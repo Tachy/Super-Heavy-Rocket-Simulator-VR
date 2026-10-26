@@ -554,7 +554,10 @@ func _light_cache_samples() -> void:
 			% [CloudLightCacheSchedule.CASCADES.size(), CACHE_BUDGET_DIVISOR, CACHE_BUDGET_DIVISOR],
 			fill_frames == CACHE_BUDGET_DIVISOR, "%d frames with fill jobs (%d voxels, %.1f MB)"
 			% [fill_frames, cache.voxel_count(), CloudLightCache.texture_bytes() / 1048576.0])
+	var only_views := OS.get_environment("STARSIM_CACHE_VIEWS")  # diagnostics: "3,4" runs those cascades' views alone
 	for v: Dictionary in CACHE_VIEWS:
+		if only_views != "" and not str(v["cascade"]) in only_views.split(","):
+			continue
 		_camera.fov = v["fov"]
 		var height: float = v["height_m"]
 		var reach := _view_cloud_range_m(height, v["elevation"], v["fov"], 1.0)
@@ -589,6 +592,11 @@ func _light_cache_samples() -> void:
 						+ " the view mean %.5f /sr") % [stats["worst"] * 100.0, stats["at"] % CACHE_VIEW_SIZE,
 						stats["at"] / CACHE_VIEW_SIZE, images[1][stats["at"]], images[0][stats["at"]],
 						stats["mean_error"] * 100.0, stats["bias"] * 100.0, stats["mean"]])
+				if c[0] == broken:
+					var at := Vector2i(stats["at"] % CACHE_VIEW_SIZE, stats["at"] / CACHE_VIEW_SIZE)
+					print("  info  worst pixel %s, cascade shares along its ray: %s; worst pixel by the cascade "
+							% [at, _pixel_cascade_shares(_point(height), at, sun)] + "holding its slab middle: %s"
+							% _worst_by_cascade(images[1], images[0], _point(height), sun))
 	# The fill's GPU time per frame at the game's budget (spec decision 6: <= 0.5 ms in every frame): a full refresh of
 	# every cascade from nothing, the time of each frame's fill (the RenderingDevice's timestamps trail by a frame or
 	# two; every fill frame carries the budget's voxels but the last).
@@ -651,7 +659,7 @@ func _light_cache_samples() -> void:
 			% ["identical" if outside[0] == outside[1] else "DIFFERENT", lit, outside_reach.x / 1000.0, last,
 			_cascade_radius_m(last, false) / 1000.0, settled])
 	# A clock jump: every cascade invalid until filled - the frames right after it are the march's, bit for bit (at the
-	# game's budget: cascade 0 alone takes 26 frames, the render's 4 frames see nothing filled).
+	# game's budget: the seed squares of all cascades take 6 plans, the render's 5 see nothing filled).
 	cache.schedule.budget_voxels = game_budget
 	_camera.fov = v0["fov"]
 	await _settle_cache(_point(v0["height_m"]), view0, sun45, 2)
@@ -812,6 +820,77 @@ static func _cascade_radius_m(k: int, full: bool) -> float:
 	var dx: float = c["extent_m"] / float(c["size"].x)
 	var radius := float(c["size"].x / 2 - CloudLightCacheSchedule.REANCHOR_VOXELS - CloudLightCacheSchedule.MARGIN_VOXELS)
 	return (radius - (CloudLightCacheSchedule.BAND_VOXELS if full else 0)) * dx
+
+
+## Diagnostics (section 8): the cascade weights along the ray of view pixel `pixel` (the camera as the last render) at
+## the slab's bottom, middle and top - per height the share of each cascade (the lookup's chain: chosen at the sample,
+## a hybrid one only where it holds the end of its near march) and the march's rest.
+func _pixel_cascade_shares(camera_itrf_m: Vector3, pixel: Vector2i, sun_itrf: Vector3) -> String:
+	var out := PackedStringArray()
+	for h: float in [SLAB_BOTTOM_M, 0.5 * (SLAB_BOTTOM_M + SLAB_TOP_M), SLAB_TOP_M]:
+		var shares := _cascade_shares_at(camera_itrf_m, pixel, sun_itrf, h)
+		var parts := PackedStringArray()
+		for k in range(shares.size()):
+			parts.append(("c%d" % k if k < shares.size() - 1 else "march") + " %.2f" % shares[k])
+		out.append("h %.0f m: %s" % [h, ", ".join(parts) if not shares.is_empty() else "no hit"])
+	return "; ".join(out)
+
+
+## Diagnostics (section 8): the worst pixel error (as _cache_error) among the pixels whose slab middle each cascade
+## holds with the largest share.
+func _worst_by_cascade(cached: PackedFloat32Array, march: PackedFloat32Array, camera_itrf_m: Vector3,
+		sun_itrf: Vector3) -> String:
+	var mean := 0.0
+	for v in march:
+		mean += v / march.size()
+	var worst := PackedFloat64Array()
+	worst.resize(CloudLightCacheSchedule.CASCADES.size() + 1)
+	worst.fill(0.0)
+	for i in range(march.size()):
+		var shares := _cascade_shares_at(camera_itrf_m, Vector2i(i % CACHE_VIEW_SIZE, i / CACHE_VIEW_SIZE), sun_itrf,
+				0.5 * (SLAB_BOTTOM_M + SLAB_TOP_M))
+		var owner := 0
+		for k in range(shares.size()):
+			owner = k if shares[k] > shares[owner] else owner
+		var error := absf(cached[i] - march[i]) / maxf(march[i], CACHE_ERROR_FLOOR * mean)
+		worst[owner] = maxf(worst[owner], error)
+	var parts := PackedStringArray()
+	for k in range(worst.size()):
+		parts.append(("c%d" % k if k < worst.size() - 1 else "march") + " %.1f %%" % (worst[k] * 100.0))
+	return ", ".join(parts)
+
+
+## The shares of the cascades (and last the march) at height h along the ray of view pixel `pixel` (empty: no hit).
+func _cascade_shares_at(camera_itrf_m: Vector3, pixel: Vector2i, sun_itrf: Vector3, h: float) -> PackedFloat64Array:
+	var state := _clouds.light_cache.schedule.lookup_state()
+	var ray_gcrf := Frames.from_render(_camera.project_ray_normal(Vector2(pixel) + Vector2(0.5, 0.5)))
+	var ray := (_earth_to_gcrf.inverse() * ray_gcrf).normalized()
+	var r0 := _point(0.0).length()
+	var light := Frames.to_render(sun_itrf).normalized()
+	var origin: Vector3 = state["origin"]
+	var shares := PackedFloat64Array()
+	var b := camera_itrf_m.dot(ray)
+	var disc := b * b - (camera_itrf_m.length_squared() - (r0 + h) * (r0 + h))
+	if disc < 0.0:
+		return shares
+	var p := Frames.to_render(camera_itrf_m + ray * (-b - sqrt(disc)))
+	var open := 1.0
+	for k in range(CloudLightCacheSchedule.CASCADES.size()):
+		var c: Dictionary = state["cascades"][k]
+		var dx: float = c["dx_m"]
+		var at := p + light * _clouds.light_cache.near_length_m(k)
+		var g := Vector2((p - origin).dot(state["east"]), (p - origin).dot(state["north"])) / dx
+		var gf := Vector2((at - origin).dot(state["east"]), (at - origin).dot(state["north"])) / dx
+		var d := (g - (c["centre"] as Vector2)).abs()
+		var e := clampf((float(c["radius_voxels"]) - maxf(d.x, d.y)) / float(c["band_voxels"]), 0.0, 1.0)
+		var held: Rect2i = c["valid"][1] if float(c["weight"]) >= 0.5 else c["valid"][0]
+		var lo := gf - (Vector2(held.position) + Vector2(0.5, 0.5))
+		var hi := (Vector2(held.end) - Vector2(0.5, 0.5)) - gf
+		var hw := clampf(minf(minf(lo.x, lo.y), minf(hi.x, hi.y)) / float(c["band_voxels"]), 0.0, 1.0)
+		shares.append(open * minf(e, hw))
+		open -= shares[k]
+	shares.append(open)
+	return shares
 
 
 ## Renders until the light cache holds every cascade's window for this scene (and one frame more: the render thread

@@ -38,11 +38,12 @@ global uniform vec3 cloud_light_cache_origin;   // the frame's origin - the came
 global uniform vec3 cloud_light_cache_east;     // the frame's horizontal axes (unit, Earth-local)
 global uniform vec3 cloud_light_cache_north;
 global uniform vec4 cloud_light_cache_shell;    // (bottom height m, top height m, texels across N, unused)
-// The hybrid cascades' near march: (first interval m, ratio, length m, samples).
+// The hybrid cascades' near march: (first interval m, ratio, the interval after the geometric ones m, geometric
+// samples): cloud_near_length.
 global uniform vec4 cloud_light_cache_near;
-// Per cascade (columns): [0] (dx m, 1: hybrid / 0: pure, layers, weight of slot 1); [1] / [2] the voxels slot 0 / 1
-// holds (x0, y0, x1, y1: global indices, end exclusive; empty: x1 <= x0); [3] (the ground point x, y in voxel units,
-// the camera square's half size, the band; voxels).
+// Per cascade (columns): [0] (dx m, near samples n (0: pure, read at the sample), layers, weight of slot 1); [1] / [2]
+// the voxels slot 0 / 1 holds (x0, y0, x1, y1: global indices, end exclusive; empty: x1 <= x0); [3] (the ground point
+// x, y in voxel units, the camera square's half size, the band; voxels).
 global uniform mat4 cloud_light_cache_cascade0;
 global uniform mat4 cloud_light_cache_cascade1;
 global uniform mat4 cloud_light_cache_cascade2;
@@ -66,17 +67,36 @@ float cloud_offset_height(vec3 offset) {
 	return cloud_camera_height_m + q / (sqrt(max(r_c * r_c + q, 0.0)) + r_c);
 }
 
+// The near march's samples: geometric intervals from the first (.x, ratio .y) for the first .w samples, then each as
+// long as the last of them (.z) - the length of n samples (n = 0: 0).
+float cloud_near_length(float n) {
+	vec4 nm = cloud_light_cache_near;
+	float m = min(n, nm.w);
+	float geometric = nm.y > 1.0 ? nm.x * (pow(nm.y, m) - 1.0) / (nm.y - 1.0) : nm.x * m;
+	return geometric + max(n - nm.w, 0.0) * nm.z;
+}
+
 // Adds cascade c's share to result (x: the weighted cached tau_light so far, y: the weight of the hybrid cascades
-// whose near part the caller marches, z: the weight still open). The cascade is chosen at the sample (its plane
-// coordinates `plane`, m); a pure cascade (c[0].y = 0) is read at the sample (height fraction hf over the shell), a
-// hybrid one (c[0].y = 1) at the point the near march ends (plane_near, hf_near) - and only where it holds that point.
-void cloud_cache_cascade(mat4 c, sampler3D slot0, sampler3D slot1, vec2 plane, float hf, vec2 plane_near,
-		float hf_near, inout vec3 result) {
+// whose near part the caller marches, z: the weight still open) and a hybrid cascade's weight to near_w (by its number
+// of near samples' slot: cascades 1..4 -> x..w). The cascade is chosen at the sample (its plane coordinates `plane`,
+// m); a pure cascade (c[0].y = 0) is read at the sample (height fraction hf over the shell), a hybrid one (c[0].y = its
+// near samples n) at the point its near march ends, cloud_near_length(n) toward the light from the sample (rel: the
+// sample from the frame's origin, offset: from the camera) - and only where it holds that point.
+void cloud_cache_cascade(mat4 c, sampler3D slot0, sampler3D slot1, int k, vec2 plane, float hf, vec3 rel, vec3 offset,
+		vec3 light_dir, inout vec3 result, inout vec4 near_w) {
 	vec2 g = plane / c[0].x;  // global voxel coordinates (voxel i spans [i, i + 1))
 	vec2 d = abs(g - c[3].xy);
 	float e = clamp((c[3].z - max(d.x, d.y)) / c[3].w, 0.0, 1.0);
 	bool hybrid = c[0].y > 0.5;
-	vec2 gf = hybrid ? plane_near / c[0].x : g;  // where the cascade is read
+	vec2 gf = g;  // where the cascade is read
+	float hf_read = hf;
+	if (hybrid) {
+		float near_m = cloud_near_length(c[0].y);
+		vec3 rel_near = rel + light_dir * near_m;
+		gf = vec2(dot(rel_near, cloud_light_cache_east), dot(rel_near, cloud_light_cache_north)) / c[0].x;
+		hf_read = (cloud_offset_height(offset + light_dir * near_m) - cloud_light_cache_shell.x)
+				/ (cloud_light_cache_shell.y - cloud_light_cache_shell.x);
+	}
 	float w1 = c[0].w;
 	if (w1 < 1.0) {
 		e = min(e, cloud_cache_rect_weight(c[1], gf, c[3].w));
@@ -88,64 +108,94 @@ void cloud_cache_cascade(mat4 c, sampler3D slot0, sampler3D slot1, vec2 plane, f
 		return;
 	}
 	float layers = c[0].z;
-	vec3 f = vec3(fract(gf / cloud_light_cache_shell.z),
-			clamp((hybrid ? hf_near : hf) * layers, 0.5, layers - 0.5) / layers);
+	vec3 f = vec3(fract(gf / cloud_light_cache_shell.z), clamp(hf_read * layers, 0.5, layers - 0.5) / layers);
 	float tau = w1 < 1.0 ? textureLod(slot0, f, 0.0).r : 0.0;
 	if (w1 > 0.0) {
 		tau = mix(tau, textureLod(slot1, f, 0.0).r, w1);
 	}
 	float w = result.z * e;
 	result.x += w * tau;
-	result.y += hybrid ? w : 0.0;
+	if (hybrid) {
+		result.y += w;
+		near_w[k - 1] += w;
+	}
 	result.z -= w;
 }
 
 // tau_light toward the Sun (light_dir) at camera + offset_local with its height from the cascades: x the weighted
-// cached optical depth, y the weight of the hybrid cascades (their tau starts cloud_light_cache_near.z sunward: the
-// caller adds y x the near march over that length through the shapes), z the weight left for the per-sample march
-// (1: the cache holds nothing here - off, not filled, outside every cascade - and the caller's result is the march's;
-// 0: the cache alone). tau_light = x + y * near march + z * march.
-vec3 cloud_cached_light_depth(vec3 offset_local, float height_m, vec3 light_dir) {
+// cached optical depth, y the weight of the hybrid cascades (their tau starts where their near march ends: the caller
+// adds near_w's weighted near marches, cloud_near_light_depth), z the weight left for the per-sample march (1: the
+// cache holds nothing here - off, not filled, outside every cascade - and the caller's result is the march's; 0: the
+// cache alone). tau_light = x + near + z * march. near_w: the hybrid cascades' weights (cascades 1..4 -> x..w;
+// cascade 0 is pure: CloudLightCacheSchedule.CASCADES).
+vec3 cloud_cached_light_depth(vec3 offset_local, float height_m, vec3 light_dir, out vec4 near_w) {
 	vec3 result = vec3(0.0, 0.0, 1.0);
+	near_w = vec4(0.0);
 	if (!cloud_light_cache_enabled || !cloud_light_cache_valid) {
 		return result;
 	}
 	vec3 rel = offset_local - cloud_light_cache_origin;
 	vec2 plane = vec2(dot(rel, cloud_light_cache_east), dot(rel, cloud_light_cache_north));
-	float span = cloud_light_cache_shell.y - cloud_light_cache_shell.x;
-	float hf = (height_m - cloud_light_cache_shell.x) / span;
-	vec3 near_offset = offset_local + light_dir * cloud_light_cache_near.z;
-	vec3 rel_near = rel + light_dir * cloud_light_cache_near.z;
-	vec2 plane_near = vec2(dot(rel_near, cloud_light_cache_east), dot(rel_near, cloud_light_cache_north));
-	float hf_near = (cloud_offset_height(near_offset) - cloud_light_cache_shell.x) / span;
-	cloud_cache_cascade(cloud_light_cache_cascade0, cloud_light_cache_a0, cloud_light_cache_b0, plane, hf, plane_near,
-			hf_near, result);
+	float hf = (height_m - cloud_light_cache_shell.x) / (cloud_light_cache_shell.y - cloud_light_cache_shell.x);
+	cloud_cache_cascade(cloud_light_cache_cascade0, cloud_light_cache_a0, cloud_light_cache_b0, 0, plane, hf, rel,
+			offset_local, light_dir, result, near_w);
 	if (result.z > 0.0) {
-		cloud_cache_cascade(cloud_light_cache_cascade1, cloud_light_cache_a1, cloud_light_cache_b1, plane, hf,
-				plane_near, hf_near, result);
+		cloud_cache_cascade(cloud_light_cache_cascade1, cloud_light_cache_a1, cloud_light_cache_b1, 1, plane, hf, rel,
+				offset_local, light_dir, result, near_w);
 	}
 	if (result.z > 0.0) {
-		cloud_cache_cascade(cloud_light_cache_cascade2, cloud_light_cache_a2, cloud_light_cache_b2, plane, hf,
-				plane_near, hf_near, result);
+		cloud_cache_cascade(cloud_light_cache_cascade2, cloud_light_cache_a2, cloud_light_cache_b2, 2, plane, hf, rel,
+				offset_local, light_dir, result, near_w);
 	}
 	if (result.z > 0.0) {
-		cloud_cache_cascade(cloud_light_cache_cascade3, cloud_light_cache_a3, cloud_light_cache_b3, plane, hf,
-				plane_near, hf_near, result);
+		cloud_cache_cascade(cloud_light_cache_cascade3, cloud_light_cache_a3, cloud_light_cache_b3, 3, plane, hf, rel,
+				offset_local, light_dir, result, near_w);
 	}
 	if (result.z > 0.0) {
-		cloud_cache_cascade(cloud_light_cache_cascade4, cloud_light_cache_a4, cloud_light_cache_b4, plane, hf,
-				plane_near, hf_near, result);
+		cloud_cache_cascade(cloud_light_cache_cascade4, cloud_light_cache_a4, cloud_light_cache_b4, 4, plane, hf, rel,
+				offset_local, light_dir, result, near_w);
 	}
 	return result;
 }
 
-// The near part of a hybrid cascade's light path: from the sample cloud_light_cache_near.z toward the light through
-// the shapes in cloud_light_cache_near.w geometric intervals (first .x, ratio .y), the stratified midpoints (jitter
-// 0.5: deterministic, as the fill); the detail band-limited at the pixel footprint as the per-sample march.
+// The near parts of the hybrid cascades' light paths, weighted (near_w from cloud_cached_light_depth): one march from
+// the sample toward the light through the shapes (the intervals of cloud_near_length, the stratified midpoints -
+// jitter 0.5: deterministic, as the fill; the detail band-limited at the pixel footprint as the per-sample march),
+// each cascade's weight times the march's sum over its own samples. (A clear-air early-out - the field's column code
+// above the sample 0 at both ends of the segment - cost more than it saved: weather-clouds.md.)
 float cloud_near_light_depth(vec3 offset_local, float height_m, float camera_distance_m, vec3 light_dir,
-		float pixel_angle) {
-	return cloud_light_optical_depth_with(offset_local, height_m, camera_distance_m, light_dir, 0.5, pixel_angle,
-			pixel_angle, vec4(cloud_light_cache_near.xyz, 0.0), ivec2(int(cloud_light_cache_near.w), 0), 0.0);
+		float pixel_angle, vec4 near_w) {
+	vec4 n = vec4(cloud_light_cache_cascade1[0].y, cloud_light_cache_cascade2[0].y, cloud_light_cache_cascade3[0].y,
+			cloud_light_cache_cascade4[0].y);
+	float n_max = 0.0;
+	for (int k = 0; k < 4; k++) {
+		n_max = near_w[k] > 0.0 ? max(n_max, n[k]) : n_max;
+	}
+	vec3 p = atmosphere_camera_hi + atmosphere_camera_lo + offset_local;
+	vec3 up = normalize(p * ATM_STRETCH);
+	float climb = dot(up, normalize(light_dir * ATM_STRETCH));
+	float tau = 0.0;
+	float result = 0.0;
+	float start = 0.0;
+	float length_i = cloud_light_cache_near.x;
+	for (int i = 0; i < int(n_max); i++) {
+		float s = start + 0.5 * length_i;
+		float h = height_m + s * climb + s * s / (2.0 * CLOUD_A_M);
+		if (h <= CLOUD_TOP_M) {
+			vec2 lat_lon;
+			float in_cloud;
+			float footprint = max(pixel_angle * (camera_distance_m + s), length_i);
+			tau += cloud_extinction_at(offset_local + light_dir * s, h, footprint, pixel_angle * (camera_distance_m + s),
+					lat_lon, in_cloud) * length_i;
+		}
+		start += length_i;
+		length_i = float(i + 1) < cloud_light_cache_near.w ? length_i * cloud_light_cache_near.y
+				: cloud_light_cache_near.z;
+		for (int k = 0; k < 4; k++) {
+			result += float(i + 1) == n[k] ? near_w[k] * tau : 0.0;
+		}
+	}
+	return result;
 }
 
 // =====================================================================================================================

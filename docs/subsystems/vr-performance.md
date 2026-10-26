@@ -131,3 +131,18 @@ system's state, not this change); compare within a state:
 The hybrid near march adds +0.75-1.4 ms (fast) / +0.2-2.9 ms (slow) to the proxy's cloud pass, +45-65 % (VR ~2.6x
 the proxy) - with the rest of the pass over the 2.5 ms cloud budget (open). Before the cache (Task 11, other weather):
 1.4-3.2 ms at divisor 4. Not yet measured in the headset.
+
+Fix round 1 (near lengths 1 / 3 / 2 / 2 km in cascades 1-4, 12 / 32 / 22 / 22 samples - case 8 needs them; the
+clear-air early-out tried and dropped). Same command, back to back; the GPU state told by shadow_pass (~0.5 fast /
+~0.9 ms slow). cloud_pass median ms, descent / pan low / pan high:
+
+| Variant | fast | slow |
+|---|---|---|
+| round 3 lengths (1 km everywhere) | 2.24 / 3.62 / 2.67 | 5.06 / 7.51 / 5.50 |
+| round 3 lengths + early-out | - | 5.13, 3.50 / 7.62, 7.71 / 5.68, 5.71 |
+| new lengths | 2.25 / 5.04 / 3.60 | 5.14 / 10.66 / 7.68 |
+| new lengths + early-out | 2.32 / 5.08 / 3.73 | 5.13 / 11.03 / 8.00 |
+
+The longer near marches cost +35-42 % in the pans (descent unchanged); the early-out (2-4 texture fetches and two
+lat / lon conversions per sample against the samples above a clear column top it skips) cost +1-4 % in both states
+and was removed. Over the 2.5 ms budget in VR: Task 10's binding item (controller ruling 2026-10-26).

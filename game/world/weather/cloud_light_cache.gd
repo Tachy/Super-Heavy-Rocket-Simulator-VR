@@ -50,6 +50,39 @@ var _batch := {}
 ## What the schedule has not seen while a batch waited (main thread).
 var _held_jump := false
 var _held_delta_s := 0.0
+## near_samples' cache (render thread): the first interval it holds and the samples per cascade.
+var _near_first_m := -1.0  ## none yet
+var _near_samples := PackedInt32Array()
+var _near_ratio_first_m := -1.0
+var _near_ratio_value := 1.0
+
+
+## The near march's samples of cascade k at the preset's first interval (CloudLightCacheSchedule.near_samples; 0: pure;
+## computed once per first interval: the render thread asks every frame).
+func near_samples(k: int) -> int:
+	var first := march_first_m
+	if first != _near_first_m:
+		var samples := PackedInt32Array()
+		for i in range(CloudLightCacheSchedule.CASCADES.size()):
+			samples.append(CloudLightCacheSchedule.near_samples(i, first))
+		_near_samples = samples
+		_near_first_m = first
+	return _near_samples[k]
+
+
+## The near march's geometric ratio at the preset's first interval (cached with near_samples).
+func _near_ratio() -> float:
+	near_samples(0)
+	if _near_ratio_first_m != _near_first_m:
+		_near_ratio_value = CloudLayer.light_march_ratio(_near_first_m, CloudLightCacheSchedule.NEAR_GEOMETRIC_M,
+				CloudLightCacheSchedule.NEAR_GEOMETRIC_SAMPLES)
+		_near_ratio_first_m = _near_first_m
+	return _near_ratio_value
+
+
+## The length of cascade k's near march [m] (0: pure).
+func near_length_m(k: int) -> float:
+	return CloudLightCacheSchedule.near_length_m(near_samples(k), march_first_m)
 
 
 ## All voxels of one generation.
@@ -139,13 +172,11 @@ func lookup_globals(camera_earth_m: Vector3) -> Dictionary:
 		var size: Vector3i = c["size"]
 		var centre: Vector2 = c["centre"]
 		result[StringName("cloud_light_cache_cascade%d" % k)] = Projection(
-				Vector4(c["dx_m"], 1.0 if c["hybrid"] else 0.0, size.z, c["weight"]), columns[0], columns[1],
+				Vector4(c["dx_m"], near_samples(k), size.z, c["weight"]), columns[0], columns[1],
 				Vector4(centre.x, centre.y, c["radius_voxels"], c["band_voxels"]))
 	result[&"cloud_light_cache_valid"] = any
-	var near_m := CloudLightCacheSchedule.NEAR_M
-	var samples := CloudLightCacheSchedule.NEAR_SAMPLES
-	result[&"cloud_light_cache_near"] = Vector4(march_first_m,
-			CloudLayer.light_march_ratio(march_first_m, near_m, samples), near_m, samples)
+	result[&"cloud_light_cache_near"] = Vector4(march_first_m, _near_ratio(),
+			CloudLightCacheSchedule.NEAR_INTERVAL_M, CloudLightCacheSchedule.NEAR_GEOMETRIC_SAMPLES)
 	result[&"cloud_light_cache_origin"] = (_state["origin"] as Vector3) - camera_earth_m
 	result[&"cloud_light_cache_east"] = _state["east"]
 	result[&"cloud_light_cache_north"] = _state["north"]

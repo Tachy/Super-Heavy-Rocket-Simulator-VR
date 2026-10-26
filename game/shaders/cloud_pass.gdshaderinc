@@ -136,10 +136,11 @@ global uniform float cloud_fine_step_fraction;  // fine step / distance inside t
 // is the march's, bit for bit).
 float cloud_light_source(vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, float height_m, float distance_m,
 		vec2 column, float jitter, float pixel_angle, bool sun) {
-	vec3 cached = sun ? cloud_cached_light_depth(offset, height_m, light_dir) : vec3(0.0, 0.0, 1.0);
+	vec4 near_w = vec4(0.0);
+	vec3 cached = sun ? cloud_cached_light_depth(offset, height_m, light_dir, near_w) : vec3(0.0, 0.0, 1.0);
 	float tau_light = cached.x;
 	if (cached.y > 0.0) {
-		tau_light += cached.y * cloud_near_light_depth(offset, height_m, distance_m, light_dir, pixel_angle);
+		tau_light += cloud_near_light_depth(offset, height_m, distance_m, light_dir, pixel_angle, near_w);
 	}
 	if (cached.z > 0.0) {
 		float marched = cloud_light_optical_depth(offset, height_m, distance_m, light_dir, jitter, pixel_angle,
