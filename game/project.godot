@@ -525,6 +525,10 @@ cloud_light_cache_shell={
 "type": "vec4",
 "value": Vector4(-500, 20000, 128, 0)
 }
+cloud_light_cache_near={
+"type": "vec4",
+"value": Vector4(20, 1, 500, 8)
+}
 cloud_light_cache_cascade0={
 "type": "mat4",
 "value": Projection(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)

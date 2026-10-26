@@ -109,8 +109,25 @@ points refreshed only every `REFRESH_S` - rebuild with the points, move it with 
 
 The light toward the Sun is looked up in a light cache instead of marched per cloud sample (`weather-clouds.md`): 5
 cascades x 128 x 128 x 512 voxels, R16F, 2 generations = 160 MB of VRAM (budget 192 MB [E]). Its fill is spread over
-frames: at most 327 680 voxels per frame (96 + 32 light samples each, ~1.4 ns per voxel on the RTX 4090 with
-`cloud_check.gd`'s slabs), measured worst frame 0.45 ms and 0.80 ms in two runs (`cloud_check.gd` section 8,
-`terrain_perf.gd --gpu_passes` names it `cloud_light_fill`); a full refresh of 42 M voxels takes 128 frames (1.4 s at
-90 Hz). Task 1's whole-cascade refill was 5-8 ms in one frame. Not yet measured in VR or in dense real weather; the
-0.80 ms frame (over the 0.5 ms target) is open.
+frames: at most 98 304 voxels per frame (96 + 32 light samples each); `cloud_check.gd` section 8 measures every
+frame of a full refresh (427 frames, 4.7 s at 90 Hz): median 0.099, worst 0.454 ms (RTX 4090, the check's slab). The
+cost per voxel depends on the GPU's clock state and the weather, not the jobs: on the slab 262 144 voxels took 0.18 ms
+at full clock and 0.37-0.51 ms clocked down (the earlier 0.45-0.80 ms spread at 327 680); in ERA5 weather (below)
+196 608 voxels reached 0.45 ms per second's mean at full speed, 98 304 0.44 ms in the slow state. Task 1's
+whole-cascade refill was 5-8 ms in one frame.
+
+VR proxy (`terrain_perf.gd -- --utc=2025-10-26T15:00:00 --render_scale=1.65 --gpu_passes --weather=<abs>/data/
+weather/cache/era5_1102911.wthr --cloud_quality=vr`, median of the per-second means, ms). The machine ran in two
+states between runs: "fast" and "slow" (every pass ~2x slower in slow, e.g. transparent_and_post 0.88 vs 2.1 ms - the
+system's state, not this change); compare within a state:
+
+| Phase | cloud_pass read at the sample (round 2) fast / slow | hybrid cascades 1-4 (1 km / 12) fast / slow |
+|---|---|---|
+| descent | 1.15 / 4.71 | 2.51, 2.52 / 4.93, 5.04, 4.79 |
+| pan low | 1.98 / 4.50 | 3.12, 3.10 / 7.44, 7.48, 7.40 |
+| pan high | 1.48 / 3.60 | 2.23, 2.24 / 5.53, 5.39, 5.52 |
+| cape | 0.12 / 0.27 | 0.10, 0.12 / 0.26, 0.24, 0.26 |
+
+The hybrid near march adds +0.75-1.4 ms (fast) / +0.2-2.9 ms (slow) to the proxy's cloud pass, +45-65 % (VR ~2.6x
+the proxy) - with the rest of the pass over the 2.5 ms cloud budget (open). Before the cache (Task 11, other weather):
+1.4-3.2 ms at divisor 4. Not yet measured in the headset.

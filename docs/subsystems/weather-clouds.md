@@ -83,33 +83,39 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   refilled. The `CLOUD_LIGHT_FILL` kernel evaluates `cloud_light_optical_depth_with` at each voxel centre (96 near +
   32 far samples at the stratified midpoints, deterministic; detail band-limited at the voxel's size; the point solved
   for the march's exact model height; the field mixed at the generation's blend). The fill is progressive: the
-  schedule hands the render thread at most 327 680 voxels of jobs per frame (~0.5 ms GPU), a full refresh of all 42 M
-  voxels takes 128 frames (1.4 s at 90 Hz). Refresh: the Sun turned by 0.25 deg or the blend moved by 0.05 -> the
-  other slot is filled completely while the old one stays shown alone, then the lookup cross-fades over 0.5 s. A clock
-  jump (`CloudLayer.notify_clock_jump`, `SimClock.time_jumped`), a Sun jump > 15 deg, or a change of quality / detail
+  schedule hands the render thread at most 98 304 voxels of jobs per frame (<= 0.5 ms GPU, measured below), a full
+  refresh of all 42 M voxels takes 427 frames (4.7 s at 90 Hz). Refresh: the Sun turned by 0.25 deg or the blend
+  moved by 0.05 -> the other slot is filled completely while the old one stays shown alone, then the lookup
+  cross-fades over 0.5 s. A clock
+  jump (`CloudLayer.notify_clock_jump`, `SimClock.time_jumped`), a Sun jump > 25 deg, or a change of quality / detail
   / debug output / noise / the content of a slot with weight invalidates everything: the march takes over until
-  filled. Lookup (`cloud_cached_light_depth` -> (weighted tau, weight left)): cascade k has weight 1 within 34 voxels
-  of the ground point (Chebyshev), falling to 0 at 42 (a band of 8 voxels: 0.5 .. 8 km), the rest goes to the next
-  cascade and after the last (beyond 34-42 km) to the per-sample march (`cloud_light_optical_depth`: near samples over
-  6 km in geometric intervals from 20 m through the shapes, then far samples to the cloud top through the grid mean;
-  stratified, unbiased over the jitter) - no seam; the weights depend only on the ground point, never on a re-anchor.
-  The Moon always marches. Where the cache holds nothing the result is the march's bit for bit (one call site).
-  Threads: `CloudLayer` plans every frame (main thread: the schedule's jobs and the lookup state they lead to, one
-  batch; a batch with jobs not yet run holds the schedule back); `CloudEffect` runs the batch's jobs before the march
-  and only then adopts its state (`CloudShaderPort.pack` overrides `cloud_light_cache_valid / _origin / _east /
-  _north / _shell / _cascade0..4`). Fidelity flag `CloudLayer.light_cache_enabled` (global
-  `cloud_light_cache_enabled`; off = the per-sample march everywhere, the reference; the cache keeps planning, so it is
-  current when switched back on). The closed-form source (the
-  fidelity flag's CLOSED_FORM) is the core's `cloud_scattering_source_3d`: TMS on the delta-Eddington source function of the surface the light entered through
-  (entry cosine mu_e = clamp((t_v + mu0) / (tau_s + 1), max(mu0, 0.02), 1); a slab gives mu_e = mu0 exactly, a sunlit
-  flank or a base under a Sun below the local horizon gets its true incidence; tilted independent column, Varnai &
-  Davies 1999). The light march band-limits the detail at the larger of the pixel footprint and its interval. Plus the
-  sky source (`cloud_sky_scattering_source`, vertical column). Column depths use one convention in core and shader:
-  the covered area's in-cloud mean mean / cf (the A channel's), continuous through the layer centres. The air's Sun /
-  sky irradiance at the cloud from `atmosphere.gdshaderinc`, re-evaluated every 500 m / 5 % along a ray; the eclipse
-  acts on both: the Sun through `atm_sunlit`, the sky light through `atm_sky_eclipse_factor`, evaluated per 8 x 8 work
-  group at 5 km and 150 km along its centre ray and interpolated in distance (per sample it cost 10 ms at the eclipse
-  epoch; the penumbra changes by ~3 % per 100 km).
+  filled. Lookup (`cloud_cached_light_depth` -> (weighted cached tau, weight of the hybrid cascades, weight left)):
+  cascade k has weight 1 within 34 voxels of the ground point (Chebyshev), falling to 0 at 42 (a band of 8 voxels:
+  0.5 .. 8 km), the rest goes to the next cascade and after the last (beyond 34-42 km) to the per-sample march. The
+  cache thus covers the volume march's full range (Task 8's near / far hand-over at <= 34 km, ledgered). Cascade 0
+  is read at the sample; cascades 1-4 are hybrid (controller ruling 2026-10-26): the sample marches the first 1 km of
+  its light path through the shapes (`cloud_near_light_depth`: 12 geometric intervals from 20 m, the stratified
+  midpoints) and adds the cascade's tau read at that point (the fill's tau starts there, so nothing is counted
+  twice) - a far cascade's voxel cannot hold a cumulus' self-shadowing. The per-sample march
+  (`cloud_light_optical_depth`: near samples over 6 km in geometric intervals from 20 m through the shapes, then far
+  samples to the cloud top through the grid mean; stratified, unbiased over the jitter) - no seam; the weights depend
+  only on the ground point, never on a re-anchor. The Moon always marches. Where the cache holds nothing the result is
+  the march's bit for bit (one call site). Threads: `CloudLayer` plans every frame (main thread: the schedule's jobs and
+  the lookup state they lead to, one batch; a batch with jobs not yet run holds the schedule back); `CloudEffect` runs
+  the batch's jobs before the march and only then adopts its state (`CloudShaderPort.pack` overrides
+  `cloud_light_cache_valid / _origin / _east / _north / _shell / _cascade0..4`). Fidelity flag
+  `CloudLayer.light_cache_enabled` (global `cloud_light_cache_enabled`; off = the per-sample march everywhere, the
+  reference; the cache keeps planning, so it is current when switched back on). The closed-form source (the fidelity
+  flag's CLOSED_FORM) is the core's `cloud_scattering_source_3d`: TMS on the delta-Eddington source function of the
+  surface the light entered through (entry cosine mu_e = clamp((t_v + mu0) / (tau_s + 1), max(mu0, 0.02), 1); a slab
+  gives mu_e = mu0 exactly, a sunlit flank or a base under a Sun below the local horizon gets its true incidence; tilted
+  independent column, Varnai & Davies 1999). The light march band-limits the detail at the larger of the pixel footprint
+  and its interval. Plus the sky source (`cloud_sky_scattering_source`, vertical column). Column depths use one
+  convention in core and shader: the covered area's in-cloud mean mean / cf (the A channel's), continuous through the
+  layer centres. The air's Sun / sky irradiance at the cloud from `atmosphere.gdshaderinc`, re-evaluated every 500 m / 5
+  % along a ray; the eclipse acts on both: the Sun through `atm_sunlit`, the sky light through `atm_sky_eclipse_factor`,
+  evaluated per 8 x 8 work group at 5 km and 150 km along its centre ray and interpolated in distance (per sample it
+  cost 10 ms at the eclipse epoch; the penumbra changes by ~3 % per 100 km).
 - **Cloud pass** (`CloudEffect`, a compositor effect before the transparent pass; kernels in
   `shaders/cloud_pass.gdshaderinc` with `atmosphere.gdshaderinc` + `clouds.gdshaderinc` compiled as GLSL compute by
   `CloudShaderPort`, which turns their `global uniform`s into one uniform block + sampler bindings filled from
@@ -297,16 +303,20 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   8 frames, the view's jitter pinned alike) at every pixel of a 64 x 64 view per cascade at its scale (camera 5 / 9.9
   / 18.8 / 36.5 / 72 km up, 80-81 deg down; the farthest cloud samples asserted inside that cascade's full weight;
   error relative to max(pixel, 5 % of the view mean)), the fill at 1/16 of the voxels per frame (complete after 16
-  frames): a tau-10 slab (debug 2) worst 0.48-1.25 % in every cascade (tolerance 5 %); a cf 0.4 broken layer (debug
-  7, the shapes) cascade 0 worst 2.71 / 4.60 % at Sun 45 / 20 deg (tolerance 10 %) - cascades 1-4 FAIL: worst 12.7 /
-  18.0, 14.2 / 26.0, 21.2 / 62.8, 44.7 / 107.7 %, mean 0.3-5.1 % (open, see Known limits); a view beyond every
-  cascade (complete fill) and the frames right after a clock jump bit-identical to the march. Section 10 (no seam):
-  the row-to-row step of (cache - march) / mean along a line of pixels across each edge band within the image noise:
-  0 -> 1 0.36 / 0.61 %, 1 -> 2 0.18 / 0.32 %, 2 -> 3 0.11 / 0.25 %, 4 -> march 0.23 / 0.59 % - 3 -> 4 0.29 % against a
-  noise of 0.19 % (open); the same view before / after a re-anchor of cascade 3: 0.0000 %. Measured on the way:
-  64 / 256 / 512 voxels up worst 78 / 23 / 8 % (Task 1, broken, Sun 20 deg); 24 + 8 fill samples 30 % off the
-  converged integral at a pixel, 48 + 16 10.6 %; a x8 layout (8 / 64 / 512 km) broken worst 42 / 193 % (64 km) and
-  129 / 1005 % (512 km).
+  frames): a tau-10 slab (debug 2) worst 0.43-1.12 % in every cascade (tolerance 5 %); a cf 0.4 broken layer (debug
+  7, the shapes), worst pixel at Sun 45 / 20 deg (tolerance 10 %): cascade 0 2.71 / 4.60 %, 1 3.38 / 9.58 %, 2 7.10 /
+  9.37 %, 3 8.09 / FAIL 39.6 %, 4 5.81 / FAIL 39.8 % (mean errors 0.12-0.81 %; the two failures one pixel at the
+  view's edge at a 20-deg Sun, open); a view beyond every cascade (complete fill) and the frames right after a clock
+  jump bit-identical to the march; the fill at the game's budget (98 304 voxels) <= 0.5 ms in every frame: median
+  0.099, worst 0.454 ms over the 427 frames of a full refresh. Section 10 (no seam; the march with the cache's sample
+  count): the row-to-row step of (cache - march) / mean along a line of pixels over each edge band within the image
+  noise: 0 -> 1 0.046 / 0.071 %, 1 -> 2 0.030 / 0.050 %, 2 -> 3 0.021 / 0.048 %, 3 -> 4 0.061 / 0.074 %, 4 -> march
+  0.051 / 0.502 %; the same view before / after a re-anchor of cascade 3: 0.0000 %. Measured on the way: 64 / 256 / 512
+  voxels up worst 78 / 23 / 8 % (Task 1, broken, Sun 20 deg); 24 + 8 fill samples 30 % off the converged integral at a
+  pixel, 48 + 16 10.6 %; a x8 layout (8 / 64 / 512 km) broken worst 42 / 193 % (64 km) and 129 / 1005 % (512 km); the x2
+  layout read at the sample 12.7-107.7 %; the hybrid's near length / samples in `CloudLightCacheSchedule.NEAR_M`. The
+  earlier 3 -> 4 "seam" (0.29 % against 0.19 %) was the preset march's own pattern (6 + 3 samples) as reference, not a
+  seam: against the cache's sample count the step is 0.061 %.
 - Core `[weather]` light under the clouds: T_total = 1 - albedo of the Monte Carlo fixture within 3.2 % (10 cases;
   the LUT likewise), LUT monotone / 1 at tau 0 / continuous at its last node; white-sky vs two-stream within 10 %
   (4.6 % measured); overcast tau 30 at Sun 45 deg 0.277 in 0.2-0.3 (Kasten & Czeplak 0.25); the Sun's diffuse part under
@@ -406,8 +416,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   `CloudEffect.pinned_frame` (checks: the march's jitter of a fixed frame); with `CloudEffect.capture_timestamps`
   (`terrain_perf.gd --gpu_passes`) the fill is its own interval `cloud_light_fill`; `CloudLightCache.settled()`,
   `planned_fill_frames`, `last_fill_voxels`, `schedule.lookup_state()` (windows, held rectangles, weights);
-  `schedule.budget_voxels` (the checks fill at 1/16 of the voxels per frame). Schedule logic:
-  `tests/cloud_light_cache_test.gd` (headless).
+  `schedule.budget_voxels` (the checks fill at 1/16 of the voxels per frame); `STARSIM_LIGHT_CACHE_ONLY=1` runs
+  `cloud_check.gd`'s sections 8 and 10 alone (with per-row seam profiles and the fill's per-frame times). Schedule
+  logic: `tests/cloud_light_cache_test.gd` (headless).
 - `CloudShadowEffect.grid_mean_only` (checks): the near shadow map with the grid mean. `CloudShadowEffect.ran_msec`: the
   render callback's last run; `CloudLayer` takes the maps as valid (`cloud_shadow_valid`) only within 250 ms of it.
 - `cloud_check.gd` with `STARSIM_SLANT_TABLE=1`: only the beam-cover fit table (shapes' direct Sun, near disc, eight
@@ -474,12 +485,12 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 - The stochastic light march (outside the light cache, and for the Moon) is unbiased in tau_s but exp(-tau_s) per
   sample is brighter on average (+10 % at the worst checked geometry with the preset's samples); more near samples
   reduce it.
-- Light cache: broken cloud in cascades 1-4 (125 m .. 1 km voxels) misses `cloud_check` section 8's 10 % at single
-  pixels (12-108 % worst, mean 0.3-5 %): a voxel coarser than the shapes' 25-200 m edges blurs a cumulus'
-  self-shadowing, independent of the pixel footprint - only cascade 0 (62.5 m) holds it. The seam check 3 -> 4 shows
-  a 0.29 % row step against 0.19 % noise (the band or cascade 3's own interpolation: not separated yet). Beyond 34-42
-  km the light is marched. The fill's per-frame GPU time measured 0.45 and 0.80 ms (worst frame, two runs, RTX 4090)
-  at 327 680 voxels - timing spread not yet understood; dense real weather not measured.
+- Light cache: broken cloud in cascades 3-4 (hybrid) misses `cloud_check` section 8's 10 % at one edge pixel of the
+  view at a 20-deg Sun (39.6 / 39.8 %, mean 0.5 / 0.7 %); a longer or finer near march did not change it (1 km / 16
+  samples the same, 2 km / 8 worse). The hybrid near march costs the cloud pass +45-65 % in the VR proxy
+  (`vr-performance.md`): over the 2.5 ms budget in VR, open. The fill's GPU time per voxel depends on the GPU's clock
+  state and the weather (real weather ~2x the slab's); the budget (98 304 voxels) keeps the slow state under 0.5 ms.
+  Beyond 34-42 km the light is marched (the volume march ends at <= 34 km).
 - The transfer table is a plane-parallel slab result on a tilted independent column: light is not moved between
   columns (no light leaking around a cumulus' shadowed side beyond the entry-surface tilt); the HG peak is treated as
   forward (its ~0.3 deg width is not resolved in the multiply scattered light). Ice uses the droplet table.

@@ -38,7 +38,9 @@ global uniform vec3 cloud_light_cache_origin;   // the frame's origin - the came
 global uniform vec3 cloud_light_cache_east;     // the frame's horizontal axes (unit, Earth-local)
 global uniform vec3 cloud_light_cache_north;
 global uniform vec4 cloud_light_cache_shell;    // (bottom height m, top height m, texels across N, unused)
-// Per cascade (columns): [0] (dx m, unused, layers, weight of slot 1); [1] / [2] the voxels slot 0 / 1
+// The hybrid cascades' near march: (first interval m, ratio, length m, samples).
+global uniform vec4 cloud_light_cache_near;
+// Per cascade (columns): [0] (dx m, 1: hybrid / 0: pure, layers, weight of slot 1); [1] / [2] the voxels slot 0 / 1
 // holds (x0, y0, x1, y1: global indices, end exclusive; empty: x1 <= x0); [3] (the ground point x, y in voxel units,
 // the camera square's half size, the band; voxels).
 global uniform mat4 cloud_light_cache_cascade0;
@@ -55,57 +57,95 @@ float cloud_cache_rect_weight(vec4 held, vec2 g, float band) {
 	return clamp(min(min(lo.x, lo.y), min(hi.x, hi.y)) / band, 0.0, 1.0);
 }
 
-// Adds cascade c's share at plane coordinates `plane` (m) and height fraction hf (0 .. 1 over the shell) to result
-// (x: the weighted tau_light so far, y: the weight still open).
-void cloud_cache_cascade(mat4 c, sampler3D slot0, sampler3D slot1, vec2 plane, float hf, inout vec2 result) {
+// The march's model height (cloud_height_along's form) of the point camera + offset.
+float cloud_offset_height(vec3 offset) {
+	vec3 m = offset * ATM_STRETCH;
+	vec3 up_c = normalize((atmosphere_camera_hi + atmosphere_camera_lo) * ATM_STRETCH);
+	float r_c = CLOUD_A_M + cloud_camera_height_m;
+	float q = dot(m, m) + 2.0 * r_c * dot(up_c, m);
+	return cloud_camera_height_m + q / (sqrt(max(r_c * r_c + q, 0.0)) + r_c);
+}
+
+// Adds cascade c's share to result (x: the weighted cached tau_light so far, y: the weight of the hybrid cascades
+// whose near part the caller marches, z: the weight still open). The cascade is chosen at the sample (its plane
+// coordinates `plane`, m); a pure cascade (c[0].y = 0) is read at the sample (height fraction hf over the shell), a
+// hybrid one (c[0].y = 1) at the point the near march ends (plane_near, hf_near) - and only where it holds that point.
+void cloud_cache_cascade(mat4 c, sampler3D slot0, sampler3D slot1, vec2 plane, float hf, vec2 plane_near,
+		float hf_near, inout vec3 result) {
 	vec2 g = plane / c[0].x;  // global voxel coordinates (voxel i spans [i, i + 1))
 	vec2 d = abs(g - c[3].xy);
 	float e = clamp((c[3].z - max(d.x, d.y)) / c[3].w, 0.0, 1.0);
+	bool hybrid = c[0].y > 0.5;
+	vec2 gf = hybrid ? plane_near / c[0].x : g;  // where the cascade is read
 	float w1 = c[0].w;
 	if (w1 < 1.0) {
-		e = min(e, cloud_cache_rect_weight(c[1], g, c[3].w));
+		e = min(e, cloud_cache_rect_weight(c[1], gf, c[3].w));
 	}
 	if (w1 > 0.0) {
-		e = min(e, cloud_cache_rect_weight(c[2], g, c[3].w));
+		e = min(e, cloud_cache_rect_weight(c[2], gf, c[3].w));
 	}
 	if (e <= 0.0) {
 		return;
 	}
 	float layers = c[0].z;
-	vec3 f = vec3(fract(g / cloud_light_cache_shell.z), clamp(hf * layers, 0.5, layers - 0.5) / layers);
+	vec3 f = vec3(fract(gf / cloud_light_cache_shell.z),
+			clamp((hybrid ? hf_near : hf) * layers, 0.5, layers - 0.5) / layers);
 	float tau = w1 < 1.0 ? textureLod(slot0, f, 0.0).r : 0.0;
 	if (w1 > 0.0) {
 		tau = mix(tau, textureLod(slot1, f, 0.0).r, w1);
 	}
-	result.x += result.y * e * tau;
-	result.y *= 1.0 - e;
+	float w = result.z * e;
+	result.x += w * tau;
+	result.y += hybrid ? w : 0.0;
+	result.z -= w;
 }
 
-// tau_light toward the Sun at camera + offset_local with its height from the cascades: x the weighted optical depth,
-// y the weight left for the per-sample march (1: the cache holds nothing here - off, not filled, outside every
-// cascade - and the caller's result is the march's; 0: the cache alone). tau_light = x + y * march.
-vec2 cloud_cached_light_depth(vec3 offset_local, float height_m) {
-	vec2 result = vec2(0.0, 1.0);
+// tau_light toward the Sun (light_dir) at camera + offset_local with its height from the cascades: x the weighted
+// cached optical depth, y the weight of the hybrid cascades (their tau starts cloud_light_cache_near.z sunward: the
+// caller adds y x the near march over that length through the shapes), z the weight left for the per-sample march
+// (1: the cache holds nothing here - off, not filled, outside every cascade - and the caller's result is the march's;
+// 0: the cache alone). tau_light = x + y * near march + z * march.
+vec3 cloud_cached_light_depth(vec3 offset_local, float height_m, vec3 light_dir) {
+	vec3 result = vec3(0.0, 0.0, 1.0);
 	if (!cloud_light_cache_enabled || !cloud_light_cache_valid) {
 		return result;
 	}
 	vec3 rel = offset_local - cloud_light_cache_origin;
 	vec2 plane = vec2(dot(rel, cloud_light_cache_east), dot(rel, cloud_light_cache_north));
-	float hf = (height_m - cloud_light_cache_shell.x) / (cloud_light_cache_shell.y - cloud_light_cache_shell.x);
-	cloud_cache_cascade(cloud_light_cache_cascade0, cloud_light_cache_a0, cloud_light_cache_b0, plane, hf, result);
-	if (result.y > 0.0) {
-		cloud_cache_cascade(cloud_light_cache_cascade1, cloud_light_cache_a1, cloud_light_cache_b1, plane, hf, result);
+	float span = cloud_light_cache_shell.y - cloud_light_cache_shell.x;
+	float hf = (height_m - cloud_light_cache_shell.x) / span;
+	vec3 near_offset = offset_local + light_dir * cloud_light_cache_near.z;
+	vec3 rel_near = rel + light_dir * cloud_light_cache_near.z;
+	vec2 plane_near = vec2(dot(rel_near, cloud_light_cache_east), dot(rel_near, cloud_light_cache_north));
+	float hf_near = (cloud_offset_height(near_offset) - cloud_light_cache_shell.x) / span;
+	cloud_cache_cascade(cloud_light_cache_cascade0, cloud_light_cache_a0, cloud_light_cache_b0, plane, hf, plane_near,
+			hf_near, result);
+	if (result.z > 0.0) {
+		cloud_cache_cascade(cloud_light_cache_cascade1, cloud_light_cache_a1, cloud_light_cache_b1, plane, hf,
+				plane_near, hf_near, result);
 	}
-	if (result.y > 0.0) {
-		cloud_cache_cascade(cloud_light_cache_cascade2, cloud_light_cache_a2, cloud_light_cache_b2, plane, hf, result);
+	if (result.z > 0.0) {
+		cloud_cache_cascade(cloud_light_cache_cascade2, cloud_light_cache_a2, cloud_light_cache_b2, plane, hf,
+				plane_near, hf_near, result);
 	}
-	if (result.y > 0.0) {
-		cloud_cache_cascade(cloud_light_cache_cascade3, cloud_light_cache_a3, cloud_light_cache_b3, plane, hf, result);
+	if (result.z > 0.0) {
+		cloud_cache_cascade(cloud_light_cache_cascade3, cloud_light_cache_a3, cloud_light_cache_b3, plane, hf,
+				plane_near, hf_near, result);
 	}
-	if (result.y > 0.0) {
-		cloud_cache_cascade(cloud_light_cache_cascade4, cloud_light_cache_a4, cloud_light_cache_b4, plane, hf, result);
+	if (result.z > 0.0) {
+		cloud_cache_cascade(cloud_light_cache_cascade4, cloud_light_cache_a4, cloud_light_cache_b4, plane, hf,
+				plane_near, hf_near, result);
 	}
 	return result;
+}
+
+// The near part of a hybrid cascade's light path: from the sample cloud_light_cache_near.z toward the light through
+// the shapes in cloud_light_cache_near.w geometric intervals (first .x, ratio .y), the stratified midpoints (jitter
+// 0.5: deterministic, as the fill); the detail band-limited at the pixel footprint as the per-sample march.
+float cloud_near_light_depth(vec3 offset_local, float height_m, float camera_distance_m, vec3 light_dir,
+		float pixel_angle) {
+	return cloud_light_optical_depth_with(offset_local, height_m, camera_distance_m, light_dir, 0.5, pixel_angle,
+			pixel_angle, vec4(cloud_light_cache_near.xyz, 0.0), ivec2(int(cloud_light_cache_near.w), 0), 0.0);
 }
 
 // =====================================================================================================================
@@ -133,15 +173,6 @@ layout(r16f, set = 1, binding = 1) uniform writeonly image3D out_light_depth;
 layout(r32f, set = 1, binding = 1) uniform writeonly image3D out_light_depth;
 #endif
 
-// The march's model height (cloud_height_along's form) of the point camera + offset.
-float cloud_fill_height(vec3 offset) {
-	vec3 m = offset * ATM_STRETCH;
-	vec3 up_c = normalize((atmosphere_camera_hi + atmosphere_camera_lo) * ATM_STRETCH);
-	float r_c = CLOUD_A_M + cloud_camera_height_m;
-	float q = dot(m, m) + 2.0 * r_c * dot(up_c, m);
-	return cloud_camera_height_m + q / (sqrt(max(r_c * r_c + q, 0.0)) + r_c);
-}
-
 // Floor division (GLSL's % and / are undefined / truncating for negative operands); exact for |i| < 2^24.
 int cloud_fill_floor_div(int i, int n) {
 	return int(floor(float(i) / float(n)));
@@ -164,7 +195,7 @@ void main() {
 	// sphere vs the ellipsoid start error of < 0.2 km shrinks below a millimetre in three steps).
 	float t = h + (x * x + y * y) / (2.0 * (CLOUD_A_M + h));
 	for (int k = 0; k < 3; k++) {
-		t += h - cloud_fill_height(base + cloud_fill.up.xyz * t);
+		t += h - cloud_offset_height(base + cloud_fill.up.xyz * t);
 	}
 	vec3 offset = base + cloud_fill.up.xyz * t;
 	float tau = cloud_light_optical_depth_with(offset, h, 0.0, cloud_fill.light.xyz, 0.5, 0.0, 0.0, cloud_fill.march,

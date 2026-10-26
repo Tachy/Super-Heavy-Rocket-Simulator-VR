@@ -42,7 +42,7 @@
 #      samples asserted inside that cascade's full weight, beyond the finer ones'): a slab of tau ~10 (debug output 2,
 #      the grid mean) 5 %, a broken layer of cf 0.4 (debug output 7, the shapes) 10 % - Sun 45 / 20 deg up; a view
 #      beyond every cascade with a complete fill, and the frames right after a clock jump (nothing held), equal the
-#      march exactly (bit for bit); the fill's GPU time per frame at the game's budget (information).
+#      march exactly (bit for bit); the fill's GPU time in every frame at the game's budget <= 0.5 ms.
 #  10. (static clouds Task 2) no seam: a line of pixels crossing each cascade's edge band (cascade 0 -> 1 -> ... -> 4 ->
 #      the march, the slab): the row-to-row step of (cache - march) / mean stays within the image noise (the largest
 #      difference of two march renders with independent jitter); the same view before / after a re-anchor (the
@@ -75,7 +75,7 @@ const CLIMB_STEP_LIMIT := 0.05
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 129
+const EXPECTED_SAMPLES := 130
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -115,7 +115,9 @@ const CACHE_SLAB_TOLERANCE := 0.05
 const CACHE_BROKEN_TOLERANCE := 0.10  ## the voxel size (62.5 m across, 40 m up near the camera) against the shapes
 ## The fill's budget in the checks: 1/16 of all voxels per frame (complete after 16 frames).
 const CACHE_BUDGET_DIVISOR := 16
-const CACHE_MAX_SETTLE_FRAMES := 400
+const CACHE_MAX_SETTLE_FRAMES := 600  ## > a full refresh at the game budget (427 frames)
+const CACHE_FILL_LIMIT_MS := 0.5  ## spec decision 6: the fill's share of the 2.5 ms per frame
+const CACHE_FILL_IDLE_MS := 0.02  ## a frame without fill jobs (the interval's timestamps alone)
 ## Each cascade at its scale: the same view (81 deg down, fov 22; cascade 0: 80 / 24) from a camera about twice as high
 ## per cascade (x2 apart as the cascades), its farthest cloud samples just inside that cascade's full weight and
 ## beyond the finer cascade's (asserted): the outer part of the view is that cascade's, the inner the finer ones', at
@@ -193,6 +195,14 @@ func _run() -> void:
 	if OS.get_environment("STARSIM_SLANT_TABLE") != "":
 		await _slant_table()
 		quit(0)
+		return
+	if OS.get_environment("STARSIM_LIGHT_CACHE_ONLY") != "":  # diagnostics: sections 8 and 10 alone (no sample count)
+		await _light_cache_samples()
+		_clouds.shutdown()
+		for f in _files:
+			DirAccess.remove_absolute(f)
+		print("cloud_check (light cache only): %d failures" % _failures)
+		quit(1 if _failures > 0 else 0)
 		return
 	var thin := _slab("thin", SLAB_BOTTOM_M, SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0)
 	_show(thin)
@@ -579,7 +589,9 @@ func _light_cache_samples() -> void:
 						+ " the view mean %.5f /sr") % [stats["worst"] * 100.0, stats["at"] % CACHE_VIEW_SIZE,
 						stats["at"] / CACHE_VIEW_SIZE, images[1][stats["at"]], images[0][stats["at"]],
 						stats["mean_error"] * 100.0, stats["bias"] * 100.0, stats["mean"]])
-	# The fill's GPU time per frame at the game's budget (information; spec decision 6: <= 0.5 ms).
+	# The fill's GPU time per frame at the game's budget (spec decision 6: <= 0.5 ms in every frame): a full refresh of
+	# every cascade from nothing, the time of each frame's fill (the RenderingDevice's timestamps trail by a frame or
+	# two; every fill frame carries the budget's voxels but the last).
 	cache.schedule.budget_voxels = game_budget
 	_show(slab)
 	_camera.fov = v0["fov"]
@@ -587,18 +599,33 @@ func _light_cache_samples() -> void:
 	cache.reset()
 	CloudEffect.capture_timestamps = true
 	var camera := _point(v0["height_m"])
-	var worst_ms := 0.0
+	var times := PackedFloat64Array()
 	var frames := 0
 	var game_fill_frames := cache.planned_fill_frames
-	while frames < CACHE_MAX_SETTLE_FRAMES and not (frames > 2 and cache.settled()):
+	var after := 0  # frames after the last plan with jobs (the timestamps trail)
+	while frames < CACHE_MAX_SETTLE_FRAMES and after < 4:
 		_clouds.update(camera, 0.0, 0.0)
 		await RenderingServer.frame_post_draw
-		worst_ms = maxf(worst_ms, _light_fill_ms())
+		var ms := _light_fill_ms()
+		if ms > CACHE_FILL_IDLE_MS:
+			times.append(ms)
+		after = after + 1 if cache.settled() else 0
 		frames += 1
 	CloudEffect.capture_timestamps = false
-	print("  info  light cache fill at the game's budget (%d voxels per frame): worst %.3f ms GPU per frame, %d frames"
-			% [game_budget, worst_ms, cache.planned_fill_frames - game_fill_frames]
-			+ " for all %d voxels (%.1f MB)" % [cache.voxel_count(), CloudLightCache.texture_bytes() / 1048576.0])
+	var sorted := times.duplicate()
+	sorted.sort()
+	var worst := sorted[sorted.size() - 1] if not sorted.is_empty() else 0.0
+	var series := ""
+	for ms in times:
+		series += "%.2f " % ms
+	print("  info  light cache fill per frame (ms GPU, in fill order): " + series)
+	_check("light cache: the fill at the game's budget stays <= %.1f ms GPU in every frame" % CACHE_FILL_LIMIT_MS,
+			not sorted.is_empty() and worst <= CACHE_FILL_LIMIT_MS,
+			("%d voxels per frame: median %.3f, p95 %.3f, worst %.3f ms over %d frames; %d plans for all %d voxels "
+			+ "(%.1f MB)") % [game_budget, sorted[sorted.size() / 2] if not sorted.is_empty() else 0.0,
+			sorted[int(sorted.size() * 0.95)] if not sorted.is_empty() else 0.0, worst, sorted.size(),
+			cache.planned_fill_frames - game_fill_frames, cache.voxel_count(),
+			CloudLightCache.texture_bytes() / 1048576.0])
 	cache.schedule.budget_voxels = cache.voxel_count() / CACHE_BUDGET_DIVISOR
 	# Beyond every cascade (a complete fill): from 20 km toward the northern horizon every cloud sample lies past the
 	# outermost cascade's weight; the cache must change no bit.
@@ -677,6 +704,11 @@ func _seam_samples(slab: Dictionary) -> void:
 			if entry >= band.x - half and entry <= band.y + half:
 				rows = Vector2i(mini(rows.x, row), maxi(rows.y, row))
 		var result := _seam(lines[0], lines[1], lines[2], rows)
+		var profile := ""  # (cache - march) / mean per row, % (top row first), and the row's slab entry (km)
+		for row in range(CACHE_LINE_SIZE.y):
+			profile += "%d:%.2f@%.1f " % [row, (lines[0][row] - lines[1][row]) / result["mean"] * 100.0,
+					_row_entry_m(height, v["elevation"], v["fov"], row) / 1000.0]
+		print("  info  edge %d -> %d profile: %s" % [k, k + 1, profile])
 		if k == CACHE_REANCHOR_CASCADE:
 			reanchor_noise = result["noise"]
 		var into := "the march" if k == CloudLightCacheSchedule.CASCADES.size() - 1 else "cascade %d" % (k + 1)
@@ -714,12 +746,22 @@ func _seam_samples(slab: Dictionary) -> void:
 			% [worst * 100.0, reanchor_noise * 100.0, k, windows_before[k], windows_after[k]])
 
 
-## The line (row means) of the cache, the march (frames 0 .. 7) and the march with other jitter (frames 8 .. 15).
+## The line (row means) of the cache, the march (frames 0 .. 7) and the march with other jitter (frames 8 .. 15) - the
+## march with the cache's own sample count (as section 8: the preset's few samples carry their own bias and pattern).
 func _line_triple(camera: Vector3, view: Vector3, sun: Vector3) -> Array[PackedFloat32Array]:
+	var preset: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.DESKTOP]
+	var first: float = preset["light_first_m"]
+	var near: float = preset["light_near_m"]
+	var samples := CloudLightCache.SAMPLES
 	var result: Array[PackedFloat32Array] = []
 	for setting in [[true, 0], [false, 0], [false, RADIANCE_FRAMES]]:
 		_clouds.light_cache_enabled = setting[0]
+		ShaderGlobals.set_value(&"cloud_light_march", Vector4(first,
+				CloudLayer.light_march_ratio(first, near, samples.x), near, 0.0))
+		ShaderGlobals.set_value(&"cloud_light_samples", samples)
 		result.append(_column_means(await _mean_image(camera, view, sun, 2, CACHE_LINE_SIZE, setting[1])))
+	_clouds.quality = CloudLayer.Quality.DESKTOP
+	_detail_off()
 	_clouds.light_cache_enabled = true
 	return result
 
@@ -743,7 +785,7 @@ static func _seam(cache: PackedFloat32Array, march: PackedFloat32Array, other: P
 			if i - 1 >= rows.x and i <= rows.y and s > step:
 				step = s
 				at = i
-	return {"step": step, "at": at, "step_all": step_all, "noise": noise}
+	return {"step": step, "at": at, "step_all": step_all, "noise": noise, "mean": mean}
 
 
 ## The horizontal distance (m) at which the centre column's ray of row `row` (of CACHE_LINE_SIZE.y, top first) of a

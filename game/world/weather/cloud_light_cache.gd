@@ -139,9 +139,13 @@ func lookup_globals(camera_earth_m: Vector3) -> Dictionary:
 		var size: Vector3i = c["size"]
 		var centre: Vector2 = c["centre"]
 		result[StringName("cloud_light_cache_cascade%d" % k)] = Projection(
-				Vector4(c["dx_m"], 0.0, size.z, c["weight"]), columns[0], columns[1],
+				Vector4(c["dx_m"], 1.0 if c["hybrid"] else 0.0, size.z, c["weight"]), columns[0], columns[1],
 				Vector4(centre.x, centre.y, c["radius_voxels"], c["band_voxels"]))
 	result[&"cloud_light_cache_valid"] = any
+	var near_m := CloudLightCacheSchedule.NEAR_M
+	var samples := CloudLightCacheSchedule.NEAR_SAMPLES
+	result[&"cloud_light_cache_near"] = Vector4(march_first_m,
+			CloudLayer.light_march_ratio(march_first_m, near_m, samples), near_m, samples)
 	result[&"cloud_light_cache_origin"] = (_state["origin"] as Vector3) - camera_earth_m
 	result[&"cloud_light_cache_east"] = _state["east"]
 	result[&"cloud_light_cache_north"] = _state["north"]

@@ -25,23 +25,34 @@ extends RefCounted
 ## [E] The cascades (spec A; tuned in Task 10): horizontal extent and voxels (east, north, up). 62.5 m across and 40 m
 ## up near the camera (static clouds Task 1: cloud_check.gd section 8); x2 per cascade, a clipmap (8 / 16 / 32 / 64 /
 ## 128 km; controller ruling 2026-10-26): each level sees about the first's voxel / pixel-footprint ratio at its
-## distance. Measured (case 8 at each level's scale): the slab within 1.3 % everywhere; broken cloud only cascade 0
-## within 10 % (cascades 1-4: 13-108 % at a pixel - a voxel above the shapes' 25-200 m edges blurs a cumulus'
-## self-shadowing; open); x8 per cascade (8 / 64 / 512 km) was 42-1005 %. Weight to 42 km from the ground point
-## (the volume march ends at the near / far hand-over, 30-50 km: beyond 42 km its light is marched). The vertical stays
-## 40 m in every cascade: the light's kink at a cloud's top does not get coarser with distance.
+## distance. Weight 1 to 34 km from the ground point, 0 at 42 km: the volume march's full range (Task 8's near / far
+## hand-over at <= 34 km, ledgered). The vertical stays 40 m in every cascade: the light's kink at a cloud's top does
+## not get coarser with distance.
+## hybrid: the sample marches the first NEAR_M of its light path through the shapes and reads the cascade there (a
+## cumulus' self-shadowing lies below a far cascade's voxel; controller ruling 2026-10-26). Measured (case 8 at each
+## level's scale, broken cloud): read at the sample, cascades 1-4 were 13-108 % off at a pixel (a x8 layout 42-1005 %);
+## hybrid, 1-2 pass and 3-4 at a 20-deg Sun keep ~40 % at one edge pixel (open). Cascade 0 (62.5 m) is read at the
+## sample (pure): case 8 passes so (2.7 / 4.6 %), it serves the most samples, and pure is the cheaper path.
 const CASCADES := [
-	{"extent_m": 8000.0, "size": Vector3i(128, 128, 512)},
-	{"extent_m": 16000.0, "size": Vector3i(128, 128, 512)},
-	{"extent_m": 32000.0, "size": Vector3i(128, 128, 512)},
-	{"extent_m": 64000.0, "size": Vector3i(128, 128, 512)},
-	{"extent_m": 128000.0, "size": Vector3i(128, 128, 512)},
+	{"extent_m": 8000.0, "size": Vector3i(128, 128, 512), "hybrid": false},
+	{"extent_m": 16000.0, "size": Vector3i(128, 128, 512), "hybrid": true},
+	{"extent_m": 32000.0, "size": Vector3i(128, 128, 512), "hybrid": true},
+	{"extent_m": 64000.0, "size": Vector3i(128, 128, 512), "hybrid": true},
+	{"extent_m": 128000.0, "size": Vector3i(128, 128, 512), "hybrid": true},
 ]
+## [E] The hybrid cascades' near march: its length (a cumulus' self-shadowing scale) and samples (geometric intervals
+## from CloudLightCache.march_first_m, the stratified midpoints). Measured (cloud_check.gd section 8, broken cloud,
+## worst pixel of cascades 1 / 2 / 3 / 4 at Sun 20 deg): 500 m / 8 7.4 / 14.5 / 29.7 / 23.3 %; 2 km / 8 24.7 / 153 /
+## 47 / 61 % (the near march's own intervals too coarse); 1 km / 12 9.6 / 9.4 / 39.6 / 39.8 %; 1 km / 16 7.4 / 9.4 /
+## 39.6 / 39.2 % (no gain for 4 more samples). Cost (terrain_perf --render_scale=1.65, the VR preset): the cloud pass
+## +1.1-1.4 ms over the pure lookup (vr-performance.md).
+const NEAR_M := 1000.0
+const NEAR_SAMPLES := 12
 ## The shell (cloud_pass.gdshaderinc CLOUD_BOTTOM_M .. CLOUD_TOP_M: below every ground .. above every cloud).
 const SHELL_BOTTOM_M := -500.0
 const SHELL_TOP_M := 20000.0
 ## [E] Re-anchor when the ground point is this many voxels from the window's centre along an axis (cascade 0: 1.25 km;
-## a slab of 20 x 128 x 512 voxels, ~4 frames of the budget).
+## a slab of 20 x 128 x 512 voxels, ~13 frames of the budget).
 const REANCHOR_VOXELS := 20
 ## [E] The camera square's distance from the window's edge beyond the re-anchoring distance: the voxel-centre range ends
 ## half a voxel inside the window, and the render thread's camera trails the main thread's by up to a frame.
@@ -56,19 +67,24 @@ const REFRESH_ANGLE_RAD := 0.25 * PI / 180.0
 const REFRESH_BLEND_STEP := 0.05
 ## [E] Beyond this Sun turn the shown generation is too far off to fade from (the clock jumped without a flag, the
 ## checks' Sun changes): invalidate at once, the march takes over until filled. Under 1000x time warp the Sun turns
-## ~4.2 deg/s; a refresh (the full fill ~1.4 s + the fade 0.5 s) then lags by up to ~8 deg - below this, so warp still
-## cross-fades.
-const RESET_ANGLE_RAD := 15.0 * PI / 180.0
+## ~4.2 deg/s; a refresh (the full fill ~4.7 s + the fade 0.5 s) then lags by up to ~22 deg - below this, so warp
+## still cross-fades.
+const RESET_ANGLE_RAD := 25.0 * PI / 180.0
 ## [E] The cross-fade of a new generation (the light of 0.25 deg Sun or a 5 % blend: half a second is no visible pop).
 const CROSSFADE_S := 0.5
 ## [E] A new frame (everything re-anchored, invalid) when the ground point is this far from the frame's origin in the
 ## plane: the plane's up then tilts <= 9 deg from the local vertical and its voxels stretch < 1.3 % (the fill solves the
 ## height exactly).
 const REFRAME_M := 1.0e6
-## [E] Voxels filled per frame: <= 0.5 ms GPU (spec decision 6: inside the 2.5 ms p99). Measured (cloud_check.gd
-## section 8, RTX 4090): 524 288 voxels cost 0.74 ms (1.4 ns each at 96 + 32 light samples), so 20 layers of cascade
-## 0 (327 680 voxels, ~0.46 ms); a full refresh of all 42 M voxels takes 128 frames (1.4 s at 90 Hz), cross-faded.
-const BUDGET_VOXELS := 327680
+## [E] Voxels filled per frame: <= 0.5 ms GPU in every frame (spec decision 6: inside the 2.5 ms p99). Measured
+## (cloud_check.gd section 8, RTX 4090): the same jobs cost 0.18 ms per 262 144 voxels at the GPU's full clock and
+## 0.37-0.51 ms when it clocks down in a light scene (the 0.45-0.80 ms spread at 327 680: the GPU's clock state, not
+## the jobs - one run steady at 0.37, another 0.18 with single frames at 0.38-0.51); real weather costs more per voxel
+## (terrain_perf --render_scale=1.65, ERA5 2025-10-26 15 UTC, per-second means: 196 608 voxels up to 0.45 ms, 131 072
+## up to 0.48 ms in a run where the whole GPU ran ~2x slower - the system's state, every pass alike). So 6 layers of
+## cascade 0 (98 304 voxels, ~0.36 ms in that slow state). A full refresh of all 42 M voxels takes 427 frames (4.7 s at
+## 90 Hz), cross-faded.
+const BUDGET_VOXELS := 98304
 
 var budget_voxels := BUDGET_VOXELS
 
@@ -151,7 +167,8 @@ func lookup_state() -> Dictionary:
 		for s: Dictionary in c["slots"]:
 			valid.append(s["valid"] if s["active"] and not s["building"] else Rect2i())
 		var fade: float = c["fade"]
-		cascades.append({"dx_m": _dx(k), "size": size, "window": _window(c), "centre": c["ground"],
+		cascades.append({"dx_m": _dx(k), "size": size, "hybrid": CASCADES[k]["hybrid"], "window": _window(c),
+				"centre": c["ground"],
 				"radius_voxels": float(size.x / 2 - REANCHOR_VOXELS - MARGIN_VOXELS), "band_voxels": float(BAND_VOXELS),
 				"valid": valid, "weight": fade if c["front"] == 1 else 1.0 - fade})
 	return {"origin": origin, "east": east, "north": north, "up": up, "cascades": cascades}
