@@ -225,7 +225,18 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      the entry is bisected `CLOUD_SILHOUETTE_BISECTIONS` 4 [E] times between the step's start and the sample and the
      in-cloud steps start there (the clear stretch skipped holds tau < 0.1); the detail is band-limited at the larger
      of the pixel footprint and `CLOUD_DETAIL_STEP_FRACTION` 0.5 [E] x the step (a level enters from one step per
-     cell: finer detail at fixed points aliased into static salt-and-pepper holes in near cumuli). The jittered march
+     cell: finer detail at fixed points aliased into static salt-and-pepper holes in near cumuli). **Sub-samples**
+     (static clouds Task 5c, `CLOUD_STRUCTURE_STEP_M` 125 m [E] = the shape texture's finest texel, at most
+     `CLOUD_MAX_SUBSTEPS` 4 [E]): a step longer than 125 m (the VR fine step is 2.5 % of the distance, 500 m at 20
+     km) takes the mean extinction of ceil(step / 125 m) sub-samples at the midpoints of equal sub-steps, in the
+     step's field cell (the field is smooth over a step), the detail band-limited at the sub-step; one light sample
+     per step at the sub-samples' extinction-weighted centre (also the step's distance for the air light). A
+     silhouette is bisected from the first sub-sample over the threshold (between it and the one before); the thin
+     cloud of the sub-samples before it ends the step there with its optical depth kept. One point per step hit or
+     skipped thin and broken cloud on long oblique paths with each ray's fixed step phase - static salt-and-pepper
+     at the march pixel (the user's t7_cape view) that the jittered march's history had averaged away, gone with 8 x
+     the steps; and the sub-threshold thin cloud before every entry was dropped. Not for the grid-mean debug outputs
+     (1 / 2 / 6) nor the jittered march. The jittered march
      (the reference path, flag off): blue-noise start jitter, 64 x 64 void-and-cluster mask offset per frame by the
      golden ratio - the same for both eyes, the light march's jitter decorrelated per step; background through
      exp(-tau), scattered light through exp(-(1 - f) tau); colour = T_c L + (1 - T_bg) S_c with the air at the
@@ -488,6 +499,17 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   a uniform slab = T_total - exp(-tau / mu0) (table and delta-Eddington), none above it or with the Sun down; a broken
   layer (cf 0.4) as independent columns (direct, diffuse, sky); column texels = `cloud_column_depths_above` at the
   centres within the code's 3 % (depth) and 0.003 (cover).
+- GPU `game/tests/cloud_grain_check.gd` (static clouds Task 5c; the main scene, analog weather 2024-06-15 21 UTC, VR
+  preset): the grain - the mean |Laplacian| of the cloud image's premultiplied luminance at a spacing of one march
+  pixel over the pixels with alpha > 0.1 (and their four neighbours), relative to their mean luminance - within 25 %
+  [E] of the 8 x steps reference's (768 / 1536), both ways (no salt-and-pepper, no blur): the Cape (28.57 N, 80.65 W,
+  20 deg up) 1.176, the ground at Starbase 1.096, the deck from 9 km 1.104 (before the sub-samples 1.704 - RED -, 1.196,
+  1.179; the cloud pixels then 458 k / 626 k of the reference's on the ground: thin cloud was missed); the cloud image
+  of the next frame bit-identical in each view. `render_check --repeat_identical` at the Cape: the frames differ in
+  the sea below the horizon only (y >= 825; the base too) - the check prints the differing pixels' bounding box.
+  `cloud_far_check`: the broken layer's volume-vs-far block 18.10 % (was 19.36 %; Task 8), the decks unchanged (a
+  first version that compared the float32 b - a_this in the step-weight test sprayed bright speckles near the limb from
+  8 600 km: deck tau 2 at 15 %).
 - GPU `cloud_check.gd` section 6 (terrain_earth.gdshader on a quad 300 m from a camera 2 m up; slabs tau 1 / deck tau
   3 / broken cf 0.4; Sun 45 / 20 deg; debug output 5 = the three factors): with the near map of the grid mean
   (`CloudShadowEffect.grid_mean_only`) direct vs the CPU within 1.3 %, diffuse within 0.6 %, sky within 0.3 %, the
@@ -591,6 +613,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 - `cloud_check.gd` with `STARSIM_LCL_ONLY=1`: section 12 alone (the flat cloud base on a snapshot built from fields,
   `StarsimCore.weather_write_column_snapshot`: optical depth straight up 0.9993 of the core's column (1 % allowed), no
   cloud 100 m below the base (the fog column has it), above the base's layer as without the base texture).
+- `cloud_grain_check.gd -- --only=cape` (or `ground`, `deck`): one view of the grain check.
 - `cloud_check.gd` with `STARSIM_SLANT_TABLE=1`: only the beam-cover fit table (shapes' direct Sun, near disc, eight
   sites, f 0.15-0.6 x e 5-75 deg).
 
@@ -688,6 +711,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   fine temporal grain on broken cloud beyond f_s until the temporal mean converges (still camera: frames; a moving
   one: the floor weight's ~23 % of one frame's noise) - with the jittered march only; the deterministic one reads the
   footprint's centre.
+- **March sub-samples (Task 5c)**: the VR proxy's cloud pass +49 / +55 / +62 % (descent / pan low / pan high medians,
+  `vr-performance.md`) for the shapes' lookups at the sub-samples - over the budget like the base (Task 10). Left: some
+  march-pixel blocks in dark thin layers (one light sample per step; grain 1.18 x the reference's at the Cape), steps
+  beyond 500 m sampled at a quarter of the step, and cirrus, whose vertical shape texel (2 km / 128 = 16 m) is finer
+  than the 125 m interval.
 - **Deterministic march (Task 3, outline pass Task 5b)**: a cloud edge is binary per ray; the outline pass (cloud
   pass 1b) averages the centre and three fixed coverage-only sub-rays on outline pixels, so outlines no longer follow the march grid (no stairs,
   `t5b_*` vs `t5f_*` images), but they stay one march pixel wide across the edge (crisp; at divisor 3 ~3 screen

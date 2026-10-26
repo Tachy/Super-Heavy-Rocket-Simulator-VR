@@ -193,6 +193,7 @@ func _repeat_frames(world: World) -> bool:
 		return false
 	var first := _repeat_images[0]
 	var worst := 0
+	var box := Rect2i()  # the differing pixels' bounding box (the frame-rate label differs from frame to frame)
 	for k in range(1, _repeat_images.size()):
 		var other := _repeat_images[k]
 		var differing := 0
@@ -200,9 +201,11 @@ func _repeat_frames(world: World) -> bool:
 			for x in first.get_width():
 				if first.get_pixel(x, y) != other.get_pixel(x, y):
 					differing += 1
+					box = Rect2i(x, y, 1, 1) if box.size == Vector2i.ZERO else box.expand(Vector2i(x, y))
 		worst = maxi(worst, differing)
-	print("render_check: repeat_identical %d frames: %s (most differing pixels %d of %d)" % [wanted,
-			"identical" if worst == 0 else "DIFFER", worst, first.get_width() * first.get_height()])
+	print("render_check: repeat_identical %d frames: %s (most differing pixels %d of %d%s)" % [wanted,
+			"identical" if worst == 0 else "DIFFER", worst, first.get_width() * first.get_height(),
+			"" if worst == 0 else ", within %s" % box])
 	if worst > 0:
 		_repeat_failed = true
 	return true

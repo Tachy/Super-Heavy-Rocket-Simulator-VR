@@ -188,3 +188,22 @@ Fix round 1 (the same run, `t5c_perf_step*.log`), each step on top of the previo
 Now +46 / +26 / +34 % over the medians before Task 5b: still over the 15 % mark (open, Task 10 / the controller:
 approach 2, an edge-directed full-resolution alpha smoothing, costs nothing in the march). The remaining cost is the
 coverage rays' own steps through broken cumulus (field and shape lookups), not their light.
+
+## Cloud march sub-samples (static clouds Task 5c, 2026-10-27)
+
+VR proxy as above (`terrain_perf --render_scale=1.65 --gpu_passes --cloud_quality=vr`), but the cache files predate the
+snapshot format v4: the shipped analog of the run's month and slot (`data/weather/analog/era5_1102644.wthr`, October 12
+UTC), the same for every column; base = 82e387d. cloud_pass, median / max of the per-second means, ms
+(`.superpowers/sdd/2026-10-26-static-clouds/t5c_vrperf_*.log`):
+
+| Phase | base | 8 x steps (768 / 1536) | sub 125 m, max 8, cell per sub | max 4, cell per sub | max 4, step's cell (shipped) |
+|---|---|---|---|---|---|
+| descent | 4.33 / 17.06 | 14.95 / 66.90 | 9.94 / 42.24 | 7.95 / 31.48 | 6.45 / 26.35 |
+| pan low | 13.74 / 14.89 | 29.97 / 31.86 | 33.91 / 37.48 | 26.09 / 27.72 | 21.31 / 22.61 |
+| pan high | 9.77 / 11.13 | 19.94 / 20.62 | 24.84 / 29.58 | 19.35 / 21.78 | 15.84 / 17.45 |
+| cape | 0.33 / 0.39 | 0.34 / 0.47 | 0.33 / 0.70 | 0.33 / 0.61 | 0.34 / 0.54 |
+
+The shipped variant costs +49 / +55 / +62 % (medians) over the base. The extra cost is the shapes' lookups at the
+sub-samples (the light is per step and cached: a fine step of 5 % instead of 2.5 % with the sub-samples cost no less,
+29.48 ms pan low); skipping the sub-samples behind T_sc < 0.1 saved nothing (the march ends at 0.01 and dense steps are
+short anyway). Over the budget like the base (Task 10).

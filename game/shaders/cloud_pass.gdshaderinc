@@ -220,6 +220,18 @@ const float CLOUD_DETAIL_STEP_FRACTION = 0.5;
 // [E] Smallest |dh/ds| for the step phase's height shells (a horizontal ray: shells 1e-3 of the step apart, the phase
 // a function of the ray alone as for any other ray).
 const float CLOUD_PHASE_MIN_CLIMB = 1.0e-3;
+// [E] The deterministic march's longest interval between samples of the shapes (static clouds Task 5c): the shape
+// texture's finest texel (16 km / 128 vertically; 250 m across). A longer step - the fine step is 2.5 % of the
+// distance (VR), 500 m at 20 km - takes the mean extinction of ceil(step / this) sub-samples at the midpoints of equal
+// sub-steps, in the step's field cell (the field is smooth over a step; a cell per sub-sample cost ~20 % more for an
+// unchanged grain metric), with the detail band-limited at the sub-step; one light sample per step, at the
+// sub-samples' extinction-weighted centre. One sample per step hit or skipped thin and broken cloud on long oblique paths with the
+// ray's fixed step phase - static salt-and-pepper at the march pixel that the jittered march's history had averaged
+// (the user's t7_cape; gone with 8 x the steps; cloud_grain_check.gd).
+const float CLOUD_STRUCTURE_STEP_M = 125.0;
+// [E] At most this many sub-samples per step (steps beyond 500 m sample at a quarter of the step): 8 left the grain
+// metric unchanged (cloud_grain_check Cape 1.245 vs 1.251 x the reference's) at ~30 % more cost.
+const int CLOUD_MAX_SUBSTEPS = 4;
 shared vec3 cloud_group_eclipse_near;
 shared vec3 cloud_group_eclipse_far;
 
@@ -260,7 +272,8 @@ float cloud_light_source(vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, flo
 // is bisected (CLOUD_SILHOUETTE_BISECTIONS) between the step's start and the sample, and the in-cloud steps start there
 // (the outline found, not sampled: a whole step's depth at a cloud's rim made the silhouette a step's width too big);
 // a clear sample whose step ends in the field's cloudy region ends the step there (fine steps follow), and the detail
-// is band-limited at the step too (CLOUD_DETAIL_STEP_FRACTION).
+// is band-limited at the step too (CLOUD_DETAIL_STEP_FRACTION); a step longer than the shapes' texel samples them at
+// sub-steps (CLOUD_STRUCTURE_STEP_M, Task 5c).
 // coverage_only (the outline pass's sub-rays, Task 5b fix round 1): the same steps and transmittance without the light
 // samples and the air light, ended at CLOUD_COVERAGE_MIN_TRANSMITTANCE (alpha within 0.01 of the full march's, the
 // cloud distance nearly its); the colour stays 0.
@@ -396,16 +409,87 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		vec3 offset = eye + dir * d;  // from the head: the ray starts at the eye
 		float height = cloud_height_along(ray, d);
 		float in_cloud;
+		// The deterministic march's sub-samples of the shapes (CLOUD_STRUCTURE_STEP_M; not for the grid-mean debug
+		// outputs, which have no sub-grid structure): a step longer than the shapes' texel is the mean of its sub-steps'
+		// extinction, a silhouette found from the first sub-sample over the threshold.
+		int subs = phase_m >= 0.0 && cloud_debug_output != 1 && cloud_debug_output != 2 && cloud_debug_output != 6
+				? clamp(int(ceil((b - a_this) / CLOUD_STRUCTURE_STEP_M)), 1, CLOUD_MAX_SUBSTEPS) : 1;
 		// The detail's band limit: the pixel footprint; the deterministic march's also its step
 		// (CLOUD_DETAIL_STEP_FRACTION).
 		float detail_m = phase_m >= 0.0 ? max(pixel_angle * d, CLOUD_DETAIL_STEP_FRACTION * step_m) : pixel_angle * d;
-		float beta = cloud_extinction_in_cell(cell, offset, height, detail_m, pixel_angle * d, in_cloud);
-		if (beta <= 0.0) {
-			dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
-			outside = true;
-			continue;
+		float beta;
+		if (subs > 1) {
+			float sub_m = (b - a_this) / float(subs);
+			float sum_beta = 0.0;
+			float sum_beta_d = 0.0;
+			float before = a_this;  // the last sub-sample (the step's start before the first)
+			bool entered = false;
+			int taken = 0;  // the sub-samples counted
+			for (int j = 0; j < subs; j++) {
+				float d_j = a_this + (float(j) + 0.5) * sub_m;
+				float detail_j = max(pixel_angle * d_j, CLOUD_DETAIL_STEP_FRACTION * sub_m);
+				float beta_j = cloud_extinction_in_cell(cell, eye + dir * d_j, cloud_height_along(ray, d_j), detail_j,
+						pixel_angle * d_j, in_cloud);
+				bool entry = outside && beta_j >= CLOUD_SILHOUETTE_EXTINCTION_PER_M;
+				outside = beta_j < CLOUD_SILHOUETTE_EXTINCTION_PER_M;
+				if (entry) {
+					// The silhouette between the last sub-sample and this one (as below for a single sample).
+					float lo = before;
+					float hi = d_j;
+					for (int k = 0; k < CLOUD_SILHOUETTE_BISECTIONS; k++) {
+						float mid = 0.5 * (lo + hi);
+						vec2 lat_lon_mid;
+						float in_cloud_mid;
+						float beta_mid = cloud_extinction_at(eye + dir * mid, cloud_height_along(ray, mid), detail_j,
+								pixel_angle * mid, lat_lon_mid, in_cloud_mid);
+						if (beta_mid >= CLOUD_SILHOUETTE_EXTINCTION_PER_M) {
+							hi = mid;
+						} else {
+							lo = mid;
+						}
+					}
+					if (lo > a_this) {
+						// The in-cloud steps start at the entry; the thin cloud of the sub-samples before it ends this
+						// step there (its optical depth kept: dropped, a thin layer's below the threshold went missing
+						// with every entry, as the ray's step phase fell - grain).
+						a = lo;
+						b = lo;
+						entered = true;
+						break;
+					}
+				}
+				sum_beta += beta_j;
+				sum_beta_d += beta_j * d_j;
+				before = d_j;
+				taken++;
+			}
+			if (entered && sum_beta <= 0.0) {
+				continue;
+			}
+			if (sum_beta <= 0.0) {
+				dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
+				continue;
+			}
+			// The mean over the sub-steps taken (an entry's step: their optical depth over the shortened step).
+			beta = entered ? sum_beta * sub_m / (b - a_this) : sum_beta / float(subs);
+			if (entered) {
+				// The shortened step's intended length for the step-weight test below (not b - a_this: its float32
+				// difference far from the camera retried the step until the budget ran out, as noted there).
+				step_m = float(taken) * sub_m;
+			}
+			// The step's light and distance at its extinction-weighted centre (where it scatters); the step's cell.
+			d = sum_beta_d / sum_beta;
+			offset = eye + dir * d;
+			height = cloud_height_along(ray, d);
+		} else {
+			beta = cloud_extinction_in_cell(cell, offset, height, detail_m, pixel_angle * d, in_cloud);
+			if (beta <= 0.0) {
+				dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
+				outside = true;
+				continue;
+			}
 		}
-		if (phase_m >= 0.0) {
+		if (phase_m >= 0.0 && subs == 1) {
 			bool entry = outside && beta >= CLOUD_SILHOUETTE_EXTINCTION_PER_M;
 			outside = beta < CLOUD_SILHOUETTE_EXTINCTION_PER_M;
 			if (entry && d > a_this) {
