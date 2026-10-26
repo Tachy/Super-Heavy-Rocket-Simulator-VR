@@ -19,6 +19,12 @@ const GOLDEN := 0.6180339887498949
 const VIEW_BLOCK_SIZE := 4 * 64 + 4 * 16
 ## Render callbacks a replaced image waits before it is freed (frames in flight may still sample it).
 const FREE_DELAY_CALLBACKS := 3
+## The shape prefilter's kernel choice (_shape_prefilter_needed): its start footprint (core cloud_noise.hpp
+## cloud_shape_prefilter_start_m, clouds.gdshaderinc), the WGS84 ellipsoid's largest radius of curvature a^2 / b (at
+## the poles; conservative for the farthest cloud sample) and the cloud top above the ellipsoid.
+const SHAPE_PREFILTER_START_M := 3500.0
+const CURVATURE_RADIUS_MAX_M := 6378137.0 * 6378137.0 / 6356752.314
+const CLOUD_TOP_M := 20000.0
 
 ## The full-resolution result for the composite quad (layer = view); re-created when the size changes and shown by
 ## swap_output (then output_generation counts up and the quad's material takes the texture again).
@@ -85,6 +91,8 @@ func _create() -> void:
 		return
 	_march = CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH"]), PackedStringArray(MARCH_FILES))
 	var kernels := {"march": _march.source,
+		"march_prefilter": CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH", "CLOUD_SHAPE_PREFILTER"]),
+				PackedStringArray(MARCH_FILES)).source,
 		"temporal": CloudShaderPort.build(PackedStringArray(["CLOUD_TEMPORAL"]), PackedStringArray(PASS_FILES),
 				false).source,
 		"upsample": CloudShaderPort.build(PackedStringArray(["CLOUD_UPSAMPLE"]), PackedStringArray(PASS_FILES),
@@ -118,7 +126,8 @@ func _create() -> void:
 			state.repeat_u = mode
 			state.repeat_v = mode
 			state.repeat_w = mode
-			_samplers["%s|%s" % [linear, repeat]] = _rd.sampler_create(state)
+			_samplers["%s|%s|false" % [linear, repeat]] = _rd.sampler_create(state)
+	_samplers["true|true|true"] = _rd.sampler_create(CloudShaderPort.mipmap_sampler_state())
 	_fallback["sampler2D"] = _texture(RenderingDevice.TEXTURE_TYPE_2D, Vector2i(1, 1), 1,
 			RenderingDevice.DATA_FORMAT_R8G8B8A8_UNORM, PackedByteArray([0, 0, 0, 0]))
 	_fallback["sampler3D"] = _texture(RenderingDevice.TEXTURE_TYPE_3D, Vector2i(1, 1), 1,
@@ -300,11 +309,14 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		var u := RDUniform.new()
 		u.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
 		u.binding = s["binding"]
-		u.add_id(_samplers["%s|%s" % [s["linear"], s["repeat"]]])
+		u.add_id(_samplers["%s|%s|%s" % [s["linear"], s["repeat"], s["mipmap"]]])
 		var texture: RID = textures[i]
 		u.add_id(texture if texture.is_valid() else _fallback.get(s["type"], _fallback["sampler2D"]))
 		set0.append(u)
-	var march_set0 := UniformSetCacheRD.get_cache(_shaders["march"], 0, set0)
+	# The shape prefilter's kernel (clouds.gdshaderinc) only when a footprint can exceed its start: the farthest cloud
+	# sample (_shape_prefilter_needed).
+	var march := "march_prefilter" if _shape_prefilter_needed(scene, view_count) else "march"
+	var march_set0 := UniformSetCacheRD.get_cache(_shaders[march], 0, set0)
 
 	# The camera (float64 from the floating-origin globals) and its motion since the last frame.
 	var hi: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi")
@@ -318,8 +330,8 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 	var debug := int(ShaderGlobals.value(&"cloud_debug_output"))
 	var weight := 1.0 if debug != 0 else _temporal_weight
 	var jitter := fmod(float(_frame) * GOLDEN, 1.0)
-	var linear_clamp: RID = _samplers["true|false"]
-	var nearest_clamp: RID = _samplers["false|false"]
+	var linear_clamp: RID = _samplers["true|false|false"]
+	var nearest_clamp: RID = _samplers["false|false|false"]
 
 	for view in range(view_count):
 		var v: Dictionary = _views[view]
@@ -340,7 +352,7 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		# The march pixel's angle (the detail's band limit): 2 tan(fov_y / 2) / low height = 2 / (P[1][1] low height).
 		var pixel_angle := 2.0 / maxf(absf(projection.y.y) * low.y, 1e-6)
 		block_bytes.append_array([jitter, weight, debug, pixel_angle])
-		block_bytes.append_array([eye_earth.x, eye_earth.y, eye_earth.z, 0.0])
+		block_bytes.append_array([eye_earth.x, eye_earth.y, eye_earth.z, float(_frame % 4096)])
 		_rd.buffer_update(v["buffer"], 0, VIEW_BLOCK_SIZE, block_bytes.to_byte_array())
 		v["previous"] = clip_from_earth
 
@@ -355,9 +367,9 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		var groups_full := Vector2i((size.x - 1) / GROUP + 1, (size.y - 1) / GROUP + 1)
 
 		var list := _rd.compute_list_begin()
-		_rd.compute_list_bind_compute_pipeline(list, _pipelines["march"])
+		_rd.compute_list_bind_compute_pipeline(list, _pipelines[march])
 		_rd.compute_list_bind_uniform_set(list, march_set0, 0)
-		_rd.compute_list_bind_uniform_set(list, _set1("march", [_ubo(v["buffer"]), _tex(1, nearest_clamp, depth),
+		_rd.compute_list_bind_uniform_set(list, _set1(march, [_ubo(v["buffer"]), _tex(1, nearest_clamp, depth),
 				_image(2, v["color"]), _image(3, v["depth"])]), 1)
 		_rd.compute_list_dispatch(list, groups_low.x, groups_low.y, 1)
 		_rd.compute_list_add_barrier(list)
@@ -377,6 +389,22 @@ func _render_callback(_callback_type: int, render_data: RenderData) -> void:
 		v["valid"] = true
 	stats = {"valid": true, "low_size": _views[0]["low"], "views": view_count,
 		"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
+
+
+## Whether a cloud sample of this frame can have a pixel footprint above the shape prefilter's start (clouds.gdshaderinc
+## CLOUD_SHAPE_PREFILTER_START_M): the largest pixel angle of the views times the farthest distance a cloud sample can
+## have - the horizon distances of the camera and of the cloud top on the largest radius of curvature, plus the light
+## march's near length.
+func _shape_prefilter_needed(scene: RenderSceneData, view_count: int) -> bool:
+	var pixel_angle := 0.0
+	for view in range(view_count):  # as the view block below
+		var low: Vector2i = _views[view]["low"]
+		pixel_angle = maxf(pixel_angle, 2.0 / maxf(absf(scene.get_view_projection(view).y.y) * low.y, 1e-6))
+	var h := maxf(float(ShaderGlobals.value(&"cloud_camera_height_m")), 0.0)
+	var far_m := sqrt(h * (2.0 * CURVATURE_RADIUS_MAX_M + h)) \
+			+ sqrt(CLOUD_TOP_M * (2.0 * CURVATURE_RADIUS_MAX_M + CLOUD_TOP_M))
+	far_m += (ShaderGlobals.value(&"cloud_light_march") as Vector4).z
+	return pixel_angle * far_m > SHAPE_PREFILTER_START_M
 
 
 func _set1(kernel: String, uniforms: Array) -> RID:

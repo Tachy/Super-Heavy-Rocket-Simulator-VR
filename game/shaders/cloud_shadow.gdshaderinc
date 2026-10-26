@@ -69,7 +69,7 @@ vec2 cloud_shadow_density(vec3 offset, vec3 sun, float step_m, float texel_m, bo
 		return vec2(mean, beam);  // the grid mean's own independent column (as the far map), not an overcast
 	}
 	float in_cloud;
-	float shaped = cloud_extinction_in_cell(cell, offset, h, max(texel_m, step_m), in_cloud);
+	float shaped = cloud_extinction_in_cell(cell, offset, h, max(texel_m, step_m), 0.0, in_cloud);
 	return vec2(mix(shaped, mean, w), mix(1.0, beam, w));
 }
 

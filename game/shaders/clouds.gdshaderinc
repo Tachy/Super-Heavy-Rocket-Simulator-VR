@@ -37,6 +37,16 @@
 // q = p / S_H + up(p) h(p) (1 / S_V - 1 / S_H), up = p / |p|), detail isotropic; all Earth-fixed, so every eye and every
 // frame sees the same shapes. The camera's coordinates arrive wrapped to [0, 1) from the CPU (float64); level k's
 // origin is fract(4^k x level 0's) (exact: 4^k is an integer).
+//
+// Shape prefilter (Task 10 fix round 1, cloud_noise.hpp, anti-aliasing): beyond the start footprint
+// CLOUD_SHAPE_PREFILTER_START_M of the PIXEL (shape_footprint_m; the light march's interval does not count) the shape
+// is read from its box-filtered mips at the level lambda = clamp(log2(f / f_s), 0, 1) log2(f / texel) (at most
+// CLOUD_SHAPE_PREFILTER_LEVELS; between level 0, the unfiltered texture, and 1 the two are mixed), against the level's
+// threshold and edge mean factor tables (the covered area stays cf, the mean water the grid mean), read at a sub-pixel
+// offset per ray (cloud_subpixel_offset: the temporal mean averages the pixel's footprint). Compiled only with
+// CLOUD_SHAPE_PREFILTER: the cloud pass runs that kernel variant only when a footprint on the frame's clouds can exceed
+// f_s (CloudEffect), else the unfiltered kernel - bit for bit the code before the prefilter (one more branch alone
+// moved results by an ulp through the compiler).
 
 // ---- Globals (project.godot [shader_globals], CloudLayer).
 global uniform sampler3D cloud_field_before : filter_linear, repeat_enable;
@@ -51,6 +61,9 @@ global uniform sampler3D cloud_noise_detail : filter_linear, repeat_enable;
 // 256 x CLOUD_DETAIL_STATES, R = t[state](code / 255) and m[state](code / 255).
 global uniform sampler2D cloud_coverage_threshold : filter_linear, repeat_disable;
 global uniform sampler2D cloud_edge_mean : filter_linear, repeat_disable;
+global uniform sampler3D cloud_noise_shape_mips : filter_linear_mipmap, repeat_enable;  // shape mip levels 1..
+global uniform sampler2D cloud_prefilter_threshold : filter_linear, repeat_disable;  // 256 x rows (core)
+global uniform sampler2D cloud_prefilter_edge_mean : filter_linear, repeat_disable;  // 256 x rows (core)
 global uniform vec2 cloud_edge_width;       // (w_min, w_max) in shape-value units
 global uniform bool cloud_enabled;
 global uniform float cloud_camera_height_m;  // |M camera| - a, float64 on the CPU
@@ -105,6 +118,12 @@ const float CLOUD_SHAPE_TILE_V_M = 16000.0;
 const float CLOUD_DETAIL_TILE_M = 1000.0;  // level 0; level k: / 4^k
 const int CLOUD_DETAIL_LEVELS = 3;          // core cloud_detail_levels
 const float CLOUD_DETAIL_STATES = 4.0;      // core cloud_detail_states (the table rows)
+// Shape prefilter (core cloud_noise.hpp cloud_shape_prefilter_*; texels of the shape texture across the tile).
+const float CLOUD_SHAPE_PREFILTER_START_M = 3500.0;
+const float CLOUD_SHAPE_PREFILTER_LEVELS = 2.0;
+const float CLOUD_SHAPE_PREFILTER_ROWS_PER_LEVEL = 4.0;
+const float CLOUD_SHAPE_PREFILTER_ROWS = 9.0;
+const float CLOUD_SHAPE_TEXELS = 128.0;
 // [E] Ice-dominated cloud: thin sheets - the shape tile 2 km high instead of 16 (cirrus and altostratus are layered,
 // often a few hundred metres thick; no fibre direction: the snapshot has no wind, user decision 2026-10-25).
 const float CLOUD_ICE_TILE_V_M = 2000.0;
@@ -342,6 +361,30 @@ float cloud_coverage(vec3 shape_q, float fraction) {
 	return texture(cloud_noise_shape, shape_q).r > cloud_threshold(fraction, 0.0) ? 1.0 : 0.0;
 }
 
+// The shape prefilter's level at the pixel footprint [m] (core cloud_shape_prefilter_level): 0 up to the start.
+float cloud_shape_prefilter_level(float footprint_m) {
+	if (footprint_m <= CLOUD_SHAPE_PREFILTER_START_M) {
+		return 0.0;
+	}
+	float onset = min(log2(footprint_m / CLOUD_SHAPE_PREFILTER_START_M), 1.0);
+	return clamp(onset * log2(footprint_m * CLOUD_SHAPE_TEXELS / CLOUD_SHAPE_TILE_H_M), 0.0,
+			CLOUD_SHAPE_PREFILTER_LEVELS);
+}
+
+// The shape at its prefilter level (core sample_shape_prefiltered): mip 1 is the mips texture's level 0.
+vec4 cloud_shape_prefiltered(vec3 shape_q, float level) {
+	if (level < 1.0) {
+		return mix(texture(cloud_noise_shape, shape_q), textureLod(cloud_noise_shape_mips, shape_q, 0.0), level);
+	}
+	return textureLod(cloud_noise_shape_mips, shape_q, level - 1.0);
+}
+
+// The prefilter tables' texel of a cloud fraction (columns: codes) and a level (rows), linear between both.
+vec2 cloud_prefilter_uv(float fraction, float level) {
+	return vec2((fraction * 255.0 + 0.5) / 256.0,
+			(level * CLOUD_SHAPE_PREFILTER_ROWS_PER_LEVEL + 0.5) / CLOUD_SHAPE_PREFILTER_ROWS);
+}
+
 // The soft edge ramp (core cloud_edge_ramp, cloud_edge_width_value): smoothstep of the excess over the edge width of
 // the width noise n.
 float cloud_edge_ramp(float value, float threshold, float width_noise) {
@@ -381,12 +424,67 @@ float cloud_detail_perturbation(vec3 offset_local, float state) {
 	return p;
 }
 
+#ifdef CLOUD_SHAPE_PREFILTER
+// Four uniform numbers in [0, 1) of the ray (set by the cloud pass per pixel and frame: blue noise + R4 sequence).
+vec4 cloud_shape_subpixel = vec4(0.5);
+#endif
+
+// Sub-pixel offsets (header): from f_s on the pixel spans several of the shape's features (and the 32 km tile's period
+// beats with the pixel grid; the mips stop at level 2): the shape is read at a horizontal offset in the local tangent
+// plane drawn per ray from the pixel's tent filter (half-width f per axis, faded in from f_s to 2 f_s: the ray stands
+// for a random point of its pixel's footprint), and the cloud pass's temporal mean averages the pixel's transmittance
+// over it - the coverage-preserving mean of the thresholded shape, in transmittance (a mean density would make broken
+// cloud a fog). The cell (fraction, water) stays the true point's.
+vec3 cloud_subpixel_offset(vec3 offset_local, float footprint_m) {
+	float half_width = footprint_m * clamp(log2(footprint_m / CLOUD_SHAPE_PREFILTER_START_M), 0.0, 1.0);
+	if (half_width <= 0.0) {
+		return offset_local;
+	}
+	vec3 up = normalize(atmosphere_camera_hi + atmosphere_camera_lo + offset_local);
+	// Orthonormal tangent basis (Duff et al. 2017, "Building an Orthonormal Basis, Revisited").
+	float sign_z = up.z >= 0.0 ? 1.0 : -1.0;
+	float a = -1.0 / (sign_z + up.z);
+	float b = up.x * up.y * a;
+	vec3 t1 = vec3(1.0 + sign_z * up.x * up.x * a, sign_z * b, -sign_z * up.x);
+	vec3 t2 = vec3(b, sign_z + up.y * up.y * a, -up.y);
+#ifdef CLOUD_SHAPE_PREFILTER
+	vec2 u = cloud_shape_subpixel.xy + cloud_shape_subpixel.zw - 1.0;  // tent on [-1, 1]
+#else
+	vec2 u = vec2(0.0);
+#endif
+	return offset_local + (t1 * u.x + t2 * u.y) * half_width;
+}
+
+// The shapes at the prefilter level (> 0; header) for the pixel footprint footprint_m: the detail is long gone there
+// (its state is 0 beyond 125 m).
+float cloud_extinction_prefiltered(CloudCell cell, vec3 offset_local, float height_m, float footprint_m, float level) {
+	vec2 uv = cloud_prefilter_uv(cell.fraction, level);
+	float threshold = texture(cloud_prefilter_threshold, uv).r;
+	vec3 shifted = cloud_subpixel_offset(offset_local, footprint_m);
+	float ramp = 0.0;
+	if (cell.ice < 1.0) {
+		vec4 s = cloud_shape_prefiltered(cloud_shape_coordinates(shifted, height_m), level);
+		ramp += (1.0 - cell.ice) * cloud_edge_ramp(s.r, threshold, s.a);
+	}
+	if (cell.ice > 0.0) {
+		vec4 s = cloud_shape_prefiltered(
+				cloud_shape_coordinates_for(shifted, height_m, cloud_ice_origin, CLOUD_ICE_TILE_V_M), level);
+		ramp += cell.ice * cloud_edge_ramp(s.r, threshold, s.a);
+	}
+	if (ramp <= 0.0) {
+		return 0.0;
+	}
+	float m = texture(cloud_prefilter_edge_mean, uv).r;
+	return cell.extinction / max(m, 1.0e-4) * ramp;
+}
+
 // Extinction [1/m] (unscaled) at camera + offset_local with its height, from the field cell already looked up there;
-// the detail band-limited at footprint_m (the pixel footprint there; large: the shape alone). in_cloud: the in-cloud
-// mean extinction mean / cf of the covered area (the column terms: the A channel's convention, core
-// cloud_render_texels.hpp; one convention, so the column depth is continuous through the layer centres).
+// the detail band-limited at footprint_m (the pixel footprint there or larger; large: the shape alone), the shape
+// prefiltered at the pixel footprint shape_footprint_m (0: never; header). in_cloud: the in-cloud mean extinction
+// mean / cf of the covered area (the column terms: the A channel's convention, core cloud_render_texels.hpp; one
+// convention, so the column depth is continuous through the layer centres).
 float cloud_extinction_in_cell(CloudCell cell, vec3 offset_local, float height_m, float footprint_m,
-		out float in_cloud) {
+		float shape_footprint_m, out float in_cloud) {
 	in_cloud = 0.0;
 	if (cloud_debug_output == 1 || cloud_debug_output == 2 || cloud_debug_output == 6) {  // checks: the grid mean
 		in_cloud = cell.extinction;
@@ -396,6 +494,12 @@ float cloud_extinction_in_cell(CloudCell cell, vec3 offset_local, float height_m
 		return 0.0;
 	}
 	in_cloud = cell.extinction / cell.fraction;
+#ifdef CLOUD_SHAPE_PREFILTER
+	float prefilter = cloud_shape_prefilter_level(shape_footprint_m);
+	if (prefilter > 0.0) {
+		return cloud_extinction_prefiltered(cell, offset_local, height_m, shape_footprint_m, prefilter);
+	}
+#endif
 	float state = cloud_detail_state(footprint_m);
 	float threshold = cloud_threshold(cell.fraction, state);
 	float detail = state > 0.0 ? cloud_detail_perturbation(offset_local, state) : 0.0;
@@ -416,9 +520,11 @@ float cloud_extinction_in_cell(CloudCell cell, vec3 offset_local, float height_m
 	return cell.extinction / max(m, 1.0e-4) * ramp;
 }
 
-float cloud_extinction_at(vec3 offset_local, float height_m, float footprint_m, out vec2 lat_lon, out float in_cloud) {
+float cloud_extinction_at(vec3 offset_local, float height_m, float footprint_m, float shape_footprint_m,
+		out vec2 lat_lon, out float in_cloud) {
 	lat_lon = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset_local);
-	return cloud_extinction_in_cell(cloud_field(lat_lon, height_m), offset_local, height_m, footprint_m, in_cloud);
+	return cloud_extinction_in_cell(cloud_field(lat_lon, height_m), offset_local, height_m, footprint_m,
+			shape_footprint_m, in_cloud);
 }
 
 // Grid-mean extinction (no shapes) at camera + offset_local: the far part of the light march.
@@ -431,12 +537,13 @@ float cloud_height_of(vec3 p_earth_m) {
 	return length(p_earth_m * ATM_STRETCH) - CLOUD_A_M;
 }
 
-// Extinction [1/m] at an absolute Earth-local point (Tasks 9 / 10): the shapes, the detail band-limited at footprint_m.
+// Extinction [1/m] at an absolute Earth-local point (Tasks 9 / 10): the shapes, the detail band-limited and the shape
+// prefiltered at the pixel footprint footprint_m.
 float cloud_density(vec3 p_earth_m, float footprint_m) {
 	vec3 offset = p_earth_m - atmosphere_camera_hi - atmosphere_camera_lo;
 	vec2 lat_lon;
 	float in_cloud;
-	return cloud_extinction_at(offset, cloud_height_of(p_earth_m), footprint_m, lat_lon, in_cloud);
+	return cloud_extinction_at(offset, cloud_height_of(p_earth_m), footprint_m, footprint_m, lat_lon, in_cloud);
 }
 
 // ---- The light march (core cloud_light_optical_depth): from camera + offset_local toward dir_local; near_length in
@@ -444,11 +551,11 @@ float cloud_density(vec3 p_earth_m, float footprint_m) {
 // equal intervals to the cloud top (at most CLOUD_SUN_PATH_MAX_M) through the grid-mean field. One sample per interval
 // at the fraction jitter, weighted by the interval: stratified, unbiased over the jitter. The detail is band-limited at
 // the larger of the pixel footprint there (pixel_angle x (camera_distance_m + s)) and the interval (finer octaves
-// average out over it; the tables keep the mean); pixel_angle large: the shape alone. Heights along the straight line
-// (curvature + s^2 / 2a).
+// average out over it; the tables keep the mean); pixel_angle large: the shape alone. The shape is prefiltered at the
+// pixel footprint of shape_pixel_angle alone (0: never). Heights along the straight line (curvature + s^2 / 2a).
 const float CLOUD_SUN_PATH_MAX_M = 300000.0;
 float cloud_light_optical_depth(vec3 offset_local, float height_m, float camera_distance_m, vec3 dir_local,
-		float jitter, float pixel_angle) {
+		float jitter, float pixel_angle, float shape_pixel_angle) {
 	vec3 p = atmosphere_camera_hi + atmosphere_camera_lo + offset_local;
 	vec3 up = normalize(p * ATM_STRETCH);
 	float climb = dot(up, normalize(dir_local * ATM_STRETCH));
@@ -465,7 +572,8 @@ float cloud_light_optical_depth(vec3 offset_local, float height_m, float camera_
 			vec2 lat_lon;
 			float in_cloud;
 			float footprint = max(pixel_angle * (camera_distance_m + s), length_i);
-			tau += cloud_extinction_at(offset_local + dir_local * s, h, footprint, lat_lon, in_cloud) * length_i;
+			tau += cloud_extinction_at(offset_local + dir_local * s, h, footprint,
+					shape_pixel_angle * (camera_distance_m + s), lat_lon, in_cloud) * length_i;
 		}
 		start += length_i;
 		length_i *= cloud_light_march.y;
@@ -492,7 +600,7 @@ float cloud_sun_transmittance(vec3 p_earth_m, vec3 sun_dir) {
 		return 1.0;
 	}
 	vec3 offset = p_earth_m - atmosphere_camera_hi - atmosphere_camera_lo;
-	return exp(-cloud_light_optical_depth(offset, h, length(offset), sun_dir, 0.5, CLOUD_NO_DETAIL_ANGLE));
+	return exp(-cloud_light_optical_depth(offset, h, length(offset), sun_dir, 0.5, CLOUD_NO_DETAIL_ANGLE, 0.0));
 }
 
 // ---- Optics (cloud_optics.hpp).

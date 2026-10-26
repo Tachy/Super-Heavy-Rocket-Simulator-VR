@@ -87,7 +87,8 @@ func _create() -> void:
 			state.repeat_u = mode
 			state.repeat_v = mode
 			state.repeat_w = mode
-			_samplers["%s|%s" % [linear, repeat]] = _rd.sampler_create(state)
+			_samplers["%s|%s|false" % [linear, repeat]] = _rd.sampler_create(state)
+	_samplers["true|true|true"] = _rd.sampler_create(CloudShaderPort.mipmap_sampler_state())
 	for type in ["sampler2D", "sampler3D"]:
 		var tf := RDTextureFormat.new()
 		tf.texture_type = RenderingDevice.TEXTURE_TYPE_2D if type == "sampler2D" else RenderingDevice.TEXTURE_TYPE_3D
@@ -145,7 +146,7 @@ func _render_callback(_callback_type: int, _render_data: RenderData) -> void:
 		var u := RDUniform.new()
 		u.uniform_type = RenderingDevice.UNIFORM_TYPE_SAMPLER_WITH_TEXTURE
 		u.binding = s["binding"]
-		u.add_id(_samplers["%s|%s" % [s["linear"], s["repeat"]]])
+		u.add_id(_samplers["%s|%s|%s" % [s["linear"], s["repeat"], s["mipmap"]]])
 		var texture: RID = textures[i]
 		u.add_id(texture if texture.is_valid() else _fallback.get(s["type"], _fallback["sampler2D"]))
 		set0.append(u)

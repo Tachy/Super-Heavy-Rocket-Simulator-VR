@@ -714,6 +714,15 @@ godot::Dictionary StarsimCore::cloud_noise() const {
         result["edge_width_max_value"] = noise.edge_width_max_value;
         result["blue_noise"] = bytes(noise.blue_noise);
         result["blue_noise_size"] = static_cast<int64_t>(noise.blue_noise_size);
+        godot::Array mips;
+        for (const auto& level : noise.shape_mips) mips.push_back(bytes(level));
+        result["shape_mips"] = mips;
+        result["prefilter_threshold"] = rows(noise.prefilter_threshold);
+        result["prefilter_edge_mean"] = rows(noise.prefilter_edge_mean);
+        result["prefilter_rows"] = static_cast<int64_t>(environment::cloud_shape_prefilter_rows);
+        result["prefilter_rows_per_level"] = static_cast<int64_t>(environment::cloud_shape_prefilter_rows_per_level);
+        result["prefilter_levels"] = static_cast<int64_t>(environment::cloud_shape_prefilter_levels);
+        result["prefilter_start_m"] = environment::cloud_shape_prefilter_start_m;
         return result;
     } catch (const std::exception& e) {
         return weather_failure("Wolkenrauschen konnte nicht erzeugt werden: ", e);

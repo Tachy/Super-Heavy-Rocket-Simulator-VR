@@ -55,6 +55,21 @@
 // <= cf: the mean over the cell is the field's grid mean at every state and edge width (the "alpha" at the edge is real
 // transmittance of less water, not a fudge).
 //
+// Shape prefilter (task 10 fix round 1, anti-aliasing): the shape value s is read without mipmaps (above), which is
+// right while the shape's octaves span pixels; at a pixel footprint of kilometres (the Earth from ~8 600 km: ~7 km) its
+// Perlin octaves (4 km to 500 m) are point-sampled - moire, speckle and a wrong local cover. Beyond the start footprint
+// f_s (cloud_shape_prefilter_start_m) the shape is read from its box-filtered mip chain (shape_mips: 2 x 2 x 2 texel
+// means, rounded, down to one texel) at the level
+//   lambda(f) = clamp(log2(f / f_s), 0, 1) x log2(f / texel),  texel = tile / shape_size (250 m), at most
+//   cloud_shape_prefilter_levels,
+// the mips blended linearly in lambda (as the GPU's trilinear mip filter): the octaves finer than the pixel enter with
+// their mean, as the detail levels' band limit does. lambda is 0 up to f_s and continuous (no pop); from 2 f_s on it is
+// the standard mip level of the footprint. Against the level's own threshold prefilter_threshold[lambda](cf) (covered
+// fraction cf, from uniform random positions of the blended value) and edge mean factor prefilter_edge_mean[lambda](cf)
+// (the joint (v, n) distribution of the level): the covered area stays cf and the mean water the grid mean. Rows at
+// lambda = r / cloud_shape_prefilter_rows_per_level, linear between them; row 0 is the state-0 row (the unfiltered
+// shape). The detail is gone long before f_s (level 0 fades out at 125 m), so the prefilter acts on the shape alone.
+//
 // Blue noise (task 8 amendment, no grain): a size^2 tileable rank mask (void-and-cluster, Ulichney 1993, "The
 // void-and-cluster method for dither array generation", Proc. SPIE 1913, 332; Gaussian energy sigma 1.5 on the
 // torus), byte = rank x 256 / size^2 (each value equally often). The shader offsets the raymarch start per pixel by it
@@ -85,6 +100,21 @@ inline constexpr double cloud_detail_join_lag_m = 62.5;
 // factor makes the measured D Lovejoy's 1.35 - calibrated on the observable, not on a look.
 inline constexpr double cloud_detail_amplitude_calibration = 2.5;
 inline constexpr int cloud_detail_states = cloud_detail_levels + 1;
+// [E] Shape prefilter (header): the start footprint f_s - the largest that still filters the Earth seen from the
+// scaled-space limit fully (fully filtered from 2 f_s; there the march pixel is >= 7 km: 8 600 km at 8e-4 rad and
+// more), above the footprints from the ground and an ascent below ~30 km (the farthest cloud sample ~1 100 km away at
+// the 1600 x 900 check's 3.1e-3 rad half-resolution pixel: ~3.4 km). Views under it read the unfiltered shape exactly
+// (ruling 2026-10-26: shapes unchanged at normal distances); higher views (the limb from an ascent or from orbit) are
+// prefiltered where their footprint exceeds f_s - there the shape aliases as at the hand-over. The highest level
+// (2: 32^3 texels of 1 km; deeper mips keep only a few features per horizontal slice of the tile, and a cloud layer
+// seen from afar cuts many slices: their cover, off cf, showed as rings around the sub-camera point and moved the
+// cf 0.4 hand-over to 10.7 % with level 4, 7.5 % with 2 - beyond the level the shader's sub-pixel offsets average the
+// footprint, clouds.gdshaderinc) and the table rows per level (quarter levels: the blend of two mips is not the mean of
+// their tables - covered fraction / water 2.3 % / 36 % off at 4.5 with whole-level rows).
+inline constexpr double cloud_shape_prefilter_start_m = 3500.0;
+inline constexpr int cloud_shape_prefilter_levels = 2;
+inline constexpr int cloud_shape_prefilter_rows_per_level = 4;
+inline constexpr int cloud_shape_prefilter_rows = cloud_shape_prefilter_levels * cloud_shape_prefilter_rows_per_level + 1;
 
 struct CloudNoise {
     int shape_size = 128, detail_size = 32, blue_noise_size = 64;
@@ -96,6 +126,11 @@ struct CloudNoise {
     float detail_mean = 0.0f;                                                      // mean of d (header)
     float edge_width_min_value = 0.0f, edge_width_max_value = 0.0f;                // w_min, w_max (header)
     std::vector<std::uint8_t> blue_noise;  // blue_noise_size^2 R8, row-major
+    // Shape prefilter (header): mip levels 1 .. log2(shape_size) of shape_rgba (sizes shape_size / 2 .. 1), and the
+    // threshold and edge mean factor per row [row][code] (row 0 = state 0).
+    std::vector<std::vector<std::uint8_t>> shape_mips;
+    std::array<std::array<float, 256>, cloud_shape_prefilter_rows> prefilter_threshold{};
+    std::array<std::array<float, 256>, cloud_shape_prefilter_rows> prefilter_edge_mean{};
 };
 
 CloudNoise generate_cloud_noise();
@@ -130,6 +165,14 @@ double cloud_shape_value(const CloudNoise& noise, double shape_value, const math
 // the shader's linear filter) and the code of the cloud fraction.
 double cloud_coverage_threshold(const CloudNoise& noise, double detail_state, int code);
 double cloud_edge_mean_factor(const CloudNoise& noise, double detail_state, int code);
+
+// Shape prefilter (header): the level lambda at the pixel footprint [m] for a shape texture of shape_size texels; one
+// channel of the shape at level-0 texel coordinates, the mips blended linearly in the level (level 0: exactly
+// sample_noise_trilinear of shape_rgba); the level's threshold and edge mean factor of a code (linear between rows).
+double cloud_shape_prefilter_level(double footprint_m, int shape_size = 128);
+double sample_shape_prefiltered(const CloudNoise& noise, int channel, const math::Vec3& texel, double level);
+double cloud_prefilter_threshold(const CloudNoise& noise, double level, int code);
+double cloud_prefilter_edge_mean(const CloudNoise& noise, double level, int code);
 
 // Void-and-cluster blue-noise rank mask (header) of size x size, deterministic.
 std::vector<std::uint8_t> generate_blue_noise(int size);

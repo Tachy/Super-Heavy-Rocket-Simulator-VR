@@ -38,6 +38,26 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
   mixes in the ramp of thin-sheet coordinates (vertical tile 2 km instead of 16 km [E]; no fibre direction: no wind in
   the snapshot), the same detail. Shape tile 32 km across / 16 km high [E]; Earth-fixed, the camera's part in float64
   on the CPU (level k's origin fract(4^k x level 0's)).
+- **Shape prefilter at large pixel footprints** (Task 10 fix round 1, anti-aliasing; `cloud_noise.hpp` "Shape
+  prefilter", `clouds.gdshaderinc`): the shape texture is point-sampled per ray, right while its octaves (Worley
+  8 km, Perlin 4 km to 500 m) span pixels; from the scaled-space limit a march pixel is 7-27 km and the shape aliased
+  (moire, speckle, a wrong local cover). Beyond the start footprint f_s = 3.5 km of the pixel (not the light march's
+  interval) the shape is read from its box-filtered mips (`CloudNoise::shape_mips`, 2^3 texel means) at the level
+  lambda = clamp(log2(f / f_s), 0, 1) log2(f / 250 m), at most 2 (1 km texels), against the level's own threshold and
+  edge mean factor (`prefilter_threshold` / `prefilter_edge_mean`, rows at quarter levels: covered area cf, mean water
+  the grid mean - the detail band limit's rule applied to the shape). Beyond that, each ray reads the shape at a
+  horizontal offset drawn from the pixel's tent filter (half-width f, faded in from f_s to 2 f_s; blue noise + the R4
+  sequence per frame) and the temporal mean averages the pixel's transmittance over its footprint - the
+  coverage-preserving mean in transmittance (a mean density would make broken cloud a fog); the cell (fraction,
+  water) stays the true point's. Deeper mips (level 4, 4 km texels) were tried: their few features per horizontal
+  slice of the tile showed as rings around the sub-camera point (cf 0.4 hand-over 10.7 % instead of 7.5 %). The
+  code sits under `CLOUD_SHAPE_PREFILTER`: `CloudEffect` runs that march kernel only when a footprint on the frame's
+  clouds can exceed f_s (largest pixel angle x (the horizon distances of the camera and of the 20 km cloud top on the
+  largest radius of curvature + the light march's 6 km)), else the unfiltered kernel - bit for bit the code before
+  (one added branch alone moved results by an ulp through the compiler). With the 1600 x 900 check window (pixel
+  3.1e-3 rad at half resolution) that keeps the ground and an ascent up to ~30 km unfiltered; the limb from higher
+  (an ascent near the Karman line, low orbit) is prefiltered where its footprint exceeds f_s (there the shape aliased
+  as at the hand-over). Shadow maps never prefilter.
 - **Multiple scattering: Monte Carlo transfer table** (Task 8b, after Bouthors et al. 2008; `cloud_transfer_table.hpp`,
   `config/clouds/cloud_transfer_table.bin`, 9.7 MB): the source of the multiply scattered light of a plane-parallel
   conservative slab, made offline by `tools/validation/cloud_slab_monte_carlo.py --table-runs / --table-build` with
@@ -198,7 +218,9 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
 - Core `[weather]`: render texels (linear extinction, in-cloud depth vs trapezoids, code round trip, ice share);
   vertical profile (flat base, water path kept exactly); covered fraction = cf within 0.003 at every detail state
   (0.006 between rows); soft edges of varying width (mean water / grid mean 0.996-1.000 for cf 0.05-1 at states 0, 1,
-  1.5, 3); perimeter fractal dimension by box counting of the cloud mask (16 km plane at 4 m, cf 0.5, boxes 8 m to
+  1.5, 3); the shape prefilter (level 0 up to f_s and continuous, the mips' box filter, level 0 = the unfiltered
+  sample and state-0 tables bit for bit; covered fraction within 0.003 and mean water / grid mean 0.995-1.007 at
+  levels 0.125-2 for cf 0.1 / 0.4 / 0.9, 4e5 random positions); perimeter fractal dimension by box counting of the cloud mask (16 km plane at 4 m, cf 0.5, boxes 8 m to
   1024 m: D = 1.350, test 1.25-1.45, Lovejoy 1982; the shape alone 1.01); blue noise (each value equally often, 4 x 4 block-mean variance 0.18 of white
   noise); 3D Sun light (light march unbiased within 1 %, shadow-side transmittance exp(-mean tau) within 2 % of
   Beer-Lambert; sunlit flank 6.9x / 52x the shadowed one and 3.9x the column model at +10 / -3 deg Sun; a slab gives
@@ -256,8 +278,15 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
   output 6: the far field's physics without the shapes) within 2.2 % / 4.2 % (tolerance 5 %); the volume pass only
   inside, `earth_clouds.gdshader` only outside, the CPU light factors (1, 0, 1) outside; from 384 400 km with the ERA5
   hour of 2024-04-08 18:00 five cloudy cells (vertical transmittance < 0.05) 5.3-8.2x brighter with the weather on,
-  five clear cells (no cloud within 1 deg) unchanged (ratio 1.0000). Reported, not asserted: the game's volume (the
-  shapes) against the far field - see "Open points".
+  five clear cells (no cloud within 1 deg) unchanged (ratio 1.0000). The game's volume (the shapes, prefiltered)
+  against the far field, tolerance 10 % (ruling 2026-10-26: the shapes' 3D light is outside a column model): deck
+  tau 10 within 7.3 %, tau 2 within 5.2 %, broken cf 0.4 (21 x 21 block means) within 8.5 % (two runs 7.5 / 8.5 %,
+  the temporal mean's noise; before the prefilter 32 %).
+- Image identity of the shape prefilter (`render_check.gd --fixed_exposure --deterministic=64`: the cloud history
+  and frame counter reset, then exactly 64 frames; ERA5 2024-04-08 18:00): the Starbase ground view and an ascent
+  view at 25 km toward the horizon are bit-identical to the commit before (a7d52e1); two runs of a7d52e1 itself
+  differ in 0 / at most 1 pixel by 1. The low-orbit oblique view (420 km) differs at the limb only, where the
+  footprint exceeds f_s.
 - `game/tests/cloud_layer_test.gd` (headless): the cross-fade never jumps, never changes a weighted slot.
 
 ## Diagnostics
@@ -265,7 +294,9 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
 - `render_check.gd --weather=<abs path .wthr>` or `--weather=slab:<bottom>,<top>,<liquid kg/m^3>,<fraction>` (pinned,
   no service; the overlay shows the pinned snapshot), `--weather=analog` (the shipped analog of `--utc`, pinned),
   `--weather[=s]` / `--weather=online` online; any other value exits with an error. `--cloud_quality=desktop|vr`,
-  `--cloud_detail_levels=0..3`, `--cloud_scattering=table|closed`, `--look_at_sun [--away_from_sun]`.
+  `--cloud_detail_levels=0..3`, `--cloud_scattering=table|closed`, `--look_at_sun [--away_from_sun]`;
+  `--fixed_exposure --deterministic[=64]` for before / after image identity (cloud history and frame counter reset
+  once settled, then exactly that many frames).
 - `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr [--cloud_scattering=table|closed]` (weather off
   otherwise).
 - `cloud_debug_output` 1 / 2 / 3 / 4: background transmittance (grid mean), Sun radiance (grid mean), coverage at
@@ -301,6 +332,8 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
   8.4 -> 9.7); the Task 9 cloud pass in the same state 15.90 / 16.09 ms: the two cloud-pass fixes cost nothing
   measurable. Scaled space (2560 x 1440, 2025-10-25 15:00 UTC ERA5): the far field adds 0.26 ms GPU from the Moon's
   direction at 330 000 km (0.51 -> 0.77 ms) and 0.30 ms just outside 1.5e7 m (0.43 -> 0.73 ms); frame p99 ~1.5 ms.
+  The shape prefilter kernel (fix round 1, A/B in one session, 2560 x 1440, ERA5 2024-04-08 18:00, inside the limit at
+  1.4985e7 / 1.2e7 m): GPU p50 6.09 -> 6.29 / 6.07 and 8.05 -> 8.03 / 8.08 ms: not measurable.
 - At sharp dark edges (a deck's base seen at 30 km) a staircase of the half-resolution blocks is still visible.
 - The stochastic light march is unbiased in tau_s but exp(-tau_s) per sample is brighter on average (+10 % at the
   worst checked geometry with the preset's samples); more near samples reduce it.
@@ -320,17 +353,16 @@ clouds in the light of the ground, vehicles and the eye) and Task 10 (the far fi
   inside clouds (a receiver inside one gets a linear share), the Moon's direct light the column's (no shapes). The
   sky's diffuse transmittance and the Sun's diffuse light are the local column's (no light from neighbouring columns,
   no cloud-side glow in gaps). The scaled-space Earth takes the column (the far field: no shapes, no shadow maps).
-- Far field against the volume at the hand-over (Task 10, `cloud_far_check.gd`, reported): with the game's volume (the
-  shapes) a deck of tau 10 differs by up to 8.2 % (the volume brighter 25-45 deg from the sub-camera point, Sun ~35 deg
-  up, view ~68 deg off the vertical; within 3.3 % nearer the centre), tau 2 by up to 6.8 % (the volume darker); with the
-  volume on the grid mean the same blocks agree within 2.2 % / 4.2 %: the step is the shapes' sub-grid structure (the
-  3D entry cosine under a varying Sun depth only brightens: mu_e is clamped at mu0 from below), not the far field. A
-  broken layer (cf 0.4): 21 x 21 block means differ by up to 32 % (the centre: volume 0.154, far field 0.202) - from
-  8 600 km a pixel is ~7 km and the volume point-samples the shape noise (32 km tile, its Perlin octaves finer than the
-  pixel are not band-limited, only the detail levels are): moire and speckle around the sub-camera point, its local
-  cover off the cell's (the background transmittance at the centre 0.85 against the column's 0.49). Visible as a
-  change of texture (speckle -> smooth) at the limit for broken cloud; a band limit of the shape noise itself at large
-  footprints would be a new shape rule (open for a ruling).
+- Far field against the volume at the hand-over (Task 10, `cloud_far_check.gd`): with the game's volume (the shapes)
+  a deck of tau 10 differs by up to 7.3 % (the volume brighter 25-45 deg from the sub-camera point, Sun ~35 deg up,
+  view ~68 deg off the vertical), tau 2 by up to 5.2 %, a broken layer (cf 0.4) by up to 8.5 % (the volume brighter
+  at the centre by 8-9 %); with the volume on the grid mean the decks agree within 2.6 % / 3.9 %: the step is the shapes' sub-grid structure (the 3D entry cosine
+  under a varying Sun depth only brightens: mu_e is clamped at mu0 from below; the soft edges' thin fringes), which a
+  column model cannot carry. Accepted with the tolerance 10 % (ruling 2026-10-26): a faint step when crossing
+  1.5e7 m. A thin layer seen from afar cuts many horizontal slices of the 32 km shape tile, whose cover is not exactly
+  cf: faint rings around the sub-camera point remain (the shapes' own, not aliasing). The sub-pixel offsets leave a
+  fine temporal grain on broken cloud beyond f_s until the temporal mean converges (still camera: frames; a moving
+  one: the floor weight's ~23 % of one frame's noise).
 - Far field: plane-parallel independent columns (no 3D radiative effects: no lit cloud sides at a low Sun, no shadows
   cast on neighbouring columns or the ground beside them); the field's 0.25 deg grid shows as soft cells near the
   hand-over (~4 pixels per cell at 1.5e7 m).

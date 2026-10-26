@@ -495,6 +495,13 @@ func _upload_noise() -> void:
 	ShaderGlobals.set_value(&"cloud_coverage_threshold", _noise_textures[2])
 	ShaderGlobals.set_value(&"cloud_edge_mean", _noise_textures[3])
 	ShaderGlobals.set_value(&"cloud_blue_noise", _noise_textures[4])
+	# The shape prefilter (Task 10 fix round 1, cloud_noise.hpp): the mip levels 1.. of the shape and their tables.
+	var prefilter_rows := int(noise["prefilter_rows"])
+	_noise_textures.append_array([_mip_texture(noise["shape_mips"], int(noise["shape_size"]) / 2),
+			_table(noise["prefilter_threshold"], prefilter_rows), _table(noise["prefilter_edge_mean"], prefilter_rows)])
+	ShaderGlobals.set_value(&"cloud_noise_shape_mips", _noise_textures[5])
+	ShaderGlobals.set_value(&"cloud_prefilter_threshold", _noise_textures[6])
+	ShaderGlobals.set_value(&"cloud_prefilter_edge_mean", _noise_textures[7])
 	ShaderGlobals.set_value(&"cloud_edge_width", Vector2(noise["edge_width_min_value"], noise["edge_width_max_value"]))
 	ShaderGlobals.set_value(&"cloud_detail_mean", float(noise["detail_mean"]))
 	ShaderGlobals.set_value(&"cloud_detail_weights", noise["detail_weights"])
@@ -546,6 +553,21 @@ func _apply_scattering_model() -> void:
 static func _table(values: PackedFloat32Array, rows: int) -> ImageTexture:
 	return ImageTexture.create_from_image(Image.create_from_data(values.size() / rows, rows, false, Image.FORMAT_RF,
 			values.to_byte_array()))
+
+
+## A 3D RGBA8 texture with mipmaps from its levels (levels[0] of size^3, each next one half as large, down to 1).
+static func _mip_texture(levels: Array, size: int) -> ImageTexture3D:
+	var images: Array[Image] = []
+	var s := size
+	for level: PackedByteArray in levels:
+		var slice := s * s * 4
+		for z in range(s):
+			images.append(Image.create_from_data(s, s, false, Image.FORMAT_RGBA8,
+					level.slice(z * slice, (z + 1) * slice)))
+		s = maxi(s / 2, 1)
+	var texture := ImageTexture3D.new()
+	texture.create(Image.FORMAT_RGBA8, size, size, size, true, images)
+	return texture
 
 
 static func _noise_texture(texels: PackedByteArray, size: int) -> ImageTexture3D:

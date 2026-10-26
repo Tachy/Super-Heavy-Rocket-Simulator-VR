@@ -39,7 +39,8 @@ layout(set = 1, binding = 0, std140) uniform CloudView {
 	vec4 sizes;                // full width, full height, low width, low height
 	vec4 camera_delta;         // xyz: camera now - camera before (Earth-local, m); w: 1 = history valid
 	vec4 params;               // x: frame jitter [0, 1), y: temporal weight, z: debug output, w: march pixel angle [rad]
-	vec4 eye_earth;            // xyz: the eye's offset from the head (camera), Earth-local axes (m); 0 on the desktop
+	vec4 eye_earth;            // xyz: the eye's offset from the head (camera), Earth-local axes (m); 0 on the desktop;
+	                           // w: the frame index mod 4096 (the sub-pixel shape offsets' sequence)
 } cloud_view;
 
 // Distance [m] from the camera of a full-resolution pixel's depth (reversed Z: 1 near, 0 far = no geometry).
@@ -114,7 +115,8 @@ global uniform float cloud_fine_step_fraction;  // fine step / distance inside t
 // Scattering source of one light (Sun or Moon) at a sample: J per unit irradiance normal to the light.
 float cloud_light_source(vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, float height_m, float distance_m,
 		vec2 column, float jitter, float pixel_angle) {
-	float tau_light = cloud_light_optical_depth(offset, height_m, distance_m, light_dir, jitter, pixel_angle);
+	float tau_light = cloud_light_optical_depth(offset, height_m, distance_m, light_dir, jitter, pixel_angle,
+			pixel_angle);
 	if (cloud_scattering_model == 1) {
 		return cloud_scattering_source_mc(light_dir, -dir, normal, tau_light, column.x, column.y);
 	}
@@ -223,7 +225,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		vec3 offset = eye + dir * d;  // from the head: the ray starts at the eye
 		float height = cloud_height_along(ray, d);
 		float in_cloud;
-		float beta = cloud_extinction_in_cell(cell, offset, height, pixel_angle * d, in_cloud);
+		float beta = cloud_extinction_in_cell(cell, offset, height, pixel_angle * d, pixel_angle * d, in_cloud);
 		if (beta <= 0.0) {
 			dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
 			continue;
@@ -378,6 +380,16 @@ void main() {
 	if (cloud_enabled && atmosphere_enabled) {
 		float noise = texelFetch(cloud_blue_noise, pixel % 64, 0).r;
 		float jitter = fract(noise + cloud_view.params.x);
+#ifdef CLOUD_SHAPE_PREFILTER
+		// The sub-pixel shape offset (clouds.gdshaderinc cloud_subpixel_offset): blue noise at four shifted texels, moved
+		// per frame along the R4 sequence (Roberts 2018: 1 / phi_4^k) of the frame index.
+		float frame = cloud_view.eye_earth.w;
+		cloud_shape_subpixel = fract(vec4(texelFetch(cloud_blue_noise, (pixel + ivec2(17, 41)) % 64, 0).r,
+				texelFetch(cloud_blue_noise, (pixel + ivec2(43, 29)) % 64, 0).r,
+				texelFetch(cloud_blue_noise, (pixel + ivec2(5, 53)) % 64, 0).r,
+				texelFetch(cloud_blue_noise, (pixel + ivec2(31, 11)) % 64, 0).r)
+				+ frame * vec4(0.8566748839, 0.7338918708, 0.6287067210, 0.5385972572));
+#endif
 		cloud_march(cloud_ray_earth(centre), scene_m, jitter, cloud_group_eclipse_near, cloud_group_eclipse_far, color,
 				alpha, cloud_m);
 	}

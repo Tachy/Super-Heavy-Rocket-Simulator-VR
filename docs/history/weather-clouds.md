@@ -58,6 +58,18 @@ needed.
 - **Performance after Task 8 fix round 1** (closed form, same setup): without clouds p99 13.20 / 13.06 ms, with clouds
   15.54 ms; descent 12.1 -> 16.7 ms p99, worst GPU second 18.9 ms at 8.4 km.
 
+## Point-sampled shapes at kilometre pixels (Task 10, replaced in its fix round 1, 2026-10-26)
+
+- The volume read the shape texture point-sampled at any footprint; only the detail levels were band-limited. From
+  the scaled-space limit (8 600 km, ~7-27 km pixels) its octaves aliased: moire and speckle around the sub-camera
+  point, the background transmittance at the centre 0.85 against the column's 0.49. The hand-over against the far
+  field (reported then, not asserted): deck tau 10 up to 8.2 %, tau 2 up to 6.8 %, broken cf 0.4 (21 x 21 block means)
+  up to 32 % (centre: volume 0.154, far field 0.202). Ruling 2026-10-26: band-limiting the shape at footprints larger
+  than its features is sampling, not a shape change; views below a footprint threshold stay bit-identical.
+- First fix-round attempt: the mips up to level 4 (4 km texels) alone: the moire stayed at 27 km pixels (cf 0.4 65 %);
+  with sub-pixel offsets beyond level 4: 10.7 %, rings from the coarse mips' slice cover; unfiltered shape + offsets
+  only: 11.6 % (the volume brighter everywhere). Kept: mips up to level 2 + offsets (7.5-8.5 %).
+
 ## The cloud pass at long range before Task 10 (fixed 2026-10-26)
 
 - **Step retry on the float32 distance**: a step heavier than `CLOUD_MAX_STEP_WEIGHT` was retried while

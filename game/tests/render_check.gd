@@ -21,6 +21,8 @@
 #          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels),
 #          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
+# Image identity: --deterministic[=64] once settled resets the cloud history and the cloud pass's frame counter and
+#          saves after exactly that many more frames (with --fixed_exposure, for before / after comparisons).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
@@ -41,6 +43,7 @@ var _frames := 0
 var _start_s := 0.0
 var _terrain_idle := 0  ## consecutive frames without terrain loading
 var _found_event_tdb_s := NAN  ## --at_event: the event's instant found by flying (_fly_until_event)
+var _deterministic_left := -1  ## --deterministic: frames still to draw after the reset (-1: not yet reset)
 
 
 func _initialize() -> void:
@@ -119,6 +122,15 @@ func _process(_delta: float) -> bool:
 			and _frames < TERRAIN_MAX_FRAMES
 	if _frames >= FRAMES_TO_SETTLE and not weather_waiting and not clouds_waiting \
 			and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES):
+		if _args.has("deterministic"):
+			if _deterministic_left < 0:  # the same jitter sequence and history from here in every run
+				var effect: CloudEffect = world.clouds.effect
+				effect.reset_history()
+				RenderingServer.call_on_render_thread(func() -> void: effect._frame = 0)
+				_deterministic_left = int(_args["deterministic"]) if _args["deterministic"].is_valid_int() else 64
+			if _deterministic_left > 0:
+				_deterministic_left -= 1
+				return false
 		print("render_check: ", world.weather.status_text())
 		print("render_check: clouds %s, field textures %.1f MB, last upload %.1f ms" % [world.clouds.state(),
 				world.clouds.field_texture_bytes / 1.0e6, world.clouds.last_upload_ms])

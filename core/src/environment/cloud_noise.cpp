@@ -38,6 +38,10 @@ constexpr double joint_bins_per_unit = 2048.0;
 constexpr int joint_width_bins = 16;
 constexpr std::uint32_t composite_sample_seed = 0x7u;
 constexpr int composite_chunks = 16;
+// The shape prefilter's tables (header): uniform random positions per row (sampling error of a fraction <= 3.5e-4)
+// and their seed.
+constexpr int prefilter_samples = 2000000;
+constexpr std::uint32_t prefilter_sample_seed = 0x9u;
 // Increment statistics (detail amplitude, edge widths): sample pairs and seed.
 constexpr int increment_pairs = 200000;
 constexpr std::uint32_t increment_seed = 0x8u;
@@ -578,14 +582,15 @@ std::array<float, 256> quantile_thresholds(const CompositeHistograms& h, int sta
     return t;
 }
 
-// Edge mean factors of a state from its joint histogram (header): bins at their centres.
-std::array<float, 256> joint_edge_mean_factors(const CloudNoise& noise, const CompositeHistograms& h, int state) {
+// Edge mean factors of a row (detail state or prefilter row) from its joint histogram and thresholds t (header): bins
+// at their centres.
+std::array<float, 256> joint_edge_mean_factors(const CloudNoise& noise, const CompositeHistograms& h, int state,
+                                               const std::array<float, 256>& t) {
     const double* counts = h.joint.data() + static_cast<std::size_t>(state) * h.joint_bins * joint_width_bins;
     double total = 0.0;
     for (std::size_t i = 0; i < h.joint_bins * joint_width_bins; ++i) total += counts[i];
     std::array<double, joint_width_bins> width{};
     for (int k = 0; k < joint_width_bins; ++k) width[static_cast<std::size_t>(k)] = cloud_edge_width_value(noise, (k + 0.5) / joint_width_bins);
-    const std::array<float, 256>& t = noise.coverage_threshold[static_cast<std::size_t>(state)];
     std::array<float, 256> m{};
     detail::for_each_row(256, [&](int i) {
         const double threshold = t[static_cast<std::size_t>(i)];
@@ -611,7 +616,123 @@ double table_at(const std::array<std::array<float, 256>, cloud_detail_states>& t
     return lerp(table[static_cast<std::size_t>(lo)][c], table[static_cast<std::size_t>(hi)][c], s - lo);
 }
 
+// Box-filtered mip chain of a size^3 RGBA8 texture (header, shape prefilter): levels 1 .. log2(size), each texel the
+// rounded mean of the 2 x 2 x 2 texels below it (GPU mip convention: level l texel centres at level-0 coordinates
+// / 2^l).
+std::vector<std::vector<std::uint8_t>> mip_chain(const std::vector<std::uint8_t>& rgba, int size) {
+    std::vector<std::vector<std::uint8_t>> mips;
+    for (int s = size / 2; s >= 1; s /= 2) {
+        const std::vector<std::uint8_t>& source = mips.empty() ? rgba : mips.back();
+        const int from = 2 * s;
+        std::vector<std::uint8_t> level(static_cast<std::size_t>(s) * s * s * channels);
+        for (int z = 0; z < s; ++z) {
+            for (int y = 0; y < s; ++y) {
+                for (int x = 0; x < s; ++x) {
+                    for (int ch = 0; ch < channels; ++ch) {
+                        int sum = 0;
+                        for (int c = 0; c < 8; ++c) {
+                            const std::size_t i = (static_cast<std::size_t>(2 * z + (c >> 2)) * from + 2 * y + ((c >> 1) & 1)) *
+                                                      from + 2 * x + (c & 1);
+                            sum += source[channels * i + static_cast<std::size_t>(ch)];
+                        }
+                        level[channels * ((static_cast<std::size_t>(z) * s + y) * s + x) + static_cast<std::size_t>(ch)] =
+                            static_cast<std::uint8_t>((sum + 4) / 8);
+                    }
+                }
+            }
+        }
+        mips.push_back(std::move(level));
+    }
+    return mips;
+}
+
+// All four channels of the shape at level-0 texel coordinates and the prefilter level (sample_shape_prefiltered).
+std::array<double, 4> prefiltered4(const CloudNoise& noise, const math::Vec3& texel, double level) {
+    const auto at = [&](int l) {
+        if (l == 0) return trilinear4(noise.shape_rgba, noise.shape_size, texel);
+        return trilinear4(noise.shape_mips[static_cast<std::size_t>(l - 1)], noise.shape_size >> l,
+                          texel / static_cast<double>(1 << l));
+    };
+    const double lv = std::clamp(level, 0.0, static_cast<double>(cloud_shape_prefilter_levels));
+    const int lo = static_cast<int>(std::floor(lv));
+    if (lv == lo) return at(lo);
+    const std::array<double, 4> a = at(lo), b = at(lo + 1);
+    std::array<double, 4> v{};
+    for (std::size_t ch = 0; ch < 4; ++ch) v[ch] = lerp(a[ch], b[ch], lv - lo);
+    return v;
+}
+
+// Histograms of the prefiltered shape value per row (header; row 0 unused: state 0's tables): fine and joint with the
+// width noise, over [0, 1], at uniform random positions.
+CompositeHistograms prefilter_histograms(const CloudNoise& noise) {
+    CompositeHistograms h;
+    h.lo = 0.0;
+    h.hi = 1.0;
+    h.fine_bins = static_cast<std::size_t>(composite_bins_per_unit);
+    h.joint_bins = static_cast<std::size_t>(joint_bins_per_unit);
+    const std::size_t rows = cloud_shape_prefilter_rows;
+    const std::size_t fine_size = rows * h.fine_bins, joint_size = rows * h.joint_bins * joint_width_bins;
+    std::vector<std::vector<std::uint32_t>> fine(composite_chunks), joint(composite_chunks);
+    const double n = noise.shape_size;
+    detail::for_each_row(composite_chunks, [&](int chunk) {
+        std::vector<std::uint32_t>& f = fine[static_cast<std::size_t>(chunk)];
+        std::vector<std::uint32_t>& j = joint[static_cast<std::size_t>(chunk)];
+        f.assign(fine_size, 0);
+        j.assign(joint_size, 0);
+        for (int i = chunk; i < prefilter_samples; i += composite_chunks) {
+            HashSequence r{hash32(static_cast<std::uint32_t>(i) ^ hash32(prefilter_sample_seed))};
+            const math::Vec3 texel{r.next() * n, r.next() * n, r.next() * n};
+            for (std::size_t row = 1; row < rows; ++row) {
+                const std::array<double, 4> v =
+                    prefiltered4(noise, texel, static_cast<double>(row) / cloud_shape_prefilter_rows_per_level);
+                const std::size_t width_bin =
+                    std::min<std::size_t>(joint_width_bins - 1, static_cast<std::size_t>(v[3] * joint_width_bins));
+                const std::size_t fb = std::min(h.fine_bins - 1, static_cast<std::size_t>(v[0] * composite_bins_per_unit));
+                const std::size_t jb = std::min(h.joint_bins - 1, static_cast<std::size_t>(v[0] * joint_bins_per_unit));
+                ++f[row * h.fine_bins + fb];
+                ++j[(row * h.joint_bins + jb) * joint_width_bins + width_bin];
+            }
+        }
+    });
+    h.fine.assign(fine_size, 0.0);
+    h.joint.assign(joint_size, 0.0);
+    for (int c = 0; c < composite_chunks; ++c) {
+        for (std::size_t i = 0; i < fine_size; ++i) h.fine[i] += fine[static_cast<std::size_t>(c)][i];
+        for (std::size_t i = 0; i < joint_size; ++i) h.joint[i] += joint[static_cast<std::size_t>(c)][i];
+    }
+    return h;
+}
+
+double prefilter_table_at(const std::array<std::array<float, 256>, cloud_shape_prefilter_rows>& table, double level,
+                          int code) {
+    const double s = std::clamp(level * cloud_shape_prefilter_rows_per_level, 0.0,
+                                static_cast<double>(cloud_shape_prefilter_rows - 1));
+    const int lo = static_cast<int>(std::floor(s));
+    const int hi = std::min(lo + 1, cloud_shape_prefilter_rows - 1);
+    const std::size_t c = static_cast<std::size_t>(std::clamp(code, 0, 255));
+    return lerp(table[static_cast<std::size_t>(lo)][c], table[static_cast<std::size_t>(hi)][c], s - lo);
+}
+
 }  // namespace
+
+double cloud_shape_prefilter_level(double footprint_m, int shape_size) {
+    if (!(footprint_m > cloud_shape_prefilter_start_m)) return 0.0;
+    const double onset = std::min(std::log2(footprint_m / cloud_shape_prefilter_start_m), 1.0);
+    const double texel_m = cloud_shape_tile_horizontal_m / shape_size;
+    return std::clamp(onset * std::log2(footprint_m / texel_m), 0.0, static_cast<double>(cloud_shape_prefilter_levels));
+}
+
+double sample_shape_prefiltered(const CloudNoise& noise, int channel, const math::Vec3& texel, double level) {
+    return prefiltered4(noise, texel, level)[static_cast<std::size_t>(std::clamp(channel, 0, 3))];
+}
+
+double cloud_prefilter_threshold(const CloudNoise& noise, double level, int code) {
+    return prefilter_table_at(noise.prefilter_threshold, level, code);
+}
+
+double cloud_prefilter_edge_mean(const CloudNoise& noise, double level, int code) {
+    return prefilter_table_at(noise.prefilter_edge_mean, level, code);
+}
 
 double cloud_shape_hurst_exponent() { return 2.0 - constants::cloud_perimeter_fractal_dimension; }
 
@@ -738,7 +859,19 @@ CloudNoise generate_cloud_noise() {
         noise.coverage_threshold[static_cast<std::size_t>(state)] = quantile_thresholds(histograms, state);
     }
     for (int state = 0; state < cloud_detail_states; ++state) {
-        noise.edge_mean_factor[static_cast<std::size_t>(state)] = joint_edge_mean_factors(noise, histograms, state);
+        noise.edge_mean_factor[static_cast<std::size_t>(state)] =
+            joint_edge_mean_factors(noise, histograms, state, noise.coverage_threshold[static_cast<std::size_t>(state)]);
+    }
+
+    // The shape prefilter (header): the mip chain, row 0 = state 0, the other rows from their blended values.
+    noise.shape_mips = mip_chain(noise.shape_rgba, n);
+    noise.prefilter_threshold[0] = noise.coverage_threshold[0];
+    noise.prefilter_edge_mean[0] = noise.edge_mean_factor[0];
+    const CompositeHistograms prefiltered = prefilter_histograms(noise);
+    for (int row = 1; row < cloud_shape_prefilter_rows; ++row) {
+        const std::size_t r = static_cast<std::size_t>(row);
+        noise.prefilter_threshold[r] = quantile_thresholds(prefiltered, row);
+        noise.prefilter_edge_mean[r] = joint_edge_mean_factors(noise, prefiltered, row, noise.prefilter_threshold[r]);
     }
     return noise;
 }

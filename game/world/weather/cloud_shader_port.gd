@@ -12,7 +12,7 @@ const SAMPLER_TYPES := ["sampler2D", "sampler3D", "sampler2DArray", "samplerCube
 
 var source := ""  ## the GLSL compute source
 var members: Array[Dictionary] = []  ## {name, id (StringName), type, offset} of the uniform block, std140
-var samplers: Array[Dictionary] = []  ## {name, id (StringName), type, binding, linear, repeat}
+var samplers: Array[Dictionary] = []  ## {name, id (StringName), type, binding, linear, repeat, mipmap}
 var block_size := 0  ## bytes of the uniform block (a multiple of 16)
 var _defaults := {}  ## project.godot defaults of the members never set, looked up once (pack: the render thread)
 
@@ -37,7 +37,8 @@ static func build(defines: PackedStringArray, files: PackedStringArray, with_glo
 		if type in SAMPLER_TYPES:
 			var hints := m.get_string(3)
 			port.samplers.append({"name": name, "id": StringName(name), "type": type, "binding": port.samplers.size() + 1,
-					"linear": not hints.contains("filter_nearest"), "repeat": hints.contains("repeat_enable")})
+					"linear": not hints.contains("filter_nearest"), "repeat": hints.contains("repeat_enable"),
+					"mipmap": hints.contains("_mipmap")})
 		else:
 			port.members.append({"name": name, "id": StringName(name), "type": type})
 	body = regex.sub(body, "", true)
@@ -51,6 +52,19 @@ static func build(defines: PackedStringArray, files: PackedStringArray, with_glo
 			header += "layout(set = 0, binding = %d) uniform %s %s;\n" % [s["binding"], s["type"], s["name"]]
 	port.source = header + body
 	return port
+
+
+## The sampler state of the hint filter_linear_mipmap (with repeat_enable; the shape prefilter's mips): linear in
+## texels and between mip levels. The effects key their samplers "linear|repeat|mipmap".
+static func mipmap_sampler_state() -> RDSamplerState:
+	var state := RDSamplerState.new()
+	state.min_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	state.mag_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	state.mip_filter = RenderingDevice.SAMPLER_FILTER_LINEAR
+	state.repeat_u = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+	state.repeat_v = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+	state.repeat_w = RenderingDevice.SAMPLER_REPEAT_MODE_REPEAT
+	return state
 
 
 func _inline(file: String, seen: Dictionary) -> String:

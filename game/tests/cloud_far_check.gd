@@ -10,8 +10,10 @@
 #   3. the hand-over (the no-pop rule): decks of tau ~10 and ~2 (cf 1) seen from just inside and just outside
 #      1.5e7 m: with the volume on the grid mean (cloud debug output 6: the far field's physics without the sub-grid
 #      shapes) the 5 x 5 block luminance at seven Earth points (Sun 20-75 deg up) agrees within 5 %; with the game's
-#      volume (the shapes) the same blocks are reported, a broken layer (cf 0.4) as 21 x 21 block means; the volume pass
-#      draws only inside (cloud_enabled), the far field only outside (earth_clouds.gdshader); the CPU light factors are
+#      volume (the shapes) within 10 % (HANDOVER_SHAPES_TOLERANCE: the shapes' 3D light - the entry cosine under a
+#      varying Sun depth - is outside a column model; ruling 2026-10-26), a broken layer (cf 0.4, the shapes prefiltered
+#      at the ~7 km pixel, cloud_noise.hpp "Shape prefilter") as 21 x 21 block means within 10 %; the volume pass draws
+#      only inside (cloud_enabled), the far field only outside (earth_clouds.gdshader); the CPU light factors are
 #      (1, 0, 1) outside;
 #   4. from the Moon's distance (3.844e8 m) with the ERA5 snapshot of 2024-04-08 18:00 UTC: five cells the snapshot
 #      has cloudy are brighter with the weather on than off (ratio >= 1.3), five clear cells unchanged (2 %).
@@ -39,6 +41,10 @@ const MAX_FRAMES := 6000
 const PROBE_TOLERANCE := 0.03
 const PROBE_FLOOR := 1.0e-3  ## /sr: below it the absolute difference counts
 const HANDOVER_TOLERANCE := 0.05
+## The game's volume with the shapes against the far field (ruling 2026-10-26, concern 1): decks step by up to ~8 % at
+## 25-45 deg off the sub-camera point - the shapes' 3D entry cosine under a varying Sun depth only brightens, which a
+## column model cannot carry; seen only when crossing 1.5e7 m (a faint step at that moment). Broken cloud likewise.
+const HANDOVER_SHAPES_TOLERANCE := 0.10
 const CLOUDY_RATIO_MIN := 1.3
 const CLEAR_TOLERANCE := 0.02
 const EARTH_CLOUDS_SHADER := "res://shaders/earth_clouds.gdshader"
@@ -90,16 +96,16 @@ func _run() -> void:
 	await _identity_sample()
 	# 3. The hand-over.
 	# The volume on the grid mean (cloud debug output 6: the same field, light, sky, air and composite without the
-	# sub-grid shapes) is what the far field reproduces: asserted. The game's volume with the shapes: reported (their
-	# 3D effects and, at a 7 km pixel, their aliasing are outside a column model; weather-clouds.md "Far field").
+	# sub-grid shapes) is what the far field reproduces: 5 %. The game's volume with the shapes (prefiltered at the
+	# ~7 km pixel): 10 % (their 3D light is outside a column model; weather-clouds.md "Far field").
 	for deck in [["deck tau 10", DECK_LIQUID_KG_M3], ["deck tau 2", THIN_LIQUID_KG_M3]]:
 		_show(_slab(deck[0], deck[1], 1.0))
 		ShaderGlobals.set_value(&"cloud_debug_output", 6)
-		await _handover_sample(deck[0] + ", volume on the grid mean", 2, true)
+		await _handover_sample(deck[0] + ", volume on the grid mean", 2, HANDOVER_TOLERANCE)
 		ShaderGlobals.set_value(&"cloud_debug_output", 0)
-		await _handover_sample(deck[0] + ", volume with the shapes", 2, false)
+		await _handover_sample(deck[0] + ", volume with the shapes", 2, HANDOVER_SHAPES_TOLERANCE)
 	_show(_slab("broken", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION))
-	await _handover_sample("broken cf 0.4, volume with the shapes", 10, false)
+	await _handover_sample("broken cf 0.4, volume with the shapes", 10, HANDOVER_SHAPES_TOLERANCE)
 	# 4. From the Moon.
 	await _moon_samples()
 
@@ -184,7 +190,7 @@ func _earth_shader_path() -> String:
 
 
 ## 3. The same Earth points just inside (terrain + cloud pass) and just outside (earth.gdshader + far field).
-func _handover_sample(label: String, radius: int, assert_blocks: bool) -> void:
+func _handover_sample(label: String, radius: int, tolerance: float) -> void:
 	var points: Array[Vector3] = []
 	points.append(_itrf(SUB_CAMERA.x, SUB_CAMERA.y))
 	for i in range(3):
@@ -219,13 +225,9 @@ func _handover_sample(label: String, radius: int, assert_blocks: bool) -> void:
 		var step := absf(b - a) / maxf(a, 1.0e-6)
 		worst = maxf(worst, step)
 		trace += " %.4f/%.4f" % [a, b]
-	if assert_blocks:
-		_check("%s: luminance inside / outside at %d points within %.0f %%" % [label, points.size(),
-				HANDOVER_TOLERANCE * 100.0], worst <= HANDOVER_TOLERANCE,
-				"worst %.2f %%:%s" % [worst * 100.0, trace])
-	else:
-		print("  info  %s: %d x %d block means inside / outside, worst %.2f %%:%s" % [label, 2 * radius + 1,
-				2 * radius + 1, worst * 100.0, trace])
+	_check("%s: %d x %d block luminance inside / outside at %d points within %.0f %%" % [label, 2 * radius + 1,
+			2 * radius + 1, points.size(), tolerance * 100.0], worst <= tolerance,
+			"worst %.2f %%:%s" % [worst * 100.0, trace])
 
 
 ## 4. The Moon's distance: cloudy and clear cells of the ERA5 snapshot, weather off then on.

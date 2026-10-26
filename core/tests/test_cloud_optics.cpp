@@ -451,6 +451,86 @@ TEST_CASE("Soft cloud edges of varying width keep the grid-mean water at every d
     CHECK(cloud_edge_ramp(2.0) == 1.0);
 }
 
+TEST_CASE("The shape prefilter keeps the covered fraction and the water at large pixel footprints", "[weather]") {
+    // Task 10 fix round 1 (cloud_noise.hpp "Shape prefilter"): beyond cloud_shape_prefilter_start_m the shape value is
+    // read from the box-filtered mip chain at the level lambda(f) (the shape's octaves finer than the pixel enter with
+    // their mean), against the level's threshold and edge mean factor: the covered fraction stays cf and the mean water
+    // the grid mean. Below the start the level is 0 - the unfiltered shape, exactly.
+    const CloudNoise noise = generate_cloud_noise();
+    const double start = cloud_shape_prefilter_start_m;
+    const double texel_m = cloud_shape_tile_horizontal_m / noise.shape_size;
+    for (double f : {0.0, 1.0, 250.0, 2000.0, start}) CHECK(cloud_shape_prefilter_level(f) == 0.0);
+    CHECK(cloud_shape_prefilter_level(start * (1.0 + 1e-6)) < 1e-4);  // continuous at the start (no pop)
+    CHECK(cloud_shape_prefilter_level(2.0 * start) ==
+          Approx(std::min(std::log2(2.0 * start / texel_m), static_cast<double>(cloud_shape_prefilter_levels))));
+    CHECK(cloud_shape_prefilter_level(1.1 * start) == Approx(std::log2(1.1) * std::log2(1.1 * start / texel_m)));
+    CHECK(cloud_shape_prefilter_level(1.0e6) == cloud_shape_prefilter_levels);
+    double previous = 0.0;
+    for (double f = start; f < 1.0e5; f *= 1.05) {
+        const double level = cloud_shape_prefilter_level(f);
+        CHECK(level >= previous);
+        previous = level;
+    }
+
+    // The mip chain: box filter of 2 x 2 x 2 texels (rounded), down to one texel.
+    REQUIRE(noise.shape_mips.size() == 7);
+    for (std::size_t l = 0; l < noise.shape_mips.size(); ++l) {
+        const std::size_t size = static_cast<std::size_t>(noise.shape_size >> (l + 1));
+        REQUIRE(noise.shape_mips[l].size() == size * size * size * 4);
+    }
+    for (int ch = 0; ch < 4; ++ch) {
+        int sum = 0;
+        for (int c = 0; c < 8; ++c) {
+            // Level 1 texel (2, 1, 1) <- level 0 texels x 4..5, y 2..3, z 2..3.
+            const std::size_t i = (static_cast<std::size_t>(2 + (c >> 2)) * noise.shape_size + 2 + ((c >> 1) & 1)) *
+                                      noise.shape_size + 4 + (c & 1);
+            sum += noise.shape_rgba[4 * i + static_cast<std::size_t>(ch)];
+        }
+        const std::size_t j = (static_cast<std::size_t>(1) * (noise.shape_size / 2) + 1) * (noise.shape_size / 2) + 2;
+        CHECK(noise.shape_mips[0][4 * j + static_cast<std::size_t>(ch)] == (sum + 4) / 8);
+    }
+    // Level 0: the unfiltered trilinear sample and the state-0 tables, bit for bit.
+    for (const math::Vec3 texel : {math::Vec3{3.3, 70.1, 5.9}, math::Vec3{127.9, 0.2, 64.5}}) {
+        for (int ch = 0; ch < 4; ++ch) {
+            CHECK(sample_shape_prefiltered(noise, ch, texel, 0.0) ==
+                  sample_noise_trilinear(noise.shape_rgba, noise.shape_size, ch, texel));
+        }
+    }
+    CHECK(noise.prefilter_threshold[0] == noise.coverage_threshold[0]);
+    CHECK(noise.prefilter_edge_mean[0] == noise.edge_mean_factor[0]);
+
+    // Covered fraction and mean water at table levels and between them (GPU: the mips blended linearly in the level,
+    // the table rows linearly): 4e5 uniform random positions per level.
+    std::mt19937_64 rng(46);
+    std::uniform_real_distribution<double> unit(0.0, 1.0);
+    const double n = noise.shape_size;
+    for (double level : {0.125, 0.5, 1.0, 1.25, 1.625, 1.875, 2.0}) {
+        std::vector<ShapeSample> samples(400000);
+        for (ShapeSample& s : samples) {
+            const math::Vec3 texel{unit(rng) * n, unit(rng) * n, unit(rng) * n};
+            s.value = sample_shape_prefiltered(noise, 0, texel, level);
+            s.width_noise = sample_shape_prefiltered(noise, 3, texel, level);
+        }
+        const bool on_row = level * cloud_shape_prefilter_rows_per_level == std::floor(level * cloud_shape_prefilter_rows_per_level);
+        for (double cf : {0.1, 0.4, 0.9}) {
+            const int index = static_cast<int>(std::lround(cf * 255.0));
+            const double t = cloud_prefilter_threshold(noise, level, index);
+            const double m = cloud_prefilter_edge_mean(noise, level, index);
+            double covered = 0.0, water = 0.0;
+            for (const ShapeSample& s : samples) {
+                covered += s.value > t ? 1.0 : 0.0;
+                water += cloud_edge_ramp((s.value - t) / cloud_edge_width_value(noise, s.width_noise)) / m;
+            }
+            covered /= samples.size();
+            water /= samples.size();
+            report("prefilter level %.2f cf %.2f: covered %.4f, m %.4f, mean water / grid mean %.4f\n", level, cf,
+                   covered, m, water);
+            CHECK(std::abs(covered - index / 255.0) <= (on_row ? 0.01 : 0.02));
+            CHECK(water == Approx(1.0).epsilon(on_row ? 0.015 : 0.025));
+        }
+    }
+}
+
 TEST_CASE("Cloud perimeters have the observed fractal dimension", "[weather]") {
     // Lovejoy 1982 (Science 216, 185): cloud and rain areas have the area-perimeter dimension D = 1.35 +- 0.05 from
     // 1 to 1.2e6 km^2 (constants.hpp). The sub-grid shapes continue it: the cloud mask (v > t(cf), all detail levels)

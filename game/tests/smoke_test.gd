@@ -213,6 +213,17 @@ func _check_weather(core: StarsimCore) -> bool:
 			and (noise["edge_mean_factor"] as PackedFloat32Array).size() == 256 * int(noise["detail_states"])
 			and (noise["level_amplitude"] as PackedFloat32Array).size() == int(noise["detail_states"]) - 1,
 			"cloud_noise sizes")
+	# The shape prefilter (Task 10 fix round 1): the mips and tables, and the constants the shaders and CloudEffect
+	# mirror (clouds.gdshaderinc CLOUD_SHAPE_PREFILTER_*: start 3500 m, 2 levels, 4 rows per level).
+	var mips: Array = noise["shape_mips"]
+	var rows: int = int(noise["prefilter_rows"])
+	_check(mips.size() == 7 and (mips[0] as PackedByteArray).size() == 4 * (n / 2) ** 3
+			and (mips[6] as PackedByteArray).size() == 4 and rows == 9 and int(noise["prefilter_levels"]) == 2
+			and int(noise["prefilter_rows_per_level"]) == 4
+			and float(noise["prefilter_start_m"]) == CloudEffect.SHAPE_PREFILTER_START_M
+			and (noise["prefilter_threshold"] as PackedFloat32Array).size() == 256 * rows
+			and (noise["prefilter_edge_mean"] as PackedFloat32Array).size() == 256 * rows,
+			"cloud_noise shape prefilter sizes and constants")
 	var optics: Dictionary = core.cloud_optics_parameters()
 	_check(absf(float(optics.get("asymmetry_g", 0.0)) - 0.8793) < 1e-3 and float(optics["extinction_step_per_m"]) > 0.0,
 			"cloud_optics_parameters (g %.4f)" % float(optics.get("asymmetry_g", 0.0)))
