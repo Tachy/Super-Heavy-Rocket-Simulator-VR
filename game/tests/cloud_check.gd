@@ -115,7 +115,7 @@ const CACHE_SLAB_TOLERANCE := 0.05
 const CACHE_BROKEN_TOLERANCE := 0.10  ## the voxel size (62.5 m across, 40 m up near the camera) against the shapes
 ## The fill's budget in the checks: 1/16 of all voxels per frame (complete after 16 frames).
 const CACHE_BUDGET_DIVISOR := 16
-const CACHE_MAX_SETTLE_FRAMES := 600  ## > a full refresh at the game budget (427 frames)
+const CACHE_MAX_SETTLE_FRAMES := 800  ## > a full refresh at the game budget (640 frames)
 const CACHE_FILL_LIMIT_MS := 0.5  ## spec decision 6: the fill's share of the 2.5 ms per frame
 const CACHE_FILL_IDLE_MS := 0.02  ## a frame without fill jobs (the interval's timestamps alone)
 ## Each cascade at its scale: the same view (81 deg down, fov 22; cascade 0: 80 / 24) from a camera about twice as high

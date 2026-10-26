@@ -203,7 +203,8 @@ func _warp_checks() -> void:
 		for f: int in r["first_hold"]:
 			ok = ok and f >= 0 and f <= _seed_frames() + SEED_SLACK_FRAMES
 		_check(ok, "%dx warp: every cascade's shown light within %.1f deg of the Sun (worst %s deg; ground point held %s "
-				% [warp, rad_to_deg(bound), _fmt(worst), _fmt(r["held_share"])] + "of the frames)")
+				% [warp, rad_to_deg(bound), _fmt(worst), _fmt(r["held_share"])] + "of the frames; kept after first hold %s)"
+				% [r["held_after_first"]])
 		if warp == 100.0:  # below RESET: once held, the ground point stays held (no drops)
 			_check(_all_true(r["held_after_first"]), "100x warp: every cascade keeps its ground point once held (%s)"
 					% [r["held_after_first"]])
