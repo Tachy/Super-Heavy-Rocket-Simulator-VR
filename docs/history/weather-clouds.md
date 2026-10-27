@@ -546,3 +546,11 @@ than the converged volume for broken cumulus; the dotted horizon row was the ups
 > - Far field: plane-parallel independent columns (no 3D radiative effects: no lit cloud sides at a low Sun, no shadows
 >   cast on neighbouring columns or the ground beside them); the field's 0.25 deg grid shows as soft cells near the
 >   hand-over (~4 pixels per cell at 1.5e7 m).
+
+## The Sun's disk brightness (superseded by static clouds Task 9)
+
+`sun.gdshader` drew the disk at `intensity` 30 (scene value, "the disc's display brightness"), 16 x a white Lambertian
+under full Sun and 100 x the lit ground - 1500 x too dim against the physical 1.5e5 x. Seen through a cloud the volume's
+own forward-scattered light (HG part g 0.995, ~200 x the disk at tau 2 at the Sun's position, in the same scene units)
+drowned it: no disk through any slab of tau >= 2. The march also left exp(-tau) ~ 5e-4 of the background behind a thick
+cloud (the scaled criterion's early exit), invisible next to a disk of 30, 120 x a lit ground next to the physical one.

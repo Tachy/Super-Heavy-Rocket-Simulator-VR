@@ -179,6 +179,14 @@ const float CLOUD_MIN_STEP_M = 10.0;
 // Lower end of the shell: below every ground (the Dead Sea shore -430 m); the field holds layer 0 below 0 m.
 const float CLOUD_BOTTOM_M = -500.0;
 const float CLOUD_MIN_SCALED_TRANSMITTANCE = 0.01;
+// [E] The Sun's disk is seen through the cloud at its physical radiance (6.9e4 on the scene scale: 1.5e5 times a lit
+// ground's), so the background transmittance of rays toward it is marched on past the scaled criterion (which leaves
+// exp(-tau) ~ 5e-4 of the disk) down to CLOUD_SUN_MIN_TRANSMITTANCE: the disk x that is < 1e-4 of a lit ground. Those
+// rays: within CLOUD_SUN_RAY_ANGLE of the Sun (3 x the disk's radius 4.65e-3: the march pixel and the upsample).
+// [E] Half the spacing of half floats below 1 (2^-12): an alpha within it of 1 is stored as 1.
+const float CLOUD_ALPHA_SNAP = 2.44140625e-4;
+const float CLOUD_SUN_MIN_TRANSMITTANCE = 1.0e-9;
+const float CLOUD_SUN_RAY_ANGLE = 0.014;
 // [E] A coverage-only ray (cloud_march) ends where its background transmittance falls below this: its alpha is then
 // known to 0.01 (the scaled transmittance, which ends the full march, decays more slowly by the transport scale).
 const float CLOUD_COVERAGE_MIN_TRANSMITTANCE = 0.01;
@@ -652,6 +660,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 
 	float k = cloud_transport_scale();
 	vec3 sun_dir = normalize(atmosphere_sun_direction);
+	bool sun_ray = dot(dir, sun_dir) > cos(CLOUD_SUN_RAY_ANGLE);  // the Sun's disk is behind this ray
 	vec3 moon_dir = normalize(atmosphere_moon_direction);
 	bool moonlit = atm_moonlit();
 	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
@@ -1011,8 +1020,9 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 			if (!far && d < cloud_handover_near_m) {
 				transmittance_front = transmittance_bg;
 			}
-			if (transmittance_sc < CLOUD_MIN_SCALED_TRANSMITTANCE
-					|| (coverage_only && transmittance_bg < CLOUD_COVERAGE_MIN_TRANSMITTANCE)) {
+			if ((transmittance_sc < CLOUD_MIN_SCALED_TRANSMITTANCE
+					&& !(sun_ray && transmittance_bg > CLOUD_SUN_MIN_TRANSMITTANCE))
+					|| (coverage_only && !sun_ray && transmittance_bg < CLOUD_COVERAGE_MIN_TRANSMITTANCE)) {
 				break;
 			}
 		}
@@ -1266,6 +1276,12 @@ void main() {
 	if (any(isnan(color)) || isnan(alpha)) {
 		color = vec3(0.0);
 		alpha = 0.0;
+	}
+	// The half-float store rounds toward zero here: an alpha of 1 - 1e-5 would come out as 1 - 2^-11 (4.9e-4 of the
+	// background, 29 on the scene scale for the Sun's disk, 120 times a lit ground, behind any thick cloud). Within half
+	// a spacing of 1 it is 1.
+	if (alpha > 1.0 - CLOUD_ALPHA_SNAP) {
+		alpha = 1.0;
 	}
 	imageStore(out_color, pixel, vec4(color, clamp(alpha, 0.0, 1.0)));
 	imageStore(out_depth, pixel, vec4(scene_m, cloud_m, 0.0, 0.0));

@@ -21,6 +21,8 @@ const PAD_TOP_LIFT_M := 0.03
 const VIEWPOINT_AIM_RAISE_DEG := 3.0
 ## The solar disk is drawn behind all scaled-space bodies (1.5e7 m) but in front of the stars (2.5e7 m).
 const SUN_RENDER_DISTANCE_M := 2.0e7
+## The linear limb darkening of shaders/sun.gdshader (u): the disk's mean radiance is (1 - u / 3) of its centre's.
+const SUN_LIMB_DARKENING := 0.6
 
 ## Focus targets selectable in the UI.
 const FOCUS_EARTH := "earth"
@@ -441,6 +443,15 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 
 
+## The Sun disc's central scene value: its physical radiance on the scene scale of a white Lambertian surface in full
+## Sun (Atmosphere.DAY_EXPOSURE = E / pi): L_disc = E / solid angle, so DAY_EXPOSURE x pi / (pi (R / AU)^2) = 1.5 x 46 200
+## = 6.9e4, over the disc's mean limb factor. The Sun seen through cloud then stays above the lit ground until the
+## direct beam falls to the ground's radiance (static clouds Task 9); sun.gdshader clamps it to the half-float range.
+static func sun_disc_scene_value() -> float:
+	var ratio := Atmosphere.ASTRONOMICAL_UNIT_M / SUN_RADIUS_M
+	return Atmosphere.DAY_EXPOSURE * ratio * ratio / (1.0 - SUN_LIMB_DARKENING / 3.0)
+
+
 func _place_sun(sun_from_camera_m: Vector3) -> void:
 	var distance := sun_from_camera_m.length()
 	var direction := Frames.to_render(sun_from_camera_m / distance)
@@ -532,6 +543,7 @@ func _setup_bodies(data_dir: String) -> void:
 	sphere.height = 2.0
 	var sun_material := ShaderMaterial.new()
 	sun_material.shader = load("res://shaders/sun.gdshader")
+	sun_material.set_shader_parameter("intensity", sun_disc_scene_value())
 	sun_disk.mesh = sphere
 	sun_disk.material_override = sun_material
 	sun_disk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

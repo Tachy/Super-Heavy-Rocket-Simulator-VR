@@ -63,6 +63,12 @@
 #      preset's divisor with the camera rolled; along each row the edge crosses, the final image's alpha changes
 #      monotonically by at most 0.35 per pixel (no stairs of a march pixel), and a second render is bit-identical
 #      (STARSIM_OUTLINE_ONLY=1 runs this section alone).
+#  13. (static clouds Task 9) the Sun through slabs of vertical tau 2 / 5 / 10 / 20 seen from below (the disk drawn
+#      by sun.gdshader, HDR): the disk's radiance (the centre, less the same view without the disk: the cloud's glow)
+#      = the cloudless disk x the core's direct transmittance exp(-tau / mu) within 5 %, brighter than the cloudless
+#      terrain while its expected radiance is, the aureole (the Sun's scattered radiance beside the disk) at least
+#      twice that 60 deg away; the near march, and the far tier alone for tau 5 / 20 (STARSIM_SUN_ONLY=1 runs this
+#      section alone).
 # The other sections run with the light cache on and the deterministic march (the game's path; 10 with the jittered
 # one: it measures against independent jitter's noise). Detail
 # levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
@@ -100,7 +106,7 @@ const CLIMB_STEP_LIMIT := 0.055
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 138
+const EXPECTED_SAMPLES := 138 + SUN_SAMPLES
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -197,6 +203,32 @@ const OUTLINE_CLEAR := 0.05
 const OUTLINE_COVERED := 0.95
 const OUTLINE_MIN_ROWS := 8
 
+## Section 13 (static clouds Task 9): the Sun 55 deg up (mu 0.819) through slabs of these vertical optical depths.
+const SUN_TAUS := [2.0, 5.0, 10.0, 20.0]
+const SUN_FAR_TAUS := [5.0, 20.0]  ## also with the far tier alone
+const SUN_ELEVATION_DEG := 55.0
+const SUN_FOV_DEG := 1.0  ## the disk (0.53 deg) fills half of the view's width
+const SUN_RENDER_DISTANCE_M := 2.0e7  ## as World.SUN_RENDER_DISTANCE_M
+const SUN_RADIUS_M := 695700000.0
+const SUN_AUREOLE_PIXELS := 14  ## the pixel beside the disk (0.43 deg from the centre; the disk's radius is 0.27)
+const SUN_AUREOLE_AWAY_DEG := 60.0
+const SUN_AUREOLE_RATIO := 2.0  ## [E] the forward peak of the phase function against a view 60 deg off the Sun
+const SUN_DISK_TOLERANCE := 0.05
+const SUN_OFFSET_DEG := 0.0  ## the disk is measured this far (azimuth) beside the Sun (0: at it, as the eye sees)
+## [E] The disk's part under the cloud image's alpha resolution: 1 - T is stored as a half float, spacing 2^-11 = 4.9e-4
+## near 1, so T below ~2.4e-4 is lost (the disk x T then is 0 or a multiple of 4.9e-4 of the disk).
+const SUN_DISK_FLOOR := 4.9e-4
+## [E] The march's slant optical depth against the core's (the slab's shape octaves vary the depth along a ray).
+const SUN_TAU_TOLERANCE := 0.08
+const SUN_TAU_MIN_T := 1.0e-6
+## [E] The cloud image's alpha is a half float (spacing 2^-11 below 1; the pass snaps what is within 2^-12 of 1 to 1): the
+## direct beam below this is lost to it (known limit: the disk vanishes at a slant tau of ~8.3, vertical ~6.8 at mu 0.82,
+## where it would still outshine the terrain up to a slant tau of ~11).
+const SUN_ALPHA_FLOOR := 2.44140625e-4
+## Checks of section 13: the cloudless disk 1; per near tau the disk 1, the march's tau 1 (not tau 20: beyond the half
+## floats of the debug output) and the terrain 1; the aureole 1; per far tau (5, 20) the disk 1 and the march's tau 1 (5).
+const SUN_SAMPLES := 1 + (4 + 3 + 4) + 1 + (2 + 1)
+
 ## Section 9: a broken layer (cf SILHOUETTE_FRACTION, the thick slab's water: opaque cumuli) seen from
 ## SILHOUETTE_DISTANCE_M above its top, straight down. The reference: the jittered march with fine steps of
 ## SILHOUETTE_REFERENCE_FINE of the distance (~12 m: the cumulus' rim) and SILHOUETTE_REFERENCE_STEPS coarse ones (the
@@ -223,6 +255,7 @@ var _samples := 0
 var _files: Array[String] = []
 var _terrain_parent := Node3D.new()  ## Earth-fixed frame of the terrain quad (section 6)
 var _terrain_quad := MeshInstance3D.new()
+var _sun_disk := MeshInstance3D.new()  ## section 13: the Sun as the game draws it (sun.gdshader)
 var _terrain_material := ShaderMaterial.new()
 var _probe_viewport := SubViewport.new()  ## section 7: the receivers' probe
 var _probe_material := ShaderMaterial.new()
@@ -287,6 +320,14 @@ func _run() -> void:
 		for f in _files:
 			DirAccess.remove_absolute(f)
 		print("cloud_check (light cache only): %d failures" % _failures)
+		quit(1 if _failures > 0 else 0)
+		return
+	if OS.get_environment("STARSIM_SUN_ONLY") != "":  # diagnostics: section 13 alone (no sample count)
+		await _sun_through_samples()
+		_clouds.shutdown()
+		for f in _files:
+			DirAccess.remove_absolute(f)
+		print("cloud_check (Sun only): %d failures" % _failures)
 		quit(1 if _failures > 0 else 0)
 		return
 	var thin := _slab("thin", SLAB_BOTTOM_M, SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0)
@@ -398,6 +439,8 @@ func _run() -> void:
 	await _outline_samples()
 	# 12. The flat cloud base at the lifting condensation level.
 	await _lcl_base_samples()
+	# 13. The Sun through the decks.
+	await _sun_through_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -458,6 +501,17 @@ func _setup_scene() -> void:
 	_terrain_parent.add_child(_terrain_quad)
 	_terrain_parent.visible = false
 	_viewport.add_child(_terrain_parent)
+	var sphere := SphereMesh.new()
+	sphere.radius = 1.0
+	sphere.height = 2.0
+	var sun_material := ShaderMaterial.new()
+	sun_material.shader = load("res://shaders/sun.gdshader")
+	sun_material.set_shader_parameter("intensity", World.sun_disc_scene_value())
+	_sun_disk.mesh = sphere
+	_sun_disk.material_override = sun_material
+	_sun_disk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_sun_disk.visible = false
+	_viewport.add_child(_sun_disk)
 
 
 ## Writes a slab snapshot, returns its loaded dictionary (the file is removed at the end).
@@ -590,7 +644,7 @@ func _coverage_sample(fraction: float) -> void:
 
 
 func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode: int, block_radius := 0,
-		roll_deg := 0.0) -> Vector3:
+		roll_deg := 0.0, pixel_offset := Vector2i.ZERO) -> Vector3:
 	var camera_gcrf := _earth_to_gcrf * camera_itrf_m
 	var sun_gcrf: Vector3 = _earth_to_gcrf * sun_itrf * AU_M
 	_atmosphere.update(camera_gcrf, Vector3.ZERO, _earth_to_gcrf, sun_gcrf, 0.0, 1.0)
@@ -612,7 +666,8 @@ func _render(camera_itrf_m: Vector3, view_itrf: Vector3, sun_itrf: Vector3, mode
 	var sum := Vector3.ZERO
 	for dy in range(-block_radius, block_radius + 1):
 		for dx in range(-block_radius, block_radius + 1):
-			var c := image.get_pixel(image.get_width() / 2 + dx, image.get_height() / 2 + dy)
+			var c := image.get_pixel(image.get_width() / 2 + dx + pixel_offset.x,
+					image.get_height() / 2 + dy + pixel_offset.y)
 			sum += Vector3(c.r, c.g, c.b)
 	return sum / float((2 * block_radius + 1) * (2 * block_radius + 1))
 
@@ -1774,3 +1829,95 @@ func _check(label: String, ok: bool, detail: String) -> void:
 func _fail_and_quit(message: String) -> void:
 	print("cloud_check: FAIL - " + message)
 	quit(1)
+
+
+## Section 13 (static clouds Task 9): the Sun's disk (sun.gdshader, HDR) seen from 10 m up through slabs of vertical tau
+## SUN_TAUS, the Sun SUN_ELEVATION_DEG up. The composite is linear in the scene behind the clouds, so the disk's part
+## of a pixel is the render with the disk less the render without it, against the cloudless disk x the core's direct
+## transmittance of that ray (exp(-tau / mu) of the slab). The disk is measured SUN_OFFSET_DEG beside the Sun: at the
+## Sun itself the clouds' forward peak (the phase function's HG part, g 0.995) is 2-5 orders brighter than the disk
+## drawn at the display brightness 30 and the half-float image cannot resolve the difference (printed: the glow on the
+## disk). The near march, and the far tier alone for SUN_FAR_TAUS.
+func _sun_through_samples() -> void:
+	var camera := _point(10.0)
+	var sun := _local_direction(SUN_ELEVATION_DEG, 135.0)
+	var disk_direction := _local_direction(SUN_ELEVATION_DEG, 135.0 + SUN_OFFSET_DEG)
+	var mu := disk_direction.dot(_local_direction(90.0, 0.0))
+	var up := _local_direction(90.0, 0.0)
+	# The cloudless terrain's radiance (the same Sun, 300 m ahead): what the disk must outshine.
+	_clouds.show_now({}, {}, 0.0)
+	_core.weather_set_active("", "", 0.0)
+	var point := HeightSource.geodetic_to_fixed(LAT_DEG + rad_to_deg(GROUND_DISTANCE_M / 6.371e6), LON_DEG, 0.0)
+	var terrain := _luminance(await _render_ground(camera, point, up, sun, 0, _terrain_material))
+	# The disk as the game places it: at SUN_RENDER_DISTANCE_M, its apparent size.
+	_sun_disk.scale = Vector3.ONE * SUN_RADIUS_M * SUN_RENDER_DISTANCE_M / AU_M
+	_sun_disk.visible = true
+	_camera.fov = SUN_FOV_DEG
+	var aureole := Vector2i(SUN_AUREOLE_PIXELS, 0)
+	_sun_disk.position = Frames.to_render(_earth_to_gcrf * disk_direction) * SUN_RENDER_DISTANCE_M
+	var clear_disk := _luminance(await _render(camera, disk_direction, sun, 0, BLOCK_RADIUS))
+	var clear_beside := _luminance(await _render(camera, disk_direction, sun, 0, BLOCK_RADIUS, 0.0, aureole))
+	_check("Sun: the cloudless disk is unclipped HDR and outshines its surroundings",
+			clear_disk > 10.0 * clear_beside and clear_disk > terrain and clear_disk < 6.0e4,
+			"disk %.1f beside %.4f terrain %.4f" % [clear_disk, clear_beside, terrain])
+	var preset: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.DESKTOP]
+	for far_only in [false, true]:
+		for nominal_tau: float in (SUN_FAR_TAUS if far_only else SUN_TAUS):
+			var slab := _slab("sun_%d" % int(nominal_tau), SLAB_BOTTOM_M, SLAB_TOP_M,
+					nominal_tau * THIN_LIQUID_KG_M3, 1.0)
+			_show(slab)
+			if far_only:  # the far tier alone (render_check --handover=0,0)
+				ShaderGlobals.set_value(&"cloud_handover_near_m", 0.0)
+				ShaderGlobals.set_value(&"cloud_handover_far_m", 0.0)
+			await _settle_cache(camera, disk_direction, sun, 0)  # the light cache complete: the same glow in both
+			var t_cpu := float(_core.weather_cloud_light(camera, disk_direction)["sun_transmittance"])
+			_sun_disk.visible = false
+			var glow := _luminance(await _render(camera, disk_direction, sun, 0, BLOCK_RADIUS))
+			_sun_disk.visible = true
+			var through := _luminance(await _render(camera, disk_direction, sun, 0, BLOCK_RADIUS)) - glow
+			var got := through / clear_disk
+			_sun_disk.visible = false
+			var t_grid := (await _render(camera, disk_direction, sun, 1, BLOCK_RADIUS)).x  # the grid mean's T
+			var t_march := (await _render(camera, disk_direction, sun, 4, BLOCK_RADIUS)).x  # the shapes' T
+			_sun_disk.visible = true
+			var label := "%s tau %.0f" % ["far tier" if far_only else "near march", nominal_tau]
+			_check("Sun disk through " + label + " = the cloud pass's transmittance",
+					absf(got - t_march) <= maxf(SUN_DISK_TOLERANCE * t_march, SUN_DISK_FLOOR),
+					"disk/clear %.5f march %.5f; the cloud's own light there %.3f x clear disk"
+					% [got, t_march, glow / clear_disk])
+			# The march against the core's exp(-tau / mu): the slab's low shape octaves vary the depth along a ray.
+			var tau_slant := -log(t_cpu)
+			var tau_march := -log(maxf(t_grid, 1.0e-30))
+			print("    march slant tau %.3f, core %.3f (exp(-%.0f/%.3f) = %.3f)" % [tau_march, tau_slant, nominal_tau, mu,
+					nominal_tau / mu])
+			if t_cpu > SUN_TAU_MIN_T:  # (the colour image of the debug output holds half floats: no T below 6e-8)
+				_check("Sun transmittance of the march through " + label,
+						absf(tau_march - tau_slant) <= SUN_TAU_TOLERANCE * tau_slant,
+						"T grid mean %.5f shapes %.5f core %.5f" % [t_grid, t_march, t_cpu])
+			else:
+				print("    (beyond the debug output's half floats: T core ", String.num_scientific(t_cpu), ")")
+			if not far_only:
+				_check("Sun disk through %s outshines the terrain while expected to" % label,
+						clear_disk * t_cpu < terrain or t_cpu < SUN_ALPHA_FLOOR or through > terrain,
+						"disk %.4f expected %.4f terrain %.4f" % [through, clear_disk * t_cpu, terrain])
+			if not far_only:  # at the Sun itself: what the eye sees (information)
+				_sun_disk.position = Frames.to_render(_earth_to_gcrf * sun) * SUN_RENDER_DISTANCE_M
+				_sun_disk.visible = false
+				var glow_at_sun := _luminance(await _render(camera, sun, sun, 0, BLOCK_RADIUS))
+				print("    at the Sun: the cloud's glow %.3f x the cloudless disk (disk x T %.4f)" % [
+						glow_at_sun / clear_disk, t_cpu])
+				_sun_disk.position = Frames.to_render(_earth_to_gcrf * disk_direction) * SUN_RENDER_DISTANCE_M
+				_sun_disk.visible = true
+			if not far_only and nominal_tau == SUN_TAUS[1]:
+				var side := _local_direction(SUN_ELEVATION_DEG, 135.0 + SUN_AUREOLE_AWAY_DEG)
+				var near_sun := _luminance(await _render(camera, sun, sun, 2, BLOCK_RADIUS, 0.0, aureole))
+				var away := _luminance(await _render(camera, side, sun, 2, BLOCK_RADIUS))
+				_check("Sun aureole: scattered radiance 0.43 deg from the disk vs %.0f deg away" % SUN_AUREOLE_AWAY_DEG,
+						near_sun >= SUN_AUREOLE_RATIO * away, "%.4f vs %.4f (%.1fx)" % [near_sun, away,
+						near_sun / maxf(away, 1e-9)])
+			if far_only:  # the preset's hand-over again
+				var band: Vector2 = preset["handover_m"]
+				ShaderGlobals.set_value(&"cloud_handover_near_m", band.x)
+				ShaderGlobals.set_value(&"cloud_handover_far_m", band.y)
+	_sun_disk.visible = false
+	_camera.fov = 10.0

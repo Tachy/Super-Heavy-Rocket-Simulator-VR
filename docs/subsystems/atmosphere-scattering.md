@@ -59,7 +59,8 @@ vehicles still fly through `Us76Atmosphere`).
   model's sky along the reflected ray; a ray reflected below the horizontal takes its upward mirror [E]): Sun
   transmitted to the point x cos + the sky irradiance on the normal, then transmittance + in-scattering to the camera;
   city lights x T. Moon, Sun disc: x T + the in-scattered sky. The Sun disc's colour is the model's TOA solar
-  spectrum (`atmosphere_sun_illuminance_lux`), normalised to unit luminance. Vehicles, tower, pad, drone ship:
+  spectrum (`atmosphere_sun_illuminance_lux`), normalised to unit luminance. Its brightness is physical on the scene scale
+  (`World.sun_disc_scene_value`, 6.9e4: `weather-clouds.md`, the Sun through cloud). Vehicles, tower, pad, drone ship:
   `lit_aerial.gdshader` (`LitAerial.material`): Godot's
   PBR plus aerial perspective through FOG (per-channel T split: t = max(T), FOG.a = 1 - t, FOG.rgb = S / (1 - t), and
   T / t on albedo and emission; only the dielectric specular takes the scalar); the tower lattice through `atm_fog`.

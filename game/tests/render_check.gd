@@ -32,10 +32,17 @@
 #          CloudLayer.deterministic_march off).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
+# Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
+#          optical depth (liquid = tau / 150 000 kg/m^3: beta = 150 LWC) and the view aimed at the Sun (static clouds Task 9).
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
 const FRAMES_TO_SETTLE := 6
+## --sun_through_deck: the slab's heights (m) and the extinction per liquid water content of the renderer's droplets
+## (beta = 3 LWC / (2 rho_w r_e) = 150 LWC [1/m], r_e 10 um; as cloud_check.gd THIN_LIQUID_KG_M3).
+const SUN_DECK_BOTTOM_M := 1000
+const SUN_DECK_TOP_M := 2000
+const SUN_DECK_EXTINCTION_PER_LWC := 150.0
 ## Upper bound on the wait for the streamed terrain (frames).
 const TERRAIN_MAX_FRAMES := 6000
 ## The flight session's fixed tick (200 Hz, sim::FlightSession): --t_plus aims a tick late (the grid need not hit T-0).
@@ -60,6 +67,10 @@ func _initialize() -> void:
 	for arg in OS.get_cmdline_user_args():
 		var parts := arg.trim_prefix("--").split("=", true, 1)
 		_args[parts[0]] = parts[1] if parts.size() > 1 else ""
+	if _args.has("sun_through_deck"):
+		_args["weather"] = "slab:%d,%d,%s,1" % [SUN_DECK_BOTTOM_M, SUN_DECK_TOP_M,
+				float(_args["sun_through_deck"]) / SUN_DECK_EXTINCTION_PER_LWC / (SUN_DECK_TOP_M - SUN_DECK_BOTTOM_M)]
+		_args["look_at_sun"] = ""
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	_start_s = Time.get_ticks_msec() / 1000.0
