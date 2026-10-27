@@ -96,7 +96,8 @@ external/godot/bin/godot.windows.editor.double.x86_64.console.exe --headless --p
   fix the cause when tests go wrong.
 - ctest runs cases as parallel processes: tests must not share temp files or directories (unique names).
 - Visual checks need a GPU (no `--headless`): `res://tests/render_check.gd` (options in `docs/setup.md`); read the PNG.
-  During visual work send progress PNGs to the user.
+  During visual work send progress PNGs to the user. Every test image / screenshot (renders, crops, diagnostics) goes
+  to `screenshots/<topic>/` (git-ignored, user 2026-10-27) - never into `tmp/`, `.superpowers/` or the repo.
 - After every vehicle config change: `python tools/vehicle_report.py <vehicle-id> [--payload-kg N]`.
 
 ## Data licensing

@@ -11,6 +11,9 @@
 
 # Scratch files of work sessions (logs, before / after images, raw downloads)
 /tmp/
+
+# Test images and screenshots (all renders, before / after images, diagnostics) - never committed
+/screenshots/
 *.obj
 *.lib
 *.exp
