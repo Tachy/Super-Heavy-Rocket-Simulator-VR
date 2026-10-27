@@ -21,7 +21,8 @@
 # clouds' shadows on the air (static clouds Task 9b) integrate their loss to the scene, so the sea's frame-to-frame
 # depth changes move it there; the rows from HORIZON_IDENTITY_MARGIN above the horizon down are left out.
 # Needs a GPU (no --headless): godot --xr-mode off --path game --script res://tests/cloud_grain_check.gd
-# [-- --only=cape] (one view) [--save=<dir>] (the cloud images as EXR). Exit code 1 on failure.
+# [-- --only=cape] (one view) [--save=<dir>] (the cloud images as EXR) [--quality=desktop] (the desktop preset instead
+# of the VR one, Task 10). Exit code 1 on failure.
 extends SceneTree
 
 const UTC := "2024-06-15T21:00:00"
@@ -76,6 +77,7 @@ var _world: World
 var _failures := 0
 var _only := ""
 var _save_dir := ""  ## --save=<dir>: the views' cloud images (EXR)
+var _quality := CloudLayer.Quality.VR  ## --quality=desktop
 
 
 func _initialize() -> void:
@@ -84,6 +86,8 @@ func _initialize() -> void:
 			_only = arg.trim_prefix("--only=")
 		elif arg.begins_with("--save="):
 			_save_dir = arg.trim_prefix("--save=")
+		elif arg == "--quality=desktop":
+			_quality = CloudLayer.Quality.DESKTOP
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	_run.call_deferred()
@@ -94,7 +98,7 @@ func _run() -> void:
 	_world = _main.get_node("World")
 	_world.clock.warp = 0.0
 	_world.weather.enabled = false
-	_world.clouds.quality = CloudLayer.Quality.VR
+	_world.clouds.quality = _quality
 	var unix := Time.get_unix_time_from_datetime_string(UTC)
 	var file: String = _world.weather.analog_file(unix / 3600.0 + WeatherService.HOURS_1900_TO_1970)
 	if file == "":
@@ -110,9 +114,10 @@ func _run() -> void:
 	_world.clock.set_time(_world.core.utc_to_tdb_s(UTC))
 	_world.atmosphere.eye_adaptation_enabled = false
 	_world.set_focus(World.FOCUS_EARTH)
-	var preset: Dictionary = CloudLayer.PRESETS[CloudLayer.Quality.VR]
+	var preset: Dictionary = CloudLayer.PRESETS[_quality]
 	var divisor := int(preset["divisor"])
-	print("cloud_grain_check: %s, VR preset (steps %d / %d, divisor %d), reference x%d" % [file, preset["steps"],
+	print("cloud_grain_check: %s, %s preset (steps %d / %d, divisor %d), reference x%d" % [file,
+			"desktop" if _quality == CloudLayer.Quality.DESKTOP else "VR", preset["steps"],
 			preset["max_steps"], divisor, REFERENCE_STEP_FACTOR])
 	for view: Dictionary in VIEWS:
 		if _only != "" and view["name"] != _only:

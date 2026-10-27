@@ -25,7 +25,7 @@
 #      of the CPU within 5 % (the broken layer as independent columns, cloud_optics.hpp); with the game's map (the
 #      shapes) under the slabs of cf 1 the ground's total light vs the vehicle's CPU light (grid mean) at the same spot
 #      within 10 % (broken: reported - the spot is in a gap or under a cumulus, the CPU's the cell's mean); with weather off every pixel of land and sea bit-identical to the
-#      shader without its CLOUD_LIGHT blocks.
+#      shader without its CLOUD_LIGHT blocks (STARSIM_GROUND_ONLY=1 runs this section alone).
 #   7. (fix round 1) through cloud_light_probe.gdshader (the surfaces' cloud-light functions at receivers on annuli
 #      around the camera, no terrain geometry), the means over eight independent sites (shape-noise realisations):
 #      the hand-overs near map -> far map (9-11 km: annuli at 8 / 10 / 12 km) and far map -> the slanted column
@@ -70,7 +70,11 @@
 #      (exactly 0 where that is below the half-float store, and then physically too) and at or above exp(-tau / mu)
 #      (the plane-parallel bias of the drawn inhomogeneity, Cahalan et al. 1994), brighter than the cloudless terrain
 #      while its expected radiance is, the aureole (the Sun's scattered radiance beside the disk) at least 100 x that
-#      60 deg away; the near march, and the far tier alone for tau 5 / 20 (STARSIM_SUN_ONLY=1 runs this alone).
+#      60 deg away; the near march, and the far tier alone for tau 5 / 20; the shipped analog June weather's cumulus
+#      at Starbase (Task 10, a realistic body: gaps and cores), the Sun 45 deg up at eight azimuths: each disk = the
+#      cloud pass's transmittance (a single ray through broken cloud is a gap's 1 or a core's ~0, so exp(-tau / mu) is
+#      no bound per ray), the mean over the azimuths at or above the core's grid-mean transmittance (STARSIM_SUN_ONLY=1
+#      runs this alone).
 #  14. (static clouds Task 9b) the backlit slab (tau 10 / 30, Sun zenith 75 / 45 deg) seen from below: the
 #      transmitted radiance (debug output 2, bin means) vs the Monte Carlo fixture cloud_slab_transmitted_mc.csv within
 #      7 % (the light cache filled first); the clouds' shadows
@@ -247,11 +251,29 @@ const SUN_T_STORE_MIN := 2.98023224e-8
 ## [E] The march's slant optical depth against the core's (the slab's shape octaves vary the depth along a ray).
 const SUN_TAU_TOLERANCE := 0.08
 const SUN_TAU_MIN_T := 1.0e-6
-## Checks of section 13: the cloudless disk 3 (outshines, clip at 55 deg, unclipped at 20 deg); per near tau the disk 2
+## Section 13's realistic cumulus body (Task 10): the shipped analog weather of June at SUN_CU_SITE (Starbase, where the
+## cumulus fields of the views are), the Sun SUN_ELEVATION_DEG up at these azimuths from the camera on the ground. A
+## single ray through broken cumulus is a gap's 1 or a core's ~0, so exp(-tau / mu) bounds no single disk: each disk
+## follows the cloud pass's transmittance (a pixel on a core's edge is a coverage mix: within the range of the
+## transmittance at the centre and SUN_CU_NEIGHBOUR_PIXELS away in four directions), and over many directions the
+## mean transmittance of the shapes is at or above the core's grid-mean one (Jensen; the slabs' bias band, Cahalan et
+## al. 1994) within the statistical error of the sample.
+const SUN_CU_SITE := Vector2(25.997, -97.157)  ## latitude, longitude (deg)
+const SUN_CU_MONTH := 6
+const SUN_CU_AZIMUTHS_DEG := [0.0, 45.0, 90.0, 135.0, 180.0, 225.0, 270.0, 315.0]
+const SUN_CU_NEIGHBOUR_PIXELS := 4  ## of the 1 deg view's 0.53 deg disk (~half its radius)
+const SUN_CU_ENSEMBLE_ELEVATIONS_DEG := [35.0, 45.0, 55.0, 65.0, 75.0]
+const SUN_CU_ENSEMBLE_AZIMUTH_STEP_DEG := 30.0
+## [E] The ensemble's allowance below the grid mean: this many standard errors of the mean of N Bernoulli-like
+## transmittances (gap 1, core 0), relative to the grid mean m: sqrt((1 - m) / (m N)); neighbouring directions share
+## clouds, so N is the nominal count (conservative the other way: the real error is larger, the bound a warning
+## against a disk that is far too dark, not a fit).
+const SUN_CU_ENSEMBLE_SIGMAS := 3.0
+## Checks of section 13: the cloudless disk 3 (outshines, clip at 55 deg, unclipped at 13 deg); per near tau the disk 2
 ## (= the march's T or 0 below the store; >= exp(-tau / mu) or that below the store), the march's tau 1 (not tau 20:
 ## beyond the half floats of the debug output) and the terrain 1; the aureole 1; per far tau (5, 20) the disk 2 and the
-## march's tau 1 (5).
-const SUN_SAMPLES := 3 + (7 * 2 + 6 + 7) + 1 + (2 * 2 + 1)
+## march's tau 1 (5); the analog cumulus: per azimuth the disk 1, the gaps and cores 1, the ensemble mean 1.
+const SUN_SAMPLES := 3 + (7 * 2 + 6 + 7) + 1 + (2 * 2 + 1) + (8 + 2)
 
 ## Section 9: a broken layer (cf SILHOUETTE_FRACTION, the thick slab's water: opaque cumuli) seen from
 ## SILHOUETTE_DISTANCE_M above its top, straight down. The reference: the jittered march with fine steps of
@@ -430,6 +452,14 @@ func _run() -> void:
 		for f in _files:
 			DirAccess.remove_absolute(f)
 		print("cloud_check (Sun only): %d failures" % _failures)
+		quit(1 if _failures > 0 else 0)
+		return
+	if OS.get_environment("STARSIM_GROUND_ONLY") != "":  # diagnostics: section 6 alone (no sample count)
+		await _ground_light_samples()
+		_clouds.shutdown()
+		for f in _files:
+			DirAccess.remove_absolute(f)
+		print("cloud_check (light on the ground only): %d failures" % _failures)
 		quit(1 if _failures > 0 else 0)
 		return
 	var thin := _slab("thin", SLAB_BOTTOM_M, SLAB_TOP_M, THIN_LIQUID_KG_M3, 1.0)
@@ -2048,8 +2078,86 @@ func _sun_through_samples() -> void:
 				var band: Vector2 = preset["handover_m"]
 				ShaderGlobals.set_value(&"cloud_handover_near_m", band.x)
 				ShaderGlobals.set_value(&"cloud_handover_far_m", band.y)
+	await _sun_through_cumulus_samples(clear_disk)
 	_sun_disk.visible = false
 	_camera.fov = 10.0
+
+
+## Section 13's realistic cumulus body: see SUN_CU_AZIMUTHS_DEG. The camera and the Sun are at the analog site.
+func _sun_through_cumulus_samples(clear_disk: float) -> void:
+	var file := _analog_june_file()
+	if file == "":
+		_fail_and_quit("Sun through cumulus: no analog snapshot for month %d" % SUN_CU_MONTH)
+		return
+	var snapshot: Dictionary = _core.weather_load_snapshot(file)
+	snapshot["file"] = file
+	_show(snapshot)
+	var camera := HeightSource.geodetic_to_fixed(SUN_CU_SITE.x, SUN_CU_SITE.y, 10.0)
+	var gaps := 0
+	var cores := 0
+	var offsets := [Vector2i(SUN_CU_NEIGHBOUR_PIXELS, 0), Vector2i(-SUN_CU_NEIGHBOUR_PIXELS, 0),
+			Vector2i(0, SUN_CU_NEIGHBOUR_PIXELS), Vector2i(0, -SUN_CU_NEIGHBOUR_PIXELS)]
+	for azimuth: float in SUN_CU_AZIMUTHS_DEG:
+		var sun := _local_direction(SUN_ELEVATION_DEG, azimuth, SUN_CU_SITE.x, SUN_CU_SITE.y)
+		_sun_disk.position = Frames.to_render(_earth_to_gcrf * sun) * SUN_RENDER_DISTANCE_M
+		await _settle_cache(camera, sun, sun, 0)
+		_sun_disk.visible = false
+		await _render(camera, sun, sun, 0, BLOCK_RADIUS)  # the cloud's own light has settled (the cache's last frames)
+		var glow := _luminance(await _render(camera, sun, sun, 0, BLOCK_RADIUS))
+		_sun_disk.visible = true
+		var with_disk := _luminance(await _render(camera, sun, sun, 0, BLOCK_RADIUS))
+		_sun_disk.visible = false
+		var t_march := (await _render(camera, sun, sun, 4, BLOCK_RADIUS)).x
+		var t_low := t_march
+		var t_high := t_march
+		for offset: Vector2i in offsets:
+			var t := (await _render(camera, sun, sun, 4, BLOCK_RADIUS, 0.0, offset)).x
+			t_low = minf(t_low, t)
+			t_high = maxf(t_high, t)
+		var got := (with_disk - glow) / clear_disk
+		var resolution := (glow + with_disk) * SUN_HALF_RESOLUTION / clear_disk
+		gaps += 1 if t_low > 0.5 else 0
+		cores += 1 if t_high < 0.05 else 0
+		_check("Sun disk through the analog cumulus %.0f deg azimuth = the cloud pass's transmittance" % azimuth,
+				got >= (1.0 - SUN_DISK_TOLERANCE) * t_low - resolution
+				and got <= (1.0 + SUN_DISK_TOLERANCE) * t_high + resolution,
+				"disk/clear %s, march T %s (%s - %s over %d px), resolution %s" % [String.num_scientific(got),
+				String.num_scientific(t_march), String.num_scientific(t_low), String.num_scientific(t_high),
+				SUN_CU_NEIGHBOUR_PIXELS, String.num_scientific(resolution)])
+	_check("Sun through the analog cumulus: the body has gaps and cores in view of the Sun", gaps > 0 and cores > 0,
+			"%d disks in gaps (T > 0.5 over %d px), %d behind cores (T < 0.05) of %d" % [gaps,
+			SUN_CU_NEIGHBOUR_PIXELS, cores, SUN_CU_AZIMUTHS_DEG.size()])
+	# The mean over many directions (the shapes' T, debug output 4; no light involved: no cache settling).
+	var sum_march := 0.0
+	var sum_core := 0.0
+	var n := 0
+	for elevation: float in SUN_CU_ENSEMBLE_ELEVATIONS_DEG:
+		for k in range(int(360.0 / SUN_CU_ENSEMBLE_AZIMUTH_STEP_DEG)):
+			var sun := _local_direction(elevation, k * SUN_CU_ENSEMBLE_AZIMUTH_STEP_DEG, SUN_CU_SITE.x, SUN_CU_SITE.y)
+			sum_march += (await _render(camera, sun, sun, 4, BLOCK_RADIUS)).x
+			sum_core += float(_core.weather_cloud_light(camera, sun)["sun_transmittance"])
+			n += 1
+	var mean_march := sum_march / n
+	var mean_core := sum_core / n
+	var allowance := SUN_CU_ENSEMBLE_SIGMAS * sqrt((1.0 - mean_core) / (mean_core * n))
+	_check("Sun through the analog cumulus: the mean transmittance of the shapes at or above the core's grid mean",
+			mean_march >= (1.0 - SUN_DISK_TOLERANCE - allowance) * mean_core,
+			"mean shapes %.4f, mean grid %.4f (ratio %.3f, allowance %.3f) over %d directions" % [mean_march,
+			mean_core, mean_march / mean_core, allowance, n])
+
+
+## The shipped analog snapshot of SUN_CU_MONTH's 00 UTC slot (data/weather/analog/index.json), "" if there is none.
+func _analog_june_file() -> String:
+	var dir := Paths.data_dir().path_join("weather/analog")
+	var f := FileAccess.open(dir.path_join("index.json"), FileAccess.READ)
+	if f == null:
+		return ""
+	var parsed: Variant = JSON.parse_string(f.get_as_text())
+	f.close()
+	for entry: Dictionary in (parsed.get("entries", []) if parsed is Dictionary else []):
+		if int(entry["month"]) == SUN_CU_MONTH and int(entry["hour_utc"]) == 0:
+			return dir.path_join(String(entry["file"]))
+	return ""
 
 
 ## The cloudless disk's centre as sun.gdshader should draw it (unclamped): its physical value
