@@ -33,17 +33,20 @@ vehicles still fly through `Us76Atmosphere`).
   `multiple_scattering_tail` in `earth_optics.toml` (true; false truncates like Bruneton; part of the input hash; test:
   on in the shipped config and it changes the tables). 5 vs 7 orders with the tail: within 0.20 % (sky illuminance
   0.03 %).
-- **Tables and cache.** Transmittance 1024 x 1024, scattering (Rayleigh + all multiple orders) and single Mie 8 nu x 32
-  mu_s x 128 mu x 64 r, irradiance 64 x 16; mu_s_min = cos 120 deg (twilight to -18 deg for the star threshold).
-  Precompute 61-62 s on 24 threads (once per input hash), file `data/atmosphere/earth_atmosphere.bin` (83.9 MB: header
-  with magic, version, input hash, sizes and parameters, four float32 arrays, FNV-1a 64 checksum verified before
+- **Tables and cache.** Transmittance 1024 x 1024, scattering (Rayleigh + all multiple orders), single Mie and single
+  Rayleigh (static clouds Task 9b: the first order alone, for the cloud shadows on the air, `weather-clouds.md`) 8 nu x
+  32 mu_s x 128 mu x 64 r, irradiance 64 x 16; mu_s_min = cos 120 deg (twilight to -18 deg for the star threshold).
+  Precompute 61-62 s on 24 threads (once per input hash; `atmosphere_tables_code_version` 4), file
+  `data/atmosphere/earth_atmosphere.bin` (117.5 MB, format version 3: header with magic, version, input hash, sizes
+  and parameters, five float32 arrays, FNV-1a 64 checksum verified before
   parsing; temp name then rename; a damaged, stale or missing file is recomputed, a failed write still returns the
   tables). The input hash covers the config, the table sizes, the stored spectral / optics data and
   `atmosphere_tables_code_version`. CLI `build/core/atmosphere_tables.exe [--config] [--out]`; `tools/package.ps1` runs
   it, so installed games ship the cache. The game loads the cache on a worker (`StarsimCore.load_atmosphere`; first run
   computes and shows "Atmosphäre wird berechnet (einmalig, etwa eine Minute) ..." in the time panel). GPU formats:
-  transmittance RGBAF (grazing values ~1e-5 are half-float subnormals), scattering / Mie / irradiance RGBAH; ~50 MB
-  VRAM.
+  transmittance RGBAF (grazing values ~1e-5 are half-float subnormals), scattering / Mie / single Rayleigh /
+  irradiance RGBAH; ~66 MB VRAM. The single Rayleigh table is read only by the cloud pass (`atmosphere_single_rayleigh`
+  declared in `cloud_pass.gdshaderinc`, not in this include).
 - **Shader include** `game/shaders/atmosphere.gdshaderinc` (port of the CPU code, globals in project.godot
   `[shader_globals]` `atmosphere_*`): `atm_sky`, `atm_to_point*` (aerial perspective; camera-relative offsets for near
   points), `atm_sun_at` / `atm_sky_light` / `atm_sun_and_sky`, `atm_sky_to_far_object` (Moon, Sun), `atm_fog`

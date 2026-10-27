@@ -73,6 +73,9 @@ struct AtmosphereParameters {
 //    function, A = the red channel of the single Mie scattering (Bruneton's combined layout). Luminance units:
 //    radiance folded over the spectrum (W m^-2 sr^-1 per unit of the sRGB CMFs); x sky_radiance_to_luminance -> cd/m^2.
 //  single_mie: same layout, RGB = single Mie scattering without the phase function, A = 0.
+//  single_rayleigh: same layout, RGB = the single Rayleigh scattering alone (the scattering table's first order)
+//    without the phase function, A = 0: the part of the air light the Sun's direct beam scatters once, which cloud
+//    shadows on the air take away (static clouds Task 9b, cloud_pass.gdshaderinc).
 //  irradiance: irradiance_mu_s x irradiance_r, RGB = the sky (indirect) irradiance of a horizontal surface, orders
 //    1..N-1 of the scattered light plus the geometric tail (Bruneton's irradiance texture; zero for orders = 1),
 //    A = 0. The direct irradiance is a pass-internal delta table (see atmosphere_precompute.hpp), never stored here.
@@ -83,12 +86,13 @@ struct AtmosphereTables {
     std::vector<float> transmittance;
     std::vector<float> scattering;
     std::vector<float> single_mie;
+    std::vector<float> single_rayleigh;
     std::vector<float> irradiance;
 };
 
 // Version of the precomputation code; part of the input hash. Bump on every code change that alters table contents
 // (the tabulated data is covered by atmosphere_spectral_data_checksum; code behind the optics functions is not).
-inline constexpr std::uint64_t atmosphere_tables_code_version = 3;
+inline constexpr std::uint64_t atmosphere_tables_code_version = 4;  // 4: single_rayleigh
 
 // The parameters of a configuration (radii, mu_s_min, luminance factors, solar irradiance).
 AtmosphereParameters atmosphere_parameters(const config::AtmosphereOpticsConfig& optics);

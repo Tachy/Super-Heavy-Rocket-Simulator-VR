@@ -92,9 +92,10 @@ public:
                                        const godot::PackedFloat64Array& longitudes_deg) const;
 
     // Atmosphere (M8): loads <cache_dir>/earth_atmosphere.bin or precomputes it (config_dir/atmosphere/earth_optics.toml)
-    // and keeps the lookups for the calls below. {ok, error, transmittance / scattering / single_mie / irradiance:
-    // PackedFloat32Array RGBA, *_size, parameters: Dictionary of the AtmosphereParameters fields}. Callable from a
-    // worker thread. Texel order (AtmosphereTables): 4 floats per texel, x fastest, then y, then z. transmittance:
+    // and keeps the lookups for the calls below. {ok, error, transmittance / scattering / single_mie /
+    // single_rayleigh / irradiance: PackedFloat32Array RGBA, *_size, parameters: Dictionary of the
+    // AtmosphereParameters fields}. Callable from a worker thread. Texel order (AtmosphereTables): 4 floats per
+    // texel, x fastest, then y, then z. transmittance:
     // x = mu, y = r (transmittance_size); irradiance: x = mu_s, y = r; scattering / single_mie: x packs (nu, mu_s) as
     // x = nu_index * scattering_mu_s + mu_s_index (mu_s fastest), y = mu, z = r (scattering_size = width, height, depth;
     // scattering_cells: Vector4i(nu, mu_s, mu, r) cell counts).

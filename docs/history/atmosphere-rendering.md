@@ -422,3 +422,10 @@ physics, nothing is tuned. Flight physics is untouched (the vehicles still fly t
   one Sun light (above); the totality approximation (above); night vision's limits (above); the 256 x 128 Earth mesh
   in scaled space sits up to ~0.6 km below the ellipsoid (-2 % in its aerial perspective).
 
+## atmosphere-scattering.md before static clouds Task 9b (2026-10-27): four tables
+
+- Tables and cache: "... file `data/atmosphere/earth_atmosphere.bin` (83.9 MB: header with magic, version, input hash,
+  sizes and parameters, four float32 arrays, FNV-1a 64 checksum verified before parsing ..." (format version 2,
+  `atmosphere_tables_code_version` 3); GPU "scattering / Mie / irradiance RGBAH; ~50 MB VRAM". The single Rayleigh
+  scattering was only inside the scattering table (with the multiple orders); Task 9b keeps it apart for the cloud
+  shadows on the air.

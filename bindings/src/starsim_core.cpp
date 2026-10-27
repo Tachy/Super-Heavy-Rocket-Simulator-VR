@@ -380,6 +380,7 @@ godot::Dictionary StarsimCore::load_atmosphere(const godot::String& config_dir, 
         result["transmittance_size"] = godot::Vector2i(s.transmittance_mu, s.transmittance_r);
         result["scattering"] = to_packed(tables->scattering);
         result["single_mie"] = to_packed(tables->single_mie);
+        result["single_rayleigh"] = to_packed(tables->single_rayleigh);
         result["scattering_size"] = godot::Vector3i(s.scattering_width(), s.scattering_height(), s.scattering_depth());
         result["scattering_cells"] = godot::Vector4i(s.scattering_nu, s.scattering_mu_s, s.scattering_mu, s.scattering_r);
         result["irradiance"] = to_packed(tables->irradiance);

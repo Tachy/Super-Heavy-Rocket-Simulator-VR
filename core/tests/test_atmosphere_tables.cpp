@@ -107,7 +107,12 @@ TEST_CASE("Single scattering matches a brute-force raymarch", "[atmosphere]") {
         for (int ch = 0; ch < 3; ++ch) {
             const double er = rel_error(tables.scattering[4 * i + ch], expected.rayleigh[ch]);
             const double em = rel_error(tables.single_mie[4 * i + ch], expected.mie[ch]);
-            max_error = std::max({max_error, er, em});
+            // The single Rayleigh table (static clouds Task 9b: the cloud shadows on the air) holds the same single
+            // Rayleigh scattering as the scattering table of a single-order precompute.
+            const double es = rel_error(tables.single_rayleigh[4 * i + ch], expected.rayleigh[ch]);
+            CHECK(tables.single_rayleigh[4 * i + ch] == Approx(tables.scattering[4 * i + ch]).epsilon(1e-6));
+            CHECK(es < 0.01);
+            max_error = std::max({max_error, er, em, es});
             INFO("ch " << ch << " rayleigh " << tables.scattering[4 * i + ch] << " ref " << expected.rayleigh[ch]
                        << " mie " << tables.single_mie[4 * i + ch] << " ref " << expected.mie[ch]);
             CHECK(er < 0.01);
@@ -241,6 +246,21 @@ TEST_CASE("The multiple-scattering tail is on in the shipped config and changes 
     const auto off = environment::precompute_atmosphere(without, sizes);
     CHECK(on.transmittance == off.transmittance);
     CHECK(on.single_mie == off.single_mie);
+    CHECK(on.single_rayleigh == off.single_rayleigh);
+    // The single Rayleigh part lies below the scattering table's single + multiple Rayleigh (spectrally; per sRGB
+    // channel the colour fold may move either way: compared summed over the table).
+    REQUIRE(on.single_rayleigh.size() == on.scattering.size());
+    double single_sum = 0.0;
+    double all_sum = 0.0;
+    for (std::size_t i = 0; i < on.scattering.size(); i += 4) {
+        for (int ch = 0; ch < 3; ++ch) {
+            single_sum += on.single_rayleigh[i + ch];
+            all_sum += on.scattering[i + ch];
+        }
+        CHECK(on.single_rayleigh[i + 3] == 0.0f);
+    }
+    CHECK(single_sum > 0.0);
+    CHECK(single_sum < all_sum);
     REQUIRE(on.scattering.size() == off.scattering.size());
     REQUIRE(on.irradiance.size() == off.irradiance.size());
     // The tail adds the higher orders' light (spectrally non-negative; per sRGB channel the fold through the colour
@@ -274,5 +294,5 @@ TEST_CASE("Input hash covers the spectral data", "[atmosphere]") {
     std::printf("atmosphere spectral data checksum: 0x%016llx, input hash 0x%016llx\n",
                 static_cast<unsigned long long>(checksum), static_cast<unsigned long long>(hash));
     CHECK(checksum == 0xe510c3f8544c5064ull);
-    CHECK(hash == 0x4d86e11bf588bf63ull);
+    CHECK(hash == 0xf3e29f19ccaa8d86ull);  // code version 4 (single_rayleigh)
 }

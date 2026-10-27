@@ -72,11 +72,11 @@ AtmosphereParameters parameters_from_fields(const std::array<double, parameter_c
     return p;
 }
 
-// The float counts of the four tables for the sizes (RGBA texels).
-std::array<std::uint64_t, 4> expected_counts(const AtmosphereTableSizes& s) {
+// The float counts of the five tables for the sizes (RGBA texels).
+std::array<std::uint64_t, 5> expected_counts(const AtmosphereTableSizes& s) {
     const std::uint64_t scattering = static_cast<std::uint64_t>(s.scattering_width()) * s.scattering_height() *
                                      s.scattering_depth() * 4;
-    return {static_cast<std::uint64_t>(s.transmittance_mu) * s.transmittance_r * 4, scattering, scattering,
+    return {static_cast<std::uint64_t>(s.transmittance_mu) * s.transmittance_r * 4, scattering, scattering, scattering,
             static_cast<std::uint64_t>(s.irradiance_mu_s) * s.irradiance_r * 4};
 }
 
@@ -84,13 +84,14 @@ std::array<std::uint64_t, 4> expected_counts(const AtmosphereTableSizes& s) {
 
 void write_atmosphere_tables(const std::filesystem::path& file, const AtmosphereTables& tables) {
     const auto counts = expected_counts(tables.sizes);
-    const std::array<const std::vector<float>*, 4> arrays{&tables.transmittance, &tables.scattering,
-                                                          &tables.single_mie, &tables.irradiance};
-    for (int i = 0; i < 4; ++i) {
+    const std::array<const std::vector<float>*, 5> arrays{&tables.transmittance, &tables.scattering,
+                                                          &tables.single_mie, &tables.single_rayleigh,
+                                                          &tables.irradiance};
+    for (int i = 0; i < 5; ++i) {
         if (arrays[i]->size() != counts[i]) throw std::invalid_argument("atmosphere tables do not match their sizes");
     }
     std::vector<char> bytes;
-    std::size_t total = 8 + 4 + 4 + 8 + 8 * 4 + parameter_count * 8 + 4 * 8 + 8;
+    std::size_t total = 8 + 4 + 4 + 8 + 8 * 4 + parameter_count * 8 + 5 * 8 + 8;
     for (const auto c : counts) total += static_cast<std::size_t>(c) * sizeof(float);
     bytes.reserve(total);
     bytes.insert(bytes.end(), magic, magic + sizeof(magic));
@@ -140,12 +141,13 @@ std::optional<AtmosphereTables> read_atmosphere_tables(const std::filesystem::pa
     tables.parameters = parameters_from_fields(parameter_values);
     tables.input_hash = hash;
     const auto expected = expected_counts(tables.sizes);
-    std::array<std::uint64_t, 4> counts{};
-    for (int i = 0; i < 4; ++i) {
+    std::array<std::uint64_t, 5> counts{};
+    for (int i = 0; i < 5; ++i) {
         if (!r.read(counts[i]) || counts[i] != expected[i]) return std::nullopt;
     }
     if (!r.read_array(tables.transmittance, counts[0]) || !r.read_array(tables.scattering, counts[1]) ||
-        !r.read_array(tables.single_mie, counts[2]) || !r.read_array(tables.irradiance, counts[3])) {
+        !r.read_array(tables.single_mie, counts[2]) || !r.read_array(tables.single_rayleigh, counts[3]) ||
+        !r.read_array(tables.irradiance, counts[4])) {
         return std::nullopt;
     }
     if (r.at != payload) return std::nullopt;

@@ -765,7 +765,8 @@ void parallel_for_rows(int rows, const std::function<void(int)>& body) {
 namespace {
 
 // Folds the pass's single scattering into the luminance tables (kComputeSingleScatteringShader with blending):
-// scattering.rgb += M x delta_rayleigh, scattering.a += (M x delta_mie).r, single_mie.rgb += M x delta_mie.
+// scattering.rgb += M x delta_rayleigh, scattering.a += (M x delta_mie).r, single_mie.rgb += M x delta_mie; and
+// single_rayleigh.rgb += M x delta_rayleigh (the first order kept apart: the cloud shadows on the air).
 void accumulate_single_scattering(const SpectralPassTables& pass, const Mat3& m, AtmosphereTables& tables) {
     const std::size_t texels = pass.delta_rayleigh.size() / 3;
     for (std::size_t i = 0; i < texels; ++i) {
@@ -779,6 +780,7 @@ void accumulate_single_scattering(const SpectralPassTables& pass, const Mat3& m,
         for (int c = 0; c < 3; ++c) {
             tables.scattering[4 * i + c] += static_cast<float>(lr[c]);
             tables.single_mie[4 * i + c] += static_cast<float>(lm[c]);
+            tables.single_rayleigh[4 * i + c] += static_cast<float>(lr[c]);
         }
         tables.scattering[4 * i + 3] += static_cast<float>(lm[0]);
     }
@@ -901,6 +903,7 @@ AtmosphereTables precompute_atmosphere(const config::AtmosphereOpticsConfig& opt
         static_cast<std::size_t>(sizes.scattering_width()) * sizes.scattering_height() * sizes.scattering_depth();
     tables.scattering.assign(scattering_texels * 4, 0.0f);
     tables.single_mie.assign(scattering_texels * 4, 0.0f);
+    tables.single_rayleigh.assign(scattering_texels * 4, 0.0f);
     tables.irradiance.assign(static_cast<std::size_t>(sizes.irradiance_mu_s) * sizes.irradiance_r * 4, 0.0f);
 
     const DensityProfileTable profile = make_density_profile_table(optics);

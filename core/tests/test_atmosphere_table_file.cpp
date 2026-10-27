@@ -78,7 +78,8 @@ bool same_tables(const environment::AtmosphereTables& a, const environment::Atmo
            p.sun_radiance_to_luminance == q.sun_radiance_to_luminance &&
            p.toa_solar_illuminance_lux == q.toa_solar_illuminance_lux && p.ground_albedo == q.ground_albedo &&
            a.transmittance == b.transmittance &&
-           a.scattering == b.scattering && a.single_mie == b.single_mie && a.irradiance == b.irradiance;
+           a.scattering == b.scattering && a.single_mie == b.single_mie &&
+           a.single_rayleigh == b.single_rayleigh && a.irradiance == b.irradiance;
 }
 
 }  // namespace
