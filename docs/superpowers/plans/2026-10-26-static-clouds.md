@@ -334,6 +334,12 @@ checks, docs `docs/subsystems/weather-clouds.md`, `weather-service.md`, `tools/d
 
 ### Task 9d: De-tile the cloud shape lookup (user 2026-10-27)
 
+**Status: deferred into Task 10** (user 2026-10-27: the cloud pass already costs ~44 ms per VR-proxy frame at the
+ground - no de-tiling on top of that; quality first only where the code can be optimised). Measured options (sdd
+task-9d-report.md, attempt on local ref `wip/t9d-detile`): blend +68-95 %, smooth warp A 0.33 +22 % / +7 % (metric
+passes, shapes stretched at 100 km), hard offsets +10-17 % with seams. Revisit in Task 10 after the march is optimised:
+the per-lookup overhead scales with the lookup count (hundreds to thousands per pixel), so cutting lookups cuts both.
+
 User (photo from altitude, a uniform broken field): the clouds form a regular "chessboard" lattice. Cause: the 32 km
 shape tile's periodicity, resolved once the pixel footprint reaches kilometres (weather-clouds.md, "Visible at
 kilometre footprints"). User OK to change the lookup; the shapes themselves stay (same noise, same statistics).
@@ -361,6 +367,7 @@ kilometre footprints"). User OK to change the lookup; the shapes themselves stay
   t9c / t9d cloud cost on the same camera (60 -> 40 fps seen in t9c_ground), the shape de-tiling cost (Task 9d).
   Physics item from Task 9c: low stratiform in-cloud tau by run depth on the analog set (re-measured, v7) - a
   < 1 km bin median > 40 opens a finding (overcast too dark); update the known-issues number.
+  Then revisit Task 9d (de-tiling) on the optimised march: warp or blend if the extra cost is then small.
 - [ ] **Step 2: Desktop re-baseline**: the render_check view set before / after, PNGs to the user; `cloud_check.gd` /
   `cloud_far_check.gd` reference values documented.
 - [ ] **Step 3: VR run with the user** (`Start-VR.cmd --perf-log`, weather on, pad -> decks -> orbit, `nvidia-smi`):
