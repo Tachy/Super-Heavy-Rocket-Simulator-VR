@@ -399,7 +399,8 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		var texture: RID = textures[i]
 		var name := String(s["id"])
 		if light_cache != null and name.begins_with("cloud_light_cache_"):  # _a<k> / _b<k>: slot 0 / 1 of cascade k
-			texture = light_cache.texture(0 if name[18] == "a" else 1, name.right(1).to_int())
+			var slot_cascade := name.trim_prefix("cloud_light_cache_")  # "a3": slot a (0) or b (1), cascade 3
+			texture = light_cache.texture(0 if slot_cascade.begins_with("a") else 1, slot_cascade.substr(1).to_int())
 		u.add_id(texture if texture.is_valid() else _fallback.get(s["type"], _fallback["sampler2D"]))
 		set0.append(u)
 	# The shape prefilter's kernel (clouds.gdshaderinc) only when a footprint can exceed its start: the farthest cloud
