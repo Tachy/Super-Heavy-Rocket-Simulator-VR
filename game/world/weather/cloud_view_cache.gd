@@ -33,7 +33,9 @@ func _init(rd: RenderingDevice, layout_: CloudViewCacheLayout, kernels: Dictiona
 		_textures.append(_cube(rd, texels, COLOR_FORMAT))
 		_distances.append(_cube(rd, texels, DISTANCE_FORMAT))
 		_view_buffers.append(rd.uniform_buffer_create(VIEW_BLOCK_SIZE))
-	_tiles = rd.storage_buffer_create(4 * layout.tile_count())
+	assert((layout.face_texels / layout.tiles_per_side) % BLOCK == 0, "tile size must be a multiple of the 8 x 8 work group")
+	# A {tile, level} list may hold one tile at several levels.
+	_tiles = rd.storage_buffer_create(4 * layout.tile_count() * CloudViewCacheLayout.LEVELS)
 
 
 ## The colour + T cube (6 layers) of a level.
@@ -61,6 +63,18 @@ func fill(rd: RenderingDevice, tiles: Array[Dictionary], anchor_offset_earth: Ve
 		entries.append_array(by_level[level])
 	if entries.is_empty():
 		return
+	var capacity := layout.tile_count() * CloudViewCacheLayout.LEVELS
+	if entries.size() > capacity:
+		push_error("CloudViewCache.fill: tile list of %d entries exceeds the buffer (%d); the rest is dropped"
+				% [entries.size(), capacity])
+		assert(false, "cloud view cache tile list overflow")
+		entries.resize(capacity)
+		# Keep by_level consistent with the truncated list.
+		var left := capacity
+		for level in range(CloudViewCacheLayout.LEVELS):
+			if by_level[level].size() > left:
+				by_level[level].resize(left)
+			left -= by_level[level].size()
 	rd.buffer_update(_tiles, 0, 4 * entries.size(), entries.to_byte_array())
 	var angles := PackedFloat32Array()
 	for level in range(CloudViewCacheLayout.LEVELS):

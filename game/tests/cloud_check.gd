@@ -381,6 +381,10 @@ const VIEW_CACHE_TILE_TEXELS := 64
 ## 448^2 texels per face against 256^2 pixels over 60 deg).
 const VIEW_CACHE_MEDIAN_TOLERANCE := 0.01
 const VIEW_CACHE_P99_TOLERANCE := 0.05
+## The four horizontal face views (+-X, +-Y) look half at the ground: the fill ends at the ellipsoid, the check's march
+## at its -500 m shell (the deck nadir's 0.2 % median, here at the horizon's grazing rays: measured p99 2.0-8.0 %). Their
+## medians (0.000 %) and distances prove the axes; the p99 bound is looser there.
+const VIEW_CACHE_P99_HORIZONTAL_TOLERANCE := 0.10
 const VIEW_CACHE_T_RMS_TOLERANCE := 0.01
 const VIEW_CACHE_DISTANCE_TOLERANCE := 0.01
 const VIEW_CACHE_DISTANCE_ALPHA := 0.5
@@ -389,11 +393,13 @@ const VIEW_CACHE_DISTANCE_ALPHA := 0.5
 ## pixel centre rays = texel centre rays. The broken layer from the ground at the zenith (face +Z), the deck from above
 ## at the nadir (face -Z): no ground in view. Name, cloud fraction, height (m), Earth-local forward axis.
 const VIEW_CACHE_FACE_VIEWS := [["ground zenith", 0.4, 10.0, Vector3(0.0, 0.0, 1.0)],
-		["deck nadir", 1.0, 3500.0, Vector3(0.0, 0.0, -1.0)]]
+		["deck nadir", 1.0, 3500.0, Vector3(0.0, 0.0, -1.0)],
+		["deck +X", 1.0, 3500.0, Vector3(1.0, 0.0, 0.0)], ["deck -X", 1.0, 3500.0, Vector3(-1.0, 0.0, 0.0)],
+		["deck +Y", 1.0, 3500.0, Vector3(0.0, 1.0, 0.0)], ["deck -Y", 1.0, 3500.0, Vector3(0.0, -1.0, 0.0)]]
 const VIEW_CACHE_FACE_FOV_DEG := 90.0
 ## Per general view: the identity, debug 0 (colour, distance) and 12 (distance); per face-aligned view: debug 0
 ## (colour, T, distance) and 12 (alpha, distance).
-const VIEW_CACHE_SAMPLES := 2 * (1 + 2 + 1) + 2 * (3 + 2)
+const VIEW_CACHE_SAMPLES := 2 * (1 + 2 + 1) + 6 * (3 + 2)
 ## Diagnostics: a directory for the march's images before / after a refactoring (written when missing, else compared
 ## bit for bit): STARSIM_MARCH_REFERENCE=<dir>.
 const MARCH_REFERENCE_ENV := "STARSIM_MARCH_REFERENCE"
@@ -2728,7 +2734,8 @@ func _view_cache_compare(name: String, camera: Vector3, view: Vector3, sun: Vect
 			_camera.get_camera_projection(), size, VIEW_CACHE_TILE_TEXELS)
 	if exact:
 		var earth_to_world := (ShaderGlobals.value(&"atmosphere_world_to_earth") as Basis).inverse()
-		_camera.transform = Transform3D(Basis.looking_at(earth_to_world * face_forward, earth_to_world * Vector3.UP),
+		_camera.transform = Transform3D(Basis.looking_at(earth_to_world * face_forward,
+					earth_to_world * (Vector3.BACK if absf(face_forward.y) > 0.5 else Vector3.UP)),
 				Vector3.ZERO)
 		for i in range(SETTLE_FRAMES):
 			await RenderingServer.frame_post_draw
@@ -2804,7 +2811,8 @@ func _view_cache_compare(name: String, camera: Vector3, view: Vector3, sun: Vect
 		var e := _sorted(errors)
 		var p99 := e[int(0.99 * (n - 1))]
 		_check(label + ": colour", mean_lum > 0.0 and e[n / 2] <= VIEW_CACHE_MEDIAN_TOLERANCE
-				and (p99 <= VIEW_CACHE_P99_TOLERANCE or not exact), "per-pixel luminance error median %.3f %%, p99 "
+				and (p99 <= (VIEW_CACHE_P99_TOLERANCE if absf(face_forward.z) > 0.5
+					else VIEW_CACHE_P99_HORIZONTAL_TOLERANCE) or not exact), "per-pixel luminance error median %.3f %%, p99 "
 				% (e[n / 2] * 100.0) + "%.3f %%, worst %.2f %% (mean luminance %.4f)%s" % [p99 * 100.0,
 				e[n - 1] * 100.0, mean_lum, "" if exact else "; T RMS %.5f (resampling: printed)" % t_rms])
 		if exact:
