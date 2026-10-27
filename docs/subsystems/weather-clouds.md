@@ -122,7 +122,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   coverage-preserving mean in transmittance (a mean density would make broken cloud a fog); the cell (fraction,
   water) stays the true point's. The deterministic march (the default, static clouds Task 3) reads the footprint's
   centre (no offset, the same in every frame): the mips' box filter there is the footprint's mean cover (spec
-  decision 4); Task 8's hand-over is to end the volume before such footprints matter. Deeper mips (level 4, 4 km texels) were tried: their few features per horizontal
+  decision 4); the near / far hand-over (static clouds Task 8, below) ends the march at 34 km, so with the presets no
+  march footprint reaches f_s any more (VR 5.4 mrad x 34 km = 0.18 km) and the prefilter kernel runs only for the
+  debug outputs (they march the whole segment) or a band moved out (checks). Deeper mips (level 4, 4 km texels) were tried: their few features per horizontal
   slice of the tile showed as rings around the sub-camera point (cf 0.4 hand-over 10.7 % instead of 7.5 %). The
   code sits under `CLOUD_SHAPE_PREFILTER`: `CloudEffect` runs that march kernel only when a footprint on the frame's
   clouds can exceed f_s (largest pixel angle x (the horizon distances of the camera and of the 20 km cloud top on the
@@ -182,7 +184,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   hybrid cascades' weights):
   cascade k has weight 1 within 34 voxels of the ground point (Chebyshev), falling to 0 at 42 (a band of 8 voxels:
   0.5 .. 8 km), the rest goes to the next cascade and after the last (beyond 34-42 km) to the per-sample march. The
-  cache thus covers the volume march's full range (Task 8's near / far hand-over at <= 34 km, ledgered). Cascade 0
+  cache thus covers the volume march's full range (the near / far hand-over ends it at 34 km, static clouds Task 8). Cascade 0
   is read at the sample; cascades 1-4 are hybrid (controller ruling 2026-10-26): the sample marches the first 1 / 3 /
   2 / 2 km (cascades 1 / 2 / 3 / 4) of its light path through the shapes and adds the cascade's tau read where that
   march ends (the fill's tau starts there, so nothing is counted twice) - a far cascade's voxel can hold neither a
@@ -403,7 +405,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     the ray with exp(-w_D tau_v) (single scattering in closed form, the table by 8-point Gauss-Legendre in
     u = 1 - exp(-w_D tau_v / mu); the core's `slab_reflected_radiance_mc` integrates the same between the depth nodes);
     the closed form likewise under the fidelity flag; plus the sky's source (closed form, linear in depth: integrated
-    exactly) x the sky irradiance there;
+    exactly; its slope from the source at the slab's base - a unit depth beyond a slab thinner than 1 was clamped to
+    the slab and underestimated it) x the sky irradiance there; seen from below (view cosine < 0, the cloud pass's
+    far tier under a far layer) the same sources integrated from the slab's base, attenuated by exp(-w (tau - t) /
+    |mu|): the diffusely transmitted light of the base;
   - composite as the cloud pass: alpha = C_v (1 - exp(-tau / (C_v mu))), colour = T_air C_v L + alpha S_air over
     (1 - alpha) x the ground; the ground lit through the column (`cloud_ground_light`'s column tier, the terrain's
     beyond 140 km: direct, the Sun's diffuse part, the sky's; the Moon likewise).
@@ -411,13 +416,52 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   at one point, a Sun below the cloud's local horizon at the entry floor 0.02, view cosine floor 0.02
   (`CLOUD_FAR_MU_MIN` [E]). The CPU light factors stay (1, 0, 1) beyond the limit (`cloud_enabled` false; a camera
   there is far above any cloud). The earthshine on the Moon keeps the Bond albedo 0.306 (clouds included on average).
+- **Near / far hand-over in the cloud pass** (static clouds Task 8; `cloud_pass.gdshaderinc` `cloud_march` (two
+  passes), `cloud_far_slab` / `cloud_far_column`; `CloudLayer.PRESETS` `handover_m` -> globals
+  `cloud_handover_near_m` / `_far_m`, both presets 20 / 34 km [E]): the march ends at 34 km - inside the light cache's
+  full weight (ruling of Task 2: the light beyond is never taken from the per-sample light march) and below the
+  footprints that need the shape prefilter (VR 0.18 km at 34 km, f_s 3.5 km: the far cumulus' cover no longer beats
+  with the 32 km tile, Task 3 follow-up). The far tier takes the ray from 20 km to the scene or the shell; over the
+  band the far tier's weight w(d) = smoothstep(20 km, 34 km, d) (an empty band: a step; both beyond the scene: the
+  march alone, 0 / 0: the far tier alone - the checks' switches, render_check `--handover`):
+  - the march weights every step's share of the pixel (its light and its alpha after the clouds in front of it) by
+    1 - w at the step's distance; a faded opacity per step compounded over the many steps inside one cloud like a
+    faded density (a thick cloud stayed opaque to the band's end);
+  - the far tier is a second pass of the same steps (`cloud_march` pass 1, over [20 km, end]; its steps weighted by w):
+    the march's machinery - coarse steps spanning the segment, fine steps in the field's cloudy region that still
+    reach its end within the preset's max steps, sub-samples, bisected silhouette entries, dense refinement, the
+    deterministic step phase on Earth-fixed height shells - with the shapes band-limited at the pixel footprint
+    (`cloud_sample_extinction`: beyond a shape texel, 250 m, the shape's box-filtered mips at that level -
+    deterministic, no sub-pixel offset, spec decision 4 - the sub-samples' structure step scaled with the mip) and the
+    light from `cloud_far_light_depth` (`cloud_sample_light_source`: no light cache there): 5 geometric intervals
+    20 m .. 1.5 km [E] through the same shapes (the far cumuli's lit and shaded flanks; equal intervals put the first
+    sample 250 m out, above a deck's top: 25 % dark; 3 intervals: 7 %), then the column's grid-mean depth above that
+    point along the light. A separate simpler far march (fixed 0.5 % steps) needed the full step budget in the analog
+    weather and still lost far deck against cloud_grain_check's 8 x reference (alpha -12 % in the deck view); a single
+    slab per pixel (the column model, or the shapes sampled along its chord) drew far cumulus as flat slabs, lost a
+    low layer's cloud under a higher one and needed per-cloud weight heuristics;
+  - composite: the march's (1 - w)-weighted image plus the march's transmittance at 20 km times the far tier's
+    w-weighted one - both march the same clouds, so a cloud in the band, or two behind each other, is the exact linear
+    cross-fade of the two renders; the cloud distance weighted by each part's alpha;
+  - where the pixel footprint at the ray's crossing of 2 km (`cloud_far_reference_m`; its lowest point when it stays
+    above: continuous over the pixels), projected onto the vertical (x |cos| of the view there), exceeds 0.5 km [E],
+    the far tier fades by 1 km to the far field's column model (`cloud_far_slab`: the far field's slab placement along
+    the ray, from above or from below, a crossing in front of the band taken at its start; `cloud_far_column`: the
+    beam cover C_v, the plane-parallel slab), weighted by w at the slab: seen from above with ~1 km footprints the
+    32 km shape tile showed as a lattice over a uniform layer and the mips (1 km texels at most) beat into streaks; at
+    grazing views the overlap merges the shapes into the horizon's band, which the column model drew faint (the
+    unprojected footprint faded the band from 20 km to the column). From 420 km every pixel is the far tier's (the
+    march segment is empty): at VR resolution (2.3 km) the column model below, the shapes along the limb.
+  The debug outputs march the whole segment without the far tier (the checks' physical quantities of the volume). The
+  column texture reaches the compute kernels through the same swizzled view as Godot's shaders (cover in .a).
 - **Quality presets** [E]: desktop 128 coarse / 512 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 96 / 384,
   2.5 %, 5 + 2 (static clouds Task 3: the deterministic march lost cumulus bases with 48 coarse steps; case 9 passes
   with the 2.5 % fine step; cost in `vr-performance.md`, the budget is Task 10's); both 3 detail levels; resolution 1/2 desktop, 1/3 of the VR centre view (VR performance plan part 2); temporal weight floor 1/32 /
   1/96 (jittered march only). Max steps 4 x the coarse ones (Task 5c fix round 1): with 192 the VR fine steps through
   a broken layer's cloudy region (mostly clear between the shapes) ran out before the far cloud - 7-16 % of the deck
   view from 9 km lost its far deck (alpha -8.5 % vs the 8 x reference); 384 and 768 gave the same image; the
-  desktop's 256 lost 3.8 % of the deck's alpha (512: 1.3 %).
+  desktop's 256 lost 3.8 % of the deck's alpha (512: 1.3 %). The near / far hand-over band 20 / 34 km in both
+  (above); the far tier's march takes at most the preset's max steps.
 
 ## Validation
 
@@ -527,9 +571,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   `.superpowers/sdd/2026-10-26-static-clouds/task-5c-report.md` (fix round 1); before it (cb65707) the deck's alpha
   -8.5 %, alpha grain 1.30, cover -5.3 %, RMS 0.14-0.17 on ground / deck / cirrus. `render_check --repeat_identical`
   at the Cape: the frames differ in the sea below the horizon only (y >= 825; the base too) - the check prints the
-  differing pixels' bounding box. `cloud_far_check` after fix round 1: the deck tau 10 volume-vs-far block 11.20 %
-  (limit 10 %; cb65707 9.88 %, the same march at 8 x the steps 11.97 %: the converged volume is brighter than the far
-  field, open for Task 8 with the broken layer's 17.50 %).
+  differing pixels' bounding box.
 - GPU `cloud_check.gd` section 6 (terrain_earth.gdshader on a quad 300 m from a camera 2 m up; slabs tau 1 / deck tau
   3 / broken cf 0.4; Sun 45 / 20 deg; debug output 5 = the three factors): with the near map of the grid mean
   (`CloudShadowEffect.grid_mean_only`) direct vs the CPU within 1.3 %, diffuse within 0.6 %, sky within 0.3 %, the
@@ -561,11 +603,23 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   output 6: the far field's physics without the shapes) within 2.95 % / 3.89 % (tolerance 5 %); the volume pass only
   inside, `earth_clouds.gdshader` only outside, the CPU light factors (1, 0, 1) outside; from 384 400 km with the ERA5
   hour of 2024-04-08 18:00 five cloudy cells (vertical transmittance < 0.05) 5.3-8.2x brighter with the weather on,
-  five clear cells (no cloud within 1 deg) unchanged (ratio 1.0000). The game's volume (the shapes, prefiltered)
-  against the far field, tolerance 10 % (ruling 2026-10-26: the shapes' 3D light is outside a column model): deck
-  tau 10 within 6.4 %, tau 2 within 4.3 %, broken cf 0.4 (21 x 21 block means) within 7.3 % (Task 11: every placement
-  resets the cloud history and the frame counter and draws exactly 64 frames, so the temporal mean is the same number of
-  frames in every run; the earlier runs, timing-dependent, gave 7.3 / 5.2 / 7.5-8.5 %; before the prefilter 32 %).
+  five clear cells (no cloud within 1 deg) unchanged (ratio 1.0000). The game's cloud pass inside (static clouds
+  Task 8: every cloud there lies beyond the near / far hand-over; its far tier draws them with the column model at
+  these footprints) against the far field outside, tolerance 5 %: deck tau 10 within 0.22 %, tau 2 within 0.62 %,
+  broken cf 0.4 (21 x 21 block means) within 2.60 % at the six points off the sub-camera point; there the ground alone
+  steps across the limit (weather off: 0.157 inside / 0.069 outside, the terrain's sea glint, which the scaled-space
+  Earth lacks; seen through a broken layer's gaps it was 11 % of the pixel) - points whose ground steps by more than
+  the tolerance are listed, not asserted. Every placement resets the cloud history and the frame counter and draws
+  exactly 64 frames (Task 11). Static clouds Task 8, section 5 (`--only=handover`; the cloud pass's own image,
+  desktop preset): from 420 km the game's image equals the far tier's alone (0 of 1.44e6 pixels differ); a broken
+  layer (cf 0.4) and a deck (tau 10, 1-2 km) seen from 9 km (0 N 45 W, 10 deg down to the north, Sun ~60 deg up): the
+  far tier's mean radiance at 30-50 km vs the march alone 0.9905 / 0.9900 (tolerance 10 %, the M8 ruling), the game's
+  image the linear cross-fade of the two within 2.38 % / 0.39 % in every 2 km bin from 14 to 60 km (3 %), the band's
+  own step between bins 0.26 % / 0.28 % (3 %); a camera at 20 km moved by 100 m: 4 interior cover flips in 646 130
+  covered pixels against 0 of a static pair (allowance 0.1 % of the covered pixels [E]). cloud_grain_check (the far
+  pass included, its 8 x reference too): Cape / ground / deck / cirrus cover within 0.02 / 1.00 / 0.16 / 0.10 %. Before Task 8 (base
+  1cb02f6, the march to the horizon) the deck tau 10 and the broken layer at the scaled-space limit were 11.20 % /
+  17.50 % off.
 - Image identity of the shape prefilter (`render_check.gd --fixed_exposure --deterministic=64`: the cloud history
   and frame counter reset, then exactly 64 frames; ERA5 2024-04-08 18:00; identity holds at the check window (1600 x
   900) and the views' FOV used there - a larger window or a narrower FOV shrinks the pixel angle and keeps the
@@ -720,17 +774,16 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   inside clouds (a receiver inside one gets a linear share), the Moon's direct light the column's (no shapes). The
   sky's diffuse transmittance and the Sun's diffuse light are the local column's (no light from neighbouring columns,
   no cloud-side glow in gaps). The scaled-space Earth takes the column (the far field: no shapes, no shadow maps).
-- Far field against the volume at the hand-over (Task 10, `cloud_far_check.gd`): with the game's volume (the shapes)
-  a deck of tau 10 differs by up to 6.4 % (the volume brighter 25-45 deg from the sub-camera point, Sun ~35 deg up,
-  view ~68 deg off the vertical), tau 2 by up to 4.3 %, a broken layer (cf 0.4) by up to 7.3 % (the volume brighter
-  at the centre by 5-8 %); with the volume on the grid mean the decks agree within 2.95 % / 3.89 %: the step is the shapes' sub-grid structure (the 3D entry cosine
-  under a varying Sun depth only brightens: mu_e is clamped at mu0 from below; the soft edges' thin fringes), which a
-  column model cannot carry. Accepted with the tolerance 10 % (ruling 2026-10-26): a faint step when crossing
-  1.5e7 m. A thin layer seen from afar cuts many horizontal slices of the 32 km shape tile, whose cover is not exactly
-  cf: faint rings around the sub-camera point remain (the shapes' own, not aliasing). The sub-pixel offsets leave a
-  fine temporal grain on broken cloud beyond f_s until the temporal mean converges (still camera: frames; a moving
-  one: the floor weight's ~23 % of one frame's noise) - with the jittered march only; the deterministic one reads the
-  footprint's centre.
+- Near / far hand-over (static clouds Task 8): the far tier's light is the column's beyond 1.5 km of the light path
+  (no light cache beyond the march: no far neighbours' shadows past 1.5 km); its shapes are band-limited at the pixel
+  footprint (no detail beyond ~125 m footprints, as the march); at large footprints (VR beyond ~90 km, low orbit) it is
+  the far field's column model (plane-parallel, the 0.25 deg cells as soft patches from orbit). In the band both passes
+  run (the cost of the overlap); in all the cost is about the march's to the horizon before (VR proxy,
+  `vr-performance.md`), as the far pass takes the same steps, with a cheaper light. The scaled-space limit: the
+  ground's sea glint steps there (terrain vs scaled-space Earth, weather off), seen through broken cloud. The dotted line at the far sea horizon in the deck and 20 km views (pre-existing,
+  unchanged): the checkerboard of the march pixels' nearest / farthest scene depth - on the horizon rows alternate
+  march pixels end at the sea (~340 km from 9 km) or run into the sky, and only the latter hold the cloud band beyond
+  the sea horizon, so the upsample alternates along the row (period 2 march pixels).
 - **March sub-samples (Task 5c, fix round 1)**: the VR proxy's cloud pass +97 / +75 / +72 % (descent / pan low / pan
   high medians over cb65707, `vr-performance.md`) for the shapes' and field's lookups at up to 8 sub-samples and the
   doubled step budget - over the budget like the base (Task 10); at most 4 sub-samples cost +39 / +27 / +25 % and
@@ -750,4 +803,5 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   steps' iso-distance shells). The VR cost is over the 2.5 ms budget (`vr-performance.md`, Task 10).
 - Far field: plane-parallel independent columns (no 3D radiative effects: no lit cloud sides at a low Sun, no shadows
   cast on neighbouring columns or the ground beside them); the field's 0.25 deg grid shows as soft cells near the
-  hand-over (~4 pixels per cell at 1.5e7 m).
+  hand-over (~4 pixels per cell at 1.5e7 m). A column with several layers is one slab (placed by its seen light's mean
+  depth): from the ground, a high layer far out and a low one share one crossing.

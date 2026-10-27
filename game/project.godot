@@ -449,6 +449,14 @@ cloud_fine_step_fraction={
 "type": "float",
 "value": 0.025
 }
+cloud_handover_near_m={
+"type": "float",
+"value": 20000.0
+}
+cloud_handover_far_m={
+"type": "float",
+"value": 34000.0
+}
 cloud_debug_output={
 "type": "int",
 "value": 0

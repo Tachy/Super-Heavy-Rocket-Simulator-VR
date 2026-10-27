@@ -242,6 +242,32 @@ global uniform int cloud_steps;        // coarse steps spanning the segment (qua
 global uniform int cloud_max_steps;    // cap on the steps per pixel (coarse + fine)
 global uniform float cloud_fine_step_fraction;  // fine step / distance inside the field's cloudy region
 global uniform bool cloud_deterministic_march;  // fidelity flag (CloudLayer.deterministic_march; false: jittered)
+// The near / far hand-over (static clouds Task 8; CloudLayer.PRESETS "handover_m"): the march ends at
+// cloud_handover_far_m, the far tier (cloud_far_tier) takes the ray from cloud_handover_near_m on, blended between.
+global uniform float cloud_handover_near_m;
+global uniform float cloud_handover_far_m;
+
+// [E] The far tier's shapes (cloud_march's pass 1) fade to the column model's even cover between these pixel
+// footprints, projected onto the vertical (x |cos| of the view), at the ray's reference distance
+// (cloud_far_reference_m): the shape's mips stop at 1 km texels (CLOUD_SHAPE_PREFILTER_LEVELS), and seen from above
+// with footprints of ~1 km (low orbit on the desktop) the 32 km shape tile showed as a lattice over a uniform layer
+// and the mips beat into streaks (the beat of Task 3's follow-up at ~7 km footprints); at a grazing view the overlap
+// merges the shapes into the horizon's band, which the column model drew faint (the unprojected footprint faded the
+// band from 20 km to the column).
+const float CLOUD_FAR_PATTERN_FADE_START_M = 500.0;
+const float CLOUD_FAR_PATTERN_FADE_END_M = 1000.0;
+// [E] The far tier's light path through the shapes (cloud_far_light_depth): samples, first interval and the intervals'
+// ratio - 20 / 52 / 137 / 358 / 936 m, 1.5 km in all (a cumulus' width, so a sample on a sunlit flank is lit through
+// its flank, not through the column above it; the first interval the volume's light march's, CloudLayer.PRESETS
+// light_first_m; 3 intervals lit a far deck 7 % dark).
+const int CLOUD_FAR_LIGHT_SAMPLES = 5;
+const float CLOUD_FAR_LIGHT_FIRST_M = 20.0;
+const float CLOUD_FAR_LIGHT_RATIO = 2.615;
+// [E] The far tier's first guess of the slab's height where the column of its first guess is clear: a low cloud's
+// (the next guess takes the column where the ray crosses it).
+const float CLOUD_FAR_GUESS_HEIGHT_M = 2000.0;
+// [E] Behind a march transmittance below this the far tier is not evaluated (< 0.1 % of its light).
+const float CLOUD_FAR_MIN_TRANSMITTANCE = 1.0e-3;
 
 // Scattering source of one light (Sun or Moon) at a sample: J per unit irradiance normal to the light. The Sun's
 // optical depth from the light cache's cascades where they hold the sample (cloud_light_cache.gdshaderinc; the hybrid
@@ -261,6 +287,202 @@ float cloud_light_source(vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, flo
 				pixel_angle);
 		tau_light = cached.z >= 1.0 ? marched : tau_light + cached.z * marched;
 	}
+	if (cloud_scattering_model == 1) {
+		return cloud_scattering_source_mc(light_dir, -dir, normal, tau_light, column.x, column.y);
+	}
+	return cloud_scattering_source_3d(light_dir, -dir, normal, tau_light, column.x, column.y);
+}
+
+// The far tier's weight at distance d (0: the march alone, 1: the far tier alone): smoothstep over the hand-over band;
+// a step at cloud_handover_far_m for an empty band (the checks: 0 / 0 = the far tier everywhere, both beyond the scene
+// = the march everywhere).
+float cloud_handover_weight(float d) {
+	if (cloud_handover_far_m <= cloud_handover_near_m) {
+		return d >= cloud_handover_far_m ? 1.0 : 0.0;
+	}
+	return smoothstep(cloud_handover_near_m, cloud_handover_far_m, d);
+}
+
+// The far slab's heights for the column at lat_lon (x the grid-mean depth, y the largest fraction) seen at the view's
+// |cosine| mu: x from below (the depth from its base reaching cloud_far_seen_depth), y from above (from its top).
+vec2 cloud_far_slab_heights(vec2 lat_lon, vec2 column, float mu) {
+	float seen = cloud_far_seen_depth(column, mu);
+	float from_above = cloud_far_depth_height(lat_lon, seen);
+	float from_below = cloud_far_depth_height(lat_lon, max(column.x - seen, 0.0));
+	return vec2(min(from_below, from_above), from_above);
+}
+
+// The far tier's column part (static clouds Task 8; at large pixel footprints, CLOUD_FAR_PATTERN_FADE_*): the column
+// model of the far field (cloud_far.gdshaderinc) for the ray beyond the hand-over's start from_m up to to_m (the scene
+// or the cloud shell). The slab is placed as in the far field - at the height where the column's depth reaches the
+// seen light's mean depth (from above: from its top; from below: from its base) - and found along the ray: a first
+// guess of its column (the surface the ray meets when it has one, the far field's ground point; else its lowest point
+// in the segment), then twice the slab's crossing with the column there: the ray at from_m above the slab descends to
+// it, below it climbs to it, inside the slab's heights it is taken where it leaves them (grazing); a crossing in front
+// of from_m (a higher layer draws the slab up) is taken at from_m. Out: the crossing's distance (< 0: none) and its
+// column (x the grid-mean depth, y the largest fraction).
+float cloud_far_slab(CloudRay ray, vec3 dir, vec3 eye, float from_m, float to_m, bool surface, out vec2 column_p) {
+	column_p = vec2(0.0);
+	if (to_m <= from_m) {
+		return -1.0;
+	}
+	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
+	float guess_m = surface ? to_m : clamp(-ray.r_c * ray.mu / ray.scale, from_m, to_m);
+	vec3 q = camera + eye + dir * guess_m;
+	vec2 lat_lon = cloud_lat_lon(q);
+	vec2 column = cloud_column_mean_depth(lat_lon, 0.0);
+	float h_from = cloud_height_along(ray, from_m);
+	float d_p = -1.0;
+	for (int i = 0; i < 2; i++) {
+		vec2 heights = vec2(CLOUD_FAR_GUESS_HEIGHT_M);
+		if (column.x > 0.0) {
+			heights = cloud_far_slab_heights(lat_lon, column, max(abs(dot(dir, cloud_geodetic_up(q))),
+					CLOUD_FAR_MU_MIN));
+		}
+		float d = -1.0;
+		if (h_from >= heights.y) {
+			vec2 crossing = cloud_sphere_crossing(ray, heights.y);
+			d = crossing.x <= crossing.y ? crossing.x : -1.0;  // descending to the slab seen from above
+		} else if (h_from <= heights.x) {
+			vec2 crossing = cloud_sphere_crossing(ray, heights.x);
+			d = crossing.x <= crossing.y ? crossing.y : -1.0;  // climbing to the slab seen from below
+		} else {
+			// Inside the slab's heights at from_m: where the ray leaves them (climbing: the top, else the base).
+			bool climbing = cloud_height_slope(ray, from_m) >= 0.0;
+			vec2 crossing = cloud_sphere_crossing(ray, climbing ? heights.y : heights.x);
+			d = crossing.x <= crossing.y ? (climbing ? crossing.y : crossing.x) : -1.0;
+		}
+		if (!(d >= 0.0 && d < to_m)) {
+			break;
+		}
+		d = max(d, from_m);
+		q = camera + eye + dir * d;
+		lat_lon = cloud_lat_lon(q);
+		column = cloud_column_mean_depth(lat_lon, 0.0);
+		d_p = d;
+		column_p = column;
+	}
+	return column_p.x > 0.0 ? d_p : -1.0;
+}
+
+// The distance at which the far tier's shapes fade to the column model (CLOUD_FAR_PATTERN_FADE_*, the pixel footprint
+// there): where the ray crosses CLOUD_FAR_GUESS_HEIGHT_M (descending from above, climbing from below; its lowest point
+// when it stays above), within [from_m, to_m] - continuous over the pixels (the slab's crossing, from the column there,
+// jumped between neighbouring pixels: rectangular steps in the far horizon's band).
+float cloud_far_reference_m(CloudRay ray, float from_m, float to_m) {
+	vec2 crossing = cloud_sphere_crossing(ray, CLOUD_FAR_GUESS_HEIGHT_M);
+	float d;
+	if (cloud_camera_height_m < CLOUD_FAR_GUESS_HEIGHT_M) {
+		d = crossing.y;
+	} else {
+		d = crossing.x <= crossing.y ? crossing.x : -ray.r_c * ray.mu / ray.scale;
+	}
+	return clamp(d, from_m, to_m);
+}
+
+// The column model at the slab's crossing d_p (cloud_far_slab): the even cover C_v (the beam cover of the column's
+// largest fraction at the view's cosine), the plane-parallel slab of the cloudy part's depth
+// (cloud_far_cloudy_radiance: reflected seen from above, transmitted from below), its air light at the crossing;
+// premultiplied colour + alpha (coverage_only: alpha alone).
+vec4 cloud_far_column(vec3 dir, vec3 eye, float d_p, vec2 column_p, vec3 eclipse_near, vec3 eclipse_far,
+		bool coverage_only) {
+	vec3 offset = eye + dir * d_p;
+	vec3 p = atmosphere_camera_hi + atmosphere_camera_lo + offset;
+	vec3 up = cloud_geodetic_up(p);
+	vec3 view_prop = -dir;
+	float mu = max(abs(dot(view_prop, up)), CLOUD_FAR_MU_MIN);
+	float cover = max(cloud_column_beam_cover(column_p, mu), CLOUD_MIN_FRACTION);
+	float tau = column_p.x / cover;  // the cloudy part's vertical depth
+	float alpha = cover * (1.0 - exp(-tau / mu));
+	if (coverage_only) {
+		return vec4(0.0, 0.0, 0.0, alpha);
+	}
+	float eclipse_x = clamp((d_p - CLOUD_ECLIPSE_NEAR_M) / (CLOUD_ECLIPSE_FAR_M - CLOUD_ECLIPSE_NEAR_M), 0.0, 1.0);
+	vec3 radiance = cloud_far_cloudy_radiance(p, up, view_prop, tau, mix(eclipse_near, eclipse_far, eclipse_x));
+	vec3 air_transmittance;
+	vec3 air_light = atm_to_point_offset(offset, air_transmittance);
+	return vec4(air_transmittance * radiance * cover + alpha * air_light, alpha);
+}
+
+// The far tier's extinction [1/m] (unscaled) at camera + offset_local: up to one shape texel of band limit the
+// volume's own (cloud_extinction_in_cell: the shape and the detail band-limited at detail_m - the lobes the march
+// draws there), beyond it the shape from its box-filtered mips at the level (cloud_extinction_prefiltered; the detail
+// is gone at that band limit, continuous at level 0; deterministic, no sub-pixel offset - spec decision 4); 0 outside
+// cloud.
+float cloud_far_extinction_at(vec3 offset_local, float height_m, CloudCell cell, float detail_m, float band_m,
+		float level) {
+	if (cell.fraction < CLOUD_MIN_FRACTION || cell.extinction <= 0.0) {
+		return 0.0;
+	}
+	if (level <= 0.0) {
+		float in_cloud;
+		return cloud_extinction_in_cell(cell, offset_local, height_m, detail_m, 0.0, in_cloud);
+	}
+	return cloud_extinction_prefiltered(cell, offset_local, height_m, band_m, level);
+}
+
+// The far tier's optical depth toward a light from camera + offset_local (height_m): CLOUD_FAR_LIGHT_SAMPLES
+// geometric intervals over CLOUD_FAR_LIGHT_NEAR_M from CLOUD_FAR_LIGHT_FIRST_M on (as the volume's light march: the
+// cloud right around the sample decides its source's depth - equal intervals put the first sample 250 m out, above a
+// deck's top, and lit the far deck as its top: 25 % dark) through the far tier's shapes (the lit and shaded flanks of
+// the far cumuli), the rest the column's grid-mean depth above that point along the light (plane-parallel; the light
+// march's far part is the grid mean too). No light cache this far (ruling of Task 2: its cascades end the march).
+float cloud_far_light_depth(vec3 offset_local, float height_m, vec3 light_dir, float detail_m, float band_m,
+		float level) {
+	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
+	float tau = 0.0;
+	float start = 0.0;
+	float length_i = CLOUD_FAR_LIGHT_FIRST_M;
+	for (int i = 0; i < CLOUD_FAR_LIGHT_SAMPLES; i++) {
+		vec3 q = offset_local + light_dir * (start + 0.5 * length_i);
+		float h = cloud_height_of(camera + q);
+		CloudCell cell = cloud_field(cloud_lat_lon(camera + q), h);
+		tau += cloud_far_extinction_at(q, h, cell, max(detail_m, length_i), band_m, level) * length_i;
+		start += length_i;
+		length_i *= CLOUD_FAR_LIGHT_RATIO;
+	}
+	vec3 end = camera + offset_local + light_dir * start;
+	float mu_l = max(dot(light_dir, cloud_geodetic_up(end)), CLOUD_ENTRY_COSINE_MIN);
+	return tau + cloud_column_mean_depth(cloud_lat_lon(end), cloud_height_of(end)).x / mu_l;
+}
+
+// The level of the shape's box-filtered mips whose texel is the band limit band_m (0: the shape itself).
+float cloud_far_level(float band_m) {
+	return clamp(log2(band_m * CLOUD_SHAPE_TEXELS / CLOUD_SHAPE_TILE_H_M), 0.0, CLOUD_SHAPE_PREFILTER_LEVELS);
+}
+
+// A sample's extinction [1/m] (unscaled) at camera + offset_local in its field cell: the march's (far false:
+// cloud_extinction_in_cell - the shape prefiltered at the pixel footprint pixel_m only beyond f_s, in the prefilter
+// kernel) or the far tier's (true: cloud_far_extinction_at - the shape band-limited at the pixel footprint, beyond a
+// shape texel its mips); the detail band-limited at detail_m. in_cloud: the cell's in-cloud mean extinction.
+float cloud_sample_extinction_in_cell(bool far, CloudCell cell, vec3 offset_local, float height_m, float detail_m,
+		float pixel_m, out float in_cloud) {
+	if (!far) {
+		return cloud_extinction_in_cell(cell, offset_local, height_m, detail_m, pixel_m, in_cloud);
+	}
+	in_cloud = cell.fraction >= CLOUD_MIN_FRACTION && cell.extinction > 0.0 ? cell.extinction / cell.fraction : 0.0;
+	return cloud_far_extinction_at(offset_local, height_m, cell, detail_m, pixel_m, cloud_far_level(pixel_m));
+}
+
+// The same at camera + offset_local with its field cell looked up; out its (lat, lon).
+float cloud_sample_extinction(bool far, vec3 offset_local, float height_m, float detail_m, float pixel_m,
+		out vec2 lat_lon, out float in_cloud) {
+	lat_lon = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset_local);
+	return cloud_sample_extinction_in_cell(far, cloud_field(lat_lon, height_m), offset_local, height_m, detail_m,
+			pixel_m, in_cloud);
+}
+
+// A sample's source of one light (cloud_light_source's J): the march's (far false: the light cache, the light march)
+// or the far tier's (true: no cache that far, ruling of Task 2 - the optical depth toward the light from
+// cloud_far_light_depth, the shapes band-limited at the pixel footprint there).
+float cloud_sample_light_source(bool far, vec3 light_dir, vec3 normal, vec3 dir, vec3 offset, float height_m,
+		float distance_m, vec2 column, float jitter, float pixel_angle, bool sun) {
+	if (!far) {
+		return cloud_light_source(light_dir, normal, dir, offset, height_m, distance_m, column, jitter, pixel_angle,
+				sun);
+	}
+	float band_m = pixel_angle * distance_m;
+	float tau_light = cloud_far_light_depth(offset, height_m, light_dir, band_m, band_m, cloud_far_level(band_m));
 	if (cloud_scattering_model == 1) {
 		return cloud_scattering_source_mc(light_dir, -dir, normal, tau_light, column.x, column.y);
 	}
@@ -292,6 +514,9 @@ float cloud_structure_step(CloudCell cell, float climb) {
 // coverage_only (the outline pass's sub-rays, Task 5b fix round 1): the same steps and transmittance without the light
 // samples and the air light, ended at CLOUD_COVERAGE_MIN_TRANSMITTANCE (alpha within 0.01 of the full march's, the
 // cloud distance nearly its); the colour stays 0.
+// The near / far hand-over (static clouds Task 8): two passes of these steps - the march up to cloud_handover_far_m
+// with its light cache, the far tier from cloud_handover_near_m to the segment's end with the shapes band-limited at the
+// pixel footprint and the far light path - each step weighted by its pass's hand-over weight; composited below.
 void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 eclipse_far, bool coverage_only,
 		out vec3 color, out float alpha, out float cloud_m) {
 	color = vec3(0.0);
@@ -327,9 +552,17 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 			d0 = max(d0, bottom.y);
 		}
 	}
+	bool surface = scene_m < d1;  // the ray ends on the scene, not on the cloud shell
 	d1 = min(d1, scene_m);
 	if (d1 <= d0) {
 		return;
+	}
+	// The near / far hand-over (static clouds Task 8): the march ends at cloud_handover_far_m, the far tier takes the
+	// rest (after the loop). The debug outputs (the checks' physical quantities of the volume) march the whole segment.
+	bool handover = cloud_debug_output == 0;
+	float end_m = d1;
+	if (handover) {
+		d1 = min(d1, cloud_handover_far_m);
 	}
 
 	float k = cloud_transport_scale();
@@ -339,334 +572,429 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
 	vec3 eye = cloud_view.eye_earth.xyz;  // each eye marches from its own position (heights: the head's, <= 3 cm apart)
 	float pixel_angle = cloud_view.params.w;  // the detail's band limit: footprint = pixel_angle x distance
-	float start = max(d0, CLOUD_NEAR_START_M);
-	int n = max(cloud_steps, 1);
-	// Coarse step: the fraction of the distance that spans [start, d1] in n steps; at most one height layer.
-	float coarse_rel = d1 > start ? exp(log(d1 / start) / float(n)) - 1.0 : 1.0;
-	float transmittance_bg = 1.0;   // exp(-tau): the background
-	float transmittance_sc = 1.0;   // exp(-(1 - f) tau): the scattered light
-	// exp(-w_D tau): the lights' scattered light with the transfer table (cloud_scattering_model 1; the table's source
-	// leaves the phase function's HG peak in the view ray, core cloud_transfer_view_extinction)
-	float transmittance_tab = 1.0;
 	float w_tab = cloud_phase.w;
-	vec3 radiance = vec3(0.0);
-	float weighted_distance = 0.0;
-	float light_at_m = -1.0e30;
-	vec3 sun_irradiance = vec3(0.0);
-	vec3 sky_irradiance = vec3(0.0);
-	vec3 moon_irradiance = vec3(0.0);
-	vec3 moon_sky_irradiance = vec3(0.0);
-	float dense_step_m = 1.0e30;  // the step limit after a dense sample (CLOUD_MAX_STEP_WEIGHT)
-	float carried_tau = 0.0;  // thin cloud in front of an entry, added to the next step (cloud_march's sub-samples)
-	float a = d0;
-	// The deterministic step phase: the first step ends where the ray meets the next height shell k s_v above the
-	// ellipsoid (s_v: the first coarse step's height extent), so the samples stay put for a static camera and move with
-	// the shells, not with the screen, for a moving one. phase_m: that end (-1: none, the jittered march).
-	float phase_m = -1.0;
-	bool outside = true;  // the last sample lay below CLOUD_SILHOUETTE_EXTINCTION_PER_M (the next crossing is an entry)
-	bool cloud_ahead = false;  // the last clear step ended in the field's cloudy region: the next steps are fine ones
-	if (cloud_deterministic_march) {
-		float h0 = cloud_height_along(ray, d0);
-		float slope = cloud_height_slope(ray, d0);
-		float layer0_m = h0 < CLOUD_FINE_TOP_M ? CLOUD_FINE_LAYER_M : CLOUD_COARSE_LAYER_M;
-		float step0_m = max(min(start * coarse_rel, layer0_m / max(abs(slope), 1.0e-3)), CLOUD_MIN_STEP_M);
-		float shell_m = step0_m * max(abs(slope), CLOUD_PHASE_MIN_CLIMB);
-		float f = fract(h0 / shell_m);
-		float to_shell = slope >= 0.0 ? 1.0 - f : f;  // of the step, toward the next shell along the ray
-		phase_m = d0 + step0_m * (to_shell > 1.0e-3 ? to_shell : 1.0);
+	// The far tier (static clouds Task 8): from the band's start to the segment's end; its shapes fade to the far
+	// field's column model where the pixel footprint outgrows their mips (CLOUD_FAR_PATTERN_FADE_*, at the ray's
+	// reference distance cloud_far_reference_m: continuous over the pixels).
+	float far_from_m = max(d0, cloud_handover_near_m);
+	float shapes = 1.0;
+	if (handover && pixel_angle * end_m > CLOUD_FAR_PATTERN_FADE_START_M) {
+		float reference_m = cloud_far_reference_m(ray, far_from_m, end_m);
+		float steep = abs(dot(dir, cloud_geodetic_up(camera + eye + dir * reference_m)));
+		shapes = 1.0 - smoothstep(CLOUD_FAR_PATTERN_FADE_START_M, CLOUD_FAR_PATTERN_FADE_END_M,
+				pixel_angle * reference_m * steep);
 	}
-	for (int i = 0; i < cloud_max_steps && a < d1; i++) {
-		float h_a = cloud_height_along(ray, a);
-		float climb = abs(cloud_height_slope(ray, a));
-		float layer_m = h_a < CLOUD_FINE_TOP_M ? CLOUD_FINE_LAYER_M : CLOUD_COARSE_LAYER_M;
-		float step_m = min(max(a, start) * coarse_rel, layer_m / max(climb, 1.0e-3));
-		step_m = max(step_m, CLOUD_MIN_STEP_M);
-		if (a < phase_m) {
-			step_m = min(step_m, phase_m - a);
-		}
-		// Inside the field's cloudy region the step shrinks to the fine fraction of the distance: the sub-grid shapes
-		// are resolved (a coarse step would hit or miss a cumulus edge per pixel: grain).
-		float d = a + jitter * step_m;
-		vec2 lat_lon = cloud_lat_lon(camera + eye + dir * d);
-		CloudCell cell = cloud_field(lat_lon, cloud_height_along(ray, d));
-		if (cell.extinction > 0.0 || cloud_ahead) {
-			// Never finer than what still reaches the segment's end within the remaining steps (no far cloud is cut).
-			float remaining = float(max(cloud_max_steps - i, 1));
-			float reach = max(a, start) * (exp(log(max(d1, start) / max(a, start)) / remaining) - 1.0);
-			// The dense-cloud limit overrides the reach (behind an opaque surface little of the segment is seen).
-			float fine = min(max(max(max(a, start) * cloud_fine_step_fraction, reach), CLOUD_MIN_STEP_M), dense_step_m);
-			if (fine < step_m) {
-				step_m = fine;
-				d = a + jitter * step_m;
-				lat_lon = cloud_lat_lon(camera + eye + dir * d);
-				cell = cloud_field(lat_lon, cloud_height_along(ray, d));
-			}
-		}
-		float b = min(a + step_m, d1);
-		d = min(d, b);
-		float a_this = a;
-		a = b;
-		if (cell.extinction <= 0.0) {
-			dense_step_m = min(2.0 * dense_step_m, 1.0e30);
-			outside = true;
-			if (phase_m >= 0.0 && b < d1) {
-				// The deterministic march: a clear sample whose step ends in the field's cloudy region (a deck's top, a
-				// cumulus layer's) ends the step at the sample and marches on with fine steps - a fixed sample point
-				// would skip up to a coarse step of the cloud there in every frame (the jitter only averaged it).
-				cloud_ahead = cloud_field(cloud_lat_lon(camera + eye + dir * b), cloud_height_along(ray, b)).extinction
-						> 0.0;
-				if (cloud_ahead && d > a_this) {
-					a = d;
-				}
-			}
-			continue;
-		}
-		cloud_ahead = false;
-		vec3 offset = eye + dir * d;  // from the head: the ray starts at the eye
-		float height = cloud_height_along(ray, d);
-		float in_cloud;
-		float beta;
-		float tau_step;  // the step's optical depth (unscaled)
-		if (phase_m >= 0.0 && cloud_debug_output != 1 && cloud_debug_output != 2 && cloud_debug_output != 6) {
-			// The deterministic march's samples of the shapes (not for the grid-mean debug outputs, which have no
-			// sub-grid structure): the step in equal sub-steps of at most the structure step (cloud_structure_step;
-			// beyond CLOUD_MAX_SUBSTEPS of them longer), each sampled at its midpoint in its own field cell (a sheet of
-			// cirrus a few hundred metres thick changes over a slant step: the step's cell lost ~2 % of its alpha).
-			float span_m = b - a_this;
-			float spacing_m = max(cloud_structure_step(cell, climb), span_m / float(CLOUD_MAX_SUBSTEPS));
-			int subs = clamp(int(ceil(span_m / spacing_m - 1.0e-3)), 1, CLOUD_MAX_SUBSTEPS);
-			float sub_m = span_m / float(subs);
-			// The detail's band limit: the pixel footprint, at least CLOUD_DETAIL_STEP_FRACTION of the step up to the
-			// structure step's spacing - continuous in the step length (with the sub-step itself, which halves where the
-			// step crosses the structure step, the band limit jumped there: a contour on near cumuli, fix round 1).
-			spacing_m = min(span_m, spacing_m);
-			float sum_tau = 0.0;     // of the sub-steps taken
-			float sum_tau_d = 0.0;
-			float sum_tau_in = 0.0;  // x the sub-samples' in-cloud extinction (their cells')
-			float sum_tau_gap = 0.0;  // of the stretch from the last sub-step taken to an entry
-			float before = a_this;   // the last sub-sample (the step's start before the first)
-			float beta_before = 0.0;
-			float beta_taken_max = 0.0;  // the largest extinction of the sub-samples taken
-			float taken_m = span_m;      // the step's length (shortened at an entry after cloud)
-			int taken = subs;            // the sub-steps taken
-			bool entered = false;        // ended at an entry with only thin cloud in front (carried)
-			for (int j = 0; j < subs; j++) {
-				float d_j = a_this + (float(j) + 0.5) * sub_m;
-				float detail_j = max(pixel_angle * d_j, CLOUD_DETAIL_STEP_FRACTION * spacing_m);
-				vec2 lat_lon_j;
-				float in_cloud_j;
-				float beta_j = cloud_extinction_at(eye + dir * d_j, cloud_height_along(ray, d_j), detail_j,
-						pixel_angle * d_j, lat_lon_j, in_cloud_j);
-				bool entry = outside && beta_j >= CLOUD_SILHOUETTE_EXTINCTION_PER_M;
-				outside = beta_j < CLOUD_SILHOUETTE_EXTINCTION_PER_M;
-				if (entry) {
-					// The silhouette between the last sub-sample and this one: bisected for the threshold
-					// (CLOUD_SILHOUETTE_BISECTIONS), then the in-cloud steps start there (the outline found, not
-					// sampled).
-					float lo = before;
-					float hi = d_j;
-					float beta_lo = beta_before;
-					for (int k = 0; k < CLOUD_SILHOUETTE_BISECTIONS; k++) {
-						float mid = 0.5 * (lo + hi);
-						vec2 lat_lon_mid;
-						float in_cloud_mid;
-						float beta_mid = cloud_extinction_at(eye + dir * mid, cloud_height_along(ray, mid), detail_j,
-								pixel_angle * mid, lat_lon_mid, in_cloud_mid);
-						if (beta_mid >= CLOUD_SILHOUETTE_EXTINCTION_PER_M) {
-							hi = mid;
-						} else {
-							lo = mid;
-							beta_lo = beta_mid;
-						}
-					}
-					if (lo > a_this) {
-						// The step ends at the entry. In front of it: the sub-steps taken and the stretch from their end
-						// to the entry (at the bracket's clear end's extinction). Thin cloud only (all below the
-						// threshold) is carried into the next step (dropped, a thin layer went missing with every entry
-						// as the ray's step phase fell - grain); cloud the ray left and re-enters within the step is a
-						// step of its own with its light (carried, it darkened the next step's light: black specks).
-						float gap_m = max(lo - (a_this + float(j) * sub_m), 0.0);
-						a = lo;
-						if (beta_taken_max < CLOUD_SILHOUETTE_EXTINCTION_PER_M) {
-							carried_tau += sum_tau + beta_lo * gap_m;
-							entered = true;
-						} else {
-							sum_tau_gap = beta_lo * gap_m;
-							taken_m = float(j) * sub_m + gap_m;
-							taken = j;
-						}
-						break;
-					}
-				}
-				sum_tau += beta_j * sub_m;
-				sum_tau_d += beta_j * sub_m * d_j;
-				sum_tau_in += beta_j * sub_m * in_cloud_j;
-				before = d_j;
-				beta_before = beta_j;
-				beta_taken_max = max(beta_taken_max, beta_j);
-			}
-			if (entered) {
-				continue;
-			}
-			if (sum_tau <= 0.0) {
-				dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
-				continue;
-			}
-			beta = (sum_tau + sum_tau_gap) / taken_m;  // the step's mean extinction
-			tau_step = sum_tau + sum_tau_gap;
-			if (taken < subs) {
-				// A step shortened at an entry: the length of its sub-steps for the step-weight test below (not
-				// lo - a_this: its float32 difference far from the camera retried the step until the budget ran out, as
-				// noted there).
-				step_m = float(taken) * sub_m;
-			}
-			// The step's light and distance at its extinction-weighted centre (where it scatters); the step's cell.
-			in_cloud = sum_tau_in / sum_tau;
-			d = sum_tau_d / sum_tau;
-			offset = eye + dir * d;
-			height = cloud_height_along(ray, d);
-		} else {
-			// The detail's band limit: the pixel footprint (the jittered march; the grid-mean debug outputs).
-			beta = cloud_extinction_in_cell(cell, offset, height, pixel_angle * d, pixel_angle * d, in_cloud);
-			if (beta <= 0.0) {
-				dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
-				outside = true;
-				continue;
-			}
-			tau_step = beta * (b - a_this);
-			if (phase_m >= 0.0) {
-				bool entry = outside && beta >= CLOUD_SILHOUETTE_EXTINCTION_PER_M;
-				outside = beta < CLOUD_SILHOUETTE_EXTINCTION_PER_M;
-				if (entry && d > a_this) {
-					// The silhouette (the debug outputs' grid mean, as above for the shapes).
-					float lo = a_this;
-					float hi = d;
-					for (int j = 0; j < CLOUD_SILHOUETTE_BISECTIONS; j++) {
-						float mid = 0.5 * (lo + hi);
-						vec2 lat_lon_mid;
-						float in_cloud_mid;
-						float beta_mid = cloud_extinction_at(eye + dir * mid, cloud_height_along(ray, mid),
-								pixel_angle * mid, pixel_angle * mid, lat_lon_mid, in_cloud_mid);
-						if (beta_mid >= CLOUD_SILHOUETTE_EXTINCTION_PER_M) {
-							hi = mid;
-						} else {
-							lo = mid;
-						}
-					}
-					if (lo > a_this) {
-						a = lo;  // the in-cloud steps start at the entry (the bracket's clear end)
-						continue;
-					}
-				}
-			}
-		}
-		// A step weighing more than CLOUD_MAX_STEP_WEIGHT in the pixel is done again with steps of that weight. The
-		// step's intended length is compared, not b - a_this: far from the camera (a float32 distance of 8.6e6 m has a
-		// 1 m ulp) the rounded difference exceeded the 0.1 % margin again and again - the same step was retried until
-		// the step budget ran out and the ray never reached the cloud (Task 10: low decks seen from the scaled-space
-		// limit, the horizon from orbit).
-		float allowed = CLOUD_MAX_STEP_WEIGHT / transmittance_sc;
-		float refined = allowed < 1.0 ? max(-log(1.0 - allowed) / (k * beta), CLOUD_MIN_STEP_M) : 1.0e30;
-		if (min(step_m, d1 - a_this) > 1.001 * refined) {
-			dense_step_m = refined;
-			a = a_this;
-			continue;
-		}
-		dense_step_m = max(refined, CLOUD_MIN_STEP_M);  // the limit at this density (grows as the pixel turns opaque)
-		float tau = tau_step + carried_tau;
-		carried_tau = 0.0;
-		float scaled_step = exp(-k * tau);
-		float true_step = exp(-tau);
-		if (!coverage_only) {
-			vec3 p = camera + offset;
-			vec3 normal = normalize(p * ATM_STRETCH * ATM_STRETCH);  // the ellipsoid's normal (geodetic up)
-			vec2 column = cloud_column_depths(cell, lat_lon, height, in_cloud);
-			// The light march's jitter decorrelated from step to step (golden-ratio sequence): the samples of one ray
-			// average its noise instead of sharing one light-march error.
-			// The deterministic march: the light march's midpoints too (the Moon's; the Sun's where no cache holds it).
-			float light_jitter = phase_m >= 0.0 ? 0.5 : fract(jitter + float(i) * 0.6180339887);
-			vec3 source = vec3(0.0);        // the sky's (scaled problem: attenuated on the scaled depths)
-			vec3 light_source = vec3(0.0);  // the Sun's and the Moon's (cloud_light_source)
-			if (cloud_debug_output == 2 || cloud_debug_output == 7) {
-				light_source = vec3(cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter,
-						pixel_angle, true));
-			} else {
-				// The air's light at the cloud (Sun and sky irradiance), refreshed along the ray every
-				// CLOUD_LIGHT_REFRESH_FRACTION of the distance (at least CLOUD_LIGHT_REFRESH_M): it changes over kilometres.
-				if (abs(d - light_at_m) > max(CLOUD_LIGHT_REFRESH_M, CLOUD_LIGHT_REFRESH_FRACTION * d)) {
-					light_at_m = d;
-					sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
-					float eclipse_x = clamp((d - CLOUD_ECLIPSE_NEAR_M) / (CLOUD_ECLIPSE_FAR_M - CLOUD_ECLIPSE_NEAR_M), 0.0,
-							1.0);
-					sky_irradiance = ATM_PI * atm_sky_light(p, normal) * mix(eclipse_near, eclipse_far, eclipse_x);
-					if (moonlit) {
-						moon_irradiance = ATM_PI * atm_moon_at(p);
-						moon_sky_irradiance = ATM_PI * atm_moon_sky_light(p, normal);
-					}
-				}
-				float sky_source = cloud_sky_scattering_source(-dot(dir, normal), column.x, column.y);
-				source = sky_irradiance * sky_source;
-				if (dot(sun_irradiance, sun_irradiance) > 0.0) {
-					light_source += sun_irradiance
-							* cloud_light_source(sun_dir, normal, dir, offset, height, d, column, light_jitter,
-							pixel_angle, true);
-				}
-				if (moonlit) {
-					light_source += moon_irradiance
-							* cloud_light_source(moon_dir, normal, dir, offset, height, d, column, light_jitter,
-							pixel_angle, false);
-					source += moon_sky_irradiance * sky_source;
-				}
-			}
-			if (cloud_scattering_model == 1) {
-				// The lights' source with the table (exact single scattering + the tabulated Draine part of the higher
-				// orders) is attenuated with exp(-w_D tau); the sky's stays in the scaled problem.
-				float tab_step = exp(-w_tab * tau);
-				radiance += transmittance_sc * source * (1.0 - scaled_step) / k
-						+ transmittance_tab * light_source * (1.0 - tab_step) / w_tab;
-				transmittance_tab *= tab_step;
-			} else {
-				radiance += transmittance_sc * (source + light_source) * (1.0 - scaled_step) / k;
-			}
-		}
-		transmittance_sc *= scaled_step;
-		float next_bg = transmittance_bg * true_step;
-		weighted_distance += d * (transmittance_bg - next_bg);
-		transmittance_bg = next_bg;
-		if (transmittance_sc < CLOUD_MIN_SCALED_TRANSMITTANCE
-				|| (coverage_only && transmittance_bg < CLOUD_COVERAGE_MIN_TRANSMITTANCE)) {
+	// Two passes over the same steps (the march's machinery: coarse steps spanning the segment, fine steps in the
+	// field's cloudy region that still reach its end, sub-samples, silhouette entries, dense refinement): pass 0 the
+	// march [d0, d1], pass 1 the far tier [far_from_m, end_m] - its shapes band-limited at the pixel footprint
+	// (cloud_sample_extinction), its light from cloud_far_light_depth (cloud_sample_light_source), its steps weighted
+	// by the hand-over weight, the march's by 1 - it. Their results: radiance, alpha (weighted), alpha-weighted
+	// distance.
+	vec3 pass_radiance[2] = vec3[](vec3(0.0), vec3(0.0));
+	float pass_alpha[2] = float[](0.0, 0.0);
+	float pass_weighted[2] = float[](0.0, 0.0);
+	float transmittance_end = 1.0;    // the march's background transmittance at its end (the debug outputs)
+	float transmittance_front = 1.0;  // the march's in front of the hand-over band (the far tier's attenuation)
+	int passes = handover && shapes > 0.0 && far_from_m < end_m ? 2 : 1;
+	for (int pass = 0; pass < passes; pass++) {
+		bool far = pass == 1;
+		if (far && transmittance_front <= CLOUD_FAR_MIN_TRANSMITTANCE) {
 			break;
+		}
+		float seg0 = far ? far_from_m : d0;
+		float seg1 = far ? end_m : d1;
+		float start = max(seg0, CLOUD_NEAR_START_M);
+		int n = max(cloud_steps, 1);
+		// Coarse step: the fraction of the distance that spans [start, seg1] in n steps; at most one height layer.
+		float coarse_rel = seg1 > start ? exp(log(seg1 / start) / float(n)) - 1.0 : 1.0;
+		float transmittance_bg = 1.0;   // exp(-tau): the background
+		// The pass's alpha: each step's share of the pixel weighted by keep (the hand-over's cross-fade; = 1 - the
+		// background's transmittance without a band).
+		float march_alpha = 0.0;
+		float transmittance_sc = 1.0;   // exp(-(1 - f) tau): the scattered light
+		// exp(-w_D tau): the lights' scattered light with the transfer table (cloud_scattering_model 1; the table's
+		// source leaves the phase function's HG peak in the view ray, core cloud_transfer_view_extinction)
+		float transmittance_tab = 1.0;
+		vec3 radiance = vec3(0.0);
+		float weighted_distance = 0.0;
+		float light_at_m = -1.0e30;
+		vec3 sun_irradiance = vec3(0.0);
+		vec3 sky_irradiance = vec3(0.0);
+		vec3 moon_irradiance = vec3(0.0);
+		vec3 moon_sky_irradiance = vec3(0.0);
+		float dense_step_m = 1.0e30;  // the step limit after a dense sample (CLOUD_MAX_STEP_WEIGHT)
+		float carried_tau = 0.0;  // thin cloud in front of an entry, added to the next step (cloud_march's sub-samples)
+		float a = seg0;
+		// The deterministic step phase: the first step ends where the ray meets the next height shell k s_v above the
+		// ellipsoid (s_v: the first coarse step's height extent), so the samples stay put for a static camera and move
+		// with the shells, not with the screen, for a moving one. phase_m: that end (-1: none, the jittered march).
+		float phase_m = -1.0;
+		// the last sample lay below CLOUD_SILHOUETTE_EXTINCTION_PER_M (the next crossing is an entry)
+		bool outside = true;
+		// the last clear step ended in the field's cloudy region: the next steps are fine ones
+		bool cloud_ahead = false;
+		if (cloud_deterministic_march) {
+			float h0 = cloud_height_along(ray, seg0);
+			float slope = cloud_height_slope(ray, seg0);
+			float layer0_m = h0 < CLOUD_FINE_TOP_M ? CLOUD_FINE_LAYER_M : CLOUD_COARSE_LAYER_M;
+			float step0_m = max(min(start * coarse_rel, layer0_m / max(abs(slope), 1.0e-3)), CLOUD_MIN_STEP_M);
+			float shell_m = step0_m * max(abs(slope), CLOUD_PHASE_MIN_CLIMB);
+			float f = fract(h0 / shell_m);
+			float to_shell = slope >= 0.0 ? 1.0 - f : f;  // of the step, toward the next shell along the ray
+			phase_m = seg0 + step0_m * (to_shell > 1.0e-3 ? to_shell : 1.0);
+		}
+		for (int i = 0; i < cloud_max_steps && a < seg1; i++) {
+			float h_a = cloud_height_along(ray, a);
+			float climb = abs(cloud_height_slope(ray, a));
+			float layer_m = h_a < CLOUD_FINE_TOP_M ? CLOUD_FINE_LAYER_M : CLOUD_COARSE_LAYER_M;
+			float step_m = min(max(a, start) * coarse_rel, layer_m / max(climb, 1.0e-3));
+			step_m = max(step_m, CLOUD_MIN_STEP_M);
+			if (a < phase_m) {
+				step_m = min(step_m, phase_m - a);
+			}
+			// Inside the field's cloudy region the step shrinks to the fine fraction of the distance: the sub-grid
+			// shapes are resolved (a coarse step would hit or miss a cumulus edge per pixel: grain).
+			float d = a + jitter * step_m;
+			vec2 lat_lon = cloud_lat_lon(camera + eye + dir * d);
+			CloudCell cell = cloud_field(lat_lon, cloud_height_along(ray, d));
+			if (cell.extinction > 0.0 || cloud_ahead) {
+				// Never finer than what still reaches the segment's end within the remaining steps (no far cloud is
+				// cut).
+				float remaining = float(max(cloud_max_steps - i, 1));
+				float reach = max(a, start) * (exp(log(max(seg1, start) / max(a, start)) / remaining) - 1.0);
+				// The dense-cloud limit overrides the reach (behind an opaque surface little of the segment is seen).
+				float fine = min(max(max(max(a, start) * cloud_fine_step_fraction, reach), CLOUD_MIN_STEP_M),
+						dense_step_m);
+				if (fine < step_m) {
+					step_m = fine;
+					d = a + jitter * step_m;
+					lat_lon = cloud_lat_lon(camera + eye + dir * d);
+					cell = cloud_field(lat_lon, cloud_height_along(ray, d));
+				}
+			}
+			float b = min(a + step_m, seg1);
+			d = min(d, b);
+			float a_this = a;
+			a = b;
+			if (cell.extinction <= 0.0) {
+				dense_step_m = min(2.0 * dense_step_m, 1.0e30);
+				outside = true;
+				if (phase_m >= 0.0 && b < seg1) {
+					// The deterministic march: a clear sample whose step ends in the field's cloudy region (a deck's
+					// top, a cumulus layer's) ends the step at the sample and marches on with fine steps - a fixed
+					// sample point would skip up to a coarse step of the cloud there in every frame (the jitter only
+					// averaged it).
+					cloud_ahead = cloud_field(cloud_lat_lon(camera + eye + dir * b),
+							cloud_height_along(ray, b)).extinction > 0.0;
+					if (cloud_ahead && d > a_this) {
+						a = d;
+					}
+				}
+				continue;
+			}
+			cloud_ahead = false;
+			vec3 offset = eye + dir * d;  // from the head: the ray starts at the eye
+			float height = cloud_height_along(ray, d);
+			float in_cloud;
+			float beta;
+			float tau_step;  // the step's optical depth (unscaled)
+			if (phase_m >= 0.0 && cloud_debug_output != 1 && cloud_debug_output != 2 && cloud_debug_output != 6) {
+				// The deterministic march's samples of the shapes (not for the grid-mean debug outputs, which have no
+				// sub-grid structure): the step in equal sub-steps of at most the structure step (cloud_structure_step;
+				// beyond CLOUD_MAX_SUBSTEPS of them longer), each sampled at its midpoint in its own field cell (a
+				// sheet of cirrus a few hundred metres thick changes over a slant step: the step's cell lost ~2 % of
+				// its alpha).
+				float span_m = b - a_this;
+				// (the far tier's shapes are band-limited at the pixel footprint: their structure step scales with the
+				// mip)
+				float structure_m = cloud_structure_step(cell, climb)
+						* (far ? exp2(cloud_far_level(pixel_angle * a_this)) : 1.0);
+				float spacing_m = max(structure_m, span_m / float(CLOUD_MAX_SUBSTEPS));
+				int subs = clamp(int(ceil(span_m / spacing_m - 1.0e-3)), 1, CLOUD_MAX_SUBSTEPS);
+				float sub_m = span_m / float(subs);
+				// The detail's band limit: the pixel footprint, at least CLOUD_DETAIL_STEP_FRACTION of the step up to
+				// the structure step's spacing - continuous in the step length (with the sub-step itself, which halves
+				// where the step crosses the structure step, the band limit jumped there: a contour on near cumuli, fix
+				// round 1).
+				spacing_m = min(span_m, spacing_m);
+				float sum_tau = 0.0;     // of the sub-steps taken
+				float sum_tau_d = 0.0;
+				float sum_tau_in = 0.0;  // x the sub-samples' in-cloud extinction (their cells')
+				float sum_tau_gap = 0.0;  // of the stretch from the last sub-step taken to an entry
+				float before = a_this;   // the last sub-sample (the step's start before the first)
+				float beta_before = 0.0;
+				float beta_taken_max = 0.0;  // the largest extinction of the sub-samples taken
+				float taken_m = span_m;      // the step's length (shortened at an entry after cloud)
+				int taken = subs;            // the sub-steps taken
+				bool entered = false;        // ended at an entry with only thin cloud in front (carried)
+				for (int j = 0; j < subs; j++) {
+					float d_j = a_this + (float(j) + 0.5) * sub_m;
+					float detail_j = max(pixel_angle * d_j, CLOUD_DETAIL_STEP_FRACTION * spacing_m);
+					vec2 lat_lon_j;
+					float in_cloud_j;
+					float beta_j = cloud_sample_extinction(far, eye + dir * d_j, cloud_height_along(ray, d_j), detail_j,
+							pixel_angle * d_j, lat_lon_j, in_cloud_j);
+					bool entry = outside && beta_j >= CLOUD_SILHOUETTE_EXTINCTION_PER_M;
+					outside = beta_j < CLOUD_SILHOUETTE_EXTINCTION_PER_M;
+					if (entry) {
+						// The silhouette between the last sub-sample and this one: bisected for the threshold
+						// (CLOUD_SILHOUETTE_BISECTIONS), then the in-cloud steps start there (the outline found, not
+						// sampled).
+						float lo = before;
+						float hi = d_j;
+						float beta_lo = beta_before;
+						for (int k = 0; k < CLOUD_SILHOUETTE_BISECTIONS; k++) {
+							float mid = 0.5 * (lo + hi);
+							vec2 lat_lon_mid;
+							float in_cloud_mid;
+							float beta_mid = cloud_sample_extinction(far, eye + dir * mid, cloud_height_along(ray, mid),
+									detail_j, pixel_angle * mid, lat_lon_mid, in_cloud_mid);
+							if (beta_mid >= CLOUD_SILHOUETTE_EXTINCTION_PER_M) {
+								hi = mid;
+							} else {
+								lo = mid;
+								beta_lo = beta_mid;
+							}
+						}
+						if (lo > a_this) {
+							// The step ends at the entry. In front of it: the sub-steps taken and the stretch from
+							// their end to the entry (at the bracket's clear end's extinction). Thin cloud only (all
+							// below the threshold) is carried into the next step (dropped, a thin layer went missing
+							// with every entry as the ray's step phase fell - grain); cloud the ray left and re-enters
+							// within the step is a step of its own with its light (carried, it darkened the next step's
+							// light: black specks).
+							float gap_m = max(lo - (a_this + float(j) * sub_m), 0.0);
+							a = lo;
+							if (beta_taken_max < CLOUD_SILHOUETTE_EXTINCTION_PER_M) {
+								carried_tau += sum_tau + beta_lo * gap_m;
+								entered = true;
+							} else {
+								sum_tau_gap = beta_lo * gap_m;
+								taken_m = float(j) * sub_m + gap_m;
+								taken = j;
+							}
+							break;
+						}
+					}
+					sum_tau += beta_j * sub_m;
+					sum_tau_d += beta_j * sub_m * d_j;
+					sum_tau_in += beta_j * sub_m * in_cloud_j;
+					before = d_j;
+					beta_before = beta_j;
+					beta_taken_max = max(beta_taken_max, beta_j);
+				}
+				if (entered) {
+					continue;
+				}
+				if (sum_tau <= 0.0) {
+					dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
+					continue;
+				}
+				beta = (sum_tau + sum_tau_gap) / taken_m;  // the step's mean extinction
+				tau_step = sum_tau + sum_tau_gap;
+				if (taken < subs) {
+					// A step shortened at an entry: the length of its sub-steps for the step-weight test below (not lo
+					// - a_this: its float32 difference far from the camera retried the step until the budget ran out,
+					// as noted there).
+					step_m = float(taken) * sub_m;
+				}
+				// The step's light and distance at its extinction-weighted centre (where it scatters); the step's cell.
+				in_cloud = sum_tau_in / sum_tau;
+				d = sum_tau_d / sum_tau;
+				offset = eye + dir * d;
+				height = cloud_height_along(ray, d);
+			} else {
+				// The detail's band limit: the pixel footprint (the jittered march; the grid-mean debug outputs).
+				beta = cloud_sample_extinction_in_cell(far, cell, offset, height, pixel_angle * d, pixel_angle * d,
+						in_cloud);
+				if (beta <= 0.0) {
+					dense_step_m = min(2.0 * dense_step_m, 1.0e30);  // clear air: the steps grow back
+					outside = true;
+					continue;
+				}
+				tau_step = beta * (b - a_this);
+				if (phase_m >= 0.0) {
+					bool entry = outside && beta >= CLOUD_SILHOUETTE_EXTINCTION_PER_M;
+					outside = beta < CLOUD_SILHOUETTE_EXTINCTION_PER_M;
+					if (entry && d > a_this) {
+						// The silhouette (the debug outputs' grid mean, as above for the shapes).
+						float lo = a_this;
+						float hi = d;
+						for (int j = 0; j < CLOUD_SILHOUETTE_BISECTIONS; j++) {
+							float mid = 0.5 * (lo + hi);
+							vec2 lat_lon_mid;
+							float in_cloud_mid;
+							float beta_mid = cloud_sample_extinction(far, eye + dir * mid, cloud_height_along(ray, mid),
+									pixel_angle * mid, pixel_angle * mid, lat_lon_mid, in_cloud_mid);
+							if (beta_mid >= CLOUD_SILHOUETTE_EXTINCTION_PER_M) {
+								hi = mid;
+							} else {
+								lo = mid;
+							}
+						}
+						if (lo > a_this) {
+							a = lo;  // the in-cloud steps start at the entry (the bracket's clear end)
+							continue;
+						}
+					}
+				}
+			}
+			// A step weighing more than CLOUD_MAX_STEP_WEIGHT in the pixel is done again with steps of that weight. The
+			// step's intended length is compared, not b - a_this: far from the camera (a float32 distance of 8.6e6 m
+			// has a 1 m ulp) the rounded difference exceeded the 0.1 % margin again and again - the same step was
+			// retried until the step budget ran out and the ray never reached the cloud (Task 10: low decks seen from
+			// the scaled-space limit, the horizon from orbit).
+			float allowed = CLOUD_MAX_STEP_WEIGHT / transmittance_sc;
+			float refined = allowed < 1.0 ? max(-log(1.0 - allowed) / (k * beta), CLOUD_MIN_STEP_M) : 1.0e30;
+			if (min(step_m, seg1 - a_this) > 1.001 * refined) {
+				dense_step_m = refined;
+				a = a_this;
+				continue;
+			}
+			// the limit at this density (grows as the pixel turns opaque)
+			dense_step_m = max(refined, CLOUD_MIN_STEP_M);
+			float tau = tau_step + carried_tau;
+			carried_tau = 0.0;
+			// Over the hand-over band the step's share of the pixel (its light and its alpha, after the clouds in front
+			// of it) is weighted by 1 - the far tier's weight there, the far tier's steps by the weight: a
+			// premultiplied cross-fade, linear per cloud. A faded opacity per step compounds over the many steps inside
+			// one cloud like a faded density - a thick cloud stayed opaque until the band's end.
+			float keep = !handover ? 1.0 : (far ? cloud_handover_weight(d) : 1.0 - cloud_handover_weight(d));
+			float scaled_step = exp(-k * tau);
+			float true_step = exp(-tau);
+			if (!coverage_only) {
+				vec3 p = camera + offset;
+				vec3 normal = normalize(p * ATM_STRETCH * ATM_STRETCH);  // the ellipsoid's normal (geodetic up)
+				vec2 column = cloud_column_depths(cell, lat_lon, height, in_cloud);
+				// The light march's jitter decorrelated from step to step (golden-ratio sequence): the samples of one
+				// ray average its noise instead of sharing one light-march error. The deterministic march: the light
+				// march's midpoints too (the Moon's; the Sun's where no cache holds it).
+				float light_jitter = phase_m >= 0.0 ? 0.5 : fract(jitter + float(i) * 0.6180339887);
+				vec3 source = vec3(0.0);        // the sky's (scaled problem: attenuated on the scaled depths)
+				vec3 light_source = vec3(0.0);  // the Sun's and the Moon's (cloud_light_source)
+				if (cloud_debug_output == 2 || cloud_debug_output == 7) {
+					light_source = vec3(cloud_sample_light_source(far, sun_dir, normal, dir, offset, height, d, column,
+							light_jitter, pixel_angle, true));
+				} else {
+					// The air's light at the cloud (Sun and sky irradiance), refreshed along the ray every
+					// CLOUD_LIGHT_REFRESH_FRACTION of the distance (at least CLOUD_LIGHT_REFRESH_M): it changes over
+					// kilometres.
+					if (abs(d - light_at_m) > max(CLOUD_LIGHT_REFRESH_M, CLOUD_LIGHT_REFRESH_FRACTION * d)) {
+						light_at_m = d;
+						sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
+						float eclipse_x = clamp((d - CLOUD_ECLIPSE_NEAR_M)
+								/ (CLOUD_ECLIPSE_FAR_M - CLOUD_ECLIPSE_NEAR_M), 0.0, 1.0);
+						sky_irradiance = ATM_PI * atm_sky_light(p, normal) * mix(eclipse_near, eclipse_far, eclipse_x);
+						if (moonlit) {
+							moon_irradiance = ATM_PI * atm_moon_at(p);
+							moon_sky_irradiance = ATM_PI * atm_moon_sky_light(p, normal);
+						}
+					}
+					float sky_source = cloud_sky_scattering_source(-dot(dir, normal), column.x, column.y);
+					source = sky_irradiance * sky_source;
+					if (dot(sun_irradiance, sun_irradiance) > 0.0) {
+						light_source += sun_irradiance
+								* cloud_sample_light_source(far, sun_dir, normal, dir, offset, height, d, column,
+								light_jitter, pixel_angle, true);
+					}
+					if (moonlit) {
+						light_source += moon_irradiance
+								* cloud_sample_light_source(far, moon_dir, normal, dir, offset, height, d, column,
+								light_jitter, pixel_angle, false);
+						source += moon_sky_irradiance * sky_source;
+					}
+				}
+				if (cloud_scattering_model == 1) {
+					// The lights' source with the table (exact single scattering + the tabulated Draine part of the
+					// higher orders) is attenuated with exp(-w_D tau); the sky's stays in the scaled problem.
+					float tab_step = exp(-w_tab * tau);
+					radiance += keep * (transmittance_sc * source * (1.0 - scaled_step) / k
+							+ transmittance_tab * light_source * (1.0 - tab_step) / w_tab);
+					transmittance_tab *= tab_step;
+				} else {
+					radiance += keep * transmittance_sc * (source + light_source) * (1.0 - scaled_step) / k;
+				}
+			}
+			transmittance_sc *= scaled_step;
+			float next_bg = transmittance_bg * true_step;
+			float step_alpha = transmittance_bg - next_bg;
+			march_alpha += keep * step_alpha;
+			weighted_distance += keep * d * step_alpha;
+			transmittance_bg = next_bg;
+			if (!far && d < cloud_handover_near_m) {
+				transmittance_front = transmittance_bg;
+			}
+			if (transmittance_sc < CLOUD_MIN_SCALED_TRANSMITTANCE
+					|| (coverage_only && transmittance_bg < CLOUD_COVERAGE_MIN_TRANSMITTANCE)) {
+				break;
+			}
+		}
+
+		// Thin cloud in front of an entry the step budget ended at: its transmittance (its light is negligible, tau <
+		// 0.05).
+		float carried = exp(-carried_tau);
+		march_alpha += (!handover ? 1.0 : (far ? cloud_handover_weight(seg1) : 1.0 - cloud_handover_weight(seg1)))
+				* transmittance_bg * (1.0 - carried);
+		transmittance_bg *= carried;
+		pass_radiance[pass] = radiance;
+		pass_alpha[pass] = handover ? march_alpha : 1.0 - transmittance_bg;
+		pass_weighted[pass] = weighted_distance;
+		if (!far) {
+			transmittance_end = transmittance_bg;
 		}
 	}
 
-	// Thin cloud in front of an entry the step budget ended at: its transmittance (its light is negligible, tau < 0.05).
-	transmittance_bg *= exp(-carried_tau);
 	if (cloud_debug_output == 1 || cloud_debug_output == 4) {
-		color = vec3(transmittance_bg);
+		color = vec3(transmittance_end);
 		alpha = 1.0;
 		return;
 	}
 	if (cloud_debug_output == 2 || cloud_debug_output == 7) {
-		color = radiance;
+		color = pass_radiance[0];
 		alpha = 1.0;
 		return;
 	}
-	alpha = 1.0 - transmittance_bg;
+	// The composite (static clouds Task 8): the march's image plus, behind the march's clouds in front of the band, the
+	// far tier's (faded to the column model at large footprints, weighted by the hand-over weight at the far slab):
+	// both march the same clouds, so a cloud in the band - or two behind each other - is the exact linear cross-fade of
+	// the two renders; the cloud distance weighted by each part's alpha.
+	float behind = handover ? transmittance_front : 0.0;
+	vec4 column_part = vec4(0.0);
+	float column_m = 0.0;
+	if (handover && shapes < 1.0 && behind > CLOUD_FAR_MIN_TRANSMITTANCE) {
+		vec2 column_p;
+		float d_p = cloud_far_slab(ray, dir, eye, far_from_m, end_m, surface, column_p);
+		if (d_p > 0.0) {
+			column_part = cloud_handover_weight(d_p)
+					* cloud_far_column(dir, eye, d_p, column_p, eclipse_near, eclipse_far, coverage_only);
+			column_m = d_p;
+		}
+	}
+	float near_alpha = pass_alpha[0];
+	float far_alpha = mix(column_part.a, pass_alpha[1], shapes);
+	alpha = min(near_alpha + behind * far_alpha, 1.0);
+	float weighted_m = pass_weighted[0]
+			+ behind * ((1.0 - shapes) * column_part.a * column_m + shapes * pass_weighted[1]);
+	cloud_m = alpha > 1.0e-6 ? weighted_m / alpha : 0.0;
 	if (coverage_only) {
-		cloud_m = alpha > 1.0e-6 ? weighted_distance / alpha : 0.0;
 		return;
 	}
-	if (alpha <= 1.0e-6 && dot(radiance, radiance) <= 0.0) {
+	if (alpha <= 1.0e-6 && dot(pass_radiance[0], pass_radiance[0]) <= 0.0
+			&& dot(pass_radiance[1], pass_radiance[1]) <= 0.0) {
 		alpha = 0.0;
+		cloud_m = 0.0;
 		return;
 	}
-	vec3 air_transmittance = vec3(1.0);
-	vec3 air_light = vec3(0.0);
-	if (alpha > 1.0e-6) {
-		cloud_m = weighted_distance / alpha;
-		air_light = atm_to_point_offset(eye + dir * cloud_m, air_transmittance);
+	for (int pass = 0; pass < passes; pass++) {
+		vec3 air_transmittance = vec3(1.0);
+		vec3 air_light = vec3(0.0);
+		if (pass_alpha[pass] > 1.0e-6) {
+			air_light = atm_to_point_offset(eye + dir * (pass_weighted[pass] / pass_alpha[pass]), air_transmittance);
+		}
+		vec3 part = air_transmittance * pass_radiance[pass] + pass_alpha[pass] * air_light;
+		color += pass == 0 ? part : behind * shapes * part;
 	}
-	color = air_transmittance * radiance + alpha * air_light;
+	color += behind * (1.0 - shapes) * column_part.rgb;
 }
 
 #ifdef CLOUD_CENTRE

@@ -221,3 +221,23 @@ limit continuous. cloud_pass, median / max of the per-second means, ms:
 
 +97 / +75 / +72 % (medians) shipped, +39 / +27 / +25 % with 4 (user: quality first; both pass cloud_grain_check, 8
 within 0.8 % of the 8 x reference's cover and alpha, 4 within 1.8 %).
+
+## Near / far hand-over (static clouds Task 8, 2026-10-27)
+
+Same VR proxy and weather as the Task 5c fix round (`t8_vrperf_*.log`, base 1cb02f6 = the table above, max 8
+sub-samples). The march ends at 34 km; a second pass of the same steps (the far tier) runs from 20 km to the segment's
+end with the far light path (no light cache there) and band-limited shapes; both run over the 20-34 km band.
+cloud_pass, median / max of the per-second means, ms:
+
+| Phase | base 1cb02f6 | separate far march (0.5 % steps, 384) | two passes (shipped) |
+|---|---|---|---|
+| descent | 12.64 / 67.09 | 10.89 / 78.54 | 16.55 / 85.84 |
+| pan low | 38.02 / 42.82 | 42.28 / 46.21 | 51.17 / 57.99 |
+| pan high | 28.03 / 33.23 | 28.48 / 30.31 | 36.12 / 40.99 |
+| cape | 0.33 / 0.54 | 0.36 / 0.76 | 0.38 / 0.67 |
+
+The shipped variant costs +31 / +35 / +29 % (medians) over the base: the band's overlap (both passes) and the far
+pass's light path (5 samples per step instead of the cache's lookup). The cheaper separate far march lost far deck in
+cloud_grain_check's deck view (alpha -12 % against the 8 x reference). Over the budget like the base (Task 10: knobs are
+the band, the far pass's step budget and its light samples).
+

@@ -20,7 +20,8 @@
 #          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's), --cloud_debug=1..4 (the cloud
 #          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels),
 #          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form),
-#          --no_light_cache (the light toward the Sun marched per sample: the light cache's reference).
+#          --no_light_cache (the light toward the Sun marched per sample: the light cache's reference),
+#          --handover=<near m>,<far m> (the near / far hand-over band; 1e9,1e9: the march alone, 0,0: the far tier).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Image identity: --deterministic[=64] once settled resets the cloud history and the cloud pass's frame counter and
 #          saves after exactly that many more frames (with --fixed_exposure, for before / after comparisons).
@@ -81,6 +82,10 @@ func _process(_delta: float) -> bool:
 		if _args.has("cloud_scattering"):  # the fidelity flag (CloudLayer.ScatteringModel)
 			world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
 					if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE
+		if _args.has("handover"):  # the near / far hand-over band (CloudLayer.PRESETS handover_m): "<near m>,<far m>"
+			var band: PackedStringArray = _args["handover"].split(",")
+			ShaderGlobals.set_value(&"cloud_handover_near_m", float(band[0]))
+			ShaderGlobals.set_value(&"cloud_handover_far_m", float(band[1]))
 		if _args.has("cloud_debug"):  # the cloud pass's debug output (clouds.gdshaderinc cloud_debug_output)
 			ShaderGlobals.set_value(&"cloud_debug_output", int(_args["cloud_debug"]))
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))

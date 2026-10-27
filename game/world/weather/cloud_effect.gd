@@ -13,7 +13,8 @@ extends CompositorEffect
 ## cloud's disparity from its distance). Without a RenderingDevice (headless, Compatibility) it does nothing.
 
 const MARCH_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clouds.gdshaderinc",
-		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc"]
+		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_far.gdshaderinc",
+		"res://shaders/cloud_pass.gdshaderinc"]
 const PASS_FILES := ["res://shaders/cloud_pass.gdshaderinc"]
 const GROUP := 8
 const MAX_DISPATCH_GROUPS := 65535  # D3D12's limit per dispatch dimension
@@ -569,12 +570,15 @@ static func _matrix_floats(m: Projection) -> PackedFloat32Array:
 
 ## Whether a cloud sample of this frame can have a pixel footprint above the shape prefilter's start (clouds.gdshaderinc
 ## CLOUD_SHAPE_PREFILTER_START_M): the march pixel's angle (the centre view's) times the farthest distance a cloud
-## sample can have - the horizon distances of the camera and of the cloud top on the largest radius of curvature, plus
-## the light march's near length.
+## sample can have - the horizon distances of the camera and of the cloud top on the largest radius of curvature, at
+## most the near / far hand-over's end (static clouds Task 8: the march ends there; the debug outputs march the whole
+## segment), plus the light march's near length.
 func _shape_prefilter_needed(pixel_angle: float) -> bool:
 	var h := maxf(float(ShaderGlobals.value(&"cloud_camera_height_m")), 0.0)
 	var far_m := sqrt(h * (2.0 * CURVATURE_RADIUS_MAX_M + h)) \
 			+ sqrt(CLOUD_TOP_M * (2.0 * CURVATURE_RADIUS_MAX_M + CLOUD_TOP_M))
+	if int(ShaderGlobals.value(&"cloud_debug_output")) == 0:
+		far_m = minf(far_m, float(ShaderGlobals.value(&"cloud_handover_far_m")))
 	far_m += (ShaderGlobals.value(&"cloud_light_march") as Vector4).z
 	return pixel_angle * far_m > SHAPE_PREFILTER_START_M
 

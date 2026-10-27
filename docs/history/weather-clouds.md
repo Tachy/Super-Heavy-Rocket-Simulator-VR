@@ -480,3 +480,30 @@ Superseded text of `docs/subsystems/weather-clouds.md` (march, validation, open 
   limit jumped where a step crossed 125 m (sub-step halved). Now: max steps 4 x the coarse, a cell per sub-sample,
   a per-type quarter-texel structure step, up to 8 sub-samples, the band limit continuous, the thin cloud before an
   entry carried into the next step (also for single-sample steps).
+
+## Far field vs the volume at the scaled-space limit (superseded by the near / far hand-over, static clouds Task 8, 2026-10-27)
+Superseded text of `docs/subsystems/weather-clouds.md` (validation, open points); the march then ran to the horizon
+and drew every cloud with the shapes up to 1.5e7 m:
+
+> differing pixels' bounding box. `cloud_far_check` after fix round 1: the deck tau 10 volume-vs-far block 11.20 %
+> (limit 10 %; cb65707 9.88 %, the same march at 8 x the steps 11.97 %: the converged volume is brighter than the far
+> field, open for Task 8 with the broken layer's 17.50 %).
+
+> five clear cells (no cloud within 1 deg) unchanged (ratio 1.0000). The game's volume (the shapes, prefiltered)
+> against the far field, tolerance 10 % (ruling 2026-10-26: the shapes' 3D light is outside a column model): deck
+> tau 10 within 6.4 %, tau 2 within 4.3 %, broken cf 0.4 (21 x 21 block means) within 7.3 % (Task 11: every placement
+> resets the cloud history and the frame counter and draws exactly 64 frames, so the temporal mean is the same number of
+> frames in every run; the earlier runs, timing-dependent, gave 7.3 / 5.2 / 7.5-8.5 %; before the prefilter 32 %).
+
+> - Far field against the volume at the hand-over (Task 10, `cloud_far_check.gd`): with the game's volume (the shapes)
+> a deck of tau 10 differs by up to 6.4 % (the volume brighter 25-45 deg from the sub-camera point, Sun ~35 deg up,
+> view ~68 deg off the vertical), tau 2 by up to 4.3 %, a broken layer (cf 0.4) by up to 7.3 % (the volume brighter
+> at the centre by 5-8 %); with the volume on the grid mean the decks agree within 2.95 % / 3.89 %: the step is the shapes' sub-grid structure (the 3D entry cosine
+> under a varying Sun depth only brightens: mu_e is clamped at mu0 from below; the soft edges' thin fringes), which a
+> column model cannot carry. Accepted with the tolerance 10 % (ruling 2026-10-26): a faint step when crossing
+> 1.5e7 m. A thin layer seen from afar cuts many horizontal slices of the 32 km shape tile, whose cover is not exactly
+> cf: faint rings around the sub-camera point remain (the shapes' own, not aliasing). The sub-pixel offsets leave a
+> fine temporal grain on broken cloud beyond f_s until the temporal mean converges (still camera: frames; a moving
+> one: the floor weight's ~23 % of one frame's noise) - with the jittered march only; the deterministic one reads the
+> footprint's centre.
+

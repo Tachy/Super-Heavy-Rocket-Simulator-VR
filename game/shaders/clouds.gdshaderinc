@@ -939,7 +939,8 @@ vec2 cloud_column_texel(sampler3D column, vec3 size, vec2 lat_lon, float layer) 
 	int r0 = int(y0);
 	int z = int(layer);
 	// The RG8 volume reaches Godot shaders as luminance-alpha (Texture3DRD maps R8G8 to LA8: swizzle R, R, R, G), so
-	// the cover is in .a (Godot shaders only; the compute kernels do not read this texture).
+	// the cover is in .a (the cloud pass's compute kernels - the far tier, static clouds Task 8 - are handed the same
+	// swizzled view: .a there too).
 	vec2 t00 = texelFetch(column, ivec3(c0, r0, z), 0).ra;
 	vec2 t10 = texelFetch(column, ivec3(c1, r0, z), 0).ra;
 	vec2 t01 = texelFetch(column, ivec3(c0, r0 + 1, z), 0).ra;

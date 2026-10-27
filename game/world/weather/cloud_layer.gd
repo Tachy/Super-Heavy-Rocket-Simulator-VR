@@ -93,13 +93,20 @@ enum ScatteringModel { CLOSED_FORM, TABLE }
 ## broken layer's cloudy region (2.5 % of the distance each, mostly clear between the shapes) ran out before far cloud -
 ## 7-16 % of the deck view from 9 km lost its far deck (alpha -8.5 % vs the 8 x reference, cloud_grain_check); 384 and
 ## 768 gave the same image. The desktop's 256 lost 3.8 % of the deck's alpha (512: 1.3 %).
+## The near / far hand-over (static clouds Task 8; "handover_m": the band's start and end): the march ends at the end,
+## the far tier (cloud_pass.gdshaderinc cloud_far_tier: the far field's column model with the shapes' pattern) takes
+## the ray from the start, cross-faded between. The end stays inside the light cache's full weight (<= 34 km, ruling of
+## static clouds Task 2: the light beyond is never marched per sample) and below the footprints that need the shape
+## prefilter (VR 1/3 of the centre view: 5.4 mrad x 34 km = 0.18 km, far below its 3.5 km start - the march's cover
+## beat with the 32 km tile there, Task 3 follow-up); the start leaves a band of 14 km, so a 10 % difference between
+## the two models (the M8 ruling) changes the image by <= 3 % per 2 km of distance (smoothstep's slope 1.5 / 14 km).
 const PRESETS := {
 	Quality.DESKTOP: {"steps": 128, "max_steps": 512, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
-			"temporal_weight": 1.0 / 32.0, "clip_gamma": 0.0},
+			"temporal_weight": 1.0 / 32.0, "clip_gamma": 0.0, "handover_m": Vector2(20000.0, 34000.0)},
 	Quality.VR: {"steps": 96, "max_steps": 384, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 3,
-			"temporal_weight": 1.0 / 96.0, "clip_gamma": 1.5},
+			"temporal_weight": 1.0 / 96.0, "clip_gamma": 1.5, "handover_m": Vector2(20000.0, 34000.0)},
 }
 
 var quality: Quality = Quality.DESKTOP:
@@ -742,6 +749,9 @@ func _apply_quality() -> void:
 	ShaderGlobals.set_value(&"cloud_steps", int(preset["steps"]))
 	ShaderGlobals.set_value(&"cloud_max_steps", int(preset["max_steps"]))
 	ShaderGlobals.set_value(&"cloud_fine_step_fraction", float(preset["fine_step_fraction"]))
+	var handover: Vector2 = preset["handover_m"]
+	ShaderGlobals.set_value(&"cloud_handover_near_m", handover.x)
+	ShaderGlobals.set_value(&"cloud_handover_far_m", handover.y)
 	var near := int(preset["light_near"])
 	var first_m := float(preset["light_first_m"])
 	var near_m := float(preset["light_near_m"])

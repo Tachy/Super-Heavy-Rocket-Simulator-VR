@@ -1,6 +1,8 @@
 // The far field of the clouds (M8 weather and clouds, Task 10): the cloud layer of the scaled-space Earth
 // (earth_clouds.gdshader, drawn while the camera is beyond CelestialBody.SCALED_SPACE_DISTANCE_M, where the cloud pass
-// is off). Include atmosphere.gdshaderinc and clouds.gdshaderinc first.
+// is off) and, since static clouds Task 8, the cloud pass's far tier beyond the near / far hand-over
+// (cloud_pass.gdshaderinc cloud_far_tier: the same slab, seen from above or from below, with the shapes' pattern).
+// Include atmosphere.gdshaderinc and clouds.gdshaderinc first.
 //
 // The same field and the same light transport as the cloud pass, in its plane-parallel limit: a pixel there covers
 // >= 7 km (the shapes' detail levels have faded to their mean; the shape noise itself is resolved by a few pixels at
@@ -54,56 +56,78 @@ vec3 cloud_far_angles(vec3 light_dir, vec3 view_prop, vec3 up) {
 	return vec3(theta, psi, one_minus_cos);
 }
 
-// The light's radiance reflected by a slab of vertical optical depth tau toward view_prop, per unit irradiance normal
-// to the light (1/sr; core slab_reflected_radiance_mc with the table, the closed form's integral otherwise). light_dir
-// toward the light, view_prop the propagation toward the camera, up the slab's normal; all unit.
+// The light's radiance leaving a slab of vertical optical depth tau toward view_prop, per unit irradiance normal to
+// the light (1/sr): seen from above (view_prop up, dot(view_prop, up) >= 0) the reflected light (core
+// slab_reflected_radiance_mc with the table, the closed form's integral otherwise), from below the diffusely
+// transmitted light - the same source J(t) integrated from the slab's base, attenuated by exp(-w (tau - t) / |mu|)
+// (static clouds Task 8: a camera under a far layer sees its base). light_dir toward the light, view_prop the
+// propagation toward the camera, up the slab's normal; all unit.
 float cloud_far_light_radiance(float tau, vec3 light_dir, vec3 view_prop, vec3 up) {
 	if (!(tau > 0.0)) {
 		return 0.0;
 	}
-	float mu = max(dot(view_prop, up), CLOUD_FAR_MU_MIN);
+	float mu_signed = dot(view_prop, up);
+	bool below = mu_signed < 0.0;
+	float mu = max(abs(mu_signed), CLOUD_FAR_MU_MIN);
 	float mu0 = max(dot(light_dir, up), CLOUD_ENTRY_COSINE_MIN);
 	vec3 angles = cloud_far_angles(light_dir, view_prop, up);
 	float phase = cloud_phase_function(1.0 - angles.z, angles.z);
 	if (cloud_scattering_model == 1) {
 		float w = cloud_phase.w;
-		float r = w / mu;  // the ray's attenuation exp(-w t / mu) per unit vertical depth
-		float a = 1.0 / mu0 + r;
-		float single = phase / (mu * a) * (1.0 - exp(-tau * a));
-		// Orders >= 2: (1 / w) int_0^U J(t(u)) du, u = 1 - exp(-r t).
+		float r = w / mu;  // the ray's attenuation exp(-w s / mu) per unit vertical depth s from its exit
+		float single;
+		if (below) {
+			// phase / mu int_0^tau exp(-t / mu0) exp(-r (tau - t)) dt
+			float a = 1.0 / mu0 - r;
+			single = abs(a * tau) < 1.0e-4 ? phase / mu * tau * exp(-r * tau)
+					: phase / (mu * a) * (exp(-r * tau) - exp(-tau / mu0));
+		} else {
+			float a = 1.0 / mu0 + r;
+			single = phase / (mu * a) * (1.0 - exp(-tau * a));
+		}
+		// Orders >= 2: (1 / w) int_0^U J(t(u)) du, u = 1 - exp(-r s), s the depth from the exit (top or base).
 		float u_end = 1.0 - exp(-r * tau);
 		float multiple = 0.0;
 		for (int i = 0; i < CLOUD_FAR_NODES; i++) {
-			float t = min(-log(1.0 - u_end * CLOUD_FAR_GL_X[i]) / r, tau);
+			float s = min(-log(1.0 - u_end * CLOUD_FAR_GL_X[i]) / r, tau);
+			float t = below ? tau - s : s;
 			multiple += CLOUD_FAR_GL_W[i] * cloud_transfer_lookup(t, tau - t, mu0, angles.x, angles.y);
 		}
 		return single + multiple * u_end / w;
 	}
-	// The closed form (cloud_scattering_source: its own single scattering inside), attenuated by exp(-k t / mu).
+	// The closed form (cloud_scattering_source: its own single scattering inside), attenuated by exp(-k s / mu).
 	float k = cloud_transport_scale();
 	float r = k / mu;
 	float u_end = 1.0 - exp(-r * tau);
 	float sum = 0.0;
 	for (int i = 0; i < CLOUD_FAR_NODES; i++) {
-		float t = min(-log(1.0 - u_end * CLOUD_FAR_GL_X[i]) / r, tau);
+		float s = min(-log(1.0 - u_end * CLOUD_FAR_GL_X[i]) / r, tau);
+		float t = below ? tau - s : s;
 		sum += CLOUD_FAR_GL_W[i]
-				* cloud_scattering_source(1.0 - angles.z, angles.z, mu, mu0, t / mu0, t, tau);
+				* cloud_scattering_source(1.0 - angles.z, angles.z, mu_signed < 0.0 ? -mu : mu, mu0, t / mu0, t, tau);
 	}
 	return sum * u_end / k;
 }
 
-// The sky's radiance reflected by the slab toward a view of cosine mu, per unit horizontal sky irradiance: the sky
-// source S(t) = P + Q t (cloud_sky_scattering_source, linear in the vertical depth t) along the ray with the scaled
-// attenuation exp(-k t / mu), in closed form.
+// The sky's radiance leaving the slab toward a view of signed cosine mu_view (> 0 from above, reflected; < 0 from
+// below, transmitted), per unit horizontal sky irradiance: the sky source S(t) = P + Q t (cloud_sky_scattering_source,
+// linear in the vertical depth t) along the ray with the scaled attenuation exp(-k s / |mu|) from its exit, in closed
+// form. Q from the source at the slab's base (the source's depth is clamped to the slab: a unit depth beyond a slab
+// thinner than 1 underestimated the slope).
 float cloud_far_sky_radiance(float tau, float mu_view) {
 	if (!(tau > 0.0)) {
 		return 0.0;
 	}
-	float mu = max(mu_view, CLOUD_FAR_MU_MIN);
-	float p = cloud_sky_scattering_source(mu, 0.0, tau);
-	float q = cloud_sky_scattering_source(mu, 1.0, tau) - p;
+	float mu = max(abs(mu_view), CLOUD_FAR_MU_MIN);
+	float mu_s = mu_view < 0.0 ? -mu : mu;
+	float p = cloud_sky_scattering_source(mu_s, 0.0, tau);
+	float q = (cloud_sky_scattering_source(mu_s, tau, tau) - p) / tau;
 	float b = cloud_transport_scale() / mu;
 	float e = exp(-b * tau);
+	if (mu_view < 0.0) {
+		// from the base: S(tau - s) = (P + Q tau) - Q s
+		return ((p + q * tau) * (1.0 - e) / b - q * (1.0 - e * (1.0 + b * tau)) / (b * b)) / mu;
+	}
 	return (p * (1.0 - e) / b + q * (1.0 - e * (1.0 + b * tau)) / (b * b)) / mu;
 }
 
@@ -160,6 +184,37 @@ vec3 cloud_far_crossing(vec3 g, vec3 view, float h) {
 	return g - view * s;
 }
 
+// The grid-mean vertical depth from the side the light is seen from at which the slab is placed: the
+// transmittance-weighted mean in-cloud ray depth of the cloudy part, x (1 - (1 + X) e^-X) / (1 - e^-X), as a grid-mean
+// vertical depth (column: x the grid-mean depth, y the largest fraction; mu the view's |cosine|).
+float cloud_far_seen_depth(vec2 column, float mu) {
+	float cover = max(cloud_column_beam_cover(column, mu), CLOUD_MIN_FRACTION);
+	float x = min(column.x / (cover * mu), 50.0);
+	float mean_ray = x < 1.0e-3 ? 0.5 * x : (1.0 - (1.0 + x) * exp(-x)) / (1.0 - exp(-x));
+	return cover * mu * mean_ray;
+}
+
+// The radiance of a cloudy slab of in-cloud vertical depth tau at the cloud point p (Earth-local, up its geodetic up)
+// toward the camera (view_prop: the propagation toward it; from above or from below by its sign against up): the
+// lights at the cloud as the cloud pass takes them (irradiance normal to the light; the sky's horizontal), not yet
+// attenuated by the air. sky_eclipse: the eclipse sky's factor there.
+vec3 cloud_far_cloudy_radiance(vec3 p, vec3 up, vec3 view_prop, float tau, vec3 sky_eclipse) {
+	vec3 sun_dir = normalize(atmosphere_sun_direction);
+	vec3 sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
+	vec3 sky_irradiance = ATM_PI * atm_sky_light(p, up) * sky_eclipse;
+	float sky_radiance = cloud_far_sky_radiance(tau, dot(view_prop, up));
+	vec3 radiance = sky_irradiance * sky_radiance;
+	if (dot(sun_irradiance, sun_irradiance) > 0.0) {
+		radiance += sun_irradiance * cloud_far_light_radiance(tau, sun_dir, view_prop, up);
+	}
+	if (atm_moonlit()) {
+		vec3 moon_dir = normalize(atmosphere_moon_direction);
+		radiance += ATM_PI * atm_moon_at(p) * cloud_far_light_radiance(tau, moon_dir, view_prop, up)
+				+ ATM_PI * atm_moon_sky_light(p, up) * sky_radiance;
+	}
+	return radiance;
+}
+
 // The cloud layer over the ground point g (Earth-local) of the scaled-space Earth: premultiplied colour (rgb) and
 // alpha (a), to blend over the ground's colour as rgb + (1 - a) x ground. sky_eclipse: the eclipse sky's factor there.
 vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse) {
@@ -169,13 +224,9 @@ vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse) {
 	if (!(column_g.x > 0.0)) {
 		return vec4(0.0);
 	}
-	// The transmittance-weighted mean in-cloud ray depth of the cloudy part, x (1 - (1 + X) e^-X) / (1 - e^-X), as a
-	// grid-mean vertical depth: the height to place the cloud at.
+	// The height to place the cloud at (cloud_far_seen_depth).
 	float mu_g = max(-dot(view, cloud_geodetic_up(g)), CLOUD_FAR_MU_MIN);
-	float cover_g = max(cloud_column_beam_cover(column_g, mu_g), CLOUD_MIN_FRACTION);
-	float x = min(column_g.x / (cover_g * mu_g), 50.0);
-	float mean_ray = x < 1.0e-3 ? 0.5 * x : (1.0 - (1.0 + x) * exp(-x)) / (1.0 - exp(-x));
-	float h = cloud_far_depth_height(cloud_lat_lon(g), cover_g * mu_g * mean_ray);
+	float h = cloud_far_depth_height(cloud_lat_lon(g), cloud_far_seen_depth(column_g, mu_g));
 	vec3 p = cloud_far_crossing(g, view, h);
 	vec2 column = cloud_column_mean_depth(cloud_lat_lon(p), 0.0);
 	if (!(column.x > 0.0)) {
@@ -187,20 +238,7 @@ vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse) {
 	float cover = max(cloud_column_beam_cover(column, mu), CLOUD_MIN_FRACTION);
 	float tau = column.x / cover;  // the cloudy part's vertical depth
 	float alpha = cover * (1.0 - exp(-tau / mu));
-	// The lights at the cloud, as the cloud pass takes them (irradiance normal to the light; the sky's horizontal).
-	vec3 sun_dir = normalize(atmosphere_sun_direction);
-	vec3 sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
-	vec3 sky_irradiance = ATM_PI * atm_sky_light(p, up) * sky_eclipse;
-	float sky_radiance = cloud_far_sky_radiance(tau, mu);
-	vec3 radiance = sky_irradiance * sky_radiance;
-	if (dot(sun_irradiance, sun_irradiance) > 0.0) {
-		radiance += sun_irradiance * cloud_far_light_radiance(tau, sun_dir, view_prop, up);
-	}
-	if (atm_moonlit()) {
-		vec3 moon_dir = normalize(atmosphere_moon_direction);
-		radiance += ATM_PI * atm_moon_at(p) * cloud_far_light_radiance(tau, moon_dir, view_prop, up)
-				+ ATM_PI * atm_moon_sky_light(p, up) * sky_radiance;
-	}
+	vec3 radiance = cloud_far_cloudy_radiance(p, up, view_prop, tau, sky_eclipse);
 	vec3 air_transmittance;
 	vec3 air_light = atm_to_point_offset(p - camera, air_transmittance);
 	return vec4(air_transmittance * radiance * cover + alpha * air_light, alpha);
