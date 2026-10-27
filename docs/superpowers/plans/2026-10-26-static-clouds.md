@@ -310,22 +310,27 @@ brighter than the sky beside it; real backlit cumulus bodies are dark grey with 
 - [ ] **Step 4: Run** the cloud checks, renders t9b_* (backlit, front-lit, side-lit) vs t9f.
 - [ ] **Step 5: Commit** `fix(game): backlit cumulus bodies dark with a bright rim`
 
-### Task 9c: Cumulus water from an adiabatic parcel (user 2026-10-27: "Cumulus sind nie flach")
+### Task 9c: Cover from ERA5 total cloud cover, cumulus water from an adiabatic parcel (user 2026-10-27)
 
-Investigation (sdd cloud-tau-investigation.md): ERA5 / GFS cloud water lacks the convective updraft cores, so
-grid-mean water / cover gives cumulus about half the subadiabatic in-cloud water; the thinnest decile (and GFS
-shallow cumulus, median in-cloud tau 0.4) are wide, thin, translucent sheets - not cumulus.
+User: "Cumulus sind nie flach"; decision 2026-10-27: cover follows the reanalysis total cloud cover AND cumulus get the
+water of the updraft cores the reanalysis does not hold (adiabatic parcel). Measurement round (sdd task-9c-report.md):
+a water-conserving floor costs 10-20 % cover on top of the part-1 deficit vs tcc (mean 0.14) - rejected.
 
-**Files:** `core/src/environment/` (column build / LCL bases), `core/tests/`, docs `docs/subsystems/weather-clouds.md`
+**Files:** `tools/data_pipeline/` (ERA5 `total_cloud_cover`, GFS `TCDC` entire atmosphere, analog builder),
+`core/src/weather_decode/`, `core/src/environment/` (column build), `.wthr` format version, `core/tests/`, game
+checks, docs `docs/subsystems/weather-clouds.md`, `weather-service.md`, `tools/data_pipeline/sources.toml`
 
-- [ ] **Step 1: Test** (RED): liquid cumuliform boundary-layer runs reach in-cloud LWC >= f_ad x the adiabatic LWC
-  gradient (T, p) x height above the cloud base (f_ad 0.3-0.5 [E], Blyth 1993, Brenguier et al. 2000); column water
-  path conserved; cover <= the data's.
-- [ ] **Step 2: Implement**: where the data's in-cloud water is below the floor, lower the cumulus cover to keep the
-  water path (fewer, denser, deeper-looking cells); shapes unchanged (user-approved), only cover / extinction.
-- [ ] **Step 3: Run** core tags + cloud checks; record the cover change vs ERA5 tcc; renders t9c_* (Cape, ground,
-  deck) vs t9b.
-- [ ] **Step 4: Commit** `feat(core): cumulus in-cloud water from an adiabatic parcel`
+- [ ] **Step 1: Data**: fetch tcc with every snapshot (ERA5 single level, GFS TCDC; analog files from the same
+  ERA5 source), stored per column in the .wthr (version bump; older refused and rebuilt).
+- [ ] **Step 2: Test** (RED): the column's maximum-overlap cover of its layers is scaled to tcc (layer fractions
+  kept in proportion, randomly / maximum overlap as the core uses); liquid cumuliform runs above an LCL base reach
+  in-cloud LWC >= f_ad x adiabatic gradient (T, p) x height above base over their run path (f_ad [E] with sources,
+  Blyth 1993, Brenguier et al. 2000) - the added water is recorded per column (diagnostic) and bounded (p99 in-cloud
+  LWC <= ~1.5 g/m^3); stratiform / ice unchanged in water; cover vs tcc mean deficit <= 0.03.
+- [ ] **Step 3: Implement**, CPU light / far field / shadows follow the new water and cover automatically (one source).
+- [ ] **Step 4: Run** core tags + cloud checks; the in-cloud tau distribution per type before/after (thin Cu area);
+  renders t9c_* vs t9b_*.
+- [ ] **Step 5: Commit** `feat(core): cloud cover from total cloud cover, cumulus water from an adiabatic parcel`
 
 ### Task 10: Budget, presets, desktop re-baseline, VR acceptance
 
