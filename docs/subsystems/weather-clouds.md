@@ -621,7 +621,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   ruling 2026-10-27; open point below for the CPU's grid-mean value).
 - **Quality presets** [E]: desktop 128 coarse / 512 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 96 / 384,
   2.5 %, 5 + 2 (static clouds Task 3: the deterministic march lost cumulus bases with 48 coarse steps; case 9 passes
-  with the 2.5 % fine step; cost in `vr-performance.md`, the budget is Task 10's); both 3 detail levels; resolution 1/2 desktop, 1/3 of the VR centre view (VR performance plan part 2); temporal weight floor 1/32 /
+  with the 2.5 % fine step; cost and the Task 10 profile in `vr-performance.md`: kept, every cheaper setting
+  changes the look - user decision); both 3 detail levels; resolution 1/2 desktop, 1/3 of the VR centre view (VR performance plan part 2); temporal weight floor 1/32 /
   1/96 (jittered march only). Max steps 4 x the coarse ones (Task 5c fix round 1): with 192 the VR fine steps through
   a broken layer's cloudy region (mostly clear between the shapes) ran out before the far cloud - 7-16 % of the deck
   view from 9 km lost its far deck (alpha -8.5 % vs the 8 x reference); 384 and 768 gave the same image; the
@@ -638,6 +639,14 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   scene's single scattering, outline, front weight, no-negative and clear-sky cases (numbers in the Model section);
   core `[weather]`: `cloud_render_top_m`; core `[atmosphere]`: the single Rayleigh table = the raymarch's single
   Rayleigh within 1 % and below the scattering table's total.
+- Reference values at Task 10 (6b9149e, RTX 4090; sdd `t10_checks_e1/`): `cloud_check.gd` PASS, 198 samples, 312 s for
+  the whole run; `cloud_far_check.gd`: slab radiance vs Monte Carlo worst 0.34 % (72 geometries), deck tau 10 inside /
+  outside 2.68 % (grid mean), 0.22 % (far tier), 8.16 % (converged shapes, limit 10 %), deck tau 2 3.17 / 0.60 / 1.54 %,
+  broken cf 0.4 2.28 %, far field / converged volume 0.925 and 0.951 (limit 10 %), far tier / march 0.990 (both
+  cases), cross-fade worst 2.48 % / 0.38 %, hand-over step 2.52 % / 0.58 % (limits 3 %), from 420 km 0 pixels differ;
+  only the Moon view fails (cache file `era5_1089330.wthr` missing, known); `cloud_grain_check.gd` PASS (grain ratio
+  to the 8 x reference 1.00-1.07, cover and mean alpha within 0.44 %, RMS 0.025-0.048); stereo, layer, smoke and
+  repeat_identical (ground, deck) green.
 - In-cloud optical depths (static clouds Task 10, the 48 shipped analog files, format 7; the body-core vertical tau of
   each column's contiguous cloudy run, sum of beta / m(cf) dz - the renderer's plateau -, weighted by cos(lat) x the
   run's max cf; script and table: sdd `tau_inv/t10_cloud_tau.py`, `t10_analog_v7.log`). p10 / p50 / p90:

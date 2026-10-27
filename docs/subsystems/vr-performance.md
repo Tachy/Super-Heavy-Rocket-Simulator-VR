@@ -333,3 +333,9 @@ sub-samples | divisor 4):
   flatter; not checked against the reference cases (cloud_check 8 / 9, the grain check).
 Even all of them together leave the ground view near 20 ms and the deck near 25 ms in the proxy - the budget (cloud
 p99 2.5 ms x the stereo correction) is out of reach of optimisation without a different march design.
+
+Shape de-tiling (Task 9d, re-measured on 6b9149e with the parked `wip/t9d-detile` commit and its variants; cloud pass,
+ground / 400 km; tiled 40.9 / 6.2 ms): blend in a 0.1 band (c7fe2ca) 97.8 / 11.9 (+139 / +91 %), blend in a 0.05 band
+(V4) 72.9 / 10.2 (+78 / +64 %), smooth warp A = 0.33 (V5) 47.3 / 7.3 (+16 / +18 %; shapes stretched locally, Task 9d
+report). The detail skip does not shorten the per-lookup cost the de-tiling adds, so the ratios stay those of Task 9d;
+user decision open.
