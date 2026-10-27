@@ -207,3 +207,17 @@ The shipped variant costs +49 / +55 / +62 % (medians) over the base. The extra c
 sub-samples (the light is per step and cached: a fine step of 5 % instead of 2.5 % with the sub-samples cost no less,
 29.48 ms pan low); skipping the sub-samples behind T_sc < 0.1 saved nothing (the march ends at 0.01 and dense steps are
 short anyway). Over the budget like the base (Task 10).
+
+Fix round 1 (2026-10-27, base cb65707 - snapshot format v5, the analog regenerated; same run and weather,
+`t5d_vrperf_*.log`): max steps 384, a field cell per sub-sample, the per-type quarter-texel structure step, the band
+limit continuous. cloud_pass, median / max of the per-second means, ms:
+
+| Phase | base cb65707 | at most 4 sub-samples | at most 8 (shipped) |
+|---|---|---|---|
+| descent | 6.41 / 26.68 | 8.88 / 44.10 | 12.64 / 67.09 |
+| pan low | 21.67 / 22.88 | 27.52 / 31.09 | 38.02 / 42.82 |
+| pan high | 16.25 / 17.71 | 20.28 / 23.81 | 28.03 / 33.23 |
+| cape | 0.34 / 0.47 | 0.33 / 0.62 | 0.33 / 0.54 |
+
++97 / +75 / +72 % (medians) shipped, +39 / +27 / +25 % with 4 (user: quality first; both pass cloud_grain_check, 8
+within 0.8 % of the 8 x reference's cover and alpha, 4 within 1.8 %).

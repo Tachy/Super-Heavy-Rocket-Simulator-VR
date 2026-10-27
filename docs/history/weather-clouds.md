@@ -438,3 +438,45 @@ between rows); steep edges of varying width, 10-90 % rise median 8 m (< 10 m), 9
   run above it within the boundary layer (a deck at 2 km turned dense, the low cloud vanished); the cut scale of a base
   a few metres under its layer's top was unbounded. Now: merge only into a run starting within LCL + the lowest run's
   depth, otherwise lift the lowest run to the LCL; bases closer than 20 m under the layer top are dropped; file format 5.
+
+## Cloud march sub-samples, Task 5c (replaced in fix round 1, 2026-10-27)
+Superseded text of `docs/subsystems/weather-clouds.md` (march, validation, open point):
+
+> **Sub-samples**
+> (static clouds Task 5c, `CLOUD_STRUCTURE_STEP_M` 125 m [E] = the shape texture's finest texel, at most
+> `CLOUD_MAX_SUBSTEPS` 4 [E]): a step longer than 125 m (the VR fine step is 2.5 % of the distance, 500 m at 20
+> km) takes the mean extinction of ceil(step / 125 m) sub-samples at the midpoints of equal sub-steps, in the
+> step's field cell (the field is smooth over a step), the detail band-limited at the sub-step; one light sample
+> per step at the sub-samples' extinction-weighted centre (also the step's distance for the air light). A
+> silhouette is bisected from the first sub-sample over the threshold (between it and the one before); the thin
+> cloud of the sub-samples before it ends the step there with its optical depth kept. One point per step hit or
+> skipped thin and broken cloud on long oblique paths with each ray's fixed step phase - static salt-and-pepper
+> at the march pixel (the user's t7_cape view) that the jittered march's history had averaged away, gone with 8 x
+> the steps; and the sub-threshold thin cloud before every entry was dropped. Not for the grid-mean debug outputs
+> (1 / 2 / 6) nor the jittered march.
+
+> - GPU `game/tests/cloud_grain_check.gd` (static clouds Task 5c; the main scene, analog weather 2024-06-15 21 UTC, VR
+>   preset): the grain - the mean |Laplacian| of the cloud image's premultiplied luminance at a spacing of one march
+>   pixel over the pixels with alpha > 0.1 (and their four neighbours), relative to their mean luminance - within 25 %
+>   [E] of the 8 x steps reference's (768 / 1536), both ways (no salt-and-pepper, no blur): the Cape (28.57 N, 80.65 W,
+>   20 deg up) 1.176, the ground at Starbase 1.096, the deck from 9 km 1.104 (before the sub-samples 1.704 - RED -, 1.196,
+>   1.179; the cloud pixels then 458 k / 626 k of the reference's on the ground: thin cloud was missed); the cloud image
+>   of the next frame bit-identical in each view. `render_check --repeat_identical` at the Cape: the frames differ in
+>   the sea below the horizon only (y >= 825; the base too) - the check prints the differing pixels' bounding box.
+>   `cloud_far_check`: the broken layer's volume-vs-far block 18.10 % (was 19.36 %; Task 8), the decks unchanged (a
+>   first version that compared the float32 b - a_this in the step-weight test sprayed bright speckles near the limb from
+>   8 600 km: deck tau 2 at 15 %).
+
+> - **March sub-samples (Task 5c)**: the VR proxy's cloud pass +49 / +55 / +62 % (descent / pan low / pan high medians,
+>   `vr-performance.md`) for the shapes' lookups at the sub-samples - over the budget like the base (Task 10). Left: some
+>   march-pixel blocks in dark thin layers (one light sample per step; grain 1.18 x the reference's at the Cape), steps
+>   beyond 500 m sampled at a quarter of the step, and cirrus, whose vertical shape texel (2 km / 128 = 16 m) is finer
+>   than the 125 m interval.
+
+- Why replaced (review of 8f85b31): the grain check asserted only the luminance grain - the deck's alpha grain was 1.30
+  x the reference's, its alpha -8.5 % and cover -5.3 %, the ground -3.9 % / -3.4 %. Causes: the 192-step budget ran
+  out in broken layers' cloudy regions before the far cloud (7-16 % of the deck view's rays); the step's one field
+  cell for all sub-samples (cirrus sheets -4 % alpha); 125 m sub-steps (half a texel) and at most 4. The detail band
+  limit jumped where a step crossed 125 m (sub-step halved). Now: max steps 4 x the coarse, a cell per sub-sample,
+  a per-type quarter-texel structure step, up to 8 sub-samples, the band limit continuous, the thin cloud before an
+  entry carried into the next step (also for single-sample steps).

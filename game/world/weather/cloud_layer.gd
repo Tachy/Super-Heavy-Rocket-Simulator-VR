@@ -89,11 +89,15 @@ enum ScatteringModel { CLOSED_FORM, TABLE }
 ## march): 48 coarse steps (4.3 % of the distance) lost cumulus bases at a fixed sample point - cloud_check case 9 off
 ## by 5 px, the deck view at 9 km thinned: 96 / 192 coarse / max steps. The fine fraction stays 0.025 (case 9 passes
 ## with it; 0.012 was a look choice at about twice the in-cloud samples, cost in docs/subsystems/vr-performance.md).
+## Max steps 4 x the coarse steps (static clouds Task 5c fix round 1): with 192 (VR) the fine steps through a
+## broken layer's cloudy region (2.5 % of the distance each, mostly clear between the shapes) ran out before far cloud -
+## 7-16 % of the deck view from 9 km lost its far deck (alpha -8.5 % vs the 8 x reference, cloud_grain_check); 384 and
+## 768 gave the same image. The desktop's 256 lost 3.8 % of the deck's alpha (512: 1.3 %).
 const PRESETS := {
-	Quality.DESKTOP: {"steps": 128, "max_steps": 256, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
+	Quality.DESKTOP: {"steps": 128, "max_steps": 512, "fine_step_fraction": 0.012, "light_near": 6, "light_far": 3,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 2,
 			"temporal_weight": 1.0 / 32.0, "clip_gamma": 0.0},
-	Quality.VR: {"steps": 96, "max_steps": 192, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
+	Quality.VR: {"steps": 96, "max_steps": 384, "fine_step_fraction": 0.025, "light_near": 5, "light_far": 2,
 			"light_first_m": 20.0, "light_near_m": 6000.0, "detail_levels": 3, "divisor": 3,
 			"temporal_weight": 1.0 / 96.0, "clip_gamma": 1.5},
 }

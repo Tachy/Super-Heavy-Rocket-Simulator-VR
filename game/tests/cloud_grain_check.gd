@@ -1,12 +1,17 @@
 # GPU check of the cloud march's step aliasing (static clouds Task 5c): the game's main scene, the shipped analog
 # weather of 2024-06-15 21:00 UTC, the VR quality preset (deterministic march, light cache on). Each view is rendered
 # with the preset's steps and with REFERENCE_STEP_FACTOR times as many (the converged march along the ray), and the
-# grain - the high-pass energy at the march-pixel scale of the cloud layer's own image (CloudEffect.output: the mean
-# |Laplacian| of the premultiplied luminance at a spacing of one march pixel, over the pixels whose alpha and whose four
-# neighbours' exceed ALPHA_MIN, relative to their mean luminance) - must lie within GRAIN_TOLERANCE of the reference's:
-# no more (no static salt-and-pepper of a fixed step phase hitting or skipping thin / broken cloud) and no less (the
-# fix does not just blur the structure). Views: the Cape (thin layers on long oblique paths, the user's t7_cape), the
-# ground at Starbase and a deck seen from 9 km. With the preset the cloud image of the next frame is bit-identical
+# cloud layer's own image (CloudEffect.output) must match the reference's:
+# - the grain - the high-pass energy at the march-pixel scale: the mean |Laplacian| of the premultiplied luminance at a
+#   spacing of one march pixel, over the pixels whose alpha and whose four neighbours' exceed ALPHA_MIN, relative to
+#   their mean luminance; and the same on alpha - within GRAIN_TOLERANCE of the reference's: no more (no static
+#   salt-and-pepper of a fixed step phase hitting or skipping thin / broken cloud) and no less (no blur);
+# - the covered pixels (alpha > ALPHA_MIN), the mean alpha and the mean premultiplied luminance of the whole image
+#   within MEAN_TOLERANCE (no cloud lost or gained, no brightness bias of the step's light sample);
+# - the RMS difference of the premultiplied luminance over the cloud mask (either image's alpha > ALPHA_MIN), relative
+#   to the reference's mean there, below RMS_TOLERANCE (the same picture, not only the same statistics).
+# Views: the Cape (thin layers on long oblique paths, the user's t7_cape), the ground at Starbase, a deck seen from 9 km
+# and the cirrus seen from 9 km off Peru (t5_cirrus). With the preset the cloud image of the next frame is bit-identical
 # (static clouds; render_check's repeat_identical compares the whole frame, whose sea differs between frames at the Cape
 # without any cloud change).
 # Needs a GPU (no --headless): godot --xr-mode off --path game --script res://tests/cloud_grain_check.gd
@@ -14,18 +19,27 @@
 extends SceneTree
 
 const UTC := "2024-06-15T21:00:00"
-## The views (render_check's: t3_render.sh ground / deck, and the Cape view of the user's t7_cape).
+## The views (render_check's: t3_render.sh ground / deck, the Cape view of the user's t7_cape, t5_cirrus).
 const VIEWS := [
 	{"name": "cape", "lat": 28.5729, "lon": -80.649, "azimuth": 90.0, "elevation": 20.0},
 	{"name": "ground", "lat": 25.997, "lon": -97.157, "azimuth": 90.0, "elevation": 25.0},
 	{"name": "deck", "lat": 25.997, "lon": -97.157, "azimuth": 0.0, "elevation": -10.0, "eye_height": 9000.0},
+	{"name": "cirrus", "lat": -18.0, "lon": -78.0, "azimuth": 0.0, "elevation": 15.0, "eye_height": 9000.0},
 ]
 ## [E] The reference march: 8 x the preset's coarse and maximum steps (768 / 1536 for VR) - the controller's
 ## dbg_cape_vr_steps8x, where the grain is gone.
 const REFERENCE_STEP_FACTOR := 8
-## [E] Allowed relative deviation of the grain from the reference's (brief: ours <= reference x 1.25; the same band
-## below: no blur).
+## [E] Allowed relative deviation of the grain (luminance and alpha) from the reference's (brief: ours <= reference x
+## 1.25; the same band below: no blur).
 const GRAIN_TOLERANCE := 0.25
+## [E] Allowed relative deviation of the covered pixels, the mean alpha and the mean luminance (fix round 1: a few per
+## cent of cloud or brightness is the smallest change seen side by side in the renders).
+const MEAN_TOLERANCE := 0.03
+## [E] Largest RMS luminance difference over the cloud mask relative to the reference's mean there (fix round 1): the
+## step aliasing of Task 5c's base measured 0.14-0.17 (ground, deck, cirrus); the reference's finer steps near the
+## camera band-limit the detail more finely (CLOUD_DETAIL_STEP_FRACTION of the step), which leaves lobe-scale shading
+## differences of up to ~0.09 on the ground view's near cumulus by design.
+const RMS_TOLERANCE := 0.1
 ## [E] Cloud pixels: alpha above this (the thin layers' grain lives in alpha 0.1-0.6).
 const ALPHA_MIN := 0.1
 const FRAMES_TO_SETTLE := 6
@@ -74,29 +88,53 @@ func _run() -> void:
 	for view: Dictionary in VIEWS:
 		if _only != "" and view["name"] != _only:
 			continue
+		var name: String = view["name"]
 		_place(view)
 		if not await _settle():
-			_fail_and_quit("%s: the scene did not settle" % view["name"])
+			_fail_and_quit("%s: the scene did not settle" % name)
 			return
-		var ours := _grain(divisor)
 		var first := _world.clouds.effect.output.get_layer_data(0)
 		await process_frame
 		var second := _world.clouds.effect.output.get_layer_data(0)
-		_check("%s: the cloud image of the next frame bit-identical" % view["name"],
+		_check("%s: the cloud image of the next frame bit-identical" % name,
 				first != null and second != null and first.get_data() == second.get_data(), "")
 		ShaderGlobals.set_value(&"cloud_steps", int(preset["steps"]) * REFERENCE_STEP_FACTOR)
 		ShaderGlobals.set_value(&"cloud_max_steps", int(preset["max_steps"]) * REFERENCE_STEP_FACTOR)
-		await _settle()
-		var reference := _grain(divisor)
+		var reference_settled: bool = await _settle()
+		var reference_image := _world.clouds.effect.output.get_layer_data(0)
 		ShaderGlobals.set_value(&"cloud_steps", int(preset["steps"]))
 		ShaderGlobals.set_value(&"cloud_max_steps", int(preset["max_steps"]))
-		var ratio := ours.x / maxf(reference.x, 1.0e-9)
-		_check("%s: grain within %.0f %% of the x%d reference" % [view["name"], GRAIN_TOLERANCE * 100.0,
-				REFERENCE_STEP_FACTOR], absf(ratio - 1.0) <= GRAIN_TOLERANCE,
-				"%.4f vs %.4f (ratio %.3f; cloud pixels %d / %d, alpha grain %.4f / %.4f)" % [ours.x, reference.x,
-				ratio, int(ours.y), int(reference.y), ours.z, reference.z])
+		if not reference_settled or first == null or reference_image == null:
+			_fail_and_quit("%s: the x%d reference did not settle" % [name, REFERENCE_STEP_FACTOR])
+			return
+		_compare(name, _Picture.new(first), _Picture.new(reference_image), divisor)
 	print("cloud_grain_check: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(0 if _failures == 0 else 1)
+
+
+## The view's checks of ours against the reference (header).
+func _compare(name: String, ours: _Picture, reference: _Picture, spacing: int) -> void:
+	var g := ours.grain(spacing)
+	var g_ref := reference.grain(spacing)
+	var ratio := g.x / maxf(g_ref.x, 1.0e-9)
+	var ratio_alpha := g.z / maxf(g_ref.z, 1.0e-9)
+	_check("%s: grain within %.0f %% of the x%d reference" % [name, GRAIN_TOLERANCE * 100.0, REFERENCE_STEP_FACTOR],
+			absf(ratio - 1.0) <= GRAIN_TOLERANCE, "%.4f vs %.4f (ratio %.3f; over %d / %d pixels)" % [g.x, g_ref.x,
+			ratio, int(g.y), int(g_ref.y)])
+	_check("%s: alpha grain within %.0f %%" % [name, GRAIN_TOLERANCE * 100.0],
+			absf(ratio_alpha - 1.0) <= GRAIN_TOLERANCE, "%.4f vs %.4f (ratio %.3f)" % [g.z, g_ref.z, ratio_alpha])
+	_check_mean("%s: covered pixels" % name, ours.covered, reference.covered)
+	_check_mean("%s: mean alpha" % name, ours.alpha_mean, reference.alpha_mean)
+	_check_mean("%s: mean luminance" % name, ours.luminance_mean, reference.luminance_mean)
+	var rms := ours.rms_against(reference)
+	_check("%s: RMS luminance difference over the cloud mask below %.2f" % [name, RMS_TOLERANCE], rms <= RMS_TOLERANCE,
+			"%.4f" % rms)
+
+
+func _check_mean(label: String, ours: float, reference: float) -> void:
+	var deviation := ours / maxf(reference, 1.0e-12) - 1.0
+	_check("%s within %.0f %%" % [label, MEAN_TOLERANCE * 100.0], absf(deviation) <= MEAN_TOLERANCE,
+			"%.5f vs %.5f (%+.2f %%)" % [ours, reference, deviation * 100.0])
 
 
 ## A ground view at the view's site (the eye eye_height above the core's surface, 2 m by default).
@@ -129,43 +167,6 @@ func _settle() -> bool:
 	return false
 
 
-## (x) the grain of the cloud layer's image (header), (y) the cloud pixels it was taken over, (z) the same on alpha
-## (not normalised).
-func _grain(spacing: int) -> Vector3:
-	var image := _world.clouds.effect.output.get_layer_data(0)
-	if image == null:
-		return Vector3.ZERO
-	var w := image.get_width()
-	var h := image.get_height()
-	var luminance := PackedFloat32Array()
-	var alpha := PackedFloat32Array()
-	luminance.resize(w * h)
-	alpha.resize(w * h)
-	for y in range(h):
-		for x in range(w):
-			var c := image.get_pixel(x, y)
-			luminance[y * w + x] = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
-			alpha[y * w + x] = c.a
-	var high := 0.0
-	var high_alpha := 0.0
-	var mean := 0.0
-	var count := 0
-	for y in range(spacing, h - spacing):
-		for x in range(spacing, w - spacing):
-			var i := y * w + x
-			var n := PackedInt32Array([i - spacing, i + spacing, i - spacing * w, i + spacing * w])
-			if alpha[i] <= ALPHA_MIN or alpha[n[0]] <= ALPHA_MIN or alpha[n[1]] <= ALPHA_MIN \
-					or alpha[n[2]] <= ALPHA_MIN or alpha[n[3]] <= ALPHA_MIN:
-				continue
-			high += absf(luminance[i] - 0.25 * (luminance[n[0]] + luminance[n[1]] + luminance[n[2]] + luminance[n[3]]))
-			high_alpha += absf(alpha[i] - 0.25 * (alpha[n[0]] + alpha[n[1]] + alpha[n[2]] + alpha[n[3]]))
-			mean += luminance[i]
-			count += 1
-	if count == 0 or mean <= 0.0:
-		return Vector3.ZERO
-	return Vector3(high / mean, count, high_alpha / count)
-
-
 func _check(label: String, ok: bool, detail: String) -> void:
 	if not ok:
 		_failures += 1
@@ -175,3 +176,72 @@ func _check(label: String, ok: bool, detail: String) -> void:
 func _fail_and_quit(message: String) -> void:
 	print("cloud_grain_check: FAIL - " + message)
 	quit(1)
+
+
+## The cloud layer's image as premultiplied luminance and alpha, with its whole-image means.
+class _Picture:
+	var w: int
+	var h: int
+	var luminance := PackedFloat32Array()
+	var alpha := PackedFloat32Array()
+	var covered := 0.0         # pixels with alpha > ALPHA_MIN
+	var alpha_mean := 0.0
+	var luminance_mean := 0.0
+
+	func _init(image: Image) -> void:
+		w = image.get_width()
+		h = image.get_height()
+		luminance.resize(w * h)
+		alpha.resize(w * h)
+		for y in range(h):
+			for x in range(w):
+				var c := image.get_pixel(x, y)
+				var i := y * w + x
+				luminance[i] = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+				alpha[i] = c.a
+				covered += 1.0 if c.a > ALPHA_MIN else 0.0
+				alpha_mean += c.a
+				luminance_mean += luminance[i]
+		alpha_mean /= float(w * h)
+		luminance_mean /= float(w * h)
+
+	## (x) the luminance grain (header), (y) the pixels it was taken over, (z) the same on alpha (not normalised).
+	func grain(spacing: int) -> Vector3:
+		var high := 0.0
+		var high_alpha := 0.0
+		var mean := 0.0
+		var count := 0
+		for y in range(spacing, h - spacing):
+			for x in range(spacing, w - spacing):
+				var i := y * w + x
+				var n := PackedInt32Array([i - spacing, i + spacing, i - spacing * w, i + spacing * w])
+				if alpha[i] <= ALPHA_MIN or alpha[n[0]] <= ALPHA_MIN or alpha[n[1]] <= ALPHA_MIN \
+						or alpha[n[2]] <= ALPHA_MIN or alpha[n[3]] <= ALPHA_MIN:
+					continue
+				high += absf(luminance[i] - 0.25 * (luminance[n[0]] + luminance[n[1]] + luminance[n[2]]
+						+ luminance[n[3]]))
+				high_alpha += absf(alpha[i] - 0.25 * (alpha[n[0]] + alpha[n[1]] + alpha[n[2]] + alpha[n[3]]))
+				mean += luminance[i]
+				count += 1
+		if count == 0 or mean <= 0.0:
+			return Vector3.ZERO
+		return Vector3(high / mean, count, high_alpha / count)
+
+	## The RMS luminance difference over the pixels where either image has alpha > ALPHA_MIN, relative to the other's
+	## (the reference's) mean luminance there.
+	func rms_against(other: _Picture) -> float:
+		if other.w != w or other.h != h:
+			return INF
+		var sum_sq := 0.0
+		var sum_ref := 0.0
+		var count := 0
+		for i in range(w * h):
+			if alpha[i] <= ALPHA_MIN and other.alpha[i] <= ALPHA_MIN:
+				continue
+			var diff := luminance[i] - other.luminance[i]
+			sum_sq += diff * diff
+			sum_ref += other.luminance[i]
+			count += 1
+		if count == 0 or sum_ref <= 0.0:
+			return 0.0
+		return sqrt(sum_sq / count) / (sum_ref / count)
