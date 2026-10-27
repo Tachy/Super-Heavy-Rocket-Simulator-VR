@@ -202,8 +202,10 @@ const float CLOUD_ONE_SURFACE_SPREAD = 0.05;
 // [E] Largest weight of one step in the pixel's scattered light, T_sc (1 - exp(-(1 - f) tau_step)): a heavier step is
 // marched again with steps of this weight (one point sample - its light march included - would decide the pixel over
 // the whole step: grain at cloud surfaces and at bases seen at a grazing angle; with steps of tau ~1 instead the pass
-// cost 6 ms more at the descent's worst second). Behind T_sc < this weight any step is fine.
-const float CLOUD_MAX_STEP_WEIGHT = 0.15;
+// cost 6 ms more at the descent's worst second). Behind T_sc < this weight any step is fine. 0.3 (was 0.15, Task 10:
+// -4.7 / -5.2 ms of the VR proxy's cloud pass at the ground / the deck) passes every reference case within its
+// tolerances (cloud_check, cloud_far_check, cloud_grain_check); lobes slightly flatter (t10_opt_*_stepweight.png).
+const float CLOUD_MAX_STEP_WEIGHT = 0.3;
 // [E] The air's light at the cloud is re-evaluated along a ray after 500 m or 5 % of the distance (the transmitted
 // Sun changes by < 1 % over that at a 10-deg Sun; the eclipse's shadow edge is ~50 km wide).
 const float CLOUD_LIGHT_REFRESH_M = 500.0;
@@ -241,9 +243,11 @@ const float CLOUD_PHASE_MIN_CLIMB = 1.0e-3;
 // detail band limit continuous in the step, fix round 1) the ground view lost 2.4 % of its cover against the 8 x
 // reference (RMS difference 0.13), the deck 2.7 %; a whole texel left the Cape's grain at 1.36 x the reference's.
 const float CLOUD_STRUCTURE_TEXEL_FRACTION = 0.25;
-// [E] At most this many sub-samples per step (longer steps sample at 1 / CLOUD_MAX_SUBSTEPS of the step): 4 left the
-// deck view 1.4 % and the cirrus 1.7 % short of the reference's alpha; 8 within 0.8 % (cover and alpha).
-const int CLOUD_MAX_SUBSTEPS = 8;
+// [E] At most this many sub-samples per step (longer steps sample at 1 / CLOUD_MAX_SUBSTEPS of the step): 8 held the
+// deck view and the cirrus within 0.8 % of the 8 x reference's alpha, 4 within 1.4 % / 1.7 % but left the Cape's alpha
+// grain at 1.375 x the reference's (bound 1.25, cloud_grain_check.gd); 5: 1.241 (no margin), 6: 1.16-1.17. 6 saves
+// 5.4 / 4.2 ms of the VR proxy's cloud pass at the ground / the deck (4: 9.3 / 8.9; crops t10b_substeps_*).
+const int CLOUD_MAX_SUBSTEPS = 6;
 shared vec3 cloud_group_eclipse_near;
 shared vec3 cloud_group_eclipse_far;
 
