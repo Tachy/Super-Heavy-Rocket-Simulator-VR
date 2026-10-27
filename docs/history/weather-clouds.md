@@ -664,3 +664,8 @@ removed forward Mie light the scene never added at a setting Sun (segment sum / 
 -0.60 (backlit) / -0.67 (rays); the 20 km clip sampled the backlit body 2 % brighter (rim / body 3.93-3.95 against
 4.01 converged).
 
+## Task 9b fix round 2 remnants (superseded 2026-10-27)
+- Cost note: the backlit cumulus view cost +1.6-1.9 ms before the clip to the cloud top (+1.0-1.1 ms after).
+- Ray-free control: its undetrended spread 0.23 passed the earlier (undetrended) metric.
+- Rim / body 4.01 at 2-6 deg from the Sun was recorded as "just above the acceptance's 4 (cloud-visual-reference.md
+  (3))"; the band's bound is now 2-5 x [E] (photographic range, not a physical bound).

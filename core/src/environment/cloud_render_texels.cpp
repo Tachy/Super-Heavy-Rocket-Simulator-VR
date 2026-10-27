@@ -144,7 +144,8 @@ double cloud_render_top_m(const WeatherSnapshot& snapshot) {
         const std::size_t base = static_cast<std::size_t>(layer) * cells * channels;
         for (std::size_t cell = 0; cell < cells; ++cell) {
             const std::size_t i = base + cell * channels;
-            if (source[i] != 0 && (source[i + 1] != 0 || source[i + 2] != 0)) {
+            // Any water counts, also in a cell whose fraction code is 0: the grid-mean paths render it.
+            if (source[i + 1] != 0 || source[i + 2] != 0) {
                 return layer == weather_layer_count - 1 ? weather_top_m : layer_centre_m(layer + 1);
             }
         }

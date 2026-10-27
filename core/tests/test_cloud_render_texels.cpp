@@ -357,4 +357,10 @@ TEST_CASE("The render field's cloud top: the centre above the highest cloudy lay
     texels[k] = encode_weather_cloud_fraction(1.0);
     texels[k + 1] = encode_weather_water(1e-6);
     CHECK(top_of() == Approx(weather_top_m));
+    // Water in a cell with fraction code 0 still counts (the grid-mean paths render it): layer 10 is below the top
+    // layer, so use a fresh snapshot.
+    std::vector<std::uint8_t> trace(texels.size(), 0);
+    trace[texel_offset(5, 0, 1, rows, columns) + 1] = encode_weather_water(1e-6);
+    CHECK(cloud_render_top_m(WeatherSnapshot::from_parts({}, rows, columns, std::vector<float>(rows * columns, 0.0f),
+                                                         trace)) == Approx(layer_centre_m(6)));
 }
