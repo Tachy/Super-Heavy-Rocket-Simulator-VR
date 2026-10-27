@@ -457,6 +457,10 @@ cloud_handover_far_m={
 "type": "float",
 "value": 34000.0
 }
+cloud_far_pattern_fade_m={
+"type": "vec2",
+"value": Vector2(1500, 3000)
+}
 cloud_debug_output={
 "type": "int",
 "value": 0

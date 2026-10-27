@@ -241,3 +241,8 @@ pass's light path (5 samples per step instead of the cache's lookup). The cheape
 cloud_grain_check's deck view (alpha -12 % against the 8 x reference). Over the budget like the base (Task 10: knobs are
 the band, the far pass's step budget and its light samples).
 
+Fix round 1 (the lateral far fade 1.5-3 km, the column model's sub-grid cover - 32 or 64 shape reads per column pixel,
+once - and the B-spline column, the mixed-depth upsample; `t8_vrperf_t8f_fix1.log`), same run: descent 16.73 / 85.50,
+pan low 51.67 / 58.45, pan high 36.15 / 40.76, cape 0.45 / 0.73 - within the run-to-run spread of the two-pass numbers
+above (the proxy's phases see the column model only at their farthest pixels). Orbit views, where every pixel beyond
+~1 km footprints is the column model, were not measured (Task 10).

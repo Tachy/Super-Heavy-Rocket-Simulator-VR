@@ -22,6 +22,7 @@
 #          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form),
 #          --no_light_cache (the light toward the Sun marched per sample: the light cache's reference),
 #          --handover=<near m>,<far m> (the near / far hand-over band; 1e9,1e9: the march alone, 0,0: the far tier).
+#          --far_fade=<start m>,<end m> (the far tier's shapes-to-column fade; 1e9,1e9: the shapes, 0,0: the column).
 # Eye adaptation: on as in the game (adapted to the final view); --fixed_exposure switches it off.
 # Image identity: --deterministic[=64] once settled resets the cloud history and the cloud pass's frame counter and
 #          saves after exactly that many more frames (with --fixed_exposure, for before / after comparisons).
@@ -86,6 +87,9 @@ func _process(_delta: float) -> bool:
 			var band: PackedStringArray = _args["handover"].split(",")
 			ShaderGlobals.set_value(&"cloud_handover_near_m", float(band[0]))
 			ShaderGlobals.set_value(&"cloud_handover_far_m", float(band[1]))
+		if _args.has("far_fade"):  # the far tier's shapes-to-column fade (PRESETS far_fade_m): "<start m>,<end m>"
+			var fade: PackedStringArray = _args["far_fade"].split(",")
+			ShaderGlobals.set_value(&"cloud_far_pattern_fade_m", Vector2(float(fade[0]), float(fade[1])))
 		if _args.has("cloud_debug"):  # the cloud pass's debug output (clouds.gdshaderinc cloud_debug_output)
 			ShaderGlobals.set_value(&"cloud_debug_output", int(_args["cloud_debug"]))
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))

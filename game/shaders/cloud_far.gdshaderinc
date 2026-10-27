@@ -1,7 +1,7 @@
 // The far field of the clouds (M8 weather and clouds, Task 10): the cloud layer of the scaled-space Earth
 // (earth_clouds.gdshader, drawn while the camera is beyond CelestialBody.SCALED_SPACE_DISTANCE_M, where the cloud pass
-// is off) and, since static clouds Task 8, the cloud pass's far tier beyond the near / far hand-over
-// (cloud_pass.gdshaderinc cloud_far_tier: the same slab, seen from above or from below, with the shapes' pattern).
+// is off) and, since static clouds Task 8, the column part of the cloud pass's far tier at large footprints
+// (cloud_pass.gdshaderinc cloud_far_column: the same slab, seen from above or from below, with a sub-grid cover).
 // Include atmosphere.gdshaderinc and clouds.gdshaderinc first.
 //
 // The same field and the same light transport as the cloud pass, in its plane-parallel limit: a pixel there covers
@@ -30,6 +30,16 @@
 // [E] The smallest view cosine taken (a grazing view at the limb: the in-cloud path of a plane-parallel slab grows as
 // 1 / mu without limit; the beam cover's own floor).
 const float CLOUD_FAR_MU_MIN = 0.02;
+// [E] The shapes' 3D Sun light, which the plane-parallel slab lacks (static clouds Task 8 fix round 1: the column model
+// against the converged volume with the shapes, cloud_far_check sections 3 and 6): the volume lights a sample whose
+// Sun path is shorter than its depth below the column's top as through a surface turned toward the Sun
+// (cloud_entry_cosine) - the domes of a deck's top under a low Sun (+12-14 % at 30-36 deg) and the sunlit flanks of
+// broken cumulus (+15-20 % at cf 0.4 under a high Sun, seen from above and at 45 deg). The column model takes them as
+// an entry cosine turned this fraction of the way from mu0 to 1 (the slab's normal for the Sun's light turned toward
+// it, cloud_entry_normal) and a gain of the Sun's light of 1 + this x (1 - f) for the column's largest fraction f
+// (none for a deck). Fitted to those checks (0.3 / 0.15 left broken cumulus 10-11 % dark; 0.4 / 0.15 within 7 %).
+const float CLOUD_FAR_ENTRY_TURN = 0.15;
+const float CLOUD_FAR_FLANK_GAIN = 0.4;
 // 8-point Gauss-Legendre nodes and weights on [0, 1].
 const int CLOUD_FAR_NODES = 8;
 const float CLOUD_FAR_GL_X[8] = float[](0.0198550717512319, 0.1016667612931866, 0.2372337950418355,
@@ -197,15 +207,20 @@ float cloud_far_seen_depth(vec2 column, float mu) {
 // The radiance of a cloudy slab of in-cloud vertical depth tau at the cloud point p (Earth-local, up its geodetic up)
 // toward the camera (view_prop: the propagation toward it; from above or from below by its sign against up): the
 // lights at the cloud as the cloud pass takes them (irradiance normal to the light; the sky's horizontal), not yet
-// attenuated by the air. sky_eclipse: the eclipse sky's factor there.
-vec3 cloud_far_cloudy_radiance(vec3 p, vec3 up, vec3 view_prop, float tau, vec3 sky_eclipse) {
+// attenuated by the air; the Sun's with the shapes' 3D light for the column's largest fraction (CLOUD_FAR_ENTRY_TURN,
+// CLOUD_FAR_FLANK_GAIN). sky_eclipse: the eclipse sky's factor there.
+vec3 cloud_far_cloudy_radiance(vec3 p, vec3 up, vec3 view_prop, float tau, float fraction, vec3 sky_eclipse) {
 	vec3 sun_dir = normalize(atmosphere_sun_direction);
+	// The shapes' 3D Sun light (CLOUD_FAR_ENTRY_TURN, CLOUD_FAR_FLANK_GAIN).
+	float mu0 = dot(sun_dir, up);
+	vec3 entry = mu0 > 0.0 ? cloud_entry_normal(sun_dir, up, mu0, mu0 + (1.0 - mu0) * CLOUD_FAR_ENTRY_TURN) : up;
+	float gain = 1.0 + CLOUD_FAR_FLANK_GAIN * (1.0 - clamp(fraction, 0.0, 1.0));
 	vec3 sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
 	vec3 sky_irradiance = ATM_PI * atm_sky_light(p, up) * sky_eclipse;
 	float sky_radiance = cloud_far_sky_radiance(tau, dot(view_prop, up));
 	vec3 radiance = sky_irradiance * sky_radiance;
 	if (dot(sun_irradiance, sun_irradiance) > 0.0) {
-		radiance += sun_irradiance * cloud_far_light_radiance(tau, sun_dir, view_prop, up);
+		radiance += sun_irradiance * gain * cloud_far_light_radiance(tau, sun_dir, view_prop, entry);
 	}
 	if (atm_moonlit()) {
 		vec3 moon_dir = normalize(atmosphere_moon_direction);
@@ -238,7 +253,7 @@ vec4 cloud_far_layer(vec3 g, vec3 sky_eclipse) {
 	float cover = max(cloud_column_beam_cover(column, mu), CLOUD_MIN_FRACTION);
 	float tau = column.x / cover;  // the cloudy part's vertical depth
 	float alpha = cover * (1.0 - exp(-tau / mu));
-	vec3 radiance = cloud_far_cloudy_radiance(p, up, view_prop, tau, sky_eclipse);
+	vec3 radiance = cloud_far_cloudy_radiance(p, up, view_prop, tau, column.y, sky_eclipse);
 	vec3 air_transmittance;
 	vec3 air_light = atm_to_point_offset(p - camera, air_transmittance);
 	return vec4(air_transmittance * radiance * cover + alpha * air_light, alpha);

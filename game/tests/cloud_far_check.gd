@@ -13,10 +13,12 @@
 #      sub-grid shapes; the debug outputs march the whole segment) the 5 x 5 block luminance at seven Earth points (Sun
 #      20-75 deg up) agrees within 5 %; the game's cloud pass - every cloud there lies beyond the near / far hand-over,
 #      its far tier draws them with the far field's column model at these footprints - within 5 %, a broken layer (cf
-#      0.4) as 21 x 21 block means within 5 %; points where the ground itself steps across the limit by more than the
-#      tolerance (weather off: the terrain's sea glint at the sub-camera point, which the scaled-space Earth lacks) are
-#      listed, not asserted; the volume pass draws only inside (cloud_enabled), the far field only outside
-#      (earth_clouds.gdshader); the CPU light factors are (1, 0, 1) outside;
+#      0.4) as 21 x 21 block means within 5 %; the converged volume with the shapes (the march alone, 8 x its steps)
+#      against the far field within 10 % for the decks (the column model's own error, the M8 ruling; a broken layer's
+#      volume beats with the shapes' tile at these footprints: section 6); points where the ground itself steps across
+#      the limit by more than the tolerance (weather off: the terrain's sea glint at the sub-camera point, which the
+#      scaled-space Earth lacks) are listed, not asserted; the volume pass draws only inside (cloud_enabled), the far
+#      field only outside (earth_clouds.gdshader); the CPU light factors are (1, 0, 1) outside;
 #   4. from the Moon's distance (3.844e8 m) with the ERA5 snapshot of 2024-04-08 18:00 UTC: five cells the snapshot
 #      has cloudy are brighter with the weather on than off (ratio >= 1.3), five clear cells unchanged (2 %);
 #   5. the near / far hand-over in the cloud pass (static clouds Task 8; CloudLayer.PRESETS handover_m), on the cloud
@@ -25,12 +27,17 @@
 #      (tau 10) seen from 9 km, rendered by the march alone (the band beyond every scene), the far tier alone and the
 #      game: the far tier's mean radiance at 30-50 km within 10 % of the march's (the M8 ruling), the game's image in
 #      every 2 km distance bin (14-60 km, the ray's crossing of the slab's middle) the linear cross-fade of the two
-#      within 3 % (the weight at the slab's top), and the band's own step between bins - the weight's largest step
-#      times the two's difference over the band - within 3 %; a camera at 20 km moved by 100 m: interior cover flips
-#      (alpha changing by > 0.5 where a 7 x 7 window was all clear or all cloud) within a static pair's + 0.1 % of the
-#      covered pixels.
+#      within 3 % (the weight at the slab's top), and the band's own step between bins - measured on the game's image
+#      relative to the march's - within 3 %; a camera at 20 km moved by 100 m: interior cover flips (alpha changing by
+#      > 0.5 where a 7 x 7 window was all clear or all cloud) within a static pair's + 0.1 % of the covered pixels;
+#   6. the far tier's column model at orbit footprints (static clouds Task 8 fix round 1): the broken layer and the
+#      deck seen from 420 km at nadir and at 45 deg - the column model (the far tier everywhere, its fade at 0) against
+#      the converged volume (the march alone, 8 x its steps) and against the far tier's shapes (its fade beyond every
+#      footprint), mean radiance of the central square within 10 % (the M8 ruling); no speckle: the broken layer's limb
+#      from 420 km and its far horizon from 50 km (the shapes' 1 km mips at footprints of several km beat into salt and
+#      pepper) - the RMS of the game's image against its sub-pixel supersampled reference over the far band within 10 %.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_far_check.gd [-- --save=<dir>] (PNGs of
-# the renders) [--only=scaled|handover] (sections 1-4 or 5 alone). Exit code 1 on failure.
+# the renders) [--only=scaled|handover|column] (sections 1-4, 5 or 6 alone). Exit code 1 on failure.
 extends SceneTree
 
 const EPOCH_UTC := "2024-04-08T14:00:00"  ## no eclipse; the Sun over the Atlantic
@@ -88,6 +95,28 @@ const FLIP_WINDOW := 3
 const FLIP_UNIFORM_ALPHA := Vector2(0.1, 0.9)
 ## [E] Allowed interior flips of the moving pair beyond the static pair's, as a fraction of the covered pixels.
 const FLIP_ALLOWANCE := 1.0e-3
+## 3. / 6. The converged march (cloud_grain_check's reference: its coarse and maximum steps x 8).
+const REFERENCE_STEP_FACTOR := 8
+## 6. The far tier's column model at orbit footprints (static clouds Task 8 fix round 1).
+const COLUMN_VIEWS := [{"name": "nadir", "elevation": -89.0}, {"name": "45 deg", "elevation": -48.5}]
+const COLUMN_BLOCK := 0.3  ## the central square's side, as a fraction of the image height
+const FADE_SHAPES := Vector2(1.0e9, 1.0e9)  ## cloud_far_pattern_fade_m: the shapes everywhere
+## The views of the speckle check: the limb from 420 km (lateral footprints of several km along it) and the far horizon
+## from 50 km; the elevation puts the horizon SPECKLE_HORIZON_BELOW_DEG below the view's centre.
+const SPECKLE_VIEWS := [{"name": "limb from 420 km", "height": 420000.0, "band_deg": 6.0},
+		{"name": "horizon from 50 km", "height": 50000.0, "band_deg": 0.6}]
+const SPECKLE_HORIZON_BELOW_DEG := 3.0
+## The band compared: from SPECKLE_SKIP_ROWS below the horizon (its edge's sub-pixel position is no speckle) to the
+## view's band_deg below it - the far clouds at footprints of 1-2 km (50 km) and 2-5 km (the limb); the near ones'
+## march-pixel outline is cloud_check's and cloud_grain_check's.
+const SPECKLE_SKIP_ROWS := 3
+## [E] Largest RMS luminance difference of the game's image against its sub-pixel supersampled reference (the mean of
+## the renders with the camera turned by whole screen pixels over one march pixel, aligned back) over the clouds below
+## the horizon, relative to the reference's mean: a point sample of the shapes' 1 km mips at several km of footprint is
+## salt and pepper that the sub-pixel positions do not repeat; a footprint average of the cover is the same picture at
+## every sub-pixel position.
+const SPECKLE_RMS_TOLERANCE := 0.1
+const ALPHA_MIN := 0.1
 
 var _main: Node
 var _world: World
@@ -140,6 +169,10 @@ func _run() -> void:
 		# sub-grid shapes; the debug outputs march the whole segment) is what the far field reproduces: 5 %. The game's
 		# cloud pass draws every cloud there with its far tier (static clouds Task 8: all lie beyond the near / far
 		# hand-over), the far field's model with the pattern faded out at these footprints: 5 %.
+		# The converged volume with the shapes (the march alone, REFERENCE_STEP_FACTOR x its steps) against the far
+		# field: the column model's own error, 10 % (the M8 ruling). Decks only: a broken layer's cover in the volume
+		# beats with the 32 km tile at these ~17 km footprints (Task 3's follow-up; 17-32 % off either way) - section 6
+		# compares it at orbit footprints, where the volume resolves its clouds.
 		for deck in [["deck tau 10", DECK_LIQUID_KG_M3], ["deck tau 2", THIN_LIQUID_KG_M3]]:
 			var snapshot := _slab(deck[0], deck[1], 1.0)
 			_show(snapshot)
@@ -147,6 +180,9 @@ func _run() -> void:
 			await _handover_sample(deck[0] + ", volume on the grid mean", 2, HANDOVER_TOLERANCE)
 			ShaderGlobals.set_value(&"cloud_debug_output", 0)
 			await _handover_sample(deck[0] + ", the cloud pass's far tier", 2, HANDOVER_TOLERANCE, snapshot)
+			_set_converged_volume(true)
+			await _handover_sample(deck[0] + ", the converged volume with the shapes", 2, NEAR_FAR_TOLERANCE, snapshot)
+			_set_converged_volume(false)
 		var broken := _slab("broken", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION)
 		_show(broken)
 		await _handover_sample("broken cf 0.4, the cloud pass's far tier", 10, HANDOVER_TOLERANCE, broken)
@@ -155,6 +191,9 @@ func _run() -> void:
 	if _only == "" or _only == "handover":
 		# 5. The near / far hand-over in the cloud pass.
 		await _handover_band_samples()
+	if _only == "" or _only == "column":
+		# 6. The far tier's column model at orbit footprints.
+		await _column_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -387,19 +426,166 @@ func _handover_band_samples() -> void:
 	_set_handover(preset)
 
 
+## 6. The far tier's column model at orbit footprints (static clouds Task 8 fix round 1; header).
+func _column_samples() -> void:
+	var preset: Dictionary = CloudLayer.PRESETS[_world.clouds.quality]
+	for layer in [["broken cf 0.4", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION], ["deck tau 10", DECK_LIQUID_KG_M3, 1.0]]:
+		_show(_slab(layer[0], layer[1], layer[2]))
+		for view: Dictionary in COLUMN_VIEWS:
+			var label := "%s, %s from %.0f km" % [layer[0], view["name"], ORBIT_HEIGHT_M / 1000.0]
+			var means := {}
+			for model: String in ["volume", "shapes", "column"]:
+				_set_converged_volume(model == "volume")
+				if model != "volume":
+					_set_handover(Vector2.ZERO)  # the far tier everywhere
+				_set_fade(FADE_SHAPES if model == "shapes" else Vector2.ZERO)
+				if not await _ground_view(BAND_SITE, ORBIT_HEIGHT_M, 0.0, view["elevation"]):
+					_check("%s: the view settled" % label, false, "")
+					return
+				var image := _cloud_image()
+				_save(image, "t8fcheck_%s_%s_%s" % [str(layer[0]).replace(" ", "_"),
+						str(view["name"]).replace(" ", "_"), model])
+				means[model] = _central_means(image)
+			var column: Vector2 = means["column"]
+			var volume: Vector2 = means["volume"]
+			var shapes: Vector2 = means["shapes"]
+			_check("%s: the column model vs the converged volume, mean radiance within %.0f %%" % [label,
+					NEAR_FAR_TOLERANCE * 100.0], absf(column.x / maxf(volume.x, 1.0e-12) - 1.0) <= NEAR_FAR_TOLERANCE,
+					"column / volume %.4f (radiance %.5f / %.5f, alpha %.4f / %.4f)" % [column.x / maxf(volume.x,
+					1.0e-12), column.x, volume.x, column.y, volume.y])
+			_check("%s: across the far tier's shapes-to-column fade, mean radiance within %.0f %%" % [label,
+					NEAR_FAR_TOLERANCE * 100.0], absf(column.x / maxf(shapes.x, 1.0e-12) - 1.0) <= NEAR_FAR_TOLERANCE,
+					"column / shapes %.4f (radiance %.5f / %.5f, alpha %.4f / %.4f)" % [column.x / maxf(shapes.x,
+					1.0e-12), column.x, shapes.x, column.y, shapes.y])
+	_set_converged_volume(false)
+	_set_fade(preset["far_fade_m"])
+	# No speckle: the game's image against its sub-pixel supersampled reference.
+	_show(_slab("broken", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION))
+	for view: Dictionary in SPECKLE_VIEWS:
+		await _speckle_sample(view)
+
+
+## Mean premultiplied luminance (x) and alpha (y) over the image's central square (COLUMN_BLOCK of its height).
+static func _central_means(image: Image) -> Vector2:
+	var w := image.get_width()
+	var h := image.get_height()
+	var half := int(COLUMN_BLOCK * h * 0.5)
+	var sum := Vector2.ZERO
+	var n := 0
+	for y in range(h / 2 - half, h / 2 + half + 1):
+		for x in range(w / 2 - half, w / 2 + half + 1):
+			var c := image.get_pixel(x, y)
+			sum += Vector2(_luminance(c), c.a)
+			n += 1
+	return sum / maxf(n, 1)
+
+
+## The speckle check of one view (header 6): the camera turned by whole screen pixels over one march pixel (the
+## preset's divisor in x and y), each render aligned back by the integer shift that matches the unturned one best; the
+## reference is their mean (the march's rays at every sub-pixel position of the march pixel).
+func _speckle_sample(view: Dictionary) -> void:
+	var height: float = view["height"]
+	var elevation := -rad_to_deg(acos(WGS84_A_M / (WGS84_A_M + height))) + SPECKLE_HORIZON_BELOW_DEG
+	var screen := root.get_texture().get_size()
+	var pixel_rad := 2.0 * tan(deg_to_rad(_world.camera.fov) * 0.5) / float(screen.y)
+	var divisor: int = CloudLayer.PRESETS[_world.clouds.quality]["divisor"]
+	var images: Array[Image] = []
+	for j in range(divisor):
+		for i in range(divisor):
+			var azimuth := rad_to_deg(i * pixel_rad / cos(deg_to_rad(elevation)))
+			if not await _ground_view(BAND_SITE, height, azimuth, elevation + rad_to_deg(j * pixel_rad)):
+				_check("%s: the view settled" % view["name"], false, "")
+				return
+			images.append(_cloud_image())
+	var game := images[0]
+	_save(game, "t8fcheck_speckle_%s" % str(view["name"]).replace(" ", "_"))
+	var w := game.get_width()
+	var h := game.get_height()
+	# The far band (band_deg; the clouds at the largest footprints).
+	var focal := 0.5 * h / tan(deg_to_rad(_world.camera.fov) * 0.5)
+	var horizon_y := int(0.5 * h + focal * tan(deg_to_rad(SPECKLE_HORIZON_BELOW_DEG)))
+	var band_rows := int(focal * (tan(deg_to_rad(SPECKLE_HORIZON_BELOW_DEG + float(view["band_deg"])))
+			- tan(deg_to_rad(SPECKLE_HORIZON_BELOW_DEG))))
+	var region := Rect2i(w / 4, horizon_y + SPECKLE_SKIP_ROWS, w / 2, band_rows - SPECKLE_SKIP_ROWS)
+	var reference := PackedFloat32Array()
+	var reference_alpha := PackedFloat32Array()
+	reference.resize(region.size.x * region.size.y)
+	reference_alpha.resize(region.size.x * region.size.y)
+	var offsets := ""
+	for image in images:
+		var shift := _best_shift(game, image, Rect2i(w / 4, h / 2, w / 2, h / 6), divisor + 1)  # on the clouds below
+		offsets += " (%d, %d)" % [shift.x, shift.y]
+		for y in range(region.size.y):
+			for x in range(region.size.x):
+				var c := image.get_pixel(region.position.x + x + shift.x, region.position.y + y + shift.y)
+				reference[y * region.size.x + x] += _luminance(c) / images.size()
+				reference_alpha[y * region.size.x + x] += c.a / images.size()
+	var sum_sq := 0.0
+	var sum_ref := 0.0
+	var count := 0
+	for y in range(region.size.y):
+		for x in range(region.size.x):
+			var c := game.get_pixel(region.position.x + x, region.position.y + y)
+			var k := y * region.size.x + x
+			if c.a <= ALPHA_MIN and reference_alpha[k] <= ALPHA_MIN:
+				continue
+			sum_sq += pow(_luminance(c) - reference[k], 2.0)
+			sum_ref += reference[k]
+			count += 1
+	var rms := sqrt(sum_sq / maxf(count, 1)) / maxf(sum_ref / maxf(count, 1), 1.0e-12)
+	_check("%s: no speckle - the image vs its %d x %d sub-pixel supersampled reference, RMS within %.0f %%" % [
+			view["name"], divisor, divisor, SPECKLE_RMS_TOLERANCE * 100.0], count > 0 and rms <= SPECKLE_RMS_TOLERANCE,
+			"RMS %.2f %% over %d cloud pixels (shifts%s); grain %.4f vs %.4f" % [rms * 100.0, count, offsets,
+			_band_grain(game, region, divisor, PackedFloat32Array()), _band_grain(game, region, divisor, reference)])
+
+
+## The grain over the region (cloud_grain_check's: the mean |Laplacian| at a spacing of one march pixel relative to the
+## mean luminance) of the image, or of the region's own values when given (row-major over the region).
+static func _band_grain(image: Image, region: Rect2i, spacing: int, values: PackedFloat32Array) -> float:
+	var high := 0.0
+	var mean := 0.0
+	for y in range(spacing, region.size.y - spacing):
+		for x in range(spacing, region.size.x - spacing):
+			var l := PackedFloat32Array()
+			for o: Vector2i in [Vector2i.ZERO, Vector2i(-spacing, 0), Vector2i(spacing, 0), Vector2i(0, -spacing),
+					Vector2i(0, spacing)]:
+				if values.is_empty():
+					l.append(_luminance(image.get_pixel(region.position.x + x + o.x, region.position.y + y + o.y)))
+				else:
+					l.append(values[(y + o.y) * region.size.x + x + o.x])
+			high += absf(l[0] - 0.25 * (l[1] + l[2] + l[3] + l[4]))
+			mean += l[0]
+	return high / maxf(mean, 1.0e-12)
+
+
+## The integer shift (within +-reach) of b that matches a best over the region (mean absolute luminance difference).
+static func _best_shift(a: Image, b: Image, region: Rect2i, reach: int) -> Vector2i:
+	var best := Vector2i.ZERO
+	var best_error := INF
+	for oy in range(-reach, reach + 1):
+		for ox in range(-reach, reach + 1):
+			var error := 0.0
+			for y in range(region.position.y, region.end.y, 4):
+				for x in range(region.position.x, region.end.x, 4):
+					error += absf(_luminance(a.get_pixel(x, y)) - _luminance(b.get_pixel(x + ox, y + oy)))
+			if error < best_error:
+				best_error = error
+				best = Vector2i(ox, oy)
+	return best
+
+
 ## The band's checks (header 5) on the march alone (near), the far tier alone (far) and the game's image, binned by the
 ## distance at which each pixel's ray crosses the slab's middle (BAND_SLAB_MID_M); the hand-over weight of a pixel at
 ## the distance of the slab's top (where its cloud is seen from above).
 func _band_checks(label: String, near: Image, far: Image, game: Image, band: Vector2) -> void:
 	var bins := int((BAND_BINS_M.y - BAND_BINS_M.x) / BIN_M)
-	var sums := [PackedFloat64Array(), PackedFloat64Array(), PackedFloat64Array(), PackedFloat64Array(),
-			PackedFloat64Array()]  # near, far, game, the linear cross-fade of near and far, the weight
+	var sums := [PackedFloat64Array(), PackedFloat64Array(), PackedFloat64Array(),
+			PackedFloat64Array()]  # near, far, game, the linear cross-fade of near and far
 	var counts := PackedFloat64Array()
 	for s in sums:
 		s.resize(bins)
 	counts.resize(bins)
 	var compare := Vector3.ZERO  # near, far, pixels over BAND_COMPARE_M
-	var in_band := Vector2.ZERO  # near, far over the band
 	var w := near.get_width()
 	var h := near.get_height()
 	var site_up := Frames.to_render(_world.earth.fixed_to_gcrf * _itrf(BAND_SITE.x, BAND_SITE.y).normalized())
@@ -421,15 +607,12 @@ func _band_checks(label: String, near: Image, far: Image, game: Image, band: Vec
 					_luminance(game.get_pixel(x, y))]
 			if d >= BAND_COMPARE_M.x and d < BAND_COMPARE_M.y:
 				compare += Vector3(lums[0], lums[1], 1.0)
-			if d >= band.x and d < band.y:
-				in_band += Vector2(lums[0], lums[1])
 			var i := int(floor((d - BAND_BINS_M.x) / BIN_M))
 			if i < 0 or i >= bins:
 				continue
 			for k in range(3):
 				sums[k][i] += lums[k]
 			sums[3][i] += (1.0 - weight) * lums[0] + weight * lums[1]
-			sums[4][i] += weight
 			counts[i] += 1.0
 	var ratio := compare.y / maxf(compare.x, 1.0e-12)
 	_check("%s at %.0f-%.0f km: far tier vs march mean radiance within %.0f %%" % [label, BAND_COMPARE_M.x / 1000.0,
@@ -438,7 +621,8 @@ func _band_checks(label: String, near: Image, far: Image, game: Image, band: Vec
 	# The game's image is the linear cross-fade of the two in every bin (no dip, no ring from the composite) ...
 	var worst := 0.0
 	var worst_at := 0.0
-	var largest_weight_step := 0.0
+	var largest_step := 0.0  # of the game's image relative to the march's, between neighbouring bins
+	var largest_step_at := 0.0
 	var table := ""
 	for i in range(bins):
 		if counts[i] <= 0.0:
@@ -450,18 +634,18 @@ func _band_checks(label: String, near: Image, far: Image, game: Image, band: Vec
 			worst = residual
 			worst_at = BAND_BINS_M.x + (i + 0.5) * BIN_M
 		if i + 1 < bins and counts[i + 1] > 0.0:
-			largest_weight_step = maxf(largest_weight_step,
-					absf(sums[4][i + 1] / counts[i + 1] - sums[4][i] / counts[i]))
+			var step := absf(sums[2][i + 1] / maxf(sums[0][i + 1], 1.0e-12) - sums[2][i] / maxf(sums[0][i], 1.0e-12))
+			if step > largest_step:
+				largest_step = step
+				largest_step_at = BAND_BINS_M.x + (i + 1) * BIN_M
 	_check("%s: the game's image is the cross-fade of the march and the far tier within %.0f %% per %.0f km bin" % [
 			label, BIN_STEP_TOLERANCE * 100.0, BIN_M / 1000.0], worst <= BIN_STEP_TOLERANCE,
 			"worst %.2f %% at %.0f km; bins km:near/far/game/cross-fade%s" % [worst * 100.0, worst_at / 1000.0, table])
-	# ... whose own step between neighbouring bins is the weight's step times the two models' difference over the band.
-	var band_ratio := in_band.y / maxf(in_band.x, 1.0e-12)
-	var step := largest_weight_step * absf(band_ratio - 1.0)
-	_check("%s: the hand-over's step between %.0f km bins (band %.0f-%.0f km) within %.0f %%" % [label,
-			BIN_M / 1000.0, band.x / 1000.0, band.y / 1000.0, BIN_STEP_TOLERANCE * 100.0], step <= BIN_STEP_TOLERANCE,
-			"%.2f %% (weight step %.3f x far / near %.4f over the band)" % [step * 100.0, largest_weight_step,
-			band_ratio])
+	# ... and its own step between neighbouring bins, measured on the game's image relative to the march's (the clouds'
+	# own variation from bin to bin divided out): the band's seam.
+	_check("%s: the hand-over's step between %.0f km bins (band %.0f-%.0f km), game / march, within %.0f %%" % [label,
+			BIN_M / 1000.0, band.x / 1000.0, band.y / 1000.0, BIN_STEP_TOLERANCE * 100.0],
+			largest_step <= BIN_STEP_TOLERANCE, "%.2f %% at %.0f km" % [largest_step * 100.0, largest_step_at / 1000.0])
 
 
 ## The far tier's weight at distance d (cloud_pass.gdshaderinc cloud_handover_weight).
@@ -507,17 +691,6 @@ static func _image_difference(a: Image, b: Image) -> Vector2:
 	return result
 
 
-static func _block_alpha(image: Image, centre: Vector2, radius: int) -> float:
-	var sum := 0.0
-	var n := 0
-	for y in range(int(round(centre.y)) - radius, int(round(centre.y)) + radius + 1):
-		for x in range(int(round(centre.x)) - radius, int(round(centre.x)) + radius + 1):
-			if x >= 0 and y >= 0 and x < image.get_width() and y < image.get_height():
-				sum += image.get_pixel(x, y).a
-				n += 1
-	return sum / maxf(n, 1)
-
-
 static func _covered_pixels(image: Image) -> int:
 	var n := 0
 	for y in range(image.get_height()):
@@ -528,6 +701,20 @@ static func _covered_pixels(image: Image) -> int:
 
 static func _luminance(c: Color) -> float:
 	return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
+
+
+## The march alone at REFERENCE_STEP_FACTOR x the preset's steps (the converged volume with the shapes), or the
+## preset's band and steps.
+func _set_converged_volume(on: bool) -> void:
+	var preset: Dictionary = CloudLayer.PRESETS[_world.clouds.quality]
+	var factor := REFERENCE_STEP_FACTOR if on else 1
+	ShaderGlobals.set_value(&"cloud_steps", int(preset["steps"]) * factor)
+	ShaderGlobals.set_value(&"cloud_max_steps", int(preset["max_steps"]) * factor)
+	_set_handover(Vector2(BAND_ALL_MARCH_M, BAND_ALL_MARCH_M) if on else preset["handover_m"])
+
+
+func _set_fade(fade: Vector2) -> void:
+	ShaderGlobals.set_value(&"cloud_far_pattern_fade_m", fade)
 
 
 func _set_handover(band: Vector2) -> void:

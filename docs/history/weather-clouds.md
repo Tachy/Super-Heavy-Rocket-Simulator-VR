@@ -507,3 +507,42 @@ and drew every cloud with the shapes up to 1.5e7 m:
 > one: the floor weight's ~23 % of one frame's noise) - with the jittered march only; the deterministic one reads the
 > footprint's centre.
 
+## Far tier's fade, column model, Task 2 light ruling (superseded by static clouds Task 8 fix round 1, 2026-10-27)
+Superseded text of `docs/subsystems/weather-clouds.md` (model, open points). The fade then took the footprint projected
+onto the vertical (x |cos|): grazing views kept the shapes at multi-km footprints (the limb from orbit speckled); the
+column model drew the 0.25 deg cells bilinear (a lattice of soft squares from orbit) as an even cover, ~11-20 % darker
+than the converged volume for broken cumulus; the dotted horizon row was the upsample's.
+
+>   `cloud_handover_near_m` / `_far_m`, both presets 20 / 34 km [E]): the march ends at 34 km - inside the light cache's
+>   full weight (ruling of Task 2: the light beyond is never taken from the per-sample light march) and below the
+>   footprints that need the shape prefilter
+
+>   - where the pixel footprint at the ray's crossing of 2 km (`cloud_far_reference_m`; its lowest point when it stays
+>     above: continuous over the pixels), projected onto the vertical (x |cos| of the view there), exceeds 0.5 km [E],
+>     the far tier fades by 1 km to the far field's column model (`cloud_far_slab`: the far field's slab placement along
+>     the ray, from above or from below, a crossing in front of the band taken at its start; `cloud_far_column`: the
+>     beam cover C_v, the plane-parallel slab), weighted by w at the slab: seen from above with ~1 km footprints the
+>     32 km shape tile showed as a lattice over a uniform layer and the mips (1 km texels at most) beat into streaks; at
+>     grazing views the overlap merges the shapes into the horizon's band, which the column model drew faint (the
+>     unprojected footprint faded the band from 20 km to the column). From 420 km every pixel is the far tier's (the
+>     march segment is empty): at VR resolution (2.3 km) the column model below, the shapes along the limb.
+
+>   Approximations: no light between columns (no lit cloud sides, no shadows on neighbouring columns), the light taken
+>   at one point,
+
+>   broken cf 0.4 (21 x 21 block means) within 2.60 % at the six points off the sub-camera point; there the ground alone
+
+> - Near / far hand-over (static clouds Task 8): the far tier's light is the column's beyond 1.5 km of the light path
+>   (no light cache beyond the march: no far neighbours' shadows past 1.5 km); its shapes are band-limited at the pixel
+>   footprint (no detail beyond ~125 m footprints, as the march); at large footprints (VR beyond ~90 km, low orbit) it is
+>   the far field's column model (plane-parallel, the 0.25 deg cells as soft patches from orbit). In the band both passes
+>   run (the cost of the overlap); in all the cost is about the march's to the horizon before (VR proxy,
+>   `vr-performance.md`), as the far pass takes the same steps, with a cheaper light. The scaled-space limit: the
+>   ground's sea glint steps there (terrain vs scaled-space Earth, weather off), seen through broken cloud. The dotted line at the far sea horizon in the deck and 20 km views (pre-existing,
+>   unchanged): the checkerboard of the march pixels' nearest / farthest scene depth - on the horizon rows alternate
+>   march pixels end at the sea (~340 km from 9 km) or run into the sky, and only the latter hold the cloud band beyond
+>   the sea horizon, so the upsample alternates along the row (period 2 march pixels).
+
+> - Far field: plane-parallel independent columns (no 3D radiative effects: no lit cloud sides at a low Sun, no shadows
+>   cast on neighbouring columns or the ground beside them); the field's 0.25 deg grid shows as soft cells near the
+>   hand-over (~4 pixels per cell at 1.5e7 m).

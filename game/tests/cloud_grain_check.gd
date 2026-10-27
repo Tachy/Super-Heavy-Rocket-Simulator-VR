@@ -11,11 +11,16 @@
 # - the RMS difference of the premultiplied luminance over the cloud mask (either image's alpha > ALPHA_MIN), relative
 #   to the reference's mean there, below RMS_TOLERANCE (the same picture, not only the same statistics).
 # Views: the Cape (thin layers on long oblique paths, the user's t7_cape), the ground at Starbase, a deck seen from 9 km
-# and the cirrus seen from 9 km off Peru (t5_cirrus). With the preset the cloud image of the next frame is bit-identical
+# and the cirrus seen from 9 km off Peru (t5_cirrus). The deck view's horizon row (static clouds Task 8 fix round 1):
+# the march's nearest / farthest depth checkerboard along the terrain's horizon dotted it in the upsample; isolated
+# outlier pixels (luminance or alpha off the median of their 7-pixel row window by more than DOT_DEVIATION of it and off
+# both row neighbours) within HORIZON_ROWS of the horizon (per column, the rays against the site's sphere) at most
+# DOT_FACTOR x the rows' own density HORIZON_REFERENCE_ROWS away, + DOT_ALLOWANCE.
+# With the preset the cloud image of the next frame is bit-identical
 # (static clouds; render_check's repeat_identical compares the whole frame, whose sea differs between frames at the Cape
 # without any cloud change).
 # Needs a GPU (no --headless): godot --xr-mode off --path game --script res://tests/cloud_grain_check.gd
-# [-- --only=cape] (one view). Exit code 1 on failure.
+# [-- --only=cape] (one view) [--save=<dir>] (the cloud images as EXR). Exit code 1 on failure.
 extends SceneTree
 
 const UTC := "2024-06-15T21:00:00"
@@ -23,7 +28,8 @@ const UTC := "2024-06-15T21:00:00"
 const VIEWS := [
 	{"name": "cape", "lat": 28.5729, "lon": -80.649, "azimuth": 90.0, "elevation": 20.0},
 	{"name": "ground", "lat": 25.997, "lon": -97.157, "azimuth": 90.0, "elevation": 25.0},
-	{"name": "deck", "lat": 25.997, "lon": -97.157, "azimuth": 0.0, "elevation": -10.0, "eye_height": 9000.0},
+	{"name": "deck", "lat": 25.997, "lon": -97.157, "azimuth": 0.0, "elevation": -10.0, "eye_height": 9000.0,
+			"horizon": true},
 	{"name": "cirrus", "lat": -18.0, "lon": -78.0, "azimuth": 0.0, "elevation": 15.0, "eye_height": 9000.0},
 ]
 ## [E] The reference march: 8 x the preset's coarse and maximum steps (768 / 1536 for VR) - the controller's
@@ -43,18 +49,37 @@ const RMS_TOLERANCE := 0.1
 ## [E] Cloud pixels: alpha above this (the thin layers' grain lives in alpha 0.1-0.6).
 const ALPHA_MIN := 0.1
 const FRAMES_TO_SETTLE := 6
+## The horizon row (header): rows within HORIZON_ROWS of it (the terrain's heights shift it by a row or two), reference
+## rows HORIZON_REFERENCE_ROWS.x-.y away.
+const HORIZON_ROWS := 3
+const HORIZON_REFERENCE_ROWS := Vector2i(8, 40)
+## [E] An isolated outlier: off its 7-pixel row median by more than this fraction (the dots: 40-75 %; a cloud's edge
+## follows the median) and off both row neighbours by more than DOT_NEIGHBOUR of it; values below DOT_FLOOR count as it.
+const DOT_DEVIATION := 0.25
+const DOT_NEIGHBOUR := 0.6
+const DOT_FLOOR := 0.02
+## [E] The horizon rows' outliers at most DOT_FACTOR x the reference rows' density (per as many rows) + DOT_ALLOWANCE
+## (the deck view's thin cloud has its own: ~115 expected over the 7 rows; with the checkerboard's dotted row 272,
+## without it 38).
+const DOT_FACTOR := 1.5
+const DOT_ALLOWANCE := 3.0
+const WGS84_A_M := 6378137.0
+const WGS84_E2 := 6.69437999014e-3
 const MAX_FRAMES := 6000
 
 var _main: Node
 var _world: World
 var _failures := 0
 var _only := ""
+var _save_dir := ""  ## --save=<dir>: the views' cloud images (EXR)
 
 
 func _initialize() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--only="):
 			_only = arg.trim_prefix("--only=")
+		elif arg.begins_with("--save="):
+			_save_dir = arg.trim_prefix("--save=")
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	_run.call_deferred()
@@ -98,6 +123,12 @@ func _run() -> void:
 		var second := _world.clouds.effect.output.get_layer_data(0)
 		_check("%s: the cloud image of the next frame bit-identical" % name,
 				first != null and second != null and first.get_data() == second.get_data(), "")
+		if view.get("horizon", false) and first != null:
+			_horizon_dots(name, first, view)
+		if _save_dir != "" and first != null:
+			var copy := first.duplicate() as Image
+			copy.convert(Image.FORMAT_RGBAF)
+			copy.save_exr(_save_dir.path_join("grain_%s.exr" % name))
 		ShaderGlobals.set_value(&"cloud_steps", int(preset["steps"]) * REFERENCE_STEP_FACTOR)
 		ShaderGlobals.set_value(&"cloud_max_steps", int(preset["max_steps"]) * REFERENCE_STEP_FACTOR)
 		var reference_settled: bool = await _settle()
@@ -129,6 +160,52 @@ func _compare(name: String, ours: _Picture, reference: _Picture, spacing: int) -
 	var rms := ours.rms_against(reference)
 	_check("%s: RMS luminance difference over the cloud mask below %.2f" % [name, RMS_TOLERANCE], rms <= RMS_TOLERANCE,
 			"%.4f" % rms)
+
+
+## The horizon row's isolated outliers (header).
+func _horizon_dots(name: String, image: Image, view: Dictionary) -> void:
+	var picture := _Picture.new(image)
+	var itrf := _itrf(view["lat"], view["lon"])
+	var up := Frames.to_render(_world.earth.fixed_to_gcrf * itrf.normalized())
+	var r_ground := itrf.length()
+	var r_c := r_ground + float(view["eye_height"])
+	var at_horizon := 0.0
+	var away := Vector2.ZERO  # outliers, rows
+	var reach := HORIZON_REFERENCE_ROWS.y
+	for x in range(3, picture.w - 3):
+		var lo := 0
+		var hi := picture.h - 1  # the first row whose ray meets the sphere (the view's bottom does)
+		while hi - lo > 1:
+			var mid := (lo + hi) / 2
+			var b := r_c * _world.camera.project_ray_normal(Vector2(x + 0.5, mid + 0.5)).dot(up)
+			if b < 0.0 and b * b - (r_c * r_c - r_ground * r_ground) >= 0.0:
+				hi = mid
+			else:
+				lo = mid
+		for y in range(maxi(hi - reach, 0), mini(hi + reach + 1, picture.h)):
+			var offset := absi(y - hi)
+			if offset > HORIZON_ROWS and offset < HORIZON_REFERENCE_ROWS.x:
+				continue
+			var dot := 1.0 if picture.is_dot(x, y) else 0.0
+			if offset <= HORIZON_ROWS:
+				at_horizon += dot
+			else:
+				away += Vector2(dot, 1.0)
+	var columns := float(picture.w - 6)
+	var expected := away.x / maxf(away.y, 1.0) * columns * (2 * HORIZON_ROWS + 1)
+	_check(("%s: no dotted horizon row (isolated outliers within %d rows of it at most %.1f x the density %d-%d rows"
+			+ " away + %.0f)") % [name, HORIZON_ROWS, DOT_FACTOR, HORIZON_REFERENCE_ROWS.x, HORIZON_REFERENCE_ROWS.y,
+			DOT_ALLOWANCE],
+			at_horizon <= DOT_FACTOR * expected + DOT_ALLOWANCE, "%d at the horizon, %.2f expected" % [int(at_horizon),
+			expected])
+
+
+## Earth-fixed (ITRF) point at geodetic (lat, lon) deg on the ellipsoid.
+static func _itrf(lat_deg: float, lon_deg: float) -> Vector3:
+	var lat := deg_to_rad(lat_deg)
+	var lon := deg_to_rad(lon_deg)
+	var n := WGS84_A_M / sqrt(1.0 - WGS84_E2 * sin(lat) * sin(lat))
+	return Vector3(n * cos(lat) * cos(lon), n * cos(lat) * sin(lon), n * (1.0 - WGS84_E2) * sin(lat))
 
 
 func _check_mean(label: String, ours: float, reference: float) -> void:
@@ -226,6 +303,22 @@ class _Picture:
 		if count == 0 or mean <= 0.0:
 			return Vector3.ZERO
 		return Vector3(high / mean, count, high_alpha / count)
+
+	## An isolated outlier at (x, y) in luminance or alpha (header; 3 <= x < w - 3).
+	func is_dot(x: int, y: int) -> bool:
+		return _is_dot(luminance, x, y) or _is_dot(alpha, x, y)
+
+	func _is_dot(values: PackedFloat32Array, x: int, y: int) -> bool:
+		var row := y * w
+		var window := PackedFloat32Array()
+		for k in range(-3, 4):
+			window.append(values[row + x + k])
+		window.sort()
+		var median := maxf(window[3], DOT_FLOOR)
+		var v := values[row + x]
+		return absf(v - window[3]) > DOT_DEVIATION * median \
+				and absf(v - values[row + x - 1]) > DOT_NEIGHBOUR * DOT_DEVIATION * median \
+				and absf(v - values[row + x + 1]) > DOT_NEIGHBOUR * DOT_DEVIATION * median
 
 	## The RMS luminance difference over the pixels where either image has alpha > ALPHA_MIN, relative to the other's
 	## (the reference's) mean luminance there.

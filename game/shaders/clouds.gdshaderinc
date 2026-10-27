@@ -952,8 +952,44 @@ vec2 cloud_column_texel(sampler3D column, vec3 size, vec2 lat_lon, float layer) 
 	return mix(mix(d00, d10, f.x), mix(d01, d11, f.x), f.y);
 }
 
-// One snapshot's grid-mean column above (lat, lon, height): x the depth, y the cover.
-vec2 cloud_snapshot_column(sampler3D field, sampler3D column, vec3 size, vec2 lat_lon, float height_m) {
+// The cubic B-spline's four weights at the fraction t between the two middle texels (non-negative, sum 1: the field's
+// mean is kept; C2).
+vec4 cloud_bspline_weights(float t) {
+	float t2 = t * t;
+	float t3 = t2 * t;
+	float s = 1.0 - t;
+	return vec4(s * s * s, 3.0 * t3 - 6.0 * t2 + 4.0, -3.0 * t3 + 3.0 * t2 + 3.0 * t + 1.0, t3) / 6.0;
+}
+
+// cloud_column_texel with the cubic B-spline over the 4 x 4 texels around instead of the bilinear (static clouds Task 8
+// fix round 1, the far tier's column model): from low orbit a 0.25 deg cell spans tens of pixels, and the bilinear's
+// creases along the cell edges drew the grid as a lattice of soft squares.
+vec2 cloud_column_texel_smooth(sampler3D column, vec3 size, vec2 lat_lon, float layer) {
+	float x = lat_lon.y / (2.0 * CLOUD_PI) * size.x;
+	float y = clamp((0.5 * CLOUD_PI - lat_lon.x) / (CLOUD_PI / (size.y - 1.0)), 0.0, size.y - 1.0);
+	float x0 = floor(x);
+	float y0 = floor(y);
+	vec4 wx = cloud_bspline_weights(x - x0);
+	vec4 wy = cloud_bspline_weights(y - y0);
+	int rows = int(size.y);
+	int z = int(layer);
+	vec2 sum = vec2(0.0);
+	for (int j = 0; j < 4; j++) {
+		int r = clamp(int(y0) - 1 + j, 0, rows - 1);
+		vec2 row = vec2(0.0);
+		for (int i = 0; i < 4; i++) {
+			int c = int(mod(x0 - 1.0 + float(i), size.x));
+			vec2 t = texelFetch(column, ivec3(c, r, z), 0).ra;  // .a: the cover (cloud_column_texel)
+			row += wx[i] * vec2(cloud_decode_depth(t.x), t.y);
+		}
+		sum += wy[j] * row;
+	}
+	return sum;
+}
+
+// One snapshot's grid-mean column above (lat, lon, height): x the depth, y the cover; bspline: the column texels'
+// B-spline (cloud_column_texel_smooth).
+vec2 cloud_snapshot_column(sampler3D field, sampler3D column, vec3 size, vec2 lat_lon, float height_m, bool bspline) {
 	float s = cloud_layer_coordinate(height_m) - 0.5;
 	float k = clamp(floor(s), 0.0, CLOUD_LAYERS - 2.0);
 	float x = clamp(s - k, 0.0, 1.0);
@@ -969,7 +1005,8 @@ vec2 cloud_snapshot_column(sampler3D field, sampler3D column, vec3 size, vec2 la
 	}
 	float centre = clamp(floor(s) + 1.0, 0.0, CLOUD_LAYERS - 1.0);  // the centre above (0 below centre 0)
 	float beta_centre = centre > k ? beta_a : beta_b;
-	vec2 at_centre = cloud_column_texel(column, size, lat_lon, centre);
+	vec2 at_centre = bspline ? cloud_column_texel_smooth(column, size, lat_lon, centre)
+			: cloud_column_texel(column, size, lat_lon, centre);
 	return vec2(at_centre.x + 0.5 * (beta + beta_centre) * max(cloud_layer_centre_m(centre) - height_m, 0.0),
 			max(at_centre.y, fraction));
 }
@@ -982,11 +1019,28 @@ vec2 cloud_column_mean_depth(vec2 lat_lon, float height_m) {
 	}
 	if (cloud_blend < 1.0) {
 		depth += (1.0 - cloud_blend) * cloud_snapshot_column(cloud_field_before, cloud_column_before,
-				cloud_field_before_size, lat_lon, height_m);
+				cloud_field_before_size, lat_lon, height_m, false);
 	}
 	if (cloud_blend > 0.0) {
 		depth += cloud_blend * cloud_snapshot_column(cloud_field_after, cloud_column_after,
-				cloud_field_after_size, lat_lon, height_m);
+				cloud_field_after_size, lat_lon, height_m, false);
+	}
+	return depth;
+}
+
+// cloud_column_mean_depth with the column texels' B-spline (cloud_column_texel_smooth; the far tier's column model).
+vec2 cloud_column_mean_depth_smooth(vec2 lat_lon, float height_m) {
+	vec2 depth = vec2(0.0);
+	if (height_m > CLOUD_TOP_M) {
+		return depth;
+	}
+	if (cloud_blend < 1.0) {
+		depth += (1.0 - cloud_blend) * cloud_snapshot_column(cloud_field_before, cloud_column_before,
+				cloud_field_before_size, lat_lon, height_m, true);
+	}
+	if (cloud_blend > 0.0) {
+		depth += cloud_blend * cloud_snapshot_column(cloud_field_after, cloud_column_after,
+				cloud_field_after_size, lat_lon, height_m, true);
 	}
 	return depth;
 }

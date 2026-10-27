@@ -243,19 +243,23 @@ global uniform int cloud_max_steps;    // cap on the steps per pixel (coarse + f
 global uniform float cloud_fine_step_fraction;  // fine step / distance inside the field's cloudy region
 global uniform bool cloud_deterministic_march;  // fidelity flag (CloudLayer.deterministic_march; false: jittered)
 // The near / far hand-over (static clouds Task 8; CloudLayer.PRESETS "handover_m"): the march ends at
-// cloud_handover_far_m, the far tier (cloud_far_tier) takes the ray from cloud_handover_near_m on, blended between.
+// cloud_handover_far_m, the far tier (cloud_march's pass 1, the column model cloud_far_column at large footprints)
+// takes the ray from cloud_handover_near_m on, blended between.
 global uniform float cloud_handover_near_m;
 global uniform float cloud_handover_far_m;
 
-// [E] The far tier's shapes (cloud_march's pass 1) fade to the column model's even cover between these pixel
-// footprints, projected onto the vertical (x |cos| of the view), at the ray's reference distance
-// (cloud_far_reference_m): the shape's mips stop at 1 km texels (CLOUD_SHAPE_PREFILTER_LEVELS), and seen from above
-// with footprints of ~1 km (low orbit on the desktop) the 32 km shape tile showed as a lattice over a uniform layer
-// and the mips beat into streaks (the beat of Task 3's follow-up at ~7 km footprints); at a grazing view the overlap
-// merges the shapes into the horizon's band, which the column model drew faint (the unprojected footprint faded the
-// band from 20 km to the column).
-const float CLOUD_FAR_PATTERN_FADE_START_M = 500.0;
-const float CLOUD_FAR_PATTERN_FADE_END_M = 1000.0;
+// The far tier's shapes (cloud_march's pass 1) fade to the column model between these lateral pixel footprints
+// (x start, y end [m]; CloudLayer.PRESETS "far_fade_m") at the ray's reference distance (cloud_far_reference_m): the
+// shape's mips stop at 1 km texels (CLOUD_SHAPE_PREFILTER_LEVELS), so beyond ~3.5 km a point sample of them beats with
+// the 32 km tile (Task 3's follow-up, spec decision 4) - the speckled band along the limb and the far horizon. The
+// footprint is the lateral one (no |cos| of the view: at a grazing view the pixel spans km along the layer). The
+// checks: 1e9, 1e9 the shapes everywhere, 0, 0 the column model.
+global uniform vec2 cloud_far_pattern_fade_m;
+// [E] Seen from above the footprint counts this many times (up to it at a vertical view, x |cos| x it, at least x 1): a
+// steep ray crosses the layer within its footprint, so a pixel is one point of the thresholded shapes (from low orbit
+// at ~1 km footprints their cumuli flickered per pixel into grain), while a grazing ray averages them over kilometres
+// of its path through the layer.
+const float CLOUD_FAR_STEEP_FOOTPRINT_FACTOR = 3.0;
 // [E] The far tier's light path through the shapes (cloud_far_light_depth): samples, first interval and the intervals'
 // ratio - 20 / 52 / 137 / 358 / 936 m, 1.5 km in all (a cumulus' width, so a sample on a sunlit flank is lit through
 // its flank, not through the column above it; the first interval the volume's light march's, CloudLayer.PRESETS
@@ -266,6 +270,25 @@ const float CLOUD_FAR_LIGHT_RATIO = 2.615;
 // [E] The far tier's first guess of the slab's height where the column of its first guess is clear: a low cloud's
 // (the next guess takes the column where the ray crosses it).
 const float CLOUD_FAR_GUESS_HEIGHT_M = 2000.0;
+// [E] The column model's sub-grid cover (cloud_far_cover_ratio): taps across the footprint (twice as many along it: 32
+// shape reads per pixel, once; 64 with the unaligned reading), the footprint's widening (2: the average spans two pixels, no march-pixel blocks), its
+// largest extent along a grazing view (beyond it the average is the layer's mean: the 32 km tile), and the footprints
+// over which it fades to the even cover (from a quarter of the tile on, its period would show as a lattice; the
+// scaled-space far field beyond 1.5e7 m, with ~17 km pixels, draws the even cover).
+const int CLOUD_FAR_COVER_TAPS = 4;
+const float CLOUD_FAR_COVER_FOOTPRINT_SCALE = 2.0;
+// [E] From footprints of a few km the 32 km tile's period shows as a regular lattice over the hundreds of km of a view
+// from orbit: the sub-grid cover mixes in (up to this weight, faded in over these footprints) a second reading of the
+// shape, Earth-fixed in a frame turned by 37 deg about (1, 2, 3) and scaled by an irrational-ish 1.37 (a horizontal
+// slice of the isotropic noise has the same statistics: the same thresholds and edge mean), whose period does not line
+// up with the first.
+const float CLOUD_FAR_COVER_UNALIGNED_WEIGHT = 0.5;
+const vec2 CLOUD_FAR_COVER_UNALIGNED_M = vec2(1000.0, 3000.0);
+const float CLOUD_FAR_COVER_UNALIGNED_SCALE = 1.37;
+const mat3 CLOUD_FAR_COVER_UNALIGNED_ROTATION = mat3(0.8130186879, 0.5112918472, -0.2785341274, -0.4537591358,
+		0.8561682215, 0.2471408976, 0.3648331945, -0.0745427634, 0.9280841107);
+const float CLOUD_FAR_COVER_ALONG_MAX_M = 32000.0;
+const vec2 CLOUD_FAR_COVER_FADE_M = vec2(8000.0, 16000.0);
 // [E] Behind a march transmittance below this the far tier is not evaluated (< 0.1 % of its light).
 const float CLOUD_FAR_MIN_TRANSMITTANCE = 1.0e-3;
 
@@ -312,7 +335,7 @@ vec2 cloud_far_slab_heights(vec2 lat_lon, vec2 column, float mu) {
 	return vec2(min(from_below, from_above), from_above);
 }
 
-// The far tier's column part (static clouds Task 8; at large pixel footprints, CLOUD_FAR_PATTERN_FADE_*): the column
+// The far tier's column part (static clouds Task 8; at large pixel footprints, cloud_far_pattern_fade_m): the column
 // model of the far field (cloud_far.gdshaderinc) for the ray beyond the hand-over's start from_m up to to_m (the scene
 // or the cloud shell). The slab is placed as in the far field - at the height where the column's depth reaches the
 // seen light's mean depth (from above: from its top; from below: from its base) - and found along the ray: a first
@@ -360,12 +383,12 @@ float cloud_far_slab(CloudRay ray, vec3 dir, vec3 eye, float from_m, float to_m,
 		lat_lon = cloud_lat_lon(q);
 		column = cloud_column_mean_depth(lat_lon, 0.0);
 		d_p = d;
-		column_p = column;
+		column_p = cloud_column_mean_depth_smooth(lat_lon, 0.0);  // the drawn column: smooth (no cell lattice)
 	}
 	return column_p.x > 0.0 ? d_p : -1.0;
 }
 
-// The distance at which the far tier's shapes fade to the column model (CLOUD_FAR_PATTERN_FADE_*, the pixel footprint
+// The distance at which the far tier's shapes fade to the column model (cloud_far_pattern_fade_m, the pixel footprint
 // there): where the ray crosses CLOUD_FAR_GUESS_HEIGHT_M (descending from above, climbing from below; its lowest point
 // when it stays above), within [from_m, to_m] - continuous over the pixels (the slab's crossing, from the column there,
 // jumped between neighbouring pixels: rectangular steps in the far horizon's band).
@@ -380,25 +403,87 @@ float cloud_far_reference_m(CloudRay ray, float from_m, float to_m) {
 	return clamp(d, from_m, to_m);
 }
 
+// The column model's sub-grid cover (static clouds Task 8 fix round 1; spec decision 4: a deterministic footprint
+// average of the mip-based cover) for the column's largest fraction: the share of fixed taps over the pixel's footprint
+// on the layer where the shapes' prefiltered value exceeds that fraction's prefilter threshold (its covered area), over
+// the fraction - 1 on average, so the cover and the water stay the grid's; 1 for a deck. The footprint is widened by
+// CLOUD_FAR_COVER_FOOTPRINT_SCALE (a box of one pixel still aliases): footprint_m across the view, footprint_m / mu
+// along its horizontal direction (at most CLOUD_FAR_COVER_ALONG_MAX_M), CLOUD_FAR_COVER_TAPS across and twice as many
+// along, read at the mip level of the larger spacing; from CLOUD_FAR_COVER_UNALIGNED_M's footprints on a share comes
+// from the shape's second, unaligned reading. It fades to 1 between CLOUD_FAR_COVER_FADE_M's footprints (the 32 km
+// tile's own period would show as a lattice) and is 1 where the cell at the point holds no cloud (its types).
+float cloud_far_cover_ratio(vec3 offset_local, float height_m, vec3 dir, vec3 up, float mu, float footprint_m,
+		float fraction) {
+	float fade = 1.0 - smoothstep(CLOUD_FAR_COVER_FADE_M.x, CLOUD_FAR_COVER_FADE_M.y, footprint_m);
+	CloudCell cell = cloud_field(cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset_local), height_m);
+	if (fade <= 0.0 || fraction >= 1.0 || cell.fraction < CLOUD_MIN_FRACTION || cell.extinction <= 0.0) {
+		return 1.0;
+	}
+	vec3 along = dir - up * dot(dir, up);
+	float along_norm = length(along);
+	vec3 t1 = along_norm > 1.0e-6 ? along / along_norm
+			: normalize(cross(up, abs(up.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+	vec3 t2 = cross(up, t1);
+	float across_m = footprint_m * CLOUD_FAR_COVER_FOOTPRINT_SCALE;
+	float along_m = min(across_m / mu, max(CLOUD_FAR_COVER_ALONG_MAX_M, across_m));
+	const int taps_along = 2 * CLOUD_FAR_COVER_TAPS;
+	// cloud_far_level of the taps' larger spacing
+	float spacing_m = max(along_m / float(taps_along), across_m / float(CLOUD_FAR_COVER_TAPS));
+	float level = clamp(log2(spacing_m * CLOUD_SHAPE_TEXELS / CLOUD_SHAPE_TILE_H_M), 0.0, CLOUD_SHAPE_PREFILTER_LEVELS);
+	vec2 uv = cloud_prefilter_uv(fraction, level);
+	float threshold = texture(cloud_prefilter_threshold, uv).r;
+	vec3 types = cloud_type_weights(cell);
+	// The second, unaligned reading's weight (CLOUD_FAR_COVER_UNALIGNED_*).
+	float unaligned = CLOUD_FAR_COVER_UNALIGNED_WEIGHT
+			* smoothstep(CLOUD_FAR_COVER_UNALIGNED_M.x, CLOUD_FAR_COVER_UNALIGNED_M.y, footprint_m);
+	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
+	float sum = 0.0;
+	for (int j = 0; j < CLOUD_FAR_COVER_TAPS; j++) {
+		for (int i = 0; i < taps_along; i++) {
+			vec2 u = (vec2(i, j) + 0.5) / vec2(taps_along, CLOUD_FAR_COVER_TAPS) - 0.5;
+			vec3 q = offset_local + t1 * (u.x * along_m) + t2 * (u.y * across_m);
+			float covered = 0.0;
+			for (int type = 0; type < 3; type++) {
+				if (types[type] > 0.0) {
+					vec4 s = cloud_shape_prefiltered(cloud_type_shape_coordinates(type, q, height_m), level);
+					covered += types[type] * step(threshold, s.r);
+				}
+			}
+			if (unaligned > 0.0) {
+				vec4 s = cloud_shape_prefiltered(CLOUD_FAR_COVER_UNALIGNED_ROTATION * (camera + q)
+						/ (CLOUD_SHAPE_TILE_H_M * CLOUD_FAR_COVER_UNALIGNED_SCALE), level);
+				covered = mix(covered, step(threshold, s.r), unaligned);
+			}
+			sum += covered;
+		}
+	}
+	float ratio = sum / float(taps_along * CLOUD_FAR_COVER_TAPS) / max(fraction, CLOUD_MIN_FRACTION);
+	return mix(1.0, ratio, fade);
+}
+
 // The column model at the slab's crossing d_p (cloud_far_slab): the even cover C_v (the beam cover of the column's
-// largest fraction at the view's cosine), the plane-parallel slab of the cloudy part's depth
-// (cloud_far_cloudy_radiance: reflected seen from above, transmitted from below), its air light at the crossing;
-// premultiplied colour + alpha (coverage_only: alpha alone).
-vec4 cloud_far_column(vec3 dir, vec3 eye, float d_p, vec2 column_p, vec3 eclipse_near, vec3 eclipse_far,
-		bool coverage_only) {
+// largest fraction at the view's cosine) scaled by the sub-grid cover at the pixel's footprint footprint_m
+// (cloud_far_cover_ratio; at most 1) with the even cover's in-cloud depth (the water follows the cover), the
+// plane-parallel slab of the cloudy part's depth (cloud_far_cloudy_radiance: reflected seen from above, transmitted from below), its
+// air light at the crossing; premultiplied colour + alpha (coverage_only: alpha alone).
+vec4 cloud_far_column(vec3 dir, vec3 eye, float d_p, vec2 column_p, float footprint_m, vec3 eclipse_near,
+		vec3 eclipse_far, bool coverage_only) {
 	vec3 offset = eye + dir * d_p;
 	vec3 p = atmosphere_camera_hi + atmosphere_camera_lo + offset;
 	vec3 up = cloud_geodetic_up(p);
 	vec3 view_prop = -dir;
 	float mu = max(abs(dot(view_prop, up)), CLOUD_FAR_MU_MIN);
-	float cover = max(cloud_column_beam_cover(column_p, mu), CLOUD_MIN_FRACTION);
-	float tau = column_p.x / cover;  // the cloudy part's vertical depth
+	float even = max(cloud_column_beam_cover(column_p, mu), CLOUD_MIN_FRACTION);
+	float tau = column_p.x / even;  // the cloudy part's vertical depth
+	float cover = min(even * cloud_far_cover_ratio(offset, cloud_height_of(p), dir, up, mu, footprint_m,
+			column_p.y), 1.0);
 	float alpha = cover * (1.0 - exp(-tau / mu));
 	if (coverage_only) {
 		return vec4(0.0, 0.0, 0.0, alpha);
 	}
 	float eclipse_x = clamp((d_p - CLOUD_ECLIPSE_NEAR_M) / (CLOUD_ECLIPSE_FAR_M - CLOUD_ECLIPSE_NEAR_M), 0.0, 1.0);
-	vec3 radiance = cloud_far_cloudy_radiance(p, up, view_prop, tau, mix(eclipse_near, eclipse_far, eclipse_x));
+	vec3 radiance = cloud_far_cloudy_radiance(p, up, view_prop, tau, column_p.y, mix(eclipse_near, eclipse_far,
+			eclipse_x));
 	vec3 air_transmittance;
 	vec3 air_light = atm_to_point_offset(offset, air_transmittance);
 	return vec4(air_transmittance * radiance * cover + alpha * air_light, alpha);
@@ -574,15 +659,17 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	float pixel_angle = cloud_view.params.w;  // the detail's band limit: footprint = pixel_angle x distance
 	float w_tab = cloud_phase.w;
 	// The far tier (static clouds Task 8): from the band's start to the segment's end; its shapes fade to the far
-	// field's column model where the pixel footprint outgrows their mips (CLOUD_FAR_PATTERN_FADE_*, at the ray's
+	// field's column model where the pixel footprint outgrows their mips (cloud_far_pattern_fade_m, at the ray's
 	// reference distance cloud_far_reference_m: continuous over the pixels).
 	float far_from_m = max(d0, cloud_handover_near_m);
 	float shapes = 1.0;
-	if (handover && pixel_angle * end_m > CLOUD_FAR_PATTERN_FADE_START_M) {
+	if (handover && pixel_angle * end_m * CLOUD_FAR_STEEP_FOOTPRINT_FACTOR > cloud_far_pattern_fade_m.x) {
 		float reference_m = cloud_far_reference_m(ray, far_from_m, end_m);
 		float steep = abs(dot(dir, cloud_geodetic_up(camera + eye + dir * reference_m)));
-		shapes = 1.0 - smoothstep(CLOUD_FAR_PATTERN_FADE_START_M, CLOUD_FAR_PATTERN_FADE_END_M,
-				pixel_angle * reference_m * steep);
+		float footprint_m = pixel_angle * reference_m * max(1.0, steep * CLOUD_FAR_STEEP_FOOTPRINT_FACTOR);
+		shapes = cloud_far_pattern_fade_m.y > cloud_far_pattern_fade_m.x
+				? 1.0 - smoothstep(cloud_far_pattern_fade_m.x, cloud_far_pattern_fade_m.y, footprint_m)
+				: (footprint_m >= cloud_far_pattern_fade_m.y ? 0.0 : 1.0);
 	}
 	// Two passes over the same steps (the march's machinery: coarse steps spanning the segment, fine steps in the
 	// field's cloudy region that still reach its end, sub-samples, silhouette entries, dense refinement): pass 0 the
@@ -966,7 +1053,8 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		float d_p = cloud_far_slab(ray, dir, eye, far_from_m, end_m, surface, column_p);
 		if (d_p > 0.0) {
 			column_part = cloud_handover_weight(d_p)
-					* cloud_far_column(dir, eye, d_p, column_p, eclipse_near, eclipse_far, coverage_only);
+					* cloud_far_column(dir, eye, d_p, column_p, pixel_angle * d_p, eclipse_near, eclipse_far,
+					coverage_only);
 			column_m = d_p;
 		}
 	}
@@ -1295,6 +1383,9 @@ const float CLOUD_DEPTH_SHARPNESS = 4.0;
 const float CLOUD_EDGE_SOFT_M = 20.0;
 const float CLOUD_TENT_RADIUS_MIN = 1.0;
 const float CLOUD_TENT_RADIUS_MAX = 2.0;
+// [E] Taps whose depth weights differ by more than this ratio (one below it times the largest) show two surfaces: the
+// gather keeps only its kernel's positive part (static clouds Task 8 fix round 1, the dotted horizon row).
+const float CLOUD_DEPTH_MIXED_WEIGHT = 0.5;
 // Distance where an eye pixel without scene geometry is reprojected into the centre (the far sky: rotation only).
 const float CLOUD_UPSAMPLE_SKY_M = 1.0e7;
 
@@ -1334,6 +1425,10 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 	ivec2 base = ivec2(floor(position - 0.5)) - 1;
 	vec4 sum = vec4(0.0);
 	float weights = 0.0;
+	vec4 sum_positive = vec4(0.0);  // the kernel's positive part alone (CLOUD_DEPTH_MIXED_WEIGHT)
+	float weights_positive = 0.0;
+	float depth_weight_min = 1.0;
+	float depth_weight_max = 0.0;
 	float cloud_sum = 0.0;
 	float cloud_weights = 0.0;
 	vec4 best = vec4(0.0);
@@ -1348,9 +1443,18 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 			vec2 depths = texelFetch(low_depth, q, 0).rg;
 			float march_m = min(depths.r, 1.0e20);
 			float error = abs(log(max(scene_m, 1.0) / max(march_m, 1.0)));
-			float w = tent * exp(-CLOUD_DEPTH_SHARPNESS * error);
+			float depth_weight = exp(-CLOUD_DEPTH_SHARPNESS * error);
+			float w = tent * depth_weight;
 			sum += w * c;
 			weights += w;
+			if (tent > 0.0) {
+				sum_positive += w * c;
+				weights_positive += w;
+			}
+			if (tent != 0.0) {
+				depth_weight_min = min(depth_weight_min, depth_weight);
+				depth_weight_max = max(depth_weight_max, depth_weight);
+			}
 			if (depths.g > 0.0 && w > 0.0) {
 				cloud_sum += w * c.a * depths.g;
 				cloud_weights += w * c.a;
@@ -1362,6 +1466,13 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 		}
 	}
 	cloud = cloud_weights > 1.0e-6 ? cloud_sum / cloud_weights : 0.0;
+	// Taps of two depths (the march's nearest / farthest checkerboard along a depth edge - the horizon seen from
+	// altitude): the Catmull-Rom's negative lobes, renormalised over the taps of one depth, alternate with the
+	// checkerboard and dotted the edge's row; its positive part alone (the nearest texels) is used there.
+	if (depth_weight_min < CLOUD_DEPTH_MIXED_WEIGHT * depth_weight_max) {
+		sum = sum_positive;
+		weights = weights_positive;
+	}
 	// The Catmull-Rom lobes can over- / undershoot: premultiplied colour >= 0, alpha in [0, 1].
 	vec4 result = weights > 1.0e-4 ? sum / weights : best;
 	return vec4(max(result.rgb, vec3(0.0)), clamp(result.a, 0.0, 1.0));
