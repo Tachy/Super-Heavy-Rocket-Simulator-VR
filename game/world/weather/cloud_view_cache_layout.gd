@@ -78,8 +78,9 @@ func tile_of(dir: Vector3) -> int:
 	return (int(t.z) * tiles_per_side + ty) * tiles_per_side + tx
 
 
-## (x, y, face): the continuous texel coordinates of a direction in its face.
+## (x, y, face): the continuous texel coordinates of a direction in its face (dir not zero).
 func texel_of(dir: Vector3) -> Vector3:
+	assert(dir != Vector3.ZERO, "a direction is needed")
 	var a := dir.abs()
 	var face: int
 	var s: float

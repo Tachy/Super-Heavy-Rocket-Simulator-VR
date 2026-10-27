@@ -26,6 +26,7 @@ func _initialize() -> void:
 	_test_light_staleness()
 	_test_parallax()
 	_test_budget_and_levels()
+	_test_timing()
 	print("cloud_view_cache_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -70,17 +71,14 @@ func _test_tiles() -> void:
 		in_range = in_range and tile >= 0 and tile < layout.tile_count()
 	_check(in_range, "every direction maps to a tile in 0..%d" % layout.tile_count())
 	# One tile per direction, and the tiles partition the sphere: every tile's centre maps back to that very tile.
-	var seen := PackedByteArray()
-	seen.resize(layout.tile_count())
 	var identity := true
 	for tile in range(layout.tile_count()):
 		identity = identity and layout.tile_of(layout.tile_dir(tile)) == tile
-		seen[tile] += 1
 	_check(identity, "each tile's centre direction lies in that tile (%d tiles)" % layout.tile_count())
 	var sizes_ok := layout.level_texels(0) == TILE_TEXELS / 4 and layout.level_texels(1) == TILE_TEXELS / 2 \
 			and layout.level_texels(2) == TILE_TEXELS
 	_check(sizes_ok, "level texels: 1/4, 1/2, full of the tile")
-	# Texel density: the face centre has face_texels / 2 per radian, no direction fewer than that / sqrt(3)^... (corner).
+	# Texel density: the face centre (the coarsest point of a face) has face_texels / 2 texels per radian.
 	var centre := layout.texel_of(Vector3(0.0, 0.0, -1.0))
 	var next := layout.texel_of(Vector3(1.0e-4, 0.0, -1.0).normalized())
 	var per_rad := absf(next.x - centre.x) / 1.0e-4
@@ -164,26 +162,38 @@ func _test_first_fill() -> void:
 			first_outside = i
 	_check(last_inside < first_outside, "tiles of the view come before the margin ring (last visible %d, first margin %d)"
 			% [last_inside, first_outside])
-	# Everything in the view and margin gets level 0 before anything refines.
-	var order_ok := true
-	var done := {}
+	# Everything in the view and margin gets level 0 before anything refines: while an in-margin tile lacks level 0
+	# (and is not in the batch itself at level 0), no pick may carry a level above 0.
+	var margin_reach := sample_rad + layout.tile_radius_rad() + CloudViewCacheSchedule.VIEW_MARGIN_RAD
+	var margin_tiles: Array[int] = []
+	for tile in range(layout.tile_count()):
+		if _max_angle_dot(layout.tile_dir(tile), view) >= cos(margin_reach):
+			margin_tiles.append(tile)
 	var guard := 0
 	var refined_early := false
-	var margin_open := true
-	while margin_open and guard < 200:
+	var rounds_with_open_margin := 0
+	while guard < 200:
 		guard += 1
 		var batch := schedule.pick(anchor, anchor, view, 400, sample_rad)
-		margin_open = false
-		for p in batch:
-			if p["level"] == 0 and schedule.level_of(p["tile"]) < 0:
-				margin_open = true
-			elif schedule.level_of(p["tile"]) < 0:
-				refined_early = true
+		var batch_level_0 := {}
 		for p in batch:
 			if p["level"] == 0:
-				schedule.completed(p["tile"], 0, _state(Vector3.UP))
-	_check(not refined_early and guard < 200,
-			"the view and margin reach level 0 before a tile refines (%d rounds)" % guard)
+				batch_level_0[p["tile"]] = true
+		var lacking := 0
+		for tile in margin_tiles:
+			if schedule.level_of(tile) < 0 and not batch_level_0.has(tile):
+				lacking += 1
+		if lacking > 0:
+			rounds_with_open_margin += 1
+			for p in batch:
+				refined_early = refined_early or p["level"] > 0
+		for tile in batch_level_0:
+			schedule.completed(tile, 0, _state(Vector3.UP))
+		if lacking == 0:
+			break
+	_check(not refined_early and rounds_with_open_margin > 1 and guard < 200,
+			"no pick refines while the view and margin (%d tiles) lack level 0 (%d such rounds)"
+			% [margin_tiles.size(), rounds_with_open_margin])
 	var refine := schedule.pick(anchor, anchor, view, 50, sample_rad)
 	var all_up := not refine.is_empty()
 	for p in refine:
@@ -259,11 +269,43 @@ func _test_parallax() -> void:
 	var far_tile := all.tile_of(Vector3(0.05, 0.0, -1.0))
 	s2.set_tile_distance(near_tile, 500.0)
 	s2.set_tile_distance(far_tile, 5000.0)
-	var camera := anchor + Vector3(0.0, 5.0, 0.0)
-	var picks := s2.pick(camera, anchor, [Vector3(0.0, 0.0, -1.0)], 10, deg_to_rad(10.0))
-	_check(picks.size() == 2 and picks[0]["tile"] == near_tile and picks[1]["tile"] == far_tile,
-			"visible tiles over %.1f px: the nearer cloud first (%s)" % [CloudViewCacheSchedule.PARALLAX_REFRESH_PX,
-			str(picks)])
+	# The anchor moves 5 m: the tiles rendered from the old one show that offset (the other tiles are merely stale).
+	var moved := anchor + Vector3(0.0, 5.0, 0.0)
+	var picks := s2.pick(moved, moved, [Vector3(0.0, 0.0, -1.0)], 10, deg_to_rad(10.0))
+	_check(picks.size() >= 2 and picks[0]["tile"] == near_tile and picks[1]["tile"] == far_tile
+			and picks[0]["level"] == 2,
+			"visible tiles over %.1f px: the nearer cloud first, at its level (%s)"
+			% [CloudViewCacheSchedule.PARALLAX_REFRESH_PX, str(picks.slice(0, 2))])
+	_test_parallax_reanchor()
+
+
+## Class 2 compares the tile's rendered anchor with the CURRENT anchor: a camera off a fixed anchor changes nothing
+## (refilling from the same anchor cannot reduce it); moving the anchor makes the old tiles picked.
+func _test_parallax_reanchor() -> void:
+	var layout := _layout()
+	var schedule := CloudViewCacheSchedule.new(layout)
+	var anchor := Vector3(1.0e6, 2.0e6, 3.0e6)
+	_complete_all(schedule, 2, _state(Vector3.UP, 0.5, 1, anchor))
+	schedule.mark_light(Vector3.UP, 0.5, 1)
+	var view := _view_grid(deg_to_rad(30.0), VIEW_STEP_RAD)
+	var tile := layout.tile_of(Vector3(0.14, 0.0, -1.0))  # ~8 deg off the view centre: nothing nearer to the centre
+	schedule.set_tile_distance(tile, 500.0)
+	var camera := anchor + Vector3(50.0, 0.0, 0.0)
+	var picks := schedule.pick(camera, anchor, view, 100, VIEW_SAMPLE_RAD)
+	_check(picks.is_empty(), "converged cache, camera 50 m off the anchor: nothing to march (%d picks)" % picks.size())
+	var camera_error := schedule.parallax_error_px(tile, camera, anchor)
+	_check(camera_error > 100.0, "parallax_error_px still reports the camera's offset from an anchor (%.0f px)"
+			% camera_error)
+	picks = schedule.pick(camera, camera, view, 100, VIEW_SAMPLE_RAD)
+	_check(not picks.is_empty() and picks[0]["tile"] == tile and picks[0]["level"] == 2,
+			"anchor moved 50 m: the tile rendered from the old anchor comes first, at its level (%s)"
+			% str(picks.slice(0, 1)))
+	schedule.completed(tile, 2, _state(Vector3.UP, 0.5, 1, camera))
+	picks = schedule.pick(camera, camera, view, 100, VIEW_SAMPLE_RAD)
+	var again := false
+	for p in picks:
+		again = again or p["tile"] == tile
+	_check(not again, "the tile re-marched from the new anchor is not picked again")
 
 
 func _test_budget_and_levels() -> void:
@@ -291,6 +333,67 @@ func _test_budget_and_levels() -> void:
 	for tile in range(layout.tile_count()):
 		all_full = all_full and schedule.level_of(tile) == CloudViewCacheLayout.LEVELS - 1
 	_check(all_full, "all %d tiles reached the full level" % layout.tile_count())
+
+
+## [E] Main-thread budgets (the 5 ms main-thread target is shared by many sections): a converged cache's pick plus
+## mark_light per frame, and a cold pick (every tile open).
+const WARM_BUDGET_MS := 1.0
+const COLD_BUDGET_MS := 10.0
+const TIMING_CALLS := 20
+
+
+## The run's layout (the face the projection asks for) and a view of ~50 deg half-angle.
+func _test_timing() -> void:
+	var face := CloudViewCacheLayout.face_texels_for(_run_projection(), VIEW_SIZE, TILE_TEXELS)
+	var layout := _layout(face)
+	var anchor := Vector3(1.0e6, 2.0e6, 3.0e6)
+	var view := _view_grid(deg_to_rad(50.0), VIEW_STEP_RAD)
+	var sun := Vector3(0.3, 0.8, -0.5).normalized()
+	var schedule := CloudViewCacheSchedule.new(layout)
+	var cold: Array[float] = []
+	var cold_count := 0
+	for i in range(TIMING_CALLS):
+		var started := Time.get_ticks_usec()
+		var picks := schedule.pick(anchor, anchor, view, 400, VIEW_SAMPLE_RAD)
+		cold.append((Time.get_ticks_usec() - started) / 1000.0)
+		cold_count = picks.size()
+	var cold_ms := _median(cold)
+	_check(cold_count == 400 and cold_ms <= COLD_BUDGET_MS, "cold pick (%d tiles open, %d view rays, budget 400): "
+			% [layout.tile_count(), view.size()] + "median %.2f ms <= %.0f ms" % [cold_ms, COLD_BUDGET_MS])
+	_complete_all(schedule, CloudViewCacheLayout.LEVELS - 1, _state(sun, 0.5, 1, anchor))
+	schedule.mark_light(sun, 0.5, 1)
+	for tile in range(layout.tile_count()):
+		schedule.set_tile_distance(tile, 2000.0 + tile)
+	var axis := sun.cross(Vector3.UP).normalized()
+	var warm: Array[float] = []
+	var warm_empty := true
+	for i in range(TIMING_CALLS):
+		var started := Time.get_ticks_usec()
+		# The Sun turns a little every frame (well below a scan's step in total), the head moves.
+		schedule.mark_light(sun.rotated(axis, 1.0e-5 * i), 0.5, 1)
+		var picks := schedule.pick(anchor + Vector3(0.0, 0.1 * i, 0.0), anchor, view, 400, VIEW_SAMPLE_RAD)
+		warm.append((Time.get_ticks_usec() - started) / 1000.0)
+		warm_empty = warm_empty and picks.is_empty()
+	var warm_ms := _median(warm)
+	_check(warm_empty and warm_ms <= WARM_BUDGET_MS, "warm pick + mark_light on a converged cache: median %.3f ms <= "
+			% warm_ms + "%.1f ms (nothing to march: %s)" % [WARM_BUDGET_MS, str(warm_empty)])
+	var started_scan := Time.get_ticks_usec()
+	schedule.mark_light(sun.rotated(axis, 0.01), 0.5, 1)
+	print("  info  a tile rescan (Sun moved past the scan step): %.1f ms"
+			% ((Time.get_ticks_usec() - started_scan) / 1000.0))
+
+
+static func _median(values: Array[float]) -> float:
+	var sorted := values.duplicate()
+	sorted.sort()
+	return sorted[sorted.size() / 2]
+
+
+static func _max_angle_dot(dir: Vector3, views: Array[Vector3]) -> float:
+	var best := -1.0
+	for d in views:
+		best = maxf(best, dir.dot(d))
+	return best
 
 
 func _check(ok: bool, message: String) -> void:
