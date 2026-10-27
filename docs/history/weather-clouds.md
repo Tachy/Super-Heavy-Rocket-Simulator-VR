@@ -795,3 +795,10 @@ Static clouds final review (2026-10-27), weather-service.md file-format version 
 >   tcc block (-1 unknown), the float32 added-cumulus-water block and the float32 dropped-condensate block (kg/m^2,
 >   diagnostics; +16 MB at 0.25 deg for the four), then the texels (version 2 had the unknown level as 0 and no redistribution, version 3 moved only the lowest liquid
 >   run and averaged the downsampled levels, 4 merged a deck far above, 5 had no tcc and no cumulus water, 6 had a constant f_ad, no in-cloud bound and no dropped-condensate block).
+
+## Cloud view cache before its fill (superseded by cloud view cache Task 3, 2026-10-27)
+
+> **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`)**: pure logic so far -
+>   `CloudViewCacheLayout` (cube map, tiles, 3 resolution levels, face size from the eyes' projection) and
+>   `CloudViewCacheSchedule` (tile state, staleness, priority pick under a budget); `cloud_view_cache_test.gd`. Not wired
+>   into the renderer yet.

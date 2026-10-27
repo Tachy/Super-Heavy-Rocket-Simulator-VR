@@ -17,6 +17,11 @@ const MARCH_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clo
 		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_far.gdshaderinc",
 		"res://shaders/cloud_light.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc"]
 const PASS_FILES := ["res://shaders/cloud_pass.gdshaderinc"]
+## The cloud view cache's fill (cloud view cache Task 3): the march's files and its kernel (CLOUD_CACHE_FILL).
+const CACHE_FILL_FILES := ["res://shaders/atmosphere.gdshaderinc", "res://shaders/clouds.gdshaderinc",
+		"res://shaders/cloud_light_cache.gdshaderinc", "res://shaders/cloud_far.gdshaderinc",
+		"res://shaders/cloud_light.gdshaderinc", "res://shaders/cloud_pass.gdshaderinc",
+		"res://shaders/cloud_view_cache.gdshaderinc"]
 const GROUP := 8
 const MAX_DISPATCH_GROUPS := 65535  # D3D12's limit per dispatch dimension
 const CENTRE_IMAGES := ["color", "refined", "depth", "history0", "history1", "age0", "age1", "buffer", "outline"]
@@ -56,6 +61,12 @@ static var capture_timestamps := false
 static var pinned_frame := -1
 ## The light cache (CloudLayer's; filled on the render thread before the march, cloud_light_cache.gd); null: none.
 var light_cache: CloudLightCache
+## The cloud view cache (cloud view cache Task 3; render thread): created by the first fill request, re-created for a
+## new face or tile size; null until then. Filled only on request so far (request_view_cache_fill: the checks) - the
+## game's frame still shows the per-frame march.
+var view_cache: CloudViewCache
+## Fills run so far (checks: a request was served).
+var view_cache_fills := 0
 
 var _rd: RenderingDevice
 var _march: CloudShaderPort
@@ -81,6 +92,7 @@ var _prefilter_warm := false  ## the prefilter kernel has been dispatched once (
 var _callbacks := 0  ## render callbacks so far (the deferred free)
 var _garbage: Array[Dictionary] = []  ## {callback, rids}: images to free once that callback is reached
 var _previous_camera := Vector3.ZERO  ## float64 Earth-local camera of the previous frame
+var _fill_request := {}  ## {layout, anchor, tiles}: the next frame's view cache fill (render thread)
 ## Render-thread copies of the quality (set_quality).
 var _divisor := 2
 var _temporal_weight := 0.1
@@ -104,6 +116,24 @@ func reset_history() -> void:
 	RenderingServer.call_on_render_thread(_reset_history)
 
 
+## Main thread: fill the tiles ({tile, level} each) of a view cache laid out as layout from anchor_earth_m (Earth-local,
+## float64) in the next frame, before its march.
+func request_view_cache_fill(layout: CloudViewCacheLayout, anchor_earth_m: Vector3, tiles: Array[Dictionary]) -> void:
+	RenderingServer.call_on_render_thread(_set_fill_request.bind(layout, anchor_earth_m, tiles))
+
+
+## Checks: the raw bytes of one of the centre view's images ("color": the march's colour + T, "depth": its scene and
+## cloud distances) - empty before the first frame.
+func debug_centre_data(key: String) -> PackedByteArray:
+	if _rd == null or not _centre.has(key):
+		return PackedByteArray()
+	return _rd.texture_get_data(_centre[key], 0)
+
+
+func _set_fill_request(layout: CloudViewCacheLayout, anchor_earth_m: Vector3, tiles: Array[Dictionary]) -> void:
+	_fill_request = {"layout": layout, "anchor": anchor_earth_m, "tiles": tiles}
+
+
 func _set_quality(divisor: int, temporal_weight: float, clip_gamma: float) -> void:
 	if maxi(divisor, 1) != _divisor:
 		_size = Vector2i.ZERO  # another resolution: re-create the images
@@ -123,6 +153,10 @@ func _create() -> void:
 		return
 	_march = CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH"]), PackedStringArray(MARCH_FILES))
 	var kernels := {"march": _march.source,
+		"fill": CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH", "CLOUD_CACHE_FILL"]),
+				PackedStringArray(CACHE_FILL_FILES)).source,
+		"fill_prefilter": CloudShaderPort.build(PackedStringArray(["CLOUD_MARCH", "CLOUD_CACHE_FILL",
+				"CLOUD_SHAPE_PREFILTER"]), PackedStringArray(CACHE_FILL_FILES)).source,
 		"temporal": CloudShaderPort.build(PackedStringArray(["CLOUD_TEMPORAL"]), PackedStringArray(PASS_FILES),
 				false).source,
 		"upsample": CloudShaderPort.build(PackedStringArray(["CLOUD_UPSAMPLE"]), PackedStringArray(PASS_FILES),
@@ -329,6 +363,8 @@ func _notification(what: int) -> void:
 			_rd.free_rid(texture)
 		if light_cache != null:
 			light_cache.free_resources(_rd)
+		if view_cache != null:
+			view_cache.free_resources(_rd)
 		for buffer: RID in [_globals_buffer, _eyes_buffer, _centre_buffer]:
 			if buffer.is_valid():
 				_rd.free_rid(buffer)
@@ -416,6 +452,8 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var pixel_angle: float = centre_view["pixel_angle"]
 	var march := family + "_prefilter" if _shape_prefilter_needed(pixel_angle) else family
 	var march_set0 := UniformSetCacheRD.get_cache(_shaders[march], 0, set0)
+	if not _fill_request.is_empty():
+		_fill_view_cache(set0, camera)
 
 	# The camera's motion since the last frame.
 	var camera_delta := camera - _previous_camera
@@ -554,6 +592,25 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	_centre["valid"] = true
 	stats = {"valid": true, "low_size": low, "views": view_count,
 		"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
+
+
+## The requested view cache fill (request_view_cache_fill) with this frame's set 0, before the march: the anchor's
+## offset from the camera differenced in float64. A new face or tile size re-creates the cache.
+func _fill_view_cache(set0: Array[RDUniform], camera: Vector3) -> void:
+	var layout: CloudViewCacheLayout = _fill_request["layout"]
+	if view_cache == null or view_cache.layout.face_texels != layout.face_texels \
+			or view_cache.layout.tile_texels != layout.tile_texels:
+		if view_cache != null:
+			view_cache.free_resources(_rd)  # nothing samples it yet (the frame shows the per-frame march)
+		var kernels := {}
+		for name in ["fill", "fill_prefilter"]:
+			kernels[name] = {"shader": _shaders[name], "pipeline": _pipelines[name]}
+		view_cache = CloudViewCache.new(_rd, layout, kernels, _shape_prefilter_needed)
+	var anchor: Vector3 = _fill_request["anchor"]
+	var tiles: Array[Dictionary] = _fill_request["tiles"]
+	view_cache.fill(_rd, tiles, anchor - camera, set0)
+	view_cache_fills += 1
+	_fill_request = {}
 
 
 ## Diagnostics (capture_timestamps): ends the compute list, stamps the GPU time where the interval `name` starts and

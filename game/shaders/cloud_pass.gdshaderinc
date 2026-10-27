@@ -2,7 +2,9 @@
 // (game/world/weather/cloud_effect.gd) through CloudShaderPort, never included by a Godot shader. One of CLOUD_MARCH,
 // CLOUD_TEMPORAL, CLOUD_UPSAMPLE, CLOUD_OUTLINE, CLOUD_EDGE_REFINE, CLOUD_CENTRE or
 // CLOUD_SHAPE_PREFILTER is defined per kernel; CLOUD_MARCH also gets atmosphere.gdshaderinc and
-// clouds.gdshaderinc (translated: their `global uniform`s in set 0).
+// clouds.gdshaderinc (translated: their `global uniform`s in set 0). With CLOUD_CACHE_FILL (cloud view cache Task 3)
+// the march's machinery is compiled without its images and main for cloud_view_cache.gdshaderinc's fill kernel; the
+// march and the fill shade a ray by the one function cloud_shade_ray.
 //
 // The march and the temporal accumulation run once per frame in the centre view (VR: the head, a frustum covering both
 // eyes, CloudCentreView; the desktop: the view itself), the upsample once per eye (VR performance part 2: two marches

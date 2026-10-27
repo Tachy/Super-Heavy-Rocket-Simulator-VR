@@ -89,6 +89,11 @@
 #      single scattering (debug 8, T_c uniform) at low / high views and a setting Sun (+0.3 / -0.5 deg) within 1 %;
 #      no negative final HDR; the clear sky (above the deck looking up, a cloudless field) within 0.5 %
 #      (STARSIM_AIR_ONLY=1 runs this alone).
+#  15. (cloud view cache Task 3) the march image of a static view twice bit-identical (STARSIM_MARCH_REFERENCE=<dir>:
+#      also against a reference directory, before / after a refactoring); the cloud view cache's fill of the whole cube
+#      from the camera vs the march at divisor 1: on face-aligned views (pixel rays = texel rays) luminance error median
+#      1 % / p99 5 %, T RMS 0.01, cloud distance median 1 %; on general views (bilinear resampling) the medians, the rest
+#      printed (STARSIM_VIEW_CACHE_ONLY=1 runs this alone).
 # The other sections run with the light cache on and the deterministic march (the game's path; 10 with the jittered
 # one: it measures against independent jitter's noise). Detail
 # levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
@@ -363,7 +368,32 @@ const AIR_SAMPLES := 2 * 2 + 2 * 3 + 1 + 1 + 2 + 1 + 5 + 1 + 2
 const VIEW_CACHE_SIZE := 256
 const VIEW_CACHE_FOV_DEG := 60.0
 const VIEW_CACHE_VIEWS := [["ground", 0.4, 10.0, 35.0, 200.0], ["deck", 1.0, 3500.0, -30.0, 70.0]]
-const VIEW_CACHE_SAMPLES := 2
+## The cache's tiles (cloud view cache Task 2: 64 texels); its face size from the view's pixel density at the centre
+## (CloudViewCacheLayout.face_texels_for), the whole cube filled at the full level from the camera.
+const VIEW_CACHE_TILE_TEXELS := 64
+## The fill against the march at divisor 1: the per-pixel luminance error (relative to max(the march's,
+## CACHE_ERROR_FLOOR x the view's mean)) - median and 99th percentile -, the transmittance's (debug 12: alpha's) RMS,
+## the cloud distance where the march's alpha exceeds VIEW_CACHE_DISTANCE_ALPHA (the cache's alpha-weighted bilinear
+## sample), median. All bounds on the face-aligned views (VIEW_CACHE_FACE_VIEWS: every pixel's ray is a texel's, the
+## shading alone is compared); the general views (VIEW_CACHE_VIEWS, texel vs pixel resampling) the medians only - their
+## p99 and RMS are printed: the deterministic march's hard edges and its step grain (Earth-fixed height shells) differ
+## between a ray and the bilinear mean of the four texel rays around it (measured 7.8-46 % p99, RMS 0.020-0.021 at
+## 448^2 texels per face against 256^2 pixels over 60 deg).
+const VIEW_CACHE_MEDIAN_TOLERANCE := 0.01
+const VIEW_CACHE_P99_TOLERANCE := 0.05
+const VIEW_CACHE_T_RMS_TOLERANCE := 0.01
+const VIEW_CACHE_DISTANCE_TOLERANCE := 0.01
+const VIEW_CACHE_DISTANCE_ALPHA := 0.5
+## The face-aligned views at the equator / Greenwich (Earth-local +Z = ITRF +X: the zenith): a camera looking along a
+## cube face's axis with a 90 deg view of VIEW_CACHE_SIZE^2 pixels on a cache of VIEW_CACHE_SIZE^2 texels per face -
+## pixel centre rays = texel centre rays. The broken layer from the ground at the zenith (face +Z), the deck from above
+## at the nadir (face -Z): no ground in view. Name, cloud fraction, height (m), Earth-local forward axis.
+const VIEW_CACHE_FACE_VIEWS := [["ground zenith", 0.4, 10.0, Vector3(0.0, 0.0, 1.0)],
+		["deck nadir", 1.0, 3500.0, Vector3(0.0, 0.0, -1.0)]]
+const VIEW_CACHE_FACE_FOV_DEG := 90.0
+## Per general view: the identity, debug 0 (colour, distance) and 12 (distance); per face-aligned view: debug 0
+## (colour, T, distance) and 12 (alpha, distance).
+const VIEW_CACHE_SAMPLES := 2 * (1 + 2 + 1) + 2 * (3 + 2)
 ## Diagnostics: a directory for the march's images before / after a refactoring (written when missing, else compared
 ## bit for bit): STARSIM_MARCH_REFERENCE=<dir>.
 const MARCH_REFERENCE_ENV := "STARSIM_MARCH_REFERENCE"
@@ -2653,6 +2683,22 @@ func _view_cache_samples() -> void:
 		if reference_dir != "":
 			for key: String in images:
 				_march_reference(reference_dir.path_join("%s_%s.bin" % [name, key]), images[key], "%s %s" % [name, key])
+		for mode in [0, 12]:
+			await _view_cache_compare(name, camera, view, sun, mode, Vector3.ZERO)
+	# The face-aligned views: the shading alone (pixel rays = texel rays).
+	_camera.fov = VIEW_CACHE_FACE_FOV_DEG
+	for v in VIEW_CACHE_FACE_VIEWS:
+		_show(_slab("view_cache_face_%d" % int(v[1] * 10.0), SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, v[1]))
+		var camera := HeightSource.geodetic_to_fixed(0.0, 0.0, v[2])
+		var forward: Vector3 = v[3]
+		var view_itrf := Vector3(forward.z, forward.x, forward.y)  # Earth-local render axes (y, z, x) = ITRF (x, y, z)
+		var face_sun := _local_direction(45.0, 135.0, 0.0, 0.0)
+		_clouds.quality = CloudLayer.Quality.DESKTOP
+		_detail_off()
+		await _settle_cache(camera, view_itrf, face_sun, 0)
+		_clouds.effect.set_quality(1, 1.0)
+		for mode in [0, 12]:
+			await _view_cache_compare(v[0], camera, view_itrf, face_sun, mode, forward)
 	_clouds.quality = CloudLayer.Quality.DESKTOP
 	_detail_off()
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
@@ -2664,6 +2710,156 @@ func _output_bytes(camera: Vector3, view: Vector3, sun: Vector3, mode: int) -> P
 	await _render(camera, view, sun, mode)
 	var image := _clouds.effect.output.get_layer_data(0)
 	return image.get_data() if image != null else PackedByteArray()
+
+
+## Section 15: the whole cube of the effect's CloudViewCache filled at the full level from the camera (the anchor at the
+## camera: offset 0), against the march of the same frames at divisor 1 (its own image and distances before the
+## upsample, CloudEffect.debug_centre_data): each pixel's ray (the camera's) sampled bilinearly in its face through
+## CloudViewCacheLayout.texel_of - the CPU side of the fill's addressing, which a mirrored face or axis would fail.
+## face_forward (Earth-local, not zero): the camera looks along that face axis with the screen's up +Y (Earth-local;
+## the cube's faces are mirror images of a camera's view: a column of pixels is a column of texels counted the other
+## way) on a cache of VIEW_CACHE_SIZE texels per face - every bound asserted; else the general view, medians only.
+func _view_cache_compare(name: String, camera: Vector3, view: Vector3, sun: Vector3, mode: int,
+		face_forward: Vector3) -> void:
+	await _render(camera, view, sun, mode)
+	var size := Vector2i(VIEW_CACHE_SIZE, VIEW_CACHE_SIZE)
+	var exact := face_forward != Vector3.ZERO
+	var face_texels := VIEW_CACHE_SIZE if exact else CloudViewCacheLayout.face_texels_for(
+			_camera.get_camera_projection(), size, VIEW_CACHE_TILE_TEXELS)
+	if exact:
+		var earth_to_world := (ShaderGlobals.value(&"atmosphere_world_to_earth") as Basis).inverse()
+		_camera.transform = Transform3D(Basis.looking_at(earth_to_world * face_forward, earth_to_world * Vector3.UP),
+				Vector3.ZERO)
+		for i in range(SETTLE_FRAMES):
+			await RenderingServer.frame_post_draw
+			_clouds.update(camera, 0.0, 0.0)
+	var layout := CloudViewCacheLayout.new(face_texels, VIEW_CACHE_TILE_TEXELS)
+	var level := CloudViewCacheLayout.LEVELS - 1
+	var tiles: Array[Dictionary] = []
+	for tile in range(layout.tile_count()):
+		tiles.append({"tile": tile, "level": level})
+	var anchor: Vector3 = ShaderGlobals.value(&"atmosphere_camera_hi") + ShaderGlobals.value(&"atmosphere_camera_lo")
+	var fills_before := _clouds.effect.view_cache_fills
+	_clouds.effect.request_view_cache_fill(layout, anchor, tiles)
+	for i in range(2):
+		await RenderingServer.frame_post_draw
+		_clouds.update(camera, 0.0, 0.0)
+	var label := "view cache (%s view, debug %d, 6 x %d^2 texels) vs the march at divisor 1" % [name, mode, face_texels]
+	var checks := (3 if mode == 0 else 2) if exact else (2 if mode == 0 else 1)
+	var cache := _clouds.effect.view_cache
+	if cache == null or _clouds.effect.view_cache_fills == fills_before or _clouds.effect.centre_low != size:
+		for i in range(checks):
+			_check(label, false, "no fill ran or the march is not at divisor 1 (%s)" % _clouds.effect.centre_low)
+		return
+	var rd := RenderingServer.get_rendering_device()
+	var colours: Array[PackedByteArray] = []
+	var distances: Array[PackedByteArray] = []
+	for face in range(CloudViewCacheLayout.FACES):
+		colours.append(rd.texture_get_data(cache.texture(level), face))
+		distances.append(rd.texture_get_data(cache.distance_texture(level), face))
+	var march := _clouds.effect.debug_centre_data("color")
+	var march_depth := _clouds.effect.debug_centre_data("depth")
+	var world_to_earth: Basis = ShaderGlobals.value(&"atmosphere_world_to_earth")
+	var n := size.x * size.y
+	var march_lum := PackedFloat32Array()
+	var cache_lum := PackedFloat32Array()
+	var t_sq := 0.0
+	var distance_errors := PackedFloat32Array()
+	var mean_lum := 0.0
+	var picture := Image.create(size.x * 3, size.y, false, Image.FORMAT_RGBF)
+	for y in range(size.y):
+		for x in range(size.x):
+			var i := y * size.x + x
+			var m := Color(march.decode_half(i * 8), march.decode_half(i * 8 + 2), march.decode_half(i * 8 + 4),
+					march.decode_half(i * 8 + 6))
+			var dir := world_to_earth * _camera.project_ray_normal(Vector2(x + 0.5, y + 0.5))
+			var c := _cube_bilinear(colours, distances, face_texels, layout.texel_of(dir), mode)
+			var colour: Color = c[0]
+			if mode == 0:
+				march_lum.append(_luminance(Vector3(m.r, m.g, m.b)))
+				cache_lum.append(_luminance(Vector3(colour.r, colour.g, colour.b)))
+				mean_lum += absf(march_lum[i]) / n
+				t_sq += (colour.a - m.a) * (colour.a - m.a)
+				if 1.0 - m.a > VIEW_CACHE_DISTANCE_ALPHA:
+					var d_m := march_depth.decode_float(i * 8 + 4)
+					distance_errors.append(absf(float(c[1]) - d_m) / d_m)
+				picture.set_pixel(x, y, Color(m.r, m.g, m.b))
+				picture.set_pixel(size.x + x, y, Color(colour.r, colour.g, colour.b))
+				var dc := Color(absf(colour.r - m.r), absf(colour.g - m.g), absf(colour.b - m.b)) * 10.0
+				picture.set_pixel(2 * size.x + x, y, dc)
+			else:
+				t_sq += (colour.g - m.g) * (colour.g - m.g)  # debug 12: (cloud distance, alpha)
+				if m.g > VIEW_CACHE_DISTANCE_ALPHA:
+					distance_errors.append(absf(float(c[2]) - m.r) / m.r)
+	var t_rms := sqrt(t_sq / n)
+	var d := _sorted(distance_errors)
+	var d_median := d[d.size() / 2] if d.size() > 0 else INF
+	var d_p99 := d[int(0.99 * (d.size() - 1))] if d.size() > 0 else INF
+	var d_detail := "median %.3f %%, p99 %.3f %%, worst %.2f %% over %d pixels" % [d_median * 100.0, d_p99 * 100.0,
+			(d[d.size() - 1] if d.size() > 0 else INF) * 100.0, d.size()]
+	if mode == 0:
+		var errors := PackedFloat32Array()
+		for i in range(n):
+			errors.append(absf(cache_lum[i] - march_lum[i]) / maxf(absf(march_lum[i]), CACHE_ERROR_FLOOR * mean_lum))
+		var e := _sorted(errors)
+		var p99 := e[int(0.99 * (n - 1))]
+		_check(label + ": colour", mean_lum > 0.0 and e[n / 2] <= VIEW_CACHE_MEDIAN_TOLERANCE
+				and (p99 <= VIEW_CACHE_P99_TOLERANCE or not exact), "per-pixel luminance error median %.3f %%, p99 "
+				% (e[n / 2] * 100.0) + "%.3f %%, worst %.2f %% (mean luminance %.4f)%s" % [p99 * 100.0,
+				e[n - 1] * 100.0, mean_lum, "" if exact else "; T RMS %.5f (resampling: printed)" % t_rms])
+		if exact:
+			_check(label + ": transmittance", t_rms <= VIEW_CACHE_T_RMS_TOLERANCE, "RMS %.5f" % t_rms)
+		_check(label + ": cloud distance (the distance image, alpha > %.1f)" % VIEW_CACHE_DISTANCE_ALPHA,
+				d.size() > 0 and d_median <= VIEW_CACHE_DISTANCE_TOLERANCE, d_detail)
+		var dir_path := ProjectSettings.globalize_path("res://").path_join("../screenshots/cloud-view-cache")
+		DirAccess.make_dir_recursive_absolute(dir_path)
+		picture.save_png(dir_path.path_join("t3_fill_vs_march_%s.png" % name.replace(" ", "_")).simplify_path())
+	else:
+		if exact:
+			_check(label + ": alpha", t_rms <= VIEW_CACHE_T_RMS_TOLERANCE, "RMS %.5f" % t_rms)
+		_check(label + ": cloud distance (debug output 12, alpha > %.1f)" % VIEW_CACHE_DISTANCE_ALPHA,
+				d.size() > 0 and d_median <= VIEW_CACHE_DISTANCE_TOLERANCE,
+				d_detail + ("" if exact else "; alpha RMS %.5f (resampling: printed)" % t_rms))
+
+
+## A bilinear sample of the cube's faces (RGBA half colour + T, R32F distance; face_texels^2 each, row-major) at the
+## continuous texel coordinates t = (x, y, face), clamped inside the face: [colour + T, distance, colour's red]. The
+## distance and the red channel (debug output 12: the cloud distance; its alpha in .g) are alpha-weighted (the march's
+## convention).
+static func _cube_bilinear(colours: Array[PackedByteArray], distances: Array[PackedByteArray], face_texels: int,
+		t: Vector3, mode: int) -> Array:
+	var face := int(t.z)
+	var p := Vector2(t.x - 0.5, t.y - 0.5)
+	var x0 := floori(p.x)
+	var y0 := floori(p.y)
+	var f := p - Vector2(x0, y0)
+	var colour := Color(0, 0, 0, 0)
+	var weighted := 0.0
+	var weighted_red := 0.0
+	var weight := 0.0
+	for j in range(2):
+		for i in range(2):
+			var x := clampi(x0 + i, 0, face_texels - 1)
+			var y := clampi(y0 + j, 0, face_texels - 1)
+			var w := (f.x if i == 1 else 1.0 - f.x) * (f.y if j == 1 else 1.0 - f.y)
+			var k := (y * face_texels + x) * 8
+			var bytes := colours[face]
+			var c := Color(bytes.decode_half(k), bytes.decode_half(k + 2), bytes.decode_half(k + 4),
+					bytes.decode_half(k + 6))
+			colour += c * w
+			var alpha := c.g if mode == 12 else 1.0 - c.a
+			weighted += w * alpha * distances[face].decode_float((y * face_texels + x) * 4)
+			weighted_red += w * alpha * c.r
+			weight += w * alpha
+	if weight <= 0.0:
+		return [colour, 0.0, 0.0]
+	return [colour, weighted / weight, weighted_red / weight]
+
+
+static func _sorted(values: PackedFloat32Array) -> PackedFloat32Array:
+	var s := values.duplicate()
+	s.sort()
+	return s
 
 
 ## Pixels (8 bytes each: RGBA half) whose bytes differ; all when the sizes differ.

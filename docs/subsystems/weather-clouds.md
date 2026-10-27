@@ -640,6 +640,18 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 
 ## Validation
 
+- Cloud view cache fill (cloud view cache Task 3, cloud_check 15, `STARSIM_VIEW_CACHE_ONLY=1`): the march image of a
+  static view twice bit-identical (a broken cumulus layer from the ground, a deck from above; 256^2, desktop preset);
+  `STARSIM_MARCH_REFERENCE=<dir>` compares the march images (desktop preset; divisor 1, debug 0 / 12) with a directory
+  written before a refactoring - the extraction of `cloud_shade_ray`: 0 differing pixels in all six. The whole cube
+  filled at the full level from the camera vs the march at divisor 1, each pixel's ray sampled bilinearly through
+  `CloudViewCacheLayout.texel_of`: face-aligned views (90 deg on 256^2 texels per face: pixel rays = texel rays; the
+  zenith from the ground under cf 0.4, the nadir above a deck) luminance error median 0.000 / 0.217 %, p99 2.7 / 1.4 %
+  (bound 1 / 5 %), T RMS 0.0039 / 0.0000 (0.01), cloud distance median 0.000 / 0.220 % (1 %) - the deck's 0.2 % is
+  the static end (the fill ends at the ellipsoid, the depth-less check's march at the -500 m shell: other step
+  lengths); general 60-deg views (448^2 texels per face) median 0.09 / 0.47 %, distance median 0.04 / 0.10 % asserted,
+  p99 46 / 7.8 % and T RMS 0.021 / 0.020 printed: a ray against the bilinear mean of the four texel rays around it at
+  the deterministic march's hard edges and step grain (open for Task 4's lookup).
 - Backlit slab transmitted radiance (Task 9b, cloud_check 14; fixture `tests/validation/weather/
   cloud_slab_transmitted_mc.csv` from `tools/validation/cloud_slab_monte_carlo.py --transmitted`, 1e7 photons per case,
   sigma 0.3-0.7 %): the GPU's bin means (debug output 2, light cache filled) vs Monte Carlo at tau 10 / 30, Sun zenith
@@ -940,10 +952,25 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 
 ## Open points and known limits
 
-- **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`)**: pure logic so far -
-  `CloudViewCacheLayout` (cube map, tiles, 3 resolution levels, face size from the eyes' projection) and
-  `CloudViewCacheSchedule` (tile state, staleness, priority pick under a budget); `cloud_view_cache_test.gd`. Not wired
-  into the renderer yet. Per-frame bound (controller ruling, tested as a maximum, not a median): `mark_light` + `pick` <= 1.0 ms
+- **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`)**:
+  `CloudViewCacheLayout` (cube map, tiles, 3 resolution levels, face size from the eyes' projection),
+  `CloudViewCacheSchedule` (tile state, staleness, priority pick under a budget; `cloud_view_cache_test.gd`) and the
+  fill (Task 3): `CloudViewCache` (`game/world/weather/cloud_view_cache.gd`) holds per level a cube texture of colour + T
+  (RGBA16F) and one of the alpha-weighted cloud distance (R32F) (3456 per face for the VR run: 0.86 GB full level, 1.13
+  GB all three) and fills the texels of a tile list ({tile, level}; one dispatch per level, push constants, the list
+  sorted by level) with the kernel `CLOUD_CACHE_FILL` (`shaders/cloud_view_cache.gdshaderinc`: the march's code with
+  `CLOUD_MARCH` + `CLOUD_CACHE_FILL`, its own images instead of the march's). Each texel's ray (`dir_of`'s mirror in
+  GLSL) starts at the anchor - its offset from the camera in the fill's CloudView `eye_earth` (float64 difference on the
+  CPU) - and ends at the ellipsoid / sea crossing seen from there (else 1e30), never the frame's depth; the texel angle
+  at a face centre (2 / level face texels) is the detail's band limit. The march and the fill shade a ray with the one
+  function `cloud_shade_ray` (`cloud_pass.gdshaderinc`: march, air shadow loss, debug outputs, the stored colour; with
+  `cloud_ray_jitter`, `cloud_stored_color`, `cloud_eclipse_factors`); `cloud_march` and `CloudRay` take the ray's
+  origin (`h_c`: its height). `cloud_ray_from` is origin-aware only in the fill (an anchor kilometres from the camera
+  has its own height and up); the per-frame march keeps the camera's ray at compile time - a run-time branch on the
+  offset let the GPU compiler re-associate the camera's path (4 % of the pixels changed, up to 30 % of the mean colour:
+  the deterministic march's step grain flips with ulp-level changes). CloudEffect compiles `fill` / `fill_prefilter`
+  and serves `request_view_cache_fill(layout, anchor_earth_m, tiles)` in the next frame before the march (checks only:
+  the game's frame still shows the per-frame march; the schedule is not wired yet). Per-frame bound (controller ruling, tested as a maximum, not a median): `mark_light` + `pick` <= 1.0 ms
   on every frame once level 0 is everywhere, a cold start / jump frame <= 10 ms. So the schedule is amortised: the light
   rescan is a pass of `LIGHT_SCAN_BLOCKS` blocks per `mark_light` call (persistent cursor, `light_scan_pending()`); an anchor
   move starts an epoch (O(blocks)), tiles of older epochs are "off" (stale, parallax candidates) and counted exactly per
