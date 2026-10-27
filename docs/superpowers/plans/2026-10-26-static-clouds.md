@@ -310,6 +310,23 @@ brighter than the sky beside it; real backlit cumulus bodies are dark grey with 
 - [ ] **Step 4: Run** the cloud checks, renders t9b_* (backlit, front-lit, side-lit) vs t9f.
 - [ ] **Step 5: Commit** `fix(game): backlit cumulus bodies dark with a bright rim`
 
+### Task 9c: Cumulus water from an adiabatic parcel (user 2026-10-27: "Cumulus sind nie flach")
+
+Investigation (sdd cloud-tau-investigation.md): ERA5 / GFS cloud water lacks the convective updraft cores, so
+grid-mean water / cover gives cumulus about half the subadiabatic in-cloud water; the thinnest decile (and GFS
+shallow cumulus, median in-cloud tau 0.4) are wide, thin, translucent sheets - not cumulus.
+
+**Files:** `core/src/environment/` (column build / LCL bases), `core/tests/`, docs `docs/subsystems/weather-clouds.md`
+
+- [ ] **Step 1: Test** (RED): liquid cumuliform boundary-layer runs reach in-cloud LWC >= f_ad x the adiabatic LWC
+  gradient (T, p) x height above the cloud base (f_ad 0.3-0.5 [E], Blyth 1993, Brenguier et al. 2000); column water
+  path conserved; cover <= the data's.
+- [ ] **Step 2: Implement**: where the data's in-cloud water is below the floor, lower the cumulus cover to keep the
+  water path (fewer, denser, deeper-looking cells); shapes unchanged (user-approved), only cover / extinction.
+- [ ] **Step 3: Run** core tags + cloud checks; record the cover change vs ERA5 tcc; renders t9c_* (Cape, ground,
+  deck) vs t9b.
+- [ ] **Step 4: Commit** `feat(core): cumulus in-cloud water from an adiabatic parcel`
+
 ### Task 10: Budget, presets, desktop re-baseline, VR acceptance
 
 **Files:** `game/world/weather/cloud_layer.gd` (presets), `docs/subsystems/weather-clouds.md`,
