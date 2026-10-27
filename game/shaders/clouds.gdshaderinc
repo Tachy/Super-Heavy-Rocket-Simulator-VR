@@ -201,13 +201,15 @@ vec2 cloud_lat_lon(vec3 p_local) {
 	return vec2(atan(CLOUD_AB2 * p_local.y, s), atan(p_local.x, p_local.z));
 }
 
-// The camera in model space: radius r_c = a + h_c, its up and the model-space ray (unit) with the length factor of
-// the stretch (model distance = distance x scale).
+// The ray's origin in model space - the camera (cloud_ray), or a point offset from it (cloud_pass.gdshaderinc
+// cloud_ray_from: the cloud view cache's anchor): its height h_c, radius r_c = a + h_c, its up and the model-space ray
+// (unit) with the length factor of the stretch (model distance = distance x scale).
 struct CloudRay {
 	vec3 dir_local;   // unit, Earth-local render axes
 	float scale;      // |M dir|
-	float mu;         // cosine of the model ray to the camera's model up
+	float mu;         // cosine of the model ray to the origin's model up
 	float r_c;
+	float h_c;        // the origin's height |M origin| - a (the camera's: cloud_camera_height_m)
 };
 
 CloudRay cloud_ray(vec3 dir_local) {
@@ -218,6 +220,7 @@ CloudRay cloud_ray(vec3 dir_local) {
 	vec3 up_c = normalize((atmosphere_camera_hi + atmosphere_camera_lo) * ATM_STRETCH);
 	ray.mu = dot(up_c, vm / ray.scale);
 	ray.r_c = CLOUD_A_M + cloud_camera_height_m;
+	ray.h_c = cloud_camera_height_m;
 	return ray;
 }
 
@@ -226,7 +229,7 @@ CloudRay cloud_ray(vec3 dir_local) {
 float cloud_height_along(CloudRay ray, float d) {
 	float dm = d * ray.scale;
 	float r_d = sqrt(max(ray.r_c * ray.r_c + dm * dm + 2.0 * ray.r_c * ray.mu * dm, 0.0));
-	return cloud_camera_height_m + dm * (dm + 2.0 * ray.r_c * ray.mu) / (r_d + ray.r_c);
+	return ray.h_c + dm * (dm + 2.0 * ray.r_c * ray.mu) / (r_d + ray.r_c);
 }
 
 // d(height) / d(distance) along the ray at distance d (the sine of the local elevation).
@@ -240,7 +243,7 @@ float cloud_height_slope(CloudRay ray, float d) {
 vec2 cloud_sphere_crossing(CloudRay ray, float h_s) {
 	float r_s = CLOUD_A_M + h_s;
 	float b = ray.r_c * ray.mu;
-	float disc = b * b - (cloud_camera_height_m - h_s) * (ray.r_c + r_s);
+	float disc = b * b - (ray.h_c - h_s) * (ray.r_c + r_s);
 	if (disc < 0.0) {
 		return vec2(1.0, -1.0);
 	}

@@ -126,7 +126,7 @@ const CLIMB_STEP_LIMIT := 0.055
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 140 + SUN_SAMPLES + AIR_SAMPLES
+const EXPECTED_SAMPLES := 140 + SUN_SAMPLES + AIR_SAMPLES + VIEW_CACHE_SAMPLES
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -357,6 +357,16 @@ const SLAB_TR_FOV_DEG := 44.0
 ## slab 2 x 2, backlit 2 x 3, outline, front weight, rays 2, control, telescoping 5 (AIR_TELESCOPE_CASES), no negative
 ## HDR, clear sky 2
 const AIR_SAMPLES := 2 * 2 + 2 * 3 + 1 + 1 + 2 + 1 + 5 + 1 + 2
+## Section 15 (cloud view cache Task 3): the views - a broken cumulus layer (cf 0.4) seen from the ground looking up,
+## and a deck (cf 1) seen from above, looking down (every ray below the horizon ends on the deck: no ground in view, so
+## the march's sky distance and the cache's static end - the ellipsoid - agree wherever the background shows).
+const VIEW_CACHE_SIZE := 256
+const VIEW_CACHE_FOV_DEG := 60.0
+const VIEW_CACHE_VIEWS := [["ground", 0.4, 10.0, 35.0, 200.0], ["deck", 1.0, 3500.0, -30.0, 70.0]]
+const VIEW_CACHE_SAMPLES := 2
+## Diagnostics: a directory for the march's images before / after a refactoring (written when missing, else compared
+## bit for bit): STARSIM_MARCH_REFERENCE=<dir>.
+const MARCH_REFERENCE_ENV := "STARSIM_MARCH_REFERENCE"
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
@@ -366,6 +376,7 @@ var _camera := Camera3D.new()
 var _earth_to_gcrf := Basis.IDENTITY
 var _failures := 0
 var _samples := 0
+var _optional_samples := 0  ## checks that run only with a diagnostics switch (MARCH_REFERENCE_ENV)
 var _files: Array[String] = []
 var _terrain_parent := Node3D.new()  ## Earth-fixed frame of the terrain quad (section 6)
 var _terrain_quad := MeshInstance3D.new()
@@ -452,6 +463,14 @@ func _run() -> void:
 		for f in _files:
 			DirAccess.remove_absolute(f)
 		print("cloud_check (Sun only): %d failures" % _failures)
+		quit(1 if _failures > 0 else 0)
+		return
+	if OS.get_environment("STARSIM_VIEW_CACHE_ONLY") != "":  # diagnostics: section 15 alone (no sample count)
+		await _view_cache_samples()
+		_clouds.shutdown()
+		for f in _files:
+			DirAccess.remove_absolute(f)
+		print("cloud_check (view cache only): %d failures" % _failures)
 		quit(1 if _failures > 0 else 0)
 		return
 	if OS.get_environment("STARSIM_GROUND_ONLY") != "":  # diagnostics: section 6 alone (no sample count)
@@ -576,11 +595,13 @@ func _run() -> void:
 	# 14. The backlit slab vs Monte Carlo; the clouds' shadows on the air.
 	await _slab_transmitted_samples()
 	await _air_shadow_samples()
+	# 15. The cloud view cache's fill against the per-frame march.
+	await _view_cache_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
 	_clouds.shutdown()
-	_check("sample count", _samples == EXPECTED_SAMPLES, "%d samples" % _samples)
+	_check("sample count", _samples == EXPECTED_SAMPLES + _optional_samples, "%d samples" % _samples)
 	print("cloud_check: %s (%d samples, %d failures)" % ["PASS" if _failures == 0 else "FAIL", _samples, _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -2602,3 +2623,79 @@ func _bin_mean(view: Vector3, sun: Vector3, vz: float, va: float) -> float:
 			sum += w * image.get_pixel(x, y).r
 			weight += w
 	return sum / weight if weight > 0.0 else -1.0
+
+
+## Section 15 (cloud view cache Task 3): per view (VIEW_CACHE_VIEWS) the game's march image (desktop preset, debug
+## output 0) twice - bit-identical (static) - and, with MARCH_REFERENCE_ENV, the march's images (desktop preset; divisor
+## 1, debug outputs 0 and 12) against a reference directory (a refactoring of the march keeps them bit for bit).
+func _view_cache_samples() -> void:
+	_viewport.size = Vector2i(VIEW_CACHE_SIZE, VIEW_CACHE_SIZE)
+	_camera.fov = VIEW_CACHE_FOV_DEG
+	var sun := _local_direction(45.0, 135.0)
+	var reference_dir := OS.get_environment(MARCH_REFERENCE_ENV)
+	for v in VIEW_CACHE_VIEWS:
+		var name: String = v[0]
+		_show(_slab("view_cache_" + name, SLAB_BOTTOM_M, SLAB_TOP_M, THICK_LIQUID_KG_M3, v[1]))
+		var camera := _point(v[2])
+		var view := _local_direction(v[3], v[4])
+		_clouds.quality = CloudLayer.Quality.DESKTOP
+		_detail_off()
+		await _settle_cache(camera, view, sun, 0)
+		var first := await _output_bytes(camera, view, sun, 0)
+		var second := await _output_bytes(camera, view, sun, 0)
+		var differing := _differing_pixels(first, second)
+		_check("view cache (%s view): the march image of a static view is bit-identical" % name,
+				first.size() > 0 and differing == 0, "%d of %d pixels differ" % [differing, first.size() / 8])
+		var images := {"desktop_0": first}
+		_clouds.effect.set_quality(1, 1.0)
+		for mode in [0, 12]:
+			images["divisor1_%d" % mode] = await _output_bytes(camera, view, sun, mode)
+		if reference_dir != "":
+			for key: String in images:
+				_march_reference(reference_dir.path_join("%s_%s.bin" % [name, key]), images[key], "%s %s" % [name, key])
+	_clouds.quality = CloudLayer.Quality.DESKTOP
+	_detail_off()
+	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
+	_camera.fov = 10.0
+
+
+## The cloud pass's result (layer 0) after a render, its raw bytes (RGBA half floats).
+func _output_bytes(camera: Vector3, view: Vector3, sun: Vector3, mode: int) -> PackedByteArray:
+	await _render(camera, view, sun, mode)
+	var image := _clouds.effect.output.get_layer_data(0)
+	return image.get_data() if image != null else PackedByteArray()
+
+
+## Pixels (8 bytes each: RGBA half) whose bytes differ; all when the sizes differ.
+static func _differing_pixels(a: PackedByteArray, b: PackedByteArray) -> int:
+	if a.size() != b.size():
+		return maxi(a.size(), b.size()) / 8
+	var differing := 0
+	for i in range(0, a.size(), 8):
+		if a.decode_u64(i) != b.decode_u64(i):
+			differing += 1
+	return differing
+
+
+## MARCH_REFERENCE_ENV: writes the image when its reference file is missing, else checks it bit for bit.
+func _march_reference(path: String, bytes: PackedByteArray, label: String) -> void:
+	if not FileAccess.file_exists(path):
+		DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+		var out := FileAccess.open(path, FileAccess.WRITE)
+		out.store_buffer(bytes)
+		out.close()
+		print("cloud_check: march reference written: " + path)
+		return
+	var reference := FileAccess.get_file_as_bytes(path)
+	var differing := _differing_pixels(bytes, reference)
+	var largest := 0.0  # the largest difference of a colour channel relative to the image's mean colour magnitude
+	if differing > 0 and bytes.size() == reference.size():
+		var mean := 0.0
+		for i in range(0, bytes.size(), 2):
+			if (i / 2) % 4 != 3:
+				mean += absf(reference.decode_half(i)) / (bytes.size() / 8 * 3)
+		for i in range(0, bytes.size(), 2):
+			largest = maxf(largest, absf(bytes.decode_half(i) - reference.decode_half(i)) / maxf(mean, 1.0e-30))
+	_optional_samples += 1
+	_check("view cache: the march image (%s) equals the reference bit for bit" % label, differing == 0,
+			"%d of %d pixels differ (largest difference / mean colour %.6f)" % [differing, bytes.size() / 8, largest])

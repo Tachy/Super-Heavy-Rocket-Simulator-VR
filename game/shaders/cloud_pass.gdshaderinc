@@ -155,12 +155,14 @@ void main() {
 // =====================================================================================================================
 #ifdef CLOUD_MARCH
 
+#ifndef CLOUD_CACHE_FILL
 layout(set = 1, binding = 1) uniform sampler2D scene_depth;  // full resolution, nearest
 layout(rgba16f, set = 1, binding = 2) uniform writeonly image2D out_color;
 #ifdef CLOUD_EDGE_REFINE
 layout(rg32f, set = 1, binding = 3) uniform image2D out_depth;  // read too: the first march's cloud distance
 #else
 layout(rg32f, set = 1, binding = 3) uniform writeonly image2D out_depth;
+#endif
 #endif
 #ifdef CLOUD_EDGE_REFINE
 // [E] The centre ray's colour per alpha serves an outline pixel while its alpha is at least half the pixel's mean
@@ -307,6 +309,27 @@ const vec2 CLOUD_FAR_COVER_FADE_M = vec2(8000.0, 16000.0);
 // [E] Behind a march transmittance below this the far tier is not evaluated (< 0.1 % of its light).
 const float CLOUD_FAR_MIN_TRANSMITTANCE = 1.0e-3;
 
+// The ray dir (Earth-local unit) from a point offset from the camera (Earth-local, m). The cache fill
+// (CLOUD_CACHE_FILL: the anchor, metres to kilometres from the camera): the ray's height is the camera's plus the
+// offset's along its own direction (the cloud_height_along form: exact in float32 where |M p| - a would lose ~0.5 m),
+// its up the anchor's model up. The per-frame march: the camera's ray (cloud_ray) - its origin is an eye at most a few
+// centimetres from the head (cloud_vr_stereo_test), the head's height and up; kept apart at compile time so the
+// march's code stays bit-identical (a run-time branch on the offset let the GPU compiler re-associate the camera's
+// path: 4 % of the pixels changed, up to 30 % of the mean colour).
+CloudRay cloud_ray_from(vec3 dir_local, vec3 origin_offset) {
+	CloudRay ray = cloud_ray(dir_local);
+#ifdef CLOUD_CACHE_FILL
+	float offset_m = length(origin_offset);
+	if (offset_m > 0.0) {
+		ray.h_c = cloud_height_along(cloud_ray(origin_offset / offset_m), offset_m);
+		ray.r_c = CLOUD_A_M + ray.h_c;
+		vec3 up_o = normalize((atmosphere_camera_hi + atmosphere_camera_lo + origin_offset) * ATM_STRETCH);
+		ray.mu = dot(up_o, dir_local * ATM_STRETCH / ray.scale);
+	}
+#endif
+	return ray;
+}
+
 // Scattering source of one light (Sun or Moon) at a sample: J per unit irradiance normal to the light. The Sun's
 // optical depth from the light cache's cascades where they hold the sample (cloud_light_cache.gdshaderinc; the hybrid
 // ones plus the near part of the path marched through the shapes), blended into the light march over the outermost
@@ -410,7 +433,7 @@ float cloud_far_slab(CloudRay ray, vec3 dir, vec3 eye, float from_m, float to_m,
 float cloud_far_reference_m(CloudRay ray, float from_m, float to_m) {
 	vec2 crossing = cloud_sphere_crossing(ray, CLOUD_FAR_GUESS_HEIGHT_M);
 	float d;
-	if (cloud_camera_height_m < CLOUD_FAR_GUESS_HEIGHT_M) {
+	if (ray.h_c < CLOUD_FAR_GUESS_HEIGHT_M) {
 		d = crossing.y;
 	} else {
 		d = crossing.x <= crossing.y ? crossing.x : -ray.r_c * ray.mu / ray.scale;
@@ -607,7 +630,8 @@ float cloud_structure_step(CloudCell cell, float climb) {
 	return CLOUD_STRUCTURE_TEXEL_FRACTION / max(climb / up_texel_m, across / across_texel_m);
 }
 
-// The raymarch of one ray (dir: Earth-local unit) up to scene_m; out: premultiplied colour, alpha, weighted distance,
+// The raymarch of one ray (dir: Earth-local unit; from origin: the eye's or the cache anchor's offset from the camera,
+// Earth-local, m) up to scene_m; out: premultiplied colour, alpha, weighted distance,
 // and the background's transmittance T = 1 - alpha computed without the cancellation of 1 - alpha (what the image
 // stores in .a: a half float resolves T relatively, the Sun's disk down to a slant tau of ~17).
 // The deterministic march (cloud_deterministic_march; static clouds Task 3): the first step ends on an Earth-fixed
@@ -624,20 +648,20 @@ float cloud_structure_step(CloudCell cell, float climb) {
 // The near / far hand-over (static clouds Task 8): two passes of these steps - the march up to cloud_handover_far_m
 // with its light cache, the far tier from cloud_handover_near_m to the segment's end with the shapes band-limited at the
 // pixel footprint and the far light path - each step weighted by its pass's hand-over weight; composited below.
-void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 eclipse_far, bool coverage_only,
-		out vec3 color, out float alpha, out float transmittance, out float cloud_m) {
+void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclipse_near, vec3 eclipse_far,
+		bool coverage_only, out vec3 color, out float alpha, out float transmittance, out float cloud_m) {
 	color = vec3(0.0);
 	alpha = 0.0;
 	transmittance = 1.0;
 	cloud_m = 0.0;
-	CloudRay ray = cloud_ray(dir);
+	CloudRay ray = cloud_ray_from(dir, origin);
 	if (cloud_debug_output == 3) {
 		vec2 crossing = cloud_sphere_crossing(ray, cloud_debug_height_m);
 		float d_h = crossing.x > 0.0 ? crossing.x : crossing.y;
 		if (crossing.x > crossing.y || d_h <= 0.0) {
 			return;
 		}
-		vec3 offset_h = cloud_view.eye_earth.xyz + dir * d_h;
+		vec3 offset_h = origin + dir * d_h;
 		vec2 lat_lon_h = cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset_h);
 		CloudCell cell = cloud_field(lat_lon_h, cloud_debug_height_m);
 		color = vec3(cloud_coverage(cloud_shape_coordinates(offset_h, cloud_debug_height_m), cell.fraction));
@@ -653,7 +677,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	float d1 = top.y;
 	vec2 bottom = cloud_sphere_crossing(ray, CLOUD_BOTTOM_M);
 	if (bottom.x <= bottom.y) {
-		if (cloud_camera_height_m >= CLOUD_BOTTOM_M) {
+		if (ray.h_c >= CLOUD_BOTTOM_M) {
 			if (bottom.x > 0.0) {
 				d1 = min(d1, bottom.x);
 			}
@@ -681,7 +705,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	vec3 moon_dir = normalize(atmosphere_moon_direction);
 	bool moonlit = atm_moonlit();
 	vec3 camera = atmosphere_camera_hi + atmosphere_camera_lo;
-	vec3 eye = cloud_view.eye_earth.xyz;  // each eye marches from its own position (heights: the head's, <= 3 cm apart)
+	vec3 eye = origin;  // each eye (the cache: its anchor) marches from its own position
 	float pixel_angle = cloud_view.params.w;  // the detail's band limit: footprint = pixel_angle x distance
 	float w_tab = cloud_phase.w;
 	// The far tier (static clouds Task 8): from the band's start to the segment's end; its shapes fade to the far
@@ -1339,6 +1363,95 @@ vec3 cloud_air_single_reference(CloudRay ray, vec3 dir, vec3 eye, float end_m) {
 	return atm_to_scene(cloud_air_single_at(a, a.from_m) - cloud_air_single_at(a, a.to_m));
 }
 
+// The work group's eclipse factors on the sky light (CLOUD_ECLIPSE_NEAR_M / _FAR_M) along its centre ray dir from
+// origin (offset from the camera): probe points above the ground (a ray that meets it is probed short of it).
+void cloud_eclipse_factors(vec3 dir, vec3 origin, out vec3 near_factor, out vec3 far_factor) {
+	near_factor = vec3(1.0);
+	far_factor = vec3(1.0);
+	if (cloud_enabled && atmosphere_enabled && atmosphere_eclipse_segments > 0) {
+		vec3 camera_point = atmosphere_camera_hi + atmosphere_camera_lo + origin;
+		vec2 ground = cloud_sphere_crossing(cloud_ray_from(dir, origin), 0.0);
+		float limit_m = ground.x <= ground.y && ground.x > 0.0 ? ground.x : CLOUD_ECLIPSE_FAR_M;
+		near_factor = atm_sky_eclipse_factor(camera_point + dir * min(CLOUD_ECLIPSE_NEAR_M, limit_m));
+		far_factor = atm_sky_eclipse_factor(camera_point + dir * min(CLOUD_ECLIPSE_FAR_M, limit_m));
+	}
+}
+
+// The start jitter of a ray (the deterministic march: the stratified midpoints, 0.5; else blue noise at noise_pixel
+// moved per frame) and, with CLOUD_SHAPE_PREFILTER, the sub-pixel shape offset (clouds.gdshaderinc
+// cloud_subpixel_offset).
+float cloud_ray_jitter(ivec2 noise_pixel) {
+	float jitter = 0.5;
+	if (!cloud_deterministic_march) {
+		jitter = fract(texelFetch(cloud_blue_noise, noise_pixel % 64, 0).r + cloud_view.params.x);
+	}
+#ifdef CLOUD_SHAPE_PREFILTER
+	// The sub-pixel shape offset: blue noise at four shifted texels, moved per frame along the R4 sequence (Roberts
+	// 2018: 1 / phi_4^k) of the frame index. The deterministic march reads the footprint's centre (0.5: no offset) - the
+	// mips' box filter there is the footprint's mean cover (spec decision 4), the same in every frame.
+	if (!cloud_deterministic_march) {
+		float frame = cloud_view.eye_earth.w;
+		cloud_shape_subpixel = fract(vec4(texelFetch(cloud_blue_noise, (noise_pixel + ivec2(17, 41)) % 64, 0).r,
+				texelFetch(cloud_blue_noise, (noise_pixel + ivec2(43, 29)) % 64, 0).r,
+				texelFetch(cloud_blue_noise, (noise_pixel + ivec2(5, 53)) % 64, 0).r,
+				texelFetch(cloud_blue_noise, (noise_pixel + ivec2(31, 11)) % 64, 0).r)
+				+ frame * vec4(0.8566748839, 0.7338918708, 0.6287067210, 0.5385972572));
+	}
+#endif
+	return jitter;
+}
+
+// What the images store of a ray's colour and transmittance: the half-float range (a lit cloud seen through a
+// dark-adapted eye; negative: the air shadow's loss, cloud_air_shadow_loss), no NaN into the history, and in .a the
+// background's transmittance T, not alpha: a half float resolves T relatively (normal down to 6.1e-5, subnormal to
+// 6e-8), where 1 - T near 1 had a spacing of 4.9e-4 - the Sun's disk vanished behind a slant tau of 8.
+vec4 cloud_stored_color(vec3 color, float transmittance) {
+	color = clamp(color, vec3(-65000.0), vec3(65000.0));
+	if (any(isnan(color)) || isnan(transmittance)) {
+		color = vec3(0.0);
+		transmittance = 1.0;
+	}
+	return vec4(color, clamp(transmittance, 0.0, 1.0));
+}
+
+// The shading of one view ray (cloud view cache Task 3: the per-frame march and the cache's fill share it):
+// dir_earth (Earth-local unit) from origin_offset (the eye's or the anchor's offset from the camera, Earth-local, m) up
+// to scene_m - the march (cloud_ray_jitter at noise_pixel), the air shadow's loss in the colour, the debug outputs.
+// Out: the stored colour (cloud_stored_color: premultiplied colour + the background's transmittance T in .a) and the
+// alpha-weighted cloud distance.
+void cloud_shade_ray(vec3 dir_earth, vec3 origin_offset, float scene_m, ivec2 noise_pixel, vec3 eclipse_near,
+		vec3 eclipse_far, out vec4 color_t, out float cloud_m) {
+	vec3 color = vec3(0.0);
+	float alpha = 0.0;
+	float transmittance = 1.0;
+	cloud_m = 0.0;
+	// The air shadow's loss in the colour: the game's image (debug output 0) and the checks' 9 (the loss alone: the
+	// march's colour zeroed) and 10 (as 9; CLOUD_EDGE_REFINE's outline pixels their own).
+	bool air = cloud_debug_output == 0 || cloud_debug_output == 9 || cloud_debug_output == 10;
+	if (cloud_enabled && atmosphere_enabled) {
+		float jitter = cloud_ray_jitter(noise_pixel);
+		cloud_march(dir_earth, origin_offset, scene_m, jitter, eclipse_near, eclipse_far, false, color, alpha,
+				transmittance, cloud_m);
+		if (cloud_debug_output == 9 || cloud_debug_output == 10) {
+			color = vec3(0.0);  // the loss alone
+		}
+		if (air) {
+			color -= cloud_air_shadow_loss(cloud_ray_from(dir_earth, origin_offset), dir_earth, origin_offset, scene_m,
+					alpha > 1.0e-6 ? cloud_m : 1.0e30, transmittance);
+		}
+		if (cloud_debug_output == 8) {
+			color = cloud_air_single_reference(cloud_ray_from(dir_earth, origin_offset), dir_earth, origin_offset,
+					scene_m);
+			transmittance = 0.0;
+		} else if (cloud_debug_output == 12) {
+			color = vec3(cloud_m, alpha, 0.0);
+			transmittance = 0.0;
+		}
+	}
+	color_t = cloud_stored_color(color, transmittance);
+}
+
+#ifndef CLOUD_CACHE_FILL
 #ifdef CLOUD_CENTRE
 // The centre view has no depth buffer of its own: its rays take the scene distance from an eye's (VR performance
 // part 2).
@@ -1432,22 +1545,11 @@ void main() {
 	cloud_outline_spread(pixel, low, coarse, opaque_neighbour);
 #else
 	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
-	// The work group's eclipse factors on the sky light (CLOUD_ECLIPSE_NEAR_M / _FAR_M), before any invocation leaves.
+	// The work group's eclipse factors on the sky light (cloud_eclipse_factors), before any invocation leaves.
 	if (gl_LocalInvocationIndex == 0u) {
-		vec3 near_factor = vec3(1.0);
-		vec3 far_factor = vec3(1.0);
-		if (cloud_enabled && atmosphere_enabled && atmosphere_eclipse_segments > 0) {
-			vec2 group_centre = (vec2(gl_WorkGroupID.xy * gl_WorkGroupSize.xy) + 0.5 * vec2(gl_WorkGroupSize.xy)) * scale;
-			vec3 group_dir = cloud_ray_earth(min(group_centre, cloud_view.sizes.xy - 0.5));
-			vec3 camera_point = atmosphere_camera_hi + atmosphere_camera_lo + cloud_view.eye_earth.xyz;
-			// Probe points above the ground: a ray that meets it is probed short of it.
-			vec2 ground = cloud_sphere_crossing(cloud_ray(group_dir), 0.0);
-			float limit_m = ground.x <= ground.y && ground.x > 0.0 ? ground.x : CLOUD_ECLIPSE_FAR_M;
-			near_factor = atm_sky_eclipse_factor(camera_point + group_dir * min(CLOUD_ECLIPSE_NEAR_M, limit_m));
-			far_factor = atm_sky_eclipse_factor(camera_point + group_dir * min(CLOUD_ECLIPSE_FAR_M, limit_m));
-		}
-		cloud_group_eclipse_near = near_factor;
-		cloud_group_eclipse_far = far_factor;
+		vec2 group_centre = (vec2(gl_WorkGroupID.xy * gl_WorkGroupSize.xy) + 0.5 * vec2(gl_WorkGroupSize.xy)) * scale;
+		vec3 group_dir = cloud_ray_earth(min(group_centre, cloud_view.sizes.xy - 0.5));
+		cloud_eclipse_factors(group_dir, cloud_view.eye_earth.xyz, cloud_group_eclipse_near, cloud_group_eclipse_far);
 	}
 	barrier();
 	if (pixel.x >= low.x || pixel.y >= low.y) {
@@ -1465,34 +1567,15 @@ void main() {
 	if (far_m < 1.0e29 && far_m <= near_m * exp(CLOUD_ONE_SURFACE_SPREAD)) {
 		scene_m = sum_m / count;  // one surface: the centre ray's distance
 	}
+#ifdef CLOUD_EDGE_REFINE
 	vec3 color = vec3(0.0);
 	float alpha = 0.0;
 	float transmittance = 1.0;
 	float cloud_m = 0.0;
-	// The air shadow's loss in the colour: the game's image (debug output 0) and the checks' 9 (the loss alone: the
-	// march's colour zeroed) and 10 (as 9, the outline pixels' loss their own, not rescaled from the source's).
+	// The air shadow's loss in the colour (as cloud_shade_ray).
 	bool air = cloud_debug_output == 0 || cloud_debug_output == 9 || cloud_debug_output == 10;
 	if (cloud_enabled && atmosphere_enabled) {
-		// The deterministic march: the stratified midpoints (cloud_march); else blue noise per pixel moved per frame.
-		float jitter = 0.5;
-		if (!cloud_deterministic_march) {
-			jitter = fract(texelFetch(cloud_blue_noise, pixel % 64, 0).r + cloud_view.params.x);
-		}
-#ifdef CLOUD_SHAPE_PREFILTER
-		// The sub-pixel shape offset (clouds.gdshaderinc cloud_subpixel_offset): blue noise at four shifted texels, moved
-		// per frame along the R4 sequence (Roberts 2018: 1 / phi_4^k) of the frame index. The deterministic march reads
-		// the footprint's centre (0.5: no offset) - the mips' box filter there is the footprint's mean cover (spec
-		// decision 4), the same in every frame.
-		if (!cloud_deterministic_march) {
-			float frame = cloud_view.eye_earth.w;
-			cloud_shape_subpixel = fract(vec4(texelFetch(cloud_blue_noise, (pixel + ivec2(17, 41)) % 64, 0).r,
-					texelFetch(cloud_blue_noise, (pixel + ivec2(43, 29)) % 64, 0).r,
-					texelFetch(cloud_blue_noise, (pixel + ivec2(5, 53)) % 64, 0).r,
-					texelFetch(cloud_blue_noise, (pixel + ivec2(31, 11)) % 64, 0).r)
-					+ frame * vec4(0.8566748839, 0.7338918708, 0.6287067210, 0.5385972572));
-		}
-#endif
-#ifdef CLOUD_EDGE_REFINE
+		float jitter = cloud_ray_jitter(pixel);
 		// The coverage: the mean alpha of the centre ray (the first march's) and CLOUD_EDGE_SUBRAYS coverage-only rays at
 		// the rotated grid's fixed offsets (the same in every frame: static); the cloud distance weighted by each ray's
 		// alpha (the march's own convention). The colour per alpha: CLOUD_EDGE_COLOUR_ALPHA_RATIO's. Full marches per
@@ -1507,8 +1590,8 @@ void main() {
 			float sub_alpha;
 			float sub_transmittance;
 			float sub_m;
-			cloud_march(cloud_ray_earth(centre + CLOUD_EDGE_OFFSETS[k] * scale), scene_m, jitter,
-					vec3(1.0), vec3(1.0), true, sub_color, sub_alpha, sub_transmittance, sub_m);
+			cloud_march(cloud_ray_earth(centre + CLOUD_EDGE_OFFSETS[k] * scale), cloud_view.eye_earth.xyz,
+					scene_m, jitter, vec3(1.0), vec3(1.0), true, sub_color, sub_alpha, sub_transmittance, sub_m);
 			bool bad = isnan(sub_alpha) || isnan(sub_transmittance);
 			sub_alpha = bad ? 0.0 : clamp(sub_alpha, 0.0, 1.0);
 			coverage += sub_alpha;
@@ -1527,7 +1610,8 @@ void main() {
 		vec3 air_front = vec3(0.0);
 		vec3 air_behind = vec3(0.0);
 		if (air) {
-			cloud_air_shadow_parts(cloud_ray(dir_centre), dir_centre, cloud_view.eye_earth.xyz, scene_m,
+			vec3 eye = cloud_view.eye_earth.xyz;
+			cloud_air_shadow_parts(cloud_ray_from(dir_centre, eye), dir_centre, eye, scene_m,
 					cloud_m > 0.0 ? cloud_m : 1.0e30, air_front, air_behind);
 		}
 		vec3 loss_source = air_front + source.a * air_behind;
@@ -1536,38 +1620,27 @@ void main() {
 		if (cloud_debug_output == 10) {
 			color = -loss_here;
 		}
-#else
-		vec3 dir_centre = cloud_ray_earth(centre);
-		cloud_march(dir_centre, scene_m, jitter, cloud_group_eclipse_near, cloud_group_eclipse_far, false, color, alpha,
-				transmittance, cloud_m);
-		if (cloud_debug_output == 9 || cloud_debug_output == 10) {
-			color = vec3(0.0);  // the loss alone
-		}
-		if (air) {
-			color -= cloud_air_shadow_loss(cloud_ray(dir_centre), dir_centre, cloud_view.eye_earth.xyz, scene_m,
-					alpha > 1.0e-6 ? cloud_m : 1.0e30, transmittance);
-		}
-#endif
 		if (cloud_debug_output == 8) {
-			color = cloud_air_single_reference(cloud_ray(dir_centre), dir_centre, cloud_view.eye_earth.xyz, scene_m);
+			color = cloud_air_single_reference(cloud_ray_from(dir_centre, cloud_view.eye_earth.xyz), dir_centre,
+					cloud_view.eye_earth.xyz, scene_m);
 			transmittance = 0.0;
 		} else if (cloud_debug_output == 12) {
 			color = vec3(cloud_m, alpha, 0.0);
 			transmittance = 0.0;
 		}
 	}
-	// Half-float range (a lit cloud seen through a dark-adapted eye) and no NaN into the history; negative: the air
-	// shadow's loss (cloud_air_shadow_loss).
-	color = clamp(color, vec3(-65000.0), vec3(65000.0));
-	if (any(isnan(color)) || isnan(transmittance)) {
-		color = vec3(0.0);
-		transmittance = 1.0;
-	}
-	// .a holds the background's transmittance T, not alpha: a half float resolves T relatively (normal down to 6.1e-5,
-	// subnormal to 6e-8), where 1 - T near 1 had a spacing of 4.9e-4 - the Sun's disk vanished behind a slant tau of 8.
-	imageStore(out_color, pixel, vec4(color, clamp(transmittance, 0.0, 1.0)));
+	vec4 color_t = cloud_stored_color(color, transmittance);
+#else
+	// One ray through the pixel's centre from the eye (the centre view: the head).
+	vec4 color_t;
+	float cloud_m;
+	cloud_shade_ray(cloud_ray_earth(centre), cloud_view.eye_earth.xyz, scene_m, pixel, cloud_group_eclipse_near,
+			cloud_group_eclipse_far, color_t, cloud_m);
+#endif
+	imageStore(out_color, pixel, color_t);
 	imageStore(out_depth, pixel, vec4(scene_m, cloud_m, 0.0, 0.0));
 }
+#endif
 
 #endif
 
