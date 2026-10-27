@@ -332,6 +332,24 @@ checks, docs `docs/subsystems/weather-clouds.md`, `weather-service.md`, `tools/d
   renders t9c_* vs t9b_*.
 - [ ] **Step 5: Commit** `feat(core): cloud cover from total cloud cover, cumulus water from an adiabatic parcel`
 
+### Task 9d: De-tile the cloud shape lookup (user 2026-10-27)
+
+User (photo from altitude, a uniform broken field): the clouds form a regular "chessboard" lattice. Cause: the 32 km
+shape tile's periodicity, resolved once the pixel footprint reaches kilometres (weather-clouds.md, "Visible at
+kilometre footprints"). User OK to change the lookup; the shapes themselves stay (same noise, same statistics).
+
+**Files:** `game/shaders/clouds.gdshaderinc` (shape lookup), `core` cloud_noise only if the CPU mirrors the lookup,
+`game/tests/cloud_check.gd`, `docs/subsystems/weather-clouds.md`
+
+- [ ] **Step 1: Test** (RED): a periodicity metric on a uniform broken field seen from 100 / 400 / 3000 km (the
+  autocorrelation or spectrum peak at the tile period along two axes) - present before, gone after; covered fraction
+  and water per type unchanged (the existing coverage test); stereo identical; repeat_identical.
+- [ ] **Step 2: Implement**: per-tile hashed offset + rotation (Earth-fixed, deterministic), blended across tile borders
+  with a variance-preserving blend (no contrast loss in the blend band); the prefilter path de-tiled the same way.
+- [ ] **Step 3: Renders** t9d_* vs before at the three heights + the ground / Cape views (near look unchanged); cost of
+  the cloud pass before/after (Task 10 owns the budget).
+- [ ] **Step 4: Commit** `fix(game): de-tile the cloud shape lookup`
+
 ### Task 10: Budget, presets, desktop re-baseline, VR acceptance
 
 **Files:** `game/world/weather/cloud_layer.gd` (presets), `docs/subsystems/weather-clouds.md`,
