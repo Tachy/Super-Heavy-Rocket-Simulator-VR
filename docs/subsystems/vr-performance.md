@@ -13,7 +13,7 @@ GPU <= 9 ms with clouds at the VR pixel count. The 1440p desktop proxy of M8 Tas
 not count for VR.
 
 Standing decision (user 2026-10-27, static clouds): the cloud budget (cloud p99 2.5 ms x the stereo correction) is not
-met - the cloud pass is 31 ms at the ground and 39 ms at the deck in the proxy - and the user accepted that "with
+met - the cloud pass is 37 ms at the ground and 45 ms at the deck in the proxy - and the user accepted that "with
 clouds the frame rate is lower" until a better approach (e.g. precomputing the static field). Open: the headset run
 (pad -> decks -> orbit, `--perf-log`, look check, composite second-pass A/B, the light-cache fill's worst frame under
 load); see `weather-clouds.md` Open points.
@@ -292,16 +292,19 @@ skip (`weather-clouds.md` "Steep edges"; images bit-identical in all seven views
 
 | View | frame | cloud pass | march kernel | outline refine | shadow maps |
 |---|---|---|---|---|---|
-| ground | 46.2 / 42.6 / 32.7 | 44.6 / 40.9 / 31.0 | 34.0 / 30.9 / 23.0 | 10.4 / 10.0 / 7.8 | 0.59 |
+| ground | 46.2 / 42.6 / 38.8 | 44.6 / 40.9 / 36.9 | 34.0 / 30.9 / 28.4 | 10.4 / 10.0 / 8.4 | 0.59 |
 | 3 km | 41.8 / 38.0 / 32.6 | 38.9 / 35.2 / 29.6 | 28.7 / 25.5 / 21.8 | 9.9 / 9.7 / 7.7 | 0.59 |
-| 9 km deck | 52.9 / 51.8 / 41.7 | 49.9 / 48.9 / 38.9 | 38.0 / 37.6 / 29.7 | 11.7 / 11.1 / 9.0 | 0.59 |
+| 9 km deck | 52.9 / 51.8 / 48.2 | 49.9 / 48.9 / 45.3 | 38.0 / 37.6 / 35.8 | 11.7 / 11.1 / 9.5 | 0.59 |
 | 20 km | 34.2 / 33.8 / 28.8 | 31.4 / 30.6 / 25.8 | 22.1 / 21.9 / 18.7 | 9.0 / 8.6 / 6.9 | 0.60 |
 | 400 km | 8.5 / 8.5 / 8.6 | 6.1 / 6.2 / 6.1 | 4.0 / 3.9 / 3.8 | 2.0 / 2.1 / 2.1 | 0.60 |
 | backlit Cu | 16.4 / 16.1 / 14.5 | 15.0 / 14.7 / 13.0 | 10.7 / 10.2 / 8.9 | 4.2 / 4.4 / 3.9 | 0.59 |
 | Sun through deck | 8.4 / 8.2 / 8.2 | 7.3 / 7.1 / 7.1 | 7.2 / 7.0 / 7.0 | 0 | 0.57 |
 
-(third value: after the Task 10 follow-up, 954a4c8: at most 6 sub-samples, step-weight limit 0.3; the look is the
-before's within 0.1-0.4 of 255 on average, crops `t10b_substeps_*`.)
+(third value: after the Task 10 follow-up, 6 sub-samples and step-weight limit 0.3, 954a4c8 - the step weight was taken
+back to 0.15 because 0.3 failed cloud_far_check's hand-over fade cases; the ground / deck rows show the 6 sub-samples
+and step weight 0.15 state, sdd `t10_prof_{ground,deck}_w015.log`; the other rows' third values were measured at 0.3
+and are about 4-5 ms (cloud pass) too low where the view is in dense cloud; the look is the before's within 0.1-0.4 of 255 on average, crops
+`t10b_substeps_*`.)
 
 The outline pass's list kernel, the temporal copy and the upsample are 0.01-0.12 ms; the light cache fill is 0 once
 settled. Run-to-run spread about +-1.5 ms at 40-50 ms.
@@ -316,7 +319,8 @@ cloud pass, ms saved):
   the per-sample fallback march 0;
 - the outline refinement (3 coverage-only sub-rays per outline pixel): 10.4 / 11.7 ms;
 - the air shadow (32 segments x 3 shadow-map samples + 33 single-scattering lookups): 5.3 / 2.3 ms;
-- the step-weight limit (CLOUD_MAX_STEP_WEIGHT) 0.15 -> 0.3: 4.7 / 5.2 ms (fewer light samples in dense cloud).
+- the step-weight limit (CLOUD_MAX_STEP_WEIGHT) 0.15 -> 0.3: 4.7 / 5.2 ms (fewer light samples in dense cloud) - not
+  kept, see below.
 
 Tried and not taken (all measured on the ground / deck views):
 - Clear-air skip of the detail's three lookups (shapes first; exact): -3.7 ms ground, -1.0 deck (noise level) -
@@ -336,11 +340,12 @@ Look-trade options after the user's rulings (2026-10-27; crops `screenshots/stat
 - at most 6 sub-samples instead of 8: APPLIED, -5.4 / -4.2 ms at the ground / the deck. 4 (-9.3 / -8.9 ms) was the
   ruling but fails the Cape's alpha grain check (1.375 x the reference's, bound 1.25; 5: 1.241); no visible loss in the
   crops (mean difference 0.1-0.4 of 255).
-- step-weight limit 0.3 instead of 0.15: APPLIED after the reference cases passed (cloud_check incl. the Monte Carlo
-  fixtures, cloud_far_check, cloud_grain_check, within their tolerances): -4.7 / -5.2 ms.
+- step-weight limit 0.3 instead of 0.15: REVERTED. It was allowed only if every reference case passed within its
+  tolerance; cloud_far_check's hand-over fade cases (scattered cf 0.12 nadir 1.1085, broken cf 0.4 low Sun 45 deg
+  1.1024 against 10 %) failed with it (the shapes' radiance dropped), 1.0936 / 1.0849 with 0.15. -4.7 / -5.2 ms lost.
 - march divisor 4 instead of 3 (-11.3 / -14.3 ms): REJECTED by the user (visibly softer near cumulus, blockier lower
   deck outlines); divisor 3 stays.
-The cloud pass is still 31 ms at the ground and 39 ms at the deck in the proxy - the budget (cloud p99 2.5 ms x the
+The cloud pass is still 37 ms at the ground and 45 ms at the deck in the proxy - the budget (cloud p99 2.5 ms x the
 stereo correction) is out of reach of optimisation without a different march design.
 
 Shape de-tiling (Task 9d, re-measured on 6b9149e with the parked `wip/t9d-detile` commit and its variants; cloud pass,

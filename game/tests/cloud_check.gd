@@ -126,7 +126,7 @@ const CLIMB_STEP_LIMIT := 0.055
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 138 + SUN_SAMPLES + AIR_SAMPLES
+const EXPECTED_SAMPLES := 140 + SUN_SAMPLES + AIR_SAMPLES
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0

@@ -714,7 +714,7 @@ weather-clouds.md, Cover from the total cloud cover (first 9c state, file format
   0.25 deg) put each cloud layer on cloud_min_cover with its water kept (dense specks). The plausibility cloud-base
   check therefore ran on the unscaled fractions.
 
-## Before the Task 10 follow-up (superseded 2026-10-27: 6 sub-samples, step weight 0.3, new reference values)
+## Before the Task 10 follow-up (superseded 2026-10-27: 6 sub-samples; the step weight 0.3 of 954a4c8 was reverted to 0.15 because it failed cloud_far_check's hand-over fade cases at 1.1085 / 1.1024 of 10 %)
 weather-clouds.md:
 
 - Reference values at Task 10 (6b9149e, RTX 4090; sdd `t10_checks_e1/`): `cloud_check.gd` PASS, 198 samples, 312 s for

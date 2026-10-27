@@ -203,10 +203,10 @@ const float CLOUD_ONE_SURFACE_SPREAD = 0.05;
 // [E] Largest weight of one step in the pixel's scattered light, T_sc (1 - exp(-(1 - f) tau_step)): a heavier step is
 // marched again with steps of this weight (one point sample - its light march included - would decide the pixel over
 // the whole step: grain at cloud surfaces and at bases seen at a grazing angle; with steps of tau ~1 instead the pass
-// cost 6 ms more at the descent's worst second). Behind T_sc < this weight any step is fine. 0.3 (was 0.15, Task 10:
-// -4.7 / -5.2 ms of the VR proxy's cloud pass at the ground / the deck) passes every reference case within its
-// tolerances (cloud_check, cloud_far_check, cloud_grain_check); lobes slightly flatter (t10_opt_*_stepweight.png).
-const float CLOUD_MAX_STEP_WEIGHT = 0.3;
+// cost 6 ms more at the descent's worst second). Behind T_sc < this weight any step is fine. 0.3 saved 4.7 / 5.2 ms of
+// the VR proxy's cloud pass at the ground / the deck but pushed cloud_far_check's hand-over fade cases to 1.108 / 1.102
+// (bound 1.10): the shapes' radiance dropped; 0.15 keeps them at 1.094 / 1.085.
+const float CLOUD_MAX_STEP_WEIGHT = 0.15;
 // [E] The air's light at the cloud is re-evaluated along a ray after 500 m or 5 % of the distance (the transmitted
 // Sun changes by < 1 % over that at a 10-deg Sun; the eclipse's shadow edge is ~50 km wide).
 const float CLOUD_LIGHT_REFRESH_M = 500.0;

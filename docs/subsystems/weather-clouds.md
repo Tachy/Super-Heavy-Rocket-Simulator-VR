@@ -307,7 +307,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      golden ratio - the same for both eyes, the light march's jitter decorrelated per step; background through
      exp(-tau), scattered light through exp(-(1 - f) tau); colour = T_c L + (1 - T_bg) S_c with the air at the
      transmittance-weighted cloud distance; a step whose weight in the scattered light T_sc (1 - exp(-(1 - f) tau))
-     exceeds 0.3 [E] (Task 10; 0.15 before) is marched again with steps of that weight (one sample deciding a whole deep step was the grain
+     exceeds 0.15 [E] (0.3 tried in Task 10, reverted) is marched again with steps of that weight (one sample deciding a whole deep step was the grain
      at cloud surfaces and at bases seen at a grazing angle; the step's intended length is compared, not the float32
      difference of the distances, whose 1 m ulp at 8 600 km retried the same step until the budget ran out - Task 10);
   1b. **outline pass** (static clouds Task 5b, fix round 1; the deterministic march only, not the debug outputs), two
@@ -640,12 +640,13 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   scene's single scattering, outline, front weight, no-negative and clear-sky cases (numbers in the Model section);
   core `[weather]`: `cloud_render_top_m`; core `[atmosphere]`: the single Rayleigh table = the raymarch's single
   Rayleigh within 1 % and below the scattering table's total.
-- Reference values at Task 10 follow-up (ff62126 with 6 sub-samples and step weight 0.3, RTX 4090; sdd
-  `t10_checks_e3/`): `cloud_check.gd` PASS, 208 samples, 393 s for the whole run (section 6 alone,
+- Reference values at Task 10 follow-up (ff62126 with 6 sub-samples and step weight 0.3 - reverted to 0.15,
+  the far check re-run at 0.15 in sdd `final_fix/`; RTX 4090; sdd `t10_checks_e3/`): `cloud_check.gd` PASS, 208 samples, 393 s for the whole run (section 6 alone,
   `STARSIM_GROUND_ONLY=1`: 12 s; the Sun through the shipped analog June cumulus at Starbase: 6 disks through gaps at
   0.9999 of the cloudless disk, 2 behind cores at the march's T 3e-6 / 0, the mean transmittance of the shapes over 60
-  directions 0.727 vs the grid mean 0.730); `cloud_far_check.gd`: as at 6b9149e (below, same limits), only the Moon
-  view fails (cache file `era5_1089330.wthr` missing, known); speckle RMS vs the sub-pixel supersampled reference:
+  directions 0.727 vs the grid mean 0.730); `cloud_far_check.gd` at step weight 0.15 (`final_fix/far_w015.log`): passes, hand-over fade column / shapes
+  1.0936 (scattered cf 0.12 nadir) and 1.0849 (broken cf 0.4 low Sun 45 deg) of 10 % (0.3 gave 1.1085 / 1.1024:
+  why it was reverted); speckle RMS vs the sub-pixel supersampled reference:
   limb from 420 km 5.0 %, 50 km horizon 9.4 % (limit 10 %), at the VR pixel angle (1.8 mrad, 3 x 3 reference) the limb
   6.2 % and the 50 km horizon 11.0 % (listed, not asserted: open point); `cloud_grain_check.gd` VR PASS (grain ratio
   1.01-1.05, alpha grain 0.995-1.165 (Cape the largest), RMS 0.033-0.057) and `--quality=desktop` PASS (grain
@@ -932,7 +933,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 ## Open points and known limits
 
 - **Standing decisions (user 2026-10-27, static clouds Task 10)**: with clouds the frame rate is lower - the 2.5 ms
-  cloud budget is not met (cloud pass 31 / 39 ms in the proxy at the ground / the deck, `vr-performance.md`) and the
+  cloud budget is not met (cloud pass 37 / 45 ms in the proxy at the ground / the deck, `vr-performance.md`) and the
   user accepted that until a better approach exists (e.g. precomputing the static field). March sub-samples: 6 (4 fail
   the Cape's grain bound, 5 pass with no margin). March divisor 3 (4 rejected: softer cumulus, blockier deck outlines).
   Shape de-tiling NOT done: the lattice stays (options and costs below).
@@ -963,9 +964,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     tolerance p99 2 % against 1.67 % measured; the upsample floor falls back to 0 when no inner tap passes the depth
     gate; 16-entry tap arrays with 4 used in the radius-0 path (register pressure); a per-region cloud top for the air
     shadow (the global top gives no gain on real weather).
-  - cloud_far_check: the two hand-over fade cases (scattered cf 0.12 nadir, broken cf 0.4 low Sun 45 deg) fail at
-    1.108 / 1.102 against 10 % (the fade reference point below); the check exits 1 until that is decided. The 50 km
-    horizon speckle at the VR angle is capped at 13 % (measured 11.0 %).
+  - cloud_far_check: the 50 km horizon speckle at the VR angle is capped at 13 % (measured 11.0 %).
 
 - **Shape de-tiling (Task 9d, deferred by the user 2026-10-27)**: the shapes' 32 km tile shows as a chessboard lattice
   from altitude (the shapes' own period, not the weather). Measured options on 6b9149e (cloud pass ground / 400 km;
@@ -1067,8 +1066,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   gain for broken cloud is a fit (above). The speckle check's far horizon from 50 km passes with a thin margin (9.4 %
   of 10 %; the shapes' march-pixel outline at ~1 km footprints dominates it). The scaled-space limit: the ground's sea
   glint steps there (terrain vs scaled-space Earth, weather off), seen through broken cloud.
-- **March sub-samples (Task 5c fix round 1, Task 10)**: at most 6 per step (8 before Task 10) and a step-weight limit
-  of 0.3 (0.15 before): the VR proxy's cloud pass at the ground / the deck 40.9 / 48.9 -> 31.0 / 38.9 ms
+- **March sub-samples (Task 5c fix round 1, Task 10)**: at most 6 per step (8 before Task 10); the step-weight limit stays 0.15
+  (0.3 saved 4.7 / 5.2 ms but pushed two far hand-over fade cases to 1.108 / 1.102 of 10 %): the VR proxy's cloud pass
+  at the ground / the deck 40.9 / 48.9 -> 36.9 / 45.3 ms
   (`vr-performance.md`), still over the budget like the base. 4 sub-samples (-9 ms) fail the grain check at the Cape
   (alpha grain 1.375 x the 8 x reference's, bound 1.25; the user's ruling to use 4 could not be kept without widening
   the bound), 5 pass with no margin (1.241), 6 at 1.16. One light sample per step.
