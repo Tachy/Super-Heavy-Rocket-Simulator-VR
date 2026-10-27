@@ -9,6 +9,8 @@ const VIEW_SIZE := Vector2i(3534, 2838)
 const FAR_M := 3.0e7
 const TILE_TEXELS := 64
 ## The view rays a caller passes: a grid every 10 deg, each ray covering half the grid diagonal.
+## A pick returns at most MAX_BLOCK_EXPANSIONS blocks' tiles (128): the first pick of a cold cache asks for fewer.
+const FIRST_PICK_TILES := 120
 const VIEW_STEP_RAD := 0.17453293
 const VIEW_SAMPLE_RAD := 0.13089969
 const ROUND_TRIP_TOLERANCE_RAD := 1.0e-9
@@ -131,9 +133,9 @@ func _test_first_fill() -> void:
 	var sample_rad := VIEW_SAMPLE_RAD
 	var anchor := Vector3(1.0e6, 2.0e6, 3.0e6)
 	var started := Time.get_ticks_usec()
-	var picks := schedule.pick(anchor, anchor, view, 200, sample_rad)
+	var picks := schedule.pick(anchor, anchor, view, FIRST_PICK_TILES, sample_rad)
 	var pick_ms := (Time.get_ticks_usec() - started) / 1000.0
-	var all_level_0 := picks.size() == 200
+	var all_level_0 := picks.size() == FIRST_PICK_TILES
 	var in_margin := true
 	var reach := deg_to_rad(50.0) + CloudViewCacheSchedule.VIEW_MARGIN_RAD + sample_rad + layout.tile_radius_rad()
 	var distinct := {}
@@ -207,21 +209,21 @@ func _test_light_staleness() -> void:
 	var schedule := CloudViewCacheSchedule.new(layout)
 	var sun := Vector3(0.3, 0.8, -0.5).normalized()
 	_complete_all(schedule, CloudViewCacheLayout.LEVELS - 1, _state(sun))
-	schedule.mark_light(sun, 0.5, 1)
+	_settle(schedule, sun, 0.5, 1)
 	_check(_stale_count(schedule) == 0, "same light: no tile stale")
 	var axis := sun.cross(Vector3.UP).normalized()
-	schedule.mark_light(sun.rotated(axis, deg_to_rad(0.05)), 0.5, 1)
+	_settle(schedule, sun.rotated(axis, deg_to_rad(0.05)), 0.5, 1)
 	_check(_stale_count(schedule) == 0, "Sun 0.05 deg off: no tile stale (%d)" % _stale_count(schedule))
-	schedule.mark_light(sun.rotated(axis, deg_to_rad(0.5)), 0.5, 1)
+	_settle(schedule, sun.rotated(axis, deg_to_rad(0.5)), 0.5, 1)
 	_check(_stale_count(schedule) == layout.tile_count(), "Sun 0.5 deg off: all %d tiles stale (%d)"
 			% [layout.tile_count(), _stale_count(schedule)])
-	schedule.mark_light(sun, 0.5, 1)
+	_settle(schedule, sun, 0.5, 1)
 	_check(_stale_count(schedule) == 0, "Sun back: not stale")
-	schedule.mark_light(sun, 0.51, 1)
+	_settle(schedule, sun, 0.51, 1)
 	_check(_stale_count(schedule) == 0, "weather weight 0.01 off: not stale")
-	schedule.mark_light(sun, 0.53, 1)
+	_settle(schedule, sun, 0.53, 1)
 	_check(_stale_count(schedule) == layout.tile_count(), "weather weight 0.03 off: all stale")
-	schedule.mark_light(sun, 0.5, 2)
+	_settle(schedule, sun, 0.5, 2)
 	_check(_stale_count(schedule) == layout.tile_count(), "another light cache generation: all stale")
 	# A stale tile is picked (class 4) at its own level; completing it with the new light clears the flag.
 	var anchor := Vector3(1.0e6, 2.0e6, 3.0e6)
@@ -233,9 +235,18 @@ func _test_light_staleness() -> void:
 	schedule.completed(picks[0]["tile"], 2, _state(sun, 0.5, 2))
 	_check(not schedule.is_stale(picks[0]["tile"]), "a tile completed with the current light is not stale")
 	var moved := Vector3(anchor.x + 50.0, anchor.y, anchor.z)
-	schedule.mark_light(sun, 0.5, 2)
+	_settle(schedule, sun, 0.5, 2)
 	schedule.pick(moved, moved, [Vector3(0.0, 0.0, -1.0)], 1, 0.1)
 	_check(schedule.is_stale(picks[0]["tile"]), "a new anchor makes a tile rendered from the old one stale")
+
+
+## mark_light until the amortised light pass has finished (the staleness flags are complete).
+func _settle(schedule: CloudViewCacheSchedule, sun: Vector3, weight: float, generation: int) -> void:
+	for i in range(1000):
+		schedule.mark_light(sun, weight, generation)
+		if not schedule.light_scan_pending():
+			return
+	_check(false, "the light pass finishes")
 
 
 func _stale_count(schedule: CloudViewCacheSchedule) -> int:
@@ -264,7 +275,7 @@ func _test_parallax() -> void:
 	var all := _layout()
 	var s2 := CloudViewCacheSchedule.new(all)
 	_complete_all(s2, 2, _state(Vector3.UP, 0.5, 1, anchor))
-	s2.mark_light(Vector3.UP, 0.5, 1)
+	_settle(s2, Vector3.UP, 0.5, 1)
 	var near_tile := all.tile_of(Vector3(0.0, 0.0, -1.0))
 	var far_tile := all.tile_of(Vector3(0.05, 0.0, -1.0))
 	s2.set_tile_distance(near_tile, 500.0)
@@ -286,7 +297,7 @@ func _test_parallax_reanchor() -> void:
 	var schedule := CloudViewCacheSchedule.new(layout)
 	var anchor := Vector3(1.0e6, 2.0e6, 3.0e6)
 	_complete_all(schedule, 2, _state(Vector3.UP, 0.5, 1, anchor))
-	schedule.mark_light(Vector3.UP, 0.5, 1)
+	_settle(schedule, Vector3.UP, 0.5, 1)
 	var view := _view_grid(deg_to_rad(30.0), VIEW_STEP_RAD)
 	var tile := layout.tile_of(Vector3(0.14, 0.0, -1.0))  # ~8 deg off the view centre: nothing nearer to the centre
 	schedule.set_tile_distance(tile, 500.0)
@@ -335,52 +346,157 @@ func _test_budget_and_levels() -> void:
 	_check(all_full, "all %d tiles reached the full level" % layout.tile_count())
 
 
-## [E] Main-thread budgets (the 5 ms main-thread target is shared by many sections): a converged cache's pick plus
-## mark_light per frame, and a cold pick (every tile open).
+## [E] Main-thread budgets (the 5 ms main-thread target is shared by many sections), per frame, every frame: a
+## converged cache's pick plus mark_light, and a cold start / jump frame.
 const WARM_BUDGET_MS := 1.0
 const COLD_BUDGET_MS := 10.0
 const TIMING_CALLS := 20
+## Tiles one frame may march (each costs the caller a GPU march and pick() a result entry).
+const FRAME_BUDGET_TILES := 128
+const SUN_SWEEP_FRAMES := 200
+const SUN_SWEEP_DEG := 0.05
+## Headless timing noise: at most this many frames, each above OUTLIER_FACTOR x the median, are dropped from a maximum
+## (and reported).
+const MAX_OUTLIERS := 2
+const OUTLIER_FACTOR := 3.0
 
 
-## The run's layout (the face the projection asks for) and a view of ~50 deg half-angle.
+## The run's layout: the face the projection asks for.
+func _run_layout() -> CloudViewCacheLayout:
+	return _layout(CloudViewCacheLayout.face_texels_for(_run_projection(), VIEW_SIZE, TILE_TEXELS))
+
+
 func _test_timing() -> void:
-	var face := CloudViewCacheLayout.face_texels_for(_run_projection(), VIEW_SIZE, TILE_TEXELS)
-	var layout := _layout(face)
+	var layout := _run_layout()
 	var anchor := Vector3(1.0e6, 2.0e6, 3.0e6)
-	var view := _view_grid(deg_to_rad(50.0), VIEW_STEP_RAD)
+	var view := _view_grid(deg_to_rad(50.0), VIEW_STEP_RAD)  # ~50 deg half-angle
 	var sun := Vector3(0.3, 0.8, -0.5).normalized()
 	var schedule := CloudViewCacheSchedule.new(layout)
 	var cold: Array[float] = []
 	var cold_count := 0
 	for i in range(TIMING_CALLS):
 		var started := Time.get_ticks_usec()
-		var picks := schedule.pick(anchor, anchor, view, 400, VIEW_SAMPLE_RAD)
+		var picks := schedule.pick(anchor, anchor, view, FRAME_BUDGET_TILES, VIEW_SAMPLE_RAD)
 		cold.append((Time.get_ticks_usec() - started) / 1000.0)
 		cold_count = picks.size()
 	var cold_ms := _median(cold)
-	_check(cold_count == 400 and cold_ms <= COLD_BUDGET_MS, "cold pick (%d tiles open, %d view rays, budget 400): "
+	_check(cold_count == FRAME_BUDGET_TILES and cold_ms <= COLD_BUDGET_MS, "cold pick (%d tiles open, %d view rays, budget 128): "
 			% [layout.tile_count(), view.size()] + "median %.2f ms <= %.0f ms" % [cold_ms, COLD_BUDGET_MS])
-	_complete_all(schedule, CloudViewCacheLayout.LEVELS - 1, _state(sun, 0.5, 1, anchor))
-	schedule.mark_light(sun, 0.5, 1)
-	for tile in range(layout.tile_count()):
-		schedule.set_tile_distance(tile, 2000.0 + tile)
+	var converged := _converged_schedule(layout, sun, anchor)
 	var axis := sun.cross(Vector3.UP).normalized()
 	var warm: Array[float] = []
 	var warm_empty := true
 	for i in range(TIMING_CALLS):
 		var started := Time.get_ticks_usec()
-		# The Sun turns a little every frame (well below a scan's step in total), the head moves.
-		schedule.mark_light(sun.rotated(axis, 1.0e-5 * i), 0.5, 1)
-		var picks := schedule.pick(anchor + Vector3(0.0, 0.1 * i, 0.0), anchor, view, 400, VIEW_SAMPLE_RAD)
+		# The Sun turns a little every frame (well below a pass's step in total), the head moves.
+		converged.mark_light(sun.rotated(axis, 1.0e-5 * i), 0.5, 1)
+		var picks := converged.pick(anchor + Vector3(0.0, 0.1 * i, 0.0), anchor, view, FRAME_BUDGET_TILES, VIEW_SAMPLE_RAD)
 		warm.append((Time.get_ticks_usec() - started) / 1000.0)
 		warm_empty = warm_empty and picks.is_empty()
 	var warm_ms := _median(warm)
 	_check(warm_empty and warm_ms <= WARM_BUDGET_MS, "warm pick + mark_light on a converged cache: median %.3f ms <= "
 			% warm_ms + "%.1f ms (nothing to march: %s)" % [WARM_BUDGET_MS, str(warm_empty)])
-	var started_scan := Time.get_ticks_usec()
-	schedule.mark_light(sun.rotated(axis, 0.01), 0.5, 1)
-	print("  info  a tile rescan (Sun moved past the scan step): %.1f ms"
-			% ((Time.get_ticks_usec() - started_scan) / 1000.0))
+	_test_sun_sweep(layout, view, sun, anchor)
+	_test_reanchor_timing(layout, view, sun, anchor)
+	_test_cold_start_timing(layout, view, anchor)
+
+
+## A schedule on the layout with every tile at the full level, a known cloud distance everywhere, the light settled
+## and the anchor adopted (the first pick, untimed).
+func _converged_schedule(layout: CloudViewCacheLayout, sun: Vector3, anchor: Vector3) -> CloudViewCacheSchedule:
+	var schedule := CloudViewCacheSchedule.new(layout)
+	_complete_all(schedule, CloudViewCacheLayout.LEVELS - 1, _state(sun, 0.5, 1, anchor))
+	for tile in range(layout.tile_count()):
+		schedule.set_tile_distance(tile, 2000.0 + tile)
+	_settle(schedule, sun, 0.5, 1)
+	schedule.pick(anchor, anchor, [Vector3(0.0, 0.0, -1.0)], 1, 0.1)
+	return schedule
+
+
+## The maximum of the frame times after dropping up to MAX_OUTLIERS frames above OUTLIER_FACTOR x the median; the
+## dropped ones are printed.
+func _max_without_outliers(times: Array[float], what: String) -> float:
+	var median := _median(times)
+	var sorted := times.duplicate()
+	sorted.sort()
+	var dropped: Array[float] = []
+	while dropped.size() < MAX_OUTLIERS and sorted.back() > OUTLIER_FACTOR * median and sorted.back() > 1.0:
+		dropped.append(sorted.pop_back())
+	print("  info  %s: median %.3f ms, max %.3f ms, excluded outliers %s" % [what, median, sorted.back(), str(dropped)])
+	return sorted.back()
+
+
+## (a) A Sun turning 0.05 deg per frame on a converged cache: the light passes run back to back and the stale tiles
+## come back as picks (completed in the same frame, untimed); every frame's mark_light + pick stays in the bound.
+func _test_sun_sweep(layout: CloudViewCacheLayout, view: Array[Vector3], sun: Vector3, anchor: Vector3) -> void:
+	var schedule := _converged_schedule(layout, sun, anchor)
+	var axis := sun.cross(Vector3.UP).normalized()
+	var times: Array[float] = []
+	var picked_total := 0
+	for frame in range(1, SUN_SWEEP_FRAMES + 1):
+		var turned := sun.rotated(axis, deg_to_rad(SUN_SWEEP_DEG) * frame)
+		var started := Time.get_ticks_usec()
+		schedule.mark_light(turned, 0.5, 1)
+		var picks := schedule.pick(anchor, anchor, view, FRAME_BUDGET_TILES, VIEW_SAMPLE_RAD)
+		times.append((Time.get_ticks_usec() - started) / 1000.0)
+		picked_total += picks.size()
+		for p in picks:
+			schedule.completed(p["tile"], p["level"], _state(turned, 0.5, 1, anchor))
+	var worst := _max_without_outliers(times, "Sun sweep %.2f deg/frame, %d frames" % [SUN_SWEEP_DEG, SUN_SWEEP_FRAMES])
+	_check(worst <= WARM_BUDGET_MS and picked_total > 0, "Sun sweep: every frame's mark_light + pick <= %.1f ms "
+			% WARM_BUDGET_MS + "(max %.3f ms, %d stale tiles re-marched)" % [worst, picked_total])
+
+
+## (b) A re-anchor by 50 m on a converged cache: every picked tile is re-marched in the same frame until nothing is
+## left, then 50 more frames; the converged frames pick nothing.
+func _test_reanchor_timing(layout: CloudViewCacheLayout, view: Array[Vector3], sun: Vector3,
+		anchor: Vector3) -> void:
+	var schedule := _converged_schedule(layout, sun, anchor)
+	var moved := anchor + Vector3(50.0, 0.0, 0.0)
+	var times: Array[float] = []
+	var frames := 0
+	var converged_frames := 0
+	var converged_empty := true
+	var marched := 0
+	while converged_frames < 50 and frames < 5000:
+		frames += 1
+		var started := Time.get_ticks_usec()
+		schedule.mark_light(sun, 0.5, 1)
+		var picks := schedule.pick(moved, moved, view, FRAME_BUDGET_TILES, VIEW_SAMPLE_RAD)
+		times.append((Time.get_ticks_usec() - started) / 1000.0)
+		marched += picks.size()
+		if picks.is_empty():
+			converged_frames += 1
+		else:
+			converged_empty = converged_empty and converged_frames == 0
+		for p in picks:
+			schedule.completed(p["tile"], p["level"], _state(sun, 0.5, 1, moved))
+	var worst := _max_without_outliers(times, "re-anchor 50 m, %d frames (%d tiles re-marched)" % [frames, marched])
+	_check(worst <= WARM_BUDGET_MS and converged_frames == 50 and converged_empty and marched >= layout.tile_count(),
+			"re-anchor: every frame <= %.1f ms (max %.3f ms), then %d converged frames pick nothing"
+			% [WARM_BUDGET_MS, worst, converged_frames])
+
+
+## (c) A cold start (invalidate_all) with partial fills each frame (half of each pick completes) until converged.
+func _test_cold_start_timing(layout: CloudViewCacheLayout, view: Array[Vector3], anchor: Vector3) -> void:
+	var sun := Vector3(0.3, 0.8, -0.5).normalized()
+	var schedule := _converged_schedule(layout, sun, anchor)
+	schedule.invalidate_all()
+	var times: Array[float] = []
+	var frames := 0
+	while frames < 5000:
+		frames += 1
+		var started := Time.get_ticks_usec()
+		schedule.mark_light(sun, 0.5, 1)
+		var picks := schedule.pick(anchor, anchor, view, FRAME_BUDGET_TILES, VIEW_SAMPLE_RAD)
+		times.append((Time.get_ticks_usec() - started) / 1000.0)
+		if picks.is_empty():
+			break
+		for i in range((picks.size() + 1) / 2):
+			schedule.completed(picks[i]["tile"], picks[i]["level"], _state(sun, 0.5, 1, anchor))
+	var worst := _max_without_outliers(times, "cold start, %d frames" % frames)
+	_check(frames < 5000 and worst <= COLD_BUDGET_MS, "cold start with partial fills: every frame <= %.0f ms "
+			% COLD_BUDGET_MS + "(max %.3f ms, converged after %d frames)" % [worst, frames])
 
 
 static func _median(values: Array[float]) -> float:

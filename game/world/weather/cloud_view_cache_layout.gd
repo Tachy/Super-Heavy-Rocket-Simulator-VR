@@ -70,6 +70,11 @@ func tile_dir(tile: int) -> Vector3:
 	return _tile_dirs[tile]
 
 
+## All tile centre directions (index = tile): for hot loops that cannot afford a call per tile.
+func tile_dirs() -> PackedVector3Array:
+	return _tile_dirs
+
+
 ## The tile holding a direction (not necessarily unit).
 func tile_of(dir: Vector3) -> int:
 	var t := texel_of(dir)
