@@ -940,6 +940,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 
 ## Open points and known limits
 
+- **Cloud view cache (in progress, `docs/superpowers/specs/2026-10-27-cloud-view-cache-design.md`)**: pure logic so far -
+  `CloudViewCacheLayout` (cube map, tiles, 3 resolution levels, face size from the eyes' projection) and
+  `CloudViewCacheSchedule` (tile state, staleness, priority pick under a budget); `cloud_view_cache_test.gd`. Not wired
+  into the renderer yet.
 - **Standing decisions (user 2026-10-27, static clouds Task 10)**: with clouds the frame rate is lower - the 2.5 ms
   cloud budget is not met (cloud pass 37 / 45 ms in the proxy at the ground / the deck, `vr-performance.md`) and the
   user accepted that until a better approach exists (e.g. precomputing the static field). March sub-samples: 6 (4 fail
