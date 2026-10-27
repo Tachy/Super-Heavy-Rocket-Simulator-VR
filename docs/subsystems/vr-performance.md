@@ -12,6 +12,12 @@ frame; a missed frame makes the runtime lock to 45 Hz (22.2 ms). Targets: main t
 GPU <= 9 ms with clouds at the VR pixel count. The 1440p desktop proxy of M8 Task 11 underestimated VR ~10x and does
 not count for VR.
 
+Standing decision (user 2026-10-27, static clouds): the cloud budget (cloud p99 2.5 ms x the stereo correction) is not
+met - the cloud pass is 31 ms at the ground and 39 ms at the deck in the proxy - and the user accepted that "with
+clouds the frame rate is lower" until a better approach (e.g. precomputing the static field). Open: the headset run
+(pad -> decks -> orbit, `--perf-log`, look check, composite second-pass A/B, the light-cache fill's worst frame under
+load); see `weather-clouds.md` Open points.
+
 ## Measuring
 
 - `Start-VR.cmd --perf-log` (any start: `-- --perf-log`): `PerfLog` (`game/util/perf_log.gd`) writes
@@ -152,7 +158,7 @@ clear-air early-out tried and dropped). Same command, back to back; the GPU stat
 
 The longer near marches cost +35-42 % in the pans (descent unchanged); the early-out (2-4 texture fetches and two
 lat / lon conversions per sample against the samples above a clear column top it skips) cost +1-4 % in both states
-and was removed. Over the 2.5 ms budget in VR: Task 10's binding item (controller ruling 2026-10-26).
+and was removed. Over the 2.5 ms budget in VR (accepted by the user 2026-10-27, see Rig and budget).
 
 Static clouds Task 3 (deterministic march, fix round 1): VR preset 96 coarse / 192 max steps, fine 2.5 % (was 48 /
 96 / 2.5 %), the entry bisection (4 field lookups per silhouette), the cloud-ahead lookup per clear coarse step, the
@@ -166,7 +172,7 @@ per-second means (n = 60 / 20 / 20 / 20; p99 = the largest at these counts):
 | pan high | 3.60 | 4.50 / 5.93 |
 | cape | - | 0.32 / 0.34 |
 
-+44 / +17 / +25 % over the medians before Task 3. Not tuned here: Task 10's binding 2.5 ms item.
++44 / +17 / +25 % over the medians before Task 3. Not tuned here (the budget is accepted as exceeded, see Rig and budget).
 
 ## Cloud outline pass (static clouds Task 5b, 2026-10-26)
 
@@ -341,4 +347,4 @@ Shape de-tiling (Task 9d, re-measured on 6b9149e with the parked `wip/t9d-detile
 ground / 400 km; tiled 40.9 / 6.2 ms): blend in a 0.1 band (c7fe2ca) 97.8 / 11.9 (+139 / +91 %), blend in a 0.05 band
 (V4) 72.9 / 10.2 (+78 / +64 %), smooth warp A = 0.33 (V5) 47.3 / 7.3 (+16 / +18 %; shapes stretched locally, Task 9d
 report). The detail skip does not shorten the per-lookup cost the de-tiling adds, so the ratios stay those of Task 9d;
-user decision open.
+the user decided 2026-10-27: not done, the lattice stays.

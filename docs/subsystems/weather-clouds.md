@@ -331,7 +331,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      pixel holds its covered fraction in quarters - smooth along the edge, still one march pixel wide across it
      (crisp), the same in every frame (no jitter, no noise pattern; the list's order varies, each entry's result does
      not). Cost: the VR proxy's cloud pass +26-46 % over the medians before Task 5b (`vr-performance.md`; was ~3x
-     with four full marches per outline pixel in place; open - Task 10);
+     with four full marches per outline pixel in place; inside the accepted frame-rate cost, see the standing
+     decisions in Open points);
   2. temporal accumulation per eye: reprojection of the cloud distance (sky: rotation only) with the camera's float64
      motion into the previous frame's clip space of the same eye, history clamped to the 3 x 3 neighbourhood; a running
      mean of weight 1 / n (n the frames the history holds, kept per pixel) down to 1/32 (an exponential mean of 0.1
@@ -733,11 +734,12 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   pixel of a 64 x 64 view per cascade at its scale (camera 5 / 9.9
   / 18.8 / 36.5 / 72 km up, 80-81 deg down; the farthest cloud samples asserted inside that cascade's full weight;
   error relative to max(pixel, 5 % of the view mean)), the fill at 1/16 of the voxels per frame (complete after 16
-  frames): a tau-10 slab (debug 2) worst 0.07-0.71 % in every cascade (tolerance 5 %); a cf 0.4 broken layer (debug
-  7, the shapes): interior pixels worst <= 10 % and the 99th percentile <= 10 %, silhouette pixels (alpha < 0.3 within
-  one march pixel, debug 4) worst <= 20 %. Worst pixel at Sun 45 / 20 deg: cascade 0 2.78 / 6.71 %, 1 4.81 / 16.00 %
-  (FAIL: interior, 9 interior pixels over 10 %; p99 6.81 %), 2 6.00 / 11.45 %, 3 8.13 / 9.52 %, 4 9.95 / 12.08 %
-  (p99 1.6-6.8 %, mean errors 0.16-0.95 %). The cascade-1 view's failing pixels are interior pixels held by cascade 0
+  frames): a tau-10 slab (debug 2) worst pixel within 5 % (measured 0.07-0.71 % in every cascade); a cf 0.4 broken
+  layer (debug 7, the shapes): the 99th percentile of the per-pixel error within 10 % and the worst pixel within 20 %
+  (the interior / silhouette split, alpha < 0.3 within one march pixel, debug 4, is printed only). Worst pixel at Sun
+  45 / 20 deg: cascade 0 2.78 / 6.71 %, 1 4.81 / 16.00 %, 2 6.00 / 11.45 %, 3 8.13 / 9.52 %, 4 9.95 / 12.08 % (p99
+  1.6-6.8 %, mean errors 0.16-0.95 %). A self-test of the verdict (`_cache_case_ok`: a slab with a 10 % worst pixel
+  fails) runs first. The cascade-1 view's failing pixels are interior pixels held by cascade 0
   (read at the sample, 62.5 m voxels) at the low Sun: the voxel interpolation of a cumulus' self-shadowing at a fixed
   sample - the jittered march's 8-frame mean had brought it to 9.58 %; without the entry bisection it stays 12.7 %
   (not the bisection). Open: a user decision (finer cascade 0 / a near march for it, or a tolerance). `info` lines:
@@ -929,6 +931,42 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 
 ## Open points and known limits
 
+- **Standing decisions (user 2026-10-27, static clouds Task 10)**: with clouds the frame rate is lower - the 2.5 ms
+  cloud budget is not met (cloud pass 31 / 39 ms in the proxy at the ground / the deck, `vr-performance.md`) and the
+  user accepted that until a better approach exists (e.g. precomputing the static field). March sub-samples: 6 (4 fail
+  the Cape's grain bound, 5 pass with no margin). March divisor 3 (4 rejected: softer cumulus, blockier deck outlines).
+  Shape de-tiling NOT done: the lattice stays (options and costs below).
+- **Open: Task 10 step 3, the VR run with the user (not done)**: pad -> decks -> orbit with `--perf-log` in the headset:
+  the cloud pass p99 and the frame rate at the VR pixel count, the look check against the anti-goals of
+  `cloud-visual-reference.md`, the composite's second pass A/B (Task 9), the light-cache fill's worst frame under load
+  (Task 2), the quiet-machine gate. Plan: `docs/superpowers/plans/2026-10-26-static-clouds.md`, Task 10 step 3.
+- **Planned: milestone M11 (after M7 cockpit and M10 sound design)**: the rest of the weather. Part 2: rain, snow, fog,
+  lightning, weather-dependent haze (the small variant: climatology AOD plus humidity growth with a few precomputed
+  table sets), city light on clouds. Part 3: GOES cloud patterns. Part 4: wind / density and launch rules. Open
+  action: compare the grid-mean liquid water path with the MAC-LWP monthly climatology (same months / ocean regions).
+- **Deferred minors (static clouds final review)**, none of them blocking:
+  - Outline pass colour on semi-transparent rims (the centre ray's colour per alpha, or the most opaque neighbour's)
+    is not checked against full marches (Task 5b M4); bound unknown.
+  - Light cache: the outside-cascade check does not assert a complete fill; the cache's 62.5 m detail floor against the
+    march's finer detail is not measured (section 8 runs detail off); one stale cache frame when the flag is switched
+    back (Task 1).
+  - `near_samples` is written from the main thread by cloud_check's diagnostics (render-thread contract, Task 2).
+  - `cloud_structure_step` switches on a type weight > 0: any cirrus share makes the cell's step fine (a sharpness
+    change at type-band edges); the redone dense step keeps the sub-loop's `outside` flag (Task 5c).
+  - No service-level test that an old-version weather file heals; `map::operator[]` in checks (Task 6 M6 / M7).
+  - The LCL cut scale is computed per load, untimed; the RG32F base texture is created synchronously on the main
+    thread (cloud_layer.gd, 8 MB at 0.25 deg) while the field textures are spread over frames: an unmeasured
+    main-thread stall at every snapshot change (Task 7).
+  - The checks restore a hard-coded FOV of 60 deg (cloud_check, cloud_far_check; Task 8).
+  - Temporal variance clip: fp32 cancellation on the jittered path only (Task 9).
+  - Task 9b: the telescoping reference shares `cloud_air_single_at` with the loss (no independent check); the outline
+    tolerance p99 2 % against 1.67 % measured; the upsample floor falls back to 0 when no inner tap passes the depth
+    gate; 16-entry tap arrays with 4 used in the radius-0 path (register pressure); a per-region cloud top for the air
+    shadow (the global top gives no gain on real weather).
+  - cloud_far_check: the two hand-over fade cases (scattered cf 0.12 nadir, broken cf 0.4 low Sun 45 deg) fail at
+    1.108 / 1.102 against 10 % (the fade reference point below); the check exits 1 until that is decided. The 50 km
+    horizon speckle at the VR angle is capped at 13 % (measured 11.0 %).
+
 - **Shape de-tiling (Task 9d, deferred by the user 2026-10-27)**: the shapes' 32 km tile shows as a chessboard lattice
   from altitude (the shapes' own period, not the weather). Measured options on 6b9149e (cloud pass ground / 400 km;
   tiled 40.9 / 6.2 ms): blend of two reads in a 0.1 band (c7fe2ca) 97.8 / 11.9 ms (+139 / +91 %), in a 0.05 band (V4)
@@ -953,7 +991,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   pixel's cloud distance (p99 1.7 %, max 7 % of the pixel's loss). Backlit rim / body: 2-4 x is the
   photographic range [E] (cloud-visual-reference.md 5.3), not a physical bound; the ratio rises with nearness to the
   Sun (the rim's forward peak) and the body's optical depth, so the 2-6 deg band is accepted at 2-5 x [E] (measured
-  4.01-4.03), 6-10 / 10-15 deg at 2-4 x. Re-measure after Task 9c (review M7). Twilight cloud shadows above the cloud
+  4.01-4.03), 6-10 / 10-15 deg at 2-4 x. Re-measured in Task 10 (cloud_check section 14's bands pass, 208 of 208). Twilight cloud shadows above the cloud
   top are not modelled: the ray clip to the cloud top assumes the Sun looks up from the air point; with the Sun
   below the point's horizon by dep the Sun ray first descends ~dep^2 R / 2 (2 deg: ~3.9 km), so the real shadow
   of a low deck at dusk lies above its top (review N3; a fix would clip at top + R (1 - cos dep)). Higher orders of the light scattered into
@@ -967,50 +1005,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   b ~13 from the vertical column (debug source 0.167 /sr vs 0.012-0.018 of the slab); a cap needs a 3D Monte Carlo box
   reference first - not built (the air shadow met the acceptance alone).
 
-- **VR (2026-10-26, `vr-performance.md`)**: the 1440p gate below underestimated the headset ~10x (20 MP per frame at
-  the user's Pimax FSR 1.5). Measured at the VR pixel count (`terrain_perf --render_scale=1.65 --gpu_passes`): the cloud
-  pass 11-13 ms at divisor 2, 1.4-3.2 ms at 4 (the VR preset now), shadow 0.55 ms, the clouds' share of the opaque pass
-  0.2-1 ms. Ground / deck / 20 km views unchanged at divisor 4, orbit cumulus fields step coarser; their hard cell edges
-  exist at divisor 2 too (not the upsample's depth weight: open point). VR run: GPU 26-66 -> 13-17 ms, but in the
-  headset the clouds look grainy and blurred differently per eye (user 2026-10-26): each eye marches with its own
-  jitter and history. Since 1ba1be7 VR marches and accumulates once in a centre view covering both eyes
-  (`CloudCentreView`, divisor 3), each eye reprojects into it at the cloud's distance (exact disparity,
-  `cloud_vr_stereo_test`) and gathers a 4 x 4 tent (soft alpha edges, the same in both eyes). VR run
-  (`perf_20261026_085348.csv`): GPU 15.2 / 18.1 / 19.5 / 15.6 / 14.4 ms pad / climb / decks / 13-60 / > 60 km, 1-2.3 ms
-  more than two eyes at divisor 4; user: kept. Open: the tent's width is fixed in screen pixels, so far clouds get the
-  same blur as near ones (looks unnatural, user 2026-10-26).
-- **Performance gate (Task 11)**: `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr` (1440p desktop proxy of
-  the 90 Hz VR frame; the gate it prints: p99 <= 11 ms with clouds / 8 ms without, max <= 16 ms; 2024-04-08 18:42 eclipse
-  epoch, ERA5 18:00 pinned, three runs with and three without in one session, alternating). The machine's baseline moved
-  between the notes: a clean one measured without clouds p50 4.5 / p99 7.6 ms (Task 9), the session of Task 11
-  p50 8.25-8.29 / p99 12.58-12.63 / max 16.3-17.1 ms (three runs; the Task 9 scripts at 21a833c on the same machine and
-  the same day gave p99 12.47, so it is the machine, not the code; no VR headset runtime was running (Pimax client / runtime and DesktopXR bridge stopped), the
-  Virtual Desktop service and its virtual display driver could not be stopped without administrator rights). In that
-  state the absolute gate p99 <= 11 ms cannot be met even without clouds and was not met. What the clouds add, measured
-  against the baseline of the same session, is the budget the gate is derived from (clouds <= +3 ms p99 over the
-  baseline):
-  - preset 64 / 128 steps (before Task 11): p50 +1.4 ms, p99 +3.5-3.7 ms (16.14 / 16.07 / 16.23 vs 12.51 / 12.59 /
-    12.53), max 20.9-22.4 ms - over the budget.
-  - tuning runs (single runs, VR preset, `terrain_perf.gd --cloud_tune=...`): steps 48 / max 96: p99 14.90 (-1.2 ms);
-    light near 5 -> 4: 15.62 (-0.5); fine step 2.5 -> 3.5 %: 15.72 (-0.4); all three: 14.47 (-1.7). Not touched: the
-    detail levels (they are the approved shapes' fine structure), the resolution divisor, the light march's far part.
-  - **preset 48 / 96 (the VR preset now)**: with clouds p50 9.51 / 9.51 / 9.51, p99 14.96 / 15.00 / 14.86, max 18.86 /
-    19.04 / 19.61 ms against 8.29 / 8.25 / 8.27, 12.63 / 12.59 / 12.58, 16.91 / 16.32 / 17.07 ms without: clouds +1.25 ms
-    p50, +2.4 ms p99 (within the +3 ms budget, 3 of 3), +2-3 ms max. By phase (third run): descent p99 15.90 vs 11.91
-    ms (the worst, the decks seen from 8 km: GPU 14-15 ms per frame), pan low 13.45 vs 12.62, pan high 13.27 vs 12.23,
-    Cape 13.99 vs 13.29. VRAM +430 MB (2886 vs 2456 MB at the Cape: two snapshots of field, ice and column textures).
-    Image A/B of 64 / 128 vs 48 / 96 (`render_check --cloud_quality=vr --fixed_exposure --deterministic=64`, 1600 x 900,
-    four views: cumulus layer from 2.5 km, sunset bases, the Cape shadows from 3.5 km, 420 km orbit over a front): mean
-    absolute difference 0.3-0.7 of 255, 1-2.5 % of the pixels differ by more than 8 levels (cloud edges, p99 5-13), none
-    visible by eye. The checks (`cloud_check`, `cloud_far_check`) run the desktop preset and do not cover the VR one.
-  - The absolute gate (p99 <= 11, max <= 16 ms with clouds) therefore needs the machine's clean state (baseline p99
-    ~7.6 ms): expected ~10.0 ms p99 with the +2.4 ms of the clouds. To be re-run by the user on a quiet machine.
-  - Pre-warm (Task 11): `earth_clouds.gdshader` is drawn once on a sub-pixel quad at load, and the shape-prefilter march
-    kernel is dispatched once (one group) in the first cloud frame; the first switch to the scaled-space far field used
-    to cost up to 5.4 ms in one frame. Sporadic draw / present stalls of 16-46 ms happen with and without clouds (one
-    46 ms frame in a baseline run of Task 11), i.e. they are the platform's.
-  - Levers measured earlier (superseded numbers in `docs/history/weather-clouds.md`): the detail levels ~2 ms in the
-    descent, the step refinement ~0.3 ms, the eclipse probes ~0.3 ms (per sample ~10 ms).
+- **Earlier VR notes and the Task 11 gate**: the VR centre-view design (`CloudCentreView`, divisor 3, a 4 x 4 tent per
+  eye) stands; the open point that the tent is fixed in screen pixels (far clouds get the near clouds' blur, user
+  2026-10-26) stays. The absolute Task 11 gate (p99 <= 11 ms) was not re-run: superseded by the Task 10 profile and the
+  accepted frame-rate cost (`vr-performance.md`); the old numbers (VR preset 48 / 96, divisor 4) are in
+  `docs/history/weather-clouds.md`.
 - Scaled space (Task 10; 2560 x 1440, 2025-10-25 15:00 UTC ERA5): the far field adds 0.26 ms GPU from the Moon's direction
   at 330 000 km (0.51 -> 0.77 ms) and 0.30 ms just outside 1.5e7 m (0.43 -> 0.73 ms); frame p99 ~1.5 ms. The shape
   prefilter kernel (A/B in one session, inside the limit at 1.4985e7 / 1.2e7 m): GPU p50 6.09 -> 6.29 / 6.07 and 8.05
@@ -1028,10 +1027,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   reduce it.
 - Light cache: the hybrid near march (1 / 3 / 2 / 2 km, 12-32 samples) costs the cloud pass +35-42 % in the VR proxy
   over round 3's 1 km in every cascade, which itself was +45-65 % over the pure lookup (`vr-performance.md`): over the
-  2.5 ms budget in VR - Task 10's binding item. The fill's GPU time per voxel depends on the GPU's clock state and the
+  2.5 ms budget in VR (accepted, see the standing decisions). The fill's GPU time per voxel depends on the GPU's clock state and the
   weather (real weather ~2x the slab's); at the budget (98 304 voxels) single frames of a first fill reach 0.43-0.65
   ms (clock-state transitions; `cloud_check` section 8 asserts the 95th percentile, the worst frame under load is
-  Task 10's). Under 1000x
+  an open headset measurement). Under 1000x
   warp every cascade's shown light lags the Sun by up to 25 deg (the drop bound; 100x: <= 3.6 deg); at 7.8 km/s
   cascades 0-1 fall behind their re-anchors. Beyond 34-42 km the light is marched (the volume march ends at <= 34
   km).
@@ -1060,13 +1059,12 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   (`cloud_far_light_depth`), not a per-pixel column model - the cheaper variants failed the look (the column model
   alone drew far broken cumulus as an even haze ~25 % dark; a separate far march lost far deck, alpha -12 %). This
   supersedes Task 2's ruling that the light beyond the march is never marched per sample and that in orbit every cloud
-  is the far field: the column model draws only beyond the far fade's footprints. The cost (+29-35 % VR proxy) is Task
-  10's (band width, the far pass's step budget and light samples are its knobs; cost if wrong: Task 10 needs a cheaper
-  far tier). The far tier's light is the column's beyond 1.5 km of the light path (no light cache beyond the march:
+  is the far field: the column model draws only beyond the far fade's footprints. The cost (+29-35 % VR proxy) is inside
+  the accepted frame-rate cost. The far tier's light is the column's beyond 1.5 km of the light path (no light cache beyond the march:
   no far neighbours' shadows past 1.5 km); its shapes are band-limited at the pixel footprint (no detail beyond
   ~125 m footprints, as the march). The column model's sub-grid cover is the shape tile's (with a second unaligned
   reading): realistic cumulus texture from orbit, not the real clouds' positions below the 0.25 deg grid; its sun
-  gain for broken cloud is a fit (above). The speckle check's far horizon from 50 km passes with a thin margin (9.2 %
+  gain for broken cloud is a fit (above). The speckle check's far horizon from 50 km passes with a thin margin (9.4 %
   of 10 %; the shapes' march-pixel outline at ~1 km footprints dominates it). The scaled-space limit: the ground's sea
   glint steps there (terrain vs scaled-space Earth, weather off), seen through broken cloud.
 - **March sub-samples (Task 5c fix round 1, Task 10)**: at most 6 per step (8 before Task 10) and a step-weight limit

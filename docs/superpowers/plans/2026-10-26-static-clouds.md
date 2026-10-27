@@ -372,4 +372,5 @@ kilometre footprints"). User OK to change the lookup; the shapes themselves stay
   `cloud_far_check.gd` reference values documented.
 - [ ] **Step 3: VR run with the user** (`Start-VR.cmd --perf-log`, weather on, pad -> decks -> orbit, `nvidia-smi`):
   cloud cost p99, and the user's look check against the spec's anti-goals.
+  DEFERRED (2026-10-27, final review): open, listed in `docs/subsystems/weather-clouds.md` Open points.
 - [ ] **Step 4: Docs, ledger, memory; commit** `docs: static clouds - measurements and current state`

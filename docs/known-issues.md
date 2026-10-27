@@ -44,12 +44,14 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
   the 37 pressure levels lose the overlap of the model levels, 0.14-0.20 below tcc before), keeping the grid-mean
   water: the in-cloud water of decks and cirrus is thinner by that factor; the boundary-layer cumulus get a
   sub-adiabatic parcel's water (grid-mean liquid water path 50 -> 111 g/m^2 on the analog hours - still above the ocean
-  climatology of order 60-90 g/m^2 quoted from memory for MAC-LWP, so the mean water is deliberately high; f_ad falls
+  climatology of order 60-90 g/m^2 quoted from memory for MAC-LWP, so the mean water is deliberately high (open: compare against the MAC-LWP monthly climatology on the same months / ocean regions); f_ad falls
   from 0.50 at the base to 0.20 at 2 km); low stratiform is not too dark by its renderer (body-core tau median 97 on the
   analog set, carried by > 4 km frontal runs; the < 1 km runs median 20, Task 10 - `weather-clouds.md` Validation); the limits (light between columns, shadow darkness under broken cloud, plumes always draw
   over clouds, earthshine at the constant Bond albedo, half-resolution staircase at sharp dark edges, no rain / fog /
   wind) are listed under "Open points and known limits" in `docs/subsystems/weather-clouds.md`.
-- `cloud_far_check.gd` (open, 2026-10-26): the Moon-view case needs `data/weather/cache/era5_1089330.wthr`, which the
-  cache eviction removed (environmental; refetch it or pick a cached epoch). "broken cf 0.4, volume with the shapes"
-  block luminance inside / outside fails (38 % vs 10 %, worst point 0.14 vs 0.20) since 477a356 (deterministic march,
-  static clouds Task 3; 8 % at 9a47649); the cause is not yet isolated (`docs/subsystems/weather-clouds.md`).
+- `cloud_far_check.gd` (2026-10-27): the Moon-view case needs `data/weather/cache/era5_1089330.wthr`, which the cache
+  eviction removed; it prints a SKIP line (environmental; refetch it or pick a cached epoch). Two hand-over fade cases
+  fail (listed in `docs/subsystems/weather-clouds.md`, Open points).
+- Planned (user 2026-10-27): milestone M11 (after M7 cockpit and M10 sound design) holds the rest of the weather - part
+  2 rain / snow / fog / lightning / weather-dependent haze (small variant: climatology AOD plus humidity growth, a few
+  precomputed table sets) / city light on clouds; part 3 GOES patterns; part 4 wind / density and launch rules.

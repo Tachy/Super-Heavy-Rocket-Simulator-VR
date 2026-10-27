@@ -732,3 +732,66 @@ weather-clouds.md:
   still pass the grain check (cover / alpha within 1.8 %, luminance 2.2 %, Cape grain 1.10). One light sample per step.
 
 - Quality-preset note: the march ran at up to 8 sub-samples per step (`CLOUD_MAX_SUBSTEPS` 8, longer steps 1/8 of the step) and the step-weight limit was 0.15.
+
+Static clouds final review (2026-10-27), superseded cloud_check section 8 acceptance text (the old interior 10 % / silhouette 20 % acceptance, with the then-failing cascade 1 case):
+
+> frames): a tau-10 slab (debug 2) worst 0.07-0.71 % in every cascade (tolerance 5 %); a cf 0.4 broken layer (debug
+>   7, the shapes): interior pixels worst <= 10 % and the 99th percentile <= 10 %, silhouette pixels (alpha < 0.3 within
+>   one march pixel, debug 4) worst <= 20 %. Worst pixel at Sun 45 / 20 deg: cascade 0 2.78 / 6.71 %, 1 4.81 / 16.00 %
+>   (FAIL: interior, 9 interior pixels over 10 %; p99 6.81 %), 2 6.00 / 11.45 %, 3 8.13 / 9.52 %, 4 9.95 / 12.08 %
+>   (p99 1.6-6.8 %, mean errors 0.16-0.95 %).
+
+Static clouds final review (2026-10-27), superseded Open points blocks "VR (2026-10-26)" and "Performance gate (Task 11)" (they call the VR preset 48 / 96 at divisor 4; it is 96 / 384 at divisor 3 since Tasks 3 / 5c / 10):
+
+- **VR (2026-10-26, `vr-performance.md`)**: the 1440p gate below underestimated the headset ~10x (20 MP per frame at
+  the user's Pimax FSR 1.5). Measured at the VR pixel count (`terrain_perf --render_scale=1.65 --gpu_passes`): the cloud
+  pass 11-13 ms at divisor 2, 1.4-3.2 ms at 4 (the VR preset now), shadow 0.55 ms, the clouds' share of the opaque pass
+  0.2-1 ms. Ground / deck / 20 km views unchanged at divisor 4, orbit cumulus fields step coarser; their hard cell edges
+  exist at divisor 2 too (not the upsample's depth weight: open point). VR run: GPU 26-66 -> 13-17 ms, but in the
+  headset the clouds look grainy and blurred differently per eye (user 2026-10-26): each eye marches with its own
+  jitter and history. Since 1ba1be7 VR marches and accumulates once in a centre view covering both eyes
+  (`CloudCentreView`, divisor 3), each eye reprojects into it at the cloud's distance (exact disparity,
+  `cloud_vr_stereo_test`) and gathers a 4 x 4 tent (soft alpha edges, the same in both eyes). VR run
+  (`perf_20261026_085348.csv`): GPU 15.2 / 18.1 / 19.5 / 15.6 / 14.4 ms pad / climb / decks / 13-60 / > 60 km, 1-2.3 ms
+  more than two eyes at divisor 4; user: kept. Open: the tent's width is fixed in screen pixels, so far clouds get the
+  same blur as near ones (looks unnatural, user 2026-10-26).
+- **Performance gate (Task 11)**: `terrain_perf.gd --weather=<abs path .wthr> --cloud_quality=vr` (1440p desktop proxy of
+  the 90 Hz VR frame; the gate it prints: p99 <= 11 ms with clouds / 8 ms without, max <= 16 ms; 2024-04-08 18:42 eclipse
+  epoch, ERA5 18:00 pinned, three runs with and three without in one session, alternating). The machine's baseline moved
+  between the notes: a clean one measured without clouds p50 4.5 / p99 7.6 ms (Task 9), the session of Task 11
+  p50 8.25-8.29 / p99 12.58-12.63 / max 16.3-17.1 ms (three runs; the Task 9 scripts at 21a833c on the same machine and
+  the same day gave p99 12.47, so it is the machine, not the code; no VR headset runtime was running (Pimax client / runtime and DesktopXR bridge stopped), the
+  Virtual Desktop service and its virtual display driver could not be stopped without administrator rights). In that
+  state the absolute gate p99 <= 11 ms cannot be met even without clouds and was not met. What the clouds add, measured
+  against the baseline of the same session, is the budget the gate is derived from (clouds <= +3 ms p99 over the
+  baseline):
+  - preset 64 / 128 steps (before Task 11): p50 +1.4 ms, p99 +3.5-3.7 ms (16.14 / 16.07 / 16.23 vs 12.51 / 12.59 /
+    12.53), max 20.9-22.4 ms - over the budget.
+  - tuning runs (single runs, VR preset, `terrain_perf.gd --cloud_tune=...`): steps 48 / max 96: p99 14.90 (-1.2 ms);
+    light near 5 -> 4: 15.62 (-0.5); fine step 2.5 -> 3.5 %: 15.72 (-0.4); all three: 14.47 (-1.7). Not touched: the
+    detail levels (they are the approved shapes' fine structure), the resolution divisor, the light march's far part.
+  - **preset 48 / 96 (the VR preset now)**: with clouds p50 9.51 / 9.51 / 9.51, p99 14.96 / 15.00 / 14.86, max 18.86 /
+    19.04 / 19.61 ms against 8.29 / 8.25 / 8.27, 12.63 / 12.59 / 12.58, 16.91 / 16.32 / 17.07 ms without: clouds +1.25 ms
+    p50, +2.4 ms p99 (within the +3 ms budget, 3 of 3), +2-3 ms max. By phase (third run): descent p99 15.90 vs 11.91
+    ms (the worst, the decks seen from 8 km: GPU 14-15 ms per frame), pan low 13.45 vs 12.62, pan high 13.27 vs 12.23,
+    Cape 13.99 vs 13.29. VRAM +430 MB (2886 vs 2456 MB at the Cape: two snapshots of field, ice and column textures).
+    Image A/B of 64 / 128 vs 48 / 96 (`render_check --cloud_quality=vr --fixed_exposure --deterministic=64`, 1600 x 900,
+    four views: cumulus layer from 2.5 km, sunset bases, the Cape shadows from 3.5 km, 420 km orbit over a front): mean
+    absolute difference 0.3-0.7 of 255, 1-2.5 % of the pixels differ by more than 8 levels (cloud edges, p99 5-13), none
+    visible by eye. The checks (`cloud_check`, `cloud_far_check`) run the desktop preset and do not cover the VR one.
+  - The absolute gate (p99 <= 11, max <= 16 ms with clouds) therefore needs the machine's clean state (baseline p99
+    ~7.6 ms): expected ~10.0 ms p99 with the +2.4 ms of the clouds. To be re-run by the user on a quiet machine.
+  - Pre-warm (Task 11): `earth_clouds.gdshader` is drawn once on a sub-pixel quad at load, and the shape-prefilter march
+    kernel is dispatched once (one group) in the first cloud frame; the first switch to the scaled-space far field used
+    to cost up to 5.4 ms in one frame. Sporadic draw / present stalls of 16-46 ms happen with and without clouds (one
+    46 ms frame in a baseline run of Task 11), i.e. they are the platform's.
+  - Levers measured earlier (superseded numbers in `docs/history/weather-clouds.md`): the detail levels ~2 ms in the
+    descent, the step refinement ~0.3 ms, the eclipse probes ~0.3 ms (per sample ~10 ms).
+
+
+Static clouds final review (2026-10-27), weather-service.md file-format version history (moved from the current text):
+
+> Stored in the `.wthr` file: format version 7 = ground block, the float32 LCL block, the float32
+>   tcc block (-1 unknown), the float32 added-cumulus-water block and the float32 dropped-condensate block (kg/m^2,
+>   diagnostics; +16 MB at 0.25 deg for the four), then the texels (version 2 had the unknown level as 0 and no redistribution, version 3 moved only the lowest liquid
+>   run and averaged the downsampled levels, 4 merged a deck far above, 5 had no tcc and no cumulus water, 6 had a constant f_ad, no in-cloud bound and no dropped-condensate block).

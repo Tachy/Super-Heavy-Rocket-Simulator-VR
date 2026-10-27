@@ -60,8 +60,8 @@ only with HTTP 206 (a 200 full-file answer is rejected), an unranged one only wi
   "0-6 hour ave"; ~0.8 MB). The build scales the layers' cover to it and adds the cumulus water
   (`weather-clouds.md`). Stored in the `.wthr` file: format version 7 = ground block, the float32 LCL block, the float32
   tcc block (-1 unknown), the float32 added-cumulus-water block and the float32 dropped-condensate block (kg/m^2,
-  diagnostics; +16 MB at 0.25 deg for the four), then the texels (version 2 had the unknown level as 0 and no redistribution, version 3 moved only the lowest liquid
-  run and averaged the downsampled levels, 4 merged a deck far above, 5 had no tcc and no cumulus water, 6 had a constant f_ad, no in-cloud bound and no dropped-condensate block).
+  diagnostics; +16 MB at 0.25 deg for the four), then the texels. Older versions are refused (earlier versions:
+  `docs/history/weather-clouds.md`).
 - **Old files heal**: `read_weather_snapshot` refuses version-1 .. -6 files (and anything else of another version). A
   runtime-cache file is then treated as unloadable: deleted and rebuilt from a fresh download (the existing retry path,
   "a snapshot file that cannot be loaded is deleted and rebuilt"), the analog baseline is the shipped
