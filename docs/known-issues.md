@@ -43,7 +43,10 @@ Moved verbatim from `CLAUDE.md` on 2026-10-25. Per-subsystem open points also li
 - Weather and clouds (M8): the snapshot's layers are scaled to the data's total cloud cover (static clouds Task 9c;
   the 37 pressure levels lose the overlap of the model levels, 0.14-0.20 below tcc before), keeping the grid-mean
   water: the in-cloud water of decks and cirrus is thinner by that factor; the boundary-layer cumulus get a
-  sub-adiabatic parcel's water (grid-mean liquid water path 50 -> 140 g/m^2 on the analog hours); the limits (light between columns, shadow darkness under broken cloud, plumes always draw
+  sub-adiabatic parcel's water (grid-mean liquid water path 50 -> 111 g/m^2 on the analog hours - still above the ocean
+  climatology of order 60-90 g/m^2 quoted from memory for MAC-LWP, so the mean water is deliberately high; f_ad falls
+  from 0.50 at the base to 0.20 at 2 km); overcast low stratiform may be too dark (body-core tau median 113 on the
+  first 9c state, Task 10 item: measure by run depth, open a finding if the < 1 km bin exceeds 40); the limits (light between columns, shadow darkness under broken cloud, plumes always draw
   over clouds, earthshine at the constant Bond albedo, half-resolution staircase at sharp dark edges, no rain / fog /
   wind) are listed under "Open points and known limits" in `docs/subsystems/weather-clouds.md`.
 - `cloud_far_check.gd` (open, 2026-10-26): the Moon-view case needs `data/weather/cache/era5_1089330.wthr`, which the

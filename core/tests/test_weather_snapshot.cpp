@@ -614,7 +614,7 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     // The same bytes with the right version number (and the missing block) are not a valid version 2 file either.
     const std::uint32_t two = 2;
     // Version 2 stored unknown levels as 0 and had no base redistribution; version 3 moved only the lowest liquid run; version 4 merged a deck far above the lifted cloud.
-    CHECK(weather_snapshot_file_version == 6);  // 5: no total cloud cover, cover not scaled, no cumulus water
+    CHECK(weather_snapshot_file_version == 7);  // 6: no dropped-condensate block; 5: no total cloud cover / cumulus water
     std::memcpy(bytes.data() + 8, &two, sizeof(two));
     bytes.resize(bytes.size() - sizeof(std::uint64_t));
     hash = 14695981039346656037ull;
@@ -709,12 +709,6 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
             }
         }
         const auto snapshot = WeatherSnapshot::from_era5(era5_id(), f, coarse_geoid());
-        // The cloud base below is checked on the fractions as the data has them: scaling the cover to tcc (Task 9c) lifts
-        // a trace layer over ERA5's 1 % base threshold (the Cape 2025: a 0.75 % layer 830 m under the base) without
-        // moving any cloud.
-        Era5Fields unscaled_fields = f;
-        unscaled_fields.total_cloud_cover = {};
-        const auto unscaled = WeatherSnapshot::from_era5(era5_id(), unscaled_fields, coarse_geoid());
         for (int c = 0; c < columns; ++c) {
             const PlausibilityColumn& col = cells[static_cast<std::size_t>(hour * columns + c)];
             const double lat = node_latitude(1, rows), lon = node_longitude(c, columns);
@@ -734,7 +728,7 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
                 const double fraction = cell.liquid_water_kg_m3 + cell.ice_water_kg_m3 > 0.0 ? cell.cloud_fraction : 0.0;
                 clear *= above < 1.0 ? (1.0 - std::max(fraction, above)) / (1.0 - above) : 1.0;
                 above = fraction;
-                const WeatherCell data = unscaled.at(lat, lon, 0.5 * (bottom + top));
+                const WeatherCell data = cell;  // the shipped (scaled) snapshot: a trace layer is not scaled across 1 %
                 if (data.liquid_water_kg_m3 + data.ice_water_kg_m3 > 0.0 && data.cloud_fraction > 0.01) {
                     base_agl_m = std::max(bottom, ground) - ground;
                     layer_m = top - bottom;

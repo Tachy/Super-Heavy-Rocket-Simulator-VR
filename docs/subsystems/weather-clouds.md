@@ -55,45 +55,52 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   light and the shadow maps read the layer means without the cut: their column water path is the same. Flat sharp
   bases, nothing hangs below them, silhouettes above the base's layer untouched; nothing is fetched above 12 km
   (Everest 8.85 km + the 3 km boundary layer, rounded up).
-- **Cover from the total cloud cover, cumulus water from an adiabatic parcel** (static clouds Task 9c, user
-  2026-10-27 "Cumulus sind nie flach", ruling "Bedeckung nach ERA5 + Wasser ergaenzen"; `weather_snapshot.hpp`, file
-  format 6). Every snapshot carries the data's total cloud cover per column (ERA5 single-level `total_cloud_cover`,
-  GFS `TCDC` entire atmosphere instantaneous; `WeatherSnapshot::total_cloud_cover`, -1 unknown). The column build
-  (`ColumnLayers::build`) runs, after the LCL raise:
+- **Cover from the total cloud cover, cumulus water from an adiabatic parcel** (static clouds Task 9c and its fix round
+  1, user 2026-10-27 "Cumulus sind nie flach", ruling "Bedeckung nach ERA5 + Wasser ergaenzen"; `weather_snapshot.hpp`,
+  file format 7). Every snapshot carries the data's total cloud cover per column (ERA5 single-level
+  `total_cloud_cover`, GFS `TCDC` entire atmosphere instantaneous; `WeatherSnapshot::total_cloud_cover`, -1 unknown).
+  The column build (`ColumnLayers::build`) runs, after the LCL raise:
   - `scale_cloud_cover_to_total`: the fractions of the layers that count for the cover (stored condensate, a non-zero
-    water code, above the ground) are multiplied by one factor (in proportion, at most 1, at least `cloud_min_cover`;
-    layers without condensate untouched) until their maximum-random cover (`cloud_column_cover_max_random`, Geleyn &
+    water code, above the ground, fraction above `cloud_trace_fraction` 0.01 = ERA5's cloud-presence threshold; traces
+    keep their value so no cloud base appears under the data's) are multiplied by one factor (in proportion, at most 1,
+    at least `cloud_min_cover`) until their maximum-random cover (`cloud_column_cover_max_random`, Geleyn &
     Hollingsworth 1979 as ERA5 combines its levels) is the data's tcc; the water contents (grid means) are kept, so the
-    in-cloud water of every type falls by that factor (stratiform and ice too: their water is unchanged). The
-    downsampled set and the pole rows scale their box means again to the box's mean tcc (box means of layers that held
-    the cloud at different places no longer overlap: before that re-scaling the 1-deg cover was 0.057 below tcc).
+    in-cloud water of every type falls by that factor. The downsampled set and the pole rows scale their box means
+    again to the box's mean tcc (before that re-scaling the 1-deg cover was 0.057 below tcc). The plausibility test
+    (cloud base, cover within 0.02 of tcc) runs on the shipped, scaled snapshot; the cover check is close to a tautology
+    (same overlap function as the scaler) and verifies the 8-bit codes and the layer remap, not ERA5's overlap physics.
+  - `bound_incloud_condensate`: where the scaling puts a layer's water on a much smaller fraction (down to
+    `cloud_min_cover` where tcc ~ 0) the in-cloud liquid is cut to `cloud_liquid_water_max_kg_m3` 3e-3 and the ice to
+    `cloud_ice_water_max_kg_m3` 1e-3 [E, order-of-magnitude aircraft maxima, no specific citation]; the excess is dropped
+    (not concentrated into dense specks) and stored per column (`dropped_condensate_path_kg_m2`, diagnostic). Also
+    applied to downsampled boxes and pole rows after their re-scaling.
   - `add_cumulus_adiabatic_water` (the path rule of the measurement round): the lowest significant liquid run with
     its base in the boundary layer and a known LCL (0 < LCL < 3 km), base z_b = max(ground + LCL, run bottom), path =
-    its layers with more than `cloud_base_snap_m` above z_b. When the path's in-cloud liquid water path sum L t / C is
-    below the sub-adiabatic parcel's from z_b to the boundary-layer top, sum f_ad Gamma_l(T, p) ((z_top - z_b)^2 -
-    (z_bottom - z_b)^2) / 2 with heights capped at ground + 3 km, each path layer's liquid is multiplied by
-    1 + w_k (s - 1) (s the ratio, w_k the layer's cumulus weight of `cloud_type_weights`: no switch, a deck's layers keep
-    their water), in-cloud at most `cumulus_liquid_water_max_kg_m3` 1.5e-3 [E] (Warner 1955) - a denser layer keeps
-    its value. f_ad = `cumulus_adiabatic_fraction` 0.4 [E] (Brenguier et al. 2000: shallow Cu 0.3-0.6; Blyth 1993).
-    Gamma_l (`adiabatic_liquid_water_gradient_kg_m3_per_m`) = -rho_d dr_s/dz of the pseudo-adiabat c_pd dT + g dz +
-    L(T) dr_s = 0 with Romps' constants (1.6-2.4 g/m^3/km at 275-290 K, 800-950 hPa; 2.6-2.8 at a 298-300 K tropical
-    base). The parcel ends at the boundary-layer top: f_ad is a shallow-cumulus value, and a congestus / cumulonimbus
-    run keeps its data water above 3 km (it counts in the in-cloud path; without the cap a deep convective column of
-    the fixture got +4.5 kg/m^2). The added grid-mean liquid path is stored per column
+    its layers with more than `cloud_base_snap_m` above z_b. The cumulus-weighted (w_k of `cloud_type_weights`: no
+    switch, a deck's layers keep their water) in-cloud liquid water path sum w_k L t / C is raised to the weighted
+    sub-adiabatic parcel path sum w_k Gamma_l(T, p) * integral f_ad(h) h dh (h above z_b, parcel capped at ground + 3 km),
+    each path layer's liquid multiplied by 1 + w_k (s - 1), in-cloud at most `cumulus_liquid_water_max_kg_m3` 1.5e-3
+    [E] - a denser layer keeps its value; the layers that get water meet the floor exactly (a deck below no longer
+    lowers the ratio). f_ad(h) falls linearly from `cumulus_adiabatic_fraction_base` 0.50 at the base to
+    `cumulus_adiabatic_fraction_at_reference` 0.20 at 2 km, constant above [E]: the trend (shallow Cu 0.3-0.6, Brenguier
+    et al. 2000; continental Cu 0.2-0.6 falling with height, Blyth 1993; Warner 1955) is from those papers, the end
+    values are the low ends of the ruled ranges (0.5-0.6, 0.2-0.3), chosen to bring the mean water down, not read off one
+    dataset. Gamma_l (`adiabatic_liquid_water_gradient_kg_m3_per_m`) = -rho_d dr_s/dz of the pseudo-adiabat with
+    Romps' constants (1.6-2.4 g/m^3/km at 275-290 K, 800-950 hPa; 2.6-2.8 at a 298-300 K tropical base). The parcel ends
+    at the boundary-layer top: f_ad is a shallow-cumulus value, and a congestus / cumulonimbus run keeps its data water
+    above 3 km (it shares the factor). The added grid-mean liquid path is stored per column
     (`added_liquid_path_kg_m2`, diagnostic). The layer means carry T and p for it (`LevelSample` 5 fields).
-  - Order: LCL raise, cover, water - the cloud types follow the final fractions, the water floor holds on them. CPU
-    light, far field, shadow maps, air shadow and the GPU field read the same layer means (one source).
-  - Measured on four analog hours (Jan / Apr / Jul / Oct 2025 15th 00 UTC, 1 deg, `tau_inv/t9c_*.py`): cover deficit
-    vs tcc 0.196-0.203 before -> 0.004-0.008 (cos-lat means; 0.25 deg: 0.011; all 48 analog hours 0.004-0.009, mean
-    0.006, added cumulus water 86-111 g/m^2); grid-mean liquid water path 50.2 ->
-    140.4 g/m^2 (+180 %, ice 20.4 unchanged); low boundary-layer cumulus (area-resolved vertical in-cloud tau, maximal
-    overlap) p10 / p50 / p90 5.0 / 19.0 / 70 -> 6.2 / 30.6 / 144, thin area (tau < 7.07) 16.6 -> 11.8 % (the cover
-    alone: 36.8 %; of the 11.8 %, 7.5 points are runs with deck-typed layers, which keep their water); in-cloud LWC
-    p50 / p90 / p99 0.117 / 0.303 / 0.516 -> 0.233 / 0.629 / 1.054 g/m^3 (0.25 deg: p99 1.47). f_ad 0.3 / 0.5: LWP
-    111 / 168 g/m^2, thin area 14.4 / 10.3 %, Cu tau p50 24 / 37. Body-core tau medians per type (`cloud_tau.py`): low
-    Cu 57 -> 120, Ac 60 -> 26, St / Sc 96 -> 113 (area share 0.11 -> 0.29: the raised fractions reach the deck band),
-    cirrus 4.5 -> 2.2. Columns with tcc < 0.01 and stored condensate: 1.1 % (0.25 deg, Jan): their cloud layers drop to
-    `cloud_min_cover`.
+  - Order: LCL raise, cover, bound, water - the cloud types follow the final fractions, the water floor holds on them.
+    CPU light, far field, shadow maps, air shadow and the GPU field read the same layer means (one source).
+  - Measured on four analog hours (Jan / Apr / Jul / Oct 2025 15th 00 UTC, 1 deg, `tau_inv/t9c_*.py`), fix round 1
+    against the first 9c state (f_ad 0.4 constant): grid-mean liquid water path 50.2 -> 140.4 -> 111.1 g/m^2 (ice 20.4;
+    the 48-hour set 117.5 g/m^2, ice 21.6); added water 96 -> 61 g/m^2; low boundary-layer cumulus (area-resolved
+    vertical in-cloud tau, maximal overlap) p10 / p50 / p90 6.2 / 30.6 / 144 -> 6.0 / 27.4 / 106, thin area (tau < 7.07)
+    16.6 % in the data -> 11.8 -> 12.4 %; in-cloud LWC p50 / p90 / p99 0.117 / 0.303 / 0.516 (data) -> 0.233 / 0.629 /
+    1.054 -> 0.189 / 0.488 / 0.823 g/m^3; dropped condensate 0.002 g/m^2 grid mean (0.25 deg: 0.44 % of the columns,
+    at most 36 g/m^2 in one). Cover deficit vs tcc 0.196-0.203 (data) -> 0.004-0.009. The mean liquid water path is
+    still above the ocean climatology the reviewer quoted from memory (MAC-LWP, O'Dell et al. 2008 / Elsaesser et al.
+    2017: order 60-90 g/m^2, not verified here), see `known-issues.md`.
 - **Vertical profile rule** (`cloud_render_texels.hpp` `cloud_profile_value`, port in `clouds.gdshaderinc`): the two
   layer centres around a point are fetched apart; where cloud starts above a clear layer the base is flat and sharp
   (50 m transition, `cloud_base_transition_m` [E]) in the middle of the gap, partly so where cloud only thickens upward;

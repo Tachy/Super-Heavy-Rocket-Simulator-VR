@@ -45,8 +45,8 @@ struct Column {
             ice[static_cast<std::size_t>(k)] = f * ice_in_cloud;
         }
     }
-    double add(double lcl_m, double f_ad = c::cumulus_adiabatic_fraction) {
-        return add_cumulus_adiabatic_water(fraction, liquid, ice, temperature, pressure, 0.0, lcl_m, f_ad);
+    double add(double lcl_m, AdiabaticFractionProfile profile = {}) {
+        return add_cumulus_adiabatic_water(fraction, liquid, ice, temperature, pressure, 0.0, lcl_m, profile);
     }
     double cover() const { return cloud_column_cover_max_random(fraction, liquid, ice, 0.0); }
     double liquid_path() const {
@@ -58,17 +58,28 @@ struct Column {
     }
 };
 
-// Sub-adiabatic liquid water path of the layers [first, last] from the base z_b to the boundary-layer top (ground 0),
-// and the in-cloud one of the layers.
-double floor_path(const Column& col, int first, int last, double base_m, double f_ad) {
+// The test's f_ad(h): linear from the base value to the value at the reference height, constant above it.
+double test_f_ad(const AdiabaticFractionProfile& profile, double h_m) {
+    const double t = std::min(h_m / c::cumulus_adiabatic_fraction_reference_height_m, 1.0);
+    return profile.at_base + (profile.at_reference - profile.at_base) * t;
+}
+
+// Sub-adiabatic liquid water path of the layers [first, last] from the base z_b to the boundary-layer top (ground 0):
+// the in-cloud water f_ad(h) Gamma_l h integrated over height in 0.5 m steps (midpoint rule).
+double floor_path(const Column& col, int first, int last, double base_m, const AdiabaticFractionProfile& profile = {}) {
     double path = 0.0;
     const double top_m = c::cloud_boundary_layer_top_m;
     for (int k = first; k <= last; ++k) {
-        const double lo = std::min(std::max(weather_layer_bottom_m(k), base_m), top_m) - base_m;
-        const double hi = std::min(weather_layer_bottom_m(k + 1), top_m) - base_m;
+        const double lo = std::min(std::max(weather_layer_bottom_m(k), base_m), top_m);
+        const double hi = std::min(weather_layer_bottom_m(k + 1), top_m);
         const auto i = static_cast<std::size_t>(k);
-        path += f_ad * adiabatic_liquid_water_gradient_kg_m3_per_m(col.temperature[i], col.pressure[i]) * 0.5 *
-                (hi * hi - lo * lo);
+        const double gamma = adiabatic_liquid_water_gradient_kg_m3_per_m(col.temperature[i], col.pressure[i]);
+        const int steps = std::max(1, static_cast<int>(std::lround((hi - lo) / 0.5)));
+        const double dz = (hi - lo) / steps;
+        for (int j = 0; j < steps; ++j) {
+            const double h = lo + (j + 0.5) * dz - base_m;
+            path += test_f_ad(profile, h) * gamma * h * dz;
+        }
     }
     return path;
 }
@@ -165,16 +176,16 @@ TEST_CASE("A shallow cumulus reaches the sub-adiabatic water on its run path", "
     col.cloud(3, 7, 0.3, 1e-4);
     const Column before = col;
     const double base = 800.0;
-    const double target = floor_path(col, 3, 7, base, c::cumulus_adiabatic_fraction);
+    const double target = floor_path(col, 3, 7, base, AdiabaticFractionProfile{});
     // The in-cloud path over the parts above the base (layer 3 holds its mean over the whole layer).
     const double in_cloud_before = in_cloud_path(col, 3, 7);
     REQUIRE(in_cloud_before < target);
     const double added = col.add(base);
-    CHECK(in_cloud_path(col, 3, 7) == Catch::Approx(target).epsilon(1e-9));
+    CHECK(in_cloud_path(col, 3, 7) == Catch::Approx(target).epsilon(1e-6));
     // One factor for the whole run: the profile is kept.
     for (int k = 3; k <= 7; ++k) {
         CHECK(col.liquid[static_cast<std::size_t>(k)] / before.liquid[static_cast<std::size_t>(k)] ==
-              Catch::Approx(target / in_cloud_before).epsilon(1e-9));
+              Catch::Approx(target / in_cloud_before).epsilon(1e-6));
     }
     // Cover and ice unchanged; the added grid-mean water path is the returned diagnostic.
     CHECK(col.fraction == before.fraction);
@@ -185,11 +196,12 @@ TEST_CASE("A shallow cumulus reaches the sub-adiabatic water on its run path", "
 
 TEST_CASE("Cumulus water grows with the adiabatic fraction and stays bounded", "[weather]") {
     double previous = 0.0;
-    for (const double f_ad : {0.0, 0.3, 0.4, 0.5}) {
+    for (const double scale : {0.0, 0.5, 1.0, 1.5}) {
         Column col;
         col.cloud(3, 7, 0.3, 1e-4);
-        const double added = col.add(800.0, f_ad);
-        if (f_ad == 0.0) {
+        const double added = col.add(800.0, {scale * c::cumulus_adiabatic_fraction_base,
+                                             scale * c::cumulus_adiabatic_fraction_at_reference});
+        if (scale == 0.0) {
             CHECK(added == 0.0);
         } else {
             CHECK(added > previous);
@@ -200,15 +212,15 @@ TEST_CASE("Cumulus water grows with the adiabatic fraction and stays bounded", "
     // sub-adiabatic path up to 3 km, the run's water above counts but no parcel water is asked for there.
     Column deep;
     deep.cloud(3, 20, 0.3, 1e-4);
-    const double deep_target = floor_path(deep, 3, 20, 800.0, c::cumulus_adiabatic_fraction);
+    const double deep_target = floor_path(deep, 3, 20, 800.0, AdiabaticFractionProfile{});
     REQUIRE(in_cloud_path(deep, 3, 20) < deep_target);
     deep.add(800.0);
-    CHECK(in_cloud_path(deep, 3, 20) == Catch::Approx(deep_target).epsilon(1e-9));
+    CHECK(in_cloud_path(deep, 3, 20) == Catch::Approx(deep_target).epsilon(1e-6));
     // A very thin boundary-layer cumulus (0.01 g/m^3, 750 m .. 3 km) raised to a whole adiabatic parcel: no layer is
     // raised above the bound in-cloud, and the bound is reached.
     Column thin;
     thin.cloud(3, 11, 0.3, 1e-5);
-    thin.add(800.0, 1.0);
+    thin.add(800.0, {1.0, 1.0});
     double highest = 0.0;
     for (int k = 3; k <= 11; ++k) highest = std::max(highest, thin.liquid[static_cast<std::size_t>(k)] / 0.3);
     CHECK(highest <= c::cumulus_liquid_water_max_kg_m3 * (1.0 + 1e-12));
@@ -217,7 +229,7 @@ TEST_CASE("Cumulus water grows with the adiabatic fraction and stays bounded", "
     Column dense;
     dense.cloud(3, 11, 0.3, 1e-5);
     dense.liquid[8] = 0.3 * 2e-3;
-    dense.add(800.0, 1.0);
+    dense.add(800.0, {1.0, 1.0});
     CHECK(dense.liquid[8] == 0.3 * 2e-3);
 }
 
@@ -274,10 +286,103 @@ TEST_CASE("Decks, ice, deep-enough cumulus and clouds without an LCL base keep t
     const double half_added = half.add(800.0);
     CHECK(half_added > 0.0);
     // The same column at weight 1 would reach the floor exactly; at weight 0.5 halfway in the factor.
-    const double target = floor_path(full, 3, 7, 800.0, c::cumulus_adiabatic_fraction);
+    const double target = floor_path(full, 3, 7, 800.0, AdiabaticFractionProfile{});
     const double s = target / in_cloud_path(full, 3, 7);
     CHECK(in_cloud_path(half, 3, 7) ==
           Catch::Approx(in_cloud_path(full, 3, 7) * (1.0 + 0.5 * (s - 1.0))).epsilon(1e-6));
+}
+
+TEST_CASE("The adiabatic fraction falls with the height above the base", "[weather]") {
+    // Observed: ~0.5-0.6 near the base, ~0.2-0.3 by 2 km (constants.hpp). The defaults are inside those ranges.
+    CHECK(c::cumulus_adiabatic_fraction_base >= 0.5);
+    CHECK(c::cumulus_adiabatic_fraction_base <= 0.6);
+    CHECK(c::cumulus_adiabatic_fraction_at_reference >= 0.2);
+    CHECK(c::cumulus_adiabatic_fraction_at_reference <= 0.3);
+    CHECK(c::cumulus_adiabatic_fraction_reference_height_m == 2000.0);
+    // A cumulus 2.2 km deep (base 800 m, to the boundary-layer top): the falling profile asks for less water than the
+    // base value held constant, more than the value at 2 km held constant.
+    const auto added_with = [](AdiabaticFractionProfile profile) {
+        Column col;
+        col.cloud(3, 11, 0.3, 1e-5);
+        col.add(800.0, profile);
+        return in_cloud_path(col, 3, 11);
+    };
+    const double falling = added_with({});
+    CHECK(falling < added_with({c::cumulus_adiabatic_fraction_base, c::cumulus_adiabatic_fraction_base}));
+    CHECK(falling > added_with({c::cumulus_adiabatic_fraction_at_reference, c::cumulus_adiabatic_fraction_at_reference}));
+    // The floor is the numerical integral of f_ad(h) Gamma_l h (floor_path above).
+    Column col;
+    col.cloud(3, 11, 0.3, 1e-5);
+    const double target = floor_path(col, 3, 11, 800.0, {});
+    col.add(800.0);
+    CHECK(in_cloud_path(col, 3, 11) == Catch::Approx(target).epsilon(1e-6));
+}
+
+TEST_CASE("Cumulus under a deck meet the floor on the layers that get water", "[weather]") {
+    // A deck (fraction 1, cumulus weight 0) at the bottom of the run and cumulus (weight 1) above it: the deck keeps its
+    // water and the cumulus layers' in-cloud path reaches the floor of those layers.
+    Column mixed;
+    mixed.cloud(3, 5, 1.0, 1e-4);
+    mixed.cloud(6, 9, 0.3, 1e-4);
+    const Column before = mixed;
+    mixed.add(800.0);
+    for (int k = 3; k <= 5; ++k) {
+        CHECK(mixed.liquid[static_cast<std::size_t>(k)] == before.liquid[static_cast<std::size_t>(k)]);
+    }
+    CHECK(in_cloud_path(mixed, 6, 9) == Catch::Approx(floor_path(mixed, 6, 9, 800.0, {})).epsilon(1e-6));
+}
+
+TEST_CASE("The in-cloud water is bounded; the excess is dropped and counted", "[weather]") {
+    Column col;
+    col.cloud(3, 5, 0.3, 1e-2);        // 10 g/m^3 liquid in-cloud: above any cloud
+    col.cloud(6, 7, 0.3, 1e-4, 5e-3);  // plausible liquid, 5 g/m^3 ice
+    col.cloud(8, 9, 0.3, 1e-4);        // within both bounds
+    col.fraction[12] = 0.0;            // water without a cloud fraction: shown at cloud_min_cover
+    col.liquid[12] = 1e-6;
+    const Column before = col;
+    const double dropped = bound_incloud_condensate(col.fraction, col.liquid, col.ice, 0.0);
+    double expected = 0.0;
+    for (int k = 0; k < weather_layer_count; ++k) {
+        const auto i = static_cast<std::size_t>(k);
+        const double f = std::max(col.fraction[i], c::cloud_min_cover);
+        CHECK(col.liquid[i] / f <= c::cloud_liquid_water_max_kg_m3 * (1.0 + 1e-12));
+        CHECK(col.ice[i] / f <= c::cloud_ice_water_max_kg_m3 * (1.0 + 1e-12));
+        expected += (before.liquid[i] - col.liquid[i] + before.ice[i] - col.ice[i]) *
+                    (weather_layer_bottom_m(k + 1) - weather_layer_bottom_m(k));
+    }
+    CHECK(col.liquid[3] / 0.3 == Catch::Approx(c::cloud_liquid_water_max_kg_m3));
+    CHECK(col.ice[6] / 0.3 == Catch::Approx(c::cloud_ice_water_max_kg_m3));
+    CHECK(col.liquid[6] == before.liquid[6]);
+    CHECK(col.liquid[8] == before.liquid[8]);
+    CHECK(col.fraction == before.fraction);
+    CHECK(dropped > 0.0);
+    CHECK(dropped == Catch::Approx(expected).epsilon(1e-12));
+    // Nothing above the bound: nothing dropped, nothing changed.
+    Column fine;
+    fine.cloud(3, 7, 0.3, 1e-4, 1e-4);
+    const Column fine_before = fine;
+    CHECK(bound_incloud_condensate(fine.fraction, fine.liquid, fine.ice, 0.0) == 0.0);
+    CHECK(fine.liquid == fine_before.liquid);
+    CHECK(fine.ice == fine_before.ice);
+    // Layers wholly under the ground are not touched.
+    Column buried;
+    buried.cloud(3, 3, 0.3, 1e-2);
+    CHECK(bound_incloud_condensate(buried.fraction, buried.liquid, buried.ice, 5000.0) == 0.0);
+    CHECK(buried.liquid[3] == 0.3 * 1e-2);
+}
+
+TEST_CASE("A trace layer is not scaled across the cloud-presence threshold", "[weather]") {
+    // ERA5's cloud base is the lowest level with a fraction above 1 %: a 0.8 % trace stays under it.
+    Column col;
+    col.cloud(8, 10, 0.3, 1e-4);
+    col.cloud(3, 3, c::cloud_trace_fraction * 0.8, 1e-4);  // trace below the cloud
+    col.cloud(5, 5, c::cloud_trace_fraction * 2.0, 1e-4);  // a thin cloud above the threshold
+    const Column before = col;
+    scale_cloud_cover_to_total(col.fraction, col.liquid, col.ice, 0.0, 0.7);
+    CHECK(col.fraction[3] == before.fraction[3]);
+    CHECK(col.fraction[5] > before.fraction[5]);
+    CHECK(col.fraction[8] > before.fraction[8]);
+    CHECK(col.cover() == Catch::Approx(0.7).margin(1e-9));
 }
 
 TEST_CASE("The cover is scaled to the total cloud cover with the layer fractions in proportion", "[weather]") {
@@ -358,39 +463,66 @@ TEST_CASE("A built snapshot takes the total cloud cover and adds the cumulus wat
     // the added path.
     CHECK(scaled.added_liquid_path_kg_m2(r, col) > 0.0f);
     CHECK(unscaled.added_liquid_path_kg_m2(r, col) > 0.0f);
+    // The cover doubles, the in-cloud water halves, so the floor asks for more: the scaled column gets more water.
+    CHECK(scaled.added_liquid_path_kg_m2(r, col) > unscaled.added_liquid_path_kg_m2(r, col));
+}
+
+TEST_CASE("A column the data calls clear keeps no dense specks", "[weather]") {
+    const int rows = 5, columns = 8, r = 2, col = 3;
+    // Cloud below 2 km at 40 % (in-cloud ~0.25 g/m^3) but a total cover of 0: scaling puts each layer at
+    // cloud_min_cover, which would concentrate the water 200-fold; the bound drops the excess instead.
+    const auto clear = WeatherSnapshot::gfs_test_column(rows, columns, 2000.0, 1e-4, 40.0, 295.0, 288.0, 0.0);
+    const std::size_t cells = static_cast<std::size_t>(rows) * columns;
+    const std::size_t cell = static_cast<std::size_t>(r) * columns + col;
+    double highest_liquid = 0.0;
+    for (std::size_t k = 0; k < n_layers; ++k) {
+        const std::size_t i = (k * cells + cell) * 4;
+        const double f = decode_weather_cloud_fraction(clear.texels()[i]);
+        if (f > 0.0) highest_liquid = std::max(highest_liquid, decode_weather_water(clear.texels()[i + 1]) / f);
+    }
+    REQUIRE(highest_liquid > 0.0);
+    CHECK(highest_liquid <= c::cloud_liquid_water_max_kg_m3 * 1.0197);  // the 8-bit water code's half step
+    CHECK(clear.dropped_condensate_path_kg_m2(r, col) > 0.0f);
+    const auto unscaled = WeatherSnapshot::gfs_test_column(rows, columns, 2000.0, 1e-4, 40.0, 295.0, 288.0);
+    CHECK(unscaled.dropped_condensate_path_kg_m2(r, col) == 0.0f);
 }
 
 TEST_CASE("Total cloud cover and added water survive the file and the downsampling", "[weather]") {
     const int rows = 9, columns = 8;
     const std::size_t cells = static_cast<std::size_t>(rows) * columns;
     std::vector<std::uint8_t> texels(n_layers * cells * 4, 0);
-    std::vector<float> ground(cells, 0.0f), lcl(cells, 800.0f), tcc(cells, 0.5f), added(cells, 0.0f);
+    std::vector<float> ground(cells, 0.0f), lcl(cells, 800.0f), tcc(cells, 0.5f), added(cells, 0.0f),
+        dropped(cells, 0.0f);
     for (std::size_t i = 0; i < cells; ++i) {
         tcc[i] = static_cast<float>(i % 5) * 0.25f;
         added[i] = static_cast<float>(i) * 1e-3f;
+        dropped[i] = static_cast<float>(i % 7) * 1e-4f;
     }
     tcc[27] = weather_total_cloud_cover_unknown;  // row 3, column 3: inside the box of coarse cell (1, 1)
-    const auto snapshot = WeatherSnapshot::from_parts({}, rows, columns, ground, texels, lcl, tcc, added);
+    const auto snapshot = WeatherSnapshot::from_parts({}, rows, columns, ground, texels, lcl, tcc, added, dropped);
     const auto file = std::filesystem::temp_directory_path() / "weather_tcc_round_trip_9c.wthr";
     write_weather_snapshot(file, snapshot);
     const auto back = read_weather_snapshot(file);
     REQUIRE(back.has_value());
     CHECK(back->total_cloud_covers() == tcc);
     CHECK(back->added_liquid_paths_kg_m2() == added);
+    CHECK(back->dropped_condensate_paths_kg_m2() == dropped);
     std::filesystem::remove(file);
     // Defaults: unknown cover, nothing added.
     const auto plain = WeatherSnapshot::from_parts({}, rows, columns, ground, texels, lcl);
     CHECK(plain.total_cloud_cover(3, 3) == weather_total_cloud_cover_unknown);
     CHECK(plain.added_liquid_path_kg_m2(3, 3) == 0.0f);
+    CHECK(plain.dropped_condensate_path_kg_m2(3, 3) == 0.0f);
     // Box mean (the known columns of the box for the cover), as every other field of the downsampled set.
     const auto coarse = snapshot.downsampled(4);
-    double sum = 0.0, weights = 0.0, sum_added = 0.0, weights_added = 0.0;
+    double sum = 0.0, weights = 0.0, sum_added = 0.0, sum_dropped = 0.0, weights_added = 0.0;
     for (int dr = -2; dr <= 2; ++dr) {
         for (int dc = -2; dc <= 2; ++dc) {
             const double w = (std::abs(dr) == 2 ? 0.5 : 1.0) * (std::abs(dc) == 2 ? 0.5 : 1.0);
             const std::size_t i =
                 static_cast<std::size_t>(4 + dr) * columns + static_cast<std::size_t>((4 + dc + columns) % columns);
             sum_added += w * added[i];
+            sum_dropped += w * dropped[i];
             weights_added += w;
             if (tcc[i] < 0.0f) continue;
             sum += w * tcc[i];
@@ -399,6 +531,7 @@ TEST_CASE("Total cloud cover and added water survive the file and the downsampli
     }
     CHECK(coarse.total_cloud_cover(1, 1) == Catch::Approx(sum / weights).epsilon(1e-6));
     CHECK(coarse.added_liquid_path_kg_m2(1, 1) == Catch::Approx(sum_added / weights_added).epsilon(1e-6));
+    CHECK(coarse.dropped_condensate_path_kg_m2(1, 1) == Catch::Approx(sum_dropped / weights_added).epsilon(1e-6));
 }
 
 TEST_CASE("A downsampled box keeps the total cloud cover of its cells", "[weather]") {

@@ -202,12 +202,31 @@ inline constexpr double cloud_overlap_slant_onset_cot = 1.8;
 // Cumulus water from an adiabatic parcel (weather_snapshot.hpp: add_cumulus_adiabatic_water; static clouds Task 9c).
 // The reanalysis holds the grid-box mean of the condensate, not the updraft cores of its sub-grid cumulus: their
 // in-cloud water is raised to a fraction of the moist-adiabatic parcel's.
-// - Adiabatic fraction f_ad: the measured in-cloud liquid water of cumulus over that of an undiluted parcel from the
-//   cloud base [E: 0.4; shallow cumulus 0.3-0.6, Brenguier et al. 2000, J. Atmos. Sci. 57, 803; cloud-mean ratios of
-//   continental cumulus 0.2-0.6 with height, Blyth 1993, J. Appl. Meteor. 32, 626].
+// - Adiabatic fraction f_ad(h) of the measured in-cloud liquid water over that of an undiluted parcel from the cloud
+//   base, falling with the height h above the base (entrainment dilutes older, higher cloud): linearly from
+//   cumulus_adiabatic_fraction_base at the base to cumulus_adiabatic_fraction_at_reference at the reference height, held
+//   above it. [E: 0.50 -> 0.20 at 2 km, the low ends of the ruled 0.5-0.6 near the base and 0.2-0.3 by ~2 km (0.55 -> 0.25
+//   gave 125 g/m^2 analog grid-mean liquid water path, 0.50 -> 0.20 111). The trend (shallow
+//   cumulus 0.3-0.6, Brenguier et al. 2000, J. Atmos. Sci. 57, 803; continental cumulus 0.2-0.6 falling with height,
+//   Blyth 1993, J. Appl. Meteor. 32, 626; Warner 1955, Tellus 7, 449) is from those papers; the end values are chosen
+//   within the ranges the project owner ruled (2026-10-27), not read off one dataset.]
 // - Bound of the raised in-cloud water: no layer is raised above it (a layer the data holds denser keeps its value)
-//   [E: 1.5e-3 kg/m^3; aircraft cumulus maxima of ~1-2 g/m^3 in clouds a few km deep, Warner 1955, Tellus 7, 449].
-inline constexpr double cumulus_adiabatic_fraction = 0.4;
+//   [E: 1.5e-3 kg/m^3; a bound on the layer-mean in-cloud liquid water, i.e. stricter than a maximum; aircraft cumulus
+//   maxima of ~1-2 g/m^3 in clouds a few km deep, Warner 1955].
+inline constexpr double cumulus_adiabatic_fraction_base = 0.50;
+inline constexpr double cumulus_adiabatic_fraction_at_reference = 0.20;
+inline constexpr double cumulus_adiabatic_fraction_reference_height_m = 2000.0;
 inline constexpr double cumulus_liquid_water_max_kg_m3 = 1.5e-3;
+// Bounds of the in-cloud condensate of any layer (weather_snapshot.hpp: bound_incloud_condensate): the cover scaling
+// can put the grid-mean water of a layer on a far smaller cloud fraction (a column the data calls clear), which would
+// be a dense speck; the excess is dropped. Liquid [E: 3e-3 kg/m^3, ~2-4 g/m^3 are the aircraft maxima of deep
+// cumulus, order of magnitude after Warner 1955; not re-checked against the paper]. Ice [E: 1e-3 kg/m^3, the order of
+// the densest anvil and frontal ice cloud in aircraft data; no specific citation, an upper bound on layer means].
+inline constexpr double cloud_liquid_water_max_kg_m3 = 3.0e-3;
+inline constexpr double cloud_ice_water_max_kg_m3 = 1.0e-3;
+// Cloud-presence threshold of ERA5's cloud base height: the lowest model level with a cloud fraction above 1 % (ECMWF
+// IFS documentation, part IV, cloud base height diagnostic). A layer at or below it is a trace: the cover scaling to the
+// total cloud cover leaves it alone so that it does not become a cloud (and a cloud base) below the data's.
+inline constexpr double cloud_trace_fraction = 0.01;
 
 }  // namespace starsim::constants

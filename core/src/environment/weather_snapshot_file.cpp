@@ -24,10 +24,11 @@ void write_weather_snapshot(const std::filesystem::path& file, const WeatherSnap
     const auto& lcl = snapshot.lcl_heights_m();
     const auto& tcc = snapshot.total_cloud_covers();
     const auto& added = snapshot.added_liquid_paths_kg_m2();
+    const auto& dropped = snapshot.dropped_condensate_paths_kg_m2();
     const auto& texels = snapshot.texels();
     const WeatherSnapshotId& id = snapshot.id();
     std::vector<char> bytes;
-    bytes.reserve(96 + 4 * ground.size() * sizeof(float) + texels.size());
+    bytes.reserve(96 + 5 * ground.size() * sizeof(float) + texels.size());
     bytes.insert(bytes.end(), magic, magic + sizeof(magic));
     detail::append_bytes(bytes, weather_snapshot_file_version);
     detail::append_bytes(bytes, std::uint32_t{0});
@@ -40,7 +41,7 @@ void write_weather_snapshot(const std::filesystem::path& file, const WeatherSnap
     detail::append_bytes(bytes, static_cast<std::int32_t>(snapshot.columns()));
     detail::append_bytes(bytes, static_cast<std::int32_t>(weather_layer_count));
     detail::append_bytes(bytes, texel_channels);
-    for (const std::vector<float>* block : {&ground, &lcl, &tcc, &added}) {
+    for (const std::vector<float>* block : {&ground, &lcl, &tcc, &added, &dropped}) {
         const auto* b = reinterpret_cast<const char*>(block->data());
         bytes.insert(bytes.end(), b, b + block->size() * sizeof(float));
     }
@@ -82,10 +83,10 @@ std::optional<WeatherSnapshot> read_weather_snapshot(const std::filesystem::path
         return std::nullopt;
     }
     const std::uint64_t cells = static_cast<std::uint64_t>(rows) * static_cast<std::uint64_t>(columns);
-    std::vector<float> ground, lcl, tcc, added;
+    std::vector<float> ground, lcl, tcc, added, dropped;
     std::vector<std::uint8_t> texels;
     if (!r.read_array(ground, cells) || !r.read_array(lcl, cells) || !r.read_array(tcc, cells) ||
-        !r.read_array(added, cells) || !r.read_array(texels, cells * layers * channels)) {
+        !r.read_array(added, cells) || !r.read_array(dropped, cells) || !r.read_array(texels, cells * layers * channels)) {
         return std::nullopt;
     }
     if (r.at != payload) return std::nullopt;
@@ -97,7 +98,7 @@ std::optional<WeatherSnapshot> read_weather_snapshot(const std::filesystem::path
     id.cycle_hour = cycle_hour;
     id.analog_hour = analog_hour;
     return WeatherSnapshot::from_parts(id, rows, columns, std::move(ground), std::move(texels), std::move(lcl),
-                                      std::move(tcc), std::move(added));
+                                      std::move(tcc), std::move(added), std::move(dropped));
 }
 
 }  // namespace starsim::environment

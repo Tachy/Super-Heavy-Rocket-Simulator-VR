@@ -34,8 +34,8 @@
 //   column's boundary-layer liquid below it is moved up (raise_liquid_cloud_to_lcl).
 // - Then the layers' cover is scaled to the data's total cloud cover (ERA5 total_cloud_cover, GFS TCDC entire
 //   atmosphere; scale_cloud_cover_to_total; the downsampled set and the pole rows scale their box means again to the
-//   box's mean) and the cumulus get the water of a sub-adiabatic parcel (add_cumulus_adiabatic_water; static clouds
-//   Task 9c).
+//   box's mean), the in-cloud condensate is bounded (bound_incloud_condensate) and the cumulus get the water of a
+//   sub-adiabatic parcel (add_cumulus_adiabatic_water; static clouds Task 9c).
 // - Levels at or below the surface are ignored; the lowest level above the ground is held down to the ground, the
 //   highest one held upward; layer parts below the ground do not count, at() is zero below the ground.
 //
@@ -144,9 +144,19 @@ double cloud_column_cover_max_random(std::span<const double> cloud_fraction, std
 // every layer that counts for the cover (stored condensate above the ground) is multiplied by one factor (kept in
 // proportion, at most 1, at least cloud_min_cover) so that cloud_column_cover_max_random equals total_cloud_cover (to
 // round-off; a cover of 0 leaves each cloud layer at cloud_min_cover); the water contents (grid means) are kept.
-// Untouched: an unknown cover (negative or NaN), a column without condensate and layers without condensate.
+// Untouched: an unknown cover (negative or NaN), a column without condensate, layers without condensate and trace
+// layers (fraction <= cloud_trace_fraction, ERA5's cloud-presence threshold: scaling must not lift one over it).
 void scale_cloud_cover_to_total(std::span<double> cloud_fraction, std::span<const double> liquid_kg_m3,
                                 std::span<const double> ice_kg_m3, double ground_m, double total_cloud_cover);
+
+// Bound of the in-cloud condensate (static clouds Task 9c fix round 1): after the cover scaling a layer's grid-mean water
+// can sit on a far smaller cloud fraction (down to cloud_min_cover where the data's total cloud cover is ~0), a dense
+// speck the data does not have. In every layer above the ground the in-cloud liquid water (grid mean over the cloud
+// fraction, at least cloud_min_cover) is cut to cloud_liquid_water_max_kg_m3 and the in-cloud ice to
+// cloud_ice_water_max_kg_m3; the excess is dropped (not moved). Returns the dropped liquid + ice water path (grid
+// mean, kg/m^2).
+double bound_incloud_condensate(std::span<const double> cloud_fraction, std::span<double> liquid_kg_m3,
+                                std::span<double> ice_kg_m3, double ground_m);
 
 // Liquid water gradient (kg/m^3 per m of ascent) of a saturated parcel rising pseudo-adiabatically at the temperature
 // and pressure: Gamma_l = -rho_d dr_s/dz with the moist adiabat c_pd dT + g dz + L(T) dr_s = 0, hydrostatic pressure
@@ -155,23 +165,32 @@ void scale_cloud_cover_to_total(std::span<double> cloud_fraction, std::span<cons
 // non-positive input gives 0.
 double adiabatic_liquid_water_gradient_kg_m3_per_m(double temperature_k, double pressure_pa);
 
+// f_ad(h) of the adiabatic parcel (constants.hpp): linear in the height h above the cloud base from `at_base` to
+// `at_reference` at cumulus_adiabatic_fraction_reference_height_m, held above it.
+struct AdiabaticFractionProfile {
+    double at_base = constants::cumulus_adiabatic_fraction_base;
+    double at_reference = constants::cumulus_adiabatic_fraction_at_reference;
+};
+
 // Cumulus water from an adiabatic parcel (static clouds Task 9c, user 2026-10-27: the reanalysis lacks the updraft
 // cores). The lowest significant liquid run of the column (raise_liquid_cloud_to_lcl's significance), its base less
 // than cloud_boundary_layer_top_m above the ground and the LCL known (0 < lcl < that top): its base z_b = max(ground +
-// lcl, the run's bottom); the layers with more than cloud_base_snap_m above z_b form the run path. When the path's
-// in-cloud liquid water path sum_k L_k t_k / C_k (t_k the layer's above-ground thickness: a layer cut by the base holds
-// its mean over the whole layer) is below the sub-adiabatic one of the parcel from z_b to the boundary-layer top
-// z_t = ground + cloud_boundary_layer_top_m, sum_k f_ad Gamma_l(T_k, p_k) ((min(z_k,top, z_t) - z_b)^2 -
-// (min(max(z_k,bottom, z_b), z_t) - z_b)^2) / 2 (f_ad is a shallow-cumulus value; the water of a congestus or
-// cumulonimbus above z_t is the data's and counts in the in-cloud path), each path layer's liquid is multiplied by
-// 1 + w_k (s - 1), s = their ratio, w_k its cumulus weight (cloud_type_weights; no switch: a deck's layers keep their
-// water); no layer is raised above cumulus_liquid_water_max_kg_m3 in-cloud. Cloud fractions, ice, every other run and
+// lcl, the run's bottom); the layers with more than cloud_base_snap_m above z_b form the run path, each with its
+// cumulus weight w_k (cloud_type_weights; no switch: a deck's layers keep their water). The weighted in-cloud liquid
+// water path sum_k w_k L_k t_k / C_k (t_k the layer's above-ground thickness: a layer cut by the base holds its mean
+// over the whole layer) is raised to the weighted sub-adiabatic one of the parcel from z_b to the boundary-layer top
+// z_t = ground + cloud_boundary_layer_top_m, sum_k w_k Gamma_l(T_k, p_k) times the integral of f_ad(h) h dh over the
+// layer's part of the parcel (f_ad a shallow-cumulus value falling with the height h above z_b; the water of a
+// congestus or cumulonimbus above z_t asks for no parcel water but counts in the sum and shares the factor): each path
+// layer's liquid is multiplied by
+// 1 + w_k (s - 1), s = that ratio when it is above 1, so the layers that get water meet the floor (no layer is raised
+// above cumulus_liquid_water_max_kg_m3 in-cloud, which can leave the sum below it). Cloud fractions, ice, every other run and
 // a run already as deep in water are unchanged; the grid-mean water rises (intended). Returns the added liquid water
 // path (grid mean, kg/m^2). One entry per layer in every span.
 double add_cumulus_adiabatic_water(std::span<const double> cloud_fraction, std::span<double> liquid_kg_m3,
                                    std::span<const double> ice_kg_m3, std::span<const double> temperature_k,
                                    std::span<const double> pressure_pa, double ground_m, double lcl_m,
-                                   double adiabatic_fraction = constants::cumulus_adiabatic_fraction);
+                                   const AdiabaticFractionProfile& profile = {});
 
 struct WeatherCell {
     double cloud_fraction = 0.0, liquid_water_kg_m3 = 0.0, ice_water_kg_m3 = 0.0;  // grid means
@@ -217,11 +236,13 @@ public:
                                            double total_cloud_percent = -1.0);
     // From the cache form (weather_snapshot_file): ground rows x columns, texels as render_texels(). Throws
     // std::invalid_argument on a size mismatch.
-    // lcl_m / total_cloud_cover empty = all unknown, added_liquid_path_kg_m2 empty = all 0.
+    // lcl_m / total_cloud_cover empty = all unknown, added_liquid_path_kg_m2 / dropped_condensate_path_kg_m2 empty =
+    // all 0.
     static WeatherSnapshot from_parts(const WeatherSnapshotId& id, int rows, int columns, std::vector<float> ground_m,
                                       std::vector<std::uint8_t> texels, std::vector<float> lcl_m = {},
                                       std::vector<float> total_cloud_cover = {},
-                                      std::vector<float> added_liquid_path_kg_m2 = {});
+                                      std::vector<float> added_liquid_path_kg_m2 = {},
+                                      std::vector<float> dropped_condensate_path_kg_m2 = {});
 
     const WeatherSnapshotId& id() const { return id_; }
     int rows() const { return rows_; }
@@ -254,6 +275,12 @@ public:
         return added_liquid_path_kg_m2_[static_cast<std::size_t>(row) * columns_ + column];
     }
     const std::vector<float>& added_liquid_paths_kg_m2() const { return added_liquid_path_kg_m2_; }
+    // Diagnostic: the liquid + ice water path (grid mean, kg/m^2) the build dropped from the column's layers because
+    // their in-cloud water exceeded the bound after the cover scaling (bound_incloud_condensate).
+    float dropped_condensate_path_kg_m2(int row, int column) const {
+        return dropped_condensate_path_kg_m2_[static_cast<std::size_t>(row) * columns_ + column];
+    }
+    const std::vector<float>& dropped_condensate_paths_kg_m2() const { return dropped_condensate_path_kg_m2_; }
 
     // Box mean over factor x factor cells (analog set, factor 4: 1 deg); needs (rows - 1) and columns divisible by it.
     WeatherSnapshot downsampled(int factor) const;
@@ -269,6 +296,7 @@ private:
     std::vector<float> lcl_m_;           // rows x columns, above the ground
     std::vector<float> total_cloud_cover_;        // rows x columns, 0..1 or unknown
     std::vector<float> added_liquid_path_kg_m2_;  // rows x columns, diagnostic
+    std::vector<float> dropped_condensate_path_kg_m2_;  // rows x columns, diagnostic
     std::vector<std::uint8_t> texels_;   // layers x rows x columns x 4
 };
 

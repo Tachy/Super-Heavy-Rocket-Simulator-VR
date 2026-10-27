@@ -700,3 +700,16 @@ known-issues.md:
 - Weather and clouds (M8): the snapshot's column cloud cover is lower than ERA5's total cloud cover (0.00-0.36, mean
   0.14 in the real-date check; the 37 pressure levels lose the overlap of the model levels), so multi-layer skies are
   thinner than the reanalysis says; the limits (light between columns, shadow darkness under broken cloud, plumes always draw
+
+## Before static clouds Task 9c fix round 1 (superseded 2026-10-27: height-dependent f_ad, in-cloud bound, trace layers kept, weighted floor)
+weather-clouds.md, Cover from the total cloud cover (first 9c state, file format 6):
+
+- f_ad = `cumulus_adiabatic_fraction` 0.4 [E], constant with height; the floor integrated f_ad Gamma_l (z - z_b)^2 / 2.
+  Grid-mean liquid water path of the four analog hours 50.2 -> 140.4 g/m^2 (+180 %, added 86-111 g/m^2 per hour), thin
+  area 11.8 %, Cu tau p10 / p50 / p90 6.2 / 30.6 / 144, in-cloud LWC p99 1.054 g/m^3; f_ad 0.3 / 0.5: 111 / 168 g/m^2.
+- The floor ratio was computed over the whole run path (deck layers too), so a column with a deck below the cumulus
+  ended below the floor (7.5 of the 11.8 points of thin area).
+- `scale_cloud_cover_to_total` scaled every layer with condensate, traces too (a 0.75 % layer 830 m under the Cape 2025
+  base crossed ERA5's 1 % threshold), and no in-cloud bound followed the scaling down: tcc ~ 0 columns (1.1 % at
+  0.25 deg) put each cloud layer on cloud_min_cover with its water kept (dense specks). The plausibility cloud-base
+  check therefore ran on the unscaled fractions.
