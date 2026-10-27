@@ -132,6 +132,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   = the median increment of the signed s + P over those widths (0.0207 / 0.0316; the eroded v's median, 0.0076 / 0.0137,
   made the edges ~2.7 x steeper and failed the cloud_check base contour). m is taken over the joint (v, n) distribution:
   the cell mean stays the field's (0.996-1.000 at the table states, also between them).
+  Clear air without the detail (static clouds Task 10, `clouds.gdshaderinc` `cloud_extinction_in_cell`): the shapes of
+  the types present are read first; where their largest value plus the largest lift the detail levels can give at the
+  state (`cloud_detail_lift_bound`: sum of w_k x lift_k x a_k x (1 - detail mean), the detail value at most 1) lies at
+  or below the threshold, every ramp is 0 and the sample returns 0 without the detail's three lookups - the same image
+  bit for bit (render_check frames identical), the VR proxy's cloud pass -4 ms at the ground (`vr-performance.md`).
 - **Shapes by cloud type** (static clouds Task 5; `cloud_type_weights` in `cloud_noise.hpp` and
   `clouds.gdshaderinc`): ERA5 / GFS carry no type, so it follows per point from the layer data as continuous weights
   (fix round 1: no seam, no pop): cirrus = smoothstep of the ice share over 0.4-0.6 (`cloud_cirrus_ice_share` +-
@@ -388,7 +393,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     maximally nor randomly: the 3D noise displaces the layers' clouds against each other (cover above f at the zenith,
     a) and a slanted beam crosses further cells (b, k). Fitted to the shipped shapes' shadows (the near map, area means
     over eight independent sites, `cloud_check.gd` `STARSIM_SLANT_TABLE=1`, f 0.15-0.6, e 5-75 deg, the layer 1 km
-    deep, in-cloud tau 3): the direct Sun's transmittance within 0.018. Measured, f 0.3: 0.629 at 75 deg, 0.627 at 45,
+    deep, in-cloud tau 3 - a synthetic test layer, far thinner than the data's low cumulus, Validation "In-cloud optical
+    depths"): the direct Sun's transmittance within 0.018. Measured, f 0.3: 0.629 at 75 deg, 0.627 at 45,
     0.571 at 20, 0.404 at 8, 0.278 at 5 (maximum overlap would give 0.70 at every elevation). Without it the near map
     (the shapes) and the far map / CPU light disagreed by 10 % at 45 deg and 40 % at 8 deg (a ring at the 9-11 km
     hand-over at sunset, seen by the first tests of fix round 1). Limits: the layer depth (1 km) and the in-cloud tau
@@ -433,7 +439,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     uniformly - gaps get 1 + T_sd, shadows T_sd; physically the light scattered out of the clouds' sides concentrates
     under and beside them (shadows T_sd / C, the clear parts less), so the contrast between shadow and gap is a little
     too high in the gaps' favour: shadows too dark by (1 / C - 1) T_sd, gaps too bright by T_sd (the cell mean is
-    right). A cf 0.3 cumulus layer, in-cloud tau 3, Sun 45 deg: the cell's T_sd ~0.25, the shadows' ~0.65 in reality.
+    right). A cf 0.3 cumulus layer, in-cloud tau 3 (synthetic), Sun 45 deg: the cell's T_sd ~0.25, the shadows' ~0.65
+    in reality.
   - Weather off (cloud_enabled false): every Earth-surface pixel as before - the shader's `CLOUD_LIGHT_BEGIN` / `_END`
     blocks only change values inside `if (cloud_enabled)`; the CPU factors are exactly (1, 1, 0).
   - The terrain material now binds the cloud globals (~15 more sampler descriptors per terrain node):
@@ -631,6 +638,14 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   scene's single scattering, outline, front weight, no-negative and clear-sky cases (numbers in the Model section);
   core `[weather]`: `cloud_render_top_m`; core `[atmosphere]`: the single Rayleigh table = the raymarch's single
   Rayleigh within 1 % and below the scattering table's total.
+- In-cloud optical depths (static clouds Task 10, the 48 shipped analog files, format 7; the body-core vertical tau of
+  each column's contiguous cloudy run, sum of beta / m(cf) dz - the renderer's plateau -, weighted by cos(lat) x the
+  run's max cf; script and table: sdd `tau_inv/t10_cloud_tau.py`, `t10_analog_v7.log`). p10 / p50 / p90:
+  low cumulus 25 / 102 / 257 (by run depth: < 0.5 km 2.3, 0.5-1 km 22, 1-2 km 67, 2-4 km 157); low stratiform
+  22 / 97 / 309 (by run depth: < 1 km 20, 1-2 km 44, 2-4 km 108, > 4 km 178 - the deep frontal columns carry the
+  median); mid stratiform 19 / 44 / 99; mid cumuliform 7 / 30 / 92; cirrus (ice > 50 %) 0.18 / 2.3 / 12 (runs < 1.5 km
+  0.05). The < 1 km low stratiform bin (median 20, observed St / Sc 5-30) does not open the "overcast too dark" finding
+  (threshold 40); the deep runs are thick by their water, not by the renderer.
 - Real-date plausibility (final review I4, `test_weather_snapshot.cpp` "Real-date columns ...", fixture
   `era5_plausibility.toml` by `tools/validation/gen_weather_fixtures.py`: ERA5 columns of 2024-04-08 18 UTC and
   2025-08-15 18 UTC at Starbase, the Cape, the North Atlantic, the warm pool and the most overcast cell near Starbase,

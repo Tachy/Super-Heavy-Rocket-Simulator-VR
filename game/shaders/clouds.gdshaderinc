@@ -561,6 +561,17 @@ float cloud_detail_perturbation(vec3 offset_local, float state) {
 	return p;
 }
 
+// The largest value the detail levels can add for the state (cloud_detail_perturbation's lifted terms at the detail's
+// largest value 1: the weights sum to 1, core cloud_noise.cpp): a shape value this far below the threshold stays clear.
+float cloud_detail_lift_bound(float state) {
+	float bound = 0.0;
+	for (int k = 0; k < CLOUD_DETAIL_LEVELS; k++) {
+		float w = clamp(state - float(k), 0.0, 1.0);
+		bound += w * cloud_level_lift[k] * max(cloud_level_amplitude[k], 0.0) * (1.0 - cloud_detail_mean);
+	}
+	return bound;
+}
+
 #ifdef CLOUD_SHAPE_PREFILTER
 // Four uniform numbers in [0, 1) of the ray (set by the cloud pass per pixel and frame: blue noise + R4 sequence).
 vec4 cloud_shape_subpixel = vec4(0.5);
@@ -637,13 +648,25 @@ float cloud_extinction_in_cell(CloudCell cell, vec3 offset_local, float height_m
 #endif
 	float state = cloud_detail_state(footprint_m);
 	float threshold = cloud_threshold(cell.fraction, state);
-	float detail = state > 0.0 ? cloud_detail_perturbation(offset_local, state) : 0.0;
 	vec3 types = cloud_type_weights(cell);
-	float ramp = 0.0;
-	for (int type = 0; type < 3; type++) {  // the types' ramps mixed by their weights (one lookup outside the bands)
+	vec4 shape[3] = vec4[3](vec4(0.0), vec4(0.0), vec4(0.0));
+	float shape_max = -1.0;
+	for (int type = 0; type < 3; type++) {  // one lookup per type present (one outside the bands)
 		if (types[type] > 0.0) {
-			vec4 s = texture(cloud_noise_shape, cloud_type_shape_coordinates(type, offset_local, height_m));
-			ramp += types[type] * cloud_edge_ramp(s.r + detail, threshold, s.a);
+			shape[type] = texture(cloud_noise_shape, cloud_type_shape_coordinates(type, offset_local, height_m));
+			shape_max = max(shape_max, shape[type].r);
+		}
+	}
+	// Clear air at the shape alone: no detail can lift the value over the threshold (the ramps are 0 there exactly -
+	// the same result without the detail's lookups; Task 10).
+	if (shape_max + cloud_detail_lift_bound(state) <= threshold) {
+		return 0.0;
+	}
+	float detail = state > 0.0 ? cloud_detail_perturbation(offset_local, state) : 0.0;
+	float ramp = 0.0;
+	for (int type = 0; type < 3; type++) {  // the types' ramps mixed by their weights
+		if (types[type] > 0.0) {
+			ramp += types[type] * cloud_edge_ramp(shape[type].r + detail, threshold, shape[type].a);
 		}
 	}
 	if (ramp <= 0.0) {

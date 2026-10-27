@@ -26,6 +26,13 @@ not count for VR.
 - `nvidia-smi --query-gpu=timestamp,utilization.gpu,clocks.gr,memory.used,power.draw,temperature.gpu,clocks_throttle_reasons.active --format=csv -l 1`
   alongside a VR run: GPU-bound runs sit at 100 % and the 450 W cap (reason 0x4).
 - Time panel: "Bildrate: N fps (x ms)" (`TimePanel.frame_rate_line`).
+- Per GPU pass at a fixed camera (static clouds Task 10): `render_check.gd -- <view> --cloud_quality=vr
+  --render_scale=1.65 --fixed_exposure --gpu_time=120 --gpu_passes` waits for the light cache to settle and prints the
+  median / p99 per timestamp interval: `cloud_light_fill`, the cloud pass's kernels `cloud_pass_march` /
+  `_outline` / `_refine` / `_temporal` / `_upsample` (their sum `cloud_pass`; `CloudEffect._stamp` splits the compute
+  list only while timestamps are captured), `shadow_pass` (the cloud shadow maps), `opaque_and_sky`,
+  `transparent_and_post`. `--cloud_divisor=<n>` overrides the preset's march resolution. `terrain_perf --gpu_passes`
+  sums the `cloud_pass_*` kernels as `cloud_pass` too. Runs repeat to about +-1.5 ms at 40 ms (GPU clocks).
 
 ## Desktop VR-pixel proxy (Task 4)
 
@@ -267,3 +274,62 @@ once - and the B-spline column, the mixed-depth upsample; `t8_vrperf_t8f_fix1.lo
 pan low 51.67 / 58.45, pan high 36.15 / 40.76, cape 0.45 / 0.73 - within the run-to-run spread of the two-pass numbers
 above (the proxy's phases see the column model only at their farthest pixels). Orbit views, where every pixel beyond
 ~1 km footprints is the column model, were not measured (Task 10).
+
+## Cloud pass profile (static clouds Task 10, 2026-10-27)
+
+VR pixel proxy per pass (`render_check --cloud_quality=vr --render_scale=1.65 --fixed_exposure --gpu_time=120
+--gpu_passes`, light cache settled, daylight; sdd `t10_prof.sh`, logs `t10_prof_<view>_<tag>.log`). Views: ground
+(Starbase, analog weather 2024-06-15 21 UTC, az 90 el 25), 3 km (el -5), 9 km deck (el -10), 20 km (el -15), 400 km
+(nadir, cf 0.5 slab 1-2 km), backlit cumulus (cf 0.5 slab, Sun 15 deg, at the Sun), the Sun through a tau-5 deck.
+Without weather the ground frame is 0.99 ms. ms, median of 120 frames, before (base 058318e) / after (the clear-air
+detail skip, `weather-clouds.md` "Steep edges"; images bit-identical in all seven views):
+
+| View | frame | cloud pass | march kernel | outline refine | shadow maps |
+|---|---|---|---|---|---|
+| ground | 46.2 / 42.6 | 44.6 / 40.9 | 34.0 / 30.9 | 10.4 / 10.0 | 0.59 |
+| 3 km | 41.8 / 38.0 | 38.9 / 35.2 | 28.7 / 25.5 | 9.9 / 9.7 | 0.59 |
+| 9 km deck | 52.9 / 51.8 | 49.9 / 48.9 | 38.0 / 37.6 | 11.7 / 11.1 | 0.59 |
+| 20 km | 34.2 / 33.8 | 31.4 / 30.6 | 22.1 / 21.9 | 9.0 / 8.6 | 0.60 |
+| 400 km | 8.5 / 8.5 | 6.1 / 6.2 | 4.0 / 3.9 | 2.0 / 2.1 | 0.60 |
+| backlit Cu | 16.4 / 16.1 | 15.0 / 14.7 | 10.7 / 10.2 | 4.2 / 4.4 | 0.59 |
+| Sun through deck | 8.4 / 8.2 | 7.3 / 7.1 | 7.2 / 7.0 | 0 | 0.57 |
+
+The outline pass's list kernel, the temporal copy and the upsample are 0.01-0.12 ms; the light cache fill is 0 once
+settled. Run-to-run spread about +-1.5 ms at 40-50 ms.
+
+Where the milliseconds are (ablations on the base: one part switched off or changed, temporary defines; ground / deck
+cloud pass, ms saved):
+- the march's sub-samples (up to 8 per step, each a field lookup and the shapes): 1 sub-sample instead of 8 saves
+  23 / 29 ms - the largest item; of it the field lookups per sub-sample (the step's cell reused) 8 / 10 ms;
+- the far tier (pass 1 of the hand-over, march and outline sub-rays): 13 / 21 ms; its 20-34 km band (marched by both
+  passes) 4.6 / 3.9, its light path (5 samples) 2.0 / 4.1;
+- the hybrid cascades' near light march (12-32 samples per lit step): 12.6 / 11.2 ms; the whole light 13.4 / 12.7;
+  the per-sample fallback march 0;
+- the outline refinement (3 coverage-only sub-rays per outline pixel): 10.4 / 11.7 ms;
+- the air shadow (32 segments x 3 shadow-map samples + 33 single-scattering lookups): 5.3 / 2.3 ms;
+- the step-weight limit (CLOUD_MAX_STEP_WEIGHT) 0.15 -> 0.3: 4.7 / 5.2 ms (fewer light samples in dense cloud).
+
+Tried and not taken (all measured on the ground / deck views):
+- Clear-air skip of the detail's three lookups (shapes first; exact): -3.7 ms ground, -1.0 deck (noise level) -
+  shipped.
+- Empty-space skip of whole steps from conservative bounds (the field texels' largest fraction and ice share, the
+  lowest threshold, the shape's widened 4- / 8-texel block maxima from the core): bit-identical but +9 / +13 ms - the
+  block maxima of the shape noise lie above the threshold almost everywhere (its 500 m octaves), so the bound costs
+  without skipping. Patch kept (sdd `t10_skip2_*.patch`).
+- Caching the four LCL base texels per ray (exact): +8-13 ms (the state held across the march loop costs occupancy).
+- Air shadow: one lookup per segment instead of 3, 16 segments, lazy single-scattering lookups only for shadowed
+  segments (exact): -2 / 0, -0.5 / -0.4, -0.2 / +1.5 ms: noise level.
+- Far light 3 samples instead of 5: -1.5 / -0.6 ms; the near march capped at 22 samples: ~0; the pass loop unrolled
+  (far / near specialised): ~0.
+
+Options with a look trade (not applied; user decision, crops `screenshots/static_clouds/t10_opt_*.png`: base | 4
+sub-samples | divisor 4):
+- at most 4 sub-samples instead of 8: -9.3 / -8.9 ms (-23 / -19 %); the grain check passed with 4 in Task 5c (1.8 %
+  vs the 8 x reference's alpha, 8: 0.8 %); visible: slightly more fine speckle in the far deck band.
+- march divisor 4 instead of 3 (1.8 x fewer rays): -11.3 / -14.3 ms (-28 / -30 %); visible: softer near cumulus,
+  blockier outlines of the lower deck.
+- step-weight limit 0.3 instead of 0.15 (a dense step's light sampled for up to 30 % of the pixel): -4.7 / -5.2 ms
+  (-12 / -11 %); crops `t10_opt_*_stepweight.png`: mean |difference| 0.5-0.7 of 255, the lobes' shading a little
+  flatter; not checked against the reference cases (cloud_check 8 / 9, the grain check).
+Even all of them together leave the ground view near 20 ms and the deck near 25 ms in the proxy - the budget (cloud
+p99 2.5 ms x the stereo correction) is out of reach of optimisation without a different march design.
