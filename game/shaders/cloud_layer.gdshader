@@ -4,7 +4,11 @@ shader_type spatial;
 // full-resolution result (CloudEffect, compute: shaders/cloud_pass.gdshaderinc) over the opaque scene: premultiplied,
 //     final = T_bg x scene + (1 - T_bg) S_c + T_c L
 // (the pass's colour holds the clouds' light seen through the air T_c L plus the air in front of them (1 - T_bg) S_c,
-// its alpha 1 - T_bg; the scene's own air light behind a cloud is dimmed with it).
+// its .a the background's transmittance T_bg itself; the scene's own air light behind a cloud is dimmed with it), in
+// two passes of the quad: this one multiplies the scene by T_bg (blend_mul), its next pass (cloud_layer_light.gdshader)
+// adds the colour (blend_add). The premultiplied blend's factor 1 - alpha is rounded to the half-float target's
+// precision (measured: 1 - T was kept to 2^-11, so the Sun's disk stayed at 4.9e-4 of itself behind any deck of a slant
+// tau > 7.6); the multiply's factor T keeps the half float's relative precision.
 //
 // The raymarch itself (cloud_pass.gdshaderinc CLOUD_MARCH, with clouds.gdshaderinc and atmosphere.gdshaderinc):
 // - Steps: outside the field's cloudy region coarse steps growing with the distance (the fraction that spans the
@@ -24,7 +28,7 @@ shader_type spatial;
 // - Compositing: the clouds' light seen through the air to their transmittance-weighted mean distance d_c
 //   (atm_to_point_offset: T_c, S_c) - exact for cloud light at one distance; a deck seen at a slant spreads over its
 //   depth.
-render_mode unshaded, blend_premul_alpha, depth_draw_never, depth_test_disabled, cull_disabled, shadows_disabled,
+render_mode unshaded, blend_mul, depth_draw_never, depth_test_disabled, cull_disabled, shadows_disabled,
 		fog_disabled, skip_vertex_transform;
 
 global uniform bool cloud_enabled;
@@ -38,10 +42,9 @@ void fragment() {
 	if (!cloud_enabled) {
 		discard;
 	}
-	vec4 c = texture(cloud_image, vec3(SCREEN_UV, float(VIEW_INDEX)));
-	if (c.a <= 0.0 && dot(c.rgb, c.rgb) <= 0.0) {
+	float transmittance = texture(cloud_image, vec3(SCREEN_UV, float(VIEW_INDEX))).a;  // T_bg
+	if (transmittance >= 1.0) {
 		discard;
 	}
-	ALBEDO = c.rgb;
-	ALPHA = c.a;
+	ALBEDO = vec3(transmittance);
 }

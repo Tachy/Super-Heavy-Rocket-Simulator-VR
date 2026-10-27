@@ -584,3 +584,36 @@ Validation text then (cloud_far_check section 6, one site each):
   nadir / 45 deg, mean radiance of the central square, tolerance 10 %: the column model vs the converged volume
   0.927 / 0.940 (broken; before fix round 1 0.891 / 0.799) and 0.988 / 1.008 (deck), vs the far tier's shapes (the
   brightness across the fade) 0.973 / 0.993 and 0.992 / 1.004; no speckle
+
+## The Sun's disk through cloud, alpha in the cloud image (superseded by static clouds Task 9 fix round 1, 2026-10-27)
+
+The bullet as it stood after Task 9 (the cloud image stored alpha; the composite blended premultiplied alpha; the disk
+clamp per channel; numbers: the disk's mean 6.9e4 was given as its centre):
+
+- **The Sun's disk through cloud** (static clouds Task 9; `sun.gdshader`, `World.sun_disc_scene_value`,
+  `cloud_pass.gdshaderinc` `CLOUD_SUN_*`, `CLOUD_ALPHA_SNAP`): the disk is drawn at its physical radiance on the scene
+  scale (a white Lambertian in full Sun = `Atmosphere.DAY_EXPOSURE` 1.5 = E / pi, so the disk is E / solid angle =
+  1.5 x (AU / R_sun)^2 = 6.9e4 over the limb law's mean 0.8; it was 30, 100 x a lit ground instead of 1.5e5 x, under
+  which the clouds' own forward peak - the phase function's HG part, g 0.995 - outshone the disk 200 x at tau 2 and the
+  disk vanished under any cloud). The composite is linear in the scene behind the clouds, so the disk through cloud is
+  disk x (1 - alpha) = disk x T_bg of the march. The march continues past the scaled criterion (which stops at
+  exp(-tau) ~ 5e-4) on rays within `CLOUD_SUN_RAY_ANGLE` 0.014 rad of the Sun down to T_bg 1e-9 (coverage-only
+  sub-rays too), and the pass snaps an alpha within 2^-12 of 1 to 1 (the half-float store of the cloud image rounds
+  toward zero: 1 - 1e-5 came out as 1 - 2^-11, a leak of 29 on the scene scale behind any thick cloud). Limit: the
+  image's alpha is a half float, so a direct beam below T ~ 2.4e-4 (slant tau 8.3, vertical 6.8 at mu 0.82) is
+  lost (the disk vanishes there, where it would still outshine a lit ground up to slant tau ~11) and above it is
+  quantised to 4.9e-4 steps (tau 5: 8 %). The shapes' transmittance along the Sun's ray is the Jensen mean of
+  exp(-tau) over the slab's low shape octaves: 15 % above the grid mean's at tau 2, 40 % at tau 5.
+
+Diagnostics bullet then:
+
+- `cloud_check.gd` with `STARSIM_SUN_ONLY=1`: section 13 alone (the Sun's disk through slabs of tau 2 / 5 / 10 / 20 at
+  55 deg: the disk's part = the render with the disk less without it, within 5 % (or 4.9e-4 of the clear disk) of the
+  march's shapes transmittance, the march's slant tau within 8 % of the core's, brighter than the terrain while
+  expected to, the aureole 303 x the radiance 60 deg off; near march and far tier alone). `render_check.gd
+  --sun_through_deck=<tau> --lat= --lon=` renders the view (`.superpowers/sdd/.../img/t9_tau*.png`).
+
+Measured then (fix round 1, at 11283a0): the premultiplied blend rounds its factor 1 - alpha to the half-float target
+too, so even with alpha computed exactly the disk stayed at 2^-11 = 4.9e-4 of itself behind every deck of slant tau
+7.6+ (disk/clear 4.89e-4 at vertical tau 7, 8, 9, 10); the per-channel clamp turned the 55 deg disk (81 500) into
+(60 000, 60 000, 51 456) instead of the hue (60 000, 47 546, 37 918).

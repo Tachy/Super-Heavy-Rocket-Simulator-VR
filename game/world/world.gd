@@ -9,7 +9,7 @@ const EARTH_SEMI_MAJOR_AXIS_M := 6378137.0
 const EARTH_FLATTENING := 1.0 / 298.257223563
 const EARTH_MEAN_RADIUS_M := 6371000.0
 const MOON_RADIUS_M := 1737400.0
-const SUN_RADIUS_M := 695700000.0
+const SUN_RADIUS_M := Atmosphere.SUN_RADIUS_M
 const GROUND_EYE_HEIGHT_M := 2.0
 ## [E] Lag of the sim snapshot behind the instant it was asked for in the previous frame tolerated before the clock is
 ## held back (the sim thread answers last frame's request; a genuinely lagging sim falls further behind).
@@ -444,12 +444,23 @@ func _input(event: InputEvent) -> void:
 
 
 ## The Sun disc's central scene value: its physical radiance on the scene scale of a white Lambertian surface in full
-## Sun (Atmosphere.DAY_EXPOSURE = E / pi): L_disc = E / solid angle, so DAY_EXPOSURE x pi / (pi (R / AU)^2) = 1.5 x 46 200
-## = 6.9e4, over the disc's mean limb factor. The Sun seen through cloud then stays above the lit ground until the
-## direct beam falls to the ground's radiance (static clouds Task 9); sun.gdshader clamps it to the half-float range.
+## Sun (Atmosphere.DAY_EXPOSURE = E / pi): the disc's mean L = E / solid angle, so DAY_EXPOSURE x pi / (pi (R / AU)^2) =
+## 1.5 x 46 200 = 6.9e4, its centre that over the mean limb factor (1 - u / 3): 8.67e4. The Sun seen through cloud then
+## stays above the lit ground until the direct beam falls to the ground's radiance (static clouds Task 9); sun.gdshader
+## clamps it to the half-float range (above T_atm x the exposure gain ~0.69, colour kept).
 static func sun_disc_scene_value() -> float:
 	var ratio := Atmosphere.ASTRONOMICAL_UNIT_M / SUN_RADIUS_M
 	return Atmosphere.DAY_EXPOSURE * ratio * ratio / (1.0 - SUN_LIMB_DARKENING / 3.0)
+
+
+## The Sun disc's material (shaders/sun.gdshader) at its physical centre value and limb darkening - the game's and the
+## checks' one source.
+static func sun_disc_material() -> ShaderMaterial:
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/sun.gdshader")
+	material.set_shader_parameter("intensity", sun_disc_scene_value())
+	material.set_shader_parameter("limb_darkening", SUN_LIMB_DARKENING)
+	return material
 
 
 func _place_sun(sun_from_camera_m: Vector3) -> void:
@@ -541,11 +552,8 @@ func _setup_bodies(data_dir: String) -> void:
 	var sphere := SphereMesh.new()
 	sphere.radius = 1.0
 	sphere.height = 2.0
-	var sun_material := ShaderMaterial.new()
-	sun_material.shader = load("res://shaders/sun.gdshader")
-	sun_material.set_shader_parameter("intensity", sun_disc_scene_value())
 	sun_disk.mesh = sphere
-	sun_disk.material_override = sun_material
+	sun_disk.material_override = sun_disc_material()
 	sun_disk.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	sun_disk.name = "Sun"
 	add_child(sun_disk)

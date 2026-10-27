@@ -222,6 +222,14 @@ limit continuous. cloud_pass, median / max of the per-second means, ms:
 +97 / +75 / +72 % (medians) shipped, +39 / +27 / +25 % with 4 (user: quality first; both pass cloud_grain_check, 8
 within 0.8 % of the 8 x reference's cover and alpha, 4 within 1.8 %).
 
+## The Sun through cloud (static clouds Task 9 fix round 1, 2026-10-27)
+
+VR pixel proxy (`render_check --sun_through_deck=5 --cloud_quality=vr --render_scale=1.65 --resolution 2560x1440
+--fov=90 --gpu_time=240`, 30N 95W, Sun 67 deg up, RTX 4090): the whole frame's GPU time looking at the Sun through the
+deck 14.492 ms median (p99 19.58), the same deck with the Sun behind (`--away_from_sun`) 14.490 ms (p99 19.51): the
+march toward the Sun past the scaled criterion (rays within 0.014 rad, transmittance only) costs nothing measurable.
+The composite's second quad pass (the scene x T, then + the colour) is in both numbers (not measured apart).
+
 ## Near / far hand-over (static clouds Task 8, 2026-10-27)
 
 Same VR proxy and weather as the Task 5c fix round (`t8_vrperf_*.log`, base 1cb02f6 = the table above, max 8

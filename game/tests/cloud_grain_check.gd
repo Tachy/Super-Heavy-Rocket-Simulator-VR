@@ -275,9 +275,10 @@ class _Picture:
 				var c := image.get_pixel(x, y)
 				var i := y * w + x
 				luminance[i] = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
-				alpha[i] = c.a
-				covered += 1.0 if c.a > ALPHA_MIN else 0.0
-				alpha_mean += c.a
+				var a := 1.0 - c.a  # the cloud image holds the background's transmittance in .a
+				alpha[i] = a
+				covered += 1.0 if a > ALPHA_MIN else 0.0
+				alpha_mean += a
 				luminance_mean += luminance[i]
 		alpha_mean /= float(w * h)
 		luminance_mean /= float(w * h)

@@ -842,9 +842,18 @@ func _set_handover(band: Vector2) -> void:
 	ShaderGlobals.set_value(&"cloud_handover_far_m", band.y)
 
 
-## The cloud pass's own image (premultiplied colour + alpha, the view's resolution).
+## The cloud pass's own image (premultiplied colour + alpha, the view's resolution; the pass stores the background's
+## transmittance T = 1 - alpha in .a, turned back into alpha here).
 func _cloud_image() -> Image:
-	return _world.clouds.effect.output.get_layer_data(0)
+	var image := _world.clouds.effect.output.get_layer_data(0)
+	if image == null:
+		return image
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			var c := image.get_pixel(x, y)
+			c.a = 1.0 - c.a
+			image.set_pixel(x, y, c)
+	return image
 
 
 ## A ground view at site (lat, lon) with the eye eye_height_m above the core's surface; waits until the terrain, the

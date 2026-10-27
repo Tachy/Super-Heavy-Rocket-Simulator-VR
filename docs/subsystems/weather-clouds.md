@@ -290,7 +290,9 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   3. depth-aware upsampling (bilinear x exp(-4 |ln(D / D_i)|)) into a full-resolution array (layer = view); a VR eye's
      tent gather has the largest radius 2 with the jittered march (`CloudEffect.TENT_RADIUS_*`, the centre block's
      params.z). With the deterministic march the final gather (eyes and desktop) is a 4 x 4 Catmull-Rom filter (the
-     centre block's params.w; depth weights as above, alpha clamped to [0, 1], colour >= 0): bilinear left 1-march-pixel
+     centre block's params.w; depth weights as above, T clamped to [0, 1], colour >= 0; T >= 0.5 from 1 - the gathered
+     alpha, below from the gathered T - the normalised sum of T = 1 taps with cancelling lobes flickered one half-float
+     step below 1 on the moving sea, fix round 1 of Task 9): bilinear left 1-march-pixel
      stair steps on the binary cumulus outlines, Catmull-Rom rounds their corners at no march cost (Task 3 fix round 1).
      Debug outputs stay bilinear (the checks' quantities: the filter's overshoot raised section 8's worst pixels at
      dark silhouettes from 12 to 38 %). Where the taps' depth weights differ by more than a factor 2
@@ -298,7 +300,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      terrain's horizon seen from altitude) only the kernel's positive part is used (static clouds Task 8 fix round 1):
      the negative lobes, renormalised over the taps of one depth, alternated with the checkerboard and dotted the
      horizon row with dark and bright pixels.
-  The composite quad (`cloud_layer.gdshader`, first in the transparent pass, premultiplied) blends it over the scene;
+  The composite quad (`cloud_layer.gdshader` x T, its next pass `cloud_layer_light.gdshader` + the colour: first in the
+  transparent pass, premultiplied; the images' .a is T, see the Sun's disk) blends it over the scene;
   plumes draw over it, MSAA resolves stay intact. Off beyond 1.5e7 m (scaled space: the far field below). A new size
   (resize, divisor) creates new images; the main thread shows the new result before the next frame (`CloudEffect.swap_output`:
   replacing it inside the render callback broke the composite's material for a frame), the old images are freed three
@@ -490,20 +493,30 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     field down to the limb, no cell lattice, no speckle (`t8f_orbit*`).
   The debug outputs march the whole segment without the far tier (the checks' physical quantities of the volume). The
   column texture reaches the compute kernels through the same swizzled view as Godot's shaders (cover in .a).
-- **The Sun's disk through cloud** (static clouds Task 9; `sun.gdshader`, `World.sun_disc_scene_value`,
-  `cloud_pass.gdshaderinc` `CLOUD_SUN_*`, `CLOUD_ALPHA_SNAP`): the disk is drawn at its physical radiance on the scene
-  scale (a white Lambertian in full Sun = `Atmosphere.DAY_EXPOSURE` 1.5 = E / pi, so the disk is E / solid angle =
-  1.5 x (AU / R_sun)^2 = 6.9e4 over the limb law's mean 0.8; it was 30, 100 x a lit ground instead of 1.5e5 x, under
-  which the clouds' own forward peak - the phase function's HG part, g 0.995 - outshone the disk 200 x at tau 2 and the
-  disk vanished under any cloud). The composite is linear in the scene behind the clouds, so the disk through cloud is
-  disk x (1 - alpha) = disk x T_bg of the march. The march continues past the scaled criterion (which stops at
-  exp(-tau) ~ 5e-4) on rays within `CLOUD_SUN_RAY_ANGLE` 0.014 rad of the Sun down to T_bg 1e-9 (coverage-only
-  sub-rays too), and the pass snaps an alpha within 2^-12 of 1 to 1 (the half-float store of the cloud image rounds
-  toward zero: 1 - 1e-5 came out as 1 - 2^-11, a leak of 29 on the scene scale behind any thick cloud). Limit: the
-  image's alpha is a half float, so a direct beam below T ~ 2.4e-4 (slant tau 8.3, vertical 6.8 at mu 0.82) is
-  lost (the disk vanishes there, where it would still outshine a lit ground up to slant tau ~11) and above it is
-  quantised to 4.9e-4 steps (tau 5: 8 %). The shapes' transmittance along the Sun's ray is the Jensen mean of
-  exp(-tau) over the slab's low shape octaves: 15 % above the grid mean's at tau 2, 40 % at tau 5.
+- **The Sun's disk through cloud** (static clouds Task 9 + fix round 1; `sun.gdshader`, `World.sun_disc_material` /
+  `sun_disc_scene_value`, `cloud_pass.gdshaderinc` `CLOUD_SUN_*`, `cloud_layer.gdshader` +
+  `cloud_layer_light.gdshader`): the disk is drawn at its physical radiance on the scene scale (a white Lambertian in
+  full Sun = `Atmosphere.DAY_EXPOSURE` 1.5 = E / pi, so the disk's mean is E / solid angle = 1.5 x (AU / R_sun)^2 =
+  6.9e4, its centre that over the limb law's mean 1 - u / 3 = 0.8: 8.67e4; it was 30, under which the clouds' own
+  forward peak - the phase function's HG part, g 0.995 - outshone the disk 200 x at tau 2 and the disk vanished under
+  any cloud). `sun.gdshader` scales the colour as a whole down to a largest channel of 6e4 (inside the half-float scene
+  buffer): the centre clips where T_atm x the exposure gain > 0.69 - a high Sun from the ground (55 deg up: 81 500 -> 60
+  000), above the haze, in space (known limit; the colour is kept). The cloud pass's images hold the background's
+  transmittance T = 1 - alpha in .a (fix round 1; the march computes it without the cancellation of 1 - alpha: T_bg plus
+  the hand-over's dropped step shares), and the composite draws its quad in two passes: the scene x T (`blend_mul`),
+  then + the colour (`blend_add`, the next pass). Every stage (edge refine mean, temporal mix / clamp, tent /
+  Catmull-Rom gather) is linear in T. A half float resolves T relatively: normal to 6.1e-5, subnormal to 6e-8 (measured
+  on the RTX 4090: subnormals survive the compute store and the multiply blend - the disk at slant tau 12.2 is 0.985 of
+  the march's T). Before, alpha was stored (spacing 2^-11 below 1) and the premultiplied blend rounds its factor 1 -
+  alpha to the target's half precision too (measured: the disk stuck at 2^-11 = 4.9e-4 of itself behind every deck of
+  slant tau 7.6 and more). The march continues past the scaled criterion (which stops at exp(-tau) ~ 5e-4) on rays
+  within `CLOUD_SUN_RAY_ANGLE` 0.014 rad of the Sun down to T_bg 1e-9 (coverage-only sub-rays too), with the
+  background's transmittance alone once T_sc < 0.01 (no light samples: no brighter disc of the last percent around the
+  Sun, and cheaper). The disk follows the drawn cloud: the shapes' transmittance along the Sun's ray is above exp(-tau /
+  mu) of the grid mean (1.15 x at vertical tau 2, 1.41 x at 5, 1.63 / 1.75 / 1.83 / 1.99 x at 7 / 8 / 9 / 10, mu 0.82):
+  the plane-parallel bias of unresolved inhomogeneity - exp(-tau) is convex, so the mean transmittance through a
+  variable cloud exceeds exp(-mean tau) (Cahalan et al. 1994, J. Atmos. Sci. 51, 2434) - accepted as physics (controller
+  ruling 2026-10-27; open point below for the CPU's grid-mean value).
 - **Quality presets** [E]: desktop 128 coarse / 512 max steps, fine 1.2 %, light 6 near + 3 far samples; VR 96 / 384,
   2.5 %, 5 + 2 (static clouds Task 3: the deterministic march lost cumulus bases with 48 coarse steps; case 9 passes
   with the 2.5 % fine step; cost in `vr-performance.md`, the budget is Task 10's); both 3 detail levels; resolution 1/2 desktop, 1/3 of the VR centre view (VR performance plan part 2); temporal weight floor 1/32 /
@@ -753,11 +766,16 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   logic: `tests/cloud_light_cache_test.gd` (headless).
 - `CloudShadowEffect.grid_mean_only` (checks): the near shadow map with the grid mean. `CloudShadowEffect.ran_msec`: the
   render callback's last run; `CloudLayer` takes the maps as valid (`cloud_shadow_valid`) only within 250 ms of it.
-- `cloud_check.gd` with `STARSIM_SUN_ONLY=1`: section 13 alone (the Sun's disk through slabs of tau 2 / 5 / 10 / 20 at
-  55 deg: the disk's part = the render with the disk less without it, within 5 % (or 4.9e-4 of the clear disk) of the
-  march's shapes transmittance, the march's slant tau within 8 % of the core's, brighter than the terrain while
-  expected to, the aureole 303 x the radiance 60 deg off; near march and far tier alone). `render_check.gd
-  --sun_through_deck=<tau> --lat= --lon=` renders the view (`.superpowers/sdd/.../img/t9_tau*.png`).
+- `cloud_check.gd` with `STARSIM_SUN_ONLY=1`: section 13 alone (36 checks): the cloudless disk's centre = the core's
+  sun transmittance x `World.sun_disc_scene_value` within 3 % per channel (13 deg up: unclipped; 55 deg up: clipped
+  with its colour kept); through slabs of vertical tau 2 / 5 / 7 / 8 / 9 / 10 / 20 at 55 deg the disk's part (the
+  render with the disk less without it) within 5 % of the march's shapes transmittance (debug 4; and the two renders'
+  half-float resolution at most half of it), at or above exp(-tau / mu) of the core, exactly 0 where the march's T is
+  below the store (tau 20: and the core's T there too), the march's slant tau within 8 % of the core's, brighter than
+  the terrain while expected to, the aureole >= 100 x (303 x) the radiance 60 deg off; near march and far tier alone
+  (tau 5 / 20). `render_check.gd --sun_through_deck=<tau> --lat= --lon=` renders the view
+  (`.superpowers/sdd/.../img/t9f_tau*.png`, `t9f_edge.png`); `--gpu_time[=120]` prints the root viewport's GPU render
+  time (median, p99), `--render_scale=1.65` with `--resolution 2560x1440` the VR pixel proxy.
 - `cloud_check.gd` with `STARSIM_OUTLINE_ONLY=1`: section 11 alone (`STARSIM_VERBOSE=1` prints the worst row's alpha).
 - `cloud_check.gd` with `STARSIM_LCL_ONLY=1`: section 12 alone (the flat cloud base on a snapshot built from fields,
   `StarsimCore.weather_write_column_snapshot`: optical depth straight up 0.9993 of the core's column (1 % allowed), no
@@ -842,6 +860,13 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 - Ice uses the droplet phase function and thin sheets without a fibre direction; no ground-reflected light into the
   cloud bases; the sky light kept in the forward peak is left out.
 - A resize shows the clouds of the old size for one frame (scaled), then the new ones.
+- The Sun's direct beam: the drawn disk follows the shapes (above exp(-tau / mu), the plane-parallel bias), the CPU's
+  `weather_cloud_light` `sun_transmittance` is the grid mean's exp(-tau / mu) (tau 5 at 55 deg: 0.00235 vs the disk's
+  0.00331). That CPU value lights the vehicles (direct Sun) and enters the eye adaptation (`Atmosphere`
+  `cloud_light_at`); the ground and the clouds themselves take the GPU paths (shadow maps, march). Open: whether the
+  vehicles' and the eye's direct Sun should follow the drawn shapes' transmittance at the light point.
+- The Sun's disk is clipped at a largest channel of 6e4 (half-float scene buffer) where T_atm x the exposure gain >
+  0.69 (high Sun, above the haze, in space; by up to 31 %), its colour kept; through cloud it is dimmed from that.
 - Light (Task 9): the vehicles' light and the eye adaptation are the grid mean at one point (a vehicle in a gap
   between cumuli gets its cell's mean, not the shadow next to it; under a deck the same within 0.4 %); one light point
   as before (the booster far below the ship gets the followed body's light). Ambient on vehicles = Godot's clear-sky

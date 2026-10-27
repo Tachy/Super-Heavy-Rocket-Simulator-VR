@@ -162,7 +162,8 @@ var far_3d_light := true:
 
 var _core: StarsimCore
 var _quad := MeshInstance3D.new()
-var _material := ShaderMaterial.new()
+var _material := ShaderMaterial.new()  ## the composite's first pass: the scene x T (cloud_layer.gdshader)
+var _light_material := ShaderMaterial.new()  ## its next pass: + the clouds' light (cloud_layer_light.gdshader)
 var _noise_task := -1
 var _noise_result := {}
 var _noise_textures: Array = []
@@ -205,6 +206,10 @@ func setup(core: StarsimCore) -> void:
 	_material.shader = load("res://shaders/cloud_layer.gdshader")
 	_material.render_priority = Material.RENDER_PRIORITY_MIN  # first in the transparent pass: plumes draw over it
 	_material.set_shader_parameter(&"cloud_image", effect.output)
+	_light_material.shader = load("res://shaders/cloud_layer_light.gdshader")
+	_light_material.render_priority = Material.RENDER_PRIORITY_MIN + 1  # right after the multiply
+	_light_material.set_shader_parameter(&"cloud_image", effect.output)
+	_material.next_pass = _light_material
 	_quad.mesh = quad
 	_quad.material_override = _material
 	_quad.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -330,8 +335,9 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	if effect.swap_output():  # the pass re-created its result (a new size): shown from the next frame on
 		# Unset first: the same resource again would leave the material's uniform set on the old RD texture, which the
 		# pass frees a few frames later (CloudEffect.FREE_DELAY_CALLBACKS).
-		_material.set_shader_parameter(&"cloud_image", null)
-		_material.set_shader_parameter(&"cloud_image", effect.output)
+		for material: ShaderMaterial in [_material, _light_material]:
+			material.set_shader_parameter(&"cloud_image", null)
+			material.set_shader_parameter(&"cloud_image", effect.output)
 	ShaderGlobals.set_value(&"cloud_blend", _w1)
 	var camera_render := Frames.to_render(camera_fixed_m)
 	var stretched := Vector3(camera_fixed_m.x, camera_fixed_m.y, camera_fixed_m.z * POLAR_STRETCH)

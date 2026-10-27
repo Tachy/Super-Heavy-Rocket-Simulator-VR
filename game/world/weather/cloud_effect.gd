@@ -3,7 +3,8 @@ extends CompositorEffect
 ## The cloud pass (M8 weather and clouds, Task 8): the raymarch at reduced resolution, per-eye temporal accumulation
 ## and the depth-aware upsampling to full resolution, as compute kernels (shaders/cloud_pass.gdshaderinc with
 ## atmosphere.gdshaderinc and clouds.gdshaderinc, ported by CloudShaderPort) after the opaque pass and the sky, before
-## the transparent pass. The result (premultiplied colour + alpha, one layer per view) is `output`; the composite quad
+## the transparent pass. The result (premultiplied colour + the background's transmittance T = 1 - alpha in .a, one
+## layer per view) is `output`; the composite quad
 ## (CloudLayer, shaders/cloud_layer.gdshader) blends it over the scene first in the transparent pass, so plumes and
 ## the other transparent objects draw over the clouds (and MSAA's resolve keeps the clouds). Reads the resolved depth.
 ## The march and the accumulation run once per frame in the centre view (VR performance part 2, user 2026-10-26: one

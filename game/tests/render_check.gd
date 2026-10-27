@@ -34,6 +34,8 @@
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
 #          optical depth (liquid = tau / 150 000 kg/m^3: beta = 150 LWC) and the view aimed at the Sun (static clouds Task 9).
+# GPU time: --gpu_time[=120] once settled, the root viewport's measured GPU render time over that many frames (median,
+#          p99); --render_scale=<f> renders the 3D view at f x the window per axis (1.65: the VR pixel proxy).
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -61,6 +63,7 @@ var _deterministic_left := -1  ## --deterministic: frames still to draw after th
 var _cache_settled := 0  ## --repeat_identical: consecutive frames with the light cache settled
 var _repeat_images: Array[Image] = []  ## --repeat_identical: the consecutive frames drawn so far
 var _repeat_failed := false  ## --repeat_identical: the frames differ (exit code 1)
+var _gpu_ms: Array[float] = []  ## --gpu_time: the measured frames' GPU render times
 
 
 func _initialize() -> void:
@@ -74,6 +77,11 @@ func _initialize() -> void:
 	_main = load("res://main.tscn").instantiate()
 	root.add_child(_main)
 	_start_s = Time.get_ticks_msec() / 1000.0
+	if _args.has("render_scale"):
+		root.scaling_3d_mode = Viewport.SCALING_3D_MODE_BILINEAR
+		root.scaling_3d_scale = float(_args["render_scale"])
+	if _args.has("gpu_time"):
+		RenderingServer.viewport_set_measure_render_time(root.get_viewport_rid(), true)
 
 
 func _process(_delta: float) -> bool:
@@ -165,6 +173,8 @@ func _process(_delta: float) -> bool:
 				return false
 		if _args.has("repeat_identical") and not _repeat_frames(world):
 			return false
+		if _args.has("gpu_time") and not _gpu_frames():
+			return false
 		print("render_check: ", world.weather.status_text())
 		print("render_check: clouds %s, field textures %.1f MB, last upload %.1f ms" % [world.clouds.state(),
 				world.clouds.field_texture_bytes / 1.0e6, world.clouds.last_upload_ms])
@@ -198,6 +208,20 @@ func _process(_delta: float) -> bool:
 			quit(1)
 		return true  # quit
 	return false
+
+
+## --gpu_time[=120]: collects the root viewport's GPU render time of that many frames; true when done (printed).
+func _gpu_frames() -> bool:
+	var wanted: int = int(_args["gpu_time"]) if _args["gpu_time"].is_valid_int() else 120
+	_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
+	if _gpu_ms.size() < wanted:
+		return false
+	var sorted := _gpu_ms.duplicate()
+	sorted.sort()
+	print("render_check: GPU render time over %d frames: median %.3f ms, p99 %.3f ms (render scale %.2f, %s)" % [
+			wanted, sorted[wanted / 2], sorted[mini(wanted - 1, int(0.99 * wanted))], root.scaling_3d_scale,
+			root.size])
+	return true
 
 
 ## --repeat_identical[=2]: once the light cache is settled (no fill, no cross-fade), collects that many consecutive

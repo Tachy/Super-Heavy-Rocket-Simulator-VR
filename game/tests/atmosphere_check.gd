@@ -436,7 +436,6 @@ enum StarCase { HIDDEN, UNCHANGED, VISIBLE }
 const STAR_UNCHANGED_TOLERANCE := 0.05
 const STAR_VISIBLE_FACTOR := 2.0
 const STAR_COLOR_INDEX := 0.6  ## B-V of the test star (near white)
-const SUN_RADIUS_M := 695700000.0
 const SUN_RENDER_DISTANCE_M := 2.0e7  ## World.SUN_RENDER_DISTANCE_M
 const SUN_MIN_RED_OVER_BLUE := 3.0
 const MOON_TOLERANCE := 0.03
@@ -488,11 +487,9 @@ func _sun_sample(label: String, camera_itrf_m: Vector3, sun_itrf: Vector3) -> vo
 	sphere.radius = 1.0
 	sphere.height = 2.0
 	disc.mesh = sphere
-	var material := ShaderMaterial.new()
-	material.shader = load("res://shaders/sun.gdshader")
-	disc.material_override = material
+	disc.material_override = World.sun_disc_material()  # the game's (its physical value)
 	disc.position = Frames.to_render(_earth_to_gcrf * sun_itrf) * SUN_RENDER_DISTANCE_M
-	disc.scale = Vector3.ONE * SUN_RADIUS_M * SUN_RENDER_DISTANCE_M / AU_M
+	disc.scale = Vector3.ONE * Atmosphere.SUN_RADIUS_M * SUN_RENDER_DISTANCE_M / AU_M
 	_viewport.add_child(disc)
 	var got := await _render(camera_itrf_m, sun_itrf, sun_itrf)
 	disc.queue_free()

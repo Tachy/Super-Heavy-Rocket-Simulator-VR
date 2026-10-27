@@ -16,7 +16,9 @@
 //    bit-identical image. The jittered one (the reference path): the start jitter is a blue-noise value per
 //    low-resolution pixel (cloud_noise.hpp, 64 x 64 tiled) offset per frame by the golden ratio (a low-discrepancy
 //    sequence in time): a function of the pixel and the frame alone - the same for both eyes. Out: premultiplied
-//    colour + alpha, and (march distance used, transmittance-weighted cloud distance). With CLOUD_EDGE_REFINE (the
+//    colour + the background's transmittance T = 1 - alpha (every image of the pass holds T in .a: its half float
+//    resolves the direct beam of the Sun's disk to T ~ 1e-7, where 1 - T had lost it below 2.4e-4; every stage is
+//    linear in it), and (march distance used, transmittance-weighted cloud distance). With CLOUD_EDGE_REFINE (the
 //    deterministic march's outline pass, static clouds Task 5b) the same kernel runs a second time: pixels on an
 //    outline get three fixed coverage-only sub-rays besides the centre ray (alpha: the mean of the four, colour: the
 //    centre's per alpha), all others are copied.
@@ -112,7 +114,8 @@ const uint CLOUD_OUTLINE_GROUP_PIXELS = 64u;  // the work group's invocations (8
 // smaller step is not resolved further by four rays).
 const float CLOUD_EDGE_ALPHA_STEP = 0.25;
 
-// The largest alpha difference between the march pixel and its 8 neighbours; opaque: the most opaque of the 3 x 3.
+// The largest alpha difference between the march pixel and its 8 neighbours (= of their T in .a); opaque: the most
+// opaque of the 3 x 3 (the least T).
 float cloud_outline_spread(ivec2 pixel, ivec2 low, vec4 coarse, out vec4 opaque) {
 	float spread = 0.0;
 	opaque = coarse;
@@ -120,7 +123,7 @@ float cloud_outline_spread(ivec2 pixel, ivec2 low, vec4 coarse, out vec4 opaque)
 		for (int i = -1; i <= 1; i++) {
 			vec4 c = texelFetch(coarse_color, clamp(pixel + ivec2(i, j), ivec2(0), low - 1), 0);
 			spread = max(spread, abs(c.a - coarse.a));
-			if (c.a > opaque.a) {
+			if (c.a < opaque.a) {
 				opaque = c;
 			}
 		}
@@ -179,12 +182,11 @@ const float CLOUD_MIN_STEP_M = 10.0;
 // Lower end of the shell: below every ground (the Dead Sea shore -430 m); the field holds layer 0 below 0 m.
 const float CLOUD_BOTTOM_M = -500.0;
 const float CLOUD_MIN_SCALED_TRANSMITTANCE = 0.01;
-// [E] The Sun's disk is seen through the cloud at its physical radiance (6.9e4 on the scene scale: 1.5e5 times a lit
-// ground's), so the background transmittance of rays toward it is marched on past the scaled criterion (which leaves
-// exp(-tau) ~ 5e-4 of the disk) down to CLOUD_SUN_MIN_TRANSMITTANCE: the disk x that is < 1e-4 of a lit ground. Those
-// rays: within CLOUD_SUN_RAY_ANGLE of the Sun (3 x the disk's radius 4.65e-3: the march pixel and the upsample).
-// [E] Half the spacing of half floats below 1 (2^-12): an alpha within it of 1 is stored as 1.
-const float CLOUD_ALPHA_SNAP = 2.44140625e-4;
+// [E] The Sun's disk is seen through the cloud at its physical radiance (its centre 8.67e4 on the scene scale, the
+// mean 6.9e4: 3e5 times a lit ground's), so the background transmittance of rays toward it is marched on past the
+// scaled criterion (which leaves exp(-tau) ~ 5e-4 of the disk) down to CLOUD_SUN_MIN_TRANSMITTANCE (the disk x that is
+// < 1e-4 of a lit ground) - the transmittance alone, without light samples. Those rays: within CLOUD_SUN_RAY_ANGLE of
+// the Sun (3 x the disk's radius 4.65e-3: the march pixel and the upsample).
 const float CLOUD_SUN_MIN_TRANSMITTANCE = 1.0e-9;
 const float CLOUD_SUN_RAY_ANGLE = 0.014;
 // [E] A coverage-only ray (cloud_march) ends where its background transmittance falls below this: its alpha is then
@@ -599,7 +601,9 @@ float cloud_structure_step(CloudCell cell, float climb) {
 	return CLOUD_STRUCTURE_TEXEL_FRACTION / max(climb / up_texel_m, across / across_texel_m);
 }
 
-// The raymarch of one ray (dir: Earth-local unit) up to scene_m; out: premultiplied colour, alpha, weighted distance.
+// The raymarch of one ray (dir: Earth-local unit) up to scene_m; out: premultiplied colour, alpha, weighted distance,
+// and the background's transmittance T = 1 - alpha computed without the cancellation of 1 - alpha (what the image
+// stores in .a: a half float resolves T relatively, the Sun's disk down to a slant tau of ~17).
 // The deterministic march (cloud_deterministic_march; static clouds Task 3): the first step ends on an Earth-fixed
 // height shell (CLOUD_PHASE_MIN_CLIMB), every sample - the view's and the light march's - at its step's midpoint
 // (jitter 0.5), and where a sample's extinction crosses CLOUD_SILHOUETTE_EXTINCTION_PER_M from below the entry point
@@ -615,9 +619,10 @@ float cloud_structure_step(CloudCell cell, float climb) {
 // with its light cache, the far tier from cloud_handover_near_m to the segment's end with the shapes band-limited at the
 // pixel footprint and the far light path - each step weighted by its pass's hand-over weight; composited below.
 void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 eclipse_far, bool coverage_only,
-		out vec3 color, out float alpha, out float cloud_m) {
+		out vec3 color, out float alpha, out float transmittance, out float cloud_m) {
 	color = vec3(0.0);
 	alpha = 0.0;
+	transmittance = 1.0;
 	cloud_m = 0.0;
 	CloudRay ray = cloud_ray(dir);
 	if (cloud_debug_output == 3) {
@@ -631,6 +636,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		CloudCell cell = cloud_field(lat_lon_h, cloud_debug_height_m);
 		color = vec3(cloud_coverage(cloud_shape_coordinates(offset_h, cloud_debug_height_m), cell.fraction));
 		alpha = 1.0;
+		transmittance = 0.0;
 		return;
 	}
 	vec2 top = cloud_sphere_crossing(ray, CLOUD_TOP_M);
@@ -692,6 +698,8 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	// distance.
 	vec3 pass_radiance[2] = vec3[](vec3(0.0), vec3(0.0));
 	float pass_alpha[2] = float[](0.0, 0.0);
+	// 1 - the pass's alpha as T_bg + the hand-over's dropped shares (1 - keep) of the steps' alpha: no cancellation.
+	float pass_rest[2] = float[](1.0, 1.0);
 	float pass_weighted[2] = float[](0.0, 0.0);
 	float transmittance_end = 1.0;    // the march's background transmittance at its end (the debug outputs)
 	float transmittance_front = 1.0;  // the march's in front of the hand-over band (the far tier's attenuation)
@@ -711,6 +719,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		// The pass's alpha: each step's share of the pixel weighted by keep (the hand-over's cross-fade; = 1 - the
 		// background's transmittance without a band).
 		float march_alpha = 0.0;
+		float dropped_alpha = 0.0;      // the steps' alpha the hand-over's keep left out: sum (1 - keep) step_alpha
 		float transmittance_sc = 1.0;   // exp(-(1 - f) tau): the scattered light
 		// exp(-w_D tau): the lights' scattered light with the transfer table (cloud_scattering_model 1; the table's
 		// source leaves the phase function's HG peak in the view ray, core cloud_transfer_view_extinction)
@@ -962,7 +971,10 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 			float keep = !handover ? 1.0 : (far ? cloud_handover_weight(d) : 1.0 - cloud_handover_weight(d));
 			float scaled_step = exp(-k * tau);
 			float true_step = exp(-tau);
-			if (!coverage_only) {
+			// A ray toward the Sun marched on past the scaled criterion (CLOUD_SUN_MIN_TRANSMITTANCE) carries the
+			// background's transmittance alone: its light beyond is dropped as on every other ray (no brighter disc
+			// of the last percent around the Sun), and the light samples are saved.
+			if (!coverage_only && transmittance_sc >= CLOUD_MIN_SCALED_TRANSMITTANCE) {
 				vec3 p = camera + offset;
 				vec3 normal = normalize(p * ATM_STRETCH * ATM_STRETCH);  // the ellipsoid's normal (geodetic up)
 				vec2 column = cloud_column_depths(cell, lat_lon, height, in_cloud);
@@ -1019,6 +1031,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 			float next_bg = transmittance_bg * true_step;
 			float step_alpha = transmittance_bg - next_bg;
 			march_alpha += keep * step_alpha;
+			dropped_alpha += (1.0 - keep) * step_alpha;
 			weighted_distance += keep * d * step_alpha;
 			transmittance_bg = next_bg;
 			if (!far && d < cloud_handover_near_m) {
@@ -1034,11 +1047,13 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 		// Thin cloud in front of an entry the step budget ended at: its transmittance (its light is negligible, tau <
 		// 0.05).
 		float carried = exp(-carried_tau);
-		march_alpha += (!handover ? 1.0 : (far ? cloud_handover_weight(seg1) : 1.0 - cloud_handover_weight(seg1)))
-				* transmittance_bg * (1.0 - carried);
+		float carried_keep = !handover ? 1.0 : (far ? cloud_handover_weight(seg1) : 1.0 - cloud_handover_weight(seg1));
+		march_alpha += carried_keep * transmittance_bg * (1.0 - carried);
+		dropped_alpha += (1.0 - carried_keep) * transmittance_bg * (1.0 - carried);
 		transmittance_bg *= carried;
 		pass_radiance[pass] = radiance;
 		pass_alpha[pass] = handover ? march_alpha : 1.0 - transmittance_bg;
+		pass_rest[pass] = handover ? transmittance_bg + dropped_alpha : transmittance_bg;
 		pass_weighted[pass] = weighted_distance;
 		if (!far) {
 			transmittance_end = transmittance_bg;
@@ -1048,11 +1063,13 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	if (cloud_debug_output == 1 || cloud_debug_output == 4) {
 		color = vec3(transmittance_end);
 		alpha = 1.0;
+		transmittance = 0.0;
 		return;
 	}
 	if (cloud_debug_output == 2 || cloud_debug_output == 7) {
 		color = pass_radiance[0];
 		alpha = 1.0;
+		transmittance = 0.0;
 		return;
 	}
 	// The composite (static clouds Task 8): the march's image plus, behind the march's clouds in front of the band, the
@@ -1075,6 +1092,10 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	float near_alpha = pass_alpha[0];
 	float far_alpha = mix(column_part.a, pass_alpha[1], shapes);
 	alpha = min(near_alpha + behind * far_alpha, 1.0);
+	// T = 1 - near_alpha - behind x far_alpha = (near_rest - behind) + behind x far_rest: both terms at the magnitude
+	// of T itself.
+	float far_rest = mix(1.0 - column_part.a, pass_rest[1], shapes);
+	transmittance = clamp((pass_rest[0] - behind) + behind * far_rest, 0.0, 1.0);
 	float weighted_m = pass_weighted[0]
 			+ behind * ((1.0 - shapes) * column_part.a * column_m + shapes * pass_weighted[1]);
 	cloud_m = alpha > 1.0e-6 ? weighted_m / alpha : 0.0;
@@ -1084,6 +1105,7 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	if (alpha <= 1.0e-6 && dot(pass_radiance[0], pass_radiance[0]) <= 0.0
 			&& dot(pass_radiance[1], pass_radiance[1]) <= 0.0) {
 		alpha = 0.0;
+		transmittance = 1.0;
 		cloud_m = 0.0;
 		return;
 	}
@@ -1227,6 +1249,7 @@ void main() {
 	}
 	vec3 color = vec3(0.0);
 	float alpha = 0.0;
+	float transmittance = 1.0;
 	float cloud_m = 0.0;
 	if (cloud_enabled && atmosphere_enabled) {
 		// The deterministic march: the stratified midpoints (cloud_march); else blue noise per pixel moved per frame.
@@ -1254,40 +1277,43 @@ void main() {
 		// alpha (the march's own convention). The colour per alpha: CLOUD_EDGE_COLOUR_ALPHA_RATIO's. Full marches per
 		// sub-ray (their light samples) had made the pass ~3x as costly (fix round 1).
 		vec4 centre_depth = imageLoad(out_depth, pixel);  // the first march's, this pixel's own texel
-		float coverage = coarse.a;
-		float weighted_m = coarse.a * centre_depth.y;
+		float centre_alpha = 1.0 - coarse.a;  // the images hold T in .a
+		float coverage = centre_alpha;
+		float transmittance_sum = coarse.a;
+		float weighted_m = centre_alpha * centre_depth.y;
 		for (int k = 0; k < CLOUD_EDGE_SUBRAYS; k++) {
 			vec3 sub_color;
 			float sub_alpha;
+			float sub_transmittance;
 			float sub_m;
 			cloud_march(cloud_ray_earth(centre + CLOUD_EDGE_OFFSETS[k] * scale), scene_m, jitter,
-					vec3(1.0), vec3(1.0), true, sub_color, sub_alpha, sub_m);
-			sub_alpha = isnan(sub_alpha) ? 0.0 : clamp(sub_alpha, 0.0, 1.0);
+					vec3(1.0), vec3(1.0), true, sub_color, sub_alpha, sub_transmittance, sub_m);
+			bool bad = isnan(sub_alpha) || isnan(sub_transmittance);
+			sub_alpha = bad ? 0.0 : clamp(sub_alpha, 0.0, 1.0);
 			coverage += sub_alpha;
+			transmittance_sum += bad ? 1.0 : clamp(sub_transmittance, 0.0, 1.0);
 			weighted_m += sub_alpha * sub_m;
 		}
 		alpha = coverage / float(CLOUD_EDGE_SUBRAYS + 1);
+		transmittance = transmittance_sum / float(CLOUD_EDGE_SUBRAYS + 1);
 		cloud_m = coverage > 1.0e-6 ? weighted_m / coverage : 0.0;
-		vec4 source = coarse.a >= CLOUD_EDGE_COLOUR_ALPHA_RATIO * alpha ? coarse : opaque_neighbour;
-		color = source.a > 1.0e-6 ? source.rgb * (alpha / source.a) : vec3(0.0);
+		vec4 source = centre_alpha >= CLOUD_EDGE_COLOUR_ALPHA_RATIO * alpha ? coarse : opaque_neighbour;
+		float source_alpha = 1.0 - source.a;
+		color = source_alpha > 1.0e-6 ? source.rgb * (alpha / source_alpha) : vec3(0.0);
 #else
 		cloud_march(cloud_ray_earth(centre), scene_m, jitter, cloud_group_eclipse_near, cloud_group_eclipse_far, false,
-				color, alpha, cloud_m);
+				color, alpha, transmittance, cloud_m);
 #endif
 	}
 	// Half-float range (a lit cloud seen through a dark-adapted eye) and no NaN into the history.
 	color = clamp(color, vec3(0.0), vec3(65000.0));
-	if (any(isnan(color)) || isnan(alpha)) {
+	if (any(isnan(color)) || isnan(transmittance)) {
 		color = vec3(0.0);
-		alpha = 0.0;
+		transmittance = 1.0;
 	}
-	// The half-float store rounds toward zero here: an alpha of 1 - 1e-5 would come out as 1 - 2^-11 (4.9e-4 of the
-	// background, 29 on the scene scale for the Sun's disk, 120 times a lit ground, behind any thick cloud). Within half
-	// a spacing of 1 it is 1.
-	if (alpha > 1.0 - CLOUD_ALPHA_SNAP) {
-		alpha = 1.0;
-	}
-	imageStore(out_color, pixel, vec4(color, clamp(alpha, 0.0, 1.0)));
+	// .a holds the background's transmittance T, not alpha: a half float resolves T relatively (normal down to 6.1e-5,
+	// subnormal to 6e-8), where 1 - T near 1 had a spacing of 4.9e-4 - the Sun's disk vanished behind a slant tau of 8.
+	imageStore(out_color, pixel, vec4(color, clamp(transmittance, 0.0, 1.0)));
 	imageStore(out_depth, pixel, vec4(scene_m, cloud_m, 0.0, 0.0));
 }
 
@@ -1446,12 +1472,18 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 	vec4 sum = vec4(0.0);
 	float weights = 0.0;
 	vec4 sum_positive = vec4(0.0);  // the kernel's positive part alone (CLOUD_DEPTH_MIXED_WEIGHT)
+	// The alpha 1 - T too: the Catmull-Rom's weights cancel (sum w << sum |w|), so the normalised sum of T = 1 taps
+	// came out up to ~5e-4 below 1 where the scene depth moves (the sea's waves: the clear sky flickered by one
+	// half-float step), while a sum of alpha = 0 stays exactly 0. T below 0.5 is taken from the sum of T (the Sun's disk
+	// behind a deck: relative precision), above from 1 - the sum of alpha.
+	float sum_alpha = 0.0;
+	float sum_alpha_positive = 0.0;
 	float weights_positive = 0.0;
 	float depth_weight_min = 1.0;
 	float depth_weight_max = 0.0;
 	float cloud_sum = 0.0;
 	float cloud_weights = 0.0;
-	vec4 best = vec4(0.0);
+	vec4 best = vec4(0.0, 0.0, 0.0, 1.0);  // no cloud (T 1)
 	float best_error = 1.0e30;
 	for (int j = 0; j <= 3; j++) {
 		for (int i = 0; i <= 3; i++) {
@@ -1466,9 +1498,11 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 			float depth_weight = exp(-CLOUD_DEPTH_SHARPNESS * error);
 			float w = tent * depth_weight;
 			sum += w * c;
+			sum_alpha += w * (1.0 - c.a);
 			weights += w;
 			if (tent > 0.0) {
 				sum_positive += w * c;
+				sum_alpha_positive += w * (1.0 - c.a);
 				weights_positive += w;
 			}
 			if (tent != 0.0) {
@@ -1476,8 +1510,8 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 				depth_weight_max = max(depth_weight_max, depth_weight);
 			}
 			if (depths.g > 0.0 && w > 0.0) {
-				cloud_sum += w * c.a * depths.g;
-				cloud_weights += w * c.a;
+				cloud_sum += w * (1.0 - c.a) * depths.g;  // .a: T
+				cloud_weights += w * (1.0 - c.a);
 			}
 			if (tent > 0.0 && error < best_error) {
 				best_error = error;
@@ -1491,10 +1525,14 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 	// checkerboard and dotted the edge's row; its positive part alone (the nearest texels) is used there.
 	if (depth_weight_min < CLOUD_DEPTH_MIXED_WEIGHT * depth_weight_max) {
 		sum = sum_positive;
+		sum_alpha = sum_alpha_positive;
 		weights = weights_positive;
 	}
-	// The Catmull-Rom lobes can over- / undershoot: premultiplied colour >= 0, alpha in [0, 1].
+	// The Catmull-Rom lobes can over- / undershoot: premultiplied colour >= 0, T in [0, 1].
 	vec4 result = weights > 1.0e-4 ? sum / weights : best;
+	if (weights > 1.0e-4 && result.a >= 0.5) {
+		result.a = 1.0 - sum_alpha / weights;
+	}
 	return vec4(max(result.rgb, vec3(0.0)), clamp(result.a, 0.0, 1.0));
 }
 
@@ -1534,7 +1572,7 @@ void main() {
 	vec2 f = position - vec2(base);
 	vec4 sum = vec4(0.0);
 	float weights = 0.0;
-	vec4 best = vec4(0.0);
+	vec4 best = vec4(0.0, 0.0, 0.0, 1.0);  // no cloud (T 1)
 	float best_error = 1.0e30;
 	for (int j = 0; j <= 1; j++) {
 		for (int i = 0; i <= 1; i++) {
