@@ -344,14 +344,16 @@ TEST_CASE("The in-cloud water is bounded; the excess is dropped and counted", "[
     double expected = 0.0;
     for (int k = 0; k < weather_layer_count; ++k) {
         const auto i = static_cast<std::size_t>(k);
-        const double f = std::max(col.fraction[i], c::cloud_min_cover);
+        const double f = std::max(decode_weather_cloud_fraction(encode_weather_cloud_fraction(col.fraction[i])),
+                                  1.0 / 255.0);
         CHECK(col.liquid[i] / f <= c::cloud_liquid_water_max_kg_m3 * (1.0 + 1e-12));
         CHECK(col.ice[i] / f <= c::cloud_ice_water_max_kg_m3 * (1.0 + 1e-12));
         expected += (before.liquid[i] - col.liquid[i] + before.ice[i] - col.ice[i]) *
                     (weather_layer_bottom_m(k + 1) - weather_layer_bottom_m(k));
     }
-    CHECK(col.liquid[3] / 0.3 == Catch::Approx(c::cloud_liquid_water_max_kg_m3));
-    CHECK(col.ice[6] / 0.3 == Catch::Approx(c::cloud_ice_water_max_kg_m3));
+    const double stored_03 = decode_weather_cloud_fraction(encode_weather_cloud_fraction(0.3));
+    CHECK(col.liquid[3] / stored_03 == Catch::Approx(c::cloud_liquid_water_max_kg_m3));
+    CHECK(col.ice[6] / stored_03 == Catch::Approx(c::cloud_ice_water_max_kg_m3));
     CHECK(col.liquid[6] == before.liquid[6]);
     CHECK(col.liquid[8] == before.liquid[8]);
     CHECK(col.fraction == before.fraction);
@@ -369,6 +371,24 @@ TEST_CASE("The in-cloud water is bounded; the excess is dropped and counted", "[
     buried.cloud(3, 3, 0.3, 1e-2);
     CHECK(bound_incloud_condensate(buried.fraction, buried.liquid, buried.ice, 5000.0) == 0.0);
     CHECK(buried.liquid[3] == 0.3 * 1e-2);
+}
+
+TEST_CASE("The in-cloud bound holds on the fraction the texel stores", "[weather]") {
+    // 0.0059 is stored as code 2 (0.0078) but 1.5 codes: bounding on the double fraction let the stored in-cloud
+    // value exceed the bound by up to 1.5x at the lowest codes.
+    Column col;
+    col.cloud(3, 3, 0.0059, 1e-2);
+    col.cloud(5, 5, 0.0059, 1e-4);
+    col.fraction[8] = 0.0;
+    col.liquid[8] = 1e-3;
+    bound_incloud_condensate(col.fraction, col.liquid, col.ice, 0.0);
+    for (const int k : {3, 5, 8}) {
+        const auto i = static_cast<std::size_t>(k);
+        const double stored = std::max(decode_weather_cloud_fraction(encode_weather_cloud_fraction(col.fraction[i])),
+                                       1.0 / 255.0);
+        CHECK(col.liquid[i] / stored <= c::cloud_liquid_water_max_kg_m3 * (1.0 + 1e-12));
+    }
+    CHECK(col.liquid[5] == 0.0059 * 1e-4);  // already within the bound: untouched
 }
 
 TEST_CASE("A trace layer is not scaled across the cloud-presence threshold", "[weather]") {

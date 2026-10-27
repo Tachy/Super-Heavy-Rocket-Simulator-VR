@@ -586,7 +586,7 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     write_weather_snapshot(file, snapshot);
     REQUIRE(read_weather_snapshot(file).has_value());
     auto bytes = read_bytes(file);
-    for (const std::uint32_t old_version : {2u, 3u, 4u, 5u}) {  // the current layout stamped 2 .. 5: refused
+    for (const std::uint32_t old_version : {2u, 3u, 4u, 5u, 6u}) {  // the current layout stamped 2 .. 6: refused
         auto v2 = bytes;
         std::memcpy(v2.data() + 8, &old_version, sizeof(old_version));
         v2.resize(v2.size() - sizeof(std::uint64_t));

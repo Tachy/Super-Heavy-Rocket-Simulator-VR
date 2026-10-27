@@ -541,8 +541,9 @@ double bound_incloud_condensate(std::span<const double> cloud_fraction, std::spa
         const double top = weather_layer_bottom_m(static_cast<int>(k) + 1);
         if (!(top > ground_m)) continue;
         const double thickness = top - std::max(weather_layer_bottom_m(static_cast<int>(k)), ground_m);
-        // The renderer shows a layer's water on at least cloud_min_cover.
-        const double fraction = std::max(cloud_fraction[k], c::cloud_min_cover);
+        // The renderer divides the stored water by the stored fraction (8-bit code, shown at least at one code).
+        const double fraction = std::max(decode_weather_cloud_fraction(encode_weather_cloud_fraction(cloud_fraction[k])),
+                                         1.0 / 255.0);
         const double liquid_max = c::cloud_liquid_water_max_kg_m3 * fraction, ice_max = c::cloud_ice_water_max_kg_m3 * fraction;
         if (liquid_kg_m3[k] > liquid_max) {
             dropped_kg_m2 += (liquid_kg_m3[k] - liquid_max) * thickness;
