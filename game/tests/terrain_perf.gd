@@ -151,6 +151,8 @@ func _record_gpu_passes() -> void:
 		var name := rd.get_captured_timestamp_name(i - 1)
 		var us := float(rd.get_captured_timestamp_gpu_time(i) - rd.get_captured_timestamp_gpu_time(i - 1))
 		_gpu_pass_us[name] = float(_gpu_pass_us.get(name, 0.0)) + us
+		if name.begins_with("cloud_pass_"):  # the cloud pass's kernels (CloudEffect._stamp): also their sum
+			_gpu_pass_us["cloud_pass"] = float(_gpu_pass_us.get("cloud_pass", 0.0)) + us
 	_gpu_pass_frames += 1
 
 

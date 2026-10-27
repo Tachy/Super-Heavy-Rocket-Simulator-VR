@@ -17,7 +17,8 @@
 # Weather: off in a render check unless --weather[=900 / =online] (online: waits for the downloads, at most 900 s or
 #          that many), --weather=analog (the shipped analog of --utc), --weather=<file.wthr> (a cached snapshot) or
 #          --weather=slab:<bottom m>,<top m>,<liquid kg/m^3>,<fraction>; any other value exits with an error;
-#          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's), --cloud_debug=1..4 (the cloud
+#          --cloud_quality=desktop|vr (the clouds' quality preset; default: the game's; --cloud_divisor=<n>: its march
+#          resolution divisor instead), --cloud_debug=1..4 (the cloud
 #          pass's debug output, clouds.gdshaderinc cloud_debug_output), --cloud_detail_levels=0..3 (the detail levels),
 #          --cloud_scattering=table|closed (the multiple-scattering model: Monte Carlo table, default; closed form),
 #          --no_light_cache (the light toward the Sun marched per sample: the light cache's reference),
@@ -36,7 +37,9 @@
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
 #          optical depth (liquid = tau / 150 000 kg/m^3: beta = 150 LWC) and the view aimed at the Sun (static clouds Task 9).
 # GPU time: --gpu_time[=120] once settled, the root viewport's measured GPU render time over that many frames (median,
-#          p99); --render_scale=<f> renders the 3D view at f x the window per axis (1.65: the VR pixel proxy).
+#          p99); --render_scale=<f> renders the 3D view at f x the window per axis (1.65: the VR pixel proxy);
+#          --gpu_passes: also per GPU timestamp interval (the cloud pass's kernels, fill, shadow maps), the light cache
+#          settled first.
 #     [--yaw=0.6] [--pitch=-0.3] [--distance=2.2e7] [--azimuth=90] [--elevation=5] [--fov=50] --out=C:/tmp/x.png
 extends SceneTree
 
@@ -65,6 +68,7 @@ var _cache_settled := 0  ## --repeat_identical: consecutive frames with the ligh
 var _repeat_images: Array[Image] = []  ## --repeat_identical: the consecutive frames drawn so far
 var _repeat_failed := false  ## --repeat_identical: the frames differ (exit code 1)
 var _gpu_ms: Array[float] = []  ## --gpu_time: the measured frames' GPU render times
+var _gpu_passes := {}  ## --gpu_passes: timestamp name -> Array of the measured frames' GPU ms
 
 
 func _initialize() -> void:
@@ -83,6 +87,7 @@ func _initialize() -> void:
 		root.scaling_3d_scale = float(_args["render_scale"])
 	if _args.has("gpu_time"):
 		RenderingServer.viewport_set_measure_render_time(root.get_viewport_rid(), true)
+	CloudEffect.capture_timestamps = _args.has("gpu_passes")
 
 
 func _process(_delta: float) -> bool:
@@ -94,6 +99,10 @@ func _process(_delta: float) -> bool:
 		if _args.has("cloud_quality"):
 			world.clouds.quality = CloudLayer.Quality.VR if _args["cloud_quality"] == "vr" else CloudLayer.Quality.DESKTOP
 		_show_weather_file(world)
+		if _args.has("cloud_divisor"):  # the march's resolution divisor (the preset's otherwise; tuning runs)
+			var preset: Dictionary = CloudLayer.PRESETS[world.clouds.quality]
+			world.clouds.effect.set_quality(int(_args["cloud_divisor"]), float(preset["temporal_weight"]),
+					float(preset["clip_gamma"]))
 		if _args.has("cloud_detail_levels"):  # the detail levels used (the preset's otherwise)
 			ShaderGlobals.set_value(&"cloud_detail_levels", int(_args["cloud_detail_levels"]))
 		if _args.has("no_light_cache"):  # the fidelity flag (CloudLayer.light_cache_enabled)
@@ -178,7 +187,7 @@ func _process(_delta: float) -> bool:
 				return false
 		if _args.has("repeat_identical") and not _repeat_frames(world):
 			return false
-		if _args.has("gpu_time") and not _gpu_frames():
+		if _args.has("gpu_time") and not _gpu_frames(world):
 			return false
 		print("render_check: ", world.weather.status_text())
 		print("render_check: clouds %s, field textures %.1f MB, last upload %.1f ms" % [world.clouds.state(),
@@ -219,8 +228,17 @@ func _process(_delta: float) -> bool:
 
 
 ## --gpu_time[=120]: collects the root viewport's GPU render time of that many frames; true when done (printed).
-func _gpu_frames() -> bool:
+## --gpu_passes (with --gpu_time): the frames are collected once the light cache is settled (steady state), and per
+## frame the GPU time between the RenderingDevice's captured timestamps of the previous frame, per name (the interval
+## a timestamp starts; CloudEffect.capture_timestamps: cloud_light_fill, cloud_pass_<kernel>, shadow_pass; their
+## cloud_pass_* summed as cloud_pass), printed as median and p99 per name.
+func _gpu_frames(world: World) -> bool:
 	var wanted: int = int(_args["gpu_time"]) if _args["gpu_time"].is_valid_int() else 120
+	if _args.has("gpu_passes"):
+		_cache_settled = _cache_settled + 1 if world.clouds.light_cache.settled() else 0
+		if _cache_settled < FRAMES_TO_SETTLE and _frames < TERRAIN_MAX_FRAMES:
+			return false
+		_record_gpu_passes()
 	_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
 	if _gpu_ms.size() < wanted:
 		return false
@@ -229,7 +247,29 @@ func _gpu_frames() -> bool:
 	print("render_check: GPU render time over %d frames: median %.3f ms, p99 %.3f ms (render scale %.2f, %s)" % [
 			wanted, sorted[wanted / 2], sorted[mini(wanted - 1, int(0.99 * wanted))], root.scaling_3d_scale,
 			root.size])
+	for name: String in _gpu_passes:
+		var ms: Array = _gpu_passes[name]
+		while ms.size() < wanted:  # frames without that interval
+			ms.append(0.0)
+		ms.sort()
+		print("render_check: gpu pass %s median %.3f ms, p99 %.3f ms" % [name, ms[ms.size() / 2],
+				ms[mini(ms.size() - 1, int(0.99 * ms.size()))]])
 	return true
+
+
+func _record_gpu_passes() -> void:
+	var rd := RenderingServer.get_rendering_device()
+	var frame := {}
+	for i in range(1, rd.get_captured_timestamps_count()):
+		var name := rd.get_captured_timestamp_name(i - 1)
+		var ms := float(rd.get_captured_timestamp_gpu_time(i) - rd.get_captured_timestamp_gpu_time(i - 1)) / 1.0e6
+		frame[name] = float(frame.get(name, 0.0)) + ms
+		if name.begins_with("cloud_pass_"):
+			frame["cloud_pass"] = float(frame.get("cloud_pass", 0.0)) + ms
+	for name: String in frame:
+		if not _gpu_passes.has(name):
+			_gpu_passes[name] = []
+		_gpu_passes[name].append(frame[name])
 
 
 ## --repeat_identical[=2]: once the light cache is settled (no fill, no cross-fade), collects that many consecutive

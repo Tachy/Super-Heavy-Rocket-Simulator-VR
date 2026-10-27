@@ -499,18 +499,21 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 					else march_set1), 1)
 			_rd.compute_list_dispatch(list, 1, 1, 1)
 			_rd.compute_list_add_barrier(list)
+	list = _stamp(list, "cloud_pass_march")
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines[march])
 	_rd.compute_list_bind_uniform_set(list, march_set0, 0)
 	_rd.compute_list_bind_uniform_set(list, _set1(march, march_set1), 1)
 	_rd.compute_list_dispatch(list, groups_low.x, groups_low.y, 1)
 	_rd.compute_list_add_barrier(list)
 	if refine:
+		list = _stamp(list, "cloud_pass_outline")
 		_rd.compute_list_bind_compute_pipeline(list, _pipelines["outline"])
 		_rd.compute_list_bind_uniform_set(list, _set1("outline", [_ubo(_centre["buffer"]),
 				_image(2, _centre["refined"]), _tex(6, nearest_clamp, _centre["color"]),
 				_storage(7, _centre["outline"])]), 1)
 		_rd.compute_list_dispatch(list, groups_low.x, groups_low.y, 1)
 		_rd.compute_list_add_barrier(list)
+		list = _stamp(list, "cloud_pass_refine")
 		var outline := march + "_refine"
 		_rd.compute_list_bind_compute_pipeline(list, _pipelines[outline])
 		_rd.compute_list_bind_uniform_set(list, UniformSetCacheRD.get_cache(_shaders[outline], 0, set0), 0)
@@ -522,6 +525,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		var list_width := mini(list_groups, MAX_DISPATCH_GROUPS)
 		_rd.compute_list_dispatch(list, list_width, (list_groups - 1) / list_width + 1, 1)
 		_rd.compute_list_add_barrier(list)
+	list = _stamp(list, "cloud_pass_temporal")
 	_rd.compute_list_bind_compute_pipeline(list, _pipelines["temporal"])
 	_rd.compute_list_bind_uniform_set(list, _set1("temporal", [_ubo(_centre["buffer"]),
 			_tex(1, nearest_clamp, _centre["refined" if refine else "color"]),
@@ -530,6 +534,7 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 			_image(6, age_out)]), 1)
 	_rd.compute_list_dispatch(list, groups_low.x, groups_low.y, 1)
 	_rd.compute_list_add_barrier(list)
+	list = _stamp(list, "cloud_pass_upsample")
 	for view in range(view_count):
 		var v: Dictionary = _views[view]
 		_rd.compute_list_bind_compute_pipeline(list, _pipelines["upsample"])
@@ -541,6 +546,17 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	_centre["valid"] = true
 	stats = {"valid": true, "low_size": low, "views": view_count,
 		"record_ms": (Time.get_ticks_usec() - start_us) / 1000.0}
+
+
+## Diagnostics (capture_timestamps): ends the compute list, stamps the GPU time where the interval `name` starts and
+## begins a new list (a timestamp cannot be taken inside a list); the list unchanged otherwise. The cloud pass's
+## kernels are named cloud_pass_<kernel> (terrain_perf / render_check --gpu_passes sum them as cloud_pass).
+func _stamp(list: int, name: String) -> int:
+	if not CloudEffect.capture_timestamps:
+		return list
+	_rd.compute_list_end()
+	_rd.capture_timestamp(name)
+	return _rd.compute_list_begin()
 
 
 ## The CloudView block (cloud_pass.gdshaderinc): inverse projection, view -> world, world -> Earth axes, the previous
