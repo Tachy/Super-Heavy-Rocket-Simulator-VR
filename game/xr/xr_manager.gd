@@ -13,6 +13,10 @@ signal recentered
 const VR_ARG := "--vr"
 const DESKTOP_ARG := "--no-xr"
 const AUTO_RECENTER_DELAY_S := 2.0  ## [E] one recentre after the start (pattern of the sibling project), so the view is in front
+## VR frame-rate targets (user 2026-10-27: "mit Wetter immer 45 fps, ohne 90"; 45 Hz with the runtime's reprojection
+## "ist butterweich"): the clouds' view cache gets the half-rate frame's budget.
+const TARGET_HZ_WEATHER := 45.0
+const TARGET_HZ_CLEAR := 90.0
 
 var origin: XROrigin3D
 var camera: XRCamera3D  ## VR only (null on the desktop, where the OrbitCamera is the current camera)
@@ -72,6 +76,22 @@ static func vr_requested() -> bool:
 	if DisplayServer.get_name() == "headless" or engine_args.has("--script") or engine_args.has("-s"):
 		return false
 	return user_args.has(VR_ARG) and not user_args.has(DESKTOP_ARG)
+
+
+## The VR frame-rate target for the weather switch.
+static func target_hz(weather_enabled: bool) -> float:
+	return TARGET_HZ_WEATHER if weather_enabled else TARGET_HZ_CLEAR
+
+
+## VR only: caps the frame loop at the weather switch's target (the runtime reprojects the display frames between);
+## the desktop keeps its frame rate. Cheap to call every frame.
+func apply_frame_rate(weather_enabled: bool) -> void:
+	if not xr_active:
+		return
+	var hz := int(target_hz(weather_enabled))
+	if Engine.max_fps != hz:
+		Engine.max_fps = hz
+		print("[XR] frame-rate target %d Hz (weather %s)" % [hz, "on" if weather_enabled else "off"])
 
 
 ## Base orientation of the view (the OrbitCamera's basis); the origin stays at the render origin.

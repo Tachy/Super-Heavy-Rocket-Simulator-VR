@@ -131,6 +131,9 @@ var field_texture_bytes := 0  ## both resident snapshots (field + ice share texe
 var pinned := false  ## show_now was used: set_target is ignored
 ## The scaled-space Earth draws the clouds (weather shown, the camera beyond RAYMARCH_MAX_DISTANCE_M; Task 10).
 var far_enabled := false
+## Diagnostics (cloud view cache plan Task 1): false skips the near cloud pass (the scene's GPU time without it);
+## user argument `--no_cloud_pass` (World), render_check passes it through.
+var pass_enabled := true
 var effect := CloudEffect.new()  ## the cloud pass (the world's Compositor)
 const SHADOW_RUN_WINDOW_MSEC := 250  ## how long after its last run the shadow effect still counts as running
 var shadow_effect := CloudShadowEffect.new(SHADOW_MAP_SIZE)  ## the cloud shadow maps (the world's Compositor)
@@ -359,7 +362,7 @@ func update(camera_fixed_m: Vector3, blend: float, delta_s: float) -> void:
 	ShaderGlobals.set_value(&"cloud_detail_origin", _wrap(camera_render / DETAIL_TILE_M))
 	var visible_weight := (1.0 - _w1) * float(_slots[0]["id"] != "") + _w1 * float(_slots[1]["id"] != "")
 	var near := camera_fixed_m.length() < RAYMARCH_MAX_DISTANCE_M
-	var enabled := noise_ready and visible_weight > 0.0 and near
+	var enabled := noise_ready and visible_weight > 0.0 and near and pass_enabled
 	ShaderGlobals.set_value(&"cloud_enabled", enabled)
 	# The far field needs only the field and column textures (no noise, no shadow maps).
 	far_enabled = visible_weight > 0.0 and not near

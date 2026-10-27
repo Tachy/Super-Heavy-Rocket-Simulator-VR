@@ -96,6 +96,8 @@ func _ready() -> void:
 	clouds.setup(core)
 	var xr := get_node_or_null("/root/XrManager")
 	clouds.quality = CloudLayer.Quality.VR if xr != null and xr.vr_requested() else CloudLayer.Quality.DESKTOP
+	clouds.pass_enabled = not OS.get_cmdline_user_args().has("--no_cloud_pass")
+	_xr = xr
 	weather.light_driven_by_layer = true  # the layer pushes the CPU light's pair with its cross-fade
 	weather.snapshots_changed.connect(clouds.set_target)
 	clouds.core_cache_missed.connect(weather.reload_into_core_cache)
@@ -116,6 +118,7 @@ func _ready() -> void:
 
 
 var _delta := 0.0
+var _xr: Node  ## the XrManager autoload (null in tests without it)
 var _warmup_mesh: MeshInstance3D  ## draws earth_clouds.gdshader once at load (first switch: no pipeline compile mid-flight)
 var _warmup_frames := 0
 var _mission_press_tdb_s := 0.0  ## clock instant of the pending mission start (the clock holds there meanwhile)
@@ -184,6 +187,8 @@ func update_world() -> void:
 	FrameProfiler.end(&"flight_advance")
 	FrameProfiler.begin(&"weather")
 	weather.update(t, clock.warp)  # non-blocking: downloads, builds and loads run in the background
+	if _xr != null:
+		_xr.apply_frame_rate(weather.enabled)  # VR: 45 Hz with weather, 90 Hz without (user 2026-10-27)
 	FrameProfiler.end(&"weather")
 	FrameProfiler.begin(&"towers_zone")
 	for view in towers:

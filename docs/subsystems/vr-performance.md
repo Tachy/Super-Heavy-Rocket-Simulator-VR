@@ -12,11 +12,30 @@ frame; a missed frame makes the runtime lock to 45 Hz (22.2 ms). Targets: main t
 GPU <= 9 ms with clouds at the VR pixel count. The 1440p desktop proxy of M8 Task 11 underestimated VR ~10x and does
 not count for VR.
 
-Standing decision (user 2026-10-27, static clouds): the cloud budget (cloud p99 2.5 ms x the stereo correction) is not
-met - the cloud pass is 37 ms at the ground and 45 ms at the deck in the proxy - and the user accepted that "with
-clouds the frame rate is lower" until a better approach (e.g. precomputing the static field). Open: the headset run
-(pad -> decks -> orbit, `--perf-log`, look check, composite second-pass A/B, the light-cache fill's worst frame under
-load); see `weather-clouds.md` Open points.
+Frame-rate rule (user 2026-10-27, cloud view cache plan Task 1): with weather on the VR target is 45 Hz
+(`XrManager.apply_frame_rate`: `Engine.max_fps` 45, the runtime reprojects the display frames between - the user's
+headset verdict "alles bestens bei 45 fps"), with weather off 90 Hz. The per-frame cloud pass costs 41-45 ms in the
+proxy and ~45 ms in VR (8-18 fps in the cloud zone, VR run 2026-10-27): it is replaced by the world-fixed cloud view
+cache (plan `docs/superpowers/plans/2026-10-27-cloud-view-cache.md`), whose fill gets the budget below.
+
+## Cloud view cache budget (cloud view cache plan Task 1, 2026-10-27)
+
+`--no_cloud_pass` (user argument; render_check passes it through) skips the near cloud pass (`CloudLayer.pass_enabled`;
+its shadow maps and light cache with it). Desktop proxy (`render_check --render_scale=1.65 --gpu_time=120 --gpu_passes
+--cloud_quality=vr --fixed_exposure`, Starbase 2024-06-15T21:00 UTC, analog weather; scripts
+`.superpowers/sdd/2026-10-27-cloud-view-cache/t1_prof.sh`), GPU frame median / p99:
+
+| View | with the cloud pass | without | weather off |
+|---|---|---|---|
+| ground (az 90, el 25) | 44.9 / 47.2 ms (cloud pass 41.3: march 32.6, refine 8.5; shadow pass 1.5) | 1.6 / 3.2 ms | 1.6 / 2.7 ms |
+| 9 km deck (el -10) | 49.8 / 56.0 ms (cloud pass 45.0: march 35.4, refine 9.6) | 2.5 / 6.3 ms | - |
+
+Headset (Pimax Dream Air, 3534 x 2838 per eye, pad, weather on, 45 Hz, `data/perf/perf_20261027_2234*.csv` /
+`_223635.csv`): with the cloud pass GPU 45.3 ms median (15-33 fps); without it GPU 7.4 ms median, 8.2 ms p90, 8.8 ms
+max, the frame interval a steady 22.22 ms. **Cache budget at 45 Hz: 22.2 - 9 (scene, max) - 2 (margin [E]) ~ 11 ms
+per frame** (the preset `cache_budget_ms`, Task 4). The per-frame pass's rate (1.3 M rays of the 1377 x 947 centre in
+~45 ms, refine included) puts a full-resolution fill of the visible region (~9 x the rays) at ~0.4 s of GPU, i.e.
+~1 s at 11 ms per frame, the coarse level 0 (1/4 density) in ~2-3 frames.
 
 ## Measuring
 
