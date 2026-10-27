@@ -330,3 +330,31 @@ TEST_CASE("The base cut keeps the rendered column: the scaled profile integrates
         CHECK(cut == Approx(uncut).epsilon(1e-5));
     }
 }
+
+TEST_CASE("The render field's cloud top: the centre above the highest cloudy layer", "[weather]") {
+    const int rows = 3, columns = 4;
+    std::vector<std::uint8_t> texels(static_cast<std::size_t>(weather_layer_count) * rows * columns * 4, 0);
+    const auto top_of = [&] {
+        return cloud_render_top_m(WeatherSnapshot::from_parts({}, rows, columns,
+                                                              std::vector<float>(rows * columns, 0.0f), texels));
+    };
+    CHECK(top_of() == 0.0);  // no cloud
+    // Cloud fraction without water (no extinction) is no cloud.
+    texels[texel_offset(12, 1, 2, rows, columns)] = encode_weather_cloud_fraction(0.6);
+    CHECK(top_of() == 0.0);
+    // One cell with liquid in layer 7 (1.75-2 km): the profile between the centres reaches zero at centre 8.
+    const std::size_t i = texel_offset(7, 2, 3, rows, columns);
+    texels[i] = encode_weather_cloud_fraction(0.4);
+    texels[i + 1] = encode_weather_water(1e-4);
+    CHECK(top_of() == Approx(layer_centre_m(8)));
+    // Ice only, higher (layer 20): that layer's centre above.
+    const std::size_t j = texel_offset(20, 0, 0, rows, columns);
+    texels[j] = encode_weather_cloud_fraction(1.0);
+    texels[j + 2] = encode_weather_water(1e-6);
+    CHECK(top_of() == Approx(layer_centre_m(21)));
+    // The top layer: held to the field's top (20 km).
+    const std::size_t k = texel_offset(weather_layer_count - 1, 1, 1, rows, columns);
+    texels[k] = encode_weather_cloud_fraction(1.0);
+    texels[k + 1] = encode_weather_water(1e-6);
+    CHECK(top_of() == Approx(weather_top_m));
+}

@@ -115,6 +115,10 @@ global uniform vec3 cloud_transfer_theta_map;
 // cloud_debug_height_m (the GPU's filtered coverage against the core's table); 4 = T_bg with the shapes; 6 = the full
 // image (light, sky, air, composite) on the grid-mean field without the shapes (Task 10: the far field's physics);
 // 7 = as 2 with the sub-grid shapes (the light cache against the light march on broken cloud, static clouds Task 1).
+// The air shadow (cloud_pass.gdshaderinc, static clouds Task 9b): 8 = the scene's single scattering over the air
+// shadow's stretch of the ray (opaque); 9 = the image's air shadow loss alone (-L: the march's colour zeroed, T kept);
+// 10 = as 9 with each outline pixel's own loss (not rescaled from its colour source); 11 = the image without the
+// clouds' own light (the air in front of them kept, no air shadow); 12 = (cloud distance [m], alpha, 0), opaque.
 global uniform int cloud_debug_output;
 global uniform float cloud_debug_height_m;
 

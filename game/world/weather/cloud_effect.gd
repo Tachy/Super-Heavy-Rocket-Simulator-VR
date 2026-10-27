@@ -427,8 +427,8 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	# The outline pass (static clouds Task 5b) after the deterministic march: CLOUD_OUTLINE lists its outline pixels,
 	# CLOUD_EDGE_REFINE gives them three coverage-only sub-rays each (cloud_pass.gdshaderinc) - no stairs of a march
 	# pixel. Not for the debug outputs (the checks' per-ray quantities) nor the jittered march (its temporal mean
-	# averages the pixel already).
-	var refine := deterministic and debug == 0
+	# averages the pixel already). The air shadow's checks 9 / 10 (the loss alone) take it as the game does.
+	var refine := deterministic and (debug == 0 or debug == 9 or debug == 10)
 	var jitter_frame := _frame if CloudEffect.pinned_frame < 0 else CloudEffect.pinned_frame
 	var params := Vector4(fmod(float(jitter_frame) * GOLDEN, 1.0), weight, debug, pixel_angle)
 	var linear_clamp: RID = _samplers["true|false|false"]
@@ -578,7 +578,8 @@ func _shape_prefilter_needed(pixel_angle: float) -> bool:
 	var h := maxf(float(ShaderGlobals.value(&"cloud_camera_height_m")), 0.0)
 	var far_m := sqrt(h * (2.0 * CURVATURE_RADIUS_MAX_M + h)) \
 			+ sqrt(CLOUD_TOP_M * (2.0 * CURVATURE_RADIUS_MAX_M + CLOUD_TOP_M))
-	if int(ShaderGlobals.value(&"cloud_debug_output")) == 0:
+	var debug := int(ShaderGlobals.value(&"cloud_debug_output"))
+	if debug == 0 or debug >= 9:  # the game's hand-over (the air shadow's checks 9-12 too)
 		far_m = minf(far_m, float(ShaderGlobals.value(&"cloud_handover_far_m")))
 	far_m += (ShaderGlobals.value(&"cloud_light_march") as Vector4).z
 	return pixel_angle * far_m > SHAPE_PREFILTER_START_M

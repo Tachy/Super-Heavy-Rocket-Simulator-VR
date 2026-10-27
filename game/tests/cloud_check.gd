@@ -77,9 +77,13 @@
 #      on the air: a backlit cumulus (cf 0.5, in-cloud tau 50 in 1-2 km,
 #      the Sun 15 deg up, looking at it; HDR luminance, pixels classed by the cloud image's T: sky T > 0.999, body
 #      T < 1e-6, rim 0.1-0.8) - the body's median below the sky's at the same angle from the Sun and the rim's p90
-#      2-4 x the body's median within 15 deg of the Sun; crepuscular rays under a broken deck (cf 0.4) at a 4-deg Sun,
-#      toward and away from the Sun: the sky's luminance with / without the air shadow per column (azimuth) varies by
-#      >= 2 % (away: 1 %) along the band; the clear sky (above the deck looking up, a cloudless field) within 0.5 %
+#      2-4 x the body's median within 15 deg of the Sun; an outline pixel's loss its own (debug outputs 9 / 10); the
+#      composite's air in front of a cloud at weight 1 (debug 11 / 12 against the core's air light to the cloud's
+#      distance); crepuscular rays under a broken deck (cf 0.4) at a 4-deg Sun toward it: the on / off luminance ratio
+#      per column (azimuth) over its running median varies by >= 2 % (p90 - p10), a ray-free control (T_c uniform)
+#      below that; away from the Sun the shadowed air present (mean loss >= 1 %); the segment sum against the scene's
+#      single scattering (debug 8, T_c uniform) at low / high views and a setting Sun (+0.3 / -0.5 deg) within 1 %;
+#      no negative final HDR; the clear sky (above the deck looking up, a cloudless field) within 0.5 %
 #      (STARSIM_AIR_ONLY=1 runs this alone).
 # The other sections run with the light cache on and the deterministic march (the game's path; 10 with the jittered
 # one: it measures against independent jitter's noise). Detail
@@ -280,10 +284,40 @@ const AIR_RAYS_SUN_ELEVATION_DEG := 4.0
 const AIR_RAYS_VIEW_ELEVATION_DEG := 12.0
 const AIR_RAYS_MIN_PIXELS := 8  ## sky pixels a column needs to count
 const AIR_RAYS_MIN_COLUMNS := 40
-const AIR_RAYS_MIN_MODULATION := 0.02  ## [E] (p90 - p10) / p50 of the on / off ratio: rays seen (> ~2 % contrast)
-## [E] Away from the Sun the shadowed part is the single Rayleigh (and the aerosol's weak backscatter): the
-## anti-crepuscular rays are fainter (measured 1.9 %).
-const AIR_RAYS_MIN_MODULATION_AWAY := 0.01
+## [E] p90 - p10 of the detrended on / off ratio (_ray_modulation): rays seen as a ~2 % luminance contrast across
+## neighbouring azimuths (the eye's contrast threshold for extended bands is ~1-2 %).
+const AIR_RAYS_MIN_MODULATION := 0.02
+## [E] Away from the Sun: the shadowed air present - its mean loss at least 1 % (the away view's air light below the
+## deck top is mostly single Rayleigh and weak aerosol backscatter, a few % of it shadowed by the cf 0.4 deck).
+const AIR_AWAY_MIN_LOSS := 0.01
+## [E] The running median's width (61 columns = 7.6 deg): the trend with the angle from the Sun is smooth over it,
+## the rays (gaps of ~1 km cumulus seen 10-30 km away: 2-6 deg) are narrower (31 columns followed the rays themselves:
+## rays 1.5 %, the control 0.3 %; 61: 3.6 % and 1.1 %).
+const AIR_RAYS_DETREND_COLUMNS := 61
+## The ray-free control's and the telescoping check's uniform cloud transmittance (cloud_debug_air_transmittance).
+const AIR_CONTROL_TRANSMITTANCE := 0.5
+## (Sun elevation, view elevation, view azimuth from the Sun's): low views (long segments: the clamp), a high one, the
+## setting Sun (the camera's Mie fade: 0.3 deg is inside smoothstep(0, 0.01, mu_s), -0.5 deg below it).
+const AIR_TELESCOPE_CASES := [[4.0, 1.0, 0.0], [4.0, 3.0, 0.0], [4.0, 30.0, 90.0], [0.3, 3.0, 0.0], [-0.5, 3.0, 0.0]]
+## [E] Pixels whose S1 is below this share of their luminance (the setting Sun's S1 is ~0 below the deck top; the
+## half-float image resolves ~0.1 %) are checked absolutely: |loss - S1| within AIR_CLEAR_TOLERANCE of the pixel.
+const AIR_TELESCOPE_MIN_SHARE := 0.01
+const AIR_TELESCOPE_TOLERANCE := 0.01  ## the review's ~1 % on the median
+const AIR_TELESCOPE_SPREAD := 0.03  ## p5 / p95
+## Pixels whose neighbours this far are all clear (the upsample's 4 x 4 low-resolution taps at divisor 2): the
+## Catmull-Rom lobes next to a cloud filter the image differently with and without the loss's negative colour.
+const AIR_TELESCOPE_MARGIN := 4
+const AIR_SETTING_SUN_DEG := [0.3, -0.5]
+const AIR_SETTING_VIEW_DEG := 3.0  ## the horizon in view (the sea against the shadowed sky)
+## [E] An outline pixel's loss vs its own at p99: the source's loss is taken from this pixel's ray parts at this
+## pixel's cloud distance (one loss call per outline pixel; review M1) - measured p99 1.7 %, max 7 %; the fault it
+## guards against (this pixel's T for the source's) is ~alpha (1 - alpha) of the loss behind (up to 25 %; 32 % of the
+## pixels were over 1 %).
+const AIR_OUTLINE_TOLERANCE := 0.02
+const AIR_OUTLINE_MAX_SHARE := 0.01  ## of the outline pixels may exceed it
+const AIR_WEIGHT_MIN_ALPHA := 0.98  ## cloud bodies (the debug output's distance is not mixed with the sky's)
+const AIR_WEIGHT_MAX_M := 8000.0  ## inside the march's own tier (the debug outputs have no far tier)
+const AIR_WEIGHT_TOLERANCE := 0.03  ## atmosphere_check's SURFACE_TOLERANCE (the tables against the core's raymarch)
 const AIR_CLEAR_TOLERANCE := 0.005  ## the ruling's 0.5 %
 ## The backlit slab against the Monte Carlo transmitted radiance (section 14's first part).
 const SLAB_TR_TAUS := [10.0, 30.0]
@@ -295,7 +329,9 @@ const SLAB_TR_BINS := [[0.0, 0.0], [30.0, 0.0], [30.0, 180.0], [60.0, 0.0], [60.
 const SLAB_TR_TOLERANCE := 0.07
 const SLAB_TR_VIEW_SIZE := 161
 const SLAB_TR_FOV_DEG := 44.0
-const AIR_SAMPLES := 2 * 2 + 2 * 3 + 2 + 2
+## slab 2 x 2, backlit 2 x 3, outline, front weight, rays 2, control, telescoping 5 (AIR_TELESCOPE_CASES), no negative
+## HDR, clear sky 2
+const AIR_SAMPLES := 2 * 2 + 2 * 3 + 1 + 1 + 2 + 1 + 5 + 1 + 2
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
@@ -2031,6 +2067,7 @@ func _air_shadow_samples() -> void:
 	_camera.fov = AIR_FOV_DEG
 	var up := _local_direction(90.0, 0.0)
 	var up_render := Frames.to_render(_earth_to_gcrf * up).normalized()
+	var negatives := {}  # scene -> the final image's lowest HDR channel (air shadow on)
 	# The backlit cumulus (the t9b setup): cf 0.5, in-cloud vertical tau 50 in 1-2 km, the Sun 15 deg up ahead.
 	var fraction := AIR_CUMULUS_FRACTION
 	var cumulus := _slab("air_cu", SLAB_BOTTOM_M, SLAB_TOP_M,
@@ -2045,6 +2082,7 @@ func _air_shadow_samples() -> void:
 		await _render(_point(10.0), sun, sun, 0)
 		images[on] = [_viewport.get_texture().get_image(), _clouds.effect.output.get_layer_data(0)]
 	_clouds.air_shadow = true
+	negatives["backlit"] = _lowest_channel(images[true][0])
 	for b in range(AIR_BANDS_DEG.size()):
 		var band: Vector2 = AIR_BANDS_DEG[b]
 		var stats := {}
@@ -2086,49 +2124,54 @@ func _air_shadow_samples() -> void:
 				AIR_RIM_RATIO.y, band.x, band.y], s[5] > 0 and rim_ratio >= AIR_RIM_RATIO.x
 				and rim_ratio <= AIR_RIM_RATIO.y, "rim / body %.2f (off %.2f)" % [rim_ratio,
 				float(o[2]) / maxf(o[1], 1e-9)])
-	# Crepuscular rays: the broken deck under a low Sun, the sky between the clouds toward and away from the Sun;
-	# the ratio air shadow on / off per azimuth bin along the elevation band (the sky's own gradient divides out).
+	await _air_outline_samples(sun)
+	await _air_front_weight_samples(cumulus, sun)
+	# Crepuscular rays: the broken deck under a low Sun, the sky between the clouds toward and away from the Sun.
 	var broken := _slab("air_broken", SLAB_BOTTOM_M, SLAB_TOP_M,
 			AIR_BROKEN_FRACTION * AIR_CUMULUS_TAU / 150.0 / (SLAB_TOP_M - SLAB_BOTTOM_M), AIR_BROKEN_FRACTION)
 	_show(broken)
 	var low_sun := _local_direction(AIR_RAYS_SUN_ELEVATION_DEG, 0.0)
 	for toward in [true, false]:
 		var view := _local_direction(AIR_RAYS_VIEW_ELEVATION_DEG, 0.0 if toward else 180.0)
-		var pair := {}
-		for on in [false, true]:
-			_clouds.air_shadow = on
-			await _render(_point(10.0), view, low_sun, 0)
-			pair[on] = [_viewport.get_texture().get_image(), _clouds.effect.output.get_layer_data(0)]
+		var rays := await _ray_modulation(view, low_sun, -1.0)
+		negatives["rays " + ("toward" if toward else "away")] = rays[2]
+		if not toward:
+			# Away from the Sun only the shadowed air's presence: its luminance per column falls by the mean loss, the
+			# columns' differences average out along the long rays through many shadows (detrended ~0.1 %).
+			_check("air shadow: the shadowed air away from the Sun (%.0f deg up, deck cf %.1f)" % [
+					AIR_RAYS_SUN_ELEVATION_DEG, AIR_BROKEN_FRACTION], rays[3] >= AIR_RAYS_MIN_COLUMNS
+					and 1.0 - rays[4] >= AIR_AWAY_MIN_LOSS, "on / off p50 %.4f (loss >= %.3f);" % [rays[4],
+					AIR_AWAY_MIN_LOSS] + " detrended modulation %.4f over %d columns, undetrended %.3f" % [rays[0],
+					rays[3], rays[1]])
+			continue
+		_check("air shadow: crepuscular rays toward the Sun (%.0f deg up, deck cf %.1f)" % [AIR_RAYS_SUN_ELEVATION_DEG,
+				AIR_BROKEN_FRACTION], rays[3] >= AIR_RAYS_MIN_COLUMNS and rays[0] >= AIR_RAYS_MIN_MODULATION,
+				"detrended modulation %.4f (>= %.3f) over %d columns; undetrended %.3f" % [rays[0],
+				AIR_RAYS_MIN_MODULATION, rays[3], rays[1]])
+		# The control: the same deck and view with T_c uniform (no shadow shapes, the same smooth trend with the
+		# angle from the Sun): no rays, so the detrended metric must stay below the threshold.
+		var control := await _ray_modulation(view, low_sun, AIR_CONTROL_TRANSMITTANCE)
+		_check("air shadow: no crepuscular rays without shadow shapes (control: T_c %.1f everywhere)"
+				% AIR_CONTROL_TRANSMITTANCE, control[3] >= AIR_RAYS_MIN_COLUMNS
+				and control[0] < AIR_RAYS_MIN_MODULATION, "detrended modulation %.4f (< %.3f); undetrended %.3f"
+				% [control[0], AIR_RAYS_MIN_MODULATION, control[1]])
+	# The segment sum against the scene's single scattering (T_c uniform: loss = (1 - T_c) x S1 exactly when the
+	# difference form telescopes - the per-segment clamp and the Mie fade), low and high views, the Sun low and setting.
+	for c in AIR_TELESCOPE_CASES:
+		var case_sun := _local_direction(c[0], 0.0)
+		await _air_telescoping(_local_direction(c[1], c[2]), case_sun, "Sun %+.1f deg, view %.0f deg up, azimuth %.0f"
+				% [c[0], c[1], c[2]])
+	# The setting Sun under the broken deck (its Mie fade, the horizon's depth edge in view): no negative final HDR.
+	for e in AIR_SETTING_SUN_DEG:
 		_clouds.air_shadow = true
-		var sums := PackedFloat64Array()
-		var counts := PackedInt32Array()
-		sums.resize(size.x)
-		counts.resize(size.x)
-		var t_image: Image = pair[true][1]
-		for y in range(size.y):
-			for x in range(size.x):
-				var t := t_image.get_pixel(int(float(x) * t_image.get_width() / size.x),
-						int(float(y) * t_image.get_height() / size.y)).a
-				if t < AIR_SKY_T:
-					continue
-				var c_on: Color = pair[true][0].get_pixel(x, y)
-				var c_off: Color = pair[false][0].get_pixel(x, y)
-				var off := _luminance(Vector3(c_off.r, c_off.g, c_off.b))
-				if off <= 0.0:
-					continue
-				sums[x] += _luminance(Vector3(c_on.r, c_on.g, c_on.b)) / off
-				counts[x] += 1
-		var ratios: Array[float] = []
-		for x in range(size.x):
-			if counts[x] >= AIR_RAYS_MIN_PIXELS:
-				ratios.append(sums[x] / counts[x])
-		ratios.sort()
-		var modulation := (_pct(ratios, 0.9) - _pct(ratios, 0.1)) / maxf(_pct(ratios, 0.5), 1e-9)
-		_check("air shadow: crepuscular rays %s the Sun (%.0f deg up, deck cf %.1f)" % ["toward" if toward else
-				"away from", AIR_RAYS_SUN_ELEVATION_DEG, AIR_BROKEN_FRACTION], ratios.size() >= AIR_RAYS_MIN_COLUMNS
-				and modulation >= (AIR_RAYS_MIN_MODULATION if toward else AIR_RAYS_MIN_MODULATION_AWAY),
-				"on / off p10 %.3f p50 %.3f p90 %.3f over %d columns: modulation %.3f"
-				% [_pct(ratios, 0.1), _pct(ratios, 0.5), _pct(ratios, 0.9), ratios.size(), modulation])
+		await _render(_point(10.0), _local_direction(AIR_SETTING_VIEW_DEG, 0.0), _local_direction(e, 0.0), 0)
+		negatives["setting Sun %+.1f deg" % e] = _lowest_channel(_viewport.get_texture().get_image())
+	var lowest := 0.0
+	var detail := ""
+	for k in negatives:
+		lowest = minf(lowest, negatives[k])
+		detail += " %s %.4f;" % [k, negatives[k]]
+	_check("air shadow: no negative final HDR", lowest >= 0.0, "lowest channel:" + detail)
 	# Clear sky unchanged: above the deck looking up (no cloud in the Sun's way of that air), and a cloudless field.
 	var clear_views := [["above the deck, looking up", broken, 3000.0, _local_direction(30.0, 30.0)],
 			["no cloud", _slab("air_clear", SLAB_BOTTOM_M, SLAB_TOP_M, 0.0, 0.0), 10.0, _local_direction(10.0, 20.0)]]
@@ -2151,6 +2194,206 @@ func _air_shadow_samples() -> void:
 				"%.4f %% of the view's luminance" % (change * 100.0))
 	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
 	_camera.fov = 10.0
+
+
+## The crepuscular-ray metric of one view (the deck shown): the sky between the clouds, the on / off luminance ratio
+## per column (azimuth) in column order, each over the running median of AIR_RAYS_DETREND_COLUMNS columns around it
+## (the smooth trend with the angle from the Sun divides out) - 1: p90 - p10 of these residuals. forced_t >= 0 replaces
+## T_c everywhere (cloud_debug_air_transmittance). Returns [detrended, undetrended (p90 - p10) / p50, lowest final HDR
+## channel with the air shadow, columns, the ratio's p50].
+func _ray_modulation(view: Vector3, sun: Vector3, forced_t: float) -> Array:
+	var size := AIR_VIEW_SIZE
+	ShaderGlobals.set_value(&"cloud_debug_air_transmittance", forced_t)
+	var pair := {}
+	for on in [false, true]:
+		_clouds.air_shadow = on
+		await _render(_point(10.0), view, sun, 0)
+		pair[on] = [_viewport.get_texture().get_image(), _clouds.effect.output.get_layer_data(0)]
+	_clouds.air_shadow = true
+	ShaderGlobals.set_value(&"cloud_debug_air_transmittance", -1.0)
+	var sums := PackedFloat64Array()
+	var counts := PackedInt32Array()
+	sums.resize(size.x)
+	counts.resize(size.x)
+	var t_image: Image = pair[true][1]
+	for y in range(size.y):
+		for x in range(size.x):
+			var t := t_image.get_pixel(int(float(x) * t_image.get_width() / size.x),
+					int(float(y) * t_image.get_height() / size.y)).a
+			if t < AIR_SKY_T:
+				continue
+			var c_on: Color = pair[true][0].get_pixel(x, y)
+			var c_off: Color = pair[false][0].get_pixel(x, y)
+			var off := _luminance(Vector3(c_off.r, c_off.g, c_off.b))
+			if off <= 0.0:
+				continue
+			sums[x] += _luminance(Vector3(c_on.r, c_on.g, c_on.b)) / off
+			counts[x] += 1
+	var ratios: Array[float] = []
+	for x in range(size.x):
+		if counts[x] >= AIR_RAYS_MIN_PIXELS:
+			ratios.append(sums[x] / counts[x])
+	var residuals: Array[float] = []
+	var half := AIR_RAYS_DETREND_COLUMNS / 2
+	for i in range(ratios.size()):
+		var window: Array[float] = []
+		for j in range(maxi(0, i - half), mini(ratios.size(), i + half + 1)):
+			window.append(ratios[j])
+		window.sort()
+		residuals.append(ratios[i] / maxf(window[window.size() / 2], 1e-9) - 1.0)
+	residuals.sort()
+	var sorted := ratios.duplicate()
+	sorted.sort()
+	return [_pct(residuals, 0.9) - _pct(residuals, 0.1),
+			(_pct(sorted, 0.9) - _pct(sorted, 0.1)) / maxf(_pct(sorted, 0.5), 1e-9),
+			_lowest_channel(pair[true][0]), ratios.size(), _pct(sorted, 0.5)]
+
+
+## The segment sum of cloud_air_shadow_loss against the scene's single scattering over the same stretch (debug output
+## 8: the endpoint form), T_c uniform AIR_CONTROL_TRANSMITTANCE: per clear pixel (off - on) / ((1 - T_c) x S1) = 1.
+func _air_telescoping(view: Vector3, sun: Vector3, label: String) -> void:
+	var size := AIR_VIEW_SIZE
+	var forced := AIR_CONTROL_TRANSMITTANCE
+	ShaderGlobals.set_value(&"cloud_debug_air_transmittance", forced)
+	var got := {}
+	for on in [false, true]:
+		_clouds.air_shadow = on
+		await _render(_point(10.0), view, sun, 0)
+		got[on] = [_viewport.get_texture().get_image(), _clouds.effect.output.get_layer_data(0)]
+	_clouds.air_shadow = true
+	await _render(_point(10.0), view, sun, 8)
+	var reference := _viewport.get_texture().get_image()
+	ShaderGlobals.set_value(&"cloud_debug_output", 0)
+	ShaderGlobals.set_value(&"cloud_debug_air_transmittance", -1.0)
+	var t_image: Image = got[true][1]
+	var up_render := Frames.to_render(_earth_to_gcrf * _point(10.0).normalized()).normalized()
+	var errors: Array[float] = []  # relative to S1, where S1 is at least AIR_TELESCOPE_MIN_SHARE of the pixel
+	var small: Array[float] = []  # |loss - S1| / the pixel's luminance, the rest
+	var s1s: Array[float] = []
+	var m := AIR_TELESCOPE_MARGIN
+	for y in range(m, size.y - m):
+		for x in range(m, size.x - m):
+			if _camera.project_ray_normal(Vector2(x + 0.5, y + 0.5)).dot(up_render) <= 0.0:
+				continue  # the sky (the sea's waves move its depth between the renders)
+			var clear := true
+			for dy in range(-m, m + 1):
+				for dx in range(-m, m + 1):
+					clear = clear and t_image.get_pixel(x + dx, y + dy).a >= AIR_SKY_T
+			if not clear:
+				continue  # the upsample's taps all clear: the filter's lobes at a cloud do not enter
+			var c := reference.get_pixel(x, y)
+			# The loss's parts are >= 0 as a whole (cloud_air_shadow_parts): a negative table S1 (setting Sun) is 0.
+			var s1 := (1.0 - forced) * maxf(_luminance(Vector3(c.r, c.g, c.b)), 0.0)
+			var c_on: Color = got[true][0].get_pixel(x, y)
+			var c_off: Color = got[false][0].get_pixel(x, y)
+			var off := _luminance(Vector3(c_off.r, c_off.g, c_off.b))
+			s1s.append(s1)
+			var loss := off - _luminance(Vector3(c_on.r, c_on.g, c_on.b))
+			if s1 >= AIR_TELESCOPE_MIN_SHARE * off:
+				errors.append((loss - s1) / s1)
+			else:
+				small.append(absf(loss - s1) / maxf(off, 1e-9))
+	errors.sort()
+	small.sort()
+	s1s.sort()
+	var median := _pct(errors, 0.5)
+	_check("air shadow: the segment sum telescopes to the scene's single scattering (%s)" % label,
+			errors.size() + small.size() > 0 and (errors.is_empty() or (absf(median) <= AIR_TELESCOPE_TOLERANCE
+			and absf(_pct(errors, 0.05)) <= AIR_TELESCOPE_SPREAD and absf(_pct(errors, 0.95)) <= AIR_TELESCOPE_SPREAD))
+			and (small.is_empty() or _pct(small, 0.95) <= AIR_CLEAR_TOLERANCE),
+			("loss / ((1 - T_c) S1) - 1: %s; S1 below %.0f %% of the pixel: |loss - S1| %s; (1 - T_c) S1 p50 %.5f") % [
+			"none" if errors.is_empty() else "p5 %+.4f p50 %+.4f p95 %+.4f over %d clear sky pixels" % [
+			_pct(errors, 0.05), median, _pct(errors, 0.95), errors.size()], AIR_TELESCOPE_MIN_SHARE * 100.0,
+			"none" if small.is_empty() else "p95 %.4f %% of it over %d" % [_pct(small, 0.95) * 100.0, small.size()],
+			_pct(s1s, 0.5)])
+
+
+## The outline pass's loss: the image's colour with the march's zeroed (debug output 9: the loss alone, the outline
+## pixels rescaled from their colour source) against each pixel's own loss (10), T_c 0 everywhere (the loss behind the
+## clouds large). Their difference is the source's loss mis-taken for the pixel's (the edge pixel's T differs).
+func _air_outline_samples(sun: Vector3) -> void:
+	ShaderGlobals.set_value(&"cloud_debug_air_transmittance", 0.0)
+	var layers := {}
+	for mode in [9, 10]:
+		await _render(_point(10.0), sun, sun, mode)
+		layers[mode] = _clouds.effect.output.get_layer_data(0)
+	ShaderGlobals.set_value(&"cloud_debug_output", 0)
+	ShaderGlobals.set_value(&"cloud_debug_air_transmittance", -1.0)
+	var a: Image = layers[9]
+	var b: Image = layers[10]
+	var errors: Array[float] = []
+	for y in range(b.get_height()):
+		for x in range(b.get_width()):
+			var own := b.get_pixel(x, y)
+			var t := own.a
+			if t <= AIR_RIM_T.x or t >= AIR_SKY_T:
+				continue  # the outline: partly covered pixels
+			var l_own := absf(_luminance(Vector3(own.r, own.g, own.b)))
+			if l_own <= 0.0:
+				continue
+			var c := a.get_pixel(x, y)
+			errors.append(absf(_luminance(Vector3(c.r, c.g, c.b)) - _luminance(Vector3(own.r, own.g, own.b))) / l_own)
+	errors.sort()
+	_check("air shadow: an outline pixel's loss is its own (T 0.1-0.999)", errors.size() > 0
+			and _pct(errors, 1.0 - AIR_OUTLINE_MAX_SHARE) <= AIR_OUTLINE_TOLERANCE,
+			"relative error p50 %.2f %% p95 %.2f %% p99 %.2f %% max %.2f %% over %d pixels (p%.0f <= %.0f %%)" % [
+			_pct(errors, 0.5) * 100.0, _pct(errors, 0.95) * 100.0, _pct(errors, 0.99) * 100.0,
+			_pct(errors, 1.0) * 100.0, errors.size(), (1.0 - AIR_OUTLINE_MAX_SHARE) * 100.0,
+			AIR_OUTLINE_TOLERANCE * 100.0])
+
+
+## The composite's air in front of a cloud at weight 1 (cloud_march adds alpha x the air light to the clouds' distance;
+## the scene behind is dimmed by T): the image without the clouds' own light (debug output 11) minus T x the cloudless
+## scene against alpha x the core's air light to the clouds' distance (12: distance and alpha), at the cloud bodies
+## within AIR_WEIGHT_MAX_M (the march's own tier). A double count gives 2, a gap 0.
+func _air_front_weight_samples(cumulus: Dictionary, sun: Vector3) -> void:
+	var size := AIR_VIEW_SIZE
+	var camera := _point(10.0)
+	_clouds.air_shadow = false
+	_show(_slab("air_none", SLAB_BOTTOM_M, SLAB_TOP_M, 0.0, 0.0))
+	await _render(camera, sun, sun, 0)
+	var scene := _viewport.get_texture().get_image()
+	_show(cumulus)
+	await _render(camera, sun, sun, 11)
+	var no_light := _viewport.get_texture().get_image()
+	var t_image := _clouds.effect.output.get_layer_data(0)
+	await _render(camera, sun, sun, 12)
+	var geometry := _viewport.get_texture().get_image()
+	ShaderGlobals.set_value(&"cloud_debug_output", 0)
+	_clouds.air_shadow = true
+	var ratios: Array[float] = []
+	for y in range(0, size.y, 2):
+		for x in range(0, size.x, 2):
+			var g := geometry.get_pixel(x, y)
+			if g.g < AIR_WEIGHT_MIN_ALPHA or g.r <= 0.0 or g.r > AIR_WEIGHT_MAX_M:
+				continue
+			var t := t_image.get_pixel(int(float(x) * t_image.get_width() / size.x),
+					int(float(y) * t_image.get_height() / size.y)).a
+			var ray := _camera.project_ray_normal(Vector2(x + 0.5, y + 0.5))
+			var ray_itrf: Vector3 = _earth_to_gcrf.inverse() * Frames.from_render(ray)
+			var to_point: Dictionary = _core.atmosphere_sky_luminance_to_point(camera, camera + ray_itrf * g.r, sun)
+			var expected := g.g * _luminance(to_point["luminance"] * _atmosphere.luminance_scale)
+			var c := no_light.get_pixel(x, y)
+			var s := scene.get_pixel(x, y)
+			var front := _luminance(Vector3(c.r, c.g, c.b)) - t * _luminance(Vector3(s.r, s.g, s.b))
+			if expected > 0.0:
+				ratios.append(front / expected)
+	ratios.sort()
+	var median := _pct(ratios, 0.5)
+	_check("air shadow: the composite's air in front of a cloud at weight 1", ratios.size() > 0
+			and absf(median - 1.0) <= AIR_WEIGHT_TOLERANCE, "(image - T scene) / (alpha x air light to the cloud): "
+			+ "p5 %.3f p50 %.3f p95 %.3f over %d body pixels" % [_pct(ratios, 0.05), median, _pct(ratios, 0.95),
+			ratios.size()])
+
+
+## The lowest RGB channel of an HDR image.
+static func _lowest_channel(image: Image) -> float:
+	var lowest := INF
+	for y in range(image.get_height()):
+		for x in range(image.get_width()):
+			var c := image.get_pixel(x, y)
+			lowest = minf(lowest, minf(c.r, minf(c.g, c.b)))
+	return lowest
 
 
 static func _pct(a: Array[float], q: float) -> float:

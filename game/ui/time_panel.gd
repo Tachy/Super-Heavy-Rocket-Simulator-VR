@@ -17,6 +17,9 @@ const PRESETS := [
 	["Totale Mondfinsternis 14.03.2025", "2025-03-14T06:58:00"],
 ]
 
+## The frame-rate line in the info text (render_check --repeat_identical hides it: it changes from frame to frame).
+static var show_frame_rate := true
+
 var world: World
 
 var _utc_label := Label.new()
@@ -132,7 +135,7 @@ func _process_unprofiled(_delta: float) -> void:
 	if world.atmosphere.status_text != "":
 		lines.append(world.atmosphere.status_text)
 	lines.append(world.weather.status_text())
-	var frame_rate := frame_rate_line(Engine.get_frames_per_second())
+	var frame_rate := frame_rate_line(Engine.get_frames_per_second()) if show_frame_rate else ""
 	if frame_rate != "":
 		lines.append(frame_rate)
 	_info_label.text = "\n".join(lines)

@@ -238,6 +238,10 @@ air shadow on / off (`--no_air_shadow`): backlit cumulus (cf 0.5 slab, Sun 15 de
 36.98 / 36.79 ms (+4.2-4.5 ms; p99 52.6 / 54.6 vs 46.7 / 48.7). Per march pixel 33 boundary lookups (transmittance +
 two single-scattering tables) and 96 shadow-map lookups. Task 10 owns the budget (candidates: fewer segments over
 long horizontal rays, a quarter-resolution pass of its own, skipping rays whose shell has no cloud in the Sun's way).
+Fix round 1 (the ray clipped to the highest cloud top of the loaded weather, `cloud_air_shadow_top_m`, instead of
+20 km; the same runs, `t9b_r1_cost_before/after.log`): backlit cumulus (tops 2.1 km) on 14.86 / 15.17 -> 14.21 /
+14.26 ms against off 13.25 / 13.23 -> 14.18 (noisy) / 13.19 ms: +1.6-1.9 -> +1.0-1.1 ms; the 9 km deck (analog
+weather, cloud up to the upper layers) on 40.94 / 41.02 -> 40.77 / 40.70 ms against off ~36.8 ms: +4.0 ms, no gain.
 
 ## Near / far hand-over (static clouds Task 8, 2026-10-27)
 

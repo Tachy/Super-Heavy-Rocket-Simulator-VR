@@ -28,8 +28,8 @@
 #          saves after exactly that many more frames (with --fixed_exposure, for before / after comparisons).
 #          --repeat_identical[=2] once settled and the light cache complete compares that many consecutive frames of
 #          the unchanged scene (no history reset): any differing pixel fails (exit code 1; the deterministic march,
-#          static clouds Task 3). --jittered_march: the jittered march with temporal accumulation (the flag
-#          CloudLayer.deterministic_march off). --no_air_shadow: the clouds' shadows on the air off (the flag
+#          static clouds Task 3; the HUD's frame-rate line hidden). --jittered_march: the jittered march with
+#          temporal accumulation (the flag CloudLayer.deterministic_march off). --no_air_shadow: the clouds' shadows on the air off (the flag
 #          CloudLayer.air_shadow).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
@@ -112,6 +112,8 @@ func _process(_delta: float) -> bool:
 		if _args.has("far_fade"):  # the far tier's shapes-to-column fade (PRESETS far_fade_m): "<start m>,<end m>"
 			var fade: PackedStringArray = _args["far_fade"].split(",")
 			ShaderGlobals.set_value(&"cloud_far_pattern_fade_m", Vector2(float(fade[0]), float(fade[1])))
+		if _args.has("repeat_identical"):  # the HUD's frame-rate line changes from frame to frame
+			TimePanel.show_frame_rate = false
 		if _args.has("cloud_debug"):  # the cloud pass's debug output (clouds.gdshaderinc cloud_debug_output)
 			ShaderGlobals.set_value(&"cloud_debug_output", int(_args["cloud_debug"]))
 		world.clock.set_time(world.core.utc_to_tdb_s(_args.get("utc", "2024-04-08T18:42:00")))
@@ -243,7 +245,7 @@ func _repeat_frames(world: World) -> bool:
 		return false
 	var first := _repeat_images[0]
 	var worst := 0
-	var box := Rect2i()  # the differing pixels' bounding box (the frame-rate label differs from frame to frame)
+	var box := Rect2i()  # the differing pixels' bounding box
 	for k in range(1, _repeat_images.size()):
 		var other := _repeat_images[k]
 		var differing := 0

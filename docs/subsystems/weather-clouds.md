@@ -395,36 +395,56 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     per node; 262144 holds ~8000 nodes against 1875 drawn at most in `terrain_perf`: 4x headroom). Follow-up: a slim
     terrain include that declares only the ~7 samplers the terrain uses (the others are bound per node regardless).
 - **Cloud shadows on the air** (static clouds Task 9b, ruling 2026-10-27 "Wolkenschatten auf die Luft";
-  `cloud_pass.gdshaderinc` `cloud_air_shadow_loss`, fidelity flag `CloudLayer.air_shadow` / global `cloud_air_shadow`,
-  render_check `--no_air_shadow`). The tables' air light is the clear sky's; under and beside clouds the Sun's direct
-  beam is cut. Of the air light only the single scattering of the direct beam is weighted by the beam's cloud
-  transmittance T_c at the scattering point; the multiple scattering (the sky's diffuse light, the deck's glow) stays.
-  The single Rayleigh part comes from the new atmosphere table `atmosphere_single_rayleigh` (core
-  `AtmosphereTables::single_rayleigh`, `atmosphere-scattering.md`), the single Mie from `atmosphere_single_mie`. The
-  march kernel integrates per pixel over the ray below 20 km (to the scene or the shell's exit) in 32 segments at
-  (i / n)^2 [E], Bruneton's difference form per segment (unweighted it telescopes to the plain single-scattering
-  lookup), T_c = the mean of 3 fixed points per segment [E] from the cloud shadow maps (`cloud_shadow_transmittance`:
-  near map's shapes within 9-11 km, far map's grid mean to 120-140 km, slanted column beyond; inside the near range
-  the near map alone) - one midpoint per segment aliased the near map's shadows into regular stripes across the sky,
-  3 x 32 points look as 96 segments. The segment's part in front of the clouds' weighted distance is seen directly, the
-  rest through the background's T (linear split: a step at the midpoint stair-stepped the loss along the clouds'
-  distance contours). The pass's colour carries -L (the march clamps to +-65000, the upsample's undershoot floor is the
-  lowest tap's colour instead of 0, the composite's additive pass adds it). Static (fixed points, `repeat_identical`),
-  world space (both VR eyes), the eclipse's unocculted fraction applied. Weather off or no cloud in the Sun's way: L = 0
-  exactly (cloud_check 14: 0.0000 %).
-  - Backlit cumulus (cloud_check 14: cf 0.5, in-cloud tau 50, 1-2 km, Sun 15 deg up, HDR medians; before -> after):
-    2-6 deg from the Sun sky 2.59 -> 1.75, body 2.27 -> 0.60 (body / sky 0.88 -> 0.34), rim p90 / body 1.77 -> 3.95;
-    6-10 deg sky 1.86 -> 1.40, body 1.72 -> 0.70 (0.50), rim / body 1.63 -> 2.77; 10-15 deg sky 1.17 -> 0.80, body
-    1.12 -> 0.57 (0.71), rim / body 1.87 -> 2.76. The acceptance (cloud-visual-reference.md (3)) holds. Under a cf 0.5
-    deck at a 15-deg Sun the beam crosses ~3.7 km of the cloud layer: the air below it lies ~70 % in shadow (beam cover
-    0.70), so the aureole of the air in front of the body nearly vanishes (the measurement round's 24-piece light-march
-    diagnostic, -21..-24 %, had left the sky unshadowed and used the per-sample light march).
-  - Crepuscular rays (cloud_check 14: cf 0.4 deck, Sun 4 deg, the sky's on / off ratio per column along a 12-deg band):
-    toward the Sun p10 / p50 / p90 0.41 / 0.59 / 0.76 (modulation 0.58), away 0.92 / 0.93 / 0.94 (0.019: the
-    anti-crepuscular side is lit mostly by single Rayleigh and the aerosol's weak backscatter).
-  - Cost (VR proxy, whole frame, `vr-performance.md`): +1.6-1.7 ms backlit cumulus, +4.2-4.5 ms the 9 km deck view.
-  - The bit-identity of the cloud image (cloud_grain_check) is checked with the air shadow off: the loss is integrated
-    to the scene, so the sea's waves move it (~2500 Cape sea pixels by < 3e-5).
+  `cloud_pass.gdshaderinc` `cloud_air_shadow_parts` / `cloud_air_shadow_loss`, fidelity flag `CloudLayer.air_shadow` /
+  global `cloud_air_shadow`, render_check `--no_air_shadow`). The tables' air light is the clear sky's; under and beside
+  clouds the Sun's direct beam is cut. Of the air light only the single scattering of the direct beam is weighted by
+  the beam's cloud transmittance T_c at the scattering point; the multiple scattering (the sky's diffuse light, the
+  deck's glow) stays. The single Rayleigh part comes from the atmosphere table `atmosphere_single_rayleigh` (core
+  `AtmosphereTables::single_rayleigh`, `atmosphere-scattering.md`), the single Mie from `atmosphere_single_mie`, faded
+  as the scene fades it: `smoothstep(0, 0.01, mu_s)` at the CAMERA (`atm_to_point_model`, `atm_sky`), so the
+  unweighted sum is exactly the scene's single scattering. The march kernel integrates per pixel over the ray below the
+  highest cloud top of the bound snapshots (`cloud_air_shadow_top_m` from `CloudLayer._bind_slots`, core
+  `environment::cloud_render_top_m`: the centre of the layer above the highest layer with cloud fraction and
+  condensate, 20 km for the top layer, 0 without cloud: no work) to the scene or the shell's exit, in 32 segments at
+  (i / n)^2 [E], Bruneton's difference form per segment without a clamp per piece (a piece the tables' interpolation
+  makes negative belongs to the telescoping sum; the front and behind parts are >= 0 as a whole), T_c = the mean of 3
+  fixed points per segment [E] from the cloud shadow maps (`cloud_shadow_transmittance`: near map's shapes within
+  9-11 km, far map's grid mean to 120-140 km, slanted column beyond; inside the near range the near map alone) - one
+  midpoint per segment aliased the near map's shadows into regular stripes across the sky, 3 x 32 points look as 96
+  segments. The segment's part in front of the clouds' weighted distance is seen directly, the rest through the
+  background's T (linear split: a step at the midpoint stair-stepped the loss along the clouds' distance contours); the
+  two parts are returned apart (loss = front + T x behind). The composite adds the air in front of a cloud at weight 1
+  (`cloud_march`'s alpha x `atm_to_point_offset` to the clouds' distance plus T x the scene), the same weight as the
+  loss's front part (cloud_check 14: 1.000). The pass's colour carries -L (the march clamps to +-65000; the composite's
+  additive pass adds it). The outline pass (`CLOUD_EDGE_REFINE`) takes the source's loss off with the source's T and
+  adds this pixel's with its own (one parts call per outline pixel at this pixel's cloud distance). The upsample's
+  undershoot floor: the inner 2 x 2 taps of this pixel's scene depth (depth weight within `CLOUD_DEPTH_MIXED_WEIGHT` of
+  the best), the larger of their lowest colour and this pixel's T x their lowest colour per T (`CLOUD_FLOOR_MIN_T`): a
+  negative colour belongs to its T x scene, so a cloud body next to the shadowed sky cannot take the sky's -L; 0
+  without air shadow, as before. Static (fixed points, `repeat_identical`), world space (both VR eyes), the eclipse's
+  unocculted fraction applied. Weather off or no cloud in the Sun's way: L = 0 exactly (cloud_check 14: 0.0000 %).
+  - Backlit cumulus (cloud_check 14: cf 0.5, in-cloud tau 50, 1-2 km, Sun 15 deg up, HDR medians; air shadow off ->
+    on): 2-6 deg from the Sun sky 2.59 -> 1.72, body 2.27 -> 0.586 (body / sky 0.88 -> 0.34), rim p90 / body 1.77 ->
+    4.01 (4.03 in the full run) - just above the acceptance's 4 (cloud-visual-reference.md (3)); converged (128
+    segments: 4.01); 6-10 deg sky
+    1.86 -> 1.40, body 1.72 -> 0.69 (0.49), rim / body 1.63 -> 2.77; 10-15 deg sky 1.17 -> 0.80, body 1.12 -> 0.56
+    (0.70), rim / body 1.87 -> 2.84. Under a cf 0.5 deck at a 15-deg Sun the beam crosses ~3.7 km of the cloud layer:
+    the air below it lies ~70 % in shadow (beam cover 0.70), so the aureole of the air in front of the body nearly
+    vanishes.
+  - Crepuscular rays (cloud_check 14: cf 0.4 deck, Sun 4 deg, the sky's on / off ratio per column over its running
+    median of 61 columns = 7.6 deg [E]): toward the Sun p90 - p10 of the residual 3.6 % (>= 2 % [E]: the eye's contrast
+    threshold for extended bands); the ray-free control (T_c 0.5 everywhere, the same deck and view) 1.1 % (its
+    undetrended spread 0.23 passed the earlier metric). Away from the Sun the mean loss is 6.8 % but the columns differ
+    by 0.15 % only: the long rays through many shadows average the anti-crepuscular rays out (checked as presence:
+    loss >= 1 %).
+  - The segment sum against the scene's single scattering over the same stretch (debug output 8, T_c 0.5 uniform,
+    clear sky pixels away from clouds): median within 0.03 %, p5 / p95 within 0.2 % (Sun 4 deg, view 1 / 3 deg up),
+    0.6 % (view 30 deg), 1.6 % (Sun +0.3 deg); Sun -0.5 deg: S1 ~0, |loss - S1| p95 0.08 % of the pixel.
+  - No negative final HDR in section 14's scenes (backlit, rays, setting Sun +0.3 / -0.5 deg with the horizon in view).
+  - Cost (VR proxy, whole frame, `vr-performance.md`): +1.0-1.1 ms backlit cumulus (+1.6-1.9 ms before the clip to
+    the cloud top), +4.0 ms the 9 km deck view (analog weather, tops up to the upper layers: no gain).
+  - The bit-identity of the cloud image (cloud_grain_check) is checked with the air shadow on, above the horizon (8
+    rows margin): below it the sea's depth changes between frames and the loss is integrated to the scene.
 - **Far field** (Task 10; `cloud_far.gdshaderinc`, `earth_clouds.gdshader` = `earth_surface.gdshaderinc` with
   `EARTH_CLOUDS`): beyond 1.5e7 m from the Earth's centre (`CelestialBody.SCALED_SPACE_DISTANCE_M`, the same distance
   that hands the terrain over to the ellipsoid mesh) the cloud pass is off (`cloud_enabled`) and `CloudLayer.far_enabled`
@@ -563,9 +583,10 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   cloud_slab_transmitted_mc.csv` from `tools/validation/cloud_slab_monte_carlo.py --transmitted`, 1e7 photons per case,
   sigma 0.3-0.7 %): the GPU's bin means (debug output 2, light cache filled) vs Monte Carlo at tau 10 / 30, Sun zenith
   75 / 45 deg, view zenith 0 / 30 / 60 toward, across and away from the Sun: within 4.9 % (tolerance 7 % [E]). The
-  cloud shadows on the air: section 14's backlit cumulus, crepuscular rays and clear-sky cases (numbers in the Model
-  section); core `[atmosphere]`: the single Rayleigh table = the raymarch's single Rayleigh within 1 % and below the
-  scattering table's total.
+  cloud shadows on the air: section 14's backlit cumulus, crepuscular rays (+ ray-free control), segment sum vs the
+  scene's single scattering, outline, front weight, no-negative and clear-sky cases (numbers in the Model section);
+  core `[weather]`: `cloud_render_top_m`; core `[atmosphere]`: the single Rayleigh table = the raymarch's single
+  Rayleigh within 1 % and below the scattering table's total.
 - Real-date plausibility (final review I4, `test_weather_snapshot.cpp` "Real-date columns ...", fixture
   `era5_plausibility.toml` by `tools/validation/gen_weather_fixtures.py`: ERA5 columns of 2024-04-08 18 UTC and
   2025-08-15 18 UTC at Starbase, the Cape, the North Atlantic, the warm pool and the most overcast cell near Starbase,
@@ -825,15 +846,17 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 ## Open points and known limits
 
 - **Cloud shadows on the air (Task 9b)**: shapes' shadows (rays) only within the near map's 9-11 km; beyond, the far
-  map's grid mean shades the air smoothly (no individual rays from far clouds). Cameras above the atmosphere's top get
-  no air shadow (the shell's air seen from orbit keeps the clear sky's light). Higher orders of the light scattered into
+  map's grid mean shades the air smoothly (no individual rays from far clouds). Cameras above the atmosphere's top
+  (~100 km) get no air shadow: the loss switches off there during an ascent (the tables' parametrisation needs the ray
+  moved to its top-of-atmosphere entry, as `atm_sky` does; not done). The outline pass takes the source's loss at this
+  pixel's cloud distance (p99 1.7 %, max 7 % of the pixel's loss). Backlit rim / body 4.01 at 2-6 deg from the Sun
+  against the acceptance's 4: re-run section 14 after Task 9c (review M7). Higher orders of the light scattered into
   the shadowed air are not followed (the multiple scattering is the clear sky's: slightly too bright in large shadows).
   The scaled-space far field has none.
 - **Per-sample light march for thick slabs seen from below (Task 9b)**: with the light cache off (or a view the cache
   has not filled yet: the fallback) the transmitted radiance of a backlit slab is +25..+92 % above the Monte Carlo
   reference (tau 10 / 30, Sun zenith 45 / 75; `STARSIM_SLAB_NO_CACHE=1` in cloud_check 14); with the cache filled
-  within 5 %. The measurement round's "+21..+39 % at view zenith 60 forward" was this fallback, not the table. Open:
-  the fallback's light-march length for low Suns.
+  within 5 %. Open: the fallback's light-march length for low Suns.
 - **Low-Sun base over-lighting (Task 9b secondary)**: the entry-cosine clamp gives cumulus bases under a 15-deg Sun
   b ~13 from the vertical column (debug source 0.167 /sr vs 0.012-0.018 of the slab); a cap needs a 3D Monte Carlo box
   reference first - not built (the air shadow met the acceptance alone).

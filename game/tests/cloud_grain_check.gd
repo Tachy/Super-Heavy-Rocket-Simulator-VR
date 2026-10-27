@@ -16,10 +16,10 @@
 # outlier pixels (luminance or alpha off the median of their 7-pixel row window by more than DOT_DEVIATION of it and off
 # both row neighbours) within HORIZON_ROWS of the horizon (per column, the rays against the site's sphere) at most
 # DOT_FACTOR x the rows' own density HORIZON_REFERENCE_ROWS away, + DOT_ALLOWANCE.
-# With the preset the cloud image of the next frame is bit-identical, checked with the clouds' shadows on the air off
-# (static clouds Task 9b: that loss is integrated to the scene and follows the sea's waves)
-# (static clouds; render_check's repeat_identical compares the whole frame, whose sea differs between frames at the Cape
-# without any cloud change).
+# With the preset the cloud image of the next frame is bit-identical above the horizon (static clouds; render_check's
+# repeat_identical compares the whole frame, whose sea differs between frames at the Cape without any cloud change): the
+# clouds' shadows on the air (static clouds Task 9b) integrate their loss to the scene, so the sea's frame-to-frame
+# depth changes move it there; the rows from HORIZON_IDENTITY_MARGIN above the horizon down are left out.
 # Needs a GPU (no --headless): godot --xr-mode off --path game --script res://tests/cloud_grain_check.gd
 # [-- --only=cape] (one view) [--save=<dir>] (the cloud images as EXR). Exit code 1 on failure.
 extends SceneTree
@@ -53,6 +53,9 @@ const FRAMES_TO_SETTLE := 6
 ## The horizon row (header): rows within HORIZON_ROWS of it (the terrain's heights shift it by a row or two), reference
 ## rows HORIZON_REFERENCE_ROWS.x-.y away.
 const HORIZON_ROWS := 3
+## The bit-identity's rows above the horizon left out (the upsample's 4 x 4 low-resolution taps reach 2 texels: 6 rows
+## at the VR divisor 3, + 2 for the terrain's heights).
+const HORIZON_IDENTITY_MARGIN := 8
 const HORIZON_REFERENCE_ROWS := Vector2i(8, 40)
 ## [E] An isolated outlier: off its 7-pixel row median by more than this fraction (the dots: 40-75 %; a cloud's edge
 ## follows the median) and off both row neighbours by more than DOT_NEIGHBOUR of it; values below DOT_FLOOR count as it.
@@ -119,18 +122,17 @@ func _run() -> void:
 		if not await _settle():
 			_fail_and_quit("%s: the scene did not settle" % name)
 			return
-		# The march's determinism without the clouds' shadows on the air (static clouds Task 9b): that loss is
-		# integrated to the scene, and the sea's waves move it (measured at the Cape: ~2500 sea pixels by < 3e-5).
-		_world.clouds.air_shadow = false
-		await process_frame
+		# The march's determinism with the clouds' shadows on the air, above the horizon (header).
 		await process_frame
 		var first := _world.clouds.effect.output.get_layer_data(0)
 		await process_frame
 		var second := _world.clouds.effect.output.get_layer_data(0)
-		_world.clouds.air_shadow = true
-		_check("%s: the cloud image of the next frame bit-identical (air shadow off)" % name,
-				first != null and second != null and first.get_data() == second.get_data(),
-				_differing_pixels(first, second))
+		var sky := _sky_mask(first, view) if first != null else PackedByteArray()
+		_check("%s: the cloud image of the next frame bit-identical above the horizon" % name,
+				first != null and second != null and first.get_size() == second.get_size()
+				and _differing_pixels_count(first, second, sky) == 0,
+				"above: %s; below: %s" % [_differing_pixels(first, second, sky, 1),
+				_differing_pixels(first, second, sky, 0)])
 		await process_frame
 		await process_frame
 		first = _world.clouds.effect.output.get_layer_data(0)
@@ -352,8 +354,42 @@ class _Picture:
 		return sqrt(sum_sq / count) / (sum_ref / count)
 
 
-## The differing pixels of two images of one size (the bit-identity check's detail): count, the largest RGBA change.
-static func _differing_pixels(a: Image, b: Image) -> String:
+## Per pixel of the image: 1 above the horizon by more than HORIZON_IDENTITY_MARGIN rows (the first row per column
+## whose ray meets the sea-level sphere under the camera), else 0.
+func _sky_mask(image: Image, view: Dictionary) -> PackedByteArray:
+	var w := image.get_width()
+	var h := image.get_height()
+	var itrf := _itrf(view["lat"], view["lon"])
+	var up := Frames.to_render(_world.earth.fixed_to_gcrf * itrf.normalized())
+	var r_ground := itrf.length()
+	var r_c := r_ground + maxf(float(ShaderGlobals.value(&"cloud_camera_height_m")), 0.0)
+	var scale := Vector2(_world.camera.get_viewport().get_visible_rect().size) / Vector2(w, h)
+	var mask := PackedByteArray()
+	mask.resize(w * h)
+	for x in range(w):
+		var horizon := h
+		for y in range(h):
+			var b := r_c * _world.camera.project_ray_normal(Vector2(x + 0.5, y + 0.5) * scale).dot(up)
+			if b < 0.0 and b * b - (r_c * r_c - r_ground * r_ground) >= 0.0:
+				horizon = y
+				break
+		for y in range(mini(maxi(horizon - HORIZON_IDENTITY_MARGIN, 0), h)):
+			mask[y * w + x] = 1
+	return mask
+
+
+static func _differing_pixels_count(a: Image, b: Image, mask: PackedByteArray) -> int:
+	var count := 0
+	for y in range(a.get_height()):
+		for x in range(a.get_width()):
+			if mask[y * a.get_width() + x] == 1 and a.get_pixel(x, y) != b.get_pixel(x, y):
+				count += 1
+	return count
+
+
+## The differing pixels of two images of one size (the bit-identity check's detail): count, the largest RGBA change;
+## only where mask holds `inside` (no mask: all).
+static func _differing_pixels(a: Image, b: Image, mask := PackedByteArray(), inside := 1) -> String:
 	if a == null or b == null or a.get_size() != b.get_size():
 		return "images missing or of different sizes"
 	var count := 0
@@ -362,6 +398,8 @@ static func _differing_pixels(a: Image, b: Image) -> String:
 	var box := Rect2i()
 	for y in range(a.get_height()):
 		for x in range(a.get_width()):
+			if not mask.is_empty() and mask[y * a.get_width() + x] != inside:
+				continue
 			var d := a.get_pixel(x, y) - b.get_pixel(x, y)
 			var m := maxf(maxf(absf(d.r), absf(d.g)), maxf(absf(d.b), absf(d.a)))
 			if m > 0.0:

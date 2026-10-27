@@ -99,4 +99,10 @@ double cloud_render_column_optical_depth(const WeatherSnapshot& snapshot, int ro
 // The GPU form of the snapshot's texels (layout above).
 std::vector<std::uint8_t> cloud_render_texels(const WeatherSnapshot& snapshot);
 
+// The height above which the rendered field holds no cloud anywhere (static clouds Task 9b: the cloud shadows on the
+// air need no samples above it): the centre of the layer above the highest layer with a cloud fraction and condensate
+// in any cell (the profile between the centres reaches zero there), the field's top weather_top_m for the top layer
+// (held to it), 0 without cloud.
+double cloud_render_top_m(const WeatherSnapshot& snapshot);
+
 }  // namespace starsim::environment

@@ -137,6 +137,21 @@ std::vector<std::uint8_t> cloud_render_texels(const WeatherSnapshot& snapshot) {
     return out;
 }
 
+double cloud_render_top_m(const WeatherSnapshot& snapshot) {
+    const std::vector<std::uint8_t>& source = snapshot.texels();
+    const std::size_t cells = static_cast<std::size_t>(snapshot.rows()) * snapshot.columns();
+    for (int layer = weather_layer_count - 1; layer >= 0; --layer) {
+        const std::size_t base = static_cast<std::size_t>(layer) * cells * channels;
+        for (std::size_t cell = 0; cell < cells; ++cell) {
+            const std::size_t i = base + cell * channels;
+            if (source[i] != 0 && (source[i + 1] != 0 || source[i + 2] != 0)) {
+                return layer == weather_layer_count - 1 ? weather_top_m : layer_centre_m(layer + 1);
+            }
+        }
+    }
+    return 0.0;
+}
+
 std::vector<std::uint8_t> cloud_render_column_texels(const WeatherSnapshot& snapshot) {
     const std::vector<std::uint8_t>& source = snapshot.texels();
     const std::size_t cells = static_cast<std::size_t>(snapshot.rows()) * snapshot.columns();

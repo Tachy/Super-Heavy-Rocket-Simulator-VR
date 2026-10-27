@@ -553,7 +553,7 @@ static func _snapshot_id(snapshot: Dictionary) -> String:
 
 func _empty_slot() -> Dictionary:
 	return {"id": "", "file": "", "size": Vector3(2, 2, LAYERS), "field": null, "ice": null, "column": null,
-		"base": null}
+		"base": null, "top_m": 0.0}
 
 
 ## A slot for the snapshot with its volumes created (not yet uploaded); the empty slot for none.
@@ -582,7 +582,8 @@ func _new_slot(snapshot: Dictionary) -> Dictionary:
 		"field": CloudFieldTexture.create(snapshot["cloud_texels"], columns, rows, 4),
 		"ice": CloudFieldTexture.create(ice, columns, rows, 1),
 		"column": CloudFieldTexture.create(column, columns, rows, 2),
-		"base": ImageTexture.create_from_image(Image.create_from_data(columns, rows, false, Image.FORMAT_RGF, base))}
+		"base": ImageTexture.create_from_image(Image.create_from_data(columns, rows, false, Image.FORMAT_RGF, base)),
+		"top_m": float(snapshot.get("cloud_top_m", CloudEffect.CLOUD_TOP_M))}
 
 
 ## Frees a slot's volumes unless a resident slot still shows them (show_now shares one upload for a snapshot twice).
@@ -653,6 +654,8 @@ func _bind_slots() -> void:
 		[&"cloud_field_after", &"cloud_ice_after", &"cloud_field_after_size", &"cloud_column_after",
 			&"cloud_base_after"]]
 	field_texture_bytes = 0
+	# The highest cloud top of both slots (environment::cloud_render_top_m): the air shadow's rays end there.
+	ShaderGlobals.set_value(&"cloud_air_shadow_top_m", maxf(float(_slots[0]["top_m"]), float(_slots[1]["top_m"])))
 	for s in range(2):
 		var slot: Dictionary = _slots[s]
 		var has := slot["field"] != null

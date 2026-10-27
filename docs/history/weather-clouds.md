@@ -617,3 +617,50 @@ Measured then (fix round 1, at 11283a0): the premultiplied blend rounds its fact
 too, so even with alpha computed exactly the disk stayed at 2^-11 = 4.9e-4 of itself behind every deck of slant tau
 7.6+ (disk/clear 4.89e-4 at vertical tau 7, 8, 9, 10); the per-channel clamp turned the 55 deg disk (81 500) into
 (60 000, 60 000, 51 456) instead of the hue (60 000, 47 546, 37 918).
+
+## Cloud shadows on the air, first version (superseded by static clouds Task 9b fix round 1, 2026-10-27)
+
+The Model bullet as of 34661fa (the Mie fade per point, a clamp per segment, the ray to 20 km, the upsample's floor
+from every tap, the outline pass's loss of this pixel for the source's, the grain identity with the air shadow off):
+
+- **Cloud shadows on the air** (static clouds Task 9b, ruling 2026-10-27 "Wolkenschatten auf die Luft";
+  `cloud_pass.gdshaderinc` `cloud_air_shadow_loss`, fidelity flag `CloudLayer.air_shadow` / global `cloud_air_shadow`,
+  render_check `--no_air_shadow`). The tables' air light is the clear sky's; under and beside clouds the Sun's direct
+  beam is cut. Of the air light only the single scattering of the direct beam is weighted by the beam's cloud
+  transmittance T_c at the scattering point; the multiple scattering (the sky's diffuse light, the deck's glow) stays.
+  The single Rayleigh part comes from the new atmosphere table `atmosphere_single_rayleigh` (core
+  `AtmosphereTables::single_rayleigh`, `atmosphere-scattering.md`), the single Mie from `atmosphere_single_mie`. The
+  march kernel integrates per pixel over the ray below 20 km (to the scene or the shell's exit) in 32 segments at
+  (i / n)^2 [E], Bruneton's difference form per segment (unweighted it telescopes to the plain single-scattering
+  lookup), T_c = the mean of 3 fixed points per segment [E] from the cloud shadow maps (`cloud_shadow_transmittance`:
+  near map's shapes within 9-11 km, far map's grid mean to 120-140 km, slanted column beyond; inside the near range
+  the near map alone) - one midpoint per segment aliased the near map's shadows into regular stripes across the sky,
+  3 x 32 points look as 96 segments. The segment's part in front of the clouds' weighted distance is seen directly, the
+  rest through the background's T (linear split: a step at the midpoint stair-stepped the loss along the clouds'
+  distance contours). The pass's colour carries -L (the march clamps to +-65000, the upsample's undershoot floor is the
+  lowest tap's colour instead of 0, the composite's additive pass adds it). Static (fixed points, `repeat_identical`),
+  world space (both VR eyes), the eclipse's unocculted fraction applied. Weather off or no cloud in the Sun's way: L = 0
+  exactly (cloud_check 14: 0.0000 %).
+  - Backlit cumulus (cloud_check 14: cf 0.5, in-cloud tau 50, 1-2 km, Sun 15 deg up, HDR medians; before -> after):
+    2-6 deg from the Sun sky 2.59 -> 1.75, body 2.27 -> 0.60 (body / sky 0.88 -> 0.34), rim p90 / body 1.77 -> 3.95;
+    6-10 deg sky 1.86 -> 1.40, body 1.72 -> 0.70 (0.50), rim / body 1.63 -> 2.77; 10-15 deg sky 1.17 -> 0.80, body
+    1.12 -> 0.57 (0.71), rim / body 1.87 -> 2.76. The acceptance (cloud-visual-reference.md (3)) holds. Under a cf 0.5
+    deck at a 15-deg Sun the beam crosses ~3.7 km of the cloud layer: the air below it lies ~70 % in shadow (beam cover
+    0.70), so the aureole of the air in front of the body nearly vanishes (the measurement round's 24-piece light-march
+    diagnostic, -21..-24 %, had left the sky unshadowed and used the per-sample light march).
+  - Crepuscular rays (cloud_check 14: cf 0.4 deck, Sun 4 deg, the sky's on / off ratio per column along a 12-deg band):
+    toward the Sun p10 / p50 / p90 0.41 / 0.59 / 0.76 (modulation 0.58), away 0.92 / 0.93 / 0.94 (0.019: the
+    anti-crepuscular side is lit mostly by single Rayleigh and the aerosol's weak backscatter).
+  - Cost (VR proxy, whole frame, `vr-performance.md`): +1.6-1.7 ms backlit cumulus, +4.2-4.5 ms the 9 km deck view.
+  - The bit-identity of the cloud image (cloud_grain_check) is checked with the air shadow off: the loss is integrated
+    to the scene, so the sea's waves move it (~2500 Cape sea pixels by < 3e-5).
+
+Open points then: "The measurement round's "+21..+39 % at view zenith 60 forward" was this fallback, not the table."
+(the per-sample light march for thick slabs seen from below). Review r1 (task-9b-findings-r1.md): the per-point Mie fade
+removed forward Mie light the scene never added at a setting Sun (segment sum / scene single scattering 1.54 at a
+0.3-deg Sun); the per-segment clamp biased the sum up to +8 % at p95 near the horizon; the crepuscular metric
+((p90 - p10) / p50 of the on / off ratio) passed a ray-free control (0.23); the outline pass's error up to 7.4 %
+(32 % of the outline pixels over 1 %); the floor from every tap let a body pixel next to the shadowed sky go to
+-0.60 (backlit) / -0.67 (rays); the 20 km clip sampled the backlit body 2 % brighter (rim / body 3.93-3.95 against
+4.01 converged).
+
