@@ -55,6 +55,45 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   light and the shadow maps read the layer means without the cut: their column water path is the same. Flat sharp
   bases, nothing hangs below them, silhouettes above the base's layer untouched; nothing is fetched above 12 km
   (Everest 8.85 km + the 3 km boundary layer, rounded up).
+- **Cover from the total cloud cover, cumulus water from an adiabatic parcel** (static clouds Task 9c, user
+  2026-10-27 "Cumulus sind nie flach", ruling "Bedeckung nach ERA5 + Wasser ergaenzen"; `weather_snapshot.hpp`, file
+  format 6). Every snapshot carries the data's total cloud cover per column (ERA5 single-level `total_cloud_cover`,
+  GFS `TCDC` entire atmosphere instantaneous; `WeatherSnapshot::total_cloud_cover`, -1 unknown). The column build
+  (`ColumnLayers::build`) runs, after the LCL raise:
+  - `scale_cloud_cover_to_total`: the fractions of the layers that count for the cover (stored condensate, a non-zero
+    water code, above the ground) are multiplied by one factor (in proportion, at most 1, at least `cloud_min_cover`;
+    layers without condensate untouched) until their maximum-random cover (`cloud_column_cover_max_random`, Geleyn &
+    Hollingsworth 1979 as ERA5 combines its levels) is the data's tcc; the water contents (grid means) are kept, so the
+    in-cloud water of every type falls by that factor (stratiform and ice too: their water is unchanged). The
+    downsampled set and the pole rows scale their box means again to the box's mean tcc (box means of layers that held
+    the cloud at different places no longer overlap: before that re-scaling the 1-deg cover was 0.057 below tcc).
+  - `add_cumulus_adiabatic_water` (the path rule of the measurement round): the lowest significant liquid run with
+    its base in the boundary layer and a known LCL (0 < LCL < 3 km), base z_b = max(ground + LCL, run bottom), path =
+    its layers with more than `cloud_base_snap_m` above z_b. When the path's in-cloud liquid water path sum L t / C is
+    below the sub-adiabatic parcel's from z_b to the boundary-layer top, sum f_ad Gamma_l(T, p) ((z_top - z_b)^2 -
+    (z_bottom - z_b)^2) / 2 with heights capped at ground + 3 km, each path layer's liquid is multiplied by
+    1 + w_k (s - 1) (s the ratio, w_k the layer's cumulus weight of `cloud_type_weights`: no switch, a deck's layers keep
+    their water), in-cloud at most `cumulus_liquid_water_max_kg_m3` 1.5e-3 [E] (Warner 1955) - a denser layer keeps
+    its value. f_ad = `cumulus_adiabatic_fraction` 0.4 [E] (Brenguier et al. 2000: shallow Cu 0.3-0.6; Blyth 1993).
+    Gamma_l (`adiabatic_liquid_water_gradient_kg_m3_per_m`) = -rho_d dr_s/dz of the pseudo-adiabat c_pd dT + g dz +
+    L(T) dr_s = 0 with Romps' constants (1.6-2.4 g/m^3/km at 275-290 K, 800-950 hPa; 2.6-2.8 at a 298-300 K tropical
+    base). The parcel ends at the boundary-layer top: f_ad is a shallow-cumulus value, and a congestus / cumulonimbus
+    run keeps its data water above 3 km (it counts in the in-cloud path; without the cap a deep convective column of
+    the fixture got +4.5 kg/m^2). The added grid-mean liquid path is stored per column
+    (`added_liquid_path_kg_m2`, diagnostic). The layer means carry T and p for it (`LevelSample` 5 fields).
+  - Order: LCL raise, cover, water - the cloud types follow the final fractions, the water floor holds on them. CPU
+    light, far field, shadow maps, air shadow and the GPU field read the same layer means (one source).
+  - Measured on four analog hours (Jan / Apr / Jul / Oct 2025 15th 00 UTC, 1 deg, `tau_inv/t9c_*.py`): cover deficit
+    vs tcc 0.196-0.203 before -> 0.004-0.008 (cos-lat means; 0.25 deg: 0.011; all 48 analog hours 0.004-0.009, mean
+    0.006, added cumulus water 86-111 g/m^2); grid-mean liquid water path 50.2 ->
+    140.4 g/m^2 (+180 %, ice 20.4 unchanged); low boundary-layer cumulus (area-resolved vertical in-cloud tau, maximal
+    overlap) p10 / p50 / p90 5.0 / 19.0 / 70 -> 6.2 / 30.6 / 144, thin area (tau < 7.07) 16.6 -> 11.8 % (the cover
+    alone: 36.8 %; of the 11.8 %, 7.5 points are runs with deck-typed layers, which keep their water); in-cloud LWC
+    p50 / p90 / p99 0.117 / 0.303 / 0.516 -> 0.233 / 0.629 / 1.054 g/m^3 (0.25 deg: p99 1.47). f_ad 0.3 / 0.5: LWP
+    111 / 168 g/m^2, thin area 14.4 / 10.3 %, Cu tau p50 24 / 37. Body-core tau medians per type (`cloud_tau.py`): low
+    Cu 57 -> 120, Ac 60 -> 26, St / Sc 96 -> 113 (area share 0.11 -> 0.29: the raised fractions reach the deck band),
+    cirrus 4.5 -> 2.2. Columns with tcc < 0.01 and stored condensate: 1.1 % (0.25 deg, Jan): their cloud layers drop to
+    `cloud_min_cover`.
 - **Vertical profile rule** (`cloud_render_texels.hpp` `cloud_profile_value`, port in `clouds.gdshaderinc`): the two
   layer centres around a point are fetched apart; where cloud starts above a clear layer the base is flat and sharp
   (50 m transition, `cloud_base_transition_m` [E]) in the middle of the gap, partly so where cloud only thickens upward;
@@ -588,14 +627,22 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 - Real-date plausibility (final review I4, `test_weather_snapshot.cpp` "Real-date columns ...", fixture
   `era5_plausibility.toml` by `tools/validation/gen_weather_fixtures.py`: ERA5 columns of 2024-04-08 18 UTC and
   2025-08-15 18 UTC at Starbase, the Cape, the North Atlantic, the warm pool and the most overcast cell near Starbase,
-  with the store's own `total_cloud_cover` and `cloud_base_height`). Cloud base (lowest layer with fraction > 1 % and
-  condensate, ERA5's definition) within one layer plus the spacing of the pressure levels around ERA5's cbh (unchanged by
-  the bases at the LCL; the fixture now carries the 2 m temperature and dew point, and a boundary-layer base lies no more
-  than one layer below the column's LCL: all ten columns pass). Cover: the
-  snapshot is systematically LOWER than ERA5's tcc, by 0.00-0.36 (mean 0.14) with the same maximum-random overlap (the
-  renderer's maximum overlap is lower still, 0.00-0.37): the 37 pressure levels hold the model levels' fractions
-  interpolated, so clouds that overlap in the model at different horizontal places no longer add up. The test asserts
-  never more than tcc + 0.05, at most 0.40 below, mean deficit < 0.2 (a limit of the data choice, `known-issues.md`).
+  with the store's own `total_cloud_cover` and `cloud_base_height`; the build gets the tcc). Cloud base (lowest layer
+  with fraction > 1 % and condensate, ERA5's definition, on the fractions as the data has them: the cover scaling lifts
+  a trace layer over 1 % - the Cape 2025, 0.75 % 830 m under the base - without moving cloud) within one layer plus the
+  spacing of the pressure levels around ERA5's cbh, and a boundary-layer base no more than one layer below the column's
+  LCL: all ten columns pass. Cover (Task 9c): the maximum-random cover of the snapshot's layers is tcc within 0.02 per
+  column (measured -0.002 .. +0.012, mean deficit 0.002; test mean <= 0.03); the renderer's maximum overlap stays
+  below it. Cumulus water added: 0-1.27 kg/m^2 (the deep convective Starbase 2025 column the most).
+- Core `[weather]` Task 9c (`test_weather_cover_water.cpp`): Gamma_l = a numerical parcel (0.1 m steps of c_pd dT +
+  g dz + L dr_s = 0, finite differences of r_s) within 0.3 % at 268-298 K, and within 1-2.5 g/m^3/km at 275-290 K /
+  800-950 hPa; a shallow cumulus reaches the sub-adiabatic path exactly with its profile kept; monotone in f_ad; a deep
+  run's parcel ends at 3 km; the in-cloud bound reached and never exceeded, a denser layer kept; decks, ice,
+  deep-enough cumulus, fog / unknown / high LCL, a run above the boundary layer, the second run and a deck under
+  rising cumulus keep their water; the half-stratiform weight gives half the factor; the cover scaling (two separated
+  clouds 0.44 -> 0.3 / 0.6 / 0.95 / 1.0 within 1e-9, ratio kept, water kept, maximum overlap of touching layers,
+  unknown / clear / tcc 0, dry layers, buried layers); a built GFS column scaled from 0.4 to 0.8 within 0.01 with the
+  water diagnostic; .wthr round trip of tcc and added water, box means; a checkerboard box scaled back to its 0.5.
 - Core `[weather]`: render texels (linear extinction, in-cloud depth vs trapezoids, code round trip, ice share);
   vertical profile (flat base, water path kept exactly); covered fraction = cf within 0.003 at every detail state (0.006
   between rows); steep edges of varying width, 10-90 % rise median 7 m (< 10 m), 90th percentile 21 m (<= 40 m, the

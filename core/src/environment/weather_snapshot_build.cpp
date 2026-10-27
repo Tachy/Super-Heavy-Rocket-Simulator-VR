@@ -77,6 +77,7 @@ WeatherSnapshot build_weather_snapshot_from_raw(const WeatherSnapshotId& id, con
         f.surface_geopotential_height_m = gfs_record(raw_dir / gfs_surface_height_file_name(key));
         f.temperature_2m_k = gfs_record(raw_dir / gfs_2m_file_name(key, "TMP"));
         f.dewpoint_2m_k = gfs_record(raw_dir / gfs_2m_file_name(key, "DPT"));
+        f.total_cloud_percent = gfs_record(raw_dir / gfs_total_cloud_file_name(key));
         snapshot = WeatherSnapshot::from_gfs(id, f, geoid);
     } else {
         Era5Fields f;
@@ -91,6 +92,7 @@ WeatherSnapshot build_weather_snapshot_from_raw(const WeatherSnapshotId& id, con
         f.surface_geopotential_m2_s2 = era5_file(raw_dir / era5_static_orography_file_name, 1);
         f.temperature_2m_k = era5_grid(raw_dir, key, "2m_temperature", 1);
         f.dewpoint_2m_k = era5_grid(raw_dir, key, "2m_dewpoint_temperature", 1);
+        f.total_cloud_cover = era5_grid(raw_dir, key, "total_cloud_cover", 1);
         snapshot = WeatherSnapshot::from_era5(id, f, geoid);
     }
     if (downsample > 1) return snapshot->downsampled(downsample);

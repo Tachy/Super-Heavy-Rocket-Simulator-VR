@@ -32,6 +32,10 @@
 //   downsampled set and the pole rows take the LOWEST known base of the box (ground + level, less the box's ground;
 //   a saturated column makes the box 0), so the renderer's flat base never cuts a lower-based column's cloud. The
 //   column's boundary-layer liquid below it is moved up (raise_liquid_cloud_to_lcl).
+// - Then the layers' cover is scaled to the data's total cloud cover (ERA5 total_cloud_cover, GFS TCDC entire
+//   atmosphere; scale_cloud_cover_to_total; the downsampled set and the pole rows scale their box means again to the
+//   box's mean) and the cumulus get the water of a sub-adiabatic parcel (add_cumulus_adiabatic_water; static clouds
+//   Task 9c).
 // - Levels at or below the surface are ignored; the lowest level above the ground is held down to the ground, the
 //   highest one held upward; layer parts below the ground do not count, at() is zero below the ground.
 //
@@ -124,6 +128,51 @@ inline constexpr float weather_lcl_unknown_m = -1.0f;
 void raise_liquid_cloud_to_lcl(std::span<double> cloud_fraction, std::span<double> liquid_kg_m3,
                                std::span<const double> ice_kg_m3, double ground_m, double lcl_m);
 
+// Stored for a column whose total cloud cover is not known (no tcc field in the data).
+inline constexpr float weather_total_cloud_cover_unknown = -1.0f;
+
+// The column's cloud cover of its 32 layer means as ERA5 combines its levels into the total cloud cover (Geleyn &
+// Hollingsworth 1979, maximum-random overlap: layers that touch overlap maximally, separated clouds randomly,
+// 1 - C = prod_k (1 - max(C_k, C_k-1)) / (1 - C_k-1), top to bottom); a layer counts with condensate the snapshot
+// stores (a non-zero water code of either phase: what the renderer shows) and a part
+// above the ground.
+double cloud_column_cover_max_random(std::span<const double> cloud_fraction, std::span<const double> liquid_kg_m3,
+                                     std::span<const double> ice_kg_m3, double ground_m);
+
+// Cover from the total cloud cover (static clouds Task 9c): the pressure levels hold the model levels' fractions
+// interpolated, so a column's combined cover falls below the reanalysis's own total (mean 0.14-0.20). The fraction of
+// every layer that counts for the cover (stored condensate above the ground) is multiplied by one factor (kept in
+// proportion, at most 1, at least cloud_min_cover) so that cloud_column_cover_max_random equals total_cloud_cover (to
+// round-off; a cover of 0 leaves each cloud layer at cloud_min_cover); the water contents (grid means) are kept.
+// Untouched: an unknown cover (negative or NaN), a column without condensate and layers without condensate.
+void scale_cloud_cover_to_total(std::span<double> cloud_fraction, std::span<const double> liquid_kg_m3,
+                                std::span<const double> ice_kg_m3, double ground_m, double total_cloud_cover);
+
+// Liquid water gradient (kg/m^3 per m of ascent) of a saturated parcel rising pseudo-adiabatically at the temperature
+// and pressure: Gamma_l = -rho_d dr_s/dz with the moist adiabat c_pd dT + g dz + L(T) dr_s = 0, hydrostatic pressure
+// (moist air density), r_s = eps e_s / (p - e_s) over liquid; Romps 2017's constant set (e_s, L(T) = E_0v + R_v T +
+// (c_vv - c_vl)(T - T_0), c_pd = c_va + R_a). ~2 g/m^3/km in a mid-latitude boundary layer. A non-finite or
+// non-positive input gives 0.
+double adiabatic_liquid_water_gradient_kg_m3_per_m(double temperature_k, double pressure_pa);
+
+// Cumulus water from an adiabatic parcel (static clouds Task 9c, user 2026-10-27: the reanalysis lacks the updraft
+// cores). The lowest significant liquid run of the column (raise_liquid_cloud_to_lcl's significance), its base less
+// than cloud_boundary_layer_top_m above the ground and the LCL known (0 < lcl < that top): its base z_b = max(ground +
+// lcl, the run's bottom); the layers with more than cloud_base_snap_m above z_b form the run path. When the path's
+// in-cloud liquid water path sum_k L_k t_k / C_k (t_k the layer's above-ground thickness: a layer cut by the base holds
+// its mean over the whole layer) is below the sub-adiabatic one of the parcel from z_b to the boundary-layer top
+// z_t = ground + cloud_boundary_layer_top_m, sum_k f_ad Gamma_l(T_k, p_k) ((min(z_k,top, z_t) - z_b)^2 -
+// (min(max(z_k,bottom, z_b), z_t) - z_b)^2) / 2 (f_ad is a shallow-cumulus value; the water of a congestus or
+// cumulonimbus above z_t is the data's and counts in the in-cloud path), each path layer's liquid is multiplied by
+// 1 + w_k (s - 1), s = their ratio, w_k its cumulus weight (cloud_type_weights; no switch: a deck's layers keep their
+// water); no layer is raised above cumulus_liquid_water_max_kg_m3 in-cloud. Cloud fractions, ice, every other run and
+// a run already as deep in water are unchanged; the grid-mean water rises (intended). Returns the added liquid water
+// path (grid mean, kg/m^2). One entry per layer in every span.
+double add_cumulus_adiabatic_water(std::span<const double> cloud_fraction, std::span<double> liquid_kg_m3,
+                                   std::span<const double> ice_kg_m3, std::span<const double> temperature_k,
+                                   std::span<const double> pressure_pa, double ground_m, double lcl_m,
+                                   double adiabatic_fraction = constants::cumulus_adiabatic_fraction);
+
 struct WeatherCell {
     double cloud_fraction = 0.0, liquid_water_kg_m3 = 0.0, ice_water_kg_m3 = 0.0;  // grid means
 };
@@ -134,6 +183,8 @@ struct Era5Fields {
         surface_geopotential_m2_s2, total_column_water_vapour_kg_m2;
     // 2 m temperature and dew point (one level each); both empty = no lifting condensation level (unknown).
     weather_decode::FloatGrid temperature_2m_k, dewpoint_2m_k;
+    // Single-level total_cloud_cover (0..1, one level); empty = unknown (the cover is not scaled).
+    weather_decode::FloatGrid total_cloud_cover;
     std::vector<double> levels_pa;
 };
 
@@ -143,6 +194,8 @@ struct GfsFields {
         surface_geopotential_height_m;
     // TMP / DPT 2 m above ground (one level each); both empty = no lifting condensation level (unknown).
     weather_decode::FloatGrid temperature_2m_k, dewpoint_2m_k;
+    // TCDC entire atmosphere (percent, one level); empty = unknown (the cover is not scaled).
+    weather_decode::FloatGrid total_cloud_percent;
     std::vector<double> levels_pa;
 };
 
@@ -157,14 +210,18 @@ public:
                                         double cloud_fraction);
     // Checks of the flat cloud base: a snapshot BUILT by from_gfs (layer mapping, the 2 m level, the LCL raise) from
     // one column everywhere - the standard atmosphere on levels every 100 m to 4 km and every 500 m above, ground and geoid
-    // 0, cloud of liquid_kg_kg (specific) and cloud_percent on the levels below cloud_top_m, 2 m air t2m_k / td2m_k.
+    // 0, cloud of liquid_kg_kg (specific) and cloud_percent on the levels below cloud_top_m, 2 m air t2m_k / td2m_k,
+    // the total cloud cover total_cloud_percent (negative: unknown, the cover is not scaled).
     static WeatherSnapshot gfs_test_column(int rows, int columns, double cloud_top_m, double liquid_kg_kg,
-                                           double cloud_percent, double t2m_k, double td2m_k);
+                                           double cloud_percent, double t2m_k, double td2m_k,
+                                           double total_cloud_percent = -1.0);
     // From the cache form (weather_snapshot_file): ground rows x columns, texels as render_texels(). Throws
     // std::invalid_argument on a size mismatch.
-    // lcl_m empty = all unknown.
+    // lcl_m / total_cloud_cover empty = all unknown, added_liquid_path_kg_m2 empty = all 0.
     static WeatherSnapshot from_parts(const WeatherSnapshotId& id, int rows, int columns, std::vector<float> ground_m,
-                                      std::vector<std::uint8_t> texels, std::vector<float> lcl_m = {});
+                                      std::vector<std::uint8_t> texels, std::vector<float> lcl_m = {},
+                                      std::vector<float> total_cloud_cover = {},
+                                      std::vector<float> added_liquid_path_kg_m2 = {});
 
     const WeatherSnapshotId& id() const { return id_; }
     int rows() const { return rows_; }
@@ -185,6 +242,18 @@ public:
     // point; the base of convective cloud (the build has already moved the column's boundary-layer condensate above it).
     float lcl_m(int row, int column) const { return lcl_m_[static_cast<std::size_t>(row) * columns_ + column]; }
     const std::vector<float>& lcl_heights_m() const { return lcl_m_; }
+    // The data's total cloud cover of a column (0..1; weather_total_cloud_cover_unknown = unknown), row * columns() +
+    // column: the cover the build scaled the layers to (scale_cloud_cover_to_total).
+    float total_cloud_cover(int row, int column) const {
+        return total_cloud_cover_[static_cast<std::size_t>(row) * columns_ + column];
+    }
+    const std::vector<float>& total_cloud_covers() const { return total_cloud_cover_; }
+    // Diagnostic: the liquid water path (grid mean, kg/m^2) the build added to the column's cumulus
+    // (add_cumulus_adiabatic_water).
+    float added_liquid_path_kg_m2(int row, int column) const {
+        return added_liquid_path_kg_m2_[static_cast<std::size_t>(row) * columns_ + column];
+    }
+    const std::vector<float>& added_liquid_paths_kg_m2() const { return added_liquid_path_kg_m2_; }
 
     // Box mean over factor x factor cells (analog set, factor 4: 1 deg); needs (rows - 1) and columns divisible by it.
     WeatherSnapshot downsampled(int factor) const;
@@ -198,6 +267,8 @@ private:
     int rows_ = 0, columns_ = 0;
     std::vector<float> ground_m_;        // rows x columns, ellipsoidal
     std::vector<float> lcl_m_;           // rows x columns, above the ground
+    std::vector<float> total_cloud_cover_;        // rows x columns, 0..1 or unknown
+    std::vector<float> added_liquid_path_kg_m2_;  // rows x columns, diagnostic
     std::vector<std::uint8_t> texels_;   // layers x rows x columns x 4
 };
 

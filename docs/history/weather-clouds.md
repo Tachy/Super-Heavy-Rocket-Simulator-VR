@@ -669,3 +669,34 @@ removed forward Mie light the scene never added at a setting Sun (segment sum / 
 - Ray-free control: its undetrended spread 0.23 passed the earlier (undetrended) metric.
 - Rim / body 4.01 at 2-6 deg from the Sun was recorded as "just above the acceptance's 4 (cloud-visual-reference.md
   (3))"; the band's bound is now 2-5 x [E] (photographic range, not a physical bound).
+
+## Before static clouds Task 9c (superseded 2026-10-27: cover scaled to the total cloud cover, cumulus water from an adiabatic parcel)
+weather-clouds.md, Validation (real-date plausibility):
+
+- Real-date plausibility (final review I4, `test_weather_snapshot.cpp` "Real-date columns ...", fixture
+  `era5_plausibility.toml` by `tools/validation/gen_weather_fixtures.py`: ERA5 columns of 2024-04-08 18 UTC and
+  2025-08-15 18 UTC at Starbase, the Cape, the North Atlantic, the warm pool and the most overcast cell near Starbase,
+  with the store's own `total_cloud_cover` and `cloud_base_height`). Cloud base (lowest layer with fraction > 1 % and
+  condensate, ERA5's definition) within one layer plus the spacing of the pressure levels around ERA5's cbh (unchanged by
+  the bases at the LCL; the fixture now carries the 2 m temperature and dew point, and a boundary-layer base lies no more
+  than one layer below the column's LCL: all ten columns pass). Cover: the
+  snapshot is systematically LOWER than ERA5's tcc, by 0.00-0.36 (mean 0.14) with the same maximum-random overlap (the
+  renderer's maximum overlap is lower still, 0.00-0.37): the 37 pressure levels hold the model levels' fractions
+  interpolated, so clouds that overlap in the model at different horizontal places no longer add up. The test asserts
+  never more than tcc + 0.05, at most 0.40 below, mean deficit < 0.2 (a limit of the data choice, `known-issues.md`).
+
+weather-service.md:
+
+  ERA5 hour = 8 timed files (the 6 cloud / temperature / pressure / vapour fields + `2m_temperature`,
+  `2m_dewpoint_temperature`) + the static `era5_geopotential_at_surface.blosc` (downloaded once, kept in `cache/raw`).
+  GFS = 113 byte ranges (5 variables x 22 levels, HGT surface, TMP and DPT "2 m above ground").
+  (`raise_liquid_cloud_to_lcl`, `weather-clouds.md`). Stored in the `.wthr` file: format version 5 = ground block, then a
+  float32 LCL block (+4 MB at 0.25 deg), then the texels (version 2 had the unknown level as 0 and no redistribution,
+  version 3 moved only the lowest liquid run and averaged the downsampled levels).
+- **Old files heal**: `read_weather_snapshot` refuses version-1, -2 and -3 files (and anything else of another version). A
+
+known-issues.md:
+
+- Weather and clouds (M8): the snapshot's column cloud cover is lower than ERA5's total cloud cover (0.00-0.36, mean
+  0.14 in the real-date check; the 37 pressure levels lose the overlap of the model levels), so multi-layer skies are
+  thinner than the reanalysis says; the limits (light between columns, shadow darkness under broken cloud, plumes always draw

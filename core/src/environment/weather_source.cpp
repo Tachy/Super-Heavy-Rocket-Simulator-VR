@@ -27,7 +27,7 @@ struct Era5Variable {
     bool four_dimensional;
     bool time_independent;
 };
-constexpr std::array<Era5Variable, 9> era5_variables{{
+constexpr std::array<Era5Variable, 10> era5_variables{{
     {"fraction_of_cloud_cover", true, false},
     {"specific_cloud_liquid_water_content", true, false},
     {"specific_cloud_ice_water_content", true, false},
@@ -37,6 +37,7 @@ constexpr std::array<Era5Variable, 9> era5_variables{{
     {"geopotential_at_surface", false, true},
     {"2m_temperature", false, false},
     {"2m_dewpoint_temperature", false, false},
+    {"total_cloud_cover", false, false},
 }};
 
 constexpr std::array<const char*, 5> gfs_variables{"TCDC", "CLMR", "ICMR", "HGT", "TMP"};
@@ -296,6 +297,8 @@ std::string gfs_2m_file_name(const std::string& cache_key, std::string_view vari
     return cache_key + "_" + std::string(variable) + "_2m.grb2";
 }
 
+std::string gfs_total_cloud_file_name(const std::string& cache_key) { return cache_key + "_TCDC_total.grb2"; }
+
 std::string gfs_index_url(const WeatherSnapshotId& id) { return gfs_file_url(id) + ".idx"; }
 
 std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId& id, std::string_view idx_text) {
@@ -307,10 +310,12 @@ std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId& id, std::strin
     std::map<std::pair<std::string, int>, std::size_t> wanted;  // (variable, level) -> record position
     std::optional<std::size_t> surface_height;                  // HGT surface: the ground
     std::map<std::string, std::optional<std::size_t>> two_meter;  // TMP / DPT "2 m above ground"
+    std::optional<std::size_t> total_cloud;                       // TCDC "entire atmosphere" (instantaneous)
     for (std::size_t i = 0; i < records.size(); ++i) {
         const IndexRecord& r = records[i];
         if (r.stamp != stamp || r.forecast != forecast) continue;
         if (r.variable == "HGT" && r.level == "surface" && !surface_height) surface_height = i;
+        if (r.variable == "TCDC" && r.level == "entire atmosphere" && !total_cloud) total_cloud = i;
         if (r.level == "2 m above ground" && std::find(gfs_2m_variables.begin(), gfs_2m_variables.end(), r.variable) !=
                                                  gfs_2m_variables.end() && !two_meter[r.variable]) {
             two_meter[r.variable] = i;
@@ -357,6 +362,8 @@ std::vector<WeatherRequest> gfs_requests(const WeatherSnapshotId& id, std::strin
         }
         add(*two_meter[variable], gfs_2m_file_name(key, variable));
     }
+    if (!total_cloud) throw std::runtime_error("GFS index: record TCDC entire atmosphere missing for " + url);
+    add(*total_cloud, gfs_total_cloud_file_name(key));
     return out;
 }
 

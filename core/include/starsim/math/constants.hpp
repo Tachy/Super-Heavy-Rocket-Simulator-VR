@@ -199,5 +199,15 @@ inline constexpr double cloud_min_cover = 0.5 / 255.0;
 inline constexpr double cloud_overlap_vertical = 0.66;
 inline constexpr double cloud_overlap_slant = 0.21;
 inline constexpr double cloud_overlap_slant_onset_cot = 1.8;
+// Cumulus water from an adiabatic parcel (weather_snapshot.hpp: add_cumulus_adiabatic_water; static clouds Task 9c).
+// The reanalysis holds the grid-box mean of the condensate, not the updraft cores of its sub-grid cumulus: their
+// in-cloud water is raised to a fraction of the moist-adiabatic parcel's.
+// - Adiabatic fraction f_ad: the measured in-cloud liquid water of cumulus over that of an undiluted parcel from the
+//   cloud base [E: 0.4; shallow cumulus 0.3-0.6, Brenguier et al. 2000, J. Atmos. Sci. 57, 803; cloud-mean ratios of
+//   continental cumulus 0.2-0.6 with height, Blyth 1993, J. Appl. Meteor. 32, 626].
+// - Bound of the raised in-cloud water: no layer is raised above it (a layer the data holds denser keeps its value)
+//   [E: 1.5e-3 kg/m^3; aircraft cumulus maxima of ~1-2 g/m^3 in clouds a few km deep, Warner 1955, Tellus 7, 449].
+inline constexpr double cumulus_adiabatic_fraction = 0.4;
+inline constexpr double cumulus_liquid_water_max_kg_m3 = 1.5e-3;
 
 }  // namespace starsim::constants

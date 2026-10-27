@@ -586,7 +586,7 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     write_weather_snapshot(file, snapshot);
     REQUIRE(read_weather_snapshot(file).has_value());
     auto bytes = read_bytes(file);
-    for (const std::uint32_t old_version : {2u, 3u, 4u}) {  // a complete file of the current layout stamped 2 .. 4: refused
+    for (const std::uint32_t old_version : {2u, 3u, 4u, 5u}) {  // the current layout stamped 2 .. 5: refused
         auto v2 = bytes;
         std::memcpy(v2.data() + 8, &old_version, sizeof(old_version));
         v2.resize(v2.size() - sizeof(std::uint64_t));
@@ -614,7 +614,7 @@ TEST_CASE("A format version 1 snapshot file is refused", "[weather]") {
     // The same bytes with the right version number (and the missing block) are not a valid version 2 file either.
     const std::uint32_t two = 2;
     // Version 2 stored unknown levels as 0 and had no base redistribution; version 3 moved only the lowest liquid run; version 4 merged a deck far above the lifted cloud.
-    CHECK(weather_snapshot_file_version == 5);
+    CHECK(weather_snapshot_file_version == 6);  // 5: no total cloud cover, cover not scaled, no cumulus water
     std::memcpy(bytes.data() + 8, &two, sizeof(two));
     bytes.resize(bytes.size() - sizeof(std::uint64_t));
     hash = 14695981039346656037ull;
@@ -690,10 +690,11 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
         f.levels_pa = levels_pa;
         f.cloud_fraction = f.liquid_kg_kg = f.ice_kg_kg = f.temperature_k = grid(levels, rows, columns);
         f.surface_pressure_pa = f.surface_geopotential_m2_s2 = f.total_column_water_vapour_kg_m2 = grid(1, rows, columns);
-        f.temperature_2m_k = f.dewpoint_2m_k = grid(1, rows, columns);
+        f.temperature_2m_k = f.dewpoint_2m_k = f.total_cloud_cover = grid(1, rows, columns);
         for (int r = 0; r < rows; ++r) {
             for (int c = 0; c < columns; ++c) {
                 const PlausibilityColumn& col = cells[static_cast<std::size_t>(hour * columns + c)];
+                set(f.total_cloud_cover, 0, r, c, col.total_cloud_cover);
                 set(f.temperature_2m_k, 0, r, c, col.temperature_2m_k);
                 set(f.dewpoint_2m_k, 0, r, c, col.dewpoint_2m_k);
                 for (int k = 0; k < levels; ++k) {
@@ -708,6 +709,12 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
             }
         }
         const auto snapshot = WeatherSnapshot::from_era5(era5_id(), f, coarse_geoid());
+        // The cloud base below is checked on the fractions as the data has them: scaling the cover to tcc (Task 9c) lifts
+        // a trace layer over ERA5's 1 % base threshold (the Cape 2025: a 0.75 % layer 830 m under the base) without
+        // moving any cloud.
+        Era5Fields unscaled_fields = f;
+        unscaled_fields.total_cloud_cover = {};
+        const auto unscaled = WeatherSnapshot::from_era5(era5_id(), unscaled_fields, coarse_geoid());
         for (int c = 0; c < columns; ++c) {
             const PlausibilityColumn& col = cells[static_cast<std::size_t>(hour * columns + c)];
             const double lat = node_latitude(1, rows), lon = node_longitude(c, columns);
@@ -727,23 +734,27 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
                 const double fraction = cell.liquid_water_kg_m3 + cell.ice_water_kg_m3 > 0.0 ? cell.cloud_fraction : 0.0;
                 clear *= above < 1.0 ? (1.0 - std::max(fraction, above)) / (1.0 - above) : 1.0;
                 above = fraction;
-                if (fraction > 0.01) {
+                const WeatherCell data = unscaled.at(lat, lon, 0.5 * (bottom + top));
+                if (data.liquid_water_kg_m3 + data.ice_water_kg_m3 > 0.0 && data.cloud_fraction > 0.01) {
                     base_agl_m = std::max(bottom, ground) - ground;
                     layer_m = top - bottom;
                 }
             }
             const double cover_max_random = 1.0 - clear;
             INFO(col.time_utc << " " << col.name);
-            std::printf("plausibility %s %-26s tcc %.2f -> max %.2f, max-random %.2f   cbh %7.0f m, lcl %6.0f m -> base %7.0f m (layer %4.0f m)\n",
-                        col.time_utc.c_str(), col.name.c_str(), col.total_cloud_cover, cover, cover_max_random, col.cloud_base_height_m,
-                        snapshot.lcl_m(1, c), base_agl_m, layer_m);
-            // ERA5's tcc is maximum-random overlap of the 137 model levels. The snapshot has the 37 pressure levels' fractions
-            // averaged onto 32 layers: where one cloud spans several levels at different horizontal places the levels' fractions
-            // no longer add up, so the snapshot's cover is the LOWER one (measured 0.0 .. 0.36 below tcc, known limit in
-            // docs/known-issues.md). It never exceeds ERA5's, and the renderer's maximum overlap is below the maximum-random one.
+            std::printf("plausibility %s %-26s tcc %.2f -> max %.2f, max-random %.3f   cbh %7.0f m, lcl %6.0f m -> base "
+                        "%7.0f m (layer %4.0f m), cumulus water added %.1f g/m^2\n",
+                        col.time_utc.c_str(), col.name.c_str(), col.total_cloud_cover, cover, cover_max_random,
+                        col.cloud_base_height_m, snapshot.lcl_m(1, c), base_agl_m, layer_m,
+                        1e3 * snapshot.added_liquid_path_kg_m2(1, c));
+            // ERA5's tcc is maximum-random overlap of the 137 model levels. The 37 pressure levels' fractions averaged onto
+            // 32 layers fall below it (where one cloud spans several levels at different horizontal places the levels'
+            // fractions no longer add up: 0.0 .. 0.36 below, mean 0.14, before static clouds Task 9c). Re-baselined for
+            // Task 9c: the build scales the layers' fractions to tcc (scale_cloud_cover_to_total), so the maximum-random
+            // cover is tcc up to the 8-bit fraction codes (measured within 0.004); the renderer's maximum overlap stays
+            // below it.
             deficit_sum += col.total_cloud_cover - cover_max_random;
-            CHECK(cover_max_random <= col.total_cloud_cover + 0.05);
-            CHECK(cover_max_random >= col.total_cloud_cover - 0.40);
+            CHECK(std::abs(cover_max_random - col.total_cloud_cover) <= 0.02);
             CHECK(cover <= cover_max_random + 1e-9);
             // Re-baselined for the cloud bases at the LCL (static clouds, Task 7): a boundary-layer cloud (base below 3 km)
             // starts no more than one layer below the LCL of the column's 2 m air (the layer that holds the LCL is the
@@ -779,7 +790,8 @@ TEST_CASE("Real-date columns agree with ERA5's total cloud cover and cloud base"
             }
         }
     }
-    CHECK(deficit_sum / static_cast<double>(cells.size()) < 0.2);  // measured 0.14: the systematic part of the limit
+    // Before Task 9c: 0.14 (the systematic part of the pressure-level limit); scaled to tcc: within the codes.
+    CHECK(std::abs(deficit_sum / static_cast<double>(cells.size())) <= 0.03);
 }
 
 // ---- Cloud bases at the lifting condensation level (static clouds, Task 7).
@@ -1143,9 +1155,14 @@ TEST_CASE("A snapshot built from fields gets the flat base and keeps the column'
     }
     CHECK(fog.texels()[cell * 4 + 1] > 0);  // the fog column has liquid at the ground
     // The column's optical depth is kept (the 8-bit water codes: <= 1.97 % per layer).
+    // Static clouds Task 9c: plus the cumulus water from the adiabatic parcel (the fog column has no convective base),
+    // the liquid path's extinction 3 W / (2 rho_w r_eff).
     const double tau = cloud_render_column_optical_depth(raised, r, c);
     CHECK(tau > 1.0);
-    CHECK(tau == Catch::Approx(cloud_render_column_optical_depth(fog, r, c)).epsilon(0.03));
+    CHECK(fog.added_liquid_path_kg_m2(r, c) == 0.0f);
+    const double added_tau = 1.5 * raised.added_liquid_path_kg_m2(r, c) /
+                             (constants::liquid_water_density_kg_m3 * constants::cloud_droplet_effective_radius_m);
+    CHECK(tau == Catch::Approx(cloud_render_column_optical_depth(fog, r, c) + added_tau).epsilon(0.03));
     // The base texel: the level above the ground; the fog column has none.
     const auto base = cloud_render_base_texels(raised);
     CHECK(base[2 * cell] == Catch::Approx(ground + lcl));

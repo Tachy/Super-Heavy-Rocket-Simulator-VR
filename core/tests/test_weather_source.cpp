@@ -188,12 +188,12 @@ TEST_CASE("Warp steps align to hours since 1900", "[weather]") {
     CHECK(b.blend == Catch::Approx(1.0 / 3.0));
 }
 
-TEST_CASE("ERA5 requests list the nine files of a snapshot", "[weather]") {
+TEST_CASE("ERA5 requests list the ten files of a snapshot", "[weather]") {
     WeatherSnapshotId id;
     id.kind = WeatherSourceKind::era5;
     id.valid_hour = 1088136;
     const auto reqs = era5_requests(id);
-    REQUIRE(reqs.size() == 9);
+    REQUIRE(reqs.size() == 10);
     const std::string base = "https://storage.googleapis.com/gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3/";
     CHECK(reqs[0].url == base + "fraction_of_cloud_cover/1088136.0.0.0");
     CHECK(reqs[1].url == base + "specific_cloud_liquid_water_content/1088136.0.0.0");
@@ -206,6 +206,9 @@ TEST_CASE("ERA5 requests list the nine files of a snapshot", "[weather]") {
     CHECK(reqs[8].url == base + "2m_dewpoint_temperature/1088136.0.0");
     CHECK(reqs[7].file_name == "era5_1088136_2m_temperature.blosc");
     CHECK(reqs[8].file_name == "era5_1088136_2m_dewpoint_temperature.blosc");
+    // The single-level total cloud cover (the cover the snapshot's layers are scaled to).
+    CHECK(reqs[9].url == base + "total_cloud_cover/1088136.0.0");
+    CHECK(reqs[9].file_name == "era5_1088136_total_cloud_cover.blosc");
     // File names as the weather_snapshot CLI reads them; the static orography's name has no hour (one cached copy).
     CHECK(reqs[0].file_name == "era5_1088136_fraction_of_cloud_cover.blosc");
     CHECK(reqs[5].file_name == "era5_1088136_total_column_water_vapour.blosc");
@@ -217,7 +220,7 @@ TEST_CASE("ERA5 requests list the nine files of a snapshot", "[weather]") {
         CHECK(r.last_byte == -1);
         names.insert(r.file_name);
     }
-    CHECK(names.size() == 9);
+    CHECK(names.size() == 10);
     WeatherSnapshotId other = id;
     other.valid_hour += 1;
     CHECK(era5_requests(other)[6].file_name == reqs[6].file_name);
@@ -245,7 +248,7 @@ TEST_CASE("GFS byte ranges come from the index", "[weather]") {
           "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20260920/00/atmos/gfs.t00z.pgrb2.0p25.f006.idx");
 
     const auto reqs = gfs_requests(id, idx);
-    REQUIRE(reqs.size() == 5 * 22 + 1 + 2);
+    REQUIRE(reqs.size() == 5 * 22 + 1 + 2 + 1);
     // File names as the weather_snapshot CLI reads them; the ground (HGT surface) comes last.
     CHECK(reqs[0].file_name == "gfs_1110792_f006_TCDC_1000mb.grb2");
     CHECK(reqs[21].file_name == "gfs_1110792_f006_TCDC_0050mb.grb2");
@@ -257,9 +260,13 @@ TEST_CASE("GFS byte ranges come from the index", "[weather]") {
     CHECK(reqs[5 * 22 + 1].file_name == "gfs_1110792_f006_TMP_2m.grb2");
     CHECK(reqs[5 * 22 + 1].first_byte == 420490760);
     CHECK(reqs[5 * 22 + 1].last_byte == 420999562 - 1);
-    CHECK(reqs.back().file_name == "gfs_1110792_f006_DPT_2m.grb2");
-    CHECK(reqs.back().first_byte == 422220087);
-    CHECK(reqs.back().last_byte == 422752522 - 1);
+    CHECK(reqs[5 * 22 + 2].file_name == "gfs_1110792_f006_DPT_2m.grb2");
+    CHECK(reqs[5 * 22 + 2].first_byte == 422220087);
+    CHECK(reqs[5 * 22 + 2].last_byte == 422752522 - 1);
+    // Then the total cloud cover, the instantaneous TCDC entire atmosphere (line 636; 637 is the 0-6 hour average).
+    CHECK(reqs.back().file_name == "gfs_1110792_f006_TCDC_total.grb2");
+    CHECK(reqs.back().first_byte == 449322989);
+    CHECK(reqs.back().last_byte == 450159083 - 1);
     const std::string grib_url = "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20260920/00/atmos/gfs.t00z.pgrb2.0p25.f006";
     for (const auto& r : reqs) {
         CHECK(r.url == grib_url);
@@ -324,20 +331,24 @@ TEST_CASE("GFS analysis leads use anl in the index", "[weather]") {
     idx += std::to_string(n++) + ":" + std::to_string(offset) + ":d=2026092000:TMP:2 m above ground:anl:\n";
     offset += 1000;
     idx += std::to_string(n++) + ":" + std::to_string(offset) + ":d=2026092000:DPT:2 m above ground:anl:\n";
+    offset += 1000;
+    idx += std::to_string(n++) + ":" + std::to_string(offset) + ":d=2026092000:TCDC:entire atmosphere:anl:\n";
     WeatherSnapshotId id;
     id.kind = WeatherSourceKind::gfs;
     id.cycle_hour = hour_of(2026, 9, 20, 0);
     id.lead_h = 0;
     id.valid_hour = id.cycle_hour;
     const auto reqs = gfs_requests(id, idx);
-    REQUIRE(reqs.size() == 113);
+    REQUIRE(reqs.size() == 114);
     CHECK(reqs[0].first_byte == 0);
     CHECK(reqs[0].last_byte == 999);
     CHECK(reqs.back().last_byte == -1);  // the file's last record: open end
     CHECK(reqs[0].url.find(".f000") != std::string::npos);
-    // Without the HGT surface record (the ground) or a 2 m record the snapshot cannot be built: throws.
+    // Without the HGT surface record (the ground), a 2 m record or the total cloud cover the snapshot cannot be built:
+    // throws.
     CHECK_THROWS_AS(gfs_requests(id, idx.substr(0, idx.rfind(std::to_string(n - 1) + ":"))), std::runtime_error);
     CHECK_THROWS_AS(gfs_requests(id, idx.substr(0, idx.rfind(std::to_string(n - 2) + ":"))), std::runtime_error);
+    CHECK_THROWS_AS(gfs_requests(id, idx.substr(0, idx.rfind(std::to_string(n - 3) + ":"))), std::runtime_error);
     id.lead_h = 6;  // there are no "6 hour fcst" lines in this index
     CHECK_THROWS_AS(gfs_requests(id, idx), std::runtime_error);
 }

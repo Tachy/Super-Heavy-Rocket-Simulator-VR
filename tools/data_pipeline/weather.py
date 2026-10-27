@@ -47,6 +47,7 @@ VARIABLES = (
     ("geopotential_at_surface", False, True),
     ("2m_temperature", False, False),
     ("2m_dewpoint_temperature", False, False),
+    ("total_cloud_cover", False, False),
 )
 
 

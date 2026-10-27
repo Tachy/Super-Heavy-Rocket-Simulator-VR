@@ -203,6 +203,7 @@ add_executable(starsim_core_tests
     test_weather_decode.cpp
     test_weather_source.cpp
     test_weather_snapshot.cpp
+    test_weather_cover_water.cpp
     test_cloud_optics.cpp
     test_cloud_transfer_table.cpp
     test_cloud_render_texels.cpp
