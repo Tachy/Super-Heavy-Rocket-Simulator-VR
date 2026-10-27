@@ -357,6 +357,10 @@ kilometre footprints"). User OK to change the lookup; the shapes themselves stay
 
 - [ ] **Step 1: Measure** with `terrain_perf.gd --render_scale=1.65 --gpu_passes` (cloud pass, fill) and tune the
   presets (cascade sizes, budget, divisor, steps, hand-over) to cloud p99 <= 2.5 ms x the stereo correction.
+  Includes: the air-shadow cost (Task 9b: +1.0 ms backlit, +4.0 ms analog deck; per-region cloud top), the t9b vs
+  t9c / t9d cloud cost on the same camera (60 -> 40 fps seen in t9c_ground), the shape de-tiling cost (Task 9d).
+  Physics item from Task 9c: low stratiform in-cloud tau by run depth on the analog set (re-measured, v7) - a
+  < 1 km bin median > 40 opens a finding (overcast too dark); update the known-issues number.
 - [ ] **Step 2: Desktop re-baseline**: the render_check view set before / after, PNGs to the user; `cloud_check.gd` /
   `cloud_far_check.gd` reference values documented.
 - [ ] **Step 3: VR run with the user** (`Start-VR.cmd --perf-log`, weather on, pad -> decks -> orbit, `nvidia-smi`):
