@@ -745,6 +745,14 @@ godot::Dictionary StarsimCore::cloud_noise() const {
         types["CLOUD_ICE_TILE_V_M"] = environment::cloud_ice_tile_vertical_m;
         godot::Dictionary pass_constants;  // mirrors in cloud_pass.gdshaderinc
         pass_constants["CLOUD_MIN_STEP_M"] = constants::cloud_march_min_step_m;
+        // Mirrors in clouds.gdshaderinc (the cloud field's CPU / GPU pair).
+        godot::Dictionary field_constants;
+        field_constants["CLOUD_BASE_TRANSITION_M"] = constants::cloud_base_transition_m;
+        field_constants["CLOUD_LCL_RAMP_M"] = constants::cloud_lcl_ramp_m;
+        field_constants["CLOUD_OVERLAP_VERTICAL"] = constants::cloud_overlap_vertical;
+        field_constants["CLOUD_OVERLAP_SLANT"] = constants::cloud_overlap_slant;
+        field_constants["CLOUD_OVERLAP_ONSET_COT"] = constants::cloud_overlap_slant_onset_cot;
+        result["field_constants"] = field_constants;
         result["pass_constants"] = pass_constants;
         result["type_constants"] = types;
         result["detail_mean"] = noise.detail_mean;

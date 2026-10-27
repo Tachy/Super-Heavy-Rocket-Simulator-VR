@@ -620,7 +620,7 @@ double add_cumulus_adiabatic_water(std::span<const double> cloud_fraction, std::
     std::array<double, weather_layer_count> cumulus{};  // 0 off the path
     for (int k = first; k < end && k < weather_layer_count; ++k) {
         const double low = std::max(bottom_of(k), base_m), part = top_of(k) - low;
-        if (!(part > c::cloud_base_snap_m)) continue;  // a sliver under the base: snapped away by the renderer
+        if (!(part > c::cloud_base_snap_m)) continue;  // a sliver above the base: the renderer's texels drop such a base (no cut)
         const double thickness = top_of(k) - bottom_of(k);
         const double fraction = cloud_fraction[i(k)], liquid = liquid_kg_m3[i(k)], ice = ice_kg_m3[i(k)];
         const double h_low = std::min(low, parcel_top_m) - base_m, h_high = std::min(top_of(k), parcel_top_m) - base_m;

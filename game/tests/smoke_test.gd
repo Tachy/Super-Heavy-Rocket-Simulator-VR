@@ -282,6 +282,11 @@ func _check_weather(core: StarsimCore) -> bool:
 	var pass_constants: Dictionary = noise["pass_constants"]
 	_check(step_found != null and float(step_found.get_string(1)) == float(pass_constants["CLOUD_MIN_STEP_M"]),
 			"cloud_pass.gdshaderinc CLOUD_MIN_STEP_M equals the core's")
+	var field: Dictionary = noise["field_constants"]
+	var field_ok := field.size() == 5
+	for constant: String in field:
+		field_ok = field_ok and is_equal_approx(_shader_constant(constant), float(field[constant]))
+	_check(field_ok, "clouds.gdshaderinc cloud field constants (LCL ramp, base transition, overlap) equal the core's")
 	var optics: Dictionary = core.cloud_optics_parameters()
 	_check(absf(float(optics.get("asymmetry_g", 0.0)) - 0.8793) < 1e-3 and float(optics["extinction_step_per_m"]) > 0.0,
 			"cloud_optics_parameters (g %.4f)" % float(optics.get("asymmetry_g", 0.0)))

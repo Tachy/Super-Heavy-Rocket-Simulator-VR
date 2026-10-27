@@ -1,6 +1,7 @@
 // The cloud pass's compute kernels (M8 weather and clouds, Task 8): GLSL 450 only - compiled by CloudEffect
 // (game/world/weather/cloud_effect.gd) through CloudShaderPort, never included by a Godot shader. One of CLOUD_MARCH,
-// CLOUD_TEMPORAL, CLOUD_UPSAMPLE is defined per kernel; CLOUD_MARCH also gets atmosphere.gdshaderinc and
+// CLOUD_TEMPORAL, CLOUD_UPSAMPLE, CLOUD_OUTLINE, CLOUD_EDGE_REFINE, CLOUD_CENTRE or
+// CLOUD_SHAPE_PREFILTER is defined per kernel; CLOUD_MARCH also gets atmosphere.gdshaderinc and
 // clouds.gdshaderinc (translated: their `global uniform`s in set 0).
 //
 // The march and the temporal accumulation run once per frame in the centre view (VR: the head, a frustum covering both
@@ -525,7 +526,8 @@ float cloud_far_extinction_at(vec3 offset_local, float height_m, CloudCell cell,
 }
 
 // The far tier's optical depth toward a light from camera + offset_local (height_m): CLOUD_FAR_LIGHT_SAMPLES
-// geometric intervals over CLOUD_FAR_LIGHT_NEAR_M from CLOUD_FAR_LIGHT_FIRST_M on (as the volume's light march: the
+// geometric intervals (ratio CLOUD_FAR_LIGHT_RATIO, about 1.5 km in all) from CLOUD_FAR_LIGHT_FIRST_M on (as the
+// volume's light march: the
 // cloud right around the sample decides its source's depth - equal intervals put the first sample 250 m out, above a
 // deck's top, and lit the far deck as its top: 25 % dark) through the far tier's shapes (the lit and shaded flanks of
 // the far cumuli), the rest the column's grid-mean depth above that point along the light (plane-parallel; the light
