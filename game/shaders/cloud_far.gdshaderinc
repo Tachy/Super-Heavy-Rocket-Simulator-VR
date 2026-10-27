@@ -37,9 +37,15 @@ const float CLOUD_FAR_MU_MIN = 0.02;
 // broken cumulus (+15-20 % at cf 0.4 under a high Sun, seen from above and at 45 deg). The column model takes them as
 // an entry cosine turned this fraction of the way from mu0 to 1 (the slab's normal for the Sun's light turned toward
 // it, cloud_entry_normal) and a gain of the Sun's light of 1 + this x (1 - f) for the column's largest fraction f
-// (none for a deck). Fitted to those checks (0.3 / 0.15 left broken cumulus 10-11 % dark; 0.4 / 0.15 within 7 %).
+// (none for a deck; bounded: at most 1.4, for f -> 0). Fitted in fix round 1 to those checks (0.3 / 0.15 left broken
+// cumulus 10-11 % dark) - they match the game's volume renderer, not a radiative-transfer reference. Held out in fix
+// round 2 (unchanged constants, cloud_far_check section 6, three sites each): scattered cumulus cf 0.12 under the high
+// Sun and cf 0.4 under a 24 deg Sun, from above and at 45 deg, within 6 % of the converged volume (the plane-parallel
+// slab alone 17-31 % dark there: the volume's 3D gain grows toward a low Sun, 1.2x at 73 deg to 1.46x at 24 deg).
 const float CLOUD_FAR_ENTRY_TURN = 0.15;
 const float CLOUD_FAR_FLANK_GAIN = 0.4;
+// Fidelity flag (CloudLayer.far_3d_light): false lights the slab as plane-parallel (no entry turn, no gain).
+global uniform bool cloud_far_3d_light;
 // 8-point Gauss-Legendre nodes and weights on [0, 1].
 const int CLOUD_FAR_NODES = 8;
 const float CLOUD_FAR_GL_X[8] = float[](0.0198550717512319, 0.1016667612931866, 0.2372337950418355,
@@ -213,8 +219,12 @@ vec3 cloud_far_cloudy_radiance(vec3 p, vec3 up, vec3 view_prop, float tau, float
 	vec3 sun_dir = normalize(atmosphere_sun_direction);
 	// The shapes' 3D Sun light (CLOUD_FAR_ENTRY_TURN, CLOUD_FAR_FLANK_GAIN).
 	float mu0 = dot(sun_dir, up);
-	vec3 entry = mu0 > 0.0 ? cloud_entry_normal(sun_dir, up, mu0, mu0 + (1.0 - mu0) * CLOUD_FAR_ENTRY_TURN) : up;
-	float gain = 1.0 + CLOUD_FAR_FLANK_GAIN * (1.0 - clamp(fraction, 0.0, 1.0));
+	vec3 entry = up;
+	float gain = 1.0;
+	if (cloud_far_3d_light) {
+		entry = mu0 > 0.0 ? cloud_entry_normal(sun_dir, up, mu0, mu0 + (1.0 - mu0) * CLOUD_FAR_ENTRY_TURN) : up;
+		gain = 1.0 + CLOUD_FAR_FLANK_GAIN * (1.0 - clamp(fraction, 0.0, 1.0));
+	}
 	vec3 sun_irradiance = ATM_PI * atm_sun_at(p) * atm_sunlit(p);
 	vec3 sky_irradiance = ATM_PI * atm_sky_light(p, up) * sky_eclipse;
 	float sky_radiance = cloud_far_sky_radiance(tau, dot(view_prop, up));

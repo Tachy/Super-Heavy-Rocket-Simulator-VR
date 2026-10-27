@@ -537,6 +537,10 @@ cloud_deterministic_march={
 "type": "bool",
 "value": true
 }
+cloud_far_3d_light={
+"type": "bool",
+"value": true
+}
 cloud_light_cache_valid={
 "type": "bool",
 "value": false

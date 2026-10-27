@@ -15,7 +15,9 @@
 #      its far tier draws them with the far field's column model at these footprints - within 5 %, a broken layer (cf
 #      0.4) as 21 x 21 block means within 5 %; the converged volume with the shapes (the march alone, 8 x its steps)
 #      against the far field within 10 % for the decks (the column model's own error, the M8 ruling; a broken layer's
-#      volume beats with the shapes' tile at these footprints: section 6); points where the ground itself steps across
+#      volume beats with the shapes' tile at these footprints: section 6), and for the broken layer in a 1 deg view
+#      (its ~1 km march pixels resolve the shapes; fix round 2) the whole image's mean at nadir under Suns of ~73, ~55
+#      and ~24 deg within 10 %; points where the ground itself steps across
 #      the limit by more than the tolerance (weather off: the terrain's sea glint at the sub-camera point, which the
 #      scaled-space Earth lacks) are listed, not asserted; the volume pass draws only inside (cloud_enabled), the far
 #      field only outside (earth_clouds.gdshader); the CPU light factors are (1, 0, 1) outside;
@@ -30,12 +32,14 @@
 #      within 3 % (the weight at the slab's top), and the band's own step between bins - measured on the game's image
 #      relative to the march's - within 3 %; a camera at 20 km moved by 100 m: interior cover flips (alpha changing by
 #      > 0.5 where a 7 x 7 window was all clear or all cloud) within a static pair's + 0.1 % of the covered pixels;
-#   6. the far tier's column model at orbit footprints (static clouds Task 8 fix round 1): the broken layer and the
-#      deck seen from 420 km at nadir and at 45 deg - the column model (the far tier everywhere, its fade at 0) against
-#      the converged volume (the march alone, 8 x its steps) and against the far tier's shapes (its fade beyond every
-#      footprint), mean radiance of the central square within 10 % (the M8 ruling); no speckle: the broken layer's limb
-#      from 420 km and its far horizon from 50 km (the shapes' 1 km mips at footprints of several km beat into salt and
-#      pepper) - the RMS of the game's image against its sub-pixel supersampled reference over the far band within 10 %.
+#   6. the far tier's column model at orbit footprints (static clouds Task 8 fix rounds 1 and 2): the broken layer
+#      (cf 0.4), the deck and - held out of the 3D Sun light's fit - scattered cumulus (cf 0.12) and the broken layer
+#      under a ~24 deg Sun, seen from 420 km at nadir and at 45 deg - the column model (the far tier everywhere, its fade
+#      at 0) against the converged volume (the march alone, 8 x its steps; mean radiance and mean alpha) and against the
+#      far tier's shapes (its fade beyond every footprint; mean radiance), the central square's means over three sites
+#      1 deg apart within 10 % (the M8 ruling); --no_3d_light: CloudLayer.far_3d_light off; no speckle: the broken
+#      layer's limb from 420 km and its far horizon from 50 km (the shapes' 1 km mips at footprints of several km beat
+#      into salt and pepper) - the RMS of the game's image against its sub-pixel supersampled reference over the far band within 10 %.
 # Needs a GPU (no --headless): godot --path game --script res://tests/cloud_far_check.gd [-- --save=<dir>] (PNGs of
 # the renders) [--only=scaled|handover|column] (sections 1-4, 5 or 6 alone). Exit code 1 on failure.
 extends SceneTree
@@ -97,9 +101,30 @@ const FLIP_UNIFORM_ALPHA := Vector2(0.1, 0.9)
 const FLIP_ALLOWANCE := 1.0e-3
 ## 3. / 6. The converged march (cloud_grain_check's reference: its coarse and maximum steps x 8).
 const REFERENCE_STEP_FACTOR := 8
-## 6. The far tier's column model at orbit footprints (static clouds Task 8 fix round 1).
+## 6. The far tier's column model at orbit footprints (static clouds Task 8 fix round 1). Held out of the 3D-light
+## term's derivation (fix round 2): scattered cumulus (cf 0.12, the broken layer's in-cloud depth) under the high Sun
+## and the broken layer under a low Sun (LOW_SUN_SITE: the Sun ~25 deg up at EPOCH_UTC, the Pacific west of the
+## Galapagos).
+const SCATTERED_FRACTION := 0.12
+const LOW_SUN_SITE := Vector2(0.0, -95.0)
+const LOW_SUN_ELEVATION_DEG := Vector2(20.0, 30.0)  ## the held-out case's Sun, asserted
+const COLUMN_LAYERS := [
+		{"name": "broken cf 0.4", "liquid": BROKEN_LIQUID_KG_M3, "fraction": BROKEN_FRACTION, "site": BAND_SITE},
+		{"name": "deck tau 10", "liquid": DECK_LIQUID_KG_M3, "fraction": 1.0, "site": BAND_SITE},
+		{"name": "scattered cf 0.12", "liquid": BROKEN_LIQUID_KG_M3 * SCATTERED_FRACTION / BROKEN_FRACTION,
+				"fraction": SCATTERED_FRACTION, "site": BAND_SITE},
+		{"name": "broken cf 0.4 low Sun", "liquid": BROKEN_LIQUID_KG_M3, "fraction": BROKEN_FRACTION,
+				"site": LOW_SUN_SITE, "sun_deg": LOW_SUN_ELEVATION_DEG}]
 const COLUMN_VIEWS := [{"name": "nadir", "elevation": -89.0}, {"name": "45 deg", "elevation": -48.5}]
 const COLUMN_BLOCK := 0.3  ## the central square's side, as a fraction of the image height
+## Each case's means over the views from above its site and from above these offsets (lat, lon) deg: the sub-grid cover
+## reads the shapes' 32 km tile at one height, and the central square (~146 km at nadir: 4.5 tile periods) samples it
+## with a spread of the column's mean cover of +-6 % between sites 1 deg apart (the volume's +-3 %; fix round 2, six
+## sites) - the model's error is the mean's.
+## 3. The scaled-space broken layer's view (fix round 2): ~0.3 km screen pixels from 1.5e7 m.
+const SCALED_BROKEN_FOV_DEG := 1.0
+const SCALED_BROKEN_SITES := [SUB_CAMERA, Vector2(-25.0, -45.0)]  ## the Sun ~73 / ~55 deg up
+const COLUMN_SITE_OFFSETS_DEG := [Vector2.ZERO, Vector2(1.0, -1.0), Vector2(-1.0, 1.0)]
 const FADE_SHAPES := Vector2(1.0e9, 1.0e9)  ## cloud_far_pattern_fade_m: the shapes everywhere
 ## The views of the speckle check: the limb from 420 km (lateral footprints of several km along it) and the far horizon
 ## from 50 km; the elevation puts the horizon SPECKLE_HORIZON_BELOW_DEG below the view's centre.
@@ -124,6 +149,7 @@ var _failures := 0
 var _samples := 0
 var _save_dir := ""
 var _only := ""  ## --only=scaled | handover: sections 1-4 or 5 alone
+var _no_3d_light := false  ## --no_3d_light: CloudLayer.far_3d_light off (the plane-parallel slab alone)
 var _files: Array[String] = []
 var _probe_viewport := SubViewport.new()
 var _probe_material := ShaderMaterial.new()
@@ -135,6 +161,8 @@ func _initialize() -> void:
 			_save_dir = arg.trim_prefix("--save=")
 		elif arg.begins_with("--only="):
 			_only = arg.trim_prefix("--only=")
+		elif arg == "--no_3d_light":
+			_no_3d_light = true
 	_run.call_deferred()
 
 
@@ -144,6 +172,7 @@ func _run() -> void:
 	root.add_child(_main)
 	_world = _main.get_node("World")
 	_world.weather.enabled = false
+	_world.clouds.far_3d_light = not _no_3d_light
 	for i in range(MAX_FRAMES):
 		await process_frame
 		if _world.atmosphere.ready and _world.clouds.noise_ready and _world.clouds.transfer_ready:
@@ -186,6 +215,8 @@ func _run() -> void:
 		var broken := _slab("broken", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION)
 		_show(broken)
 		await _handover_sample("broken cf 0.4, the cloud pass's far tier", 10, HANDOVER_TOLERANCE, broken)
+		# The far field's broken layer against the converged volume where the volume resolves its clouds: a narrow view.
+		await _scaled_broken_samples(broken)
 		# 4. From the Moon.
 		await _moon_samples()
 	if _only == "" or _only == "handover":
@@ -340,6 +371,63 @@ func _handover_sample(label: String, radius: int, tolerance: float, snapshot := 
 			"; the ground itself steps at" + excluded])
 
 
+## 3. The scaled-space far field's broken layer (its 3D Sun light, its even cover) against the converged volume with
+## the shapes (fix round 2): from just inside / just outside 1.5e7 m at nadir with a SCALED_BROKEN_FOV_DEG view, whose
+## ~1 km march pixels resolve the shapes (at 60 deg their ~17 km footprints beat with the tile), the whole image's mean
+## luminance within 10 % (the M8 ruling), under the high Sun (SCALED_BROKEN_SITES) and the low one (LOW_SUN_SITE); a
+## site whose ground alone steps across the limit by more than the tolerance (weather off: the terrain's sea glint) is
+## listed, not asserted.
+func _scaled_broken_samples(broken: Dictionary) -> void:
+	_world.camera.fov = SCALED_BROKEN_FOV_DEG
+	for site: Vector2 in SCALED_BROKEN_SITES + [LOW_SUN_SITE]:
+		var label := "broken cf 0.4 at (%.0f, %.0f), Sun %.0f deg: the far field vs the converged volume" % [site.x,
+				site.y, _sun_elevation_deg(site)]
+		var ground := {}
+		_world.clouds.show_now({}, {}, 0.0)
+		for distance: float in [INSIDE_M, OUTSIDE_M]:
+			await _place(site, distance)
+			ground[distance < HANDOVER_M] = _image_luminance(_frame())
+		_show(broken)
+		_set_converged_volume(true)
+		var values := {}
+		for distance: float in [INSIDE_M, OUTSIDE_M]:
+			await _place(site, distance)
+			var image := _frame()
+			_save(image, "t8g2check_scaled_broken_%.0f_%s" % [site.y, "inside" if distance < HANDOVER_M else "outside"])
+			values[distance < HANDOVER_M] = _image_luminance(image)
+		_set_converged_volume(false)
+		var outside: Vector2 = values[false]
+		var inside: Vector2 = values[true]
+		var ratio := outside.x / maxf(inside.x, 1.0e-12)
+		var detail := ("outside / inside %.4f (%.5f / %.5f; weather off %.5f / %.5f; non-finite pixels skipped %d / %d)"
+				% [ratio, outside.x, inside.x, ground[false].x, ground[true].x, outside.y, inside.y])
+		var ground_step: float = absf(ground[false].x / maxf(ground[true].x, 1.0e-12) - 1.0)
+		if ground_step > NEAR_FAR_TOLERANCE:
+			print("  info  %s: not asserted, the ground itself steps by %.0f %%: %s" % [label, ground_step * 100.0,
+					detail])
+			continue
+		_check("%s, mean luminance within %.0f %%" % [label, NEAR_FAR_TOLERANCE * 100.0],
+				absf(ratio - 1.0) <= NEAR_FAR_TOLERANCE, detail)
+	_world.camera.fov = 60.0
+
+
+## Mean luminance (x) of every BAND_PIXEL_STRIDE-th pixel and the number of non-finite ones skipped (y: the terrain's
+## narrow nadir view over the sea leaves a few, weather off too).
+static func _image_luminance(image: Image) -> Vector2:
+	var sum := 0.0
+	var n := 0
+	var skipped := 0
+	for y in range(0, image.get_height(), BAND_PIXEL_STRIDE):
+		for x in range(0, image.get_width(), BAND_PIXEL_STRIDE):
+			var l := _luminance(image.get_pixel(x, y))
+			if is_finite(l):
+				sum += l
+				n += 1
+			else:
+				skipped += 1
+	return Vector2(sum / maxf(n, 1), skipped)
+
+
 ## 4. The Moon's distance: cloudy and clear cells of the ERA5 snapshot, weather off then on.
 func _moon_samples() -> void:
 	var file := Paths.data_dir().path_join(ERA5_FILE)
@@ -429,23 +517,42 @@ func _handover_band_samples() -> void:
 ## 6. The far tier's column model at orbit footprints (static clouds Task 8 fix round 1; header).
 func _column_samples() -> void:
 	var preset: Dictionary = CloudLayer.PRESETS[_world.clouds.quality]
-	for layer in [["broken cf 0.4", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION], ["deck tau 10", DECK_LIQUID_KG_M3, 1.0]]:
-		_show(_slab(layer[0], layer[1], layer[2]))
+	for layer: Dictionary in COLUMN_LAYERS:
+		_show(_slab(layer["name"], layer["liquid"], layer["fraction"]))
+		var site: Vector2 = layer["site"]
+		for i in range(SETTLE_FRAMES):
+			await process_frame  # the World's Sun follows the clock's time
+		var sun_deg := _sun_elevation_deg(site)
+		if layer.has("sun_deg"):
+			var bounds: Vector2 = layer["sun_deg"]
+			var low := INF
+			var high := -INF
+			for offset: Vector2 in COLUMN_SITE_OFFSETS_DEG:
+				low = minf(low, _sun_elevation_deg(site + offset))
+				high = maxf(high, _sun_elevation_deg(site + offset))
+			_check("%s: the Sun %.0f-%.0f deg up" % [layer["name"], bounds.x, bounds.y],
+					low >= bounds.x and high <= bounds.y, "%.1f-%.1f deg" % [low, high])
 		for view: Dictionary in COLUMN_VIEWS:
-			var label := "%s, %s from %.0f km" % [layer[0], view["name"], ORBIT_HEIGHT_M / 1000.0]
-			var means := {}
-			for model: String in ["volume", "shapes", "column"]:
-				_set_converged_volume(model == "volume")
-				if model != "volume":
-					_set_handover(Vector2.ZERO)  # the far tier everywhere
-				_set_fade(FADE_SHAPES if model == "shapes" else Vector2.ZERO)
-				if not await _ground_view(BAND_SITE, ORBIT_HEIGHT_M, 0.0, view["elevation"]):
-					_check("%s: the view settled" % label, false, "")
-					return
-				var image := _cloud_image()
-				_save(image, "t8fcheck_%s_%s_%s" % [str(layer[0]).replace(" ", "_"),
-						str(view["name"]).replace(" ", "_"), model])
-				means[model] = _central_means(image)
+			var label := "%s, %s from %.0f km (Sun %.0f deg, %d sites)" % [layer["name"], view["name"],
+					ORBIT_HEIGHT_M / 1000.0, sun_deg, COLUMN_SITE_OFFSETS_DEG.size()]
+			var means := {"volume": Vector2.ZERO, "shapes": Vector2.ZERO, "column": Vector2.ZERO}
+			for k in range(COLUMN_SITE_OFFSETS_DEG.size()):
+				for model: String in ["volume", "shapes", "column"]:
+					_set_converged_volume(model == "volume")
+					if model != "volume":
+						_set_handover(Vector2.ZERO)  # the far tier everywhere
+					_set_fade(FADE_SHAPES if model == "shapes" else Vector2.ZERO)
+					var at: Vector2 = site + COLUMN_SITE_OFFSETS_DEG[k]
+					if not await _ground_view(at, ORBIT_HEIGHT_M, 0.0, view["elevation"]):
+						_check("%s: the view settled" % label, false, "")
+						return
+					var image := _cloud_image()
+					if k == 0:
+						_save(image, "t8fcheck_%s_%s_%s" % [str(layer["name"]).replace(" ", "_"),
+								str(view["name"]).replace(" ", "_"), model])
+					var m := _central_means(image)
+					print("    site %s %s: radiance %.5f alpha %.4f" % [at, model, m.x, m.y])
+					means[model] += m / float(COLUMN_SITE_OFFSETS_DEG.size())
 			var column: Vector2 = means["column"]
 			var volume: Vector2 = means["volume"]
 			var shapes: Vector2 = means["shapes"]
@@ -453,6 +560,10 @@ func _column_samples() -> void:
 					NEAR_FAR_TOLERANCE * 100.0], absf(column.x / maxf(volume.x, 1.0e-12) - 1.0) <= NEAR_FAR_TOLERANCE,
 					"column / volume %.4f (radiance %.5f / %.5f, alpha %.4f / %.4f)" % [column.x / maxf(volume.x,
 					1.0e-12), column.x, volume.x, column.y, volume.y])
+			_check("%s: the column model vs the converged volume, mean cover (alpha) within %.0f %%" % [label,
+					NEAR_FAR_TOLERANCE * 100.0], absf(column.y / maxf(volume.y, 1.0e-12) - 1.0) <= NEAR_FAR_TOLERANCE,
+					"column / volume %.4f (alpha %.4f / %.4f)" % [column.y / maxf(volume.y, 1.0e-12), column.y,
+					volume.y])
 			_check("%s: across the far tier's shapes-to-column fade, mean radiance within %.0f %%" % [label,
 					NEAR_FAR_TOLERANCE * 100.0], absf(column.x / maxf(shapes.x, 1.0e-12) - 1.0) <= NEAR_FAR_TOLERANCE,
 					"column / shapes %.4f (radiance %.5f / %.5f, alpha %.4f / %.4f)" % [column.x / maxf(shapes.x,
@@ -463,6 +574,15 @@ func _column_samples() -> void:
 	_show(_slab("broken", BROKEN_LIQUID_KG_M3, BROKEN_FRACTION))
 	for view: Dictionary in SPECKLE_VIEWS:
 		await _speckle_sample(view)
+
+
+## The Sun's elevation (deg) over the geodetic site (lat, lon) deg at the clock's time.
+func _sun_elevation_deg(site: Vector2) -> float:
+	var sun_itrf := (_world.earth.fixed_to_gcrf.transposed() * _world.sun_apparent_from_earth_m).normalized()
+	var lat := deg_to_rad(site.x)
+	var lon := deg_to_rad(site.y)
+	var up := Vector3(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat))
+	return rad_to_deg(asin(clampf(sun_itrf.dot(up), -1.0, 1.0)))
 
 
 ## Mean premultiplied luminance (x) and alpha (y) over the image's central square (COLUMN_BLOCK of its height).

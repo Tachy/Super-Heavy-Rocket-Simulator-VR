@@ -278,7 +278,7 @@ const float CLOUD_FAR_LIGHT_RATIO = 2.615;
 // [E] The far tier's first guess of the slab's height where the column of its first guess is clear: a low cloud's
 // (the next guess takes the column where the ray crosses it).
 const float CLOUD_FAR_GUESS_HEIGHT_M = 2000.0;
-// [E] The column model's sub-grid cover (cloud_far_cover_ratio): taps across the footprint (twice as many along it: 32
+// [E] The column model's sub-grid cover (cloud_far_cover): taps across the footprint (twice as many along it: 32
 // shape reads per pixel, once; 64 with the unaligned reading), the footprint's widening (2: the average spans two pixels, no march-pixel blocks), its
 // largest extent along a grazing view (beyond it the average is the layer's mean: the 32 km tile), and the footprints
 // over which it fades to the even cover (from a quarter of the tile on, its period would show as a lattice; the
@@ -411,21 +411,27 @@ float cloud_far_reference_m(CloudRay ray, float from_m, float to_m) {
 	return clamp(d, from_m, to_m);
 }
 
-// The column model's sub-grid cover (static clouds Task 8 fix round 1; spec decision 4: a deterministic footprint
-// average of the mip-based cover) for the column's largest fraction: the share of fixed taps over the pixel's footprint
-// on the layer where the shapes' prefiltered value exceeds that fraction's prefilter threshold (its covered area), over
-// the fraction - 1 on average, so the cover and the water stay the grid's; 1 for a deck. The footprint is widened by
+// The column model's sub-grid cover (static clouds Task 8 fix rounds 1 and 2; spec decision 4: a deterministic
+// footprint average of the mip-based cover) of a column whose largest fraction is fraction and whose even cover along
+// the view is even (the beam cover, cloud_beam_cover_of): the share of fixed taps over the pixel's footprint on the
+// layer where the shapes' prefiltered value exceeds the prefilter threshold of the even cover - the shapes' pattern
+// covering the share even of the layer, so the mean over the layer is the even cover's (spec decision 3: the cover and
+// the water stay the grid's at every footprint; a share of the fraction's threshold scaled by even / fraction and
+// clamped at 1 lost 9-15 % of the cover where whole footprints were covered); the even cover for a deck. The footprint
+// is widened by
 // CLOUD_FAR_COVER_FOOTPRINT_SCALE (a box of one pixel still aliases): footprint_m across the view, footprint_m / mu
 // along its horizontal direction (at most CLOUD_FAR_COVER_ALONG_MAX_M), CLOUD_FAR_COVER_TAPS across and twice as many
 // along, read at the mip level of the larger spacing; from CLOUD_FAR_COVER_UNALIGNED_M's footprints on a share comes
-// from the shape's second, unaligned reading. It fades to 1 between CLOUD_FAR_COVER_FADE_M's footprints (the 32 km
-// tile's own period would show as a lattice) and is 1 where the cell at the point holds no cloud (its types).
-float cloud_far_cover_ratio(vec3 offset_local, float height_m, vec3 dir, vec3 up, float mu, float footprint_m,
-		float fraction) {
+// from the shape's second, unaligned reading. It fades to the even cover between CLOUD_FAR_COVER_FADE_M's footprints
+// (the 32 km tile's own period would show as a lattice) and is the even cover where the cell at the point holds no
+// cloud (its types).
+float cloud_far_cover(vec3 offset_local, float height_m, vec3 dir, vec3 up, float mu, float footprint_m,
+		float fraction, float even) {
 	float fade = 1.0 - smoothstep(CLOUD_FAR_COVER_FADE_M.x, CLOUD_FAR_COVER_FADE_M.y, footprint_m);
 	CloudCell cell = cloud_field(cloud_lat_lon(atmosphere_camera_hi + atmosphere_camera_lo + offset_local), height_m);
-	if (fade <= 0.0 || fraction >= 1.0 || cell.fraction < CLOUD_MIN_FRACTION || cell.extinction <= 0.0) {
-		return 1.0;
+	if (fade <= 0.0 || fraction >= 1.0 || even >= 1.0 || cell.fraction < CLOUD_MIN_FRACTION
+			|| cell.extinction <= 0.0) {
+		return even;
 	}
 	vec3 along = dir - up * dot(dir, up);
 	float along_norm = length(along);
@@ -438,7 +444,7 @@ float cloud_far_cover_ratio(vec3 offset_local, float height_m, vec3 dir, vec3 up
 	// cloud_far_level of the taps' larger spacing
 	float spacing_m = max(along_m / float(taps_along), across_m / float(CLOUD_FAR_COVER_TAPS));
 	float level = clamp(log2(spacing_m * CLOUD_SHAPE_TEXELS / CLOUD_SHAPE_TILE_H_M), 0.0, CLOUD_SHAPE_PREFILTER_LEVELS);
-	vec2 uv = cloud_prefilter_uv(fraction, level);
+	vec2 uv = cloud_prefilter_uv(even, level);
 	float threshold = texture(cloud_prefilter_threshold, uv).r;
 	vec3 types = cloud_type_weights(cell);
 	// The second, unaligned reading's weight (CLOUD_FAR_COVER_UNALIGNED_*).
@@ -465,13 +471,12 @@ float cloud_far_cover_ratio(vec3 offset_local, float height_m, vec3 dir, vec3 up
 			sum += covered;
 		}
 	}
-	float ratio = sum / float(taps_along * CLOUD_FAR_COVER_TAPS) / max(fraction, CLOUD_MIN_FRACTION);
-	return mix(1.0, ratio, fade);
+	return mix(even, sum / float(taps_along * CLOUD_FAR_COVER_TAPS), fade);
 }
 
 // The column model at the slab's crossing d_p (cloud_far_slab): the even cover C_v (the beam cover of the column's
-// largest fraction at the view's cosine) scaled by the sub-grid cover at the pixel's footprint footprint_m
-// (cloud_far_cover_ratio; at most 1) with the even cover's in-cloud depth (the water follows the cover), the
+// largest fraction at the view's cosine) distributed by the sub-grid cover at the pixel's footprint footprint_m
+// (cloud_far_cover; its mean C_v) with the even cover's in-cloud depth (the water follows the cover), the
 // plane-parallel slab of the cloudy part's depth (cloud_far_cloudy_radiance: reflected seen from above, transmitted from below), its
 // air light at the crossing; premultiplied colour + alpha (coverage_only: alpha alone).
 vec4 cloud_far_column(vec3 dir, vec3 eye, float d_p, vec2 column_p, float footprint_m, vec3 eclipse_near,
@@ -483,8 +488,7 @@ vec4 cloud_far_column(vec3 dir, vec3 eye, float d_p, vec2 column_p, float footpr
 	float mu = max(abs(dot(view_prop, up)), CLOUD_FAR_MU_MIN);
 	float even = max(cloud_column_beam_cover(column_p, mu), CLOUD_MIN_FRACTION);
 	float tau = column_p.x / even;  // the cloudy part's vertical depth
-	float cover = min(even * cloud_far_cover_ratio(offset, cloud_height_of(p), dir, up, mu, footprint_m,
-			column_p.y), 1.0);
+	float cover = cloud_far_cover(offset, cloud_height_of(p), dir, up, mu, footprint_m, column_p.y, even);
 	float alpha = cover * (1.0 - exp(-tau / mu));
 	if (coverage_only) {
 		return vec4(0.0, 0.0, 0.0, alpha);

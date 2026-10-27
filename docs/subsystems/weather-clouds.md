@@ -416,13 +416,20 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   - composite as the cloud pass: alpha = C_v (1 - exp(-tau / (C_v mu))), colour = T_air C_v L + alpha S_air over
     (1 - alpha) x the ground; the ground lit through the column (`cloud_ground_light`'s column tier, the terrain's
     beyond 140 km: direct, the Sun's diffuse part, the sky's; the Moon likewise).
-  - the shapes' 3D Sun light (static clouds Task 8 fix round 1; `CLOUD_FAR_ENTRY_TURN` 0.15, `CLOUD_FAR_FLANK_GAIN`
-    0.4 [E]): the volume lights a sample whose Sun path is shorter than its depth below the column's top as through a
-    surface turned toward the Sun (`cloud_entry_cosine`) - a deck's domes under a low Sun were 12-14 % brighter in the
-    converged volume than the slab, broken cumulus (cf 0.4) under a high Sun 15-20 % (their lit flanks); the slab's
-    normal for the Sun's light is turned 0.15 of the way from mu0 to 1 and the Sun's light gains 1 + 0.4 (1 - f) for
-    the column's largest fraction f (fitted to cloud_far_check sections 3 and 6: 0.3 / 0.15 left the broken layer
-    10-11 % dark);
+  - the shapes' 3D Sun light (static clouds Task 8 fix rounds 1 and 2; `CLOUD_FAR_ENTRY_TURN` 0.15,
+    `CLOUD_FAR_FLANK_GAIN` 0.4 [E]; fidelity flag `CloudLayer.far_3d_light` / shader global `cloud_far_3d_light`,
+    default on): the volume lights a sample whose Sun path is shorter than its depth below the column's top as through
+    a surface turned toward the Sun (`cloud_entry_cosine`) - a deck's domes under a low Sun were 12-14 % brighter in the
+    converged volume than the slab, broken cumulus 20-46 % (their lit flanks; more toward a low Sun: 1.20x at 73 deg,
+    1.46x at 24 deg from above); the slab's normal for the Sun's light is turned 0.15 of the way from mu0 to 1 and the
+    Sun's light gains 1 + 0.4 (1 - f) for the column's largest fraction f (bounded: <= 1.4). The constants were fitted
+    in fix round 1 to cloud_far_check sections 3 and 6 (cf 0.4, Sun 73 deg; decks) and match the game's converged
+    volume renderer, not a radiative-transfer reference (for broken cumulus 3D transfer studies find the domain-mean
+    reflectance above the plane-parallel one under a low Sun and near or below it under a high one, Welch & Wielicki
+    1984, Benner & Evans 2001 - the renderer's own 3D gain at a high Sun is its entry-cosine model's). Held out in fix
+    round 2 with the constants unchanged: cf 0.12 under the high Sun and cf 0.4 under a 24 deg Sun (section 6) within
+    6 %, and the scaled-space far field against the converged volume (section 3); the plane-parallel slab alone
+    (`--no_3d_light`) is 17-31 % dark in every broken case;
   Approximations: no light between columns (no shadows on neighbouring columns; the lit sides only as that mean gain),
   the light taken at one point, a Sun below the cloud's local horizon at the entry floor 0.02, view cosine floor 0.02
   (`CLOUD_FAR_MU_MIN` [E]). The CPU light factors stay (1, 0, 1) beyond the limit (`cloud_enabled` false; a camera
@@ -468,15 +475,17 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     grid-mean depth and largest fraction from the column texels' cubic B-spline (`cloud_column_mean_depth_smooth`,
     `cloud_column_texel_smooth`: from orbit a 0.25 deg cell spans tens of pixels and the bilinear's creases drew a
     lattice of soft squares; the slab heights stay bilinear); the even cover C_v (the beam cover of the largest
-    fraction at the view's cosine) times the sub-grid cover (`cloud_far_cover_ratio`, spec decision 4's deterministic
-    footprint average): the shapes' prefiltered cover - the share of 4 x 8 fixed taps over the pixel's footprint x 2
-    across the view and / mu along it (at most 32 km) above the prefilter threshold of the column's largest fraction,
-    at the mip of the taps' spacing - over that fraction (1 on average: the cover and the water stay the grid's; 1 for
-    a deck), half of it from a second, unaligned reading of the shape (Earth-fixed, turned 37 deg about (1, 2, 3),
-    x 1.37) faded in from 1 to 3 km of footprint (the 32 km tile's period showed as a regular lattice over the hundreds
-    of km of an orbit view), and none beyond 8-16 km footprints (the scaled-space far field's even cover); the cover
-    clamped to 1, the in-cloud depth the even cover's; the radiance the plane-parallel slab's with the shapes' 3D Sun
-    light (below, far field). From 420 km every pixel is the far tier's (the march segment is empty): below ~1 km
+    fraction at the view's cosine) distributed by the sub-grid cover (`cloud_far_cover`, spec decision 4's
+    deterministic footprint average): the share of 4 x 8 fixed taps over the pixel's footprint x 2 across the view and
+    / mu along it (at most 32 km) where the shapes' prefiltered value exceeds the prefilter threshold of C_v itself, at
+    the mip of the taps' spacing - the pattern covers C_v of the layer, so the mean cover is C_v at every footprint and
+    view angle (spec decision 3; fix round 2: the share of the fraction's threshold x C_v / f, clamped at 1, lost 6-15 %
+    of the cover where whole footprints were covered; the deck's cover is C_v), half of it from a second, unaligned
+    reading of the shape (Earth-fixed, turned 37 deg about (1, 2, 3), x 1.37) faded in from 1 to 3 km of footprint (the
+    32 km tile's period showed as a regular lattice over the hundreds of km of an orbit view), and C_v itself beyond
+    8-16 km footprints (the scaled-space far field's even cover); the in-cloud depth the even cover's; the radiance the
+    plane-parallel slab's with the shapes' 3D Sun light (below, far field). From 420 km every pixel is the far
+    tier's (the march segment is empty): below ~1 km
     footprints (nadir) the shapes' fade from above, then the column model with its sub-grid cover: a broken cumulus
     field down to the limb, no cell lattice, no speckle (`t8f_orbit*`).
   The debug outputs march the whole segment without the far tier (the checks' physical quantities of the volume). The
@@ -650,7 +659,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   broken cf 0.4 (21 x 21 block means) within 2.30 % at the six points off the sub-camera point; the converged volume
   with the shapes (the march alone, 8 x its steps) against the far field (the column model's own error, tolerance 10 %,
   the M8 ruling) deck tau 10 within 8.15 % (before fix round 1 11.98 %), tau 2 within 1.49 % (a broken layer's volume
-  beats with the 32 km tile at these ~17 km footprints, 17-32 % either way: section 6); there the ground alone
+  beats with the 32 km tile at these ~17 km footprints, 17-32 % either way: section 6); the broken layer (cf 0.4) in
+  a 1 deg view (~1 km march pixels resolve the shapes; fix round 2), the whole image's mean at nadir, far field /
+  converged volume 0.925 (Sun 54 deg, 25 S 45 W) and 0.951 (Sun 24 deg, 0 N 95 W) (the plane-parallel slab alone
+  0.736 at 24 deg), at 0 N 45 W (Sun 73 deg) 0.968 listed, not asserted (the ground alone steps 55 %); there the
+  ground alone
   steps across the limit (weather off: 0.157 inside / 0.069 outside, the terrain's sea glint, which the scaled-space
   Earth lacks; seen through a broken layer's gaps it was 11 % of the pixel) - points whose ground steps by more than
   the tolerance are listed, not asserted. Every placement resets the cloud history and the frame counter and draws
@@ -661,12 +674,18 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   image the linear cross-fade of the two within 2.38 % / 0.39 % in every 2 km bin from 14 to 60 km (3 %), the band's
   own step between bins, measured on the game's image relative to the march's, 2.45 % / 0.57 % (3 %); a camera at
   20 km moved by 100 m: 4 interior cover flips in 646 130 covered pixels against 0 of a static pair (allowance 0.1 %
-  of the covered pixels [E]). Section 6 (`--only=column`, fix round 1): the broken layer and the deck from 420 km at
-  nadir / 45 deg, mean radiance of the central square, tolerance 10 %: the column model vs the converged volume
-  0.927 / 0.940 (broken; before fix round 1 0.891 / 0.799) and 0.988 / 1.008 (deck), vs the far tier's shapes (the
-  brightness across the fade) 0.973 / 0.993 and 0.992 / 1.004; no speckle - the game's image against its 2 x 2
+  of the covered pixels [E]). Section 6 (`--only=column`, fix rounds 1 and 2): from 420 km at nadir / 45 deg, the
+  central square's means over three sites 1 deg apart (a single site's column cover is off by up to +-6 %: the
+  sub-grid cover reads the 32 km tile at one height), tolerance 10 %; the column model vs the converged volume,
+  radiance / alpha: broken cf 0.4 (Sun 73 deg) 0.986 / 0.993 and 0.967 / 0.936, deck tau 10 0.989 / 1.001 and
+  1.007 / 1.001; held out of the 3D Sun light's fit: scattered cf 0.12 (Sun 73 deg) 1.013 / 1.059 and 0.949 / 0.931,
+  broken cf 0.4 under a 24 deg Sun (0 N 95 W) 0.940 / 1.001 and 1.011 / 0.942 (at 8153ed5, the clamped sub-grid
+  cover: radiance 0.857 / 0.924, 0.888 / 0.928, 0.838 / 0.960, alpha down to 0.861; `--no_3d_light`: radiance
+  0.68-0.83); vs the far tier's shapes (the brightness across the fade) 1.041 / 1.023, 0.993 / 1.004, 1.094 / 1.015,
+  1.002 / 1.084; no speckle - the game's image against its 2 x 2
   sub-pixel supersampled reference (the camera turned by whole screen pixels, aligned back), RMS over the far band:
-  the limb from 420 km 6.0 % (before 16.1 %), the far horizon from 50 km 9.2 % (before 10.3 %; tolerance 10 % [E]).
+  the limb from 420 km 5.0 % (fix round 1 6.0 %, before 16.1 %), the far horizon from 50 km 9.3 %
+  (before 10.3 %; tolerance 10 % [E]).
   cloud_grain_check (the far pass included, its 8 x reference too): Cape / ground / deck / cirrus cover within 0.02 /
   1.00 / 0.16 / 0.10 %; the deck view's horizon row (fix round 1): 38 isolated outlier pixels within 3 rows of the
   terrain's horizon against ~116 expected from the rows 8-40 away (before the mixed-depth gather 272; limit 1.5 x +
@@ -861,7 +880,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   the first entry (2 x 2 taps over the footprint half a footprint deeper, 4 field lookups per ray) changed ~1 000 of
   1.44 M pixels by > 20/255 with no visible softening. Far cumulus fields at 20-40 km show faint horizontal bands (the
   steps' iso-distance shells). The VR cost is over the 2.5 ms budget (`vr-performance.md`, Task 10).
-- Far field: plane-parallel independent columns (the shapes' 3D Sun light only as a fitted mean gain; no shadows
+- Far field: plane-parallel independent columns (the shapes' 3D Sun light only as a mean gain matched to the converged
+  volume, switchable: `CloudLayer.far_3d_light`; no shadows
   cast on neighbouring columns or the ground beside them); in the scaled-space Earth the field's 0.25 deg grid shows as
   soft cells near the hand-over (~4 pixels per cell at 1.5e7 m; its column stays bilinear, without the cloud pass's
   sub-grid cover). A column with several layers is one slab (placed by its seen light's mean

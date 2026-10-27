@@ -152,6 +152,13 @@ var deterministic_march := true:
 	set(value):
 		deterministic_march = value
 		ShaderGlobals.set_value(&"cloud_deterministic_march", value)
+## Fidelity flag (shader global cloud_far_3d_light; static clouds Task 8 fix round 2): the far tier's column model and
+## the scaled-space far field light their plane-parallel slab with the shapes' 3D Sun light (cloud_far.gdshaderinc
+## CLOUD_FAR_ENTRY_TURN, CLOUD_FAR_FLANK_GAIN); false: the plane-parallel slab alone.
+var far_3d_light := true:
+	set(value):
+		far_3d_light = value
+		ShaderGlobals.set_value(&"cloud_far_3d_light", value)
 
 var _core: StarsimCore
 var _quad := MeshInstance3D.new()
@@ -223,6 +230,7 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_debug_output", 0)
 	ShaderGlobals.set_value(&"cloud_light_cache_enabled", light_cache_enabled)
 	ShaderGlobals.set_value(&"cloud_deterministic_march", deterministic_march)
+	ShaderGlobals.set_value(&"cloud_far_3d_light", far_3d_light)
 	ShaderGlobals.set_value(&"cloud_shadow_near", shadow_effect.near_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_far", shadow_effect.far_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_extent", Vector4(SHADOW_NEAR_HALF_M, SHADOW_FAR_HALF_M,

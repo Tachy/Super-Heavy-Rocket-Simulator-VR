@@ -554,3 +554,33 @@ under full Sun and 100 x the lit ground - 1500 x too dim against the physical 1.
 own forward-scattered light (HG part g 0.995, ~200 x the disk at tau 2 at the Sun's position, in the same scene units)
 drowned it: no disk through any slab of tau >= 2. The march also left exp(-tau) ~ 5e-4 of the background behind a thick
 cloud (the scaled criterion's early exit), invisible next to a disk of 30, 120 x a lit ground next to the physical one.
+
+## Far tier's sub-grid cover and the 3D Sun light's validation (superseded by static clouds Task 8 fix round 2, 2026-10-27)
+The sub-grid cover scaled the even cover by the share of taps above the prefilter threshold of the column's largest
+fraction over that fraction, clamped at 1; where whole footprints were covered the clamp lost 6-15 % of the mean cover
+(alpha column / converged volume 0.85-0.94 at single sites), and the 3D Sun light's constants compensated part of it.
+The 3D light was not switchable and validated only on the scenes it was fitted to. Text then:
+
+  - the shapes' 3D Sun light (static clouds Task 8 fix round 1; `CLOUD_FAR_ENTRY_TURN` 0.15, `CLOUD_FAR_FLANK_GAIN`
+    0.4 [E]): the volume lights a sample whose Sun path is shorter than its depth below the column's top as through a
+    surface turned toward the Sun (`cloud_entry_cosine`) - a deck's domes under a low Sun were 12-14 % brighter in the
+    converged volume than the slab, broken cumulus (cf 0.4) under a high Sun 15-20 % (their lit flanks); the slab's
+    normal for the Sun's light is turned 0.15 of the way from mu0 to 1 and the Sun's light gains 1 + 0.4 (1 - f) for
+    the column's largest fraction f (fitted to cloud_far_check sections 3 and 6: 0.3 / 0.15 left the broken layer
+    10-11 % dark);
+    lattice of soft squares; the slab heights stay bilinear); the even cover C_v (the beam cover of the largest
+    fraction at the view's cosine) times the sub-grid cover (`cloud_far_cover_ratio`, spec decision 4's deterministic
+    footprint average): the shapes' prefiltered cover - the share of 4 x 8 fixed taps over the pixel's footprint x 2
+    across the view and / mu along it (at most 32 km) above the prefilter threshold of the column's largest fraction,
+    at the mip of the taps' spacing - over that fraction (1 on average: the cover and the water stay the grid's; 1 for
+    a deck), half of it from a second, unaligned reading of the shape (Earth-fixed, turned 37 deg about (1, 2, 3),
+    x 1.37) faded in from 1 to 3 km of footprint (the 32 km tile's period showed as a regular lattice over the hundreds
+    of km of an orbit view), and none beyond 8-16 km footprints (the scaled-space far field's even cover); the cover
+    clamped to 1, the in-cloud depth the even cover's; the radiance the plane-parallel slab's with the shapes' 3D Sun
+    light (below, far field).
+Validation text then (cloud_far_check section 6, one site each):
+
+  of the covered pixels [E]). Section 6 (`--only=column`, fix round 1): the broken layer and the deck from 420 km at
+  nadir / 45 deg, mean radiance of the central square, tolerance 10 %: the column model vs the converged volume
+  0.927 / 0.940 (broken; before fix round 1 0.891 / 0.799) and 0.988 / 1.008 (deck), vs the far tier's shapes (the
+  brightness across the fade) 0.973 / 0.993 and 0.992 / 1.004; no speckle
