@@ -150,6 +150,7 @@ func _check_atmosphere(core: StarsimCore) -> bool:
 	var tsize: Vector2i = loaded["transmittance_size"]
 	_check((loaded["scattering"] as PackedFloat32Array).size() == 4 * size.x * size.y * size.z
 			and (loaded["single_mie"] as PackedFloat32Array).size() == 4 * size.x * size.y * size.z
+			and (loaded["single_rayleigh"] as PackedFloat32Array).size() == 4 * size.x * size.y * size.z
 			and (loaded["transmittance"] as PackedFloat32Array).size() == 4 * tsize.x * tsize.y,
 			"atmosphere table sizes %s, transmittance %s" % [size, tsize])
 	var params: Dictionary = loaded["parameters"]

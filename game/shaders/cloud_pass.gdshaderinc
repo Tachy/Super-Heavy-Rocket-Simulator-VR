@@ -1121,6 +1121,148 @@ void cloud_march(vec3 dir, float scene_m, float jitter, vec3 eclipse_near, vec3 
 	color += behind * (1.0 - shapes) * column_part.rgb;
 }
 
+// ---- Cloud shadows on the air (static clouds Task 9b, ruling 2026-10-27 "Wolkenschatten auf die Luft"). The air
+// light the tables give (atmosphere.gdshaderinc) is the clear sky's: every point of a view ray is lit by the Sun's
+// direct beam. Under and beside clouds that beam is cut: a backlit cumulus is seen through the shadowed haze in front
+// of it, and the gaps of a broken deck at a low Sun send crepuscular rays across the sky. Physics: of the air light
+// only the single scattering of the direct beam (single Rayleigh: atmosphere_single_rayleigh, single Mie:
+// atmosphere_single_mie) is weighted by the beam's cloud transmittance T_c at the scattering point; the multiple
+// scattering (the sky's diffuse light, the deck's glow) is unchanged. The loss along the view ray,
+//     L = sum_i (1 - T_c(p_i)) x [T(x, s_i-1) S1(s_i-1) - T(x, s_i) S1(s_i)] x V(s_i)
+// in Bruneton's difference form per segment (as the eclipse's atm_segmented_scattering: unweighted it telescopes to
+// the plain single-scattering lookup), S1 = S1_R x P_R + S1_M x P_M, V = 1 in front of the clouds' weighted distance
+// and the background's transmittance behind it (the composite dims the scene's air behind a cloud by T; the segment
+// holding that distance split linearly). T_c from the cloud shadow maps (cloud_light.gdshaderinc
+// cloud_shadow_transmittance: the near map's shapes within ~10 km, the far map's grid mean to 130 km, the slanted
+// column beyond), averaged over fixed points of the segment (CLOUD_AIR_SHADOW_SUBSAMPLES): world space, the same for
+// both VR eyes, no jitter (static). The pass's colour carries -L (negative where the air is shadowed); the composite
+// adds it to the scene.
+// Segments [E]: 32 over the part of the ray below CLOUD_TOP_M (no cloud above it shadows the air: the Sun above the
+// point's horizon looks up), at d0 + (d1 - d0) (i / n)^2 - denser near the camera, where the air is densest along a
+// low ray and the near map's shapes lie.
+global uniform sampler3D atmosphere_single_rayleigh : filter_linear, repeat_disable;
+// Fidelity flag (CloudLayer.air_shadow): false keeps the clear sky's air light in front of and between the clouds.
+global uniform bool cloud_air_shadow;
+const int CLOUD_AIR_SHADOW_SEGMENTS = 32;
+// [E] T_c per segment: the mean of this many points spread evenly over it (fixed per pixel) - one midpoint aliased the
+// near map's cloud shadows into regular stripes across the sky (the segment spacing against the shadows' spacing);
+// 3 x 32 points show the rays as 96 segments do, at a third of the table lookups.
+const int CLOUD_AIR_SHADOW_SUBSAMPLES = 3;
+
+// The single scattering (unphased Rayleigh, unphased Mie) at (r, mu, mu_s, nu) (atm_combined_scattering's lookup).
+void cloud_single_scattering(float r, float rho, float mu, float mu_s, float nu, bool ground, out vec3 rayleigh,
+		out vec3 mie) {
+	vec4 uvwz = atm_scattering_uvwz(r, rho, mu, mu_s, nu, ground);
+	float nu_size = atmosphere_scattering_size.x;
+	float tex_coord_x = uvwz.x * (nu_size - 1.0);
+	float tex_x = floor(tex_coord_x);
+	float lerp_nu = tex_coord_x - tex_x;
+	vec3 uvw0 = vec3((tex_x + uvwz.y) / nu_size, uvwz.z, uvwz.w);
+	vec3 uvw1 = vec3((tex_x + 1.0 + uvwz.y) / nu_size, uvwz.z, uvwz.w);
+	rayleigh = mix(textureLod(atmosphere_single_rayleigh, uvw0, 0.0).rgb,
+			textureLod(atmosphere_single_rayleigh, uvw1, 0.0).rgb, lerp_nu);
+	mie = mix(textureLod(atmosphere_single_mie, uvw0, 0.0).rgb, textureLod(atmosphere_single_mie, uvw1, 0.0).rgb,
+			lerp_nu);
+}
+
+// The direct Sun's cloud transmittance at an air point (offset from the camera, Earth-local render axes); inside the
+// near map's range the map alone (cloud_shadow_transmittance's weights there: no column lookup).
+float cloud_air_sun_transmittance(vec3 offset_local, vec3 sun_dir) {
+	vec3 p = atmosphere_camera_hi + atmosphere_camera_lo + offset_local;
+	float height_m = cloud_height_of(p);
+	if (height_m > CLOUD_TOP_M) {
+		return 1.0;
+	}
+	if (cloud_shadow_valid) {
+		vec3 up_c = normalize((atmosphere_camera_hi + atmosphere_camera_lo) * ATM_STRETCH);
+		if (length(offset_local - up_c * dot(offset_local, up_c)) <= cloud_shadow_extent.z) {
+			return cloud_shadow_map_transmittance(cloud_shadow_near, cloud_shadow_near_anchor, cloud_shadow_extent.x,
+					offset_local);
+		}
+	}
+	float mu0 = dot(cloud_geodetic_up(p), sun_dir);
+	return cloud_shadow_transmittance(offset_local, cloud_column_mean_depth(cloud_lat_lon(p), height_m), mu0);
+}
+
+// The air light the clouds' shadows take away along the ray dir from the eye (offset from the camera) up to end_m
+// (render metres: the scene or the ray's end), scene units: front_m the clouds' weighted distance, behind_t the
+// background's transmittance behind them (see above). Zero without clouds in the Sun's way.
+vec3 cloud_air_shadow_loss(CloudRay ray, vec3 dir, vec3 eye, float end_m, float front_m, float behind_t) {
+	if (!cloud_air_shadow || !atmosphere_enabled) {
+		return vec3(0.0);
+	}
+	vec2 top = cloud_sphere_crossing(ray, CLOUD_TOP_M);
+	if (top.x > top.y || top.y <= 0.0) {
+		return vec3(0.0);
+	}
+	float from_m = max(top.x, 0.0);
+	float to_m = min(top.y, end_m);
+	if (to_m <= from_m) {
+		return vec3(0.0);
+	}
+	vec3 sun_dir = normalize(atmosphere_sun_direction);
+	vec3 up;
+	float r;
+	float rho;
+	atm_point_model(eye, up, r, rho);
+	if (r > atmosphere_top_radius_m) {
+		return vec3(0.0);  // the shell lies inside the atmosphere: a camera above it sees the shell's air from below
+	}
+	vec3 v_stretched = dir * ATM_STRETCH;
+	float scale = length(v_stretched);  // model metres per render metre along the ray
+	vec3 v = v_stretched / scale;
+	vec3 sun = normalize(atmosphere_sun_direction * ATM_STRETCH);
+	float mu = atm_clamp_cosine(dot(up, v));
+	float mu_s = atm_clamp_cosine(dot(up, sun));
+	float nu = atm_clamp_cosine(dot(v, sun));
+	bool ground = atm_ray_intersects_ground(r, rho, mu);
+	float R = atmosphere_bottom_radius_m;
+	float phase_r = atm_rayleigh_phase(nu);
+	float phase_m = atm_mie_phase(atmosphere_mie_phase_g, nu);
+	vec3 loss = vec3(0.0);
+	vec3 s_prev = vec3(0.0);
+	vec3 t_prev = vec3(0.0);
+	float prev_m = from_m;
+	float inv_n = 1.0 / float(CLOUD_AIR_SHADOW_SEGMENTS);
+	for (int i = 0; i <= CLOUD_AIR_SHADOW_SEGMENTS; i++) {
+		float f = float(i) * inv_n;
+		float at_m = from_m + (to_m - from_m) * f * f;
+		float d = at_m * scale;
+		float h = clamp(atm_height_along(r, rho, mu, d), 0.0, atmosphere_top_radius_m - R);
+		float r_d = R + h;
+		float mu_d = atm_clamp_cosine((r * mu + d) / r_d);
+		float mu_s_d = atm_clamp_cosine((r * mu_s + d * nu) / r_d);
+		vec3 t_d = d > 0.0 ? atm_transmittance(r, rho, mu, d, ground) : vec3(1.0);
+		vec3 rayleigh;
+		vec3 mie;
+		cloud_single_scattering(r_d, atm_rho_from_height(h), mu_d, mu_s_d, nu, ground, rayleigh, mie);
+		// Bruneton's fade of the single Mie term with the Sun below the horizon (atm_to_point_model).
+		vec3 s_d = rayleigh * phase_r + mie * phase_m * smoothstep(0.0, 0.01, mu_s_d);
+		if (i > 0) {
+			float shadow = 0.0;
+			for (int k = 0; k < CLOUD_AIR_SHADOW_SUBSAMPLES; k++) {
+				float at_k = mix(prev_m, at_m, (float(k) + 0.5) / float(CLOUD_AIR_SHADOW_SUBSAMPLES));
+				shadow += 1.0 - cloud_air_sun_transmittance(eye + dir * at_k, sun_dir);
+			}
+			shadow /= float(CLOUD_AIR_SHADOW_SUBSAMPLES);
+			if (shadow > 0.0) {
+				float mid_m = 0.5 * (prev_m + at_m);
+				// The segment's part in front of the clouds' distance seen directly, the rest through T: linear in
+				// front_m (a step at the midpoint stair-stepped the loss along the clouds' distance contours).
+				float seen = mix(behind_t, 1.0, clamp((front_m - prev_m) / max(at_m - prev_m, 1.0e-3), 0.0, 1.0));
+				if (atmosphere_eclipse_segments > 0) {
+					seen *= atm_sunlit(atmosphere_camera_hi + atmosphere_camera_lo + eye + dir * mid_m);
+				}
+				loss += shadow * seen * max(t_prev * s_prev - t_d * s_d, vec3(0.0));
+			}
+		}
+		s_prev = s_d;
+		t_prev = t_d;
+		prev_m = at_m;
+	}
+	return atm_to_scene(loss);
+}
+
 #ifdef CLOUD_CENTRE
 // The centre view has no depth buffer of its own: its rays take the scene distance from an eye's (VR performance
 // part 2).
@@ -1299,14 +1441,25 @@ void main() {
 		cloud_m = coverage > 1.0e-6 ? weighted_m / coverage : 0.0;
 		vec4 source = centre_alpha >= CLOUD_EDGE_COLOUR_ALPHA_RATIO * alpha ? coarse : opaque_neighbour;
 		float source_alpha = 1.0 - source.a;
-		color = source_alpha > 1.0e-6 ? source.rgb * (alpha / source_alpha) : vec3(0.0);
+		// The images' colour carries the air shadow's -L (cloud_air_shadow_loss): taken off the source before its
+		// colour per alpha is scaled, this pixel's own added back (the loss varies smoothly: the source's ~ this one's).
+		vec3 dir_centre = cloud_ray_earth(centre);
+		vec3 air_loss = cloud_debug_output == 0 ? cloud_air_shadow_loss(cloud_ray(dir_centre), dir_centre,
+				cloud_view.eye_earth.xyz, scene_m, cloud_m > 0.0 ? cloud_m : 1.0e30, transmittance) : vec3(0.0);
+		color = (source_alpha > 1.0e-6 ? (source.rgb + air_loss) * (alpha / source_alpha) : vec3(0.0)) - air_loss;
 #else
-		cloud_march(cloud_ray_earth(centre), scene_m, jitter, cloud_group_eclipse_near, cloud_group_eclipse_far, false,
-				color, alpha, transmittance, cloud_m);
+		vec3 dir_centre = cloud_ray_earth(centre);
+		cloud_march(dir_centre, scene_m, jitter, cloud_group_eclipse_near, cloud_group_eclipse_far, false, color, alpha,
+				transmittance, cloud_m);
+		if (cloud_debug_output == 0) {
+			color -= cloud_air_shadow_loss(cloud_ray(dir_centre), dir_centre, cloud_view.eye_earth.xyz, scene_m,
+					alpha > 1.0e-6 ? cloud_m : 1.0e30, transmittance);
+		}
 #endif
 	}
-	// Half-float range (a lit cloud seen through a dark-adapted eye) and no NaN into the history.
-	color = clamp(color, vec3(0.0), vec3(65000.0));
+	// Half-float range (a lit cloud seen through a dark-adapted eye) and no NaN into the history; negative: the air
+	// shadow's loss (cloud_air_shadow_loss).
+	color = clamp(color, vec3(-65000.0), vec3(65000.0));
 	if (any(isnan(color)) || isnan(transmittance)) {
 		color = vec3(0.0);
 		transmittance = 1.0;
@@ -1485,6 +1638,7 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 	float cloud_weights = 0.0;
 	vec4 best = vec4(0.0, 0.0, 0.0, 1.0);  // no cloud (T 1)
 	float best_error = 1.0e30;
+	vec3 lowest = vec3(0.0);  // the taps' lowest colour below 0 (the air shadow's loss): the lobes' undershoot floor
 	for (int j = 0; j <= 3; j++) {
 		for (int i = 0; i <= 3; i++) {
 			ivec2 q = clamp(base + ivec2(i, j), ivec2(0), low - 1);
@@ -1501,6 +1655,7 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 			sum_alpha += w * (1.0 - c.a);
 			weights += w;
 			if (tent > 0.0) {
+				lowest = min(lowest, c.rgb);
 				sum_positive += w * c;
 				sum_alpha_positive += w * (1.0 - c.a);
 				weights_positive += w;
@@ -1528,12 +1683,13 @@ vec4 cloud_tent_gather(vec2 position, float scene_m, float radius, out float clo
 		sum_alpha = sum_alpha_positive;
 		weights = weights_positive;
 	}
-	// The Catmull-Rom lobes can over- / undershoot: premultiplied colour >= 0, T in [0, 1].
+	// The Catmull-Rom lobes can over- / undershoot: premultiplied colour >= the lowest tap's (0 without air shadow),
+	// T in [0, 1].
 	vec4 result = weights > 1.0e-4 ? sum / weights : best;
 	if (weights > 1.0e-4 && result.a >= 0.5) {
 		result.a = 1.0 - sum_alpha / weights;
 	}
-	return vec4(max(result.rgb, vec3(0.0)), clamp(result.a, 0.0, 1.0));
+	return vec4(max(result.rgb, lowest), clamp(result.a, 0.0, 1.0));
 }
 
 void main() {

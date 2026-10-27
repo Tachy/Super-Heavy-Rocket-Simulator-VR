@@ -16,7 +16,8 @@
 # outlier pixels (luminance or alpha off the median of their 7-pixel row window by more than DOT_DEVIATION of it and off
 # both row neighbours) within HORIZON_ROWS of the horizon (per column, the rays against the site's sphere) at most
 # DOT_FACTOR x the rows' own density HORIZON_REFERENCE_ROWS away, + DOT_ALLOWANCE.
-# With the preset the cloud image of the next frame is bit-identical
+# With the preset the cloud image of the next frame is bit-identical, checked with the clouds' shadows on the air off
+# (static clouds Task 9b: that loss is integrated to the scene and follows the sea's waves)
 # (static clouds; render_check's repeat_identical compares the whole frame, whose sea differs between frames at the Cape
 # without any cloud change).
 # Needs a GPU (no --headless): godot --xr-mode off --path game --script res://tests/cloud_grain_check.gd
@@ -118,11 +119,21 @@ func _run() -> void:
 		if not await _settle():
 			_fail_and_quit("%s: the scene did not settle" % name)
 			return
+		# The march's determinism without the clouds' shadows on the air (static clouds Task 9b): that loss is
+		# integrated to the scene, and the sea's waves move it (measured at the Cape: ~2500 sea pixels by < 3e-5).
+		_world.clouds.air_shadow = false
+		await process_frame
+		await process_frame
 		var first := _world.clouds.effect.output.get_layer_data(0)
 		await process_frame
 		var second := _world.clouds.effect.output.get_layer_data(0)
-		_check("%s: the cloud image of the next frame bit-identical" % name,
-				first != null and second != null and first.get_data() == second.get_data(), "")
+		_world.clouds.air_shadow = true
+		_check("%s: the cloud image of the next frame bit-identical (air shadow off)" % name,
+				first != null and second != null and first.get_data() == second.get_data(),
+				_differing_pixels(first, second))
+		await process_frame
+		await process_frame
+		first = _world.clouds.effect.output.get_layer_data(0)
 		if view.get("horizon", false) and first != null:
 			_horizon_dots(name, first, view)
 		if _save_dir != "" and first != null:
@@ -339,3 +350,24 @@ class _Picture:
 		if count == 0 or sum_ref <= 0.0:
 			return 0.0
 		return sqrt(sum_sq / count) / (sum_ref / count)
+
+
+## The differing pixels of two images of one size (the bit-identity check's detail): count, the largest RGBA change.
+static func _differing_pixels(a: Image, b: Image) -> String:
+	if a == null or b == null or a.get_size() != b.get_size():
+		return "images missing or of different sizes"
+	var count := 0
+	var largest := 0.0
+	var at := Vector2i(-1, -1)
+	var box := Rect2i()
+	for y in range(a.get_height()):
+		for x in range(a.get_width()):
+			var d := a.get_pixel(x, y) - b.get_pixel(x, y)
+			var m := maxf(maxf(absf(d.r), absf(d.g)), maxf(absf(d.b), absf(d.a)))
+			if m > 0.0:
+				count += 1
+				box = Rect2i(x, y, 1, 1) if count == 1 else box.expand(Vector2i(x, y))
+				if m > largest:
+					largest = m
+					at = Vector2i(x, y)
+	return "%d pixels differ, largest %s at %s, within %s of %s" % [count, largest, at, box, a.get_size()]

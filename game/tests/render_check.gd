@@ -29,7 +29,8 @@
 #          --repeat_identical[=2] once settled and the light cache complete compares that many consecutive frames of
 #          the unchanged scene (no history reset): any differing pixel fails (exit code 1; the deterministic march,
 #          static clouds Task 3). --jittered_march: the jittered march with temporal accumulation (the flag
-#          CloudLayer.deterministic_march off).
+#          CloudLayer.deterministic_march off). --no_air_shadow: the clouds' shadows on the air off (the flag
+#          CloudLayer.air_shadow).
 # Refraction: on as in the game; --no_refraction draws Sun, Moon and stars at their geometric directions.
 #          --look_at_sun aims a ground view at the (true) Sun; with --away_from_sun the opposite azimuth.
 # Sun through a deck: --sun_through_deck=<vertical tau> (with --lat / --lon and --utc): a uniform slab 1-2 km of that
@@ -99,6 +100,8 @@ func _process(_delta: float) -> bool:
 			world.clouds.light_cache_enabled = false
 		if _args.has("jittered_march"):  # the fidelity flag (CloudLayer.deterministic_march)
 			world.clouds.deterministic_march = false
+		if _args.has("no_air_shadow"):  # the fidelity flag (CloudLayer.air_shadow)
+			world.clouds.air_shadow = false
 		if _args.has("cloud_scattering"):  # the fidelity flag (CloudLayer.ScatteringModel)
 			world.clouds.scattering_model = CloudLayer.ScatteringModel.CLOSED_FORM \
 					if _args["cloud_scattering"] == "closed" else CloudLayer.ScatteringModel.TABLE
@@ -201,7 +204,10 @@ func _process(_delta: float) -> bool:
 		print("render_check: night vision: twilight glow %s cd/m^2, scotopic %s cd/m^2, rod scale %s, moonlight %s of the Sun (%s), vehicle Moon light %s, brightness %.4f, chroma %.4f" % [
 				a.last_adaptation_glow_cd_m2, a.scotopic_cd_m2, a.rod_scale, a.moonlight_relative_value, "on" if a.moonlight_active else "off",
 				world.moon_light.light_energy if world.moon_light.visible else 0.0, a.brightness, a.chroma])
-		var out: String = _args.get("out", "user://render_check.png")
+		# Default: <repo>/screenshots/ (git-ignored; every test image goes there, user 2026-10-27).
+		var out: String = _args.get("out", ProjectSettings.globalize_path("res://").path_join(
+				"../screenshots/render_check.png").simplify_path())
+		DirAccess.make_dir_recursive_absolute(out.get_base_dir())
 		var error := root.get_viewport().get_texture().get_image().save_png(out)
 		print("render_check: saved %s (error %d)" % [out, error])
 		if _repeat_failed:

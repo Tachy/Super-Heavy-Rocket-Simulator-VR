@@ -109,6 +109,10 @@ atmosphere_single_mie={
 "type": "sampler3D",
 "value": ""
 }
+atmosphere_single_rayleigh={
+"type": "sampler3D",
+"value": ""
+}
 atmosphere_irradiance={
 "type": "sampler2D",
 "value": ""
@@ -534,6 +538,10 @@ cloud_light_cache_enabled={
 "value": true
 }
 cloud_deterministic_march={
+"type": "bool",
+"value": true
+}
+cloud_air_shadow={
 "type": "bool",
 "value": true
 }

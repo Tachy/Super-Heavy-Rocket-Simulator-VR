@@ -9,6 +9,7 @@ seed.
 
     python tools/validation/cloud_slab_monte_carlo.py [photons]            # R and T (hemispheric)
     python tools/validation/cloud_slab_monte_carlo.py --radiance [photons] > tests/validation/weather/cloud_slab_radiance_mc.csv
+    python tools/validation/cloud_slab_monte_carlo.py --transmitted [photons] > tests/validation/weather/cloud_slab_transmitted_mc.csv
     python tools/validation/cloud_slab_monte_carlo.py --albedo [photons] > tests/validation/weather/cloud_slab_albedo_mc.csv
     python -I tools/validation/cloud_slab_monte_carlo.py --table-runs <run dir> [workers]     # 16 x 27 slabs, ~30 min / 24
     python -I tools/validation/cloud_slab_monte_carlo.py --table-build <run dir> config/clouds/cloud_transfer_table.bin \
@@ -43,6 +44,9 @@ REL_AZIMUTHS_DEG = (0.0, 90.0, 180.0)
 ZENITH_HALF_WIDTH_DEG = 5.0
 ZENITH_CAP_DEG = 8.0
 AZIMUTH_HALF_WIDTH_DEG = 15.0
+# --transmitted (static clouds Task 9b, the backlit slab): the Sun 15 deg (t9f_edge's) and 45 deg up, thick slabs.
+TRANSMITTED_SUN_ZENITHS_DEG = (75.0, 45.0)
+TRANSMITTED_TAUS = (10, 30)
 
 
 def sample_hg(g, n, rng=RNG):
@@ -87,9 +91,9 @@ def rotate(ux, uy, uz, ct, rng=RNG):
     return nx, ny, nz
 
 
-def slab(tau, mu0, n, diffuse=False, escapes=None):
+def slab(tau, mu0, n, diffuse=False, escapes=None, transmits=None):
     """Reflected and transmitted fractions; z = optical depth below the top, uz > 0 downward. The Sun's beam travels
-    toward +x. escapes (a list) collects the directions (ux, uy, uz) of the reflected photons."""
+    toward +x. escapes / transmits (lists) collect the directions (ux, uy, uz) of the reflected / transmitted photons."""
     uz = np.sqrt(RNG.random(n)) if diffuse else np.full(n, mu0)
     ux, uy, z = np.sqrt(1 - uz * uz), np.zeros(n), np.zeros(n)
     reflected = transmitted = 0
@@ -100,24 +104,31 @@ def slab(tau, mu0, n, diffuse=False, escapes=None):
         transmitted += down.sum()
         if escapes is not None:
             escapes.append((ux[up], uy[up], uz[up]))
+        if transmits is not None:
+            transmits.append((ux[down], uy[down], uz[down]))
         keep = ~(up | down)
         z, ux, uy, uz = z[keep], ux[keep], uy[keep], uz[keep]
         ux, uy, uz = rotate(ux, uy, uz, sample_cos(z.size))
     return reflected / n, transmitted / n
 
 
-def radiance_bins(tau, mu0, n, batch=500000):
-    """Bin-averaged reflected radiance [1/sr] per unit Sun irradiance: list of (zenith, azimuth, L, rel_sigma, count)."""
+def radiance_bins(tau, mu0, n, batch=500000, transmitted=False):
+    """Bin-averaged reflected (transmitted: below the slab) radiance [1/sr] per unit Sun irradiance: list of (zenith,
+    azimuth, L, rel_sigma, count). Transmitted: the zenith angle of the looking direction (up), azimuth 0 = looking
+    toward the Sun's side; the unscattered beam is in no bin (the Sun is more than a bin's width from every bin)."""
     counts = {}
     done = 0
     while done < n:
         m = min(batch, n - done)
         escapes = []
-        slab(tau, mu0, m, escapes=escapes)
+        if transmitted:
+            slab(tau, mu0, m, transmits=escapes)
+        else:
+            slab(tau, mu0, m, escapes=escapes)
         ux = np.concatenate([e[0] for e in escapes])
         uy = np.concatenate([e[1] for e in escapes])
         uz = np.concatenate([e[2] for e in escapes])
-        zen = np.degrees(np.arccos(np.clip(-uz, -1, 1)))
+        zen = np.degrees(np.arccos(np.clip(uz if transmitted else -uz, -1, 1)))
         azi = np.degrees(np.arctan2(np.abs(uy), ux))
         for vz in VIEW_ZENITHS_DEG:
             for va in REL_AZIMUTHS_DEG if vz > 0 else (0.0,):
@@ -454,6 +465,19 @@ def main():
             mu0 = np.cos(np.radians(sun_zenith))
             for tau in (1, 10, 30):
                 for vz, va, rad, sig, k in radiance_bins(tau, mu0, n):
+                    print(f"{sun_zenith:.0f},{tau},{vz:.0f},{va:.0f},{rad:.6f},{sig:.4f},{k}", flush=True)
+        return
+    if "--transmitted" in sys.argv:
+        n = int(args[0]) if args else 4000000
+        print("# Transmitted radiance below a conservative cloud slab (black surface), Monte Carlo, "
+              "tools/validation/cloud_slab_monte_carlo.py --transmitted " + str(n))
+        print("# Per unit Sun irradiance normal to the beam [1/sr], bin-averaged; view zenith = the looking direction's "
+              "(up), rel. azimuth 0 = looking toward the Sun's side. rel_sigma = 1/sqrt(count).")
+        print("sun_zenith_deg,optical_depth,view_zenith_deg,rel_azimuth_deg,radiance_per_sr,rel_sigma,count")
+        for sun_zenith in TRANSMITTED_SUN_ZENITHS_DEG:
+            mu0 = np.cos(np.radians(sun_zenith))
+            for tau in TRANSMITTED_TAUS:
+                for vz, va, rad, sig, k in radiance_bins(tau, mu0, n, transmitted=True):
                     print(f"{sun_zenith:.0f},{tau},{vz:.0f},{va:.0f},{rad:.6f},{sig:.4f},{k}", flush=True)
         return
     n = int(args[0]) if args else 100000

@@ -71,6 +71,16 @@
 #      (the plane-parallel bias of the drawn inhomogeneity, Cahalan et al. 1994), brighter than the cloudless terrain
 #      while its expected radiance is, the aureole (the Sun's scattered radiance beside the disk) at least 100 x that
 #      60 deg away; the near march, and the far tier alone for tau 5 / 20 (STARSIM_SUN_ONLY=1 runs this alone).
+#  14. (static clouds Task 9b) the backlit slab (tau 10 / 30, Sun zenith 75 / 45 deg) seen from below: the
+#      transmitted radiance (debug output 2, bin means) vs the Monte Carlo fixture cloud_slab_transmitted_mc.csv within
+#      7 % (the light cache filled first); the clouds' shadows
+#      on the air: a backlit cumulus (cf 0.5, in-cloud tau 50 in 1-2 km,
+#      the Sun 15 deg up, looking at it; HDR luminance, pixels classed by the cloud image's T: sky T > 0.999, body
+#      T < 1e-6, rim 0.1-0.8) - the body's median below the sky's at the same angle from the Sun and the rim's p90
+#      2-4 x the body's median within 15 deg of the Sun; crepuscular rays under a broken deck (cf 0.4) at a 4-deg Sun,
+#      toward and away from the Sun: the sky's luminance with / without the air shadow per column (azimuth) varies by
+#      >= 2 % (away: 1 %) along the band; the clear sky (above the deck looking up, a cloudless field) within 0.5 %
+#      (STARSIM_AIR_ONLY=1 runs this alone).
 # The other sections run with the light cache on and the deterministic march (the game's path; 10 with the jittered
 # one: it measures against independent jitter's noise). Detail
 # levels off for the numbers (cloud_detail_levels 0); the desktop quality preset. Exit code 1 on failure.
@@ -108,7 +118,7 @@ const CLIMB_STEP_LIMIT := 0.055
 const COVERAGE_TOLERANCE := 0.02
 ## Transmittance and radiance samples: the mean of the 5 x 5 pixels around the centre (see _render).
 const BLOCK_RADIUS := 2
-const EXPECTED_SAMPLES := 138 + SUN_SAMPLES
+const EXPECTED_SAMPLES := 138 + SUN_SAMPLES + AIR_SAMPLES
 ## Occluders: one inside the slab at a known distance (depth -> distance), one near "mountain" over half the view.
 const OCCLUDER_DISTANCE_M := 2000.0
 const OCCLUDER_SIZE_M := 1000.0
@@ -253,6 +263,39 @@ const SILHOUETTE_REFERENCE_STEPS := 512
 const SILHOUETTE_REFERENCE_FRAMES := 16
 const SILHOUETTE_MIN_CONTOUR := 24  ## reference contour pixels in view (cloud edges are seen)
 const SILHOUETTE_SEARCH := 8  ## full-resolution pixels searched for the reference's contour
+# Section 14 (static clouds Task 9b): the clouds' shadows on the air.
+const AIR_VIEW_SIZE := Vector2i(320, 180)
+const AIR_FOV_DEG := 40.0
+const AIR_CUMULUS_FRACTION := 0.5
+const AIR_CUMULUS_TAU := 50.0  ## in-cloud vertical tau over the 1 km slab (fair cumulus, extinction 50 /km)
+const AIR_BACKLIT_ELEVATION_DEG := 15.0  ## t9f_edge's Sun
+const AIR_MIN_ELEVATION_DEG := 2.0  ## pixels this far above the horizon
+const AIR_BANDS_DEG := [Vector2(2.0, 6.0), Vector2(6.0, 10.0), Vector2(10.0, 15.0)]  ## angle from the Sun
+const AIR_SKY_T := 0.999
+const AIR_BODY_T := 1.0e-6  ## slant tau > 14
+const AIR_RIM_T := Vector2(0.1, 0.8)
+const AIR_RIM_RATIO := Vector2(2.0, 4.0)  ## cloud-visual-reference.md (3): the backlit rim 2-4 x the body
+const AIR_BROKEN_FRACTION := 0.4
+const AIR_RAYS_SUN_ELEVATION_DEG := 4.0
+const AIR_RAYS_VIEW_ELEVATION_DEG := 12.0
+const AIR_RAYS_MIN_PIXELS := 8  ## sky pixels a column needs to count
+const AIR_RAYS_MIN_COLUMNS := 40
+const AIR_RAYS_MIN_MODULATION := 0.02  ## [E] (p90 - p10) / p50 of the on / off ratio: rays seen (> ~2 % contrast)
+## [E] Away from the Sun the shadowed part is the single Rayleigh (and the aerosol's weak backscatter): the
+## anti-crepuscular rays are fainter (measured 1.9 %).
+const AIR_RAYS_MIN_MODULATION_AWAY := 0.01
+const AIR_CLEAR_TOLERANCE := 0.005  ## the ruling's 0.5 %
+## The backlit slab against the Monte Carlo transmitted radiance (section 14's first part).
+const SLAB_TR_TAUS := [10.0, 30.0]
+const SLAB_TR_SUN_ZENITHS_DEG := [75.0, 45.0]
+## (view zenith, relative azimuth: 0 = looking toward the Sun's side) - the fixture's bins
+const SLAB_TR_BINS := [[0.0, 0.0], [30.0, 0.0], [30.0, 180.0], [60.0, 0.0], [60.0, 90.0], [60.0, 180.0]]
+## [E] Measured with the light cache filled 0.1-4.9 % (Task 9b, Monte Carlo sigma 0.3-0.7 %); the measurement round's
+## +21..+39 % at view zenith 60 toward the Sun came from a view the cache had not filled yet.
+const SLAB_TR_TOLERANCE := 0.07
+const SLAB_TR_VIEW_SIZE := 161
+const SLAB_TR_FOV_DEG := 44.0
+const AIR_SAMPLES := 2 * 2 + 2 * 3 + 2 + 2
 
 var _core := StarsimCore.new()
 var _atmosphere := Atmosphere.new()
@@ -330,6 +373,16 @@ func _run() -> void:
 		for f in _files:
 			DirAccess.remove_absolute(f)
 		print("cloud_check (light cache only): %d failures" % _failures)
+		quit(1 if _failures > 0 else 0)
+		return
+	if OS.get_environment("STARSIM_AIR_ONLY") != "":  # diagnostics: section 14 alone (no sample count)
+		if OS.get_environment("STARSIM_AIR_NO_SLAB") == "":
+			await _slab_transmitted_samples()
+		await _air_shadow_samples()
+		_clouds.shutdown()
+		for f in _files:
+			DirAccess.remove_absolute(f)
+		print("cloud_check (air shadow only): %d failures" % _failures)
 		quit(1 if _failures > 0 else 0)
 		return
 	if OS.get_environment("STARSIM_SUN_ONLY") != "":  # diagnostics: section 13 alone (no sample count)
@@ -451,6 +504,9 @@ func _run() -> void:
 	await _lcl_base_samples()
 	# 13. The Sun through the decks.
 	await _sun_through_samples()
+	# 14. The backlit slab vs Monte Carlo; the clouds' shadows on the air.
+	await _slab_transmitted_samples()
+	await _air_shadow_samples()
 
 	for f in _files:
 		DirAccess.remove_absolute(f)
@@ -1965,3 +2021,211 @@ func _sun_disk_expected(camera_itrf_m: Vector3, sun_itrf: Vector3) -> Vector3:
 	var gain := float(ShaderGlobals.value(&"atmosphere_exposure_gain"))
 	var transmittance: Vector3 = _core.atmosphere_sun_transmittance(camera_itrf_m, sun_itrf)
 	return World.sun_disc_scene_value() * gain * solar / solar.dot(Vector3(0.2126, 0.7152, 0.0722)) * transmittance
+
+
+## Section 14 (static clouds Task 9b): the clouds' shadows on the air (cloud_pass.gdshaderinc cloud_air_shadow_loss).
+## HDR luminance of the full view (linear tone map, exposure 1), pixels classed by the cloud image's T.
+func _air_shadow_samples() -> void:
+	var size := AIR_VIEW_SIZE
+	_viewport.size = size
+	_camera.fov = AIR_FOV_DEG
+	var up := _local_direction(90.0, 0.0)
+	var up_render := Frames.to_render(_earth_to_gcrf * up).normalized()
+	# The backlit cumulus (the t9b setup): cf 0.5, in-cloud vertical tau 50 in 1-2 km, the Sun 15 deg up ahead.
+	var fraction := AIR_CUMULUS_FRACTION
+	var cumulus := _slab("air_cu", SLAB_BOTTOM_M, SLAB_TOP_M,
+			fraction * AIR_CUMULUS_TAU / 150.0 / (SLAB_TOP_M - SLAB_BOTTOM_M), fraction)
+	_show(cumulus)
+	var sun := _local_direction(AIR_BACKLIT_ELEVATION_DEG, 0.0)
+	var sun_render := Frames.to_render(_earth_to_gcrf * sun).normalized()
+	var images := {}
+	await _render(_point(10.0), sun, sun, 0)  # settles the light cache and the shadow maps for the first image
+	for on in [false, true]:
+		_clouds.air_shadow = on
+		await _render(_point(10.0), sun, sun, 0)
+		images[on] = [_viewport.get_texture().get_image(), _clouds.effect.output.get_layer_data(0)]
+	_clouds.air_shadow = true
+	for b in range(AIR_BANDS_DEG.size()):
+		var band: Vector2 = AIR_BANDS_DEG[b]
+		var stats := {}
+		for on in [false, true]:
+			var full: Image = images[on][0]
+			var t_image: Image = images[on][1]
+			var sky: Array[float] = []
+			var body: Array[float] = []
+			var rim: Array[float] = []
+			for y in range(size.y):
+				for x in range(size.x):
+					var ray := _camera.project_ray_normal(Vector2(x + 0.5, y + 0.5))
+					if ray.dot(up_render) < sin(deg_to_rad(AIR_MIN_ELEVATION_DEG)):
+						continue
+					var angle := rad_to_deg(acos(clampf(ray.dot(sun_render), -1.0, 1.0)))
+					if angle < band.x or angle >= band.y:
+						continue
+					var t := t_image.get_pixel(int(float(x) * t_image.get_width() / size.x),
+							int(float(y) * t_image.get_height() / size.y)).a
+					var c := full.get_pixel(x, y)
+					var lum := _luminance(Vector3(c.r, c.g, c.b))
+					if t > AIR_SKY_T:
+						sky.append(lum)
+					elif t < AIR_BODY_T:
+						body.append(lum)
+					elif t > AIR_RIM_T.x and t < AIR_RIM_T.y:
+						rim.append(lum)
+			for a in [sky, body, rim]:
+				a.sort()
+			stats[on] = [_pct(sky, 0.5), _pct(body, 0.5), _pct(rim, 0.9), sky.size(), body.size(), rim.size()]
+		var s: Array = stats[true]
+		var o: Array = stats[false]
+		var detail := "sky %.3f body %.3f rim p90 %.3f (n %d / %d / %d) | air shadow off: sky %.3f body %.3f rim %.3f" % [
+				s[0], s[1], s[2], s[3], s[4], s[5], o[0], o[1], o[2]]
+		_check("air shadow: backlit body below the sky %.0f-%.0f deg from the Sun" % [band.x, band.y],
+				s[4] > 0 and s[3] > 0 and s[1] < s[0], detail + " body / sky %.2f" % (s[1] / maxf(s[0], 1e-9)))
+		var rim_ratio := float(s[2]) / maxf(s[1], 1e-9)
+		_check("air shadow: backlit rim %.1f-%.1f x the body %.0f-%.0f deg from the Sun" % [AIR_RIM_RATIO.x,
+				AIR_RIM_RATIO.y, band.x, band.y], s[5] > 0 and rim_ratio >= AIR_RIM_RATIO.x
+				and rim_ratio <= AIR_RIM_RATIO.y, "rim / body %.2f (off %.2f)" % [rim_ratio,
+				float(o[2]) / maxf(o[1], 1e-9)])
+	# Crepuscular rays: the broken deck under a low Sun, the sky between the clouds toward and away from the Sun;
+	# the ratio air shadow on / off per azimuth bin along the elevation band (the sky's own gradient divides out).
+	var broken := _slab("air_broken", SLAB_BOTTOM_M, SLAB_TOP_M,
+			AIR_BROKEN_FRACTION * AIR_CUMULUS_TAU / 150.0 / (SLAB_TOP_M - SLAB_BOTTOM_M), AIR_BROKEN_FRACTION)
+	_show(broken)
+	var low_sun := _local_direction(AIR_RAYS_SUN_ELEVATION_DEG, 0.0)
+	for toward in [true, false]:
+		var view := _local_direction(AIR_RAYS_VIEW_ELEVATION_DEG, 0.0 if toward else 180.0)
+		var pair := {}
+		for on in [false, true]:
+			_clouds.air_shadow = on
+			await _render(_point(10.0), view, low_sun, 0)
+			pair[on] = [_viewport.get_texture().get_image(), _clouds.effect.output.get_layer_data(0)]
+		_clouds.air_shadow = true
+		var sums := PackedFloat64Array()
+		var counts := PackedInt32Array()
+		sums.resize(size.x)
+		counts.resize(size.x)
+		var t_image: Image = pair[true][1]
+		for y in range(size.y):
+			for x in range(size.x):
+				var t := t_image.get_pixel(int(float(x) * t_image.get_width() / size.x),
+						int(float(y) * t_image.get_height() / size.y)).a
+				if t < AIR_SKY_T:
+					continue
+				var c_on: Color = pair[true][0].get_pixel(x, y)
+				var c_off: Color = pair[false][0].get_pixel(x, y)
+				var off := _luminance(Vector3(c_off.r, c_off.g, c_off.b))
+				if off <= 0.0:
+					continue
+				sums[x] += _luminance(Vector3(c_on.r, c_on.g, c_on.b)) / off
+				counts[x] += 1
+		var ratios: Array[float] = []
+		for x in range(size.x):
+			if counts[x] >= AIR_RAYS_MIN_PIXELS:
+				ratios.append(sums[x] / counts[x])
+		ratios.sort()
+		var modulation := (_pct(ratios, 0.9) - _pct(ratios, 0.1)) / maxf(_pct(ratios, 0.5), 1e-9)
+		_check("air shadow: crepuscular rays %s the Sun (%.0f deg up, deck cf %.1f)" % ["toward" if toward else
+				"away from", AIR_RAYS_SUN_ELEVATION_DEG, AIR_BROKEN_FRACTION], ratios.size() >= AIR_RAYS_MIN_COLUMNS
+				and modulation >= (AIR_RAYS_MIN_MODULATION if toward else AIR_RAYS_MIN_MODULATION_AWAY),
+				"on / off p10 %.3f p50 %.3f p90 %.3f over %d columns: modulation %.3f"
+				% [_pct(ratios, 0.1), _pct(ratios, 0.5), _pct(ratios, 0.9), ratios.size(), modulation])
+	# Clear sky unchanged: above the deck looking up (no cloud in the Sun's way of that air), and a cloudless field.
+	var clear_views := [["above the deck, looking up", broken, 3000.0, _local_direction(30.0, 30.0)],
+			["no cloud", _slab("air_clear", SLAB_BOTTOM_M, SLAB_TOP_M, 0.0, 0.0), 10.0, _local_direction(10.0, 20.0)]]
+	for v in clear_views:
+		_show(v[1])
+		var lums := {}
+		for on in [false, true]:
+			_clouds.air_shadow = on
+			await _render(_point(v[2]), v[3], low_sun, 0)
+			var image := _viewport.get_texture().get_image()
+			var total := 0.0
+			for y in range(size.y):
+				for x in range(size.x):
+					var c := image.get_pixel(x, y)
+					total += _luminance(Vector3(c.r, c.g, c.b))
+			lums[on] = total
+		_clouds.air_shadow = true
+		var change := absf(lums[true] - lums[false]) / maxf(lums[false], 1e-9)
+		_check("air shadow: clear sky unchanged (%s)" % v[0], change <= AIR_CLEAR_TOLERANCE,
+				"%.4f %% of the view's luminance" % (change * 100.0))
+	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
+	_camera.fov = 10.0
+
+
+static func _pct(a: Array[float], q: float) -> float:
+	return a[int(q * (a.size() - 1))] if a.size() > 0 else -1.0
+
+
+## Section 14, first part: the backlit slab's transmitted radiance (debug output 2: the grid mean's Sun source per unit
+## irradiance, seen from below) against the Monte Carlo fixture (tests/validation/weather/cloud_slab_transmitted_mc.csv,
+## tools/validation/cloud_slab_monte_carlo.py --transmitted: bin means; GPU likewise averaged over each bin).
+func _slab_transmitted_samples() -> void:
+	var rows := {}
+	var file := FileAccess.open(ProjectSettings.globalize_path("res://").path_join(
+			"../tests/validation/weather/cloud_slab_transmitted_mc.csv").simplify_path(), FileAccess.READ)
+	if file == null:
+		_check("slab transmitted radiance: fixture", false, "cloud_slab_transmitted_mc.csv missing")
+		return
+	while not file.eof_reached():
+		var line := file.get_line()
+		if line.begins_with("#") or line.begins_with("sun") or line.strip_edges() == "":
+			continue
+		var f := line.split(",")
+		rows["%s|%s|%s|%s" % [f[0], f[1], f[2], f[3]]] = float(f[4])
+	var up := _local_direction(90.0, 0.0)
+	# Diagnostics: STARSIM_SLAB_NO_CACHE=1 measures the per-sample light march (the cache's fidelity flag off).
+	_clouds.light_cache_enabled = OS.get_environment("STARSIM_SLAB_NO_CACHE") == ""
+	for tau_v in SLAB_TR_TAUS:
+		var slab := _slab("transmitted_%d" % int(tau_v), SLAB_BOTTOM_M, SLAB_TOP_M,
+				tau_v / 150.0 / (SLAB_TOP_M - SLAB_BOTTOM_M), 1.0)
+		_show(slab)
+		var tau := -log(float(_core.weather_cloud_light(_point(10.0), up)["sun_transmittance"]))
+		for sz in SLAB_TR_SUN_ZENITHS_DEG:
+			var worst := 0.0
+			var detail := ""
+			for c in SLAB_TR_BINS:
+				var view := _local_direction(90.0 - c[0], 0.0)
+				var sun := _local_direction(90.0 - sz, c[1])
+				var binned := await _bin_mean(view, sun, c[0], c[1])
+				var expected: float = rows["%d|%d|%d|%d" % [int(sz), int(tau_v), int(c[0]), int(c[1])]]
+				var error := binned / expected - 1.0
+				detail += " %d/%d %+.1f %%" % [c[0], c[1], error * 100.0]
+				worst = maxf(worst, absf(error))
+			_check("slab transmitted radiance vs Monte Carlo: tau %.1f, Sun zenith %.0f deg" % [tau, sz],
+					worst <= SLAB_TR_TOLERANCE, "view zenith / azimuth:%s" % detail)
+	_clouds.light_cache_enabled = true
+	_viewport.size = Vector2i(VIEW_SIZE, VIEW_SIZE)
+	_camera.fov = 10.0
+
+
+## The cos-weighted mean of debug output 2 over the Monte Carlo bin (view zenith +-5 deg, relative azimuth +-15 deg;
+## the zenith bin 0..8 deg), in a 161^2 view of 44 deg around its centre.
+func _bin_mean(view: Vector3, sun: Vector3, vz: float, va: float) -> float:
+	var size := SLAB_TR_VIEW_SIZE
+	_viewport.size = Vector2i(size, size)
+	_camera.fov = SLAB_TR_FOV_DEG
+	await _settle_cache(_point(10.0), view, sun, 2)  # the light cache filled for this Sun (no march fallback)
+	await _render(_point(10.0), view, sun, 2)
+	var image := _viewport.get_texture().get_image()
+	var up := Frames.to_render(_earth_to_gcrf * _local_direction(90.0, 0.0)).normalized()
+	var north := Frames.to_render(_earth_to_gcrf * _local_direction(0.0, 0.0)).normalized()
+	var east := Frames.to_render(_earth_to_gcrf * _local_direction(0.0, 90.0)).normalized()
+	var sun_r := Frames.to_render(_earth_to_gcrf * sun).normalized()
+	var sun_az := atan2(sun_r.dot(east), sun_r.dot(north))
+	var axis := Frames.to_render(_earth_to_gcrf * view).normalized()
+	var sum := 0.0
+	var weight := 0.0
+	for y in range(size):
+		for x in range(size):
+			var ray := _camera.project_ray_normal(Vector2(x + 0.5, y + 0.5))
+			var zen := rad_to_deg(acos(clampf(ray.dot(up), -1.0, 1.0)))
+			var az := absf(rad_to_deg(wrapf(atan2(ray.dot(east), ray.dot(north)) - sun_az, -PI, PI)))
+			var inside := zen <= 8.0 if vz == 0.0 else (absf(zen - vz) <= 5.0 and absf(az - va) <= 15.0)
+			if not inside:
+				continue
+			var c := ray.dot(axis)
+			var w := cos(deg_to_rad(zen)) * c * c * c  # the solid angle per pixel ~ cos^3 off the axis
+			sum += w * image.get_pixel(x, y).r
+			weight += w
+	return sum / weight if weight > 0.0 else -1.0

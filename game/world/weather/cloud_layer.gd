@@ -159,6 +159,14 @@ var far_3d_light := true:
 	set(value):
 		far_3d_light = value
 		ShaderGlobals.set_value(&"cloud_far_3d_light", value)
+## Fidelity flag (shader global cloud_air_shadow; static clouds Task 9b): the clouds' shadows on the air - the single
+## scattering of the Sun's direct beam along the view ray weighted by its cloud transmittance from the shadow maps
+## (cloud_pass.gdshaderinc cloud_air_shadow_loss: shadowed haze before backlit clouds, crepuscular rays); false: the
+## clear sky's air light everywhere.
+var air_shadow := true:
+	set(value):
+		air_shadow = value
+		ShaderGlobals.set_value(&"cloud_air_shadow", value)
 
 var _core: StarsimCore
 var _quad := MeshInstance3D.new()
@@ -236,6 +244,7 @@ func setup(core: StarsimCore) -> void:
 	ShaderGlobals.set_value(&"cloud_light_cache_enabled", light_cache_enabled)
 	ShaderGlobals.set_value(&"cloud_deterministic_march", deterministic_march)
 	ShaderGlobals.set_value(&"cloud_far_3d_light", far_3d_light)
+	ShaderGlobals.set_value(&"cloud_air_shadow", air_shadow)
 	ShaderGlobals.set_value(&"cloud_shadow_near", shadow_effect.near_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_far", shadow_effect.far_texture)
 	ShaderGlobals.set_value(&"cloud_shadow_extent", Vector4(SHADOW_NEAR_HALF_M, SHADOW_FAR_HALF_M,

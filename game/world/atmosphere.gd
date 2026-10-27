@@ -1040,7 +1040,8 @@ func _load_task(config_dir: String, cache_dir: String) -> void:
 		result["irradiance_image"] = _image_2d(result["irradiance"], i_size)
 		result["scattering_images"] = _images_3d(result["scattering"], s_size)
 		result["single_mie_images"] = _images_3d(result["single_mie"], s_size)
-		for key in ["transmittance", "irradiance", "scattering", "single_mie"]:
+		result["single_rayleigh_images"] = _images_3d(result["single_rayleigh"], s_size)
+		for key in ["transmittance", "irradiance", "scattering", "single_mie", "single_rayleigh"]:
 			result.erase(key)
 	_result = result
 
@@ -1079,7 +1080,10 @@ func _upload(result: Dictionary) -> void:
 	scattering.create(table_format, s_size.x, s_size.y, s_size.z, false, result["scattering_images"])
 	var single_mie := ImageTexture3D.new()
 	single_mie.create(table_format, s_size.x, s_size.y, s_size.z, false, result["single_mie_images"])
-	_textures = [transmittance, irradiance, scattering, single_mie]
+	# The single Rayleigh part (static clouds Task 9b): the cloud pass's cloud shadows on the air.
+	var single_rayleigh := ImageTexture3D.new()
+	single_rayleigh.create(table_format, s_size.x, s_size.y, s_size.z, false, result["single_rayleigh_images"])
+	_textures = [transmittance, irradiance, scattering, single_mie, single_rayleigh]
 	var t_size: Vector2i = result["transmittance_size"]
 	var i_size: Vector2i = result["irradiance_size"]
 	var cells: Vector4i = result["scattering_cells"]  # (nu, mu_s, mu, r)
@@ -1087,6 +1091,7 @@ func _upload(result: Dictionary) -> void:
 	ShaderGlobals.set_value(&"atmosphere_irradiance", irradiance)
 	ShaderGlobals.set_value(&"atmosphere_scattering", scattering)
 	ShaderGlobals.set_value(&"atmosphere_single_mie", single_mie)
+	ShaderGlobals.set_value(&"atmosphere_single_rayleigh", single_rayleigh)
 	ShaderGlobals.set_value(&"atmosphere_bottom_radius_m", float(parameters["bottom_radius_m"]))
 	ShaderGlobals.set_value(&"atmosphere_top_radius_m", float(parameters["top_radius_m"]))
 	ShaderGlobals.set_value(&"atmosphere_mu_s_min", float(parameters["mu_s_min"]))

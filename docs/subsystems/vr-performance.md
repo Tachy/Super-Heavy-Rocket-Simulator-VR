@@ -230,6 +230,15 @@ deck 14.492 ms median (p99 19.58), the same deck with the Sun behind (`--away_fr
 march toward the Sun past the scaled criterion (rays within 0.014 rad, transmittance only) costs nothing measurable.
 The composite's second quad pass (the scene x T, then + the colour) is in both numbers (not measured apart).
 
+## Cloud shadows on the air (static clouds Task 9b, 2026-10-27)
+
+`render_check --cloud_quality=vr --fixed_exposure --render_scale=1.65 --gpu_time=120` (whole frame, two rounds each),
+air shadow on / off (`--no_air_shadow`): backlit cumulus (cf 0.5 slab, Sun 15 deg) median 14.85 / 15.09 vs 13.22 /
+13.34 ms (+1.6-1.7 ms; p99 17.1 / 20.6 vs 18.1 / 18.2); the 9 km deck over Starbase (analog weather) 41.21 / 41.27 vs
+36.98 / 36.79 ms (+4.2-4.5 ms; p99 52.6 / 54.6 vs 46.7 / 48.7). Per march pixel 33 boundary lookups (transmittance +
+two single-scattering tables) and 96 shadow-map lookups. Task 10 owns the budget (candidates: fewer segments over
+long horizontal rays, a quarter-resolution pass of its own, skipping rays whose shell has no cloud in the Sun's way).
+
 ## Near / far hand-over (static clouds Task 8, 2026-10-27)
 
 Same VR proxy and weather as the Task 5c fix round (`t8_vrperf_*.log`, base 1cb02f6 = the table above, max 8

@@ -1,7 +1,7 @@
 // Clouds in the light of the Earth's surfaces (M8 weather and clouds, Task 9): the direct Sun through the cloud shadow
 // maps, the Sun's light diffused through the column and the sky's diffuse transmittance at a ground point. Include
-// atmosphere.gdshaderinc and clouds.gdshaderinc first. Surfaces only: the cloud pass's kernels never include this file
-// (the shadow kernel writes the maps sampled here).
+// atmosphere.gdshaderinc and clouds.gdshaderinc first. Surfaces and the cloud pass's march (the cloud shadows on the
+// air, cloud_pass.gdshaderinc cloud_air_shadow_loss); never the shadow kernel (it writes the maps sampled here).
 //
 // Shadow maps (CloudShadowEffect, before the opaque pass; shaders/cloud_shadow.gdshaderinc): orthographic along the
 // Sun, a plane perpendicular to it through an anchor near the ground under the camera (Earth-fixed between re-anchors:
