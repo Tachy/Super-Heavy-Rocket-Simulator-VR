@@ -10,6 +10,10 @@ const MAX_HALF_ANGLE_RAD := deg_to_rad(75.0)
 ## [E] The centre projection's far plane where the eyes' is infinite or unreadable (only directions and the clip xy of
 ## the temporal reprojection use it).
 const FALLBACK_FAR_M := 1.0e9
+## [E] Relative change of the centre image size per axis that is kept as the previous size (keep_size): the runtime's
+## field of view jitters by a hair per frame (Pimax, VR run 2026-10-27: 946 / 947 rows), a quality preset or a resize
+## changes it by far more. 1 % of a march pixel's density is invisible.
+const SIZE_HYSTERESIS := 0.01
 
 
 ## {projection, low, pixel_angle} of the centre view for these eye projections (clip <- head space, the renderer's
@@ -44,6 +48,22 @@ static func build(view_projections: Array[Projection], view_size: Vector2i, divi
 	var size := (union_max - union_min) * density / divisor
 	var low := Vector2i(maxi(ceili(size.x), 1), maxi(ceili(size.y), 1))
 	return {"projection": centre, "low": low, "pixel_angle": 2.0 / maxf(absf(centre.y.y) * low.y, 1e-6)}
+
+
+## The built centre view with its image size held at `previous` when both axes are within SIZE_HYSTERESIS of it (the
+## pixel angle follows the kept size). A new size re-creates the cloud pass's images, and the composite shows the
+## previous frame's result until the swap: the clouds lagged the head and jumped when the size followed the jitter.
+## The projection is the frame's own (only the pixel density changes, by less than SIZE_HYSTERESIS).
+static func keep_size(view: Dictionary, previous: Vector2i) -> Dictionary:
+	var low: Vector2i = view["low"]
+	if previous.x <= 0 or previous.y <= 0 or low == previous:
+		return view
+	var change := (Vector2(low) - Vector2(previous)).abs() / Vector2(previous)
+	if change.x > SIZE_HYSTERESIS or change.y > SIZE_HYSTERESIS:
+		return view
+	var projection: Projection = view["projection"]
+	return {"projection": projection, "low": previous,
+		"pixel_angle": 2.0 / maxf(absf(projection.y.y) * previous.y, 1e-6)}
 
 
 ## Head-space direction through a clip-space ndc: the difference of two unprojected depths (the eye's offset is inside

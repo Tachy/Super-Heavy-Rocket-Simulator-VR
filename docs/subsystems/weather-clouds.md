@@ -366,6 +366,14 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   reproduces the renderer's matrices and checks the rays of both eyes meet at the cloud to 1e-16 rad; it mirrors the
   GDScript, not the shader (a typo in the shader's copy is not detectable by it). The user's headset check of the fix is
   pending.
+- **Centre size hysteresis (VR)** (`CloudCentreView.keep_size`, `SIZE_HYSTERESIS` 1 % [E]): the centre image size is
+  rebuilt from the runtime's field of view every frame; on the Pimax (VR run 2026-10-27, per-eye target 3534 x 2838,
+  divisor 3) its height sat on an integer boundary and alternated 946 / 947 rows with the FOV's per-frame jitter. Every
+  new size re-created the pass's images, and the composite showed the previous frame's result until `swap_output`: the
+  whole cloud layer lagged the head and jumped back (the rest of the scene steady), 86 re-creations in 20 s. A size
+  within 1 % per axis of the current one is kept (the frame's own projection, the pixel angle of the kept size); a
+  quality preset or a resize changes it. PerfLog columns `cloud_image_creations` / `cloud_output_swaps` /
+  `cloud_low_w` / `cloud_low_h` show it (1 / 1 on a steady run).
 - **Cross-fade** (`CloudLayer`, ruling 2026-10-25): two slots and the weight of slot 1; a new pair is reached through
   one visible snapshot (weight moves 1 per 2 s), the missing snapshot is uploaded into the slot without weight, then
   the weight tracks `WeatherService.blend()`. Weather off fades to the empty texture. Unused zero-weight slots are freed.

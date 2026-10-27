@@ -42,6 +42,7 @@ func _initialize() -> void:
 			for azimuth in [0.0, 0.3]:  # straight ahead and 17 deg to the right
 				_check_point(near_m, distance_m, azimuth)
 	_test_centre_view()
+	_test_centre_size_hysteresis()
 	for wall_m in [50.0, 2000.0, 20000.0]:
 		_test_centre_gather(wall_m)
 	for distance_m in [100.0, 2000.0, 20000.0]:
@@ -222,6 +223,34 @@ func _test_centre_view() -> void:
 	_check(half_angle <= CloudCentreView.MAX_HALF_ANGLE_RAD + 1.0e-9,
 			"centre view of a very wide canted pair: capped at %.1f deg (%.3f deg)"
 			% [rad_to_deg(CloudCentreView.MAX_HALF_ANGLE_RAD), rad_to_deg(half_angle)])
+
+
+## The runtime's field of view jitters by a hair from frame to frame (Pimax, VR run 2026-10-27: the centre height
+## alternated 946 / 947): the kept size must not follow it (each new size re-created the images and showed the previous
+## frame's clouds - the layer lagged the head and jumped), but must follow a real change (quality preset, resize).
+func _test_centre_size_hysteresis() -> void:
+	var size := Vector2i(3534, 2838)  # the run's per-eye target
+	var base := CloudCentreView.build(_eye_projections(1.0, 0.0), size, 3)
+	var low: Vector2i = base["low"]
+	var changed := 0
+	for i in range(40):
+		# the run's alternation: the built size one row / column off (ceil of a size on an integer boundary)
+		var built := base.duplicate()
+		built["low"] = low + Vector2i(i % 2, (i + 1) % 2)
+		var view := CloudCentreView.keep_size(built, low)
+		if view["low"] != low:
+			changed += 1
+		if i == 0:
+			var projection: Projection = view["projection"]
+			var kept: Vector2i = view["low"]
+			_check(is_equal_approx(view["pixel_angle"], 2.0 / (absf(projection.y.y) * kept.y)),
+					"centre size hysteresis: pixel angle of the kept size")
+	_check(changed == 0, "centre size hysteresis: a size one row / column off keeps the size (%d changes in 40)" % changed)
+	var finer := CloudCentreView.keep_size(CloudCentreView.build(_eye_projections(1.0, 0.0), size, 2), low)
+	_check(finer["low"] != low, "centre size hysteresis: a new divisor takes its size (%s -> %s)"
+			% [str(low), str(finer["low"])])
+	var first := CloudCentreView.keep_size(base, Vector2i.ZERO)
+	_check(first["low"] == low, "centre size hysteresis: no previous size takes the built one")
 
 
 ## cloud_pass.gdshaderinc CLOUD_CENTRE gather (mirror): a centre ray's scene distance read from the eye whose ndc holds

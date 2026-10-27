@@ -53,7 +53,8 @@ func _ready() -> void:
 		return
 	_file.store_line("kind,t_s,frames,frame_p50_ms,frame_p99_ms,frame_max_ms,gpu_mean_ms,gpu_max_ms,cpu_render_max_ms,"
 			+ "script_max_ms,altitude_m,cloud_far,cloud_uploading,cloud_last_upload_ms,draw_calls,primitives,vram_mb,xr,"
-			+ "main_max_ms," + ",".join(FrameProfiler.SECTIONS.map(func(s: StringName) -> String: return "sec_%s_max_ms" % s)))
+			+ "main_max_ms,cloud_image_creations,cloud_output_swaps,cloud_low_w,cloud_low_h,"
+			+ ",".join(FrameProfiler.SECTIONS.map(func(s: StringName) -> String: return "sec_%s_max_ms" % s)))
 	_vp = get_viewport().get_viewport_rid()
 	RenderingServer.viewport_set_measure_render_time(_vp, true)
 	get_tree().process_frame.connect(func() -> void: _frame_start_usec = Time.get_ticks_usec())
@@ -132,4 +133,6 @@ func _write_row(kind: String, now_msec: int, intervals: PackedFloat64Array, gpu_
 			Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0,
 			int(xr != null and xr.xr_active)]
 			+ ",%.2f" % main_max
+			+ ",%d,%d,%d,%d" % [clouds.effect.image_creations, clouds.effect.output_generation,
+					clouds.effect.centre_low.x, clouds.effect.centre_low.y]
 			+ "".join(FrameProfiler.SECTIONS.map(func(s: StringName) -> String: return ",%.2f" % float(sections.get(s, 0.0)))))

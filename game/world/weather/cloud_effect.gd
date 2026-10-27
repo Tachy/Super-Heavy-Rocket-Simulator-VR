@@ -46,6 +46,9 @@ var output := Texture2DArrayRD.new()
 var output_generation := 0
 ## Render-thread state of the last frame (tests): {valid, low_size, views, march_ms}.
 var stats := {}
+## Diagnostics (PerfLog): image sets created so far (each one a new result shown a frame late), the centre image size.
+var image_creations := 0
+var centre_low := Vector2i.ZERO
 ## Diagnostics (terrain_perf --gpu_passes): GPU timestamps around the cloud passes (RenderingDevice).
 static var capture_timestamps := false
 ## Checks only (cloud_check.gd): >= 0 pins the frame index of the march's jitter (the same noise in two renders that
@@ -227,6 +230,8 @@ func _ensure_images(size: Vector2i, view_count: int, low: Vector2i) -> void:
 	if size == _size and view_count == _view_count and low == _low and _output_rd.is_valid():
 		return
 	_free_images()
+	image_creations += 1
+	centre_low = low
 	var old_output := _output_rd
 	_size = size
 	_view_count = view_count
@@ -360,7 +365,9 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 	var projections: Array[Projection] = []
 	for view in range(view_count):
 		projections.append(scene.get_view_projection(view))
-	var centre_view := CloudCentreView.build(projections, size, _divisor)
+	# The size held through the runtime's field-of-view jitter (a new one re-creates the images, shown a frame late).
+	var centre_view := CloudCentreView.keep_size(CloudCentreView.build(projections, size, _divisor),
+			_low if size == _size and view_count == _view_count else Vector2i.ZERO)
 	_ensure_images(size, view_count, centre_view["low"])
 	_frame += 1
 
