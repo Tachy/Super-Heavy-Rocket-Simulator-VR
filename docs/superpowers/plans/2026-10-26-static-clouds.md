@@ -293,6 +293,23 @@ fails (`game/shaders/cloud_layer.gdshader`, the Sun disk material)
 - [ ] **Step 4: Run** the check, `smoke_test.gd`.
 - [ ] **Step 5: Commit** `test(game): the Sun through cloud decks` (or `fix(game): ...`)
 
+### Task 9b: Backlit cumulus contrast (controller look check 2026-10-27, quality first)
+
+The t9f_edge render (Sun 15 deg, just behind a cumulus) shows the silver rim, but the backlit body is as bright as or
+brighter than the sky beside it; real backlit cumulus bodies are dark grey with a brilliant rim (rim 2-4x the body).
+
+**Files:** `game/shaders/cloud_pass.gdshaderinc` (light / multiple scattering), `game/tests/cloud_check.gd`, docs
+`docs/subsystems/weather-clouds.md`
+
+- [ ] **Step 1: Measure** HDR body / sky / rim radiance of a backlit cumulus at known slant tau (>= 30) and of a
+  backlit slab against the project's Monte Carlo transfer reference (transmitted radiance at that view angle).
+- [ ] **Step 2: Test** (RED): body darker than the sky at the same angle from the Sun, rim 2-4x the body, slab
+  transmitted radiance within [E] of the MC reference.
+- [ ] **Step 3: Fix** the cause (light march extinction scale, multiple-scattering approximation, forward-peak
+  in-scattering), without breaking the front-lit tonal zones, cloud_check limits, or the far tier match.
+- [ ] **Step 4: Run** the cloud checks, renders t9b_* (backlit, front-lit, side-lit) vs t9f.
+- [ ] **Step 5: Commit** `fix(game): backlit cumulus bodies dark with a bright rim`
+
 ### Task 10: Budget, presets, desktop re-baseline, VR acceptance
 
 **Files:** `game/world/weather/cloud_layer.gd` (presets), `docs/subsystems/weather-clouds.md`,
