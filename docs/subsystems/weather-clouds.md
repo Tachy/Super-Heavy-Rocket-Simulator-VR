@@ -41,7 +41,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   G its layer's extinction scale, 0 = no base - fog, unknown, LCL >= 3 km, or condensate left in a layer wholly under
   the base's layer (e.g. ice under the LCL: the column stays uncut, the ice is shown), or a base closer than
   `cloud_base_snap_m` 20 m [E] (twice `CLOUD_MIN_STEP_M`, mirrored in the core, smoke_test compares) under its layer's
-  top (it snaps to the top: scale 1, no sheet - a thinner sheet is not resolved by the march and its scale would
+  top (the base is dropped: scale 1, no cut, the layer keeps a faint haze - a thinner sheet is not resolved by the march and its scale would
   diverge; the scale of a base 25 m under the top is 23). Limit: the rule works per layer, so ice in the base's own
   layer is pushed above the base by the scale (its water path kept, its part below the LCL not shown). `cloud_lcl_cut` (shader; core
   `cloud_lcl_cut_factor`, `cloud_lcl_extinction_factor`) reads the four nearest columns by `texelFetch`: the cloud
@@ -287,8 +287,8 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      (static clouds Task 5c, fix round 1): a step longer than the structure step (`cloud_structure_step`:
      `CLOUD_STRUCTURE_TEXEL_FRACTION` 0.25 [E] of the distance over which the ray crosses one texel of the finest shape
      in the cell - cumulus 250 m across / 125 m high, stratiform 1 km / 125 m, cirrus 250 m / 16 m; a horizontal ray
-     through cumulus every 62.5 m) is ceil(step / structure step) equal sub-steps, at most `CLOUD_MAX_SUBSTEPS` 8 [E]
-     (longer steps: 1/8 of the step), each sampled at its midpoint in its own field cell (a thin cirrus sheet changes
+     through cumulus every 62.5 m) is ceil(step / structure step) equal sub-steps, at most `CLOUD_MAX_SUBSTEPS` 6 [E]
+     (longer steps: 1/6 of the step), each sampled at its midpoint in its own field cell (a thin cirrus sheet changes
      over a slant step: the step's cell lost 4 % of its alpha); the step's optical depth is their sum, its mean
      extinction that over the step (the step-weight test). The detail is band-limited at the larger of the pixel
      footprint and `CLOUD_DETAIL_STEP_FRACTION` x min(step, the structure step or step / 8) - continuous in the step
@@ -307,7 +307,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
      golden ratio - the same for both eyes, the light march's jitter decorrelated per step; background through
      exp(-tau), scattered light through exp(-(1 - f) tau); colour = T_c L + (1 - T_bg) S_c with the air at the
      transmittance-weighted cloud distance; a step whose weight in the scattered light T_sc (1 - exp(-(1 - f) tau))
-     exceeds 0.15 [E] is marched again with steps of that weight (one sample deciding a whole deep step was the grain
+     exceeds 0.3 [E] (Task 10; 0.15 before) is marched again with steps of that weight (one sample deciding a whole deep step was the grain
      at cloud surfaces and at bases seen at a grazing angle; the step's intended length is compared, not the float32
      difference of the distances, whose 1 m ulp at 8 600 km retried the same step until the budget ran out - Task 10);
   1b. **outline pass** (static clouds Task 5b, fix round 1; the deterministic march only, not the debug outputs), two
@@ -584,7 +584,7 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     deterministic footprint average): the share of 4 x 8 fixed taps over the pixel's footprint x 2 across the view and
     / mu along it (at most 32 km) where the shapes' prefiltered value exceeds the prefilter threshold of C_v itself, at
     the mip of the taps' spacing - the pattern covers C_v of the layer, so the mean cover is C_v at every footprint and
-    view angle (spec decision 3; fix round 2: the share of the fraction's threshold x C_v / f, clamped at 1, lost 6-15 %
+    view angle (spec decision 3; fix round 2: the share of the fraction's threshold x C_v / f, clamped at 1, lost 9-15 %
     of the cover where whole footprints were covered; the deck's cover is C_v), half of it from a second, unaligned
     reading of the shape (Earth-fixed, turned 37 deg about (1, 2, 3), x 1.37) faded in from 1 to 3 km of footprint (the
     32 km tile's period showed as a regular lattice over the hundreds of km of an orbit view), and C_v itself beyond
@@ -639,14 +639,22 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   scene's single scattering, outline, front weight, no-negative and clear-sky cases (numbers in the Model section);
   core `[weather]`: `cloud_render_top_m`; core `[atmosphere]`: the single Rayleigh table = the raymarch's single
   Rayleigh within 1 % and below the scattering table's total.
-- Reference values at Task 10 (6b9149e, RTX 4090; sdd `t10_checks_e1/`): `cloud_check.gd` PASS, 198 samples, 312 s for
-  the whole run; `cloud_far_check.gd`: slab radiance vs Monte Carlo worst 0.34 % (72 geometries), deck tau 10 inside /
-  outside 2.68 % (grid mean), 0.22 % (far tier), 8.16 % (converged shapes, limit 10 %), deck tau 2 3.17 / 0.60 / 1.54 %,
-  broken cf 0.4 2.28 %, far field / converged volume 0.925 and 0.951 (limit 10 %), far tier / march 0.990 (both
-  cases), cross-fade worst 2.48 % / 0.38 %, hand-over step 2.52 % / 0.58 % (limits 3 %), from 420 km 0 pixels differ;
-  only the Moon view fails (cache file `era5_1089330.wthr` missing, known); `cloud_grain_check.gd` PASS (grain ratio
-  to the 8 x reference 1.00-1.07, cover and mean alpha within 0.44 %, RMS 0.025-0.048); stereo, layer, smoke and
-  repeat_identical (ground, deck) green.
+- Reference values at Task 10 follow-up (ff62126 with 6 sub-samples and step weight 0.3, RTX 4090; sdd
+  `t10_checks_e3/`): `cloud_check.gd` PASS, 208 samples, 393 s for the whole run (section 6 alone,
+  `STARSIM_GROUND_ONLY=1`: 12 s; the Sun through the shipped analog June cumulus at Starbase: 6 disks through gaps at
+  0.9999 of the cloudless disk, 2 behind cores at the march's T 3e-6 / 0, the mean transmittance of the shapes over 60
+  directions 0.727 vs the grid mean 0.730); `cloud_far_check.gd`: as at 6b9149e (below, same limits), only the Moon
+  view fails (cache file `era5_1089330.wthr` missing, known); speckle RMS vs the sub-pixel supersampled reference:
+  limb from 420 km 5.0 %, 50 km horizon 9.4 % (limit 10 %), at the VR pixel angle (1.8 mrad, 3 x 3 reference) the limb
+  6.2 % and the 50 km horizon 11.0 % (listed, not asserted: open point); `cloud_grain_check.gd` VR PASS (grain ratio
+  1.01-1.05, alpha grain 0.995-1.165 (Cape the largest), RMS 0.033-0.057) and `--quality=desktop` PASS (grain
+  1.01-1.05, alpha 0.97-1.03, covered / mean alpha within 0.9 %, RMS 0.036-0.081, ground the largest); stereo, layer,
+  smoke and repeat_identical (ground, deck) green.
+- Reference values at Task 10 (6b9149e; with 8 sub-samples and step weight 0.15): `cloud_far_check.gd`: slab radiance
+  vs Monte Carlo worst 0.34 % (72 geometries), deck tau 10 inside / outside 2.68 % (grid mean), 0.22 % (far tier),
+  8.16 % (converged shapes, limit 10 %), deck tau 2 3.17 / 0.60 / 1.54 %, broken cf 0.4 2.28 %, far field / converged
+  volume 0.925 and 0.951 (limit 10 %), far tier / march 0.990 (both cases), cross-fade worst 2.48 % / 0.38 %,
+  hand-over step 2.52 % / 0.58 % (limits 3 %), from 420 km 0 pixels differ.
 - In-cloud optical depths (static clouds Task 10, the 48 shipped analog files, format 7; the body-core vertical tau of
   each column's contiguous cloudy run, sum of beta / m(cf) dz - the renderer's plateau -, weighted by cos(lat) x the
   run's max cf; script and table: sdd `tau_inv/t10_cloud_tau.py`, `t10_analog_v7.log`). p10 / p50 / p90:
@@ -921,6 +929,23 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
 
 ## Open points and known limits
 
+- **Shape de-tiling (Task 9d, deferred by the user 2026-10-27)**: the shapes' 32 km tile shows as a chessboard lattice
+  from altitude (the shapes' own period, not the weather). Measured options on 6b9149e (cloud pass ground / 400 km;
+  tiled 40.9 / 6.2 ms): blend of two reads in a 0.1 band (c7fe2ca) 97.8 / 11.9 ms (+139 / +91 %), in a 0.05 band (V4)
+  72.9 / 10.2 (+78 / +64 %), smooth warp A = 0.33 (V5) 47.3 / 7.3 (+16 / +18 %, shapes stretched locally: rejected as
+  too slow for the look it buys). The lattice stays. The attempt is parked on the local ref `wip/t9d-detile`, the
+  variants in the sdd patch `t9d2_variants.patch`; no plan task.
+- **Speckle margin at the VR pixel angle (Task 10)**: cloud_far_check's 50 km horizon band at the VR march pixel (5.4
+  mrad, 3 x 3 reference) is 11.0 % RMS against the 10 % bound (9.4 % at the check window's 2.6 mrad pixels: a thin
+  margin there too). The band is 5 rows; the RMS is the march pixel's outline position against the sub-pixel mean (no
+  speckle visible, `t10b_far/t8fcheck_speckle_vr_horizon_from_50_km.png`), so it is listed, not asserted, and the bound
+  is not widened. The limb at the VR angle (6.2 %) is asserted.
+- **Fade reference point (Task 10, review Minor 3)**: the far tier's shapes fade at the footprint at the ray's 2 km
+  crossing, or at its lowest point when it stays above. A ray from 9 km with its tangent point at 2 km (d = 299 km)
+  meets 15 km high cloud at 706 km: the footprint there is 2.4 x the reference's (VR 5.4 mrad: 3.8 km against 1.6 km;
+  the desktop's 2.6 mrad 1.8 against 0.8 km), i.e. past the shapes' 1 km mips where the fade has not started. Seen only
+  as a far cirrus / Cb horizon from altitude in VR (the cirrus grain check passes); not changed - fading at the
+  farthest cloud would change the look of the horizon cirrus (user decision).
 - **Cloud shadows on the air (Task 9b)**: shapes' shadows (rays) only within the near map's 9-11 km; beyond, the far
   map's grid mean shades the air smoothly (no individual rays from far clouds). Cameras above the atmosphere's top
   (~100 km) get no air shadow: the loss switches off there during an ascent (the tables' parametrisation needs the ray
@@ -1044,10 +1069,11 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   gain for broken cloud is a fit (above). The speckle check's far horizon from 50 km passes with a thin margin (9.2 %
   of 10 %; the shapes' march-pixel outline at ~1 km footprints dominates it). The scaled-space limit: the ground's sea
   glint steps there (terrain vs scaled-space Earth, weather off), seen through broken cloud.
-- **March sub-samples (Task 5c, fix round 1)**: the VR proxy's cloud pass +97 / +75 / +72 % (descent / pan low / pan
-  high medians over cb65707, `vr-performance.md`) for the shapes' and field's lookups at up to 8 sub-samples and the
-  doubled step budget - over the budget like the base (Task 10); at most 4 sub-samples cost +39 / +27 / +25 % and
-  still pass the grain check (cover / alpha within 1.8 %, luminance 2.2 %, Cape grain 1.10). One light sample per step.
+- **March sub-samples (Task 5c fix round 1, Task 10)**: at most 6 per step (8 before Task 10) and a step-weight limit
+  of 0.3 (0.15 before): the VR proxy's cloud pass at the ground / the deck 40.9 / 48.9 -> 31.0 / 38.9 ms
+  (`vr-performance.md`), still over the budget like the base. 4 sub-samples (-9 ms) fail the grain check at the Cape
+  (alpha grain 1.375 x the 8 x reference's, bound 1.25; the user's ruling to use 4 could not be kept without widening
+  the bound), 5 pass with no margin (1.241), 6 at 1.16. One light sample per step.
 - **Deterministic march (Task 3, outline pass Task 5b)**: a cloud edge is binary per ray; the outline pass (cloud
   pass 1b) averages the centre and three fixed coverage-only sub-rays on outline pixels, so outlines no longer follow the march grid (no stairs,
   `t5b_*` vs `t5f_*` images), but they stay one march pixel wide across the edge (crisp; at divisor 3 ~3 screen

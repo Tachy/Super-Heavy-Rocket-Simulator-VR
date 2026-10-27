@@ -713,3 +713,22 @@ weather-clouds.md, Cover from the total cloud cover (first 9c state, file format
   base crossed ERA5's 1 % threshold), and no in-cloud bound followed the scaling down: tcc ~ 0 columns (1.1 % at
   0.25 deg) put each cloud layer on cloud_min_cover with its water kept (dense specks). The plausibility cloud-base
   check therefore ran on the unscaled fractions.
+
+## Before the Task 10 follow-up (superseded 2026-10-27: 6 sub-samples, step weight 0.3, new reference values)
+weather-clouds.md:
+
+- Reference values at Task 10 (6b9149e, RTX 4090; sdd `t10_checks_e1/`): `cloud_check.gd` PASS, 198 samples, 312 s for
+  the whole run; `cloud_far_check.gd`: slab radiance vs Monte Carlo worst 0.34 % (72 geometries), deck tau 10 inside /
+  outside 2.68 % (grid mean), 0.22 % (far tier), 8.16 % (converged shapes, limit 10 %), deck tau 2 3.17 / 0.60 / 1.54 %,
+  broken cf 0.4 2.28 %, far field / converged volume 0.925 and 0.951 (limit 10 %), far tier / march 0.990 (both
+  cases), cross-fade worst 2.48 % / 0.38 %, hand-over step 2.52 % / 0.58 % (limits 3 %), from 420 km 0 pixels differ;
+  only the Moon view fails (cache file `era5_1089330.wthr` missing, known); `cloud_grain_check.gd` PASS (grain ratio
+  to the 8 x reference 1.00-1.07, cover and mean alpha within 0.44 %, RMS 0.025-0.048); stereo, layer, smoke and
+  repeat_identical (ground, deck) green.
+
+- **March sub-samples (Task 5c, fix round 1)**: the VR proxy's cloud pass +97 / +75 / +72 % (descent / pan low / pan
+  high medians over cb65707, `vr-performance.md`) for the shapes' and field's lookups at up to 8 sub-samples and the
+  doubled step budget - over the budget like the base (Task 10); at most 4 sub-samples cost +39 / +27 / +25 % and
+  still pass the grain check (cover / alpha within 1.8 %, luminance 2.2 %, Cape grain 1.10). One light sample per step.
+
+- Quality-preset note: the march ran at up to 8 sub-samples per step (`CLOUD_MAX_SUBSTEPS` 8, longer steps 1/8 of the step) and the step-weight limit was 0.15.

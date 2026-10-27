@@ -281,18 +281,21 @@ VR pixel proxy per pass (`render_check --cloud_quality=vr --render_scale=1.65 --
 --gpu_passes`, light cache settled, daylight; sdd `t10_prof.sh`, logs `t10_prof_<view>_<tag>.log`). Views: ground
 (Starbase, analog weather 2024-06-15 21 UTC, az 90 el 25), 3 km (el -5), 9 km deck (el -10), 20 km (el -15), 400 km
 (nadir, cf 0.5 slab 1-2 km), backlit cumulus (cf 0.5 slab, Sun 15 deg, at the Sun), the Sun through a tau-5 deck.
-Without weather the ground frame is 0.99 ms. ms, median of 120 frames, before (base 058318e) / after (the clear-air
-detail skip, `weather-clouds.md` "Steep edges"; images bit-identical in all seven views):
+Without weather the ground frame is 0.99 ms. ms, median of 120 frames: base 058318e / after the clear-air detail
+skip (`weather-clouds.md` "Steep edges"; images bit-identical in all seven views) / after the follow-up (below):
 
 | View | frame | cloud pass | march kernel | outline refine | shadow maps |
 |---|---|---|---|---|---|
-| ground | 46.2 / 42.6 | 44.6 / 40.9 | 34.0 / 30.9 | 10.4 / 10.0 | 0.59 |
-| 3 km | 41.8 / 38.0 | 38.9 / 35.2 | 28.7 / 25.5 | 9.9 / 9.7 | 0.59 |
-| 9 km deck | 52.9 / 51.8 | 49.9 / 48.9 | 38.0 / 37.6 | 11.7 / 11.1 | 0.59 |
-| 20 km | 34.2 / 33.8 | 31.4 / 30.6 | 22.1 / 21.9 | 9.0 / 8.6 | 0.60 |
-| 400 km | 8.5 / 8.5 | 6.1 / 6.2 | 4.0 / 3.9 | 2.0 / 2.1 | 0.60 |
-| backlit Cu | 16.4 / 16.1 | 15.0 / 14.7 | 10.7 / 10.2 | 4.2 / 4.4 | 0.59 |
-| Sun through deck | 8.4 / 8.2 | 7.3 / 7.1 | 7.2 / 7.0 | 0 | 0.57 |
+| ground | 46.2 / 42.6 / 32.7 | 44.6 / 40.9 / 31.0 | 34.0 / 30.9 / 23.0 | 10.4 / 10.0 / 7.8 | 0.59 |
+| 3 km | 41.8 / 38.0 / 32.6 | 38.9 / 35.2 / 29.6 | 28.7 / 25.5 / 21.8 | 9.9 / 9.7 / 7.7 | 0.59 |
+| 9 km deck | 52.9 / 51.8 / 41.7 | 49.9 / 48.9 / 38.9 | 38.0 / 37.6 / 29.7 | 11.7 / 11.1 / 9.0 | 0.59 |
+| 20 km | 34.2 / 33.8 / 28.8 | 31.4 / 30.6 / 25.8 | 22.1 / 21.9 / 18.7 | 9.0 / 8.6 / 6.9 | 0.60 |
+| 400 km | 8.5 / 8.5 / 8.6 | 6.1 / 6.2 / 6.1 | 4.0 / 3.9 / 3.8 | 2.0 / 2.1 / 2.1 | 0.60 |
+| backlit Cu | 16.4 / 16.1 / 14.5 | 15.0 / 14.7 / 13.0 | 10.7 / 10.2 / 8.9 | 4.2 / 4.4 / 3.9 | 0.59 |
+| Sun through deck | 8.4 / 8.2 / 8.2 | 7.3 / 7.1 / 7.1 | 7.2 / 7.0 / 7.0 | 0 | 0.57 |
+
+(third value: after the Task 10 follow-up, 954a4c8: at most 6 sub-samples, step-weight limit 0.3; the look is the
+before's within 0.1-0.4 of 255 on average, crops `t10b_substeps_*`.)
 
 The outline pass's list kernel, the temporal copy and the upsample are 0.01-0.12 ms; the light cache fill is 0 once
 settled. Run-to-run spread about +-1.5 ms at 40-50 ms.
@@ -322,17 +325,17 @@ Tried and not taken (all measured on the ground / deck views):
 - Far light 3 samples instead of 5: -1.5 / -0.6 ms; the near march capped at 22 samples: ~0; the pass loop unrolled
   (far / near specialised): ~0.
 
-Options with a look trade (not applied; user decision, crops `screenshots/static_clouds/t10_opt_*.png`: base | 4
-sub-samples | divisor 4):
-- at most 4 sub-samples instead of 8: -9.3 / -8.9 ms (-23 / -19 %); the grain check passed with 4 in Task 5c (1.8 %
-  vs the 8 x reference's alpha, 8: 0.8 %); visible: slightly more fine speckle in the far deck band.
-- march divisor 4 instead of 3 (1.8 x fewer rays): -11.3 / -14.3 ms (-28 / -30 %); visible: softer near cumulus,
-  blockier outlines of the lower deck.
-- step-weight limit 0.3 instead of 0.15 (a dense step's light sampled for up to 30 % of the pixel): -4.7 / -5.2 ms
-  (-12 / -11 %); crops `t10_opt_*_stepweight.png`: mean |difference| 0.5-0.7 of 255, the lobes' shading a little
-  flatter; not checked against the reference cases (cloud_check 8 / 9, the grain check).
-Even all of them together leave the ground view near 20 ms and the deck near 25 ms in the proxy - the budget (cloud
-p99 2.5 ms x the stereo correction) is out of reach of optimisation without a different march design.
+Look-trade options after the user's rulings (2026-10-27; crops `screenshots/static_clouds/t10_opt_*.png`, applied ones
+`t10b_substeps_{ground,deck,cape}.png`: before | after):
+- at most 6 sub-samples instead of 8: APPLIED, -5.4 / -4.2 ms at the ground / the deck. 4 (-9.3 / -8.9 ms) was the
+  ruling but fails the Cape's alpha grain check (1.375 x the reference's, bound 1.25; 5: 1.241); no visible loss in the
+  crops (mean difference 0.1-0.4 of 255).
+- step-weight limit 0.3 instead of 0.15: APPLIED after the reference cases passed (cloud_check incl. the Monte Carlo
+  fixtures, cloud_far_check, cloud_grain_check, within their tolerances): -4.7 / -5.2 ms.
+- march divisor 4 instead of 3 (-11.3 / -14.3 ms): REJECTED by the user (visibly softer near cumulus, blockier lower
+  deck outlines); divisor 3 stays.
+The cloud pass is still 31 ms at the ground and 39 ms at the deck in the proxy - the budget (cloud p99 2.5 ms x the
+stereo correction) is out of reach of optimisation without a different march design.
 
 Shape de-tiling (Task 9d, re-measured on 6b9149e with the parked `wip/t9d-detile` commit and its variants; cloud pass,
 ground / 400 km; tiled 40.9 / 6.2 ms): blend in a 0.1 band (c7fe2ca) 97.8 / 11.9 (+139 / +91 %), blend in a 0.05 band
