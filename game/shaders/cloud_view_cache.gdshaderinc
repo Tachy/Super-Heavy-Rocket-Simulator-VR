@@ -512,8 +512,12 @@ void main() {
 	uint flags = cloud_cache_lookup_block.layout_.w;
 	bool covering = (flags & 1u) != 0u;
 	bool near_shell = (flags & 2u) != 0u;
-	if ((fresh <= 0.0 || !stable) && (covering || near_shell)) {
-		return;  // no level or no settled anchor: the march's result stays (its whole ray there)
+	// No level or no settled anchor: the march's result stays (its whole ray there). With the near shell exactly where
+	// its kernel marched the whole ray (cloud_near_shell_end: the same pick, no settled anchor - a ray without a level
+	// has none); a first fill there (fresh 0 at the frame it is shown) is composited behind the shell's segment, which
+	// ended at the sphere (Task 5 fix round 2: keeping that segment alone left the deck's clouds out after a jump).
+	if (near_shell ? !stable : ((fresh <= 0.0 || !stable) && covering)) {
+		return;
 	}
 	// Scene geometry in front of the cloud hides it, softly over the distance ratio (the upsample's depth weight). A
 	// texel without cloud holds the air's shadow loss along the cached ray to its static end: nearer geometry (a hill

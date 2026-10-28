@@ -34,6 +34,8 @@ func _initialize() -> void:
 	_test_reanchor_trigger()
 	_test_progressive_reanchor()
 	_test_eviction_by_parallax()
+	_test_motion_refresh_levels()
+	_test_no_cloud_in_reach()
 	print("cloud_view_cache_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -232,6 +234,114 @@ func _test_eviction_by_parallax() -> void:
 	_check(absf(deviations[2] - 0.45 * r) < 1.0e-6 and deviations[3] == 0.0,
 			"eviction: the schedule's parallax bound is the largest kept offset (%.1f m with the first anchor's tiles, "
 			% deviations[2] + "%.1f m once they are dropped)" % deviations[3])
+
+
+## Refreshes because of motion go to level 0 first (Task 5 fix round 2 ruling), light refreshes keep their level: a
+## schedule converged at the full level, one tile's light stale and the anchor moved - the off tiles are picked at
+## level 0 (the parallax class and the anchor's part of class 4), the light-stale tile of the new anchor at level 2.
+## Through the planner, such a refresh fades from the finer level it showed (no fade slot) and the tile is refined
+## to the full level again from the following budgets.
+func _test_motion_refresh_levels() -> void:
+	var layout := _layout()
+	var schedule := CloudViewCacheSchedule.new(layout)
+	var anchor := Vector3(1.0e6, 2.0e6, 3.0e6)
+	var moved := anchor + Vector3(0.0, 30.0, 0.0)
+	_complete_all(schedule, 2, _state(Vector3.UP, 0.5, 1, anchor))
+	_settle(schedule, Vector3.UP, 0.5, 1)
+	var view := _view_grid(deg_to_rad(30.0), VIEW_STEP_RAD)
+	var cloud_tile := layout.tile_of(Vector3(0.0, 0.0, -1.0))
+	schedule.set_tile_distance(cloud_tile, 2000.0)
+	var lit_tile := layout.tile_of(Vector3(0.0, 0.0, 1.0))  # behind the view: class 4 only
+	schedule.set_anchor_deviation(moved, moved.distance_to(anchor))  # the anchor moved (a new epoch)
+	schedule.completed(lit_tile, 2, _state(Vector3.UP.rotated(Vector3.RIGHT, 0.01), 0.5, 1, moved))
+	var levels := {}
+	for p in schedule.pick(moved, moved, view, 100000, VIEW_SAMPLE_RAD, 1000):
+		levels[p["tile"]] = p["level"]
+	var off_levels := {}
+	for tile: int in levels:
+		if tile != lit_tile:
+			off_levels[levels[tile]] = true
+	_check(levels.get(cloud_tile, -1) == 0 and off_levels.keys() == [0] and levels.get(lit_tile, -1) == 2,
+			"motion refreshes at level 0: the parallax tile %d, all %d off tiles %s; the light-stale tile at %d"
+			% [levels.get(cloud_tile, -1), levels.size() - 1, str(off_levels.keys()), levels.get(lit_tile, -1)])
+	# The planner: converged at the full level, re-anchored - refreshes at level 0 fade from level 2 (source 3).
+	var planner := CloudViewCachePlanner.new()
+	var pview := {"dirs": _view_grid(deg_to_rad(40.0), VIEW_STEP_RAD), "sample_rad": VIEW_SAMPLE_RAD,
+		"face_texels": 512}
+	var light := {"sun_dir": Vector3(0.3, 0.8, 0.5).normalized(), "weather_weight": 0.0, "light_generation": 1}
+	var camera := Vector3(1.0e6, 2.0e6, 3.0e6)
+	for frame in range(60):
+		_plan(planner, camera, pview, light)
+	var full := PackedInt32Array()
+	for tile in range(planner.layout.tile_count()):
+		if planner.shown_level(tile) == CloudViewCacheSchedule.MAX_LEVEL:
+			full.append(tile)
+	camera += Vector3(0.0, 0.0, 1.0) * CloudViewCacheSchedule.REANCHOR_FRACTION * CloudLayer.near_radius_m() * 1.01
+	_plan(planner, camera, pview, light)
+	# (A tile refreshed at level 0 may be refined again in the same plan when its budget is free: those count apart.)
+	var refreshed := 0
+	var from_full := 0
+	var seen := {}
+	for tile in planner.last_fades:
+		if full.has(tile) and not seen.has(tile) and planner.shown_level(tile) == 0:
+			seen[tile] = true
+			refreshed += 1
+			from_full += 1 if planner.fade_source(tile) == 3 else 0
+	var converged_again := true
+	for frame in range(60):
+		_plan(planner, camera, pview, light)
+	for tile in full:
+		converged_again = converged_again and planner.shown_level(tile) == CloudViewCacheSchedule.MAX_LEVEL \
+				and planner.tile_anchor(tile) == planner.anchor_index
+	_check(not full.is_empty() and refreshed > 0 and from_full == refreshed and converged_again,
+			"planner: after a re-anchor %d full-level tiles show level 0, %d of them fading from level 2; all %d back at "
+			% [refreshed, from_full, full.size()] + "the full level from the new anchor 60 plans on (%s)"
+			% converged_again)
+
+
+## No cloud within the near shell's reach of the camera (Task 5 fix round 2): no keep cap - a clear tile is kept however
+## far the camera went (no parallax), a cloud at 20 R_near by its own parallax (0.1 x 40 km); and a clear tile does not
+## join the parallax class after a 600 m anchor move (the coarse tile of the view goes first).
+func _test_no_cloud_in_reach() -> void:
+	var planner := CloudViewCachePlanner.new()
+	var view := {"dirs": _view_grid(deg_to_rad(40.0), VIEW_STEP_RAD), "sample_rad": VIEW_SAMPLE_RAD,
+		"face_texels": 512}
+	var light := {"sun_dir": Vector3(0.3, 0.8, 0.5).normalized(), "weather_weight": 0.0, "light_generation": 1}
+	var camera := Vector3(1.0e6, 2.0e6, 3.0e6)
+	for frame in range(40):
+		planner.plan(camera, view, light, 1000.0, 1.0 / 45.0, INF)
+		planner.wait()
+	var first := planner.anchor_index
+	var shown := PackedInt32Array()
+	for tile in range(planner.layout.tile_count()):
+		if planner.shown_level(tile) >= 0 and planner.tile_anchor(tile) == first:
+			shown.append(tile)
+	var r := CloudLayer.near_radius_m()
+	var bits := PackedByteArray()
+	bits.resize(4)
+	bits.encode_float(0, 20.0 * r)
+	planner._apply_distances(planner.epoch, PackedInt32Array([shown[0]]), bits)
+	var kept_at := []  # per offset: [the 20 R_near tile, a clear tile]
+	for offset_m: float in [0.55 * r, 5.0 * r]:
+		var at := camera + Vector3(0.0, 0.0, offset_m)
+		planner._reanchor(at)
+		planner._evict_far(at)
+		kept_at.append([planner.shown_level(shown[0]) >= 0, planner.shown_level(shown[1]) >= 0])
+	_check(kept_at == [[true, true], [false, true]], "no cloud in reach: kept (20 R_near / clear) at 55 % / 5 x R_near "
+			+ "off: %s (expected [[true, true], [false, true]])" % str(kept_at))
+	var all := _layout()
+	var s3 := CloudViewCacheSchedule.new(all)
+	var anchor := Vector3(1.0e6, 2.0e6, 3.0e6)
+	_complete_all(s3, 2, _state(Vector3.UP, 0.5, 1, anchor))
+	_settle(s3, Vector3.UP, 0.5, 1)
+	s3.set_cloud_in_reach(false)
+	var at := anchor + Vector3(0.0, 600.0, 0.0)
+	s3.set_anchor_deviation(at, 600.0)
+	var coarse_tile := all.tile_of(Vector3(0.02, 0.0, -1.0))
+	s3.completed(coarse_tile, 1, _state(Vector3.UP, 0.5, 1, at))
+	var picks := s3.pick(at, at, [Vector3(0.0, 0.0, -1.0)], 3, deg_to_rad(10.0))
+	_check(not picks.is_empty() and picks[0]["tile"] == coarse_tile, "no cloud in reach: after a 600 m anchor move "
+			+ "the coarse tile of the view goes first, no clear-sky refresh (%s)" % str(picks.slice(0, 1)))
 
 
 ## One plan of the planner (its run waited for), a large budget (the fills are not measured here).
@@ -491,8 +601,8 @@ func _test_parallax() -> void:
 	var moved := anchor + Vector3(0.0, 5.0, 0.0)
 	var picks := s2.pick(moved, moved, [Vector3(0.0, 0.0, -1.0)], 10, deg_to_rad(10.0))
 	_check(picks.size() >= 2 and picks[0]["tile"] == near_tile and picks[1]["tile"] == far_tile
-			and picks[0]["level"] == 2,
-			"visible tiles over %.1f px: the nearer cloud first, at its level (%s)"
+			and picks[0]["level"] == 0,
+			"visible tiles over %.1f px: the nearer cloud first, at level 0 (motion: coarse first; %s)"
 			% [CloudViewCacheSchedule.PARALLAX_REFRESH_PX, str(picks.slice(0, 2))])
 	# Clear sky (no known cloud, fix round 1): no parallax class after a small anchor move (a finer-level tile of the
 	# view goes first), but from SKY_REFRESH_FRACTION of its keep distance on it joins it (ahead of that tile).
@@ -531,15 +641,17 @@ func _test_parallax_reanchor() -> void:
 	_check(camera_error > 100.0, "parallax_error_px still reports the camera's offset from an anchor (%.0f px)"
 			% camera_error)
 	picks = schedule.pick(camera, camera, view, 100, VIEW_SAMPLE_RAD)
-	_check(not picks.is_empty() and picks[0]["tile"] == tile and picks[0]["level"] == 2,
-			"anchor moved 50 m: the tile rendered from the old anchor comes first, at its level (%s)"
+	_check(not picks.is_empty() and picks[0]["tile"] == tile and picks[0]["level"] == 0,
+			"anchor moved 50 m: the tile rendered from the old anchor comes first, at level 0 (%s)"
 			% str(picks.slice(0, 1)))
-	schedule.completed(tile, 2, _state(Vector3.UP, 0.5, 1, camera))
+	schedule.completed(tile, 0, _state(Vector3.UP, 0.5, 1, camera))
 	picks = schedule.pick(camera, camera, view, 100, VIEW_SAMPLE_RAD)
-	var again := false
+	var again := []
 	for p in picks:
-		again = again or p["tile"] == tile
-	_check(not again, "the tile re-marched from the new anchor is not picked again")
+		if p["tile"] == tile:
+			again.append(p["level"])
+	_check(again == [1], "the tile re-marched from the new anchor is refined next (level 1), not refreshed again (%s)"
+			% str(again))
 
 
 func _test_budget_and_levels() -> void:
@@ -675,6 +787,9 @@ func _test_sun_sweep(layout: CloudViewCacheLayout, view: Array[Vector3], sun: Ve
 func _test_reanchor_timing(layout: CloudViewCacheLayout, view: Array[Vector3], sun: Vector3,
 		anchor: Vector3) -> void:
 	var schedule := _converged_schedule(layout, sun, anchor)
+	# The running game's state before the move: this view's cone list built (a pick with nothing open; the list is
+	# rebuilt only when the view turns - not the re-anchor's cost, Task 5 fix round 2).
+	schedule.pick(anchor, anchor, view, FRAME_BUDGET_TILES, VIEW_SAMPLE_RAD)
 	var moved := anchor + Vector3(50.0, 0.0, 0.0)
 	var times: Array[float] = []
 	var frames := 0

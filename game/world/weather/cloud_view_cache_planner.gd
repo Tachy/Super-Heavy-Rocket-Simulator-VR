@@ -143,6 +143,8 @@ var _ready := {}
 var _held_s := 0.0
 var _inbox_distances: Array[Dictionary] = []
 var _inbox_fills: Array[Vector2] = []
+## The run's: a cloud within the near shell's reach of the camera (plan's nearest_cloud_m; the eviction's cap applies).
+var _cloud_in_reach := true
 
 
 ## Main thread: restart the cache at the next plan (a view or clock jump, a pinned snapshot). Until the restarted run's
@@ -154,8 +156,10 @@ func request_reset() -> void:
 ## Main thread, once a frame: the last finished run's batch ({} while it runs or without one; a reset batch while a
 ## restart is pending), and the next run started with this frame's inputs. view: {dirs: Array[Vector3] (Earth-local unit
 ## sample rays of the eyes), sample_rad, face_texels (the eyes' density)}; light: {sun_dir, weather_weight,
-## light_generation}; budget_ms: the fill's GPU time.
-func plan(camera_earth_m: Vector3, view: Dictionary, light: Dictionary, budget_ms: float, delta_s: float) -> Dictionary:
+## light_generation}; budget_ms: the fill's GPU time; nearest_cloud_m: CloudLayer's nearest cloud within the near
+## shell's reach (INF: none - no keep cap, Task 5 fix round 2; the default 0 keeps the cap).
+func plan(camera_earth_m: Vector3, view: Dictionary, light: Dictionary, budget_ms: float, delta_s: float,
+		nearest_cloud_m := 0.0) -> Dictionary:
 	_held_s += maxf(delta_s, 0.0)
 	if _task >= 0 and WorkerThreadPool.is_task_completed(_task):
 		wait()
@@ -168,7 +172,8 @@ func plan(camera_earth_m: Vector3, view: Dictionary, light: Dictionary, budget_m
 	if view.is_empty():
 		return batch
 	var inputs := {"camera": camera_earth_m, "view": view, "light": light, "budget_ms": budget_ms, "delta_s": _held_s,
-		"reset": _reset_pending, "distances": _inbox_distances, "fills": _inbox_fills}
+		"reset": _reset_pending, "distances": _inbox_distances, "fills": _inbox_fills,
+		"cloud_in_reach": nearest_cloud_m < INF}
 	_reset_pending = false
 	_held_s = 0.0
 	_inbox_distances = []
@@ -193,6 +198,7 @@ func _run(inputs: Dictionary) -> void:
 		_apply_distances(r["epoch"], r["tiles"], r["bits"])
 	for fill: Vector2 in inputs["fills"]:
 		_apply_fill_time(int(fill.x), fill.y)
+	_cloud_in_reach = inputs["cloud_in_reach"]
 	_result = _plan_now(inputs["camera"], inputs["view"], inputs["light"], inputs["budget_ms"], inputs["delta_s"],
 			inputs["reset"])
 
@@ -215,6 +221,7 @@ func _plan_now(camera_earth_m: Vector3, view: Dictionary, light: Dictionary, bud
 		_restart(camera_earth_m)
 	elif schedule.reanchor_needed(camera_earth_m):
 		_reanchor(camera_earth_m)
+	schedule.set_cloud_in_reach(_cloud_in_reach)
 	_evict_far(camera_earth_m)
 	var light_sun: Vector3 = light["sun_dir"]
 	schedule.mark_light(light_sun, light["weather_weight"], light["light_generation"])
@@ -530,13 +537,14 @@ func _reanchor(camera_earth_m: Vector3) -> void:
 ## largest offset of a kept tile's anchor from the current one (its parallax class's bound). An entry's tiles are
 ## scanned only when the camera may have left the keep distance of the entry's nearest cloud.
 func _evict_far(camera_earth_m: Vector3) -> void:
-	var cap_m := CloudViewCacheSchedule.keep_distance_m(INF)
+	var cap_m := CloudViewCacheSchedule.keep_distance_m(INF, _cloud_in_reach)
 	var deviation_m := 0.0
 	for index in range(ANCHOR_RING):
 		if _anchor_tiles[index] <= 0 or index == anchor_index:
 			continue
 		var offset_m := camera_earth_m.distance_to(_anchor_ring[index])
-		if offset_m > CloudViewCacheSchedule.keep_distance_m(_anchor_min_near_m[index]) or offset_m > cap_m:
+		if offset_m > CloudViewCacheSchedule.keep_distance_m(_anchor_min_near_m[index], _cloud_in_reach) \
+				or offset_m > cap_m:
 			var kept := PackedInt32Array()
 			var dropped := PackedInt32Array()
 			var nearest_m := INF
@@ -544,7 +552,7 @@ func _evict_far(camera_earth_m: Vector3) -> void:
 				if _tile_anchor[tile] != index:
 					continue  # refilled from another anchor since
 				var near_m := schedule.near_of(tile)
-				if offset_m > CloudViewCacheSchedule.keep_distance_m(near_m):
+				if offset_m > CloudViewCacheSchedule.keep_distance_m(near_m, _cloud_in_reach):
 					dropped.append(tile)
 				else:
 					kept.append(tile)
@@ -592,7 +600,9 @@ func _shown_now(tile: int, level: int) -> int:
 	var old := _shown[tile]
 	var from := 0  # nothing: a first fill fades in from T = 1 (or the covering march)
 	var slot := -1
-	if old >= 0 and level > old:
+	if old >= 0 and level != old:
+		# A refinement fades from the coarser level; a refresh at a coarser level (motion, Task 5 fix round 2) from the
+		# finer one it showed - that level's texels stay as they were until the tile is refined to it again.
 		from = old + 1
 	elif old >= 0:
 		# A refresh: the shown texels go to a slot first (a slot still fading ends that fade: the ring is too short).

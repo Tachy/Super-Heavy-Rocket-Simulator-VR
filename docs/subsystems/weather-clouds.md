@@ -1096,40 +1096,51 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
     anchor (`CloudViewCacheSchedule.reanchor_needed`) it becomes the anchor, the next entry of a ring of `ANCHOR_RING`
     128 [E]; every tile keeps what it shows from its own anchor (no restart, no tile dropped) until the schedule refills
     it from the new one (its parallax class by error x nearness - a tile without a known cloud joins it only once its
-    anchor is `SKY_REFRESH_FRACTION` 0.5 [E] of its keep distance off, counted at the cap's distance - and the staleness
-    classes, cross-faded from the fade slot; blocks with tiles missing are expanded before those with a parallax only).
+    anchor is `SKY_REFRESH_FRACTION` 0.5 [E] of its keep distance off, counted at the cap's distance, and only while a
+    cloud is in the near shell's reach - and the staleness classes; blocks with tiles missing are expanded before those
+    with a parallax only). **Refreshes because of motion at level 0 (fix round 2, controller ruling)**: a tile picked by
+    the parallax class or rendered from another anchor is refilled at level 0 (1/16 of a full tile's rays) and refined
+    by the finer-level classes from what the budget leaves; it fades from the finer level it showed (that level's texels
+    stay until the tile is refined to it again: no fade slot); light / weather refreshes keep their level (fade slot).
     **Eviction by a tile's own parallax (fix round 1)**: a tile is dropped once the camera is farther from its anchor
     than `CloudViewCacheSchedule.keep_distance_m` = `ANCHOR_EVICT_RATIO` 0.1 [E] x its nearest cached cloud distance
     (200 m for a deck at R_near: the deck passage's measured best), at most `ANCHOR_KEEP_FRACTION` 0.5 [E] x R_near = 1
-    km (clear sky, far clouds: the camera stays inside the anchor's sphere); the planner keeps a tile list and the
-    nearest cloud per ring entry and scans an entry only when the camera may have left its nearest one's keep distance,
-    then hands the schedule the largest kept offset (`set_anchor_deviation`); the tiles of a ring entry about to be
-    reused are dropped too (`CloudViewCacheSchedule.forget`; the near shell's kernel marches them whole in view). The
-    light cache's reach stays camera-centred: with the anchor within 100 m of the camera (tiles of older anchors within
-    1 km) its cascades (kilometres) hold the anchor's rays as the camera's - not tested separately.
-  - **Validation and open (Task 5, fix round 1)**: `cloud_view_cache_test` (the re-anchor at 5 % of R_near, not
+    km while a cloud is within the near shell's reach of the camera (`set_cloud_in_reach`, from CloudLayer's nearest
+    cloud; fix round 2: the camera then stays inside the anchor's sphere). With no cloud in reach the near shell does
+    not run and there is no cap: a clear tile (no cloud along its rays) needs no refresh for the camera's motion and is
+    kept until its ring entry is reused. The planner keeps a tile list and the nearest cloud per ring entry and scans an
+    entry only when the camera may have left its nearest one's keep distance, then hands the schedule the largest kept
+    offset (`set_anchor_deviation`); the tiles of a ring entry about to be reused are dropped too
+    (`CloudViewCacheSchedule.forget`; the near shell's kernel marches them whole in view). The light cache's reach stays
+    camera-centred: with the anchor within 100 m of the camera (tiles of older anchors within 1 km while a cloud is
+    near) its cascades (kilometres) hold the anchor's rays as the camera's - not tested separately.
+    **Lookup under the near shell (fix round 2)**: the lookup keeps the near kernel's result alone exactly where that
+    kernel marched the whole ray (`cloud_cache_pick` unsettled or no level); a first fill (fade weight 0 in the frame it
+    is shown) is composited behind the shell's segment - keeping the segment alone dropped the clouds beyond R_near in
+    the frames after a restart (`--jump_check` deck 0.23 / ground 0.17 since c625926).
+  - **Validation and open (Task 5, fix round 2)**: `cloud_view_cache_test` (the re-anchor at 5 % of R_near, not
     below; through the planner a re-anchor restarts nothing, every tile that showed a level keeps one, refills take the
     new anchor; eviction by a tile's own parallax: a cloud at R_near / 4 / 20 R_near and clear sky kept at 5 / 15 / 45 /
     55 % of R_near off as [all] / [not R_near] / [only 20 R_near and sky] / [none], the schedule's bound the largest
-    kept offset; clear sky joins the parallax class only past 500 m), `cloud_vr_stereo_test` (a tile reprojected from
-    its own anchor 100 / 200 m off: a deck at R_near within 1.2e-6 / 3.8e-4 eye px, 1 km off at 5 R_near 3.8e-4;
+    kept offset; clear sky joins the parallax class only past 500 m; motion refreshes at level 0, light refreshes at
+    their level, a refresh fades from level 2 and the tile converges again; no cloud in reach: a clear tile kept 10 km
+    off, a cloud at 20 R_near dropped by its parallax, no clear-sky refresh), `cloud_vr_stereo_test` (a tile reprojected
+    from its own anchor 100 / 200 m off: a deck at R_near within 1.2e-6 / 3.8e-4 eye px, 1 km off at 5 R_near 3.8e-4;
     the pick across two / three anchors' tiles: every settled ray read from the anchor of the tile it reads within
-    1e-6 px, the unsettled ones only where no tile holds the point - the rules before disagreed on 13 / read an
-    unchecked tile on 132 of the same rays), core `[weather]` "The render field's nearest cloud", cloud_check with
-    `STARSIM_MARCH_REFERENCE` (the per-frame march bit for bit as before Task 5). `render_check --frames_every=0.5
+    1e-6 px, the unsettled ones only where no tile holds the point), core `[weather]` "The render field's nearest
+    cloud", cloud_check with `STARSIM_MARCH_REFERENCE` (the per-frame march bit for bit as before Task 5),
+    `render_check --jump_check` PASS (deck 0.019 / 0.011, ground 0.012 / 0.006). `render_check --frames_every=0.5
     --frames_for=120` (the Starbase ascent through a slab 1.5-2.5 km, `--fly=25`, VR preset at render scale 1.65;
-    the alpha bound 0.06 while the camera is within a layer's extent +- R_near - the field's nearest cloud within
-    R_near -, else 0.02; the first frame after each sample's reference march not counted: its measured GPU time is the
-    reference's): watched from the ground PASS (worst 0.012, GPU median 6.9 / p99 15.2 ms); **on board FAIL**: GPU
-    median 12.3 / p99 24.4 ms (target 22.2; before the fix 27.5) and the deck passage's alpha worst 0.29 (bound 0.06;
-    before 0.059). The frame does not hold the near shell and a fill: the rest of the frame (scene, VR proxy) p95
-    ~14 ms (median 8) plus the near shell in the deck 8-15 ms leave the adaptive budget at its 2 ms floor, so the
-    deck's tiles are refreshed far slower than the camera moves (the anchor-held loss above) - a trade-off between the
-    frame target and the deck's look for the controller. `--jump_check` fails (deck 0.23 / ground 0.17; at c625926
-    already 0.06-0.11): the near shell's first frames after a restart (frames 2-4) show up to 0.2 less coverage than
-    the march - open. The main-thread section `cloud_view_cache` (the nearest-cloud query and the plan's hand-over)
-    over the 5400 flight frames: median 0.057 / p99 0.082 / max 0.18 ms. Open for the user's VR check: the deck
-    passage from on board.
+    the alpha bound 0.06 while the camera is within a layer's extent +- R_near, else 0.02; the first frame after each
+    sample's reference march not counted; per phase: pad / in the layer / outside it): watched from the ground PASS
+    (worst 0.012, GPU p99 15.3 / 14.9 ms); **on board FAIL**: GPU p99 pad 15.9 / in the layer 25.3 / above the deck
+    23.7 ms (target 22.2), the deck passage's alpha worst 0.26 (bound 0.06). Over-target frames are the near shell's
+    march (in the deck 11 ms mean, up to 15; above the deck covering 9 ms) plus the scene (~9.6 ms), not the fill (the
+    budget sits at its 2 ms floor in the deck): the frame does not hold the near shell / covering march and a refresh
+    rate that keeps the view's tiles on an anchor moving 150 m/s - open, a ruling for the controller. The re-anchor
+    timing case of `cloud_view_cache_test` (pick <= 1.0 ms a frame) is flaky at 0.97-1.13 ms since the level-0 refreshes
+    add the refinement frames (509 instead of 213 frames; ~0.35-0.45 ms per classified block, unchanged). The
+    main-thread section `cloud_view_cache` over the 5400 flight frames: median 0.056 / p99 0.079 ms.
   - **Open (Task 4)**: the coarse levels show slightly less cloud than the full one (deck view: coverage 1.9 % below
     the march's for ~2 s after a restart, inside the 0.02 bound); near objects in front of shadowed air get the air
     loss of the whole cached ray scaled by distance only (with the near shell: a cloud texel hidden by nearer geometry

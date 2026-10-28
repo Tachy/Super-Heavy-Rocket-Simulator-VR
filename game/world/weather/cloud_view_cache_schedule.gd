@@ -10,7 +10,9 @@ extends RefCounted
 ## whose parallax error exceeds PARALLAX_REFRESH_PX, by error times nearness; (3) visible tiles below the full level;
 ## (4) tiles stale in light / weather / anchor; (5) the rest below the full level. Each tile counts in the first
 ## class it fits; within a class nearer the view first. A tile that pick() returned stays as it was until completed()
-## reports it: the caller completes what it marches in the same frame.
+## reports it: the caller completes what it marches in the same frame. Missing tiles and the refreshes because of
+## motion (class 2, and the anchor's part of class 4) are picked at level 0, refinements one level up, light refreshes
+## at their level (Task 5 fix round 2).
 ##
 ## The parallax of class 2 is the one a new march would remove: the offset between the anchor the tile was rendered
 ## from and the CURRENT anchor (the viewpoint a march starts from). A camera that left the anchor is the re-anchor's
@@ -61,8 +63,11 @@ const REANCHOR_FRACTION := 0.05
 ## a broken deck) kept its mean alpha best with 200 m at R_near (worst 0.059 against 0.125 at 600 m) - a cached volume
 ## seen from off its anchor loses coverage with the angle.
 const ANCHOR_EVICT_RATIO := 0.1
-## [E] ... and at most this fraction of the near shell's radius (1 km) for any tile (a far cloud, clear sky): the camera
-## stays well inside the anchor's sphere of R_near, from which the tile's content starts (the near shell's end).
+## [E] ... and at most this fraction of the near shell's radius (1 km) for any tile (a far cloud, clear sky) while a
+## cloud is within the near shell's reach of the camera (set_cloud_in_reach): the camera stays well inside the anchor's
+## sphere of R_near, from which the tile's content starts (the near shell's end). With no cloud in reach the near shell
+## does not run and a tile is kept by its own parallax alone - a clear tile (no cloud along its rays) needs no refresh
+## for the camera's motion (Task 5 fix round 2: above a deck at 1 km/s the cap churned the clear sky every second).
 const ANCHOR_KEEP_FRACTION := 0.5
 ## [E] A tile without a known cloud is refreshed once its anchor is this fraction of its keep distance from the current
 ## one (500 m): its refresh comes before its eviction (the camera another ~400 m on: 0.4 s at 1 km/s, a cheap fill
@@ -137,6 +142,7 @@ var _max_anchor_dev_m := 0.0
 var _total_off := 0
 ## The nearest cloud distance (m) a tile's parallax counts with at most: the one whose keep distance is the cap
 ## (keep_distance_m) - a tile without a known cloud counts there.
+## Both INF while no cloud is within the near shell's reach (set_cloud_in_reach: no cap, no clear-sky refresh).
 var _near_cap_m := ANCHOR_KEEP_FRACTION * CloudLayer.near_radius_m() / ANCHOR_EVICT_RATIO
 var _sky_refresh_m := SKY_REFRESH_FRACTION * ANCHOR_KEEP_FRACTION * CloudLayer.near_radius_m()
 var _cone_valid := false
@@ -345,9 +351,16 @@ func reanchor_needed(camera_earth_m: Vector3) -> bool:
 
 ## How far (m) the camera may be from the anchor a tile was rendered from before the tile is dropped
 ## (CloudViewCachePlanner; Task 5 fix round 1): ANCHOR_EVICT_RATIO of the tile's nearest cached cloud distance near_m
-## (INF: none), at most ANCHOR_KEEP_FRACTION of R_near.
-static func keep_distance_m(near_m: float) -> float:
-	return minf(ANCHOR_EVICT_RATIO * near_m, ANCHOR_KEEP_FRACTION * CloudLayer.near_radius_m())
+## (INF: none), at most ANCHOR_KEEP_FRACTION of R_near while a cloud is within the near shell's reach (capped).
+static func keep_distance_m(near_m: float, capped := true) -> float:
+	return minf(ANCHOR_EVICT_RATIO * near_m, ANCHOR_KEEP_FRACTION * CloudLayer.near_radius_m() if capped else INF)
+
+
+## Whether a cloud is within the near shell's reach of the camera (CloudLayer's nearest-cloud query found one; Task 5
+## fix round 2): with none, no tile is capped at ANCHOR_KEEP_FRACTION and a clear tile has no parallax to refresh.
+func set_cloud_in_reach(in_reach: bool) -> void:
+	_near_cap_m = keep_distance_m(INF, in_reach) / ANCHOR_EVICT_RATIO
+	_sky_refresh_m = SKY_REFRESH_FRACTION * keep_distance_m(INF, in_reach)
 
 
 ## The anchor (as pick's) and the largest offset (m) from it of an anchor a tile still shows (the planner, after its
@@ -525,8 +538,15 @@ func pick(_camera_earth_m: Vector3, anchor_earth_m: Vector3, view_dirs: Array[Ve
 		for i in range(mini(keys.size(), budget_tiles - picked.size())):
 			var tile := int(fmod(keys[i], _TILE_RANGE))
 			var level := _level[tile]
-			# Missing and the finer-level classes go one level up; refreshes (parallax, stale) keep the level.
-			var next := 0 if level < 0 else (level if class_index == 1 or class_index == 3 else level + 1)
+			# Missing and the finer-level classes go one level up; a light refresh keeps the level; a refresh because of
+			# motion (the parallax class, a tile rendered from another anchor) goes to level 0 first and is refined by
+			# the finer-level classes from what the budget leaves (Task 5 fix round 2 ruling: coarse, not missing - a
+			# sixteenth of a full tile's rays keeps the view's tiles on the moving anchor).
+			var next := level + 1
+			if level < 0 or class_index == 1 or (class_index == 3 and _stamp[tile] != _anchor_epoch):
+				next = 0
+			elif class_index == 3:
+				next = level
 			picked.append({"tile": tile, "level": next})
 		if picked.size() >= budget_tiles:
 			break

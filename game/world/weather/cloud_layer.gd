@@ -590,7 +590,7 @@ func _update_view_cache(camera_render: Vector3, enabled: bool, delta_s: float) -
 	var light := {"sun_dir": (value as Vector3).normalized(), "weather_weight": _w1,
 		"light_generation": _view_cache_generation}
 	var batch := view_cache_planner.plan(camera_render, effect.view_cache_view(), light, cache_budget_ms(),
-			_view_cache_held_s)
+			_view_cache_held_s, nearest_cloud_m)
 	_view_cache_held_s = 0.0
 	if not batch.is_empty():
 		effect.submit_view_cache_batch(batch)

@@ -111,6 +111,11 @@ const FLY_ALPHA_IN_LAYER_TOLERANCE := 0.06
 ## the reference march's (measured, Task 5 fix round 1: the first one shows its outline pass, 18 - 26 ms; the second
 ## the cache's) - not counted.
 const FLY_GPU_LAG_FRAMES := 1
+## [E] The flight's phases in the report (Task 5 fix round 2: the per-phase numbers): on the pad while the vehicle is
+## within this of its altitude at the flight's start (m; the ascent's first second climbs more), then the camera in the
+## layer (within a cloud layer's extent +- R_near, the alpha bound's rule) or outside it (above the deck).
+const FLY_PAD_RISE_M := 20.0
+const FLY_PHASES := ["pad", "in the layer", "outside the layer"]
 
 var _args := {}
 var _main: Node
@@ -184,6 +189,9 @@ var _fly_gpu_skip := 0  ## flight frames whose measured GPU time is still a refe
 var _fly_section_ms: Array[float] = []  ## the flight frames' main-thread section cloud_view_cache (FrameProfiler)
 var _last_section_ms := 0.0  ## the last frame's section cloud_view_cache (ms)
 var _fly_gpu_ms: Array[float] = []
+var _fly_gpu_phase: Array[int] = []  ## per counted flight frame: its phase (FLY_PHASES)
+var _fly_sample_phase: Array[int] = []  ## per sample: its phase
+var _fly_start_altitude_m := NAN
 var _fly_near_frames := 0
 var _fly_near_at_sample := 0  ## CloudEffect.near_shell_frames when the sample's cache frame was taken
 var _fly_near_sample := false  ## the near shell ran in the frames before the sample
@@ -650,6 +658,7 @@ func _fly_frames_done(world: World) -> bool:
 		# The field's nearest cloud is a lower bound of the vertical gap to a cloudy layer (CloudLayer.nearest_cloud_m).
 		var in_layer: bool = clouds.nearest_cloud_m <= CloudLayer.near_radius_m()
 		_fly_in_layer.append(in_layer)
+		_fly_sample_phase.append(_fly_phase(world))
 		var since := _stats(_fly_gpu_ms.slice(_fly_sample_gpu_from))
 		_fly_sample_gpu_from = _fly_gpu_ms.size()
 		print("render_check: fly sample t %.1f s: annulus %d pixels, mean alpha cache %.4f, march %.4f (diff %.4f), "
@@ -686,6 +695,7 @@ func _fly_frames_done(world: World) -> bool:
 		_fly_gpu_skip -= 1  # the measured GPU time is the previous frame's: the sample's last reference march
 	else:
 		_fly_gpu_ms.append(RenderingServer.viewport_get_measured_render_time_gpu(root.get_viewport_rid()))
+		_fly_gpu_phase.append(_fly_phase(world))
 		var target_ms := float(CloudLayer.PRESETS[clouds.quality]["frame_target_ms"])
 		if _args.has("gpu_passes") and _fly_gpu_ms.back() > target_ms:
 			_print_slow_frame(_fly_gpu_ms.back())
@@ -721,12 +731,38 @@ func _fly_report() -> bool:
 			% [counted[1], FLY_ALPHA_TOLERANCE, FLY_ALPHA_IN_LAYER_TOLERANCE] + "(worst %.4f / %.4f); flight frames %d "
 			% [worst[0], worst[1], gpu["n"]] + "(near shell in %d): GPU median %.2f / p99 %.2f / max %.2f ms (frame "
 			% [_fly_near_frames, gpu["median"], gpu["p99"], gpu["max"]] + "target %.1f ms)" % target)
+	for phase in range(FLY_PHASES.size()):
+		var phase_gpu: Array[float] = []
+		for i in range(_fly_gpu_ms.size()):
+			if _fly_gpu_phase[i] == phase:
+				phase_gpu.append(_fly_gpu_ms[i])
+		var phase_worst := 0.0
+		var phase_counted := 0
+		for i in range(_fly_samples.size()):
+			if _fly_sample_phase[i] == phase and _fly_samples[i].y >= FLY_MIN_ANNULUS:
+				phase_counted += 1
+				phase_worst = maxf(phase_worst, absf(_fly_samples[i].z - _fly_samples[i].w))
+		var phase_stats := _stats(phase_gpu)
+		print("render_check: frames_every phase %s: %d frames, GPU median %.2f / p99 %.2f / max %.2f ms; %d samples "
+				% [FLY_PHASES[phase], phase_stats["n"], phase_stats["median"], phase_stats["p99"], phase_stats["max"],
+				phase_counted] + "with an annulus, worst alpha difference %.4f" % phase_worst)
 	var section := _stats(_fly_section_ms)
 	print("render_check: frames_every main thread (section cloud_view_cache: the nearest cloud, the plan's hand-over) "
 			+ "over %d flight frames: median %.3f / p99 %.3f / max %.3f ms" % [section["n"], section["median"],
 			section["p99"], section["max"]])
 	_check_failed = _check_failed or not ok
 	return true
+
+
+## The flight's phase now (FLY_PHASES): on the pad, in a cloud layer's extent +- R_near, or outside it.
+func _fly_phase(world: World) -> int:
+	var sim := world.flight.sim
+	var altitude_m: float = sim.telemetry(sim.controlled_index())["altitude_m"]
+	if is_nan(_fly_start_altitude_m):
+		_fly_start_altitude_m = altitude_m
+	if altitude_m - _fly_start_altitude_m <= FLY_PAD_RISE_M:
+		return 0
+	return 1 if world.clouds.nearest_cloud_m <= CloudLayer.near_radius_m() else 2
 
 
 ## The eye pixels (every FLY_STRIDE-th per axis) whose march cloud distance lies within FLY_ANNULUS_FACTOR of the near
