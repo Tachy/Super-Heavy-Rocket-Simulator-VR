@@ -983,6 +983,28 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   Round 2 (Task 2b): `--spike_levers=1,2,4,s,t` / `--spike_stop=<T>` switch the step rule's levers (a bake max volume:
   the 3^3-texel max per bake cell, or minus the Chebyshev distance of a clear cell; Delta tau from it, sphere tracing on
   it, one analytic step per bake cell, trilinear / structure options); numbers in `vr-performance.md` round 2.
+- World volume layout and upkeep schedule (world volume plan Task 3; pure logic, no GPU; headless
+  `res://tests/cloud_world_volume_test.gd`, ~80 checks, prints `cloud_world_volume_test: PASS`):
+  - `CloudWorldVolumeLayout` (`game/world/weather/cloud_world_volume_layout.gd`): 8 levels of 256 x 256 x 128 toroidal
+    cells (cell sizes `CELL_H_M` 50 m .. 6.4 km, `CELL_V_M` 25 / 50 / 164.0625 m over the shell -500 .. 20 500 m); the
+    horizontal axes are the azimuthal-equidistant projection about the frame origin on the Gaussian-radius sphere
+    (geodetic normal of the point, so no flat-tangent miss), z = ellipsoid height (round trip < 1e-6 m). Render axes
+    (polar axis +Y). A level's window is centred on the camera's ground point and snapped to the cell; levels 0-1 are
+    centred vertically on the camera height and clamped at the shell BOTTOM only (no top clamp, so level 0 switches
+    off at 22.1 km without a pop; `level_active`), and fade at their vertical window edges except at the clamped
+    bottom (`fade_weight`, 8 cells; the GLSL mirror needs `origin`, `vertical_fade`, `clamped_bottom` from the lookup).
+    `exposed_slabs` gives disjoint half-open boxes; `box_split` / `box_clip` are the shared box helpers.
+    Max-extinction mip / distance field: `MIP_DIV` 4 -> `mip_size()` 64 x 64 x 32 texels per level.
+  - `CloudWorldVolumeSchedule` (`..._schedule.gd`): `plan(camera, sun, moon, blend, cloud_top_m, jumped, delta_s,
+    slot_ids)` -> `bake` ({level, from, to, snapshot_channel -1 = both | slot, spare}), `provisional` (+ `from_column`
+    for the coarsest level), `light` (+ `moon`), `reframe`, `lookup` (state after the batch: per level origin /
+    active / ready / frame origin; `slot_ready`; the spare while it fades). Exposed slabs are baked in the adopting
+    plan (not budgeted) and lit first; fills (cold start, jump, level on) are baked under the budget coarse to fine
+    (only the coarsest level whole at once); a replaced snapshot slot is rebaked alone (`slot_ready`). Light
+    refresh generations (Sun / Moon / blend triggers, tiles nearest first, equal shares finest first) as in the file
+    header. Spike frames (cold start, jump, re-frame, until `complete()`): 3 ms split bake / light, else 0.5 / 1.0 ms.
+    Calibration: `feedback()`; start rates 1 M bake and 1.12 M light cells/ms [E]. Measured (headless): fill 41 frames
+    (0.9 s at 45 Hz), `plan()` p99 0.28 ms at 7.8 km/s, orbital-speed bake 54.7 k cells/frame (= the layout formula).
 - Real sessions (VR or desktop): `Start-VR.cmd --perf-log` (`PerfLog`, `game/util/perf_log.gd`) writes
   `data/perf/perf_<date>_<time>.csv`: one row per second (frame interval p50 / p99 / max, root viewport GPU / CPU render
   time, main-thread script time, camera altitude, cloud far field / upload state, draw calls, VRAM) plus a "spike" row for every
