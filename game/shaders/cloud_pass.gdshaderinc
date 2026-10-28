@@ -726,6 +726,9 @@ void cloud_march(vec3 dir, vec3 origin, float scene_m, float jitter, vec3 eclips
 #ifdef CLOUD_CACHE_FILL
 	d0 = max(d0, cloud_march_start_m);  // the cache holds what lies beyond the near shell (Task 5)
 #endif
+#ifdef CLOUD_SPIKE_CLIP_M
+	d0 = max(d0, CLOUD_SPIKE_CLIP_M);  // spike S's reference: the far part [R_near, end] alone (CloudSpike, Task 13 removes)
+#endif
 	bool surface = scene_m < d1;  // the ray ends on the scene, not on the cloud shell
 	d1 = min(d1, scene_m);
 	if (d1 <= d0) {
@@ -1570,6 +1573,10 @@ void cloud_shade_near(vec3 dir_earth, vec3 origin_offset, float scene_m, ivec2 n
 // The eye ray's end at the near shell (m from the eye; <= 0: the whole ray), cloud_view_cache.gdshaderinc.
 float cloud_near_shell_end(vec3 eye_offset, vec3 dir);
 #endif
+#ifdef CLOUD_SPIKE_FAR
+// World volume plan Task 2, spike S (throw-away, removed in Task 13): the far tier's ray, cloud_spike.gdshaderinc.
+void cloud_spike_shade(vec3 dir, vec3 eye, float scene_m, out vec4 color_t, out float cloud_m);
+#endif
 
 #ifndef CLOUD_CACHE_FILL
 #ifdef CLOUD_CENTRE
@@ -1757,7 +1764,9 @@ void main() {
 	// One ray through the pixel's centre from the eye (the centre view: the head).
 	vec4 color_t;
 	float cloud_m;
-#ifdef CLOUD_NEAR_SHELL
+#if defined(CLOUD_SPIKE_FAR)
+	cloud_spike_shade(cloud_ray_earth(centre), cloud_view.eye_earth.xyz, scene_m, color_t, cloud_m);  // spike S
+#elif defined(CLOUD_NEAR_SHELL)
 	// The near shell (cloud view cache Task 5): up to the shell around the anchor of the cache tile the ray meets there.
 	vec3 dir_near = cloud_ray_earth(centre);
 	cloud_march_end_m = cloud_near_shell_end(cloud_view.eye_earth.xyz, dir_near);

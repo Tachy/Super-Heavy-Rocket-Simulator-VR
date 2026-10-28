@@ -63,6 +63,11 @@
 #          writes <out>_counter_<name>.png (normalised to the maximum); --ablate=<name,...> switches work off for timing
 #          runs (CloudEffect.ABLATIONS: density, light, air, field, shape, detail, subsamples, outline, air_shadow,
 #          far_tier; the environment variable STARSIM_CLOUD_ABLATE does the same).
+# Spike S (world volume plan Task 2; throw-away, removed in Task 13): --spike=a|b runs CloudSpike's far tier alone
+#          ([2 km, end] from the cyclops point; a: procedural density, b: baked) instead of the march, --spike=ref today's
+#          march clipped to [2 km, end] (the sanity check's reference; with --handover=0,0); --spike_scale=0.5|1.0 its
+#          resolution per axis. Prints the centre image's mean alpha / luminance and the spike's plan; with --counters
+#          also tau_limited_steps, extinction_steps, structure_limited_steps (occupied_steps: steps in occupied space).
 # Stereo harness (world volume plan Task 1): --stereo=<json> renders through the multiview path with a stand-in headset
 #          (StereoMockXr: the recorded per-eye projections, eye transforms and render target of the JSON that PerfLog
 #          writes at a VR start, game/tests/data/pimax_dream_air_projections.json) with the VR cloud preset (unless
@@ -231,6 +236,8 @@ func _initialize() -> void:
 	CloudEffect.counters = _args.has("counters")
 	if _args.has("ablate"):
 		CloudEffect.ablate = PackedStringArray(String(_args["ablate"]).split(",", false))
+	if _args.has("spike") and not _start_spike():
+		return
 	if _args.has("stereo") and not _start_stereo(String(_args["stereo"])):
 		return
 	_main = load("res://main.tscn").instantiate()
@@ -406,6 +413,10 @@ func _process(_delta: float) -> bool:
 			and _frames < TERRAIN_MAX_FRAMES
 	# The cloud view cache (on unless --no_view_cache): until nothing is left to fill (its timing printed below).
 	var cache_waiting := _cache_waiting(world)
+	if CloudSpike.failed:
+		_refuse("render_check: the spike's plan was refused (see the CloudSpike error)")
+		return true
+	cache_waiting = cache_waiting or (CloudSpike.mode != CloudSpike.Mode.OFF and not CloudSpike.ready)  # spike S's build
 	if _frames >= FRAMES_TO_SETTLE and not weather_waiting and not clouds_waiting and not cache_waiting \
 			and (_terrain_idle >= FRAMES_TO_SETTLE or _frames >= TERRAIN_MAX_FRAMES):
 		if _args.has("ab_view_cache") and not _ab_frames(world):
@@ -459,6 +470,8 @@ func _process(_delta: float) -> bool:
 				world.moon_light.light_energy if world.moon_light.visible else 0.0, a.brightness, a.chroma])
 		if _args.has("counters"):
 			_print_counters(world)
+		if _args.has("spike"):
+			_print_centre_stats(world)
 		# Default: <repo>/screenshots/ (git-ignored; every test image goes there, user 2026-10-27).
 		var out: String = _args.get("out", ProjectSettings.globalize_path("res://").path_join(
 				"../screenshots/render_check.png").simplify_path())
@@ -487,6 +500,10 @@ func _print_counters(world: World) -> void:
 		return
 	var values := data.to_int32_array()  # the texels' uints (counts stay far below 2^31)
 	var names := ["density_fetches", "light_fetches", "occupied_steps", "empty_steps"]
+	# Spike S (cloud_spike.gdshaderinc): channels 1-3 carry a second count in their high 16 bits.
+	var spike := CloudSpike.mode != CloudSpike.Mode.OFF
+	if spike:
+		names.append_array(["tau_limited_steps", "extinction_steps", "structure_limited_steps"])
 	var count := low.x * low.y
 	for channel in range(names.size()):
 		var column := PackedInt32Array()
@@ -494,7 +511,9 @@ func _print_counters(world: World) -> void:
 		var sum := 0
 		var largest := 0
 		for i in range(count):
-			var v := values[4 * i + channel]
+			var v := values[4 * i + (channel if channel < 4 else channel - 3)]
+			if spike and channel >= 1:
+				v = (v >> 16) & 0xffff if channel >= 4 else v & 0xffff
 			column[i] = v
 			sum += v
 			largest = maxi(largest, v)
@@ -1155,6 +1174,52 @@ func _weather_online() -> bool:
 		return false
 	var value: String = _args["weather"]
 	return value == "" or value == "online" or value.is_valid_float()
+
+
+## --spike=a|b|ref (world volume plan Task 2, spike S; throw-away, removed in Task 13): CloudSpike's far tier (a: the
+## procedural density, b: the bake) or the sanity check's reference (today's march clipped to [R_near, end]), the
+## per-frame march (no view cache), the occupancy's band from a --weather=slab:<bottom>,<top>,..., --spike_scale=0.5|1.0
+## the far tier's resolution per axis (the cloud pass's divisor 2 / 1). false (exit 1) on an unknown value.
+func _start_spike() -> bool:
+	var value: String = _args["spike"]
+	if not value in ["a", "b", "ref"]:
+		_refuse("render_check: unknown --spike=%s (a, b, ref)" % value)
+		return false
+	CloudSpike.mode = {"a": CloudSpike.Mode.PROCEDURAL, "b": CloudSpike.Mode.BAKED, "ref": CloudSpike.Mode.OFF}[value]
+	CloudSpike.reference_clip = value == "ref"
+	_args["no_view_cache"] = ""
+	var scale: String = _args.get("spike_scale", "0.5")
+	if not scale in ["0.5", "1.0"]:
+		_refuse("render_check: unknown --spike_scale=%s (0.5, 1.0)" % scale)
+		return false
+	_args["cloud_divisor"] = "2" if scale == "0.5" else "1"
+	var weather: String = _args.get("weather", "")
+	if weather.begins_with("slab:"):
+		var p := weather.trim_prefix("slab:").split(",")
+		CloudSpike.band_m = Vector2(float(p[0]), float(p[1]))
+	return true
+
+
+## --spike: the centre view's march image (the far tier's colour + T) - mean alpha and mean luminance (Rec. 709) over
+## all its pixels, the sanity check's quantities.
+func _print_centre_stats(world: World) -> void:
+	var effect: CloudEffect = world.clouds.effect
+	var data := effect.debug_centre_data("color")
+	var low := effect.centre_low
+	var count := low.x * low.y
+	if data.size() < 8 * count or count == 0:
+		print("render_check: spike centre: no data")
+		return
+	var alpha := 0.0
+	var luminance := 0.0
+	for i in range(count):
+		var o := 8 * i
+		luminance += 0.2126 * data.decode_half(o) + 0.7152 * data.decode_half(o + 2) + 0.0722 * data.decode_half(o + 4)
+		alpha += 1.0 - data.decode_half(o + 6)
+	print("render_check: spike centre %dx%d mean alpha %.4f mean luminance %s (%s)" % [low.x, low.y, alpha / count,
+			luminance / count, _args["spike"]])
+	if CloudSpike.plan_report != "":
+		print("render_check: " + CloudSpike.plan_report)
 
 
 ## The online wait limit [s] of --weather (900 unless --weather=<seconds>).

@@ -114,6 +114,8 @@ var light_cache: CloudLightCache
 ## then. With the shader global cloud_view_cache (CloudLayer.view_cache) and no debug output the frame shows it: the
 ## batch's tiles filled under the budget, then each eye's lookup (CLOUD_CACHE_LOOKUP) - no march, no upsample.
 var view_cache: CloudViewCache
+## World volume plan Task 2, spike S (throw-away, removed in Task 13): the far tier's spike (CloudSpike.mode).
+var spike: CloudSpike
 ## Fills run so far (checks: a request was served).
 var view_cache_fills := 0
 ## Render thread, the last frame (diagnostics): the view cache was shown; the tiles its batch filled.
@@ -301,6 +303,8 @@ static func diagnostic_defines() -> PackedStringArray:
 	var defines := PackedStringArray()
 	if counters:
 		defines.append("CLOUD_COUNTERS")
+	if CloudSpike.reference_clip:  # spike S's reference: the march's far part alone (Task 13 removes it)
+		defines.append("CLOUD_SPIKE_CLIP_M %.1f" % CloudSpike.R_NEAR_M)
 	for n in ablate:
 		if n in ABLATIONS:
 			defines.append("CLOUD_ABLATE_" + n.to_upper())
@@ -531,6 +535,9 @@ func _notification(what: int) -> void:
 		for rid: RID in outputs:
 			if rid.is_valid():
 				_rd.free_rid(rid)
+		_shaders.erase("spike_far")  # the spike's own (freed below)
+		if spike != null:
+			spike.free_all()
 		for shader: RID in _shaders.values():
 			_rd.free_rid(shader)  # frees the pipelines with them
 		for sampler: RID in _samplers.values():
@@ -733,6 +740,24 @@ func _render_pass(_callback_type: int, render_data: RenderData) -> void:
 		for level in range(CloudViewCacheLayout.LEVELS):  # the lookup's distances: its tile / anchor rule (fix round 1)
 			march_set1.append(_tex(10 + level, nearest_clamp, view_cache.distance_texture(level)))
 		refine = false
+	# World volume plan Task 2, spike S (throw-away, removed in Task 13): the spike's far-tier march in the march's place
+	# (its volumes built over the first frames; no outline pass).
+	if CloudSpike.mode != CloudSpike.Mode.OFF and cache_mode == CacheMode.OFF:
+		if spike == null:
+			spike = CloudSpike.new()
+			if not spike.setup(_rd, stereo):
+				CloudSpike.mode = CloudSpike.Mode.OFF
+		var extra: Array[RDUniform] = []
+		if CloudSpike.mode != CloudSpike.Mode.OFF:
+			extra = spike.frame(set0, _samplers, camera, world_to_earth * view_to_world.basis, centre_projection,
+					pixel_angle)
+		if not extra.is_empty():
+			_shaders["spike_far"] = spike.far_shader
+			_pipelines["spike_far"] = spike.far_pipeline
+			march = "spike_far"
+			march_set0 = UniformSetCacheRD.get_cache(spike.far_shader, 0, set0)
+			march_set1.append_array(extra)
+			refine = false
 	# The outline pass's set 1: the march's, its colour read (binding 6), the refined image written instead and the
 	# outline list (binding 7, its count reset here: no buffer updates inside a compute list).
 	var refine_set1 := []

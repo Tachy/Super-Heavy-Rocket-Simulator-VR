@@ -964,6 +964,22 @@ the eye, the far field on the scaled-space Earth, the performance gate. Supersed
   the counters of its own run); with neither switch the kernels are the game's (cloud_check section 15 bit-identical to
   the reference saved before the change). Later world-volume tasks reuse the names `density`, `light`, `air` and the
   counter names (their occupied step = inside the occupancy volume).
+- Spike S (world volume plan Task 2; throw-away, removed in Task 13; numbers in `vr-performance.md` "Spike S"):
+  `render_check.gd --spike=a|b [--spike_scale=0.5|1.0]` (with `--stereo`, a slab `--cloud_view`, `--handover=0,0`)
+  replaces the march by `CloudSpike` (`game/world/weather/cloud_spike.gd`, `game/shaders/cloud_spike.gdshaderinc`):
+  the far tier alone, rays [2 km, end] from the cyclops point over the centre view (divisor 2 / 1), over scratch
+  volumes built over the first frames (one dispatch per frame; render_check waits for `CloudSpike.ready`): an
+  occupancy over the view's band region (200 m cells, 4^3 taps of `cloud_extinction_at` at each tap's own footprint +
+  the lift-bound shape test, Chebyshev distance field capped at 16 cells, max extinction dilated by one cell; grid
+  azimuthal-equidistant about the camera, model height; tiles of 2048 texels stacked in depth for D3D12's 3-D limit),
+  for (b) a 100 m bake of the cell-mean extinction and a dummy RGBA16F light volume. Steps: sphere tracing where the
+  distance is >= 2 cells, else min(Delta tau 0.3 from the max extinction, half a cell, 1/4 of the finest structure at
+  the footprint) >= 2 m, one sample per step, constant light (per-ray Sun irradiance / 4 pi), today's termination; no air.
+  (a) samples `cloud_extinction_at`, (b) one bake fetch + one light fetch. `--spike=ref` is the sanity check's
+  reference: today's march with `CLOUD_SPIKE_CLIP_M` (its rays start at 2 km). The log prints the plan
+  (`spike plan: ...`) and `spike centre <w>x<h> mean alpha a mean luminance l`; with `--counters` the channels carry
+  extra counts in their high 16 bits (`tau_limited_steps`, `extinction_steps`, `structure_limited_steps`;
+  `occupied_steps` = steps in occupied space, the dilated occupancy).
 - Real sessions (VR or desktop): `Start-VR.cmd --perf-log` (`PerfLog`, `game/util/perf_log.gd`) writes
   `data/perf/perf_<date>_<time>.csv`: one row per second (frame interval p50 / p99 / max, root viewport GPU / CPU render
   time, main-thread script time, camera altitude, cloud far field / upload state, draw calls, VRAM) plus a "spike" row for every

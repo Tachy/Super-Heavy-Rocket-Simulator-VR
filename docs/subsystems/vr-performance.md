@@ -458,3 +458,36 @@ evaluated on occupied steps only). Cost per occupied step, the number Spike S co
 occupied steps summed over the image = 32.7 ms / 4.77e6 = 6.9 ns (ground), 37.2 ms / 5.69e6 = 6.5 ns (deck); the whole
 cloud pass (outline refine included) 8.7 / 8.2 ns. The empty steps are 95 % / 95 % of all steps and about 18 times more
 numerous; their field-cell fetches (about 13 per empty step in a cloud-free slab run) are most of the density fetches.
+
+## Spike S: far tier, baked vs procedural density (cloud world volume plan Task 2, 2026-10-28)
+
+The far tier alone (`CloudSpike`, `weather-clouds.md` Diagnostics): rays [2 km, end] from the cyclops point over the
+union of both eye frusta (stereo harness, provisional Pimax projections, 0.5x: centre image 2196 x 1420 = 3.12 Mpx;
+1.0x: 4392 x 2839), perfect occupancy (view-exact taps, 200 m cells, Chebyshev distance field), constant light, no air.
+(a) per-step `cloud_extinction_at`; (b) one fetch of a 100 m bake + one dummy RGBA16F light fetch. Gate views V1 (pad,
+slab 1-2.5 km cf 0.5) and V3 (9 km above slab 1.5-2.5 km), `--handover=0,0 --gpu_time=120 --gpu_passes`; sdd logs
+`t2_<view>_<spike>_<tag>.log`, summary `t2_summary.txt`. March kernel ms, median / p99 (`c`: without counters):
+
+| | V3 (a) | V3 (b) | V1 (a) | V1 (b) | V3 (b) 1.0x |
+|---|---|---|---|---|---|
+| march, no counters | 23.5 / 41.1 | **12.4 / 25.3** | 34.7 / 52.4 | 17.7 / 28.8 | 72.7 / 91.3 |
+| march, counters | 24.9 / 44.3 | 13.1 / 26.6 | 39.8 / 61.2 | 19.0 / 34.9 | 48.7 / 102.6 |
+| occupied steps / px median, p90, p99; mean | 124, 587, 1581; 219 | 121, 591, 1425; 215 | 227, 917, 2343; 358 | 228, 927, 2116; 356 | 122, 620, 1512; 227 |
+| of them Delta-tau limited / with extinction > 0 | 97 % / 16 % | 97 % / 40 % | 72 % / 7 % | 72 % / 21 % | 94 % / 38 % |
+| empty (sphere-traced) steps / px median | 1 | 1 | 0 | 0 | 1 |
+| ps per occupied step (counter run) | 36.4 | 19.5 | 35.7 | 17.1 | 17.2 |
+| density fetch ps / step (ablation `density`) | 27.6 | 9.4 | 27.7 | 7.7 | |
+| light fetch ps / step (ablation `light`) | - | 2.1 | - | 2.4 | |
+
+Today's march over the same far part (`--spike=ref`): V1 21.5 / 38.4 ms. Sanity (mean alpha of the centre image):
+V3 ref 0.4655, (a) 0.4710, (b) 0.4763; V1 ref 0.3513, (a) 0.3558, (b) 0.3595; luminance (b) vs (a) +0.1 % / -0.5 %.
+The 1.0x run without counters measured slower than with counters (72.7 vs 48.7 ms): run-to-run spread at that load
+(both p99 > 90 ms); the per-step figure is from the counter run. Ablation `density` replaces the fetch by half the
+occupancy's max extinction (no fetch): the rays end sooner (2.4e8 vs 6.7e8 steps in V3), so its split is per step.
+
+Rules (spec G): (b) <= 5 ms in V3: no (12.4 ms). (b) >= 1.5x cheaper per occupied step than (a): yes (1.87x V3, 2.09x
+V1). > 100 occupied steps per pixel in V3 despite perfect occupancy: yes (median 121, mean 215). (b) > 10 ms: yes - stop
+and report. The cost is the step count: inside occupied cells the step is 0.3 / (the cell's dilated max extinction) -
+real cumulus has ~0.05-0.15 /m, so 2-6 m steps also through the cells' clear parts (V3 (b): 60 % of the occupied steps
+sample no extinction), down to the scaled termination (tau ~18 at k = 1 - g^2). At (b)'s 19.5 ps a step, 5 ms in V3 is
+~82 occupied steps per pixel on average (2.6x fewer).
