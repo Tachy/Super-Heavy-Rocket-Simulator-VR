@@ -226,6 +226,47 @@ func completed(tile: int, level: int, state: Dictionary) -> void:
 			_max_anchor_dev_m = 0.0
 
 
+## completed() for many tiles of one state (tiles[i] now holds levels[i]): the same result, the state read once and the
+## per-tile helpers inlined (cloud view cache Task 4: ~128 tiles a frame on the main thread).
+func completed_batch(tiles: PackedInt32Array, levels: PackedInt32Array, state: Dictionary) -> void:
+	var anchor: Vector3 = state["anchor_earth_m"]
+	var stamp := _anchor_epoch if is_nan(_current_anchor.x) or anchor.distance_to(_current_anchor) <= ANCHOR_MOVE_M \
+			else -1
+	var sun := (state["sun_dir"] as Vector3).normalized()
+	var weight: float = state["weather_weight"]
+	var generation: int = state["light_generation"]
+	var stale := 1 if _have_light and (sun.dot(_current_sun) < _cos_sun_refresh \
+			or absf(weight - _current_weight) > WEATHER_REFRESH or generation != _current_generation) else 0
+	var per_side := layout.tiles_per_side
+	for i in range(tiles.size()):
+		var tile := tiles[i]
+		var level := levels[i]
+		var block := (tile / (per_side * per_side) * _blocks_per_side + (tile / per_side) % per_side / BLOCK_TILES) \
+				* _blocks_per_side + tile % per_side / BLOCK_TILES
+		var old := _level[tile]
+		var was_open := old < MAX_LEVEL or _stale[tile] != 0 or _stamp[tile] != _anchor_epoch
+		var was_off := old >= 0 and _stamp[tile] != _anchor_epoch
+		if old < 0 and level >= 0:
+			_block_missing[block] -= 1
+		_level[tile] = level
+		_anchor_earth_m[tile] = anchor
+		_stamp[tile] = stamp
+		_sun_dir[tile] = sun
+		_weather_weight[tile] = weight
+		_light_generation[tile] = generation
+		_stale[tile] = stale
+		var is_open := level < MAX_LEVEL or stale != 0 or stamp != _anchor_epoch
+		if was_open != is_open:
+			_block_open[block] += 1 if is_open else -1
+		var is_off := level >= 0 and stamp != _anchor_epoch
+		if was_off != is_off:
+			var step := 1 if is_off else -1
+			_block_off[block] += step
+			_total_off += step
+			if _total_off == 0:
+				_max_anchor_dev_m = 0.0
+
+
 ## The level a tile holds (-1: none).
 func level_of(tile: int) -> int:
 	return _level[tile]

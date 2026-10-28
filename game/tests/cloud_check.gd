@@ -444,6 +444,7 @@ func _run() -> void:
 		_fail_and_quit("cloud noise not ready")
 		return
 	_clouds.quality = CloudLayer.Quality.DESKTOP
+	_clouds.view_cache = false  # the march is what these sections check (section 15 fills the cache on request)
 	_detail_off()
 	_check("transfer table loaded", _clouds.transfer_ready, "config/" + CloudLayer.TRANSFER_TABLE)
 

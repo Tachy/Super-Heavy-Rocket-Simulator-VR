@@ -29,8 +29,45 @@ func _initialize() -> void:
 	_test_parallax()
 	_test_budget_and_levels()
 	_test_timing()
+	_test_completed_batch()
 	print("cloud_view_cache_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
+
+
+## completed_batch (cloud view cache Task 4) leaves the schedule as completed() tile by tile does: two schedules through
+## the same frames (picks, a light change, an anchor move, refills) agree on every tile's level and staleness and on
+## the next pick.
+func _test_completed_batch() -> void:
+	var layout := _layout(1024)
+	var single := CloudViewCacheSchedule.new(layout)
+	var batched := CloudViewCacheSchedule.new(layout)
+	var view := _view_grid(deg_to_rad(50.0), VIEW_STEP_RAD)
+	var anchor := Vector3(1.0e6, 2.0e6, 3.0e6)
+	var sun := Vector3(0.0, 1.0, 0.0)
+	var same := true
+	for frame in range(60):
+		if frame == 20:
+			sun = sun.rotated(Vector3.RIGHT, 0.01)  # stale tiles
+		if frame == 40:
+			anchor += Vector3(5.0, 0.0, 0.0)  # off tiles
+		for s: CloudViewCacheSchedule in [single, batched]:
+			s.mark_light(sun, 0.5, 1)
+		var picks := single.pick(anchor, anchor, view, 128, VIEW_SAMPLE_RAD)
+		same = same and picks == batched.pick(anchor, anchor, view, 128, VIEW_SAMPLE_RAD)
+		var state := _state(sun, 0.5, 1, anchor)
+		var tiles := PackedInt32Array()
+		var levels := PackedInt32Array()
+		for p in picks:
+			single.completed(p["tile"], p["level"], state)
+			tiles.append(p["tile"])
+			levels.append(p["level"])
+		batched.completed_batch(tiles, levels, state)
+	for tile in range(layout.tile_count()):
+		same = same and single.level_of(tile) == batched.level_of(tile) \
+				and single.is_stale(tile) == batched.is_stale(tile)
+	same = same and single.pick(anchor, anchor, view, 500, VIEW_SAMPLE_RAD) \
+			== batched.pick(anchor, anchor, view, 500, VIEW_SAMPLE_RAD)
+	_check(same, "completed_batch: the same levels, staleness and picks as completed() per tile over 60 frames")
 
 
 func _layout(face_texels := 3200) -> CloudViewCacheLayout:

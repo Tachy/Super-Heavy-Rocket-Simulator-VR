@@ -32,6 +32,20 @@ const CENTRE_PROBE_M := 1.0e6
 const EDGE_SOFT_M := 20.0
 const TENT_RADIUS_MIN := 1.0
 const TENT_RADIUS_MAX := 2.0
+## cloud_view_cache.gdshaderinc (cloud view cache Task 4): the lookup's parallax iterations and the distance of a texel
+## without cloud (rotation only).
+const CACHE_PARALLAX_ITERATIONS := 3
+const CACHE_FAR_M := 1.0e7
+## The cache lookup's bound: a cloud point lands within a quarter of an eye pixel of the eye's direct ray, at the
+## headset's ~35 px/deg (cloud view cache spec).
+const CACHE_PARALLAX_TOLERANCE_PX := 0.25
+const EYE_PX_PER_RAD := 35.0 * 180.0 / PI
+## The camera's offset from the anchor in the parallax case (m): a moved camera before a re-anchor.
+const CACHE_CAMERA_OFFSET_M := 50.0
+## The deck field is asserted from this distance on (m): a deck nearer than ~2 km seen 50 m off the anchor needs a 4th
+## iteration (0.6 eye px left at 300 m after 3) - the near shell's reach (R_near, cloud view cache Task 5), marched per
+## frame, not looked up. Printed below it.
+const CACHE_DECK_ASSERTED_M := 2000.0
 
 var _failures := 0
 
@@ -49,6 +63,8 @@ func _initialize() -> void:
 		for azimuth in [0.0, 0.3, -0.6]:
 			_test_centre_upsample(distance_m, azimuth)
 	_test_edge_radius()
+	for distance_m in [300.0, 2000.0, 20000.0]:
+		_test_cache_parallax(distance_m)
 	print("cloud_vr_stereo_test: %s" % ("PASS" if _failures == 0 else "FAIL (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
 
@@ -336,6 +352,71 @@ func _test_edge_radius() -> void:
 	var in_metres := _tent_radius(8000.0, angle) * 8000.0 * angle
 	_check(absf(in_metres - EDGE_SOFT_M) < 1.0e-6 or _tent_radius(8000.0, angle) in [TENT_RADIUS_MIN, TENT_RADIUS_MAX],
 			"edge radius: %.1f m wide at 8 km between the limits" % in_metres)
+
+
+## cloud_view_cache.gdshaderinc cloud_cache_lookup (mirror): the anchor's direction q an eye ray (offset o = eye -
+## anchor, unit dir) reads the cache at - the root of g(s) = r(q(s)) - |o + s dir| along the eye ray, q(s) the
+## direction of o + s dir and r the cached cloud distance from the anchor (no cloud: CACHE_FAR_M). The first two steps
+## are fixed-point steps (the eye ray's point at the cached distance from the anchor, |o + s dir| = r), the next ones
+## secant steps on g while both ends saw cloud (a flat deck seen 50 m off the anchor converged by only ~0.4 per
+## fixed-point step: 25 eye px left after three); CACHE_PARALLAX_ITERATIONS + 1 distance reads. distance_of: q -> r
+## (m, 0 without cloud).
+static func _cache_lookup(offset: Vector3, dir: Vector3, distance_of: Callable) -> Vector3:
+	var b := offset.dot(dir)
+	var c := offset.length_squared()
+	var r: float = distance_of.call(dir)
+	var s_prev := -b + sqrt(maxf(b * b - c + _cache_far(r) * _cache_far(r), 0.0))
+	r = distance_of.call((offset + dir * s_prev).normalized())
+	var g_prev := r - (offset + dir * s_prev).length() if r > 0.0 else NAN
+	var s := -b + sqrt(maxf(b * b - c + _cache_far(r) * _cache_far(r), 0.0))
+	for i in range(1, CACHE_PARALLAX_ITERATIONS):
+		r = distance_of.call((offset + dir * s).normalized())
+		var g := r - (offset + dir * s).length() if r > 0.0 else NAN
+		var next := -b + sqrt(maxf(b * b - c + _cache_far(r) * _cache_far(r), 0.0))
+		if not is_nan(g) and not is_nan(g_prev) and g != g_prev:
+			var secant := s - g * (s - s_prev) / (g - g_prev)
+			next = secant if secant > 0.0 else next
+		s_prev = s
+		g_prev = g
+		s = next
+	return (offset + dir * s).normalized()
+
+
+static func _cache_far(r: float) -> float:
+	return r if r > 0.0 else CACHE_FAR_M
+
+
+## The parallax of the view cache lookup (mirror): a cloud point at distance_m seen from each eye (IPD_M, the head at
+## the anchor) and from a camera CACHE_CAMERA_OFFSET_M off the anchor (across, along and up the view): the cached point
+## the lookup reads (A + r(q) q) lies within CACHE_PARALLAX_TOLERANCE_PX eye pixels of the eye's direct ray to the
+## point. Two cached fields: the point's distance in every direction (a cloud at that distance) and a flat deck through
+## the point (the distance varies with the direction; the point 30 deg below the horizon).
+func _test_cache_parallax(distance_m: float) -> void:
+	var point_dir := Vector3(0.3, -0.5, -0.8).normalized()
+	var eyes: Array[Vector3] = [Vector3(-IPD_M / 2.0, 0.0, 0.0), Vector3(IPD_M / 2.0, 0.0, 0.0)]
+	for offset_dir: Vector3 in [Vector3.RIGHT, Vector3.FORWARD, Vector3.UP]:
+		eyes.append(offset_dir * CACHE_CAMERA_OFFSET_M)
+	for field in ["shell", "deck"]:
+		var worst_px := 0.0
+		for eye: Vector3 in eyes:
+			var point := eye + point_dir * distance_m  # the cloud point, distance_m from this viewpoint
+			var normal := Vector3.UP
+			var deck_height := point.dot(normal)  # the deck's plane through the point (below the anchor: < 0)
+			var distance_of := func(q: Vector3) -> float:
+				if field == "shell":
+					return point.length()
+				var down := q.dot(normal)
+				return deck_height / down if down < 0.0 else 0.0  # the plane ahead of the anchor; above it no cloud
+			var dir := (point - eye).normalized()
+			var q := _cache_lookup(eye, dir, distance_of)
+			var shown: Vector3 = q * float(distance_of.call(q))  # the cached point the eye pixel shows
+			worst_px = maxf(worst_px, (shown - eye).angle_to(dir) * EYE_PX_PER_RAD)
+		var label := "view cache parallax, %s cloud at %.0f m: eyes +-%.3f m and a " % [field, distance_m, IPD_M / 2.0] 				+ "camera %.0f m off the anchor land on the direct ray (worst %s eye px)" % [CACHE_CAMERA_OFFSET_M,
+				String.num_scientific(worst_px)]
+		if field == "deck" and distance_m < CACHE_DECK_ASSERTED_M:
+			print("  info  %s (not asserted: inside the near shell's reach)" % label)
+			continue
+		_check(worst_px <= CACHE_PARALLAX_TOLERANCE_PX, label)
 
 
 func _check(ok: bool, message: String) -> void:

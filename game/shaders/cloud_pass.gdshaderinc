@@ -4,7 +4,8 @@
 // CLOUD_SHAPE_PREFILTER is defined per kernel; CLOUD_MARCH also gets atmosphere.gdshaderinc and
 // clouds.gdshaderinc (translated: their `global uniform`s in set 0). With CLOUD_CACHE_FILL (cloud view cache Task 3)
 // the march's machinery is compiled without its images and main for cloud_view_cache.gdshaderinc's fill kernel; the
-// march and the fill shade a ray by the one function cloud_shade_ray.
+// march and the fill shade a ray by the one function cloud_shade_ray. CLOUD_CACHE_LOOKUP (Task 4) gets the CloudView
+// block and the ray helpers below for cloud_view_cache.gdshaderinc's per-eye lookup.
 //
 // The march and the temporal accumulation run once per frame in the centre view (VR: the head, a frustum covering both
 // eyes, CloudCentreView; the desktop: the view itself), the upsample once per eye (VR performance part 2: two marches
@@ -43,7 +44,8 @@
 //    with the same depth weight. Out: the full-resolution
 //    image the composite quad (cloud_layer.gdshader) blends over the scene.
 
-#if defined(CLOUD_MARCH) || defined(CLOUD_TEMPORAL) || defined(CLOUD_UPSAMPLE) || defined(CLOUD_OUTLINE)
+#if defined(CLOUD_MARCH) || defined(CLOUD_TEMPORAL) || defined(CLOUD_UPSAMPLE) || defined(CLOUD_OUTLINE) \
+		|| defined(CLOUD_CACHE_LOOKUP)
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 

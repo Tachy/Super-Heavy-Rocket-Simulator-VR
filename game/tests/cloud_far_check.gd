@@ -184,6 +184,7 @@ func _run() -> void:
 	root.add_child(_main)
 	_world = _main.get_node("World")
 	_world.weather.enabled = false
+	_world.clouds.view_cache = false  # the per-frame march's far tier is what this checks (the cache fills from it)
 	_world.clouds.far_3d_light = not _no_3d_light
 	for i in range(MAX_FRAMES):
 		await process_frame

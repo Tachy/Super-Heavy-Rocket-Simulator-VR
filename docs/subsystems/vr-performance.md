@@ -37,6 +37,27 @@ per frame** (the preset `cache_budget_ms`, Task 4). The per-frame pass's rate (1
 ~45 ms, refine included) puts a full-resolution fill of the visible region (~9 x the rays) at ~0.4 s of GPU, i.e.
 ~1 s at 11 ms per frame, the coarse level 0 (1/4 density) in ~2-3 frames.
 
+## Cloud view cache in the frame (cloud view cache Task 4, 2026-10-28)
+
+The frame shows the world-fixed cache (fill under the budget, per-eye lookup; `docs/subsystems/weather-clouds.md`).
+Desktop VR-pixel proxy, the same runs as Task 1 with the cache on (`t1_prof.sh cache <view>`; the VR preset: budget
+cap 11.4 ms; face 3200 texels at the proxy's density), once the cache has nothing left to fill:
+
+| View | GPU frame median / p99 | cloud pass (the lookup) | before (per-frame pass) |
+|---|---|---|---|
+| ground (az 90, el 25) | 2.56 / 4.99 ms | 0.10 / 0.52 ms | 44.9 / 47.2 ms |
+| 9 km deck (el -10) | 3.63 / 8.27 ms | 0.11 / 0.46 ms | 49.8 / 56.0 ms |
+
+Convergence after a start / jump (the planner's restart; VR proxy): level 0 over the view after 0.32-0.37 s (20-23
+frames), the full level over the view after 3.2-3.3 s (191-199 frames), the whole cube after 12.8 / 16.8 s; the fill
+per frame median 4.0-4.4 ms (the level-0 / level-1 phases are capped by the pick's 128 tiles a call, not by the
+budget), max 31-34 ms (overshoot where the picks turn from clear-sky to deck tiles: the cost per full tile varies
+0.1-1.6 ms). Desktop preset (1600 x 900, budget 6 ms, face 1984): view level 0 after 0.1-0.2 s, full level after
+2.1-4.3 s, the whole cube after 6.4-13 s; fill median 4.0 ms, p90 7.5, p99 17 ms. Main thread (FrameProfiler section
+`cloud_view_cache`, desktop deck while filling): median 0.6 ms, p90 1.0, p99 1.4 ms, the first frame (cold pick) 3.0
+ms (the layout and schedule are built on a worker: 8 ms at face 1984 before); VR proxy median 0.8-0.9 ms, max 5.5-5.9
+ms (the cold pick at face 3200); 0 once converged.
+
 ## Measuring
 
 - `Start-VR.cmd --perf-log` (any start: `-- --perf-log`): `PerfLog` (`game/util/perf_log.gd`) writes

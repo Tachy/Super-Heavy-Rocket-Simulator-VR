@@ -541,6 +541,10 @@ cloud_deterministic_march={
 "type": "bool",
 "value": true
 }
+cloud_view_cache={
+"type": "bool",
+"value": true
+}
 cloud_air_shadow={
 "type": "bool",
 "value": true

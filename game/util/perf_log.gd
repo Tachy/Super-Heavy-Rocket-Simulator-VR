@@ -8,7 +8,8 @@ extends Node
 ## (from SceneTree.process_frame to this node, which runs last), the CPU side a GPU-light frame can still miss on;
 ## main_max_ms: process_frame to RenderingServer.frame_pre_draw (also the deferred calls and the UI's _draw); then
 ## one column per FrameProfiler section (its per-frame total, max over the second). A spike row carries the previous
-## frame's main / section times: the long interval ends the frame that did that work.
+## frame's main / section times: the long interval ends the frame that did that work. The cloud view cache: the tiles
+## its last plan filled, the cube's fraction at the full level, the last measured fill interval (GPU ms).
 
 const ARG := "--perf-log"
 const SPIKE_MS := 22.0  ## [E] two 90 Hz frames: a frame the headset certainly had to reproject
@@ -54,6 +55,7 @@ func _ready() -> void:
 	_file.store_line("kind,t_s,frames,frame_p50_ms,frame_p99_ms,frame_max_ms,gpu_mean_ms,gpu_max_ms,cpu_render_max_ms,"
 			+ "script_max_ms,altitude_m,cloud_far,cloud_uploading,cloud_last_upload_ms,draw_calls,primitives,vram_mb,xr,"
 			+ "main_max_ms,cloud_image_creations,cloud_output_swaps,cloud_low_w,cloud_low_h,"
+			+ "cache_tiles_filled,cache_full_fraction,cache_fill_ms,"
 			+ ",".join(FrameProfiler.SECTIONS.map(func(s: StringName) -> String: return "sec_%s_max_ms" % s)))
 	_vp = get_viewport().get_viewport_rid()
 	RenderingServer.viewport_set_measure_render_time(_vp, true)
@@ -123,6 +125,7 @@ func _write_row(kind: String, now_msec: int, intervals: PackedFloat64Array, gpu_
 	var n := sorted.size()
 	var clouds: CloudLayer = _world.clouds
 	var cloud_state := clouds.state()
+	var cache := clouds.view_cache_stats()  # the view cache's last plan and fill (cloud view cache Task 4)
 	var xr := get_node_or_null("/root/XrManager")
 	_file.store_line("%s,%.3f,%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.0f,%d,%d,%.2f,%d,%d,%.0f,%d" % [
 			kind, (now_msec - _start_msec) / 1000.0, n, sorted[n / 2], sorted[mini(n - 1, int(n * 0.99))], sorted[n - 1],
@@ -135,4 +138,5 @@ func _write_row(kind: String, now_msec: int, intervals: PackedFloat64Array, gpu_
 			+ ",%.2f" % main_max
 			+ ",%d,%d,%d,%d" % [clouds.effect.image_creations, clouds.effect.output_generation,
 					clouds.effect.centre_low.x, clouds.effect.centre_low.y]
+			+ ",%d,%.4f,%.3f" % [cache["tiles_filled"], cache["full_fraction"], cache["fill_ms"]]
 			+ "".join(FrameProfiler.SECTIONS.map(func(s: StringName) -> String: return ",%.2f" % float(sections.get(s, 0.0)))))

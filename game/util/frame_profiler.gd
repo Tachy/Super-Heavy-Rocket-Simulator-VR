@@ -6,8 +6,8 @@ class_name FrameProfiler
 ## The columns of the perf log, in update order (World.update_world with flight_views split into its fv_* parts,
 ## then the UI's and the XR manager's _process; ui_overlay, ui_navball, ui_webcast_draw are _draw, after _process).
 const SECTIONS: Array[StringName] = [&"flight_advance", &"weather", &"towers_zone", &"ephemeris", &"camera",
-		&"atmosphere", &"clouds", &"refraction", &"earth_terrain", &"water", &"moon", &"shader_globals", &"sun",
-		&"flight_views", &"fv_trajectory", &"fv_trail", &"fv_instruments", &"fv_vehicles", &"moon_orbit", &"ui_hud",
+		&"atmosphere", &"clouds", &"cloud_view_cache", &"refraction", &"earth_terrain", &"water", &"moon",
+		&"shader_globals", &"sun", &"flight_views", &"fv_trajectory", &"fv_trail", &"fv_instruments", &"fv_vehicles", &"moon_orbit", &"ui_hud",
 		&"ui_overlay", &"ui_navball", &"ui_time_panel", &"ui_webcast", &"ui_webcast_draw", &"xr"]
 
 static var enabled := false

@@ -4,9 +4,14 @@
 # - the weight of slot 1 moves by at most dt / FADE_S (no jump of the visible mix);
 # - a slot's content changes only while that slot has no weight;
 # - the pair ends in its real blend and then tracks the service's blend; weather off fades out the same way.
+# The view cache's frame loop (cloud view cache Task 4): a view jump and a clock jump restart the cache; a Sun step of
+# 1 deg starts cross-fades, none completing in the frame it starts.
 extends SceneTree
 
 const DT := 1.0 / 60.0
+## The view cache case: a small cube (8 x 8 tiles of 64 per face) and the frames it may take to converge the view.
+const VIEW_CACHE_FACE := 512
+const VIEW_CACHE_MAX_FRAMES := 600
 
 var _failures := 0
 var _layer: CloudLayer
@@ -64,6 +69,7 @@ func _run() -> void:
 			and _layer._empty_base.get_format() == Image.FORMAT_RGF,
 			"an empty slot binds the zero RGF base texture (no cloud base)")
 
+	_test_view_cache(camera)
 	_layer.shutdown()
 	print("CLOUD LAYER TEST %s" % ("PASSED" if _failures == 0 else "FAILED (%d)" % _failures))
 	quit(1 if _failures > 0 else 0)
@@ -117,6 +123,82 @@ func _test_light_follows_fade(core: StarsimCore, camera: Vector3) -> void:
 	core.weather_set_active("", "", 0.0)
 	DirAccess.remove_absolute(slab_file)
 	DirAccess.remove_absolute(clear_file)
+
+
+## The view cache's frame loop (cloud view cache Task 4; headless: this test takes the batches in place of the render
+## thread and hands the layer a view): the view's tiles reach the full level; a view jump and a clock jump restart the
+## cache (every tile back to nothing or the first level, the restart counted); a Sun step of 1 deg starts cross-fades
+## (refreshes at the same level fade from their slot) and none completes in the frame it starts.
+func _test_view_cache(camera: Vector3) -> void:
+	var snapshot := _fake("view_cache")
+	_layer.set_target(snapshot, snapshot)
+	_drive(camera, 0.0, 4.0)
+	var sun := Vector3(0.3, 0.8, 0.5).normalized()
+	ShaderGlobals.set_value(&"atmosphere_sun_direction", sun)
+	var forward := Vector3(0.0, 0.0, -1.0)
+	var dirs: Array[Vector3] = []
+	for ix in range(-2, 3):
+		for iy in range(-2, 3):
+			dirs.append(Vector3(0.15 * ix, 0.15 * iy, -1.0).normalized())
+	_layer.effect.set_view_cache_view({"dirs": dirs, "sample_rad": 0.1, "face_texels": VIEW_CACHE_FACE})
+	var planner := _layer.view_cache_planner
+	var converged := _converge_view(camera, forward)
+	_check(converged, "view cache: the view's tile reaches the full level (%d frames)" % _frames_run)
+	var resets := planner.resets
+	_layer.notify_view_jump()
+	_layer.update(camera, 0.0, DT)
+	_layer.effect.take_view_cache_batch()
+	_check(planner.resets == resets + 1 and _highest_shown(planner) <= 0,
+			"view cache: a view jump restarts it (restarts %d -> %d, highest level shown %d)"
+			% [resets, planner.resets, _highest_shown(planner)])
+	_converge_view(camera, forward)
+	resets = planner.resets
+	_layer.notify_clock_jump()
+	_layer.update(camera, 0.0, DT)
+	_layer.effect.take_view_cache_batch()
+	_check(planner.resets == resets + 1 and _highest_shown(planner) <= 0,
+			"view cache: a clock jump restarts it (restarts %d -> %d, highest level shown %d)"
+			% [resets, planner.resets, _highest_shown(planner)])
+	_converge_view(camera, forward)
+	ShaderGlobals.set_value(&"atmosphere_sun_direction", sun.rotated(Vector3(1.0, 0.0, 0.0), deg_to_rad(1.0)))
+	var started := 0
+	var refreshes := 0
+	var completed_at_once := 0
+	for i in range(int(4.0 / DT)):
+		_layer.update(camera, 0.0, DT)
+		_layer.effect.take_view_cache_batch()
+		for tile in planner.last_fades:
+			started += 1
+			refreshes += 1 if planner.fade_source(tile) == 4 else 0
+			completed_at_once += 1 if planner.fade_weight(tile, planner.now_s) >= 1.0 else 0
+	_check(refreshes > 0 and completed_at_once == 0, "view cache: a 1 deg Sun step starts cross-fades (%d, %d of them "
+			% [started, refreshes] + "refreshes from a fade slot), none complete in the frame they start (%d)"
+			% completed_at_once)
+	ShaderGlobals.set_value(&"atmosphere_sun_direction", sun)
+
+
+var _frames_run := 0
+
+
+## Frames (the batches taken) until the tile ahead shows the full level; false after VIEW_CACHE_MAX_FRAMES.
+func _converge_view(camera: Vector3, forward: Vector3) -> bool:
+	var planner := _layer.view_cache_planner
+	_frames_run = 0
+	while _frames_run < VIEW_CACHE_MAX_FRAMES:
+		_layer.update(camera, 0.0, DT)
+		_layer.effect.take_view_cache_batch()
+		_frames_run += 1
+		if planner.layout != null and planner.shown_level(planner.layout.tile_of(forward)) \
+				== CloudViewCacheSchedule.MAX_LEVEL:
+			return true
+	return false
+
+
+static func _highest_shown(planner: CloudViewCachePlanner) -> int:
+	var highest := -1
+	for tile in range(planner.layout.tile_count()):
+		highest = maxi(highest, planner.shown_level(tile))
+	return highest
 
 
 ## What the service does: every announcement carries snapshot dictionaries with their texels (the layer strips them once

@@ -1,34 +1,32 @@
-// The cloud view cache's fill (cloud view cache Task 3): GLSL 450 only - compiled by CloudEffect through CloudShaderPort
-// after cloud_pass.gdshaderinc with CLOUD_MARCH and CLOUD_CACHE_FILL defined (the march's machinery and its set 0,
-// without the march's own images and main), never included by a Godot shader.
+// The cloud view cache's kernels (cloud view cache Tasks 3-4): GLSL 450 only - compiled by CloudEffect through
+// CloudShaderPort after cloud_pass.gdshaderinc, never included by a Godot shader.
 //
-// CLOUD_CACHE_FILL: one invocation per texel of the picked tiles of one resolution level (CloudViewCache.fill: one
-// dispatch per level, x = the 8 x 8 blocks of a tile, y = its entries of the tile list). The texel's direction is
+// CLOUD_CACHE_FILL (with CLOUD_MARCH: the march's machinery and its set 0, without the march's own images and main):
+// one invocation per texel of the picked tiles of one resolution level (CloudViewCache.fill: one dispatch per level,
+// x = the 8 x 8 blocks of a tile, y = its entries of the tile list). The texel's direction is
 // CloudViewCacheLayout.dir_of's (cube faces +X, -X, +Y, -Y, +Z, -Z of the Earth-local axes, tangent mapping); its ray
 // starts at the anchor (CloudView eye_earth.xyz: the anchor's offset from the camera, differenced in float64 on the
 // CPU) and ends at the static world seen from there - the ellipsoid / sea crossing, never the frame's depth buffer
 // (scene geometry hides the cached clouds per frame). The shading is the march's own (cloud_shade_ray). Out per texel:
 // premultiplied colour + the background's transmittance T (RGBA16F) and the alpha-weighted cloud distance (R32F).
+// Task 4: an entry may name a fade slot - the texel's old colour is copied there first (the lookup cross-fades from
+// it: a refresh at the same level, CloudViewCachePlanner) - and every entry's nearest cloud distance is kept (atomicMin
+// of the float bits: positive floats order as their bits) for the schedule's parallax error (read back by the CPU).
+//
+// CLOUD_CACHE_LOOKUP (cloud view cache Task 4; replaces CLOUD_UPSAMPLE when the cache is on): one invocation per eye
+// pixel. The eye's ray (CloudView of the eye) reads the cache from the eye's own position (cloud_cache_lookup: the
+// parallax through the cached cloud distance), at the finest level its tile has, cross-faded from the tile's previous
+// content over CLOUD_CACHE_CROSSFADE_S; scene geometry nearer than the cloud hides it (the upsample's depth weight).
+// Out: the eye's layer of the pass's result (premultiplied colour + T), as the upsample's.
 
-#ifdef CLOUD_CACHE_FILL
+#if defined(CLOUD_CACHE_FILL) || defined(CLOUD_CACHE_LOOKUP)
 
-layout(rgba16f, set = 1, binding = 1) uniform writeonly imageCube cache_color;
-layout(r32f, set = 1, binding = 2) uniform writeonly imageCube cache_distance;
-layout(set = 1, binding = 3, std430) readonly buffer CloudCacheTiles {
-	uint tiles[];  // tile indices (CloudViewCacheLayout: (face * tiles_per_side + ty) * tiles_per_side + tx)
-} cloud_cache_tiles;
-layout(push_constant, std430) uniform CloudCacheFill {
-	uint face_texels;     // this level's texels per face side
-	uint tiles_per_side;
-	uint first;           // the level's first entry of the tile list
-	uint pad;
-} cloud_cache_fill;
+const uint CLOUD_CACHE_NO_SLOT = 0xFFFFFFFFu;  // a tile-list entry without a fade slot
+// The fade slots' cells (CloudViewCachePlanner.SLOT_*): one full-level tile each, SLOT cells per atlas row.
+const uint CLOUD_CACHE_LEVELS = 3u;  // CloudViewCacheLayout.LEVELS
 
-const uint CLOUD_CACHE_BLOCK = 8u;  // the work group's side (local_size 8 x 8)
-// [E] The sky's distance where the ray from the anchor meets no static surface.
-const float CLOUD_CACHE_SKY_M = 1.0e30;
-
-// The unit direction of face coordinates uv (0..1 across the face): CloudViewCacheLayout.dir_of.
+// The unit direction of face coordinates uv (0..1 across the face; beyond: toward the neighbouring face):
+// CloudViewCacheLayout.dir_of.
 vec3 cloud_cache_dir(uint face, vec2 uv) {
 	float s = 2.0 * uv.x - 1.0;
 	float t = 2.0 * uv.y - 1.0;
@@ -49,8 +47,40 @@ vec3 cloud_cache_dir(uint face, vec2 uv) {
 	return normalize(d);
 }
 
+#endif
+
+#ifdef CLOUD_CACHE_FILL
+
+layout(rgba16f, set = 1, binding = 1) uniform restrict imageCube cache_color;  // read too: the fade slot's copy
+layout(r32f, set = 1, binding = 2) uniform writeonly imageCube cache_distance;
+layout(set = 1, binding = 3, std430) readonly buffer CloudCacheTiles {
+	uvec2 tiles[];  // (tile index (CloudViewCacheLayout: (face * tiles_per_side + ty) * tiles_per_side + tx), slot)
+} cloud_cache_tiles;
+layout(set = 1, binding = 4, std430) buffer CloudCacheNear {
+	uint near[];  // per entry: the float bits of its nearest cloud distance (m; +inf: none)
+} cloud_cache_near;
+layout(rgba16f, set = 1, binding = 5) uniform writeonly image2D cache_slots;  // the fade slots' atlas
+layout(push_constant, std430) uniform CloudCacheFill {
+	uint face_texels;     // this level's texels per face side
+	uint tiles_per_side;
+	uint first;           // the level's first entry of the tile list
+	uint slots_per_row;   // the fade slots' cells per atlas row
+} cloud_cache_fill;
+
+const uint CLOUD_CACHE_BLOCK = 8u;  // the work group's side (local_size 8 x 8)
+// [E] The sky's distance where the ray from the anchor meets no static surface.
+const float CLOUD_CACHE_SKY_M = 1.0e30;
+// [E] The ground's depth under an anchor below the ellipsoid (m): a standing eye's height (the ground view's 2 m).
+const float CLOUD_CACHE_GROUND_BELOW_M = 2.0;
+// The stored end of a ray without a static surface (m): the lookup's far sky (CLOUD_CACHE_FAR_M).
+const float CLOUD_CACHE_END_MAX_M = 1.0e7;
+// The fade slots' cell side (texels): the full level's tile (CloudViewCacheLayout tile_texels, CloudViewCache).
+const uint CLOUD_CACHE_SLOT_TEXELS = 64u;
+
 void main() {
-	uint tile = cloud_cache_tiles.tiles[cloud_cache_fill.first + gl_WorkGroupID.y];
+	uint entry = cloud_cache_fill.first + gl_WorkGroupID.y;
+	uvec2 job = cloud_cache_tiles.tiles[entry];
+	uint tile = job.x;
 	uint per_side = cloud_cache_fill.tiles_per_side;
 	uint face = tile / (per_side * per_side);
 	uvec2 tile_xy = uvec2(tile % per_side, (tile / per_side) % per_side);
@@ -68,16 +98,250 @@ void main() {
 	}
 	barrier();
 	vec3 dir = cloud_cache_dir(face, (vec2(texel) + 0.5) / face_size);
-	// The static world's end: the ellipsoid (the sea) ahead of the anchor; an anchor below it (a shore below sea level)
-	// has none.
-	vec2 ground = cloud_sphere_crossing(cloud_ray_from(dir, origin), 0.0);
+	// The static world's end: the ellipsoid (the sea) ahead of the anchor; for an anchor below it (a shore below sea
+	// level: Starbase's ground lies ~25 m under the ellipsoid) a sphere CLOUD_CACHE_GROUND_BELOW_M under the anchor - the
+	// ground around it, not the air and clouds beyond the planet's limb (their shadow loss lay on the terrain).
+	CloudRay anchor_ray = cloud_ray_from(dir, origin);
+	vec2 ground = cloud_sphere_crossing(anchor_ray, min(0.0, anchor_ray.h_c - CLOUD_CACHE_GROUND_BELOW_M));
 	float scene_m = ground.x <= ground.y && ground.x > 0.0 ? ground.x : CLOUD_CACHE_SKY_M;
 	vec4 color_t;
 	float cloud_m;
 	cloud_shade_ray(dir, origin, scene_m, ivec2(texel), cloud_group_eclipse_near, cloud_group_eclipse_far, color_t,
 			cloud_m);
+	if (job.y != CLOUD_CACHE_NO_SLOT) {
+		// The texel's shown colour to its tile's fade slot (the lookup fades from it to the new one).
+		uvec2 cell = uvec2(job.y % cloud_cache_fill.slots_per_row, job.y / cloud_cache_fill.slots_per_row);
+		imageStore(cache_slots, ivec2(cell * CLOUD_CACHE_SLOT_TEXELS + texel - tile_xy * tile_texels),
+				imageLoad(cache_color, ivec3(texel, face)));
+	}
 	imageStore(cache_color, ivec3(texel, face), color_t);
-	imageStore(cache_distance, ivec3(texel, face), vec4(cloud_m, 0.0, 0.0, 0.0));
+	// Without cloud the static end's distance, negated (the lookup scales the air's shadow loss to nearer geometry).
+	imageStore(cache_distance, ivec3(texel, face),
+			vec4(cloud_m > 0.0 ? cloud_m : -min(scene_m, CLOUD_CACHE_END_MAX_M), 0.0, 0.0, 0.0));
+	if (cloud_m > 0.0) {
+		atomicMin(cloud_cache_near.near[entry], floatBitsToUint(cloud_m));
+	}
+}
+
+#endif
+
+#ifdef CLOUD_CACHE_LOOKUP
+
+layout(set = 1, binding = 1) uniform sampler2D scene_depth;  // the eye's depth, full resolution, nearest
+layout(set = 1, binding = 2) uniform samplerCube cache_color_0;  // per level: colour + T, linear
+layout(set = 1, binding = 3) uniform samplerCube cache_color_1;
+layout(set = 1, binding = 4) uniform samplerCube cache_color_2;
+layout(set = 1, binding = 5) uniform samplerCube cache_distance_0;  // per level: the cloud distance, nearest
+layout(set = 1, binding = 6) uniform samplerCube cache_distance_1;
+layout(set = 1, binding = 7) uniform samplerCube cache_distance_2;
+layout(set = 1, binding = 8) uniform sampler2D cache_slots;  // the fade slots' atlas, linear
+layout(set = 1, binding = 9, std430) readonly buffer CloudCacheStates {
+	// per tile: x = the shown level + 1 (bits 0-1; 0: none), what it fades from (bits 2-4: 0 nothing - T = 1, 1-3 that
+	// level + 1, 4 its fade slot), the slot (bits 8-31); y = the fade's start (float bits, s of the planner's clock)
+	uvec2 states[];
+} cloud_cache_states;
+layout(rgba16f, set = 1, binding = 10) uniform writeonly image2D out_image;
+layout(push_constant, std430) uniform CloudCacheLookup {
+	vec4 head;     // xyz: the camera (head) - the anchor, Earth-local (m, differenced in float64); w: now (s)
+	uvec4 layout_; // x: the full level's texels per face side, y: tiles per side, z: fade slots per atlas row
+} cloud_cache_lookup_block;
+
+// [E] Iterations of the parallax lookup (cloud_cache_lookup; cloud_vr_stereo_test mirrors it): two fixed-point steps
+// and secant steps - a cloud at 2 km and beyond lands within 1e-8 eye px for the eyes and a camera 50 m off the anchor.
+const int CACHE_PARALLAX_ITERATIONS = 3;
+// [E] The cross-fade of a tile's new content (a finer level, a refresh): a quarter second is no visible pop and lags a
+// moving light by less than its refresh step (CloudViewCacheSchedule.SUN_REFRESH_RAD at time warp).
+const float CACHE_CROSSFADE_S = 0.25;
+// Distance [m] of a cached texel without cloud: the far sky, rotation only (as CLOUD_UPSAMPLE_SKY_M).
+const float CLOUD_CACHE_FAR_M = 1.0e7;
+// [E] Sharpness of the depth test (the upsample's CLOUD_DEPTH_SHARPNESS): scene geometry 28 % nearer than the cloud
+// leaves 37 % of it.
+const float CLOUD_CACHE_DEPTH_SHARPNESS = 4.0;
+const uint CLOUD_CACHE_SLOT_TEXELS = 64u;  // as the fill's
+
+// (x, y, face): the continuous texel coordinates (0..face_size) of a direction in its face (CloudViewCacheLayout
+// texel_of).
+vec3 cloud_cache_texel(vec3 dir, float face_size) {
+	vec3 a = abs(dir);
+	float face;
+	float s;
+	float t;
+	float major;
+	if (a.x >= a.y && a.x >= a.z) {
+		major = a.x;
+		face = dir.x > 0.0 ? 0.0 : 1.0;
+		s = dir.x > 0.0 ? -dir.z : dir.z;
+		t = -dir.y;
+	} else if (a.y >= a.z) {
+		major = a.y;
+		face = dir.y > 0.0 ? 2.0 : 3.0;
+		s = dir.x;
+		t = dir.y > 0.0 ? dir.z : -dir.z;
+	} else {
+		major = a.z;
+		face = dir.z > 0.0 ? 4.0 : 5.0;
+		s = dir.z > 0.0 ? dir.x : -dir.x;
+		t = -dir.y;
+	}
+	float scale = 0.5 * face_size / major;
+	return vec3(clamp(vec2(s, t) * scale + 0.5 * face_size, vec2(0.0), vec2(face_size)), face);
+}
+
+// The tile of a face's texel position at the full level.
+uint cloud_cache_tile(vec3 texel) {
+	uint per_side = cloud_cache_lookup_block.layout_.y;
+	float tile_texels = float(cloud_cache_lookup_block.layout_.x / per_side);
+	uvec2 xy = uvec2(clamp(ivec2(texel.xy / tile_texels), ivec2(0), ivec2(per_side) - 1));
+	return (uint(texel.z) * per_side + xy.y) * per_side + xy.x;
+}
+
+int cloud_cache_shown(uint tile) {
+	return int(cloud_cache_states.states[tile].x & 3u) - 1;
+}
+
+float cloud_cache_distance_sample(int level, vec3 q) {
+	if (level == 0) {
+		return textureLod(cache_distance_0, q, 0.0).r;
+	} else if (level == 1) {
+		return textureLod(cache_distance_1, q, 0.0).r;
+	}
+	return textureLod(cache_distance_2, q, 0.0).r;
+}
+
+// The cached cloud distance (m, from the anchor; CLOUD_CACHE_FAR_M without cloud or without a level) along q.
+float cloud_cache_distance(vec3 q) {
+	float face_size = float(cloud_cache_lookup_block.layout_.x);
+	int level = cloud_cache_shown(cloud_cache_tile(cloud_cache_texel(q, face_size)));
+	float r = level >= 0 ? cloud_cache_distance_sample(level, q) : 0.0;
+	return r > 0.0 ? r : CLOUD_CACHE_FAR_M;
+}
+
+// A level's colour + T at q, bilinear inside the tile's level where a neighbouring tile does not hold that level (its
+// texels there are old or empty): the position is clamped to this tile's outer texel centres on that side.
+vec4 cloud_cache_colour(int level, vec3 q, vec3 texel_full, uint tile) {
+	uint full = cloud_cache_lookup_block.layout_.x;
+	uint per_side = cloud_cache_lookup_block.layout_.y;
+	float n = float(full >> (CLOUD_CACHE_LEVELS - 1u - uint(level)));
+	float tile_n = n / float(per_side);
+	uint face = uint(texel_full.z);
+	vec2 t = texel_full.xy * (n / float(full));
+	vec2 origin = vec2(uvec2(tile % per_side, (tile / per_side) % per_side)) * tile_n;
+	vec2 lo = origin + 0.5;
+	vec2 hi = origin + tile_n - 0.5;
+	vec2 side = vec2(t.x < lo.x ? -1.0 : (t.x > hi.x ? 1.0 : 0.0), t.y < lo.y ? -1.0 : (t.y > hi.y ? 1.0 : 0.0));
+	vec2 c = t;
+	if (side != vec2(0.0)) {
+		bvec2 clamp_axis = bvec2(false);
+		vec2 centre = origin + 0.5 * tile_n;
+		for (int k = 0; k < 3; k++) {
+			// the side neighbours along x, along y, then the diagonal one
+			vec2 step_ = k == 0 ? vec2(side.x, 0.0) : (k == 1 ? vec2(0.0, side.y) : side);
+			if ((k == 0 && side.x == 0.0) || (k == 1 && side.y == 0.0) || (k == 2 && (side.x == 0.0 || side.y == 0.0))) {
+				continue;
+			}
+			vec3 beyond = cloud_cache_dir(face, (centre + step_ * tile_n) / n);
+			if (cloud_cache_shown(cloud_cache_tile(cloud_cache_texel(beyond, float(full)))) < level) {
+				clamp_axis = bvec2(clamp_axis.x || step_.x != 0.0, clamp_axis.y || step_.y != 0.0);
+			}
+		}
+		c = vec2(clamp_axis.x ? clamp(t.x, lo.x, hi.x) : t.x, clamp_axis.y ? clamp(t.y, lo.y, hi.y) : t.y);
+	}
+	vec3 p = c == t ? q : cloud_cache_dir(face, c / n);
+	if (level == 0) {
+		return textureLod(cache_color_0, p, 0.0);
+	} else if (level == 1) {
+		return textureLod(cache_color_1, p, 0.0);
+	}
+	return textureLod(cache_color_2, p, 0.0);
+}
+
+// The eye ray's cached cloud (premultiplied colour + T) and its distance from the eye (cloud_m; without cloud <= 0:
+// minus the cached ray's static end from the anchor, the air's shadow loss alone): the
+// anchor's direction q the ray reads at is the root of g(s) = r(q(s)) - |o + s dir| along the ray (o = eye - anchor,
+// q(s) the direction of o + s dir, r the cached distance from the anchor) - two fixed-point steps (the ray's point at
+// the cached distance from the anchor), then secant steps while both ends saw cloud (cloud_vr_stereo_test mirrors it).
+// The colour: the finest level the tile has, cross-faded from what it showed before over CACHE_CROSSFADE_S; a tile
+// without a level shows no cloud (T = 1).
+vec4 cloud_cache_lookup(vec3 eye_offset_earth, vec3 dir_earth, out float cloud_m) {
+	vec3 o = eye_offset_earth;
+	vec3 d = dir_earth;
+	float b = dot(o, d);
+	float c = dot(o, o);
+	float r = cloud_cache_distance(d);
+	float s_prev = -b + sqrt(max(b * b - c + r * r, 0.0));
+	r = cloud_cache_distance(normalize(o + d * s_prev));
+	float g_prev = r < CLOUD_CACHE_FAR_M ? r - length(o + d * s_prev) : 0.0;
+	bool cloud_prev = r < CLOUD_CACHE_FAR_M;
+	float s = -b + sqrt(max(b * b - c + r * r, 0.0));
+	for (int i = 1; i < CACHE_PARALLAX_ITERATIONS; i++) {
+		r = cloud_cache_distance(normalize(o + d * s));
+		bool cloud = r < CLOUD_CACHE_FAR_M;
+		float g = cloud ? r - length(o + d * s) : 0.0;
+		float next = -b + sqrt(max(b * b - c + r * r, 0.0));
+		if (cloud && cloud_prev && g != g_prev) {
+			float secant = s - g * (s - s_prev) / (g - g_prev);
+			next = secant > 0.0 ? secant : next;
+		}
+		s_prev = s;
+		g_prev = g;
+		cloud_prev = cloud;
+		s = next;
+	}
+	vec3 q = normalize(o + d * s);
+	uint full = cloud_cache_lookup_block.layout_.x;
+	vec3 texel = cloud_cache_texel(q, float(full));
+	uint tile = cloud_cache_tile(texel);
+	uvec2 state = cloud_cache_states.states[tile];
+	int level = int(state.x & 3u) - 1;
+	cloud_m = 0.0;
+	if (level < 0) {
+		return vec4(0.0, 0.0, 0.0, 1.0);
+	}
+	vec4 to = cloud_cache_colour(level, q, texel, tile);
+	float w = clamp((cloud_cache_lookup_block.head.w - uintBitsToFloat(state.y)) / CACHE_CROSSFADE_S, 0.0, 1.0);
+	if (w < 1.0) {
+		uint from = (state.x >> 2u) & 7u;
+		vec4 before = vec4(0.0, 0.0, 0.0, 1.0);
+		if (from >= 1u && from <= CLOUD_CACHE_LEVELS) {
+			before = cloud_cache_colour(int(from) - 1, q, texel, tile);
+		} else if (from == 4u) {
+			// The slot holds the tile's texels of this level before the refresh (the fill's copy).
+			uint slot = state.x >> 8u;
+			uint per_side = cloud_cache_lookup_block.layout_.y;
+			float tile_n = float(full >> (CLOUD_CACHE_LEVELS - 1u - uint(level))) / float(per_side);
+			vec2 local = texel.xy * (tile_n * float(per_side) / float(full))
+					- vec2(uvec2(tile % per_side, (tile / per_side) % per_side)) * tile_n;
+			uint per_row = cloud_cache_lookup_block.layout_.z;
+			vec2 cell = vec2(uvec2(slot % per_row, slot / per_row)) * float(CLOUD_CACHE_SLOT_TEXELS);
+			before = textureLod(cache_slots, (cell + clamp(local, vec2(0.5), vec2(tile_n - 0.5)))
+					/ vec2(textureSize(cache_slots, 0)), 0.0);
+		}
+		to = mix(before, to, w);
+	}
+	float stored = cloud_cache_distance_sample(level, q);
+	cloud_m = stored > 0.0 ? s : stored;
+	return to;
+}
+
+void main() {
+	ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+	if (pixel.x >= int(cloud_view.sizes.x) || pixel.y >= int(cloud_view.sizes.y)) {
+		return;
+	}
+	float scene_m = cloud_scene_distance(vec2(pixel) + 0.5, texelFetch(scene_depth, pixel, 0).r);
+	vec3 dir = cloud_ray_earth(vec2(pixel) + 0.5);
+	float cloud_m;
+	vec4 result = cloud_cache_lookup(cloud_cache_lookup_block.head.xyz + cloud_view.eye_earth.xyz, dir, cloud_m);
+	// Scene geometry in front of the cloud hides it, softly over the distance ratio (the upsample's depth weight). A
+	// texel without cloud holds the air's shadow loss along the cached ray to its static end: nearer geometry (a hill
+	// before the horizon) keeps the share of its distance.
+	if (cloud_m > 0.0 && scene_m < cloud_m) {
+		float v = exp(-CLOUD_CACHE_DEPTH_SHARPNESS * log(cloud_m / max(scene_m, 1.0)));
+		result = vec4(result.rgb * v, 1.0 - v * (1.0 - result.a));
+	} else if (cloud_m < 0.0 && scene_m < -cloud_m) {
+		result.rgb *= scene_m / -cloud_m;
+	}
+	imageStore(out_image, pixel, result);
 }
 
 #endif
