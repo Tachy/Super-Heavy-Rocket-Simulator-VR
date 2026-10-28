@@ -389,6 +389,10 @@ func _process(_delta: float) -> bool:
 		# 25, then ~0.24 s of light adaptation over the settle frames: ~7.5 on a sunlit view). The world's own update this
 		# frame (after this script's _process) takes the snap at the final pose.
 		world.atmosphere.snap_adaptation()
+		if _stereo != null:  # the VR panel (menu, overlay) is not part of the cloud views
+			for child in _main.get_node("/root/XrManager").origin.get_children():
+				if child is VrOverlayPanel:
+					child.visible = false
 	_frames += 1
 	# The streamed terrain loads over many frames: wait until nothing is loading (or give up after TERRAIN_MAX_FRAMES).
 	var loading: int = world.earth_terrain.stats["nodes_loading"] + world.moon_terrain.stats["nodes_loading"]

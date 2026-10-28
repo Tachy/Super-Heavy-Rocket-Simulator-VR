@@ -35,15 +35,18 @@ const VIEWS := {
 			"--eye_height=400000", "--elevation=-90", "--fov=40"],
 	"V5_limb": ["--utc=2024-06-15T10:00:00", "--lat=0", "--lon=0", "--weather=analog",
 			"--eye_height=400000", "--elevation=-19", "--fov=40"],
-	# backlit (the Sun in view) and at sunset (the Sun 3.0 deg up: 2024-04-10T00:26:00 UTC, 3.0 +- 0.1 deg by the NOAA formula, checked in render_check)
+	# backlit (the Sun in view) and at sunset (the Sun 3.0 deg up:
+	# 2024-04-10T00:26:00 UTC, 3.01 deg in render_check)
 	"V6_backlit": ["--lat=30", "--lon=-95", "--weather=slab:1000,2000,1e-4,0.5", "--utc=2024-04-09T23:30:00",
 			"--look_at_sun"],
 	"V6_sunset": ["--lat=30", "--lon=-95", "--weather=slab:1000,2000,1e-4,0.5", "--utc=2024-04-10T00:26:00",
 			"--look_at_sun"],
 	# booster catch: --view=1 is the booster (one Tab press from the ship; found by flying the mission to the event: view 0
-	# is the ship at 183 km, view 1 the booster at 55 km, 930 m/s, nose down toward the tower)
-	"V7": ["--webcast", "--mission=starship_leo", "--at_event=caught,-90", "--view=1", "--weather=slab:1500,2500,0.0003,0.6",
-			"--frames_every=0.5", "--frames_for=95"],
+	# is the ship at 183 km, view 1 the booster). 45 s before the catch the booster is at 9.8 km, 650 m/s down: the run
+	# covers the descent from above the deck (1.5 - 2.5 km) through it to the tower.
+	"V7": ["--webcast", "--mission=starship_leo", "--at_event=caught,-45", "--view=1",
+			"--weather=slab:1500,2500,0.0003,0.6",
+			"--frames_every=0.5", "--frames_for=40"],
 }
 
 

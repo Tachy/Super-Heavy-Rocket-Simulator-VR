@@ -48,7 +48,7 @@ func _initialize() -> void:
 	_check(XRServer.find_interface("StereoMock") == null, "not registered by default")
 	XRServer.add_interface(mock)
 	_check(mock.initialize(), "initialises")
-	var recorded_dict := StereoMockXr.record(mock, NEAR_M, FAR_M)
+	var recorded_dict := XrProjectionRecord.record(mock, NEAR_M, FAR_M)
 	_check(recorded_dict["render_target"] == [TARGET.x, TARGET.y], "recorded render target")
 	var mock2 := StereoMockXr.new()
 	_check(mock2.load_dictionary(recorded_dict), "the recording loads")
@@ -57,7 +57,7 @@ func _initialize() -> void:
 		var a := mock.view_projection(view, NEAR_M, FAR_M)
 		var b := mock2.view_projection(view, NEAR_M, FAR_M)
 		for i in range(16):
-			worst_round = maxf(worst_round, absf(StereoMockXr.projection_to_array(a)[i] - StereoMockXr.projection_to_array(b)[i]))
+			worst_round = maxf(worst_round, absf(XrProjectionRecord.projection_to_array(a)[i] - XrProjectionRecord.projection_to_array(b)[i]))
 	_check(worst_round < TOLERANCE, "record -> load round trip (worst %s)" % worst_round)
 	mock.uninitialize()
 	XRServer.remove_interface(mock)

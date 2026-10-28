@@ -78,7 +78,7 @@ func _ready() -> void:
 ## The headset's per-eye projections and eye transforms (relative to the head) as JSON, the input of the offscreen stereo
 ## harness (StereoMockXr; render_check --stereo=<json>): copy it to game/tests/data/pimax_dream_air_projections.json.
 func _write_projections(path: String, xr_interface: XRInterface) -> void:
-	var record := StereoMockXr.record(xr_interface, PROJECTION_NEAR_M, PROJECTION_FAR_M)
+	var record := XrProjectionRecord.record(xr_interface, PROJECTION_NEAR_M, PROJECTION_FAR_M)
 	var file := FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		push_warning("[PerfLog] cannot write %s" % path)

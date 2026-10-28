@@ -77,28 +77,6 @@ static func _frustum_tangents(p: Projection) -> PackedFloat64Array:
 	return PackedFloat64Array([(p.z.x - 1.0) / sx, (p.z.x + 1.0) / sx, (p.z.y - 1.0) / sy, (p.z.y + 1.0) / sy])
 
 
-## The JSON dictionary for an initialised interface (what PerfLog records): its projections for the aspect of the render
-## target at the given near / far, and the eyes' transforms relative to the head.
-static func record(interface: XRInterface, near: float, far: float) -> Dictionary:
-	var size := interface.get_render_target_size()
-	var views := []
-	for view in range(interface.get_view_count()):
-		var projection := interface.get_projection_for_view(view, size.x / size.y, near, far)
-		var eye := interface.get_transform_for_view(view, Transform3D.IDENTITY)
-		views.append({"projection": projection_to_array(projection), "eye_from_head": transform_to_array(eye)})
-	return {"render_target": [int(size.x), int(size.y)], "views": views, "near_m": near, "far_m": far}
-
-
-static func projection_to_array(p: Projection) -> Array:
-	return [p.x.x, p.x.y, p.x.z, p.x.w, p.y.x, p.y.y, p.y.z, p.y.w, p.z.x, p.z.y, p.z.z, p.z.w, p.w.x, p.w.y, p.w.z,
-			p.w.w]
-
-
-static func transform_to_array(t: Transform3D) -> Array:
-	return [t.basis.x.x, t.basis.x.y, t.basis.x.z, t.basis.y.x, t.basis.y.y, t.basis.y.z, t.basis.z.x, t.basis.z.y,
-			t.basis.z.z, t.origin.x, t.origin.y, t.origin.z]
-
-
 func view_projection(view: int, near: float, far: float) -> Projection:
 	var t := _tangents[view]
 	return Projection.create_frustum(t[0] * near, t[1] * near, t[2] * near, t[3] * near, near, far)
@@ -165,7 +143,7 @@ func _get_transform_for_view(view: int, cam_transform: Transform3D) -> Transform
 
 func _get_projection_for_view(view: int, _aspect: float, z_near: float, z_far: float) -> PackedFloat64Array:
 	var p := view_projection(view, z_near, z_far)
-	return PackedFloat64Array(projection_to_array(p))
+	return PackedFloat64Array(XrProjectionRecord.projection_to_array(p))
 
 
 ## Render thread, after the viewport is drawn: the capture of the eye images (a 2D array texture, one layer per view).
@@ -215,7 +193,8 @@ func _read_views(render_target: RID) -> Array[Image]:
 ## Provisional stand-in for the recorded headset (until game/tests/data/pimax_dream_air_projections.json exists): the
 ## stereo test's FOV_LEFT_EYE (cloud_vr_stereo_test.gd, [S: Meta Quest 2 runtime]) mirrored for the right eye, IPD
 ## 0.064 m, at the Pimax Dream Air's expected per-eye target 3534 x 2838.
-static func provisional_dictionary(target := Vector2i(3534, 2838), ipd_m := 0.064, near := 0.2, far := 3.0e7) -> Dictionary:
+static func provisional_dictionary(target := Vector2i(3534, 2838), ipd_m := 0.064, near := 0.2,
+		far := 3.0e7) -> Dictionary:
 	var fov := {"left": -0.9424778, "right": 0.6981317, "up": 0.8203047, "down": -0.8377581}
 	var views := []
 	for view in range(2):
@@ -224,6 +203,7 @@ static func provisional_dictionary(target := Vector2i(3534, 2838), ipd_m := 0.06
 		var projection := Projection.create_frustum(tan(left) * near, tan(right) * near, tan(fov["down"]) * near,
 				tan(fov["up"]) * near, near, far)
 		var sign := -1.0 if view == 0 else 1.0
-		views.append({"projection": projection_to_array(projection),
-				"eye_from_head": transform_to_array(Transform3D(Basis.IDENTITY, Vector3(sign * ipd_m / 2.0, 0.0, 0.0)))})
+		views.append({"projection": XrProjectionRecord.projection_to_array(projection),
+				"eye_from_head": XrProjectionRecord.transform_to_array(
+						Transform3D(Basis.IDENTITY, Vector3(sign * ipd_m / 2.0, 0.0, 0.0)))})
 	return {"render_target": [target.x, target.y], "views": views, "near_m": near, "far_m": far}
